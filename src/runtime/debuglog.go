@@ -730,7 +730,7 @@ func (r *debugLogReader) printVal() bool {
 		// in this (potentially) nowritebarrier context.
 		str := stringStruct{
 			str: unsafe.Pointer(ptr),
-			len: len,
+			len: uint(len),
 		}
 		s := *(*string)(unsafe.Pointer(&str))
 		print(s)

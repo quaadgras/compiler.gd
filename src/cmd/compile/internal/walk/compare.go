@@ -448,19 +448,21 @@ func walkCompareString(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 
 	var r ir.Node
 	if n.Op() == ir.OEQ || n.Op() == ir.ONE {
-		// prepare for rewrite below
-		n.X = cheapExpr(n.X, init)
-		n.Y = cheapExpr(n.Y, init)
-		eqlen, eqmem := compare.EqString(n.X, n.Y)
-		// quick check of len before full compare for == or !=.
-		// memequal then tests equality up to length len.
-		if n.Op() == ir.OEQ {
-			// len(left) == len(right) && memequal(left, right, len)
-			r = ir.NewLogicalExpr(base.Pos, ir.OANDAND, eqlen, eqmem)
-		} else {
-			// len(left) != len(right) || !memequal(left, right, len)
-			eqlen.SetOp(ir.ONE)
-			r = ir.NewLogicalExpr(base.Pos, ir.OOROR, eqlen, ir.NewUnaryExpr(base.Pos, ir.ONOT, eqmem))
+		// gd small-string optimization: self-comparison folds to a
+		// literal without emitting the streqfast call. Keeps codegen
+		// tests like `s == s` / `s != s` matching stock expectations.
+		if ir.SameSafeExpr(n.X, n.Y) {
+			return ir.NewBool(base.Pos, n.Op() == ir.OEQ)
+		}
+		// Otherwise route through runtime.streqfast which the
+		// compiler lowers to an SSA 3-word fast path (same pointer,
+		// or two inline strings with identical content) followed by
+		// the standard decoded-len + memequal fallback.
+		x := typecheck.Conv(n.X, types.Types[types.TSTRING])
+		y := typecheck.Conv(n.Y, types.Types[types.TSTRING])
+		r = mkcall("streqfast", types.Types[types.TBOOL], init, x, y)
+		if n.Op() == ir.ONE {
+			r = typecheck.Expr(ir.NewUnaryExpr(base.Pos, ir.ONOT, r))
 		}
 	} else {
 		// sys_cmpstring(s1, s2) :: 0

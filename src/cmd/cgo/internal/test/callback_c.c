@@ -63,5 +63,5 @@ callGoWithString(void)
 {
 	extern void goWithString(GoString);
 	const char *str = "string passed from C to Go";
-	goWithString((GoString){str, strlen(str)});
+	goWithString((GoString){.p = str, .n = strlen(str)});
 }

@@ -815,12 +815,14 @@ type S0 struct{      // offset
 	e complex128 // 24
 }                    // 40
 
+// gd small-string optimization: y string is now 24 B (was 16 B), so
+// every field after y shifts by 8 bytes and S1 itself is 80 B (was 72).
 type S1 struct{   // offset
 	x float32 //  0
 	y string  //  8
-	z *S1     // 24
-	S0        // 32
-}                 // 72
+	z *S1     // 32 (was 24 stock)
+	S0        // 40 (was 32 stock)
+}                 // 80 (was 72 stock)
 
 type S2 struct{ // offset
 	*S1     //  0
@@ -897,22 +899,22 @@ func Offsetof1() {
 	var y1 S1
 	assert(unsafe.Offsetof(y1.x) == 0)
 	assert(unsafe.Offsetof(y1.y) == 8)
-	assert(unsafe.Offsetof(y1.z) == 24)
-	assert(unsafe.Offsetof(y1.S0) == 32)
+	assert(unsafe.Offsetof(y1.z) == 32) // gd: y string is 24 B, so z shifts +8
+	assert(unsafe.Offsetof(y1.S0) == 40)
 
 	assert(unsafe.Offsetof(y1.S0.a) == 0) // relative to S0
-	assert(unsafe.Offsetof(y1.a) == 32)   // relative to S1
-	assert(unsafe.Offsetof(y1.b) == 36)   // relative to S1
-	assert(unsafe.Offsetof(y1.c) == 40)   // relative to S1
-	assert(unsafe.Offsetof(y1.d) == 48)   // relative to S1
-	assert(unsafe.Offsetof(y1.e) == 56)   // relative to S1
+	assert(unsafe.Offsetof(y1.a) == 40)   // relative to S1
+	assert(unsafe.Offsetof(y1.b) == 44)   // relative to S1
+	assert(unsafe.Offsetof(y1.c) == 48)   // relative to S1
+	assert(unsafe.Offsetof(y1.d) == 56)   // relative to S1
+	assert(unsafe.Offsetof(y1.e) == 64)   // relative to S1
 
 	var y1p *S1
-	assert(unsafe.Offsetof(y1p.S0) == 32)
+	assert(unsafe.Offsetof(y1p.S0) == 40)
 
 	type P *S1
 	var p P = y1p
-	assert(unsafe.Offsetof(p.S0) == 32)
+	assert(unsafe.Offsetof(p.S0) == 40)
 
 	var y2 S2
 	assert(unsafe.Offsetof(y2.S1) == 0)
@@ -967,7 +969,7 @@ func Sizeof1() {
 	assert(unsafe.Sizeof(y0) == 40)
 
 	var y1 S1
-	assert(unsafe.Sizeof(y1) == 72)
+	assert(unsafe.Sizeof(y1) == 80) // gd: y string is 24 B (was 16), so S1 is 80 (was 72)
 
 	var y2 S2
 	assert(unsafe.Sizeof(y2) == 8)

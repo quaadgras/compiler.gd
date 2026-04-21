@@ -417,7 +417,12 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpSliceCap, &rc)
 
 	case types.TSTRING:
-		return x.decomposePair(pos, b, a, mem, x.typs.BytePtr, x.typs.Int, OpStringPtr, OpStringLen, &rc)
+		// gd small-string optimization: string is (ptr, hash, len).
+		// intRegs = 3 on TSTRING — produce 3 slots.
+		mem = x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpStringPtr, &rc)
+		pos = pos.WithNotStmt()
+		mem = x.decomposeOne(pos, b, a, mem, x.typs.Uintptr, OpStringHash, &rc)
+		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpStringLen, &rc)
 
 	case types.TINTER:
 		// gd fat-interface: iface/eface is (tab, data, inline complex128).
@@ -590,8 +595,10 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		return a
 
 	case types.TSTRING:
+		// gd: 3-slot decomposition (ptr, hash, len).
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr)))
 		pos = pos.WithNotStmt()
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr)))
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Int, rc.next(x.typs.Int)))
 		a = makeOf(a, OpStringMake, args)
 		x.commonSelectors[sk] = a
@@ -753,8 +760,10 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 		return m0
 
 	case types.TSTRING:
+		// gd: 3-slot wide store (ptr, hash, len).
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr))
 		pos = pos.WithNotStmt()
+		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr))
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Int, rc.next(x.typs.Int))
 		return m0
 

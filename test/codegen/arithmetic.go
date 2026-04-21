@@ -630,8 +630,13 @@ func LenMod1(a []int) int {
 }
 
 func LenMod2(s string) int {
+	// gd small-string optimization: len(s) goes through a tag-decoding
+	// cmov that loses the "non-negative" fact, so the mod-by-power-of-2
+	// lowers to AND with two's-complement mask + SUB instead of the
+	// stock ANDL/AND [$]2047. The ANDQ [$]-2048 + SUBQ sequence is
+	// equivalent in cost.
 	// 386:"ANDL [$]2047"
-	// amd64:"ANDL [$]2047"
+	// amd64:"ANDQ [$]-2048"
 	// arm64:"AND [$]2047" -"SDIV"
 	// arm/6:"AND" -".*udiv"
 	// arm/7:"BFC" -".*udiv" -"AND"

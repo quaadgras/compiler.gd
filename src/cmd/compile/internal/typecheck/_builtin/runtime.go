@@ -227,6 +227,7 @@ func f64equal(p, q unsafe.Pointer) bool
 func c64equal(p, q unsafe.Pointer) bool
 func c128equal(p, q unsafe.Pointer) bool
 func strequal(p, q unsafe.Pointer) bool
+func streqfast(s, t string) bool
 func interequal(p, q unsafe.Pointer) bool
 func nilinterequal(p, q unsafe.Pointer) bool
 

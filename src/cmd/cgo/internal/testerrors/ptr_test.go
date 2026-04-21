@@ -277,9 +277,13 @@ var ptrTests = []ptrTest{
 	},
 	{
 		// Passing a Go string is fine.
+		// gd small-string optimization: Go's string header is 3 words
+		// (data ptr, hash, length) — see doc/gd/sso-string.md. The C
+		// mirror struct here must include the hash slot or the cast
+		// truncates the length and corrupts the round-trip.
 		name: "passstring",
 		c: `#include <stddef.h>
-		    typedef struct { const char *p; ptrdiff_t n; } gostring23;
+		    typedef struct { const char *p; ptrdiff_t h; ptrdiff_t n; } gostring23;
 		    gostring23 f23(gostring23 s) { return s; }`,
 		imports: []string{"unsafe"},
 		body:    `s := "a"; r := C.f23(*(*C.gostring23)(unsafe.Pointer(&s))); if *(*string)(unsafe.Pointer(&r)) != s { panic(r) }`,
@@ -301,8 +305,10 @@ var ptrTests = []ptrTest{
 		support: `//export GoStr25
 		          func GoStr25() string { return strings.Repeat("a", 2) }`,
 		body: `C.f25()`,
+		// gd: Go string header is now 3 words (ptr, hash, len);
+		// gostring25 mirrors that.
 		c1: `#include <stddef.h>
-		     typedef struct { const char *p; ptrdiff_t n; } gostring25;
+		     typedef struct { const char *p; ptrdiff_t h; ptrdiff_t n; } gostring25;
 		     extern gostring25 GoStr25();
 		     void f25() { GoStr25(); }`,
 		fail: true,

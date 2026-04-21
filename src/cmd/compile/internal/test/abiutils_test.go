@@ -253,6 +253,10 @@ func TestABIUtilsSliceString(t *testing.T) {
 	ft := mkFuncType(nil, []*types.Type{sli32, i8, sli32, i8, str, i8, i64, sli32},
 		[]*types.Type{str, i64, str, sli32})
 
+	// gd small-string optimization: string is now 3 int regs (was 2)
+	// — see reflect/abi.go and synthString. So return strings now eat
+	// 3 register slots, and the stack-spilled string in IN 4 occupies
+	// 24 B (was 16), shifting subsequent IN offsets and the spill area.
 	exp := makeExpectedDump(`
         IN 0: R{ I0 I1 I2 } spilloffset: 0 typ: []int32
         IN 1: R{ I3 } spilloffset: 24 typ: int8
@@ -260,13 +264,13 @@ func TestABIUtilsSliceString(t *testing.T) {
         IN 3: R{ I7 } spilloffset: 56 typ: int8
         IN 4: R{ } offset: 0 typ: string
         IN 5: R{ I8 } spilloffset: 57 typ: int8
-        IN 6: R{ } offset: 16 typ: int64
-        IN 7: R{ } offset: 24 typ: []int32
-        OUT 0: R{ I0 I1 } spilloffset: -1 typ: string
-        OUT 1: R{ I2 } spilloffset: -1 typ: int64
-        OUT 2: R{ I3 I4 } spilloffset: -1 typ: string
-        OUT 3: R{ I5 I6 I7 } spilloffset: -1 typ: []int32
-        offsetToSpillArea: 48 spillAreaSize: 64
+        IN 6: R{ } offset: 24 typ: int64
+        IN 7: R{ } offset: 32 typ: []int32
+        OUT 0: R{ I0 I1 I2 } spilloffset: -1 typ: string
+        OUT 1: R{ I3 } spilloffset: -1 typ: int64
+        OUT 2: R{ I4 I5 I6 } spilloffset: -1 typ: string
+        OUT 3: R{ } offset: 56 typ: []int32
+        offsetToSpillArea: 80 spillAreaSize: 64
 `)
 
 	abitest(t, ft, exp)

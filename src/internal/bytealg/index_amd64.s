@@ -14,13 +14,15 @@ TEXT ·Index(SB),NOSPLIT,$0-56
 	LEAQ ret+48(FP), R11
 	JMP  indexbody<>(SB)
 
-TEXT ·IndexString(SB),NOSPLIT,$0-40
+// gd small-string optimization: each string is 24 B (ptr, hash, len).
+// IndexString(a, b string) int → 24 + 24 + 8 (ret) = 56.
+TEXT ·IndexString(SB),NOSPLIT,$0-56
 	MOVQ a_base+0(FP), DI
-	MOVQ a_len+8(FP), DX
-	MOVQ b_base+16(FP), R8
-	MOVQ b_len+24(FP), AX
+	MOVQ a_len+16(FP), DX
+	MOVQ b_base+24(FP), R8
+	MOVQ b_len+40(FP), AX
 	MOVQ DI, R10
-	LEAQ ret+32(FP), R11
+	LEAQ ret+48(FP), R11
 	JMP  indexbody<>(SB)
 
 // AX: length of string, that we are searching for

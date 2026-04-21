@@ -6028,6 +6028,7 @@ const (
 	OpComplexImag
 	OpStringMake
 	OpStringPtr
+	OpStringHash
 	OpStringLen
 	OpIMake
 	OpITab
@@ -88157,11 +88158,16 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "StringMake",
-		argLen:  2,
+		argLen:  3,
 		generic: true,
 	},
 	{
 		name:    "StringPtr",
+		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "StringHash",
 		argLen:  1,
 		generic: true,
 	},

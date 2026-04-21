@@ -274,8 +274,9 @@ func writeMapType(t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
 	if AlgType(t.Key()) == types.AMEM64 && elemOff != 8 {
 		base.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
 	}
-	if AlgType(t.Key()) == types.ASTRING && elemOff != int64(2*types.PtrSize) {
-		base.Fatalf("runtime assumes elemOff for string keys is %d, got %d", 2*types.PtrSize, elemOff)
+	if AlgType(t.Key()) == types.ASTRING && elemOff != types.StringSize {
+		// gd small-string optimization: string header is 3 words (24 B).
+		base.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
 	}
 
 	c.Field("Key").WritePtr(s1)

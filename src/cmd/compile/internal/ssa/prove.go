@@ -1854,6 +1854,14 @@ func initLimit(v *Value) limit {
 		fallthrough
 	case OpStringLen:
 		lim = lim.signedMin(0)
+	case OpPhi, OpCondSelect:
+		// gd small-string optimization: recognise the decoded-length
+		// phi / CondSelect pattern ssagen's stringLen emits so
+		// induction-variable and bounds analysis see it as a plain
+		// "length of string" op.
+		if unwrapStringDecodedLen(v) != nil {
+			lim = lim.signedMinMax(0, 1<<60-1)
+		}
 	}
 
 	// signed <-> unsigned propagation
@@ -1985,6 +1993,15 @@ func (ft *factsTable) flowLimit(v *Value) {
 		a := ft.limits[v.Args[0].ID]
 		b := ft.limits[v.Args[1].ID]
 		ft.newLimit(v, a.add(b, uint(v.Type.Size())*8))
+		// Add by a negative constant is semantically a subtraction —
+		// relevant for the `len(s) - 1` pattern that some passes
+		// rewrite to Add+NegConst. Feed it through the Sub relation
+		// detectors so descending-len loops keep BCE.
+		if c := v.Args[1]; c.isGenericIntConst() && c.AuxInt < 0 {
+			ft.detectAddNegConstRelations(v, v.Args[0], c)
+		} else if c := v.Args[0]; c.isGenericIntConst() && c.AuxInt < 0 {
+			ft.detectAddNegConstRelations(v, v.Args[1], c)
+		}
 	case OpSub64, OpSub32, OpSub16, OpSub8:
 		a := ft.limits[v.Args[0].ID]
 		b := ft.limits[v.Args[1].ID]
@@ -2093,7 +2110,10 @@ func (ft *factsTable) detectSliceLenRelation(v *Value) {
 		return
 	}
 
-	if !(v.Args[0].Op == OpSliceLen || v.Args[0].Op == OpStringLen || v.Args[0].Op == OpSliceCap) {
+	// gd small-string optimization: the left operand may be the tag-
+	// decoded len phi/CondSelect instead of a raw OpStringLen.
+	lenOp := effectiveLen(v.Args[0])
+	if lenOp == nil {
 		return
 	}
 
@@ -2101,7 +2121,7 @@ func (ft *factsTable) detectSliceLenRelation(v *Value) {
 	if !ft.isNonNegative(index) {
 		return
 	}
-	slice := v.Args[0].Args[0]
+	slice := lenOp.Args[0]
 
 	for o := ft.orderings[index.ID]; o != nil; o = o.next {
 		if o.d != signed {
@@ -2116,9 +2136,9 @@ func (ft *factsTable) detectSliceLenRelation(v *Value) {
 			continue
 		}
 		var lenOffset *Value
-		if bound := ow.Args[0]; (bound.Op == OpSliceLen || bound.Op == OpStringLen) && bound.Args[0] == slice {
+		if bound := effectiveLen(ow.Args[0]); bound != nil && bound.Args[0] == slice {
 			lenOffset = ow.Args[1]
-		} else if bound := ow.Args[1]; (bound.Op == OpSliceLen || bound.Op == OpStringLen) && bound.Args[0] == slice {
+		} else if bound := effectiveLen(ow.Args[1]); bound != nil && bound.Args[0] == slice {
 			// Do not infer K - slicelen, see issue #76709.
 			if ow.Op == OpAdd64 {
 				lenOffset = ow.Args[0]
@@ -2145,6 +2165,26 @@ func (ft *factsTable) detectSliceLenRelation(v *Value) {
 }
 
 // v must be Sub{64,32,16,8}.
+// detectAddNegConstRelations mirrors detectSubRelations for the
+// Add(x, neg_const) form that some passes produce instead of Sub(x, K).
+// Registers `v <= x` for a non-negative-constant subtrahend. Needed
+// so descending-len loops like `for i := len(s)-1; i >= 0; i--` have
+// an induction-variable limit that matches the bounds-check length.
+func (ft *factsTable) detectAddNegConstRelations(v, x, negConst *Value) {
+	width := uint(v.Type.Size()) * 8
+	xLim := ft.limits[x.ID]
+	// Avoid wrapping.
+	if _, ok := safeAdd(xLim.min, negConst.AuxInt, width); !ok {
+		return
+	}
+	if _, ok := safeAdd(xLim.max, negConst.AuxInt, width); !ok {
+		return
+	}
+	// Adding a strictly-negative constant to x gives a result smaller
+	// than or equal to x.
+	ft.update(v.Block, v, x, signed, lt|eq)
+}
+
 func (ft *factsTable) detectSubRelations(v *Value) {
 	// v = x-y
 	x := v.Args[0]
@@ -2381,7 +2421,10 @@ func unsignedSubUnderflows(a, b uint64) bool {
 // iteration where the index is not directly compared to the length.
 // if isReslice, then delta can be equal to K.
 func checkForChunkedIndexBounds(ft *factsTable, b *Block, index, bound *Value, isReslice bool) bool {
-	if bound.Op != OpSliceLen && bound.Op != OpStringLen && bound.Op != OpSliceCap {
+	// gd small-string optimization: bound may be the tag-decoded len
+	// phi/CondSelect instead of a raw OpStringLen.
+	boundLen := effectiveLen(bound)
+	if boundLen == nil {
 		return false
 	}
 
@@ -2390,7 +2433,7 @@ func checkForChunkedIndexBounds(ft *factsTable, b *Block, index, bound *Value, i
 	// will also work for the cap since that is not smaller
 	// than the length.
 
-	slice := bound.Args[0]
+	slice := boundLen.Args[0]
 	lim := ft.limits[index.ID]
 	if lim.min < 0 {
 		return false
@@ -2416,9 +2459,9 @@ func checkForChunkedIndexBounds(ft *factsTable, b *Block, index, bound *Value, i
 		}
 		if ow := o.w; ow.Op == OpAdd64 {
 			var lenOffset *Value
-			if bound := ow.Args[0]; (bound.Op == OpSliceLen || bound.Op == OpStringLen) && bound.Args[0] == slice {
+			if bound := effectiveLen(ow.Args[0]); bound != nil && bound.Args[0] == slice {
 				lenOffset = ow.Args[1]
-			} else if bound := ow.Args[1]; (bound.Op == OpSliceLen || bound.Op == OpStringLen) && bound.Args[0] == slice {
+			} else if bound := effectiveLen(ow.Args[1]); bound != nil && bound.Args[0] == slice {
 				lenOffset = ow.Args[0]
 			}
 			if lenOffset == nil || lenOffset.Op != OpConst64 {
@@ -2593,7 +2636,17 @@ func addLocalFacts(ft *factsTable, b *Block) {
 			ft.update(b, v, v.Args[1], unsigned, lt)
 		case OpStringLen:
 			if v.Args[0].Op == OpStringMake {
-				ft.update(b, v, v.Args[0].Args[1], signed, eq)
+				// gd: StringMake is (ptr, hash, len) — len is Args[2].
+				ft.update(b, v, v.Args[0].Args[2], signed, eq)
+			}
+		case OpCondSelect:
+			// gd small-string optimization: see the OpPhi case below —
+			// CondSelect is emitted on arches that support it instead
+			// of the if/phi form.
+			if sl := unwrapStringDecodedLen(v); sl != nil {
+				if sl.Args[0].Op == OpStringMake {
+					ft.update(b, v, sl.Args[0].Args[2], signed, eq)
+				}
 			}
 		case OpSliceLen:
 			if v.Args[0].Op == OpSliceMake {
@@ -2619,6 +2672,14 @@ func addLocalFacts(ft *factsTable, b *Block) {
 			}
 		case OpPhi:
 			addLocalFactsPhi(ft, v)
+			// gd small-string optimization: tag-decoded len phi has
+			// the same equivalence fact we'd attach to the wrapped
+			// OpStringLen.
+			if sl := unwrapStringDecodedLen(v); sl != nil {
+				if sl.Args[0].Op == OpStringMake {
+					ft.update(b, v, sl.Args[0].Args[2], signed, eq)
+				}
+			}
 		}
 	}
 }

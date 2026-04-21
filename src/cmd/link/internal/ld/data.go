@@ -1278,13 +1278,15 @@ func addstrdata(arch *sys.Arch, l *loader.Loader, name, value string) {
 	sbld.SetType(sym.SRODATA)
 
 	// Don't reset the variable's size. String variable usually has size of
-	// 2*PtrSize, but in ASAN build it can be larger due to red zone.
-	// (See issue 56175.)
-	bld.SetData(make([]byte, arch.PtrSize*2))
+	// 3*PtrSize under the gd small-string optimization (stock Go is
+	// 2*PtrSize). ASAN build may be larger due to red zone (issue 56175).
+	// Layout: word 0 = data ptr, word 1 = hash (phase A = 0),
+	// word 2 = length. See doc/gd/sso-string.md.
+	bld.SetData(make([]byte, arch.PtrSize*3))
 	bld.SetReadOnly(false)
 	bld.ResetRelocs()
 	bld.SetAddrPlus(arch, 0, sbld.Sym(), 0)
-	bld.SetUint(arch, int64(arch.PtrSize), uint64(len(value)))
+	bld.SetUint(arch, int64(arch.PtrSize)*2, uint64(len(value)))
 }
 
 func (ctxt *Link) dostrdata() {
@@ -1295,6 +1297,10 @@ func (ctxt *Link) dostrdata() {
 
 // addgostring adds str, as a Go string value, to s. symname is the name of the
 // symbol used to define the string data and must be unique per linked object.
+//
+// gd small-string optimization: the emitted Go string header is 3 words
+// (ptr, hash, len). Phase A always emits heap rep with hash = 0; literal
+// pre-hashing lands in a later phase.
 func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symname, str string) {
 	sdata := ldr.CreateSymForUpdate(symname, 0)
 	if sdata.Type() != sym.Sxxx {
@@ -1305,6 +1311,7 @@ func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symnam
 	sdata.SetSize(int64(len(str)))
 	sdata.SetData([]byte(str))
 	s.AddAddr(ctxt.Arch, sdata.Sym())
+	s.AddUint(ctxt.Arch, 0) // word 1: hash slot, phase A = 0
 	s.AddUint(ctxt.Arch, uint64(len(str)))
 }
 

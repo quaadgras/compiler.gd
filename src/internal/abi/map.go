@@ -19,8 +19,13 @@ const (
 
 	// Maximum key or elem size to keep inline (instead of mallocing per element).
 	// Must fit in a uint8.
-	MapMaxKeyBytes  = 128
-	MapMaxElemBytes = 128
+	//
+	// gd small-string optimization: scaled up from stock's 128 to 192 so that
+	// [8]string (now 8*24 = 192 B under gd) still fits inline. Keeping the
+	// stock 128 threshold would push every [N≤8]string-keyed map into the
+	// indirect-key path, allocating per insertion (TestArrayHash regression).
+	MapMaxKeyBytes  = 192
+	MapMaxElemBytes = 192
 
 	ctrlEmpty = 0b10000000
 	bitsetLSB = 0x0101010101010101

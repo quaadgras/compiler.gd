@@ -6,7 +6,6 @@ package maps
 
 import (
 	"internal/abi"
-	"internal/goarch"
 	"internal/race"
 	"internal/runtime/sys"
 	"unsafe"
@@ -47,7 +46,8 @@ func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Poi
 		// There's exactly one slot that passed the quick test. Do the single expensive comparison.
 		slotKey = g.key(typ, uintptr(j))
 		if key == *(*string)(slotKey) {
-			return unsafe.Pointer(uintptr(slotKey) + 2*goarch.PtrSize)
+			// gd: string header is 3 words (24 B) — elem follows the key.
+			return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 		}
 		return nil
 	}
@@ -61,7 +61,7 @@ dohash:
 
 	for range abi.MapGroupSlots {
 		if uint8(ctrls) == h2 && key == *(*string)(slotKey) {
-			return unsafe.Pointer(uintptr(slotKey) + 2*goarch.PtrSize)
+			return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 		}
 		slotKey = unsafe.Pointer(uintptr(slotKey) + slotSize)
 		ctrls >>= 8
@@ -90,9 +90,14 @@ func longStringQuickEqualityTest(a, b string) bool {
 	return true
 }
 func stringPtr(s string) unsafe.Pointer {
+	// Shadow of runtime.stringStruct under the gd small-string
+	// optimization: 3-word header (see doc/gd/sso-string.md). Only
+	// the ptr slot (word 0) is read here — heap-rep strings store
+	// their data pointer there, inline-rep strings store nil.
 	type stringStruct struct {
-		ptr unsafe.Pointer
-		len int
+		ptr  unsafe.Pointer
+		hash uint
+		len  uint
 	}
 	return (*stringStruct)(unsafe.Pointer(&s)).ptr
 }
@@ -142,7 +147,7 @@ func runtime_mapaccess1_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poi
 
 			slotKey := g.key(typ, i)
 			if key == *(*string)(slotKey) {
-				slotElem := unsafe.Pointer(uintptr(slotKey) + 2*goarch.PtrSize)
+				slotElem := unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 				return slotElem
 			}
 			match = match.removeFirst()
@@ -202,7 +207,7 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 
 			slotKey := g.key(typ, i)
 			if key == *(*string)(slotKey) {
-				slotElem := unsafe.Pointer(uintptr(slotKey) + 2*goarch.PtrSize)
+				slotElem := unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 				return slotElem, true
 			}
 			match = match.removeFirst()

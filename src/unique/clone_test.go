@@ -12,12 +12,15 @@ import (
 )
 
 func TestMakeCloneSeq(t *testing.T) {
+	// gd small-string optimization: each `string` is 3 words (was 2),
+	// so per-element strides in arrays of strings (and arrays-of-structs-
+	// of-strings) become 3*PtrSize instead of 2*PtrSize.
 	testCloneSeq[testString](t, cSeq(0))
 	testCloneSeq[testIntArray](t, cSeq())
 	testCloneSeq[testEface](t, cSeq())
-	testCloneSeq[testStringArray](t, cSeq(0, 2*goarch.PtrSize, 4*goarch.PtrSize))
+	testCloneSeq[testStringArray](t, cSeq(0, 3*goarch.PtrSize, 6*goarch.PtrSize))
 	testCloneSeq[testStringStruct](t, cSeq(0))
-	testCloneSeq[testStringStructArrayStruct](t, cSeq(0, 2*goarch.PtrSize))
+	testCloneSeq[testStringStructArrayStruct](t, cSeq(0, 3*goarch.PtrSize))
 	testCloneSeq[testStruct](t, cSeq(8))
 }
 

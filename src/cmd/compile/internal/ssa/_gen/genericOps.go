@@ -527,9 +527,17 @@ var genericOps = []opData{
 	{name: "ComplexImag", argLength: 1}, // imag(arg0)
 
 	// Strings
-	{name: "StringMake", argLength: 2},                // arg0=ptr, arg1=len
-	{name: "StringPtr", argLength: 1, typ: "BytePtr"}, // ptr(arg0)
-	{name: "StringLen", argLength: 1, typ: "Int"},     // len(arg0)
+	// gd small-string optimization: StringMake carries the full 24 B
+	// header in SSA. arg0=ptr (word 0: data ptr or nil-when-inline),
+	// arg1=hash (word 1: cached hash for heap rep, zero in phase A;
+	// inline bytes[0:8] under future inline rep), arg2=len-or-tagbits
+	// (word 2: tag<<60 | len for heap, tag<<60 | inline bytes[8:15]
+	// for inline). Phase A always emits heap rep with hash=0 and
+	// tag bits zero.
+	{name: "StringMake", argLength: 3},                  // arg0=ptr, arg1=hash, arg2=len
+	{name: "StringPtr", argLength: 1, typ: "BytePtr"},   // ptr(arg0)
+	{name: "StringHash", argLength: 1, typ: "Uintptr"},  // hash(arg0)
+	{name: "StringLen", argLength: 1, typ: "Int"},       // len(arg0) — phase A: returns word 2 raw; phase B will decode tag|len
 
 	// Interfaces
 	// gd fat-interface: IMake carries the full 32B iface header in SSA.

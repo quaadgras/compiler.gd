@@ -312,7 +312,7 @@ func ParseFlags() {
 		usage()
 	}
 
-	if Flag.GoVersion != "" && Flag.GoVersion != runtime.Version() {
+	if Flag.GoVersion != "" && !versionsCompatible(runtime.Version(), Flag.GoVersion) {
 		fmt.Printf("compile: version %q does not match go tool version %q\n", runtime.Version(), Flag.GoVersion)
 		Exit(2)
 	}
@@ -386,6 +386,45 @@ func ParseFlags() {
 	if buildcfg.GOOS == "plan9" && buildcfg.GOARCH == "386" {
 		Debug.AlignHot = 0
 	}
+}
+
+// versionsCompatible reports whether two Go version strings refer to
+// the same underlying Go release for purposes of the compile -goversion
+// check. It tolerates the gd fork's "gd" prefix (e.g. "gd1.26.2") being
+// passed alongside a stock prefix from the host go (e.g. "go1.26.1") so
+// that running the fork toolchain via `GOROOT=$fork host-go test ...`
+// doesn't reject every package with a version mismatch.
+//
+// The check is intentionally loose: we only require the major.minor
+// release line to match. Patch-level differences (e.g. fork's gd1.26.2
+// vs host's go1.26.1) are accepted — both share the gd1.26 ABI.
+func versionsCompatible(have, want string) bool {
+	if have == want {
+		return true
+	}
+	// Strip "go" or "gd" prefix.
+	stripPrefix := func(v string) string {
+		if strings.HasPrefix(v, "go") || strings.HasPrefix(v, "gd") {
+			return v[2:]
+		}
+		return v
+	}
+	h := stripPrefix(have)
+	w := stripPrefix(want)
+	// Match on major.minor only (everything up to the second '.').
+	majorMinor := func(v string) string {
+		dots := 0
+		for i, c := range v {
+			if c == '.' {
+				dots++
+				if dots == 2 {
+					return v[:i]
+				}
+			}
+		}
+		return v // no second dot → already major.minor
+	}
+	return majorMinor(h) == majorMinor(w)
 }
 
 // registerFlags adds flag registrations for all the fields in Flag.

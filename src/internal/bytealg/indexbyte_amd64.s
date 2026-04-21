@@ -14,11 +14,13 @@ TEXT	·IndexByte(SB), NOSPLIT, $0-40
 	LEAQ ret+32(FP), R8
 	JMP  indexbytebody<>(SB)
 
-TEXT	·IndexByteString(SB), NOSPLIT, $0-32
+// gd small-string optimization: string header is 24 B (ptr, hash, len).
+// Args are (s string, c byte) int → frame size 24 + 8 (c pad) + 8 (ret) = 40.
+TEXT	·IndexByteString(SB), NOSPLIT, $0-40
 	MOVQ s_base+0(FP), SI
-	MOVQ s_len+8(FP), BX
-	MOVB c+16(FP), AL
-	LEAQ ret+24(FP), R8
+	MOVQ s_len+16(FP), BX
+	MOVB c+24(FP), AL
+	LEAQ ret+32(FP), R8
 	JMP  indexbytebody<>(SB)
 
 // input:

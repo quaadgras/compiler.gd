@@ -39,8 +39,13 @@ var (
 	SliceLenOffset int64
 	SliceCapOffset int64
 
-	SliceSize  int64
-	StringSize int64
+	SliceSize int64
+
+	// gd: 3-word string header. See doc/gd/sso-string.md.
+	StringPtrOffset  int64
+	StringHashOffset int64
+	StringLenOffset  int64
+	StringSize       int64
 )
 
 var SkipSizeForTracing bool
@@ -395,9 +400,10 @@ func CalcSize(t *Type) {
 		}
 		w = StringSize
 		t.align = uint8(PtrSize)
-		t.intRegs = 2
+		t.intRegs = 3 // gd: {word0=ptr/nil, word1=hash/bytes, word2=tag|len/bytes}
 		t.setAlg(ASTRING)
-		t.ptrBytes = int64(PtrSize)
+		t.ptrBytes = int64(PtrSize) // word0 is the only pointer slot
+
 
 	case TARRAY:
 		if t.Elem() == nil {

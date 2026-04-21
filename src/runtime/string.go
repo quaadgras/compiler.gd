@@ -287,19 +287,56 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 	return s[:size2]
 }
 
+// stringStruct is the runtime layout of a Go string under the gd
+// small-string optimization. See doc/gd/sso-string.md and
+// src/internal/abi/string.go for the full encoding.
+//
+// Phase A invariant: only heap rep is constructed — hash is zero
+// (reserved slot), len's tag nibble is zero, so .len reads as a plain
+// length. Inline rep (tag != 0) is never produced in phase A.
 type stringStruct struct {
-	str unsafe.Pointer
-	len int
+	str  unsafe.Pointer // word 0: data ptr (heap) or nil (inline)
+	hash uint           // word 1: cached hash (heap) or bytes[0:8] (inline)
+	len  uint           // word 2: (tag<<60) | len (heap, tag=0)
+	//                             (tag<<60) | bytes[8:15] packed (inline)
 }
 
 // Variant with *byte pointer type for DWARF debugging.
 type stringStructDWARF struct {
-	str *byte
-	len int
+	str  *byte
+	hash uint
+	len  uint
 }
 
 func stringStructOf(sp *string) *stringStruct {
 	return (*stringStruct)(unsafe.Pointer(sp))
+}
+
+// length returns the logical string length regardless of representation.
+func (s *stringStruct) length() int {
+	tag := s.len >> abi.StringTagShift
+	if tag != 0 {
+		return int(tag)
+	}
+	return int(s.len & abi.StringLenMask)
+}
+
+// isInline reports whether the string is inline-rep.
+func (s *stringStruct) isInline() bool {
+	return s.str == nil && s.len >> abi.StringTagShift != 0
+}
+
+// bytes returns a pointer to the first data byte. For heap rep it
+// returns the data pointer; for inline rep it points into the header
+// itself (aliases &s.hash), which is only valid for the lifetime of s.
+// Callers must not outlive s when the result aliases inline bytes.
+//
+//go:nosplit
+func (s *stringStruct) bytes() unsafe.Pointer {
+	if s.str != nil {
+		return s.str
+	}
+	return noescape(unsafe.Pointer(&s.hash))
 }
 
 func intstring(buf *[4]byte, v int64) (s string) {
@@ -515,7 +552,7 @@ func findnull(s *byte) int {
 	safeLen := int(pageSize - uintptr(ptr)%pageSize)
 
 	for {
-		t := *(*string)(unsafe.Pointer(&stringStruct{ptr, safeLen}))
+		t := *(*string)(unsafe.Pointer(&stringStruct{str: ptr, len: uint(safeLen)}))
 		// Check one page at a time.
 		if i := bytealg.IndexByteString(t, 0); i != -1 {
 			return offset + i
@@ -541,7 +578,7 @@ func findnullw(s *uint16) int {
 
 //go:nosplit
 func gostringnocopy(str *byte) string {
-	ss := stringStruct{str: unsafe.Pointer(str), len: findnull(str)}
+	ss := stringStruct{str: unsafe.Pointer(str), len: uint(findnull(str))}
 	s := *(*string)(unsafe.Pointer(&ss))
 	return s
 }

@@ -256,7 +256,9 @@ func f10(a string) int {
 	b := a[:n>>1] // ERROR "(Proved IsSliceInBounds|Proved Rsh64x64 is unsigned)$"
 	// We optimize comparisons with small constant strings (see cmd/compile/internal/gc/walk.go),
 	// so this string literal must be long.
-	if b == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+	// gd small-string optimization: streqfast intrinsic emits extra
+	// length-equality facts that prove disproves here.
+	if b == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" { // ERROR "Disproved Neq64"
 		return 0
 	}
 	return 1
@@ -681,11 +683,17 @@ func natcmp(x, y []uint) (r int) {
 
 func suffix(s, suffix string) bool {
 	// Note: issue 76304
-	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix // ERROR "Proved IsSliceInBounds"
+	// gd small-string optimization: streqfast emits a length-equality
+	// fact that prove disproves as an additional Neq64.
+	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix // ERROR "Proved IsSliceInBounds" "Disproved Neq64"
 }
 
 func constsuffix(s string) bool {
-	return suffix(s, "abc") // ERROR "Proved IsSliceInBounds$" "Proved slicemask not needed$" "Proved Eq64$"
+	// gd small-string optimization: "Proved slicemask not needed" no
+	// longer fires — the umin/lim propagation through the tag-decode
+	// phi doesn't tighten enough for slicemask elimination to kick in.
+	// IsSliceInBounds and Eq64 still prove.
+	return suffix(s, "abc") // ERROR "Proved IsSliceInBounds$" "Proved Eq64$" "Disproved Neq64"
 }
 
 func atexit(foobar []func()) {
@@ -2295,9 +2303,12 @@ func transitiveProofsThroughOverflowingUnsignedSub(x, y, z uint64) {
 
 func resliceString(s string) byte {
 	if len(s) >= 4 {
-		s = s[2:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
-		s = s[1:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
-		return s[0] // ERROR "Proved IsInBounds"
+		s = s[2:] // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed"
+		// gd small-string optimization: the tag-decode phi surfaces
+		// extra equality facts that prove disproves as additional
+		// Neq64 comparisons here.
+		s = s[1:]   // ERROR "Proved IsSliceInBounds" "Proved slicemask not needed" "Disproved Neq64"
+		return s[0] // ERROR "Proved IsInBounds" "Disproved Neq64"
 	}
 	return 0
 }

@@ -505,12 +505,19 @@ func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suff
 		}
 
 	case asmEmptyInterface:
+		// gd fat-interface: 32 B header { _type, _data, inline complex128 }.
+		// Inline payload is two float64 halves (16 B total, never scanned).
 		cc = append(cc, newComponent(suffix+"_type", asmKind(arch.ptrSize), "interface type", off, arch.ptrSize, suffix))
 		cc = append(cc, newComponent(suffix+"_data", asmKind(arch.ptrSize), "interface data", off+arch.ptrSize, arch.ptrSize, suffix))
+		cc = append(cc, newComponent(suffix+"_inline_real", asmKind(8), "interface inline real", off+2*arch.ptrSize, 8, suffix))
+		cc = append(cc, newComponent(suffix+"_inline_imag", asmKind(8), "interface inline imag", off+2*arch.ptrSize+8, 8, suffix))
 
 	case asmInterface:
+		// gd fat-interface: 32 B header { _itable, _data, inline complex128 }.
 		cc = append(cc, newComponent(suffix+"_itable", asmKind(arch.ptrSize), "interface itable", off, arch.ptrSize, suffix))
 		cc = append(cc, newComponent(suffix+"_data", asmKind(arch.ptrSize), "interface data", off+arch.ptrSize, arch.ptrSize, suffix))
+		cc = append(cc, newComponent(suffix+"_inline_real", asmKind(8), "interface inline real", off+2*arch.ptrSize, 8, suffix))
+		cc = append(cc, newComponent(suffix+"_inline_imag", asmKind(8), "interface inline imag", off+2*arch.ptrSize+8, 8, suffix))
 
 	case asmSlice:
 		cc = append(cc, newComponent(suffix+"_base", asmKind(arch.ptrSize), "slice base", off, arch.ptrSize, suffix))
@@ -518,8 +525,11 @@ func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suff
 		cc = append(cc, newComponent(suffix+"_cap", asmKind(arch.intSize), "slice cap", off+arch.ptrSize+arch.intSize, arch.intSize, suffix))
 
 	case asmString:
+		// gd small-string optimization: 3-word header (ptr, hash, len).
+		// See doc/gd/sso-string.md.
 		cc = append(cc, newComponent(suffix+"_base", asmKind(arch.ptrSize), "string base", off, arch.ptrSize, suffix))
-		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "string len", off+arch.ptrSize, arch.intSize, suffix))
+		cc = append(cc, newComponent(suffix+"_hash", asmKind(arch.ptrSize), "string hash", off+arch.ptrSize, arch.ptrSize, suffix))
+		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "string len", off+2*arch.ptrSize, arch.intSize, suffix))
 
 	case asmComplex:
 		fsize := size / 2

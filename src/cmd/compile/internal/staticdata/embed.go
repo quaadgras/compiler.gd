@@ -125,10 +125,18 @@ func WriteEmbed(v *ir.Name) {
 		}
 		sym := v.Linksym()
 		off := 0
-		off = objw.SymPtr(sym, off, fsym, 0)       // data string
-		off = objw.Uintptr(sym, off, uint64(size)) // len
-		if kind == embedBytes {
-			objw.Uintptr(sym, off, uint64(size)) // cap for slice
+		off = objw.SymPtr(sym, off, fsym, 0) // data string
+		if kind == embedString {
+			// gd small-string optimization: a Go string is now 3 words
+			// (ptr, hash, len). Embed writes hash = 0 in Phase A; len
+			// lives in word 2 (offset 2*PtrSize). See doc/gd/sso-string.md.
+			off = objw.Uintptr(sym, off, 0)            // hash slot, Phase A = 0
+			off = objw.Uintptr(sym, off, uint64(size)) // len
+		} else {
+			// embedBytes: slice header is unchanged at 3 words
+			// (ptr, len, cap). No hash slot.
+			off = objw.Uintptr(sym, off, uint64(size)) // len
+			objw.Uintptr(sym, off, uint64(size))       // cap for slice
 		}
 
 	case embedFiles:
@@ -143,23 +151,30 @@ func WriteEmbed(v *ir.Name) {
 		//	name string
 		//	data string
 		//	hash [16]byte
-		// Emit one of these per file in the set.
+		// Emit one of these per file in the set. Each Go string is now
+		// 3 words under the gd small-string optimization (ptr, hash, len);
+		// hash slot is zero in Phase A.
 		const hashSize = 16
 		hash := make([]byte, hashSize)
 		for _, file := range files {
-			off = objw.SymPtr(slicedata, off, StringSym(v.Pos(), file), 0) // file string
+			// name string: ptr, hash=0, len
+			off = objw.SymPtr(slicedata, off, StringSym(v.Pos(), file), 0)
+			off = objw.Uintptr(slicedata, off, 0) // string hash slot
 			off = objw.Uintptr(slicedata, off, uint64(len(file)))
 			if strings.HasSuffix(file, "/") {
-				// entry for directory - no data
-				off = objw.Uintptr(slicedata, off, 0)
-				off = objw.Uintptr(slicedata, off, 0)
+				// entry for directory - no data; zero out the data string.
+				off = objw.Uintptr(slicedata, off, 0) // data.ptr
+				off = objw.Uintptr(slicedata, off, 0) // data.hash
+				off = objw.Uintptr(slicedata, off, 0) // data.len
 				off += hashSize
 			} else {
 				fsym, size, err := fileStringSym(v.Pos(), base.Flag.Cfg.Embed.Files[file], true, hash)
 				if err != nil {
 					base.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
 				}
-				off = objw.SymPtr(slicedata, off, fsym, 0) // data string
+				// data string: ptr, hash=0, len
+				off = objw.SymPtr(slicedata, off, fsym, 0)
+				off = objw.Uintptr(slicedata, off, 0) // string hash slot
 				off = objw.Uintptr(slicedata, off, uint64(size))
 				off = int(slicedata.WriteBytes(base.Ctxt, int64(off), hash))
 			}

@@ -1493,7 +1493,8 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 	case *ast.FuncType:
 		return &Type{Size: p.PtrSize, Align: p.PtrSize, C: c("void*")}
 	case *ast.InterfaceType:
-		return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoInterface")}
+		// gd fat-iface: 2 words + 16-byte inline payload.
+		return &Type{Size: 2*p.PtrSize + 16, Align: p.PtrSize, C: c("GoInterface")}
 	case *ast.MapType:
 		return &Type{Size: p.PtrSize, Align: p.PtrSize, C: c("GoMap")}
 	case *ast.ChanType:
@@ -1552,14 +1553,16 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 			return &Type{Size: p.PtrSize, Align: p.PtrSize, C: c("GoUintptr")}
 		}
 		if t.Name == "string" {
-			// The string data is 1 pointer + 1 (pointer-sized) int.
-			return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoString")}
+			// gd small-string optimization: 3 words (ptr, hash, len).
+			return &Type{Size: 3 * p.PtrSize, Align: p.PtrSize, C: c("GoString")}
 		}
 		if t.Name == "error" {
-			return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoInterface")}
+			// gd fat-iface: 2 words + 16-byte inline payload.
+			return &Type{Size: 2*p.PtrSize + 16, Align: p.PtrSize, C: c("GoInterface")}
 		}
 		if t.Name == "any" {
-			return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoInterface")}
+			// gd fat-iface: 2 words + 16-byte inline payload.
+			return &Type{Size: 2*p.PtrSize + 16, Align: p.PtrSize, C: c("GoInterface")}
 		}
 		if r, ok := goTypes[t.Name]; ok {
 			return goTypesFixup(r)
@@ -1692,7 +1695,12 @@ const builtinProlog = `
 typedef ptrdiff_t intgo;
 
 #define GO_CGO_GOSTRING_TYPEDEF
-typedef struct { const char *p; intgo n; } _GoString_;
+/* gd small-string optimization: Go's string header is 3 words
+ * (ptr, hash, len). The hash slot sits between p and n; cgo helpers
+ * reading p/n still see the right values because field names match.
+ * size_t is pointer-sized on every platform cgo supports, matching
+ * Go's uint hash slot. */
+typedef struct { const char *p; size_t h; intgo n; } _GoString_;
 typedef struct { char *p; intgo n; intgo c; } _GoBytes_;
 _GoString_ GoString(char *p);
 _GoString_ GoStringN(char *p, int l);
@@ -1991,7 +1999,7 @@ const builtinExportProlog = `
 #define GO_CGO_EXPORT_PROLOGUE_H
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
-typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+typedef struct { const char *p; size_t h; ptrdiff_t n; } _GoString_;
 extern size_t _GoStringLen(_GoString_ s);
 extern const char *_GoStringPtr(_GoString_ s);
 #endif

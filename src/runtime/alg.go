@@ -101,7 +101,7 @@ func strhash(p unsafe.Pointer, h uintptr) uintptr
 
 func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	x := (*stringStruct)(a)
-	return memhashFallback(x.str, h, uintptr(x.len))
+	return memhashFallback(x.bytes(), h, uintptr(x.length()))
 }
 
 // NOTE: Because NaN != NaN, a map can contain any
@@ -308,6 +308,28 @@ func c128equal(p, q unsafe.Pointer) bool {
 }
 func strequal(p, q unsafe.Pointer) bool {
 	return *(*string)(p) == *(*string)(q)
+}
+
+// streqfast is the fallback implementation of the string-equality
+// intrinsic. The compiler lowers calls to this function directly into
+// optimised SSA (3-word fast path + decoded len / memequal fallback),
+// so this body only runs if the intrinsic is disabled. Kept as a
+// non-recursive byte-level compare to avoid infinite recursion if the
+// compiler routes `==` back through streqfast.
+//
+//go:nosplit
+func streqfast(s, t string) bool {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	th := (*stringStruct)(unsafe.Pointer(&t))
+	sl := sh.length()
+	tl := th.length()
+	if sl != tl {
+		return false
+	}
+	if sl == 0 {
+		return true
+	}
+	return memequal(sh.bytes(), th.bytes(), uintptr(sl))
 }
 func interequal(p, q unsafe.Pointer) bool {
 	x := (*iface)(p)

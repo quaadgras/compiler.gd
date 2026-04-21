@@ -42,14 +42,17 @@ type S struct {
     n int
 }
 `
+	// gd small-string optimization: a `string` is now 3 words (was 2),
+	// so the struct gains one extra word. WordSize 4 → 24 (was 20),
+	// WordSize 8 → 48 (was 40).
 	ts := findStructType(t, src)
 	sizes := types2.StdSizes{WordSize: 4, MaxAlign: 4}
-	if got := sizes.Sizeof(ts); got != 20 {
-		t.Errorf("Sizeof(%v) with WordSize 4 = %d want 20", ts, got)
+	if got := sizes.Sizeof(ts); got != 24 {
+		t.Errorf("Sizeof(%v) with WordSize 4 = %d want 24", ts, got)
 	}
 	sizes = types2.StdSizes{WordSize: 8, MaxAlign: 8}
-	if got := sizes.Sizeof(ts); got != 40 {
-		t.Errorf("Sizeof(%v) with WordSize 8 = %d want 40", ts, got)
+	if got := sizes.Sizeof(ts); got != 48 {
+		t.Errorf("Sizeof(%v) with WordSize 8 = %d want 48", ts, got)
 	}
 }
 

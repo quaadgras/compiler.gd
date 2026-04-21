@@ -175,7 +175,8 @@ func (s *StdSizes) Sizeof(T Type) int64 {
 			}
 		}
 		if k == String {
-			return s.WordSize * 2
+			// gd small-string optimization: 3-word header.
+			return s.WordSize * 3
 		}
 	case *Array:
 		n := t.len

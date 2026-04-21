@@ -18,16 +18,18 @@ TEXT ·Count(SB),NOSPLIT,$0-40
 	LEAQ	ret+32(FP), R8
 	JMP	countbody<>(SB)
 
-TEXT ·CountString(SB),NOSPLIT,$0-32
+// gd small-string optimization: string is 24 B (ptr, hash, len).
+// CountString(s string, c byte) int → 24 + 8 (c) + 8 (ret) = 40.
+TEXT ·CountString(SB),NOSPLIT,$0-40
 #ifndef hasPOPCNT
 	CMPB	internal∕cpu·X86+const_offsetX86HasPOPCNT(SB), $1
 	JEQ	2(PC)
 	JMP	·countGenericString(SB)
 #endif
 	MOVQ	s_base+0(FP), SI
-	MOVQ	s_len+8(FP), BX
-	MOVB	c+16(FP), AL
-	LEAQ	ret+24(FP), R8
+	MOVQ	s_len+16(FP), BX
+	MOVB	c+24(FP), AL
+	LEAQ	ret+32(FP), R8
 	JMP	countbody<>(SB)
 
 // input:

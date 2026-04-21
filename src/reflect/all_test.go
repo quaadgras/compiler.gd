@@ -7033,12 +7033,17 @@ func TestFuncLayout(t *testing.T) {
 	}
 	tests := []test{
 		{
+			// gd small-string optimization: each string is 3 words
+			// (ptr, hash, len). func(a, b string) string =
+			// 3*3 = 9 words; argsize/retOffset = 2*3 = 6 words.
+			// Pointer bitmap: word 0 of each string is a pointer
+			// (ptr slot), the other two slots are scalar.
 			typ:       ValueOf(func(a, b string) string { return "" }).Type(),
-			size:      6 * goarch.PtrSize,
-			argsize:   4 * goarch.PtrSize,
-			retOffset: 4 * goarch.PtrSize,
-			stack:     []byte{1, 0, 1, 0, 1},
-			gc:        []byte{1, 0, 1, 0, 1},
+			size:      9 * goarch.PtrSize,
+			argsize:   6 * goarch.PtrSize,
+			retOffset: 6 * goarch.PtrSize,
+			stack:     []byte{1, 0, 0, 1, 0, 0, 1},
+			gc:        []byte{1, 0, 0, 1, 0, 0, 1},
 		},
 		{
 			typ:       ValueOf(func(a, b, c uint32, p *byte, d uint16) {}).Type(),

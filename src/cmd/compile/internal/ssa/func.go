@@ -191,13 +191,16 @@ func (f *Func) localSlotAddr(slot LocalSlot) *LocalSlot {
 	return a
 }
 
-func (f *Func) SplitString(name *LocalSlot) (*LocalSlot, *LocalSlot) {
+func (f *Func) SplitString(name *LocalSlot) (*LocalSlot, *LocalSlot, *LocalSlot) {
 	ptrType := types.NewPtr(types.Types[types.TUINT8])
+	hashType := types.Types[types.TUINTPTR]
 	lenType := types.Types[types.TINT]
-	// Split this string up into two separate variables.
+	// gd small-string optimization: three sub-slots — ptr, hash, len —
+	// matching the 24 B stringStruct header.
 	p := f.SplitSlot(name, ".ptr", 0, ptrType)
-	l := f.SplitSlot(name, ".len", ptrType.Size(), lenType)
-	return p, l
+	h := f.SplitSlot(name, ".hash", ptrType.Size(), hashType)
+	l := f.SplitSlot(name, ".len", ptrType.Size()+hashType.Size(), lenType)
+	return p, h, l
 }
 
 func (f *Func) SplitInterface(name *LocalSlot) (*LocalSlot, *LocalSlot, *LocalSlot, *LocalSlot) {

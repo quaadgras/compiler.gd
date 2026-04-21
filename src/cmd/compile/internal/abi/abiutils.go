@@ -589,8 +589,14 @@ func setup() {
 			types.NewField(nxp, fname("cap"), it),
 		})
 		types.CalcStructSize(synthSlice)
+		// gd small-string optimization: 3-word header
+		// { data ptr / nil, hash / bytes[0:8], tag<<60|len / tag|bytes[8:15] }.
+		// See doc/gd/sso-string.md. data is the sole pointer word;
+		// hash and len are non-pointer (uint).
+		up := types.Types[types.TUINT]
 		synthString = types.NewStruct([]*types.Field{
 			types.NewField(nxp, fname("data"), bp),
+			types.NewField(nxp, fname("hash"), up),
 			types.NewField(nxp, fname("len"), it),
 		})
 		types.CalcStructSize(synthString)

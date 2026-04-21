@@ -27,7 +27,7 @@ type traceStringTable struct {
 func (t *traceStringTable) put(gen uintptr, s string) uint64 {
 	// Put the string in the table.
 	ss := stringStructOf(&s)
-	id, added := t.tab.put(ss.str, uintptr(ss.len))
+	id, added := t.tab.put(ss.bytes(), uintptr(ss.length()))
 	if added {
 		// Write the string to the buffer.
 		systemstack(func() {

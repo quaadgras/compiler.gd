@@ -974,25 +974,29 @@
 (Load <t> _ _) && t.Size() == 0 => (Empty)
 (Store _ (Empty) mem) => mem
 
-// string ops
-// Decomposing StringMake and lowering of StringPtr and StringLen
+// string ops — gd: 3-word header (ptr, hash, len).
+// Decomposing StringMake and lowering of StringPtr/StringHash/StringLen
 // happens in a later pass, dec, so that these operations are available
-// to other passes for optimizations.
-(StringPtr (StringMake (Addr <t> {s} base) _)) => (Addr <t> {s} base)
-(StringLen (StringMake _ (Const64 <t> [c]))) => (Const64 <t> [c])
+// to other passes for optimizations. Phase A: hash word is zero for
+// all compiler-constructed strings; literal pre-hashing is a later phase.
+(StringPtr  (StringMake (Addr <t> {s} base) _ _)) => (Addr <t> {s} base)
+(StringLen  (StringMake _ _ (Const64 <t> [c]))) => (Const64 <t> [c])
+(StringHash (StringMake _ (Const64 <t> [c]) _)) => (Const64 <t> [c])
 (ConstString {str}) && config.PtrSize == 4 && str == "" =>
-  (StringMake (ConstNil) (Const32 <typ.Int> [0]))
+  (StringMake (ConstNil) (Const32 <typ.Uintptr> [0]) (Const32 <typ.Int> [0]))
 (ConstString {str}) && config.PtrSize == 8 && str == "" =>
-  (StringMake (ConstNil) (Const64 <typ.Int> [0]))
+  (StringMake (ConstNil) (Const64 <typ.Uintptr> [0]) (Const64 <typ.Int> [0]))
 (ConstString {str}) && config.PtrSize == 4 && str != "" =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)}
       (SB))
+    (Const32 <typ.Uintptr> [0])
     (Const32 <typ.Int> [int32(len(str))]))
 (ConstString {str}) && config.PtrSize == 8 && str != "" =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)}
       (SB))
+    (Const64 <typ.Uintptr> [0])
     (Const64 <typ.Int> [int64(len(str))]))
 
 // slice ops
@@ -2246,6 +2250,7 @@
 // Note that this does not handle some obscure cases like
 // m[[2]string{string(b1), string(b2)}]. There is code in ../walk/order.go
 // which handles some of those cases.
+// gd: StringMake is 3-ary (ptr, hash, len). Hash word is zero in phase A.
 (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   &&    (isSameCall(f, "runtime.mapaccess1_faststr")
       || isSameCall(f, "runtime.mapaccess2_faststr")
@@ -2253,10 +2258,24 @@
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
+  && config.PtrSize == 8
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr len) mem)
+=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
+
+(StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
+  &&    (isSameCall(f, "runtime.mapaccess1_faststr")
+      || isSameCall(f, "runtime.mapaccess2_faststr")
+      || isSameCall(f, "runtime.mapdelete_faststr"))
+  && isSameCall(g, "runtime.slicebytetostring")
+  && key.Uses == 1
+  && sbts.Uses == 2
+  && config.PtrSize == 4
+  && resetCopy(m, mem)
+  && clobber(sbts)
+  && clobber(key)
+=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
 
 // Similarly to map lookups, also handle unique.Make for strings, which unique.Make will clone.
 (StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
@@ -2264,10 +2283,22 @@
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
+  && config.PtrSize == 8
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr len) mem)
+=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
+
+(StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
+  && isSameCall(f, "unique.Make[go.shape.string]")
+  && isSameCall(g, "runtime.slicebytetostring")
+  && key.Uses == 1
+  && sbts.Uses == 2
+  && config.PtrSize == 4
+  && resetCopy(m, mem)
+  && clobber(sbts)
+  && clobber(key)
+=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
 
 // Transform some CondSelect into math operations.
 // if b { x++ } => x += b // but not on arm64 because it has CSINC

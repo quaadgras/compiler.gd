@@ -17,14 +17,16 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVQ	AX, SI
 	JMP	cmpbody<>(SB)
 
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$0-40
-	// AX = a_base (want in SI)
-	// BX = a_len  (want in BX)
-	// CX = b_base (want in DI)
-	// DI = b_len  (want in DX)
-	MOVQ	AX, SI
-	MOVQ	DI, DX
-	MOVQ	CX, DI
+// gd small-string optimization: each string is 24 B (ptr, hash, len),
+// passed in 3 int regs. cmpstring(a, b string) int register layout is:
+//   a.ptr=AX, a.hash=BX, a.len=CX, b.ptr=DI, b.hash=SI, b.len=R8.
+// cmpbody wants SI=a_ptr, BX=a_len, DI=b_ptr, DX=b_len.
+// Frame: 24 + 24 + 8 = 56 (args + ret) — used only for stack fallback.
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$0-56
+	MOVQ	AX, SI    // SI = a.ptr
+	MOVQ	CX, BX    // BX = a.len  (CX held a.len under gd 3-reg string)
+	MOVQ	R8, DX    // DX = b.len  (R8 held b.len under gd 3-reg string)
+	// DI already holds b.ptr; hash regs (BX in, SI in) are dead — cmpstring ignores hash.
 	JMP	cmpbody<>(SB)
 
 // input:

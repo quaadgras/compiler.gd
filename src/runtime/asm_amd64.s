@@ -1291,13 +1291,29 @@ noaes:
 	JMP	runtime·memhashFallback<ABIInternal>(SB)
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
+// gd small-string optimization: stringStruct is 24 B (ptr, hash, len).
+// Tag-aware dispatch:
+//   - tag == 0 (heap rep, including empty): ptr = word 0, len = word 2
+//   - tag != 0 (inline rep): ptr = header + 8, len = tag
+// Empty heap strings {nil,0,0} must go through the aes path too so
+// their hash matches non-empty same-rep comparisons (aeshash's 0-len
+// path differs from memhashFallback's 0-len path).
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$0-24
 	// AX = ptr to string struct
 	// BX = seed
 	CMPB	runtime·useAeshash(SB), $0
 	JEQ	noaes
-	MOVQ	8(AX), CX	// length of string
-	MOVQ	(AX), AX	// string data
+	MOVQ	16(AX), CX	// CX = raw word 2 (tag<<60 | len-or-bytes)
+	MOVQ	CX, DX
+	SHRQ	$60, CX		// CX = tag
+	JNE	inline
+	// Heap rep: CX = tag = 0 already; load len and ptr.
+	MOVQ	DX, CX		// CX = len (word 2 low 60, tag == 0)
+	MOVQ	(AX), AX	// AX = data pointer (may be nil iff len == 0)
+	JMP	aeshashbody<>(SB)
+inline:
+	// Inline rep: bytes live at header + 8, tag is the length.
+	ADDQ	$8, AX
 	JMP	aeshashbody<>(SB)
 noaes:
 	JMP	runtime·strhashFallback<ABIInternal>(SB)
@@ -1945,7 +1961,16 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 //
 // This is ABIInternal because Go code injects its PC directly into new
 // goroutine stacks.
-TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
+//
+// gd small-string optimization: frame bumped 152→160 so that
+// frameSize-128(SP) resolves to SP+32 (was SP+24). debugCallCheck
+// returns a 3-word string which spans 8(SP)..31(SP) under gd; storing
+// argSize at SP+24 (the old slot) was being clobbered by the return
+// string's len field, causing the dispatch to read 0 and pick
+// debugCall32 for any frame size — TestDebugCallLarge symptom was an
+// "unexpected return pc 0x5" because args.in[5]=5 wound up at fn's RA
+// slot.
+TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$160-0
 	// Save all registers that may contain pointers so they can be
 	// conservatively scanned.
 	//
@@ -1974,6 +1999,10 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
 	MOVQ	DX, frameSize-128(SP)
 
 	// Perform a safe-point check.
+	// gd small-string optimization: debugCallCheck returns a 3-word
+	// string under stack ABI — ptr at 8(SP), hash at 16(SP), len at
+	// 24(SP). The safe-point error path then republishes that string
+	// at the top of stack as a 3-word header for debugCallUnsafe.
 	MOVQ	retpc-8(FP), AX	// Caller's PC
 	MOVQ	AX, 0(SP)
 	CALL	runtime·debugCallCheck(SB)
@@ -1981,10 +2010,11 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
 	TESTQ	AX, AX
 	JZ	good
 	// The safety check failed. Put the reason string at the top
-	// of the stack.
-	MOVQ	AX, 0(SP)
-	MOVQ	16(SP), AX
-	MOVQ	AX, 8(SP)
+	// of the stack as a 3-word string {ptr, hash=0, len}.
+	MOVQ	AX, 0(SP)        // ptr (already in AX from MOVQ 8(SP), AX)
+	MOVQ	24(SP), AX       // len from gd return slot 24(SP)
+	MOVQ	AX, 16(SP)       // store len at word 2
+	MOVQ	$0, 8(SP)        // hash slot, Phase A = 0
 	// Set R12 to 8 and invoke INT3. The debugger should get the
 	// reason a call can't be injected from the top of the stack
 	// and resume execution.
@@ -2032,9 +2062,11 @@ good:
 	DEBUG_CALL_DISPATCH(debugCall32768<>, 32768)
 	DEBUG_CALL_DISPATCH(debugCall65536<>, 65536)
 	// The frame size is too large. Report the error.
+	// gd small-string optimization: write a 3-word string {ptr, hash=0, len}.
 	MOVQ	$debugCallFrameTooLarge<>(SB), AX
-	MOVQ	AX, 0(SP)
-	MOVQ	$20, 8(SP) // length of debugCallFrameTooLarge string
+	MOVQ	AX, 0(SP)            // ptr
+	MOVQ	$0, 8(SP)            // hash slot, Phase A = 0
+	MOVQ	$20, 16(SP)          // len of debugCallFrameTooLarge string at word 2
 	MOVQ	$8, R12
 	BYTE	$0xcc
 	JMP	restore
@@ -2093,15 +2125,20 @@ DEBUG_CALL_FN(debugCall65536<>, 65536)
 
 // func debugCallPanicked(val interface{})
 // gd fat-interface: `interface{}` is 32 bytes (two words + 16-byte
-// inline payload). The local frame still only needs the 16 bytes of
-// (type, data) that gopanic consumes, but the argument area must
-// match the full iface size.
-TEXT runtime·debugCallPanicked(SB),NOSPLIT,$16-32
-	// Copy the panic value to the top of stack.
+// inline payload). Both the argument area and the bytes published at
+// SP for the debugger must match the full iface size — the
+// receiver-side debugCallPanicOut now copies sizeof(any) = 32 B.
+TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-32
+	// Copy the panic value to the top of stack as a full 32 B iface
+	// (type/data + inline payload).
 	MOVQ	val_type+0(FP), AX
 	MOVQ	AX, 0(SP)
 	MOVQ	val_data+8(FP), AX
 	MOVQ	AX, 8(SP)
+	MOVQ	val_inline_real+16(FP), AX
+	MOVQ	AX, 16(SP)
+	MOVQ	val_inline_imag+24(FP), AX
+	MOVQ	AX, 24(SP)
 	MOVQ	$2, R12
 	BYTE	$0xcc
 	RET

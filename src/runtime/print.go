@@ -20,9 +20,10 @@ type quoted string
 func bytes(s string) (ret []byte) {
 	rp := (*slice)(unsafe.Pointer(&ret))
 	sp := stringStructOf(&s)
-	rp.array = sp.str
-	rp.len = sp.len
-	rp.cap = sp.len
+	n := sp.length()
+	rp.array = sp.bytes()
+	rp.len = n
+	rp.cap = n
 	return
 }
 

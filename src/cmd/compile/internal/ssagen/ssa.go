@@ -1450,6 +1450,256 @@ func (s *state) iMake(t *types.Type, tab, data *ssa.Value) *ssa.Value {
 	return s.curBlock.NewValue4(s.peekPos(), ssa.OpIMake, t, tab, data, zero, zero)
 }
 
+// sMake emits a heap-rep string SSA value with a zero hash slot
+// (phase A default — hash caching lands in a later phase).
+// gd small-string optimization: OpStringMake is 3-ary
+// (ptr, hash, tag<<60|len).
+func (s *state) sMake(t *types.Type, ptr, length *ssa.Value) *ssa.Value {
+	hash := s.constInt(s.f.Config.Types.Uintptr, 0)
+	return s.curBlock.NewValue3(s.peekPos(), ssa.OpStringMake, t, ptr, hash, length)
+}
+
+// stringLen returns the logical length of a string, decoding the tag
+// nibble in word 2: if tag != 0 the string is inline-rep and tag is
+// the length; otherwise word 2 low 60 bits hold the heap-rep length.
+//
+// On 32-bit targets the tag decode would use 64-bit shifts that split
+// into Int64Make pairs (unsupported on several 32-bit arches), and
+// inline construction is unsupported anyway because the header words
+// are uintptr-sized. Fall back to the raw value — always the real
+// length on heap-rep-only 32-bit code.
+//
+// On 64-bit arches with an OpCondSelect lowering (amd64/arm64/loong64/
+// ppc64) the decode stays within the current block, preserving the
+// loop-header structure findIndVar expects so BCE keeps working. On
+// arches without CondSelect the emitted if/phi splits the header and
+// induction-variable detection doesn't fire, but correctness remains.
+func (s *state) stringLen(str *ssa.Value) *ssa.Value {
+	intT := types.Types[types.TINT]
+	raw := s.newValue1(ssa.OpStringLen, intT, str)
+	if s.config.PtrSize < 8 {
+		return raw
+	}
+	shift := s.constInt64(intT, rtabi.StringTagShift)
+	tag := s.newValue2(ssa.OpRsh64Ux64, intT, raw, shift)
+	mask := s.constInt64(intT, rtabi.StringLenMask)
+	masked := s.newValue2(ssa.OpAnd64, intT, raw, mask)
+	zero := s.constInt64(intT, 0)
+	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+	switch Arch.LinkArch.Family {
+	case sys.AMD64, sys.ARM64, sys.Loong64, sys.PPC64:
+		return s.newValue3(ssa.OpCondSelect, intT, tag, masked, cond)
+	}
+	return s.ternary(cond, tag, masked)
+}
+
+// stringBytes returns a pointer to the first data byte of a string,
+// handling both heap and inline representations. For heap rep (tag
+// nibble in word 2 is zero) it just returns word 0 (the data pointer
+// — nil for empty strings, matching stock unsafe.StringData). For
+// inline rep (tag != 0), word 0 is nil and the bytes live at offset
+// PtrSize inside the header; we spill str into an addrtaken autotmp
+// and return &tmp + PtrSize. The spill is emitted inside a branch
+// taken only on the inline path, so heap-rep code paths (all of
+// Phase B) pay only a shift + test + branch — no memory traffic.
+// The resulting pointer's lifetime is the enclosing stack frame when
+// the inline path is taken — callers that let it escape must force
+// heap rep upstream.
+//
+// When the result type is known (e.g. *uint8), pass a non-nil resultT;
+// otherwise BytePtr is used.
+func (s *state) stringBytes(str *ssa.Value, resultT *types.Type) *ssa.Value {
+	if resultT == nil {
+		resultT = s.f.Config.Types.BytePtr
+	}
+	w0 := s.newValue1(ssa.OpStringPtr, resultT, str)
+	// 32-bit targets have no inline strings (see stringLen), so word 0
+	// is always the real data pointer. Skip the tag check and spill.
+	if s.config.PtrSize < 8 {
+		return w0
+	}
+	// tag := word2 >> StringTagShift. Heap rep ⇒ tag==0; inline ⇒ tag 1..15.
+	intT := types.Types[types.TINT]
+	raw := s.newValue1(ssa.OpStringLen, intT, str)
+	shift := s.constInt64(intT, rtabi.StringTagShift)
+	tag := s.newValue2(ssa.OpRsh64Ux64, intT, raw, shift)
+	zero := s.constInt64(intT, 0)
+	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	bHeap := s.f.NewBlock(ssa.BlockPlain)
+	bEnd := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely // phase B: tag is always 0
+	b.AddEdgeTo(bInline)
+	b.AddEdgeTo(bHeap)
+
+	marker := ssaMarker("stringBytes")
+
+	// Heap (hot) path: no spill, just use word 0.
+	s.startBlock(bHeap)
+	s.vars[marker] = w0
+	s.endBlock().AddEdgeTo(bEnd)
+
+	// Inline (cold) path: spill str to an autotmp and point past word 0.
+	s.startBlock(bInline)
+	tmp := typecheck.TempAt(s.peekPos(), s.curfn, types.Types[types.TSTRING])
+	tmp.SetAddrtaken(true)
+	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+	tmpAddr := s.addr(tmp)
+	s.storeType(types.Types[types.TSTRING], tmpAddr, str, 0, false)
+	inlineBase := s.newValue1I(ssa.OpOffPtr, resultT, s.config.PtrSize, tmpAddr)
+	s.vars[marker] = inlineBase
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bEnd)
+	result := s.variable(marker, resultT)
+	delete(s.vars, marker)
+	return result
+}
+
+// stringIndex returns s[i] as a uint8, without ever spilling str to
+// memory. The heap path performs the usual load from (word0 + i);
+// the inline path extracts the byte directly from word1/word2 via
+// shifts. i must be bounds-checked by the caller.
+//
+// Phase B: tag is always zero so only the heap path executes. The
+// inline path is live code (for Phase C onward) but never taken.
+//
+// 32-bit targets have no inline rep (see stringLen), so emit the
+// stock load-from-(word0+i) without any tag check.
+func (s *state) stringIndex(str, i *ssa.Value) *ssa.Value {
+	u8 := types.Types[types.TUINT8]
+	intT := types.Types[types.TINT]
+	ptrT := s.f.Config.Types.BytePtr
+
+	ptr := s.newValue1(ssa.OpStringPtr, ptrT, str)
+	if s.config.PtrSize < 8 {
+		addr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, i)
+		return s.load(u8, addr)
+	}
+	w2 := s.newValue1(ssa.OpStringLen, intT, str)
+	shift60 := s.constInt64(intT, rtabi.StringTagShift)
+	tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, shift60)
+	zero := s.constInt64(intT, 0)
+	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	bHeap := s.f.NewBlock(ssa.BlockPlain)
+	bEnd := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bInline)
+	b.AddEdgeTo(bHeap)
+
+	marker := ssaMarker("stringIndex")
+
+	// Heap path: byte = *(ptr + i).
+	s.startBlock(bHeap)
+	addr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, i)
+	hbyte := s.load(u8, addr)
+	s.vars[marker] = hbyte
+	s.endBlock().AddEdgeTo(bEnd)
+
+	// Inline path: extract byte from word1 (bytes[0:8]) or word2 low
+	// 56 bits (bytes[8:15]) based on i. No memory traffic.
+	s.startBlock(bInline)
+	w1 := s.newValue1(ssa.OpStringHash, intT, str)
+	three := s.constInt64(intT, 3)
+	ishift := s.newValue2(ssa.OpLsh64x64, intT, i, three) // i*8
+	eight := s.constInt64(intT, 8)
+	iIsLow := s.newValue2(ssa.OpLess64, types.Types[types.TBOOL], i, eight)
+	// Low half: word1 >> (i*8), valid for i<8.
+	lowShifted := s.newValue2(ssa.OpRsh64Ux64, intT, w1, ishift)
+	// High half: word2 >> ((i-8)*8), valid for i>=8.
+	sixtyFour := s.constInt64(intT, 64)
+	highShiftAmt := s.newValue2(ssa.OpSub64, intT, ishift, sixtyFour) // i*8 - 64
+	highShifted := s.newValue2(ssa.OpRsh64Ux64, intT, w2, highShiftAmt)
+	// Select low when i<8, else high.
+	srcWord := s.ternary(iIsLow, lowShifted, highShifted)
+	ibyte := s.newValue1(ssa.OpTrunc64to8, u8, srcWord)
+	s.vars[marker] = ibyte
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bEnd)
+	result := s.variable(marker, u8)
+	delete(s.vars, marker)
+	return result
+}
+
+// stringEqFast returns l == r as a *ssa.Value<bool>. The fast path
+// compares all three words of the headers — same heap pointer OR two
+// inline strings with identical content both match — and the slow
+// path does a standard decoded-length check plus runtime.memequal.
+func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
+	boolT := types.Types[types.TBOOL]
+	intT := types.Types[types.TINT]
+	ptrT := s.f.Config.Types.BytePtr
+	uT := s.f.Config.Types.Uintptr
+
+	lw0 := s.newValue1(ssa.OpStringPtr, ptrT, l)
+	rw0 := s.newValue1(ssa.OpStringPtr, ptrT, r)
+	lw1 := s.newValue1(ssa.OpStringHash, uT, l)
+	rw1 := s.newValue1(ssa.OpStringHash, uT, r)
+	lw2 := s.newValue1(ssa.OpStringLen, intT, l)
+	rw2 := s.newValue1(ssa.OpStringLen, intT, r)
+
+	eq0 := s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0)
+	eq1 := s.newValue2(ssa.OpEq64, boolT, lw1, rw1)
+	eq2 := s.newValue2(ssa.OpEq64, boolT, lw2, rw2)
+	fast := s.newValue2(ssa.OpAndB, boolT, eq0, s.newValue2(ssa.OpAndB, boolT, eq1, eq2))
+
+	bFast := s.f.NewBlock(ssa.BlockPlain)
+	bSlow := s.f.NewBlock(ssa.BlockPlain)
+	bLenMismatch := s.f.NewBlock(ssa.BlockPlain)
+	bLenMatch := s.f.NewBlock(ssa.BlockPlain)
+	bEnd := s.f.NewBlock(ssa.BlockPlain)
+
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(fast)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bFast)
+	b.AddEdgeTo(bSlow)
+
+	marker := ssaMarker("stringEq")
+
+	s.startBlock(bFast)
+	s.vars[marker] = s.constBool(true)
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bSlow)
+	llen := s.stringLen(l)
+	rlen := s.stringLen(r)
+	lenEq := s.newValue2(ssa.OpEq64, boolT, llen, rlen)
+	b2 := s.endBlock()
+	b2.Kind = ssa.BlockIf
+	b2.SetControl(lenEq)
+	b2.AddEdgeTo(bLenMatch)
+	b2.AddEdgeTo(bLenMismatch)
+
+	s.startBlock(bLenMismatch)
+	s.vars[marker] = s.constBool(false)
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bLenMatch)
+	lptr := s.stringBytes(l, ptrT)
+	rptr := s.stringBytes(r, ptrT)
+	sizeU := s.newValue1(ssa.OpCopy, uT, llen)
+	res := s.rtcall(ir.Syms.Memequal, true, []*types.Type{boolT}, lptr, rptr, sizeU)
+	s.vars[marker] = res[0]
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bEnd)
+	result := s.variable(marker, boolT)
+	delete(s.vars, marker)
+	return result
+}
+
 // iMakeInline emits an iface SSA value with a populated inline payload
 // (two float64 halves of the 16B inline slot). data is usually ConstNil
 // for a pure-inline iface; under gd's "shadow" scheme it may also hold
@@ -3242,11 +3492,11 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		slice := s.expr(n.X)
 		ptr := s.newValue1(ssa.OpSlicePtr, s.f.Config.Types.BytePtr, slice)
 		len := s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], slice)
-		return s.newValue2(ssa.OpStringMake, n.Type(), ptr, len)
+		return s.sMake(n.Type(), ptr, len)
 	case ir.OSTR2BYTESTMP:
 		n := n.(*ir.ConvExpr)
 		str := s.expr(n.X)
-		ptr := s.newValue1(ssa.OpStringPtr, s.f.Config.Types.BytePtr, str)
+		ptr := s.stringBytes(str, s.f.Config.Types.BytePtr)
 		if !n.NonNil() {
 			// We need to ensure []byte("") evaluates to []byte{}, and not []byte(nil).
 			//
@@ -3255,7 +3505,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			zerobase := s.newValue1A(ssa.OpAddr, ptr.Type, ir.Syms.Zerobase, s.sb)
 			ptr = s.ternary(cond, ptr, zerobase)
 		}
-		len := s.newValue1(ssa.OpStringLen, types.Types[types.TINT], str)
+		len := s.stringLen(str)
 		return s.newValue3(ssa.OpSliceMake, n.Type(), ptr, len, len)
 	case ir.OCFUNC:
 		n := n.(*ir.UnaryExpr)
@@ -3747,10 +3997,10 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			}
 			a := s.expr(n.X)
 			i := s.expr(n.Index)
-			len := s.newValue1(ssa.OpStringLen, types.Types[types.TINT], a)
+			len := s.stringLen(a)
 			i = s.boundsCheck(i, len, ssa.BoundsIndex, n.Bounded())
 			ptrtyp := s.f.Config.Types.BytePtr
-			ptr := s.newValue1(ssa.OpStringPtr, ptrtyp, a)
+			ptr := s.stringBytes(a, ptrtyp)
 			if ir.IsConst(n.Index, constant.Int) {
 				ptr = s.newValue1I(ssa.OpOffPtr, ptrtyp, ir.Int64Val(n.Index), ptr)
 			} else {
@@ -3800,7 +4050,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			}
 			return s.newValue1(op, types.Types[types.TINT], a)
 		case t.IsString(): // string; not reachable for OCAP
-			return s.newValue1(ssa.OpStringLen, types.Types[types.TINT], a)
+			return s.stringLen(a)
 		case t.IsMap(), t.IsChan():
 			return s.referenceTypeBuiltin(n, a)
 		case t.IsArray():
@@ -3821,7 +4071,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			}
 			return s.newValue1(ssa.OpSlicePtrUnchecked, n.Type(), a)
 		} else {
-			return s.newValue1(ssa.OpStringPtr, n.Type(), a)
+			return s.stringBytes(a, n.Type())
 		}
 
 	case ir.OITAB:
@@ -3893,7 +4143,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		n := n.(*ir.StringHeaderExpr)
 		p := s.expr(n.Ptr)
 		l := s.expr(n.Len)
-		return s.newValue2(ssa.OpStringMake, n.Type(), p, l)
+		return s.sMake(n.Type(), p, l)
 
 	case ir.OSLICE, ir.OSLICEARR, ir.OSLICE3, ir.OSLICE3ARR:
 		n := n.(*ir.SliceExpr)
@@ -3927,7 +4177,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			j = s.expr(n.High)
 		}
 		p, l, _ := s.slice(v, i, j, nil, n.Bounded())
-		return s.newValue2(ssa.OpStringMake, n.Type(), p, l)
+		return s.sMake(n.Type(), p, l)
 
 	case ir.OSLICE2ARRPTR:
 		// if arrlen > slice.len {
@@ -5956,11 +6206,18 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 		}
 		// otherwise, no scalar fields.
 	case t.IsString():
+		// gd small-string optimization: 3-word string header
+		// (ptr at 0, hash at PtrSize, len at 2*PtrSize). storeTypePtrs
+		// handles word 0 (the only pointer slot). Here we store the
+		// scalar parts: hash and len.
+		hash := s.newValue1(ssa.OpStringHash, s.f.Config.Types.Uintptr, right)
+		hashAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, s.config.PtrSize, left)
+		s.store(s.f.Config.Types.Uintptr, hashAddr, hash)
 		if skip&skipLen != 0 {
 			return
 		}
 		len := s.newValue1(ssa.OpStringLen, types.Types[types.TINT], right)
-		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, s.config.PtrSize, left)
+		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, 2*s.config.PtrSize, left)
 		s.store(types.Types[types.TINT], lenAddr, len)
 	case t.IsSlice():
 		if skip&skipLen == 0 {
@@ -6070,8 +6327,8 @@ func (s *state) slice(v, i, j, k *ssa.Value, bounded bool) (p, l, c *ssa.Value) 
 		len = s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], v)
 		cap = s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], v)
 	case t.IsString():
-		ptr = s.newValue1(ssa.OpStringPtr, types.NewPtr(types.Types[types.TUINT8]), v)
-		len = s.newValue1(ssa.OpStringLen, types.Types[types.TINT], v)
+		ptr = s.stringBytes(v, types.NewPtr(types.Types[types.TUINT8]))
+		len = s.stringLen(v)
 		cap = len
 	case t.IsPtr():
 		if !t.Elem().IsArray() {

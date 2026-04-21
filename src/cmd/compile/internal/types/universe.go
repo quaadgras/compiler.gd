@@ -50,8 +50,15 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 	SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
 	SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
 
-	// string is same as slice wo the cap
-	StringSize = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
+	// gd: string header grows from 2 words to 3 words. See
+	// doc/gd/sso-string.md / src/internal/abi/string.go.
+	//   word 0 @ 0            : data ptr (heap) / nil (inline)
+	//   word 1 @ PtrSize      : cached hash (heap) / bytes[0:8] (inline)
+	//   word 2 @ 2*PtrSize    : tag<<60 | len-or-inline-bytes
+	StringPtrOffset = 0
+	StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
+	StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
+	StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
 
 	for et := Kind(0); et < NTYPE; et++ {
 		SimType[et] = et

@@ -73,12 +73,18 @@ func (h *debugCallHandler) debugCallReturn(ctxt *sigctxt) {
 // case 2
 func (h *debugCallHandler) debugCallPanicOut(ctxt *sigctxt) {
 	rsp := ctxt.rsp()
-	memmove(unsafe.Pointer(&h.panic), unsafe.Pointer(uintptr(rsp)), 2*goarch.PtrSize)
+	// gd fat-interface: an `any` value is 32 B (tab/_type, data,
+	// inline_real, inline_imag) — see doc/gd/fat-iface.md. Copy the
+	// whole iface; copying only 16 B leaves the inline payload zero
+	// and silently breaks panics whose dynamic type fits inline.
+	memmove(unsafe.Pointer(&h.panic), unsafe.Pointer(uintptr(rsp)), unsafe.Sizeof(h.panic))
 }
 
 // case 8
 func (h *debugCallHandler) debugCallUnsafe(ctxt *sigctxt) {
 	rsp := ctxt.rsp()
+	// gd small-string optimization: a string is 24 B (ptr, hash, len).
+	// debugCallV2's asm error paths write the 3-word header at rsp.
 	reason := *(*string)(unsafe.Pointer(uintptr(rsp)))
 	h.err = plainError(reason)
 }

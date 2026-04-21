@@ -38,21 +38,29 @@
     imag
     (Store {typ.Float64} dst real mem))
 
-// string ops
-(StringPtr (StringMake ptr _)) => ptr
-(StringLen (StringMake _ len)) => len
+// string ops — gd small-string optimization (3-word header).
+// arg0=ptr (word 0), arg1=hash (word 1), arg2=len (word 2).
+(StringPtr  (StringMake ptr  _  _  )) => ptr
+(StringHash (StringMake _    hash _)) => hash
+(StringLen  (StringMake _    _  len)) => len
 
 (Load <t> ptr mem) && t.IsString() =>
   (StringMake
     (Load <typ.BytePtr> ptr mem)
+    (Load <typ.Uintptr>
+      (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
+      mem)
     (Load <typ.Int>
-      (OffPtr <typ.IntPtr> [config.PtrSize] ptr)
+      (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
       mem))
-(Store dst (StringMake ptr len) mem) =>
+(Store dst (StringMake ptr hash len) mem) =>
   (Store {typ.Int}
-    (OffPtr <typ.IntPtr> [config.PtrSize] dst)
+    (OffPtr <typ.IntPtr> [2*config.PtrSize] dst)
     len
-    (Store {typ.BytePtr} dst ptr mem))
+    (Store {typ.Uintptr}
+      (OffPtr <typ.UintptrPtr> [config.PtrSize] dst)
+      hash
+      (Store {typ.BytePtr} dst ptr mem)))
 
 // slice ops
 (SlicePtr (SliceMake ptr _ _ )) => ptr
@@ -147,9 +155,12 @@
 (ArraySelect [i] x:(Load <t> ptr mem)) =>
   @x.Block (Load <v.Type> (OffPtr <v.Type.PtrTo()> [t.Elem().Size()*i] ptr) mem)
 
-(StringPtr x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.BytePtr> ptr mem)
-(StringLen x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Int>
-      (OffPtr <typ.IntPtr> [config.PtrSize] ptr)
+(StringPtr  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.BytePtr> ptr mem)
+(StringHash x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Uintptr>
+      (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
+      mem)
+(StringLen  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Int>
+      (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
       mem)
 
 // NOTE removed must-not-be-SSA condition.

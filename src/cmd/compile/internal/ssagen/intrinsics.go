@@ -139,7 +139,7 @@ func initIntrinsics(cfg *intrinsicBuildConfig) {
 				// Compiler frontend optimizations emit OBYTES2STRTMP nodes
 				// for the backend instead of slicebytetostringtmp calls
 				// when not instrumenting.
-				return s.newValue2(ssa.OpStringMake, n.Type(), args[0], args[1])
+				return s.sMake(n.Type(), args[0], args[1])
 			},
 			all...)
 	}
@@ -201,6 +201,18 @@ func initIntrinsics(cfg *intrinsicBuildConfig) {
 			return s.newValue4(ssa.OpMemEq, s.f.Config.Types.Bool, args[0], args[1], args[2], s.mem())
 		},
 		sys.ARM64)
+
+	// gd small-string optimization: streqfast is the fast path for
+	// string equality under the 3-word header. When all three words
+	// match (same heap pointer OR two inline strings with identical
+	// content), we return true without decoding lengths or calling
+	// memequal. Otherwise we fall back to decoded-len + memequal —
+	// the same cost as before Phase B.
+	addF("runtime", "streqfast",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			return s.stringEqFast(args[0], args[1])
+		},
+		sys.AMD64, sys.ARM64)
 
 	if cfg.goppc64 >= 10 {
 		// Use only on Power10 as the new byte reverse instructions that Power10 provide

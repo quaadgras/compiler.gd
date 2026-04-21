@@ -64,14 +64,17 @@ func decomposeBuiltin(f *Func) {
 				toDelete = append(toDelete, namedVal{i, j})
 			}
 		case t.IsString():
-			ptrName, lenName := f.SplitString(name)
+			// gd: 3-slot string split (ptr, hash, len).
+			ptrName, hashName, lenName := f.SplitString(name)
 			newNames = maybeAppend2(f, newNames, ptrName, lenName)
+			newNames = maybeAppend(f, newNames, hashName)
 			for j, v := range f.NamedValues[*name] {
 				if v.Op != OpStringMake {
 					continue
 				}
 				f.NamedValues[*ptrName] = append(f.NamedValues[*ptrName], v.Args[0])
-				f.NamedValues[*lenName] = append(f.NamedValues[*lenName], v.Args[1])
+				f.NamedValues[*hashName] = append(f.NamedValues[*hashName], v.Args[1])
+				f.NamedValues[*lenName] = append(f.NamedValues[*lenName], v.Args[2])
 				toDelete = append(toDelete, namedVal{i, j})
 			}
 		case t.IsSlice():
@@ -144,18 +147,23 @@ func decomposeBuiltinPhi(v *Value) {
 }
 
 func decomposeStringPhi(v *Value) {
+	// gd small-string optimization: 3-word string (ptr, hash, len).
 	types := &v.Block.Func.Config.Types
 	ptrType := types.BytePtr
+	hashType := types.Uintptr
 	lenType := types.Int
 
 	ptr := v.Block.NewValue0(v.Pos, OpPhi, ptrType)
+	hash := v.Block.NewValue0(v.Pos, OpPhi, hashType)
 	len := v.Block.NewValue0(v.Pos, OpPhi, lenType)
 	for _, a := range v.Args {
 		ptr.AddArg(a.Block.NewValue1(v.Pos, OpStringPtr, ptrType, a))
+		hash.AddArg(a.Block.NewValue1(v.Pos, OpStringHash, hashType, a))
 		len.AddArg(a.Block.NewValue1(v.Pos, OpStringLen, lenType, a))
 	}
 	v.reset(OpStringMake)
 	v.AddArg(ptr)
+	v.AddArg(hash)
 	v.AddArg(len)
 }
 

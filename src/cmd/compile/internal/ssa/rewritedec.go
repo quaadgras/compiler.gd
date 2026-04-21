@@ -36,6 +36,8 @@ func rewriteValuedec(v *Value) bool {
 		return rewriteValuedec_OpSlicePtrUnchecked(v)
 	case OpStore:
 		return rewriteValuedec_OpStore(v)
+	case OpStringHash:
+		return rewriteValuedec_OpStringHash(v)
 	case OpStringLen:
 		return rewriteValuedec_OpStringLen(v)
 	case OpStringPtr:
@@ -480,7 +482,7 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 	}
 	// match: (Load <t> ptr mem)
 	// cond: t.IsString()
-	// result: (StringMake (Load <typ.BytePtr> ptr mem) (Load <typ.Int> (OffPtr <typ.IntPtr> [config.PtrSize] ptr) mem))
+	// result: (StringMake (Load <typ.BytePtr> ptr mem) (Load <typ.Uintptr> (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr) mem) (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem))
 	for {
 		t := v.Type
 		ptr := v_0
@@ -491,12 +493,17 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 		v.reset(OpStringMake)
 		v0 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
 		v0.AddArg2(ptr, mem)
-		v1 := b.NewValue0(v.Pos, OpLoad, typ.Int)
-		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.Uintptr)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.UintptrPtr)
 		v2.AuxInt = int64ToAuxInt(config.PtrSize)
 		v2.AddArg(ptr)
 		v1.AddArg2(v2, mem)
-		v.AddArg2(v0, v1)
+		v3 := b.NewValue0(v.Pos, OpLoad, typ.Int)
+		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
+		v4.AuxInt = int64ToAuxInt(2 * config.PtrSize)
+		v4.AddArg(ptr)
+		v3.AddArg2(v4, mem)
+		v.AddArg3(v0, v1, v3)
 		return true
 	}
 	// match: (Load <t> ptr mem)
@@ -758,24 +765,31 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		v.AddArg3(v0, imag, v1)
 		return true
 	}
-	// match: (Store dst (StringMake ptr len) mem)
-	// result: (Store {typ.Int} (OffPtr <typ.IntPtr> [config.PtrSize] dst) len (Store {typ.BytePtr} dst ptr mem))
+	// match: (Store dst (StringMake ptr hash len) mem)
+	// result: (Store {typ.Int} (OffPtr <typ.IntPtr> [2*config.PtrSize] dst) len (Store {typ.Uintptr} (OffPtr <typ.UintptrPtr> [config.PtrSize] dst) hash (Store {typ.BytePtr} dst ptr mem)))
 	for {
 		dst := v_0
 		if v_1.Op != OpStringMake {
 			break
 		}
-		len := v_1.Args[1]
+		len := v_1.Args[2]
 		ptr := v_1.Args[0]
+		hash := v_1.Args[1]
 		mem := v_2
 		v.reset(OpStore)
 		v.Aux = typeToAux(typ.Int)
 		v0 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
-		v0.AuxInt = int64ToAuxInt(config.PtrSize)
+		v0.AuxInt = int64ToAuxInt(2 * config.PtrSize)
 		v0.AddArg(dst)
 		v1 := b.NewValue0(v.Pos, OpStore, types.TypeMem)
-		v1.Aux = typeToAux(typ.BytePtr)
-		v1.AddArg3(dst, ptr, mem)
+		v1.Aux = typeToAux(typ.Uintptr)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.UintptrPtr)
+		v2.AuxInt = int64ToAuxInt(config.PtrSize)
+		v2.AddArg(dst)
+		v3 := b.NewValue0(v.Pos, OpStore, types.TypeMem)
+		v3.Aux = typeToAux(typ.BytePtr)
+		v3.AddArg3(dst, ptr, mem)
+		v1.AddArg3(v2, hash, v3)
 		v.AddArg3(v0, len, v1)
 		return true
 	}
@@ -868,24 +882,64 @@ func rewriteValuedec_OpStore(v *Value) bool {
 	}
 	return false
 }
+func rewriteValuedec_OpStringHash(v *Value) bool {
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (StringHash (StringMake _ hash _))
+	// result: hash
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		hash := v_0.Args[1]
+		v.copyOf(hash)
+		return true
+	}
+	// match: (StringHash x:(Load <t> ptr mem))
+	// cond: t.IsString()
+	// result: @x.Block (Load <typ.Uintptr> (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr) mem)
+	for {
+		x := v_0
+		if x.Op != OpLoad {
+			break
+		}
+		t := x.Type
+		mem := x.Args[1]
+		ptr := x.Args[0]
+		if !(t.IsString()) {
+			break
+		}
+		b = x.Block
+		v0 := b.NewValue0(v.Pos, OpLoad, typ.Uintptr)
+		v.copyOf(v0)
+		v1 := b.NewValue0(v.Pos, OpOffPtr, typ.UintptrPtr)
+		v1.AuxInt = int64ToAuxInt(config.PtrSize)
+		v1.AddArg(ptr)
+		v0.AddArg2(v1, mem)
+		return true
+	}
+	return false
+}
 func rewriteValuedec_OpStringLen(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
 	config := b.Func.Config
 	typ := &b.Func.Config.Types
-	// match: (StringLen (StringMake _ len))
+	// match: (StringLen (StringMake _ _ len))
 	// result: len
 	for {
 		if v_0.Op != OpStringMake {
 			break
 		}
-		len := v_0.Args[1]
+		len := v_0.Args[2]
 		v.copyOf(len)
 		return true
 	}
 	// match: (StringLen x:(Load <t> ptr mem))
 	// cond: t.IsString()
-	// result: @x.Block (Load <typ.Int> (OffPtr <typ.IntPtr> [config.PtrSize] ptr) mem)
+	// result: @x.Block (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem)
 	for {
 		x := v_0
 		if x.Op != OpLoad {
@@ -901,7 +955,7 @@ func rewriteValuedec_OpStringLen(v *Value) bool {
 		v0 := b.NewValue0(v.Pos, OpLoad, typ.Int)
 		v.copyOf(v0)
 		v1 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
-		v1.AuxInt = int64ToAuxInt(config.PtrSize)
+		v1.AuxInt = int64ToAuxInt(2 * config.PtrSize)
 		v1.AddArg(ptr)
 		v0.AddArg2(v1, mem)
 		return true
@@ -912,7 +966,7 @@ func rewriteValuedec_OpStringPtr(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
 	typ := &b.Func.Config.Types
-	// match: (StringPtr (StringMake ptr _))
+	// match: (StringPtr (StringMake ptr _ _ ))
 	// result: ptr
 	for {
 		if v_0.Op != OpStringMake {

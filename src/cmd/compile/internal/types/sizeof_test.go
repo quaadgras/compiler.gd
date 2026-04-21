@@ -20,7 +20,10 @@ func TestSizeof(t *testing.T) {
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
-		{Sym{}, 56, 80},
+		// gd small-string optimization: each `string` field grows by
+		// 8 B on 64-bit / 4 B on 32-bit. Sym has 2 string fields
+		// (Linkname, Name) → +16 / +8.
+		{Sym{}, 64, 96},
 		{Type{}, 96, 128},
 		{Map{}, 12, 24},
 		{Forward{}, 20, 32},

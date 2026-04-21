@@ -55,19 +55,24 @@ func TestEqStructCost(t *testing.T) {
 				types.Types[types.TINT64],
 			},
 		},
-		{"struct with 1 int field and 1 string", 3, 3,
+		// gd small-string optimization: each `string` is now 3 words
+		// (was 2). Under CanMergeLoads (the merge-cost column),
+		// EqStructCost gains +1 per string field; the per-word
+		// !MergeLoads cost is unchanged because string equality there
+		// is still counted as len + memcmp (2 ops).
+		{"struct with 1 int field and 1 string", 4, 3,
 			[]*types.Type{
 				types.Types[types.TINT64],
 				types.Types[types.TSTRING],
 			},
 		},
-		{"struct with 2 strings", 4, 4, repeat(2, types.Types[types.TSTRING])},
+		{"struct with 2 strings", 6, 4, repeat(2, types.Types[types.TSTRING])},
 		{"struct with 1 large byte array field", 26, 101,
 			[]*types.Type{
 				types.NewArray(types.Types[types.TUINT16], 101),
 			},
 		},
-		{"struct with string array field", 4, 4,
+		{"struct with string array field", 6, 4,
 			[]*types.Type{
 				types.NewArray(types.Types[types.TSTRING], 2),
 			},

@@ -1,25 +1,38 @@
 #!/bin/bash
-# Build the gd fork's toolchain using host Go + host GOROOT.
+# Build the gd fork's toolchain using host Go via bootstrap workspace.
 #
-# Full mode runs src/make.bash with -stop=go_bootstrap. Two phases from dist:
-#   1. bootstrapBuildTools: host Go compiles fork cmd/{asm,cgo,compile,link}
-#      against host GOROOT via a bootstrap workspace with rewritten imports
-#      (bootstrap/cmd/..., bootstrap/internal/...). Produces toolchain1.
-#   2. go_bootstrap: toolchain1 compiles fork runtime + cmd/go against FORK
-#      stdlib. Produces pkg/tool/linux_amd64/go_bootstrap, which dist then
-#      copies to bin/go (our -stop=go_bootstrap tweak).
-# We stop here to avoid toolchain2/3 and the final `install std cmd` phase,
-# which exercise toolchain1 on more of fork stdlib and currently miscompile
-# (e.g. crypto/internal/fips140/alias: "doTyp returned nil for info={11 false}").
+# What this produces
+# ------------------
+# Just the fork toolchain binaries: cmd/{compile,link,asm,cgo}, installed to
+# $TOOLDIR (pkg/tool/linux_amd64). These binaries are HOST-RUNTIME-LINKED:
+# they were compiled by host Go against a bootstrap-rewritten copy of the
+# fork source that uses host stdlib. They run on host runtime — not fork
+# runtime — so any ABI bugs in fork stdlib cannot crash the tools.
 #
-# Partial mode (./rebuild-tools.sh compile ...) is an escape hatch for fast
-# iteration: host Go + GOROOT=$GOFORK builds the named tool(s) only. Uses
-# fork GOROOT so internal/* changes must stay source-compatible with host Go.
+# The tools emit code for FORK stdlib and FORK runtime. To actually test
+# fork changes, use:
 #
-# Usage:
-#   ./rebuild-tools.sh              # full: make.bash -stop=go_bootstrap
-#   ./rebuild-tools.sh compile      # partial: rebuild just cmd/compile
-#   ./rebuild-tools.sh compile link # partial: rebuild a subset
+#   cd /home/quentin/git/go && GOROOT=$PWD GOTOOLCHAIN=local /usr/lib/go/bin/go test -count=1 ./some/package
+#
+# System go (host-runtime-linked) invokes the fork tools to compile test
+# binaries against fork stdlib; the test binaries run on fork runtime.
+# Crashes in test binaries reflect real fork bugs. We never run the
+# rebuilt fork tools *against their own fork runtime* — that would
+# double-stack "compiler bug" on "runtime bug" and make debugging awful.
+#
+# What this does NOT produce
+# --------------------------
+# No go_bootstrap / bin/go. make.bash's phase 2 (toolchain1 building
+# go_bootstrap against fork stdlib) intentionally skipped via
+# -stop=toolchain1. Debugging a fork-compiled cmd/go binary is exactly
+# the trap this script exists to avoid.
+#
+# Host Go tools (preprofile/vet/cover/fix) are seeded into $TOOLDIR from
+# the host toolchain so cmd/go tooling drivers find them.
+#
+# Usage
+# -----
+#   ./rebuild-tools.sh          # build toolchain1 (compile/link/asm/cgo)
 
 set -euo pipefail
 
@@ -27,8 +40,6 @@ GOFORK=/home/quentin/git/go
 SYSGO=/usr/lib/go
 SYSGOBIN=$SYSGO/bin/go
 TOOLDIR=$GOFORK/pkg/tool/linux_amd64
-CACHE=/tmp/cache-rebuild-tools
-ZBOOTSTRAP=$GOFORK/src/internal/buildcfg/zbootstrap.go
 
 die() {
     echo "rebuild-tools: FATAL: $*" >&2
@@ -41,128 +52,76 @@ trap 'die "aborted on line $LINENO (command: ${BASH_COMMAND})"' ERR
 [ -d "$GOFORK/src/cmd" ] || die "fork source tree missing at $GOFORK/src/cmd"
 
 sys_ver=go1.26.1
-our_ver=$(head -1 $GOFORK/VERSION)
 
-# Previously we force-aligned VERSION/zbootstrap.go to the host Go version
-# ("to keep object headers agreeing at link time"). Host Go only compiles
-# the fork toolchain binaries (cmd/compile etc.) during bootstrapBuildTools;
-# it never produces stdlib .a files, so there is no cross-linker mismatch
-# to worry about. Keeping VERSION distinct ("gd1.26.1") lets -V=full carry
-# a gd-prefix marker that cmd/internal/objabi/flag.go uses to emit
-# buildID=<contentID>, which is how cmd/go/internal/work/buildid.go keys
-# the build cache so rebuilds invalidate stale artifacts.
+echo "Building fork toolchain1 via bootstrap workspace (host Go: $sys_ver)"
+echo "  GOROOT_BOOTSTRAP=$SYSGO"
+echo
 
-# ---- full mode: make.bash -stop=go_bootstrap ----
-if [ $# -eq 0 ]; then
-    echo "Full toolchain1 + go_bootstrap build via make.bash (host Go: $sys_ver)"
-    echo "  GOROOT_BOOTSTRAP=$SYSGO"
-    echo
+# make.bash -stop=toolchain1:
+#   bootstrapBuildTools only — host Go compiles fork cmd/{compile,link,asm,
+#   cgo} against a bootstrap workspace with rewritten imports. The bootstrap
+#   workspace's stdlib-style imports resolve to HOST Go's stdlib, so the
+#   produced tools don't link fork runtime. Exits before the go_bootstrap
+#   (phase 2) + toolchain2/3 + "install std cmd" stages that exercise fork
+#   stdlib at build time.
+(
+    cd $GOFORK/src
+    GOROOT_BOOTSTRAP=$SYSGO \
+    GOTOOLCHAIN=local \
+    ./make.bash -stop=toolchain1
+)
 
-    # make.bash -a is implicit in dist bootstrap; it cleans pkg/obj and
-    # rebuilds the bootstrap workspace from scratch. We pass -stop=go_bootstrap
-    # through to cmd/dist so it exits after toolchain1 + cmd/go are built.
-    (
-        cd $GOFORK/src
-        GOROOT_BOOTSTRAP=$SYSGO \
-        GOTOOLCHAIN=local \
-        ./make.bash -stop=go_bootstrap
-    )
+for t in compile link asm cgo; do
+    [ -x "$TOOLDIR/$t" ] || die "expected $TOOLDIR/$t after make.bash, not found"
+done
 
-    # Verify toolchain1 tools + go_bootstrap (copied to bin/go) are present.
-    # bootstrapBuildTools only builds these four tools; preprofile/vet/cover/fix
-    # are seeded from host below so tooling drivers still find them.
-    for t in compile link asm cgo; do
-        [ -x "$TOOLDIR/$t" ] || die "expected $TOOLDIR/$t after make.bash, not found"
-    done
-    [ -x "$GOFORK/bin/go" ] || die "expected $GOFORK/bin/go after make.bash, not found"
-    for seed in preprofile vet cover fix; do
-        src=$SYSGO/pkg/tool/linux_amd64/$seed
-        [ -x "$src" ] && cp "$src" "$TOOLDIR/$seed"
-    done
+# Seed driver tools that we don't customize (preprofile/cover/fix) from
+# the host toolchain so cmd/go can find them. vet is rebuilt from FORK
+# source below because gd's 24-byte string and 32-byte fat-iface change
+# go/types size data that asmdecl uses to validate runtime assembly.
+for seed in preprofile cover fix; do
+    src=$SYSGO/pkg/tool/linux_amd64/$seed
+    [ -x "$src" ] && cp "$src" "$TOOLDIR/$seed"
+done
 
-    # Wipe the user's go-build cache: freshly-installed tools invalidate any
-    # previously-cached .a files.
-    $GOFORK/bin/go clean -cache 2>/dev/null || true
-
-    echo
-    echo "Versions:"
-    for t in compile link asm; do
-        timeout 3 $TOOLDIR/$t -V=full 2>&1 | sed 's/^/  /' | head -1
-    done
-    timeout 3 $GOFORK/bin/go version 2>&1 | sed 's/^/  /'
-
-    echo
-    echo "Test with:"
-    echo "  cd $GOFORK && ./bin/go test -short sort"
-    exit 0
-fi
-
-# ---- partial mode: in-place host-Go build of requested tools only ----
-TOOLS=("$@")
-
-# Re-seed tool dir with stable host tools before each fork tool build, so
-# `go build` runs on a known-good toolchain (not a half-built fork tool
-# from the previous iteration).
-#
-# `local` is critical: seed_tools is called from inside a `for t in ...`
-# loop that drives the actual builds. Without `local`, the inner loop
-# variable leaks out and every build runs against the last-seeded name.
-seed_tools() {
-    local seed
-    for seed in compile link asm cgo preprofile vet cover fix; do
-        local src=$SYSGO/pkg/tool/linux_amd64/$seed
-        [ -x "$src" ] && cp "$src" "$TOOLDIR/$seed"
-    done
+# Rebuild vet against fork source so its asmdecl pass sees 24 B strings
+# and 32 B fat-iface. Built by host Go (so vet itself runs on host
+# runtime), but the SOURCE it uses for type sizes is fork's go/types.
+# This makes `go vet` flag any runtime assembly that still hardcodes
+# stock 16 B / 16 B layouts.
+echo
+echo "Rebuilding vet from host source with gd-aware overlay..."
+# Build vet from HOST Go's source tree (so vet binary uses host stdlib —
+# host runtime, host 16 B strings) but overlay just the three files where
+# we changed type-size data: asmdecl (knows about 24 B string + 32 B
+# fat-iface components) and go/types size implementations (returns those
+# sizes when asmdecl asks). Host's vet binary therefore runs cleanly on
+# host runtime AND its asmdecl pass flags any runtime assembly that still
+# hardcodes stock layouts.
+OVERLAY=/tmp/gd-vet-overlay.json
+cat > "$OVERLAY" <<EOF
+{
+  "Replace": {
+    "$SYSGO/src/cmd/vendor/golang.org/x/tools/go/analysis/passes/asmdecl/asmdecl.go": "$GOFORK/src/cmd/vendor/golang.org/x/tools/go/analysis/passes/asmdecl/asmdecl.go",
+    "$SYSGO/src/go/types/sizes.go":   "$GOFORK/src/go/types/sizes.go",
+    "$SYSGO/src/go/types/gcsizes.go": "$GOFORK/src/go/types/gcsizes.go"
+  }
 }
+EOF
+( cd "$SYSGO/src" && GOTOOLCHAIN=local $SYSGOBIN build -overlay="$OVERLAY" -o "$TOOLDIR/vet" ./cmd/vet )
+[ -x "$TOOLDIR/vet" ] || die "vet rebuild failed"
 
-mkdir -p $TOOLDIR $GOFORK/bin
-
-# Wipe caches: this script's scratch cache fully, and the user's shared cache
-# since package .a files are keyed by content hash and can cross-contaminate
-# between fork/host builds.
-rm -rf $CACHE && mkdir -p $CACHE
-if [ -x "$GOFORK/bin/go" ]; then
-    $GOFORK/bin/go clean -cache 2>/dev/null || true
-fi
-
-# Stale .new files from a prior aborted run mask whether THIS run succeeded.
-rm -f $TOOLDIR/*.new
-
-echo "Partial rebuild with host Go ($sys_ver):"
-echo "  GOROOT=$GOFORK"
-echo "  CACHE=$CACHE"
-echo
-
-for t in "${TOOLS[@]}"; do
-    [ -d "$GOFORK/src/cmd/$t" ] || die "no such tool: cmd/$t"
-    echo "  -> cmd/$t"
-    seed_tools
-    GOCACHE=$CACHE GOROOT=$GOFORK GOTOOLCHAIN=local $SYSGOBIN build \
-        -o $TOOLDIR/$t.new ./src/cmd/$t
-    [ -x "$TOOLDIR/$t.new" ] || die "cmd/$t build produced no binary"
-done
-
-# Atomically install: re-seed with stable host tools, then drop freshly-built
-# on top. Any tool we DIDN'T rebuild ends up as the stable host version.
-seed_tools
-for t in "${TOOLS[@]}"; do
-    mv $TOOLDIR/$t.new $TOOLDIR/$t
-    [ -x "$TOOLDIR/$t" ] || die "install mv succeeded but $TOOLDIR/$t not executable"
-done
-
-stray=$(ls $TOOLDIR/*.new 2>/dev/null || true)
-[ -z "$stray" ] || die "leftover .new files after install: $stray"
-
-[ -x "$GOFORK/bin/go" ] && $GOFORK/bin/go clean -cache 2>/dev/null || true
-
-echo
-echo "Versions:"
-for t in compile link asm; do
-    [ -x "$TOOLDIR/$t" ] && timeout 3 $TOOLDIR/$t -V=full 2>&1 | sed 's/^/  /' | head -1
-done
+# Wipe any cached fork-compiled .a files: freshly-installed compile
+# invalidates whatever the previous iteration produced.
+$SYSGOBIN clean -cache 2>/dev/null || true
 
 echo
 echo "Installed:"
-for t in "${TOOLS[@]}"; do
-    echo "  $TOOLDIR/$t ($(stat -c '%y' $TOOLDIR/$t | cut -d. -f1))"
+for t in compile link asm cgo vet; do
+    echo "  $TOOLDIR/$t"
 done
+echo "  $GOFORK/bin/go (shim → $SYSGOBIN with GOROOT=fork)"
+
+echo
+echo "Test via host go:"
+echo "  cd $GOFORK && GOROOT=\$PWD GOTOOLCHAIN=local $SYSGOBIN test -count=1 -short ./sort"

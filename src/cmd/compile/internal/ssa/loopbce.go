@@ -411,6 +411,16 @@ func findKNN(v *Value) (*Value, int64) {
 	}
 	switch x.Op {
 	case OpSliceLen, OpStringLen, OpSliceCap:
+	case OpPhi, OpCondSelect:
+		// Recognise the gd small-string tag-decode pattern as a
+		// "non-negative length of string" value for induction-var /
+		// bounds-check purposes. Crucially we leave x as the phi
+		// itself so the SSA value used at the bounds-check site
+		// (which reads stringLen through the same helper and CSEs to
+		// the same phi) matches the induction variable's limit.
+		if unwrapStringDecodedLen(x) == nil {
+			return nil, 0
+		}
 	default:
 		return nil, 0
 	}
@@ -463,4 +473,69 @@ func minSignedValue(t *types.Type) int64 {
 
 func maxSignedValue(t *types.Type) int64 {
 	return 1<<((t.Size()*8)-1) - 1
+}
+
+// effectiveLen peels through the gd small-string tag-decoded len
+// pattern when present, returning the OpStringLen value that actually
+// references the string. For plain OpSliceLen / OpStringLen / OpSliceCap
+// values it returns v unchanged. Returns nil if v is none of the above.
+func effectiveLen(v *Value) *Value {
+	switch v.Op {
+	case OpSliceLen, OpStringLen, OpSliceCap:
+		return v
+	case OpPhi, OpCondSelect:
+		return unwrapStringDecodedLen(v)
+	}
+	return nil
+}
+
+// unwrapStringDecodedLen reports whether v is the tag-aware string-length
+// pattern that ssagen's stringLen helper emits under the gd small-string
+// optimization, and if so returns the underlying OpStringLen value. The
+// pattern is a two-arg phi (or, after branchelim, a CondSelect) whose
+// arms are (Rsh64Ux64 sl 60) and (And64 sl (1<<60)-1) for the same
+// sl = OpStringLen(str). Returning the OpStringLen value lets prove /
+// loopbce treat the decoded length as a plain "length of string" op
+// for BCE and induction-variable analysis.
+func unwrapStringDecodedLen(v *Value) *Value {
+	var a0, a1 *Value
+	switch {
+	case v.Op == OpPhi && len(v.Args) == 2:
+		a0, a1 = v.Args[0], v.Args[1]
+	case v.Op == OpCondSelect:
+		a0, a1 = v.Args[0], v.Args[1]
+	default:
+		return nil
+	}
+	var shift, mask *Value
+	switch {
+	case a0.Op == OpRsh64Ux64 && a1.Op == OpAnd64:
+		shift, mask = a0, a1
+	case a0.Op == OpAnd64 && a1.Op == OpRsh64Ux64:
+		shift, mask = a1, a0
+	default:
+		return nil
+	}
+	if shift.Args[1].Op != OpConst64 || shift.Args[1].AuxInt != 60 {
+		return nil
+	}
+	// And64 is commutative, so the OpStringLen operand can land in
+	// either Args[0] or Args[1] depending on canonicalization.
+	var maskVal, maskConst *Value
+	switch {
+	case mask.Args[0].Op == OpConst64:
+		maskConst, maskVal = mask.Args[0], mask.Args[1]
+	case mask.Args[1].Op == OpConst64:
+		maskConst, maskVal = mask.Args[1], mask.Args[0]
+	default:
+		return nil
+	}
+	if uint64(maskConst.AuxInt) != 1<<60-1 {
+		return nil
+	}
+	sl := shift.Args[0]
+	if sl.Op != OpStringLen || sl != maskVal {
+		return nil
+	}
+	return sl
 }

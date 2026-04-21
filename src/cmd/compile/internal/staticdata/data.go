@@ -336,10 +336,14 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		}
 
 	case constant.String:
+		// gd small-string optimization: string is a 3-word header
+		// (ptr, hash, len). Phase A writes hash = 0; literal pre-hashing
+		// will land in a later phase. See doc/gd/sso-string.md.
 		i := constant.StringVal(u)
 		symdata := StringSym(n.Pos(), i)
-		s.WriteAddr(base.Ctxt, noff, types.PtrSize, symdata, 0)
-		s.WriteInt(base.Ctxt, noff+int64(types.PtrSize), types.PtrSize, int64(len(i)))
+		s.WriteAddr(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
+		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, 0)
+		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, int64(len(i)))
 
 	default:
 		base.Fatalf("InitConst unhandled OLITERAL %v", c)
