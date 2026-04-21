@@ -669,7 +669,7 @@ func (t *rtype) Method(i int) (m Method) {
 	m.Type = mt
 	tfn := t.textOff(p.Tfn)
 	fn := unsafe.Pointer(&tfn)
-	m.Func = Value{&mt.(*rtype).t, fn, fl}
+	m.Func = Value{typ_: &mt.(*rtype).t, ptr: fn, flag: fl}
 
 	m.Index = i
 	return m
@@ -2914,12 +2914,18 @@ func addTypeBits(bv *bitVector, offset uintptr, t *abi.Type) {
 		bv.append(1)
 
 	case Interface:
-		// 2 pointers
+		// gd fat-interface: { tab/_type, data, complex128 inline }. The
+		// tab/_type word is a pointer but never GC-scanned (itab lives
+		// in persistentalloc, *_type in rodata / the reflect map). Only
+		// the data word needs a pointer bit; the 16-byte inline payload
+		// is pointer-free by the TFlagInlineIface eligibility rule.
 		for bv.n < uint32(offset/goarch.PtrSize) {
 			bv.append(0)
 		}
+		bv.append(0)
 		bv.append(1)
-		bv.append(1)
+		bv.append(0)
+		bv.append(0)
 
 	case Array:
 		// repeat inner type

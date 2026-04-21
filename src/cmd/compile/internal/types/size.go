@@ -324,10 +324,24 @@ func CalcSize(t *Type) {
 		t.intRegs = 1
 		t.ptrBytes = int64(PtrSize)
 
-	case TINTER: // implemented as 2 pointers
-		w = 2 * int64(PtrSize)
-		t.align = uint8(PtrSize)
+	case TINTER:
+		// gd fat-interface layout: { tab/_type, data, inline complex128 }.
+		// Size is 2*PtrSize + 16: 32 on 64-bit, 24 on 32-bit. The complex128
+		// inline field forces 8-byte alignment even on 32-bit.
+		// ptrBytes stays at 2*PtrSize: only the tab and data words live
+		// in the pointer-bitmap prefix (typebits.set marks data only;
+		// the inline payload is pointer-free by construction under the
+		// TFlagInlineIface eligibility rule). The ABI carries the
+		// complex128 in two float registers, so TINTER needs 2 int +
+		// 2 float regs — matches synthIface.
+		w = 2*int64(PtrSize) + 16
+		if PtrSize >= 8 {
+			t.align = uint8(PtrSize)
+		} else {
+			t.align = 8
+		}
 		t.intRegs = 2
+		t.floatRegs = 2
 		expandiface(t)
 		if len(t.allMethods.Slice()) == 0 {
 			t.setAlg(ANILINTER)

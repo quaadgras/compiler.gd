@@ -37,7 +37,7 @@ func Field(v Value, i int) Value {
 	// In the latter case, we must have field.offset = 0,
 	// so v.ptr + field.offset is still the correct address.
 	ptr := add(v.ptr, field.Offset, "same as non-reflect &v.field")
-	return Value{typ, ptr, fl}
+	return Value{typ_: typ, ptr: ptr, flag: fl}
 }
 
 func TField(typ Type, i int) Type {
@@ -71,9 +71,9 @@ func Zero(typ Type) Value {
 	t := typ.common()
 	fl := flag(t.Kind())
 	if !t.IsDirectIface() {
-		return Value{t, unsafe_New(t), fl | flagIndir}
+		return Value{typ_: t, ptr: unsafe_New(t), flag: fl | flagIndir}
 	}
-	return Value{t, nil, fl}
+	return Value{typ_: t, ptr: nil, flag: fl}
 }
 
 // ToInterface returns v's current value as an interface{}.

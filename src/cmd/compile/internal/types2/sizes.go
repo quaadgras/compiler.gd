@@ -219,7 +219,8 @@ func (s *StdSizes) Sizeof(T Type) int64 {
 		// Type parameters lead to variable sizes/alignments;
 		// StdSizes.Sizeof won't be called for them.
 		assert(!isTypeParam(T))
-		return s.WordSize * 2
+		// gd fat-interface: { tab/_type, data, inline complex128 } = 2 words + 16 bytes.
+		return s.WordSize*2 + 16
 	case *TypeParam, *Union:
 		panic("unreachable")
 	}

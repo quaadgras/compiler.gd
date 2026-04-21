@@ -6378,12 +6378,14 @@ func rewriteValuegeneric_OpConstInterface(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (ConstInterface)
-	// result: (IMake (ConstNil <typ.Uintptr>) (ConstNil <typ.BytePtr>))
+	// result: (IMake (ConstNil <typ.Uintptr>) (ConstNil <typ.BytePtr>) (Const64F <typ.Float64> [0]) (Const64F <typ.Float64> [0]))
 	for {
 		v.reset(OpIMake)
 		v0 := b.NewValue0(v.Pos, OpConstNil, typ.Uintptr)
 		v1 := b.NewValue0(v.Pos, OpConstNil, typ.BytePtr)
-		v.AddArg2(v0, v1)
+		v2 := b.NewValue0(v.Pos, OpConst64F, typ.Float64)
+		v2.AuxInt = float64ToAuxInt(0)
+		v.AddArg4(v0, v1, v2, v2)
 		return true
 	}
 }
@@ -8985,9 +8987,11 @@ func rewriteValuegeneric_OpFloor(v *Value) bool {
 	return false
 }
 func rewriteValuegeneric_OpIMake(v *Value) bool {
+	v_3 := v.Args[3]
+	v_2 := v.Args[2]
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
-	// match: (IMake _typ (StructMake ___))
+	// match: (IMake _typ (StructMake ___) _real _imag)
 	// result: imakeOfStructMake(v)
 	for {
 		if v_1.Op != OpStructMake {
@@ -8996,16 +9000,18 @@ func rewriteValuegeneric_OpIMake(v *Value) bool {
 		v.copyOf(imakeOfStructMake(v))
 		return true
 	}
-	// match: (IMake _typ (ArrayMake1 val))
-	// result: (IMake _typ val)
+	// match: (IMake _typ (ArrayMake1 val) _real _imag)
+	// result: (IMake _typ val _real _imag)
 	for {
 		_typ := v_0
 		if v_1.Op != OpArrayMake1 {
 			break
 		}
 		val := v_1.Args[0]
+		_real := v_2
+		_imag := v_3
 		v.reset(OpIMake)
-		v.AddArg2(_typ, val)
+		v.AddArg4(_typ, val, _real, _imag)
 		return true
 	}
 	return false
@@ -12587,7 +12593,7 @@ func rewriteValuegeneric_OpLoad(v *Value) bool {
 		v.copyOf(rewriteFixedLoad(v, s, sb, 0))
 		return true
 	}
-	// match: (Load (ITab (IMake (Addr {s} sb) _)) _)
+	// match: (Load (ITab (IMake (Addr {s} sb) _ _ _)) _)
 	// cond: isFixedLoad(v, s, 0)
 	// result: rewriteFixedLoad(v, s, sb, 0)
 	for {
@@ -12610,7 +12616,7 @@ func rewriteValuegeneric_OpLoad(v *Value) bool {
 		v.copyOf(rewriteFixedLoad(v, s, sb, 0))
 		return true
 	}
-	// match: (Load (ITab (IMake (Convert (Addr {s} sb) _) _)) _)
+	// match: (Load (ITab (IMake (Convert (Addr {s} sb) _) _ _ _)) _)
 	// cond: isFixedLoad(v, s, 0)
 	// result: rewriteFixedLoad(v, s, sb, 0)
 	for {
@@ -12681,7 +12687,7 @@ func rewriteValuegeneric_OpLoad(v *Value) bool {
 		v.copyOf(rewriteFixedLoad(v, s, sb, off))
 		return true
 	}
-	// match: (Load (OffPtr [off] (ITab (IMake (Addr {s} sb) _))) _)
+	// match: (Load (OffPtr [off] (ITab (IMake (Addr {s} sb) _ _ _))) _)
 	// cond: isFixedLoad(v, s, off)
 	// result: rewriteFixedLoad(v, s, sb, off)
 	for {
@@ -12709,7 +12715,7 @@ func rewriteValuegeneric_OpLoad(v *Value) bool {
 		v.copyOf(rewriteFixedLoad(v, s, sb, off))
 		return true
 	}
-	// match: (Load (OffPtr [off] (ITab (IMake (Convert (Addr {s} sb) _) _))) _)
+	// match: (Load (OffPtr [off] (ITab (IMake (Convert (Addr {s} sb) _) _ _ _))) _)
 	// cond: isFixedLoad(v, s, off)
 	// result: rewriteFixedLoad(v, s, sb, off)
 	for {
@@ -32061,6 +32067,48 @@ func rewriteValuegeneric_OpStore(v *Value) bool {
 		}
 		call := v_0_0.Args[0]
 		if call.Op != OpStaticLECall {
+			break
+		}
+		x := v_1
+		mem := v_2
+		if mem.Op != OpSelectN || auxIntToInt64(mem.AuxInt) != 1 || call != mem.Args[0] || !(isConstZero(x) && isMalloc(call.Aux)) {
+			break
+		}
+		v.copyOf(mem)
+		return true
+	}
+	// match: (Store (SelectN [0] call:(StaticCall ___)) x mem:(SelectN [1] call))
+	// cond: isConstZero(x) && isMalloc(call.Aux)
+	// result: mem
+	for {
+		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
+			break
+		}
+		call := v_0.Args[0]
+		if call.Op != OpStaticCall {
+			break
+		}
+		x := v_1
+		mem := v_2
+		if mem.Op != OpSelectN || auxIntToInt64(mem.AuxInt) != 1 || call != mem.Args[0] || !(isConstZero(x) && isMalloc(call.Aux)) {
+			break
+		}
+		v.copyOf(mem)
+		return true
+	}
+	// match: (Store (OffPtr (SelectN [0] call:(StaticCall ___))) x mem:(SelectN [1] call))
+	// cond: isConstZero(x) && isMalloc(call.Aux)
+	// result: mem
+	for {
+		if v_0.Op != OpOffPtr {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpSelectN || auxIntToInt64(v_0_0.AuxInt) != 0 {
+			break
+		}
+		call := v_0_0.Args[0]
+		if call.Op != OpStaticCall {
 			break
 		}
 		x := v_1

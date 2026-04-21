@@ -6032,6 +6032,8 @@ const (
 	OpIMake
 	OpITab
 	OpIData
+	OpIInlineReal
+	OpIInlineImag
 	OpStructMake
 	OpStructSelect
 	OpArrayMake1
@@ -88170,7 +88172,7 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "IMake",
-		argLen:  2,
+		argLen:  4,
 		generic: true,
 	},
 	{
@@ -88180,6 +88182,16 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "IData",
+		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "IInlineReal",
+		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "IInlineImag",
 		argLen:  1,
 		generic: true,
 	},

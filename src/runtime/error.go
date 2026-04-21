@@ -8,6 +8,7 @@ import (
 	"internal/abi"
 	"internal/bytealg"
 	"internal/runtime/sys"
+	"unsafe"
 )
 
 // Error identifies a runtime error used in panic.
@@ -260,43 +261,50 @@ func printanycustomtype(i any) {
 	eface := efaceOf(&i)
 	typestring := toRType(eface._type).string()
 
+	// gd fat-iface: for inline-iface types the payload lives in eface.inline,
+	// not behind eface.data (which is nil). Pick the right source pointer.
+	p := eface.data
+	if eface._type.IsInlineIface() {
+		p = unsafe.Pointer(&eface.inline)
+	}
+
 	switch eface._type.Kind() {
 	case abi.String:
 		print(typestring, `("`)
-		printindented(*(*string)(eface.data))
+		printindented(*(*string)(p))
 		print(`")`)
 	case abi.Bool:
-		print(typestring, "(", *(*bool)(eface.data), ")")
+		print(typestring, "(", *(*bool)(p), ")")
 	case abi.Int:
-		print(typestring, "(", *(*int)(eface.data), ")")
+		print(typestring, "(", *(*int)(p), ")")
 	case abi.Int8:
-		print(typestring, "(", *(*int8)(eface.data), ")")
+		print(typestring, "(", *(*int8)(p), ")")
 	case abi.Int16:
-		print(typestring, "(", *(*int16)(eface.data), ")")
+		print(typestring, "(", *(*int16)(p), ")")
 	case abi.Int32:
-		print(typestring, "(", *(*int32)(eface.data), ")")
+		print(typestring, "(", *(*int32)(p), ")")
 	case abi.Int64:
-		print(typestring, "(", *(*int64)(eface.data), ")")
+		print(typestring, "(", *(*int64)(p), ")")
 	case abi.Uint:
-		print(typestring, "(", *(*uint)(eface.data), ")")
+		print(typestring, "(", *(*uint)(p), ")")
 	case abi.Uint8:
-		print(typestring, "(", *(*uint8)(eface.data), ")")
+		print(typestring, "(", *(*uint8)(p), ")")
 	case abi.Uint16:
-		print(typestring, "(", *(*uint16)(eface.data), ")")
+		print(typestring, "(", *(*uint16)(p), ")")
 	case abi.Uint32:
-		print(typestring, "(", *(*uint32)(eface.data), ")")
+		print(typestring, "(", *(*uint32)(p), ")")
 	case abi.Uint64:
-		print(typestring, "(", *(*uint64)(eface.data), ")")
+		print(typestring, "(", *(*uint64)(p), ")")
 	case abi.Uintptr:
-		print(typestring, "(", *(*uintptr)(eface.data), ")")
+		print(typestring, "(", *(*uintptr)(p), ")")
 	case abi.Float32:
-		print(typestring, "(", *(*float32)(eface.data), ")")
+		print(typestring, "(", *(*float32)(p), ")")
 	case abi.Float64:
-		print(typestring, "(", *(*float64)(eface.data), ")")
+		print(typestring, "(", *(*float64)(p), ")")
 	case abi.Complex64:
-		print(typestring, *(*complex64)(eface.data))
+		print(typestring, *(*complex64)(p))
 	case abi.Complex128:
-		print(typestring, *(*complex128)(eface.data))
+		print(typestring, *(*complex128)(p))
 	default:
 		print("(", typestring, ") ", eface.data)
 	}

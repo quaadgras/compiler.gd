@@ -497,6 +497,9 @@ func dcommontype(c rttype.Cursor, t *types.Type) {
 	if types.IsDirectIface(t) {
 		tflag |= abi.TFlagDirectIface
 	}
+	if types.IsInlineIface(t) {
+		tflag |= abi.TFlagInlineIface
+	}
 
 	if tflag != abi.TFlag(uint8(tflag)) {
 		// this should optimize away completely
@@ -1056,13 +1059,17 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 	//   inter  *interfacetype
 	//   _type  *_type
 	//   hash   uint32 // copy of _type.hash. Used for type switches.
-	//   _      [4]byte
+	//   inline uint8  // gd: nonzero if _type fits in the iface inline slot
+	//   _      [3]byte
 	//   fun    [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
 	// }
 	c := rttype.NewCursor(lsym, 0, rttype.ITab)
 	c.Field("Inter").WritePtr(writeType(iface))
 	c.Field("Type").WritePtr(writeType(typ))
 	c.Field("Hash").WriteUint32(types.TypeHash(typ)) // copy of type hash
+	if types.IsInlineIface(typ) {
+		c.Field("Inline").WriteUint8(1)
+	}
 
 	var delta int64
 	c = c.Field("Fun")

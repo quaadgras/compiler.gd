@@ -2062,7 +2062,7 @@ typedef _GoString_ GoString;
 #endif
 typedef void *GoMap;
 typedef void *GoChan;
-typedef struct { void *t; void *v; } GoInterface;
+typedef struct { void *t; void *v; GoComplex128 inline_payload; } GoInterface;
 typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 
 #endif

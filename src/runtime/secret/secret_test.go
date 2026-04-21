@@ -217,13 +217,18 @@ func TestGoExit(t *testing.T) {
 	// cleared its stack. There's no signal for that, so just wait a bit.
 	time.Sleep(1 * time.Millisecond)
 
-	checkRangeForSecret(t, lo, hi)
-
+	// Snapshot registers before running checkRangeForSecret: that helper
+	// compares each stack word against the constant secretValue, which
+	// under our regalloc gets hoisted into a watched GPR (R10 on amd64)
+	// and survives the return, causing a spurious leak report.
 	var spillArea [64]secretType
 	n := spillRegisters(unsafe.Pointer(&spillArea))
 	if n > unsafe.Sizeof(spillArea) {
 		t.Fatalf("spill area overrun %d\n", n)
 	}
+
+	checkRangeForSecret(t, lo, hi)
+
 	for i, v := range spillArea {
 		if v == secretValue {
 			t.Errorf("secret found in spill slot %d", i)

@@ -595,9 +595,17 @@ func setup() {
 		})
 		types.CalcStructSize(synthString)
 		unsp := types.Types[types.TUNSAFEPTR]
+		c128 := types.Types[types.TCOMPLEX128]
+		// gd fat-interface layout: { tab/_type, data, inline complex128 }.
+		// The inline slot is typed complex128 so the ABI places it in two
+		// float registers (saving int-register pressure); the bits are the
+		// same 16-byte pointer-free payload. tab/_type and inline are never
+		// GC-scanned; data is the sole pointer word. Keep this in lockstep
+		// with the runtime iface/eface and abi.EmptyInterface/NonEmptyInterface.
 		synthIface = types.NewStruct([]*types.Field{
 			types.NewField(nxp, fname("f1"), unsp),
 			types.NewField(nxp, fname("f2"), unsp),
+			types.NewField(nxp, fname("f3"), c128),
 		})
 		types.CalcStructSize(synthIface)
 	})

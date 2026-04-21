@@ -4,6 +4,8 @@
 
 package sync
 
+import "internal/abi"
+
 // Export for testing.
 var Runtime_Semacquire = runtime_Semacquire
 var Runtime_Semrelease = runtime_Semrelease
@@ -19,7 +21,7 @@ type PoolDequeue interface {
 
 func NewPoolDequeue(n int) PoolDequeue {
 	d := &poolDequeue{
-		vals: make([]eface, n),
+		vals: make([]abi.EmptyInterface, n),
 	}
 	// For testing purposes, set the head and tail indexes close
 	// to wrapping around.

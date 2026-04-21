@@ -125,6 +125,13 @@ const (
 	// This flag is just a cached computation of Size_ == PtrBytes == goarch.PtrSize.
 	TFlagDirectIface TFlag = 1 << 5
 
+	// TFlagInlineIface (gd) means values of this type are stored inline
+	// in the 16-byte inline slot of an iface/eface header instead of being
+	// boxed on the heap. Set iff Size_ <= 16 && PtrBytes == 0 && Align_ <= 8.
+	// Strictly broader than TFlagDirectIface, but disjoint: direct-iface
+	// types always contain a pointer, so PtrBytes > 0 excludes them.
+	TFlagInlineIface TFlag = 1 << 6
+
 	// Leaving this breadcrumb behind for dlv. It should not be used, and no
 	// Kind should be big enough to set this bit.
 	KindDirectIface Kind = 1 << 5
@@ -205,6 +212,12 @@ func (t *Type) Pointers() bool { return t.PtrBytes != 0 }
 // IsDirectIface reports whether t is stored directly in an interface value.
 func (t *Type) IsDirectIface() bool {
 	return t.TFlag&TFlagDirectIface != 0
+}
+
+// IsInlineIface reports whether t is stored inline in the 16-byte inline
+// slot of an iface/eface header under the gd fork's fat-interface layout.
+func (t *Type) IsInlineIface() bool {
+	return t.TFlag&TFlagInlineIface != 0
 }
 
 func (t *Type) GcSlice(begin, end uintptr) []byte {

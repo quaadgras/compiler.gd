@@ -157,6 +157,10 @@ func interhash(p unsafe.Pointer, h uintptr) uintptr {
 		// we want to report the struct, not the slice).
 		panic(errorString("hash of unhashable type " + toRType(t).string()))
 	}
+	if tab.Inline != 0 {
+		// gd fat-iface: payload lives in a.inline.
+		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.inline), h^c0))
+	}
 	if t.IsDirectIface() {
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.data), h^c0))
 	} else {
@@ -183,6 +187,10 @@ func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	if t.Equal == nil {
 		// See comment in interhash above.
 		panic(errorString("hash of unhashable type " + toRType(t).string()))
+	}
+	if t.IsInlineIface() {
+		// gd fat-iface: payload lives in a.inline.
+		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.inline), h^c0))
 	}
 	if t.IsDirectIface() {
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.data), h^c0))
@@ -302,14 +310,32 @@ func strequal(p, q unsafe.Pointer) bool {
 	return *(*string)(p) == *(*string)(q)
 }
 func interequal(p, q unsafe.Pointer) bool {
-	x := *(*iface)(p)
-	y := *(*iface)(q)
-	return x.tab == y.tab && ifaceeq(x.tab, x.data, y.data)
+	x := (*iface)(p)
+	y := (*iface)(q)
+	if x.tab != y.tab {
+		return false
+	}
+	// gd fat-iface: feed the inline slot address when the concrete type
+	// is inline-eligible; otherwise pass the boxed data pointer as before.
+	xd, yd := x.data, y.data
+	if x.tab != nil && x.tab.Inline != 0 {
+		xd = unsafe.Pointer(&x.inline)
+		yd = unsafe.Pointer(&y.inline)
+	}
+	return ifaceeq(x.tab, xd, yd)
 }
 func nilinterequal(p, q unsafe.Pointer) bool {
-	x := *(*eface)(p)
-	y := *(*eface)(q)
-	return x._type == y._type && efaceeq(x._type, x.data, y.data)
+	x := (*eface)(p)
+	y := (*eface)(q)
+	if x._type != y._type {
+		return false
+	}
+	xd, yd := x.data, y.data
+	if x._type != nil && x._type.IsInlineIface() {
+		xd = unsafe.Pointer(&x.inline)
+		yd = unsafe.Pointer(&y.inline)
+	}
+	return efaceeq(x._type, xd, yd)
 }
 func efaceeq(t *_type, x, y unsafe.Pointer) bool {
 	if t == nil {

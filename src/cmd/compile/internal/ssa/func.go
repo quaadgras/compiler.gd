@@ -200,18 +200,22 @@ func (f *Func) SplitString(name *LocalSlot) (*LocalSlot, *LocalSlot) {
 	return p, l
 }
 
-func (f *Func) SplitInterface(name *LocalSlot) (*LocalSlot, *LocalSlot) {
+func (f *Func) SplitInterface(name *LocalSlot) (*LocalSlot, *LocalSlot, *LocalSlot, *LocalSlot) {
 	n := name.N
 	u := types.Types[types.TUINTPTR]
 	t := types.NewPtr(types.Types[types.TUINT8])
-	// Split this interface up into two separate variables.
+	f64 := types.Types[types.TFLOAT64]
+	// gd fat-interface: four sub-slots — itab/type, data, inline real,
+	// inline imag — matching the 32B iface header.
 	sfx := ".itab"
 	if n.Type().IsEmptyInterface() {
 		sfx = ".type"
 	}
 	c := f.SplitSlot(name, sfx, 0, u) // see comment in typebits.Set
 	d := f.SplitSlot(name, ".data", u.Size(), t)
-	return c, d
+	r := f.SplitSlot(name, ".inline_real", u.Size()+t.Size(), f64)
+	i := f.SplitSlot(name, ".inline_imag", u.Size()+t.Size()+f64.Size(), f64)
+	return c, d, r, i
 }
 
 func (f *Func) SplitSlice(name *LocalSlot) (*LocalSlot, *LocalSlot, *LocalSlot) {

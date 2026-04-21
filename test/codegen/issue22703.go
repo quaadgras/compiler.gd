@@ -530,6 +530,10 @@ func callMethodSmallOffset(i I) {
 }
 
 func callMethodLargeOffset(i I) {
-	// amd64:"TESTB"
+	// gd fat-interface: the nil-check of the iface header is subsumed
+	// into the CMPB of itab.Inline emitted before every interface call
+	// (inline-or-boxed dispatch), so no separate TESTB is needed — the
+	// CMPB faults on a nil itab the same way TESTB would.
+	// amd64:`CMPB\s\d+\([A-Z][A-Z0-9]*\),\s\$0`
 	i.foo511()
 }

@@ -40,22 +40,16 @@ type Value struct {
 
 	// Pointer-valued data or, if flagIndir is set, pointer to data.
 	// Valid when either flagIndir is set or typ.pointers() is true.
+	// If flagInline is set, ptr is ignored and data lives in inline.
 	ptr unsafe.Pointer
 
-	// flag holds metadata about the value.
-	//
-	// The lowest five bits give the Kind of the value, mirroring typ.Kind().
-	//
-	// The next set of bits are flag bits:
-	//	- flagStickyRO: obtained via unexported not embedded field, so read-only
-	//	- flagEmbedRO: obtained via unexported embedded field, so read-only
-	//	- flagIndir: val holds a pointer to the data
-	//	- flagAddr: v.CanAddr is true (implies flagIndir and ptr is non-nil)
-	//	- flagMethod: v is a method value.
-	// If !typ.IsDirectIface(), code can assume that flagIndir is set.
-	//
-	// The remaining 22+ bits give a method number for method values.
-	// If flag.kind() != Func, code can assume that flagMethod is unset.
+	// inline stores the bits of pointer-free values up to 16 bytes
+	// (int64, complex128, small structs). Used when flagInline is set,
+	// in which case unpackEface did not allocate a heap copy. See
+	// reflect.Value for details on lifetime constraints.
+	inline complex128
+
+	// flag bits mirror reflect.Value. See there for layout.
 	flag
 
 	// A method value represents a curried method invocation
@@ -75,7 +69,8 @@ const (
 	flagIndir       flag = 1 << 7
 	flagAddr        flag = 1 << 8
 	flagMethod      flag = 1 << 9
-	flagMethodShift      = 10
+	flagInline      flag = 1 << 10
+	flagMethodShift      = 11
 	flagRO          flag = flagStickyRO | flagEmbedRO
 )
 
@@ -99,6 +94,31 @@ func (v Value) typ() *abi.Type {
 	return (*abi.Type)(abi.NoEscape(unsafe.Pointer(v.typ_)))
 }
 
+// dataPtr returns a pointer to v's underlying data. When flagInline is
+// set the returned pointer refers to v.inline inside the caller's local
+// Value; see reflect.Value.dataPtr for lifetime constraints.
+//
+//go:nosplit
+func (v *Value) dataPtr() unsafe.Pointer {
+	if v.flag&flagInline != 0 {
+		return unsafe.Pointer(&v.inline)
+	}
+	return v.ptr
+}
+
+// materialize moves inline data to a fresh heap allocation so that v.ptr
+// is a stable address. After it returns flagInline is cleared.
+func (v *Value) materialize() {
+	if v.flag&flagInline == 0 {
+		return
+	}
+	t := v.typ()
+	c := unsafe_New(t)
+	typedmemmove(t, c, unsafe.Pointer(&v.inline))
+	v.ptr = c
+	v.flag &^= flagInline
+}
+
 // pointer returns the underlying pointer represented by v.
 // v.Kind() must be Pointer, Map, Chan, Func, or UnsafePointer
 func (v Value) pointer() unsafe.Pointer {
@@ -106,9 +126,9 @@ func (v Value) pointer() unsafe.Pointer {
 		panic("can't call pointer on a non-pointer Value")
 	}
 	if v.flag&flagIndir != 0 {
-		return *(*unsafe.Pointer)(v.ptr)
+		return *(*unsafe.Pointer)(v.dataPtr())
 	}
-	return v.ptr
+	return v.dataPtr()
 }
 
 // packEface converts v to the empty interface.
@@ -118,12 +138,22 @@ func packEface(v Value) any {
 	e := (*abi.EmptyInterface)(unsafe.Pointer(&i))
 	// First, fill in the data portion of the interface.
 	switch {
+	case t.IsInlineIface():
+		// gd fat-iface: payload lives in the Inline slot, Data stays nil.
+		src := v.dataPtr()
+		if v.flag&(flagIndir|flagInline) != 0 {
+			typedmemmove(t, unsafe.Pointer(&e.Inline), src)
+		} else {
+			// Inline types are pointer-free so they are never IsDirectIface;
+			// if we ever get here the bits live in v.ptr itself.
+			*(*unsafe.Pointer)(unsafe.Pointer(&e.Inline)) = src
+		}
 	case !t.IsDirectIface():
 		if v.flag&flagIndir == 0 {
 			panic("bad indir")
 		}
 		// Value is indirect, and so is the interface we're making.
-		ptr := v.ptr
+		ptr := v.dataPtr()
 		if v.flag&flagAddr != 0 {
 			c := unsafe_New(t)
 			typedmemmove(t, c, ptr)
@@ -133,10 +163,10 @@ func packEface(v Value) any {
 	case v.flag&flagIndir != 0:
 		// Value is indirect, but interface is direct. We need
 		// to load the data at v.ptr into the interface data word.
-		e.Data = *(*unsafe.Pointer)(v.ptr)
+		e.Data = *(*unsafe.Pointer)(v.dataPtr())
 	default:
 		// Value is direct, and so is the interface.
-		e.Data = v.ptr
+		e.Data = v.dataPtr()
 	}
 	// Now, fill in the type portion. We're very careful here not
 	// to have any operation between the e.word and e.typ assignments
@@ -158,7 +188,16 @@ func unpackEface(i any) Value {
 	if !t.IsDirectIface() {
 		f |= flagIndir
 	}
-	return Value{t, e.Data, f}
+	if t.IsInlineIface() {
+		// gd fat-iface: carry the inline payload inside Value itself so we
+		// don't have to heap-allocate just to give v.ptr a stable address.
+		var v Value
+		v.typ_ = t
+		typedmemmove(t, unsafe.Pointer(&v.inline), unsafe.Pointer(&e.Inline))
+		v.flag = f | flagInline
+		return v
+	}
+	return Value{typ_: t, ptr: e.Data, flag: f}
 }
 
 // A ValueError occurs when a Value method is invoked on
@@ -233,11 +272,11 @@ func (v Value) Elem() Value {
 	case abi.Interface:
 		var eface any
 		if v.typ().NumMethod() == 0 {
-			eface = *(*any)(v.ptr)
+			eface = *(*any)(v.dataPtr())
 		} else {
 			eface = (any)(*(*interface {
 				M()
-			})(v.ptr))
+			})(v.dataPtr()))
 		}
 		x := unpackEface(eface)
 		if x.flag != 0 {
@@ -245,7 +284,7 @@ func (v Value) Elem() Value {
 		}
 		return x
 	case abi.Pointer:
-		ptr := v.ptr
+		ptr := v.dataPtr()
 		if v.flag&flagIndir != 0 {
 			ptr = *(*unsafe.Pointer)(ptr)
 		}
@@ -257,7 +296,7 @@ func (v Value) Elem() Value {
 		typ := tt.Elem
 		fl := v.flag&flagRO | flagIndir | flagAddr
 		fl |= flag(typ.Kind())
-		return Value{typ, ptr, fl}
+		return Value{typ_: typ, ptr: ptr, flag: fl}
 	}
 	panic(&ValueError{"reflectlite.Value.Elem", v.kind()})
 }
@@ -272,11 +311,11 @@ func valueInterface(v Value) any {
 		// Empty interface has one layout, all interfaces with
 		// methods have a second layout.
 		if v.numMethod() == 0 {
-			return *(*any)(v.ptr)
+			return *(*any)(v.dataPtr())
 		}
 		return *(*interface {
 			M()
-		})(v.ptr)
+		})(v.dataPtr())
 	}
 
 	return packEface(v)
@@ -296,7 +335,7 @@ func (v Value) IsNil() bool {
 		// if v.flag&flagMethod != 0 {
 		// 	return false
 		// }
-		ptr := v.ptr
+		ptr := v.dataPtr()
 		if v.flag&flagIndir != 0 {
 			ptr = *(*unsafe.Pointer)(ptr)
 		}
@@ -304,7 +343,7 @@ func (v Value) IsNil() bool {
 	case abi.Interface, abi.Slice:
 		// Both interface and slice are nil if first word is 0.
 		// Both are always bigger than a word; assume flagIndir.
-		return *(*unsafe.Pointer)(v.ptr) == nil
+		return *(*unsafe.Pointer)(v.dataPtr()) == nil
 	}
 	panic(&ValueError{"reflectlite.Value.IsNil", v.kind()})
 }
@@ -346,10 +385,10 @@ func (v Value) Len() int {
 		return maplen(v.pointer())
 	case abi.Slice:
 		// Slice is bigger than a word; assume flagIndir.
-		return (*unsafeheader.Slice)(v.ptr).Len
+		return (*unsafeheader.Slice)(v.dataPtr()).Len
 	case abi.String:
 		// String is bigger than a word; assume flagIndir.
-		return (*unsafeheader.String)(v.ptr).Len
+		return (*unsafeheader.String)(v.dataPtr()).Len
 	}
 	panic(&ValueError{"reflect.Value.Len", v.kind()})
 }
@@ -370,13 +409,13 @@ func (v Value) Set(x Value) {
 	x.mustBeExported() // do not let unexported x leak
 	var target unsafe.Pointer
 	if v.kind() == abi.Interface {
-		target = v.ptr
+		target = v.dataPtr()
 	}
 	x = x.assignTo("reflectlite.Set", v.typ(), target)
 	if x.flag&flagIndir != 0 {
-		typedmemmove(v.typ(), v.ptr, x.ptr)
+		typedmemmove(v.typ(), v.dataPtr(), (&x).dataPtr())
 	} else {
-		*(*unsafe.Pointer)(v.ptr) = x.ptr
+		*(*unsafe.Pointer)(v.dataPtr()) = x.ptr
 	}
 }
 
@@ -420,9 +459,12 @@ func (v Value) assignTo(context string, dst *abi.Type, target unsafe.Pointer) Va
 	case directlyAssignable(dst, v.typ()):
 		// Overwrite type so that they match.
 		// Same memory layout, so no harm done.
-		fl := v.flag&(flagAddr|flagIndir) | v.flag.ro()
+		fl := v.flag&(flagAddr|flagIndir|flagInline) | v.flag.ro()
 		fl |= flag(dst.Kind())
-		return Value{dst, v.ptr, fl}
+		out := v
+		out.typ_ = dst
+		out.flag = fl
+		return out
 
 	case implements(dst, v.typ()):
 		if target == nil {
@@ -432,7 +474,7 @@ func (v Value) assignTo(context string, dst *abi.Type, target unsafe.Pointer) Va
 			// A nil ReadWriter passed to nil Reader is OK,
 			// but using ifaceE2I below will panic.
 			// Avoid the panic by returning a nil dst (e.g., Reader) explicitly.
-			return Value{dst, nil, flag(abi.Interface)}
+			return Value{typ_: dst, ptr: nil, flag: flag(abi.Interface)}
 		}
 		x := valueInterface(v)
 		if dst.NumMethod() == 0 {
@@ -440,7 +482,7 @@ func (v Value) assignTo(context string, dst *abi.Type, target unsafe.Pointer) Va
 		} else {
 			ifaceE2I(dst, x, target)
 		}
-		return Value{dst, target, flagIndir | flag(abi.Interface)}
+		return Value{typ_: dst, ptr: target, flag: flagIndir | flag(abi.Interface)}
 	}
 
 	// Failed.

@@ -15,8 +15,7 @@ func f() reflect.Type {
 }
 
 func g() reflect.Type {
-        // amd64:`LEAQ\stype:int\(SB\)`
-        // arm64:`MOVD\s\$type:int\(SB\)`
-        return reflect.TypeFor[int]()
+	// amd64:`LEAQ\stype:int\(SB\)`
+	// arm64:`MOVD\s\$type:int\(SB\)`
+	return reflect.TypeFor[int]()
 }
-

@@ -1422,7 +1422,8 @@ DEBUG_CALL_FN(debugCall65536<>, 65536)
 
 #ifdef GOARCH_ppc64le
 // func debugCallPanicked(val interface{})
-TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-16
+// gd fat-interface: iface is 32 bytes (2 words + 16-byte inline payload).
+TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-32
 	// Copy the panic value to the top of stack at SP+32.
 	MOVD	val_type+0(FP), R31
 	MOVD	R31, 32(R1)

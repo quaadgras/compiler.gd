@@ -14,7 +14,9 @@ import "unsafe"
 func main() {
 	var a interface{} = 0
 	size := unsafe.Sizeof(a)
-	if size != 2*unsafe.Sizeof((*int)(nil)) {
+	// gd fat-interface: header carries a 16-byte inline payload
+	// alongside the two words, so size == 2*PtrSize + 16.
+	if size != 2*unsafe.Sizeof((*int)(nil))+16 {
 		println("wrong size: ", size)
 	}
 }

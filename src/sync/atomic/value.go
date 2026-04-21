@@ -5,6 +5,7 @@
 package atomic
 
 import (
+	"internal/abi"
 	"unsafe"
 )
 
@@ -15,31 +16,42 @@ import (
 // A Value must not be copied after first use.
 type Value struct {
 	v any
+	// gd fat-iface: lock serializes all operations on v. The stock 16-byte
+	// iface let Store publish (Type,Data) with a single atomic pointer
+	// write; the 32-byte fat header spans Type+Data+Inline[2] and no single
+	// instruction covers it, so readers and writers both take this spinlock
+	// to see a consistent snapshot. Unlocked=0, locked=1.
+	lock uint32
 }
 
-// efaceWords is interface{} internal representation.
-type efaceWords struct {
-	typ  unsafe.Pointer
-	data unsafe.Pointer
+// acquire takes the spinlock. procPin keeps the lock holder from being
+// descheduled while other goroutines busy-wait on the lock.
+func (v *Value) acquire() {
+	runtime_procPin()
+	for !CompareAndSwapUint32(&v.lock, 0, 1) {
+		// spin
+	}
+}
+
+func (v *Value) release() {
+	StoreUint32(&v.lock, 0)
+	runtime_procUnpin()
 }
 
 // Load returns the value set by the most recent Store.
 // It returns nil if there has been no call to Store for this Value.
 func (v *Value) Load() (val any) {
-	vp := (*efaceWords)(unsafe.Pointer(v))
-	typ := LoadPointer(&vp.typ)
-	if typ == nil || typ == unsafe.Pointer(&firstStoreInProgress) {
-		// First store not yet completed.
+	vp := (*abi.EmptyInterface)(unsafe.Pointer(v))
+	v.acquire()
+	if vp.Type == nil {
+		v.release()
 		return nil
 	}
-	data := LoadPointer(&vp.data)
-	vlp := (*efaceWords)(unsafe.Pointer(&val))
-	vlp.typ = typ
-	vlp.data = data
+	vlp := (*abi.EmptyInterface)(unsafe.Pointer(&val))
+	*vlp = *vp
+	v.release()
 	return
 }
-
-var firstStoreInProgress byte
 
 // Store sets the value of the [Value] v to val.
 // All calls to Store for a given Value must use values of the same concrete type.
@@ -48,38 +60,15 @@ func (v *Value) Store(val any) {
 	if val == nil {
 		panic("sync/atomic: store of nil value into Value")
 	}
-	vp := (*efaceWords)(unsafe.Pointer(v))
-	vlp := (*efaceWords)(unsafe.Pointer(&val))
-	for {
-		typ := LoadPointer(&vp.typ)
-		if typ == nil {
-			// Attempt to start first store.
-			// Disable preemption so that other goroutines can use
-			// active spin wait to wait for completion.
-			runtime_procPin()
-			if !CompareAndSwapPointer(&vp.typ, nil, unsafe.Pointer(&firstStoreInProgress)) {
-				runtime_procUnpin()
-				continue
-			}
-			// Complete first store.
-			StorePointer(&vp.data, vlp.data)
-			StorePointer(&vp.typ, vlp.typ)
-			runtime_procUnpin()
-			return
-		}
-		if typ == unsafe.Pointer(&firstStoreInProgress) {
-			// First store in progress. Wait.
-			// Since we disable preemption around the first store,
-			// we can wait with active spinning.
-			continue
-		}
-		// First store completed. Check type and overwrite data.
-		if typ != vlp.typ {
-			panic("sync/atomic: store of inconsistently typed value into Value")
-		}
-		StorePointer(&vp.data, vlp.data)
-		return
+	vp := (*abi.EmptyInterface)(unsafe.Pointer(v))
+	vlp := (*abi.EmptyInterface)(unsafe.Pointer(&val))
+	v.acquire()
+	if vp.Type != nil && vp.Type != vlp.Type {
+		v.release()
+		panic("sync/atomic: store of inconsistently typed value into Value")
 	}
+	*vp = *vlp
+	v.release()
 }
 
 // Swap stores new into Value and returns the previous value. It returns nil if
@@ -91,39 +80,20 @@ func (v *Value) Swap(new any) (old any) {
 	if new == nil {
 		panic("sync/atomic: swap of nil value into Value")
 	}
-	vp := (*efaceWords)(unsafe.Pointer(v))
-	np := (*efaceWords)(unsafe.Pointer(&new))
-	for {
-		typ := LoadPointer(&vp.typ)
-		if typ == nil {
-			// Attempt to start first store.
-			// Disable preemption so that other goroutines can use
-			// active spin wait to wait for completion.
-			runtime_procPin()
-			if !CompareAndSwapPointer(&vp.typ, nil, unsafe.Pointer(&firstStoreInProgress)) {
-				runtime_procUnpin()
-				continue
-			}
-			// Complete first store.
-			StorePointer(&vp.data, np.data)
-			StorePointer(&vp.typ, np.typ)
-			runtime_procUnpin()
-			return nil
-		}
-		if typ == unsafe.Pointer(&firstStoreInProgress) {
-			// First store in progress. Wait.
-			// Since we disable preemption around the first store,
-			// we can wait with active spinning.
-			continue
-		}
-		// First store completed. Check type and overwrite data.
-		if typ != np.typ {
-			panic("sync/atomic: swap of inconsistently typed value into Value")
-		}
-		op := (*efaceWords)(unsafe.Pointer(&old))
-		op.typ, op.data = np.typ, SwapPointer(&vp.data, np.data)
-		return old
+	vp := (*abi.EmptyInterface)(unsafe.Pointer(v))
+	np := (*abi.EmptyInterface)(unsafe.Pointer(&new))
+	v.acquire()
+	if vp.Type != nil && vp.Type != np.Type {
+		v.release()
+		panic("sync/atomic: swap of inconsistently typed value into Value")
 	}
+	if vp.Type != nil {
+		op := (*abi.EmptyInterface)(unsafe.Pointer(&old))
+		*op = *vp
+	}
+	*vp = *np
+	v.release()
+	return old
 }
 
 // CompareAndSwap executes the compare-and-swap operation for the [Value].
@@ -135,56 +105,37 @@ func (v *Value) CompareAndSwap(old, new any) (swapped bool) {
 	if new == nil {
 		panic("sync/atomic: compare and swap of nil value into Value")
 	}
-	vp := (*efaceWords)(unsafe.Pointer(v))
-	np := (*efaceWords)(unsafe.Pointer(&new))
-	op := (*efaceWords)(unsafe.Pointer(&old))
-	if op.typ != nil && np.typ != op.typ {
+	vp := (*abi.EmptyInterface)(unsafe.Pointer(v))
+	np := (*abi.EmptyInterface)(unsafe.Pointer(&new))
+	op := (*abi.EmptyInterface)(unsafe.Pointer(&old))
+	if op.Type != nil && np.Type != op.Type {
 		panic("sync/atomic: compare and swap of inconsistently typed values")
 	}
-	for {
-		typ := LoadPointer(&vp.typ)
-		if typ == nil {
-			if old != nil {
-				return false
-			}
-			// Attempt to start first store.
-			// Disable preemption so that other goroutines can use
-			// active spin wait to wait for completion.
-			runtime_procPin()
-			if !CompareAndSwapPointer(&vp.typ, nil, unsafe.Pointer(&firstStoreInProgress)) {
-				runtime_procUnpin()
-				continue
-			}
-			// Complete first store.
-			StorePointer(&vp.data, np.data)
-			StorePointer(&vp.typ, np.typ)
-			runtime_procUnpin()
-			return true
-		}
-		if typ == unsafe.Pointer(&firstStoreInProgress) {
-			// First store in progress. Wait.
-			// Since we disable preemption around the first store,
-			// we can wait with active spinning.
-			continue
-		}
-		// First store completed. Check type and overwrite data.
-		if typ != np.typ {
-			panic("sync/atomic: compare and swap of inconsistently typed value into Value")
-		}
-		// Compare old and current via runtime equality check.
-		// This allows value types to be compared, something
-		// not offered by the package functions.
-		// CompareAndSwapPointer below only ensures vp.data
-		// has not changed since LoadPointer.
-		data := LoadPointer(&vp.data)
-		var i any
-		(*efaceWords)(unsafe.Pointer(&i)).typ = typ
-		(*efaceWords)(unsafe.Pointer(&i)).data = data
-		if i != old {
+	v.acquire()
+	if vp.Type == nil {
+		if old != nil {
+			v.release()
 			return false
 		}
-		return CompareAndSwapPointer(&vp.data, data, np.data)
+		*vp = *np
+		v.release()
+		return true
 	}
+	if vp.Type != np.Type {
+		v.release()
+		panic("sync/atomic: compare and swap of inconsistently typed value into Value")
+	}
+	// Compare the full fat iface against old via runtime equality.
+	var cur any
+	cp := (*abi.EmptyInterface)(unsafe.Pointer(&cur))
+	*cp = *vp
+	if cur != old {
+		v.release()
+		return false
+	}
+	*vp = *np
+	v.release()
+	return true
 }
 
 // Disable/enable preemption, implemented in runtime.

@@ -420,6 +420,11 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		return x.decomposePair(pos, b, a, mem, x.typs.BytePtr, x.typs.Int, OpStringPtr, OpStringLen, &rc)
 
 	case types.TINTER:
+		// gd fat-interface: iface/eface is (tab, data, inline complex128).
+		// synthIface allocates 2 int + 2 float register slots per interface
+		// argument/return. SSA carries iface as a 4-arg OpIMake
+		// (tab, data, inline_real, inline_imag); decompose into matching
+		// register slots.
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.Uintptr, OpITab, &rc)
 		pos = pos.WithNotStmt()
 		// Immediate interfaces cause so many headaches.
@@ -435,9 +440,17 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 					}
 				}
 			}
-			return x.decomposeAsNecessary(pos, b, data, mem, rc.next(data.Type))
+			mem = x.decomposeAsNecessary(pos, b, data, mem, rc.next(data.Type))
+			mem = x.decomposeAsNecessary(pos, b, a.Args[2], mem, rc.next(x.typs.Float64))
+			mem = x.decomposeAsNecessary(pos, b, a.Args[3], mem, rc.next(x.typs.Float64))
+		} else {
+			mem = x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpIData, &rc)
+			real := b.NewValue1(pos, OpIInlineReal, x.typs.Float64, a)
+			mem = x.decomposeAsNecessary(pos, b, real, mem, rc.next(x.typs.Float64))
+			imag := b.NewValue1(pos, OpIInlineImag, x.typs.Float64, a)
+			mem = x.decomposeAsNecessary(pos, b, imag, mem, rc.next(x.typs.Float64))
 		}
-		return x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpIData, &rc)
+		return mem
 
 	case types.TCOMPLEX64:
 		return x.decomposePair(pos, b, a, mem, x.typs.Float32, x.typs.Float32, OpComplexReal, OpComplexImag, &rc)
@@ -585,9 +598,14 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		return a
 
 	case types.TINTER:
+		// gd fat-interface: consume 2 int + 2 float register slots
+		// (tab, data, inline.real, inline.imag) and feed all 4 into the
+		// 4-ary OpIMake so the inline payload survives ABI transit.
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr)))
 		pos = pos.WithNotStmt()
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr)))
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Float64, rc.next(x.typs.Float64)))
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Float64, rc.next(x.typs.Float64)))
 		a = makeOf(a, OpIMake, args)
 		x.commonSelectors[sk] = a
 		return a
@@ -741,9 +759,14 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 		return m0
 
 	case types.TINTER:
+		// gd fat-interface: store all four slots (2 int + 2 float) to
+		// memory so the in-memory iface matches the 32-byte (24-byte
+		// on 32-bit) layout with inline typed complex128.
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr))
 		pos = pos.WithNotStmt()
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr))
+		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Float64, rc.next(x.typs.Float64))
+		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Float64, rc.next(x.typs.Float64))
 		return m0
 
 	case types.TCOMPLEX64:

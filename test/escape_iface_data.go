@@ -6,6 +6,14 @@
 
 // Test the data word used for interface conversions
 // that might otherwise allocate.
+//
+// gd fat-interface: inline-eligible types (pointer-free, size <= 16,
+// align <= 8) bypass the dataWord path entirely — their bits live in
+// the iface's inline payload, so the compiler emits "using inline slot
+// for interface value" instead of any of the stock "using global"
+// messages for ints, named ints, small structs, etc. Strings still
+// hit the boxed path (they contain a pointer) and zero-sized values
+// still use &runtime.zerobase. Lines below track this split.
 
 package dataword
 
@@ -82,42 +90,42 @@ func string11() {
 }
 
 func integer1() {
-	sink = 42 // ERROR "using global for interface value"
+	sink = 42 // ERROR "using inline slot for interface value"
 }
 
 func integer2() {
 	v := 42
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func integer3() {
-	sink = 0 // ERROR "using global for interface value"
+	sink = 0 // ERROR "using inline slot for interface value"
 }
 
 func integer4a() {
 	v := 0
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func integer4b() {
 	v := uint8(0)
-	sink = v // ERROR "using global for single-byte interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func integer5() {
-	var a any = 42 // ERROR "using global for interface value"
+	var a any = 42 // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func integer6() {
 	var a any
 	v := 42
-	a = v // ERROR "using global for interface value"
+	a = v // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func integer7(v int) {
-	sink = v
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 type M interface{ M() }
@@ -131,114 +139,114 @@ func escapes(m M) {
 }
 
 func named1a() {
-	sink = MyInt(42) // ERROR "using global for interface value"
+	sink = MyInt(42) // ERROR "using inline slot for interface value"
 }
 
 func named1b() {
-	escapes(MyInt(42)) // ERROR "using global for interface value"
+	escapes(MyInt(42)) // ERROR "using inline slot for interface value"
 }
 
 func named2a() {
 	v := MyInt(0)
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func named2b() {
 	v := MyInt(42)
-	escapes(v) // ERROR "using global for interface value"
+	escapes(v) // ERROR "using inline slot for interface value"
 }
 
 func named2c() {
 	v := 42
-	sink = MyInt(v) // ERROR "using global for interface value"
+	sink = MyInt(v) // ERROR "using inline slot for interface value"
 }
 
 func named2d() {
 	v := 42
-	escapes(MyInt(v)) // ERROR "using global for interface value"
+	escapes(MyInt(v)) // ERROR "using inline slot for interface value"
 }
 func named3a() {
-	sink = MyInt(42) // ERROR "using global for interface value"
+	sink = MyInt(42) // ERROR "using inline slot for interface value"
 }
 
 func named3b() {
-	escapes(MyInt(0)) // ERROR "using global for interface value"
+	escapes(MyInt(0)) // ERROR "using inline slot for interface value"
 }
 
 func named4a() {
 	v := MyInt(0)
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func named4b() {
 	v := MyInt(0)
-	escapes(v) // ERROR "using global for interface value"
+	escapes(v) // ERROR "using inline slot for interface value"
 }
 
 func named4c() {
 	v := 0
-	sink = MyInt(v) // ERROR "using global for interface value"
+	sink = MyInt(v) // ERROR "using inline slot for interface value"
 }
 
 func named4d() {
 	v := 0
-	escapes(MyInt(v)) // ERROR "using global for interface value"
+	escapes(MyInt(v)) // ERROR "using inline slot for interface value"
 }
 
 func named5() {
-	var a any = MyInt(42) // ERROR "using global for interface value"
+	var a any = MyInt(42) // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func named6() {
 	var a any
 	v := MyInt(42)
-	a = v // ERROR "using global for interface value"
+	a = v // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func named7a(v MyInt) {
-	sink = v
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func named7b(v MyInt) {
-	escapes(v)
+	escapes(v) // ERROR "using inline slot for interface value"
 }
 
 type S struct{ a, b int64 }
 
 func struct1() {
-	sink = S{1, 1} // ERROR "using global for interface value"
+	sink = S{1, 1} // ERROR "using inline slot for interface value"
 }
 
 func struct2() {
 	v := S{1, 1}
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func struct3() {
-	sink = S{} // ERROR "using global for zero value interface value"
+	sink = S{} // ERROR "using inline slot for interface value"
 }
 
 func struct4() {
 	v := S{}
-	sink = v // ERROR "using global for zero value interface value"
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func struct5() {
-	var a any = S{1, 1} // ERROR "using global for interface value"
+	var a any = S{1, 1} // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func struct6() {
 	var a any
 	v := S{1, 1}
-	a = v // ERROR "using global for interface value"
+	a = v // ERROR "using inline slot for interface value"
 	_ = a
 }
 
 func struct7(v S) {
-	sink = v
+	sink = v // ERROR "using inline slot for interface value"
 }
 
 func emptyStruct1() {
@@ -279,17 +287,17 @@ func debugf2(format string, args ...interface{}) {
 
 func f1() {
 	v := 1000
-	debugf("hello %d", v) // ERROR "using global for interface value"
+	debugf("hello %d", v) // ERROR "using inline slot for interface value"
 }
 
 func f2() {
 	v := 1000
-	debugf2("hello %d", v) // ERROR "using global for interface value"
+	debugf2("hello %d", v) // ERROR "using inline slot for interface value"
 }
 
 //go:noinline
 func f3(i int) {
-	debugf("hello %d", i)
+	debugf("hello %d", i) // ERROR "using inline slot for interface value"
 }
 
 func f4() {

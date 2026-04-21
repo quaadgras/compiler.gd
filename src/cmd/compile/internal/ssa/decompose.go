@@ -88,14 +88,17 @@ func decomposeBuiltin(f *Func) {
 				toDelete = append(toDelete, namedVal{i, j})
 			}
 		case t.IsInterface():
-			typeName, dataName := f.SplitInterface(name)
+			typeName, dataName, realName, imagName := f.SplitInterface(name)
 			newNames = maybeAppend2(f, newNames, typeName, dataName)
+			newNames = maybeAppend2(f, newNames, realName, imagName)
 			for j, v := range f.NamedValues[*name] {
 				if v.Op != OpIMake {
 					continue
 				}
 				f.NamedValues[*typeName] = append(f.NamedValues[*typeName], v.Args[0])
 				f.NamedValues[*dataName] = append(f.NamedValues[*dataName], v.Args[1])
+				f.NamedValues[*realName] = append(f.NamedValues[*realName], v.Args[2])
+				f.NamedValues[*imagName] = append(f.NamedValues[*imagName], v.Args[3])
 				toDelete = append(toDelete, namedVal{i, j})
 			}
 		case t.IsFloat():
@@ -219,18 +222,27 @@ func decomposeComplexPhi(v *Value) {
 }
 
 func decomposeInterfacePhi(v *Value) {
+	// gd fat-interface: split phi of iface into four sub-phis matching
+	// OpIMake's 4 args (itab, data, inline_real, inline_imag).
 	uintptrType := v.Block.Func.Config.Types.Uintptr
 	ptrType := v.Block.Func.Config.Types.BytePtr
+	f64Type := v.Block.Func.Config.Types.Float64
 
 	itab := v.Block.NewValue0(v.Pos, OpPhi, uintptrType)
 	data := v.Block.NewValue0(v.Pos, OpPhi, ptrType)
+	real := v.Block.NewValue0(v.Pos, OpPhi, f64Type)
+	imag := v.Block.NewValue0(v.Pos, OpPhi, f64Type)
 	for _, a := range v.Args {
 		itab.AddArg(a.Block.NewValue1(v.Pos, OpITab, uintptrType, a))
 		data.AddArg(a.Block.NewValue1(v.Pos, OpIData, ptrType, a))
+		real.AddArg(a.Block.NewValue1(v.Pos, OpIInlineReal, f64Type, a))
+		imag.AddArg(a.Block.NewValue1(v.Pos, OpIInlineImag, f64Type, a))
 	}
 	v.reset(OpIMake)
 	v.AddArg(itab)
 	v.AddArg(data)
+	v.AddArg(real)
+	v.AddArg(imag)
 }
 
 func decomposeUser(f *Func) {

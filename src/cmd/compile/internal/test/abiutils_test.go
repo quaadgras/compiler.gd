@@ -322,16 +322,16 @@ func TestABIUtilsInterfaces(t *testing.T) {
 
 	exp := makeExpectedDump(`
         IN 0: R{ I0 I1 I2 } spilloffset: 0 typ: struct { int16; int16; bool }
-        IN 1: R{ I3 I4 } spilloffset: 8 typ: interface {}
-        IN 2: R{ I5 I6 } spilloffset: 24 typ: interface {}
-        IN 3: R{ I7 I8 } spilloffset: 40 typ: interface { F() string }
+        IN 1: R{ I3 I4 F0 F1 } spilloffset: 8 typ: interface {}
+        IN 2: R{ I5 I6 F2 F3 } spilloffset: 40 typ: interface {}
+        IN 3: R{ I7 I8 F4 F5 } spilloffset: 72 typ: interface { F() string }
         IN 4: R{ } offset: 0 typ: *interface {}
         IN 5: R{ } offset: 8 typ: interface { F() string }
-        IN 6: R{ } offset: 24 typ: int16
-        OUT 0: R{ I0 I1 } spilloffset: -1 typ: interface {}
-        OUT 1: R{ I2 I3 } spilloffset: -1 typ: interface { F() string }
+        IN 6: R{ } offset: 40 typ: int16
+        OUT 0: R{ I0 I1 F0 F1 } spilloffset: -1 typ: interface {}
+        OUT 1: R{ I2 I3 F2 F3 } spilloffset: -1 typ: interface { F() string }
         OUT 2: R{ I4 } spilloffset: -1 typ: *interface {}
-        offsetToSpillArea: 32 spillAreaSize: 56
+        offsetToSpillArea: 48 spillAreaSize: 104
 `)
 
 	abitest(t, ft, exp)

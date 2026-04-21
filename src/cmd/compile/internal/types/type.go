@@ -1845,6 +1845,21 @@ func IsDirectIface(t *Type) bool {
 	return t.Size() == int64(PtrSize) && PtrDataSize(t) == int64(PtrSize)
 }
 
+// IsInlineIface reports whether t is eligible for inline storage in the
+// 16-byte inline slot of an iface/eface header (gd fat-interface layout).
+// Eligibility: pointer-free, 0 < size <= 16, alignment <= 8, and not
+// pointer-shaped. Zero-sized types are excluded so they keep the stock
+// representation (Data points to runtime.zerobase) — nothing to store
+// inline anyway, and callers like reflect.Value.InterfaceData() observe
+// the Data word directly. Pointer-shaped types are excluded even when
+// PtrDataSize is zero (notinheap pointers like *cgo.Incomplete): the
+// runtime hand-constructs such ifaces with data set and inline zero
+// (see (*pollDesc).makeArg) so assertions must read from Data, and the
+// user-level any(p) path must agree with that layout.
+func IsInlineIface(t *Type) bool {
+	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(t) == 0 && t.Alignment() <= 8 && !t.IsPtrShaped()
+}
+
 // IsInterfaceMethod reports whether (field) m is
 // an interface method. Such methods have the
 // special receiver type types.FakeRecvType().

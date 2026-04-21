@@ -150,13 +150,13 @@ func (v Value) MapIndex(key Value) Value {
 
 	var e unsafe.Pointer
 	if (tt.Key == stringType || key.kind() == String) && tt.Key == key.typ() && tt.Elem.Size() <= abi.MapMaxElemBytes {
-		k := *(*string)(key.ptr)
+		k := *(*string)((&key).dataPtr())
 		e = mapaccess_faststr(v.typ(), v.pointer(), k)
 	} else {
 		key = key.assignTo("reflect.Value.MapIndex", tt.Key, nil)
 		var k unsafe.Pointer
 		if key.flag&flagIndir != 0 {
-			k = key.ptr
+			k = (&key).dataPtr()
 		} else {
 			k = unsafe.Pointer(&key.ptr)
 		}
@@ -273,16 +273,16 @@ func (v Value) SetIterKey(iter *MapIter) {
 	v.mustBeAssignable()
 	var target unsafe.Pointer
 	if v.kind() == Interface {
-		target = v.ptr
+		target = v.dataPtr()
 	}
 
 	t := (*abi.MapType)(unsafe.Pointer(iter.m.typ()))
 	ktype := t.Key
 
 	iter.m.mustBeExported() // do not let unexported m leak
-	key := Value{ktype, iterkey, iter.m.flag | flag(ktype.Kind()) | flagIndir}
+	key := Value{typ_: ktype, ptr: iterkey, flag: iter.m.flag | flag(ktype.Kind()) | flagIndir}
 	key = key.assignTo("reflect.MapIter.SetKey", v.typ(), target)
-	typedmemmove(v.typ(), v.ptr, key.ptr)
+	typedmemmove(v.typ(), v.dataPtr(), (&key).dataPtr())
 }
 
 // Value returns the value of iter's current map entry.
@@ -317,16 +317,16 @@ func (v Value) SetIterValue(iter *MapIter) {
 	v.mustBeAssignable()
 	var target unsafe.Pointer
 	if v.kind() == Interface {
-		target = v.ptr
+		target = v.dataPtr()
 	}
 
 	t := (*abi.MapType)(unsafe.Pointer(iter.m.typ()))
 	vtype := t.Elem
 
 	iter.m.mustBeExported() // do not let unexported m leak
-	elem := Value{vtype, iterelem, iter.m.flag | flag(vtype.Kind()) | flagIndir}
+	elem := Value{typ_: vtype, ptr: iterelem, flag: iter.m.flag | flag(vtype.Kind()) | flagIndir}
 	elem = elem.assignTo("reflect.MapIter.SetValue", v.typ(), target)
-	typedmemmove(v.typ(), v.ptr, elem.ptr)
+	typedmemmove(v.typ(), v.dataPtr(), (&elem).dataPtr())
 }
 
 // Next advances the map iterator and reports whether there is another
@@ -400,7 +400,7 @@ func (v Value) SetMapIndex(key, elem Value) {
 	tt := (*abi.MapType)(unsafe.Pointer(v.typ()))
 
 	if (tt.Key == stringType || key.kind() == String) && tt.Key == key.typ() && tt.Elem.Size() <= abi.MapMaxElemBytes {
-		k := *(*string)(key.ptr)
+		k := *(*string)((&key).dataPtr())
 		if elem.typ() == nil {
 			mapdelete_faststr(v.typ(), v.pointer(), k)
 			return
@@ -409,7 +409,7 @@ func (v Value) SetMapIndex(key, elem Value) {
 		elem = elem.assignTo("reflect.Value.SetMapIndex", tt.Elem, nil)
 		var e unsafe.Pointer
 		if elem.flag&flagIndir != 0 {
-			e = elem.ptr
+			e = (&elem).dataPtr()
 		} else {
 			e = unsafe.Pointer(&elem.ptr)
 		}
@@ -420,7 +420,7 @@ func (v Value) SetMapIndex(key, elem Value) {
 	key = key.assignTo("reflect.Value.SetMapIndex", tt.Key, nil)
 	var k unsafe.Pointer
 	if key.flag&flagIndir != 0 {
-		k = key.ptr
+		k = (&key).dataPtr()
 	} else {
 		k = unsafe.Pointer(&key.ptr)
 	}
@@ -432,7 +432,7 @@ func (v Value) SetMapIndex(key, elem Value) {
 	elem = elem.assignTo("reflect.Value.SetMapIndex", tt.Elem, nil)
 	var e unsafe.Pointer
 	if elem.flag&flagIndir != 0 {
-		e = elem.ptr
+		e = (&elem).dataPtr()
 	} else {
 		e = unsafe.Pointer(&elem.ptr)
 	}

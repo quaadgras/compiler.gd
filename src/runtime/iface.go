@@ -204,6 +204,13 @@ func (t *itabTableType) add(m *itab) {
 func itabInit(m *itab, firstTime bool) string {
 	inter := m.Inter
 	typ := m.Type
+	// Only writable itabs (persistentalloc-backed, firstTime==true) can
+	// receive the inline flag here. Compile-time itabs live in rodata —
+	// writeITab already populated Inline, and re-entering on those with
+	// firstTime==false (see issue 65962) must be mutation-free.
+	if firstTime && typ.TFlag&abi.TFlagInlineIface != 0 {
+		m.Inline = 1
+	}
 	x := typ.Uncommon()
 
 	// both inter and typ have method sorted by name,
@@ -671,12 +678,12 @@ var emptyInterfaceSwitchCache = abi.InterfaceSwitchCache{Mask: 0}
 //
 //go:linkname reflect_ifaceE2I reflect.ifaceE2I
 func reflect_ifaceE2I(inter *interfacetype, e eface, dst *iface) {
-	*dst = iface{assertE2I(inter, e._type), e.data}
+	*dst = iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline}
 }
 
 //go:linkname reflectlite_ifaceE2I internal/reflectlite.ifaceE2I
 func reflectlite_ifaceE2I(inter *interfacetype, e eface, dst *iface) {
-	*dst = iface{assertE2I(inter, e._type), e.data}
+	*dst = iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline}
 }
 
 func iterate_itabs(fn func(*itab)) {

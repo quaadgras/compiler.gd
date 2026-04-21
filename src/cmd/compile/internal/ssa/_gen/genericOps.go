@@ -532,9 +532,14 @@ var genericOps = []opData{
 	{name: "StringLen", argLength: 1, typ: "Int"},     // len(arg0)
 
 	// Interfaces
-	{name: "IMake", argLength: 2},                // arg0=itab, arg1=data
-	{name: "ITab", argLength: 1, typ: "Uintptr"}, // arg0=interface, returns itable field
-	{name: "IData", argLength: 1},                // arg0=interface, returns data field
+	// gd fat-interface: IMake carries the full 32B iface header in SSA.
+	// arg0=itab, arg1=data (boxed pointer, nil when inline), arg2=inline real
+	// (float64 half of the 16B inline payload), arg3=inline imag.
+	{name: "IMake", argLength: 4},
+	{name: "ITab", argLength: 1, typ: "Uintptr"},       // arg0=interface, returns itable field
+	{name: "IData", argLength: 1},                      // arg0=interface, returns data field (boxed; nil if inline)
+	{name: "IInlineReal", argLength: 1, typ: "Float64"}, // arg0=interface, returns inline payload real half
+	{name: "IInlineImag", argLength: 1, typ: "Float64"}, // arg0=interface, returns inline payload imag half
 
 	// Structs
 	{name: "StructMake", argLength: -1},                // args...=field0..n-1. Returns struct with n fields. Must have >0 size (use Empty otherwise).

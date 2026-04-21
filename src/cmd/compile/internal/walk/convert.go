@@ -57,7 +57,28 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 
 	if !fromType.IsInterface() {
 		typeWord := reflectdata.ConvIfaceTypeWord(base.Pos, n)
-		l := ir.NewBinaryExpr(base.Pos, ir.OMAKEFACE, typeWord, dataWord(n, init))
+		var dw ir.Node
+		if types.IsInlineIface(fromType) && !fromType.IsPtrShaped() {
+			// gd fat-interface: hand the raw source value to OMAKEFACE as
+			// n.Y. ssagen recognises a non-pointer Y and lowers into the
+			// inline path (stage into two float64 halves, feed
+			// OpIMake's inline slots, leave data nil). No convT* call.
+			//
+			// Pointer-shaped types (regular pointers, and notinheap
+			// pointers like *cgo.Incomplete) are excluded: notinheap
+			// pointer ifaces are built by hand in the runtime
+			// (e.g. (*pollDesc).makeArg sets .data = &field) and callers
+			// type-asserting them expect the stock indirect layout.
+			// Forcing them through inline breaks that contract; handing
+			// them to dataWord keeps the stock convT* boxing path.
+			if base.Debug.EscapeDebug > 0 {
+				base.WarnfAt(n.Pos(), "convert: using inline slot for interface value: %v", n.X)
+			}
+			dw = n.X
+		} else {
+			dw = dataWord(n, init)
+		}
+		l := ir.NewBinaryExpr(base.Pos, ir.OMAKEFACE, typeWord, dw)
 		l.SetType(toType)
 		l.SetTypecheck(n.Typecheck())
 		return l

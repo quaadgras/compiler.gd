@@ -948,7 +948,7 @@
   @x.Block (Load <v.Type> (OffPtr <v.Type.PtrTo()> [t.FieldOff(int(i))] ptr) mem)
 
 // Putting struct{*byte} and similar into direct interfaces.
-(IMake _typ (StructMake ___)) => imakeOfStructMake(v)
+(IMake _typ (StructMake ___) _real _imag) => imakeOfStructMake(v)
 (StructSelect (IData x)) && v.Type.Size() > 0 => (IData x)
 (StructSelect (IData x)) && v.Type.Size() == 0 => (Empty)
 
@@ -967,7 +967,7 @@
 (Store dst (ArrayMake1 e) mem) => (Store {e.Type} dst e mem)
 
 // Putting [1]*byte and similar into direct interfaces.
-(IMake _typ (ArrayMake1 val)) => (IMake _typ val)
+(IMake _typ (ArrayMake1 val) _real _imag) => (IMake _typ val _real _imag)
 (ArraySelect [0] (IData x)) => (IData x)
 
 // zero-sized values.
@@ -1022,10 +1022,13 @@
 (SliceMake (AddPtr <t> x (And32 y (Slicemask _))) w:(Const32 [c]) z) && c > 0 => (SliceMake (AddPtr <t> x y) w z)
 
 // interface ops
+// gd fat-interface: IMake is 4-ary with two float64 inline halves.
 (ConstInterface) =>
   (IMake
     (ConstNil <typ.Uintptr>)
-    (ConstNil <typ.BytePtr>))
+    (ConstNil <typ.BytePtr>)
+    (Const64F <typ.Float64> [0])
+    (Const64F <typ.Float64> [0]))
 
 (NilCheck ptr:(GetG mem) mem) => ptr
 
@@ -1325,6 +1328,22 @@
 	=> mem
 
 (Store (OffPtr (SelectN [0] call:(StaticLECall ___))) x mem:(SelectN [1] call))
+	&& isConstZero(x)
+	&& isMalloc(call.Aux)
+	=> mem
+
+// gd fat-interface: iface decomposition happens in the "decompose builtin"
+// pass, which runs AFTER "expand calls". By then StaticLECall has been
+// lowered to StaticCall, so the three rules above no longer match and the
+// redundant zero-fill stores the decomposed IMake emits survive into the
+// final code. Provide StaticCall-typed copies for the late_opt pass to
+// catch them.
+(Store (SelectN [0] call:(StaticCall ___)) x mem:(SelectN [1] call))
+	&& isConstZero(x)
+	&& isMalloc(call.Aux)
+	=> mem
+
+(Store (OffPtr (SelectN [0] call:(StaticCall ___))) x mem:(SelectN [1] call))
 	&& isConstZero(x)
 	&& isMalloc(call.Aux)
 	=> mem
@@ -2184,12 +2203,12 @@
 // Loading fixed addresses and constants.
 (Load                                     (Addr {s} sb)         _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
 (Load                            (Convert (Addr {s} sb) _)      _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
-(Load               (ITab (IMake          (Addr {s} sb)    _))  _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
-(Load               (ITab (IMake (Convert (Addr {s} sb) _) _))  _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
+(Load               (ITab (IMake          (Addr {s} sb)    _ _ _))  _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
+(Load               (ITab (IMake (Convert (Addr {s} sb) _) _ _ _))  _)  && isFixedLoad(v, s,   0) => rewriteFixedLoad(v, s, sb,   0)
 (Load (OffPtr [off]                       (Addr {s} sb)       ) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
 (Load (OffPtr [off]              (Convert (Addr {s} sb) _)    ) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
-(Load (OffPtr [off] (ITab (IMake          (Addr {s} sb)    _))) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
-(Load (OffPtr [off] (ITab (IMake (Convert (Addr {s} sb) _) _))) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
+(Load (OffPtr [off] (ITab (IMake          (Addr {s} sb)    _ _ _))) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
+(Load (OffPtr [off] (ITab (IMake (Convert (Addr {s} sb) _) _ _ _))) _)  && isFixedLoad(v, s, off) => rewriteFixedLoad(v, s, sb, off)
 
 // Calling cmpstring a second time with the same arguments in the
 // same memory state can reuse the results of the first call.

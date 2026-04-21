@@ -47,25 +47,23 @@ func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
 		bv.Set(int32(off / int64(types.PtrSize))) //pointer in first slot
 
 	case types.TINTER:
-		// struct { Itab *tab;	void *data; }
+		// Under gd's fat-interface layout:
+		//   struct { Itab *tab; void *data; complex128 inline; }
 		// or, when isnilinter(t)==true:
-		// struct { Type *type; void *data; }
+		//   struct { Type *type; void *data; complex128 inline; }
+		//
+		// The first word (tab/_type) is a pointer but never scanned — it
+		// points into persistentalloc (itab) or into rodata / heap-held
+		// reflect-allocated types, which are kept live by the central
+		// reflect map. The inline slot is typed complex128 (16 raw bytes,
+		// carried in two float registers) and is never scanned because
+		// TFlagInlineIface eligibility forbids pointers in the payload.
+		// Only the data word needs a pointer bit; boxed types hold a live
+		// heap pointer there, inline types hold nil.
 		if off&int64(types.PtrSize-1) != 0 {
 			base.Fatalf("typebits.Set: invalid alignment, %v", t)
 		}
-		// The first word of an interface is a pointer, but we don't
-		// treat it as such.
-		// 1. If it is a non-empty interface, the pointer points to an itab
-		//    which is always in persistentalloc space.
-		// 2. If it is an empty interface, the pointer points to a _type.
-		//   a. If it is a compile-time-allocated type, it points into
-		//      the read-only data section.
-		//   b. If it is a reflect-allocated type, it points into the Go heap.
-		//      Reflect is responsible for keeping a reference to
-		//      the underlying type so it won't be GCd.
-		// If we ever have a moving GC, we need to change this for 2b (as
-		// well as scan itabs to update their itab._type fields).
-		bv.Set(int32(off/int64(types.PtrSize) + 1)) // pointer in second slot
+		bv.Set(int32(off/int64(types.PtrSize) + 1)) // pointer in second slot (data)
 
 	case types.TSLICE:
 		// struct { byte *array; uintgo len; uintgo cap; }

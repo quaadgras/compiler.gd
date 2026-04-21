@@ -960,7 +960,7 @@ char * const issue75751p = &issue75751v;
 char * const volatile issue75751p2 = &issue75751v;
 #define issue75751m2 issue75751p2
 
-typedef struct { void *t; void *v; } GoInterface;
+typedef struct { void *t; void *v; double _Complex inline_payload; } GoInterface;
 extern int exportAny76340Param(GoInterface);
 extern GoInterface exportAny76340Return(int);
 

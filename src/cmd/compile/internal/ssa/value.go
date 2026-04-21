@@ -624,7 +624,13 @@ func CanSSA(t *types.Type) bool {
 		// 4*Widthptr is an arbitrary constant. We want it
 		// to be at least 3*Widthptr so slices can be registerized.
 		// Too big and we'll introduce too much register pressure.
-		if !buildcfg.Experiment.SIMD {
+		//
+		// gd fat-interface: TINTER grew to 2*PtrSize + 16 bytes, which
+		// exceeds the 32-bit sizeLimit (16). Keep interfaces SSA-able
+		// regardless of PtrSize — dec.rules decomposes them into their
+		// scalar fields anyway, so they never materialize as a single
+		// wide value past the decompose pass.
+		if t.Kind() != types.TINTER && !buildcfg.Experiment.SIMD {
 			return false
 		}
 	}

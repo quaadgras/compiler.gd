@@ -7049,12 +7049,15 @@ func TestFuncLayout(t *testing.T) {
 			gc:        r,
 		},
 		{
+			// gd fat-interface: `any` is (tab/type, data, complex128 inline)
+			// = 2*PtrSize + 16 bytes. Only data is GC-scanned; the 2 slots
+			// for the inline payload are always zero in the bitmap.
 			typ:       ValueOf(func(a map[int]int, b uintptr, c any) {}).Type(),
-			size:      4 * goarch.PtrSize,
-			argsize:   4 * goarch.PtrSize,
-			retOffset: 4 * goarch.PtrSize,
-			stack:     []byte{1, 0, 1, 1},
-			gc:        []byte{1, 0, 1, 1},
+			size:      4*goarch.PtrSize + 16,
+			argsize:   4*goarch.PtrSize + 16,
+			retOffset: 4*goarch.PtrSize + 16,
+			stack:     []byte{1, 0, 0, 1, 0, 0},
+			gc:        []byte{1, 0, 0, 1, 0, 0},
 		},
 		{
 			typ:       ValueOf(func(a S) {}).Type(),
@@ -8760,7 +8763,11 @@ func TestTypeAssertAllocs(t *testing.T) {
 
 	val := 123
 	typeAssertAllocs[any](t, ValueOf(val), 0)
-	typeAssertAllocs[any](t, ValueOf(&val).Elem(), 1) // must allocate, so that Set() does not modify the returned inner iface value.
+	// Stock Go would need 1 alloc here so Set() on the source can't write
+	// through the returned any. Under the gd fork's fat-iface, the int
+	// rides in the returned iface's inline slot (a copy of val), so there
+	// is no aliasing and no allocation.
+	typeAssertAllocs[any](t, ValueOf(&val).Elem(), 0)
 	typeAssertAllocs[int](t, ValueOf(val), 0)
 	typeAssertAllocs[int](t, ValueOf(&val).Elem(), 0)
 

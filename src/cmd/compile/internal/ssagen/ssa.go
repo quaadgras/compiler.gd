@@ -1170,6 +1170,7 @@ var (
 	okVar        = ssaMarker("ok")
 	deferBitsVar = ssaMarker("deferBits")
 	hashVar      = ssaMarker("hash")
+	rcvrVar      = ssaMarker("rcvr")
 )
 
 // startBlock sets the current block we're generating code in to b.
@@ -1439,6 +1440,203 @@ func (s *state) constInt(t *types.Type, c int64) *ssa.Value {
 		s.Fatalf("integer constant too big %d", c)
 	}
 	return s.constInt32(t, int32(c))
+}
+
+// iMake emits a boxed iface SSA value — the common case. The two inline
+// payload halves are zero; Phase D/E inline producers go through
+// iMakeInline instead (gd fat-interface: OpIMake is 4-ary).
+func (s *state) iMake(t *types.Type, tab, data *ssa.Value) *ssa.Value {
+	zero := s.constFloat64(types.Types[types.TFLOAT64], 0)
+	return s.curBlock.NewValue4(s.peekPos(), ssa.OpIMake, t, tab, data, zero, zero)
+}
+
+// iMakeInline emits an iface SSA value with a populated inline payload
+// (two float64 halves of the 16B inline slot). data is usually ConstNil
+// for a pure-inline iface; under gd's "shadow" scheme it may also hold
+// a boxed pointer.
+func (s *state) iMakeInline(t *types.Type, tab, data, real, imag *ssa.Value) *ssa.Value {
+	return s.curBlock.NewValue4(s.peekPos(), ssa.OpIMake, t, tab, data, real, imag)
+}
+
+// inlineStageTemp allocates an addressable complex128 autotmp for the
+// memory bitcast between the 16-byte inline payload and an f64 pair or a
+// concrete value. Addrtaken must be set explicitly: complex128 is
+// SSA-able, and without it s.addr collapses the autotmp to
+// runtime.zerobase (see s.addr's canSSA fast path) — every stage at every
+// call site then aliases the same zero word.
+func (s *state) inlineStageTemp(pos src.XPos) *ssa.Value {
+	tmp := typecheck.TempAt(pos, s.curfn, types.Types[types.TCOMPLEX128])
+	tmp.SetAddrtaken(true)
+	return s.addr(tmp)
+}
+
+// iMakeInlineFromValue stages valNode into the inline payload's two
+// float64 halves and emits an inline iface with data=nil. Caller must
+// have verified that valNode's type is ≤ 16 B, pointer-free, and
+// align ≤ 8.
+func (s *state) iMakeInlineFromValue(ifaceT *types.Type, tab *ssa.Value, valNode ir.Node) *ssa.Value {
+	valT := valNode.Type()
+	f64 := types.Types[types.TFLOAT64]
+	byteptr := s.f.Config.Types.BytePtr
+
+	// Fast path: ≤ 8 B integer or bool. Widen to uint64 in registers, stage
+	// through an 8 B addrtaken uint64 slot, load as float64 — the backend
+	// fuses MOVQstore+MOVSDload to a single register bit-move (MOVQi2f on
+	// amd64, equivalents on other arches). Imag half is const 0; no 16 B
+	// zero-init needed.
+	if (valT.IsInteger() || valT.IsBoolean()) && valT.Size() <= 8 {
+		src := s.expr(valNode)
+		u64 := types.Types[types.TUINT64]
+		var widened *ssa.Value
+		switch valT.Size() {
+		case 1:
+			widened = s.newValue1(ssa.OpZeroExt8to64, u64, src)
+		case 2:
+			widened = s.newValue1(ssa.OpZeroExt16to64, u64, src)
+		case 4:
+			widened = s.newValue1(ssa.OpZeroExt32to64, u64, src)
+		case 8:
+			widened = src
+		default:
+			base.Fatalf("iMakeInlineFromValue: unexpected integer size %d for %v", valT.Size(), valT)
+		}
+		tmp := typecheck.TempAt(valNode.Pos(), s.curfn, u64)
+		tmp.SetAddrtaken(true)
+		stageAddr := s.addr(tmp)
+		s.store(u64, stageAddr, widened)
+		realV := s.load(f64, stageAddr)
+		imagV := s.constFloat64(f64, 0)
+		return s.iMakeInline(ifaceT, tab, s.constNil(byteptr), realV, imagV)
+	}
+
+	// General path: pointer-free type of any shape, size ≤ 16 B. Stage
+	// through a zero-init'd complex128 temp and extract two float64 halves
+	// via memory.
+	stageT := types.Types[types.TCOMPLEX128]
+	stageAddr := s.inlineStageTemp(valNode.Pos())
+	s.zero(stageT, stageAddr)
+
+	if valT.Size() > 0 {
+		src := s.expr(valNode)
+		stageAsVal := s.newValue1I(ssa.OpOffPtr, types.NewPtr(valT), 0, stageAddr)
+		s.store(valT, stageAsVal, src)
+	}
+
+	realV := s.load(f64, stageAddr)
+	imagAddr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(f64), 8, stageAddr)
+	imagV := s.load(f64, imagAddr)
+
+	return s.iMakeInline(ifaceT, tab, s.constNil(byteptr), realV, imagV)
+}
+
+// inlineExtract loads a concrete inline-eligible value directly from the
+// iface's 16-byte inline slot. Stages the two float64 halves into a
+// complex128 temp (pointer-free, no write barrier) and loads T from it.
+// Used by ODEREF when walk emits OSTAR(OIDATA) for a non-direct-iface
+// inline concrete type.
+func (s *state) inlineExtract(pos src.XPos, t *types.Type, iface *ssa.Value) *ssa.Value {
+	f64 := types.Types[types.TFLOAT64]
+	f64Ptr := types.NewPtr(f64)
+	stageAddr := s.inlineStageTemp(pos)
+	real := s.newValue1(ssa.OpIInlineReal, f64, iface)
+	imag := s.newValue1(ssa.OpIInlineImag, f64, iface)
+	s.store(f64, stageAddr, real)
+	imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
+	s.store(f64, imagSlot, imag)
+	valPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), 0, stageAddr)
+	return s.load(t, valPtr)
+}
+
+// inlineStagePtr unpacks the inline payload of iface into a fresh complex128
+// stack temp and returns its address typed as resultT (== *T where T is an
+// inline-eligible concrete type). The caller dereferences the pointer to
+// produce a T-valued SSA value. No write barriers: the payload is
+// pointer-free by IsInlineIface.
+func (s *state) inlineStagePtr(pos src.XPos, resultT *types.Type, iface *ssa.Value) *ssa.Value {
+	f64 := types.Types[types.TFLOAT64]
+	f64Ptr := types.NewPtr(f64)
+	stageAddr := s.inlineStageTemp(pos)
+	real := s.newValue1(ssa.OpIInlineReal, f64, iface)
+	imag := s.newValue1(ssa.OpIInlineImag, f64, iface)
+	s.store(f64, stageAddr, real)
+	imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
+	s.store(f64, imagSlot, imag)
+	return s.newValue1I(ssa.OpOffPtr, resultT, 0, stageAddr)
+}
+
+// inlineOrBoxedPtr emits a runtime branch on itab.Inline (or Type.TFlag for
+// empty interfaces): if the concrete type is inline-eligible, stage the
+// inline payload into a complex128 temp and return its address; otherwise
+// return iface.data unchanged. Result is typed as unsafe.Pointer — suitable
+// for runtime.ifaceeq / runtime.efaceeq. A nil iface/eface reaches the
+// boxed branch and yields nil, matching stock OpIData semantics.
+func (s *state) inlineOrBoxedPtr(pos src.XPos, iface *ssa.Value, srcT *types.Type) *ssa.Value {
+	byteptr := s.f.Config.Types.BytePtr
+	u8 := types.Types[types.TUINT8]
+	itab := s.newValue1(ssa.OpITab, types.Types[types.TUINTPTR], iface)
+
+	// Stage inline halves unconditionally — writes are to a fresh
+	// pointer-free stack temp, so the boxed side pays only a couple
+	// wasted stores and no write barriers.
+	f64 := types.Types[types.TFLOAT64]
+	f64Ptr := types.NewPtr(f64)
+	stageAddr := s.inlineStageTemp(pos)
+	realV := s.newValue1(ssa.OpIInlineReal, f64, iface)
+	imagV := s.newValue1(ssa.OpIInlineImag, f64, iface)
+	s.store(f64, stageAddr, realV)
+	imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
+	s.store(f64, imagSlot, imagV)
+	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stageAddr)
+	boxedData := s.newValue1(ssa.OpIData, byteptr, iface)
+
+	// Guard: nil itab means the value itself is nil — skip the Inline
+	// load (it would deref nil) and fall into the boxed branch.
+	itabNonNil := s.newValue2(ssa.OpNeqPtr, types.Types[types.TBOOL], itab, s.constNil(byteptr))
+	bCheckInline := s.f.NewBlock(ssa.BlockPlain)
+	bUseBoxed := s.f.NewBlock(ssa.BlockPlain)
+	bMerge := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(itabNonNil)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bCheckInline)
+	b.AddEdgeTo(bUseBoxed)
+
+	resultVar := ssaMarker("idata-result")
+
+	s.startBlock(bCheckInline)
+	var inlineFlag *ssa.Value
+	if srcT.IsEmptyInterface() {
+		tflagPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(u8), rttype.Type.OffsetOf("TFlag"), itab)
+		tflag := s.load(u8, tflagPtr)
+		mask := s.constInt8(u8, int8(rtabi.TFlagInlineIface))
+		inlineFlag = s.newValue2(ssa.OpAnd8, u8, tflag, mask)
+	} else {
+		inlineFlagPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(u8), rttype.ITab.OffsetOf("Inline"), itab)
+		inlineFlag = s.load(u8, inlineFlagPtr)
+	}
+	zero := s.constInt8(u8, 0)
+	cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], inlineFlag, zero)
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	b2 := s.endBlock()
+	b2.Kind = ssa.BlockIf
+	b2.SetControl(cond)
+	b2.Likely = ssa.BranchUnlikely // boxed is the common case today
+	b2.AddEdgeTo(bInline)
+	b2.AddEdgeTo(bUseBoxed)
+
+	s.startBlock(bInline)
+	s.vars[resultVar] = inlineAddr
+	s.endBlock().AddEdgeTo(bMerge)
+
+	s.startBlock(bUseBoxed)
+	s.vars[resultVar] = boxedData
+	s.endBlock().AddEdgeTo(bMerge)
+
+	s.startBlock(bMerge)
+	result := s.variable(resultVar, byteptr)
+	delete(s.vars, resultVar)
+	return result
 }
 
 // newValueOrSfCall* are wrappers around newValue*, which may create a call to a
@@ -3495,6 +3693,17 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
+		// gd fat-interface: *(*T)(OIDATA(iface)) is how walk expresses the
+		// payload extraction for a non-direct-iface concrete type T (see
+		// walk/walk.go ifaceData). When T is inline-eligible AND not
+		// pointer-shaped, the payload lives in iface.inline, not behind
+		// iface.data — skip the deref and load directly from the inline
+		// halves. Pointer-shaped inline-eligible types (notinheap
+		// pointers) stay on the indirect data path to match OMAKEFACE.
+		if inner, ok := n.X.(*ir.UnaryExpr); ok && inner.Op() == ir.OIDATA && types.IsInlineIface(n.Type()) && !n.Type().IsPtrShaped() {
+			iface := s.expr(inner.X)
+			return s.inlineExtract(n.Pos(), n.Type(), iface)
+		}
 		p := s.exprPtr(n.X, n.Bounded(), n.Pos())
 		return s.load(n.Type(), p)
 
@@ -3623,13 +3832,55 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 	case ir.OIDATA:
 		n := n.(*ir.UnaryExpr)
 		a := s.expr(n.X)
-		return s.newValue1(ssa.OpIData, n.Type(), a)
+		resultT := n.Type()
+		// EqInterface and friends use OIDATA typed as unsafe.Pointer on an
+		// interface whose concrete type isn't statically known. Runtime
+		// branch on itab.Inline: inline concrete types hand back a pointer
+		// to a stage temp holding the inline halves; boxed types hand back
+		// the data word unchanged.
+		if resultT == types.Types[types.TUNSAFEPTR] && n.X.Type().IsInterface() {
+			return s.inlineOrBoxedPtr(n.Pos(), a, n.X.Type())
+		}
+		// Direct-iface concrete types (pointer, chan, map, func, ...)
+		// arrive as OIDATA without an OSTAR wrapper — the data word IS
+		// the value. Inline-eligible non-direct-iface types instead
+		// arrive wrapped in OSTAR; that case is handled above in
+		// ir.ODEREF and reads from iface.inline.
+		return s.newValue1(ssa.OpIData, resultT, a)
 
 	case ir.OMAKEFACE:
 		n := n.(*ir.BinaryExpr)
 		tab := s.expr(n.X)
+		// gd fat-interface: walk hands us the raw source value as n.Y for
+		// inline-eligible types (pointer-free, ≤16 B, align ≤8) instead
+		// of a pointer-shaped data word. Must mirror walkConvInterface's
+		// gate — including the !IsPtrShaped exclusion for notinheap
+		// pointer types (e.g. *cgo.Incomplete), which stay on the stock
+		// indirect path so hand-built runtime ifaces (e.g.
+		// (*pollDesc).makeArg) and user-level any(p) read back through
+		// the same layout as dottype1 expects.
+		yT := n.Y.Type()
+		if yT != nil && types.IsInlineIface(yT) && !yT.IsPtrShaped() {
+			return s.iMakeInlineFromValue(n.Type(), tab, n.Y)
+		}
+		// gd fat-interface: I2I / I2E pass-through. Walk emits
+		// OMAKEFACE(typeWord, OIDATA(src_iface)) to rebuild an iface with
+		// a new type word but the same payload. The stock representation
+		// was single-word so forwarding data sufficed; under gd we must
+		// also forward the inline slot, else inline payloads get zeroed.
+		if inner, ok := n.Y.(*ir.UnaryExpr); ok && inner.Op() == ir.OIDATA {
+			if innerSrcT := inner.X.Type(); innerSrcT != nil && innerSrcT.IsInterface() {
+				src := s.expr(inner.X)
+				byteptr := s.f.Config.Types.BytePtr
+				f64 := types.Types[types.TFLOAT64]
+				data := s.newValue1(ssa.OpIData, byteptr, src)
+				realV := s.newValue1(ssa.OpIInlineReal, f64, src)
+				imagV := s.newValue1(ssa.OpIInlineImag, f64, src)
+				return s.iMakeInline(n.Type(), tab, data, realV, imagV)
+			}
+		}
 		data := s.expr(n.Y)
-		return s.newValue2(ssa.OpIMake, n.Type(), tab, data)
+		return s.iMake(n.Type(), tab, data)
 
 	case ir.OSLICEHEADER:
 		n := n.(*ir.SliceHeaderExpr)
@@ -5213,7 +5464,51 @@ func (s *state) getClosureAndRcvr(fn *ir.SelectorExpr) (*ssa.Value, *ssa.Value) 
 	s.nilCheck(itab)
 	itabidx := fn.Offset() + rttype.ITab.OffsetOf("Fun")
 	closure := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, itabidx, itab)
-	rcvr := s.newValue1(ssa.OpIData, s.f.Config.Types.BytePtr, i)
+	byteptr := s.f.Config.Types.BytePtr
+	// gd fat-interface: split on itab.Inline. Inline receivers need an
+	// address that backs the concrete value — we materialize the inline
+	// payload into a complex128 stack temp (two float64 stores, no write
+	// barriers) and pass its address. Boxed receivers keep reading
+	// iface.data.
+	u8 := types.Types[types.TUINT8]
+	inlineFlagPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(u8), rttype.ITab.OffsetOf("Inline"), itab)
+	inlineFlag := s.load(u8, inlineFlagPtr)
+	zero := s.constInt8(u8, 0)
+	cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], inlineFlag, zero)
+
+	f64 := types.Types[types.TFLOAT64]
+	f64Ptr := types.NewPtr(f64)
+	stageAddr := s.inlineStageTemp(fn.Pos())
+	real := s.newValue1(ssa.OpIInlineReal, f64, i)
+	imag := s.newValue1(ssa.OpIInlineImag, f64, i)
+	s.store(f64, stageAddr, real)
+	imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
+	s.store(f64, imagSlot, imag)
+	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stageAddr)
+
+	boxedData := s.newValue1(ssa.OpIData, byteptr, i)
+
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	bBoxed := s.f.NewBlock(ssa.BlockPlain)
+	bMerge := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely // boxed is the common case today
+	b.AddEdgeTo(bInline)
+	b.AddEdgeTo(bBoxed)
+
+	s.startBlock(bInline)
+	s.vars[rcvrVar] = inlineAddr
+	s.endBlock().AddEdgeTo(bMerge)
+
+	s.startBlock(bBoxed)
+	s.vars[rcvrVar] = boxedData
+	s.endBlock().AddEdgeTo(bMerge)
+
+	s.startBlock(bMerge)
+	rcvr := s.variable(rcvrVar, byteptr)
+	delete(s.vars, rcvrVar)
 	return closure, rcvr
 }
 
@@ -5312,6 +5607,18 @@ func (s *state) addr(n ir.Node) *ssa.Value {
 		}
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
+		// gd fat-interface: mirror the expr-side inline handling (see
+		// case ir.ODEREF in expr). For *(*T)(OIDATA(iface)) with T
+		// inline-eligible and non-pointer-shaped, the data word is nil
+		// and the payload lives in iface.inline. Stage it into an
+		// addressable temp and return that temp's address so the caller
+		// (e.g. a copy from an unSSAable RHS) reads from the staged
+		// payload rather than dereferencing nil. Pointer-shaped
+		// inline-eligible types stay on the indirect data path.
+		if inner, ok := n.X.(*ir.UnaryExpr); ok && inner.Op() == ir.OIDATA && types.IsInlineIface(n.Type()) && !n.Type().IsPtrShaped() {
+			iface := s.expr(inner.X)
+			return s.inlineStagePtr(n.Pos(), types.NewPtr(n.Type()), iface)
+		}
 		return s.exprPtr(n.X, n.Bounded(), n.Pos())
 	case ir.ODOT:
 		n := n.(*ir.SelectorExpr)
@@ -5670,6 +5977,19 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 		// itab field doesn't need a write barrier (even though it is a pointer).
 		itab := s.newValue1(ssa.OpITab, s.f.Config.Types.BytePtr, right)
 		s.store(types.Types[types.TUINTPTR], left, itab)
+		// gd fat-interface: extract and store the 16-byte inline payload.
+		// OpIInlineReal/Imag select halves from an iface SSA value;
+		// dec.rules forwards them to IMake's args (rule 87, 88) or to a
+		// direct memory load, so boxed and inline sources both flow
+		// through the same shape. Pointer-free by construction, no write
+		// barrier needed.
+		f64 := types.Types[types.TFLOAT64]
+		real := s.newValue1(ssa.OpIInlineReal, f64, right)
+		imag := s.newValue1(ssa.OpIInlineImag, f64, right)
+		realAddr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(f64), 2*s.config.PtrSize, left)
+		s.store(f64, realAddr, real)
+		imagAddr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(f64), 2*s.config.PtrSize+8, left)
+		s.store(f64, imagAddr, imag)
 	case isStructNotSIMD(t):
 		n := t.NumFields()
 		for i := 0; i < n; i++ {
@@ -6228,11 +6548,18 @@ func (s *state) dottype(n *ir.TypeAssertExpr, commaok bool) (res, resok *ssa.Val
 			base.Fatalf("unexpected *ir.TypeAssertExpr with UseNilPanic == true && Type().IsInterface() == true")
 		}
 		typs := s.f.Config.Types
-		iface = s.newValue2(
-			ssa.OpIMake,
+		// gd fat-interface: preserve the inline payload when rebuilding
+		// iface for the nil-panic guard. Downstream uses (method-dispatch
+		// devirtualization) extract inline_real/imag from this iface;
+		// iMake would zero them and silently corrupt the dispatched
+		// receiver value.
+		f64 := types.Types[types.TFLOAT64]
+		iface = s.iMakeInline(
 			iface.Type,
 			s.nilCheck(s.newValue1(ssa.OpITab, typs.BytePtr, iface)),
 			s.newValue1(ssa.OpIData, typs.BytePtr, iface),
+			s.newValue1(ssa.OpIInlineReal, f64, iface),
+			s.newValue1(ssa.OpIInlineImag, f64, iface),
 		)
 	}
 
@@ -6311,7 +6638,9 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 				off := s.newValue1I(ssa.OpOffPtr, byteptr, rttype.ITab.OffsetOf("Type"), itab)
 				typ := s.load(byteptr, off)
 				idata := s.newValue1(ssa.OpIData, byteptr, iface)
-				res = s.newValue2(ssa.OpIMake, dst, typ, idata)
+				ireal := s.newValue1(ssa.OpIInlineReal, types.Types[types.TFLOAT64], iface)
+				iimag := s.newValue1(ssa.OpIInlineImag, types.Types[types.TFLOAT64], iface)
+				res = s.iMakeInline(dst, typ, idata, ireal, iimag)
 				return
 			}
 
@@ -6333,7 +6662,9 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			bFail.AddEdgeTo(bEnd)
 			s.startBlock(bEnd)
 			idata := s.newValue1(ssa.OpIData, byteptr, iface)
-			res = s.newValue2(ssa.OpIMake, dst, s.variable(typVar, byteptr), idata)
+			ireal := s.newValue1(ssa.OpIInlineReal, types.Types[types.TFLOAT64], iface)
+			iimag := s.newValue1(ssa.OpIInlineImag, types.Types[types.TFLOAT64], iface)
+			res = s.iMakeInline(dst, s.variable(typVar, byteptr), idata, ireal, iimag)
 			resok = cond
 			delete(s.vars, typVar) // no practical effect, just to indicate typVar is no longer live.
 			return
@@ -6345,6 +6676,8 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 
 		itab := s.newValue1(ssa.OpITab, byteptr, iface)
 		data := s.newValue1(ssa.OpIData, types.Types[types.TUNSAFEPTR], iface)
+		ireal := s.newValue1(ssa.OpIInlineReal, types.Types[types.TFLOAT64], iface)
+		iimag := s.newValue1(ssa.OpIInlineImag, types.Types[types.TFLOAT64], iface)
 
 		// First, check for nil.
 		bNil := s.f.NewBlock(ssa.BlockPlain)
@@ -6491,7 +6824,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		if commaok {
 			ok = s.newValue2(ssa.OpNeqPtr, types.Types[types.TBOOL], itab, s.constNil(byteptr))
 		}
-		return s.newValue2(ssa.OpIMake, dst, itab, data), ok
+		return s.iMakeInline(dst, itab, data, ireal, iimag), ok
 	}
 
 	if base.Debug.TypeAssert > 0 {
@@ -6532,6 +6865,27 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 	b.AddEdgeTo(bOk)
 	b.AddEdgeTo(bFail)
 
+	// gd fat-interface: an assertion to an inline-eligible concrete type
+	// reads from iface.inline instead of dereferencing iface.data. Gated
+	// on -d=gdinline=1 and !IsPtrShaped so it mirrors the OMAKEFACE
+	// emission gate; otherwise pointer-shaped inline-eligible types
+	// (e.g. pointers to NotInHeap structs like *pollDesc, which have
+	// PtrDataSize == 0) would read from an inline slot that was never
+	// populated — the source iface was built with data set and inline
+	// zero (runtime.(*pollDesc).makeArg does exactly this).
+	inlineRead := types.IsInlineIface(dst) && !dst.IsPtrShaped()
+	inlineSrcPtr := func() *ssa.Value {
+		f64 := types.Types[types.TFLOAT64]
+		f64Ptr := types.NewPtr(f64)
+		stageAddr := s.inlineStageTemp(pos)
+		real := s.newValue1(ssa.OpIInlineReal, f64, iface)
+		imag := s.newValue1(ssa.OpIInlineImag, f64, iface)
+		s.store(f64, stageAddr, real)
+		imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
+		s.store(f64, imagSlot, imag)
+		return s.newValue1I(ssa.OpOffPtr, types.NewPtr(dst), 0, stageAddr)
+	}
+
 	if !commaok {
 		// on failure, panic by calling panicdottype
 		s.startBlock(bFail)
@@ -6547,6 +6901,9 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 
 		// on success, return data from interface
 		s.startBlock(bOk)
+		if inlineRead {
+			return s.load(dst, inlineSrcPtr()), nil
+		}
 		if direct {
 			return s.newValue1(ssa.OpIData, dst, iface), nil
 		}
@@ -6564,14 +6921,22 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 	// type assertion succeeded
 	s.startBlock(bOk)
 	if tmp == nil {
-		if direct {
+		switch {
+		case inlineRead:
+			s.vars[valVar] = s.load(dst, inlineSrcPtr())
+		case direct:
 			s.vars[valVar] = s.newValue1(ssa.OpIData, dst, iface)
-		} else {
+		default:
 			p := s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
 			s.vars[valVar] = s.load(dst, p)
 		}
 	} else {
-		p := s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
+		var p *ssa.Value
+		if inlineRead {
+			p = inlineSrcPtr()
+		} else {
+			p = s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
+		}
 		s.move(dst, addr, p)
 	}
 	s.vars[okVar] = s.constBool(true)

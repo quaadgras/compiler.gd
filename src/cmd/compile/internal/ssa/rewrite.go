@@ -1275,8 +1275,12 @@ func isConstZero(v *Value) bool {
 		return true
 	case OpConst64, OpConst32, OpConst16, OpConst8, OpConstBool, OpConst32F, OpConst64F:
 		return v.AuxInt == 0
-	case OpStringMake, OpIMake, OpComplexMake:
+	case OpStringMake, OpComplexMake:
 		return isConstZero(v.Args[0]) && isConstZero(v.Args[1])
+	case OpIMake:
+		// gd fat-interface: 4 args (itab, data, inline_real, inline_imag).
+		return isConstZero(v.Args[0]) && isConstZero(v.Args[1]) &&
+			isConstZero(v.Args[2]) && isConstZero(v.Args[3])
 	case OpSliceMake:
 		return isConstZero(v.Args[0]) && isConstZero(v.Args[1]) && isConstZero(v.Args[2])
 	case OpStringPtr, OpStringLen, OpSlicePtr, OpSliceLen, OpSliceCap, OpITab, OpIData, OpComplexReal, OpComplexImag:
@@ -2773,8 +2777,8 @@ func isDictArgSym(sym Sym) bool {
 	return sym.(*ir.Name).Sym().Name == typecheck.LocalDictName
 }
 
-// When v is (IMake typ (StructMake ...)), convert to
-// (IMake typ arg) where arg is the pointer-y argument to
+// When v is (IMake typ (StructMake ...) real imag), convert to
+// (IMake typ arg real imag) where arg is the pointer-y argument to
 // the StructMake (there must be exactly one).
 func imakeOfStructMake(v *Value) *Value {
 	var arg *Value
@@ -2784,5 +2788,10 @@ func imakeOfStructMake(v *Value) *Value {
 			break
 		}
 	}
-	return v.Block.NewValue2(v.Pos, OpIMake, v.Type, v.Args[0], arg)
+	r := v.Block.NewValue0(v.Pos, OpIMake, v.Type)
+	r.AddArg(v.Args[0])
+	r.AddArg(arg)
+	r.AddArg(v.Args[2])
+	r.AddArg(v.Args[3])
+	return r
 }

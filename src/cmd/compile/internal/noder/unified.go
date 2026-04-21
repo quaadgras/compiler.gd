@@ -10,6 +10,7 @@ import (
 	"internal/pkgbits"
 	"internal/types/errors"
 	"io"
+	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -192,6 +193,11 @@ func unified(m posMap, noders []*noder) {
 	pgoir.PostLookupCleanup = PostLookupCleanup
 
 	data := writePkgStub(m, noders)
+
+	if dbg := os.Getenv("GD_PKGBITS_DUMP"); dbg != "" {
+		path := fmt.Sprintf("%s/%s.pkgbits", dbg, strings.ReplaceAll(types.LocalPkg.Path, "/", "_"))
+		os.WriteFile(path, []byte(data), 0644)
+	}
 
 	target := typecheck.Target
 

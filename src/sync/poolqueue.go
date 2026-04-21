@@ -5,6 +5,7 @@
 package sync
 
 import (
+	"internal/abi"
 	"sync/atomic"
 	"unsafe"
 )
@@ -41,11 +42,7 @@ type poolDequeue struct {
 	// index has moved beyond it and typ has been set to nil. This
 	// is set to nil atomically by the consumer and read
 	// atomically by the producer.
-	vals []eface
-}
-
-type eface struct {
-	typ, val unsafe.Pointer
+	vals []abi.EmptyInterface
 }
 
 const dequeueBits = 32
@@ -87,7 +84,7 @@ func (d *poolDequeue) pushHead(val any) bool {
 	slot := &d.vals[head&uint32(len(d.vals)-1)]
 
 	// Check if the head slot has been released by popTail.
-	typ := atomic.LoadPointer(&slot.typ)
+	typ := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&slot.Type)))
 	if typ != nil {
 		// Another goroutine is still cleaning up the tail, so
 		// the queue is actually still full.
@@ -110,7 +107,7 @@ func (d *poolDequeue) pushHead(val any) bool {
 // It returns false if the queue is empty. It must only be called by a
 // single producer.
 func (d *poolDequeue) popHead() (any, bool) {
-	var slot *eface
+	var slot *abi.EmptyInterface
 	for {
 		ptrs := d.headTail.Load()
 		head, tail := d.unpack(ptrs)
@@ -137,7 +134,7 @@ func (d *poolDequeue) popHead() (any, bool) {
 	}
 	// Zero the slot. Unlike popTail, this isn't racing with
 	// pushHead, so we don't need to be careful here.
-	*slot = eface{}
+	*slot = abi.EmptyInterface{}
 	return val, true
 }
 
@@ -145,7 +142,7 @@ func (d *poolDequeue) popHead() (any, bool) {
 // It returns false if the queue is empty. It may be called by any
 // number of consumers.
 func (d *poolDequeue) popTail() (any, bool) {
-	var slot *eface
+	var slot *abi.EmptyInterface
 	for {
 		ptrs := d.headTail.Load()
 		head, tail := d.unpack(ptrs)
@@ -177,8 +174,8 @@ func (d *poolDequeue) popTail() (any, bool) {
 	//
 	// We write to val first and then publish that we're done with
 	// this slot by atomically writing to typ.
-	slot.val = nil
-	atomic.StorePointer(&slot.typ, nil)
+	slot.Data = nil
+	atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&slot.Type)), nil)
 	// At this point pushHead owns the slot.
 
 	return val, true
@@ -223,7 +220,7 @@ func (c *poolChain) pushHead(val any) {
 		// Initialize the chain.
 		const initSize = 8 // Must be a power of 2
 		d = new(poolChainElt)
-		d.vals = make([]eface, initSize)
+		d.vals = make([]abi.EmptyInterface, initSize)
 		c.head = d
 		c.tail.Store(d)
 	}
@@ -242,7 +239,7 @@ func (c *poolChain) pushHead(val any) {
 
 	d2 := &poolChainElt{}
 	d2.prev.Store(d)
-	d2.vals = make([]eface, newSize)
+	d2.vals = make([]abi.EmptyInterface, newSize)
 	c.head = d2
 	d.next.Store(d2)
 	d2.pushHead(val)

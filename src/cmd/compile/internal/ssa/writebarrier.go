@@ -630,25 +630,60 @@ func (f *Func) computeZeroMap(select1 []*Value) map[ID]ZeroRegion {
 			// Note: iterating forwards helps convergence, as values are
 			// typically (but not always!) in store order.
 			for _, v := range b.Values {
-				if v.Op != OpStore {
+				// Extract the (dst, size) the op writes, or recognise
+				// pass-through lifetime markers. gd fat-iface inline
+				// staging interposes Zero/Store to a stack autotmp
+				// between newobject and the header stores; the chain
+				// must propagate through those, else spurious write
+				// barriers appear for the data-slot ConstNil store
+				// (see test/writebarrier.go f27/f28).
+				var dst *Value
+				var size int64
+				switch v.Op {
+				case OpStore:
+					dst = v.Args[0]
+					size = v.Aux.(*types.Type).Size()
+				case OpZero:
+					dst = v.Args[0]
+					size = v.AuxInt
+				case OpVarDef, OpVarLive:
+					// Lifetime markers don't modify memory contents;
+					// propagate the current zero state unchanged.
+					z, ok := zeroes[v.MemoryArg().ID]
+					if !ok {
+						continue
+					}
+					if zeroes[v.ID] != z {
+						zeroes[v.ID] = z
+						changed = true
+					}
+					continue
+				default:
 					continue
 				}
 				z, ok := zeroes[v.MemoryArg().ID]
 				if !ok {
 					continue
 				}
-				ptr := v.Args[0]
+				ptr := dst
 				var off int64
-				size := v.Aux.(*types.Type).Size()
 				for ptr.Op == OpOffPtr {
 					off += ptr.AuxInt
 					ptr = ptr.Args[0]
 				}
 				if ptr != z.base {
-					// Different base object - we don't know anything.
-					// We could even be writing to the base object we know
-					// about, but through an aliased but offset pointer.
-					// So we have to throw all the zero information we have away.
+					// Different base object. If the dst is provably
+					// stack- or global-resident, it can't alias a
+					// fresh heap-allocated z.base, so propagate the
+					// zero state unchanged. Otherwise be conservative
+					// and drop the state (same as the original
+					// pre-fat-iface behaviour).
+					if IsStackAddr(dst) || IsGlobalAddr(dst) {
+						if zeroes[v.ID] != z {
+							zeroes[v.ID] = z
+							changed = true
+						}
+					}
 					continue
 				}
 				// Round to cover any partially written pointer slots.

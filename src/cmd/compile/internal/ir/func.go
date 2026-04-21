@@ -582,8 +582,16 @@ func FuncPC(pos src.XPos, n Node, wantABI obj.ABI) Node {
 	if wantABI != obj.ABIInternal {
 		base.ErrorfAt(pos, 0, "internal/abi.FuncPC%s does not accept func expression, which is ABIInternal", wantABI)
 	}
+	// gd fat-interface: route OIDATA through an unsafe.Pointer OCONVNOP so
+	// the emitted shape is not *(*uintptr)(OIDATA(n)). ssagen's ODEREF
+	// handler treats that exact shape as an inline-payload extraction (see
+	// ir.ODEREF in ssagen.ssa.expr). For FuncPC the iface holds a func
+	// value in the data word, and the correct read is a plain pointer
+	// dereference of iface.data — not an inline extraction.
 	var e Node = NewUnaryExpr(pos, OIDATA, n)
-	e.SetType(types.Types[types.TUINTPTR].PtrTo())
+	e.SetType(types.Types[types.TUNSAFEPTR])
+	e.SetTypecheck(1)
+	e = NewConvExpr(pos, OCONVNOP, types.Types[types.TUINTPTR].PtrTo(), e)
 	e.SetTypecheck(1)
 	e = NewStarExpr(pos, e)
 	e.SetType(types.Types[types.TUINTPTR])

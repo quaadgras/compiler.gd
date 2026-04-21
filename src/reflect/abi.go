@@ -217,7 +217,16 @@ func (a *abiSeq) regAssign(t *abi.Type, offset uintptr) bool {
 	case String:
 		return a.assignIntN(offset, goarch.PtrSize, 2, 0b01)
 	case Interface:
-		return a.assignIntN(offset, goarch.PtrSize, 2, 0b10)
+		// gd fat-iface: interface is {ptr, ptr, complex128}. Two
+		// pointer-sized int regs for tab/_type and data, then the
+		// 16-byte Inline payload in two FP regs — mirrors
+		// compile/internal/abi synthIface. The fork compiler always
+		// emits this ABI, regardless of runtime.Compiler, so the
+		// reflect side must follow unconditionally.
+		if !a.assignIntN(offset, goarch.PtrSize, 2, 0b10) {
+			return false
+		}
+		return a.assignFloatN(offset+2*goarch.PtrSize, 8, 2)
 	case Slice:
 		return a.assignIntN(offset, goarch.PtrSize, 3, 0b001)
 	case Array:

@@ -2092,7 +2092,11 @@ DEBUG_CALL_FN(debugCall32768<>, 32768)
 DEBUG_CALL_FN(debugCall65536<>, 65536)
 
 // func debugCallPanicked(val interface{})
-TEXT runtime·debugCallPanicked(SB),NOSPLIT,$16-16
+// gd fat-interface: `interface{}` is 32 bytes (two words + 16-byte
+// inline payload). The local frame still only needs the 16 bytes of
+// (type, data) that gopanic consumes, but the argument area must
+// match the full iface size.
+TEXT runtime·debugCallPanicked(SB),NOSPLIT,$16-32
 	// Copy the panic value to the top of stack.
 	MOVQ	val_type+0(FP), AX
 	MOVQ	AX, 0(SP)

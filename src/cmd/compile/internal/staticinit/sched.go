@@ -480,7 +480,15 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		staticdata.InitAddr(l, loff, itab.X.(*ir.LinksymOffsetExpr).Linksym)
 
 		// Emit data.
-		if types.IsDirectIface(val.Type()) {
+		if types.IsInlineIface(val.Type()) {
+			// gd fat-interface: payload lives in the inline slot at offset
+			// 2*PtrSize, data stays zero. Runtime reads via TFlagInlineIface.
+			if val.Op() == ir.ONIL {
+				return true
+			}
+			ir.SetPos(val)
+			assign(base.Pos, l, loff+2*int64(types.PtrSize), val)
+		} else if types.IsDirectIface(val.Type()) {
 			if val.Op() == ir.ONIL {
 				// Nil is zero, nothing to do.
 				return true

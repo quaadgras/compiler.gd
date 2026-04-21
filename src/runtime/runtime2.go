@@ -181,15 +181,39 @@ type funcval struct {
 	// variable-size, fn-specific data here
 }
 
+// iface and eface use the gd fork's fat-interface layout. tab/_type is
+// never scanned (points into rodata or persistentalloc). data is scanned
+// (holds the boxed heap pointer). inline is a fixed 16-byte, never-scanned
+// payload used when the concrete type is TFlagInlineIface (pointer-free,
+// size <= 16, align <= 8); in that case data is nil. Stock boxed
+// representation leaves inline zero.
+// inline is complex128 rather than [2]uint64 so the ABIInternal register
+// allocator carries it in two float registers instead of spilling to the
+// stack. Arrays of length > 1 are never register-passed (see
+// cmd/compile/internal/types/size.go:CalcArraySize), which would otherwise
+// force iface/eface onto the stack and mismatch the TINTER register ABI
+// that carries the same bytes in two float slots.
 type iface struct {
-	tab  *itab
-	data unsafe.Pointer
+	tab    *itab
+	data   unsafe.Pointer
+	inline complex128
 }
 
 type eface struct {
-	_type *_type
-	data  unsafe.Pointer
+	_type  *_type
+	data   unsafe.Pointer
+	inline complex128
 }
+
+// Compile-time assertion that iface and eface match the gd fat-interface
+// layout (2*PtrSize pointer words + 16-byte inline payload). A mismatch
+// here means the compiler's synthIface / abi.EmptyInterface / reflect
+// Value representation has drifted out of sync with runtime — fix those,
+// not this check.
+const _ uintptr = unsafe.Sizeof(iface{}) - (2*goarch.PtrSize + 16)
+const _ uintptr = (2*goarch.PtrSize + 16) - unsafe.Sizeof(iface{})
+const _ uintptr = unsafe.Sizeof(eface{}) - (2*goarch.PtrSize + 16)
+const _ uintptr = (2*goarch.PtrSize + 16) - unsafe.Sizeof(eface{})
 
 func efaceOf(ep *any) *eface {
 	return (*eface)(unsafe.Pointer(ep))

@@ -253,7 +253,7 @@ func TestMakeAllocs(t *testing.T) {
 			intHandle = Make(randomNumber)
 		}},
 
-		{name: "large number to any", allocs: 1, f: func() {
+		{name: "large number to any", allocs: 0, f: func() {
 			anyHandle = Make[any](randomNumber)
 		}},
 
