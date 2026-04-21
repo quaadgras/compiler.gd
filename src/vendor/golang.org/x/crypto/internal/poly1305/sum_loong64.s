@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build gc && !purego
+//go:build (gc || gd) && !purego
 
 // func update(state *macState, msg []byte)
 TEXT ·update(SB), $0-32

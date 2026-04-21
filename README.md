@@ -1,42 +1,20 @@
-# The Go Programming Language
+# compiler.gd
 
-Go is an open source programming language that makes it easy to build simple,
-reliable, and efficient software.
+A compiler for the Go programming language that aggresively avoids allocations. 
 
-![Gopher image](https://golang.org/doc/gopher/fiveyears.jpg)
-*Gopher image by [Renee French][rf], licensed under [Creative Commons 4.0 Attribution license][cc4-by].*
+Pass `-compiler=gd` to compiler.gd's Go command to use the compiler, otherwise 
+it will fallback to Google's `gc` compiler. All `gd` specific optimizations are
+feature flagged under `runtime.Compiler == "gd"` or `go:build gd`.
 
-Our canonical Git repository is located at https://go.googlesource.com/go.
-There is a mirror of the repository at https://github.com/golang/go.
+### Optimisation Goals
 
-Unless otherwise noted, the Go source files are distributed under the
-BSD-style license found in the LICENSE file.
+1. Interfaces include an additional 128bits for storing values directly.
+2. Small string optimization.
+3. Dynamic escape bits for closures and interfaces.
+4. `func() (A, B, C...)` stored in memory like a tuple.
+5. Reduced CGO overhead.
 
-### Download and Install
+### Compatibility Goals
 
-#### Binary Distributions
-
-Official binary distributions are available at https://go.dev/dl/.
-
-After downloading a binary release, visit https://go.dev/doc/install
-for installation instructions.
-
-#### Install From Source
-
-If a binary distribution is not available for your combination of
-operating system and architecture, visit
-https://go.dev/doc/install/source
-for source installation instructions.
-
-### Contributing
-
-Go is the work of thousands of contributors. We appreciate your help!
-
-To contribute, please read the contribution guidelines at https://go.dev/doc/contribute.
-
-Note that the Go project uses the issue tracker for bug reports and
-proposals only. See https://go.dev/wiki/Questions for a list of
-places to ask questions about the Go language.
-
-[rf]: https://reneefrench.blogspot.com/
-[cc4-by]: https://creativecommons.org/licenses/by/4.0/
+1. Provide a Go runtime interface, that can be implemented in C or assembly to support bare metal builds.
+2. Provide a stable register-based ABI.

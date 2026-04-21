@@ -2068,7 +2068,7 @@ func (p *Package) load(loaderstate *modload.State, ctx context.Context, opts Pac
 	}
 
 	// The gc toolchain only permits C source files with cgo or SWIG.
-	if len(p.CFiles) > 0 && !p.UsesCgo() && !p.UsesSwig() && cfg.BuildContext.Compiler == "gc" {
+	if len(p.CFiles) > 0 && !p.UsesCgo() && !p.UsesSwig() && (cfg.BuildContext.Compiler == "gc" || cfg.BuildContext.Compiler == "gd") {
 		setError(fmt.Errorf("C source files not allowed when not using cgo or SWIG: %s", strings.Join(p.CFiles, " ")))
 		return
 	}
@@ -2418,7 +2418,7 @@ func (p *Package) setBuildInfo(ctx context.Context, f *modfetch.Fetcher, autoVCS
 	if gccgoflags := BuildGccgoflags.String(); gccgoflags != "" && cfg.BuildContext.Compiler == "gccgo" {
 		appendSetting("-gccgoflags", gccgoflags)
 	}
-	if gcflags := BuildGcflags.String(); gcflags != "" && cfg.BuildContext.Compiler == "gc" {
+	if gcflags := BuildGcflags.String(); gcflags != "" && (cfg.BuildContext.Compiler == "gc" || cfg.BuildContext.Compiler == "gd") {
 		appendSetting("-gcflags", gcflags)
 	}
 	if ldflags := BuildLdflags.String(); ldflags != "" {

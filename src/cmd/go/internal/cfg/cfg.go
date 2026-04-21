@@ -205,6 +205,53 @@ func defaultContext() build.Context {
 
 func init() {
 	SetGOROOT(Getenv("GOROOT"), false)
+	initGDROOT()
+	initGDPATH()
+}
+
+// initGDROOT resolves GDROOT for the gd toolchain. It checks $GDROOT,
+// then the install path of the running binary, then GOROOT as a final
+// fallback (used during make.bash bootstrap where both roots are the
+// same tree).
+func initGDROOT() {
+	if runtime.Compiler != "gd" {
+		return
+	}
+	if env := os.Getenv("GDROOT"); env != "" {
+		GDROOT = filepath.Clean(env)
+		return
+	}
+	if exe, err := os.Executable(); err == nil {
+		// Binary is at $GDROOT/bin/go; install is two dirs up.
+		candidate := filepath.Clean(filepath.Dir(filepath.Dir(exe)))
+		if fi, err := os.Stat(filepath.Join(candidate, "src", "runtime")); err == nil && fi.IsDir() {
+			GDROOT = candidate
+			return
+		}
+	}
+	GDROOT = GOROOT
+}
+
+// initGDPATH resolves GDPATH for the gd toolchain: $GDPATH, otherwise
+// $HOME/gd (the gd analogue of GOPATH's ~/go default). Activated by
+// -compiler=gd, which swaps BuildContext.GOPATH to this value.
+func initGDPATH() {
+	if runtime.Compiler != "gd" {
+		return
+	}
+	if env := os.Getenv("GDPATH"); env != "" {
+		GDPATH = filepath.Clean(env)
+		return
+	}
+	envVar := "HOME"
+	if runtime.GOOS == "windows" {
+		envVar = "USERPROFILE"
+	} else if runtime.GOOS == "plan9" {
+		envVar = "home"
+	}
+	if home := os.Getenv(envVar); home != "" {
+		GDPATH = filepath.Join(home, "gd")
+	}
 }
 
 // ForceHost forces GOOS and GOARCH to runtime.GOOS and runtime.GOARCH.
@@ -454,6 +501,18 @@ func CanGetenv(key string) bool {
 
 var (
 	GOROOT string
+
+	// GDROOT is the install prefix of the gd toolchain, used when
+	// -compiler=gd swaps GOROOT to the gd install. Only meaningful when
+	// runtime.Compiler == "gd"; empty otherwise. Resolved from $GDROOT,
+	// the running binary's install path, or GOROOT as a last resort.
+	GDROOT string
+
+	// GDPATH is the user workspace for the gd toolchain, swapped into
+	// BuildContext.GOPATH by -compiler=gd. Only meaningful when
+	// runtime.Compiler == "gd"; empty otherwise. Defaults to $GDPATH,
+	// otherwise $HOME/gd.
+	GDPATH string
 
 	// Either empty or produced by filepath.Join(GOROOT, …).
 	GOROOTbin string

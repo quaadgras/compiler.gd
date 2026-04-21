@@ -245,7 +245,7 @@ func bootstrapBuildTools() {
 	cmd := []string{
 		pathf("%s/bin/go", goroot_bootstrap),
 		"install",
-		"-tags=math_big_pure_go compiler_bootstrap purego",
+		"-tags=math_big_pure_go compiler_bootstrap purego " + toolchainName,
 	}
 	if vflag > 0 {
 		cmd = append(cmd, "-v")

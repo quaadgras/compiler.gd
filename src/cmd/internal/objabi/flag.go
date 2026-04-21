@@ -106,8 +106,13 @@ func (versionFlag) Set(s string) error {
 	// for releases, but during development we include the full
 	// build ID of the binary, so that if the compiler is changed and
 	// rebuilt, we notice and rebuild all packages.
+	//
+	// gd fork: our version string is stable (not "devel") but the
+	// compiler's behaviour changes freely across rebuilds, so emit the
+	// buildID here too. cmd/go/internal/work/buildid.go routes this
+	// through contentID so every recompile invalidates cached artifacts.
 	if s == "full" {
-		if strings.Contains(buildcfg.Version, "devel") {
+		if strings.Contains(buildcfg.Version, "devel") || strings.HasPrefix(buildcfg.Version, "gd") {
 			p += " buildID=" + buildID
 		}
 	}

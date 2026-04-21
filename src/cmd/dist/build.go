@@ -245,6 +245,10 @@ func xinit() {
 	os.Setenv("GOPPC64", goppc64)
 	os.Setenv("GORISCV64", goriscv64)
 	os.Setenv("GOROOT", goroot)
+	if toolchainName == "gd" {
+		// During bootstrap the gd install and GOROOT are the same tree.
+		os.Setenv("GDROOT", goroot)
+	}
 	os.Setenv("GOFIPS140", gofips140)
 
 	// Set GOBIN to GOROOT/bin. The meaning of GOBIN has drifted over time
@@ -274,7 +278,7 @@ func xinit() {
 	tooldir = pathf("%s/pkg/tool/%s_%s", goroot, gohostos, gohostarch)
 
 	goversion := findgoversion()
-	isRelease = (strings.HasPrefix(goversion, "release.") || strings.HasPrefix(goversion, "go")) &&
+	isRelease = (strings.HasPrefix(goversion, "release.") || strings.HasPrefix(goversion, "go") || strings.HasPrefix(goversion, "gd")) &&
 		!strings.Contains(goversion, "devel")
 }
 
@@ -1080,7 +1084,7 @@ var unixOS = map[string]bool{
 // matchtag reports whether the tag matches this build.
 func matchtag(tag string) bool {
 	switch tag {
-	case "gc", "cmd_go_bootstrap", "go1.1":
+	case toolchainName, "cmd_go_bootstrap", "go1.1":
 		return true
 	case "linux":
 		return goos == "linux" || goos == "android"
@@ -1413,14 +1417,22 @@ func cmdbootstrap() {
 	defer timelog("end", "dist bootstrap")
 
 	var debug, distpack, force, noBanner, noClean bool
+	var stop string
 	flag.BoolVar(&rebuildall, "a", rebuildall, "rebuild all")
 	flag.BoolVar(&debug, "d", debug, "enable debugging of bootstrap process")
 	flag.BoolVar(&distpack, "distpack", distpack, "write distribution files to pkg/distpack")
 	flag.BoolVar(&force, "force", force, "build even if the port is marked as broken")
 	flag.BoolVar(&noBanner, "no-banner", noBanner, "do not print banner")
 	flag.BoolVar(&noClean, "no-clean", noClean, "print deprecation warning")
+	flag.StringVar(&stop, "stop", "", "stop after phase (toolchain1, go_bootstrap)")
 
 	xflagparse(0)
+
+	switch stop {
+	case "", "toolchain1", "go_bootstrap":
+	default:
+		fatalf("unknown -stop phase %q (supported: toolchain1, go_bootstrap)", stop)
+	}
 
 	if noClean {
 		xprintf("warning: --no-clean is deprecated and has no effect; use 'go install std cmd' instead\n")
@@ -1463,7 +1475,16 @@ func cmdbootstrap() {
 	// toolchain and by dist consistent. Once go_bootstrap takes
 	// over the build process, we'll set this back to the original
 	// GOEXPERIMENT.
-	os.Setenv("GOEXPERIMENT", "none")
+	//
+	// Exception (-stop=toolchain1): when toolchain1 is the final
+	// toolchain (we aren't going to build toolchain2/3), it must
+	// use normal experiments so its embedded runtime.buildVersion
+	// matches binaries built against fork stdlib (baseline dwarf5
+	// etc. on). Otherwise compile's self-check fails at runtime
+	// with "version ... does not match go tool version".
+	if stop != "toolchain1" {
+		os.Setenv("GOEXPERIMENT", "none")
+	}
 
 	if isdir(pathf("%s/src/pkg", goroot)) {
 		fatalf("\n\n"+
@@ -1484,6 +1505,25 @@ func cmdbootstrap() {
 	timelog("build", "toolchain1")
 	checkCC()
 	bootstrapBuildTools()
+
+	if stop == "toolchain1" {
+		// Fork-specific: toolchain1 miscompiles fork stdlib, so the
+		// later phases (go_bootstrap, toolchain2, toolchain3, std/cmd
+		// install) cannot run. Exit here; cmd/go is built separately
+		// by the wrapper script.
+		//
+		// Generate files that are normally produced during install()
+		// but that cmd/go needs to compile (zdefaultcc.go for
+		// cmd/go/internal/cfg, zversion.go for internal/runtime/sys,
+		// zzipdata.go for time/tzdata).
+		for _, gt := range gentab {
+			dir := pathf("%s/src/%s", goroot, gt.pkg)
+			file := pathf("%s/%s", dir, gt.file)
+			gt.gen(dir, file)
+		}
+		xprintf("Stopped after toolchain1 (per -stop flag).\n")
+		return
+	}
 
 	// Remember old content of $GOROOT/bin for comparison below.
 	oldBinFiles, err := filepath.Glob(pathf("%s/bin/*", goroot))
@@ -1508,6 +1548,13 @@ func cmdbootstrap() {
 	install("cmd/go")
 	if vflag > 0 {
 		xprintf("\n")
+	}
+
+	if stop == "go_bootstrap" {
+		goBootstrap := pathf("%s/go_bootstrap", tooldir)
+		copyfile(pathf("%s/bin/go", goroot), goBootstrap, writeExec)
+		xprintf("Stopped after go_bootstrap; copied %s -> %s/bin/go.\n", goBootstrap, goroot)
+		return
 	}
 
 	gogcflags = os.Getenv("GO_GCFLAGS") // we were using $BOOT_GO_GCFLAGS until now
@@ -1723,6 +1770,14 @@ func goCmd(env []string, goBinary string, cmd string, args ...string) {
 	if noOpt {
 		goCmd = append(goCmd, "-tags=noopt")
 	}
+	if toolchainName == "gd" {
+		// Under the gd fork, cmd/go defaults to -compiler=gc (stock
+		// dispatch) post-install. During bootstrap we want the gd
+		// toolchain so runtime.Compiler resolves to "gd" in the built
+		// stdlib, so pass the flag explicitly. goCmd is used for
+		// "install" and "build" which both accept -compiler.
+		goCmd = append(goCmd, "-compiler=gd")
+	}
 	goCmd = appendCompilerFlags(goCmd)
 	if vflag > 0 {
 		goCmd = append(goCmd, "-v")
@@ -1740,6 +1795,9 @@ func checkNotStale(env []string, goBinary string, targets ...string) {
 	goCmd := []string{goBinary, "list"}
 	if noOpt {
 		goCmd = append(goCmd, "-tags=noopt")
+	}
+	if toolchainName == "gd" {
+		goCmd = append(goCmd, "-compiler=gd")
 	}
 	goCmd = appendCompilerFlags(goCmd)
 	goCmd = append(goCmd, "-f={{if .Stale}}\tSTALE {{.ImportPath}}: {{.StaleReason}}{{end}}")

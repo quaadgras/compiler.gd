@@ -256,7 +256,7 @@ var gcArchSizes = map[string]*gcSizes{
 // "mips64", "mips64le", "ppc64", "ppc64le", "riscv64", "s390x", "sparc64", "wasm".
 func SizesFor(compiler, arch string) Sizes {
 	switch compiler {
-	case "gc":
+	case "gc", "gd":
 		if s := gcSizesFor(compiler, arch); s != nil {
 			return Sizes(s)
 		}

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build darwin && amd64 && gc
+//go:build darwin && amd64 && (gc || gd)
 
 #include "textflag.h"
 

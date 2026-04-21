@@ -50,7 +50,7 @@ func DefaultConds() map[string]Cond {
 				return true, nil
 			}
 			switch suffix {
-			case "gc", "gccgo":
+			case "gc", "gd", "gccgo":
 				return false, nil
 			default:
 				return false, fmt.Errorf("unrecognized compiler %q", suffix)

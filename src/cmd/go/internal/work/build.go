@@ -273,6 +273,23 @@ func (c buildCompiler) Set(value string) error {
 	switch value {
 	case "gc":
 		BuildToolchain = gcToolchain{}
+	case "gd":
+		BuildToolchain = gcToolchain{}
+		// Under the gd binary, swap cfg.GOROOT to cfg.GDROOT so stdlib
+		// and tools are resolved from the gd install, and swap the
+		// active workspace (GOPATH + derived GOMODCACHE) to GDPATH. On
+		// a non-gd binary, "gd" is accepted but behaves like "gc".
+		if runtime.Compiler == "gd" {
+			if cfg.GDROOT != "" && cfg.GDROOT != cfg.GOROOT {
+				cfg.SetGOROOT(cfg.GDROOT, false)
+			}
+			if cfg.GDPATH != "" && cfg.GDPATH != cfg.BuildContext.GOPATH {
+				cfg.BuildContext.GOPATH = cfg.GDPATH
+				if !cfg.GOMODCACHEChanged {
+					cfg.GOMODCACHE = filepath.Join(cfg.GDPATH, "pkg", "mod")
+				}
+			}
+		}
 	case "gccgo":
 		BuildToolchain = gccgoToolchain{}
 	default:
@@ -288,9 +305,17 @@ func (c buildCompiler) String() string {
 }
 
 func init() {
-	switch build.Default.Compiler {
+	defaultCompiler := build.Default.Compiler
+	if runtime.Compiler == "gd" {
+		// The gd binary defaults to the stock gc toolchain (dispatched
+		// via $GOROOT). Users opt into the gd toolchain with
+		// -compiler=gd. During bootstrap, dist passes the flag
+		// explicitly, so the init default only matters post-install.
+		defaultCompiler = "gc"
+	}
+	switch defaultCompiler {
 	case "gc", "gccgo":
-		buildCompiler{}.Set(build.Default.Compiler)
+		buildCompiler{}.Set(defaultCompiler)
 	}
 }
 
@@ -486,7 +511,7 @@ func runBuild(ctx context.Context, cmd *base.Command, args []string) {
 		if load.BuildLdflags.Present() {
 			fmt.Println("go build: when using gccgo toolchain, please pass linker flags using -gccgoflags, not -ldflags")
 		}
-	case "gc":
+	case "gc", "gd":
 		if load.BuildGccgoflags.Present() {
 			fmt.Println("go build: when using gc toolchain, please pass compile flags using -gcflags, and linker flags using -ldflags")
 		}

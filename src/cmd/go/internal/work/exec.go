@@ -360,7 +360,7 @@ func (b *Builder) buildActionID(a *Action) cache.ActionID {
 	switch cfg.BuildToolchainName {
 	default:
 		base.Fatalf("buildActionID: unknown build toolchain %q", cfg.BuildToolchainName)
-	case "gc":
+	case "gc", "gd":
 		fmt.Fprintf(h, "compile %s %q %q\n", b.toolID("compile"), forcedGcflags, p.Internal.Gcflags)
 		if len(p.SFiles) > 0 {
 			fmt.Fprintf(h, "asm %q %q %q\n", b.toolID("asm"), forcedAsmflags, p.Internal.Asmflags)
@@ -1551,7 +1551,7 @@ func (b *Builder) printLinkerConfig(h io.Writer, p *load.Package) {
 	default:
 		base.Fatalf("linkActionID: unknown toolchain %q", cfg.BuildToolchainName)
 
-	case "gc":
+	case "gc", "gd":
 		fmt.Fprintf(h, "link %s %q %s\n", b.toolID("link"), forcedLdflags, ldBuildmode)
 		if p != nil {
 			fmt.Fprintf(h, "linkflags %q\n", p.Internal.Ldflags)
@@ -3099,7 +3099,7 @@ func (b *Builder) processCgoOutputs(a *Action, runCgoProvider *runCgoProvider, c
 	}
 
 	switch cfg.BuildToolchainName {
-	case "gc":
+	case "gc", "gd":
 		importGo := objdir + "_cgo_import.go"
 		dynOutGo, dynOutObj, err := b.dynimport(a, objdir, importGo, cgoExe, runCgoProvider.CFLAGS, runCgoProvider.LDFLAGS, outObj)
 		if err != nil {

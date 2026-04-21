@@ -191,7 +191,7 @@ if [[ "$GOROOT_BOOTSTRAP" == "$GOROOT" ]]; then
 	exit 1
 fi
 rm -f cmd/dist/dist
-bootstrapenv "$GOROOT_BOOTSTRAP/bin/go" build -o cmd/dist/dist ./cmd/dist
+bootstrapenv "$GOROOT_BOOTSTRAP/bin/go" build -tags gd -o cmd/dist/dist ./cmd/dist
 
 # -e doesn't propagate out of eval, so check success by hand.
 eval $(./cmd/dist/dist env -p || echo FAIL=true)

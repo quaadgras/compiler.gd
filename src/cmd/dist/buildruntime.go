@@ -63,7 +63,16 @@ func mkbuildcfg(file string) {
 	fmt.Fprintf(&buf, "const defaultGOEXPERIMENT = `%s`\n", goexperiment)
 	fmt.Fprintf(&buf, "const defaultGO_EXTLINK_ENABLED = `%s`\n", goextlinkenabled)
 	fmt.Fprintf(&buf, "const defaultGO_LDSO = `%s`\n", defaultldso)
-	fmt.Fprintf(&buf, "const version = `%s`\n", findgoversion())
+	// gd fork: rewrite the "go" prefix of the version to "gd" so that
+	// buildcfg.Version (and thus every tool's `-V=full` output) is
+	// distinguishable from stock. cmd/internal/objabi/flag.go and
+	// cmd/go/internal/work/buildid.go use that prefix to emit/consume
+	// buildID= so that a compiler rebuild invalidates the build cache.
+	gv := findgoversion()
+	if strings.HasPrefix(gv, "go") && !strings.HasPrefix(gv, "gd") {
+		gv = "gd" + gv[len("go"):]
+	}
+	fmt.Fprintf(&buf, "const version = `%s`\n", gv)
 	fmt.Fprintf(&buf, "const defaultGOOS = runtime.GOOS\n")
 	fmt.Fprintf(&buf, "const defaultGOARCH = runtime.GOARCH\n")
 	fmt.Fprintf(&buf, "const DefaultGOFIPS140 = `%s`\n", gofips140)

@@ -6,7 +6,7 @@
 // system call on AIX without depending on x/sys/unix.
 // (See golang.org/issue/32102)
 
-//go:build aix && ppc64 && gc
+//go:build aix && ppc64 && (gc || gd)
 
 package cpu
 

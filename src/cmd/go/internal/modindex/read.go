@@ -391,7 +391,7 @@ func (rp *IndexPackage) Import(bctxt build.Context, mode build.ImportMode) (p *b
 
 	var pkgerr error
 	switch ctxt.Compiler {
-	case "gccgo", "gc":
+	case "gccgo", "gc", "gd":
 	default:
 		// Save error for end of function.
 		pkgerr = fmt.Errorf("import %q: unknown compiler %q", p.Dir, ctxt.Compiler)
@@ -433,7 +433,7 @@ func (rp *IndexPackage) Import(bctxt build.Context, mode build.ImportMode) (p *b
 				pkgtargetroot = "pkg/gccgo_" + ctxt.GOOS + "_" + ctxt.GOARCH + suffix
 				dir, elem := path.Split(p.ImportPath)
 				pkga = pkgtargetroot + "/" + dir + "lib" + elem + ".a"
-			case "gc":
+			case "gc", "gd":
 				pkgtargetroot = "pkg/" + ctxt.GOOS + "_" + ctxt.GOARCH + suffix
 				pkga = pkgtargetroot + "/" + p.ImportPath + ".a"
 			}

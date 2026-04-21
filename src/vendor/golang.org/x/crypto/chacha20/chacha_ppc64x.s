@@ -19,7 +19,7 @@
 // The differences in this and the original implementation are
 // due to the calling conventions and initialization of constants.
 
-//go:build gc && !purego && (ppc64 || ppc64le)
+//go:build (gc || gd) && !purego && (ppc64 || ppc64le)
 
 #include "textflag.h"
 

@@ -591,7 +591,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 	switch ctxt.Compiler {
 	case "gccgo":
 		pkgtargetroot = "pkg/gccgo_" + ctxt.GOOS + "_" + ctxt.GOARCH + suffix
-	case "gc":
+	case "gc", "gd":
 		pkgtargetroot = "pkg/" + ctxt.GOOS + "_" + ctxt.GOARCH + suffix
 	default:
 		// Save error for end of function.
@@ -602,7 +602,7 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 		case "gccgo":
 			dir, elem := pathpkg.Split(p.ImportPath)
 			pkga = pkgtargetroot + "/" + dir + "lib" + elem + ".a"
-		case "gc":
+		case "gc", "gd":
 			pkga = pkgtargetroot + "/" + p.ImportPath + ".a"
 		}
 	}

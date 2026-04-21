@@ -46,7 +46,7 @@ type Lookup func(path string) (io.ReadCloser, error)
 // will attempt to resolve imports in the $GOPATH workspace.
 func ForCompiler(fset *token.FileSet, compiler string, lookup Lookup) types.Importer {
 	switch compiler {
-	case "gc":
+	case "gc", "gd":
 		return &gcimports{
 			fset:     fset,
 			packages: make(map[string]*types.Package),

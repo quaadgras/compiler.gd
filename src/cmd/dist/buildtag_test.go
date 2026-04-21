@@ -7,8 +7,11 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"testing"
 )
+
+var gcTokenRE = regexp.MustCompile(`\bgc\b`)
 
 var buildParserTests = []struct {
 	x       string
@@ -35,9 +38,10 @@ var buildParserTests = []struct {
 
 func TestBuildParser(t *testing.T) {
 	for _, tt := range buildParserTests {
-		matched, err := matchexpr(tt.x)
+		x := gcTokenRE.ReplaceAllString(tt.x, toolchainName)
+		matched, err := matchexpr(x)
 		if matched != tt.matched || !reflect.DeepEqual(err, tt.err) {
-			t.Errorf("matchexpr(%q) = %v, %v; want %v, %v", tt.x, matched, err, tt.matched, tt.err)
+			t.Errorf("matchexpr(%q) = %v, %v; want %v, %v", x, matched, err, tt.matched, tt.err)
 		}
 	}
 }

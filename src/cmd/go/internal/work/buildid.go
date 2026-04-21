@@ -112,6 +112,17 @@ func contentID(buildID string) string {
 	return buildID[strings.LastIndex(buildID, buildIDSeparator)+1:]
 }
 
+// fileContentID returns a hash of the file at path, for use as a
+// toolID when the tool binary has no linker-injected buildID.
+// gd fork only: see toolID for context.
+func fileContentID(path string) string {
+	h, err := cache.FileHash(path)
+	if err != nil {
+		base.Fatalf("go: hashing tool %s: %v", path, err)
+	}
+	return buildid.HashToString(h)
+}
+
 // toolID returns the unique ID to use for the current copy of the
 // named tool (asm, compile, cover, link).
 //
@@ -173,12 +184,20 @@ func (b *Builder) toolID(name string) string {
 		if len(f) < 3 || f[0] != name && path != VetTool || f[1] != "version" || strings.Contains(f[2], "devel") && !strings.HasPrefix(f[len(f)-1], "buildID=") {
 			base.Fatalf("go: parsing buildID from %s -V=full: unexpected output:\n\t%s", desc, line)
 		}
-		if strings.Contains(f[2], "devel") {
-			// On the development branch, use the content ID part of the build ID.
-			return contentID(f[len(f)-1])
+		// gd fork: gd-prefixed versions want per-rebuild cache invalidation
+		// because the reported version string is stable across compiler
+		// changes. Prefer the linker-injected buildID (`-X=cmd/internal/
+		// objabi.buildID=` in cmd/go/internal/work/gc.go), but fall back
+		// to a hash of the tool binary itself — the bootstrap build uses
+		// host Go's `go install bootstrap/cmd/...`, which doesn't match
+		// that ldflag injection's `HasPrefix(ImportPath, "cmd/")` check
+		// and leaves the embedded buildID empty.
+		if strings.Contains(f[2], "devel") || strings.HasPrefix(f[2], "gd") {
+			if last := f[len(f)-1]; strings.HasPrefix(last, "buildID=") && last != "buildID=" {
+				return contentID(last)
+			}
+			return fileContentID(path)
 		}
-		// For a release, the output is like: "compile version go1.9.1 X:framepointer".
-		// Use the whole line.
 		return strings.TrimSpace(line)
 	})
 }

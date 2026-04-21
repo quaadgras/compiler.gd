@@ -5,7 +5,7 @@
 // Minimal copy of x/sys/unix so the cpu package can make a
 // system call on Darwin without depending on x/sys/unix.
 
-//go:build darwin && amd64 && gc
+//go:build darwin && amd64 && (gc || gd)
 
 package cpu
 
