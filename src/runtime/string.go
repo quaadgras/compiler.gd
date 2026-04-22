@@ -51,6 +51,17 @@ func concatstrings(buf *tmpBuf, a []string) string {
 	if count == 1 && (buf != nil || !stringDataOnStack(a[idx])) {
 		return a[idx]
 	}
+	// gd small-string optimization: assemble 1..15-byte results inline.
+	// Zero alloc and no dependency on buf — we only touch a local
+	// 16-byte staging buffer before packing into the header.
+	if goarch.PtrSize == 8 && l <= 15 {
+		var tmp [16]byte
+		off := 0
+		for _, x := range a {
+			off += copy(tmp[off:], x)
+		}
+		return inlineStringFromBytes(&tmp[0], l)
+	}
 	s, b := rawstringtmp(buf, l)
 	for _, x := range a {
 		n := copy(b, x)
@@ -154,6 +165,12 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
 	}
 	if asanenabled {
 		asanread(unsafe.Pointer(ptr), uintptr(n))
+	}
+	// gd small-string optimization: 1..15-byte results ride inside an
+	// inline-rep header — zero alloc, no dependency on buf. Supersedes
+	// stock's n==1 staticuint64s shortcut on 64-bit.
+	if goarch.PtrSize == 8 && n <= 15 {
+		return inlineStringFromBytes(ptr, n)
 	}
 	if n == 1 {
 		p := unsafe.Pointer(&staticuint64s[*ptr])
@@ -274,6 +291,20 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 	size1 := 0
 	for _, r := range a {
 		size1 += encoderune(dum[:], r)
+	}
+	// gd small-string optimization: if the final encoding certainly
+	// fits inline, encode into a local 16-byte staging buffer and
+	// pack directly — no rawstringtmp (no heap alloc, no buf dep).
+	if goarch.PtrSize == 8 && size1 >= 1 && size1 <= 15 {
+		var tmp [16]byte
+		size2 := 0
+		for _, r := range a {
+			if size2 >= size1 {
+				break
+			}
+			size2 += encoderune(tmp[size2:], r)
+		}
+		return inlineStringFromBytes(&tmp[0], size2)
 	}
 	s, b := rawstringtmp(buf, size1+3)
 	size2 := 0
@@ -429,6 +460,24 @@ func cgoStringNormalize(s string) string {
 	return *(*string)(unsafe.Pointer(&r))
 }
 
+// inlineStringFromBytes packs 1..15 bytes starting at ptr into an
+// inline-rep string header — word 0 = nil, word 1 = bytes[0:8] packed
+// little-endian, word 2 = (tag<<60) | bytes[8:15] low 56 bits. Zero
+// allocations; the returned string is self-contained, so callers can
+// hand it back without worrying about the source buffer's lifetime.
+// 64-bit only; callers must gate on goarch.PtrSize == 8.
+//
+//go:nosplit
+func inlineStringFromBytes(ptr *byte, n int) string {
+	var buf [16]byte
+	memmove(unsafe.Pointer(&buf[0]), unsafe.Pointer(ptr), uintptr(n))
+	var r stringStruct
+	r.hash = uint(*(*uint64)(unsafe.Pointer(&buf[0])))
+	lenWord := *(*uint64)(unsafe.Pointer(&buf[8]))
+	r.len = uint(lenWord&abi.StringLenMask | uint64(n)<<abi.StringTagShift)
+	return *(*string)(unsafe.Pointer(&r))
+}
+
 // stringcopy implements copy(dst, src) where src is a string. It handles
 // both heap-rep (word0 != nil) and inline-rep (word0 == nil; bytes live
 // in word1 and low 56 bits of word2) sources uniformly, so the compiler
@@ -481,15 +530,22 @@ func sliceinlinestring(s string, lo, hi int) string {
 }
 
 func intstring(buf *[4]byte, v int64) (s string) {
+	if int64(rune(v)) != v {
+		v = runeError
+	}
+	// gd small-string optimization: rune encodes to 1..4 bytes, always
+	// fits inline. Zero alloc regardless of buf.
+	if goarch.PtrSize == 8 {
+		var tmp [4]byte
+		n := encoderune(tmp[:], rune(v))
+		return inlineStringFromBytes(&tmp[0], n)
+	}
 	var b []byte
 	if buf != nil {
 		b = buf[:]
 		s = slicebytetostringtmp(&b[0], len(b))
 	} else {
 		s, b = rawstring(4)
-	}
-	if int64(rune(v)) != v {
-		v = runeError
 	}
 	n := encoderune(b, rune(v))
 	return s[:n]

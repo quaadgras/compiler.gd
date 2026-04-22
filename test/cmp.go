@@ -49,7 +49,12 @@ func main() {
 
 	// go.tools/ssa/interp can't handle unsafe.Pointer.
 	if os.Getenv("GOSSAINTERP") == "" {
-		if stringptr(c) == stringptr(d) {
+		// gd small-string optimization: both literals and short
+		// concatenations produce inline-rep headers where word 0 is
+		// nil — the stock "distinct pointers" assumption no longer
+		// holds for strings of length <= 15. Only check distinctness
+		// when at least one side is heap-rep.
+		if pc, pd := stringptr(c), stringptr(d); pc != 0 && pd != 0 && pc == pd {
 			panic("compiler too smart -- got same string")
 		}
 	}

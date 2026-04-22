@@ -149,9 +149,12 @@ func TestStringConcatenationAllocs(t *testing.T) {
 			t.Fatalf("want %v, got %v", want, s)
 		}
 	})
-	// Only string concatenation allocates.
-	if n != 1 {
-		t.Fatalf("want 1 allocation, got %v", n)
+	// Under the gd small-string optimization the 13-byte result rides
+	// in an inline string header, so string(b) no longer copies the
+	// slice onto the heap. Escape analysis then leaves b on the
+	// stack, and the whole block runs allocation-free.
+	if n != 0 {
+		t.Fatalf("want 0 allocations, got %v", n)
 	}
 }
 
