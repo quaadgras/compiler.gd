@@ -760,6 +760,36 @@ func (v Value) call(op string, in []Value) []Value {
 			// All that's left is values passed in registers that we need to
 			// create space for and copy values back into.
 			//
+			// gd Phase D: for spread types (string / slice return), write
+			// the three register halves directly into the Value's own
+			// storage (ptr + inline, contiguous in the struct) and set
+			// flagSpread — no heap alloc per call-return.
+			if tv.IsSpreadIface() {
+				var v Value
+				v.typ_ = tv
+				base := unsafe.Pointer(&v.ptr)
+				for _, st := range steps {
+					switch st.kind {
+					case abiStepIntReg:
+						offset := add(base, st.offset, "precomputed value offset")
+						intFromReg(&regArgs, st.ireg, st.size, offset)
+					case abiStepPointer:
+						off := add(base, st.offset, "precomputed value offset")
+						*((*unsafe.Pointer)(off)) = regArgs.Ptrs[st.ireg]
+					case abiStepFloatReg:
+						offset := add(base, st.offset, "precomputed value offset")
+						floatFromReg(&regArgs, st.freg, st.size, offset)
+					case abiStepStack:
+						panic("register-based return value has stack component")
+					default:
+						panic("unknown ABI part kind")
+					}
+				}
+				v.flag = flagIndir | flagSpread | flag(tv.Kind())
+				ret[i] = v
+				continue
+			}
+			//
 			// TODO(mknyszek): We make a new allocation for each register-allocated
 			// value, but previously we could always point into the heap-allocated
 			// stack frame. This is a regression that could be fixed by adding
@@ -2068,6 +2098,17 @@ func (v Value) lenNonSlice() int {
 // allocating a new variable as needed.
 func copyVal(typ *abi.Type, fl flag, ptr unsafe.Pointer) Value {
 	if !typ.IsDirectIface() {
+		// gd Phase D: strings and slices (spread types) ride inside
+		// the Value struct itself — word 0 in v.ptr, words 1+2 in
+		// v.inline. No heap alloc per map entry / call-return.
+		if typ.IsSpreadIface() {
+			var v Value
+			v.typ_ = typ
+			v.ptr = *(*unsafe.Pointer)(ptr)
+			*(*[16]byte)(unsafe.Pointer(&v.inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(ptr) + goarch.PtrSize))
+			v.flag = fl | flagIndir | flagSpread
+			return v
+		}
 		// Copy result so future changes to the map
 		// won't change the underlying value.
 		c := unsafe_New(typ)
