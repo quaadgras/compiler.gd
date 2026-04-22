@@ -6,6 +6,7 @@ package staticdata
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"go/constant"
 	"io"
@@ -337,19 +338,45 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 
 	case constant.String:
 		// gd small-string optimization: string is a 3-word header
-		// (ptr, hash, len). Phase A writes hash = 0; literal pre-hashing
-		// will land in a later phase. See doc/gd/sso-string.md.
+		// (ptr, hash, len). Phase A writes hash = 0 for heap rep;
+		// literal pre-hashing will land in a later phase.
+		// See doc/gd/sso-string.md.
 		//
-		// Phase C note: static initializers always emit heap-rep
-		// (rodata-backed) so that any subsequent slice/index of the
-		// literal has a valid backing pointer. Inline-rep emission
-		// for static data is deferred until the companion escape
-		// analysis change (sso-string.md §5.3) lands.
+		// Phase C Step 7: on 64-bit, strings of length 1..15 are
+		// emitted inline — word 0 = 0 (no relocation to go:string
+		// data), word 1 = bytes[0:8] packed little-endian, word 2 =
+		// (tag<<60) | bytes[8:15] packed low 56 bits. Safe because
+		// OSLICESTR on an inline source takes the register path
+		// added in Step 5 (no interior pointers escape), and the
+		// consumer helpers (stringLen, stringIndex, stringEqFast)
+		// are inline-aware. 32-bit targets keep heap rep — the 12 B
+		// header has no room for 15 B inline bytes.
 		i := constant.StringVal(u)
+		slen := int64(len(i))
+		if types.PtrSize == 8 && slen >= 1 && slen <= 15 {
+			var w1buf [8]byte
+			copy(w1buf[:], i)
+			word1 := int64(binary.LittleEndian.Uint64(w1buf[:]))
+
+			var w2buf [8]byte
+			if slen > 8 {
+				copy(w2buf[:], i[8:])
+			}
+			const lenMask = 1<<60 - 1
+			word2 := int64(binary.LittleEndian.Uint64(w2buf[:]))&lenMask | slen<<60
+
+			// Word 0 defaults to zero in uninitialized rodata, but
+			// write an explicit 0 to guard against a previous
+			// initializer at the same offset.
+			s.WriteInt(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
+			s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, word1)
+			s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, word2)
+			break
+		}
 		symdata := StringSym(n.Pos(), i)
 		s.WriteAddr(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
 		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, 0)
-		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, int64(len(i)))
+		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
 
 	default:
 		base.Fatalf("InitConst unhandled OLITERAL %v", c)

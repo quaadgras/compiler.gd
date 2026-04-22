@@ -1575,24 +1575,28 @@ func (v Value) Index(i int) Value {
 
 	case String:
 		// gd small-string optimization: decode logical length from the
-		// tag nibble and point at the correct byte — for inline-rep
-		// strings Data is nil and the bytes live at offset PtrSize of
-		// the header.
+		// tag nibble. For inline-rep strings the bytes live inside the
+		// header itself; for flagSpread values the header lives in
+		// v.inline on this method's stack frame, so a byte pointer
+		// into it would dangle after Index returns. Copy the byte out
+		// into the returned Value's own inline slot (uint8 fits) and
+		// hand back a self-contained flagInline sub-Value.
 		s := (*unsafeheader.String)(v.dataPtr())
-		tag := uint(s.Len) >> abi.StringTagShift
-		var length int
-		var base unsafe.Pointer
-		if tag != 0 {
-			length = int(tag)
-			base = unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize)
-		} else {
-			length = s.Len
-			base = s.Data
+		if tag := uint(s.Len) >> abi.StringTagShift; tag != 0 {
+			if uint(i) >= tag {
+				panic("reflect: string index out of range")
+			}
+			b := *(*byte)(unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize + uintptr(i)))
+			var sub Value
+			sub.typ_ = uint8Type
+			*(*byte)(unsafe.Pointer(&sub.inline)) = b
+			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
+			return sub
 		}
-		if uint(i) >= uint(length) {
+		if uint(i) >= uint(s.Len) {
 			panic("reflect: string index out of range")
 		}
-		p := arrayAt(base, i, 1, "i < s.Len")
+		p := arrayAt(s.Data, i, 1, "i < s.Len")
 		fl := v.flag.ro() | flag(Uint8) | flagIndir
 		return Value{typ_: uint8Type, ptr: p, flag: fl}
 	}
