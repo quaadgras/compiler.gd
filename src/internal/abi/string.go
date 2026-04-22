@@ -28,11 +28,11 @@ package abi
 //
 // The upper 4 bits of word2 are the length tag:
 //   - 0       : heap rep. word0 is the data pointer; word2 (low 60 bits)
-//               is the length. Max heap length is 2^60 − 1, well above
-//               runtime.maxAlloc.
+//     is the length. Max heap length is 2^60 − 1, well above
+//     runtime.maxAlloc.
 //   - 1..15   : inline rep. Tag equals the inline byte count. word0 is
-//               nil; the 15 bytes are split 8+7 across word1 (all 8
-//               bytes) and the low 56 bits of word2.
+//     nil; the 15 bytes are split 8+7 across word1 (all 8
+//     bytes) and the low 56 bits of word2.
 //
 // Inline bytes are contiguous in memory on little-endian architectures:
 // at offsets 8..22 of the header. The tag+pad byte lives at offset 23

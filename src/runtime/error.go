@@ -267,6 +267,15 @@ func printanycustomtype(i any) {
 	if eface._type.IsInlineIface() {
 		p = unsafe.Pointer(&eface.inline)
 	}
+	// gd Phase D: spread types (string, slice) split their 3-word value
+	// across eface.data (word 0) + eface.inline (words 1+2). Reassemble
+	// into a stack-local header so *(*T)(p) below reads the full value.
+	var spreadBuf [3]uintptr
+	if eface._type.IsSpreadIface() {
+		spreadBuf[0] = uintptr(eface.data)
+		*(*[16]byte)(unsafe.Pointer(&spreadBuf[1])) = *(*[16]byte)(unsafe.Pointer(&eface.inline))
+		p = noescape(unsafe.Pointer(&spreadBuf))
+	}
 
 	switch eface._type.Kind() {
 	case abi.String:

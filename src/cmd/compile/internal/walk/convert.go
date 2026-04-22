@@ -75,6 +75,23 @@ func walkConvInterface(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 				base.WarnfAt(n.Pos(), "convert: using inline slot for interface value: %v", n.X)
 			}
 			dw = n.X
+		} else if types.IsSpreadIface(fromType) && toType.IsEmptyInterface() {
+			// gd Phase D: string and slice headers (3 words, first a
+			// pointer) stored across the iface's data slot (word 0) and
+			// its 16-byte inline slot (words 1+2). Hand the raw source
+			// value to OMAKEFACE; ssagen emits a 4-slot OpIMake. No
+			// convT*, no heap allocation.
+			//
+			// Gated on empty-interface targets only. Non-empty iface
+			// method dispatch passes iface.data as the receiver, which
+			// under spread is word 0 (not a pointer to a full 24 B
+			// header). Keeping method-bearing ifaces on the stock boxed
+			// path preserves stock ABI for method calls until the
+			// dispatch path is taught the spread layout.
+			if base.Debug.EscapeDebug > 0 {
+				base.WarnfAt(n.Pos(), "convert: using spread slots for interface value: %v", n.X)
+			}
+			dw = n.X
 		} else {
 			dw = dataWord(n, init)
 		}

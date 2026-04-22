@@ -316,8 +316,13 @@ func EqInterface(s, t ir.Node) (eqtab *ir.BinaryExpr, eqdata *ir.CallExpr) {
 	if !types.Identical(s.Type(), t.Type()) {
 		base.Fatalf("EqInterface %v %v", s.Type(), t.Type())
 	}
-	// func ifaceeq(tab *uintptr, x, y unsafe.Pointer) (ret bool)
-	// func efaceeq(typ *uintptr, x, y unsafe.Pointer) (ret bool)
+	// gd fat-iface: efaceeq / ifaceeq take pointers to the full iface
+	// headers (tab + data + inline) so the runtime can dispatch on the
+	// concrete type's storage mode (direct / inline / spread / boxed).
+	// Under Phase D a spread type's value spans data + inline, so the
+	// old {itab, data, data} signature couldn't reach the inline half.
+	// func ifaceeq(tab *uintptr, x, y *iface) (ret bool)
+	// func efaceeq(typ *uintptr, x, y *eface) (ret bool)
 	var fn ir.Node
 	if s.Type().IsEmptyInterface() {
 		fn = typecheck.LookupRuntime("efaceeq")
@@ -327,14 +332,14 @@ func EqInterface(s, t ir.Node) (eqtab *ir.BinaryExpr, eqdata *ir.CallExpr) {
 
 	stab := ir.NewUnaryExpr(base.Pos, ir.OITAB, s)
 	ttab := ir.NewUnaryExpr(base.Pos, ir.OITAB, t)
-	sdata := ir.NewUnaryExpr(base.Pos, ir.OIDATA, s)
-	tdata := ir.NewUnaryExpr(base.Pos, ir.OIDATA, t)
-	sdata.SetType(types.Types[types.TUNSAFEPTR])
-	tdata.SetType(types.Types[types.TUNSAFEPTR])
-	sdata.SetTypecheck(1)
-	tdata.SetTypecheck(1)
+	saddr := typecheck.NodAddr(s)
+	taddr := typecheck.NodAddr(t)
+	saddr.SetType(types.Types[types.TUNSAFEPTR])
+	taddr.SetType(types.Types[types.TUNSAFEPTR])
+	saddr.SetTypecheck(1)
+	taddr.SetTypecheck(1)
 
-	call := typecheck.Call(base.Pos, fn, []ir.Node{stab, sdata, tdata}, false).(*ir.CallExpr)
+	call := typecheck.Call(base.Pos, fn, []ir.Node{stab, saddr, taddr}, false).(*ir.CallExpr)
 
 	cmp := ir.NewBinaryExpr(base.Pos, ir.OEQ, stab, ttab)
 	cmp = typecheck.Expr(cmp).(*ir.BinaryExpr)

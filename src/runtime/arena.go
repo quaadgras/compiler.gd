@@ -145,11 +145,22 @@ func arena_heapify(s any) any {
 	var v unsafe.Pointer
 	e := efaceOf(&s)
 	t := e._type
+	// gd Phase D: string and slice values are spread-boxed across
+	// e.data (word 0) + e.inline (words 1+2). Materialise the backing
+	// pointer / header for inspection.
 	switch t.Kind() {
 	case abi.String:
-		v = stringStructOf((*string)(e.data)).str
+		if t.IsSpreadIface() {
+			v = e.data // word 0 = string.ptr
+		} else {
+			v = stringStructOf((*string)(e.data)).str
+		}
 	case abi.Slice:
-		v = (*slice)(e.data).array
+		if t.IsSpreadIface() {
+			v = e.data // word 0 = slice.array
+		} else {
+			v = (*slice)(e.data).array
+		}
 	case abi.Pointer:
 		v = e.data
 	default:
@@ -169,13 +180,29 @@ func arena_heapify(s any) any {
 		copy(b, s1)
 		x = s2
 	case abi.Slice:
-		len := (*slice)(e.data).len
+		var sliceLen int
+		var sliceArray unsafe.Pointer
+		if t.IsSpreadIface() {
+			sliceLen = int(*(*uintptr)(unsafe.Pointer(&e.inline)))
+			sliceArray = e.data
+		} else {
+			sliceLen = (*slice)(e.data).len
+			sliceArray = (*slice)(e.data).array
+		}
 		et := (*slicetype)(unsafe.Pointer(t)).Elem
 		sl := new(slice)
-		*sl = slice{makeslicecopy(et, len, len, (*slice)(e.data).array), len, len}
+		*sl = slice{makeslicecopy(et, sliceLen, sliceLen, sliceArray), sliceLen, sliceLen}
 		xe := efaceOf(&x)
 		xe._type = t
-		xe.data = unsafe.Pointer(sl)
+		// gd Phase D: if the concrete type is spread-eligible, write
+		// the fresh slice header back across data + inline. Otherwise
+		// the stock single-pointer boxed form is correct.
+		if t.IsSpreadIface() {
+			xe.data = sl.array
+			*(*[2]uintptr)(unsafe.Pointer(&xe.inline)) = [2]uintptr{uintptr(sl.len), uintptr(sl.cap)}
+		} else {
+			xe.data = unsafe.Pointer(sl)
+		}
 	case abi.Pointer:
 		et := (*ptrtype)(unsafe.Pointer(t)).Elem
 		e2 := newobject(et)

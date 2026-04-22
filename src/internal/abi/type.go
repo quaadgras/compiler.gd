@@ -132,6 +132,19 @@ const (
 	// types always contain a pointer, so PtrBytes > 0 excludes them.
 	TFlagInlineIface TFlag = 1 << 6
 
+	// TFlagSpreadIface (gd Phase D) means the value of this type is 3
+	// words laid out as (ptr, scalar0, scalar1) and is stored across an
+	// iface/eface's data slot (word 0 → data) + inline slot (word 1 →
+	// inline real, word 2 → inline imag) instead of being boxed on the
+	// heap. Set on `string` and every slice type. Disjoint from both
+	// TFlagDirectIface (1 word) and TFlagInlineIface (≤16 B pointer-free).
+	//
+	// Only word 0 is a pointer; GC marks data naturally as part of iface
+	// scanning (same as non-inline iface), walks the pointee via the
+	// heap allocation's own type metadata (no iface-specific traversal
+	// needed for the backing array of a slice).
+	TFlagSpreadIface TFlag = 1 << 7
+
 	// Leaving this breadcrumb behind for dlv. It should not be used, and no
 	// Kind should be big enough to set this bit.
 	KindDirectIface Kind = 1 << 5
@@ -218,6 +231,14 @@ func (t *Type) IsDirectIface() bool {
 // slot of an iface/eface header under the gd fork's fat-interface layout.
 func (t *Type) IsInlineIface() bool {
 	return t.TFlag&TFlagInlineIface != 0
+}
+
+// IsSpreadIface reports whether t is stored across an iface/eface's 8 B
+// data slot (word 0) + 16 B inline slot (words 1+2). Set on string and
+// every slice type; disjoint from both TFlagDirectIface and
+// TFlagInlineIface.
+func (t *Type) IsSpreadIface() bool {
+	return t.TFlag&TFlagSpreadIface != 0
 }
 
 func (t *Type) GcSlice(begin, end uintptr) []byte {

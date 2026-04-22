@@ -178,6 +178,14 @@ func packEface(v Value) any {
 			// if a non-indir Value somehow reaches here its bits live in v.ptr.
 			*(*unsafe.Pointer)(unsafe.Pointer(&ei.Inline)) = src
 		}
+	} else if t.IsSpreadIface() {
+		// gd Phase D: reflect stores spread-iface values with flagIndir
+		// pointing at a 24 B heap-allocated header. Unpack word 0 into
+		// ei.Data and words 1+2 into ei.Inline so the iface layout
+		// matches the compiler's 4-slot OMAKEFACE.
+		src := v.dataPtr()
+		ei.Data = *(*unsafe.Pointer)(src)
+		*(*[16]byte)(unsafe.Pointer(&ei.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 	} else {
 		ei.Data = packEfaceData(v)
 	}
@@ -233,6 +241,18 @@ func unpackEface(i any) Value {
 		typedmemmove(t, unsafe.Pointer(&v.inline), unsafe.Pointer(&e.Inline))
 		v.flag = f | flagInline
 		return v
+	}
+	if t.IsSpreadIface() {
+		// gd Phase D: the iface's data slot holds word 0 of the spread
+		// value directly (not a pointer to a heap-boxed copy). Reflect
+		// accessors expect a stable *T when flagIndir is set, so
+		// materialise a 24 B header: word 0 from e.Data, word 1+2 from
+		// e.Inline. unsafe_New alloc matches stock Go's behaviour for
+		// flagAddr-less non-direct ifaces.
+		ptr := unsafe_New(t)
+		*(*unsafe.Pointer)(ptr) = e.Data
+		*(*[16]byte)(unsafe.Pointer(uintptr(ptr) + goarch.PtrSize)) = *(*[16]byte)(unsafe.Pointer(&e.Inline))
+		return Value{typ_: t, ptr: ptr, flag: f}
 	}
 	return Value{typ_: t, ptr: e.Data, flag: f}
 }

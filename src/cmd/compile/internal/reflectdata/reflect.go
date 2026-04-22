@@ -500,6 +500,9 @@ func dcommontype(c rttype.Cursor, t *types.Type) {
 	if types.IsInlineIface(t) {
 		tflag |= abi.TFlagInlineIface
 	}
+	if types.IsSpreadIface(t) {
+		tflag |= abi.TFlagSpreadIface
+	}
 
 	if tflag != abi.TFlag(uint8(tflag)) {
 		// this should optimize away completely

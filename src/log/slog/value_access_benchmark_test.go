@@ -133,14 +133,14 @@ func (v *setVisitor) Any(x any)                { v.a = x }
 
 func (a Value) AsString() (string, bool) {
 	if a.Kind() == KindString {
-		return a.str(), true
+		return a.any.(string), true
 	}
 	return "", false
 }
 
 func (a Value) AsInt64() (int64, bool) {
 	if a.Kind() == KindInt64 {
-		return int64(a.num), true
+		return a.any.(int64), true
 	}
 	return 0, false
 }
@@ -154,21 +154,21 @@ func (a Value) AsUint64() (uint64, bool) {
 
 func (a Value) AsFloat64() (float64, bool) {
 	if a.Kind() == KindFloat64 {
-		return a.float(), true
+		return a.any.(float64), true
 	}
 	return 0, false
 }
 
 func (a Value) AsBool() (bool, bool) {
 	if a.Kind() == KindBool {
-		return a.bool(), true
+		return a.any.(bool), true
 	}
 	return false, false
 }
 
 func (a Value) AsDuration() (time.Duration, bool) {
 	if a.Kind() == KindDuration {
-		return a.duration(), true
+		return a.any.(time.Duration), true
 	}
 	return 0, false
 }
@@ -196,17 +196,17 @@ type Visitor interface {
 func (a Value) Visit(v Visitor) {
 	switch a.Kind() {
 	case KindString:
-		v.String(a.str())
+		v.String(a.any.(string))
 	case KindInt64:
 		v.Int64(int64(a.num))
 	case KindUint64:
 		v.Uint64(a.num)
 	case KindBool:
-		v.Bool(a.bool())
+		v.Bool(a.any.(bool))
 	case KindFloat64:
-		v.Float64(a.float())
+		v.Float64(a.any.(float64))
 	case KindDuration:
-		v.Duration(a.duration())
+		v.Duration(a.any.(time.Duration))
 	case KindAny:
 		v.Any(a.any)
 	default:

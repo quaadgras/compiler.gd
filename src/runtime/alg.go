@@ -161,6 +161,16 @@ func interhash(p unsafe.Pointer, h uintptr) uintptr {
 		// gd fat-iface: payload lives in a.inline.
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.inline), h^c0))
 	}
+	if t.IsSpreadIface() {
+		// gd Phase D: value is split across a.data (word 0) + a.inline
+		// (words 1+2). Materialise a contiguous 24 B buffer so typehash
+		// sees a normal header. Buffer is stack-local — noescape keeps
+		// it off the heap even though typehash takes its address.
+		var buf [3]uintptr
+		buf[0] = uintptr(a.data)
+		*(*[16]byte)(unsafe.Pointer(&buf[1])) = *(*[16]byte)(unsafe.Pointer(&a.inline))
+		return trimHash(c1 * typehash(t, noescape(unsafe.Pointer(&buf)), h^c0))
+	}
 	if t.IsDirectIface() {
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.data), h^c0))
 	} else {
@@ -191,6 +201,14 @@ func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	if t.IsInlineIface() {
 		// gd fat-iface: payload lives in a.inline.
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.inline), h^c0))
+	}
+	if t.IsSpreadIface() {
+		// gd Phase D: reassemble the 24 B header from a.data + a.inline
+		// so typehash (for string and slice) sees a stock layout.
+		var buf [3]uintptr
+		buf[0] = uintptr(a.data)
+		*(*[16]byte)(unsafe.Pointer(&buf[1])) = *(*[16]byte)(unsafe.Pointer(&a.inline))
+		return trimHash(c1 * typehash(t, noescape(unsafe.Pointer(&buf)), h^c0))
 	}
 	if t.IsDirectIface() {
 		return trimHash(c1 * typehash(t, unsafe.Pointer(&a.data), h^c0))
@@ -338,14 +356,10 @@ func interequal(p, q unsafe.Pointer) bool {
 	if x.tab != y.tab {
 		return false
 	}
-	// gd fat-iface: feed the inline slot address when the concrete type
-	// is inline-eligible; otherwise pass the boxed data pointer as before.
-	xd, yd := x.data, y.data
-	if x.tab != nil && x.tab.Inline != 0 {
-		xd = unsafe.Pointer(&x.inline)
-		yd = unsafe.Pointer(&y.inline)
-	}
-	return ifaceeq(x.tab, xd, yd)
+	// gd fat-iface / Phase D: ifaceeq now takes pointers to the full
+	// iface headers so it can handle direct / inline / spread storage
+	// internally. Pass p and q through verbatim.
+	return ifaceeq(x.tab, p, q)
 }
 func nilinterequal(p, q unsafe.Pointer) bool {
 	x := (*eface)(p)
@@ -353,13 +367,22 @@ func nilinterequal(p, q unsafe.Pointer) bool {
 	if x._type != y._type {
 		return false
 	}
-	xd, yd := x.data, y.data
-	if x._type != nil && x._type.IsInlineIface() {
-		xd = unsafe.Pointer(&x.inline)
-		yd = unsafe.Pointer(&y.inline)
-	}
-	return efaceeq(x._type, xd, yd)
+	// gd fat-iface / Phase D: efaceeq now takes pointers to the full
+	// eface headers so it can handle direct / inline / spread storage
+	// internally.
+	return efaceeq(x._type, p, q)
 }
+// efaceeq is the callee for compiler-generated empty-interface equality.
+// Under gd's fat-iface, x and y are pointers to the full eface headers
+// (not just the data slots) so the function can read data + inline and
+// dispatch per the concrete type's storage mode:
+//   - DirectIface : value == data slot        (pointer compare)
+//   - InlineIface : value lives in inline     (feed &inline to t.Equal)
+//   - SpreadIface : 3-word value split across data + inline; reassemble
+//                   into a stack buffer, then feed to t.Equal
+//   - Boxed       : data = pointer to heap value (legacy path)
+// Callers from the runtime (interequal/nilinterequal) must also pass
+// pointers to ifaces.
 func efaceeq(t *_type, x, y unsafe.Pointer) bool {
 	if t == nil {
 		return true
@@ -368,14 +391,27 @@ func efaceeq(t *_type, x, y unsafe.Pointer) bool {
 	if eq == nil {
 		panic(errorString("comparing uncomparable type " + toRType(t).string()))
 	}
+	xe := (*eface)(x)
+	ye := (*eface)(y)
 	if t.IsDirectIface() {
-		// Direct interface types are ptr, chan, map, func, and single-element structs/arrays thereof.
-		// Maps and funcs are not comparable, so they can't reach here.
-		// Ptrs, chans, and single-element items can be compared directly using ==.
-		return x == y
+		return xe.data == ye.data
 	}
-	return eq(x, y)
+	if t.IsInlineIface() {
+		return eq(unsafe.Pointer(&xe.inline), unsafe.Pointer(&ye.inline))
+	}
+	if t.IsSpreadIface() {
+		var xbuf, ybuf [3]uintptr
+		xbuf[0] = uintptr(xe.data)
+		*(*[16]byte)(unsafe.Pointer(&xbuf[1])) = *(*[16]byte)(unsafe.Pointer(&xe.inline))
+		ybuf[0] = uintptr(ye.data)
+		*(*[16]byte)(unsafe.Pointer(&ybuf[1])) = *(*[16]byte)(unsafe.Pointer(&ye.inline))
+		return eq(noescape(unsafe.Pointer(&xbuf)), noescape(unsafe.Pointer(&ybuf)))
+	}
+	return eq(xe.data, ye.data)
 }
+
+// ifaceeq mirrors efaceeq for non-empty interfaces: x, y point to full
+// iface headers (tab + data + inline).
 func ifaceeq(tab *itab, x, y unsafe.Pointer) bool {
 	if tab == nil {
 		return true
@@ -385,11 +421,23 @@ func ifaceeq(tab *itab, x, y unsafe.Pointer) bool {
 	if eq == nil {
 		panic(errorString("comparing uncomparable type " + toRType(t).string()))
 	}
+	xi := (*iface)(x)
+	yi := (*iface)(y)
 	if t.IsDirectIface() {
-		// See comment in efaceeq.
-		return x == y
+		return xi.data == yi.data
 	}
-	return eq(x, y)
+	if t.IsInlineIface() {
+		return eq(unsafe.Pointer(&xi.inline), unsafe.Pointer(&yi.inline))
+	}
+	if t.IsSpreadIface() {
+		var xbuf, ybuf [3]uintptr
+		xbuf[0] = uintptr(xi.data)
+		*(*[16]byte)(unsafe.Pointer(&xbuf[1])) = *(*[16]byte)(unsafe.Pointer(&xi.inline))
+		ybuf[0] = uintptr(yi.data)
+		*(*[16]byte)(unsafe.Pointer(&ybuf[1])) = *(*[16]byte)(unsafe.Pointer(&yi.inline))
+		return eq(noescape(unsafe.Pointer(&xbuf)), noescape(unsafe.Pointer(&ybuf)))
+	}
+	return eq(xi.data, yi.data)
 }
 
 // Testing adapters for hash quality tests (see hash_test.go)

@@ -1860,6 +1860,20 @@ func IsInlineIface(t *Type) bool {
 	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(t) == 0 && t.Alignment() <= 8 && !t.IsPtrShaped()
 }
 
+// IsSpreadIface reports whether t is eligible for spread storage in an
+// iface/eface header — word 0 into the 8-byte data slot, words 1+2 into
+// the 16-byte inline slot (gd Phase D). Eligibility: t is `string` or a
+// slice type; these are the stdlib's 3-word header types with exactly
+// one pointer at offset 0.
+//
+// Disjoint from IsInlineIface (t is 3 words, not ≤16 B pointer-free) and
+// IsDirectIface (t is 3 words, not 1 ptrsize word). Types satisfying
+// IsSpreadIface can be converted to any/eface with zero allocation —
+// the whole 24 B header is rematerialized in-place at each use site.
+func IsSpreadIface(t *Type) bool {
+	return t.IsString() || t.IsSlice()
+}
+
 // IsInterfaceMethod reports whether (field) m is
 // an interface method. Such methods have the
 // special receiver type types.FakeRecvType().

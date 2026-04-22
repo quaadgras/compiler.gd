@@ -1800,6 +1800,70 @@ func (s *state) inlineStageTemp(pos src.XPos) *ssa.Value {
 	return s.addr(tmp)
 }
 
+// iMakeSpreadFromValue stages a 3-word header value (string or slice)
+// into an iface's 4 ABI slots: word 0 into data (pointer-shaped), and
+// words 1/2 into the two float64 halves of the inline slot. The source
+// value never touches the heap — every slot is live in registers or on
+// the caller's stack frame.
+//
+// For string the three words are (ptr, hash-or-packed-bytes, len-or-
+// tag+bytes); for []T they are (backing ptr, len, cap). Both word 1 and
+// word 2 are 8-byte scalars, bit-cast through an addrtaken uint64 temp
+// so the backend fuses MOVQstore+MOVSDload into a single register move
+// (MOVQi2f on amd64).
+func (s *state) iMakeSpreadFromValue(ifaceT *types.Type, tab *ssa.Value, valNode ir.Node) *ssa.Value {
+	valT := valNode.Type()
+	f64 := types.Types[types.TFLOAT64]
+	byteptr := s.f.Config.Types.BytePtr
+	u64 := types.Types[types.TUINT64]
+
+	src := s.expr(valNode)
+
+	var w0, w1, w2 *ssa.Value
+	switch {
+	case valT.IsString():
+		w0 = s.newValue1(ssa.OpStringPtr, byteptr, src)
+		w1 = s.newValue1(ssa.OpStringHash, s.f.Config.Types.Uintptr, src)
+		w2 = s.newValue1(ssa.OpStringWord2, types.Types[types.TINT], src)
+	case valT.IsSlice():
+		elemPtrT := valT.Elem().PtrTo()
+		w0 = s.newValue1(ssa.OpSlicePtr, elemPtrT, src)
+		w1 = s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], src)
+		w2 = s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], src)
+	default:
+		base.Fatalf("iMakeSpreadFromValue: unsupported type %v", valT)
+	}
+
+	// word 0 is already pointer-shaped: *byte for string, *T for slice.
+	// The iface data slot accepts any pointer SSA value — it is
+	// GC-scanned via the iface type descriptor's pointer bitmap.
+	dataV := w0
+
+	// Bit-cast word 1 into the real-half float64.
+	tmp1 := typecheck.TempAt(valNode.Pos(), s.curfn, u64)
+	tmp1.SetAddrtaken(true)
+	tmp1Addr := s.addr(tmp1)
+	w1u64 := w1
+	if w1.Type != u64 {
+		w1u64 = s.newValue1(ssa.OpCopy, u64, w1)
+	}
+	s.store(u64, tmp1Addr, w1u64)
+	realV := s.load(f64, tmp1Addr)
+
+	// Bit-cast word 2 into the imag-half float64.
+	tmp2 := typecheck.TempAt(valNode.Pos(), s.curfn, u64)
+	tmp2.SetAddrtaken(true)
+	tmp2Addr := s.addr(tmp2)
+	w2u64 := w2
+	if w2.Type != u64 {
+		w2u64 = s.newValue1(ssa.OpCopy, u64, w2)
+	}
+	s.store(u64, tmp2Addr, w2u64)
+	imagV := s.load(f64, tmp2Addr)
+
+	return s.iMakeInline(ifaceT, tab, dataV, realV, imagV)
+}
+
 // iMakeInlineFromValue stages valNode into the inline payload's two
 // float64 halves and emits an inline iface with data=nil. Caller must
 // have verified that valNode's type is ≤ 16 B, pointer-free, and
@@ -1875,6 +1939,57 @@ func (s *state) inlineExtract(pos src.XPos, t *types.Type, iface *ssa.Value) *ss
 	s.store(f64, imagSlot, imag)
 	valPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), 0, stageAddr)
 	return s.load(t, valPtr)
+}
+
+// spreadExtract rebuilds a 3-word header value (string or []T) from an
+// iface's 4 ABI slots: iface.data is word 0 (a pointer), iface.inline's
+// real half is word 1, imag half is word 2. No memory load through the
+// data pointer — the data slot IS the value's first word (gd Phase D).
+//
+// For strings, word 1 is the hash / packed inline bytes; word 2 is the
+// raw tag+len or packed bytes (see OpStringWord2). For slices, word 1
+// is len and word 2 is cap.
+func (s *state) spreadExtract(pos src.XPos, t *types.Type, iface *ssa.Value) *ssa.Value {
+	f64 := types.Types[types.TFLOAT64]
+	u64 := types.Types[types.TUINT64]
+	byteptr := s.f.Config.Types.BytePtr
+
+	data := s.newValue1(ssa.OpIData, byteptr, iface)
+	realV := s.newValue1(ssa.OpIInlineReal, f64, iface)
+	imagV := s.newValue1(ssa.OpIInlineImag, f64, iface)
+
+	// Bit-cast real/imag f64 halves back to uint64 via an addrtaken temp.
+	tmpR := typecheck.TempAt(pos, s.curfn, u64)
+	tmpR.SetAddrtaken(true)
+	tmpRAddr := s.addr(tmpR)
+	s.store(f64, tmpRAddr, realV)
+	w1 := s.load(u64, tmpRAddr)
+
+	tmpI := typecheck.TempAt(pos, s.curfn, u64)
+	tmpI.SetAddrtaken(true)
+	tmpIAddr := s.addr(tmpI)
+	s.store(f64, tmpIAddr, imagV)
+	w2 := s.load(u64, tmpIAddr)
+
+	switch {
+	case t.IsString():
+		hash := s.newValue1(ssa.OpCopy, s.f.Config.Types.Uintptr, w1)
+		word2 := s.newValue1(ssa.OpCopy, types.Types[types.TINT], w2)
+		return s.newValue3(ssa.OpStringMake, t, data, hash, word2)
+	case t.IsSlice():
+		// Reinterpret iface data (BytePtr) as *T via OpCopy; both are
+		// pointer-shaped register-width values. The slice header's ptr
+		// slot carries the Elem().PtrTo() type so GC treats the backing
+		// per the slice type descriptor.
+		elemPtrT := t.Elem().PtrTo()
+		ptr := s.newValue1(ssa.OpCopy, elemPtrT, data)
+		ln := s.newValue1(ssa.OpCopy, types.Types[types.TINT], w1)
+		cap := s.newValue1(ssa.OpCopy, types.Types[types.TINT], w2)
+		return s.newValue3(ssa.OpSliceMake, t, ptr, ln, cap)
+	default:
+		base.Fatalf("spreadExtract: unsupported type %v", t)
+		return nil
+	}
 }
 
 // inlineStagePtr unpacks the inline payload of iface into a fresh complex128
@@ -4037,6 +4152,15 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			iface := s.expr(inner.X)
 			return s.inlineExtract(n.Pos(), n.Type(), iface)
 		}
+		// gd Phase D: spread-iface extraction. Walk also wraps
+		// *(*T)(OIDATA(iface)) around spread types (string, []T); the
+		// 3-word value is assembled from iface.data + the two halves of
+		// iface.inline. No memory load from the data ptr — the data
+		// slot IS word 0 of the value.
+		if inner, ok := n.X.(*ir.UnaryExpr); ok && inner.Op() == ir.OIDATA && types.IsSpreadIface(n.Type()) {
+			iface := s.expr(inner.X)
+			return s.spreadExtract(n.Pos(), n.Type(), iface)
+		}
 		p := s.exprPtr(n.X, n.Bounded(), n.Pos())
 		return s.load(n.Type(), p)
 
@@ -4198,6 +4322,13 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		yT := n.Y.Type()
 		if yT != nil && types.IsInlineIface(yT) && !yT.IsPtrShaped() {
 			return s.iMakeInlineFromValue(n.Type(), tab, n.Y)
+		}
+		// gd Phase D: spread-iface layout for string and slice headers.
+		// Source value is 3 words (ptr, scalar0, scalar1). Place word 0
+		// into the data slot directly and bit-cast words 1/2 into the
+		// two float64 halves of the inline slot — zero heap allocation.
+		if yT != nil && types.IsSpreadIface(yT) {
+			return s.iMakeSpreadFromValue(n.Type(), tab, n.Y)
 		}
 		// gd fat-interface: I2I / I2E pass-through. Walk emits
 		// OMAKEFACE(typeWord, OIDATA(src_iface)) to rebuild an iface with
@@ -7226,6 +7357,17 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		return s.newValue1I(ssa.OpOffPtr, types.NewPtr(dst), 0, stageAddr)
 	}
 
+	// gd Phase D: spread-iface type assertion. The concrete value
+	// (string, []T) has been split across the iface's data slot (word 0)
+	// and the 16-byte inline slot (words 1+2). Reassemble directly via
+	// spreadExtract — no memory load through iface.data.
+	//
+	// Gated on empty-interface sources only: walkConvInterface only
+	// spreads when the target is eface, so any/eface-held spread-type
+	// values are the only ones that use this layout. Non-empty iface
+	// sources still carry boxed values per the stock ABI.
+	spreadRead := src.IsEmptyInterface() && types.IsSpreadIface(dst)
+
 	if !commaok {
 		// on failure, panic by calling panicdottype
 		s.startBlock(bFail)
@@ -7243,6 +7385,9 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		s.startBlock(bOk)
 		if inlineRead {
 			return s.load(dst, inlineSrcPtr()), nil
+		}
+		if spreadRead {
+			return s.spreadExtract(pos, dst, iface), nil
 		}
 		if direct {
 			return s.newValue1(ssa.OpIData, dst, iface), nil
@@ -7264,6 +7409,8 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		switch {
 		case inlineRead:
 			s.vars[valVar] = s.load(dst, inlineSrcPtr())
+		case spreadRead:
+			s.vars[valVar] = s.spreadExtract(pos, dst, iface)
 		case direct:
 			s.vars[valVar] = s.newValue1(ssa.OpIData, dst, iface)
 		default:
@@ -7274,10 +7421,19 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		var p *ssa.Value
 		if inlineRead {
 			p = inlineSrcPtr()
+		} else if spreadRead {
+			// addr-taken temp destination: assemble the 24 B header and
+			// store into the temp via s.store rather than returning via
+			// the val var.
+			v := s.spreadExtract(pos, dst, iface)
+			s.store(dst, addr, v)
+			p = nil
 		} else {
 			p = s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
 		}
-		s.move(dst, addr, p)
+		if p != nil {
+			s.move(dst, addr, p)
+		}
 	}
 	s.vars[okVar] = s.constBool(true)
 	s.endBlock()
