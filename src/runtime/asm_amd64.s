@@ -1300,39 +1300,26 @@ noaes:
 // path differs from memhashFallback's 0-len path).
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$0-24
 	// AX = ptr to string struct
-	// BX = seed (ignored — gd uses a process-wide seed for strings)
+	// BX = seed (ignored — gd uses compile-time-known hash constants)
 	//
 	// gd string hash cache: heap-rep strings carry their hash in
-	// word 1, populated eagerly by runtime producers (sealStringHash)
-	// and the compiler for static literals. Inline-rep keeps bytes
+	// word 1, populated by runtime producers (sealStringHash) and
+	// by the compiler for static literals. Inline-rep keeps bytes
 	// in word 1, so gate the cache check on a non-nil word 0.
-	MOVQ	(AX), CX	// CX = word 0 (data ptr for heap, nil for inline)
+	//
+	// On cache miss, fall through to strhashFallback which runs the
+	// shared internal/abi string-hash algorithm. Bypassing aeshash
+	// here lets compile-time and runtime emit identical hashes for
+	// identical bytes — the whole point of the cache.
+	MOVQ	(AX), CX	// CX = word 0
 	TESTQ	CX, CX
-	JZ	noncached	// inline rep — word 1 holds bytes, skip cache
+	JZ	strhash_fallback	// inline rep
 	MOVQ	8(AX), DX	// DX = cached hash
 	TESTQ	DX, DX
-	JZ	noncached	// heap rep but not yet sealed
+	JZ	strhash_fallback	// heap, unsealed
 	MOVQ	DX, AX
 	RET
-noncached:
-	// Zero caller's per-table seed so freshly-computed hashes match
-	// the sealed-path values and cache readers agree.
-	XORQ	BX, BX
-	CMPB	runtime·useAeshash(SB), $0
-	JEQ	noaes
-	MOVQ	16(AX), CX	// CX = raw word 2 (tag<<60 | len-or-bytes)
-	MOVQ	CX, DX
-	SHRQ	$60, CX		// CX = tag
-	JNE	inline
-	// Heap rep: CX = tag = 0 already; load len and ptr.
-	MOVQ	DX, CX		// CX = len (word 2 low 60, tag == 0)
-	MOVQ	(AX), AX	// AX = data pointer (may be nil iff len == 0)
-	JMP	aeshashbody<>(SB)
-inline:
-	// Inline rep: bytes live at header + 8, tag is the length.
-	ADDQ	$8, AX
-	JMP	aeshashbody<>(SB)
-noaes:
+strhash_fallback:
 	JMP	runtime·strhashFallback<ABIInternal>(SB)
 
 // AX: data

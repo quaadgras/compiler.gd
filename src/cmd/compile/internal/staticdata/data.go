@@ -24,6 +24,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
+	"internal/abi"
 )
 
 // InitAddrOffset writes the static name symbol lsym to n, it does not modify n.
@@ -375,7 +376,19 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		}
 		symdata := StringSym(n.Pos(), i)
 		s.WriteAddr(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
-		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, 0)
+		// gd string hash cache: pre-populate word 1 with the fork's
+		// canonical string hash so the very first map lookup /
+		// equality check on a literal hits the cache without any
+		// runtime computation. abi.StringHashBytes is shared with
+		// runtime.sealStringHash and runtime.strhashFallback — same
+		// algorithm, same constants, same output for the same bytes.
+		// 32-bit targets leave the slot at 0 (they don't benefit from
+		// the cache; the header is 12 B with no reserved hash slot).
+		var hash int64
+		if types.PtrSize == 8 {
+			hash = int64(abi.StringHashBytes([]byte(i)))
+		}
+		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, hash)
 		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
 
 	default:

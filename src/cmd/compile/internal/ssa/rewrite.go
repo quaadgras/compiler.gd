@@ -18,6 +18,7 @@ import (
 	"cmd/internal/src"
 	"encoding/binary"
 	"fmt"
+	"internal/abi"
 	"internal/buildcfg"
 	"io"
 	"math"
@@ -2778,6 +2779,15 @@ func panicBoundsCCToAux(p PanicBoundsCC) Aux {
 
 func isDictArgSym(sym Sym) bool {
 	return sym.(*ir.Name).Sym().Name == typecheck.LocalDictName
+}
+
+// stringConstHash returns the fork's cached string hash for a literal
+// string. Matches runtime.sealStringHash / strhashFallback so
+// ConstString lowerings (in-function assignments, argument passing)
+// write the same value that runtime producers and staticdata.InitConst
+// compute — the invariant the word-1 cache depends on.
+func stringConstHash(s string) int64 {
+	return int64(abi.StringHashBytes([]byte(s)))
 }
 
 // stringInlineWord1 packs the first up to 8 bytes of s little-endian

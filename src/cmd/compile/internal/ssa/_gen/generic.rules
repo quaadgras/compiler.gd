@@ -1010,11 +1010,17 @@
     (ConstNil)
     (Const64 <typ.Uintptr> [stringInlineWord1(str)])
     (Const64 <typ.Int>     [stringInlineWord2(str)]))
+// gd string hash cache: pre-populate word 1 with the compile-time
+// hash so local string-literal assignments and in-function materialised
+// headers hit the cache too (matches what staticdata.InitConst writes
+// for package-level globals). Shared algorithm lives in
+// internal/abi.StringHashBytes; stringConstHash is the thin wrapper
+// in rewrite.go.
 (ConstString {str}) && config.PtrSize == 8 && len(str) > 15 =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)}
       (SB))
-    (Const64 <typ.Uintptr> [0])
+    (Const64 <typ.Uintptr> [stringConstHash(str)])
     (Const64 <typ.Int> [int64(len(str))]))
 
 // slice ops

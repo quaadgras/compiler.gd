@@ -6505,7 +6505,7 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 	}
 	// match: (ConstString {str})
 	// cond: config.PtrSize == 8 && len(str) > 15
-	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const64 <typ.Uintptr> [0]) (Const64 <typ.Int> [int64(len(str))]))
+	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const64 <typ.Uintptr> [stringConstHash(str)]) (Const64 <typ.Int> [int64(len(str))]))
 	for {
 		str := auxToString(v.Aux)
 		if !(config.PtrSize == 8 && len(str) > 15) {
@@ -6517,7 +6517,7 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		v1 := b.NewValue0(v.Pos, OpSB, typ.Uintptr)
 		v0.AddArg(v1)
 		v2 := b.NewValue0(v.Pos, OpConst64, typ.Uintptr)
-		v2.AuxInt = int64ToAuxInt(0)
+		v2.AuxInt = int64ToAuxInt(stringConstHash(str))
 		v3 := b.NewValue0(v.Pos, OpConst64, typ.Int)
 		v3.AuxInt = int64ToAuxInt(int64(len(str)))
 		v.AddArg3(v0, v2, v3)

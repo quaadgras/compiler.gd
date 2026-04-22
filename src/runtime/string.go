@@ -482,13 +482,7 @@ func sealStringHash(s string) string {
 	if n == 0 {
 		return s
 	}
-	h := memhash(sh.str, 0, uintptr(n))
-	if h == 0 {
-		// Reserve 0 as the "not populated" sentinel. Any non-zero
-		// substitute is fine; collisions are vanishingly rare.
-		h = 1
-	}
-	sh.hash = uint(h)
+	sh.hash = uint(abi.StringHashBytes(unsafe.Slice((*byte)(sh.str), n)))
 	return s
 }
 
