@@ -444,6 +444,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpStringLen(v)
 	case OpStringPtr:
 		return rewriteValuegeneric_OpStringPtr(v)
+	case OpStringWord2:
+		return rewriteValuegeneric_OpStringWord2(v)
 	case OpStructSelect:
 		return rewriteValuegeneric_OpStructSelect(v)
 	case OpSub16:
@@ -6485,11 +6487,28 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		return true
 	}
 	// match: (ConstString {str})
-	// cond: config.PtrSize == 8 && str != ""
+	// cond: config.PtrSize == 8 && len(str) > 0 && len(str) <= 15
+	// result: (StringMake (ConstNil) (Const64 <typ.Uintptr> [stringInlineWord1(str)]) (Const64 <typ.Int> [stringInlineWord2(str)]))
+	for {
+		str := auxToString(v.Aux)
+		if !(config.PtrSize == 8 && len(str) > 0 && len(str) <= 15) {
+			break
+		}
+		v.reset(OpStringMake)
+		v0 := b.NewValue0(v.Pos, OpConstNil, typ.BytePtr)
+		v1 := b.NewValue0(v.Pos, OpConst64, typ.Uintptr)
+		v1.AuxInt = int64ToAuxInt(stringInlineWord1(str))
+		v2 := b.NewValue0(v.Pos, OpConst64, typ.Int)
+		v2.AuxInt = int64ToAuxInt(stringInlineWord2(str))
+		v.AddArg3(v0, v1, v2)
+		return true
+	}
+	// match: (ConstString {str})
+	// cond: config.PtrSize == 8 && len(str) > 15
 	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const64 <typ.Uintptr> [0]) (Const64 <typ.Int> [int64(len(str))]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.PtrSize == 8 && str != "") {
+		if !(config.PtrSize == 8 && len(str) > 15) {
 			break
 		}
 		v.reset(OpStringMake)
@@ -32583,6 +32602,7 @@ func rewriteValuegeneric_OpStringHash(v *Value) bool {
 func rewriteValuegeneric_OpStringLen(v *Value) bool {
 	v_0 := v.Args[0]
 	// match: (StringLen (StringMake _ _ (Const64 <t> [c])))
+	// cond: uint64(c)>>60 == 0
 	// result: (Const64 <t> [c])
 	for {
 		if v_0.Op != OpStringMake {
@@ -32595,9 +32615,34 @@ func rewriteValuegeneric_OpStringLen(v *Value) bool {
 		}
 		t := v_0_2.Type
 		c := auxIntToInt64(v_0_2.AuxInt)
+		if !(uint64(c)>>60 == 0) {
+			break
+		}
 		v.reset(OpConst64)
 		v.Type = t
 		v.AuxInt = int64ToAuxInt(c)
+		return true
+	}
+	// match: (StringLen (StringMake _ _ (Const64 <t> [c])))
+	// cond: uint64(c)>>60 != 0
+	// result: (Const64 <t> [int64(uint64(c)>>60)])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpConst64 {
+			break
+		}
+		t := v_0_2.Type
+		c := auxIntToInt64(v_0_2.AuxInt)
+		if !(uint64(c)>>60 != 0) {
+			break
+		}
+		v.reset(OpConst64)
+		v.Type = t
+		v.AuxInt = int64ToAuxInt(int64(uint64(c) >> 60))
 		return true
 	}
 	return false
@@ -32621,6 +32666,28 @@ func rewriteValuegeneric_OpStringPtr(v *Value) bool {
 		v.Type = t
 		v.Aux = symToAux(s)
 		v.AddArg(base)
+		return true
+	}
+	return false
+}
+func rewriteValuegeneric_OpStringWord2(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (StringWord2 (StringMake _ _ (Const64 <t> [c])))
+	// result: (Const64 <t> [c])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpConst64 {
+			break
+		}
+		t := v_0_2.Type
+		c := auxIntToInt64(v_0_2.AuxInt)
+		v.reset(OpConst64)
+		v.Type = t
+		v.AuxInt = int64ToAuxInt(c)
 		return true
 	}
 	return false

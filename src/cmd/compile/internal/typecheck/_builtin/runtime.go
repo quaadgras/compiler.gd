@@ -81,6 +81,9 @@ func concatbyte5(*[32]byte, string, string, string, string, string) []byte
 func concatbytes(*[32]byte, []string) []byte
 
 func cmpstring(string, string) int
+func sliceinlinestring(string, int, int) string
+func stringDataHeap(string) *byte
+func stringcopy(dst *byte, dstLen int, src string) int
 func intstring(*[4]byte, int64) string
 func slicebytetostring(buf *[32]byte, ptr *byte, n int) string
 func slicebytetostringtmp(ptr *byte, n int) string

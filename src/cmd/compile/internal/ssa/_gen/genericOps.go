@@ -534,10 +534,11 @@ var genericOps = []opData{
 	// (word 2: tag<<60 | len for heap, tag<<60 | inline bytes[8:15]
 	// for inline). Phase A always emits heap rep with hash=0 and
 	// tag bits zero.
-	{name: "StringMake", argLength: 3},                  // arg0=ptr, arg1=hash, arg2=len
-	{name: "StringPtr", argLength: 1, typ: "BytePtr"},   // ptr(arg0)
-	{name: "StringHash", argLength: 1, typ: "Uintptr"},  // hash(arg0)
-	{name: "StringLen", argLength: 1, typ: "Int"},       // len(arg0) — phase A: returns word 2 raw; phase B will decode tag|len
+	{name: "StringMake", argLength: 3},                   // arg0=ptr, arg1=hash, arg2=word2 (raw: tag<<60|len-or-bytes)
+	{name: "StringPtr", argLength: 1, typ: "BytePtr"},    // ptr(arg0): heap data pointer, or nil for inline rep
+	{name: "StringHash", argLength: 1, typ: "Uintptr"},   // hash(arg0): word 1 (heap: cached hash; inline: bytes[0:8])
+	{name: "StringLen", argLength: 1, typ: "Int"},        // len(arg0): logical length (tag-decoded)
+	{name: "StringWord2", argLength: 1, typ: "Int"},      // word 2 of arg0 raw (tag nibble + packed). Use by helpers that need tag access.
 
 	// Interfaces
 	// gd fat-interface: IMake carries the full 32B iface header in SSA.

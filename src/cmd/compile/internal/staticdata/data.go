@@ -339,6 +339,12 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		// gd small-string optimization: string is a 3-word header
 		// (ptr, hash, len). Phase A writes hash = 0; literal pre-hashing
 		// will land in a later phase. See doc/gd/sso-string.md.
+		//
+		// Phase C note: static initializers always emit heap-rep
+		// (rodata-backed) so that any subsequent slice/index of the
+		// literal has a valid backing pointer. Inline-rep emission
+		// for static data is deferred until the companion escape
+		// analysis change (sso-string.md §5.3) lands.
 		i := constant.StringVal(u)
 		symdata := StringSym(n.Pos(), i)
 		s.WriteAddr(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)

@@ -2780,6 +2780,26 @@ func isDictArgSym(sym Sym) bool {
 	return sym.(*ir.Name).Sym().Name == typecheck.LocalDictName
 }
 
+// stringInlineWord1 packs the first up to 8 bytes of s little-endian
+// into word 1 of the gd inline-string header. s must have len ∈ [1, 15].
+func stringInlineWord1(s string) int64 {
+	var b [8]byte
+	copy(b[:], s)
+	return int64(binary.LittleEndian.Uint64(b[:]))
+}
+
+// stringInlineWord2 packs bytes[8:15] of s little-endian into the low 56
+// bits of word 2, with the 4-bit length tag in the top nibble. s must
+// have len ∈ [1, 15].
+func stringInlineWord2(s string) int64 {
+	var b [8]byte
+	if len(s) > 8 {
+		copy(b[:], s[8:])
+	}
+	const lenMask = 1<<60 - 1
+	return int64(binary.LittleEndian.Uint64(b[:]))&lenMask | int64(len(s))<<60
+}
+
 // When v is (IMake typ (StructMake ...) real imag), convert to
 // (IMake typ arg real imag) where arg is the pointer-y argument to
 // the StructMake (there must be exactly one).

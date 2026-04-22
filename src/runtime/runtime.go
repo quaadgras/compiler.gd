@@ -221,9 +221,15 @@ func syscall_runtimeUnsetenv(key string) {
 // writeErrStr writes a string to descriptor 2.
 // If SetCrashOutput(f) was called, it also writes to f.
 //
+// Callable from nowritebarrier contexts (badmorestackgsignal,
+// badsignal, ...) — uses stringStruct.bytes() instead of
+// unsafe.StringData so inline-rep input doesn't force a heap alloc.
+// writeErrData consumes the bytes synchronously.
+//
 //go:nosplit
 func writeErrStr(s string) {
-	writeErrData(unsafe.StringData(s), int32(len(s)))
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	writeErrData((*byte)(sh.bytes()), int32(len(s)))
 }
 
 // writeErrData is the common parts of writeErr{,Str}.

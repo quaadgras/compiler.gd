@@ -15,6 +15,7 @@ import (
 	"cmd/compile/internal/escape"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/reflectdata"
+	"cmd/compile/internal/staticdata"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 )
@@ -175,6 +176,19 @@ func walkCopy(n *ir.BinaryExpr, init *ir.Nodes, runtimecall bool) ir.Node {
 		n.Y = cheapExpr(n.Y, init)
 		ptrR, lenR := backingArrayPtrLen(n.Y)
 		return mkcall1(fn, n.Type(), init, reflectdata.CopyElemRType(base.Pos, n), ptrL, lenL, ptrR, lenR)
+	}
+
+	// copy(dst []byte, src string): src may be inline-rep (24 B string,
+	// word0 == nil, bytes in word1 + low 56 bits of word2). A raw
+	// memmove(dst, StringPtr(src), n) would deref nil. Route through
+	// runtime.stringcopy, which branches on the tag and handles both reps.
+	if n.Y.Type().IsString() {
+		n.X = cheapExpr(n.X, init)
+		ptrL, lenL := backingArrayPtrLen(n.X)
+		n.Y = cheapExpr(n.Y, init)
+		fn := typecheck.LookupRuntime("stringcopy")
+		srcStr := typecheck.Conv(n.Y, types.Types[types.TSTRING])
+		return mkcall1(fn, n.Type(), init, ptrL, lenL, srcStr)
 	}
 
 	if runtimecall {
@@ -773,6 +787,41 @@ func walkRecover(nn *ir.CallExpr, init *ir.Nodes) ir.Node {
 
 // walkUnsafeData walks an OUNSAFESLICEDATA or OUNSAFESTRINGDATA expression.
 func walkUnsafeData(n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
+	if n.X.Type().IsString() {
+		// gd: unsafe.StringData must return a stable pointer for the
+		// lifetime of the string value. For inline-rep inputs the
+		// bytes live in the header (stack/register), so a plain OSPTR
+		// would dangle once the caller's frame exits.
+		//
+		// Constant-string fast path: when the argument is a compile-time
+		// string literal, point directly at its rodata symbol. Stock Go
+		// does this implicitly via OSPTR+ConstString's heap form; under
+		// Phase C's inline rewrite we would otherwise pay a per-call
+		// heap copy in hot zero-alloc code (e.g. log/slog's StringValue).
+		// Look through ONAME / OCONVNOP to the underlying literal for
+		// inliner-created parameter bindings (e.g. `value := "foo"` from
+		// inlining log/slog.StringValue("foo")). ir.StaticValue walks
+		// single-assignment chains back to the root.
+		x := ir.StaticValue(n.X)
+		if x.Op() == ir.OLITERAL && x.Val().Kind() == constant.String {
+			s := constant.StringVal(x.Val())
+			if len(s) == 0 {
+				return typecheck.ConvNop(typecheck.NodNil(), n.Type())
+			}
+			sym := staticdata.StringSym(n.Pos(), s)
+			addr := typecheck.NodAddr(ir.NewLinksymExpr(n.Pos(), sym, types.Types[types.TUINT8]))
+			addr.SetType(n.Type())
+			return typecheck.Expr(addr)
+		}
+		// Otherwise route through runtime.stringDataHeap, which returns
+		// word0 unchanged for heap-rep (zero overhead) and heap-copies
+		// inline-rep bytes so the pointer survives the caller's frame.
+		s := walkExpr(n.X, init)
+		res := mkcall("stringDataHeap", n.Type(), init, s)
+		return res
+	}
+	// unsafe.SliceData: slices always have a stable backing pointer,
+	// OSPTR is sufficient.
 	slice := walkExpr(n.X, init)
 	res := typecheck.Expr(ir.NewUnaryExpr(n.Pos(), ir.OSPTR, slice))
 	res.SetType(n.Type())

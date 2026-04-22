@@ -2635,9 +2635,19 @@ func addLocalFacts(ft *factsTable, b *Block) {
 			// modulus is 0). See issue 67625.
 			ft.update(b, v, v.Args[1], unsigned, lt)
 		case OpStringLen:
+			// gd small-string optimization: StringMake's 3rd arg is the
+			// RAW word 2 (tag<<60 | len-or-bytes). StringLen is the
+			// *decoded* length, which is only equal to the raw word 2
+			// when the tag nibble is zero. Fold the equality fact only
+			// when the raw word 2 is a known heap-tag constant
+			// (tag==0); otherwise the fact lets prove substitute the
+			// raw word 2 for len, corrupting callers that expect the
+			// decoded length.
 			if v.Args[0].Op == OpStringMake {
-				// gd: StringMake is (ptr, hash, len) — len is Args[2].
-				ft.update(b, v, v.Args[0].Args[2], signed, eq)
+				a2 := v.Args[0].Args[2]
+				if a2.Op != OpConst64 || uint64(a2.AuxInt)>>60 == 0 {
+					ft.update(b, v, a2, signed, eq)
+				}
 			}
 		case OpCondSelect:
 			// gd small-string optimization: see the OpPhi case below —

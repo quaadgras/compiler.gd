@@ -35,6 +35,12 @@ var ReadRandomFailed = &readRandomFailed
 
 var Fastlog2 = fastlog2
 
+// StringSameBacking is the exported test alias of stringSameBacking.
+// Tests that previously compared unsafe.StringData(a) == unsafe.StringData(b)
+// to check "same backing" should use this instead under gd's small-
+// string optimization (see src/runtime/string.go).
+var StringSameBacking = stringSameBacking
+
 var ParseByteCount = parseByteCount
 
 var Nanotime = nanotime

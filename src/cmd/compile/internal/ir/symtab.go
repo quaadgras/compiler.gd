@@ -43,6 +43,7 @@ type symsStruct struct {
 	MallocGCTiny              [16]*obj.LSym
 	Memmove                   *obj.LSym
 	Memequal                  *obj.LSym
+	SliceInlineString         *obj.LSym
 	Msanread                  *obj.LSym
 	Msanwrite                 *obj.LSym
 	Msanmove                  *obj.LSym

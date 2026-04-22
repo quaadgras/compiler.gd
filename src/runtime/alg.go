@@ -331,6 +331,7 @@ func streqfast(s, t string) bool {
 	}
 	return memequal(sh.bytes(), th.bytes(), uintptr(sl))
 }
+
 func interequal(p, q unsafe.Pointer) bool {
 	x := (*iface)(p)
 	y := (*iface)(q)

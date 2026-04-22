@@ -599,6 +599,7 @@
 (Eq64F   (Const64F [c]) (Const64F [d])) => (ConstBool [c == d])
 (Neq32F  (Const32F [c]) (Const32F [d])) => (ConstBool [c != d])
 (Neq64F  (Const64F [c]) (Const64F [d])) => (ConstBool [c != d])
+
 (Less32F (Const32F [c]) (Const32F [d])) => (ConstBool [c < d])
 (Less64F (Const64F [c]) (Const64F [d])) => (ConstBool [c < d])
 (Leq32F  (Const32F [c]) (Const32F [d])) => (ConstBool [c <= d])
@@ -980,7 +981,13 @@
 // to other passes for optimizations. Phase A: hash word is zero for
 // all compiler-constructed strings; literal pre-hashing is a later phase.
 (StringPtr  (StringMake (Addr <t> {s} base) _ _)) => (Addr <t> {s} base)
-(StringLen  (StringMake _ _ (Const64 <t> [c]))) => (Const64 <t> [c])
+// StringLen is the decoded logical length. For a heap-rep const (tag==0)
+// the raw word 2 IS the length; for an inline-rep const the tag nibble
+// is the length and the remaining bits are packed bytes.
+(StringLen  (StringMake _ _ (Const64 <t> [c]))) && uint64(c)>>60 == 0 => (Const64 <t> [c])
+(StringLen  (StringMake _ _ (Const64 <t> [c]))) && uint64(c)>>60 != 0 => (Const64 <t> [int64(uint64(c)>>60)])
+// StringWord2 is the raw word 2 (tag nibble + payload).
+(StringWord2 (StringMake _ _ (Const64 <t> [c]))) => (Const64 <t> [c])
 (StringHash (StringMake _ (Const64 <t> [c]) _)) => (Const64 <t> [c])
 (ConstString {str}) && config.PtrSize == 4 && str == "" =>
   (StringMake (ConstNil) (Const32 <typ.Uintptr> [0]) (Const32 <typ.Int> [0]))
@@ -992,7 +999,18 @@
       (SB))
     (Const32 <typ.Uintptr> [0])
     (Const32 <typ.Int> [int32(len(str))]))
-(ConstString {str}) && config.PtrSize == 8 && str != "" =>
+// gd small-string optimization (Phase C): compile-time literals with
+// 1..15 bytes lower to an inline-rep header. word0 = nil, word1 holds
+// bytes[0:8] LE, word2 holds (tag<<60) | bytes[8:15] LE. No go:string
+// symbol is emitted. Slicing such a literal is safe because OSLICESTR
+// routes through stringSlice (SSA register path for heap, runtime
+// sliceinlinestring for inline — neither exposes an interior ptr).
+(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 =>
+  (StringMake
+    (ConstNil)
+    (Const64 <typ.Uintptr> [stringInlineWord1(str)])
+    (Const64 <typ.Int>     [stringInlineWord2(str)]))
+(ConstString {str}) && config.PtrSize == 8 && len(str) > 15 =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)}
       (SB))

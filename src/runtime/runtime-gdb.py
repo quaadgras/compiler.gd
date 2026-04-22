@@ -116,8 +116,25 @@ class StringTypePrinter:
 		return 'string'
 
 	def to_string(self):
-		l = int(self.val['len'])
-		return self.val['str'].string("utf-8", "ignore", l)
+		# gd small-string optimization: the top 4 bits of the 'len' field
+		# are a length tag. tag == 0 means heap-rep (str points to the
+		# bytes, length is the low 60 bits). tag 1..15 means inline-rep
+		# (str is nil, bytes are packed into the header at offset 8..22
+		# — &hash..&hash+7 then low 7 bytes of len — and tag is the
+		# length).
+		raw = int(self.val['len'])
+		tag = (raw >> 60) & 0xf
+		if tag != 0:
+			length = tag
+			addr = self.val.address
+			if addr is None:
+				return "<inline string, no address>"
+			inferior = gdb.selected_inferior()
+			# Bytes start at offset 8 (the 'hash' word).
+			buf = inferior.read_memory(int(addr) + 8, length)
+			return str(bytes(buf), encoding="utf-8", errors="ignore")
+		length = raw & ((1 << 60) - 1)
+		return self.val['str'].string("utf-8", "ignore", length)
 
 
 class SliceTypePrinter:

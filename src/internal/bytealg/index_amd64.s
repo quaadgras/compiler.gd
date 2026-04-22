@@ -16,11 +16,25 @@ TEXT ·Index(SB),NOSPLIT,$0-56
 
 // gd small-string optimization: each string is 24 B (ptr, hash, len).
 // IndexString(a, b string) int → 24 + 24 + 8 (ret) = 56.
+// Inline-rep strings have base==nil and bytes inside the header; decode
+// the tag nibble and redirect the data pointer to &hash+offset(FP).
 TEXT ·IndexString(SB),NOSPLIT,$0-56
 	MOVQ a_base+0(FP), DI
 	MOVQ a_len+16(FP), DX
+	MOVQ DX, CX
+	SHRQ $60, CX
+	JZ   is_a_heap
+	LEAQ a_hash+8(FP), DI
+	MOVQ CX, DX
+is_a_heap:
 	MOVQ b_base+24(FP), R8
 	MOVQ b_len+40(FP), AX
+	MOVQ AX, CX
+	SHRQ $60, CX
+	JZ   is_b_heap
+	LEAQ b_hash+32(FP), R8
+	MOVQ CX, AX
+is_b_heap:
 	MOVQ DI, R10
 	LEAQ ret+48(FP), R11
 	JMP  indexbody<>(SB)

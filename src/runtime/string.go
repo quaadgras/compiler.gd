@@ -339,6 +339,147 @@ func (s *stringStruct) bytes() unsafe.Pointer {
 	return noescape(unsafe.Pointer(&s.hash))
 }
 
+// stringSameBacking reports whether a and b share the same underlying
+// byte storage. Two heap-rep strings share backing iff their data
+// pointers are equal. Two inline-rep strings share "backing" iff their
+// inline word pairs are bit-equal (i.e. same content encoded identically
+// — there is no distinct backing for inline bytes). Mixed rep is never
+// shared: an inline copy of a heap string's content has independent
+// storage.
+//
+// Intended for tests and clone-detection paths that need to ask "did
+// this op copy the bytes?" — a question unsafe.StringData pointer
+// identity can no longer answer under gd's small-string optimization.
+//
+//go:nosplit
+func stringSameBacking(a, b string) bool {
+	ah := (*stringStruct)(unsafe.Pointer(&a))
+	bh := (*stringStruct)(unsafe.Pointer(&b))
+	if ah.str != nil || bh.str != nil {
+		// At least one is heap-rep; share iff both heap with same ptr.
+		return ah.str == bh.str
+	}
+	// Both inline-rep: share iff identical header content.
+	return ah.hash == bh.hash && ah.len == bh.len
+}
+
+// stringDataHeap returns a stable pointer to the bytes of s. For heap-
+// rep inputs it returns s.str unchanged (matching stock unsafe.StringData
+// semantics). For inline-rep inputs it allocates a 1..15-byte heap
+// buffer, copies the inline bytes in, and returns the buffer — so the
+// returned pointer never aliases the caller's stack and survives as long
+// as the caller holds it.
+//
+// Used by the compiler for user-visible unsafe.StringData calls via
+// walkUnsafeData. Runtime-internal callers that consume the pointer
+// within a single call should use stringStruct.bytes() instead —
+// stringDataHeap's alloc path is not reachable from //go:nowritebarrierrec
+// contexts (writeErrStr, dloggerImpl.s, heapdump.*).
+func stringDataHeap(s string) *byte {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	if sh.str != nil {
+		return (*byte)(sh.str)
+	}
+	n := int(uint64(sh.len) >> abi.StringTagShift)
+	if n == 0 {
+		return nil
+	}
+	p := mallocgc(uintptr(n), nil, false)
+	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
+	return (*byte)(p)
+}
+
+// sliceinlinestring is called by the compiler to implement OSLICESTR
+// when the source string is inline-rep. It copies bytes[lo:hi] from the
+// source header into a fresh inline header and returns it as a new
+// string value — no pointer into the caller's frame is exposed.
+//
+// The compiler only routes this call from the tag-dispatched inline
+// branch of stringSlice; bounds have already been checked by the
+// caller, and the source is known to be inline-rep (word0 == nil,
+// tag != 0). Result length is guaranteed ≤ 15.
+//
+// cgoStringNormalize ensures s has a heap representation before being
+// passed to a cgo C function. Inline-rep strings (word0 == nil, bytes in
+// word1 + low 56 bits of word2) are not readable from C — s.p is nil and
+// s.n is tag-encoded. Cgo's generated Go stubs call this helper on each
+// string argument so the C side always sees a normal {ptr, 0, len}
+// header with valid s.p and decoded s.n.
+//
+// Heap-rep inputs (tag == 0) return s unchanged. Inline-rep inputs
+// allocate a len-sized heap buffer, copy the inline bytes in, and
+// return a fresh heap-rep string pointing at the buffer.
+//
+//go:linkname cgoStringNormalize
+func cgoStringNormalize(s string) string {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	if sh.str != nil {
+		return s
+	}
+	n := int(uint64(sh.len) >> abi.StringTagShift)
+	if n == 0 {
+		return ""
+	}
+	p := mallocgc(uintptr(n), nil, false)
+	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
+	var r stringStruct
+	r.str = p
+	r.hash = 0
+	r.len = uint(n)
+	return *(*string)(unsafe.Pointer(&r))
+}
+
+// stringcopy implements copy(dst, src) where src is a string. It handles
+// both heap-rep (word0 != nil) and inline-rep (word0 == nil; bytes live
+// in word1 and low 56 bits of word2) sources uniformly, so the compiler
+// no longer emits a raw memmove(dst, StringPtr(src), n) that would deref
+// a nil StringPtr on inline-rep inputs.
+//
+// Returns the number of bytes copied: min(dstLen, len(src)).
+//
+//go:nosplit
+func stringcopy(dst *byte, dstLen int, s string) int {
+	n := len(s)
+	if n > dstLen {
+		n = dstLen
+	}
+	if n == 0 {
+		return 0
+	}
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	if sh.str != nil {
+		memmove(unsafe.Pointer(dst), sh.str, uintptr(n))
+		return n
+	}
+	// Inline rep — bytes live in &sh.hash (word 1, 8 bytes) and the low 7
+	// bytes of sh.len (word 2 masked). Materialize into a stack buffer and
+	// memmove; the buffer doesn't escape this frame.
+	var buf [16]byte
+	*(*uint64)(unsafe.Pointer(&buf[0])) = uint64(sh.hash)
+	*(*uint64)(unsafe.Pointer(&buf[8])) = uint64(sh.len) & abi.StringLenMask
+	memmove(unsafe.Pointer(dst), noescape(unsafe.Pointer(&buf[0])), uintptr(n))
+	return n
+}
+
+//go:nosplit
+func sliceinlinestring(s string, lo, hi int) string {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	n := hi - lo
+	if n == 0 {
+		return ""
+	}
+	src := noescape(unsafe.Pointer(&sh.hash))
+	var buf [16]byte
+	for i := 0; i < n; i++ {
+		buf[i] = *(*byte)(unsafe.Pointer(uintptr(src) + uintptr(lo+i)))
+	}
+	var r stringStruct
+	r.hash = uint(*(*uint64)(unsafe.Pointer(&buf[0])))
+	lenWord := *(*uint64)(unsafe.Pointer(&buf[8]))
+	r.len = uint(lenWord&abi.StringLenMask | uint64(n)<<abi.StringTagShift)
+	return *(*string)(unsafe.Pointer(&r))
+}
+
 func intstring(buf *[4]byte, v int64) (s string) {
 	var b []byte
 	if buf != nil {

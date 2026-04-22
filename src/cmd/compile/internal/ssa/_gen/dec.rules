@@ -39,10 +39,34 @@
     (Store {typ.Float64} dst real mem))
 
 // string ops — gd small-string optimization (3-word header).
-// arg0=ptr (word 0), arg1=hash (word 1), arg2=len (word 2).
-(StringPtr  (StringMake ptr  _  _  )) => ptr
-(StringHash (StringMake _    hash _)) => hash
-(StringLen  (StringMake _    _  len)) => len
+// arg0=ptr (word 0), arg1=hash or inline bytes[0:8] (word 1),
+// arg2=raw word 2 (tag<<60 | logical len for heap rep; tag<<60 |
+// packed bytes[8:15] for inline rep).
+//
+// StringLen is the LOGICAL length — on 32-bit the raw word 2 always
+// has tag=0 so it is the length. On 64-bit decode the tag nibble.
+// StringWord2 is the raw word 2, used by helpers that need the tag
+// for inline-vs-heap dispatch.
+(StringPtr   (StringMake ptr  _  _  )) => ptr
+(StringHash  (StringMake _    hash _)) => hash
+(StringWord2 (StringMake _    _  w2)) => w2
+(StringLen   (StringMake _    _  w2)) && config.PtrSize == 4 => w2
+// 64-bit: decode tag-encoded word 2 without CondSelect so every arch
+// (incl. ARM, MIPS, S390X, RISCV64) lowers cleanly. Formula:
+//   tag    = w2 >>u 60           (0 for heap, 1..15 for inline)
+//   masked = w2 & ((1<<60)-1)    (heap len, or garbage on inline)
+//   zm     = int64(tag-1) >>s 63 (-1 if tag==0, 0 otherwise)
+//   result = tag + (masked & zm)
+// When tag==0: result = 0 + masked = masked = heap len. When tag!=0:
+// result = tag + 0 = tag = inline len.
+(StringLen   (StringMake _    _  w2)) && config.PtrSize == 8 =>
+  (Add64 <typ.Int>
+    (Rsh64Ux64 <typ.Int> w2 (Const64 <typ.UInt64> [60]))
+    (And64 <typ.Int>
+      (And64 <typ.Int> w2 (Const64 <typ.Int> [1<<60-1]))
+      (Rsh64x64 <typ.Int>
+        (Sub64 <typ.Int> (Rsh64Ux64 <typ.Int> w2 (Const64 <typ.UInt64> [60])) (Const64 <typ.Int> [1]))
+        (Const64 <typ.UInt64> [63]))))
 
 (Load <t> ptr mem) && t.IsString() =>
   (StringMake
@@ -155,11 +179,11 @@
 (ArraySelect [i] x:(Load <t> ptr mem)) =>
   @x.Block (Load <v.Type> (OffPtr <v.Type.PtrTo()> [t.Elem().Size()*i] ptr) mem)
 
-(StringPtr  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.BytePtr> ptr mem)
-(StringHash x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Uintptr>
+(StringPtr   x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.BytePtr> ptr mem)
+(StringHash  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Uintptr>
       (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
       mem)
-(StringLen  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Int>
+(StringWord2 x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Int>
       (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
       mem)
 

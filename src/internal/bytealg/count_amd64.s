@@ -20,6 +20,8 @@ TEXT ·Count(SB),NOSPLIT,$0-40
 
 // gd small-string optimization: string is 24 B (ptr, hash, len).
 // CountString(s string, c byte) int → 24 + 8 (c) + 8 (ret) = 40.
+// Inline-rep strings have s_base == nil and the bytes live in the header
+// itself (starting at s_hash+8(FP)); the length is the top-4-bit tag.
 TEXT ·CountString(SB),NOSPLIT,$0-40
 #ifndef hasPOPCNT
 	CMPB	internal∕cpu·X86+const_offsetX86HasPOPCNT(SB), $1
@@ -28,6 +30,12 @@ TEXT ·CountString(SB),NOSPLIT,$0-40
 #endif
 	MOVQ	s_base+0(FP), SI
 	MOVQ	s_len+16(FP), BX
+	MOVQ	BX, CX
+	SHRQ	$60, CX
+	JZ	cs_heap
+	LEAQ	s_hash+8(FP), SI
+	MOVQ	CX, BX
+cs_heap:
 	MOVB	c+24(FP), AL
 	LEAQ	ret+32(FP), R8
 	JMP	countbody<>(SB)

@@ -147,7 +147,10 @@ func decomposeBuiltinPhi(v *Value) {
 }
 
 func decomposeStringPhi(v *Value) {
-	// gd small-string optimization: 3-word string (ptr, hash, len).
+	// gd small-string optimization: 3-word string (ptr, hash, word2).
+	// The third slot is the RAW word 2 (tag<<60 | len-or-bytes), NOT the
+	// tag-decoded length; losing the tag across a phi would corrupt
+	// inline-rep headers.
 	types := &v.Block.Func.Config.Types
 	ptrType := types.BytePtr
 	hashType := types.Uintptr
@@ -155,16 +158,16 @@ func decomposeStringPhi(v *Value) {
 
 	ptr := v.Block.NewValue0(v.Pos, OpPhi, ptrType)
 	hash := v.Block.NewValue0(v.Pos, OpPhi, hashType)
-	len := v.Block.NewValue0(v.Pos, OpPhi, lenType)
+	word2 := v.Block.NewValue0(v.Pos, OpPhi, lenType)
 	for _, a := range v.Args {
 		ptr.AddArg(a.Block.NewValue1(v.Pos, OpStringPtr, ptrType, a))
 		hash.AddArg(a.Block.NewValue1(v.Pos, OpStringHash, hashType, a))
-		len.AddArg(a.Block.NewValue1(v.Pos, OpStringLen, lenType, a))
+		word2.AddArg(a.Block.NewValue1(v.Pos, OpStringWord2, lenType, a))
 	}
 	v.reset(OpStringMake)
 	v.AddArg(ptr)
 	v.AddArg(hash)
-	v.AddArg(len)
+	v.AddArg(word2)
 }
 
 func decomposeSlicePhi(v *Value) {

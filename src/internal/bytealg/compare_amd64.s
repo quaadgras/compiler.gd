@@ -21,13 +21,33 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 // passed in 3 int regs. cmpstring(a, b string) int register layout is:
 //   a.ptr=AX, a.hash=BX, a.len=CX, b.ptr=DI, b.hash=SI, b.len=R8.
 // cmpbody wants SI=a_ptr, BX=a_len, DI=b_ptr, DX=b_len.
-// Frame: 24 + 24 + 8 = 56 (args + ret) — used only for stack fallback.
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$0-56
+//
+// For inline-rep strings word 0 (ptr) is nil and the 15 data bytes live
+// inside the header (word1 || low 7 B of word2). Spill the header to the
+// stack and repoint the data pointer before dispatching. 32 B of local
+// frame: 16 B spill slot each for a (0..15) and b (16..31).
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
+	TESTQ	AX, AX
+	JNE	cmpstr_a_heap
+	MOVQ	BX, 0(SP)
+	MOVQ	CX, 8(SP)
+	LEAQ	0(SP), AX
+	SHRQ	$60, CX   // CX = tag = real length (inline)
+cmpstr_a_heap:
+	TESTQ	DI, DI
+	JNE	cmpstr_b_heap
+	MOVQ	SI, 16(SP)
+	MOVQ	R8, 24(SP)
+	LEAQ	16(SP), DI
+	SHRQ	$60, R8
+cmpstr_b_heap:
 	MOVQ	AX, SI    // SI = a.ptr
-	MOVQ	CX, BX    // BX = a.len  (CX held a.len under gd 3-reg string)
-	MOVQ	R8, DX    // DX = b.len  (R8 held b.len under gd 3-reg string)
-	// DI already holds b.ptr; hash regs (BX in, SI in) are dead — cmpstring ignores hash.
-	JMP	cmpbody<>(SB)
+	MOVQ	CX, BX    // BX = a.len
+	MOVQ	R8, DX    // DX = b.len
+	// cmpbody is tail-called via CALL+RET (not JMP) because cmpstring
+	// now owns a $32 local frame that must be unwound on return.
+	CALL	cmpbody<>(SB)
+	RET
 
 // input:
 //   SI = a

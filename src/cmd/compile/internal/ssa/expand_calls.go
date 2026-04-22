@@ -417,12 +417,15 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpSliceCap, &rc)
 
 	case types.TSTRING:
-		// gd small-string optimization: string is (ptr, hash, len).
-		// intRegs = 3 on TSTRING — produce 3 slots.
+		// gd small-string optimization: string is (ptr, hash, word2).
+		// intRegs = 3 on TSTRING — produce 3 slots. The third slot is the
+		// RAW word 2 (tag<<60 | len-or-bytes), NOT the tag-decoded length;
+		// otherwise inline-rep strings lose their tag nibble when passed
+		// across a call boundary and the callee sees a broken header.
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpStringPtr, &rc)
 		pos = pos.WithNotStmt()
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.Uintptr, OpStringHash, &rc)
-		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpStringLen, &rc)
+		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpStringWord2, &rc)
 
 	case types.TINTER:
 		// gd fat-interface: iface/eface is (tab, data, inline complex128).

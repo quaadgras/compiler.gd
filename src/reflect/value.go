@@ -1530,11 +1530,25 @@ func (v Value) Index(i int) Value {
 		return Value{typ_: typ, ptr: val, flag: fl}
 
 	case String:
+		// gd small-string optimization: decode logical length from the
+		// tag nibble and point at the correct byte — for inline-rep
+		// strings Data is nil and the bytes live at offset PtrSize of
+		// the header.
 		s := (*unsafeheader.String)(v.dataPtr())
-		if uint(i) >= uint(s.Len) {
+		tag := uint(s.Len) >> abi.StringTagShift
+		var length int
+		var base unsafe.Pointer
+		if tag != 0 {
+			length = int(tag)
+			base = unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize)
+		} else {
+			length = s.Len
+			base = s.Data
+		}
+		if uint(i) >= uint(length) {
 			panic("reflect: string index out of range")
 		}
-		p := arrayAt(s.Data, i, 1, "i < s.Len")
+		p := arrayAt(base, i, 1, "i < s.Len")
 		fl := v.flag.ro() | flag(Uint8) | flagIndir
 		return Value{typ_: uint8Type, ptr: p, flag: fl}
 	}
@@ -1976,8 +1990,14 @@ func (v Value) lenNonSlice() int {
 	case Map:
 		return maplen(v.pointer())
 	case String:
-		// String is bigger than a word; assume flagIndir.
-		return (*unsafeheader.String)(v.dataPtr()).Len
+		// String is bigger than a word; assume flagIndir. gd: Len is
+		// the raw word2 (tag nibble + length/bytes); decode the tag
+		// to get the logical length.
+		raw := uint((*unsafeheader.String)(v.dataPtr()).Len)
+		if tag := raw >> abi.StringTagShift; tag != 0 {
+			return int(tag)
+		}
+		return int(raw & abi.StringLenMask)
 	case Ptr:
 		if v.typ().Elem().Kind() == abi.Array {
 			return v.typ().Elem().Len()
@@ -2189,7 +2209,15 @@ func (v Value) Pointer() uintptr {
 	case Slice:
 		return uintptr((*unsafeheader.Slice)(v.dataPtr()).Data)
 	case String:
-		return uintptr((*unsafeheader.String)(v.dataPtr()).Data)
+		// gd: for heap-rep strings Data is the byte pointer. For
+		// inline-rep the bytes live in the header itself — return
+		// &s.Hash, which points at the first inline byte. The
+		// lifetime matches the Value's flagIndir storage.
+		sh := (*unsafeheader.String)(v.dataPtr())
+		if sh.Data != nil {
+			return uintptr(sh.Data)
+		}
+		return uintptr(v.dataPtr()) + goarch.PtrSize
 	}
 	panic(&ValueError{"reflect.Value.Pointer", v.kind()})
 }
@@ -2459,13 +2487,30 @@ func (v Value) Slice(i, j int) Value {
 		cap = s.Cap
 
 	case String:
+		// gd: decode inline vs heap, then produce a fresh string
+		// header. For an inline source, slicing must not expose a
+		// pointer into the source's header (it would dangle once the
+		// source goes out of scope); build the result via
+		// runtime.sliceinlinestring which returns a self-contained
+		// inline value.
 		s := (*unsafeheader.String)(v.dataPtr())
-		if i < 0 || j < i || j > s.Len {
+		raw := uint(s.Len)
+		var logicalLen int
+		if tag := raw >> abi.StringTagShift; tag != 0 {
+			logicalLen = int(tag)
+		} else {
+			logicalLen = int(raw & abi.StringLenMask)
+		}
+		if i < 0 || j < i || j > logicalLen {
 			panic("reflect.Value.Slice: string slice index out of bounds")
 		}
-		var t unsafeheader.String
-		if i < s.Len {
-			t = unsafeheader.String{Data: arrayAt(s.Data, i, 1, "i < s.Len"), Len: j - i}
+		var t string
+		if i < logicalLen {
+			// Route through the compiler's OSLICESTR path by slicing
+			// a string-typed copy. This picks up the rep-aware
+			// stringSlice helper (heap: ptr+i; inline: fresh inline).
+			src := *(*string)(v.dataPtr())
+			t = src[i:j]
 		}
 		return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: v.flag}
 	}
@@ -2742,7 +2787,15 @@ func (v Value) UnsafePointer() unsafe.Pointer {
 	case Slice:
 		return (*unsafeheader.Slice)(v.dataPtr()).Data
 	case String:
-		return (*unsafeheader.String)(v.dataPtr()).Data
+		// gd: for inline-rep strings Data is nil and the bytes live
+		// in the header itself — return &s.Hash so callers get a
+		// valid byte pointer. Lifetime is tied to the Value's
+		// flagIndir storage.
+		sh := (*unsafeheader.String)(v.dataPtr())
+		if sh.Data != nil {
+			return sh.Data
+		}
+		return unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize)
 	}
 	panic(&ValueError{"reflect.Value.UnsafePointer", v.kind()})
 }
@@ -2970,10 +3023,20 @@ func Copy(dst, src Value) int {
 	} else if sk == Slice {
 		ss = *(*unsafeheader.Slice)((&src).dataPtr())
 	} else {
-		sh := *(*unsafeheader.String)((&src).dataPtr())
-		ss.Data = sh.Data
-		ss.Len = sh.Len
-		ss.Cap = sh.Len
+		// gd: decode inline-vs-heap for the source string and produce
+		// a Slice view of its bytes. For inline rep Data must point
+		// at the header's inline-byte area, not nil.
+		srcPtr := (&src).dataPtr()
+		sh := *(*unsafeheader.String)(srcPtr)
+		raw := uint(sh.Len)
+		if tag := raw >> abi.StringTagShift; tag != 0 {
+			ss.Data = unsafe.Pointer(uintptr(srcPtr) + goarch.PtrSize)
+			ss.Len = int(tag)
+		} else {
+			ss.Data = sh.Data
+			ss.Len = int(raw & abi.StringLenMask)
+		}
+		ss.Cap = ss.Len
 	}
 
 	return typedslicecopy(de.Common(), ds, ss)

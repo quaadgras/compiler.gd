@@ -559,11 +559,15 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 	inProlog := builtinDefs[name] != ""
 	cname := fmt.Sprintf("_cgo%s%s", cPrefix, n.Mangle)
 	paramnames := []string(nil)
+	stringParamNames := []string(nil) // gd SSO: subset needing heap-rep normalize
 	if d.Type.Params != nil {
 		for i, param := range d.Type.Params.List {
 			paramName := fmt.Sprintf("p%d", i)
 			param.Names = []*ast.Ident{ast.NewIdent(paramName)}
 			paramnames = append(paramnames, paramName)
+			if id, ok := param.Type.(*ast.Ident); ok && id.Name == "string" {
+				stringParamNames = append(stringParamNames, paramName)
+			}
 		}
 	}
 
@@ -658,6 +662,15 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 	if noCallback {
 		// disable cgocallback, will check it in runtime.
 		fmt.Fprintf(fgo2, "\t_Cgo_no_callback(true)\n")
+	}
+
+	// gd SSO: normalize inline-rep strings to heap-rep before handing the
+	// argument frame to C. Inline strings have s.p == nil and a
+	// tag-encoded s.n; C code reading those fields reads garbage. The
+	// helper is a nop on heap-rep inputs (tag == 0), so cost is one
+	// load + branch per string arg.
+	for _, name := range stringParamNames {
+		fmt.Fprintf(fgo2, "\t%s = _cgoStringNormalize(%s)\n", name, name)
 	}
 
 	prefix := ""
@@ -1727,12 +1740,17 @@ func _cgoCheckPointer(interface{}, interface{})
 //go:linkname _cgoCheckResult runtime.cgoCheckResult
 //go:noescape
 func _cgoCheckResult(interface{})
+
+//go:linkname _cgoStringNormalize runtime.cgoStringNormalize
+func _cgoStringNormalize(string) string
 `
 
 const gccgoGoProlog = `
 func _cgoCheckPointer(interface{}, interface{})
 
 func _cgoCheckResult(interface{})
+
+func _cgoStringNormalize(string) string
 `
 
 const goStringDef = `

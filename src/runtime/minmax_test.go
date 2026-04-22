@@ -6,9 +6,9 @@ package runtime_test
 
 import (
 	"math"
+	. "runtime"
 	"strings"
 	"testing"
-	"unsafe"
 )
 
 var (
@@ -112,11 +112,16 @@ func TestMinMaxStringTies(t *testing.T) {
 	x := strings.Split(s, "")
 
 	test := func(i, j, k int) {
-		if z := min(x[i], x[j], x[k]); unsafe.StringData(z) != unsafe.StringData(x[i]) {
-			t.Errorf("min(x[%v], x[%v], x[%v]) = %p, want %p", i, j, k, unsafe.StringData(z), unsafe.StringData(x[i]))
+		// gd: equal inline strings don't share backing pointers even
+		// when one is a copy of another — unsafe.StringData cannot
+		// answer the "is this the same argument?" question here.
+		// StringSameBacking returns true for same-heap-ptr OR same
+		// inline header content.
+		if z := min(x[i], x[j], x[k]); !StringSameBacking(z, x[i]) {
+			t.Errorf("min(x[%v], x[%v], x[%v]) does not share backing with x[%v]", i, j, k, i)
 		}
-		if z := max(x[i], x[j], x[k]); unsafe.StringData(z) != unsafe.StringData(x[i]) {
-			t.Errorf("max(x[%v], x[%v], x[%v]) = %p, want %p", i, j, k, unsafe.StringData(z), unsafe.StringData(x[i]))
+		if z := max(x[i], x[j], x[k]); !StringSameBacking(z, x[i]) {
+			t.Errorf("max(x[%v], x[%v], x[%v]) does not share backing with x[%v]", i, j, k, i)
 		}
 	}
 

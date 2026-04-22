@@ -145,6 +145,7 @@ func InitConfig() {
 	ir.Syms.MallocGC = typecheck.LookupRuntimeFunc("mallocgc")
 	ir.Syms.Memmove = typecheck.LookupRuntimeFunc("memmove")
 	ir.Syms.Memequal = typecheck.LookupRuntimeFunc("memequal")
+	ir.Syms.SliceInlineString = typecheck.LookupRuntimeFunc("sliceinlinestring")
 	ir.Syms.Msanread = typecheck.LookupRuntimeFunc("msanread")
 	ir.Syms.Msanwrite = typecheck.LookupRuntimeFunc("msanwrite")
 	ir.Syms.Msanmove = typecheck.LookupRuntimeFunc("msanmove")
@@ -1475,40 +1476,30 @@ func (s *state) sMake(t *types.Type, ptr, length *ssa.Value) *ssa.Value {
 // arches without CondSelect the emitted if/phi splits the header and
 // induction-variable detection doesn't fire, but correctness remains.
 func (s *state) stringLen(str *ssa.Value) *ssa.Value {
-	intT := types.Types[types.TINT]
-	raw := s.newValue1(ssa.OpStringLen, intT, str)
-	if s.config.PtrSize < 8 {
-		return raw
-	}
-	shift := s.constInt64(intT, rtabi.StringTagShift)
-	tag := s.newValue2(ssa.OpRsh64Ux64, intT, raw, shift)
-	mask := s.constInt64(intT, rtabi.StringLenMask)
-	masked := s.newValue2(ssa.OpAnd64, intT, raw, mask)
-	zero := s.constInt64(intT, 0)
-	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
-	switch Arch.LinkArch.Family {
-	case sys.AMD64, sys.ARM64, sys.Loong64, sys.PPC64:
-		return s.newValue3(ssa.OpCondSelect, intT, tag, masked, cond)
-	}
-	return s.ternary(cond, tag, masked)
+	// OpStringLen is the logical length — dec.rules decodes the tag
+	// for inline-rep strings.
+	return s.newValue1(ssa.OpStringLen, types.Types[types.TINT], str)
 }
 
-// stringBytes returns a pointer to the first data byte of a string,
-// handling both heap and inline representations. For heap rep (tag
-// nibble in word 2 is zero) it just returns word 0 (the data pointer
-// — nil for empty strings, matching stock unsafe.StringData). For
-// inline rep (tag != 0), word 0 is nil and the bytes live at offset
-// PtrSize inside the header; we spill str into an addrtaken autotmp
-// and return &tmp + PtrSize. The spill is emitted inside a branch
-// taken only on the inline path, so heap-rep code paths (all of
-// Phase B) pay only a shift + test + branch — no memory traffic.
-// The resulting pointer's lifetime is the enclosing stack frame when
-// the inline path is taken — callers that let it escape must force
-// heap rep upstream.
+// stringBytesTransient returns a pointer to the first data byte of a
+// string, handling both heap and inline representations. For heap rep
+// (tag nibble in word 2 is zero) it just returns word 0 (the data
+// pointer — nil for empty strings, matching stock unsafe.StringData).
+// For inline rep (tag != 0), word 0 is nil and the bytes live at
+// offset PtrSize inside the header; we spill str into an addrtaken
+// autotmp and return &tmp + PtrSize. The spill is emitted inside a
+// branch taken only on the inline path, so heap-rep code paths pay
+// only a shift + test + branch — no memory traffic.
+//
+// "Transient" means the returned pointer must be consumed within the
+// single operation that called this helper — any escape will dangle
+// once the caller's frame unwinds. Safe uses today: the memequal arg
+// in stringEqFast (read during the call). For persistent pointers
+// (unsafe.StringData, OSPTR, OSTR2BYTESTMP), use stringBytesStable.
 //
 // When the result type is known (e.g. *uint8), pass a non-nil resultT;
 // otherwise BytePtr is used.
-func (s *state) stringBytes(str *ssa.Value, resultT *types.Type) *ssa.Value {
+func (s *state) stringBytesTransient(str *ssa.Value, resultT *types.Type) *ssa.Value {
 	if resultT == nil {
 		resultT = s.f.Config.Types.BytePtr
 	}
@@ -1520,7 +1511,7 @@ func (s *state) stringBytes(str *ssa.Value, resultT *types.Type) *ssa.Value {
 	}
 	// tag := word2 >> StringTagShift. Heap rep ⇒ tag==0; inline ⇒ tag 1..15.
 	intT := types.Types[types.TINT]
-	raw := s.newValue1(ssa.OpStringLen, intT, str)
+	raw := s.newValue1(ssa.OpStringWord2, intT, str)
 	shift := s.constInt64(intT, rtabi.StringTagShift)
 	tag := s.newValue2(ssa.OpRsh64Ux64, intT, raw, shift)
 	zero := s.constInt64(intT, 0)
@@ -1580,7 +1571,7 @@ func (s *state) stringIndex(str, i *ssa.Value) *ssa.Value {
 		addr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, i)
 		return s.load(u8, addr)
 	}
-	w2 := s.newValue1(ssa.OpStringLen, intT, str)
+	w2 := s.newValue1(ssa.OpStringWord2, intT, str)
 	shift60 := s.constInt64(intT, rtabi.StringTagShift)
 	tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, shift60)
 	zero := s.constInt64(intT, 0)
@@ -1631,6 +1622,91 @@ func (s *state) stringIndex(str, i *ssa.Value) *ssa.Value {
 	return result
 }
 
+// stringSlice returns s[lo:hi] as a fresh string value without ever
+// exposing an interior pointer into inline-rep source storage.
+//
+// Heap-rep source (tag==0, or any string on 32-bit): produces a
+// heap-rep result {ptr+lo, 0, hi-lo} in-place — identical to stock
+// O(1) slicing.
+//
+// Inline-rep source (tag!=0, 64-bit only): dispatches to
+// runtime.sliceinlinestring which copies bytes[lo:hi] into a fresh
+// inline header. The result is a self-contained 24-B value; no
+// pointer into the caller's frame can dangle.
+//
+// lo and/or hi may be nil (default 0 and len(s) respectively). Bounds
+// are checked here unless bounded is true.
+func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
+	intT := types.Types[types.TINT]
+	strT := v.Type
+	ptrT := s.f.Config.Types.BytePtr
+	slen := s.stringLen(v)
+
+	if lo == nil {
+		lo = s.constInt(intT, 0)
+	}
+	if hi == nil {
+		hi = slen
+	}
+	if hi != slen {
+		hi = s.boundsCheck(hi, slen, ssa.BoundsSliceAlen, bounded)
+	}
+	lo = s.boundsCheck(lo, hi, ssa.BoundsSliceB, bounded)
+
+	// Compute newLen and a zero-when-empty mask to prevent the heap-rep
+	// result from carrying a past-end pointer for s[len:].
+	newLen := s.newValue2(ssa.OpSub64, intT, hi, lo)
+	mask := s.newValue1(ssa.OpSlicemask, intT, newLen)
+	delta := s.newValue2(ssa.OpAnd64, intT, lo, mask)
+
+	// 32-bit: no inline rep, always heap path.
+	if s.config.PtrSize < 8 {
+		ptr := s.newValue1(ssa.OpStringPtr, ptrT, v)
+		newPtr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, delta)
+		return s.sMake(strT, newPtr, newLen)
+	}
+
+	// 64-bit: branch on tag.
+	w2 := s.newValue1(ssa.OpStringWord2, intT, v)
+	shift := s.constInt64(intT, rtabi.StringTagShift)
+	tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, shift)
+	zero := s.constInt64(intT, 0)
+	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	bHeap := s.f.NewBlock(ssa.BlockPlain)
+	bEnd := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bInline)
+	b.AddEdgeTo(bHeap)
+
+	marker := ssaMarker("stringSlice")
+
+	// Heap (hot) path: ptr + delta (== lo, masked to 0 when newLen==0),
+	// len hi - lo.
+	s.startBlock(bHeap)
+	ptr := s.newValue1(ssa.OpStringPtr, ptrT, v)
+	newPtr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, delta)
+	heapResult := s.sMake(strT, newPtr, newLen)
+	s.vars[marker] = heapResult
+	s.endBlock().AddEdgeTo(bEnd)
+
+	// Inline (cold) path: runtime helper constructs a fresh inline
+	// header from the shifted bytes.
+	s.startBlock(bInline)
+	res := s.rtcall(ir.Syms.SliceInlineString, true, []*types.Type{strT}, v, lo, hi)
+	s.vars[marker] = res[0]
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bEnd)
+	result := s.variable(marker, strT)
+	delete(s.vars, marker)
+	return result
+}
+
 // stringEqFast returns l == r as a *ssa.Value<bool>. The fast path
 // compares all three words of the headers — same heap pointer OR two
 // inline strings with identical content both match — and the slow
@@ -1645,8 +1721,12 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	rw0 := s.newValue1(ssa.OpStringPtr, ptrT, r)
 	lw1 := s.newValue1(ssa.OpStringHash, uT, l)
 	rw1 := s.newValue1(ssa.OpStringHash, uT, r)
-	lw2 := s.newValue1(ssa.OpStringLen, intT, l)
-	rw2 := s.newValue1(ssa.OpStringLen, intT, r)
+	// Fast path requires bit-exact word 2 — StringWord2, not the
+	// decoded-length StringLen. Two inline strings of the same
+	// length can differ in word 2's low bytes (bytes[8:15]); a
+	// logical-length compare would incorrectly let them pass.
+	lw2 := s.newValue1(ssa.OpStringWord2, intT, l)
+	rw2 := s.newValue1(ssa.OpStringWord2, intT, r)
 
 	eq0 := s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0)
 	eq1 := s.newValue2(ssa.OpEq64, boolT, lw1, rw1)
@@ -1687,8 +1767,8 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	s.endBlock().AddEdgeTo(bEnd)
 
 	s.startBlock(bLenMatch)
-	lptr := s.stringBytes(l, ptrT)
-	rptr := s.stringBytes(r, ptrT)
+	lptr := s.stringBytesTransient(l, ptrT)
+	rptr := s.stringBytesTransient(r, ptrT)
 	sizeU := s.newValue1(ssa.OpCopy, uT, llen)
 	res := s.rtcall(ir.Syms.Memequal, true, []*types.Type{boolT}, lptr, rptr, sizeU)
 	s.vars[marker] = res[0]
@@ -3496,7 +3576,10 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 	case ir.OSTR2BYTESTMP:
 		n := n.(*ir.ConvExpr)
 		str := s.expr(n.X)
-		ptr := s.stringBytes(str, s.f.Config.Types.BytePtr)
+		// OSTR2BYTESTMP is only emitted when escape analysis has
+		// proved the result []byte doesn't escape, so a Transient
+		// spill of an inline source is safe within the expression.
+		ptr := s.stringBytesTransient(str, s.f.Config.Types.BytePtr)
 		if !n.NonNil() {
 			// We need to ensure []byte("") evaluates to []byte{}, and not []byte(nil).
 			//
@@ -3999,14 +4082,10 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			i := s.expr(n.Index)
 			len := s.stringLen(a)
 			i = s.boundsCheck(i, len, ssa.BoundsIndex, n.Bounded())
-			ptrtyp := s.f.Config.Types.BytePtr
-			ptr := s.stringBytes(a, ptrtyp)
-			if ir.IsConst(n.Index, constant.Int) {
-				ptr = s.newValue1I(ssa.OpOffPtr, ptrtyp, ir.Int64Val(n.Index), ptr)
-			} else {
-				ptr = s.newValue2(ssa.OpAddPtr, ptrtyp, ptr, i)
-			}
-			return s.load(types.Types[types.TUINT8], ptr)
+			// Route through stringIndex: register-level shift-and-mask
+			// on the inline path, load-from-ptr on the heap path. Never
+			// spills, never allocates.
+			return s.stringIndex(a, i)
 		case n.X.Type().IsSlice():
 			p := s.addr(n)
 			return s.load(n.X.Type().Elem(), p)
@@ -4071,7 +4150,14 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			}
 			return s.newValue1(ssa.OpSlicePtrUnchecked, n.Type(), a)
 		} else {
-			return s.stringBytes(a, n.Type())
+			// OSPTR on strings is the generic "give me a pointer" op
+			// used throughout walk (copy, concat, unsafe ops).
+			// Transient is correct as long as callers only consume
+			// the pointer within the same op. Today all callers do —
+			// no inline-rep strings are observable yet (gd Phase C
+			// literal emission is still gated behind the stringSlice
+			// refactor and a companion unsafe.StringData path).
+			return s.stringBytesTransient(a, n.Type())
 		}
 
 	case ir.OITAB:
@@ -4176,8 +4262,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		if n.High != nil {
 			j = s.expr(n.High)
 		}
-		p, l, _ := s.slice(v, i, j, nil, n.Bounded())
-		return s.sMake(n.Type(), p, l)
+		return s.stringSlice(v, i, j, n.Bounded())
 
 	case ir.OSLICE2ARRPTR:
 		// if arrlen > slice.len {
@@ -6216,7 +6301,9 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 		if skip&skipLen != 0 {
 			return
 		}
-		len := s.newValue1(ssa.OpStringLen, types.Types[types.TINT], right)
+		// Store the raw word 2 (tag-encoded), not the decoded length —
+		// we need to faithfully reproduce the string header.
+		len := s.newValue1(ssa.OpStringWord2, types.Types[types.TINT], right)
 		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, 2*s.config.PtrSize, left)
 		s.store(types.Types[types.TINT], lenAddr, len)
 	case t.IsSlice():
@@ -6326,10 +6413,6 @@ func (s *state) slice(v, i, j, k *ssa.Value, bounded bool) (p, l, c *ssa.Value) 
 		ptr = s.newValue1(ssa.OpSlicePtr, types.NewPtr(t.Elem()), v)
 		len = s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], v)
 		cap = s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], v)
-	case t.IsString():
-		ptr = s.stringBytes(v, types.NewPtr(types.Types[types.TUINT8]))
-		len = s.stringLen(v)
-		cap = len
 	case t.IsPtr():
 		if !t.Elem().IsArray() {
 			s.Fatalf("bad ptr to array in slice %v\n", t)
