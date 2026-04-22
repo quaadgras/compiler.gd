@@ -184,7 +184,7 @@ func TestValueAny(t *testing.T) {
 		v := AnyValue(want)
 		got := v.Any()
 		if !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
+			t.Errorf("got %v (%[1]T), want %v (%[2]T)", got, want)
 		}
 	}
 }

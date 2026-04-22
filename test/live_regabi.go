@@ -141,8 +141,8 @@ var i9 interface{}
 
 func f9() bool {
 	g8()
-	x := i9
-	y := interface{}(g18()) // ERROR "live at call to convT: x.data$" "live at call to g18: x.data$" "stack object .autotmp_[0-9]+ \[2\]string$"
+	x := i9                 // ERROR "stack object x interface \{\}$"
+	y := interface{}(g18()) // ERROR "live at call to convT: x$" "live at call to g18: x$" "stack object .autotmp_[0-9]+ \[2\]string$" "stack object y interface \{\}$"
 	i9 = y                  // make y escape so the line above has to call convT
 	return x != y
 }

@@ -27,8 +27,11 @@ set -u
 
 GOFORK=/home/quentin/git/go
 SYSGO=/usr/lib/go/bin/go
-GOCACHE=${GOCACHE:-/tmp/gd-test-cache}
-LOG=/tmp/gd-tests.log
+# Respect $TMPDIR (and fall back to /tmp) so this script works in
+# sandboxed environments where /tmp is read-only.
+GDTMP=${TMPDIR:-/tmp}
+GOCACHE=${GOCACHE:-$GDTMP/gd-test-cache}
+LOG=${GDTMP}/gd-tests.log
 PKG_TIMEOUT=60s
 
 die() { echo "run-tests: $*" >&2; exit 1; }
@@ -40,6 +43,22 @@ die() { echo "run-tests: $*" >&2; exit 1; }
 export GOROOT="$GOFORK"
 export GOTOOLCHAIN=local
 export GOCACHE
+
+# rebuild-tools.sh only clears `go clean -cache` for whatever $GOCACHE was
+# set when *it* ran (typically unset → system default). run-tests.sh uses
+# its own $GOCACHE (/tmp/gd-test-cache by default), which rebuild-tools
+# never touches. If the compile tool is newer than the cache's toolchain
+# marker, wipe our cache so stale .a files from a previous (possibly
+# buggy) toolchain don't contaminate test results. The marker is stamped
+# to the tool's mtime, so subsequent runs with the same tool skip clean.
+TOOL="$GOFORK/pkg/tool/linux_amd64/compile"
+MARKER="$GOCACHE/.gd-toolchain-mtime"
+if [ ! -f "$MARKER" ] || [ "$TOOL" -nt "$MARKER" ]; then
+    echo "Toolchain is newer than $GOCACHE — wiping build cache."
+    $SYSGO clean -cache 2>/dev/null || true
+    mkdir -p "$GOCACHE"
+    touch -r "$TOOL" "$MARKER"
+fi
 
 # Hot set: packages most likely to exercise the gd-fork ABI changes
 # (interface conversions, reflection, atomic broadcasts, encoders/decoders,

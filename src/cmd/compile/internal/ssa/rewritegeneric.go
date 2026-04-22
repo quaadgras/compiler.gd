@@ -31615,7 +31615,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 	}
 	// match: (StaticLECall {f} typ_ x y mem)
 	// cond: isSameCall(f, "runtime.efaceeq") && isDirectAndComparableType(typ_) && clobber(v)
-	// result: (MakeResult (EqPtr x y) mem)
+	// result: (MakeResult (EqPtr (Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] x) mem) (Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] y) mem)) mem)
 	for {
 		if len(v.Args) != 4 {
 			break
@@ -31630,13 +31630,23 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		}
 		v.reset(OpMakeResult)
 		v0 := b.NewValue0(v.Pos, OpEqPtr, typ.Bool)
-		v0.AddArg2(x, y)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.BytePtr)
+		v2.AuxInt = int64ToAuxInt(config.PtrSize)
+		v2.AddArg(x)
+		v1.AddArg2(v2, mem)
+		v3 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
+		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.BytePtr)
+		v4.AuxInt = int64ToAuxInt(config.PtrSize)
+		v4.AddArg(y)
+		v3.AddArg2(v4, mem)
+		v0.AddArg2(v1, v3)
 		v.AddArg2(v0, mem)
 		return true
 	}
 	// match: (StaticLECall {f} itab x y mem)
 	// cond: isSameCall(f, "runtime.ifaceeq") && isDirectAndComparableIface(itab) && clobber(v)
-	// result: (MakeResult (EqPtr x y) mem)
+	// result: (MakeResult (EqPtr (Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] x) mem) (Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] y) mem)) mem)
 	for {
 		if len(v.Args) != 4 {
 			break
@@ -31651,7 +31661,17 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		}
 		v.reset(OpMakeResult)
 		v0 := b.NewValue0(v.Pos, OpEqPtr, typ.Bool)
-		v0.AddArg2(x, y)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.BytePtr)
+		v2.AuxInt = int64ToAuxInt(config.PtrSize)
+		v2.AddArg(x)
+		v1.AddArg2(v2, mem)
+		v3 := b.NewValue0(v.Pos, OpLoad, typ.BytePtr)
+		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.BytePtr)
+		v4.AuxInt = int64ToAuxInt(config.PtrSize)
+		v4.AddArg(y)
+		v3.AddArg2(v4, mem)
+		v0.AddArg2(v1, v3)
 		v.AddArg2(v0, mem)
 		return true
 	}

@@ -26,13 +26,17 @@ func AccessInt2(m map[int]int) bool {
 	return ok
 }
 
+// Under the gd small-string optimization, "abc" is inline-rep — its
+// bytes are packed into the header as immediates with no go.string
+// symbol, so the stock literal-bytes pattern no longer matches.
+// Check for the mapaccess_faststr fast-path call instead.
 func AccessString1(m map[string]int) int {
-	// amd64:`.*"abc"`
+	// amd64:`CALL.*mapaccess1_faststr`
 	return m["abc"]
 }
 
 func AccessString2(m map[string]int) bool {
-	// amd64:`.*"abc"`
+	// amd64:`CALL.*mapaccess2_faststr`
 	_, ok := m["abc"]
 	return ok
 }

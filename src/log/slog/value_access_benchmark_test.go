@@ -133,7 +133,7 @@ func (v *setVisitor) Any(x any)                { v.a = x }
 
 func (a Value) AsString() (string, bool) {
 	if a.Kind() == KindString {
-		return a.any.(string), true
+		return string(a.any.(kindString)), true
 	}
 	return "", false
 }
@@ -196,17 +196,17 @@ type Visitor interface {
 func (a Value) Visit(v Visitor) {
 	switch a.Kind() {
 	case KindString:
-		v.String(a.any.(string))
+		v.String(string(a.any.(kindString)))
 	case KindInt64:
-		v.Int64(int64(a.num))
+		v.Int64(int64(a.any.(kindInt64)))
 	case KindUint64:
-		v.Uint64(a.num)
+		v.Uint64(uint64(a.any.(kindUint64)))
 	case KindBool:
-		v.Bool(a.any.(bool))
+		v.Bool(bool(a.any.(kindBool)))
 	case KindFloat64:
-		v.Float64(a.any.(float64))
+		v.Float64(float64(a.any.(kindFloat64)))
 	case KindDuration:
-		v.Duration(a.any.(time.Duration))
+		v.Duration(time.Duration(a.any.(kindDuration)))
 	case KindAny:
 		v.Any(a.any)
 	default:

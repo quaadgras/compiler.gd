@@ -208,8 +208,13 @@ func itabInit(m *itab, firstTime bool) string {
 	// receive the inline flag here. Compile-time itabs live in rodata —
 	// writeITab already populated Inline, and re-entering on those with
 	// firstTime==false (see issue 65962) must be mutation-free.
-	if firstTime && typ.TFlag&abi.TFlagInlineIface != 0 {
-		m.Inline = 1
+	if firstTime {
+		switch {
+		case typ.TFlag&abi.TFlagInlineIface != 0:
+			m.Inline = abi.ITabInlineInline
+		case typ.TFlag&abi.TFlagSpreadIface != 0:
+			m.Inline = abi.ITabInlineSpread
+		}
 	}
 	x := typ.Uncommon()
 

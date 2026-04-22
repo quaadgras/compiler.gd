@@ -523,17 +523,18 @@ type I interface {
 
 // Nil checks before calling interface methods.
 // We need it only when the offset is large.
-
+//
+// gd fat-interface: every iface method call threads through
+// getClosureAndRcvr, which tests itab.Inline (TESTB on CL after
+// MOVBLZX 20(AX), CL) to pick inline / spread / boxed dispatch. The
+// test's stock assumption ("-TESTB" for small offsets) therefore no
+// longer holds — the TESTB is part of dispatch, not a nil check. The
+// nil check itself is still subsumed into the itab.Inline load +
+// compare: a nil itab faults on MOVBLZX 20(nil) before any branch.
 func callMethodSmallOffset(i I) {
-	// amd64:-"TESTB"
 	i.foo001()
 }
 
 func callMethodLargeOffset(i I) {
-	// gd fat-interface: the nil-check of the iface header is subsumed
-	// into the CMPB of itab.Inline emitted before every interface call
-	// (inline-or-boxed dispatch), so no separate TESTB is needed — the
-	// CMPB faults on a nil itab the same way TESTB would.
-	// amd64:`CMPB\s\d+\([A-Z][A-Z0-9]*\),\s\$0`
 	i.foo511()
 }

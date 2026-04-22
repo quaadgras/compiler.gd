@@ -11,53 +11,55 @@
 // align <= 8) bypass the dataWord path entirely — their bits live in
 // the iface's inline payload, so the compiler emits "using inline slot
 // for interface value" instead of any of the stock "using global"
-// messages for ints, named ints, small structs, etc. Strings still
-// hit the boxed path (they contain a pointer) and zero-sized values
-// still use &runtime.zerobase. Lines below track this split.
+// messages for ints, named ints, small structs, etc. Phase D extends
+// this to strings and slices via the spread layout: word 0 into the
+// iface's data slot, words 1+2 into the 16 B inline slot, emitting
+// "using spread slots for interface value". Zero-sized values still
+// use &runtime.zerobase. Lines below track this split.
 
 package dataword
 
 var sink interface{}
 
 func string1() {
-	sink = "abc" // ERROR "using global for interface value"
+	sink = "abc" // ERROR "using spread slots for interface value"
 }
 
 func string2() {
 	v := "abc"
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using spread slots for interface value"
 }
 
 func string3() {
-	sink = "" // ERROR "using global for interface value"
+	sink = "" // ERROR "using spread slots for interface value"
 }
 
 func string4() {
 	v := ""
-	sink = v // ERROR "using global for interface value"
+	sink = v // ERROR "using spread slots for interface value"
 }
 
 func string5() {
-	var a any = "abc" // ERROR "using global for interface value"
+	var a any = "abc" // ERROR "using spread slots for interface value"
 	_ = a
 }
 
 func string6() {
 	var a any
 	v := "abc"
-	a = v // ERROR "using global for interface value"
+	a = v // ERROR "using spread slots for interface value"
 	_ = a
 }
 
 // string7 can be inlined.
 func string7(v string) {
-	sink = v
+	sink = v // ERROR "using spread slots for interface value"
 }
 
 func string8() {
 	v0 := "abc"
 	v := v0
-	string7(v) // ERROR "using global for interface value"
+	string7(v) // ERROR "using spread slots for interface value"
 }
 
 func string9() {
@@ -66,7 +68,7 @@ func string9() {
 	f := func() {
 		string7(v)
 	}
-	f() // ERROR "using global for interface value"
+	f() // ERROR "using spread slots for interface value"
 }
 
 func string10() {
@@ -78,14 +80,14 @@ func string10() {
 		}
 		f2()
 	}
-	f() // ERROR "using global for interface value"
+	f() // ERROR "using spread slots for interface value"
 }
 
 func string11() {
 	v0 := "abc"
 	v := v0
 	defer func() {
-		string7(v) // ERROR "using global for interface value"
+		string7(v) // ERROR "using spread slots for interface value"
 	}()
 }
 

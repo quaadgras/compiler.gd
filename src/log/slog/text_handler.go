@@ -96,7 +96,7 @@ func (h *TextHandler) Handle(_ context.Context, r Record) error {
 func appendTextValue(s *handleState, v Value) error {
 	switch v.Kind() {
 	case KindString:
-		s.appendString(v.any.(string))
+		s.appendString(string(v.any.(kindString)))
 	case KindTime:
 		s.appendTime(v.time())
 	case KindAny:

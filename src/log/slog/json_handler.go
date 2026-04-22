@@ -104,7 +104,7 @@ func appendJSONTime(s *handleState, t time.Time) {
 func appendJSONValue(s *handleState, v Value) error {
 	switch v.Kind() {
 	case KindString:
-		s.appendString(v.any.(string))
+		s.appendString(string(v.any.(kindString)))
 	case KindInt64:
 		*s.buf = strconv.AppendInt(*s.buf, v.Int64(), 10)
 	case KindUint64:

@@ -15,10 +15,18 @@ type ITab struct {
 	Inter  *InterfaceType
 	Type   *Type
 	Hash   uint32 // copy of Type.Hash. Used for type switches.
-	Inline uint8  // gd: nonzero if Type is TFlagInlineIface (payload fits in the inline slot)
+	Inline uint8  // gd: dispatch mode — see ITabInline* constants
 	_      [3]byte
 	Fun    [1]uintptr // variable sized. fun[0]==0 means Type does not implement Inter.
 }
+
+// Values for ITab.Inline, selecting how getClosureAndRcvr stages the
+// receiver for an interface method call.
+const (
+	ITabInlineBoxed  uint8 = 0 // receiver = iface.Data (heap-boxed)
+	ITabInlineInline uint8 = 1 // receiver = &stage16; stage16 ← iface.Inline
+	ITabInlineSpread uint8 = 2 // receiver = &stage24; stage24 ← {iface.Data, iface.Inline}
+)
 
 // Under the gd fork's fat-interface layout an interface header carries a
 // fixed 16-byte inline payload regardless of pointer size:

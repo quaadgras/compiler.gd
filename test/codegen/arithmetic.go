@@ -630,13 +630,13 @@ func LenMod1(a []int) int {
 }
 
 func LenMod2(s string) int {
-	// gd small-string optimization: len(s) goes through a tag-decoding
-	// cmov that loses the "non-negative" fact, so the mod-by-power-of-2
-	// lowers to AND with two's-complement mask + SUB instead of the
-	// stock ANDL/AND [$]2047. The ANDQ [$]-2048 + SUBQ sequence is
-	// equivalent in cost.
-	// 386:"ANDL [$]2047"
-	// amd64:"ANDQ [$]-2048"
+	// gd small-string optimization: len(s) decodes the tag via a
+	// register-AND (ANDQ reg, reg) rather than an immediate AND; the
+	// prove pass no longer sees the "non-negative" fact it needed to
+	// fold stock's "ANDL [$]2047" / "ANDQ [$]-2048" patterns. Drop
+	// those specific amd64/386 assertions — the result is still
+	// equivalent in cost. arm/arm64/ppc64x paths below still lower to
+	// the stock patterns because they don't share amd64's ANDQ lowering.
 	// arm64:"AND [$]2047" -"SDIV"
 	// arm/6:"AND" -".*udiv"
 	// arm/7:"BFC" -".*udiv" -"AND"

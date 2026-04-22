@@ -488,6 +488,18 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			}
 			ir.SetPos(val)
 			assign(base.Pos, l, loff+2*int64(types.PtrSize), val)
+		} else if types.IsSpreadIface(val.Type()) {
+			// gd Phase D: spread-iface layout for strings and slices. Value
+			// is 3 words (ptr, scalar, scalar). Word 0 lands in the data
+			// slot (offset PtrSize), words 1-2 in the inline slot (offset
+			// 2*PtrSize). Matches runtime iMakeSpreadFromValue so
+			// reflect.unpackEface and getClosureAndRcvr reassemble the
+			// header correctly.
+			if val.Op() == ir.ONIL {
+				return true
+			}
+			ir.SetPos(val)
+			assign(base.Pos, l, loff+int64(types.PtrSize), val)
 		} else if types.IsDirectIface(val.Type()) {
 			if val.Op() == ir.ONIL {
 				// Nil is zero, nothing to do.

@@ -20,6 +20,11 @@ func Swapper(slice any) func(i, j int) {
 	if v.Kind() != Slice {
 		panic(&ValueError{Method: "Swapper", Kind: v.Kind()})
 	}
+	// The returned closures capture &v or cast v.ptr to a header type
+	// that must outlive Swapper; for flagSpread Values v.ptr holds word
+	// 0 of the slice header (backing ptr), not a pointer to a stable
+	// header. Materialize so v.ptr becomes a heap-backed 24 B header.
+	(&v).materialize()
 	// Fast path for slices of size 0 and 1. Nothing to swap.
 	switch v.Len() {
 	case 0:

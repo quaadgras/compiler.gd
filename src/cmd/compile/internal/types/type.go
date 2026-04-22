@@ -1870,7 +1870,17 @@ func IsInlineIface(t *Type) bool {
 // IsDirectIface (t is 3 words, not 1 ptrsize word). Types satisfying
 // IsSpreadIface can be converted to any/eface with zero allocation —
 // the whole 24 B header is rematerialized in-place at each use site.
+//
+// Gated on 64-bit: the spread codegen (iMakeSpreadFromValue and the
+// reverse spreadExtract) bit-casts words 1/2 through uint64 temps. On
+// 32-bit targets that emits generic Store ops the arch rules do not
+// match, and string/slice headers are only 12 B anyway so the
+// allocation benefit would be marginal. 32-bit targets fall back to
+// stock boxing, matching upstream Go.
 func IsSpreadIface(t *Type) bool {
+	if PtrSize != 8 {
+		return false
+	}
 	return t.IsString() || t.IsSlice()
 }
 

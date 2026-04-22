@@ -1070,8 +1070,11 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 	c.Field("Inter").WritePtr(writeType(iface))
 	c.Field("Type").WritePtr(writeType(typ))
 	c.Field("Hash").WriteUint32(types.TypeHash(typ)) // copy of type hash
-	if types.IsInlineIface(typ) {
-		c.Field("Inline").WriteUint8(1)
+	switch {
+	case types.IsInlineIface(typ):
+		c.Field("Inline").WriteUint8(uint8(abi.ITabInlineInline))
+	case types.IsSpreadIface(typ):
+		c.Field("Inline").WriteUint8(uint8(abi.ITabInlineSpread))
 	}
 
 	var delta int64

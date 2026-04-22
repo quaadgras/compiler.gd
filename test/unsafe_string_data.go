@@ -8,15 +8,22 @@ package main
 
 import (
 	"fmt"
-	"reflect"
 	"unsafe"
 )
 
 func main() {
+	// gd SSO: "abc" is inline-rep (len <= 15), so word 0 of the header
+	// is nil — reflect.StringHeader.Data would return 0 here, which is
+	// why this test no longer compares against it. unsafe.StringData
+	// still returns a valid pointer to the first byte (materializing a
+	// heap copy on demand for inline inputs).
 	var s = "abc"
-	sh1 := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	ptr2 := unsafe.Pointer(unsafe.StringData(s))
-	if ptr2 != unsafe.Pointer(sh1.Data) {
-		panic(fmt.Errorf("unsafe.StringData ret %p != %p", ptr2, unsafe.Pointer(sh1.Data)))
+	ptr := unsafe.StringData(s)
+	if ptr == nil {
+		panic(fmt.Errorf("unsafe.StringData(%q) returned nil", s))
+	}
+	got := unsafe.String(ptr, len(s))
+	if got != s {
+		panic(fmt.Errorf("unsafe.String(unsafe.StringData(%q), %d) = %q, want %q", s, len(s), got, s))
 	}
 }

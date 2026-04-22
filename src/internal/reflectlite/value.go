@@ -70,7 +70,8 @@ const (
 	flagAddr        flag = 1 << 8
 	flagMethod      flag = 1 << 9
 	flagInline      flag = 1 << 10
-	flagMethodShift      = 11
+	flagSpread      flag = 1 << 11
+	flagMethodShift      = 12
 	flagRO          flag = flagStickyRO | flagEmbedRO
 )
 
@@ -95,28 +96,40 @@ func (v Value) typ() *abi.Type {
 }
 
 // dataPtr returns a pointer to v's underlying data. When flagInline is
-// set the returned pointer refers to v.inline inside the caller's local
-// Value; see reflect.Value.dataPtr for lifetime constraints.
+// set the returned pointer refers to v.inline; when flagSpread is set
+// it refers to &v.ptr (start of the 24 B spread header). See
+// reflect.Value.dataPtr for lifetime constraints.
 //
 //go:nosplit
 func (v *Value) dataPtr() unsafe.Pointer {
 	if v.flag&flagInline != 0 {
 		return unsafe.Pointer(&v.inline)
 	}
+	if v.flag&flagSpread != 0 {
+		return unsafe.Pointer(&v.ptr)
+	}
 	return v.ptr
 }
 
-// materialize moves inline data to a fresh heap allocation so that v.ptr
-// is a stable address. After it returns flagInline is cleared.
+// materialize moves inline or spread data to a fresh heap allocation so
+// that v.ptr is a stable address. After it returns flagInline /
+// flagSpread is cleared.
 func (v *Value) materialize() {
-	if v.flag&flagInline == 0 {
+	if v.flag&flagInline != 0 {
+		t := v.typ()
+		c := unsafe_New(t)
+		typedmemmove(t, c, unsafe.Pointer(&v.inline))
+		v.ptr = c
+		v.flag &^= flagInline
 		return
 	}
-	t := v.typ()
-	c := unsafe_New(t)
-	typedmemmove(t, c, unsafe.Pointer(&v.inline))
-	v.ptr = c
-	v.flag &^= flagInline
+	if v.flag&flagSpread != 0 {
+		t := v.typ()
+		c := unsafe_New(t)
+		typedmemmove(t, c, unsafe.Pointer(&v.ptr))
+		v.ptr = c
+		v.flag &^= flagSpread
+	}
 }
 
 // pointer returns the underlying pointer represented by v.
@@ -148,6 +161,13 @@ func packEface(v Value) any {
 			// if we ever get here the bits live in v.ptr itself.
 			*(*unsafe.Pointer)(unsafe.Pointer(&e.Inline)) = src
 		}
+	case t.IsSpreadIface():
+		// gd Phase D: Value holds a 24 B header at v.ptr. Split it
+		// back into the iface's data slot (word 0) and inline slot
+		// (words 1+2) — no heap alloc. Mirrors reflect.packEface.
+		src := v.dataPtr()
+		e.Data = *(*unsafe.Pointer)(src)
+		*(*[16]byte)(unsafe.Pointer(&e.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 	case !t.IsDirectIface():
 		if v.flag&flagIndir == 0 {
 			panic("bad indir")
@@ -195,6 +215,18 @@ func unpackEface(i any) Value {
 		v.typ_ = t
 		typedmemmove(t, unsafe.Pointer(&v.inline), unsafe.Pointer(&e.Inline))
 		v.flag = f | flagInline
+		return v
+	}
+	if t.IsSpreadIface() {
+		// gd Phase D: carry the 24 B spread header inside Value itself
+		// — word 0 in v.ptr, words 1+2 in v.inline. dataPtr returns
+		// &v.ptr so accessors see a contiguous header without a heap
+		// alloc. Mirrors reflect.unpackEface's spread path.
+		var v Value
+		v.typ_ = t
+		v.ptr = e.Data
+		*(*[16]byte)(unsafe.Pointer(&v.inline)) = *(*[16]byte)(unsafe.Pointer(&e.Inline))
+		v.flag = f | flagSpread
 		return v
 	}
 	return Value{typ_: t, ptr: e.Data, flag: f}
@@ -459,7 +491,7 @@ func (v Value) assignTo(context string, dst *abi.Type, target unsafe.Pointer) Va
 	case directlyAssignable(dst, v.typ()):
 		// Overwrite type so that they match.
 		// Same memory layout, so no harm done.
-		fl := v.flag&(flagAddr|flagIndir|flagInline) | v.flag.ro()
+		fl := v.flag&(flagAddr|flagIndir|flagInline|flagSpread) | v.flag.ro()
 		fl |= flag(dst.Kind())
 		out := v
 		out.typ_ = dst

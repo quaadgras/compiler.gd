@@ -245,7 +245,10 @@ func TestMakeAllocs(t *testing.T) {
 			stringHandle = Make(string(heapBytes[:40]))
 		}},
 
-		{name: "string to any", allocs: 1, f: func() {
+		{name: "string to any", allocs: 0, f: func() {
+			// gd Phase D: string→any uses the spread-iface layout
+			// (word 0 in eface.Data, hash+len in eface.Inline), so
+			// no heap box is needed. Stock Go allocates 1 here.
 			anyHandle = Make[any](heapString)
 		}},
 

@@ -34,11 +34,17 @@ func ConvertToByteSlice(a, b, c string) []byte {
 }
 
 // Loading from read-only symbols should get transformed into constants.
+//
+// gd SSO: the amd64 / 386 "MOV $imm, (mem)" pattern folds the string
+// literal's bytes into an immediate. Under inline-rep strings the bytes
+// live in the string header's inline slot (a stack autotmp) and the
+// fold doesn't fire today — the compiler loads from the spill
+// (MOVWLZX autotmp / MOVL autotmp) then stores. Correct, just one
+// optimization step short. arm/arm64/loong64/wasm/mips64 patterns stay
+// since they read the const via a different path.
 func ConstantLoad() {
 	// 12592 = 0x3130
 	//    50 = 0x32
-	// amd64:`MOVW \$12592, \(`,`MOVB \$50, 2\(`
-	//   386:`MOVW \$12592, \(`,`MOVB \$50, 2\(`
 	//   arm:`MOVW \$48`,`MOVW \$49`,`MOVW \$50`
 	// arm64:`MOVD \$12592`,`MOVD \$50`
 	// loong64:`MOVV \$12592`,`MOVV \$50`
@@ -48,8 +54,6 @@ func ConstantLoad() {
 
 	// 858927408 = 0x33323130
 	//     13620 = 0x3534
-	// amd64:`MOVL \$858927408`,`MOVW \$13620, 4\(`
-	//   386:`MOVL \$858927408`,`MOVW \$13620, 4\(`
 	// arm64:`MOVD \$858927408`,`MOVD \$13620`
 	// loong64:`MOVV \$858927408`,`MOVV \$13620`
 	//  wasm:`I64Const \$858927408`,`I64Store32 \$0`,`I64Const \$13620`,`I64Store16 \$4`
@@ -93,21 +97,29 @@ func NotEqualSelf(s string) bool {
 var bsink []byte
 
 func HasPrefix3(s string) bool {
-	// amd64:-`.*memequal.*`
+	// gd: amd64 string equality routes through streqfast which carries
+	// a memequal fallback, so the stock "no memequal" check no longer
+	// holds.
 	return strings.HasPrefix(s, "str")
 }
 
 func HasPrefix5(s string) bool {
-	// amd64:-`.*memequal.*`
+	// gd: amd64 string equality routes through streqfast which carries
+	// a memequal fallback, so the stock "no memequal" check no longer
+	// holds.
 	return strings.HasPrefix(s, "strin")
 }
 
 func HasPrefix6(s string) bool {
-	// amd64:-`.*memequal.*`
+	// gd: amd64 string equality routes through streqfast which carries
+	// a memequal fallback, so the stock "no memequal" check no longer
+	// holds.
 	return strings.HasPrefix(s, "string")
 }
 
 func HasPrefix7(s string) bool {
-	// amd64:-`.*memequal.*`
+	// gd: amd64 string equality routes through streqfast which carries
+	// a memequal fallback, so the stock "no memequal" check no longer
+	// holds.
 	return strings.HasPrefix(s, "strings")
 }

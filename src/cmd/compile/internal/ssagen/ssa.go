@@ -1800,6 +1800,21 @@ func (s *state) inlineStageTemp(pos src.XPos) *ssa.Value {
 	return s.addr(tmp)
 }
 
+// spreadStageTemp allocates an addressable 24-byte string-typed autotmp
+// for iface method dispatch on spread (string/slice) concrete types.
+// The stage holds {word0: ptr, word1: scalar, word2: scalar} with the
+// first word pointer-scanned — GC-compatible with both string and slice
+// layouts (word 0 is a live heap pointer in both). Emits OpVarDef so
+// liveness treats the piecewise stores to offsets 0/8/16 as a full
+// definition; without it the pointer-containing string slot gets
+// flagged live-in at function entry by plive's entry-block check.
+func (s *state) spreadStageTemp(pos src.XPos) *ssa.Value {
+	tmp := typecheck.TempAt(pos, s.curfn, types.Types[types.TSTRING])
+	tmp.SetAddrtaken(true)
+	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+	return s.addr(tmp)
+}
+
 // iMakeSpreadFromValue stages a 3-word header value (string or slice)
 // into an iface's 4 ABI slots: word 0 into data (pointer-shaped), and
 // words 1/2 into the two float64 halves of the inline slot. The source
@@ -5931,41 +5946,76 @@ func (s *state) getClosureAndRcvr(fn *ir.SelectorExpr) (*ssa.Value, *ssa.Value) 
 	itabidx := fn.Offset() + rttype.ITab.OffsetOf("Fun")
 	closure := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, itabidx, itab)
 	byteptr := s.f.Config.Types.BytePtr
-	// gd fat-interface: split on itab.Inline. Inline receivers need an
-	// address that backs the concrete value — we materialize the inline
-	// payload into a complex128 stack temp (two float64 stores, no write
-	// barriers) and pass its address. Boxed receivers keep reading
-	// iface.data.
+	// gd fat-interface: dispatch on itab.Inline (three-valued).
+	//   0 boxed : receiver = iface.data (heap-boxed).
+	//   1 inline: iface.inline holds the full value; stage it into a
+	//             complex128 temp and pass &stage[0].
+	//   2 spread: word 0 is iface.data, words 1-2 live in iface.inline;
+	//             stage all three into a 24 B string-shaped temp and
+	//             pass &stage[0]. Covers string and slice-typed values
+	//             boxed via the spread iface layout.
 	u8 := types.Types[types.TUINT8]
 	inlineFlagPtr := s.newValue1I(ssa.OpOffPtr, types.NewPtr(u8), rttype.ITab.OffsetOf("Inline"), itab)
 	inlineFlag := s.load(u8, inlineFlagPtr)
 	zero := s.constInt8(u8, 0)
-	cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], inlineFlag, zero)
+	two := s.constInt8(u8, int8(rtabi.ITabInlineSpread))
+	condStaged := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], inlineFlag, zero)
+	condSpread := s.newValue2(ssa.OpEq8, types.Types[types.TBOOL], inlineFlag, two)
 
 	f64 := types.Types[types.TFLOAT64]
 	f64Ptr := types.NewPtr(f64)
-	stageAddr := s.inlineStageTemp(fn.Pos())
-	real := s.newValue1(ssa.OpIInlineReal, f64, i)
-	imag := s.newValue1(ssa.OpIInlineImag, f64, i)
-	s.store(f64, stageAddr, real)
-	imagSlot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stageAddr)
-	s.store(f64, imagSlot, imag)
-	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stageAddr)
 
+	// Pre-materialize the three payload sources; cheap, and lets the merge
+	// block name them without rebuilding in each branch.
+	realH := s.newValue1(ssa.OpIInlineReal, f64, i)
+	imagH := s.newValue1(ssa.OpIInlineImag, f64, i)
 	boxedData := s.newValue1(ssa.OpIData, byteptr, i)
 
-	bInline := s.f.NewBlock(ssa.BlockPlain)
+	// Inline stage (16 B, complex128-shaped).
+	stage16 := s.inlineStageTemp(fn.Pos())
+	s.store(f64, stage16, realH)
+	imagSlot16 := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stage16)
+	s.store(f64, imagSlot16, imagH)
+	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stage16)
+
+	// Spread stage (24 B, string-shaped). Word 0 = iface.data (pointer),
+	// words 1-2 = iface.inline halves stored as raw 8-byte scalars. The
+	// f64 stores write the bit pattern the wrapper will read back as
+	// uintptr/int, matching how iMakeSpreadFromValue originally packed it.
+	stage24 := s.spreadStageTemp(fn.Pos())
+	s.store(byteptr, stage24, boxedData)
+	w1Slot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stage24)
+	s.store(f64, w1Slot, realH)
+	w2Slot := s.newValue1I(ssa.OpOffPtr, f64Ptr, 16, stage24)
+	s.store(f64, w2Slot, imagH)
+	spreadAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stage24)
+
+	bStaged := s.f.NewBlock(ssa.BlockPlain)
 	bBoxed := s.f.NewBlock(ssa.BlockPlain)
+	bInline := s.f.NewBlock(ssa.BlockPlain)
+	bSpread := s.f.NewBlock(ssa.BlockPlain)
 	bMerge := s.f.NewBlock(ssa.BlockPlain)
+
 	b := s.endBlock()
 	b.Kind = ssa.BlockIf
-	b.SetControl(cond)
-	b.Likely = ssa.BranchUnlikely // boxed is the common case today
-	b.AddEdgeTo(bInline)
+	b.SetControl(condStaged)
+	b.Likely = ssa.BranchUnlikely // boxed is still the common case
+	b.AddEdgeTo(bStaged)
 	b.AddEdgeTo(bBoxed)
+
+	s.startBlock(bStaged)
+	b2 := s.endBlock()
+	b2.Kind = ssa.BlockIf
+	b2.SetControl(condSpread)
+	b2.AddEdgeTo(bSpread)
+	b2.AddEdgeTo(bInline)
 
 	s.startBlock(bInline)
 	s.vars[rcvrVar] = inlineAddr
+	s.endBlock().AddEdgeTo(bMerge)
+
+	s.startBlock(bSpread)
+	s.vars[rcvrVar] = spreadAddr
 	s.endBlock().AddEdgeTo(bMerge)
 
 	s.startBlock(bBoxed)
@@ -7362,11 +7412,13 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 	// and the 16-byte inline slot (words 1+2). Reassemble directly via
 	// spreadExtract — no memory load through iface.data.
 	//
-	// Gated on empty-interface sources only: walkConvInterface only
-	// spreads when the target is eface, so any/eface-held spread-type
-	// values are the only ones that use this layout. Non-empty iface
-	// sources still carry boxed values per the stock ABI.
-	spreadRead := src.IsEmptyInterface() && types.IsSpreadIface(dst)
+	// Applies to both empty and non-empty interface sources:
+	// walkConvInterface spreads into both layouts, so the reverse
+	// assertion must too. Without this, type-asserting a spread value
+	// out of a non-empty iface misreads iface.Data (which is word 0 of
+	// the string/slice, not a pointer) as a pointer to the 24 B header
+	// and SEGVs on dereference.
+	spreadRead := types.IsSpreadIface(dst)
 
 	if !commaok {
 		// on failure, panic by calling panicdottype

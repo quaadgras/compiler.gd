@@ -2247,19 +2247,32 @@
 
 // We can easily compute the result of efaceeq if
 // we know the underlying type is pointer-ish.
+// gd fat-iface: efaceeq(typ, xHdr, yHdr) takes pointers to 32 B eface
+// headers, not data pointers. For direct-and-comparable types the data
+// lives at offset PtrSize (word 1) and the inline slot is zero in both
+// headers (iMake zeroes it), so comparing the data words is sufficient.
 (StaticLECall {f} typ_ x y mem)
 	&& isSameCall(f, "runtime.efaceeq")
 	&& isDirectAndComparableType(typ_)
 	&& clobber(v)
-	=> (MakeResult (EqPtr x y) mem)
+	=> (MakeResult (EqPtr
+			(Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] x) mem)
+			(Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] y) mem))
+		mem)
 
 // We can easily compute the result of ifaceeq if
 // we know the underlying type is pointer-ish.
+// gd fat-iface: ifaceeq(tab, xHdr, yHdr) takes pointers to 32 B iface
+// headers; same reasoning as efaceeq above — load data slot at offset
+// PtrSize and compare.
 (StaticLECall {f} itab x y mem)
 	&& isSameCall(f, "runtime.ifaceeq")
 	&& isDirectAndComparableIface(itab)
 	&& clobber(v)
-	=> (MakeResult (EqPtr x y) mem)
+	=> (MakeResult (EqPtr
+			(Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] x) mem)
+			(Load <typ.BytePtr> (OffPtr <typ.BytePtr> [config.PtrSize] y) mem))
+		mem)
 
 // If we use the result of slicebytetostring in a map lookup operation,
 // then we don't need to actually do the []byte->string conversion.

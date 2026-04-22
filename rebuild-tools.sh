@@ -98,7 +98,7 @@ echo "Rebuilding vet from host source with gd-aware overlay..."
 # sizes when asmdecl asks). Host's vet binary therefore runs cleanly on
 # host runtime AND its asmdecl pass flags any runtime assembly that still
 # hardcodes stock layouts.
-OVERLAY=/tmp/gd-vet-overlay.json
+OVERLAY="${GOTMPDIR:-${TMPDIR:-/tmp}}/gd-vet-overlay.json"
 cat > "$OVERLAY" <<EOF
 {
   "Replace": {

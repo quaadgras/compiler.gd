@@ -45,12 +45,16 @@ type Value struct {
 	// Pointer-valued data or, if flagIndir is set, pointer to data.
 	// Valid when either flagIndir is set or typ.pointers() is true.
 	// If flagInline is set, ptr is ignored and data lives in inline.
+	// If flagSpread is set, ptr holds word 0 of a 24-byte spread header
+	// (string or slice) and inline holds words 1+2 — the whole 24 B
+	// layout lives contiguously at &ptr.
 	ptr unsafe.Pointer
 
 	// inline stores the bits of the value directly, for pointer-free
 	// types whose size fits in 16 bytes (int64, complex128, small
 	// structs, etc.). Used only when flagInline is set — in which case
-	// unpackEface did not allocate a heap copy.
+	// unpackEface did not allocate a heap copy. When flagSpread is set,
+	// inline holds words 1+2 of the spread value (word 0 is in ptr).
 	//
 	// Because inline lives inside the Value struct itself, its address
 	// is only valid while the owning Value is on the stack/heap; do not
@@ -70,6 +74,10 @@ type Value struct {
 	//	- flagMethod: v is a method value.
 	//	- flagInline: v's data lives in the inline field (implies flagIndir,
 	//	  excludes flagAddr since the inline storage has no stable address).
+	//	- flagSpread: v's data is a 24-byte spread header (string or slice)
+	//	  laid out contiguously across ptr (word 0) and inline (words 1+2).
+	//	  Implies flagIndir. Like flagInline, excludes flagAddr. Set by
+	//	  unpackEface for spread types so ValueOf doesn't heap-alloc.
 	// If !typ.IsDirectIface(), code can assume that flagIndir is set.
 	//
 	// The remaining 21+ bits give a method number for method values.
@@ -94,7 +102,8 @@ const (
 	flagAddr        flag = 1 << 8
 	flagMethod      flag = 1 << 9
 	flagInline      flag = 1 << 10
-	flagMethodShift      = 11
+	flagSpread      flag = 1 << 11
+	flagMethodShift      = 12
 	flagRO          flag = flagStickyRO | flagEmbedRO
 )
 
@@ -123,32 +132,46 @@ func (v Value) typ() *abi.Type {
 
 // dataPtr returns a pointer to v's underlying data. When flagInline is
 // set the returned pointer refers to v.inline inside the caller's local
-// Value; it is valid only for the duration of the current method call
-// and must not be stashed into a sub-Value or returned through a ptr
-// field. Use materialize to obtain a stable pointer.
+// Value; when flagSpread is set it refers to &v.ptr (start of the 24 B
+// spread header that spans v.ptr and v.inline). In both cases the
+// returned pointer is valid only for the duration of the current method
+// call and must not be stashed into a sub-Value or returned through a
+// ptr field. Use materialize to obtain a stable pointer.
 //
 //go:nosplit
 func (v *Value) dataPtr() unsafe.Pointer {
 	if v.flag&flagInline != 0 {
 		return abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
+	if v.flag&flagSpread != 0 {
+		return abi.NoEscape(unsafe.Pointer(&v.ptr))
+	}
 	return v.ptr
 }
 
-// materialize moves inline data to a fresh heap allocation so that v.ptr
-// is a stable address suitable for sub-Values (Field, Index, Elem, Addr).
-// After materialize the value is no longer flagInline and v.ptr points
-// at the heap copy. Callers that only need to read data should use
-// dataPtr instead to avoid the allocation.
+// materialize moves inline or spread data to a fresh heap allocation so
+// that v.ptr is a stable address suitable for sub-Values (Field, Index,
+// Elem, Addr). After materialize the value is no longer flagInline /
+// flagSpread and v.ptr points at the heap copy. Callers that only need
+// to read data should use dataPtr instead to avoid the allocation.
 func (v *Value) materialize() {
-	if v.flag&flagInline == 0 {
+	if v.flag&flagInline != 0 {
+		t := v.typ()
+		c := unsafe_New(t)
+		typedmemmove(t, c, unsafe.Pointer(&v.inline))
+		v.ptr = c
+		v.flag &^= flagInline
 		return
 	}
-	t := v.typ()
-	c := unsafe_New(t)
-	typedmemmove(t, c, unsafe.Pointer(&v.inline))
-	v.ptr = c
-	v.flag &^= flagInline
+	if v.flag&flagSpread != 0 {
+		// The 24 B header lives at &v.ptr (ptr, inline-lo, inline-hi).
+		// Copy it out before overwriting v.ptr with the heap copy.
+		t := v.typ()
+		c := unsafe_New(t)
+		typedmemmove(t, c, unsafe.Pointer(&v.ptr))
+		v.ptr = c
+		v.flag &^= flagSpread
+	}
 }
 
 // pointer returns the underlying pointer represented by v.
@@ -243,16 +266,17 @@ func unpackEface(i any) Value {
 		return v
 	}
 	if t.IsSpreadIface() {
-		// gd Phase D: the iface's data slot holds word 0 of the spread
-		// value directly (not a pointer to a heap-boxed copy). Reflect
-		// accessors expect a stable *T when flagIndir is set, so
-		// materialise a 24 B header: word 0 from e.Data, word 1+2 from
-		// e.Inline. unsafe_New alloc matches stock Go's behaviour for
-		// flagAddr-less non-direct ifaces.
-		ptr := unsafe_New(t)
-		*(*unsafe.Pointer)(ptr) = e.Data
-		*(*[16]byte)(unsafe.Pointer(uintptr(ptr) + goarch.PtrSize)) = *(*[16]byte)(unsafe.Pointer(&e.Inline))
-		return Value{typ_: t, ptr: ptr, flag: f}
+		// gd Phase D: store the 24 B spread header inside the Value
+		// itself — word 0 in v.ptr, words 1+2 in v.inline. dataPtr
+		// returns &v.ptr so accessors see a contiguous header without
+		// a heap alloc. GC stays honest because v.ptr holds a real
+		// heap pointer (string bytes / slice backing array).
+		var v Value
+		v.typ_ = t
+		v.ptr = e.Data
+		*(*[16]byte)(unsafe.Pointer(&v.inline)) = *(*[16]byte)(unsafe.Pointer(&e.Inline))
+		v.flag = f | flagSpread
+		return v
 	}
 	return Value{typ_: t, ptr: e.Data, flag: f}
 }
@@ -1711,6 +1735,15 @@ func TypeAssert[T any](v Value) (T, bool) {
 				} else {
 					*(*unsafe.Pointer)(unsafe.Pointer(&outC.Inline)) = v.dataPtr()
 				}
+			} else if t.IsSpreadIface() {
+				// gd Phase D: split the 24 B spread header across
+				// the iface's Data slot (word 0) and Inline slot
+				// (words 1+2). v.dataPtr() returns the start of the
+				// header whether it lives inline in the Value
+				// (flagSpread) or at a heap address (flagIndir only).
+				src := v.dataPtr()
+				outC.Data = *(*unsafe.Pointer)(src)
+				*(*[16]byte)(unsafe.Pointer(&outC.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 			} else {
 				outC.Data = packEfaceData(v)
 			}
@@ -2532,7 +2565,11 @@ func (v Value) Slice(i, j int) Value {
 			src := *(*string)(v.dataPtr())
 			t = src[i:j]
 		}
-		return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: v.flag}
+		// Return a flagIndir Value pointing at t. Clear flagSpread /
+		// flagInline: the result's 24 B header lives at &t, not inside
+		// the Value struct.
+		fl := v.flag &^ (flagSpread | flagInline)
+		return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: fl}
 	}
 
 	if i < 0 || j < i || j > cap {
@@ -3384,10 +3421,11 @@ func (v Value) assignTo(context string, dst *abi.Type, target unsafe.Pointer) Va
 	case directlyAssignable(dst, v.typ()):
 		// Overwrite type so that they match.
 		// Same memory layout, so no harm done.
-		fl := v.flag&(flagAddr|flagIndir|flagInline) | v.flag.ro()
+		fl := v.flag&(flagAddr|flagIndir|flagInline|flagSpread) | v.flag.ro()
 		fl |= flag(dst.Kind())
-		// Preserve the whole value (including inline bytes) so that
-		// flagInline Values remain alloc-free across assignTo.
+		// Preserve the whole value (including inline / spread bytes)
+		// so that flagInline / flagSpread Values remain alloc-free
+		// across assignTo.
 		out := v
 		out.typ_ = dst
 		out.flag = fl
@@ -3839,7 +3877,11 @@ func cvtSliceArrayPtr(v Value, t Type) Value {
 		panic("reflect: cannot convert slice with length " + strconv.Itoa(v.Len()) + " to pointer to array with length " + strconv.Itoa(n))
 	}
 	h := (*unsafeheader.Slice)(v.dataPtr())
-	return Value{typ_: t.common(), ptr: h.Data, flag: v.flag&^(flagIndir|flagAddr|flagKindMask) | flag(Pointer)}
+	// Result is Pointer kind (direct iface); clear flagSpread/flagInline
+	// so ptr is interpreted as the pointer value, not as word 0 of an
+	// in-Value spread/inline header.
+	fl := v.flag&^(flagIndir|flagAddr|flagInline|flagSpread|flagKindMask) | flag(Pointer)
+	return Value{typ_: t.common(), ptr: h.Data, flag: fl}
 }
 
 // convertOp: []T -> [N]T
@@ -3855,7 +3897,10 @@ func cvtSliceArray(v Value, t Type) Value {
 	typedmemmove(typ, c, ptr)
 	ptr = c
 
-	return Value{typ_: typ, ptr: ptr, flag: v.flag&^(flagAddr|flagKindMask) | flag(Array)}
+	// Result is a heap-backed array (flagIndir, ptr→heap). Drop
+	// flagSpread/flagInline: the source layout is gone.
+	fl := v.flag&^(flagAddr|flagInline|flagSpread|flagKindMask) | flag(Array)
+	return Value{typ_: typ, ptr: ptr, flag: fl}
 }
 
 // convertOp: direct copy

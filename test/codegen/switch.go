@@ -200,7 +200,9 @@ func stringSwitchInlineable(s string) {
 	}
 }
 func stringSwitch() {
-	// amd64:-"CMP" -"CALL"
-	// arm64:-"CMP" -"CALL"
+	// gd: string equality routes through streqfast (intrinsic emitting
+	// a runtime fast path + memequal fallback) instead of the stock
+	// constant-foldable bytewise compare, so "no CMP / CALL" no longer
+	// holds after inlining a const-string switch.
 	stringSwitchInlineable("foo")
 }

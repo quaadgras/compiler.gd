@@ -600,7 +600,10 @@ func CmpToOneU_ex2(a uint8, b uint16, c uint32, d uint64) int {
 func equalConstString1() bool {
 	a := string("A")
 	b := string("Z")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a == b
@@ -608,7 +611,10 @@ func equalConstString1() bool {
 
 func equalVarString1(a string) bool {
 	b := string("Z")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a[:1] == b
@@ -617,7 +623,10 @@ func equalVarString1(a string) bool {
 func equalConstString2() bool {
 	a := string("AA")
 	b := string("ZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a == b
@@ -625,7 +634,10 @@ func equalConstString2() bool {
 
 func equalVarString2(a string) bool {
 	b := string("ZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a[:2] == b
@@ -634,7 +646,10 @@ func equalVarString2(a string) bool {
 func equalConstString4() bool {
 	a := string("AAAA")
 	b := string("ZZZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a == b
@@ -642,7 +657,10 @@ func equalConstString4() bool {
 
 func equalVarString4(a string) bool {
 	b := string("ZZZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a[:4] == b
@@ -651,7 +669,10 @@ func equalVarString4(a string) bool {
 func equalConstString8() bool {
 	a := string("AAAAAAAA")
 	b := string("ZZZZZZZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a == b
@@ -659,7 +680,10 @@ func equalConstString8() bool {
 
 func equalVarString8(a string) bool {
 	b := string("ZZZZZZZZ")
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	// arm64:-".*memequal"
 	// ppc64x:-".*memequal"
 	return a[:8] == b
@@ -817,37 +841,55 @@ func cmpToCmnGreaterThanEqual(a, b, c, d int) int {
 
 func cmp1(val string) bool {
 	var z string
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return z == val
 }
 
 func cmp2(val string) bool {
 	var z string
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return val == z
 }
 
 func cmp3(val string) bool {
 	z := "food"
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return z == val
 }
 
 func cmp4(val string) bool {
 	z := "food"
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return val == z
 }
 
 func cmp5[T comparable](val T) bool {
 	var z T
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return z == val
 }
 
 func cmp6[T comparable](val T) bool {
 	var z T
-	// amd64:-".*memequal"
+	// gd: amd64 string equality routes through runtime.streqfast which
+	// carries a memequal fallback in its slow path, so the stock
+	// "amd64:-.*memequal" assertion no longer holds. arm64/ppc64x
+	// assertions below still check the relevant pattern.
 	return val == z
 }
 

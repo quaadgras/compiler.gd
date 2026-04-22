@@ -615,6 +615,17 @@ func cgoCheckPointer(ptr any, arg any) {
 		}
 	}
 
+	// gd Phase D: spread-iface types (string, slice) carry word 0 in
+	// ep.data and words 1+2 in ep.inline. cgoCheckArg expects p to
+	// point to a contiguous 3-word header (or be word 0 directly for
+	// direct-iface types), so reassemble into a stack buffer first.
+	if t.TFlag&abi.TFlagSpreadIface != 0 {
+		var buf [3]uintptr
+		buf[0] = uintptr(ep.data)
+		*(*[16]byte)(unsafe.Pointer(&buf[1])) = *(*[16]byte)(unsafe.Pointer(&ep.inline))
+		cgoCheckArg(t, noescape(unsafe.Pointer(&buf)), true, top, cgoCheckPointerFail)
+		return
+	}
 	cgoCheckArg(t, ep.data, !t.IsDirectIface(), top, cgoCheckPointerFail)
 }
 
@@ -824,6 +835,15 @@ func cgoCheckResult(val any) {
 	ep := efaceOf(&val)
 	t := ep._type
 	if t == nil {
+		return
+	}
+	// gd Phase D: reassemble spread-iface types (string, slice) into a
+	// contiguous 3-word stack buffer — see cgoCheckPointer.
+	if t.TFlag&abi.TFlagSpreadIface != 0 {
+		var buf [3]uintptr
+		buf[0] = uintptr(ep.data)
+		*(*[16]byte)(unsafe.Pointer(&buf[1])) = *(*[16]byte)(unsafe.Pointer(&ep.inline))
+		cgoCheckArg(t, noescape(unsafe.Pointer(&buf)), true, false, cgoResultFail)
 		return
 	}
 	cgoCheckArg(t, ep.data, !t.IsDirectIface(), false, cgoResultFail)
