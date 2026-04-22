@@ -625,14 +625,14 @@ func text(t *testing.T, h *HashSet, prefix, suffix string) {
 }
 
 // Make sure different seed values generate different hashes.
+//
+// gd string hash cache: strings ignore the caller's seed so the
+// cached word-1 hash is consistent across maps. The fork has already
+// dropped per-map DoS scrambling for strings (see alg.go and
+// doc/gd/sso-string.md), so this test no longer applies — all seeds
+// yield the same hash for the same string bytes.
 func TestSmhasherSeed(t *testing.T) {
-	h := newHashSet()
-	const N = 100000
-	s := "hello"
-	for i := 0; i < N; i++ {
-		h.addS_seed(s, uintptr(i))
-	}
-	h.check(t)
+	t.Skip("gd: strings use a process-wide seed, per-seed scrambling disabled")
 }
 
 func TestIssue66841(t *testing.T) {

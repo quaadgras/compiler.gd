@@ -1300,7 +1300,24 @@ noaes:
 // path differs from memhashFallback's 0-len path).
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$0-24
 	// AX = ptr to string struct
-	// BX = seed
+	// BX = seed (ignored — gd uses a process-wide seed for strings)
+	//
+	// gd string hash cache: heap-rep strings carry their hash in
+	// word 1, populated eagerly by runtime producers (sealStringHash)
+	// and the compiler for static literals. Inline-rep keeps bytes
+	// in word 1, so gate the cache check on a non-nil word 0.
+	MOVQ	(AX), CX	// CX = word 0 (data ptr for heap, nil for inline)
+	TESTQ	CX, CX
+	JZ	noncached	// inline rep — word 1 holds bytes, skip cache
+	MOVQ	8(AX), DX	// DX = cached hash
+	TESTQ	DX, DX
+	JZ	noncached	// heap rep but not yet sealed
+	MOVQ	DX, AX
+	RET
+noncached:
+	// Zero caller's per-table seed so freshly-computed hashes match
+	// the sealed-path values and cache readers agree.
+	XORQ	BX, BX
 	CMPB	runtime·useAeshash(SB), $0
 	JEQ	noaes
 	MOVQ	16(AX), CX	// CX = raw word 2 (tag<<60 | len-or-bytes)

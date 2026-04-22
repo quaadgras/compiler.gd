@@ -67,7 +67,7 @@ func concatstrings(buf *tmpBuf, a []string) string {
 		n := copy(b, x)
 		b = b[n:]
 	}
-	return s
+	return sealStringHash(s)
 }
 
 // concatstring2 helps make the callsite smaller (compared to concatstrings),
@@ -187,7 +187,7 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
 		p = mallocgc(uintptr(n), nil, false)
 	}
 	memmove(p, unsafe.Pointer(ptr), uintptr(n))
-	return unsafe.String((*byte)(p), n)
+	return sealStringHash(unsafe.String((*byte)(p), n))
 }
 
 // stringDataOnStack reports whether the string's data is
@@ -315,7 +315,8 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 		}
 		size2 += encoderune(b[size2:], r)
 	}
-	return s[:size2]
+	// Subslice first (s[:size2] still heap-rep), then seal its hash.
+	return sealStringHash(s[:size2])
 }
 
 // stringStruct is the runtime layout of a Go string under the gd
@@ -457,7 +458,38 @@ func cgoStringNormalize(s string) string {
 	r.str = p
 	r.hash = 0
 	r.len = uint(n)
-	return *(*string)(unsafe.Pointer(&r))
+	return sealStringHash(*(*string)(unsafe.Pointer(&r)))
+}
+
+// sealStringHash populates word 1 of a freshly-constructed heap-rep
+// string with the process-wide hash. Idempotent — does nothing if the
+// string is inline-rep, empty, or already sealed. Called by every
+// runtime producer that returns a heap-rep string so subsequent
+// strhash / streqfast calls skip the aeshash compute.
+//
+// The fork uses a single process-wide seed for string hashing (the
+// runtime-initialised aeskeysched via memhash(…, 0, …)), trading
+// per-map DoS scrambling for cache consistency across map instances.
+// See doc/gd/sso-string.md.
+//
+//go:nosplit
+func sealStringHash(s string) string {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	if sh.str == nil || sh.hash != 0 {
+		return s
+	}
+	n := int(sh.len & abi.StringLenMask)
+	if n == 0 {
+		return s
+	}
+	h := memhash(sh.str, 0, uintptr(n))
+	if h == 0 {
+		// Reserve 0 as the "not populated" sentinel. Any non-zero
+		// substitute is fine; collisions are vanishingly rare.
+		h = 1
+	}
+	sh.hash = uint(h)
+	return s
 }
 
 // inlineStringFromBytes packs 1..15 bytes starting at ptr into an
@@ -548,7 +580,7 @@ func intstring(buf *[4]byte, v int64) (s string) {
 		s, b = rawstring(4)
 	}
 	n := encoderune(b, rune(v))
-	return s[:n]
+	return sealStringHash(s[:n])
 }
 
 // rawstring allocates storage for a new string. The returned
@@ -614,7 +646,7 @@ func gostring(p *byte) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
-	return s
+	return sealStringHash(s)
 }
 
 // internal_syscall_gostring is a version of gostring for internal/syscall/unix.
@@ -630,7 +662,7 @@ func gostringn(p *byte, l int) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
-	return s
+	return sealStringHash(s)
 }
 
 // parseByteCount parses a string that represents a count of bytes.
@@ -797,5 +829,5 @@ func gostringw(strw *uint16) string {
 		n2 += encoderune(b[n2:], rune(str[i]))
 	}
 	b[n2] = 0 // for luck
-	return s[:n2]
+	return sealStringHash(s[:n2])
 }

@@ -101,7 +101,17 @@ func strhash(p unsafe.Pointer, h uintptr) uintptr
 
 func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	x := (*stringStruct)(a)
-	return memhashFallback(x.bytes(), h, uintptr(x.length()))
+	// gd string hash cache: heap-rep strings carry their hash in
+	// word 1, populated eagerly by runtime producers (see
+	// sealStringHash) or by the compiler for static literals. Inline
+	// rep keeps bytes in word 1, so we gate the cache check on a
+	// non-nil data pointer. h (the caller's seed) is ignored — the
+	// fork uses a single process-wide seed so cached values are
+	// consistent across maps.
+	if x.str != nil && x.hash != 0 {
+		return uintptr(x.hash)
+	}
+	return memhashFallback(x.bytes(), 0, uintptr(x.length()))
 }
 
 // NOTE: Because NaN != NaN, a map can contain any
