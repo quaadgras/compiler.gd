@@ -138,9 +138,22 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		n := n.(*ir.UnaryExpr)
 		e.discard(n.X)
 
+	case ir.OUNSAFESTRINGDATA:
+		// gd: under the SSO fork unsafe.StringData may heap-allocate a
+		// 1..15 B buffer when its input is an inline-rep string and
+		// the returned *byte escapes the caller's frame. Spill here
+		// so the escape solver records an EscHeap/EscNone bit on n
+		// that walk can read to pick between runtime.stringDataHeap
+		// and a cheap stack-spill via OSPTR. The string argument
+		// flows through the spill location, preserving stock's
+		// "if the result escapes, so does the string's data pointer"
+		// invariant.
+		n := n.(*ir.UnaryExpr)
+		e.expr(e.spill(k, n), n.X)
+
 	case ir.OCALLMETH, ir.OCALLFUNC, ir.OCALLINTER, ir.OINLCALL,
 		ir.OLEN, ir.OCAP, ir.OMIN, ir.OMAX, ir.OCOMPLEX, ir.OREAL, ir.OIMAG, ir.OAPPEND, ir.OCOPY, ir.ORECOVER,
-		ir.OUNSAFEADD, ir.OUNSAFESLICE, ir.OUNSAFESTRING, ir.OUNSAFESTRINGDATA, ir.OUNSAFESLICEDATA:
+		ir.OUNSAFEADD, ir.OUNSAFESLICE, ir.OUNSAFESTRING, ir.OUNSAFESLICEDATA:
 		e.call([]hole{k}, n)
 
 	case ir.ONEW:

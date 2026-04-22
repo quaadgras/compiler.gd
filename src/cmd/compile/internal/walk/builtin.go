@@ -813,6 +813,20 @@ func walkUnsafeData(n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 			addr.SetType(n.Type())
 			return typecheck.Expr(addr)
 		}
+		// Non-escaping fast path: escape analysis has marked n EscNone,
+		// so the pointer is consumed within the caller's frame. OSPTR
+		// lowers through ssagen.stringBytesTransient — heap-rep returns
+		// word 0 directly, inline-rep spills to an addrtaken autotmp
+		// that lives for the function's duration. No heap alloc.
+		//
+		// The escape pass's OUNSAFESTRINGDATA case spills via a location
+		// whose escape status is reflected in n.Esc(); see
+		// cmd/compile/internal/escape/expr.go.
+		if n.Esc() == ir.EscNone {
+			res := typecheck.Expr(ir.NewUnaryExpr(n.Pos(), ir.OSPTR, n.X))
+			res.SetType(n.Type())
+			return walkExpr(res, init)
+		}
 		// Otherwise route through runtime.stringDataHeap, which returns
 		// word0 unchanged for heap-rep (zero overhead) and heap-copies
 		// inline-rep bytes so the pointer survives the caller's frame.
