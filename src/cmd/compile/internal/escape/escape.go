@@ -293,6 +293,12 @@ func (b *batch) finish(fns []*ir.Func) {
 		for i, param := range fn.Type().RecvParams() {
 			param.Note = b.paramTag(fn, 1+i, param)
 		}
+
+		// gd escape-bits: fold each param's leaks into a compact
+		// per-argument heap-escape mask. Consumers (closure/itab
+		// carriers) check bit k+1 to decide whether to materialize
+		// arg k before an indirect call. Bit 0 is reserved.
+		fn.EscMask = computeEscMask(fn.Type())
 	}
 
 	for _, loc := range b.allLocs {
@@ -411,6 +417,40 @@ const (
 	looping labelState = 1 + iota
 	nonlooping
 )
+
+// computeEscMask derives the per-argument heap-escape mask for the
+// function signature sig from the leaks tags already installed on its
+// params. Bit k+1 (0-indexed from the first call argument, counting
+// the receiver as arg 0 for methods) is set iff that argument can
+// reach the heap. Bit 0 is reserved as the dynamic-mask discriminator
+// (see doc/gd/escape-bits.md Phase F).
+//
+// The leaks encoding (see leaks.go) uses the empty string as a space-
+// optimized spelling of "Heap() == 0" (the pessimistic default —
+// argument escapes). A non-empty "esc:..." string encodes either
+// "Heap() == -1" (doesn't flow to heap) or "Heap() > 0" (flows after
+// N derefs, which the caller must still treat as escaping because it
+// may chain). We set the bit iff the flow is non-negative.
+//
+// Arguments beyond position 62 exceed the mask width; we leave their
+// bits unset. Consumers must treat absence of a bit past position 62
+// conservatively, i.e. heap-alloc the arg up front.
+func computeEscMask(sig *types.Type) uint64 {
+	if sig == nil || sig.Kind() != types.TFUNC {
+		return 0
+	}
+	var mask uint64
+	for i, f := range sig.RecvParams() {
+		if i >= 63 {
+			break
+		}
+		esc := parseLeaks(f.Note)
+		if esc.Heap() >= 0 {
+			mask |= 1 << uint(i+1)
+		}
+	}
+	return mask
+}
 
 func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	name := func() string {

@@ -116,6 +116,21 @@ type Func struct {
 
 	Pragma PragmaFlag // go:xxx function annotations
 
+	// EscMask summarises the per-parameter escape profile of this
+	// function's body as one bit per formal argument (receiver +
+	// declared params, in ABI order). Bit k+1 is set iff argument k
+	// can reach the heap under some call path. Bit 0 is reserved as
+	// a discriminator for a future dynamic-mask-fn encoding (see
+	// doc/gd/escape-bits.md Phase F): a mask word with bit 0 = 1
+	// will mean "word & ~1 is a fn pointer; call it to compute the
+	// mask." Phase A populates only the static form (bit 0 = 0).
+	//
+	// Populated at the end of escape analysis from each param's
+	// leaks tag. Unused args, scalar args, and args beyond bit 62
+	// keep bit clear (scalars can't escape; over-width signatures
+	// fall back to conservative "all ones" at the consumer).
+	EscMask uint64
+
 	flags bitset16
 
 	// ABI is a function's "definition" ABI. This is the ABI that
