@@ -16,6 +16,20 @@ import (
 	"unsafe"
 )
 
+var MaterializeToHeap = materializeToHeap
+
+// MaterializeToHeapTyped is a test-only helper that materialises src
+// into a fresh heap copy of the same dynamic type carried by typ (an
+// interface value whose concrete-type descriptor we read). Returns
+// the new heap pointer as an unsafe.Pointer.
+func MaterializeToHeapTyped(src unsafe.Pointer, typ any) unsafe.Pointer {
+	// An any's data word points to the concrete value. The first
+	// word of an empty interface is *abi.Type. For any reflect.Type
+	// stored in an any, the data word is a *runtime._type == *abi.Type.
+	e := (*abi.EmptyInterface)(unsafe.Pointer(&typ))
+	return materializeToHeap(src, e.Type)
+}
+
 var Fadd64 = fadd64
 var Fsub64 = fsub64
 var Fmul64 = fmul64
