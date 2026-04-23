@@ -630,6 +630,12 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		}
 	}
 
+	// gd escape-bits: wrap pointer args tagged EscCandidate with a
+	// runtime bit-check-and-materialize. Inert until Phase D
+	// (doc/gd/escape-bits.md) lands — nothing produces EscCandidate
+	// today.
+	wrapEscapeCandidateArgs(n, init)
+
 	walkCall1(n, init)
 	return n
 }
