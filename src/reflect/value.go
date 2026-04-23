@@ -486,9 +486,8 @@ func (v Value) CanSet() bool {
 // preallocate `in := make([]Value, 0, maxArgs)` once and reuse it for
 // every call — zero []Value allocation per call. Callers that kept a
 // reference to in observe the returned results at in[:nout] instead of
-// the original arguments. Pass in = make([]Value, n) (cap == n == len)
-// to preserve the stock behaviour of a fresh slice (still no extra
-// alloc when n < nout).
+// the original arguments. Patterns like calling two functions back to
+// back with the same in slice must clone before the second call.
 func (v Value) Call(in []Value) []Value {
 	v.mustBe(Func)
 	v.mustBeExported()
@@ -739,15 +738,14 @@ func (v Value) call(op string, in []Value) []Value {
 		// already has capacity for nout. Callers in hot reflection
 		// paths (encoders, marshalers, rpc dispatch) commonly alloc
 		// one in []Value = make([]Value, 0, maxArgs) and hand the
-		// same slice to each Call; no fresh []Value alloc per call
-		// either for the inputs or the outputs. Callers who retained
-		// a reference to `in` after Call observe the results, not
-		// the original args — documented on Call/CallSlice.
+		// same slice to each Call; no fresh []Value allocation per
+		// call. Callers who retained a reference to in observe the
+		// results at in[:nout] instead of the original arguments —
+		// documented on Call / CallSlice.
 		if cap(in) >= nout {
 			ret = in[:nout]
 			// Clear the reused backing so the per-slot fill below
-			// sees zero-initialised Value headers (typ_, ptr, inline,
-			// flag all zero).
+			// sees zero-initialised Value headers.
 			clear(ret)
 		} else {
 			ret = make([]Value, nout)

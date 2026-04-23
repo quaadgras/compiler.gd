@@ -317,21 +317,29 @@ func CheckEqual(f, g any, config *Config) error {
 		return SetupError("functions have different types")
 	}
 
-	arguments := make([]reflect.Value, xType.NumIn())
+	// gd: reflect.Call under the fork reuses its input slice's
+	// backing array when cap >= nout, so the same slice can't be
+	// passed to two back-to-back Calls. Keep two slices for x and y;
+	// arbitraryValues copies into both after re-filling the first.
+	argsX := make([]reflect.Value, xType.NumIn())
+	argsY := make([]reflect.Value, xType.NumIn())
 	rand := config.getRand()
 	maxCount := config.getMaxCount()
 
 	for i := 0; i < maxCount; i++ {
-		err := arbitraryValues(arguments, xType, config, rand)
+		err := arbitraryValues(argsX, xType, config, rand)
 		if err != nil {
 			return err
 		}
+		copy(argsY, argsX)
 
-		xOut := toInterfaces(x.Call(arguments))
-		yOut := toInterfaces(y.Call(arguments))
+		xOut := toInterfaces(x.Call(argsX))
+		yOut := toInterfaces(y.Call(argsY))
 
 		if !reflect.DeepEqual(xOut, yOut) {
-			return &CheckEqualError{CheckError{i + 1, toInterfaces(arguments)}, xOut, yOut}
+			// argsX may have been overwritten by x.Call; argsY still
+			// holds the originals for reporting.
+			return &CheckEqualError{CheckError{i + 1, toInterfaces(argsY)}, xOut, yOut}
 		}
 	}
 

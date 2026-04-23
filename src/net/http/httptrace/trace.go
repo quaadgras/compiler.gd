@@ -198,9 +198,12 @@ func (t *ClientTrace) compose(old *ClientTrace) {
 		// creates a recursive call cycle and stack overflows)
 		tfCopy := reflect.ValueOf(tf.Interface())
 
-		// We need to call both tf and of in some order.
+		// We need to call both tf and of in some order. The gd fork
+		// reuses args's backing array for the result slice, so clone
+		// before the second Call to preserve the input values.
 		newFunc := reflect.MakeFunc(hookType, func(args []reflect.Value) []reflect.Value {
-			tfCopy.Call(args)
+			argsCopy := append([]reflect.Value(nil), args...)
+			tfCopy.Call(argsCopy)
 			return of.Call(args)
 		})
 		tv.Field(i).Set(newFunc)

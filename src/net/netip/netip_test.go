@@ -2305,9 +2305,12 @@ func TestAddrStringAllocs(t *testing.T) {
 		ip         Addr
 		wantAllocs int
 	}{
+		// gd SSO: IPv4 and short IPv6 (<= 15 bytes formatted) ride
+		// inline in the string header with no heap alloc; longer
+		// zones / ipv4-in-ipv6 still allocate.
 		{"zero", Addr{}, 0},
-		{"ipv4", MustParseAddr("192.168.1.1"), 1},
-		{"ipv6", MustParseAddr("2001:db8::1"), 1},
+		{"ipv4", MustParseAddr("192.168.1.1"), 0},
+		{"ipv6", MustParseAddr("2001:db8::1"), 0},
 		{"ipv6+zone", MustParseAddr("2001:db8::1%eth0"), 1},
 		{"ipv4-in-ipv6", MustParseAddr("::ffff:192.168.1.1"), 1},
 		{"ipv4-in-ipv6+zone", MustParseAddr("::ffff:192.168.1.1%eth0"), 1},

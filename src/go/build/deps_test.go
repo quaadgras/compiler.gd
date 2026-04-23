@@ -69,7 +69,7 @@ var depsRules = `
 	  unicode/utf8,
 	  unicode/utf16;
 
-	internal/goarch < internal/abi;
+	internal/goarch, math/bits < internal/abi;
 	internal/byteorder, internal/cpu, internal/goarch < internal/chacha8rand;
 	internal/goarch, math/bits < internal/strconv;
 

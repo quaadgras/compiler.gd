@@ -978,8 +978,12 @@ func TestShiftGeneric(t *testing.T) {
 			for j := 0; j < i; j++ {
 				n <<= 1
 			}
-			args[0] = reflect.ValueOf(n).Convert(fv.Type().In(0))
+			n0 := reflect.ValueOf(n).Convert(fv.Type().In(0))
 			for s := 0; s <= test.shiftWidth; s++ {
+				// gd: reflect.Call reuses args's backing array for
+				// its return slice, so refresh args[0] each iter
+				// rather than setting it once before the loop.
+				args[0] = n0
 				args[1] = reflect.ValueOf(s).Convert(fv.Type().In(1))
 
 				// Compute desired result. We're testing variable shifts
