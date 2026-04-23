@@ -26,8 +26,8 @@ func (b *batch) walkAll() {
 	// happen at most once. So we take Θ(len(e.allLocs)) walks.
 
 	// Queue of locations to walk. Has enough room for b.allLocs
-	// plus b.heapLoc, b.mutatorLoc, b.calleeLoc.
-	todo := newQueue(len(b.allLocs) + 3)
+	// plus b.heapLoc, b.mutatorLoc, b.calleeLoc, and b.candidateLoc.
+	todo := newQueue(len(b.allLocs) + 4)
 
 	enqueue := func(loc *location) {
 		if !loc.queuedWalkAll {
@@ -50,10 +50,12 @@ func (b *batch) walkAll() {
 	}
 	todo.pushFront(&b.mutatorLoc)
 	todo.pushFront(&b.calleeLoc)
+	todo.pushFront(&b.candidateLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
 	b.calleeLoc.queuedWalkAll = true
+	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
 
 	var walkgen uint32

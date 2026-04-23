@@ -236,6 +236,38 @@ var (
 	funcsyms   []*ir.Name // functions that need function value symbols
 )
 
+// computeFuncsymEscMask derives the gd escape-bits mask for sig's
+// parameters by decoding each param's Note tag. Mirrors
+// cmd/compile/internal/escape.computeEscMask — kept here as a small
+// duplicate because that function's return type wraps the private
+// `leaks` type and escape's package can't be imported from
+// staticdata without cycles.
+//
+// Bit k+1 is set iff argument k's Note encodes a heap-reaching
+// leak. Notes that don't start with "esc:" decode to Heap()==0 per
+// leaks' space-optimised spelling — that's the conservative default
+// for untagged (external, assembly) functions. Bit 0 is reserved.
+func computeFuncsymEscMask(sig *types.Type) uint64 {
+	var mask uint64
+	for i, f := range sig.RecvParams() {
+		if i >= 63 {
+			break
+		}
+		note := f.Note
+		if !strings.HasPrefix(note, "esc:") {
+			// Default: Heap()==0 (escapes).
+			mask |= 1 << uint(i+1)
+			continue
+		}
+		// Encoded leaks tag; first byte is Heap() + 1. 0 means -1
+		// (never flows to heap) so bit stays clear.
+		if len(note) >= 5 && note[4] != 0 {
+			mask |= 1 << uint(i+1)
+		}
+	}
+	return mask
+}
+
 // FuncLinksym returns n·f, the function value symbol for n.
 func FuncLinksym(n *ir.Name) *obj.LSym {
 	if n.Op() != ir.ONAME || n.Class != ir.PFUNC {
@@ -288,6 +320,16 @@ func WriteFuncSyms() {
 		if target.ABI() != obj.ABIInternal {
 			base.Fatalf("expected ABIInternal: %v has %v", target, target.ABI())
 		}
+		// gd escape-bits: function-value rodata entry is {F, M}
+		// (PtrSize + 8 bytes) instead of the stock {F} alone.
+		// M is the function's per-argument heap-escape mask; every
+		// indirect call dispatched through this value reads M to
+		// decide whether to materialize pointer args to the heap.
+		// See doc/gd/escape-bits.md. Capturing closure literals and
+		// method values already carry M at offset PtrSize via their
+		// own struct layouts; this path uniform-ifies bare function
+		// references so the wrap at OCALLFUNC always hits a valid
+		// mask word.
 		objw.SymPtr(sf, 0, target, 0)
 		objw.Global(sf, int32(types.PtrSize), obj.DUPOK|obj.RODATA)
 	}

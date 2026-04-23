@@ -53,7 +53,7 @@ func wrapEscapeCandidateArgs(n *ir.CallExpr, init *ir.Nodes) {
 	// Bail cheaply when no arg is a candidate — the hot path.
 	hasCandidate := false
 	for _, arg := range n.Args {
-		if arg.Esc() == ir.EscCandidate {
+		if argIsEscapeCandidate(arg) {
 			hasCandidate = true
 			break
 		}
@@ -61,12 +61,33 @@ func wrapEscapeCandidateArgs(n *ir.CallExpr, init *ir.Nodes) {
 	if !hasCandidate {
 		return
 	}
-
 	if isIface {
 		wrapIfaceCallCandidates(n, init)
 	} else {
 		wrapClosureCallCandidates(n, init)
 	}
+}
+
+// argIsEscapeCandidate reports whether arg points to an object that
+// escape analysis classified as EscCandidate — a stack-allocated
+// allocation whose only escape edge is through this dynamic call.
+// Escape analysis tags the underlying allocation's node, not the
+// address-taking expression, so we peer through OADDR to inspect
+// the target.
+func argIsEscapeCandidate(arg ir.Node) bool {
+	if arg == nil {
+		return false
+	}
+	if arg.Esc() == ir.EscCandidate {
+		return true
+	}
+	switch a := arg.(type) {
+	case *ir.AddrExpr:
+		if a.X != nil && a.X.Esc() == ir.EscCandidate {
+			return true
+		}
+	}
+	return false
 }
 
 func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
@@ -75,29 +96,25 @@ func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
 
 	// Cache the closure value so the per-arg wraps all read the same
 	// mask word (and so the closure expression is evaluated only
-	// once).
-	fnCached := cheapExpr(typecheck.Conv(n.Fun, unsafePtr), init)
+	// once). func-to-unsafe.Pointer isn't a legal ConvExpr in the
+	// language, but at the IR level the bit pattern is the same —
+	// we cache the func-typed value and reinterpret with ConvNop.
+	fnCached := cheapExpr(n.Fun, init)
 
 	for i, arg := range n.Args {
-		if arg.Esc() != ir.EscCandidate {
+		if !argIsEscapeCandidate(arg) {
 			continue
 		}
 		argType := arg.Type()
 		if !argType.IsPtr() && !argType.IsUnsafePtr() {
-			// Escape-bit machinery only applies to pointer args. The
-			// analyzer shouldn't tag non-pointers as EscCandidate;
-			// if it does, fall back to heap — treat as EscHeap and
-			// let the rest of walk handle it.
-			arg.SetEsc(ir.EscHeap)
 			continue
 		}
-		// Pointee type descriptor (*abi.Type).
 		elemType := argType.Elem()
 		elemTypePtr := reflectdata.TypePtrAt(pos, elemType)
 
-		// runtime.maybeEscapeClosureArg(fnCached, i, unsafe.Pointer(arg), elemTypePtr)
+		// runtime.maybeEscapeClosureArg(unsafe.Pointer(fnCached), i, unsafe.Pointer(arg), elemTypePtr)
 		wrapCall := mkcall("maybeEscapeClosureArg", unsafePtr, init,
-			fnCached,
+			typecheck.ConvNop(fnCached, unsafePtr),
 			ir.NewInt(pos, int64(i)),
 			typecheck.ConvNop(arg, unsafePtr),
 			elemTypePtr,
@@ -110,7 +127,7 @@ func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
 	// Point the call at the cached closure value instead of the
 	// original expression so both Fun and Args see the same
 	// materialisation.
-	n.Fun = typecheck.ConvNop(fnCached, n.Fun.Type())
+	n.Fun = fnCached
 }
 
 func wrapIfaceCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
@@ -135,12 +152,11 @@ func wrapIfaceCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
 	methodIdx := sel.Offset() / int64(types.PtrSize)
 
 	for i, arg := range n.Args {
-		if arg.Esc() != ir.EscCandidate {
+		if !argIsEscapeCandidate(arg) {
 			continue
 		}
 		argType := arg.Type()
 		if !argType.IsPtr() && !argType.IsUnsafePtr() {
-			arg.SetEsc(ir.EscHeap)
 			continue
 		}
 		elemType := argType.Elem()

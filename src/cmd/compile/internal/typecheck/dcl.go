@@ -118,6 +118,12 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 	for i, param := range sig.Params() {
 		d := types.NewField(base.Pos, nil, param.Type)
 		d.SetIsDDD(param.IsDDD())
+		// Note: escape-analysis Notes aren't copied here because
+		// NewMethodType runs during typecheck, before escape
+		// analysis writes them. Downstream consumers that need the
+		// Notes (e.g. reflectdata's gd escape-bits itab mask) read
+		// them directly from the original method signature via
+		// typeSig.origType.
 		params[nrecvs+i] = d
 	}
 

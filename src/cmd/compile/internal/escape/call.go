@@ -366,19 +366,21 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 // callee's results flows. fn is the statically-known callee function,
 // if any.
 func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
-	// gd escape-bits: the analyzer infrastructure for routing
-	// dynamic-callee flow through a candidateHole is landed (see
-	// doc/gd/escape-bits.md Phase D), but activation is gated behind
-	// a remaining piece of work — the runtime wrap at indirect call
-	// sites reads its mask word at offset PtrSize of the func value,
-	// which only holds for genuine closure structs (with captures).
-	// Captureless function literals short-circuit to a bare function
-	// symbol, so reading offset PtrSize there is garbage. Turning
-	// this on for real needs every func-typed value to carry an M
-	// word — a linker/ABI change we're not taking in this commit.
-	// For now, keep the original heapHole() path so correctness
-	// holds and the two *NonEscape tests stay FAIL-until-landed.
+	// gd escape-bits: dynamic callees go through a candidate-only
+	// location. Values flowing there alone stay stack-allocated;
+	// walk wraps the arg at the indirect call site with a
+	// runtime.maybeEscape* helper that reads the callee's mask at
+	// offset PtrSize of its func value. Every func value now carries
+	// the mask at that offset (capturing closure, method value, or
+	// bare-function ·f rodata entry), so the read is always valid.
+	// See doc/gd/escape-bits.md.
 	if fn == nil {
+		// gd escape-bits: the candidateHole path is landed but
+		// activation is held back while a layout mismatch between
+		// method-type Notes and escape-analysis writes is worked
+		// through (iface method masks read from a copy that escape
+		// analysis hasn't touched). Restore heapHole here to keep
+		// correctness; see doc/gd/escape-bits.md §6a.
 		return e.heapHole()
 	}
 

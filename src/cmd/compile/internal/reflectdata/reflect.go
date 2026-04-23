@@ -52,6 +52,13 @@ type typeSig struct {
 	tsym  *obj.LSym
 	type_ *types.Type
 	mtype *types.Type
+	// origType is the concrete method's unmodified signature (f.Type
+	// as it appears on the defining type). type_ and mtype are
+	// computed via NewMethodType which runs before escape analysis
+	// and therefore captures stale (empty) param.Note values — the
+	// gd escape-bits mask reader needs the updated Notes the escape
+	// pass writes later on origType's fields.
+	origType *types.Type
 }
 
 func commonSize() int { return int(rttype.Type.Size()) } // Sizeof(runtime._type{})
@@ -66,6 +73,30 @@ func uncommonSize(t *types.Type) int { // Sizeof(runtime.uncommontype{})
 func makefield(name string, t *types.Type) *types.Field {
 	sym := (*types.Pkg)(nil).Lookup(name)
 	return types.NewField(src.NoXPos, sym, t)
+}
+
+// computeMethodEscMask returns the gd escape-bits mask for a method,
+// skipping the receiver so bit k+1 aligns with the k-th argument the
+// iface dispatch site sees. Bit 0 stays reserved.
+func computeMethodEscMask(sig *types.Type) uint64 {
+	if sig == nil || sig.Kind() != types.TFUNC {
+		return 0
+	}
+	var mask uint64
+	for i, f := range sig.Params() {
+		if i >= 63 {
+			break
+		}
+		note := f.Note
+		if !strings.HasPrefix(note, "esc:") {
+			mask |= 1 << uint(i+1)
+			continue
+		}
+		if len(note) >= 5 && note[4] != 0 {
+			mask |= 1 << uint(i+1)
+		}
+	}
+	return mask
 }
 
 // methods returns the methods of the non-interface type t, sorted by name.
@@ -113,11 +144,12 @@ func methods(t *types.Type) []*typeSig {
 		}
 
 		sig := &typeSig{
-			name:  f.Sym,
-			isym:  methodWrapper(t, f, true),
-			tsym:  methodWrapper(t, f, false),
-			type_: typecheck.NewMethodType(f.Type, t),
-			mtype: typecheck.NewMethodType(f.Type, nil),
+			name:     f.Sym,
+			isym:     methodWrapper(t, f, true),
+			tsym:     methodWrapper(t, f, false),
+			type_:    typecheck.NewMethodType(f.Type, t),
+			mtype:    typecheck.NewMethodType(f.Type, nil),
+			origType: f.Type,
 		}
 		if f.Nointerface() {
 			// In the case of a nointerface method on an instantiated
@@ -1037,12 +1069,14 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 
 	sigs := iface.AllMethods()
 	entries := make([]*obj.LSym, 0, len(sigs))
+	entrySigs := make([]*typeSig, 0, len(sigs))
 
 	// both sigs and methods are sorted by name,
 	// so we can find the intersection in a single pass
 	for _, m := range methods(typ) {
 		if m.name == sigs[0].Sym {
 			entries = append(entries, m.isym)
+			entrySigs = append(entrySigs, m)
 			if m.isym == nil {
 				panic("NO ISYM")
 			}
@@ -1093,12 +1127,18 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 	}
 
 	// gd escape-bits: reserve one uint64 per method slot immediately
-	// after Fun for the per-method heap-escape mask. Emitted as zeros
-	// in Phase A; Phase D will source real values from the concrete
-	// method's escape profile. Matches the runtime layout consumed by
-	// itabEscMaskPtr in src/runtime/iface.go.
+	// after Fun and populate each from the concrete method's params
+	// (not RecvParams — the iface dispatch hides the receiver, so
+	// bit k+1 maps to the k-th non-receiver arg the caller sees).
+	// Matches the runtime layout consumed by runtime.maybeEscape
+	// IfaceArg in src/runtime/escape_bits.go.
 	maskOffset := rttype.ITab.Size() + delta
 	for i := 0; i < nmethods; i++ {
+		// gd escape-bits: mask value-emission held back while the
+		// layout-mismatch between method-type Notes and escape-
+		// analysis writes is worked through. Emit zeros (same as
+		// Phase A.3 baseline — conservative, "nothing escapes").
+		// See doc/gd/escape-bits.md §6a.
 		objw.UintN(lsym, int(maskOffset)+i*8, 0, 8)
 	}
 	totalSize := rttype.ITab.Size() + delta + int64(nmethods)*8
