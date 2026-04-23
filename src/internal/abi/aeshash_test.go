@@ -42,6 +42,18 @@ func hasAESHash() bool {
 	return false
 }
 
+// nativeAeshashString returns the fork's Go aeshash port that matches
+// the current runtime.GOARCH — abi.AeshashStringARM64 on arm64,
+// abi.AeshashString (x86 port) elsewhere. Parity tests compare this
+// against runtime.memhash, which dispatches to the native aeshashbody
+// for the running arch.
+func nativeAeshashString(s string) uint64 {
+	if runtime.GOARCH == "arm64" {
+		return abi.AeshashStringARM64(s)
+	}
+	return abi.AeshashString(s)
+}
+
 func TestAeshashParity(t *testing.T) {
 	if !hasAESHash() {
 		t.Skip("CPU lacks AES instructions; asm aeshash inactive")
@@ -61,14 +73,15 @@ func TestAeshashParity(t *testing.T) {
 		string(make([]byte, 1024)),
 	}
 	for _, s := range cases {
-		got := abi.AeshashString(s)
+		got := nativeAeshashString(s)
 		var p unsafe.Pointer
 		if len(s) > 0 {
 			p = unsafe.Pointer(unsafe.StringData(s))
 		}
 		want := uint64(runtimeMemhash(p, 0, uintptr(len(s))))
 		if got != want {
-			t.Errorf("len=%d: AeshashString=%016x runtime.memhash=%016x", len(s), got, want)
+			t.Errorf("goarch=%s len=%d: port=%016x runtime.memhash=%016x",
+				runtime.GOARCH, len(s), got, want)
 		}
 	}
 }
@@ -85,25 +98,27 @@ func TestAeshashParityRandom(t *testing.T) {
 			b[j] = byte(r.Uint32())
 		}
 		s := string(b)
-		got := abi.AeshashString(s)
+		got := nativeAeshashString(s)
 		var p unsafe.Pointer
 		if n > 0 {
 			p = unsafe.Pointer(unsafe.StringData(s))
 		}
 		want := uint64(runtimeMemhash(p, 0, uintptr(n)))
 		if got != want {
-			t.Errorf("iter=%d len=%d: got=%016x want=%016x bytes=%x",
-				i, n, got, want, b)
+			t.Errorf("goarch=%s iter=%d len=%d: port=%016x runtime.memhash=%016x bytes=%x",
+				runtime.GOARCH, i, n, got, want, b)
 			return
 		}
 	}
 }
 
-// TestStrhashInlineParity exercises the fast inline strhash path in
-// runtime/asm_amd64.s by constructing inline-rep string headers of
-// every length from 1 to 15 and comparing runtime.strhash's output
-// to AeshashString (which is parity-tested against aeshashbody). If
-// the inline asm drifts from aeshashbody, this test catches it.
+// TestStrhashInlineParity exercises the strhash path on inline-rep
+// strings by constructing every length from 1 to 15 and comparing
+// runtime.strhash's output to the Go port matching the current arch
+// (parity-tested against aeshashbody in TestAeshashParity). On amd64
+// this covers the asm inline fast path in strhash_amd64; on arm64 it
+// covers the spill+CALL path, and a regression in either would fail
+// this test without needing access to the target's internals.
 func TestStrhashInlineParity(t *testing.T) {
 	if !hasAESHash() {
 		t.Skip("CPU lacks AES instructions; inline fast path inactive")
@@ -127,10 +142,10 @@ func TestStrhashInlineParity(t *testing.T) {
 		w2 |= uint64(n) << abi.StringTagShift
 		header := [3]uint64{0, w1, w2}
 		got := runtimeStrhash(unsafe.Pointer(&header[0]), 0)
-		want := uintptr(abi.AeshashString(s))
+		want := uintptr(nativeAeshashString(s))
 		if got != want {
-			t.Errorf("len=%d: strhash=%016x AeshashString=%016x",
-				n, got, want)
+			t.Errorf("goarch=%s len=%d: strhash=%016x port=%016x",
+				runtime.GOARCH, n, got, want)
 		}
 	}
 }
