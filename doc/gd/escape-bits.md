@@ -259,7 +259,79 @@ Goal: the mask is computed and carried, but nothing consumes it.
 3. Set the `Arg.EscCandidate` flag on arguments reaching an indirect
    call whose parent object is `EscCandidate`.
 
-### Phase E — Measure and tune
+### Phase E — Trivial wrappers (static half)
+
+A forwarding closure like `func(x *T) { inner(x) }` with `inner` a
+known function currently gets an all-ones mask because `x` "flows
+into an indirect call." But the indirect call resolves to a known
+target during escape analysis; the mask should transitively inherit
+`inner.EscMask`. Extend `tagHole` at `call.go:368` to peek through
+the call's function-value expression:
+
+- `ir.ONAME` resolving to a package-level func → substitute that
+  func's mask, recompute.
+- Local variable bound to a single-assignment closure literal →
+  substitute the literal's mask.
+- Anything else (captured param, struct field load, reflect) →
+  treat as genuinely dynamic, keep the runtime-mask path.
+
+Catches the bulk of trivial wrappers at compile time, zero runtime
+cost. Landable after Phase D; strictly reduces the number of
+`EscCandidate`-tagged args, so only improves things.
+
+### Phase F — Dynamic mask functions (future, design pinned)
+
+Some wrappers can't be resolved statically:
+
+```go
+func wrap(f func(*T)) func(*T) {
+    return func(x *T) { f(x) }   // f is captured, not known until call
+}
+```
+
+Here the wrapper's effective mask *is* `f`'s mask, computable only
+at the wrapper's call time. Encoding: repurpose bit 0 of the mask
+word as a discriminator. Fn pointers are ≥ 4-byte aligned on every
+Go target, so bit 0 of a real fn pointer is always 0.
+
+```
+mask word:
+  bit 0 = 0: bits 1..63 are the static mask (left-shifted by 1)
+  bit 0 = 1: word & ~1 is a pointer to a mask-computing fn
+```
+
+Call-site reader:
+
+```go
+mask := *maskSlot
+if mask & 1 != 0 {
+    mask = (*func(unsafe.Pointer) uint64)(unsafe.Pointer(mask & ^1))(recv)
+}
+// per-arg bit test as usual
+```
+
+The mask-computing fn is compiler-synthesized. For a pure forwarder
+it's `func(c) uint64 { return c.f.EscMask }` (one load). For a
+branching wrapper (`if cond { a(x) } else { b(x) }`) it's the union:
+`a.EscMask | b.EscMask`.
+
+Cost of dynamic masks: one test + (rare) one call + tiny fn body.
+On every closure that isn't a forwarder, bit 0 stays clear and the
+static-mask fast path is unchanged.
+
+**Pinned now**: the mask slot is `uint64`, not `uint32`, and bit 0
+is reserved. Phase A's static encoding must left-shift bits by 1
+(or equivalent) so Phase F can drop in without re-plumbing carriers.
+
+Alternative representations we considered and rejected:
+- **Two slots** (`static_mask uint64, dynamic_fn uintptr`): +16 B
+  per closure, doubles itab method slot to 3 words. Too expensive
+  for the non-forwarder common case.
+- **Cycle-tolerant recursive mask fns**: a mask fn that queries
+  another closure's mask fn. Defer indefinitely; compiler can break
+  cycles by conservatively returning all-ones.
+
+### Phase G — Measure and tune (was Phase E pre-wrapper)
 
 Targets (allocation-sensitive hot paths in graphics workloads):
 
