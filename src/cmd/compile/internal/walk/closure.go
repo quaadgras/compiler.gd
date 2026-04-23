@@ -10,6 +10,7 @@ import (
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
+	"go/constant"
 )
 
 // directClosureCall rewrites a direct call of a function literal into
@@ -118,9 +119,19 @@ func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 
 	typ := typecheck.ClosureType(clo)
 
+	// gd escape-bits: emit the function's per-arg heap-escape mask as
+	// the second closure field (offset PtrSize). Call sites read this
+	// to decide whether to materialize pointer args on the heap before
+	// dispatching. See doc/gd/escape-bits.md.
+	maskLit := ir.NewBasicLit(base.Pos, types.Types[types.TUINT64],
+		constant.MakeUint64(clofn.EscMask))
+
 	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, typ, nil)
 	clos.SetEsc(clo.Esc())
-	clos.List = append([]ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, clofn.Nname)}, closureArgs(clo)...)
+	clos.List = append([]ir.Node{
+		ir.NewUnaryExpr(base.Pos, ir.OCFUNC, clofn.Nname),
+		maskLit,
+	}, closureArgs(clo)...)
 	for i, value := range clos.List {
 		clos.List[i] = ir.NewStructKeyExpr(base.Pos, typ.Field(i), value)
 	}
@@ -167,8 +178,9 @@ func walkMethodValue(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 	// Create closure in the form of a composite literal.
 	// For x.M with receiver (x) type T, the generated code looks like:
 	//
-	//	clos = &struct{F uintptr; R T}{T.M·f, x}
+	//	clos = &struct{F uintptr; M uint64; R T}{T.M·f, mask, x}
 	//
+	// M is the gd escape-bits mask; see doc/gd/escape-bits.md.
 	// Like walkClosure above.
 
 	if n.X.Type().IsInterface() {
@@ -184,9 +196,20 @@ func walkMethodValue(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 
 	typ := typecheck.MethodValueType(n)
 
+	// The wrapper's EscMask comes from the method-value wrapper
+	// function; use zero here for now and let the compiler populate
+	// once the wrapper's escape analysis runs. Safe default: treat
+	// all args as escaping.
+	wrapper := methodValueWrapper(n)
+	var mask uint64
+	if wrapper.Func != nil {
+		mask = wrapper.Func.EscMask
+	}
+	maskLit := ir.NewBasicLit(base.Pos, types.Types[types.TUINT64], constant.MakeUint64(mask))
+
 	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, typ, nil)
 	clos.SetEsc(n.Esc())
-	clos.List = []ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, methodValueWrapper(n)), n.X}
+	clos.List = []ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, wrapper), maskLit, n.X}
 
 	addr := typecheck.NodAddr(clos)
 	addr.SetEsc(n.Esc())
