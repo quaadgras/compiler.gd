@@ -1069,6 +1069,12 @@ func subprocessHash(t *testing.T, env string) uintptr {
 //
 // Regression test for https://go.dev/issue/66885.
 func TestMemHashGlobalSeed(t *testing.T) {
+	// gd fork: the string hash uses a process-wide fixed seed
+	// (abi.AeskeyschedSeed) so compile-time and runtime hashes match
+	// for cache consistency. Upstream's unique-per-process invariant
+	// is intentionally dropped; see doc/gd/sso-string.md.
+	t.Skip("gd fork uses a fixed global seed; hashes are deterministic by design")
+
 	if os.Getenv("GO_TEST_SUBPROCESS_HASH") != "" {
 		fmt.Println(computeHash())
 		os.Exit(0)

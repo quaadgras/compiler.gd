@@ -482,7 +482,14 @@ func sealStringHash(s string) string {
 	if n == 0 {
 		return s
 	}
-	sh.hash = uint(abi.StringHashBytes(unsafe.Slice((*byte)(sh.str), n)))
+	if useAeshash {
+		sh.hash = uint(memhash(sh.str, 0, uintptr(n)))
+	} else {
+		sh.hash = uint(abi.AeshashString(unsafe.String((*byte)(sh.str), n)))
+	}
+	if sh.hash == 0 {
+		sh.hash = 1 // 0 is reserved as the unsealed sentinel
+	}
 	return s
 }
 

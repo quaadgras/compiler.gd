@@ -379,14 +379,17 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		// gd string hash cache: pre-populate word 1 with the fork's
 		// canonical string hash so the very first map lookup /
 		// equality check on a literal hits the cache without any
-		// runtime computation. abi.StringHashBytes is shared with
-		// runtime.sealStringHash and runtime.strhashFallback — same
-		// algorithm, same constants, same output for the same bytes.
-		// 32-bit targets leave the slot at 0 (they don't benefit from
-		// the cache; the header is 12 B with no reserved hash slot).
+		// runtime computation. abi.AeshashString mirrors the runtime
+		// asm aeshashbody with AeskeyschedSeed installed, so rodata-
+		// embedded hashes match what sealStringHash / strhashFallback
+		// would compute at runtime. 32-bit targets leave the slot
+		// at 0 (no reserved hash slot on their 12 B header).
 		var hash int64
 		if types.PtrSize == 8 {
-			hash = int64(abi.StringHashBytes([]byte(i)))
+			hash = int64(abi.AeshashString(i))
+			if hash == 0 {
+				hash = 1 // reserve 0 as the unsealed sentinel
+			}
 		}
 		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, hash)
 		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)

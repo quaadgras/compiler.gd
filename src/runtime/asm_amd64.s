@@ -1291,36 +1291,55 @@ noaes:
 	JMP	runtime·memhashFallback<ABIInternal>(SB)
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
-// gd small-string optimization: stringStruct is 24 B (ptr, hash, len).
-// Tag-aware dispatch:
-//   - tag == 0 (heap rep, including empty): ptr = word 0, len = word 2
-//   - tag != 0 (inline rep): ptr = header + 8, len = tag
-// Empty heap strings {nil,0,0} must go through the aes path too so
-// their hash matches non-empty same-rep comparisons (aeshash's 0-len
-// path differs from memhashFallback's 0-len path).
-TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$0-24
-	// AX = ptr to string struct
-	// BX = seed (ignored — gd uses compile-time-known hash constants)
-	//
-	// gd string hash cache: heap-rep strings carry their hash in
-	// word 1, populated by runtime producers (sealStringHash) and
-	// by the compiler for static literals. Inline-rep keeps bytes
-	// in word 1, so gate the cache check on a non-nil word 0.
-	//
-	// On cache miss, fall through to strhashFallback which runs the
-	// shared internal/abi string-hash algorithm. Bypassing aeshash
-	// here lets compile-time and runtime emit identical hashes for
-	// identical bytes — the whole point of the cache.
-	MOVQ	(AX), CX	// CX = word 0
+//
+// gd fork layout: stringStruct is 24 B (ptr, hash, len). Heap-rep
+// strings carry a cached hash in word 1 (populated by sealStringHash
+// and by the compiler for static literals); a non-zero cache short-
+// circuits the call. On cache miss we tail-route the bytes into
+// runtime·memhash with seed=0 so aeshashbody runs against the fork's
+// fixed aeskeysched and matches the compile-time hash emitted for
+// string literals.
+//
+// Layouts:
+//   heap rep (word 0 != nil):  hash = word 1, data = word 0, len = word 2 & 0x0fff...
+//   inline rep (word 0 == nil): bytes packed in words 1+2, len = word 2 >> 60.
+//     Inline bytes are spilled to a 16 B local buffer before calling
+//     memhash, since memhash wants a pointer.
+TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$16-24
+	// AX = ptr to string struct, BX = caller seed (ignored).
+	MOVQ	(AX), CX		// CX = word 0
 	TESTQ	CX, CX
-	JZ	strhash_fallback	// inline rep
-	MOVQ	8(AX), DX	// DX = cached hash
+	JZ	strhash_inline
+	// Heap rep: check cache.
+	MOVQ	8(AX), DX		// DX = cached hash
 	TESTQ	DX, DX
-	JZ	strhash_fallback	// heap, unsealed
+	JZ	strhash_heap_unsealed
 	MOVQ	DX, AX
 	RET
-strhash_fallback:
-	JMP	runtime·strhashFallback<ABIInternal>(SB)
+strhash_heap_unsealed:
+	// Heap cache miss: hash data bytes with seed=0 via memhash (which
+	// dispatches to aeshashbody on AES-capable CPUs or memhashFallback
+	// otherwise).
+	MOVQ	16(AX), DX		// DX = word 2 (len|tag)
+	MOVQ	$0x0fffffffffffffff, R8
+	ANDQ	R8, DX
+	MOVQ	CX, AX			// data ptr
+	XORL	BX, BX
+	MOVQ	DX, CX
+	CALL	runtime·memhash<ABIInternal>(SB)
+	RET
+strhash_inline:
+	// Spill inline bytes (word 1 + word 2) to the 16 B local frame.
+	MOVQ	8(AX), DX
+	MOVQ	16(AX), R8
+	MOVQ	DX, 0(SP)
+	MOVQ	R8, 8(SP)
+	MOVQ	R8, CX
+	SHRQ	$60, CX			// CX = length
+	MOVQ	SP, AX
+	XORL	BX, BX
+	CALL	runtime·memhash<ABIInternal>(SB)
+	RET
 
 // AX: data
 // BX: hash seed

@@ -106,18 +106,29 @@ func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	// sealStringHash) or by the compiler's static-init emitter.
 	// Inline rep keeps bytes in word 1, so gate the cache check on a
 	// non-nil data pointer. h (the caller's seed) is ignored — the
-	// fork uses compile-time-known hash constants (internal/abi) so
-	// runtime and static-init emit identical values and every strhash
-	// call returns the same hash for a given byte sequence across
-	// map instances.
+	// fork uses a process-wide fixed seed (aeskeysched loaded from
+	// abi.AeskeyschedSeed) so runtime and static-init emit identical
+	// values.
 	if x.str != nil && x.hash != 0 {
 		return uintptr(x.hash)
 	}
+	// Cache miss. Inline-rep (x.str==nil) reads bytes from the header
+	// via bytes() — valid while x is live. Heap-rep with hash==0 means
+	// the seal never ran; compute now. On AES-capable CPUs route
+	// through memhash so the fast asm aeshashbody path runs; otherwise
+	// fall back to the pure-Go aeshash port so the output still
+	// matches what the compiler emitted for literals.
 	n := x.length()
-	if n == 0 {
-		return uintptr(abi.StringHashK0)
+	if useAeshash {
+		if n == 0 {
+			return memhash(nil, 0, 0)
+		}
+		return memhash(x.bytes(), 0, uintptr(n))
 	}
-	return uintptr(abi.StringHashBytes(unsafe.Slice((*byte)(x.bytes()), n)))
+	if n == 0 {
+		return uintptr(abi.AeshashString(""))
+	}
+	return uintptr(abi.AeshashString(unsafe.String((*byte)(x.bytes()), n)))
 }
 
 // NOTE: Because NaN != NaN, a map can contain any
@@ -522,11 +533,13 @@ func alginit() {
 
 func initAlgAES() {
 	useAeshash = true
-	// Initialize with random data so hash collisions will be hard to engineer.
-	key := (*[hashRandomBytes / 8]uint64)(unsafe.Pointer(&aeskeysched))
-	for i := range key {
-		key[i] = bootstrapRand()
-	}
+	// gd fork: fixed aeskeysched so aeshash is a pure function of its
+	// input. runtime.sealStringHash and the compiler's stringConstHash
+	// compute hashes with the same seed, keeping rodata-embedded and
+	// runtime-computed hashes in lockstep. DoS protection is
+	// intentionally traded away for cache consistency — see
+	// doc/gd/sso-string.md.
+	copy(aeskeysched[:], abi.AeskeyschedSeed[:])
 }
 
 // Note: These routines perform the read with a native endianness.

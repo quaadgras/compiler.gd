@@ -2787,7 +2787,11 @@ func isDictArgSym(sym Sym) bool {
 // write the same value that runtime producers and staticdata.InitConst
 // compute — the invariant the word-1 cache depends on.
 func stringConstHash(s string) int64 {
-	return int64(abi.StringHashBytes([]byte(s)))
+	h := int64(abi.AeshashString(s))
+	if h == 0 {
+		h = 1 // reserve 0 as the unsealed sentinel
+	}
+	return h
 }
 
 // stringInlineWord1 packs the first up to 8 bytes of s little-endian
