@@ -20,7 +20,7 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 // 24 B header breaks every per-arch version. Redirect to the Go
 // fallback, which lowers len(s) / s[i] through tag-aware helpers.
 TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$0-56
-	JMP	runtime·cmpstringFallback<ABIInternal>(SB)
+	JMP	·cmpstringFallback<ABIInternal>(SB)
 
 // input:
 //    R4: points to the start of a

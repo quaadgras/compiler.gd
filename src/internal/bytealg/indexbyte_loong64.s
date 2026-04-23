@@ -2,6 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// gd SSO: stock 16 B string ABI, no inline-rep prolog. The Go
+// fallback in indexbyte_generic.go serves loong64 until this
+// is ported.
+
+//go:build ignore
+
 #include "go_asm.h"
 #include "textflag.h"
 

@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build ppc64 || ppc64le
+// gd SSO: stock 16 B string ABI, no inline-rep prolog. The Go
+// fallback in indexbyte_generic.go serves ppc64/ppc64le until
+// this is ported.
+
+//go:build ignore
 
 #include "go_asm.h"
 #include "textflag.h"

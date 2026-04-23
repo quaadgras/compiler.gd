@@ -19,7 +19,7 @@ TEXT ·Compare(SB),NOSPLIT,$0-56
 // 24 B header breaks every per-arch version. Redirect to the Go
 // fallback, which lowers len(s) / s[i] through tag-aware helpers.
 TEXT runtime·cmpstring(SB),NOSPLIT,$0-56
-	JMP	runtime·cmpstringFallback(SB)
+	JMP	·cmpstringFallback(SB)
 
 // On entry:
 // R1 length of a

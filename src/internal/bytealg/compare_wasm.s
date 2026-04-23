@@ -19,7 +19,7 @@ TEXT ·Compare(SB), NOSPLIT, $0-56
 // the Go fallback, which handles the fork's 24 B / inline layouts
 // via tag-aware len/index helpers.
 TEXT runtime·cmpstring(SB), NOSPLIT, $0-56
-	JMP runtime·cmpstringFallback(SB)
+	JMP ·cmpstringFallback(SB)
 
 // params: a, alen, b, blen
 // ret: -1/0/1
