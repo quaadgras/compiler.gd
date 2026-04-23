@@ -375,13 +375,7 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	// bare-function ·f rodata entry), so the read is always valid.
 	// See doc/gd/escape-bits.md.
 	if fn == nil {
-		// gd escape-bits: the candidateHole path is landed but
-		// activation is held back while a layout mismatch between
-		// method-type Notes and escape-analysis writes is worked
-		// through (iface method masks read from a copy that escape
-		// analysis hasn't touched). Restore heapHole here to keep
-		// correctness; see doc/gd/escape-bits.md §6a.
-		return e.heapHole()
+		return e.candidateHole()
 	}
 
 	if e.inMutualBatch(fn) {

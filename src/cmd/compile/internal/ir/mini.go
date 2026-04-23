@@ -46,6 +46,15 @@ func (n *miniNode) SetEsc(x uint16)   { n.esc = x }
 const (
 	miniTypecheckShift = 0
 	miniWalked         = 1 << 2 // to prevent/catch re-walking
+	// gd escape-bits: node's allocation was classified as an escape
+	// candidate — its only escape edge is through an indirect call
+	// whose mask will decide at runtime. Walk reads this bit when
+	// rewriting indirect-call arg lists to emit the runtime wrap.
+	// Kept separate from Esc() so existing consumers (OnStack,
+	// SSAable, IsStackAllocatable etc.) see EscHeap and allocate
+	// correctly — the wrap is an optimization on the pass-by-ptr
+	// arg, not a change to the underlying allocation strategy.
+	miniEscCandidate = 1 << 3
 )
 
 func (n *miniNode) Typecheck() uint8 { return n.bits.get2(miniTypecheckShift) }
@@ -58,6 +67,10 @@ func (n *miniNode) SetTypecheck(x uint8) {
 
 func (n *miniNode) Walked() bool     { return n.bits&miniWalked != 0 }
 func (n *miniNode) SetWalked(x bool) { n.bits.set(miniWalked, x) }
+
+// gd escape-bits: see miniEscCandidate above.
+func (n *miniNode) EscCandidate() bool     { return n.bits&miniEscCandidate != 0 }
+func (n *miniNode) SetEscCandidate(x bool) { n.bits.set(miniEscCandidate, x) }
 
 // Empty, immutable graph structure.
 

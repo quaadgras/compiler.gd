@@ -47,6 +47,11 @@ type Node interface {
 	// Storage for analysis passes.
 	Esc() uint16
 	SetEsc(x uint16)
+	// gd escape-bits: whether this node's allocation is an
+	// indirect-call escape candidate. See miniEscCandidate doc in
+	// mini.go. Orthogonal to Esc().
+	EscCandidate() bool
+	SetEscCandidate(bool)
 
 	// Typecheck values:
 	//  0 means the node is not typechecked
@@ -568,23 +573,43 @@ func OuterValue(n Node) Node {
 }
 
 const (
-	EscUnknown   = iota
-	EscNone      // Does not escape to heap, result, or parameters.
-	EscHeap      // Reachable from the heap
-	EscNever     // By construction will not escape.
-	EscCandidate // gd escape-bits: stack-alloc at emission; the node
-	// flows into an indirect call whose callee's EscMask bit may
-	// force a runtime materialize-to-heap. Allocation sites treat
-	// this identically to EscNone (stack); indirect-call sites
-	// recognise it and emit the bit-check wrap. See
-	// doc/gd/escape-bits.md.
+	EscUnknown = iota
+	EscNone    // Does not escape to heap, result, or parameters.
+	EscHeap    // Reachable from the heap
+	EscNever   // By construction will not escape.
+
+	// EscCandidate historically existed as a distinct state. The
+	// current design tracks "escape-candidate" via a separate bit
+	// on the node (see Node.IsEscapeCandidate / SetEscapeCandidate)
+	// while keeping Esc() values in {Unknown, None, Heap, Never}.
+	// Kept as an unused enum value to preserve any export-data
+	// roundtripping guarantees.
+	EscCandidate
 )
 
 // StackAllocatable reports whether an escape state permits stack
 // allocation at the point of emission. Used by walk to pick between
 // initStackTemp and runtime.newobject at composite-literal and
-// conversion sites. EscNone and the gd escape-bits EscCandidate both
-// live on the stack; only EscHeap and EscUnknown force the heap.
+// conversion sites. Only EscNone is safe — other states either
+// escape unconditionally or have dedicated handling.
 func StackAllocatable(esc uint16) bool {
-	return esc == EscNone || esc == EscCandidate
+	return esc == EscNone
+}
+
+// NodeStackAllocatable extends StackAllocatable with the gd escape-
+// bits EscCandidate bit. A node whose Esc() would otherwise force
+// heap (typically EscHeap, set as the safe default for candidate
+// nodes so non-walk consumers like OnStack remain consistent) is
+// still safe to stack-alloc at walk emission *if* it carries the
+// EscCandidate bit — the call-site wrap (wrapEscapeCandidateArgs)
+// will materialize to heap at runtime whenever the callee's mask
+// says the arg actually escapes.
+func NodeStackAllocatable(n Node) bool {
+	if n == nil {
+		return false
+	}
+	if StackAllocatable(n.Esc()) {
+		return true
+	}
+	return n.EscCandidate()
 }

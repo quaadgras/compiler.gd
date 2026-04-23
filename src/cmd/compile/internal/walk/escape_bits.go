@@ -78,12 +78,12 @@ func argIsEscapeCandidate(arg ir.Node) bool {
 	if arg == nil {
 		return false
 	}
-	if arg.Esc() == ir.EscCandidate {
+	if arg.EscCandidate() {
 		return true
 	}
 	switch a := arg.(type) {
 	case *ir.AddrExpr:
-		if a.X != nil && a.X.Esc() == ir.EscCandidate {
+		if a.X != nil && a.X.EscCandidate() {
 			return true
 		}
 	}

@@ -351,10 +351,15 @@ func (b *batch) finish(fns []*ir.Func) {
 			n.SetEsc(ir.EscHeap)
 		} else if loc.hasAttr(attrCandidateEscape) {
 			// gd escape-bits: sole escape path is through a dynamic
-			// callee. Stay stack-allocated; walk emits the
-			// runtime.maybeEscape* wrap at the indirect call site so
-			// materialization is conditional on the callee's mask.
-			n.SetEsc(ir.EscCandidate)
+			// callee. The node's allocation still goes to the heap
+			// (EscHeap), preserving correctness for every consumer
+			// that inspects Esc(); the EscCandidate bit is the
+			// signal that walk's call-site pass may (later) rewrite
+			// the pass-by-ptr argument into a wrap, so the heap
+			// allocation can be delayed to the moment of actual
+			// escape. See doc/gd/escape-bits.md.
+			n.SetEsc(ir.EscHeap)
+			n.SetEscCandidate(true)
 		} else {
 			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
 				if n.Op() == ir.OAPPEND {
