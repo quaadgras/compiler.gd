@@ -22,6 +22,16 @@ import (
 //go:linkname runtimeMemhash runtime.memhash
 func runtimeMemhash(p unsafe.Pointer, h, s uintptr) uintptr
 
+// runtimeStrhash is runtime.strhash. Its asm prolog does a cache
+// check; on cache miss it routes into aeshashbody directly (fast
+// inline path for 1..15 B strings, CALL for heap rep). Calling it
+// on a freshly-heap-allocated string with the hash slot zeroed
+// forces the miss path, giving us the asm-level hash. Used to
+// verify the inline fast path in strhash_amd64 matches AeshashString.
+//
+//go:linkname runtimeStrhash runtime.strhash
+func runtimeStrhash(p unsafe.Pointer, h uintptr) uintptr
+
 func hasAESHash() bool {
 	if runtime.GOARCH == "amd64" {
 		return cpu.X86.HasAES && cpu.X86.HasSSSE3 && cpu.X86.HasSSE41
@@ -85,6 +95,42 @@ func TestAeshashParityRandom(t *testing.T) {
 			t.Errorf("iter=%d len=%d: got=%016x want=%016x bytes=%x",
 				i, n, got, want, b)
 			return
+		}
+	}
+}
+
+// TestStrhashInlineParity exercises the fast inline strhash path in
+// runtime/asm_amd64.s by constructing inline-rep string headers of
+// every length from 1 to 15 and comparing runtime.strhash's output
+// to AeshashString (which is parity-tested against aeshashbody). If
+// the inline asm drifts from aeshashbody, this test catches it.
+func TestStrhashInlineParity(t *testing.T) {
+	if !hasAESHash() {
+		t.Skip("CPU lacks AES instructions; inline fast path inactive")
+	}
+	for n := 1; n <= 15; n++ {
+		data := make([]byte, n)
+		for i := range data {
+			data[i] = byte(i*17 + 1)
+		}
+		s := string(data) // compiler may emit heap or inline — force inline below
+		// Build an inline-rep header directly so strhash sees an
+		// inline string (word 0 == nil). word 1 = bytes[0:min(n,8)]
+		// little-endian; word 2 = (n<<60) | bytes[8:n].
+		var w1, w2 uint64
+		for i := 0; i < n && i < 8; i++ {
+			w1 |= uint64(data[i]) << (8 * i)
+		}
+		for i := 8; i < n; i++ {
+			w2 |= uint64(data[i]) << (8 * (i - 8))
+		}
+		w2 |= uint64(n) << abi.StringTagShift
+		header := [3]uint64{0, w1, w2}
+		got := runtimeStrhash(unsafe.Pointer(&header[0]), 0)
+		want := uintptr(abi.AeshashString(s))
+		if got != want {
+			t.Errorf("len=%d: strhash=%016x AeshashString=%016x",
+				n, got, want)
 		}
 	}
 }

@@ -1329,13 +1329,51 @@ strhash_heap_unsealed:
 	CALL	runtime·memhash<ABIInternal>(SB)
 	RET
 strhash_inline:
-	// Spill inline bytes (word 1 + word 2) to the 16 B local frame.
+	// Inline-rep strings keep their bytes in word 1 + low 60 bits of
+	// word 2, so we can feed them straight into an XMM register and
+	// run aeshashbody's aes0to15 final1 pattern inline — no stack
+	// spill, no CALL. On non-AES CPUs we still need memhashFallback,
+	// which wants a pointer, so that path spills and CALLs.
+	CMPB	runtime·useAeshash(SB), $0
+	JEQ	strhash_inline_wy
+	// Fast path: inline aeshash for 1..15 B strings.
+	MOVQ	8(AX), DX		// DX = word 1 (bytes[0..7])
+	MOVQ	16(AX), R8		// R8 = word 2 (len<<60 | bytes[8..14])
+	MOVQ	R8, CX
+	SHRQ	$60, CX			// CX = length (1..15)
+	// Pack bytes into X1: low 8 = word1, high 8 = word2.
+	MOVQ	DX, X1
+	PINSRQ	$1, R8, X1
+	// Zero-mask bytes at positions >= length (also strips the tag
+	// nibble and any padding). masks<>+16*len gives a 16 B mask with
+	// 1s in low `len` bytes and 0s elsewhere.
+	LEAQ	masks<>(SB), R9
+	MOVQ	CX, R10
+	SHLQ	$4, R10
+	MOVOU	(R9)(R10*1), X2
+	PAND	X2, X1
+	// Seed X0 the same way aeshashbody does with BX=0.
+	XORPS	X0, X0
+	PINSRW	$4, CX, X0
+	PSHUFHW	$0, X0, X0
+	PXOR	runtime·aeskeysched(SB), X0
+	AESENC	X0, X0
+	// final1: PXOR seed; AESENC 3 rounds; return low 64.
+	PXOR	X0, X1
+	AESENC	X1, X1
+	AESENC	X1, X1
+	AESENC	X1, X1
+	MOVQ	X1, AX
+	RET
+strhash_inline_wy:
+	// Non-AES fallback: spill inline bytes to local frame and CALL
+	// memhash so memhashFallback (wyhash) sees contiguous memory.
 	MOVQ	8(AX), DX
 	MOVQ	16(AX), R8
 	MOVQ	DX, 0(SP)
 	MOVQ	R8, 8(SP)
 	MOVQ	R8, CX
-	SHRQ	$60, CX			// CX = length
+	SHRQ	$60, CX
 	MOVQ	SP, AX
 	XORL	BX, BX
 	CALL	runtime·memhash<ABIInternal>(SB)
