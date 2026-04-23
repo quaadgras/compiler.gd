@@ -126,9 +126,9 @@ func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 		return memhash(x.bytes(), 0, uintptr(n))
 	}
 	if n == 0 {
-		return uintptr(abi.AeshashString(""))
+		return uintptr(strhashPort(""))
 	}
-	return uintptr(abi.AeshashString(unsafe.String((*byte)(x.bytes()), n)))
+	return uintptr(strhashPort(unsafe.String((*byte)(x.bytes()), n)))
 }
 
 // NOTE: Because NaN != NaN, a map can contain any

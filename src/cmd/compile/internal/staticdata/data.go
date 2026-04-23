@@ -25,6 +25,7 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"internal/abi"
+	"internal/buildcfg"
 )
 
 // InitAddrOffset writes the static name symbol lsym to n, it does not modify n.
@@ -386,7 +387,14 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		// at 0 (no reserved hash slot on their 12 B header).
 		var hash int64
 		if types.PtrSize == 8 {
-			hash = int64(abi.AeshashString(i))
+			// arm64 runtime uses AESE+AESMC, which produces bit-
+			// different output from x86's AESENC. Match the target.
+			switch buildcfg.GOARCH {
+			case "arm64":
+				hash = int64(abi.AeshashStringARM64(i))
+			default:
+				hash = int64(abi.AeshashString(i))
+			}
 			if hash == 0 {
 				hash = 1 // reserve 0 as the unsealed sentinel
 			}

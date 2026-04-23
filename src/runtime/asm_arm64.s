@@ -774,45 +774,19 @@ strhash_heap_unsealed:
 	BL	runtime·memhash<ABIInternal>(SB)
 	RET
 strhash_inline:
-	MOVB	runtime·useAeshash(SB), R10
-	CBZ	R10, strhash_inline_wy
-	// Fast path: fold aes0to15 inline. Pack word 1 and tag-stripped
-	// word 2 into V2, run three AESE/AESMC rounds against the seed-
-	// derived round key V0, and return V2.D[0] — matching what the
-	// generic aes0to15 produces when it would otherwise load the same
-	// bytes from memory.
-	MOVD	8(R0), R11		// word 1 (bytes[0..7])
-	MOVD	16(R0), R12		// word 2 (len<<60 | bytes[8..14])
-	LSR	$60, R12, R2		// R2 = length
-	MOVD	$0x0fffffffffffffff, R13
-	AND	R13, R12		// strip tag from word 2
-	VMOV	R11, V2.D[0]
-	VMOV	R12, V2.D[1]
-	// Build V30 = seed_low(0) | length_high, matching aeshashbody prologue.
-	VEOR	V30.B16, V30.B16, V30.B16
-	VMOV	R2, V30.D[1]
-	// V0 = AESE(V30, aeskeysched[0..16]); AESMC
-	MOVD	$runtime·aeskeysched+0(SB), R4
-	VLD1	(R4), [V0.B16]
-	AESE	V30.B16, V0.B16
-	AESMC	V0.B16, V0.B16
-	// Three AES rounds on data XOR seed.
-	AESE	V0.B16, V2.B16
-	AESMC	V2.B16, V2.B16
-	AESE	V0.B16, V2.B16
-	AESMC	V2.B16, V2.B16
-	AESE	V0.B16, V2.B16
-	AESMC	V2.B16, V2.B16
-	VMOV	V2.D[0], R0
-	RET
-strhash_inline_wy:
-	// Non-AES fallback: spill inline bytes to local frame and CALL
-	// memhash (which dispatches to memhashFallback here).
+	// Inline-rep: spill word 1 + word 2 (tag nibble excluded by the
+	// mask below) to the 16 B local frame and CALL memhash. A register
+	// fast-path analogous to amd64's isn't correct here because
+	// aeshashbody_arm64's aes0to15 uses a bit-test chain of positional
+	// loads (VLD1 into V2.S[2], V2.H[6], V2.B[14]) whose byte layout
+	// doesn't match a contiguous pack of word 1 + word 2 for every
+	// length. Funneling through memory lets aeshashbody run the exact
+	// byte-for-byte sequence it would on a heap-rep string.
 	MOVD	8(R0), R11
 	MOVD	16(R0), R12
+	LSR	$60, R12, R2		// R2 = length
 	MOVD	R11, 0(RSP)
 	MOVD	R12, 8(RSP)
-	LSR	$60, R12, R2
 	MOVD	RSP, R0
 	MOVD	$0, R1
 	BL	runtime·memhash<ABIInternal>(SB)

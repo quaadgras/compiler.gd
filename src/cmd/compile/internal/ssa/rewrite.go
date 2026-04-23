@@ -2787,7 +2787,19 @@ func isDictArgSym(sym Sym) bool {
 // write the same value that runtime producers and staticdata.InitConst
 // compute — the invariant the word-1 cache depends on.
 func stringConstHash(s string) int64 {
-	h := int64(abi.AeshashString(s))
+	// Dispatch on target GOARCH so rodata-baked hashes match what the
+	// target's runtime aeshashbody (or Go fallback port) will compute.
+	// arm64 uses AESE+AESMC, a different round function than x86's
+	// AESENC, so it needs its own port (abi.AeshashStringARM64).
+	// Everything else (amd64/386 asm, non-AES Go port on any arch)
+	// agrees with the x86-style abi.AeshashString.
+	var h int64
+	switch buildcfg.GOARCH {
+	case "arm64":
+		h = int64(abi.AeshashStringARM64(s))
+	default:
+		h = int64(abi.AeshashString(s))
+	}
 	if h == 0 {
 		h = 1 // reserve 0 as the unsealed sentinel
 	}

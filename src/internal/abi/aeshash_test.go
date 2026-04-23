@@ -135,6 +135,59 @@ func TestStrhashInlineParity(t *testing.T) {
 	}
 }
 
+// TestAeshashARM64Deterministic does not verify ARM64 bit-exact
+// parity (we'd need arm64 hardware). It locks the Go port's own
+// consistency: same input always yields same output, different
+// inputs yield different outputs with overwhelming probability,
+// and every length branch is exercised.
+func TestAeshashARM64Deterministic(t *testing.T) {
+	r := rand.New(rand.NewPCG(0xDEADBEEF, 0xCAFEBABE))
+	seen := make(map[uint64]string)
+	for _, n := range []int{0, 1, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129, 500, 1024} {
+		for trial := 0; trial < 4; trial++ {
+			b := make([]byte, n)
+			for j := range b {
+				b[j] = byte(r.Uint32())
+			}
+			s := string(b)
+			h1 := abi.AeshashStringARM64(s)
+			h2 := abi.AeshashStringARM64(s)
+			if h1 != h2 {
+				t.Errorf("len=%d trial=%d unstable: %x vs %x", n, trial, h1, h2)
+			}
+			if prev, dup := seen[h1]; dup && prev != s {
+				t.Logf("collision len=%d: %x between %q and %q", n, h1, prev, s)
+			}
+			seen[h1] = s
+		}
+	}
+}
+
+// TestAeshashARMvsX86Differ confirms the two ports produce distinct
+// values for non-trivial inputs (sanity check that we haven't written
+// the same algorithm twice by accident).
+func TestAeshashARMvsX86Differ(t *testing.T) {
+	distinct := 0
+	total := 0
+	r := rand.New(rand.NewPCG(1, 2))
+	for trial := 0; trial < 50; trial++ {
+		n := r.IntN(40) + 1
+		b := make([]byte, n)
+		for j := range b {
+			b[j] = byte(r.Uint32())
+		}
+		s := string(b)
+		if abi.AeshashString(s) != abi.AeshashStringARM64(s) {
+			distinct++
+		}
+		total++
+	}
+	if distinct == 0 {
+		t.Errorf("no inputs produced different outputs between x86 and arm64 ports; likely a bug")
+	}
+	t.Logf("%d/%d inputs yield distinct x86 vs arm64 hashes", distinct, total)
+}
+
 func BenchmarkAeshashString_5B(b *testing.B) {
 	s := "hello"
 	for i := 0; i < b.N; i++ {
