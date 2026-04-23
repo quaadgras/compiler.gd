@@ -216,9 +216,16 @@ func TestReflectMakeFuncCallABI(t *testing.T) {
 			for i := 0; i < fnTyp.NumIn()-1; /* last one is magic type */ i++ {
 				args = append(args, genValue(t, fnTyp.In(i), r))
 			}
+			// gd: Call may reuse args's backing array for its return
+			// slice, so snapshot the Interface values before Call for
+			// post-hoc comparison.
+			want := make([]any, fnTyp.NumIn()-1)
+			for i := range want {
+				want[i] = args[i+1].Interface()
+			}
 			results := callFn.Call(args)
 			for i := range results {
-				x, y := args[i+1].Interface(), results[i].Interface()
+				x, y := want[i], results[i].Interface()
 				if reflect.DeepEqual(x, y) {
 					continue
 				}
