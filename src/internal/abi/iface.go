@@ -18,6 +18,34 @@ type ITab struct {
 	Inline uint8  // gd: dispatch mode — see ITabInline* constants
 	_      [3]byte
 	Fun    [1]uintptr // variable sized. fun[0]==0 means Type does not implement Inter.
+	// gd escape-bits: an unsafe-addressable array of uint64 follows
+	// immediately after the Fun tail, with one entry per interface
+	// method. EscMask(k) returns the k-th entry. Storage is reserved
+	// by every ITab allocator (runtime persistentalloc, compiler
+	// static emission, linker fixups) and initialised to zero, which
+	// means "every pointer arg of method k escapes" — the same
+	// pessimistic answer the compiler uses today for unknown callees.
+	// Phase D will source real values from the concrete method's
+	// escape profile.
+}
+
+// ITabEscMaskOff returns the byte offset of EscMask[k] relative to the
+// start of the ITab, given the interface's method count and the
+// target's pointer size. The masks sit immediately after the variable-
+// length Fun array.
+func ITabEscMaskOff(ptrSize, nmethods, k int) int {
+	// Before Fun: Inter + Type (2 pointers) + Hash(4) + Inline(1) +
+	// pad[3] = 2*ptrSize + 8.
+	base := 2*ptrSize + 8
+	// Fun is [nmethods]uintptr. Masks follow.
+	return base + nmethods*ptrSize + k*8
+}
+
+// ITabSize returns the total size of an ITab carrying nmethods methods
+// with the mask tail, for a target with the given pointer size.
+func ITabSize(ptrSize, nmethods int) int {
+	base := 2*ptrSize + 8
+	return base + nmethods*ptrSize + nmethods*8
 }
 
 // Values for ITab.Inline, selecting how getClosureAndRcvr stages the

@@ -141,6 +141,63 @@ func TestEscapeBitsIfaceEscape(t *testing.T) {
 	}
 }
 
+// TestEscapeBitsItabDispatch verifies Phase A.3: growing the itab to
+// carry a per-method escape-mask tail after Fun didn't break dispatch.
+// Exercises a multi-method interface with multiple concretes so both
+// the compile-time static itab and the runtime-allocated itab paths
+// through getitab + itabInit actually get hit. If the size math in
+// either the compiler (writeITab) or the runtime (persistentalloc)
+// got out of sync with the other side's understanding of the mask
+// tail, the method pointer read at call time would either segfault
+// or dispatch to a bogus address.
+func TestEscapeBitsItabDispatch(t *testing.T) {
+	type adder interface {
+		Add(int) int
+		Mul(int) int
+		Name() string
+	}
+	// Methods intentionally stored before the iface box so the
+	// compiler can't see through the dynamic type at dispatch.
+	reg := map[string]adder{}
+	reg["simple"] = &simpleImpl{base: 10}
+	reg["doubler"] = &doublerImpl{base: 5}
+	cases := []struct {
+		key      string
+		addArg   int
+		mulArg   int
+		wantAdd  int
+		wantMul  int
+		wantName string
+	}{
+		{"simple", 3, 4, 13, 40, "simple"},   // 10+3=13, 10*4=40
+		{"doubler", 2, 7, 9, 140, "doubler"}, // 5+2*2=9, 5*7*4=140
+	}
+	for _, c := range cases {
+		v := reg[c.key]
+		if got := v.Add(c.addArg); got != c.wantAdd {
+			t.Errorf("%s.Add(%d) = %d, want %d", c.key, c.addArg, got, c.wantAdd)
+		}
+		if got := v.Mul(c.mulArg); got != c.wantMul {
+			t.Errorf("%s.Mul(%d) = %d, want %d", c.key, c.mulArg, got, c.wantMul)
+		}
+		if got := v.Name(); got != c.wantName {
+			t.Errorf("%s.Name() = %q, want %q", c.key, got, c.wantName)
+		}
+	}
+}
+
+type simpleImpl struct{ base int }
+
+func (s *simpleImpl) Add(x int) int  { return s.base + x }
+func (s *simpleImpl) Mul(x int) int  { return s.base * x }
+func (s *simpleImpl) Name() string   { return "simple" }
+
+type doublerImpl struct{ base int }
+
+func (d *doublerImpl) Add(x int) int { return d.base + x*2 }
+func (d *doublerImpl) Mul(x int) int { return d.base * x * 4 }
+func (d *doublerImpl) Name() string  { return "doubler" }
+
 // TestEscapeBitsClosureLayout verifies Phase A.2: every closure carries
 // its EscMask as the second word of its struct, right after the fn
 // pointer. The mask is the fork's contract surface — Phase C call-site

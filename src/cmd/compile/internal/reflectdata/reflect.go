@@ -1079,9 +1079,11 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 
 	var delta int64
 	c = c.Field("Fun")
+	nmethods := len(entries)
 	if !completeItab {
 		// If typ doesn't implement iface, make method entries be zero.
 		c.Elem(0).WriteUintptr(0)
+		nmethods = 1 // single zero slot; mask tail still gets one uint64 below
 	} else {
 		var a rttype.ArrayCursor
 		a, delta = c.ModifyArray(len(entries))
@@ -1089,8 +1091,20 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 			a.Elem(i).WritePtrWeak(fn) // method pointer for each method
 		}
 	}
+
+	// gd escape-bits: reserve one uint64 per method slot immediately
+	// after Fun for the per-method heap-escape mask. Emitted as zeros
+	// in Phase A; Phase D will source real values from the concrete
+	// method's escape profile. Matches the runtime layout consumed by
+	// itabEscMaskPtr in src/runtime/iface.go.
+	maskOffset := rttype.ITab.Size() + delta
+	for i := 0; i < nmethods; i++ {
+		objw.UintN(lsym, int(maskOffset)+i*8, 0, 8)
+	}
+	totalSize := rttype.ITab.Size() + delta + int64(nmethods)*8
+
 	// Nothing writes static itabs, so they are read only.
-	objw.Global(lsym, int32(rttype.ITab.Size()+delta), int16(obj.DUPOK|obj.RODATA))
+	objw.Global(lsym, int32(totalSize), int16(obj.DUPOK|obj.RODATA))
 	lsym.Set(obj.AttrContentAddressable, true)
 }
 
