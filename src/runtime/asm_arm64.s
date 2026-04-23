@@ -748,21 +748,75 @@ noaes:
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
 //
-// gd string hash cache: read word 1 (cached hash) on heap-rep inputs
-// and return it; otherwise tail-call strhashFallback, which runs the
-// shared internal/abi string-hash algorithm. aeshashbody is no longer
-// used for strings — the stock arm64 asm assumed the 16 B header and
-// would read hash-or-len at offset 8 the wrong way under the fork's
-// 24 B layout.
-TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-24
+// gd fork: 24 B string header with a cached hash in word 1 for heap
+// reps and a 15 B inline rep when word 0 == nil. Heap cache hits
+// return immediately. Misses route through aeshashbody (with seed=0
+// and the fork's fixed aeskeysched) so the runtime produces the same
+// hash any other producer would. Inline-rep strings keep their bytes
+// in the header and have no cache slot, so they compute on every
+// call; the fast path below folds aeshashbody's aes0to15 sequence
+// inline to avoid the stack spill + CALL the generic path would need.
+TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$16-24
 	MOVD	(R0), R10		// R10 = word 0 (data ptr, nil for inline)
-	CBZ	R10, strhash_fallback	// inline rep — word 1 is bytes, not hash
-	MOVD	8(R0), R10		// R10 = word 1 (cached hash)
-	CBZ	R10, strhash_fallback	// heap, but not yet sealed
-	MOVD	R10, R0
+	CBZ	R10, strhash_inline
+	MOVD	8(R0), R11		// R11 = word 1 (cached hash)
+	CBZ	R11, strhash_heap_unsealed
+	MOVD	R11, R0
 	RET
-strhash_fallback:
-	B	runtime·strhashFallback<ABIInternal>(SB)
+strhash_heap_unsealed:
+	// Heap cache miss: memhash(data=word0, seed=0, size=word2 & lenMask).
+	MOVD	16(R0), R12		// word 2 (len|tag)
+	MOVD	$0x0fffffffffffffff, R13
+	AND	R13, R12
+	MOVD	R10, R0
+	MOVD	$0, R1
+	MOVD	R12, R2
+	BL	runtime·memhash<ABIInternal>(SB)
+	RET
+strhash_inline:
+	MOVB	runtime·useAeshash(SB), R10
+	CBZ	R10, strhash_inline_wy
+	// Fast path: fold aes0to15 inline. Pack word 1 and tag-stripped
+	// word 2 into V2, run three AESE/AESMC rounds against the seed-
+	// derived round key V0, and return V2.D[0] — matching what the
+	// generic aes0to15 produces when it would otherwise load the same
+	// bytes from memory.
+	MOVD	8(R0), R11		// word 1 (bytes[0..7])
+	MOVD	16(R0), R12		// word 2 (len<<60 | bytes[8..14])
+	LSR	$60, R12, R2		// R2 = length
+	MOVD	$0x0fffffffffffffff, R13
+	AND	R13, R12		// strip tag from word 2
+	VMOV	R11, V2.D[0]
+	VMOV	R12, V2.D[1]
+	// Build V30 = seed_low(0) | length_high, matching aeshashbody prologue.
+	VEOR	V30.B16, V30.B16, V30.B16
+	VMOV	R2, V30.D[1]
+	// V0 = AESE(V30, aeskeysched[0..16]); AESMC
+	MOVD	$runtime·aeskeysched+0(SB), R4
+	VLD1	(R4), [V0.B16]
+	AESE	V30.B16, V0.B16
+	AESMC	V0.B16, V0.B16
+	// Three AES rounds on data XOR seed.
+	AESE	V0.B16, V2.B16
+	AESMC	V2.B16, V2.B16
+	AESE	V0.B16, V2.B16
+	AESMC	V2.B16, V2.B16
+	AESE	V0.B16, V2.B16
+	AESMC	V2.B16, V2.B16
+	VMOV	V2.D[0], R0
+	RET
+strhash_inline_wy:
+	// Non-AES fallback: spill inline bytes to local frame and CALL
+	// memhash (which dispatches to memhashFallback here).
+	MOVD	8(R0), R11
+	MOVD	16(R0), R12
+	MOVD	R11, 0(RSP)
+	MOVD	R12, 8(RSP)
+	LSR	$60, R12, R2
+	MOVD	RSP, R0
+	MOVD	$0, R1
+	BL	runtime·memhash<ABIInternal>(SB)
+	RET
 
 // R0: data
 // R1: seed data
