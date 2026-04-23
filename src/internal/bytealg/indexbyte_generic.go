@@ -10,7 +10,7 @@
 // because their asm predates the fork's 24-byte string ABI / inline
 // rep. See indexbyte_native.go for the rationale.
 
-//go:build !386 && (!amd64 || plan9) && !arm && !mips && !mipsle
+//go:build !386 && (!amd64 || plan9) && !arm && !arm64 && !mips && !mipsle
 
 package bytealg
 

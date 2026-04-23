@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// gd SSO: non-amd64 64-bit arches (arm64, loong64, mips64{,le},
-// ppc64{,le}, riscv64, s390x) are dropped from the native list — their
-// CountString asm uses the stock 16-byte string ABI and has no
-// inline-rep prolog like amd64's. They fall back to the generic Go
-// implementation in count_generic.go, which is correct under the
-// fork. 32-bit arm stays on native because 32-bit strings have no
-// inline rep (12 B header).
+// gd SSO: arm64's CountString asm has been rewritten with a 24 B
+// string prolog (count_arm64.s). The other 64-bit non-amd64 arches
+// (loong64, mips64{,le}, ppc64{,le}, riscv64, s390x) still use stock
+// 16 B asm and fall back to the generic Go implementation in
+// count_generic.go; port them as needed.
 
-//go:build amd64 || arm
+//go:build amd64 || arm || arm64
 
 package bytealg
 

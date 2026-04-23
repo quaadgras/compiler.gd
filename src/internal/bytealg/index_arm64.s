@@ -5,30 +5,60 @@
 #include "go_asm.h"
 #include "textflag.h"
 
+// gd small-string optimization: IndexString takes two 24 B string
+// headers. Under ABIInternal the fork lays them out as
+//   R0=a.ptr R1=a.hash R2=a.word2  R3=b.ptr R4=b.hash R5=b.word2
+// whereas the stock body expects (R0=a.ptr, R1=a.len, R2=b.ptr,
+// R3=b.len). The $32 local frame holds two 16 B spill buffers: for
+// an inline-rep input we copy word1/word2 there and point the body
+// at them; for heap rep we just decode the length. Both paths
+// converge on indexStringBody<> via BL so the epilogue unwinds the
+// frame.
+//
+// Index takes two []byte; its stock 6-reg slice ABI already lands
+// bytes the right way — move R3→R2, R4→R3 and tail-call the body
+// since Index itself has no frame.
+
 // func Index(a, b []byte) int
-// input:
-//   R0: a ptr (haystack)
-//   R1: a len (haystack)
-//   R2: a cap (haystack) (unused)
-//   R3: b ptr (needle)
-//   R4: b len (needle) (2 <= len <= 32)
-//   R5: b cap (needle) (unused)
-// return:
-//   R0: result
 TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVD	R3, R2
 	MOVD	R4, R3
-	B	·IndexString<ABIInternal>(SB)
+	B	indexStringBody<>(SB)
 
 // func IndexString(a, b string) int
-// input:
-//   R0: a ptr (haystack)
-//   R1: a len (haystack)
-//   R2: b ptr (needle)
-//   R3: b len (needle) (2 <= len <= 32)
-// return:
-//   R0: result
-TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$32-56
+	// Decode a into R0=ptr, R1=len. Inline spills to 0..15(RSP).
+	CBZ	R0, is_a_inline
+	AND	$0x0fffffffffffffff, R2, R1
+	B	is_a_done
+is_a_inline:
+	MOVD	R1, 0(RSP)
+	MOVD	R2, 8(RSP)
+	MOVD	RSP, R0
+	LSR	$60, R2, R1
+is_a_done:
+
+	// Decode b into R2=ptr, R3=len. Inline spills to 16..31(RSP).
+	CBZ	R3, is_b_inline
+	MOVD	R3, R2
+	AND	$0x0fffffffffffffff, R5, R3
+	B	is_b_done
+is_b_inline:
+	MOVD	R4, 16(RSP)
+	MOVD	R5, 24(RSP)
+	ADD	$16, RSP, R2
+	LSR	$60, R5, R3
+is_b_done:
+
+	BL	indexStringBody<>(SB)
+	RET
+
+// indexStringBody is the shared Rabin-Karp-style substring search.
+// Entry: R0=a.ptr (haystack), R1=a.len, R2=b.ptr (needle), R3=b.len
+// (2 <= b.len <= 32). Return: R0 = index or -1. NOFRAME — either
+// tail-called from a no-frame wrapper (Index) or BL'd from a framed
+// wrapper (IndexString) that runs its own epilogue.
+TEXT indexStringBody<>(SB),NOSPLIT|NOFRAME,$0
 	// main idea is to load 'sep' into separate register(s)
 	// to avoid repeatedly re-load it again and again
 	// for sebsequent substring comparisons

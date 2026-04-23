@@ -5,26 +5,39 @@
 #include "go_asm.h"
 #include "textflag.h"
 
+// gd small-string optimization: CountString takes a 24 B string
+// header — (R0=s.ptr, R1=s.hash, R2=s.word2, R3=c). Inline-rep
+// inputs spill word 1+2 to the function's 16 B local frame and
+// point at it; heap inputs decode the length from word 2 low 60
+// bits. Both paths reach countBody<>(R0=ptr, R1=len, R2=c).
+
 // func Count(b []byte, c byte) int
-// input:
-//   R0: b ptr
-//   R1: b len
-//   R2: b cap
-//   R3: c byte to search
-// return:
-//   R0: result
 TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
 	MOVD	R3, R2
-	B	·CountString<ABIInternal>(SB)
+	B	countBody<>(SB)
 
 // func CountString(s string, c byte) int
-// input:
-//   R0: s ptr
-//   R1: s len
-//   R2: c byte to search (due to ABIInternal upper bits can contain junk)
-// return:
-//   R0: result
-TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$0-32
+TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$16-40
+	CBZ	R0, cs_inline
+	// Heap rep: R0 already the data pointer; len in low 60 bits of R2.
+	AND	$0x0fffffffffffffff, R2, R1
+	MOVD	R3, R2
+	BL	countBody<>(SB)
+	RET
+cs_inline:
+	// Inline rep: bytes packed in R1 (bytes[0:8]) + low 7 of R2 (bytes[8:14]).
+	MOVD	R1, 0(RSP)
+	MOVD	R2, 8(RSP)
+	MOVD	RSP, R0
+	LSR	$60, R2, R1
+	MOVD	R3, R2
+	BL	countBody<>(SB)
+	RET
+
+// countBody is the shared byte-count loop. Entry: R0=ptr, R1=len,
+// R2=c. Return: R0=count. NOFRAME; callers either tail-call it (B)
+// from a no-frame function or BL + RET with their own epilogue.
+TEXT countBody<>(SB),NOSPLIT|NOFRAME,$0
 	// R11 = count of byte to search
 	MOVD	$0, R11
 	// short path to handle 0-byte case
