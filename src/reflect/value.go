@@ -818,6 +818,35 @@ func (v Value) call(op string, in []Value) []Value {
 				ret[i] = v
 				continue
 			}
+			// gd: pointer-free types that fit in the 16 B inline slot
+			// (int, int64, small structs, complex128) ride inside the
+			// returned Value rather than heap-allocating an 8–16 B
+			// backing buffer. Same "materialise on demand" contract as
+			// flagInline values produced by unpackEface.
+			if tv.IsInlineIface() {
+				var v Value
+				v.typ_ = tv
+				base := unsafe.Pointer(&v.inline)
+				for _, st := range steps {
+					switch st.kind {
+					case abiStepIntReg:
+						offset := add(base, st.offset, "precomputed value offset")
+						intFromReg(&regArgs, st.ireg, st.size, offset)
+					case abiStepPointer:
+						panic("pointer in inline (pointer-free) return")
+					case abiStepFloatReg:
+						offset := add(base, st.offset, "precomputed value offset")
+						floatFromReg(&regArgs, st.freg, st.size, offset)
+					case abiStepStack:
+						panic("register-based return value has stack component")
+					default:
+						panic("unknown ABI part kind")
+					}
+				}
+				v.flag = flagIndir | flagInline | flag(tv.Kind())
+				ret[i] = v
+				continue
+			}
 			//
 			// TODO(mknyszek): We make a new allocation for each register-allocated
 			// value, but previously we could always point into the heap-allocated
