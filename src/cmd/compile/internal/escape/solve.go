@@ -124,7 +124,17 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 						logopt.LogOpt(l.n.Pos(), "escape", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", l.n), explanation)
 					}
 				}
-				newAttrs |= attrEscapes | attrPersists | attrMutates | attrCalls
+				// gd escape-bits: when the root is the candidate-only
+				// location (flow through a dynamic callee), propagate
+				// attrCandidateEscape instead of attrEscapes. The
+				// value stays stack-allocatable; walk will wrap the
+				// arg at the indirect call site to materialize it on
+				// the heap iff the runtime mask says so.
+				if root.hasAttr(attrCandidateEscape) && !root.hasAttr(attrEscapes) {
+					newAttrs |= attrCandidateEscape | attrPersists | attrMutates | attrCalls
+				} else {
+					newAttrs |= attrEscapes | attrPersists | attrMutates | attrCalls
+				}
 			} else
 			// If l's address flows to a persistent location, then l needs
 			// to persist too.
@@ -282,6 +292,14 @@ func (b *batch) explainLoc(l *location) string {
 func (b *batch) outlives(l, other *location) bool {
 	// The heap outlives everything.
 	if l.hasAttr(attrEscapes) {
+		return true
+	}
+
+	// candidateLoc also outlives the callee's frame — values flowing
+	// there either materialize to heap or stay stack-bound at the
+	// runtime wrap. Treat as outliving so the solver propagates
+	// attrCandidateEscape in sync.
+	if l.hasAttr(attrCandidateEscape) {
 		return true
 	}
 

@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -59,4 +60,32 @@ func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *abi.Type) 
 		return materializeToHeap(src, typ)
 	}
 	return src
+}
+
+// maybeEscapeClosureArg reads the escape-bit mask from a closure's
+// second word (offset PtrSize from fnPtr) and delegates to
+// maybeEscapeArg. Walk emits one call per candidate arg at an
+// indirect closure call site; f is the closure value (cast to
+// unsafe.Pointer so the IR side stays type-agnostic).
+//
+//go:nosplit
+func maybeEscapeClosureArg(f unsafe.Pointer, argIdx int, src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
+	mask := *(*uint64)(unsafe.Add(f, goarch.PtrSize))
+	return maybeEscapeArg(mask, argIdx, src, typ)
+}
+
+// maybeEscapeIfaceArg reads the escape-bit mask from the itab's
+// per-method tail and delegates to maybeEscapeArg. Called at
+// interface-method dispatch sites when the selected method's
+// callee-side escape profile says an arg may stay on the stack.
+// itabPtr must be a non-nil itab pointer; callers are assumed to
+// have done the nil check earlier in the dispatch sequence.
+//
+//go:nosplit
+func maybeEscapeIfaceArg(itabPtr unsafe.Pointer, methodIdx, argIdx int, src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
+	tab := (*itab)(itabPtr)
+	ni := len(tab.Inter.Methods)
+	maskBase := unsafe.Add(unsafe.Pointer(&tab.Fun[0]), uintptr(ni)*goarch.PtrSize)
+	mask := *(*uint64)(unsafe.Add(maskBase, uintptr(methodIdx)*8))
+	return maybeEscapeArg(mask, argIdx, src, typ)
 }

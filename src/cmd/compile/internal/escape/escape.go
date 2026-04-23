@@ -93,10 +93,11 @@ type batch struct {
 	closures        []closure
 	reassignOracles map[*ir.Func]*ir.ReassignOracle
 
-	heapLoc    location
-	mutatorLoc location
-	calleeLoc  location
-	blankLoc   location
+	heapLoc      location
+	mutatorLoc   location
+	calleeLoc    location
+	blankLoc     location
+	candidateLoc location
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,
@@ -140,6 +141,13 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.mutatorLoc.attrs = attrMutates
 	b.calleeLoc.attrs = attrCalls
+	// candidateLoc plays the role of heapLoc for values flowing into
+	// dynamic-callee edges, but with attrCandidateEscape in place of
+	// attrEscapes. At finalize, solely-candidate values become
+	// EscCandidate rather than EscHeap; walk then inserts the
+	// runtime.maybeEscape* wrap at the indirect call site. See
+	// doc/gd/escape-bits.md.
+	b.candidateLoc.attrs = attrCandidateEscape | attrPersists | attrMutates | attrCalls
 	b.reassignOracles = reassignOracles
 
 	// Construct data-flow graph from syntax trees.
@@ -341,6 +349,12 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 			}
 			n.SetEsc(ir.EscHeap)
+		} else if loc.hasAttr(attrCandidateEscape) {
+			// gd escape-bits: sole escape path is through a dynamic
+			// callee. Stay stack-allocated; walk emits the
+			// runtime.maybeEscape* wrap at the indirect call site so
+			// materialization is conditional on the callee's mask.
+			n.SetEsc(ir.EscCandidate)
 		} else {
 			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
 				if n.Op() == ir.OAPPEND {

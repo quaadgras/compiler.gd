@@ -101,6 +101,12 @@ func convT(typ *byte, elem *any) unsafe.Pointer
 // Same as convT, for types with no pointers in them.
 func convTnoptr(typ *byte, elem *any) unsafe.Pointer
 
+// gd escape-bits helpers. See doc/gd/escape-bits.md.
+func materializeToHeap(src unsafe.Pointer, typ *byte) unsafe.Pointer
+func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
+func maybeEscapeClosureArg(f unsafe.Pointer, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
+func maybeEscapeIfaceArg(itabPtr unsafe.Pointer, methodIdx int, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
+
 // Specialized versions of convT for specific types.
 // These functions take concrete types in the runtime. But they may
 // be used for a wider range of types, which have the same memory

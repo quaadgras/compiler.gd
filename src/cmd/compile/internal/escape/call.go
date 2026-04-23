@@ -366,7 +366,18 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 // callee's results flows. fn is the statically-known callee function,
 // if any.
 func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
-	// If this is a dynamic call, we can't rely on param.Note.
+	// gd escape-bits: the analyzer infrastructure for routing
+	// dynamic-callee flow through a candidateHole is landed (see
+	// doc/gd/escape-bits.md Phase D), but activation is gated behind
+	// a remaining piece of work — the runtime wrap at indirect call
+	// sites reads its mask word at offset PtrSize of the func value,
+	// which only holds for genuine closure structs (with captures).
+	// Captureless function literals short-circuit to a bare function
+	// symbol, so reading offset PtrSize there is garbage. Turning
+	// this on for real needs every func-typed value to carry an M
+	// word — a linker/ABI change we're not taking in this commit.
+	// For now, keep the original heapHole() path so correctness
+	// holds and the two *NonEscape tests stay FAIL-until-landed.
 	if fn == nil {
 		return e.heapHole()
 	}

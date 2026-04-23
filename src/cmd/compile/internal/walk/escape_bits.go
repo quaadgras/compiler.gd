@@ -5,7 +5,11 @@
 package walk
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
+	"cmd/compile/internal/reflectdata"
+	"cmd/compile/internal/typecheck"
+	"cmd/compile/internal/types"
 )
 
 // wrapEscapeCandidateArgs rewrites each pointer arg of n (a closure
@@ -14,32 +18,39 @@ import (
 // passed as a stack pointer (when the callee's escape-mask bit is
 // clear) or copied to the heap first (when the bit is set).
 //
-// Phase C.2 skeleton: the function recognises candidate args and
-// returns without rewriting them. Phase D will land the full IR
-// transformation once escape analysis starts flagging args as
-// EscCandidate. Keeping the dispatch point here so Phase D is a
-// focused change — body-only, no new call sites.
+// Phase D of doc/gd/escape-bits.md.
 //
-// See doc/gd/escape-bits.md.
+// The transformation, for each candidate pointer arg at index i:
+//
+//   orig:  cl(arg_0, ..., arg_i, ...)
+//   rewr:  tmpFn := cl
+//          arg_i = (*T)(runtime.maybeEscapeClosureArg(
+//                     unsafe.Pointer(tmpFn), i,
+//                     unsafe.Pointer(arg_i), reflect_type_ptr_of_T))
+//          tmpFn(..., arg_i, ...)
+//
+// For OCALLINTER the helper is runtime.maybeEscapeIfaceArg, taking
+// the itab pointer and the method index so it can look up the right
+// slot in the itab's mask tail.
 func wrapEscapeCandidateArgs(n *ir.CallExpr, init *ir.Nodes) {
 	if n == nil {
 		return
 	}
+	var isIface bool
 	switch n.Op() {
 	case ir.OCALLFUNC:
 		if ir.StaticCalleeName(n.Fun) != nil {
-			// Direct call; escape analysis used the callee's
-			// per-param escape tag directly — nothing to wrap.
+			// Direct call; escape analysis used the callee's per-param
+			// escape tag directly — nothing to wrap.
 			return
 		}
 	case ir.OCALLINTER:
-		// Always indirect.
+		isIface = true
 	default:
 		return
 	}
 
-	// Scan for any candidate arg. When none present, this is the
-	// common case and we exit immediately without cost.
+	// Bail cheaply when no arg is a candidate — the hot path.
 	hasCandidate := false
 	for _, arg := range n.Args {
 		if arg.Esc() == ir.EscCandidate {
@@ -51,12 +62,102 @@ func wrapEscapeCandidateArgs(n *ir.CallExpr, init *ir.Nodes) {
 		return
 	}
 
-	// TODO(gd Phase D): for each candidate arg i, synthesise the IR
-	// that loads the mask from either the closure header (offset
-	// PtrSize from &closure) or the itab's mask tail (offset
-	// abi.ITabEscMaskOff(PtrSize, nmethods, methodIdx)) and wraps the
-	// arg in a runtime.maybeEscapeArg call. For now this branch is
-	// unreachable because no escape-analysis edge produces
-	// EscCandidate yet — Phase D flips that in cmd/compile/internal/
-	// escape/call.go tagHole's fn==nil path.
+	if isIface {
+		wrapIfaceCallCandidates(n, init)
+	} else {
+		wrapClosureCallCandidates(n, init)
+	}
+}
+
+func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
+	pos := n.Pos()
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+
+	// Cache the closure value so the per-arg wraps all read the same
+	// mask word (and so the closure expression is evaluated only
+	// once).
+	fnCached := cheapExpr(typecheck.Conv(n.Fun, unsafePtr), init)
+
+	for i, arg := range n.Args {
+		if arg.Esc() != ir.EscCandidate {
+			continue
+		}
+		argType := arg.Type()
+		if !argType.IsPtr() && !argType.IsUnsafePtr() {
+			// Escape-bit machinery only applies to pointer args. The
+			// analyzer shouldn't tag non-pointers as EscCandidate;
+			// if it does, fall back to heap — treat as EscHeap and
+			// let the rest of walk handle it.
+			arg.SetEsc(ir.EscHeap)
+			continue
+		}
+		// Pointee type descriptor (*abi.Type).
+		elemType := argType.Elem()
+		elemTypePtr := reflectdata.TypePtrAt(pos, elemType)
+
+		// runtime.maybeEscapeClosureArg(fnCached, i, unsafe.Pointer(arg), elemTypePtr)
+		wrapCall := mkcall("maybeEscapeClosureArg", unsafePtr, init,
+			fnCached,
+			ir.NewInt(pos, int64(i)),
+			typecheck.ConvNop(arg, unsafePtr),
+			elemTypePtr,
+		)
+		// Convert the helper's unsafe.Pointer result back to the arg's
+		// original pointer type.
+		n.Args[i] = typecheck.ConvNop(wrapCall, argType)
+	}
+
+	// Point the call at the cached closure value instead of the
+	// original expression so both Fun and Args see the same
+	// materialisation.
+	n.Fun = typecheck.ConvNop(fnCached, n.Fun.Type())
+}
+
+func wrapIfaceCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
+	pos := n.Pos()
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+
+	// n.Fun is a SelectorExpr on the iface value. Grab the itab
+	// pointer from the iface header.
+	sel, ok := n.Fun.(*ir.SelectorExpr)
+	if !ok {
+		base.FatalfAt(pos, "OCALLINTER with non-SelectorExpr Fun: %+v", n.Fun)
+	}
+
+	ifaceVal := cheapExpr(sel.X, init)
+	// itab = iface.Tab — OITAB on the iface value.
+	itabVal := ir.NewUnaryExpr(pos, ir.OITAB, ifaceVal)
+	itabVal.SetType(unsafePtr)
+	itabVal.SetTypecheck(1)
+	itabCached := cheapExpr(itabVal, init)
+
+	// Method index = sel.Offset() / PtrSize (the Fun slot index).
+	methodIdx := sel.Offset() / int64(types.PtrSize)
+
+	for i, arg := range n.Args {
+		if arg.Esc() != ir.EscCandidate {
+			continue
+		}
+		argType := arg.Type()
+		if !argType.IsPtr() && !argType.IsUnsafePtr() {
+			arg.SetEsc(ir.EscHeap)
+			continue
+		}
+		elemType := argType.Elem()
+		elemTypePtr := reflectdata.TypePtrAt(pos, elemType)
+
+		// runtime.maybeEscapeIfaceArg(itab, methodIdx, i, unsafe.Pointer(arg), elemTypePtr)
+		wrapCall := mkcall("maybeEscapeIfaceArg", unsafePtr, init,
+			itabCached,
+			ir.NewInt(pos, methodIdx),
+			ir.NewInt(pos, int64(i)),
+			typecheck.ConvNop(arg, unsafePtr),
+			elemTypePtr,
+		)
+		n.Args[i] = typecheck.ConvNop(wrapCall, argType)
+	}
+
+	// Replace sel.X with the cached iface value so repeated reads
+	// (itab load, receiver load) share the same evaluation.
+	sel.X = ifaceVal
 }

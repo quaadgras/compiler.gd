@@ -106,6 +106,18 @@ const (
 	// location may be called without tracking their results. This is
 	// used to better optimize indirect closure calls.
 	attrCalls
+
+	// attrCandidateEscape indicates the value flows into an indirect
+	// call whose callee's per-arg escape mask will decide at runtime
+	// whether the value actually needs heap storage. At allocation
+	// time, such values stay on the stack; walk wraps them with a
+	// runtime.maybeEscape* helper that materialises to the heap only
+	// when the mask bit is set. When a value also reaches a normal
+	// attrEscapes location, attrEscapes wins and the value is
+	// unconditionally heap-allocated — attrCandidateEscape is only
+	// honoured when it's the sole escape path. See
+	// doc/gd/escape-bits.md.
+	attrCandidateEscape
 )
 
 func (l *location) hasAttr(attr locAttr) bool { return l.attrs&attr != 0 }
@@ -229,10 +241,11 @@ func (b *batch) flow(k hole, src *location) {
 	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
 }
 
-func (b *batch) heapHole() hole    { return b.heapLoc.asHole() }
-func (b *batch) mutatorHole() hole { return b.mutatorLoc.asHole() }
-func (b *batch) calleeHole() hole  { return b.calleeLoc.asHole() }
-func (b *batch) discardHole() hole { return b.blankLoc.asHole() }
+func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
+func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
+func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
+func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }
+func (b *batch) candidateHole() hole { return b.candidateLoc.asHole() }
 
 func (b *batch) oldLoc(n *ir.Name) *location {
 	if n.Canonical().Opt == nil {
