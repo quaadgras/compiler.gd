@@ -220,7 +220,7 @@ func dataWord(conv *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// n is a readonly global; use it directly.
 		diagnose("using global for interface value", n)
 		value = n
-	case conv.Esc() == ir.EscNone && fromType.Size() <= 1024:
+	case ir.StackAllocatable(conv.Esc()) && fromType.Size() <= 1024:
 		// n does not escape. Use a stack temporary initialized to n.
 		diagnose("using stack temporary for interface value", n)
 		value = typecheck.TempAt(base.Pos, ir.CurFunc, fromType)
@@ -283,7 +283,7 @@ func dataWord(conv *ir.ConvExpr, init *ir.Nodes) ir.Node {
 // walkBytesRunesToString walks an OBYTES2STR or ORUNES2STR node.
 func walkBytesRunesToString(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	a := typecheck.NodNil()
-	if n.Esc() == ir.EscNone {
+	if ir.StackAllocatable(n.Esc()) {
 		// Create temporary buffer for string on stack.
 		a = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
 	}
@@ -314,7 +314,7 @@ func walkBytesToStringTemp(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 // walkRuneToString walks an ORUNESTR node.
 func walkRuneToString(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	a := typecheck.NodNil()
-	if n.Esc() == ir.EscNone {
+	if ir.StackAllocatable(n.Esc()) {
 		a = stackBufAddr(4, types.Types[types.TUINT8])
 	}
 	// intstring(*[4]byte, rune)
@@ -335,7 +335,7 @@ func walkStringToBytes(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// Allocate a [n]byte of the right size.
 		t := types.NewArray(types.Types[types.TUINT8], int64(len(sc)))
 		var a ir.Node
-		if n.Esc() == ir.EscNone && len(sc) <= int(ir.MaxImplicitStackVarSize) {
+		if ir.StackAllocatable(n.Esc()) && len(sc) <= int(ir.MaxImplicitStackVarSize) {
 			a = stackBufAddr(t.NumElem(), t.Elem())
 		} else {
 			types.CalcSize(t)
@@ -363,7 +363,7 @@ func walkStringToBytes(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	}
 
 	a := typecheck.NodNil()
-	if n.Esc() == ir.EscNone {
+	if ir.StackAllocatable(n.Esc()) {
 		// Create temporary buffer for slice on stack.
 		a = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
 	}
@@ -387,7 +387,7 @@ func walkStringToBytesTemp(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 // walkStringToRunes walks an OSTR2RUNES node.
 func walkStringToRunes(n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	a := typecheck.NodNil()
-	if n.Esc() == ir.EscNone {
+	if ir.StackAllocatable(n.Esc()) {
 		// Create temporary buffer for slice on stack.
 		a = stackBufAddr(tmpstringbufsize, types.Types[types.TINT32])
 	}

@@ -451,7 +451,7 @@ func orderMakeSliceCopy(s []ir.Node) {
 	}
 
 	mk := as.Y.(*ir.MakeExpr)
-	if mk.Esc() == ir.EscNone || mk.Len == nil || mk.Cap != nil {
+	if ir.StackAllocatable(mk.Esc()) || mk.Len == nil || mk.Cap != nil {
 		return
 	}
 	mk.SetOp(ir.OMAKESLICECOPY)

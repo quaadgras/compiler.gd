@@ -353,7 +353,7 @@ func slicelit(ctxt initContext, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes)
 			panic("dotdotdot base type does not match order's assigned type")
 		}
 		a = initStackTemp(init, x, vstat)
-	} else if n.Esc() == ir.EscNone {
+	} else if ir.StackAllocatable(n.Esc()) {
 		a = initStackTemp(init, typecheck.TempAt(base.Pos, ir.CurFunc, t), vstat)
 	} else {
 		a = ir.NewUnaryExpr(base.Pos, ir.ONEW, ir.TypeNode(t))

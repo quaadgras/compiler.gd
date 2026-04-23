@@ -178,6 +178,31 @@ func TestComputeEscMask_BitZeroReserved(t *testing.T) {
 	}
 }
 
+func TestStackAllocatable(t *testing.T) {
+	// Locks the contract Phase C relies on: both EscNone and the new
+	// EscCandidate pick stack allocation at emission time. EscHeap and
+	// EscUnknown force heap. EscNever is a separate "never escapes"
+	// marker used for compiler-known-safe objects; it's grouped with
+	// stack-allocatable because the underlying object lives in a fixed
+	// spot (rodata or statically-allocated).
+	cases := []struct {
+		esc  uint16
+		want bool
+		name string
+	}{
+		{ir.EscUnknown, false, "EscUnknown"},
+		{ir.EscNone, true, "EscNone"},
+		{ir.EscHeap, false, "EscHeap"},
+		{ir.EscNever, false, "EscNever"},
+		{ir.EscCandidate, true, "EscCandidate"},
+	}
+	for _, c := range cases {
+		if got := ir.StackAllocatable(c.esc); got != c.want {
+			t.Errorf("StackAllocatable(%s=%d) = %v, want %v", c.name, c.esc, got, c.want)
+		}
+	}
+}
+
 func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
 	// With 63 heap-escaping params we fill bits 1..63. The 64th and
 	// beyond are dropped — callers treat unset bits as "maybe

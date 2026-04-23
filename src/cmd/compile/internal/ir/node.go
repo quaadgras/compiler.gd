@@ -568,8 +568,23 @@ func OuterValue(n Node) Node {
 }
 
 const (
-	EscUnknown = iota
-	EscNone    // Does not escape to heap, result, or parameters.
-	EscHeap    // Reachable from the heap
-	EscNever   // By construction will not escape.
+	EscUnknown   = iota
+	EscNone      // Does not escape to heap, result, or parameters.
+	EscHeap      // Reachable from the heap
+	EscNever     // By construction will not escape.
+	EscCandidate // gd escape-bits: stack-alloc at emission; the node
+	// flows into an indirect call whose callee's EscMask bit may
+	// force a runtime materialize-to-heap. Allocation sites treat
+	// this identically to EscNone (stack); indirect-call sites
+	// recognise it and emit the bit-check wrap. See
+	// doc/gd/escape-bits.md.
 )
+
+// StackAllocatable reports whether an escape state permits stack
+// allocation at the point of emission. Used by walk to pick between
+// initStackTemp and runtime.newobject at composite-literal and
+// conversion sites. EscNone and the gd escape-bits EscCandidate both
+// live on the stack; only EscHeap and EscUnknown force the heap.
+func StackAllocatable(esc uint16) bool {
+	return esc == EscNone || esc == EscCandidate
+}
