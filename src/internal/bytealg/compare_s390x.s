@@ -24,20 +24,11 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 #endif
 	BR	cmpbody<>(SB)
 
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
-#ifndef GOEXPERIMENT_regabiargs
-	MOVD	a_base+0(FP), R2
-	MOVD	a_len+8(FP), R3
-	MOVD	b_base+16(FP), R4
-	MOVD	b_len+24(FP), R5
-	LA	ret+32(FP), R6
-#endif
-	// R2 = a_base
-	// R3 = a_len
-	// R4 = b_base
-	// R5 = b_len
-
-	BR	cmpbody<>(SB)
+// gd: stock cmpstring asm assumed a 16 B string ABI; the fork's
+// 24 B header breaks every per-arch version. Redirect to the Go
+// fallback, which lowers len(s) / s[i] through tag-aware helpers.
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+	BR	runtime·cmpstringFallback<ABIInternal>(SB)
 
 // input:
 //   R2 = a

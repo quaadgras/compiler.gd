@@ -747,12 +747,21 @@ noaes:
 	B	runtime·memhashFallback<ABIInternal>(SB)
 
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
+//
+// gd string hash cache: read word 1 (cached hash) on heap-rep inputs
+// and return it; otherwise tail-call strhashFallback, which runs the
+// shared internal/abi string-hash algorithm. aeshashbody is no longer
+// used for strings — the stock arm64 asm assumed the 16 B header and
+// would read hash-or-len at offset 8 the wrong way under the fork's
+// 24 B layout.
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-24
-	MOVB	runtime·useAeshash(SB), R10
-	CBZ	R10, noaes
-	LDP	(R0), (R0, R2)	// string data / length
-	B	aeshashbody<>(SB)
-noaes:
+	MOVD	(R0), R10		// R10 = word 0 (data ptr, nil for inline)
+	CBZ	R10, strhash_fallback	// inline rep — word 1 is bytes, not hash
+	MOVD	8(R0), R10		// R10 = word 1 (cached hash)
+	CBZ	R10, strhash_fallback	// heap, but not yet sealed
+	MOVD	R10, R0
+	RET
+strhash_fallback:
 	B	runtime·strhashFallback<ABIInternal>(SB)
 
 // R0: data

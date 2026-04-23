@@ -16,12 +16,16 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	MOVD	R4, R3
 	B	cmpbody<>(SB)
 
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
-	// R0 = a_base
-	// R1 = a_len
-	// R2 = b_base
-	// R3 = b_len
-	B	cmpbody<>(SB)
+// gd: under the fork's 24 B string layout, args come in as
+//   R0=a.ptr R1=a.hash R2=a.word2  R3=b.ptr R4=b.hash R5=b.word2
+// — the stock asm, which expected (a_base, a_len, b_base, b_len) in
+// R0..R3, would misread every field. Tail-call the Go fallback; its
+// generic loop lowers len(s) / s[i] through tag-aware helpers so
+// heap, inline, and mixed-rep inputs all work correctly. Per-arch
+// asm can be reinstated later with a 24 B prolog if profiling
+// warrants; comparison is rarely hot outside of sort.
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+	B	runtime·cmpstringFallback<ABIInternal>(SB)
 
 // On entry:
 // R0 points to the start of a

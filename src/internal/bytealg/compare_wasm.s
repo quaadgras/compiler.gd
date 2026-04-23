@@ -15,15 +15,11 @@ TEXT ·Compare(SB), NOSPLIT, $0-56
 	I64Store ret+48(FP)
 	RET
 
-TEXT runtime·cmpstring(SB), NOSPLIT, $0-40
-	Get SP
-	I64Load a_base+0(FP)
-	I64Load a_len+8(FP)
-	I64Load b_base+16(FP)
-	I64Load b_len+24(FP)
-	Call cmpbody<>(SB)
-	I64Store ret+32(FP)
-	RET
+// gd: stock cmpstring asm assumes a 16 B string ABI; redirect to
+// the Go fallback, which handles the fork's 24 B / inline layouts
+// via tag-aware len/index helpers.
+TEXT runtime·cmpstring(SB), NOSPLIT, $0-56
+	JMP runtime·cmpstringFallback(SB)
 
 // params: a, alen, b, blen
 // ret: -1/0/1

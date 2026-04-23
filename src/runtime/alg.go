@@ -120,6 +120,36 @@ func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	return uintptr(abi.StringHashBytes(unsafe.Slice((*byte)(x.bytes()), n)))
 }
 
+// cmpstringFallback is the Go implementation of string comparison used
+// by non-amd64 arches whose per-arch cmpstring asm still reads the
+// stock 16 B string header (arm64 and friends). len(a) / a[i] lower
+// to tag-aware helpers under the fork, so the generic byte loop is
+// correct for heap, inline, and mixed representations.
+//
+//go:nosplit
+func cmpstringFallback(a, b string) int {
+	l := len(a)
+	if len(b) < l {
+		l = len(b)
+	}
+	for i := 0; i < l; i++ {
+		c1, c2 := a[i], b[i]
+		if c1 < c2 {
+			return -1
+		}
+		if c1 > c2 {
+			return +1
+		}
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return +1
+	}
+	return 0
+}
+
 // NOTE: Because NaN != NaN, a map can contain any
 // number of (mostly useless) entries keyed with NaNs.
 // To avoid long hash chains, we assign a random number

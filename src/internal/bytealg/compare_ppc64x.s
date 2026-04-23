@@ -64,27 +64,11 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	BEQ	CR7,LR
 	BR	cmpbody<>(SB)
 
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
-	// incoming:
-	// R3 a addr -> R5
-	// R4 a len  -> R3
-	// R5 b addr -> R6
-	// R6 b len  -> R4
-	//
-	// on entry to cmpbody:
-	// R3 compare value if compared length is same.
-	// R5 a addr
-	// R6 b addr
-	// R9 min(len(a),len(b))
-	SETB_INIT()
-	CMP	R4,R6,CR0
-	CMP	R3,R5,CR7
-	ISEL	CR0LT,R4,R6,R9
-	MOVD	R5,R6
-	MOVD	R3,R5
-	SETB_CR0(R3)
-	BEQ	CR7,LR
-	BR	cmpbody<>(SB)
+// gd: stock cmpstring asm assumed a 16 B string ABI; the fork's
+// 24 B header breaks every per-arch version. Redirect to the Go
+// fallback, which lowers len(s) / s[i] through tag-aware helpers.
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+	BR	runtime·cmpstringFallback<ABIInternal>(SB)
 
 #ifdef GOARCH_ppc64le
 DATA byteswap<>+0(SB)/8, $0x0706050403020100
