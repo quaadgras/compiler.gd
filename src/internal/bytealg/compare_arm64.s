@@ -18,14 +18,37 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 
 // gd: under the fork's 24 B string layout, args come in as
 //   R0=a.ptr R1=a.hash R2=a.word2  R3=b.ptr R4=b.hash R5=b.word2
-// — the stock asm, which expected (a_base, a_len, b_base, b_len) in
-// R0..R3, would misread every field. Tail-call the Go fallback; its
-// generic loop lowers len(s) / s[i] through tag-aware helpers so
-// heap, inline, and mixed-rep inputs all work correctly. Per-arch
-// asm can be reinstated later with a 24 B prolog if profiling
-// warrants; comparison is rarely hot outside of sort.
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
-	B	runtime·cmpstringFallback<ABIInternal>(SB)
+// whereas cmpbody expects (R0=a_base, R1=a_len, R2=b_base, R3=b_len).
+// Decode each string: heap rep → len from word 2 low 60 bits; inline
+// rep → spill words 1+2 to a local 16 B buffer, point at the buffer,
+// take length from word 2's top nibble. 32 B local frame for both
+// strings; BL + RET so the epilogue restores SP.
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
+	// Decode a: R0=ptr, R1=len on exit.
+	CBZ	R0, cs_a_inline
+	AND	$0x0fffffffffffffff, R2, R1
+	B	cs_a_done
+cs_a_inline:
+	MOVD	R1, 0(RSP)
+	MOVD	R2, 8(RSP)
+	MOVD	RSP, R0
+	LSR	$60, R2, R1
+cs_a_done:
+
+	// Decode b: R2=ptr, R3=len on exit.
+	CBZ	R3, cs_b_inline
+	MOVD	R3, R2
+	AND	$0x0fffffffffffffff, R5, R3
+	B	cs_b_done
+cs_b_inline:
+	MOVD	R4, 16(RSP)
+	MOVD	R5, 24(RSP)
+	ADD	$16, RSP, R2
+	LSR	$60, R5, R3
+cs_b_done:
+
+	BL	cmpbody<>(SB)
+	RET
 
 // On entry:
 // R0 points to the start of a
