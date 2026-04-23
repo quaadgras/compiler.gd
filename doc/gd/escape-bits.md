@@ -345,6 +345,56 @@ Targets (allocation-sensitive hot paths in graphics workloads):
 Baseline against pre-Phase-A to isolate the effect of this work from
 the SSO/fat-iface wins already measured.
 
+## 6a. Activation blocker: uniform func-value layout
+
+Phase D's infrastructure (analyzer → `candidateLoc`, walk wrap,
+runtime helpers, carriers) is all landed. Flipping
+`escape/call.go:371` from `heapHole()` to `candidateHole()` is a
+one-line toggle. It isn't toggled today because of a single
+correctness hole:
+
+`maybeEscapeClosureArg` reads the mask at offset `PtrSize` of its
+func-value argument. That's correct when the value is a true
+closure struct (captures + emitted by `walkClosure`) or a method
+value (`walkMethodValue`). It is **not** correct for captureless
+function literals:
+
+```go
+var fn = func(x *int) { ... }
+```
+
+`walkClosure` short-circuits this at `walk/closure.go:99` and
+returns the bare `Nname`. The rodata closure entry the linker
+emits for the callee is 8 B (`{F}`), so reading offset `PtrSize`
+lands in adjacent rodata — garbage mask.
+
+Two paths to unblock:
+
+1. **Uniform `{F, M}` rodata entries.** Extend the linker to
+   always emit 16 B for function-value symbols. Walk continues
+   to short-circuit captureless literals to `Nname`, but every
+   `Nname`-originated func value now has a valid `M` at offset
+   8. Blast radius: the `.f` symbol emission in
+   `cmd/link/internal/ld/*` and matching size math in
+   `cmd/compile/internal/reflectdata/reflect.go`. No runtime
+   changes needed — the indirect-call path already only reads
+   offset 0 and our wrap reads offset 8.
+
+2. **Static classification at walk time.** Detect at the call
+   site whether the func value is a real closure (has `{F, M}`)
+   or a bare function pointer (has only `{F}`), and only emit
+   the wrap in the former case. Falls back to the old heap-
+   alloc path otherwise, which means captureless-literal
+   targets lose the optimization. Static classification requires
+   tracking the provenance of each func value — feasible for
+   direct calls and single-assignment locals, opaque for map
+   lookups, parameters, etc. Smaller blast radius but narrower
+   win surface.
+
+Path 1 is the cleaner long-term fix; path 2 is landable without
+touching the linker. Either way, with the chosen path in place,
+flip `tagHole` and the two `*NonEscape` tests go green.
+
 ## 7. Open questions / risks
 
 1. **Mask granularity.** 1 bit per pointer param is cheapest and
