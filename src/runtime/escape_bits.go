@@ -41,3 +41,22 @@ func materializeToHeap(src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
 	typedmemmove(typ, dst, src)
 	return dst
 }
+
+// maybeEscapeArg returns src as-is when bit argIdx+1 of mask is clear
+// and a heap copy of *src when the bit is set. Compile-time
+// call-site wrappers at indirect calls pass the closure or itab mask
+// through here: when the specific callee's escape profile says this
+// arg stays put, we avoid the alloc; otherwise we materialize before
+// the call so the callee can retain the pointer safely.
+//
+// Bit 0 of mask is the dynamic-mask-fn discriminator (doc/gd/
+// escape-bits.md Phase F) and is ignored here — caller must resolve
+// that before invoking this helper.
+//
+//go:nosplit
+func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
+	if mask&(1<<uint(argIdx+1)) != 0 {
+		return materializeToHeap(src, typ)
+	}
+	return src
+}

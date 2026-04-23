@@ -77,6 +77,63 @@ func TestMaterializeToHeap_PointerFieldsScanned(t *testing.T) {
 	}
 }
 
+func TestMaybeEscapeArg_BitClearReturnsSrc(t *testing.T) {
+	// mask=0 → no bit can be set → every call returns src unchanged
+	// regardless of argIdx. No heap alloc. This is the "callee
+	// doesn't escape" happy path the whole optimization chases.
+	type box struct{ A, B int }
+	src := box{A: 9, B: 17}
+	for _, argIdx := range []int{0, 1, 2, 5, 7} {
+		got := runtime.MaybeEscapeArgTyped(0, argIdx, unsafe.Pointer(&src), box{})
+		if got != unsafe.Pointer(&src) {
+			t.Errorf("argIdx=%d mask=0: got %v, want &src=%v", argIdx, got, &src)
+		}
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = runtime.MaybeEscapeArgTyped(0, 0, unsafe.Pointer(&src), box{})
+	})
+	if allocs != 0 {
+		t.Errorf("mask=0: got %v allocs/run, want 0", allocs)
+	}
+}
+
+func TestMaybeEscapeArg_BitSetMaterializes(t *testing.T) {
+	// Bit N (=argIdx+1) set → should materialize on heap.
+	type box struct{ X int }
+	src := box{X: 42}
+	typeTag := box{}
+
+	// argIdx=0 → bit 1. mask=0b10 targets it.
+	dstPtr := runtime.MaybeEscapeArgTyped(0b10, 0, unsafe.Pointer(&src), typeTag)
+	if dstPtr == unsafe.Pointer(&src) {
+		t.Fatal("bit set but helper returned original src — no materialization happened")
+	}
+	dst := (*box)(dstPtr)
+	if dst.X != 42 {
+		t.Errorf("copy content wrong: got %d, want 42", dst.X)
+	}
+
+	// argIdx=2 → bit 3. mask=0b1000 targets it; mask=0b100 does not.
+	if got := runtime.MaybeEscapeArgTyped(0b100, 2, unsafe.Pointer(&src), typeTag); got != unsafe.Pointer(&src) {
+		t.Errorf("argIdx=2 mask=0b100: expected src passthrough")
+	}
+	if got := runtime.MaybeEscapeArgTyped(0b1000, 2, unsafe.Pointer(&src), typeTag); got == unsafe.Pointer(&src) {
+		t.Errorf("argIdx=2 mask=0b1000: expected materialize, got src")
+	}
+}
+
+func TestMaybeEscapeArg_Bit0Ignored(t *testing.T) {
+	// Bit 0 is reserved as the dynamic-mask-fn discriminator. If the
+	// caller hands us a mask word with bit 0 set and everything else
+	// clear, every argIdx should still pass through — argIdx+1 >= 1.
+	type box struct{ X int }
+	src := box{X: 99}
+	got := runtime.MaybeEscapeArgTyped(1, 0, unsafe.Pointer(&src), box{})
+	if got != unsafe.Pointer(&src) {
+		t.Errorf("bit 0 only: expected src passthrough, got heap copy")
+	}
+}
+
 func TestMaterializeToHeap_AllocsOnce(t *testing.T) {
 	// The helper is allowed exactly one heap allocation per call.
 	// A future "small-type shortcut" could regress this, so lock it.

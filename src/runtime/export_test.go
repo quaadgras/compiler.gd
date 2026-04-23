@@ -30,6 +30,13 @@ func MaterializeToHeapTyped(src unsafe.Pointer, typ any) unsafe.Pointer {
 	return materializeToHeap(src, e.Type)
 }
 
+// MaybeEscapeArgTyped is the test-only wrapper for maybeEscapeArg.
+// typeTag is an any whose concrete type supplies the *abi.Type.
+func MaybeEscapeArgTyped(mask uint64, argIdx int, src unsafe.Pointer, typeTag any) unsafe.Pointer {
+	e := (*abi.EmptyInterface)(unsafe.Pointer(&typeTag))
+	return maybeEscapeArg(mask, argIdx, src, e.Type)
+}
+
 var Fadd64 = fadd64
 var Fsub64 = fsub64
 var Fmul64 = fmul64
