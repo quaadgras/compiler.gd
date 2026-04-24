@@ -254,8 +254,25 @@ func printuintptr(p uintptr) {
 	printhex(uint64(p))
 }
 
+// gd Phase G.2.1: the inline budget for runtime's bytes() is 81
+// while the inline max is 80 — the extra outBuf param Phase G
+// threads through some of bytes's dependencies (stringStructOf
+// etc.) just tips it over. Left uninlined, bytes's return aliases
+// its OWN stack param for inline-rep strings, producing dangling
+// reads at the gwrite call site. Manually inline the body here
+// where &s is printstring's param storage, which lives through
+// the gwrite call.
+//
+//go:nosplit
 func printstring(s string) {
-	gwrite(bytes(s))
+	sp := stringStructOf(&s)
+	n := sp.length()
+	var b []byte
+	rp := (*slice)(unsafe.Pointer(&b))
+	rp.array = sp.bytes()
+	rp.len = n
+	rp.cap = n
+	gwrite(b)
 }
 
 func printslice(s []byte) {
