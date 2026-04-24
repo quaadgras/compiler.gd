@@ -12,9 +12,11 @@ GLOBL StaticData<>(SB), NOPTR, $4
 TEXT StaticText<>(SB), $0
 	RET
 
-TEXT ·PtrStaticData(SB), $0-8
+// gd Phase G.2.1: sig is func(outBuf unsafe.Pointer) *uint32 —
+// argframe is 8 (outBuf) + 8 (ret) = 16. Result sits at FP+8.
+TEXT ·PtrStaticData(SB), $0-16
 	MOVQ $StaticData<>(SB), AX
-	MOVQ AX, ret+0(FP)
+	MOVQ AX, ret+8(FP)
 	RET
 
 TEXT ·PtrStaticText(SB), $0-8
