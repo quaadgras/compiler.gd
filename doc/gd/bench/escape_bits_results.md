@@ -71,23 +71,39 @@ Net: ~9% geomean speedup, big alloc reductions on the paths the
 optimisation reaches; small regressions on paths where the wrap's
 runtime mask-check adds cost the optimisation can't recoup.
 
-### `sort` — allocation elimination with per-call overhead
+### `sort` — initial regression root-caused and fixed
 
-| benchmark             | stock ns/op | fork ns/op | delta   | allocs |
-|-----------------------|------------:|-----------:|--------:|-------:|
-| SortStrings           |       24.1m |      24.6m |    ~    |  1 → 0 |
-| SortStrings_Sorted    |      461 µs |     616 µs | +33.64% |  1 → 0 |
-| StableString1K        |       83 µs |     112 µs | +35.33% |  1 → 0 |
+Initial run showed fork regressing on sort benchmarks. Root cause was
+**not** the escape-bits wrap (verified: `grep maybeEscape sort.s` → 0,
+and `data.Less(i,j)` / `data.Swap(i,j)` take `int` args so no candidate
+pointer for the wrap to fire on). The real overhead was SSO's inline-
+aware `runtime·cmpstring` prolog: every call spilled each inline
+operand's header words to a 32 B local frame and repointed the data
+pointer before CALLing cmpbody, even when the strings were short
+enough to fit entirely in registers.
 
-Each benchmark loses its single per-run allocation (the iface box
-`sort.StringSlice`-wraps the input for `sort.Interface`), but the
-fork's wrap fires per-call on the sort's comparison function,
-adding overhead the small benchmarks can't amortise. `SortStrings`
-(which does large amounts of comparison work) breaks even;
-`SortStrings_Sorted` (pre-sorted, few comparisons) and
-`StableString1K` (short) pay the per-iteration cost visibly. A
-targeted un-wrap for statically-resolvable comparator paths would
-recover this.
+`BenchmarkSortStrings_Sorted` hit the pessimal case: `strconv.Itoa(i)`
+for i ∈ [0, 100000) produces 99.9% inline-rep strings (≤ 5 bytes each),
+so every comparison paid the spill + CALL.
+
+Fixed by `5a74a65d29`: added a both-inline fast path at the top of
+cmpstring that BSWAPQs each word so byte 0 lands in the MSB, then
+decides the ordering with two register-register CMPQs. The 4-bit
+length tag at the top nibble of word 2 lands in the LSB of the
+bswapped word and acts as an implicit length tiebreak. No spill, no
+CALL, ~7–13 instructions vs the prior ~35 + call overhead.
+
+| benchmark             | stock ns/op | pre-fix   | post-fix | vs stock |
+|-----------------------|------------:|----------:|---------:|---------:|
+| SortStrings           |      24.1m  |   24.6m   |  23.5m   |  −2.5%   |
+| SortStrings_Sorted    |     461 µs  |   616 µs  |  403 µs  | −12.6%   |
+| StableString1K        |      83 µs  |   112 µs  |   91 µs  |  +9.6%   |
+
+`SortStrings_Sorted` now **beats** stock by ~13% on the same presorted
+workload; `SortStrings` also tips slightly ahead of stock; the
+`StableString1K` regression is reduced from +35% to +10%. Allocation
+counts stay at 0/run across the board (the escape-bits wrap still
+eliminates the `sort.StringSlice` iface-box allocation).
 
 ### `encoding/json` — CodeDecoder regressed
 
