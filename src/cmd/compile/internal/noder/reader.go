@@ -1553,13 +1553,11 @@ func (r *reader) declareParams() {
 			r.dictParam = name
 			continue
 		}
-		// gd Phase G: synthesised .outBufK params are appended to Dcl
-		// after results (see ir.DeclareParams). They don't correspond
-		// to a writer-side entry, so addLocal would desync the sync-
-		// marker stream. Skip them here — the body never references
-		// them as locals; walk picks them up via Type.Params() when
-		// emitting the callee's outBuf access.
-		if strings.HasPrefix(name.Sym().Name, ".outBuf") {
+		// gd Phase G: synthesised .outBufK params don't have a
+		// writer-side addLocal entry (the writer serialises from
+		// types2 which has no outBufs). Skip them here so the
+		// sync-marker stream stays aligned with the writer.
+		if strings.HasPrefix(name.Sym().Name, types.OutBufNamePrefix) {
 			continue
 		}
 
