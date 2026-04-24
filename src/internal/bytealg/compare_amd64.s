@@ -23,10 +23,52 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 // cmpbody wants SI=a_ptr, BX=a_len, DI=b_ptr, DX=b_len.
 //
 // For inline-rep strings word 0 (ptr) is nil and the 15 data bytes live
-// inside the header (word1 || low 7 B of word2). Spill the header to the
-// stack and repoint the data pointer before dispatching. 32 B of local
-// frame: 16 B spill slot each for a (0..15) and b (16..31).
+// inside the header (word1 || low 7 B of word2). When BOTH operands are
+// inline we stay entirely in registers via a BSWAPQ-and-compare fast
+// path; otherwise we spill the inline side's header to the local frame
+// and repoint the data pointer before dispatching to cmpbody. 32 B of
+// local frame: 16 B spill slot each for a (0..15) and b (16..31).
 TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
+	// BOTH-INLINE fast path: OR word 0 of both operands. If the combined
+	// value is zero, neither operand has a heap data pointer — the bytes
+	// live in the 24 B header. Skip the stack spill + cmpbody call and
+	// decide the ordering with two BSWAPQ + CMPQ pairs in registers.
+	//
+	// Correctness: bytes 0..7 sit in word 1 little-endian, bytes 8..14 in
+	// word 2 low 56 bits little-endian, length in word 2 top nibble, the
+	// nibble at bits 56..59 is always zero. BSWAPQ reverses byte order so
+	// byte 0 lands in the MSB; an unsigned compare on the reversed value
+	// is lexicographic byte order over bytes 0..7 / 8..14. Trailing-zero
+	// padding can't confuse the result because (a) positions past each
+	// length are zero on both sides when content through the shared
+	// prefix matches, and (b) if content through the prefix truly matches
+	// and one string is shorter, its word 2 has a smaller length tag —
+	// and BSWAPQ places that tag at the LSB of word 2, so the unsigned
+	// compare breaks the tie in favour of the longer string (i.e. the
+	// shorter string compares less).
+	MOVQ	AX, R9
+	ORQ	DI, R9
+	JNE	cmpstr_any_heap
+	BSWAPQ	BX
+	BSWAPQ	SI
+	CMPQ	BX, SI
+	JB	cmpstr_ii_less
+	JA	cmpstr_ii_greater
+	BSWAPQ	CX
+	BSWAPQ	R8
+	CMPQ	CX, R8
+	JB	cmpstr_ii_less
+	JA	cmpstr_ii_greater
+	XORL	AX, AX
+	RET
+cmpstr_ii_less:
+	MOVQ	$-1, AX
+	RET
+cmpstr_ii_greater:
+	MOVQ	$1, AX
+	RET
+
+cmpstr_any_heap:
 	TESTQ	AX, AX
 	JNE	cmpstr_a_heap
 	MOVQ	BX, 0(SP)
