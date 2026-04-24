@@ -110,12 +110,12 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 
 	// TODO(mdempsky): Move this function to types.
 
-	// gd Phase G V1 defers methods from the outBuf rewrite. A bare
-	// sig read via reader.typ() may have already picked up outBufs,
-	// but if we're lifting into a method-expr type (recv!=nil) the
-	// method's own declaration was skipped by the recv-gate and the
-	// resulting sigs must stay stock so the Identical check in
-	// noder.methodExpr passes.
+	// gd Phase G: methods stay stock (V1). If the input sig picked
+	// up outBufs via reader.signature (applies universally to bare
+	// sigs), strip them so the lifted method-expr sig matches the
+	// method's declaration-time stock form. Without this,
+	// noder.methodExpr's types.Identical check fails because the
+	// bare-sig form has outBufs and the method form doesn't.
 	sigParams := sig.Params()
 	if recv != nil {
 		for len(sigParams) > 0 && IsOutBufParam(sigParams[len(sigParams)-1]) {

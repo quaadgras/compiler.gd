@@ -65,11 +65,12 @@ func phaseGEligible(recv *types.Field, params, results []*types.Field) bool {
 		return false
 	}
 	if base.Flag.CompilingRuntime {
-		return false
-	}
-	if recv != nil {
-		// Methods deferred — the method-type lift moves recv into
-		// params and makes arity bookkeeping trickier.
+		// Runtime has asm entry points that expect stock ABI, and
+		// its Go funcs are interleaved with those asm routines in
+		// ways that make a universal rewrite fragile (tests hang on
+		// cgo/preemption paths even though the code compiles). Skip
+		// entirely. User packages that import runtime funcs run
+		// through a separate strip step at funcExt/obj time.
 		return false
 	}
 	if !hasPtrResult(results) {
@@ -78,6 +79,13 @@ func phaseGEligible(recv *types.Field, params, results []*types.Field) bool {
 	if hasDictParam(params) {
 		// Generic instantiation carries a runtime-dict param we
 		// don't want to reshape around yet. Defer.
+		return false
+	}
+	if len(params) > 0 && params[len(params)-1].IsDDD() {
+		// Variadic: the last param is a slice with trailing-arg
+		// semantics. Appending an outBuf after the variadic would
+		// place it in the slice; placing it before requires ABI
+		// rework. Defer.
 		return false
 	}
 	return true

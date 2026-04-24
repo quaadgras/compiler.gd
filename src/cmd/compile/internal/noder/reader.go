@@ -29,6 +29,26 @@ import (
 	"cmd/internal/src"
 )
 
+// isAsmBackedPkg reports whether pkg contains extern/asm-backed
+// functions that gd Phase G's return-outBuf rewrite must skip. Covers:
+//   - Runtime-special packages (pkgspecial.Runtime) — CompilingRuntime
+//     gates the rewrite off on their compile, so imports must strip.
+//   - AllowAsmABI packages (reflect, syscall, internal/bytealg, etc.)
+//     — same rationale, these have asm entry points that don't know
+//     about outBufs.
+//   - sync/atomic — not in AllowAsmABI but has extern asm functions
+//     like SwapPointer declared without bodies.
+func isAsmBackedPkg(pkg *types.Pkg) bool {
+	if pkg == nil {
+		return false
+	}
+	if pkg.Path == "sync/atomic" {
+		return true
+	}
+	ps := objabi.LookupPkgSpecial(pkg.Path)
+	return ps.Runtime || ps.AllowAsmABI
+}
+
 // This file implements cmd/compile backend's reader for the Unified
 // IR export data.
 
@@ -607,10 +627,12 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 		params[len(params)-1].SetIsDDD(true)
 	}
 
-	// gd Phase G: append synthesised outBufK *T params for each pointer
-	// result. No-op unless typecheck.PhaseGActive is set; see
-	// typecheck/return_outbuf.go.
-	params = typecheck.AppendReturnOutBufs(recv, params, results)
+	// gd Phase G: signature-level rewrite deferred. The decision is
+	// made per-function by the writer (it sets ir.GdReturnOutBuf on
+	// eligible funcs) and applied by reader.funcExt when the bit is
+	// set. Sigs at this level stay stock so function-typed params /
+	// fields / method lifts don't pick up outBufs inconsistently.
+	_ = recv
 
 	return types.NewSignature(recv, params, results)
 }
@@ -1154,6 +1176,24 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 	}
 
 	fn.Pragma = r.pragmaFlag()
+
+	// gd Phase G: apply the outBuf rewrite if and only if the writer
+	// set the GdReturnOutBuf bit. The writer decided eligibility at
+	// its own compile (so runtime / asm-backed packages that skipped
+	// the rewrite don't have the bit set), and the bit rides through
+	// pkgbits as a normal pragma flag. Applying the rewrite HERE —
+	// before we read notes, before tcCall can reference this Type —
+	// keeps the writer's "wrote N+K notes" symmetric with the
+	// reader's "iterate N+K RecvParams".
+	if fn.Pragma&ir.GdReturnOutBuf != 0 && name.Type().NumOutBufs() == 0 {
+		sig := name.Type()
+		extended := typecheck.AppendReturnOutBufs(sig.Recv(), sig.Params(), sig.Results())
+		if len(extended) > sig.NumParams() {
+			newSig := types.NewSignature(sig.Recv(), extended, sig.Results())
+			name.SetType(newSig)
+		}
+	}
+
 	r.linkname(name)
 
 	if buildcfg.GOARCH == "wasm" {
@@ -1180,10 +1220,11 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 
 		fn.ABI = obj.ABI(r.Uint64())
 
-		// Escape analysis. One note per RecvParam — includes gd's
-		// synthesised .outBufK params because the writer also
-		// iterates RecvParams when serialising. The note on an
-		// outBuf param is always the empty string.
+		// Escape analysis. One note per RecvParam. If the
+		// GdReturnOutBuf pragma was set above, RecvParams() already
+		// has the outBufs appended — the writer wrote matching
+		// N+outBufs notes. If the pragma is clear, RecvParams() is
+		// stock and the writer wrote N notes.
 		for _, f := range name.Type().RecvParams() {
 			f.Note = r.String()
 		}

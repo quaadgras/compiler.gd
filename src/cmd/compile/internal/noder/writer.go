@@ -17,6 +17,7 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
 )
@@ -1053,6 +1054,52 @@ func (pw *pkgWriter) selectorIdx(obj types2.Object) selectorInfo {
 
 // @@@ Compiler extensions
 
+// phaseGEligibleForWriter decides whether the writer should tag obj
+// with ir.GdReturnOutBuf so the reader applies the Phase G outBuf
+// rewrite to this function. The predicate must stay symmetric with
+// the reader's application logic at reader.go's funcExt: both sides
+// agreeing keeps pkgbits writer/reader counts aligned.
+//
+// V1 eligibility:
+//   - feature gate on (typecheck.PhaseGActive);
+//   - not compiling runtime (CompilingRuntime skips);
+//   - at least one pointer-typed result;
+//   - no receiver (methods deferred);
+//   - not variadic.
+//
+// Generic shape-functions carry a runtime dict param but it's
+// introduced after writer-time, so there's no dict-check to do here —
+// types2.Signature is the user's source-level sig. If generics
+// cause other issues we'll add a separate gate.
+func phaseGEligibleForWriter(obj *types2.Func, decl *syntax.FuncDecl) bool {
+	if !typecheck.PhaseGActive {
+		return false
+	}
+	if base.Flag.CompilingRuntime {
+		return false
+	}
+	sig, ok := obj.Type().(*types2.Signature)
+	if !ok {
+		return false
+	}
+	if sig.Recv() != nil {
+		return false
+	}
+	if sig.Variadic() {
+		return false
+	}
+	results := sig.Results()
+	any := false
+	for i := 0; i < results.Len(); i++ {
+		r := results.At(i)
+		if _, isPtr := r.Type().(*types2.Pointer); isPtr {
+			any = true
+			break
+		}
+	}
+	return any
+}
+
 func (w *writer) funcExt(obj *types2.Func) {
 	decl, ok := w.p.funDecls[obj]
 	assert(ok)
@@ -1064,6 +1111,14 @@ func (w *writer) funcExt(obj *types2.Func) {
 	pragma := asPragmaFlag(decl.Pragma)
 	if pragma&ir.Systemstack != 0 && pragma&ir.Nosplit != 0 {
 		w.p.errorf(decl, "go:nosplit and go:systemstack cannot be combined")
+	}
+
+	// gd Phase G: mark this function eligible for the outBuf rewrite
+	// if the current compile admits it. Symmetric with the reader
+	// which applies AppendReturnOutBufs on seeing this bit. See
+	// doc/gd/escape-bits-phase-g-plan.md.
+	if phaseGEligibleForWriter(obj, decl) {
+		pragma |= ir.GdReturnOutBuf
 	}
 	wi := asWasmImport(decl.Pragma)
 	we := asWasmExport(decl.Pragma)

@@ -78,3 +78,24 @@ func (t *Type) UserRecvParams() []*Field {
 	rp := t.RecvParams()
 	return rp[:len(rp)-t.NumOutBufs()]
 }
+
+// StripOutBufs returns a signature identical to t but with any
+// trailing synthesised outBufK params removed. Returns t unchanged
+// when t has no outBufs or when t isn't a function type.
+//
+// Used when a function is discovered to be runtime-owned (where the
+// rewrite must not apply) AFTER its sig has already been built by
+// the noder reader.
+func (t *Type) StripOutBufs() *Type {
+	if t == nil || t.Kind() != TFUNC {
+		return t
+	}
+	nOut := t.NumOutBufs()
+	if nOut == 0 {
+		return t
+	}
+	userParams := t.UserParams()
+	keep := make([]*Field, len(userParams))
+	copy(keep, userParams)
+	return NewSignature(t.Recv(), keep, t.Results())
+}
