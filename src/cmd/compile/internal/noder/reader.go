@@ -607,6 +607,11 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 		params[len(params)-1].SetIsDDD(true)
 	}
 
+	// gd Phase G: append synthesised outBufK *T params for each pointer
+	// result. No-op unless typecheck.PhaseGActive is set; see
+	// typecheck/return_outbuf.go.
+	params = typecheck.AppendReturnOutBufs(params, results)
+
 	return types.NewSignature(recv, params, results)
 }
 
@@ -1175,8 +1180,14 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 
 		fn.ABI = obj.ABI(r.Uint64())
 
-		// Escape analysis.
+		// Escape analysis. Notes are in the bitstream one-per-user-
+		// param, so skip synthesised .outBufK params (gd Phase G).
+		// The writer produced N notes; RecvParams() after
+		// typecheck.AppendReturnOutBufs has N + outBufs entries.
 		for _, f := range name.Type().RecvParams() {
+			if typecheck.IsOutBufParam(f) {
+				continue
+			}
 			f.Note = r.String()
 		}
 
@@ -1543,6 +1554,15 @@ func (r *reader) declareParams() {
 	for _, name := range r.curfn.Dcl {
 		if name.Sym().Name == dictParamName {
 			r.dictParam = name
+			continue
+		}
+		// gd Phase G: synthesised .outBufK params are appended to Dcl
+		// after results (see ir.DeclareParams). They don't correspond
+		// to a writer-side entry, so addLocal would desync the sync-
+		// marker stream. Skip them here — the body never references
+		// them as locals; walk picks them up via Type.Params() when
+		// emitting the callee's outBuf access.
+		if strings.HasPrefix(name.Sym().Name, ".outBuf") {
 			continue
 		}
 
