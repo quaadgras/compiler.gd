@@ -715,16 +715,12 @@ func (w *writer) signature(sig *types2.Signature) {
 // types.PhaseGApplies but works on types2 (which is what the writer
 // sees) rather than types.
 //
-// Universal extension (Phase G.2.1): no CompilingRuntime gate. Every
-// pointer-returning sig everywhere is uniformly extended — except
-// variadic sigs, where the variadic slice must remain at the tail
-// (appending outBufs after would change the ABI in a way asmdecl /
-// the standard variadic convention can't absorb).
+// Universal extension (Phase G.2.1): no CompilingRuntime gate, no
+// variadic skip. Variadic sigs keep their `...T` slice at the tail
+// by inserting outBufs BEFORE the variadic slot (NewSignature
+// handles the positioning).
 func phaseGAppliesTo(sig *types2.Signature) bool {
 	if !typecheck.PhaseGActive {
-		return false
-	}
-	if sig.Variadic() {
 		return false
 	}
 	results := sig.Results()

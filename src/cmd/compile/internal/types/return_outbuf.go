@@ -53,11 +53,11 @@ const PhaseGActive = false
 // match on this prefix (Field.IsOutBufParam).
 const OutBufNamePrefix = ".outBuf"
 
-// PhaseGApplies reports whether NewSignature should append outBuf
-// params to a sig with the given params/results. True when the gate
-// is on, at least one result is a pointer type, and the existing
-// param list isn't variadic (the variadic slice must stay at the
-// tail so append-outBuf-after would break the standard ABI).
+// PhaseGApplies reports whether NewSignature should extend a sig
+// with the given params/results. True when the gate is on and at
+// least one result is a pointer type. Variadic sigs are supported —
+// NewSignature inserts outBufs BEFORE the variadic slice so the
+// slice stays at the tail (matching the Go ABI convention).
 //
 // Universal extension: we do NOT gate on CompilingRuntime. Every
 // pointer-returning func Type in the universe is uniformly extended
@@ -69,11 +69,7 @@ func PhaseGApplies(params, results []*Field) bool {
 	if !PhaseGActive {
 		return false
 	}
-	if len(params) > 0 && params[len(params)-1] != nil && params[len(params)-1].IsDDD() {
-		// Variadic: placing outBufs after the variadic slice would
-		// change the calling convention; skip the rewrite for these.
-		return false
-	}
+	_ = params // reserved; variadic handled by positioning, not skip.
 	for _, r := range results {
 		if r != nil && r.Type != nil && r.Type.IsPtr() {
 			return true
@@ -94,15 +90,18 @@ func countPointerResults(results []*Field) int {
 	return n
 }
 
-// paramsAlreadyExtended reports whether params already contains a
-// trailing .outBufK field. Used by NewSignature to stay idempotent
-// when the reader passes back already-extended params from pkgbits.
+// paramsAlreadyExtended reports whether params already contains any
+// .outBufK field. Used by NewSignature to stay idempotent when the
+// reader passes back already-extended params from pkgbits — and to
+// tolerate the variadic layout where outBufs sit BEFORE the trailing
+// variadic slice, so the last-param check isn't sufficient.
 func paramsAlreadyExtended(params []*Field) bool {
-	if len(params) == 0 {
-		return false
+	for _, p := range params {
+		if p != nil && p.Sym != nil && strings.HasPrefix(p.Sym.Name, OutBufNamePrefix) {
+			return true
+		}
 	}
-	last := params[len(params)-1]
-	return last != nil && last.Sym != nil && strings.HasPrefix(last.Sym.Name, OutBufNamePrefix)
+	return false
 }
 
 // BuildOutBufFields returns a fresh slice of K outBufK Fields, one

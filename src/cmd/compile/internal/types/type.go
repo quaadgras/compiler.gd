@@ -1694,6 +1694,9 @@ func (t *Type) SetUnderlying(underlying *Type) {
 	if underlying.HasShape() {
 		t.SetHasShape(true)
 	}
+	if underlying.GdReturnOutBuf() {
+		t.SetGdReturnOutBuf(true)
+	}
 
 	// spec: "The declared type does not inherit any methods bound
 	// to the existing type, but the method set of an interface
@@ -1753,9 +1756,17 @@ func NewSignature(recv *Field, params, results []*Field) *Type {
 	needsRewrite := PhaseGApplies(params, results) && !alreadyExtended
 	if needsRewrite {
 		outBufs := BuildOutBufFields(results)
+		// Insert outBufs BEFORE the variadic slice if present, so
+		// `...T` stays at the tail. For non-variadic sigs outBufs
+		// go at the end (no-op after the final append).
+		insertAt := len(params)
+		if insertAt > 0 && params[insertAt-1] != nil && params[insertAt-1].IsDDD() {
+			insertAt--
+		}
 		extended := make([]*Field, 0, len(params)+len(outBufs))
-		extended = append(extended, params...)
+		extended = append(extended, params[:insertAt]...)
 		extended = append(extended, outBufs...)
+		extended = append(extended, params[insertAt:]...)
 		params = extended
 	}
 	// Flag rides on t whenever the param list ends with outBufs —

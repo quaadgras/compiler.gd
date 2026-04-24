@@ -41,19 +41,50 @@ func FillOutBufArgs(n *ir.CallExpr, callee *types.Type) {
 	if nOut == 0 {
 		return
 	}
-	// sig.Params() is [user0..user{N-1}, outBuf0..outBuf{K-1}].
-	// User wrote N args; append K nils.
+	// sig.Params() layout:
+	//   non-variadic: [user0..user{N-1}, outBuf0..outBuf{K-1}]
+	//   variadic:     [user0..user{N-2}, outBuf0..outBuf{K-1},
+	//                  variadic_slice]
+	//
+	// Find the first outBuf position — that's where we splice in
+	// the matching nil args.
 	params := callee.Params()
-	userArgs := len(params) - nOut
-	if len(n.Args) != userArgs {
-		// Arity already mismatches user-visible expectations; let
-		// typecheckaste produce its normal error. Don't mask.
-		return
+	outBufStart := -1
+	for i, p := range params {
+		if p != nil && p.IsOutBufParam() {
+			outBufStart = i
+			break
+		}
 	}
-	for i := 0; i < nOut; i++ {
-		field := params[userArgs+i]
+	if outBufStart < 0 {
+		return // unexpected: flagged but no outBuf fields
+	}
+	// User-visible mandatory arg count: params BEFORE the outBufs.
+	userMandatory := outBufStart
+	variadic := len(params) > 0 && params[len(params)-1].IsDDD()
+	if variadic {
+		if len(n.Args) < userMandatory {
+			// Too few args; let typecheckaste error.
+			return
+		}
+	} else {
+		if len(n.Args) != userMandatory {
+			// Arity already mismatches user-visible expectations;
+			// let typecheckaste error without masking.
+			return
+		}
+	}
+	// Splice K nils into n.Args at position userMandatory.
+	nils := make([]ir.Node, nOut)
+	for i := range nils {
+		field := params[outBufStart+i]
 		nilArg := ir.NewNilExpr(n.Pos(), field.Type)
 		nilArg.SetTypecheck(1)
-		n.Args = append(n.Args, nilArg)
+		nils[i] = nilArg
 	}
+	newArgs := make([]ir.Node, 0, len(n.Args)+nOut)
+	newArgs = append(newArgs, n.Args[:userMandatory]...)
+	newArgs = append(newArgs, nils...)
+	newArgs = append(newArgs, n.Args[userMandatory:]...)
+	n.Args = newArgs
 }

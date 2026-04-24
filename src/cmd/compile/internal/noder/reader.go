@@ -613,13 +613,21 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 	// now (mirroring NewSignature's rewrite) and use the flag-on
 	// constructor. Otherwise we keep it stock. This preserves ABI
 	// compatibility across runtime↔non-runtime boundaries.
+	//
+	// Variadic: outBufs go BEFORE the variadic slice so `...T`
+	// stays at the tail (mirrors NewSignature's insertion order).
 	originExtended := r.Bool()
 	if originExtended {
 		outBufs := types.BuildOutBufFields(results)
 		if len(outBufs) > 0 {
+			insertAt := len(params)
+			if insertAt > 0 && params[insertAt-1] != nil && params[insertAt-1].IsDDD() {
+				insertAt--
+			}
 			extended := make([]*types.Field, 0, len(params)+len(outBufs))
-			extended = append(extended, params...)
+			extended = append(extended, params[:insertAt]...)
 			extended = append(extended, outBufs...)
+			extended = append(extended, params[insertAt:]...)
 			params = extended
 		}
 	}
