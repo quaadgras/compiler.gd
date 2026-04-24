@@ -16,30 +16,35 @@ import (
 // generated on demand by VirtualParams / VirtualRecvParams.
 const OutBufNamePrefix = ".outBuf"
 
-// outBufSymOnce guards one-time initialisation of outBufSyms.
-var outBufSymOnce sync.Once
+// outBufSymInit guards one-time initialisation of outBufSyms.
+var outBufSymInit sync.Once
 
 // outBufSyms caches the gd Phase G `.outBufK` symbols so
 // VirtualParams can build its field list without touching the
 // unsynchronised LocalPkg.Syms map during parallel SSA generation.
 //
-// The cap is larger than any realistic number of pointer results on
-// a single function; if we ever overflow we fall back to
-// LookupNum on demand (which is still unsafe under concurrency,
-// but the overflow path is astronomically unlikely to fire).
+// The Syms here are DELIBERATELY not registered in LocalPkg.Syms.
+// staticdata.FuncLinksym holds funcsymsmu when doing LookupOK on
+// package symbol maps during the backend; we have no access to
+// that mutex from the types package, and the stock contract is
+// that nothing else writes those maps concurrently. Since these
+// synthesised syms are only used internally for marker identity
+// (FieldIsOutBufParam matches by name prefix, not by Sym pointer),
+// not publishing them to LocalPkg.Syms avoids the contention
+// entirely — LookupOK for ".outBufK" returns a FRESH Sym to any
+// caller that asks, which is fine because nothing in the codebase
+// looks them up that way.
+//
+// Cap is larger than any realistic number of pointer results on a
+// single function; overflow is handled by building a Sym on the fly.
 var outBufSyms [32]*Sym
 
 func initOutBufSyms() {
 	for i := range outBufSyms {
-		// Build each Sym without going through LookupNum, which
-		// mutates LocalPkg.Syms. We intern the Syms into
-		// LocalPkg ourselves; after init the LocalPkg.Syms map
-		// has the entries pre-populated, so any stray LookupNum
-		// for these names during compile is a pure read.
-		name := OutBufNamePrefix + itoa(i)
-		s := &Sym{Name: name, Pkg: LocalPkg}
-		LocalPkg.Syms[name] = s
-		outBufSyms[i] = s
+		outBufSyms[i] = &Sym{
+			Name: OutBufNamePrefix + itoa(i),
+			Pkg:  LocalPkg,
+		}
 	}
 }
 
@@ -59,19 +64,14 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// outBufSym returns the cached `.outBufK` Sym for k. Call sites
-// must not exceed len(outBufSyms); if they would, VirtualParams
-// caps the synthesised outBuf count to keep us within the array.
+// outBufSym returns the cached `.outBufK` Sym for k.
 func outBufSym(k int) *Sym {
-	outBufSymOnce.Do(initOutBufSyms)
+	outBufSymInit.Do(initOutBufSyms)
 	if k < len(outBufSyms) {
 		return outBufSyms[k]
 	}
-	// Overflow fallback — should never happen for realistic sigs,
-	// but be safe: build a fresh Sym without interning. Two
-	// functions with >32 pointer results would see different Sym
-	// instances for the same name, which is fine because nothing
-	// at this layer relies on pointer identity for outBuf syms.
+	// Overflow fallback — build a fresh Sym. No identity
+	// guarantees across calls, but nothing depends on that.
 	return &Sym{Name: OutBufNamePrefix + itoa(k), Pkg: LocalPkg}
 }
 
