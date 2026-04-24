@@ -40,22 +40,36 @@ const outBufNamePrefix = ".outBuf"
 // guard for signatures read back from pkgbits that were serialised
 // post-rewrite).
 //
-// The rewrite is universal: applied to every callable the noder
-// decodes, including interface method declarations, so iface
-// satisfaction continues to hold by construction.
+// V1 eligibility:
+// - has at least one pointer result;
+// - not compiling runtime (asm-backed symbols stay stock);
+// - signature has no receiver (methods deferred);
+// - no trailing `.dict` runtime-generic param (generics deferred).
 //
-// Package boundaries: runtime is intentionally skipped. Its
-// asm-backed routines follow stock ABI, and even though a trailing
-// outBuf arg would be silently ignored by asm that doesn't read it,
-// the conservative default for V1 is to skip.
-func AppendReturnOutBufs(params, results []*types.Field) []*types.Field {
+// Generic functions / methods / interface methods will pick up the
+// rewrite in a follow-up phase once the `.dict` and recv interactions
+// are threaded through consistently. Skipping them here means their
+// ABI stays stock, which also means callers passing pointers through
+// iface dispatch don't benefit yet — acceptable for V1, tracked by
+// Phase G follow-ups in doc/gd/escape-bits-phase-g-plan.md.
+func AppendReturnOutBufs(recv *types.Field, params, results []*types.Field) []*types.Field {
 	if !PhaseGActive {
 		return params
 	}
 	if base.Flag.CompilingRuntime {
 		return params
 	}
+	if recv != nil {
+		// Methods deferred — the method-type lift moves the recv
+		// into params and makes arity bookkeeping trickier.
+		return params
+	}
 	if !HasPtrResult(results) {
+		return params
+	}
+	if hasDictParam(params) {
+		// Generic instantiation carries a runtime-dict param we
+		// don't want to reshape around yet. Defer.
 		return params
 	}
 	if paramsAlreadyHaveOutBufs(params, results) {
@@ -155,8 +169,23 @@ func FillOutBufArgs(n *ir.CallExpr, callee *types.Type) {
 	for i := 0; i < outBufs; i++ {
 		field := sigParams[userArgs+i]
 		nilArg := ir.NewNilExpr(n.Pos(), field.Type)
+		nilArg.SetTypecheck(1)
 		n.Args = append(n.Args, nilArg)
 	}
+}
+
+// hasDictParam reports whether params contains a runtime-dictionary
+// param (`.dict` prefix). Generics instantiation inserts such a param
+// between the receiver and the user-declared params; while we defer
+// generic-method support, skipping the rewrite for any signature that
+// has a dict keeps those callees stock.
+func hasDictParam(params []*types.Field) bool {
+	for _, p := range params {
+		if p != nil && p.Sym != nil && strings.HasPrefix(p.Sym.Name, ".dict") {
+			return true
+		}
+	}
+	return false
 }
 
 // paramsAlreadyHaveOutBufs reports whether params already ends in

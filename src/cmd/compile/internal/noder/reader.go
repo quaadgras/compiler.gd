@@ -610,7 +610,7 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 	// gd Phase G: append synthesised outBufK *T params for each pointer
 	// result. No-op unless typecheck.PhaseGActive is set; see
 	// typecheck/return_outbuf.go.
-	params = typecheck.AppendReturnOutBufs(params, results)
+	params = typecheck.AppendReturnOutBufs(recv, params, results)
 
 	return types.NewSignature(recv, params, results)
 }

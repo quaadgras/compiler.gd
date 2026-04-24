@@ -109,13 +109,25 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 	}
 
 	// TODO(mdempsky): Move this function to types.
-	// TODO(mdempsky): Preserve positions, names, and package from sig+recv.
 
-	params := make([]*types.Field, nrecvs+sig.NumParams())
+	// gd Phase G V1 defers methods from the outBuf rewrite. A bare
+	// sig read via reader.typ() may have already picked up outBufs,
+	// but if we're lifting into a method-expr type (recv!=nil) the
+	// method's own declaration was skipped by the recv-gate and the
+	// resulting sigs must stay stock so the Identical check in
+	// noder.methodExpr passes.
+	sigParams := sig.Params()
+	if recv != nil {
+		for len(sigParams) > 0 && IsOutBufParam(sigParams[len(sigParams)-1]) {
+			sigParams = sigParams[:len(sigParams)-1]
+		}
+	}
+
+	params := make([]*types.Field, nrecvs+len(sigParams))
 	if recv != nil {
 		params[0] = types.NewField(base.Pos, nil, recv)
 	}
-	for i, param := range sig.Params() {
+	for i, param := range sigParams {
 		// Preserve Sym so gd's synthesised .outBufK params stay
 		// recognisable across the method-type lift (see
 		// typecheck.IsOutBufParam, used by call-site arg-count
