@@ -7,6 +7,146 @@ function; we just need to ship that info across the indirect-call
 boundary so the caller can keep args on the stack when the specific
 callee doesn't let them escape. README optimization goal #3.
 
+> **Status:** Phase A–D are active fork-wide as of commit 9120642bae
+> (2026-04-23). Phase F and G runtime helpers landed in the same
+> commit; their compile-time automation is still in-progress. This
+> top section describes the landed state; the phased plan below is
+> preserved as design history. See §Landed state for the
+> as-implemented summary.
+
+## Landed state
+
+The optimisation runs unconditionally: `shouldEnableEscapeCandidate`
+in `cmd/compile/internal/escape/escape.go` returns `true` for every
+function. Safety is enforced by three surgical filters, all narrower
+than the original plan:
+
+**1. `isCandidateLoc` only admits ONAME PAUTOs with Addrtaken.**
+Fresh-allocation expressions (ONEW, OPTRLIT, OCONVIFACE, composite
+literals) never become candidates. This is narrower than the plan's
+original "all allocation ops" — it was narrowed because recursive
+allocation graphs (fmt's RecursiveInt chain) and struct-field-stored
+pointers inside composite literals were being over-eagerly stack-
+promoted. The current rule captures the bread-and-butter win
+(`&localvar` to a dynamic callee) without the aliasing hazards.
+
+**2. `candidateEligibleParamType` gates `tagHole`.** Dynamic callees
+only route pointer-shaped args (*T, unsafe.Pointer, chan) through
+`candidateHole`. Struct-by-value, slice, map, interface, and func
+args fall back to `heapHole`, matching stock Go's behaviour exactly.
+This keeps `&x` nested inside a struct value arg (`f(P{p: &x})`)
+from being candidate-routed despite the struct's methods escaping
+the field. Per-field escape tracking to reclaim the struct case is
+planned — see `memory/project_escape_bits_field_escape_roadmap.md`.
+
+**3. Interface-method receivers are excluded from candidate-eligible
+pointers.** Go synthesises iface-method receivers as `*struct{}` —
+an opaque pointer to empty-struct standing in for the iface's data
+word. A naïve pointer-kind check would treat them as real pointer
+args; we reject `*T` where `T.Kind()==TSTRUCT && T.NumFields()==0`
+so the iface receiver chain (e.g. `Handler → TextHandler →
+commonHandler.w → &buf`) isn't pulled into candidate propagation.
+
+### Box promotion via Heapaddr
+
+For every PAUTO local tagged EscCandidate, walk's
+`promoteEscapeCandidates` (in `cmd/compile/internal/walk/
+escape_bits.go`) emits:
+
+```
+var <name>_backing T         // PAUTO, SetEsc(EscHeap) so
+                             // liveness/shouldTrack skips it
+var &<name> *T               // PAUTO, stack-allocated
+&<name> = &<name>_backing    // prologue, top of fn body
+<name>.Heapaddr = &<name>    // SSA gen routes accesses through *Heapaddr
+```
+
+All reads/writes of the promoted name go through `*Heapaddr`; every
+`&name` evaluates to the value of the `&name` pointer var. At a
+dynamic call site, `wrapEscapeCandidateArgs` emits
+`&name = runtime.maybeEscape{Closure,Iface}Arg(carrier, argIdx,
+&name, typ)` so the pointer gets re-homed to a heap copy iff the
+callee's mask bit fires. Post-call reads through `*Heapaddr` see the
+migrated storage.
+
+For `p := new(T); f(p)` patterns the wrap additionally updates the
+ONAME's value in place (via `updateNameViaWrap`) so subsequent
+`*p` reads stay consistent.
+
+### Idempotent runtime materialize
+
+`runtime.materializeToHeap` (`src/runtime/escape_bits.go`) checks
+the src pointer against the current goroutine's stack range up
+front: if src is already off-stack, it returns src unchanged. Hot
+loops amortise any migration to zero allocs/run across iterations,
+and repeat calls can't break caller-visible pointer identity
+(e.g. `strings.Builder.copyCheck` panicking on `b.addr != b`).
+
+### Phase F: dynamic compute-fn masks
+
+`runtime.resolveMask(rawMask, carrier, heapMask, depth) uint64`
+handles the static vs dynamic split:
+
+- Bit 0 clear → rawMask is itself the static mask, return as-is.
+- Bit 0 set → upper bits are a `computeMaskFn` pointer; invoke with
+  the carrier + heapMask hint + decremented depth.
+
+`computeMaskFn` signature: `func(carrier unsafe.Pointer, heapMask
+uint64, depth int) uint64`. The heapMask lets the compute fn express
+inter-argument relationships ("arg A escapes iff arg B is on heap").
+Depth cap (`maxComputeMaskDepth = 8`) with
+`conservativeAllEscapeMask` fallback prevents infinite recursion on
+cyclic wrapper chains. Bit 0 stripped from the return to keep the
+discriminator unambiguous.
+
+Compile-time automation of compute-fn synthesis for trivial wrappers
+is pending — see `memory/project_escape_bits_phase_f_roadmap.md`.
+
+### Phase G: return-value outbuf
+
+`runtime.maybeInPlace(outBuf, typ) unsafe.Pointer` picks storage for
+a callee's about-to-be-returned pointer-typed result:
+
+- `outBuf != nil` → zero outBuf (via `typedmemclr` if it has pointer
+  fields, so GC never sees stale words) and return it. Zero allocs.
+- `outBuf == nil` → `mallocgc`, same cost as stock `new(T)`.
+
+Symmetric to materializeToHeap on the return side. A hand-
+transformed demo (`src/cmd/compile/internal/test/
+escape_bits_outbuf_test.go`) shows −85% time and −100% allocs
+against stock `return new(T)`; the nil-fallback path is within noise
+of stock. Compile-time rewrite to automate the signature extension +
+callee body rewrite + caller-side stack buffer is pending — see
+`memory/project_escape_bits_phase_g_roadmap.md`.
+
+### Tests in the tree
+
+- `src/cmd/compile/internal/test/escape_bits_test.go` — 8 end-to-end
+  `TestEscapeBits*` alloc tests and 6 `BenchmarkEscapeBits*`
+  benchmarks demonstrating −71% geomean speedup and 100% alloc
+  reduction on the canonical patterns.
+- `src/cmd/compile/internal/test/escape_bits_dynmask_test.go` — 3
+  Phase F dynamic-mask tests (forced escape override, call
+  integrity, heapMask-driven relational decisions).
+- `src/cmd/compile/internal/test/escape_bits_outbuf_test.go` — 4
+  Phase G correctness tests + 3 benchmarks.
+- `src/runtime/escape_bits_test.go` — 17 runtime-side tests covering
+  materializeToHeap, maybeEscapeArg, resolveMask (static passthrough,
+  bit-0 clamp, cycles, depth, heapMask), maybeInPlace.
+
+### Pre-existing stdlib failures (not caused by escape-bits)
+
+Verified by running with the gate off: `encoding/pem/TestFuzz`,
+`go/doc/TestClassifyExamples`,
+`go/doc/comment/TestTestdata/crash1.txt`, `log/syslog/TestFlap`,
+`log/syslog/TestConcurrentReconnect`,
+`log/syslog/TestWithSimulated`. Not regressions introduced by this
+work.
+
+---
+
+# Design history (phased plan, preserved as-written)
+
 ## 0. Premise check
 
 Escape analysis in `cmd/compile/internal/escape/` already produces
