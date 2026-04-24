@@ -2,6 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// The gd compile-time aeshash port uses uint64 arithmetic that the
+// 32-bit SSA lowering rules (386, arm, mips, mipsle, wasm) can't lower
+// when the target itself is 32-bit and this file is pulled into that
+// build of internal/abi. The runtime never calls AeshashStringARM64
+// (it's purely a compile-time helper for when the emitter targets
+// arm64), so restrict the file to 64-bit GOARCHes. Host compilers for
+// those same 64-bit hosts continue to see it and can still emit arm64
+// hashes when GOARCH=arm64.
+
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+
 package abi
 
 // AeshashStringARM64 returns the hash that runtime.aeshashbody would
