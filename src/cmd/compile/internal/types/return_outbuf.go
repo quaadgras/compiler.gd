@@ -54,8 +54,10 @@ const PhaseGActive = false
 const OutBufNamePrefix = ".outBuf"
 
 // PhaseGApplies reports whether NewSignature should append outBuf
-// params to a sig with the given results. True when the gate is on
-// and at least one result is a pointer type.
+// params to a sig with the given params/results. True when the gate
+// is on, at least one result is a pointer type, and the existing
+// param list isn't variadic (the variadic slice must stay at the
+// tail so append-outBuf-after would break the standard ABI).
 //
 // Universal extension: we do NOT gate on CompilingRuntime. Every
 // pointer-returning func Type in the universe is uniformly extended
@@ -63,8 +65,13 @@ const OutBufNamePrefix = ".outBuf"
 // extended ABI. That eliminates the cross-package stock-vs-extended
 // shape mismatch that plagued the per-package approach. Asm and
 // cgo sources have been updated in tandem to accept the extra arg.
-func PhaseGApplies(results []*Field) bool {
+func PhaseGApplies(params, results []*Field) bool {
 	if !PhaseGActive {
+		return false
+	}
+	if len(params) > 0 && params[len(params)-1] != nil && params[len(params)-1].IsDDD() {
+		// Variadic: placing outBufs after the variadic slice would
+		// change the calling convention; skip the rewrite for these.
 		return false
 	}
 	for _, r := range results {

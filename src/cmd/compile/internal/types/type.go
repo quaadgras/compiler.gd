@@ -1750,7 +1750,7 @@ func NewSignature(recv *Field, params, results []*Field) *Type {
 	// serialised by another package's compiler and should ride
 	// through unchanged).
 	alreadyExtended := paramsAlreadyExtended(params)
-	needsRewrite := PhaseGApplies(results) && !alreadyExtended
+	needsRewrite := PhaseGApplies(params, results) && !alreadyExtended
 	if needsRewrite {
 		outBufs := BuildOutBufFields(results)
 		extended := make([]*Field, 0, len(params)+len(outBufs))

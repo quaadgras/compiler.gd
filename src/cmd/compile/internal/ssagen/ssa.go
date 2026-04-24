@@ -781,22 +781,44 @@ func (s *state) flushPendingHeapAllocations() {
 	size = types.RoundUp(size, align)
 
 	// Convert newObject call to a mallocgc call.
-	args := []*ssa.Value{
-		s.constInt(types.Types[types.TUINTPTR], size),
-		s.constNil(call.Args[0].Type), // a nil *runtime._type
-		s.constBool(true),             // needZero TODO: false is ok?
-		call.Args[1],                  // memory
+	// gd Phase G: mallocgc's sig is extended with one outBufK
+	// unsafe.Pointer per pointer result. Since mallocgc returns
+	// unsafe.Pointer, the extended arity is 3 user + 1 outBuf +
+	// mem = 5 values. We build the arg/result type lists and
+	// argslots to match.
+	//
+	// The incoming `call` is the newobject StaticLECall, whose
+	// Args tail may already include Phase G's outBuf nil between
+	// the user args and mem — fetch mem via MemoryArg() rather
+	// than positional indexing so we work for both.
+	unsafePtrTyp := types.Types[types.TUNSAFEPTR]
+	argSize := s.constInt(types.Types[types.TUINTPTR], size)
+	argType := s.constNil(call.Args[0].Type) // a nil *runtime._type
+	argZero := s.constBool(true)             // needZero TODO: false is ok?
+	argMem := call.MemoryArg()
+	argTypes := []*types.Type{argSize.Type, argType.Type, argZero.Type}
+	if types.PhaseGActive {
+		argTypes = append(argTypes, unsafePtrTyp)
 	}
+
 	mallocSym := ir.Syms.MallocGC
 	if specialMallocSym := s.specializedMallocSym(size, false); specialMallocSym != nil {
 		mallocSym = specialMallocSym
 	}
 	call.Aux = ssa.StaticAuxCall(mallocSym, s.f.ABIDefault.ABIAnalyzeTypes(
-		[]*types.Type{args[0].Type, args[1].Type, args[2].Type},
-		[]*types.Type{types.Types[types.TUNSAFEPTR]},
+		argTypes,
+		[]*types.Type{unsafePtrTyp},
 	))
-	call.AuxInt = 4 * s.config.PtrSize // arg+results size, uintptr/ptr/bool/ptr
-	call.SetArgs4(args[0], args[1], args[2], args[3])
+	// arg+results size: 1 uintptr + 1 ptr + 1 bool + (1 outBuf if Phase G) + 1 ptr result
+	if types.PhaseGActive {
+		call.AuxInt = 5 * s.config.PtrSize
+		argOutBuf := s.constNil(unsafePtrTyp)
+		call.SetArgs4(argSize, argType, argZero, argOutBuf)
+		call.AddArg(argMem)
+	} else {
+		call.AuxInt = 4 * s.config.PtrSize
+		call.SetArgs4(argSize, argType, argZero, argMem)
+	}
 	// TODO: figure out how to pass alignment to runtime
 
 	call.Type = types.NewTuple(types.Types[types.TUNSAFEPTR], types.TypeMem)
