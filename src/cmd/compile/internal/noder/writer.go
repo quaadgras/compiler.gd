@@ -1085,12 +1085,18 @@ func phaseGEligibleForWriter(obj *types2.Func, decl *syntax.FuncDecl) bool {
 		return false
 	}
 	// cgo generates Go wrappers around C functions in
-	// _cgo_gotypes.go with names like _Cfunc_foo / _Cgo_foo. The
-	// wrapper bodies forward to the C call via a runtime cgocall
-	// bridge that expects the Go-side ABI to match the C signature
-	// exactly; adding an outBuf shifts which register holds each
-	// user arg. Skip these by name.
-	if n := obj.Name(); strings.HasPrefix(n, "_Cfunc_") || strings.HasPrefix(n, "_Cgo_") || strings.HasPrefix(n, "_cgo") {
+	// _cgo_gotypes.go and annotates every one with
+	// //go:cgo_unsafe_args. That pragma's semantics — "caller
+	// builds a contiguous arg frame that a C callee reads by
+	// offset" — is exactly the condition that forbids appending an
+	// outBuf register: the C side knows the stock layout and
+	// shifting which register holds each user arg feeds garbage to
+	// C. The pragma is reliable (cmd/cgo/out.go:649 emits it on
+	// every C-boundary wrapper) and precise — a user COULD write
+	// //go:cgo_unsafe_args by hand, but then they've opted into
+	// the same C-ABI constraint so skipping is the right call
+	// semantically, not just incidentally.
+	if asPragmaFlag(decl.Pragma)&ir.CgoUnsafeArgs != 0 {
 		return false
 	}
 	sig, ok := obj.Type().(*types2.Signature)
