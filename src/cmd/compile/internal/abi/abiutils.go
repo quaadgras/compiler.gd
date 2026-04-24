@@ -378,11 +378,10 @@ func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Type) *ABIParamResultInfo 
 
 	info := &ABIParamResultInfo{config: config}
 
-	// Inputs. gd Phase G: when the sig is eligible, use the virtual
-	// view so outBuf slots are allocated alongside user params. Stock
-	// sigs get VirtualRecvParams == RecvParams, so behaviour is
-	// unchanged for every non-eligible callable.
-	info.inparams = assignParams(ft.VirtualRecvParams(), false)
+	// Inputs. gd Phase G: for eligible sigs NewSignature already baked
+	// the synthesised outBufK *T params into RecvParams, so this loop
+	// naturally covers them alongside the user params.
+	info.inparams = assignParams(ft.RecvParams(), false)
 	s.stackOffset = types.RoundUp(s.stackOffset, int64(types.RegSize))
 	info.inRegistersUsed = s.rUsed.intRegs + s.rUsed.floatRegs
 
@@ -408,10 +407,9 @@ func (config *ABIConfig) ABIAnalyze(t *types.Type, setNname bool) *ABIParamResul
 	result := config.ABIAnalyzeFuncType(t)
 
 	// Fill in the frame offsets for receiver, inputs, results. gd
-	// Phase G: match ABIAnalyzeFuncType's virtual view so the
-	// inparams loop covers the outBuf slots. VirtualRecvParams
-	// equals RecvParams for non-eligible sigs.
-	for i, f := range t.VirtualRecvParams() {
+	// Phase G.2.1: NewSignature bakes the outBufK params into
+	// RecvParams, so this loop naturally updates them.
+	for i, f := range t.RecvParams() {
 		config.updateOffset(result, f, result.inparams[i], false, setNname)
 	}
 	for i, f := range t.Results() {

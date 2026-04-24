@@ -402,6 +402,11 @@ func (r *reader) signature(recv *types.Var, rtparams, tparams []*types.TypeParam
 	params := r.params(types.ParamVar)
 	results := r.params(types.ResultVar)
 	variadic := r.Bool()
+	// gd Phase G.2.1: fork writer serialises an origin-extended bit
+	// after the variadic flag. go/types-level readers don't need
+	// that info (the outBuf params only exist at the cmd/compile
+	// types layer), but we must consume the bit to stay in sync.
+	_ = r.Bool()
 
 	return types.NewSignatureType(recv, rtparams, tparams, params, results, variadic)
 }

@@ -700,6 +700,34 @@ func (w *writer) signature(sig *types2.Signature) {
 	w.params(sig.Params())
 	w.params(sig.Results())
 	w.Bool(sig.Variadic())
+	// gd Phase G.2.1: serialise whether this compile's Phase G
+	// rewrite applies to this sig, so the reader can reconstruct
+	// the Type in the exact form the origin compiled against —
+	// runtime-origin sigs stay stock, non-runtime-origin sigs ride
+	// through extended. Without this bit, non-runtime readers would
+	// re-extend runtime sigs and desync with the stock-ABI runtime
+	// body.
+	w.Bool(phaseGAppliesTo(sig))
+}
+
+// phaseGAppliesTo reports whether NewSignature would extend this
+// sig with outBuf params under the current compile's context. Mirrors
+// types.PhaseGApplies but works on types2 (which is what the writer
+// sees) rather than types.
+func phaseGAppliesTo(sig *types2.Signature) bool {
+	if !typecheck.PhaseGActive {
+		return false
+	}
+	if base.Flag.CompilingRuntime {
+		return false
+	}
+	results := sig.Results()
+	for i := 0; i < results.Len(); i++ {
+		if _, isPtr := results.At(i).Type().(*types2.Pointer); isPtr {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *writer) params(typ *types2.Tuple) {
@@ -1054,73 +1082,6 @@ func (pw *pkgWriter) selectorIdx(obj types2.Object) selectorInfo {
 
 // @@@ Compiler extensions
 
-// phaseGEligibleForWriter decides whether the writer should tag obj
-// with ir.GdReturnOutBuf so the reader applies the Phase G outBuf
-// rewrite to this function. The predicate must stay symmetric with
-// the reader's application logic at reader.go's funcExt: both sides
-// agreeing keeps pkgbits writer/reader counts aligned.
-//
-// V1 eligibility:
-//   - feature gate on (typecheck.PhaseGActive);
-//   - not compiling runtime (CompilingRuntime skips);
-//   - at least one pointer-typed result;
-//   - no receiver (methods deferred);
-//   - not variadic.
-//
-// Generic shape-functions carry a runtime dict param but it's
-// introduced after writer-time, so there's no dict-check to do here —
-// types2.Signature is the user's source-level sig. If generics
-// cause other issues we'll add a separate gate.
-func phaseGEligibleForWriter(obj *types2.Func, decl *syntax.FuncDecl) bool {
-	if !typecheck.PhaseGActive {
-		return false
-	}
-	if base.Flag.CompilingRuntime {
-		return false
-	}
-	if decl == nil || decl.Body == nil {
-		// No Go body → asm-backed (or external via linkname).
-		// Those expect stock ABI; changing arg layout would shift
-		// FP offsets relative to what the .s source encoded.
-		return false
-	}
-	// cgo generates Go wrappers around C functions in
-	// _cgo_gotypes.go and annotates every one with
-	// //go:cgo_unsafe_args. That pragma's semantics — "caller
-	// builds a contiguous arg frame that a C callee reads by
-	// offset" — is exactly the condition that forbids appending an
-	// outBuf register: the C side knows the stock layout and
-	// shifting which register holds each user arg feeds garbage to
-	// C. The pragma is reliable (cmd/cgo/out.go:649 emits it on
-	// every C-boundary wrapper) and precise — a user COULD write
-	// //go:cgo_unsafe_args by hand, but then they've opted into
-	// the same C-ABI constraint so skipping is the right call
-	// semantically, not just incidentally.
-	if asPragmaFlag(decl.Pragma)&ir.CgoUnsafeArgs != 0 {
-		return false
-	}
-	sig, ok := obj.Type().(*types2.Signature)
-	if !ok {
-		return false
-	}
-	if sig.Recv() != nil {
-		return false
-	}
-	if sig.Variadic() {
-		return false
-	}
-	results := sig.Results()
-	any := false
-	for i := 0; i < results.Len(); i++ {
-		r := results.At(i)
-		if _, isPtr := r.Type().(*types2.Pointer); isPtr {
-			any = true
-			break
-		}
-	}
-	return any
-}
-
 func (w *writer) funcExt(obj *types2.Func) {
 	decl, ok := w.p.funDecls[obj]
 	assert(ok)
@@ -1134,13 +1095,6 @@ func (w *writer) funcExt(obj *types2.Func) {
 		w.p.errorf(decl, "go:nosplit and go:systemstack cannot be combined")
 	}
 
-	// gd Phase G: mark this function eligible for the outBuf rewrite
-	// if the current compile admits it. Symmetric with the reader
-	// which applies AppendReturnOutBufs on seeing this bit. See
-	// doc/gd/escape-bits-phase-g-plan.md.
-	if phaseGEligibleForWriter(obj, decl) {
-		pragma |= ir.GdReturnOutBuf
-	}
 	wi := asWasmImport(decl.Pragma)
 	we := asWasmExport(decl.Pragma)
 

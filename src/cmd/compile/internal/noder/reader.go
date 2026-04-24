@@ -607,16 +607,23 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 		params[len(params)-1].SetIsDDD(true)
 	}
 
-	// gd Phase G: signature-level rewrite is NOT applied here. The
-	// decision is per-function (writer sets ir.GdReturnOutBuf on
-	// eligible funcs). reader.funcExt flips the GdReturnOutBuf bit
-	// on the sig when it sees the pragma, activating the
-	// Type.VirtualParams() projection that ABI / call-site codegen
-	// consults. Stock Params() / Results() stay the same so
-	// reflect, type identity, and shape-type checks aren't
-	// perturbed. See doc/gd/escape-bits-phase-g-plan.md.
-
-	return types.NewSignature(recv, params, results)
+	// gd Phase G.2.1: reconstruct the sig in the exact form the
+	// origin compiled against. The origin wrote a bool indicating
+	// whether it extended this sig with outBufs; if so we extend
+	// now (mirroring NewSignature's rewrite) and use the flag-on
+	// constructor. Otherwise we keep it stock. This preserves ABI
+	// compatibility across runtime↔non-runtime boundaries.
+	originExtended := r.Bool()
+	if originExtended {
+		outBufs := types.BuildOutBufFields(results)
+		if len(outBufs) > 0 {
+			extended := make([]*types.Field, 0, len(params)+len(outBufs))
+			extended = append(extended, params...)
+			extended = append(extended, outBufs...)
+			params = extended
+		}
+	}
+	return types.NewSignatureAsIs(recv, params, results, originExtended)
 }
 
 func (r *reader) params() []*types.Field {
@@ -1158,18 +1165,6 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 	}
 
 	fn.Pragma = r.pragmaFlag()
-
-	// gd Phase G: flip the GdReturnOutBuf bit on the function's sig
-	// type when the writer tagged the function eligible. The bit
-	// activates the projected/virtual view — sig.Params() stays
-	// stock-length, sig.VirtualParams() includes synthesised outBufs.
-	// Consumers that need the extended view (abiutils, call-site arg
-	// fill) ask via the Virtual* helpers; stock consumers keep
-	// seeing the unextended form so reflect, type identity, and
-	// shape-type checks are untouched. See doc/gd/escape-bits-phase-g-plan.md.
-	if fn.Pragma&ir.GdReturnOutBuf != 0 {
-		name.Type().SetGdReturnOutBuf(true)
-	}
 
 	r.linkname(name)
 

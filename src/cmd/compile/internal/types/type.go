@@ -1743,6 +1743,39 @@ func NewInterface(methods []*Field) *Type {
 // NewSignature returns a new function type for the given receiver,
 // parameters, and results, any of which may be nil.
 func NewSignature(recv *Field, params, results []*Field) *Type {
+	// gd Phase G: for fresh constructions, apply the outBuf rewrite
+	// when the gate is on and we're not compiling runtime-special
+	// code. NewSignatureAsIs is the sibling used by the pkgbits
+	// reader when the params are already in their final form (i.e.
+	// serialised by another package's compiler and should ride
+	// through unchanged).
+	flagOn := PhaseGApplies(results) && !paramsAlreadyExtended(params)
+	if flagOn {
+		outBufs := BuildOutBufFields(results)
+		extended := make([]*Field, 0, len(params)+len(outBufs))
+		extended = append(extended, params...)
+		extended = append(extended, outBufs...)
+		params = extended
+	}
+	return newSignatureInternal(recv, params, results, flagOn)
+}
+
+// NewSignatureAsIs constructs a func Type with exactly the given
+// recv/params/results — no Phase G rewrite applied here. The caller
+// is responsible for passing params in final form. The `extended`
+// bool indicates whether the sig participates in the Phase G ABI
+// (so the flag is set without re-running the rewrite).
+//
+// Use this from the pkgbits reader: the sig on the wire was already
+// constructed by the exporting package's compiler, and must ride
+// through unchanged so runtime-origin sigs stay stock and
+// non-runtime-origin sigs stay extended.
+func NewSignatureAsIs(recv *Field, params, results []*Field, extended bool) *Type {
+	return newSignatureInternal(recv, params, results, extended)
+}
+
+func newSignatureInternal(recv *Field, params, results []*Field, flagOn bool) *Type {
+
 	startParams := 0
 	if recv != nil {
 		startParams = 1
@@ -1773,6 +1806,9 @@ func NewSignature(recv *Field, params, results []*Field) *Type {
 
 	if fieldsHasShape(allParams) {
 		t.SetHasShape(true)
+	}
+	if flagOn {
+		t.SetGdReturnOutBuf(true)
 	}
 
 	return t

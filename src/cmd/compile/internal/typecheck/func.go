@@ -275,11 +275,11 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 	// off or when the callee has no outBufs.
 	FillOutBufArgs(n, t)
 
-	// gd Phase G: pass the virtual (outBuf-extended) param list so
-	// the arg-count check matches the nils FillOutBufArgs appended.
-	// When Phase G is inactive or the callee isn't eligible, this
-	// returns t.Params() unchanged.
-	typecheckaste(ir.OCALL, n.Fun, n.IsDDD, t.VirtualParams(), n.Args, func() string { return fmt.Sprintf("argument to %v", n.Fun) })
+	// Phase G.2.1: t.Params() already includes outBuf slots because
+	// NewSignature baked them in; FillOutBufArgs appended matching
+	// nils to n.Args above. For non-eligible sigs, t.Params() is
+	// stock and there's nothing extra.
+	typecheckaste(ir.OCALL, n.Fun, n.IsDDD, t.Params(), n.Args, func() string { return fmt.Sprintf("argument to %v", n.Fun) })
 	FixVariadicCall(n)
 	FixMethodCall(n)
 	if t.NumResults() == 0 {

@@ -457,17 +457,6 @@ const (
 	GoBuildPragma
 
 	RegisterParams // TODO(register args) remove after register abi is working
-
-	// GdReturnOutBuf marks a function whose gd Phase G rewrite is
-	// active: the callee has been (or should be) extended with
-	// trailing outBufK *T params, one per pointer-typed result. The
-	// pragma bit is the single source of truth for per-function
-	// eligibility across write/read boundaries. The writer sets it
-	// at its compile based on current-compile eligibility; the
-	// reader applies AppendReturnOutBufs at funcExt when the bit is
-	// set. See doc/gd/escape-bits-phase-g-plan.md.
-	GdReturnOutBuf
-
 )
 
 var BlankNode *Name
