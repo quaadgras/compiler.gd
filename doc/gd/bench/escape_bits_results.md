@@ -123,3 +123,51 @@ iface dispatch, handler registries, callback maps) and small
 overhead elsewhere. Allocation counts reliably drop; wall time
 trades with per-call dispatch cost depending on how dense the
 indirect calls are in the measured hot path.
+
+## Binary size
+
+| program                            | stock      | fork       | delta    |
+|------------------------------------|-----------:|-----------:|---------:|
+| hello world (`fmt.Println`)        |  2,392,425 |  2,551,634 |   +6.7%  |
+| stdlib mix (json/http/slog/regexp) |  6,243,262 |  6,908,907 |  +10.7%  |
+
+Section breakdown on the larger binary:
+
+| section              |     stock |      fork |    delta |
+|----------------------|----------:|----------:|---------:|
+| `.text` (code)       | 1,881,585 | 2,374,225 |  +26.2%  |
+| `.rodata`            |   544,793 |   545,977 |   +0.2%  |
+| `.gopclntab`         | 1,527,966 | 1,592,155 |   +4.2%  |
+| `.data`              |    53,810 |    63,762 |  +18.5%  |
+| `.noptrdata`         |   288,417 |   288,737 |   +0.1%  |
+
+Where the growth comes from:
+
+- **`.text` (+26%)**: wrap calls + box-promotion prologues at every
+  candidate call site, plus the new runtime helpers
+  (`resolveMask`, `maybeInPlace`, `materializeToHeap` stack-range
+  check, idempotence path).
+- **`.data` (+18%)**: funcsym entries widened from `{F}` (8 B) to
+  `{F, M}` (16 B) — every function value in the binary carries its
+  escape mask word.
+- **`.gopclntab` (+4%)**: a handful of new runtime-helper PCs add
+  line-table entries; otherwise unchanged.
+- **`.rodata`**: itab mask tails are small enough to disappear into
+  the noise.
+
+Reproduce:
+```
+mkdir /tmp/hello && cd /tmp/hello
+printf 'module hello\ngo 1.24\n' > go.mod
+printf 'package main\nimport "fmt"\nfunc main() { fmt.Println("hi") }\n' > main.go
+
+# stock
+/usr/lib/go/bin/go build -o hello-stock .
+
+# fork
+GOROOT=/home/quentin/git/go GOTOOLCHAIN=local \
+  /usr/lib/go/bin/go build -o hello-fork .
+
+ls -la hello-*
+size -A hello-stock hello-fork
+```
