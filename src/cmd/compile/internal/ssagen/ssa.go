@@ -6432,6 +6432,22 @@ func (s *state) intDivide(n ir.Node, a, b *ssa.Value) *ssa.Value {
 // If returns is false, the block is marked as an exit block.
 func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args ...*ssa.Value) []*ssa.Value {
 	s.prevCall = nil
+
+	// gd Phase G (universal extension): if this call returns any
+	// pointers, the target's sig was extended at NewSignature time
+	// with one outBufK *T per pointer result. Every other caller
+	// hits the Phase G path through typecheck.FillOutBufArgs, but
+	// rtcall bypasses that layer and builds its own aux directly —
+	// so append matching nil outBufs here to keep caller/callee in
+	// sync. If PhaseGActive is off this is a no-op.
+	if types.PhaseGActive {
+		for _, r := range results {
+			if r != nil && r.IsPtr() {
+				args = append(args, s.constNil(r))
+			}
+		}
+	}
+
 	// Write args to the stack
 	off := base.Ctxt.Arch.FixedFrameSize
 	var callArgs []*ssa.Value

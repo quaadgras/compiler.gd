@@ -11,11 +11,11 @@ import (
 //
 //go:noinline
 func newSig(params, results []*types.Field) *types.Type {
-	// gd Phase G: runtime-function type descriptors must stay
-	// stock — runtime.* symbols implement stock ABI regardless of
-	// whether the current compile has Phase G active. Use
-	// NewSignatureAsIs with extended=false to bypass the rewrite.
-	return types.NewSignatureAsIs(nil, params, results, false)
+	// gd Phase G (universal extension): runtime funcs use extended
+	// ABI like everyone else. NewSignature applies the rewrite so
+	// the compiler's view of runtime.newobject etc. matches the
+	// actual runtime body's extended ABI.
+	return types.NewSignature(nil, params, results)
 }
 
 func params(tlist ...*types.Type) []*types.Field {

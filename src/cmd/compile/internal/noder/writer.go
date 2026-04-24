@@ -714,11 +714,11 @@ func (w *writer) signature(sig *types2.Signature) {
 // sig with outBuf params under the current compile's context. Mirrors
 // types.PhaseGApplies but works on types2 (which is what the writer
 // sees) rather than types.
+//
+// Universal extension (Phase G.2.1): no CompilingRuntime gate. Every
+// pointer-returning sig everywhere is uniformly extended.
 func phaseGAppliesTo(sig *types2.Signature) bool {
 	if !typecheck.PhaseGActive {
-		return false
-	}
-	if base.Flag.CompilingRuntime {
 		return false
 	}
 	results := sig.Results()

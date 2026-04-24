@@ -109,6 +109,23 @@ func vmkcall(fn ir.Node, t *types.Type, init *ir.Nodes, va []ir.Node) *ir.CallEx
 		base.Fatalf("mkcall %v %v", fn, fn.Type())
 	}
 
+	// gd Phase G (universal extension): the callee's sig may have
+	// trailing outBufK unsafe.Pointer params appended by
+	// NewSignature. Walk-level mk*call helpers only receive the
+	// user args, so pad va with nil unsafe.Pointer per synthesised
+	// outBuf. typecheck.Call → FillOutBufArgs handles the typical
+	// path but matches by user-visible arity; mkcall can't rely on
+	// that because the runtime sigs in builtin.go are already
+	// extended.
+	if nOut := fn.Type().NumOutBufs(); nOut > 0 {
+		unsafePtr := types.Types[types.TUNSAFEPTR]
+		for i := 0; i < nOut; i++ {
+			nilArg := ir.NewNilExpr(base.Pos, unsafePtr)
+			nilArg.SetTypecheck(1)
+			va = append(va, nilArg)
+		}
+	}
+
 	n := fn.Type().NumParams()
 	if n != len(va) {
 		base.Fatalf("vmkcall %v needs %v args got %v", fn, n, len(va))

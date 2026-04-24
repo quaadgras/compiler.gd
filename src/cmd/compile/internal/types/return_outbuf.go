@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"cmd/compile/internal/base"
 	"cmd/internal/src"
 )
 
@@ -55,14 +54,17 @@ const PhaseGActive = false
 const OutBufNamePrefix = ".outBuf"
 
 // PhaseGApplies reports whether NewSignature should append outBuf
-// params to a sig with the given results. True when the gate is on,
-// we're not compiling runtime-special code, and at least one result
-// is a pointer type.
+// params to a sig with the given results. True when the gate is on
+// and at least one result is a pointer type.
+//
+// Universal extension: we do NOT gate on CompilingRuntime. Every
+// pointer-returning func Type in the universe is uniformly extended
+// — runtime's Go code, asm decls, and cgo wrappers all see the
+// extended ABI. That eliminates the cross-package stock-vs-extended
+// shape mismatch that plagued the per-package approach. Asm and
+// cgo sources have been updated in tandem to accept the extra arg.
 func PhaseGApplies(results []*Field) bool {
 	if !PhaseGActive {
-		return false
-	}
-	if base.Flag.CompilingRuntime {
 		return false
 	}
 	for _, r := range results {
@@ -96,10 +98,24 @@ func paramsAlreadyExtended(params []*Field) bool {
 	return last != nil && last.Sym != nil && strings.HasPrefix(last.Sym.Name, OutBufNamePrefix)
 }
 
-// BuildOutBufFields returns a fresh slice of K outBufK *T Fields,
-// one per pointer-typed result. Used by NewSignature to extend the
+// BuildOutBufFields returns a fresh slice of K outBufK Fields, one
+// per pointer-typed result. Used by NewSignature to extend the
 // param list, and by the pkgbits reader to extend already-written
 // sigs whose origin applied the rewrite.
+//
+// Field type: unsafe.Pointer, not *T.
+//
+// Using a concrete unsafe.Pointer (rather than copying the result's
+// *T type) keeps the outBuf fields out of SubstAny's way when the
+// compiler-side builtin sig descriptors use `any` as a placeholder
+// (runtime's mapaccess1(*byte, map[any]any, *any) *any etc.). An
+// `*any` outBuf would double-count in the any-substitution loop;
+// a plain unsafe.Pointer doesn't participate at all.
+//
+// ABI-wise this is fine — runtime.maybeInPlace and the caller's
+// stack-buffer materialisation both operate on raw pointers anyway,
+// and the callee casts back to the concrete type via the result's
+// declared type.
 func BuildOutBufFields(results []*Field) []*Field {
 	n := countPointerResults(results)
 	if n == 0 {
@@ -107,11 +123,12 @@ func BuildOutBufFields(results []*Field) []*Field {
 	}
 	out := make([]*Field, 0, n)
 	k := 0
+	unsafePtr := Types[TUNSAFEPTR]
 	for _, r := range results {
 		if r == nil || r.Type == nil || !r.Type.IsPtr() {
 			continue
 		}
-		out = append(out, NewField(src.NoXPos, outBufSym(k), r.Type))
+		out = append(out, NewField(src.NoXPos, outBufSym(k), unsafePtr))
 		k++
 	}
 	return out
