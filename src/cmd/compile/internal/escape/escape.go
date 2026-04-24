@@ -293,6 +293,71 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 	}
 }
 
+// isCandidateLoc reports whether n is a node whose storage may safely
+// be re-homed by the runtime escape-bits wrap.
+//
+// Three categories:
+//  1. Fresh-allocation expressions (ONEW) where the caller never
+//     observes the allocated object except through a single value.
+//     The wrap can freely substitute a heap copy for the allocation.
+//  2. Pre-existing local PAUTO names whose address is taken and
+//     passed to a dynamic callee. These get promoted to PAUTOHEAP
+//     by walk so the var's backing storage lives behind an
+//     updatable pointer (stack backing initially, heap after the
+//     wrap migrates). Post-call reads through the pointer agree
+//     with the callee's view — no divergent stack copy.
+//
+// Composite literals, closures, maps, and iface conversions are
+// excluded: their lifetimes interact with consumer patterns the
+// wrap can't safely preserve (e.g. capturing references).
+func isCandidateLoc(n ir.Node) bool {
+	if n == nil {
+		return false
+	}
+	switch n.Op() {
+	case ir.ONAME:
+		name := n.(*ir.Name)
+		// Only user-written locals-with-address-taken need the
+		// box. Params already have their own Heapaddr dance;
+		// compiler-synthesised temporaries (AutoTemp, names that
+		// look like ".autotmp_*", etc.) opt out because their
+		// lifetime and aliasing guarantees come from the walk
+		// pass that created them, not from surface-level
+		// semantics.
+		if name.Class != ir.PAUTO {
+			return false
+		}
+		if !name.Addrtaken() {
+			return false
+		}
+		if name.AutoTemp() {
+			return false
+		}
+		// Skip types the runtime wrap can't materialize: zero-
+		// sized types and not-in-heap types.
+		t := name.Type()
+		if t == nil || t.Size() == 0 || t.NotInHeap() {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// shouldEnableEscapeCandidate is the activation gate for the gd
+// escape-bits Phase D optimization. Now that tagHole only routes
+// candidate-eligible (pointer-shaped) args through candidateHole,
+// and isCandidateLoc is restricted to ONAME-with-Addrtaken, the
+// remaining known-unsafe shapes are all funnelled back to stock
+// heapLoc. The gate can therefore open fork-wide; it stays as a
+// kill switch in case a new failure mode surfaces.
+func shouldEnableEscapeCandidate(fn *ir.Func) bool {
+	if fn == nil || fn.Nname == nil {
+		return false
+	}
+	return true
+}
+
 func (b *batch) finish(fns []*ir.Func) {
 	// Record parameter tags for package export data.
 	for _, fn := range fns {
@@ -350,16 +415,35 @@ func (b *batch) finish(fns []*ir.Func) {
 			}
 			n.SetEsc(ir.EscHeap)
 		} else if loc.hasAttr(attrCandidateEscape) {
-			// gd escape-bits: sole escape path is through a dynamic
-			// callee. The node's allocation still goes to the heap
-			// (EscHeap), preserving correctness for every consumer
-			// that inspects Esc(); the EscCandidate bit is the
-			// signal that walk's call-site pass may (later) rewrite
-			// the pass-by-ptr argument into a wrap, so the heap
-			// allocation can be delayed to the moment of actual
-			// escape. See doc/gd/escape-bits.md.
-			n.SetEsc(ir.EscHeap)
-			n.SetEscCandidate(true)
+			// gd escape-bits: the solver routed this loc's
+			// escape edge through a dynamic callee (candidateHole).
+			//
+			// When the per-function activation gate is open and
+			// the loc is one of the shapes the wrap safely
+			// handles (see isCandidateLoc), tag as candidate so
+			// walk can insert the mask-check wrap and update
+			// the caller's pointer via Heapaddr indirection.
+			//
+			// Otherwise fall back to a normal heap allocation:
+			// this preserves correctness for every loc that
+			// would have been EscHeap under stock Go by
+			// treating attrCandidateEscape as equivalent to
+			// attrEscapes at finalize time.
+			if !base.Flag.CompilingRuntime &&
+				isCandidateLoc(n) &&
+				shouldEnableEscapeCandidate(loc.curfn) {
+				n.SetEsc(ir.EscHeap)
+				n.SetEscCandidate(true)
+			} else {
+				if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
+					if n.Op() == ir.OAPPEND {
+						base.WarnfAt(n.Pos(), "append escapes to heap")
+					} else {
+						base.WarnfAt(n.Pos(), "%v escapes to heap", n)
+					}
+				}
+				n.SetEsc(ir.EscHeap)
+			}
 		} else {
 			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
 				if n.Op() == ir.OAPPEND {

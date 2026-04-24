@@ -279,6 +279,12 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	base.Timer.Start("fe", "escapes")
 	escape.Funcs(typecheck.Target.Funcs)
 
+	// gd escape-bits: write the per-method EscMask into every itab
+	// whose slot was reserved during noder-time writeITab calls. Must
+	// run after escape so ir.Func.EscMask is populated. See
+	// doc/gd/escape-bits.md.
+	reflectdata.FinalizeItabMasks()
+
 	slice.Funcs(typecheck.Target.Funcs)
 
 	loopvar.LogTransformations(transformed)

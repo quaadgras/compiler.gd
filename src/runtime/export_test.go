@@ -17,6 +17,20 @@ import (
 )
 
 var MaterializeToHeap = materializeToHeap
+var MaybeInPlace = maybeInPlace
+
+// ResolveMask exposes the internal Phase-F mask resolver so
+// in-package runtime tests can exercise the cycle/depth
+// fallback (see escape_bits_test.go).
+var ResolveMask = resolveMask
+
+// MaxComputeMaskDepth is the starting recursion budget that
+// runtime-internal call sites seed resolveMask with.
+const MaxComputeMaskDepth = maxComputeMaskDepth
+
+// ConservativeAllEscapeMask is the fallback mask returned when
+// the depth budget runs out (probable cycle).
+const ConservativeAllEscapeMask = conservativeAllEscapeMask
 
 // MaterializeToHeapTyped is a test-only helper that materialises src
 // into a fresh heap copy of the same dynamic type carried by typ (an
@@ -35,6 +49,14 @@ func MaterializeToHeapTyped(src unsafe.Pointer, typ any) unsafe.Pointer {
 func MaybeEscapeArgTyped(mask uint64, argIdx int, src unsafe.Pointer, typeTag any) unsafe.Pointer {
 	e := (*abi.EmptyInterface)(unsafe.Pointer(&typeTag))
 	return maybeEscapeArg(mask, argIdx, src, e.Type)
+}
+
+// MaybeInPlaceTyped is the test-only wrapper for maybeInPlace.
+// Provides an *abi.Type via an any's concrete-type descriptor
+// so test code doesn't have to reach into runtime internals.
+func MaybeInPlaceTyped(outBuf unsafe.Pointer, typeTag any) unsafe.Pointer {
+	e := (*abi.EmptyInterface)(unsafe.Pointer(&typeTag))
+	return maybeInPlace(outBuf, e.Type)
 }
 
 var Fadd64 = fadd64

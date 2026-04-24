@@ -332,7 +332,7 @@ func walkMakeMap(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 
 	// var m *Map
 	var m ir.Node
-	if ir.StackAllocatable(n.Esc()) {
+	if ir.NodeStackAllocatable(n) {
 		// Allocate hmap on stack.
 
 		// var mv Map
@@ -392,7 +392,7 @@ func walkMakeMap(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 		// For hint <= abi.MapGroupSlots no groups will be
 		// allocated by makemap. Therefore, no groups need to be
 		// allocated in this code path.
-		if ir.StackAllocatable(n.Esc()) {
+		if ir.NodeStackAllocatable(n) {
 			// Only need to initialize m.seed since
 			// m map has been allocated on the stack already.
 			// m.seed = uintptr(rand())
@@ -450,7 +450,7 @@ func walkMakeSlice(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 	}
 
 	tryStack := false
-	if ir.StackAllocatable(n.Esc()) {
+	if ir.NodeStackAllocatable(n) {
 		if why := escape.HeapAllocReason(n); why != "" {
 			base.Fatalf("%v has EscNone, but %v", n, why)
 		}
@@ -563,7 +563,7 @@ func walkMakeSlice(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 
 // walkMakeSliceCopy walks an OMAKESLICECOPY node.
 func walkMakeSliceCopy(n *ir.MakeExpr, init *ir.Nodes) ir.Node {
-	if ir.StackAllocatable(n.Esc()) {
+	if ir.NodeStackAllocatable(n) {
 		base.Fatalf("OMAKESLICECOPY with EscNone: %v", n)
 	}
 
@@ -618,11 +618,21 @@ func walkNew(n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 	if t.NotInHeap() {
 		base.Errorf("%v can't be allocated in Go; it is incomplete (or unallocatable)", n.Type().Elem())
 	}
-	if ir.StackAllocatable(n.Esc()) {
+	if ir.NodeStackAllocatable(n) {
 		if t.Size() > ir.MaxImplicitStackVarSize {
 			base.Fatalf("large ONEW with EscNone: %v", n)
 		}
-		return stackTempAddr(init, t)
+		addr := stackTempAddr(init, t)
+		// gd escape-bits: propagate the EscCandidate bit from the
+		// ONEW to the resulting &stackTemp expression so the
+		// call-site wrap can still detect the candidate at the
+		// call site (ONEW is the node tagged by escape; walk
+		// rewrites it in place and the bit would otherwise be
+		// lost).
+		if n.EscCandidate() {
+			addr.SetEscCandidate(true)
+		}
+		return addr
 	}
 	types.CalcSize(t)
 	n.MarkNonNil()
@@ -822,7 +832,7 @@ func walkUnsafeData(n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 		// The escape pass's OUNSAFESTRINGDATA case spills via a location
 		// whose escape status is reflected in n.Esc(); see
 		// cmd/compile/internal/escape/expr.go.
-		if ir.StackAllocatable(n.Esc()) {
+		if ir.NodeStackAllocatable(n) {
 			res := typecheck.Expr(ir.NewUnaryExpr(n.Pos(), ir.OSPTR, n.X))
 			res.SetType(n.Type())
 			return walkExpr(res, init)

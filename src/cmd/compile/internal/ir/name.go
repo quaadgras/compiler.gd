@@ -233,7 +233,7 @@ func (n *Name) OnStack() bool {
 	if n.Op() == ONAME {
 		switch n.Class {
 		case PPARAM, PPARAMOUT, PAUTO:
-			return n.Esc() != EscHeap
+			return !IsHeapAllocated(n)
 		case PEXTERN, PAUTOHEAP:
 			return false
 		}

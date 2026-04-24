@@ -141,6 +141,115 @@ func TestEscapeBitsIfaceEscape(t *testing.T) {
 	}
 }
 
+// BenchmarkEscapeBitsClosureNonEscape measures the alloc + time
+// win of the escape-bits wrap when the closure does NOT retain its
+// arg. Stock Go allocates &x on the heap every iteration (the
+// escape analyzer can't see through the opaque func var); the gd
+// fork's wrap sees the clear mask bit and leaves &x on the stack.
+func BenchmarkEscapeBitsClosureNonEscape(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		x := 42
+		nonEscapingReader(&x)
+	}
+}
+
+// BenchmarkEscapeBitsClosureEscape locks in the inverse: when the
+// closure's mask bit IS set, the gd fork still allocates once —
+// the wrap materializes &x to heap before dispatch, matching stock
+// Go exactly.
+func BenchmarkEscapeBitsClosureEscape(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		x := 42
+		escapingRetainer(&x)
+	}
+}
+
+// BenchmarkEscapeBitsIfaceNonEscape — iface dispatch, callee does
+// not retain its arg.
+func BenchmarkEscapeBitsIfaceNonEscape(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		x := 42
+		escBitsOpaqueReader.Consume(&x)
+	}
+}
+
+// BenchmarkEscapeBitsIfaceEscape — iface dispatch, callee retains.
+func BenchmarkEscapeBitsIfaceEscape(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		x := 42
+		escBitsOpaqueRetainer.Consume(&x)
+	}
+}
+
+// --- Devirt-blocked benchmarks ---
+//
+// These patterns defeat stock Go's devirtualization by forcing
+// the interface or func value through a path where the compiler
+// can't prove a single concrete callee. They mirror real-world
+// plugin / event-bus / handler-registry shapes where multiple
+// implementations are registered at init and the caller genuinely
+// doesn't know which one is active at compile time.
+
+type escBitsHandler interface {
+	Handle(p *int)
+}
+
+type escBitsReadHandler struct{}
+
+func (escBitsReadHandler) Handle(p *int) { escBitsSink = *p }
+
+type escBitsWriteHandler struct{}
+
+func (escBitsWriteHandler) Handle(p *int) { *p = escBitsSink + 1 }
+
+// escBitsHandlerRegistry is populated in init with two concrete
+// types so escape analysis can't devirtualize the iface variable
+// back to a single method body. The active handler is picked at
+// runtime via map lookup, which also keeps the value opaque.
+var escBitsHandlerRegistry map[string]escBitsHandler
+
+func init() {
+	escBitsHandlerRegistry = map[string]escBitsHandler{
+		"read":  escBitsReadHandler{},
+		"write": escBitsWriteHandler{},
+	}
+}
+
+// BenchmarkEscapeBitsHandlerDispatch — the handler-registry
+// pattern common in event loops and plugin systems. Stock Go's
+// escape analyzer has to assume the iface callee might retain the
+// arg, so &x heap-allocates every iteration. The gd fork reads
+// the per-itab mask; both registered handlers have masks of 0
+// (neither retains), so the stack pointer goes through unchanged.
+func BenchmarkEscapeBitsHandlerDispatch(b *testing.B) {
+	h := escBitsHandlerRegistry["read"]
+	for i := 0; i < b.N; i++ {
+		var x int = 1
+		h.Handle(&x)
+	}
+}
+
+// escBitsCallback — the classic "accept a *T callback arg" shape.
+// Registering through a map forces the value to be opaque.
+var escBitsCallbackRegistry map[string]func(*int)
+
+func init() {
+	escBitsCallbackRegistry = map[string]func(*int){
+		"read":  func(p *int) { escBitsSink = *p },
+		"write": func(p *int) { *p = escBitsSink + 1 },
+	}
+}
+
+// BenchmarkEscapeBitsCallbackDispatch — func-var dispatch via
+// map. Same shape as event-bus subscribe / on-message code.
+func BenchmarkEscapeBitsCallbackDispatch(b *testing.B) {
+	cb := escBitsCallbackRegistry["read"]
+	for i := 0; i < b.N; i++ {
+		var x int = 1
+		cb(&x)
+	}
+}
+
 // TestEscapeBitsItabDispatch verifies Phase A.3: growing the itab to
 // carry a per-method escape-mask tail after Fun didn't break dispatch.
 // Exercises a multi-method interface with multiple concretes so both

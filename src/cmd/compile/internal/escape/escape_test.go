@@ -179,12 +179,12 @@ func TestComputeEscMask_BitZeroReserved(t *testing.T) {
 }
 
 func TestStackAllocatable(t *testing.T) {
-	// Locks the contract Phase C relies on: both EscNone and the new
-	// EscCandidate pick stack allocation at emission time. EscHeap and
-	// EscUnknown force heap. EscNever is a separate "never escapes"
-	// marker used for compiler-known-safe objects; it's grouped with
-	// stack-allocatable because the underlying object lives in a fixed
-	// spot (rodata or statically-allocated).
+	// Contract: StackAllocatable reports raw Esc-value eligibility
+	// for stack allocation. Only EscNone qualifies on the raw
+	// value; EscCandidate is signalled by a separate bit (see
+	// ir.NodeStackAllocatable) because it rides alongside EscHeap
+	// so every non-escape-bits consumer keeps treating the node
+	// as heap-promoted.
 	cases := []struct {
 		esc  uint16
 		want bool
@@ -194,7 +194,6 @@ func TestStackAllocatable(t *testing.T) {
 		{ir.EscNone, true, "EscNone"},
 		{ir.EscHeap, false, "EscHeap"},
 		{ir.EscNever, false, "EscNever"},
-		{ir.EscCandidate, true, "EscCandidate"},
 	}
 	for _, c := range cases {
 		if got := ir.StackAllocatable(c.esc); got != c.want {

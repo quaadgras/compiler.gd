@@ -288,7 +288,7 @@ func createDwarfVars(fnsym *obj.LSym, complexOK bool, fn *ir.Func, apDecls []*ir
 			DictIndex:     n.DictIndex,
 			ClosureOffset: closureOffset(n, closureVars),
 		}
-		if n.Esc() == ir.EscHeap {
+		if ir.IsHeapAllocated(n) {
 			if n.Heapaddr == nil {
 				base.Fatalf("invalid heap allocated var without Heapaddr")
 			}

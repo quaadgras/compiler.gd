@@ -500,7 +500,7 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 	default:
 		base.FatalfAt(x.Pos(), "unexpected type: %v", typ)
 	case typ.IsString():
-		if ir.StackAllocatable(x.Esc()) {
+		if ir.NodeStackAllocatable(x) {
 			sz := int64(0)
 			for _, n1 := range x.List {
 				if n1.Op() == ir.OLITERAL {
@@ -518,7 +518,7 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 		args = []ir.Node{buf}
 		fnsmall, fnbig = "concatstring%d", "concatstrings"
 	case typ.IsSlice() && typ.Elem().IsKind(types.TUINT8): // Optimize []byte(str1+str2+...)
-		if conv != nil && ir.StackAllocatable(conv.Esc()) {
+		if conv != nil && ir.NodeStackAllocatable(conv) {
 			buf = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
 		}
 		args = []ir.Node{buf}

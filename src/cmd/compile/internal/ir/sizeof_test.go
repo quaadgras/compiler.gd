@@ -20,7 +20,7 @@ func TestSizeof(t *testing.T) {
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
-		{Func{}, 200, 328},
+		{Func{}, 208, 344},
 		{Name{}, 144, 208},
 		{miniExpr{}, 32, 48},
 		{miniNode{}, 12, 12},

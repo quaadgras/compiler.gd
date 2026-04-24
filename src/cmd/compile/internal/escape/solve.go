@@ -126,12 +126,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 						logopt.LogOpt(l.n.Pos(), "escape", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", l.n), explanation)
 					}
 				}
-				// gd escape-bits: when the root is the candidate-only
-				// location (flow through a dynamic callee), propagate
-				// attrCandidateEscape instead of attrEscapes. The
-				// value stays stack-allocatable; walk will wrap the
-				// arg at the indirect call site to materialize it on
-				// the heap iff the runtime mask says so.
+				// gd escape-bits: when the sole outliving root is
+				// a candidate-only location, propagate
+				// attrCandidateEscape in place of attrEscapes.
+				// See doc/gd/escape-bits.md.
 				if root.hasAttr(attrCandidateEscape) && !root.hasAttr(attrEscapes) {
 					newAttrs |= attrCandidateEscape | attrPersists | attrMutates | attrCalls
 				} else {

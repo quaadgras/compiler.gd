@@ -361,21 +361,66 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 	return tmp
 }
 
+// candidateEligibleParamType reports whether an argument of type t
+// passed to a dynamic callee is a shape the call-site wrap can
+// safely materialise via runtime.materializeToHeap. Only pointer-
+// shaped values qualify: *T, unsafe.Pointer, and chan (pointer-
+// under-the-hood). Struct-by-value, slice, map, interface, and func
+// args let the callee reach storage the wrap can't see — we must
+// fall back to stock heap-escape decisions for those so a candidate
+// pointer stored inside them isn't accidentally stack-kept. See
+// doc/gd/escape-bits.md §4.
+func candidateEligibleParamType(t *types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case types.TPTR:
+		// Interface-method receivers are synthesized by the
+		// compiler as `*struct{}` — an opaque pointer to the
+		// iface's data word, never a user-facing pointer arg.
+		// Routing these through candidateHole pulls the
+		// containing receiver chain (TextHandler → commonHandler
+		// → &buf) into candidate propagation even though
+		// there's no real wrap opportunity. Treat them as
+		// non-candidate so stock heap decisions apply to the
+		// iface receiver while real `*T` args still qualify.
+		elem := t.Elem()
+		if elem == nil {
+			return false
+		}
+		if elem.Kind() == types.TSTRUCT && elem.NumFields() == 0 {
+			return false
+		}
+		return true
+	case types.TUNSAFEPTR, types.TCHAN:
+		return true
+	}
+	return false
+}
+
 // tagHole returns a hole for evaluating an argument passed to param.
 // ks should contain the holes representing where the function
 // callee's results flows. fn is the statically-known callee function,
 // if any.
 func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	// gd escape-bits: dynamic callees go through a candidate-only
-	// location. Values flowing there alone stay stack-allocated;
-	// walk wraps the arg at the indirect call site with a
-	// runtime.maybeEscape* helper that reads the callee's mask at
-	// offset PtrSize of its func value. Every func value now carries
-	// the mask at that offset (capturing closure, method value, or
-	// bare-function ·f rodata entry), so the read is always valid.
-	// See doc/gd/escape-bits.md.
+	// location IF the arg type is one our call-site wrap can handle
+	// at runtime — i.e. a pointer-shaped value the wrap can re-home
+	// via materializeToHeap. For struct-by-value, map, slice, chan,
+	// or interface args we fall back to the stock heapHole: the
+	// wrap can't decode arbitrary struct fields to find nested
+	// candidate pointers, so the conservative escape decision is
+	// correct (and matches stock Go's behaviour exactly for those
+	// argument shapes). This restriction fixes the TestGenericEscape
+	// failure where &x stored inside a struct field was being marked
+	// candidate-only and stack-allocated despite the struct's method
+	// actually escaping the field. See doc/gd/escape-bits.md.
 	if fn == nil {
-		return e.candidateHole()
+		if candidateEligibleParamType(param.Type) {
+			return e.candidateHole()
+		}
+		return e.heapHole()
 	}
 
 	if e.inMutualBatch(fn) {

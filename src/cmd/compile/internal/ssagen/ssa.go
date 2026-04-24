@@ -2473,7 +2473,7 @@ func (s *state) stmt(n ir.Node) {
 
 	case ir.ODCL:
 		n := n.(*ir.Decl)
-		if v := n.X; v.Esc() == ir.EscHeap {
+		if v := n.X; ir.IsHeapAllocated(v) {
 			s.newHeapaddr(v)
 		}
 

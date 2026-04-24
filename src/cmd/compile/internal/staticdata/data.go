@@ -331,7 +331,9 @@ func WriteFuncSyms() {
 		// references so the wrap at OCALLFUNC always hits a valid
 		// mask word.
 		objw.SymPtr(sf, 0, target, 0)
-		objw.Global(sf, int32(types.PtrSize), obj.DUPOK|obj.RODATA)
+		mask := computeFuncsymEscMask(nam.Type())
+		objw.UintN(sf, int(types.PtrSize), mask, 8)
+		objw.Global(sf, int32(types.PtrSize)+8, obj.DUPOK|obj.RODATA)
 	}
 }
 

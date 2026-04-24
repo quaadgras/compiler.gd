@@ -59,6 +59,93 @@ type typeSig struct {
 	// gd escape-bits mask reader needs the updated Notes the escape
 	// pass writes later on origType's fields.
 	origType *types.Type
+	// methodFn is the *ir.Func for the method when the method has a
+	// compiled body in the current package. Used to pull the
+	// per-argument escape-bits mask (fn.EscMask) populated by the
+	// escape-analysis pass. nil when the method comes from an
+	// imported package (notes travel via origType.Params()[].Note in
+	// that case).
+	methodFn *ir.Func
+}
+
+// methodFieldEscMask returns the per-argument escape mask for the
+// method represented by sig, preferring the locally-compiled Func's
+// EscMask (which was populated by escape analysis) and falling back to
+// decoding the imported notes on origType when the method lives in
+// another package.
+func methodFieldEscMask(sig *typeSig) uint64 {
+	if sig == nil {
+		return 0
+	}
+	if sig.methodFn != nil {
+		// fn.EscMask encodes bit k+1 for the k-th RecvParam
+		// (receiver at bit 1, first real arg at bit 2, ...).
+		// The iface-dispatch mask hides the receiver: bit k+1 is
+		// the k-th non-receiver arg. Shift right by one and clear
+		// the newly-exposed low bit (which was "receiver escapes",
+		// not meaningful at the dispatch site — the receiver is
+		// always materialized to match the interface shape).
+		return (sig.methodFn.EscMask >> 1) & ^uint64(1)
+	}
+	if sig.origType != nil {
+		return computeMethodEscMask(sig.origType)
+	}
+	return 0
+}
+
+// pendingItabMasks records per-method itab EscMask slots that
+// writeITab has reserved but whose value must be filled in only after
+// escape analysis has populated ir.Func.EscMask. writeITab runs during
+// noder (well before escape) to materialize static itabs referenced
+// from generated data, so reading fn.EscMask at that point returns 0.
+// We defer the actual value emission to FinalizeItabMasks, called
+// after escape.Funcs by gc.Main.
+type pendingItabMask struct {
+	lsym   *obj.LSym
+	offset int
+	fn     *ir.Func // nil for imported methods; mask stays 0
+	// origType captures the concrete method signature at writeITab
+	// time. When fn is nil (imported method) we re-derive the mask
+	// from origType.Params[].Note at finalize time — by then the
+	// importer has had time to propagate upstream escape tags.
+	origType *types.Type
+}
+
+var pendingItabMasks []pendingItabMask
+
+// FinalizeItabMasks writes the per-method escape-bits mask into every
+// itab symbol that writeITab previously reserved slot space for. Must
+// run after escape analysis completes so that fn.EscMask reflects the
+// real per-parameter escape profile. See doc/gd/escape-bits.md §6a.
+//
+// ir.Func.Esc() value 3 corresponds to escFuncTagged (see
+// cmd/compile/internal/escape/escape.go) — the "we ran escape
+// analysis and populated notes / EscMask for this fn" marker. Reading
+// fn.EscMask on a fn that was never analyzed (e.g. imported-package
+// method wrapper accessible via f.Nname but whose body lives
+// elsewhere) returns the zero value — which means "nothing escapes"
+// in our encoding, the opposite of the pessimistic default. Fall back
+// to origType's imported notes in that case so we don't accidentally
+// clear escape bits we actually need.
+const escFuncTagged = 3
+
+func FinalizeItabMasks() {
+	for _, p := range pendingItabMasks {
+		var mask uint64
+		switch {
+		case p.fn != nil && p.fn.Esc() >= escFuncTagged:
+			// fn.EscMask carries receiver at bit 1 and args at
+			// bits 2.. — the iface dispatch mask hides the
+			// receiver, so shift right once and clear the newly
+			// exposed low bit (which was "receiver escapes",
+			// meaningless at the dispatch site).
+			mask = (p.fn.EscMask >> 1) & ^uint64(1)
+		case p.origType != nil:
+			mask = computeMethodEscMask(p.origType)
+		}
+		objw.UintN(p.lsym, p.offset, mask, 8)
+	}
+	pendingItabMasks = nil
 }
 
 func commonSize() int { return int(rttype.Type.Size()) } // Sizeof(runtime._type{})
@@ -143,6 +230,12 @@ func methods(t *types.Type) []*typeSig {
 			continue
 		}
 
+		var mfn *ir.Func
+		if f.Nname != nil {
+			if name, ok := f.Nname.(*ir.Name); ok {
+				mfn = name.Func
+			}
+		}
 		sig := &typeSig{
 			name:     f.Sym,
 			isym:     methodWrapper(t, f, true),
@@ -150,6 +243,7 @@ func methods(t *types.Type) []*typeSig {
 			type_:    typecheck.NewMethodType(f.Type, t),
 			mtype:    typecheck.NewMethodType(f.Type, nil),
 			origType: f.Type,
+			methodFn: mfn,
 		}
 		if f.Nointerface() {
 			// In the case of a nointerface method on an instantiated
@@ -1134,12 +1228,20 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 	// IfaceArg in src/runtime/escape_bits.go.
 	maskOffset := rttype.ITab.Size() + delta
 	for i := 0; i < nmethods; i++ {
-		// gd escape-bits: mask value-emission held back while the
-		// layout-mismatch between method-type Notes and escape-
-		// analysis writes is worked through. Emit zeros (same as
-		// Phase A.3 baseline — conservative, "nothing escapes").
-		// See doc/gd/escape-bits.md §6a.
+		// Reserve the slot now (zeros); the real value is written
+		// by FinalizeItabMasks after escape analysis runs. writeITab
+		// is called during noder for statically-constructible itabs,
+		// well before ir.Func.EscMask has been populated.
 		objw.UintN(lsym, int(maskOffset)+i*8, 0, 8)
+		if completeItab && i < len(entrySigs) {
+			sig := entrySigs[i]
+			pendingItabMasks = append(pendingItabMasks, pendingItabMask{
+				lsym:     lsym,
+				offset:   int(maskOffset) + i*8,
+				fn:       sig.methodFn,
+				origType: sig.origType,
+			})
+		}
 	}
 	totalSize := rttype.ITab.Size() + delta + int64(nmethods)*8
 

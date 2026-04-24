@@ -613,3 +613,17 @@ func NodeStackAllocatable(n Node) bool {
 	}
 	return n.EscCandidate()
 }
+
+// IsHeapAllocated reports whether n's storage is heap-allocated
+// after gd's escape-bits override: Esc==EscHeap forces heap unless
+// the node is also an escape-candidate, in which case the wrap at
+// the indirect call site takes responsibility for materializing on
+// demand and the underlying storage stays on the stack.
+//
+// Callers that previously checked n.Esc() == ir.EscHeap for
+// "is on heap" should switch to this helper so the new bit is
+// respected consistently across OnStack, dwarfgen, paramsToHeap,
+// the ODCL Heapaddr allocator, and anywhere else that cares.
+func IsHeapAllocated(n Node) bool {
+	return n.Esc() == EscHeap && !n.EscCandidate()
+}

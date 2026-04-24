@@ -36,6 +36,12 @@ func Walk(fn *ir.Func) {
 		return
 	}
 
+	// gd escape-bits: promote EscCandidate PAUTOs to PAUTOHEAP with
+	// a stack-initial backing slot so the wrap at indirect call sites
+	// can re-home the backing to heap on demand. Must run before
+	// walkStmtList so SSA gen sees Heapaddr wired up.
+	promoteEscapeCandidates(fn)
+
 	if base.Flag.W != 0 {
 		s := fmt.Sprintf("\nbefore walk %v", ir.CurFunc.Sym())
 		ir.DumpList(s, ir.CurFunc.Body)
