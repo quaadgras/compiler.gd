@@ -700,14 +700,13 @@ func (w *writer) signature(sig *types2.Signature) {
 	w.params(sig.Params())
 	w.params(sig.Results())
 	w.Bool(sig.Variadic())
-	// gd Phase G.2.1: serialise whether this compile's Phase G
-	// rewrite applies to this sig, so the reader can reconstruct
-	// the Type in the exact form the origin compiled against —
-	// runtime-origin sigs stay stock, non-runtime-origin sigs ride
-	// through extended. Without this bit, non-runtime readers would
-	// re-extend runtime sigs and desync with the stock-ABI runtime
-	// body.
-	w.Bool(phaseGAppliesTo(sig))
+	// gd Phase G.2.1: wire format stays stock (no outBuf params
+	// serialised, no extra origin-extended bit) so that host Go's
+	// go/types / gcimporter can still parse fork-produced pkgbits
+	// without modification. Fork's reader applies NewSignature's
+	// rewrite locally based on the result types — every sig in the
+	// tree was compiled with the same PhaseGActive gate so the
+	// extension decision is reproducible.
 }
 
 // phaseGAppliesTo reports whether NewSignature would extend this

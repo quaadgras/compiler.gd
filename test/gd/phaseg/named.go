@@ -8,6 +8,7 @@
 // via SetUnderlying (types/type.go), so FillOutBufArgs triggers
 // on calls through the named type.
 package main
+import "fmt"
 
 type T struct{ X int }
 
@@ -20,18 +21,18 @@ func main() {
 	var f Factory = Make
 	t := f()
 	if t == nil || t.X != 7 {
-		println("FAIL: named func type direct")
+		fmt.Println("FAIL: named func type direct")
 		return
 	}
 
 	// Named type parameter: function taking a Factory.
 	result := use(f)
 	if result == nil || result.X != 7 {
-		println("FAIL: named func type param")
+		fmt.Println("FAIL: named func type param")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }
 
 //go:noinline

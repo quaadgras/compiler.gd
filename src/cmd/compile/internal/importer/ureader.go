@@ -345,12 +345,6 @@ func (r *reader) signature(recv *types2.Var, rtparams, tparams []*types2.TypePar
 	params := r.params()
 	results := r.params()
 	variadic := r.Bool()
-	// gd Phase G.2.1: consume the origin-extended flag written by
-	// the fork compiler's writer. This reader is types2-level
-	// (frontend), so we don't materialise outBuf params here —
-	// that happens at types2→types conversion. We still need to
-	// read the bit to keep the stream in sync.
-	_ = r.Bool()
 
 	return types2.NewSignatureType(recv, rtparams, tparams, params, results, variadic)
 }

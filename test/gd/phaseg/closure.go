@@ -7,6 +7,7 @@
 // fresh func type. Must end up extended like any other
 // pointer-returning sig.
 package main
+import "fmt"
 
 type T struct{ V int }
 
@@ -16,7 +17,7 @@ func main() {
 	build := func() *T { return &T{V: base + 1} }
 	a := build()
 	if a == nil || a.V != 101 {
-		println("FAIL: closure direct")
+		fmt.Println("FAIL: closure direct")
 		return
 	}
 
@@ -24,7 +25,7 @@ func main() {
 	var f func() *T = func() *T { return &T{V: 42} }
 	b := f()
 	if b == nil || b.V != 42 {
-		println("FAIL: closure via func value")
+		fmt.Println("FAIL: closure via func value")
 		return
 	}
 
@@ -35,9 +36,9 @@ func main() {
 	g := make2(7)
 	c := g()
 	if c == nil || c.V != 14 {
-		println("FAIL: closure returned from factory")
+		fmt.Println("FAIL: closure returned from factory")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

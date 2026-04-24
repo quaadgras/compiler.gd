@@ -10,6 +10,7 @@
 // Both must route through the extended-ABI body without ABI drift
 // at the method-value wrapper boundary.
 package main
+import "fmt"
 
 type T struct{ X int }
 
@@ -24,7 +25,7 @@ func main() {
 	// Direct method call.
 	u1 := t.Double()
 	if u1 == nil || u1.V != 42 {
-		println("FAIL: direct method call")
+		fmt.Println("FAIL: direct method call")
 		return
 	}
 
@@ -32,7 +33,7 @@ func main() {
 	f := t.Double
 	u2 := f()
 	if u2 == nil || u2.V != 42 {
-		println("FAIL: method value call")
+		fmt.Println("FAIL: method value call")
 		return
 	}
 
@@ -40,9 +41,9 @@ func main() {
 	g := (*T).Double
 	u3 := g(t)
 	if u3 == nil || u3.V != 42 {
-		println("FAIL: method expression call")
+		fmt.Println("FAIL: method expression call")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

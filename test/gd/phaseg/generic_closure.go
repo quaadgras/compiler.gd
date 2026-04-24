@@ -14,6 +14,7 @@
 // If the shape body uses stock ABI (option B) but the closure's
 // concrete type is extended, register mismatch → garbage.
 package main
+import "fmt"
 
 //go:noinline
 func Default[T any]() *T {
@@ -29,7 +30,7 @@ func main() {
 	var fInt func() *int = Default[int]
 	a := fInt()
 	if a == nil || *a != 0 {
-		println("FAIL: Default[int] via func value")
+		fmt.Println("FAIL: Default[int] via func value")
 		return
 	}
 
@@ -37,7 +38,7 @@ func main() {
 	var fStr func() *string = Default[string]
 	b := fStr()
 	if b == nil || *b != "" {
-		println("FAIL: Default[string] via func value")
+		fmt.Println("FAIL: Default[string] via func value")
 		return
 	}
 
@@ -45,18 +46,18 @@ func main() {
 	var fPtr func() **int = Default[*int]
 	c := fPtr()
 	if c == nil {
-		println("FAIL: Default[*int] via func value")
+		fmt.Println("FAIL: Default[*int] via func value")
 		return
 	}
 
 	// Pass generic as arg expecting concrete func type.
 	r := apply(Default[int])
 	if r == nil || *r != 0 {
-		println("FAIL: Default[int] passed as arg")
+		fmt.Println("FAIL: Default[int] passed as arg")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }
 
 //go:noinline

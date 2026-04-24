@@ -10,6 +10,7 @@
 //   - many variadic args
 //   - slice-form (foo(prefix, s...))
 package main
+import "fmt"
 
 type T struct {
 	Name string
@@ -29,14 +30,14 @@ func main() {
 	// Zero variadic args.
 	a := NewT("zero")
 	if a == nil || a.Name != "zero" || a.Sum != 0 {
-		println("FAIL: zero variadic")
+		fmt.Println("FAIL: zero variadic")
 		return
 	}
 
 	// Several variadic args.
 	b := NewT("sum", 1, 2, 3, 4)
 	if b == nil || b.Name != "sum" || b.Sum != 10 {
-		println("FAIL: multi variadic")
+		fmt.Println("FAIL: multi variadic")
 		return
 	}
 
@@ -44,9 +45,9 @@ func main() {
 	xs := []int{5, 6, 7}
 	c := NewT("slice", xs...)
 	if c == nil || c.Name != "slice" || c.Sum != 18 {
-		println("FAIL: slice-form variadic")
+		fmt.Println("FAIL: slice-form variadic")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

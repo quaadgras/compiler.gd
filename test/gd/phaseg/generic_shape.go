@@ -8,6 +8,7 @@
 // to `go.shape.*uint8`). The SINGLE shared body must match the
 // extended ABI for every instantiation that flows through it.
 package main
+import "fmt"
 
 type Holder[T any] struct{ V T }
 
@@ -29,7 +30,7 @@ func main() {
 	*ints[1] = 20
 	ap := First(ints)
 	if ap == nil || **ap != 10 {
-		println("FAIL: First[*int]")
+		fmt.Println("FAIL: First[*int]")
 		return
 	}
 
@@ -38,7 +39,7 @@ func main() {
 	*strs[1] = "world"
 	sp := First(strs)
 	if sp == nil || **sp != "hello" {
-		println("FAIL: First[*string]")
+		fmt.Println("FAIL: First[*string]")
 		return
 	}
 
@@ -46,14 +47,14 @@ func main() {
 	// is itself a pointer, doubling up on the rewrite.
 	h1 := Make[*int](new(int))
 	if h1 == nil || h1.V == nil {
-		println("FAIL: Make[*int]")
+		fmt.Println("FAIL: Make[*int]")
 		return
 	}
 	h2 := Make[*string](new(string))
 	if h2 == nil || h2.V == nil {
-		println("FAIL: Make[*string]")
+		fmt.Println("FAIL: Make[*string]")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

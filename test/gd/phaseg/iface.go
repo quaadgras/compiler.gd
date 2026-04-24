@@ -6,6 +6,7 @@
 // Interface methods dispatch through itab. Both the iface method
 // declaration and the impl method must agree on extended ABI.
 package main
+import "fmt"
 
 type T struct{ V int }
 
@@ -27,7 +28,7 @@ func main() {
 	var m Maker = &Factory{Base: 5}
 	a := m.Build()
 	if a == nil || a.V != 6 {
-		println("FAIL: iface dispatch (ptr recv)")
+		fmt.Println("FAIL: iface dispatch (ptr recv)")
 		return
 	}
 
@@ -35,7 +36,7 @@ func main() {
 	m = OtherFactory{Base: 3}
 	b := m.Build()
 	if b == nil || b.V != 30 {
-		println("FAIL: iface dispatch (val recv)")
+		fmt.Println("FAIL: iface dispatch (val recv)")
 		return
 	}
 
@@ -45,10 +46,10 @@ func main() {
 	for i, mk := range makers {
 		r := mk.Build()
 		if r == nil || r.V != expected[i] {
-			println("FAIL: iface slice dispatch", i)
+			fmt.Println("FAIL: iface slice dispatch", i)
 			return
 		}
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

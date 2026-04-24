@@ -607,31 +607,11 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 		params[len(params)-1].SetIsDDD(true)
 	}
 
-	// gd Phase G.2.1: reconstruct the sig in the exact form the
-	// origin compiled against. The origin wrote a bool indicating
-	// whether it extended this sig with outBufs; if so we extend
-	// now (mirroring NewSignature's rewrite) and use the flag-on
-	// constructor. Otherwise we keep it stock. This preserves ABI
-	// compatibility across runtime↔non-runtime boundaries.
-	//
-	// Variadic: outBufs go BEFORE the variadic slice so `...T`
-	// stays at the tail (mirrors NewSignature's insertion order).
-	originExtended := r.Bool()
-	if originExtended {
-		outBufs := types.BuildOutBufFields(results)
-		if len(outBufs) > 0 {
-			insertAt := len(params)
-			if insertAt > 0 && params[insertAt-1] != nil && params[insertAt-1].IsDDD() {
-				insertAt--
-			}
-			extended := make([]*types.Field, 0, len(params)+len(outBufs))
-			extended = append(extended, params[:insertAt]...)
-			extended = append(extended, outBufs...)
-			extended = append(extended, params[insertAt:]...)
-			params = extended
-		}
-	}
-	return types.NewSignatureAsIs(recv, params, results, originExtended)
+	// gd Phase G.2.1: wire format is stock. NewSignature extends
+	// locally based on results — every compile in the tree uses the
+	// same PhaseGActive gate so the outcome is reproducible without
+	// needing to ride a bit through pkgbits.
+	return types.NewSignature(recv, params, results)
 }
 
 func (r *reader) params() []*types.Field {

@@ -239,3 +239,35 @@ func (t *Type) UserParams() []*Field {
 	}
 	return params[:len(params)-nOut]
 }
+
+// StockifyCgoSig returns a stock-ABI copy of t, with outBuf params
+// removed. Used by the noder's funcExt when it sees a
+// //go:cgo_unsafe_args pragma — those wrappers treat the Go arg
+// frame as a raw contiguous region that must match the C callee's
+// layout, so they keep the unextended sig regardless of Phase G.
+//
+// Callers sharing a Type identity after stockification see the
+// stock view too; Go's type system will accept assignments as long
+// as the structural shape (user-visible) still matches.
+func StockifyCgoSig(t *Type) *Type {
+	if t == nil || t.Kind() != TFUNC || !t.GdReturnOutBuf() {
+		return t
+	}
+	// Find the outBuf start. outBufs are contiguous within Params
+	// (possibly followed by the variadic slice).
+	params := t.Params()
+	userParams := make([]*Field, 0, len(params))
+	for _, p := range params {
+		if p != nil && p.IsOutBufParam() {
+			continue
+		}
+		userParams = append(userParams, p)
+	}
+	// Copy results as-is; Recv preserved.
+	var recv *Field
+	if t.Recv() != nil {
+		recv = t.Recv()
+	}
+	results := t.Results()
+	return NewSignatureAsIs(recv, userParams, results, false)
+}

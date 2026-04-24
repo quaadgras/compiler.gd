@@ -7,6 +7,7 @@
 // Exercises the generic-instantiation path through
 // ssagen / noder's shape machinery.
 package main
+import "fmt"
 
 type Box[T any] struct{ V T }
 
@@ -17,14 +18,14 @@ func main() {
 	// Instantiated with int.
 	a := NewBox[int](42)
 	if a == nil || a.V != 42 {
-		println("FAIL: generic[int] direct")
+		fmt.Println("FAIL: generic[int] direct")
 		return
 	}
 
 	// Instantiated with string.
 	b := NewBox[string]("hi")
 	if b == nil || b.V != "hi" {
-		println("FAIL: generic[string] direct")
+		fmt.Println("FAIL: generic[string] direct")
 		return
 	}
 
@@ -34,9 +35,9 @@ func main() {
 	x := 7
 	c := NewBox[*int](&x)
 	if c == nil || c.V == nil || *c.V != 7 {
-		println("FAIL: generic[*int] direct")
+		fmt.Println("FAIL: generic[*int] direct")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

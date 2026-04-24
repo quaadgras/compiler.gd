@@ -67,8 +67,10 @@ func decodetypeFuncDotdotdot(arch *sys.Arch, p []byte) bool {
 }
 
 // Type.FuncType.inCount
+// gd Phase G.2.1: mask out PhaseGExtendedFlag (top bit) — the count
+// itself is 15 bits, with the top bit reserved as the extended flag.
 func decodetypeFuncInCount(arch *sys.Arch, p []byte) int {
-	return int(decodeInuxi(arch, p[commonsize(arch):], 2))
+	return int(uint16(decodeInuxi(arch, p[commonsize(arch):], 2)) & (1<<15 - 1))
 }
 
 func decodetypeFuncOutCount(arch *sys.Arch, p []byte) int {

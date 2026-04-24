@@ -12,6 +12,7 @@
 // types pass through the same factory and end up extended, so
 // indirect calls match.
 package main
+import "fmt"
 
 type T struct{ X int }
 
@@ -26,14 +27,14 @@ func main() {
 	var f func() *T = NewT
 	a := f()
 	if a == nil || a.X != 99 {
-		println("FAIL: func value assignment")
+		fmt.Println("FAIL: func value assignment")
 		return
 	}
 
 	// Pass as argument into a function expecting func() *T.
 	b := apply(NewT)
 	if b == nil || b.X != 99 {
-		println("FAIL: func value argument")
+		fmt.Println("FAIL: func value argument")
 		return
 	}
 
@@ -42,7 +43,7 @@ func main() {
 	for i, fn := range fs {
 		r := fn()
 		if r == nil || r.X != 99 {
-			println("FAIL: func value from slice", i)
+			fmt.Println("FAIL: func value from slice", i)
 			return
 		}
 	}
@@ -51,9 +52,9 @@ func main() {
 	m := map[string]func() *T{"default": NewT}
 	c := m["default"]()
 	if c == nil || c.X != 99 {
-		println("FAIL: func value from map")
+		fmt.Println("FAIL: func value from map")
 		return
 	}
 
-	println("ok")
+	fmt.Println("ok")
 }

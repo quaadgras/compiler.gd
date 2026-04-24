@@ -6,6 +6,7 @@
 // Baseline case — with extended ABI, caller passes one outBuf nil,
 // callee ignores it, returns a heap pointer.
 package main
+import "fmt"
 
 type T struct{ X int }
 
@@ -17,12 +18,12 @@ func main() {
 	b := NewT(42)
 	if a == b {
 		// Different allocations — pointer identity must differ.
-		println("FAIL: same pointer for different NewT calls")
+		fmt.Println("FAIL: same pointer for different NewT calls")
 		return
 	}
 	if a.X != 42 || b.X != 42 {
-		println("FAIL: wrong field values")
+		fmt.Println("FAIL: wrong field values")
 		return
 	}
-	println("ok")
+	fmt.Println("ok")
 }
