@@ -830,7 +830,11 @@ func (t *rtype) NumIn() int {
 		panic("reflect: NumIn of non-func type " + t.String())
 	}
 	tt := (*abi.FuncType)(unsafe.Pointer(t))
-	return tt.NumIn()
+	// gd Phase G.2.1: the runtime FuncType's InCount includes
+	// synthesised outBuf slots. The reflection API exposes the
+	// user-visible count; Call / MakeFunc handle the outBufs
+	// internally when constructing the call frame.
+	return tt.NumUserIn()
 }
 
 func (t *rtype) NumOut() int {

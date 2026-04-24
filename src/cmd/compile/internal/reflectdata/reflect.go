@@ -963,39 +963,35 @@ func writeType(t *types.Type) *obj.LSym {
 	case types.TFUNC:
 		// internal/abi.FuncType
 		//
-		// gd Phase G.2.1: filter out synthesised outBuf params from
-		// the user-visible rtype. reflect's NumIn/In/Call operate on
-		// this count, and the test suite plus stdlib expectations
-		// assume they see the original source-level arity. The
-		// extended ABI is a compile-time/runtime-frame concept —
-		// reflect bridges it internally at Call time.
+		// gd Phase G.2.1: emit the EXTENDED view (including outBuf
+		// slots). funcLayout / reflectcall need the full ABI to
+		// build matching frames. reflect's user-facing methods
+		// (NumIn, In, Call's arg-count check) filter outBufs via
+		// FuncType.NumOutBufs/NumUserIn, gated on the top bit of
+		// InCount (abi.PhaseGExtendedFlag).
 		for _, t1 := range t.RecvParamsResults() {
-			if t1.IsOutBufParam() {
-				continue
-			}
 			writeType(t1.Type)
 		}
-		inCount := t.NumRecvs() + t.NumParams() - t.NumOutBufs()
+		inCount := t.NumRecvs() + t.NumParams()
 		outCount := t.NumResults()
 		if t.IsVariadic() {
 			outCount |= 1 << 15
 		}
+		// Set the Phase G extended flag in the top bit of InCount
+		// so reflect can tell stock sigs (gate-off) from extended
+		// sigs even when they both have pointer results.
+		encodedInCount := uint16(inCount)
+		if t.GdReturnOutBuf() {
+			encodedInCount |= 1 << 15
+		}
 
-		c.Field("InCount").WriteUint16(uint16(inCount))
+		c.Field("InCount").WriteUint16(encodedInCount)
 		c.Field("OutCount").WriteUint16(uint16(outCount))
 
 		// Array of rtype pointers follows funcType.
 		typs := t.RecvParamsResults()
-		// Filter outBufs from the published array.
-		filtered := make([]*types.Field, 0, len(typs))
-		for _, t1 := range typs {
-			if t1.IsOutBufParam() {
-				continue
-			}
-			filtered = append(filtered, t1)
-		}
-		array := rttype.NewArrayCursor(lsym, C, types.Types[types.TUNSAFEPTR], len(filtered))
-		for i, t1 := range filtered {
+		array := rttype.NewArrayCursor(lsym, C, types.Types[types.TUNSAFEPTR], len(typs))
+		for i, t1 := range typs {
 			array.Elem(i).WritePtr(writeType(t1.Type))
 		}
 

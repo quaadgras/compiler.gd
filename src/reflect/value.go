@@ -537,7 +537,13 @@ func (v Value) call(op string, in []Value) []Value {
 	}
 
 	isSlice := op == "CallSlice"
-	n := t.NumIn()
+	// gd Phase G.2.1: FuncType.InCount includes synthesised outBuf
+	// params. The user-facing arg-count check and type-assignability
+	// check operate on the user-visible count (NumUserIn); outBufs
+	// are padded with typed nils further down so the reflectcall
+	// frame still matches the callee's extended ABI.
+	nOut := t.NumOutBufs()
+	n := t.NumUserIn()
 	isVariadic := t.IsVariadic()
 	if isSlice {
 		if !isVariadic {
@@ -586,6 +592,22 @@ func (v Value) call(op string, in []Value) []Value {
 		in = make([]Value, n+1)
 		copy(in[:n], origIn)
 		in[n] = slice
+	}
+
+	// gd Phase G.2.1: pad with typed-nil outBuf Values so the
+	// marshaling loop below covers the full extended frame. Each
+	// outBuf slot has type unsafe.Pointer; Zero() gives us a
+	// correctly-shaped nil that marshals to an empty register /
+	// stack slot.
+	if nOut > 0 {
+		ins := t.InSlice()
+		padded := make([]Value, 0, len(in)+nOut)
+		padded = append(padded, in...)
+		totalIn := t.NumIn() // masks PhaseGExtendedFlag
+		for i := totalIn - nOut; i < totalIn; i++ {
+			padded = append(padded, Zero(toRType(ins[i])))
+		}
+		in = padded
 	}
 
 	nin := len(in)
@@ -969,6 +991,15 @@ func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool, regs 
 			}
 		}
 		in = append(in, v)
+	}
+
+	// gd Phase G.2.1: strip synthesised outBuf args before handing
+	// the in[] slice to the user's MakeFunc callback. The user
+	// wrote a function matching the source-level signature, so
+	// they see N user args only; the K trailing outBufs stay in
+	// the frame untouched.
+	if nOut := ftyp.NumOutBufs(); nOut > 0 && len(in) >= nOut {
+		in = in[:len(in)-nOut]
 	}
 
 	// Call underlying function.

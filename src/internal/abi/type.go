@@ -528,16 +528,30 @@ type SliceType struct {
 //	}
 type FuncType struct {
 	Type
-	InCount  uint16
+	InCount  uint16 // top bit (PhaseGExtendedFlag) set when sig has synthesised outBuf params
 	OutCount uint16 // top bit is set if last input parameter is ...
 }
+
+// PhaseGExtendedFlag is the top bit of FuncType.InCount set by the
+// compiler when the sig carries synthesised outBuf params. Runtime
+// consumers (reflect) use this to tell stock from extended without
+// having to re-derive from the result list — avoids false positives
+// when a sig has pointer results but the compiler (gate off) did not
+// extend it.
+const PhaseGExtendedFlag uint16 = 1 << 15
 
 func (t *FuncType) In(i int) *Type {
 	return t.InSlice()[i]
 }
 
 func (t *FuncType) NumIn() int {
-	return int(t.InCount)
+	return int(t.InCount &^ PhaseGExtendedFlag)
+}
+
+// IsPhaseGExtended reports whether the compiler extended this sig
+// with synthesised outBuf params.
+func (t *FuncType) IsPhaseGExtended() bool {
+	return t.InCount&PhaseGExtendedFlag != 0
 }
 
 func (t *FuncType) NumOut() int {
@@ -548,15 +562,39 @@ func (t *FuncType) Out(i int) *Type {
 	return (t.OutSlice()[i])
 }
 
+// NumOutBufs returns the number of synthesised Phase G outBuf
+// params this FuncType carries. Zero unless the sig is extended.
+func (t *FuncType) NumOutBufs() int {
+	if !t.IsPhaseGExtended() {
+		return 0
+	}
+	n := 0
+	for _, r := range t.OutSlice() {
+		if r != nil && r.Kind() == Pointer {
+			n++
+		}
+	}
+	return n
+}
+
+// NumUserIn returns the number of user-visible input parameters
+// (InCount minus synthesised outBuf slots).
+func (t *FuncType) NumUserIn() int {
+	return t.NumIn() - t.NumOutBufs()
+}
+
 func (t *FuncType) InSlice() []*Type {
 	uadd := unsafe.Sizeof(*t)
 	if t.TFlag&TFlagUncommon != 0 {
 		uadd += unsafe.Sizeof(UncommonType{})
 	}
-	if t.InCount == 0 {
+	// Mask out PhaseGExtendedFlag — the trailing rtype array uses
+	// the raw count, no flag bits.
+	inCount := uint16(t.NumIn())
+	if inCount == 0 {
 		return nil
 	}
-	return (*[1 << 16]*Type)(addChecked(unsafe.Pointer(t), uadd, "t.inCount > 0"))[:t.InCount:t.InCount]
+	return (*[1 << 16]*Type)(addChecked(unsafe.Pointer(t), uadd, "t.inCount > 0"))[:inCount:inCount]
 }
 func (t *FuncType) OutSlice() []*Type {
 	outCount := uint16(t.NumOut())
@@ -567,7 +605,8 @@ func (t *FuncType) OutSlice() []*Type {
 	if t.TFlag&TFlagUncommon != 0 {
 		uadd += unsafe.Sizeof(UncommonType{})
 	}
-	return (*[1 << 17]*Type)(addChecked(unsafe.Pointer(t), uadd, "outCount > 0"))[t.InCount : t.InCount+outCount : t.InCount+outCount]
+	inCount := uint16(t.NumIn())
+	return (*[1 << 17]*Type)(addChecked(unsafe.Pointer(t), uadd, "outCount > 0"))[inCount : inCount+outCount : inCount+outCount]
 }
 
 func (t *FuncType) IsVariadic() bool {
