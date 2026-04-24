@@ -719,15 +719,35 @@ func (w *writer) signature(sig *types2.Signature) {
 // variadic skip. Variadic sigs keep their `...T` slice at the tail
 // by inserting outBufs BEFORE the variadic slot (NewSignature
 // handles the positioning).
+//
+// TypeParam results are treated as potentially-pointer (conservative
+// extension). That way generic bodies compile to the extended ABI,
+// matching concrete instantiations whose results ARE pointers. For
+// non-pointer concrete instantiations we pay one unused register
+// slot, but this avoids an ABI mismatch at the closure boundary
+// between the shape body and the concrete-typed function value.
 func phaseGAppliesTo(sig *types2.Signature) bool {
 	if !typecheck.PhaseGActive {
 		return false
 	}
 	results := sig.Results()
 	for i := 0; i < results.Len(); i++ {
-		if _, isPtr := results.At(i).Type().(*types2.Pointer); isPtr {
+		if resultNeedsOutBuf(results.At(i).Type()) {
 			return true
 		}
+	}
+	return false
+}
+
+// resultNeedsOutBuf reports whether a result of type t should carry
+// an outBuf param. Pointer types are the obvious case; TypeParams
+// are treated as pointer-possible (see phaseGAppliesTo).
+func resultNeedsOutBuf(t types2.Type) bool {
+	switch t.(type) {
+	case *types2.Pointer:
+		return true
+	case *types2.TypeParam:
+		return true
 	}
 	return false
 }
