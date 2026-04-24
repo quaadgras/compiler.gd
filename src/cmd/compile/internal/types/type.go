@@ -1749,14 +1749,19 @@ func NewSignature(recv *Field, params, results []*Field) *Type {
 	// reader when the params are already in their final form (i.e.
 	// serialised by another package's compiler and should ride
 	// through unchanged).
-	flagOn := PhaseGApplies(results) && !paramsAlreadyExtended(params)
-	if flagOn {
+	alreadyExtended := paramsAlreadyExtended(params)
+	needsRewrite := PhaseGApplies(results) && !alreadyExtended
+	if needsRewrite {
 		outBufs := BuildOutBufFields(results)
 		extended := make([]*Field, 0, len(params)+len(outBufs))
 		extended = append(extended, params...)
 		extended = append(extended, outBufs...)
 		params = extended
 	}
+	// Flag rides on t whenever the param list ends with outBufs —
+	// whether we just appended them, or the caller already had them
+	// (e.g. syntheticSig cloning an already-extended sig).
+	flagOn := needsRewrite || alreadyExtended
 	return newSignatureInternal(recv, params, results, flagOn)
 }
 

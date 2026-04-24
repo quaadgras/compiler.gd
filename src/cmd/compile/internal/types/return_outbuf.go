@@ -27,6 +27,25 @@ import (
 // Keep false until asm + cgo updates land, then flip to true
 // behind make.bash to rebuild the fork compile tool with the
 // extended ABI applied to its own code.
+//
+// Known blockers to flipping (2026-04-25):
+//   1. Runtime-special sigs are stock but non-runtime readers
+//      construct fresh FuncTypes via NewSignature that extend
+//      them. Cross-package generic/shape reshape assertions then
+//      see (stock vs extended) forms of the same sig and fail
+//      (e.g. runtime.FuncForPC typed as both func(uintptr)
+//      *runtime.Func and func(uintptr, *runtime.Func)
+//      *runtime.Func in the same compile).
+//   2. Asm-backed decls like runtime.newobject need their .s
+//      argsize bumped to match the extended ABI, else vet /
+//      asmdecl screams.
+//   3. cgo-generated wrappers need the trailing outBuf arg added
+//      by cmd/cgo/out.go.
+//
+// Option-A fix for (1): universal extension — remove the
+// CompilingRuntime gate from PhaseGApplies so every Go program's
+// pointer-returning sigs are uniformly extended. Requires
+// completing (2) and (3) first.
 const PhaseGActive = false
 
 // OutBufNamePrefix is the Sym.Name prefix every gd Phase G

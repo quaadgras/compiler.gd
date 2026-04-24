@@ -643,7 +643,18 @@ func (fn *Func) DeclareParams(setNname bool) {
 				sym = fn.Sym().Pkg.LookupNum(prefix, i)
 			}
 
-			name := NewNameAt(param.Pos, sym, param.Type)
+			// gd Phase G: synthesised outBuf fields carry
+			// src.NoXPos because NewSignature constructs them
+			// without a function context. The inliner's inlPos
+			// walks every Dcl's position and can't handle a nil
+			// PosBase, so substitute the enclosing function's
+			// position for outBuf Names.
+			pos := param.Pos
+			if param.IsOutBufParam() {
+				pos = fn.Pos()
+			}
+
+			name := NewNameAt(pos, sym, param.Type)
 			name.Class = ctxt
 			name.Curfn = fn
 			dst[offset+i] = name
