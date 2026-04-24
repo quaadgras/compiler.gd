@@ -1084,6 +1084,15 @@ func phaseGEligibleForWriter(obj *types2.Func, decl *syntax.FuncDecl) bool {
 		// FP offsets relative to what the .s source encoded.
 		return false
 	}
+	// cgo generates Go wrappers around C functions in
+	// _cgo_gotypes.go with names like _Cfunc_foo / _Cgo_foo. The
+	// wrapper bodies forward to the C call via a runtime cgocall
+	// bridge that expects the Go-side ABI to match the C signature
+	// exactly; adding an outBuf shifts which register holds each
+	// user arg. Skip these by name.
+	if n := obj.Name(); strings.HasPrefix(n, "_Cfunc_") || strings.HasPrefix(n, "_Cgo_") || strings.HasPrefix(n, "_cgo") {
+		return false
+	}
 	sig, ok := obj.Type().(*types2.Signature)
 	if !ok {
 		return false
