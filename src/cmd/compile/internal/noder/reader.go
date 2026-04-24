@@ -1180,11 +1180,14 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 
 		fn.ABI = obj.ABI(r.Uint64())
 
-		// Escape analysis. One note per RecvParam — includes gd's
-		// synthesised .outBufK params because the writer also
-		// iterates RecvParams when serialising. The note on an
-		// outBuf param is always the empty string.
+		// Escape analysis. Notes are in the bitstream one-per-user-
+		// param, so skip synthesised .outBufK params (gd Phase G).
+		// The writer produced N notes; RecvParams() after
+		// typecheck.AppendReturnOutBufs has N + outBufs entries.
 		for _, f := range name.Type().RecvParams() {
+			if typecheck.IsOutBufParam(f) {
+				continue
+			}
 			f.Note = r.String()
 		}
 
