@@ -508,6 +508,24 @@ func (p *Package) structType(n *Name) (string, int64) {
 		fmt.Fprintf(&buf, "\t\tchar __pad%d[%d];\n", off, pad)
 		off += pad
 	}
+	// gd Phase G.2.1: the fork's compile tool extends pointer-
+	// returning func sigs with an outBufK *T param between user
+	// args and the result. This C struct must match the Go-side
+	// frame layout exactly — insert one pointer-sized slot per
+	// pointer result BEFORE the result slot, so the C side writes
+	// r at the same offset where Go's extended ABI reads it.
+	//
+	// cgo can't see the compile gate directly, so emit the slot
+	// unconditionally: cgo lives in the gd fork, and the fork ships
+	// with Phase G either on-by-default or being flipped on shortly.
+	// Gate-off cgo users need to match by leaving the slot unused
+	// (the wrapper body already passes a pointer to p0, not &outBuf,
+	// so nothing populates the slot when Phase G is off — it's
+	// harmless dead padding in the C struct).
+	if t := n.FuncType.Result; t != nil && cgoResultIsPointer(t) {
+		fmt.Fprintf(&buf, "\t\tchar __phaseg_outbuf[%d];\n", p.PtrSize)
+		off += p.PtrSize
+	}
 	if t := n.FuncType.Result; t != nil {
 		if off%t.Align != 0 {
 			pad := t.Align - off%t.Align
@@ -527,6 +545,21 @@ func (p *Package) structType(n *Name) (string, int64) {
 	}
 	fmt.Fprintf(&buf, "\t}")
 	return buf.String(), off
+}
+
+// cgoResultIsPointer reports whether the function result Go type
+// resolves to a Go pointer (not unsafe.Pointer). gd Phase G's
+// NewSignature extends sigs with outBuf params when IsPtr() is
+// true on a result — matches kind TPTR, excludes TUNSAFEPTR. The
+// Go AST for cgo result types is just ast.Expr; check via the
+// AST shape and the Go-side type string.
+func cgoResultIsPointer(t *Type) bool {
+	if t == nil {
+		return false
+	}
+	// cgo's Type.Go is an ast.Expr for the Go-side type.
+	_, ok := t.Go.(*ast.StarExpr)
+	return ok
 }
 
 func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
