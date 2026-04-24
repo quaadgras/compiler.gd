@@ -233,6 +233,15 @@ const (
 	// typeIsFullyInstantiated reports whether a type is fully instantiated generic type; i.e.
 	// an instantiated generic type where all type arguments are non-generic or fully instantiated generic types.
 	typeIsFullyInstantiated
+	// typeGdReturnOutBuf marks a func signature as participating in
+	// the gd Phase G return-outBuf rewrite. The bit is set at the
+	// noder's funcExt when the writer flagged the owning function
+	// with ir.GdReturnOutBuf. Consumers that need the "projected"
+	// view of the sig (abiutils, call-site arg filling) consult
+	// Type.GdReturnOutBuf() and the Virtual* helpers below; stock
+	// consumers (reflect, type identity, shape checking) keep using
+	// Params()/Results() and see the unextended form.
+	typeGdReturnOutBuf
 )
 
 func (t *Type) NotInHeap() bool           { return t.flags&typeNotInHeap != 0 }
@@ -242,12 +251,14 @@ func (t *Type) Recur() bool               { return t.flags&typeRecur != 0 }
 func (t *Type) IsShape() bool             { return t.flags&typeIsShape != 0 }
 func (t *Type) HasShape() bool            { return t.flags&typeHasShape != 0 }
 func (t *Type) IsFullyInstantiated() bool { return t.flags&typeIsFullyInstantiated != 0 }
+func (t *Type) GdReturnOutBuf() bool      { return t.flags&typeGdReturnOutBuf != 0 }
 
 func (t *Type) SetNotInHeap(b bool)           { t.flags.set(typeNotInHeap, b) }
 func (t *Type) SetNoalg(b bool)               { t.flags.set(typeNoalg, b) }
 func (t *Type) SetDeferwidth(b bool)          { t.flags.set(typeDeferwidth, b) }
 func (t *Type) SetRecur(b bool)               { t.flags.set(typeRecur, b) }
 func (t *Type) SetIsFullyInstantiated(b bool) { t.flags.set(typeIsFullyInstantiated, b) }
+func (t *Type) SetGdReturnOutBuf(b bool)      { t.flags.set(typeGdReturnOutBuf, b) }
 
 // Should always do SetHasShape(true) when doing SetIsShape(true).
 func (t *Type) SetIsShape(b bool)  { t.flags.set(typeIsShape, b) }

@@ -1078,6 +1078,12 @@ func phaseGEligibleForWriter(obj *types2.Func, decl *syntax.FuncDecl) bool {
 	if base.Flag.CompilingRuntime {
 		return false
 	}
+	if decl == nil || decl.Body == nil {
+		// No Go body → asm-backed (or external via linkname).
+		// Those expect stock ABI; changing arg layout would shift
+		// FP offsets relative to what the .s source encoded.
+		return false
+	}
 	sig, ok := obj.Type().(*types2.Signature)
 	if !ok {
 		return false

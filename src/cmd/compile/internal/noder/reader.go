@@ -29,26 +29,6 @@ import (
 	"cmd/internal/src"
 )
 
-// isAsmBackedPkg reports whether pkg contains extern/asm-backed
-// functions that gd Phase G's return-outBuf rewrite must skip. Covers:
-//   - Runtime-special packages (pkgspecial.Runtime) — CompilingRuntime
-//     gates the rewrite off on their compile, so imports must strip.
-//   - AllowAsmABI packages (reflect, syscall, internal/bytealg, etc.)
-//     — same rationale, these have asm entry points that don't know
-//     about outBufs.
-//   - sync/atomic — not in AllowAsmABI but has extern asm functions
-//     like SwapPointer declared without bodies.
-func isAsmBackedPkg(pkg *types.Pkg) bool {
-	if pkg == nil {
-		return false
-	}
-	if pkg.Path == "sync/atomic" {
-		return true
-	}
-	ps := objabi.LookupPkgSpecial(pkg.Path)
-	return ps.Runtime || ps.AllowAsmABI
-}
-
 // This file implements cmd/compile backend's reader for the Unified
 // IR export data.
 
@@ -627,12 +607,14 @@ func (r *reader) signature(recv *types.Field) *types.Type {
 		params[len(params)-1].SetIsDDD(true)
 	}
 
-	// gd Phase G: signature-level rewrite deferred. The decision is
-	// made per-function by the writer (it sets ir.GdReturnOutBuf on
-	// eligible funcs) and applied by reader.funcExt when the bit is
-	// set. Sigs at this level stay stock so function-typed params /
-	// fields / method lifts don't pick up outBufs inconsistently.
-	_ = recv
+	// gd Phase G: signature-level rewrite is NOT applied here. The
+	// decision is per-function (writer sets ir.GdReturnOutBuf on
+	// eligible funcs). reader.funcExt flips the GdReturnOutBuf bit
+	// on the sig when it sees the pragma, activating the
+	// Type.VirtualParams() projection that ABI / call-site codegen
+	// consults. Stock Params() / Results() stay the same so
+	// reflect, type identity, and shape-type checks aren't
+	// perturbed. See doc/gd/escape-bits-phase-g-plan.md.
 
 	return types.NewSignature(recv, params, results)
 }
@@ -1177,21 +1159,16 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 
 	fn.Pragma = r.pragmaFlag()
 
-	// gd Phase G: apply the outBuf rewrite if and only if the writer
-	// set the GdReturnOutBuf bit. The writer decided eligibility at
-	// its own compile (so runtime / asm-backed packages that skipped
-	// the rewrite don't have the bit set), and the bit rides through
-	// pkgbits as a normal pragma flag. Applying the rewrite HERE —
-	// before we read notes, before tcCall can reference this Type —
-	// keeps the writer's "wrote N+K notes" symmetric with the
-	// reader's "iterate N+K RecvParams".
-	if fn.Pragma&ir.GdReturnOutBuf != 0 && name.Type().NumOutBufs() == 0 {
-		sig := name.Type()
-		extended := typecheck.AppendReturnOutBufs(sig.Recv(), sig.Params(), sig.Results())
-		if len(extended) > sig.NumParams() {
-			newSig := types.NewSignature(sig.Recv(), extended, sig.Results())
-			name.SetType(newSig)
-		}
+	// gd Phase G: flip the GdReturnOutBuf bit on the function's sig
+	// type when the writer tagged the function eligible. The bit
+	// activates the projected/virtual view — sig.Params() stays
+	// stock-length, sig.VirtualParams() includes synthesised outBufs.
+	// Consumers that need the extended view (abiutils, call-site arg
+	// fill) ask via the Virtual* helpers; stock consumers keep
+	// seeing the unextended form so reflect, type identity, and
+	// shape-type checks are untouched. See doc/gd/escape-bits-phase-g-plan.md.
+	if fn.Pragma&ir.GdReturnOutBuf != 0 {
+		name.Type().SetGdReturnOutBuf(true)
 	}
 
 	r.linkname(name)
@@ -3572,6 +3549,18 @@ func unifiedInlineCall(callerfn *ir.Func, call *ir.CallExpr, fn *ir.Func, inlInd
 		base.FatalfAt(call.Pos(), "OCALLMETH missed by typecheck")
 	}
 	args.Append(call.Args...)
+
+	// gd Phase G: the caller's typecheck extended call.Args with
+	// trailing nil outBuf args (FillOutBufArgs) for every virtual
+	// outBuf the callee's eligible sig exposes. Inlining binds
+	// call.Args 1:1 to the callee's inlvars (Dcl[:endParams]),
+	// which only covers the user-declared params — the outBufs live
+	// in the sig's virtual view, not the callee's body. Drop the
+	// outBuf args before the OAS2 so the counts match; the inlined
+	// body doesn't reference outBufs anyway.
+	if nOut := fn.Type().NumOutBufs(); nOut > 0 && len(args) >= nOut {
+		args = args[:len(args)-nOut]
+	}
 
 	// Create assignment to declare and initialize inlvars.
 	as2 := ir.NewAssignListStmt(call.Pos(), ir.OAS2, ir.ToNodes(inlvars), args)

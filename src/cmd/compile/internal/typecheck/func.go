@@ -275,7 +275,11 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 	// off or when the callee has no outBufs.
 	FillOutBufArgs(n, t)
 
-	typecheckaste(ir.OCALL, n.Fun, n.IsDDD, t.Params(), n.Args, func() string { return fmt.Sprintf("argument to %v", n.Fun) })
+	// gd Phase G: pass the virtual (outBuf-extended) param list so
+	// the arg-count check matches the nils FillOutBufArgs appended.
+	// When Phase G is inactive or the callee isn't eligible, this
+	// returns t.Params() unchanged.
+	typecheckaste(ir.OCALL, n.Fun, n.IsDDD, t.VirtualParams(), n.Args, func() string { return fmt.Sprintf("argument to %v", n.Fun) })
 	FixVariadicCall(n)
 	FixMethodCall(n)
 	if t.NumResults() == 0 {

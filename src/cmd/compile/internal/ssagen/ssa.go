@@ -5876,8 +5876,13 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 			s.startBlock(curb)
 		}
 
+		// gd Phase G: callee may have trailing outBuf params beyond
+		// t.NumParams(); iterate the virtual view so each arg has
+		// a matching param type. For stock (non-eligible) sigs,
+		// VirtualParams() == Params() so behaviour is unchanged.
+		virtualParams := t.VirtualParams()
 		for i, n := range args {
-			callArgs = append(callArgs, s.putArg(n, t.Param(i).Type))
+			callArgs = append(callArgs, s.putArg(n, virtualParams[i].Type))
 		}
 
 		callArgs = append(callArgs, s.mem())

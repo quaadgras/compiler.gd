@@ -4,22 +4,20 @@
 
 package types
 
-import "strings"
+import (
+	"strings"
 
-// OutBufNamePrefix is the Sym.Name prefix the gd Phase G return-value
-// rewrite uses for synthesised outBuf params. Kept as a constant here
-// (rather than in typecheck) so that types-level helpers can recognise
-// them without introducing a dependency cycle.
-//
-// See doc/gd/escape-bits-phase-g-plan.md.
+	"cmd/internal/src"
+)
+
+// OutBufNamePrefix is the Sym.Name prefix every gd Phase G
+// synthesised outBufK param carries. Only used for virtual fields
+// generated on demand by VirtualParams / VirtualRecvParams.
 const OutBufNamePrefix = ".outBuf"
 
-// IsOutBufParam reports whether f is a gd Phase G synthesised
-// outBufK *T param. Returns false for the zero Field, for fields
-// without a Sym, and for fields whose Sym name doesn't match the
-// prefix. Call sites are expected to use IsOutBufParam rather than
-// re-checking the prefix inline — keeps the discriminator in one
-// place.
+// IsOutBufParam reports whether f is one of gd's synthesised outBufK
+// *T fields. Virtual fields produced by VirtualParams have the
+// naming convention baked in.
 func (f *Field) IsOutBufParam() bool {
 	if f == nil || f.Sym == nil {
 		return false
@@ -27,75 +25,69 @@ func (f *Field) IsOutBufParam() bool {
 	return strings.HasPrefix(f.Sym.Name, OutBufNamePrefix)
 }
 
-// NumOutBufs returns the number of trailing synthesised outBuf params
-// in signature type t. 0 for non-func types and for sigs without any
-// outBufs appended.
-//
-// Phase G appends outBufs to the END of the params list, so we scan
-// backwards and stop at the first non-outBuf field.
+// NumOutBufs returns the number of synthesised outBuf params the
+// Virtual view of t exposes. Non-func types and unmarked func types
+// return 0.
 func (t *Type) NumOutBufs() int {
-	if t == nil || t.Kind() != TFUNC {
+	if t == nil || t.Kind() != TFUNC || !t.GdReturnOutBuf() {
 		return 0
 	}
-	params := t.Params()
 	n := 0
-	for i := len(params) - 1; i >= 0; i-- {
-		if !params[i].IsOutBufParam() {
-			break
+	for _, r := range t.Results() {
+		if r.Type != nil && r.Type.IsPtr() {
+			n++
 		}
-		n++
 	}
 	return n
 }
 
-// UserParams returns t.Params() with trailing synthesised outBufs
-// stripped. Use at every site that wants to present a user-visible
-// view of the signature — reflect's In/NumIn, diagnostic printers,
-// arity matching against user-written call args. ABI-level
-// consumers (abiutils, SSA-gen, walk) should use Params() directly.
-func (t *Type) UserParams() []*Field {
-	params := t.Params()
-	return params[:len(params)-t.NumOutBufs()]
-}
-
-// NumUserParams is the len of UserParams.
-func (t *Type) NumUserParams() int {
-	return t.NumParams() - t.NumOutBufs()
-}
-
-// OutBufs returns just the trailing synthesised outBuf fields. Empty
-// for sigs without outBufs.
-func (t *Type) OutBufs() []*Field {
-	params := t.Params()
-	return params[len(params)-t.NumOutBufs():]
-}
-
-// UserRecvParams returns RecvParams() with trailing synthesised
-// outBufs stripped. OutBufs are always at the tail of params (never
-// before results or within recv), so the strip count is the same as
-// NumOutBufs.
-func (t *Type) UserRecvParams() []*Field {
-	rp := t.RecvParams()
-	return rp[:len(rp)-t.NumOutBufs()]
-}
-
-// StripOutBufs returns a signature identical to t but with any
-// trailing synthesised outBufK params removed. Returns t unchanged
-// when t has no outBufs or when t isn't a function type.
+// VirtualParams returns t.Params() extended with one synthesised
+// outBufK *T field for each pointer-typed result. When t is not
+// flagged with GdReturnOutBuf (or isn't a func type), returns
+// t.Params() unchanged.
 //
-// Used when a function is discovered to be runtime-owned (where the
-// rewrite must not apply) AFTER its sig has already been built by
-// the noder reader.
-func (t *Type) StripOutBufs() *Type {
-	if t == nil || t.Kind() != TFUNC {
-		return t
+// The returned slice is freshly built each call; callers can modify
+// the slice header but the underlying fields are shared with t.
+//
+// This is a projection, not a mutation: t.Params() keeps its stock
+// length for reflect, type identity, and shape checks. Only
+// ABI-level and call-emission consumers that explicitly ask for the
+// virtual view see the extended form.
+func (t *Type) VirtualParams() []*Field {
+	params := t.Params()
+	n := t.NumOutBufs()
+	if n == 0 {
+		return params
 	}
-	nOut := t.NumOutBufs()
-	if nOut == 0 {
-		return t
+	out := make([]*Field, 0, len(params)+n)
+	out = append(out, params...)
+	k := 0
+	for _, r := range t.Results() {
+		if r.Type == nil || !r.Type.IsPtr() {
+			continue
+		}
+		sym := LocalPkg.LookupNum(OutBufNamePrefix, k)
+		out = append(out, NewField(src.NoXPos, sym, r.Type))
+		k++
 	}
-	userParams := t.UserParams()
-	keep := make([]*Field, len(userParams))
-	copy(keep, userParams)
-	return NewSignature(t.Recv(), keep, t.Results())
+	return out
+}
+
+// VirtualRecvParams is VirtualParams prefixed by the receiver (if
+// any), matching the layout of RecvParams().
+func (t *Type) VirtualRecvParams() []*Field {
+	if t.NumOutBufs() == 0 {
+		return t.RecvParams()
+	}
+	recvs := t.Recvs()
+	params := t.VirtualParams()
+	out := make([]*Field, 0, len(recvs)+len(params))
+	out = append(out, recvs...)
+	out = append(out, params...)
+	return out
+}
+
+// NumVirtualParams is len(VirtualParams()).
+func (t *Type) NumVirtualParams() int {
+	return t.NumParams() + t.NumOutBufs()
 }

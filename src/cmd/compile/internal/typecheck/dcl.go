@@ -110,30 +110,15 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 
 	// TODO(mdempsky): Move this function to types.
 
-	// gd Phase G: methods stay stock (V1). If the input sig picked
-	// up outBufs via reader.signature (applies universally to bare
-	// sigs), strip them so the lifted method-expr sig matches the
-	// method's declaration-time stock form. Without this,
-	// noder.methodExpr's types.Identical check fails because the
-	// bare-sig form has outBufs and the method form doesn't.
 	sigParams := sig.Params()
-	if recv != nil {
-		for len(sigParams) > 0 && IsOutBufParam(sigParams[len(sigParams)-1]) {
-			sigParams = sigParams[:len(sigParams)-1]
-		}
-	}
 
 	params := make([]*types.Field, nrecvs+len(sigParams))
 	if recv != nil {
 		params[0] = types.NewField(base.Pos, nil, recv)
 	}
 	for i, param := range sigParams {
-		// Preserve Sym so gd's synthesised .outBufK params stay
-		// recognisable across the method-type lift (see
-		// typecheck.IsOutBufParam, used by call-site arg-count
-		// matching and reflect's In()/NumIn() stripping). User
-		// params also keep their names, addressing mdempsky's TODO
-		// below.
+		// Preserve Sym (unrelated to gd Phase G; mdempsky's TODO
+		// about NewMethodType losing names applies here).
 		d := types.NewField(base.Pos, param.Sym, param.Type)
 		d.SetIsDDD(param.IsDDD())
 		// Note: escape-analysis Notes aren't copied here because

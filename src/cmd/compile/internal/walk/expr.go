@@ -649,7 +649,10 @@ func walkCall1(n *ir.CallExpr, init *ir.Nodes) {
 	}
 
 	args := n.Args
-	params := n.Fun.Type().Params()
+	// gd Phase G: use the virtual param list so we iterate all N+K
+	// args (user params + outBufs). Stock sigs return the same
+	// thing as Params().
+	params := n.Fun.Type().VirtualParams()
 
 	n.Fun = walkExpr(n.Fun, init)
 	walkExprList(args, init)
