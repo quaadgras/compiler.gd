@@ -224,8 +224,16 @@ func (cs *CallSite) computeCallSiteScore(csa *callSiteAnalyzer, calleeProps *Fun
 	}
 
 	// Walk through the actual expressions being passed at the call.
+	// gd Phase G: the call may have trailing outBuf nil args past
+	// the stock param count. Only score the user-declared params —
+	// calleeProps.ParamFlags and cs.ArgProps are sized to that
+	// count, not the virtual-extended count.
 	calleeRecvrParms := callee.Type().RecvParams()
-	for idx := range call.Args {
+	nArgs := len(call.Args)
+	if nArgs > len(calleeRecvrParms) {
+		nArgs = len(calleeRecvrParms)
+	}
+	for idx := 0; idx < nArgs; idx++ {
 		// ignore blanks
 		if calleeRecvrParms[idx].Sym == nil ||
 			calleeRecvrParms[idx].Sym.IsBlank() {
