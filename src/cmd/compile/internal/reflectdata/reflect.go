@@ -962,10 +962,20 @@ func writeType(t *types.Type) *obj.LSym {
 
 	case types.TFUNC:
 		// internal/abi.FuncType
+		//
+		// gd Phase G.2.1: filter out synthesised outBuf params from
+		// the user-visible rtype. reflect's NumIn/In/Call operate on
+		// this count, and the test suite plus stdlib expectations
+		// assume they see the original source-level arity. The
+		// extended ABI is a compile-time/runtime-frame concept —
+		// reflect bridges it internally at Call time.
 		for _, t1 := range t.RecvParamsResults() {
+			if t1.IsOutBufParam() {
+				continue
+			}
 			writeType(t1.Type)
 		}
-		inCount := t.NumRecvs() + t.NumParams()
+		inCount := t.NumRecvs() + t.NumParams() - t.NumOutBufs()
 		outCount := t.NumResults()
 		if t.IsVariadic() {
 			outCount |= 1 << 15
@@ -976,8 +986,16 @@ func writeType(t *types.Type) *obj.LSym {
 
 		// Array of rtype pointers follows funcType.
 		typs := t.RecvParamsResults()
-		array := rttype.NewArrayCursor(lsym, C, types.Types[types.TUNSAFEPTR], len(typs))
-		for i, t1 := range typs {
+		// Filter outBufs from the published array.
+		filtered := make([]*types.Field, 0, len(typs))
+		for _, t1 := range typs {
+			if t1.IsOutBufParam() {
+				continue
+			}
+			filtered = append(filtered, t1)
+		}
+		array := rttype.NewArrayCursor(lsym, C, types.Types[types.TUNSAFEPTR], len(filtered))
+		for i, t1 := range filtered {
 			array.Elem(i).WritePtr(writeType(t1.Type))
 		}
 
