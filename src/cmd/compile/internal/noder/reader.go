@@ -3550,16 +3550,22 @@ func unifiedInlineCall(callerfn *ir.Func, call *ir.CallExpr, fn *ir.Func, inlInd
 	}
 	args.Append(call.Args...)
 
-	// gd Phase G: the caller's typecheck extended call.Args with
-	// trailing nil outBuf args (FillOutBufArgs) for every virtual
-	// outBuf the callee's eligible sig exposes. Inlining binds
+	// gd Phase G: the caller may have extended call.Args with
+	// trailing nil outBuf args (FillOutBufArgs). Inlining binds
 	// call.Args 1:1 to the callee's inlvars (Dcl[:endParams]),
-	// which only covers the user-declared params — the outBufs live
-	// in the sig's virtual view, not the callee's body. Drop the
-	// outBuf args before the OAS2 so the counts match; the inlined
-	// body doesn't reference outBufs anyway.
-	if nOut := fn.Type().NumOutBufs(); nOut > 0 && len(args) >= nOut {
-		args = args[:len(args)-nOut]
+	// which only covers the user-declared params. Drop whatever
+	// surplus args were appended — they're always outBuf nils that
+	// the inlined body doesn't reference.
+	//
+	// Compute the surplus from the actual arg count vs the callee's
+	// stock NumParams: this handles both direct calls (where
+	// FillOutBufArgs added nils for the callee's outBufs) and
+	// function-value calls where the caller saw a different Type
+	// instance without the GdReturnOutBuf flag and so DIDN'T add
+	// nils.
+	stockParams := fn.Type().NumRecvs() + fn.Type().NumParams()
+	if extra := len(args) - stockParams; extra > 0 {
+		args = args[:len(args)-extra]
 	}
 
 	// Create assignment to declare and initialize inlvars.
