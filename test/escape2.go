@@ -930,7 +930,11 @@ func foo117(unknown func(interface{})) { // ERROR "unknown does not escape$"
 }
 
 func foo118(unknown func(*int)) { // ERROR "unknown does not escape$"
-	x := 1 // ERROR "moved to heap: x$"
+	// gd escape-bits: x flows into a dynamic-callee pointer arg, so
+	// escape analysis routes it through candidateHole rather than
+	// heapHole. No compile-time "moved to heap" — runtime decides
+	// via the closure's escape mask (see runtime.maybeEscapeClosureArg).
+	x := 1
 	unknown(&x)
 }
 
