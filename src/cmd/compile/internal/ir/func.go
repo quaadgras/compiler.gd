@@ -621,12 +621,16 @@ func FuncPC(pos src.XPos, n Node, wantABI obj.ABI) Node {
 // parameter.
 //
 // gd Phase G: synthesised .outBufK params (see typecheck.IsOutBufParam)
-// are segregated in Dcl — they come AFTER results instead of with the
-// rest of the params. The noder's body bitstream references locals by
-// index into Dcl; appending outBufs in-line between user params and
-// results would shift result indices by one per outBuf and desync
-// every function-body read. Results stay at their stock positions;
-// outBufs live at the tail, where body code never references them.
+// sit in Dcl in the standard [params..., results...] position — i.e.
+// they appear AT THE END OF params, matching the signature's
+// sig.RecvParams() order. This keeps the Dcl offsets that downstream
+// passes compute from sig.NumRecvs()+sig.NumParams() (e.g. the inline
+// reader's retvars slice) correct.
+//
+// The noder's addLocal sync stream still expects only user locals, so
+// the noder's declareParams filters outBufs out of its addLocal loop
+// (see reader.go:declareParams). That filter keeps r.locals indexed
+// consistently with the body bitstream the writer produced.
 func (fn *Func) DeclareParams(setNname bool) {
 	if fn.Dcl != nil {
 		base.FatalfAt(fn.Pos(), "%v already has Dcl", fn)
@@ -651,42 +655,14 @@ func (fn *Func) DeclareParams(setNname bool) {
 	}
 
 	sig := fn.Type()
-	recvParams := sig.RecvParams()
+	params := sig.RecvParams()
 	results := sig.Results()
 
-	// Split recvParams into user-declared and synthesised-outBuf slices.
-	// IsOutBufParam is the discriminator — see typecheck/return_outbuf.go.
-	// Importing the typecheck pkg from ir would cycle; inline the check.
-	userParams := recvParams
-	var outBufs []*types.Field
-	for i := len(recvParams) - 1; i >= 0; i-- {
-		if !isOutBufField(recvParams[i]) {
-			userParams = recvParams[:i+1]
-			outBufs = recvParams[i+1:]
-			break
-		}
-		if i == 0 {
-			userParams = nil
-			outBufs = recvParams
-		}
-	}
-
-	fn.Dcl = make([]*Name, len(userParams)+len(results)+len(outBufs))
-	declareParams(fn.Dcl, userParams, PPARAM, "~p", 0)
-	declareParams(fn.Dcl, results, PPARAMOUT, "~r", len(userParams))
-	// outBufs appended after results; see comment above.
-	declareParams(fn.Dcl, outBufs, PPARAM, "~o", len(userParams)+len(results))
+	fn.Dcl = make([]*Name, len(params)+len(results))
+	declareParams(fn.Dcl, params, PPARAM, "~p", 0)
+	declareParams(fn.Dcl, results, PPARAMOUT, "~r", len(params))
 }
 
-// isOutBufField mirrors typecheck.IsOutBufParam without importing
-// typecheck (which would cycle). Keep in sync with
-// typecheck/return_outbuf.go's outBufNamePrefix.
-func isOutBufField(f *types.Field) bool {
-	if f == nil || f.Sym == nil {
-		return false
-	}
-	return strings.HasPrefix(f.Sym.Name, ".outBuf")
-}
 
 // ContainsClosure reports whether c is a closure contained within f.
 func ContainsClosure(f, c *Func) bool {
