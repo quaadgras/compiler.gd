@@ -268,13 +268,6 @@ func tcCall(n *ir.CallExpr, top int) ir.Node {
 		}
 	}
 
-	// gd Phase G: auto-append nil args for the callee's synthesised
-	// outBufK params if the caller's arg list matches the user-visible
-	// arity. A later walk-time pass rewrites individual call sites to
-	// replace selected nils with &stackBuf. No-op when PhaseGActive is
-	// off or when the callee has no outBufs.
-	FillOutBufArgs(n, t)
-
 	typecheckaste(ir.OCALL, n.Fun, n.IsDDD, t.Params(), n.Args, func() string { return fmt.Sprintf("argument to %v", n.Fun) })
 	FixVariadicCall(n)
 	FixMethodCall(n)

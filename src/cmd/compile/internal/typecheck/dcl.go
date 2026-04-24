@@ -116,13 +116,7 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 		params[0] = types.NewField(base.Pos, nil, recv)
 	}
 	for i, param := range sig.Params() {
-		// Preserve Sym so gd's synthesised .outBufK params stay
-		// recognisable across the method-type lift (see
-		// typecheck.IsOutBufParam, used by call-site arg-count
-		// matching and reflect's In()/NumIn() stripping). User
-		// params also keep their names, addressing mdempsky's TODO
-		// below.
-		d := types.NewField(base.Pos, param.Sym, param.Type)
+		d := types.NewField(base.Pos, nil, param.Type)
 		d.SetIsDDD(param.IsDDD())
 		// Note: escape-analysis Notes aren't copied here because
 		// NewMethodType runs during typecheck, before escape
