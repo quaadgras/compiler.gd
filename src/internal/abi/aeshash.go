@@ -2,6 +2,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// The gd software AES port is only needed when the TARGET runtime may
+// call strhashPort (non-arm64, non-AES-hardware fallback). The 32-bit
+// SSA lowering rules can't lower some Int64Make shapes that this file's
+// uint64 arithmetic produces; restrict the file to 64-bit GOARCHes and
+// keep a 32-bit-specific strhashPort in runtime that goes through
+// memhashFallback directly. The static-data emitter already leaves
+// word 1 unsealed (0) for 32-bit targets (see staticdata/data.go's
+// types.PtrSize==8 gate), so nothing on those targets bakes an AES
+// hash into rodata that the runtime must reproduce.
+
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+
 package abi
 
 // aesLow64 returns the low 64 bits of a 16-B AES state, little-endian.

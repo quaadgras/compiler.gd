@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Matches aeshash.go's 64-bit gating: StringHashBytes uses bits.Mul64
+// and 8-byte reads whose SSA lowering on 32-bit arches runs into the
+// same Int64Make issues aeshash.go hits. Since the runtime hash-cache
+// path is disabled on 32-bit targets (static-data emits word 1 = 0),
+// no 32-bit consumer of this function remains.
+
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+
 package abi
 
 import (
