@@ -279,6 +279,16 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	base.Timer.Start("fe", "escapes")
 	escape.Funcs(typecheck.Target.Funcs)
 
+	// gd Phase F4: synthesise compute fns for every detected
+	// trivial forwarder. Must run after escape (so GdForwarder
+	// fields are populated by DetectForwarders inside
+	// escape.Batch.finish) and before FinalizeItabMasks (so the
+	// install path can reference the synthesized funcsym). See
+	// doc/gd/escape-bits.md §F4.
+	if base.Debug.GdForwarderDisable == 0 {
+		escape.SynthesizeForwarderComputeFns(typecheck.Target.Funcs)
+	}
+
 	// gd escape-bits: write the per-method EscMask into every itab
 	// whose slot was reserved during noder-time writeITab calls. Must
 	// run after escape so ir.Func.EscMask is populated. See

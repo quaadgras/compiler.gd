@@ -264,14 +264,27 @@ func candidateStorageAddr(arg ir.Node) (*ir.Name, bool) {
 	return nil, false
 }
 
-func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
+// candidateArg captures the per-arg work walk needs to do at one
+// indirect call site. We pre-classify each candidate arg once,
+// then emit the resolved-mask plumbing in one block (cheap-cache
+// the boxes, build heapMask, resolve, per-arg test + materialise),
+// rather than threading classification through one mkcall per arg.
+type candidateArg struct {
+	idx       int      // position in n.Args
+	box       *ir.Name // pointer-PAUTO whose value is the live storage; nil for fresh-alloc
+	name      *ir.Name // user local for `p := new(T); f(p)`; nil otherwise
+	freshExpr ir.Node  // raw expression for fresh-alloc args; nil otherwise
+	elemPtr   ir.Node  // *abi.Type for materializeToHeap
+	argType   *types.Type
+}
+
+// classifyCandidates builds the per-arg work list for n. Returns
+// (nil, false) if no arg is a candidate or none classifies as a
+// supported shape — the caller then bails before emitting any
+// mask-resolution plumbing.
+func classifyCandidates(n *ir.CallExpr) ([]candidateArg, bool) {
 	pos := n.Pos()
-	unsafePtr := types.Types[types.TUNSAFEPTR]
-
-	// Cache the closure value once so every per-arg wrap sees the
-	// same mask word.
-	fnCached := cheapExpr(n.Fun, init)
-
+	out := make([]candidateArg, 0, len(n.Args))
 	for i, arg := range n.Args {
 		if !argIsEscapeCandidate(arg) {
 			continue
@@ -280,36 +293,225 @@ func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
 		if !argType.IsPtr() && !argType.IsUnsafePtr() {
 			continue
 		}
-		elemType := argType.Elem()
-		elemTypePtr := reflectdata.TypePtrAt(pos, elemType)
-
+		ca := candidateArg{idx: i, argType: argType, elemPtr: reflectdata.TypePtrAt(pos, argType.Elem())}
 		if box, ok := candidateStorageAddr(arg); ok {
-			emitBoxUpdate(pos, box, elemTypePtr, init, fnCached, int64(i), "maybeEscapeClosureArg", nil)
-			n.Args[i] = box
-			continue
+			ca.box = box
+		} else if name, ok := candidatePointerName(arg); ok {
+			ca.name = name
+		} else {
+			ca.freshExpr = arg
 		}
-		if name, ok := candidatePointerName(arg); ok {
-			// `p := new(T); f(p)` — update the var in place so
-			// post-call reads of p see the migrated pointer.
-			// The call argument is the var itself.
-			updateNameViaWrap(pos, name, elemTypePtr, init, fnCached, int64(i), "maybeEscapeClosureArg", nil)
-			n.Args[i] = name
-			continue
-		}
+		out = append(out, ca)
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
 
-		// Fresh-allocation path: substitute the call argument with
-		// the wrap's return value (no var to update).
-		wrapCall := mkcall("maybeEscapeClosureArg", unsafePtr, init,
-			typecheck.ConvNop(fnCached, unsafePtr),
-			ir.NewInt(pos, int64(i)),
-			typecheck.ConvNop(arg, unsafePtr),
-			elemTypePtr,
-		)
-		n.Args[i] = typecheck.ConvNop(wrapCall, argType)
+// boxValue returns an ir.Node whose evaluation yields the *T
+// pointer currently in the box / name / fresh expression. This is
+// the value passed to runtime.materializeToHeap and the value
+// tested by runtime.isOnHeap when building heapMask.
+func (ca *candidateArg) boxValue() ir.Node {
+	switch {
+	case ca.box != nil:
+		return ca.box
+	case ca.name != nil:
+		return ca.name
+	default:
+		return ca.freshExpr
+	}
+}
+
+// u64Lit returns a typed-uint64 literal; using ir.NewInt directly
+// yields an untyped constant, which trips ssagen's "width not
+// calculated" check when fed into a typed binary op without going
+// through full typecheck propagation.
+func u64Lit(pos src.XPos, v int64) ir.Node {
+	n := ir.NewInt(pos, v)
+	n.SetType(types.Types[types.TUINT64])
+	n.SetTypecheck(1)
+	return n
+}
+
+// intLit returns a typed-int literal; mirrors u64Lit for places
+// we feed an `int`-typed value into a runtime helper (depth arg).
+func intLit(pos src.XPos, v int64) ir.Node {
+	n := ir.NewInt(pos, v)
+	n.SetType(types.Types[types.TINT])
+	n.SetTypecheck(1)
+	return n
+}
+
+// uintptrLit returns a typed-uintptr literal for offset arithmetic
+// on unsafe-pointer-derived values.
+func uintptrLit(pos src.XPos, v int64) ir.Node {
+	n := ir.NewInt(pos, v)
+	n.SetType(types.Types[types.TUINTPTR])
+	n.SetTypecheck(1)
+	return n
+}
+
+// rawLoadU64At returns IR for `*(*uint64)(unsafe.Pointer(uintptr(base) + offset))`.
+// Used to open-code the mask-word load out of a closure header or
+// itab method tail without paying a runtime helper call on the
+// fast (static-mask) path.
+func rawLoadU64At(pos src.XPos, base ir.Node, offset int64) ir.Node {
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+	uintptrT := types.Types[types.TUINTPTR]
+	u64 := types.Types[types.TUINT64]
+
+	asUnsafe := typecheck.ConvNop(base, unsafePtr)
+	asUintptr := typecheck.Conv(asUnsafe, uintptrT)
+	sum := ir.NewBinaryExpr(pos, ir.OADD, asUintptr, uintptrLit(pos, offset))
+	sum.SetType(uintptrT)
+	sum.SetTypecheck(1)
+	asPtrU64 := typecheck.ConvNop(typecheck.ConvNop(sum, unsafePtr), types.NewPtr(u64))
+	deref := ir.NewStarExpr(pos, asPtrU64)
+	deref.SetType(u64)
+	deref.SetTypecheck(1)
+	return deref
+}
+
+// newU64Temp creates a fresh PAUTO uint64 temporary in the current
+// function. Used for the resolved mask and the heapMask scratch
+// values that walk threads through the open-coded resolution
+// sequence.
+func newU64Temp(pos src.XPos) *ir.Name {
+	t := typecheck.TempAt(pos, ir.CurFunc, types.Types[types.TUINT64])
+	t.SetTypecheck(1)
+	return t
+}
+
+// emitMaskResolve emits the open-coded mask-resolution sequence
+// for one indirect call site:
+//
+//	raw := *(*uint64)(carrier + maskOffset)
+//	mask := raw
+//	if raw & 1 != 0 {
+//	    hm := uint64(0)
+//	    if isOnHeap(box_0) { hm |= 1 << 1 }
+//	    if isOnHeap(box_1) { hm |= 1 << 2 }
+//	    ...
+//	    mask = resolveMaskSlow(raw, computeFnCarrier, hm, maxComputeMaskDepth)
+//	}
+//
+// Returns the `mask` PAUTO. carrier is the value at whose
+// maskOffset the raw mask word lives (the closure value, or the
+// itab pointer for an iface call). computeFnCarrier is what the
+// compute fn sees as its first argument (the closure value, or the
+// receiver-data word for an iface call) — symmetric across the two
+// dispatch shapes: in both cases it points at the storage holding
+// the captured/field state the compute fn reads to forward.
+//
+// heapMask construction lives inside the bit-0 branch on purpose:
+// the static-mask fast path (the dominant case across stdlib) costs
+// just one load + one and-test + branch-not-taken, with no
+// stack-range checks at all.
+func emitMaskResolve(pos src.XPos, init *ir.Nodes, carrier, computeFnCarrier ir.Node, maskOffset int64, cands []candidateArg) *ir.Name {
+	u64 := types.Types[types.TUINT64]
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+
+	rawTmp := newU64Temp(pos)
+	init.Append(typecheck.Stmt(ir.NewAssignStmt(pos, rawTmp, rawLoadU64At(pos, carrier, maskOffset))))
+
+	maskTmp := newU64Temp(pos)
+	init.Append(typecheck.Stmt(ir.NewAssignStmt(pos, maskTmp, rawTmp)))
+
+	// Build the dynamic-branch body: compute heapMask, call
+	// resolveMaskSlow, store result into maskTmp.
+	var dynBody ir.Nodes
+	hmTmp := newU64Temp(pos)
+	dynBody.Append(typecheck.Stmt(ir.NewAssignStmt(pos, hmTmp, u64Lit(pos, 0))))
+	for _, ca := range cands {
+		boxAsUnsafe := typecheck.ConvNop(ca.boxValue(), unsafePtr)
+		isHeapCall := mkcall("isOnHeap", types.Types[types.TBOOL], &dynBody, boxAsUnsafe)
+		bit := u64Lit(pos, int64(1)<<uint(ca.idx+1))
+		// Walk lowering of OASOP normally happens during walkStmt;
+		// statements we append into a freshly-constructed Nodes
+		// won't be re-walked, so lower hmTmp |= bit by hand to
+		// hmTmp = hmTmp | bit.
+		orExpr := typecheck.Expr(ir.NewBinaryExpr(pos, ir.OOR, hmTmp, bit))
+		var orBody ir.Nodes
+		orBody.Append(typecheck.Stmt(ir.NewAssignStmt(pos, hmTmp, orExpr)))
+		dynBody.Append(typecheck.Stmt(ir.NewIfStmt(pos, isHeapCall, orBody, nil)))
+	}
+	slowCall := mkcall("resolveMaskSlow", u64, &dynBody,
+		rawTmp,
+		typecheck.ConvNop(computeFnCarrier, unsafePtr),
+		hmTmp,
+		intLit(pos, int64(maxComputeMaskDepthForGen)),
+	)
+	dynBody.Append(typecheck.Stmt(ir.NewAssignStmt(pos, maskTmp, slowCall)))
+
+	cond := typecheck.Expr(ir.NewBinaryExpr(pos, ir.ONE,
+		ir.NewBinaryExpr(pos, ir.OAND, rawTmp, u64Lit(pos, 1)),
+		u64Lit(pos, 0)))
+	init.Append(typecheck.Stmt(ir.NewIfStmt(pos, cond, dynBody, nil)))
+
+	return maskTmp
+}
+
+// maxComputeMaskDepthForGen mirrors runtime.maxComputeMaskDepth.
+// The runtime constant is unexported and we'd rather not add a
+// runtime accessor for one int — keep them in lockstep here.
+const maxComputeMaskDepthForGen = 8
+
+// emitMaybeMaterialize emits, for one candidate arg, the open-
+// coded conditional materialise:
+//
+//	if mask & (1 << (i+1)) != 0 {
+//	    slot = (T)(runtime.materializeToHeap(unsafe.Pointer(slot), &T))
+//	}
+//
+// where `slot` is the storage location whose value reaches the
+// callee — a promoted-PAUTO box, a user pointer-name, or a fresh
+// PAUTO seeded with the original fresh-alloc expression. The call
+// site's argument is then rewritten to reference `slot`.
+func emitMaybeMaterialize(pos src.XPos, n *ir.CallExpr, init *ir.Nodes, mask *ir.Name, ca candidateArg) {
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+
+	var slot *ir.Name
+	switch {
+	case ca.box != nil:
+		slot = ca.box
+	case ca.name != nil:
+		slot = ca.name
+	default:
+		slot = typecheck.TempAt(pos, ir.CurFunc, ca.argType)
+		slot.SetTypecheck(1)
+		init.Append(typecheck.Stmt(ir.NewAssignStmt(pos, slot, ca.freshExpr)))
 	}
 
-	// Point the call at the cached closure value so Fun and Args
-	// see the same materialisation.
+	var bodyInit ir.Nodes
+	matCall := mkcall("materializeToHeap", unsafePtr, &bodyInit,
+		typecheck.ConvNop(slot, unsafePtr),
+		ca.elemPtr,
+	)
+	bodyInit.Append(typecheck.Stmt(ir.NewAssignStmt(pos, slot, typecheck.ConvNop(matCall, slot.Type()))))
+
+	bit := u64Lit(pos, int64(1)<<uint(ca.idx+1))
+	cond := typecheck.Expr(ir.NewBinaryExpr(pos, ir.ONE,
+		ir.NewBinaryExpr(pos, ir.OAND, mask, bit),
+		u64Lit(pos, 0)))
+	init.Append(typecheck.Stmt(ir.NewIfStmt(pos, cond, bodyInit, nil)))
+	n.Args[ca.idx] = slot
+}
+
+func wrapClosureCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
+	pos := n.Pos()
+	cands, ok := classifyCandidates(n)
+	if !ok {
+		return
+	}
+	// Cache the closure value once: the mask load, the compute-fn
+	// carrier, and the call itself all see the same materialisation.
+	fnCached := cheapExpr(n.Fun, init)
+	mask := emitMaskResolve(pos, init, fnCached, fnCached, int64(types.PtrSize), cands)
+	for _, ca := range cands {
+		emitMaybeMaterialize(pos, n, init, mask, ca)
+	}
 	n.Fun = fnCached
 }
 
@@ -322,79 +524,58 @@ func wrapIfaceCallCandidates(n *ir.CallExpr, init *ir.Nodes) {
 		base.FatalfAt(pos, "OCALLINTER with non-SelectorExpr Fun: %+v", n.Fun)
 	}
 
+	cands, hasCands := classifyCandidates(n)
+	if !hasCands {
+		return
+	}
+
+	// Cache the iface value, then derive itab AND data pointers
+	// from it. The mask word lives in the itab tail (carrier);
+	// the compute fn sees the receiver-data pointer
+	// (computeFnCarrier) so it can reach the receiver's fields —
+	// symmetric to the closure case where captures live in the
+	// closure value itself.
 	ifaceVal := cheapExpr(sel.X, init)
 	itabVal := ir.NewUnaryExpr(pos, ir.OITAB, ifaceVal)
 	itabVal.SetType(unsafePtr)
 	itabVal.SetTypecheck(1)
 	itabCached := cheapExpr(itabVal, init)
 
+	dataVal := ir.NewUnaryExpr(pos, ir.OIDATA, ifaceVal)
+	dataVal.SetType(unsafePtr)
+	dataVal.SetTypecheck(1)
+	dataCached := cheapExpr(dataVal, init)
+
 	methodIdx := sel.Offset() / int64(types.PtrSize)
-
-	for i, arg := range n.Args {
-		if !argIsEscapeCandidate(arg) {
-			continue
-		}
-		argType := arg.Type()
-		if !argType.IsPtr() && !argType.IsUnsafePtr() {
-			continue
-		}
-		elemType := argType.Elem()
-		elemTypePtr := reflectdata.TypePtrAt(pos, elemType)
-
-		if box, ok := candidateStorageAddr(arg); ok {
-			emitBoxUpdate(pos, box, elemTypePtr, init, itabCached, int64(i), "maybeEscapeIfaceArg", ir.NewInt(pos, methodIdx))
-			n.Args[i] = box
-			continue
-		}
-		if name, ok := candidatePointerName(arg); ok {
-			updateNameViaWrap(pos, name, elemTypePtr, init, itabCached, int64(i), "maybeEscapeIfaceArg", ir.NewInt(pos, methodIdx))
-			n.Args[i] = name
-			continue
-		}
-
-		wrapCall := mkcall("maybeEscapeIfaceArg", unsafePtr, init,
-			itabCached,
-			ir.NewInt(pos, methodIdx),
-			ir.NewInt(pos, int64(i)),
-			typecheck.ConvNop(arg, unsafePtr),
-			elemTypePtr,
-		)
-		n.Args[i] = typecheck.ConvNop(wrapCall, argType)
+	ifaceType := sel.X.Type()
+	for ifaceType.IsPtr() {
+		ifaceType = ifaceType.Elem()
 	}
+	if !ifaceType.IsInterface() {
+		base.FatalfAt(pos, "OCALLINTER receiver type is not interface: %v", sel.X.Type())
+	}
+	ni := int64(len(ifaceType.AllMethods()))
 
+	// itab layout (mirrors src/internal/abi/iface.go ITab and
+	// src/runtime/iface.go itab in the gd fork):
+	//   Inter   *InterfaceType  (PtrSize)
+	//   Type    *Type           (PtrSize)
+	//   Hash    uint32          (4)
+	//   Inline  uint8           (1)
+	//   _       [3]byte         (3)
+	//   Fun     [N]uintptr      (N * PtrSize)
+	//   masks   [N]uint64       (N * 8) ← per-method escape masks
+	//
+	// Per-method mask tail starts at funBase + N*PtrSize; methodIdx
+	// selects the 8-byte slot within it.
+	funBase := int64(2*types.PtrSize) + 8 // 2 ptrs + uint32 + uint8 + 3 pad
+	maskOffset := funBase + ni*int64(types.PtrSize) + methodIdx*8
+
+	mask := emitMaskResolve(pos, init, itabCached, dataCached, maskOffset, cands)
+	for _, ca := range cands {
+		emitMaybeMaterialize(pos, n, init, mask, ca)
+	}
 	sel.X = ifaceVal
-}
-
-// emitBoxUpdate emits `box = cast(helper(carrier, …,
-// unsafe.Pointer(box), elemTypePtr))` into init.
-func emitBoxUpdate(pos src.XPos, box *ir.Name, elemTypePtr ir.Node, init *ir.Nodes, carrier ir.Node, argIdx int64, helperName string, methodIdxArg ir.Node) {
-	updateNameViaWrap(pos, box, elemTypePtr, init, carrier, argIdx, helperName, methodIdxArg)
-}
-
-// updateNameViaWrap emits `name = cast(helper(carrier, …,
-// unsafe.Pointer(name), elemTypePtr))`. Works for both the box
-// pointer case (where name is the synthesized `&x` PAUTO whose
-// value is the active storage pointer) and the Name-of-pointer
-// case (where name is a user local whose value is a pointer to a
-// fresh allocation). helperName is "maybeEscapeClosureArg" or
-// "maybeEscapeIfaceArg"; methodIdxArg is nil for closure calls.
-func updateNameViaWrap(pos src.XPos, name *ir.Name, elemTypePtr ir.Node, init *ir.Nodes, carrier ir.Node, argIdx int64, helperName string, methodIdxArg ir.Node) {
-	unsafePtr := types.Types[types.TUNSAFEPTR]
-	args := []ir.Node{
-		typecheck.ConvNop(carrier, unsafePtr),
-	}
-	if methodIdxArg != nil {
-		args = append(args, methodIdxArg)
-	}
-	args = append(args,
-		ir.NewInt(pos, argIdx),
-		typecheck.ConvNop(name, unsafePtr),
-		elemTypePtr,
-	)
-	wrapCall := mkcall(helperName, unsafePtr, init, args...)
-	newPtr := typecheck.ConvNop(wrapCall, name.Type())
-	as := ir.NewAssignStmt(pos, name, newPtr)
-	init.Append(typecheck.Stmt(as))
 }
 
 // candidatePointerName returns (name, true) when arg is an ONAME

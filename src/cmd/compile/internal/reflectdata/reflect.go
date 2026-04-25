@@ -131,6 +131,19 @@ const escFuncTagged = 3
 
 func FinalizeItabMasks() {
 	for _, p := range pendingItabMasks {
+		// Phase F4 install. Write a SymPtr reloc to the synth funcsym
+		// with bit 0 set (dynamic-mask discriminator). The PkgIdxSelf
+		// hash this introduces is incompatible with content-addressable
+		// itab dedup; writeITab drops AttrContentAddressable for the
+		// entire itab when install is enabled, so the linker dedups by
+		// name (DUPOK) instead. Disable via `-d=gdforwarderdisable=1`.
+		if base.Debug.GdForwarderDisable == 0 && p.fn != nil && p.fn.GdForwarder != nil && p.fn.GdForwarder.SyntheticComputeFn != nil {
+			if hasPointerBearingArg(p.fn) {
+				cfSym := staticdata.FuncLinksym(p.fn.GdForwarder.SyntheticComputeFn.Nname)
+				objw.SymPtr(p.lsym, p.offset, cfSym, 1)
+				continue
+			}
+		}
 		var mask uint64
 		switch {
 		case p.fn != nil && p.fn.Esc() >= escFuncTagged:
@@ -146,6 +159,36 @@ func FinalizeItabMasks() {
 		objw.UintN(p.lsym, p.offset, mask, 8)
 	}
 	pendingItabMasks = nil
+}
+
+// hasPointerBearingArg reports whether fn has at least one
+// non-receiver param of pointer kind (or unsafe.Pointer / chan /
+// map / iface / func — any type that can carry an EscCandidate
+// pointer). Used by Phase F4 to gate install: forwarder methods
+// with no pointer-bearing args have no candidate args at the wrap
+// site, so the mask is never read, and installing the synth's
+// funcsym there is dead but expensive.
+func hasPointerBearingArg(fn *ir.Func) bool {
+	if fn == nil || fn.Type() == nil {
+		return false
+	}
+	for _, p := range fn.Type().Params() {
+		t := p.Type
+		if t == nil {
+			continue
+		}
+		switch t.Kind() {
+		case types.TPTR, types.TUNSAFEPTR, types.TINTER, types.TFUNC, types.TMAP, types.TCHAN, types.TSLICE:
+			return true
+		}
+		// Struct-by-value with pointer-bearing fields counts too:
+		// the wrap routes such structs through tagHole when any
+		// inner field is pointer-shaped.
+		if t.HasPointers() {
+			return true
+		}
+	}
+	return false
 }
 
 func commonSize() int { return int(rttype.Type.Size()) } // Sizeof(runtime._type{})
@@ -1261,7 +1304,20 @@ func writeITab(lsym *obj.LSym, typ, iface *types.Type, allowNonImplement bool) {
 
 	// Nothing writes static itabs, so they are read only.
 	objw.Global(lsym, int32(totalSize), int16(obj.DUPOK|obj.RODATA))
-	lsym.Set(obj.AttrContentAddressable, true)
+	// Phase F4 install puts a per-package SymPtr reloc into the
+	// itab's mask tail (FinalizeItabMasks). The reloc target's
+	// PkgIdxSelf hash is salted with the current package path
+	// (cmd/internal/obj.objfile contentHash), making the same
+	// logical itab compiled from different packages produce
+	// different content hashes — breaking the linker's hashed-
+	// def dedup and surfacing as "T from different scopes"
+	// panics on type assertions where the duplicate itabs
+	// reach different rtype lookups. F4 install is on by default;
+	// fall back to plain DUPOK name-based dedup for itabs unless
+	// the user explicitly disables F4 with -d=gdforwarderdisable=1.
+	if base.Debug.GdForwarderDisable != 0 {
+		lsym.Set(obj.AttrContentAddressable, true)
+	}
 }
 
 func WritePluginTable() {

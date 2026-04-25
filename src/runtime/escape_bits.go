@@ -188,11 +188,29 @@ type computeMaskFn func(carrier unsafe.Pointer, heapMask uint64, depth int) uint
 // conservative "every arg escapes" mask — safe under any
 // wrapper cycle.
 //
+// Walk-emitted call sites prefer to open-code the bit-0 fast
+// path (a single load + test) and tail into resolveMaskSlow
+// only when the dynamic-mask discriminator fires. resolveMask
+// is kept as the single-entry helper for the per-arg helpers
+// below and for tests; the open-coded path skips it to keep the
+// fast path call-free.
+//
 //go:nosplit
 func resolveMask(rawMask uint64, carrier unsafe.Pointer, heapMask uint64, depth int) uint64 {
 	if rawMask&1 == 0 {
 		return rawMask
 	}
+	return resolveMaskSlow(rawMask, carrier, heapMask, depth)
+}
+
+// resolveMaskSlow is the dynamic-discriminator branch of
+// resolveMask, factored out so callers (chiefly walk-emitted
+// indirect-call sequences) can open-code the bit-0 test and
+// CALL into the runtime only when bit 0 is actually set.
+// rawMask MUST have bit 0 set; the function does not re-check.
+//
+//go:nosplit
+func resolveMaskSlow(rawMask uint64, carrier unsafe.Pointer, heapMask uint64, depth int) uint64 {
 	if depth <= 0 {
 		return conservativeAllEscapeMask
 	}
@@ -206,39 +224,71 @@ func resolveMask(rawMask uint64, carrier unsafe.Pointer, heapMask uint64, depth 
 	return fn(carrier, heapMask, depth-1) &^ 1
 }
 
-// maybeEscapeClosureArg reads the escape-bit mask from a closure's
-// second word (offset PtrSize from fnPtr) and delegates to
-// maybeEscapeArg. Walk emits one call per candidate arg at an
-// indirect closure call site; f is the closure value (cast to
-// unsafe.Pointer so the IR side stays type-agnostic).
+// isOnHeap reports whether p points outside the current
+// goroutine's stack — i.e. into the heap, a global, or another
+// goroutine's stack (rare and treated as heap-equivalent for
+// escape-bit purposes). Used by walk-emitted indirect-call
+// sequences to build a precise heapMask for resolveMaskSlow:
+// each candidate arg's box pointer is tested in turn and the
+// corresponding bit set when off-stack. The compute fn can then
+// express inter-arg relationships ("arg A escapes iff arg B is
+// on heap") that the static-mask encoding cannot.
 //
 //go:nosplit
-func maybeEscapeClosureArg(f unsafe.Pointer, argIdx int, src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
-	raw := *(*uint64)(unsafe.Add(f, goarch.PtrSize))
-	// heapMask=0 here is the "conservative caller" default:
-	// tells the compute fn to assume every arg is currently on
-	// the stack. Per-arg helpers can't build a better heapMask
-	// because they only see one arg at a time; a call-site
-	// codegen path that resolves the mask once and asks per-arg
-	// afterwards could compute and pass a precise heapMask.
-	mask := resolveMask(raw, f, 0, maxComputeMaskDepth)
-	return maybeEscapeArg(mask, argIdx, src, typ)
+func isOnHeap(p unsafe.Pointer) bool {
+	if p == nil {
+		return false
+	}
+	ptr := uintptr(p)
+	stk := getg().stack
+	return ptr < stk.lo || ptr >= stk.hi
 }
 
-// maybeEscapeIfaceArg reads the escape-bit mask from the itab's
-// per-method tail and delegates to maybeEscapeArg. Called at
-// interface-method dispatch sites when the selected method's
-// callee-side escape profile says an arg may stay on the stack.
-// itabPtr must be a non-nil itab pointer; callers are assumed to
-// have done the nil check earlier in the dispatch sequence.
+// resolveForwardedRecvFieldMask is the parameterised backbone for
+// Phase F4's synthesised compute fns. Each detected trivial
+// forwarder (escape.DetectForwarders) gets a tiny synthesised
+// `func(carrier, heapMask, depth) uint64` that hardcodes the
+// receiver-field byte offset and the inner method's index, then
+// tail-calls this helper. The helper:
+//
+//  1. Reinterprets carrier as the wrapper's receiver pointer.
+//  2. Loads the iface header at carrier+fieldOffset (a 2-word
+//     {itab, data} pair).
+//  3. Reads the inner itab's per-method mask slot for methodIdx.
+//  4. Forwards to resolveMask with the inner itab as the new
+//     carrier and the same heapMask.
+//
+// On any nil itab we return conservativeAllEscapeMask — the
+// forwarder will materialize all candidate args, matching what a
+// well-behaved static-mask wrapper would have done in stock Go.
+//
+// fieldOffset and methodIdx are compile-time constants supplied
+// by the synthesised wrapper, so this function compiles down to
+// straight pointer arithmetic + one resolveMask call.
 //
 //go:nosplit
-func maybeEscapeIfaceArg(itabPtr unsafe.Pointer, methodIdx, argIdx int, src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
-	tab := (*itab)(itabPtr)
+func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, methodIdx int, heapMask uint64, depth int) uint64 {
+	if depth <= 0 {
+		return conservativeAllEscapeMask
+	}
+	// iface header: matches abi.EmptyInterface / iface in
+	// internal/abi/iface.go: itab pointer first, then data
+	// pointer. We only need the itab.
+	type ifaceHdr struct {
+		itab *itab
+		data unsafe.Pointer
+	}
+	inner := (*ifaceHdr)(unsafe.Add(carrier, fieldOffset))
+	if inner.itab == nil {
+		return conservativeAllEscapeMask
+	}
+	tab := inner.itab
 	ni := len(tab.Inter.Methods)
 	maskBase := unsafe.Add(unsafe.Pointer(&tab.Fun[0]), uintptr(ni)*goarch.PtrSize)
 	raw := *(*uint64)(unsafe.Add(maskBase, uintptr(methodIdx)*8))
-	// See note in maybeEscapeClosureArg about heapMask=0.
-	mask := resolveMask(raw, itabPtr, 0, maxComputeMaskDepth)
-	return maybeEscapeArg(mask, argIdx, src, typ)
+	// Pass depth (not depth-1): resolveMask/Slow decrement
+	// internally before calling the inner compute fn (if any).
+	// Subtracting here would double-count.
+	return resolveMask(raw, unsafe.Pointer(tab), heapMask, depth)
 }
+

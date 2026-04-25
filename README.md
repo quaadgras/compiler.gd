@@ -1,20 +1,12 @@
 # compiler.gd
 
-A compiler for the Go programming language that aggresively avoids allocations. 
-
-Pass `-compiler=gd` to compiler.gd's Go command to use the compiler, otherwise 
-it will fallback to Google's `gc` compiler. All `gd` specific optimizations are
-feature flagged under `runtime.Compiler == "gd"` or `go:build gd`.
+A compiler for the Go programming language that aggressively avoids allocations. 
 
 ### Optimisation Goals
 
 1. Interfaces include an additional 128bits for storing values directly.
-2. Small string optimization.
+2. Small string optimization (up to 15 characters + inline hash for heap strings).
 3. Dynamic escape bits for closures and interfaces.
-4. `func() (A, B, C...)` stored in memory like a tuple.
-5. Reduced CGO overhead.
-
-### Compatibility Goals
-
-1. Provide a Go runtime interface, that can be implemented in C or assembly to support bare metal builds.
-2. Provide a stable register-based ABI.
+4. Returned pointers to known types, allocated within a function, often stay on the stack.
+5. Fat closures, that store an additional 32 bytes of inline storage.
+6. Reduced CGO overhead.

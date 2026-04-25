@@ -331,11 +331,49 @@ func WriteFuncSyms() {
 		// references so the wrap at OCALLFUNC always hits a valid
 		// mask word.
 		objw.SymPtr(sf, 0, target, 0)
-		mask := computeFuncsymEscMask(nam.Type())
-		objw.UintN(sf, int(types.PtrSize), mask, 8)
+		// Phase F4 install (default-on). When the function is a
+		// trivial forwarder (escape.DetectForwarders + Synthesize
+		// ForwarderComputeFns), point the M slot at the synth's
+		// funcsym with bit 0 set so the runtime treats it as a
+		// dynamic mask. Funcsyms are DUPOK rodata + non-content-
+		// addressable, so the per-pkg-hash interaction the itab
+		// install triggers doesn't apply here.
+		switch {
+		case base.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
+			cfFuncsym := FuncLinksym(nam.Func.GdForwarder.SyntheticComputeFn.Nname)
+			objw.SymPtr(sf, int(types.PtrSize), cfFuncsym, 1)
+		default:
+			mask := computeFuncsymEscMask(nam.Type())
+			objw.UintN(sf, int(types.PtrSize), mask, 8)
+		}
 		objw.Global(sf, int32(types.PtrSize)+8, obj.DUPOK|obj.RODATA)
 	}
 }
+
+// hasPointerBearingFuncsymArg mirrors reflectdata.hasPointerBearingArg
+// for funcsym targets (top-level functions). Returns true iff sig
+// has at least one non-receiver param that can carry an
+// EscCandidate pointer.
+func hasPointerBearingFuncsymArg(sig *types.Type) bool {
+	if sig == nil {
+		return false
+	}
+	for _, p := range sig.Params() {
+		t := p.Type
+		if t == nil {
+			continue
+		}
+		switch t.Kind() {
+		case types.TPTR, types.TUNSAFEPTR, types.TINTER, types.TFUNC, types.TMAP, types.TCHAN, types.TSLICE:
+			return true
+		}
+		if t.HasPointers() {
+			return true
+		}
+	}
+	return false
+}
+
 
 // InitConst writes the static literal c to n.
 // Neither n nor c is modified.

@@ -34,6 +34,8 @@ type DebugFlags struct {
 	EscapeDebug           int    `help:"print information about escape analysis and resulting optimizations" concurrent:"ok"`
 	EscapeAlias           int    `help:"print information about alias analysis" concurrent:"ok"`
 	EscapeAliasCheck      int    `help:"enable additional validation for alias analysis" concurrent:"ok"`
+	GdForwarder           int    `help:"log gd-fork Phase-F trivial-forwarder detector matches" concurrent:"ok"`
+	GdForwarderDisable    int    `help:"disable gd-fork Phase-F4 trivial-forwarder install (1 to disable; default 0 = enabled)" concurrent:"ok"`
 	Export                int    `help:"print export data"`
 	FIPSHash              string `help:"hash value for FIPS debugging" concurrent:"ok"`
 	Fmahash               string `help:"hash value for use in debugging platform-dependent multiply-add use" concurrent:"ok"`

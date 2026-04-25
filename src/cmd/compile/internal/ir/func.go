@@ -131,6 +131,25 @@ type Func struct {
 	// fall back to conservative "all ones" at the consumer).
 	EscMask uint64
 
+	// GdForwarder, when non-nil, classifies this function as a
+	// trivial Phase-F forwarder: its body delegates one indirect
+	// call to the same args, so the dynamic mask can be derived
+	// at runtime from the delegate's mask. The pointer recovers
+	// the inner-call expression so F4's compute-fn synthesis can
+	// emit the right load. Detected by escape.DetectForwarders
+	// after the leaks computation (so the pattern matcher can
+	// correlate body shape with escape facts). See
+	// doc/gd/escape-bits.md §F3.
+	GdForwarder *GdForwarderInfo
+
+	// GdForwarderSynthRegistered marks a synthesised
+	// forwarder-compute-fn (Phase F4) that has already been
+	// appended to typecheck.Target.Funcs. Multiple wrappers
+	// referencing the same synth share the cfn pointer; only
+	// the first registration may add it to the compile queue,
+	// otherwise gc.prepareFunc → ir.InitLSym fires twice.
+	GdForwarderSynthRegistered bool
+
 	flags bitset16
 
 	// ABI is a function's "definition" ABI. This is the ABI that
@@ -176,6 +195,54 @@ type WasmImport struct {
 // WasmExport stores metadata associated with the //go:wasmexport pragma.
 type WasmExport struct {
 	Name string
+}
+
+// GdForwarderShape classifies what kind of inner call a Phase-F
+// trivial forwarder (Func.GdForwarder) delegates to. F4's
+// compute-fn synthesis branches on this.
+type GdForwarderShape uint8
+
+const (
+	GdForwarderUnknown GdForwarderShape = iota
+	// GdForwarderRecvField: body is `return w.field.M(args)`
+	// where w is the (pointer) receiver and field is a struct
+	// field of iface or func type. The compute fn reads the
+	// delegate's mask via the receiver.
+	GdForwarderRecvField
+	// GdForwarderCapture: body of a closure literal whose only
+	// outward-flowing capture is an iface or func value, called
+	// with the closure's params unchanged. The compute fn reads
+	// the delegate's mask via the closure-value carrier (which
+	// is also the closure struct holding the captures).
+	GdForwarderCapture
+)
+
+// GdForwarderInfo records the pieces F4 needs to synthesise a
+// compute fn for the forwarder. Populated by escape.DetectForwarders.
+type GdForwarderInfo struct {
+	// Shape of the inner-call delegate (receiver field, capture).
+	Shape GdForwarderShape
+	// InnerCall is the body's single OCALL/OCALLFUNC/OCALLINTER
+	// expression that the wrapper delegates to. F4 reads its
+	// receiver/callee shape to emit the synthesized fn body.
+	InnerCall *CallExpr
+	// MethodIdx (iface case): the method's slot index within the
+	// inner iface's method table. Used by F4 to emit the load
+	// `inner.itab.Fun[MethodIdx].mask`.
+	MethodIdx int
+	// FieldOffset (recv-field case): byte offset of the inner-
+	// iface field within the wrapper's receiver type. F4 bakes
+	// this into the synthesized compute fn as a compile-time
+	// constant so the runtime helper can do a single
+	// `*(carrier + FieldOffset)` load to reach the iface.
+	FieldOffset int64
+	// SyntheticComputeFn is the compute fn F4 synthesised for
+	// this forwarder, or nil if synthesis hasn't run yet (or
+	// was skipped for an unsupported shape). FinalizeItabMasks
+	// and WriteFuncSyms install its funcsym (with bit 0 set)
+	// into the wrapper's mask carrier. See
+	// doc/gd/escape-bits.md §F4.
+	SyntheticComputeFn *Func
 }
 
 // NewFunc returns a new Func with the given name and type.

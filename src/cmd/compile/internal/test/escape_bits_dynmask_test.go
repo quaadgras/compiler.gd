@@ -144,3 +144,87 @@ func TestEscapeBitsDynamicMaskRelational(t *testing.T) {
 		t.Errorf("relational mask(heap=0x4): got %#x, want %#x", got, uint64(1)<<1)
 	}
 }
+
+// escBitsObservedHeapMask records the heapMask value that the
+// per-call-site mask-resolution sequence in walk passes to
+// resolveMaskSlow at runtime. End-to-end Phase F1 test scaffolding:
+// a real two-arg closure call drives walk's heapMask-construction
+// path, the compute fn captures whatever value walk computed, and
+// the test asserts the bits match what isOnHeap should have
+// reported for each box.
+var escBitsObservedHeapMask uint64
+var escBitsObservedCount int32
+
+// escBitsHeapMaskObserver is the Phase-F compute fn we install on
+// escBitsDynTwoArg. It returns mask=0 (no escape), so the wrap
+// never materialises — but it does observe and record the heapMask
+// it received, which is the per-call-site value walk built by
+// stack-range-checking each candidate box.
+var escBitsHeapMaskObserver func(unsafe.Pointer, uint64, int) uint64 = func(carrier unsafe.Pointer, heapMask uint64, depth int) uint64 {
+	_ = carrier
+	_ = depth
+	escBitsObservedHeapMask = heapMask
+	escBitsObservedCount++
+	return 0 // bits 1.. all clear: no arg escapes
+}
+
+// escBitsDynTwoArg is a two-arg closure whose static mask would
+// be 0 (the body doesn't retain its args). We overwrite its M
+// word at init to install escBitsHeapMaskObserver as the compute
+// fn (bit 0 set, upper bits = fn descriptor).
+var escBitsDynTwoArg func(p *int, q *int)
+var escBitsDynTwoArgCapture int
+var escBitsDynTwoArgSink int
+
+func init() {
+	cap2 := &escBitsDynTwoArgCapture
+	escBitsDynTwoArg = func(p *int, q *int) {
+		// Body deliberately doesn't retain p or q. Static escape
+		// analysis would compute mask = 0; the dynamic discriminator
+		// we install overrides this with the observer.
+		*cap2 = *p + *q
+		escBitsDynTwoArgSink = *p + *q
+	}
+	closurePtr2 := *(**[3]uintptr)(unsafe.Pointer(&escBitsDynTwoArg))
+	descriptor2 := *(*uintptr)(unsafe.Pointer(&escBitsHeapMaskObserver))
+	closurePtr2[1] = descriptor2 | 1
+}
+
+// TestEscapeBitsHeapMaskStackStack drives a two-arg closure call
+// whose args both live on the test fn's stack. Walk's per-call-
+// site heapMask construction should call isOnHeap on each box
+// pointer; both checks return false, so the resulting heapMask
+// must be 0. If walk routes through the old per-arg helpers (which
+// always pass heapMask=0) this test still passes — but if walk
+// builds heapMask from the wrong source (e.g. miscounts bits or
+// reads the wrong storage), the observed value diverges.
+func TestEscapeBitsHeapMaskStackStack(t *testing.T) {
+	escBitsObservedHeapMask = ^uint64(0)
+	escBitsObservedCount = 0
+	a, b := 100, 200
+	escBitsDynTwoArg(&a, &b)
+	if escBitsObservedCount == 0 {
+		t.Fatal("compute fn was not called — wrap did not route through resolveMaskSlow")
+	}
+	if escBitsObservedHeapMask != 0 {
+		t.Errorf("heapMask(stack,stack): got %#x, want 0", escBitsObservedHeapMask)
+	}
+	if escBitsDynTwoArgSink != 300 {
+		t.Errorf("two-arg call: sink=%d, want 300", escBitsDynTwoArgSink)
+	}
+}
+
+// TestEscapeBitsHeapMaskCallIntegrity confirms repeated invocation
+// of the closure remains correct under the heapMask-observing
+// compute fn — guards against the wrap accidentally corrupting
+// args between the heapMask build and the actual call.
+func TestEscapeBitsHeapMaskCallIntegrity(t *testing.T) {
+	for i := 0; i < 5; i++ {
+		a := i * 10
+		b := i*10 + 1
+		escBitsDynTwoArg(&a, &b)
+		if got, want := escBitsDynTwoArgSink, a+b; got != want {
+			t.Errorf("iter %d: sink=%d, want %d", i, got, want)
+		}
+	}
+}

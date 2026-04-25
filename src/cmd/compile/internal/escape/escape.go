@@ -186,6 +186,18 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 
 	b.walkAll()
 	b.finish(fns)
+
+	// Phase F3: detector for trivial forwarders. Runs after
+	// finish so leaks/EscMask are populated and the matcher can
+	// rely on the body being in its post-typecheck shape. F4
+	// consumes ir.Func.GdForwarder to synthesise compute fns;
+	// without F4 the field is inert and the wrapper continues to
+	// publish its conservative static mask.
+	if base.Debug.GdForwarderDisable == 0 {
+		for _, fn := range fns {
+			DetectForwarders(fn)
+		}
+	}
 }
 
 func (b *batch) with(fn *ir.Func) *escape {

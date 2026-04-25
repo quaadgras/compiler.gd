@@ -104,8 +104,9 @@ func convTnoptr(typ *byte, elem *any) unsafe.Pointer
 // gd escape-bits helpers. See doc/gd/escape-bits.md.
 func materializeToHeap(src unsafe.Pointer, typ *byte) unsafe.Pointer
 func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
-func maybeEscapeClosureArg(f unsafe.Pointer, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
-func maybeEscapeIfaceArg(itabPtr unsafe.Pointer, methodIdx int, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
+func resolveMaskSlow(rawMask uint64, carrier unsafe.Pointer, heapMask uint64, depth int) uint64
+func isOnHeap(p unsafe.Pointer) bool
+func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, methodIdx int, heapMask uint64, depth int) uint64
 
 // gd Phase G return-outBuf helper. Returns outBuf when non-nil
 // (zeroed), else heap-allocates. See doc/gd/escape-bits.md and
