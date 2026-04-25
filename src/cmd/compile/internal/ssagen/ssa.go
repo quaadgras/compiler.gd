@@ -151,6 +151,7 @@ func InitConfig() {
 	ir.Syms.Msanmove = typecheck.LookupRuntimeFunc("msanmove")
 	ir.Syms.Asanread = typecheck.LookupRuntimeFunc("asanread")
 	ir.Syms.Asanwrite = typecheck.LookupRuntimeFunc("asanwrite")
+	ir.Syms.MaybeInPlace = typecheck.LookupRuntimeFunc("maybeInPlace")
 	ir.Syms.Newobject = typecheck.LookupRuntimeFunc("newobject")
 	ir.Syms.Newproc = typecheck.LookupRuntimeFunc("newproc")
 	ir.Syms.PanicBounds = typecheck.LookupRuntimeFunc("panicBounds")
@@ -713,6 +714,19 @@ func allocAlign(t *types.Type) int64 {
 
 // newHeapaddr allocates heap memory for n and sets its heap address.
 func (s *state) newHeapaddr(n *ir.Name) {
+	// gd Phase G: outBuf-tagged locals route through runtime.maybeInPlace
+	// so the caller's stack buffer (when non-nil) is reused in place of
+	// a heap alloc. The helper handles the nil case internally by
+	// falling back to mallocgc — the callee body is correct either way.
+	// Bypasses the small-alloc aggregation path; outBuf semantics
+	// require a single alloc per tagged local.
+	if n.OutBufResultIdx > 0 {
+		if ptr := s.maybeInPlaceAlloc(n); ptr != nil {
+			s.setHeapaddr(n.Pos(), n, ptr)
+			return
+		}
+		// Fall through: tagged but no outBuf found. Heap-alloc.
+	}
 	size := allocSize(n.Type())
 	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 {
 		s.setHeapaddr(n.Pos(), n, s.newObject(n.Type()))
@@ -881,6 +895,47 @@ func (s *state) setHeapaddr(pos src.XPos, n *ir.Name, ptr *ssa.Value) {
 
 	n.Heapaddr = addr
 	s.assign(addr, ptr, false, 0)
+}
+
+// maybeInPlaceAlloc returns an SSA value denoting a call to
+// runtime.maybeInPlace(outBuf_k, &T) — where k is n.OutBufResultIdx
+// (1-based). Returns nil if the expected outBuf param can't be
+// located (caller falls back to plain newobject). The resulting
+// *T is either the caller's stack buffer (zeroed) or a heap-
+// allocated one, decided at runtime by the helper.
+func (s *state) maybeInPlaceAlloc(n *ir.Name) *ssa.Value {
+	k := int(n.OutBufResultIdx)
+	if k == 0 {
+		return nil
+	}
+	var outBufName *ir.Name
+	seen := 0
+	for _, p := range s.curfn.Type().Params() {
+		if !p.IsOutBufParam() {
+			continue
+		}
+		seen++
+		if seen == k {
+			if p.Nname != nil {
+				outBufName = p.Nname.(*ir.Name)
+			}
+			break
+		}
+	}
+	if outBufName == nil {
+		return nil
+	}
+	outBuf := s.expr(outBufName)
+	rtype := s.reflectType(n.Type())
+	// Override the call's result type to *T directly (matching how
+	// newObject does it). This skips the OpConvert that the late_opt
+	// dead-zero-store rules can't see through, so the redundant
+	// initialisation stores after maybeInPlace get elided just as
+	// they are after newobject.
+	ret := s.rtcall(ir.Syms.MaybeInPlace, true,
+		[]*types.Type{types.NewPtr(n.Type())},
+		outBuf, rtype)[0]
+	return ret
 }
 
 // newObject returns an SSA value denoting new(typ).
@@ -7895,6 +7950,13 @@ func EmitArgInfo(f *ir.Func, abiInfo *abi.ABIParamResultInfo) *obj.LSym {
 	}
 
 	for _, a := range abiInfo.InParams()[start:] {
+		// gd Phase G.2.1: synthesised outBuf params aren't part of the
+		// user-visible signature — skip them in arg-info funcdata so
+		// tracebacks match the source declaration.
+		if a.Name != nil && a.Name.Sym() != nil &&
+			strings.HasPrefix(a.Name.Sym().Name, types.OutBufNamePrefix) {
+			continue
+		}
 		if !visitType(a.FrameOffset(abiInfo), a.Type, 0) {
 			break
 		}

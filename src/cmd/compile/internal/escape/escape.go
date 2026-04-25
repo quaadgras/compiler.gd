@@ -392,6 +392,17 @@ func (b *batch) finish(fns []*ir.Func) {
 		// TODO(mdempsky): Update tests to expect this.
 		goDeferWrapper := n.Op() == ir.OCLOSURE && n.(*ir.ClosureExpr).Func.Wrapper()
 
+		// gd Phase G synthesises a spill loc for every pointer-returning
+		// call expression so the solver can decide whether to forward a
+		// caller stack buffer or fall through to heap. That makes call
+		// exprs appear in the loc set — but stock Go never had them
+		// here, so emitting "X escapes to heap" / "X does not escape"
+		// for the call itself is purely fork-internal noise. Suppress
+		// the user-facing diagnostic for these synthetic spills; the
+		// existing diagnostics on the receiving sink (if any) already
+		// communicate whether the result escapes.
+		phaseGCallSpill := n.Op() == ir.OCALLFUNC || n.Op() == ir.OCALLINTER || n.Op() == ir.OCALLMETH
+
 		if loc.hasAttr(attrEscapes) {
 			if n.Op() == ir.ONAME {
 				if base.Flag.CompilingRuntime {
@@ -401,7 +412,7 @@ func (b *batch) finish(fns []*ir.Func) {
 					base.WarnfAt(n.Pos(), "moved to heap: %v", n)
 				}
 			} else {
-				if base.Flag.LowerM != 0 && !goDeferWrapper {
+				if base.Flag.LowerM != 0 && !goDeferWrapper && !phaseGCallSpill {
 					if n.Op() == ir.OAPPEND {
 						base.WarnfAt(n.Pos(), "append escapes to heap")
 					} else {
@@ -414,6 +425,17 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 			}
 			n.SetEsc(ir.EscHeap)
+			// gd Phase G chain-fold: if the heap-escaping loc
+			// belongs to a Phase-G spill on a call expression and
+			// its only non-heap escape is a flow into one of the
+			// current function's own results, record that result
+			// index on the call. Walk's call-site rewrite then
+			// forwards the parent function's outBuf for that result
+			// instead of nil, chaining stack reuse across factory
+			// wrappers.
+			if call, ok := n.(*ir.CallExpr); ok && (call.Op() == ir.OCALLFUNC || call.Op() == ir.OCALLINTER) {
+				call.GdForwardOutBufResult = phaseGSingleResultLeak(loc)
+			}
 		} else if loc.hasAttr(attrCandidateEscape) {
 			// gd escape-bits: the solver routed this loc's
 			// escape edge through a dynamic callee (candidateHole).
@@ -435,7 +457,7 @@ func (b *batch) finish(fns []*ir.Func) {
 				n.SetEsc(ir.EscHeap)
 				n.SetEscCandidate(true)
 			} else {
-				if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
+				if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
 					if n.Op() == ir.OAPPEND {
 						base.WarnfAt(n.Pos(), "append escapes to heap")
 					} else {
@@ -445,7 +467,7 @@ func (b *batch) finish(fns []*ir.Func) {
 				n.SetEsc(ir.EscHeap)
 			}
 		} else {
-			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper {
+			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
 				if n.Op() == ir.OAPPEND {
 					base.WarnfAt(n.Pos(), "append does not escape")
 				} else {
@@ -812,4 +834,34 @@ func (b *batch) reassignOracle(fn *ir.Func) *ir.ReassignOracle {
 		b.reassignOracles[f] = ro
 	}
 	return ro
+}
+
+// phaseGSingleResultLeak inspects loc.paramEsc and returns 1+k when
+// loc's value flows to exactly the k-th result of its enclosing
+// function (and to no other non-heap sink). Returns 0 otherwise —
+// no result-leak, or multiple results, or the loc has untracked
+// flows we can't safely chain-fold across.
+//
+// Used by Phase G to decide whether a call-site rewrite should
+// forward the parent's outBuf parameter (chain-fold) versus pass
+// nil (true heap escape).
+func phaseGSingleResultLeak(loc *location) uint8 {
+	if loc == nil {
+		return 0
+	}
+	chosen := -1
+	for k := 0; k < numEscResults; k++ {
+		if loc.paramEsc.Result(k) >= 0 {
+			if chosen >= 0 {
+				// Flows to two different results — we'd need to
+				// pick one outBuf, conservatively bail.
+				return 0
+			}
+			chosen = k
+		}
+	}
+	if chosen < 0 {
+		return 0
+	}
+	return uint8(chosen + 1)
 }

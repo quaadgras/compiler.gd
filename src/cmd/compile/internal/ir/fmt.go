@@ -752,11 +752,12 @@ func exprFmt(n Node, s fmt.State, prec int) {
 	case OCALL, OCALLFUNC, OCALLINTER, OCALLMETH, OGETG:
 		n := n.(*CallExpr)
 		exprFmt(n.Fun, s, nprec)
+		args := callExprUserArgs(n)
 		if n.IsDDD {
-			fmt.Fprintf(s, "(%.v...)", n.Args)
+			fmt.Fprintf(s, "(%.v...)", args)
 			return
 		}
-		fmt.Fprintf(s, "(%.v)", n.Args)
+		fmt.Fprintf(s, "(%.v)", args)
 
 	case OINLCALL:
 		n := n.(*InlinedCallExpr)
@@ -859,6 +860,38 @@ func ellipsisIf(b bool) string {
 		return "..."
 	}
 	return ""
+}
+
+// callExprUserArgs returns n.Args with any trailing gd Phase G outBuf
+// args filtered out, so call expressions print as the user wrote them.
+// For variadic sigs the outBufs sit between the user mandatory args
+// and the trailing variadic slice — we keep both and drop the middle.
+func callExprUserArgs(n *CallExpr) Nodes {
+	if n.Fun == nil {
+		return n.Args
+	}
+	t := n.Fun.Type()
+	if t == nil || t.Kind() != types.TFUNC {
+		return n.Args
+	}
+	nOut := t.NumOutBufs()
+	if nOut == 0 {
+		return n.Args
+	}
+	if len(n.Args) < nOut {
+		return n.Args
+	}
+	if t.IsVariadic() {
+		userMandatory := t.NumParams() - nOut - 1
+		if userMandatory < 0 || userMandatory+nOut > len(n.Args) {
+			return n.Args
+		}
+		out := make(Nodes, 0, len(n.Args)-nOut)
+		out = append(out, n.Args[:userMandatory]...)
+		out = append(out, n.Args[userMandatory+nOut:]...)
+		return out
+	}
+	return n.Args[:len(n.Args)-nOut]
 }
 
 // Nodes

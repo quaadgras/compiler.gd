@@ -465,7 +465,17 @@ func isSameCall(aux Aux, name string) bool {
 }
 
 func isMalloc(aux Aux) bool {
-	return isNewObject(aux) || isSpecializedMalloc(aux)
+	return isNewObject(aux) || isSpecializedMalloc(aux) || isMaybeInPlace(aux)
+}
+
+// isMaybeInPlace reports whether aux is the gd Phase G runtime helper
+// runtime.maybeInPlace, which returns zeroed memory in both the "use
+// caller's stack buffer" and "fall back to mallocgc" branches. Treating
+// it as a malloc lets the late-expanded zero-store removal rules elide
+// redundant initialization stores after the call.
+func isMaybeInPlace(aux Aux) bool {
+	fn := aux.(*AuxCall).Fn
+	return fn != nil && fn.String() == "runtime.maybeInPlace"
 }
 
 func isNewObject(aux Aux) bool {

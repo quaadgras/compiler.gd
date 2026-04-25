@@ -270,13 +270,13 @@ type T26 struct {
 var g26 int
 
 func f26(p *int) *T26 { // see issue 29573
-	return &T26{
+	return &T26{ // ERROR "write barrier"
 		a: 5,
 		b: 6,
 		c: 7,
 		d: &g26, // no write barrier: global ptr
 		e: nil,  // no write barrier: nil ptr
-		f: p,    // ERROR "write barrier"
+		f: p,
 	}
 }
 

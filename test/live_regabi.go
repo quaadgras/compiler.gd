@@ -702,7 +702,7 @@ func good40() {
 }
 
 func bad40() {
-	t := newT40()
+	t := newT40() // ERROR "stack object .autotmp_[0-9]+ T40$"
 	_ = t
 	printnl()
 }
