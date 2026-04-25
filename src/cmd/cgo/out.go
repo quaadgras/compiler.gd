@@ -515,14 +515,15 @@ func (p *Package) structType(n *Name) (string, int64) {
 	// pointer result BEFORE the result slot, so the C side writes
 	// r at the same offset where Go's extended ABI reads it.
 	//
-	// cgo can't see the compile gate directly, so emit the slot
-	// unconditionally: cgo lives in the gd fork, and the fork ships
-	// with Phase G either on-by-default or being flipped on shortly.
-	// Gate-off cgo users need to match by leaving the slot unused
-	// (the wrapper body already passes a pointer to p0, not &outBuf,
-	// so nothing populates the slot when Phase G is off — it's
-	// harmless dead padding in the C struct).
-	if t := n.FuncType.Result; t != nil && cgoResultIsPointer(t) {
+	// Only emit the slot when there is at least one user param.
+	// The //go:cgo_unsafe_args wrapper passes &p0 (start of the
+	// extended Go arg frame: [params...][outBuf][r]) in that case,
+	// so the C struct layout matches 1:1. For 0-param functions the
+	// wrapper passes &r1 instead — the outBuf in the Go frame sits
+	// *before* r1 and is unreachable from &r1, so the C struct must
+	// skip the outBuf slot to keep r at offset 0 from the pointer
+	// the wrapper hands to cgocall.
+	if t := n.FuncType.Result; t != nil && cgoResultIsPointer(t) && len(n.FuncType.Params) > 0 {
 		fmt.Fprintf(&buf, "\t\tchar __phaseg_outbuf[%d];\n", p.PtrSize)
 		off += p.PtrSize
 	}

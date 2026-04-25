@@ -42,6 +42,22 @@ func Walk(fn *ir.Func) {
 	// walkStmtList so SSA gen sees Heapaddr wired up.
 	promoteEscapeCandidates(fn)
 
+	// gd Phase G: recognize return-of-allocation shapes and
+	// retag the underlying local with an outBuf result index so
+	// ssagen routes its heap allocation through runtime.maybeInPlace.
+	// Must run before walkStmtList lowers ONEW/OPTRLIT and before
+	// the body is otherwise transformed.
+	phaseGReturnRewrite(fn)
+
+	// gd Phase G: at each call site to a Phase-G-extended callee,
+	// replace trailing nil outBuf args with the address of a fresh
+	// stack-allocated buffer when (a) the corresponding result's
+	// destination doesn't escape the caller's frame, AND (b) the
+	// callee's result k is a fresh allocation per escape tags (no
+	// input aliases result k). Pairs with the callee-side rewrite
+	// above to deliver the zero-alloc path end-to-end.
+	phaseGCallSiteRewrite(fn)
+
 	if base.Flag.W != 0 {
 		s := fmt.Sprintf("\nbefore walk %v", ir.CurFunc.Sym())
 		ir.DumpList(s, ir.CurFunc.Body)

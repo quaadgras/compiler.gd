@@ -644,6 +644,33 @@ func asmParseDecl(pass *analysis.Pass, decl *ast.FuncDecl) map[string]*asmFunc {
 		}
 		offset = 0
 		addParams(decl.Type.Params.List, false)
+		// gd Phase G.2.1: the fork compiler extends pointer-returning
+		// func sigs with one outBufK unsafe.Pointer per pointer result,
+		// inserted between user params and results. asm files declare
+		// argsize accordingly. Reserve the same trailing pointer-sized
+		// slots here so vet's expected layout matches the asm.
+		if decl.Type.Results != nil && len(decl.Type.Results.List) > 0 {
+			nptr := 0
+			for _, fld := range decl.Type.Results.List {
+				rt := pass.TypesInfo.Types[fld.Type].Type
+				if rt == nil {
+					continue
+				}
+				_, isPtr := rt.Underlying().(*types.Pointer)
+				if !isPtr {
+					continue
+				}
+				n := 1
+				if len(fld.Names) > 1 {
+					n = len(fld.Names)
+				}
+				nptr += n
+			}
+			for i := 0; i < nptr; i++ {
+				offset += -offset & (arch.ptrSize - 1)
+				offset += arch.ptrSize
+			}
+		}
 		if decl.Type.Results != nil && len(decl.Type.Results.List) > 0 {
 			offset += -offset & (arch.maxAlign - 1)
 			addParams(decl.Type.Results.List, true)

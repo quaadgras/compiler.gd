@@ -197,6 +197,15 @@ type CallExpr struct {
 	// whether it's a runtime.KeepAlive call the compiler generates to
 	// keep a variable alive. See #73137.
 	IsCompilerVarLive bool
+	// gd Phase G: 1-based index into the current function's pointer
+	// results, asserting that this call's result flows to that
+	// result and nothing else. Walk's call-site rewrite forwards
+	// the corresponding outBuf parameter as the call's outBuf
+	// argument, chaining stack reuse across factory wrappers.
+	// 0 means "no result-leak hint": either the call's result is
+	// fully local (Esc==EscNone, stack buffer here) or it truly
+	// escapes (heap fallback, nil outBuf).
+	GdForwardOutBufResult uint8
 }
 
 func NewCallExpr(pos src.XPos, op Op, fun Node, args []Node) *CallExpr {

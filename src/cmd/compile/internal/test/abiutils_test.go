@@ -324,6 +324,9 @@ func TestABIUtilsInterfaces(t *testing.T) {
 	ft := mkFuncType(nil, []*types.Type{s1, ei, ei, nei, pei, nei, i16},
 		[]*types.Type{ei, nei, pei})
 
+	// gd Phase G.2.1: NewSignature appends one outBuf unsafe.Pointer
+	// per pointer-typed result. *interface{} (pei) is a pointer →
+	// one outBuf added at offset 48 (pushing offsetToSpillArea to 56).
 	exp := makeExpectedDump(`
         IN 0: R{ I0 I1 I2 } spilloffset: 0 typ: struct { int16; int16; bool }
         IN 1: R{ I3 I4 F0 F1 } spilloffset: 8 typ: interface {}
@@ -332,10 +335,11 @@ func TestABIUtilsInterfaces(t *testing.T) {
         IN 4: R{ } offset: 0 typ: *interface {}
         IN 5: R{ } offset: 8 typ: interface { F() string }
         IN 6: R{ } offset: 40 typ: int16
+        IN 7: R{ } offset: 48 typ: unsafe.Pointer
         OUT 0: R{ I0 I1 F0 F1 } spilloffset: -1 typ: interface {}
         OUT 1: R{ I2 I3 F2 F3 } spilloffset: -1 typ: interface { F() string }
         OUT 2: R{ I4 } spilloffset: -1 typ: *interface {}
-        offsetToSpillArea: 48 spillAreaSize: 104
+        offsetToSpillArea: 56 spillAreaSize: 104
 `)
 
 	abitest(t, ft, exp)

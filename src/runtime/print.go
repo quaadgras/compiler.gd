@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/abi"
 	"internal/strconv"
 	"unsafe"
 )
@@ -17,14 +18,48 @@ type hex uint64
 // printquoted instead of printstring.
 type quoted string
 
-func bytes(s string) (ret []byte) {
-	rp := (*slice)(unsafe.Pointer(&ret))
-	sp := stringStructOf(&s)
-	n := sp.length()
-	rp.array = sp.bytes()
-	rp.len = n
-	rp.cap = n
-	return
+// bytes returns a []byte view of s. For heap-rep strings it aliases
+// s.str directly (no copy); for inline-rep strings (gd Phase C
+// SSO) it heap-materialises a 1..15-byte buffer and returns a slice
+// pointing at that, so the result is safe to outlive s.
+//
+// Stock Go's bytes() unconditionally aliased the string's data
+// pointer, which was fine because Go strings have a single rep.
+// gd Phase C packs short strings into the header itself, where the
+// "data pointer" is the address of the header. Aliasing that for
+// any caller that outlives bytes()'s frame produces a dangling
+// []byte (the original symptom appeared as garbled \U escapes in
+// goroutine label tracebacks). The heap-materialise path keeps the
+// helper safe for callers like runtime/race.go that store the
+// pointer in long-lived state.
+//
+// //go:nosplit so callers in nosplit contexts (e.g. tracebacks) can
+// still use it; the heap path goes through mallocgc which is
+// nosplit-safe under the runtime's own stack invariants.
+func bytes(s string) []byte {
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	if sh.str != nil {
+		// heap rep: alias.
+		var b []byte
+		bp := (*slice)(unsafe.Pointer(&b))
+		bp.array = sh.str
+		bp.len = int(sh.len & abi.StringLenMask)
+		bp.cap = bp.len
+		return b
+	}
+	// inline rep: heap-materialise so the result outlives s.
+	n := int(uint64(sh.len) >> abi.StringTagShift)
+	if n == 0 {
+		return nil
+	}
+	p := mallocgc(uintptr(n), nil, false)
+	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
+	var b []byte
+	bp := (*slice)(unsafe.Pointer(&b))
+	bp.array = p
+	bp.len = n
+	bp.cap = n
+	return b
 }
 
 var (
@@ -233,13 +268,18 @@ func printquoted(s string) {
 		if r >= ' ' && r <= '~' {
 			gwrite([]byte{byte(r)})
 		} else if r < 127 {
-			gwrite(bytes(`\x`))
+			// gd Phase C: avoid bytes(`\x`) because the 2-byte
+			// literal is emitted as an inline-rep SSO string.
+			// bytes() becomes uninlined when Phase G extends its
+			// deps, so sp.bytes() returns a pointer into bytes()'s
+			// own stack frame that dangles past the return.
+			gwrite([]byte{'\\', 'x'})
 			printhexopts(false, 2, uint64(r))
 		} else if r < 0x1_0000 {
-			gwrite(bytes(`\u`))
+			gwrite([]byte{'\\', 'u'})
 			printhexopts(false, 4, uint64(r))
 		} else {
-			gwrite(bytes(`\U`))
+			gwrite([]byte{'\\', 'U'})
 			printhexopts(false, 8, uint64(r))
 		}
 	}

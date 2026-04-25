@@ -62,6 +62,15 @@ type Name struct {
 	// Outer points to the immediately enclosing function's copy of this
 	// closure variable. If not a closure variable, then Outer is nil.
 	Outer *Name
+
+	// OutBufResultIdx is the 1-based index of the function's
+	// pointer-typed result that this local's storage is bound to for
+	// gd Phase G's return-outBuf rewrite. 0 means "unbound"; K means
+	// "when allocating this local's heap backing, route through
+	// runtime.maybeInPlace(outBuf_{K-1}, T) so the caller's stack
+	// buffer (or heap, when outBuf is nil) is reused". Set by the
+	// walk recognizer; consumed by ssagen.newHeapaddr.
+	OutBufResultIdx uint8
 }
 
 func (n *Name) isExpr() {}

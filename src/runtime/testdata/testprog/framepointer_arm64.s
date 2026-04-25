@@ -4,6 +4,8 @@
 
 #include "textflag.h"
 
-TEXT	·getFP(SB), NOSPLIT|NOFRAME, $0-8
-	MOVD	R29, ret+0(FP)
+// gd Phase G.2.1: sig is func(outBuf unsafe.Pointer) *uintptr —
+// argframe is 8 (outBuf) + 8 (ret) = 16. Result sits at FP+8.
+TEXT	·getFP(SB), NOSPLIT|NOFRAME, $0-16
+	MOVD	R29, ret+8(FP)
 	RET

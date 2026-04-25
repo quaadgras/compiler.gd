@@ -233,6 +233,12 @@ func (cs *CallSite) computeCallSiteScore(csa *callSiteAnalyzer, calleeProps *Fun
 	if nArgs > len(calleeRecvrParms) {
 		nArgs = len(calleeRecvrParms)
 	}
+	// gd Phase G.2.1: ParamFlags is sized to the user-visible param
+	// count (outBufs are filtered out of getParams). Cap nArgs so
+	// trailing outBuf nil args don't push the index past ParamFlags.
+	if nArgs > len(calleeProps.ParamFlags) {
+		nArgs = len(calleeProps.ParamFlags)
+	}
 	for idx := 0; idx < nArgs; idx++ {
 		// ignore blanks
 		if calleeRecvrParms[idx].Sym == nil ||

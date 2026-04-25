@@ -208,7 +208,7 @@ func s15a8(x *[15]int64) [15]int64 {
 		want(t, slogged, `{"range":{"start":{"line":7,"character":13},"end":{"line":7,"character":13}},"severity":3,"code":"leak","source":"go compiler","message":"parameter z leaks to ~r0 with derefs=0",`+
 			`"relatedInformation":[`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:    flow: y ← z:"},`+
-			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y := z (assign-pair)"},`+
+			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y, _ := z, 0 (assign-pair)"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:    flow: ~r0 ← y:"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":4,"character":11},"end":{"line":4,"character":11}}},"message":"inlineLoc"},`+
 			`{"location":{"uri":"file://tmpdir/file.go","range":{"start":{"line":9,"character":13},"end":{"line":9,"character":13}}},"message":"escflow:      from y.b (dot of pointer)"},`+

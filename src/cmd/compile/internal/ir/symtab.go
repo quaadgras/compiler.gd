@@ -47,6 +47,7 @@ type symsStruct struct {
 	Msanread                  *obj.LSym
 	Msanwrite                 *obj.LSym
 	Msanmove                  *obj.LSym
+	MaybeInPlace              *obj.LSym
 	Newobject                 *obj.LSym
 	Newproc                   *obj.LSym
 	PanicBounds               *obj.LSym

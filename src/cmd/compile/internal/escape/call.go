@@ -133,6 +133,41 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			argumentParam(param, args[i])
 		}
 
+		// gd Phase G: for a call whose signature was extended with
+		// trailing outBuf params, model the call's result as an
+		// allocation at the call site. The synthetic spill loc
+		// accumulates the usual heap-reaching edges from downstream
+		// uses of the result; after solve, its attrEscapes bit tells
+		// walk whether to pass &stackBuf (local) or nil (escapes).
+		// Without this, call.Esc() stays EscUnknown and walk's
+		// Phase-G call-site rewriter conservatively passes nil —
+		// correct but leaves the optimization on the table.
+		//
+		// Restricted to single-result calls for now: multi-result
+		// CallExpr.Type is a tuple struct that finalize's
+		// HeapAllocReason can't size, and each result would need a
+		// distinct ir.Node key for its own spill loc anyway.
+		if ks != nil && fntype != nil && fntype.GdReturnOutBuf() &&
+			len(fntype.Results()) == 1 {
+			r := fntype.Results()[0]
+			if len(ks) >= 1 && r != nil && r.Type != nil && r.Type.IsPtr() {
+				// Spill creates loc(call) and flows &call → ks[0].
+				// We then mark loc.param = true so the solver's
+				// walkAll records paramEsc leaks (Result/Heap)
+				// for the spill — this is what lets walk's call-
+				// site rewriter distinguish "result flows only to
+				// our k-th return" (chain-fold via parent's
+				// outBuf_k) from "result truly escapes" (heap
+				// fallback). loc.n is the CallExpr, not a param
+				// Name; paramTag won't find it via oldLoc, so
+				// this doesn't pollute exported escape tags.
+				h := e.spill(ks[0], call)
+				if h.dst != nil {
+					h.dst.param = true
+				}
+			}
+		}
+
 	case ir.OINLCALL:
 		call := call.(*ir.InlinedCallExpr)
 		e.stmts(call.Body)

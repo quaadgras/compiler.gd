@@ -107,6 +107,11 @@ func maybeEscapeArg(mask uint64, argIdx int, src unsafe.Pointer, typ *byte) unsa
 func maybeEscapeClosureArg(f unsafe.Pointer, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
 func maybeEscapeIfaceArg(itabPtr unsafe.Pointer, methodIdx int, argIdx int, src unsafe.Pointer, typ *byte) unsafe.Pointer
 
+// gd Phase G return-outBuf helper. Returns outBuf when non-nil
+// (zeroed), else heap-allocates. See doc/gd/escape-bits.md and
+// runtime/escape_bits.go.
+func maybeInPlace(outBuf unsafe.Pointer, typ *byte) unsafe.Pointer
+
 // Specialized versions of convT for specific types.
 // These functions take concrete types in the runtime. But they may
 // be used for a wider range of types, which have the same memory

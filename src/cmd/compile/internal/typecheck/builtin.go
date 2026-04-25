@@ -11,10 +11,6 @@ import (
 //
 //go:noinline
 func newSig(params, results []*types.Field) *types.Type {
-	// gd Phase G (universal extension): runtime funcs use extended
-	// ABI like everyone else. NewSignature applies the rewrite so
-	// the compiler's view of runtime.newobject etc. matches the
-	// actual runtime body's extended ABI.
 	return types.NewSignature(nil, params, results)
 }
 
@@ -107,6 +103,7 @@ var runtimeDecls = [...]struct {
 	{"maybeEscapeArg", funcTag, 69},
 	{"maybeEscapeClosureArg", funcTag, 70},
 	{"maybeEscapeIfaceArg", funcTag, 71},
+	{"maybeInPlace", funcTag, 68},
 	{"convT16", funcTag, 73},
 	{"convT32", funcTag, 75},
 	{"convT64", funcTag, 76},

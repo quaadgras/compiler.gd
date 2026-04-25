@@ -1406,10 +1406,28 @@ func (r *reader) callShaped(pos src.XPos) {
 }
 
 // syntheticArgs returns the recvs and params arguments passed to the
-// current function.
+// current function. Phase G.2.1 outBuf params are filtered out — they
+// belong to the *current* function's extended ABI; the destination's
+// FillOutBufArgs in tcCall will re-append nils matching the
+// destination's outBuf count, which may differ from r.curfn's.
 func (r *reader) syntheticArgs() ir.Nodes {
 	sig := r.curfn.Nname.Type()
-	return ir.ToNodes(r.curfn.Dcl[:sig.NumRecvs()+sig.NumParams()])
+	all := r.curfn.Dcl[:sig.NumRecvs()+sig.NumParams()]
+	if sig.NumOutBufs() == 0 {
+		return ir.ToNodes(all)
+	}
+	out := make([]*ir.Name, 0, len(all))
+	nRecv := sig.NumRecvs()
+	for i, n := range all {
+		if i >= nRecv {
+			p := sig.Params()[i-nRecv]
+			if p.IsOutBufParam() {
+				continue
+			}
+		}
+		out = append(out, n)
+	}
+	return ir.ToNodes(out)
 }
 
 // syntheticTailCall emits a tail call to fn, passing the given
@@ -4013,7 +4031,12 @@ func newWrapperType(recvType *types.Type, method *types.Field) *types.Type {
 	params := clone(sig.Params())
 	results := clone(sig.Results())
 
-	return types.NewSignature(recv, params, results)
+	// gd Phase G.2.1: preserve method.Type's exact form (extended or
+	// not) — addTailCall forwards args 1:1, so the wrapper sig must
+	// have the same param count as method.Type. NewSignature would
+	// re-extend if cloned params lack outBuf names, producing a
+	// mismatch with a stock method.Type.
+	return types.NewSignatureAsIs(recv, params, results, sig.GdReturnOutBuf())
 }
 
 func addTailCall(pos src.XPos, fn *ir.Func, recv ir.Node, method *types.Field) {
@@ -4024,6 +4047,22 @@ func addTailCall(pos src.XPos, fn *ir.Func, recv ir.Node, method *types.Field) {
 	}
 
 	dot := typecheck.XDotMethod(pos, recv, method.Sym, true)
+	// gd Phase G.2.1: drop the wrapper's own outBuf args; tcCall's
+	// FillOutBufArgs re-appends nils matching dot's actual NumOutBufs
+	// (which may differ from the wrapper's sig — e.g. typechecker
+	// re-built method type for the receiver's method set). Filter by
+	// IsOutBufParam so we keep variadic slices (which sit AFTER the
+	// outBuf cluster in the param list) intact.
+	if sig.NumOutBufs() > 0 {
+		filtered := args[:0]
+		for i, p := range sig.Params() {
+			if p.IsOutBufParam() {
+				continue
+			}
+			filtered = append(filtered, args[i])
+		}
+		args = filtered
+	}
 	call := typecheck.Call(pos, dot, args, method.Type.IsVariadic()).(*ir.CallExpr)
 
 	if recv.Type() != nil && recv.Type().IsPtr() && method.Type.Recv().Type.IsPtr() &&

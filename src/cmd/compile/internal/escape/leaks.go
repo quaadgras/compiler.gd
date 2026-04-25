@@ -6,6 +6,7 @@ package escape
 
 import (
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/types"
 	"math"
 	"strings"
 )
@@ -127,6 +128,72 @@ func parseLeaks(s string) leaks {
 
 func ParseLeaks(s string) leaks {
 	return parseLeaks(s)
+}
+
+// ResultAliasesParam reports whether any param (or receiver) of
+// the function signature sig could flow to result k via the
+// escape tags installed on sig's fields. Used by gd Phase G's
+// call-site rewriter: when any input aliases result k, a
+// caller-supplied stack buffer for that result would be unsafe
+// because the callee may return an existing heap pointer (the
+// input) rather than a fresh allocation targeted at the buffer.
+//
+// Conservatively returns true when the tag is missing or unknown
+// — parseLeaks returns an all-heap leak for any Note that doesn't
+// carry the "esc:" prefix (body-less functions, or params that
+// escape analysis hadn't reached). "Unknown" means "might alias";
+// the rewriter declines to stack-buffer under that uncertainty.
+func ResultAliasesParam(sig *types.Type, k int) bool {
+	if sig == nil || sig.Kind() != types.TFUNC {
+		return false
+	}
+	if k < 0 || k >= numEscResults {
+		// Beyond the tag's capacity — be conservative.
+		return true
+	}
+	// aliasOrUnknown: the tag asserts a result-k leak, OR we can't
+	// definitively rule out aliasing. Anything that COULD carry a
+	// pointer into the callee (pointer, slice, map, chan, iface,
+	// func, string, struct-with-pointers) is potentially capable
+	// of flowing to a pointer-typed result; if we don't have an
+	// explicit "esc:" tag that clears that input, we bail out.
+	//
+	// Scalar-only params (int, float, bool, etc.) cannot alias
+	// any pointer-typed result regardless of tag state.
+	aliasOrUnknown := func(f *types.Field) bool {
+		if f == nil {
+			return false
+		}
+		if f.Type != nil && !f.Type.HasPointers() {
+			return false
+		}
+		note := f.Note
+		if !strings.HasPrefix(note, "esc:") {
+			// No tag — assume it might reach result k.
+			return true
+		}
+		esc := parseLeaks(note)
+		return esc.Result(k) >= 0
+	}
+	if aliasOrUnknown(sig.Recv()) {
+		return true
+	}
+	for _, f := range sig.Params() {
+		if f == nil {
+			continue
+		}
+		// Skip synthesised outBuf params — by construction they
+		// don't alias results; including them in the check would
+		// produce a false positive whenever outBuf's default tag
+		// is missing.
+		if f.IsOutBufParam() {
+			continue
+		}
+		if aliasOrUnknown(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // Any reports whether the value flows anywhere at all.

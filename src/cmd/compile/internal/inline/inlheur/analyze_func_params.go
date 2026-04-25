@@ -6,8 +6,10 @@ package inlheur
 
 import (
 	"cmd/compile/internal/ir"
+	"cmd/compile/internal/types"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // paramsAnalyzer holds state information for the phase that computes
@@ -23,11 +25,25 @@ type paramsAnalyzer struct {
 }
 
 // getParams returns an *ir.Name slice containing all params for the
-// function (plus rcvr as well if applicable).
+// function (plus rcvr as well if applicable). gd Phase G.2.1
+// synthesised outBuf params are filtered out — they're not part of
+// the user-visible signature, so the inline heuristic shouldn't see
+// them when analysing param flow.
 func getParams(fn *ir.Func) []*ir.Name {
 	sig := fn.Type()
 	numParams := sig.NumRecvs() + sig.NumParams()
-	return fn.Dcl[:numParams]
+	all := fn.Dcl[:numParams]
+	if sig.NumOutBufs() == 0 {
+		return all
+	}
+	out := make([]*ir.Name, 0, len(all))
+	for _, p := range all {
+		if p != nil && p.Sym() != nil && strings.HasPrefix(p.Sym().Name, types.OutBufNamePrefix) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // addParamsAnalyzer creates a new paramsAnalyzer helper object for
