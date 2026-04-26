@@ -437,9 +437,8 @@ func dnameData(gd *base.Invocation, s *obj.LSym, ot int, name, tag string, pkg *
 	return ot
 }
 
-var dnameCount int
-
 // dname creates a reflect.name for a struct field or method.
+// (Counter on Invocation: see base/invocation.go Dnamecount.)
 func dname(gd *base.Invocation, name, tag string, pkg *types.Pkg, exported, embedded bool) *obj.LSym {
 	// Write out data as "type:." to signal two things to the
 	// linker, first that when dynamically linking, the symbol
@@ -464,8 +463,8 @@ func dname(gd *base.Invocation, name, tag string, pkg *types.Pkg, exported, embe
 	} else {
 		// TODO(mdempsky): We should be able to share these too (except
 		// maybe when dynamic linking).
-		sname = fmt.Sprintf("%s%s.%d", sname, types.LocalPkg(gd).Prefix, dnameCount)
-		dnameCount++
+		sname = fmt.Sprintf("%s%s.%d", sname, types.LocalPkg(gd).Prefix, gd.Dnamecount)
+		gd.Dnamecount++
 	}
 	if embedded {
 		sname += ".embedded"

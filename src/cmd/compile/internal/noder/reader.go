@@ -2124,7 +2124,7 @@ func (r *reader) label() *types.Sym {
 	r.Sync(pkgbits.SyncLabel)
 	name := r.String()
 	if r.inlCall != nil && name != "_" {
-		name = fmt.Sprintf("~%s·%d", name, inlgen)
+		name = fmt.Sprintf("~%s·%d", name, r.gd.NoderInlgen)
 	}
 	return typecheck.Lookup(r.gd, name)
 }
@@ -3495,7 +3495,8 @@ func unifiedHaveInlineBody(fn *ir.Func) bool {
 	return ok
 }
 
-var inlgen = 0
+// (gd.NoderInlgen is the per-Invocation counter for inlined-call name
+// minting; previously a package-level var.)
 
 // unifiedInlineCall implements inline.NewInline by re-reading the function
 // body from its Unified IR export data.
@@ -3550,7 +3551,7 @@ func unifiedInlineCall(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr
 	r.delayResults = fn.Inl.CanDelayResults
 
 	r.retlabel = typecheck.AutoLabel(gd, ".i")
-	inlgen++
+	gd.NoderInlgen++
 
 	init := ir.TakeInit(call)
 

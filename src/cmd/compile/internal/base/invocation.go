@@ -52,4 +52,17 @@ type Invocation struct {
 	LocalPkg any // *types.Pkg
 
 	Status int
+
+	// Per-compile counters used to mint unique synthesised names.
+	// Were package-level globals; threaded here so multiple compile
+	// invocations in one process don't share name spaces.
+	Renameinitgen     int   // noder/noder.go (renameinit name minter)
+	NoderInlgen       int   // noder/reader.go (inlined-call name minter)
+	Dnamecount        int   // reflectdata/reflect.go (dname name minter)
+	Slicedatagen      int   // staticdata/data.go (sliceData name minter)
+	Statuniqgen       int   // staticinit/sched.go (static temp name minter)
+	Mapinitgen        int   // staticinit/sched.go (map-init name minter)
+	TypeAssertGen     int   // walk/expr.go (type-assert helper minter)
+	InterfaceSwitchGen int  // walk/switch.go (iface-switch helper minter)
+	GlobClosgen       int32 // ir/func.go (closure name minter)
 }

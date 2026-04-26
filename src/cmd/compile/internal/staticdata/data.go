@@ -207,11 +207,11 @@ func fileStringSym(gd *base.Invocation, pos src.XPos, file string, readonly bool
 	return symdata, size, nil
 }
 
-var slicedataGen int
-
+// slicedata's counter lives on Invocation (gd.Slicedatagen) so multiple
+// compile invocations don't share the .gobytes name space.
 func slicedata(gd *base.Invocation, pos src.XPos, s string) *obj.LSym {
-	slicedataGen++
-	symname := fmt.Sprintf(".gobytes.%d", slicedataGen)
+	gd.Slicedatagen++
+	symname := fmt.Sprintf(".gobytes.%d", gd.Slicedatagen)
 	lsym := types.LocalPkg(gd).Lookup(symname).LinksymABI(gd, obj.ABI0)
 	off := dstringdata(gd, lsym, 0, s, pos, "slice")
 	objw.Global(gd, lsym, int32(off), obj.NOPTR|obj.LOCAL)

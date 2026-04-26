@@ -768,13 +768,12 @@ func (s *Schedule) staticAssignInlinedCall(gd *base.Invocation, l *ir.Name, loff
 // data statements for the constant
 // part of the composite literal.
 
-var statuniqgen int // name generator for static temps
-
 // StaticName returns a name backed by a (writable) static data symbol.
+// (gd.Statuniqgen is the per-Invocation name generator for static temps.)
 func StaticName(gd *base.Invocation, t *types.Type) *ir.Name {
 	// Don't use LookupNum; it interns the resulting string, but these are all unique.
-	sym := typecheck.Lookup(gd, fmt.Sprintf("%s%d", obj.StaticNamePrefix, statuniqgen))
-	statuniqgen++
+	sym := typecheck.Lookup(gd, fmt.Sprintf("%s%d", obj.StaticNamePrefix, gd.Statuniqgen))
+	gd.Statuniqgen++
 
 	n := ir.NewNameAt(gd, gd.Pos, sym, t)
 	sym.Def = n
@@ -1180,8 +1179,8 @@ func tryWrapGlobalInit(gd *base.Invocation, n ir.Node) *ir.Func {
 	//	}
 	//
 	// Note: cmd/link expects the function name to contain "map.init".
-	minitsym := typecheck.LookupNum(gd, "map.init.", mapinitgen)
-	mapinitgen++
+	minitsym := typecheck.LookupNum(gd, "map.init.", gd.Mapinitgen)
+	gd.Mapinitgen++
 
 	fn := ir.NewFunc(gd, n.Pos(), n.Pos(), minitsym, types.NewSignature(gd, nil, nil, nil))
 	fn.SetInlinabilityChecked(true) // suppress inlining (which would defeat the point)
@@ -1208,9 +1207,8 @@ func tryWrapGlobalInit(gd *base.Invocation, n ir.Node) *ir.Func {
 	return fn
 }
 
-// mapinitgen is a counter used to uniquify compiler-generated
-// map init functions.
-var mapinitgen int
+// (gd.Mapinitgen is the per-Invocation counter used to uniquify
+// compiler-generated map init functions.)
 
 // AddKeepRelocations adds a dummy "R_KEEP" relocation from each
 // global map variable V to its associated outlined init function.

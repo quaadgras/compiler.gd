@@ -531,8 +531,8 @@ func walkSwitchType(gd *base.Invocation, sw *ir.SwitchStmt) {
 		if len(interfaceCases) > 0 {
 
 			// Build an internal/abi.InterfaceSwitch descriptor to pass to the runtime.
-			lsym := types.LocalPkg(gd).Lookup(fmt.Sprintf(".interfaceSwitch.%d", interfaceSwitchGen)).LinksymABI(gd, obj.ABI0)
-			interfaceSwitchGen++
+			lsym := types.LocalPkg(gd).Lookup(fmt.Sprintf(".interfaceSwitch.%d", gd.InterfaceSwitchGen)).LinksymABI(gd, obj.ABI0)
+			gd.InterfaceSwitchGen++
 			c := rttype.NewCursor(gd, lsym, 0, rttype.InterfaceSwitch)
 			c.Field("Cache").WritePtr(typecheck.LookupRuntimeVar(gd, "emptyInterfaceSwitchCache"))
 			c.Field("NCases").WriteInt(int64(len(interfaceCases)))
@@ -698,7 +698,8 @@ caseLoop:
 	sw.Cases = nil
 }
 
-var interfaceSwitchGen int
+// (gd.InterfaceSwitchGen is the per-Invocation counter for
+// .interfaceSwitch.N descriptor symbols.)
 
 // typeHashFieldOf returns an expression to select the type hash field
 // from an interface's descriptor word (whether a *runtime._type or

@@ -945,8 +945,6 @@ func inlCallee(gd *base.Invocation, caller *ir.Func, fn ir.Node, profile *pgoir.
 	return nil
 }
 
-var inlgen int
-
 // SSADumpInline gives the SSA back end a chance to dump the function
 // when producing output for debugging the compiler itself.
 var SSADumpInline = func(*ir.Func) {}

@@ -770,8 +770,8 @@ func walkDotType(gd *base.Invocation, n *ir.TypeAssertExpr, init *ir.Nodes) ir.N
 func makeTypeAssertDescriptor(gd *base.Invocation, target *types.Type, canFail bool) *obj.LSym {
 	// When converting from an interface to a non-empty interface. Needs a runtime call.
 	// Allocate an internal/abi.TypeAssert descriptor for that call.
-	lsym := types.LocalPkg(gd).Lookup(fmt.Sprintf(".typeAssert.%d", typeAssertGen)).LinksymABI(gd, obj.ABI0)
-	typeAssertGen++
+	lsym := types.LocalPkg(gd).Lookup(fmt.Sprintf(".typeAssert.%d", gd.TypeAssertGen)).LinksymABI(gd, obj.ABI0)
+	gd.TypeAssertGen++
 	c := rttype.NewCursor(gd, lsym, 0, rttype.TypeAssert)
 	c.Field("Cache").WritePtr(typecheck.LookupRuntimeVar(gd, "emptyTypeAssertCache"))
 	c.Field("Inter").WritePtr(reflectdata.TypeLinksym(gd, target))
@@ -781,7 +781,8 @@ func makeTypeAssertDescriptor(gd *base.Invocation, target *types.Type, canFail b
 	return lsym
 }
 
-var typeAssertGen int
+// (gd.TypeAssertGen is the per-Invocation counter for .typeAssert.N
+// descriptor symbols.)
 
 // walkDynamicDotType walks an ODYNAMICDOTTYPE or ODYNAMICDOTTYPE2 node.
 func walkDynamicDotType(gd *base.Invocation, n *ir.DynamicTypeAssertExpr, init *ir.Nodes) ir.Node {

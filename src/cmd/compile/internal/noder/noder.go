@@ -447,11 +447,11 @@ func parseGoEmbed(args string) ([]string, error) {
 // It is called by the initialization before main is run.
 // To make it unique within a package and also uncallable,
 // the name, normally "pkg.init", is altered to "pkg.init.0".
-var renameinitgen int
-
+// Counter lives on Invocation so multiple compile invocations don't
+// share the init-name counter.
 func Renameinit(gd *base.Invocation) *types.Sym {
-	s := typecheck.LookupNum(gd, "init.", renameinitgen)
-	renameinitgen++
+	s := typecheck.LookupNum(gd, "init.", gd.Renameinitgen)
+	gd.Renameinitgen++
 	return s
 }
 

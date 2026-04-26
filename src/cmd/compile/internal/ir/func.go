@@ -511,10 +511,10 @@ func ClosureDebugRuntimeCheck(gd *base.Invocation, clo *ClosureExpr) {
 	}
 }
 
-// globClosgen is like Func.Closgen, but for the global scope.
-var globClosgen int32
-
 // closureName generates a new unique name for a closure within outerfn at pos.
+// (gd.GlobClosgen plays the role of stock's globClosgen package-level var,
+// but lives on Invocation so multiple compile invocations in one process
+// don't share the closure-name counter.)
 func closureName(gd *base.Invocation, outerfn *Func, pos src.XPos, why Op) *types.Sym {
 	if outerfn.OClosure != nil && outerfn.OClosure.Func.RangeParent != nil {
 		outerfn = outerfn.OClosure.Func.RangeParent
@@ -536,7 +536,7 @@ func closureName(gd *base.Invocation, outerfn *Func, pos src.XPos, why Op) *type
 	case ODEFER:
 		suffix = ".deferwrap"
 	}
-	gen := &globClosgen
+	gen := &gd.GlobClosgen
 
 	// There may be multiple functions named "_". In those
 	// cases, we can't use their individual Closgens as it
