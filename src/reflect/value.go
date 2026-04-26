@@ -423,8 +423,12 @@ func (v Value) Bytes() []byte {
 	// keeps Bytes inlinable.
 	//
 	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	// abi.NoEscape hides the &v.ptr address-of from escape analysis;
+	// without it, taking the address of v.ptr forces v's storage onto
+	// the heap and cascades into "x escapes to heap" for callers like
+	// reflect.ValueOf(structWithStringField).Field(i).Bytes().
 	if v.typ_ == bytesType && v.flag&flagSpread != 0 { // ok to use v.typ_ directly as comparison doesn't cause escape
-		return *(*[]byte)(unsafe.Pointer(&v.ptr))
+		return *(*[]byte)(abi.NoEscape(unsafe.Pointer(&v.ptr)))
 	}
 	return v.bytesSlow()
 }
@@ -1408,8 +1412,10 @@ func (v Value) Cap() int {
 	// inlinable.
 	//
 	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	// abi.NoEscape on &v.inline keeps v from leaking into escape
+	// analysis (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
-		return (*[2]int)(unsafe.Pointer(&v.inline))[1]
+		return (*[2]int)(abi.NoEscape(unsafe.Pointer(&v.inline)))[1]
 	}
 	return v.capNonSlice()
 }
@@ -2179,8 +2185,10 @@ func (v Value) Len() int {
 	// inlinable.
 	//
 	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	// abi.NoEscape on &v.inline keeps v from leaking into escape
+	// analysis (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
-		return *(*int)(unsafe.Pointer(&v.inline))
+		return *(*int)(abi.NoEscape(unsafe.Pointer(&v.inline)))
 	}
 	return v.lenNonSlice()
 }
@@ -2826,8 +2834,10 @@ func (v Value) String() string {
 	//
 	// Spread layout: 3-word string header lives contiguously at &v.ptr
 	// (word 0 = data ptr or inline-rep word0, words 1+2 = v.inline).
+	// abi.NoEscape on &v.ptr keeps v from leaking into escape analysis
+	// (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(String)|flagSpread {
-		return *(*string)(unsafe.Pointer(&v.ptr))
+		return *(*string)(abi.NoEscape(unsafe.Pointer(&v.ptr)))
 	}
 	return v.stringNonString()
 }
