@@ -101,4 +101,13 @@ type Invocation struct {
 	// during this compile. Emitted as a single DUPOK RODATA symbol at
 	// finalize time.
 	ReflectdataZeroSize int64
+
+	// Per-compile noder wrapper-type bookkeeping. Drained by
+	// MakeWrappers / wrapMethodValue at end of unified IR reading;
+	// without per-Invocation storage two compiles would queue each
+	// other's wrappers.
+	NoderNeedWrapperTypes        any // []*types.Type
+	NoderHaveWrapperTypes        any // []*types.Type
+	NoderNeedMethodValueWrappers any // []noder.methodValueWrapper
+	NoderHaveMethodValueWrappers any // []noder.methodValueWrapper
 }

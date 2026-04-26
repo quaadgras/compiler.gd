@@ -2290,9 +2290,9 @@ func (r *reader) expr() (res ir.Node) {
 			}
 
 			if r.importedDef() {
-				haveMethodValueWrappers = append(haveMethodValueWrappers, wrapper)
+				appendHaveMethodValueWrapper(r.gd, wrapper)
 			} else {
-				needMethodValueWrappers = append(needMethodValueWrappers, wrapper)
+				appendNeedMethodValueWrapper(r.gd, wrapper)
 			}
 			return n
 		}
@@ -3821,22 +3821,29 @@ func expandInline(gd *base.Invocation, fn *ir.Func, pri pkgReaderIndex) {
 // unit, then we skip constructing a duplicate one. However, currently
 // this is only done on a best-effort basis.
 
-// needWrapperTypes lists types for which we may need to generate
-// method wrappers.
-var needWrapperTypes []*types.Type
+// needWrapperTypes / haveWrapperTypes / need|haveMethodValueWrappers
+// hold per-compile wrapper-generation queues. Stored on
+// *base.Invocation; lazy-init typed slices at append time.
 
-// haveWrapperTypes lists types for which we know we already have
-// method wrappers, because we found the type in an imported package.
-var haveWrapperTypes []*types.Type
+func appendNeedWrapperType(gd *base.Invocation, t *types.Type) {
+	s, _ := gd.NoderNeedWrapperTypes.([]*types.Type)
+	gd.NoderNeedWrapperTypes = append(s, t)
+}
 
-// needMethodValueWrappers lists methods for which we may need to
-// generate method value wrappers.
-var needMethodValueWrappers []methodValueWrapper
+func appendHaveWrapperType(gd *base.Invocation, t *types.Type) {
+	s, _ := gd.NoderHaveWrapperTypes.([]*types.Type)
+	gd.NoderHaveWrapperTypes = append(s, t)
+}
 
-// haveMethodValueWrappers lists methods for which we know we already
-// have method value wrappers, because we found it in an imported
-// package.
-var haveMethodValueWrappers []methodValueWrapper
+func appendNeedMethodValueWrapper(gd *base.Invocation, w methodValueWrapper) {
+	s, _ := gd.NoderNeedMethodValueWrappers.([]methodValueWrapper)
+	gd.NoderNeedMethodValueWrappers = append(s, w)
+}
+
+func appendHaveMethodValueWrapper(gd *base.Invocation, w methodValueWrapper) {
+	s, _ := gd.NoderHaveMethodValueWrappers.([]methodValueWrapper)
+	gd.NoderHaveMethodValueWrappers = append(s, w)
+}
 
 type methodValueWrapper struct {
 	rcvr   *types.Type
@@ -3857,9 +3864,9 @@ func (r *reader) needWrapper(typ *types.Type) {
 	// that package (or one of its transitive dependencies) already
 	// generated method wrappers for it.
 	if r.importedDef() && !forceNeed {
-		haveWrapperTypes = append(haveWrapperTypes, typ)
+		appendHaveWrapperType(r.gd, typ)
 	} else {
-		needWrapperTypes = append(needWrapperTypes, typ)
+		appendNeedWrapperType(r.gd, typ)
 	}
 }
 
@@ -3885,29 +3892,37 @@ func (r *reader) importedDef() bool {
 // compilation unit.
 func MakeWrappers(gd *base.Invocation, target *ir.Package) {
 	// always generate a wrapper for error.Error (#29304)
-	needWrapperTypes = append(needWrapperTypes, types.ErrorType)
+	appendNeedWrapperType(gd, types.ErrorType)
 
 	seen := make(map[string]*types.Type)
 
-	for _, typ := range haveWrapperTypes {
-		wrapType(gd, typ, target, seen, false)
+	if have, _ := gd.NoderHaveWrapperTypes.([]*types.Type); have != nil {
+		for _, typ := range have {
+			wrapType(gd, typ, target, seen, false)
+		}
+		gd.NoderHaveWrapperTypes = nil
 	}
-	haveWrapperTypes = nil
 
-	for _, typ := range needWrapperTypes {
-		wrapType(gd, typ, target, seen, true)
+	if need, _ := gd.NoderNeedWrapperTypes.([]*types.Type); need != nil {
+		for _, typ := range need {
+			wrapType(gd, typ, target, seen, true)
+		}
+		gd.NoderNeedWrapperTypes = nil
 	}
-	needWrapperTypes = nil
 
-	for _, wrapper := range haveMethodValueWrappers {
-		wrapMethodValue(gd, wrapper.rcvr, wrapper.method, target, false)
+	if have, _ := gd.NoderHaveMethodValueWrappers.([]methodValueWrapper); have != nil {
+		for _, wrapper := range have {
+			wrapMethodValue(gd, wrapper.rcvr, wrapper.method, target, false)
+		}
+		gd.NoderHaveMethodValueWrappers = nil
 	}
-	haveMethodValueWrappers = nil
 
-	for _, wrapper := range needMethodValueWrappers {
-		wrapMethodValue(gd, wrapper.rcvr, wrapper.method, target, true)
+	if need, _ := gd.NoderNeedMethodValueWrappers.([]methodValueWrapper); need != nil {
+		for _, wrapper := range need {
+			wrapMethodValue(gd, wrapper.rcvr, wrapper.method, target, true)
+		}
+		gd.NoderNeedMethodValueWrappers = nil
 	}
-	needMethodValueWrappers = nil
 }
 
 func wrapType(gd *base.Invocation, typ *types.Type, target *ir.Package, seen map[string]*types.Type, needed bool) {
