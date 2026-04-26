@@ -63,26 +63,36 @@ func (s *Schedule) StaticInit(gd *base.Invocation, n ir.Node) {
 	}
 }
 
-// varToMapInit holds book-keeping state for global map initialization;
-// it records the init function created by the compiler to host the
-// initialization code for the map in question.
-var varToMapInit map[*ir.Name]*ir.Func
+// varToMapInit / MapInitToVar hold per-compile book-keeping state for
+// global map initialization (map var ↔ outlined init function). Lives
+// on *base.Invocation; same per-Invocation rationale as the noder maps.
 
-// MapInitToVar is the inverse of VarToMapInit; it maintains a mapping
-// from a compiler-generated init function to the map the function is
-// initializing.
-var MapInitToVar map[*ir.Func]*ir.Name
+func varToMapInit(gd *base.Invocation) map[*ir.Name]*ir.Func {
+	m, _ := gd.StaticinitVarToMapInit.(map[*ir.Name]*ir.Func)
+	return m
+}
+
+// MapInitToVar returns the func→var inverse for the current invocation.
+// May return nil before any recordFuncForVar call — callers must
+// nil-check, matching the previous global-var behaviour.
+func MapInitToVar(gd *base.Invocation) map[*ir.Func]*ir.Name {
+	m, _ := gd.StaticinitMapInitToVar.(map[*ir.Func]*ir.Name)
+	return m
+}
 
 // recordFuncForVar establishes a mapping between global map var "v" and
 // outlined init function "fn" (and vice versa); so that we can use
 // the mappings later on to update relocations.
-func recordFuncForVar(v *ir.Name, fn *ir.Func) {
-	if varToMapInit == nil {
-		varToMapInit = make(map[*ir.Name]*ir.Func)
-		MapInitToVar = make(map[*ir.Func]*ir.Name)
+func recordFuncForVar(gd *base.Invocation, v *ir.Name, fn *ir.Func) {
+	v2m, _ := gd.StaticinitVarToMapInit.(map[*ir.Name]*ir.Func)
+	if v2m == nil {
+		v2m = make(map[*ir.Name]*ir.Func)
+		gd.StaticinitVarToMapInit = v2m
+		gd.StaticinitMapInitToVar = make(map[*ir.Func]*ir.Name)
 	}
-	varToMapInit[v] = fn
-	MapInitToVar[fn] = v
+	m2v := gd.StaticinitMapInitToVar.(map[*ir.Func]*ir.Name)
+	v2m[v] = fn
+	m2v[fn] = v
 }
 
 // allBlank reports whether every node in exprs is blank.
@@ -1202,7 +1212,7 @@ func tryWrapGlobalInit(gd *base.Invocation, n ir.Node) *ir.Func {
 		fmt.Fprintf(os.Stderr, "=-= newfunc is %+v\n", fn)
 	}
 
-	recordFuncForVar(nm, fn)
+	recordFuncForVar(gd, nm, fn)
 
 	return fn
 }
@@ -1216,10 +1226,11 @@ func tryWrapGlobalInit(gd *base.Invocation, n ir.Node) *ir.Func {
 // be reachable at link time, we also mark the init function as
 // reachable.
 func AddKeepRelocations(gd *base.Invocation) {
-	if varToMapInit == nil {
+	v2m := varToMapInit(gd)
+	if v2m == nil {
 		return
 	}
-	for k, v := range varToMapInit {
+	for k, v := range v2m {
 		// Add R_KEEP relocation from map to init function.
 		fs := v.Linksym()
 		if fs == nil {
@@ -1235,7 +1246,7 @@ func AddKeepRelocations(gd *base.Invocation) {
 				vs.Name, fs.Name)
 		}
 	}
-	varToMapInit = nil
+	gd.StaticinitVarToMapInit = nil
 }
 
 // OutlineMapInits replaces global map initializers with outlined

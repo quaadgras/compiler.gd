@@ -78,4 +78,10 @@ type Invocation struct {
 
 	// Per-compile escape caches.
 	EscapeSynthRegistered any // map[string]*ir.Func — F4 forwarder compute-fn registry
+
+	// Per-compile staticinit map-init bookkeeping. Stored on
+	// Invocation so AddKeepRelocations / dwarfgen lookups don't
+	// rely on package-level globals.
+	StaticinitVarToMapInit any // map[*ir.Name]*ir.Func
+	StaticinitMapInitToVar any // map[*ir.Func]*ir.Name
 }

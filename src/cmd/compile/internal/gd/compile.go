@@ -105,8 +105,8 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 
 	// If this function is a compiler-generated outlined global map
 	// initializer function, register its LSym for later processing.
-	if staticinit.MapInitToVar != nil {
-		if _, ok := staticinit.MapInitToVar[fn]; ok {
+	if m2v := staticinit.MapInitToVar(gd); m2v != nil {
+		if _, ok := m2v[fn]; ok {
 			ssagen.RegisterMapInitLsym(fn.Linksym())
 		}
 	}
