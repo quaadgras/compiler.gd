@@ -642,8 +642,16 @@ func (r *reader) param() *types.Field {
 
 // objReader maps qualified identifiers (represented as *types.Sym) to
 // a pkgReader and corresponding index that can be used for reading
-// that object's definition.
-var objReader = map[*types.Sym]pkgReaderIndex{}
+// that object's definition. Lives on *base.Invocation (gd.NoderObjReader)
+// so multiple compile invocations don't share the table.
+func objReader(gd *base.Invocation) map[*types.Sym]pkgReaderIndex {
+	m, _ := gd.NoderObjReader.(map[*types.Sym]pkgReaderIndex)
+	if m == nil {
+		m = map[*types.Sym]pkgReaderIndex{}
+		gd.NoderObjReader = m
+	}
+	return m
+}
 
 // obj reads an instantiated object reference from the bitstream.
 func (r *reader) obj() ir.Node {
@@ -709,7 +717,7 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 		case types.BuiltinPkg, types.UnsafePkg:
 			return sym.Def.(ir.Node), nil
 		}
-		if pri, ok := objReader[sym]; ok {
+		if pri, ok := objReader(pr.gd)[sym]; ok {
 			return pri.pr.objIdxMayFail(pri.idx, nil, explicits, shaped)
 		}
 		if sym.Pkg.Path == "runtime" {
@@ -1274,21 +1282,35 @@ func (r *reader) pragmaFlag() ir.PragmaFlag {
 // @@@ Function bodies
 
 // bodyReader tracks where the serialized IR for a local or imported,
-// generic function's body can be found.
-var bodyReader = map[*ir.Func]pkgReaderIndex{}
+// generic function's body can be found. Per-Invocation; see objReader.
+func bodyReader(gd *base.Invocation) map[*ir.Func]pkgReaderIndex {
+	m, _ := gd.NoderBodyReader.(map[*ir.Func]pkgReaderIndex)
+	if m == nil {
+		m = map[*ir.Func]pkgReaderIndex{}
+		gd.NoderBodyReader = m
+	}
+	return m
+}
 
 // importBodyReader tracks where the serialized IR for an imported,
 // static (i.e., non-generic) function body can be read.
-var importBodyReader = map[*types.Sym]pkgReaderIndex{}
+func importBodyReader(gd *base.Invocation) map[*types.Sym]pkgReaderIndex {
+	m, _ := gd.NoderImportBodyReader.(map[*types.Sym]pkgReaderIndex)
+	if m == nil {
+		m = map[*types.Sym]pkgReaderIndex{}
+		gd.NoderImportBodyReader = m
+	}
+	return m
+}
 
 // bodyReaderFor returns the pkgReaderIndex for reading fn's
 // serialized IR, and whether one was found.
 func bodyReaderFor(gd *base.Invocation, fn *ir.Func) (pri pkgReaderIndex, ok bool) {
 	if fn.Nname.Defn != nil {
-		pri, ok = bodyReader[fn]
+		pri, ok = bodyReader(gd)[fn]
 		gd.AssertfAt(ok, gd.Pos, "must have bodyReader for %v", fn) // must always be available
 	} else {
-		pri, ok = importBodyReader[fn.Sym()]
+		pri, ok = importBodyReader(gd)[fn.Sym()]
 	}
 	return
 }
@@ -1311,7 +1333,7 @@ func (r *reader) addBody(fn *ir.Func, method *types.Sym) {
 	idx := r.Reloc(pkgbits.SectionBody)
 
 	pri := pkgReaderIndex{r.p, idx, r.dict, method, r.gd, nil}
-	bodyReader[fn] = pri
+	bodyReader(r.gd)[fn] = pri
 
 	if r.curfn == nil {
 		todoBodies = append(todoBodies, fn)
@@ -2661,7 +2683,7 @@ func (pr *pkgReader) objDictName(idx index, implicits, explicits []*types.Type) 
 
 	if tag == pkgbits.ObjStub {
 		assert(pr.gd, !sym.IsBlank())
-		if pri, ok := objReader[sym]; ok {
+		if pri, ok := objReader(pr.gd)[sym]; ok {
 			return pri.pr.objDictName(pri.idx, nil, explicits)
 		}
 		pr.gd.Fatalf("unresolved stub: %v", sym)
@@ -2830,7 +2852,7 @@ func (r *reader) syntheticClosure(origPos src.XPos, typ *types.Type, ifaceHack b
 
 		addBody(origPos, r, captured)
 	}}
-	bodyReader[fn] = pri
+	bodyReader(r.gd)[fn] = pri
 	pri.funcBody(fn)
 
 	return ir.InitExpr(r.gd, init, clo)
@@ -3480,17 +3502,14 @@ func (r *reader) pkgObjs(target *ir.Package) []*ir.Name {
 
 // unifiedHaveInlineBody reports whether we have the function body for
 // fn, so we can inline it.
-func unifiedHaveInlineBody(fn *ir.Func) bool {
+func unifiedHaveInlineBody(gd *base.Invocation, fn *ir.Func) bool {
 	if fn.Inl == nil {
 		return false
 	}
 
-	// Pass nil gd: the assert in bodyReaderFor only fires for fn.Nname.Defn != nil
-	// callers, and unifiedHaveInlineBody is only called for fn.Inl != nil where
-	// the body is expected to exist anyway. Keep gd unused here.
-	_, ok := bodyReader[fn]
+	_, ok := bodyReader(gd)[fn]
 	if fn.Nname.Defn == nil {
-		_, ok = importBodyReader[fn.Sym()]
+		_, ok = importBodyReader(gd)[fn.Sym()]
 	}
 	return ok
 }
@@ -4084,7 +4103,7 @@ func addTailCall(gd *base.Invocation, pos src.XPos, fn *ir.Func, recv ir.Node, m
 
 	if recv.Type() != nil && recv.Type().IsPtr() && method.Type.Recv().Type.IsPtr() &&
 		method.Embedded != 0 && !types.IsInterfaceMethod(method.Type) &&
-		!unifiedHaveInlineBody(ir.MethodExprName(dot).Func) &&
+		!unifiedHaveInlineBody(gd, ir.MethodExprName(dot).Func) &&
 		!(gd.Ctxt.Arch.Name == "ppc64le" && gd.Ctxt.Flag_dynlink) {
 		if gd.Debug.TailCall != 0 {
 			gd.WarnfAt(fn.Nname.Type().Recv().Type.Elem().Pos(), "tail call emitted for the method %v wrapper", method.Nname)

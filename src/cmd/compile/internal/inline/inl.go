@@ -388,7 +388,7 @@ func InlineImpossible(gd *base.Invocation, fn *ir.Func) string {
 
 	// If a local function has no fn.Body (is defined outside of Go), cannot inline it.
 	// Imported functions don't have fn.Body but might have inline body in fn.Inl.
-	if len(fn.Body) == 0 && !typecheck.HaveInlineBody(fn) {
+	if len(fn.Body) == 0 && !typecheck.HaveInlineBody(gd, fn) {
 		reason = "no function body"
 		return reason
 	}
@@ -612,7 +612,7 @@ opSwitch:
 			break // Treat like any other node.
 		}
 
-		if callee := inlCallee(v.gd, v.curFunc, n.Fun, v.profile, false); callee != nil && typecheck.HaveInlineBody(callee) {
+		if callee := inlCallee(v.gd, v.curFunc, n.Fun, v.profile, false); callee != nil && typecheck.HaveInlineBody(v.gd, callee) {
 			// Check whether we'd actually inline this call. Set
 			// log == false since we aren't actually doing inlining
 			// yet.
@@ -904,7 +904,7 @@ func TryInlineCall(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr, bi
 		return nil
 	}
 
-	if fn := inlCallee(gd, callerfn, call.Fun, profile, false); fn != nil && typecheck.HaveInlineBody(fn) {
+	if fn := inlCallee(gd, callerfn, call.Fun, profile, false); fn != nil && typecheck.HaveInlineBody(gd, fn) {
 		return mkinlcall(gd, callerfn, call, fn, bigCaller, closureCalledOnce)
 	}
 	return nil

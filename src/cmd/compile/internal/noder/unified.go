@@ -59,7 +59,7 @@ func LookupFunc(gd *base.Invocation, fullName string) (*ir.Func, error) {
 	// function Bar, or a method on type Bar? Thus we must simply attempt
 	// to lookup both.
 
-	fn, err := lookupFunction(pkg, symName)
+	fn, err := lookupFunction(gd, pkg, symName)
 	if err == nil {
 		return fn, nil
 	}
@@ -80,13 +80,13 @@ func PostLookupCleanup(gd *base.Invocation) {
 	readBodies(gd, typecheck.Target(gd), false)
 }
 
-func lookupFunction(pkg *types.Pkg, symName string) (*ir.Func, error) {
+func lookupFunction(gd *base.Invocation, pkg *types.Pkg, symName string) (*ir.Func, error) {
 	sym := pkg.Lookup(symName)
 
 	// TODO(prattmic): Enclosed functions (e.g., foo.Bar.func1) are not
 	// present in objReader, only as OCLOSURE nodes in the enclosing
 	// function.
-	pri, ok := objReader[sym]
+	pri, ok := objReader(gd)[sym]
 	if !ok {
 		return nil, fmt.Errorf("func sym %v missing objReader", sym)
 	}
@@ -115,7 +115,7 @@ func lookupMethod(gd *base.Invocation, pkg *types.Pkg, symName string) (*ir.Func
 		return nil, fmt.Errorf("error looking up method symbol %q: %v", symName, err)
 	}
 
-	pri, ok := objReader[typ]
+	pri, ok := objReader(gd)[typ]
 	if !ok {
 		return nil, fmt.Errorf("type sym %v missing objReader", typ)
 	}
@@ -265,7 +265,7 @@ func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool) {
 			fn := todoBodies[len(todoBodies)-1]
 			todoBodies = todoBodies[:len(todoBodies)-1]
 
-			pri, ok := bodyReader[fn]
+			pri, ok := bodyReader(gd)[fn]
 			assert(gd, ok)
 			pri.funcBody(fn)
 
@@ -434,7 +434,7 @@ func readPackage(gd *base.Invocation, pr *pkgReader, importpkg *types.Pkg, local
 
 			path, name, code := r.p.PeekObj(idx)
 			if code != pkgbits.ObjStub {
-				objReader[types.NewPkg(path, "").Lookup(name)] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
+				objReader(gd)[types.NewPkg(path, "").Lookup(name)] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
 			}
 		}
 
@@ -457,8 +457,9 @@ func readPackage(gd *base.Invocation, pr *pkgReader, importpkg *types.Pkg, local
 			idx := r.Reloc(pkgbits.SectionBody)
 
 			sym := types.NewPkg(path, "").Lookup(name)
-			if _, ok := importBodyReader[sym]; !ok {
-				importBodyReader[sym] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
+			ibr := importBodyReader(gd)
+			if _, ok := ibr[sym]; !ok {
+				ibr[sym] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
 			}
 		}
 

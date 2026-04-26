@@ -17,8 +17,10 @@ import (
 // for inlining.
 //
 // It's a function literal so that it can be overridden for
-// GOEXPERIMENT=unified.
-var HaveInlineBody = func(fn *ir.Func) bool {
+// GOEXPERIMENT=unified. Takes gd so noder's implementation can read
+// its per-Invocation bodyReader/importBodyReader maps without a
+// package-level fallback.
+var HaveInlineBody = func(gd *base.Invocation, fn *ir.Func) bool {
 	panic("HaveInlineBody not overridden")
 }
 

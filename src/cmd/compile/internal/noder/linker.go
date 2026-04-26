@@ -143,7 +143,7 @@ func (l *linker) relocObj(gd *base.Invocation, pr *pkgReader, idx index) index {
 	}
 
 	if tag == pkgbits.ObjStub && path != "builtin" && path != "unsafe" {
-		pri, ok := objReader[sym]
+		pri, ok := objReader(gd)[sym]
 		if !ok {
 			gd.Fatalf("missing reader for %q.%v", path, name)
 		}

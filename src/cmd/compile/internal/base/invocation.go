@@ -65,4 +65,12 @@ type Invocation struct {
 	TypeAssertGen     int   // walk/expr.go (type-assert helper minter)
 	InterfaceSwitchGen int  // walk/switch.go (iface-switch helper minter)
 	GlobClosgen       int32 // ir/func.go (closure name minter)
+
+	// Per-compile noder reader maps. Type-asserted at use site to
+	// avoid an import cycle (noder imports base, not the other
+	// direction). Were package-level globals; same per-Invocation
+	// rationale as the counters above.
+	NoderObjReader        any // map[*types.Sym]noder.pkgReaderIndex
+	NoderBodyReader       any // map[*ir.Func]noder.pkgReaderIndex
+	NoderImportBodyReader any // map[*types.Sym]noder.pkgReaderIndex
 }

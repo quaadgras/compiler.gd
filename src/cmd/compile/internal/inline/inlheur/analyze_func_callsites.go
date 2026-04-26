@@ -152,7 +152,7 @@ func (cstb *callSiteTableBuilder) propsForArg(arg ir.Node) ActualExprPropBits {
 	}
 	fname := cstb.funcName(arg)
 	if fname != nil {
-		if fn := fname.Func; fn != nil && typecheck.HaveInlineBody(fn) {
+		if fn := fname.Func; fn != nil && typecheck.HaveInlineBody(cstb.gd, fn) {
 			return ActualExprIsInlinableFunc
 		}
 		return ActualExprIsFunc
