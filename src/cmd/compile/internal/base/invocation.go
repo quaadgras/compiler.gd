@@ -84,4 +84,11 @@ type Invocation struct {
 	// rely on package-level globals.
 	StaticinitVarToMapInit any // map[*ir.Name]*ir.Func
 	StaticinitMapInitToVar any // map[*ir.Func]*ir.Name
+
+	// Per-function walk caches. Set on entry to walk.Walk, cleared
+	// on exit (via defer). Stored on Invocation rather than as
+	// package vars so concurrent compile invocations don't clobber
+	// each other's transient walk state.
+	WalkStaticValues any // map[ir.Node]ir.Node — findStaticValues result
+	WalkEscapeBoxes  any // map[*ir.Name]*ir.Name — promoted-EscCandidate boxes
 }

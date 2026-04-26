@@ -24,11 +24,11 @@ const tmpstringbufsize = 32
 func Walk(gd *base.Invocation, fn *ir.Func) {
 	gd.CurFunc = fn
 
-	// Set and then clear a package-level cache of static values for this fn.
+	// Set and then clear a per-Invocation cache of static values for this fn.
 	// (At some point, it might be worthwhile to have a walkState structure
 	// that gets passed everywhere where things like this can go.)
-	staticValues = findStaticValues(fn)
-	defer func() { staticValues = nil }()
+	gd.WalkStaticValues = findStaticValues(fn)
+	defer func() { gd.WalkStaticValues = nil }()
 
 	errorsBefore := gd.Errors()
 	order(gd, fn)
@@ -452,14 +452,12 @@ func ifaceData(gd *base.Invocation, pos src.XPos, n ir.Node, t *types.Type) ir.N
 // The current use case is reducing OCONVIFACE allocations, and hence
 // staticValue is currently only useful when given an *ir.ConvExpr.X as n.
 func staticValue(gd *base.Invocation, n ir.Node) ir.Node {
-	if staticValues == nil {
-		gd.Fatalf("staticValues is nil. staticValue called outside of walk.Walk?")
+	sv, _ := gd.WalkStaticValues.(map[ir.Node]ir.Node)
+	if sv == nil {
+		gd.Fatalf("WalkStaticValues is nil. staticValue called outside of walk.Walk?")
 	}
-	return staticValues[n]
+	return sv[n]
 }
-
-// staticValues is a cache of static values for use by staticValue.
-var staticValues map[ir.Node]ir.Node
 
 // findStaticValues returns a map of static values for fn.
 func findStaticValues(fn *ir.Func) map[ir.Node]ir.Node {

@@ -21,7 +21,14 @@ import (
 // returned by runtime.maybeEscape…Arg when the mask bit fires, and
 // the call-argument rewrite substitutes the pointer-var's value in
 // place of `&name`.
-var escapeBoxes map[*ir.Name]*ir.Name
+//
+// Per-function state lives on Invocation (gd.WalkEscapeBoxes) rather
+// than as a package var so concurrent compile invocations can't
+// clobber each other's transient walk state.
+func escapeBoxes(gd *base.Invocation) map[*ir.Name]*ir.Name {
+	m, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*ir.Name)
+	return m
+}
 
 // promoteEscapeCandidates wires up a pointer-indirection for every
 // PAUTO local that escape analysis has tagged EscCandidate:
@@ -51,7 +58,7 @@ func promoteEscapeCandidates(gd *base.Invocation, fn *ir.Func) {
 	if fn == nil || len(fn.Dcl) == 0 {
 		return
 	}
-	escapeBoxes = nil // fresh per function
+	gd.WalkEscapeBoxes = nil // fresh per function
 	var prologue ir.Nodes
 	dcls := fn.Dcl[:len(fn.Dcl):len(fn.Dcl)]
 	for _, name := range dcls {
@@ -132,10 +139,12 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 	// Route every later access of name through *addr.
 	name.Heapaddr = addr
 
-	if escapeBoxes == nil {
-		escapeBoxes = make(map[*ir.Name]*ir.Name)
+	eb, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*ir.Name)
+	if eb == nil {
+		eb = make(map[*ir.Name]*ir.Name)
+		gd.WalkEscapeBoxes = eb
 	}
-	escapeBoxes[name] = addr
+	eb[name] = addr
 }
 
 // wrapEscapeCandidateArgs rewrites each candidate arg of n (a closure
@@ -250,13 +259,14 @@ func nameReachesCandidate(n *ir.Name, depth int) bool {
 // callee sees either the original stack pointer or a heap-migrated
 // pointer depending on the mask bit. Returns (nil, false) for
 // fresh-allocation args; those substitute the call arg directly.
-func candidateStorageAddr(arg ir.Node) (*ir.Name, bool) {
-	if escapeBoxes == nil {
+func candidateStorageAddr(gd *base.Invocation, arg ir.Node) (*ir.Name, bool) {
+	eb := escapeBoxes(gd)
+	if eb == nil {
 		return nil, false
 	}
 	if ae, ok := arg.(*ir.AddrExpr); ok {
 		if name, ok := ae.X.(*ir.Name); ok {
-			if box, ok := escapeBoxes[name]; ok {
+			if box, ok := eb[name]; ok {
 				return box, true
 			}
 		}
@@ -294,7 +304,7 @@ func classifyCandidates(gd *base.Invocation, n *ir.CallExpr) ([]candidateArg, bo
 			continue
 		}
 		ca := candidateArg{idx: i, argType: argType, elemPtr: reflectdata.TypePtrAt(gd, pos, argType.Elem())}
-		if box, ok := candidateStorageAddr(arg); ok {
+		if box, ok := candidateStorageAddr(gd, arg); ok {
 			ca.box = box
 		} else if name, ok := candidatePointerName(arg); ok {
 			ca.name = name
