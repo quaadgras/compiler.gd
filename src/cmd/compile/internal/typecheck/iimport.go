@@ -29,21 +29,26 @@ func SetBaseTypeIndex(gd *base.Invocation, t *types.Type, i, pi int64) {
 		gd.Fatalf("SetBaseTypeIndex on non-defined type %v", t)
 	}
 	if i != -1 && pi != -1 {
-		typeSymIdx[t] = [2]int64{i, pi}
+		m, _ := gd.TypecheckTypeSymIdx.(map[*types.Type][2]int64)
+		if m == nil {
+			m = make(map[*types.Type][2]int64)
+			gd.TypecheckTypeSymIdx = m
+		}
+		m[t] = [2]int64{i, pi}
 	}
 }
 
-// Map imported type T to the index of type descriptor symbols of T and *T,
-// so we can use index to reference the symbol.
+// BaseTypeIndex returns the imported type's descriptor index, or -1 if
+// not registered. The map is per-Invocation (gd.TypecheckTypeSymIdx)
+// so concurrent compiles don't share descriptor indices.
 // TODO(mdempsky): Store this information directly in the Type's Name.
-var typeSymIdx = make(map[*types.Type][2]int64)
-
-func BaseTypeIndex(t *types.Type) int64 {
+func BaseTypeIndex(gd *base.Invocation, t *types.Type) int64 {
 	tbase := t
 	if t.IsPtr() && t.Sym() == nil && t.Elem().Sym() != nil {
 		tbase = t.Elem()
 	}
-	i, ok := typeSymIdx[tbase]
+	m, _ := gd.TypecheckTypeSymIdx.(map[*types.Type][2]int64)
+	i, ok := m[tbase]
 	if !ok {
 		return -1
 	}

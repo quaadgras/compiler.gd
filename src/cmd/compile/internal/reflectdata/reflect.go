@@ -910,7 +910,7 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	}
 
 	if !NeedEmit(gd, tbase) {
-		if i := typecheck.BaseTypeIndex(t); i >= 0 {
+		if i := typecheck.BaseTypeIndex(gd, t); i >= 0 {
 			lsym.Pkg = tbase.Sym().Pkg.Prefix
 			lsym.SymIdx = int32(i)
 			lsym.Set(obj.AttrIndexed, true)

@@ -177,4 +177,11 @@ type Invocation struct {
 	InlheurAllCallSites     any  // inlheur.CallSiteTab — accumulated across whole compile (debug)
 	InlheurScoreCacheTab    any  // inlheur.CallSiteTab — reused across ScoreCalls invocations
 	InlheurScoreCacheCallsl any  // []*inlheur.CallSite — reused list buffer
+
+	// typecheck imported-type → descriptor index mapping. Populated
+	// by SetBaseTypeIndex during noder; consumed by reflectdata's
+	// type-descriptor emit. Per-Invocation so two compiles don't
+	// collide on overlapping type pointers (interned per-process,
+	// but the descriptor indices are per-compile).
+	TypecheckTypeSymIdx any // map[*types.Type][2]int64
 }
