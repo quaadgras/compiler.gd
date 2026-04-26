@@ -91,4 +91,9 @@ type Invocation struct {
 	// each other's transient walk state.
 	WalkStaticValues any // map[ir.Node]ir.Node — findStaticValues result
 	WalkEscapeBoxes  any // map[*ir.Name]*ir.Name — promoted-EscCandidate boxes
+
+	// pkginit asan instrumentation tables — populated only under
+	// -asan, deterministic-order via slice paired with the map.
+	PkginitInstrumentGlobalsMap   any // map[string]ir.Node
+	PkginitInstrumentGlobalsSlice any // []ir.Node
 }

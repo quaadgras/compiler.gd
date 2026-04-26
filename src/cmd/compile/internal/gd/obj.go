@@ -265,7 +265,7 @@ func ggloblnod(gd *base.Invocation, nam *ir.Name) {
 	}
 
 	// We've skipped linkname'd globals's instrument, so we can skip them here as well.
-	if gd.Flag.ASan && linkname == "" && pkginit.InstrumentGlobalsMap[name] != nil {
+	if gd.Flag.ASan && linkname == "" && pkginit.InstrumentGlobalsMap(gd)[name] != nil {
 		// Write the new size of instrumented global variables that have
 		// trailing redzones into object file.
 		rzSize := pkginit.GetRedzoneSizeForGlobal(size)

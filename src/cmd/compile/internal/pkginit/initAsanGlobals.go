@@ -21,7 +21,7 @@ func instrumentGlobals(gd *base.Invocation, fn *ir.Func) *ir.Name {
 	tconv := typecheck.ConvNop
 	// Make a global array of asanGlobalStruct type.
 	// var asanglobals []asanGlobalStruct
-	arraytype := types.NewArray(asanGlobalStruct, int64(len(InstrumentGlobalsMap)))
+	arraytype := types.NewArray(asanGlobalStruct, int64(len(InstrumentGlobalsMap(gd))))
 	symG := lname(gd, ".asanglobals")
 	globals := ir.NewNameAt(gd, gd.Pos, symG, arraytype)
 	globals.Class = ir.PEXTERN
@@ -29,7 +29,7 @@ func instrumentGlobals(gd *base.Invocation, fn *ir.Func) *ir.Name {
 	typecheck.Target(gd).Externs = append(typecheck.Target(gd).Externs, globals)
 	// Make a global array of asanLocationStruct type.
 	// var asanL []asanLocationStruct
-	arraytype = types.NewArray(asanLocationStruct, int64(len(InstrumentGlobalsMap)))
+	arraytype = types.NewArray(asanLocationStruct, int64(len(InstrumentGlobalsMap(gd))))
 	symL := lname(gd, ".asanL")
 	asanlocation := ir.NewNameAt(gd, gd.Pos, symL, arraytype)
 	asanlocation.Class = ir.PEXTERN
@@ -61,7 +61,7 @@ func instrumentGlobals(gd *base.Invocation, fn *ir.Func) *ir.Name {
 	var init ir.Nodes
 	var c ir.Node
 	// globals[i].odrIndicator = 0 is the default, no need to set it explicitly here.
-	for i, n := range InstrumentGlobalsSlice {
+	for i, n := range InstrumentGlobalsSlice(gd) {
 		setField := func(f string, val ir.Node, i int) {
 			r := ir.NewAssignStmt(gd, gd.Pos, ir.NewSelectorExpr(gd, gd.Pos, ir.ODOT,
 				ir.NewIndexExpr(gd, gd.Pos, globals, ir.NewInt(gd, gd.Pos, int64(i))), lname(gd, f)), val)
@@ -208,8 +208,23 @@ func GetRedzoneSizeForGlobal(size int64) int64 {
 // map as "foo".
 // Consider range over maps is nondeterministic, make a slice to hold all the values in the
 // InstrumentGlobalsMap and iterate over the InstrumentGlobalsSlice.
-var InstrumentGlobalsMap = make(map[string]ir.Node)
-var InstrumentGlobalsSlice = make([]ir.Node, 0, 0)
+// InstrumentGlobalsMap returns the per-Invocation instrumentation map,
+// lazy-initialised on first use.
+func InstrumentGlobalsMap(gd *base.Invocation) map[string]ir.Node {
+	m, _ := gd.PkginitInstrumentGlobalsMap.(map[string]ir.Node)
+	if m == nil {
+		m = make(map[string]ir.Node)
+		gd.PkginitInstrumentGlobalsMap = m
+	}
+	return m
+}
+
+// InstrumentGlobalsSlice returns the deterministic-order companion to
+// InstrumentGlobalsMap.
+func InstrumentGlobalsSlice(gd *base.Invocation) []ir.Node {
+	s, _ := gd.PkginitInstrumentGlobalsSlice.([]ir.Node)
+	return s
+}
 
 func canInstrumentGlobal(gd *base.Invocation, g ir.Node) bool {
 	if g.Op() != ir.ONAME {
