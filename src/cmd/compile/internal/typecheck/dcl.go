@@ -14,7 +14,12 @@ import (
 	"cmd/internal/src"
 )
 
-var funcStack []*ir.Func // stack of previous values of ir.CurFunc
+// funcStackOf returns the per-Invocation CurFunc stack, the inverse
+// of which is what gd.TypecheckFuncStack stores. Lazy-initialised.
+func funcStackOf(gd *base.Invocation) []*ir.Func {
+	s, _ := gd.TypecheckFuncStack.([]*ir.Func)
+	return s
+}
 
 // DeclFunc declares the parameters for fn and adds it to
 // Target.Funcs.
@@ -26,19 +31,20 @@ func DeclFunc(gd *base.Invocation, fn *ir.Func) {
 	fn.Nname.Defn = fn
 	Target(gd).Funcs = append(Target(gd).Funcs, fn)
 
-	funcStack = append(funcStack, ir.CurFunc(gd))
+	gd.TypecheckFuncStack = append(funcStackOf(gd), ir.CurFunc(gd))
 	gd.CurFunc = fn
 }
 
 // FinishFuncBody restores ir.CurFunc to its state before the last
 // call to DeclFunc.
 func FinishFuncBody(gd *base.Invocation) {
-	funcStack, gd.CurFunc = funcStack[:len(funcStack)-1], funcStack[len(funcStack)-1]
+	s := funcStackOf(gd)
+	gd.TypecheckFuncStack, gd.CurFunc = s[:len(s)-1], s[len(s)-1]
 }
 
 func CheckFuncStack(gd *base.Invocation) {
-	if len(funcStack) != 0 {
-		gd.Fatalf("funcStack is non-empty: %v", len(funcStack))
+	if s := funcStackOf(gd); len(s) != 0 {
+		gd.Fatalf("funcStack is non-empty: %v", len(s))
 	}
 }
 

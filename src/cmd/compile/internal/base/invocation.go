@@ -126,4 +126,9 @@ type Invocation struct {
 	// Per-compile so two parallel compiles don't share the call-graph
 	// state.
 	SsagenNowritebarrierrecCheck any // *ssagen.nowritebarrierrecChecker
+
+	// typecheck.DeclFunc / FinishFuncBody push and pop CurFunc onto
+	// this stack. Per-compile because CurFunc itself is per-compile;
+	// concurrent compiles would otherwise corrupt each other.
+	TypecheckFuncStack any // []*ir.Func
 }
