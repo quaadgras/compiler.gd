@@ -19,7 +19,17 @@ import (
 // pairs sharing a base wrapper); without a registry guard we'd
 // enqueue the same cfn twice and gc.prepareFunc → ir.InitLSym
 // fires its "already initialised" assertion.
-var synthRegistered = map[string]*ir.Func{}
+//
+// Stored per-Invocation (gd.EscapeSynthRegistered) so multiple
+// compile invocations don't share *ir.Func references.
+func synthRegistered(gd *base.Invocation) map[string]*ir.Func {
+	m, _ := gd.EscapeSynthRegistered.(map[string]*ir.Func)
+	if m == nil {
+		m = map[string]*ir.Func{}
+		gd.EscapeSynthRegistered = m
+	}
+	return m
+}
 
 // SynthesizeForwarderComputeFns walks the package's functions
 // and, for each one tagged by DetectForwarders with
@@ -53,7 +63,8 @@ func SynthesizeForwarderComputeFns(gd *base.Invocation, funcs []*ir.Func) {
 		}
 		linkName := fn.Linksym().Name
 		synthName := ".gdfwd." + linkName
-		if existing, ok := synthRegistered[synthName]; ok {
+		sr := synthRegistered(gd)
+		if existing, ok := sr[synthName]; ok {
 			// Re-derive: a different wrapper *Func with the
 			// same linksym name (e.g. ABI wrapper pairs) hit
 			// the same synth — share it. The constants must
@@ -67,7 +78,7 @@ func SynthesizeForwarderComputeFns(gd *base.Invocation, funcs []*ir.Func) {
 			continue
 		}
 		fn.GdForwarder.SyntheticComputeFn = cfn
-		synthRegistered[synthName] = cfn
+		sr[synthName] = cfn
 		// Note: typecheck.DeclFunc (called by buildForwarder
 		// ComputeFn) already appends cfn to Target.Funcs.
 		// Appending again here would enqueue the same fn twice

@@ -75,4 +75,7 @@ type Invocation struct {
 	NoderImportBodyReader any // map[*types.Sym]noder.pkgReaderIndex
 	NoderTodoBodies       any // []*ir.Func — pending function bodies during readBodies
 	NoderTodoDicts        any // []func()    — pending dictionary constructors during readBodies
+
+	// Per-compile escape caches.
+	EscapeSynthRegistered any // map[string]*ir.Func — F4 forwarder compute-fn registry
 }
