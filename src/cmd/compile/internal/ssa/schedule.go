@@ -5,7 +5,6 @@
 package ssa
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/types"
 	"cmp"
 	"container/heap"
@@ -349,14 +348,14 @@ func schedule(f *Func) {
 			if v.Op == OpSPanchored {
 				// Free this value
 				if v.Uses != 0 {
-					base.Fatalf("SPAnchored still has %d uses", v.Uses)
+					f.Config.gd.Fatalf("SPAnchored still has %d uses", v.Uses)
 				}
 				v.resetArgs()
 				f.freeValue(v)
 			} else {
 				if opcodeTable[v.Op].nilCheck {
 					if v.Uses != 0 {
-						base.Fatalf("nilcheck still has %d uses", v.Uses)
+						f.Config.gd.Fatalf("nilcheck still has %d uses", v.Uses)
 					}
 					// We can't delete the nil check, but we mark
 					// it as having void type so regalloc won't

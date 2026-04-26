@@ -119,7 +119,7 @@ type Profile struct {
 }
 
 // New generates a profile-graph from the profile or pre-processed profile.
-func New(profileFile string) (*Profile, error) {
+func New(gd *base.Invocation, profileFile string) (*Profile, error) {
 	f, err := os.Open(profileFile)
 	if err != nil {
 		return nil, fmt.Errorf("error opening profile: %w", err)
@@ -150,7 +150,7 @@ func New(profileFile string) (*Profile, error) {
 	}
 
 	// Create package-level call graph with weights from profile and IR.
-	wg := createIRGraph(base.NamedEdgeMap)
+	wg := createIRGraph(gd, base.NamedEdgeMap)
 
 	return &Profile{
 		Profile:    base,
@@ -160,15 +160,15 @@ func New(profileFile string) (*Profile, error) {
 
 // createIRGraph builds the IRGraph by visiting all the ir.Func in decl list
 // of a package.
-func createIRGraph(namedEdgeMap pgo.NamedEdgeMap) *IRGraph {
+func createIRGraph(gd *base.Invocation, namedEdgeMap pgo.NamedEdgeMap) *IRGraph {
 	g := &IRGraph{
 		IRNodes: make(map[string]*IRNode),
 	}
 
 	// Bottomup walk over the function to create IRGraph.
-	ir.VisitFuncsBottomUp(typecheck.Target.Funcs, func(list []*ir.Func, recursive bool) {
+	ir.VisitFuncsBottomUp(typecheck.Target(gd).Funcs, func(list []*ir.Func, recursive bool) {
 		for _, fn := range list {
-			visitIR(fn, namedEdgeMap, g)
+			visitIR(gd, fn, namedEdgeMap, g)
 		}
 	})
 
@@ -182,14 +182,14 @@ func createIRGraph(namedEdgeMap pgo.NamedEdgeMap) *IRGraph {
 	// approaches is a bit awkward, particularly because direct calls are
 	// discoverable via the profile as well. Unify these into a single
 	// approach.
-	addIndirectEdges(g, namedEdgeMap)
+	addIndirectEdges(gd, g, namedEdgeMap)
 
 	return g
 }
 
 // visitIR traverses the body of each ir.Func adds edges to g from ir.Func to
 // any called function in the body.
-func visitIR(fn *ir.Func, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
+func visitIR(gd *base.Invocation, fn *ir.Func, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
 	name := ir.LinkFuncName(fn)
 	node, ok := g.IRNodes[name]
 	if !ok {
@@ -200,13 +200,13 @@ func visitIR(fn *ir.Func, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
 	}
 
 	// Recursively walk over the body of the function to create IRGraph edges.
-	createIRGraphEdge(fn, node, name, namedEdgeMap, g)
+	createIRGraphEdge(gd, fn, node, name, namedEdgeMap, g)
 }
 
 // createIRGraphEdge traverses the nodes in the body of ir.Func and adds edges
 // between the callernode which points to the ir.Func and the nodes in the
 // body.
-func createIRGraphEdge(fn *ir.Func, callernode *IRNode, name string, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
+func createIRGraphEdge(gd *base.Invocation, fn *ir.Func, callernode *IRNode, name string, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
 	ir.VisitList(fn.Body, func(n ir.Node) {
 		switch n.Op() {
 		case ir.OCALLFUNC:
@@ -214,28 +214,28 @@ func createIRGraphEdge(fn *ir.Func, callernode *IRNode, name string, namedEdgeMa
 			// Find the callee function from the call site and add the edge.
 			callee := DirectCallee(call.Fun)
 			if callee != nil {
-				addIREdge(callernode, name, n, callee, namedEdgeMap, g)
+				addIREdge(gd, callernode, name, n, callee, namedEdgeMap, g)
 			}
 		case ir.OCALLMETH:
 			call := n.(*ir.CallExpr)
 			// Find the callee method from the call site and add the edge.
 			callee := ir.MethodExprName(call.Fun).Func
-			addIREdge(callernode, name, n, callee, namedEdgeMap, g)
+			addIREdge(gd, callernode, name, n, callee, namedEdgeMap, g)
 		}
 	})
 }
 
 // NodeLineOffset returns the line offset of n in fn.
-func NodeLineOffset(n ir.Node, fn *ir.Func) int {
+func NodeLineOffset(gd *base.Invocation, n ir.Node, fn *ir.Func) int {
 	// See "A note on line numbers" at the top of the file.
-	line := int(base.Ctxt.InnermostPos(n.Pos()).RelLine())
-	startLine := int(base.Ctxt.InnermostPos(fn.Pos()).RelLine())
+	line := int(gd.Ctxt.InnermostPos(n.Pos()).RelLine())
+	startLine := int(gd.Ctxt.InnermostPos(fn.Pos()).RelLine())
 	return line - startLine
 }
 
 // addIREdge adds an edge between caller and new node that points to `callee`
 // based on the profile-graph and NodeMap.
-func addIREdge(callerNode *IRNode, callerName string, call ir.Node, callee *ir.Func, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
+func addIREdge(gd *base.Invocation, callerNode *IRNode, callerName string, call ir.Node, callee *ir.Func, namedEdgeMap pgo.NamedEdgeMap, g *IRGraph) {
 	calleeName := ir.LinkFuncName(callee)
 	calleeNode, ok := g.IRNodes[calleeName]
 	if !ok {
@@ -248,7 +248,7 @@ func addIREdge(callerNode *IRNode, callerName string, call ir.Node, callee *ir.F
 	namedEdge := pgo.NamedCallEdge{
 		CallerName:     callerName,
 		CalleeName:     calleeName,
-		CallSiteOffset: NodeLineOffset(call, callerNode.AST),
+		CallSiteOffset: NodeLineOffset(gd, call, callerNode.AST),
 	}
 
 	// Add edge in the IRGraph from caller to callee.
@@ -267,8 +267,8 @@ func addIREdge(callerNode *IRNode, callerName string, call ir.Node, callee *ir.F
 
 // LookupFunc looks up a function or method in export data. It is expected to
 // be overridden by package noder, to break a dependency cycle.
-var LookupFunc = func(fullName string) (*ir.Func, error) {
-	base.Fatalf("pgoir.LookupMethodFunc not overridden")
+var LookupFunc = func(gd *base.Invocation, fullName string) (*ir.Func, error) {
+	gd.Fatalf("pgoir.LookupMethodFunc not overridden")
 	panic("unreachable")
 }
 
@@ -276,8 +276,8 @@ var LookupFunc = func(fullName string) (*ir.Func, error) {
 // after a series of calls to LookupFunc, specifically reading in the
 // bodies of functions that may have been delayed due being encountered
 // in a stage where the reader's curfn state was not set up.
-var PostLookupCleanup = func() {
-	base.Fatalf("pgoir.PostLookupCleanup not overridden")
+var PostLookupCleanup = func(gd *base.Invocation) {
+	gd.Fatalf("pgoir.PostLookupCleanup not overridden")
 	panic("unreachable")
 }
 
@@ -292,7 +292,7 @@ var PostLookupCleanup = func() {
 // TODO(prattmic): Devirtualization runs before inlining, so we can't devirtualize
 // calls inside inlined call bodies. If we did add that, we'd need edges from
 // inlined bodies as well.
-func addIndirectEdges(g *IRGraph, namedEdgeMap pgo.NamedEdgeMap) {
+func addIndirectEdges(gd *base.Invocation, g *IRGraph, namedEdgeMap pgo.NamedEdgeMap) {
 	// g.IRNodes is populated with the set of functions in the local
 	// package build by VisitIR. We want to filter for local functions
 	// below, but we also add unknown callees to IRNodes as we go. So make
@@ -340,12 +340,12 @@ func addIndirectEdges(g *IRGraph, namedEdgeMap pgo.NamedEdgeMap) {
 			// devirtualization. Instantiation of generic functions
 			// will likely need to be done at the devirtualization
 			// site, if at all.
-			if base.Debug.PGODebug >= 3 {
+			if gd.Debug.PGODebug >= 3 {
 				fmt.Printf("addIndirectEdges: %s attempting export data lookup\n", key.CalleeName)
 			}
-			fn, err := LookupFunc(key.CalleeName)
+			fn, err := LookupFunc(gd, key.CalleeName)
 			if err == nil {
-				if base.Debug.PGODebug >= 3 {
+				if gd.Debug.PGODebug >= 3 {
 					fmt.Printf("addIndirectEdges: %s found in export data\n", key.CalleeName)
 				}
 				calleeNode = &IRNode{AST: fn}
@@ -370,7 +370,7 @@ func addIndirectEdges(g *IRGraph, namedEdgeMap pgo.NamedEdgeMap) {
 				// Record this call anyway. If this is the hottest,
 				// then we want to skip devirtualization rather than
 				// devirtualizing to the second most common callee.
-				if base.Debug.PGODebug >= 3 {
+				if gd.Debug.PGODebug >= 3 {
 					fmt.Printf("addIndirectEdges: %s not found in export data: %v\n", key.CalleeName, err)
 				}
 				calleeNode = &IRNode{LinkerSymbolName: key.CalleeName}
@@ -394,17 +394,17 @@ func addIndirectEdges(g *IRGraph, namedEdgeMap pgo.NamedEdgeMap) {
 		callerNode.OutEdges[key] = edge
 	}
 
-	PostLookupCleanup()
+	PostLookupCleanup(gd)
 }
 
 // PrintWeightedCallGraphDOT prints IRGraph in DOT format.
-func (p *Profile) PrintWeightedCallGraphDOT(edgeThreshold float64) {
+func (p *Profile) PrintWeightedCallGraphDOT(gd *base.Invocation, edgeThreshold float64) {
 	fmt.Printf("\ndigraph G {\n")
 	fmt.Printf("forcelabels=true;\n")
 
 	// List of functions in this package.
 	funcs := make(map[string]struct{})
-	ir.VisitFuncsBottomUp(typecheck.Target.Funcs, func(list []*ir.Func, recursive bool) {
+	ir.VisitFuncsBottomUp(typecheck.Target(gd).Funcs, func(list []*ir.Func, recursive bool) {
 		for _, f := range list {
 			name := ir.LinkFuncName(f)
 			funcs[name] = struct{}{}
@@ -448,7 +448,7 @@ func (p *Profile) PrintWeightedCallGraphDOT(edgeThreshold float64) {
 		}
 	}
 	// Print edges.
-	ir.VisitFuncsBottomUp(typecheck.Target.Funcs, func(list []*ir.Func, recursive bool) {
+	ir.VisitFuncsBottomUp(typecheck.Target(gd).Funcs, func(list []*ir.Func, recursive bool) {
 		for _, f := range list {
 			name := ir.LinkFuncName(f)
 			if n, ok := p.WeightedCG.IRNodes[name]; ok {

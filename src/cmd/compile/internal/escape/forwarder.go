@@ -46,7 +46,7 @@ import (
 // wrapper continues to use its conservative static mask).
 //
 // See doc/gd/escape-bits.md §F3.
-func DetectForwarders(fn *ir.Func) {
+func DetectForwarders(gd *base.Invocation, fn *ir.Func) {
 	if fn == nil || fn.GdForwarder != nil {
 		return
 	}
@@ -65,14 +65,14 @@ func DetectForwarders(fn *ir.Func) {
 	}
 	info, reason := matchForwarderBody(fn)
 	if info == nil {
-		if base.Debug.GdForwarder >= 2 {
-			base.WarnfAt(fn.Pos(), "gd:forwarder reject %v: %s", fn.Sym(), reason)
+		if gd.Debug.GdForwarder >= 2 {
+			gd.WarnfAt(fn.Pos(), "gd:forwarder reject %v: %s", fn.Sym(), reason)
 		}
 		return
 	}
 	fn.GdForwarder = info
-	if base.Debug.GdForwarder != 0 {
-		base.WarnfAt(fn.Pos(), "gd:forwarder detected %v: shape=%d innerCall=%v", fn.Sym(), info.Shape, info.InnerCall)
+	if gd.Debug.GdForwarder != 0 {
+		gd.WarnfAt(fn.Pos(), "gd:forwarder detected %v: shape=%d innerCall=%v", fn.Sym(), info.Shape, info.InnerCall)
 	}
 }
 
@@ -84,13 +84,13 @@ func DetectForwarders(fn *ir.Func) {
 // Accepted body shapes (by the time escape sees fn.Body):
 //
 //  1. Single-stmt:
-//       return inner.M(args)             // single result
-//       inner.M(args)                    // void
+//     return inner.M(args)             // single result
+//     inner.M(args)                    // void
 //
 //  2. Two-stmt (multi-result, after typecheck hoists the call into
 //     autotmps so the ReturnStmt only carries plain Names):
-//       autotmp1, ... autotmpN = inner.M(args)
-//       return autotmp1, ... autotmpN
+//     autotmp1, ... autotmpN = inner.M(args)
+//     return autotmp1, ... autotmpN
 func matchForwarderBody(fn *ir.Func) (*ir.GdForwarderInfo, string) {
 	body := fn.Body
 	if len(body) == 0 || len(body) > 2 {
@@ -138,13 +138,13 @@ func matchForwarderBody(fn *ir.Func) (*ir.GdForwarderInfo, string) {
 // Two physical shapes get the same logical match:
 //
 //  1. **Single-stmt return-of-call** (single-result fn):
-//       body[0] = ReturnStmt{Results: [CallExpr]}
+//     body[0] = ReturnStmt{Results: [CallExpr]}
 //
 //  2. **Multi-result return** (typechecker decomposes the call
 //     into autotmps via ir.InitExpr; the AssignListStmt lives in
 //     Results[0]'s Init list):
-//       body[0] = ReturnStmt{Results: [InitExpr(autotmp1), autotmp2, ...]}
-//       Results[0].Init = [AssignListStmt(autotmp1..N = CallExpr)]
+//     body[0] = ReturnStmt{Results: [InitExpr(autotmp1), autotmp2, ...]}
+//     Results[0].Init = [AssignListStmt(autotmp1..N = CallExpr)]
 //     The CallExpr is the inner call we want.
 //
 //  3. **Void call**: body[0] is the CallExpr itself.

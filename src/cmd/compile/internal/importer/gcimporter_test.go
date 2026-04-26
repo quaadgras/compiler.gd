@@ -6,6 +6,7 @@ package importer
 
 import (
 	"bytes"
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"fmt"
@@ -22,6 +23,12 @@ import (
 	"testing"
 	"time"
 )
+
+// testGd is the *base.Invocation passed to importer's exported functions
+// in tests. Empty default is fine — Import only consumes gd for diag
+// routing through gd.FatalfAt, which routes to "???" position when Ctxt
+// is nil.
+var testGd = &base.Invocation{}
 
 func TestMain(m *testing.M) {
 	build.Default.GOROOT = testenv.GOROOT(nil)
@@ -67,7 +74,7 @@ func compile(t *testing.T, dirname, filename, outdirname string, packagefiles ma
 
 func testPath(t *testing.T, path, srcDir string) *types2.Package {
 	t0 := time.Now()
-	pkg, err := Import(make(map[string]*types2.Package), path, srcDir, nil)
+	pkg, err := Import(testGd, make(map[string]*types2.Package), path, srcDir, nil)
 	if err != nil {
 		t.Errorf("testPath(%s): %s", path, err)
 		return nil
@@ -161,7 +168,7 @@ func TestVersionHandling(t *testing.T) {
 		}
 
 		// test that export data can be imported
-		_, err := Import(make(map[string]*types2.Package), pkgpath, dir, nil)
+		_, err := Import(testGd, make(map[string]*types2.Package), pkgpath, dir, nil)
 		if err != nil {
 			// ok to fail if it fails with a 'not the start of an archive file' error for select files
 			if strings.Contains(err.Error(), "not the start of an archive file") {
@@ -221,7 +228,7 @@ func TestVersionHandling(t *testing.T) {
 		os.WriteFile(filename, data, 0666)
 
 		// test that importing the corrupted file results in an error
-		_, err = Import(make(map[string]*types2.Package), pkgpath, corruptdir, nil)
+		_, err = Import(testGd, make(map[string]*types2.Package), pkgpath, corruptdir, nil)
 		if err == nil {
 			t.Errorf("import corrupted %q succeeded", pkgpath)
 		} else if msg := err.Error(); !strings.Contains(msg, "version skew") {
@@ -307,7 +314,7 @@ func TestImportedTypes(t *testing.T) {
 		importPath := s[0]
 		objName := s[1]
 
-		pkg, err := Import(make(map[string]*types2.Package), importPath, ".", nil)
+		pkg, err := Import(testGd, make(map[string]*types2.Package), importPath, ".", nil)
 		if err != nil {
 			t.Error(err)
 			continue
@@ -409,7 +416,7 @@ func TestCorrectMethodPackage(t *testing.T) {
 	}
 
 	imports := make(map[string]*types2.Package)
-	_, err := Import(imports, "net/http", ".", nil)
+	_, err := Import(testGd, imports, "net/http", ".", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -470,7 +477,7 @@ func TestIssue13898(t *testing.T) {
 
 	// import go/internal/gcimporter which imports go/types partially
 	imports := make(map[string]*types2.Package)
-	_, err := Import(imports, "go/internal/gcimporter", ".", nil)
+	_, err := Import(testGd, imports, "go/internal/gcimporter", ".", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +539,7 @@ func TestIssue15517(t *testing.T) {
 	// The same issue occurs with vendoring.)
 	imports := make(map[string]*types2.Package)
 	for i := 0; i < 3; i++ {
-		if _, err := Import(imports, "./././testdata/p", tmpdir, nil); err != nil {
+		if _, err := Import(testGd, imports, "./././testdata/p", tmpdir, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -587,7 +594,7 @@ func TestIssue25596(t *testing.T) {
 }
 
 func importPkg(t *testing.T, path, srcDir string) *types2.Package {
-	pkg, err := Import(make(map[string]*types2.Package), path, srcDir, nil)
+	pkg, err := Import(testGd, make(map[string]*types2.Package), path, srcDir, nil)
 	if err != nil {
 		t.Helper()
 		t.Fatal(err)
@@ -632,13 +639,13 @@ func TestIssue69912(t *testing.T) {
 
 	compile(t, "testdata", "issue69912.go", testoutdir, nil)
 
-	issue69912, err := Import(make(map[string]*types2.Package), "./testdata/issue69912", tmpdir, nil)
+	issue69912, err := Import(testGd, make(map[string]*types2.Package), "./testdata/issue69912", tmpdir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	check := func(pkgname, src string, imports importMap) (*types2.Package, error) {
-		f, err := syntax.Parse(syntax.NewFileBase(pkgname), strings.NewReader(src), nil, nil, 0)
+		f, err := syntax.Parse(testGd, syntax.NewFileBase(pkgname), strings.NewReader(src), nil, nil, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -690,13 +697,13 @@ func TestIssue63285(t *testing.T) {
 
 	compile(t, "testdata", "issue63285.go", testoutdir, nil)
 
-	issue63285, err := Import(make(map[string]*types2.Package), "./testdata/issue63285", tmpdir, nil)
+	issue63285, err := Import(testGd, make(map[string]*types2.Package), "./testdata/issue63285", tmpdir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	check := func(pkgname, src string, imports importMap) (*types2.Package, error) {
-		f, err := syntax.Parse(syntax.NewFileBase(pkgname), strings.NewReader(src), nil, nil, 0)
+		f, err := syntax.Parse(testGd, syntax.NewFileBase(pkgname), strings.NewReader(src), nil, nil, 0)
 		if err != nil {
 			return nil, err
 		}

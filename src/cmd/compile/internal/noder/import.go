@@ -29,6 +29,7 @@ import (
 )
 
 type gcimports struct {
+	gd       *base.Invocation
 	ctxt     *types2.Context
 	packages map[string]*types2.Package
 }
@@ -42,7 +43,7 @@ func (m *gcimports) ImportFrom(path, srcDir string, mode types2.ImportMode) (*ty
 		panic("mode must be 0")
 	}
 
-	_, pkg, err := readImportFile(path, typecheck.Target, m.ctxt, m.packages)
+	_, pkg, err := readImportFile(m.gd, path, typecheck.Target(m.gd), m.ctxt, m.packages)
 	return pkg, err
 }
 
@@ -58,14 +59,14 @@ func islocalname(name string) bool {
 		strings.HasPrefix(name, "../") || name == ".."
 }
 
-func openPackage(path string) (*os.File, error) {
+func openPackage(gd *base.Invocation, path string) (*os.File, error) {
 	if islocalname(path) {
-		if base.Flag.NoLocalImports {
+		if gd.Flag.NoLocalImports {
 			return nil, errors.New("local imports disallowed")
 		}
 
-		if base.Flag.Cfg.PackageFile != nil {
-			return os.Open(base.Flag.Cfg.PackageFile[path])
+		if gd.Flag.Cfg.PackageFile != nil {
+			return os.Open(gd.Flag.Cfg.PackageFile[path])
 		}
 
 		// try .a before .o.  important for building libraries:
@@ -87,11 +88,11 @@ func openPackage(path string) (*os.File, error) {
 		return nil, fmt.Errorf("non-canonical import path %q (should be %q)", path, q)
 	}
 
-	if base.Flag.Cfg.PackageFile != nil {
-		return os.Open(base.Flag.Cfg.PackageFile[path])
+	if gd.Flag.Cfg.PackageFile != nil {
+		return os.Open(gd.Flag.Cfg.PackageFile[path])
 	}
 
-	for _, dir := range base.Flag.Cfg.ImportDirs {
+	for _, dir := range gd.Flag.Cfg.ImportDirs {
 		if file, err := os.Open(fmt.Sprintf("%s/%s.a", dir, path)); err == nil {
 			return file, nil
 		}
@@ -102,13 +103,13 @@ func openPackage(path string) (*os.File, error) {
 
 	if buildcfg.GOROOT != "" {
 		suffix := ""
-		if base.Flag.InstallSuffix != "" {
-			suffix = "_" + base.Flag.InstallSuffix
-		} else if base.Flag.Race {
+		if gd.Flag.InstallSuffix != "" {
+			suffix = "_" + gd.Flag.InstallSuffix
+		} else if gd.Flag.Race {
 			suffix = "_race"
-		} else if base.Flag.MSan {
+		} else if gd.Flag.MSan {
 			suffix = "_msan"
-		} else if base.Flag.ASan {
+		} else if gd.Flag.ASan {
 			suffix = "_asan"
 		}
 
@@ -124,7 +125,7 @@ func openPackage(path string) (*os.File, error) {
 
 // resolveImportPath resolves an import path as it appears in a Go
 // source file to the package's full path.
-func resolveImportPath(path string) (string, error) {
+func resolveImportPath(gd *base.Invocation, path string) (string, error) {
 	// The package name main is no longer reserved,
 	// but we reserve the import path "main" to identify
 	// the main package, just as we reserve the import
@@ -133,14 +134,14 @@ func resolveImportPath(path string) (string, error) {
 		return "", errors.New("cannot import \"main\"")
 	}
 
-	if base.Ctxt.Pkgpath == "" {
+	if gd.Ctxt.Pkgpath == "" {
 		panic("missing pkgpath")
 	}
-	if path == base.Ctxt.Pkgpath {
+	if path == gd.Ctxt.Pkgpath {
 		return "", fmt.Errorf("import %q while compiling that package (import cycle)", path)
 	}
 
-	if mapped, ok := base.Flag.Cfg.ImportMap[path]; ok {
+	if mapped, ok := gd.Flag.Cfg.ImportMap[path]; ok {
 		path = mapped
 	}
 
@@ -149,13 +150,13 @@ func resolveImportPath(path string) (string, error) {
 			return "", errors.New("import path cannot be absolute path")
 		}
 
-		prefix := base.Flag.D
+		prefix := gd.Flag.D
 		if prefix == "" {
 			// Questionable, but when -D isn't specified, historically we
 			// resolve local import paths relative to the directory the
 			// compiler's current directory, not the respective source
 			// file's directory.
-			prefix = base.Ctxt.Pathname
+			prefix = gd.Ctxt.Pathname
 		}
 		path = pathpkg.Join(prefix, path)
 
@@ -170,8 +171,8 @@ func resolveImportPath(path string) (string, error) {
 // readImportFile reads the import file for the given package path and
 // returns its types.Pkg representation. If packages is non-nil, the
 // types2.Package representation is also returned.
-func readImportFile(path string, target *ir.Package, env *types2.Context, packages map[string]*types2.Package) (pkg1 *types.Pkg, pkg2 *types2.Package, err error) {
-	path, err = resolveImportPath(path)
+func readImportFile(gd *base.Invocation, path string, target *ir.Package, env *types2.Context, packages map[string]*types2.Package) (pkg1 *types.Pkg, pkg2 *types2.Package, err error) {
+	path, err = resolveImportPath(gd, path)
 	if err != nil {
 		return
 	}
@@ -192,7 +193,7 @@ func readImportFile(path string, target *ir.Package, env *types2.Context, packag
 	pkg1 = types.NewPkg(path, "")
 	if packages != nil {
 		pkg2 = packages[path]
-		assert(pkg1.Direct == (pkg2 != nil && pkg2.Complete()))
+		assert(gd, pkg1.Direct == (pkg2 != nil && pkg2.Complete()))
 	}
 
 	if pkg1.Direct {
@@ -201,7 +202,7 @@ func readImportFile(path string, target *ir.Package, env *types2.Context, packag
 	pkg1.Direct = true
 	target.Imports = append(target.Imports, pkg1)
 
-	f, err := openPackage(path)
+	f, err := openPackage(gd, path)
 	if err != nil {
 		return
 	}
@@ -212,17 +213,17 @@ func readImportFile(path string, target *ir.Package, env *types2.Context, packag
 		return
 	}
 
-	if base.Debug.Export != 0 {
+	if gd.Debug.Export != 0 {
 		fmt.Printf("importing %s (%s)\n", path, f.Name())
 	}
 
 	pr := pkgbits.NewPkgDecoder(pkg1.Path, data)
 
 	// Read package descriptors for both types2 and compiler backend.
-	readPackage(newPkgReader(pr), pkg1, false)
-	pkg2 = importer.ReadPackage(env, packages, pr)
+	readPackage(gd, newPkgReader(gd, pr), pkg1, false)
+	pkg2 = importer.ReadPackage(gd, env, packages, pr)
 
-	err = addFingerprint(path, data)
+	err = addFingerprint(gd, path, data)
 	return
 }
 
@@ -281,7 +282,7 @@ func readExportData(f *os.File) (data string, err error) {
 
 // addFingerprint reads the linker fingerprint included at the end of
 // the exportdata.
-func addFingerprint(path string, data string) error {
+func addFingerprint(gd *base.Invocation, path string, data string) error {
 	var fingerprint goobj.FingerprintType
 
 	pos := len(data) - len(fingerprint)
@@ -291,7 +292,7 @@ func addFingerprint(path string, data string) error {
 	buf := []byte(data[pos:])
 
 	copy(fingerprint[:], buf)
-	base.Ctxt.AddImport(path, fingerprint)
+	gd.Ctxt.AddImport(path, fingerprint)
 
 	return nil
 }

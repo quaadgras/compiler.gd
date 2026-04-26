@@ -11,8 +11,15 @@ import (
 	"strings"
 	"testing"
 
+	"cmd/compile/internal/base"
 	"cmd/internal/sys"
 )
+
+// testGd is the *base.Invocation passed to initIntrinsics in tests.
+// initIntrinsics only consults gd for diag-style fatal paths that won't
+// fire under valid intrinsic-builder configs, so an empty Invocation is
+// sufficient.
+var testGd = &base.Invocation{}
 
 var updateIntrinsics = flag.Bool("update", false, "Print an updated intrinsics table")
 
@@ -1382,7 +1389,7 @@ func TestIntrinsics(t *testing.T) {
 		goppc64:   10,
 		goriscv64: 23,
 	}
-	initIntrinsics(cfg)
+	initIntrinsics(testGd, cfg)
 
 	if *updateIntrinsics {
 		var updatedIntrinsics []*testIntrinsicKey
@@ -1423,7 +1430,7 @@ func TestIntrinsics(t *testing.T) {
 
 func TestIntrinsicBuilders(t *testing.T) {
 	cfg := &intrinsicBuildConfig{}
-	initIntrinsics(cfg)
+	initIntrinsics(testGd, cfg)
 
 	for _, arch := range sys.Archs {
 		if intrinsics.lookup(arch, "internal/runtime/sys", "GetCallerSP") == nil {
@@ -1453,7 +1460,7 @@ func TestIntrinsicBuilders(t *testing.T) {
 	cfg.goppc64 = 10
 	cfg.instrumenting = true
 
-	initIntrinsics(cfg)
+	initIntrinsics(testGd, cfg)
 
 	if intrinsics.lookup(sys.ArchAMD64, "runtime", "slicebytetostringtmp") != nil {
 		t.Error("Intrinsic incorrectly exists for runtime.slicebytetostringtmp")

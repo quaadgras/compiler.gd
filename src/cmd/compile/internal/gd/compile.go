@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package gc
+package gd
 
 import (
 	"cmp"
@@ -29,9 +29,9 @@ var (
 	compilequeue []*ir.Func // functions waiting to be compiled
 )
 
-func enqueueFunc(fn *ir.Func, symABIs *ssagen.SymABIs) {
-	if ir.CurFunc != nil {
-		base.FatalfAt(fn.Pos(), "enqueueFunc %v inside %v", fn, ir.CurFunc)
+func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
+	if ir.CurFunc(gd) != nil {
+		gd.FatalfAt(fn.Pos(), "enqueueFunc %v inside %v", fn, ir.CurFunc(gd))
 	}
 
 	if ir.FuncName(fn) == "_" {
@@ -44,7 +44,7 @@ func enqueueFunc(fn *ir.Func, symABIs *ssagen.SymABIs) {
 		return // we'll get this as part of its enclosing function
 	}
 
-	if ssagen.CreateWasmImportWrapper(fn) {
+	if ssagen.CreateWasmImportWrapper(gd, fn) {
 		return
 	}
 
@@ -54,10 +54,10 @@ func enqueueFunc(fn *ir.Func, symABIs *ssagen.SymABIs) {
 			// is used in a non-call context (e.g. as a function pointer).
 			// We skip functions defined in assembly, or has a linkname (which
 			// could be defined in another package).
-			ssagen.GenIntrinsicBody(fn)
+			ssagen.GenIntrinsicBody(gd, fn)
 		} else {
 			// Initialize ABI wrappers if necessary.
-			ir.InitLSym(fn, false)
+			ir.InitLSym(gd, fn, false)
 			types.CalcSize(fn.Type())
 			a := ssagen.AbiForBodylessFuncStackMap(fn)
 			abiInfo := a.ABIAnalyzeFuncType(fn.Type()) // abiInfo has spill/home locations for wrapper
@@ -66,27 +66,27 @@ func enqueueFunc(fn *ir.Func, symABIs *ssagen.SymABIs) {
 				// is ABI0, and only ABI0 assembly function can have a FUNCDATA
 				// reference to args_stackmap (see cmd/internal/obj/plist.go:Flushplist).
 				// So avoid introducing an args_stackmap if the func is not ABI0.
-				liveness.WriteFuncMap(fn, abiInfo)
+				liveness.WriteFuncMap(gd, fn, abiInfo)
 
-				x := ssagen.EmitArgInfo(fn, abiInfo)
-				objw.Global(x, int32(len(x.P)), obj.RODATA|obj.LOCAL)
+				x := ssagen.EmitArgInfo(gd, fn, abiInfo)
+				objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.LOCAL)
 			}
 			return
 		}
 	}
 
-	errorsBefore := base.Errors()
+	errorsBefore := gd.Errors()
 
 	todo := []*ir.Func{fn}
 	for len(todo) > 0 {
 		next := todo[len(todo)-1]
 		todo = todo[:len(todo)-1]
 
-		prepareFunc(next)
+		prepareFunc(gd, next)
 		todo = append(todo, next.Closures...)
 	}
 
-	if base.Errors() > errorsBefore {
+	if gd.Errors() > errorsBefore {
 		return
 	}
 
@@ -97,11 +97,11 @@ func enqueueFunc(fn *ir.Func, symABIs *ssagen.SymABIs) {
 
 // prepareFunc handles any remaining frontend compilation tasks that
 // aren't yet safe to perform concurrently.
-func prepareFunc(fn *ir.Func) {
+func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 	// Set up the function's LSym early to avoid data races with the assemblers.
 	// Do this before walk, as walk needs the LSym to set attributes/relocations
 	// (e.g. in MarkTypeUsedInInterface).
-	ir.InitLSym(fn, true)
+	ir.InitLSym(gd, fn, true)
 
 	// If this function is a compiler-generated outlined global map
 	// initializer function, register its LSym for later processing.
@@ -117,19 +117,19 @@ func prepareFunc(fn *ir.Func) {
 	// Generate wrappers between Go ABI and Wasm ABI, for a wasmexport
 	// function.
 	// Must be done after InitLSym and CalcSize.
-	ssagen.GenWasmExportWrapper(fn)
+	ssagen.GenWasmExportWrapper(gd, fn)
 
-	ir.CurFunc = fn
-	walk.Walk(fn)
-	ir.CurFunc = nil // enforce no further uses of CurFunc
+	gd.CurFunc = fn
+	walk.Walk(gd, fn)
+	gd.CurFunc = nil // enforce no further uses of CurFunc
 
-	base.Ctxt.DwTextCount++
+	gd.Ctxt.DwTextCount++
 }
 
 // compileFunctions compiles all functions in compilequeue.
 // It fans out nBackendWorkers to do the work
 // and waits for them to complete.
-func compileFunctions(profile *pgoir.Profile) {
+func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 	if race.Enabled {
 		// Randomize compilation order to try to shake out races.
 		tmp := make([]*ir.Func, len(compilequeue))
@@ -153,7 +153,7 @@ func compileFunctions(profile *pgoir.Profile) {
 		work(0)
 	}
 
-	if nWorkers := base.Flag.LowerC; nWorkers > 1 {
+	if nWorkers := gd.Flag.LowerC; nWorkers > 1 {
 		// For concurrent builds, we allow the work queue
 		// to grow arbitrarily large, but only nWorkers work items
 		// can be running concurrently.
@@ -178,8 +178,14 @@ func compileFunctions(profile *pgoir.Profile) {
 					pending = pending[:len(pending)-1]
 					ids = ids[:len(ids)-1]
 					go func() {
+						// Always signal `done`, even if `work` panics
+						// or calls runtime.Goexit (e.g. via gd.Fatalf
+						// → gd.ErrorExit → gd.Exit). Without this the
+						// dispatcher deadlocks waiting for a value
+						// that never arrives, masking the real compile
+						// error that triggered the abort.
+						defer func() { done <- id }()
 						work(id)
-						done <- id
 					}()
 				}
 			}
@@ -196,20 +202,32 @@ func compileFunctions(profile *pgoir.Profile) {
 		for _, fn := range fns {
 			fn := fn
 			queue(func(worker int) {
-				ssagen.Compile(fn, worker, profile)
+				// Always call wg.Done, even when ssagen.Compile
+				// panics or runtime.Goexit's (e.g. via gd.Fatalf →
+				// gd.ErrorExit → gd.Exit). Without this defer,
+				// wg.Wait hangs forever and we never get to see the
+				// real error. Translate a panic that isn't a known
+				// compiler abort into gd.Fatalf so the standard
+				// error-reporting path runs.
+				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						gd.Fatalf("panic during compile of %v: %v", fn, r)
+					}
+				}()
+				ssagen.Compile(gd, fn, worker, profile)
 				compile(fn.Closures)
-				wg.Done()
 			})
 		}
 	}
 
 	types.CalcSizeDisabled = true // not safe to calculate sizes concurrently
-	base.Ctxt.InParallel = true
+	gd.Ctxt.InParallel = true
 
 	compile(compilequeue)
 	compilequeue = nil
 	wg.Wait()
 
-	base.Ctxt.InParallel = false
+	gd.Ctxt.InParallel = false
 	types.CalcSizeDisabled = false
 }

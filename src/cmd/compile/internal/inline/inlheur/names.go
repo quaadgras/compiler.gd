@@ -5,6 +5,7 @@
 package inlheur
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"go/constant"
 )
@@ -29,19 +30,20 @@ import (
 // at the entire function); in such cases queries will still work
 // for explicit constant values and functions.
 type nameFinder struct {
+	gd *base.Invocation
 	ro *ir.ReassignOracle
 }
 
 // newNameFinder returns a new nameFinder object with a reassignment
 // oracle initialized based on the function fn, or if fn is nil,
 // without an underlying ReassignOracle.
-func newNameFinder(fn *ir.Func) *nameFinder {
+func newNameFinder(gd *base.Invocation, fn *ir.Func) *nameFinder {
 	var ro *ir.ReassignOracle
 	if fn != nil {
 		ro = &ir.ReassignOracle{}
 		ro.Init(fn)
 	}
-	return &nameFinder{ro: ro}
+	return &nameFinder{gd: gd, ro: ro}
 }
 
 // funcName returns the *ir.Name for the func or method

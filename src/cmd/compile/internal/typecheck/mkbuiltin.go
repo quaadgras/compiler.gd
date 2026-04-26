@@ -37,14 +37,15 @@ func main() {
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, `import (`)
 	fmt.Fprintln(&b, `      "cmd/compile/internal/types"`)
+	fmt.Fprintln(&b, `      "cmd/compile/internal/base"`)
 	fmt.Fprintln(&b, `      "cmd/internal/src"`)
 	fmt.Fprintln(&b, `)`)
 
 	fmt.Fprintln(&b, `
 // Not inlining this function removes a significant chunk of init code.
 //go:noinline
-func newSig(params, results []*types.Field) *types.Type {
-	return types.NewSignature(nil, params, results)
+func newSig(gd *base.Invocation, params, results []*types.Field) *types.Type {
+	return types.NewSignature(gd, nil, params, results)
 }
 
 func params(tlist ...*types.Type) []*types.Field {
@@ -124,7 +125,7 @@ func mkbuiltin(w io.Writer, name string) {
 	fmt.Fprintln(w, "}")
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "func %sTypes() []*types.Type {\n", name)
+	fmt.Fprintf(w, "func %sTypes(gd *base.Invocation) []*types.Type {\n", name)
 	fmt.Fprintf(w, "var typs [%d]*types.Type\n", len(interner.typs))
 	for i, typ := range interner.typs {
 		fmt.Fprintf(w, "typs[%d] = %s\n", i, typ)
@@ -190,7 +191,7 @@ func (i *typeInterner) mktype(t ast.Expr) string {
 		}
 		return fmt.Sprintf("types.NewChan(%s, %s)", i.subtype(t.Value), dir)
 	case *ast.FuncType:
-		return fmt.Sprintf("newSig(%s, %s)", i.fields(t.Params, false), i.fields(t.Results, false))
+		return fmt.Sprintf("newSig(gd, %s, %s)", i.fields(t.Params, false), i.fields(t.Results, false))
 	case *ast.InterfaceType:
 		if len(t.Methods.List) != 0 {
 			log.Fatal("non-empty interfaces unsupported")
@@ -222,7 +223,7 @@ func (i *typeInterner) fields(fl *ast.FieldList, keepNames bool) string {
 		} else {
 			for _, name := range f.Names {
 				if keepNames {
-					res = append(res, fmt.Sprintf("types.NewField(src.NoXPos, Lookup(%q), %s)", name.Name, typ))
+					res = append(res, fmt.Sprintf("types.NewField(src.NoXPos, Lookup(gd, %q), %s)", name.Name, typ))
 				} else {
 					res = append(res, typ)
 				}

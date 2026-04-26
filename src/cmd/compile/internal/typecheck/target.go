@@ -6,7 +6,15 @@
 
 package typecheck
 
-import "cmd/compile/internal/ir"
+import (
+	"cmd/compile/internal/base"
+	"cmd/compile/internal/ir"
+)
 
 // Target is the package being compiled.
-var Target *ir.Package
+func Target(gd *base.Invocation) *ir.Package {
+	if gd.Package == nil {
+		return nil
+	}
+	return gd.Package.(*ir.Package)
+}

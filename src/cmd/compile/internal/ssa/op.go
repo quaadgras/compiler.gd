@@ -488,7 +488,7 @@ const (
 
 // Returns the bounds error code needed by the runtime, and
 // whether the x field is signed.
-func (b BoundsKind) Code() (rtabi.BoundsErrorCode, bool) {
+func (b BoundsKind) Code(gd *base.Invocation) (rtabi.BoundsErrorCode, bool) {
 	switch b {
 	case BoundsIndex:
 		return rtabi.BoundsIndex, true
@@ -525,7 +525,7 @@ func (b BoundsKind) Code() (rtabi.BoundsErrorCode, bool) {
 	case BoundsConvert:
 		return rtabi.BoundsConvert, false
 	default:
-		base.Fatalf("bad bounds kind %d", b)
+		gd.Fatalf("bad bounds kind %d", b)
 		return 0, false
 	}
 }

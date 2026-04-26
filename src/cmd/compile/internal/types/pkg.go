@@ -5,6 +5,7 @@
 package types
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"fmt"
@@ -23,6 +24,7 @@ type Pkg struct {
 	Pathsym *obj.LSym
 
 	Direct bool // imported directly
+	Local  bool // true for the package currently being compiled (set by cmd/compile main on the Pkg returned by NewPkg(gd.Ctxt.Pkgpath, ""))
 }
 
 // NewPkg returns a new Pkg for the given package path and name.
@@ -107,9 +109,9 @@ func (pkg *Pkg) LookupNum(prefix string, n int) *Sym {
 }
 
 // Selector looks up a selector identifier.
-func (pkg *Pkg) Selector(name string) *Sym {
+func (pkg *Pkg) Selector(gd *base.Invocation, name string) *Sym {
 	if IsExported(name) {
-		pkg = LocalPkg
+		pkg = LocalPkg(gd)
 	}
 	return pkg.Lookup(name)
 }

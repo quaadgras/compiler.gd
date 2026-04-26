@@ -934,7 +934,7 @@ func _() {
 	A(B, nil // syntax error: missing ',' before newline in argument list
 }
 `
-	f, err := syntax.Parse(syntax.NewFileBase(pkgName(src)), strings.NewReader(src), func(error) {}, nil, 0)
+	f, err := syntax.Parse(testGd, syntax.NewFileBase(pkgName(src)), strings.NewReader(src), func(error) {}, nil, 0)
 	if err == nil {
 		t.Fatal("expected syntax error")
 	}

@@ -30,10 +30,10 @@ func (n *typeNode) Type() *types.Type { return n.typ }
 func (n *typeNode) Sym() *types.Sym   { return n.typ.Sym() }
 
 // TypeNode returns the Node representing the type t.
-func TypeNode(t *types.Type) Node {
+func TypeNode(gd *base.Invocation, t *types.Type) Node {
 	if n := t.Obj(); n != nil {
 		if n.Type() != t {
-			base.Fatalf("type skew: %v has type %v, but expected %v", n, n.Type(), t)
+			gd.Fatalf("type skew: %v has type %v, but expected %v", n, n.Type(), t)
 		}
 		return n.(*Name)
 	}
@@ -65,8 +65,9 @@ type DynamicType struct {
 	ITab Node
 }
 
-func NewDynamicType(pos src.XPos, rtype Node) *DynamicType {
+func NewDynamicType(gd *base.Invocation, pos src.XPos, rtype Node) *DynamicType {
 	n := &DynamicType{RType: rtype}
+	n.gd = gd
 	n.pos = pos
 	n.op = ODYNAMICTYPE
 	return n
@@ -74,19 +75,20 @@ func NewDynamicType(pos src.XPos, rtype Node) *DynamicType {
 
 // ToStatic returns static type of dt if it is actually static.
 func (dt *DynamicType) ToStatic() Node {
+	gd := dt.compiler()
 	if dt.Typecheck() == 0 {
-		base.Fatalf("missing typecheck: %v", dt)
+		gd.Fatalf("missing typecheck: %v", dt)
 	}
 	if dt.RType != nil && dt.RType.Op() == OADDR {
 		addr := dt.RType.(*AddrExpr)
 		if addr.X.Op() == OLINKSYMOFFSET {
-			return TypeNode(dt.Type())
+			return TypeNode(gd, dt.Type())
 		}
 	}
 	if dt.ITab != nil && dt.ITab.Op() == OADDR {
 		addr := dt.ITab.(*AddrExpr)
 		if addr.X.Op() == OLINKSYMOFFSET {
-			return TypeNode(dt.Type())
+			return TypeNode(gd, dt.Type())
 		}
 	}
 	return nil

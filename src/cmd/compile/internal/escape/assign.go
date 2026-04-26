@@ -5,7 +5,6 @@
 package escape
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 )
 
@@ -21,7 +20,7 @@ func (e *escape) addr(n ir.Node) hole {
 
 	switch n.Op() {
 	default:
-		base.Fatalf("unexpected addr: %v", n)
+		e.gd.Fatalf("unexpected addr: %v", n)
 	case ir.ONAME:
 		n := n.(*ir.Name)
 		if n.Class == ir.PEXTERN {
@@ -69,7 +68,7 @@ func (e *escape) addrs(l ir.Nodes) []hole {
 }
 
 func (e *escape) assignHeap(src ir.Node, why string, where ir.Node) {
-	e.expr(e.heapHole().note(where, why), src)
+	e.expr(e.heapHole().note(e.gd, where, why), src)
 }
 
 // assignList evaluates the assignment dsts... = srcs....
@@ -85,20 +84,20 @@ func (e *escape) assignList(dsts, srcs []ir.Node, why string, where ir.Node) {
 			// Detect implicit conversion of uintptr to unsafe.Pointer when
 			// storing into reflect.{Slice,String}Header.
 			if dst.Op() == ir.ODOTPTR && ir.IsReflectHeaderDataField(dst) {
-				e.unsafeValue(e.heapHole().note(where, why), src)
+				e.unsafeValue(e.heapHole().note(e.gd, where, why), src)
 				continue
 			}
 
 			// Filter out some no-op assignments for escape analysis.
 			if src != nil && isSelfAssign(dst, src) {
-				if base.Flag.LowerM != 0 {
-					base.WarnfAt(where.Pos(), "%v ignoring self-assignment in %v", e.curfn, where)
+				if e.gd.Flag.LowerM != 0 {
+					e.gd.WarnfAt(where.Pos(), "%v ignoring self-assignment in %v", e.curfn, where)
 				}
 				k = e.discardHole()
 			}
 		}
 
-		e.expr(k.note(where, why), src)
+		e.expr(k.note(e.gd, where, why), src)
 	}
 
 	e.reassigned(ks, where)

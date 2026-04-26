@@ -21,33 +21,31 @@ var ReservedImports = map[string]bool{
 	"type": true,
 }
 
-var Ctxt *obj.Link
-
 // TODO(mdempsky): These should probably be obj.Link methods.
 
 // PkgLinksym returns the linker symbol for name within the given
 // package prefix. For user packages, prefix should be the package
 // path encoded with objabi.PathToPrefix.
-func PkgLinksym(prefix, name string, abi obj.ABI) *obj.LSym {
+func (gd *Invocation) PkgLinksym(prefix, name string, abi obj.ABI) *obj.LSym {
 	if name == "_" {
 		// TODO(mdempsky): Cleanup callers and Fatalf instead.
-		return linksym(prefix, "_", abi)
+		return gd.linksym(prefix, "_", abi)
 	}
 	sep := "."
 	if ReservedImports[prefix] {
 		sep = ":"
 	}
-	return linksym(prefix, prefix+sep+name, abi)
+	return gd.linksym(prefix, prefix+sep+name, abi)
 }
 
 // Linkname returns the linker symbol for the given name as it might
 // appear within a //go:linkname directive.
-func Linkname(name string, abi obj.ABI) *obj.LSym {
-	return linksym("_", name, abi)
+func (gd *Invocation) Linkname(name string, abi obj.ABI) *obj.LSym {
+	return gd.linksym("_", name, abi)
 }
 
 // linksym is an internal helper function for implementing the above
 // exported APIs.
-func linksym(pkg, name string, abi obj.ABI) *obj.LSym {
-	return Ctxt.LookupABIInit(name, abi, func(r *obj.LSym) { r.Pkg = pkg })
+func (gd *Invocation) linksym(pkg, name string, abi obj.ABI) *obj.LSym {
+	return gd.Ctxt.LookupABIInit(name, abi, func(r *obj.LSym) { r.Pkg = pkg })
 }

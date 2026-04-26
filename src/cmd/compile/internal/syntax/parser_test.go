@@ -27,11 +27,11 @@ var (
 )
 
 func TestParse(t *testing.T) {
-	ParseFile(*src_, func(err error) { t.Error(err) }, nil, 0)
+	ParseFile(testGd, *src_, func(err error) { t.Error(err) }, nil, 0)
 }
 
 func TestVerify(t *testing.T) {
-	ast, err := ParseFile(*src_, func(err error) { t.Error(err) }, nil, 0)
+	ast, err := ParseFile(testGd, *src_, func(err error) { t.Error(err) }, nil, 0)
 	if err != nil {
 		return // error already reported
 	}
@@ -92,7 +92,7 @@ func TestStdLib(t *testing.T) {
 				if debug {
 					fmt.Printf("parsing %s\n", filename)
 				}
-				ast, err := ParseFile(filename, nil, nil, 0)
+				ast, err := ParseFile(testGd, filename, nil, nil, 0)
 				if err != nil {
 					t.Error(err)
 					return
@@ -174,7 +174,7 @@ func verifyPrint(t *testing.T, filename string, ast1 *File) {
 	}
 	bytes1 := buf1.Bytes()
 
-	ast2, err := Parse(NewFileBase(filename), &buf1, nil, nil, 0)
+	ast2, err := Parse(testGd, NewFileBase(filename), &buf1, nil, nil, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -200,20 +200,20 @@ func verifyPrint(t *testing.T, filename string, ast1 *File) {
 }
 
 func TestIssue17697(t *testing.T) {
-	_, err := Parse(nil, bytes.NewReader(nil), nil, nil, 0) // return with parser error, don't panic
+	_, err := Parse(testGd, nil, bytes.NewReader(nil), nil, nil, 0) // return with parser error, don't panic
 	if err == nil {
 		t.Errorf("no error reported")
 	}
 }
 
 func TestParseFile(t *testing.T) {
-	_, err := ParseFile("", nil, nil, 0)
+	_, err := ParseFile(testGd, "", nil, nil, 0)
 	if err == nil {
 		t.Error("missing io error")
 	}
 
 	var first error
-	_, err = ParseFile("", func(err error) {
+	_, err = ParseFile(testGd, "", func(err error) {
 		if first == nil {
 			first = err
 		}
@@ -348,7 +348,7 @@ func TestLineDirectives(t *testing.T) {
 		{"//line bar:1\n/*line :10:20*/", valid, "bar", 10, 20},
 	} {
 		base := NewFileBase(filename)
-		_, err := Parse(base, strings.NewReader(test.src), nil, nil, 0)
+		_, err := Parse(testGd, base, strings.NewReader(test.src), nil, nil, 0)
 		if err == nil {
 			t.Errorf("%s: no error reported", test.src)
 			continue

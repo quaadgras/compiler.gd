@@ -16,8 +16,8 @@ import (
 	"cmd/internal/src"
 )
 
-func EnableNoWriteBarrierRecCheck() {
-	nowritebarrierrecCheck = newNowritebarrierrecChecker()
+func EnableNoWriteBarrierRecCheck(gd *base.Invocation) {
+	nowritebarrierrecCheck = newNowritebarrierrecChecker(gd)
 }
 
 func NoWriteBarrierRecCheck() {
@@ -30,6 +30,8 @@ func NoWriteBarrierRecCheck() {
 var nowritebarrierrecCheck *nowritebarrierrecChecker
 
 type nowritebarrierrecChecker struct {
+	gd *base.Invocation
+
 	// extraCalls contains extra function calls that may not be
 	// visible during later analysis. It maps from the ODCLFUNC of
 	// the caller to a list of callees.
@@ -46,8 +48,9 @@ type nowritebarrierrecCall struct {
 
 // newNowritebarrierrecChecker creates a nowritebarrierrecChecker. It
 // must be called before walk.
-func newNowritebarrierrecChecker() *nowritebarrierrecChecker {
+func newNowritebarrierrecChecker(gd *base.Invocation) *nowritebarrierrecChecker {
 	c := &nowritebarrierrecChecker{
+		gd:         gd,
 		extraCalls: make(map[*ir.Func][]nowritebarrierrecCall),
 	}
 
@@ -56,7 +59,7 @@ func newNowritebarrierrecChecker() *nowritebarrierrecChecker {
 	// important to handle it for this check, so we model it
 	// directly. This has to happen before transforming closures in walk since
 	// it's a lot harder to work out the argument after.
-	for _, n := range typecheck.Target.Funcs {
+	for _, n := range typecheck.Target(gd).Funcs {
 		c.curfn = n
 		if c.curfn.ABIWrapper() {
 			// We only want "real" calls to these
@@ -71,6 +74,7 @@ func newNowritebarrierrecChecker() *nowritebarrierrecChecker {
 }
 
 func (c *nowritebarrierrecChecker) findExtraCalls(nn ir.Node) {
+	gd := c.gd
 	if nn.Op() != ir.OCALLFUNC {
 		return
 	}
@@ -96,7 +100,7 @@ func (c *nowritebarrierrecChecker) findExtraCalls(nn ir.Node) {
 		arg := arg.(*ir.ClosureExpr)
 		callee = arg.Func
 	default:
-		base.Fatalf("expected ONAME or OCLOSURE node, got %+v", arg)
+		gd.Fatalf("expected ONAME or OCLOSURE node, got %+v", arg)
 	}
 	c.extraCalls[c.curfn] = append(c.extraCalls[c.curfn], nowritebarrierrecCall{callee, n.Pos()})
 }
@@ -118,6 +122,7 @@ func (c *nowritebarrierrecChecker) recordCall(fn *ir.Func, to *obj.LSym, pos src
 }
 
 func (c *nowritebarrierrecChecker) check() {
+	gd := c.gd
 	// We walk the call graph as late as possible so we can
 	// capture all calls created by lowering, but this means we
 	// only get to see the obj.LSyms of calls. symToFunc lets us
@@ -133,7 +138,7 @@ func (c *nowritebarrierrecChecker) check() {
 	// q is the queue of ODCLFUNC Nodes to visit in BFS order.
 	var q ir.NameQueue
 
-	for _, fn := range typecheck.Target.Funcs {
+	for _, fn := range typecheck.Target(gd).Funcs {
 		symToFunc[fn.LSym] = fn
 
 		// Make nowritebarrierrec functions BFS roots.
@@ -143,7 +148,7 @@ func (c *nowritebarrierrecChecker) check() {
 		}
 		// Check go:nowritebarrier functions.
 		if fn.Pragma&ir.Nowritebarrier != 0 && fn.WBPos.IsKnown() {
-			base.ErrorfAt(fn.WBPos, 0, "write barrier prohibited")
+			gd.ErrorfAt(fn.WBPos, 0, "write barrier prohibited")
 		}
 	}
 
@@ -171,7 +176,7 @@ func (c *nowritebarrierrecChecker) check() {
 			var err strings.Builder
 			call := funcs[fn]
 			for call.target != nil {
-				fmt.Fprintf(&err, "\n\t%v: called by %v", base.FmtPos(call.lineno), call.target.Nname)
+				fmt.Fprintf(&err, "\n\t%v: called by %v", gd.FmtPos(call.lineno), call.target.Nname)
 				call = funcs[call.target]
 			}
 			// Seeing this error in a failed CI run? It indicates that
@@ -182,7 +187,7 @@ func (c *nowritebarrierrecChecker) check() {
 			//
 			// Even if the call path is infeasable,
 			// you will need to reorganize the code to avoid it.
-			base.ErrorfAt(fn.WBPos, 0, "write barrier prohibited by caller; %v%s", fn.Nname, err.String())
+			gd.ErrorfAt(fn.WBPos, 0, "write barrier prohibited by caller; %v%s", fn.Nname, err.String())
 			continue
 		}
 

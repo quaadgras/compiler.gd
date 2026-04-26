@@ -96,13 +96,13 @@ var adjValues = map[scoreAdjustTyp]int{
 // debugging option, if set. The value of this flag is expected to be
 // a series of "/"-separated clauses of the form adj1:value1. Example:
 // -d=inlscoreadj=inLoopAdj=0/passConstToIfAdj=-99
-func SetupScoreAdjustments() {
-	if base.Debug.InlScoreAdj == "" {
+func SetupScoreAdjustments(gd *base.Invocation) {
+	if gd.Debug.InlScoreAdj == "" {
 		return
 	}
-	if err := parseScoreAdj(base.Debug.InlScoreAdj); err != nil {
-		base.Fatalf("malformed -d=inlscoreadj argument %q: %v",
-			base.Debug.InlScoreAdj, err)
+	if err := parseScoreAdj(gd.Debug.InlScoreAdj); err != nil {
+		gd.Fatalf("malformed -d=inlscoreadj argument %q: %v",
+			gd.Debug.InlScoreAdj, err)
 	}
 }
 
@@ -190,7 +190,7 @@ func mustToMay(x scoreAdjustTyp) scoreAdjustTyp {
 // based on previously computed argument and function properties,
 // then stores the score and the adjustment mask in the appropriate
 // fields in 'cs'
-func (cs *CallSite) computeCallSiteScore(csa *callSiteAnalyzer, calleeProps *FuncProps) {
+func (cs *CallSite) computeCallSiteScore(gd *base.Invocation, csa *callSiteAnalyzer, calleeProps *FuncProps) {
 	callee := cs.Callee
 	csflags := cs.Flags
 	call := cs.Call
@@ -201,7 +201,7 @@ func (cs *CallSite) computeCallSiteScore(csa *callSiteAnalyzer, calleeProps *Fun
 
 	if debugTrace&debugTraceScoring != 0 {
 		fmt.Fprintf(os.Stderr, "=-= scoring call to %s at %s , initial=%d\n",
-			callee.Sym().Name, fmtFullPos(call.Pos()), score)
+			callee.Sym().Name, fmtFullPos(gd, call.Pos()), score)
 	}
 
 	// First some score adjustments to discourage inlining in selected cases.
@@ -453,13 +453,13 @@ type scoreCallsCacheType struct {
 // We don't want to perform scoring for the 'foo' call in "bar" until
 // after foo has been analyzed, but it's conceivable that CanInline
 // might visit bar before foo for this SCC.
-func ScoreCalls(fn *ir.Func) {
+func ScoreCalls(gd *base.Invocation, fn *ir.Func) {
 	if len(fn.Body) == 0 {
 		return
 	}
 	enableDebugTraceIfEnv()
 
-	nameFinder := newNameFinder(fn)
+	nameFinder := newNameFinder(gd, fn)
 
 	if debugTrace&debugTraceScoring != 0 {
 		fmt.Fprintf(os.Stderr, "=-= ScoreCalls(%v)\n", ir.FuncName(fn))
@@ -482,13 +482,13 @@ func ScoreCalls(fn *ir.Func) {
 			fmt.Fprintf(os.Stderr, "=-= building cstab for non-inl func %s\n",
 				ir.FuncName(fn))
 		}
-		cstab = computeCallSiteTable(fn, fn.Body, scoreCallsCache.tab, nil, 0,
+		cstab = computeCallSiteTable(gd, fn, fn.Body, scoreCallsCache.tab, nil, 0,
 			nameFinder)
 	}
 
-	csa := makeCallSiteAnalyzer(fn)
+	csa := makeCallSiteAnalyzer(gd, fn)
 	const doCallResults = true
-	csa.scoreCallsRegion(fn, fn.Body, cstab, doCallResults, nil)
+	csa.scoreCallsRegion(gd, fn, fn.Body, cstab, doCallResults, nil)
 
 	disableDebugTrace()
 }
@@ -497,7 +497,7 @@ func ScoreCalls(fn *ir.Func) {
 // region 'region' within function 'fn'. This can be called on
 // an entire function, or with 'region' set to a chunk of
 // code corresponding to an inlined call.
-func (csa *callSiteAnalyzer) scoreCallsRegion(fn *ir.Func, region ir.Nodes, cstab CallSiteTab, doCallResults bool, ic *ir.InlinedCallExpr) {
+func (csa *callSiteAnalyzer) scoreCallsRegion(gd *base.Invocation, fn *ir.Func, region ir.Nodes, cstab CallSiteTab, doCallResults bool, ic *ir.InlinedCallExpr) {
 	if debugTrace&debugTraceScoring != 0 {
 		fmt.Fprintf(os.Stderr, "=-= scoreCallsRegion(%v, %s) len(cstab)=%d\n",
 			ir.FuncName(fn), region[0].Op().String(), len(cstab))
@@ -528,24 +528,24 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(fn *ir.Func, region ir.Nodes, csta
 			cprops = DeserializeFromString(cs.Callee.Inl.Properties)
 			desercprops = true
 		} else {
-			if base.Debug.DumpInlFuncProps != "" {
-				fmt.Fprintf(os.Stderr, "=-= *** unable to score call to %s from %s\n", cs.Callee.Sym().Name, fmtFullPos(cs.Call.Pos()))
+			if gd.Debug.DumpInlFuncProps != "" {
+				fmt.Fprintf(os.Stderr, "=-= *** unable to score call to %s from %s\n", cs.Callee.Sym().Name, fmtFullPos(gd, cs.Call.Pos()))
 				panic("should never happen")
 			} else {
 				continue
 			}
 		}
-		cs.computeCallSiteScore(csa, cprops)
+		cs.computeCallSiteScore(gd, csa, cprops)
 
 		if doCallResults {
 			if debugTrace&debugTraceScoring != 0 {
-				fmt.Fprintf(os.Stderr, "=-= examineCallResults at %s: flags=%d score=%d funcInlHeur=%v deser=%v\n", fmtFullPos(cs.Call.Pos()), cs.Flags, cs.Score, fihcprops, desercprops)
+				fmt.Fprintf(os.Stderr, "=-= examineCallResults at %s: flags=%d score=%d funcInlHeur=%v deser=%v\n", fmtFullPos(gd, cs.Call.Pos()), cs.Flags, cs.Score, fihcprops, desercprops)
 			}
-			resultNameTab = csa.examineCallResults(cs, resultNameTab)
+			resultNameTab = csa.examineCallResults(gd, cs, resultNameTab)
 		}
 
 		if debugTrace&debugTraceScoring != 0 {
-			fmt.Fprintf(os.Stderr, "=-= scoring call at %s: flags=%d score=%d funcInlHeur=%v deser=%v\n", fmtFullPos(cs.Call.Pos()), cs.Flags, cs.Score, fihcprops, desercprops)
+			fmt.Fprintf(os.Stderr, "=-= scoring call at %s: flags=%d score=%d funcInlHeur=%v deser=%v\n", fmtFullPos(gd, cs.Call.Pos()), cs.Flags, cs.Score, fihcprops, desercprops)
 		}
 	}
 
@@ -557,8 +557,8 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(fn *ir.Func, region ir.Nodes, csta
 
 	if ic != nil && callSiteTab != nil {
 		// Integrate the calls from this cstab into the table for the caller.
-		if err := callSiteTab.merge(cstab); err != nil {
-			base.FatalfAt(ic.Pos(), "%v", err)
+		if err := callSiteTab.merge(gd, cstab); err != nil {
+			gd.FatalfAt(ic.Pos(), "%v", err)
 		}
 	} else {
 		callSiteTab = cstab
@@ -567,8 +567,8 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(fn *ir.Func, region ir.Nodes, csta
 
 // ScoreCallsCleanup resets the state of the callsite cache
 // once ScoreCalls is done with a function.
-func ScoreCallsCleanup() {
-	if base.Debug.DumpInlCallSiteScores != 0 {
+func ScoreCallsCleanup(gd *base.Invocation) {
+	if gd.Debug.DumpInlCallSiteScores != 0 {
 		if allCallSites == nil {
 			allCallSites = make(CallSiteTab)
 		}
@@ -604,9 +604,9 @@ func GetCallSiteScore(fn *ir.Func, call *ir.CallExpr) (int, bool) {
 // budget initially (to allow for a large score adjustment); later on
 // in RevisitInlinability we'll look at each individual function to
 // demote it if needed.
-func BudgetExpansion(maxBudget int32) int32 {
-	if base.Debug.InlBudgetSlack != 0 {
-		return int32(base.Debug.InlBudgetSlack)
+func BudgetExpansion(gd *base.Invocation, maxBudget int32) int32 {
+	if gd.Debug.InlBudgetSlack != 0 {
+		return int32(gd.Debug.InlBudgetSlack)
 	}
 	// In the default case, return maxBudget, which will effectively
 	// double the budget from 80 to 160; this should be good enough
@@ -643,7 +643,7 @@ var allCallSites CallSiteTab
 // of the function called, "CallerPos" is the position of the
 // callsite, and "ScoreFlags" is a digest of the specific properties
 // we used to make adjustments to callsite score via heuristics.
-func DumpInlCallSiteScores(profile *pgoir.Profile, budgetCallback func(fn *ir.Func, profile *pgoir.Profile) (int32, bool)) {
+func DumpInlCallSiteScores(gd *base.Invocation, profile *pgoir.Profile, budgetCallback func(fn *ir.Func, profile *pgoir.Profile) (int32, bool)) {
 
 	var indirectlyDueToPromotion func(cs *CallSite) bool
 	indirectlyDueToPromotion = func(cs *CallSite) bool {
@@ -702,7 +702,7 @@ func DumpInlCallSiteScores(profile *pgoir.Profile, budgetCallback func(fn *ir.Fu
 		return st
 	}
 
-	if base.Debug.DumpInlCallSiteScores != 0 {
+	if gd.Debug.DumpInlCallSiteScores != 0 {
 		var sl []*CallSite
 		for _, cs := range allCallSites {
 			sl = append(sl, cs)
@@ -716,8 +716,8 @@ func DumpInlCallSiteScores(profile *pgoir.Profile, budgetCallback func(fn *ir.Fu
 			if fni != fnj {
 				return cmp.Compare(fni, fnj)
 			}
-			ecsi := EncodeCallSiteKey(a)
-			ecsj := EncodeCallSiteKey(b)
+			ecsi := EncodeCallSiteKey(gd, a)
+			ecsj := EncodeCallSiteKey(gd, b)
 			return cmp.Compare(ecsi, ecsj)
 		})
 
@@ -726,7 +726,7 @@ func DumpInlCallSiteScores(profile *pgoir.Profile, budgetCallback func(fn *ir.Fu
 			if fn == nil || fn.Nname == nil {
 				return "<nil>"
 			}
-			if fn.Sym().Pkg == types.LocalPkg {
+			if fn.Sym().Pkg == types.LocalPkg(gd) {
 				n = "·" + fn.Sym().Name
 			} else {
 				n = ir.PkgFuncName(fn)
@@ -739,14 +739,14 @@ func DumpInlCallSiteScores(profile *pgoir.Profile, budgetCallback func(fn *ir.Fu
 		}
 
 		if len(sl) != 0 {
-			fmt.Fprintf(os.Stdout, "# scores for package %s\n", types.LocalPkg.Path)
+			fmt.Fprintf(os.Stdout, "# scores for package %s\n", types.LocalPkg(gd).Path)
 			fmt.Fprintf(os.Stdout, "# Score  Adjustment  Status  Callee  CallerPos Flags ScoreFlags\n")
 		}
 		for _, cs := range sl {
 			hairyval := cs.Callee.Inl.Cost
 			adj := int32(cs.Score) - hairyval
 			nm := mkname(cs.Callee)
-			ecc := EncodeCallSiteKey(cs)
+			ecc := EncodeCallSiteKey(gd, cs)
 			fmt.Fprintf(os.Stdout, "%d  %d\t%s\t%s\t%s\t%s\n",
 				cs.Score, adj, genstatus(cs),
 				nm, ecc,

@@ -22,21 +22,21 @@ type posMap struct {
 type poser interface{ Pos() syntax.Pos }
 type ender interface{ End() syntax.Pos }
 
-func (m *posMap) pos(p poser) src.XPos { return m.makeXPos(p.Pos()) }
+func (m *posMap) pos(gd *base.Invocation, p poser) src.XPos { return m.makeXPos(gd, p.Pos()) }
 
-func (m *posMap) makeXPos(pos syntax.Pos) src.XPos {
+func (m *posMap) makeXPos(gd *base.Invocation, pos syntax.Pos) src.XPos {
 	// Predeclared objects (e.g., the result parameter for error.Error)
 	// do not have a position.
 	if !pos.IsKnown() {
 		return src.NoXPos
 	}
 
-	posBase := m.makeSrcPosBase(pos.Base())
-	return base.Ctxt.PosTable.XPos(src.MakePos(posBase, pos.Line(), pos.Col()))
+	posBase := m.makeSrcPosBase(gd, pos.Base())
+	return gd.Ctxt.PosTable.XPos(src.MakePos(posBase, pos.Line(), pos.Col()))
 }
 
 // makeSrcPosBase translates from a *syntax.PosBase to a *src.PosBase.
-func (m *posMap) makeSrcPosBase(b0 *syntax.PosBase) *src.PosBase {
+func (m *posMap) makeSrcPosBase(gd *base.Invocation, b0 *syntax.PosBase) *src.PosBase {
 	// fast path: most likely PosBase hasn't changed
 	if m.cache.last == b0 {
 		return m.cache.base
@@ -45,7 +45,7 @@ func (m *posMap) makeSrcPosBase(b0 *syntax.PosBase) *src.PosBase {
 	b1, ok := m.bases[b0]
 	if !ok {
 		fn := b0.Filename()
-		absfn := trimFilename(b0)
+		absfn := trimFilename(gd, b0)
 
 		if b0.IsFileBase() {
 			b1 = src.NewFileBase(fn, absfn)
@@ -56,7 +56,7 @@ func (m *posMap) makeSrcPosBase(b0 *syntax.PosBase) *src.PosBase {
 			if p0b == b0 {
 				panic("infinite recursion in makeSrcPosBase")
 			}
-			p1 := src.MakePos(m.makeSrcPosBase(p0b), p0.Line(), p0.Col())
+			p1 := src.MakePos(m.makeSrcPosBase(gd, p0b), p0.Line(), p0.Col())
 			b1 = src.NewLinePragmaBase(p1, fn, absfn, b0.Line(), b0.Col())
 		}
 		if m.bases == nil {

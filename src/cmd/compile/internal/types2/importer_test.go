@@ -7,10 +7,17 @@
 package types2_test
 
 import (
+	"cmd/compile/internal/base"
 	gcimporter "cmd/compile/internal/importer"
 	"cmd/compile/internal/types2"
 	"io"
 )
+
+// testGd is the *base.Invocation passed to gcimporter.Import in tests.
+// gcimporter only uses gd for diag routing, so an empty Invocation is
+// sufficient — there's no Ctxt for these tests because we never report
+// positions through it.
+var testGd = &base.Invocation{}
 
 func defaultImporter() types2.Importer {
 	return &gcimports{
@@ -31,5 +38,5 @@ func (m *gcimports) ImportFrom(path, srcDir string, mode types2.ImportMode) (*ty
 	if mode != 0 {
 		panic("mode must be 0")
 	}
-	return gcimporter.Import(m.packages, path, srcDir, m.lookup)
+	return gcimporter.Import(testGd, m.packages, path, srcDir, m.lookup)
 }

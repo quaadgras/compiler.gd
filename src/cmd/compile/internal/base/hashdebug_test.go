@@ -11,8 +11,10 @@ import (
 	"testing"
 )
 
+var I Invocation
+
 func TestHashDebugGossahashY(t *testing.T) {
-	hd := NewHashDebug("GOSSAHASH", "y", new(bytes.Buffer))
+	hd := I.NewHashDebug("GOSSAHASH", "y", new(bytes.Buffer))
 	if hd == nil {
 		t.Errorf("NewHashDebug should not return nil for GOSSASHASH=y")
 	}
@@ -22,7 +24,7 @@ func TestHashDebugGossahashY(t *testing.T) {
 }
 
 func TestHashDebugGossahashN(t *testing.T) {
-	hd := NewHashDebug("GOSSAHASH", "n", new(bytes.Buffer))
+	hd := I.NewHashDebug("GOSSAHASH", "n", new(bytes.Buffer))
 	if hd == nil {
 		t.Errorf("NewHashDebug should not return nil for GOSSASHASH=n")
 	}
@@ -32,15 +34,15 @@ func TestHashDebugGossahashN(t *testing.T) {
 }
 
 func TestHashDebugGossahashEmpty(t *testing.T) {
-	hd := NewHashDebug("GOSSAHASH", "", nil)
+	hd := I.NewHashDebug("GOSSAHASH", "", nil)
 	if hd != nil {
 		t.Errorf("NewHashDebug should return nil for GOSSASHASH=\"\"")
 	}
 }
 
 func TestHashDebugMagic(t *testing.T) {
-	hd := NewHashDebug("FOOXYZZY", "y", nil)
-	hd0 := NewHashDebug("FOOXYZZY0", "n", nil)
+	hd := I.NewHashDebug("FOOXYZZY", "y", nil)
+	hd0 := I.NewHashDebug("FOOXYZZY0", "n", nil)
 	if hd == nil {
 		t.Errorf("NewHashDebug should have succeeded for FOOXYZZY")
 	}
@@ -60,7 +62,7 @@ func TestHash(t *testing.T) {
 
 func TestHashMatch(t *testing.T) {
 	b := new(bytes.Buffer)
-	hd := NewHashDebug("GOSSAHASH", "v1110", b)
+	hd := I.NewHashDebug("GOSSAHASH", "v1110", b)
 	check := hd.MatchPkgFunc("bar", "0", func() string { return "note" })
 	msg := b.String()
 	t.Logf("message was '%s'", msg)
@@ -73,7 +75,7 @@ func TestHashMatch(t *testing.T) {
 
 func TestYMatch(t *testing.T) {
 	b := new(bytes.Buffer)
-	hd := NewHashDebug("GOSSAHASH", "vy", b)
+	hd := I.NewHashDebug("GOSSAHASH", "vy", b)
 	check := hd.MatchPkgFunc("bar", "0", nil)
 	msg := b.String()
 	t.Logf("message was '%s'", msg)
@@ -86,7 +88,7 @@ func TestYMatch(t *testing.T) {
 
 func TestNMatch(t *testing.T) {
 	b := new(bytes.Buffer)
-	hd := NewHashDebug("GOSSAHASH", "vn", b)
+	hd := I.NewHashDebug("GOSSAHASH", "vn", b)
 	check := hd.MatchPkgFunc("bar", "0", nil)
 	msg := b.String()
 	t.Logf("message was '%s'", msg)
@@ -99,7 +101,7 @@ func TestNMatch(t *testing.T) {
 
 func TestHashNoMatch(t *testing.T) {
 	b := new(bytes.Buffer)
-	hd := NewHashDebug("GOSSAHASH", "01110", b)
+	hd := I.NewHashDebug("GOSSAHASH", "01110", b)
 	check := hd.MatchPkgFunc("bar", "0", nil)
 	msg := b.String()
 	t.Logf("message was '%s'", msg)
@@ -114,7 +116,7 @@ func TestHashNoMatch(t *testing.T) {
 
 func TestHashSecondMatch(t *testing.T) {
 	b := new(bytes.Buffer)
-	hd := NewHashDebug("GOSSAHASH", "01110/11110", b)
+	hd := I.NewHashDebug("GOSSAHASH", "01110/11110", b)
 
 	check := hd.MatchPkgFunc("bar", "0", nil)
 	msg := b.String()

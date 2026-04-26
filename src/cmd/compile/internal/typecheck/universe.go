@@ -7,6 +7,7 @@ package typecheck
 import (
 	"go/constant"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
@@ -63,9 +64,9 @@ var unsafeFuncs = [...]struct {
 }
 
 // InitUniverse initializes the universe block.
-func InitUniverse() {
-	types.InitTypes(func(sym *types.Sym, typ *types.Type) types.Object {
-		n := ir.NewDeclNameAt(src.NoXPos, ir.OTYPE, sym)
+func InitUniverse(gd *base.Invocation) {
+	types.InitTypes(gd, func(sym *types.Sym, typ *types.Type) types.Object {
+		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, sym)
 		n.SetType(typ)
 		n.SetTypecheck(1)
 		sym.Def = n
@@ -81,21 +82,21 @@ func InitUniverse() {
 	}
 
 	s := types.BuiltinPkg.Lookup("true")
-	s.Def = ir.NewConstAt(src.NoXPos, s, types.UntypedBool, constant.MakeBool(true))
+	s.Def = ir.NewConstAt(gd, src.NoXPos, s, types.UntypedBool, constant.MakeBool(true))
 
 	s = types.BuiltinPkg.Lookup("false")
-	s.Def = ir.NewConstAt(src.NoXPos, s, types.UntypedBool, constant.MakeBool(false))
+	s.Def = ir.NewConstAt(gd, src.NoXPos, s, types.UntypedBool, constant.MakeBool(false))
 
-	s = Lookup("_")
+	s = Lookup(gd, "_")
 	types.BlankSym = s
-	ir.BlankNode = ir.NewNameAt(src.NoXPos, s, types.Types[types.TBLANK])
+	ir.BlankNode = ir.NewNameAt(gd, src.NoXPos, s, types.Types[types.TBLANK])
 	s.Def = ir.BlankNode
 
 	s = types.BuiltinPkg.Lookup("_")
-	s.Def = ir.NewNameAt(src.NoXPos, s, types.Types[types.TBLANK])
+	s.Def = ir.NewNameAt(gd, src.NoXPos, s, types.Types[types.TBLANK])
 
 	s = types.BuiltinPkg.Lookup("nil")
-	s.Def = NodNil()
+	s.Def = NodNil(gd)
 
 	// initialize okfor
 	for et := types.Kind(0); et < types.NTYPE; et++ {

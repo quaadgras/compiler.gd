@@ -264,7 +264,7 @@ func testTestDir(t *testing.T, path string, ignore ...string) {
 		if testing.Verbose() {
 			fmt.Println("\t", filename)
 		}
-		file, err := syntax.ParseFile(filename, nil, nil, 0)
+		file, err := syntax.ParseFile(testGd, filename, nil, nil, 0)
 		if err == nil {
 			conf := Config{
 				GoVersion: goVersion,
@@ -379,7 +379,7 @@ func typecheckFiles(path string, filenames []string, importer Importer) (*Packag
 	for _, filename := range filenames {
 		var errs []error
 		errh := func(err error) { errs = append(errs, err) }
-		file, err := syntax.ParseFile(filename, errh, nil, 0)
+		file, err := syntax.ParseFile(testGd, filename, errh, nil, 0)
 		if err != nil {
 			return nil, errors.Join(errs...)
 		}

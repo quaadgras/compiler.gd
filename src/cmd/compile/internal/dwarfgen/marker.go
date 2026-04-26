@@ -18,9 +18,9 @@ type ScopeMarker struct {
 }
 
 // checkPos validates the given position and returns the current scope.
-func (m *ScopeMarker) checkPos(pos src.XPos) ir.ScopeID {
+func (m *ScopeMarker) checkPos(gd *base.Invocation, pos src.XPos) ir.ScopeID {
 	if !pos.IsKnown() {
-		base.Fatalf("unknown scope position")
+		gd.Fatalf("unknown scope position")
 	}
 
 	if len(m.marks) == 0 {
@@ -28,15 +28,15 @@ func (m *ScopeMarker) checkPos(pos src.XPos) ir.ScopeID {
 	}
 
 	last := &m.marks[len(m.marks)-1]
-	if xposBefore(pos, last.Pos) {
-		base.FatalfAt(pos, "non-monotonic scope positions\n\t%v: previous scope position", base.FmtPos(last.Pos))
+	if xposBefore(gd, pos, last.Pos) {
+		gd.FatalfAt(pos, "non-monotonic scope positions\n\t%v: previous scope position", gd.FmtPos(last.Pos))
 	}
 	return last.Scope
 }
 
 // Push records a transition to a new child scope of the current scope.
-func (m *ScopeMarker) Push(pos src.XPos) {
-	current := m.checkPos(pos)
+func (m *ScopeMarker) Push(gd *base.Invocation, pos src.XPos) {
+	current := m.checkPos(gd, pos)
 
 	m.parents = append(m.parents, current)
 	child := ir.ScopeID(len(m.parents))
@@ -45,8 +45,8 @@ func (m *ScopeMarker) Push(pos src.XPos) {
 }
 
 // Pop records a transition back to the current scope's parent.
-func (m *ScopeMarker) Pop(pos src.XPos) {
-	current := m.checkPos(pos)
+func (m *ScopeMarker) Pop(gd *base.Invocation, pos src.XPos) {
+	current := m.checkPos(gd, pos)
 
 	parent := m.parents[current-1]
 
@@ -54,12 +54,12 @@ func (m *ScopeMarker) Pop(pos src.XPos) {
 }
 
 // Unpush removes the current scope, which must be empty.
-func (m *ScopeMarker) Unpush() {
+func (m *ScopeMarker) Unpush(gd *base.Invocation) {
 	i := len(m.marks) - 1
 	current := m.marks[i].Scope
 
 	if current != ir.ScopeID(len(m.parents)) {
-		base.FatalfAt(m.marks[i].Pos, "current scope is not empty")
+		gd.FatalfAt(m.marks[i].Pos, "current scope is not empty")
 	}
 
 	m.parents = m.parents[:current-1]

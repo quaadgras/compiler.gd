@@ -23,15 +23,11 @@ import (
 	"cmd/internal/sys"
 )
 
-func usage() {
+func (gd *Invocation) usage() {
 	fmt.Fprintf(os.Stderr, "usage: compile [options] file.go...\n")
 	objabi.Flagprint(os.Stderr)
-	Exit(2)
+	gd.Exit(2)
 }
-
-// Flag holds the parsed command-line flags.
-// See ParseFlag for non-zero defaults.
-var Flag CmdFlags
 
 // A CountFlag is a counting integer flag.
 // It accepts -name=value to set the value directly,
@@ -154,70 +150,70 @@ func addEnv(s string) {
 }
 
 // ParseFlags parses the command-line flags into Flag.
-func ParseFlags() {
-	Flag.I = addImportDir
+func (gd *Invocation) ParseFlags() {
+	gd.Flag.I = gd.addImportDir
 
-	Flag.LowerC = runtime.GOMAXPROCS(0)
-	Flag.LowerD = objabi.NewDebugFlag(&Debug, DebugSSA)
-	Flag.LowerP = &Ctxt.Pkgpath
-	Flag.LowerV = &Ctxt.Debugvlog
+	gd.Flag.LowerC = runtime.GOMAXPROCS(0)
+	gd.Flag.LowerD = objabi.NewDebugFlag(&gd.Debug, gd.DebugSSA)
+	gd.Flag.LowerP = &gd.Ctxt.Pkgpath
+	gd.Flag.LowerV = &gd.Ctxt.Debugvlog
 
-	Flag.Dwarf = buildcfg.GOARCH != "wasm"
-	Flag.DwarfBASEntries = &Ctxt.UseBASEntries
-	Flag.DwarfLocationLists = &Ctxt.Flag_locationlists
-	*Flag.DwarfLocationLists = true
-	Flag.Dynlink = &Ctxt.Flag_dynlink
-	Flag.EmbedCfg = readEmbedCfg
-	Flag.Env = addEnv
-	Flag.GenDwarfInl = 2
-	Flag.ImportCfg = readImportCfg
-	Flag.CoverageCfg = readCoverageCfg
-	Flag.LinkShared = &Ctxt.Flag_linkshared
-	Flag.Shared = &Ctxt.Flag_shared
-	Flag.WB = true
+	gd.Flag.Dwarf = buildcfg.GOARCH != "wasm"
+	gd.Flag.DwarfBASEntries = &gd.Ctxt.UseBASEntries
+	gd.Flag.DwarfLocationLists = &gd.Ctxt.Flag_locationlists
+	*gd.Flag.DwarfLocationLists = true
+	gd.Flag.Dynlink = &gd.Ctxt.Flag_dynlink
+	gd.Flag.EmbedCfg = gd.readEmbedCfg
+	gd.Flag.Env = addEnv
+	gd.Flag.GenDwarfInl = 2
+	gd.Flag.ImportCfg = gd.readImportCfg
+	gd.Flag.CoverageCfg = gd.readCoverageCfg
+	gd.Flag.LinkShared = &gd.Ctxt.Flag_linkshared
+	gd.Flag.Shared = &gd.Ctxt.Flag_shared
+	gd.Flag.WB = true
 
-	Debug.ConcurrentOk = true
-	Debug.CompressInstructions = 1
-	Debug.MaxShapeLen = 500
-	Debug.AlignHot = 1
-	Debug.InlFuncsWithClosures = 1
-	Debug.InlStaticInit = 1
-	Debug.FreeAppend = 1
-	Debug.PGOInline = 1
-	Debug.PGODevirtualize = 2
-	Debug.SyncFrames = -1            // disable sync markers by default
-	Debug.VariableMakeThreshold = 32 // 32 byte default for stack allocated make results
-	Debug.ZeroCopy = 1
-	Debug.RangeFuncCheck = 1
-	Debug.MergeLocals = 1
+	gd.Debug.ConcurrentOk = true
+	gd.Debug.CompressInstructions = 1
+	gd.Debug.MaxShapeLen = 500
+	gd.Debug.AlignHot = 1
+	gd.Debug.InlFuncsWithClosures = 1
+	gd.Debug.InlStaticInit = 1
+	gd.Debug.FreeAppend = 1
+	gd.Debug.PGOInline = 1
+	gd.Debug.PGODevirtualize = 2
+	gd.Debug.SyncFrames = -1            // disable sync markers by default
+	gd.Debug.VariableMakeThreshold = 32 // 32 byte default for stack allocated make results
+	gd.Debug.ZeroCopy = 1
+	gd.Debug.RangeFuncCheck = 1
+	gd.Debug.MergeLocals = 1
 
-	Debug.Checkptr = -1 // so we can tell whether it is set explicitly
+	gd.Debug.Checkptr = -1 // so we can tell whether it is set explicitly
 
-	Flag.Cfg.ImportMap = make(map[string]string)
+	gd.Flag.Cfg.ImportMap = make(map[string]string)
 
 	objabi.AddVersionFlag() // -V
-	registerFlags()
-	objabi.Flagparse(usage)
+	gd.registerFlags()
+	objabi.Flagparse(gd.usage)
 	counter.CountFlags("compile/flag:", *flag.CommandLine)
 
 	if gcd := os.Getenv("GOCOMPILEDEBUG"); gcd != "" {
 		// This will only override the flags set in gcd;
 		// any others set on the command line remain set.
-		Flag.LowerD.Set(gcd)
+		gd.Flag.LowerD.Set(gcd)
 	}
 
-	if Debug.Gossahash != "" {
-		hashDebug = NewHashDebug("gossahash", Debug.Gossahash, nil)
+	if gd.Debug.Gossahash != "" {
+		hashDebug = gd.NewHashDebug("gossahash", gd.Debug.Gossahash, nil)
 	}
-	obj.SetFIPSDebugHash(Debug.FIPSHash)
+	obj.SetFIPSDebugHash(gd.Debug.FIPSHash)
 
 	// Compute whether we're compiling the runtime from the package path. Test
 	// code can also use the flag to set this explicitly.
-	if Flag.Std && objabi.LookupPkgSpecial(Ctxt.Pkgpath).Runtime {
-		Flag.CompilingRuntime = true
+	if gd.Flag.Std && objabi.LookupPkgSpecial(gd.Ctxt.Pkgpath).Runtime {
+		gd.Flag.CompilingRuntime = true
 	}
 
-	Ctxt.Std = Flag.Std
+	gd.Ctxt.Std = gd.Flag.Std
 
 	// Three inputs govern loop iteration variable rewriting, hash, experiment, flag.
 	// The loop variable rewriting is:
@@ -242,86 +238,86 @@ func ParseFlags() {
 	// (**) Loop semantics, changed or not, follow code from a package when it is inlined; that is, the behavior
 	//      of an application compiled with partially modified loop semantics does not depend on inlining.
 
-	if Debug.LoopVarHash != "" {
+	if gd.Debug.LoopVarHash != "" {
 		// This first little bit controls the inputs for debug-hash-matching.
 		mostInlineOnly := true
-		if strings.HasPrefix(Debug.LoopVarHash, "IL") {
+		if strings.HasPrefix(gd.Debug.LoopVarHash, "IL") {
 			// When hash-searching on a position that is an inline site, default is to use the
 			// most-inlined position only.  This makes the hash faster, plus there's no point
 			// reporting a problem with all the inlining; there's only one copy of the source.
 			// However, if for some reason you wanted it per-site, you can get this.  (The default
 			// hash-search behavior for compiler debugging is at an inline site.)
-			Debug.LoopVarHash = Debug.LoopVarHash[2:]
+			gd.Debug.LoopVarHash = gd.Debug.LoopVarHash[2:]
 			mostInlineOnly = false
 		}
 		// end of testing trickiness
-		LoopVarHash = NewHashDebug("loopvarhash", Debug.LoopVarHash, nil)
-		if Debug.LoopVar < 11 { // >= 11 means all loops are rewrite-eligible
-			Debug.LoopVar = 1 // 1 means those loops that syntactically escape their dcl vars are eligible.
+		LoopVarHash = gd.NewHashDebug("loopvarhash", gd.Debug.LoopVarHash, nil)
+		if gd.Debug.LoopVar < 11 { // >= 11 means all loops are rewrite-eligible
+			gd.Debug.LoopVar = 1 // 1 means those loops that syntactically escape their dcl vars are eligible.
 		}
 		LoopVarHash.SetInlineSuffixOnly(mostInlineOnly)
-	} else if buildcfg.Experiment.LoopVar && Debug.LoopVar == 0 {
-		Debug.LoopVar = 1
+	} else if buildcfg.Experiment.LoopVar && gd.Debug.LoopVar == 0 {
+		gd.Debug.LoopVar = 1
 	}
 
-	if Debug.Converthash != "" {
-		ConvertHash = NewHashDebug("converthash", Debug.Converthash, nil)
+	if gd.Debug.Converthash != "" {
+		ConvertHash = gd.NewHashDebug("converthash", gd.Debug.Converthash, nil)
 	} else {
 		// quietly disable the convert hash changes
-		ConvertHash = NewHashDebug("converthash", "qn", nil)
+		ConvertHash = gd.NewHashDebug("converthash", "qn", nil)
 	}
-	if Debug.Fmahash != "" {
-		FmaHash = NewHashDebug("fmahash", Debug.Fmahash, nil)
+	if gd.Debug.Fmahash != "" {
+		FmaHash = gd.NewHashDebug("fmahash", gd.Debug.Fmahash, nil)
 	}
-	if Debug.PGOHash != "" {
-		PGOHash = NewHashDebug("pgohash", Debug.PGOHash, nil)
+	if gd.Debug.PGOHash != "" {
+		PGOHash = gd.NewHashDebug("pgohash", gd.Debug.PGOHash, nil)
 	}
-	if Debug.LiteralAllocHash != "" {
-		LiteralAllocHash = NewHashDebug("literalalloc", Debug.LiteralAllocHash, nil)
-	}
-
-	if Debug.MergeLocalsHash != "" {
-		MergeLocalsHash = NewHashDebug("mergelocals", Debug.MergeLocalsHash, nil)
-	}
-	if Debug.VariableMakeHash != "" {
-		VariableMakeHash = NewHashDebug("variablemake", Debug.VariableMakeHash, nil)
+	if gd.Debug.LiteralAllocHash != "" {
+		LiteralAllocHash = gd.NewHashDebug("literalalloc", gd.Debug.LiteralAllocHash, nil)
 	}
 
-	if Flag.MSan && !platform.MSanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
+	if gd.Debug.MergeLocalsHash != "" {
+		MergeLocalsHash = gd.NewHashDebug("mergelocals", gd.Debug.MergeLocalsHash, nil)
+	}
+	if gd.Debug.VariableMakeHash != "" {
+		VariableMakeHash = gd.NewHashDebug("variablemake", gd.Debug.VariableMakeHash, nil)
+	}
+
+	if gd.Flag.MSan && !platform.MSanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
 		log.Fatalf("%s/%s does not support -msan", buildcfg.GOOS, buildcfg.GOARCH)
 	}
-	if Flag.ASan && !platform.ASanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
+	if gd.Flag.ASan && !platform.ASanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
 		log.Fatalf("%s/%s does not support -asan", buildcfg.GOOS, buildcfg.GOARCH)
 	}
-	if Flag.Race && !platform.RaceDetectorSupported(buildcfg.GOOS, buildcfg.GOARCH) {
+	if gd.Flag.Race && !platform.RaceDetectorSupported(buildcfg.GOOS, buildcfg.GOARCH) {
 		log.Fatalf("%s/%s does not support -race", buildcfg.GOOS, buildcfg.GOARCH)
 	}
-	if (*Flag.Shared || *Flag.Dynlink || *Flag.LinkShared) && !Ctxt.Arch.InFamily(sys.AMD64, sys.ARM, sys.ARM64, sys.I386, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64, sys.S390X) {
+	if (*gd.Flag.Shared || *gd.Flag.Dynlink || *gd.Flag.LinkShared) && !gd.Ctxt.Arch.InFamily(sys.AMD64, sys.ARM, sys.ARM64, sys.I386, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64, sys.S390X) {
 		log.Fatalf("%s/%s does not support -shared", buildcfg.GOOS, buildcfg.GOARCH)
 	}
-	parseSpectre(Flag.Spectre) // left as string for RecordFlags
+	gd.parseSpectre(gd.Flag.Spectre) // left as string for RecordFlags
 
-	Ctxt.CompressInstructions = Debug.CompressInstructions != 0
-	Ctxt.Flag_shared = Ctxt.Flag_dynlink || Ctxt.Flag_shared
-	Ctxt.Flag_optimize = Flag.N == 0
-	Ctxt.Debugasm = int(Flag.S)
-	Ctxt.Flag_maymorestack = Debug.MayMoreStack
-	Ctxt.Flag_noRefName = Debug.NoRefName != 0
+	gd.Ctxt.CompressInstructions = gd.Debug.CompressInstructions != 0
+	gd.Ctxt.Flag_shared = gd.Ctxt.Flag_dynlink || gd.Ctxt.Flag_shared
+	gd.Ctxt.Flag_optimize = gd.Flag.N == 0
+	gd.Ctxt.Debugasm = int(gd.Flag.S)
+	gd.Ctxt.Flag_maymorestack = gd.Debug.MayMoreStack
+	gd.Ctxt.Flag_noRefName = gd.Debug.NoRefName != 0
 
 	if flag.NArg() < 1 {
-		usage()
+		gd.usage()
 	}
 
-	if Flag.GoVersion != "" && !versionsCompatible(runtime.Version(), Flag.GoVersion) {
-		fmt.Printf("compile: version %q does not match go tool version %q\n", runtime.Version(), Flag.GoVersion)
-		Exit(2)
+	if gd.Flag.GoVersion != "" && !versionsCompatible(runtime.Version(), gd.Flag.GoVersion) {
+		fmt.Printf("compile: version %q does not match go tool version %q\n", runtime.Version(), gd.Flag.GoVersion)
+		gd.Exit(2)
 	}
 
-	if *Flag.LowerP == "" {
-		*Flag.LowerP = obj.UnlinkablePkg
+	if *gd.Flag.LowerP == "" {
+		*gd.Flag.LowerP = obj.UnlinkablePkg
 	}
 
-	if Flag.LowerO == "" {
+	if gd.Flag.LowerO == "" {
 		p := flag.Arg(0)
 		if i := strings.LastIndex(p, "/"); i >= 0 {
 			p = p[i+1:]
@@ -335,56 +331,56 @@ func ParseFlags() {
 			p = p[:i]
 		}
 		suffix := ".o"
-		if Flag.Pack {
+		if gd.Flag.Pack {
 			suffix = ".a"
 		}
-		Flag.LowerO = p + suffix
+		gd.Flag.LowerO = p + suffix
 	}
 	switch {
-	case Flag.Race && Flag.MSan:
+	case gd.Flag.Race && gd.Flag.MSan:
 		log.Fatal("cannot use both -race and -msan")
-	case Flag.Race && Flag.ASan:
+	case gd.Flag.Race && gd.Flag.ASan:
 		log.Fatal("cannot use both -race and -asan")
-	case Flag.MSan && Flag.ASan:
+	case gd.Flag.MSan && gd.Flag.ASan:
 		log.Fatal("cannot use both -msan and -asan")
 	}
-	if Flag.Race || Flag.MSan || Flag.ASan {
+	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
 		// -race, -msan and -asan imply -d=checkptr for now.
-		if Debug.Checkptr == -1 { // if not set explicitly
-			Debug.Checkptr = 1
+		if gd.Debug.Checkptr == -1 { // if not set explicitly
+			gd.Debug.Checkptr = 1
 		}
 	}
 
-	if Flag.LowerC < 1 {
-		log.Fatalf("-c must be at least 1, got %d", Flag.LowerC)
+	if gd.Flag.LowerC < 1 {
+		log.Fatalf("-c must be at least 1, got %d", gd.Flag.LowerC)
 	}
-	if !concurrentBackendAllowed() {
-		Flag.LowerC = 1
+	if !gd.concurrentBackendAllowed() {
+		gd.Flag.LowerC = 1
 	}
 
-	if Flag.CompilingRuntime {
+	if gd.Flag.CompilingRuntime {
 		// It is not possible to build the runtime with no optimizations,
 		// because the compiler cannot eliminate enough write barriers.
-		Flag.N = 0
-		Ctxt.Flag_optimize = true
+		gd.Flag.N = 0
+		gd.Ctxt.Flag_optimize = true
 
 		// Runtime can't use -d=checkptr, at least not yet.
-		Debug.Checkptr = 0
+		gd.Debug.Checkptr = 0
 
 		// Fuzzing the runtime isn't interesting either.
-		Debug.Libfuzzer = 0
+		gd.Debug.Libfuzzer = 0
 	}
 
-	if Debug.Checkptr == -1 { // if not set explicitly
-		Debug.Checkptr = 0
+	if gd.Debug.Checkptr == -1 { // if not set explicitly
+		gd.Debug.Checkptr = 0
 	}
 
 	// set via a -d flag
-	Ctxt.Debugpcln = Debug.PCTab
+	gd.Ctxt.Debugpcln = gd.Debug.PCTab
 
 	// https://golang.org/issue/67502
 	if buildcfg.GOOS == "plan9" && buildcfg.GOARCH == "386" {
-		Debug.AlignHot = 0
+		gd.Debug.AlignHot = 0
 	}
 }
 
@@ -429,7 +425,7 @@ func versionsCompatible(have, want string) bool {
 
 // registerFlags adds flag registrations for all the fields in Flag.
 // See the comment on type CmdFlags for the rules.
-func registerFlags() {
+func (gd *Invocation) registerFlags() {
 	var (
 		boolType      = reflect.TypeFor[bool]()
 		intType       = reflect.TypeFor[int]()
@@ -441,7 +437,7 @@ func registerFlags() {
 		funcType      = reflect.TypeFor[func(string)]()
 	)
 
-	v := reflect.ValueOf(&Flag).Elem()
+	v := reflect.ValueOf(&gd.Flag).Elem()
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -507,20 +503,20 @@ func registerFlags() {
 
 // concurrentFlagOk reports whether the current compiler flags
 // are compatible with concurrent compilation.
-func concurrentFlagOk() bool {
+func (gd *Invocation) concurrentFlagOk() bool {
 	// TODO(rsc): Many of these are fine. Remove them.
-	return Flag.Percent == 0 &&
-		Flag.E == 0 &&
-		Flag.K == 0 &&
-		Flag.L == 0 &&
-		Flag.LowerH == 0 &&
-		Flag.LowerJ == 0 &&
-		Flag.LowerM == 0 &&
-		Flag.LowerR == 0
+	return gd.Flag.Percent == 0 &&
+		gd.Flag.E == 0 &&
+		gd.Flag.K == 0 &&
+		gd.Flag.L == 0 &&
+		gd.Flag.LowerH == 0 &&
+		gd.Flag.LowerJ == 0 &&
+		gd.Flag.LowerM == 0 &&
+		gd.Flag.LowerR == 0
 }
 
-func concurrentBackendAllowed() bool {
-	if !concurrentFlagOk() {
+func (gd *Invocation) concurrentBackendAllowed() bool {
+	if !gd.concurrentFlagOk() {
 		return false
 	}
 
@@ -528,7 +524,7 @@ func concurrentBackendAllowed() bool {
 	// while writing the object file, and that is non-concurrent.
 	// Adding Debug_vlog, however, causes Debug.S to also print
 	// while flushing the plist, which happens concurrently.
-	if Ctxt.Debugvlog || !Debug.ConcurrentOk || Flag.Live > 0 {
+	if gd.Ctxt.Debugvlog || !gd.Debug.ConcurrentOk || gd.Flag.Live > 0 {
 		return false
 	}
 	// TODO: Test and delete this condition.
@@ -536,23 +532,23 @@ func concurrentBackendAllowed() bool {
 		return false
 	}
 	// TODO: fix races and enable the following flags
-	if Ctxt.Flag_dynlink || Flag.Race {
+	if gd.Ctxt.Flag_dynlink || gd.Flag.Race {
 		return false
 	}
 	return true
 }
 
-func addImportDir(dir string) {
+func (gd *Invocation) addImportDir(dir string) {
 	if dir != "" {
-		Flag.Cfg.ImportDirs = append(Flag.Cfg.ImportDirs, dir)
+		gd.Flag.Cfg.ImportDirs = append(gd.Flag.Cfg.ImportDirs, dir)
 	}
 }
 
-func readImportCfg(file string) {
-	if Flag.Cfg.ImportMap == nil {
-		Flag.Cfg.ImportMap = make(map[string]string)
+func (gd *Invocation) readImportCfg(file string) {
+	if gd.Flag.Cfg.ImportMap == nil {
+		gd.Flag.Cfg.ImportMap = make(map[string]string)
 	}
-	Flag.Cfg.PackageFile = map[string]string{}
+	gd.Flag.Cfg.PackageFile = map[string]string{}
 	data, err := os.ReadFile(file)
 	if err != nil {
 		log.Fatalf("-importcfg: %v", err)
@@ -578,17 +574,17 @@ func readImportCfg(file string) {
 			if !hasEq || before == "" || after == "" {
 				log.Fatalf(`%s:%d: invalid importmap: syntax is "importmap old=new"`, file, lineNum)
 			}
-			Flag.Cfg.ImportMap[before] = after
+			gd.Flag.Cfg.ImportMap[before] = after
 		case "packagefile":
 			if !hasEq || before == "" || after == "" {
 				log.Fatalf(`%s:%d: invalid packagefile: syntax is "packagefile path=filename"`, file, lineNum)
 			}
-			Flag.Cfg.PackageFile[before] = after
+			gd.Flag.Cfg.PackageFile[before] = after
 		}
 	}
 }
 
-func readCoverageCfg(file string) {
+func (gd *Invocation) readCoverageCfg(file string) {
 	var cfg covcmd.CoverFixupConfig
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -597,27 +593,27 @@ func readCoverageCfg(file string) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		log.Fatalf("error reading -coveragecfg file %q: %v", file, err)
 	}
-	Flag.Cfg.CoverageInfo = &cfg
+	gd.Flag.Cfg.CoverageInfo = &cfg
 }
 
-func readEmbedCfg(file string) {
+func (gd *Invocation) readEmbedCfg(file string) {
 	data, err := os.ReadFile(file)
 	if err != nil {
 		log.Fatalf("-embedcfg: %v", err)
 	}
-	if err := json.Unmarshal(data, &Flag.Cfg.Embed); err != nil {
+	if err := json.Unmarshal(data, &gd.Flag.Cfg.Embed); err != nil {
 		log.Fatalf("%s: %v", file, err)
 	}
-	if Flag.Cfg.Embed.Patterns == nil {
+	if gd.Flag.Cfg.Embed.Patterns == nil {
 		log.Fatalf("%s: invalid embedcfg: missing Patterns", file)
 	}
-	if Flag.Cfg.Embed.Files == nil {
+	if gd.Flag.Cfg.Embed.Files == nil {
 		log.Fatalf("%s: invalid embedcfg: missing Files", file)
 	}
 }
 
 // parseSpectre parses the spectre configuration from the string s.
-func parseSpectre(s string) {
+func (gd *Invocation) parseSpectre(s string) {
 	for f := range strings.SplitSeq(s, ",") {
 		f = strings.TrimSpace(f)
 		switch f {
@@ -626,16 +622,16 @@ func parseSpectre(s string) {
 		case "":
 			// nothing
 		case "all":
-			Flag.Cfg.SpectreIndex = true
-			Ctxt.Retpoline = true
+			gd.Flag.Cfg.SpectreIndex = true
+			gd.Ctxt.Retpoline = true
 		case "index":
-			Flag.Cfg.SpectreIndex = true
+			gd.Flag.Cfg.SpectreIndex = true
 		case "ret":
-			Ctxt.Retpoline = true
+			gd.Ctxt.Retpoline = true
 		}
 	}
 
-	if Flag.Cfg.SpectreIndex {
+	if gd.Flag.Cfg.SpectreIndex {
 		switch buildcfg.GOARCH {
 		case "amd64":
 			// ok

@@ -89,6 +89,8 @@ import (
 // A batch holds escape analysis state that's shared across an entire
 // batch of functions being analyzed at once.
 type batch struct {
+	gd *base.Invocation
+
 	allLocs         []*location
 	closures        []closure
 	reassignOracles map[*ir.Func]*ir.ReassignOracle
@@ -123,21 +125,22 @@ type escape struct {
 	loopDepth int
 }
 
-func Funcs(all []*ir.Func) {
+func Funcs(gd *base.Invocation, all []*ir.Func) {
 	// Make a cache of ir.ReassignOracles. The cache is lazily populated.
 	// TODO(thepudds): consider adding a field on ir.Func instead. We might also be able
 	// to use that field elsewhere, like in walk. See discussion in https://go.dev/cl/688075.
 	reassignOracles := make(map[*ir.Func]*ir.ReassignOracle)
 
 	ir.VisitFuncsBottomUp(all, func(list []*ir.Func, recursive bool) {
-		Batch(list, reassignOracles)
+		Batch(gd, list, reassignOracles)
 	})
 }
 
 // Batch performs escape analysis on a minimal batch of
 // functions.
-func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
+func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	var b batch
+	b.gd = gd
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.mutatorLoc.attrs = attrMutates
 	b.calleeLoc.attrs = attrCalls
@@ -152,7 +155,7 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 
 	// Construct data-flow graph from syntax trees.
 	for _, fn := range fns {
-		if base.Flag.W > 1 {
+		if gd.Flag.W > 1 {
 			s := fmt.Sprintf("\nbefore escape %v", fn)
 			ir.Dump(s, fn)
 		}
@@ -179,8 +182,8 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 
 		// Check if the node must be heap allocated for certain reasons
 		// such as OMAKESLICE for a large slice.
-		if why := HeapAllocReason(loc.n); why != "" {
-			b.flow(b.heapHole().addr(loc.n, why), loc)
+		if why := HeapAllocReason(gd, loc.n); why != "" {
+			b.flow(b.heapHole().addr(gd, loc.n, why), loc)
 		}
 	}
 
@@ -193,9 +196,9 @@ func Batch(fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	// consumes ir.Func.GdForwarder to synthesise compute fns;
 	// without F4 the field is inert and the wrapper continues to
 	// publish its conservative static mask.
-	if base.Debug.GdForwarderDisable == 0 {
+	if gd.Debug.GdForwarderDisable == 0 {
 		for _, fn := range fns {
-			DetectForwarders(fn)
+			DetectForwarders(gd, fn)
 		}
 	}
 }
@@ -211,10 +214,10 @@ func (b *batch) with(fn *ir.Func) *escape {
 func (b *batch) initFunc(fn *ir.Func) {
 	e := b.with(fn)
 	if fn.Esc() != escFuncUnknown {
-		base.Fatalf("unexpected node: %v", fn)
+		b.gd.Fatalf("unexpected node: %v", fn)
 	}
 	fn.SetEsc(escFuncPlanned)
-	if base.Flag.LowerM > 3 {
+	if b.gd.Flag.LowerM > 3 {
 		ir.Dump("escAnalyze", fn)
 	}
 
@@ -267,7 +270,7 @@ func (b *batch) walkFunc(fn *ir.Func) {
 	e.block(fn.Body)
 
 	if len(e.labels) != 0 {
-		base.FatalfAt(fn.Pos(), "leftover labels after walkFunc")
+		b.gd.FatalfAt(fn.Pos(), "leftover labels after walkFunc")
 	}
 }
 
@@ -276,32 +279,32 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 		n := cv.Canonical()
 		loc := b.oldLoc(cv)
 		if !loc.captured {
-			base.FatalfAt(cv.Pos(), "closure variable never captured: %v", cv)
+			b.gd.FatalfAt(cv.Pos(), "closure variable never captured: %v", cv)
 		}
 
 		// Capture by value for variables <= 128 bytes that are never reassigned.
-		n.SetByval(!loc.addrtaken && !loc.reassigned && n.Type().Size() <= 128)
+		n.SetByval(b.gd, !loc.addrtaken && !loc.reassigned && n.Type().Size() <= 128)
 		if !n.Byval() {
 			n.SetAddrtaken(true)
 			if n.Sym().Name == typecheck.LocalDictName {
-				base.FatalfAt(n.Pos(), "dictionary variable not captured by value")
+				b.gd.FatalfAt(n.Pos(), "dictionary variable not captured by value")
 			}
 		}
 
-		if base.Flag.LowerM > 1 {
+		if b.gd.Flag.LowerM > 1 {
 			how := "ref"
 			if n.Byval() {
 				how = "value"
 			}
-			base.WarnfAt(n.Pos(), "%v capturing by %s: %v (addr=%v assign=%v width=%d)", n.Curfn, how, n, loc.addrtaken, loc.reassigned, n.Type().Size())
+			b.gd.WarnfAt(n.Pos(), "%v capturing by %s: %v (addr=%v assign=%v width=%d)", n.Curfn, how, n, loc.addrtaken, loc.reassigned, n.Type().Size())
 		}
 
 		// Flow captured variables to closure.
 		k := k
 		if !cv.Byval() {
-			k = k.addr(cv, "reference")
+			k = k.addr(b.gd, cv, "reference")
 		}
-		b.flow(k.note(cv, "captured by a closure"), loc)
+		b.flow(k.note(b.gd, cv, "captured by a closure"), loc)
 	}
 }
 
@@ -383,7 +386,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		// per-argument heap-escape mask. Consumers (closure/itab
 		// carriers) check bit k+1 to decide whether to materialize
 		// arg k before an indirect call. Bit 0 is reserved.
-		fn.EscMask = computeEscMask(fn.Type())
+		fn.EscMask = computeEscMask(b.gd, fn.Type())
 	}
 
 	for _, loc := range b.allLocs {
@@ -417,18 +420,18 @@ func (b *batch) finish(fns []*ir.Func) {
 
 		if loc.hasAttr(attrEscapes) {
 			if n.Op() == ir.ONAME {
-				if base.Flag.CompilingRuntime {
-					base.ErrorfAt(n.Pos(), 0, "%v escapes to heap, not allowed in runtime", n)
+				if b.gd.Flag.CompilingRuntime {
+					b.gd.ErrorfAt(n.Pos(), 0, "%v escapes to heap, not allowed in runtime", n)
 				}
-				if base.Flag.LowerM != 0 {
-					base.WarnfAt(n.Pos(), "moved to heap: %v", n)
+				if b.gd.Flag.LowerM != 0 {
+					b.gd.WarnfAt(n.Pos(), "moved to heap: %v", n)
 				}
 			} else {
-				if base.Flag.LowerM != 0 && !goDeferWrapper && !phaseGCallSpill {
+				if b.gd.Flag.LowerM != 0 && !goDeferWrapper && !phaseGCallSpill {
 					if n.Op() == ir.OAPPEND {
-						base.WarnfAt(n.Pos(), "append escapes to heap")
+						b.gd.WarnfAt(n.Pos(), "append escapes to heap")
 					} else {
-						base.WarnfAt(n.Pos(), "%v escapes to heap", n)
+						b.gd.WarnfAt(n.Pos(), "%v escapes to heap", n)
 					}
 				}
 				if logopt.Enabled() {
@@ -463,27 +466,27 @@ func (b *batch) finish(fns []*ir.Func) {
 			// would have been EscHeap under stock Go by
 			// treating attrCandidateEscape as equivalent to
 			// attrEscapes at finalize time.
-			if !base.Flag.CompilingRuntime &&
+			if !b.gd.Flag.CompilingRuntime &&
 				isCandidateLoc(n) &&
 				shouldEnableEscapeCandidate(loc.curfn) {
 				n.SetEsc(ir.EscHeap)
 				n.SetEscCandidate(true)
 			} else {
-				if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
+				if b.gd.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
 					if n.Op() == ir.OAPPEND {
-						base.WarnfAt(n.Pos(), "append escapes to heap")
+						b.gd.WarnfAt(n.Pos(), "append escapes to heap")
 					} else {
-						base.WarnfAt(n.Pos(), "%v escapes to heap", n)
+						b.gd.WarnfAt(n.Pos(), "%v escapes to heap", n)
 					}
 				}
 				n.SetEsc(ir.EscHeap)
 			}
 		} else {
-			if base.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
+			if b.gd.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
 				if n.Op() == ir.OAPPEND {
-					base.WarnfAt(n.Pos(), "append does not escape")
+					b.gd.WarnfAt(n.Pos(), "append does not escape")
 				} else {
-					base.WarnfAt(n.Pos(), "%v does not escape", n)
+					b.gd.WarnfAt(n.Pos(), "%v does not escape", n)
 				}
 			}
 			n.SetEsc(ir.EscNone)
@@ -504,10 +507,10 @@ func (b *batch) finish(fns []*ir.Func) {
 
 		// If the result of a string->[]byte conversion is never mutated,
 		// then it can simply reuse the string's memory directly.
-		if base.Debug.ZeroCopy != 0 {
+		if b.gd.Debug.ZeroCopy != 0 {
 			if n, ok := n.(*ir.ConvExpr); ok && n.Op() == ir.OSTR2BYTES && !loc.hasAttr(attrMutates) {
-				if base.Flag.LowerM >= 1 {
-					base.WarnfAt(n.Pos(), "zero-copy string->[]byte conversion")
+				if b.gd.Flag.LowerM >= 1 {
+					b.gd.WarnfAt(n.Pos(), "zero-copy string->[]byte conversion")
 				}
 				n.SetOp(ir.OSTR2BYTESTMP)
 			}
@@ -518,7 +521,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		// Look for specific patterns of usage, such as appends
 		// to slices that we can prove are not aliased.
 		for _, fn := range fns {
-			a := aliasAnalysis{}
+			a := aliasAnalysis{gd: b.gd}
 			a.analyze(fn)
 		}
 	}
@@ -533,7 +536,7 @@ func (b *batch) finish(fns []*ir.Func) {
 func (b *batch) inMutualBatch(fn *ir.Name) bool {
 	if fn.Defn != nil && fn.Defn.Esc() < escFuncTagged {
 		if fn.Defn.Esc() == escFuncUnknown {
-			base.FatalfAt(fn.Pos(), "graph inconsistency: %v", fn)
+			b.gd.FatalfAt(fn.Pos(), "graph inconsistency: %v", fn)
 		}
 		return true
 	}
@@ -572,7 +575,7 @@ const (
 // Arguments beyond position 62 exceed the mask width; we leave their
 // bits unset. Consumers must treat absence of a bit past position 62
 // conservatively, i.e. heap-alloc the arg up front.
-func computeEscMask(sig *types.Type) uint64 {
+func computeEscMask(gd *base.Invocation, sig *types.Type) uint64 {
 	if sig == nil || sig.Kind() != types.TFUNC {
 		return 0
 	}
@@ -581,7 +584,7 @@ func computeEscMask(sig *types.Type) uint64 {
 		if i >= 63 {
 			break
 		}
-		esc := parseLeaks(f.Note)
+		esc := parseLeaks(gd, f.Note)
 		if esc.Heap() >= 0 {
 			mask |= 1 << uint(i+1)
 		}
@@ -600,7 +603,7 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	// Only report diagnostics for user code;
 	// not for wrappers generated around them.
 	// TODO(mdempsky): Generalize this.
-	diagnose := base.Flag.LowerM != 0 && !(fn.Wrapper() || fn.Dupok())
+	diagnose := b.gd.Flag.LowerM != 0 && !(fn.Wrapper() || fn.Dupok())
 
 	if len(fn.Body) == 0 {
 		// Assume that uintptr arguments must be held live across the call.
@@ -613,7 +616,7 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 
 		if f.Type.IsUintptr() {
 			if diagnose {
-				base.WarnfAt(f.Pos, "assuming %v is unsafe uintptr", name())
+				b.gd.WarnfAt(f.Pos, "assuming %v is unsafe uintptr", name())
 			}
 			return ""
 		}
@@ -628,15 +631,15 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 		// //go:noescape is given before the declaration.
 		if fn.Pragma&ir.Noescape != 0 {
 			if diagnose && f.Sym != nil {
-				base.WarnfAt(f.Pos, "%v does not escape", name())
+				b.gd.WarnfAt(f.Pos, "%v does not escape", name())
 			}
-			esc.AddMutator(0)
-			esc.AddCallee(0)
+			esc.AddMutator(b.gd, 0)
+			esc.AddCallee(b.gd, 0)
 		} else {
 			if diagnose && f.Sym != nil {
-				base.WarnfAt(f.Pos, "leaking param: %v", name())
+				b.gd.WarnfAt(f.Pos, "leaking param: %v", name())
 			}
-			esc.AddHeap(0)
+			esc.AddHeap(b.gd, 0)
 		}
 
 		return esc.Encode()
@@ -645,14 +648,14 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	if fn.Pragma&ir.UintptrEscapes != 0 {
 		if f.Type.IsUintptr() {
 			if diagnose {
-				base.WarnfAt(f.Pos, "marking %v as escaping uintptr", name())
+				b.gd.WarnfAt(f.Pos, "marking %v as escaping uintptr", name())
 			}
 			return ""
 		}
 		if f.IsDDD() && f.Type.Elem().IsUintptr() {
 			// final argument is ...uintptr.
 			if diagnose {
-				base.WarnfAt(f.Pos, "marking %v as escaping ...uintptr", name())
+				b.gd.WarnfAt(f.Pos, "marking %v as escaping ...uintptr", name())
 			}
 			return ""
 		}
@@ -671,7 +674,7 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	n := f.Nname.(*ir.Name)
 	loc := b.oldLoc(n)
 	esc := loc.paramEsc
-	esc.Optimize()
+	esc.Optimize(b.gd)
 
 	if diagnose && !loc.hasAttr(attrEscapes) {
 		b.reportLeaks(f.Pos, name(), esc, fn.Type())
@@ -684,39 +687,39 @@ func (b *batch) reportLeaks(pos src.XPos, name string, esc leaks, sig *types.Typ
 	warned := false
 	if x := esc.Heap(); x >= 0 {
 		if x == 0 {
-			base.WarnfAt(pos, "leaking param: %v", name)
+			b.gd.WarnfAt(pos, "leaking param: %v", name)
 		} else {
 			// TODO(mdempsky): Mention level=x like below?
-			base.WarnfAt(pos, "leaking param content: %v", name)
+			b.gd.WarnfAt(pos, "leaking param content: %v", name)
 		}
 		warned = true
 	}
 	for i := 0; i < numEscResults; i++ {
 		if x := esc.Result(i); x >= 0 {
 			res := sig.Result(i).Nname.Sym().Name
-			base.WarnfAt(pos, "leaking param: %v to result %v level=%d", name, res, x)
+			b.gd.WarnfAt(pos, "leaking param: %v to result %v level=%d", name, res, x)
 			warned = true
 		}
 	}
 
-	if base.Debug.EscapeMutationsCalls <= 0 {
+	if b.gd.Debug.EscapeMutationsCalls <= 0 {
 		if !warned {
-			base.WarnfAt(pos, "%v does not escape", name)
+			b.gd.WarnfAt(pos, "%v does not escape", name)
 		}
 		return
 	}
 
 	if x := esc.Mutator(); x >= 0 {
-		base.WarnfAt(pos, "mutates param: %v derefs=%v", name, x)
+		b.gd.WarnfAt(pos, "mutates param: %v derefs=%v", name, x)
 		warned = true
 	}
 	if x := esc.Callee(); x >= 0 {
-		base.WarnfAt(pos, "calls param: %v derefs=%v", name, x)
+		b.gd.WarnfAt(pos, "calls param: %v derefs=%v", name, x)
 		warned = true
 	}
 
 	if !warned {
-		base.WarnfAt(pos, "%v does not escape, mutate, or call", name)
+		b.gd.WarnfAt(pos, "%v does not escape, mutate, or call", name)
 	}
 }
 
@@ -729,9 +732,9 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 
 	assignTemp := func(pos src.XPos, n ir.Node, init *ir.Nodes) {
 		// Preserve any side effects of n by assigning it to an otherwise unused temp.
-		tmp := typecheck.TempAt(pos, fn, n.Type())
-		init.Append(typecheck.Stmt(ir.NewDecl(pos, ir.ODCL, tmp)))
-		init.Append(typecheck.Stmt(ir.NewAssignStmt(pos, tmp, n)))
+		tmp := typecheck.TempAt(b.gd, pos, fn, n.Type())
+		init.Append(typecheck.Stmt(b.gd, ir.NewDecl(b.gd, pos, ir.ODCL, tmp)))
+		init.Append(typecheck.Stmt(b.gd, ir.NewAssignStmt(b.gd, pos, tmp, n)))
 	}
 
 	switch n.Op() {
@@ -749,7 +752,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 			// Look up a cached ReassignOracle for the function, lazily computing one if needed.
 			ro := b.reassignOracle(fn)
 			if ro == nil {
-				base.Fatalf("no ReassignOracle for function %v with closure parent %v", fn, fn.ClosureParent)
+				b.gd.Fatalf("no ReassignOracle for function %v with closure parent %v", fn, fn.ClosureParent)
 			}
 
 			s := ro.StaticValue(*r)
@@ -757,7 +760,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 			case ir.OLITERAL:
 				lit, ok := s.(*ir.BasicLit)
 				if !ok || lit.Val().Kind() != constant.Int {
-					base.Fatalf("unexpected BasicLit Kind")
+					b.gd.Fatalf("unexpected BasicLit Kind")
 				}
 				if constant.Compare(lit.Val(), token.GEQ, constant.MakeInt64(0)) {
 					if !base.LiteralAllocHash.MatchPos(n.Pos(), nil) {
@@ -766,7 +769,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 					}
 					// Preserve any side effects of the original expression, then replace it.
 					assignTemp(n.Pos(), *r, n.PtrInit())
-					*r = ir.NewBasicLit(n.Pos(), (*r).Type(), lit.Val())
+					*r = ir.NewBasicLit(b.gd, n.Pos(), (*r).Type(), lit.Val())
 				}
 			case ir.OLEN:
 				x := ro.StaticValue(s.(*ir.UnaryExpr).X)
@@ -774,7 +777,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 					x := x.(*ir.CompLitExpr)
 					// Preserve any side effects of the original expression, then update the value.
 					assignTemp(n.Pos(), *r, n.PtrInit())
-					*r = ir.NewBasicLit(n.Pos(), types.Types[types.TINT], constant.MakeInt64(x.Len))
+					*r = ir.NewBasicLit(b.gd, n.Pos(), types.Types[types.TINT], constant.MakeInt64(x.Len))
 				}
 			}
 		}
@@ -787,22 +790,22 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 			// Look up a cached ReassignOracle for the function, lazily computing one if needed.
 			ro := b.reassignOracle(fn)
 			if ro == nil {
-				base.Fatalf("no ReassignOracle for function %v with closure parent %v", fn, fn.ClosureParent)
+				b.gd.Fatalf("no ReassignOracle for function %v with closure parent %v", fn, fn.ClosureParent)
 			}
 			v := ro.StaticValue(conv.X)
-			if v != nil && v.Op() == ir.OLITERAL && ir.ValidTypeForConst(conv.X.Type(), v.Val()) {
+			if v != nil && v.Op() == ir.OLITERAL && ir.ValidTypeForConst(b.gd, conv.X.Type(), v.Val()) {
 				if !base.LiteralAllocHash.MatchPos(n.Pos(), nil) {
 					// De-selected by literal alloc optimizations debug hash.
 					return
 				}
-				if base.Debug.EscapeDebug >= 3 {
-					base.WarnfAt(n.Pos(), "rewriting OCONVIFACE value from %v (%v) to %v (%v)", conv.X, conv.X.Type(), v, v.Type())
+				if b.gd.Debug.EscapeDebug >= 3 {
+					b.gd.WarnfAt(n.Pos(), "rewriting OCONVIFACE value from %v (%v) to %v (%v)", conv.X, conv.X.Type(), v, v.Type())
 				}
 				// Preserve any side effects of the original expression, then replace it.
 				assignTemp(conv.Pos(), conv.X, conv.PtrInit())
 				v := v.(*ir.BasicLit)
-				conv.X = ir.NewBasicLit(conv.Pos(), conv.X.Type(), v.Val())
-				typecheck.Expr(conv)
+				conv.X = ir.NewBasicLit(b.gd, conv.Pos(), conv.X.Type(), v.Val())
+				typecheck.Expr(b.gd, conv)
 			}
 		}
 	}

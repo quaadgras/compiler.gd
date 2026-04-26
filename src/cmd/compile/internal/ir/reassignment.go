@@ -4,10 +4,6 @@
 
 package ir
 
-import (
-	"cmd/compile/internal/base"
-)
-
 // A ReassignOracle efficiently answers queries about whether local
 // variables are reassigned. This helper works by looking for function
 // params and short variable declarations (e.g.
@@ -151,6 +147,7 @@ func (ro *ReassignOracle) StaticValue(n Node) Node {
 }
 
 func (ro *ReassignOracle) staticValue1(nn Node) Node {
+	gd := nn.compiler()
 	if nn.Op() != ONAME {
 		return nil
 	}
@@ -178,12 +175,12 @@ FindRHS:
 				break FindRHS
 			}
 		}
-		base.FatalfAt(defn.Pos(), "%v missing from LHS of %v", n, defn)
+		gd.FatalfAt(defn.Pos(), "%v missing from LHS of %v", n, defn)
 	default:
 		return nil
 	}
 	if rhs == nil {
-		base.FatalfAt(defn.Pos(), "RHS is nil: %v", defn)
+		gd.FatalfAt(defn.Pos(), "RHS is nil: %v", defn)
 	}
 
 	if _, ok := ro.singleDef[n]; !ok {

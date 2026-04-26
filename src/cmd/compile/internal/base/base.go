@@ -5,22 +5,29 @@
 package base
 
 import (
-	"os"
+	"runtime"
 )
 
-var atExitFuncs []func()
-
-func AtExit(f func()) {
-	atExitFuncs = append(atExitFuncs, f)
+func (gd *Invocation) AtExit(f func()) {
+	gd.atExitFuncs = append(gd.atExitFuncs, f)
 }
 
-func Exit(code int) {
-	for i := len(atExitFuncs) - 1; i >= 0; i-- {
-		f := atExitFuncs[i]
-		atExitFuncs = atExitFuncs[:i]
+// RunAtExitFuncs runs and drains the registered AtExit callbacks in
+// LIFO order. The outermost cmd/compile entry calls this directly
+// before os.Exit (since Exit's runtime.Goexit isn't appropriate at the
+// process boundary).
+func (gd *Invocation) RunAtExitFuncs() {
+	for i := len(gd.atExitFuncs) - 1; i >= 0; i-- {
+		f := gd.atExitFuncs[i]
+		gd.atExitFuncs = gd.atExitFuncs[:i]
 		f()
 	}
-	os.Exit(code)
+}
+
+func (gd *Invocation) Exit(code int) {
+	gd.RunAtExitFuncs()
+	gd.Status = code
+	runtime.Goexit()
 }
 
 // To enable tracing support (-t flag), set EnableTrace to true.

@@ -60,7 +60,7 @@ func parseFiles(t *testing.T, filenames []string, srcs [][]byte, mode syntax.Mod
 	for i, filename := range filenames {
 		base := syntax.NewFileBase(filename)
 		r := bytes.NewReader(srcs[i])
-		file, err := syntax.Parse(base, r, errh, nil, mode)
+		file, err := syntax.Parse(testGd, base, r, errh, nil, mode)
 		if file == nil {
 			t.Fatalf("%s: %s", filename, err)
 		}

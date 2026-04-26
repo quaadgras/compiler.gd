@@ -13,8 +13,8 @@ import (
 	"internal/pkgbits"
 )
 
-func assert(p bool) {
-	base.Assert(p)
+func assert(gd *base.Invocation, p bool) {
+	gd.Assert(p)
 }
 
 const deltaNewFile = -64 // see cmd/compile/internal/gc/bexport.go

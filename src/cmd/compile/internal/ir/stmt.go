@@ -18,8 +18,9 @@ type Decl struct {
 	X *Name // the thing being declared
 }
 
-func NewDecl(pos src.XPos, op Op, x *Name) *Decl {
+func NewDecl(gd *base.Invocation, pos src.XPos, op Op, x *Name) *Decl {
 	n := &Decl{X: x}
+	n.gd = gd
 	n.pos = pos
 	switch op {
 	default:
@@ -67,8 +68,9 @@ type AssignListStmt struct {
 	Rhs Nodes
 }
 
-func NewAssignListStmt(pos src.XPos, op Op, lhs, rhs []Node) *AssignListStmt {
+func NewAssignListStmt(gd *base.Invocation, pos src.XPos, op Op, lhs, rhs []Node) *AssignListStmt {
 	n := &AssignListStmt{}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	n.Lhs = lhs
@@ -94,8 +96,9 @@ type AssignStmt struct {
 	Y   Node
 }
 
-func NewAssignStmt(pos src.XPos, x, y Node) *AssignStmt {
+func NewAssignStmt(gd *base.Invocation, pos src.XPos, x, y Node) *AssignStmt {
 	n := &AssignStmt{X: x, Y: y}
+	n.gd = gd
 	n.pos = pos
 	n.op = OAS
 	return n
@@ -119,8 +122,9 @@ type AssignOpStmt struct {
 	IncDec bool // actually ++ or --
 }
 
-func NewAssignOpStmt(pos src.XPos, asOp Op, x, y Node) *AssignOpStmt {
+func NewAssignOpStmt(gd *base.Invocation, pos src.XPos, asOp Op, x, y Node) *AssignOpStmt {
 	n := &AssignOpStmt{AsOp: asOp, X: x, Y: y}
+	n.gd = gd
 	n.pos = pos
 	n.op = OASOP
 	return n
@@ -132,11 +136,11 @@ type BlockStmt struct {
 	List Nodes
 }
 
-func NewBlockStmt(pos src.XPos, list []Node) *BlockStmt {
+func NewBlockStmt(gd *base.Invocation, pos src.XPos, list []Node) *BlockStmt {
 	n := &BlockStmt{}
 	n.pos = pos
 	if !pos.IsKnown() {
-		n.pos = base.Pos
+		n.pos = gd.Pos
 		if len(list) > 0 {
 			n.pos = list[0].Pos()
 		}
@@ -152,7 +156,7 @@ type BranchStmt struct {
 	Label *types.Sym // label if present
 }
 
-func NewBranchStmt(pos src.XPos, op Op, label *types.Sym) *BranchStmt {
+func NewBranchStmt(gd *base.Invocation, pos src.XPos, op Op, label *types.Sym) *BranchStmt {
 	switch op {
 	case OBREAK, OCONTINUE, OFALL, OGOTO:
 		// ok
@@ -160,6 +164,7 @@ func NewBranchStmt(pos src.XPos, op Op, label *types.Sym) *BranchStmt {
 		panic("NewBranch " + op.String())
 	}
 	n := &BranchStmt{Label: label}
+	n.gd = gd
 	n.pos = pos
 	n.op = op
 	return n
@@ -195,8 +200,9 @@ type CaseClause struct {
 	Body Nodes
 }
 
-func NewCaseStmt(pos src.XPos, list, body []Node) *CaseClause {
+func NewCaseStmt(gd *base.Invocation, pos src.XPos, list, body []Node) *CaseClause {
 	n := &CaseClause{List: list, Body: body}
+	n.gd = gd
 	n.pos = pos
 	n.op = OCASE
 	return n
@@ -208,8 +214,9 @@ type CommClause struct {
 	Body Nodes
 }
 
-func NewCommStmt(pos src.XPos, comm Node, body []Node) *CommClause {
+func NewCommStmt(gd *base.Invocation, pos src.XPos, comm Node, body []Node) *CommClause {
 	n := &CommClause{Comm: comm, Body: body}
+	n.gd = gd
 	n.pos = pos
 	n.op = OCASE
 	return n
@@ -225,8 +232,9 @@ type ForStmt struct {
 	DistinctVars bool
 }
 
-func NewForStmt(pos src.XPos, init Node, cond, post Node, body []Node, distinctVars bool) *ForStmt {
+func NewForStmt(gd *base.Invocation, pos src.XPos, init Node, cond, post Node, body []Node, distinctVars bool) *ForStmt {
 	n := &ForStmt{Cond: cond, Post: post}
+	n.gd = gd
 	n.pos = pos
 	n.op = OFOR
 	if init != nil {
@@ -248,8 +256,9 @@ type GoDeferStmt struct {
 	DeferAt Expr
 }
 
-func NewGoDeferStmt(pos src.XPos, op Op, call Node) *GoDeferStmt {
+func NewGoDeferStmt(gd *base.Invocation, pos src.XPos, op Op, call Node) *GoDeferStmt {
 	n := &GoDeferStmt{Call: call}
+	n.gd = gd
 	n.pos = pos
 	switch op {
 	case ODEFER, OGO:
@@ -269,8 +278,9 @@ type IfStmt struct {
 	Likely bool // code layout hint
 }
 
-func NewIfStmt(pos src.XPos, cond Node, body, els []Node) *IfStmt {
+func NewIfStmt(gd *base.Invocation, pos src.XPos, cond Node, body, els []Node) *IfStmt {
 	n := &IfStmt{Cond: cond}
+	n.gd = gd
 	n.pos = pos
 	n.op = OIF
 	n.Body = body
@@ -304,8 +314,9 @@ type JumpTableStmt struct {
 	Targets []*types.Sym
 }
 
-func NewJumpTableStmt(pos src.XPos, idx Node) *JumpTableStmt {
+func NewJumpTableStmt(gd *base.Invocation, pos src.XPos, idx Node) *JumpTableStmt {
 	n := &JumpTableStmt{Idx: idx}
+	n.gd = gd
 	n.pos = pos
 	n.op = OJUMPTABLE
 	return n
@@ -338,7 +349,7 @@ type InterfaceSwitchStmt struct {
 	Descriptor  *obj.LSym
 }
 
-func NewInterfaceSwitchStmt(pos src.XPos, case_, itab, runtimeType, hash Node, descriptor *obj.LSym) *InterfaceSwitchStmt {
+func NewInterfaceSwitchStmt(gd *base.Invocation, pos src.XPos, case_, itab, runtimeType, hash Node, descriptor *obj.LSym) *InterfaceSwitchStmt {
 	n := &InterfaceSwitchStmt{
 		Case:        case_,
 		Itab:        itab,
@@ -346,6 +357,7 @@ func NewInterfaceSwitchStmt(pos src.XPos, case_, itab, runtimeType, hash Node, d
 		Hash:        hash,
 		Descriptor:  descriptor,
 	}
+	n.gd = gd
 	n.pos = pos
 	n.op = OINTERFACESWITCH
 	return n
@@ -357,8 +369,9 @@ type InlineMarkStmt struct {
 	Index int64
 }
 
-func NewInlineMarkStmt(pos src.XPos, index int64) *InlineMarkStmt {
+func NewInlineMarkStmt(gd *base.Invocation, pos src.XPos, index int64) *InlineMarkStmt {
 	n := &InlineMarkStmt{Index: index}
+	n.gd = gd
 	n.pos = pos
 	n.op = OINLMARK
 	return n
@@ -373,8 +386,9 @@ type LabelStmt struct {
 	Label *types.Sym // "Label:"
 }
 
-func NewLabelStmt(pos src.XPos, label *types.Sym) *LabelStmt {
+func NewLabelStmt(gd *base.Invocation, pos src.XPos, label *types.Sym) *LabelStmt {
 	n := &LabelStmt{Label: label}
+	n.gd = gd
 	n.pos = pos
 	n.op = OLABEL
 	return n
@@ -404,8 +418,9 @@ type RangeStmt struct {
 	ValueSrcRType Node `mknode:"-"`
 }
 
-func NewRangeStmt(pos src.XPos, key, value, x Node, body []Node, distinctVars bool) *RangeStmt {
+func NewRangeStmt(gd *base.Invocation, pos src.XPos, key, value, x Node, body []Node, distinctVars bool) *RangeStmt {
 	n := &RangeStmt{X: x, Key: key, Value: value}
+	n.gd = gd
 	n.pos = pos
 	n.op = ORANGE
 	n.Body = body
@@ -419,8 +434,9 @@ type ReturnStmt struct {
 	Results Nodes // return list
 }
 
-func NewReturnStmt(pos src.XPos, results []Node) *ReturnStmt {
+func NewReturnStmt(gd *base.Invocation, pos src.XPos, results []Node) *ReturnStmt {
 	n := &ReturnStmt{}
+	n.gd = gd
 	n.pos = pos
 	n.op = ORETURN
 	n.Results = results
@@ -437,8 +453,9 @@ type SelectStmt struct {
 	Compiled Nodes // compiled form, after walkSelect
 }
 
-func NewSelectStmt(pos src.XPos, cases []*CommClause) *SelectStmt {
+func NewSelectStmt(gd *base.Invocation, pos src.XPos, cases []*CommClause) *SelectStmt {
 	n := &SelectStmt{Cases: cases}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSELECT
 	return n
@@ -451,8 +468,9 @@ type SendStmt struct {
 	Value Node
 }
 
-func NewSendStmt(pos src.XPos, ch, value Node) *SendStmt {
+func NewSendStmt(gd *base.Invocation, pos src.XPos, ch, value Node) *SendStmt {
 	n := &SendStmt{Chan: ch, Value: value}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSEND
 	return n
@@ -469,8 +487,9 @@ type SwitchStmt struct {
 	Compiled Nodes // compiled form, after walkSwitch
 }
 
-func NewSwitchStmt(pos src.XPos, tag Node, cases []*CaseClause) *SwitchStmt {
+func NewSwitchStmt(gd *base.Invocation, pos src.XPos, tag Node, cases []*CaseClause) *SwitchStmt {
 	n := &SwitchStmt{Tag: tag, Cases: cases}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSWITCH
 	return n
@@ -483,8 +502,9 @@ type TailCallStmt struct {
 	Call *CallExpr // the underlying call
 }
 
-func NewTailCallStmt(pos src.XPos, call *CallExpr) *TailCallStmt {
+func NewTailCallStmt(gd *base.Invocation, pos src.XPos, call *CallExpr) *TailCallStmt {
 	n := &TailCallStmt{Call: call}
+	n.gd = gd
 	n.pos = pos
 	n.op = OTAILCALL
 	return n
@@ -498,8 +518,9 @@ type TypeSwitchGuard struct {
 	Used bool
 }
 
-func NewTypeSwitchGuard(pos src.XPos, tag *Ident, x Node) *TypeSwitchGuard {
+func NewTypeSwitchGuard(gd *base.Invocation, pos src.XPos, tag *Ident, x Node) *TypeSwitchGuard {
 	n := &TypeSwitchGuard{Tag: tag, X: x}
+	n.gd = gd
 	n.pos = pos
 	n.op = OTYPESW
 	return n

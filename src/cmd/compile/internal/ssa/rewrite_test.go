@@ -261,8 +261,8 @@ func TestDisjointTypes(t *testing.T) {
 		{new([2]int), new(*byte), true},
 	}
 	for _, tst := range tests {
-		t1 := rttype.FromReflect(reflect.TypeOf(tst.v1))
-		t2 := rttype.FromReflect(reflect.TypeOf(tst.v2))
+		t1 := rttype.FromReflect(testGd, reflect.TypeOf(tst.v1))
+		t2 := rttype.FromReflect(testGd, reflect.TypeOf(tst.v2))
 		result := disjointTypes(t1, t2)
 		if result != tst.expected {
 			t.Errorf("disjointTypes(%s, %s) got %t expected %t", t1.String(), t2.String(), result, tst.expected)

@@ -297,9 +297,9 @@ func TestEscapeBitsItabDispatch(t *testing.T) {
 
 type simpleImpl struct{ base int }
 
-func (s *simpleImpl) Add(x int) int  { return s.base + x }
-func (s *simpleImpl) Mul(x int) int  { return s.base * x }
-func (s *simpleImpl) Name() string   { return "simple" }
+func (s *simpleImpl) Add(x int) int { return s.base + x }
+func (s *simpleImpl) Mul(x int) int { return s.base * x }
+func (s *simpleImpl) Name() string  { return "simple" }
 
 type doublerImpl struct{ base int }
 

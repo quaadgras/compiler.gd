@@ -19,25 +19,31 @@ import (
 	"testing"
 )
 
+// testGd is the *base.Invocation passed to ABI / ir / typecheck APIs in
+// tests. We populate just Ctxt so diag formatting has somewhere to route.
+var testGd = &base.Invocation{}
+
 // AMD64 registers available:
 // - integer: RAX, RBX, RCX, RDI, RSI, R8, R9, r10, R11
 // - floating point: X0 - X14
-var configAMD64 = abi.NewABIConfig(9, 15, 0, 1)
+var configAMD64 = abi.NewABIConfig(testGd, 9, 15, 0, 1)
 
 func TestMain(m *testing.M) {
 	ssagen.Arch.LinkArch = &x86.Linkamd64
 	ssagen.Arch.REGSP = x86.REGSP
 	ssagen.Arch.MAXWIDTH = 1 << 50
 	types.MaxWidth = ssagen.Arch.MAXWIDTH
-	base.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
-	base.Ctxt.DiagFunc = base.Errorf
-	base.Ctxt.DiagFlush = base.FlushErrors
-	base.Ctxt.Bso = bufio.NewWriter(os.Stdout)
-	types.LocalPkg = types.NewPkg("p", "local")
-	types.LocalPkg.Prefix = "p"
+	testGd.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
+	testGd.Ctxt.DiagFunc = testGd.Errorf
+	testGd.Ctxt.DiagFlush = testGd.FlushErrors
+	testGd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
+	localPkg := types.NewPkg("p", "local")
+	localPkg.Local = true
+	localPkg.Prefix = "p"
+	testGd.LocalPkg = localPkg
 	types.PtrSize = ssagen.Arch.LinkArch.PtrSize
 	types.RegSize = ssagen.Arch.LinkArch.RegSize
-	typecheck.InitUniverse()
+	typecheck.InitUniverse(testGd)
 	os.Exit(m.Run())
 }
 
@@ -316,7 +322,7 @@ func TestABIUtilsInterfaces(t *testing.T) {
 	pei := types.NewPtr(ei)         // *interface{}
 	fldt := mkFuncType(types.FakeRecvType(), []*types.Type{},
 		[]*types.Type{types.Types[types.TSTRING]})
-	field := types.NewField(src.NoXPos, typecheck.Lookup("F"), fldt)
+	field := types.NewField(src.NoXPos, typecheck.Lookup(testGd, "F"), fldt)
 	nei := types.NewInterface([]*types.Field{field})
 	i16 := types.Types[types.TINT16]
 	tb := types.Types[types.TBOOL]

@@ -30,7 +30,7 @@ import (
 //		println(byval)
 //		(*&byref)++
 //	}(byval, &byref, 42)
-func directClosureCall(n *ir.CallExpr) {
+func directClosureCall(gd *base.Invocation, n *ir.CallExpr) {
 	clo := n.Fun.(*ir.ClosureExpr)
 	clofn := clo.Func
 
@@ -48,7 +48,7 @@ func directClosureCall(n *ir.CallExpr) {
 			// and v remains PAUTOHEAP with &v heapaddr
 			// (accesses will implicitly deref &v).
 
-			addr := ir.NewNameAt(clofn.Pos(), typecheck.Lookup("&"+v.Sym().Name), types.NewPtr(v.Type()))
+			addr := ir.NewNameAt(gd, clofn.Pos(), typecheck.Lookup(gd, "&"+v.Sym().Name), types.NewPtr(v.Type()))
 			addr.Curfn = clofn
 			v.Heapaddr = addr
 			v = addr
@@ -68,13 +68,13 @@ func directClosureCall(n *ir.CallExpr) {
 
 	// Create new function type with parameters prepended, and
 	// then update type and declarations.
-	typ = types.NewSignature(nil, append(params, typ.Params()...), typ.Results())
+	typ = types.NewSignature(gd, nil, append(params, typ.Params()...), typ.Results())
 	f.SetType(typ)
 	clofn.Dcl = append(decls, clofn.Dcl...)
 
 	// Rewrite call.
 	n.Fun = f
-	n.Args.Prepend(closureArgs(clo)...)
+	n.Args.Prepend(closureArgs(gd, clo)...)
 
 	// Update the call expression's type. We need to do this
 	// because typecheck gave it the result type of the OCLOSURE
@@ -89,22 +89,22 @@ func directClosureCall(n *ir.CallExpr) {
 	// Add to Closures for enqueueFunc. It's no longer a proper
 	// closure, but we may have already skipped over it in the
 	// functions list, so this just ensures it's compiled.
-	ir.CurFunc.Closures = append(ir.CurFunc.Closures, clofn)
+	ir.CurFunc(gd).Closures = append(ir.CurFunc(gd).Closures, clofn)
 }
 
-func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
+func walkClosure(gd *base.Invocation, clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 	clofn := clo.Func
 
 	// If not a closure, don't bother wrapping.
 	if !clofn.IsClosure() {
-		if base.Debug.Closure > 0 {
-			base.WarnfAt(clo.Pos(), "closure converted to global")
+		if gd.Debug.Closure > 0 {
+			gd.WarnfAt(clo.Pos(), "closure converted to global")
 		}
 		return clofn.Nname
 	}
 
 	// The closure is not trivial or directly called, so it's going to stay a closure.
-	ir.ClosureDebugRuntimeCheck(clo)
+	ir.ClosureDebugRuntimeCheck(gd, clo)
 	clofn.SetNeedctxt(true)
 
 	// The closure expression may be walked more than once if it appeared in composite
@@ -114,33 +114,33 @@ func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 	// compiling a function twice would lead to an ICE.
 	if !clofn.Walked() {
 		clofn.SetWalked(true)
-		ir.CurFunc.Closures = append(ir.CurFunc.Closures, clofn)
+		ir.CurFunc(gd).Closures = append(ir.CurFunc(gd).Closures, clofn)
 	}
 
-	typ := typecheck.ClosureType(clo)
+	typ := typecheck.ClosureType(gd, clo)
 
 	// gd escape-bits: emit the function's per-arg heap-escape mask as
 	// the second closure field (offset PtrSize). Call sites read this
 	// to decide whether to materialize pointer args on the heap before
 	// dispatching. See doc/gd/escape-bits.md.
-	maskLit := ir.NewBasicLit(base.Pos, types.Types[types.TUINT64],
+	maskLit := ir.NewBasicLit(gd, gd.Pos, types.Types[types.TUINT64],
 		constant.MakeUint64(clofn.EscMask))
 
-	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, typ, nil)
+	clos := ir.NewCompLitExpr(gd, gd.Pos, ir.OCOMPLIT, typ, nil)
 	clos.SetEsc(clo.Esc())
 	clos.List = append([]ir.Node{
-		ir.NewUnaryExpr(base.Pos, ir.OCFUNC, clofn.Nname),
+		ir.NewUnaryExpr(gd, gd.Pos, ir.OCFUNC, clofn.Nname),
 		maskLit,
-	}, closureArgs(clo)...)
+	}, closureArgs(gd, clo)...)
 	for i, value := range clos.List {
-		clos.List[i] = ir.NewStructKeyExpr(base.Pos, typ.Field(i), value)
+		clos.List[i] = ir.NewStructKeyExpr(gd, gd.Pos, typ.Field(i), value)
 	}
 
-	addr := typecheck.NodAddr(clos)
+	addr := typecheck.NodAddr(gd, clos)
 	addr.SetEsc(clo.Esc())
 
 	// Force type conversion from *struct to the func type.
-	cfn := typecheck.ConvNop(addr, clo.Type())
+	cfn := typecheck.ConvNop(gd, addr, clo.Type())
 
 	// non-escaping temp to use, if any.
 	if x := clo.Prealloc; x != nil {
@@ -151,7 +151,7 @@ func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 		clo.Prealloc = nil
 	}
 
-	return walkExpr(cfn, init)
+	return walkExpr(gd, cfn, init)
 }
 
 // closureArgs returns a slice of expressions that can be used to
@@ -159,7 +159,7 @@ func walkClosure(clo *ir.ClosureExpr, init *ir.Nodes) ir.Node {
 // one-to-one with the variables in clo.Func.ClosureVars, and will be
 // either an ONAME node (if the variable is captured by value) or an
 // OADDR-of-ONAME node (if not).
-func closureArgs(clo *ir.ClosureExpr) []ir.Node {
+func closureArgs(gd *base.Invocation, clo *ir.ClosureExpr) []ir.Node {
 	fn := clo.Func
 
 	args := make([]ir.Node, len(fn.ClosureVars))
@@ -167,14 +167,14 @@ func closureArgs(clo *ir.ClosureExpr) []ir.Node {
 		var outer ir.Node
 		outer = v.Outer
 		if !v.Byval() {
-			outer = typecheck.NodAddrAt(fn.Pos(), outer)
+			outer = typecheck.NodAddrAt(gd, fn.Pos(), outer)
 		}
-		args[i] = typecheck.Expr(outer)
+		args[i] = typecheck.Expr(gd, outer)
 	}
 	return args
 }
 
-func walkMethodValue(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
+func walkMethodValue(gd *base.Invocation, n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 	// Create closure in the form of a composite literal.
 	// For x.M with receiver (x) type T, the generated code looks like:
 	//
@@ -186,36 +186,36 @@ func walkMethodValue(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 	if n.X.Type().IsInterface() {
 		// Trigger panic for method on nil interface now.
 		// Otherwise it happens in the wrapper and is confusing.
-		n.X = cheapExpr(n.X, init)
-		n.X = walkExpr(n.X, nil)
+		n.X = cheapExpr(gd, n.X, init)
+		n.X = walkExpr(gd, n.X, nil)
 
-		tab := ir.NewUnaryExpr(base.Pos, ir.OITAB, n.X)
-		check := ir.NewUnaryExpr(base.Pos, ir.OCHECKNIL, tab)
-		init.Append(typecheck.Stmt(check))
+		tab := ir.NewUnaryExpr(gd, gd.Pos, ir.OITAB, n.X)
+		check := ir.NewUnaryExpr(gd, gd.Pos, ir.OCHECKNIL, tab)
+		init.Append(typecheck.Stmt(gd, check))
 	}
 
-	typ := typecheck.MethodValueType(n)
+	typ := typecheck.MethodValueType(gd, n)
 
 	// The wrapper's EscMask comes from the method-value wrapper
 	// function; use zero here for now and let the compiler populate
 	// once the wrapper's escape analysis runs. Safe default: treat
 	// all args as escaping.
-	wrapper := methodValueWrapper(n)
+	wrapper := methodValueWrapper(gd, n)
 	var mask uint64
 	if wrapper.Func != nil {
 		mask = wrapper.Func.EscMask
 	}
-	maskLit := ir.NewBasicLit(base.Pos, types.Types[types.TUINT64], constant.MakeUint64(mask))
+	maskLit := ir.NewBasicLit(gd, gd.Pos, types.Types[types.TUINT64], constant.MakeUint64(mask))
 
-	clos := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, typ, nil)
+	clos := ir.NewCompLitExpr(gd, gd.Pos, ir.OCOMPLIT, typ, nil)
 	clos.SetEsc(n.Esc())
-	clos.List = []ir.Node{ir.NewUnaryExpr(base.Pos, ir.OCFUNC, wrapper), maskLit, n.X}
+	clos.List = []ir.Node{ir.NewUnaryExpr(gd, gd.Pos, ir.OCFUNC, wrapper), maskLit, n.X}
 
-	addr := typecheck.NodAddr(clos)
+	addr := typecheck.NodAddr(gd, clos)
 	addr.SetEsc(n.Esc())
 
 	// Force type conversion from *struct to the func type.
-	cfn := typecheck.ConvNop(addr, n.Type())
+	cfn := typecheck.ConvNop(gd, addr, n.Type())
 
 	// non-escaping temp to use, if any.
 	if x := n.Prealloc; x != nil {
@@ -226,27 +226,27 @@ func walkMethodValue(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
 		n.Prealloc = nil
 	}
 
-	return walkExpr(cfn, init)
+	return walkExpr(gd, cfn, init)
 }
 
 // methodValueWrapper returns the ONAME node representing the
 // wrapper function (*-fm) needed for the given method value. If the
 // wrapper function hasn't already been created yet, it's created and
 // added to typecheck.Target.Decls.
-func methodValueWrapper(dot *ir.SelectorExpr) *ir.Name {
+func methodValueWrapper(gd *base.Invocation, dot *ir.SelectorExpr) *ir.Name {
 	if dot.Op() != ir.OMETHVALUE {
-		base.Fatalf("methodValueWrapper: unexpected %v (%v)", dot, dot.Op())
+		gd.Fatalf("methodValueWrapper: unexpected %v (%v)", dot, dot.Op())
 	}
 
 	meth := dot.Sel
 	rcvrtype := dot.X.Type()
-	sym := ir.MethodSymSuffix(rcvrtype, meth, "-fm")
+	sym := ir.MethodSymSuffix(gd, rcvrtype, meth, "-fm")
 
 	if sym.Uniq() {
 		return sym.Def.(*ir.Name)
 	}
 	sym.SetUniq(true)
 
-	base.FatalfAt(dot.Pos(), "missing wrapper for %v", meth)
+	gd.FatalfAt(dot.Pos(), "missing wrapper for %v", meth)
 	panic("unreachable")
 }

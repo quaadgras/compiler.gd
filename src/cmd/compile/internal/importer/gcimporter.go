@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/types2"
 )
 
@@ -22,7 +23,7 @@ import (
 // The packages map must contain all packages already imported.
 //
 // This function should only be used in tests.
-func Import(packages map[string]*types2.Package, path, srcDir string, lookup func(path string) (io.ReadCloser, error)) (pkg *types2.Package, err error) {
+func Import(gd *base.Invocation, packages map[string]*types2.Package, path, srcDir string, lookup func(path string) (io.ReadCloser, error)) (pkg *types2.Package, err error) {
 	var rc io.ReadCloser
 	var id string
 	if lookup != nil {
@@ -81,7 +82,7 @@ func Import(packages map[string]*types2.Package, path, srcDir string, lookup fun
 	s := string(data)
 
 	input := pkgbits.NewPkgDecoder(id, s)
-	pkg = ReadPackage(nil, packages, input)
+	pkg = ReadPackage(gd, nil, packages, input)
 
 	return
 }

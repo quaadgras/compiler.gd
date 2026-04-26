@@ -50,7 +50,7 @@ func TestSizeof(t *testing.T) {
 		{Nil{}, 72, 112},
 
 		// Misc
-		{Scope{}, 64, 112},  // +1 string (comment)
+		{Scope{}, 64, 112},   // +1 string (comment)
 		{Package{}, 56, 112}, // +3 strings (path, name, goVersion)
 		{_TypeSet{}, 28, 56},
 	}

@@ -9,7 +9,7 @@ import (
 	"cmd/compile/internal/arm"
 	"cmd/compile/internal/arm64"
 	"cmd/compile/internal/base"
-	"cmd/compile/internal/gc"
+	"cmd/compile/internal/gd"
 	"cmd/compile/internal/loong64"
 	"cmd/compile/internal/mips"
 	"cmd/compile/internal/mips64"
@@ -53,7 +53,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "compile: unknown architecture %q\n", buildcfg.GOARCH)
 		os.Exit(2)
 	}
-
-	gc.Main(archInit)
-	base.Exit(0)
+	compiler := new(base.Invocation)
+	gd.Main(archInit, compiler)
+	// gd.Main may have set compiler.Status via gd.Exit (which only
+	// runtime.Goexit's the calling goroutine, so an in-process harness
+	// can keep running). At the outermost cmd/compile entry we must
+	// terminate the process — runtime.Goexit on the main goroutine
+	// triggers the deadlock detector once the worker pool drains.
+	compiler.RunAtExitFuncs()
+	os.Exit(compiler.Status)
 }

@@ -13,18 +13,18 @@ import (
 	"cmd/internal/bio"
 )
 
-func WriteExports(out *bio.Writer) {
+func WriteExports(gd *base.Invocation, out *bio.Writer) {
 	var data bytes.Buffer
 
 	data.WriteByte('u')
-	writeUnifiedExport(&data)
+	writeUnifiedExport(gd, &data)
 
 	// The linker also looks for the $$ marker - use char after $$ to distinguish format.
 	out.WriteString("\n$$B\n") // indicate binary export format
 	io.Copy(out, &data)
 	out.WriteString("\n$$\n")
 
-	if base.Debug.Export != 0 {
-		fmt.Printf("BenchmarkExportSize:%s 1 %d bytes\n", base.Ctxt.Pkgpath, data.Len())
+	if gd.Debug.Export != 0 {
+		fmt.Printf("BenchmarkExportSize:%s 1 %d bytes\n", gd.Ctxt.Pkgpath, data.Len())
 	}
 }

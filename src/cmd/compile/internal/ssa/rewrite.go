@@ -5,7 +5,6 @@
 package ssa
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
 	"cmd/compile/internal/reflectdata"
@@ -2136,6 +2135,7 @@ func isFixedLoad(v *Value, sym Sym, off int64) bool {
 func rewriteFixedLoad(v *Value, sym Sym, sb *Value, off int64) *Value {
 	b := v.Block
 	f := b.Func
+	gd := f.Config.gd
 
 	lsym := sym.(*obj.LSym)
 	if (v.Type.IsPtrShaped() || v.Type.IsUintptr()) && lsym.Type == objabi.SRODATA {
@@ -2147,11 +2147,11 @@ func rewriteFixedLoad(v *Value, sym Sym, sb *Value, off int64) *Value {
 					// That information is currently recorded in relocations in the dictionary,
 					// but if we perform this load at compile time then the dictionary
 					// might be dead.
-					reflectdata.MarkTypeSymUsedInInterface(r.Sym, f.fe.Func().Linksym())
+					reflectdata.MarkTypeSymUsedInInterface(gd, r.Sym, f.fe.Func().Linksym())
 				} else if strings.HasPrefix(r.Sym.Name, "go:itab") {
 					// Same, but if we're using an itab we need to record that the
 					// itab._type might be put in an interface.
-					reflectdata.MarkTypeSymUsedInInterface(r.Sym, f.fe.Func().Linksym())
+					reflectdata.MarkTypeSymUsedInInterface(gd, r.Sym, f.fe.Func().Linksym())
 				}
 				v.reset(OpAddr)
 				v.Aux = symToAux(r.Sym)
@@ -2159,7 +2159,7 @@ func rewriteFixedLoad(v *Value, sym Sym, sb *Value, off int64) *Value {
 				return v
 			}
 		}
-		base.Fatalf("fixedLoad data not known for %s:%d", sym, off)
+		gd.Fatalf("fixedLoad data not known for %s:%d", sym, off)
 	}
 
 	if ti := lsym.TypeInfo(); ti != nil {
@@ -2194,30 +2194,30 @@ func rewriteFixedLoad(v *Value, sym Sym, sb *Value, off int64) *Value {
 					v.AuxInt = int64(int8(reflectdata.ABIKindOfType(t)))
 					return v
 				case "GCData":
-					gcdata, _ := reflectdata.GCSym(t, true)
+					gcdata, _ := reflectdata.GCSym(gd, t, true)
 					v.reset(OpAddr)
 					v.Aux = symToAux(gcdata)
 					v.AddArg(sb)
 					return v
 				default:
-					base.Fatalf("unknown field %s for fixedLoad of %s at offset %d", f.Sym.Name, lsym.Name, off)
+					gd.Fatalf("unknown field %s for fixedLoad of %s at offset %d", f.Sym.Name, lsym.Name, off)
 				}
 			}
 		}
 
 		if t.IsPtr() && off == rttype.PtrType.OffsetOf("Elem") {
-			elemSym := reflectdata.TypeLinksym(t.Elem())
-			reflectdata.MarkTypeSymUsedInInterface(elemSym, f.fe.Func().Linksym())
+			elemSym := reflectdata.TypeLinksym(gd, t.Elem())
+			reflectdata.MarkTypeSymUsedInInterface(gd, elemSym, f.fe.Func().Linksym())
 			v.reset(OpAddr)
 			v.Aux = symToAux(elemSym)
 			v.AddArg(sb)
 			return v
 		}
 
-		base.Fatalf("fixedLoad data not known for %s:%d", sym, off)
+		gd.Fatalf("fixedLoad data not known for %s:%d", sym, off)
 	}
 
-	base.Fatalf("fixedLoad data not known for %s:%d", sym, off)
+	gd.Fatalf("fixedLoad data not known for %s:%d", sym, off)
 	return nil
 }
 
@@ -2470,7 +2470,7 @@ func logicFlags32(x int32) flagConstant {
 }
 
 func makeJumpTableSym(b *Block) *obj.LSym {
-	s := base.Ctxt.Lookup(fmt.Sprintf("%s.jump%d", b.Func.fe.Func().LSym.Name, b.ID))
+	s := b.Func.Config.gd.Ctxt.Lookup(fmt.Sprintf("%s.jump%d", b.Func.fe.Func().LSym.Name, b.ID))
 	// The jump table symbol is accessed only from the function symbol.
 	s.Set(obj.AttrStatic, true)
 	return s
@@ -2628,7 +2628,7 @@ func rewriteStructStore(v *Value) *Value {
 	dst := v.Args[0]
 	x := v.Args[1]
 	if x.Op != OpStructMake {
-		base.Fatalf("invalid struct store: %v", x)
+		v.Block.Func.Config.gd.Fatalf("invalid struct store: %v", x)
 	}
 	mem := v.Args[2]
 
@@ -2748,7 +2748,7 @@ func flagify(v *Value) bool {
 	case OpAMD64ADDLconst:
 		flagVersion = OpAMD64ADDLconstflags
 	default:
-		base.Fatalf("can't flagify op %s", v.Op)
+		v.Block.Func.Config.gd.Fatalf("can't flagify op %s", v.Op)
 	}
 	inner := v.copyInto(v.Block)
 	inner.Op = flagVersion

@@ -5,6 +5,7 @@
 package walk
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -18,8 +19,8 @@ import (
 //
 // First-cut shapes recognised (no escape-graph dependency):
 //
-//   1. return new(T)              — single ONEW result
-//   2. return &T{...}             — single OPTRLIT result
+//  1. return new(T)              — single ONEW result
+//  2. return &T{...}             — single OPTRLIT result
 //
 // In each case the returned pointer's underlying storage is
 // provably local: there is no other reference to it inside the
@@ -35,7 +36,7 @@ import (
 // Constraint: at most one tagged temp per outBuf — addressed by
 // only recognising single-return functions in this first cut.
 // Multi-return + return &local + return p land in later cuts.
-func phaseGReturnRewrite(fn *ir.Func) {
+func phaseGReturnRewrite(gd *base.Invocation, fn *ir.Func) {
 	sig := fn.Type()
 	if sig == nil || !sig.GdReturnOutBuf() {
 		return
@@ -84,7 +85,7 @@ func phaseGReturnRewrite(fn *ir.Func) {
 			dropIdx[foldedIdx] = true
 		}
 
-		tmp, init := phaseGAllocPattern(fn, retExpr, r.Type.Elem())
+		tmp, init := phaseGAllocPattern(gd, fn, retExpr, r.Type.Elem())
 		if tmp == nil {
 			continue
 		}
@@ -93,13 +94,13 @@ func phaseGReturnRewrite(fn *ir.Func) {
 		tmp.SetEscCandidate(false)
 		tmp.SetAddrtaken(true)
 
-		decl := ir.NewDecl(retExpr.Pos(), ir.ODCL, tmp)
+		decl := ir.NewDecl(gd, retExpr.Pos(), ir.ODCL, tmp)
 		decl.SetTypecheck(1)
 		pre.Append(decl)
 		if init != nil {
 			pre.Append(init)
 		}
-		addr := typecheck.NodAddrAt(retExpr.Pos(), tmp)
+		addr := typecheck.NodAddrAt(gd, retExpr.Pos(), tmp)
 		addr.SetType(r.Type)
 		addr.SetTypecheck(1)
 		ret.Results[i] = addr
@@ -157,7 +158,7 @@ func unwrapHoistedAlloc(body ir.Nodes, retExpr ir.Node) (ir.Node, int) {
 // declared T-typed local and init (if non-nil) is the assignment
 // statement that fills it from a composite literal. Returns
 // (nil, nil) when no pattern matches.
-func phaseGAllocPattern(fn *ir.Func, retExpr ir.Node, elemT *types.Type) (*ir.Name, ir.Node) {
+func phaseGAllocPattern(gd *base.Invocation, fn *ir.Func, retExpr ir.Node, elemT *types.Type) (*ir.Name, ir.Node) {
 	switch retExpr.Op() {
 	case ir.ONEW:
 		nw := retExpr.(*ir.UnaryExpr)
@@ -167,7 +168,7 @@ func phaseGAllocPattern(fn *ir.Func, retExpr ir.Node, elemT *types.Type) (*ir.Na
 		if !types.Identical(nw.X.Type(), elemT) {
 			return nil, nil
 		}
-		tmp := typecheck.TempAt(retExpr.Pos(), fn, elemT)
+		tmp := typecheck.TempAt(gd, retExpr.Pos(), fn, elemT)
 		return tmp, nil
 
 	case ir.OPTRLIT:
@@ -178,8 +179,8 @@ func phaseGAllocPattern(fn *ir.Func, retExpr ir.Node, elemT *types.Type) (*ir.Na
 		if !types.Identical(ad.X.Type(), elemT) {
 			return nil, nil
 		}
-		tmp := typecheck.TempAt(retExpr.Pos(), fn, elemT)
-		as := ir.NewAssignStmt(retExpr.Pos(), tmp, ad.X)
+		tmp := typecheck.TempAt(gd, retExpr.Pos(), fn, elemT)
+		as := ir.NewAssignStmt(gd, retExpr.Pos(), tmp, ad.X)
 		as.SetTypecheck(1)
 		return tmp, as
 	}

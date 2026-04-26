@@ -5,6 +5,7 @@
 package syntax
 
 import (
+	"cmd/compile/internal/base"
 	"fmt"
 	"io"
 	"os"
@@ -50,7 +51,7 @@ type Pragma any
 // The handler may wish to report an error. In this case, pos is the
 // current parser position, not the position of the pragma itself.
 // Blank specifies whether the line is blank before the pragma.
-type PragmaHandler func(pos Pos, blank bool, text string, current Pragma) Pragma
+type PragmaHandler func(gd *base.Invocation, pos Pos, blank bool, text string, current Pragma) Pragma
 
 // Parse parses a single Go source file from src and returns the corresponding
 // syntax tree. If there are errors, Parse will return the first error found,
@@ -63,7 +64,7 @@ type PragmaHandler func(pos Pos, blank bool, text string, current Pragma) Pragma
 // error, and the returned syntax tree is nil.
 //
 // If pragh != nil, it is called with each pragma encountered.
-func Parse(base *PosBase, src io.Reader, errh ErrorHandler, pragh PragmaHandler, mode Mode) (_ *File, first error) {
+func Parse(gd *base.Invocation, base *PosBase, src io.Reader, errh ErrorHandler, pragh PragmaHandler, mode Mode) (_ *File, first error) {
 	defer func() {
 		if p := recover(); p != nil {
 			if err, ok := p.(Error); ok {
@@ -75,13 +76,14 @@ func Parse(base *PosBase, src io.Reader, errh ErrorHandler, pragh PragmaHandler,
 	}()
 
 	var p parser
+	p.gd = gd
 	p.init(base, src, errh, pragh, mode)
 	p.next()
 	return p.fileOrNil(), p.first
 }
 
 // ParseFile behaves like Parse but it reads the source from the named file.
-func ParseFile(filename string, errh ErrorHandler, pragh PragmaHandler, mode Mode) (*File, error) {
+func ParseFile(gd *base.Invocation, filename string, errh ErrorHandler, pragh PragmaHandler, mode Mode) (*File, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		if errh != nil {
@@ -90,5 +92,5 @@ func ParseFile(filename string, errh ErrorHandler, pragh PragmaHandler, mode Mod
 		return nil, err
 	}
 	defer f.Close()
-	return Parse(NewFileBase(filename), f, errh, pragh, mode)
+	return Parse(gd, NewFileBase(filename), f, errh, pragh, mode)
 }

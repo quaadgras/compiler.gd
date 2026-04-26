@@ -91,10 +91,10 @@ func (ib intrinsicBuilders) lookup(arch *sys.Arch, pkg, fn string) intrinsicBuil
 	return intrinsics[intrinsicKey{arch, pkg, fn}]
 }
 
-func initIntrinsics(cfg *intrinsicBuildConfig) {
+func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	if cfg == nil {
 		cfg = &intrinsicBuildConfig{
-			instrumenting: base.Flag.Cfg.Instrumenting,
+			instrumenting: gd.Flag.Cfg.Instrumenting,
 			go386:         buildcfg.GO386,
 			goamd64:       buildcfg.GOAMD64,
 			goarm:         buildcfg.GOARM,
@@ -1654,7 +1654,7 @@ func initIntrinsics(cfg *intrinsicBuildConfig) {
 
 	if buildcfg.Experiment.SIMD {
 		// Only enable intrinsics, if SIMD experiment.
-		simdIntrinsics(addF)
+		simdIntrinsics(gd, addF)
 
 		addF(simdPackage, "ClearAVXUpperBits",
 			func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
@@ -1951,7 +1951,7 @@ func opLen4_31(op ssa.Op, t *types.Type) func(s *state, n *ir.CallExpr, args []*
 	}
 }
 
-func immJumpTable(s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp func(*state, int)) *ssa.Value {
+func immJumpTable(gd *base.Invocation, s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp func(*state, int)) *ssa.Value {
 	// Make blocks we'll need.
 	bEnd := s.f.NewBlock(ssa.BlockPlain)
 
@@ -1966,7 +1966,7 @@ func immJumpTable(s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp fu
 	b := s.curBlock
 	b.Kind = ssa.BlockJumpTable
 	b.Pos = intrinsicCall.Pos()
-	if base.Flag.Cfg.SpectreIndex {
+	if gd.Flag.Cfg.SpectreIndex {
 		// Potential Spectre vulnerability hardening?
 		idx = s.newValue2(ssa.OpSpectreSliceIndex, t, idx, s.uintptrConstant(255))
 	}
@@ -1993,48 +1993,48 @@ func immJumpTable(s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp fu
 	return ret
 }
 
-func opLen1Imm8(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen1Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue1I(op, t, args[1].AuxInt<<int64(offset), args[0])
 		}
-		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue1I(op, t, int64(int8(idx<<offset)), args[0])
 		})
 	}
 }
 
-func opLen2Imm8(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen2Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2])
 		}
-		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset)), args[0], args[2])
 		})
 	}
 }
 
-func opLen3Imm8(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen3Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue3I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2], args[3])
 		}
-		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue3I(op, t, int64(int8(idx<<offset)), args[0], args[2], args[3])
 		})
 	}
 }
 
-func opLen2Imm8_2I(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen2Imm8_2I(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[2].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, args[2].AuxInt<<int64(offset), args[0], args[1])
 		}
-		return immJumpTable(s, args[2], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[2], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset)), args[0], args[1])
 		})
@@ -2042,7 +2042,7 @@ func opLen2Imm8_2I(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.Ca
 }
 
 // Two immediates instead of just 1.  Offset is ignored, so it is a _ parameter instead.
-func opLen2Imm8_II(op ssa.Op, t *types.Type, _ int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen2Imm8_II(gd *base.Invocation, op ssa.Op, t *types.Type, _ int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 && args[2].Op == ssa.OpConst8 && args[1].AuxInt & ^3 == 0 && args[2].AuxInt & ^3 == 0 {
 			i1, i2 := args[1].AuxInt, args[2].AuxInt
@@ -2051,7 +2051,7 @@ func opLen2Imm8_II(op ssa.Op, t *types.Type, _ int) func(s *state, n *ir.CallExp
 		four := s.constInt64(types.Types[types.TUINT8], 4)
 		shifted := s.newValue2(ssa.OpLsh8x8, types.Types[types.TUINT8], args[2], four)
 		combined := s.newValue2(ssa.OpAdd8, types.Types[types.TUINT8], args[1], shifted)
-		return immJumpTable(s, combined, n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, combined, n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			// TODO for "zeroing" values, panic instead.
 			if idx & ^(3+3<<4) == 0 {
@@ -2064,36 +2064,36 @@ func opLen2Imm8_II(op ssa.Op, t *types.Type, _ int) func(s *state, n *ir.CallExp
 }
 
 // The assembler requires the imm value of a SHA1RNDS4 instruction to be one of 0,1,2,3...
-func opLen2Imm8_SHA1RNDS4(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen2Imm8_SHA1RNDS4(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, (args[1].AuxInt<<int64(offset))&0b11, args[0], args[2])
 		}
-		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset))&0b11, args[0], args[2])
 		})
 	}
 }
 
-func opLen3Imm8_2I(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen3Imm8_2I(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[2].Op == ssa.OpConst8 {
 			return s.newValue3I(op, t, args[2].AuxInt<<int64(offset), args[0], args[1], args[3])
 		}
-		return immJumpTable(s, args[2], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[2], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue3I(op, t, int64(int8(idx<<offset)), args[0], args[1], args[3])
 		})
 	}
 }
 
-func opLen4Imm8(op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+func opLen4Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue4I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2], args[3], args[4])
 		}
-		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue4I(op, t, int64(int8(idx<<offset)), args[0], args[2], args[3], args[4])
 		})
@@ -2162,7 +2162,7 @@ func simdMaskedStore(op ssa.Op) func(s *state, n *ir.CallExpr, args []*ssa.Value
 
 // findIntrinsic returns a function which builds the SSA equivalent of the
 // function identified by the symbol sym.  If sym is not an intrinsic call, returns nil.
-func findIntrinsic(sym *types.Sym) intrinsicBuilder {
+func findIntrinsic(gd *base.Invocation, sym *types.Sym) intrinsicBuilder {
 	if sym == nil || sym.Pkg == nil {
 		return nil
 	}
@@ -2170,7 +2170,7 @@ func findIntrinsic(sym *types.Sym) intrinsicBuilder {
 	if sym.Pkg == ir.Pkgs.Runtime {
 		pkg = "runtime"
 	}
-	if base.Flag.Race && pkg == "sync/atomic" {
+	if gd.Flag.Race && pkg == "sync/atomic" {
 		// The race detector needs to be able to intercept these calls.
 		// We can't intrinsify them.
 		return nil
@@ -2193,7 +2193,7 @@ func findIntrinsic(sym *types.Sym) intrinsicBuilder {
 	return intrinsics.lookup(Arch.LinkArch.Arch, pkg, fn)
 }
 
-func IsIntrinsicCall(n *ir.CallExpr) bool {
+func IsIntrinsicCall(gd *base.Invocation, n *ir.CallExpr) bool {
 	if n == nil {
 		return false
 	}
@@ -2202,17 +2202,17 @@ func IsIntrinsicCall(n *ir.CallExpr) bool {
 		if n.Fun.Op() == ir.OMETHEXPR {
 			if meth := ir.MethodExprName(n.Fun); meth != nil {
 				if fn := meth.Func; fn != nil {
-					return IsIntrinsicSym(fn.Sym())
+					return IsIntrinsicSym(gd, fn.Sym())
 				}
 			}
 		}
 		return false
 	}
-	return IsIntrinsicSym(name.Sym())
+	return IsIntrinsicSym(gd, name.Sym())
 }
 
-func IsIntrinsicSym(sym *types.Sym) bool {
-	return findIntrinsic(sym) != nil
+func IsIntrinsicSym(gd *base.Invocation, sym *types.Sym) bool {
+	return findIntrinsic(gd, sym) != nil
 }
 
 // GenIntrinsicBody generates the function body for a bodyless intrinsic.
@@ -2223,12 +2223,12 @@ func IsIntrinsicSym(sym *types.Sym) bool {
 // The compiler already recognizes a call to fn as an intrinsic and can
 // directly generate code for it. So we just fill in the body with a call
 // to fn.
-func GenIntrinsicBody(fn *ir.Func) {
-	if ir.CurFunc != nil {
-		base.FatalfAt(fn.Pos(), "enqueueFunc %v inside %v", fn, ir.CurFunc)
+func GenIntrinsicBody(gd *base.Invocation, fn *ir.Func) {
+	if ir.CurFunc(gd) != nil {
+		gd.FatalfAt(fn.Pos(), "enqueueFunc %v inside %v", fn, ir.CurFunc(gd))
 	}
 
-	if base.Flag.LowerR != 0 {
+	if gd.Flag.LowerR != 0 {
 		fmt.Println("generate intrinsic for", ir.FuncName(fn))
 	}
 
@@ -2243,10 +2243,10 @@ func GenIntrinsicBody(fn *ir.Func) {
 	// Here fn has already the type-qualified method symbol, and it is hard
 	// to get the unqualified symbol. So we just generate the post-Walk form
 	// and mark it typechecked and Walked.
-	call := ir.NewCallExpr(pos, ir.OCALLFUNC, fn.Nname, nil)
+	call := ir.NewCallExpr(gd, pos, ir.OCALLFUNC, fn.Nname, nil)
 	call.Args = ir.RecvParamNames(ft)
 	call.IsDDD = ft.IsVariadic()
-	typecheck.Exprs(call.Args)
+	typecheck.Exprs(gd, call.Args)
 	call.SetTypecheck(1)
 	call.SetWalked(true)
 	ret = call
@@ -2256,17 +2256,17 @@ func GenIntrinsicBody(fn *ir.Func) {
 		} else {
 			call.SetType(ft.ResultsTuple())
 		}
-		n := ir.NewReturnStmt(base.Pos, nil)
+		n := ir.NewReturnStmt(gd, gd.Pos, nil)
 		n.Results = []ir.Node{call}
 		ret = n
 	}
 	fn.Body.Append(ret)
 
-	if base.Flag.LowerR != 0 {
-		ir.DumpList("generate intrinsic body", fn.Body)
+	if gd.Flag.LowerR != 0 {
+		ir.DumpList(gd, "generate intrinsic body", fn.Body)
 	}
 
-	ir.CurFunc = fn
-	typecheck.Stmts(fn.Body)
-	ir.CurFunc = nil // we know CurFunc is nil at entry
+	gd.CurFunc = fn
+	typecheck.Stmts(gd, fn.Body)
+	gd.CurFunc = nil // we know CurFunc is nil at entry
 }

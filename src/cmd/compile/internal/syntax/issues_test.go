@@ -31,7 +31,7 @@ func TestIssue67866(t *testing.T) {
 		src = src[:i] + src[i+1:]
 		want := colbase + uint(i)
 
-		f, err := Parse(nil, strings.NewReader(src), nil, nil, 0)
+		f, err := Parse(testGd, nil, strings.NewReader(src), nil, nil, 0)
 		if err != nil {
 			t.Errorf("%s: %v", src, err)
 			continue

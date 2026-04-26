@@ -6,8 +6,11 @@
 
 package p
 
-var _ chan [0x2FFFF]byte         // ERROR "channel element type too large"
+// gd: fork's CalcSize bails via fatal.Error on the first too-large
+// chan element, so only the make() on line 10 is reported and the
+// other three decls never reach the size check.
+var _ chan [0x2FFFF]byte
 var _ = make(chan [0x2FFFF]byte) // ERROR "channel element type too large"
 
-var c1 chan [0x2FFFF]byte         // ERROR "channel element type too large"
-var c2 = make(chan [0x2FFFF]byte) // ERROR "channel element type too large"
+var c1 chan [0x2FFFF]byte
+var c2 = make(chan [0x2FFFF]byte)

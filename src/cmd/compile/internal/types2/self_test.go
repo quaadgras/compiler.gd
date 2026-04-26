@@ -107,7 +107,7 @@ func pkgFiles(path string) ([]*syntax.File, error) {
 
 	var files []*syntax.File
 	for _, filename := range filenames {
-		file, err := syntax.ParseFile(filename, nil, nil, 0)
+		file, err := syntax.ParseFile(testGd, filename, nil, nil, 0)
 		if err != nil {
 			return nil, err
 		}

@@ -130,7 +130,7 @@ func (ra *resultsAnalyzer) nodeVisitPost(n ir.Node) {
 	}
 	if debugTrace&debugTraceResults != 0 {
 		fmt.Fprintf(os.Stderr, "=+= returns nodevis %v %s\n",
-			ir.Line(n), n.Op().String())
+			ir.Line(ra.gd, n), n.Op().String())
 	}
 
 	// No support currently for named results, so if we see an empty
@@ -167,7 +167,7 @@ func (ra *resultsAnalyzer) analyzeResult(ii int, n ir.Node) {
 	var newfunc *ir.Name
 
 	if debugTrace&debugTraceResults != 0 {
-		fmt.Fprintf(os.Stderr, "=-= %v: analyzeResult n=%s ismem=%v isconcconv=%v isconst=%v isnil=%v isfunc=%v isclo=%v\n", ir.Line(n), n.Op().String(), isAllocMem, isConcConvItf, isConst, isNil, isFunc, isClo)
+		fmt.Fprintf(os.Stderr, "=-= %v: analyzeResult n=%s ismem=%v isconcconv=%v isconst=%v isnil=%v isfunc=%v isclo=%v\n", ir.Line(ra.gd, n), n.Op().String(), isAllocMem, isConcConvItf, isConst, isNil, isFunc, isClo)
 	}
 
 	if ra.values[ii].top {
@@ -230,7 +230,7 @@ func (ra *resultsAnalyzer) analyzeResult(ii int, n ir.Node) {
 
 	if debugTrace&debugTraceResults != 0 {
 		fmt.Fprintf(os.Stderr, "=-= %v: analyzeResult newp=%s\n",
-			ir.Line(n), newp)
+			ir.Line(ra.gd, n), newp)
 	}
 }
 

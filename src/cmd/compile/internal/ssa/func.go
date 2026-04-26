@@ -264,7 +264,7 @@ func (f *Func) SplitArray(name *LocalSlot) *LocalSlot {
 	n := name.N
 	at := name.Type
 	if at.NumElem() != 1 {
-		base.FatalfAt(n.Pos(), "bad array size")
+		f.Config.gd.FatalfAt(n.Pos(), "bad array size")
 	}
 	et := at.Elem()
 	return f.SplitSlot(name, "[0]", 0, et)
@@ -863,7 +863,7 @@ func (f *Func) useFMA(v *Value) bool {
 
 // NewLocal returns a new anonymous local variable of the given type.
 func (f *Func) NewLocal(pos src.XPos, typ *types.Type) *ir.Name {
-	nn := typecheck.TempAt(pos, f.fe.Func(), typ) // Note: adds new auto to fn.Dcl list
+	nn := typecheck.TempAt(f.Config.gd, pos, f.fe.Func(), typ) // Note: adds new auto to fn.Dcl list
 	nn.SetNonMergeable(true)
 	return nn
 }
@@ -873,9 +873,9 @@ func (f *Func) NewLocal(pos src.XPos, typ *types.Type) *ir.Name {
 // items larger than what CanSSA would allow (approximateky, we disallow things
 // marked as open defer slots so as to avoid complicating liveness
 // analysis.
-func IsMergeCandidate(n *ir.Name) bool {
-	if base.Debug.MergeLocals == 0 ||
-		base.Flag.N != 0 ||
+func IsMergeCandidate(gd *base.Invocation, n *ir.Name) bool {
+	if gd.Debug.MergeLocals == 0 ||
+		gd.Flag.N != 0 ||
 		n.Class != ir.PAUTO ||
 		n.Type().Size() <= int64(3*types.PtrSize) ||
 		n.Addrtaken() ||

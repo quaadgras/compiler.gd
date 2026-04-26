@@ -5,7 +5,6 @@
 package escape
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 )
@@ -25,9 +24,9 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		return
 	}
 
-	lno := ir.SetPos(n)
+	lno := ir.SetPos(e.gd, n)
 	defer func() {
-		base.Pos = lno
+		e.gd.Pos = lno
 	}()
 
 	if k.derefs >= 0 && !n.Type().IsUntyped() && !n.Type().HasPointers() {
@@ -36,7 +35,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 
 	switch n.Op() {
 	default:
-		base.Fatalf("unexpected expr: %s %v", n.Op().String(), n)
+		e.gd.Fatalf("unexpected expr: %s %v", n.Op().String(), n)
 
 	case ir.OLITERAL, ir.ONIL, ir.OGETG, ir.OGETCALLERSP, ir.OTYPE, ir.OMETHEXPR, ir.OLINKSYMOFFSET:
 		// nop
@@ -61,30 +60,30 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.discard(n.Y)
 	case ir.OADDR:
 		n := n.(*ir.AddrExpr)
-		e.expr(k.addr(n, "address-of"), n.X) // "address-of"
+		e.expr(k.addr(e.gd, n, "address-of"), n.X) // "address-of"
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
-		e.expr(k.deref(n, "indirection"), n.X) // "indirection"
+		e.expr(k.deref(e.gd, n, "indirection"), n.X) // "indirection"
 	case ir.ODOT, ir.ODOTMETH, ir.ODOTINTER:
 		n := n.(*ir.SelectorExpr)
-		e.expr(k.note(n, "dot"), n.X)
+		e.expr(k.note(e.gd, n, "dot"), n.X)
 	case ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
-		e.expr(k.deref(n, "dot of pointer"), n.X) // "dot of pointer"
+		e.expr(k.deref(e.gd, n, "dot of pointer"), n.X) // "dot of pointer"
 	case ir.ODOTTYPE, ir.ODOTTYPE2:
 		n := n.(*ir.TypeAssertExpr)
-		e.expr(k.dotType(n.Type(), n, "dot"), n.X)
+		e.expr(k.dotType(e.gd, n.Type(), n, "dot"), n.X)
 	case ir.ODYNAMICDOTTYPE, ir.ODYNAMICDOTTYPE2:
 		n := n.(*ir.DynamicTypeAssertExpr)
-		e.expr(k.dotType(n.Type(), n, "dot"), n.X)
+		e.expr(k.dotType(e.gd, n.Type(), n, "dot"), n.X)
 		// n.T doesn't need to be tracked; it always points to read-only storage.
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
 		if n.X.Type().IsArray() {
-			e.expr(k.note(n, "fixed-array-index-of"), n.X)
+			e.expr(k.note(e.gd, n, "fixed-array-index-of"), n.X)
 		} else {
 			// TODO(mdempsky): Fix why reason text.
-			e.expr(k.deref(n, "dot of pointer"), n.X)
+			e.expr(k.deref(e.gd, n, "dot of pointer"), n.X)
 		}
 		e.discard(n.Index)
 	case ir.OINDEXMAP:
@@ -93,14 +92,14 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.discard(n.Index)
 	case ir.OSLICE, ir.OSLICEARR, ir.OSLICE3, ir.OSLICE3ARR, ir.OSLICESTR:
 		n := n.(*ir.SliceExpr)
-		e.expr(k.note(n, "slice"), n.X)
+		e.expr(k.note(e.gd, n, "slice"), n.X)
 		e.discard(n.Low)
 		e.discard(n.High)
 		e.discard(n.Max)
 
 	case ir.OCONV, ir.OCONVNOP:
 		n := n.(*ir.ConvExpr)
-		if (ir.ShouldCheckPtr(e.curfn, 2) || ir.ShouldAsanCheckPtr(e.curfn)) && n.Type().IsUnsafePtr() && n.X.Type().IsPtr() {
+		if (ir.ShouldCheckPtr(e.gd, e.curfn, 2) || ir.ShouldAsanCheckPtr(e.gd, e.curfn)) && n.Type().IsUnsafePtr() && n.X.Type().IsPtr() {
 			// When -d=checkptr=2 or -asan is enabled,
 			// treat conversions to unsafe.Pointer as an
 			// escaping operation. This allows better
@@ -118,7 +117,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		if !n.X.Type().IsInterface() && !types.IsDirectIface(n.X.Type()) {
 			k = e.spill(k, n)
 		}
-		e.expr(k.note(n, "interface-converted"), n.X)
+		e.expr(k.note(e.gd, n, "interface-converted"), n.X)
 	case ir.OMAKEFACE:
 		n := n.(*ir.BinaryExpr)
 		// Note: n.X is not needed because it can never point to memory that might escape.
@@ -129,7 +128,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	case ir.OSLICE2ARR:
 		// Converting a slice to array is effectively a deref.
 		n := n.(*ir.ConvExpr)
-		e.expr(k.deref(n, "slice-to-array"), n.X)
+		e.expr(k.deref(e.gd, n, "slice-to-array"), n.X)
 	case ir.OSLICE2ARRPTR:
 		// the slice pointer flows directly to the result
 		n := n.(*ir.ConvExpr)
@@ -207,7 +206,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 			if elt.Op() == ir.OKEY {
 				elt = elt.(*ir.KeyExpr).Value
 			}
-			e.expr(k.note(n, "array literal element"), elt)
+			e.expr(k.note(e.gd, n, "array literal element"), elt)
 		}
 
 	case ir.OSLICELIT:
@@ -218,13 +217,13 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 			if elt.Op() == ir.OKEY {
 				elt = elt.(*ir.KeyExpr).Value
 			}
-			e.expr(k.note(n, "slice-literal-element"), elt)
+			e.expr(k.note(e.gd, n, "slice-literal-element"), elt)
 		}
 
 	case ir.OSTRUCTLIT:
 		n := n.(*ir.CompLitExpr)
 		for _, elt := range n.List {
-			e.expr(k.note(n, "struct literal element"), elt.(*ir.StructKeyExpr).Value)
+			e.expr(k.note(e.gd, n, "struct literal element"), elt.(*ir.StructKeyExpr).Value)
 		}
 
 	case ir.OMAPLIT:
@@ -291,10 +290,10 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 // for conversions from an unsafe.Pointer.
 func (e *escape) unsafeValue(k hole, n ir.Node) {
 	if n.Type().Kind() != types.TUINTPTR {
-		base.Fatalf("unexpected type %v for %v", n.Type(), n)
+		e.gd.Fatalf("unexpected type %v for %v", n.Type(), n)
 	}
 	if k.addrtaken {
-		base.Fatalf("unexpected addrtaken")
+		e.gd.Fatalf("unexpected addrtaken")
 	}
 
 	e.stmts(n.Init())
@@ -310,7 +309,7 @@ func (e *escape) unsafeValue(k hole, n ir.Node) {
 	case ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
 		if ir.IsReflectHeaderDataField(n) {
-			e.expr(k.deref(n, "reflect.Header.Data"), n.X)
+			e.expr(k.deref(e.gd, n, "reflect.Header.Data"), n.X)
 		} else {
 			e.discard(n.X)
 		}
@@ -349,6 +348,6 @@ func (e *escape) discards(l ir.Nodes) {
 // intended for use with most expressions that allocate storage.
 func (e *escape) spill(k hole, n ir.Node) hole {
 	loc := e.newLoc(n, false)
-	e.flow(k.addr(n, "spill"), loc)
+	e.flow(k.addr(e.gd, n, "spill"), loc)
 	return loc.asHole()
 }

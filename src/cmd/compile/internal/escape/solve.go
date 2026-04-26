@@ -5,7 +5,6 @@
 package escape
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
 	"cmd/internal/src"
@@ -116,9 +115,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			// outlives it, then l needs to be heap
 			// allocated.
 			if b.outlives(root, l) {
-				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || base.Flag.LowerM >= 2) {
-					if base.Flag.LowerM >= 2 {
-						fmt.Printf("%s: %v escapes to heap in %v:\n", base.FmtPos(l.n.Pos()), l.n, ir.FuncName(l.curfn))
+				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || b.gd.Flag.LowerM >= 2) {
+					if b.gd.Flag.LowerM >= 2 {
+						fmt.Printf("%s: %v escapes to heap in %v:\n", b.gd.FmtPos(l.n.Pos()), l.n, ir.FuncName(l.curfn))
 					}
 					explanation := b.explainPath(root, l)
 					if logopt.Enabled() {
@@ -154,9 +153,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		// later.
 		if l.param {
 			if b.outlives(root, l) {
-				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || base.Flag.LowerM >= 2) {
-					if base.Flag.LowerM >= 2 {
-						fmt.Printf("%s: parameter %v leaks to %s for %v with derefs=%d:\n", base.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), derefs)
+				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || b.gd.Flag.LowerM >= 2) {
+					if b.gd.Flag.LowerM >= 2 {
+						fmt.Printf("%s: parameter %v leaks to %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), derefs)
 					}
 					explanation := b.explainPath(root, l)
 					if logopt.Enabled() {
@@ -165,13 +164,13 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 							fmt.Sprintf("parameter %v leaks to %s with derefs=%d", l.n, b.explainLoc(root), derefs), explanation)
 					}
 				}
-				l.leakTo(root, derefs)
+				l.leakTo(b.gd, root, derefs)
 			}
 			if root.hasAttr(attrMutates) {
-				l.paramEsc.AddMutator(derefs)
+				l.paramEsc.AddMutator(b.gd, derefs)
 			}
 			if root.hasAttr(attrCalls) {
-				l.paramEsc.AddCallee(derefs)
+				l.paramEsc.AddCallee(b.gd, derefs)
 			}
 		}
 
@@ -209,19 +208,19 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 // explainPath prints an explanation of how src flows to the walk root.
 func (b *batch) explainPath(root, src *location) []*logopt.LoggedOpt {
 	visited := make(map[*location]bool)
-	pos := base.FmtPos(src.n.Pos())
+	pos := b.gd.FmtPos(src.n.Pos())
 	var explanation []*logopt.LoggedOpt
 	for {
 		// Prevent infinite loop.
 		if visited[src] {
-			if base.Flag.LowerM >= 2 {
+			if b.gd.Flag.LowerM >= 2 {
 				fmt.Printf("%s:   warning: truncated explanation due to assignment cycle; see golang.org/issue/35518\n", pos)
 			}
 			break
 		}
 		visited[src] = true
 		// src.dst points at the next hop toward root; root itself has
-		// dst=nil (walkOne:80). When src == root (Phase F: a synthetic
+		// dst=nil (walkOne:79). When src == root (Phase F: a synthetic
 		// param loc that gained attrCandidateEscape becomes its own
 		// walkAll root, so outlives(root,root) is true and we still
 		// enter the param branch), the flow is trivially empty.
@@ -231,7 +230,7 @@ func (b *batch) explainPath(root, src *location) []*logopt.LoggedOpt {
 		dst := src.dst
 		edge := &dst.edges[src.dstEdgeIdx]
 		if edge.src != src {
-			base.Fatalf("path inconsistency: %v != %v", edge.src, src)
+			b.gd.Fatalf("path inconsistency: %v != %v", edge.src, src)
 		}
 
 		explanation = b.explainFlow(pos, dst, src, edge.derefs, edge.notes, explanation)
@@ -250,7 +249,7 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 	if derefs >= 0 {
 		ops = strings.Repeat("*", derefs)
 	}
-	print := base.Flag.LowerM >= 2
+	print := b.gd.Flag.LowerM >= 2
 
 	flow := fmt.Sprintf("   flow: %s ← %s%v:", b.explainLoc(dst), ops, b.explainLoc(srcloc))
 	if print {
@@ -269,7 +268,7 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 
 	for note := notes; note != nil; note = note.next {
 		if print {
-			fmt.Printf("%s:     from %v (%v) at %s\n", pos, note.where, note.why, base.FmtPos(note.where.Pos()))
+			fmt.Printf("%s:     from %v (%v) at %s\n", pos, note.where, note.why, b.gd.FmtPos(note.where.Pos()))
 		}
 		if logopt.Enabled() {
 			var e_curfn *ir.Func // TODO(mdempsky): Fix.

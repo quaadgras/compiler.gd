@@ -26,11 +26,11 @@ type varPos struct {
 // This is the main entry point for collection of raw material to
 // drive generation of DWARF "inlined subroutine" DIEs. See proposal
 // 22080 for more details and background info.
-func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
+func assembleInlines(gd *base.Invocation, fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 	var inlcalls dwarf.InlCalls
 
-	if base.Debug.DwarfInl != 0 {
-		base.Ctxt.Logf("assembling DWARF inlined routine info for %v\n", fnsym.Name)
+	if gd.Debug.DwarfInl != 0 {
+		gd.Ctxt.Logf("assembling DWARF inlined routine info for %v\n", fnsym.Name)
 	}
 
 	// This maps inline index (from Ctxt.InlTree) to index in inlcalls.Calls
@@ -42,9 +42,9 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 		if p.Pos == prevpos {
 			continue
 		}
-		ii := posInlIndex(p.Pos)
+		ii := posInlIndex(gd, p.Pos)
 		if ii >= 0 {
-			insertInlCall(&inlcalls, ii, imap)
+			insertInlCall(gd, &inlcalls, ii, imap)
 		}
 		prevpos = p.Pos
 	}
@@ -73,7 +73,7 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 			// We can occasionally encounter a var produced by the
 			// inliner for which there is no remaining prog; add a new
 			// entry to the call list in this scenario.
-			idx = insertInlCall(&inlcalls, ii, imap)
+			idx = insertInlCall(gd, &inlcalls, ii, imap)
 		}
 		inlcalls.Calls[idx].InlVars =
 			append(inlcalls.Calls[idx].InlVars, dwv)
@@ -107,10 +107,10 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 				}
 				continue
 			}
-			m = makePreinlineDclMap(fnsym)
+			m = makePreinlineDclMap(gd, fnsym)
 		} else {
-			ifnlsym := base.Ctxt.InlTree.InlinedFunction(int(ii - 1))
-			m = makePreinlineDclMap(ifnlsym)
+			ifnlsym := gd.Ctxt.InlTree.InlinedFunction(int(ii - 1))
+			m = makePreinlineDclMap(gd, ifnlsym)
 		}
 
 		// Here we assign child indices to variables based on
@@ -156,20 +156,20 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 		if prevp != nil && p.Pos == prevp.Pos {
 			continue
 		}
-		ii := posInlIndex(p.Pos)
+		ii := posInlIndex(gd, p.Pos)
 		if ii == curii {
 			continue
 		}
 		// Close out the current range
 		if start != -1 {
-			addRange(inlcalls.Calls, start, p.Pc, curii, imap)
+			addRange(gd, inlcalls.Calls, start, p.Pc, curii, imap)
 		}
 		// Begin new range
 		start = p.Pc
 		curii = ii
 	}
 	if start != -1 {
-		addRange(inlcalls.Calls, start, fnsym.Size, curii, imap)
+		addRange(gd, inlcalls.Calls, start, fnsym.Size, curii, imap)
 	}
 
 	// Issue 33188: if II foo is a child of II bar, then ensure that
@@ -182,9 +182,9 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 	}
 
 	// Debugging
-	if base.Debug.DwarfInl != 0 {
-		dumpInlCalls(inlcalls)
-		dumpInlVars(dwVars)
+	if gd.Debug.DwarfInl != 0 {
+		dumpInlCalls(gd, inlcalls)
+		dumpInlVars(gd, dwVars)
 	}
 
 	// Perform a consistency check on inlined routine PC ranges
@@ -194,7 +194,7 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 	// within the ranges for A, or C within B.
 	for k, c := range inlcalls.Calls {
 		if c.Root {
-			checkInlCall(fnsym.Name, inlcalls, fnsym.Size, k, -1)
+			checkInlCall(gd, fnsym.Name, inlcalls, fnsym.Size, k, -1)
 		}
 	}
 
@@ -205,17 +205,17 @@ func assembleInlines(fnsym *obj.LSym, dwVars []*dwarf.Var) dwarf.InlCalls {
 // late in the compilation when it is determined that we need an
 // abstract function DIE for an inlined routine imported from a
 // previously compiled package.
-func AbstractFunc(fn *obj.LSym) {
-	ifn := base.Ctxt.DwFixups.GetPrecursorFunc(fn)
+func AbstractFunc(gd *base.Invocation, fn *obj.LSym) {
+	ifn := gd.Ctxt.DwFixups.GetPrecursorFunc(fn)
 	if ifn == nil {
-		base.Ctxt.Diag("failed to locate precursor fn for %v", fn)
+		gd.Ctxt.Diag("failed to locate precursor fn for %v", fn)
 		return
 	}
 	_ = ifn.(*ir.Func)
-	if base.Debug.DwarfInl != 0 {
-		base.Ctxt.Logf("DwarfAbstractFunc(%v)\n", fn.Name)
+	if gd.Debug.DwarfInl != 0 {
+		gd.Ctxt.Logf("DwarfAbstractFunc(%v)\n", fn.Name)
 	}
-	base.Ctxt.DwarfAbstractFunc(ifn, fn)
+	gd.Ctxt.DwarfAbstractFunc(ifn, fn)
 }
 
 // Given a function that was inlined as part of the compilation, dig
@@ -224,11 +224,11 @@ func AbstractFunc(fn *obj.LSym) {
 // position/name. NB: the recipe for computing variable pos/file/line
 // needs to be kept in sync with the similar code in gc.createSimpleVars
 // and related functions.
-func makePreinlineDclMap(fnsym *obj.LSym) map[varPos]int {
-	dcl := preInliningDcls(fnsym)
+func makePreinlineDclMap(gd *base.Invocation, fnsym *obj.LSym) map[varPos]int {
+	dcl := preInliningDcls(gd, fnsym)
 	m := make(map[varPos]int)
 	for i, n := range dcl {
-		pos := base.Ctxt.InnermostPos(n.Pos())
+		pos := gd.Ctxt.InnermostPos(n.Pos())
 		vp := varPos{
 			DeclName: n.Sym().Name,
 			DeclFile: pos.RelFilename(),
@@ -244,7 +244,7 @@ func makePreinlineDclMap(fnsym *obj.LSym) map[varPos]int {
 	return m
 }
 
-func insertInlCall(dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
+func insertInlCall(gd *base.Invocation, dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
 	callIdx, found := imap[inlIdx]
 	if found {
 		return callIdx
@@ -254,16 +254,16 @@ func insertInlCall(dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
 	// is one. We do this first so that parents appear before their
 	// children in the resulting table.
 	parCallIdx := -1
-	parInlIdx := base.Ctxt.InlTree.Parent(inlIdx)
+	parInlIdx := gd.Ctxt.InlTree.Parent(inlIdx)
 	if parInlIdx >= 0 {
-		parCallIdx = insertInlCall(dwcalls, parInlIdx, imap)
+		parCallIdx = insertInlCall(gd, dwcalls, parInlIdx, imap)
 	}
 
 	// Create new entry for this inline
-	inlinedFn := base.Ctxt.InlTree.InlinedFunction(inlIdx)
-	callXPos := base.Ctxt.InlTree.CallPos(inlIdx)
-	callPos := base.Ctxt.InnermostPos(callXPos)
-	absFnSym := base.Ctxt.DwFixups.AbsFuncDwarfSym(inlinedFn)
+	inlinedFn := gd.Ctxt.InlTree.InlinedFunction(inlIdx)
+	callXPos := gd.Ctxt.InlTree.CallPos(inlIdx)
+	callPos := gd.Ctxt.InnermostPos(callXPos)
+	absFnSym := gd.Ctxt.DwFixups.AbsFuncDwarfSym(inlinedFn)
 	ic := dwarf.InlCall{
 		InlIndex:  inlIdx,
 		CallPos:   callPos,
@@ -289,8 +289,8 @@ func insertInlCall(dwcalls *dwarf.InlCalls, inlIdx int, imap map[int]int) int {
 // calls C calls D" and all three callees are inlined (B, C, and D),
 // the index for a node from the inlined body of D will refer to the
 // call to D from C. Whew.
-func posInlIndex(xpos src.XPos) int {
-	pos := base.Ctxt.PosTable.Pos(xpos)
+func posInlIndex(gd *base.Invocation, xpos src.XPos) int {
+	pos := gd.Ctxt.PosTable.Pos(xpos)
 	if b := pos.Base(); b != nil {
 		ii := b.InliningIndex()
 		if ii >= 0 {
@@ -300,7 +300,7 @@ func posInlIndex(xpos src.XPos) int {
 	return -1
 }
 
-func addRange(calls []dwarf.InlCall, start, end int64, ii int, imap map[int]int) {
+func addRange(gd *base.Invocation, calls []dwarf.InlCall, start, end int64, ii int, imap map[int]int) {
 	if start == -1 {
 		panic("bad range start")
 	}
@@ -316,46 +316,46 @@ func addRange(calls []dwarf.InlCall, start, end int64, ii int, imap map[int]int)
 	// Append range to correct inlined call
 	callIdx, found := imap[ii]
 	if !found {
-		base.Fatalf("can't find inlIndex %d in imap for prog at %d\n", ii, start)
+		gd.Fatalf("can't find inlIndex %d in imap for prog at %d\n", ii, start)
 	}
 	call := &calls[callIdx]
 	call.Ranges = append(call.Ranges, dwarf.Range{Start: start, End: end})
 }
 
-func dumpInlCall(inlcalls dwarf.InlCalls, idx, ilevel int) {
+func dumpInlCall(gd *base.Invocation, inlcalls dwarf.InlCalls, idx, ilevel int) {
 	for i := 0; i < ilevel; i++ {
-		base.Ctxt.Logf("  ")
+		gd.Ctxt.Logf("  ")
 	}
 	ic := inlcalls.Calls[idx]
-	callee := base.Ctxt.InlTree.InlinedFunction(ic.InlIndex)
-	base.Ctxt.Logf("  %d: II:%d (%s) V: (", idx, ic.InlIndex, callee.Name)
+	callee := gd.Ctxt.InlTree.InlinedFunction(ic.InlIndex)
+	gd.Ctxt.Logf("  %d: II:%d (%s) V: (", idx, ic.InlIndex, callee.Name)
 	for _, f := range ic.InlVars {
-		base.Ctxt.Logf(" %v", f.Name)
+		gd.Ctxt.Logf(" %v", f.Name)
 	}
-	base.Ctxt.Logf(" ) C: (")
+	gd.Ctxt.Logf(" ) C: (")
 	for _, k := range ic.Children {
-		base.Ctxt.Logf(" %v", k)
+		gd.Ctxt.Logf(" %v", k)
 	}
-	base.Ctxt.Logf(" ) R:")
+	gd.Ctxt.Logf(" ) R:")
 	for _, r := range ic.Ranges {
-		base.Ctxt.Logf(" [%d,%d)", r.Start, r.End)
+		gd.Ctxt.Logf(" [%d,%d)", r.Start, r.End)
 	}
-	base.Ctxt.Logf("\n")
+	gd.Ctxt.Logf("\n")
 	for _, k := range ic.Children {
-		dumpInlCall(inlcalls, k, ilevel+1)
+		dumpInlCall(gd, inlcalls, k, ilevel+1)
 	}
 
 }
 
-func dumpInlCalls(inlcalls dwarf.InlCalls) {
+func dumpInlCalls(gd *base.Invocation, inlcalls dwarf.InlCalls) {
 	for k, c := range inlcalls.Calls {
 		if c.Root {
-			dumpInlCall(inlcalls, k, 0)
+			dumpInlCall(gd, inlcalls, k, 0)
 		}
 	}
 }
 
-func dumpInlVars(dwvars []*dwarf.Var) {
+func dumpInlVars(gd *base.Invocation, dwvars []*dwarf.Var) {
 	for i, dwv := range dwvars {
 		typ := "local"
 		if dwv.Tag == dwarf.DW_TAG_formal_parameter {
@@ -365,7 +365,7 @@ func dumpInlVars(dwvars []*dwarf.Var) {
 		if dwv.IsInAbstract {
 			ia = 1
 		}
-		base.Ctxt.Logf("V%d: %s CI:%d II:%d IA:%d %s\n", i, dwv.Name, dwv.ChildIndex, dwv.InlIndex-1, ia, typ)
+		gd.Ctxt.Logf("V%d: %s CI:%d II:%d IA:%d %s\n", i, dwv.Name, dwv.ChildIndex, dwv.InlIndex-1, ia, typ)
 	}
 }
 
@@ -398,11 +398,11 @@ func rangesContainsAll(parent, child []dwarf.Range) (bool, string) {
 // this is a root/toplevel inline, checks that the ranges fall within
 // the extent of the top level function). A panic is issued if a
 // malformed range is found.
-func checkInlCall(funcName string, inlCalls dwarf.InlCalls, funcSize int64, idx, parentIdx int) {
+func checkInlCall(gd *base.Invocation, funcName string, inlCalls dwarf.InlCalls, funcSize int64, idx, parentIdx int) {
 
 	// Callee
 	ic := inlCalls.Calls[idx]
-	callee := base.Ctxt.InlTree.InlinedFunction(ic.InlIndex).Name
+	callee := gd.Ctxt.InlTree.InlinedFunction(ic.InlIndex).Name
 	calleeRanges := ic.Ranges
 
 	// Caller
@@ -410,19 +410,19 @@ func checkInlCall(funcName string, inlCalls dwarf.InlCalls, funcSize int64, idx,
 	parentRanges := []dwarf.Range{dwarf.Range{Start: int64(0), End: funcSize}}
 	if parentIdx != -1 {
 		pic := inlCalls.Calls[parentIdx]
-		caller = base.Ctxt.InlTree.InlinedFunction(pic.InlIndex).Name
+		caller = gd.Ctxt.InlTree.InlinedFunction(pic.InlIndex).Name
 		parentRanges = pic.Ranges
 	}
 
 	// Callee ranges contained in caller ranges?
 	c, m := rangesContainsAll(parentRanges, calleeRanges)
 	if !c {
-		base.Fatalf("** malformed inlined routine range in %s: caller %s callee %s II=%d %s\n", funcName, caller, callee, idx, m)
+		gd.Fatalf("** malformed inlined routine range in %s: caller %s callee %s II=%d %s\n", funcName, caller, callee, idx, m)
 	}
 
 	// Now visit kids
 	for _, k := range ic.Children {
-		checkInlCall(funcName, inlCalls, funcSize, k, idx)
+		checkInlCall(gd, funcName, inlCalls, funcSize, k, idx)
 	}
 }
 

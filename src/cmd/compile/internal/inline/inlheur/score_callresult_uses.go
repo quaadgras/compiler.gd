@@ -5,6 +5,7 @@
 package inlheur
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"fmt"
 	"os"
@@ -65,10 +66,10 @@ func (csa *callSiteAnalyzer) rescoreBasedOnCallResultUses(fn *ir.Func, resultNam
 	disableDebugTrace()
 }
 
-func (csa *callSiteAnalyzer) examineCallResults(cs *CallSite, resultNameTab map[*ir.Name]resultPropAndCS) map[*ir.Name]resultPropAndCS {
+func (csa *callSiteAnalyzer) examineCallResults(gd *base.Invocation, cs *CallSite, resultNameTab map[*ir.Name]resultPropAndCS) map[*ir.Name]resultPropAndCS {
 	if debugTrace&debugTraceScoring != 0 {
 		fmt.Fprintf(os.Stderr, "=-= examining call results for %q\n",
-			EncodeCallSiteKey(cs))
+			EncodeCallSiteKey(gd, cs))
 	}
 
 	// Invoke a helper to pick out the specific ir.Name's the results

@@ -5,6 +5,7 @@
 package typecheck
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 )
@@ -27,7 +28,7 @@ const PhaseGActive = types.PhaseGActive
 // &stackBuf where the caller's escape analyser proved result
 // locality; non-candidate sites stay nil and the callee falls
 // through to heap alloc in runtime.maybeInPlace.
-func FillOutBufArgs(n *ir.CallExpr, callee *types.Type) {
+func FillOutBufArgs(gd *base.Invocation, n *ir.CallExpr, callee *types.Type) {
 	if !PhaseGActive {
 		return
 	}
@@ -78,7 +79,7 @@ func FillOutBufArgs(n *ir.CallExpr, callee *types.Type) {
 	nils := make([]ir.Node, nOut)
 	for i := range nils {
 		field := params[outBufStart+i]
-		nilArg := ir.NewNilExpr(n.Pos(), field.Type)
+		nilArg := ir.NewNilExpr(gd, n.Pos(), field.Type)
 		nilArg.SetTypecheck(1)
 		nils[i] = nilArg
 	}

@@ -18,30 +18,37 @@ import (
 	"testing"
 )
 
+// testGd is the *base.Invocation passed to escape package functions in
+// tests. We populate just the bits the package reads — Ctxt for diag
+// routing — so we don't have to stand up a full compiler invocation.
+var testGd = &base.Invocation{}
+
 func TestMain(m *testing.M) {
 	ssagen.Arch.LinkArch = &x86.Linkamd64
 	ssagen.Arch.REGSP = x86.REGSP
 	ssagen.Arch.MAXWIDTH = 1 << 50
 	types.MaxWidth = ssagen.Arch.MAXWIDTH
-	base.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
-	base.Ctxt.DiagFunc = base.Errorf
-	base.Ctxt.DiagFlush = base.FlushErrors
-	base.Ctxt.Bso = bufio.NewWriter(os.Stdout)
-	types.LocalPkg = types.NewPkg("p", "local")
-	types.LocalPkg.Prefix = "p"
+	testGd.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
+	testGd.Ctxt.DiagFunc = testGd.Errorf
+	testGd.Ctxt.DiagFlush = testGd.FlushErrors
+	testGd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
+	localPkg := types.NewPkg("p", "local")
+	localPkg.Local = true
+	localPkg.Prefix = "p"
+	testGd.LocalPkg = localPkg
 	types.PtrSize = ssagen.Arch.LinkArch.PtrSize
 	types.RegSize = ssagen.Arch.LinkArch.RegSize
-	typecheck.InitUniverse()
+	typecheck.InitUniverse(testGd)
 	os.Exit(m.Run())
 }
 
 // mkParam builds a *types.Field representing one call argument with
 // the given type and pre-installed escape Note. Mirrors what escape
 // analysis itself writes into param.Note via paramTag.
-func mkParam(t *types.Type, esc leaks) *types.Field {
-	name := typecheck.Lookup("?")
+func mkParam(gd *base.Invocation, t *types.Type, esc leaks) *types.Field {
+	name := typecheck.Lookup(testGd, "?")
 	f := types.NewField(src.NoXPos, name, t)
-	n := ir.NewNameAt(src.NoXPos, name, t)
+	n := ir.NewNameAt(gd, src.NoXPos, name, t)
 	n.Class = ir.PPARAM
 	f.Nname = n
 	f.Note = esc.Encode()
@@ -51,7 +58,7 @@ func mkParam(t *types.Type, esc leaks) *types.Field {
 // mkNoEscapeParam returns a param whose leaks encode "does not leak"
 // — canonically, the empty Note produced when Heap() == 0. (Encode
 // returns "" for that case.)
-func mkNoEscapeParam(t *types.Type) *types.Field {
+func mkNoEscapeParam(gd *base.Invocation, t *types.Type) *types.Field {
 	var esc leaks
 	// Leave heap unset so Heap() == -1 (never-flows). Encode then
 	// uses the default "" which parseLeaks will inflate back to
@@ -59,22 +66,22 @@ func mkNoEscapeParam(t *types.Type) *types.Field {
 	// escape. To test the "truly does not escape" branch, set
 	// Mutator only: that encodes as a non-empty Note and Heap() is
 	// still -1.
-	esc.AddMutator(0)
-	return mkParam(t, esc)
+	esc.AddMutator(gd, 0)
+	return mkParam(gd, t, esc)
 }
 
 // mkHeapEscapingParam returns a param whose leaks encode "escapes
 // to heap" (Heap() == 0, the most common non-trivial case).
-func mkHeapEscapingParam(t *types.Type) *types.Field {
+func mkHeapEscapingParam(gd *base.Invocation, t *types.Type) *types.Field {
 	var esc leaks
-	esc.AddHeap(0)
-	return mkParam(t, esc)
+	esc.AddHeap(gd, 0)
+	return mkParam(gd, t, esc)
 }
 
 func TestComputeEscMask_Empty(t *testing.T) {
 	// func() — no params, no bits.
-	sig := types.NewSignature(nil, nil, nil)
-	got := computeEscMask(sig)
+	sig := types.NewSignature(testGd, nil, nil, nil)
+	got := computeEscMask(testGd, sig)
 	if got != 0 {
 		t.Errorf("empty signature: got mask=0x%x, want 0", got)
 	}
@@ -84,10 +91,10 @@ func TestComputeEscMask_SingleHeapEscape(t *testing.T) {
 	// func(p *int) — p escapes to heap.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
-	p := mkHeapEscapingParam(ptrT)
-	sig := types.NewSignature(nil, []*types.Field{p}, nil)
+	p := mkHeapEscapingParam(testGd, ptrT)
+	sig := types.NewSignature(testGd, nil, []*types.Field{p}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	// bit 0 is the discriminator (reserved).
 	// bit 1 is the first argument (p). p escapes → bit 1 set.
 	want := uint64(1 << 1)
@@ -100,10 +107,10 @@ func TestComputeEscMask_SingleNonEscape(t *testing.T) {
 	// func(p *int) — p does NOT escape.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
-	p := mkNoEscapeParam(ptrT)
-	sig := types.NewSignature(nil, []*types.Field{p}, nil)
+	p := mkNoEscapeParam(testGd, ptrT)
+	sig := types.NewSignature(testGd, nil, []*types.Field{p}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	if got != 0 {
 		t.Errorf("non-escaping p: got mask=0x%x, want 0", got)
 	}
@@ -113,12 +120,12 @@ func TestComputeEscMask_Mixed(t *testing.T) {
 	// func(a *int, b *int, c *int) — a escapes, b doesn't, c escapes.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
-	a := mkHeapEscapingParam(ptrT)
-	b := mkNoEscapeParam(ptrT)
-	c := mkHeapEscapingParam(ptrT)
-	sig := types.NewSignature(nil, []*types.Field{a, b, c}, nil)
+	a := mkHeapEscapingParam(testGd, ptrT)
+	b := mkNoEscapeParam(testGd, ptrT)
+	c := mkHeapEscapingParam(testGd, ptrT)
+	sig := types.NewSignature(testGd, nil, []*types.Field{a, b, c}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	// bits 1 and 3 set (args a and c); bit 2 clear (arg b).
 	want := uint64((1 << 1) | (1 << 3))
 	if got != want {
@@ -134,11 +141,11 @@ func TestComputeEscMask_Method(t *testing.T) {
 	tstruct := types.NewStruct(nil)
 	recvT := types.NewPtr(tstruct)
 
-	recv := mkHeapEscapingParam(recvT)
-	p := mkNoEscapeParam(ptrInt)
-	sig := types.NewSignature(recv, []*types.Field{p}, nil)
+	recv := mkHeapEscapingParam(testGd, recvT)
+	p := mkNoEscapeParam(testGd, ptrInt)
+	sig := types.NewSignature(testGd, recv, []*types.Field{p}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	// With receiver counted as arg 0: bit 1 = recv (escapes), bit 2 = p (no).
 	want := uint64(1 << 1)
 	if got != want {
@@ -151,11 +158,11 @@ func TestComputeEscMask_ScalarsIgnored(t *testing.T) {
 	// Heap()==-1 for it, since scalars can't reach heap); p escapes.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
-	n := mkNoEscapeParam(intT) // Heap()==-1 tag — the scalar shape
-	p := mkHeapEscapingParam(ptrT)
-	sig := types.NewSignature(nil, []*types.Field{n, p}, nil)
+	n := mkNoEscapeParam(testGd, intT) // Heap()==-1 tag — the scalar shape
+	p := mkHeapEscapingParam(testGd, ptrT)
+	sig := types.NewSignature(testGd, nil, []*types.Field{n, p}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	// Arg 0 is n (scalar, no bit). Arg 1 is p (escapes → bit 2).
 	want := uint64(1 << 2)
 	if got != want {
@@ -169,10 +176,10 @@ func TestComputeEscMask_BitZeroReserved(t *testing.T) {
 	// matter how we populate the signature.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
-	esc := mkHeapEscapingParam(ptrT)
-	sig := types.NewSignature(nil, []*types.Field{esc}, nil)
+	esc := mkHeapEscapingParam(testGd, ptrT)
+	sig := types.NewSignature(testGd, nil, []*types.Field{esc}, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	if got&1 != 0 {
 		t.Errorf("got mask=0x%x, bit 0 must be reserved (clear)", got)
 	}
@@ -213,11 +220,11 @@ func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
 	const N = 70
 	params := make([]*types.Field, N)
 	for i := range params {
-		params[i] = mkHeapEscapingParam(ptrT)
+		params[i] = mkHeapEscapingParam(testGd, ptrT)
 	}
-	sig := types.NewSignature(nil, params, nil)
+	sig := types.NewSignature(testGd, nil, params, nil)
 
-	got := computeEscMask(sig)
+	got := computeEscMask(testGd, sig)
 	// Bits 1..63 should all be set; bits 0 and 64+ not representable.
 	want := uint64(0xFFFFFFFFFFFFFFFE) // all except bit 0
 	if got != want {

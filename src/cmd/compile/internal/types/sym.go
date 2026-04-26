@@ -71,26 +71,26 @@ func (sym *Sym) IsBlank() bool {
 // higher-level abstraction that directly returns the linker symbol
 // for a named object. For example, reflectdata.TypeLinksym(t) instead
 // of reflectdata.TypeSym(t).Linksym().
-func (sym *Sym) Linksym() *obj.LSym {
+func (sym *Sym) Linksym(gd *base.Invocation) *obj.LSym {
 	abi := obj.ABI0
 	if sym.Func() {
 		abi = obj.ABIInternal
 	}
-	return sym.LinksymABI(abi)
+	return sym.LinksymABI(gd, abi)
 }
 
 // Deprecated: This method should not be used directly. Instead, use a
 // higher-level abstraction that directly returns the linker symbol
 // for a named object. For example, (*ir.Name).LinksymABI(abi) instead
 // of (*ir.Name).Sym().LinksymABI(abi).
-func (sym *Sym) LinksymABI(abi obj.ABI) *obj.LSym {
+func (sym *Sym) LinksymABI(gd *base.Invocation, abi obj.ABI) *obj.LSym {
 	if sym == nil {
-		base.Fatalf("nil symbol")
+		gd.Fatalf("nil symbol")
 	}
 	if sym.Linkname != "" {
-		return base.Linkname(sym.Linkname, abi)
+		return gd.Linkname(sym.Linkname, abi)
 	}
-	return base.PkgLinksym(sym.Pkg.Prefix, sym.Name, abi)
+	return gd.PkgLinksym(sym.Pkg.Prefix, sym.Name, abi)
 }
 
 // CompareSyms return the ordering of a and b, as for [cmp.Compare].

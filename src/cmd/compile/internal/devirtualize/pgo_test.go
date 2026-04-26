@@ -17,6 +17,18 @@ import (
 	"testing"
 )
 
+// testGd is the *base.Invocation passed to devirtualize's exported
+// functions in tests. We populate just the bits the package reads —
+// Ctxt and Debug.PGODebug — so we don't have to stand up a full
+// compiler invocation.
+var testGd = func() *base.Invocation {
+	gd := &base.Invocation{
+		Ctxt: &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}},
+	}
+	gd.Debug.PGODebug = 3
+	return gd
+}()
+
 func init() {
 	// These are the few constants that need to be initialized in order to use
 	// the types package without using the typecheck package by calling
@@ -24,13 +36,11 @@ func init() {
 	types.PtrSize = 8
 	types.RegSize = 8
 	types.MaxWidth = 1 << 50
-	base.Ctxt = &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}}
-	typecheck.InitUniverse()
-	base.Debug.PGODebug = 3
+	typecheck.InitUniverse(testGd)
 }
 
 func makePos(b *src.PosBase, line, col uint) src.XPos {
-	return base.Ctxt.PosTable.XPos(src.MakePos(b, line, col))
+	return testGd.Ctxt.PosTable.XPos(src.MakePos(b, line, col))
 }
 
 type profileBuilder struct {
@@ -88,17 +98,17 @@ func addEdge(caller, callee *pgoir.IRNode, offset int, weight int64) {
 
 // Create a new struct type named structName with a method named methName and
 // return the method.
-func makeStructWithMethod(pkg *types.Pkg, structName, methName string) *ir.Func {
+func makeStructWithMethod(gd *base.Invocation, pkg *types.Pkg, structName, methName string) *ir.Func {
 	// type structName struct{}
 	structType := types.NewStruct(nil)
 
 	// func (structName) methodName()
-	recv := types.NewField(src.NoXPos, typecheck.Lookup(structName), structType)
-	sig := types.NewSignature(recv, nil, nil)
-	fn := ir.NewFunc(src.NoXPos, src.NoXPos, pkg.Lookup(structName+"."+methName), sig)
+	recv := types.NewField(src.NoXPos, typecheck.Lookup(testGd, structName), structType)
+	sig := types.NewSignature(testGd, recv, nil, nil)
+	fn := ir.NewFunc(gd, src.NoXPos, src.NoXPos, pkg.Lookup(structName+"."+methName), sig)
 
 	// Add the method to the struct.
-	structType.SetMethods([]*types.Field{types.NewField(src.NoXPos, typecheck.Lookup(methName), sig)})
+	structType.SetMethods([]*types.Field{types.NewField(src.NoXPos, typecheck.Lookup(testGd, methName), sig)})
 
 	return fn
 }
@@ -123,16 +133,16 @@ func TestFindHotConcreteInterfaceCallee(t *testing.T) {
 	// type IFace interface {
 	//	Foo()
 	// }
-	fooSig := types.NewSignature(types.FakeRecv(), nil, nil)
-	method := types.NewField(src.NoXPos, typecheck.Lookup("Foo"), fooSig)
+	fooSig := types.NewSignature(testGd, types.FakeRecv(), nil, nil)
+	method := types.NewField(src.NoXPos, typecheck.Lookup(testGd, "Foo"), fooSig)
 	iface := types.NewInterface([]*types.Field{method})
 
-	callerFn := ir.NewFunc(makePos(basePos, callerStart, 1), src.NoXPos, pkgFoo.Lookup("Caller"), types.NewSignature(nil, nil, nil))
+	callerFn := ir.NewFunc(testGd, makePos(basePos, callerStart, 1), src.NoXPos, pkgFoo.Lookup("Caller"), types.NewSignature(testGd, nil, nil, nil))
 
-	hotCalleeFn := makeStructWithMethod(pkgFoo, "HotCallee", "Foo")
-	coldCalleeFn := makeStructWithMethod(pkgFoo, "ColdCallee", "Foo")
-	wrongLineCalleeFn := makeStructWithMethod(pkgFoo, "WrongLineCallee", "Foo")
-	wrongMethodCalleeFn := makeStructWithMethod(pkgFoo, "WrongMethodCallee", "Bar")
+	hotCalleeFn := makeStructWithMethod(testGd, pkgFoo, "HotCallee", "Foo")
+	coldCalleeFn := makeStructWithMethod(testGd, pkgFoo, "ColdCallee", "Foo")
+	wrongLineCalleeFn := makeStructWithMethod(testGd, pkgFoo, "WrongLineCallee", "Foo")
+	wrongMethodCalleeFn := makeStructWithMethod(testGd, pkgFoo, "WrongMethodCallee", "Bar")
 
 	callerNode := p.NewNode("example.com/foo.Caller", callerFn)
 	hotCalleeNode := p.NewNode("example.com/foo.HotCallee.Foo", hotCalleeFn)
@@ -155,10 +165,10 @@ func TestFindHotConcreteInterfaceCallee(t *testing.T) {
 	addEdge(callerNode, hotMissingCalleeNode, callOffset, 10)
 
 	// IFace.Foo()
-	sel := typecheck.NewMethodExpr(src.NoXPos, iface, typecheck.Lookup("Foo"))
-	call := ir.NewCallExpr(makePos(basePos, callerStart+callOffset, 1), ir.OCALLINTER, sel, nil)
+	sel := typecheck.NewMethodExpr(testGd, src.NoXPos, iface, typecheck.Lookup(testGd, "Foo"))
+	call := ir.NewCallExpr(testGd, makePos(basePos, callerStart+callOffset, 1), ir.OCALLINTER, sel, nil)
 
-	gotFn, gotWeight := findHotConcreteInterfaceCallee(p.Profile(), callerFn, call)
+	gotFn, gotWeight := findHotConcreteInterfaceCallee(testGd, p.Profile(), callerFn, call)
 	if gotFn != hotCalleeFn {
 		t.Errorf("findHotConcreteInterfaceCallee func got %v want %v", gotFn, hotCalleeFn)
 	}
@@ -185,13 +195,13 @@ func TestFindHotConcreteFunctionCallee(t *testing.T) {
 		callOffset = 1
 	)
 
-	callerFn := ir.NewFunc(makePos(basePos, callerStart, 1), src.NoXPos, pkgFoo.Lookup("Caller"), types.NewSignature(nil, nil, nil))
+	callerFn := ir.NewFunc(testGd, makePos(basePos, callerStart, 1), src.NoXPos, pkgFoo.Lookup("Caller"), types.NewSignature(testGd, nil, nil, nil))
 
 	// func HotCallee()
-	hotCalleeFn := ir.NewFunc(src.NoXPos, src.NoXPos, pkgFoo.Lookup("HotCallee"), types.NewSignature(nil, nil, nil))
+	hotCalleeFn := ir.NewFunc(testGd, src.NoXPos, src.NoXPos, pkgFoo.Lookup("HotCallee"), types.NewSignature(testGd, nil, nil, nil))
 
 	// func WrongCallee() bool
-	wrongCalleeFn := ir.NewFunc(src.NoXPos, src.NoXPos, pkgFoo.Lookup("WrongCallee"), types.NewSignature(nil, nil,
+	wrongCalleeFn := ir.NewFunc(testGd, src.NoXPos, src.NoXPos, pkgFoo.Lookup("WrongCallee"), types.NewSignature(testGd, nil, nil,
 		[]*types.Field{
 			types.NewField(src.NoXPos, nil, types.Types[types.TBOOL]),
 		},
@@ -205,11 +215,11 @@ func TestFindHotConcreteFunctionCallee(t *testing.T) {
 	addEdge(callerNode, hotCalleeNode, callOffset, 10)
 
 	// var fn func()
-	name := ir.NewNameAt(src.NoXPos, typecheck.Lookup("fn"), types.NewSignature(nil, nil, nil))
+	name := ir.NewNameAt(testGd, src.NoXPos, typecheck.Lookup(testGd, "fn"), types.NewSignature(testGd, nil, nil, nil))
 	// fn()
-	call := ir.NewCallExpr(makePos(basePos, callerStart+callOffset, 1), ir.OCALL, name, nil)
+	call := ir.NewCallExpr(testGd, makePos(basePos, callerStart+callOffset, 1), ir.OCALL, name, nil)
 
-	gotFn, gotWeight := findHotConcreteFunctionCallee(p.Profile(), callerFn, call)
+	gotFn, gotWeight := findHotConcreteFunctionCallee(testGd, p.Profile(), callerFn, call)
 	if gotFn != hotCalleeFn {
 		t.Errorf("findHotConcreteFunctionCallee func got %v want %v", gotFn, hotCalleeFn)
 	}

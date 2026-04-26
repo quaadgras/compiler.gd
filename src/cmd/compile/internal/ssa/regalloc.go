@@ -114,7 +114,6 @@
 package ssa
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
@@ -841,7 +840,7 @@ func (s *regAllocState) init(f *Func) {
 	// The clobberdeadreg experiment inserts code to clobber dead registers
 	// at call sites.
 	// Ignore huge functions to avoid doing too much work.
-	if base.Flag.ClobberDeadReg && len(s.f.Blocks) <= 10000 {
+	if f.Config.gd.Flag.ClobberDeadReg && len(s.f.Blocks) <= 10000 {
 		// TODO: honor GOCLOBBERDEADHASH, or maybe GOSSAHASH.
 		s.doClobber = true
 	}

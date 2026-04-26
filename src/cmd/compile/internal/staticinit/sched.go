@@ -54,9 +54,9 @@ func (s *Schedule) append(n ir.Node) {
 }
 
 // StaticInit adds an initialization statement n to the schedule.
-func (s *Schedule) StaticInit(n ir.Node) {
-	if !s.tryStaticInit(n) {
-		if base.Flag.Percent != 0 {
+func (s *Schedule) StaticInit(gd *base.Invocation, n ir.Node) {
+	if !s.tryStaticInit(gd, n) {
+		if gd.Flag.Percent != 0 {
 			ir.Dump("StaticInit failed", n)
 		}
 		s.append(n)
@@ -97,13 +97,13 @@ func allBlank(exprs []ir.Node) bool {
 
 // tryStaticInit attempts to statically execute an initialization
 // statement and reports whether it succeeded.
-func (s *Schedule) tryStaticInit(n ir.Node) bool {
+func (s *Schedule) tryStaticInit(gd *base.Invocation, n ir.Node) bool {
 	var lhs []ir.Node
 	var rhs ir.Node
 
 	switch n.Op() {
 	default:
-		base.FatalfAt(n.Pos(), "unexpected initialization statement: %v", n)
+		gd.FatalfAt(n.Pos(), "unexpected initialization statement: %v", n)
 	case ir.OAS:
 		n := n.(*ir.AssignStmt)
 		lhs, rhs = []ir.Node{n.X}, n.Y
@@ -117,14 +117,14 @@ func (s *Schedule) tryStaticInit(n ir.Node) bool {
 				rhs = rhs.(*ir.ConvExpr).X
 			}
 			if name, ok := rhs.(*ir.Name); !ok || !name.AutoTemp() {
-				base.FatalfAt(n.Pos(), "unexpected rhs, not an autotmp: %+v", rhs)
+				gd.FatalfAt(n.Pos(), "unexpected rhs, not an autotmp: %+v", rhs)
 			}
 		}
 		return false
 	case ir.OAS2DOTTYPE, ir.OAS2FUNC, ir.OAS2MAPR, ir.OAS2RECV:
 		n := n.(*ir.AssignListStmt)
 		if len(n.Lhs) < 2 || len(n.Rhs) != 1 {
-			base.FatalfAt(n.Pos(), "unexpected shape for %v: %v", n.Op(), n)
+			gd.FatalfAt(n.Pos(), "unexpected shape for %v: %v", n.Op(), n)
 		}
 		lhs, rhs = n.Lhs, n.Rhs[0]
 	case ir.OCALLFUNC:
@@ -132,7 +132,7 @@ func (s *Schedule) tryStaticInit(n ir.Node) bool {
 	}
 
 	if !s.seenMutation {
-		s.seenMutation = mayModifyPkgVar(rhs)
+		s.seenMutation = mayModifyPkgVar(gd, rhs)
 	}
 
 	if allBlank(lhs) && !AnySideEffects(rhs) {
@@ -145,22 +145,22 @@ func (s *Schedule) tryStaticInit(n ir.Node) bool {
 		return false
 	}
 
-	lno := ir.SetPos(n)
-	defer func() { base.Pos = lno }()
+	lno := ir.SetPos(gd, n)
+	defer func() { gd.Pos = lno }()
 
 	nam := lhs[0].(*ir.Name)
-	return s.StaticAssign(nam, 0, rhs, nam.Type())
+	return s.StaticAssign(gd, nam, 0, rhs, nam.Type())
 }
 
 // like staticassign but we are copying an already
 // initialized value r.
-func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Type) bool {
+func (s *Schedule) staticcopy(gd *base.Invocation, l *ir.Name, loff int64, rn *ir.Name, typ *types.Type) bool {
 	if rn.Class == ir.PFUNC {
 		// TODO if roff != 0 { panic }
-		staticdata.InitAddr(l, loff, staticdata.FuncLinksym(rn))
+		staticdata.InitAddr(gd, l, loff, staticdata.FuncLinksym(gd, rn))
 		return true
 	}
-	if rn.Class != ir.PEXTERN || rn.Sym().Pkg != types.LocalPkg {
+	if rn.Class != ir.PEXTERN || rn.Sym().Pkg != types.LocalPkg(gd) {
 		return false
 	}
 	if rn.Defn == nil {
@@ -181,14 +181,14 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 	r := rn.Defn.(*ir.AssignStmt).Y
 	if r == nil {
 		// types2.InitOrder doesn't include default initializers.
-		base.Fatalf("unexpected initializer: %v", rn.Defn)
+		gd.Fatalf("unexpected initializer: %v", rn.Defn)
 	}
 
 	// Variable may have been reassigned by a user-written function call
 	// that was invoked to initialize another global variable (#51913).
 	if s.seenMutation {
-		if base.Debug.StaticCopy != 0 {
-			base.WarnfAt(l.Pos(), "skipping static copy of %v+%v with %v", l, loff, r)
+		if gd.Debug.StaticCopy != 0 {
+			gd.WarnfAt(l.Pos(), "skipping static copy of %v+%v with %v", l, loff, r)
 		}
 		return false
 	}
@@ -199,20 +199,20 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 
 	switch r.Op() {
 	case ir.OMETHEXPR:
-		r = r.(*ir.SelectorExpr).FuncName()
+		r = r.(*ir.SelectorExpr).FuncName(gd)
 		fallthrough
 	case ir.ONAME:
 		r := r.(*ir.Name)
-		if s.staticcopy(l, loff, r, typ) {
+		if s.staticcopy(gd, l, loff, r, typ) {
 			return true
 		}
 		// We may have skipped past one or more OCONVNOPs, so
 		// use conv to ensure r is assignable to l (#13263).
 		dst := ir.Node(l)
 		if loff != 0 || !types.Identical(typ, l.Type()) {
-			dst = ir.NewNameOffsetExpr(base.Pos, l, loff, typ)
+			dst = ir.NewNameOffsetExpr(gd, gd.Pos, l, loff, typ)
 		}
-		s.append(ir.NewAssignStmt(base.Pos, dst, typecheck.Conv(r, typ)))
+		s.append(ir.NewAssignStmt(gd, gd.Pos, dst, typecheck.Conv(gd, r, typ)))
 		return true
 
 	case ir.ONIL:
@@ -222,7 +222,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		if ir.IsZero(r) {
 			return true
 		}
-		staticdata.InitConst(l, loff, r, int(typ.Size()))
+		staticdata.InitConst(gd, l, loff, r, int(typ.Size()))
 		return true
 
 	case ir.OADDR:
@@ -231,7 +231,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 			if a.Class != ir.PEXTERN {
 				return false // e.g. local from new(expr)
 			}
-			staticdata.InitAddr(l, loff, staticdata.GlobalLinksym(a))
+			staticdata.InitAddr(gd, l, loff, staticdata.GlobalLinksym(a))
 			return true
 		}
 
@@ -240,14 +240,14 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		switch r.X.Op() {
 		case ir.OARRAYLIT, ir.OSLICELIT, ir.OSTRUCTLIT, ir.OMAPLIT:
 			// copy pointer
-			staticdata.InitAddr(l, loff, staticdata.GlobalLinksym(s.Temps[r]))
+			staticdata.InitAddr(gd, l, loff, staticdata.GlobalLinksym(s.Temps[r]))
 			return true
 		}
 
 	case ir.OSLICELIT:
 		r := r.(*ir.CompLitExpr)
 		// copy slice
-		staticdata.InitSlice(l, loff, staticdata.GlobalLinksym(s.Temps[r]), r.Len)
+		staticdata.InitSlice(gd, l, loff, staticdata.GlobalLinksym(s.Temps[r]), r.Len)
 		return true
 
 	case ir.OARRAYLIT, ir.OSTRUCTLIT:
@@ -257,22 +257,22 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 			e := &p.E[i]
 			typ := e.Expr.Type()
 			if e.Expr.Op() == ir.OLITERAL || e.Expr.Op() == ir.ONIL {
-				staticdata.InitConst(l, loff+e.Xoffset, e.Expr, int(typ.Size()))
+				staticdata.InitConst(gd, l, loff+e.Xoffset, e.Expr, int(typ.Size()))
 				continue
 			}
 			x := e.Expr
 			if x.Op() == ir.OMETHEXPR {
-				x = x.(*ir.SelectorExpr).FuncName()
+				x = x.(*ir.SelectorExpr).FuncName(gd)
 			}
-			if x.Op() == ir.ONAME && s.staticcopy(l, loff+e.Xoffset, x.(*ir.Name), typ) {
+			if x.Op() == ir.ONAME && s.staticcopy(gd, l, loff+e.Xoffset, x.(*ir.Name), typ) {
 				continue
 			}
 			// Requires computation, but we're
 			// copying someone else's computation.
-			ll := ir.NewNameOffsetExpr(base.Pos, l, loff+e.Xoffset, typ)
-			rr := ir.NewNameOffsetExpr(base.Pos, orig, e.Xoffset, typ)
-			ir.SetPos(rr)
-			s.append(ir.NewAssignStmt(base.Pos, ll, rr))
+			ll := ir.NewNameOffsetExpr(gd, gd.Pos, l, loff+e.Xoffset, typ)
+			rr := ir.NewNameOffsetExpr(gd, gd.Pos, orig, e.Xoffset, typ)
+			ir.SetPos(gd, rr)
+			s.append(ir.NewAssignStmt(gd, gd.Pos, ll, rr))
 		}
 
 		return true
@@ -281,14 +281,14 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 	return false
 }
 
-func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Type) bool {
+func (s *Schedule) StaticAssign(gd *base.Invocation, l *ir.Name, loff int64, r ir.Node, typ *types.Type) bool {
 	// If we're building for FIPS, avoid global data relocations
 	// by treating all address-of operations as non-static.
 	// See ../../../internal/obj/fips.go for more context.
 	// We do this even in non-PIE mode to avoid generating
 	// static temporaries that would go into SRODATAFIPS
 	// but need relocations. We can't handle that in the verification.
-	disableGlobalAddrs := base.Ctxt.IsFIPS()
+	disableGlobalAddrs := gd.Ctxt.IsFIPS()
 
 	if r == nil {
 		// No explicit initialization value. Either zero or supplied
@@ -300,7 +300,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 	}
 
 	assign := func(pos src.XPos, a *ir.Name, aoff int64, v ir.Node) {
-		if s.StaticAssign(a, aoff, v, v.Type()) {
+		if s.StaticAssign(gd, a, aoff, v, v.Type()) {
 			return
 		}
 		var lhs ir.Node
@@ -308,9 +308,9 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			// Don't use NameOffsetExpr with blank (#43677).
 			lhs = ir.BlankNode
 		} else {
-			lhs = ir.NewNameOffsetExpr(pos, a, aoff, v.Type())
+			lhs = ir.NewNameOffsetExpr(gd, pos, a, aoff, v.Type())
 		}
-		s.append(ir.NewAssignStmt(pos, lhs, v))
+		s.append(ir.NewAssignStmt(gd, pos, lhs, v))
 	}
 
 	switch r.Op() {
@@ -319,14 +319,14 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			return false
 		}
 		r := r.(*ir.Name)
-		return s.staticcopy(l, loff, r, typ)
+		return s.staticcopy(gd, l, loff, r, typ)
 
 	case ir.OMETHEXPR:
 		if disableGlobalAddrs {
 			return false
 		}
 		r := r.(*ir.SelectorExpr)
-		return s.staticcopy(l, loff, r.FuncName(), typ)
+		return s.staticcopy(gd, l, loff, r.FuncName(gd), typ)
 
 	case ir.ONIL:
 		return true
@@ -338,7 +338,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		if disableGlobalAddrs && r.Type().IsString() {
 			return false
 		}
-		staticdata.InitConst(l, loff, r, int(typ.Size()))
+		staticdata.InitConst(gd, l, loff, r, int(typ.Size()))
 		return true
 
 	case ir.OADDR:
@@ -346,8 +346,8 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			return false
 		}
 		r := r.(*ir.AddrExpr)
-		if name, offset, ok := StaticLoc(r.X); ok && name.Class == ir.PEXTERN {
-			staticdata.InitAddrOffset(l, loff, name.Linksym(), offset)
+		if name, offset, ok := StaticLoc(gd, r.X); ok && name.Class == ir.PEXTERN {
+			staticdata.InitAddrOffset(gd, l, loff, name.Linksym(), offset)
 			return true
 		}
 		fallthrough
@@ -360,13 +360,13 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		switch r.X.Op() {
 		case ir.OARRAYLIT, ir.OSLICELIT, ir.OMAPLIT, ir.OSTRUCTLIT:
 			// Init pointer.
-			a := StaticName(r.X.Type())
+			a := StaticName(gd, r.X.Type())
 
 			s.Temps[r] = a
-			staticdata.InitAddr(l, loff, a.Linksym())
+			staticdata.InitAddr(gd, l, loff, a.Linksym())
 
 			// Init underlying literal.
-			assign(base.Pos, a, 0, r.X)
+			assign(gd.Pos, a, 0, r.X)
 			return true
 		}
 		//dump("not static ptrlit", r);
@@ -378,7 +378,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		r := r.(*ir.ConvExpr)
 		if l.Class == ir.PEXTERN && r.X.Op() == ir.OLITERAL {
 			sval := ir.StringVal(r.X)
-			staticdata.InitSliceBytes(l, loff, sval)
+			staticdata.InitSliceBytes(gd, l, loff, sval)
 			return true
 		}
 
@@ -387,13 +387,13 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			return false
 		}
 		r := r.(*ir.CompLitExpr)
-		s.initplan(r)
+		s.initplan(gd, r)
 		// Init slice.
 		ta := types.NewArray(r.Type().Elem(), r.Len)
 		ta.SetNoalg(true)
-		a := StaticName(ta)
+		a := StaticName(gd, ta)
 		s.Temps[r] = a
-		staticdata.InitSlice(l, loff, a.Linksym(), r.Len)
+		staticdata.InitSlice(gd, l, loff, a.Linksym(), r.Len)
 		// Fall through to init underlying array.
 		l = a
 		loff = 0
@@ -401,17 +401,17 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 
 	case ir.OARRAYLIT, ir.OSTRUCTLIT:
 		r := r.(*ir.CompLitExpr)
-		s.initplan(r)
+		s.initplan(gd, r)
 
 		p := s.Plans[r]
 		for i := range p.E {
 			e := &p.E[i]
 			if e.Expr.Op() == ir.OLITERAL && !disableGlobalAddrs || e.Expr.Op() == ir.ONIL {
-				staticdata.InitConst(l, loff+e.Xoffset, e.Expr, int(e.Expr.Type().Size()))
+				staticdata.InitConst(gd, l, loff+e.Xoffset, e.Expr, int(e.Expr.Type().Size()))
 				continue
 			}
-			ir.SetPos(e.Expr)
-			assign(base.Pos, l, loff+e.Xoffset, e.Expr)
+			ir.SetPos(gd, e.Expr)
+			assign(gd.Pos, l, loff+e.Xoffset, e.Expr)
 		}
 
 		return true
@@ -425,16 +425,16 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		}
 		r := r.(*ir.ClosureExpr)
 		if !r.Func.IsClosure() {
-			if base.Debug.Closure > 0 {
-				base.WarnfAt(r.Pos(), "closure converted to global")
+			if gd.Debug.Closure > 0 {
+				gd.WarnfAt(r.Pos(), "closure converted to global")
 			}
 			// Closures with no captured variables are globals,
 			// so the assignment can be done at link time.
 			// TODO if roff != 0 { panic }
-			staticdata.InitAddr(l, loff, staticdata.FuncLinksym(r.Func.Nname))
+			staticdata.InitAddr(gd, l, loff, staticdata.FuncLinksym(gd, r.Func.Nname))
 			return true
 		}
-		ir.ClosureDebugRuntimeCheck(r)
+		ir.ClosureDebugRuntimeCheck(gd, r)
 
 	case ir.OCONVIFACE:
 		// This logic is mirrored in isStaticCompositeLiteral.
@@ -465,19 +465,19 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			return false
 		}
 
-		reflectdata.MarkTypeUsedInInterface(val.Type(), l.Linksym())
+		reflectdata.MarkTypeUsedInInterface(gd, val.Type(), l.Linksym())
 
 		var itab *ir.AddrExpr
 		if typ.IsEmptyInterface() {
-			itab = reflectdata.TypePtrAt(base.Pos, val.Type())
+			itab = reflectdata.TypePtrAt(gd, gd.Pos, val.Type())
 		} else {
-			itab = reflectdata.ITabAddrAt(base.Pos, val.Type(), typ)
+			itab = reflectdata.ITabAddrAt(gd, gd.Pos, val.Type(), typ)
 		}
 
 		// Create a copy of l to modify while we emit data.
 
 		// Emit itab, advance offset.
-		staticdata.InitAddr(l, loff, itab.X.(*ir.LinksymOffsetExpr).Linksym)
+		staticdata.InitAddr(gd, l, loff, itab.X.(*ir.LinksymOffsetExpr).Linksym)
 
 		// Emit data.
 		if types.IsInlineIface(val.Type()) {
@@ -486,8 +486,8 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			if val.Op() == ir.ONIL {
 				return true
 			}
-			ir.SetPos(val)
-			assign(base.Pos, l, loff+2*int64(types.PtrSize), val)
+			ir.SetPos(gd, val)
+			assign(gd.Pos, l, loff+2*int64(types.PtrSize), val)
 		} else if types.IsSpreadIface(val.Type()) {
 			// gd Phase D: spread-iface layout for strings and slices. Value
 			// is 3 words (ptr, scalar, scalar). Word 0 lands in the data
@@ -498,22 +498,22 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			if val.Op() == ir.ONIL {
 				return true
 			}
-			ir.SetPos(val)
-			assign(base.Pos, l, loff+int64(types.PtrSize), val)
+			ir.SetPos(gd, val)
+			assign(gd.Pos, l, loff+int64(types.PtrSize), val)
 		} else if types.IsDirectIface(val.Type()) {
 			if val.Op() == ir.ONIL {
 				// Nil is zero, nothing to do.
 				return true
 			}
 			// Copy val directly into n.
-			ir.SetPos(val)
-			assign(base.Pos, l, loff+int64(types.PtrSize), val)
+			ir.SetPos(gd, val)
+			assign(gd.Pos, l, loff+int64(types.PtrSize), val)
 		} else {
 			// Construct temp to hold val, write pointer to temp into n.
-			a := StaticName(val.Type())
+			a := StaticName(gd, val.Type())
 			s.Temps[val] = a
-			assign(base.Pos, a, 0, val)
-			staticdata.InitAddr(l, loff+int64(types.PtrSize), a.Linksym())
+			assign(gd.Pos, a, 0, val)
+			staticdata.InitAddr(gd, l, loff+int64(types.PtrSize), a.Linksym())
 		}
 
 		return true
@@ -523,16 +523,16 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			return false
 		}
 		r := r.(*ir.InlinedCallExpr)
-		return s.staticAssignInlinedCall(l, loff, r, typ)
+		return s.staticAssignInlinedCall(gd, l, loff, r, typ)
 	}
 
-	if base.Flag.Percent != 0 {
+	if gd.Flag.Percent != 0 {
 		ir.Dump("not static", r)
 	}
 	return false
 }
 
-func (s *Schedule) initplan(n ir.Node) {
+func (s *Schedule) initplan(gd *base.Invocation, n ir.Node) {
 	if s.Plans[n] != nil {
 		return
 	}
@@ -540,7 +540,7 @@ func (s *Schedule) initplan(n ir.Node) {
 	s.Plans[n] = p
 	switch n.Op() {
 	default:
-		base.Fatalf("initplan")
+		gd.Fatalf("initplan")
 
 	case ir.OARRAYLIT, ir.OSLICELIT:
 		n := n.(*ir.CompLitExpr)
@@ -548,10 +548,10 @@ func (s *Schedule) initplan(n ir.Node) {
 		for _, a := range n.List {
 			if a.Op() == ir.OKEY {
 				kv := a.(*ir.KeyExpr)
-				k = typecheck.IndexConst(kv.Key)
+				k = typecheck.IndexConst(gd, kv.Key)
 				a = kv.Value
 			}
-			s.addvalue(p, k*n.Type().Elem().Size(), a)
+			s.addvalue(gd, p, k*n.Type().Elem().Size(), a)
 			k++
 		}
 
@@ -559,28 +559,28 @@ func (s *Schedule) initplan(n ir.Node) {
 		n := n.(*ir.CompLitExpr)
 		for _, a := range n.List {
 			if a.Op() != ir.OSTRUCTKEY {
-				base.Fatalf("initplan structlit")
+				gd.Fatalf("initplan structlit")
 			}
 			a := a.(*ir.StructKeyExpr)
 			if a.Sym().IsBlank() {
 				continue
 			}
-			s.addvalue(p, a.Field.Offset, a.Value)
+			s.addvalue(gd, p, a.Field.Offset, a.Value)
 		}
 
 	case ir.OMAPLIT:
 		n := n.(*ir.CompLitExpr)
 		for _, a := range n.List {
 			if a.Op() != ir.OKEY {
-				base.Fatalf("initplan maplit")
+				gd.Fatalf("initplan maplit")
 			}
 			a := a.(*ir.KeyExpr)
-			s.addvalue(p, -1, a.Value)
+			s.addvalue(gd, p, -1, a.Value)
 		}
 	}
 }
 
-func (s *Schedule) addvalue(p *Plan, xoffset int64, n ir.Node) {
+func (s *Schedule) addvalue(gd *base.Invocation, p *Plan, xoffset int64, n ir.Node) {
 	// special case: zero can be dropped entirely
 	if ir.IsZero(n) {
 		return
@@ -588,7 +588,7 @@ func (s *Schedule) addvalue(p *Plan, xoffset int64, n ir.Node) {
 
 	// special case: inline struct and array (not slice) literals
 	if isvaluelit(n) {
-		s.initplan(n)
+		s.initplan(gd, n)
 		q := s.Plans[n]
 		for _, qe := range q.E {
 			// qe is a copy; we are not modifying entries in q.E
@@ -602,8 +602,8 @@ func (s *Schedule) addvalue(p *Plan, xoffset int64, n ir.Node) {
 	p.E = append(p.E, Entry{Xoffset: xoffset, Expr: n})
 }
 
-func (s *Schedule) staticAssignInlinedCall(l *ir.Name, loff int64, call *ir.InlinedCallExpr, typ *types.Type) bool {
-	if base.Debug.InlStaticInit == 0 {
+func (s *Schedule) staticAssignInlinedCall(gd *base.Invocation, l *ir.Name, loff int64, call *ir.InlinedCallExpr, typ *types.Type) bool {
+	if gd.Debug.InlStaticInit == 0 {
 		return false
 	}
 
@@ -748,13 +748,13 @@ func (s *Schedule) staticAssignInlinedCall(l *ir.Name, loff int64, call *ir.Inli
 		}
 		args[v.(*ir.Name)] = as2init.Rhs[i]
 	}
-	r, ok := subst(as2body.Rhs[0], args)
+	r, ok := subst(gd, as2body.Rhs[0], args)
 	if !ok {
 		return false
 	}
-	ok = s.StaticAssign(l, loff, r, typ)
+	ok = s.StaticAssign(gd, l, loff, r, typ)
 
-	if ok && base.Flag.Percent != 0 {
+	if ok && gd.Flag.Percent != 0 {
 		ir.Dump("static inlined-LEFT", l)
 		ir.Dump("static inlined-ORIG", call)
 		ir.Dump("static inlined-RIGHT", r)
@@ -771,23 +771,23 @@ func (s *Schedule) staticAssignInlinedCall(l *ir.Name, loff int64, call *ir.Inli
 var statuniqgen int // name generator for static temps
 
 // StaticName returns a name backed by a (writable) static data symbol.
-func StaticName(t *types.Type) *ir.Name {
+func StaticName(gd *base.Invocation, t *types.Type) *ir.Name {
 	// Don't use LookupNum; it interns the resulting string, but these are all unique.
-	sym := typecheck.Lookup(fmt.Sprintf("%s%d", obj.StaticNamePrefix, statuniqgen))
+	sym := typecheck.Lookup(gd, fmt.Sprintf("%s%d", obj.StaticNamePrefix, statuniqgen))
 	statuniqgen++
 
-	n := ir.NewNameAt(base.Pos, sym, t)
+	n := ir.NewNameAt(gd, gd.Pos, sym, t)
 	sym.Def = n
 
 	n.Class = ir.PEXTERN
-	typecheck.Target.Externs = append(typecheck.Target.Externs, n)
+	typecheck.Target(gd).Externs = append(typecheck.Target(gd).Externs, n)
 
 	n.Linksym().Set(obj.AttrStatic, true)
 	return n
 }
 
 // StaticLoc returns the static address of n, if n has one, or else nil.
-func StaticLoc(n ir.Node) (name *ir.Name, offset int64, ok bool) {
+func StaticLoc(gd *base.Invocation, n ir.Node) (name *ir.Name, offset int64, ok bool) {
 	if n == nil {
 		return nil, 0, false
 	}
@@ -799,11 +799,11 @@ func StaticLoc(n ir.Node) (name *ir.Name, offset int64, ok bool) {
 
 	case ir.OMETHEXPR:
 		n := n.(*ir.SelectorExpr)
-		return StaticLoc(n.FuncName())
+		return StaticLoc(gd, n.FuncName(gd))
 
 	case ir.ODOT:
 		n := n.(*ir.SelectorExpr)
-		if name, offset, ok = StaticLoc(n.X); !ok {
+		if name, offset, ok = StaticLoc(gd, n.X); !ok {
 			break
 		}
 		offset += n.Offset()
@@ -814,7 +814,7 @@ func StaticLoc(n ir.Node) (name *ir.Name, offset int64, ok bool) {
 		if n.X.Type().IsSlice() {
 			break
 		}
-		if name, offset, ok = StaticLoc(n.X); !ok {
+		if name, offset, ok = StaticLoc(gd, n.X); !ok {
 			break
 		}
 		l := getlit(n.Index)
@@ -924,7 +924,7 @@ func AnySideEffects(n ir.Node) bool {
 
 // mayModifyPkgVar reports whether expression n may modify any
 // package-scope variables declared within the current package.
-func mayModifyPkgVar(n ir.Node) bool {
+func mayModifyPkgVar(gd *base.Invocation, n ir.Node) bool {
 	// safeLHS reports whether the assigned-to variable lhs is either a
 	// local variable or a global from another package.
 	safeLHS := func(lhs ir.Node) bool {
@@ -935,7 +935,7 @@ func mayModifyPkgVar(n ir.Node) bool {
 			outer = outer.(*ir.StarExpr).X
 		}
 		v, ok := outer.(*ir.Name)
-		return ok && v.Op() == ir.ONAME && !(v.Class == ir.PEXTERN && v.Sym().Pkg == types.LocalPkg)
+		return ok && v.Op() == ir.ONAME && !(v.Class == ir.PEXTERN && v.Sym().Pkg == types.LocalPkg(gd))
 	}
 
 	return ir.Any(n, func(n ir.Node) bool {
@@ -1007,7 +1007,7 @@ func isvaluelit(n ir.Node) bool {
 	return n.Op() == ir.OARRAYLIT || n.Op() == ir.OSTRUCTLIT
 }
 
-func subst(n ir.Node, m map[*ir.Name]ir.Node) (ir.Node, bool) {
+func subst(gd *base.Invocation, n ir.Node, m map[*ir.Name]ir.Node) (ir.Node, bool) {
 	valid := true
 	var edit func(ir.Node) ir.Node
 	edit = func(x ir.Node) ir.Node {
@@ -1029,14 +1029,14 @@ func subst(n ir.Node, m map[*ir.Name]ir.Node) (ir.Node, bool) {
 		case ir.OCONV:
 			x := x.(*ir.ConvExpr)
 			if x.X.Op() == ir.OLITERAL {
-				if x, ok := truncate(x.X, x.Type()); ok {
+				if x, ok := truncate(gd, x.X, x.Type()); ok {
 					return x
 				}
 				valid = false
 				return x
 			}
 		case ir.OADDSTR:
-			return addStr(x.(*ir.AddStringExpr))
+			return addStr(gd, x.(*ir.AddStringExpr))
 		}
 		return x
 	}
@@ -1047,7 +1047,7 @@ func subst(n ir.Node, m map[*ir.Name]ir.Node) (ir.Node, bool) {
 // truncate returns the result of force converting c to type t,
 // truncating its value as needed, like a conversion of a variable.
 // If the conversion is too difficult, truncate returns nil, false.
-func truncate(c ir.Node, t *types.Type) (ir.Node, bool) {
+func truncate(gd *base.Invocation, c ir.Node, t *types.Type) (ir.Node, bool) {
 	ct := c.Type()
 	cv := c.Val()
 	if ct.Kind() != t.Kind() {
@@ -1069,12 +1069,12 @@ func truncate(c ir.Node, t *types.Type) (ir.Node, bool) {
 			}
 		}
 	}
-	c = ir.NewConstExpr(cv, c)
+	c = ir.NewConstExpr(gd, cv, c)
 	c.SetType(t)
 	return c, true
 }
 
-func addStr(n *ir.AddStringExpr) ir.Node {
+func addStr(gd *base.Invocation, n *ir.AddStringExpr) ir.Node {
 	// Merge adjacent constants in the argument list.
 	s := n.List
 	need := 0
@@ -1092,7 +1092,7 @@ func addStr(n *ir.AddStringExpr) ir.Node {
 		for _, c := range s {
 			strs = append(strs, ir.StringVal(c))
 		}
-		return ir.NewConstExpr(constant.MakeString(strings.Join(strs, "")), n)
+		return ir.NewConstExpr(gd, constant.MakeString(strings.Join(strs, "")), n)
 	}
 	newList := make([]ir.Node, 0, need)
 	for i := 0; i < len(s); i++ {
@@ -1105,7 +1105,7 @@ func addStr(n *ir.AddStringExpr) ir.Node {
 				i2++
 			}
 
-			newList = append(newList, ir.NewConstExpr(constant.MakeString(strings.Join(strs, "")), s[i]))
+			newList = append(newList, ir.NewConstExpr(gd, constant.MakeString(strings.Join(strs, "")), s[i]))
 			i = i2 - 1
 		} else {
 			newList = append(newList, s[i])
@@ -1125,7 +1125,7 @@ const wrapGlobalMapInitSizeThreshold = 20
 //
 // Currently, it outlines map assignment statements with large,
 // side-effect-free RHS expressions.
-func tryWrapGlobalInit(n ir.Node) *ir.Func {
+func tryWrapGlobalInit(gd *base.Invocation, n ir.Node) *ir.Func {
 	// Look for "X = ..." where X has map type.
 	// FIXME: might also be worth trying to look for cases where
 	// the LHS is of interface type but RHS is map type.
@@ -1147,14 +1147,14 @@ func tryWrapGlobalInit(n ir.Node) *ir.Func {
 		rsiz++
 		return false
 	})
-	if base.Debug.WrapGlobalMapDbg > 0 {
+	if gd.Debug.WrapGlobalMapDbg > 0 {
 		fmt.Fprintf(os.Stderr, "=-= mapassign %s %v rhs size %d\n",
-			base.Ctxt.Pkgpath, n, rsiz)
+			gd.Ctxt.Pkgpath, n, rsiz)
 	}
 
 	// Reject smaller candidates if not in stress mode.
-	if rsiz < wrapGlobalMapInitSizeThreshold && base.Debug.WrapGlobalMapCtl != 2 {
-		if base.Debug.WrapGlobalMapDbg > 1 {
+	if rsiz < wrapGlobalMapInitSizeThreshold && gd.Debug.WrapGlobalMapCtl != 2 {
+		if gd.Debug.WrapGlobalMapDbg > 1 {
 			fmt.Fprintf(os.Stderr, "=-= skipping %v size too small at %d\n",
 				nm, rsiz)
 		}
@@ -1163,13 +1163,13 @@ func tryWrapGlobalInit(n ir.Node) *ir.Func {
 
 	// Reject right hand sides with side effects.
 	if AnySideEffects(as.Y) {
-		if base.Debug.WrapGlobalMapDbg > 0 {
+		if gd.Debug.WrapGlobalMapDbg > 0 {
 			fmt.Fprintf(os.Stderr, "=-= rejected %v due to side effects\n", nm)
 		}
 		return nil
 	}
 
-	if base.Debug.WrapGlobalMapDbg > 1 {
+	if gd.Debug.WrapGlobalMapDbg > 1 {
 		fmt.Fprintf(os.Stderr, "=-= committed for: %+v\n", n)
 	}
 
@@ -1180,13 +1180,13 @@ func tryWrapGlobalInit(n ir.Node) *ir.Func {
 	//	}
 	//
 	// Note: cmd/link expects the function name to contain "map.init".
-	minitsym := typecheck.LookupNum("map.init.", mapinitgen)
+	minitsym := typecheck.LookupNum(gd, "map.init.", mapinitgen)
 	mapinitgen++
 
-	fn := ir.NewFunc(n.Pos(), n.Pos(), minitsym, types.NewSignature(nil, nil, nil))
+	fn := ir.NewFunc(gd, n.Pos(), n.Pos(), minitsym, types.NewSignature(gd, nil, nil, nil))
 	fn.SetInlinabilityChecked(true) // suppress inlining (which would defeat the point)
-	typecheck.DeclFunc(fn)
-	if base.Debug.WrapGlobalMapDbg > 0 {
+	typecheck.DeclFunc(gd, fn)
+	if gd.Debug.WrapGlobalMapDbg > 0 {
 		fmt.Fprintf(os.Stderr, "=-= generated func is %v\n", fn)
 	}
 
@@ -1196,9 +1196,9 @@ func tryWrapGlobalInit(n ir.Node) *ir.Func {
 
 	// Insert assignment into function body; mark body finished.
 	fn.Body = []ir.Node{as}
-	typecheck.FinishFuncBody()
+	typecheck.FinishFuncBody(gd)
 
-	if base.Debug.WrapGlobalMapDbg > 1 {
+	if gd.Debug.WrapGlobalMapDbg > 1 {
 		fmt.Fprintf(os.Stderr, "=-= mapvar is %v\n", nm)
 		fmt.Fprintf(os.Stderr, "=-= newfunc is %+v\n", fn)
 	}
@@ -1217,7 +1217,7 @@ var mapinitgen int
 // These relocation ensure that if the map var itself is determined to
 // be reachable at link time, we also mark the init function as
 // reachable.
-func AddKeepRelocations() {
+func AddKeepRelocations(gd *base.Invocation) {
 	if varToMapInit == nil {
 		return
 	}
@@ -1225,14 +1225,14 @@ func AddKeepRelocations() {
 		// Add R_KEEP relocation from map to init function.
 		fs := v.Linksym()
 		if fs == nil {
-			base.Fatalf("bad: func %v has no linksym", v)
+			gd.Fatalf("bad: func %v has no linksym", v)
 		}
 		vs := k.Linksym()
 		if vs == nil {
-			base.Fatalf("bad: mapvar %v has no linksym", k)
+			gd.Fatalf("bad: mapvar %v has no linksym", k)
 		}
-		vs.AddRel(base.Ctxt, obj.Reloc{Type: objabi.R_KEEP, Sym: fs})
-		if base.Debug.WrapGlobalMapDbg > 1 {
+		vs.AddRel(gd.Ctxt, obj.Reloc{Type: objabi.R_KEEP, Sym: fs})
+		if gd.Debug.WrapGlobalMapDbg > 1 {
 			fmt.Fprintf(os.Stderr, "=-= add R_KEEP relo from %s to %s\n",
 				vs.Name, fs.Name)
 		}
@@ -1244,8 +1244,8 @@ func AddKeepRelocations() {
 // calls to separate "map init" functions (where possible and
 // profitable), to facilitate better dead-code elimination by the
 // linker.
-func OutlineMapInits(fn *ir.Func) {
-	if base.Debug.WrapGlobalMapCtl == 1 {
+func OutlineMapInits(gd *base.Invocation, fn *ir.Func) {
+	if gd.Debug.WrapGlobalMapCtl == 1 {
 		return
 	}
 
@@ -1253,15 +1253,15 @@ func OutlineMapInits(fn *ir.Func) {
 	for i, stmt := range fn.Body {
 		// Attempt to outline stmt. If successful, replace it with a call
 		// to the returned wrapper function.
-		if wrapperFn := tryWrapGlobalInit(stmt); wrapperFn != nil {
-			ir.WithFunc(fn, func() {
-				fn.Body[i] = typecheck.Call(stmt.Pos(), wrapperFn.Nname, nil, false)
+		if wrapperFn := tryWrapGlobalInit(gd, stmt); wrapperFn != nil {
+			ir.WithFunc(gd, fn, func() {
+				fn.Body[i] = typecheck.Call(gd, stmt.Pos(), wrapperFn.Nname, nil, false)
 			})
 			outlined++
 		}
 	}
 
-	if base.Debug.WrapGlobalMapDbg > 1 {
+	if gd.Debug.WrapGlobalMapDbg > 1 {
 		fmt.Fprintf(os.Stderr, "=-= outlined %v map initializations\n", outlined)
 	}
 }

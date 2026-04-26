@@ -134,7 +134,7 @@ func (l *location) asHole() hole {
 }
 
 // leak records that parameter l leaks to sink.
-func (l *location) leakTo(sink *location, derefs int) {
+func (l *location) leakTo(gd *base.Invocation, sink *location, derefs int) {
 	// If sink is a result parameter that doesn't escape (#44614)
 	// and we can fit return bits into the escape analysis tag,
 	// then record as a result leak.
@@ -142,13 +142,13 @@ func (l *location) leakTo(sink *location, derefs int) {
 		ri := sink.resultIndex - 1
 		if ri < numEscResults {
 			// Leak to result parameter.
-			l.paramEsc.AddResult(ri, derefs)
+			l.paramEsc.AddResult(gd, ri, derefs)
 			return
 		}
 	}
 
 	// Otherwise, record as heap leak.
-	l.paramEsc.AddHeap(derefs)
+	l.paramEsc.AddHeap(gd, derefs)
 }
 
 func (l *location) isName(c ir.Class) bool {
@@ -175,11 +175,11 @@ type note struct {
 	why   string
 }
 
-func (k hole) note(where ir.Node, why string) hole {
+func (k hole) note(gd *base.Invocation, where ir.Node, why string) hole {
 	if where == nil || why == "" {
-		base.Fatalf("note: missing where/why")
+		gd.Fatalf("note: missing where/why")
 	}
-	if base.Flag.LowerM >= 2 || logopt.Enabled() {
+	if gd.Flag.LowerM >= 2 || logopt.Enabled() {
 		k.notes = &note{
 			next:  k.notes,
 			where: where,
@@ -189,23 +189,27 @@ func (k hole) note(where ir.Node, why string) hole {
 	return k
 }
 
-func (k hole) shift(delta int) hole {
+func (k hole) shift(gd *base.Invocation, delta int) hole {
 	k.derefs += delta
 	if k.derefs < -1 {
-		base.Fatalf("derefs underflow: %v", k.derefs)
+		gd.Fatalf("derefs underflow: %v", k.derefs)
 	}
 	k.addrtaken = delta < 0
 	return k
 }
 
-func (k hole) deref(where ir.Node, why string) hole { return k.shift(1).note(where, why) }
-func (k hole) addr(where ir.Node, why string) hole  { return k.shift(-1).note(where, why) }
+func (k hole) deref(gd *base.Invocation, where ir.Node, why string) hole {
+	return k.shift(gd, 1).note(gd, where, why)
+}
+func (k hole) addr(gd *base.Invocation, where ir.Node, why string) hole {
+	return k.shift(gd, -1).note(gd, where, why)
+}
 
-func (k hole) dotType(t *types.Type, where ir.Node, why string) hole {
+func (k hole) dotType(gd *base.Invocation, t *types.Type, where ir.Node, why string) hole {
 	if !t.IsInterface() && !types.IsDirectIface(t) {
-		k = k.shift(1)
+		k = k.shift(gd, 1)
 	}
-	return k.note(where, why)
+	return k.note(gd, where, why)
 }
 
 func (b *batch) flow(k hole, src *location) {
@@ -221,9 +225,9 @@ func (b *batch) flow(k hole, src *location) {
 		return
 	}
 	if dst.hasAttr(attrEscapes) && k.derefs < 0 { // dst = &src
-		if base.Flag.LowerM >= 2 || logopt.Enabled() {
-			pos := base.FmtPos(src.n.Pos())
-			if base.Flag.LowerM >= 2 {
+		if b.gd.Flag.LowerM >= 2 || logopt.Enabled() {
+			pos := b.gd.FmtPos(src.n.Pos())
+			if b.gd.Flag.LowerM >= 2 {
 				fmt.Printf("%s: %v escapes to heap in %v:\n", pos, src.n, ir.FuncName(src.curfn))
 			}
 			explanation := b.explainFlow(pos, dst, src, k.derefs, k.notes, []*logopt.LoggedOpt{})
@@ -249,22 +253,22 @@ func (b *batch) candidateHole() hole { return b.candidateLoc.asHole() }
 
 func (b *batch) oldLoc(n *ir.Name) *location {
 	if n.Canonical().Opt == nil {
-		base.FatalfAt(n.Pos(), "%v has no location", n)
+		b.gd.FatalfAt(n.Pos(), "%v has no location", n)
 	}
 	return n.Canonical().Opt.(*location)
 }
 
 func (e *escape) newLoc(n ir.Node, persists bool) *location {
 	if e.curfn == nil {
-		base.Fatalf("e.curfn isn't set")
+		e.gd.Fatalf("e.curfn isn't set")
 	}
 	if n != nil && n.Type() != nil && n.Type().NotInHeap() {
-		base.ErrorfAt(n.Pos(), 0, "%v is incomplete (or unallocatable); stack allocation disallowed", n.Type())
+		e.gd.ErrorfAt(n.Pos(), 0, "%v is incomplete (or unallocatable); stack allocation disallowed", n.Type())
 	}
 
 	if n != nil && n.Op() == ir.ONAME {
 		if canon := n.(*ir.Name).Canonical(); n != canon {
-			base.FatalfAt(n.Pos(), "newLoc on non-canonical %v (canonical is %v)", n, canon)
+			e.gd.FatalfAt(n.Pos(), "newLoc on non-canonical %v (canonical is %v)", n, canon)
 		}
 	}
 	loc := &location{
@@ -288,11 +292,11 @@ func (e *escape) newLoc(n ir.Node, persists bool) *location {
 			if n.Class == ir.PPARAM && n.Curfn == nil {
 				// ok; hidden parameter
 			} else if n.Curfn != e.curfn {
-				base.FatalfAt(n.Pos(), "curfn mismatch: %v != %v for %v", n.Curfn, e.curfn, n)
+				e.gd.FatalfAt(n.Pos(), "curfn mismatch: %v != %v for %v", n.Curfn, e.curfn, n)
 			}
 
 			if n.Opt != nil {
-				base.FatalfAt(n.Pos(), "%v already has a location", n)
+				e.gd.FatalfAt(n.Pos(), "%v already has a location", n)
 			}
 			n.Opt = loc
 		}
@@ -322,7 +326,7 @@ func (e *escape) teeHole(ks ...hole) hole {
 		// *ltmp" and "l2 = ltmp" and return "ltmp = &_"
 		// instead.
 		if k.derefs < 0 {
-			base.Fatalf("teeHole: negative derefs")
+			e.gd.Fatalf("teeHole: negative derefs")
 		}
 
 		e.flow(k, loc)

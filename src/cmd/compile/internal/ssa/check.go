@@ -323,7 +323,7 @@ func checkFunc(f *Func) {
 				}
 			case OpVarDef:
 				n := v.Aux.(*ir.Name)
-				if !n.Type().HasPointers() && !IsMergeCandidate(n) {
+				if !n.Type().HasPointers() && !IsMergeCandidate(f.Config.gd, n) {
 					f.Fatalf("vardef must be merge candidate or have pointer type %s", v.Aux.(*ir.Name).Type().String())
 				}
 			case OpNilCheck:

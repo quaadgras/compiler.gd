@@ -7,6 +7,7 @@ package noder
 import (
 	"go/constant"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/typecheck"
@@ -42,8 +43,8 @@ func typed(typ *types.Type, n ir.Node) ir.Node {
 
 // FixValue returns val after converting and truncating it as
 // appropriate for typ.
-func FixValue(typ *types.Type, val constant.Value) constant.Value {
-	assert(typ.Kind() != types.TFORW)
+func FixValue(gd *base.Invocation, typ *types.Type, val constant.Value) constant.Value {
+	assert(gd, typ.Kind() != types.TFORW)
 	switch {
 	case typ.IsInteger():
 		val = constant.ToInt(val)
@@ -53,29 +54,29 @@ func FixValue(typ *types.Type, val constant.Value) constant.Value {
 		val = constant.ToComplex(val)
 	}
 	if !typ.IsUntyped() {
-		val = typecheck.ConvertVal(val, typ, false)
+		val = typecheck.ConvertVal(gd, val, typ, false)
 	}
-	ir.AssertValidTypeForConst(typ, val)
+	ir.AssertValidTypeForConst(gd, typ, val)
 	return val
 }
 
 // Expressions
 
-func Addr(pos src.XPos, x ir.Node) *ir.AddrExpr {
-	n := typecheck.NodAddrAt(pos, x)
+func Addr(gd *base.Invocation, pos src.XPos, x ir.Node) *ir.AddrExpr {
+	n := typecheck.NodAddrAt(gd, pos, x)
 	typed(types.NewPtr(x.Type()), n)
 	return n
 }
 
-func Deref(pos src.XPos, typ *types.Type, x ir.Node) *ir.StarExpr {
-	n := ir.NewStarExpr(pos, x)
+func Deref(gd *base.Invocation, pos src.XPos, typ *types.Type, x ir.Node) *ir.StarExpr {
+	n := ir.NewStarExpr(gd, pos, x)
 	typed(typ, n)
 	return n
 }
 
 // Statements
 
-func idealType(tv syntax.TypeAndValue) types2.Type {
+func idealType(gd *base.Invocation, tv syntax.TypeAndValue) types2.Type {
 	// The gc backend expects all expressions to have a concrete type, and
 	// types2 mostly satisfies this expectation already. But there are a few
 	// cases where the Go spec doesn't require converting to concrete type,
@@ -90,7 +91,7 @@ func idealType(tv syntax.TypeAndValue) types2.Type {
 			typ = types2.Typ[types2.Uint]
 			if tv.Value != nil {
 				s := constant.ToInt(tv.Value)
-				assert(s.Kind() == constant.Int)
+				assert(gd, s.Kind() == constant.Int)
 				if constant.Sign(s) < 0 {
 					typ = types2.Typ[types2.Int]
 				}

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package gc
+package gd
 
 import (
 	"bufio"
@@ -46,53 +46,55 @@ import (
 // or runtime exception during front-end compiler processing (unless there have
 // already been some compiler errors). It may also be invoked from the explicit panic in
 // hcrash(), in which case, we pass the panic on through.
-func handlePanic() {
+func handlePanic(gd *base.Invocation) {
 	if err := recover(); err != nil {
 		if err == "-h" {
 			// Force real panic now with -h option (hcrash) - the error
 			// information will have already been printed.
 			panic(err)
 		}
-		base.Fatalf("panic: %v", err)
+		gd.Fatalf("panic: %v", err)
 	}
 }
 
 // Main parses flags and Go source files specified in the command-line
 // arguments, type-checks the parsed Go package, compiles functions to machine
 // code, and finally writes the compiled package definition to disk.
-func Main(archInit func(*ssagen.ArchInfo)) {
-	base.Timer.Start("fe", "init")
+func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
+	gd.Timer.Start("fe", "init")
 	counter.Open()
 	counter.Inc("compile/invocations")
 
-	defer handlePanic()
+	defer handlePanic(gd)
 
 	archInit(&ssagen.Arch)
 
-	base.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
-	base.Ctxt.DiagFunc = base.Errorf
-	base.Ctxt.DiagFlush = base.FlushErrors
-	base.Ctxt.Bso = bufio.NewWriter(os.Stdout)
+	gd.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
+	gd.Ctxt.DiagFunc = gd.Errorf
+	gd.Ctxt.DiagFlush = gd.FlushErrors
+	gd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
 
 	// UseBASEntries is preferred because it shaves about 2% off build time, but LLDB, dsymutil, and dwarfdump
 	// on Darwin don't support it properly, especially since macOS 10.14 (Mojave).  This is exposed as a flag
 	// to allow testing with LLVM tools on Linux, and to help with reporting this bug to the LLVM project.
 	// See bugs 31188 and 21945 (CLs 170638, 98075, 72371).
-	base.Ctxt.UseBASEntries = base.Ctxt.Headtype != objabi.Hdarwin
+	gd.Ctxt.UseBASEntries = gd.Ctxt.Headtype != objabi.Hdarwin
 
-	base.DebugSSA = ssa.PhaseOption
-	base.ParseFlags()
+	gd.DebugSSA = ssa.PhaseOption
+	gd.ParseFlags()
 
-	if flagGCStart := base.Debug.GCStart; flagGCStart > 0 || // explicit flags overrides environment variable disable of GC boost
-		os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && base.Flag.LowerC != 1 { // explicit GC knobs or no concurrency implies default heap
+	if flagGCStart := gd.Debug.GCStart; flagGCStart > 0 || // explicit flags overrides environment variable disable of GC boost
+		os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && gd.Flag.LowerC != 1 { // explicit GC knobs or no concurrency implies default heap
 		startHeapMB := int64(128)
 		if flagGCStart > 0 {
 			startHeapMB = int64(flagGCStart)
 		}
-		base.AdjustStartingHeap(uint64(startHeapMB)<<20, 0, 0, 0, base.Debug.GCAdjust == 1)
+		gd.AdjustStartingHeap(uint64(startHeapMB)<<20, 0, 0, 0, gd.Debug.GCAdjust == 1)
 	}
 
-	types.LocalPkg = types.NewPkg(base.Ctxt.Pkgpath, "")
+	localPkg := types.NewPkg(gd.Ctxt.Pkgpath, "")
+	localPkg.Local = true
+	gd.LocalPkg = localPkg
 
 	// pseudo-package, for scoping
 	types.BuiltinPkg = types.NewPkg("go.builtin", "") // TODO(gri) name this package go.builtin?
@@ -128,9 +130,9 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	// Record flags that affect the build result. (And don't
 	// record flags that don't, since that would cause spurious
 	// changes in the binary.)
-	dwarfgen.RecordFlags("B", "N", "l", "msan", "race", "asan", "shared", "dynlink", "dwarf", "dwarflocationlists", "dwarfbasentries", "smallframes", "spectre")
+	dwarfgen.RecordFlags(gd, "B", "N", "l", "msan", "race", "asan", "shared", "dynlink", "dwarf", "dwarflocationlists", "dwarfbasentries", "smallframes", "spectre")
 
-	if !base.EnableTrace && base.Flag.LowerT {
+	if !base.EnableTrace && gd.Flag.LowerT {
 		log.Fatalf("compiler not built with support for -t")
 	}
 
@@ -138,60 +140,68 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	//	default: inlining on.  (Flag.LowerL == 1)
 	//	-l: inlining off  (Flag.LowerL == 0)
 	//	-l=2, -l=3: inlining on again, with extra debugging (Flag.LowerL > 1)
-	if base.Flag.LowerL <= 1 {
-		base.Flag.LowerL = 1 - base.Flag.LowerL
+	if gd.Flag.LowerL <= 1 {
+		gd.Flag.LowerL = 1 - gd.Flag.LowerL
 	}
 
-	if base.Flag.SmallFrames {
+	if gd.Flag.SmallFrames {
 		ir.MaxStackVarSize = 64 * 1024
 		ir.MaxImplicitStackVarSize = 16 * 1024
 	}
 
-	if base.Flag.Dwarf {
-		base.Ctxt.DebugInfo = dwarfgen.Info
-		base.Ctxt.GenAbstractFunc = dwarfgen.AbstractFunc
-		base.Ctxt.DwFixups = obj.NewDwarfFixupTable(base.Ctxt)
+	if gd.Flag.Dwarf {
+		gd.Ctxt.DebugInfo = func(ctxt *obj.Link, fn, info *obj.LSym, curfn obj.Func) ([]dwarf.Scope, dwarf.InlCalls) {
+			return dwarfgen.Info(gd, ctxt, fn, info, curfn)
+		}
+		gd.Ctxt.GenAbstractFunc = func(fn *obj.LSym) {
+			dwarfgen.AbstractFunc(gd, fn)
+		}
+		gd.Ctxt.DwFixups = obj.NewDwarfFixupTable(gd.Ctxt)
 	} else {
 		// turn off inline generation if no dwarf at all
-		base.Flag.GenDwarfInl = 0
-		base.Ctxt.Flag_locationlists = false
+		gd.Flag.GenDwarfInl = 0
+		gd.Ctxt.Flag_locationlists = false
 	}
-	if base.Ctxt.Flag_locationlists && len(base.Ctxt.Arch.DWARFRegisters) == 0 {
-		log.Fatalf("location lists requested but register mapping not available on %v", base.Ctxt.Arch.Name)
-	}
-
-	types.ParseLangFlag()
-
-	symABIs := ssagen.NewSymABIs()
-	if base.Flag.SymABIs != "" {
-		symABIs.ReadSymABIs(base.Flag.SymABIs)
+	if gd.Ctxt.Flag_locationlists && len(gd.Ctxt.Arch.DWARFRegisters) == 0 {
+		log.Fatalf("location lists requested but register mapping not available on %v", gd.Ctxt.Arch.Name)
 	}
 
-	if objabi.LookupPkgSpecial(base.Ctxt.Pkgpath).NoInstrument {
-		base.Flag.Race = false
-		base.Flag.MSan = false
-		base.Flag.ASan = false
+	types.ParseLangFlag(gd)
+
+	symABIs := ssagen.NewSymABIs(gd)
+	if gd.Flag.SymABIs != "" {
+		symABIs.ReadSymABIs(gd.Flag.SymABIs)
 	}
 
-	ssagen.Arch.LinkArch.Init(base.Ctxt)
-	startProfile()
-	if base.Flag.Race || base.Flag.MSan || base.Flag.ASan {
-		base.Flag.Cfg.Instrumenting = true
+	if objabi.LookupPkgSpecial(gd.Ctxt.Pkgpath).NoInstrument {
+		gd.Flag.Race = false
+		gd.Flag.MSan = false
+		gd.Flag.ASan = false
 	}
-	if base.Flag.Dwarf {
-		dwarf.EnableLogging(base.Debug.DwarfInl != 0)
+
+	ssagen.Arch.LinkArch.Init(gd.Ctxt)
+	startProfile(gd)
+	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
+		gd.Flag.Cfg.Instrumenting = true
 	}
-	if base.Debug.SoftFloat != 0 {
+	if gd.Flag.Dwarf {
+		dwarf.EnableLogging(gd.Debug.DwarfInl != 0)
+	}
+	if gd.Debug.SoftFloat != 0 {
 		ssagen.Arch.SoftFloat = true
 	}
 
-	if base.Flag.JSON != "" { // parse version,destination from json logging optimization.
-		logopt.LogJsonOption(base.Flag.JSON)
+	if gd.Flag.JSON != "" { // parse version,destination from json logging optimization.
+		logopt.LogJsonOption(gd.Flag.JSON)
 	}
 
 	ir.EscFmt = escape.Fmt
-	ir.IsIntrinsicCall = ssagen.IsIntrinsicCall
-	ir.IsIntrinsicSym = ssagen.IsIntrinsicSym
+	ir.IsIntrinsicCall = func(ce *ir.CallExpr) bool {
+		return ssagen.IsIntrinsicCall(gd, ce)
+	}
+	ir.IsIntrinsicSym = func(s *types.Sym) bool {
+		return ssagen.IsIntrinsicSym(gd, s)
+	}
 	inline.SSADumpInline = ssagen.DumpInline
 	ssagen.InitEnv()
 
@@ -199,74 +209,74 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	types.RegSize = ssagen.Arch.LinkArch.RegSize
 	types.MaxWidth = ssagen.Arch.MAXWIDTH
 
-	typecheck.Target = new(ir.Package)
+	gd.Package = new(ir.Package)
 
-	base.AutogeneratedPos = makePos(src.NewFileBase("<autogenerated>", "<autogenerated>"), 1, 0)
+	gd.AutogeneratedPos = makePos(gd, src.NewFileBase("<autogenerated>", "<autogenerated>"), 1, 0)
 
-	typecheck.InitUniverse()
-	typecheck.InitRuntime()
-	rttype.Init()
+	typecheck.InitUniverse(gd)
+	typecheck.InitRuntime(gd)
+	rttype.Init(gd)
 
 	// Some intrinsics (notably, the simd intrinsics) mention
 	// types "eagerly", thus ssagen must be initialized AFTER
 	// the type system is ready.
-	ssagen.InitTables()
+	ssagen.InitTables(gd)
 
 	// Parse and typecheck input.
-	noder.LoadPackage(flag.Args())
+	noder.LoadPackage(gd, flag.Args())
 
 	// As a convenience to users (toolchain maintainers, in particular),
 	// when compiling a package named "main", we default the package
 	// path to "main" if the -p flag was not specified.
-	if base.Ctxt.Pkgpath == obj.UnlinkablePkg && types.LocalPkg.Name == "main" {
-		base.Ctxt.Pkgpath = "main"
-		types.LocalPkg.Path = "main"
-		types.LocalPkg.Prefix = "main"
+	if gd.Ctxt.Pkgpath == obj.UnlinkablePkg && types.LocalPkg(gd).Name == "main" {
+		gd.Ctxt.Pkgpath = "main"
+		types.LocalPkg(gd).Path = "main"
+		types.LocalPkg(gd).Prefix = "main"
 	}
 
-	dwarfgen.RecordPackageName()
+	dwarfgen.RecordPackageName(gd)
 
 	// Prepare for backend processing.
-	ssagen.InitConfig()
+	ssagen.InitConfig(gd)
 
 	// Apply coverage fixups, if applicable.
-	coverage.Fixup()
+	coverage.Fixup(gd)
 
 	// Read profile file and build profile-graph and weighted-call-graph.
-	base.Timer.Start("fe", "pgo-load-profile")
+	gd.Timer.Start("fe", "pgo-load-profile")
 	var profile *pgoir.Profile
-	if base.Flag.PgoProfile != "" {
+	if gd.Flag.PgoProfile != "" {
 		var err error
-		profile, err = pgoir.New(base.Flag.PgoProfile)
+		profile, err = pgoir.New(gd, gd.Flag.PgoProfile)
 		if err != nil {
-			log.Fatalf("%s: PGO error: %v", base.Flag.PgoProfile, err)
+			log.Fatalf("%s: PGO error: %v", gd.Flag.PgoProfile, err)
 		}
 	}
 
 	// Apply bloop markings.
-	bloop.BloopWalk(typecheck.Target)
+	bloop.BloopWalk(gd, typecheck.Target(gd))
 
 	// Interleaved devirtualization and inlining.
-	base.Timer.Start("fe", "devirtualize-and-inline")
-	interleaved.DevirtualizeAndInlinePackage(typecheck.Target, profile)
+	gd.Timer.Start("fe", "devirtualize-and-inline")
+	interleaved.DevirtualizeAndInlinePackage(gd, typecheck.Target(gd), profile)
 
-	noder.MakeWrappers(typecheck.Target) // must happen after inlining
+	noder.MakeWrappers(gd, typecheck.Target(gd)) // must happen after inlining
 
 	// Get variable capture right in for loops.
 	var transformed []loopvar.VarAndLoop
-	for _, fn := range typecheck.Target.Funcs {
-		transformed = append(transformed, loopvar.ForCapture(fn)...)
+	for _, fn := range typecheck.Target(gd).Funcs {
+		transformed = append(transformed, loopvar.ForCapture(gd, fn)...)
 	}
-	ir.CurFunc = nil
+	gd.CurFunc = nil
 
 	// Build init task, if needed.
-	pkginit.MakeTask()
+	pkginit.MakeTask(gd)
 
 	// Generate ABI wrappers. Must happen before escape analysis
 	// and doesn't benefit from dead-coding or inlining.
 	symABIs.GenABIWrappers()
 
-	deadlocals.Funcs(typecheck.Target.Funcs)
+	deadlocals.Funcs(gd, typecheck.Target(gd).Funcs)
 
 	// Escape analysis.
 	// Required for moving heap allocations onto stack,
@@ -276,8 +286,8 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	// or else the stack copier will not update it.
 	// Large values are also moved off stack in escape analysis;
 	// because large values may contain pointers, it must happen early.
-	base.Timer.Start("fe", "escapes")
-	escape.Funcs(typecheck.Target.Funcs)
+	gd.Timer.Start("fe", "escapes")
+	escape.Funcs(gd, typecheck.Target(gd).Funcs)
 
 	// gd Phase F4: synthesise compute fns for every detected
 	// trivial forwarder. Must run after escape (so GdForwarder
@@ -285,55 +295,55 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 	// escape.Batch.finish) and before FinalizeItabMasks (so the
 	// install path can reference the synthesized funcsym). See
 	// doc/gd/escape-bits.md §F4.
-	if base.Debug.GdForwarderDisable == 0 {
-		escape.SynthesizeForwarderComputeFns(typecheck.Target.Funcs)
+	if gd.Debug.GdForwarderDisable == 0 {
+		escape.SynthesizeForwarderComputeFns(gd, typecheck.Target(gd).Funcs)
 	}
 
 	// gd escape-bits: write the per-method EscMask into every itab
 	// whose slot was reserved during noder-time writeITab calls. Must
 	// run after escape so ir.Func.EscMask is populated. See
 	// doc/gd/escape-bits.md.
-	reflectdata.FinalizeItabMasks()
+	reflectdata.FinalizeItabMasks(gd)
 
-	slice.Funcs(typecheck.Target.Funcs)
+	slice.Funcs(gd, typecheck.Target(gd).Funcs)
 
-	loopvar.LogTransformations(transformed)
+	loopvar.LogTransformations(gd, transformed)
 
 	// Collect information for go:nowritebarrierrec
 	// checking. This must happen before transforming closures during Walk
 	// We'll do the final check after write barriers are
 	// inserted.
-	if base.Flag.CompilingRuntime {
-		ssagen.EnableNoWriteBarrierRecCheck()
+	if gd.Flag.CompilingRuntime {
+		ssagen.EnableNoWriteBarrierRecCheck(gd)
 	}
 
-	ir.CurFunc = nil
+	gd.CurFunc = nil
 
-	reflectdata.WriteBasicTypes()
+	reflectdata.WriteBasicTypes(gd)
 
 	// Compile top-level declarations.
 	//
 	// There are cyclic dependencies between all of these phases, so we
 	// need to iterate all of them until we reach a fixed point.
-	base.Timer.Start("be", "compilefuncs")
+	gd.Timer.Start("be", "compilefuncs")
 	for nextFunc, nextExtern := 0, 0; ; {
-		reflectdata.WriteRuntimeTypes()
+		reflectdata.WriteRuntimeTypes(gd)
 
-		if nextExtern < len(typecheck.Target.Externs) {
-			switch n := typecheck.Target.Externs[nextExtern]; n.Op() {
+		if nextExtern < len(typecheck.Target(gd).Externs) {
+			switch n := typecheck.Target(gd).Externs[nextExtern]; n.Op() {
 			case ir.ONAME:
-				dumpGlobal(n)
+				dumpGlobal(gd, n)
 			case ir.OLITERAL:
-				dumpGlobalConst(n)
+				dumpGlobalConst(gd, n)
 			case ir.OTYPE:
-				reflectdata.NeedRuntimeType(n.Type())
+				reflectdata.NeedRuntimeType(gd, n.Type())
 			}
 			nextExtern++
 			continue
 		}
 
-		if nextFunc < len(typecheck.Target.Funcs) {
-			enqueueFunc(typecheck.Target.Funcs[nextFunc], symABIs)
+		if nextFunc < len(typecheck.Target(gd).Funcs) {
+			enqueueFunc(gd, typecheck.Target(gd).Funcs[nextFunc], symABIs)
 			nextFunc++
 			continue
 		}
@@ -342,7 +352,7 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		// as late as possible to maximize how much work we can batch and
 		// process concurrently.
 		if len(compilequeue) != 0 {
-			compileFunctions(profile)
+			compileFunctions(gd, profile)
 			continue
 		}
 
@@ -354,58 +364,58 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		// allow multiple invocations, so we intentionally run it just
 		// once after everything else. Worst case, some generated
 		// functions have slightly larger DWARF DIEs.
-		if base.Ctxt.DwFixups != nil {
-			base.Ctxt.DwFixups.Finalize(base.Ctxt.Pkgpath, base.Debug.DwarfInl != 0)
-			base.Ctxt.DwFixups = nil
-			base.Flag.GenDwarfInl = 0
+		if gd.Ctxt.DwFixups != nil {
+			gd.Ctxt.DwFixups.Finalize(gd.Ctxt.Pkgpath, gd.Debug.DwarfInl != 0)
+			gd.Ctxt.DwFixups = nil
+			gd.Flag.GenDwarfInl = 0
 			continue // may have called reflectdata.TypeLinksym (#62156)
 		}
 
 		break
 	}
 
-	base.Timer.AddEvent(int64(len(typecheck.Target.Funcs)), "funcs")
+	gd.Timer.AddEvent(int64(len(typecheck.Target(gd).Funcs)), "funcs")
 
-	if base.Flag.CompilingRuntime {
+	if gd.Flag.CompilingRuntime {
 		// Write barriers are now known. Check the call graph.
 		ssagen.NoWriteBarrierRecCheck()
 	}
 
 	// Add keep relocations for global maps.
-	if base.Debug.WrapGlobalMapCtl != 1 {
-		staticinit.AddKeepRelocations()
+	if gd.Debug.WrapGlobalMapCtl != 1 {
+		staticinit.AddKeepRelocations(gd)
 	}
 
 	// Write object data to disk.
-	base.Timer.Start("be", "dumpobj")
-	dumpdata()
-	base.Ctxt.NumberSyms()
-	dumpobj()
-	if base.Flag.AsmHdr != "" {
-		dumpasmhdr()
+	gd.Timer.Start("be", "dumpobj")
+	dumpdata(gd)
+	gd.Ctxt.NumberSyms()
+	dumpobj(gd)
+	if gd.Flag.AsmHdr != "" {
+		dumpasmhdr(gd)
 	}
 
-	ssagen.CheckLargeStacks()
-	typecheck.CheckFuncStack()
+	ssagen.CheckLargeStacks(gd)
+	typecheck.CheckFuncStack(gd)
 
 	if len(compilequeue) != 0 {
-		base.Fatalf("%d uncompiled functions", len(compilequeue))
+		gd.Fatalf("%d uncompiled functions", len(compilequeue))
 	}
 
-	logopt.FlushLoggedOpts(base.Ctxt, base.Ctxt.Pkgpath)
-	base.ExitIfErrors()
+	logopt.FlushLoggedOpts(gd.Ctxt, gd.Ctxt.Pkgpath)
+	gd.ExitIfErrors()
 
-	base.FlushErrors()
-	base.Timer.Stop()
+	gd.FlushErrors()
+	gd.Timer.Stop()
 
-	if base.Flag.Bench != "" {
-		if err := writebench(base.Flag.Bench); err != nil {
+	if gd.Flag.Bench != "" {
+		if err := writebench(gd, gd.Flag.Bench); err != nil {
 			log.Fatalf("cannot write benchmark data: %v", err)
 		}
 	}
 }
 
-func writebench(filename string) error {
+func writebench(gd *base.Invocation, filename string) error {
 	f, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return err
@@ -415,7 +425,7 @@ func writebench(filename string) error {
 	fmt.Fprintln(&buf, "commit:", buildcfg.Version)
 	fmt.Fprintln(&buf, "goos:", runtime.GOOS)
 	fmt.Fprintln(&buf, "goarch:", runtime.GOARCH)
-	base.Timer.Write(&buf, "BenchmarkCompile:"+base.Ctxt.Pkgpath+":")
+	gd.Timer.Write(&buf, "BenchmarkCompile:"+gd.Ctxt.Pkgpath+":")
 
 	n, err := f.Write(buf.Bytes())
 	if err != nil {
@@ -428,6 +438,6 @@ func writebench(filename string) error {
 	return f.Close()
 }
 
-func makePos(b *src.PosBase, line, col uint) src.XPos {
-	return base.Ctxt.PosTable.XPos(src.MakePos(b, line, col))
+func makePos(gd *base.Invocation, b *src.PosBase, line, col uint) src.XPos {
+	return gd.Ctxt.PosTable.XPos(src.MakePos(b, line, col))
 }

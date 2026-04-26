@@ -16,7 +16,7 @@ import (
 )
 
 // MapGroupType makes the map slot group type given the type of the map.
-func MapGroupType(t *types.Type) *types.Type {
+func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 	if t.MapType().Group != nil {
 		return t.MapType().Group
 	}
@@ -67,20 +67,20 @@ func MapGroupType(t *types.Type) *types.Type {
 
 	// Check invariants that map code depends on.
 	if !types.IsComparable(t.Key()) {
-		base.Fatalf("unsupported map key type for %v", t)
+		gd.Fatalf("unsupported map key type for %v", t)
 	}
 	if group.Size() <= 8 {
 		// internal/runtime/maps creates pointers to slots, even if
 		// both key and elem are size zero. In this case, each slot is
 		// size 0, but group should still reserve a word of padding at
 		// the end to ensure pointers are valid.
-		base.Fatalf("bad group size for %v", t)
+		gd.Fatalf("bad group size for %v", t)
 	}
 	if t.Key().Size() > abi.MapMaxKeyBytes && !keytype.IsPtr() {
-		base.Fatalf("key indirect incorrect for %v", t)
+		gd.Fatalf("key indirect incorrect for %v", t)
 	}
 	if t.Elem().Size() > abi.MapMaxElemBytes && !elemtype.IsPtr() {
-		base.Fatalf("elem indirect incorrect for %v", t)
+		gd.Fatalf("elem indirect incorrect for %v", t)
 	}
 
 	t.MapType().Group = group
@@ -92,7 +92,7 @@ var cachedMapTableType *types.Type
 
 // mapTableType returns a type interchangeable with internal/runtime/maps.table.
 // Make sure this stays in sync with internal/runtime/maps/table.go.
-func mapTableType() *types.Type {
+func mapTableType(gd *base.Invocation) *types.Type {
 	if cachedMapTableType != nil {
 		return cachedMapTableType
 	}
@@ -121,7 +121,7 @@ func mapTableType() *types.Type {
 		makefield("groups_lengthMask", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("table"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("table"))
 	table := types.NewNamed(n)
 	n.SetType(table)
 	n.SetTypecheck(1)
@@ -132,7 +132,7 @@ func mapTableType() *types.Type {
 	// The size of table should be 32 bytes on 64 bit
 	// and 24 bytes on 32 bit platforms.
 	if size := int64(3*2 + 2*1 /* one extra for padding */ + 1*8 + 2*types.PtrSize); table.Size() != size {
-		base.Fatalf("internal/runtime/maps.table size not correct: got %d, want %d", table.Size(), size)
+		gd.Fatalf("internal/runtime/maps.table size not correct: got %d, want %d", table.Size(), size)
 	}
 
 	cachedMapTableType = table
@@ -143,7 +143,7 @@ var cachedMapType *types.Type
 
 // MapType returns a type interchangeable with internal/runtime/maps.Map.
 // Make sure this stays in sync with internal/runtime/maps/map.go.
-func MapType() *types.Type {
+func MapType(gd *base.Invocation) *types.Type {
 	if cachedMapType != nil {
 		return cachedMapType
 	}
@@ -177,7 +177,7 @@ func MapType() *types.Type {
 		makefield("clearSeq", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Map"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Map"))
 	m := types.NewNamed(n)
 	n.SetType(m)
 	n.SetTypecheck(1)
@@ -188,7 +188,7 @@ func MapType() *types.Type {
 	// The size of Map should be 48 bytes on 64 bit
 	// and 32 bytes on 32 bit platforms.
 	if size := int64(2*8 + 4*types.PtrSize /* one extra for globalDepth/globalShift/writing + padding */); m.Size() != size {
-		base.Fatalf("internal/runtime/maps.Map size not correct: got %d, want %d", m.Size(), size)
+		gd.Fatalf("internal/runtime/maps.Map size not correct: got %d, want %d", m.Size(), size)
 	}
 
 	cachedMapType = m
@@ -199,7 +199,7 @@ var cachedMapIterType *types.Type
 
 // MapIterType returns a type interchangeable with internal/runtime/maps.Iter.
 // Make sure this stays in sync with internal/runtime/maps/table.go.
-func MapIterType() *types.Type {
+func MapIterType(gd *base.Invocation) *types.Type {
 	if cachedMapIterType != nil {
 		return cachedMapIterType
 	}
@@ -231,19 +231,19 @@ func MapIterType() *types.Type {
 		makefield("key", types.Types[types.TUNSAFEPTR]),  // Used in range.go for TMAP.
 		makefield("elem", types.Types[types.TUNSAFEPTR]), // Used in range.go for TMAP.
 		makefield("typ", types.Types[types.TUNSAFEPTR]),
-		makefield("m", types.NewPtr(MapType())),
+		makefield("m", types.NewPtr(MapType(gd))),
 		makefield("groupSlotOffset", types.Types[types.TUINT64]),
 		makefield("dirOffset", types.Types[types.TUINT64]),
 		makefield("clearSeq", types.Types[types.TUINT64]),
 		makefield("globalDepth", types.Types[types.TUINT8]),
 		makefield("dirIdx", types.Types[types.TINT]),
-		makefield("tab", types.NewPtr(mapTableType())),
+		makefield("tab", types.NewPtr(mapTableType(gd))),
 		makefield("group", types.Types[types.TUNSAFEPTR]),
 		makefield("entryIdx", types.Types[types.TUINT64]),
 	}
 
 	// build iterator struct holding the above fields
-	n := ir.NewDeclNameAt(src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Iter"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Iter"))
 	iter := types.NewNamed(n)
 	n.SetType(iter)
 	n.SetTypecheck(1)
@@ -254,29 +254,29 @@ func MapIterType() *types.Type {
 	// The size of Iter should be 96 bytes on 64 bit
 	// and 64 bytes on 32 bit platforms.
 	if size := 8*types.PtrSize /* one extra for globalDepth + padding */ + 4*8; iter.Size() != int64(size) {
-		base.Fatalf("internal/runtime/maps.Iter size not correct: got %d, want %d", iter.Size(), size)
+		gd.Fatalf("internal/runtime/maps.Iter size not correct: got %d, want %d", iter.Size(), size)
 	}
 
 	cachedMapIterType = iter
 	return iter
 }
 
-func writeMapType(t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
+func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
 	// internal/abi.MapType
-	gtyp := MapGroupType(t)
-	s1 := writeType(t.Key())
-	s2 := writeType(t.Elem())
-	s3 := writeType(gtyp)
-	hasher := genhash(t.Key())
+	gtyp := MapGroupType(gd, t)
+	s1 := writeType(gd, t.Key())
+	s2 := writeType(gd, t.Elem())
+	s3 := writeType(gd, gtyp)
+	hasher := genhash(gd, t.Key())
 
 	slotTyp := gtyp.Field(1).Type.Elem()
 	elemOff := slotTyp.Field(1).Offset
-	if AlgType(t.Key()) == types.AMEM64 && elemOff != 8 {
-		base.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
+	if AlgType(gd, t.Key()) == types.AMEM64 && elemOff != 8 {
+		gd.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
 	}
-	if AlgType(t.Key()) == types.ASTRING && elemOff != types.StringSize {
+	if AlgType(gd, t.Key()) == types.ASTRING && elemOff != types.StringSize {
 		// gd small-string optimization: string header is 3 words (24 B).
-		base.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
+		gd.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
 	}
 
 	c.Field("Key").WritePtr(s1)
@@ -287,7 +287,7 @@ func writeMapType(t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
 	c.Field("SlotSize").WriteUintptr(uint64(slotTyp.Size()))
 	c.Field("ElemOff").WriteUintptr(uint64(elemOff))
 	var flags uint32
-	if needkeyupdate(t.Key()) {
+	if needkeyupdate(gd, t.Key()) {
 		flags |= abi.MapNeedKeyUpdate
 	}
 	if hashMightPanic(t.Key()) {
@@ -306,6 +306,6 @@ func writeMapType(t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
 		// type live in the binary. This is important to make sure that
 		// a named map and that same map cast to its underlying type via
 		// reflection, use the same hash function. See issue 37716.
-		lsym.AddRel(base.Ctxt, obj.Reloc{Type: objabi.R_KEEP, Sym: writeType(u)})
+		lsym.AddRel(gd.Ctxt, obj.Reloc{Type: objabi.R_KEEP, Sym: writeType(gd, u)})
 	}
 }

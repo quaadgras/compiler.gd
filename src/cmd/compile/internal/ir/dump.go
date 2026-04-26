@@ -21,8 +21,8 @@ import (
 )
 
 // DumpAny is like FDumpAny but prints to stderr.
-func DumpAny(root any, filter string, depth int) {
-	FDumpAny(os.Stderr, root, filter, depth)
+func DumpAny(gd *base.Invocation, root any, filter string, depth int) {
+	FDumpAny(gd, os.Stderr, root, filter, depth)
 }
 
 // FDumpAny prints the structure of a rooted data structure
@@ -42,7 +42,7 @@ func DumpAny(root any, filter string, depth int) {
 // rather than their type; struct fields with zero values or
 // non-matching field names are omitted, and "…" means recursion
 // depth has been reached or struct fields have been omitted.
-func FDumpAny(w io.Writer, root any, filter string, depth int) {
+func FDumpAny(gd *base.Invocation, w io.Writer, root any, filter string, depth int) {
 	if root == nil {
 		fmt.Fprintln(w, "nil")
 		return
@@ -59,7 +59,7 @@ func FDumpAny(w io.Writer, root any, filter string, depth int) {
 		last:    '\n', // force printing of line number on first line
 	}
 
-	p.dump(reflect.ValueOf(root), depth)
+	p.dump(gd, reflect.ValueOf(root), depth)
 	p.printf("\n")
 }
 
@@ -134,14 +134,14 @@ func (p *dumper) addr(x reflect.Value) string {
 }
 
 // dump prints the contents of x.
-func (p *dumper) dump(x reflect.Value, depth int) {
+func (p *dumper) dump(gd *base.Invocation, x reflect.Value, depth int) {
 	if depth == 0 {
 		p.printf("…")
 		return
 	}
 
 	if pos, ok := x.Interface().(src.XPos); ok {
-		p.printf("%s", base.FmtPos(pos))
+		p.printf("%s", gd.FmtPos(pos))
 		return
 	}
 
@@ -154,7 +154,7 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 			p.printf("nil")
 			return
 		}
-		p.dump(x.Elem(), depth-1)
+		p.dump(gd, x.Elem(), depth-1)
 
 	case reflect.Ptr:
 		if x.IsNil() {
@@ -169,7 +169,7 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 			return
 		}
 		p.ptrmap[ptr] = p.line
-		p.dump(x.Elem(), depth) // don't count pointer indirection towards depth
+		p.dump(gd, x.Elem(), depth) // don't count pointer indirection towards depth
 
 	case reflect.Slice:
 		if x.IsNil() {
@@ -182,7 +182,7 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 			p.printf("\n")
 			for i, n := 0, x.Len(); i < n; i++ {
 				p.printf("%d: ", i)
-				p.dump(x.Index(i), depth-1)
+				p.dump(gd, x.Index(i), depth-1)
 				p.printf("\n")
 			}
 			p.indent--
@@ -232,7 +232,7 @@ func (p *dumper) dump(x reflect.Value, depth int) {
 					first = false
 				}
 				p.printf("%s: ", name)
-				p.dump(x, depth-1)
+				p.dump(gd, x, depth-1)
 				p.printf("\n")
 			}
 		}

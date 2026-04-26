@@ -19,26 +19,29 @@ const (
 
 // A BitVec is a bit vector.
 type BitVec struct {
+	gd *base.Invocation
+
 	N int32    // number of bits in vector
 	B []uint32 // words holding bits
 }
 
-func New(n int32) BitVec {
+func New(gd *base.Invocation, n int32) BitVec {
 	nword := (n + wordBits - 1) / wordBits
-	return BitVec{n, make([]uint32, nword)}
+	return BitVec{gd, n, make([]uint32, nword)}
 }
 
 type Bulk struct {
+	gd    *base.Invocation
 	words []uint32
 	nbit  int32
 	nword int32
 }
 
-func NewBulk(nbit int32, count int32, pos src.XPos) Bulk {
+func NewBulk(gd *base.Invocation, nbit int32, count int32, pos src.XPos) Bulk {
 	nword := (nbit + wordBits - 1) / wordBits
 	size := int64(nword) * int64(count)
 	if int64(int32(size*4)) != size*4 {
-		base.FatalfAt(pos, "NewBulk too big: nbit=%d count=%d nword=%d size=%d", nbit, count, nword, size)
+		gd.FatalfAt(pos, "NewBulk too big: nbit=%d count=%d nword=%d size=%d", nbit, count, nword, size)
 	}
 	return Bulk{
 		words: make([]uint32, size),
@@ -48,14 +51,14 @@ func NewBulk(nbit int32, count int32, pos src.XPos) Bulk {
 }
 
 func (b *Bulk) Next() BitVec {
-	out := BitVec{b.nbit, b.words[:b.nword]}
+	out := BitVec{b.gd, b.nbit, b.words[:b.nword]}
 	b.words = b.words[b.nword:]
 	return out
 }
 
 func (bv1 BitVec) Eq(bv2 BitVec) bool {
 	if bv1.N != bv2.N {
-		base.Fatalf("bvequal: lengths %d and %d are not equal", bv1.N, bv2.N)
+		bv1.gd.Fatalf("bvequal: lengths %d and %d are not equal", bv1.N, bv2.N)
 	}
 	for i, x := range bv1.B {
 		if x != bv2.B[i] {
@@ -71,7 +74,7 @@ func (dst BitVec) Copy(src BitVec) {
 
 func (bv BitVec) Get(i int32) bool {
 	if i < 0 || i >= bv.N {
-		base.Fatalf("bvget: index %d is out of bounds with length %d\n", i, bv.N)
+		bv.gd.Fatalf("bvget: index %d is out of bounds with length %d\n", i, bv.N)
 	}
 	mask := uint32(1 << uint(i%wordBits))
 	return bv.B[i>>wordShift]&mask != 0
@@ -79,7 +82,7 @@ func (bv BitVec) Get(i int32) bool {
 
 func (bv BitVec) Set(i int32) {
 	if i < 0 || i >= bv.N {
-		base.Fatalf("bvset: index %d is out of bounds with length %d\n", i, bv.N)
+		bv.gd.Fatalf("bvset: index %d is out of bounds with length %d\n", i, bv.N)
 	}
 	mask := uint32(1 << uint(i%wordBits))
 	bv.B[i/wordBits] |= mask
@@ -87,7 +90,7 @@ func (bv BitVec) Set(i int32) {
 
 func (bv BitVec) Unset(i int32) {
 	if i < 0 || i >= bv.N {
-		base.Fatalf("bvunset: index %d is out of bounds with length %d\n", i, bv.N)
+		bv.gd.Fatalf("bvunset: index %d is out of bounds with length %d\n", i, bv.N)
 	}
 	mask := uint32(1 << uint(i%wordBits))
 	bv.B[i/wordBits] &^= mask

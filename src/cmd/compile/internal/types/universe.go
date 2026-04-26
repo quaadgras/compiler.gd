@@ -6,6 +6,7 @@ package types
 
 import (
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/fatal"
 	"cmd/internal/src"
 )
 
@@ -40,9 +41,9 @@ var typedefs = [...]struct {
 	{"uintptr", TUINTPTR, TUINT32, TUINT64},
 }
 
-func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
+func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object) {
 	if PtrSize == 0 {
-		base.Fatalf("InitTypes called before PtrSize was set")
+		fatal.Error("InitTypes called before PtrSize was set")
 	}
 
 	SlicePtrOffset = 0
@@ -106,7 +107,7 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 	// error type
 	DeferCheckSize()
 	ErrorType = defBasic(TFORW, BuiltinPkg, "error")
-	ErrorType.SetUnderlying(makeErrorInterface())
+	ErrorType.SetUnderlying(makeErrorInterface(gd))
 	ResumeCheckSize()
 
 	// comparable type (interface)
@@ -146,11 +147,11 @@ func InitTypes(defTypeName func(sym *Sym, typ *Type) Object) {
 	IsComplex[TCOMPLEX128] = true
 }
 
-func makeErrorInterface() *Type {
-	sig := NewSignature(FakeRecv(), nil, []*Field{
+func makeErrorInterface(gd *base.Invocation) *Type {
+	sig := NewSignature(gd, FakeRecv(), nil, []*Field{
 		NewField(src.NoXPos, nil, Types[TSTRING]),
 	})
-	method := NewField(src.NoXPos, LocalPkg.Lookup("Error"), sig)
+	method := NewField(src.NoXPos, LocalPkg(gd).Lookup("Error"), sig)
 	return NewInterface([]*Field{method})
 }
 

@@ -19,7 +19,12 @@ import (
 var BuiltinPkg *Pkg
 
 // LocalPkg is the package being compiled.
-var LocalPkg *Pkg
+func LocalPkg(gd *base.Invocation) *Pkg {
+	if gd.LocalPkg == nil {
+		return nil
+	}
+	return gd.LocalPkg.(*Pkg)
+}
 
 // UnsafePkg is package unsafe.
 var UnsafePkg *Pkg
@@ -130,7 +135,7 @@ func pkgqual(pkg *Pkg, verb rune, mode fmtMode) string {
 	if verb != 'S' {
 		switch mode {
 		case fmtGo: // This is for the user
-			if pkg == BuiltinPkg || pkg == LocalPkg {
+			if pkg == BuiltinPkg || pkg.Local {
 				return ""
 			}
 
@@ -477,7 +482,7 @@ func tconv2(b *bytes.Buffer, t *Type, verb rune, mode fmtMode, visited map[*Type
 			case mt.Group:
 				b.WriteString("map.group[")
 			default:
-				base.Fatalf("unknown internal map type")
+				panic("unknown internal map type")
 			}
 			tconv2(b, m.Key(), 0, mode, visited)
 			b.WriteByte(']')
@@ -570,7 +575,9 @@ func fldconv(b *bytes.Buffer, f *Field, verb rune, mode fmtMode, visited map[*Ty
 				// and deduplicate.
 				typ := f.Type
 				if typ.IsPtr() {
-					base.Assertf(typ.Sym() == nil, "embedded pointer type has name: %L", typ)
+					if typ.Sym() != nil {
+						panic(fmt.Sprintf("embedded pointer type has name: %L", typ))
+					}
 					typ = typ.Elem()
 				}
 				tsym := typ.Sym()

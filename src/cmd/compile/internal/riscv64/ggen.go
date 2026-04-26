@@ -12,17 +12,17 @@ import (
 	"cmd/internal/obj/riscv"
 )
 
-func zeroRange(pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
+func zeroRange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
 
 	if cnt%int64(types.PtrSize) != 0 {
 		panic("zeroed region not aligned")
 	}
 
 	// Adjust the frame to account for LR.
-	off += base.Ctxt.Arch.FixedFrameSize
+	off += gd.Ctxt.Arch.FixedFrameSize
 
 	for cnt != 0 {
-		p = pp.Append(p, riscv.AMOV, obj.TYPE_REG, riscv.REG_ZERO, 0, obj.TYPE_MEM, riscv.REG_SP, off)
+		p = pp.Append(gd, p, riscv.AMOV, obj.TYPE_REG, riscv.REG_ZERO, 0, obj.TYPE_MEM, riscv.REG_SP, off)
 		cnt -= int64(types.PtrSize)
 		off += int64(types.PtrSize)
 	}

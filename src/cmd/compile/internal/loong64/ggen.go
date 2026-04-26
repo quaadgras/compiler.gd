@@ -11,16 +11,16 @@ import (
 	"cmd/internal/obj/loong64"
 )
 
-func zerorange(pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
+func zerorange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
 	if cnt%8 != 0 {
 		panic("zeroed region not aligned")
 	}
 
 	// Adjust the frame to account for LR.
-	off += base.Ctxt.Arch.FixedFrameSize
+	off += gd.Ctxt.Arch.FixedFrameSize
 
 	for cnt != 0 {
-		p = pp.Append(p, loong64.AMOVV, obj.TYPE_REG, loong64.REGZERO, 0, obj.TYPE_MEM, loong64.REGSP, off)
+		p = pp.Append(gd, p, loong64.AMOVV, obj.TYPE_REG, loong64.REGZERO, 0, obj.TYPE_MEM, loong64.REGSP, off)
 		off += 8
 		cnt -= 8
 	}
@@ -28,7 +28,7 @@ func zerorange(pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog
 	return p
 }
 
-func ginsnop(pp *objw.Progs) *obj.Prog {
-	p := pp.Prog(loong64.ANOOP)
+func ginsnop(gd *base.Invocation, pp *objw.Progs) *obj.Prog {
+	p := pp.Prog(gd, loong64.ANOOP)
 	return p
 }

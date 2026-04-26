@@ -89,11 +89,11 @@ func (n *Name) RecordFrameOffset(offset int64) {
 
 // NewNameAt returns a new ONAME Node associated with symbol s at position pos.
 // The caller is responsible for setting Curfn.
-func NewNameAt(pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
+func NewNameAt(gd *base.Invocation, pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
 	if sym == nil {
-		base.Fatalf("NewNameAt nil")
+		gd.Fatalf("NewNameAt nil")
 	}
-	n := newNameAt(pos, ONAME, sym)
+	n := newNameAt(gd, pos, ONAME, sym)
 	if typ != nil {
 		n.SetType(typ)
 		n.SetTypecheck(1)
@@ -102,9 +102,11 @@ func NewNameAt(pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
 }
 
 // NewBuiltin returns a new Name representing a builtin function,
-// either predeclared or from package unsafe.
+// either predeclared or from package unsafe. Builtins are constructed
+// during package init (before any *base.Invocation exists) so they
+// carry a nil gd; callers must not invoke gd-dependent methods on them.
 func NewBuiltin(sym *types.Sym, op Op) *Name {
-	n := newNameAt(src.NoXPos, ONAME, sym)
+	n := newNameAt(nil, src.NoXPos, ONAME, sym)
 	n.BuiltinOp = op
 	n.SetTypecheck(1)
 	sym.Def = n
@@ -112,12 +114,12 @@ func NewBuiltin(sym *types.Sym, op Op) *Name {
 }
 
 // NewLocal returns a new function-local variable with the given name and type.
-func (fn *Func) NewLocal(pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
+func (fn *Func) NewLocal(gd *base.Invocation, pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
 	if fn.Dcl == nil {
-		base.FatalfAt(pos, "must call DeclParams on %v first", fn)
+		gd.FatalfAt(pos, "must call DeclParams on %v first", fn)
 	}
 
-	n := NewNameAt(pos, sym, typ)
+	n := NewNameAt(gd, pos, sym, typ)
 	n.Class = PAUTO
 	n.Curfn = fn
 	fn.Dcl = append(fn.Dcl, n)
@@ -126,34 +128,39 @@ func (fn *Func) NewLocal(pos src.XPos, sym *types.Sym, typ *types.Type) *Name {
 
 // NewDeclNameAt returns a new Name associated with symbol s at position pos.
 // The caller is responsible for setting Curfn.
-func NewDeclNameAt(pos src.XPos, op Op, sym *types.Sym) *Name {
+func NewDeclNameAt(gd *base.Invocation, pos src.XPos, op Op, sym *types.Sym) *Name {
 	if sym == nil {
-		base.Fatalf("NewDeclNameAt nil")
+		gd.Fatalf("NewDeclNameAt nil")
 	}
 	switch op {
 	case ONAME, OTYPE, OLITERAL:
 		// ok
 	default:
-		base.Fatalf("NewDeclNameAt op %v", op)
+		gd.Fatalf("NewDeclNameAt op %v", op)
 	}
-	return newNameAt(pos, op, sym)
+	return newNameAt(gd, pos, op, sym)
 }
 
 // NewConstAt returns a new OLITERAL Node associated with symbol s at position pos.
-func NewConstAt(pos src.XPos, sym *types.Sym, typ *types.Type, val constant.Value) *Name {
+func NewConstAt(gd *base.Invocation, pos src.XPos, sym *types.Sym, typ *types.Type, val constant.Value) *Name {
 	if sym == nil {
-		base.Fatalf("NewConstAt nil")
+		gd.Fatalf("NewConstAt nil")
 	}
-	n := newNameAt(pos, OLITERAL, sym)
+	n := newNameAt(gd, pos, OLITERAL, sym)
 	n.SetType(typ)
 	n.SetTypecheck(1)
 	n.SetVal(val)
 	return n
 }
 
-// newNameAt is like NewNameAt but allows sym == nil.
-func newNameAt(pos src.XPos, op Op, sym *types.Sym) *Name {
+// newNameAt is like NewNameAt but allows sym == nil. The gd parameter
+// is stored on the resulting Name so n.compiler() returns the right
+// Invocation for any later gd-dependent method (e.g. SetPos, Linksym).
+// Pass gd=nil only for nodes constructed before any compile invocation
+// exists (predeclared types / builtins / package-init sentinels).
+func newNameAt(gd *base.Invocation, pos src.XPos, op Op, sym *types.Sym) *Name {
 	n := new(Name)
+	n.gd = gd
 	n.op = op
 	n.pos = pos
 	n.sym = sym
@@ -169,8 +176,8 @@ func (n *Name) SetFunc(x *Func)        { n.Func = x }
 func (n *Name) FrameOffset() int64     { return n.Offset_ }
 func (n *Name) SetFrameOffset(x int64) { n.Offset_ = x }
 
-func (n *Name) Linksym() *obj.LSym               { return n.sym.Linksym() }
-func (n *Name) LinksymABI(abi obj.ABI) *obj.LSym { return n.sym.LinksymABI(abi) }
+func (n *Name) Linksym() *obj.LSym               { return n.sym.Linksym(n.compiler()) }
+func (n *Name) LinksymABI(abi obj.ABI) *obj.LSym { return n.sym.LinksymABI(n.compiler(), abi) }
 
 func (*Name) CanBeNtype()    {}
 func (*Name) CanBeAnSSASym() {}
@@ -239,6 +246,7 @@ func (n *Name) SetNonMergeable(b bool)             { n.flags.set(nameNonMergeabl
 
 // OnStack reports whether variable n may reside on the stack.
 func (n *Name) OnStack() bool {
+	gd := n.compiler()
 	if n.Op() == ONAME {
 		switch n.Class {
 		case PPARAM, PPARAMOUT, PAUTO:
@@ -249,13 +257,14 @@ func (n *Name) OnStack() bool {
 	}
 	// Note: fmt.go:dumpNodeHeader calls all "func() bool"-typed
 	// methods, but it can only recover from panics, not Fatalf.
-	panic(fmt.Sprintf("%v: not a variable: %v", base.FmtPos(n.Pos()), n))
+	panic(fmt.Sprintf("%v: not a variable: %v", gd.FmtPos(n.Pos()), n))
 }
 
 // MarkReadonly indicates that n is an ONAME with readonly contents.
 func (n *Name) MarkReadonly() {
+	gd := n.compiler()
 	if n.Op() != ONAME {
-		base.Fatalf("Node.MarkReadonly %v", n.Op())
+		gd.Fatalf("Node.MarkReadonly %v", n.Op())
 	}
 	n.setReadonly(true)
 	// Mark the linksym as readonly immediately
@@ -274,10 +283,11 @@ func (n *Name) Val() constant.Value {
 
 // SetVal sets the constant.Value for the node.
 func (n *Name) SetVal(v constant.Value) {
+	gd := n.compiler()
 	if n.op != OLITERAL {
 		panic(n.no("SetVal"))
 	}
-	AssertValidTypeForConst(n.Type(), v)
+	AssertValidTypeForConst(gd, n.Type(), v)
 	n.val = v
 }
 
@@ -292,9 +302,9 @@ func (n *Name) Canonical() *Name {
 	return n
 }
 
-func (n *Name) SetByval(b bool) {
+func (n *Name) SetByval(gd *base.Invocation, b bool) {
 	if n.Canonical() != n {
-		base.Fatalf("SetByval called on non-canonical variable: %v", n)
+		gd.Fatalf("SetByval called on non-canonical variable: %v", n)
 	}
 	n.flags.set(nameByval, b)
 }
@@ -307,16 +317,16 @@ func (n *Name) Byval() bool {
 
 // NewClosureVar returns a new closure variable for fn to refer to
 // outer variable n.
-func NewClosureVar(pos src.XPos, fn *Func, n *Name) *Name {
+func NewClosureVar(gd *base.Invocation, pos src.XPos, fn *Func, n *Name) *Name {
 	switch n.Class {
 	case PAUTO, PPARAM, PPARAMOUT, PAUTOHEAP:
 		// ok
 	default:
 		// Prevent mistaken capture of global variables.
-		base.Fatalf("NewClosureVar: %+v", n)
+		gd.Fatalf("NewClosureVar: %+v", n)
 	}
 
-	c := NewNameAt(pos, n.Sym(), n.Type())
+	c := NewNameAt(gd, pos, n.Sym(), n.Type())
 	c.Curfn = fn
 	c.Class = PAUTOHEAP
 	c.SetIsClosureVar(true)
@@ -330,20 +340,20 @@ func NewClosureVar(pos src.XPos, fn *Func, n *Name) *Name {
 
 // NewHiddenParam returns a new hidden parameter for fn with the given
 // name and type.
-func NewHiddenParam(pos src.XPos, fn *Func, sym *types.Sym, typ *types.Type) *Name {
+func NewHiddenParam(gd *base.Invocation, pos src.XPos, fn *Func, sym *types.Sym, typ *types.Type) *Name {
 	if fn.OClosure != nil {
-		base.FatalfAt(fn.Pos(), "cannot add hidden parameters to closures")
+		gd.FatalfAt(fn.Pos(), "cannot add hidden parameters to closures")
 	}
 
 	fn.SetNeedctxt(true)
 
 	// Create a fake parameter, disassociated from any real function, to
 	// pretend to capture.
-	fake := NewNameAt(pos, sym, typ)
+	fake := NewNameAt(gd, pos, sym, typ)
 	fake.Class = PPARAM
-	fake.SetByval(true)
+	fake.SetByval(gd, true)
 
-	return NewClosureVar(pos, fn, fake)
+	return NewClosureVar(gd, pos, fn, fake)
 }
 
 // SameSource reports whether two nodes refer to the same source
@@ -367,18 +377,18 @@ func SameSource(n1, n2 Node) bool {
 
 // Uses reports whether expression x is a (direct) use of the given
 // variable.
-func Uses(x Node, v *Name) bool {
+func Uses(gd *base.Invocation, x Node, v *Name) bool {
 	if v == nil || v.Op() != ONAME {
-		base.Fatalf("RefersTo bad Name: %v", v)
+		gd.Fatalf("RefersTo bad Name: %v", v)
 	}
 	return x.Op() == ONAME && x.Name() == v
 }
 
 // DeclaredBy reports whether expression x refers (directly) to a
 // variable that was declared by the given statement.
-func DeclaredBy(x, stmt Node) bool {
+func DeclaredBy(gd *base.Invocation, x, stmt Node) bool {
 	if stmt == nil {
-		base.Fatalf("DeclaredBy nil")
+		gd.Fatalf("DeclaredBy nil")
 	}
 	return x.Op() == ONAME && SameSource(x.Name().Defn, stmt)
 }

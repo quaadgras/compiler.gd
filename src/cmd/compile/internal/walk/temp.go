@@ -13,30 +13,30 @@ import (
 
 // initStackTemp appends statements to init to initialize the given
 // temporary variable to val, and then returns the expression &tmp.
-func initStackTemp(init *ir.Nodes, tmp *ir.Name, val ir.Node) *ir.AddrExpr {
+func initStackTemp(gd *base.Invocation, init *ir.Nodes, tmp *ir.Name, val ir.Node) *ir.AddrExpr {
 	if val != nil && !types.Identical(tmp.Type(), val.Type()) {
-		base.Fatalf("bad initial value for %L: %L", tmp, val)
+		gd.Fatalf("bad initial value for %L: %L", tmp, val)
 	}
-	appendWalkStmt(init, ir.NewAssignStmt(base.Pos, tmp, val))
-	return typecheck.Expr(typecheck.NodAddr(tmp)).(*ir.AddrExpr)
+	appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, tmp, val))
+	return typecheck.Expr(gd, typecheck.NodAddr(gd, tmp)).(*ir.AddrExpr)
 }
 
 // stackTempAddr returns the expression &tmp, where tmp is a newly
 // allocated temporary variable of the given type. Statements to
 // zero-initialize tmp are appended to init.
-func stackTempAddr(init *ir.Nodes, typ *types.Type) *ir.AddrExpr {
-	n := typecheck.TempAt(base.Pos, ir.CurFunc, typ)
+func stackTempAddr(gd *base.Invocation, init *ir.Nodes, typ *types.Type) *ir.AddrExpr {
+	n := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), typ)
 	n.SetNonMergeable(true)
-	return initStackTemp(init, n, nil)
+	return initStackTemp(gd, init, n, nil)
 }
 
 // stackBufAddr returns the expression &tmp, where tmp is a newly
 // allocated temporary variable of type [len]elem. This variable is
 // initialized, and elem must not contain pointers.
-func stackBufAddr(len int64, elem *types.Type) *ir.AddrExpr {
+func stackBufAddr(gd *base.Invocation, len int64, elem *types.Type) *ir.AddrExpr {
 	if elem.HasPointers() {
-		base.FatalfAt(base.Pos, "%v has pointers", elem)
+		gd.FatalfAt(gd.Pos, "%v has pointers", elem)
 	}
-	tmp := typecheck.TempAt(base.Pos, ir.CurFunc, types.NewArray(elem, len))
-	return typecheck.Expr(typecheck.NodAddr(tmp)).(*ir.AddrExpr)
+	tmp := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.NewArray(elem, len))
+	return typecheck.Expr(gd, typecheck.NodAddr(gd, tmp)).(*ir.AddrExpr)
 }

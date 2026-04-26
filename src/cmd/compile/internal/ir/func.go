@@ -252,8 +252,8 @@ type GdForwarderInfo struct {
 //
 // TODO(mdempsky): I suspect there's no need for separate fpos and
 // npos.
-func NewFunc(fpos, npos src.XPos, sym *types.Sym, typ *types.Type) *Func {
-	name := NewNameAt(npos, sym, typ)
+func NewFunc(gd *base.Invocation, fpos, npos src.XPos, sym *types.Sym, typ *types.Type) *Func {
+	name := NewNameAt(gd, npos, sym, typ)
 	name.Class = PFUNC
 	sym.SetFunc(true)
 
@@ -360,9 +360,9 @@ func (f *Func) SetOpenCodedDeferDisallowed(b bool) { f.flags.set(funcOpenCodedDe
 func (f *Func) SetClosureResultsLost(b bool)       { f.flags.set(funcClosureResultsLost, b) }
 func (f *Func) SetIsPackageInit(b bool)            { f.flags.set(funcPackageInit, b) }
 
-func (f *Func) SetWBPos(pos src.XPos) {
-	if base.Debug.WB != 0 {
-		base.WarnfAt(pos, "write barrier")
+func (f *Func) SetWBPos(gd *base.Invocation, pos src.XPos) {
+	if gd.Debug.WB != 0 {
+		gd.WarnfAt(pos, "write barrier")
 	}
 	if !f.WBPos.IsKnown() {
 		f.WBPos = pos
@@ -474,16 +474,21 @@ func splitPkg(name string) (pkgpath, sym string) {
 	return "", name
 }
 
-var CurFunc *Func
+func CurFunc(gd *base.Invocation) *Func {
+	if gd.CurFunc == nil {
+		return nil
+	}
+	return gd.CurFunc.(*Func)
+}
 
 // WithFunc invokes do with CurFunc and base.Pos set to curfn and
 // curfn.Pos(), respectively, and then restores their previous values
 // before returning.
-func WithFunc(curfn *Func, do func()) {
-	oldfn, oldpos := CurFunc, base.Pos
-	defer func() { CurFunc, base.Pos = oldfn, oldpos }()
+func WithFunc(gd *base.Invocation, curfn *Func, do func()) {
+	oldfn, oldpos := CurFunc(gd), gd.Pos
+	defer func() { gd.CurFunc, gd.Pos = oldfn, oldpos }()
 
-	CurFunc, base.Pos = curfn, curfn.Pos()
+	gd.CurFunc, gd.Pos = curfn, curfn.Pos()
 	do()
 }
 
@@ -493,16 +498,16 @@ func FuncSymName(s *types.Sym) string {
 
 // ClosureDebugRuntimeCheck applies boilerplate checks for debug flags
 // and compiling runtime.
-func ClosureDebugRuntimeCheck(clo *ClosureExpr) {
-	if base.Debug.Closure > 0 {
+func ClosureDebugRuntimeCheck(gd *base.Invocation, clo *ClosureExpr) {
+	if gd.Debug.Closure > 0 {
 		if clo.Esc() == EscHeap {
-			base.WarnfAt(clo.Pos(), "heap closure, captured vars = %v", clo.Func.ClosureVars)
+			gd.WarnfAt(clo.Pos(), "heap closure, captured vars = %v", clo.Func.ClosureVars)
 		} else {
-			base.WarnfAt(clo.Pos(), "stack closure, captured vars = %v", clo.Func.ClosureVars)
+			gd.WarnfAt(clo.Pos(), "stack closure, captured vars = %v", clo.Func.ClosureVars)
 		}
 	}
-	if base.Flag.CompilingRuntime && clo.Esc() == EscHeap && !clo.IsGoWrap {
-		base.ErrorfAt(clo.Pos(), 0, "heap-allocated closure %s, not allowed in runtime", FuncName(clo.Func))
+	if gd.Flag.CompilingRuntime && clo.Esc() == EscHeap && !clo.IsGoWrap {
+		gd.ErrorfAt(clo.Pos(), 0, "heap-allocated closure %s, not allowed in runtime", FuncName(clo.Func))
 	}
 }
 
@@ -510,16 +515,16 @@ func ClosureDebugRuntimeCheck(clo *ClosureExpr) {
 var globClosgen int32
 
 // closureName generates a new unique name for a closure within outerfn at pos.
-func closureName(outerfn *Func, pos src.XPos, why Op) *types.Sym {
+func closureName(gd *base.Invocation, outerfn *Func, pos src.XPos, why Op) *types.Sym {
 	if outerfn.OClosure != nil && outerfn.OClosure.Func.RangeParent != nil {
 		outerfn = outerfn.OClosure.Func.RangeParent
 	}
-	pkg := types.LocalPkg
+	pkg := types.LocalPkg(gd)
 	outer := "glob."
 	var suffix string = "."
 	switch why {
 	default:
-		base.FatalfAt(pos, "closureName: bad Op: %v", why)
+		gd.FatalfAt(pos, "closureName: bad Op: %v", why)
 	case OCLOSURE:
 		if outerfn.OClosure == nil {
 			suffix = ".func"
@@ -553,9 +558,9 @@ func closureName(outerfn *Func, pos src.XPos, why Op) *types.Sym {
 	// If this closure was created due to inlining, then incorporate any
 	// inlined functions' names into the closure's linker symbol name
 	// too (#60324).
-	if inlIndex := base.Ctxt.InnermostPos(pos).Base().InliningIndex(); inlIndex >= 0 {
+	if inlIndex := gd.Ctxt.InnermostPos(pos).Base().InliningIndex(); inlIndex >= 0 {
 		names := []string{outer}
-		base.Ctxt.InlTree.AllParents(inlIndex, func(call obj.InlinedCall) {
+		gd.Ctxt.InlTree.AllParents(inlIndex, func(call obj.InlinedCall) {
 			names = append(names, call.Name)
 		})
 		outer = strings.Join(names, ".")
@@ -580,12 +585,12 @@ func closureName(outerfn *Func, pos src.XPos, why Op) *types.Sym {
 // why is the reason we're generating this Func. It can be OCLOSURE
 // (for a normal function literal) or OGO or ODEFER (for wrapping a
 // call expression that has parameters or results).
-func NewClosureFunc(fpos, cpos src.XPos, why Op, typ *types.Type, outerfn *Func, pkg *Package) *Func {
+func NewClosureFunc(gd *base.Invocation, fpos, cpos src.XPos, why Op, typ *types.Type, outerfn *Func, pkg *Package) *Func {
 	if outerfn == nil {
-		base.FatalfAt(fpos, "outerfn is nil")
+		gd.FatalfAt(fpos, "outerfn is nil")
 	}
 
-	fn := NewFunc(fpos, fpos, closureName(outerfn, cpos, why), typ)
+	fn := NewFunc(gd, fpos, fpos, closureName(gd, outerfn, cpos, why), typ)
 	fn.SetDupok(outerfn.Dupok()) // if the outer function is dupok, so is the closure
 
 	clo := &ClosureExpr{Func: fn}
@@ -641,28 +646,28 @@ func IsIfaceOfFunc(n Node) *Func {
 // TODO(prattmic): Since n is simply an interface{} there is no assertion that
 // it is actually a function at all. Perhaps we should emit a runtime type
 // assertion?
-func FuncPC(pos src.XPos, n Node, wantABI obj.ABI) Node {
+func FuncPC(gd *base.Invocation, pos src.XPos, n Node, wantABI obj.ABI) Node {
 	if !n.Type().IsInterface() {
-		base.ErrorfAt(pos, 0, "internal/abi.FuncPC%s expects an interface value, got %v", wantABI, n.Type())
+		gd.ErrorfAt(pos, 0, "internal/abi.FuncPC%s expects an interface value, got %v", wantABI, n.Type())
 	}
 
 	if fn := IsIfaceOfFunc(n); fn != nil {
 		name := fn.Nname
 		abi := fn.ABI
 		if abi != wantABI {
-			base.ErrorfAt(pos, 0, "internal/abi.FuncPC%s expects an %v function, %s is defined as %v", wantABI, wantABI, name.Sym().Name, abi)
+			gd.ErrorfAt(pos, 0, "internal/abi.FuncPC%s expects an %v function, %s is defined as %v", wantABI, wantABI, name.Sym().Name, abi)
 		}
-		var e Node = NewLinksymExpr(pos, name.LinksymABI(abi), types.Types[types.TUINTPTR])
-		e = NewAddrExpr(pos, e)
+		var e Node = NewLinksymExpr(gd, pos, name.LinksymABI(abi), types.Types[types.TUINTPTR])
+		e = NewAddrExpr(gd, pos, e)
 		e.SetType(types.Types[types.TUINTPTR].PtrTo())
-		e = NewConvExpr(pos, OCONVNOP, types.Types[types.TUINTPTR], e)
+		e = NewConvExpr(gd, pos, OCONVNOP, types.Types[types.TUINTPTR], e)
 		e.SetTypecheck(1)
 		return e
 	}
 	// fn is not a defined function. It must be ABIInternal.
 	// Read the address from func value, i.e. *(*uintptr)(idata(fn)).
 	if wantABI != obj.ABIInternal {
-		base.ErrorfAt(pos, 0, "internal/abi.FuncPC%s does not accept func expression, which is ABIInternal", wantABI)
+		gd.ErrorfAt(pos, 0, "internal/abi.FuncPC%s does not accept func expression, which is ABIInternal", wantABI)
 	}
 	// gd fat-interface: route OIDATA through an unsafe.Pointer OCONVNOP so
 	// the emitted shape is not *(*uintptr)(OIDATA(n)). ssagen's ODEREF
@@ -670,12 +675,12 @@ func FuncPC(pos src.XPos, n Node, wantABI obj.ABI) Node {
 	// ir.ODEREF in ssagen.ssa.expr). For FuncPC the iface holds a func
 	// value in the data word, and the correct read is a plain pointer
 	// dereference of iface.data — not an inline extraction.
-	var e Node = NewUnaryExpr(pos, OIDATA, n)
+	var e Node = NewUnaryExpr(gd, pos, OIDATA, n)
 	e.SetType(types.Types[types.TUNSAFEPTR])
 	e.SetTypecheck(1)
-	e = NewConvExpr(pos, OCONVNOP, types.Types[types.TUINTPTR].PtrTo(), e)
+	e = NewConvExpr(gd, pos, OCONVNOP, types.Types[types.TUINTPTR].PtrTo(), e)
 	e.SetTypecheck(1)
-	e = NewStarExpr(pos, e)
+	e = NewStarExpr(gd, pos, e)
 	e.SetType(types.Types[types.TUINTPTR])
 	e.SetTypecheck(1)
 	return e
@@ -698,9 +703,9 @@ func FuncPC(pos src.XPos, n Node, wantABI obj.ABI) Node {
 // the noder's declareParams filters outBufs out of its addLocal loop
 // (see reader.go:declareParams). That filter keeps r.locals indexed
 // consistently with the body bitstream the writer produced.
-func (fn *Func) DeclareParams(setNname bool) {
+func (fn *Func) DeclareParams(gd *base.Invocation, setNname bool) {
 	if fn.Dcl != nil {
-		base.FatalfAt(fn.Pos(), "%v already has Dcl", fn)
+		gd.FatalfAt(fn.Pos(), "%v already has Dcl", fn)
 	}
 
 	declareParams := func(dst []*Name, params []*types.Field, ctxt Class, prefix string, offset int) {
@@ -721,7 +726,7 @@ func (fn *Func) DeclareParams(setNname bool) {
 				pos = fn.Pos()
 			}
 
-			name := NewNameAt(pos, sym, param.Type)
+			name := NewNameAt(gd, pos, sym, param.Type)
 			name.Class = ctxt
 			name.Curfn = fn
 			dst[offset+i] = name
@@ -740,7 +745,6 @@ func (fn *Func) DeclareParams(setNname bool) {
 	declareParams(fn.Dcl, params, PPARAM, "~p", 0)
 	declareParams(fn.Dcl, results, PPARAMOUT, "~r", len(params))
 }
-
 
 // ContainsClosure reports whether c is a closure contained within f.
 func ContainsClosure(f, c *Func) bool {

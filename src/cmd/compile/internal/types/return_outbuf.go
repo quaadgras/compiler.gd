@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"cmd/compile/internal/base"
 	"cmd/internal/src"
 )
 
@@ -28,18 +29,18 @@ import (
 // extended ABI applied to its own code.
 //
 // Known blockers to flipping (2026-04-25):
-//   1. Runtime-special sigs are stock but non-runtime readers
-//      construct fresh FuncTypes via NewSignature that extend
-//      them. Cross-package generic/shape reshape assertions then
-//      see (stock vs extended) forms of the same sig and fail
-//      (e.g. runtime.FuncForPC typed as both func(uintptr)
-//      *runtime.Func and func(uintptr, *runtime.Func)
-//      *runtime.Func in the same compile).
-//   2. Asm-backed decls like runtime.newobject need their .s
-//      argsize bumped to match the extended ABI, else vet /
-//      asmdecl screams.
-//   3. cgo-generated wrappers need the trailing outBuf arg added
-//      by cmd/cgo/out.go.
+//  1. Runtime-special sigs are stock but non-runtime readers
+//     construct fresh FuncTypes via NewSignature that extend
+//     them. Cross-package generic/shape reshape assertions then
+//     see (stock vs extended) forms of the same sig and fail
+//     (e.g. runtime.FuncForPC typed as both func(uintptr)
+//     *runtime.Func and func(uintptr, *runtime.Func)
+//     *runtime.Func in the same compile).
+//  2. Asm-backed decls like runtime.newobject need their .s
+//     argsize bumped to match the extended ABI, else vet /
+//     asmdecl screams.
+//  3. cgo-generated wrappers need the trailing outBuf arg added
+//     by cmd/cgo/out.go.
 //
 // Option-A fix for (1): universal extension — remove the
 // CompilingRuntime gate from PhaseGApplies so every Go program's
@@ -122,7 +123,7 @@ func paramsAlreadyExtended(params []*Field) bool {
 // stack-buffer materialisation both operate on raw pointers anyway,
 // and the callee casts back to the concrete type via the result's
 // declared type.
-func BuildOutBufFields(results []*Field) []*Field {
+func BuildOutBufFields(gd *base.Invocation, results []*Field) []*Field {
 	n := countPointerResults(results)
 	if n == 0 {
 		return nil
@@ -134,7 +135,7 @@ func BuildOutBufFields(results []*Field) []*Field {
 		if r == nil || r.Type == nil || !r.Type.IsPtr() {
 			continue
 		}
-		out = append(out, NewField(src.NoXPos, outBufSym(k), unsafePtr))
+		out = append(out, NewField(src.NoXPos, outBufSym(gd, k), unsafePtr))
 		k++
 	}
 	return out
@@ -163,11 +164,11 @@ var outBufSymInit sync.Once
 // single function; overflow is handled by building a Sym on the fly.
 var outBufSyms [32]*Sym
 
-func initOutBufSyms() {
+func initOutBufSyms(gd *base.Invocation) {
 	for i := range outBufSyms {
 		outBufSyms[i] = &Sym{
 			Name: OutBufNamePrefix + itoa(i),
-			Pkg:  LocalPkg,
+			Pkg:  LocalPkg(gd),
 		}
 	}
 }
@@ -189,14 +190,16 @@ func itoa(n int) string {
 }
 
 // outBufSym returns the cached `.outBufK` Sym for k.
-func outBufSym(k int) *Sym {
-	outBufSymInit.Do(initOutBufSyms)
+func outBufSym(gd *base.Invocation, k int) *Sym {
+	outBufSymInit.Do(func() {
+		initOutBufSyms(gd)
+	})
 	if k < len(outBufSyms) {
 		return outBufSyms[k]
 	}
 	// Overflow fallback — build a fresh Sym. No identity
 	// guarantees across calls, but nothing depends on that.
-	return &Sym{Name: OutBufNamePrefix + itoa(k), Pkg: LocalPkg}
+	return &Sym{Name: OutBufNamePrefix + itoa(k), Pkg: LocalPkg(gd)}
 }
 
 // IsOutBufParam reports whether f is one of gd's synthesised outBufK

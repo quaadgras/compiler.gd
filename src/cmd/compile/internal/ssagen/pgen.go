@@ -27,15 +27,15 @@ import (
 )
 
 // cmpstackvarlt reports whether the stack variable a sorts before b.
-func cmpstackvarlt(a, b *ir.Name, mls *liveness.MergeLocalsState) bool {
+func cmpstackvarlt(gd *base.Invocation, a, b *ir.Name, mls *liveness.MergeLocalsState) bool {
 	// Sort non-autos before autos.
-	if needAlloc(a) != needAlloc(b) {
-		return needAlloc(b)
+	if needAlloc(gd, a) != needAlloc(gd, b) {
+		return needAlloc(gd, b)
 	}
 
 	// If both are non-auto (e.g., parameters, results), then sort by
 	// frame offset (defined by ABI).
-	if !needAlloc(a) {
+	if !needAlloc(gd, a) {
 		return a.FrameOffset() < b.FrameOffset()
 	}
 
@@ -101,9 +101,9 @@ func cmpstackvarlt(a, b *ir.Name, mls *liveness.MergeLocalsState) bool {
 // needAlloc reports whether n is within the current frame, for which we need to
 // allocate space. In particular, it excludes arguments and results, which are in
 // the callers frame.
-func needAlloc(n *ir.Name) bool {
+func needAlloc(gd *base.Invocation, n *ir.Name) bool {
 	if n.Op() != ir.ONAME {
-		base.FatalfAt(n.Pos(), "%v has unexpected Op %v", n, n.Op())
+		gd.FatalfAt(n.Pos(), "%v has unexpected Op %v", n, n.Op())
 	}
 
 	switch n.Class {
@@ -115,12 +115,12 @@ func needAlloc(n *ir.Name) bool {
 		return n.IsOutputParamInRegisters()
 
 	default:
-		base.FatalfAt(n.Pos(), "%v has unexpected Class %v", n, n.Class)
+		gd.FatalfAt(n.Pos(), "%v has unexpected Class %v", n, n.Class)
 		return false
 	}
 }
 
-func (s *ssafn) AllocFrame(f *ssa.Func) {
+func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 	s.stksize = 0
 	s.stkptrsize = 0
 	s.stkalign = int64(types.RegSize)
@@ -136,7 +136,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 			continue
 		}
 
-		if needAlloc(ln) {
+		if needAlloc(gd, ln) {
 			ln.SetUsed(false)
 		}
 	}
@@ -167,12 +167,12 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 
 	var mls *liveness.MergeLocalsState
 	var leaders map[*ir.Name]int64
-	if base.Debug.MergeLocals != 0 {
-		mls = liveness.MergeLocals(fn, f)
-		if base.Debug.MergeLocalsTrace > 0 && mls != nil {
+	if gd.Debug.MergeLocals != 0 {
+		mls = liveness.MergeLocals(gd, fn, f)
+		if gd.Debug.MergeLocalsTrace > 0 && mls != nil {
 			savedNP, savedP := mls.EstSavings()
 			fmt.Fprintf(os.Stderr, "%s: %d bytes of stack space saved via stack slot merging (%d nonpointer %d pointer)\n", ir.FuncName(fn), savedNP+savedP, savedNP, savedP)
-			if base.Debug.MergeLocalsTrace > 1 {
+			if gd.Debug.MergeLocalsTrace > 1 {
 				fmt.Fprintf(os.Stderr, "=-= merge locals state for %v:\n%v",
 					fn, mls)
 			}
@@ -184,7 +184,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 	// compiler output) is less sensitive to frontend changes that
 	// introduce or remove unused variables.
 	sort.SliceStable(fn.Dcl, func(i, j int) bool {
-		return cmpstackvarlt(fn.Dcl[i], fn.Dcl[j], mls)
+		return cmpstackvarlt(gd, fn.Dcl[i], fn.Dcl[j], mls)
 	})
 
 	if mls != nil {
@@ -207,10 +207,10 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 		fn.Dcl = newdcl
 	}
 
-	if base.Debug.MergeLocalsTrace > 1 && mls != nil {
+	if gd.Debug.MergeLocalsTrace > 1 && mls != nil {
 		fmt.Fprintf(os.Stderr, "=-= sorted DCL for %v:\n", fn)
 		for i, v := range fn.Dcl {
-			if !ssa.IsMergeCandidate(v) {
+			if !ssa.IsMergeCandidate(gd, v) {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, " %d: %q isleader=%v subsumed=%v used=%v sz=%d align=%d t=%s\n", i, v.Sym().Name, mls.IsLeader(v), mls.Subsumed(v), v.Used(), v.Type().Size(), v.Type().Alignment(), v.Type().String())
@@ -235,7 +235,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 		types.CalcSize(n.Type())
 		w := n.Type().Size()
 		if w >= types.MaxWidth || w < 0 {
-			base.Fatalf("bad width")
+			gd.Fatalf("bad width")
 		}
 		if w == 0 && lastHasPtr {
 			// Pad between a pointer-containing object and a zero-sized object.
@@ -279,7 +279,7 @@ func (s *ssafn) AllocFrame(f *ssa.Func) {
 			n.SetFrameOffset(off)
 		}
 
-		if base.Debug.MergeLocalsTrace > 1 {
+		if gd.Debug.MergeLocalsTrace > 1 {
 			fmt.Fprintf(os.Stderr, "=-= stack layout for %v:\n", fn)
 			for i, v := range fn.Dcl {
 				if v.Op() != ir.ONAME || (v.Class != ir.PAUTO && !(v.Class == ir.PPARAMOUT && v.IsOutputParamInRegisters())) {
@@ -300,8 +300,8 @@ const maxStackSize = 1 << 30
 // uses it to generate a plist,
 // and flushes that plist to machine code.
 // worker indicates which of the backend workers is doing the processing.
-func Compile(fn *ir.Func, worker int, profile *pgoir.Profile) {
-	f := buildssa(fn, worker, inline.IsPgoHotFunc(fn, profile) || inline.HasPgoHotInline(fn))
+func Compile(gd *base.Invocation, fn *ir.Func, worker int, profile *pgoir.Profile) {
+	f := buildssa(gd, fn, worker, inline.IsPgoHotFunc(fn, profile) || inline.HasPgoHotInline(fn))
 	// Note: check arg size to fix issue 25507.
 	if f.Frontend().(*ssafn).stksize >= maxStackSize || f.OwnAux.ArgWidth() >= maxStackSize {
 		largeStackFramesMu.Lock()
@@ -309,9 +309,9 @@ func Compile(fn *ir.Func, worker int, profile *pgoir.Profile) {
 		largeStackFramesMu.Unlock()
 		return
 	}
-	pp := objw.NewProgs(fn, worker)
-	defer pp.Free()
-	genssa(f, pp)
+	pp := objw.NewProgs(gd, fn, worker)
+	defer pp.Free(gd)
+	genssa(gd, f, pp)
 	// Check frame size again.
 	// The check above included only the space needed for local variables.
 	// After genssa, the space needed includes local variables and the callee arg region.
@@ -326,17 +326,17 @@ func Compile(fn *ir.Func, worker int, profile *pgoir.Profile) {
 		return
 	}
 
-	pp.Flush() // assemble, fill in boilerplate, etc.
+	pp.Flush(gd) // assemble, fill in boilerplate, etc.
 
 	// If we're compiling the package init function, search for any
 	// relocations that target global map init outline functions and
 	// turn them into weak relocs.
-	if fn.IsPackageInit() && base.Debug.WrapGlobalMapCtl != 1 {
-		weakenGlobalMapInitRelocs(fn)
+	if fn.IsPackageInit() && gd.Debug.WrapGlobalMapCtl != 1 {
+		weakenGlobalMapInitRelocs(gd, fn)
 	}
 
 	// fieldtrack must be called after pp.Flush. See issue 20014.
-	fieldtrack(pp.Text.From.Sym, fn.FieldTrack)
+	fieldtrack(gd, pp.Text.From.Sym, fn.FieldTrack)
 }
 
 // globalMapInitLsyms records the LSym of each map.init.NNN outlined
@@ -356,7 +356,7 @@ func RegisterMapInitLsym(s *obj.LSym) {
 // given a package init function "fn" and looks for relocs that target
 // outlined global map initializer functions; if it finds any such
 // relocs, it flags them as R_WEAK.
-func weakenGlobalMapInitRelocs(fn *ir.Func) {
+func weakenGlobalMapInitRelocs(gd *base.Invocation, fn *ir.Func) {
 	if globalMapInitLsyms == nil {
 		return
 	}
@@ -368,7 +368,7 @@ func weakenGlobalMapInitRelocs(fn *ir.Func) {
 		if _, ok := globalMapInitLsyms[tgt]; !ok {
 			continue
 		}
-		if base.Debug.WrapGlobalMapDbg > 1 {
+		if gd.Debug.WrapGlobalMapDbg > 1 {
 			fmt.Fprintf(os.Stderr, "=-= weakify fn %v reloc %d %+v\n", fn, i,
 				fn.LSym.R[i])
 		}
@@ -380,19 +380,19 @@ func weakenGlobalMapInitRelocs(fn *ir.Func) {
 // StackOffset returns the stack location of a LocalSlot relative to the
 // stack pointer, suitable for use in a DWARF location entry. This has nothing
 // to do with its offset in the user variable.
-func StackOffset(slot ssa.LocalSlot) int32 {
+func StackOffset(gd *base.Invocation, slot ssa.LocalSlot) int32 {
 	n := slot.N
 	var off int64
 	switch n.Class {
 	case ir.PPARAM, ir.PPARAMOUT:
 		if !n.IsOutputParamInRegisters() {
-			off = n.FrameOffset() + base.Ctxt.Arch.FixedFrameSize
+			off = n.FrameOffset() + gd.Ctxt.Arch.FixedFrameSize
 			break
 		}
 		fallthrough // PPARAMOUT in registers allocates like an AUTO
 	case ir.PAUTO:
 		off = n.FrameOffset()
-		if base.Ctxt.Arch.FixedFrameSize == 0 {
+		if gd.Ctxt.Arch.FixedFrameSize == 0 {
 			off -= int64(types.PtrSize)
 		}
 		if buildcfg.FramePointerEnabled {
@@ -404,7 +404,7 @@ func StackOffset(slot ssa.LocalSlot) int32 {
 
 // fieldtrack adds R_USEFIELD relocations to fnsym to record any
 // struct fields that it used.
-func fieldtrack(fnsym *obj.LSym, tracked map[*obj.LSym]struct{}) {
+func fieldtrack(gd *base.Invocation, fnsym *obj.LSym, tracked map[*obj.LSym]struct{}) {
 	if fnsym == nil {
 		return
 	}
@@ -418,7 +418,7 @@ func fieldtrack(fnsym *obj.LSym, tracked map[*obj.LSym]struct{}) {
 	}
 	slices.SortFunc(trackSyms, func(a, b *obj.LSym) int { return strings.Compare(a.Name, b.Name) })
 	for _, sym := range trackSyms {
-		fnsym.AddRel(base.Ctxt, obj.Reloc{Type: objabi.R_USEFIELD, Sym: sym})
+		fnsym.AddRel(gd.Ctxt, obj.Reloc{Type: objabi.R_USEFIELD, Sym: sym})
 	}
 }
 
@@ -435,16 +435,16 @@ var (
 	largeStackFrames   []largeStack
 )
 
-func CheckLargeStacks() {
+func CheckLargeStacks(gd *base.Invocation) {
 	// Check whether any of the functions we have compiled have gigantic stack frames.
 	sort.Slice(largeStackFrames, func(i, j int) bool {
 		return largeStackFrames[i].pos.Before(largeStackFrames[j].pos)
 	})
 	for _, large := range largeStackFrames {
 		if large.callee != 0 {
-			base.ErrorfAt(large.pos, 0, "stack frame too large (>1GB): %d MB locals + %d MB args + %d MB callee", large.locals>>20, large.args>>20, large.callee>>20)
+			gd.ErrorfAt(large.pos, 0, "stack frame too large (>1GB): %d MB locals + %d MB args + %d MB callee", large.locals>>20, large.args>>20, large.callee>>20)
 		} else {
-			base.ErrorfAt(large.pos, 0, "stack frame too large (>1GB): %d MB locals + %d MB args", large.locals>>20, large.args>>20)
+			gd.ErrorfAt(large.pos, 0, "stack frame too large (>1GB): %d MB locals + %d MB args", large.locals>>20, large.args>>20)
 		}
 	}
 }

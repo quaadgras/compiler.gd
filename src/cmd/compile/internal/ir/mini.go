@@ -7,6 +7,7 @@
 package ir
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 // for more useful panic messages when invalid methods are called,
 // instead of implementing Op itself.
 type miniNode struct {
+	gd   *base.Invocation
 	pos  src.XPos
 	op   Op
 	bits bitset8
@@ -42,6 +44,8 @@ func (n *miniNode) Pos() src.XPos     { return n.pos }
 func (n *miniNode) SetPos(x src.XPos) { n.pos = x }
 func (n *miniNode) Esc() uint16       { return n.esc }
 func (n *miniNode) SetEsc(x uint16)   { n.esc = x }
+
+func (n *miniNode) compiler() *base.Invocation { return n.gd }
 
 const (
 	miniTypecheckShift = 0

@@ -16,6 +16,14 @@ import (
 
 type typefn func() *types.Type
 
+// testGd is the *base.Invocation passed to compare's exported functions
+// in tests. We populate just the bits the compare package reads —
+// currently only Ctxt.Arch — so we don't have to stand up a full
+// compiler invocation.
+var testGd = &base.Invocation{
+	Ctxt: &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}},
+}
+
 func init() {
 	// These are the few constants that need to be initialized in order to use
 	// the types package without using the typecheck package by calling
@@ -23,8 +31,7 @@ func init() {
 	types.PtrSize = 8
 	types.RegSize = 8
 	types.MaxWidth = 1 << 50
-	base.Ctxt = &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}}
-	typecheck.InitUniverse()
+	typecheck.InitUniverse(testGd)
 }
 
 func TestEqStructCost(t *testing.T) {
@@ -83,21 +90,21 @@ func TestEqStructCost(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fields := make([]*types.Field, len(tc.fieldTypes))
 			for i, ftyp := range tc.fieldTypes {
-				fields[i] = types.NewField(src.NoXPos, typecheck.LookupNum("f", i), ftyp)
+				fields[i] = types.NewField(src.NoXPos, typecheck.LookupNum(testGd, "f", i), ftyp)
 			}
 			typ := types.NewStruct(fields)
 			types.CalcSize(typ)
 
 			want := tc.cost
-			base.Ctxt.Arch.CanMergeLoads = true
-			actual := EqStructCost(typ)
+			testGd.Ctxt.Arch.CanMergeLoads = true
+			actual := EqStructCost(testGd, typ)
 			if actual != want {
 				t.Errorf("CanMergeLoads=true EqStructCost(%v) = %d, want %d", typ, actual, want)
 			}
 
-			base.Ctxt.Arch.CanMergeLoads = false
+			testGd.Ctxt.Arch.CanMergeLoads = false
 			want = tc.nonMergeLoadCost
-			actual = EqStructCost(typ)
+			actual = EqStructCost(testGd, typ)
 			if actual != want {
 				t.Errorf("CanMergeLoads=false EqStructCost(%v) = %d, want %d", typ, actual, want)
 			}

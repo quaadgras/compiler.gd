@@ -42,20 +42,20 @@ var sharedProgArray = new([10000]obj.Prog) // *T instead of T to work around iss
 
 // NewProgs returns a new Progs for fn.
 // worker indicates which of the backend workers will use the Progs.
-func NewProgs(fn *ir.Func, worker int) *Progs {
+func NewProgs(gd *base.Invocation, fn *ir.Func, worker int) *Progs {
 	pp := new(Progs)
-	if base.Ctxt.CanReuseProgs() {
-		sz := len(sharedProgArray) / base.Flag.LowerC
+	if gd.Ctxt.CanReuseProgs() {
+		sz := len(sharedProgArray) / gd.Flag.LowerC
 		pp.Cache = sharedProgArray[sz*worker : sz*(worker+1)]
 	}
 	pp.CurFunc = fn
 
 	// prime the pump
-	pp.Next = pp.NewProg()
+	pp.Next = pp.NewProg(gd)
 	pp.Clear(pp.Next)
 
 	pp.Pos = fn.Pos()
-	pp.SetText(fn)
+	pp.SetText(gd, fn)
 	// PCDATA tables implicitly start with index -1.
 	pp.PrevLive = -1
 	pp.NextLive = pp.PrevLive
@@ -94,7 +94,7 @@ func (s StackMapIndex) StackMapValid() bool {
 	return s != StackMapDontCare
 }
 
-func (pp *Progs) NewProg() *obj.Prog {
+func (pp *Progs) NewProg(gd *base.Invocation) *obj.Prog {
 	var p *obj.Prog
 	if pp.CacheIndex < len(pp.Cache) {
 		p = &pp.Cache[pp.CacheIndex]
@@ -102,19 +102,21 @@ func (pp *Progs) NewProg() *obj.Prog {
 	} else {
 		p = new(obj.Prog)
 	}
-	p.Ctxt = base.Ctxt
+	p.Ctxt = gd.Ctxt
 	return p
 }
 
 // Flush converts from pp to machine code.
-func (pp *Progs) Flush() {
+func (pp *Progs) Flush(gd *base.Invocation) {
 	plist := &obj.Plist{Firstpc: pp.Text, Curfn: pp.CurFunc}
-	obj.Flushplist(base.Ctxt, plist, pp.NewProg)
+	obj.Flushplist(gd.Ctxt, plist, func() *obj.Prog {
+		return pp.NewProg(gd)
+	})
 }
 
 // Free clears pp and any associated resources.
-func (pp *Progs) Free() {
-	if base.Ctxt.CanReuseProgs() {
+func (pp *Progs) Free(gd *base.Invocation) {
+	if gd.Ctxt.CanReuseProgs() {
 		// Clear progs to enable GC and avoid abuse.
 		clear(pp.Cache[:pp.CacheIndex])
 	}
@@ -123,19 +125,19 @@ func (pp *Progs) Free() {
 }
 
 // Prog adds a Prog with instruction As to pp.
-func (pp *Progs) Prog(as obj.As) *obj.Prog {
+func (pp *Progs) Prog(gd *base.Invocation, as obj.As) *obj.Prog {
 	if pp.NextLive != StackMapDontCare && pp.NextLive != pp.PrevLive {
 		// Emit stack map index change.
 		idx := pp.NextLive
 		pp.PrevLive = idx
-		p := pp.Prog(obj.APCDATA)
+		p := pp.Prog(gd, obj.APCDATA)
 		p.From.SetConst(abi.PCDATA_StackMapIndex)
 		p.To.SetConst(int64(idx))
 	}
 	if pp.NextUnsafe != pp.PrevUnsafe {
 		// Emit unsafe-point marker.
 		pp.PrevUnsafe = pp.NextUnsafe
-		p := pp.Prog(obj.APCDATA)
+		p := pp.Prog(gd, obj.APCDATA)
 		p.From.SetConst(abi.PCDATA_UnsafePoint)
 		if pp.NextUnsafe {
 			p.To.SetConst(abi.UnsafePointUnsafe)
@@ -145,12 +147,12 @@ func (pp *Progs) Prog(as obj.As) *obj.Prog {
 	}
 
 	p := pp.Next
-	pp.Next = pp.NewProg()
+	pp.Next = pp.NewProg(gd)
 	pp.Clear(pp.Next)
 	p.Link = pp.Next
 
-	if !pp.Pos.IsKnown() && base.Flag.K != 0 {
-		base.Warn("prog: unknown position (line 0)")
+	if !pp.Pos.IsKnown() && gd.Flag.K != 0 {
+		gd.Warn("prog: unknown position (line 0)")
 	}
 
 	p.As = as
@@ -172,8 +174,8 @@ func (pp *Progs) Clear(p *obj.Prog) {
 	pp.PC++
 }
 
-func (pp *Progs) Append(p *obj.Prog, as obj.As, ftype obj.AddrType, freg int16, foffset int64, ttype obj.AddrType, treg int16, toffset int64) *obj.Prog {
-	q := pp.NewProg()
+func (pp *Progs) Append(gd *base.Invocation, p *obj.Prog, as obj.As, ftype obj.AddrType, freg int16, foffset int64, ttype obj.AddrType, treg int16, toffset int64) *obj.Prog {
+	q := pp.NewProg(gd)
 	pp.Clear(q)
 	q.As = as
 	q.Pos = p.Pos
@@ -188,11 +190,11 @@ func (pp *Progs) Append(p *obj.Prog, as obj.As, ftype obj.AddrType, freg int16, 
 	return q
 }
 
-func (pp *Progs) SetText(fn *ir.Func) {
+func (pp *Progs) SetText(gd *base.Invocation, fn *ir.Func) {
 	if pp.Text != nil {
-		base.Fatalf("Progs.SetText called twice")
+		gd.Fatalf("Progs.SetText called twice")
 	}
-	ptxt := pp.Prog(obj.ATEXT)
+	ptxt := pp.Prog(gd, obj.ATEXT)
 	pp.Text = ptxt
 
 	fn.LSym.Func().Text = ptxt

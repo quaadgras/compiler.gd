@@ -20,7 +20,7 @@ func ConstType(n Node) constant.Kind {
 
 // IntVal returns v converted to int64.
 // Note: if t is uint64, very large values will be converted to negative int64.
-func IntVal(t *types.Type, v constant.Value) int64 {
+func IntVal(gd *base.Invocation, t *types.Type, v constant.Value) int64 {
 	if t.IsUnsigned() {
 		if x, ok := constant.Uint64Val(v); ok {
 			return int64(x)
@@ -30,17 +30,17 @@ func IntVal(t *types.Type, v constant.Value) int64 {
 			return x
 		}
 	}
-	base.Fatalf("%v out of range for %v", v, t)
+	gd.Fatalf("%v out of range for %v", v, t)
 	panic("unreachable")
 }
 
-func AssertValidTypeForConst(t *types.Type, v constant.Value) {
-	if !ValidTypeForConst(t, v) {
-		base.Fatalf("%v (%v) does not represent %v (%v)", t, t.Kind(), v, v.Kind())
+func AssertValidTypeForConst(gd *base.Invocation, t *types.Type, v constant.Value) {
+	if !ValidTypeForConst(gd, t, v) {
+		gd.Fatalf("%v (%v) does not represent %v (%v)", t, t.Kind(), v, v.Kind())
 	}
 }
 
-func ValidTypeForConst(t *types.Type, v constant.Value) bool {
+func ValidTypeForConst(gd *base.Invocation, t *types.Type, v constant.Value) bool {
 	switch v.Kind() {
 	case constant.Unknown:
 		return OKForConst[t.Kind()]
@@ -56,7 +56,7 @@ func ValidTypeForConst(t *types.Type, v constant.Value) bool {
 		return t.IsComplex()
 	}
 
-	base.Fatalf("unexpected constant kind: %v", v)
+	gd.Fatalf("unexpected constant kind: %v", v)
 	panic("unreachable")
 }
 
@@ -65,12 +65,13 @@ var OKForConst [types.NTYPE]bool
 // Int64Val returns n as an int64.
 // n must be an integer or rune constant.
 func Int64Val(n Node) int64 {
+	gd := n.compiler()
 	if !IsConst(n, constant.Int) {
-		base.Fatalf("Int64Val(%v)", n)
+		gd.Fatalf("Int64Val(%v)", n)
 	}
 	x, ok := constant.Int64Val(n.Val())
 	if !ok {
-		base.Fatalf("Int64Val(%v)", n)
+		gd.Fatalf("Int64Val(%v)", n)
 	}
 	return x
 }
@@ -78,12 +79,13 @@ func Int64Val(n Node) int64 {
 // Uint64Val returns n as a uint64.
 // n must be an integer or rune constant.
 func Uint64Val(n Node) uint64 {
+	gd := n.compiler()
 	if !IsConst(n, constant.Int) {
-		base.Fatalf("Uint64Val(%v)", n)
+		gd.Fatalf("Uint64Val(%v)", n)
 	}
 	x, ok := constant.Uint64Val(n.Val())
 	if !ok {
-		base.Fatalf("Uint64Val(%v)", n)
+		gd.Fatalf("Uint64Val(%v)", n)
 	}
 	return x
 }
@@ -91,8 +93,9 @@ func Uint64Val(n Node) uint64 {
 // BoolVal returns n as a bool.
 // n must be a boolean constant.
 func BoolVal(n Node) bool {
+	gd := n.compiler()
 	if !IsConst(n, constant.Bool) {
-		base.Fatalf("BoolVal(%v)", n)
+		gd.Fatalf("BoolVal(%v)", n)
 	}
 	return constant.BoolVal(n.Val())
 }
@@ -100,8 +103,9 @@ func BoolVal(n Node) bool {
 // StringVal returns the value of a literal string Node as a string.
 // n must be a string constant.
 func StringVal(n Node) string {
+	gd := n.compiler()
 	if !IsConst(n, constant.String) {
-		base.Fatalf("StringVal(%v)", n)
+		gd.Fatalf("StringVal(%v)", n)
 	}
 	return constant.StringVal(n.Val())
 }

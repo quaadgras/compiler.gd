@@ -26,7 +26,7 @@ import (
 // The result of walkExpr MUST be assigned back to n, e.g.
 //
 //	n.Left = walkExpr(n.Left, init)
-func walkExpr(n ir.Node, init *ir.Nodes) ir.Node {
+func walkExpr(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 	if n == nil {
 		return n
 	}
@@ -35,29 +35,29 @@ func walkExpr(n ir.Node, init *ir.Nodes) ir.Node {
 		// not okay to use n->ninit when walking n,
 		// because we might replace n with some other node
 		// and would lose the init list.
-		base.Fatalf("walkExpr init == &n->ninit")
+		gd.Fatalf("walkExpr init == &n->ninit")
 	}
 
 	if len(n.Init()) != 0 {
-		walkStmtList(n.Init())
+		walkStmtList(gd, n.Init())
 		init.Append(ir.TakeInit(n)...)
 	}
 
-	lno := ir.SetPos(n)
+	lno := ir.SetPos(gd, n)
 
-	if base.Flag.LowerW > 1 {
+	if gd.Flag.LowerW > 1 {
 		ir.Dump("before walk expr", n)
 	}
 
 	if n.Typecheck() != 1 {
-		base.Fatalf("missed typecheck: %+v", n)
+		gd.Fatalf("missed typecheck: %+v", n)
 	}
 
 	if n.Type().IsUntyped() {
-		base.Fatalf("expression has untyped type: %+v", n)
+		gd.Fatalf("expression has untyped type: %+v", n)
 	}
 
-	n = walkExpr1(n, init)
+	n = walkExpr1(gd, n, init)
 
 	// Eagerly compute sizes of all expressions for the back end.
 	if typ := n.Type(); typ != nil && typ.Kind() != types.TBLANK && !typ.IsFuncArgStruct() {
@@ -69,22 +69,22 @@ func walkExpr(n ir.Node, init *ir.Nodes) ir.Node {
 	if ir.IsConst(n, constant.String) {
 		// Emit string symbol now to avoid emitting
 		// any concurrently during the backend.
-		_ = staticdata.StringSym(n.Pos(), constant.StringVal(n.Val()))
+		_ = staticdata.StringSym(gd, n.Pos(), constant.StringVal(n.Val()))
 	}
 
-	if base.Flag.LowerW != 0 && n != nil {
+	if gd.Flag.LowerW != 0 && n != nil {
 		ir.Dump("after walk expr", n)
 	}
 
-	base.Pos = lno
+	gd.Pos = lno
 	return n
 }
 
-func walkExpr1(n ir.Node, init *ir.Nodes) ir.Node {
+func walkExpr1(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 	switch n.Op() {
 	default:
 		ir.Dump("walk", n)
-		base.Fatalf("walkExpr: switch 1 unknown op %+v", n.Op())
+		gd.Fatalf("walkExpr: switch 1 unknown op %+v", n.Op())
 		panic("unreachable")
 
 	case ir.OGETG, ir.OGETCALLERSP:
@@ -100,261 +100,261 @@ func walkExpr1(n ir.Node, init *ir.Nodes) ir.Node {
 	case ir.OMETHEXPR:
 		// TODO(mdempsky): Do this right after type checking.
 		n := n.(*ir.SelectorExpr)
-		return n.FuncName()
+		return n.FuncName(gd)
 
 	case ir.OMIN, ir.OMAX:
 		n := n.(*ir.CallExpr)
-		return walkMinMax(n, init)
+		return walkMinMax(gd, n, init)
 
 	case ir.ONOT, ir.ONEG, ir.OPLUS, ir.OBITNOT, ir.OREAL, ir.OIMAG, ir.OSPTR, ir.OITAB, ir.OIDATA:
 		n := n.(*ir.UnaryExpr)
-		n.X = walkExpr(n.X, init)
+		n.X = walkExpr(gd, n.X, init)
 		return n
 
 	case ir.ODOTMETH, ir.ODOTINTER:
 		n := n.(*ir.SelectorExpr)
-		n.X = walkExpr(n.X, init)
+		n.X = walkExpr(gd, n.X, init)
 		return n
 
 	case ir.OADDR:
 		n := n.(*ir.AddrExpr)
-		n.X = walkExpr(n.X, init)
+		n.X = walkExpr(gd, n.X, init)
 		return n
 
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
-		n.X = walkExpr(n.X, init)
+		n.X = walkExpr(gd, n.X, init)
 		return n
 
 	case ir.OMAKEFACE, ir.OAND, ir.OANDNOT, ir.OSUB, ir.OMUL, ir.OADD, ir.OOR, ir.OXOR, ir.OLSH, ir.ORSH,
 		ir.OUNSAFEADD:
 		n := n.(*ir.BinaryExpr)
-		n.X = walkExpr(n.X, init)
-		n.Y = walkExpr(n.Y, init)
-		if n.Op() == ir.OUNSAFEADD && ir.ShouldCheckPtr(ir.CurFunc, 1) {
+		n.X = walkExpr(gd, n.X, init)
+		n.Y = walkExpr(gd, n.Y, init)
+		if n.Op() == ir.OUNSAFEADD && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
 			// For unsafe.Add(p, n), just walk "unsafe.Pointer(uintptr(p)+uintptr(n))"
 			// for the side effects of validating unsafe.Pointer rules.
-			x := typecheck.ConvNop(n.X, types.Types[types.TUINTPTR])
-			y := typecheck.Conv(n.Y, types.Types[types.TUINTPTR])
-			conv := typecheck.ConvNop(ir.NewBinaryExpr(n.Pos(), ir.OADD, x, y), types.Types[types.TUNSAFEPTR])
-			walkExpr(conv, init)
+			x := typecheck.ConvNop(gd, n.X, types.Types[types.TUINTPTR])
+			y := typecheck.Conv(gd, n.Y, types.Types[types.TUINTPTR])
+			conv := typecheck.ConvNop(gd, ir.NewBinaryExpr(gd, n.Pos(), ir.OADD, x, y), types.Types[types.TUNSAFEPTR])
+			walkExpr(gd, conv, init)
 		}
 		return n
 
 	case ir.OUNSAFESLICE:
 		n := n.(*ir.BinaryExpr)
-		return walkUnsafeSlice(n, init)
+		return walkUnsafeSlice(gd, n, init)
 
 	case ir.OUNSAFESTRING:
 		n := n.(*ir.BinaryExpr)
-		return walkUnsafeString(n, init)
+		return walkUnsafeString(gd, n, init)
 
 	case ir.OUNSAFESTRINGDATA, ir.OUNSAFESLICEDATA:
 		n := n.(*ir.UnaryExpr)
-		return walkUnsafeData(n, init)
+		return walkUnsafeData(gd, n, init)
 
 	case ir.ODOT, ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
-		return walkDot(n, init)
+		return walkDot(gd, n, init)
 
 	case ir.ODOTTYPE, ir.ODOTTYPE2:
 		n := n.(*ir.TypeAssertExpr)
-		return walkDotType(n, init)
+		return walkDotType(gd, n, init)
 
 	case ir.ODYNAMICDOTTYPE, ir.ODYNAMICDOTTYPE2:
 		n := n.(*ir.DynamicTypeAssertExpr)
-		return walkDynamicDotType(n, init)
+		return walkDynamicDotType(gd, n, init)
 
 	case ir.OLEN, ir.OCAP:
 		n := n.(*ir.UnaryExpr)
-		return walkLenCap(n, init)
+		return walkLenCap(gd, n, init)
 
 	case ir.OCOMPLEX:
 		n := n.(*ir.BinaryExpr)
-		n.X = walkExpr(n.X, init)
-		n.Y = walkExpr(n.Y, init)
+		n.X = walkExpr(gd, n.X, init)
+		n.Y = walkExpr(gd, n.Y, init)
 		return n
 
 	case ir.OEQ, ir.ONE, ir.OLT, ir.OLE, ir.OGT, ir.OGE:
 		n := n.(*ir.BinaryExpr)
-		return walkCompare(n, init)
+		return walkCompare(gd, n, init)
 
 	case ir.OANDAND, ir.OOROR:
 		n := n.(*ir.LogicalExpr)
-		return walkLogical(n, init)
+		return walkLogical(gd, n, init)
 
 	case ir.OPRINT, ir.OPRINTLN:
-		return walkPrint(n.(*ir.CallExpr), init)
+		return walkPrint(gd, n.(*ir.CallExpr), init)
 
 	case ir.OPANIC:
 		n := n.(*ir.UnaryExpr)
-		return mkcall("gopanic", nil, init, n.X)
+		return mkcall(gd, "gopanic", nil, init, n.X)
 
 	case ir.ORECOVER:
-		return walkRecover(n.(*ir.CallExpr), init)
+		return walkRecover(gd, n.(*ir.CallExpr), init)
 
 	case ir.OCFUNC:
 		return n
 
 	case ir.OCALLINTER, ir.OCALLFUNC:
 		n := n.(*ir.CallExpr)
-		return walkCall(n, init)
+		return walkCall(gd, n, init)
 
 	case ir.OAS, ir.OASOP:
-		return walkAssign(init, n)
+		return walkAssign(gd, init, n)
 
 	case ir.OAS2:
 		n := n.(*ir.AssignListStmt)
-		return walkAssignList(init, n)
+		return walkAssignList(gd, init, n)
 
 	// a,b,... = fn()
 	case ir.OAS2FUNC:
 		n := n.(*ir.AssignListStmt)
-		return walkAssignFunc(init, n)
+		return walkAssignFunc(gd, init, n)
 
 	// x, y = <-c
 	// order.stmt made sure x is addressable or blank.
 	case ir.OAS2RECV:
 		n := n.(*ir.AssignListStmt)
-		return walkAssignRecv(init, n)
+		return walkAssignRecv(gd, init, n)
 
 	// a,b = m[i]
 	case ir.OAS2MAPR:
 		n := n.(*ir.AssignListStmt)
-		return walkAssignMapRead(init, n)
+		return walkAssignMapRead(gd, init, n)
 
 	case ir.ODELETE:
 		n := n.(*ir.CallExpr)
-		return walkDelete(init, n)
+		return walkDelete(gd, init, n)
 
 	case ir.OAS2DOTTYPE:
 		n := n.(*ir.AssignListStmt)
-		return walkAssignDotType(n, init)
+		return walkAssignDotType(gd, n, init)
 
 	case ir.OCONVIFACE:
 		n := n.(*ir.ConvExpr)
-		return walkConvInterface(n, init)
+		return walkConvInterface(gd, n, init)
 
 	case ir.OCONV, ir.OCONVNOP:
 		n := n.(*ir.ConvExpr)
-		return walkConv(n, init)
+		return walkConv(gd, n, init)
 
 	case ir.OSLICE2ARR:
 		n := n.(*ir.ConvExpr)
-		return walkSliceToArray(n, init)
+		return walkSliceToArray(gd, n, init)
 
 	case ir.OSLICE2ARRPTR:
 		n := n.(*ir.ConvExpr)
-		n.X = walkExpr(n.X, init)
+		n.X = walkExpr(gd, n.X, init)
 		return n
 
 	case ir.ODIV, ir.OMOD:
 		n := n.(*ir.BinaryExpr)
-		return walkDivMod(n, init)
+		return walkDivMod(gd, n, init)
 
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
-		return walkIndex(n, init)
+		return walkIndex(gd, n, init)
 
 	case ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
-		return walkIndexMap(n, init)
+		return walkIndexMap(gd, n, init)
 
 	case ir.ORECV:
-		base.Fatalf("walkExpr ORECV") // should see inside OAS only
+		gd.Fatalf("walkExpr ORECV") // should see inside OAS only
 		panic("unreachable")
 
 	case ir.OSLICEHEADER:
 		n := n.(*ir.SliceHeaderExpr)
-		return walkSliceHeader(n, init)
+		return walkSliceHeader(gd, n, init)
 
 	case ir.OSTRINGHEADER:
 		n := n.(*ir.StringHeaderExpr)
-		return walkStringHeader(n, init)
+		return walkStringHeader(gd, n, init)
 
 	case ir.OSLICE, ir.OSLICEARR, ir.OSLICESTR, ir.OSLICE3, ir.OSLICE3ARR:
 		n := n.(*ir.SliceExpr)
-		return walkSlice(n, init)
+		return walkSlice(gd, n, init)
 
 	case ir.ONEW:
 		n := n.(*ir.UnaryExpr)
-		return walkNew(n, init)
+		return walkNew(gd, n, init)
 
 	case ir.OADDSTR:
-		return walkAddString(n.(*ir.AddStringExpr), init, nil)
+		return walkAddString(gd, n.(*ir.AddStringExpr), init, nil)
 
 	case ir.OAPPEND:
 		// order should make sure we only see OAS(node, OAPPEND), which we handle above.
-		base.Fatalf("append outside assignment")
+		gd.Fatalf("append outside assignment")
 		panic("unreachable")
 
 	case ir.OCOPY:
-		return walkCopy(n.(*ir.BinaryExpr), init, base.Flag.Cfg.Instrumenting && !base.Flag.CompilingRuntime)
+		return walkCopy(gd, n.(*ir.BinaryExpr), init, gd.Flag.Cfg.Instrumenting && !gd.Flag.CompilingRuntime)
 
 	case ir.OCLEAR:
 		n := n.(*ir.UnaryExpr)
-		return walkClear(n)
+		return walkClear(gd, n)
 
 	case ir.OCLOSE:
 		n := n.(*ir.UnaryExpr)
-		return walkClose(n, init)
+		return walkClose(gd, n, init)
 
 	case ir.OMAKECHAN:
 		n := n.(*ir.MakeExpr)
-		return walkMakeChan(n, init)
+		return walkMakeChan(gd, n, init)
 
 	case ir.OMAKEMAP:
 		n := n.(*ir.MakeExpr)
-		return walkMakeMap(n, init)
+		return walkMakeMap(gd, n, init)
 
 	case ir.OMAKESLICE:
 		n := n.(*ir.MakeExpr)
-		return walkMakeSlice(n, init)
+		return walkMakeSlice(gd, n, init)
 
 	case ir.OMAKESLICECOPY:
 		n := n.(*ir.MakeExpr)
-		return walkMakeSliceCopy(n, init)
+		return walkMakeSliceCopy(gd, n, init)
 
 	case ir.ORUNESTR:
 		n := n.(*ir.ConvExpr)
-		return walkRuneToString(n, init)
+		return walkRuneToString(gd, n, init)
 
 	case ir.OBYTES2STR, ir.ORUNES2STR:
 		n := n.(*ir.ConvExpr)
-		return walkBytesRunesToString(n, init)
+		return walkBytesRunesToString(gd, n, init)
 
 	case ir.OBYTES2STRTMP:
 		n := n.(*ir.ConvExpr)
-		return walkBytesToStringTemp(n, init)
+		return walkBytesToStringTemp(gd, n, init)
 
 	case ir.OSTR2BYTES:
 		n := n.(*ir.ConvExpr)
-		return walkStringToBytes(n, init)
+		return walkStringToBytes(gd, n, init)
 
 	case ir.OSTR2BYTESTMP:
 		n := n.(*ir.ConvExpr)
-		return walkStringToBytesTemp(n, init)
+		return walkStringToBytesTemp(gd, n, init)
 
 	case ir.OSTR2RUNES:
 		n := n.(*ir.ConvExpr)
-		return walkStringToRunes(n, init)
+		return walkStringToRunes(gd, n, init)
 
 	case ir.OARRAYLIT, ir.OSLICELIT, ir.OMAPLIT, ir.OSTRUCTLIT, ir.OPTRLIT:
-		return walkCompLit(n, init)
+		return walkCompLit(gd, n, init)
 
 	case ir.OSEND:
 		n := n.(*ir.SendStmt)
-		return walkSend(n, init)
+		return walkSend(gd, n, init)
 
 	case ir.OCLOSURE:
-		return walkClosure(n.(*ir.ClosureExpr), init)
+		return walkClosure(gd, n.(*ir.ClosureExpr), init)
 
 	case ir.OMETHVALUE:
-		return walkMethodValue(n.(*ir.SelectorExpr), init)
+		return walkMethodValue(gd, n.(*ir.SelectorExpr), init)
 
 	case ir.OMOVE2HEAP:
 		n := n.(*ir.MoveToHeapExpr)
-		n.Slice = walkExpr(n.Slice, init)
+		n.Slice = walkExpr(gd, n.Slice, init)
 		return n
 	}
 
@@ -368,46 +368,46 @@ func walkExpr1(n ir.Node, init *ir.Nodes) ir.Node {
 // the types expressions are calculated.
 // compile-time constants are evaluated.
 // complex side effects like statements are appended to init.
-func walkExprList(s []ir.Node, init *ir.Nodes) {
+func walkExprList(gd *base.Invocation, s []ir.Node, init *ir.Nodes) {
 	for i := range s {
-		s[i] = walkExpr(s[i], init)
+		s[i] = walkExpr(gd, s[i], init)
 	}
 }
 
-func walkExprListCheap(s []ir.Node, init *ir.Nodes) {
+func walkExprListCheap(gd *base.Invocation, s []ir.Node, init *ir.Nodes) {
 	for i, n := range s {
-		s[i] = cheapExpr(n, init)
-		s[i] = walkExpr(s[i], init)
+		s[i] = cheapExpr(gd, n, init)
+		s[i] = walkExpr(gd, s[i], init)
 	}
 }
 
-func walkExprListSafe(s []ir.Node, init *ir.Nodes) {
+func walkExprListSafe(gd *base.Invocation, s []ir.Node, init *ir.Nodes) {
 	for i, n := range s {
-		s[i] = safeExpr(n, init)
-		s[i] = walkExpr(s[i], init)
+		s[i] = safeExpr(gd, n, init)
+		s[i] = walkExpr(gd, s[i], init)
 	}
 }
 
 // return side-effect free and cheap n, appending side effects to init.
 // result may not be assignable.
-func cheapExpr(n ir.Node, init *ir.Nodes) ir.Node {
+func cheapExpr(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 	switch n.Op() {
 	case ir.ONAME, ir.OLITERAL, ir.ONIL:
 		return n
 	}
 
-	return copyExpr(n, n.Type(), init)
+	return copyExpr(gd, n, n.Type(), init)
 }
 
 // return side effect-free n, appending side effects to init.
 // result is assignable if n is.
-func safeExpr(n ir.Node, init *ir.Nodes) ir.Node {
+func safeExpr(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 	if n == nil {
 		return nil
 	}
 
 	if len(n.Init()) != 0 {
-		walkStmtList(n.Init())
+		walkStmtList(gd, n.Init())
 		init.Append(ir.TakeInit(n)...)
 	}
 
@@ -417,72 +417,72 @@ func safeExpr(n ir.Node, init *ir.Nodes) ir.Node {
 
 	case ir.OLEN, ir.OCAP:
 		n := n.(*ir.UnaryExpr)
-		l := safeExpr(n.X, init)
+		l := safeExpr(gd, n.X, init)
 		if l == n.X {
 			return n
 		}
 		a := ir.Copy(n).(*ir.UnaryExpr)
 		a.X = l
-		return walkExpr(typecheck.Expr(a), init)
+		return walkExpr(gd, typecheck.Expr(gd, a), init)
 
 	case ir.ODOT, ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
-		l := safeExpr(n.X, init)
+		l := safeExpr(gd, n.X, init)
 		if l == n.X {
 			return n
 		}
 		a := ir.Copy(n).(*ir.SelectorExpr)
 		a.X = l
-		return walkExpr(typecheck.Expr(a), init)
+		return walkExpr(gd, typecheck.Expr(gd, a), init)
 
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
-		l := safeExpr(n.X, init)
+		l := safeExpr(gd, n.X, init)
 		if l == n.X {
 			return n
 		}
 		a := ir.Copy(n).(*ir.StarExpr)
 		a.X = l
-		return walkExpr(typecheck.Expr(a), init)
+		return walkExpr(gd, typecheck.Expr(gd, a), init)
 
 	case ir.OINDEX, ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
-		l := safeExpr(n.X, init)
-		r := safeExpr(n.Index, init)
+		l := safeExpr(gd, n.X, init)
+		r := safeExpr(gd, n.Index, init)
 		if l == n.X && r == n.Index {
 			return n
 		}
 		a := ir.Copy(n).(*ir.IndexExpr)
 		a.X = l
 		a.Index = r
-		return walkExpr(typecheck.Expr(a), init)
+		return walkExpr(gd, typecheck.Expr(gd, a), init)
 
 	case ir.OSTRUCTLIT, ir.OARRAYLIT, ir.OSLICELIT:
 		n := n.(*ir.CompLitExpr)
-		if isStaticCompositeLiteral(n) {
+		if isStaticCompositeLiteral(gd, n) {
 			return n
 		}
 	}
 
 	// make a copy; must not be used as an lvalue
 	if ir.IsAddressable(n) {
-		base.Fatalf("missing lvalue case in safeExpr: %v", n)
+		gd.Fatalf("missing lvalue case in safeExpr: %v", n)
 	}
-	return cheapExpr(n, init)
+	return cheapExpr(gd, n, init)
 }
 
-func copyExpr(n ir.Node, t *types.Type, init *ir.Nodes) ir.Node {
-	l := typecheck.TempAt(base.Pos, ir.CurFunc, t)
-	appendWalkStmt(init, ir.NewAssignStmt(base.Pos, l, n))
+func copyExpr(gd *base.Invocation, n ir.Node, t *types.Type, init *ir.Nodes) ir.Node {
+	l := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), t)
+	appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, l, n))
 	return l
 }
 
 // walkAddString walks a string concatenation expression x.
 // If conv is non nil, x is the conv.X field.
-func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.Node {
+func walkAddString(gd *base.Invocation, x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.Node {
 	c := len(x.List)
 	if c < 2 {
-		base.Fatalf("walkAddString count %d too small", c)
+		gd.Fatalf("walkAddString count %d too small", c)
 	}
 
 	typ := x.Type()
@@ -495,10 +495,10 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 
 	var fn, fnsmall, fnbig string
 
-	buf := typecheck.NodNil()
+	buf := typecheck.NodNil(gd)
 	switch {
 	default:
-		base.FatalfAt(x.Pos(), "unexpected type: %v", typ)
+		gd.FatalfAt(x.Pos(), "unexpected type: %v", typ)
 	case typ.IsString():
 		if ir.NodeStackAllocatable(x) {
 			sz := int64(0)
@@ -511,7 +511,7 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 			// Don't allocate the buffer if the result won't fit.
 			if sz < tmpstringbufsize {
 				// Create temporary buffer for result string on stack.
-				buf = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
+				buf = stackBufAddr(gd, tmpstringbufsize, types.Types[types.TUINT8])
 			}
 		}
 
@@ -519,7 +519,7 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 		fnsmall, fnbig = "concatstring%d", "concatstrings"
 	case typ.IsSlice() && typ.Elem().IsKind(types.TUINT8): // Optimize []byte(str1+str2+...)
 		if conv != nil && ir.NodeStackAllocatable(conv) {
-			buf = stackBufAddr(tmpstringbufsize, types.Types[types.TUINT8])
+			buf = stackBufAddr(gd, tmpstringbufsize, types.Types[types.TUINT8])
 		}
 		args = []ir.Node{buf}
 		fnsmall, fnbig = "concatbyte%d", "concatbytes"
@@ -531,7 +531,7 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 		fn = fmt.Sprintf(fnsmall, c)
 
 		for _, n2 := range x.List {
-			args = append(args, typecheck.Conv(n2, types.Types[types.TSTRING]))
+			args = append(args, typecheck.Conv(gd, n2, types.Types[types.TSTRING]))
 		}
 	} else {
 		// large numbers of strings are passed to the runtime as a slice.
@@ -540,19 +540,19 @@ func walkAddString(x *ir.AddStringExpr, init *ir.Nodes, conv *ir.ConvExpr) ir.No
 
 		slargs := make([]ir.Node, len(x.List))
 		for i, n2 := range x.List {
-			slargs[i] = typecheck.Conv(n2, types.Types[types.TSTRING])
+			slargs[i] = typecheck.Conv(gd, n2, types.Types[types.TSTRING])
 		}
-		slice := ir.NewCompLitExpr(base.Pos, ir.OCOMPLIT, t, slargs)
+		slice := ir.NewCompLitExpr(gd, gd.Pos, ir.OCOMPLIT, t, slargs)
 		slice.Prealloc = x.Prealloc
 		args = append(args, slice)
 		slice.SetEsc(ir.EscNone)
 	}
 
-	cat := typecheck.LookupRuntime(fn)
-	r := ir.NewCallExpr(base.Pos, ir.OCALL, cat, nil)
+	cat := typecheck.LookupRuntime(gd, fn)
+	r := ir.NewCallExpr(gd, gd.Pos, ir.OCALL, cat, nil)
 	r.Args = args
-	r1 := typecheck.Expr(r)
-	r1 = walkExpr(r1, init)
+	r1 := typecheck.Expr(gd, r)
+	r1 = walkExpr(gd, r1, init)
 	r1.SetType(typ)
 
 	return r1
@@ -569,21 +569,21 @@ var hooks = map[string]hookInfo{
 }
 
 // walkCall walks an OCALLFUNC or OCALLINTER node.
-func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
+func walkCall(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 	if n.Op() == ir.OCALLMETH {
-		base.FatalfAt(n.Pos(), "OCALLMETH missed by typecheck")
+		gd.FatalfAt(n.Pos(), "OCALLMETH missed by typecheck")
 	}
 	if n.Op() == ir.OCALLINTER || n.Fun.Op() == ir.OMETHEXPR {
 		// We expect both interface call reflect.Type.Method and concrete
 		// call reflect.(*rtype).Method.
-		usemethod(n)
+		usemethod(gd, n)
 	}
 	if n.Op() == ir.OCALLINTER {
-		reflectdata.MarkUsedIfaceMethod(n)
+		reflectdata.MarkUsedIfaceMethod(gd, n)
 	}
 
 	if n.Op() == ir.OCALLFUNC && n.Fun.Op() == ir.OCLOSURE {
-		directClosureCall(n)
+		directClosureCall(gd, n)
 	}
 
 	if ir.IsFuncPCIntrinsic(n) {
@@ -599,10 +599,10 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 			wantABI = obj.ABIInternal
 		}
 		if n.Type() != types.Types[types.TUINTPTR] {
-			base.FatalfAt(n.Pos(), "FuncPC intrinsic should return uintptr, got %v", n.Type()) // as expected by typecheck.FuncPC.
+			gd.FatalfAt(n.Pos(), "FuncPC intrinsic should return uintptr, got %v", n.Type()) // as expected by typecheck.FuncPC.
 		}
-		n := ir.FuncPC(n.Pos(), arg, wantABI)
-		return walkExpr(n, init)
+		n := ir.FuncPC(gd, n.Pos(), arg, wantABI)
+		return walkExpr(gd, n, init)
 	}
 
 	if n.Op() == ir.OCALLFUNC {
@@ -614,7 +614,7 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 			// argument.
 			ps := fn.Type().Params()
 			if len(ps) == 2 && ps[1].Type.IsShape() {
-				return walkExpr(n.Args[1], init)
+				return walkExpr(gd, n.Args[1], init)
 			}
 		}
 	}
@@ -625,83 +625,83 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 			// Call to runtime.deferrangefunc is being shared with a range-over-func
 			// body that might add defers to this frame, so we cannot use open-coded defers
 			// and we need to call deferreturn even if we don't see any other explicit defers.
-			ir.CurFunc.SetHasDefer(true)
-			ir.CurFunc.SetOpenCodedDeferDisallowed(true)
+			ir.CurFunc(gd).SetHasDefer(true)
+			ir.CurFunc(gd).SetOpenCodedDeferDisallowed(true)
 		}
 	}
 
 	// gd escape-bits: wrap pointer args tagged EscCandidate with a
 	// runtime bit-check-and-materialize. See doc/gd/escape-bits.md.
-	wrapEscapeCandidateArgs(n, init)
+	wrapEscapeCandidateArgs(gd, n, init)
 
-	walkCall1(n, init)
+	walkCall1(gd, n, init)
 	return n
 }
 
-func walkCall1(n *ir.CallExpr, init *ir.Nodes) {
+func walkCall1(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) {
 	if n.Walked() {
 		return // already walked
 	}
 	n.SetWalked(true)
 
 	if n.Op() == ir.OCALLMETH {
-		base.FatalfAt(n.Pos(), "OCALLMETH missed by typecheck")
+		gd.FatalfAt(n.Pos(), "OCALLMETH missed by typecheck")
 	}
 
 	args := n.Args
 	// Phase G.2.1: t.Params() includes outBuf slots automatically.
 	params := n.Fun.Type().Params()
 
-	n.Fun = walkExpr(n.Fun, init)
-	walkExprList(args, init)
+	n.Fun = walkExpr(gd, n.Fun, init)
+	walkExprList(gd, args, init)
 
 	for i, arg := range args {
 		// Validate argument and parameter types match.
 		param := params[i]
 		if !types.Identical(arg.Type(), param.Type) {
-			base.FatalfAt(n.Pos(), "assigning %L to parameter %v (type %v)", arg, param.Sym, param.Type)
+			gd.FatalfAt(n.Pos(), "assigning %L to parameter %v (type %v)", arg, param.Sym, param.Type)
 		}
 
 		// For any argument whose evaluation might require a function call,
 		// store that argument into a temporary variable,
 		// to prevent that calls from clobbering arguments already on the stack.
-		if mayCall(arg) {
+		if mayCall(gd, arg) {
 			// assignment of arg to Temp
-			tmp := typecheck.TempAt(base.Pos, ir.CurFunc, param.Type)
-			init.Append(convas(typecheck.Stmt(ir.NewAssignStmt(base.Pos, tmp, arg)).(*ir.AssignStmt), init))
+			tmp := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), param.Type)
+			init.Append(convas(gd, typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, tmp, arg)).(*ir.AssignStmt), init))
 			// replace arg with temp
 			args[i] = tmp
 		}
 	}
 
 	funSym := n.Fun.Sym()
-	if base.Debug.Libfuzzer != 0 && funSym != nil {
+	if gd.Debug.Libfuzzer != 0 && funSym != nil {
 		if hook, found := hooks[funSym.Pkg.Path+"."+funSym.Name]; found {
 			if len(args) != hook.argsNum {
 				panic(fmt.Sprintf("%s.%s expects %d arguments, but received %d", funSym.Pkg.Path, funSym.Name, hook.argsNum, len(args)))
 			}
 			var hookArgs []ir.Node
 			for _, arg := range args {
-				hookArgs = append(hookArgs, tracecmpArg(arg, types.Types[hook.paramType], init))
+				hookArgs = append(hookArgs, tracecmpArg(gd, arg, types.Types[hook.paramType], init))
 			}
-			hookArgs = append(hookArgs, fakePC(n))
-			init.Append(mkcall(hook.runtimeFunc, nil, init, hookArgs...))
+			hookArgs = append(hookArgs, fakePC(gd, n))
+			init.Append(mkcall(gd, hook.runtimeFunc, nil, init, hookArgs...))
 		}
 	}
 }
 
 // walkDivMod walks an ODIV or OMOD node.
-func walkDivMod(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
-	n.Y = walkExpr(n.Y, init)
+func walkDivMod(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
+	n.Y = walkExpr(gd, n.Y, init)
 
 	// rewrite complex div into function call.
 	et := n.X.Type().Kind()
 
 	if types.IsComplex[et] && n.Op() == ir.ODIV {
 		t := n.Type()
-		call := mkcall("complex128div", types.Types[types.TCOMPLEX128], init, typecheck.Conv(n.X, types.Types[types.TCOMPLEX128]), typecheck.Conv(n.Y, types.Types[types.TCOMPLEX128]))
-		return typecheck.Conv(call, t)
+		call := mkcall(gd, "complex128div", types.Types[types.TCOMPLEX128], init, typecheck.Conv(gd, n.X, types.Types[types.TCOMPLEX128]), typecheck.Conv(gd, n.Y, types.Types[types.TCOMPLEX128]))
+		return typecheck.Conv(gd, call, t)
 	}
 
 	// Nothing to do for float divisions.
@@ -740,79 +740,79 @@ func walkDivMod(n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 		} else {
 			fn += "mod"
 		}
-		return mkcall(fn, n.Type(), init, typecheck.Conv(n.X, types.Types[et]), typecheck.Conv(n.Y, types.Types[et]))
+		return mkcall(gd, fn, n.Type(), init, typecheck.Conv(gd, n.X, types.Types[et]), typecheck.Conv(gd, n.Y, types.Types[et]))
 	}
 	return n
 }
 
 // walkDot walks an ODOT or ODOTPTR node.
-func walkDot(n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
-	usefield(n)
-	n.X = walkExpr(n.X, init)
+func walkDot(gd *base.Invocation, n *ir.SelectorExpr, init *ir.Nodes) ir.Node {
+	usefield(gd, n)
+	n.X = walkExpr(gd, n.X, init)
 	return n
 }
 
 // walkDotType walks an ODOTTYPE or ODOTTYPE2 node.
-func walkDotType(n *ir.TypeAssertExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
+func walkDotType(gd *base.Invocation, n *ir.TypeAssertExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
 	// Set up interface type addresses for back end.
 	if !n.Type().IsInterface() && !n.X.Type().IsEmptyInterface() {
-		n.ITab = reflectdata.ITabAddrAt(base.Pos, n.Type(), n.X.Type())
+		n.ITab = reflectdata.ITabAddrAt(gd, gd.Pos, n.Type(), n.X.Type())
 	}
 	if n.X.Type().IsInterface() && n.Type().IsInterface() && !n.Type().IsEmptyInterface() {
 		// This kind of conversion needs a runtime call. Allocate
 		// a descriptor for that call.
-		n.Descriptor = makeTypeAssertDescriptor(n.Type(), n.Op() == ir.ODOTTYPE2)
+		n.Descriptor = makeTypeAssertDescriptor(gd, n.Type(), n.Op() == ir.ODOTTYPE2)
 	}
 	return n
 }
 
-func makeTypeAssertDescriptor(target *types.Type, canFail bool) *obj.LSym {
+func makeTypeAssertDescriptor(gd *base.Invocation, target *types.Type, canFail bool) *obj.LSym {
 	// When converting from an interface to a non-empty interface. Needs a runtime call.
 	// Allocate an internal/abi.TypeAssert descriptor for that call.
-	lsym := types.LocalPkg.Lookup(fmt.Sprintf(".typeAssert.%d", typeAssertGen)).LinksymABI(obj.ABI0)
+	lsym := types.LocalPkg(gd).Lookup(fmt.Sprintf(".typeAssert.%d", typeAssertGen)).LinksymABI(gd, obj.ABI0)
 	typeAssertGen++
-	c := rttype.NewCursor(lsym, 0, rttype.TypeAssert)
-	c.Field("Cache").WritePtr(typecheck.LookupRuntimeVar("emptyTypeAssertCache"))
-	c.Field("Inter").WritePtr(reflectdata.TypeLinksym(target))
+	c := rttype.NewCursor(gd, lsym, 0, rttype.TypeAssert)
+	c.Field("Cache").WritePtr(typecheck.LookupRuntimeVar(gd, "emptyTypeAssertCache"))
+	c.Field("Inter").WritePtr(reflectdata.TypeLinksym(gd, target))
 	c.Field("CanFail").WriteBool(canFail)
-	objw.Global(lsym, int32(rttype.TypeAssert.Size()), obj.LOCAL)
-	lsym.Gotype = reflectdata.TypeLinksym(rttype.TypeAssert)
+	objw.Global(gd, lsym, int32(rttype.TypeAssert.Size()), obj.LOCAL)
+	lsym.Gotype = reflectdata.TypeLinksym(gd, rttype.TypeAssert)
 	return lsym
 }
 
 var typeAssertGen int
 
 // walkDynamicDotType walks an ODYNAMICDOTTYPE or ODYNAMICDOTTYPE2 node.
-func walkDynamicDotType(n *ir.DynamicTypeAssertExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
-	n.RType = walkExpr(n.RType, init)
-	n.ITab = walkExpr(n.ITab, init)
+func walkDynamicDotType(gd *base.Invocation, n *ir.DynamicTypeAssertExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
+	n.RType = walkExpr(gd, n.RType, init)
+	n.ITab = walkExpr(gd, n.ITab, init)
 	// Convert to non-dynamic if we can.
 	if n.RType != nil && n.RType.Op() == ir.OADDR {
 		addr := n.RType.(*ir.AddrExpr)
 		if addr.X.Op() == ir.OLINKSYMOFFSET {
-			r := ir.NewTypeAssertExpr(n.Pos(), n.X, n.Type())
+			r := ir.NewTypeAssertExpr(gd, n.Pos(), n.X, n.Type())
 			if n.Op() == ir.ODYNAMICDOTTYPE2 {
 				r.SetOp(ir.ODOTTYPE2)
 			}
 			r.SetType(n.Type())
 			r.SetTypecheck(1)
-			return walkExpr(r, init)
+			return walkExpr(gd, r, init)
 		}
 	}
 	return n
 }
 
 // walkIndex walks an OINDEX node.
-func walkIndex(n *ir.IndexExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
+func walkIndex(gd *base.Invocation, n *ir.IndexExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
 
 	// save the original node for bounds checking elision.
 	// If it was a ODIV/OMOD walk might rewrite it.
 	r := n.Index
 
-	n.Index = walkExpr(n.Index, init)
+	n.Index = walkExpr(gd, n.Index, init)
 
 	// if range of type cannot exceed static array bound,
 	// disable bounds check.
@@ -825,13 +825,13 @@ func walkIndex(n *ir.IndexExpr, init *ir.Nodes) ir.Node {
 	}
 	if t.IsArray() {
 		n.SetBounded(bounded(r, t.NumElem()))
-		if base.Flag.LowerM != 0 && n.Bounded() && !ir.IsConst(n.Index, constant.Int) {
-			base.Warn("index bounds check elided")
+		if gd.Flag.LowerM != 0 && n.Bounded() && !ir.IsConst(n.Index, constant.Int) {
+			gd.Warn("index bounds check elided")
 		}
 	} else if ir.IsConst(n.X, constant.String) {
 		n.SetBounded(bounded(r, int64(len(ir.StringVal(n.X)))))
-		if base.Flag.LowerM != 0 && n.Bounded() && !ir.IsConst(n.Index, constant.Int) {
-			base.Warn("index bounds check elided")
+		if gd.Flag.LowerM != 0 && n.Bounded() && !ir.IsConst(n.Index, constant.Int) {
+			gd.Warn("index bounds check elided")
 		}
 	}
 	return n
@@ -840,11 +840,11 @@ func walkIndex(n *ir.IndexExpr, init *ir.Nodes) ir.Node {
 // mapKeyArg returns an expression for key that is suitable to be passed
 // as the key argument for runtime map* functions.
 // n is the map indexing or delete Node (to provide Pos).
-func mapKeyArg(fast int, n, key ir.Node, assigned bool) ir.Node {
+func mapKeyArg(gd *base.Invocation, fast int, n, key ir.Node, assigned bool) ir.Node {
 	if fast == mapslow {
 		// standard version takes key by reference.
 		// orderState.expr made sure key is addressable.
-		return typecheck.NodAddr(key)
+		return typecheck.NodAddr(gd, key)
 	}
 	if assigned {
 		// mapassign does distinguish pointer vs. integer key.
@@ -853,9 +853,9 @@ func mapKeyArg(fast int, n, key ir.Node, assigned bool) ir.Node {
 	// mapaccess and mapdelete don't distinguish pointer vs. integer key.
 	switch fast {
 	case mapfast32ptr:
-		return ir.NewConvExpr(n.Pos(), ir.OCONVNOP, types.Types[types.TUINT32], key)
+		return ir.NewConvExpr(gd, n.Pos(), ir.OCONVNOP, types.Types[types.TUINT32], key)
 	case mapfast64ptr:
-		return ir.NewConvExpr(n.Pos(), ir.OCONVNOP, types.Types[types.TUINT64], key)
+		return ir.NewConvExpr(gd, n.Pos(), ir.OCONVNOP, types.Types[types.TUINT64], key)
 	default:
 		// fast version takes key by value.
 		return key
@@ -864,72 +864,72 @@ func mapKeyArg(fast int, n, key ir.Node, assigned bool) ir.Node {
 
 // walkIndexMap walks an OINDEXMAP node.
 // It replaces m[k] with *map{access1,assign}(maptype, m, &k)
-func walkIndexMap(n *ir.IndexExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
-	n.Index = walkExpr(n.Index, init)
+func walkIndexMap(gd *base.Invocation, n *ir.IndexExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
+	n.Index = walkExpr(gd, n.Index, init)
 	map_ := n.X
 	t := map_.Type()
-	fast := mapfast(t)
-	key := mapKeyArg(fast, n, n.Index, n.Assigned)
-	args := []ir.Node{reflectdata.IndexMapRType(base.Pos, n), map_, key}
+	fast := mapfast(gd, t)
+	key := mapKeyArg(gd, fast, n, n.Index, n.Assigned)
+	args := []ir.Node{reflectdata.IndexMapRType(gd, gd.Pos, n), map_, key}
 
 	var mapFn ir.Node
 	switch {
 	case n.Assigned:
-		mapFn = mapfn(mapassign[fast], t, false)
+		mapFn = mapfn(gd, mapassign[fast], t, false)
 	case t.Elem().Size() > abi.ZeroValSize:
-		args = append(args, reflectdata.ZeroAddr(t.Elem().Size()))
-		mapFn = mapfn("mapaccess1_fat", t, true)
+		args = append(args, reflectdata.ZeroAddr(gd, t.Elem().Size()))
+		mapFn = mapfn(gd, "mapaccess1_fat", t, true)
 	default:
-		mapFn = mapfn(mapaccess1[fast], t, false)
+		mapFn = mapfn(gd, mapaccess1[fast], t, false)
 	}
-	call := mkcall1(mapFn, nil, init, args...)
+	call := mkcall1(gd, mapFn, nil, init, args...)
 	call.SetType(types.NewPtr(t.Elem()))
 	call.MarkNonNil() // mapaccess1* and mapassign always return non-nil pointers.
-	star := ir.NewStarExpr(base.Pos, call)
+	star := ir.NewStarExpr(gd, gd.Pos, call)
 	star.SetType(t.Elem())
 	star.SetTypecheck(1)
 	return star
 }
 
 // walkLogical walks an OANDAND or OOROR node.
-func walkLogical(n *ir.LogicalExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
+func walkLogical(gd *base.Invocation, n *ir.LogicalExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
 
 	// cannot put side effects from n.Right on init,
 	// because they cannot run before n.Left is checked.
 	// save elsewhere and store on the eventual n.Right.
 	var ll ir.Nodes
 
-	n.Y = walkExpr(n.Y, &ll)
-	n.Y = ir.InitExpr(ll, n.Y)
+	n.Y = walkExpr(gd, n.Y, &ll)
+	n.Y = ir.InitExpr(gd, ll, n.Y)
 	return n
 }
 
 // walkSend walks an OSEND node.
-func walkSend(n *ir.SendStmt, init *ir.Nodes) ir.Node {
+func walkSend(gd *base.Invocation, n *ir.SendStmt, init *ir.Nodes) ir.Node {
 	n1 := n.Value
-	n1 = typecheck.AssignConv(n1, n.Chan.Type().Elem(), "chan send")
-	n1 = walkExpr(n1, init)
-	n1 = typecheck.NodAddr(n1)
-	return mkcall1(chanfn("chansend1", 2, n.Chan.Type()), nil, init, n.Chan, n1)
+	n1 = typecheck.AssignConv(gd, n1, n.Chan.Type().Elem(), "chan send")
+	n1 = walkExpr(gd, n1, init)
+	n1 = typecheck.NodAddr(gd, n1)
+	return mkcall1(gd, chanfn(gd, "chansend1", 2, n.Chan.Type()), nil, init, n.Chan, n1)
 }
 
 // walkSlice walks an OSLICE, OSLICEARR, OSLICESTR, OSLICE3, or OSLICE3ARR node.
-func walkSlice(n *ir.SliceExpr, init *ir.Nodes) ir.Node {
-	n.X = walkExpr(n.X, init)
-	n.Low = walkExpr(n.Low, init)
+func walkSlice(gd *base.Invocation, n *ir.SliceExpr, init *ir.Nodes) ir.Node {
+	n.X = walkExpr(gd, n.X, init)
+	n.Low = walkExpr(gd, n.Low, init)
 	if n.Low != nil && ir.IsZero(n.Low) {
 		// Reduce x[0:j] to x[:j] and x[0:j:k] to x[:j:k].
 		n.Low = nil
 	}
-	n.High = walkExpr(n.High, init)
-	n.Max = walkExpr(n.Max, init)
+	n.High = walkExpr(gd, n.High, init)
+	n.Max = walkExpr(gd, n.Max, init)
 
 	if (n.Op() == ir.OSLICE || n.Op() == ir.OSLICESTR) && n.Low == nil && n.High == nil {
 		// Reduce x[:] to x.
-		if base.Debug.Slice > 0 {
-			base.Warn("slice: omit slice operation")
+		if gd.Debug.Slice > 0 {
+			gd.Warn("slice: omit slice operation")
 		}
 		return n.X
 	}
@@ -937,17 +937,17 @@ func walkSlice(n *ir.SliceExpr, init *ir.Nodes) ir.Node {
 }
 
 // walkSliceHeader walks an OSLICEHEADER node.
-func walkSliceHeader(n *ir.SliceHeaderExpr, init *ir.Nodes) ir.Node {
-	n.Ptr = walkExpr(n.Ptr, init)
-	n.Len = walkExpr(n.Len, init)
-	n.Cap = walkExpr(n.Cap, init)
+func walkSliceHeader(gd *base.Invocation, n *ir.SliceHeaderExpr, init *ir.Nodes) ir.Node {
+	n.Ptr = walkExpr(gd, n.Ptr, init)
+	n.Len = walkExpr(gd, n.Len, init)
+	n.Cap = walkExpr(gd, n.Cap, init)
 	return n
 }
 
 // walkStringHeader walks an OSTRINGHEADER node.
-func walkStringHeader(n *ir.StringHeaderExpr, init *ir.Nodes) ir.Node {
-	n.Ptr = walkExpr(n.Ptr, init)
-	n.Len = walkExpr(n.Len, init)
+func walkStringHeader(gd *base.Invocation, n *ir.StringHeaderExpr, init *ir.Nodes) ir.Node {
+	n.Ptr = walkExpr(gd, n.Ptr, init)
+	n.Len = walkExpr(gd, n.Len, init)
 	return n
 }
 
@@ -1024,13 +1024,13 @@ func bounded(n ir.Node, max int64) bool {
 
 // usemethod checks calls for uses of Method and MethodByName of reflect.Value,
 // reflect.Type, reflect.(*rtype), and reflect.(*interfaceType).
-func usemethod(n *ir.CallExpr) {
+func usemethod(gd *base.Invocation, n *ir.CallExpr) {
 	// Don't mark reflect.(*rtype).Method, etc. themselves in the reflect package.
 	// Those functions may be alive via the itab, which should not cause all methods
 	// alive. We only want to mark their callers.
-	if base.Ctxt.Pkgpath == "reflect" {
+	if gd.Ctxt.Pkgpath == "reflect" {
 		// TODO: is there a better way than hardcoding the names?
-		switch fn := ir.CurFunc.Nname.Sym().Name; {
+		switch fn := ir.CurFunc(gd).Nname.Sym().Name; {
 		case fn == "(*rtype).Method", fn == "(*rtype).MethodByName":
 			return
 		case fn == "(*interfaceType).Method", fn == "(*interfaceType).MethodByName":
@@ -1093,28 +1093,28 @@ func usemethod(n *ir.CallExpr) {
 			targetName = n.Args[1]
 		}
 	default:
-		base.FatalfAt(dot.Pos(), "usemethod: unexpected dot.Op() %s", dot.Op())
+		gd.FatalfAt(dot.Pos(), "usemethod: unexpected dot.Op() %s", dot.Op())
 	}
 
 	if ir.IsConst(targetName, constant.String) {
 		name := constant.StringVal(targetName.Val())
-		ir.CurFunc.LSym.AddRel(base.Ctxt, obj.Reloc{
+		ir.CurFunc(gd).LSym.AddRel(gd.Ctxt, obj.Reloc{
 			Type: objabi.R_USENAMEDMETHOD,
-			Sym:  staticdata.StringSymNoCommon(name),
+			Sym:  staticdata.StringSymNoCommon(gd, name),
 		})
 	} else {
-		ir.CurFunc.LSym.Set(obj.AttrReflectMethod, true)
+		ir.CurFunc(gd).LSym.Set(obj.AttrReflectMethod, true)
 	}
 }
 
-func usefield(n *ir.SelectorExpr) {
+func usefield(gd *base.Invocation, n *ir.SelectorExpr) {
 	if !buildcfg.Experiment.FieldTrack {
 		return
 	}
 
 	switch n.Op() {
 	default:
-		base.Fatalf("usefield %v", n.Op())
+		gd.Fatalf("usefield %v", n.Op())
 
 	case ir.ODOT, ir.ODOTPTR:
 		break
@@ -1122,10 +1122,10 @@ func usefield(n *ir.SelectorExpr) {
 
 	field := n.Selection
 	if field == nil {
-		base.Fatalf("usefield %v %v without paramfld", n.X.Type(), n.Sel)
+		gd.Fatalf("usefield %v %v without paramfld", n.X.Type(), n.Sel)
 	}
 	if field.Sym != n.Sel {
-		base.Fatalf("field inconsistency: %v != %v", field.Sym, n.Sel)
+		gd.Fatalf("field inconsistency: %v != %v", field.Sym, n.Sel)
 	}
 	if !strings.Contains(field.Note, "go:\"track\"") {
 		return
@@ -1136,12 +1136,12 @@ func usefield(n *ir.SelectorExpr) {
 		outer = outer.Elem()
 	}
 	if outer.Sym() == nil {
-		base.Errorf("tracked field must be in named struct type")
+		gd.Errorf("tracked field must be in named struct type")
 	}
 
-	sym := reflectdata.TrackSym(outer, field)
-	if ir.CurFunc.FieldTrack == nil {
-		ir.CurFunc.FieldTrack = make(map[*obj.LSym]struct{})
+	sym := reflectdata.TrackSym(gd, outer, field)
+	if ir.CurFunc(gd).FieldTrack == nil {
+		ir.CurFunc(gd).FieldTrack = make(map[*obj.LSym]struct{})
 	}
-	ir.CurFunc.FieldTrack[sym] = struct{}{}
+	ir.CurFunc(gd).FieldTrack[sym] = struct{}{}
 }

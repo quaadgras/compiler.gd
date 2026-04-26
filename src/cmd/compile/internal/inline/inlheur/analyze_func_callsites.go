@@ -5,6 +5,7 @@
 package inlheur
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/pgoir"
 	"cmd/compile/internal/typecheck"
@@ -19,6 +20,7 @@ type callSiteAnalyzer struct {
 }
 
 type callSiteTableBuilder struct {
+	gd *base.Invocation
 	fn *ir.Func
 	*nameFinder
 	cstab    CallSiteTab
@@ -28,16 +30,17 @@ type callSiteTableBuilder struct {
 	isInit   bool
 }
 
-func makeCallSiteAnalyzer(fn *ir.Func) *callSiteAnalyzer {
+func makeCallSiteAnalyzer(gd *base.Invocation, fn *ir.Func) *callSiteAnalyzer {
 	return &callSiteAnalyzer{
 		fn:         fn,
-		nameFinder: newNameFinder(fn),
+		nameFinder: newNameFinder(gd, fn),
 	}
 }
 
-func makeCallSiteTableBuilder(fn *ir.Func, cstab CallSiteTab, ptab map[ir.Node]pstate, loopNestingLevel int, nf *nameFinder) *callSiteTableBuilder {
+func makeCallSiteTableBuilder(gd *base.Invocation, fn *ir.Func, cstab CallSiteTab, ptab map[ir.Node]pstate, loopNestingLevel int, nf *nameFinder) *callSiteTableBuilder {
 	isInit := fn.IsPackageInit() || strings.HasPrefix(fn.Sym().Name, "init.")
 	return &callSiteTableBuilder{
+		gd:         gd,
 		fn:         fn,
 		cstab:      cstab,
 		ptab:       ptab,
@@ -53,8 +56,8 @@ func makeCallSiteTableBuilder(fn *ir.Func, cstab CallSiteTab, ptab map[ir.Node]p
 // specific subtree within the AST for a function. The main intended
 // use cases are for 'region' to be either A) an entire function body,
 // or B) an inlined call expression.
-func computeCallSiteTable(fn *ir.Func, region ir.Nodes, cstab CallSiteTab, ptab map[ir.Node]pstate, loopNestingLevel int, nf *nameFinder) CallSiteTab {
-	cstb := makeCallSiteTableBuilder(fn, cstab, ptab, loopNestingLevel, nf)
+func computeCallSiteTable(gd *base.Invocation, fn *ir.Func, region ir.Nodes, cstab CallSiteTab, ptab map[ir.Node]pstate, loopNestingLevel int, nf *nameFinder) CallSiteTab {
+	cstb := makeCallSiteTableBuilder(gd, fn, cstab, ptab, loopNestingLevel, nf)
 	var doNode func(ir.Node) bool
 	doNode = func(n ir.Node) bool {
 		cstb.nodeVisitPre(n)
@@ -68,12 +71,12 @@ func computeCallSiteTable(fn *ir.Func, region ir.Nodes, cstab CallSiteTab, ptab 
 	return cstb.cstab
 }
 
-func (cstb *callSiteTableBuilder) flagsForNode(call *ir.CallExpr) CSPropBits {
+func (cstb *callSiteTableBuilder) flagsForNode(gd *base.Invocation, call *ir.CallExpr) CSPropBits {
 	var r CSPropBits
 
 	if debugTrace&debugTraceCalls != 0 {
 		fmt.Fprintf(os.Stderr, "=-= analyzing call at %s\n",
-			fmtFullPos(call.Pos()))
+			fmtFullPos(gd, call.Pos()))
 	}
 
 	// Set a bit if this call is within a loop.
@@ -176,8 +179,8 @@ func (cstb *callSiteTableBuilder) argPropsForCall(ce *ir.CallExpr) []ActualExprP
 	return rv
 }
 
-func (cstb *callSiteTableBuilder) addCallSite(callee *ir.Func, call *ir.CallExpr) {
-	flags := cstb.flagsForNode(call)
+func (cstb *callSiteTableBuilder) addCallSite(gd *base.Invocation, callee *ir.Func, call *ir.CallExpr) {
+	flags := cstb.flagsForNode(gd, call)
 	argProps := cstb.argPropsForCall(call)
 	if debugTrace&debugTraceCalls != 0 {
 		fmt.Fprintf(os.Stderr, "=-= props %+v for call %v\n", argProps, call)
@@ -193,7 +196,7 @@ func (cstb *callSiteTableBuilder) addCallSite(callee *ir.Func, call *ir.CallExpr
 	}
 	if _, ok := cstb.cstab[call]; ok {
 		fmt.Fprintf(os.Stderr, "*** cstab duplicate entry at: %s\n",
-			fmtFullPos(call.Pos()))
+			fmtFullPos(gd, call.Pos()))
 		fmt.Fprintf(os.Stderr, "*** call: %+v\n", call)
 		panic("bad")
 	}
@@ -208,7 +211,7 @@ func (cstb *callSiteTableBuilder) addCallSite(callee *ir.Func, call *ir.CallExpr
 	cstb.cstab[call] = cs
 	if debugTrace&debugTraceCalls != 0 {
 		fmt.Fprintf(os.Stderr, "=-= added callsite: caller=%v callee=%v n=%s\n",
-			cstb.fn, callee, fmtFullPos(call.Pos()))
+			cstb.fn, callee, fmtFullPos(gd, call.Pos()))
 	}
 }
 
@@ -222,7 +225,7 @@ func (cstb *callSiteTableBuilder) nodeVisitPre(n ir.Node) {
 		ce := n.(*ir.CallExpr)
 		callee := pgoir.DirectCallee(ce.Fun)
 		if callee != nil && callee.Inl != nil {
-			cstb.addCallSite(callee, ce)
+			cstb.addCallSite(cstb.gd, callee, ce)
 		}
 	}
 	cstb.nstack = append(cstb.nstack, n)
@@ -350,7 +353,7 @@ func (cstb *callSiteTableBuilder) containingAssignment(n ir.Node) ir.Node {
 // callerfn. The chief thing of interest here is to make sure that any
 // call nodes within 'ic' are added to the call site table for
 // 'callerfn' and scored appropriately.
-func UpdateCallsiteTable(callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallExpr) {
+func UpdateCallsiteTable(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallExpr) {
 	enableDebugTraceIfEnv()
 	defer disableDebugTrace()
 
@@ -365,7 +368,7 @@ func UpdateCallsiteTable(callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallEx
 
 	if debugTrace&debugTraceCalls != 0 {
 		fmt.Fprintf(os.Stderr, "=-= UpdateCallsiteTable(caller=%v, cs=%s)\n",
-			callerfn, fmtFullPos(n.Pos()))
+			callerfn, fmtFullPos(gd, n.Pos()))
 	}
 
 	// Mark the call in question as inlined.
@@ -378,7 +381,7 @@ func UpdateCallsiteTable(callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallEx
 
 	if debugTrace&debugTraceCalls != 0 {
 		fmt.Fprintf(os.Stderr, "=-= marked as inlined: callee=%v %s\n",
-			oldcs.Callee, EncodeCallSiteKey(oldcs))
+			oldcs.Callee, EncodeCallSiteKey(gd, oldcs))
 	}
 
 	// Walk the inlined call region to collect new callsites.
@@ -391,8 +394,8 @@ func UpdateCallsiteTable(callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallEx
 		loopNestLevel = 1
 	}
 	ptab := map[ir.Node]pstate{ic: icp}
-	nf := newNameFinder(nil)
-	icstab := computeCallSiteTable(callerfn, ic.Body, nil, ptab, loopNestLevel, nf)
+	nf := newNameFinder(nil, nil)
+	icstab := computeCallSiteTable(gd, callerfn, ic.Body, nil, ptab, loopNestLevel, nf)
 
 	// Record parent callsite. This is primarily for debug output.
 	for _, cs := range icstab {
@@ -407,7 +410,7 @@ func UpdateCallsiteTable(callerfn *ir.Func, n *ir.CallExpr, ic *ir.InlinedCallEx
 	// results. Similarly we're passing nil to makeCallSiteAnalyzer,
 	// so as to run name finding without the use of static value &
 	// friends.
-	csa := makeCallSiteAnalyzer(nil)
+	csa := makeCallSiteAnalyzer(gd, nil)
 	const doCallResults = false
-	csa.scoreCallsRegion(callerfn, ic.Body, icstab, doCallResults, ic)
+	csa.scoreCallsRegion(gd, callerfn, ic.Body, icstab, doCallResults, ic)
 }

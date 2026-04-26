@@ -6,6 +6,7 @@ package inlheur
 
 import (
 	"bufio"
+	"cmd/compile/internal/base"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -49,7 +50,7 @@ func TestFuncProperties(t *testing.T) {
 			t.Fatalf("reading func prop dump: %v", derr)
 		}
 		if *remasterflag {
-			updateExpected(t, tc, dentries, dcsites)
+			updateExpected(t, testGd, tc, dentries, dcsites)
 			continue
 		}
 		// Generate expected dump.
@@ -410,7 +411,7 @@ func mkUpexState(dentries []fnInlHeur) *upexState {
 // generics, where you can have multiple functions that all share the
 // same starting line. Currently we combine up all the dups and
 // closures into the single pre-func comment.
-func updateExpected(t *testing.T, testcase string, dentries []fnInlHeur, dcsites []encodedCallSiteTab) {
+func updateExpected(t *testing.T, gd *base.Invocation, testcase string, dentries []fnInlHeur, dcsites []encodedCallSiteTab) {
 	nd := len(dentries)
 
 	ues := mkUpexState(dentries)
@@ -437,7 +438,7 @@ func updateExpected(t *testing.T, testcase string, dentries []fnInlHeur, dcsites
 	emitFunc := func(e *fnInlHeur, dcsites encodedCallSiteTab,
 		instance, atl uint) {
 		var sb strings.Builder
-		dumpFnPreamble(&sb, e, dcsites, instance, atl)
+		dumpFnPreamble(gd, &sb, e, dcsites, instance, atl)
 		ues.newgolines = append(ues.newgolines,
 			strings.Split(strings.TrimSpace(sb.String()), "\n")...)
 	}

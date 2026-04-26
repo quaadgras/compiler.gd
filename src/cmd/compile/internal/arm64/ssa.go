@@ -162,7 +162,7 @@ func genIndexedOperand(op ssa.Op, base, idx int16) obj.Addr {
 	return mop
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpCopy, ssa.OpARM64MOVDreg:
 		if v.Type.IsMemory() {
@@ -210,7 +210,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.From.Reg = v.Args[0].Reg()
 		ssagen.AddrAuto(&p.To, v)
 	case ssa.OpArgIntReg, ssa.OpArgFloatReg:
-		ssagen.CheckArgReg(v)
+		ssagen.CheckArgReg(gd, v)
 		// The assembler needs to wrap the entry safepoint/stack growth code with spill/unspill
 		// The loop only runs once.
 		args := v.Block.Func.RegArgs
@@ -222,7 +222,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		for i := 0; i < len(args); i++ {
 			a := args[i]
 			// Offset by size of the saved LR slot.
-			addr := ssagen.SpillSlotAddr(a, arm64.REGSP, base.Ctxt.Arch.FixedFrameSize)
+			addr := ssagen.SpillSlotAddr(a, arm64.REGSP, gd.Ctxt.Arch.FixedFrameSize)
 			// Look for double-register operations if we can.
 			if i < len(args)-1 {
 				b := args[i+1]
@@ -1330,7 +1330,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpARM64LoweredPanicBoundsRR, ssa.OpARM64LoweredPanicBoundsRC, ssa.OpARM64LoweredPanicBoundsCR, ssa.OpARM64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -1424,8 +1424,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Line==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Line==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 	case ssa.OpARM64Equal,
 		ssa.OpARM64NotEqual,
@@ -1462,12 +1462,12 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.To.Offset = v.AuxInt
 	case ssa.OpARM64LoweredGetClosurePtr:
 		// Closure pointer is R26 (arm64.REGCTXT).
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 	case ssa.OpARM64LoweredGetCallerSP:
 		// caller's SP is FixedFrameSize below the address of the first arg
 		p := s.Prog(arm64.AMOVD)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -1669,7 +1669,7 @@ func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
 	}
 }
 
-func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+func loadRegResult(gd *base.Invocation, s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
 	p := s.Prog(loadByType(t))
 	p.From.Type = obj.TYPE_MEM
 	p.From.Name = obj.NAME_AUTO
@@ -1680,8 +1680,8 @@ func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir
 	return p
 }
 
-func spillArgReg(pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
-	p = pp.Append(p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
+func spillArgReg(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+	p = pp.Append(gd, p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
 	p.To.Name = obj.NAME_PARAM
 	p.To.Sym = n.Linksym()
 	p.Pos = p.Pos.WithNotStmt()

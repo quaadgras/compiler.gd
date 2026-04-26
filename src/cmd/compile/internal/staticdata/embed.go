@@ -23,19 +23,19 @@ const (
 	embedFiles
 )
 
-func embedFileList(v *ir.Name, kind int) []string {
+func embedFileList(gd *base.Invocation, v *ir.Name, kind int) []string {
 	// Build list of files to store.
 	have := make(map[string]bool)
 	var list []string
 	for _, e := range *v.Embed {
 		for _, pattern := range e.Patterns {
-			files, ok := base.Flag.Cfg.Embed.Patterns[pattern]
+			files, ok := gd.Flag.Cfg.Embed.Patterns[pattern]
 			if !ok {
-				base.ErrorfAt(e.Pos, 0, "invalid go:embed: build system did not map pattern: %s", pattern)
+				gd.ErrorfAt(e.Pos, 0, "invalid go:embed: build system did not map pattern: %s", pattern)
 			}
 			for _, file := range files {
-				if base.Flag.Cfg.Embed.Files[file] == "" {
-					base.ErrorfAt(e.Pos, 0, "invalid go:embed: build system did not map file: %s", file)
+				if gd.Flag.Cfg.Embed.Files[file] == "" {
+					gd.ErrorfAt(e.Pos, 0, "invalid go:embed: build system did not map file: %s", file)
 					continue
 				}
 				if !have[file] {
@@ -57,7 +57,7 @@ func embedFileList(v *ir.Name, kind int) []string {
 
 	if kind == embedString || kind == embedBytes {
 		if len(list) > 1 {
-			base.ErrorfAt(v.Pos(), 0, "invalid go:embed: multiple files for type %v", v.Type())
+			gd.ErrorfAt(v.Pos(), 0, "invalid go:embed: multiple files for type %v", v.Type())
 			return nil
 		}
 	}
@@ -98,54 +98,54 @@ func embedFileLess(x, y string) bool {
 
 // WriteEmbed emits the init data for a //go:embed variable,
 // which is either a string, a []byte, or an embed.FS.
-func WriteEmbed(v *ir.Name) {
+func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 	// TODO(mdempsky): User errors should be reported by the frontend.
 
 	commentPos := (*v.Embed)[0].Pos
-	if base.Flag.Cfg.Embed.Patterns == nil {
-		base.ErrorfAt(commentPos, 0, "invalid go:embed: build system did not supply embed configuration")
+	if gd.Flag.Cfg.Embed.Patterns == nil {
+		gd.ErrorfAt(commentPos, 0, "invalid go:embed: build system did not supply embed configuration")
 		return
 	}
 	kind := embedKind(v.Type())
 	if kind == embedUnknown {
-		base.ErrorfAt(v.Pos(), 0, "go:embed cannot apply to var of type %v", v.Type())
+		gd.ErrorfAt(v.Pos(), 0, "go:embed cannot apply to var of type %v", v.Type())
 		return
 	}
 
-	files := embedFileList(v, kind)
-	if base.Errors() > 0 {
+	files := embedFileList(gd, v, kind)
+	if gd.Errors() > 0 {
 		return
 	}
 	switch kind {
 	case embedString, embedBytes:
 		file := files[0]
-		fsym, size, err := fileStringSym(v.Pos(), base.Flag.Cfg.Embed.Files[file], kind == embedString, nil)
+		fsym, size, err := fileStringSym(gd, v.Pos(), gd.Flag.Cfg.Embed.Files[file], kind == embedString, nil)
 		if err != nil {
-			base.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
+			gd.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
 		}
 		sym := v.Linksym()
 		off := 0
-		off = objw.SymPtr(sym, off, fsym, 0) // data string
+		off = objw.SymPtr(gd, sym, off, fsym, 0) // data string
 		if kind == embedString {
 			// gd small-string optimization: a Go string is now 3 words
 			// (ptr, hash, len). Embed writes hash = 0 in Phase A; len
 			// lives in word 2 (offset 2*PtrSize). See doc/gd/sso-string.md.
-			off = objw.Uintptr(sym, off, 0)            // hash slot, Phase A = 0
-			off = objw.Uintptr(sym, off, uint64(size)) // len
+			off = objw.Uintptr(gd, sym, off, 0)            // hash slot, Phase A = 0
+			off = objw.Uintptr(gd, sym, off, uint64(size)) // len
 		} else {
 			// embedBytes: slice header is unchanged at 3 words
 			// (ptr, len, cap). No hash slot.
-			off = objw.Uintptr(sym, off, uint64(size)) // len
-			objw.Uintptr(sym, off, uint64(size))       // cap for slice
+			off = objw.Uintptr(gd, sym, off, uint64(size)) // len
+			objw.Uintptr(gd, sym, off, uint64(size))       // cap for slice
 		}
 
 	case embedFiles:
-		slicedata := v.Sym().Pkg.Lookup(v.Sym().Name + `.files`).Linksym()
+		slicedata := v.Sym().Pkg.Lookup(v.Sym().Name + `.files`).Linksym(gd)
 		off := 0
 		// []files pointed at by Files
-		off = objw.SymPtr(slicedata, off, slicedata, 3*types.PtrSize) // []file, pointing just past slice
-		off = objw.Uintptr(slicedata, off, uint64(len(files)))
-		off = objw.Uintptr(slicedata, off, uint64(len(files)))
+		off = objw.SymPtr(gd, slicedata, off, slicedata, 3*types.PtrSize) // []file, pointing just past slice
+		off = objw.Uintptr(gd, slicedata, off, uint64(len(files)))
+		off = objw.Uintptr(gd, slicedata, off, uint64(len(files)))
 
 		// embed/embed.go type file is:
 		//	name string
@@ -158,29 +158,29 @@ func WriteEmbed(v *ir.Name) {
 		hash := make([]byte, hashSize)
 		for _, file := range files {
 			// name string: ptr, hash=0, len
-			off = objw.SymPtr(slicedata, off, StringSym(v.Pos(), file), 0)
-			off = objw.Uintptr(slicedata, off, 0) // string hash slot
-			off = objw.Uintptr(slicedata, off, uint64(len(file)))
+			off = objw.SymPtr(gd, slicedata, off, StringSym(gd, v.Pos(), file), 0)
+			off = objw.Uintptr(gd, slicedata, off, 0) // string hash slot
+			off = objw.Uintptr(gd, slicedata, off, uint64(len(file)))
 			if strings.HasSuffix(file, "/") {
 				// entry for directory - no data; zero out the data string.
-				off = objw.Uintptr(slicedata, off, 0) // data.ptr
-				off = objw.Uintptr(slicedata, off, 0) // data.hash
-				off = objw.Uintptr(slicedata, off, 0) // data.len
+				off = objw.Uintptr(gd, slicedata, off, 0) // data.ptr
+				off = objw.Uintptr(gd, slicedata, off, 0) // data.hash
+				off = objw.Uintptr(gd, slicedata, off, 0) // data.len
 				off += hashSize
 			} else {
-				fsym, size, err := fileStringSym(v.Pos(), base.Flag.Cfg.Embed.Files[file], true, hash)
+				fsym, size, err := fileStringSym(gd, v.Pos(), gd.Flag.Cfg.Embed.Files[file], true, hash)
 				if err != nil {
-					base.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
+					gd.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
 				}
 				// data string: ptr, hash=0, len
-				off = objw.SymPtr(slicedata, off, fsym, 0)
-				off = objw.Uintptr(slicedata, off, 0) // string hash slot
-				off = objw.Uintptr(slicedata, off, uint64(size))
-				off = int(slicedata.WriteBytes(base.Ctxt, int64(off), hash))
+				off = objw.SymPtr(gd, slicedata, off, fsym, 0)
+				off = objw.Uintptr(gd, slicedata, off, 0) // string hash slot
+				off = objw.Uintptr(gd, slicedata, off, uint64(size))
+				off = int(slicedata.WriteBytes(gd.Ctxt, int64(off), hash))
 			}
 		}
-		objw.Global(slicedata, int32(off), obj.RODATA|obj.LOCAL)
+		objw.Global(gd, slicedata, int32(off), obj.RODATA|obj.LOCAL)
 		sym := v.Linksym()
-		objw.SymPtr(sym, 0, slicedata, 0)
+		objw.SymPtr(gd, sym, 0, slicedata, 0)
 	}
 }

@@ -86,7 +86,7 @@ var ssaRegToReg = []int16{
 	0, // SB isn't a real register.  We fill an Addr.Reg field with 0 in this case.
 }
 
-func loadByType(t *types.Type) obj.As {
+func loadByType(gd *base.Invocation, t *types.Type) obj.As {
 	width := t.Size()
 
 	if t.IsFloat() {
@@ -96,7 +96,7 @@ func loadByType(t *types.Type) obj.As {
 		case 8:
 			return riscv.AMOVD
 		default:
-			base.Fatalf("unknown float width for load %d in type %v", width, t)
+			gd.Fatalf("unknown float width for load %d in type %v", width, t)
 			return 0
 		}
 	}
@@ -123,13 +123,13 @@ func loadByType(t *types.Type) obj.As {
 	case 8:
 		return riscv.AMOV
 	default:
-		base.Fatalf("unknown width for load %d in type %v", width, t)
+		gd.Fatalf("unknown width for load %d in type %v", width, t)
 		return 0
 	}
 }
 
 // storeByType returns the store instruction of the given type.
-func storeByType(t *types.Type) obj.As {
+func storeByType(gd *base.Invocation, t *types.Type) obj.As {
 	width := t.Size()
 
 	if t.IsFloat() {
@@ -139,7 +139,7 @@ func storeByType(t *types.Type) obj.As {
 		case 8:
 			return riscv.AMOVD
 		default:
-			base.Fatalf("unknown float width for store %d in type %v", width, t)
+			gd.Fatalf("unknown float width for store %d in type %v", width, t)
 			return 0
 		}
 	}
@@ -154,7 +154,7 @@ func storeByType(t *types.Type) obj.As {
 	case 8:
 		return riscv.AMOV
 	default:
-		base.Fatalf("unknown width for store %d in type %v", width, t)
+		gd.Fatalf("unknown width for store %d in type %v", width, t)
 		return 0
 	}
 }
@@ -187,7 +187,7 @@ var fracMovOps = []obj.As{riscv.AMOVB, riscv.AMOVH, riscv.AMOVW, riscv.AMOV}
 // RISC-V has no flags, so this is a no-op.
 func ssaMarkMoves(s *ssagen.State, b *ssa.Block) {}
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	s.SetPos(v.Pos)
 
 	switch v.Op {
@@ -222,7 +222,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 			v.Fatalf("load flags not implemented: %v", v.LongString())
 			return
 		}
-		p := s.Prog(loadByType(v.Type))
+		p := s.Prog(loadByType(gd, v.Type))
 		ssagen.AddrAuto(&p.From, v.Args[0])
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -231,7 +231,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 			v.Fatalf("store flags not implemented: %v", v.LongString())
 			return
 		}
-		p := s.Prog(storeByType(v.Type))
+		p := s.Prog(storeByType(gd, v.Type))
 		p.From.Type = obj.TYPE_REG
 		p.From.Reg = v.Args[0].Reg()
 		ssagen.AddrAuto(&p.To, v)
@@ -241,13 +241,13 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		for _, a := range v.Block.Func.RegArgs {
 			// Pass the spill/unspill information along to the assembler, offset by size of
 			// the saved LR slot.
-			addr := ssagen.SpillSlotAddr(a, riscv.REG_SP, base.Ctxt.Arch.FixedFrameSize)
+			addr := ssagen.SpillSlotAddr(a, riscv.REG_SP, gd.Ctxt.Arch.FixedFrameSize)
 			s.FuncInfo().AddSpill(
-				obj.RegSpill{Reg: a.Reg, Addr: addr, Unspill: loadByType(a.Type), Spill: storeByType(a.Type)})
+				obj.RegSpill{Reg: a.Reg, Addr: addr, Unspill: loadByType(gd, a.Type), Spill: storeByType(gd, a.Type)})
 		}
 		v.Block.Func.RegArgs = nil
 
-		ssagen.CheckArgReg(v)
+		ssagen.CheckArgReg(gd, v)
 	case ssa.OpSP, ssa.OpSB, ssa.OpGetG:
 		// nothing to do
 	case ssa.OpRISCV64MOVBreg, ssa.OpRISCV64MOVHreg, ssa.OpRISCV64MOVWreg,
@@ -523,7 +523,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpRISCV64LoweredPanicBoundsRR, ssa.OpRISCV64LoweredPanicBoundsRC, ssa.OpRISCV64LoweredPanicBoundsCR, ssa.OpRISCV64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -935,19 +935,19 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos == 1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos == 1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 
 	case ssa.OpRISCV64LoweredGetClosurePtr:
 		// Closure pointer is S10 (riscv.REG_CTXT).
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 
 	case ssa.OpRISCV64LoweredGetCallerSP:
 		// caller's SP is FixedFrameSize below the address of the first arg
 		p := s.Prog(riscv.AMOV)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -1044,8 +1044,8 @@ func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
 	}
 }
 
-func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
-	p := s.Prog(loadByType(t))
+func loadRegResult(gd *base.Invocation, s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+	p := s.Prog(loadByType(gd, t))
 	p.From.Type = obj.TYPE_MEM
 	p.From.Name = obj.NAME_AUTO
 	p.From.Sym = n.Linksym()
@@ -1055,8 +1055,8 @@ func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir
 	return p
 }
 
-func spillArgReg(pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
-	p = pp.Append(p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
+func spillArgReg(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+	p = pp.Append(gd, p, storeByType(gd, t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
 	p.To.Name = obj.NAME_PARAM
 	p.To.Sym = n.Linksym()
 	p.Pos = p.Pos.WithNotStmt()

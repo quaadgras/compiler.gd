@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/fatal"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/objw"
 	"cmd/compile/internal/types"
@@ -30,36 +31,36 @@ import (
 
 // InitAddrOffset writes the static name symbol lsym to n, it does not modify n.
 // It's the caller responsibility to make sure lsym is from ONAME/PEXTERN node.
-func InitAddrOffset(n *ir.Name, noff int64, lsym *obj.LSym, off int64) {
+func InitAddrOffset(gd *base.Invocation, n *ir.Name, noff int64, lsym *obj.LSym, off int64) {
 	if n.Op() != ir.ONAME {
-		base.Fatalf("InitAddr n op %v", n.Op())
+		gd.Fatalf("InitAddr n op %v", n.Op())
 	}
 	if n.Sym() == nil {
-		base.Fatalf("InitAddr nil n sym")
+		gd.Fatalf("InitAddr nil n sym")
 	}
 	s := n.Linksym()
-	s.WriteAddr(base.Ctxt, noff, types.PtrSize, lsym, off)
+	s.WriteAddr(gd.Ctxt, noff, types.PtrSize, lsym, off)
 }
 
 // InitAddr is InitAddrOffset, with offset fixed to 0.
-func InitAddr(n *ir.Name, noff int64, lsym *obj.LSym) {
-	InitAddrOffset(n, noff, lsym, 0)
+func InitAddr(gd *base.Invocation, n *ir.Name, noff int64, lsym *obj.LSym) {
+	InitAddrOffset(gd, n, noff, lsym, 0)
 }
 
 // InitSlice writes a static slice symbol {lsym, lencap, lencap} to n+noff, it does not modify n.
 // It's the caller responsibility to make sure lsym is from ONAME node.
-func InitSlice(n *ir.Name, noff int64, lsym *obj.LSym, lencap int64) {
+func InitSlice(gd *base.Invocation, n *ir.Name, noff int64, lsym *obj.LSym, lencap int64) {
 	s := n.Linksym()
-	s.WriteAddr(base.Ctxt, noff, types.PtrSize, lsym, 0)
-	s.WriteInt(base.Ctxt, noff+types.SliceLenOffset, types.PtrSize, lencap)
-	s.WriteInt(base.Ctxt, noff+types.SliceCapOffset, types.PtrSize, lencap)
+	s.WriteAddr(gd.Ctxt, noff, types.PtrSize, lsym, 0)
+	s.WriteInt(gd.Ctxt, noff+types.SliceLenOffset, types.PtrSize, lencap)
+	s.WriteInt(gd.Ctxt, noff+types.SliceCapOffset, types.PtrSize, lencap)
 }
 
-func InitSliceBytes(nam *ir.Name, off int64, s string) {
+func InitSliceBytes(gd *base.Invocation, nam *ir.Name, off int64, s string) {
 	if nam.Op() != ir.ONAME {
-		base.Fatalf("InitSliceBytes %v", nam)
+		gd.Fatalf("InitSliceBytes %v", nam)
 	}
-	InitSlice(nam, off, slicedata(nam.Pos(), s), int64(len(s)))
+	InitSlice(gd, nam, off, slicedata(gd, nam.Pos(), s), int64(len(s)))
 }
 
 const (
@@ -75,7 +76,7 @@ func shortHashString(hash []byte) string {
 
 // StringSym returns a symbol containing the string s.
 // The symbol contains the string data, not a string header.
-func StringSym(pos src.XPos, s string) (data *obj.LSym) {
+func StringSym(gd *base.Invocation, pos src.XPos, s string) (data *obj.LSym) {
 	var symname string
 	if len(s) > 100 {
 		// Huge strings are hashed to avoid long names in object files.
@@ -90,10 +91,10 @@ func StringSym(pos src.XPos, s string) (data *obj.LSym) {
 		symname = strconv.Quote(s)
 	}
 
-	symdata := base.Ctxt.Lookup(stringSymPrefix + symname)
+	symdata := gd.Ctxt.Lookup(stringSymPrefix + symname)
 	if !symdata.OnList() {
-		off := dstringdata(symdata, 0, s, pos, "string")
-		objw.Global(symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL)
+		off := dstringdata(gd, symdata, 0, s, pos, "string")
+		objw.Global(gd, symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL)
 		symdata.Set(obj.AttrContentAddressable, true)
 	}
 
@@ -103,10 +104,10 @@ func StringSym(pos src.XPos, s string) (data *obj.LSym) {
 // StringSymNoCommon is like StringSym, but produces a symbol that is not content-
 // addressable. This symbol is not supposed to appear in the final binary, it is
 // only used to pass string arguments to the linker like R_USENAMEDMETHOD does.
-func StringSymNoCommon(s string) (data *obj.LSym) {
+func StringSymNoCommon(gd *base.Invocation, s string) (data *obj.LSym) {
 	var nameSym obj.LSym
-	nameSym.WriteString(base.Ctxt, 0, len(s), s)
-	objw.Global(&nameSym, int32(len(s)), obj.RODATA)
+	nameSym.WriteString(gd.Ctxt, 0, len(s), s)
+	objw.Global(gd, &nameSym, int32(len(s)), obj.RODATA)
 	return &nameSym
 }
 
@@ -121,7 +122,7 @@ const maxFileSize = int64(2e9)
 // for use as the backing store of a []byte.
 // The content hash of file is copied into hashBytes. (If hash is nil, nothing is copied.)
 // The returned symbol contains the data itself, not a string header.
-func fileStringSym(pos src.XPos, file string, readonly bool, hashBytes []byte) (*obj.LSym, int64, error) {
+func fileStringSym(gd *base.Invocation, pos src.XPos, file string, readonly bool, hashBytes []byte) (*obj.LSym, int64, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, 0, err
@@ -145,9 +146,9 @@ func fileStringSym(pos src.XPos, file string, readonly bool, hashBytes []byte) (
 		}
 		var sym *obj.LSym
 		if readonly {
-			sym = StringSym(pos, string(data))
+			sym = StringSym(gd, pos, string(data))
 		} else {
-			sym = slicedata(pos, string(data))
+			sym = slicedata(gd, pos, string(data))
 		}
 		if len(hashBytes) > 0 {
 			sum := hash.Sum32(data)
@@ -182,12 +183,12 @@ func fileStringSym(pos src.XPos, file string, readonly bool, hashBytes []byte) (
 	var symdata *obj.LSym
 	if readonly {
 		symname := fmt.Sprintf(stringSymPattern, size, shortHashString(sum))
-		symdata = base.Ctxt.Lookup(stringSymPrefix + symname)
+		symdata = gd.Ctxt.Lookup(stringSymPrefix + symname)
 		if !symdata.OnList() {
 			info := symdata.NewFileInfo()
 			info.Name = file
 			info.Size = size
-			objw.Global(symdata, int32(size), obj.DUPOK|obj.RODATA|obj.LOCAL)
+			objw.Global(gd, symdata, int32(size), obj.DUPOK|obj.RODATA|obj.LOCAL)
 			// Note: AttrContentAddressable cannot be set here,
 			// because the content-addressable-handling code
 			// does not know about file symbols.
@@ -195,7 +196,7 @@ func fileStringSym(pos src.XPos, file string, readonly bool, hashBytes []byte) (
 	} else {
 		// Emit a zero-length data symbol
 		// and then fix up length and content to use file.
-		symdata = slicedata(pos, "")
+		symdata = slicedata(gd, pos, "")
 		symdata.Size = size
 		symdata.Type = objabi.SNOPTRDATA
 		info := symdata.NewFileInfo()
@@ -208,26 +209,26 @@ func fileStringSym(pos src.XPos, file string, readonly bool, hashBytes []byte) (
 
 var slicedataGen int
 
-func slicedata(pos src.XPos, s string) *obj.LSym {
+func slicedata(gd *base.Invocation, pos src.XPos, s string) *obj.LSym {
 	slicedataGen++
 	symname := fmt.Sprintf(".gobytes.%d", slicedataGen)
-	lsym := types.LocalPkg.Lookup(symname).LinksymABI(obj.ABI0)
-	off := dstringdata(lsym, 0, s, pos, "slice")
-	objw.Global(lsym, int32(off), obj.NOPTR|obj.LOCAL)
+	lsym := types.LocalPkg(gd).Lookup(symname).LinksymABI(gd, obj.ABI0)
+	off := dstringdata(gd, lsym, 0, s, pos, "slice")
+	objw.Global(gd, lsym, int32(off), obj.NOPTR|obj.LOCAL)
 
 	return lsym
 }
 
-func dstringdata(s *obj.LSym, off int, t string, pos src.XPos, what string) int {
+func dstringdata(gd *base.Invocation, s *obj.LSym, off int, t string, pos src.XPos, what string) int {
 	// Objects that are too large will cause the data section to overflow right away,
 	// causing a cryptic error message by the linker. Check for oversize objects here
 	// and provide a useful error message instead.
 	if int64(len(t)) > 2e9 {
-		base.ErrorfAt(pos, 0, "%v with length %v is too big", what, len(t))
+		gd.ErrorfAt(pos, 0, "%v with length %v is too big", what, len(t))
 		return 0
 	}
 
-	s.WriteString(base.Ctxt, int64(off), len(t), t)
+	s.WriteString(gd.Ctxt, int64(off), len(t), t)
 	return off + len(t)
 }
 
@@ -269,9 +270,9 @@ func computeFuncsymEscMask(sig *types.Type) uint64 {
 }
 
 // FuncLinksym returns n·f, the function value symbol for n.
-func FuncLinksym(n *ir.Name) *obj.LSym {
+func FuncLinksym(gd *base.Invocation, n *ir.Name) *obj.LSym {
 	if n.Op() != ir.ONAME || n.Class != ir.PFUNC {
-		base.Fatalf("expected func name: %v", n)
+		gd.Fatalf("expected func name: %v", n)
 	}
 	s := n.Sym()
 
@@ -289,36 +290,36 @@ func FuncLinksym(n *ir.Name) *obj.LSym {
 	}
 	funcsymsmu.Unlock()
 
-	return sf.Linksym()
+	return sf.Linksym(gd)
 }
 
 func GlobalLinksym(n *ir.Name) *obj.LSym {
 	if n.Op() != ir.ONAME || n.Class != ir.PEXTERN {
-		base.Fatalf("expected global variable: %v", n)
+		fatal.Error("expected global variable: %v", n)
 	}
 	return n.Linksym()
 }
 
-func WriteFuncSyms() {
+func WriteFuncSyms(gd *base.Invocation) {
 	slices.SortFunc(funcsyms, func(a, b *ir.Name) int {
 		return strings.Compare(a.Linksym().Name, b.Linksym().Name)
 	})
 	for _, nam := range funcsyms {
 		s := nam.Sym()
-		sf := s.Pkg.Lookup(ir.FuncSymName(s)).Linksym()
+		sf := s.Pkg.Lookup(ir.FuncSymName(s)).Linksym(gd)
 
 		// While compiling package runtime, we might try to create
 		// funcsyms for functions from both types.LocalPkg and
 		// ir.Pkgs.Runtime.
-		if base.Flag.CompilingRuntime && sf.OnList() {
+		if gd.Flag.CompilingRuntime && sf.OnList() {
 			continue
 		}
 
 		// Function values must always reference ABIInternal
 		// entry points.
-		target := s.Linksym()
+		target := s.Linksym(gd)
 		if target.ABI() != obj.ABIInternal {
-			base.Fatalf("expected ABIInternal: %v has %v", target, target.ABI())
+			gd.Fatalf("expected ABIInternal: %v has %v", target, target.ABI())
 		}
 		// gd escape-bits: function-value rodata entry is {F, M}
 		// (PtrSize + 8 bytes) instead of the stock {F} alone.
@@ -330,7 +331,7 @@ func WriteFuncSyms() {
 		// own struct layouts; this path uniform-ifies bare function
 		// references so the wrap at OCALLFUNC always hits a valid
 		// mask word.
-		objw.SymPtr(sf, 0, target, 0)
+		objw.SymPtr(gd, sf, 0, target, 0)
 		// Phase F4 install (default-on). When the function is a
 		// trivial forwarder (escape.DetectForwarders + Synthesize
 		// ForwarderComputeFns), point the M slot at the synth's
@@ -339,14 +340,14 @@ func WriteFuncSyms() {
 		// addressable, so the per-pkg-hash interaction the itab
 		// install triggers doesn't apply here.
 		switch {
-		case base.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
-			cfFuncsym := FuncLinksym(nam.Func.GdForwarder.SyntheticComputeFn.Nname)
-			objw.SymPtr(sf, int(types.PtrSize), cfFuncsym, 1)
+		case gd.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
+			cfFuncsym := FuncLinksym(gd, nam.Func.GdForwarder.SyntheticComputeFn.Nname)
+			objw.SymPtr(gd, sf, int(types.PtrSize), cfFuncsym, 1)
 		default:
 			mask := computeFuncsymEscMask(nam.Type())
-			objw.UintN(sf, int(types.PtrSize), mask, 8)
+			objw.UintN(gd, sf, int(types.PtrSize), mask, 8)
 		}
-		objw.Global(sf, int32(types.PtrSize)+8, obj.DUPOK|obj.RODATA)
+		objw.Global(gd, sf, int32(types.PtrSize)+8, obj.DUPOK|obj.RODATA)
 	}
 }
 
@@ -374,38 +375,37 @@ func hasPointerBearingFuncsymArg(sig *types.Type) bool {
 	return false
 }
 
-
 // InitConst writes the static literal c to n.
 // Neither n nor c is modified.
-func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
+func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) {
 	if n.Op() != ir.ONAME {
-		base.Fatalf("InitConst n op %v", n.Op())
+		gd.Fatalf("InitConst n op %v", n.Op())
 	}
 	if n.Sym() == nil {
-		base.Fatalf("InitConst nil n sym")
+		gd.Fatalf("InitConst nil n sym")
 	}
 	if c.Op() == ir.ONIL {
 		return
 	}
 	if c.Op() != ir.OLITERAL {
-		base.Fatalf("InitConst c op %v", c.Op())
+		gd.Fatalf("InitConst c op %v", c.Op())
 	}
 	s := n.Linksym()
 	switch u := c.Val(); u.Kind() {
 	case constant.Bool:
 		i := int64(obj.Bool2int(constant.BoolVal(u)))
-		s.WriteInt(base.Ctxt, noff, wid, i)
+		s.WriteInt(gd.Ctxt, noff, wid, i)
 
 	case constant.Int:
-		s.WriteInt(base.Ctxt, noff, wid, ir.IntVal(c.Type(), u))
+		s.WriteInt(gd.Ctxt, noff, wid, ir.IntVal(gd, c.Type(), u))
 
 	case constant.Float:
 		f, _ := constant.Float64Val(u)
 		switch c.Type().Kind() {
 		case types.TFLOAT32:
-			s.WriteFloat32(base.Ctxt, noff, float32(f))
+			s.WriteFloat32(gd.Ctxt, noff, float32(f))
 		case types.TFLOAT64:
-			s.WriteFloat64(base.Ctxt, noff, f)
+			s.WriteFloat64(gd.Ctxt, noff, f)
 		}
 
 	case constant.Complex:
@@ -413,11 +413,11 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 		im, _ := constant.Float64Val(constant.Imag(u))
 		switch c.Type().Kind() {
 		case types.TCOMPLEX64:
-			s.WriteFloat32(base.Ctxt, noff, float32(re))
-			s.WriteFloat32(base.Ctxt, noff+4, float32(im))
+			s.WriteFloat32(gd.Ctxt, noff, float32(re))
+			s.WriteFloat32(gd.Ctxt, noff+4, float32(im))
 		case types.TCOMPLEX128:
-			s.WriteFloat64(base.Ctxt, noff, re)
-			s.WriteFloat64(base.Ctxt, noff+8, im)
+			s.WriteFloat64(gd.Ctxt, noff, re)
+			s.WriteFloat64(gd.Ctxt, noff+8, im)
 		}
 
 	case constant.String:
@@ -452,13 +452,13 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 			// Word 0 defaults to zero in uninitialized rodata, but
 			// write an explicit 0 to guard against a previous
 			// initializer at the same offset.
-			s.WriteInt(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
-			s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, word1)
-			s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, word2)
+			s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
+			s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, word1)
+			s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, word2)
 			break
 		}
-		symdata := StringSym(n.Pos(), i)
-		s.WriteAddr(base.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
+		symdata := StringSym(gd, n.Pos(), i)
+		s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
 		// gd string hash cache: pre-populate word 1 with the fork's
 		// canonical string hash so the very first map lookup /
 		// equality check on a literal hits the cache without any
@@ -481,10 +481,10 @@ func InitConst(n *ir.Name, noff int64, c ir.Node, wid int) {
 				hash = 1 // reserve 0 as the unsealed sentinel
 			}
 		}
-		s.WriteInt(base.Ctxt, noff+types.StringHashOffset, types.PtrSize, hash)
-		s.WriteInt(base.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
+		s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, hash)
+		s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
 
 	default:
-		base.Fatalf("InitConst unhandled OLITERAL %v", c)
+		gd.Fatalf("InitConst unhandled OLITERAL %v", c)
 	}
 }

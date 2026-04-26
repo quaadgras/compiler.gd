@@ -103,7 +103,7 @@ func storeByType(t *types.Type) obj.As {
 	panic("bad store type")
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpCopy:
 		t := v.Type
@@ -433,13 +433,13 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpPPC64LoweredGetClosurePtr:
 		// Closure pointer is R11 (already)
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 
 	case ssa.OpPPC64LoweredGetCallerSP:
 		// caller's SP is FixedFrameSize below the address of the first arg
 		p := s.Prog(ppc64.AMOVD)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -472,13 +472,13 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		for _, a := range v.Block.Func.RegArgs {
 			// Pass the spill/unspill information along to the assembler, offset by size of
 			// the saved LR slot.
-			addr := ssagen.SpillSlotAddr(a, ppc64.REGSP, base.Ctxt.Arch.FixedFrameSize)
+			addr := ssagen.SpillSlotAddr(a, ppc64.REGSP, gd.Ctxt.Arch.FixedFrameSize)
 			s.FuncInfo().AddSpill(
 				obj.RegSpill{Reg: a.Reg, Addr: addr, Unspill: loadByType(a.Type), Spill: storeByType(a.Type)})
 		}
 		v.Block.Func.RegArgs = nil
 
-		ssagen.CheckArgReg(v)
+		ssagen.CheckArgReg(gd, v)
 
 	case ssa.OpPPC64DIVD:
 		// For now,
@@ -1894,7 +1894,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		pp.To.Reg = ppc64.REG_LR
 		pp.AddRestSourceConst(1)
 
-		if ppc64.NeedTOCpointer(base.Ctxt) {
+		if ppc64.NeedTOCpointer(gd.Ctxt) {
 			// When compiling Go into PIC, the function we just
 			// called via pointer might have been implemented in
 			// a separate module and so overwritten the TOC
@@ -1916,7 +1916,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpPPC64LoweredPanicBoundsRR, ssa.OpPPC64LoweredPanicBoundsRC, ssa.OpPPC64LoweredPanicBoundsCR, ssa.OpPPC64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -2041,8 +2041,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 
 	// These should be resolved by rules and not make it here.
@@ -2131,7 +2131,7 @@ func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
 	}
 }
 
-func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+func loadRegResult(gd *base.Invocation, s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
 	p := s.Prog(loadByType(t))
 	p.From.Type = obj.TYPE_MEM
 	p.From.Name = obj.NAME_AUTO
@@ -2142,8 +2142,8 @@ func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir
 	return p
 }
 
-func spillArgReg(pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
-	p = pp.Append(p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
+func spillArgReg(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+	p = pp.Append(gd, p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
 	p.To.Name = obj.NAME_PARAM
 	p.To.Sym = n.Linksym()
 	p.Pos = p.Pos.WithNotStmt()

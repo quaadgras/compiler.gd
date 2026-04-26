@@ -165,7 +165,7 @@ func opregregimm(s *ssagen.State, op obj.As, dest, src int16, off int64) *obj.Pr
 	return p
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpS390XSLD, ssa.OpS390XSLW,
 		ssa.OpS390XSRD, ssa.OpS390XSRW,
@@ -547,16 +547,16 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		for _, a := range v.Block.Func.RegArgs {
 			// Pass the spill/unspill information along to the assembler, offset by size of
 			// the saved LR slot.
-			addr := ssagen.SpillSlotAddr(a, s390x.REGSP, base.Ctxt.Arch.FixedFrameSize)
+			addr := ssagen.SpillSlotAddr(a, s390x.REGSP, gd.Ctxt.Arch.FixedFrameSize)
 			s.FuncInfo().AddSpill(
 				obj.RegSpill{Reg: a.Reg, Addr: addr, Unspill: loadByType(a.Type), Spill: storeByType(a.Type)})
 		}
 		v.Block.Func.RegArgs = nil
 
-		ssagen.CheckArgReg(v)
+		ssagen.CheckArgReg(gd, v)
 	case ssa.OpS390XLoweredGetClosurePtr:
 		// Closure pointer is R12 (already)
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 	case ssa.OpS390XLoweredRound32F, ssa.OpS390XLoweredRound64F:
 		// input is already rounded
 	case ssa.OpS390XLoweredGetG:
@@ -570,7 +570,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		// caller's SP is FixedFrameSize below the address of the first arg
 		p := s.Prog(s390x.AMOVD)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -591,7 +591,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpS390XLoweredPanicBoundsRR, ssa.OpS390XLoweredPanicBoundsRC, ssa.OpS390XLoweredPanicBoundsCR, ssa.OpS390XLoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -718,8 +718,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 	case ssa.OpS390XMVC:
 		vo := v.AuxValAndOff()
@@ -1044,7 +1044,7 @@ func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
 	}
 }
 
-func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+func loadRegResult(gd *base.Invocation, s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
 	p := s.Prog(loadByType(t))
 	p.From.Type = obj.TYPE_MEM
 	p.From.Name = obj.NAME_AUTO
@@ -1055,8 +1055,8 @@ func loadRegResult(s *ssagen.State, f *ssa.Func, t *types.Type, reg int16, n *ir
 	return p
 }
 
-func spillArgReg(pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
-	p = pp.Append(p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
+func spillArgReg(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog {
+	p = pp.Append(gd, p, storeByType(t), obj.TYPE_REG, reg, 0, obj.TYPE_MEM, 0, n.FrameOffset()+off)
 	p.To.Name = obj.NAME_PARAM
 	p.To.Sym = n.Linksym()
 	p.Pos = p.Pos.WithNotStmt()

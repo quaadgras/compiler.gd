@@ -127,7 +127,7 @@ func testSyntaxErrors(t *testing.T, filename string) {
 	}
 	defer f.Close()
 
-	ParseFile(filename, func(err error) {
+	ParseFile(testGd, filename, func(err error) {
 		e, ok := err.(Error)
 		if !ok {
 			return

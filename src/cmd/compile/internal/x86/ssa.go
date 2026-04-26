@@ -121,7 +121,7 @@ func opregreg(s *ssagen.State, op obj.As, dest, src int16) *obj.Prog {
 	return p
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.Op386ADDL:
 		r := v.Reg()
@@ -466,9 +466,9 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		p.From.Name = obj.NAME_EXTERN
 		f := math.Float64frombits(uint64(v.AuxInt))
 		if v.Op == ssa.Op386MOVSDconst1 {
-			p.From.Sym = base.Ctxt.Float64Sym(f)
+			p.From.Sym = gd.Ctxt.Float64Sym(f)
 		} else {
-			p.From.Sym = base.Ctxt.Float32Sym(float32(f))
+			p.From.Sym = gd.Ctxt.Float32Sym(float32(f))
 		}
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -688,12 +688,12 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		ssagen.AddrAuto(&p.To, v)
 	case ssa.Op386LoweredGetClosurePtr:
 		// Closure pointer is DX.
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 	case ssa.Op386LoweredGetG:
 		r := v.Reg()
 		// See the comments in cmd/internal/obj/x86/obj6.go
 		// near CanUse1InsnTLS for a detailed explanation of these instructions.
-		if x86.CanUse1InsnTLS(base.Ctxt) {
+		if x86.CanUse1InsnTLS(gd.Ctxt) {
 			// MOVL (TLS), r
 			p := s.Prog(x86.AMOVL)
 			p.From.Type = obj.TYPE_MEM
@@ -729,7 +729,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		// caller's SP is the address of the first arg
 		p := s.Prog(x86.AMOVL)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize // 0 on 386, just to be consistent with other architectures
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize // 0 on 386, just to be consistent with other architectures
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()
@@ -744,7 +744,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 	case ssa.Op386LoweredPanicBoundsRR, ssa.Op386LoweredPanicBoundsRC, ssa.Op386LoweredPanicBoundsCR, ssa.Op386LoweredPanicBoundsCC,
 		ssa.Op386LoweredPanicExtendRR, ssa.Op386LoweredPanicExtendRC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -975,8 +975,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 	case ssa.Op386LoweredCtz32:
 		// BSFL in, out

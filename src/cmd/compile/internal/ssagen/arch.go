@@ -5,6 +5,7 @@
 package ssagen
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/objw"
 	"cmd/compile/internal/ssa"
@@ -32,15 +33,15 @@ type ArchInfo struct {
 	//    - pointers to heap-allocated return values
 	//    - open-coded deferred functions
 	// (Max size in make.bash is 40 bytes.)
-	ZeroRange func(*objw.Progs, *obj.Prog, int64, int64, *uint32) *obj.Prog
+	ZeroRange func(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog
 
-	Ginsnop func(*objw.Progs) *obj.Prog
+	Ginsnop func(*base.Invocation, *objw.Progs) *obj.Prog
 
 	// SSAMarkMoves marks any MOVXconst ops that need to avoid clobbering flags.
 	SSAMarkMoves func(*State, *ssa.Block)
 
 	// SSAGenValue emits Prog(s) for the Value.
-	SSAGenValue func(*State, *ssa.Value)
+	SSAGenValue func(*base.Invocation, *State, *ssa.Value)
 
 	// SSAGenBlock emits end-of-block Progs. SSAGenValue should be called
 	// for all values in the block before SSAGenBlock.
@@ -49,8 +50,8 @@ type ArchInfo struct {
 	// LoadRegResult emits instructions that loads register-assigned result
 	// at n+off (n is PPARAMOUT) to register reg. The result is already in
 	// memory. Used in open-coded defer return path.
-	LoadRegResult func(s *State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog
+	LoadRegResult func(gd *base.Invocation, s *State, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog
 
 	// SpillArgReg emits instructions that spill reg to n+off.
-	SpillArgReg func(pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog
+	SpillArgReg func(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, f *ssa.Func, t *types.Type, reg int16, n *ir.Name, off int64) *obj.Prog
 }

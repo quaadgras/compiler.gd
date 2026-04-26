@@ -12,22 +12,22 @@ import (
 )
 
 // importfunc declares symbol s as an imported function with type t.
-func importfunc(s *types.Sym, t *types.Type) {
-	fn := ir.NewFunc(src.NoXPos, src.NoXPos, s, t)
-	importsym(fn.Nname)
+func importfunc(gd *base.Invocation, s *types.Sym, t *types.Type) {
+	fn := ir.NewFunc(gd, src.NoXPos, src.NoXPos, s, t)
+	importsym(gd, fn.Nname)
 }
 
 // importvar declares symbol s as an imported variable with type t.
-func importvar(s *types.Sym, t *types.Type) {
-	n := ir.NewNameAt(src.NoXPos, s, t)
+func importvar(gd *base.Invocation, s *types.Sym, t *types.Type) {
+	n := ir.NewNameAt(gd, src.NoXPos, s, t)
 	n.Class = ir.PEXTERN
-	importsym(n)
+	importsym(gd, n)
 }
 
-func importsym(name *ir.Name) {
+func importsym(gd *base.Invocation, name *ir.Name) {
 	sym := name.Sym()
 	if sym.Def != nil {
-		base.Fatalf("importsym of symbol that already exists: %v", sym.Def)
+		gd.Fatalf("importsym of symbol that already exists: %v", sym.Def)
 	}
 	sym.Def = name
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package gc
+package gd
 
 import (
 	"cmd/compile/internal/base"
@@ -41,49 +41,49 @@ const (
 	modeLinkerObj
 )
 
-func dumpobj() {
-	if base.Flag.LinkObj == "" {
-		dumpobj1(base.Flag.LowerO, modeCompilerObj|modeLinkerObj)
+func dumpobj(gd *base.Invocation) {
+	if gd.Flag.LinkObj == "" {
+		dumpobj1(gd, gd.Flag.LowerO, modeCompilerObj|modeLinkerObj)
 		return
 	}
-	dumpobj1(base.Flag.LowerO, modeCompilerObj)
-	dumpobj1(base.Flag.LinkObj, modeLinkerObj)
+	dumpobj1(gd, gd.Flag.LowerO, modeCompilerObj)
+	dumpobj1(gd, gd.Flag.LinkObj, modeLinkerObj)
 }
 
-func dumpobj1(outfile string, mode int) {
+func dumpobj1(gd *base.Invocation, outfile string, mode int) {
 	bout, err := bio.Create(outfile)
 	if err != nil {
-		base.FlushErrors()
+		gd.FlushErrors()
 		fmt.Printf("can't create %s: %v\n", outfile, err)
-		base.ErrorExit()
+		gd.ErrorExit()
 	}
 
 	bout.WriteString("!<arch>\n")
 
 	if mode&modeCompilerObj != 0 {
 		start := startArchiveEntry(bout)
-		dumpCompilerObj(bout)
+		dumpCompilerObj(gd, bout)
 		finishArchiveEntry(bout, start, "__.PKGDEF")
 	}
 	if mode&modeLinkerObj != 0 {
 		start := startArchiveEntry(bout)
-		dumpLinkerObj(bout)
+		dumpLinkerObj(gd, bout)
 		finishArchiveEntry(bout, start, "_go_.o")
 	}
 
 	if err := bout.Close(); err != nil {
-		base.FlushErrors()
+		gd.FlushErrors()
 		fmt.Printf("error while writing to file %s: %v\n", outfile, err)
-		base.ErrorExit()
+		gd.ErrorExit()
 	}
 }
 
-func printObjHeader(bout *bio.Writer) {
+func printObjHeader(gd *base.Invocation, bout *bio.Writer) {
 	bout.WriteString(objabi.HeaderString())
-	if base.Flag.BuildID != "" {
-		fmt.Fprintf(bout, "build id %q\n", base.Flag.BuildID)
+	if gd.Flag.BuildID != "" {
+		fmt.Fprintf(bout, "build id %q\n", gd.Flag.BuildID)
 	}
-	if types.LocalPkg.Name == "main" {
+	if types.LocalPkg(gd).Name == "main" {
 		fmt.Fprintf(bout, "main\n")
 	}
 	fmt.Fprintf(bout, "\n") // header ends with blank line
@@ -110,69 +110,69 @@ func finishArchiveEntry(bout *bio.Writer, start int64, name string) {
 	bout.MustSeek(start+size+(size&1), 0)
 }
 
-func dumpCompilerObj(bout *bio.Writer) {
-	printObjHeader(bout)
-	noder.WriteExports(bout)
+func dumpCompilerObj(gd *base.Invocation, bout *bio.Writer) {
+	printObjHeader(gd, bout)
+	noder.WriteExports(gd, bout)
 }
 
-func dumpdata() {
-	reflectdata.WriteGCSymbols()
-	reflectdata.WritePluginTable()
-	dumpembeds()
+func dumpdata(gd *base.Invocation) {
+	reflectdata.WriteGCSymbols(gd)
+	reflectdata.WritePluginTable(gd)
+	dumpembeds(gd)
 
 	if reflectdata.ZeroSize > 0 {
-		zero := base.PkgLinksym("go:map", "zero", obj.ABI0)
-		objw.Global(zero, int32(reflectdata.ZeroSize), obj.DUPOK|obj.RODATA)
+		zero := gd.PkgLinksym("go:map", "zero", obj.ABI0)
+		objw.Global(gd, zero, int32(reflectdata.ZeroSize), obj.DUPOK|obj.RODATA)
 		zero.Set(obj.AttrStatic, true)
 	}
 
-	staticdata.WriteFuncSyms()
-	addGCLocals()
+	staticdata.WriteFuncSyms(gd)
+	addGCLocals(gd)
 }
 
-func dumpLinkerObj(bout *bio.Writer) {
-	printObjHeader(bout)
+func dumpLinkerObj(gd *base.Invocation, bout *bio.Writer) {
+	printObjHeader(gd, bout)
 
-	if len(typecheck.Target.CgoPragmas) != 0 {
+	if len(typecheck.Target(gd).CgoPragmas) != 0 {
 		// write empty export section; must be before cgo section
 		fmt.Fprintf(bout, "\n$$\n\n$$\n\n")
 		fmt.Fprintf(bout, "\n$$  // cgo\n")
-		if err := json.NewEncoder(bout).Encode(typecheck.Target.CgoPragmas); err != nil {
-			base.Fatalf("serializing pragcgobuf: %v", err)
+		if err := json.NewEncoder(bout).Encode(typecheck.Target(gd).CgoPragmas); err != nil {
+			gd.Fatalf("serializing pragcgobuf: %v", err)
 		}
 		fmt.Fprintf(bout, "\n$$\n\n")
 	}
 
 	fmt.Fprintf(bout, "\n!\n")
 
-	obj.WriteObjFile(base.Ctxt, bout)
+	obj.WriteObjFile(gd.Ctxt, bout)
 }
 
-func dumpGlobal(n *ir.Name) {
+func dumpGlobal(gd *base.Invocation, n *ir.Name) {
 	if n.Type() == nil {
-		base.Fatalf("external %v nil type\n", n)
+		gd.Fatalf("external %v nil type\n", n)
 	}
 	if n.Class == ir.PFUNC {
 		return
 	}
-	if n.Sym().Pkg != types.LocalPkg {
+	if n.Sym().Pkg != types.LocalPkg(gd) {
 		return
 	}
 	types.CalcSize(n.Type())
-	ggloblnod(n)
+	ggloblnod(gd, n)
 	if n.CoverageAuxVar() || n.Linksym().Static() {
 		return
 	}
-	base.Ctxt.DwarfGlobal(types.TypeSymName(n.Type()), n.Linksym())
+	gd.Ctxt.DwarfGlobal(types.TypeSymName(n.Type()), n.Linksym())
 }
 
-func dumpGlobalConst(n *ir.Name) {
+func dumpGlobalConst(gd *base.Invocation, n *ir.Name) {
 	// only export typed constants
 	t := n.Type()
 	if t == nil {
 		return
 	}
-	if n.Sym().Pkg != types.LocalPkg {
+	if n.Sym().Pkg != types.LocalPkg(gd) {
 		return
 	}
 	// only export integer constants for now
@@ -183,58 +183,58 @@ func dumpGlobalConst(n *ir.Name) {
 	if t.IsUntyped() {
 		// Export untyped integers as int (if they fit).
 		t = types.Types[types.TINT]
-		if ir.ConstOverflow(v, t) {
+		if ir.ConstOverflow(gd, v, t) {
 			return
 		}
 	} else {
 		// If the type of the constant is an instantiated generic, we need to emit
 		// that type so the linker knows about it. See issue 51245.
-		_ = reflectdata.TypeLinksym(t)
+		_ = reflectdata.TypeLinksym(gd, t)
 	}
-	base.Ctxt.DwarfIntConst(n.Sym().Name, types.TypeSymName(t), ir.IntVal(t, v))
+	gd.Ctxt.DwarfIntConst(n.Sym().Name, types.TypeSymName(t), ir.IntVal(gd, t, v))
 }
 
 // addGCLocals adds gcargs, gclocals, gcregs, and stack object symbols to Ctxt.Data.
 //
 // This is done during the sequential phase after compilation, since
 // global symbols can't be declared during parallel compilation.
-func addGCLocals() {
-	for _, s := range base.Ctxt.Text {
+func addGCLocals(gd *base.Invocation) {
+	for _, s := range gd.Ctxt.Text {
 		fn := s.Func()
 		if fn == nil {
 			continue
 		}
 		for _, gcsym := range []*obj.LSym{fn.GCArgs, fn.GCLocals} {
 			if gcsym != nil && !gcsym.OnList() {
-				objw.Global(gcsym, int32(len(gcsym.P)), obj.RODATA|obj.DUPOK)
+				objw.Global(gd, gcsym, int32(len(gcsym.P)), obj.RODATA|obj.DUPOK)
 			}
 		}
 		if x := fn.StackObjects; x != nil {
-			objw.Global(x, int32(len(x.P)), obj.RODATA)
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA)
 			x.Set(obj.AttrStatic, true)
 		}
 		if x := fn.OpenCodedDeferInfo; x != nil {
-			objw.Global(x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
 		}
 		if x := fn.ArgInfo; x != nil {
-			objw.Global(x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
 			x.Set(obj.AttrStatic, true)
 		}
 		if x := fn.ArgLiveInfo; x != nil {
-			objw.Global(x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
 			x.Set(obj.AttrStatic, true)
 		}
 		if x := fn.WrapInfo; x != nil && !x.OnList() {
-			objw.Global(x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
+			objw.Global(gd, x, int32(len(x.P)), obj.RODATA|obj.DUPOK)
 			x.Set(obj.AttrStatic, true)
 		}
 		for _, jt := range fn.JumpTables {
-			objw.Global(jt.Sym, int32(len(jt.Targets)*base.Ctxt.Arch.PtrSize), obj.RODATA)
+			objw.Global(gd, jt.Sym, int32(len(jt.Targets)*gd.Ctxt.Arch.PtrSize), obj.RODATA)
 		}
 	}
 }
 
-func ggloblnod(nam *ir.Name) {
+func ggloblnod(gd *base.Invocation, nam *ir.Name) {
 	s := nam.Linksym()
 
 	// main_inittask and runtime_inittask in package runtime (and in
@@ -247,7 +247,7 @@ func ggloblnod(nam *ir.Name) {
 		return
 	}
 
-	s.Gotype = reflectdata.TypeLinksym(nam.Type())
+	s.Gotype = reflectdata.TypeLinksym(gd, nam.Type())
 	flags := 0
 	if nam.Readonly() {
 		flags = obj.RODATA
@@ -265,14 +265,14 @@ func ggloblnod(nam *ir.Name) {
 	}
 
 	// We've skipped linkname'd globals's instrument, so we can skip them here as well.
-	if base.Flag.ASan && linkname == "" && pkginit.InstrumentGlobalsMap[name] != nil {
+	if gd.Flag.ASan && linkname == "" && pkginit.InstrumentGlobalsMap[name] != nil {
 		// Write the new size of instrumented global variables that have
 		// trailing redzones into object file.
 		rzSize := pkginit.GetRedzoneSizeForGlobal(size)
 		sizeWithRZ := rzSize + size
-		base.Ctxt.Globl(s, sizeWithRZ, flags)
+		gd.Ctxt.Globl(s, sizeWithRZ, flags)
 	} else {
-		base.Ctxt.Globl(s, size, flags)
+		gd.Ctxt.Globl(s, size, flags)
 	}
 	if nam.Libfuzzer8BitCounter() {
 		s.Type = objabi.SLIBFUZZER_8BIT_COUNTER
@@ -289,8 +289,8 @@ func ggloblnod(nam *ir.Name) {
 	}
 }
 
-func dumpembeds() {
-	for _, v := range typecheck.Target.Embeds {
-		staticdata.WriteEmbed(v)
+func dumpembeds(gd *base.Invocation) {
+	for _, v := range typecheck.Target(gd).Embeds {
+		staticdata.WriteEmbed(gd, v)
 	}
 }

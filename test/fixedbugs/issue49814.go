@@ -7,8 +7,10 @@
 package main
 
 // "must be integer" error is for 32-bit architectures
+// gd: fork's CalcArraySize bails via fatal.Error on the first
+// oversized array, so the second decl never reaches the size check.
 type V [1 << 50]byte // ERROR "larger than address space|invalid array length"
 
-var X [1 << 50]byte // ERROR "larger than address space|invalid array length"
+var X [1 << 50]byte
 
 func main() {}

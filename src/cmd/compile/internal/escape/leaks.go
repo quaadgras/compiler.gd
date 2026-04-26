@@ -45,32 +45,32 @@ func (l leaks) Callee() int { return l.get(leakCallee) }
 func (l leaks) Result(i int) int { return l.get(leakResult0 + i) }
 
 // AddHeap adds an assignment flow from l to the heap.
-func (l *leaks) AddHeap(derefs int) { l.add(leakHeap, derefs) }
+func (l *leaks) AddHeap(gd *base.Invocation, derefs int) { l.add(gd, leakHeap, derefs) }
 
 // AddMutator adds a flow from l to the mutator (i.e., a pointer
 // operand of an indirect assignment statement).
-func (l *leaks) AddMutator(derefs int) { l.add(leakMutator, derefs) }
+func (l *leaks) AddMutator(gd *base.Invocation, derefs int) { l.add(gd, leakMutator, derefs) }
 
 // AddCallee adds an assignment flow from l to the callee operand of a
 // call expression.
-func (l *leaks) AddCallee(derefs int) { l.add(leakCallee, derefs) }
+func (l *leaks) AddCallee(gd *base.Invocation, derefs int) { l.add(gd, leakCallee, derefs) }
 
 // AddResult adds an assignment flow from l to its function's i'th
 // result parameter.
-func (l *leaks) AddResult(i, derefs int) { l.add(leakResult0+i, derefs) }
+func (l *leaks) AddResult(gd *base.Invocation, i, derefs int) { l.add(gd, leakResult0+i, derefs) }
 
 func (l leaks) get(i int) int { return int(l[i]) - 1 }
 
-func (l *leaks) add(i, derefs int) {
+func (l *leaks) add(gd *base.Invocation, i, derefs int) {
 	if old := l.get(i); old < 0 || derefs < old {
-		l.set(i, derefs)
+		l.set(gd, i, derefs)
 	}
 }
 
-func (l *leaks) set(i, derefs int) {
+func (l *leaks) set(gd *base.Invocation, i, derefs int) {
 	v := derefs + 1
 	if v < 0 {
-		base.Fatalf("invalid derefs count: %v", derefs)
+		gd.Fatalf("invalid derefs count: %v", derefs)
 	}
 	if v > math.MaxUint8 {
 		v = math.MaxUint8
@@ -81,13 +81,13 @@ func (l *leaks) set(i, derefs int) {
 
 // Optimize removes result flow paths that are equal in length or
 // longer than the shortest heap flow path.
-func (l *leaks) Optimize() {
+func (l *leaks) Optimize(gd *base.Invocation) {
 	// If we have a path to the heap, then there's no use in
 	// keeping equal or longer paths elsewhere.
 	if x := l.Heap(); x >= 0 {
 		for i := 1; i < len(*l); i++ {
 			if l.get(i) >= x {
-				l.set(i, -1)
+				l.set(gd, i, -1)
 			}
 		}
 	}
@@ -116,18 +116,18 @@ func (l leaks) Encode() string {
 }
 
 // parseLeaks parses a binary string representing a leaks.
-func parseLeaks(s string) leaks {
+func parseLeaks(gd *base.Invocation, s string) leaks {
 	var l leaks
 	if !strings.HasPrefix(s, "esc:") {
-		l.AddHeap(0)
+		l.AddHeap(gd, 0)
 		return l
 	}
 	copy(l[:], s[4:])
 	return l
 }
 
-func ParseLeaks(s string) leaks {
-	return parseLeaks(s)
+func ParseLeaks(gd *base.Invocation, s string) leaks {
+	return parseLeaks(gd, s)
 }
 
 // ResultAliasesParam reports whether any param (or receiver) of
@@ -143,7 +143,7 @@ func ParseLeaks(s string) leaks {
 // carry the "esc:" prefix (body-less functions, or params that
 // escape analysis hadn't reached). "Unknown" means "might alias";
 // the rewriter declines to stack-buffer under that uncertainty.
-func ResultAliasesParam(sig *types.Type, k int) bool {
+func ResultAliasesParam(gd *base.Invocation, sig *types.Type, k int) bool {
 	if sig == nil || sig.Kind() != types.TFUNC {
 		return false
 	}
@@ -172,7 +172,7 @@ func ResultAliasesParam(sig *types.Type, k int) bool {
 			// No tag — assume it might reach result k.
 			return true
 		}
-		esc := parseLeaks(note)
+		esc := parseLeaks(gd, note)
 		return esc.Result(k) >= 0
 	}
 	if aliasOrUnknown(sig.Recv()) {

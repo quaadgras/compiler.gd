@@ -21,8 +21,8 @@ import (
 //
 // For now, two assignment shapes are recognised:
 //
-//   1. autotmp_X = callee(args...)               — single-result OAS
-//   2. autotmp_A, autotmp_B = callee(args...)    — multi-result OAS2
+//  1. autotmp_X = callee(args...)               — single-result OAS
+//  2. autotmp_A, autotmp_B = callee(args...)    — multi-result OAS2
 //
 // In each case, when the lhs name's escape verdict is EscNone, the
 // matching outBuf nil arg is replaced with unsafe.Pointer(&tmp_k),
@@ -35,7 +35,7 @@ import (
 // Sites whose result doesn't fit one of the recognised shapes
 // (or whose result escapes) keep their nil outBuf and fall through
 // to the heap path inside maybeInPlace — same cost as stock.
-func phaseGCallSiteRewrite(fn *ir.Func) {
+func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
 	if !types.PhaseGActive {
 		return
 	}
@@ -50,33 +50,33 @@ func phaseGCallSiteRewrite(fn *ir.Func) {
 	// debugging: their ABI invariants (init ordering, stack
 	// growth, race detector hooks) are sensitive to any extra
 	// stack allocation in the caller frames. Parity with stock.
-	if base.Ctxt.Pkgpath == "runtime" ||
-		strings.HasPrefix(base.Ctxt.Pkgpath, "internal/runtime/") ||
-		base.Ctxt.Pkgpath == "syscall" {
+	if gd.Ctxt.Pkgpath == "runtime" ||
+		strings.HasPrefix(gd.Ctxt.Pkgpath, "internal/runtime/") ||
+		gd.Ctxt.Pkgpath == "syscall" {
 		return
 	}
-	rewriteStmts(fn, &fn.Body)
+	rewriteStmts(gd, fn, &fn.Body)
 }
 
 // rewriteStmts walks stmts in place, rewriting recognised call
 // sites and splicing zero-init statements before each rewritten
 // assignment. Recurses into block-bearing children so calls
 // inside if/for bodies get the same treatment.
-func rewriteStmts(fn *ir.Func, stmts *ir.Nodes) {
+func rewriteStmts(gd *base.Invocation, fn *ir.Func, stmts *ir.Nodes) {
 	var rebuilt ir.Nodes
 	changed := false
 	for _, s := range *stmts {
 		var pre []ir.Node
 		switch s := s.(type) {
 		case *ir.AssignStmt:
-			pre = tryRewriteSingleAssign(fn, s)
+			pre = tryRewriteSingleAssign(gd, fn, s)
 		case *ir.AssignListStmt:
-			pre = tryRewriteListAssign(fn, s)
+			pre = tryRewriteListAssign(gd, fn, s)
 		}
 		// Recurse into control-flow children AFTER handling this
 		// statement so the containing-block rewrite is already in
 		// place before descending.
-		recurseIntoBlocks(fn, s)
+		recurseIntoBlocks(gd, fn, s)
 		if len(pre) > 0 {
 			changed = true
 			rebuilt = append(rebuilt, pre...)
@@ -90,32 +90,32 @@ func rewriteStmts(fn *ir.Func, stmts *ir.Nodes) {
 
 // recurseIntoBlocks finds block-bearing children of n and
 // recursively rewrites each block's statement list.
-func recurseIntoBlocks(fn *ir.Func, n ir.Node) {
+func recurseIntoBlocks(gd *base.Invocation, fn *ir.Func, n ir.Node) {
 	switch n := n.(type) {
 	case *ir.IfStmt:
-		rewriteStmts(fn, &n.Body)
-		rewriteStmts(fn, &n.Else)
+		rewriteStmts(gd, fn, &n.Body)
+		rewriteStmts(gd, fn, &n.Else)
 	case *ir.ForStmt:
-		rewriteStmts(fn, &n.Body)
+		rewriteStmts(gd, fn, &n.Body)
 	case *ir.RangeStmt:
-		rewriteStmts(fn, &n.Body)
+		rewriteStmts(gd, fn, &n.Body)
 	case *ir.SwitchStmt:
 		for _, cc := range n.Cases {
-			rewriteStmts(fn, &cc.Body)
+			rewriteStmts(gd, fn, &cc.Body)
 		}
 	case *ir.SelectStmt:
 		for _, cc := range n.Cases {
-			rewriteStmts(fn, &cc.Body)
+			rewriteStmts(gd, fn, &cc.Body)
 		}
 	case *ir.BlockStmt:
-		rewriteStmts(fn, &n.List)
+		rewriteStmts(gd, fn, &n.List)
 	}
 }
 
 // tryRewriteSingleAssign handles `autotmp = callee(args...)`.
 // Returns the pre-statements (zero-init) to splice into the
 // enclosing block ahead of as.
-func tryRewriteSingleAssign(fn *ir.Func, as *ir.AssignStmt) []ir.Node {
+func tryRewriteSingleAssign(gd *base.Invocation, fn *ir.Func, as *ir.AssignStmt) []ir.Node {
 	call, ok := as.Y.(*ir.CallExpr)
 	if !ok {
 		return nil
@@ -144,7 +144,7 @@ func tryRewriteSingleAssign(fn *ir.Func, as *ir.AssignStmt) []ir.Node {
 	// explicitly confirmed non-escaping (Esc==EscNone) is safe to
 	// stack-buffer — the default (EscUnknown) is treated as escape.
 	if call.Esc() == ir.EscNone {
-		return rewriteOutBufNils(fn, call, []*ir.Name{lhs})
+		return rewriteOutBufNils(gd, fn, call, []*ir.Name{lhs})
 	}
 	// Chain-fold: result escapes only via fn's own k-th return.
 	// Forward fn's outBuf_k as the call's outBuf — the caller's
@@ -156,7 +156,7 @@ func tryRewriteSingleAssign(fn *ir.Func, as *ir.AssignStmt) []ir.Node {
 }
 
 // tryRewriteListAssign handles `a, b = callee(args...)`.
-func tryRewriteListAssign(fn *ir.Func, as *ir.AssignListStmt) []ir.Node {
+func tryRewriteListAssign(gd *base.Invocation, fn *ir.Func, as *ir.AssignListStmt) []ir.Node {
 	if len(as.Rhs) != 1 {
 		return nil
 	}
@@ -176,7 +176,7 @@ func tryRewriteListAssign(fn *ir.Func, as *ir.AssignListStmt) []ir.Node {
 		lhsNames[i] = n
 	}
 	if call.Esc() == ir.EscNone {
-		return rewriteOutBufNils(fn, call, lhsNames)
+		return rewriteOutBufNils(gd, fn, call, lhsNames)
 	}
 	if call.GdForwardOutBufResult > 0 {
 		return forwardParentOutBuf(fn, call, int(call.GdForwardOutBufResult)-1)
@@ -300,7 +300,7 @@ func calleeIsExtended(call *ir.CallExpr) bool {
 // must be spliced into the enclosing block before the call's
 // assignment — liveness requires an explicit write before any
 // address-take of a pointer-bearing stack local.
-func rewriteOutBufNils(fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node {
+func rewriteOutBufNils(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node {
 	sig := call.Fun.Type()
 	params := sig.Params()
 	results := sig.Results()
@@ -359,7 +359,7 @@ func rewriteOutBufNils(fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node
 		// lifetime isn't tied to our stack frame, and stack-
 		// buffering would either be wasted (buf unused) or unsafe
 		// if the callee filled buf and *also* aliased an input.
-		if escape.ResultAliasesParam(sig, ri) {
+		if escape.ResultAliasesParam(gd, sig, ri) {
 			continue
 		}
 		// Extra strictness (first cut): require that NO param/recv
@@ -384,7 +384,7 @@ func rewriteOutBufNils(fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node
 		// Build the stack buffer: a fresh PAUTO of type T. Mark
 		// Addrtaken so downstream passes (liveness/stack map) see
 		// it as a pointer-containing stack slot if T has pointers.
-		bufName := typecheck.TempAt(call.Pos(), fn, underlying)
+		bufName := typecheck.TempAt(gd, call.Pos(), fn, underlying)
 		bufName.SetEsc(ir.EscNone)
 		bufName.SetAddrtaken(true)
 		// CRITICAL: the returned pointer aliases this buffer, so its
@@ -403,15 +403,15 @@ func rewriteOutBufNils(fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node
 		// the internal form of "var x T" / "x = <zero>". It doesn't
 		// need recursive walking; walkStmtList will lower it
 		// naturally when it reaches this position.
-		zeroAs := ir.NewAssignStmt(call.Pos(), bufName, nil)
+		zeroAs := ir.NewAssignStmt(gd, call.Pos(), bufName, nil)
 		zeroAs.SetTypecheck(1)
 		pre = append(pre, zeroAs)
 
 		// Replace the nil outBuf arg with unsafe.Pointer(&bufName).
-		addr := typecheck.NodAddrAt(call.Pos(), bufName)
+		addr := typecheck.NodAddrAt(gd, call.Pos(), bufName)
 		addr.SetType(types.NewPtr(underlying))
 		addr.SetTypecheck(1)
-		conv := ir.NewConvExpr(call.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], addr)
+		conv := ir.NewConvExpr(gd, call.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], addr)
 		conv.SetTypecheck(1)
 		call.Args[i] = conv
 	}

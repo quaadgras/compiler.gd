@@ -15,46 +15,46 @@ import (
 )
 
 // NewBool returns an OLITERAL representing b as an untyped boolean.
-func NewBool(pos src.XPos, b bool) Node {
-	return NewBasicLit(pos, types.UntypedBool, constant.MakeBool(b))
+func NewBool(gd *base.Invocation, pos src.XPos, b bool) Node {
+	return NewBasicLit(gd, pos, types.UntypedBool, constant.MakeBool(b))
 }
 
 // NewInt returns an OLITERAL representing v as an untyped integer.
-func NewInt(pos src.XPos, v int64) Node {
-	return NewBasicLit(pos, types.UntypedInt, constant.MakeInt64(v))
+func NewInt(gd *base.Invocation, pos src.XPos, v int64) Node {
+	return NewBasicLit(gd, pos, types.UntypedInt, constant.MakeInt64(v))
 }
 
 // NewString returns an OLITERAL representing s as an untyped string.
-func NewString(pos src.XPos, s string) Node {
-	return NewBasicLit(pos, types.UntypedString, constant.MakeString(s))
+func NewString(gd *base.Invocation, pos src.XPos, s string) Node {
+	return NewBasicLit(gd, pos, types.UntypedString, constant.MakeString(s))
 }
 
 // NewUintptr returns an OLITERAL representing v as a uintptr.
-func NewUintptr(pos src.XPos, v int64) Node {
-	return NewBasicLit(pos, types.Types[types.TUINTPTR], constant.MakeInt64(v))
+func NewUintptr(gd *base.Invocation, pos src.XPos, v int64) Node {
+	return NewBasicLit(gd, pos, types.Types[types.TUINTPTR], constant.MakeInt64(v))
 }
 
 // NewZero returns a zero value of the given type.
-func NewZero(pos src.XPos, typ *types.Type) Node {
+func NewZero(gd *base.Invocation, pos src.XPos, typ *types.Type) Node {
 	switch {
 	case typ.HasNil():
-		return NewNilExpr(pos, typ)
+		return NewNilExpr(gd, pos, typ)
 	case typ.IsInteger():
-		return NewBasicLit(pos, typ, intZero)
+		return NewBasicLit(gd, pos, typ, intZero)
 	case typ.IsFloat():
-		return NewBasicLit(pos, typ, floatZero)
+		return NewBasicLit(gd, pos, typ, floatZero)
 	case typ.IsComplex():
-		return NewBasicLit(pos, typ, complexZero)
+		return NewBasicLit(gd, pos, typ, complexZero)
 	case typ.IsBoolean():
-		return NewBasicLit(pos, typ, constant.MakeBool(false))
+		return NewBasicLit(gd, pos, typ, constant.MakeBool(false))
 	case typ.IsString():
-		return NewBasicLit(pos, typ, constant.MakeString(""))
+		return NewBasicLit(gd, pos, typ, constant.MakeString(""))
 	case typ.IsArray() || typ.IsStruct():
 		// TODO(mdempsky): Return a typechecked expression instead.
-		return NewCompLitExpr(pos, OCOMPLIT, typ, nil)
+		return NewCompLitExpr(gd, pos, OCOMPLIT, typ, nil)
 	}
 
-	base.FatalfAt(pos, "unexpected type: %v", typ)
+	gd.FatalfAt(pos, "unexpected type: %v", typ)
 	panic("unreachable")
 }
 
@@ -65,7 +65,7 @@ var (
 )
 
 // NewOne returns an OLITERAL representing 1 with the given type.
-func NewOne(pos src.XPos, typ *types.Type) Node {
+func NewOne(gd *base.Invocation, pos src.XPos, typ *types.Type) Node {
 	var val constant.Value
 	switch {
 	case typ.IsInteger():
@@ -75,10 +75,10 @@ func NewOne(pos src.XPos, typ *types.Type) Node {
 	case typ.IsComplex():
 		val = complexOne
 	default:
-		base.FatalfAt(pos, "%v cannot represent 1", typ)
+		gd.FatalfAt(pos, "%v cannot represent 1", typ)
 	}
 
-	return NewBasicLit(pos, typ, val)
+	return NewBasicLit(gd, pos, typ, val)
 }
 
 var (
@@ -93,7 +93,7 @@ const (
 	ConstPrec = 512
 )
 
-func BigFloat(v constant.Value) *big.Float {
+func BigFloat(gd *base.Invocation, v constant.Value) *big.Float {
 	f := new(big.Float)
 	f.SetPrec(ConstPrec)
 	switch u := constant.Val(v).(type) {
@@ -106,14 +106,14 @@ func BigFloat(v constant.Value) *big.Float {
 	case *big.Rat:
 		f.SetRat(u)
 	default:
-		base.Fatalf("unexpected: %v", u)
+		gd.Fatalf("unexpected: %v", u)
 	}
 	return f
 }
 
 // ConstOverflow reports whether constant value v is too large
 // to represent with type t.
-func ConstOverflow(v constant.Value, t *types.Type) bool {
+func ConstOverflow(gd *base.Invocation, v constant.Value, t *types.Type) bool {
 	switch {
 	case t.IsInteger():
 		bits := uint(8 * t.Size())
@@ -137,9 +137,9 @@ func ConstOverflow(v constant.Value, t *types.Type) bool {
 		}
 	case t.IsComplex():
 		ft := types.FloatForComplex(t)
-		return ConstOverflow(constant.Real(v), ft) || ConstOverflow(constant.Imag(v), ft)
+		return ConstOverflow(gd, constant.Real(v), ft) || ConstOverflow(gd, constant.Imag(v), ft)
 	}
-	base.Fatalf("ConstOverflow: %v, %v", v, t)
+	gd.Fatalf("ConstOverflow: %v, %v", v, t)
 	panic("unreachable")
 }
 

@@ -130,10 +130,12 @@ func (o Op) Format(s fmt.State, verb rune) {
 //	%L	Go syntax followed by " (type T)" if type is known.
 //	%+v	Debug syntax, as in Dump.
 func fmtNode(n Node, s fmt.State, verb rune) {
+	gd := n.compiler()
+
 	// %+v prints Dump.
 	// Otherwise we print Go syntax.
 	if s.Flag('+') && verb == 'v' {
-		dumpNode(s, n, 1)
+		dumpNode(gd, s, n, 1)
 		return
 	}
 
@@ -166,7 +168,7 @@ func fmtNode(n Node, s fmt.State, verb rune) {
 		return
 	}
 
-	exprFmt(n, s, 0)
+	exprFmt(gd, n, s, 0)
 }
 
 var OpPrec = []int{
@@ -504,7 +506,7 @@ func stmtFmt(n Node, s fmt.State) {
 	}
 }
 
-func exprFmt(n Node, s fmt.State, prec int) {
+func exprFmt(gd *base.Invocation, n Node, s fmt.State, prec int) {
 	// NOTE(rsc): This code used to support the text-based
 	// which was more aggressive about printing full Go syntax
 	// (for example, an actual loop instead of "for loop").
@@ -661,7 +663,7 @@ func exprFmt(n Node, s fmt.State, prec int) {
 
 	case OXDOT, ODOT, ODOTPTR, ODOTINTER, ODOTMETH, OMETHVALUE, OMETHEXPR:
 		n := n.(*SelectorExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		if n.Sel == nil {
 			fmt.Fprint(s, ".<nil>")
 			return
@@ -670,17 +672,17 @@ func exprFmt(n Node, s fmt.State, prec int) {
 
 	case ODOTTYPE, ODOTTYPE2:
 		n := n.(*TypeAssertExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		fmt.Fprintf(s, ".(%v)", n.Type())
 
 	case OINDEX, OINDEXMAP:
 		n := n.(*IndexExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		fmt.Fprintf(s, "[%v]", n.Index)
 
 	case OSLICE, OSLICESTR, OSLICEARR, OSLICE3, OSLICE3ARR:
 		n := n.(*SliceExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		fmt.Fprint(s, "[")
 		if n.Low != nil {
 			fmt.Fprint(s, n.Low)
@@ -689,7 +691,7 @@ func exprFmt(n Node, s fmt.State, prec int) {
 		if n.High != nil {
 			fmt.Fprint(s, n.High)
 		}
-		if n.Op().IsSlice3() {
+		if n.Op().IsSlice3(gd) {
 			fmt.Fprint(s, ":")
 			if n.Max != nil {
 				fmt.Fprint(s, n.Max)
@@ -751,7 +753,7 @@ func exprFmt(n Node, s fmt.State, prec int) {
 
 	case OCALL, OCALLFUNC, OCALLINTER, OCALLMETH, OGETG:
 		n := n.(*CallExpr)
-		exprFmt(n.Fun, s, nprec)
+		exprFmt(gd, n.Fun, s, nprec)
 		args := callExprUserArgs(n)
 		if n.IsDDD {
 			fmt.Fprintf(s, "(%.v...)", args)
@@ -791,7 +793,7 @@ func exprFmt(n Node, s fmt.State, prec int) {
 		if n.X != nil && n.X.Op() == n.Op() {
 			fmt.Fprint(s, " ")
 		}
-		exprFmt(n.X, s, nprec+1)
+		exprFmt(gd, n.X, s, nprec+1)
 
 	case OADDR:
 		n := n.(*AddrExpr)
@@ -799,12 +801,12 @@ func exprFmt(n Node, s fmt.State, prec int) {
 		if n.X != nil && n.X.Op() == n.Op() {
 			fmt.Fprint(s, " ")
 		}
-		exprFmt(n.X, s, nprec+1)
+		exprFmt(gd, n.X, s, nprec+1)
 
 	case ODEREF:
 		n := n.(*StarExpr)
 		fmt.Fprintf(s, "%v", n.Op())
-		exprFmt(n.X, s, nprec+1)
+		exprFmt(gd, n.X, s, nprec+1)
 
 		// Binary
 	case OADD,
@@ -825,22 +827,22 @@ func exprFmt(n Node, s fmt.State, prec int) {
 		OSUB,
 		OXOR:
 		n := n.(*BinaryExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		fmt.Fprintf(s, " %v ", n.Op())
-		exprFmt(n.Y, s, nprec+1)
+		exprFmt(gd, n.Y, s, nprec+1)
 
 	case OANDAND,
 		OOROR:
 		n := n.(*LogicalExpr)
-		exprFmt(n.X, s, nprec)
+		exprFmt(gd, n.X, s, nprec)
 		fmt.Fprintf(s, " %v ", n.Op())
-		exprFmt(n.Y, s, nprec+1)
+		exprFmt(gd, n.Y, s, nprec+1)
 
 	case OSEND:
 		n := n.(*SendStmt)
-		exprFmt(n.Chan, s, nprec)
+		exprFmt(gd, n.Chan, s, nprec)
 		fmt.Fprintf(s, " <- ")
-		exprFmt(n.Value, s, nprec+1)
+		exprFmt(gd, n.Value, s, nprec+1)
 
 	case OADDSTR:
 		n := n.(*AddStringExpr)
@@ -848,7 +850,7 @@ func exprFmt(n Node, s fmt.State, prec int) {
 			if i != 0 {
 				fmt.Fprint(s, " + ")
 			}
-			exprFmt(n1, s, nprec)
+			exprFmt(gd, n1, s, nprec)
 		}
 	default:
 		fmt.Fprintf(s, "<node %v>", n.Op())
@@ -902,10 +904,21 @@ func callExprUserArgs(n *CallExpr) Nodes {
 //	%v	Go syntax, semicolon-separated
 //	%.v	Go syntax, comma-separated
 //	%+v	Debug syntax, as in DumpList.
+// Format implements fmt.Formatter for a Nodes. The signature is the
+// standard Format(fmt.State, rune) so fmt's reflection-based dispatch
+// finds it; without that, fmt falls back to default slice rendering
+// (e.g. "[a b c]") and breaks any caller that uses "%v" / "%.v" on a
+// Nodes — escape diagnostics, IR fmt, etc.
+//
+// %+v needs an *Invocation for dumpNodes; we recover it from the first
+// element's compiler() (every Node carries its own gd). An empty Nodes
+// has nothing to dump anyway.
 func (l Nodes) Format(s fmt.State, verb rune) {
 	if s.Flag('+') && verb == 'v' {
-		// %+v is DumpList output
-		dumpNodes(s, l, 1)
+		if len(l) == 0 {
+			return
+		}
+		dumpNodes(l[0].compiler(), s, l, 1)
 		return
 	}
 
@@ -935,16 +948,16 @@ func Dump(s string, n Node) {
 }
 
 // DumpList prints the message s followed by a debug dump of each node in the list.
-func DumpList(s string, list Nodes) {
+func DumpList(gd *base.Invocation, s string, list Nodes) {
 	var buf bytes.Buffer
-	FDumpList(&buf, s, list)
+	FDumpList(gd, &buf, s, list)
 	os.Stdout.Write(buf.Bytes())
 }
 
 // FDumpList prints to w the message s followed by a debug dump of each node in the list.
-func FDumpList(w io.Writer, s string, list Nodes) {
+func FDumpList(gd *base.Invocation, w io.Writer, s string, list Nodes) {
 	io.WriteString(w, s)
-	dumpNodes(w, list, 1)
+	dumpNodes(gd, w, list, 1)
 	io.WriteString(w, "\n")
 }
 
@@ -960,22 +973,22 @@ func indent(w io.Writer, depth int) {
 var EscFmt func(n Node) string
 
 // dumpNodeHeader prints the debug-format node header line to w.
-func dumpNodeHeader(w io.Writer, n Node) {
+func dumpNodeHeader(gd *base.Invocation, w io.Writer, n Node) {
 	// Useful to see which nodes in an AST printout are actually identical
-	if base.Debug.DumpPtrs != 0 {
+	if gd.Debug.DumpPtrs != 0 {
 		fmt.Fprintf(w, " p(%p)", n)
 	}
 
-	if base.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Defn != nil {
+	if gd.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Defn != nil {
 		// Useful to see where Defn is set and what node it points to
 		fmt.Fprintf(w, " defn(%p)", n.Name().Defn)
 	}
 
-	if base.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Curfn != nil {
+	if gd.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Curfn != nil {
 		// Useful to see where Defn is set and what node it points to
 		fmt.Fprintf(w, " curfn(%p)", n.Name().Curfn)
 	}
-	if base.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Outer != nil {
+	if gd.Debug.DumpPtrs != 0 && n.Name() != nil && n.Name().Outer != nil {
 		// Useful to see where Defn is set and what node it points to
 		fmt.Fprintf(w, " outer(%p)", n.Name().Outer)
 	}
@@ -1070,7 +1083,7 @@ func dumpNodeHeader(w io.Writer, n Node) {
 			fmt.Fprint(w, "+")
 		}
 		sep := ""
-		base.Ctxt.AllPos(n.Pos(), func(pos src.Pos) {
+		gd.Ctxt.AllPos(n.Pos(), func(pos src.Pos) {
 			fmt.Fprint(w, sep)
 			sep = " "
 			// TODO(mdempsky): Print line pragma details too.
@@ -1081,7 +1094,7 @@ func dumpNodeHeader(w io.Writer, n Node) {
 	}
 }
 
-func dumpNode(w io.Writer, n Node, depth int) {
+func dumpNode(gd *base.Invocation, w io.Writer, n Node, depth int) {
 	indent(w, depth)
 	if depth > 40 {
 		fmt.Fprint(w, "...")
@@ -1095,18 +1108,18 @@ func dumpNode(w io.Writer, n Node, depth int) {
 
 	if len(n.Init()) != 0 {
 		fmt.Fprintf(w, "%+v-init", n.Op())
-		dumpNodes(w, n.Init(), depth+1)
+		dumpNodes(gd, w, n.Init(), depth+1)
 		indent(w, depth)
 	}
 
 	switch n.Op() {
 	default:
 		fmt.Fprintf(w, "%+v", n.Op())
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 
 	case OLITERAL:
 		fmt.Fprintf(w, "%+v-%v", n.Op(), n.Val())
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 		return
 
 	case ONAME, ONONAME:
@@ -1115,7 +1128,7 @@ func dumpNode(w io.Writer, n Node, depth int) {
 		} else {
 			fmt.Fprintf(w, "%+v", n.Op())
 		}
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 		return
 
 	case OLINKSYMOFFSET:
@@ -1125,47 +1138,47 @@ func dumpNode(w io.Writer, n Node, depth int) {
 		if n.Offset_ != 0 {
 			fmt.Fprintf(w, "%+v", n.Offset_)
 		}
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 
 	case OASOP:
 		n := n.(*AssignOpStmt)
 		fmt.Fprintf(w, "%+v-%+v", n.Op(), n.AsOp)
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 
 	case OTYPE:
 		fmt.Fprintf(w, "%+v %+v", n.Op(), n.Sym())
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 		return
 
 	case OCLOSURE:
 		fmt.Fprintf(w, "%+v", n.Op())
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 
 	case ODCLFUNC:
 		// Func has many fields we don't want to print.
 		// Bypass reflection and just print what we want.
 		n := n.(*Func)
 		fmt.Fprintf(w, "%+v", n.Op())
-		dumpNodeHeader(w, n)
+		dumpNodeHeader(gd, w, n)
 		fn := n
 		if len(fn.Dcl) > 0 {
 			indent(w, depth)
 			fmt.Fprintf(w, "%+v-Dcl", n.Op())
 			for _, dcl := range n.Dcl {
-				dumpNode(w, dcl, depth+1)
+				dumpNode(gd, w, dcl, depth+1)
 			}
 		}
 		if len(fn.ClosureVars) > 0 {
 			indent(w, depth)
 			fmt.Fprintf(w, "%+v-ClosureVars", n.Op())
 			for _, cv := range fn.ClosureVars {
-				dumpNode(w, cv, depth+1)
+				dumpNode(gd, w, cv, depth+1)
 			}
 		}
 		if len(fn.Body) > 0 {
 			indent(w, depth)
 			fmt.Fprintf(w, "%+v-body", n.Op())
-			dumpNodes(w, fn.Body, depth+1)
+			dumpNodes(gd, w, fn.Body, depth+1)
 		}
 		return
 	}
@@ -1200,7 +1213,7 @@ func dumpNode(w io.Writer, n Node, depth int) {
 				indent(w, depth)
 				fmt.Fprintf(w, "%+v-%s", n.Op(), name)
 			}
-			dumpNode(w, val, depth+1)
+			dumpNode(gd, w, val, depth+1)
 		case Nodes:
 			if len(val) == 0 {
 				continue
@@ -1209,7 +1222,7 @@ func dumpNode(w io.Writer, n Node, depth int) {
 				indent(w, depth)
 				fmt.Fprintf(w, "%+v-%s", n.Op(), name)
 			}
-			dumpNodes(w, val, depth+1)
+			dumpNodes(gd, w, val, depth+1)
 		default:
 			if vf.Kind() == reflect.Slice && vf.Type().Elem().Implements(nodeType) {
 				if vf.Len() == 0 {
@@ -1220,7 +1233,7 @@ func dumpNode(w io.Writer, n Node, depth int) {
 					fmt.Fprintf(w, "%+v-%s", n.Op(), name)
 				}
 				for i, n := 0, vf.Len(); i < n; i++ {
-					dumpNode(w, vf.Index(i).Interface().(Node), depth+1)
+					dumpNode(gd, w, vf.Index(i).Interface().(Node), depth+1)
 				}
 			}
 		}
@@ -1229,13 +1242,13 @@ func dumpNode(w io.Writer, n Node, depth int) {
 
 var nodeType = reflect.TypeFor[Node]()
 
-func dumpNodes(w io.Writer, list Nodes, depth int) {
+func dumpNodes(gd *base.Invocation, w io.Writer, list Nodes, depth int) {
 	if len(list) == 0 {
 		fmt.Fprintf(w, " <nil>")
 		return
 	}
 
 	for _, n := range list {
-		dumpNode(w, n, depth)
+		dumpNode(gd, w, n, depth)
 	}
 }

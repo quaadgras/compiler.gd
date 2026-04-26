@@ -5,11 +5,18 @@
 package syntax
 
 import (
+	"cmd/compile/internal/base"
 	"fmt"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+// testGd is the *base.Invocation passed to syntax.Parse / syntax.ParseFile
+// in tests. Empty Invocation suffices: the parser only consults gd through
+// PragmaHandler-style callbacks (which the tests don't override), and any
+// fatal paths panic with proper context.
+var testGd = &base.Invocation{}
 
 func TestCommentMap(t *testing.T) {
 	const src = `/* ERROR "0:0" */ /* ERROR "0:0" */ // ERROR "0:0"

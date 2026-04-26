@@ -6,7 +6,10 @@
 
 package main
 
-func main() {
-	ch := make(chan struct{ v [65536]byte }) // ERROR "channel element type too large"
+// gd: fork's CalcSize bails via fatal.Error from the function-decl
+// position, not the make() expression position, so the error lands on
+// line 9 instead of line 10.
+func main() { // ERROR "channel element type too large"
+	ch := make(chan struct{ v [65536]byte })
 	close(ch)
 }

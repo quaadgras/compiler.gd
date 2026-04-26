@@ -97,6 +97,8 @@ type RegIndex uint8
 // non-negative stack offset). The values in 'Registers' are indices
 // (as described above), not architected registers.
 type ABIParamAssignment struct {
+	gd *base.Invocation
+
 	Type      *types.Type
 	Name      *ir.Name
 	Registers []RegIndex
@@ -107,7 +109,7 @@ type ABIParamAssignment struct {
 // This will panic if "a" describes a register-allocated parameter.
 func (a *ABIParamAssignment) Offset() int32 {
 	if len(a.Registers) > 0 {
-		base.Fatalf("register allocated parameters have no offset")
+		a.gd.Fatalf("register allocated parameters have no offset")
 	}
 	return a.offset
 }
@@ -246,9 +248,9 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 // for stack-allocated inputs and outputs, that is their location on the stack.
 // (In a future version of the ABI, register-resident inputs may lose their defined
 // spill area to help reduce stack sizes.)
-func (a *ABIParamAssignment) FrameOffset(i *ABIParamResultInfo) int64 {
+func (a *ABIParamAssignment) FrameOffset(gd *base.Invocation, i *ABIParamResultInfo) int64 {
 	if a.offset == -1 {
-		base.Fatalf("function parameter has no ABI-defined frame-pointer offset")
+		gd.Fatalf("function parameter has no ABI-defined frame-pointer offset")
 	}
 	if len(a.Registers) == 0 { // passed on stack
 		return int64(a.offset) - i.config.LocalsOffset()
@@ -266,6 +268,8 @@ type RegAmounts struct {
 // ABIConfig captures the number of registers made available
 // by the ABI rules for parameter passing and result returning.
 type ABIConfig struct {
+	gd *base.Invocation
+
 	// Do we need anything more than this?
 	offsetForLocals int64 // e.g., obj.(*Link).Arch.FixedFrameSize -- extra linkage information on some architectures.
 	regAmounts      RegAmounts
@@ -274,8 +278,8 @@ type ABIConfig struct {
 
 // NewABIConfig returns a new ABI configuration for an architecture with
 // iRegsCount integer/pointer registers and fRegsCount floating point registers.
-func NewABIConfig(iRegsCount, fRegsCount int, offsetForLocals int64, which uint8) *ABIConfig {
-	return &ABIConfig{offsetForLocals: offsetForLocals, regAmounts: RegAmounts{iRegsCount, fRegsCount}, which: obj.ABI(which)}
+func NewABIConfig(gd *base.Invocation, iRegsCount, fRegsCount int, offsetForLocals int64, which uint8) *ABIConfig {
+	return &ABIConfig{gd: gd, offsetForLocals: offsetForLocals, regAmounts: RegAmounts{iRegsCount, fRegsCount}, which: obj.ABI(which)}
 }
 
 // Copy returns config.
@@ -310,7 +314,7 @@ func (config *ABIConfig) FloatIndexFor(r RegIndex) int64 {
 func (config *ABIConfig) NumParamRegs(typ *types.Type) int {
 	intRegs, floatRegs := typ.Registers()
 	if intRegs == math.MaxUint8 && floatRegs == math.MaxUint8 {
-		base.Fatalf("cannot represent parameters of type %v in registers", typ)
+		config.gd.Fatalf("cannot represent parameters of type %v in registers", typ)
 	}
 	return int(intRegs) + int(floatRegs)
 }
@@ -329,7 +333,7 @@ func (config *ABIConfig) ABIAnalyzeTypes(params, results []*types.Type) *ABIPara
 	assignParams := func(params []*types.Type, isResult bool) []ABIParamAssignment {
 		res := make([]ABIParamAssignment, len(params))
 		for i, param := range params {
-			res[i] = s.assignParam(param, nil, isResult)
+			res[i] = s.assignParam(config.gd, param, nil, isResult)
 		}
 		return res
 	}
@@ -371,7 +375,7 @@ func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Type) *ABIParamResultInfo 
 			if param.Nname != nil {
 				name = param.Nname.(*ir.Name)
 			}
-			res[i] = s.assignParam(param.Type, name, isResult)
+			res[i] = s.assignParam(config.gd, param.Type, name, isResult)
 		}
 		return res
 	}
@@ -420,14 +424,14 @@ func (config *ABIConfig) ABIAnalyze(t *types.Type, setNname bool) *ABIParamResul
 
 func (config *ABIConfig) updateOffset(result *ABIParamResultInfo, f *types.Field, a ABIParamAssignment, isResult, setNname bool) {
 	if f.Offset != types.BADWIDTH {
-		base.Fatalf("field offset for %s at %s has been set to %d", f.Sym, base.FmtPos(f.Pos), f.Offset)
+		config.gd.Fatalf("field offset for %s at %s has been set to %d", f.Sym, config.gd.FmtPos(f.Pos), f.Offset)
 	}
 
 	// Everything except return values in registers has either a frame home (if not in a register) or a frame spill location.
 	if !isResult || len(a.Registers) == 0 {
 		// The type frame offset DOES NOT show effects of minimum frame size.
 		// Getting this wrong breaks stackmaps, see liveness/plive.go:WriteFuncMap and typebits/typebits.go:Set
-		off := a.FrameOffset(result)
+		off := a.FrameOffset(config.gd, result)
 		if setNname && f.Nname != nil {
 			f.Nname.(*ir.Name).SetFrameOffset(off)
 			f.Nname.(*ir.Name).SetIsOutputParamInRegisters(false)
@@ -522,7 +526,7 @@ func nextSlot(offsetp *int64, typ *types.Type) int64 {
 // allocateRegs returns an ordered list of register indices for a parameter or result
 // that we've just determined to be register-assignable. The number of registers
 // needed is assumed to be stored in state.pUsed.
-func (state *assignState) allocateRegs(regs []RegIndex, t *types.Type) []RegIndex {
+func (state *assignState) allocateRegs(gd *base.Invocation, regs []RegIndex, t *types.Type) []RegIndex {
 	if t.Size() == 0 {
 		return regs
 	}
@@ -550,23 +554,23 @@ func (state *assignState) allocateRegs(regs []RegIndex, t *types.Type) []RegInde
 		switch typ {
 		case types.TARRAY:
 			for i := int64(0); i < t.NumElem(); i++ {
-				regs = state.allocateRegs(regs, t.Elem())
+				regs = state.allocateRegs(gd, regs, t.Elem())
 			}
 			return regs
 		case types.TSTRUCT:
 			for _, f := range t.Fields() {
-				regs = state.allocateRegs(regs, f.Type)
+				regs = state.allocateRegs(gd, regs, f.Type)
 			}
 			return regs
 		case types.TSLICE:
-			return state.allocateRegs(regs, synthSlice)
+			return state.allocateRegs(gd, regs, synthSlice)
 		case types.TSTRING:
-			return state.allocateRegs(regs, synthString)
+			return state.allocateRegs(gd, regs, synthString)
 		case types.TINTER:
-			return state.allocateRegs(regs, synthIface)
+			return state.allocateRegs(gd, regs, synthIface)
 		}
 	}
-	base.Fatalf("was not expecting type %s", t)
+	gd.Fatalf("was not expecting type %s", t)
 	panic("unreachable")
 }
 
@@ -625,8 +629,8 @@ func setup() {
 // of field f to determine whether it can be register assigned.
 // The result of the analysis is recorded in the result
 // ABIParamResultInfo held in 'state'.
-func (state *assignState) assignParam(typ *types.Type, name *ir.Name, isResult bool) ABIParamAssignment {
-	registers := state.tryAllocRegs(typ)
+func (state *assignState) assignParam(gd *base.Invocation, typ *types.Type, name *ir.Name, isResult bool) ABIParamAssignment {
+	registers := state.tryAllocRegs(gd, typ)
 
 	var offset int64 = -1
 	if registers == nil { // stack allocated; needs stack slot
@@ -636,6 +640,7 @@ func (state *assignState) assignParam(typ *types.Type, name *ir.Name, isResult b
 	}
 
 	return ABIParamAssignment{
+		gd:        gd,
 		Type:      typ,
 		Name:      name,
 		Registers: registers,
@@ -645,7 +650,7 @@ func (state *assignState) assignParam(typ *types.Type, name *ir.Name, isResult b
 
 // tryAllocRegs attempts to allocate registers to represent a
 // parameter of the given type. If unsuccessful, it returns nil.
-func (state *assignState) tryAllocRegs(typ *types.Type) []RegIndex {
+func (state *assignState) tryAllocRegs(gd *base.Invocation, typ *types.Type) []RegIndex {
 	if typ.Size() == 0 {
 		return nil // zero-size parameters are defined as being stack allocated
 	}
@@ -656,7 +661,7 @@ func (state *assignState) tryAllocRegs(typ *types.Type) []RegIndex {
 	}
 
 	regs := make([]RegIndex, 0, int(intRegs)+int(floatRegs))
-	return state.allocateRegs(regs, typ)
+	return state.allocateRegs(gd, regs, typ)
 }
 
 // ComputePadding returns a list of "post element" padding values in

@@ -16,9 +16,10 @@ import (
 // with the corresponding result from ir.StaticValue to make sure they agree.
 // This method is called only when turned on via build tag.
 func checkStaticValueResult(n Node, newres Node) {
+	gd := n.compiler()
 	oldres := StaticValue(n)
 	if oldres != newres {
-		base.Fatalf("%s: new/old static value disagreement on %v:\nnew=%v\nold=%v", fmtFullPos(n.Pos()), n, newres, oldres)
+		gd.Fatalf("%s: new/old static value disagreement on %v:\nnew=%v\nold=%v", fmtFullPos(gd, n.Pos()), n, newres, oldres)
 	}
 }
 
@@ -26,17 +27,18 @@ func checkStaticValueResult(n Node, newres Node) {
 // with the corresponding result from ir.Reassigned to make sure they agree.
 // This method is called only when turned on via build tag.
 func checkReassignedResult(n *Name, newres bool) {
+	gd := n.compiler()
 	origres := Reassigned(n)
 	if newres != origres {
-		base.Fatalf("%s: new/old reassigned disagreement on %v (class %s) newres=%v oldres=%v", fmtFullPos(n.Pos()), n, n.Class.String(), newres, origres)
+		gd.Fatalf("%s: new/old reassigned disagreement on %v (class %s) newres=%v oldres=%v", fmtFullPos(gd, n.Pos()), n, n.Class.String(), newres, origres)
 	}
 }
 
 // fmtFullPos returns a verbose dump for pos p, including inlines.
-func fmtFullPos(p src.XPos) string {
+func fmtFullPos(gd *base.Invocation, p src.XPos) string {
 	var sb strings.Builder
 	sep := ""
-	base.Ctxt.AllPos(p, func(pos src.Pos) {
+	gd.Ctxt.AllPos(p, func(pos src.Pos) {
 		sb.WriteString(sep)
 		sep = "|"
 		file := filepath.Base(pos.Filename())

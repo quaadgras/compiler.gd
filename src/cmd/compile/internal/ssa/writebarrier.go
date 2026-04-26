@@ -467,7 +467,7 @@ func writebarrier(f *Func) {
 				// Save old value to write buffer.
 				addEntry(pos, oldVal)
 			}
-			f.fe.Func().SetWBPos(pos)
+			f.fe.Func().SetWBPos(f.Config.gd, pos)
 			nWBops--
 		}
 		flush()
@@ -481,11 +481,11 @@ func writebarrier(f *Func) {
 			}
 			switch w.Op {
 			case OpZeroWB:
-				typ := reflectdata.TypeLinksym(w.Aux.(*types.Type))
+				typ := reflectdata.TypeLinksym(f.Config.gd, w.Aux.(*types.Type))
 				// zeroWB(&typ, dst)
 				taddr := b.NewValue1A(pos, OpAddr, b.Func.Config.Types.Uintptr, typ, sb)
 				memThen = wbcall(pos, bThen, wbZero, sp, memThen, taddr, dst)
-				f.fe.Func().SetWBPos(pos)
+				f.fe.Func().SetWBPos(f.Config.gd, pos)
 				nWBops--
 			case OpMoveWB:
 				src := w.Args[1]
@@ -497,11 +497,11 @@ func writebarrier(f *Func) {
 						}
 					}
 				}
-				typ := reflectdata.TypeLinksym(w.Aux.(*types.Type))
+				typ := reflectdata.TypeLinksym(f.Config.gd, w.Aux.(*types.Type))
 				// moveWB(&typ, dst, src)
 				taddr := b.NewValue1A(pos, OpAddr, b.Func.Config.Types.Uintptr, typ, sb)
 				memThen = wbcall(pos, bThen, wbMove, sp, memThen, taddr, dst, src)
-				f.fe.Func().SetWBPos(pos)
+				f.fe.Func().SetWBPos(f.Config.gd, pos)
 				nWBops--
 			}
 		}
@@ -543,7 +543,7 @@ func writebarrier(f *Func) {
 				}
 				if buildcfg.Experiment.CgoCheck2 {
 					// Issue cgo checking code.
-					typ := reflectdata.TypeLinksym(w.Aux.(*types.Type))
+					typ := reflectdata.TypeLinksym(f.Config.gd, w.Aux.(*types.Type))
 					taddr := b.NewValue1A(pos, OpAddr, b.Func.Config.Types.Uintptr, typ, sb)
 					mem = wbcall(pos, bEnd, cgoCheckMemmove, sp, mem, taddr, dst, src)
 				}
@@ -614,7 +614,7 @@ func (f *Func) computeZeroMap(select1 []*Value) map[ID]ZeroRegion {
 				// calls to newobject, which will have result type
 				// unsafe.Pointer instead. We can't easily infer how large the
 				// allocated memory is, so just skip it.
-				if types.LocalPkg.Path == "runtime" && v.Type.IsUnsafePtr() {
+				if types.LocalPkg(f.Config.gd).Path == "runtime" && v.Type.IsUnsafePtr() {
 					continue
 				}
 

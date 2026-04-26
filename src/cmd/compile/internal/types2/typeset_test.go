@@ -5,10 +5,15 @@
 package types2
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"strings"
 	"testing"
 )
+
+// testGd is the *base.Invocation passed to syntax.Parse in tests.
+// Empty Invocation suffices since these tests don't drive error paths.
+var testGd = &base.Invocation{}
 
 func TestInvalidTypeSet(t *testing.T) {
 	if !invalidTypeSet.IsEmpty() {
@@ -47,7 +52,7 @@ func TestTypeSetString(t *testing.T) {
 		// parse
 		errh := func(error) {} // dummy error handler so that parsing continues in presence of errors
 		src := "package p; type T interface" + body
-		file, err := syntax.Parse(nil, strings.NewReader(src), errh, nil, 0)
+		file, err := syntax.Parse(testGd, nil, strings.NewReader(src), errh, nil, 0)
 		if err != nil {
 			t.Fatalf("%s: %v (invalid test case)", body, err)
 		}

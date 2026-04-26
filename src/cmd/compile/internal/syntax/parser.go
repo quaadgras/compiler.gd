@@ -5,6 +5,7 @@
 package syntax
 
 import (
+	"cmd/compile/internal/base"
 	"fmt"
 	"go/build/constraint"
 	"io"
@@ -16,6 +17,8 @@ const debug = false
 const trace = false
 
 type parser struct {
+	gd *base.Invocation
+
 	file  *PosBase
 	errh  ErrorHandler
 	mode  Mode
@@ -81,7 +84,7 @@ func (p *parser) init(file *PosBase, r io.Reader, errh ErrorHandler, pragh Pragm
 					}
 				}
 				if pragh != nil {
-					p.pragma = pragh(p.posAt(line, col+2), p.scanner.blank, text, p.pragma) // +2 to skip over // or /*
+					p.pragma = pragh(p.gd, p.posAt(line, col+2), p.scanner.blank, text, p.pragma) // +2 to skip over // or /*
 				}
 			}
 		},
@@ -112,7 +115,7 @@ func (p *parser) takePragma() Pragma {
 // to be reported as unused.
 func (p *parser) clearPragma() {
 	if p.pragma != nil {
-		p.pragh(p.pos(), p.scanner.blank, "", p.pragma)
+		p.pragh(p.gd, p.pos(), p.scanner.blank, "", p.pragma)
 		p.pragma = nil
 	}
 }

@@ -5,6 +5,7 @@
 package escape
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -170,7 +171,7 @@ func mayAffectMemory(n ir.Node) bool {
 
 // HeapAllocReason returns the reason the given Node must be heap
 // allocated, or the empty string if it doesn't.
-func HeapAllocReason(n ir.Node) string {
+func HeapAllocReason(gd *base.Invocation, n ir.Node) string {
 	if n == nil || n.Type() == nil {
 		return ""
 	}
@@ -197,10 +198,10 @@ func HeapAllocReason(n ir.Node) string {
 		return "too aligned for stack"
 	}
 
-	if n.Op() == ir.OCLOSURE && typecheck.ClosureType(n.(*ir.ClosureExpr)).Size() > ir.MaxImplicitStackVarSize {
+	if n.Op() == ir.OCLOSURE && typecheck.ClosureType(gd, n.(*ir.ClosureExpr)).Size() > ir.MaxImplicitStackVarSize {
 		return "too large for stack"
 	}
-	if n.Op() == ir.OMETHVALUE && typecheck.MethodValueType(n.(*ir.SelectorExpr)).Size() > ir.MaxImplicitStackVarSize {
+	if n.Op() == ir.OMETHVALUE && typecheck.MethodValueType(gd, n.(*ir.SelectorExpr)).Size() > ir.MaxImplicitStackVarSize {
 		return "too large for stack"
 	}
 

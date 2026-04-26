@@ -44,14 +44,14 @@ type VarAndLoop struct {
 // base.Debug.LoopVar == 11 => transform ALL loops ignoring syntactic/potential escape. Do not log, can be in addition to GOEXPERIMENT.
 //
 // The effect of GOEXPERIMENT=loopvar is to change the default value (0) of base.Debug.LoopVar to 1 for all packages.
-func ForCapture(fn *ir.Func) []VarAndLoop {
+func ForCapture(gd *base.Invocation, fn *ir.Func) []VarAndLoop {
 	// if a loop variable is transformed it is appended to this slice for later logging
 	var transformed []VarAndLoop
 
 	describe := func(n *ir.Name) string {
 		pos := n.Pos()
-		inner := base.Ctxt.InnermostPos(pos)
-		outer := base.Ctxt.OutermostPos(pos)
+		inner := gd.Ctxt.InnermostPos(pos)
+		outer := gd.Ctxt.OutermostPos(pos)
 		if inner == outer {
 			return fmt.Sprintf("loop variable %v now per-iteration", n)
 		}
@@ -80,7 +80,7 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 					return
 				}
 				// default is false (leak candidate, not yet known to leak), but flag can make all variables "leak"
-				possiblyLeaked[n] = base.Debug.LoopVar >= 11
+				possiblyLeaked[n] = gd.Debug.LoopVar >= 11
 			}
 		}
 
@@ -107,9 +107,9 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 				if base.LoopVarHash.MatchPos(n.Pos(), desc) {
 					// Rename the loop key, prefix body with assignment from loop key
 					transformed = append(transformed, VarAndLoop{n, x, lastPos})
-					tk := typecheck.TempAt(base.Pos, fn, n.Type())
+					tk := typecheck.TempAt(gd, gd.Pos, fn, n.Type())
 					tk.SetTypecheck(1)
-					as := ir.NewAssignStmt(x.Pos(), n, tk)
+					as := ir.NewAssignStmt(gd, x.Pos(), n, tk)
 					as.Def = true
 					as.SetTypecheck(1)
 					x.Body.Prepend(as)
@@ -298,27 +298,27 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 					for _, z := range leaked {
 						transformed = append(transformed, VarAndLoop{z, x, lastPos})
 
-						tz := typecheck.TempAt(base.Pos, fn, z.Type())
+						tz := typecheck.TempAt(gd, gd.Pos, fn, z.Type())
 						tz.SetTypecheck(1)
 						zPrimeForZ[z] = tz
 
-						as := ir.NewAssignStmt(x.Pos(), z, tz)
+						as := ir.NewAssignStmt(gd, x.Pos(), z, tz)
 						as.Def = true
 						as.SetTypecheck(1)
 						z.Defn = as
 						preBody.Append(as)
 						dclFixups[z] = as
 
-						as = ir.NewAssignStmt(x.Pos(), tz, z)
+						as = ir.NewAssignStmt(gd, x.Pos(), tz, z)
 						as.SetTypecheck(1)
 						postBody.Append(as)
 
 					}
 
 					// (3) rewrite continues in body -- rewrite is inplace, so works for top level visit, too.
-					label := typecheck.Lookup(fmt.Sprintf(".3clNext_%d", seq))
+					label := typecheck.Lookup(gd, fmt.Sprintf(".3clNext_%d", seq))
 					seq++
-					labelStmt := ir.NewLabelStmt(x.Pos(), label)
+					labelStmt := ir.NewLabelStmt(gd, x.Pos(), label)
 					labelStmt.SetTypecheck(1)
 
 					loopLabel := x.Label
@@ -361,24 +361,24 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 						// body' = prebody +
 						// (6)     if tmp_first {tmp_first = false} else {Post} +
 						//         if !cond {break} + ...
-						tmpFirst := typecheck.TempAt(base.Pos, fn, types.Types[types.TBOOL])
-						tmpFirstDcl = typecheck.Stmt(ir.NewAssignStmt(x.Pos(), tmpFirst, ir.NewBool(base.Pos, true)))
-						tmpFirstSetFalse := typecheck.Stmt(ir.NewAssignStmt(x.Pos(), tmpFirst, ir.NewBool(base.Pos, false)))
-						ifTmpFirst := ir.NewIfStmt(x.Pos(), tmpFirst, ir.Nodes{tmpFirstSetFalse}, ir.Nodes{x.Post})
-						ifTmpFirst.PtrInit().Append(typecheck.Stmt(ir.NewDecl(base.Pos, ir.ODCL, tmpFirst))) // declares tmpFirst
-						preBody.Append(typecheck.Stmt(ifTmpFirst))
+						tmpFirst := typecheck.TempAt(gd, gd.Pos, fn, types.Types[types.TBOOL])
+						tmpFirstDcl = typecheck.Stmt(gd, ir.NewAssignStmt(gd, x.Pos(), tmpFirst, ir.NewBool(gd, gd.Pos, true)))
+						tmpFirstSetFalse := typecheck.Stmt(gd, ir.NewAssignStmt(gd, x.Pos(), tmpFirst, ir.NewBool(gd, gd.Pos, false)))
+						ifTmpFirst := ir.NewIfStmt(gd, x.Pos(), tmpFirst, ir.Nodes{tmpFirstSetFalse}, ir.Nodes{x.Post})
+						ifTmpFirst.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, gd.Pos, ir.ODCL, tmpFirst))) // declares tmpFirst
+						preBody.Append(typecheck.Stmt(gd, ifTmpFirst))
 					}
 
 					// body' = prebody +
 					//         if tmp_first {tmp_first = false} else {Post} +
 					// (7)     if !cond {break} + ...
 					if x.Cond != nil {
-						notCond := ir.NewUnaryExpr(x.Cond.Pos(), ir.ONOT, x.Cond)
+						notCond := ir.NewUnaryExpr(gd, x.Cond.Pos(), ir.ONOT, x.Cond)
 						notCond.SetType(x.Cond.Type())
 						notCond.SetTypecheck(1)
-						newBreak := ir.NewBranchStmt(x.Pos(), ir.OBREAK, nil)
+						newBreak := ir.NewBranchStmt(gd, x.Pos(), ir.OBREAK, nil)
 						newBreak.SetTypecheck(1)
-						ifNotCond := ir.NewIfStmt(x.Pos(), notCond, ir.Nodes{newBreak}, nil)
+						ifNotCond := ir.NewIfStmt(gd, x.Pos(), notCond, ir.Nodes{newBreak}, nil)
 						ifNotCond.SetTypecheck(1)
 						preBody.Append(ifNotCond)
 					}
@@ -430,7 +430,7 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 								a.PtrInit().Prepend(d)
 								delete(dclFixups, d.X) // can't be sure of visit order, wouldn't want to visit twice.
 							default:
-								base.Fatalf("not implemented yet for node type %v", s.Op())
+								gd.Fatalf("not implemented yet for node type %v", s.Op())
 							}
 							continue // do not copy this node, and do not increment j
 						}
@@ -447,7 +447,7 @@ func ForCapture(fn *ir.Func) []VarAndLoop {
 			rewriteNodes(fn, editNodes)
 		}
 	}
-	ir.WithFunc(fn, forCapture)
+	ir.WithFunc(gd, fn, forCapture)
 	return transformed
 }
 
@@ -517,8 +517,8 @@ func rewriteNodes(fn *ir.Func, editNodes func(c ir.Nodes) ir.Nodes) {
 	forNodes(fn)
 }
 
-func LogTransformations(transformed []VarAndLoop) {
-	print := 2 <= base.Debug.LoopVar && base.Debug.LoopVar != 11
+func LogTransformations(gd *base.Invocation, transformed []VarAndLoop) {
+	print := 2 <= gd.Debug.LoopVar && gd.Debug.LoopVar != 11
 
 	if print || logopt.Enabled() { // 11 is do them all, quietly, 12 includes debugging.
 		fileToPosBase := make(map[string]*src.PosBase) // used to remove inline context for innermost reporting.
@@ -532,7 +532,7 @@ func LogTransformations(transformed []VarAndLoop) {
 				fileToPosBase[afn] = pb
 			}
 			inner.SetBase(pb)
-			return base.Ctxt.PosTable.XPos(inner)
+			return gd.Ctxt.PosTable.XPos(inner)
 		}
 
 		type unit struct{}
@@ -552,8 +552,8 @@ func LogTransformations(transformed []VarAndLoop) {
 			}
 			pos := n.Pos()
 
-			inner := base.Ctxt.InnermostPos(pos)
-			outer := base.Ctxt.OutermostPos(pos)
+			inner := gd.Ctxt.InnermostPos(pos)
+			outer := gd.Ctxt.OutermostPos(pos)
 
 			if logopt.Enabled() {
 				// For automated checking of coverage of this transformation, include this in the JSON information.
@@ -570,16 +570,16 @@ func LogTransformations(transformed []VarAndLoop) {
 			if print {
 				if inner == outer {
 					if n.Esc() == ir.EscHeap {
-						base.WarnfAt(pos, "loop variable %v now per-iteration, heap-allocated", n)
+						gd.WarnfAt(pos, "loop variable %v now per-iteration, heap-allocated", n)
 					} else {
-						base.WarnfAt(pos, "loop variable %v now per-iteration, stack-allocated", n)
+						gd.WarnfAt(pos, "loop variable %v now per-iteration, stack-allocated", n)
 					}
 				} else {
 					innerXPos := trueInlinedPos(inner)
 					if n.Esc() == ir.EscHeap {
-						base.WarnfAt(innerXPos, "loop variable %v now per-iteration, heap-allocated (loop inlined into %s:%d)", n, outer.Filename(), outer.Line())
+						gd.WarnfAt(innerXPos, "loop variable %v now per-iteration, heap-allocated (loop inlined into %s:%d)", n, outer.Filename(), outer.Line())
 					} else {
-						base.WarnfAt(innerXPos, "loop variable %v now per-iteration, stack-allocated (loop inlined into %s:%d)", n, outer.Filename(), outer.Line())
+						gd.WarnfAt(innerXPos, "loop variable %v now per-iteration, stack-allocated (loop inlined into %s:%d)", n, outer.Filename(), outer.Line())
 					}
 				}
 			}
@@ -595,17 +595,17 @@ func LogTransformations(transformed []VarAndLoop) {
 				// Intended to help with performance debugging, we record whole loop ranges
 				logopt.LogOptRange(pos, last, "loop-modified-"+loopKind, "loopvar", ir.FuncName(l.curfn))
 			}
-			if print && 4 <= base.Debug.LoopVar {
+			if print && 4 <= gd.Debug.LoopVar {
 				// TODO decide if we want to keep this, or not.  It was helpful for validating logopt, otherwise, eh.
-				inner := base.Ctxt.InnermostPos(pos)
-				outer := base.Ctxt.OutermostPos(pos)
+				inner := gd.Ctxt.InnermostPos(pos)
+				outer := gd.Ctxt.OutermostPos(pos)
 
 				if inner == outer {
-					base.WarnfAt(pos, "%s loop ending at %d:%d was modified", loopKind, last.Line(), last.Col())
+					gd.WarnfAt(pos, "%s loop ending at %d:%d was modified", loopKind, last.Line(), last.Col())
 				} else {
 					pos = trueInlinedPos(inner)
-					last = trueInlinedPos(base.Ctxt.InnermostPos(last))
-					base.WarnfAt(pos, "%s loop ending at %d:%d was modified (loop inlined into %s:%d)", loopKind, last.Line(), last.Col(), outer.Filename(), outer.Line())
+					last = trueInlinedPos(gd.Ctxt.InnermostPos(last))
+					gd.WarnfAt(pos, "%s loop ending at %d:%d was modified (loop inlined into %s:%d)", loopKind, last.Line(), last.Col(), outer.Filename(), outer.Line())
 				}
 			}
 		}

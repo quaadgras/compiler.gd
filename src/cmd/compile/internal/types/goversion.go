@@ -35,24 +35,24 @@ func AllowsGoVersion(major, minor int) bool {
 
 // ParseLangFlag verifies that the -lang flag holds a valid value, and
 // exits if not. It initializes data used by AllowsGoVersion.
-func ParseLangFlag() {
-	if base.Flag.Lang == "" {
+func ParseLangFlag(gd *base.Invocation) {
+	if gd.Flag.Lang == "" {
 		return
 	}
 
 	var err error
-	langWant, err = parseLang(base.Flag.Lang)
+	langWant, err = parseLang(gd.Flag.Lang)
 	if err != nil {
-		log.Fatalf("invalid value %q for -lang: %v", base.Flag.Lang, err)
+		log.Fatalf("invalid value %q for -lang: %v", gd.Flag.Lang, err)
 	}
 
-	if def := currentLang(); base.Flag.Lang != def {
+	if def := currentLang(); gd.Flag.Lang != def {
 		defVers, err := parseLang(def)
 		if err != nil {
 			log.Fatalf("internal error parsing default lang %q: %v", def, err)
 		}
 		if langWant.major > defVers.major || (langWant.major == defVers.major && langWant.minor > defVers.minor) {
-			log.Fatalf("invalid value %q for -lang: max known version is %q", base.Flag.Lang, def)
+			log.Fatalf("invalid value %q for -lang: max known version is %q", gd.Flag.Lang, def)
 		}
 	}
 }

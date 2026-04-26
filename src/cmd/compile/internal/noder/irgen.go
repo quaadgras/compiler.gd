@@ -23,9 +23,9 @@ var versionErrorRx = regexp.MustCompile(`requires go[0-9]+\.[0-9]+ or later`)
 // checkFiles configures and runs the types2 checker on the given
 // parsed source files and then returns the result.
 // The map result value indicates which closures are generated from the bodies of range function loops.
-func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*syntax.FuncLit]bool) {
-	if base.SyntaxErrors() != 0 {
-		base.ErrorExit()
+func checkFiles(gd *base.Invocation, m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*syntax.FuncLit]bool) {
+	if gd.SyntaxErrors() != 0 {
+		gd.ErrorExit()
 	}
 
 	// setup and syntax error reporting
@@ -47,18 +47,19 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 	// typechecking
 	ctxt := types2.NewContext()
 	importer := gcimports{
+		gd:       gd,
 		ctxt:     ctxt,
 		packages: make(map[string]*types2.Package),
 	}
 	conf := types2.Config{
 		Context:            ctxt,
-		GoVersion:          base.Flag.Lang,
+		GoVersion:          gd.Flag.Lang,
 		IgnoreBranchErrors: true, // parser already checked via syntax.CheckBranches mode
 		Importer:           &importer,
 		Sizes:              types2.SizesFor("gc", buildcfg.GOARCH),
 		EnableAlias:        true,
 	}
-	if base.Flag.ErrorURL {
+	if gd.Flag.ErrorURL {
 		conf.ErrorURL = " [go.dev/e/%s]"
 	}
 	info := &types2.Info{
@@ -86,26 +87,26 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 				msg = fmt.Sprintf("%s (file declares //go:build %s)", msg, fileVersion)
 			} else {
 				// Otherwise, hint at the -lang setting.
-				msg = fmt.Sprintf("%s (-lang was set to %s; check go.mod)", msg, base.Flag.Lang)
+				msg = fmt.Sprintf("%s (-lang was set to %s; check go.mod)", msg, gd.Flag.Lang)
 			}
 		}
-		base.ErrorfAt(m.makeXPos(terr.Pos), terr.Code, "%s", msg)
+		gd.ErrorfAt(m.makeXPos(gd, terr.Pos), terr.Code, "%s", msg)
 	}
 
-	pkg, err := conf.Check(base.Ctxt.Pkgpath, files, info)
-	base.ExitIfErrors()
+	pkg, err := conf.Check(gd.Ctxt.Pkgpath, files, info)
+	gd.ExitIfErrors()
 	if err != nil {
-		base.FatalfAt(src.NoXPos, "conf.Check error: %v", err)
+		gd.FatalfAt(src.NoXPos, "conf.Check error: %v", err)
 	}
 
 	// Check for anonymous interface cycles (#56103).
 	// TODO(gri) move this code into the type checkers (types2 and go/types)
-	var f cycleFinder
+	var f = cycleFinder{gd: gd}
 	for _, file := range files {
 		syntax.Inspect(file, func(n syntax.Node) bool {
 			if n, ok := n.(*syntax.InterfaceType); ok {
 				if f.hasCycle(types2.Unalias(n.GetTypeInfo().Type).(*types2.Interface)) {
-					base.ErrorfAt(m.makeXPos(n.Pos()), errors.InvalidTypeCycle, "invalid recursive type: anonymous interface refers to itself (see https://go.dev/issue/56103)")
+					gd.ErrorfAt(m.makeXPos(gd, n.Pos()), errors.InvalidTypeCycle, "invalid recursive type: anonymous interface refers to itself (see https://go.dev/issue/56103)")
 
 					for typ := range f.cyclic {
 						f.cyclic[typ] = false // suppress duplicate errors
@@ -116,7 +117,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 			return true
 		})
 	}
-	base.ExitIfErrors()
+	gd.ExitIfErrors()
 
 	// Implementation restriction: we don't allow not-in-heap types to
 	// be used as type arguments (#54765).
@@ -130,7 +131,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 		for name, inst := range info.Instances {
 			for i := 0; i < inst.TypeArgs.Len(); i++ {
 				if targ := inst.TypeArgs.At(i); isNotInHeap(targ) {
-					nihTargs = append(nihTargs, nihTarg{m.makeXPos(name.Pos()), targ})
+					nihTargs = append(nihTargs, nihTarg{m.makeXPos(gd, name.Pos()), targ})
 				}
 			}
 		}
@@ -139,10 +140,10 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 			return ti.pos.Before(tj.pos)
 		})
 		for _, targ := range nihTargs {
-			base.ErrorfAt(targ.pos, 0, "cannot use incomplete (or unallocatable) type as a type argument: %v", targ.typ)
+			gd.ErrorfAt(targ.pos, 0, "cannot use incomplete (or unallocatable) type as a type argument: %v", targ.typ)
 		}
 	}
-	base.ExitIfErrors()
+	gd.ExitIfErrors()
 
 	// Implementation restriction: we don't allow not-in-heap types to
 	// be used as map keys/values, or channel.
@@ -154,15 +155,15 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 					case *syntax.MapType:
 						typ := n.GetTypeInfo().Type.Underlying().(*types2.Map)
 						if isNotInHeap(typ.Key()) {
-							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "incomplete (or unallocatable) map key not allowed")
+							gd.ErrorfAt(m.makeXPos(gd, n.Pos()), 0, "incomplete (or unallocatable) map key not allowed")
 						}
 						if isNotInHeap(typ.Elem()) {
-							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "incomplete (or unallocatable) map value not allowed")
+							gd.ErrorfAt(m.makeXPos(gd, n.Pos()), 0, "incomplete (or unallocatable) map value not allowed")
 						}
 					case *syntax.ChanType:
 						typ := n.GetTypeInfo().Type.Underlying().(*types2.Chan)
 						if isNotInHeap(typ.Elem()) {
-							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "chan of incomplete (or unallocatable) type not allowed")
+							gd.ErrorfAt(m.makeXPos(gd, n.Pos()), 0, "chan of incomplete (or unallocatable) type not allowed")
 						}
 					}
 				}
@@ -170,7 +171,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 			})
 		}
 	}
-	base.ExitIfErrors()
+	gd.ExitIfErrors()
 
 	// Rewrite range over function to explicit function calls
 	// with the loop bodies converted into new implicit closures.
@@ -179,13 +180,14 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 	// If we do the rewrite in the back end, like between typecheck and walk,
 	// then the new implicit closure will not have a unified IR inline body,
 	// and bodyReaderFor will fail.
-	rangeInfo := rangefunc.Rewrite(pkg, info, files)
+	rangeInfo := rangefunc.Rewrite(gd, pkg, info, files)
 
 	return pkg, info, rangeInfo
 }
 
 // A cycleFinder detects anonymous interface cycles (go.dev/issue/56103).
 type cycleFinder struct {
+	gd     *base.Invocation
 	cyclic map[*types2.Interface]bool
 }
 
@@ -208,7 +210,7 @@ func (f *cycleFinder) visit(typ0 types2.Type) bool {
 	for { // loop for tail recursion
 		switch typ := types2.Unalias(typ0).(type) {
 		default:
-			base.Fatalf("unexpected type: %T", typ)
+			f.gd.Fatalf("unexpected type: %T", typ)
 
 		case *types2.Basic, *types2.Named, *types2.TypeParam:
 			return false // named types cannot be part of an anonymous cycle

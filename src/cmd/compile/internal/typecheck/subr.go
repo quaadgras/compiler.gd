@@ -16,13 +16,13 @@ import (
 	"cmd/internal/src"
 )
 
-func AssignConv(n ir.Node, t *types.Type, context string) ir.Node {
-	return assignconvfn(n, t, func() string { return context })
+func AssignConv(gd *base.Invocation, n ir.Node, t *types.Type, context string) ir.Node {
+	return assignconvfn(gd, n, t, func() string { return context })
 }
 
 // LookupNum returns types.LocalPkg.LookupNum(prefix, n).
-func LookupNum(prefix string, n int) *types.Sym {
-	return types.LocalPkg.LookupNum(prefix, n)
+func LookupNum(gd *base.Invocation, prefix string, n int) *types.Sym {
+	return types.LocalPkg(gd).LookupNum(prefix, n)
 }
 
 // Given funarg struct list, return list of fn args.
@@ -36,32 +36,32 @@ func NewFuncParams(origs []*types.Field) []*types.Field {
 	return res
 }
 
-// NodAddr returns a node representing &n at base.Pos.
-func NodAddr(n ir.Node) *ir.AddrExpr {
-	return NodAddrAt(base.Pos, n)
+// NodAddr returns a node representing &n at gd.Pos.
+func NodAddr(gd *base.Invocation, n ir.Node) *ir.AddrExpr {
+	return NodAddrAt(gd, gd.Pos, n)
 }
 
 // NodAddrAt returns a node representing &n at position pos.
-func NodAddrAt(pos src.XPos, n ir.Node) *ir.AddrExpr {
-	return ir.NewAddrExpr(pos, Expr(n))
+func NodAddrAt(gd *base.Invocation, pos src.XPos, n ir.Node) *ir.AddrExpr {
+	return ir.NewAddrExpr(gd, pos, Expr(gd, n))
 }
 
 // LinksymAddr returns a new expression that evaluates to the address
 // of lsym. typ specifies the type of the addressed memory.
-func LinksymAddr(pos src.XPos, lsym *obj.LSym, typ *types.Type) *ir.AddrExpr {
-	n := ir.NewLinksymExpr(pos, lsym, typ)
-	return Expr(NodAddrAt(pos, n)).(*ir.AddrExpr)
+func LinksymAddr(gd *base.Invocation, pos src.XPos, lsym *obj.LSym, typ *types.Type) *ir.AddrExpr {
+	n := ir.NewLinksymExpr(gd, pos, lsym, typ)
+	return Expr(gd, NodAddrAt(gd, pos, n)).(*ir.AddrExpr)
 }
 
-func NodNil() ir.Node {
-	return ir.NewNilExpr(base.Pos, types.Types[types.TNIL])
+func NodNil(gd *base.Invocation) ir.Node {
+	return ir.NewNilExpr(gd, gd.Pos, types.Types[types.TNIL])
 }
 
 // AddImplicitDots finds missing fields in obj.field that
 // will give the shortest unique addressing and
 // modifies the tree with missing field names.
-func AddImplicitDots(n *ir.SelectorExpr) *ir.SelectorExpr {
-	n.X = typecheck(n.X, ctxType|ctxExpr)
+func AddImplicitDots(gd *base.Invocation, n *ir.SelectorExpr) *ir.SelectorExpr {
+	n.X = typecheck(gd, n.X, ctxType|ctxExpr)
 	t := n.X.Type()
 	if t == nil {
 		return n
@@ -80,13 +80,13 @@ func AddImplicitDots(n *ir.SelectorExpr) *ir.SelectorExpr {
 	case path != nil:
 		// rebuild elided dots
 		for c := len(path) - 1; c >= 0; c-- {
-			dot := ir.NewSelectorExpr(n.Pos(), ir.ODOT, n.X, path[c].field.Sym)
+			dot := ir.NewSelectorExpr(gd, n.Pos(), ir.ODOT, n.X, path[c].field.Sym)
 			dot.SetImplicit(true)
 			dot.SetType(path[c].field.Type)
 			n.X = dot
 		}
 	case ambig:
-		base.Errorf("ambiguous selector %v", n)
+		gd.Errorf("ambiguous selector %v", n)
 		n.X = nil
 	}
 
@@ -214,21 +214,21 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 var dotlist = make([]dlist, 10)
 
 // Convert node n for assignment to type t.
-func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
+func assignconvfn(gd *base.Invocation, n ir.Node, t *types.Type, context func() string) ir.Node {
 	if n == nil || n.Type() == nil {
 		return n
 	}
 
 	if t.Kind() == types.TBLANK && n.Type().Kind() == types.TNIL {
-		base.Errorf("use of untyped nil")
+		gd.Errorf("use of untyped nil")
 	}
 
-	n = convlit1(n, t, false, context)
+	n = convlit1(gd, n, t, false, context)
 	if n.Type() == nil {
-		base.Fatalf("cannot assign %v to %v", n, t)
+		gd.Fatalf("cannot assign %v to %v", n, t)
 	}
 	if n.Type().IsUntyped() {
-		base.Fatalf("%L has untyped type", n)
+		gd.Fatalf("%L has untyped type", n)
 	}
 	if t.Kind() == types.TBLANK {
 		return n
@@ -237,13 +237,13 @@ func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 		return n
 	}
 
-	op, why := assignOp(n.Type(), t)
+	op, why := assignOp(gd, n.Type(), t)
 	if op == ir.OXXX {
-		base.Errorf("cannot use %L as type %v in %s%s", n, t, context(), why)
+		gd.Errorf("cannot use %L as type %v in %s%s", n, t, context(), why)
 		op = ir.OCONV
 	}
 
-	r := ir.NewConvExpr(base.Pos, op, t, n)
+	r := ir.NewConvExpr(gd, gd.Pos, op, t, n)
 	r.SetTypecheck(1)
 	r.SetImplicit(true)
 	return r
@@ -253,7 +253,7 @@ func assignconvfn(n ir.Node, t *types.Type, context func() string) ir.Node {
 // If so, return op code to use in conversion.
 // If not, return OXXX. In this case, the string return parameter may
 // hold a reason why. In all other cases, it'll be the empty string.
-func assignOp(src, dst *types.Type) (ir.Op, string) {
+func assignOp(gd *base.Invocation, src, dst *types.Type) (ir.Op, string) {
 	if src == dst {
 		return ir.OCONVNOP, ""
 	}
@@ -307,7 +307,7 @@ func assignOp(src, dst *types.Type) (ir.Op, string) {
 			return ir.OCONVIFACE, ""
 		}
 
-		why := ImplementsExplain(src, dst)
+		why := ImplementsExplain(gd, src, dst)
 		if why == "" {
 			return ir.OCONVIFACE, ""
 		}
@@ -321,7 +321,7 @@ func assignOp(src, dst *types.Type) (ir.Op, string) {
 
 	if src.IsInterface() && dst.Kind() != types.TBLANK {
 		var why string
-		if Implements(dst, src) {
+		if Implements(gd, dst, src) {
 			why = ": need type assertion"
 		}
 		return ir.OXXX, why
@@ -364,7 +364,7 @@ func assignOp(src, dst *types.Type) (ir.Op, string) {
 // If not, return OXXX. In this case, the string return parameter may
 // hold a reason why. In all other cases, it'll be the empty string.
 // srcConstant indicates whether the value of type src is a constant.
-func convertOp(srcConstant bool, src, dst *types.Type) (ir.Op, string) {
+func convertOp(gd *base.Invocation, srcConstant bool, src, dst *types.Type) (ir.Op, string) {
 	if src == dst {
 		return ir.OCONVNOP, ""
 	}
@@ -387,7 +387,7 @@ func convertOp(srcConstant bool, src, dst *types.Type) (ir.Op, string) {
 	}
 
 	// 1. src can be assigned to dst.
-	op, why := assignOp(src, dst)
+	op, why := assignOp(gd, src, dst)
 	if op != ir.OXXX {
 		return op, why
 	}
@@ -606,19 +606,19 @@ func ifacelookdot(s *types.Sym, t *types.Type, ignorecase bool) *types.Field {
 
 // Implements reports whether t implements the interface iface. t can be
 // an interface, a type parameter, or a concrete type.
-func Implements(t, iface *types.Type) bool {
+func Implements(gd *base.Invocation, t, iface *types.Type) bool {
 	var missing, have *types.Field
 	var ptr int
-	return implements(t, iface, &missing, &have, &ptr)
+	return implements(gd, t, iface, &missing, &have, &ptr)
 }
 
 // ImplementsExplain reports whether t implements the interface iface. t can be
 // an interface, a type parameter, or a concrete type. If t does not implement
 // iface, a non-empty string is returned explaining why.
-func ImplementsExplain(t, iface *types.Type) string {
+func ImplementsExplain(gd *base.Invocation, t, iface *types.Type) string {
 	var missing, have *types.Field
 	var ptr int
-	if implements(t, iface, &missing, &have, &ptr) {
+	if implements(gd, t, iface, &missing, &have, &ptr) {
 		return ""
 	}
 
@@ -643,7 +643,7 @@ func ImplementsExplain(t, iface *types.Type) string {
 // false, it stores a method of iface that is not implemented in *m. If the
 // method name matches but the type is wrong, it additionally stores the type
 // of the method (on t) in *samename.
-func implements(t, iface *types.Type, m, samename **types.Field, ptr *int) bool {
+func implements(gd *base.Invocation, t, iface *types.Type, m, samename **types.Field, ptr *int) bool {
 	t0 := t
 	if t == nil {
 		return false
@@ -702,8 +702,8 @@ func implements(t, iface *types.Type, m, samename **types.Field, ptr *int) bool 
 		// if pointer receiver in method,
 		// the method does not exist for value types.
 		if !types.IsMethodApplicable(t0, tm) {
-			if false && base.Flag.LowerR != 0 {
-				base.Errorf("interface pointer mismatch")
+			if false && gd.Flag.LowerR != 0 {
+				gd.Errorf("interface pointer mismatch")
 			}
 
 			*m = im

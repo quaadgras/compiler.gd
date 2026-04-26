@@ -28,6 +28,7 @@ func expandCalls(f *Func) {
 	sp, _ := f.spSb()
 
 	x := &expandState{
+		gd:              f.Config.gd,
 		f:               f,
 		debug:           f.pass.debug,
 		regSize:         f.Config.RegSize,
@@ -126,7 +127,7 @@ func expandCalls(f *Func) {
 		regs := a.Registers
 		var offset int64
 		if len(regs) == 0 {
-			offset = a.FrameOffset(aux.abiInfo)
+			offset = a.FrameOffset(f.Config.gd, aux.abiInfo)
 		}
 		auxBase := x.offsetFrom(x.f.Entry, x.sp, offset, types.NewPtr(v.Type))
 		rc.init(regs, aux.abiInfo, nil, auxBase, 0)
@@ -929,6 +930,8 @@ type selKey struct {
 }
 
 type expandState struct {
+	gd *base.Invocation
+
 	f       *Func
 	debug   int // odd values log lost statement markers, so likely settings are 1 (stmts), 2 (expansion), and 3 (both)
 	regSize int64
@@ -1017,6 +1020,6 @@ func (x *expandState) invalidateRecursively(a *Value) {
 	}
 	lost := a.invalidateRecursively()
 	if x.debug&1 != 0 && lost { // For odd values of x.debug, do this.
-		x.Printf("Lost statement marker in %s on former %s\n", base.Ctxt.Pkgpath+"."+x.f.Name, s)
+		x.Printf("Lost statement marker in %s on former %s\n", x.gd.Ctxt.Pkgpath+"."+x.f.Name, s)
 	}
 }

@@ -86,20 +86,20 @@ func (pas propsAndScore) String() string {
 		pas.score, pas.mask.String())
 }
 
-func (cst CallSiteTab) merge(other CallSiteTab) error {
+func (cst CallSiteTab) merge(gd *base.Invocation, other CallSiteTab) error {
 	for k, v := range other {
 		if prev, ok := cst[k]; ok {
-			return fmt.Errorf("internal error: collision during call site table merge, fn=%s callsite=%s", prev.Callee.Sym().Name, fmtFullPos(prev.Call.Pos()))
+			return fmt.Errorf("internal error: collision during call site table merge, fn=%s callsite=%s", prev.Callee.Sym().Name, fmtFullPos(gd, prev.Call.Pos()))
 		}
 		cst[k] = v
 	}
 	return nil
 }
 
-func fmtFullPos(p src.XPos) string {
+func fmtFullPos(gd *base.Invocation, p src.XPos) string {
 	var sb strings.Builder
 	sep := ""
-	base.Ctxt.AllPos(p, func(pos src.Pos) {
+	gd.Ctxt.AllPos(p, func(pos src.Pos) {
 		sb.WriteString(sep)
 		sep = "|"
 		file := filepath.Base(pos.Filename())
@@ -108,18 +108,18 @@ func fmtFullPos(p src.XPos) string {
 	return sb.String()
 }
 
-func EncodeCallSiteKey(cs *CallSite) string {
+func EncodeCallSiteKey(gd *base.Invocation, cs *CallSite) string {
 	var sb strings.Builder
 	// FIXME: maybe rewrite line offsets relative to function start?
-	sb.WriteString(fmtFullPos(cs.Call.Pos()))
+	sb.WriteString(fmtFullPos(gd, cs.Call.Pos()))
 	fmt.Fprintf(&sb, "|%d", cs.ID)
 	return sb.String()
 }
 
-func buildEncodedCallSiteTab(tab CallSiteTab) encodedCallSiteTab {
+func buildEncodedCallSiteTab(gd *base.Invocation, tab CallSiteTab) encodedCallSiteTab {
 	r := make(encodedCallSiteTab)
 	for _, cs := range tab {
-		k := EncodeCallSiteKey(cs)
+		k := EncodeCallSiteKey(gd, cs)
 		r[k] = propsAndScore{
 			props: cs.Flags,
 			score: cs.Score,
@@ -132,9 +132,9 @@ func buildEncodedCallSiteTab(tab CallSiteTab) encodedCallSiteTab {
 // dumpCallSiteComments emits comments into the dump file for the
 // callsites in the function of interest. If "ecst" is non-nil, we use
 // that, otherwise generated a fresh encodedCallSiteTab from "tab".
-func dumpCallSiteComments(w io.Writer, tab CallSiteTab, ecst encodedCallSiteTab) {
+func dumpCallSiteComments(gd *base.Invocation, w io.Writer, tab CallSiteTab, ecst encodedCallSiteTab) {
 	if ecst == nil {
-		ecst = buildEncodedCallSiteTab(tab)
+		ecst = buildEncodedCallSiteTab(gd, tab)
 	}
 	tags := make([]string, 0, len(ecst))
 	for k := range ecst {

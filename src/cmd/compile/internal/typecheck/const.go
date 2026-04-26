@@ -13,48 +13,53 @@ import (
 	"unicode"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/fatal"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
 )
 
-func roundFloat(v constant.Value, sz int64) constant.Value {
+func roundFloat(gd *base.Invocation, v constant.Value, sz int64) constant.Value {
 	switch sz {
 	case 4:
 		f, _ := constant.Float32Val(v)
-		return makeFloat64(float64(f))
+		return makeFloat64(gd, float64(f))
 	case 8:
 		f, _ := constant.Float64Val(v)
-		return makeFloat64(f)
+		return makeFloat64(gd, f)
 	}
-	base.Fatalf("unexpected size: %v", sz)
+	fatal.Error("unexpected size: %v", sz)
 	panic("unreachable")
 }
 
 // truncate float literal fv to 32-bit or 64-bit precision
 // according to type; return truncated value.
-func truncfltlit(v constant.Value, t *types.Type) constant.Value {
+func truncfltlit(gd *base.Invocation, v constant.Value, t *types.Type) constant.Value {
 	if t.IsUntyped() {
 		return v
 	}
 
-	return roundFloat(v, t.Size())
+	return roundFloat(gd, v, t.Size())
 }
 
 // truncate Real and Imag parts of Mpcplx to 32-bit or 64-bit
 // precision, according to type; return truncated value. In case of
 // overflow, calls Errorf but does not truncate the input value.
-func trunccmplxlit(v constant.Value, t *types.Type) constant.Value {
+func trunccmplxlit(gd *base.Invocation, v constant.Value, t *types.Type) constant.Value {
 	if t.IsUntyped() {
 		return v
 	}
 
 	fsz := t.Size() / 2
-	return makeComplex(roundFloat(constant.Real(v), fsz), roundFloat(constant.Imag(v), fsz))
+	return makeComplex(roundFloat(gd, constant.Real(v), fsz), roundFloat(gd, constant.Imag(v), fsz))
 }
 
 // TODO(mdempsky): Replace these with better APIs.
-func convlit(n ir.Node, t *types.Type) ir.Node    { return convlit1(n, t, false, nil) }
-func DefaultLit(n ir.Node, t *types.Type) ir.Node { return convlit1(n, t, false, nil) }
+func convlit(gd *base.Invocation, n ir.Node, t *types.Type) ir.Node {
+	return convlit1(gd, n, t, false, nil)
+}
+func DefaultLit(gd *base.Invocation, n ir.Node, t *types.Type) ir.Node {
+	return convlit1(gd, n, t, false, nil)
+}
 
 // convlit1 converts an untyped expression n to type t. If n already
 // has a type, convlit1 has no effect.
@@ -67,12 +72,12 @@ func DefaultLit(n ir.Node, t *types.Type) ir.Node { return convlit1(n, t, false,
 //
 // If there's an error converting n to t, context is used in the error
 // message.
-func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir.Node {
+func convlit1(gd *base.Invocation, n ir.Node, t *types.Type, explicit bool, context func() string) ir.Node {
 	if explicit && t == nil {
-		base.Fatalf("explicit conversion missing type")
+		gd.Fatalf("explicit conversion missing type")
 	}
 	if t != nil && t.IsUntyped() {
-		base.Fatalf("bad conversion to untyped: %v", t)
+		gd.Fatalf("bad conversion to untyped: %v", t)
 	}
 
 	if n == nil || n.Type() == nil {
@@ -87,11 +92,11 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 	// Nil is technically not a constant, so handle it specially.
 	if n.Type().Kind() == types.TNIL {
 		if n.Op() != ir.ONIL {
-			base.Fatalf("unexpected op: %v (%v)", n, n.Op())
+			gd.Fatalf("unexpected op: %v (%v)", n, n.Op())
 		}
 		n = ir.Copy(n)
 		if t == nil {
-			base.Fatalf("use of untyped nil")
+			gd.Fatalf("use of untyped nil")
 		}
 
 		if !t.HasNil() {
@@ -104,32 +109,32 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 	}
 
 	if t == nil || !ir.OKForConst[t.Kind()] {
-		t = defaultType(n.Type())
+		t = defaultType(gd, n.Type())
 	}
 
 	switch n.Op() {
 	default:
-		base.Fatalf("unexpected untyped expression: %v", n)
+		gd.Fatalf("unexpected untyped expression: %v", n)
 
 	case ir.OLITERAL:
-		v := ConvertVal(n.Val(), t, explicit)
+		v := ConvertVal(gd, n.Val(), t, explicit)
 		if v.Kind() == constant.Unknown {
-			n = ir.NewConstExpr(n.Val(), n)
+			n = ir.NewConstExpr(gd, n.Val(), n)
 			break
 		}
-		n = ir.NewConstExpr(v, n)
+		n = ir.NewConstExpr(gd, v, n)
 		n.SetType(t)
 		return n
 
 	case ir.OPLUS, ir.ONEG, ir.OBITNOT, ir.ONOT, ir.OREAL, ir.OIMAG:
 		ot := operandType(n.Op(), t)
 		if ot == nil {
-			n = DefaultLit(n, nil)
+			n = DefaultLit(gd, n, nil)
 			break
 		}
 
 		n := n.(*ir.UnaryExpr)
-		n.X = convlit(n.X, ot)
+		n.X = convlit(gd, n.X, ot)
 		if n.X.Type() == nil {
 			n.SetType(nil)
 			return n
@@ -140,19 +145,19 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 	case ir.OADD, ir.OSUB, ir.OMUL, ir.ODIV, ir.OMOD, ir.OOR, ir.OXOR, ir.OAND, ir.OANDNOT, ir.OOROR, ir.OANDAND, ir.OCOMPLEX:
 		ot := operandType(n.Op(), t)
 		if ot == nil {
-			n = DefaultLit(n, nil)
+			n = DefaultLit(gd, n, nil)
 			break
 		}
 
 		var l, r ir.Node
 		switch n := n.(type) {
 		case *ir.BinaryExpr:
-			n.X = convlit(n.X, ot)
-			n.Y = convlit(n.Y, ot)
+			n.X = convlit(gd, n.X, ot)
+			n.Y = convlit(gd, n.Y, ot)
 			l, r = n.X, n.Y
 		case *ir.LogicalExpr:
-			n.X = convlit(n.X, ot)
-			n.Y = convlit(n.Y, ot)
+			n.X = convlit(gd, n.X, ot)
+			n.Y = convlit(gd, n.Y, ot)
 			l, r = n.X, n.Y
 		}
 
@@ -161,7 +166,7 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 			return n
 		}
 		if !types.Identical(l.Type(), r.Type()) {
-			base.Errorf("invalid operation: %v (mismatched types %v and %v)", n, l.Type(), r.Type())
+			gd.Errorf("invalid operation: %v (mismatched types %v and %v)", n, l.Type(), r.Type())
 			n.SetType(nil)
 			return n
 		}
@@ -179,21 +184,21 @@ func convlit1(n ir.Node, t *types.Type, explicit bool, context func() string) ir
 
 	case ir.OLSH, ir.ORSH:
 		n := n.(*ir.BinaryExpr)
-		n.X = convlit1(n.X, t, explicit, nil)
+		n.X = convlit1(gd, n.X, t, explicit, nil)
 		n.SetType(n.X.Type())
 		if n.Type() != nil && !n.Type().IsInteger() {
-			base.Errorf("invalid operation: %v (shift of type %v)", n, n.Type())
+			gd.Errorf("invalid operation: %v (shift of type %v)", n, n.Type())
 			n.SetType(nil)
 		}
 		return n
 	}
 
 	if explicit {
-		base.Fatalf("cannot convert %L to type %v", n, t)
+		gd.Fatalf("cannot convert %L to type %v", n, t)
 	} else if context != nil {
-		base.Fatalf("cannot use %L as type %v in %s", n, t, context())
+		gd.Fatalf("cannot use %L as type %v in %s", n, t, context())
 	} else {
-		base.Fatalf("cannot use %L as type %v", n, t)
+		gd.Fatalf("cannot use %L as type %v", n, t)
 	}
 
 	n.SetType(nil)
@@ -224,7 +229,7 @@ func operandType(op ir.Op, t *types.Type) *types.Type {
 //
 // If explicit is true, then conversions from integer to string are
 // also allowed.
-func ConvertVal(v constant.Value, t *types.Type, explicit bool) constant.Value {
+func ConvertVal(gd *base.Invocation, v constant.Value, t *types.Type, explicit bool) constant.Value {
 	switch ct := v.Kind(); ct {
 	case constant.Bool:
 		if t.IsBoolean() {
@@ -244,15 +249,15 @@ func ConvertVal(v constant.Value, t *types.Type, explicit bool) constant.Value {
 	case constant.Float, constant.Complex:
 		switch {
 		case t.IsInteger():
-			v = toint(v)
+			v = toint(gd, v)
 			return v
 		case t.IsFloat():
 			v = toflt(v)
-			v = truncfltlit(v, t)
+			v = truncfltlit(gd, v, t)
 			return v
 		case t.IsComplex():
 			v = tocplx(v)
-			v = trunccmplxlit(v, t)
+			v = trunccmplxlit(gd, v, t)
 			return v
 		}
 	}
@@ -272,7 +277,7 @@ func toflt(v constant.Value) constant.Value {
 	return constant.ToFloat(v)
 }
 
-func toint(v constant.Value) constant.Value {
+func toint(gd *base.Invocation, v constant.Value) constant.Value {
 	if v.Kind() == constant.Complex {
 		v = constant.Real(v)
 	}
@@ -290,16 +295,16 @@ func toint(v constant.Value) constant.Value {
 	// something that looks like an integer we omit the
 	// value from the error message.
 	// (See issue #11371).
-	f := ir.BigFloat(v)
+	f := ir.BigFloat(gd, v)
 	if f.MantExp(nil) > 2*ir.ConstPrec {
-		base.Errorf("integer too large")
+		gd.Errorf("integer too large")
 	} else {
 		var t big.Float
 		t.Parse(fmt.Sprint(v), 0)
 		if t.IsInt() {
-			base.Errorf("constant truncated to integer")
+			gd.Errorf("constant truncated to integer")
 		} else {
-			base.Errorf("constant %v truncated to integer", v)
+			gd.Errorf("constant %v truncated to integer", v)
 		}
 	}
 
@@ -318,9 +323,9 @@ func tostr(v constant.Value) constant.Value {
 	return v
 }
 
-func makeFloat64(f float64) constant.Value {
+func makeFloat64(gd *base.Invocation, f float64) constant.Value {
 	if math.IsInf(f, 0) {
-		base.Fatalf("infinity is not a valid constant")
+		gd.Fatalf("infinity is not a valid constant")
 	}
 	return constant.MakeFloat64(f)
 }
@@ -336,7 +341,7 @@ func makeComplex(real, imag constant.Value) constant.Value {
 // The results of defaultlit2 MUST be assigned back to l and r, e.g.
 //
 //	n.Left, n.Right = defaultlit2(n.Left, n.Right, force)
-func defaultlit2(l ir.Node, r ir.Node, force bool) (ir.Node, ir.Node) {
+func defaultlit2(gd *base.Invocation, l ir.Node, r ir.Node, force bool) (ir.Node, ir.Node) {
 	if l.Type() == nil || r.Type() == nil {
 		return l, r
 	}
@@ -352,12 +357,12 @@ func defaultlit2(l ir.Node, r ir.Node, force bool) (ir.Node, ir.Node) {
 	}
 
 	if !l.Type().IsUntyped() {
-		r = convlit(r, l.Type())
+		r = convlit(gd, r, l.Type())
 		return l, r
 	}
 
 	if !r.Type().IsUntyped() {
-		l = convlit(l, r.Type())
+		l = convlit(gd, l, r.Type())
 		return l, r
 	}
 
@@ -369,9 +374,9 @@ func defaultlit2(l ir.Node, r ir.Node, force bool) (ir.Node, ir.Node) {
 	if ir.IsNil(l) || ir.IsNil(r) {
 		return l, r
 	}
-	t := defaultType(mixUntyped(l.Type(), r.Type()))
-	l = convlit(l, t)
-	r = convlit(r, t)
+	t := defaultType(gd, mixUntyped(l.Type(), r.Type()))
+	l = convlit(gd, l, t)
+	r = convlit(gd, r, t)
 	return l, r
 }
 
@@ -391,7 +396,7 @@ func mixUntyped(t1, t2 *types.Type) *types.Type {
 		case types.UntypedComplex:
 			return 3
 		}
-		base.Fatalf("bad type %v", t)
+		fatal.Error("bad type %v", t)
 		panic("unreachable")
 	}
 
@@ -401,7 +406,7 @@ func mixUntyped(t1, t2 *types.Type) *types.Type {
 	return t1
 }
 
-func defaultType(t *types.Type) *types.Type {
+func defaultType(gd *base.Invocation, t *types.Type) *types.Type {
 	if !t.IsUntyped() || t.Kind() == types.TNIL {
 		return t
 	}
@@ -421,13 +426,13 @@ func defaultType(t *types.Type) *types.Type {
 		return types.Types[types.TCOMPLEX128]
 	}
 
-	base.Fatalf("bad type %v", t)
+	gd.Fatalf("bad type %v", t)
 	return nil
 }
 
 // IndexConst returns the index value of constant Node n.
-func IndexConst(n ir.Node) int64 {
-	return ir.IntVal(types.Types[types.TINT], toint(n.Val()))
+func IndexConst(gd *base.Invocation, n ir.Node) int64 {
+	return ir.IntVal(gd, types.Types[types.TINT], toint(gd, n.Val()))
 }
 
 // callOrChan reports whether n is a call or channel operation.

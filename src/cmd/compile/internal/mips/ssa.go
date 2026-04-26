@@ -78,7 +78,7 @@ func storeByType(t *types.Type, r int16) obj.As {
 	panic("bad store type")
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpCopy, ssa.OpMIPSMOVWreg:
 		t := v.Type
@@ -491,7 +491,7 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 	case ssa.OpMIPSLoweredPanicBoundsRR, ssa.OpMIPSLoweredPanicBoundsRC, ssa.OpMIPSLoweredPanicBoundsCR, ssa.OpMIPSLoweredPanicBoundsCC,
 		ssa.OpMIPSLoweredPanicExtendRR, ssa.OpMIPSLoweredPanicExtendRC:
 		// Compute the constant we put in the PCData entry for this call.
-		code, signed := ssa.BoundsKind(v.AuxInt).Code()
+		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
 		xIsReg := false
 		yIsReg := false
 		xVal := 0
@@ -916,8 +916,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 	case ssa.OpMIPSFPFlagTrue,
 		ssa.OpMIPSFPFlagFalse:
@@ -941,12 +941,12 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 
 	case ssa.OpMIPSLoweredGetClosurePtr:
 		// Closure pointer is R22 (mips.REGCTXT).
-		ssagen.CheckLoweredGetClosurePtr(v)
+		ssagen.CheckLoweredGetClosurePtr(gd, v)
 	case ssa.OpMIPSLoweredGetCallerSP:
 		// caller's SP is FixedFrameSize below the address of the first arg
 		p := s.Prog(mips.AMOVW)
 		p.From.Type = obj.TYPE_ADDR
-		p.From.Offset = -base.Ctxt.Arch.FixedFrameSize
+		p.From.Offset = -gd.Ctxt.Arch.FixedFrameSize
 		p.From.Name = obj.NAME_PARAM
 		p.To.Type = obj.TYPE_REG
 		p.To.Reg = v.Reg()

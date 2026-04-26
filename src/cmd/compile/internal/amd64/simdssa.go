@@ -3,13 +3,14 @@
 package amd64
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ssa"
 	"cmd/compile/internal/ssagen"
 	"cmd/internal/obj"
 	"cmd/internal/obj/x86"
 )
 
-func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
+func ssaGenSIMDValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) bool {
 	var p *obj.Prog
 	switch v.Op {
 	case ssa.OpAMD64VAESIMC128,
@@ -217,7 +218,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPMOVQD128_128,
 		ssa.OpAMD64VPMOVQD128_256,
 		ssa.OpAMD64VPMOVQD256:
-		p = simdV11(s, v)
+		p = simdV11(gd, s, v)
 
 	case ssa.OpAMD64VAESDECLAST128,
 		ssa.OpAMD64VAESDECLAST256,
@@ -548,7 +549,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPXOR256,
 		ssa.OpAMD64VPXORD512,
 		ssa.OpAMD64VPXORQ512:
-		p = simdV21(s, v)
+		p = simdV21(gd, s, v)
 
 	case ssa.OpAMD64VPCMPEQB512,
 		ssa.OpAMD64VPCMPEQW512,
@@ -558,7 +559,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPCMPGTW512,
 		ssa.OpAMD64VPCMPGTD512,
 		ssa.OpAMD64VPCMPGTQ512:
-		p = simdV2k(s, v)
+		p = simdV2k(gd, s, v)
 
 	case ssa.OpAMD64VADDPSMasked128,
 		ssa.OpAMD64VADDPSMasked256,
@@ -818,7 +819,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPBLENDMWMasked512,
 		ssa.OpAMD64VPBLENDMDMasked512,
 		ssa.OpAMD64VPBLENDMQMasked512:
-		p = simdV2kv(s, v)
+		p = simdV2kv(gd, s, v)
 
 	case ssa.OpAMD64VPABSBMasked128,
 		ssa.OpAMD64VPABSBMasked256,
@@ -1072,11 +1073,11 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VMOVDQU64Masked128,
 		ssa.OpAMD64VMOVDQU64Masked256,
 		ssa.OpAMD64VMOVDQU64Masked512:
-		p = simdVkv(s, v)
+		p = simdVkv(gd, s, v)
 
 	case ssa.OpAMD64VPBLENDVB128,
 		ssa.OpAMD64VPBLENDVB256:
-		p = simdV31(s, v)
+		p = simdV31(gd, s, v)
 
 	case ssa.OpAMD64VAESKEYGENASSIST128,
 		ssa.OpAMD64VROUNDPS128,
@@ -1147,7 +1148,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRAQ128const,
 		ssa.OpAMD64VPSRAQ256const,
 		ssa.OpAMD64VPSRAQ512const:
-		p = simdV11Imm8(s, v)
+		p = simdV11Imm8(gd, s, v)
 
 	case ssa.OpAMD64VRNDSCALEPSMasked128,
 		ssa.OpAMD64VRNDSCALEPSMasked256,
@@ -1209,7 +1210,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRAQMasked128const,
 		ssa.OpAMD64VPSRAQMasked256const,
 		ssa.OpAMD64VPSRAQMasked512const:
-		p = simdVkvImm8(s, v)
+		p = simdVkvImm8(gd, s, v)
 
 	case ssa.OpAMD64VPALIGNR128,
 		ssa.OpAMD64VPALIGNR256,
@@ -1257,7 +1258,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VSHUFPS512,
 		ssa.OpAMD64VSHUFPD256,
 		ssa.OpAMD64VSHUFPD512:
-		p = simdV21Imm8(s, v)
+		p = simdV21Imm8(gd, s, v)
 
 	case ssa.OpAMD64VCMPPS512,
 		ssa.OpAMD64VCMPPD512,
@@ -1269,7 +1270,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPCMPW512,
 		ssa.OpAMD64VPCMPD512,
 		ssa.OpAMD64VPCMPQ512:
-		p = simdV2kImm8(s, v)
+		p = simdV2kImm8(gd, s, v)
 
 	case ssa.OpAMD64VCMPPSMasked128,
 		ssa.OpAMD64VCMPPSMasked256,
@@ -1301,7 +1302,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPCMPUQMasked128,
 		ssa.OpAMD64VPCMPUQMasked256,
 		ssa.OpAMD64VPCMPUQMasked512:
-		p = simdV2kkImm8(s, v)
+		p = simdV2kkImm8(gd, s, v)
 
 	case ssa.OpAMD64VPDPWSSD128,
 		ssa.OpAMD64VPDPWSSD256,
@@ -1360,7 +1361,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDVQ128,
 		ssa.OpAMD64VPSHRDVQ256,
 		ssa.OpAMD64VPSHRDVQ512:
-		p = simdV31ResultInArg0(s, v)
+		p = simdV31ResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64VPDPWSSDMasked128,
 		ssa.OpAMD64VPDPWSSDMasked256,
@@ -1674,7 +1675,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPXORQMasked128Merging,
 		ssa.OpAMD64VPXORQMasked256Merging,
 		ssa.OpAMD64VPXORQMasked512Merging:
-		p = simdV3kvResultInArg0(s, v)
+		p = simdV3kvResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64VPSLLW128,
 		ssa.OpAMD64VPSLLW256,
@@ -1703,7 +1704,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRLQ128,
 		ssa.OpAMD64VPSRLQ256,
 		ssa.OpAMD64VPSRLQ512:
-		p = simdVfpv(s, v)
+		p = simdVfpv(gd, s, v)
 
 	case ssa.OpAMD64VPSLLWMasked128,
 		ssa.OpAMD64VPSLLWMasked256,
@@ -1732,19 +1733,19 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRLQMasked128,
 		ssa.OpAMD64VPSRLQMasked256,
 		ssa.OpAMD64VPSRLQMasked512:
-		p = simdVfpkv(s, v)
+		p = simdVfpkv(gd, s, v)
 
 	case ssa.OpAMD64VPINSRD128,
 		ssa.OpAMD64VPINSRQ128,
 		ssa.OpAMD64VPINSRB128,
 		ssa.OpAMD64VPINSRW128:
-		p = simdVgpvImm8(s, v)
+		p = simdVgpvImm8(gd, s, v)
 
 	case ssa.OpAMD64VPEXTRD128,
 		ssa.OpAMD64VPEXTRQ128,
 		ssa.OpAMD64VPEXTRB128,
 		ssa.OpAMD64VPEXTRW128:
-		p = simdVgpImm8(s, v)
+		p = simdVgpImm8(gd, s, v)
 
 	case ssa.OpAMD64VPALIGNRMasked256,
 		ssa.OpAMD64VPALIGNRMasked512,
@@ -1773,7 +1774,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDQMasked128,
 		ssa.OpAMD64VPSHRDQMasked256,
 		ssa.OpAMD64VPSHRDQMasked512:
-		p = simdV2kvImm8(s, v)
+		p = simdV2kvImm8(gd, s, v)
 
 	case ssa.OpAMD64VPABSDMasked128load,
 		ssa.OpAMD64VPABSDMasked256load,
@@ -1860,7 +1861,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VSQRTPDMasked128load,
 		ssa.OpAMD64VSQRTPDMasked256load,
 		ssa.OpAMD64VSQRTPDMasked512load:
-		p = simdVkvload(s, v)
+		p = simdVkvload(gd, s, v)
 
 	case ssa.OpAMD64VADDPS512load,
 		ssa.OpAMD64VADDPD512load,
@@ -1944,7 +1945,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSUBQ512load,
 		ssa.OpAMD64VPXORD512load,
 		ssa.OpAMD64VPXORQ512load:
-		p = simdV21load(s, v)
+		p = simdV21load(gd, s, v)
 
 	case ssa.OpAMD64VPDPWSSD512load,
 		ssa.OpAMD64VPERMI2PS128load,
@@ -1977,7 +1978,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDVQ128load,
 		ssa.OpAMD64VPSHRDVQ256load,
 		ssa.OpAMD64VPSHRDVQ512load:
-		p = simdV31loadResultInArg0(s, v)
+		p = simdV31loadResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64VPDPWSSDMasked128load,
 		ssa.OpAMD64VPDPWSSDMasked256load,
@@ -2024,7 +2025,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDVQMasked128load,
 		ssa.OpAMD64VPSHRDVQMasked256load,
 		ssa.OpAMD64VPSHRDVQMasked512load:
-		p = simdV3kvloadResultInArg0(s, v)
+		p = simdV3kvloadResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64VADDPSMasked128load,
 		ssa.OpAMD64VADDPSMasked256load,
@@ -2180,13 +2181,13 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPXORQMasked512load,
 		ssa.OpAMD64VPBLENDMDMasked512load,
 		ssa.OpAMD64VPBLENDMQMasked512load:
-		p = simdV2kvload(s, v)
+		p = simdV2kvload(gd, s, v)
 
 	case ssa.OpAMD64VPCMPEQD512load,
 		ssa.OpAMD64VPCMPEQQ512load,
 		ssa.OpAMD64VPCMPGTD512load,
 		ssa.OpAMD64VPCMPGTQ512load:
-		p = simdV2kload(s, v)
+		p = simdV2kload(gd, s, v)
 
 	case ssa.OpAMD64VPABSD512load,
 		ssa.OpAMD64VPABSQ128load,
@@ -2253,7 +2254,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VRSQRT14PD512load,
 		ssa.OpAMD64VSQRTPS512load,
 		ssa.OpAMD64VSQRTPD512load:
-		p = simdV11load(s, v)
+		p = simdV11load(gd, s, v)
 
 	case ssa.OpAMD64VRNDSCALEPS128load,
 		ssa.OpAMD64VRNDSCALEPS256load,
@@ -2288,7 +2289,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRAQ128constload,
 		ssa.OpAMD64VPSRAQ256constload,
 		ssa.OpAMD64VPSRAQ512constload:
-		p = simdV11loadImm8(s, v)
+		p = simdV11loadImm8(gd, s, v)
 
 	case ssa.OpAMD64VRNDSCALEPSMasked128load,
 		ssa.OpAMD64VRNDSCALEPSMasked256load,
@@ -2335,7 +2336,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRAQMasked128constload,
 		ssa.OpAMD64VPSRAQMasked256constload,
 		ssa.OpAMD64VPSRAQMasked512constload:
-		p = simdVkvloadImm8(s, v)
+		p = simdVkvloadImm8(gd, s, v)
 
 	case ssa.OpAMD64VGF2P8AFFINEQB128load,
 		ssa.OpAMD64VGF2P8AFFINEQB256load,
@@ -2357,7 +2358,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDQ512load,
 		ssa.OpAMD64VSHUFPS512load,
 		ssa.OpAMD64VSHUFPD512load:
-		p = simdV21loadImm8(s, v)
+		p = simdV21loadImm8(gd, s, v)
 
 	case ssa.OpAMD64VCMPPS512load,
 		ssa.OpAMD64VCMPPD512load,
@@ -2365,7 +2366,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPCMPUQ512load,
 		ssa.OpAMD64VPCMPD512load,
 		ssa.OpAMD64VPCMPQ512load:
-		p = simdV2kloadImm8(s, v)
+		p = simdV2kloadImm8(gd, s, v)
 
 	case ssa.OpAMD64VCMPPSMasked128load,
 		ssa.OpAMD64VCMPPSMasked256load,
@@ -2385,7 +2386,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPCMPUQMasked128load,
 		ssa.OpAMD64VPCMPUQMasked256load,
 		ssa.OpAMD64VPCMPUQMasked512load:
-		p = simdV2kkloadImm8(s, v)
+		p = simdV2kkloadImm8(gd, s, v)
 
 	case ssa.OpAMD64VGF2P8AFFINEINVQBMasked128load,
 		ssa.OpAMD64VGF2P8AFFINEINVQBMasked256load,
@@ -2405,7 +2406,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSHRDQMasked128load,
 		ssa.OpAMD64VPSHRDQMasked256load,
 		ssa.OpAMD64VPSHRDQMasked512load:
-		p = simdV2kvloadImm8(s, v)
+		p = simdV2kvloadImm8(gd, s, v)
 
 	case ssa.OpAMD64VPTERNLOGD128,
 		ssa.OpAMD64VPTERNLOGD256,
@@ -2413,7 +2414,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPTERNLOGQ128,
 		ssa.OpAMD64VPTERNLOGQ256,
 		ssa.OpAMD64VPTERNLOGQ512:
-		p = simdV31ResultInArg0Imm8(s, v)
+		p = simdV31ResultInArg0Imm8(gd, s, v)
 
 	case ssa.OpAMD64VPTERNLOGD128load,
 		ssa.OpAMD64VPTERNLOGD256load,
@@ -2421,20 +2422,20 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPTERNLOGQ128load,
 		ssa.OpAMD64VPTERNLOGQ256load,
 		ssa.OpAMD64VPTERNLOGQ512load:
-		p = simdV31loadResultInArg0Imm8(s, v)
+		p = simdV31loadResultInArg0Imm8(gd, s, v)
 
 	case ssa.OpAMD64SHA1MSG1128,
 		ssa.OpAMD64SHA1MSG2128,
 		ssa.OpAMD64SHA1NEXTE128,
 		ssa.OpAMD64SHA256MSG1128,
 		ssa.OpAMD64SHA256MSG2128:
-		p = simdV21ResultInArg0(s, v)
+		p = simdV21ResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64SHA1RNDS4128:
-		p = simdV21ResultInArg0Imm8(s, v)
+		p = simdV21ResultInArg0Imm8(gd, s, v)
 
 	case ssa.OpAMD64SHA256RNDS2128:
-		p = simdV31x0AtIn2ResultInArg0(s, v)
+		p = simdV31x0AtIn2ResultInArg0(gd, s, v)
 
 	case ssa.OpAMD64VPABSBMasked128Merging,
 		ssa.OpAMD64VPABSBMasked256Merging,
@@ -2700,7 +2701,7 @@ func ssaGenSIMDValue(s *ssagen.State, v *ssa.Value) bool {
 		ssa.OpAMD64VPSRAQMasked128constMerging,
 		ssa.OpAMD64VPSRAQMasked256constMerging,
 		ssa.OpAMD64VPSRAQMasked512constMerging:
-		p = simdV2kvResultInArg0(s, v)
+		p = simdV2kvResultInArg0(gd, s, v)
 
 	default:
 		// Unknown reg shape

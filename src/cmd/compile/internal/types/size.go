@@ -5,10 +5,12 @@
 package types
 
 import (
+	"fmt"
 	"math"
 	"slices"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/fatal"
 	"cmd/internal/src"
 	"internal/buildcfg"
 	"internal/types/errors"
@@ -56,8 +58,7 @@ func typePos(t *Type) src.XPos {
 	if pos := t.Pos(); pos.IsKnown() {
 		return pos
 	}
-	base.Fatalf("bad type: %v", t)
-	panic("unreachable")
+	panic(fmt.Sprintf("bad type: %v", t))
 }
 
 // MaxWidth is the maximum size of a value on the target architecture.
@@ -74,7 +75,7 @@ var defercalc int
 // RoundUp rounds o to a multiple of r, r is a power of 2.
 func RoundUp(o int64, r int64) int64 {
 	if r < 1 || r > 8 || r&(r-1) != 0 {
-		base.Fatalf("Round %d", r)
+		panic(fmt.Sprintf("Round %d", r))
 	}
 	return (o + r - 1) &^ (r - 1)
 }
@@ -92,7 +93,7 @@ func expandiface(t *Type) {
 		case !explicit && Identical(m.Type, prev.Type):
 			return
 		default:
-			base.ErrorfAt(m.Pos, errors.DuplicateDecl, "duplicate method %s", m.Sym.Name)
+			fatal.ErrorAt(m.Pos, errors.DuplicateDecl, "duplicate method %s", m.Sym.Name)
 		}
 		methods = append(methods, m)
 	}
@@ -155,7 +156,7 @@ func expandiface(t *Type) {
 	slices.SortFunc(methods, CompareFields)
 
 	if int64(len(methods)) >= MaxWidth/int64(PtrSize) {
-		base.ErrorfAt(typePos(t), 0, "interface too large")
+		fatal.ErrorAt(typePos(t), 0, "interface too large")
 	}
 	for i, m := range methods {
 		m.Offset = int64(i) * int64(PtrSize)
@@ -193,7 +194,7 @@ func calcStructOffset(t *Type, fields []*Field, offset int64) int64 {
 			maxwidth = 1<<31 - 1
 		}
 		if offset >= maxwidth {
-			base.ErrorfAt(typePos(t), 0, "type %L too large", t)
+			fatal.ErrorAt(typePos(t), 0, "type %L too large", t)
 			offset = 8 // small but nonzero
 		}
 	}
@@ -231,7 +232,7 @@ func CalcSize(t *Type) {
 	if t.width == -2 {
 		t.width = 0
 		t.align = 1
-		base.Fatalf("invalid recursive type %v", t)
+		fatal.Error("invalid recursive type %v", t)
 		return
 	}
 
@@ -240,16 +241,11 @@ func CalcSize(t *Type) {
 	}
 
 	if CalcSizeDisabled {
-		base.Fatalf("width not calculated: %v", t)
+		fatal.Error("width not calculated: %v", t)
 	}
 
 	// defer CheckSize calls until after we're done
 	DeferCheckSize()
-
-	lno := base.Pos
-	if pos := t.Pos(); pos.IsKnown() {
-		base.Pos = pos
-	}
 
 	t.width = -2
 	t.align = 0  // 0 means use t.Width, below
@@ -274,7 +270,7 @@ func CalcSize(t *Type) {
 	var w int64
 	switch et {
 	default:
-		base.Fatalf("CalcSize: unknown type: %v", t)
+		fatal.ErrorAt(t.Pos(), 0, "CalcSize: unknown type: %v", t)
 
 	// compiler-specific stuff
 	case TINT8, TUINT8, TBOOL:
@@ -376,7 +372,7 @@ func CalcSize(t *Type) {
 		// chanargs is handled.
 		CalcSize(t1.Elem())
 		if t1.Elem().width >= 1<<16 {
-			base.Errorf("channel element type too large (>64kB)")
+			fatal.Error("channel element type too large (>64kB)")
 		}
 		w = 1 // anything will do
 
@@ -389,21 +385,20 @@ func CalcSize(t *Type) {
 		t.ptrBytes = int64(PtrSize)
 
 	case TFORW: // should have been filled in
-		base.Fatalf("invalid recursive type %v", t)
+		fatal.ErrorAt(typePos(t), 0, "invalid recursive type %v", t)
 
 	case TANY: // not a real type; should be replaced before use.
-		base.Fatalf("CalcSize any")
+		fatal.ErrorAt(typePos(t), 0, "CalcSize any")
 
 	case TSTRING:
 		if StringSize == 0 {
-			base.Fatalf("early CalcSize string")
+			fatal.ErrorAt(typePos(t), 0, "early CalcSize string")
 		}
 		w = StringSize
 		t.align = uint8(PtrSize)
 		t.intRegs = 3 // gd: {word0=ptr/nil, word1=hash/bytes, word2=tag|len/bytes}
 		t.setAlg(ASTRING)
 		t.ptrBytes = int64(PtrSize) // word0 is the only pointer slot
-
 
 	case TARRAY:
 		if t.Elem() == nil {
@@ -427,7 +422,7 @@ func CalcSize(t *Type) {
 
 	case TSTRUCT:
 		if t.IsFuncArgStruct() {
-			base.Fatalf("CalcSize fn struct %v", t)
+			fatal.ErrorAt(typePos(t), 0, "CalcSize fn struct %v", t)
 		}
 		CalcStructSize(t)
 		w = t.width
@@ -457,18 +452,16 @@ func CalcSize(t *Type) {
 	}
 
 	if PtrSize == 4 && w != int64(int32(w)) {
-		base.Errorf("type %v too large", t)
+		fatal.ErrorAt(typePos(t), 0, "type %v too large", t)
 	}
 
 	t.width = w
 	if t.align == 0 {
 		if w == 0 || w > 8 || w&(w-1) != 0 {
-			base.Fatalf("invalid alignment for %v", t)
+			fatal.ErrorAt(typePos(t), 0, "invalid alignment for %v", t)
 		}
 		t.align = uint8(w)
 	}
-
-	base.Pos = lno
 
 	ResumeCheckSize()
 }
@@ -615,7 +608,7 @@ func CalcArraySize(t *Type) {
 	if elem.width != 0 {
 		cap := (uint64(MaxWidth) - 1) / uint64(elem.width)
 		if uint64(n) > cap {
-			base.Errorf("type %L larger than address space", t)
+			fatal.Error("type %L larger than address space", t)
 		}
 	}
 
@@ -691,7 +684,7 @@ func CheckSize(t *Type) {
 	// function arg structs should not be checked
 	// outside of the enclosing function.
 	if t.IsFuncArgStruct() {
-		base.Fatalf("CheckSize %v", t)
+		fatal.Error("CheckSize %v", t)
 	}
 
 	if defercalc == 0 {

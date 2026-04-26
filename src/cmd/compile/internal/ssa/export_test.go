@@ -30,6 +30,13 @@ var testCtxts = map[string]*obj.Link{
 	"arm64": obj.Linknew(&arm64.Linkarm64),
 }
 
+// testGd is the *base.Invocation passed to ssa-package-internal callers
+// of ir constructors in tests. We only populate Ctxt — the helpers used
+// by these tests don't read other fields.
+var testGd = &base.Invocation{
+	Ctxt: &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}},
+}
+
 func testConfig(tb testing.TB) *Conf      { return testConfigArch(tb, "amd64") }
 func testConfigS390X(tb testing.TB) *Conf { return testConfigArch(tb, "s390x") }
 func testConfigARM64(tb testing.TB) *Conf { return testConfigArch(tb, "arm64") }
@@ -43,7 +50,7 @@ func testConfigArch(tb testing.TB, arch string) *Conf {
 		tb.Fatal("testTypes is 64-bit only")
 	}
 	c := &Conf{
-		config: NewConfig(arch, testTypes, ctxt, true, false),
+		config: NewConfig(testGd, arch, testTypes, ctxt, true, false),
 		tb:     tb,
 	}
 	return c
@@ -58,8 +65,8 @@ type Conf struct {
 func (c *Conf) Frontend() Frontend {
 	if c.fe == nil {
 		pkg := types.NewPkg("my/import/path", "path")
-		fn := ir.NewFunc(src.NoXPos, src.NoXPos, pkg.Lookup("function"), types.NewSignature(nil, nil, nil))
-		fn.DeclareParams(true)
+		fn := ir.NewFunc(testGd, src.NoXPos, src.NoXPos, pkg.Lookup("function"), types.NewSignature(testGd, nil, nil, nil))
+		fn.DeclareParams(testGd, true)
 		fn.LSym = &obj.LSym{Name: "my/import/path.function"}
 
 		c.fe = TestFrontend{
@@ -72,7 +79,7 @@ func (c *Conf) Frontend() Frontend {
 }
 
 func (c *Conf) Temp(typ *types.Type) *ir.Name {
-	n := ir.NewNameAt(src.NoXPos, &types.Sym{Name: "aFakeAuto"}, typ)
+	n := ir.NewNameAt(testGd, src.NoXPos, &types.Sym{Name: "aFakeAuto"}, typ)
 	n.Class = ir.PAUTO
 	return n
 }
@@ -117,7 +124,6 @@ func init() {
 	types.RegSize = 8
 	types.MaxWidth = 1 << 50
 
-	base.Ctxt = &obj.Link{Arch: &obj.LinkArch{Arch: &sys.Arch{Alignment: 1, CanMergeLoads: true}}}
-	typecheck.InitUniverse()
+	typecheck.InitUniverse(testGd)
 	testTypes.SetTypPtrs()
 }

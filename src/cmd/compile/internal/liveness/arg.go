@@ -80,8 +80,8 @@ type argLiveness struct {
 // that is, we have stored the register value to it.
 // Returns the liveness map indices at each Block entry and at each Value (where
 // it changes).
-func ArgLiveness(fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx map[ssa.ID]int) {
-	if f.OwnAux.ABIInfo().InRegistersUsed() == 0 || base.Flag.N != 0 {
+func ArgLiveness(gd *base.Invocation, fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx map[ssa.ID]int) {
+	if f.OwnAux.ABIInfo().InRegistersUsed() == 0 || gd.Flag.N != 0 {
 		// No register args. Nothing to emit.
 		// Or if -N is used we spill everything upfront so it is always live.
 		return nil, nil
@@ -132,7 +132,7 @@ func ArgLiveness(fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx m
 	}
 
 	nargs := int32(len(lv.args))
-	bulk := bitvec.NewBulk(nargs, int32(len(f.Blocks)*2), fn.Pos())
+	bulk := bitvec.NewBulk(gd, nargs, int32(len(f.Blocks)*2), fn.Pos())
 	for _, b := range f.Blocks {
 		be := &lv.be[b.ID]
 		be.livein = bulk.Next()
@@ -171,7 +171,7 @@ func ArgLiveness(fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx m
 
 	// Coalesce identical live vectors. Compute liveness indices at each PC
 	// where it changes.
-	live := bitvec.New(nargs)
+	live := bitvec.New(gd, nargs)
 	addToSet := func(bv bitvec.BitVec) (int, bool) {
 		if bv.Count() == int(nargs) { // special case for all live
 			return allLiveIdx, false
@@ -201,7 +201,7 @@ func ArgLiveness(fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx m
 					// live is added to bvset and we cannot modify it now.
 					// Make a copy.
 					t := live
-					live = bitvec.New(nargs)
+					live = bitvec.New(gd, nargs)
 					live.Copy(t)
 				}
 				lastv = nil
@@ -215,12 +215,12 @@ func ArgLiveness(fn *ir.Func, f *ssa.Func, pp *objw.Progs) (blockIdx, valueIdx m
 	}
 
 	// Emit funcdata symbol, update indices to offsets in the symbol data.
-	lsym := lv.emit()
+	lsym := lv.emit(gd)
 	fn.LSym.Func().ArgLiveInfo = lsym
 
 	//lv.print()
 
-	p := pp.Prog(obj.AFUNCDATA)
+	p := pp.Prog(gd, obj.AFUNCDATA)
 	p.From.SetConst(abi.FUNCDATA_ArgLiveInfo)
 	p.To.Type = obj.TYPE_MEM
 	p.To.Name = obj.NAME_EXTERN
@@ -260,9 +260,9 @@ func mayFault(v *ssa.Value) bool {
 	return true // conservatively assume all other ops could fault
 }
 
-func (lv *argLiveness) print() {
+func (lv *argLiveness) print(gd *base.Invocation) {
 	fmt.Println("argument liveness:", lv.f.Name)
-	live := bitvec.New(int32(len(lv.args)))
+	live := bitvec.New(gd, int32(len(lv.args)))
 	for _, b := range lv.f.Blocks {
 		be := &lv.be[b.ID]
 
@@ -299,7 +299,7 @@ func (lv *argLiveness) printLivenessVec(bv bitvec.BitVec) {
 	}
 }
 
-func (lv *argLiveness) emit() *obj.LSym {
+func (lv *argLiveness) emit(gd *base.Invocation) *obj.LSym {
 	livenessMaps := lv.bvset.extractUnique()
 
 	// stack offsets of register arg spill slots
@@ -314,13 +314,13 @@ func (lv *argLiveness) emit() *obj.LSym {
 
 	idx2off := make([]int, len(livenessMaps))
 
-	lsym := base.Ctxt.Lookup(lv.fn.LSym.Name + ".argliveinfo")
+	lsym := gd.Ctxt.Lookup(lv.fn.LSym.Name + ".argliveinfo")
 	lsym.Set(obj.AttrContentAddressable, true)
 
-	off := objw.Uint8(lsym, 0, argOffsets[0]) // smallest offset that needs liveness info.
+	off := objw.Uint8(gd, lsym, 0, argOffsets[0]) // smallest offset that needs liveness info.
 	for idx, live := range livenessMaps {
 		idx2off[idx] = off
-		off = objw.BitVec(lsym, off, live)
+		off = objw.BitVec(gd, lsym, off, live)
 	}
 
 	// Update liveness indices to offsets.

@@ -1469,7 +1469,10 @@ func (v Value) Complex() complex128 {
 	k := v.kind()
 	var p = v.ptr
 	if v.flag&flagInline != 0 {
-		p = unsafe.Pointer(&v.inline)
+		// abi.NoEscape: &v.inline is read transiently here. Without the
+		// hide, escape analysis sees v's address taken and conservatively
+		// heap-escapes any caller's reflect.ValueOf(complex...).
+		p = abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
 	switch k {
 	case Complex64:
@@ -1662,7 +1665,8 @@ func (v Value) CanFloat() bool {
 func (v Value) Float() float64 {
 	var ptr = v.ptr
 	if v.flag&flagInline != 0 {
-		ptr = unsafe.Pointer(&v.inline)
+		// abi.NoEscape: see Complex for rationale.
+		ptr = abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
 	k := v.kind()
 	switch k {
@@ -1767,7 +1771,8 @@ func (v Value) Int() int64 {
 	k := v.kind()
 	var p = v.ptr
 	if v.flag&flagInline != 0 {
-		p = unsafe.Pointer(&v.inline)
+		// abi.NoEscape: see Complex for rationale.
+		p = abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
 	switch k {
 	case Int:
@@ -1915,7 +1920,8 @@ func TypeAssert[T any](v Value) (T, bool) {
 		return zero, false
 	}
 	if v.flag&flagIndir == 0 {
-		return *(*T)(unsafe.Pointer(&v.ptr)), true
+		// abi.NoEscape: see Complex for rationale.
+		return *(*T)(abi.NoEscape(unsafe.Pointer(&v.ptr))), true
 	}
 	return *(*T)(v.dataPtr()), true
 }
@@ -2943,7 +2949,8 @@ func (v Value) Uint() uint64 {
 	k := v.kind()
 	var p = v.ptr
 	if v.flag&flagInline != 0 {
-		p = unsafe.Pointer(&v.inline)
+		// abi.NoEscape: see Complex for rationale.
+		p = abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
 	switch k {
 	case Uint:

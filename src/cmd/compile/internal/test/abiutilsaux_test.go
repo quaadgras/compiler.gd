@@ -21,7 +21,7 @@ import (
 
 func mkParamResultField(t *types.Type, s *types.Sym, which ir.Class) *types.Field {
 	field := types.NewField(src.NoXPos, s, t)
-	n := ir.NewNameAt(src.NoXPos, s, t)
+	n := ir.NewNameAt(testGd, src.NoXPos, s, t)
 	n.Class = which
 	field.Nname = n
 	return field
@@ -43,7 +43,7 @@ func mkstruct(fieldtypes ...*types.Type) *types.Type {
 }
 
 func mkFuncType(rcvr *types.Type, ins []*types.Type, outs []*types.Type) *types.Type {
-	q := typecheck.Lookup("?")
+	q := typecheck.Lookup(testGd, "?")
 	inf := []*types.Field{}
 	for _, it := range ins {
 		inf = append(inf, mkParamResultField(it, q, ir.PPARAM))
@@ -56,7 +56,7 @@ func mkFuncType(rcvr *types.Type, ins []*types.Type, outs []*types.Type) *types.
 	if rcvr != nil {
 		rf = mkParamResultField(rcvr, q, ir.PPARAM)
 	}
-	return types.NewSignature(rf, inf, outf)
+	return types.NewSignature(testGd, rf, inf, outf)
 }
 
 type expectedDump struct {

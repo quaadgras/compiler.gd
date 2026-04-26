@@ -21,24 +21,24 @@ var funcStack []*ir.Func // stack of previous values of ir.CurFunc
 //
 // Before returning, it sets CurFunc to fn. When the caller is done
 // constructing fn, it must call FinishFuncBody to restore CurFunc.
-func DeclFunc(fn *ir.Func) {
-	fn.DeclareParams(true)
+func DeclFunc(gd *base.Invocation, fn *ir.Func) {
+	fn.DeclareParams(gd, true)
 	fn.Nname.Defn = fn
-	Target.Funcs = append(Target.Funcs, fn)
+	Target(gd).Funcs = append(Target(gd).Funcs, fn)
 
-	funcStack = append(funcStack, ir.CurFunc)
-	ir.CurFunc = fn
+	funcStack = append(funcStack, ir.CurFunc(gd))
+	gd.CurFunc = fn
 }
 
 // FinishFuncBody restores ir.CurFunc to its state before the last
 // call to DeclFunc.
-func FinishFuncBody() {
-	funcStack, ir.CurFunc = funcStack[:len(funcStack)-1], funcStack[len(funcStack)-1]
+func FinishFuncBody(gd *base.Invocation) {
+	funcStack, gd.CurFunc = funcStack[:len(funcStack)-1], funcStack[len(funcStack)-1]
 }
 
-func CheckFuncStack() {
+func CheckFuncStack(gd *base.Invocation) {
 	if len(funcStack) != 0 {
-		base.Fatalf("funcStack is non-empty: %v", len(funcStack))
+		gd.Fatalf("funcStack is non-empty: %v", len(funcStack))
 	}
 }
 
@@ -48,23 +48,23 @@ func CheckFuncStack() {
 // It helps in some cases if an ODCL is also created and placed in a narrower scope,
 // such as if the variable can be used in a loop body and potentially escape.
 // TODO: Consider some mechanism to more conveniently create a block scoped temporary.
-func TempAt(pos src.XPos, curfn *ir.Func, typ *types.Type) *ir.Name {
+func TempAt(gd *base.Invocation, pos src.XPos, curfn *ir.Func, typ *types.Type) *ir.Name {
 	if curfn == nil {
-		base.FatalfAt(pos, "no curfn for TempAt")
+		gd.FatalfAt(pos, "no curfn for TempAt")
 	}
 	if typ == nil {
-		base.FatalfAt(pos, "TempAt called with nil type")
+		gd.FatalfAt(pos, "TempAt called with nil type")
 	}
 	if typ.Kind() == types.TFUNC && typ.Recv() != nil {
-		base.FatalfAt(pos, "misuse of method type: %v", typ)
+		gd.FatalfAt(pos, "misuse of method type: %v", typ)
 	}
 	types.CalcSize(typ)
 
 	sym := &types.Sym{
 		Name: autotmpname(len(curfn.Dcl)),
-		Pkg:  types.LocalPkg,
+		Pkg:  types.LocalPkg(gd),
 	}
-	name := curfn.NewLocal(pos, sym, typ)
+	name := curfn.NewLocal(gd, pos, sym, typ)
 	name.SetEsc(ir.EscNever)
 	name.SetUsed(true)
 	name.SetAutoTemp(true)
@@ -102,7 +102,7 @@ func autotmpname(n int) string {
 
 // f is method type, with receiver.
 // return function type, receiver as first argument (or not).
-func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
+func NewMethodType(gd *base.Invocation, sig *types.Type, recv *types.Type) *types.Type {
 	nrecvs := 0
 	if recv != nil {
 		nrecvs++
@@ -114,12 +114,12 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 
 	params := make([]*types.Field, nrecvs+len(sigParams))
 	if recv != nil {
-		params[0] = types.NewField(base.Pos, nil, recv)
+		params[0] = types.NewField(gd.Pos, nil, recv)
 	}
 	for i, param := range sigParams {
 		// Preserve Sym (unrelated to gd Phase G; mdempsky's TODO
 		// about NewMethodType losing names applies here).
-		d := types.NewField(base.Pos, param.Sym, param.Type)
+		d := types.NewField(gd.Pos, param.Sym, param.Type)
 		d.SetIsDDD(param.IsDDD())
 		// Note: escape-analysis Notes aren't copied here because
 		// NewMethodType runs during typecheck, before escape
@@ -132,8 +132,8 @@ func NewMethodType(sig *types.Type, recv *types.Type) *types.Type {
 
 	results := make([]*types.Field, sig.NumResults())
 	for i, t := range sig.Results() {
-		results[i] = types.NewField(base.Pos, nil, t.Type)
+		results[i] = types.NewField(gd.Pos, nil, t.Type)
 	}
 
-	return types.NewSignature(nil, params, results)
+	return types.NewSignature(gd, nil, params, results)
 }

@@ -22,7 +22,7 @@ const go126ImprovedConcreteTypeAnalysis = true
 
 // StaticCall devirtualizes the given call if possible when the concrete callee
 // is available statically.
-func StaticCall(s *State, call *ir.CallExpr) {
+func StaticCall(gd *base.Invocation, s *State, call *ir.CallExpr) {
 	// For promoted methods (including value-receiver methods promoted
 	// to pointer-receivers), the interface method wrapper may contain
 	// expressions that can panic (e.g., ODEREF, ODOTPTR,
@@ -44,7 +44,7 @@ func StaticCall(s *State, call *ir.CallExpr) {
 	sel := call.Fun.(*ir.SelectorExpr)
 	var typ *types.Type
 	if go126ImprovedConcreteTypeAnalysis {
-		typ = concreteType(s, sel.X)
+		typ = concreteType(gd, s, sel.X)
 		if typ == nil {
 			return
 		}
@@ -54,7 +54,7 @@ func StaticCall(s *State, call *ir.CallExpr) {
 		// any errors, but will cause a runtime panic. We statically know that int(0) does not
 		// implement that interface, thus we skip the devirtualization, as it is not possible
 		// to make an assertion: any(0).(interface{A()}).(int) (int does not implement interface{A()}).
-		if !typecheck.Implements(typ, sel.X.Type()) {
+		if !typecheck.Implements(gd, typ, sel.X.Type()) {
 			return
 		}
 	} else {
@@ -92,8 +92,8 @@ func StaticCall(s *State, call *ir.CallExpr) {
 	// references to go:itab.T[int],iface and constructing a direct
 	// reference to .dict.T[int]).
 	if typ.HasShape() {
-		if base.Flag.LowerM != 0 {
-			base.WarnfAt(call.Pos(), "cannot devirtualize %v: shaped receiver %v", call, typ)
+		if gd.Flag.LowerM != 0 {
+			gd.WarnfAt(call.Pos(), "cannot devirtualize %v: shaped receiver %v", call, typ)
 		}
 		return
 	}
@@ -111,13 +111,13 @@ func StaticCall(s *State, call *ir.CallExpr) {
 	// could instead set a flag so that walk skips the itab check. For
 	// now, punting is easy and safe.
 	if sel.X.Type().HasShape() {
-		if base.Flag.LowerM != 0 {
-			base.WarnfAt(call.Pos(), "cannot devirtualize %v: shaped interface %v", call, sel.X.Type())
+		if gd.Flag.LowerM != 0 {
+			gd.WarnfAt(call.Pos(), "cannot devirtualize %v: shaped interface %v", call, sel.X.Type())
 		}
 		return
 	}
 
-	dt := ir.NewTypeAssertExpr(sel.Pos(), sel.X, typ)
+	dt := ir.NewTypeAssertExpr(gd, sel.Pos(), sel.X, typ)
 
 	if go126ImprovedConcreteTypeAnalysis {
 		// Consider:
@@ -138,23 +138,23 @@ func StaticCall(s *State, call *ir.CallExpr) {
 		dt.SetPos(call.Pos())
 	}
 
-	x := typecheck.XDotMethod(sel.Pos(), dt, sel.Sel, true)
+	x := typecheck.XDotMethod(gd, sel.Pos(), dt, sel.Sel, true)
 	switch x.Op() {
 	case ir.ODOTMETH:
-		if base.Flag.LowerM != 0 {
-			base.WarnfAt(call.Pos(), "devirtualizing %v to %v", sel, typ)
+		if gd.Flag.LowerM != 0 {
+			gd.WarnfAt(call.Pos(), "devirtualizing %v to %v", sel, typ)
 		}
 		call.SetOp(ir.OCALLMETH)
 		call.Fun = x
 	case ir.ODOTINTER:
 		// Promoted method from embedded interface-typed field (#42279).
-		if base.Flag.LowerM != 0 {
-			base.WarnfAt(call.Pos(), "partially devirtualizing %v to %v", sel, typ)
+		if gd.Flag.LowerM != 0 {
+			gd.WarnfAt(call.Pos(), "partially devirtualizing %v to %v", sel, typ)
 		}
 		call.SetOp(ir.OCALLINTER)
 		call.Fun = x
 	default:
-		base.FatalfAt(call.Pos(), "failed to devirtualize %v (%v)", x, x.Op())
+		gd.FatalfAt(call.Pos(), "failed to devirtualize %v (%v)", x, x.Op())
 	}
 
 	// Duplicated logic from typecheck for function call return
@@ -173,7 +173,7 @@ func StaticCall(s *State, call *ir.CallExpr) {
 	}
 
 	// Desugar OCALLMETH, if we created one (#57309).
-	typecheck.FixMethodCall(call)
+	typecheck.FixMethodCall(gd, call)
 }
 
 const concreteTypeDebug = false
@@ -181,13 +181,13 @@ const concreteTypeDebug = false
 // concreteType determines the concrete type of n, following OCONVIFACEs and type asserts.
 // Returns nil when the concrete type could not be determined, or when there are multiple
 // (different) types assigned to an interface.
-func concreteType(s *State, n ir.Node) (typ *types.Type) {
-	typ = concreteType1(s, n, make(map[*ir.Name]struct{}))
+func concreteType(gd *base.Invocation, s *State, n ir.Node) (typ *types.Type) {
+	typ = concreteType1(gd, s, n, make(map[*ir.Name]struct{}))
 	if typ == &noType {
 		return nil
 	}
 	if typ != nil && typ.IsInterface() {
-		base.FatalfAt(n.Pos(), "typ.IsInterface() = true; want = false; typ = %v", typ)
+		gd.FatalfAt(n.Pos(), "typ.IsInterface() = true; want = false; typ = %v", typ)
 	}
 	return typ
 }
@@ -198,7 +198,7 @@ var noType types.Type
 // concreteType1 analyzes the node n and returns its concrete type if it is statically known.
 // Otherwise, it returns a nil Type, indicating that a concrete type was not determined.
 // When n is known to be statically nil or a self-assignment is detected, it returns a sentinel [noType] type instead.
-func concreteType1(s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types.Type) {
+func concreteType1(gd *base.Invocation, s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types.Type) {
 	nn := n // for debug messages
 
 	if concreteTypeDebug {
@@ -207,13 +207,13 @@ func concreteType1(s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types
 			if outT != &noType {
 				t = outT.String()
 			}
-			base.Warn("concreteType1(%v) -> %v", nn, t)
+			gd.Warn("concreteType1(%v) -> %v", nn, t)
 		}()
 	}
 
 	for {
 		if concreteTypeDebug {
-			base.Warn("concreteType1(%v): analyzing %v", nn, n)
+			gd.Warn("concreteType1(%v): analyzing %v", nn, n)
 		}
 
 		if !n.Type().IsInterface() {
@@ -226,7 +226,7 @@ func concreteType1(s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types
 				if !n1.Type().IsInterface() || !types.Identical(n1.Type().Underlying(), n1.X.Type().Underlying()) {
 					// As we check (directly before this switch) whether n is an interface, thus we should only reach
 					// here for iface conversions where both operands are the same.
-					base.FatalfAt(n1.Pos(), "not identical/interface types found n1.Type = %v; n1.X.Type = %v", n1.Type(), n1.X.Type())
+					gd.FatalfAt(n1.Pos(), "not identical/interface types found n1.Type = %v; n1.X.Type = %v", n1.Type(), n1.X.Type())
 				}
 				n = n1.X
 				continue
@@ -260,12 +260,12 @@ func concreteType1(s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types
 	}
 
 	if name.Op() != ir.ONAME {
-		base.FatalfAt(name.Pos(), "name.Op = %v; want = ONAME", n.Op())
+		gd.FatalfAt(name.Pos(), "name.Op = %v; want = ONAME", n.Op())
 	}
 
 	// name.Curfn must be set, as we checked name.Class != ir.PAUTO before.
 	if name.Curfn == nil {
-		base.FatalfAt(name.Pos(), "name.Curfn = nil; want not nil")
+		gd.FatalfAt(name.Pos(), "name.Curfn = nil; want not nil")
 	}
 
 	if name.Addrtaken() {
@@ -278,17 +278,17 @@ func concreteType1(s *State, n ir.Node, seen map[*ir.Name]struct{}) (outT *types
 	seen[name] = struct{}{}
 
 	if concreteTypeDebug {
-		base.Warn("concreteType1(%v): analyzing assignments to %v", nn, name)
+		gd.Warn("concreteType1(%v): analyzing assignments to %v", nn, name)
 	}
 
 	var typ *types.Type
-	for _, v := range s.assignments(name) {
+	for _, v := range s.assignments(gd, name) {
 		var t *types.Type
 		switch v := v.(type) {
 		case *types.Type:
 			t = v
 		case ir.Node:
-			t = concreteType1(s, v, seen)
+			t = concreteType1(gd, s, v, seen)
 			if t == &noType {
 				continue
 			}
@@ -341,7 +341,7 @@ type ifaceAssignRef struct {
 }
 
 // InlinedCall updates the [State] to take into account a newly inlined call.
-func (s *State) InlinedCall(fun *ir.Func, origCall *ir.CallExpr, inlinedCall *ir.InlinedCallExpr) {
+func (s *State) InlinedCall(gd *base.Invocation, fun *ir.Func, origCall *ir.CallExpr, inlinedCall *ir.InlinedCallExpr) {
 	if _, ok := s.analyzedFuncs[fun]; !ok {
 		// Full analyze has not been yet executed for the provided function, so we can skip it for now.
 		// When no devirtualization happens in a function, it is unnecessary to analyze it.
@@ -349,8 +349,8 @@ func (s *State) InlinedCall(fun *ir.Func, origCall *ir.CallExpr, inlinedCall *ir
 	}
 
 	// Analyze assignments in the newly inlined function.
-	s.analyze(inlinedCall.Init())
-	s.analyze(inlinedCall.Body)
+	s.analyze(gd, inlinedCall.Init())
+	s.analyze(gd, inlinedCall.Body)
 
 	refs, ok := s.ifaceCallExprAssigns[origCall]
 	if !ok {
@@ -362,10 +362,10 @@ func (s *State) InlinedCall(fun *ir.Func, origCall *ir.CallExpr, inlinedCall *ir
 	for _, ref := range refs {
 		vt := &s.ifaceAssignments[ref.name][ref.assignmentIndex]
 		if *vt != nil {
-			base.Fatalf("unexpected non-nil assignment")
+			gd.Fatalf("unexpected non-nil assignment")
 		}
 		if concreteTypeDebug {
-			base.Warn(
+			gd.Warn(
 				"InlinedCall(%v, %v): replacing interface node in (%v,%v) to %v (typ %v)",
 				origCall, inlinedCall, ref.name, ref.assignmentIndex,
 				inlinedCall.ReturnVars[ref.returnIndex],
@@ -382,23 +382,23 @@ func (s *State) InlinedCall(fun *ir.Func, origCall *ir.CallExpr, inlinedCall *ir
 }
 
 // assignments returns all assignments to n.
-func (s *State) assignments(n *ir.Name) []assignment {
+func (s *State) assignments(gd *base.Invocation, n *ir.Name) []assignment {
 	fun := n.Curfn
 	if fun == nil {
-		base.FatalfAt(n.Pos(), "n.Curfn = <nil>")
+		gd.FatalfAt(n.Pos(), "n.Curfn = <nil>")
 	}
 	if n.Class != ir.PAUTO {
-		base.FatalfAt(n.Pos(), "n.Class = %v; want = PAUTO", n.Class)
+		gd.FatalfAt(n.Pos(), "n.Class = %v; want = PAUTO", n.Class)
 	}
 
 	if !n.Type().IsInterface() {
-		base.FatalfAt(n.Pos(), "name passed to assignments is not of an interface type: %v", n.Type())
+		gd.FatalfAt(n.Pos(), "name passed to assignments is not of an interface type: %v", n.Type())
 	}
 
 	// Analyze assignments in func, if not analyzed before.
 	if _, ok := s.analyzedFuncs[fun]; !ok {
 		if concreteTypeDebug {
-			base.Warn("assignments(): analyzing assignments in %v func", fun)
+			gd.Warn("assignments(): analyzing assignments in %v func", fun)
 		}
 		if s.analyzedFuncs == nil {
 			s.ifaceAssignments = make(map[*ir.Name][]assignment)
@@ -406,15 +406,15 @@ func (s *State) assignments(n *ir.Name) []assignment {
 			s.analyzedFuncs = make(map[*ir.Func]struct{})
 		}
 		s.analyzedFuncs[fun] = struct{}{}
-		s.analyze(fun.Init())
-		s.analyze(fun.Body)
+		s.analyze(gd, fun.Init())
+		s.analyze(gd, fun.Body)
 	}
 
 	return s.ifaceAssignments[n]
 }
 
 // analyze analyzes every assignment to interface variables in nodes, updating [State].
-func (s *State) analyze(nodes ir.Nodes) {
+func (s *State) analyze(gd *base.Invocation, nodes ir.Nodes) {
 	assign := func(name ir.Node, assignment assignment) (*ir.Name, int) {
 		if name == nil || name.Op() != ir.ONAME || ir.IsBlank(name) {
 			return nil, -1
@@ -433,7 +433,7 @@ func (s *State) analyze(nodes ir.Nodes) {
 
 		n = n.Canonical()
 		if n.Op() != ir.ONAME {
-			base.FatalfAt(n.Pos(), "n.Op = %v; want = ONAME", n.Op())
+			gd.FatalfAt(n.Pos(), "n.Op = %v; want = ONAME", n.Op())
 		}
 		if n.Class != ir.PAUTO {
 			return nil, -1
@@ -451,11 +451,11 @@ func (s *State) analyze(nodes ir.Nodes) {
 				return nil, -1
 			}
 		default:
-			base.Fatalf("unexpected type: %v", assignment)
+			gd.Fatalf("unexpected type: %v", assignment)
 		}
 
 		if concreteTypeDebug {
-			base.Warn("analyze(): assignment found %v = %v", name, assignment)
+			gd.Warn("analyze(): assignment found %v = %v", name, assignment)
 		}
 
 		s.ifaceAssignments[n] = append(s.ifaceAssignments[n], assignment)
@@ -498,14 +498,14 @@ func (s *State) analyze(nodes ir.Nodes) {
 		case ir.OAS2DOTTYPE:
 			n := n.(*ir.AssignListStmt)
 			if n.Rhs[0] == nil {
-				base.FatalfAt(n.Pos(), "n.Rhs[0] == nil; n = %v", n)
+				gd.FatalfAt(n.Pos(), "n.Rhs[0] == nil; n = %v", n)
 			}
 			assign(n.Lhs[0], n.Rhs[0])
 			assign(n.Lhs[1], nil) // boolean does not have methods to devirtualize
 		case ir.OAS2MAPR, ir.OAS2RECV, ir.OSELRECV2:
 			n := n.(*ir.AssignListStmt)
 			if n.Rhs[0] == nil {
-				base.FatalfAt(n.Pos(), "n.Rhs[0] == nil; n = %v", n)
+				gd.FatalfAt(n.Pos(), "n.Rhs[0] == nil; n = %v", n)
 			}
 			assign(n.Lhs[0], n.Rhs[0].Type())
 			assign(n.Lhs[1], nil) // boolean does not have methods to devirtualize
@@ -535,7 +535,7 @@ func (s *State) analyze(nodes ir.Nodes) {
 					assign(p, call.ReturnVars[i])
 				}
 			} else {
-				base.FatalfAt(n.Pos(), "unexpected type %T in OAS2FUNC Rhs[0]", call)
+				gd.FatalfAt(n.Pos(), "unexpected type %T in OAS2FUNC Rhs[0]", call)
 			}
 		case ir.ORANGE:
 			n := n.(*ir.RangeStmt)
@@ -551,7 +551,7 @@ func (s *State) analyze(nodes ir.Nodes) {
 				assign(n.Value, xTyp.Elem())
 			} else if xTyp.IsChan() {
 				assign(n.Key, xTyp.Elem())
-				base.AssertfAt(n.Value == nil, n.Pos(), "n.Value != nil in range over chan")
+				gd.AssertfAt(n.Value == nil, n.Pos(), "n.Value != nil in range over chan")
 			} else if xTyp.IsMap() {
 				assign(n.Key, xTyp.Key())
 				assign(n.Value, xTyp.Elem())
@@ -562,14 +562,14 @@ func (s *State) analyze(nodes ir.Nodes) {
 			} else {
 				// We will not reach here in case of a range-over-func, as it is
 				// rewritten to function calls in the noder package.
-				base.FatalfAt(n.Pos(), "range over unexpected type %v", n.X.Type())
+				gd.FatalfAt(n.Pos(), "range over unexpected type %v", n.X.Type())
 			}
 		case ir.OSWITCH:
 			n := n.(*ir.SwitchStmt)
 			if guard, ok := n.Tag.(*ir.TypeSwitchGuard); ok {
 				for _, v := range n.Cases {
 					if v.Var == nil {
-						base.Assert(guard.Tag == nil)
+						gd.Assert(guard.Tag == nil)
 						continue
 					}
 					assign(v.Var, guard.X)

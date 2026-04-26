@@ -47,10 +47,10 @@ type linker struct {
 // relocAll ensures that all elements specified by pr and relocs are
 // copied into the output export data file, and returns the
 // corresponding indices in the output.
-func (l *linker) relocAll(pr *pkgReader, relocs []pkgbits.RefTableEntry) []pkgbits.RefTableEntry {
+func (l *linker) relocAll(gd *base.Invocation, pr *pkgReader, relocs []pkgbits.RefTableEntry) []pkgbits.RefTableEntry {
 	res := make([]pkgbits.RefTableEntry, len(relocs))
 	for i, rent := range relocs {
-		rent.Idx = l.relocIdx(pr, rent.Kind, rent.Idx)
+		rent.Idx = l.relocIdx(gd, pr, rent.Kind, rent.Idx)
 		res[i] = rent
 	}
 	return res
@@ -58,8 +58,8 @@ func (l *linker) relocAll(pr *pkgReader, relocs []pkgbits.RefTableEntry) []pkgbi
 
 // relocIdx ensures a single element is copied into the output export
 // data file, and returns the corresponding index in the output.
-func (l *linker) relocIdx(pr *pkgReader, k pkgbits.SectionKind, idx index) index {
-	assert(pr != nil)
+func (l *linker) relocIdx(gd *base.Invocation, pr *pkgReader, k pkgbits.SectionKind, idx index) index {
+	assert(gd, pr != nil)
 
 	absIdx := pr.AbsIdx(k, idx)
 
@@ -72,9 +72,9 @@ func (l *linker) relocIdx(pr *pkgReader, k pkgbits.SectionKind, idx index) index
 	case pkgbits.SectionString:
 		newidx = l.relocString(pr, idx)
 	case pkgbits.SectionPkg:
-		newidx = l.relocPkg(pr, idx)
+		newidx = l.relocPkg(gd, pr, idx)
 	case pkgbits.SectionObj:
-		newidx = l.relocObj(pr, idx)
+		newidx = l.relocObj(gd, pr, idx)
 
 	default:
 		// Generic relocations.
@@ -84,7 +84,7 @@ func (l *linker) relocIdx(pr *pkgReader, k pkgbits.SectionKind, idx index) index
 		// if we do external relocations.
 
 		w := l.pw.NewEncoderRaw(k)
-		l.relocCommon(pr, w, k, idx)
+		l.relocCommon(gd, pr, w, k, idx)
 		newidx = w.Idx
 	}
 
@@ -106,7 +106,7 @@ func (l *linker) relocString(pr *pkgReader, idx index) index {
 // TODO(mdempsky): Since CL 391014, we already have the compilation
 // unit's import path, so there should be no need to rewrite packages
 // anymore.
-func (l *linker) relocPkg(pr *pkgReader, idx index) index {
+func (l *linker) relocPkg(gd *base.Invocation, pr *pkgReader, idx index) index {
 	path := pr.PeekPkgPath(idx)
 
 	if newidx, ok := l.pkgs[path]; ok {
@@ -121,7 +121,7 @@ func (l *linker) relocPkg(pr *pkgReader, idx index) index {
 	// from when the package was originally written as "". Probably not
 	// a big deal, but a little annoying. Maybe relocating
 	// cross-references in place is the way to go after all.
-	w.Relocs = l.relocAll(pr, r.Relocs)
+	w.Relocs = l.relocAll(gd, pr, r.Relocs)
 
 	_ = r.String() // original path
 	w.String(path)
@@ -134,7 +134,7 @@ func (l *linker) relocPkg(pr *pkgReader, idx index) index {
 // relocObj copies the specified object from pr into the output export
 // data file, rewriting its compiler-private extension data (e.g.,
 // adding inlining cost and escape analysis results for functions).
-func (l *linker) relocObj(pr *pkgReader, idx index) index {
+func (l *linker) relocObj(gd *base.Invocation, pr *pkgReader, idx index) index {
 	path, name, tag := pr.PeekObj(idx)
 	sym := types.NewPkg(path, "").Lookup(name)
 
@@ -145,17 +145,17 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 	if tag == pkgbits.ObjStub && path != "builtin" && path != "unsafe" {
 		pri, ok := objReader[sym]
 		if !ok {
-			base.Fatalf("missing reader for %q.%v", path, name)
+			gd.Fatalf("missing reader for %q.%v", path, name)
 		}
-		assert(ok)
+		assert(gd, ok)
 
 		pr = pri.pr
 		idx = pri.idx
 
 		path2, name2, tag2 := pr.PeekObj(idx)
 		sym2 := types.NewPkg(path2, "").Lookup(name2)
-		assert(sym == sym2)
-		assert(tag2 != pkgbits.ObjStub)
+		assert(gd, sym == sym2)
+		assert(gd, tag2 != pkgbits.ObjStub)
 	}
 
 	w := l.pw.NewEncoderRaw(pkgbits.SectionObj)
@@ -164,18 +164,18 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 	wdict := l.pw.NewEncoderRaw(pkgbits.SectionObjDict)
 
 	l.decls[sym] = w.Idx
-	assert(wext.Idx == w.Idx)
-	assert(wname.Idx == w.Idx)
-	assert(wdict.Idx == w.Idx)
+	assert(gd, wext.Idx == w.Idx)
+	assert(gd, wname.Idx == w.Idx)
+	assert(gd, wdict.Idx == w.Idx)
 
-	l.relocCommon(pr, w, pkgbits.SectionObj, idx)
-	l.relocCommon(pr, wname, pkgbits.SectionName, idx)
-	l.relocCommon(pr, wdict, pkgbits.SectionObjDict, idx)
+	l.relocCommon(gd, pr, w, pkgbits.SectionObj, idx)
+	l.relocCommon(gd, pr, wname, pkgbits.SectionName, idx)
+	l.relocCommon(gd, pr, wdict, pkgbits.SectionObjDict, idx)
 
 	// Generic types and functions won't have definitions, and imported
 	// objects may not either.
 	obj, _ := sym.Def.(*ir.Name)
-	local := sym.Pkg == types.LocalPkg
+	local := sym.Pkg == types.LocalPkg(gd)
 
 	if local && obj != nil {
 		wext.Sync(pkgbits.SyncObject1)
@@ -183,26 +183,26 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 		case pkgbits.ObjFunc:
 			l.relocFuncExt(wext, obj)
 		case pkgbits.ObjType:
-			l.relocTypeExt(wext, obj)
+			l.relocTypeExt(gd, wext, obj)
 		case pkgbits.ObjVar:
 			l.relocVarExt(wext, obj)
 		}
 		wext.Flush()
 	} else {
-		l.relocCommon(pr, wext, pkgbits.SectionObjExt, idx)
+		l.relocCommon(gd, pr, wext, pkgbits.SectionObjExt, idx)
 	}
 
 	// Check if we need to export the inline bodies for functions and
 	// methods.
 	if obj != nil {
 		if obj.Op() == ir.ONAME && obj.Class == ir.PFUNC {
-			l.exportBody(obj, local)
+			l.exportBody(gd, obj, local)
 		}
 
 		if obj.Op() == ir.OTYPE && !obj.Alias() {
 			if typ := obj.Type(); !typ.IsInterface() {
 				for _, method := range typ.Methods() {
-					l.exportBody(method.Nname.(*ir.Name), local)
+					l.exportBody(gd, method.Nname.(*ir.Name), local)
 				}
 			}
 		}
@@ -216,8 +216,8 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 // method available on a locally declared type. (Due to cross-package
 // type aliases, a method may be imported, but still available on a
 // locally declared type.)
-func (l *linker) exportBody(obj *ir.Name, local bool) {
-	assert(obj.Op() == ir.ONAME && obj.Class == ir.PFUNC)
+func (l *linker) exportBody(gd *base.Invocation, obj *ir.Name, local bool) {
+	assert(gd, obj.Op() == ir.ONAME && obj.Class == ir.PFUNC)
 
 	fn := obj.Func
 	if fn.Inl == nil {
@@ -241,20 +241,20 @@ func (l *linker) exportBody(obj *ir.Name, local bool) {
 	sym := obj.Sym()
 	if _, ok := l.bodies[sym]; ok {
 		// Due to type aliases, we might visit methods multiple times.
-		base.AssertfAt(obj.Type().Recv() != nil, obj.Pos(), "expected method: %v", obj)
+		gd.AssertfAt(obj.Type().Recv() != nil, obj.Pos(), "expected method: %v", obj)
 		return
 	}
 
-	pri, ok := bodyReaderFor(fn)
-	assert(ok)
-	l.bodies[sym] = l.relocIdx(pri.pr, pkgbits.SectionBody, pri.idx)
+	pri, ok := bodyReaderFor(gd, fn)
+	assert(gd, ok)
+	l.bodies[sym] = l.relocIdx(gd, pri.pr, pkgbits.SectionBody, pri.idx)
 }
 
 // relocCommon copies the specified element from pr into w,
 // recursively relocating any referenced elements as well.
-func (l *linker) relocCommon(pr *pkgReader, w *pkgbits.Encoder, k pkgbits.SectionKind, idx index) {
+func (l *linker) relocCommon(gd *base.Invocation, pr *pkgReader, w *pkgbits.Encoder, k pkgbits.SectionKind, idx index) {
 	r := pr.NewDecoderRaw(k, idx)
-	w.Relocs = l.relocAll(pr, r.Relocs)
+	w.Relocs = l.relocAll(gd, pr, r.Relocs)
 	io.Copy(&w.Data, &r.Data)
 	w.Flush()
 }
@@ -309,7 +309,7 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Sync(pkgbits.SyncEOF)
 }
 
-func (l *linker) relocTypeExt(w *pkgbits.Encoder, name *ir.Name) {
+func (l *linker) relocTypeExt(gd *base.Invocation, w *pkgbits.Encoder, name *ir.Name) {
 	w.Sync(pkgbits.SyncTypeExt)
 
 	typ := name.Type()
@@ -317,8 +317,8 @@ func (l *linker) relocTypeExt(w *pkgbits.Encoder, name *ir.Name) {
 	l.pragmaFlag(w, name.Pragma())
 
 	// For type T, export the index of type descriptor symbols of T and *T.
-	l.lsymIdx(w, "", reflectdata.TypeLinksym(typ))
-	l.lsymIdx(w, "", reflectdata.TypeLinksym(typ.PtrTo()))
+	l.lsymIdx(w, "", reflectdata.TypeLinksym(gd, typ))
+	l.lsymIdx(w, "", reflectdata.TypeLinksym(gd, typ.PtrTo()))
 
 	if typ.Kind() != types.TINTER {
 		for _, method := range typ.Methods() {

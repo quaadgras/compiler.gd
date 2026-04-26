@@ -77,7 +77,7 @@ func memcombineLoads(f *Func) {
 				continue
 			}
 			for n := max; n > 1; n /= 2 {
-				if combineLoads(v, n) {
+				if combineLoads(f.Config.gd, v, n) {
 					break
 				}
 			}
@@ -127,7 +127,7 @@ func splitPtr(ptr *Value) (BaseAddress, int64) {
 	}
 }
 
-func combineLoads(root *Value, n int64) bool {
+func combineLoads(gd *base.Invocation, root *Value, n int64) bool {
 	orOp := root.Op
 	var shiftOp Op
 	switch orOp {
@@ -298,7 +298,7 @@ func combineLoads(root *Value, n int64) bool {
 	// This is the commit point.
 
 	// First, issue load at lowest address.
-	v = loadBlock.NewValue2(pos, OpLoad, sizeType(n*size), r[0].load.Args[0], mem)
+	v = loadBlock.NewValue2(pos, OpLoad, sizeType(gd, n*size), r[0].load.Args[0], mem)
 
 	// Byte swap if needed,
 	if needSwap {
@@ -307,15 +307,15 @@ func combineLoads(root *Value, n int64) bool {
 
 	// Extend if needed.
 	if n*size < root.Type.Size() {
-		v = zeroExtend(loadBlock, pos, v, n*size, root.Type.Size())
+		v = zeroExtend(gd, loadBlock, pos, v, n*size, root.Type.Size())
 	}
 
 	// Shift if needed.
 	if isLittleEndian && shift0 != 0 {
-		v = leftShift(loadBlock, pos, v, shift0)
+		v = leftShift(gd, loadBlock, pos, v, shift0)
 	}
 	if isBigEndian && shift0-(n-1)*size*8 != 0 {
-		v = leftShift(loadBlock, pos, v, shift0-(n-1)*size*8)
+		v = leftShift(gd, loadBlock, pos, v, shift0-(n-1)*size*8)
 	}
 
 	// Install with (Copy v).
@@ -374,13 +374,13 @@ func memcombineStores(f *Func) {
 				continue
 			}
 
-			combineStores(v)
+			combineStores(f.Config.gd, v)
 		}
 	}
 }
 
 // combineStores tries to combine the stores ending in root.
-func combineStores(root *Value) {
+func combineStores(gd *base.Invocation, root *Value) {
 	// Helper functions.
 	maxRegSize := root.Block.Func.Config.RegSize
 	type StoreRecord struct {
@@ -726,14 +726,14 @@ func combineStores(root *Value) {
 	// Modify root to do all the stores.
 	sv := shiftBase
 	if isLittleEndian && shift0 != 0 {
-		sv = rightShift(root.Block, root.Pos, sv, shift0)
+		sv = rightShift(gd, root.Block, root.Pos, sv, shift0)
 	}
 	shiftedSize = aTotalSize - a[0].size
 	if isBigEndian && shift0-shiftedSize*8 != 0 {
-		sv = rightShift(root.Block, root.Pos, sv, shift0-shiftedSize*8)
+		sv = rightShift(gd, root.Block, root.Pos, sv, shift0-shiftedSize*8)
 	}
 	if sv.Type.Size() > aTotalSize {
-		sv = truncate(root.Block, root.Pos, sv, sv.Type.Size(), aTotalSize)
+		sv = truncate(gd, root.Block, root.Pos, sv, sv.Type.Size(), aTotalSize)
 	}
 	if needSwap {
 		sv = byteSwap(root.Block, root.Pos, sv)
@@ -755,7 +755,7 @@ func combineStores(root *Value) {
 	}
 }
 
-func sizeType(size int64) *types.Type {
+func sizeType(gd *base.Invocation, size int64) *types.Type {
 	switch size {
 	case 8:
 		return types.Types[types.TUINT64]
@@ -764,12 +764,12 @@ func sizeType(size int64) *types.Type {
 	case 2:
 		return types.Types[types.TUINT16]
 	default:
-		base.Fatalf("bad size %d\n", size)
+		gd.Fatalf("bad size %d\n", size)
 		return nil
 	}
 }
 
-func truncate(b *Block, pos src.XPos, v *Value, from, to int64) *Value {
+func truncate(gd *base.Invocation, b *Block, pos src.XPos, v *Value, from, to int64) *Value {
 	switch from*10 + to {
 	case 82:
 		return b.NewValue1(pos, OpTrunc64to16, types.Types[types.TUINT16], v)
@@ -778,11 +778,11 @@ func truncate(b *Block, pos src.XPos, v *Value, from, to int64) *Value {
 	case 42:
 		return b.NewValue1(pos, OpTrunc32to16, types.Types[types.TUINT16], v)
 	default:
-		base.Fatalf("bad sizes %d %d\n", from, to)
+		gd.Fatalf("bad sizes %d %d\n", from, to)
 		return nil
 	}
 }
-func zeroExtend(b *Block, pos src.XPos, v *Value, from, to int64) *Value {
+func zeroExtend(gd *base.Invocation, b *Block, pos src.XPos, v *Value, from, to int64) *Value {
 	switch from*10 + to {
 	case 24:
 		return b.NewValue1(pos, OpZeroExt16to32, types.Types[types.TUINT32], v)
@@ -791,12 +791,12 @@ func zeroExtend(b *Block, pos src.XPos, v *Value, from, to int64) *Value {
 	case 48:
 		return b.NewValue1(pos, OpZeroExt32to64, types.Types[types.TUINT64], v)
 	default:
-		base.Fatalf("bad sizes %d %d\n", from, to)
+		gd.Fatalf("bad sizes %d %d\n", from, to)
 		return nil
 	}
 }
 
-func leftShift(b *Block, pos src.XPos, v *Value, shift int64) *Value {
+func leftShift(gd *base.Invocation, b *Block, pos src.XPos, v *Value, shift int64) *Value {
 	s := b.Func.ConstInt64(types.Types[types.TUINT64], shift)
 	size := v.Type.Size()
 	switch size {
@@ -807,11 +807,11 @@ func leftShift(b *Block, pos src.XPos, v *Value, shift int64) *Value {
 	case 2:
 		return b.NewValue2(pos, OpLsh16x64, v.Type, v, s)
 	default:
-		base.Fatalf("bad size %d\n", size)
+		gd.Fatalf("bad size %d\n", size)
 		return nil
 	}
 }
-func rightShift(b *Block, pos src.XPos, v *Value, shift int64) *Value {
+func rightShift(gd *base.Invocation, b *Block, pos src.XPos, v *Value, shift int64) *Value {
 	s := b.Func.ConstInt64(types.Types[types.TUINT64], shift)
 	size := v.Type.Size()
 	switch size {
@@ -822,7 +822,7 @@ func rightShift(b *Block, pos src.XPos, v *Value, shift int64) *Value {
 	case 2:
 		return b.NewValue2(pos, OpRsh16Ux64, v.Type, v, s)
 	default:
-		base.Fatalf("bad size %d\n", size)
+		gd.Fatalf("bad size %d\n", size)
 		return nil
 	}
 }

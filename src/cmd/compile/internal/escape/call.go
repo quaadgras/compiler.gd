@@ -5,7 +5,6 @@
 package escape
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -19,17 +18,17 @@ import (
 func (e *escape) call(ks []hole, call ir.Node) {
 	argument := func(k hole, arg ir.Node) {
 		// TODO(mdempsky): Should be "call argument".
-		e.expr(k.note(call, "call parameter"), arg)
+		e.expr(k.note(e.gd, call, "call parameter"), arg)
 	}
 
 	switch call.Op() {
 	default:
 		ir.Dump("esc", call)
-		base.Fatalf("unexpected call op: %v", call.Op())
+		e.gd.Fatalf("unexpected call op: %v", call.Op())
 
 	case ir.OCALLFUNC, ir.OCALLINTER:
 		call := call.(*ir.CallExpr)
-		typecheck.AssertFixedCall(call)
+		typecheck.AssertFixedCall(e.gd, call)
 
 		// Pick out the function callee, if statically known.
 		//
@@ -81,7 +80,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 						// know the callee function. If a closure flows here, we
 						// need to conservatively assume its results might flow to
 						// the heap.
-						calleeK = e.calleeHole().note(call, "callee operand")
+						calleeK = e.calleeHole().note(e.gd, call, "callee operand")
 						break
 					}
 				}
@@ -189,14 +188,14 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// might flow to heap.
 		appendeeK := e.teeHole(ks[0], e.mutatorHole())
 		if args[0].Type().Elem().HasPointers() {
-			appendeeK = e.teeHole(appendeeK, e.heapHole().deref(call, "appendee slice"))
+			appendeeK = e.teeHole(appendeeK, e.heapHole().deref(e.gd, call, "appendee slice"))
 		}
 		argument(appendeeK, args[0])
 
 		if call.IsDDD {
 			appendedK := e.discardHole()
 			if args[1].Type().IsSlice() && args[1].Type().Elem().HasPointers() {
-				appendedK = e.heapHole().deref(call, "appended slice...")
+				appendedK = e.heapHole().deref(e.gd, call, "appended slice...")
 			}
 			argument(appendedK, args[1])
 		} else {
@@ -220,7 +219,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 
 		copiedK := e.discardHole()
 		if call.Y.Type().IsSlice() && call.Y.Type().Elem().HasPointers() {
-			copiedK = e.heapHole().deref(call, "copied slice")
+			copiedK = e.heapHole().deref(e.gd, call, "copied slice")
 		}
 		argument(copiedK, call.Y)
 		e.discard(call.RType)
@@ -290,10 +289,10 @@ func (e *escape) goDeferStmt(n *ir.GoDeferStmt) {
 
 	call, ok := n.Call.(*ir.CallExpr)
 	if !ok || call.Op() != ir.OCALLFUNC {
-		base.FatalfAt(n.Pos(), "expected function call: %v", n.Call)
+		e.gd.FatalfAt(n.Pos(), "expected function call: %v", n.Call)
 	}
 	if sig := call.Fun.Type(); sig.NumParams()+sig.NumResults() != 0 {
-		base.FatalfAt(n.Pos(), "expected signature without parameters or results: %v", sig)
+		e.gd.FatalfAt(n.Pos(), "expected signature without parameters or results: %v", sig)
 	}
 
 	if clo, ok := call.Fun.(*ir.ClosureExpr); ok && n.Op() == ir.OGO {
@@ -340,7 +339,7 @@ func (e *escape) rewriteArgument(arg ir.Node, call *ir.CallExpr, fn *ir.Name) {
 
 		k := e.mutatorHole()
 		if pragma&ir.UintptrEscapes != 0 {
-			k = e.heapHole().note(conv, "//go:uintptrescapes")
+			k = e.heapHole().note(e.gd, conv, "//go:uintptrescapes")
 		}
 		e.flow(k, e.oldLoc(tmp))
 
@@ -377,17 +376,17 @@ func (e *escape) rewriteArgument(arg ir.Node, call *ir.CallExpr, fn *ir.Name) {
 // appends statements to init to declare and initialize it to expr;
 // and escape analyzes the data flow.
 func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
-	if ir.HasUniquePos(expr) {
+	if ir.HasUniquePos(e.gd, expr) {
 		pos = expr.Pos()
 	}
 
-	tmp := typecheck.TempAt(pos, e.curfn, expr.Type())
+	tmp := typecheck.TempAt(e.gd, pos, e.curfn, expr.Type())
 
 	stmts := []ir.Node{
-		ir.NewDecl(pos, ir.ODCL, tmp),
-		ir.NewAssignStmt(pos, tmp, expr),
+		ir.NewDecl(e.gd, pos, ir.ODCL, tmp),
+		ir.NewAssignStmt(e.gd, pos, tmp, expr),
 	}
-	typecheck.Stmts(stmts)
+	typecheck.Stmts(e.gd, stmts)
 	init.Append(stmts...)
 
 	e.newLoc(tmp, true)
@@ -468,22 +467,22 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	// Call to previously tagged function.
 
 	var tagKs []hole
-	esc := parseLeaks(param.Note)
+	esc := parseLeaks(e.gd, param.Note)
 
 	if x := esc.Heap(); x >= 0 {
-		tagKs = append(tagKs, e.heapHole().shift(x))
+		tagKs = append(tagKs, e.heapHole().shift(e.gd, x))
 	}
 	if x := esc.Mutator(); x >= 0 {
-		tagKs = append(tagKs, e.mutatorHole().shift(x))
+		tagKs = append(tagKs, e.mutatorHole().shift(e.gd, x))
 	}
 	if x := esc.Callee(); x >= 0 {
-		tagKs = append(tagKs, e.calleeHole().shift(x))
+		tagKs = append(tagKs, e.calleeHole().shift(e.gd, x))
 	}
 
 	if ks != nil {
 		for i := 0; i < numEscResults; i++ {
 			if x := esc.Result(i); x >= 0 {
-				tagKs = append(tagKs, ks[i].shift(x))
+				tagKs = append(tagKs, ks[i].shift(e.gd, x))
 			}
 		}
 	}

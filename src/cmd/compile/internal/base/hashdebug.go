@@ -26,6 +26,8 @@ type hashAndMask struct {
 }
 
 type HashDebug struct {
+	gd *Invocation
+
 	mu   sync.Mutex // for logfile, posTmp, bytesTmp
 	name string     // base name of the flag/variable.
 	// what file (if any) receives the yes/no logging?
@@ -142,7 +144,7 @@ func HasDebugHash() bool {
 }
 
 // TODO: Delete when we switch to bisect-only.
-func toHashAndMask(s, varname string) hashAndMask {
+func (gd *Invocation) toHashAndMask(s, varname string) hashAndMask {
 	l := len(s)
 	if l > 64 {
 		s = s[l-64:]
@@ -151,7 +153,7 @@ func toHashAndMask(s, varname string) hashAndMask {
 	m := ^(^uint64(0) << l)
 	h, err := strconv.ParseUint(s, 2, 64)
 	if err != nil {
-		Fatalf("Could not parse %s (=%s) as a binary number", varname, s)
+		gd.Fatalf("Could not parse %s (=%s) as a binary number", varname, s)
 	}
 
 	return hashAndMask{name: varname, hash: h, mask: m}
@@ -160,16 +162,16 @@ func toHashAndMask(s, varname string) hashAndMask {
 // NewHashDebug returns a new hash-debug tester for the
 // environment variable ev.  If ev is not set, it returns
 // nil, allowing a lightweight check for normal-case behavior.
-func NewHashDebug(ev, s string, file io.Writer) *HashDebug {
+func (gd *Invocation) NewHashDebug(ev, s string, file io.Writer) *HashDebug {
 	if s == "" {
 		return nil
 	}
 
-	hd := &HashDebug{name: ev, logfile: file}
+	hd := &HashDebug{name: ev, logfile: file, gd: gd}
 	if !strings.Contains(s, "/") {
 		m, err := bisect.New(s)
 		if err != nil {
-			Fatalf("%s: %v", ev, err)
+			gd.Fatalf("%s: %v", ev, err)
 		}
 		hd.bisect = m
 		return hd
@@ -185,7 +187,7 @@ func NewHashDebug(ev, s string, file io.Writer) *HashDebug {
 			break
 		}
 		ss = ss[1:]
-		hd.excludes = append(hd.excludes, toHashAndMask(s[1:], fmt.Sprintf("%s%d", "HASH_EXCLUDE", i)))
+		hd.excludes = append(hd.excludes, gd.toHashAndMask(s[1:], fmt.Sprintf("%s%d", "HASH_EXCLUDE", i)))
 		i++
 	}
 	// hash searches may use additional EVs with 0, 1, 2, ... suffixes.
@@ -193,17 +195,17 @@ func NewHashDebug(ev, s string, file io.Writer) *HashDebug {
 	for _, s := range ss {
 		if s == "" {
 			if i != 0 || len(ss) > 1 && ss[1] != "" || len(ss) > 2 {
-				Fatalf("Empty hash match string for %s should be first (and only) one", ev)
+				gd.Fatalf("Empty hash match string for %s should be first (and only) one", ev)
 			}
 			// Special case of should match everything.
-			hd.matches = append(hd.matches, toHashAndMask("0", fmt.Sprintf("%s0", ev)))
-			hd.matches = append(hd.matches, toHashAndMask("1", fmt.Sprintf("%s1", ev)))
+			hd.matches = append(hd.matches, gd.toHashAndMask("0", fmt.Sprintf("%s0", ev)))
+			hd.matches = append(hd.matches, gd.toHashAndMask("1", fmt.Sprintf("%s1", ev)))
 			break
 		}
 		if i == 0 {
-			hd.matches = append(hd.matches, toHashAndMask(s, ev))
+			hd.matches = append(hd.matches, gd.toHashAndMask(s, ev))
 		} else {
-			hd.matches = append(hd.matches, toHashAndMask(s, fmt.Sprintf("%s%d", ev, i-1)))
+			hd.matches = append(hd.matches, gd.toHashAndMask(s, fmt.Sprintf("%s%d", ev, i-1)))
 		}
 		i++
 	}
@@ -274,7 +276,7 @@ func (d *HashDebug) MatchPos(pos src.XPos, desc func() string) bool {
 		return true
 	}
 	// Written this way to make inlining likely.
-	return d.matchPos(Ctxt, pos, desc)
+	return d.matchPos(d.gd.Ctxt, pos, desc)
 }
 
 func (d *HashDebug) matchPos(ctxt *obj.Link, pos src.XPos, note func() string) bool {
@@ -307,7 +309,7 @@ func (d *HashDebug) MatchPosWithInfo(pos src.XPos, info any, desc func() string)
 		return true
 	}
 	// Written this way to make inlining likely.
-	return d.matchPosWithInfo(Ctxt, pos, info, desc)
+	return d.matchPosWithInfo(d.gd.Ctxt, pos, info, desc)
 }
 
 // matchAndLog is the core matcher. It reports whether the hash matches the pattern.
@@ -402,7 +404,7 @@ func (d *HashDebug) log(varname string, hash uint64, text string) {
 			var err error
 			file, err = os.OpenFile(tmpfile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 			if err != nil {
-				Fatalf("could not open hash-testing logfile %s", tmpfile)
+				d.gd.Fatalf("could not open hash-testing logfile %s", tmpfile)
 				return
 			}
 		}

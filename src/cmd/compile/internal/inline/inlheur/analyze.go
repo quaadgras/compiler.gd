@@ -67,7 +67,7 @@ var fpmap = map[*ir.Func]fnInlHeur{}
 // directly into calls; other closures not directly called will also
 // be checked inlinability for inlinability here in case they are
 // returned as a result.
-func AnalyzeFunc(fn *ir.Func, canInline func(*ir.Func), budgetForFunc func(*ir.Func) int32, inlineMaxBudget int) {
+func AnalyzeFunc(gd *base.Invocation, fn *ir.Func, canInline func(*ir.Func), budgetForFunc func(*ir.Func) int32, inlineMaxBudget int) {
 	if fpmap == nil {
 		// If fpmap is nil this indicates that the main inliner pass is
 		// complete and we're doing inlining of wrappers (no heuristics
@@ -99,13 +99,13 @@ func AnalyzeFunc(fn *ir.Func, canInline func(*ir.Func), budgetForFunc func(*ir.F
 	// inlinable; if it is over the default hairiness limit and it
 	// doesn't have any interesting properties, then we don't want
 	// the overhead of writing out its inline body.
-	nameFinder := newNameFinder(fn)
+	nameFinder := newNameFinder(gd, fn)
 	for i := len(funcs) - 1; i >= 0; i-- {
 		f := funcs[i]
 		if f.OClosure != nil && !f.InlinabilityChecked() {
 			canInline(f)
 		}
-		funcProps := analyzeFunc(f, inlineMaxBudget, nameFinder)
+		funcProps := analyzeFunc(gd, f, inlineMaxBudget, nameFinder)
 		revisitInlinability(f, funcProps, budgetForFunc)
 		if f.Inl != nil {
 			f.Inl.Properties = funcProps.SerializeToString()
@@ -124,12 +124,12 @@ func TearDown() {
 	scoreCallsCache.csl = nil
 }
 
-func analyzeFunc(fn *ir.Func, inlineMaxBudget int, nf *nameFinder) *FuncProps {
+func analyzeFunc(gd *base.Invocation, fn *ir.Func, inlineMaxBudget int, nf *nameFinder) *FuncProps {
 	if funcInlHeur, ok := fpmap[fn]; ok {
 		return funcInlHeur.props
 	}
-	funcProps, fcstab := computeFuncProps(fn, inlineMaxBudget, nf)
-	file, line := fnFileLine(fn)
+	funcProps, fcstab := computeFuncProps(gd, fn, inlineMaxBudget, nf)
+	file, line := fnFileLine(gd, fn)
 	entry := fnInlHeur{
 		fname: fn.Sym().Name,
 		file:  file,
@@ -165,13 +165,13 @@ func revisitInlinability(fn *ir.Func, funcProps *FuncProps, budgetForFunc func(*
 // computeFuncProps examines the Go function 'fn' and computes for it
 // a function "properties" object, to be used to drive inlining
 // heuristics. See comments on the FuncProps type for more info.
-func computeFuncProps(fn *ir.Func, inlineMaxBudget int, nf *nameFinder) (*FuncProps, CallSiteTab) {
+func computeFuncProps(gd *base.Invocation, fn *ir.Func, inlineMaxBudget int, nf *nameFinder) (*FuncProps, CallSiteTab) {
 	if debugTrace&debugTraceFuncs != 0 {
 		fmt.Fprintf(os.Stderr, "=-= starting analysis of func %v:\n%+v\n",
 			fn, fn)
 	}
 	funcProps := new(FuncProps)
-	ffa := makeFuncFlagsAnalyzer(fn)
+	ffa := makeFuncFlagsAnalyzer(gd, fn)
 	analyzers := []propAnalyzer{ffa}
 	analyzers = addResultsAnalyzer(fn, analyzers, funcProps, inlineMaxBudget, nf)
 	analyzers = addParamsAnalyzer(fn, analyzers, funcProps, nf)
@@ -179,7 +179,7 @@ func computeFuncProps(fn *ir.Func, inlineMaxBudget int, nf *nameFinder) (*FuncPr
 	for _, a := range analyzers {
 		a.setResults(funcProps)
 	}
-	cstab := computeCallSiteTable(fn, fn.Body, nil, ffa.panicPathTable(), 0, nf)
+	cstab := computeCallSiteTable(gd, fn, fn.Body, nil, ffa.panicPathTable(), 0, nf)
 	return funcProps, cstab
 }
 
@@ -209,18 +209,18 @@ func propsForFunc(fn *ir.Func) *FuncProps {
 	return nil
 }
 
-func fnFileLine(fn *ir.Func) (string, uint) {
-	p := base.Ctxt.InnermostPos(fn.Pos())
+func fnFileLine(gd *base.Invocation, fn *ir.Func) (string, uint) {
+	p := gd.Ctxt.InnermostPos(fn.Pos())
 	return filepath.Base(p.Filename()), p.Line()
 }
 
-func Enabled() bool {
-	return buildcfg.Experiment.NewInliner || UnitTesting()
+func Enabled(gd *base.Invocation) bool {
+	return buildcfg.Experiment.NewInliner || UnitTesting(gd)
 }
 
-func UnitTesting() bool {
-	return base.Debug.DumpInlFuncProps != "" ||
-		base.Debug.DumpInlCallSiteScores != 0
+func UnitTesting(gd *base.Invocation) bool {
+	return gd.Debug.DumpInlFuncProps != "" ||
+		gd.Debug.DumpInlCallSiteScores != 0
 }
 
 // DumpFuncProps computes and caches function properties for the func
@@ -228,7 +228,7 @@ func UnitTesting() bool {
 // properties to the file given in 'dumpfile'. Used for the
 // "-d=dumpinlfuncprops=..." command line flag, intended for use
 // primarily in unit testing.
-func DumpFuncProps(fn *ir.Func, dumpfile string) {
+func DumpFuncProps(gd *base.Invocation, fn *ir.Func, dumpfile string) {
 	if fn != nil {
 		if fn.OClosure != nil {
 			// closures will be processed along with their outer enclosing func.
@@ -241,7 +241,7 @@ func DumpFuncProps(fn *ir.Func, dumpfile string) {
 			}
 		})
 	} else {
-		emitDumpToFile(dumpfile)
+		emitDumpToFile(gd, dumpfile)
 	}
 }
 
@@ -249,7 +249,7 @@ func DumpFuncProps(fn *ir.Func, dumpfile string) {
 // to a file, for unit testing. Dump entries need to be sorted by
 // definition line, and due to generics we need to account for the
 // possibility that several ir.Func's will have the same def line.
-func emitDumpToFile(dumpfile string) {
+func emitDumpToFile(gd *base.Invocation, dumpfile string) {
 	mode := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
 	if dumpfile[0] == '+' {
 		dumpfile = dumpfile[1:]
@@ -258,12 +258,12 @@ func emitDumpToFile(dumpfile string) {
 	if dumpfile[0] == '%' {
 		dumpfile = dumpfile[1:]
 		d, b := filepath.Dir(dumpfile), filepath.Base(dumpfile)
-		ptag := strings.ReplaceAll(types.LocalPkg.Path, "/", ":")
+		ptag := strings.ReplaceAll(types.LocalPkg(gd).Path, "/", ":")
 		dumpfile = d + "/" + ptag + "." + b
 	}
 	outf, err := os.OpenFile(dumpfile, mode, 0644)
 	if err != nil {
-		base.Fatalf("opening function props dump file %q: %v\n", dumpfile, err)
+		gd.Fatalf("opening function props dump file %q: %v\n", dumpfile, err)
 	}
 	defer outf.Close()
 	dumpFilePreamble(outf)
@@ -284,8 +284,8 @@ func emitDumpToFile(dumpfile string) {
 		}
 		prevline = entry.line
 		atl := atline[entry.line]
-		if err := dumpFnPreamble(outf, &entry, nil, idx, atl); err != nil {
-			base.Fatalf("function props dump: %v\n", err)
+		if err := dumpFnPreamble(gd, outf, &entry, nil, idx, atl); err != nil {
+			gd.Fatalf("function props dump: %v\n", err)
 		}
 	}
 	dumpBuffer = nil
@@ -332,7 +332,7 @@ func dumpFilePreamble(w io.Writer) {
 // Go function as part of a function properties dump. See the
 // README.txt file in testdata/props for more on the format of
 // this preamble.
-func dumpFnPreamble(w io.Writer, funcInlHeur *fnInlHeur, ecst encodedCallSiteTab, idx, atl uint) error {
+func dumpFnPreamble(gd *base.Invocation, w io.Writer, funcInlHeur *fnInlHeur, ecst encodedCallSiteTab, idx, atl uint) error {
 	fmt.Fprintf(w, "// %s %s %d %d %d\n",
 		funcInlHeur.file, funcInlHeur.fname, funcInlHeur.line, idx, atl)
 	// emit props as comments, followed by delimiter
@@ -342,7 +342,7 @@ func dumpFnPreamble(w io.Writer, funcInlHeur *fnInlHeur, ecst encodedCallSiteTab
 		return fmt.Errorf("marshal error %v\n", err)
 	}
 	fmt.Fprintf(w, "// %s\n", string(data))
-	dumpCallSiteComments(w, funcInlHeur.cstab, ecst)
+	dumpCallSiteComments(gd, w, funcInlHeur.cstab, ecst)
 	fmt.Fprintf(w, "// %s\n", fnDelimiter)
 	return nil
 }

@@ -142,25 +142,25 @@ func Init(arch *ssagen.ArchInfo) {
 	arch.SSAGenBlock = ssaGenBlock
 }
 
-func zeroRange(pp *objw.Progs, p *obj.Prog, off, cnt int64, state *uint32) *obj.Prog {
+func zeroRange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, state *uint32) *obj.Prog {
 	if cnt == 0 {
 		return p
 	}
 	if cnt%8 != 0 {
-		base.Fatalf("zerorange count not a multiple of widthptr %d", cnt)
+		gd.Fatalf("zerorange count not a multiple of widthptr %d", cnt)
 	}
 
 	for i := int64(0); i < cnt; i += 8 {
-		p = pp.Append(p, wasm.AGet, obj.TYPE_REG, wasm.REG_SP, 0, 0, 0, 0)
-		p = pp.Append(p, wasm.AI64Const, obj.TYPE_CONST, 0, 0, 0, 0, 0)
-		p = pp.Append(p, wasm.AI64Store, 0, 0, 0, obj.TYPE_CONST, 0, off+i)
+		p = pp.Append(gd, p, wasm.AGet, obj.TYPE_REG, wasm.REG_SP, 0, 0, 0, 0)
+		p = pp.Append(gd, p, wasm.AI64Const, obj.TYPE_CONST, 0, 0, 0, 0, 0)
+		p = pp.Append(gd, p, wasm.AI64Store, 0, 0, 0, obj.TYPE_CONST, 0, off+i)
 	}
 
 	return p
 }
 
-func ginsnop(pp *objw.Progs) *obj.Prog {
-	return pp.Prog(wasm.ANop)
+func ginsnop(gd *base.Invocation, pp *objw.Progs) *obj.Prog {
+	return pp.Prog(gd, wasm.ANop)
 }
 
 func ssaMarkMoves(s *ssagen.State, b *ssa.Block) {
@@ -214,7 +214,7 @@ func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
 	}
 }
 
-func ssaGenValue(s *ssagen.State, v *ssa.Value) {
+func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpWasmLoweredStaticCall, ssa.OpWasmLoweredClosureCall, ssa.OpWasmLoweredInterCall, ssa.OpWasmLoweredTailCall:
 		s.PrepareCall(v)
@@ -267,8 +267,8 @@ func ssaGenValue(s *ssagen.State, v *ssa.Value) {
 		if logopt.Enabled() {
 			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
-		if base.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
-			base.WarnfAt(v.Pos, "generated nil check")
+		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
+			gd.WarnfAt(v.Pos, "generated nil check")
 		}
 
 	case ssa.OpWasmLoweredWB:

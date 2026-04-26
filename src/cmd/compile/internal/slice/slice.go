@@ -117,16 +117,16 @@ import (
 	"cmd/compile/internal/reflectdata"
 )
 
-func Funcs(all []*ir.Func) {
-	if base.Flag.N != 0 {
+func Funcs(gd *base.Invocation, all []*ir.Func) {
+	if gd.Flag.N != 0 {
 		return
 	}
 	for _, fn := range all {
-		analyze(fn)
+		analyze(gd, fn)
 	}
 }
 
-func analyze(fn *ir.Func) {
+func analyze(gd *base.Invocation, fn *ir.Func) {
 	type sliceInfo struct {
 		// Slice variable.
 		s *ir.Name
@@ -165,7 +165,7 @@ func analyze(fn *ir.Func) {
 	// Every variable (*ir.Name) that we are tracking will have
 	// a non-nil *sliceInfo in its Opt field.
 	haveLocalSlice := false
-	maxStackSize := int64(base.Debug.VariableMakeThreshold)
+	maxStackSize := int64(gd.Debug.VariableMakeThreshold)
 	var namedRets []*ir.Name
 	for _, s := range fn.Dcl {
 		if !s.Type().IsSlice() {
@@ -348,7 +348,7 @@ func analyze(fn *ir.Func) {
 			n := n.(*ir.CallExpr)
 			for idx, arg := range n.Args {
 				if i := tracking(arg); i != nil {
-					if !argLeak(n, idx) {
+					if !argLeak(gd, n, idx) {
 						// Passing s to a nonescaping arg is ok.
 						i.okUses++
 						i.capUsed = true
@@ -429,10 +429,10 @@ func analyze(fn *ir.Func) {
 		if i.capUsed {
 			move.PreserveCapacity = true
 		}
-		move.RType = reflectdata.AppendElemRType(i.transition.Pos(), i.appends[0])
+		move.RType = reflectdata.AppendElemRType(gd, i.transition.Pos(), i.appends[0])
 		move.SetType(i.s.Type())
 		move.SetTypecheck(1)
-		as := ir.NewAssignStmt(i.transition.Pos(), i.s, move)
+		as := ir.NewAssignStmt(gd, i.transition.Pos(), i.s, move)
 		as.SetTypecheck(1)
 		i.transition.PtrInit().Prepend(as)
 		// Note: we prepend because we need to put the move2heap
@@ -456,7 +456,7 @@ func analyze(fn *ir.Func) {
 // argLeak reports if the idx'th argument to the call n escapes anywhere
 // (to the heap, another argument, return value, etc.)
 // If unknown returns true.
-func argLeak(n *ir.CallExpr, idx int) bool {
+func argLeak(gd *base.Invocation, n *ir.CallExpr, idx int) bool {
 	if n.Op() != ir.OCALLFUNC {
 		return true
 	}
@@ -467,9 +467,9 @@ func argLeak(n *ir.CallExpr, idx int) bool {
 	fntype := fn.Type()
 	if recv := fntype.Recv(); recv != nil {
 		if idx == 0 {
-			return escape.ParseLeaks(recv.Note).Any()
+			return escape.ParseLeaks(gd, recv.Note).Any()
 		}
 		idx--
 	}
-	return escape.ParseLeaks(fntype.Params()[idx].Note).Any()
+	return escape.ParseLeaks(gd, fntype.Params()[idx].Note).Any()
 }

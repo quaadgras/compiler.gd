@@ -23,7 +23,7 @@ import (
 var nopos syntax.Pos
 
 func mustParse(src string) *syntax.File {
-	f, err := syntax.Parse(syntax.NewFileBase(pkgName(src)), strings.NewReader(src), nil, nil, 0)
+	f, err := syntax.Parse(testGd, syntax.NewFileBase(pkgName(src)), strings.NewReader(src), nil, nil, 0)
 	if err != nil {
 		panic(err) // so we don't need to pass *testing.T
 	}

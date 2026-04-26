@@ -7,6 +7,7 @@ package noder
 import (
 	"fmt"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 )
 
@@ -16,7 +17,7 @@ import (
 // Deprecated: This function exists to emulate position semantics from
 // Go 1.17, necessary for compatibility with the backend DWARF
 // generation logic that assigns variables to their appropriate scope.
-func typeExprEndPos(expr0 syntax.Expr) syntax.Pos {
+func typeExprEndPos(gd *base.Invocation, expr0 syntax.Expr) syntax.Pos {
 	for {
 		switch expr := expr0.(type) {
 		case *syntax.Name:
@@ -28,8 +29,8 @@ func typeExprEndPos(expr0 syntax.Expr) syntax.Pos {
 			expr0 = expr.X
 
 		case *syntax.Operation:
-			assert(expr.Op == syntax.Mul)
-			assert(expr.Y == nil)
+			assert(gd, expr.Op == syntax.Mul)
+			assert(gd, expr.Y == nil)
 			expr0 = expr.X
 
 		case *syntax.ArrayType:

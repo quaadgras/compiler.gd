@@ -27,6 +27,8 @@ type Node interface {
 	// For making copies. For Copy and SepCopy.
 	copy() Node
 
+	compiler() *base.Invocation
+
 	doChildren(func(Node) bool) bool
 	doChildrenWithHidden(func(Node) bool) bool
 	editChildren(func(Node) Node)
@@ -65,8 +67,8 @@ type Node interface {
 
 // Line returns n's position as a string. If n has been inlined,
 // it uses the outermost position where n has been inlined.
-func Line(n Node) string {
-	return base.FmtPos(n.Pos())
+func Line(gd *base.Invocation, n Node) string {
+	return gd.FmtPos(n.Pos())
 }
 
 func IsSynthetic(n Node) bool {
@@ -489,7 +491,7 @@ func IsMethod(n Node) bool {
 // It's primarily used to distinguish references to named objects,
 // whose Pos will point back to their declaration position rather than
 // their usage position.
-func HasUniquePos(n Node) bool {
+func HasUniquePos(gd *base.Invocation, n Node) bool {
 	switch n.Op() {
 	case ONAME:
 		return false
@@ -500,8 +502,8 @@ func HasUniquePos(n Node) bool {
 	}
 
 	if !n.Pos().IsKnown() {
-		if base.Flag.K != 0 {
-			base.Warn("setlineno: unknown position (line 0)")
+		if gd.Flag.K != 0 {
+			gd.Warn("setlineno: unknown position (line 0)")
 		}
 		return false
 	}
@@ -509,18 +511,18 @@ func HasUniquePos(n Node) bool {
 	return true
 }
 
-func SetPos(n Node) src.XPos {
-	lno := base.Pos
-	if n != nil && HasUniquePos(n) {
-		base.Pos = n.Pos()
+func SetPos(gd *base.Invocation, n Node) src.XPos {
+	lno := gd.Pos
+	if n != nil && HasUniquePos(gd, n) {
+		gd.Pos = n.Pos()
 	}
 	return lno
 }
 
 // The result of InitExpr MUST be assigned back to n, e.g.
 //
-//	n.X = InitExpr(init, n.X)
-func InitExpr(init []Node, expr Node) Node {
+//	n.X = InitExpr(gd, init, n.X)
+func InitExpr(gd *base.Invocation, init []Node, expr Node) Node {
 	if len(init) == 0 {
 		return expr
 	}
@@ -528,7 +530,7 @@ func InitExpr(init []Node, expr Node) Node {
 	n, ok := expr.(InitNode)
 	if !ok || MayBeShared(n) {
 		// Introduce OCONVNOP to hold init list.
-		n = NewConvExpr(base.Pos, OCONVNOP, nil, expr)
+		n = NewConvExpr(gd, gd.Pos, OCONVNOP, nil, expr)
 		n.SetType(expr.Type())
 		n.SetTypecheck(1)
 	}
@@ -540,10 +542,11 @@ func InitExpr(init []Node, expr Node) Node {
 // what's the outer value that a write to n affects?
 // outer value means containing struct or array.
 func OuterValue(n Node) Node {
+	gd := n.compiler()
 	for {
 		switch nn := n; nn.Op() {
 		case OXDOT:
-			base.FatalfAt(n.Pos(), "OXDOT in OuterValue: %v", n)
+			gd.FatalfAt(n.Pos(), "OXDOT in OuterValue: %v", n)
 		case ODOT:
 			nn := nn.(*SelectorExpr)
 			n = nn.X
@@ -559,7 +562,7 @@ func OuterValue(n Node) Node {
 		case OINDEX:
 			nn := nn.(*IndexExpr)
 			if nn.X.Type() == nil {
-				base.Fatalf("OuterValue needs type for %v", nn.X)
+				gd.Fatalf("OuterValue needs type for %v", nn.X)
 			}
 			if nn.X.Type().IsArray() {
 				n = nn.X

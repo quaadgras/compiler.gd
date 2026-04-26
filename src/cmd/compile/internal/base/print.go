@@ -24,35 +24,25 @@ type errorMsg struct {
 	code errors.Code
 }
 
-// Pos is the current source position being processed,
-// printed by Errorf, ErrorfLang, Fatalf, and Warnf.
-var Pos src.XPos
-
-var (
-	errorMsgs       []errorMsg
-	numErrors       int // number of entries in errorMsgs that are errors (as opposed to warnings)
-	numSyntaxErrors int
-)
-
 // Errors returns the number of errors reported.
-func Errors() int {
-	return numErrors
+func (gd *Invocation) Errors() int {
+	return gd.numErrors
 }
 
 // SyntaxErrors returns the number of syntax errors reported.
-func SyntaxErrors() int {
-	return numSyntaxErrors
+func (gd *Invocation) SyntaxErrors() int {
+	return gd.numSyntaxErrors
 }
 
 // addErrorMsg adds a new errorMsg (which may be a warning) to errorMsgs.
-func addErrorMsg(pos src.XPos, code errors.Code, format string, args ...any) {
+func (gd *Invocation) addErrorMsg(pos src.XPos, code errors.Code, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	// Only add the position if know the position.
 	// See issue golang.org/issue/11361.
 	if pos.IsKnown() {
-		msg = fmt.Sprintf("%v: %s", FmtPos(pos), msg)
+		msg = fmt.Sprintf("%v: %s", gd.FmtPos(pos), msg)
 	}
-	errorMsgs = append(errorMsgs, errorMsg{
+	gd.errorMsgs = append(gd.errorMsgs, errorMsg{
 		pos:  pos,
 		msg:  msg + "\n",
 		code: code,
@@ -60,11 +50,11 @@ func addErrorMsg(pos src.XPos, code errors.Code, format string, args ...any) {
 }
 
 // FmtPos formats pos as a file:line string.
-func FmtPos(pos src.XPos) string {
-	if Ctxt == nil {
+func (gd *Invocation) FmtPos(pos src.XPos) string {
+	if gd.Ctxt == nil {
 		return "???"
 	}
-	return Ctxt.OutermostPos(pos).Format(Flag.C == 0, Flag.L == 1)
+	return gd.Ctxt.OutermostPos(pos).Format(gd.Flag.C == 0, gd.Flag.L == 1)
 }
 
 // byPos sorts errors by source position.
@@ -76,85 +66,77 @@ func (x byPos) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
 
 // FlushErrors sorts errors seen so far by line number, prints them to stdout,
 // and empties the errors array.
-func FlushErrors() {
-	if Ctxt != nil && Ctxt.Bso != nil {
-		Ctxt.Bso.Flush()
+func (gd *Invocation) FlushErrors() {
+	if gd.Ctxt != nil && gd.Ctxt.Bso != nil {
+		gd.Ctxt.Bso.Flush()
 	}
-	if len(errorMsgs) == 0 {
+	if len(gd.errorMsgs) == 0 {
 		return
 	}
-	sort.Stable(byPos(errorMsgs))
-	for i, err := range errorMsgs {
-		if i == 0 || err.msg != errorMsgs[i-1].msg {
+	sort.Stable(byPos(gd.errorMsgs))
+	for i, err := range gd.errorMsgs {
+		if i == 0 || err.msg != gd.errorMsgs[i-1].msg {
 			fmt.Print(err.msg)
 		}
 	}
-	errorMsgs = errorMsgs[:0]
-}
-
-// lasterror keeps track of the most recently issued error,
-// to avoid printing multiple error messages on the same line.
-var lasterror struct {
-	syntax src.XPos // source position of last syntax error
-	other  src.XPos // source position of last non-syntax error
-	msg    string   // error message of last non-syntax error
+	gd.errorMsgs = gd.errorMsgs[:0]
 }
 
 // sameline reports whether two positions a, b are on the same line.
-func sameline(a, b src.XPos) bool {
-	p := Ctxt.PosTable.Pos(a)
-	q := Ctxt.PosTable.Pos(b)
+func (gd *Invocation) sameline(a, b src.XPos) bool {
+	p := gd.Ctxt.PosTable.Pos(a)
+	q := gd.Ctxt.PosTable.Pos(b)
 	return p.Base() == q.Base() && p.Line() == q.Line()
 }
 
 // Errorf reports a formatted error at the current line.
-func Errorf(format string, args ...any) {
-	ErrorfAt(Pos, 0, format, args...)
+func (gd *Invocation) Errorf(format string, args ...any) {
+	gd.ErrorfAt(gd.Pos, 0, format, args...)
 }
 
 // ErrorfAt reports a formatted error message at pos.
-func ErrorfAt(pos src.XPos, code errors.Code, format string, args ...any) {
+func (gd *Invocation) ErrorfAt(pos src.XPos, code errors.Code, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 
 	if strings.HasPrefix(msg, "syntax error") {
-		numSyntaxErrors++
+		gd.numSyntaxErrors++
 		// only one syntax error per line, no matter what error
-		if sameline(lasterror.syntax, pos) {
+		if gd.sameline(gd.lasterror.syntax, pos) {
 			return
 		}
-		lasterror.syntax = pos
+		gd.lasterror.syntax = pos
 	} else {
 		// only one of multiple equal non-syntax errors per line
 		// (FlushErrors shows only one of them, so we filter them
 		// here as best as we can (they may not appear in order)
 		// so that we don't count them here and exit early, and
 		// then have nothing to show for.)
-		if sameline(lasterror.other, pos) && lasterror.msg == msg {
+		if gd.sameline(gd.lasterror.other, pos) && gd.lasterror.msg == msg {
 			return
 		}
-		lasterror.other = pos
-		lasterror.msg = msg
+		gd.lasterror.other = pos
+		gd.lasterror.msg = msg
 	}
 
-	addErrorMsg(pos, code, "%s", msg)
-	numErrors++
+	gd.addErrorMsg(pos, code, "%s", msg)
+	gd.numErrors++
 
-	hcrash()
-	if numErrors >= 10 && Flag.LowerE == 0 {
-		FlushErrors()
-		fmt.Printf("%v: too many errors\n", FmtPos(pos))
-		ErrorExit()
+	gd.hcrash()
+	if gd.numErrors >= 10 && gd.Flag.LowerE == 0 {
+		gd.FlushErrors()
+		fmt.Printf("%v: too many errors\n", gd.FmtPos(pos))
+		gd.ErrorExit()
 	}
 }
 
 // UpdateErrorDot is a clumsy hack that rewrites the last error,
 // if it was "LINE: undefined: NAME", to be "LINE: undefined: NAME in EXPR".
 // It is used to give better error messages for dot (selector) expressions.
-func UpdateErrorDot(line string, name, expr string) {
-	if len(errorMsgs) == 0 {
+func (gd *Invocation) UpdateErrorDot(line string, name, expr string) {
+	if len(gd.errorMsgs) == 0 {
 		return
 	}
-	e := &errorMsgs[len(errorMsgs)-1]
+	e := &gd.errorMsgs[len(gd.errorMsgs)-1]
 	if strings.HasPrefix(e.msg, line) && e.msg == fmt.Sprintf("%v: undefined: %v\n", line, name) {
 		e.msg = fmt.Sprintf("%v: undefined: %v in %v\n", line, name, expr)
 	}
@@ -164,18 +146,18 @@ func UpdateErrorDot(line string, name, expr string) {
 // In general the Go compiler does NOT generate warnings,
 // so this should be used only when the user has opted in
 // to additional output by setting a particular flag.
-func Warn(format string, args ...any) {
-	WarnfAt(Pos, format, args...)
+func (gd *Invocation) Warn(format string, args ...any) {
+	gd.WarnfAt(gd.Pos, format, args...)
 }
 
 // WarnfAt reports a formatted warning at pos.
 // In general the Go compiler does NOT generate warnings,
 // so this should be used only when the user has opted in
 // to additional output by setting a particular flag.
-func WarnfAt(pos src.XPos, format string, args ...any) {
-	addErrorMsg(pos, 0, format, args...)
-	if Flag.LowerM != 0 {
-		FlushErrors()
+func (gd *Invocation) WarnfAt(pos src.XPos, format string, args ...any) {
+	gd.addErrorMsg(pos, 0, format, args...)
+	if gd.Flag.LowerM != 0 {
+		gd.FlushErrors()
 	}
 }
 
@@ -191,8 +173,8 @@ func WarnfAt(pos src.XPos, format string, args ...any) {
 // prints a stack trace.
 //
 // If -h has been specified, Fatalf panics to force the usual runtime info dump.
-func Fatalf(format string, args ...any) {
-	FatalfAt(Pos, format, args...)
+func (gd *Invocation) Fatalf(format string, args ...any) {
+	gd.FatalfAt(gd.Pos, format, args...)
 }
 
 var bugStack = counter.NewStack("compile/bug", 16) // 16 is arbitrary; used by gopls and crashmonitor
@@ -209,18 +191,18 @@ var bugStack = counter.NewStack("compile/bug", 16) // 16 is arbitrary; used by g
 // prints a stack trace.
 //
 // If -h has been specified, FatalfAt panics to force the usual runtime info dump.
-func FatalfAt(pos src.XPos, format string, args ...any) {
-	FlushErrors()
+func (gd *Invocation) FatalfAt(pos src.XPos, format string, args ...any) {
+	gd.FlushErrors()
 
 	bugStack.Inc()
 
-	if Debug.Panic != 0 || numErrors == 0 {
-		fmt.Printf("%v: internal compiler error: ", FmtPos(pos))
+	if gd.Debug.Panic != 0 || gd.numErrors == 0 {
+		fmt.Printf("%v: internal compiler error: ", gd.FmtPos(pos))
 		fmt.Printf(format, args...)
 		fmt.Printf("\n")
 
 		// If this is a released compiler version, ask for a bug report.
-		if Debug.Panic == 0 && strings.HasPrefix(buildcfg.Version, "go") && !strings.Contains(buildcfg.Version, "devel") {
+		if gd.Debug.Panic == 0 && strings.HasPrefix(buildcfg.Version, "go") && !strings.Contains(buildcfg.Version, "devel") {
 			fmt.Printf("\n")
 			fmt.Printf("Please file a bug report including a short program that triggers the error.\n")
 			fmt.Printf("https://go.dev/issue/new\n")
@@ -232,37 +214,37 @@ func FatalfAt(pos src.XPos, format string, args ...any) {
 		}
 	}
 
-	hcrash()
-	ErrorExit()
+	gd.hcrash()
+	gd.ErrorExit()
 }
 
 // Assert reports "assertion failed" with Fatalf, unless b is true.
-func Assert(b bool) {
+func (gd *Invocation) Assert(b bool) {
 	if !b {
-		Fatalf("assertion failed")
+		gd.Fatalf("assertion failed")
 	}
 }
 
 // Assertf reports a fatal error with Fatalf, unless b is true.
-func Assertf(b bool, format string, args ...any) {
+func (gd *Invocation) Assertf(b bool, format string, args ...any) {
 	if !b {
-		Fatalf(format, args...)
+		gd.Fatalf(format, args...)
 	}
 }
 
 // AssertfAt reports a fatal error with FatalfAt, unless b is true.
-func AssertfAt(b bool, pos src.XPos, format string, args ...any) {
+func (gd *Invocation) AssertfAt(b bool, pos src.XPos, format string, args ...any) {
 	if !b {
-		FatalfAt(pos, format, args...)
+		gd.FatalfAt(pos, format, args...)
 	}
 }
 
 // hcrash crashes the compiler when -h is set, to find out where a message is generated.
-func hcrash() {
-	if Flag.LowerH != 0 {
-		FlushErrors()
-		if Flag.LowerO != "" {
-			os.Remove(Flag.LowerO)
+func (gd *Invocation) hcrash() {
+	if gd.Flag.LowerH != 0 {
+		gd.FlushErrors()
+		if gd.Flag.LowerO != "" {
+			os.Remove(gd.Flag.LowerO)
 		}
 		panic("-h")
 	}
@@ -270,19 +252,17 @@ func hcrash() {
 
 // ErrorExit handles an error-status exit.
 // It flushes any pending errors, removes the output file, and exits.
-func ErrorExit() {
-	FlushErrors()
-	if Flag.LowerO != "" {
-		os.Remove(Flag.LowerO)
+func (gd *Invocation) ErrorExit() {
+	gd.FlushErrors()
+	if gd.Flag.LowerO != "" {
+		os.Remove(gd.Flag.LowerO)
 	}
 	os.Exit(2)
 }
 
 // ExitIfErrors calls ErrorExit if any errors have been reported.
-func ExitIfErrors() {
-	if Errors() > 0 {
-		ErrorExit()
+func (gd *Invocation) ExitIfErrors() {
+	if gd.Errors() > 0 {
+		gd.ErrorExit()
 	}
 }
-
-var AutogeneratedPos src.XPos

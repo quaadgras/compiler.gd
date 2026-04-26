@@ -5,8 +5,8 @@
 package typebits
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/bitvec"
+	"cmd/compile/internal/fatal"
 	"cmd/compile/internal/types"
 )
 
@@ -24,7 +24,7 @@ func SetNoCheck(t *types.Type, off int64, bv bitvec.BitVec) {
 
 func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
 	if !skip && uint8(t.Alignment()) > 0 && off&int64(uint8(t.Alignment())-1) != 0 {
-		base.Fatalf("typebits.Set: invalid initial alignment: type %v has alignment %d, but offset is %v", t, uint8(t.Alignment()), off)
+		fatal.Error("typebits.Set: invalid initial alignment: type %v has alignment %d, but offset is %v", t, uint8(t.Alignment()), off)
 	}
 	if !t.HasPointers() {
 		// Note: this case ensures that pointers to not-in-heap types
@@ -35,14 +35,14 @@ func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
 	switch t.Kind() {
 	case types.TPTR, types.TUNSAFEPTR, types.TFUNC, types.TCHAN, types.TMAP:
 		if off&int64(types.PtrSize-1) != 0 {
-			base.Fatalf("typebits.Set: invalid alignment, %v", t)
+			fatal.Error("typebits.Set: invalid alignment, %v", t)
 		}
 		bv.Set(int32(off / int64(types.PtrSize))) // pointer
 
 	case types.TSTRING:
 		// struct { byte *str; intgo len; }
 		if off&int64(types.PtrSize-1) != 0 {
-			base.Fatalf("typebits.Set: invalid alignment, %v", t)
+			fatal.Error("typebits.Set: invalid alignment, %v", t)
 		}
 		bv.Set(int32(off / int64(types.PtrSize))) //pointer in first slot
 
@@ -61,14 +61,14 @@ func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
 		// Only the data word needs a pointer bit; boxed types hold a live
 		// heap pointer there, inline types hold nil.
 		if off&int64(types.PtrSize-1) != 0 {
-			base.Fatalf("typebits.Set: invalid alignment, %v", t)
+			fatal.Error("typebits.Set: invalid alignment, %v", t)
 		}
 		bv.Set(int32(off/int64(types.PtrSize) + 1)) // pointer in second slot (data)
 
 	case types.TSLICE:
 		// struct { byte *array; uintgo len; uintgo cap; }
 		if off&int64(types.PtrSize-1) != 0 {
-			base.Fatalf("typebits.Set: invalid TARRAY alignment, %v", t)
+			fatal.Error("typebits.Set: invalid TARRAY alignment, %v", t)
 		}
 		bv.Set(int32(off / int64(types.PtrSize))) // pointer in first slot (BitsPointer)
 
@@ -89,6 +89,6 @@ func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
 		}
 
 	default:
-		base.Fatalf("typebits.Set: unexpected type, %v", t)
+		fatal.Error("typebits.Set: unexpected type, %v", t)
 	}
 }

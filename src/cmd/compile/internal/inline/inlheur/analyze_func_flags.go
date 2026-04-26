@@ -17,6 +17,7 @@ import (
 // which stores the disposition of a given ir Node with respect to the
 // flags/properties we're trying to compute.
 type funcFlagsAnalyzer struct {
+	gd     *base.Invocation
 	fn     *ir.Func
 	nstate map[ir.Node]pstate
 	noInfo bool // set if we see something inscrutable/un-analyzable
@@ -33,8 +34,9 @@ const (
 	psTop                      // dataflow lattice "top" element
 )
 
-func makeFuncFlagsAnalyzer(fn *ir.Func) *funcFlagsAnalyzer {
+func makeFuncFlagsAnalyzer(gd *base.Invocation, fn *ir.Func) *funcFlagsAnalyzer {
 	return &funcFlagsAnalyzer{
+		gd:     gd,
 		fn:     fn,
 		nstate: make(map[ir.Node]pstate),
 	}
@@ -157,7 +159,7 @@ func (ffa *funcFlagsAnalyzer) stateForList(list ir.Nodes) pstate {
 		psi := ffa.getState(n)
 		if debugTrace&debugTraceFuncFlags != 0 {
 			fmt.Fprintf(os.Stderr, "=-= %v: stateForList n=%s ps=%s\n",
-				ir.Line(n), n.Op().String(), psi.String())
+				ir.Line(ffa.gd, n), n.Op().String(), psi.String())
 		}
 		st = blockCombine(psi, st)
 		ffa.updateState(n, st)
@@ -224,7 +226,7 @@ func shouldVisit(n ir.Node) bool {
 func (ffa *funcFlagsAnalyzer) nodeVisitPost(n ir.Node) {
 	if debugTrace&debugTraceFuncFlags != 0 {
 		fmt.Fprintf(os.Stderr, "=+= nodevis %v %s should=%v\n",
-			ir.Line(n), n.Op().String(), shouldVisit(n))
+			ir.Line(ffa.gd, n), n.Op().String(), shouldVisit(n))
 	}
 	if !shouldVisit(n) {
 		return
@@ -339,15 +341,15 @@ func (ffa *funcFlagsAnalyzer) nodeVisitPost(n ir.Node) {
 		// these should all be benign/uninteresting
 	case ir.OTAILCALL, ir.OJUMPTABLE, ir.OTYPESW:
 		// don't expect to see these at all.
-		base.Fatalf("unexpected op %s in func %s",
+		ffa.gd.Fatalf("unexpected op %s in func %s",
 			n.Op().String(), ir.FuncName(ffa.fn))
 	default:
-		base.Fatalf("%v: unhandled op %s in func %v",
-			ir.Line(n), n.Op().String(), ir.FuncName(ffa.fn))
+		ffa.gd.Fatalf("%v: unhandled op %s in func %v",
+			ir.Line(ffa.gd, n), n.Op().String(), ir.FuncName(ffa.fn))
 	}
 	if debugTrace&debugTraceFuncFlags != 0 {
 		fmt.Fprintf(os.Stderr, "=-= %v: visit n=%s returns %s\n",
-			ir.Line(n), n.Op().String(), st.String())
+			ir.Line(ffa.gd, n), n.Op().String(), st.String())
 	}
 	ffa.setState(n, st)
 }

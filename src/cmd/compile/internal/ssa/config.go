@@ -17,6 +17,8 @@ import (
 // It is created once, early during compilation,
 // and shared across all compilations.
 type Config struct {
+	gd *base.Invocation
+
 	arch           string // "amd64", etc.
 	PtrSize        int64  // 4 or 8; copy of cmd/internal/sys.Arch.PtrSize
 	RegSize        int64  // 4 or 8; copy of cmd/internal/sys.Arch.RegSize
@@ -172,7 +174,7 @@ type Frontend interface {
 }
 
 // NewConfig returns a new configuration object for the given architecture.
-func NewConfig(arch string, types Types, ctxt *obj.Link, optimize, softfloat bool) *Config {
+func NewConfig(gd *base.Invocation, arch string, types Types, ctxt *obj.Link, optimize, softfloat bool) *Config {
 	c := &Config{arch: arch, Types: types}
 	switch arch {
 	case "amd64":
@@ -377,8 +379,8 @@ func NewConfig(arch string, types Types, ctxt *obj.Link, optimize, softfloat boo
 		c.floatParamRegs = nil // no FP registers in softfloat mode
 	}
 
-	c.ABI0 = abi.NewABIConfig(0, 0, ctxt.Arch.FixedFrameSize, 0)
-	c.ABI1 = abi.NewABIConfig(len(c.intParamRegs), len(c.floatParamRegs), ctxt.Arch.FixedFrameSize, 1)
+	c.ABI0 = abi.NewABIConfig(gd, 0, 0, ctxt.Arch.FixedFrameSize, 0)
+	c.ABI1 = abi.NewABIConfig(gd, len(c.intParamRegs), len(c.floatParamRegs), ctxt.Arch.FixedFrameSize, 1)
 
 	if ctxt.Flag_shared {
 		// LoweredWB is secretly a CALL and CALLs on 386 in
@@ -389,6 +391,7 @@ func NewConfig(arch string, types Types, ctxt *obj.Link, optimize, softfloat boo
 
 	c.buildRecipes(arch)
 
+	c.gd = gd
 	return c
 }
 
@@ -403,7 +406,7 @@ func (c *Config) haveByteSwap(size int64) bool {
 	case 2:
 		return c.haveBswap16
 	default:
-		base.Fatalf("bad size %d\n", size)
+		c.gd.Fatalf("bad size %d\n", size)
 		return false
 	}
 }

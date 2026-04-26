@@ -61,8 +61,9 @@ type AddStringExpr struct {
 	Prealloc *Name
 }
 
-func NewAddStringExpr(pos src.XPos, list []Node) *AddStringExpr {
+func NewAddStringExpr(gd *base.Invocation, pos src.XPos, list []Node) *AddStringExpr {
 	n := &AddStringExpr{}
+	n.gd = gd
 	n.pos = pos
 	n.op = OADDSTR
 	n.List = list
@@ -77,11 +78,12 @@ type AddrExpr struct {
 	Prealloc *Name // preallocated storage if any
 }
 
-func NewAddrExpr(pos src.XPos, x Node) *AddrExpr {
+func NewAddrExpr(gd *base.Invocation, pos src.XPos, x Node) *AddrExpr {
 	if x == nil || x.Typecheck() != 1 {
-		base.FatalfAt(pos, "missed typecheck: %L", x)
+		gd.FatalfAt(pos, "missed typecheck: %L", x)
 	}
 	n := &AddrExpr{X: x}
+	n.gd = gd
 	n.pos = pos
 
 	switch x.Op() {
@@ -133,10 +135,11 @@ type BasicLit struct {
 }
 
 // NewBasicLit returns an OLITERAL representing val with the given type.
-func NewBasicLit(pos src.XPos, typ *types.Type, val constant.Value) Node {
-	AssertValidTypeForConst(typ, val)
+func NewBasicLit(gd *base.Invocation, pos src.XPos, typ *types.Type, val constant.Value) Node {
+	AssertValidTypeForConst(gd, typ, val)
 
 	n := &BasicLit{val: val}
+	n.gd = gd
 	n.op = OLITERAL
 	n.pos = pos
 	n.SetType(typ)
@@ -149,8 +152,8 @@ func (n *BasicLit) SetVal(val constant.Value) { n.val = val }
 
 // NewConstExpr returns an OLITERAL representing val, copying the
 // position and type from orig.
-func NewConstExpr(val constant.Value, orig Node) Node {
-	return NewBasicLit(orig.Pos(), orig.Type(), val)
+func NewConstExpr(gd *base.Invocation, val constant.Value, orig Node) Node {
+	return NewBasicLit(gd, orig.Pos(), orig.Type(), val)
 }
 
 // A BinaryExpr is a binary expression X Op Y,
@@ -162,8 +165,9 @@ type BinaryExpr struct {
 	RType Node `mknode:"-"` // see reflectdata/helpers.go
 }
 
-func NewBinaryExpr(pos src.XPos, op Op, x, y Node) *BinaryExpr {
+func NewBinaryExpr(gd *base.Invocation, pos src.XPos, op Op, x, y Node) *BinaryExpr {
 	n := &BinaryExpr{X: x, Y: y}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	return n
@@ -208,8 +212,9 @@ type CallExpr struct {
 	GdForwardOutBufResult uint8
 }
 
-func NewCallExpr(pos src.XPos, op Op, fun Node, args []Node) *CallExpr {
+func NewCallExpr(gd *base.Invocation, pos src.XPos, op Op, fun Node, args []Node) *CallExpr {
 	n := &CallExpr{Fun: fun}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	n.Args = args
@@ -253,8 +258,9 @@ type CompLitExpr struct {
 	Len int64
 }
 
-func NewCompLitExpr(pos src.XPos, op Op, typ *types.Type, list []Node) *CompLitExpr {
+func NewCompLitExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, list []Node) *CompLitExpr {
 	n := &CompLitExpr{List: list}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	if typ != nil {
@@ -303,8 +309,9 @@ type ConvExpr struct {
 	ElemElemRType Node `mknode:"-"`
 }
 
-func NewConvExpr(pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
+func NewConvExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
 	n := &ConvExpr{X: x}
+	n.gd = gd
 	n.pos = pos
 	n.typ = typ
 	n.SetOp(op)
@@ -334,8 +341,9 @@ type IndexExpr struct {
 	Assigned bool
 }
 
-func NewIndexExpr(pos src.XPos, x, index Node) *IndexExpr {
+func NewIndexExpr(gd *base.Invocation, pos src.XPos, x, index Node) *IndexExpr {
 	n := &IndexExpr{X: x, Index: index}
+	n.gd = gd
 	n.pos = pos
 	n.op = OINDEX
 	return n
@@ -357,8 +365,9 @@ type KeyExpr struct {
 	Value Node
 }
 
-func NewKeyExpr(pos src.XPos, key, value Node) *KeyExpr {
+func NewKeyExpr(gd *base.Invocation, pos src.XPos, key, value Node) *KeyExpr {
 	n := &KeyExpr{Key: key, Value: value}
+	n.gd = gd
 	n.pos = pos
 	n.op = OKEY
 	return n
@@ -371,8 +380,9 @@ type StructKeyExpr struct {
 	Value Node
 }
 
-func NewStructKeyExpr(pos src.XPos, field *types.Field, value Node) *StructKeyExpr {
+func NewStructKeyExpr(gd *base.Invocation, pos src.XPos, field *types.Field, value Node) *StructKeyExpr {
 	n := &StructKeyExpr{Field: field, Value: value}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSTRUCTKEY
 	return n
@@ -387,8 +397,9 @@ type InlinedCallExpr struct {
 	ReturnVars Nodes // must be side-effect free
 }
 
-func NewInlinedCallExpr(pos src.XPos, body, retvars []Node) *InlinedCallExpr {
+func NewInlinedCallExpr(gd *base.Invocation, pos src.XPos, body, retvars []Node) *InlinedCallExpr {
 	n := &InlinedCallExpr{}
+	n.gd = gd
 	n.pos = pos
 	n.op = OINLCALL
 	n.Body = body
@@ -397,14 +408,15 @@ func NewInlinedCallExpr(pos src.XPos, body, retvars []Node) *InlinedCallExpr {
 }
 
 func (n *InlinedCallExpr) SingleResult() Node {
+	gd := n.compiler()
 	if have := len(n.ReturnVars); have != 1 {
-		base.FatalfAt(n.Pos(), "inlined call has %v results, expected 1", have)
+		gd.FatalfAt(n.Pos(), "inlined call has %v results, expected 1", have)
 	}
 	if !n.Type().HasShape() && n.ReturnVars[0].Type().HasShape() {
 		// If the type of the call is not a shape, but the type of the return value
 		// is a shape, we need to do an implicit conversion, so the real type
 		// of n is maintained.
-		r := NewConvExpr(n.Pos(), OCONVNOP, n.Type(), n.ReturnVars[0])
+		r := NewConvExpr(gd, n.Pos(), OCONVNOP, n.Type(), n.ReturnVars[0])
 		r.SetTypecheck(1)
 		return r
 	}
@@ -420,8 +432,9 @@ type LogicalExpr struct {
 	Y Node
 }
 
-func NewLogicalExpr(pos src.XPos, op Op, x, y Node) *LogicalExpr {
+func NewLogicalExpr(gd *base.Invocation, pos src.XPos, op Op, x, y Node) *LogicalExpr {
 	n := &LogicalExpr{X: x, Y: y}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	return n
@@ -446,8 +459,9 @@ type MakeExpr struct {
 	Cap   Node
 }
 
-func NewMakeExpr(pos src.XPos, op Op, len, cap Node) *MakeExpr {
+func NewMakeExpr(gd *base.Invocation, pos src.XPos, op Op, len, cap Node) *MakeExpr {
 	n := &MakeExpr{Len: len, Cap: cap}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	return n
@@ -467,11 +481,12 @@ type NilExpr struct {
 	miniExpr
 }
 
-func NewNilExpr(pos src.XPos, typ *types.Type) *NilExpr {
+func NewNilExpr(gd *base.Invocation, pos src.XPos, typ *types.Type) *NilExpr {
 	if typ == nil {
-		base.FatalfAt(pos, "missing type")
+		gd.FatalfAt(pos, "missing type")
 	}
 	n := &NilExpr{}
+	n.gd = gd
 	n.pos = pos
 	n.op = ONIL
 	n.SetType(typ)
@@ -487,7 +502,9 @@ type ParenExpr struct {
 }
 
 func NewParenExpr(pos src.XPos, x Node) *ParenExpr {
+	gd := x.compiler()
 	n := &ParenExpr{X: x}
+	n.gd = gd
 	n.op = OPAREN
 	n.pos = pos
 	return n
@@ -502,8 +519,9 @@ type ResultExpr struct {
 	Index int64 // index of the result expr.
 }
 
-func NewResultExpr(pos src.XPos, typ *types.Type, index int64) *ResultExpr {
+func NewResultExpr(gd *base.Invocation, pos src.XPos, typ *types.Type, index int64) *ResultExpr {
 	n := &ResultExpr{Index: index}
+	n.gd = gd
 	n.pos = pos
 	n.op = ORESULT
 	n.typ = typ
@@ -518,11 +536,12 @@ type LinksymOffsetExpr struct {
 	Offset_ int64
 }
 
-func NewLinksymOffsetExpr(pos src.XPos, lsym *obj.LSym, offset int64, typ *types.Type) *LinksymOffsetExpr {
+func NewLinksymOffsetExpr(gd *base.Invocation, pos src.XPos, lsym *obj.LSym, offset int64, typ *types.Type) *LinksymOffsetExpr {
 	if typ == nil {
-		base.FatalfAt(pos, "nil type")
+		gd.FatalfAt(pos, "nil type")
 	}
 	n := &LinksymOffsetExpr{Linksym: lsym, Offset_: offset}
+	n.gd = gd
 	n.typ = typ
 	n.op = OLINKSYMOFFSET
 	n.SetTypecheck(1)
@@ -530,17 +549,17 @@ func NewLinksymOffsetExpr(pos src.XPos, lsym *obj.LSym, offset int64, typ *types
 }
 
 // NewLinksymExpr is NewLinksymOffsetExpr, but with offset fixed at 0.
-func NewLinksymExpr(pos src.XPos, lsym *obj.LSym, typ *types.Type) *LinksymOffsetExpr {
-	return NewLinksymOffsetExpr(pos, lsym, 0, typ)
+func NewLinksymExpr(gd *base.Invocation, pos src.XPos, lsym *obj.LSym, typ *types.Type) *LinksymOffsetExpr {
+	return NewLinksymOffsetExpr(gd, pos, lsym, 0, typ)
 }
 
 // NewNameOffsetExpr is NewLinksymOffsetExpr, but taking a *Name
 // representing a global variable instead of an *obj.LSym directly.
-func NewNameOffsetExpr(pos src.XPos, name *Name, offset int64, typ *types.Type) *LinksymOffsetExpr {
+func NewNameOffsetExpr(gd *base.Invocation, pos src.XPos, name *Name, offset int64, typ *types.Type) *LinksymOffsetExpr {
 	if name == nil || IsBlank(name) || !(name.Op() == ONAME && name.Class == PEXTERN) {
-		base.FatalfAt(pos, "cannot take offset of nil, blank name or non-global variable: %v", name)
+		gd.FatalfAt(pos, "cannot take offset of nil, blank name or non-global variable: %v", name)
 	}
-	return NewLinksymOffsetExpr(pos, name.Linksym(), offset, typ)
+	return NewLinksymOffsetExpr(gd, pos, name.Linksym(), offset, typ)
 }
 
 // A SelectorExpr is a selector expression X.Sel.
@@ -557,8 +576,9 @@ type SelectorExpr struct {
 	Prealloc  *Name // preallocated storage for OMETHVALUE, if any
 }
 
-func NewSelectorExpr(pos src.XPos, op Op, x Node, sel *types.Sym) *SelectorExpr {
+func NewSelectorExpr(gd *base.Invocation, pos src.XPos, op Op, x Node, sel *types.Sym) *SelectorExpr {
 	n := &SelectorExpr{X: x, Sel: sel}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	return n
@@ -578,11 +598,11 @@ func (n *SelectorExpr) Implicit() bool     { return n.flags&miniExprImplicit != 
 func (n *SelectorExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 func (n *SelectorExpr) Offset() int64      { return n.Selection.Offset }
 
-func (n *SelectorExpr) FuncName() *Name {
+func (n *SelectorExpr) FuncName(gd *base.Invocation) *Name {
 	if n.Op() != OMETHEXPR {
 		panic(n.no("FuncName"))
 	}
-	fn := NewNameAt(n.Selection.Pos, MethodSym(n.X.Type(), n.Sel), n.Type())
+	fn := NewNameAt(gd, n.Selection.Pos, MethodSym(gd, n.X.Type(), n.Sel), n.Type())
 	fn.Class = PFUNC
 	if n.Selection.Nname != nil {
 		// TODO(austin): Nname is nil for interface method
@@ -602,8 +622,9 @@ type SliceExpr struct {
 	Max  Node
 }
 
-func NewSliceExpr(pos src.XPos, op Op, x, low, high, max Node) *SliceExpr {
+func NewSliceExpr(gd *base.Invocation, pos src.XPos, op Op, x, low, high, max Node) *SliceExpr {
 	n := &SliceExpr{X: x, Low: low, High: high, Max: max}
+	n.gd = gd
 	n.pos = pos
 	n.op = op
 	return n
@@ -620,14 +641,14 @@ func (n *SliceExpr) SetOp(op Op) {
 
 // IsSlice3 reports whether o is a slice3 op (OSLICE3, OSLICE3ARR).
 // o must be a slicing op.
-func (o Op) IsSlice3() bool {
+func (o Op) IsSlice3(gd *base.Invocation) bool {
 	switch o {
 	case OSLICE, OSLICEARR, OSLICESTR:
 		return false
 	case OSLICE3, OSLICE3ARR:
 		return true
 	}
-	base.Fatalf("IsSlice3 op %v", o)
+	gd.Fatalf("IsSlice3 op %v", o)
 	return false
 }
 
@@ -639,8 +660,9 @@ type SliceHeaderExpr struct {
 	Cap Node
 }
 
-func NewSliceHeaderExpr(pos src.XPos, typ *types.Type, ptr, len, cap Node) *SliceHeaderExpr {
+func NewSliceHeaderExpr(gd *base.Invocation, pos src.XPos, typ *types.Type, ptr, len, cap Node) *SliceHeaderExpr {
 	n := &SliceHeaderExpr{Ptr: ptr, Len: len, Cap: cap}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSLICEHEADER
 	n.typ = typ
@@ -654,8 +676,9 @@ type StringHeaderExpr struct {
 	Len Node
 }
 
-func NewStringHeaderExpr(pos src.XPos, ptr, len Node) *StringHeaderExpr {
+func NewStringHeaderExpr(gd *base.Invocation, pos src.XPos, ptr, len Node) *StringHeaderExpr {
 	n := &StringHeaderExpr{Ptr: ptr, Len: len}
+	n.gd = gd
 	n.pos = pos
 	n.op = OSTRINGHEADER
 	n.typ = types.Types[types.TSTRING]
@@ -669,8 +692,9 @@ type StarExpr struct {
 	X Node
 }
 
-func NewStarExpr(pos src.XPos, x Node) *StarExpr {
+func NewStarExpr(gd *base.Invocation, pos src.XPos, x Node) *StarExpr {
 	n := &StarExpr{X: x}
+	n.gd = gd
 	n.op = ODEREF
 	n.pos = pos
 	return n
@@ -698,8 +722,9 @@ type TypeAssertExpr struct {
 	UseNilPanic bool
 }
 
-func NewTypeAssertExpr(pos src.XPos, x Node, typ *types.Type) *TypeAssertExpr {
+func NewTypeAssertExpr(gd *base.Invocation, pos src.XPos, x Node, typ *types.Type) *TypeAssertExpr {
 	n := &TypeAssertExpr{X: x}
+	n.gd = gd
 	n.pos = pos
 	n.op = ODOTTYPE
 	if typ != nil {
@@ -743,8 +768,9 @@ type DynamicTypeAssertExpr struct {
 	ITab Node
 }
 
-func NewDynamicTypeAssertExpr(pos src.XPos, op Op, x, rtype Node) *DynamicTypeAssertExpr {
+func NewDynamicTypeAssertExpr(gd *base.Invocation, pos src.XPos, op Op, x, rtype Node) *DynamicTypeAssertExpr {
 	n := &DynamicTypeAssertExpr{X: x, RType: rtype}
+	n.gd = gd
 	n.pos = pos
 	n.op = op
 	return n
@@ -766,8 +792,9 @@ type UnaryExpr struct {
 	X Node
 }
 
-func NewUnaryExpr(pos src.XPos, op Op, x Node) *UnaryExpr {
+func NewUnaryExpr(gd *base.Invocation, pos src.XPos, op Op, x Node) *UnaryExpr {
 	n := &UnaryExpr{X: x}
+	n.gd = gd
 	n.pos = pos
 	n.SetOp(op)
 	return n
@@ -851,7 +878,6 @@ func IsAddressable(n Node) bool {
 			return false
 		}
 		return true
-
 	case OLINKSYMOFFSET:
 		return true
 	}
@@ -904,6 +930,7 @@ func StaticValue(n Node) Node {
 }
 
 func staticValue1(nn Node) Node {
+	gd := nn.compiler()
 	if nn.Op() != ONAME {
 		return nil
 	}
@@ -931,12 +958,12 @@ FindRHS:
 				break FindRHS
 			}
 		}
-		base.FatalfAt(defn.Pos(), "%v missing from LHS of %v", n, defn)
+		gd.FatalfAt(defn.Pos(), "%v missing from LHS of %v", n, defn)
 	default:
 		return nil
 	}
 	if rhs == nil {
-		base.FatalfAt(defn.Pos(), "RHS is nil: %v", defn)
+		gd.FatalfAt(defn.Pos(), "RHS is nil: %v", defn)
 	}
 
 	if Reassigned(n) {
@@ -955,8 +982,9 @@ FindRHS:
 // NOTE: any changes made here should also be made in the corresponding
 // code in the ReassignOracle.Init method.
 func Reassigned(name *Name) bool {
+	gd := name.compiler()
 	if name.Op() != ONAME {
-		base.Fatalf("reassigned %v", name)
+		gd.Fatalf("reassigned %v", name)
 	}
 	// no way to reliably check for no-reassignment of globals, assume it can be
 	if name.Curfn == nil {
@@ -1003,7 +1031,7 @@ func Reassigned(name *Name) bool {
 		case OADDR:
 			n := n.(*AddrExpr)
 			if isName(n.X) {
-				base.FatalfAt(n.Pos(), "%v not marked addrtaken", name)
+				gd.FatalfAt(n.Pos(), "%v not marked addrtaken", name)
 			}
 		case ORANGE:
 			n := n.(*RangeStmt)
@@ -1119,14 +1147,14 @@ func SameSafeExpr(l Node, r Node) bool {
 // ShouldCheckPtr reports whether pointer checking should be enabled for
 // function fn at a given level. See debugHelpFooter for defined
 // levels.
-func ShouldCheckPtr(fn *Func, level int) bool {
-	return base.Debug.Checkptr >= level && fn.Pragma&NoCheckPtr == 0
+func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
+	return gd.Debug.Checkptr >= level && fn.Pragma&NoCheckPtr == 0
 }
 
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for
 // function fn when -asan is enabled.
-func ShouldAsanCheckPtr(fn *Func) bool {
-	return base.Flag.ASan && fn.Pragma&NoCheckPtr == 0
+func ShouldAsanCheckPtr(gd *base.Invocation, fn *Func) bool {
+	return gd.Flag.ASan && fn.Pragma&NoCheckPtr == 0
 }
 
 // IsReflectHeaderDataField reports whether l is an expression p.Data
@@ -1178,8 +1206,8 @@ func RecvParamNames(ft *types.Type) []Node {
 // method symbols.
 //
 // The returned symbol will be marked as a function.
-func MethodSym(recv *types.Type, msym *types.Sym) *types.Sym {
-	sym := MethodSymSuffix(recv, msym, "")
+func MethodSym(gd *base.Invocation, recv *types.Type, msym *types.Sym) *types.Sym {
+	sym := MethodSymSuffix(gd, recv, msym, "")
 	sym.SetFunc(true)
 	return sym
 }
@@ -1187,15 +1215,15 @@ func MethodSym(recv *types.Type, msym *types.Sym) *types.Sym {
 // MethodSymSuffix is like MethodSym, but allows attaching a
 // distinguisher suffix. To avoid collisions, the suffix must not
 // start with a letter, number, or period.
-func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sym {
+func MethodSymSuffix(gd *base.Invocation, recv *types.Type, msym *types.Sym, suffix string) *types.Sym {
 	if msym.IsBlank() {
-		base.Fatalf("blank method name")
+		gd.Fatalf("blank method name")
 	}
 
 	rsym := recv.Sym()
 	if recv.IsPtr() {
 		if rsym != nil {
-			base.Fatalf("declared pointer receiver type: %v", recv)
+			gd.Fatalf("declared pointer receiver type: %v", recv)
 		}
 		rsym = recv.Elem().Sym()
 	}
@@ -1236,7 +1264,7 @@ func MethodSymSuffix(recv *types.Type, msym *types.Sym, suffix string) *types.Sy
 // named in local symbol name, as well as the types.Sym of the receiver.
 //
 // TODO(prattmic): this does not attempt to handle method suffixes (wrappers).
-func LookupMethodSelector(pkg *types.Pkg, name string) (typ, meth *types.Sym, err error) {
+func LookupMethodSelector(gd *base.Invocation, pkg *types.Pkg, name string) (typ, meth *types.Sym, err error) {
 	typeName, methName := splitType(name)
 	if typeName == "" {
 		return nil, nil, fmt.Errorf("%s doesn't contain type split", name)
@@ -1249,7 +1277,7 @@ func LookupMethodSelector(pkg *types.Pkg, name string) (typ, meth *types.Sym, er
 	}
 
 	typ = pkg.Lookup(typeName)
-	meth = pkg.Selector(methName)
+	meth = pkg.Selector(gd, methName)
 	return typ, meth, nil
 }
 
@@ -1287,11 +1315,12 @@ func MethodExprName(n Node) *Name {
 
 // MethodExprFunc is like MethodExprName, but returns the types.Field instead.
 func MethodExprFunc(n Node) *types.Field {
+	gd := n.compiler()
 	switch n.Op() {
 	case ODOTMETH, OMETHEXPR, OMETHVALUE:
 		return n.(*SelectorExpr).Selection
 	}
-	base.Fatalf("unexpected node: %v (%v)", n, n.Op())
+	gd.Fatalf("unexpected node: %v (%v)", n, n.Op())
 	panic("unreachable")
 }
 
@@ -1314,7 +1343,9 @@ type MoveToHeapExpr struct {
 }
 
 func NewMoveToHeapExpr(pos src.XPos, slice Node) *MoveToHeapExpr {
+	gd := slice.compiler()
 	n := &MoveToHeapExpr{Slice: slice}
+	n.gd = gd
 	n.pos = pos
 	n.op = OMOVE2HEAP
 	return n

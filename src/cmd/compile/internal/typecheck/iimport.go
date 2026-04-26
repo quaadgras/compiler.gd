@@ -19,13 +19,12 @@ import (
 // It's a function literal so that it can be overridden for
 // GOEXPERIMENT=unified.
 var HaveInlineBody = func(fn *ir.Func) bool {
-	base.Fatalf("HaveInlineBody not overridden")
-	panic("unreachable")
+	panic("HaveInlineBody not overridden")
 }
 
-func SetBaseTypeIndex(t *types.Type, i, pi int64) {
+func SetBaseTypeIndex(gd *base.Invocation, t *types.Type, i, pi int64) {
 	if t.Obj() == nil {
-		base.Fatalf("SetBaseTypeIndex on non-defined type %v", t)
+		gd.Fatalf("SetBaseTypeIndex on non-defined type %v", t)
 	}
 	if i != -1 && pi != -1 {
 		typeSymIdx[t] = [2]int64{i, pi}

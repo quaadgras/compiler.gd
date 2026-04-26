@@ -6,9 +6,6 @@
 
 package base
 
-// Debug holds the parsed debugging configuration values.
-var Debug DebugFlags
-
 // DebugFlags defines the debugging configuration values (see var Debug).
 // Each struct field is a different value, named for the lower-case of the field name.
 // Each field must be an int or string and must have a `help` struct tag.
@@ -90,8 +87,3 @@ type DebugFlags struct {
 
 	ConcurrentOk bool // true if only concurrentOk flags seen
 }
-
-// DebugSSA is called to set a -d ssa/... option.
-// If nil, those options are reported as invalid options.
-// If DebugSSA returns a non-empty string, that text is reported as a compiler error.
-var DebugSSA func(phase, flag string, val int, valString string) string

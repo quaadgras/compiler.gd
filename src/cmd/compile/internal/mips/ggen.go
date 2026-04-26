@@ -12,13 +12,13 @@ import (
 	"cmd/internal/obj/mips"
 )
 
-func zerorange(pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
+func zerorange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog {
 	if cnt%int64(types.PtrSize) != 0 {
 		panic("zeroed region not aligned")
 	}
 
 	for cnt != 0 {
-		p = pp.Append(p, mips.AMOVW, obj.TYPE_REG, mips.REGZERO, 0, obj.TYPE_MEM, mips.REGSP, base.Ctxt.Arch.FixedFrameSize+off)
+		p = pp.Append(gd, p, mips.AMOVW, obj.TYPE_REG, mips.REGZERO, 0, obj.TYPE_MEM, mips.REGSP, gd.Ctxt.Arch.FixedFrameSize+off)
 		cnt -= int64(types.PtrSize)
 		off += int64(types.PtrSize)
 	}
@@ -26,7 +26,7 @@ func zerorange(pp *objw.Progs, p *obj.Prog, off, cnt int64, _ *uint32) *obj.Prog
 	return p
 }
 
-func ginsnop(pp *objw.Progs) *obj.Prog {
-	p := pp.Prog(mips.ANOOP)
+func ginsnop(gd *base.Invocation, pp *objw.Progs) *obj.Prog {
+	p := pp.Prog(gd, mips.ANOOP)
 	return p
 }

@@ -5,7 +5,6 @@
 package escape
 
 import (
-	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"fmt"
 )
@@ -16,20 +15,20 @@ func (e *escape) stmt(n ir.Node) {
 		return
 	}
 
-	lno := ir.SetPos(n)
+	lno := ir.SetPos(e.gd, n)
 	defer func() {
-		base.Pos = lno
+		e.gd.Pos = lno
 	}()
 
-	if base.Flag.LowerM > 2 {
-		fmt.Printf("%v:[%d] %v stmt: %v\n", base.FmtPos(base.Pos), e.loopDepth, e.curfn, n)
+	if e.gd.Flag.LowerM > 2 {
+		fmt.Printf("%v:[%d] %v stmt: %v\n", e.gd.FmtPos(e.gd.Pos), e.loopDepth, e.curfn, n)
 	}
 
 	e.stmts(n.Init())
 
 	switch n.Op() {
 	default:
-		base.Fatalf("unexpected stmt: %v", n)
+		e.gd.Fatalf("unexpected stmt: %v", n)
 
 	case ir.OFALL, ir.OINLMARK:
 		// nop
@@ -55,16 +54,16 @@ func (e *escape) stmt(n ir.Node) {
 		}
 		switch e.labels[n.Label] {
 		case nonlooping:
-			if base.Flag.LowerM > 2 {
-				fmt.Printf("%v:%v non-looping label\n", base.FmtPos(base.Pos), n)
+			if e.gd.Flag.LowerM > 2 {
+				fmt.Printf("%v:%v non-looping label\n", e.gd.FmtPos(e.gd.Pos), n)
 			}
 		case looping:
-			if base.Flag.LowerM > 2 {
-				fmt.Printf("%v: %v looping label\n", base.FmtPos(base.Pos), n)
+			if e.gd.Flag.LowerM > 2 {
+				fmt.Printf("%v: %v looping label\n", e.gd.FmtPos(e.gd.Pos), n)
 			}
 			e.loopDepth++
 		default:
-			base.Fatalf("label %v missing tag", n.Label)
+			e.gd.Fatalf("label %v missing tag", n.Label)
 		}
 		delete(e.labels, n.Label)
 
@@ -80,7 +79,7 @@ func (e *escape) stmt(n ir.Node) {
 
 	case ir.OFOR:
 		n := n.(*ir.ForStmt)
-		base.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
+		e.gd.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
 		e.loopDepth++
 		e.discard(n.Cond)
 		e.stmt(n.Post)
@@ -90,7 +89,7 @@ func (e *escape) stmt(n ir.Node) {
 	case ir.ORANGE:
 		// for Key, Value = range X { Body }
 		n := n.(*ir.RangeStmt)
-		base.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
+		e.gd.Assert(!n.DistinctVars) // Should all be rewritten before escape analysis
 
 		// X is evaluated outside the loop and persists until the loop
 		// terminates.
@@ -100,9 +99,9 @@ func (e *escape) stmt(n ir.Node) {
 		e.loopDepth++
 		ks := e.addrs([]ir.Node{n.Key, n.Value})
 		if n.X.Type().IsArray() {
-			e.flow(ks[1].note(n, "range"), tmp)
+			e.flow(ks[1].note(e.gd, n, "range"), tmp)
 		} else {
-			e.flow(ks[1].deref(n, "range-deref"), tmp)
+			e.flow(ks[1].deref(e.gd, n, "range-deref"), tmp)
 		}
 		e.reassigned(ks, n)
 
@@ -119,7 +118,7 @@ func (e *escape) stmt(n ir.Node) {
 					cv := cas.Var
 					k := e.dcl(cv) // type switch variables have no ODCL.
 					if cv.Type().HasPointers() {
-						ks = append(ks, k.dotType(cv.Type(), cas, "switch case"))
+						ks = append(ks, k.dotType(e.gd, cv.Type(), cas, "switch case"))
 					}
 				}
 			}
@@ -210,7 +209,7 @@ func (e *escape) block(l ir.Nodes) {
 
 func (e *escape) dcl(n *ir.Name) hole {
 	if n.Curfn != e.curfn || n.IsClosureVar() {
-		base.Fatalf("bad declaration of %v", n)
+		e.gd.Fatalf("bad declaration of %v", n)
 	}
 	loc := e.oldLoc(n)
 	loc.loopDepth = e.loopDepth
