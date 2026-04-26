@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/fatal"
@@ -232,10 +231,9 @@ func dstringdata(gd *base.Invocation, s *obj.LSym, off int, t string, pos src.XP
 	return off + len(t)
 }
 
-var (
-	funcsymsmu sync.Mutex // protects funcsyms and associated package lookups (see func funcsym)
-	funcsyms   []*ir.Name // functions that need function value symbols
-)
+// funcsyms / funcsymsmu live on Invocation (gd.StaticdataFuncsyms,
+// gd.StaticdataFuncsymsMu). Per-compile so concurrent compile
+// invocations in one process don't share or contend on the list.
 
 // computeFuncsymEscMask derives the gd escape-bits mask for sig's
 // parameters by decoding each param's Note tag. Mirrors
@@ -283,12 +281,13 @@ func FuncLinksym(gd *base.Invocation, n *ir.Name) *obj.LSym {
 	// except for the types package, which is protected separately.
 	// Reusing funcsymsmu to also cover this package lookup
 	// avoids a general, broader, expensive package lookup mutex.
-	funcsymsmu.Lock()
+	gd.StaticdataFuncsymsMu.Lock()
 	sf, existed := s.Pkg.LookupOK(ir.FuncSymName(s))
 	if !existed {
-		funcsyms = append(funcsyms, n)
+		fs, _ := gd.StaticdataFuncsyms.([]*ir.Name)
+		gd.StaticdataFuncsyms = append(fs, n)
 	}
-	funcsymsmu.Unlock()
+	gd.StaticdataFuncsymsMu.Unlock()
 
 	return sf.Linksym(gd)
 }
@@ -301,6 +300,7 @@ func GlobalLinksym(n *ir.Name) *obj.LSym {
 }
 
 func WriteFuncSyms(gd *base.Invocation) {
+	funcsyms, _ := gd.StaticdataFuncsyms.([]*ir.Name)
 	slices.SortFunc(funcsyms, func(a, b *ir.Name) int {
 		return strings.Compare(a.Linksym().Name, b.Linksym().Name)
 	})

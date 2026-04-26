@@ -7,6 +7,7 @@ package base
 import (
 	"cmd/internal/obj"
 	"cmd/internal/src"
+	"sync"
 )
 
 type Invocation struct {
@@ -131,4 +132,10 @@ type Invocation struct {
 	// this stack. Per-compile because CurFunc itself is per-compile;
 	// concurrent compiles would otherwise corrupt each other.
 	TypecheckFuncStack any // []*ir.Func
+
+	// staticdata.FuncSym: list of *ir.Name needing function-value
+	// symbols, populated concurrently from the backend (mutex-
+	// protected) and consumed by WriteFuncSyms at end of compile.
+	StaticdataFuncsymsMu sync.Mutex
+	StaticdataFuncsyms   any // []*ir.Name
 }
