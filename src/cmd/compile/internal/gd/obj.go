@@ -120,9 +120,9 @@ func dumpdata(gd *base.Invocation) {
 	reflectdata.WritePluginTable(gd)
 	dumpembeds(gd)
 
-	if reflectdata.ZeroSize > 0 {
+	if gd.ReflectdataZeroSize > 0 {
 		zero := gd.PkgLinksym("go:map", "zero", obj.ABI0)
-		objw.Global(gd, zero, int32(reflectdata.ZeroSize), obj.DUPOK|obj.RODATA)
+		objw.Global(gd, zero, int32(gd.ReflectdataZeroSize), obj.DUPOK|obj.RODATA)
 		zero.Set(obj.AttrStatic, true)
 	}
 

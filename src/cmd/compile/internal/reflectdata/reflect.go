@@ -1554,8 +1554,8 @@ func ZeroAddr(gd *base.Invocation, size int64) ir.Node {
 	if size >= 1<<31 {
 		gd.Fatalf("map elem too big %d", size)
 	}
-	if ZeroSize < size {
-		ZeroSize = size
+	if gd.ReflectdataZeroSize < size {
+		gd.ReflectdataZeroSize = size
 	}
 	lsym := gd.PkgLinksym("go:map", "zero", obj.ABI0)
 	x := ir.NewLinksymExpr(gd, gd.Pos, lsym, types.Types[types.TUINT8])
@@ -1651,7 +1651,8 @@ func methodWrapper(gd *base.Invocation, rcvr *types.Type, method *types.Field, f
 	return lsym
 }
 
-var ZeroSize int64
+// (gd.ReflectdataZeroSize is the per-Invocation high-water mark for
+// the .L_zero RODATA buffer; the gd/obj.go finalizer emits it once.)
 
 // MarkTypeUsedInInterface marks that type t is converted to an interface.
 // This information is used in the linker in dead method elimination.

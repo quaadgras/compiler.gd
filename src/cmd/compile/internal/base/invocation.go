@@ -96,4 +96,9 @@ type Invocation struct {
 	// -asan, deterministic-order via slice paired with the map.
 	PkginitInstrumentGlobalsMap   any // map[string]ir.Node
 	PkginitInstrumentGlobalsSlice any // []ir.Node
+
+	// Largest size of an .L_zero buffer needed by reflectdata.ZeroAddr
+	// during this compile. Emitted as a single DUPOK RODATA symbol at
+	// finalize time.
+	ReflectdataZeroSize int64
 }
