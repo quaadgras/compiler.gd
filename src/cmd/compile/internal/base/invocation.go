@@ -110,4 +110,10 @@ type Invocation struct {
 	NoderHaveWrapperTypes        any // []*types.Type
 	NoderNeedMethodValueWrappers any // []noder.methodValueWrapper
 	NoderHaveMethodValueWrappers any // []noder.methodValueWrapper
+
+	// The pkgReader for the package currently being compiled.
+	// Used by importedDef to distinguish local-package symbols
+	// from imported ones; per-Invocation so two compiles can
+	// each have their own local reader.
+	NoderLocalPkgReader any // *noder.pkgReader
 }

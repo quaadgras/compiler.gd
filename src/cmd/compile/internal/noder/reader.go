@@ -3885,7 +3885,7 @@ func (r *reader) needWrapper(typ *types.Type) {
 // instantiated in an imported package so that we can add types to
 // haveWrapperTypes instead.
 func (r *reader) importedDef() bool {
-	return r.p != localPkgReader && !r.hasTypeParams()
+	return r.p != localPkgReader(r.gd) && !r.hasTypeParams()
 }
 
 // MakeWrappers constructs all wrapper methods needed for the target

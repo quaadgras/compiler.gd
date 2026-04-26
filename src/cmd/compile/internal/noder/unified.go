@@ -25,10 +25,14 @@ import (
 	"cmd/internal/src"
 )
 
-// localPkgReader holds the package reader used for reading the local
-// package. It exists so the unified IR linker can refer back to it
-// later.
-var localPkgReader *pkgReader
+// localPkgReader returns the package reader used for reading the local
+// package, set up by unified() and consumed by the unified IR linker.
+// Lives on Invocation (gd.NoderLocalPkgReader) so multiple compiles
+// each have their own local-pkg reader.
+func localPkgReader(gd *base.Invocation) *pkgReader {
+	pr, _ := gd.NoderLocalPkgReader.(*pkgReader)
+	return pr
+}
 
 // LookupFunc returns the ir.Func for an arbitrary full symbol name if
 // that function exists in the set of available export data.
@@ -201,10 +205,11 @@ func unified(gd *base.Invocation, m posMap, noders []*noder) {
 
 	target := typecheck.Target(gd)
 
-	localPkgReader = newPkgReader(gd, pkgbits.NewPkgDecoder(types.LocalPkg(gd).Path, data))
-	readPackage(gd, localPkgReader, types.LocalPkg(gd), true)
+	localPR := newPkgReader(gd, pkgbits.NewPkgDecoder(types.LocalPkg(gd).Path, data))
+	gd.NoderLocalPkgReader = localPR
+	readPackage(gd, localPR, types.LocalPkg(gd), true)
 
-	r := localPkgReader.newReader(pkgbits.SectionMeta, pkgbits.PrivateRootIdx, pkgbits.SyncPrivate)
+	r := localPR.newReader(pkgbits.SectionMeta, pkgbits.PrivateRootIdx, pkgbits.SyncPrivate)
 	r.pkgInit(types.LocalPkg(gd), target)
 
 	readBodies(gd, target, false)
@@ -490,7 +495,7 @@ func writeUnifiedExport(gd *base.Invocation, out io.Writer) {
 	var selfPkgIdx index
 
 	{
-		pr := localPkgReader
+		pr := localPkgReader(gd)
 		r := pr.NewDecoder(pkgbits.SectionMeta, pkgbits.PublicRootIdx, pkgbits.SyncPublic)
 
 		r.Sync(pkgbits.SyncPkg)
