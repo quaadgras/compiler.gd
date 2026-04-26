@@ -142,4 +142,10 @@ type Invocation struct {
 	// gd compile loop: functions waiting to be backend-compiled.
 	// Populated by enqueueFunc, drained by compileFunctions.
 	GdCompileQueue any // []*ir.Func
+
+	// reflectdata pending itab EscMask slots — populated by writeITab
+	// while emitting itabs and consumed by FinalizeItabMasks after
+	// escape analysis. Per-compile because each Invocation has its
+	// own escape state and itab list.
+	ReflectdataPendingItabMasks any // []reflectdata.pendingItabMask
 }

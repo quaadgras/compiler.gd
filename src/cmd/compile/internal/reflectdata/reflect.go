@@ -111,7 +111,12 @@ type pendingItabMask struct {
 	origType *types.Type
 }
 
-var pendingItabMasks []pendingItabMask
+// pendingItabMasks lives on Invocation (gd.ReflectdataPendingItabMasks)
+// — per-compile EscMask install queue. See FinalizeItabMasks.
+func pendingItabMasks(gd *base.Invocation) []pendingItabMask {
+	s, _ := gd.ReflectdataPendingItabMasks.([]pendingItabMask)
+	return s
+}
 
 // FinalizeItabMasks writes the per-method escape-bits mask into every
 // itab symbol that writeITab previously reserved slot space for. Must
@@ -130,7 +135,7 @@ var pendingItabMasks []pendingItabMask
 const escFuncTagged = 3
 
 func FinalizeItabMasks(gd *base.Invocation) {
-	for _, p := range pendingItabMasks {
+	for _, p := range pendingItabMasks(gd) {
 		// Phase F4 install. Write a SymPtr reloc to the synth funcsym
 		// with bit 0 set (dynamic-mask discriminator). The PkgIdxSelf
 		// hash this introduces is incompatible with content-addressable
@@ -158,7 +163,7 @@ func FinalizeItabMasks(gd *base.Invocation) {
 		}
 		objw.UintN(gd, p.lsym, p.offset, mask, 8)
 	}
-	pendingItabMasks = nil
+	gd.ReflectdataPendingItabMasks = nil
 }
 
 // hasPointerBearingArg reports whether fn has at least one
@@ -1291,7 +1296,7 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 		objw.UintN(gd, lsym, int(maskOffset)+i*8, 0, 8)
 		if completeItab && i < len(entrySigs) {
 			sig := entrySigs[i]
-			pendingItabMasks = append(pendingItabMasks, pendingItabMask{
+			gd.ReflectdataPendingItabMasks = append(pendingItabMasks(gd), pendingItabMask{
 				lsym:     lsym,
 				offset:   int(maskOffset) + i*8,
 				fn:       sig.methodFn,
