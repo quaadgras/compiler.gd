@@ -8952,8 +8952,8 @@ func (s *State) PrepareCall(v *ssa.Value) {
 	if ok {
 		// Record call graph information for nowritebarrierrec
 		// analysis.
-		if nowritebarrierrecCheck != nil {
-			nowritebarrierrecCheck.recordCall(s.pp.CurFunc, call.Fn, v.Pos)
+		if c := nowritebarrierrecCheck(s.gd); c != nil {
+			c.recordCall(s.pp.CurFunc, call.Fn, v.Pos)
 		}
 	}
 

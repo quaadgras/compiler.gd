@@ -121,4 +121,9 @@ type Invocation struct {
 	// weakenGlobalMapInitRelocs to flag R_WEAK references between
 	// init functions and their outlined map initializers.
 	SsagenGlobalMapInitLsyms any // map[*obj.LSym]struct{}
+
+	// nowritebarrierrec checker — set when -d=nowritebarrier… is on.
+	// Per-compile so two parallel compiles don't share the call-graph
+	// state.
+	SsagenNowritebarrierrecCheck any // *ssagen.nowritebarrierrecChecker
 }

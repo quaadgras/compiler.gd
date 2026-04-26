@@ -17,17 +17,23 @@ import (
 )
 
 func EnableNoWriteBarrierRecCheck(gd *base.Invocation) {
-	nowritebarrierrecCheck = newNowritebarrierrecChecker(gd)
+	gd.SsagenNowritebarrierrecCheck = newNowritebarrierrecChecker(gd)
 }
 
-func NoWriteBarrierRecCheck() {
+func NoWriteBarrierRecCheck(gd *base.Invocation) {
 	// Write barriers are now known. Check the
 	// call graph.
-	nowritebarrierrecCheck.check()
-	nowritebarrierrecCheck = nil
+	c, _ := gd.SsagenNowritebarrierrecCheck.(*nowritebarrierrecChecker)
+	c.check()
+	gd.SsagenNowritebarrierrecCheck = nil
 }
 
-var nowritebarrierrecCheck *nowritebarrierrecChecker
+// nowritebarrierrecCheck returns the per-Invocation checker, or nil if
+// EnableNoWriteBarrierRecCheck was not called this compile.
+func nowritebarrierrecCheck(gd *base.Invocation) *nowritebarrierrecChecker {
+	c, _ := gd.SsagenNowritebarrierrecCheck.(*nowritebarrierrecChecker)
+	return c
+}
 
 type nowritebarrierrecChecker struct {
 	gd *base.Invocation

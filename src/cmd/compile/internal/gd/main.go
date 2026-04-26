@@ -378,7 +378,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 
 	if gd.Flag.CompilingRuntime {
 		// Write barriers are now known. Check the call graph.
-		ssagen.NoWriteBarrierRecCheck()
+		ssagen.NoWriteBarrierRecCheck(gd)
 	}
 
 	// Add keep relocations for global maps.
