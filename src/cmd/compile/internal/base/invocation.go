@@ -138,4 +138,8 @@ type Invocation struct {
 	// protected) and consumed by WriteFuncSyms at end of compile.
 	StaticdataFuncsymsMu sync.Mutex
 	StaticdataFuncsyms   any // []*ir.Name
+
+	// gd compile loop: functions waiting to be backend-compiled.
+	// Populated by enqueueFunc, drained by compileFunctions.
+	GdCompileQueue any // []*ir.Func
 }

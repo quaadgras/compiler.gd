@@ -351,7 +351,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 		// The SSA backend supports using multiple goroutines, so keep it
 		// as late as possible to maximize how much work we can batch and
 		// process concurrently.
-		if len(compilequeue) != 0 {
+		if len(compilequeue(gd)) != 0 {
 			compileFunctions(gd, profile)
 			continue
 		}
@@ -398,8 +398,8 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 	ssagen.CheckLargeStacks(gd)
 	typecheck.CheckFuncStack(gd)
 
-	if len(compilequeue) != 0 {
-		gd.Fatalf("%d uncompiled functions", len(compilequeue))
+	if cq := compilequeue(gd); len(cq) != 0 {
+		gd.Fatalf("%d uncompiled functions", len(cq))
 	}
 
 	logopt.FlushLoggedOpts(gd.Ctxt, gd.Ctxt.Pkgpath)

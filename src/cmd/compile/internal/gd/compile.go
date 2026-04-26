@@ -25,9 +25,13 @@ import (
 
 // "Portable" code generation.
 
-var (
-	compilequeue []*ir.Func // functions waiting to be compiled
-)
+// compilequeue lives on Invocation (gd.GdCompileQueue) so concurrent
+// compile invocations don't share the queue.
+
+func compilequeue(gd *base.Invocation) []*ir.Func {
+	q, _ := gd.GdCompileQueue.([]*ir.Func)
+	return q
+}
 
 func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 	if ir.CurFunc(gd) != nil {
@@ -92,7 +96,7 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 
 	// Enqueue just fn itself. compileFunctions will handle
 	// scheduling compilation of its closures after it's done.
-	compilequeue = append(compilequeue, fn)
+	gd.GdCompileQueue = append(compilequeue(gd), fn)
 }
 
 // prepareFunc handles any remaining frontend compilation tasks that
@@ -130,19 +134,20 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 // It fans out nBackendWorkers to do the work
 // and waits for them to complete.
 func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
+	cq := compilequeue(gd)
 	if race.Enabled {
 		// Randomize compilation order to try to shake out races.
-		tmp := make([]*ir.Func, len(compilequeue))
-		perm := rand.Perm(len(compilequeue))
+		tmp := make([]*ir.Func, len(cq))
+		perm := rand.Perm(len(cq))
 		for i, v := range perm {
-			tmp[v] = compilequeue[i]
+			tmp[v] = cq[i]
 		}
-		copy(compilequeue, tmp)
+		copy(cq, tmp)
 	} else {
 		// Compile the longest functions first,
 		// since they're most likely to be the slowest.
 		// This helps avoid stragglers.
-		slices.SortFunc(compilequeue, func(a, b *ir.Func) int {
+		slices.SortFunc(cq, func(a, b *ir.Func) int {
 			return cmp.Compare(len(b.Body), len(a.Body))
 		})
 	}
@@ -224,8 +229,8 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 	types.CalcSizeDisabled = true // not safe to calculate sizes concurrently
 	gd.Ctxt.InParallel = true
 
-	compile(compilequeue)
-	compilequeue = nil
+	compile(cq)
+	gd.GdCompileQueue = nil
 	wg.Wait()
 
 	gd.Ctxt.InParallel = false
