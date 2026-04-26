@@ -287,6 +287,41 @@ of stock. Compile-time rewrite to automate the signature extension +
 callee body rewrite + caller-side stack buffer is pending — see
 `memory/project_escape_bits_phase_g_roadmap.md`.
 
+#### Builtin/runtime sig parity
+
+`PhaseGApplies` checks `r.Type.IsPtr()`, which is true only for TPTR.
+TMAP, TCHAN, TUNSAFEPTR, TINTER all return false, so functions whose
+results are those kinds are **not** extended. The compiler's view of
+runtime helpers comes from `cmd/compile/internal/typecheck/_builtin/
+runtime.go`; the runtime's view comes from the actual `*.go` impl. If
+the two disagree about whether the result is TPTR, the caller emits
+stock-arity calls but the callee is compiled with an extra trailing
+outBuf param — its register holds whatever the caller left in it.
+When the body rewrite (which has no runtime exemption) routes any
+allocation through `runtime.maybeInPlace(outBuf, &T)`, that garbage
+register is treated as a real outBuf, and `memclrNoHeapPointers` zeros
+random heap.
+
+Current alignment (2026-04-27):
+
+- `makemap`, `makemap64`, `makemap_small` return `unsafe.Pointer` so
+  the runtime impl matches the builtin's TMAP view (no extension).
+  `reflect_makemap` casts the result back to `*maps.Map`.
+- `makechan`, `makechan64` return `unsafe.Pointer` so the runtime impl
+  matches the builtin's TCHAN view. `reflect_makechan` casts back to
+  `*hchan`.
+
+**If we ever change Go's user-visible map representation so that the
+compiler treats maps as pointers (TPTR) — i.e., `make(map[K]V)`
+returning `*T` rather than the opaque map header — the builtin decls
+in `_builtin/runtime.go` will start triggering Phase G extension at
+the call site, and the runtime impls listed above must regain their
+`*maps.Map` / `*hchan` returns in lockstep. Otherwise we re-introduce
+the asymmetry in the other direction (extended caller, stock callee),
+which is benign register-wise on amd64 but semantically wrong.** Same
+logic applies if any future builtin sig switches a result from
+TMAP/TCHAN/TINTER to a real pointer.
+
 ### Tests in the tree
 
 - `src/cmd/compile/internal/test/escape_bits_test.go` — 8 end-to-end
