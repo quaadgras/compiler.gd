@@ -178,13 +178,13 @@ func (v *Value) materialize() {
 // v.Kind() must be Pointer, Map, Chan, Func, or UnsafePointer
 // if v.Kind() == Pointer, the base type must not be not-in-heap.
 func (v Value) pointer() unsafe.Pointer {
-	if v.typ().Size() != goarch.PtrSize || !v.typ().Pointers() {
+	if v.typ_.Size_ != goarch.PtrSize || v.typ_.PtrBytes == 0 {
 		panic("can't call pointer on a non-pointer Value")
 	}
 	if v.flag&flagIndir != 0 {
-		return *(*unsafe.Pointer)(v.dataPtr())
+		return *(*unsafe.Pointer)(v.ptr)
 	}
-	return v.dataPtr()
+	return v.ptr
 }
 
 // packEface converts v to the empty interface.
@@ -397,14 +397,17 @@ func (v Value) Addr() Value {
 // It panics if v's kind is not [Bool].
 func (v Value) Bool() bool {
 	// panicNotBool is split out to keep Bool inlineable.
-	if v.kind() != Bool {
-		v.panicNotBool()
+	v.panicNotBool()
+	if v.flag&flagInline != 0 {
+		return v.inline != 0
 	}
-	return *(*bool)(v.dataPtr())
+	return *(*bool)(v.ptr)
 }
 
 func (v Value) panicNotBool() {
-	v.mustBe(Bool)
+	if v.kind() != Bool {
+		v.mustBe(Bool)
+	}
 }
 
 var bytesType = rtypeOf(([]byte)(nil))
@@ -413,9 +416,15 @@ var bytesType = rtypeOf(([]byte)(nil))
 // It panics if v's underlying value is not a slice of bytes or
 // an addressable array of bytes.
 func (v Value) Bytes() []byte {
-	// bytesSlow is split out to keep Bytes inlineable for unnamed []byte.
-	if v.typ_ == bytesType { // ok to use v.typ_ directly as comparison doesn't cause escape
-		return *(*[]byte)(v.dataPtr())
+	// Fast path: spread []byte — the common case after fat-iface, since
+	// every reflect.ValueOf([]byte) lands here. Non-spread []byte (e.g.
+	// a slice element pulled out by Index, where flagIndir is set) and
+	// other byte-shaped Values fall through to bytesSlow. Splitting
+	// keeps Bytes inlinable.
+	//
+	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	if v.typ_ == bytesType && v.flag&flagSpread != 0 { // ok to use v.typ_ directly as comparison doesn't cause escape
+		return *(*[]byte)(unsafe.Pointer(&v.ptr))
 	}
 	return v.bytesSlow()
 }
@@ -1393,9 +1402,14 @@ func funcName(f func([]Value) []Value) string {
 // Cap returns v's capacity.
 // It panics if v's Kind is not [Array], [Chan], [Slice] or pointer to [Array].
 func (v Value) Cap() int {
-	// capNonSlice is split out to keep Cap inlineable for slice kinds.
-	if v.kind() == Slice {
-		return (*unsafeheader.Slice)(v.dataPtr()).Cap
+	// Fast path: spread slice — the common case after fat-iface, since
+	// every reflect.ValueOf(slice) lands here. Non-spread slices and
+	// all other kinds fall through to capNonSlice. Splitting keeps Cap
+	// inlinable.
+	//
+	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
+		return (*[2]int)(unsafe.Pointer(&v.inline))[1]
 	}
 	return v.capNonSlice()
 }
@@ -1403,6 +1417,9 @@ func (v Value) Cap() int {
 func (v Value) capNonSlice() int {
 	k := v.kind()
 	switch k {
+	case Slice:
+		// Non-spread slice: heap header at v.ptr.
+		return (*unsafeheader.Slice)(v.ptr).Cap
 	case Array:
 		return v.typ().Len()
 	case Chan:
@@ -1444,11 +1461,15 @@ func (v Value) CanComplex() bool {
 // It panics if v's Kind is not [Complex64] or [Complex128]
 func (v Value) Complex() complex128 {
 	k := v.kind()
+	var p = v.ptr
+	if v.flag&flagInline != 0 {
+		p = unsafe.Pointer(&v.inline)
+	}
 	switch k {
 	case Complex64:
-		return complex128(*(*complex64)(v.dataPtr()))
+		return complex128(*(*complex64)(p))
 	case Complex128:
-		return *(*complex128)(v.dataPtr())
+		return *(*complex128)(p)
 	}
 	panic(&ValueError{"reflect.Value.Complex", v.kind()})
 }
@@ -1633,12 +1654,16 @@ func (v Value) CanFloat() bool {
 // Float returns v's underlying value, as a float64.
 // It panics if v's Kind is not [Float32] or [Float64]
 func (v Value) Float() float64 {
+	var ptr = v.ptr
+	if v.flag&flagInline != 0 {
+		ptr = unsafe.Pointer(&v.inline)
+	}
 	k := v.kind()
 	switch k {
 	case Float32:
-		return float64(*(*float32)(v.dataPtr()))
+		return float64(*(*float32)(ptr))
 	case Float64:
-		return *(*float64)(v.dataPtr())
+		return *(*float64)(ptr)
 	}
 	panic(&ValueError{"reflect.Value.Float", v.kind()})
 }
@@ -1734,7 +1759,10 @@ func (v Value) CanInt() bool {
 // It panics if v's Kind is not [Int], [Int8], [Int16], [Int32], or [Int64].
 func (v Value) Int() int64 {
 	k := v.kind()
-	p := v.dataPtr()
+	var p = v.ptr
+	if v.flag&flagInline != 0 {
+		p = unsafe.Pointer(&v.inline)
+	}
 	switch k {
 	case Int:
 		return int64(*(*int)(p))
@@ -1929,21 +1957,19 @@ func (v Value) InterfaceData() [2]uintptr {
 // i==nil will be true but v.IsNil will panic as v will be the zero
 // Value.
 func (v Value) IsNil() bool {
-	k := v.kind()
-	switch k {
-	case Chan, Func, Map, Pointer, UnsafePointer:
+	switch v.kind() {
+	case Chan, Func, Map, Pointer, UnsafePointer, Interface, Slice:
 		if v.flag&flagMethod != 0 {
-			return false
+			return false // method values (only Func) are never nil
 		}
-		ptr := v.dataPtr()
-		if v.flag&flagIndir != 0 {
-			ptr = *(*unsafe.Pointer)(ptr)
+		// First word location:
+		//   - flagSpread set     → header lives in v's bytes; word 0 is v.ptr.
+		//   - flagIndir unset    → direct iface; v.ptr is the value itself.
+		//   - flagIndir set only → v.ptr → header on heap; deref it.
+		if v.flag&(flagSpread|flagIndir) != flagIndir {
+			return v.ptr == nil
 		}
-		return ptr == nil
-	case Interface, Slice:
-		// Both interface and slice are nil if first word is 0.
-		// Both are always bigger than a word; assume flagIndir.
-		return *(*unsafe.Pointer)(v.dataPtr()) == nil
+		return *(*unsafe.Pointer)(v.ptr) == nil
 	}
 	panic(&ValueError{"reflect.Value.IsNil", v.kind()})
 }
@@ -2147,15 +2173,23 @@ func (v Value) Kind() Kind {
 // Len returns v's length.
 // It panics if v's Kind is not [Array], [Chan], [Map], [Slice], [String], or pointer to [Array].
 func (v Value) Len() int {
-	// lenNonSlice is split out to keep Len inlineable for slice kinds.
-	if v.kind() == Slice {
-		return (*unsafeheader.Slice)(v.dataPtr()).Len
+	// Fast path: spread slice — the common case after fat-iface, since
+	// every reflect.ValueOf(slice) lands here. Non-spread slices and
+	// all other kinds fall through to lenNonSlice. Splitting keeps Len
+	// inlinable.
+	//
+	// Spread layout: Data=v.ptr, Len=inline.lo, Cap=inline.hi.
+	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
+		return *(*int)(unsafe.Pointer(&v.inline))
 	}
 	return v.lenNonSlice()
 }
 
 func (v Value) lenNonSlice() int {
 	switch k := v.kind(); k {
+	case Slice:
+		// Non-spread slice: heap header at v.ptr.
+		return (*unsafeheader.Slice)(v.ptr).Len
 	case Array:
 		tt := (*arrayType)(unsafe.Pointer(v.typ()))
 		return int(tt.Len)
@@ -2785,15 +2819,25 @@ func (v Value) Slice3(i, j, k int) Value {
 // The fmt package treats Values specially. It does not call their String
 // method implicitly but instead prints the concrete values they hold.
 func (v Value) String() string {
-	// stringNonString is split out to keep String inlineable for string kinds.
-	if v.kind() == String {
-		return *(*string)(v.dataPtr())
+	// Fast path: spread string — the common case after fat-iface, since
+	// every reflect.ValueOf(string) lands here. Non-spread strings and
+	// non-string kinds fall through to stringNonString. Splitting keeps
+	// String inlinable.
+	//
+	// Spread layout: 3-word string header lives contiguously at &v.ptr
+	// (word 0 = data ptr or inline-rep word0, words 1+2 = v.inline).
+	if v.flag&(flagKindMask|flagSpread) == flag(String)|flagSpread {
+		return *(*string)(unsafe.Pointer(&v.ptr))
 	}
 	return v.stringNonString()
 }
 
 func (v Value) stringNonString() string {
-	if v.kind() == Invalid {
+	switch v.kind() {
+	case String:
+		// Non-spread string: header lives at v.ptr (flagIndir).
+		return *(*string)(v.dataPtr())
+	case Invalid:
 		return "<invalid Value>"
 	}
 	// If you call String on a reflect.Value of other type, it's better to
@@ -2887,7 +2931,10 @@ func (v Value) CanUint() bool {
 // It panics if v's Kind is not [Uint], [Uintptr], [Uint8], [Uint16], [Uint32], or [Uint64].
 func (v Value) Uint() uint64 {
 	k := v.kind()
-	p := v.dataPtr()
+	var p = v.ptr
+	if v.flag&flagInline != 0 {
+		p = unsafe.Pointer(&v.inline)
+	}
 	switch k {
 	case Uint:
 		return uint64(*(*uint)(p))
@@ -2921,9 +2968,12 @@ func (v Value) UnsafeAddr() uintptr {
 	if v.flag&flagAddr == 0 {
 		panic("reflect.Value.UnsafeAddr of unaddressable value")
 	}
-	// The compiler loses track as it converts to uintptr. Force escape.
-	escapes(v.dataPtr())
-	return uintptr(v.dataPtr())
+	var p = v.ptr
+	if v.flag&flagInline != 0 {
+		p = unsafe.Pointer(&v.inline)
+	}
+	escapes(p) // The compiler loses track as it converts to uintptr. Force escape.
+	return uintptr(p)
 }
 
 // UnsafePointer returns v's value as a [unsafe.Pointer].
