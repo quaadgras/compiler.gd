@@ -6,7 +6,6 @@ package types
 
 import (
 	"strings"
-	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/internal/src"
@@ -141,14 +140,12 @@ func BuildOutBufFields(gd *base.Invocation, results []*Field) []*Field {
 	return out
 }
 
-// outBufSymInit guards one-time initialisation of outBufSyms.
-var outBufSymInit sync.Once
-
-// outBufSyms caches the gd Phase G `.outBufK` symbols so
-// VirtualParams can build its field list without touching the
-// unsynchronised LocalPkg.Syms map during parallel SSA generation.
+// outBufSymsOf returns the per-Invocation `.outBufK` Sym cache,
+// lazy-initialised on first access. Each Invocation has its own
+// LocalPkg, so the Syms must be per-Invocation too — they pin a
+// LocalPkg pointer that differs per compile.
 //
-// The Syms here are DELIBERATELY not registered in LocalPkg.Syms.
+// The Syms are DELIBERATELY not registered in LocalPkg.Syms.
 // staticdata.FuncLinksym holds funcsymsmu when doing LookupOK on
 // package symbol maps during the backend; we have no access to
 // that mutex from the types package, and the stock contract is
@@ -162,15 +159,20 @@ var outBufSymInit sync.Once
 //
 // Cap is larger than any realistic number of pointer results on a
 // single function; overflow is handled by building a Sym on the fly.
-var outBufSyms [32]*Sym
-
-func initOutBufSyms(gd *base.Invocation) {
-	for i := range outBufSyms {
-		outBufSyms[i] = &Sym{
-			Name: OutBufNamePrefix + itoa(i),
-			Pkg:  LocalPkg(gd),
+func outBufSymsOf(gd *base.Invocation) *[32]*Sym {
+	a, _ := gd.TypesOutBufSyms.(*[32]*Sym)
+	if a == nil {
+		var arr [32]*Sym
+		for i := range arr {
+			arr[i] = &Sym{
+				Name: OutBufNamePrefix + itoa(i),
+				Pkg:  LocalPkg(gd),
+			}
 		}
+		a = &arr
+		gd.TypesOutBufSyms = a
 	}
+	return a
 }
 
 // itoa is a local copy of strconv.Itoa to avoid importing strconv
@@ -191,11 +193,9 @@ func itoa(n int) string {
 
 // outBufSym returns the cached `.outBufK` Sym for k.
 func outBufSym(gd *base.Invocation, k int) *Sym {
-	outBufSymInit.Do(func() {
-		initOutBufSyms(gd)
-	})
-	if k < len(outBufSyms) {
-		return outBufSyms[k]
+	syms := outBufSymsOf(gd)
+	if k < len(syms) {
+		return syms[k]
 	}
 	// Overflow fallback — build a fresh Sym. No identity
 	// guarantees across calls, but nothing depends on that.

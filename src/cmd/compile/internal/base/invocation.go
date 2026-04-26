@@ -184,4 +184,10 @@ type Invocation struct {
 	// collide on overlapping type pointers (interned per-process,
 	// but the descriptor indices are per-compile).
 	TypecheckTypeSymIdx any // map[*types.Type][2]int64
+
+	// types Phase-G outBuf marker symbols. Each Invocation has its
+	// own LocalPkg, so the .outBufK Syms can't be shared across
+	// invocations (Pkg pointer is per-Invocation). Lazy-initialised
+	// on first outBufSym(gd, k) call.
+	TypesOutBufSyms any // [32]*types.Sym
 }
