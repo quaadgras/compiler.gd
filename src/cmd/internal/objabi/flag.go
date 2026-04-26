@@ -82,6 +82,12 @@ func AddVersionFlag() {
 
 var buildID string // filled in by linker
 
+// BuildID returns the linker-set build ID. cmd/compile's per-Invocation
+// version flag (in cmd/compile/internal/base/cmdflag.go) reads this so
+// it can format -V=full output without taking objabi's process-global
+// versionFlag exit path.
+func BuildID() string { return buildID }
+
 type versionFlag struct{}
 
 func (versionFlag) IsBoolFlag() bool { return true }

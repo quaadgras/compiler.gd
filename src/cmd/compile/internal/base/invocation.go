@@ -7,11 +7,20 @@ package base
 import (
 	"cmd/internal/obj"
 	"cmd/internal/src"
+	"flag"
 	"sync"
 )
 
 type Invocation struct {
 	atExitFuncs []func()
+
+	// Flagset is the per-Invocation flag set used by registerFlags
+	// and ParseFlags. Each Invocation owns its own *flag.FlagSet so
+	// multiple compile invocations in the same process don't fight
+	// over flag.CommandLine. Lazy-initialised by ParseFlags when
+	// nil, so callers that don't supply one (cmd/compile/main.go)
+	// keep working unchanged.
+	Flagset *flag.FlagSet
 
 	Timer Timings
 

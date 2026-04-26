@@ -252,12 +252,17 @@ func (gd *Invocation) hcrash() {
 
 // ErrorExit handles an error-status exit.
 // It flushes any pending errors, removes the output file, and exits.
+//
+// Goes through gd.Exit (runtime.Goexit + Status=2) rather than
+// os.Exit so an in-process embedder can recover and continue. The
+// outermost cmd/compile/main.go converts gd.Status into a process
+// exit code via os.Exit.
 func (gd *Invocation) ErrorExit() {
 	gd.FlushErrors()
 	if gd.Flag.LowerO != "" {
 		os.Remove(gd.Flag.LowerO)
 	}
-	os.Exit(2)
+	gd.Exit(2)
 }
 
 // ExitIfErrors calls ErrorExit if any errors have been reported.

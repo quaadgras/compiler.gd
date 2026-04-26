@@ -23,6 +23,10 @@ func Init(arch *ssagen.ArchInfo) {
 	case "softfloat":
 		arch.SoftFloat = true
 	case "387":
+		// TODO(in-process): These two os.Exit calls take down the host
+		// process; convert to panic + handle in gd.Main when an
+		// embedder cares about GO386=387/unknown failures. Reachable
+		// only on 386 builds with an unsupported GO386 setting.
 		fmt.Fprintf(os.Stderr, "unsupported setting GO386=387. Consider using GO386=softfloat instead.\n")
 		os.Exit(1)
 	default:

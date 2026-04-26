@@ -34,7 +34,6 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"cmd/internal/telemetry/counter"
-	"flag"
 	"fmt"
 	"internal/buildcfg"
 	"log"
@@ -57,10 +56,14 @@ func handlePanic(gd *base.Invocation) {
 	}
 }
 
-// Main parses flags and Go source files specified in the command-line
-// arguments, type-checks the parsed Go package, compiles functions to machine
-// code, and finally writes the compiled package definition to disk.
-func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
+// Main parses args (typically os.Args[1:]) and Go source files
+// specified in those args, type-checks the parsed Go package, compiles
+// functions to machine code, and finally writes the compiled package
+// definition to disk. Status is reported via gd.Status; gd.Exit and
+// the various error paths use runtime.Goexit rather than os.Exit, so
+// an embedder calling Main on a worker goroutine survives a single
+// invocation's exit.
+func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	gd.Timer.Start("fe", "init")
 	counter.Open()
 	counter.Inc("compile/invocations")
@@ -81,7 +84,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 	gd.Ctxt.UseBASEntries = gd.Ctxt.Headtype != objabi.Hdarwin
 
 	gd.DebugSSA = ssa.PhaseOption
-	gd.ParseFlags()
+	gd.ParseFlags(args)
 
 	if flagGCStart := gd.Debug.GCStart; flagGCStart > 0 || // explicit flags overrides environment variable disable of GC boost
 		os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && gd.Flag.LowerC != 1 { // explicit GC knobs or no concurrency implies default heap
@@ -223,7 +226,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 	ssagen.InitTables(gd)
 
 	// Parse and typecheck input.
-	noder.LoadPackage(gd, flag.Args())
+	noder.LoadPackage(gd, gd.Flagset.Args())
 
 	// As a convenience to users (toolchain maintainers, in particular),
 	// when compiling a package named "main", we default the package

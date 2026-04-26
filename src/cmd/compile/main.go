@@ -54,12 +54,20 @@ func main() {
 		os.Exit(2)
 	}
 	compiler := new(base.Invocation)
-	gd.Main(archInit, compiler)
-	// gd.Main may have set compiler.Status via gd.Exit (which only
-	// runtime.Goexit's the calling goroutine, so an in-process harness
-	// can keep running). At the outermost cmd/compile entry we must
-	// terminate the process — runtime.Goexit on the main goroutine
-	// triggers the deadlock detector once the worker pool drains.
+	// Run gd.Main on a worker goroutine. gd.Exit (used by error
+	// paths, -V, usage) calls runtime.Goexit, which would deadlock
+	// the main goroutine if invoked here directly. The worker
+	// finishes (either by returning or via Goexit) and signals via
+	// done, then main runs the final atexit callbacks and translates
+	// gd.Status into os.Exit. An in-process embedder doesn't need
+	// this dance — it can call gd.Main on its own worker goroutine
+	// and inspect compiler.Status when it returns.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		gd.Main(archInit, compiler, os.Args[1:])
+	}()
+	<-done
 	compiler.RunAtExitFuncs()
 	os.Exit(compiler.Status)
 }

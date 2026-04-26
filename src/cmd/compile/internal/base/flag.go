@@ -25,7 +25,7 @@ import (
 
 func (gd *Invocation) usage() {
 	fmt.Fprintf(os.Stderr, "usage: compile [options] file.go...\n")
-	objabi.Flagprint(os.Stderr)
+	gd.flagprint(os.Stderr)
 	gd.Exit(2)
 }
 
@@ -149,8 +149,20 @@ func addEnv(s string) {
 	os.Setenv(s[:i], s[i+1:])
 }
 
-// ParseFlags parses the command-line flags into Flag.
-func (gd *Invocation) ParseFlags() {
+// ParseFlags parses args into gd.Flag. args is typically os.Args[1:]
+// from cmd/compile/main.go but an in-process embedder can pass any
+// slice. A fresh *flag.FlagSet is created on first call so each
+// Invocation has its own (no flag.CommandLine sharing across compiles
+// in the same process).
+func (gd *Invocation) ParseFlags(args []string) {
+	if gd.Flagset == nil {
+		// ContinueOnError so -h/-help and parse errors come back
+		// as flag.ErrHelp / err and we route them through gd.Exit
+		// (runtime.Goexit + Status) rather than the flag package's
+		// built-in os.Exit. flagparse below maps the errors to
+		// status codes.
+		gd.Flagset = flag.NewFlagSet("compile", flag.ContinueOnError)
+	}
 	gd.Flag.I = gd.addImportDir
 
 	gd.Flag.LowerC = runtime.GOMAXPROCS(0)
@@ -191,10 +203,10 @@ func (gd *Invocation) ParseFlags() {
 
 	gd.Flag.Cfg.ImportMap = make(map[string]string)
 
-	objabi.AddVersionFlag() // -V
+	gd.addVersionFlag("compile") // -V on gd.Flagset, exits via gd.Exit
 	gd.registerFlags()
-	objabi.Flagparse(gd.usage)
-	counter.CountFlags("compile/flag:", *flag.CommandLine)
+	gd.flagparse(args, gd.usage)
+	counter.CountFlags("compile/flag:", *gd.Flagset)
 
 	if gcd := os.Getenv("GOCOMPILEDEBUG"); gcd != "" {
 		// This will only override the flags set in gcd;
@@ -304,7 +316,7 @@ func (gd *Invocation) ParseFlags() {
 	gd.Ctxt.Flag_maymorestack = gd.Debug.MayMoreStack
 	gd.Ctxt.Flag_noRefName = gd.Debug.NoRefName != 0
 
-	if flag.NArg() < 1 {
+	if gd.Flagset.NArg() < 1 {
 		gd.usage()
 	}
 
@@ -318,7 +330,7 @@ func (gd *Invocation) ParseFlags() {
 	}
 
 	if gd.Flag.LowerO == "" {
-		p := flag.Arg(0)
+		p := gd.Flagset.Arg(0)
 		if i := strings.LastIndex(p, "/"); i >= 0 {
 			p = p[i+1:]
 		}
@@ -469,31 +481,31 @@ func (gd *Invocation) registerFlags() {
 		switch f.Type {
 		case boolType:
 			p := v.Field(i).Addr().Interface().(*bool)
-			flag.BoolVar(p, name, *p, help)
+			gd.Flagset.BoolVar(p, name, *p, help)
 		case intType:
 			p := v.Field(i).Addr().Interface().(*int)
-			flag.IntVar(p, name, *p, help)
+			gd.Flagset.IntVar(p, name, *p, help)
 		case stringType:
 			p := v.Field(i).Addr().Interface().(*string)
-			flag.StringVar(p, name, *p, help)
+			gd.Flagset.StringVar(p, name, *p, help)
 		case ptrBoolType:
 			p := v.Field(i).Interface().(*bool)
-			flag.BoolVar(p, name, *p, help)
+			gd.Flagset.BoolVar(p, name, *p, help)
 		case ptrIntType:
 			p := v.Field(i).Interface().(*int)
-			flag.IntVar(p, name, *p, help)
+			gd.Flagset.IntVar(p, name, *p, help)
 		case ptrStringType:
 			p := v.Field(i).Interface().(*string)
-			flag.StringVar(p, name, *p, help)
+			gd.Flagset.StringVar(p, name, *p, help)
 		case countType:
 			p := (*int)(v.Field(i).Addr().Interface().(*CountFlag))
-			objabi.Flagcount(name, help, p)
+			gd.flagcount(name, help, p)
 		case funcType:
 			f := v.Field(i).Interface().(func(string))
-			objabi.Flagfn1(name, help, f)
+			gd.flagfn1(name, help, f)
 		default:
 			if val, ok := v.Field(i).Interface().(flag.Value); ok {
-				flag.Var(val, name, help)
+				gd.Flagset.Var(val, name, help)
 			} else {
 				panic(fmt.Sprintf("base.Flag.%s has unexpected type %s", f.Name, f.Type))
 			}

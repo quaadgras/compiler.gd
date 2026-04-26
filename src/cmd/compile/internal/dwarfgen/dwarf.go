@@ -609,7 +609,7 @@ func RecordFlags(gd *base.Invocation, flags ...string) {
 	}
 	var cmd bytes.Buffer
 	for _, name := range flags {
-		f := flag.Lookup(name)
+		f := gd.Flagset.Lookup(name)
 		if f == nil {
 			continue
 		}
