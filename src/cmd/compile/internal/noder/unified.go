@@ -254,16 +254,18 @@ func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool) {
 		// before reading bodies, because bodies might reference the
 		// dictionaries.
 
-		if len(todoDicts) > 0 {
-			fn := todoDicts[len(todoDicts)-1]
-			todoDicts = todoDicts[:len(todoDicts)-1]
+		td, _ := gd.NoderTodoDicts.([]func())
+		if len(td) > 0 {
+			fn := td[len(td)-1]
+			gd.NoderTodoDicts = td[:len(td)-1]
 			fn()
 			continue
 		}
 
-		if len(todoBodies) > 0 {
-			fn := todoBodies[len(todoBodies)-1]
-			todoBodies = todoBodies[:len(todoBodies)-1]
+		tb, _ := gd.NoderTodoBodies.([]*ir.Func)
+		if len(tb) > 0 {
+			fn := tb[len(tb)-1]
+			gd.NoderTodoBodies = tb[:len(tb)-1]
 
 			pri, ok := bodyReader(gd)[fn]
 			assert(gd, ok)
@@ -289,8 +291,8 @@ func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool) {
 		break
 	}
 
-	todoDicts = nil
-	todoBodies = nil
+	gd.NoderTodoDicts = nil
+	gd.NoderTodoBodies = nil
 
 	if len(inlDecls) != 0 {
 		// If we instantiated any generic functions during inlining, we need

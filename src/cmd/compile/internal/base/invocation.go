@@ -73,4 +73,6 @@ type Invocation struct {
 	NoderObjReader        any // map[*types.Sym]noder.pkgReaderIndex
 	NoderBodyReader       any // map[*ir.Func]noder.pkgReaderIndex
 	NoderImportBodyReader any // map[*types.Sym]noder.pkgReaderIndex
+	NoderTodoBodies       any // []*ir.Func — pending function bodies during readBodies
+	NoderTodoDicts        any // []func()    — pending dictionary constructors during readBodies
 }

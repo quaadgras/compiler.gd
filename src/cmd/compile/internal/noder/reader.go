@@ -828,7 +828,7 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 			if r.dict.shaped {
 				setType(name, shapeSig(r.gd, name.Func, r.dict))
 			} else {
-				todoDicts = append(todoDicts, func() {
+				todoDictsAppend(r.gd, func() {
 					r.dict.shapedObj = pr.objIdx(idx, implicits, explicits, true).(*ir.Name)
 				})
 			}
@@ -855,7 +855,7 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 		types.ResumeCheckSize()
 
 		if r.hasTypeParams() && !r.dict.shaped {
-			todoDicts = append(todoDicts, func() {
+			todoDictsAppend(r.gd, func() {
 				r.dict.shapedObj = pr.objIdx(idx, implicits, explicits, true).(*ir.Name)
 			})
 		}
@@ -1315,13 +1315,20 @@ func bodyReaderFor(gd *base.Invocation, fn *ir.Func) (pri pkgReaderIndex, ok boo
 	return
 }
 
-// todoDicts holds the list of dictionaries that still need their
-// runtime dictionary objects constructed.
-var todoDicts []func()
+// todoDicts / todoBodies hold lists of dictionaries and function bodies
+// that still need to be constructed during a readBodies pass. Both live
+// on *base.Invocation so concurrent / sequential compile invocations
+// don't share them.
 
-// todoBodies holds the list of function bodies that still need to be
-// constructed.
-var todoBodies []*ir.Func
+func todoDictsAppend(gd *base.Invocation, f func()) {
+	td, _ := gd.NoderTodoDicts.([]func())
+	gd.NoderTodoDicts = append(td, f)
+}
+
+func todoBodiesAppend(gd *base.Invocation, fn *ir.Func) {
+	tb, _ := gd.NoderTodoBodies.([]*ir.Func)
+	gd.NoderTodoBodies = append(tb, fn)
+}
 
 // addBody reads a function body reference from the element bitstream,
 // and associates it with fn.
@@ -1336,7 +1343,7 @@ func (r *reader) addBody(fn *ir.Func, method *types.Sym) {
 	bodyReader(r.gd)[fn] = pri
 
 	if r.curfn == nil {
-		todoBodies = append(todoBodies, fn)
+		todoBodiesAppend(r.gd, fn)
 		return
 	}
 
@@ -3689,7 +3696,8 @@ func unifiedInlineCall(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr
 	res.SetTypecheck(1)
 
 	// Inlining shouldn't add any functions to todoBodies.
-	assert(gd, len(todoBodies) == 0)
+	tb, _ := gd.NoderTodoBodies.([]*ir.Func)
+	assert(gd, len(tb) == 0)
 
 	return res
 }
