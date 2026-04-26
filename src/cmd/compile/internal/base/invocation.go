@@ -148,4 +148,15 @@ type Invocation struct {
 	// escape analysis. Per-compile because each Invocation has its
 	// own escape state and itab list.
 	ReflectdataPendingItabMasks any // []reflectdata.pendingItabMask
+
+	// reflectdata runtime-type-descriptor work queues. signatmu/gcsymmu
+	// guard concurrent access from the parallel SSA backend; signatset
+	// dedups, signatslice is the FIFO of types still needing emit, and
+	// gcsymset tracks which types' GC bitmaps have already been
+	// emitted.
+	ReflectdataSignatMu    sync.Mutex
+	ReflectdataSignatSet   any // map[*types.Type]struct{}
+	ReflectdataSignatSlice any // []reflectdata.typeAndStr
+	ReflectdataGcsymMu     sync.Mutex
+	ReflectdataGcsymSet    any // map[*types.Type]struct{}
 }

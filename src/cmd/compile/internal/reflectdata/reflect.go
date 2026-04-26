@@ -11,7 +11,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/bitvec"
@@ -33,18 +32,28 @@ type ptabEntry struct {
 	t *types.Type
 }
 
-// runtime interface and reflection data structures
-var (
-	// protects signatset and signatslice
-	signatmu sync.Mutex
-	// Tracking which types need runtime type descriptor
-	signatset = make(map[*types.Type]struct{})
-	// Queue of types wait to be generated runtime type descriptor
-	signatslice []typeAndStr
+// runtime interface and reflection data structures live on Invocation:
+// gd.ReflectdataSignatMu / .ReflectdataSignatSet (lazy-init) /
+// .ReflectdataSignatSlice / .ReflectdataGcsymMu / .ReflectdataGcsymSet
+// (lazy-init). Helpers below hide the type assertions.
 
-	gcsymmu  sync.Mutex // protects gcsymset and gcsymslice
-	gcsymset = make(map[*types.Type]struct{})
-)
+func signatSet(gd *base.Invocation) map[*types.Type]struct{} {
+	m, _ := gd.ReflectdataSignatSet.(map[*types.Type]struct{})
+	if m == nil {
+		m = make(map[*types.Type]struct{})
+		gd.ReflectdataSignatSet = m
+	}
+	return m
+}
+
+func gcsymSet(gd *base.Invocation) map[*types.Type]struct{} {
+	m, _ := gd.ReflectdataGcsymSet.(map[*types.Type]struct{})
+	if m == nil {
+		m = make(map[*types.Type]struct{})
+		gd.ReflectdataGcsymSet = m
+	}
+	return m
+}
 
 type typeSig struct {
 	name  *types.Sym
@@ -613,7 +622,7 @@ func dcommontype(gd *base.Invocation, c rttype.Cursor, t *types.Type) {
 
 	gcsym, onDemand, ptrdata := dgcsym(gd, t, true, true)
 	if !onDemand {
-		delete(gcsymset, t)
+		delete(gcsymSet(gd), t)
 	}
 
 	// ../../../../reflect/type.go:/^type.rtype
@@ -717,9 +726,9 @@ func TypeSymPrefix(gd *base.Invocation, prefix string, t *types.Type) *types.Sym
 
 	// This function is for looking up type-related generated functions
 	// (e.g. eq and hash). Make sure they are indeed generated.
-	signatmu.Lock()
+	gd.ReflectdataSignatMu.Lock()
 	NeedRuntimeType(gd, t)
-	signatmu.Unlock()
+	gd.ReflectdataSignatMu.Unlock()
 
 	//print("algsym: %s -> %+S\n", p, s);
 
@@ -734,9 +743,9 @@ func TypeSym(gd *base.Invocation, t *types.Type) *types.Sym {
 		gd.Fatalf("misuse of method type: %v", t)
 	}
 	s := types.TypeSym(t)
-	signatmu.Lock()
+	gd.ReflectdataSignatMu.Lock()
 	NeedRuntimeType(gd, t)
-	signatmu.Unlock()
+	gd.ReflectdataSignatMu.Unlock()
 	return s
 }
 
@@ -750,12 +759,12 @@ func TypeLinksymLookup(gd *base.Invocation, name string) *obj.LSym {
 
 func TypeLinksym(gd *base.Invocation, t *types.Type) *obj.LSym {
 	lsym := TypeSym(gd, t).Linksym(gd)
-	signatmu.Lock()
+	gd.ReflectdataSignatMu.Lock()
 	if lsym.Extra == nil {
 		ti := lsym.NewTypeInfo()
 		ti.Type = t
 	}
-	signatmu.Unlock()
+	gd.ReflectdataSignatMu.Unlock()
 	return lsym
 }
 
@@ -779,12 +788,12 @@ func ITabLsym(gd *base.Invocation, typ, iface *types.Type) *obj.LSym {
 func itabLsym(gd *base.Invocation, typ, iface *types.Type, allowNonImplement bool) *obj.LSym {
 	s, existed := ir.Pkgs.Itab.LookupOK(typ.LinkString() + "," + iface.LinkString())
 	lsym := s.Linksym(gd)
-	signatmu.Lock()
+	gd.ReflectdataSignatMu.Lock()
 	if lsym.Extra == nil {
 		ii := lsym.NewItabInfo()
 		ii.Type = typ
 	}
-	signatmu.Unlock()
+	gd.ReflectdataSignatMu.Unlock()
 
 	if !existed {
 		writeITab(gd, lsym, typ, iface, allowNonImplement)
@@ -1173,34 +1182,42 @@ func InterfaceMethodOffset(gd *base.Invocation, ityp *types.Type, i int64) int64
 
 // NeedRuntimeType ensures that a runtime type descriptor is emitted for t.
 func NeedRuntimeType(gd *base.Invocation, t *types.Type) {
-	if _, ok := signatset[t]; !ok {
-		signatset[t] = struct{}{}
-		signatslice = append(signatslice, typeAndStr{t: t, short: types.TypeSymName(t), regular: t.String()})
+	set := signatSet(gd)
+	if _, ok := set[t]; !ok {
+		set[t] = struct{}{}
+		ss, _ := gd.ReflectdataSignatSlice.([]typeAndStr)
+		gd.ReflectdataSignatSlice = append(ss, typeAndStr{t: t, short: types.TypeSymName(t), regular: t.String()})
 	}
 }
 
 func WriteRuntimeTypes(gd *base.Invocation) {
 	// Process signatslice. Use a loop, as writeType adds
 	// entries to signatslice while it is being processed.
-	for len(signatslice) > 0 {
-		signats := signatslice
+	for {
+		ss, _ := gd.ReflectdataSignatSlice.([]typeAndStr)
+		if len(ss) == 0 {
+			return
+		}
 		// Sort for reproducible builds.
-		slices.SortFunc(signats, typesStrCmp)
-		for _, ts := range signats {
+		slices.SortFunc(ss, typesStrCmp)
+		for _, ts := range ss {
 			t := ts.t
 			writeType(gd, t)
 			if t.Sym() != nil {
 				writeType(gd, types.NewPtr(t))
 			}
 		}
-		signatslice = signatslice[len(signats):]
+		// writeType may have appended; re-read and trim what we processed.
+		cur, _ := gd.ReflectdataSignatSlice.([]typeAndStr)
+		gd.ReflectdataSignatSlice = cur[len(ss):]
 	}
 }
 
 func WriteGCSymbols(gd *base.Invocation) {
 	// Emit GC data symbols.
-	gcsyms := make([]typeAndStr, 0, len(gcsymset))
-	for t := range gcsymset {
+	set := gcsymSet(gd)
+	gcsyms := make([]typeAndStr, 0, len(set))
+	for t := range set {
 		gcsyms = append(gcsyms, typeAndStr{t: t, short: types.TypeSymName(t), regular: t.String()})
 	}
 	slices.SortFunc(gcsyms, typesStrCmp)
@@ -1474,11 +1491,12 @@ func typesStrCmp(a, b typeAndStr) int {
 // content.
 func GCSym(gd *base.Invocation, t *types.Type, onDemandAllowed bool) (lsym *obj.LSym, ptrdata int64) {
 	// Record that we need to emit the GC symbol.
-	gcsymmu.Lock()
-	if _, ok := gcsymset[t]; !ok {
-		gcsymset[t] = struct{}{}
+	gd.ReflectdataGcsymMu.Lock()
+	set := gcsymSet(gd)
+	if _, ok := set[t]; !ok {
+		set[t] = struct{}{}
 	}
-	gcsymmu.Unlock()
+	gd.ReflectdataGcsymMu.Unlock()
 
 	lsym, _, ptrdata = dgcsym(gd, t, false, onDemandAllowed)
 	return
