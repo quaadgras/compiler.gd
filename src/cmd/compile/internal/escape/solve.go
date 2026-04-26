@@ -220,6 +220,14 @@ func (b *batch) explainPath(root, src *location) []*logopt.LoggedOpt {
 			break
 		}
 		visited[src] = true
+		// src.dst points at the next hop toward root; root itself has
+		// dst=nil (walkOne:80). When src == root (Phase F: a synthetic
+		// param loc that gained attrCandidateEscape becomes its own
+		// walkAll root, so outlives(root,root) is true and we still
+		// enter the param branch), the flow is trivially empty.
+		if src == root {
+			break
+		}
 		dst := src.dst
 		edge := &dst.edges[src.dstEdgeIdx]
 		if edge.src != src {
