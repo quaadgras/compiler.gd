@@ -246,7 +246,7 @@ func CanInline(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile) {
 					fmt.Printf("%v: cannot inline %v: %s\n", ir.Line(gd, fn), fn.Nname, reason)
 				}
 				if logopt.Enabled() {
-					logopt.LogOpt(fn.Pos(), "cannotInlineFunction", "inline", ir.FuncName(fn), reason)
+					logopt.LogOpt(gd, fn.Pos(), "cannotInlineFunction", "inline", ir.FuncName(fn), reason)
 				}
 			}
 		}()
@@ -322,7 +322,7 @@ func noteInlinableFunc(gd *base.Invocation, n *ir.Name, fn *ir.Func, cost int32)
 	}
 	// JSON optimization log output.
 	if logopt.Enabled() {
-		logopt.LogOpt(fn.Pos(), "canInlineFunction", "inline", ir.FuncName(fn), fmt.Sprintf("cost: %d", cost))
+		logopt.LogOpt(gd, fn.Pos(), "canInlineFunction", "inline", ir.FuncName(fn), fmt.Sprintf("cost: %d", cost))
 	}
 }
 
@@ -1054,7 +1054,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 	if callee.Inl == nil {
 		// callee is never inlinable.
 		if log && logopt.Enabled() {
-			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 				fmt.Sprintf("%s cannot be inlined", ir.PkgFuncName(callee)))
 		}
 		return false, 0, false
@@ -1064,7 +1064,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 	if !ok {
 		// callee cost too high for this call site.
 		if log && logopt.Enabled() {
-			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 				fmt.Sprintf("cost %d of %s exceeds max caller cost %d", callee.Inl.Cost, ir.PkgFuncName(callee), maxCost))
 		}
 		return false, 0, false
@@ -1075,7 +1075,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 	for _, p := range callees {
 		if p.Line() == calleeInner.Line() && p.Col() == calleeInner.Col() && p.AbsFilename() == calleeInner.AbsFilename() {
 			if log && logopt.Enabled() {
-				logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", fmt.Sprintf("recursive call to %s", ir.FuncName(callerfn)))
+				logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", fmt.Sprintf("recursive call to %s", ir.FuncName(callerfn)))
 			}
 			return false, 0, false
 		}
@@ -1089,7 +1089,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 		// The example that we observed is inlining of LockOSThread,
 		// which lead to false race reports on m contents.
 		if log && logopt.Enabled() {
-			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 				fmt.Sprintf("call to runtime function %s in instrumented build", ir.PkgFuncName(callee)))
 		}
 		return false, 0, false
@@ -1097,7 +1097,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 
 	if gd.Flag.Race && types.IsNoRacePkg(callee.Sym().Pkg) {
 		if log && logopt.Enabled() {
-			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 				fmt.Sprintf(`call to into "no-race" package function %s in race build`, ir.PkgFuncName(callee)))
 		}
 		return false, 0, false
@@ -1106,7 +1106,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 	if gd.Debug.Checkptr != 0 && types.IsRuntimePkg(callee.Sym().Pkg) {
 		// We don't instrument runtime packages for checkptr (see base/flag.go).
 		if log && logopt.Enabled() {
-			logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 				fmt.Sprintf(`call to into runtime package function %s in -d=checkptr build`, ir.PkgFuncName(callee)))
 		}
 		return false, 0, false
@@ -1128,7 +1128,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 					fmt.Printf("%v: cannot inline %v into %v: repeated recursive cycle\n", ir.Line(gd, n), callee, ir.FuncName(callerfn))
 				}
 				if logopt.Enabled() {
-					logopt.LogOpt(n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
+					logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
 						fmt.Sprintf("repeated recursive cycle to %s", ir.PkgFuncName(callee)))
 				}
 			}

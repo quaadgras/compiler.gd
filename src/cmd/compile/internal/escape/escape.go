@@ -436,7 +436,7 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 				if logopt.Enabled() {
 					var e_curfn *ir.Func // TODO(mdempsky): Fix.
-					logopt.LogOpt(n.Pos(), "escape", "escape", ir.FuncName(e_curfn))
+					logopt.LogOpt(b.gd, n.Pos(), "escape", "escape", ir.FuncName(e_curfn))
 				}
 			}
 			n.SetEsc(ir.EscHeap)

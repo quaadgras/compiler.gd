@@ -402,7 +402,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation) {
 		gd.Fatalf("%d uncompiled functions", len(cq))
 	}
 
-	logopt.FlushLoggedOpts(gd.Ctxt, gd.Ctxt.Pkgpath)
+	logopt.FlushLoggedOpts(gd, gd.Ctxt, gd.Ctxt.Pkgpath)
 	gd.ExitIfErrors()
 
 	gd.FlushErrors()

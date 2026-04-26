@@ -310,7 +310,7 @@ func shouldPGODevirt(gd *base.Invocation, fn *ir.Func) bool {
 					fmt.Printf("%v: should not PGO devirtualize %v: %s\n", ir.Line(gd, fn), ir.FuncName(fn), reason)
 				}
 				if logopt.Enabled() {
-					logopt.LogOpt(fn.Pos(), ": should not PGO devirtualize function", "pgoir-devirtualize", ir.FuncName(fn), reason)
+					logopt.LogOpt(gd, fn.Pos(), ": should not PGO devirtualize function", "pgoir-devirtualize", ir.FuncName(fn), reason)
 				}
 			}
 		}()

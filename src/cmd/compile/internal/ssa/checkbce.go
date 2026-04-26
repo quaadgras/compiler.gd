@@ -26,10 +26,10 @@ func checkbce(f *Func) {
 				}
 				if logopt.Enabled() {
 					if v.Op == OpIsInBounds {
-						logopt.LogOpt(v.Pos, "isInBounds", "checkbce", f.Name)
+						logopt.LogOpt(f.Config.gd, v.Pos, "isInBounds", "checkbce", f.Name)
 					}
 					if v.Op == OpIsSliceInBounds {
-						logopt.LogOpt(v.Pos, "isSliceInBounds", "checkbce", f.Name)
+						logopt.LogOpt(f.Config.gd, v.Pos, "isSliceInBounds", "checkbce", f.Name)
 					}
 				}
 			}

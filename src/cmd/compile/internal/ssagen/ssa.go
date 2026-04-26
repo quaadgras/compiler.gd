@@ -2422,7 +2422,7 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		} else {
 			s.rtcall(ir.Syms.Memmove, true, nil, dst, src, s.constInt(types.Types[types.TUINTPTR], t.Size()))
 		}
-		ssa.LogLargeCopy(s.f.Name, s.peekPos(), t.Size())
+		ssa.LogLargeCopy(s.gd, s.f.Name, s.peekPos(), t.Size())
 		return
 	}
 	store := s.newValue3I(ssa.OpMove, types.TypeMem, t.Size(), dst, src, s.mem())

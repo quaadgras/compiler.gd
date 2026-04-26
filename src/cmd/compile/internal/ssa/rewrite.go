@@ -5,6 +5,7 @@
 package ssa
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
 	"cmd/compile/internal/reflectdata"
@@ -1520,16 +1521,16 @@ func logLargeCopy(v *Value, s int64) bool {
 		return true
 	}
 	if logopt.Enabled() {
-		logopt.LogOpt(v.Pos, "copy", "lower", v.Block.Func.Name, fmt.Sprintf("%d bytes", s))
+		logopt.LogOpt(v.Block.Func.Config.gd, v.Pos, "copy", "lower", v.Block.Func.Name, fmt.Sprintf("%d bytes", s))
 	}
 	return true
 }
-func LogLargeCopy(funcName string, pos src.XPos, s int64) {
+func LogLargeCopy(gd *base.Invocation, funcName string, pos src.XPos, s int64) {
 	if s < 128 {
 		return
 	}
 	if logopt.Enabled() {
-		logopt.LogOpt(pos, "copy", "lower", funcName, fmt.Sprintf("%d bytes", s))
+		logopt.LogOpt(gd, pos, "copy", "lower", funcName, fmt.Sprintf("%d bytes", s))
 	}
 }
 

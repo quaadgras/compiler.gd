@@ -122,7 +122,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					explanation := b.explainPath(root, l)
 					if logopt.Enabled() {
 						var e_curfn *ir.Func // TODO(mdempsky): Fix.
-						logopt.LogOpt(l.n.Pos(), "escape", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", l.n), explanation)
+						logopt.LogOpt(b.gd, l.n.Pos(), "escape", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", l.n), explanation)
 					}
 				}
 				// gd escape-bits: when the sole outliving root is
@@ -160,7 +160,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					explanation := b.explainPath(root, l)
 					if logopt.Enabled() {
 						var e_curfn *ir.Func // TODO(mdempsky): Fix.
-						logopt.LogOpt(l.n.Pos(), "leak", "escape", ir.FuncName(e_curfn),
+						logopt.LogOpt(b.gd, l.n.Pos(), "leak", "escape", ir.FuncName(e_curfn),
 							fmt.Sprintf("parameter %v leaks to %s with derefs=%d", l.n, b.explainLoc(root), derefs), explanation)
 					}
 				}

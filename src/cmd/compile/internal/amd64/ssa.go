@@ -1583,7 +1583,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Reg = v.Args[0].Reg()
 		if logopt.Enabled() {
-			logopt.LogOpt(v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
+			logopt.LogOpt(gd, v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
 		}
 		if gd.Debug.Nil != 0 && v.Pos.Line() > 1 { // v.Pos.Line()==1 in generated wrappers
 			gd.WarnfAt(v.Pos, "generated nil check")

@@ -233,7 +233,7 @@ func (b *batch) flow(k hole, src *location) {
 			explanation := b.explainFlow(pos, dst, src, k.derefs, k.notes, []*logopt.LoggedOpt{})
 			if logopt.Enabled() {
 				var e_curfn *ir.Func // TODO(mdempsky): Fix.
-				logopt.LogOpt(src.n.Pos(), "escapes", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", src.n), explanation)
+				logopt.LogOpt(b.gd, src.n.Pos(), "escapes", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", src.n), explanation)
 			}
 
 		}

@@ -562,9 +562,9 @@ func LogTransformations(gd *base.Invocation, transformed []VarAndLoop) {
 					nString = fmt.Sprintf("%v (from inline)", n)
 				}
 				if n.Esc() == ir.EscHeap {
-					logopt.LogOpt(pos, "iteration-variable-to-heap", "loopvar", ir.FuncName(n.Curfn), nString)
+					logopt.LogOpt(gd, pos, "iteration-variable-to-heap", "loopvar", ir.FuncName(n.Curfn), nString)
 				} else {
-					logopt.LogOpt(pos, "iteration-variable-to-stack", "loopvar", ir.FuncName(n.Curfn), nString)
+					logopt.LogOpt(gd, pos, "iteration-variable-to-stack", "loopvar", ir.FuncName(n.Curfn), nString)
 				}
 			}
 			if print {
@@ -593,7 +593,7 @@ func LogTransformations(gd *base.Invocation, transformed []VarAndLoop) {
 			}
 			if logopt.Enabled() {
 				// Intended to help with performance debugging, we record whole loop ranges
-				logopt.LogOptRange(pos, last, "loop-modified-"+loopKind, "loopvar", ir.FuncName(l.curfn))
+				logopt.LogOptRange(gd, pos, last, "loop-modified-"+loopKind, "loopvar", ir.FuncName(l.curfn))
 			}
 			if print && 4 <= gd.Debug.LoopVar {
 				// TODO decide if we want to keep this, or not.  It was helpful for validating logopt, otherwise, eh.

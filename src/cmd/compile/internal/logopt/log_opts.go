@@ -5,6 +5,7 @@
 package logopt
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/internal/obj"
 	"cmd/internal/src"
 	"encoding/json"
@@ -18,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"unicode"
 )
 
@@ -318,8 +318,9 @@ func checkLogPath(destination string) string {
 	return path
 }
 
-var loggedOpts []*LoggedOpt
-var mu = sync.Mutex{} // mu protects loggedOpts.
+// loggedOpts and the protecting mutex live on *base.Invocation as
+// gd.LogoptLoggedOpts / gd.LogoptMu — per-Invocation so concurrent
+// compile invocations don't mix diagnostic streams.
 
 // NewLoggedOpt allocates a new LoggedOpt, to later be passed to either NewLoggedOpt or LogOpt as "args".
 // Pos is the source position (including inlining), what is the message, pass is which pass created the message,
@@ -333,28 +334,30 @@ func NewLoggedOpt(pos, lastPos src.XPos, what, pass, funcName string, args ...an
 // LogOpt logs information about a (usually missed) optimization performed by the compiler.
 // Pos is the source position (including inlining), what is the message, pass is which pass created the message,
 // funcName is the name of the function.
-func LogOpt(pos src.XPos, what, pass, funcName string, args ...any) {
+func LogOpt(gd *base.Invocation, pos src.XPos, what, pass, funcName string, args ...any) {
 	if Format == None {
 		return
 	}
 	lo := NewLoggedOpt(pos, pos, what, pass, funcName, args...)
-	mu.Lock()
-	defer mu.Unlock()
+	gd.LogoptMu.Lock()
+	defer gd.LogoptMu.Unlock()
 	// Because of concurrent calls from back end, no telling what the order will be, but is stable-sorted by outer Pos before use.
-	loggedOpts = append(loggedOpts, lo)
+	los, _ := gd.LogoptLoggedOpts.([]*LoggedOpt)
+	gd.LogoptLoggedOpts = append(los, lo)
 }
 
 // LogOptRange is the same as LogOpt, but includes the ability to express a range of positions,
 // not just a point.
-func LogOptRange(pos, lastPos src.XPos, what, pass, funcName string, args ...any) {
+func LogOptRange(gd *base.Invocation, pos, lastPos src.XPos, what, pass, funcName string, args ...any) {
 	if Format == None {
 		return
 	}
 	lo := NewLoggedOpt(pos, lastPos, what, pass, funcName, args...)
-	mu.Lock()
-	defer mu.Unlock()
+	gd.LogoptMu.Lock()
+	defer gd.LogoptMu.Unlock()
 	// Because of concurrent calls from back end, no telling what the order will be, but is stable-sorted by outer Pos before use.
-	loggedOpts = append(loggedOpts, lo)
+	los, _ := gd.LogoptLoggedOpts.([]*LoggedOpt)
+	gd.LogoptLoggedOpts = append(los, lo)
 }
 
 // Enabled returns whether optimization logging is enabled.
@@ -429,11 +432,12 @@ func uprootedPath(filename string) string {
 }
 
 // FlushLoggedOpts flushes all the accumulated optimization log entries.
-func FlushLoggedOpts(ctxt *obj.Link, slashPkgPath string) {
+func FlushLoggedOpts(gd *base.Invocation, ctxt *obj.Link, slashPkgPath string) {
 	if Format == None {
 		return
 	}
 
+	loggedOpts, _ := gd.LogoptLoggedOpts.([]*LoggedOpt)
 	sort.Stable(byPos{ctxt, loggedOpts}) // Stable is necessary to preserve the per-function order, which is repeatable.
 	switch Format {
 

@@ -159,4 +159,10 @@ type Invocation struct {
 	ReflectdataSignatSlice any // []reflectdata.typeAndStr
 	ReflectdataGcsymMu     sync.Mutex
 	ReflectdataGcsymSet    any // map[*types.Type]struct{}
+
+	// logopt diagnostic accumulator. The mutex guards concurrent
+	// appends from the parallel SSA backend; the slice is sorted
+	// by source position at FlushLoggedOpts time.
+	LogoptMu         sync.Mutex
+	LogoptLoggedOpts any // []*logopt.LoggedOpt
 }
