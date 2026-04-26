@@ -116,4 +116,9 @@ type Invocation struct {
 	// from imported ones; per-Invocation so two compiles can
 	// each have their own local reader.
 	NoderLocalPkgReader any // *noder.pkgReader
+
+	// Set of LSyms for outlined map.init.NNN functions, used by
+	// weakenGlobalMapInitRelocs to flag R_WEAK references between
+	// init functions and their outlined map initializers.
+	SsagenGlobalMapInitLsyms any // map[*obj.LSym]struct{}
 }

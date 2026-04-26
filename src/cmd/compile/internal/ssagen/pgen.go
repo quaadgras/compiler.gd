@@ -339,17 +339,23 @@ func Compile(gd *base.Invocation, fn *ir.Func, worker int, profile *pgoir.Profil
 	fieldtrack(gd, pp.Text.From.Sym, fn.FieldTrack)
 }
 
-// globalMapInitLsyms records the LSym of each map.init.NNN outlined
-// map initializer function created by the compiler.
-var globalMapInitLsyms map[*obj.LSym]struct{}
+// globalMapInitLsyms returns the per-Invocation set of LSyms for
+// map.init.NNN outlined map initializer functions, lazy-initialised
+// on first access.
+func globalMapInitLsyms(gd *base.Invocation) map[*obj.LSym]struct{} {
+	m, _ := gd.SsagenGlobalMapInitLsyms.(map[*obj.LSym]struct{})
+	return m
+}
 
 // RegisterMapInitLsym records "s" in the set of outlined map initializer
-// functions.
-func RegisterMapInitLsym(s *obj.LSym) {
-	if globalMapInitLsyms == nil {
-		globalMapInitLsyms = make(map[*obj.LSym]struct{})
+// functions for this compile invocation.
+func RegisterMapInitLsym(gd *base.Invocation, s *obj.LSym) {
+	m, _ := gd.SsagenGlobalMapInitLsyms.(map[*obj.LSym]struct{})
+	if m == nil {
+		m = make(map[*obj.LSym]struct{})
+		gd.SsagenGlobalMapInitLsyms = m
 	}
-	globalMapInitLsyms[s] = struct{}{}
+	m[s] = struct{}{}
 }
 
 // weakenGlobalMapInitRelocs walks through all of the relocations on a
@@ -357,7 +363,8 @@ func RegisterMapInitLsym(s *obj.LSym) {
 // outlined global map initializer functions; if it finds any such
 // relocs, it flags them as R_WEAK.
 func weakenGlobalMapInitRelocs(gd *base.Invocation, fn *ir.Func) {
-	if globalMapInitLsyms == nil {
+	m := globalMapInitLsyms(gd)
+	if m == nil {
 		return
 	}
 	for i := range fn.LSym.R {
@@ -365,7 +372,7 @@ func weakenGlobalMapInitRelocs(gd *base.Invocation, fn *ir.Func) {
 		if tgt == nil {
 			continue
 		}
-		if _, ok := globalMapInitLsyms[tgt]; !ok {
+		if _, ok := m[tgt]; !ok {
 			continue
 		}
 		if gd.Debug.WrapGlobalMapDbg > 1 {

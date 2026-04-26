@@ -107,7 +107,7 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 	// initializer function, register its LSym for later processing.
 	if m2v := staticinit.MapInitToVar(gd); m2v != nil {
 		if _, ok := m2v[fn]; ok {
-			ssagen.RegisterMapInitLsym(fn.Linksym())
+			ssagen.RegisterMapInitLsym(gd, fn.Linksym())
 		}
 	}
 
