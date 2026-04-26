@@ -266,7 +266,7 @@ func (ra *resultsAnalyzer) deriveReturnFlagsFromCallee(n ir.Node) (ResultPropBit
 	if cname == nil {
 		return 0, false
 	}
-	calleeProps := propsForFunc(cname.Func)
+	calleeProps := propsForFunc(ra.gd, cname.Func)
 	if calleeProps == nil {
 		return 0, false
 	}

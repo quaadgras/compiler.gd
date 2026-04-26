@@ -165,4 +165,16 @@ type Invocation struct {
 	// by source position at FlushLoggedOpts time.
 	LogoptMu         sync.Mutex
 	LogoptLoggedOpts any // []*logopt.LoggedOpt
+
+	// inlheur per-compile heuristic state. Stored on Invocation so
+	// concurrent compile invocations don't share fnInlHeur entries
+	// or call-site tables. InlheurTornDown replaces the previous
+	// nil-as-signal pattern (TearDown used to set fpmap=nil to
+	// indicate "main inlining pass complete").
+	InlheurFpmap            any  // map[*ir.Func]inlheur.fnInlHeur
+	InlheurTornDown         bool // TearDown was called; new analyzeFunc calls become no-ops
+	InlheurCallSiteTab      any  // inlheur.CallSiteTab — current fn's table
+	InlheurAllCallSites     any  // inlheur.CallSiteTab — accumulated across whole compile (debug)
+	InlheurScoreCacheTab    any  // inlheur.CallSiteTab — reused across ScoreCalls invocations
+	InlheurScoreCacheCallsl any  // []*inlheur.CallSite — reused list buffer
 }

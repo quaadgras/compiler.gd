@@ -181,7 +181,7 @@ func isWellKnownFunc(s *types.Sym, pkg, name string) bool {
 
 // isExitCall reports TRUE if the node itself is an unconditional
 // call to os.Exit(), a panic, or a function that does likewise.
-func isExitCall(n ir.Node) bool {
+func isExitCall(gd *base.Invocation, n ir.Node) bool {
 	if n.Op() != ir.OCALLFUNC {
 		return false
 	}
@@ -195,7 +195,7 @@ func isExitCall(n ir.Node) bool {
 		isWellKnownFunc(s, "runtime", "throw") {
 		return true
 	}
-	if funcProps := propsForFunc(name.Func); funcProps != nil {
+	if funcProps := propsForFunc(gd, name.Func); funcProps != nil {
 		if funcProps.Flags&FuncPropNeverReturns != 0 {
 			return true
 		}
@@ -234,7 +234,7 @@ func (ffa *funcFlagsAnalyzer) nodeVisitPost(n ir.Node) {
 	var st pstate
 	switch n.Op() {
 	case ir.OCALLFUNC:
-		if isExitCall(n) {
+		if isExitCall(ffa.gd, n) {
 			st = psCallsPanic
 		}
 	case ir.OPANIC:

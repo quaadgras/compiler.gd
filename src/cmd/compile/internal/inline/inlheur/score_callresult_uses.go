@@ -41,6 +41,7 @@ type resultUseAnalyzer struct {
 	resultNameTab map[*ir.Name]resultPropAndCS
 	fn            *ir.Func
 	cstab         CallSiteTab
+	gd            *base.Invocation
 	*condLevelTracker
 }
 
@@ -53,6 +54,7 @@ func (csa *callSiteAnalyzer) rescoreBasedOnCallResultUses(fn *ir.Func, resultNam
 		resultNameTab:    resultNameTab,
 		fn:               fn,
 		cstab:            cstab,
+		gd:               csa.gd,
 		condLevelTracker: new(condLevelTracker),
 	}
 	var doNode func(ir.Node) bool
@@ -78,7 +80,7 @@ func (csa *callSiteAnalyzer) examineCallResults(gd *base.Invocation, cs *CallSit
 	// variables in question are not newly defined, then we'll receive
 	// an empty list here.
 	//
-	names, autoTemps, props := namesDefined(cs)
+	names, autoTemps, props := namesDefined(gd, cs)
 	if len(names) == 0 {
 		return resultNameTab
 	}
@@ -145,13 +147,13 @@ func (csa *callSiteAnalyzer) examineCallResults(gd *base.Invocation, cs *CallSit
 // to the user-level variables. In such cases we return
 // first the user-level variable (in the first func result)
 // and then the auto-temp name in the second result.
-func namesDefined(cs *CallSite) ([]*ir.Name, []*ir.Name, *FuncProps) {
+func namesDefined(gd *base.Invocation, cs *CallSite) ([]*ir.Name, []*ir.Name, *FuncProps) {
 	// If this call doesn't feed into an assignment (and of course not
 	// all calls do), then we don't have anything to work with here.
 	if cs.Assign == nil {
 		return nil, nil, nil
 	}
-	funcInlHeur, ok := fpmap[cs.Callee]
+	funcInlHeur, ok := fpmap(gd)[cs.Callee]
 	if !ok {
 		// TODO: add an assert/panic here.
 		return nil, nil, nil
@@ -402,7 +404,7 @@ func (rua *resultUseAnalyzer) getCallResultName(ce *ir.CallExpr) *ir.Name {
 		if !ok {
 			return nil
 		}
-		names, _, _ := namesDefined(cs)
+		names, _, _ := namesDefined(rua.gd, cs)
 		if len(names) == 0 {
 			return nil
 		}

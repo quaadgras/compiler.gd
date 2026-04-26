@@ -985,7 +985,7 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 
 	metric := callee.Inl.Cost
 	if inlheur.Enabled(gd) {
-		score, ok := inlheur.GetCallSiteScore(caller, n)
+		score, ok := inlheur.GetCallSiteScore(gd, caller, n)
 		if ok {
 			metric = int32(score)
 		}

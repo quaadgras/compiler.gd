@@ -59,7 +59,19 @@ type fnInlHeur struct {
 	line  uint
 }
 
-var fpmap = map[*ir.Func]fnInlHeur{}
+// fpmap returns the per-Invocation fnInlHeur table. Returns nil after
+// TearDown (matching the old "fpmap == nil" sentinel semantics).
+func fpmap(gd *base.Invocation) map[*ir.Func]fnInlHeur {
+	if gd.InlheurTornDown {
+		return nil
+	}
+	m, _ := gd.InlheurFpmap.(map[*ir.Func]fnInlHeur)
+	if m == nil {
+		m = map[*ir.Func]fnInlHeur{}
+		gd.InlheurFpmap = m
+	}
+	return m
+}
 
 // AnalyzeFunc computes function properties for fn and its contained
 // closures, updating the global 'fpmap' table. It is assumed that
@@ -68,10 +80,9 @@ var fpmap = map[*ir.Func]fnInlHeur{}
 // be checked inlinability for inlinability here in case they are
 // returned as a result.
 func AnalyzeFunc(gd *base.Invocation, fn *ir.Func, canInline func(*ir.Func), budgetForFunc func(*ir.Func) int32, inlineMaxBudget int) {
-	if fpmap == nil {
-		// If fpmap is nil this indicates that the main inliner pass is
-		// complete and we're doing inlining of wrappers (no heuristics
-		// used here).
+	if gd.InlheurTornDown {
+		// TearDown was called; the main inliner pass is complete and
+		// we're doing inlining of wrappers (no heuristics used here).
 		return
 	}
 	if fn.OClosure != nil {
@@ -116,16 +127,17 @@ func AnalyzeFunc(gd *base.Invocation, fn *ir.Func, canInline func(*ir.Func), bud
 
 // TearDown is invoked at the end of the main inlining pass; doing
 // function analysis and call site scoring is unlikely to help a lot
-// after this point, so nil out fpmap and other globals to reclaim
-// storage.
-func TearDown() {
-	fpmap = nil
-	scoreCallsCache.tab = nil
-	scoreCallsCache.csl = nil
+// after this point, so reclaim storage by clearing the heuristic
+// state on this Invocation.
+func TearDown(gd *base.Invocation) {
+	gd.InlheurTornDown = true
+	gd.InlheurFpmap = nil
+	gd.InlheurScoreCacheTab = nil
+	gd.InlheurScoreCacheCallsl = nil
 }
 
 func analyzeFunc(gd *base.Invocation, fn *ir.Func, inlineMaxBudget int, nf *nameFinder) *FuncProps {
-	if funcInlHeur, ok := fpmap[fn]; ok {
+	if funcInlHeur, ok := fpmap(gd)[fn]; ok {
 		return funcInlHeur.props
 	}
 	funcProps, fcstab := computeFuncProps(gd, fn, inlineMaxBudget, nf)
@@ -138,7 +150,7 @@ func analyzeFunc(gd *base.Invocation, fn *ir.Func, inlineMaxBudget int, nf *name
 		cstab: fcstab,
 	}
 	fn.SetNeverReturns(entry.props.Flags&FuncPropNeverReturns != 0)
-	fpmap[fn] = entry
+	fpmap(gd)[fn] = entry
 	if fn.Inl != nil && fn.Inl.Properties == "" {
 		fn.Inl.Properties = entry.props.SerializeToString()
 	}
@@ -198,8 +210,8 @@ func runAnalyzersOnFunction(fn *ir.Func, analyzers []propAnalyzer) {
 	doNode(fn)
 }
 
-func propsForFunc(fn *ir.Func) *FuncProps {
-	if funcInlHeur, ok := fpmap[fn]; ok {
+func propsForFunc(gd *base.Invocation, fn *ir.Func) *FuncProps {
+	if funcInlHeur, ok := fpmap(gd)[fn]; ok {
 		return funcInlHeur.props
 	} else if fn.Inl != nil && fn.Inl.Properties != "" {
 		// FIXME: considering adding some sort of cache or table
@@ -234,10 +246,10 @@ func DumpFuncProps(gd *base.Invocation, fn *ir.Func, dumpfile string) {
 			// closures will be processed along with their outer enclosing func.
 			return
 		}
-		captureFuncDumpEntry(fn)
+		captureFuncDumpEntry(gd, fn)
 		ir.VisitFuncAndClosures(fn, func(n ir.Node) {
 			if clo, ok := n.(*ir.ClosureExpr); ok {
-				captureFuncDumpEntry(clo.Func)
+				captureFuncDumpEntry(gd, clo.Func)
 			}
 		})
 	} else {
@@ -295,17 +307,17 @@ func emitDumpToFile(gd *base.Invocation, dumpfile string) {
 // and enqueues it for later dumping. Used for the
 // "-d=dumpinlfuncprops=..." command line flag, intended for use
 // primarily in unit testing.
-func captureFuncDumpEntry(fn *ir.Func) {
+func captureFuncDumpEntry(gd *base.Invocation, fn *ir.Func) {
 	// avoid capturing compiler-generated equality funcs.
 	if strings.HasPrefix(fn.Sym().Name, ".eq.") {
 		return
 	}
-	funcInlHeur, ok := fpmap[fn]
+	funcInlHeur, ok := fpmap(gd)[fn]
 	if !ok {
 		// Missing entry is expected for functions that are too large
 		// to inline. We still want to write out call site scores in
 		// this case however.
-		funcInlHeur = fnInlHeur{cstab: callSiteTab}
+		funcInlHeur = fnInlHeur{cstab: callSiteTabOf(gd)}
 	}
 	if dumpBuffer == nil {
 		dumpBuffer = make(map[*ir.Func]fnInlHeur)

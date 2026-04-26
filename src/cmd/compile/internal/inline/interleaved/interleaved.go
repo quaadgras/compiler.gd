@@ -143,7 +143,7 @@ func DevirtualizeAndInlinePackage(gd *base.Invocation, pkg *ir.Package, profile 
 		}
 		if inlheur.Enabled(gd) {
 			inline.PostProcessCallSites(gd, inlProfile)
-			inlheur.TearDown()
+			inlheur.TearDown(gd)
 		}
 	}
 

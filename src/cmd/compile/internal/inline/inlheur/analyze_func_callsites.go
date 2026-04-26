@@ -357,7 +357,7 @@ func UpdateCallsiteTable(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr,
 	enableDebugTraceIfEnv()
 	defer disableDebugTrace()
 
-	funcInlHeur, ok := fpmap[callerfn]
+	funcInlHeur, ok := fpmap(gd)[callerfn]
 	if !ok {
 		// This can happen for compiler-generated wrappers.
 		if debugTrace&debugTraceCalls != 0 {

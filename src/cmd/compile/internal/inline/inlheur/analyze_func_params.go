@@ -235,7 +235,7 @@ func (pa *paramsAnalyzer) callCheckParams(ce *ir.CallExpr) {
 // foo's param 'f' since we know that bar has that flag set for
 // its second param, and we're passing that param a function.
 func (pa *paramsAnalyzer) deriveFlagsFromCallee(ce *ir.CallExpr, callee *ir.Func) {
-	calleeProps := propsForFunc(callee)
+	calleeProps := propsForFunc(pa.gd, callee)
 	if calleeProps == nil {
 		return
 	}

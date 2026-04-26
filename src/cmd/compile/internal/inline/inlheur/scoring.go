@@ -413,22 +413,53 @@ func LargestNegativeScoreAdjustment(fn *ir.Func, props *FuncProps) int {
 	return score
 }
 
-// callSiteTab contains entries for each call in the function
-// currently being processed by InlineCalls; this variable will either
-// be set to 'cstabCache' below (for non-inlinable routines) or to the
-// local 'cstab' entry in the fnInlHeur object for inlinable routines.
+// callSiteTab / scoreCallsCache / allCallSites all live on Invocation
+// (gd.InlheurCallSiteTab, gd.InlheurScoreCacheTab, gd.InlheurScoreCacheCallsl,
+// gd.InlheurAllCallSites). Per-compile so concurrent compile invocations
+// don't share heuristic state.
 //
 // NOTE: this assumes that inlining operations are happening in a serial,
-// single-threaded fashion,f which is true today but probably won't hold
-// in the future (for example, we might want to score the callsites
-// in multiple functions in parallel); if the inliner evolves in this
-// direction we'll need to come up with a different approach here.
-var callSiteTab CallSiteTab
+// single-threaded fashion within a single compile, which is true today
+// but probably won't hold in the future (for example, we might want
+// to score the callsites in multiple functions in parallel); if the
+// inliner evolves in this direction we'll need to come up with a
+// different approach here.
 
-// scoreCallsCache caches a call site table and call site list between
-// invocations of ScoreCalls so that we can reuse previously allocated
-// storage.
-var scoreCallsCache scoreCallsCacheType
+func callSiteTabOf(gd *base.Invocation) CallSiteTab {
+	t, _ := gd.InlheurCallSiteTab.(CallSiteTab)
+	return t
+}
+
+func setCallSiteTab(gd *base.Invocation, t CallSiteTab) {
+	gd.InlheurCallSiteTab = t
+}
+
+func scoreCallsCacheTabOf(gd *base.Invocation) CallSiteTab {
+	t, _ := gd.InlheurScoreCacheTab.(CallSiteTab)
+	return t
+}
+
+func setScoreCallsCacheTab(gd *base.Invocation, t CallSiteTab) {
+	gd.InlheurScoreCacheTab = t
+}
+
+func scoreCallsCacheCslOf(gd *base.Invocation) []*CallSite {
+	s, _ := gd.InlheurScoreCacheCallsl.([]*CallSite)
+	return s
+}
+
+func setScoreCallsCacheCsl(gd *base.Invocation, s []*CallSite) {
+	gd.InlheurScoreCacheCallsl = s
+}
+
+func allCallSitesOf(gd *base.Invocation) CallSiteTab {
+	t, _ := gd.InlheurAllCallSites.(CallSiteTab)
+	return t
+}
+
+func setAllCallSites(gd *base.Invocation, t CallSiteTab) {
+	gd.InlheurAllCallSites = t
+}
 
 type scoreCallsCacheType struct {
 	tab CallSiteTab
@@ -469,20 +500,22 @@ func ScoreCalls(gd *base.Invocation, fn *ir.Func) {
 	// call site table for it. If the function wasn't an inline
 	// candidate, collect a callsite table for it now.
 	var cstab CallSiteTab
-	if funcInlHeur, ok := fpmap[fn]; ok {
+	if funcInlHeur, ok := fpmap(gd)[fn]; ok {
 		cstab = funcInlHeur.cstab
 	} else {
-		if len(scoreCallsCache.tab) != 0 {
+		cacheTab := scoreCallsCacheTabOf(gd)
+		if len(cacheTab) != 0 {
 			panic("missing call to ScoreCallsCleanup")
 		}
-		if scoreCallsCache.tab == nil {
-			scoreCallsCache.tab = make(CallSiteTab)
+		if cacheTab == nil {
+			cacheTab = make(CallSiteTab)
+			setScoreCallsCacheTab(gd, cacheTab)
 		}
 		if debugTrace&debugTraceScoring != 0 {
 			fmt.Fprintf(os.Stderr, "=-= building cstab for non-inl func %s\n",
 				ir.FuncName(fn))
 		}
-		cstab = computeCallSiteTable(gd, fn, fn.Body, scoreCallsCache.tab, nil, 0,
+		cstab = computeCallSiteTable(gd, fn, fn.Body, cacheTab, nil, 0,
 			nameFinder)
 	}
 
@@ -506,11 +539,11 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(gd *base.Invocation, fn *ir.Func, 
 	// Sort callsites to avoid any surprises with non deterministic
 	// map iteration order (this is probably not needed, but here just
 	// in case).
-	csl := scoreCallsCache.csl[:0]
+	csl := scoreCallsCacheCslOf(gd)[:0]
 	for _, cs := range cstab {
 		csl = append(csl, cs)
 	}
-	scoreCallsCache.csl = csl[:0]
+	setScoreCallsCacheCsl(gd, csl[:0])
 	slices.SortFunc(csl, func(a, b *CallSite) int {
 		return cmp.Compare(a.ID, b.ID)
 	})
@@ -521,7 +554,7 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(gd *base.Invocation, fn *ir.Func, 
 		var cprops *FuncProps
 		fihcprops := false
 		desercprops := false
-		if funcInlHeur, ok := fpmap[cs.Callee]; ok {
+		if funcInlHeur, ok := fpmap(gd)[cs.Callee]; ok {
 			cprops = funcInlHeur.props
 			fihcprops = true
 		} else if cs.Callee.Inl != nil {
@@ -555,13 +588,14 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(gd *base.Invocation, fn *ir.Func, 
 
 	disableDebugTrace()
 
-	if ic != nil && callSiteTab != nil {
+	cst := callSiteTabOf(gd)
+	if ic != nil && cst != nil {
 		// Integrate the calls from this cstab into the table for the caller.
-		if err := callSiteTab.merge(gd, cstab); err != nil {
+		if err := cst.merge(gd, cstab); err != nil {
 			gd.FatalfAt(ic.Pos(), "%v", err)
 		}
 	} else {
-		callSiteTab = cstab
+		setCallSiteTab(gd, cstab)
 	}
 }
 
@@ -569,25 +603,27 @@ func (csa *callSiteAnalyzer) scoreCallsRegion(gd *base.Invocation, fn *ir.Func, 
 // once ScoreCalls is done with a function.
 func ScoreCallsCleanup(gd *base.Invocation) {
 	if gd.Debug.DumpInlCallSiteScores != 0 {
-		if allCallSites == nil {
-			allCallSites = make(CallSiteTab)
+		acs := allCallSitesOf(gd)
+		if acs == nil {
+			acs = make(CallSiteTab)
+			setAllCallSites(gd, acs)
 		}
-		for call, cs := range callSiteTab {
-			allCallSites[call] = cs
+		for call, cs := range callSiteTabOf(gd) {
+			acs[call] = cs
 		}
 	}
-	clear(scoreCallsCache.tab)
+	clear(scoreCallsCacheTabOf(gd))
 }
 
 // GetCallSiteScore returns the previously calculated score for call
 // within fn.
-func GetCallSiteScore(fn *ir.Func, call *ir.CallExpr) (int, bool) {
-	if funcInlHeur, ok := fpmap[fn]; ok {
+func GetCallSiteScore(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr) (int, bool) {
+	if funcInlHeur, ok := fpmap(gd)[fn]; ok {
 		if cs, ok := funcInlHeur.cstab[call]; ok {
 			return cs.Score, true
 		}
 	}
-	if cs, ok := callSiteTab[call]; ok {
+	if cs, ok := callSiteTabOf(gd)[call]; ok {
 		return cs.Score, true
 	}
 	return 0, false
@@ -613,8 +649,6 @@ func BudgetExpansion(gd *base.Invocation, maxBudget int32) int32 {
 	// for most cases.
 	return maxBudget
 }
-
-var allCallSites CallSiteTab
 
 // DumpInlCallSiteScores is invoked by the inliner if the debug flag
 // "-d=dumpinlcallsitescores" is set; it dumps out a human-readable
@@ -704,7 +738,7 @@ func DumpInlCallSiteScores(gd *base.Invocation, profile *pgoir.Profile, budgetCa
 
 	if gd.Debug.DumpInlCallSiteScores != 0 {
 		var sl []*CallSite
-		for _, cs := range allCallSites {
+		for _, cs := range allCallSitesOf(gd) {
 			sl = append(sl, cs)
 		}
 		slices.SortFunc(sl, func(a, b *CallSite) int {
