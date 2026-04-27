@@ -111,7 +111,7 @@ func InitConfig(gd *base.Invocation) {
 	_ = types.NewPtr(types.ErrorType)                                       // *error
 	_ = types.NewPtr(reflectdata.MapType(gd))                               // *internal/runtime/maps.Map
 	_ = types.NewPtr(deferstruct(gd))                                       // *runtime._defer
-	types.NewPtrCacheEnabled = false
+	types.SetNewPtrCacheEnabled(false)
 	cfg := ssa.NewConfig(gd, gd.Ctxt.Arch.Name, *types_, gd.Ctxt, gd.Flag.N == 0, Arch.SoftFloat)
 	cfg.Race = gd.Flag.Race
 	gd.SsaConfig = cfg

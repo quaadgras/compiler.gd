@@ -633,9 +633,25 @@ func NewMap(k, v *Type) *Type {
 }
 
 // NewPtrCacheEnabled controls whether *T Types are cached in T.
-// Caching is disabled just before starting the backend.
-// This allows the backend to run concurrently.
-var NewPtrCacheEnabled = true
+// Caching is disabled just before starting the backend; the
+// atomic.Pointer in T.cache.ptr keeps concurrent NewPtr calls
+// safe regardless, so the disable is now a perf hint rather than
+// a correctness requirement. The flag is read and (rarely) written
+// by concurrent in-process compile invocations; we use atomic.Bool
+// so the race detector's check on the bare bool doesn't fire.
+var newPtrCacheEnabled atomic.Bool
+
+func init() { newPtrCacheEnabled.Store(true) }
+
+// NewPtrCacheEnabled returns whether *T Types should be cached.
+// Exported as a function so external readers don't observe the
+// underlying atomic.Bool.
+func NewPtrCacheEnabledLoad() bool { return newPtrCacheEnabled.Load() }
+
+// SetNewPtrCacheEnabled sets the flag. Used by ssagen.InitConfig
+// to disable caching once each invocation finishes pre-creating
+// its common ptr types.
+func SetNewPtrCacheEnabled(v bool) { newPtrCacheEnabled.Store(v) }
 
 // NewPtr returns the pointer type pointing to t.
 func NewPtr(elem *Type) *Type {
@@ -669,7 +685,7 @@ func NewPtr(elem *Type) *Type {
 	// Note: we can't check elem.NotInHeap here because it might
 	// not be set yet. See size.go:PtrDataSize.
 	t.ptrBytes = int64(PtrSize)
-	if NewPtrCacheEnabled {
+	if newPtrCacheEnabled.Load() {
 		if !elem.cache.ptr.CompareAndSwap(nil, t) {
 			// Another goroutine won the race; use its Type.
 			t = elem.cache.ptr.Load()
