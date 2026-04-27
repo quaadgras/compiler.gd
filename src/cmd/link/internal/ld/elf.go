@@ -1602,7 +1602,7 @@ func (ctxt *Link) doelf() {
 			h.Write(l.Fingerprint[:])
 		}
 		addgonote(ctxt, ".note.go.abihash", ELF_NOTE_GOABIHASH_TAG, h.Sum([]byte{}))
-		addgonote(ctxt, ".note.go.pkg-list", ELF_NOTE_GOPKGLIST_TAG, pkglistfornote)
+		addgonote(ctxt, ".note.go.pkg-list", ELF_NOTE_GOPKGLIST_TAG, ctxt.pkglistfornote)
 		var deplist []string
 		for _, shlib := range ctxt.Shlibs {
 			deplist = append(deplist, filepath.Base(shlib.Path))
@@ -2305,7 +2305,7 @@ elfobj:
 	}
 }
 
-func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
+func elfadddynsym(ctxt *Link, ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
 	ldr.SetSymDynid(s, int32(Nelfsym))
 	Nelfsym++
 	d := ldr.MakeSymbolUpdater(syms.DynSym)
@@ -2351,10 +2351,10 @@ func elfadddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.S
 
 		dil := ldr.SymDynimplib(s)
 
-		if !cgoeDynamic && dil != "" && !seenlib[dil] {
+		if !cgoeDynamic && dil != "" && !ctxt.seenlib[dil] {
 			du := ldr.MakeSymbolUpdater(syms.Dynamic)
 			Elfwritedynent(target.Arch, du, elf.DT_NEEDED, uint64(dstru.Addstring(dil)))
-			seenlib[dil] = true
+			ctxt.seenlib[dil] = true
 		}
 	} else {
 

@@ -135,7 +135,6 @@ var fipsSyms = []struct {
 }
 
 // fipsinfo is the loader symbol for go:fipsinfo.
-var fipsinfo loader.Sym
 
 const (
 	fipsMagic    = "\xff Go fipsinfo \xff\x00"
@@ -175,8 +174,7 @@ func loadfips(ctxt *Link) {
 			ctxt.Textp = append(ctxt.Textp, s.sym)
 		}
 	}
-
-	fipsinfo = info.Sym()
+	ctxt.fipsinfo = info.Sym()
 }
 
 // fipsObj calculates the fips object hash and optionally writes
@@ -283,7 +281,7 @@ func asmbfips(ctxt *Link, fipso string) {
 	}
 
 	// Overwrite the go:fipsinfo sum field with the calculated sum.
-	addr := uint64(ldr.SymValue(fipsinfo))
+	addr := uint64(ldr.SymValue(ctxt.fipsinfo))
 	seg := &Segdata
 	if !(seg.Vaddr <= addr && addr+32 < seg.Vaddr+seg.Filelen) {
 		Errorf("asmbfips: fipsinfo not in expected segment (%#x..%#x not in %#x..%#x)", addr, addr+32, seg.Vaddr, seg.Vaddr+seg.Filelen)

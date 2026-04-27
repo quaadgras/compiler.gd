@@ -163,17 +163,17 @@ func mustLinkExternal(ctxt *Link) (res bool, reason string) {
 		return true, "dynamically linking with a shared library"
 	}
 
-	if unknownObjFormat {
+	if ctxt.unknownObjFormat {
 		return true, "some input objects have an unrecognized file format"
 	}
 
-	if len(dynimportfail) > 0 {
+	if len(ctxt.dynimportfail) > 0 {
 		// This error means that we were unable to generate
 		// the _cgo_import.go file for some packages.
 		// This typically means that there are some dependencies
 		// that the cgo tool could not figure out.
 		// See issue #52863.
-		return true, fmt.Sprintf("some packages could not be built to support internal linking (%v)", dynimportfail)
+		return true, fmt.Sprintf("some packages could not be built to support internal linking (%v)", ctxt.dynimportfail)
 	}
 
 	return false, ""
@@ -201,11 +201,11 @@ func determineLinkMode(ctxt *Link) {
 			ctxt.LinkMode = LinkExternal
 			via = "via GO_EXTLINK_ENABLED "
 		default:
-			preferExternal := len(preferlinkext) != 0
+			preferExternal := len(ctxt.preferlinkext) != 0
 			if preferExternal && ctxt.Debugvlog > 0 {
-				ctxt.Logf("external linking prefer list is %v\n", preferlinkext)
+				ctxt.Logf("external linking prefer list is %v\n", ctxt.preferlinkext)
 			}
-			if extNeeded || (iscgo && (externalobj || preferExternal)) {
+			if extNeeded || (iscgo && (ctxt.externalobj || preferExternal)) {
 				ctxt.LinkMode = LinkExternal
 			} else {
 				ctxt.LinkMode = LinkInternal

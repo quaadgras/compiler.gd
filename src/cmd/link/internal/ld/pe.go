@@ -622,11 +622,11 @@ func (f *peFile) emitRelocations(ctxt *Link) {
 		{f.rdataSect, &Segrodata, ctxt.datap},
 		{f.dataSect, &Segdata, ctxt.datap},
 	}
-	if len(sehp.pdata) != 0 {
-		sects = append(sects, relsect{f.pdataSect, &Segpdata, sehp.pdata})
+	if len(ctxt.sehp.pdata) != 0 {
+		sects = append(sects, relsect{f.pdataSect, &Segpdata, ctxt.sehp.pdata})
 	}
-	if len(sehp.xdata) != 0 {
-		sects = append(sects, relsect{f.xdataSect, &Segxdata, sehp.xdata})
+	if len(ctxt.sehp.xdata) != 0 {
+		sects = append(sects, relsect{f.xdataSect, &Segxdata, ctxt.sehp.xdata})
 	}
 	for _, s := range sects {
 		s.peSect.emitRelocations(ctxt.Out, func() int {
@@ -986,7 +986,7 @@ func (f *peFile) writeOptionalHeader(ctxt *Link) {
 	oh.SizeOfImage = f.nextSectOffset
 	oh64.SizeOfHeaders = uint32(ctxt.PEFILEHEADR)
 	oh.SizeOfHeaders = uint32(ctxt.PEFILEHEADR)
-	if windowsgui {
+	if ctxt.windowsgui {
 		oh64.Subsystem = pe.IMAGE_SUBSYSTEM_WINDOWS_GUI
 		oh.Subsystem = pe.IMAGE_SUBSYSTEM_WINDOWS_GUI
 	} else {

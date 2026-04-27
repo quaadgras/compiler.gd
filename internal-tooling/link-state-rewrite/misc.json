@@ -1,0 +1,15 @@
+{
+  "fields": [
+    {"var": "pkglistfornote", "field": "pkglistfornote"},
+    {"var": "windowsgui", "field": "windowsgui"},
+    {"var": "ownTmpDir", "field": "ownTmpDir"},
+    {"var": "fipsinfo", "field": "fipsinfo"},
+    {"var": "seenlib", "field": "seenlib"},
+    {"var": "sehp", "field": "sehp"},
+    {"var": "theline", "field": "theline"},
+    {"var": "externalobj", "field": "externalobj"},
+    {"var": "dynimportfail", "field": "dynimportfail"},
+    {"var": "preferlinkext", "field": "preferlinkext"},
+    {"var": "unknownObjFormat", "field": "unknownObjFormat"}
+  ]
+}

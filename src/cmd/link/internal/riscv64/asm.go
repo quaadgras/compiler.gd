@@ -393,7 +393,7 @@ func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 		return
 	}
 
-	ld.Adddynsym(ldr, target, syms, s)
+	ld.Adddynsym(ctxt, ldr, target, syms, s)
 
 	plt := ldr.MakeSymbolUpdater(syms.PLT)
 	gotplt := ldr.MakeSymbolUpdater(syms.GOTPLT)

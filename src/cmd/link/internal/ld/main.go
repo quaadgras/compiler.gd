@@ -49,11 +49,8 @@ import (
 	"sync"
 )
 
-var (
-	pkglistfornote []byte
-	windowsgui     bool // writes a "GUI binary" instead of a "console binary"
-	ownTmpDir      bool // set to true if tmp dir created by linker (e.g. no -tmpdir)
-)
+// writes a "GUI binary" instead of a "console binary"
+// set to true if tmp dir created by linker (e.g. no -tmpdir)
 
 // counter.Open writes process-global state. sync.Once-gate so back-to-back
 // host.Run invocations don't double-initialise.
@@ -343,7 +340,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	case "":
 	case "windowsgui":
 		ctxt.HeadType = objabi.Hwindows
-		windowsgui = true
+		ctxt.windowsgui = true
 	default:
 		if err := ctxt.HeadType.Set(*flagHeadType); err != nil {
 			Errorf("%v", err)
@@ -465,8 +462,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 			} else {
 				pkgpath, file = parts[0], parts[1]
 			}
-			pkglistfornote = append(pkglistfornote, pkgpath...)
-			pkglistfornote = append(pkglistfornote, '\n')
+			ctxt.pkglistfornote = append(ctxt.pkglistfornote, pkgpath...)
+			ctxt.pkglistfornote = append(ctxt.pkglistfornote, '\n')
 			addlibpath(ctxt, "command line", "command line", file, pkgpath, "", zerofp)
 		}
 	case BuildModePlugin:

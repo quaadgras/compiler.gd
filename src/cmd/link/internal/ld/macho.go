@@ -505,10 +505,10 @@ func (ctxt *Link) domacho() {
 }
 
 func machoadddynlib(ctxt *Link, lib string, linkmode LinkMode) {
-	if seenlib[lib] || linkmode == LinkExternal {
+	if ctxt.seenlib[lib] || linkmode == LinkExternal {
 		return
 	}
-	seenlib[lib] = true
+	ctxt.seenlib[lib] = true
 
 	// Will need to store the library name rounded up
 	// and 24 bytes of header metadata. If not enough

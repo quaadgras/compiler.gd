@@ -238,7 +238,7 @@ func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 		dynSymCount = uint64(ldr.SymSize(syms.DynSym) / dynSymEntrySize)
 	}
 
-	ld.Adddynsym(ldr, target, syms, s)
+	ld.Adddynsym(ctxt, ldr, target, syms, s)
 	dynSymCount++
 
 	if !target.IsElf() {

@@ -10,7 +10,10 @@ import (
 	"cmd/link/internal/sym"
 )
 
-var sehp struct {
+// sehTables holds SEH .pdata/.xdata builders. Migrated to *Link via
+// linkState (see link_state.go) so concurrent in-process linker runs
+// don't share state.
+type sehTables struct {
 	pdata []sym.LoaderSym
 	xdata []sym.LoaderSym
 }
@@ -72,6 +75,6 @@ func writeSEHAMD64(ctxt *Link) {
 		pdata.AddPEImageRelativeAddrPlus(ctxt.Arch, s, ldr.SymSize(s))
 		pdata.AddPEImageRelativeAddrPlus(ctxt.Arch, xdata.Sym(), off)
 	}
-	sehp.pdata = append(sehp.pdata, pdata.Sym())
-	sehp.xdata = append(sehp.xdata, xdata.Sym())
+	ctxt.sehp.pdata = append(ctxt.sehp.pdata, pdata.Sym())
+	ctxt.sehp.xdata = append(ctxt.sehp.xdata, xdata.Sym())
 }

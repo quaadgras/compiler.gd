@@ -317,8 +317,9 @@ func dedupLibrariesOpenBSD(ctxt *Link, libs []string) []string {
 	libraries := make(map[string]string)
 	for _, lib := range libs {
 		if name, ok := openbsdTrimLibVersion(lib); ok {
-			// Record unversioned name as seen.
-			seenlib[name] = true
+			ctxt.
+				// Record unversioned name as seen.
+				seenlib[name] = true
 			libraries[name] = lib
 		} else if _, ok := libraries[lib]; !ok {
 			libraries[lib] = lib
@@ -341,13 +342,11 @@ func dedupLibraries(ctxt *Link, libs []string) []string {
 	return libs
 }
 
-var seenlib = make(map[string]bool)
-
 func adddynlib(ctxt *Link, lib string) {
-	if seenlib[lib] || ctxt.LinkMode == LinkExternal {
+	if ctxt.seenlib[lib] || ctxt.LinkMode == LinkExternal {
 		return
 	}
-	seenlib[lib] = true
+	ctxt.seenlib[lib] = true
 
 	if ctxt.IsELF {
 		dsu := ctxt.loader.MakeSymbolUpdater(ctxt.DynStr)
@@ -361,13 +360,13 @@ func adddynlib(ctxt *Link, lib string) {
 	}
 }
 
-func Adddynsym(ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
+func Adddynsym(ctxt *Link, ldr *loader.Loader, target *Target, syms *ArchSyms, s loader.Sym) {
 	if ldr.SymDynid(s) >= 0 || target.LinkMode == LinkExternal {
 		return
 	}
 
 	if target.IsELF {
-		elfadddynsym(ldr, target, syms, s)
+		elfadddynsym(ctxt, ldr, target, syms, s)
 	} else if target.HeadType == objabi.Hdarwin {
 		ldr.Errorf(s, "adddynsym: missed symbol (Extname=%s)", ldr.SymExtname(s))
 	} else if target.HeadType == objabi.Hwindows {
@@ -441,7 +440,7 @@ func (ctxt *Link) addexport() {
 			panic("dynexp entry not reachable")
 		}
 
-		Adddynsym(ctxt.loader, &ctxt.Target, &ctxt.ArchSyms, s)
+		Adddynsym(ctxt, ctxt.loader, &ctxt.Target, &ctxt.ArchSyms, s)
 	}
 
 	for _, lib := range dedupLibraries(ctxt, dynlib) {

@@ -336,29 +336,21 @@ var (
 
 const pkgdef = "__.PKGDEF"
 
-var (
-	// externalobj is set to true if we see an object compiled by
-	// the host compiler that is not from a package that is known
-	// to support internal linking mode.
-	externalobj = false
+// externalobj is set to true if we see an object compiled by
+// the host compiler that is not from a package that is known
+// to support internal linking mode.
 
-	// dynimportfail is a list of packages for which generating
-	// the dynimport file, _cgo_import.go, failed. If there are
-	// any of these objects, we must link externally. Issue 52863.
-	dynimportfail []string
+// dynimportfail is a list of packages for which generating
+// the dynimport file, _cgo_import.go, failed. If there are
+// any of these objects, we must link externally. Issue 52863.
 
-	// preferlinkext is a list of packages for which the Go command
-	// noticed use of peculiar C flags. If we see any of these,
-	// default to linking externally unless overridden by the
-	// user. See issues #58619, #58620, and #58848.
-	preferlinkext []string
+// preferlinkext is a list of packages for which the Go command
+// noticed use of peculiar C flags. If we see any of these,
+// default to linking externally unless overridden by the
+// user. See issues #58619, #58620, and #58848.
 
-	// unknownObjFormat is set to true if we see an object whose
-	// format we don't recognize.
-	unknownObjFormat = false
-
-	theline string
-)
+// unknownObjFormat is set to true if we see an object whose
+// format we don't recognize.
 
 func Lflag(ctxt *Link, arg string) {
 	ctxt.Libdir = append(ctxt.Libdir, arg)
@@ -1137,13 +1129,13 @@ func loadobjfile(ctxt *Link, lib *sym.Library) {
 		}
 
 		if arhdr.name == "dynimportfail" {
-			dynimportfail = append(dynimportfail, lib.Pkg)
+			ctxt.dynimportfail = append(ctxt.dynimportfail, lib.Pkg)
 		}
 		if arhdr.name == "preferlinkext" {
 			// Ignore this directive if -linkmode has been
 			// set explicitly.
 			if ctxt.LinkMode == LinkAuto {
-				preferlinkext = append(preferlinkext, lib.Pkg)
+				ctxt.preferlinkext = append(ctxt.preferlinkext, lib.Pkg)
 			}
 		}
 
@@ -1189,7 +1181,7 @@ var internalpkg = []string{
 	"runtime/asan",
 }
 
-func ldhostobj(ld func(*Link, *bio.Reader, string, int64, string), headType objabi.HeadType, f *bio.Reader, pkg string, length int64, pn string, file string) *Hostobj {
+func ldhostobj(ctxt *Link, ld func(*Link, *bio.Reader, string, int64, string), headType objabi.HeadType, f *bio.Reader, pkg string, length int64, pn string, file string) *Hostobj {
 	isinternal := false
 	for _, intpkg := range internalpkg {
 		if pkg == intpkg {
@@ -1211,7 +1203,7 @@ func ldhostobj(ld func(*Link, *bio.Reader, string, int64, string), headType obja
 	}
 
 	if !isinternal {
-		externalobj = true
+		ctxt.externalobj = true
 	}
 
 	hostobj = append(hostobj, Hostobj{})
@@ -1268,7 +1260,7 @@ func hostlinksetup(ctxt *Link) {
 			log.Fatal(err)
 		}
 		*flagTmpdir = dir
-		ownTmpDir = true
+		ctxt.ownTmpDir = true
 		AtExit(func() {
 			os.RemoveAll(*flagTmpdir)
 		})
@@ -1419,7 +1411,7 @@ func (ctxt *Link) archive() {
 	// This will reduce peak RSS for the link (and speed up linking of
 	// large applications), since when the archive command runs we
 	// won't be holding onto all of the linker's live memory.
-	if syscallExecSupported && !ownTmpDir {
+	if syscallExecSupported && !ctxt.ownTmpDir {
 		runAtExitFuncs()
 		ctxt.execArchive(argv)
 		panic("should not get here")
@@ -1517,7 +1509,7 @@ func (ctxt *Link) hostlink() {
 			wlPrefix = "-Wl,-"
 		}
 
-		if windowsgui {
+		if ctxt.windowsgui {
 			argv = append(argv, "-mwindows")
 		} else {
 			argv = append(argv, "-mconsole")
@@ -2326,7 +2318,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 			ehdr.Flags = flags
 			ctxt.Textp = append(ctxt.Textp, textp...)
 		}
-		return ldhostobj(ldelf, ctxt.HeadType, f, pkg, length, pn, file)
+		return ldhostobj(ctxt, ldelf, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
 	if magic&^1 == 0xfeedface || magic&^0x01000000 == 0xcefaedfe {
@@ -2338,7 +2330,7 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 			}
 			ctxt.Textp = append(ctxt.Textp, textp...)
 		}
-		return ldhostobj(ldmacho, ctxt.HeadType, f, pkg, length, pn, file)
+		return ldhostobj(ctxt, ldmacho, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
 	switch c1<<8 | c2 {
@@ -2356,14 +2348,16 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 				setpersrc(ctxt, ls.Resources)
 			}
 			if ls.PData != 0 {
-				sehp.pdata = append(sehp.pdata, ls.PData)
+				ctxt.sehp.
+					pdata = append(ctxt.sehp.pdata, ls.PData)
 			}
 			if ls.XData != 0 {
-				sehp.xdata = append(sehp.xdata, ls.XData)
+				ctxt.sehp.
+					xdata = append(ctxt.sehp.xdata, ls.XData)
 			}
 			ctxt.Textp = append(ctxt.Textp, ls.Textp...)
 		}
-		return ldhostobj(ldpe, ctxt.HeadType, f, pkg, length, pn, file)
+		return ldhostobj(ctxt, ldpe, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
 	if c1 == 0x01 && (c2 == 0xD7 || c2 == 0xF7) {
@@ -2375,15 +2369,16 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 			}
 			ctxt.Textp = append(ctxt.Textp, textp...)
 		}
-		return ldhostobj(ldxcoff, ctxt.HeadType, f, pkg, length, pn, file)
+		return ldhostobj(ctxt, ldxcoff, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
 	if c1 != 'g' || c2 != 'o' || c3 != ' ' || c4 != 'o' {
-		// An unrecognized object is just passed to the external linker.
-		// If we try to read symbols from this object, we will
-		// report an error at that time.
-		unknownObjFormat = true
-		return ldhostobj(nil, ctxt.HeadType, f, pkg, length, pn, file)
+		ctxt.
+			// An unrecognized object is just passed to the external linker.
+			// If we try to read symbols from this object, we will
+			// report an error at that time.
+			unknownObjFormat = true
+		return ldhostobj(ctxt, nil, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
 	/* check the header */
@@ -2974,7 +2969,7 @@ func AddGotSym(ctxt *Link, target *Target, ldr *loader.Loader, syms *ArchSyms, s
 		return
 	}
 
-	Adddynsym(ldr, target, syms, s)
+	Adddynsym(ctxt, ldr, target, syms, s)
 	got := ldr.MakeSymbolUpdater(syms.GOT)
 	ldr.SetGot(s, int32(got.Size()))
 	got.AddUint(target.Arch, 0)

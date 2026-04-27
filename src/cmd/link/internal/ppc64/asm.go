@@ -659,7 +659,7 @@ func addelfdynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld
 		su.SetRelocType(rIdx, objabi.R_ADDR)
 		if targType == sym.SDYNIMPORT {
 			// These happen in .toc sections
-			ld.Adddynsym(ldr, target, syms, targ)
+			ld.Adddynsym(ctxt, ldr, target, syms, targ)
 
 			rela := ldr.MakeSymbolUpdater(syms.Rela)
 			rela.AddAddrPlus(target.Arch, s, int64(r.Off()))
@@ -1654,7 +1654,7 @@ func addpltsym(ctxt *ld.Link, ldr *loader.Loader, s loader.Sym) {
 		return
 	}
 
-	ld.Adddynsym(ldr, &ctxt.Target, &ctxt.ArchSyms, s)
+	ld.Adddynsym(ctxt, ldr, &ctxt.Target, &ctxt.ArchSyms, s)
 
 	if ctxt.IsELF {
 		plt := ldr.MakeSymbolUpdater(ctxt.PLT)

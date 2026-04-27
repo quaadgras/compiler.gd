@@ -228,7 +228,7 @@ func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 			break
 		}
 		if target.IsElf() {
-			ld.Adddynsym(ldr, target, syms, targ)
+			ld.Adddynsym(ctxt, ldr, target, syms, targ)
 			rel := ldr.MakeSymbolUpdater(syms.Rel)
 			rel.AddAddrPlus(target.Arch, s, int64(r.Off()))
 			rel.AddUint32(target.Arch, elf.R_INFO32(uint32(ldr.SymDynid(targ)), uint32(elf.R_ARM_GLOB_DAT))) // we need a nil + A dynamic reloc
@@ -618,7 +618,7 @@ func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 		return
 	}
 
-	ld.Adddynsym(ldr, target, syms, s)
+	ld.Adddynsym(ctxt, ldr, target, syms, s)
 
 	if target.IsElf() {
 		plt := ldr.MakeSymbolUpdater(syms.PLT)

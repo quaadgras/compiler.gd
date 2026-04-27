@@ -30,6 +30,19 @@ type linkState struct {
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
 
+	// misc state migrated from various files
+	pkglistfornote   []byte    // was in main.go
+	windowsgui       bool      // was in main.go
+	ownTmpDir        bool      // was in main.go
+	fipsinfo         loader.Sym // was in fips140.go
+	seenlib          map[string]bool // was in go.go
+	sehp             sehTables       // was sehp anon struct in seh.go
+	theline          string          // was in lib.go
+	externalobj      bool            // was in lib.go
+	dynimportfail    []string        // was in lib.go
+	preferlinkext    []string        // was in lib.go
+	unknownObjFormat bool            // was in lib.go
+
 	// pe state (was in pe.go)
 	PEBASE      int64
 	PESECTALIGN int64 // initialised to 0x1000 by linknew

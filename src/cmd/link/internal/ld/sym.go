@@ -57,6 +57,7 @@ func linknew(arch *sys.Arch) *Link {
 			PESECTALIGN: 0x1000,
 			PEFILEALIGN: 2 << 8,
 			isLabel:     map[loader.Sym]bool{},
+			seenlib:     map[string]bool{},
 		},
 	}
 

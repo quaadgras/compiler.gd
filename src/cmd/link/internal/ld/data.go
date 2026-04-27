@@ -1219,11 +1219,11 @@ func dwarfblk(ctxt *Link, out *OutBuf, addr int64, size int64) {
 }
 
 func pdatablk(ctxt *Link, out *OutBuf, addr int64, size int64) {
-	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, sehp.pdata, addr, size, zeros[:])
+	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, ctxt.sehp.pdata, addr, size, zeros[:])
 }
 
 func xdatablk(ctxt *Link, out *OutBuf, addr int64, size int64) {
-	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, sehp.xdata, addr, size, zeros[:])
+	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, ctxt.sehp.xdata, addr, size, zeros[:])
 }
 
 var covCounterDataStartOff, covCounterDataLen uint64
@@ -2336,14 +2336,14 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 // allocateSEHSections allocate a sym.Section object for SEH
 // symbols, and assigns symbols to sections.
 func (state *dodataState) allocateSEHSections(ctxt *Link) {
-	if len(sehp.pdata) > 0 {
+	if len(ctxt.sehp.pdata) > 0 {
 		sect := state.allocateNamedDataSection(&Segpdata, ".pdata", []sym.SymKind{}, 04)
-		state.assignDsymsToSection(sect, sehp.pdata, sym.SRODATA, aligndatsize)
+		state.assignDsymsToSection(sect, ctxt.sehp.pdata, sym.SRODATA, aligndatsize)
 		state.checkdatsize(sym.SSEHSECT)
 	}
-	if len(sehp.xdata) > 0 {
+	if len(ctxt.sehp.xdata) > 0 {
 		sect := state.allocateNamedDataSection(&Segxdata, ".xdata", []sym.SymKind{}, 04)
-		state.assignDsymsToSection(sect, sehp.xdata, sym.SRODATA, aligndatsize)
+		state.assignDsymsToSection(sect, ctxt.sehp.xdata, sym.SRODATA, aligndatsize)
 		state.checkdatsize(sym.SSEHSECT)
 	}
 }
@@ -3040,12 +3040,12 @@ func (ctxt *Link) address() []*sym.Segment {
 		}
 	}
 
-	for _, s := range sehp.pdata {
+	for _, s := range ctxt.sehp.pdata {
 		if sect := ldr.SymSect(s); sect != nil {
 			ldr.AddToSymValue(s, int64(sect.Vaddr))
 		}
 	}
-	for _, s := range sehp.xdata {
+	for _, s := range ctxt.sehp.xdata {
 		if sect := ldr.SymSect(s); sect != nil {
 			ldr.AddToSymValue(s, int64(sect.Vaddr))
 		}
