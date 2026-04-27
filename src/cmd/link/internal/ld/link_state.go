@@ -9,6 +9,7 @@ import (
 	"cmd/internal/quoted"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
+	"flag"
 )
 
 // linkState holds per-Invocation linker state that was previously
@@ -58,9 +59,17 @@ type linkState struct {
 	strictDupMsgCount int
 	checkStrictDups   int // 0=off 1=warning 2=error
 
+	// flagSet is the per-Link *flag.FlagSet — replaces the previous
+	// pattern of mutating flag.CommandLine in Main. Created fresh in
+	// Main, populated by setupFlags, parsed against args. Concurrent
+	// in-process Main calls don't race on flag.CommandLine.formal
+	// (which previously triggered "concurrent map writes" inside
+	// flag.(*FlagSet).Var).
+	flagSet *flag.FlagSet
+
 	// Flags. Were package-level *T pointers reassigned per Main call;
 	// concurrent invocations clobbered each other. Per-Link storage,
-	// populated by setupFlags via flag.StringVar/BoolVar/etc binding.
+	// populated by setupFlags via flagSet.StringVar/BoolVar/etc binding.
 	flagBuildid         string
 	flagBindNow         bool
 	flagOutfile         string

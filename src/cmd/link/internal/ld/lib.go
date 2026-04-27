@@ -293,17 +293,11 @@ func (ctxt *Link) NeedCodeSign() bool {
 	return ctxt.IsDarwin() && ctxt.IsARM64()
 }
 
-var (
-
-	// backup old value of debug['s']
-
-	nerrors  int
-	liveness int64 // size of liveness data (funcdata), printed if -v
-
-	// See -strictdups command line flag.
-	checkStrictDups   int // 0=off 1=warning 2=error
-	strictDupMsgCount int
-)
+// nerrors / liveness / checkStrictDups / strictDupMsgCount were
+// package-level vars. Migrated to per-Link fields on linkState (gd
+// fork) so concurrent in-process host.Run invocations don't share
+// counters and accidentally trigger one Main's exit on another's
+// errors. Use ctxt.nerrors, ctxt.liveness, etc.
 
 // windows-only
 // windows-only
@@ -336,16 +330,11 @@ func Lflag(ctxt *Link, arg string) {
  * On Windows 7, remove() can force a subsequent create() to fail.
  * S_ISREG() does not exist on Plan 9.
  */
-func mayberemoveoutfile() {
-	// gd fork: read flagOutfile from currentLink (set by Main).
-	// Pre-Main calls have nothing to remove anyway.
-	if currentLink == nil {
+func (ctxt *Link) mayberemoveoutfile() {
+	if fi, err := os.Lstat(ctxt.flagOutfile); err == nil && !fi.Mode().IsRegular() {
 		return
 	}
-	if fi, err := os.Lstat(currentLink.flagOutfile); err == nil && !fi.Mode().IsRegular() {
-		return
-	}
-	os.Remove(currentLink.flagOutfile)
+	os.Remove(ctxt.flagOutfile)
 }
 
 func libinit(ctxt *Link) {
@@ -377,7 +366,7 @@ func libinit(ctxt *Link) {
 		Lflag(ctxt, filepath.Join(buildcfg.GOROOT, "pkg", fmt.Sprintf("%s_%s%s%s", buildcfg.GOOS, buildcfg.GOARCH, suffixsep, suffix)))
 	}
 
-	mayberemoveoutfile()
+	ctxt.mayberemoveoutfile()
 
 	if err := ctxt.Out.Open(ctxt.flagOutfile); err != nil {
 		Exitf("cannot create %s: %v", ctxt.flagOutfile, err)
@@ -397,17 +386,42 @@ func libinit(ctxt *Link) {
 	}
 }
 
-func exitIfErrors() {
-	if nerrors != 0 || checkStrictDups > 1 && strictDupMsgCount > 0 {
-		mayberemoveoutfile()
+func (ctxt *Link) exitIfErrors() {
+	if ctxt.nerrors != 0 || ctxt.checkStrictDups > 1 && ctxt.strictDupMsgCount > 0 {
+		ctxt.mayberemoveoutfile()
 		Exit(2)
 	}
+}
 
+func (ctxt *Link) errorexit() {
+	ctxt.exitIfErrors()
+	Exit(0)
+}
+
+// exitIfErrors / errorexit / mayberemoveoutfile are used by leaf
+// helpers (elf.go internal-error paths, sym.go AtExit closures) that
+// don't carry a *Link. They route through currentLink. Concurrent
+// in-process invocations can read another Main's currentLink here, but
+// these paths are either unreachable in normal operation (internal
+// errors) or already inside an error-driven exit, so the misroute is
+// benign.
+func exitIfErrors() {
+	if currentLink != nil {
+		currentLink.exitIfErrors()
+		return
+	}
+	Exit(2)
 }
 
 func errorexit() {
 	exitIfErrors()
 	Exit(0)
+}
+
+func mayberemoveoutfile() {
+	if currentLink != nil {
+		currentLink.mayberemoveoutfile()
+	}
 }
 
 func loadinternal(ctxt *Link, name string) *sym.Library {
@@ -661,7 +675,7 @@ func (ctxt *Link) loadlib() {
 	// We've loaded all the code now.
 	ctxt.Loaded = true
 
-	strictDupMsgCount = ctxt.loader.NStrictDupMsgs()
+	ctxt.strictDupMsgCount = ctxt.loader.NStrictDupMsgs()
 }
 
 // loadWindowsHostArchives loads in host archives and objects when
@@ -1248,7 +1262,7 @@ func hostlinksetup(ctxt *Link) {
 	if err := ctxt.Out.Close(); err != nil {
 		Exitf("error closing output file")
 	}
-	mayberemoveoutfile()
+	ctxt.mayberemoveoutfile()
 
 	p := filepath.Join(ctxt.flagTmpdir, "go.o")
 	if err := ctxt.Out.Open(p); err != nil {
@@ -1348,7 +1362,7 @@ func (ctxt *Link) archive() {
 		return
 	}
 
-	exitIfErrors()
+	ctxt.exitIfErrors()
 
 	if ctxt.flagExtar == "" {
 		const printProgName = "--print-prog-name=ar"
@@ -1359,7 +1373,7 @@ func (ctxt *Link) archive() {
 		}
 	}
 
-	mayberemoveoutfile()
+	ctxt.mayberemoveoutfile()
 
 	// Force the buffer to flush here so that external
 	// tools will see a complete file.
@@ -1402,7 +1416,7 @@ func (ctxt *Link) archive() {
 }
 
 func (ctxt *Link) hostlink() {
-	if ctxt.LinkMode != LinkExternal || nerrors > 0 {
+	if ctxt.LinkMode != LinkExternal || ctxt.nerrors > 0 {
 		return
 	}
 	if ctxt.BuildMode == BuildModeCArchive {
@@ -2788,7 +2802,11 @@ func addsection(ldr *loader.Loader, arch *sys.Arch, seg *sym.Segment, name strin
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: link [options] main.o\n")
-	objabi.Flagprint(os.Stderr)
+	if currentLink != nil && currentLink.flagSet != nil {
+		objabi.FlagprintFS(currentLink.flagSet, os.Stderr)
+	} else {
+		objabi.Flagprint(os.Stderr)
+	}
 	Exit(2)
 }
 

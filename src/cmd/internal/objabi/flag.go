@@ -33,15 +33,38 @@ func Flagfn1(name, usage string, f func(string)) {
 	flag.Var(fn1(f), name, usage)
 }
 
+// Flagfn1FS is the *flag.FlagSet variant of Flagfn1, used by tools
+// (cmd/link in-process) that build a fresh FlagSet per invocation
+// instead of mutating the process-global flag.CommandLine.
+func Flagfn1FS(fs *flag.FlagSet, name, usage string, f func(string)) {
+	fs.Var(fn1(f), name, usage)
+}
+
 func Flagprint(w io.Writer) {
 	flag.CommandLine.SetOutput(w)
 	flag.PrintDefaults()
+}
+
+// FlagprintFS prints the defaults for the given FlagSet.
+func FlagprintFS(fs *flag.FlagSet, w io.Writer) {
+	fs.SetOutput(w)
+	fs.PrintDefaults()
 }
 
 func Flagparse(usage func()) {
 	flag.Usage = usage
 	os.Args = expandArgs(os.Args)
 	flag.Parse()
+}
+
+// FlagparseFS is the *flag.FlagSet variant of Flagparse: expands
+// response-file arguments and parses against the caller-owned fs.
+// Returns the parse error so callers can decide between exit or
+// recovery; the asm/link in-process hosts use ContinueOnError-mode
+// FlagSets so concurrent invocations don't share the os.Exit fate.
+func FlagparseFS(fs *flag.FlagSet, args []string, usage func()) error {
+	fs.Usage = usage
+	return fs.Parse(expandArgs(args))
 }
 
 // expandArgs expands "response files" arguments in the provided slice.

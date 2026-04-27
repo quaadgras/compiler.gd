@@ -2011,8 +2011,8 @@ func dwarfGenerateDebugInfo(ctxt *Link) {
 	// Fix for 31034: if the objects feeding into this link were compiled
 	// with different sets of flags, then don't issue an error if
 	// the -strictdups checks fail.
-	if checkStrictDups > 1 && len(flagVariants) > 1 {
-		checkStrictDups = 1
+	if ctxt.checkStrictDups > 1 && len(flagVariants) > 1 {
+		ctxt.checkStrictDups = 1
 	}
 
 	// Make a pass through all data symbols, looking for those

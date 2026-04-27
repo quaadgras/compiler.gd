@@ -5,12 +5,6 @@
 // Package host exposes a public entry point for invoking cmd/link
 // in-process. cmd/go imports this package to skip the per-binary
 // fork/exec overhead when linking.
-//
-// gd fork specific: cmd/link's package-level state (~100 flag
-// pointers, format-output globals, nerrors counter, atExitFuncs)
-// has not yet been migrated onto a per-Link Context. host.Run
-// serialises invocations under linkRunMu so the still-shared globals
-// don't race; once the migration finishes, the mutex can be lifted.
 package host
 
 import (
@@ -53,10 +47,6 @@ var archInits = map[string]func() (*sys.Arch, ld.Arch){
 	"wasm":     wasm.Init,
 }
 
-// linkRunMu was used to serialise Run calls while package-level
-// linker state (flags, nerrors, atExitFuncs, format-output globals)
-// was being migrated to per-Link. Removed once all those migrated.
-
 // Run drives one cmd/link invocation in the calling process. args is
 // the argv that the standalone link binary would have received as
 // os.Args[1:]. stdout/stderr are reserved (link internals write to
@@ -78,10 +68,6 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 		fmt.Fprintf(os.Stderr, "link: unknown architecture %q\n", buildcfg.GOARCH)
 		return 2, nil
 	}
-
-	// linkRunMu lifted: flags + atExitFuncs + nerrors family + format
-	// state all migrated to per-Link. Concurrent in-process link
-	// invocations are now safe.
 
 	arch, theArch := archInit()
 

@@ -88,7 +88,7 @@ func loadcgo(ctxt *Link, file string, pkg string, p string) {
 	var directives [][]string
 	if err := json.NewDecoder(strings.NewReader(p)).Decode(&directives); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s: failed decoding cgo directives: %v\n", os.Args[0], file, err)
-		nerrors++
+		ctxt.nerrors++
 		return
 	}
 
@@ -119,7 +119,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 
 			if ctxt.FlagD {
 				fmt.Fprintf(os.Stderr, "%s: %s: cannot use dynamic imports with -d flag\n", os.Args[0], file)
-				nerrors++
+				ctxt.nerrors++
 				return
 			}
 
@@ -190,7 +190,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				abi, ok = obj.ParseABI(f[3])
 				if !ok {
 					fmt.Fprintf(os.Stderr, "%s: bad ABI in cgo_export directive %s\n", os.Args[0], f)
-					nerrors++
+					ctxt.nerrors++
 					return
 				}
 			}
@@ -223,7 +223,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				l.SetSymExtname(s, remote)
 			} else if l.SymExtname(s) != remote {
 				fmt.Fprintf(os.Stderr, "%s: conflicting cgo_export directives: %s as %s and %s\n", os.Args[0], l.SymName(s), l.SymExtname(s), remote)
-				nerrors++
+				ctxt.nerrors++
 				return
 			}
 
@@ -263,7 +263,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			if ctxt.flagInterpreter == "" {
 				if ctxt.interpreter != "" && ctxt.interpreter != f[1] {
 					fmt.Fprintf(os.Stderr, "%s: conflict dynlinker: %s and %s\n", os.Args[0], ctxt.interpreter, f[1])
-					nerrors++
+					ctxt.nerrors++
 					return
 				}
 				ctxt.interpreter = f[1]
@@ -279,7 +279,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 		}
 
 		fmt.Fprintf(os.Stderr, "%s: %s: invalid cgo directive: %q\n", os.Args[0], file, f)
-		nerrors++
+		ctxt.nerrors++
 	}
 	return
 }

@@ -75,9 +75,9 @@ func linknew(arch *sys.Arch) *Link {
 	}
 
 	AtExit(func() {
-		if nerrors > 0 {
+		if ctxt.nerrors > 0 {
 			ctxt.Out.ErrorClose()
-			mayberemoveoutfile()
+			ctxt.mayberemoveoutfile()
 		}
 	})
 
