@@ -1,0 +1,15 @@
+{
+  "fields": [
+    {"var": "PEBASE", "field": "PEBASE"},
+    {"var": "PESECTALIGN", "field": "PESECTALIGN"},
+    {"var": "PEFILEALIGN", "field": "PEFILEALIGN"},
+    {"var": "rsrcsyms", "field": "rsrcsyms"},
+    {"var": "PESECTHEADR", "field": "PESECTHEADR"},
+    {"var": "PEFILEHEADR", "field": "PEFILEHEADR"},
+    {"var": "pe64", "field": "pe64"},
+    {"var": "dr", "field": "dr"},
+    {"var": "dexport", "field": "dexport"},
+    {"var": "isLabel", "field": "isLabel"},
+    {"var": "pefile", "field": "pefile"}
+  ]
+}

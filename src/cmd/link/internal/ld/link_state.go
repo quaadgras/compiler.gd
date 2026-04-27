@@ -30,6 +30,19 @@ type linkState struct {
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
 
+	// pe state (was in pe.go)
+	PEBASE      int64
+	PESECTALIGN int64 // initialised to 0x1000 by linknew
+	PEFILEALIGN int64 // initialised to 0x200 by linknew
+	rsrcsyms    []loader.Sym
+	PESECTHEADR int32
+	PEFILEHEADR int32
+	pe64        bool
+	dr          *Dll
+	dexport     []loader.Sym
+	isLabel     map[loader.Sym]bool
+	pefile      peFile
+
 	// mach-o state (was in macho.go)
 	machohdr      MachoHdr
 	load          []MachoLoad

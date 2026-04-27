@@ -1967,7 +1967,7 @@ func (ctxt *Link) hostlink() {
 			// so must use linker groups.
 			argv = append(argv, "-Wl,--start-group", "-lmingwex", "-lmingw32", "-Wl,--end-group")
 		}
-		argv = append(argv, peimporteddlls()...)
+		argv = append(argv, peimporteddlls(ctxt)...)
 	}
 
 	argv = ctxt.passLongArgsInResponseFile(argv, altLinker)

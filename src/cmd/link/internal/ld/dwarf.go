@@ -2483,7 +2483,7 @@ func dwarfcompress(ctxt *Link) {
 			sect := ldr.SymSect(s)
 			if sect != prevSect {
 				if ctxt.IsWindows() {
-					pos = uint64(Rnd(int64(pos), PEFILEALIGN))
+					pos = uint64(Rnd(int64(pos), ctxt.PEFILEALIGN))
 				}
 				sect.Vaddr = pos
 				prevSect = sect

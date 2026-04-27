@@ -326,6 +326,8 @@ func knownLinkField(recvType ast.Expr, recvName string) string {
 	switch id.Name {
 	case "dwctxt":
 		return recvName + ".linkctxt"
+	case "relocSymState":
+		return recvName + ".link"
 	}
 	return ""
 }

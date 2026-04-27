@@ -1293,7 +1293,7 @@ func gensymlate(ctxt *ld.Link, ldr *loader.Loader) {
 			if ctxt.IsDarwin() {
 				ld.AddMachoSym(ctxt, ldr, p)
 			} else if ctxt.IsWindows() {
-				ld.AddPELabelSym(ldr, p)
+				ld.AddPELabelSym(ctxt, ldr, p)
 			} else {
 				panic("missing case in gensymlate")
 			}

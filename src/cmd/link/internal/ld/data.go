@@ -413,7 +413,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			if rt == objabi.R_PEIMAGEOFF {
 				// The R_PEIMAGEOFF offset is a RVA, so subtract
 				// the base address for the executable.
-				o -= PEBASE
+				o -= st.link.PEBASE
 			}
 
 			// On amd64, 4-byte offsets will be sign-extended, so it is impossible to
@@ -785,6 +785,7 @@ type relocSymState struct {
 	ldr    *loader.Loader
 	err    *ErrorReporter
 	syms   *ArchSyms
+	link   *Link // gd fork: needed by relocsym for *Link state (PEBASE etc.)
 }
 
 // makeRelocSymState creates a relocSymState container object to
@@ -796,6 +797,7 @@ func (ctxt *Link) makeRelocSymState() *relocSymState {
 		ldr:    ctxt.loader,
 		err:    &ctxt.ErrorReporter,
 		syms:   &ctxt.ArchSyms,
+		link:   ctxt,
 	}
 }
 
@@ -3000,7 +3002,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		s.Vaddr = va
 		va += uint64(vlen)
 		if ctxt.HeadType == objabi.Hwindows {
-			va = uint64(Rnd(int64(va), PEFILEALIGN))
+			va = uint64(Rnd(int64(va), ctxt.PEFILEALIGN))
 		}
 		Segdwarf.Length = va - Segdwarf.Vaddr
 	}
@@ -3179,7 +3181,7 @@ func (ctxt *Link) layout(order []*sym.Segment) uint64 {
 					Exitf("bad segment rounding (Vaddr=%#x Fileoff=%#x FlagRound=%#x)", seg.Vaddr, seg.Fileoff, *FlagRound)
 				}
 			case objabi.Hwindows:
-				seg.Fileoff = prev.Fileoff + uint64(Rnd(int64(prev.Filelen), PEFILEALIGN))
+				seg.Fileoff = prev.Fileoff + uint64(Rnd(int64(prev.Filelen), ctxt.PEFILEALIGN))
 			case objabi.Hplan9:
 				seg.Fileoff = prev.Fileoff + prev.Filelen
 			}
