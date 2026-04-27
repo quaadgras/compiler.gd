@@ -20,13 +20,7 @@ const (
 //go:linkname maps_errNilAssign internal/runtime/maps.errNilAssign
 var maps_errNilAssign error = plainError("assignment to entry in nil map")
 
-// gd Phase G: return unsafe.Pointer (TUNSAFEPTR), not *maps.Map (TPTR), so
-// types.NewSignature does not extend this sig with a trailing outBuf param.
-// The compiler's builtin decl sees `(hmap map[any]any)` (TMAP, not extended)
-// and emits stock-arity calls; if the runtime impl were extended, the outBuf
-// register would carry whatever the caller left in it, and any maybeInPlace
-// call inside would memclr at that garbage address.
-func makemap64(t *abi.MapType, hint int64, m *maps.Map) unsafe.Pointer {
+func makemap64(t *abi.MapType, hint int64, m *maps.Map) *maps.Map {
 	if int64(int(hint)) != hint {
 		hint = 0
 	}
@@ -46,8 +40,8 @@ func makemap64(t *abi.MapType, hint int64, m *maps.Map) unsafe.Pointer {
 // See go.dev/issue/67401.
 //
 //go:linkname makemap_small
-func makemap_small() unsafe.Pointer {
-	return unsafe.Pointer(maps.NewEmptyMap())
+func makemap_small() *maps.Map {
+	return maps.NewEmptyMap()
 }
 
 // makemap implements Go map creation for make(map[k]v, hint).
@@ -65,12 +59,12 @@ func makemap_small() unsafe.Pointer {
 // See go.dev/issue/67401.
 //
 //go:linkname makemap
-func makemap(t *abi.MapType, hint int, m *maps.Map) unsafe.Pointer {
+func makemap(t *abi.MapType, hint int, m *maps.Map) *maps.Map {
 	if hint < 0 {
 		hint = 0
 	}
 
-	return unsafe.Pointer(maps.NewMap(t, uintptr(hint), m, maxAlloc))
+	return maps.NewMap(t, uintptr(hint), m, maxAlloc)
 }
 
 // mapaccess1 returns a pointer to h[key].  Never returns nil, instead
@@ -214,7 +208,7 @@ func reflect_makemap(t *abi.MapType, cap int) *maps.Map {
 	}
 	// TODO: other checks
 
-	return (*maps.Map)(makemap(t, cap, nil))
+	return makemap(t, cap, nil)
 }
 
 // reflect_mapaccess is for package reflect,

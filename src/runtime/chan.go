@@ -61,15 +61,10 @@ type waitq struct {
 
 //go:linkname reflect_makechan reflect.makechan
 func reflect_makechan(t *chantype, size int) *hchan {
-	return (*hchan)(makechan(t, size))
+	return makechan(t, size)
 }
 
-// gd Phase G: makechan and makechan64 return unsafe.Pointer (TUNSAFEPTR),
-// not *hchan (TPTR), so types.NewSignature does not extend the sig with a
-// trailing outBuf param. The compiler's builtin decl sees `(hchan chan any)`
-// (TCHAN, not extended) and emits stock-arity calls; an extended runtime
-// would read garbage from the outBuf register the caller never set.
-func makechan64(t *chantype, size int64) unsafe.Pointer {
+func makechan64(t *chantype, size int64) *hchan {
 	if int64(int(size)) != size {
 		panic(plainError("makechan: size out of range"))
 	}
@@ -77,7 +72,7 @@ func makechan64(t *chantype, size int64) unsafe.Pointer {
 	return makechan(t, int(size))
 }
 
-func makechan(t *chantype, size int) unsafe.Pointer {
+func makechan(t *chantype, size int) *hchan {
 	elem := t.Elem
 
 	// compiler checks this but be safe.
@@ -126,7 +121,7 @@ func makechan(t *chantype, size int) unsafe.Pointer {
 	if debugChan {
 		print("makechan: chan=", c, "; elemsize=", elem.Size_, "; dataqsiz=", size, "\n")
 	}
-	return unsafe.Pointer(c)
+	return c
 }
 
 // chanbuf(c, i) is pointer to the i'th slot in the buffer.

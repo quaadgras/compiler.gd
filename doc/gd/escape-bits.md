@@ -287,40 +287,26 @@ of stock. Compile-time rewrite to automate the signature extension +
 callee body rewrite + caller-side stack buffer is pending — see
 `memory/project_escape_bits_phase_g_roadmap.md`.
 
-#### Builtin/runtime sig parity
+#### Builtin/runtime sig parity (note for future map/chan changes)
 
 `PhaseGApplies` checks `r.Type.IsPtr()`, which is true only for TPTR.
 TMAP, TCHAN, TUNSAFEPTR, TINTER all return false, so functions whose
 results are those kinds are **not** extended. The compiler's view of
 runtime helpers comes from `cmd/compile/internal/typecheck/_builtin/
-runtime.go`; the runtime's view comes from the actual `*.go` impl. If
-the two disagree about whether the result is TPTR, the caller emits
-stock-arity calls but the callee is compiled with an extra trailing
-outBuf param — its register holds whatever the caller left in it.
-When the body rewrite (which has no runtime exemption) routes any
-allocation through `runtime.maybeInPlace(outBuf, &T)`, that garbage
-register is treated as a real outBuf, and `memclrNoHeapPointers` zeros
-random heap.
-
-Current alignment (2026-04-27):
-
-- `makemap`, `makemap64`, `makemap_small` return `unsafe.Pointer` so
-  the runtime impl matches the builtin's TMAP view (no extension).
-  `reflect_makemap` casts the result back to `*maps.Map`.
-- `makechan`, `makechan64` return `unsafe.Pointer` so the runtime impl
-  matches the builtin's TCHAN view. `reflect_makechan` casts back to
-  `*hchan`.
-
-**If we ever change Go's user-visible map representation so that the
-compiler treats maps as pointers (TPTR) — i.e., `make(map[K]V)`
-returning `*T` rather than the opaque map header — the builtin decls
-in `_builtin/runtime.go` will start triggering Phase G extension at
-the call site, and the runtime impls listed above must regain their
-`*maps.Map` / `*hchan` returns in lockstep. Otherwise we re-introduce
-the asymmetry in the other direction (extended caller, stock callee),
-which is benign register-wise on amd64 but semantically wrong.** Same
-logic applies if any future builtin sig switches a result from
-TMAP/TCHAN/TINTER to a real pointer.
+runtime.go`; the runtime's view comes from the actual `*.go` impl.
+makemap*/makechan* are an asymmetric pair: builtin TMAP/TCHAN, runtime
+*maps.Map / *hchan. The compiler emits stock-arity calls (no outBuf
+register set), the runtime impl gets an extra outBuf register that's
+dead in the body. Benign register-wise on amd64 — none of the make*
+bodies match `phaseGReturnRewrite`'s `return new(T)` shape, so the
+outBuf is never read. We tried switching the runtime returns to
+`unsafe.Pointer` to make the sigs symmetric, but that broke
+in-process compilation of the runtime package itself: the runtime
+source's `func makemap(...) unsafe.Pointer` overrides
+`InitRuntime`'s built-in TMAP-result Sym, so subsequent `make(...)`
+emissions inside runtime get a TUNSAFEPTR-result callee that fails
+to assign to a TMAP destination. Upstream uses *maps.Map / *hchan and
+the asymmetry has been benign for years; we keep that here too.
 
 ### Tests in the tree
 
