@@ -22,6 +22,13 @@ func Flagcount(name, usage string, val *int) {
 	flag.Var((*count)(val), name, usage)
 }
 
+// FlagcountFS is the *flag.FlagSet variant of Flagcount, used by tools
+// (cmd/asm in-process) that build a fresh FlagSet per invocation
+// instead of mutating the process-global flag.CommandLine.
+func FlagcountFS(fs *flag.FlagSet, name, usage string, val *int) {
+	fs.Var((*count)(val), name, usage)
+}
+
 func Flagfn1(name, usage string, f func(string)) {
 	flag.Var(fn1(f), name, usage)
 }
@@ -78,6 +85,14 @@ func expandArgs(in []string) (out []string) {
 
 func AddVersionFlag() {
 	flag.Var(versionFlag{}, "V", "print version and exit")
+}
+
+// AddVersionFlagFS registers -V on a caller-owned *flag.FlagSet, so
+// in-process tools can avoid the process-global flag.CommandLine.
+// The Set hook still calls os.Exit; in-process callers shouldn't be
+// passed -V (cmd/go probes the tool binary before linking it in).
+func AddVersionFlagFS(fs *flag.FlagSet) {
+	fs.Var(versionFlag{}, "V", "print version and exit")
 }
 
 var buildID string // filled in by linker

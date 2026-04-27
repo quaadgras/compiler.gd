@@ -12,7 +12,6 @@ import (
 	"text/scanner"
 
 	"cmd/asm/internal/arch"
-	"cmd/asm/internal/flags"
 	"cmd/asm/internal/lex"
 	"cmd/internal/obj"
 	"cmd/internal/obj/ppc64"
@@ -75,7 +74,7 @@ func (p *Parser) append(prog *obj.Prog, cond string, doLabel bool) {
 		p.pendingLabels = p.pendingLabels[0:0]
 	}
 	prog.Pc = p.pc
-	if *flags.Debug {
+	if p.debug {
 		fmt.Println(p.lineNum, prog)
 	}
 	if testOut != nil {

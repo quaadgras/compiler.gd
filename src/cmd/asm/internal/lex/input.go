@@ -13,7 +13,6 @@ import (
 	"strings"
 	"text/scanner"
 
-	"cmd/asm/internal/flags"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 )
@@ -24,6 +23,7 @@ import (
 type Input struct {
 	Stack
 	includes        []string
+	trimPath        string // -trimpath, retained for #line pragma PosBase construction.
 	beginningOfLine bool
 	ifdefStack      []bool
 	macros          map[string]*Macro
@@ -33,18 +33,21 @@ type Input struct {
 	peekText        string
 }
 
-// NewInput returns an Input from the given path.
-func NewInput(name string) *Input {
+// NewInput returns an Input from the given path. includes/defines/trimPath
+// come from the per-invocation flags Context; was a no-arg version
+// reading package-level flag globals.
+func NewInput(name string, includes, defines []string, trimPath string) *Input {
 	return &Input{
 		// include directories: look in source dir, then -I directories.
-		includes:        append([]string{filepath.Dir(name)}, flags.I...),
+		includes:        append([]string{filepath.Dir(name)}, includes...),
+		trimPath:        trimPath,
 		beginningOfLine: true,
-		macros:          predefine(flags.D),
+		macros:          predefine(defines),
 	}
 }
 
 // predefine installs the macros set by the -D flag on the command line.
-func predefine(defines flags.MultiFlag) map[string]*Macro {
+func predefine(defines []string) map[string]*Macro {
 	macros := make(map[string]*Macro)
 	for _, name := range defines {
 		value := "1"
@@ -52,15 +55,15 @@ func predefine(defines flags.MultiFlag) map[string]*Macro {
 		if i > 0 {
 			name, value = name[:i], name[i+1:]
 		}
-		tokens := Tokenize(name)
+		tokens := Tokenize(name, "")
 		if len(tokens) != 1 || tokens[0].ScanToken != scanner.Ident {
 			fmt.Fprintf(os.Stderr, "asm: parsing -D: %q is not a valid identifier name\n", tokens[0])
-			flags.Usage()
+			os.Exit(2)
 		}
 		macros[name] = &Macro{
 			name:   name,
 			args:   nil,
-			tokens: Tokenize(value),
+			tokens: Tokenize(value, ""),
 		}
 	}
 	return macros
@@ -423,7 +426,7 @@ func (in *Input) include() {
 			in.Error("#include:", err)
 		}
 	}
-	in.Push(NewTokenizer(name, fd, fd))
+	in.Push(NewTokenizer(name, fd, fd, in.trimPath))
 }
 
 // #line processing.
@@ -450,7 +453,7 @@ func (in *Input) line() {
 		in.Error("unexpected token at end of #line: ", tok)
 	}
 	pos := src.MakePos(in.Base(), uint(in.Line())+1, 1) // +1 because #line nnn means line nnn starts on next line
-	in.Stack.SetBase(src.NewLinePragmaBase(pos, file, objabi.AbsFile(objabi.WorkingDir(), file, *flags.TrimPath), uint(line), 1))
+	in.Stack.SetBase(src.NewLinePragmaBase(pos, file, objabi.AbsFile(objabi.WorkingDir(), file, in.trimPath), uint(line), 1))
 }
 
 // #undef processing

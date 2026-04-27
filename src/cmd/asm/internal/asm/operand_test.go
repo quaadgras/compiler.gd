@@ -58,7 +58,7 @@ func tryParse(t *testing.T, parse func()) (err error) {
 func testBadOperandParser(t *testing.T, parser *Parser, tests []badOperandTest) {
 	for _, test := range tests {
 		err := tryParse(t, func() {
-			parser.start(lex.Tokenize(test.input))
+			parser.start(lex.Tokenize(test.input, ""))
 			addr := obj.Addr{}
 			parser.operand(&addr)
 		})
@@ -74,7 +74,7 @@ func testBadOperandParser(t *testing.T, parser *Parser, tests []badOperandTest) 
 
 func testOperandParser(t *testing.T, parser *Parser, tests []operandTest) {
 	for _, test := range tests {
-		parser.start(lex.Tokenize(test.input))
+		parser.start(lex.Tokenize(test.input, ""))
 		addr := obj.Addr{}
 		parser.operand(&addr)
 		var result string
@@ -156,7 +156,7 @@ func TestFuncAddress(t *testing.T) {
 		t.Run(sub.arch, func(t *testing.T) {
 			parser := newParser(sub.arch)
 			for _, test := range sub.tests {
-				parser.start(lex.Tokenize(test.input))
+				parser.start(lex.Tokenize(test.input, ""))
 				name, _, ok := parser.funcAddress()
 
 				isFuncSym := strings.HasSuffix(test.input, "(SB)") &&

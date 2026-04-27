@@ -3,6 +3,11 @@
 // license that can be found in the LICENSE file.
 
 // Package flags implements top-level flags and the usage message for the assembler.
+//
+// gd fork: flags live on a per-invocation Context rather than as
+// package-level vars, so cmd/asm/host.Run is safe to call concurrently
+// from cmd/go's outer parallelism. The package-level Parse() / globals
+// are gone — call Parse(args, stderr) for a fresh Context.
 package flags
 
 import (
@@ -10,46 +15,49 @@ import (
 	"cmd/internal/objabi"
 	"flag"
 	"fmt"
-	"os"
+	"io"
 	"path/filepath"
 	"strings"
 )
 
-var (
-	Debug      = flag.Bool("debug", false, "dump instructions as they are parsed")
-	OutputFile = flag.String("o", "", "output file; default foo.o for /a/b/c/foo.s as first argument")
-	TrimPath   = flag.String("trimpath", "", "remove prefix from recorded source file paths")
-	Shared     = flag.Bool("shared", false, "generate code that can be linked into a shared library")
-	Dynlink    = flag.Bool("dynlink", false, "support references to Go symbols defined in other shared libraries")
-	Linkshared = flag.Bool("linkshared", false, "generate code that will be linked against Go shared libraries")
-	AllErrors  = flag.Bool("e", false, "no limit on number of errors reported")
-	SymABIs    = flag.Bool("gensymabis", false, "write symbol ABI information to output file, don't assemble")
-	Importpath = flag.String("p", obj.UnlinkablePkg, "set expected package import to path")
-	Spectre    = flag.String("spectre", "", "enable spectre mitigations in `list` (all, ret)")
-)
+// Context holds parsed assembler flags for one invocation.
+type Context struct {
+	Debug      bool
+	OutputFile string
+	TrimPath   string
+	Shared     bool
+	Dynlink    bool
+	Linkshared bool
+	AllErrors  bool
+	SymABIs    bool
+	Importpath string
+	Spectre    string
 
-var DebugFlags struct {
-	CompressInstructions int    `help:"use compressed instructions when possible (if supported by architecture)"`
-	MayMoreStack         string `help:"call named function before all stack growth checks"`
-	PCTab                string `help:"print named pc-value table\nOne of: pctospadj, pctofile, pctoline, pctoinline, pctopcdata"`
-}
+	D MultiFlag
+	I MultiFlag
 
-var (
-	D        MultiFlag
-	I        MultiFlag
+	DebugFlags struct {
+		CompressInstructions int    `help:"use compressed instructions when possible (if supported by architecture)"`
+		MayMoreStack         string `help:"call named function before all stack growth checks"`
+		PCTab                string `help:"print named pc-value table\nOne of: pctospadj, pctofile, pctoline, pctoinline, pctopcdata"`
+	}
+
 	PrintOut int
 	DebugV   bool
-)
 
-func init() {
-	flag.Var(&D, "D", "predefined symbol with optional simple value -D=identifier=value; can be set multiple times")
-	flag.Var(&I, "I", "include directory; can be set multiple times")
-	flag.BoolVar(&DebugV, "v", false, "print debug output")
-	flag.Var(objabi.NewDebugFlag(&DebugFlags, nil), "d", "enable debugging settings; try -d help")
-	objabi.AddVersionFlag() // -V
-	objabi.Flagcount("S", "print assembly and machine code", &PrintOut)
+	// Args holds the positional arguments left after flag parsing
+	// (the .s source files).
+	Args []string
+}
 
-	DebugFlags.CompressInstructions = 1
+// New returns a Context with default values applied (matching the
+// init() defaults that the package-level vars used to carry).
+func New() *Context {
+	c := &Context{
+		Importpath: obj.UnlinkablePkg,
+	}
+	c.DebugFlags.CompressInstructions = 1
+	return c
 }
 
 // MultiFlag allows setting a value multiple times to collect a list, as in -I=dir1 -I=dir2.
@@ -67,26 +75,58 @@ func (m *MultiFlag) Set(val string) error {
 	return nil
 }
 
-func Usage() {
-	fmt.Fprintf(os.Stderr, "usage: asm [options] file.s ...\n")
-	fmt.Fprintf(os.Stderr, "Flags:\n")
-	flag.PrintDefaults()
-	os.Exit(2)
-}
+// Parse parses args (without argv[0]) into a fresh Context. stderr
+// receives usage / error output. Returns the Context with Args
+// populated, or an error. Callers should treat the returned error as
+// "exit with status 2 and print usage" — Parse already wrote the
+// diagnostic.
+func Parse(args []string, stderr io.Writer) (*Context, error) {
+	ctx := New()
+	fs := flag.NewFlagSet("asm", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 
-func Parse() {
-	objabi.Flagparse(Usage)
-	if flag.NArg() == 0 {
-		flag.Usage()
+	fs.BoolVar(&ctx.Debug, "debug", false, "dump instructions as they are parsed")
+	fs.StringVar(&ctx.OutputFile, "o", "", "output file; default foo.o for /a/b/c/foo.s as first argument")
+	fs.StringVar(&ctx.TrimPath, "trimpath", "", "remove prefix from recorded source file paths")
+	fs.BoolVar(&ctx.Shared, "shared", false, "generate code that can be linked into a shared library")
+	fs.BoolVar(&ctx.Dynlink, "dynlink", false, "support references to Go symbols defined in other shared libraries")
+	fs.BoolVar(&ctx.Linkshared, "linkshared", false, "generate code that will be linked against Go shared libraries")
+	fs.BoolVar(&ctx.AllErrors, "e", false, "no limit on number of errors reported")
+	fs.BoolVar(&ctx.SymABIs, "gensymabis", false, "write symbol ABI information to output file, don't assemble")
+	fs.StringVar(&ctx.Importpath, "p", obj.UnlinkablePkg, "set expected package import to path")
+	fs.StringVar(&ctx.Spectre, "spectre", "", "enable spectre mitigations in `list` (all, ret)")
+
+	fs.Var(&ctx.D, "D", "predefined symbol with optional simple value -D=identifier=value; can be set multiple times")
+	fs.Var(&ctx.I, "I", "include directory; can be set multiple times")
+	fs.BoolVar(&ctx.DebugV, "v", false, "print debug output")
+	fs.Var(objabi.NewDebugFlag(&ctx.DebugFlags, nil), "d", "enable debugging settings; try -d help")
+	objabi.AddVersionFlagFS(fs)
+	objabi.FlagcountFS(fs, "S", "print assembly and machine code", &ctx.PrintOut)
+
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "usage: asm [options] file.s ...\n")
+		fmt.Fprintf(stderr, "Flags:\n")
+		fs.PrintDefaults()
 	}
 
-	// Flag refinement.
-	if *OutputFile == "" {
-		if flag.NArg() != 1 {
-			flag.Usage()
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() == 0 {
+		fs.Usage()
+		return nil, fmt.Errorf("no input files")
+	}
+
+	ctx.Args = fs.Args()
+
+	if ctx.OutputFile == "" {
+		if len(ctx.Args) != 1 {
+			fs.Usage()
+			return nil, fmt.Errorf("no -o and multiple input files")
 		}
-		input := filepath.Base(flag.Arg(0))
+		input := filepath.Base(ctx.Args[0])
 		input = strings.TrimSuffix(input, ".s")
-		*OutputFile = fmt.Sprintf("%s.o", input)
+		ctx.OutputFile = input + ".o"
 	}
+	return ctx, nil
 }

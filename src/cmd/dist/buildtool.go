@@ -34,6 +34,7 @@ import (
 var bootstrapDirs = []string{
 	"cmp",
 	"cmd/asm",
+	"cmd/asm/host",
 	"cmd/asm/internal/...",
 	"cmd/cgo",
 	"cmd/compile",

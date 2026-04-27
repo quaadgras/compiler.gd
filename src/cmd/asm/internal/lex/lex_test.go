@@ -258,8 +258,8 @@ var lexTests = []lexTest{
 
 func TestLex(t *testing.T) {
 	for _, test := range lexTests {
-		input := NewInput(test.name)
-		input.Push(NewTokenizer(test.name, strings.NewReader(test.input), nil))
+		input := NewInput(test.name, nil, nil, "")
+		input.Push(NewTokenizer(test.name, strings.NewReader(test.input), nil, ""))
 		result := drain(input)
 		if result != test.output {
 			t.Errorf("%s: got %q expected %q", test.name, result, test.output)
@@ -328,8 +328,8 @@ var badLexTests = []badLexTest{
 
 func TestBadLex(t *testing.T) {
 	for _, test := range badLexTests {
-		input := NewInput(test.error)
-		input.Push(NewTokenizer(test.error, strings.NewReader(test.input), nil))
+		input := NewInput(test.error, nil, nil, "")
+		input.Push(NewTokenizer(test.error, strings.NewReader(test.input), nil, ""))
 		err := firstError(input)
 		if err == nil {
 			t.Errorf("%s: got no error", test.error)

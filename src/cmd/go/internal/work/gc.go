@@ -421,6 +421,16 @@ func (gcToolchain) asm(b *Builder, a *Action, sfiles []string) ([]string, error)
 		ofile := a.Objdir + sfile[:len(sfile)-len(".s")] + ".o"
 		ofiles = append(ofiles, ofile)
 		args1 := append(args, "-o", ofile, fsys.Actual(mkAbs(p.Dir, sfile)))
+		// gd fork: drive cmd/asm in-process by default. Same gating
+		// rules as the compile path — fall back to fork/exec when a
+		// -toolexec wrapper is configured, -n is set, or
+		// GOGD_INPROC=0 is set explicitly.
+		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+			if err := inProcessAssemble(b.Shell(a), p.Dir, cfgChangedEnv, args1); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if err := b.Shell(a).run(p.Dir, p.ImportPath, cfgChangedEnv, args1...); err != nil {
 			return nil, err
 		}
@@ -448,6 +458,10 @@ func (gcToolchain) symabis(b *Builder, a *Action, sfiles []string) (string, erro
 			return err
 		}
 
+		// gd fork: drive cmd/asm in-process for symabis too. Same gating.
+		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+			return inProcessAssemble(sh, p.Dir, cfgChangedEnv, args)
+		}
 		return sh.run(p.Dir, p.ImportPath, cfgChangedEnv, args...)
 	}
 

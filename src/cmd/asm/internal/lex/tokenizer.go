@@ -12,7 +12,6 @@ import (
 	"text/scanner"
 	"unicode"
 
-	"cmd/asm/internal/flags"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 )
@@ -21,14 +20,23 @@ import (
 // for our purposes and made a TokenReader. It forms the lowest level,
 // turning text from readers into tokens.
 type Tokenizer struct {
-	tok  ScanToken
-	s    *scanner.Scanner
-	base *src.PosBase
-	line int
-	file *os.File // If non-nil, file descriptor to close.
+	tok      ScanToken
+	s        *scanner.Scanner
+	base     *src.PosBase
+	line     int
+	file     *os.File // If non-nil, file descriptor to close.
+	trimPath string   // -trimpath value, retained for #line pragma PosBases (Input reads via TrimPath()).
 }
 
-func NewTokenizer(name string, r io.Reader, file *os.File) *Tokenizer {
+// TrimPath reports the -trimpath flag value the tokenizer was created
+// with. Input.line() reads it through the TokenReader interface to
+// avoid reaching into a flags package.
+func (t *Tokenizer) TrimPath() string { return t.trimPath }
+
+// NewTokenizer returns a Tokenizer for the named reader. trimPath is the
+// -trimpath flag value; pass "" if no prefix should be stripped from
+// source-file paths recorded in PosBase.
+func NewTokenizer(name string, r io.Reader, file *os.File, trimPath string) *Tokenizer {
 	var s scanner.Scanner
 	s.Init(r)
 	// Newline is like a semicolon; other space characters are fine.
@@ -43,10 +51,11 @@ func NewTokenizer(name string, r io.Reader, file *os.File) *Tokenizer {
 	s.Position.Filename = name
 	s.IsIdentRune = isIdentRune
 	return &Tokenizer{
-		s:    &s,
-		base: src.NewFileBase(name, objabi.AbsFile(objabi.WorkingDir(), name, *flags.TrimPath)),
-		line: 1,
-		file: file,
+		s:        &s,
+		base:     src.NewFileBase(name, objabi.AbsFile(objabi.WorkingDir(), name, trimPath)),
+		line:     1,
+		file:     file,
+		trimPath: trimPath,
 	}
 }
 

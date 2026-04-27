@@ -17,7 +17,7 @@ func tokenize(s string) [][]lex.Token {
 		return res
 	}
 	for _, o := range strings.Split(s, ",") {
-		res = append(res, lex.Tokenize(o))
+		res = append(res, lex.Tokenize(o, ""))
 	}
 	return res
 }

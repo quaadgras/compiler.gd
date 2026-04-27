@@ -17,7 +17,6 @@ import (
 	"unicode/utf8"
 
 	"cmd/asm/internal/arch"
-	"cmd/asm/internal/flags"
 	"cmd/asm/internal/lex"
 	"cmd/internal/obj"
 	"cmd/internal/obj/arm64"
@@ -50,6 +49,11 @@ type Parser struct {
 	allowABI      bool             // Whether ABI selectors are allowed.
 	pkgPrefix     string           // Prefix to add to local symbols.
 	errorWriter   io.Writer
+	// Per-invocation flag values; were reads of package-level flags.Debug /
+	// flags.AllErrors. Concurrent in-process asm runs each carry their own
+	// Parser, so per-Parser fields keep the flag values invocation-local.
+	debug     bool
+	allErrors bool
 }
 
 type Patch struct {
@@ -74,6 +78,14 @@ func NewParser(ctxt *obj.Link, ar *arch.Arch, lexer lex.TokenReader) *Parser {
 	}
 }
 
+// SetFlags configures per-invocation flag values on p. Was reads of
+// package-level flags.Debug / flags.AllErrors; needed for concurrent
+// in-process asm runs that each carry their own Parser.
+func (p *Parser) SetFlags(debug, allErrors bool) {
+	p.debug = debug
+	p.allErrors = allErrors
+}
+
 // panicOnError is enabled when testing to abort execution on the first error
 // and turn it into a recoverable panic.
 var panicOnError bool
@@ -94,7 +106,7 @@ func (p *Parser) errorf(format string, args ...any) {
 	}
 	fmt.Fprintf(p.errorWriter, format, args...)
 	p.errorCount++
-	if p.errorCount > 10 && !*flags.AllErrors {
+	if p.errorCount > 10 && !p.allErrors {
 		log.Fatal("too many errors")
 	}
 }

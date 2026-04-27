@@ -59,14 +59,18 @@ func (t ScanToken) String() string {
 	}
 }
 
-// NewLexer returns a lexer for the named file and the given link context.
-func NewLexer(name string) TokenReader {
-	input := NewInput(name)
+// NewLexer returns a lexer for the named file. includes/defines come
+// from the per-invocation flags Context (-I, -D); trimPath is -trimpath.
+// Was a no-arg version that read package-level flag globals;
+// the gd fork moves flags onto a per-invocation Context so concurrent
+// in-process asm runs don't alias state.
+func NewLexer(name string, includes, defines []string, trimPath string) TokenReader {
+	input := NewInput(name, includes, defines, trimPath)
 	fd, err := os.Open(name)
 	if err != nil {
 		log.Fatalf("%s\n", err)
 	}
-	input.Push(NewTokenizer(name, fd, fd))
+	input.Push(NewTokenizer(name, fd, fd, trimPath))
 	return input
 }
 
@@ -123,8 +127,11 @@ type Macro struct {
 }
 
 // Tokenize turns a string into a list of Tokens; used to parse the -D flag and in tests.
-func Tokenize(str string) []Token {
-	t := NewTokenizer("command line", strings.NewReader(str), nil)
+// trimPath is the -trimpath value that should be stripped from any
+// PosBase the tokenizer might emit. Pass "" for callers (-D parsing,
+// most tests) where no source file path is involved.
+func Tokenize(str string, trimPath string) []Token {
+	t := NewTokenizer("command line", strings.NewReader(str), nil, trimPath)
 	var tokens []Token
 	for {
 		tok := t.Next()

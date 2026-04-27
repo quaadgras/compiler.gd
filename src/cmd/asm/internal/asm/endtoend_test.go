@@ -29,7 +29,7 @@ func testEndToEnd(t *testing.T, goarch, file string) {
 	input := filepath.Join("testdata", file+".s")
 	architecture, ctxt := setArch(goarch)
 	architecture.Init(ctxt)
-	lexer := lex.NewLexer(input)
+	lexer := lex.NewLexer(input, nil, nil, "")
 	parser := NewParser(ctxt, architecture, lexer)
 	pList := new(obj.Plist)
 	var ok bool
@@ -289,7 +289,7 @@ func testErrors(t *testing.T, goarch, file string, flags ...string) {
 	input := filepath.Join("testdata", file+".s")
 	architecture, ctxt := setArch(goarch)
 	architecture.Init(ctxt)
-	lexer := lex.NewLexer(input)
+	lexer := lex.NewLexer(input, nil, nil, "")
 	parser := NewParser(ctxt, architecture, lexer)
 	pList := new(obj.Plist)
 	var ok bool
