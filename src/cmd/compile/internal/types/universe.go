@@ -79,8 +79,11 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		return typ
 	}
 
+	builtinPkg := BuiltinPkg(gd)
+	unsafePkg := UnsafePkg(gd)
+
 	for _, s := range &basicTypes {
-		Types[s.etype] = defBasic(s.etype, BuiltinPkg, s.name)
+		Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
 	}
 
 	for _, s := range &typedefs {
@@ -90,7 +93,7 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		}
 		SimType[s.etype] = sameas
 
-		Types[s.etype] = defBasic(s.etype, BuiltinPkg, s.name)
+		Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
 	}
 
 	// We create separate byte and rune types for better error messages
@@ -101,28 +104,28 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 	// NOTE(rsc): No, the error message quality is important.
 	// (Alternatively, we could introduce an OTALIAS node representing
 	// type aliases, albeit at the cost of having to deal with it everywhere).
-	ByteType = defBasic(TUINT8, BuiltinPkg, "byte")
-	RuneType = defBasic(TINT32, BuiltinPkg, "rune")
+	ByteType = defBasic(TUINT8, builtinPkg, "byte")
+	RuneType = defBasic(TINT32, builtinPkg, "rune")
 
 	// error type
 	DeferCheckSize()
-	ErrorType = defBasic(TFORW, BuiltinPkg, "error")
+	ErrorType = defBasic(TFORW, builtinPkg, "error")
 	ErrorType.SetUnderlying(makeErrorInterface(gd))
 	ResumeCheckSize()
 
 	// comparable type (interface)
 	DeferCheckSize()
-	ComparableType = defBasic(TFORW, BuiltinPkg, "comparable")
+	ComparableType = defBasic(TFORW, builtinPkg, "comparable")
 	ComparableType.SetUnderlying(makeComparableInterface())
 	ResumeCheckSize()
 
 	// any type (interface)
 	DeferCheckSize()
-	AnyType = defBasic(TFORW, BuiltinPkg, "any")
+	AnyType = defBasic(TFORW, builtinPkg, "any")
 	AnyType.SetUnderlying(NewInterface(nil))
 	ResumeCheckSize()
 
-	Types[TUNSAFEPTR] = defBasic(TUNSAFEPTR, UnsafePkg, "Pointer")
+	Types[TUNSAFEPTR] = defBasic(TUNSAFEPTR, unsafePkg, "Pointer")
 
 	Types[TBLANK] = newType(TBLANK)
 	Types[TNIL] = newType(TNIL)

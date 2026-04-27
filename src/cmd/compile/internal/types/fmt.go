@@ -15,8 +15,24 @@ import (
 	"cmd/internal/hash"
 )
 
-// BuiltinPkg is a fake package that declares the universe block.
-var BuiltinPkg *Pkg
+// BuiltinPkg returns gd's per-Invocation pseudo-package that
+// declares the universe block (int, string, true, false, etc.).
+// Lazy-initialised on first call.
+func BuiltinPkg(gd *base.Invocation) *Pkg {
+	p, _ := gd.TypesBuiltinPkg.(*Pkg)
+	if p == nil {
+		p = NewPkg(gd, "go.builtin", "")
+		p.Prefix = "go:builtin"
+		gd.TypesBuiltinPkg = p
+	}
+	return p
+}
+
+// SetBuiltinPkg pins the BuiltinPkg pointer on gd. Used by gd.Main
+// (and equivalent embedders) when an existing Pkg should serve as
+// the universe — not commonly needed; callers usually let
+// BuiltinPkg(gd) lazy-init.
+func SetBuiltinPkg(gd *base.Invocation, p *Pkg) { gd.TypesBuiltinPkg = p }
 
 // LocalPkg is the package being compiled.
 func LocalPkg(gd *base.Invocation) *Pkg {
@@ -26,11 +42,27 @@ func LocalPkg(gd *base.Invocation) *Pkg {
 	return gd.LocalPkg.(*Pkg)
 }
 
-// UnsafePkg is package unsafe.
-var UnsafePkg *Pkg
+// UnsafePkg returns gd's per-Invocation pseudo-package "unsafe"
+// (containing unsafe.Pointer). Lazy-initialised.
+func UnsafePkg(gd *base.Invocation) *Pkg {
+	p, _ := gd.TypesUnsafePkg.(*Pkg)
+	if p == nil {
+		p = NewPkg(gd, "unsafe", "unsafe")
+		gd.TypesUnsafePkg = p
+	}
+	return p
+}
 
-// BlankSym is the blank (_) symbol.
-var BlankSym *Sym
+// BlankSym returns gd's per-Invocation blank ("_") symbol.
+// Populated by typecheck.InitUniverse; nil before that runs.
+func BlankSym(gd *base.Invocation) *Sym {
+	s, _ := gd.TypesBlankSym.(*Sym)
+	return s
+}
+
+// SetBlankSym is called by InitUniverse after looking up "_" in
+// BuiltinPkg.
+func SetBlankSym(gd *base.Invocation, s *Sym) { gd.TypesBlankSym = s }
 
 // numImport tracks how often a package with a given name is imported.
 // It is used to provide a better error message (by using the package
@@ -135,7 +167,8 @@ func pkgqual(pkg *Pkg, verb rune, mode fmtMode) string {
 	if verb != 'S' {
 		switch mode {
 		case fmtGo: // This is for the user
-			if pkg == BuiltinPkg || pkg.Local {
+			// gd: BuiltinPkg is per-Invocation; compare by Path.
+			if pkg.Path == "go.builtin" || pkg.Local {
 				return ""
 			}
 

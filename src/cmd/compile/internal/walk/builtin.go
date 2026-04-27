@@ -519,7 +519,7 @@ func walkMakeSlice(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node 
 			// See issue 73199.
 			field := typecheck.Lookup(gd, "arr")
 			t = types.NewStruct([]*types.Field{
-				{Sym: types.BlankSym, Type: types.NewArray(types.Types[types.TUINTPTR], 0)},
+				{Sym: types.BlankSym(gd), Type: types.NewArray(types.Types[types.TUINTPTR], 0)},
 				{Sym: field, Type: t},
 			})
 			t.SetNoalg(true)

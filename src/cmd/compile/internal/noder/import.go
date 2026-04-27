@@ -178,7 +178,7 @@ func readImportFile(gd *base.Invocation, path string, target *ir.Package, env *t
 	}
 
 	if path == "unsafe" {
-		pkg1, pkg2 = types.UnsafePkg, types2.Unsafe
+		pkg1, pkg2 = types.UnsafePkg(gd), types2.Unsafe
 
 		// TODO(mdempsky): Investigate if this actually matters. Why would
 		// the linker or runtime care whether a package imported unsafe?

@@ -73,29 +73,32 @@ func InitUniverse(gd *base.Invocation) {
 		return n
 	})
 
+	builtinPkg := types.BuiltinPkg(gd)
+	unsafePkg := types.UnsafePkg(gd)
+
 	for _, s := range &builtinFuncs {
-		ir.NewBuiltin(types.BuiltinPkg.Lookup(s.name), s.op)
+		ir.NewBuiltin(builtinPkg.Lookup(s.name), s.op)
 	}
 
 	for _, s := range &unsafeFuncs {
-		ir.NewBuiltin(types.UnsafePkg.Lookup(s.name), s.op)
+		ir.NewBuiltin(unsafePkg.Lookup(s.name), s.op)
 	}
 
-	s := types.BuiltinPkg.Lookup("true")
+	s := builtinPkg.Lookup("true")
 	s.Def = ir.NewConstAt(gd, src.NoXPos, s, types.UntypedBool, constant.MakeBool(true))
 
-	s = types.BuiltinPkg.Lookup("false")
+	s = builtinPkg.Lookup("false")
 	s.Def = ir.NewConstAt(gd, src.NoXPos, s, types.UntypedBool, constant.MakeBool(false))
 
 	s = Lookup(gd, "_")
-	types.BlankSym = s
+	types.SetBlankSym(gd, s)
 	ir.BlankNode = ir.NewNameAt(gd, src.NoXPos, s, types.Types[types.TBLANK])
 	s.Def = ir.BlankNode
 
-	s = types.BuiltinPkg.Lookup("_")
+	s = builtinPkg.Lookup("_")
 	s.Def = ir.NewNameAt(gd, src.NoXPos, s, types.Types[types.TBLANK])
 
-	s = types.BuiltinPkg.Lookup("nil")
+	s = builtinPkg.Lookup("nil")
 	s.Def = NodNil(gd)
 
 	// initialize okfor

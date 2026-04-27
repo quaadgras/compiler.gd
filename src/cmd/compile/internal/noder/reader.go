@@ -368,9 +368,9 @@ func (r *reader) doPkg() *types.Pkg {
 	case "":
 		path = r.p.PkgPath()
 	case "builtin":
-		return types.BuiltinPkg
+		return types.BuiltinPkg(r.gd)
 	case "unsafe":
-		return types.UnsafePkg
+		return types.UnsafePkg(r.gd)
 	}
 
 	name := r.String()
@@ -714,7 +714,7 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 	if tag == pkgbits.ObjStub {
 		assert(pr.gd, !sym.IsBlank())
 		switch sym.Pkg {
-		case types.BuiltinPkg, types.UnsafePkg:
+		case types.BuiltinPkg(pr.gd), types.UnsafePkg(pr.gd):
 			return sym.Def.(ir.Node), nil
 		}
 		if pri, ok := objReader(pr.gd)[sym]; ok {
@@ -2096,7 +2096,7 @@ func (r *reader) switchStmt(label *types.Sym) ir.Node {
 			}
 			for i := range cases {
 				if r.Bool() { // case nil
-					cases[i] = typecheck.Expr(r.gd, types.BuiltinPkg.Lookup("nil").Def.(*ir.NilExpr))
+					cases[i] = typecheck.Expr(r.gd, types.BuiltinPkg(r.gd).Lookup("nil").Def.(*ir.NilExpr))
 				} else {
 					cases[i] = r.exprType()
 				}
@@ -3990,7 +3990,7 @@ func methodWrapper(gd *base.Invocation, derefs int, tbase *types.Type, method *t
 	// For simple *T wrappers around T methods, panicwrap produces a
 	// nicer panic message.
 	if wrapper.IsPtr() && types.Identical(wrapper.Elem(), wrappee) {
-		cond := ir.NewBinaryExpr(gd, pos, ir.OEQ, recv, types.BuiltinPkg.Lookup("nil").Def.(ir.Node))
+		cond := ir.NewBinaryExpr(gd, pos, ir.OEQ, recv, types.BuiltinPkg(gd).Lookup("nil").Def.(ir.Node))
 		then := []ir.Node{ir.NewCallExpr(gd, pos, ir.OCALL, typecheck.LookupRuntime(gd, "panicwrap"), nil)}
 		fn.Body.Append(ir.NewIfStmt(gd, pos, cond, then, nil))
 	}

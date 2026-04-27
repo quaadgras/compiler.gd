@@ -213,4 +213,12 @@ type Invocation struct {
 	// Invocation so the Pkg pointers are interned in this gd's
 	// TypesPkgMap. Lazy-initialised on first ir.Pkgs(gd) call.
 	IrPkgs any // *ir.PkgsStruct
+
+	// types.BuiltinPkg / UnsafePkg / BlankSym — were package-level
+	// vars wired up in InitUniverse. Per-Invocation so concurrent
+	// compile invocations in the same process don't race on the
+	// Pkgs' Syms maps during init or subsequent Lookups.
+	TypesBuiltinPkg any // *types.Pkg
+	TypesUnsafePkg  any // *types.Pkg
+	TypesBlankSym   any // *types.Sym
 }

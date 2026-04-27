@@ -556,7 +556,9 @@ func typePkg(t *types.Type) *types.Pkg {
 			}
 		}
 	}
-	if tsym != nil && tsym.Pkg != types.BuiltinPkg {
+	// gd: BuiltinPkg is per-Invocation (different pointer per gd);
+	// compare by Path which is stable.
+	if tsym != nil && tsym.Pkg != nil && tsym.Pkg.Path != "go.builtin" {
 		return tsym.Pkg
 	}
 	return nil
@@ -1397,9 +1399,10 @@ func writtenByWriteBasicTypes(typ *types.Type) bool {
 		typ = typ.Elem()
 	}
 
-	// Basic types.
+	// Basic types. BuiltinPkg/UnsafePkg are per-Invocation; compare
+	// by Path so a Sym from any gd matches.
 	sym := typ.Sym()
-	if sym != nil && (sym.Pkg == types.BuiltinPkg || sym.Pkg == types.UnsafePkg) {
+	if sym != nil && sym.Pkg != nil && (sym.Pkg.Path == "go.builtin" || sym.Pkg.Path == "unsafe") {
 		return true
 	}
 	// any or error

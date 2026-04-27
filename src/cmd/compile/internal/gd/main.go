@@ -101,12 +101,12 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 
 	pkgs := ir.Pkgs(gd)
 
-	// pseudo-package, for scoping
-	types.BuiltinPkg = types.NewPkg(gd, "go.builtin", "") // TODO(gri) name this package go.builtin?
-	types.BuiltinPkg.Prefix = "go:builtin"
+	// pseudo-package, for scoping (BuiltinPkg lazy-inits with the
+	// "go.builtin" path and "go:builtin" prefix on first call)
+	_ = types.BuiltinPkg(gd)
 
-	// pseudo-package, accessed by import "unsafe"
-	types.UnsafePkg = types.NewPkg(gd, "unsafe", "unsafe")
+	// pseudo-package, accessed by import "unsafe" (UnsafePkg lazy-inits)
+	_ = types.UnsafePkg(gd)
 
 	// Pseudo-package that contains the compiler's builtin
 	// declarations for package runtime. These are declared in a

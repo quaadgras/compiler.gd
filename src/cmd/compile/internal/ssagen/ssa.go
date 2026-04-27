@@ -4672,9 +4672,10 @@ func (s *state) getBackingStoreInfo(n ir.Node) *backingStoreInfo {
 	// Align more than naturally for the type KT. See issue 73199.
 	align := types.NewArray(types.Types[types.TUINTPTR], 0)
 	types.CalcArraySize(align)
+	blankSym := types.BlankSym(s.gd)
 	storeTyp := types.NewStruct([]*types.Field{
-		{Sym: types.BlankSym, Type: align},
-		{Sym: types.BlankSym, Type: KT},
+		{Sym: blankSym, Type: align},
+		{Sym: blankSym, Type: KT},
 	})
 	storeTyp.SetNoalg(true)
 	types.CalcStructSize(storeTyp)

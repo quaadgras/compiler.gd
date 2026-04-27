@@ -587,7 +587,13 @@ var synthIface *types.Type
 // a small set of synthesized types that we'll need along the way.
 func setup() {
 	synthOnce.Do(func() {
-		fname := types.BuiltinPkg.Lookup
+		// gd: BuiltinPkg is per-Invocation; the synth* types built
+		// here are process-global and only reference the field
+		// Syms for naming. Build a tiny dedicated Pkg shared across
+		// invocations so the cached fields don't pin one
+		// Invocation's BuiltinPkg pointer.
+		synthPkg := &types.Pkg{Name: "go.synth", Path: "go.synth", Syms: map[string]*types.Sym{}}
+		fname := synthPkg.Lookup
 		nxp := src.NoXPos
 		bp := types.NewPtr(types.Types[types.TUINT8])
 		it := types.Types[types.TINT]
