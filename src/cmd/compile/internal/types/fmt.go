@@ -48,17 +48,21 @@ func initSharedPkgs() {
 // this, a Siggen flag set by invocation 1 (e.g. for error.Error's
 // wrapper) leaks into invocation 2 and trips the
 // "already generated wrapper" assertion.
+//
+// Uses each Pkg's own symsMu to serialise against concurrent
+// LookupOK / LookupBytes from other in-process invocations.
 func ResetSharedPkgPerInvocationFlags() {
-	if builtinPkgP != nil {
-		for _, s := range builtinPkgP.Syms {
-			s.SetSiggen(false)
-		}
+	initSharedPkgs() // ensure builtinPkgP/unsafePkgP are non-nil before we read them
+	builtinPkgP.symsMu.Lock()
+	for _, s := range builtinPkgP.Syms {
+		s.SetSiggen(false)
 	}
-	if unsafePkgP != nil {
-		for _, s := range unsafePkgP.Syms {
-			s.SetSiggen(false)
-		}
+	builtinPkgP.symsMu.Unlock()
+	unsafePkgP.symsMu.Lock()
+	for _, s := range unsafePkgP.Syms {
+		s.SetSiggen(false)
 	}
+	unsafePkgP.symsMu.Unlock()
 }
 
 // BuiltinPkg returns the process-global pseudo-package that declares

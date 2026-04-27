@@ -5,7 +5,6 @@
 package work
 
 import (
-	"bytes"
 	"cmd/compile/host"
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
@@ -15,10 +14,19 @@ import (
 	"strings"
 )
 
-// useInProcessCompile reports whether the GOGD_INPROC opt-in is set.
-// Off by default — see gc.go's comment on the gating block.
+// useInProcessCompile reports whether cmd/go should drive
+// cmd/compile in-process (default) or fork/exec it as a subprocess.
+// Set GOGD_INPROC=0 to force fork/exec — useful for debugging or
+// when toolexec wrapping is needed.
+//
+// Default-on saves the per-package fork/exec cost; the compile is
+// statically linked into bin/go via cmd/compile/host. Concurrent
+// invocations are serialised internally by host.Run's runMu while
+// the lingering process-global state in types.NewPtr's caches and
+// elsewhere is migrated; cmd/go still benefits from the avoided
+// fork/exec, and each compile uses its own -c=N backend parallelism.
 func useInProcessCompile() bool {
-	return os.Getenv("GOGD_INPROC") == "1"
+	return os.Getenv("GOGD_INPROC") != "0"
 }
 
 // inProcessCompile drives a single cmd/compile invocation in the
@@ -77,78 +85,23 @@ func inProcessCompile(sh *Shell, dir string, env []string, args []any) ([]byte, 
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	// host.Run captures the compile's stdout/stderr by way of the
-	// global os.Stdout/os.Stderr today; redirect both to an in-
-	// memory buffer for the duration of the call so we can return
-	// the captured output (matching runOut). Best-effort — some
-	// compile error paths may bypass these globals.
-	var buf bytes.Buffer
-	origStdout, origStderr := os.Stdout, os.Stderr
-	stdoutR, stdoutW, perr := os.Pipe()
-	if perr != nil {
-		return sh.runOut(dir, env, args...)
-	}
-	stderrR, stderrW, perr := os.Pipe()
-	if perr != nil {
-		stdoutR.Close()
-		stdoutW.Close()
-		return sh.runOut(dir, env, args...)
-	}
-	os.Stdout = stdoutW
-	os.Stderr = stderrW
-
-	// Drain the pipes concurrently so the compile doesn't block on
-	// a full pipe buffer.
-	drainDone := make(chan struct{}, 2)
-	go func() {
-		buf2 := make([]byte, 4096)
-		for {
-			n, err := stdoutR.Read(buf2)
-			if n > 0 {
-				buf.Write(buf2[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-		drainDone <- struct{}{}
-	}()
-	go func() {
-		buf2 := make([]byte, 4096)
-		for {
-			n, err := stderrR.Read(buf2)
-			if n > 0 {
-				buf.Write(buf2[:n])
-			}
-			if err != nil {
-				break
-			}
-		}
-		drainDone <- struct{}{}
-	}()
-
-	// Run the compile. host.Run handles the worker-goroutine dance
-	// for runtime.Goexit-based gd.Exit paths, so we get a status
-	// back without process-level termination.
-	status, runErr := host.Run(cmdline[idx+1:], stdoutW, stderrW)
-
-	// Restore globals and close write-ends so the pipe drainers see EOF.
-	os.Stdout = origStdout
-	os.Stderr = origStderr
-	stdoutW.Close()
-	stderrW.Close()
-	<-drainDone
-	<-drainDone
-	stdoutR.Close()
-	stderrR.Close()
+	// Compile errors and warnings go to this process's os.Stderr
+	// directly (compile internals write there). Returning an empty
+	// byte slice as "captured output" loses runOut's diagnostic
+	// capture behaviour, but redirecting os.Stderr concurrently is
+	// fundamentally racy under parallel invocations and the user
+	// still sees the diagnostics on the terminal. cmd/go's build
+	// driver only reads the returned bytes for additional log
+	// output beyond the exit status.
+	status, runErr := host.Run(cmdline[idx+1:], os.Stdout, os.Stderr)
 
 	if runErr != nil {
-		return buf.Bytes(), runErr
+		return nil, runErr
 	}
 	if status != 0 {
 		// Match exec.Cmd's *ExitError formatting for downstream
 		// consumers in build.go that look for "exit status N".
-		return buf.Bytes(), fmt.Errorf("exit status %d", status)
+		return nil, fmt.Errorf("exit status %d", status)
 	}
-	return buf.Bytes(), nil
+	return nil, nil
 }

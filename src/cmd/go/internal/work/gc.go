@@ -175,13 +175,11 @@ func (gcToolchain) gc(b *Builder, a *Action, archive string, importcfg, embedcfg
 		// code that uses those values to expect absolute paths.
 		args = append(args, fsys.Actual(f))
 	}
-	// gd fork: drive cmd/compile in-process when GOGD_INPROC=1 is
-	// set, no toolexec wrapper is configured, and -n is off. Skips
-	// the per-package fork/exec cost. Off by default while the
-	// remaining package-level globals (types.Types[], rttype.Type
-	// et al., ssagen.Arch, etc.) are migrated onto Invocation —
-	// see project_inproc_compile_status.md for the punch list.
-	// Once those land, in-process can become the default.
+	// gd fork: drive cmd/compile in-process by default. Skips the
+	// per-package fork/exec cost. Falls back to runOut when
+	// -toolexec is configured (the wrapper needs an actual
+	// subprocess), -n is set (dry run), or GOGD_INPROC=0 is set
+	// (debug escape hatch).
 	if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
 		output, err = inProcessCompile(sh, base.Cwd(), cfgChangedEnv, args)
 		return ofile, output, err

@@ -39,6 +39,7 @@ import (
 	"internal/buildcfg"
 	"log"
 	"strings"
+	"sync"
 )
 
 var (
@@ -2256,11 +2257,15 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	}
 }
 
+var instinitOnce sync.Once
+
 func instinit(ctxt *obj.Link) {
-	if ycover[0] != 0 {
-		// Already initialized; stop now.
-		// This happens in the cmd/asm tests,
-		// each of which re-initializes the arch.
+	first := false
+	instinitOnce.Do(func() { first = true })
+	if !first {
+		// Already initialized; stop now. Was a ycover[0]!=0 check
+		// (works for cmd/asm test re-init) but racy under concurrent
+		// in-process compile invocations; sync.Once handles both.
 		return
 	}
 

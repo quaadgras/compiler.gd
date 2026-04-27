@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"internal/abi"
 	"internal/buildcfg"
+	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -91,7 +92,14 @@ func (ib intrinsicBuilders) lookup(arch *sys.Arch, pkg, fn string) intrinsicBuil
 	return intrinsics[intrinsicKey{arch, pkg, fn}]
 }
 
+var initIntrinsicsOnce sync.Once
+
 func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
+	first := false
+	initIntrinsicsOnce.Do(func() { first = true })
+	if !first {
+		return
+	}
 	if cfg == nil {
 		cfg = &intrinsicBuildConfig{
 			instrumenting: gd.Flag.Cfg.Instrumenting,

@@ -142,6 +142,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 )
 
 const enableFIPS = true
@@ -158,7 +159,10 @@ func (ctxt *Link) IsFIPS() bool {
 }
 
 // bisectFIPS controls bisect-based debugging of FIPS symbol assignment.
-var bisectFIPS *bisect.Matcher
+var (
+	bisectFIPSMu sync.Mutex
+	bisectFIPS   *bisect.Matcher
+)
 
 // SetFIPSDebugHash sets the bisect pattern for debugging FIPS changes.
 // The compiler calls this with the pattern set by -d=fipshash=pattern,
@@ -170,7 +174,9 @@ func SetFIPSDebugHash(pattern string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	bisectFIPSMu.Lock()
 	bisectFIPS = m
+	bisectFIPSMu.Unlock()
 }
 
 // EnableFIPS reports whether FIPS should be enabled at all
@@ -269,12 +275,15 @@ func (s *LSym) setFIPSType(ctxt *Link) {
 	// This is a FIPS symbol! Convert its type to FIPS.
 
 	// Allow hash-based bisect to override our decision.
-	if bisectFIPS != nil {
+	bisectFIPSMu.Lock()
+	bf := bisectFIPS
+	bisectFIPSMu.Unlock()
+	if bf != nil {
 		h := bisect.Hash(s.Name)
-		if bisectFIPS.ShouldPrint(h) {
+		if bf.ShouldPrint(h) {
 			fmt.Fprintf(os.Stderr, "%v %s (%v)\n", bisect.Marker(h), s.Name, s.Type)
 		}
-		if !bisectFIPS.ShouldEnable(h) {
+		if !bf.ShouldEnable(h) {
 			return
 		}
 	}

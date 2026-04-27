@@ -272,28 +272,30 @@ func (gd *Invocation) ParseFlags(args []string) {
 		gd.Debug.LoopVar = 1
 	}
 
-	if gd.Debug.Converthash != "" {
-		ConvertHash = gd.NewHashDebug("converthash", gd.Debug.Converthash, nil)
-	} else {
-		// quietly disable the convert hash changes
-		ConvertHash = gd.NewHashDebug("converthash", "qn", nil)
-	}
-	if gd.Debug.Fmahash != "" {
-		FmaHash = gd.NewHashDebug("fmahash", gd.Debug.Fmahash, nil)
-	}
-	if gd.Debug.PGOHash != "" {
-		PGOHash = gd.NewHashDebug("pgohash", gd.Debug.PGOHash, nil)
-	}
-	if gd.Debug.LiteralAllocHash != "" {
-		LiteralAllocHash = gd.NewHashDebug("literalalloc", gd.Debug.LiteralAllocHash, nil)
-	}
+	hashGlobalsOnce.Do(func() {
+		if gd.Debug.Converthash != "" {
+			ConvertHash = gd.NewHashDebug("converthash", gd.Debug.Converthash, nil)
+		} else {
+			// quietly disable the convert hash changes
+			ConvertHash = gd.NewHashDebug("converthash", "qn", nil)
+		}
+		if gd.Debug.Fmahash != "" {
+			FmaHash = gd.NewHashDebug("fmahash", gd.Debug.Fmahash, nil)
+		}
+		if gd.Debug.PGOHash != "" {
+			PGOHash = gd.NewHashDebug("pgohash", gd.Debug.PGOHash, nil)
+		}
+		if gd.Debug.LiteralAllocHash != "" {
+			LiteralAllocHash = gd.NewHashDebug("literalalloc", gd.Debug.LiteralAllocHash, nil)
+		}
 
-	if gd.Debug.MergeLocalsHash != "" {
-		MergeLocalsHash = gd.NewHashDebug("mergelocals", gd.Debug.MergeLocalsHash, nil)
-	}
-	if gd.Debug.VariableMakeHash != "" {
-		VariableMakeHash = gd.NewHashDebug("variablemake", gd.Debug.VariableMakeHash, nil)
-	}
+		if gd.Debug.MergeLocalsHash != "" {
+			MergeLocalsHash = gd.NewHashDebug("mergelocals", gd.Debug.MergeLocalsHash, nil)
+		}
+		if gd.Debug.VariableMakeHash != "" {
+			VariableMakeHash = gd.NewHashDebug("variablemake", gd.Debug.VariableMakeHash, nil)
+		}
+	})
 
 	if gd.Flag.MSan && !platform.MSanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
 		log.Fatalf("%s/%s does not support -msan", buildcfg.GOOS, buildcfg.GOARCH)

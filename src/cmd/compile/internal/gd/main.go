@@ -39,6 +39,23 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"sync"
+)
+
+// processInitOnce / processInitOnce2 / processInitOnce3 serialise
+// process-global init writes that the gd.Main flow performs at
+// various points across concurrent in-process invocations. The
+// values written are identical across invocations targeting the
+// same arch (cmd/go passes the same flags every time); a once gate
+// is sufficient. Three separate Onces let us preserve the existing
+// in-flow ordering (counter.Open and archInit happen before
+// ParseFlags, ParseLangFlag happens after dwarf setup, the
+// LinkArch / intrinsic / types.PtrSize block happens last before
+// LoadPackage).
+var (
+	processInitOnce  sync.Once
+	processInitOnce2 sync.Once
+	processInitOnce3 sync.Once
 )
 
 // handlePanic ensures that we print out an "internal compiler error" for any panic
@@ -70,14 +87,26 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	// reset between invocations.
 	types.ResetSharedPkgPerInvocationFlags()
 	gd.Timer.Start("fe", "init")
-	counter.Open()
+
+	// counter.Open + archInit set process-global state; sync.Once
+	// them so concurrent in-process invocations don't race on the
+	// init writes. The values they write are identical across
+	// invocations targeting the same arch.
+	processInitOnce.Do(func() {
+		counter.Open()
+		archInit(&ssagen.Arch)
+	})
 	counter.Inc("compile/invocations")
 
 	defer handlePanic(gd)
 
-	archInit(&ssagen.Arch)
-
 	gd.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
+	// Publish this invocation's Ctxt so the captured-once HashDebug
+	// globals (ConvertHash, FmaHash, etc.) use the right PosTable
+	// for hash-position lookups. host.Run's runMu serialises
+	// invocations, so the published value is stable for the
+	// duration of this compile.
+	base.SetCurrentCtxt(gd.Ctxt)
 	gd.Ctxt.DiagFunc = gd.Errorf
 	gd.Ctxt.DiagFlush = gd.FlushErrors
 	gd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
@@ -176,7 +205,9 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 		log.Fatalf("location lists requested but register mapping not available on %v", gd.Ctxt.Arch.Name)
 	}
 
-	types.ParseLangFlag(gd)
+	processInitOnce2.Do(func() {
+		types.ParseLangFlag(gd)
+	})
 
 	symABIs := ssagen.NewSymABIs(gd)
 	if gd.Flag.SymABIs != "" {
@@ -189,35 +220,40 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 		gd.Flag.ASan = false
 	}
 
-	ssagen.Arch.LinkArch.Init(gd.Ctxt)
+	processInitOnce3.Do(func() {
+		ssagen.Arch.LinkArch.Init(gd.Ctxt)
+		if gd.Flag.Dwarf {
+			dwarf.EnableLogging(gd.Debug.DwarfInl != 0)
+		}
+		if gd.Debug.SoftFloat != 0 {
+			ssagen.Arch.SoftFloat = true
+		}
+		ir.EscFmt = escape.Fmt
+		// Note: ir.IsIntrinsicCall / ir.IsIntrinsicSym capture the
+		// first invocation's gd. The intrinsic table is process-
+		// global so all invocations see the same intrinsics; the
+		// captured gd is only used for table lookups, not per-call
+		// state.
+		ir.IsIntrinsicCall = func(ce *ir.CallExpr) bool {
+			return ssagen.IsIntrinsicCall(gd, ce)
+		}
+		ir.IsIntrinsicSym = func(s *types.Sym) bool {
+			return ssagen.IsIntrinsicSym(gd, s)
+		}
+		inline.SSADumpInline = ssagen.DumpInline
+		ssagen.InitEnv()
+		types.PtrSize = ssagen.Arch.LinkArch.PtrSize
+		types.RegSize = ssagen.Arch.LinkArch.RegSize
+		types.MaxWidth = ssagen.Arch.MAXWIDTH
+	})
 	startProfile(gd)
 	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
 		gd.Flag.Cfg.Instrumenting = true
-	}
-	if gd.Flag.Dwarf {
-		dwarf.EnableLogging(gd.Debug.DwarfInl != 0)
-	}
-	if gd.Debug.SoftFloat != 0 {
-		ssagen.Arch.SoftFloat = true
 	}
 
 	if gd.Flag.JSON != "" { // parse version,destination from json logging optimization.
 		logopt.LogJsonOption(gd.Flag.JSON)
 	}
-
-	ir.EscFmt = escape.Fmt
-	ir.IsIntrinsicCall = func(ce *ir.CallExpr) bool {
-		return ssagen.IsIntrinsicCall(gd, ce)
-	}
-	ir.IsIntrinsicSym = func(s *types.Sym) bool {
-		return ssagen.IsIntrinsicSym(gd, s)
-	}
-	inline.SSADumpInline = ssagen.DumpInline
-	ssagen.InitEnv()
-
-	types.PtrSize = ssagen.Arch.LinkArch.PtrSize
-	types.RegSize = ssagen.Arch.LinkArch.RegSize
-	types.MaxWidth = ssagen.Arch.MAXWIDTH
 
 	gd.Package = new(ir.Package)
 

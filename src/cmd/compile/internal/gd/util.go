@@ -12,6 +12,7 @@ import (
 	"runtime/pprof"
 	tracepkg "runtime/trace"
 	"strings"
+	"sync"
 
 	"cmd/compile/internal/base"
 )
@@ -29,7 +30,18 @@ func profileName(gd *base.Invocation, fn, suffix string) string {
 	return fn
 }
 
+var startProfileOnce sync.Once
+
 func startProfile(gd *base.Invocation) {
+	first := false
+	startProfileOnce.Do(func() { first = true })
+	if !first {
+		// Process-global profile flags + runtime MemProfileRate /
+		// SetBlockProfileRate / SetMutexProfileFraction; once is
+		// sufficient. Concurrent in-process invocations all use
+		// the same flag values from cmd/go.
+		return
+	}
 	if gd.Flag.CPUProfile != "" {
 		fn := profileName(gd, gd.Flag.CPUProfile, ".cpuprof")
 		f, err := os.Create(fn)

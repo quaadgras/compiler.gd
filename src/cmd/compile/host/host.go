@@ -54,31 +54,29 @@ var archInits = map[string]func(*ssagen.ArchInfo){
 	"wasm":     wasm.Init,
 }
 
-// runMu serializes Run calls. Several pieces of cmd/compile state
-// remain at package level even after the Invocation refactor —
-// rttype.Type/ArrayType/..., types.Types[]/PtrSize/SimType[],
-// ssagen.Arch, and a few others initialised once per process. Two
-// concurrent Run calls would race on those writes during init. We
-// serialise here as a working first cut; cmd/go still benefits from
-// avoiding fork/exec and uses the compile's internal -c=N backend
-// parallelism. Migrating those globals onto Invocation would unlock
-// outer (cmd/go-driven) parallelism — see project_inproc_compile_status.md.
+// runMu serialises Run calls. Many process-global state writes
+// remain even after the per-Invocation migration (Type.cache.ptr
+// writes from types.NewPtr; runtimeTypes reading per-invocation
+// flags into a shared typs[] array; etc.). Concurrent gd.Main
+// would race on Type field writes deep in the type system.
+//
+// With runMu, cmd/go gets in-process compile (no fork/exec) and
+// each compile uses its internal -c=N backend parallelism, but
+// outer parallelism is lost. Lifting runMu requires per-Invocation
+// or atomic Type cache, which is a deeper refactor.
 var runMu sync.Mutex
 
 // Run drives one cmd/compile invocation in the calling process.
 // args is the argv that would be passed to the standalone `compile`
-// binary, NOT including argv[0]. stdout and stderr capture compiler
-// diagnostics; pass os.Stdout/os.Stderr (or any io.Writer) — the
-// compile internals still write to os.Stderr directly for some paths,
-// so the io.Writer redirection is best-effort. Returns the same
-// status code the standalone binary would have exited with (0 for
-// success, 2 for compile errors / usage errors).
+// binary, NOT including argv[0]. stdout and stderr are reserved for
+// future use; today the compile internals write directly to
+// os.Stdout/os.Stderr.
 //
 // Each call uses a fresh worker goroutine because gd.Exit (used on
 // error and -V paths) calls runtime.Goexit. Run handles this
 // internally — the caller's goroutine survives.
 //
-// Run serialises concurrent calls; see runMu's comment for why.
+// Run serialises concurrent calls via runMu. See runMu's comment.
 func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	runMu.Lock()
 	defer runMu.Unlock()

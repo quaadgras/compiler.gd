@@ -22,6 +22,13 @@ type Pkg struct {
 
 	Direct bool // imported directly
 	Local  bool // true for the package currently being compiled (set by cmd/compile main on the Pkg returned by NewPkg(gd, gd.Ctxt.Pkgpath, ""))
+
+	// symsMu guards Syms against concurrent reads/writes when Pkg
+	// is shared across in-process gd.Main invocations
+	// (BuiltinPkg, UnsafePkg). Per-Invocation Pkgs never have
+	// concurrent access — but it's cheap to hold the lock for those
+	// too rather than gate the lookup behind a "shared?" check.
+	symsMu sync.Mutex
 }
 
 // pkgMapOf returns gd's per-Invocation Pkg interning map, lazy-
@@ -125,6 +132,8 @@ func (pkg *Pkg) LookupOK(name string) (s *Sym, existed bool) {
 	if pkg == nil {
 		pkg = nopkg
 	}
+	pkg.symsMu.Lock()
+	defer pkg.symsMu.Unlock()
 	if s := pkg.Syms[name]; s != nil {
 		return s, true
 	}
@@ -142,9 +151,12 @@ func (pkg *Pkg) LookupBytes(name []byte) *Sym {
 	if pkg == nil {
 		pkg = nopkg
 	}
+	pkg.symsMu.Lock()
 	if s := pkg.Syms[string(name)]; s != nil {
+		pkg.symsMu.Unlock()
 		return s
 	}
+	pkg.symsMu.Unlock()
 	str := InternString(name)
 	return pkg.Lookup(str)
 }
