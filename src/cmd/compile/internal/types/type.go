@@ -13,6 +13,7 @@ import (
 	"go/constant"
 	"internal/types/errors"
 	"sync"
+	"sync/atomic"
 )
 
 // Object represents an ir.Node, but without needing to import cmd/compile/internal/ir,
@@ -191,9 +192,12 @@ type Type struct {
 	underlying *Type
 
 	// Cache of composite types, with this type being the element type.
+	// atomic.Pointer so multiple in-process compile invocations can
+	// safely share a Type pointer (shared via process-global init in
+	// types.Types[...] / rttype.*) without racing on cache writes.
 	cache struct {
-		ptr   *Type // *T, or nil
-		slice *Type // []T, or nil
+		ptr   atomic.Pointer[Type] // *T, or nil
+		slice atomic.Pointer[Type] // []T, or nil
 	}
 
 	kind  Kind  // kind of type
@@ -547,7 +551,7 @@ func NewArray(elem *Type, bound int64) *Type {
 
 // NewSlice returns the slice Type with element type elem.
 func NewSlice(elem *Type) *Type {
-	if t := elem.cache.slice; t != nil {
+	if t := elem.cache.slice.Load(); t != nil {
 		if t.Elem() != elem {
 			fatal.Error("elem mismatch")
 		}
@@ -559,9 +563,12 @@ func NewSlice(elem *Type) *Type {
 
 	t := newType(TSLICE)
 	t.extra = Slice{Elem: elem}
-	elem.cache.slice = t
 	if elem.HasShape() {
 		t.SetHasShape(true)
+	}
+	if !elem.cache.slice.CompareAndSwap(nil, t) {
+		// Another goroutine won the race; use its Type.
+		t = elem.cache.slice.Load()
 	}
 	return t
 }
@@ -636,7 +643,7 @@ func NewPtr(elem *Type) *Type {
 		fatal.Error("NewPtr: pointer to elem Type is nil")
 	}
 
-	if t := elem.cache.ptr; t != nil {
+	if t := elem.cache.ptr.Load(); t != nil {
 		if t.Elem() != elem {
 			fatal.Error("NewPtr: elem mismatch")
 		}
@@ -651,9 +658,6 @@ func NewPtr(elem *Type) *Type {
 	t.width = int64(PtrSize)
 	t.align = uint8(PtrSize)
 	t.intRegs = 1
-	if NewPtrCacheEnabled {
-		elem.cache.ptr = t
-	}
 	if elem.HasShape() {
 		t.SetHasShape(true)
 	}
@@ -665,6 +669,12 @@ func NewPtr(elem *Type) *Type {
 	// Note: we can't check elem.NotInHeap here because it might
 	// not be set yet. See size.go:PtrDataSize.
 	t.ptrBytes = int64(PtrSize)
+	if NewPtrCacheEnabled {
+		if !elem.cache.ptr.CompareAndSwap(nil, t) {
+			// Another goroutine won the race; use its Type.
+			t = elem.cache.ptr.Load()
+		}
+	}
 	return t
 }
 
@@ -1363,7 +1373,7 @@ func (t *Type) IsPtr() bool {
 
 // IsPtrElem reports whether t is the element of a pointer (to t).
 func (t *Type) IsPtrElem() bool {
-	return t.cache.ptr != nil
+	return t.cache.ptr.Load() != nil
 }
 
 // IsUnsafePtr reports whether t is an unsafe pointer.
