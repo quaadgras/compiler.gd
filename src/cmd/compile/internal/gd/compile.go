@@ -63,7 +63,7 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 			// Initialize ABI wrappers if necessary.
 			ir.InitLSym(gd, fn, false)
 			types.CalcSize(fn.Type())
-			a := ssagen.AbiForBodylessFuncStackMap(fn)
+			a := ssagen.AbiForBodylessFuncStackMap(gd, fn)
 			abiInfo := a.ABIAnalyzeFuncType(fn.Type()) // abiInfo has spill/home locations for wrapper
 			if fn.ABI == obj.ABI0 {
 				// The current args_stackmap generation assumes the function

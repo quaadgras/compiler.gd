@@ -222,6 +222,24 @@ type Invocation struct {
 	TypesUnsafePkg  any // *types.Pkg
 	TypesBlankSym   any // *types.Sym
 
+	// SsaConfig / SsaCaches — were package-level `ssaConfig` /
+	// `ssaCaches` in ssagen. Per-Invocation so concurrent
+	// host.Run invocations don't race on InitConfig overwriting
+	// the shared values.
+	SsaConfig any // *ssa.Config
+	SsaCaches any // []ssa.Cache
+
+	// SiggenSet shadows the per-Sym symSiggen flag for use sites
+	// that may operate on shared types.Sym pointers (BuiltinPkg /
+	// UnsafePkg / nopkg). Concurrent host.Run invocations would
+	// otherwise race on the global Siggen flag and trip the
+	// "already generated wrapper" assertion in
+	// noder.methodWrapper / reflectdata.writeType. Lazy-
+	// initialised; opaque to avoid base→types import cycle. Use
+	// types.SiggenIn / types.SetSiggenIn helpers.
+	SiggenSet any // map[*types.Sym]bool
+	SiggenMu  sync.Mutex
+
 	// Pathsyms maps each types.Pkg to the importpath LSym
 	// (`type:.importpath.<prefix>.`) emitted for it in this
 	// invocation. Was a `Pathsym *obj.LSym` field on types.Pkg —

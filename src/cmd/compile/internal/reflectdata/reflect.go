@@ -947,10 +947,10 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 		return lsym
 	}
 
-	if s.Siggen() {
+	if types.SiggenIn(gd, s) {
 		return lsym
 	}
-	s.SetSiggen(true)
+	types.SetSiggenIn(gd, s)
 
 	if !tbase.HasShape() {
 		TypeLinksym(gd, t) // ensure lsym.Extra is set

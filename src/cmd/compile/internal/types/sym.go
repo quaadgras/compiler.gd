@@ -63,6 +63,31 @@ func (sym *Sym) SetSiggen(b bool)       { sym.flags.set(symSiggen, b) }
 func (sym *Sym) SetAsm(b bool)          { sym.flags.set(symAsm, b) }
 func (sym *Sym) SetFunc(b bool)         { sym.flags.set(symFunc, b) }
 
+// SiggenIn reports whether sym's signature/wrapper has been
+// generated within gd's invocation. Replaces the per-Sym
+// symSiggen flag for sites that may operate on shared
+// types.Sym pointers (BuiltinPkg / UnsafePkg / nopkg) where
+// concurrent invocations would race on the flag.
+func SiggenIn(gd *base.Invocation, sym *Sym) bool {
+	gd.SiggenMu.Lock()
+	defer gd.SiggenMu.Unlock()
+	m, _ := gd.SiggenSet.(map[*Sym]bool)
+	return m[sym]
+}
+
+// SetSiggenIn marks sym as siggen'd within gd's invocation.
+// See SiggenIn.
+func SetSiggenIn(gd *base.Invocation, sym *Sym) {
+	gd.SiggenMu.Lock()
+	defer gd.SiggenMu.Unlock()
+	m, _ := gd.SiggenSet.(map[*Sym]bool)
+	if m == nil {
+		m = make(map[*Sym]bool)
+		gd.SiggenSet = m
+	}
+	m[sym] = true
+}
+
 func (sym *Sym) IsBlank() bool {
 	return sym != nil && sym.Name == "_"
 }

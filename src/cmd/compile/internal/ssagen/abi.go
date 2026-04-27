@@ -567,7 +567,7 @@ func setupWasmImport(gd *base.Invocation, f *ir.Func) {
 		// will roughly become
 		//
 		// 	(import "a_module" "add" (func (param i32 i32) (result i32)))
-		abiConfig := AbiForBodylessFuncStackMap(f)
+		abiConfig := AbiForBodylessFuncStackMap(gd, f)
 		abiInfo := abiConfig.ABIAnalyzeFuncType(f.Type())
 		wi.Params = paramsToWasmFields(gd, f, "go:wasmimport", abiInfo, abiInfo.InParams())
 		wi.Results = resultsToWasmFields(gd, f, "go:wasmimport", abiInfo, abiInfo.OutParams())
@@ -581,7 +581,7 @@ func setupWasmExport(gd *base.Invocation, f, wrapped *ir.Func) {
 	we := obj.WasmExport{
 		WrappedSym: wrapped.LSym,
 	}
-	abiConfig := AbiForBodylessFuncStackMap(wrapped)
+	abiConfig := AbiForBodylessFuncStackMap(gd, wrapped)
 	abiInfo := abiConfig.ABIAnalyzeFuncType(wrapped.Type())
 	we.Params = paramsToWasmFields(gd, wrapped, "go:wasmexport", abiInfo, abiInfo.InParams())
 	we.Results = resultsToWasmFields(gd, wrapped, "go:wasmexport", abiInfo, abiInfo.OutParams())

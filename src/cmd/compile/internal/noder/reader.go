@@ -3970,8 +3970,8 @@ func methodWrapper(gd *base.Invocation, derefs int, tbase *types.Type, method *t
 	}
 
 	sym := ir.MethodSym(gd, wrapper, method.Sym)
-	gd.Assertf(!sym.Siggen(), "already generated wrapper %v", sym)
-	sym.SetSiggen(true)
+	gd.Assertf(!types.SiggenIn(gd, sym), "already generated wrapper %v", sym)
+	types.SetSiggenIn(gd, sym)
 
 	wrappee := method.Type.Recv().Type
 	if types.Identical(wrapper, wrappee) ||

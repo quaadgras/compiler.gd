@@ -54,16 +54,22 @@ var archInits = map[string]func(*ssagen.ArchInfo){
 	"wasm":     wasm.Init,
 }
 
-// runMu serialises Run calls. Many process-global state writes
-// remain even after the per-Invocation migration (Type.cache.ptr
-// writes from types.NewPtr; runtimeTypes reading per-invocation
-// flags into a shared typs[] array; etc.). Concurrent gd.Main
-// would race on Type field writes deep in the type system.
+// runMu serialises Run calls. After the per-Invocation migration
+// of ssaConfig / ssaCaches / Pathsyms / SiggenSet (and the
+// atomic.Pointer Type.cache.{ptr,slice}), the front-end / SSA-build
+// phases largely parallelise across invocations, but several
+// process-global state pieces still need migration before runMu can
+// be dropped:
+//
+//   - types.defercalc / deferredTypeStack (CheckSize bracket).
+//   - types.CalcSizeDisabled (within-invocation backend guard
+//     that's also process-global).
+//   - ir.Syms (200+ call sites) and ssagen.BoundsCheckFunc.
+//   - escape.leakTagCache map.
 //
 // With runMu, cmd/go gets in-process compile (no fork/exec) and
 // each compile uses its internal -c=N backend parallelism, but
-// outer parallelism is lost. Lifting runMu requires per-Invocation
-// or atomic Type cache, which is a deeper refactor.
+// outer parallelism is lost.
 var runMu sync.Mutex
 
 // Run drives one cmd/compile invocation in the calling process.

@@ -38,8 +38,21 @@ import (
 	rtabi "internal/abi"
 )
 
-var ssaConfig *ssa.Config
-var ssaCaches []ssa.Cache
+// ssaConfigOf returns gd's per-Invocation *ssa.Config, populated
+// by InitConfig. Was a package-level `var ssaConfig`; concurrent
+// in-process compile invocations would have raced on the
+// InitConfig write.
+func ssaConfigOf(gd *base.Invocation) *ssa.Config {
+	c, _ := gd.SsaConfig.(*ssa.Config)
+	return c
+}
+
+// ssaCachesOf returns gd's per-Invocation []ssa.Cache slice, sized
+// by gd.Flag.LowerC in InitConfig.
+func ssaCachesOf(gd *base.Invocation) []ssa.Cache {
+	c, _ := gd.SsaCaches.([]ssa.Cache)
+	return c
+}
 
 var ssaDump string     // early copy of $GOSSAFUNC; the func name to dump output for
 var ssaDir string      // optional destination for ssa dump file
@@ -99,9 +112,10 @@ func InitConfig(gd *base.Invocation) {
 	_ = types.NewPtr(reflectdata.MapType(gd))                               // *internal/runtime/maps.Map
 	_ = types.NewPtr(deferstruct(gd))                                       // *runtime._defer
 	types.NewPtrCacheEnabled = false
-	ssaConfig = ssa.NewConfig(gd, gd.Ctxt.Arch.Name, *types_, gd.Ctxt, gd.Flag.N == 0, Arch.SoftFloat)
-	ssaConfig.Race = gd.Flag.Race
-	ssaCaches = make([]ssa.Cache, gd.Flag.LowerC)
+	cfg := ssa.NewConfig(gd, gd.Ctxt.Arch.Name, *types_, gd.Ctxt, gd.Flag.N == 0, Arch.SoftFloat)
+	cfg.Race = gd.Flag.Race
+	gd.SsaConfig = cfg
+	gd.SsaCaches = make([]ssa.Cache, gd.Flag.LowerC)
 
 	// Set up some runtime functions we'll need to call.
 	ir.Syms.AssertE2I = typecheck.LookupRuntimeFunc(gd, "assertE2I")
@@ -227,8 +241,8 @@ func InitTables(gd *base.Invocation) {
 // stack map is not needed there (the parameters survive only long
 // enough to call the wrapped assembly function).
 // This always returns a freshly copied ABI.
-func AbiForBodylessFuncStackMap(fn *ir.Func) *abi.ABIConfig {
-	return ssaConfig.ABI0.Copy() // No idea what races will result, be safe
+func AbiForBodylessFuncStackMap(gd *base.Invocation, fn *ir.Func) *abi.ABIConfig {
+	return ssaConfigOf(gd).ABI0.Copy() // No idea what races will result, be safe
 }
 
 // abiForFunc implements ABI policy for a function, but does not return a copy of the ABI.
@@ -297,7 +311,8 @@ func (s *state) emitOpenDeferInfo() {
 func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.Func {
 	name := ir.FuncName(fn)
 
-	abiSelf := abiForFunc(gd, fn, ssaConfig.ABI0, ssaConfig.ABI1)
+	cfg := ssaConfigOf(gd)
+	abiSelf := abiForFunc(gd, fn, cfg.ABI0, cfg.ABI1)
 
 	printssa := false
 	// match either a simple name e.g. "(*Reader).Reset", package.name e.g. "compress/gzip.(*Reader).Reset", or subpackage name "gzip.(*Reader).Reset"
@@ -356,20 +371,20 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 	}
 	s.curfn = fn
 
-	cache := &ssaCaches[worker]
+	cache := &ssaCachesOf(gd)[worker]
 	cache.Reset()
 
-	s.f = ssaConfig.NewFunc(&fe, cache)
-	s.config = ssaConfig
+	s.f = cfg.NewFunc(&fe, cache)
+	s.config = cfg
 	s.f.Type = fn.Type()
 	s.f.Name = name
 	s.f.PrintOrHtmlSSA = printssa
 	if fn.Pragma&ir.Nosplit != 0 {
 		s.f.NoSplit = true
 	}
-	s.f.ABI0 = ssaConfig.ABI0
-	s.f.ABI1 = ssaConfig.ABI1
-	s.f.ABIDefault = abiForFunc(gd, nil, ssaConfig.ABI0, ssaConfig.ABI1)
+	s.f.ABI0 = cfg.ABI0
+	s.f.ABI1 = cfg.ABI1
+	s.f.ABIDefault = abiForFunc(gd, nil, cfg.ABI0, cfg.ABI1)
 	s.f.ABISelf = abiSelf
 
 	s.panics = map[funcLine]*ssa.Block{}
