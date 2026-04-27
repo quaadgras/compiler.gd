@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/fatal"
@@ -212,6 +213,31 @@ func isAtomicStdPkg(p *Pkg) bool {
 	return p.Prefix == "sync/atomic" || p.Prefix == "internal/runtime/atomic"
 }
 
+// calcSizeOnce maps each Type to a sync.Once that runs its
+// CalcSize body exactly once across all in-process compile
+// invocations. Without this, concurrent invocations both calling
+// CalcSize on the same shared Type would race on the
+// Type.width=-2 in-progress sentinel.
+//
+// Reentrant CalcSize calls (CheckSize → CalcSize within the same
+// goroutine) bypass the Once via the widthCalculated() fast path
+// after the first call has stored the final width.
+var (
+	calcSizeOnceMu sync.Mutex
+	calcSizeOnce   = map[*Type]*sync.Once{}
+)
+
+func calcSizeOnceFor(t *Type) *sync.Once {
+	calcSizeOnceMu.Lock()
+	defer calcSizeOnceMu.Unlock()
+	o, ok := calcSizeOnce[t]
+	if !ok {
+		o = new(sync.Once)
+		calcSizeOnce[t] = o
+	}
+	return o
+}
+
 // CalcSize calculates and stores the size, alignment, eq/hash algorithm,
 // and ptrBytes for t.
 // If CalcSizeDisabled is set, and the size/alignment
@@ -232,14 +258,29 @@ func CalcSize(gd *base.Invocation, t *Type) {
 		return
 	}
 
+	// Fast path: if the type is already fully calculated, no work
+	// to do.
+	if t.widthCalculated() {
+		return
+	}
+
+	// Wrap the actual size calculation in a per-Type sync.Once so
+	// concurrent invocations don't race on the Type.width=-2
+	// in-progress sentinel.
+	calcSizeOnceFor(t).Do(func() {
+		calcSizeBody(gd, t)
+	})
+}
+
+func calcSizeBody(gd *base.Invocation, t *Type) {
+	if t.widthCalculated() {
+		return
+	}
+
 	if t.width == -2 {
 		t.width = 0
 		t.align = 1
 		fatal.Error("invalid recursive type %v", t)
-		return
-	}
-
-	if t.widthCalculated() {
 		return
 	}
 

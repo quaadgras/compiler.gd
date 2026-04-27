@@ -106,9 +106,12 @@ func CalcMethods(t *types.Type) {
 		f.Sym.SetUniq(true)
 	}
 
-	// generate all reachable methods
+	// generate all reachable methods. Use a per-call visited
+	// set rather than the t.Recur() flag on the shared Type so
+	// concurrent in-process compile invocations don't race on
+	// the bitset write/clear pair.
 	slist = slist[:0]
-	expand1(t, true)
+	expand1(t, true, map[*types.Type]bool{})
 
 	// check each method to be uniquely reachable
 	var ms []*types.Field
@@ -154,12 +157,16 @@ func CalcMethods(t *types.Type) {
 // in reverse order. If none exist, more will indicate whether t contains any
 // embedded fields at depth d, so callers can decide whether to retry at
 // a greater depth.
-func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase bool) (c int, more bool) {
-	if t.Recur() {
+//
+// visited is the per-call cycle set; was the t.Recur() flag on the
+// shared Type, but that races between concurrent in-process compile
+// invocations doing methodset traversal on the same Type.
+func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase bool, visited map[*types.Type]bool) (c int, more bool) {
+	if visited[t] {
 		return
 	}
-	t.SetRecur(true)
-	defer t.SetRecur(false)
+	visited[t] = true
+	defer delete(visited, t)
 
 	var u *types.Type
 	d--
@@ -195,7 +202,7 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 			// Found an embedded field at target depth.
 			return c, true
 		}
-		a, more1 := adddot1(s, f.Type, d, save, ignorecase)
+		a, more1 := adddot1(s, f.Type, d, save, ignorecase, visited)
 		if a != 0 && c == 0 {
 			dotlist[d].field = f
 		}
@@ -510,7 +517,7 @@ func dotpath(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) (
 		if d > len(dotlist) {
 			dotlist = append(dotlist, dlist{})
 		}
-		if c, more := adddot1(s, t, d, save, ignorecase); c == 1 {
+		if c, more := adddot1(s, t, d, save, ignorecase, map[*types.Type]bool{}); c == 1 {
 			return dotlist[:d], false
 		} else if c > 1 {
 			return nil, true
@@ -550,11 +557,11 @@ func expand0(t *types.Type) {
 	}
 }
 
-func expand1(t *types.Type, top bool) {
-	if t.Recur() {
+func expand1(t *types.Type, top bool, visited map[*types.Type]bool) {
+	if visited[t] {
 		return
 	}
-	t.SetRecur(true)
+	visited[t] = true
 
 	if !top {
 		expand0(t)
@@ -579,11 +586,11 @@ func expand1(t *types.Type, top bool) {
 			if f.Sym == nil {
 				continue
 			}
-			expand1(f.Type, false)
+			expand1(f.Type, false, visited)
 		}
 	}
 
-	t.SetRecur(false)
+	delete(visited, t)
 }
 
 func ifacelookdot(s *types.Sym, t *types.Type, ignorecase bool) *types.Field {

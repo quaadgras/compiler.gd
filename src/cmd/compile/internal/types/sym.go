@@ -51,11 +51,11 @@ const (
 	symFunc   // function symbol
 )
 
-func (sym *Sym) OnExportList() bool { return sym.flags&symOnExportList != 0 }
-func (sym *Sym) Uniq() bool         { return sym.flags&symUniq != 0 }
-func (sym *Sym) Siggen() bool       { return sym.flags&symSiggen != 0 }
-func (sym *Sym) Asm() bool          { return sym.flags&symAsm != 0 }
-func (sym *Sym) Func() bool         { return sym.flags&symFunc != 0 }
+func (sym *Sym) OnExportList() bool { return sym.flags.load()&symOnExportList != 0 }
+func (sym *Sym) Uniq() bool         { return sym.flags.load()&symUniq != 0 }
+func (sym *Sym) Siggen() bool       { return sym.flags.load()&symSiggen != 0 }
+func (sym *Sym) Asm() bool          { return sym.flags.load()&symAsm != 0 }
+func (sym *Sym) Func() bool         { return sym.flags.load()&symFunc != 0 }
 
 func (sym *Sym) SetOnExportList(b bool) { sym.flags.set(symOnExportList, b) }
 func (sym *Sym) SetUniq(b bool)         { sym.flags.set(symUniq, b) }

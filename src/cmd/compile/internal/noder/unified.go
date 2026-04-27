@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/inline"
@@ -190,11 +191,21 @@ func lookupMethod(gd *base.Invocation, pkg *types.Pkg, symName string) (*ir.Func
 // the unified IR has the full typed AST needed for introspection during step (1).
 // In other words, we have all the necessary information to build the generic IR form
 // (see writer.captureVars for an example).
+var unifiedHooksOnce sync.Once
+
 func unified(gd *base.Invocation, m posMap, noders []*noder) {
-	inline.InlineCall = unifiedInlineCall
-	typecheck.HaveInlineBody = unifiedHaveInlineBody
-	pgoir.LookupFunc = LookupFunc
-	pgoir.PostLookupCleanup = PostLookupCleanup
+	// Process-global hook installation. The values are constants
+	// across all in-process compile invocations; sync.Once
+	// prevents concurrent invocations from racing on the writes
+	// (the values would be equal anyway, but Go's memory model
+	// fails the race detector on unsynchronised same-value
+	// writes).
+	unifiedHooksOnce.Do(func() {
+		inline.InlineCall = unifiedInlineCall
+		typecheck.HaveInlineBody = unifiedHaveInlineBody
+		pgoir.LookupFunc = LookupFunc
+		pgoir.PostLookupCleanup = PostLookupCleanup
+	})
 
 	data := writePkgStub(gd, m, noders)
 

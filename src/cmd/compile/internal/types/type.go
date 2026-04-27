@@ -249,14 +249,14 @@ const (
 	typeGdReturnOutBuf
 )
 
-func (t *Type) NotInHeap() bool           { return t.flags&typeNotInHeap != 0 }
-func (t *Type) Noalg() bool               { return t.flags&typeNoalg != 0 }
-func (t *Type) Deferwidth() bool          { return t.flags&typeDeferwidth != 0 }
-func (t *Type) Recur() bool               { return t.flags&typeRecur != 0 }
-func (t *Type) IsShape() bool             { return t.flags&typeIsShape != 0 }
-func (t *Type) HasShape() bool            { return t.flags&typeHasShape != 0 }
-func (t *Type) IsFullyInstantiated() bool { return t.flags&typeIsFullyInstantiated != 0 }
-func (t *Type) GdReturnOutBuf() bool      { return t.flags&typeGdReturnOutBuf != 0 }
+func (t *Type) NotInHeap() bool           { return t.flags.load()&typeNotInHeap != 0 }
+func (t *Type) Noalg() bool               { return t.flags.load()&typeNoalg != 0 }
+func (t *Type) Deferwidth() bool          { return t.flags.load()&typeDeferwidth != 0 }
+func (t *Type) Recur() bool               { return t.flags.load()&typeRecur != 0 }
+func (t *Type) IsShape() bool             { return t.flags.load()&typeIsShape != 0 }
+func (t *Type) HasShape() bool            { return t.flags.load()&typeHasShape != 0 }
+func (t *Type) IsFullyInstantiated() bool { return t.flags.load()&typeIsFullyInstantiated != 0 }
+func (t *Type) GdReturnOutBuf() bool      { return t.flags.load()&typeGdReturnOutBuf != 0 }
 
 func (t *Type) SetNotInHeap(b bool)           { t.flags.set(typeNotInHeap, b) }
 func (t *Type) SetNoalg(b bool)               { t.flags.set(typeNoalg, b) }
@@ -448,8 +448,8 @@ const (
 	fieldNointerface
 )
 
-func (f *Field) IsDDD() bool       { return f.flags&fieldIsDDD != 0 }
-func (f *Field) Nointerface() bool { return f.flags&fieldNointerface != 0 }
+func (f *Field) IsDDD() bool       { return f.flags.load()&fieldIsDDD != 0 }
+func (f *Field) Nointerface() bool { return f.flags.load()&fieldNointerface != 0 }
 
 func (f *Field) SetIsDDD(b bool)       { f.flags.set(fieldIsDDD, b) }
 func (f *Field) SetNointerface(b bool) { f.flags.set(fieldNointerface, b) }
