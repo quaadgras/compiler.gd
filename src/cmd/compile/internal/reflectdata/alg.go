@@ -88,9 +88,9 @@ func genhash(gd *base.Invocation, t *types.Type) *obj.LSym {
 		if len(closure.P) > 0 { // already generated
 			return closure
 		}
-		if memhashvarlen == nil {
-			memhashvarlen = typecheck.LookupRuntimeFunc(gd, "memhash_varlen")
-		}
+		// Was a package-level memhashvarlen cache; re-lookup per
+		// call so the LSym lives in this invocation's Ctxt.
+		memhashvarlen := typecheck.LookupRuntimeFunc(gd, "memhash_varlen")
 		ot := 0
 		ot = objw.SymPtr(gd, closure, ot, memhashvarlen, 0)
 		ot = objw.Uintptr(gd, closure, ot, uint64(t.Size())) // size encoded in closure
@@ -330,9 +330,12 @@ func geneq(gd *base.Invocation, t *types.Type) *obj.LSym {
 		if len(closure.P) != 0 {
 			return closure
 		}
-		if memequalvarlen == nil {
-			memequalvarlen = typecheck.LookupRuntimeFunc(gd, "memequal_varlen")
-		}
+		// Was a package-level memequalvarlen cache; re-lookup per
+		// call so the LSym lives in this invocation's Ctxt
+		// (otherwise an in-process embedder reuses LSym pointers
+		// across invocations, producing dangling DWARF
+		// relocations).
+		memequalvarlen := typecheck.LookupRuntimeFunc(gd, "memequal_varlen")
 		ot := 0
 		ot = objw.SymPtr(gd, closure, ot, memequalvarlen, 0)
 		ot = objw.Uintptr(gd, closure, ot, uint64(t.Size()))

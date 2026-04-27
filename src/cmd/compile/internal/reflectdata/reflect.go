@@ -635,10 +635,8 @@ func ABIKindOfType(t *types.Type) abi.Kind {
 	return kinds[t.Kind()]
 }
 
-var (
-	memhashvarlen  *obj.LSym
-	memequalvarlen *obj.LSym
-)
+// (memhashvarlen / memequalvarlen LSym caches removed —
+// per-invocation state, looked up fresh each call in alg.go.)
 
 // dcommontype dumps the contents of a reflect.rtype (runtime._type) to c.
 func dcommontype(gd *base.Invocation, c rttype.Cursor, t *types.Type) {
