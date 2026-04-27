@@ -13,9 +13,6 @@ import (
 	"sync"
 )
 
-// pkgMap maps a package path to a package.
-var pkgMap = make(map[string]*Pkg)
-
 type Pkg struct {
 	Path    string // string literal used in import statement, e.g. "internal/runtime/sys"
 	Name    string // package name, e.g. "sys"
@@ -24,14 +21,46 @@ type Pkg struct {
 	Pathsym *obj.LSym
 
 	Direct bool // imported directly
-	Local  bool // true for the package currently being compiled (set by cmd/compile main on the Pkg returned by NewPkg(gd.Ctxt.Pkgpath, ""))
+	Local  bool // true for the package currently being compiled (set by cmd/compile main on the Pkg returned by NewPkg(gd, gd.Ctxt.Pkgpath, ""))
 }
 
-// NewPkg returns a new Pkg for the given package path and name.
-// Unless name is the empty string, if the package exists already,
-// the existing package name and the provided name must match.
-func NewPkg(path, name string) *Pkg {
+// pkgMapOf returns gd's per-Invocation Pkg interning map, lazy-
+// initialising on first call. Was a package-level map[string]*Pkg
+// — see invocation.go for the rationale (cross-invocation aliasing
+// of pseudo-runtime Pkgs and their Syms tables).
+//
+// Caller is responsible for holding pkgMapMu when reading or writing
+// the returned map: NewPkg / PkgMapOf both acquire it. Backend
+// goroutines call NewPkg concurrently (e.g. via TypeSymLookup), so
+// the map needs a real lock — the upstream code held no lock because
+// pkgMap was a process-global, the same Pkgs were always present by
+// the time the backend ran, and concurrent map READS without writes
+// were practically (if not formally) safe. Per-Invocation maps start
+// empty and lazily fill, so first-write races with concurrent reads
+// are real.
+var pkgMapMu sync.Mutex
+
+func pkgMapOfLocked(gd *base.Invocation) map[string]*Pkg {
+	m, _ := gd.TypesPkgMap.(map[string]*Pkg)
+	if m == nil {
+		m = make(map[string]*Pkg)
+		gd.TypesPkgMap = m
+	}
+	return m
+}
+
+// NewPkg returns a new Pkg for the given package path and name within
+// gd's namespace. Unless name is the empty string, if the package
+// exists already, the existing package name and the provided name
+// must match.
+//
+// gd must be non-nil. Tests that don't have an Invocation should call
+// NewPkgForTesting instead.
+func NewPkg(gd *base.Invocation, path, name string) *Pkg {
+	pkgMapMu.Lock()
+	pkgMap := pkgMapOfLocked(gd)
 	if p := pkgMap[path]; p != nil {
+		pkgMapMu.Unlock()
 		if name != "" && p.Name != name {
 			panic(fmt.Sprintf("conflicting package names %s and %s for path %q", p.Name, name, path))
 		}
@@ -52,13 +81,34 @@ func NewPkg(path, name string) *Pkg {
 	}
 	p.Syms = make(map[string]*Sym)
 	pkgMap[path] = p
+	pkgMapMu.Unlock()
 
 	return p
 }
 
-func PkgMap() map[string]*Pkg {
-	return pkgMap
+// PkgMapOf returns a snapshot of gd's per-Invocation interning map.
+// Returns a copy because the underlying map is locked by NewPkg —
+// callers iterate the snapshot freely without holding the lock.
+func PkgMapOf(gd *base.Invocation) map[string]*Pkg {
+	pkgMapMu.Lock()
+	defer pkgMapMu.Unlock()
+	src := pkgMapOfLocked(gd)
+	dst := make(map[string]*Pkg, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
+
+// NewPkgForTesting is the test-only entry point: routes through a
+// process-global Invocation so interning works consistently across
+// all NewPkgForTesting calls within a test binary. Tests don't need
+// to thread an Invocation through fixture setup.
+func NewPkgForTesting(path, name string) *Pkg {
+	return NewPkg(testingInvocation, path, name)
+}
+
+var testingInvocation = new(base.Invocation)
 
 var nopkg = &Pkg{
 	Syms: make(map[string]*Sym),

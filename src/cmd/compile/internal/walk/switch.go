@@ -708,24 +708,18 @@ func typeHashFieldOf(gd *base.Invocation, pos src.XPos, itab *ir.UnaryExpr) *ir.
 	if itab.Op() != ir.OITAB {
 		gd.Fatalf("expected OITAB, got %v", itab.Op())
 	}
+	// gd Phase: package-level rtypeHashField / itabHashField caches
+	// were removed — they pinned the first-invocation's Pkg pointer
+	// via Sym.Pkg, but the runtime Pkg is now per-Invocation. The
+	// recomputation is cheap (one runtime.Pkg.Lookup + types.NewField).
 	var hashField *types.Field
 	if itab.X.Type().IsEmptyInterface() {
-		// runtime._type's hash field
-		if rtypeHashField == nil {
-			rtypeHashField = runtimeField("hash", rttype.Type.OffsetOf("Hash"), types.Types[types.TUINT32])
-		}
-		hashField = rtypeHashField
+		hashField = runtimeField(gd, "hash", rttype.Type.OffsetOf("Hash"), types.Types[types.TUINT32])
 	} else {
-		// runtime.itab's hash field
-		if itabHashField == nil {
-			itabHashField = runtimeField("hash", rttype.ITab.OffsetOf("Hash"), types.Types[types.TUINT32])
-		}
-		hashField = itabHashField
+		hashField = runtimeField(gd, "hash", rttype.ITab.OffsetOf("Hash"), types.Types[types.TUINT32])
 	}
 	return boundedDotPtr(gd, pos, itab, hashField)
 }
-
-var rtypeHashField, itabHashField *types.Field
 
 // A typeSwitch walks a type switch.
 type typeSwitch struct {

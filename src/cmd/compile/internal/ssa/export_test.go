@@ -64,7 +64,7 @@ type Conf struct {
 
 func (c *Conf) Frontend() Frontend {
 	if c.fe == nil {
-		pkg := types.NewPkg("my/import/path", "path")
+		pkg := types.NewPkgForTesting("my/import/path", "path")
 		fn := ir.NewFunc(testGd, src.NoXPos, src.NoXPos, pkg.Lookup("function"), types.NewSignature(testGd, nil, nil, nil))
 		fn.DeclareParams(testGd, true)
 		fn.LSym = &obj.LSym{Name: "my/import/path.function"}

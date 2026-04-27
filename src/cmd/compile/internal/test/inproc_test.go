@@ -57,18 +57,12 @@ func TestInProcessSingleCompile(t *testing.T) {
 	}
 }
 
-// TestInProcessTwoCompiles is the next-milestone test: two compiles
-// in one process with separate Invocations. Currently skipped because
-// types.pkgMap interns Pkg pointers globally and ir.Pkgs holds well-
-// known Pkg references in package-level state. The second compile's
-// InitRuntime trips "importsym of symbol that already exists" because
-// the pseudo-runtime Pkg from the first compile is reused with its
-// symbol table already populated.
-//
-// Unskip once pkgMap and ir.Pkgs are migrated onto Invocation.
+// TestInProcessTwoCompiles drives gd.Main twice in the same process
+// with separate Invocations, asserting both produce object files and
+// exit cleanly. This is the milestone test for cmd/go's eventual
+// in-process embedding — proves nothing in compile pins per-
+// Invocation state into package-level globals.
 func TestInProcessTwoCompiles(t *testing.T) {
-	t.Skip("blocked on types.pkgMap and ir.Pkgs being package-level globals; see comment above")
-
 	if buildcfg.GOARCH != "amd64" || runtime.GOOS == "wasip1" {
 		t.Skip("test wired to amd64 host arch only")
 	}

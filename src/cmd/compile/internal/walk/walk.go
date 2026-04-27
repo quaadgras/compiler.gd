@@ -392,16 +392,14 @@ func mayCall(gd *base.Invocation, n ir.Node) bool {
 	})
 }
 
-// itabType loads the _type field from a runtime.itab struct.
+// itabType loads the _type field from a runtime.itab struct. The
+// package-level cache was removed because runtimeField now allocates
+// a Sym from the per-Invocation runtime Pkg; the recomputation is
+// cheap and avoids first-Invocation Pkg-pointer pinning.
 func itabType(gd *base.Invocation, itab ir.Node) ir.Node {
-	if itabTypeField == nil {
-		// internal/abi.ITab's Type field
-		itabTypeField = runtimeField("Type", rttype.ITab.OffsetOf("Type"), types.NewPtr(types.Types[types.TUINT8]))
-	}
+	itabTypeField := runtimeField(gd, "Type", rttype.ITab.OffsetOf("Type"), types.NewPtr(types.Types[types.TUINT8]))
 	return boundedDotPtr(gd, gd.Pos, itab, itabTypeField)
 }
-
-var itabTypeField *types.Field
 
 // boundedDotPtr returns a selector expression representing ptr.field
 // and omits nil-pointer checks for ptr.
@@ -414,8 +412,8 @@ func boundedDotPtr(gd *base.Invocation, pos src.XPos, ptr ir.Node, field *types.
 	return sel
 }
 
-func runtimeField(name string, offset int64, typ *types.Type) *types.Field {
-	f := types.NewField(src.NoXPos, ir.Pkgs.Runtime.Lookup(name), typ)
+func runtimeField(gd *base.Invocation, name string, offset int64, typ *types.Type) *types.Field {
+	f := types.NewField(src.NoXPos, ir.Pkgs(gd).Runtime.Lookup(name), typ)
 	f.Offset = offset
 	return f
 }

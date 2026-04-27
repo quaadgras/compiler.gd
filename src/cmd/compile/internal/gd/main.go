@@ -95,40 +95,42 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 		gd.AdjustStartingHeap(uint64(startHeapMB)<<20, 0, 0, 0, gd.Debug.GCAdjust == 1)
 	}
 
-	localPkg := types.NewPkg(gd.Ctxt.Pkgpath, "")
+	localPkg := types.NewPkg(gd, gd.Ctxt.Pkgpath, "")
 	localPkg.Local = true
 	gd.LocalPkg = localPkg
 
+	pkgs := ir.Pkgs(gd)
+
 	// pseudo-package, for scoping
-	types.BuiltinPkg = types.NewPkg("go.builtin", "") // TODO(gri) name this package go.builtin?
+	types.BuiltinPkg = types.NewPkg(gd, "go.builtin", "") // TODO(gri) name this package go.builtin?
 	types.BuiltinPkg.Prefix = "go:builtin"
 
 	// pseudo-package, accessed by import "unsafe"
-	types.UnsafePkg = types.NewPkg("unsafe", "unsafe")
+	types.UnsafePkg = types.NewPkg(gd, "unsafe", "unsafe")
 
 	// Pseudo-package that contains the compiler's builtin
 	// declarations for package runtime. These are declared in a
 	// separate package to avoid conflicts with package runtime's
 	// actual declarations, which may differ intentionally but
 	// insignificantly.
-	ir.Pkgs.Runtime = types.NewPkg("go.runtime", "runtime")
-	ir.Pkgs.Runtime.Prefix = "runtime"
+	pkgs.Runtime = types.NewPkg(gd, "go.runtime", "runtime")
+	pkgs.Runtime.Prefix = "runtime"
 
 	// Pseudo-package that contains the compiler's builtin
 	// declarations for maps.
-	ir.Pkgs.InternalMaps = types.NewPkg("go.internal/runtime/maps", "internal/runtime/maps")
-	ir.Pkgs.InternalMaps.Prefix = "internal/runtime/maps"
+	pkgs.InternalMaps = types.NewPkg(gd, "go.internal/runtime/maps", "internal/runtime/maps")
+	pkgs.InternalMaps.Prefix = "internal/runtime/maps"
 
 	// pseudo-packages used in symbol tables
-	ir.Pkgs.Itab = types.NewPkg("go.itab", "go.itab")
-	ir.Pkgs.Itab.Prefix = "go:itab"
+	pkgs.Itab = types.NewPkg(gd, "go.itab", "go.itab")
+	pkgs.Itab.Prefix = "go:itab"
 
 	// pseudo-package used for methods with anonymous receivers
-	ir.Pkgs.Go = types.NewPkg("go", "")
+	pkgs.Go = types.NewPkg(gd, "go", "")
 
 	// pseudo-package for use with code coverage instrumentation.
-	ir.Pkgs.Coverage = types.NewPkg("go.coverage", "runtime/coverage")
-	ir.Pkgs.Coverage.Prefix = "runtime/coverage"
+	pkgs.Coverage = types.NewPkg(gd, "go.coverage", "runtime/coverage")
+	pkgs.Coverage.Prefix = "runtime/coverage"
 
 	// Record flags that affect the build result. (And don't
 	// record flags that don't, since that would cause spurious

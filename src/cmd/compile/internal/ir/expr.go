@@ -1231,7 +1231,7 @@ func MethodSymSuffix(gd *base.Invocation, recv *types.Type, msym *types.Sym, suf
 	// Find the package the receiver type appeared in. For
 	// anonymous receiver types (i.e., anonymous structs with
 	// embedded fields), use the "go" pseudo-package instead.
-	rpkg := Pkgs.Go
+	rpkg := Pkgs(gd).Go
 	if rsym != nil {
 		rpkg = rsym.Pkg
 	}

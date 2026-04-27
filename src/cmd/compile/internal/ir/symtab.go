@@ -5,6 +5,7 @@
 package ir
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 )
@@ -94,11 +95,27 @@ type symsStruct struct {
 	WasmTruncU *obj.LSym
 }
 
-// Pkgs holds known packages.
-var Pkgs struct {
+// PkgsStruct collects the well-known pseudo-packages used throughout
+// the compiler. Each Invocation has its own — Pkgs(gd) lazy-inits
+// gd.IrPkgs on first call so the Pkg pointers are interned in gd's
+// TypesPkgMap. Was a package-level `var Pkgs` that pinned process-
+// global Pkg pointers.
+type PkgsStruct struct {
 	Go           *types.Pkg
 	Itab         *types.Pkg
 	Runtime      *types.Pkg
 	InternalMaps *types.Pkg
 	Coverage     *types.Pkg
+}
+
+// Pkgs returns gd's well-known-packages struct, lazy-initialised on
+// first call. The fields are populated by gd.Main during Invocation
+// startup; consumers should call Pkgs(gd) only after that init runs.
+func Pkgs(gd *base.Invocation) *PkgsStruct {
+	p, _ := gd.IrPkgs.(*PkgsStruct)
+	if p == nil {
+		p = &PkgsStruct{}
+		gd.IrPkgs = p
+	}
+	return p
 }

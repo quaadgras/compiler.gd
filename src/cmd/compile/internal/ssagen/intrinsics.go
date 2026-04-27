@@ -2167,7 +2167,7 @@ func findIntrinsic(gd *base.Invocation, sym *types.Sym) intrinsicBuilder {
 		return nil
 	}
 	pkg := sym.Pkg.Path
-	if sym.Pkg == ir.Pkgs.Runtime {
+	if sym.Pkg == ir.Pkgs(gd).Runtime {
 		pkg = "runtime"
 	}
 	if gd.Flag.Race && pkg == "sync/atomic" {

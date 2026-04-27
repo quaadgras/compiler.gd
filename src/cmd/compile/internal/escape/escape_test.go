@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	testGd.Ctxt.DiagFunc = testGd.Errorf
 	testGd.Ctxt.DiagFlush = testGd.FlushErrors
 	testGd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
-	localPkg := types.NewPkg("p", "local")
+	localPkg := types.NewPkgForTesting("p", "local")
 	localPkg.Local = true
 	localPkg.Prefix = "p"
 	testGd.LocalPkg = localPkg

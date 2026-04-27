@@ -310,7 +310,7 @@ func WriteFuncSyms(gd *base.Invocation) {
 
 		// While compiling package runtime, we might try to create
 		// funcsyms for functions from both types.LocalPkg and
-		// ir.Pkgs.Runtime.
+		// ir.Pkgs(gd).Runtime.
 		if gd.Flag.CompilingRuntime && sf.OnList() {
 			continue
 		}

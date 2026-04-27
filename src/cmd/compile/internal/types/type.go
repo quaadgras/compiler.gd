@@ -1647,7 +1647,10 @@ func NewNamed(obj Object) *Type {
 	t := newType(TFORW)
 	t.obj = obj
 	sym := obj.Sym()
-	if sym.Pkg == ShapePkg {
+	if sym.Pkg != nil && sym.Pkg.Path == "go.shape" {
+		// Compare by Path because ShapePkg is now a per-Invocation
+		// function-resolved Pkg (its pointer differs per gd) and we
+		// don't have gd available here. Path is stable.
 		t.SetIsShape(true)
 		t.SetHasShape(true)
 	}
@@ -2055,13 +2058,18 @@ func ComplexForFloat(t *Type) *Type {
 	return nil
 }
 
-func TypeSym(t *Type) *Sym {
-	return TypeSymLookup(TypeSymName(t))
+func TypeSym(gd *base.Invocation, t *Type) *Sym {
+	return TypeSymLookup(gd, TypeSymName(t))
 }
 
-func TypeSymLookup(name string) *Sym {
+// TypeSymLookup looks up name in the per-Invocation pseudo-package
+// "type" used for runtime type-info headers. The Pkg is interned in
+// gd.TypesPkgMap so each Invocation has its own — second-compile-in-
+// one-process invocations don't collide on existing Syms.
+func TypeSymLookup(gd *base.Invocation, name string) *Sym {
+	pkg := NewPkg(gd, "type", "type")
 	typepkgmu.Lock()
-	s := typepkg.Lookup(name)
+	s := pkg.Lookup(name)
 	typepkgmu.Unlock()
 	return s
 }
@@ -2075,17 +2083,21 @@ func TypeSymName(t *Type) string {
 	return name
 }
 
-// Fake package for runtime type info (headers)
-// Don't access directly, use typeLookup below.
-var (
-	typepkgmu sync.Mutex // protects typepkg lookups
-	typepkg   = NewPkg("type", "type")
-)
+// typepkgmu still protects pseudo-type-pkg lookups; the pkg itself
+// is now per-Invocation via NewPkg, but Pkg.Lookup writes to the
+// Pkg's Syms map and concurrent backend goroutines may race without
+// the mutex.
+var typepkgmu sync.Mutex
 
 var SimType [NTYPE]Kind
 
-// Fake package for shape types (see typecheck.Shapify()).
-var ShapePkg = NewPkg("go.shape", "go.shape")
+// ShapePkg returns gd's per-Invocation pseudo-package for shape
+// types (see typecheck.Shapify()). Was a package-level var that
+// pinned a process-global Pkg — second-invocation Syms would compare
+// unequal to ShapePkg, breaking shape detection.
+func ShapePkg(gd *base.Invocation) *Pkg {
+	return NewPkg(gd, "go.shape", "go.shape")
+}
 
 func (t *Type) IsSIMD() bool {
 	return t.isSIMD

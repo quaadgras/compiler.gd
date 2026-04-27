@@ -2481,7 +2481,7 @@ func (s *state) stmt(n ir.Node) {
 		s.callResult(n, callNormal)
 		if n.Op() == ir.OCALLFUNC && n.Fun.Op() == ir.ONAME && n.Fun.(*ir.Name).Class == ir.PFUNC {
 			if fn := n.Fun.Sym().Name; s.gd.Flag.CompilingRuntime && fn == "throw" ||
-				n.Fun.Sym().Pkg == ir.Pkgs.Runtime &&
+				n.Fun.Sym().Pkg == ir.Pkgs(s.gd).Runtime &&
 					(fn == "throwinit" || fn == "gopanic" || fn == "panicwrap" || fn == "block" ||
 						fn == "panicmakeslicelen" || fn == "panicmakeslicecap" || fn == "panicunsafeslicelen" ||
 						fn == "panicunsafeslicenilptr" || fn == "panicunsafestringlen" || fn == "panicunsafestringnilptr" ||
@@ -5861,7 +5861,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 					callABI = s.f.ABI1
 				}
 			}
-			if fn := n.Fun.Sym().Name; n.Fun.Sym().Pkg == ir.Pkgs.Runtime && fn == "deferrangefunc" {
+			if fn := n.Fun.Sym().Name; n.Fun.Sym().Pkg == ir.Pkgs(s.gd).Runtime && fn == "deferrangefunc" {
 				isCallDeferRangeFunc = true
 			}
 			break
@@ -9156,7 +9156,7 @@ func deferstruct(gd *base.Invocation) *types.Type {
 		gd.Fatalf("deferStructFnField is %q, not fn", name)
 	}
 
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.Runtime.Lookup("_defer"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).Runtime.Lookup("_defer"))
 	typ := types.NewNamed(n)
 	n.SetType(typ)
 	n.SetTypecheck(1)

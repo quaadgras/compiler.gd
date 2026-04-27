@@ -288,7 +288,7 @@ var scase *types.Type
 // Keep in sync with src/runtime/select.go.
 func scasetype(gd *base.Invocation) *types.Type {
 	if scase == nil {
-		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.Runtime.Lookup("scase"))
+		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).Runtime.Lookup("scase"))
 		scase = types.NewNamed(n)
 		n.SetType(scase)
 		n.SetTypecheck(1)

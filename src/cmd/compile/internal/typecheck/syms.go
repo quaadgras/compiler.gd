@@ -15,7 +15,7 @@ import (
 // _builtin/runtime.go. If types_ is non-empty, successive occurrences
 // of the "any" placeholder type will be substituted.
 func LookupRuntime(gd *base.Invocation, name string, types_ ...*types.Type) *ir.Name {
-	s := ir.Pkgs.Runtime.Lookup(name)
+	s := ir.Pkgs(gd).Runtime.Lookup(name)
 	if s == nil || s.Def == nil {
 		gd.Fatalf("LookupRuntime: can't find runtime.%s", name)
 	}
@@ -73,7 +73,7 @@ func InitRuntime(gd *base.Invocation) {
 
 	typs := runtimeTypes(gd)
 	for _, d := range &runtimeDecls {
-		sym := ir.Pkgs.Runtime.Lookup(d.name)
+		sym := ir.Pkgs(gd).Runtime.Lookup(d.name)
 		typ := typs[d.typ]
 		switch d.tag {
 		case funcTag:
@@ -109,7 +109,7 @@ func LookupRuntimeABI(gd *base.Invocation, name string, abi obj.ABI) *obj.LSym {
 func InitCoverage(gd *base.Invocation) {
 	typs := coverageTypes(gd)
 	for _, d := range &coverageDecls {
-		sym := ir.Pkgs.Coverage.Lookup(d.name)
+		sym := ir.Pkgs(gd).Coverage.Lookup(d.name)
 		typ := typs[d.typ]
 		switch d.tag {
 		case funcTag:
@@ -126,7 +126,7 @@ func InitCoverage(gd *base.Invocation) {
 // runtime/coverage. This function must follow the internal calling
 // convention.
 func LookupCoverage(gd *base.Invocation, name string) *ir.Name {
-	sym := ir.Pkgs.Coverage.Lookup(name)
+	sym := ir.Pkgs(gd).Coverage.Lookup(name)
 	if sym == nil {
 		gd.Fatalf("LookupCoverage: can't find runtime/coverage.%s", name)
 	}

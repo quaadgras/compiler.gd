@@ -33,9 +33,9 @@ func init() {
 	types.MaxWidth = 1 << 50
 
 	typecheck.InitUniverse(testGd)
-	local = types.NewPkg("", "")
+	local = types.NewPkgForTesting("", "")
 	fsym := &types.Sym{
-		Pkg:  types.NewPkg("my/import/path", "path"),
+		Pkg:  types.NewPkgForTesting("my/import/path", "path"),
 		Name: "function",
 	}
 	f = ir.NewFunc(testGd, src.NoXPos, src.NoXPos, fsym, nil)

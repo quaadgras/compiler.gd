@@ -136,7 +136,7 @@ func (l *linker) relocPkg(gd *base.Invocation, pr *pkgReader, idx index) index {
 // adding inlining cost and escape analysis results for functions).
 func (l *linker) relocObj(gd *base.Invocation, pr *pkgReader, idx index) index {
 	path, name, tag := pr.PeekObj(idx)
-	sym := types.NewPkg(path, "").Lookup(name)
+	sym := types.NewPkg(gd, path, "").Lookup(name)
 
 	if newidx, ok := l.decls[sym]; ok {
 		return newidx
@@ -153,7 +153,7 @@ func (l *linker) relocObj(gd *base.Invocation, pr *pkgReader, idx index) index {
 		idx = pri.idx
 
 		path2, name2, tag2 := pr.PeekObj(idx)
-		sym2 := types.NewPkg(path2, "").Lookup(name2)
+		sym2 := types.NewPkg(gd, path2, "").Lookup(name2)
 		assert(gd, sym == sym2)
 		assert(gd, tag2 != pkgbits.ObjStub)
 	}

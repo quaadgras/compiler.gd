@@ -199,4 +199,18 @@ type Invocation struct {
 	// invocations (Pkg pointer is per-Invocation). Lazy-initialised
 	// on first outBufSym(gd, k) call.
 	TypesOutBufSyms any // [32]*types.Sym
+
+	// types.NewPkg interning. Was a package-level pkgMap that
+	// would alias Pkgs (and their populated Syms tables) across
+	// compile invocations in one process; the second invocation's
+	// InitRuntime would then trip "importsym of symbol that
+	// already exists". Lazy-initialised on first
+	// types.NewPkg(gd, ...) call.
+	TypesPkgMap any // map[string]*types.Pkg
+
+	// ir.Pkgs (well-known pseudo-packages: Runtime, InternalMaps,
+	// Itab, Go, Coverage). Was a package-level struct; per-
+	// Invocation so the Pkg pointers are interned in this gd's
+	// TypesPkgMap. Lazy-initialised on first ir.Pkgs(gd) call.
+	IrPkgs any // *ir.PkgsStruct
 }

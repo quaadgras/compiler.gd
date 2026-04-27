@@ -375,7 +375,7 @@ func (r *reader) doPkg() *types.Pkg {
 
 	name := r.String()
 
-	pkg := types.NewPkg(path, "")
+	pkg := types.NewPkg(r.gd, path, "")
 
 	if pkg.Name == "" {
 		pkg.Name = name
@@ -977,7 +977,7 @@ func shapify(gd *base.Invocation, targ *types.Type, basic bool) *types.Type {
 		uls = hex.EncodeToString(h[:])
 	}
 
-	sym := types.ShapePkg.Lookup(uls)
+	sym := types.ShapePkg(gd).Lookup(uls)
 	if sym.Def == nil {
 		name := ir.NewDeclNameAt(gd, under.Pos(), ir.OTYPE, sym)
 		typ := types.NewNamed(name)

@@ -190,7 +190,7 @@ func readImportFile(gd *base.Invocation, path string, target *ir.Package, env *t
 		return
 	}
 
-	pkg1 = types.NewPkg(path, "")
+	pkg1 = types.NewPkg(gd, path, "")
 	if packages != nil {
 		pkg2 = packages[path]
 		assert(gd, pkg1.Direct == (pkg2 != nil && pkg2.Complete()))

@@ -359,7 +359,7 @@ func dimportpath(gd *base.Invocation, p *types.Pkg) {
 	// If we are compiling the runtime package, there are two runtime packages around
 	// -- localpkg and Pkgs.Runtime. We don't want to produce import path symbols for
 	// both of them, so just produce one for localpkg.
-	if gd.Ctxt.Pkgpath == "runtime" && p == ir.Pkgs.Runtime {
+	if gd.Ctxt.Pkgpath == "runtime" && p == ir.Pkgs(gd).Runtime {
 		return
 	}
 
@@ -722,7 +722,7 @@ func TrackSym(gd *base.Invocation, t *types.Type, f *types.Field) *obj.LSym {
 
 func TypeSymPrefix(gd *base.Invocation, prefix string, t *types.Type) *types.Sym {
 	p := prefix + "." + t.LinkString()
-	s := types.TypeSymLookup(p)
+	s := types.TypeSymLookup(gd, p)
 
 	// This function is for looking up type-related generated functions
 	// (e.g. eq and hash). Make sure they are indeed generated.
@@ -742,7 +742,7 @@ func TypeSym(gd *base.Invocation, t *types.Type) *types.Sym {
 	if t.Kind() == types.TFUNC && t.Recv() != nil {
 		gd.Fatalf("misuse of method type: %v", t)
 	}
-	s := types.TypeSym(t)
+	s := types.TypeSym(gd, t)
 	gd.ReflectdataSignatMu.Lock()
 	NeedRuntimeType(gd, t)
 	gd.ReflectdataSignatMu.Unlock()
@@ -754,7 +754,7 @@ func TypeLinksymPrefix(gd *base.Invocation, prefix string, t *types.Type) *obj.L
 }
 
 func TypeLinksymLookup(gd *base.Invocation, name string) *obj.LSym {
-	return types.TypeSymLookup(name).Linksym(gd)
+	return types.TypeSymLookup(gd, name).Linksym(gd)
 }
 
 func TypeLinksym(gd *base.Invocation, t *types.Type) *obj.LSym {
@@ -786,7 +786,7 @@ func ITabLsym(gd *base.Invocation, typ, iface *types.Type) *obj.LSym {
 }
 
 func itabLsym(gd *base.Invocation, typ, iface *types.Type, allowNonImplement bool) *obj.LSym {
-	s, existed := ir.Pkgs.Itab.LookupOK(typ.LinkString() + "," + iface.LinkString())
+	s, existed := ir.Pkgs(gd).Itab.LookupOK(typ.LinkString() + "," + iface.LinkString())
 	lsym := s.Linksym(gd)
 	gd.ReflectdataSignatMu.Lock()
 	if lsym.Extra == nil {
@@ -878,7 +878,7 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 		gd.Fatalf("writeType %v", t)
 	}
 
-	s := types.TypeSym(t)
+	s := types.TypeSym(gd, t)
 	lsym := s.Linksym(gd)
 
 	// special case (look for runtime below):
@@ -896,7 +896,7 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	// package. We'll emit a description for the real type while
 	// compiling package runtime, so we don't need or want to emit one
 	// from this fake type.
-	if sym := tbase.Sym(); sym != nil && sym.Pkg == ir.Pkgs.Runtime {
+	if sym := tbase.Sym(); sym != nil && sym.Pkg == ir.Pkgs(gd).Runtime {
 		return lsym
 	}
 

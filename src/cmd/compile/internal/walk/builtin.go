@@ -925,7 +925,7 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 				types.NewField(gd.Pos, nil, types.Types[types.TBOOL]),
 			})
 
-		fn := ir.NewFunc(gd, n.Pos(), n.Pos(), math_MulUintptr, decl)
+		fn := ir.NewFunc(gd, n.Pos(), n.Pos(), mathMulUintptrSym(gd), decl)
 
 		call := mkcall1(gd, fn.Nname, fn.Type().ResultsTuple(), init, ir.NewInt(gd, gd.Pos, sliceType.Elem().Size()), typecheck.Conv(gd, typecheck.Conv(gd, len, lenType), types.Types[types.TUINTPTR]))
 		appendWalkStmt(gd, init, ir.NewAssignListStmt(gd, gd.Pos, ir.OAS2, []ir.Node{mem, overflow}, []ir.Node{call}))
@@ -953,7 +953,20 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 	return walkExpr(gd, typecheck.Expr(gd, h), init)
 }
 
-var math_MulUintptr = &types.Sym{Pkg: types.NewPkg("internal/runtime/math", "math"), Name: "MulUintptr"}
+// mathMulUintptrSym returns gd's per-Invocation Sym for
+// internal/runtime/math.MulUintptr. Was a package-level
+// `var math_MulUintptr` that pinned a process-global Pkg pointer
+// (and therefore a Sym whose Pkg differed from per-Invocation
+// Syms). Made into a function so the Pkg is interned in gd's
+// TypesPkgMap.
+//
+// Passes "" for the package name on purpose: the importer may have
+// already created the Pkg (with the real "math" name); NewPkg with
+// empty name accepts whatever name the existing Pkg carries instead
+// of asserting a match.
+func mathMulUintptrSym(gd *base.Invocation) *types.Sym {
+	return types.NewPkg(gd, "internal/runtime/math", "").Lookup("MulUintptr")
+}
 
 func walkUnsafeString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.Node {
 	ptr := safeExpr(gd, n.X, init)

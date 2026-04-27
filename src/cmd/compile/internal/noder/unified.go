@@ -53,9 +53,9 @@ func LookupFunc(gd *base.Invocation, fullName string) (*ir.Func, error) {
 		return nil, fmt.Errorf("error parsing symbol name %q: %v", fullName, err)
 	}
 
-	pkg, ok := types.PkgMap()[pkgPath]
+	pkg, ok := types.PkgMapOf(gd)[pkgPath]
 	if !ok {
-		return nil, fmt.Errorf("pkg %s doesn't exist in %v", pkgPath, types.PkgMap())
+		return nil, fmt.Errorf("pkg %s doesn't exist in %v", pkgPath, types.PkgMapOf(gd))
 	}
 
 	// Symbol naming is ambiguous. We can't necessarily distinguish between
@@ -441,7 +441,7 @@ func readPackage(gd *base.Invocation, pr *pkgReader, importpkg *types.Pkg, local
 
 			path, name, code := r.p.PeekObj(idx)
 			if code != pkgbits.ObjStub {
-				objReader(gd)[types.NewPkg(path, "").Lookup(name)] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
+				objReader(gd)[types.NewPkg(gd, path, "").Lookup(name)] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}
 			}
 		}
 
@@ -463,7 +463,7 @@ func readPackage(gd *base.Invocation, pr *pkgReader, importpkg *types.Pkg, local
 			name := r.String()
 			idx := r.Reloc(pkgbits.SectionBody)
 
-			sym := types.NewPkg(path, "").Lookup(name)
+			sym := types.NewPkg(gd, path, "").Lookup(name)
 			ibr := importBodyReader(gd)
 			if _, ok := ibr[sym]; !ok {
 				ibr[sym] = pkgReaderIndex{pr, idx, nil, nil, gd, nil}

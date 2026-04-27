@@ -121,7 +121,7 @@ func mapTableType(gd *base.Invocation) *types.Type {
 		makefield("groups_lengthMask", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("table"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("table"))
 	table := types.NewNamed(n)
 	n.SetType(table)
 	n.SetTypecheck(1)
@@ -177,7 +177,7 @@ func MapType(gd *base.Invocation) *types.Type {
 		makefield("clearSeq", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Map"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Map"))
 	m := types.NewNamed(n)
 	n.SetType(m)
 	n.SetTypecheck(1)
@@ -243,7 +243,7 @@ func MapIterType(gd *base.Invocation) *types.Type {
 	}
 
 	// build iterator struct holding the above fields
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs.InternalMaps.Lookup("Iter"))
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Iter"))
 	iter := types.NewNamed(n)
 	n.SetType(iter)
 	n.SetTypecheck(1)

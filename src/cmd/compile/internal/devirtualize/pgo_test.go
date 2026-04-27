@@ -116,7 +116,7 @@ func makeStructWithMethod(gd *base.Invocation, pkg *types.Pkg, structName, methN
 func TestFindHotConcreteInterfaceCallee(t *testing.T) {
 	p := newProfileBuilder()
 
-	pkgFoo := types.NewPkg("example.com/foo", "foo")
+	pkgFoo := types.NewPkgForTesting("example.com/foo", "foo")
 	basePos := src.NewFileBase("foo.go", "/foo.go")
 
 	const (
@@ -184,7 +184,7 @@ func TestFindHotConcreteFunctionCallee(t *testing.T) {
 
 	p := newProfileBuilder()
 
-	pkgFoo := types.NewPkg("example.com/foo", "foo")
+	pkgFoo := types.NewPkgForTesting("example.com/foo", "foo")
 	basePos := src.NewFileBase("foo.go", "/foo.go")
 
 	const (
