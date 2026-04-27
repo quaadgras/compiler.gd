@@ -2,25 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Standalone link binary. Forwards to cmd/link/host.Run, which holds
+// all the actual logic so cmd/go can drive an in-process invocation
+// without a fork/exec.
 package main
 
 import (
-	"cmd/internal/sys"
-	"cmd/link/internal/amd64"
-	"cmd/link/internal/arm"
-	"cmd/link/internal/arm64"
-	"cmd/link/internal/ld"
-	"cmd/link/internal/loong64"
-	"cmd/link/internal/mips"
-	"cmd/link/internal/mips64"
-	"cmd/link/internal/ppc64"
-	"cmd/link/internal/riscv64"
-	"cmd/link/internal/s390x"
-	"cmd/link/internal/wasm"
-	"cmd/link/internal/x86"
-	"fmt"
-	"internal/buildcfg"
 	"os"
+
+	"cmd/link/host"
 )
 
 // The bulk of the linker implementation lives in cmd/link/internal/ld.
@@ -28,7 +18,7 @@ import (
 //
 // Program initialization:
 //
-// Before any argument parsing is done, the Init function of relevant
+// Before any argument parsing is done, the Init function of the relevant
 // architecture package is called. The only job done in Init is
 // configuration of the architecture-specific variables.
 //
@@ -36,38 +26,11 @@ import (
 // some configuration decisions, and then gives the architecture
 // packages a second chance to modify the linker's configuration
 // via the ld.Arch.Archinit function.
-
 func main() {
-	var arch *sys.Arch
-	var theArch ld.Arch
-
-	buildcfg.Check()
-	switch buildcfg.GOARCH {
-	default:
-		fmt.Fprintf(os.Stderr, "link: unknown architecture %q\n", buildcfg.GOARCH)
-		os.Exit(2)
-	case "386":
-		arch, theArch = x86.Init()
-	case "amd64":
-		arch, theArch = amd64.Init()
-	case "arm":
-		arch, theArch = arm.Init()
-	case "arm64":
-		arch, theArch = arm64.Init()
-	case "loong64":
-		arch, theArch = loong64.Init()
-	case "mips", "mipsle":
-		arch, theArch = mips.Init()
-	case "mips64", "mips64le":
-		arch, theArch = mips64.Init()
-	case "ppc64", "ppc64le":
-		arch, theArch = ppc64.Init()
-	case "riscv64":
-		arch, theArch = riscv64.Init()
-	case "s390x":
-		arch, theArch = s390x.Init()
-	case "wasm":
-		arch, theArch = wasm.Init()
+	status, err := host.Run(os.Args[1:], os.Stdout, os.Stderr)
+	if err != nil {
+		os.Stderr.WriteString("link: " + err.Error() + "\n")
+		os.Exit(1)
 	}
-	ld.Main(arch, theArch)
+	os.Exit(status)
 }

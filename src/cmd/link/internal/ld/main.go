@@ -46,6 +46,7 @@ import (
 	"runtime/pprof"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
@@ -54,72 +55,148 @@ var (
 	ownTmpDir      bool // set to true if tmp dir created by linker (e.g. no -tmpdir)
 )
 
-func init() {
-	flag.Var(&rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
-	flag.Var(&flagExtld, "extld", "use `linker` when linking in external mode")
-	flag.Var(&flagExtldflags, "extldflags", "pass `flags` to external linker")
-	flag.Var(&flagW, "w", "disable DWARF generation")
-}
+// counter.Open writes process-global state. sync.Once-gate so back-to-back
+// host.Run invocations don't double-initialise.
+var counterOpenOnce sync.Once
 
 // Flags used by the linker. The exported flags are used by the architecture-specific packages.
+//
+// gd fork: the var declarations no longer call flag.X(...) inline. flag
+// registration was moved into setupFlags() so each in-process Main call
+// can install a fresh flag.CommandLine and re-register all flags onto
+// it (otherwise flag.String("H", ...) inside Main panics with
+// "flag redefined" on the second invocation).
 var (
-	flagBuildid = flag.String("buildid", "", "record `id` as Go toolchain build id")
-	flagBindNow = flag.Bool("bindnow", false, "mark a dynamically linked ELF object for immediate function binding")
+	flagBuildid *string
+	flagBindNow *bool
 
-	flagOutfile    = flag.String("o", "", "write output to `file`")
-	flagPluginPath = flag.String("pluginpath", "", "full path name for plugin")
-	flagFipso      = flag.String("fipso", "", "write fips module to `file`")
+	flagOutfile    *string
+	flagPluginPath *string
+	flagFipso      *string
 
-	flagInstallSuffix = flag.String("installsuffix", "", "set package directory `suffix`")
-	flagDumpDep       = flag.Bool("dumpdep", false, "dump symbol dependency graph")
-	flagRace          = flag.Bool("race", false, "enable race detector")
-	flagMsan          = flag.Bool("msan", false, "enable MSan interface")
-	flagAsan          = flag.Bool("asan", false, "enable ASan interface")
-	flagAslr          = flag.Bool("aslr", true, "enable ASLR for buildmode=c-shared on windows")
+	flagInstallSuffix *string
+	flagDumpDep       *bool
+	flagRace          *bool
+	flagMsan          *bool
+	flagAsan          *bool
+	flagAslr          *bool
 
-	flagFieldTrack = flag.String("k", "", "set field tracking `symbol`")
-	flagLibGCC     = flag.String("libgcc", "", "compiler support lib for internal linking; use \"none\" to disable")
-	flagTmpdir     = flag.String("tmpdir", "", "use `directory` for temporary files")
+	flagFieldTrack *string
+	flagLibGCC     *string
+	flagTmpdir     *string
 
 	flagExtld      quoted.Flag
 	flagExtldflags quoted.Flag
-	flagExtar      = flag.String("extar", "", "archive program for buildmode=c-archive")
+	flagExtar      *string
 
-	flagCaptureHostObjs = flag.String("capturehostobjs", "", "capture host object files loaded during internal linking to specified dir")
+	flagCaptureHostObjs *string
 
-	flagA             = flag.Bool("a", false, "no-op (deprecated)")
-	FlagC             = flag.Bool("c", false, "dump call graph")
-	FlagD             = flag.Bool("d", false, "disable dynamic executable")
-	flagF             = flag.Bool("f", false, "ignore version mismatch")
-	flagG             = flag.Bool("g", false, "disable go package data checks")
-	flagH             = flag.Bool("h", false, "halt on error")
-	flagN             = flag.Bool("n", false, "no-op (deprecated)")
-	FlagS             = flag.Bool("s", false, "disable symbol table")
+	flagA             *bool
+	FlagC             *bool
+	FlagD             *bool
+	flagF             *bool
+	flagG             *bool
+	flagH             *bool
+	flagN             *bool
+	FlagS             *bool
 	flag8             bool // use 64-bit addresses in symbol table
-	flagHostBuildid   = flag.String("B", "", "set ELF NT_GNU_BUILD_ID `note` or Mach-O UUID; use \"gobuildid\" to generate it from the Go build ID; \"none\" to disable")
-	flagInterpreter   = flag.String("I", "", "use `linker` as ELF dynamic linker")
-	flagCheckLinkname = flag.Bool("checklinkname", true, "check linkname symbol references")
-	FlagDebugTramp    = flag.Int("debugtramp", 0, "debug trampolines")
-	FlagDebugTextSize = flag.Int("debugtextsize", 0, "debug text section max size")
-	flagDebugNosplit  = flag.Bool("debugnosplit", false, "dump nosplit call graph")
-	FlagStrictDups    = flag.Int("strictdups", 0, "sanity check duplicate symbol contents during object file reading (1=warn 2=err).")
-	FlagRound         = flag.Int64("R", -1, "set address rounding `quantum`")
-	FlagTextAddr      = flag.Int64("T", -1, "set the start address of text symbols")
-	FlagDataAddr      = flag.Int64("D", -1, "set the start address of data symbols")
-	FlagFuncAlign     = flag.Int("funcalign", 0, "set function align to `N` bytes")
-	flagEntrySymbol   = flag.String("E", "", "set `entry` symbol name")
-	flagPruneWeakMap  = flag.Bool("pruneweakmap", true, "prune weak mapinit refs")
-	flagRandLayout    = flag.Int64("randlayout", 0, "randomize function layout")
-	flagAllErrors     = flag.Bool("e", false, "no limit on number of errors reported")
-	cpuprofile        = flag.String("cpuprofile", "", "write cpu profile to `file`")
-	memprofile        = flag.String("memprofile", "", "write memory profile to `file`")
-	memprofilerate    = flag.Int64("memprofilerate", 0, "set runtime.MemProfileRate to `rate`")
-	benchmarkFlag     = flag.String("benchmark", "", "set to 'mem' or 'cpu' to enable phase benchmarking")
-	benchmarkFileFlag = flag.String("benchmarkprofile", "", "emit phase profiles to `base`_phase.{cpu,mem}prof")
+	flagHostBuildid   *string
+	flagInterpreter   *string
+	flagCheckLinkname *bool
+	FlagDebugTramp    *int
+	FlagDebugTextSize *int
+	flagDebugNosplit  *bool
+	FlagStrictDups    *int
+	FlagRound         *int64
+	FlagTextAddr      *int64
+	FlagDataAddr      *int64
+	FlagFuncAlign     *int
+	flagEntrySymbol   *string
+	flagPruneWeakMap  *bool
+	flagRandLayout    *int64
+	flagAllErrors     *bool
+	cpuprofile        *string
+	memprofile        *string
+	memprofilerate    *int64
+	benchmarkFlag     *string
+	benchmarkFileFlag *string
 
 	flagW ternaryFlag
 	FlagW = new(bool) // the -w flag, computed in main from flagW
 )
+
+// setupFlags registers every linker flag onto the current
+// flag.CommandLine. Called from init (default CommandLine) and from
+// Main (fresh CommandLine per invocation) so concurrent in-process
+// linker runs don't trip "flag redefined" on the second pass.
+//
+// The Var-style flags whose underlying values live in package-level
+// vars (rpath, flagExtld, flagExtldflags, flagW, flag8) just bind a
+// fresh -<name> entry to the same target each time; flag.Parse will
+// overwrite the value on each pass, so callers must reset those
+// targets to their defaults before parsing if they care about
+// invocation-to-invocation isolation.
+func setupFlags() {
+	flag.Var(&rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
+	flag.Var(&flagExtld, "extld", "use `linker` when linking in external mode")
+	flag.Var(&flagExtldflags, "extldflags", "pass `flags` to external linker")
+	flag.Var(&flagW, "w", "disable DWARF generation")
+
+	flagBuildid = flag.String("buildid", "", "record `id` as Go toolchain build id")
+	flagBindNow = flag.Bool("bindnow", false, "mark a dynamically linked ELF object for immediate function binding")
+
+	flagOutfile = flag.String("o", "", "write output to `file`")
+	flagPluginPath = flag.String("pluginpath", "", "full path name for plugin")
+	flagFipso = flag.String("fipso", "", "write fips module to `file`")
+
+	flagInstallSuffix = flag.String("installsuffix", "", "set package directory `suffix`")
+	flagDumpDep = flag.Bool("dumpdep", false, "dump symbol dependency graph")
+	flagRace = flag.Bool("race", false, "enable race detector")
+	flagMsan = flag.Bool("msan", false, "enable MSan interface")
+	flagAsan = flag.Bool("asan", false, "enable ASan interface")
+	flagAslr = flag.Bool("aslr", true, "enable ASLR for buildmode=c-shared on windows")
+
+	flagFieldTrack = flag.String("k", "", "set field tracking `symbol`")
+	flagLibGCC = flag.String("libgcc", "", "compiler support lib for internal linking; use \"none\" to disable")
+	flagTmpdir = flag.String("tmpdir", "", "use `directory` for temporary files")
+
+	flagExtar = flag.String("extar", "", "archive program for buildmode=c-archive")
+
+	flagCaptureHostObjs = flag.String("capturehostobjs", "", "capture host object files loaded during internal linking to specified dir")
+
+	flagA = flag.Bool("a", false, "no-op (deprecated)")
+	FlagC = flag.Bool("c", false, "dump call graph")
+	FlagD = flag.Bool("d", false, "disable dynamic executable")
+	flagF = flag.Bool("f", false, "ignore version mismatch")
+	flagG = flag.Bool("g", false, "disable go package data checks")
+	flagH = flag.Bool("h", false, "halt on error")
+	flagN = flag.Bool("n", false, "no-op (deprecated)")
+	FlagS = flag.Bool("s", false, "disable symbol table")
+	flagHostBuildid = flag.String("B", "", "set ELF NT_GNU_BUILD_ID `note` or Mach-O UUID; use \"gobuildid\" to generate it from the Go build ID; \"none\" to disable")
+	flagInterpreter = flag.String("I", "", "use `linker` as ELF dynamic linker")
+	flagCheckLinkname = flag.Bool("checklinkname", true, "check linkname symbol references")
+	FlagDebugTramp = flag.Int("debugtramp", 0, "debug trampolines")
+	FlagDebugTextSize = flag.Int("debugtextsize", 0, "debug text section max size")
+	flagDebugNosplit = flag.Bool("debugnosplit", false, "dump nosplit call graph")
+	FlagStrictDups = flag.Int("strictdups", 0, "sanity check duplicate symbol contents during object file reading (1=warn 2=err).")
+	FlagRound = flag.Int64("R", -1, "set address rounding `quantum`")
+	FlagTextAddr = flag.Int64("T", -1, "set the start address of text symbols")
+	FlagDataAddr = flag.Int64("D", -1, "set the start address of data symbols")
+	FlagFuncAlign = flag.Int("funcalign", 0, "set function align to `N` bytes")
+	flagEntrySymbol = flag.String("E", "", "set `entry` symbol name")
+	flagPruneWeakMap = flag.Bool("pruneweakmap", true, "prune weak mapinit refs")
+	flagRandLayout = flag.Int64("randlayout", 0, "randomize function layout")
+	flagAllErrors = flag.Bool("e", false, "no limit on number of errors reported")
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
+	memprofile = flag.String("memprofile", "", "write memory profile to `file`")
+	memprofilerate = flag.Int64("memprofilerate", 0, "set runtime.MemProfileRate to `rate`")
+	benchmarkFlag = flag.String("benchmark", "", "set to 'mem' or 'cpu' to enable phase benchmarking")
+	benchmarkFileFlag = flag.String("benchmarkprofile", "", "emit phase profiles to `base`_phase.{cpu,mem}prof")
+}
+
+func init() {
+	setupFlags()
+}
 
 // ternaryFlag is like a boolean flag, but has a default value that is
 // neither true nor false, allowing it to be set from context (e.g. from another
@@ -159,22 +236,57 @@ func (t *ternaryFlag) String() string {
 func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean flag
 
 // Main is the main entry point for the linker code.
-func Main(arch *sys.Arch, theArch Arch) {
+//
+// args is the argv that the standalone link binary would have received
+// as os.Args[1:]. Under cmd/link/host.Run (in-process), Main is called
+// from a worker goroutine; under linkRunMu so concurrent host.Run
+// invocations don't race on the package-level flag globals or
+// os.Args. Long-term plan: refactor flags onto a per-Link Context
+// (asm playbook) and lift the mutex.
+func Main(arch *sys.Arch, theArch Arch, args []string) {
 	log.SetPrefix("link: ")
 	log.SetFlags(0)
-	counter.Open()
+	counterOpenOnce.Do(counter.Open)
 	counter.Inc("link/invocations")
+
+	// Reset package-level state that the previous in-process invocation
+	// (if any) may have left dirty. Exit's runAtExitFuncs already clears
+	// atExitFuncs, but errored exits may bypass it.
+	nerrors = 0
+	strictDupMsgCount = 0
+	atExitFuncs = nil
 
 	thearch = theArch
 	ctxt := linknew(arch)
 	ctxt.Bso = bufio.NewWriter(os.Stdout)
+
+	// flag.Parse reads from os.Args. Under in-process invocation we
+	// need it to see args, not whatever cmd/go's own argv is. The
+	// outer linkRunMu held by host.Run keeps this serial.
+	savedArgs := os.Args
+	os.Args = append([]string{savedArgs[0]}, args...)
+	defer func() { os.Args = savedArgs }()
+
+	// Replace flag.CommandLine with a fresh FlagSet and re-register
+	// every flag onto it. The previous CommandLine still holds the
+	// flags from the previous invocation (or from process init); we
+	// want a clean slate so flag values don't leak across host.Run
+	// calls and so the local-to-Main flag.String("H", ...) below
+	// doesn't trip "flag redefined" on the second pass.
+	flag.CommandLine = flag.NewFlagSet(savedArgs[0], flag.ExitOnError)
+	flagW = ternaryFlagUnset
+	flag8 = false
+	rpath = Rpath{} // reset Var-style targets
+	flagExtld = nil
+	flagExtldflags = nil
+	setupFlags()
 
 	// For testing behavior of go command when tools crash silently.
 	// Undocumented, not in standard flag parser to avoid
 	// exposing in usage message.
 	for _, arg := range os.Args {
 		if arg == "-crash_for_testing" {
-			os.Exit(2)
+			Exit(2)
 		}
 	}
 

@@ -692,7 +692,17 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 	} else {
 		env = append(env, "GOROOT="+cfg.GOROOT)
 	}
-	return b.Shell(root).run(dir, root.Package.ImportPath, env, cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags, mainpkg)
+	args := []any{cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags, mainpkg}
+	// gd fork: cmd/link in-process is opt-in via GOGD_INPROC_LINK=1.
+	// The host package + Exit/Goexit dance is in place but cmd/link's
+	// package-level state (DWARF caches, Mach-O/ELF format vars,
+	// etc.) is not yet per-Link; back-to-back invocations would carry
+	// stale state. Default stays fork/exec until that migration
+	// finishes.
+	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+		return inProcessLink(b.Shell(root), dir, root.Package.ImportPath, env, args)
+	}
+	return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
 }
 
 func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action, targetPath, importcfg string, allactions []*Action) error {
@@ -740,7 +750,12 @@ func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action,
 	// the output file path is recorded in the .gnu.version_d section.
 	dir, targetPath := filepath.Split(targetPath)
 
-	return b.Shell(root).run(dir, targetPath, cfgChangedEnv, cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags)
+	args := []any{cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags}
+	// gd fork: in-process link gated by GOGD_INPROC_LINK=1 (see ld above).
+	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+		return inProcessLink(b.Shell(root), dir, targetPath, cfgChangedEnv, args)
+	}
+	return b.Shell(root).run(dir, targetPath, cfgChangedEnv, args...)
 }
 
 func (gcToolchain) cc(b *Builder, a *Action, ofile, cfile string) error {

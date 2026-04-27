@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
 )
 
 var atExitFuncs []func()
@@ -25,9 +26,30 @@ func runAtExitFuncs() {
 	atExitFuncs = nil
 }
 
-// Exit exits with code after executing all atExitFuncs.
+// inProcessStatus, when non-nil, redirects Exit's process-termination
+// path: instead of os.Exit it writes the code to *inProcessStatus and
+// calls runtime.Goexit so the caller's goroutine survives. Set by
+// cmd/link/host.Run before invoking Main on a worker goroutine, and
+// cleared once Main returns.
+var inProcessStatus *int
+
+// SetInProcess wires Exit to runtime.Goexit + status writeback. Called
+// by cmd/link/host.Run; not for general use.
+func SetInProcess(status *int) { inProcessStatus = status }
+
+// ClearInProcess restores Exit's process-termination behaviour.
+func ClearInProcess() { inProcessStatus = nil }
+
+// Exit exits with code after executing all atExitFuncs. Under
+// cmd/link/host.Run (in-process mode) it writes the code to a status
+// pointer and calls runtime.Goexit instead of os.Exit, so the calling
+// goroutine in cmd/go survives.
 func Exit(code int) {
 	runAtExitFuncs()
+	if inProcessStatus != nil {
+		*inProcessStatus = code
+		runtime.Goexit()
+	}
 	os.Exit(code)
 }
 

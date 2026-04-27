@@ -29,6 +29,18 @@ func useInProcessCompile() bool {
 	return os.Getenv("GOGD_INPROC") != "0"
 }
 
+// useInProcessLink reports whether cmd/go should drive cmd/link
+// in-process. Opt-in via GOGD_INPROC_LINK=1 because cmd/link's
+// package-level state (DWARF caches, Mach-O/ELF format vars, error
+// counters) has not yet been migrated onto a per-Link Context;
+// back-to-back invocations in the same process can carry stale state.
+// The host.Run scaffolding (worker goroutine + runtime.Goexit)
+// already exists; flipping the default to on requires finishing the
+// per-Link migration first.
+func useInProcessLink() bool {
+	return os.Getenv("GOGD_INPROC_LINK") == "1"
+}
+
 // inProcessCompile drives a single cmd/compile invocation in the
 // calling process via cmd/compile/host.Run, mirroring the
 // observable behaviour of (*Shell).runOut. cmd/go calls this in
