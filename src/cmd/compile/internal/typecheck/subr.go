@@ -107,16 +107,16 @@ func CalcMethods(t *types.Type) {
 	}
 
 	// generate all reachable methods. Use a per-call visited
-	// set rather than the t.Recur() flag on the shared Type so
-	// concurrent in-process compile invocations don't race on
-	// the bitset write/clear pair.
-	slist = slist[:0]
-	expand1(t, true, map[*types.Type]bool{})
+	// set and slist rather than the t.Recur() flag and shared
+	// slist on the Type/package — concurrent in-process compile
+	// invocations would otherwise race on the bitset and slice.
+	var localSlist []symlink
+	expand1(t, true, map[*types.Type]bool{}, &localSlist)
 
 	// check each method to be uniquely reachable
 	var ms []*types.Field
-	for i, sl := range slist {
-		slist[i].field = nil
+	for i, sl := range localSlist {
+		localSlist[i].field = nil
 		sl.field.Sym.SetUniq(false)
 
 		var f *types.Field
@@ -161,7 +161,11 @@ func CalcMethods(t *types.Type) {
 // visited is the per-call cycle set; was the t.Recur() flag on the
 // shared Type, but that races between concurrent in-process compile
 // invocations doing methodset traversal on the same Type.
-func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase bool, visited map[*types.Type]bool) (c int, more bool) {
+//
+// dotlist is a per-call scratch buffer for the path of embedded
+// fields. Was a package-level slice; per-call removes the
+// inter-invocation race.
+func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase bool, visited map[*types.Type]bool, dotlist []dlist) (c int, more bool) {
 	if visited[t] {
 		return
 	}
@@ -202,7 +206,7 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 			// Found an embedded field at target depth.
 			return c, true
 		}
-		a, more1 := adddot1(s, f.Type, d, save, ignorecase, visited)
+		a, more1 := adddot1(s, f.Type, d, save, ignorecase, visited, dotlist)
 		if a != 0 && c == 0 {
 			dotlist[d].field = f
 		}
@@ -214,11 +218,6 @@ func adddot1(s *types.Sym, t *types.Type, d int, save **types.Field, ignorecase 
 
 	return c, more
 }
-
-// dotlist is used by adddot1 to record the path of embedded fields
-// used to access a target field or method.
-// Must be non-nil so that dotpath returns a non-nil slice even if d is zero.
-var dotlist = make([]dlist, 10)
 
 // Convert node n for assignment to type t.
 func assignconvfn(gd *base.Invocation, n ir.Node, t *types.Type, context func() string) ir.Node {
@@ -513,11 +512,15 @@ func dotpath(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) (
 	// a field or method named s in the subtree rooted at t. To accomplish
 	// that, we iteratively perform depth-first searches of increasing depth
 	// until we either find the named field/method or exhaust the tree.
+	//
+	// dotlist is per-call so concurrent host.Run invocations don't race
+	// on a package-level scratch slice.
+	dotlist := make([]dlist, 10)
 	for d := 0; ; d++ {
 		if d > len(dotlist) {
 			dotlist = append(dotlist, dlist{})
 		}
-		if c, more := adddot1(s, t, d, save, ignorecase, map[*types.Type]bool{}); c == 1 {
+		if c, more := adddot1(s, t, d, save, ignorecase, map[*types.Type]bool{}, dotlist); c == 1 {
 			return dotlist[:d], false
 		} else if c > 1 {
 			return nil, true
@@ -527,7 +530,7 @@ func dotpath(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) (
 	}
 }
 
-func expand0(t *types.Type) {
+func expand0(t *types.Type, slist *[]symlink) {
 	u := t
 	if u.IsPtr() {
 		u = u.Elem()
@@ -539,7 +542,7 @@ func expand0(t *types.Type) {
 				continue
 			}
 			f.Sym.SetUniq(true)
-			slist = append(slist, symlink{field: f})
+			*slist = append(*slist, symlink{field: f})
 		}
 
 		return
@@ -552,19 +555,19 @@ func expand0(t *types.Type) {
 				continue
 			}
 			f.Sym.SetUniq(true)
-			slist = append(slist, symlink{field: f})
+			*slist = append(*slist, symlink{field: f})
 		}
 	}
 }
 
-func expand1(t *types.Type, top bool, visited map[*types.Type]bool) {
+func expand1(t *types.Type, top bool, visited map[*types.Type]bool, slist *[]symlink) {
 	if visited[t] {
 		return
 	}
 	visited[t] = true
 
 	if !top {
-		expand0(t)
+		expand0(t, slist)
 	}
 
 	u := t
@@ -586,7 +589,7 @@ func expand1(t *types.Type, top bool, visited map[*types.Type]bool) {
 			if f.Sym == nil {
 				continue
 			}
-			expand1(f.Type, false, visited)
+			expand1(f.Type, false, visited, slist)
 		}
 	}
 
@@ -815,7 +818,9 @@ func lookdot0(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) 
 	return c
 }
 
-var slist []symlink
+// slist removed — CalcMethods now uses a per-call local slist
+// passed by pointer through expand0/expand1 so concurrent
+// in-process compile invocations don't race on the shared slice.
 
 // Code to help generate trampoline functions for methods on embedded
 // types. These are approx the same as the corresponding AddImplicitDots

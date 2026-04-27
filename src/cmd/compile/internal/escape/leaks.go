@@ -9,6 +9,7 @@ import (
 	"cmd/compile/internal/types"
 	"math"
 	"strings"
+	"sync"
 )
 
 // A leaks represents a set of assignment flows from a parameter to
@@ -93,7 +94,17 @@ func (l *leaks) Optimize(gd *base.Invocation) {
 	}
 }
 
-var leakTagCache = map[leaks]string{}
+// leakTagCache is a process-wide dedupe cache for the binary
+// "esc:..." strings emitted into export data. The leaks→string
+// mapping is deterministic, so cross-invocation sharing is safe;
+// the mutex just keeps concurrent host.Run invocations from racing
+// on the underlying Go map. (Was unprotected; manifested as
+// "concurrent map read and map write" once cmd/go drove
+// concurrent in-process compiles.)
+var (
+	leakTagCacheMu sync.Mutex
+	leakTagCache   = map[leaks]string{}
+)
 
 // Encode converts l into a binary string for export data.
 func (l leaks) Encode() string {
@@ -102,6 +113,8 @@ func (l leaks) Encode() string {
 		// efficiently in export data.
 		return ""
 	}
+	leakTagCacheMu.Lock()
+	defer leakTagCacheMu.Unlock()
 	if s, ok := leakTagCache[l]; ok {
 		return s
 	}

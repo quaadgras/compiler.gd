@@ -291,10 +291,36 @@ type Invocation struct {
 	// Storing per-Invocation keeps the LSym Ctxt-local.
 	Pathsyms any // map[*types.Pkg]*obj.LSym
 
+	// PathsymsMu serializes dimportpath under the parallel backend.
+	// Two SSA workers reaching dimportpath for the same *types.Pkg
+	// at the same time would both miss the cache, both Lookup the
+	// same LSym in gd.Ctxt, and both call objw.Global on it — the
+	// linker pass then trips on "symbol type:.importpath.X. redeclared".
+	PathsymsMu sync.Mutex
+
 	// walk.scasetype's cached *types.Type. Was a package-level
 	// `var scase`; pinned invocation 1's LocalPkg-local Syms for
 	// the "c" / "elem" fields, breaking selector lookups in later
 	// invocations. Per-Invocation so each compile builds scase
 	// against its own LocalPkg.
 	WalkScaseType any // *types.Type
+
+	// inline package's PGO maps. Were package-level `var` maps,
+	// one of which (candHotEdgeMap) is written by PGOInlinePrologue
+	// in invocation A while invocation B reads it from inlineCostOK,
+	// triggering "concurrent map read and map write" under cmd/go's
+	// outer parallelism. The maps are stored as `any` here to keep
+	// base out of the inline import graph; helpers in inline/inl.go
+	// hand back typed views.
+	InlPgoCandHotCalleeMap any // map[*pgoir.IRNode]struct{}
+	InlPgoHasHotCall       any // map[*ir.Func]struct{}
+	InlPgoCandHotEdgeMap   any // map[pgoir.CallSiteInfo]struct{}
+
+	// Per-Invocation PGO inline thresholds; were package-level vars
+	// in cmd/compile/internal/inline. Concurrent invocations with
+	// different debug knobs would have raced on the writes in
+	// PGOInlinePrologue.
+	InlPgoHotCallSiteThresholdPercent    float64
+	InlPgoCDFHotCallSiteThresholdPercent float64
+	InlPgoHotMaxBudget                   int32
 }

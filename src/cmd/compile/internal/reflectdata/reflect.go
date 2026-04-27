@@ -362,6 +362,12 @@ func pathsymsOf(gd *base.Invocation) map[*types.Pkg]*obj.LSym {
 }
 
 func dimportpath(gd *base.Invocation, p *types.Pkg) *obj.LSym {
+	// Serialize: two parallel-backend workers reaching here for the
+	// same *types.Pkg would both miss the cache, both call Global on
+	// the same Lookup'd LSym, and trip "symbol redeclared".
+	gd.PathsymsMu.Lock()
+	defer gd.PathsymsMu.Unlock()
+
 	pathsyms := pathsymsOf(gd)
 	if s := pathsyms[p]; s != nil {
 		return s
@@ -379,9 +385,18 @@ func dimportpath(gd *base.Invocation, p *types.Pkg) *obj.LSym {
 	}
 
 	s := gd.Ctxt.Lookup("type:.importpath." + p.Prefix + ".")
-	ot := dnameData(gd, s, 0, p.Path, "", nil, false, false)
-	objw.Global(gd, s, int32(ot), obj.DUPOK|obj.RODATA)
-	s.Set(obj.AttrContentAddressable, true)
+	// Two distinct *types.Pkg pointers can share the same Path+Prefix
+	// (e.g. ir.Pkgs(gd).Runtime vs the runtime *types.Pkg created by
+	// the importer when compiling a package that imports runtime).
+	// They miss the pathsyms cache by pointer key, but Lookup returns
+	// the SAME *obj.LSym for the same name. Skip Global if it has
+	// already been added to ctxt.Data, otherwise objw.Global would
+	// trip "symbol type:.importpath.X. redeclared".
+	if !s.OnList() {
+		ot := dnameData(gd, s, 0, p.Path, "", nil, false, false)
+		objw.Global(gd, s, int32(ot), obj.DUPOK|obj.RODATA)
+		s.Set(obj.AttrContentAddressable, true)
+	}
 	pathsyms[p] = s
 	return s
 }

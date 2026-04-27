@@ -163,23 +163,35 @@ func typecheck(gd *base.Invocation, n ir.Node, top int) (res ir.Node) {
 
 	// Skip typecheck if already done.
 	// But re-typecheck ONAME/OTYPE/OLITERAL/OPACK node in case context has changed.
+	reCheck := false
 	if n.Typecheck() == 1 || n.Typecheck() == 3 {
 		switch n.Op() {
 		case ir.ONAME:
-			break
+			reCheck = true
 
 		default:
 			return n
 		}
 	}
 
-	if n.Typecheck() == 2 {
-		gd.FatalfAt(n.Pos(), "typechecking loop")
-	}
+	if reCheck {
+		// ONAME re-typecheck is idempotent (validates BuiltinOp context,
+		// sets the Used bit). Run typecheck1 directly without the
+		// state-2 transition: under concurrent host.Run invocations
+		// the same shared BuiltinPkg/UnsafePkg Name can be
+		// re-typechecked from two goroutines, and the 1→2→1 dance
+		// would have one goroutine see state 2 and panic
+		// "typechecking loop" for what is actually a finished typecheck.
+		n = typecheck1(gd, n, top)
+	} else {
+		if n.Typecheck() == 2 {
+			gd.FatalfAt(n.Pos(), "typechecking loop")
+		}
 
-	n.SetTypecheck(2)
-	n = typecheck1(gd, n, top)
-	n.SetTypecheck(1)
+		n.SetTypecheck(2)
+		n = typecheck1(gd, n, top)
+		n.SetTypecheck(1)
+	}
 
 	t := n.Type()
 	if t != nil && !t.IsFuncArgStruct() && n.Op() != ir.OTYPE {
