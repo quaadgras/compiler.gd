@@ -478,9 +478,9 @@ func (f *peFile) addDWARF(ctxt *Link) {
 	if *FlagW { // disable dwarf
 		return
 	}
-	for _, sect := range Segdwarf.Sections {
+	for _, sect := range ctxt.Segdwarf.Sections {
 		h := f.addDWARFSection(ctxt, sect.Name, int(sect.Length))
-		fileoff := sect.Vaddr - Segdwarf.Vaddr + Segdwarf.Fileoff
+		fileoff := sect.Vaddr - ctxt.Segdwarf.Vaddr + ctxt.Segdwarf.Fileoff
 		if uint64(h.pointerToRawData) != fileoff {
 			Exitf("%s.PointerToRawData = %#x, want %#x", sect.Name, h.pointerToRawData, fileoff)
 		}
@@ -491,10 +491,10 @@ func (f *peFile) addDWARF(ctxt *Link) {
 func (f *peFile) addSEH(ctxt *Link) {
 	// .pdata section can exist without the .xdata section.
 	// .xdata section depends on the .pdata section.
-	if Segpdata.Length == 0 {
+	if ctxt.Segpdata.Length == 0 {
 		return
 	}
-	d := ctxt.pefile.addSection(ctxt, ".pdata", int(Segpdata.Length), int(Segpdata.Length))
+	d := ctxt.pefile.addSection(ctxt, ".pdata", int(ctxt.Segpdata.Length), int(ctxt.Segpdata.Length))
 	d.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
 	if ctxt.LinkMode == LinkExternal {
 		// Some gcc versions don't honor the default alignment for the .pdata section.
@@ -502,14 +502,14 @@ func (f *peFile) addSEH(ctxt *Link) {
 	}
 	ctxt.pefile.
 		pdataSect = d
-	d.checkSegment(ctxt, &Segpdata)
+	d.checkSegment(ctxt, &ctxt.Segpdata)
 	ctxt.pefile.
 		dataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress = d.virtualAddress
 	ctxt.pefile.
 		dataDirectory[pe.IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size = d.virtualSize
 
-	if Segxdata.Length > 0 {
-		d = ctxt.pefile.addSection(ctxt, ".xdata", int(Segxdata.Length), int(Segxdata.Length))
+	if ctxt.Segxdata.Length > 0 {
+		d = ctxt.pefile.addSection(ctxt, ".xdata", int(ctxt.Segxdata.Length), int(ctxt.Segxdata.Length))
 		d.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
 		if ctxt.LinkMode == LinkExternal {
 			// Some gcc versions don't honor the default alignment for the .xdata section.
@@ -517,7 +517,7 @@ func (f *peFile) addSEH(ctxt *Link) {
 		}
 		ctxt.pefile.
 			xdataSect = d
-		d.checkSegment(ctxt, &Segxdata)
+		d.checkSegment(ctxt, &ctxt.Segxdata)
 	}
 }
 
@@ -618,15 +618,15 @@ func (f *peFile) emitRelocations(ctxt *Link) {
 		syms   []loader.Sym
 	}
 	sects := []relsect{
-		{f.textSect, &Segtext, ctxt.Textp},
-		{f.rdataSect, &Segrodata, ctxt.datap},
-		{f.dataSect, &Segdata, ctxt.datap},
+		{f.textSect, &ctxt.Segtext, ctxt.Textp},
+		{f.rdataSect, &ctxt.Segrodata, ctxt.datap},
+		{f.dataSect, &ctxt.Segdata, ctxt.datap},
 	}
 	if len(ctxt.sehp.pdata) != 0 {
-		sects = append(sects, relsect{f.pdataSect, &Segpdata, ctxt.sehp.pdata})
+		sects = append(sects, relsect{f.pdataSect, &ctxt.Segpdata, ctxt.sehp.pdata})
 	}
 	if len(ctxt.sehp.xdata) != 0 {
-		sects = append(sects, relsect{f.xdataSect, &Segxdata, ctxt.sehp.xdata})
+		sects = append(sects, relsect{f.xdataSect, &ctxt.Segxdata, ctxt.sehp.xdata})
 	}
 	for _, s := range sects {
 		s.peSect.emitRelocations(ctxt.Out, func() int {
@@ -639,8 +639,8 @@ func (f *peFile) emitRelocations(ctxt *Link) {
 	}
 
 dwarfLoop:
-	for i := 0; i < len(Segdwarf.Sections); i++ {
-		sect := Segdwarf.Sections[i]
+	for i := 0; i < len(ctxt.Segdwarf.Sections); i++ {
+		sect := ctxt.Segdwarf.Sections[i]
 		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ldr.SymSect(si.secSym()) != sect {
@@ -703,21 +703,21 @@ func (f *peFile) writeSymbol(out *OutBuf, ldr *loader.Loader, s loader.Sym, name
 
 // mapToPESection searches peFile f for s symbol's location.
 // It returns PE section index, and offset within that section.
-func (f *peFile) mapToPESection(ldr *loader.Loader, s loader.Sym, linkmode LinkMode) (pesectidx int, offset int64, err error) {
+func (f *peFile) mapToPESection(ctxt *Link, ldr *loader.Loader, s loader.Sym, linkmode LinkMode) (pesectidx int, offset int64, err error) {
 	sect := ldr.SymSect(s)
 	if sect == nil {
 		return 0, 0, fmt.Errorf("could not map %s symbol with no section", ldr.SymName(s))
 	}
-	if sect.Seg == &Segtext {
-		return f.textSect.index, int64(uint64(ldr.SymValue(s)) - Segtext.Vaddr), nil
+	if sect.Seg == &ctxt.Segtext {
+		return f.textSect.index, int64(uint64(ldr.SymValue(s)) - ctxt.Segtext.Vaddr), nil
 	}
-	if sect.Seg == &Segrodata {
-		return f.rdataSect.index, int64(uint64(ldr.SymValue(s)) - Segrodata.Vaddr), nil
+	if sect.Seg == &ctxt.Segrodata {
+		return f.rdataSect.index, int64(uint64(ldr.SymValue(s)) - ctxt.Segrodata.Vaddr), nil
 	}
-	if sect.Seg != &Segdata {
+	if sect.Seg != &ctxt.Segdata {
 		return 0, 0, fmt.Errorf("could not map %s symbol with non .text or .rdata or .data section", ldr.SymName(s))
 	}
-	v := uint64(ldr.SymValue(s)) - Segdata.Vaddr
+	v := uint64(ldr.SymValue(s)) - ctxt.Segdata.Vaddr
 	if linkmode != LinkExternal {
 		return f.dataSect.index, int64(v), nil
 	}
@@ -726,10 +726,10 @@ func (f *peFile) mapToPESection(ldr *loader.Loader, s loader.Sym, linkmode LinkM
 	}
 	// Note: although address of runtime.edata (type sym.SDATA) is at the start of .bss section
 	// it still belongs to the .data section, not the .bss section.
-	if v < Segdata.Filelen {
+	if v < ctxt.Segdata.Filelen {
 		return f.dataSect.index, int64(v), nil
 	}
-	return f.bssSect.index, int64(v - Segdata.Filelen), nil
+	return f.bssSect.index, int64(v - ctxt.Segdata.Filelen), nil
 }
 
 func AddPELabelSym(ctxt *Link, ldr *loader.Loader, s loader.Sym) {
@@ -785,7 +785,7 @@ func (f *peFile) writeSymbols(ctxt *Link) {
 			// but the reality is that it uses IMAGE_SYM_TYPE_NULL instead.
 			peSymType = IMAGE_SYM_DTYPE_FUNCTION<<4 + IMAGE_SYM_TYPE_NULL
 		}
-		sect, value, err := f.mapToPESection(ldr, s, ctxt.LinkMode)
+		sect, value, err := f.mapToPESection(ctxt, ldr, s, ctxt.LinkMode)
 		if err != nil {
 			switch t {
 			case sym.SDYNIMPORT, sym.SHOSTOBJ, sym.SUNDEFEXT:
@@ -1690,43 +1690,43 @@ func addpersrc(ctxt *Link) {
 }
 
 func asmbPe(ctxt *Link) {
-	t := ctxt.pefile.addSection(ctxt, ".text", int(Segtext.Length), int(Segtext.Length))
+	t := ctxt.pefile.addSection(ctxt, ".text", int(ctxt.Segtext.Length), int(ctxt.Segtext.Length))
 	t.characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ
 	if ctxt.LinkMode == LinkExternal {
 		// some data symbols (e.g. masks) end up in the .text section, and they normally
 		// expect larger alignment requirement than the default text section alignment.
 		t.characteristics |= IMAGE_SCN_ALIGN_32BYTES
 	}
-	t.checkSegment(ctxt, &Segtext)
+	t.checkSegment(ctxt, &ctxt.Segtext)
 	ctxt.pefile.
 		textSect = t
 
-	ro := ctxt.pefile.addSection(ctxt, ".rdata", int(Segrodata.Length), int(Segrodata.Length))
+	ro := ctxt.pefile.addSection(ctxt, ".rdata", int(ctxt.Segrodata.Length), int(ctxt.Segrodata.Length))
 	ro.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
 	if ctxt.LinkMode == LinkExternal {
 		// some data symbols (e.g. masks) end up in the .rdata section, and they normally
 		// expect larger alignment requirement than the default text section alignment.
 		ro.characteristics |= IMAGE_SCN_ALIGN_32BYTES
 	}
-	ro.checkSegment(ctxt, &Segrodata)
+	ro.checkSegment(ctxt, &ctxt.Segrodata)
 	ctxt.pefile.
 		rdataSect = ro
 
 	var d *peSection
 	if ctxt.LinkMode != LinkExternal {
-		d = ctxt.pefile.addSection(ctxt, ".data", int(Segdata.Length), int(Segdata.Filelen))
+		d = ctxt.pefile.addSection(ctxt, ".data", int(ctxt.Segdata.Length), int(ctxt.Segdata.Filelen))
 		d.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE
-		d.checkSegment(ctxt, &Segdata)
+		d.checkSegment(ctxt, &ctxt.Segdata)
 		ctxt.pefile.
 			dataSect = d
 	} else {
-		d = ctxt.pefile.addSection(ctxt, ".data", int(Segdata.Filelen), int(Segdata.Filelen))
+		d = ctxt.pefile.addSection(ctxt, ".data", int(ctxt.Segdata.Filelen), int(ctxt.Segdata.Filelen))
 		d.characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_32BYTES
-		d.checkSegment(ctxt, &Segdata)
+		d.checkSegment(ctxt, &ctxt.Segdata)
 		ctxt.pefile.
 			dataSect = d
 
-		b := ctxt.pefile.addSection(ctxt, ".bss", int(Segdata.Length-Segdata.Filelen), 0)
+		b := ctxt.pefile.addSection(ctxt, ".bss", int(ctxt.Segdata.Length-ctxt.Segdata.Filelen), 0)
 		b.characteristics = IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_32BYTES
 		b.pointerToRawData = 0
 		ctxt.pefile.

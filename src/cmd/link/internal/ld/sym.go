@@ -61,6 +61,8 @@ func linknew(arch *sys.Arch) *Link {
 			abiInternalVer: sym.SymVerABIInternal,
 		},
 	}
+	ctxt.Segments = []*sym.Segment{&ctxt.Segtext, &ctxt.Segrodata, &ctxt.Segrelrodata, &ctxt.Segdata, &ctxt.Segdwarf, &ctxt.Segpdata, &ctxt.Segxdata}
+	ctxt.fipsSyms = newFipsSyms(ctxt)
 
 	if buildcfg.GOARCH != arch.Name {
 		log.Fatalf("invalid buildcfg.GOARCH %s (want %s)", buildcfg.GOARCH, arch.Name)

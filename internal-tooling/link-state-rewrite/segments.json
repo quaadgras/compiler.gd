@@ -1,0 +1,12 @@
+{
+  "fields": [
+    {"var": "Segtext", "field": "Segtext"},
+    {"var": "Segrodata", "field": "Segrodata"},
+    {"var": "Segrelrodata", "field": "Segrelrodata"},
+    {"var": "Segdata", "field": "Segdata"},
+    {"var": "Segdwarf", "field": "Segdwarf"},
+    {"var": "Segpdata", "field": "Segpdata"},
+    {"var": "Segxdata", "field": "Segxdata"},
+    {"var": "Segments", "field": "Segments"}
+  ]
+}

@@ -626,7 +626,7 @@ func (state *pclntab) generateFuncdata(ctxt *Link, funcs []loader.Sym, inlsyms m
 			} else {
 				// With multiple .text sections the offset
 				// is from the start of the first one.
-				o -= int64(Segtext.Sections[0].Vaddr)
+				o -= int64(ctxt.Segtext.Sections[0].Vaddr)
 				if ctxt.Target.IsWasm() {
 					if o&(1<<16-1) != 0 {
 						ctxt.Errorf(fdSym, "textoff relocation does not target function entry for funcdata symbol: %s %#x", ldr.SymName(rs), o)

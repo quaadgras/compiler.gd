@@ -192,7 +192,7 @@ func genelfsym(ctxt *Link, elfbind elf.SymBind) {
 	// runtime.text marker symbol(s).
 	s := ldr.Lookup("runtime.text", 0)
 	putelfsym(ctxt, s, elf.STT_FUNC, elfbind)
-	for k, sect := range Segtext.Sections[1:] {
+	for k, sect := range ctxt.Segtext.Sections[1:] {
 		n := k + 1
 		if sect.Name != ".text" || (ctxt.IsAIX() && ctxt.IsExternal()) {
 			// On AIX, runtime.text.X are symbols already in the symtab.
@@ -368,7 +368,7 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 	t.SetType(sym.SRODATA)
 	nsections := int64(0)
 
-	for _, sect := range Segtext.Sections {
+	for _, sect := range ctxt.Segtext.Sections {
 		if sect.Name == ".text" {
 			nsections++
 		} else {
@@ -389,8 +389,8 @@ func textsectionmap(ctxt *Link) (loader.Sym, uint32) {
 	// order of creation starting with 1. These symbols provide the section's
 	// address after relocation by the linker.
 
-	textbase := Segtext.Sections[0].Vaddr
-	for _, sect := range Segtext.Sections {
+	textbase := ctxt.Segtext.Sections[0].Vaddr
+	for _, sect := range ctxt.Segtext.Sections {
 		if sect.Name != ".text" {
 			break
 		}

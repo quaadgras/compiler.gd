@@ -7,6 +7,7 @@ package ld
 import (
 	"cmd/internal/dwarf"
 	"cmd/link/internal/loader"
+	"cmd/link/internal/sym"
 )
 
 // linkState holds per-Invocation linker state that was previously
@@ -29,6 +30,16 @@ type linkState struct {
 	elfstrdat     []byte // contents of .shstrtab
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
+
+	// segments (was in lib.go)
+	Segtext      sym.Segment
+	Segrodata    sym.Segment
+	Segrelrodata sym.Segment
+	Segdata      sym.Segment
+	Segdwarf     sym.Segment
+	Segpdata     sym.Segment // windows-only
+	Segxdata     sym.Segment // windows-only
+	Segments     []*sym.Segment // initialised in linknew with pointers to the above
 
 	// lib.go scalars
 	dynlib          []string
@@ -53,6 +64,7 @@ type linkState struct {
 	windowsgui       bool      // was in main.go
 	ownTmpDir        bool      // was in main.go
 	fipsinfo         loader.Sym // was in fips140.go
+	fipsSyms         []fipsSym  // initialised in linknew via newFipsSyms
 	seenlib          map[string]bool // was in go.go
 	sehp             sehTables       // was sehp anon struct in seh.go
 	theline          string          // was in lib.go

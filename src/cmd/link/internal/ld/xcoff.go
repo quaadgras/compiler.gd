@@ -515,11 +515,11 @@ func xcoffGetDwarfSubtype(str string) (string, uint32) {
 }
 
 // getXCOFFscnum returns the XCOFF section number of a Go section.
-func (f *xcoffFile) getXCOFFscnum(sect *sym.Section) int16 {
+func (f *xcoffFile) getXCOFFscnum(ctxt *Link, sect *sym.Section) int16 {
 	switch sect.Seg {
-	case &Segtext:
+	case &ctxt.Segtext:
 		return f.sectNameToScnum[".text"]
-	case &Segdata:
+	case &ctxt.Segdata:
 		if sect.Name == ".noptrbss" || sect.Name == ".bss" {
 			return f.sectNameToScnum[".bss"]
 		}
@@ -527,10 +527,10 @@ func (f *xcoffFile) getXCOFFscnum(sect *sym.Section) int16 {
 			return f.sectNameToScnum[".tbss"]
 		}
 		return f.sectNameToScnum[".data"]
-	case &Segdwarf:
+	case &ctxt.Segdwarf:
 		name, _ := xcoffGetDwarfSubtype(sect.Name)
 		return f.sectNameToScnum[name]
-	case &Segrelrodata:
+	case &ctxt.Segrelrodata:
 		return f.sectNameToScnum[".data"]
 	}
 	Errorf("getXCOFFscnum not implemented for section %s", sect.Name)
@@ -673,7 +673,7 @@ func (f *xcoffFile) writeSymbolNewFile(ctxt *Link, name string, firstEntry uint6
 	f.addSymbol(auxf)
 
 	/* Dwarf */
-	for _, sect := range Segdwarf.Sections {
+	for _, sect := range ctxt.Segdwarf.Sections {
 		var dwsize uint64
 		if ctxt.LinkMode == LinkInternal {
 			// Find the size of this corresponding package DWARF compilation unit.
@@ -695,7 +695,7 @@ func (f *xcoffFile) writeSymbolNewFile(ctxt *Link, name string, firstEntry uint6
 			Nvalue:  currDwscnoff[sect.Name],
 			Noffset: uint32(f.stringTable.add(name)),
 			Nsclass: C_DWARF,
-			Nscnum:  f.getXCOFFscnum(sect),
+			Nscnum:  f.getXCOFFscnum(ctxt, sect),
 			Nnumaux: 1,
 		}
 
@@ -808,7 +808,7 @@ func (f *xcoffFile) writeSymbolFunc(ctxt *Link, x loader.Sym) []xcoffSym {
 				// update previous file values
 				xfile.updatePreviousFile(ctxt, false)
 				currSymSrcFile.name = ldr.SymPkg(x)
-				f.writeSymbolNewFile(ctxt, ldr.SymPkg(x), uint64(ldr.SymValue(x)), xfile.getXCOFFscnum(ldr.SymSect(x)))
+				f.writeSymbolNewFile(ctxt, ldr.SymPkg(x), uint64(ldr.SymValue(x)), xfile.getXCOFFscnum(ctxt, ldr.SymSect(x)))
 			} else {
 				// With external linking, ld will crash if there is several
 				// .FILE and DWARF debugging enable, somewhere during
@@ -819,7 +819,7 @@ func (f *xcoffFile) writeSymbolFunc(ctxt *Link, x loader.Sym) []xcoffSym {
 				// relocation has been found and fixed.
 				if currSymSrcFile.name == "" {
 					currSymSrcFile.name = ldr.SymPkg(x)
-					f.writeSymbolNewFile(ctxt, "go_functions", uint64(ldr.SymValue(x)), xfile.getXCOFFscnum(ldr.SymSect(x)))
+					f.writeSymbolNewFile(ctxt, "go_functions", uint64(ldr.SymValue(x)), xfile.getXCOFFscnum(ctxt, ldr.SymSect(x)))
 				}
 			}
 
@@ -833,7 +833,7 @@ func (f *xcoffFile) writeSymbolFunc(ctxt *Link, x loader.Sym) []xcoffSym {
 		Nsclass: C_EXT,
 		Noffset: uint32(xfile.stringTable.add(name)),
 		Nvalue:  uint64(ldr.SymValue(x)),
-		Nscnum:  f.getXCOFFscnum(ldr.SymSect(x)),
+		Nscnum:  f.getXCOFFscnum(ctxt, ldr.SymSect(x)),
 		Ntype:   SYM_TYPE_FUNC,
 		Nnumaux: 2,
 	}
@@ -904,7 +904,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 				Nsclass: C_HIDEXT,
 				Noffset: uint32(xfile.stringTable.add(name)),
 				Nvalue:  uint64(ldr.SymValue(x)),
-				Nscnum:  xfile.getXCOFFscnum(ldr.SymSect(x)),
+				Nscnum:  xfile.getXCOFFscnum(ctxt, ldr.SymSect(x)),
 				Ntype:   SYM_TYPE_FUNC,
 				Nnumaux: 1,
 			}
@@ -928,7 +928,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 			Nsclass: C_EXT,
 			Noffset: uint32(xfile.stringTable.add(name)),
 			Nvalue:  uint64(ldr.SymValue(x)),
-			Nscnum:  xfile.getXCOFFscnum(ldr.SymSect(x)),
+			Nscnum:  xfile.getXCOFFscnum(ctxt, ldr.SymSect(x)),
 			Nnumaux: 1,
 		}
 
@@ -1015,7 +1015,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 		s := &XcoffSymEnt64{
 			Nsclass: C_EXT,
 			Noffset: uint32(xfile.stringTable.add(name)),
-			Nscnum:  xfile.getXCOFFscnum(ldr.SymSect(x)),
+			Nscnum:  xfile.getXCOFFscnum(ctxt, ldr.SymSect(x)),
 			Nvalue:  uint64(ldr.SymValue(x)),
 			Nnumaux: 1,
 		}
@@ -1070,7 +1070,7 @@ func (f *xcoffFile) asmaixsym(ctxt *Link) {
 
 	n := 1
 	// Generate base addresses for all text sections if there are multiple
-	for _, sect := range Segtext.Sections[1:] {
+	for _, sect := range ctxt.Segtext.Sections[1:] {
 		if sect.Name != ".text" || ctxt.IsExternal() {
 			// On AIX, runtime.text.X are symbols already in the symtab.
 			break
@@ -1227,7 +1227,7 @@ func (f *xcoffFile) adddynimpsym(ctxt *Link, s loader.Sym) {
 
 // Xcoffadddynrel adds a dynamic relocation in a XCOFF file.
 // This relocation will be made by the loader.
-func Xcoffadddynrel(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func Xcoffadddynrel(ctxt *Link, target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	if target.IsExternal() {
 		return true
 	}
@@ -1263,10 +1263,10 @@ func Xcoffadddynrel(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader
 			switch ldr.SymSect(targ).Seg {
 			default:
 				ldr.Errorf(s, "unknown segment for .loader relocation with symbol %s", ldr.SymName(targ))
-			case &Segtext:
-			case &Segrodata:
+			case &ctxt.Segtext:
+			case &ctxt.Segrodata:
 				xldr.symndx = 0 // .text
-			case &Segdata:
+			case &ctxt.Segdata:
 				if targType == sym.SBSS || targType == sym.SNOPTRBSS {
 					xldr.symndx = 2 // .bss
 				} else {
@@ -1389,7 +1389,7 @@ func (f *xcoffFile) writeLdrScn(ctxt *Link, globalOff uint64) {
 			ldr.Errorf(sym, "unexpected loader symbol type: 0x%x", s.smtype)
 		case XTY_ENT | XTY_SD:
 			lds.Lvalue = uint64(ldr.SymValue(sym))
-			lds.Lscnum = f.getXCOFFscnum(ldr.SymSect(sym))
+			lds.Lscnum = f.getXCOFFscnum(ctxt, ldr.SymSect(sym))
 		case XTY_IMP:
 			lds.Lifile = int32(f.dynLibraries[ldr.SymDynimplib(sym)] + 1)
 		}
@@ -1427,7 +1427,7 @@ func (f *xcoffFile) writeLdrScn(ctxt *Link, globalOff uint64) {
 	xldr := &XcoffLdRel64{
 		Lvaddr:  uint64(ldr.SymValue(ep)),
 		Lrtype:  0x3F00,
-		Lrsecnm: f.getXCOFFscnum(ldr.SymSect(ep)),
+		Lrsecnm: f.getXCOFFscnum(ctxt, ldr.SymSect(ep)),
 		Lsymndx: 0,
 	}
 	off += 16
@@ -1446,7 +1446,7 @@ func (f *xcoffFile) writeLdrScn(ctxt *Link, globalOff uint64) {
 		}
 
 		if ldr.SymSect(symp) != nil {
-			xldr.Lrsecnm = f.getXCOFFscnum(ldr.SymSect(symp))
+			xldr.Lrsecnm = f.getXCOFFscnum(ctxt, ldr.SymSect(symp))
 		}
 
 		reloctab = append(reloctab, xldr)
@@ -1553,10 +1553,10 @@ func (f *xcoffFile) writeFileHeader(ctxt *Link) {
 		copy(f.xahdr.Omodtype[:], "1L")
 		entry := ldr.Lookup(*flagEntrySymbol, 0)
 		f.xahdr.Oentry = uint64(ldr.SymValue(entry))
-		f.xahdr.Osnentry = f.getXCOFFscnum(ldr.SymSect(entry))
+		f.xahdr.Osnentry = f.getXCOFFscnum(ctxt, ldr.SymSect(entry))
 		toc := ldr.Lookup("TOC", 0)
 		f.xahdr.Otoc = uint64(ldr.SymValue(toc))
-		f.xahdr.Osntoc = f.getXCOFFscnum(ldr.SymSect(toc))
+		f.xahdr.Osntoc = f.getXCOFFscnum(ctxt, ldr.SymSect(toc))
 
 		f.xahdr.Oalgntext = int16(logBase2(int(XCOFFSECTALIGN)))
 		f.xahdr.Oalgndata = 0x5
@@ -1583,28 +1583,28 @@ func xcoffwrite(ctxt *Link) {
 // Generate XCOFF assembly file.
 func asmbXcoff(ctxt *Link) {
 	ctxt.Out.SeekSet(0)
-	fileoff := int64(Segdwarf.Fileoff + Segdwarf.Filelen)
+	fileoff := int64(ctxt.Segdwarf.Fileoff + ctxt.Segdwarf.Filelen)
 	fileoff = Rnd(fileoff, *FlagRound)
 
 	xfile.sectNameToScnum = make(map[string]int16)
 
 	// Add sections
-	s := xfile.addSection(".text", Segtext.Vaddr, Segtext.Length, Segtext.Fileoff, STYP_TEXT)
+	s := xfile.addSection(".text", ctxt.Segtext.Vaddr, ctxt.Segtext.Length, ctxt.Segtext.Fileoff, STYP_TEXT)
 	xfile.xahdr.Otextstart = s.Svaddr
 	xfile.xahdr.Osntext = xfile.sectNameToScnum[".text"]
 	xfile.xahdr.Otsize = s.Ssize
 	xfile.sectText = s
 
-	segdataVaddr := Segdata.Vaddr
-	segdataFilelen := Segdata.Filelen
-	segdataFileoff := Segdata.Fileoff
-	segbssFilelen := Segdata.Length - Segdata.Filelen
-	if len(Segrelrodata.Sections) > 0 {
+	segdataVaddr := ctxt.Segdata.Vaddr
+	segdataFilelen := ctxt.Segdata.Filelen
+	segdataFileoff := ctxt.Segdata.Fileoff
+	segbssFilelen := ctxt.Segdata.Length - ctxt.Segdata.Filelen
+	if len(ctxt.Segrelrodata.Sections) > 0 {
 		// Merge relro segment to data segment as
 		// relro data are inside data segment on AIX.
-		segdataVaddr = Segrelrodata.Vaddr
-		segdataFileoff = Segrelrodata.Fileoff
-		segdataFilelen = Segdata.Vaddr + Segdata.Filelen - Segrelrodata.Vaddr
+		segdataVaddr = ctxt.Segrelrodata.Vaddr
+		segdataFileoff = ctxt.Segrelrodata.Fileoff
+		segdataFilelen = ctxt.Segdata.Vaddr + ctxt.Segdata.Filelen - ctxt.Segrelrodata.Vaddr
 	}
 
 	s = xfile.addSection(".data", segdataVaddr, segdataFilelen, segdataFileoff, STYP_DATA)
@@ -1620,7 +1620,7 @@ func asmbXcoff(ctxt *Link) {
 
 	if ctxt.LinkMode == LinkExternal {
 		var tbss *sym.Section
-		for _, s := range Segdata.Sections {
+		for _, s := range ctxt.Segdata.Sections {
 			if s.Name == ".tbss" {
 				tbss = s
 				break
@@ -1630,7 +1630,7 @@ func asmbXcoff(ctxt *Link) {
 	}
 
 	// add dwarf sections
-	for _, sect := range Segdwarf.Sections {
+	for _, sect := range ctxt.Segdwarf.Sections {
 		xfile.addDwarfSection(sect)
 	}
 
@@ -1737,8 +1737,8 @@ func (f *xcoffFile) emitRelocations(ctxt *Link, fileoff int64) {
 		xcoffSect *XcoffScnHdr64
 		segs      []*sym.Segment
 	}{
-		{f.sectText, []*sym.Segment{&Segtext}},
-		{f.sectData, []*sym.Segment{&Segrelrodata, &Segdata}},
+		{f.sectText, []*sym.Segment{&ctxt.Segtext}},
+		{f.sectData, []*sym.Segment{&ctxt.Segrelrodata, &ctxt.Segdata}},
 	}
 	for _, s := range sects {
 		s.xcoffSect.Srelptr = uint64(ctxt.Out.Offset())
@@ -1756,8 +1756,8 @@ func (f *xcoffFile) emitRelocations(ctxt *Link, fileoff int64) {
 	}
 
 dwarfLoop:
-	for i := 0; i < len(Segdwarf.Sections); i++ {
-		sect := Segdwarf.Sections[i]
+	for i := 0; i < len(ctxt.Segdwarf.Sections); i++ {
+		sect := ctxt.Segdwarf.Sections[i]
 		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ldr.SymSect(si.secSym()) != sect {

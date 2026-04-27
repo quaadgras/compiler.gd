@@ -26,7 +26,7 @@ func asmb(ctxt *Link) {
 	}
 
 	if ctxt.IsELF {
-		Asmbelfsetup()
+		Asmbelfsetup(ctxt)
 	}
 
 	var wg sync.WaitGroup
@@ -38,8 +38,8 @@ func asmb(ctxt *Link) {
 		CodeblkPad(ctxt, out, start, length, pad)
 	}
 
-	for _, sect := range Segtext.Sections {
-		offset := sect.Vaddr - Segtext.Vaddr + Segtext.Fileoff
+	for _, sect := range ctxt.Segtext.Sections {
+		offset := sect.Vaddr - ctxt.Segtext.Vaddr + ctxt.Segtext.Fileoff
 		// Handle text sections with Codeblk
 		if sect.Name == ".text" {
 			writeParallel(&wg, f, ctxt, offset, sect.Vaddr, sect.Length)
@@ -48,23 +48,23 @@ func asmb(ctxt *Link) {
 		}
 	}
 
-	if Segrodata.Filelen > 0 {
-		writeParallel(&wg, datblk, ctxt, Segrodata.Fileoff, Segrodata.Vaddr, Segrodata.Filelen)
+	if ctxt.Segrodata.Filelen > 0 {
+		writeParallel(&wg, datblk, ctxt, ctxt.Segrodata.Fileoff, ctxt.Segrodata.Vaddr, ctxt.Segrodata.Filelen)
 	}
 
-	if Segrelrodata.Filelen > 0 {
-		writeParallel(&wg, datblk, ctxt, Segrelrodata.Fileoff, Segrelrodata.Vaddr, Segrelrodata.Filelen)
+	if ctxt.Segrelrodata.Filelen > 0 {
+		writeParallel(&wg, datblk, ctxt, ctxt.Segrelrodata.Fileoff, ctxt.Segrelrodata.Vaddr, ctxt.Segrelrodata.Filelen)
 	}
 
-	writeParallel(&wg, datblk, ctxt, Segdata.Fileoff, Segdata.Vaddr, Segdata.Filelen)
+	writeParallel(&wg, datblk, ctxt, ctxt.Segdata.Fileoff, ctxt.Segdata.Vaddr, ctxt.Segdata.Filelen)
 
-	writeParallel(&wg, dwarfblk, ctxt, Segdwarf.Fileoff, Segdwarf.Vaddr, Segdwarf.Filelen)
+	writeParallel(&wg, dwarfblk, ctxt, ctxt.Segdwarf.Fileoff, ctxt.Segdwarf.Vaddr, ctxt.Segdwarf.Filelen)
 
-	if Segpdata.Filelen > 0 {
-		writeParallel(&wg, pdatablk, ctxt, Segpdata.Fileoff, Segpdata.Vaddr, Segpdata.Filelen)
+	if ctxt.Segpdata.Filelen > 0 {
+		writeParallel(&wg, pdatablk, ctxt, ctxt.Segpdata.Fileoff, ctxt.Segpdata.Vaddr, ctxt.Segpdata.Filelen)
 	}
-	if Segxdata.Filelen > 0 {
-		writeParallel(&wg, xdatablk, ctxt, Segxdata.Fileoff, Segxdata.Vaddr, Segxdata.Filelen)
+	if ctxt.Segxdata.Filelen > 0 {
+		writeParallel(&wg, xdatablk, ctxt, ctxt.Segxdata.Fileoff, ctxt.Segxdata.Vaddr, ctxt.Segxdata.Filelen)
 	}
 
 	wg.Wait()
@@ -115,12 +115,12 @@ func asmb2(ctxt *Link) {
 	}
 
 	if *FlagC {
-		fmt.Printf("textsize=%d\n", Segtext.Filelen)
-		fmt.Printf("datsize=%d\n", Segdata.Filelen)
-		fmt.Printf("bsssize=%d\n", Segdata.Length-Segdata.Filelen)
+		fmt.Printf("textsize=%d\n", ctxt.Segtext.Filelen)
+		fmt.Printf("datsize=%d\n", ctxt.Segdata.Filelen)
+		fmt.Printf("bsssize=%d\n", ctxt.Segdata.Length-ctxt.Segdata.Filelen)
 		fmt.Printf("symsize=%d\n", ctxt.symSize)
 		fmt.Printf("lcsize=%d\n", ctxt.lcSize)
-		fmt.Printf("total=%d\n", Segtext.Filelen+Segdata.Length+uint64(ctxt.symSize)+uint64(ctxt.lcSize))
+		fmt.Printf("total=%d\n", ctxt.Segtext.Filelen+ctxt.Segdata.Length+uint64(ctxt.symSize)+uint64(ctxt.lcSize))
 	}
 }
 
@@ -130,9 +130,9 @@ func writePlan9Header(ctxt *Link, buf *OutBuf, magic uint32, entry int64, is64Bi
 		magic |= 0x00008000
 	}
 	buf.Write32b(magic)
-	buf.Write32b(uint32(Segtext.Filelen))
-	buf.Write32b(uint32(Segdata.Filelen))
-	buf.Write32b(uint32(Segdata.Length - Segdata.Filelen))
+	buf.Write32b(uint32(ctxt.Segtext.Filelen))
+	buf.Write32b(uint32(ctxt.Segdata.Filelen))
+	buf.Write32b(uint32(ctxt.Segdata.Length - ctxt.Segdata.Filelen))
 	buf.Write32b(uint32(ctxt.symSize))
 	if is64Bit {
 		buf.Write32b(uint32(entry &^ 0x80000000))
@@ -151,7 +151,7 @@ func writePlan9Header(ctxt *Link, buf *OutBuf, magic uint32, entry int64, is64Bi
 func asmbPlan9(ctxt *Link) {
 	if !*FlagS {
 		*FlagS = true
-		symo := int64(Segdata.Fileoff + Segdata.Filelen)
+		symo := int64(ctxt.Segdata.Fileoff + ctxt.Segdata.Filelen)
 		ctxt.Out.SeekSet(symo)
 		asmbPlan9Sym(ctxt)
 	}
@@ -167,7 +167,7 @@ func sizeExtRelocs(ctxt *Link, relsize uint32) {
 		panic("sizeExtRelocs: relocation size not set")
 	}
 	var sz int64
-	for _, seg := range Segments {
+	for _, seg := range ctxt.Segments {
 		for _, sect := range seg.Sections {
 			sect.Reloff = uint64(ctxt.Out.Offset() + sz)
 			sect.Rellen = uint64(relsize * sect.Relcount)

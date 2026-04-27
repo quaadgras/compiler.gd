@@ -570,7 +570,7 @@ func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 	if target.IsElf() {
 		return addelfdynrel(ctxt, target, ldr, syms, s, r, rIdx)
 	} else if target.IsAIX() {
-		return ld.Xcoffadddynrel(target, ldr, syms, s, r, rIdx)
+		return ld.Xcoffadddynrel(ctxt, target, ldr, syms, s, r, rIdx)
 	}
 	return false
 }
@@ -1029,7 +1029,7 @@ func symtoc(ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) int64 {
 }
 
 // archreloctoc relocates a TOC relative symbol.
-func archreloctoc(ldr *loader.Loader, target *ld.Target, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) int64 {
+func archreloctoc(ctxt *ld.Link, ldr *loader.Loader, target *ld.Target, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) int64 {
 	rs := r.Sym()
 	var o1, o2 uint32
 	var t int64
@@ -1053,7 +1053,7 @@ func archreloctoc(ldr *loader.Loader, target *ld.Target, syms *ld.ArchSyms, r lo
 		relocs := ldr.Relocs(rs)
 		tarSym := relocs.At(0).Sym()
 
-		if target.IsInternal() && tarSym != 0 && ldr.AttrReachable(tarSym) && ldr.SymSect(tarSym).Seg == &ld.Segdata {
+		if target.IsInternal() && tarSym != 0 && ldr.AttrReachable(tarSym) && ldr.SymSect(tarSym).Seg == &ctxt.Segdata {
 			t = ldr.SymValue(tarSym) + r.Add() - ldr.SymValue(syms.TOC)
 			// change ld to addi in the second instruction
 			o2 = (o2 & 0x03FF0000) | 0xE<<26
@@ -1373,7 +1373,7 @@ func computeTLSLEReloc(target *ld.Target, ldr *loader.Loader, rs, s loader.Sym) 
 	return v
 }
 
-func archreloc(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) (relocatedOffset int64, nExtReloc int, ok bool) {
+func archreloc(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) (relocatedOffset int64, nExtReloc int, ok bool) {
 	rs := r.Sym()
 	if target.IsExternal() {
 		// On AIX, relocations (except TLS ones) must be also done to the
@@ -1424,7 +1424,7 @@ func archreloc(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loade
 
 	switch r.Type() {
 	case objabi.R_ADDRPOWER_TOCREL, objabi.R_ADDRPOWER_TOCREL_DS:
-		return archreloctoc(ldr, target, syms, r, s, val), nExtReloc, true
+		return archreloctoc(ctxt, ldr, target, syms, r, s, val), nExtReloc, true
 	case objabi.R_ADDRPOWER, objabi.R_ADDRPOWER_DS, objabi.R_ADDRPOWER_D34, objabi.R_ADDRPOWER_PCREL34:
 		return archrelocaddr(ldr, target, syms, r, s, val), nExtReloc, true
 	case objabi.R_CALLPOWER:

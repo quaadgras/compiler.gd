@@ -2437,14 +2437,16 @@ func dwarfcompress(ctxt *Link) {
 
 	ldr := ctxt.loader
 	var newDwarfp []dwarfSecInfo
-	Segdwarf.Sections = Segdwarf.Sections[:0]
+	ctxt.Segdwarf.
+		Sections = ctxt.Segdwarf.Sections[:0]
 	for _, z := range res {
 		s := z.syms[0]
 		if z.compressed == nil {
 			// Compression didn't help.
 			ds := dwarfSecInfo{syms: z.syms}
 			newDwarfp = append(newDwarfp, ds)
-			Segdwarf.Sections = append(Segdwarf.Sections, ldr.SymSect(s))
+			ctxt.Segdwarf.
+				Sections = append(ctxt.Segdwarf.Sections, ldr.SymSect(s))
 		} else {
 			var compressedSegName string
 			if ctxt.IsELF {
@@ -2452,7 +2454,7 @@ func dwarfcompress(ctxt *Link) {
 			} else {
 				compressedSegName = ".zdebug_" + ldr.SymSect(s).Name[len(".debug_"):]
 			}
-			sect := addsection(ctxt.loader, ctxt.Arch, &Segdwarf, compressedSegName, 04)
+			sect := addsection(ctxt.loader, ctxt.Arch, &ctxt.Segdwarf, compressedSegName, 04)
 			sect.Align = int32(ctxt.Arch.Alignment)
 			sect.Length = uint64(len(z.compressed))
 			sect.Compressed = true
@@ -2476,7 +2478,7 @@ func dwarfcompress(ctxt *Link) {
 	// Re-compute the locations of the compressed DWARF symbols
 	// and sections, since the layout of these within the file is
 	// based on Section.Vaddr and Symbol.Value.
-	pos := Segdwarf.Vaddr
+	pos := ctxt.Segdwarf.Vaddr
 	var prevSect *sym.Section
 	for _, si := range ctxt.dwarfp {
 		for _, s := range si.syms {
@@ -2495,7 +2497,8 @@ func dwarfcompress(ctxt *Link) {
 			pos += uint64(ldr.SymSize(s))
 		}
 	}
-	Segdwarf.Length = pos - Segdwarf.Vaddr
+	ctxt.Segdwarf.
+		Length = pos - ctxt.Segdwarf.Vaddr
 }
 
 func compilationUnitByStartPCCmp(a, b *sym.CompilationUnit) int {

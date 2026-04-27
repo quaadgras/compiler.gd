@@ -117,21 +117,28 @@ import (
 
 const enableFIPS = true
 
-// fipsSyms are the special FIPS section bracketing symbols.
-var fipsSyms = []struct {
+// fipsSym is the per-Link FIPS section bracketing symbol descriptor.
+// Was a package-level fipsSyms slice with seg pointers into the
+// (then) package-level Segtext/Segrodata/Segdata; now created in
+// linknew with seg pointers into the per-Link segments.
+type fipsSym struct {
 	name string
 	kind sym.SymKind
 	sym  loader.Sym
 	seg  *sym.Segment
-}{
-	{name: "go:textfipsstart", kind: sym.STEXTFIPSSTART, seg: &Segtext},
-	{name: "go:textfipsend", kind: sym.STEXTFIPSEND},
-	{name: "go:rodatafipsstart", kind: sym.SRODATAFIPSSTART, seg: &Segrodata},
-	{name: "go:rodatafipsend", kind: sym.SRODATAFIPSEND},
-	{name: "go:noptrdatafipsstart", kind: sym.SNOPTRDATAFIPSSTART, seg: &Segdata},
-	{name: "go:noptrdatafipsend", kind: sym.SNOPTRDATAFIPSEND},
-	{name: "go:datafipsstart", kind: sym.SDATAFIPSSTART, seg: &Segdata},
-	{name: "go:datafipsend", kind: sym.SDATAFIPSEND},
+}
+
+func newFipsSyms(ctxt *Link) []fipsSym {
+	return []fipsSym{
+		{name: "go:textfipsstart", kind: sym.STEXTFIPSSTART, seg: &ctxt.Segtext},
+		{name: "go:textfipsend", kind: sym.STEXTFIPSEND},
+		{name: "go:rodatafipsstart", kind: sym.SRODATAFIPSSTART, seg: &ctxt.Segrodata},
+		{name: "go:rodatafipsend", kind: sym.SRODATAFIPSEND},
+		{name: "go:noptrdatafipsstart", kind: sym.SNOPTRDATAFIPSSTART, seg: &ctxt.Segdata},
+		{name: "go:noptrdatafipsend", kind: sym.SNOPTRDATAFIPSEND},
+		{name: "go:datafipsstart", kind: sym.SDATAFIPSSTART, seg: &ctxt.Segdata},
+		{name: "go:datafipsend", kind: sym.SDATAFIPSEND},
+	}
 }
 
 // fipsinfo is the loader symbol for go:fipsinfo.
@@ -162,8 +169,8 @@ func loadfips(ctxt *Link) {
 	info.SetSize(int64(len(data)))      // magic + checksum, to be filled in
 	info.AddAddr(ctxt.Arch, info.Sym()) // self-reference
 
-	for i := range fipsSyms {
-		s := &fipsSyms[i]
+	for i := range ctxt.fipsSyms {
+		s := &ctxt.fipsSyms[i]
 		sb := ldr.CreateSymForUpdate(s.name, 0)
 		sb.SetType(s.kind)
 		sb.SetLocal(true)
@@ -259,14 +266,14 @@ func asmbfips(ctxt *Link, fipso string) {
 
 	// Add the FIPS sections to the FIPS object.
 	ldr := ctxt.loader
-	for i := 0; i < len(fipsSyms); i += 2 {
-		start := &fipsSyms[i]
-		end := &fipsSyms[i+1]
+	for i := 0; i < len(ctxt.fipsSyms); i += 2 {
+		start := &ctxt.fipsSyms[i]
+		end := &ctxt.fipsSyms[i+1]
 		startAddr := ldr.SymValue(start.sym)
 		endAddr := ldr.SymValue(end.sym)
 		seg := start.seg
-		if seg.Vaddr == 0 && seg == &Segrodata { // some systems use text instead of separate rodata
-			seg = &Segtext
+		if seg.Vaddr == 0 && seg == &ctxt.Segrodata { // some systems use text instead of separate rodata
+			seg = &ctxt.Segtext
 		}
 		base := int64(seg.Fileoff - seg.Vaddr)
 		if !(seg.Vaddr <= uint64(startAddr) && startAddr <= endAddr && uint64(endAddr) <= seg.Vaddr+seg.Filelen) {
@@ -282,7 +289,7 @@ func asmbfips(ctxt *Link, fipso string) {
 
 	// Overwrite the go:fipsinfo sum field with the calculated sum.
 	addr := uint64(ldr.SymValue(ctxt.fipsinfo))
-	seg := &Segdata
+	seg := &ctxt.Segdata
 	if !(seg.Vaddr <= addr && addr+32 < seg.Vaddr+seg.Filelen) {
 		Errorf("asmbfips: fipsinfo not in expected segment (%#x..%#x not in %#x..%#x)", addr, addr+32, seg.Vaddr, seg.Vaddr+seg.Filelen)
 		return

@@ -597,7 +597,7 @@ func machoshbits(ctxt *Link, mseg *MachoSeg, sect *sym.Section, segname string) 
 func asmbMacho(ctxt *Link) {
 	machlink := doMachoLink(ctxt)
 	if ctxt.IsExternal() {
-		symo := int64(Segdwarf.Fileoff + uint64(Rnd(int64(Segdwarf.Filelen), *FlagRound)) + uint64(machlink))
+		symo := int64(ctxt.Segdwarf.Fileoff + uint64(Rnd(int64(ctxt.Segdwarf.Filelen), *FlagRound)) + uint64(machlink))
 		ctxt.Out.SeekSet(symo)
 		machoEmitReloc(ctxt)
 	}
@@ -627,9 +627,9 @@ func asmbMacho(ctxt *Link) {
 		/* segment for entire file */
 		ms = newMachoSeg(ctxt, "", 40)
 
-		ms.fileoffset = Segtext.Fileoff
-		ms.filesize = Segdwarf.Fileoff + Segdwarf.Filelen - Segtext.Fileoff
-		ms.vsize = Segdwarf.Vaddr + Segdwarf.Length - Segtext.Vaddr
+		ms.fileoffset = ctxt.Segtext.Fileoff
+		ms.filesize = ctxt.Segdwarf.Fileoff + ctxt.Segdwarf.Filelen - ctxt.Segtext.Fileoff
+		ms.vsize = ctxt.Segdwarf.Vaddr + ctxt.Segdwarf.Length - ctxt.Segtext.Vaddr
 	}
 
 	/* segment for zero page */
@@ -639,7 +639,7 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	/* text */
-	v := Rnd(int64(uint64(ctxt.HEADR)+Segtext.Length), *FlagRound)
+	v := Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), *FlagRound)
 
 	var mstext *MachoSeg
 	if ctxt.LinkMode != LinkExternal {
@@ -653,38 +653,38 @@ func asmbMacho(ctxt *Link) {
 		mstext = ms
 	}
 
-	for _, sect := range Segtext.Sections {
+	for _, sect := range ctxt.Segtext.Sections {
 		machoshbits(ctxt, ms, sect, "__TEXT")
 	}
 
 	/* rodata */
-	if ctxt.LinkMode != LinkExternal && Segrelrodata.Length > 0 {
+	if ctxt.LinkMode != LinkExternal && ctxt.Segrelrodata.Length > 0 {
 		ms = newMachoSeg(ctxt, "__DATA_CONST", 20)
-		ms.vaddr = Segrelrodata.Vaddr
-		ms.vsize = Segrelrodata.Length
-		ms.fileoffset = Segrelrodata.Fileoff
-		ms.filesize = Segrelrodata.Filelen
+		ms.vaddr = ctxt.Segrelrodata.Vaddr
+		ms.vsize = ctxt.Segrelrodata.Length
+		ms.fileoffset = ctxt.Segrelrodata.Fileoff
+		ms.filesize = ctxt.Segrelrodata.Filelen
 		ms.prot1 = 3
 		ms.prot2 = 3
 		ms.flag = 0x10 // SG_READ_ONLY
 	}
 
-	for _, sect := range Segrelrodata.Sections {
+	for _, sect := range ctxt.Segrelrodata.Sections {
 		machoshbits(ctxt, ms, sect, "__DATA_CONST")
 	}
 
 	/* data */
 	if ctxt.LinkMode != LinkExternal {
 		ms = newMachoSeg(ctxt, "__DATA", 20)
-		ms.vaddr = Segdata.Vaddr
-		ms.vsize = Segdata.Length
-		ms.fileoffset = Segdata.Fileoff
-		ms.filesize = Segdata.Filelen
+		ms.vaddr = ctxt.Segdata.Vaddr
+		ms.vsize = ctxt.Segdata.Length
+		ms.fileoffset = ctxt.Segdata.Fileoff
+		ms.filesize = ctxt.Segdata.Filelen
 		ms.prot1 = 3
 		ms.prot2 = 3
 	}
 
-	for _, sect := range Segdata.Sections {
+	for _, sect := range ctxt.Segdata.Sections {
 		machoshbits(ctxt, ms, sect, "__DATA")
 	}
 
@@ -692,12 +692,12 @@ func asmbMacho(ctxt *Link) {
 	if !*FlagW {
 		if ctxt.LinkMode != LinkExternal {
 			ms = newMachoSeg(ctxt, "__DWARF", 20)
-			ms.vaddr = Segdwarf.Vaddr
+			ms.vaddr = ctxt.Segdwarf.Vaddr
 			ms.vsize = 0
-			ms.fileoffset = Segdwarf.Fileoff
-			ms.filesize = Segdwarf.Filelen
+			ms.fileoffset = ctxt.Segdwarf.Fileoff
+			ms.filesize = ctxt.Segdwarf.Filelen
 		}
-		for _, sect := range Segdwarf.Sections {
+		for _, sect := range ctxt.Segdwarf.Sections {
 			machoshbits(ctxt, ms, sect, "__DWARF")
 		}
 	}
@@ -716,8 +716,8 @@ func asmbMacho(ctxt *Link) {
 
 		case sys.ARM64:
 			ml := newMachoLoad(ctxt, ctxt.Arch, imacho.LC_MAIN, 4)
-			ml.data[0] = uint32(uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(ctxt.HEADR)))
-			ml.data[1] = uint32((uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(ctxt.HEADR))) >> 32)
+			ml.data[0] = uint32(uint64(Entryvalue(ctxt)) - (ctxt.Segtext.Vaddr - uint64(ctxt.HEADR)))
+			ml.data[1] = uint32((uint64(Entryvalue(ctxt)) - (ctxt.Segtext.Vaddr - uint64(ctxt.HEADR))) >> 32)
 		}
 	}
 
@@ -734,7 +734,7 @@ func asmbMacho(ctxt *Link) {
 
 		if ctxt.LinkMode != LinkExternal {
 			ms := newMachoSeg(ctxt, "__LINKEDIT", 0)
-			ms.vaddr = uint64(Rnd(int64(Segdata.Vaddr+Segdata.Length), *FlagRound))
+			ms.vaddr = uint64(Rnd(int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length), *FlagRound))
 			ms.vsize = uint64(s1 + s2 + s3 + s4 + s5 + s6 + s7)
 			ms.fileoffset = uint64(ctxt.linkoff)
 			ms.filesize = ms.vsize
@@ -855,7 +855,7 @@ func collectmachosyms(ctxt *Link) {
 				addsym(s)
 			}
 		}
-		for n := range Segtext.Sections[1:] {
+		for n := range ctxt.Segtext.Sections[1:] {
 			s := ldr.Lookup(fmt.Sprintf("runtime.text.%d", n+1), 0)
 			if s != 0 {
 				addsym(s)
@@ -1133,7 +1133,7 @@ func doMachoLink(ctxt *Link) int64 {
 	}
 
 	if size > 0 {
-		ctxt.linkoff = Rnd(int64(uint64(ctxt.HEADR)+Segtext.Length), *FlagRound) + Rnd(int64(Segrelrodata.Filelen), *FlagRound) + Rnd(int64(Segdata.Filelen), *FlagRound) + Rnd(int64(Segdwarf.Filelen), *FlagRound)
+		ctxt.linkoff = Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), *FlagRound) + Rnd(int64(ctxt.Segrelrodata.Filelen), *FlagRound) + Rnd(int64(ctxt.Segdata.Filelen), *FlagRound) + Rnd(int64(ctxt.Segdwarf.Filelen), *FlagRound)
 		ctxt.Out.SeekSet(ctxt.linkoff)
 
 		ctxt.Out.Write(ldr.Data(s1))
@@ -1213,22 +1213,22 @@ func machoEmitReloc(ctxt *Link) {
 	sizeExtRelocs(ctxt, thearch.MachorelocSize)
 	relocSect, wg := relocSectFn(ctxt, machorelocsect)
 
-	relocSect(ctxt, Segtext.Sections[0], ctxt.Textp)
-	for _, sect := range Segtext.Sections[1:] {
+	relocSect(ctxt, ctxt.Segtext.Sections[0], ctxt.Textp)
+	for _, sect := range ctxt.Segtext.Sections[1:] {
 		if sect.Name == ".text" {
 			relocSect(ctxt, sect, ctxt.Textp)
 		} else {
 			relocSect(ctxt, sect, ctxt.datap)
 		}
 	}
-	for _, sect := range Segrelrodata.Sections {
+	for _, sect := range ctxt.Segrelrodata.Sections {
 		relocSect(ctxt, sect, ctxt.datap)
 	}
-	for _, sect := range Segdata.Sections {
+	for _, sect := range ctxt.Segdata.Sections {
 		relocSect(ctxt, sect, ctxt.datap)
 	}
-	for i := 0; i < len(Segdwarf.Sections); i++ {
-		sect := Segdwarf.Sections[i]
+	for i := 0; i < len(ctxt.Segdwarf.Sections); i++ {
+		sect := ctxt.Segdwarf.Sections[i]
 		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ctxt.loader.SymSect(si.secSym()) != sect {
@@ -1339,12 +1339,12 @@ func machoDyldInfo(ctxt *Link) {
 
 	segId := func(seg *sym.Segment) uint8 {
 		switch seg {
-		case &Segtext:
+		case &ctxt.Segtext:
 			return 1
-		case &Segrelrodata:
+		case &ctxt.Segrelrodata:
 			return 2
-		case &Segdata:
-			if Segrelrodata.Length > 0 {
+		case &ctxt.Segdata:
+			if ctxt.Segrelrodata.Length > 0 {
 				return 3
 			}
 			return 2

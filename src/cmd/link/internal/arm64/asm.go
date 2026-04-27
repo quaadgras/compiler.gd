@@ -779,7 +779,7 @@ func pereloc1(arch *sys.Arch, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym, 
 	return true
 }
 
-func archreloc(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) (int64, int, bool) {
+func archreloc(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, r loader.Reloc, s loader.Sym, val int64) (int64, int, bool) {
 	const noExtReloc = 0
 	const isOk = true
 
@@ -1311,7 +1311,7 @@ func gensymlate(ctxt *ld.Link, ldr *loader.Loader) {
 
 	if ctxt.IsDarwin() {
 		big := false
-		for _, seg := range ld.Segments {
+		for _, seg := range ctxt.Segments {
 			if seg.Length >= machoRelocLimit {
 				big = true
 				break

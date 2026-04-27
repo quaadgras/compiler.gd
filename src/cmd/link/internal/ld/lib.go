@@ -211,7 +211,7 @@ type Arch struct {
 	// ELF/Mach-O/etc. relocations, not Go relocations, this must match ELF.Reloc1,
 	// etc.), and a boolean indicating success/failure (a failing value indicates
 	// a fatal error).
-	Archreloc func(*Target, *loader.Loader, *ArchSyms, loader.Reloc, loader.Sym,
+	Archreloc func(*Link, *Target, *loader.Loader, *ArchSyms, loader.Reloc, loader.Sym,
 		int64) (relocatedOffset int64, nExtReloc int, ok bool)
 	// Archrelocvariant is a second arch-specific hook used for
 	// relocation processing; it handles relocations where r.Type is
@@ -309,17 +309,8 @@ var (
 	strictDupMsgCount int
 )
 
-var (
-	Segtext      sym.Segment
-	Segrodata    sym.Segment
-	Segrelrodata sym.Segment
-	Segdata      sym.Segment
-	Segdwarf     sym.Segment
-	Segpdata     sym.Segment // windows-only
-	Segxdata     sym.Segment // windows-only
-
-	Segments = []*sym.Segment{&Segtext, &Segrodata, &Segrelrodata, &Segdata, &Segdwarf, &Segpdata, &Segxdata}
-)
+// windows-only
+// windows-only
 
 const pkgdef = "__.PKGDEF"
 
@@ -2830,12 +2821,12 @@ func (ctxt *Link) xdefine(p string, t sym.SymKind, v int64) loader.Sym {
 	return s
 }
 
-func datoff(ldr *loader.Loader, s loader.Sym, addr int64) int64 {
-	if uint64(addr) >= Segdata.Vaddr {
-		return int64(uint64(addr) - Segdata.Vaddr + Segdata.Fileoff)
+func datoff(ctxt *Link, ldr *loader.Loader, s loader.Sym, addr int64) int64 {
+	if uint64(addr) >= ctxt.Segdata.Vaddr {
+		return int64(uint64(addr) - ctxt.Segdata.Vaddr + ctxt.Segdata.Fileoff)
 	}
-	if uint64(addr) >= Segtext.Vaddr {
-		return int64(uint64(addr) - Segtext.Vaddr + Segtext.Fileoff)
+	if uint64(addr) >= ctxt.Segtext.Vaddr {
+		return int64(uint64(addr) - ctxt.Segtext.Vaddr + ctxt.Segtext.Fileoff)
 	}
 	ldr.Errorf(s, "invalid datoff %#x", addr)
 	return 0

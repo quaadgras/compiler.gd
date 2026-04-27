@@ -292,7 +292,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			case 8:
 				o = int64(target.Arch.ByteOrder.Uint64(P[off:]))
 			}
-			out, n, ok := thearch.Archreloc(target, ldr, syms, r, s, o)
+			out, n, ok := thearch.Archreloc(st.link, target, ldr, syms, r, s, o)
 			if target.IsExternal() {
 				nExtReloc += n
 			}
@@ -404,8 +404,8 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 				// TODO: .text (including rodata) to .data relocation
 				// doesn't work correctly, so we should really disallow it.
 				// See also aixStaticDataBase in symtab.go and in runtime.
-				if ldr.SymSect(s).Seg == &Segdata {
-					Xcoffadddynrel(target, ldr, syms, s, r, ri)
+				if ldr.SymSect(s).Seg == &st.link.Segdata {
+					Xcoffadddynrel(st.link, target, ldr, syms, s, r, ri)
 				}
 			}
 
@@ -495,7 +495,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			// The method offset tables using this relocation expect the offset to be relative
 			// to the start of the first text section, even if there are multiple.
 			if sect.Name == ".text" {
-				o = ldr.SymValue(rs) - int64(Segtext.Sections[0].Vaddr) + r.Add()
+				o = ldr.SymValue(rs) - int64(st.link.Segtext.Sections[0].Vaddr) + r.Add()
 				if target.IsWasm() {
 					// On Wasm, textoff (e.g. in the method table) is just the function index,
 					// whereas the "PC" (rs's Value) is function index << 16 + block index (see
@@ -1796,31 +1796,31 @@ func (ctxt *Link) dodata(symGroupType []sym.SymKind) {
 	/* number the sections */
 	n := int16(1)
 
-	for _, sect := range Segtext.Sections {
+	for _, sect := range ctxt.Segtext.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segrodata.Sections {
+	for _, sect := range ctxt.Segrodata.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segrelrodata.Sections {
+	for _, sect := range ctxt.Segrelrodata.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segdata.Sections {
+	for _, sect := range ctxt.Segdata.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segdwarf.Sections {
+	for _, sect := range ctxt.Segdwarf.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segpdata.Sections {
+	for _, sect := range ctxt.Segpdata.Sections {
 		sect.Extnum = n
 		n++
 	}
-	for _, sect := range Segxdata.Sections {
+	for _, sect := range ctxt.Segxdata.Sections {
 		sect.Extnum = n
 		n++
 	}
@@ -1942,7 +1942,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		sym.SWINDOWS,
 	}
 	for _, symn := range writable {
-		state.allocateSingleSymSections(&Segdata, symn, sym.SDATA, 06)
+		state.allocateSingleSymSections(&ctxt.Segdata, symn, sym.SDATA, 06)
 	}
 	ldr := ctxt.loader
 
@@ -1954,7 +1954,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 			Errorf("internal error: more than one SMODULEDATA symbol")
 		}
 		s := state.data[sym.SMODULEDATA][0]
-		sect := addsection(ldr, ctxt.Arch, &Segdata, ".go.module", 06)
+		sect := addsection(ldr, ctxt.Arch, &ctxt.Segdata, ".go.module", 06)
 		sect.Align = symalign(ldr, s)
 		state.datsize = Rnd(state.datsize, int64(sect.Align))
 		sect.Vaddr = uint64(state.datsize)
@@ -1968,14 +1968,14 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 
 	// writable .got (note that for PIE binaries .got goes in relro)
 	if len(state.data[sym.SELFGOT]) > 0 {
-		state.allocateNamedSectionAndAssignSyms(&Segdata, ".got", sym.SELFGOT, sym.SDATA, 06)
+		state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".got", sym.SELFGOT, sym.SDATA, 06)
 	}
 	if len(state.data[sym.SMACHOGOT]) > 0 {
-		state.allocateNamedSectionAndAssignSyms(&Segdata, ".got", sym.SMACHOGOT, sym.SDATA, 06)
+		state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".got", sym.SMACHOGOT, sym.SDATA, 06)
 	}
 
 	/* pointer-free data */
-	sect := state.allocateNamedSectionAndAssignSyms(&Segdata, ".noptrdata", sym.SNOPTRDATA, sym.SDATA, 06)
+	sect := state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".noptrdata", sym.SNOPTRDATA, sym.SDATA, 06)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.noptrdata", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.enoptrdata", 0), sect)
 
@@ -1999,11 +1999,11 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	}
 
 	if hasinitarr && len(state.data[sym.SINITARR]) > 0 {
-		state.allocateNamedSectionAndAssignSyms(&Segdata, ".init_array", sym.SINITARR, sym.Sxxx, 06)
+		state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".init_array", sym.SINITARR, sym.Sxxx, 06)
 	}
 
 	/* data */
-	sect = state.allocateNamedSectionAndAssignSyms(&Segdata, ".data", sym.SDATA, sym.SDATA, 06)
+	sect = state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".data", sym.SDATA, sym.SDATA, 06)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.data", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.edata", 0), sect)
 
@@ -2021,7 +2021,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	sect.Length = uint64(state.datsize) - sect.Vaddr
 
 	/* bss */
-	sect = state.allocateNamedSectionAndAssignSyms(&Segdata, ".bss", sym.SBSS, sym.Sxxx, 06)
+	sect = state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".bss", sym.SBSS, sym.Sxxx, 06)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.bss", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.ebss", 0), sect)
 	bssGcEnd := state.datsize - int64(sect.Vaddr)
@@ -2045,7 +2045,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	}
 
 	/* pointer-free bss */
-	sect = state.allocateNamedSectionAndAssignSyms(&Segdata, ".noptrbss", sym.SNOPTRBSS, sym.Sxxx, 06)
+	sect = state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".noptrbss", sym.SNOPTRBSS, sym.Sxxx, 06)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.noptrbss", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.enoptrbss", 0), sect)
 
@@ -2060,7 +2060,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 
 	// Coverage instrumentation counters for libfuzzer.
 	if len(state.data[sym.SLIBFUZZER_8BIT_COUNTER]) > 0 {
-		sect := state.allocateNamedSectionAndAssignSyms(&Segdata, ".go.fuzzcntrs", sym.SLIBFUZZER_8BIT_COUNTER, sym.Sxxx, 06)
+		sect := state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".go.fuzzcntrs", sym.SLIBFUZZER_8BIT_COUNTER, sym.Sxxx, 06)
 		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.__start___sancov_cntrs", 0), sect)
 		ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.__stop___sancov_cntrs", 0), sect)
 		ldr.SetSymSect(ldr.LookupOrCreateSym("internal/fuzz._counters", 0), sect)
@@ -2068,13 +2068,13 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	}
 
 	// Assign runtime.end to the last section of data segment.
-	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.end", 0), Segdata.Sections[len(Segdata.Sections)-1])
+	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.end", 0), ctxt.Segdata.Sections[len(ctxt.Segdata.Sections)-1])
 
 	if len(state.data[sym.STLSBSS]) > 0 {
 		var sect *sym.Section
 		// FIXME: not clear why it is sometimes necessary to suppress .tbss section creation.
 		if (ctxt.IsELF || ctxt.HeadType == objabi.Haix) && (ctxt.LinkMode == LinkExternal || !*FlagD) {
-			sect = addsection(ldr, ctxt.Arch, &Segdata, ".tbss", 06)
+			sect = addsection(ldr, ctxt.Arch, &ctxt.Segdata, ".tbss", 06)
 			sect.Align = int32(ctxt.Arch.PtrSize)
 			// FIXME: why does this need to be set to zero?
 			sect.Vaddr = 0
@@ -2107,11 +2107,11 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	 */
 	var segro *sym.Segment
 	if ctxt.IsELF && ctxt.LinkMode == LinkInternal {
-		segro = &Segrodata
+		segro = &ctxt.Segrodata
 	} else if ctxt.HeadType == objabi.Hwindows {
-		segro = &Segrodata
+		segro = &ctxt.Segrodata
 	} else {
-		segro = &Segtext
+		segro = &ctxt.Segtext
 	}
 
 	state.datsize = 0
@@ -2121,8 +2121,8 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		culprit := ldr.SymName(state.data[sym.STEXT][0])
 		Errorf("dodata found an sym.STEXT symbol: %s", culprit)
 	}
-	state.allocateSingleSymSections(&Segtext, sym.SELFRXSECT, sym.SRODATA, 05)
-	state.allocateSingleSymSections(&Segtext, sym.SMACHOPLT, sym.SRODATA, 05)
+	state.allocateSingleSymSections(&ctxt.Segtext, sym.SELFRXSECT, sym.SRODATA, 05)
+	state.allocateSingleSymSections(&ctxt.Segtext, sym.SMACHOPLT, sym.SRODATA, 05)
 
 	/* read-only data */
 	sect = state.allocateNamedDataSection(segro, ".rodata", sym.ReadOnly, 04)
@@ -2189,7 +2189,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	seg := segro
 
 	if ctxt.UseRelro() {
-		segrelro := &Segrelrodata
+		segrelro := &ctxt.Segrelrodata
 		if ctxt.LinkMode == LinkExternal && !ctxt.IsAIX() && !ctxt.IsDarwin() {
 			// Using a separate segment with an external
 			// linker results in some programs moving
@@ -2308,7 +2308,7 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 	for i := 0; i < len(ctxt.dwarfp); i++ {
 		// First the section symbol.
 		s := ctxt.dwarfp[i].secSym()
-		sect := state.allocateNamedDataSection(&Segdwarf, ldr.SymName(s), []sym.SymKind{}, 04)
+		sect := state.allocateNamedDataSection(&ctxt.Segdwarf, ldr.SymName(s), []sym.SymKind{}, 04)
 		ldr.SetSymSect(s, sect)
 		sect.Sym = s
 		curType := ldr.SymType(s)
@@ -2337,12 +2337,12 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 // symbols, and assigns symbols to sections.
 func (state *dodataState) allocateSEHSections(ctxt *Link) {
 	if len(ctxt.sehp.pdata) > 0 {
-		sect := state.allocateNamedDataSection(&Segpdata, ".pdata", []sym.SymKind{}, 04)
+		sect := state.allocateNamedDataSection(&ctxt.Segpdata, ".pdata", []sym.SymKind{}, 04)
 		state.assignDsymsToSection(sect, ctxt.sehp.pdata, sym.SRODATA, aligndatsize)
 		state.checkdatsize(sym.SSEHSECT)
 	}
 	if len(ctxt.sehp.xdata) > 0 {
-		sect := state.allocateNamedDataSection(&Segxdata, ".xdata", []sym.SymKind{}, 04)
+		sect := state.allocateNamedDataSection(&ctxt.Segxdata, ".xdata", []sym.SymKind{}, 04)
 		state.assignDsymsToSection(sect, ctxt.sehp.xdata, sym.SRODATA, aligndatsize)
 		state.checkdatsize(sym.SSEHSECT)
 	}
@@ -2526,12 +2526,12 @@ func appendString(data []byte, s string) []byte {
 
 // assign addresses to text
 func (ctxt *Link) textaddress() {
-	addsection(ctxt.loader, ctxt.Arch, &Segtext, ".text", 05)
+	addsection(ctxt.loader, ctxt.Arch, &ctxt.Segtext, ".text", 05)
 
 	// Assign PCs in text segment.
 	// Could parallelize, by assigning to text
 	// and then letting threads copy down, but probably not worth it.
-	sect := Segtext.Sections[0]
+	sect := ctxt.Segtext.Sections[0]
 
 	sect.Align = int32(ctxt.Funcalign)
 
@@ -2699,7 +2699,7 @@ func (ctxt *Link) textaddress() {
 		// Set the address of the start/end symbols, if not already
 		// (i.e. not darwin+dynlink or AIX+external, see above).
 		ldr.SetSymValue(etext, int64(va))
-		ldr.SetSymValue(text, int64(Segtext.Sections[0].Vaddr))
+		ldr.SetSymValue(text, int64(ctxt.Segtext.Sections[0].Vaddr))
 	}
 }
 
@@ -2763,7 +2763,7 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 			sect.Length = va - sect.Vaddr
 
 			// Create new section, set the starting Vaddr
-			sect = addsection(ctxt.loader, ctxt.Arch, &Segtext, ".text", 05)
+			sect = addsection(ctxt.loader, ctxt.Arch, &ctxt.Segtext, ".text", 05)
 
 			sect.Vaddr = va
 			sect.Align = sectAlign
@@ -2851,10 +2851,12 @@ func (ctxt *Link) address() []*sym.Segment {
 	var order []*sym.Segment // Layout order
 
 	va := uint64(*FlagTextAddr)
-	order = append(order, &Segtext)
-	Segtext.Rwx = 05
-	Segtext.Vaddr = va
-	for i, s := range Segtext.Sections {
+	order = append(order, &ctxt.Segtext)
+	ctxt.Segtext.
+		Rwx = 05
+	ctxt.Segtext.
+		Vaddr = va
+	for i, s := range ctxt.Segtext.Sections {
 		va = uint64(Rnd(int64(va), int64(s.Align)))
 		s.Vaddr = va
 		va += s.Length
@@ -2863,10 +2865,10 @@ func (ctxt *Link) address() []*sym.Segment {
 			va = wasmMinDataAddr
 		}
 	}
+	ctxt.Segtext.
+		Length = va - uint64(*FlagTextAddr)
 
-	Segtext.Length = va - uint64(*FlagTextAddr)
-
-	if len(Segrodata.Sections) > 0 {
+	if len(ctxt.Segrodata.Sections) > 0 {
 		// align to page boundary so as not to mix
 		// rodata and executable text.
 		//
@@ -2879,18 +2881,20 @@ func (ctxt *Link) address() []*sym.Segment {
 		// relocation processing, changed to r--.
 		va = uint64(Rnd(int64(va), *FlagRound))
 
-		order = append(order, &Segrodata)
-		Segrodata.Rwx = 04
-		Segrodata.Vaddr = va
-		for _, s := range Segrodata.Sections {
+		order = append(order, &ctxt.Segrodata)
+		ctxt.Segrodata.
+			Rwx = 04
+		ctxt.Segrodata.
+			Vaddr = va
+		for _, s := range ctxt.Segrodata.Sections {
 			va = uint64(Rnd(int64(va), int64(s.Align)))
 			s.Vaddr = va
 			va += s.Length
 		}
-
-		Segrodata.Length = va - Segrodata.Vaddr
+		ctxt.Segrodata.
+			Length = va - ctxt.Segrodata.Vaddr
 	}
-	if len(Segrelrodata.Sections) > 0 {
+	if len(ctxt.Segrelrodata.Sections) > 0 {
 		// align to page boundary so as not to mix
 		// rodata, rel-ro data, and executable text.
 		va = uint64(Rnd(int64(va), *FlagRound))
@@ -2899,49 +2903,55 @@ func (ctxt *Link) address() []*sym.Segment {
 			va += uint64(XCOFFDATABASE) - uint64(XCOFFTEXTBASE)
 		}
 
-		order = append(order, &Segrelrodata)
-		Segrelrodata.Rwx = 06
-		Segrelrodata.Vaddr = va
-		for _, s := range Segrelrodata.Sections {
+		order = append(order, &ctxt.Segrelrodata)
+		ctxt.Segrelrodata.
+			Rwx = 06
+		ctxt.Segrelrodata.
+			Vaddr = va
+		for _, s := range ctxt.Segrelrodata.Sections {
 			va = uint64(Rnd(int64(va), int64(s.Align)))
 			s.Vaddr = va
 			va += s.Length
 		}
-
-		Segrelrodata.Length = va - Segrelrodata.Vaddr
+		ctxt.Segrelrodata.
+			Length = va - ctxt.Segrelrodata.Vaddr
 	}
 
 	va = uint64(Rnd(int64(va), *FlagRound))
-	if ctxt.HeadType == objabi.Haix && len(Segrelrodata.Sections) == 0 {
+	if ctxt.HeadType == objabi.Haix && len(ctxt.Segrelrodata.Sections) == 0 {
 		// Data sections are moved to an unreachable segment
 		// to ensure that they are position-independent.
 		// Already done if relro sections exist.
 		va += uint64(XCOFFDATABASE) - uint64(XCOFFTEXTBASE)
 	}
-	order = append(order, &Segdata)
-	Segdata.Rwx = 06
+	order = append(order, &ctxt.Segdata)
+	ctxt.Segdata.
+		Rwx = 06
 	if *FlagDataAddr != -1 {
-		Segdata.Vaddr = uint64(*FlagDataAddr)
-		va = Segdata.Vaddr
+		ctxt.Segdata.
+			Vaddr = uint64(*FlagDataAddr)
+		va = ctxt.Segdata.Vaddr
 	} else {
-		Segdata.Vaddr = va
+		ctxt.Segdata.
+			Vaddr = va
 	}
 	var data *sym.Section
 	var noptr *sym.Section
 	var bss *sym.Section
 	var noptrbss *sym.Section
 	var fuzzCounters *sym.Section
-	for i, s := range Segdata.Sections {
+	for i, s := range ctxt.Segdata.Sections {
 		if (ctxt.IsELF || ctxt.HeadType == objabi.Haix) && s.Name == ".tbss" {
 			continue
 		}
 		vlen := int64(s.Length)
-		if i+1 < len(Segdata.Sections) && !((ctxt.IsELF || ctxt.HeadType == objabi.Haix) && Segdata.Sections[i+1].Name == ".tbss") {
-			vlen = int64(Segdata.Sections[i+1].Vaddr - s.Vaddr)
+		if i+1 < len(ctxt.Segdata.Sections) && !((ctxt.IsELF || ctxt.HeadType == objabi.Haix) && ctxt.Segdata.Sections[i+1].Name == ".tbss") {
+			vlen = int64(ctxt.Segdata.Sections[i+1].Vaddr - s.Vaddr)
 		}
 		s.Vaddr = va
 		va += uint64(vlen)
-		Segdata.Length = va - Segdata.Vaddr
+		ctxt.Segdata.
+			Length = va - ctxt.Segdata.Vaddr
 		switch s.Name {
 		case ".data":
 			data = s
@@ -2955,56 +2965,67 @@ func (ctxt *Link) address() []*sym.Segment {
 			fuzzCounters = s
 		}
 	}
+	ctxt.
 
-	// Assign Segdata's Filelen omitting the BSS. We do this here
-	// simply because right now we know where the BSS starts.
-	Segdata.Filelen = bss.Vaddr - Segdata.Vaddr
+		// Assign Segdata's Filelen omitting the BSS. We do this here
+		// simply because right now we know where the BSS starts.
+		Segdata.
+		Filelen = bss.Vaddr - ctxt.Segdata.Vaddr
 
-	if len(Segpdata.Sections) > 0 {
+	if len(ctxt.Segpdata.Sections) > 0 {
 		va = uint64(Rnd(int64(va), *FlagRound))
-		order = append(order, &Segpdata)
-		Segpdata.Rwx = 04
-		Segpdata.Vaddr = va
+		order = append(order, &ctxt.Segpdata)
+		ctxt.Segpdata.
+			Rwx = 04
+		ctxt.Segpdata.
+			Vaddr = va
 		// Segpdata.Sections is intended to contain just one section.
 		// Loop through the slice anyway for consistency.
-		for _, s := range Segpdata.Sections {
+		for _, s := range ctxt.Segpdata.Sections {
 			va = uint64(Rnd(int64(va), int64(s.Align)))
 			s.Vaddr = va
 			va += s.Length
 		}
-		Segpdata.Length = va - Segpdata.Vaddr
+		ctxt.Segpdata.
+			Length = va - ctxt.Segpdata.Vaddr
 	}
 
-	if len(Segxdata.Sections) > 0 {
+	if len(ctxt.Segxdata.Sections) > 0 {
 		va = uint64(Rnd(int64(va), *FlagRound))
-		order = append(order, &Segxdata)
-		Segxdata.Rwx = 04
-		Segxdata.Vaddr = va
+		order = append(order, &ctxt.Segxdata)
+		ctxt.Segxdata.
+			Rwx = 04
+		ctxt.Segxdata.
+			Vaddr = va
 		// Segxdata.Sections is intended to contain just one section.
 		// Loop through the slice anyway for consistency.
-		for _, s := range Segxdata.Sections {
+		for _, s := range ctxt.Segxdata.Sections {
 			va = uint64(Rnd(int64(va), int64(s.Align)))
 			s.Vaddr = va
 			va += s.Length
 		}
-		Segxdata.Length = va - Segxdata.Vaddr
+		ctxt.Segxdata.
+			Length = va - ctxt.Segxdata.Vaddr
 	}
 
 	va = uint64(Rnd(int64(va), *FlagRound))
-	order = append(order, &Segdwarf)
-	Segdwarf.Rwx = 06
-	Segdwarf.Vaddr = va
-	for i, s := range Segdwarf.Sections {
+	order = append(order, &ctxt.Segdwarf)
+	ctxt.Segdwarf.
+		Rwx = 06
+	ctxt.Segdwarf.
+		Vaddr = va
+	for i, s := range ctxt.Segdwarf.Sections {
 		vlen := int64(s.Length)
-		if i+1 < len(Segdwarf.Sections) {
-			vlen = int64(Segdwarf.Sections[i+1].Vaddr - s.Vaddr)
+		if i+1 < len(ctxt.Segdwarf.Sections) {
+			vlen = int64(ctxt.Segdwarf.Sections[i+1].Vaddr - s.Vaddr)
 		}
 		s.Vaddr = va
 		va += uint64(vlen)
 		if ctxt.HeadType == objabi.Hwindows {
 			va = uint64(Rnd(int64(va), ctxt.PEFILEALIGN))
 		}
-		Segdwarf.Length = va - Segdwarf.Vaddr
+		ctxt.Segdwarf.
+			Length = va - ctxt.Segdwarf.Vaddr
 	}
 
 	ldr := ctxt.loader
@@ -3061,7 +3082,7 @@ func (ctxt *Link) address() []*sym.Segment {
 	// If there are multiple text sections, create runtime.text.n for
 	// their section Vaddr, using n for index
 	n := 1
-	for _, sect := range Segtext.Sections[1:] {
+	for _, sect := range ctxt.Segtext.Sections[1:] {
 		if sect.Name != ".text" {
 			break
 		}
@@ -3108,7 +3129,7 @@ func (ctxt *Link) address() []*sym.Segment {
 	ctxt.xdefine("runtime.enoptrbss", sym.SNOPTRBSS, int64(noptrbss.Vaddr+noptrbss.Length))
 	ctxt.xdefine("runtime.covctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+covCounterDataStartOff))
 	ctxt.xdefine("runtime.ecovctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+covCounterDataStartOff+covCounterDataLen))
-	ctxt.xdefine("runtime.end", sym.SBSS, int64(Segdata.Vaddr+Segdata.Length))
+	ctxt.xdefine("runtime.end", sym.SBSS, int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length))
 
 	if fuzzCounters != nil {
 		if *flagAsan {
@@ -3145,7 +3166,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		// Resolve .TOC. symbols for all objects. Only one TOC region is supported. If a
 		// GOT section is present, compute it as suggested by the ELFv2 ABI. Otherwise,
 		// choose a similar offset from the start of the data segment.
-		tocAddr := int64(Segdata.Vaddr) + 0x8000
+		tocAddr := int64(ctxt.Segdata.Vaddr) + 0x8000
 		if gotAddr := ldr.SymValue(ctxt.GOT); gotAddr != 0 {
 			tocAddr = gotAddr + 0x8000
 		}
@@ -3186,7 +3207,7 @@ func (ctxt *Link) layout(order []*sym.Segment) uint64 {
 				seg.Fileoff = prev.Fileoff + prev.Filelen
 			}
 		}
-		if seg != &Segdata {
+		if seg != &ctxt.Segdata {
 			// Link.address already set Segdata.Filelen to
 			// account for BSS.
 			seg.Filelen = seg.Length
