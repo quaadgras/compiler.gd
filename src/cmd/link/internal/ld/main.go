@@ -254,8 +254,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	strictDupMsgCount = 0
 	atExitFuncs = nil
 
-	thearch = theArch
 	ctxt := linknew(arch)
+	ctxt.thearch = theArch
 	ctxt.Bso = bufio.NewWriter(os.Stdout)
 
 	// flag.Parse reads from os.Args. Under in-process invocation we
@@ -429,7 +429,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	bench.Start("computeTLSOffset")
 	ctxt.computeTLSOffset()
 	bench.Start("Archinit")
-	thearch.Archinit(ctxt)
+	ctxt.thearch.Archinit(ctxt)
 
 	if *FlagDataAddr != -1 && *FlagDataAddr%*FlagRound != 0 {
 		Exitf("invalid -D value 0x%x: not aligned to rounding quantum 0x%x", *FlagDataAddr, *FlagRound)
@@ -527,7 +527,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	ctxt.setArchSyms()
 	ctxt.addexport()
 	bench.Start("Gentext")
-	thearch.Gentext(ctxt, ctxt.loader) // trampolines, call stubs, etc.
+	ctxt.thearch.Gentext(ctxt, ctxt.loader) // trampolines, call stubs, etc.
 
 	bench.Start("textaddress")
 	ctxt.textaddress()
@@ -575,8 +575,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	// Generate additional symbols for the native symbol table just prior
 	// to code generation.
 	bench.Start("GenSymsLate")
-	if thearch.GenSymsLate != nil {
-		thearch.GenSymsLate(ctxt, ctxt.loader)
+	if ctxt.thearch.GenSymsLate != nil {
+		ctxt.thearch.GenSymsLate(ctxt, ctxt.loader)
 	}
 
 	asmbfips(ctxt, *flagFipso)

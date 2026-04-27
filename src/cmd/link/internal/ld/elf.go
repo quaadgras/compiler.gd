@@ -1385,7 +1385,7 @@ func elfrelocsect(ctxt *Link, out *OutBuf, sect *sym.Section, syms []loader.Sym)
 			if !ldr.AttrReachable(rr.Xsym) {
 				ldr.Errorf(s, "unreachable reloc %d (%s) target %v", r.Type(), sym.RelocName(ctxt.Arch, r.Type()), ldr.SymName(rr.Xsym))
 			}
-			if !thearch.ELF.Reloc1(ctxt, out, ldr, s, rr, ri, int64(uint64(ldr.SymValue(s)+int64(r.Off()))-sect.Vaddr)) {
+			if !ctxt.thearch.ELF.Reloc1(ctxt, out, ldr, s, rr, ri, int64(uint64(ldr.SymValue(s)+int64(r.Off()))-sect.Vaddr)) {
 				ldr.Errorf(s, "unsupported obj reloc %d (%s)/%d to %s", r.Type(), sym.RelocName(ctxt.Arch, r.Type()), r.Siz(), ldr.SymName(r.Sym()))
 			}
 		}
@@ -1402,7 +1402,7 @@ func elfEmitReloc(ctxt *Link) {
 		ctxt.Out.Write8(0)
 	}
 
-	sizeExtRelocs(ctxt, thearch.ELF.RelocSize)
+	sizeExtRelocs(ctxt, ctxt.thearch.ELF.RelocSize)
 	relocSect, wg := relocSectFn(ctxt, elfrelocsect)
 
 	for _, sect := range ctxt.Segtext.Sections {
@@ -1534,7 +1534,7 @@ func (ctxt *Link) doelf() {
 		// define dynamic elf table
 		dynamic := ldr.CreateSymForUpdate(".dynamic", 0)
 		switch {
-		case thearch.ELF.DynamicReadOnly:
+		case ctxt.thearch.ELF.DynamicReadOnly:
 			dynamic.SetType(sym.SELFROSECT)
 		case ctxt.UseRelro():
 			dynamic.SetType(sym.SELFRELROSECT)
@@ -1546,7 +1546,8 @@ func (ctxt *Link) doelf() {
 			// S390X uses .got instead of .got.plt
 			gotplt = got
 		}
-		thearch.ELF.SetupPLT(ctxt, ctxt.loader, plt, gotplt, dynamic.Sym())
+		ctxt.thearch.
+			ELF.SetupPLT(ctxt, ctxt.loader, plt, gotplt, dynamic.Sym())
 
 		// .dynamic table
 		elfWriteDynEntSym(ctxt, dynamic, elf.DT_HASH, hash.Sym())
@@ -1836,17 +1837,17 @@ func asmbElf(ctxt *Link) {
 			switch ctxt.HeadType {
 			case objabi.Hlinux:
 				if buildcfg.GOOS == "android" {
-					ctxt.interpreter = thearch.ELF.Androiddynld
+					ctxt.interpreter = ctxt.thearch.ELF.Androiddynld
 					if ctxt.interpreter == "" {
 						Exitf("ELF interpreter not set")
 					}
 				} else {
-					ctxt.interpreter = thearch.ELF.Linuxdynld
+					ctxt.interpreter = ctxt.thearch.ELF.Linuxdynld
 					// If interpreter does not exist, try musl instead.
 					// This lets the same cmd/link binary work on
 					// both glibc-based and musl-based systems.
 					if _, err := os.Stat(ctxt.interpreter); err != nil {
-						if musl := thearch.ELF.LinuxdynldMusl; musl != "" {
+						if musl := ctxt.thearch.ELF.LinuxdynldMusl; musl != "" {
 							if _, err := os.Stat(musl); err == nil {
 								ctxt.interpreter = musl
 							}
@@ -1855,19 +1856,19 @@ func asmbElf(ctxt *Link) {
 				}
 
 			case objabi.Hfreebsd:
-				ctxt.interpreter = thearch.ELF.Freebsddynld
+				ctxt.interpreter = ctxt.thearch.ELF.Freebsddynld
 
 			case objabi.Hnetbsd:
-				ctxt.interpreter = thearch.ELF.Netbsddynld
+				ctxt.interpreter = ctxt.thearch.ELF.Netbsddynld
 
 			case objabi.Hopenbsd:
-				ctxt.interpreter = thearch.ELF.Openbsddynld
+				ctxt.interpreter = ctxt.thearch.ELF.Openbsddynld
 
 			case objabi.Hdragonfly:
-				ctxt.interpreter = thearch.ELF.Dragonflydynld
+				ctxt.interpreter = ctxt.thearch.ELF.Dragonflydynld
 
 			case objabi.Hsolaris:
-				ctxt.interpreter = thearch.ELF.Solarisdynld
+				ctxt.interpreter = ctxt.thearch.ELF.Solarisdynld
 			}
 		}
 

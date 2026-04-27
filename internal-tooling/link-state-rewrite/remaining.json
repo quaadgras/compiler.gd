@@ -1,0 +1,13 @@
+{
+  "fields": [
+    {"var": "thearch", "field": "thearch"},
+    {"var": "xfile", "field": "xfile"},
+    {"var": "currDwscnoff", "field": "currDwscnoff"},
+    {"var": "currSymSrcFile", "field": "currSymSrcFile"},
+    {"var": "outerSymSize", "field": "outerSymSize"},
+    {"var": "covCounterDataStartOff", "field": "covCounterDataStartOff"},
+    {"var": "covCounterDataLen", "field": "covCounterDataLen"},
+    {"var": "strdata", "field": "strdata"},
+    {"var": "strnames", "field": "strnames"}
+  ]
+}

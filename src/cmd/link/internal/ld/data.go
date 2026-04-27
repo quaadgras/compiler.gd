@@ -65,7 +65,7 @@ func isRuntimeDepPkg(pkg string) bool {
 func maxSizeTrampolines(ctxt *Link, ldr *loader.Loader, s loader.Sym, isTramp bool) uint64 {
 	// If thearch.Trampoline is nil, then trampoline support is not available on this arch.
 	// A trampoline does not need any dependent trampolines.
-	if thearch.Trampoline == nil || isTramp {
+	if ctxt.thearch.Trampoline == nil || isTramp {
 		return 0
 	}
 
@@ -98,7 +98,7 @@ func maxSizeTrampolines(ctxt *Link, ldr *loader.Loader, s loader.Sym, isTramp bo
 // and external linking. On PPC64 and PPC64LE the text sections might be split
 // but will still insert trampolines where necessary.
 func trampoline(ctxt *Link, s loader.Sym) {
-	if thearch.Trampoline == nil {
+	if ctxt.thearch.Trampoline == nil {
 		return // no need or no support of trampolines on this arch
 	}
 
@@ -133,7 +133,8 @@ func trampoline(ctxt *Link, s loader.Sym) {
 				continue
 			}
 		}
-		thearch.Trampoline(ctxt, ldr, ri, rs, s)
+		ctxt.thearch.
+			Trampoline(ctxt, ldr, ri, rs, s)
 	}
 }
 
@@ -292,7 +293,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			case 8:
 				o = int64(target.Arch.ByteOrder.Uint64(P[off:]))
 			}
-			out, n, ok := thearch.Archreloc(st.link, target, ldr, syms, r, s, o)
+			out, n, ok := st.link.thearch.Archreloc(st.link, target, ldr, syms, r, s, o)
 			if target.IsExternal() {
 				nExtReloc += n
 			}
@@ -342,10 +343,11 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 			if target.IsPIE() && target.IsElf() {
 				// We are linking the final executable, so we
 				// can optimize any TLS IE relocation to LE.
-				if thearch.TLSIEtoLE == nil {
+				if st.link.thearch.TLSIEtoLE == nil {
 					log.Fatalf("internal linking of TLS IE not supported on %v", target.Arch.Family)
 				}
-				thearch.TLSIEtoLE(P, int(off), int(siz))
+				st.link.thearch.
+					TLSIEtoLE(P, int(off), int(siz))
 				o = int64(syms.Tlsoffset)
 			} else {
 				log.Fatalf("cannot handle R_TLS_IE (sym %s) when linking internally", ldr.SymName(s))
@@ -604,7 +606,7 @@ func (st *relocSymState) relocsym(s loader.Sym, P []byte) {
 
 		if target.IsPPC64() || target.IsS390X() {
 			if rv != sym.RV_NONE {
-				o = thearch.Archrelocvariant(target, ldr, r, rv, s, o, P)
+				o = st.link.thearch.Archrelocvariant(target, ldr, r, rv, s, o, P)
 			}
 		}
 
@@ -664,7 +666,7 @@ func extreloc(ctxt *Link, ldr *loader.Loader, s loader.Sym, r loader.Reloc) (loa
 
 	switch rt {
 	default:
-		return thearch.Extreloc(target, ldr, r, s)
+		return ctxt.thearch.Extreloc(target, ldr, r, s)
 
 	case objabi.R_TLS_LE, objabi.R_TLS_IE:
 		if target.IsElf() {
@@ -978,10 +980,12 @@ func dynrelocsym(ctxt *Link, s loader.Sym) {
 			continue
 		}
 		if ctxt.BuildMode == BuildModePIE && ctxt.LinkMode == LinkInternal {
-			// It's expected that some relocations will be done
-			// later by relocsym (R_TLS_LE, R_ADDROFF), so
-			// don't worry if Adddynrel returns false.
-			thearch.Adddynrel(ctxt, target, ldr, syms, s, r, ri)
+			ctxt.
+				// It's expected that some relocations will be done
+				// later by relocsym (R_TLS_LE, R_ADDROFF), so
+				// don't worry if Adddynrel returns false.
+				thearch.
+				Adddynrel(ctxt, target, ldr, syms, s, r, ri)
 			continue
 		}
 
@@ -989,7 +993,7 @@ func dynrelocsym(ctxt *Link, s loader.Sym) {
 			if rSym != 0 && !ldr.AttrReachable(rSym) {
 				ctxt.Errorf(s, "dynamic relocation to unreachable symbol %s", ldr.SymName(rSym))
 			}
-			if !thearch.Adddynrel(ctxt, target, ldr, syms, s, r, ri) {
+			if !ctxt.thearch.Adddynrel(ctxt, target, ldr, syms, s, r, ri) {
 				ctxt.Errorf(s, "unsupported dynamic relocation for symbol %s (type=%d (%s) stype=%d (%s))", ldr.SymName(rSym), r.Type(), sym.RelocName(ctxt.Arch, r.Type()), ldr.SymType(rSym), ldr.SymType(rSym))
 			}
 		}
@@ -1226,14 +1230,7 @@ func xdatablk(ctxt *Link, out *OutBuf, addr int64, size int64) {
 	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, ctxt.sehp.xdata, addr, size, zeros[:])
 }
 
-var covCounterDataStartOff, covCounterDataLen uint64
-
 var zeros [512]byte
-
-var (
-	strdata  = make(map[string]string)
-	strnames []string
-)
 
 func addstrdata1(ctxt *Link, arg string) {
 	eq := strings.Index(arg, "=")
@@ -1248,10 +1245,10 @@ func addstrdata1(ctxt *Link, arg string) {
 	pkg = objabi.PathToPrefix(pkg)
 	name := pkg + arg[dot:eq]
 	value := arg[eq+1:]
-	if _, ok := strdata[name]; !ok {
-		strnames = append(strnames, name)
+	if _, ok := ctxt.strdata[name]; !ok {
+		ctxt.strnames = append(ctxt.strnames, name)
 	}
-	strdata[name] = value
+	ctxt.strdata[name] = value
 }
 
 // addstrdata sets the initial value of the string variable name to value.
@@ -1292,8 +1289,8 @@ func addstrdata(arch *sys.Arch, l *loader.Loader, name, value string) {
 }
 
 func (ctxt *Link) dostrdata() {
-	for _, name := range strnames {
-		addstrdata(ctxt.Arch, ctxt.loader, name, strdata[name])
+	for _, name := range ctxt.strnames {
+		addstrdata(ctxt.Arch, ctxt.loader, name, ctxt.strdata[name])
 	}
 }
 
@@ -1327,15 +1324,15 @@ func addinitarrdata(ctxt *Link, ldr *loader.Loader, s loader.Sym) {
 }
 
 // symalign returns the required alignment for the given symbol s.
-func symalign(ldr *loader.Loader, s loader.Sym) int32 {
-	min := int32(thearch.Minalign)
+func symalign(ctxt *Link, ldr *loader.Loader, s loader.Sym) int32 {
+	min := int32(ctxt.thearch.Minalign)
 	align := ldr.SymAlign(s)
 	if align >= min {
 		return align
 	} else if align != 0 {
 		return min
 	}
-	align = int32(thearch.Maxalign)
+	align = int32(ctxt.thearch.Maxalign)
 	ssz := ldr.SymSize(s)
 	for int64(align) > ssz && align > min {
 		align >>= 1
@@ -1345,7 +1342,7 @@ func symalign(ldr *loader.Loader, s loader.Sym) int32 {
 }
 
 func aligndatsize(state *dodataState, datsize int64, s loader.Sym) int64 {
-	return Rnd(datsize, int64(symalign(state.ctxt.loader, s)))
+	return Rnd(datsize, int64(symalign(state.ctxt, state.ctxt.loader, s)))
 }
 
 const debugGCProg = false
@@ -1837,7 +1834,7 @@ func (state *dodataState) allocateDataSectionForSym(seg *sym.Segment, s loader.S
 		sname = ".go." + sname[len("go:"):]
 	}
 	sect := addsection(ldr, state.ctxt.Arch, seg, sname, rwx)
-	sect.Align = symalign(ldr, s)
+	sect.Align = symalign(state.ctxt, ldr, s)
 	state.datsize = Rnd(state.datsize, int64(sect.Align))
 	sect.Vaddr = uint64(state.datsize)
 	return sect
@@ -1955,7 +1952,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 		}
 		s := state.data[sym.SMODULEDATA][0]
 		sect := addsection(ldr, ctxt.Arch, &ctxt.Segdata, ".go.module", 06)
-		sect.Align = symalign(ldr, s)
+		sect.Align = symalign(ctxt, ldr, s)
 		state.datsize = Rnd(state.datsize, int64(sect.Align))
 		sect.Vaddr = uint64(state.datsize)
 		ldr.SetSymSect(s, sect)
@@ -2048,13 +2045,14 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	sect = state.allocateNamedSectionAndAssignSyms(&ctxt.Segdata, ".noptrbss", sym.SNOPTRBSS, sym.Sxxx, 06)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.noptrbss", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.enoptrbss", 0), sect)
+	ctxt.
 
-	// Code coverage counters are assigned to the .noptrbss section.
-	// We assign them in a separate pass so that they stay aggregated
-	// together in a single blob (coverage runtime depends on this).
-	covCounterDataStartOff = sect.Length
+		// Code coverage counters are assigned to the .noptrbss section.
+		// We assign them in a separate pass so that they stay aggregated
+		// together in a single blob (coverage runtime depends on this).
+		covCounterDataStartOff = sect.Length
 	state.assignToSection(sect, sym.SCOVERAGE_COUNTER, sym.SNOPTRBSS)
-	covCounterDataLen = sect.Length - covCounterDataStartOff
+	ctxt.covCounterDataLen = sect.Length - ctxt.covCounterDataStartOff
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.covctrs", 0), sect)
 	ldr.SetSymSect(ldr.LookupOrCreateSym("runtime.ecovctrs", 0), sect)
 
@@ -2440,7 +2438,7 @@ func (state *dodataState) dodataSect(ctxt *Link, symn sym.SymKind, syms []loader
 	for k := range sl {
 		s := sl[k].sym
 		if s != head && s != tail {
-			align := symalign(ldr, s)
+			align := symalign(ctxt, ldr, s)
 			if maxAlign < align {
 				maxAlign = align
 			}
@@ -2497,8 +2495,8 @@ func (ctxt *Link) buildinfo() {
 		data[len(prefix)+1] = 1
 	}
 	data[len(prefix)+1] |= 2 // signals new pointer-free format
-	data = appendString(data, strdata["runtime.buildVersion"])
-	data = appendString(data, strdata["runtime.modinfo"])
+	data = appendString(data, ctxt.strdata["runtime.buildVersion"])
+	data = appendString(data, ctxt.strdata["runtime.modinfo"])
 	// MacOS linker gets very upset if the size is not a multiple of alignment.
 	for len(data)%16 != 0 {
 		data = append(data, 0)
@@ -2588,7 +2586,7 @@ func (ctxt *Link) textaddress() {
 	n := 1
 	sect.Vaddr = va
 
-	limit := thearch.TrampLimit
+	limit := ctxt.thearch.TrampLimit
 	if limit == 0 {
 		limit = 1 << 63 // unlimited
 	}
@@ -2706,8 +2704,8 @@ func (ctxt *Link) textaddress() {
 // assigns address for a text symbol, returns (possibly new) section, its number, and the address.
 func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64, isTramp, big bool) (*sym.Section, int, uint64) {
 	ldr := ctxt.loader
-	if thearch.AssignAddress != nil {
-		return thearch.AssignAddress(ldr, sect, n, s, va, isTramp)
+	if ctxt.thearch.AssignAddress != nil {
+		return ctxt.thearch.AssignAddress(ldr, sect, n, s, va, isTramp)
 	}
 
 	ldr.SetSymSect(s, sect)
@@ -2734,7 +2732,7 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 	if big && splitTextSections(ctxt) && ldr.OuterSym(s) == 0 {
 		// For debugging purposes, allow text size limit to be cranked down,
 		// so as to stress test the code that handles multiple text sections.
-		var textSizelimit uint64 = thearch.TrampLimit
+		var textSizelimit uint64 = ctxt.thearch.TrampLimit
 		if *FlagDebugTextSize != 0 {
 			textSizelimit = uint64(*FlagDebugTextSize)
 		}
@@ -2746,7 +2744,7 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 		}
 
 		if va-sect.Vaddr+funcsize+maxSizeTrampolines(ctxt, ldr, s, isTramp) > textSizelimit {
-			sectAlign := int32(thearch.Funcalign)
+			sectAlign := int32(ctxt.thearch.Funcalign)
 			if ctxt.IsPPC64() {
 				// Align the next text section to the worst case function alignment likely
 				// to be encountered when processing function symbols. The start address
@@ -3127,8 +3125,8 @@ func (ctxt *Link) address() []*sym.Segment {
 	ctxt.xdefine("runtime.edata", sym.SDATAEND, int64(data.Vaddr+data.Length))
 	ctxt.xdefine("runtime.noptrbss", sym.SNOPTRBSS, int64(noptrbss.Vaddr))
 	ctxt.xdefine("runtime.enoptrbss", sym.SNOPTRBSS, int64(noptrbss.Vaddr+noptrbss.Length))
-	ctxt.xdefine("runtime.covctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+covCounterDataStartOff))
-	ctxt.xdefine("runtime.ecovctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+covCounterDataStartOff+covCounterDataLen))
+	ctxt.xdefine("runtime.covctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+ctxt.covCounterDataStartOff))
+	ctxt.xdefine("runtime.ecovctrs", sym.SCOVERAGE_COUNTER, int64(noptrbss.Vaddr+ctxt.covCounterDataStartOff+ctxt.covCounterDataLen))
 	ctxt.xdefine("runtime.end", sym.SBSS, int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length))
 
 	if fuzzCounters != nil {

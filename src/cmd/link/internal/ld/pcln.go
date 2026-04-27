@@ -561,8 +561,8 @@ func (state *pclntab) generateFuncdata(ctxt *Link, funcs []loader.Sym, inlsyms m
 	// for reproducible results.
 	var maxAlign int32
 	slices.SortStableFunc(fdSyms, func(a, b loader.Sym) int {
-		aAlign := symalign(ldr, a)
-		bAlign := symalign(ldr, b)
+		aAlign := symalign(ctxt, ldr, a)
+		bAlign := symalign(ctxt, ldr, b)
 
 		// Remember maximum alignment.
 		maxAlign = max(maxAlign, aAlign, bAlign)
@@ -586,7 +586,7 @@ func (state *pclntab) generateFuncdata(ctxt *Link, funcs []loader.Sym, inlsyms m
 			continue
 		}
 
-		size = Rnd(size, int64(symalign(ldr, fdSym)))
+		size = Rnd(size, int64(symalign(ctxt, ldr, fdSym)))
 		ldr.SetSymValue(fdSym, size)
 		size += datSize
 

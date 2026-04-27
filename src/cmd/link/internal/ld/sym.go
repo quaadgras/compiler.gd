@@ -62,6 +62,9 @@ func linknew(arch *sys.Arch) *Link {
 			Nelfsym:        1,
 			phdr:           make([]*ElfPhdr, 0, 8),
 			shdr:           make([]*ElfShdr, 0, 64),
+			strdata:        map[string]string{},
+			currDwscnoff:   map[string]uint64{},
+			outerSymSize:   map[string]int64{},
 		},
 	}
 	ctxt.Segments = []*sym.Segment{&ctxt.Segtext, &ctxt.Segrodata, &ctxt.Segrelrodata, &ctxt.Segdata, &ctxt.Segdwarf, &ctxt.Segpdata, &ctxt.Segxdata}

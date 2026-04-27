@@ -20,8 +20,9 @@ import (
 // This function handles the first part.
 func asmb(ctxt *Link) {
 	// TODO(jfaller): delete me.
-	if thearch.Asmb != nil {
-		thearch.Asmb(ctxt, ctxt.loader)
+	if ctxt.thearch.Asmb != nil {
+		ctxt.thearch.
+			Asmb(ctxt, ctxt.loader)
 		return
 	}
 
@@ -31,7 +32,7 @@ func asmb(ctxt *Link) {
 
 	var wg sync.WaitGroup
 	f := func(ctxt *Link, out *OutBuf, start, length int64) {
-		pad := thearch.CodePad
+		pad := ctxt.thearch.CodePad
 		if pad == nil {
 			pad = zeros[:]
 		}
@@ -76,8 +77,9 @@ func asmb(ctxt *Link) {
 //
 // This function handles the second part.
 func asmb2(ctxt *Link) {
-	if thearch.Asmb2 != nil {
-		thearch.Asmb2(ctxt, ctxt.loader)
+	if ctxt.thearch.Asmb2 != nil {
+		ctxt.thearch.
+			Asmb2(ctxt, ctxt.loader)
 		return
 	}
 	ctxt.symSize = 0
@@ -156,7 +158,7 @@ func asmbPlan9(ctxt *Link) {
 		asmbPlan9Sym(ctxt)
 	}
 	ctxt.Out.SeekSet(0)
-	writePlan9Header(ctxt, ctxt.Out, thearch.Plan9Magic, Entryvalue(ctxt), thearch.Plan9_64Bit)
+	writePlan9Header(ctxt, ctxt.Out, ctxt.thearch.Plan9Magic, Entryvalue(ctxt), ctxt.thearch.Plan9_64Bit)
 }
 
 // sizeExtRelocs precomputes the size needed for the reloc records,

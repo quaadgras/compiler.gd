@@ -268,10 +268,6 @@ type Arch struct {
 	ELF ELFArch
 }
 
-var (
-	thearch Arch
-)
-
 // Symbol version of ABIInternal symbols. It is sym.SymVerABIInternal if ABI wrappers
 // are used, 0 otherwise.
 
@@ -351,7 +347,7 @@ func libinit(ctxt *Link) {
 	if *FlagFuncAlign != 0 {
 		ctxt.Funcalign = *FlagFuncAlign
 	} else {
-		ctxt.Funcalign = thearch.Funcalign
+		ctxt.Funcalign = ctxt.thearch.Funcalign
 	}
 
 	// add goroot to the end of the libdir list.

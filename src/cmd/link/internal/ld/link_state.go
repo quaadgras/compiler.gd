@@ -41,6 +41,21 @@ type linkState struct {
 	shdrSorted bool
 	interp     string
 
+	// thearch and other lib.go state
+	thearch Arch
+
+	// data.go state
+	covCounterDataStartOff uint64
+	covCounterDataLen      uint64
+	strdata                map[string]string // initialised in linknew
+	strnames               []string
+
+	// xcoff.go state (windows-only/AIX-only but always allocated)
+	xfile          xcoffFile
+	currDwscnoff   map[string]uint64    // initialised in linknew
+	currSymSrcFile xcoffSymSrcFile
+	outerSymSize   map[string]int64     // initialised in linknew
+
 	// segments (was in lib.go)
 	Segtext      sym.Segment
 	Segrodata    sym.Segment

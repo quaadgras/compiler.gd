@@ -1455,30 +1455,30 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 	if isdw64 {
 		cieReserve += 4 // 4 bytes added for cid
 	}
-	d.createUnitLength(fsu, uint64(cieReserve))         // initial length, must be multiple of thearch.ptrsize
-	d.addDwarfAddrField(fsu, ^uint64(0))                // cid
-	fsu.AddUint8(3)                                     // dwarf version (appendix F)
-	fsu.AddUint8(0)                                     // augmentation ""
-	dwarf.Uleb128put(d, fsd, 1)                         // code_alignment_factor
-	dwarf.Sleb128put(d, fsd, dataAlignmentFactor)       // all CFI offset calculations include multiplication with this factor
-	dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfreglr)) // return_address_register
+	d.createUnitLength(fsu, uint64(cieReserve))                    // initial length, must be multiple of thearch.ptrsize
+	d.addDwarfAddrField(fsu, ^uint64(0))                           // cid
+	fsu.AddUint8(3)                                                // dwarf version (appendix F)
+	fsu.AddUint8(0)                                                // augmentation ""
+	dwarf.Uleb128put(d, fsd, 1)                                    // code_alignment_factor
+	dwarf.Sleb128put(d, fsd, dataAlignmentFactor)                  // all CFI offset calculations include multiplication with this factor
+	dwarf.Uleb128put(d, fsd, int64(d.linkctxt.thearch.Dwarfreglr)) // return_address_register
 
-	fsu.AddUint8(dwarf.DW_CFA_def_cfa)                  // Set the current frame address..
-	dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfregsp)) // ...to use the value in the platform's SP register (defined in l.go)...
+	fsu.AddUint8(dwarf.DW_CFA_def_cfa)                             // Set the current frame address..
+	dwarf.Uleb128put(d, fsd, int64(d.linkctxt.thearch.Dwarfregsp)) // ...to use the value in the platform's SP register (defined in l.go)...
 	if haslr {
 		dwarf.Uleb128put(d, fsd, int64(0)) // ...plus a 0 offset.
 
 		fsu.AddUint8(dwarf.DW_CFA_same_value) // The platform's link register is unchanged during the prologue.
-		dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfreglr))
+		dwarf.Uleb128put(d, fsd, int64(d.linkctxt.thearch.Dwarfreglr))
 
-		fsu.AddUint8(dwarf.DW_CFA_val_offset)               // The previous value...
-		dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfregsp)) // ...of the platform's SP register...
-		dwarf.Uleb128put(d, fsd, int64(0))                  // ...is CFA+0.
+		fsu.AddUint8(dwarf.DW_CFA_val_offset)                          // The previous value...
+		dwarf.Uleb128put(d, fsd, int64(d.linkctxt.thearch.Dwarfregsp)) // ...of the platform's SP register...
+		dwarf.Uleb128put(d, fsd, int64(0))                             // ...is CFA+0.
 	} else {
 		dwarf.Uleb128put(d, fsd, int64(d.arch.PtrSize)) // ...plus the word size (because the call instruction implicitly adds one word to the frame).
 
 		fsu.AddUint8(dwarf.DW_CFA_offset_extended)                           // The previous value...
-		dwarf.Uleb128put(d, fsd, int64(thearch.Dwarfreglr))                  // ...of the return address...
+		dwarf.Uleb128put(d, fsd, int64(d.linkctxt.thearch.Dwarfreglr))       // ...of the return address...
 		dwarf.Uleb128put(d, fsd, int64(-d.arch.PtrSize)/dataAlignmentFactor) // ...is saved at [CFA - (PtrSize/4)].
 	}
 
@@ -1511,7 +1511,7 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 			// This stops call stack unwinders progressing any further.
 			// TODO: similar mark on non-LR architectures.
 			deltaBuf = append(deltaBuf, dwarf.DW_CFA_undefined)
-			deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(thearch.Dwarfreglr))
+			deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(d.linkctxt.thearch.Dwarfreglr))
 		}
 
 		for pcsp.Init(d.linkctxt.loader.Data(fpcsp)); !pcsp.Done; pcsp.Next() {
@@ -1540,13 +1540,13 @@ func (d *dwctxt) writeframes(fs loader.Sym) dwarfSecInfo {
 					// The return address is preserved at (CFA-frame_size)
 					// after a stack frame has been allocated.
 					deltaBuf = append(deltaBuf, dwarf.DW_CFA_offset_extended_sf)
-					deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(thearch.Dwarfreglr))
+					deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(d.linkctxt.thearch.Dwarfreglr))
 					deltaBuf = dwarf.AppendSleb128(deltaBuf, -spdelta/dataAlignmentFactor)
 				} else {
 					// The return address is restored into the link register
 					// when a stack frame has been de-allocated.
 					deltaBuf = append(deltaBuf, dwarf.DW_CFA_same_value)
-					deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(thearch.Dwarfreglr))
+					deltaBuf = dwarf.AppendUleb128(deltaBuf, uint64(d.linkctxt.thearch.Dwarfreglr))
 				}
 			}
 
