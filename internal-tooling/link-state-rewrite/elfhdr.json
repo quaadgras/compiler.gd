@@ -1,0 +1,12 @@
+{
+  "fields": [
+    {"var": "Nelfsym", "field": "Nelfsym"},
+    {"var": "elf64", "field": "elf64"},
+    {"var": "elfRelType", "field": "elfRelType"},
+    {"var": "ehdr", "field": "ehdr"},
+    {"var": "phdr", "field": "phdr"},
+    {"var": "shdr", "field": "shdr"},
+    {"var": "shdrSorted", "field": "shdrSorted"},
+    {"var": "interp", "field": "interp"}
+  ]
+}

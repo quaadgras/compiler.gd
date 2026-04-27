@@ -68,15 +68,15 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 
 	dynamic := ldr.MakeSymbolUpdater(ctxt.ArchSyms.Dynamic)
 
-	ld.Elfwritedynent(ctxt.Arch, dynamic, elf.DT_MIPS_RLD_VERSION, 1)
-	ld.Elfwritedynent(ctxt.Arch, dynamic, elf.DT_MIPS_BASE_ADDRESS, 0)
+	ld.Elfwritedynent(ctxt, ctxt.Arch, dynamic, elf.DT_MIPS_RLD_VERSION, 1)
+	ld.Elfwritedynent(ctxt, ctxt.Arch, dynamic, elf.DT_MIPS_BASE_ADDRESS, 0)
 
 	// elfsetupplt should have been called and gotLocalCount should now
 	// have its correct value.
 	if gotLocalCount == 0 {
 		ctxt.Errorf(0, "internal error: elfsetupplt has not been called")
 	}
-	ld.Elfwritedynent(ctxt.Arch, dynamic, elf.DT_MIPS_LOCAL_GOTNO, gotLocalCount)
+	ld.Elfwritedynent(ctxt, ctxt.Arch, dynamic, elf.DT_MIPS_LOCAL_GOTNO, gotLocalCount)
 
 	// DT_* entries have to exist prior to elfdynhash(), which finalises the
 	// table by adding DT_NULL. However, the values for the following entries
@@ -88,7 +88,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 	dtOffsets = make(map[elf.DynTag]int64)
 	for _, dt := range dts {
-		ld.Elfwritedynent(ctxt.Arch, dynamic, dt, 0)
+		ld.Elfwritedynent(ctxt, ctxt.Arch, dynamic, dt, 0)
 		dtOffsets[dt] = dynamic.Size() - 8
 	}
 }

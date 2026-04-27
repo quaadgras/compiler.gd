@@ -59,6 +59,9 @@ func linknew(arch *sys.Arch) *Link {
 			isLabel:        map[loader.Sym]bool{},
 			seenlib:        map[string]bool{},
 			abiInternalVer: sym.SymVerABIInternal,
+			Nelfsym:        1,
+			phdr:           make([]*ElfPhdr, 0, 8),
+			shdr:           make([]*ElfShdr, 0, 64),
 		},
 	}
 	ctxt.Segments = []*sym.Segment{&ctxt.Segtext, &ctxt.Segrodata, &ctxt.Segrelrodata, &ctxt.Segdata, &ctxt.Segdwarf, &ctxt.Segpdata, &ctxt.Segxdata}

@@ -57,7 +57,7 @@ func putelfstr(ctxt *Link, s string) int {
 }
 
 func putelfsyment(ctxt *Link, out *OutBuf, off int, addr int64, size int64, info uint8, shndx elf.SectionIndex, other int) {
-	if elf64 {
+	if ctxt.elf64 {
 		out.Write32(uint32(off))
 		out.Write8(info)
 		out.Write8(uint8(other))

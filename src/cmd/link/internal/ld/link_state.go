@@ -31,6 +31,16 @@ type linkState struct {
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
 
+	// elf header state (was in elf.go's var block)
+	Nelfsym    int     // initialised to 1 by linknew
+	elf64      bool
+	elfRelType string  // ".rel" or ".rela"
+	ehdr       ElfEhdr
+	phdr       []*ElfPhdr // initialised in linknew
+	shdr       []*ElfShdr // initialised in linknew
+	shdrSorted bool
+	interp     string
+
 	// segments (was in lib.go)
 	Segtext      sym.Segment
 	Segrodata    sym.Segment
