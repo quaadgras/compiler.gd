@@ -1,0 +1,12 @@
+{
+  "fields": [
+    {"var": "gdbscript", "field": "gdbscript"},
+    {"var": "dwarfp", "field": "dwarfp"},
+    {"var": "dwtypes", "field": "dwtypes"},
+    {"var": "prototypedies", "field": "prototypedies"},
+    {"var": "dwsectCUSize", "field": "dwsectCUSize"},
+    {"var": "elfstrdat", "field": "elfstrdat"},
+    {"var": "buildinfo", "field": "buildinfoData"},
+    {"var": "elfverneed", "field": "elfverneed"}
+  ]
+}

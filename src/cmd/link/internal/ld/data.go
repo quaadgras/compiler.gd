@@ -1206,12 +1206,12 @@ func dwarfblk(ctxt *Link, out *OutBuf, addr int64, size int64) {
 	// section, but this would run the risk of undoing any file offset
 	// adjustments made during layout.
 	n := 0
-	for i := range dwarfp {
-		n += len(dwarfp[i].syms)
+	for i := range ctxt.dwarfp {
+		n += len(ctxt.dwarfp[i].syms)
 	}
 	syms := make([]loader.Sym, 0, n)
-	for i := range dwarfp {
-		syms = append(syms, dwarfp[i].syms...)
+	for i := range ctxt.dwarfp {
+		syms = append(syms, ctxt.dwarfp[i].syms...)
 	}
 	writeBlocks(ctxt, out, ctxt.outSem, ctxt.loader, syms, addr, size, zeros[:])
 }
@@ -2303,9 +2303,9 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 	alignOne := func(state *dodataState, datsize int64, s loader.Sym) int64 { return datsize }
 
 	ldr := ctxt.loader
-	for i := 0; i < len(dwarfp); i++ {
+	for i := 0; i < len(ctxt.dwarfp); i++ {
 		// First the section symbol.
-		s := dwarfp[i].secSym()
+		s := ctxt.dwarfp[i].secSym()
 		sect := state.allocateNamedDataSection(&Segdwarf, ldr.SymName(s), []sym.SymKind{}, 04)
 		ldr.SetSymSect(s, sect)
 		sect.Sym = s
@@ -2315,7 +2315,7 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 		state.datsize += ldr.SymSize(s)
 
 		// Then any sub-symbols for the section symbol.
-		subSyms := dwarfp[i].subSyms()
+		subSyms := ctxt.dwarfp[i].subSyms()
 		state.assignDsymsToSection(sect, subSyms, sym.SRODATA, alignOne)
 
 		for j := 0; j < len(subSyms); j++ {
@@ -2323,7 +2323,7 @@ func (state *dodataState) allocateDwarfSections(ctxt *Link) {
 			if ctxt.HeadType == objabi.Haix && curType == sym.SDWARFLOC {
 				// Update the size of .debug_loc for this symbol's
 				// package.
-				addDwsectCUSize(".debug_loc", ldr.SymPkg(s), uint64(ldr.SymSize(s)))
+				addDwsectCUSize(ctxt, ".debug_loc", ldr.SymPkg(s), uint64(ldr.SymSize(s)))
 			}
 		}
 		sect.Length = uint64(state.datsize) - sect.Vaddr
@@ -3022,7 +3022,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		}
 	}
 
-	for _, si := range dwarfp {
+	for _, si := range ctxt.dwarfp {
 		for _, s := range si.syms {
 			if sect := ldr.SymSect(s); sect != nil {
 				ldr.AddToSymValue(s, int64(sect.Vaddr))

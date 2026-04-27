@@ -652,7 +652,7 @@ func (f *peFile) emitRelocations(ctxt *Link) {
 dwarfLoop:
 	for i := 0; i < len(Segdwarf.Sections); i++ {
 		sect := Segdwarf.Sections[i]
-		si := dwarfp[i]
+		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ldr.SymSect(si.secSym()) != sect {
 			panic("inconsistency between dwarfp and Segdwarf")

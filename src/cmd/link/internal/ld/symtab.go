@@ -44,15 +44,15 @@ import (
 
 // Symbol table.
 
-func putelfstr(s string) int {
-	if len(elfstrdat) == 0 && s != "" {
+func putelfstr(ctxt *Link, s string) int {
+	if len(ctxt.elfstrdat) == 0 && s != "" {
 		// first entry must be empty string
-		putelfstr("")
+		putelfstr(ctxt, "")
 	}
 
-	off := len(elfstrdat)
-	elfstrdat = append(elfstrdat, s...)
-	elfstrdat = append(elfstrdat, 0)
+	off := len(ctxt.elfstrdat)
+	ctxt.elfstrdat = append(ctxt.elfstrdat, s...)
+	ctxt.elfstrdat = append(ctxt.elfstrdat, 0)
 	return off
 }
 
@@ -167,7 +167,7 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 		// (*sym.Symbol).ElfsymForReloc). This is approximately equivalent to the
 		// ELF linker -Bsymbolic-functions option, but that is buggy on
 		// several platforms.
-		putelfsyment(ctxt.Out, putelfstr("local."+sname), addr, size, elf.ST_INFO(elf.STB_LOCAL, typ), elfshnum, other)
+		putelfsyment(ctxt.Out, putelfstr(ctxt, "local."+sname), addr, size, elf.ST_INFO(elf.STB_LOCAL, typ), elfshnum, other)
 		ldr.SetSymLocalElfSym(x, int32(ctxt.numelfsym))
 		ctxt.numelfsym++
 		return
@@ -175,7 +175,7 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 		return
 	}
 
-	putelfsyment(ctxt.Out, putelfstr(sname), addr, size, elf.ST_INFO(bind, typ), elfshnum, other)
+	putelfsyment(ctxt.Out, putelfstr(ctxt, sname), addr, size, elf.ST_INFO(bind, typ), elfshnum, other)
 	ldr.SetSymElfSym(x, int32(ctxt.numelfsym))
 	ctxt.numelfsym++
 }
@@ -275,7 +275,7 @@ func asmElfSym(ctxt *Link) {
 	// Avoid having the working directory inserted into the symbol table.
 	// It is added with a name to avoid problems with external linking
 	// encountered on some versions of Solaris. See issue #14957.
-	putelfsyment(ctxt.Out, putelfstr("go.go"), 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_FILE), elf.SHN_ABS, 0)
+	putelfsyment(ctxt.Out, putelfstr(ctxt, "go.go"), 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_FILE), elf.SHN_ABS, 0)
 	ctxt.numelfsym++
 
 	bindings := []elf.SymBind{elf.STB_LOCAL, elf.STB_GLOBAL}

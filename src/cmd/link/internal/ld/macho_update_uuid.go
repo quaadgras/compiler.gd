@@ -87,7 +87,7 @@ func machoRewriteUuid(ctxt *Link, exef *os.File, exem *macho.File, outexe string
 				return err
 			}
 			clear(u.Uuid[:])
-			copy(u.Uuid[:], buildinfo)
+			copy(u.Uuid[:], ctxt.buildinfoData)
 			if err := reader.WriteAt(0, &u); err != nil {
 				return err
 			}

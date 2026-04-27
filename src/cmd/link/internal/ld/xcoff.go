@@ -679,7 +679,7 @@ func (f *xcoffFile) writeSymbolNewFile(ctxt *Link, name string, firstEntry uint6
 		if ctxt.LinkMode == LinkInternal {
 			// Find the size of this corresponding package DWARF compilation unit.
 			// This size is set during DWARF generation (see dwarf.go).
-			dwsize = getDwsectCUSize(sect.Name, name)
+			dwsize = getDwsectCUSize(ctxt, sect.Name, name)
 			// .debug_abbrev is common to all packages and not found with the previous function
 			if sect.Name == ".debug_abbrev" {
 				dwsize = uint64(ldr.SymSize(sect.Sym))
@@ -1759,7 +1759,7 @@ func (f *xcoffFile) emitRelocations(ctxt *Link, fileoff int64) {
 dwarfLoop:
 	for i := 0; i < len(Segdwarf.Sections); i++ {
 		sect := Segdwarf.Sections[i]
-		si := dwarfp[i]
+		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ldr.SymSect(si.secSym()) != sect {
 			panic("inconsistency between dwarfp and Segdwarf")

@@ -806,18 +806,18 @@ func asmbMacho(ctxt *Link) {
 			}
 		}
 
-		if ctxt.IsInternal() && len(buildinfo) > 0 {
+		if ctxt.IsInternal() && len(ctxt.buildinfoData) > 0 {
 			ml := newMachoLoad(ctxt.Arch, imacho.LC_UUID, 4)
 			// Mach-O UUID is 16 bytes
-			if len(buildinfo) < 16 {
-				buildinfo = append(buildinfo, make([]byte, 16)...)
+			if len(ctxt.buildinfoData) < 16 {
+				ctxt.buildinfoData = append(ctxt.buildinfoData, make([]byte, 16)...)
 			}
 			// By default, buildinfo is already in UUIDv3 format
 			// (see uuidFromGoBuildId).
-			ml.data[0] = ctxt.Arch.ByteOrder.Uint32(buildinfo)
-			ml.data[1] = ctxt.Arch.ByteOrder.Uint32(buildinfo[4:])
-			ml.data[2] = ctxt.Arch.ByteOrder.Uint32(buildinfo[8:])
-			ml.data[3] = ctxt.Arch.ByteOrder.Uint32(buildinfo[12:])
+			ml.data[0] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData)
+			ml.data[1] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[4:])
+			ml.data[2] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[8:])
+			ml.data[3] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[12:])
 		}
 
 		if ctxt.IsInternal() && ctxt.NeedCodeSign() {
@@ -1255,7 +1255,7 @@ func machoEmitReloc(ctxt *Link) {
 	}
 	for i := 0; i < len(Segdwarf.Sections); i++ {
 		sect := Segdwarf.Sections[i]
-		si := dwarfp[i]
+		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ctxt.loader.SymSect(si.secSym()) != sect {
 			panic("inconsistency between dwarfp and Segdwarf")

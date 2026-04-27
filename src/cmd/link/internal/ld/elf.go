@@ -114,8 +114,6 @@ const (
 	ELF32RELSIZE  = 8
 )
 
-var elfstrdat []byte
-
 // ELFRESERVE is the total amount of space to reserve at the
 // start of the file for Header, PHeaders, SHeaders, and interp.
 // May waste some space.
@@ -162,8 +160,6 @@ type ELFArch struct {
 	// This is used by MIPS targets.
 	DynamicReadOnly bool
 }
-
-var buildinfo []byte
 
 // Elfinit initializes the global ehdr variable that holds the ELF header.
 // It will be updated as write section and program headers.
@@ -879,12 +875,12 @@ func addbuildinfo(ctxt *Link) {
 		}
 
 		if ctxt.IsDarwin() {
-			buildinfo = uuidFromGoBuildId(buildID)
+			ctxt.buildinfoData = uuidFromGoBuildId(buildID)
 			return
 		}
 
 		hashedBuildID := hash.Sum32([]byte(buildID))
-		buildinfo = hashedBuildID[:20]
+		ctxt.buildinfoData = hashedBuildID[:20]
 
 		return
 	}
@@ -913,8 +909,7 @@ func addbuildinfo(ctxt *Link) {
 		}
 		Exitf("-B argument contains invalid hex: %s", ov)
 	}
-
-	buildinfo = b
+	ctxt.buildinfoData = b
 }
 
 // Build info note
@@ -925,8 +920,8 @@ const (
 
 var ELF_NOTE_BUILDINFO_NAME = []byte("GNU\x00")
 
-func elfbuildinfo(sh *ElfShdr, startva uint64, resoff uint64) int {
-	n := int(ELF_NOTE_BUILDINFO_NAMESZ + Rnd(int64(len(buildinfo)), 4))
+func elfbuildinfo(ctxt *Link, sh *ElfShdr, startva uint64, resoff uint64) int {
+	n := int(ELF_NOTE_BUILDINFO_NAMESZ + Rnd(int64(len(ctxt.buildinfoData)), 4))
 	return elfnote(sh, startva, resoff, n)
 }
 
@@ -935,16 +930,16 @@ func elfgobuildid(sh *ElfShdr, startva uint64, resoff uint64) int {
 	return elfnote(sh, startva, resoff, n)
 }
 
-func elfwritebuildinfo(out *OutBuf) int {
-	sh := elfwritenotehdr(out, ".note.gnu.build-id", ELF_NOTE_BUILDINFO_NAMESZ, uint32(len(buildinfo)), ELF_NOTE_BUILDINFO_TAG)
+func elfwritebuildinfo(ctxt *Link, out *OutBuf) int {
+	sh := elfwritenotehdr(out, ".note.gnu.build-id", ELF_NOTE_BUILDINFO_NAMESZ, uint32(len(ctxt.buildinfoData)), ELF_NOTE_BUILDINFO_TAG)
 	if sh == nil {
 		return 0
 	}
 
 	out.Write(ELF_NOTE_BUILDINFO_NAME)
-	out.Write(buildinfo)
+	out.Write(ctxt.buildinfoData)
 	var zero = make([]byte, 4)
-	out.Write(zero[:int(Rnd(int64(len(buildinfo)), 4)-int64(len(buildinfo)))])
+	out.Write(zero[:int(Rnd(int64(len(ctxt.buildinfoData)), 4)-int64(len(ctxt.buildinfoData)))])
 
 	return int(sh.Size)
 }
@@ -972,8 +967,6 @@ const (
 )
 
 var ELF_NOTE_GO_NAME = []byte("Go\x00\x00")
-
-var elfverneed int
 
 type Elfaux struct {
 	next *Elfaux
@@ -1139,9 +1132,8 @@ func elfdynhash(ctxt *Link) {
 		dtFlags1 |= elf.DF_1_PIE
 	}
 	Elfwritedynent(ctxt.Arch, s, elf.DT_FLAGS_1, uint64(dtFlags1))
-
-	elfverneed = nfile
-	if elfverneed != 0 {
+	ctxt.elfverneed = nfile
+	if ctxt.elfverneed != 0 {
 		elfWriteDynEntSym(ctxt, s, elf.DT_VERNEED, gnuVersionR.Sym())
 		Elfwritedynent(ctxt.Arch, s, elf.DT_VERNEEDNUM, uint64(nfile))
 		elfWriteDynEntSym(ctxt, s, elf.DT_VERSYM, gnuVersion.Sym())
@@ -1423,7 +1415,7 @@ func elfEmitReloc(ctxt *Link) {
 	}
 	for i := 0; i < len(Segdwarf.Sections); i++ {
 		sect := Segdwarf.Sections[i]
-		si := dwarfp[i]
+		si := ctxt.dwarfp[i]
 		if si.secSym() != sect.Sym ||
 			ctxt.loader.SymSect(si.secSym()) != sect {
 			panic("inconsistency between dwarfp and Segdwarf")
@@ -1896,9 +1888,9 @@ func asmbElf(ctxt *Link) {
 		phsh(pnotei, sh)
 	}
 
-	if len(buildinfo) > 0 {
+	if len(ctxt.buildinfoData) > 0 {
 		sh := elfshname(".note.gnu.build-id")
-		resoff -= int64(elfbuildinfo(sh, uint64(startva), uint64(resoff)))
+		resoff -= int64(elfbuildinfo(ctxt, sh, uint64(startva), uint64(resoff)))
 		phsh(getpnote(), sh)
 	}
 
@@ -1951,7 +1943,7 @@ func asmbElf(ctxt *Link) {
 		sh.Addralign = 1
 		shsym(sh, ldr, ldr.Lookup(".dynstr", 0))
 
-		if elfverneed != 0 {
+		if ctxt.elfverneed != 0 {
 			sh := elfshname(".gnu.version")
 			sh.Type = uint32(elf.SHT_GNU_VERSYM)
 			sh.Flags = uint64(elf.SHF_ALLOC)
@@ -1964,7 +1956,7 @@ func asmbElf(ctxt *Link) {
 			sh.Type = uint32(elf.SHT_GNU_VERNEED)
 			sh.Flags = uint64(elf.SHF_ALLOC)
 			sh.Addralign = uint64(ctxt.Arch.RegSize)
-			sh.Info = uint32(elfverneed)
+			sh.Info = uint32(ctxt.elfverneed)
 			sh.link = elfshname(".dynstr")
 			shsym(sh, ldr, ldr.Lookup(".gnu.version_r", 0))
 		}
@@ -2159,7 +2151,7 @@ elfobj:
 		for _, sect := range Segdata.Sections {
 			elfshreloc(ctxt.Arch, sect)
 		}
-		for _, si := range dwarfp {
+		for _, si := range ctxt.dwarfp {
 			sect := ldr.SymSect(si.secSym())
 			elfshreloc(ctxt.Arch, sect)
 		}
@@ -2182,7 +2174,7 @@ elfobj:
 		shstrtabLen = elfWriteShstrtab(ctxt)
 	} else {
 		asmElfSym(ctxt)
-		ctxt.Out.Write(elfstrdat)
+		ctxt.Out.Write(ctxt.elfstrdat)
 		shstrtabLen = elfWriteShstrtab(ctxt)
 		if ctxt.IsExternal() {
 			elfEmitReloc(ctxt)
@@ -2204,7 +2196,7 @@ elfobj:
 		sh = elfshname(".strtab")
 		sh.Type = uint32(elf.SHT_STRTAB)
 		sh.Off = uint64(symo) + uint64(symSize)
-		sh.Size = uint64(len(elfstrdat))
+		sh.Size = uint64(len(ctxt.elfstrdat))
 		sh.Addralign = 1
 		shstroff = sh.Off + sh.Size
 	} else {
@@ -2291,8 +2283,8 @@ elfobj:
 		if ctxt.HeadType == objabi.Hfreebsd {
 			a += int64(elfwritefreebsdsig(ctxt.Out))
 		}
-		if len(buildinfo) > 0 {
-			a += int64(elfwritebuildinfo(ctxt.Out))
+		if len(ctxt.buildinfoData) > 0 {
+			a += int64(elfwritebuildinfo(ctxt, ctxt.Out))
 		}
 		if *flagBuildid != "" {
 			a += int64(elfwritegobuildid(ctxt.Out))

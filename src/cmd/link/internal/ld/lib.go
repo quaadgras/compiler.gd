@@ -1739,8 +1739,8 @@ func (ctxt *Link) hostlink() {
 	}
 
 	if ctxt.IsELF && linkerFlagSupported(ctxt.Arch, argv[0], "", "-Wl,--build-id=0x1234567890abcdef") { // Solaris ld doesn't support --build-id.
-		if len(buildinfo) > 0 {
-			argv = append(argv, fmt.Sprintf("-Wl,--build-id=0x%x", buildinfo))
+		if len(ctxt.buildinfoData) > 0 {
+			argv = append(argv, fmt.Sprintf("-Wl,--build-id=0x%x", ctxt.buildinfoData))
 		} else if *flagHostBuildid == "none" {
 			argv = append(argv, "-Wl,--build-id=none")
 		}
@@ -2116,7 +2116,7 @@ func (ctxt *Link) hostlink() {
 			uuidUpdated = true
 		}
 	}
-	if ctxt.IsDarwin() && !uuidUpdated && len(buildinfo) > 0 {
+	if ctxt.IsDarwin() && !uuidUpdated && len(ctxt.buildinfoData) > 0 {
 		updateMachoOutFile("rewriting uuid",
 			func(ctxt *Link, exef *os.File, exem *macho.File, outexe string) error {
 				return machoRewriteUuid(ctxt, exef, exem, outexe)

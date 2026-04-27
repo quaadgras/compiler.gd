@@ -118,6 +118,12 @@ type Link struct {
 	// you can create a symbol, and just a generation function will be called
 	// after the symbol's been created in the output mmap.
 	generatorSyms map[loader.Sym]generatorFunc
+
+	// gd fork: per-Invocation state migrated off package-level vars
+	// by internal-tooling/link-state-rewrite so concurrent in-process
+	// linker runs (cmd/link/host.Run) don't alias each other. See
+	// link_state.go for the field declarations.
+	linkState
 }
 
 type cgodata struct {
