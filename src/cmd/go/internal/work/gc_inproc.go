@@ -30,15 +30,18 @@ func useInProcessCompile() bool {
 }
 
 // useInProcessLink reports whether cmd/go should drive cmd/link
-// in-process. Opt-in via GOGD_INPROC_LINK=1 because cmd/link's
-// package-level state (DWARF caches, Mach-O/ELF format vars, error
-// counters) has not yet been migrated onto a per-Link Context;
-// back-to-back invocations in the same process can carry stale state.
-// The host.Run scaffolding (worker goroutine + runtime.Goexit)
-// already exists; flipping the default to on requires finishing the
-// per-Link migration first.
+// in-process. Default-on; set GOGD_INPROC_LINK=0 to force fork/exec.
+//
+// Most of cmd/link's previously-package-level state (DWARF caches,
+// Mach-O/ELF/PE format vars, segments, thearch, etc.) has been
+// migrated onto a per-Link Context. The remaining package-level
+// state (nerrors family, flag values reset by setupFlags) is safe
+// across back-to-back in-process invocations because linkRunMu in
+// cmd/link/host.Run serialises them and Main resets the relevant
+// vars at start. Lifting linkRunMu for parallel link invocations
+// is future work.
 func useInProcessLink() bool {
-	return os.Getenv("GOGD_INPROC_LINK") == "1"
+	return os.Getenv("GOGD_INPROC_LINK") != "0"
 }
 
 // inProcessCompile drives a single cmd/compile invocation in the
