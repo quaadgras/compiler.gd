@@ -69,11 +69,11 @@ func (n *miniNode) SetTypecheck(x uint8) {
 	n.bits.set2(miniTypecheckShift, x)
 }
 
-func (n *miniNode) Walked() bool     { return n.bits&miniWalked != 0 }
+func (n *miniNode) Walked() bool     { return n.bits.load()&miniWalked != 0 }
 func (n *miniNode) SetWalked(x bool) { n.bits.set(miniWalked, x) }
 
 // gd escape-bits: see miniEscCandidate above.
-func (n *miniNode) EscCandidate() bool     { return n.bits&miniEscCandidate != 0 }
+func (n *miniNode) EscCandidate() bool     { return n.bits.load()&miniEscCandidate != 0 }
 func (n *miniNode) SetEscCandidate(x bool) { n.bits.set(miniEscCandidate, x) }
 
 // Empty, immutable graph structure.

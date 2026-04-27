@@ -44,11 +44,11 @@ func (*miniExpr) isExpr() {}
 
 func (n *miniExpr) Type() *types.Type     { return n.typ }
 func (n *miniExpr) SetType(x *types.Type) { n.typ = x }
-func (n *miniExpr) NonNil() bool          { return n.flags&miniExprNonNil != 0 }
-func (n *miniExpr) MarkNonNil()           { n.flags |= miniExprNonNil }
-func (n *miniExpr) Transient() bool       { return n.flags&miniExprTransient != 0 }
+func (n *miniExpr) NonNil() bool          { return n.flags.load()&miniExprNonNil != 0 }
+func (n *miniExpr) MarkNonNil()           { n.flags.set(miniExprNonNil, true) }
+func (n *miniExpr) Transient() bool       { return n.flags.load()&miniExprTransient != 0 }
 func (n *miniExpr) SetTransient(b bool)   { n.flags.set(miniExprTransient, b) }
-func (n *miniExpr) Bounded() bool         { return n.flags&miniExprBounded != 0 }
+func (n *miniExpr) Bounded() bool         { return n.flags.load()&miniExprBounded != 0 }
 func (n *miniExpr) SetBounded(b bool)     { n.flags.set(miniExprBounded, b) }
 func (n *miniExpr) Init() Nodes           { return n.init }
 func (n *miniExpr) PtrInit() *Nodes       { return &n.init }
@@ -116,7 +116,7 @@ func NewAddrExpr(gd *base.Invocation, pos src.XPos, x Node) *AddrExpr {
 	return n
 }
 
-func (n *AddrExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *AddrExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *AddrExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 
 func (n *AddrExpr) SetOp(op Op) {
@@ -269,7 +269,7 @@ func NewCompLitExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, l
 	return n
 }
 
-func (n *CompLitExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *CompLitExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *CompLitExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 
 func (n *CompLitExpr) SetOp(op Op) {
@@ -318,9 +318,9 @@ func NewConvExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, x No
 	return n
 }
 
-func (n *ConvExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *ConvExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *ConvExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
-func (n *ConvExpr) CheckPtr() bool     { return n.flags&miniExprCheckPtr != 0 }
+func (n *ConvExpr) CheckPtr() bool     { return n.flags.load()&miniExprCheckPtr != 0 }
 func (n *ConvExpr) SetCheckPtr(b bool) { n.flags.set(miniExprCheckPtr, b) }
 
 func (n *ConvExpr) SetOp(op Op) {
@@ -510,7 +510,7 @@ func NewParenExpr(pos src.XPos, x Node) *ParenExpr {
 	return n
 }
 
-func (n *ParenExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *ParenExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *ParenExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 
 // A ResultExpr represents a direct access to a result.
@@ -594,7 +594,7 @@ func (n *SelectorExpr) SetOp(op Op) {
 }
 
 func (n *SelectorExpr) Sym() *types.Sym    { return n.Sel }
-func (n *SelectorExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *SelectorExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *SelectorExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 func (n *SelectorExpr) Offset() int64      { return n.Selection.Offset }
 
@@ -700,7 +700,7 @@ func NewStarExpr(gd *base.Invocation, pos src.XPos, x Node) *StarExpr {
 	return n
 }
 
-func (n *StarExpr) Implicit() bool     { return n.flags&miniExprImplicit != 0 }
+func (n *StarExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit != 0 }
 func (n *StarExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 
 // A TypeAssertExpr is a selector expression X.(Type).

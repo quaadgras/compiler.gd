@@ -190,7 +190,7 @@ func (n *Name) Pragma() PragmaFlag { return n.pragma }
 func (n *Name) SetPragma(flag PragmaFlag) { n.pragma = flag }
 
 // Alias reports whether p, which must be for an OTYPE, is a type alias.
-func (n *Name) Alias() bool { return n.flags&nameAlias != 0 }
+func (n *Name) Alias() bool { return n.flags.load()&nameAlias != 0 }
 
 // SetAlias sets whether p, which must be for an OTYPE, is a type alias.
 func (n *Name) SetAlias(alias bool) { n.flags.set(nameAlias, alias) }
@@ -214,20 +214,20 @@ const (
 	nameNonMergeable             // not a candidate for stack slot merging
 )
 
-func (n *Name) Readonly() bool                 { return n.flags&nameReadonly != 0 }
-func (n *Name) Needzero() bool                 { return n.flags&nameNeedzero != 0 }
-func (n *Name) AutoTemp() bool                 { return n.flags&nameAutoTemp != 0 }
-func (n *Name) Used() bool                     { return n.flags&nameUsed != 0 }
-func (n *Name) IsClosureVar() bool             { return n.flags&nameIsClosureVar != 0 }
-func (n *Name) IsOutputParamHeapAddr() bool    { return n.flags&nameIsOutputParamHeapAddr != 0 }
-func (n *Name) IsOutputParamInRegisters() bool { return n.flags&nameIsOutputParamInRegisters != 0 }
-func (n *Name) Addrtaken() bool                { return n.flags&nameAddrtaken != 0 }
-func (n *Name) InlFormal() bool                { return n.flags&nameInlFormal != 0 }
-func (n *Name) InlLocal() bool                 { return n.flags&nameInlLocal != 0 }
-func (n *Name) OpenDeferSlot() bool            { return n.flags&nameOpenDeferSlot != 0 }
-func (n *Name) Libfuzzer8BitCounter() bool     { return n.flags&nameLibfuzzer8BitCounter != 0 }
-func (n *Name) CoverageAuxVar() bool           { return n.flags&nameCoverageAuxVar != 0 }
-func (n *Name) NonMergeable() bool             { return n.flags&nameNonMergeable != 0 }
+func (n *Name) Readonly() bool                 { return n.flags.load()&nameReadonly != 0 }
+func (n *Name) Needzero() bool                 { return n.flags.load()&nameNeedzero != 0 }
+func (n *Name) AutoTemp() bool                 { return n.flags.load()&nameAutoTemp != 0 }
+func (n *Name) Used() bool                     { return n.flags.load()&nameUsed != 0 }
+func (n *Name) IsClosureVar() bool             { return n.flags.load()&nameIsClosureVar != 0 }
+func (n *Name) IsOutputParamHeapAddr() bool    { return n.flags.load()&nameIsOutputParamHeapAddr != 0 }
+func (n *Name) IsOutputParamInRegisters() bool { return n.flags.load()&nameIsOutputParamInRegisters != 0 }
+func (n *Name) Addrtaken() bool                { return n.flags.load()&nameAddrtaken != 0 }
+func (n *Name) InlFormal() bool                { return n.flags.load()&nameInlFormal != 0 }
+func (n *Name) InlLocal() bool                 { return n.flags.load()&nameInlLocal != 0 }
+func (n *Name) OpenDeferSlot() bool            { return n.flags.load()&nameOpenDeferSlot != 0 }
+func (n *Name) Libfuzzer8BitCounter() bool     { return n.flags.load()&nameLibfuzzer8BitCounter != 0 }
+func (n *Name) CoverageAuxVar() bool           { return n.flags.load()&nameCoverageAuxVar != 0 }
+func (n *Name) NonMergeable() bool             { return n.flags.load()&nameNonMergeable != 0 }
 
 func (n *Name) setReadonly(b bool)                 { n.flags.set(nameReadonly, b) }
 func (n *Name) SetNeedzero(b bool)                 { n.flags.set(nameNeedzero, b) }
@@ -312,7 +312,7 @@ func (n *Name) SetByval(gd *base.Invocation, b bool) {
 func (n *Name) Byval() bool {
 	// We require byval to be set on the canonical variable, but we
 	// allow it to be accessed from any instance.
-	return n.Canonical().flags&nameByval != 0
+	return n.Canonical().flags.load()&nameByval != 0
 }
 
 // NewClosureVar returns a new closure variable for fn to refer to

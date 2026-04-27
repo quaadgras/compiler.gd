@@ -336,17 +336,17 @@ type SymAndPos struct {
 	Pos src.XPos  // line of call
 }
 
-func (f *Func) Dupok() bool                    { return f.flags&funcDupok != 0 }
-func (f *Func) Wrapper() bool                  { return f.flags&funcWrapper != 0 }
-func (f *Func) ABIWrapper() bool               { return f.flags&funcABIWrapper != 0 }
-func (f *Func) Needctxt() bool                 { return f.flags&funcNeedctxt != 0 }
-func (f *Func) HasDefer() bool                 { return f.flags&funcHasDefer != 0 }
-func (f *Func) NilCheckDisabled() bool         { return f.flags&funcNilCheckDisabled != 0 }
-func (f *Func) InlinabilityChecked() bool      { return f.flags&funcInlinabilityChecked != 0 }
-func (f *Func) NeverReturns() bool             { return f.flags&funcNeverReturns != 0 }
-func (f *Func) OpenCodedDeferDisallowed() bool { return f.flags&funcOpenCodedDeferDisallowed != 0 }
-func (f *Func) ClosureResultsLost() bool       { return f.flags&funcClosureResultsLost != 0 }
-func (f *Func) IsPackageInit() bool            { return f.flags&funcPackageInit != 0 }
+func (f *Func) Dupok() bool                    { return f.flags.load()&funcDupok != 0 }
+func (f *Func) Wrapper() bool                  { return f.flags.load()&funcWrapper != 0 }
+func (f *Func) ABIWrapper() bool               { return f.flags.load()&funcABIWrapper != 0 }
+func (f *Func) Needctxt() bool                 { return f.flags.load()&funcNeedctxt != 0 }
+func (f *Func) HasDefer() bool                 { return f.flags.load()&funcHasDefer != 0 }
+func (f *Func) NilCheckDisabled() bool         { return f.flags.load()&funcNilCheckDisabled != 0 }
+func (f *Func) InlinabilityChecked() bool      { return f.flags.load()&funcInlinabilityChecked != 0 }
+func (f *Func) NeverReturns() bool             { return f.flags.load()&funcNeverReturns != 0 }
+func (f *Func) OpenCodedDeferDisallowed() bool { return f.flags.load()&funcOpenCodedDeferDisallowed != 0 }
+func (f *Func) ClosureResultsLost() bool       { return f.flags.load()&funcClosureResultsLost != 0 }
+func (f *Func) IsPackageInit() bool            { return f.flags.load()&funcPackageInit != 0 }
 
 func (f *Func) SetDupok(b bool)                    { f.flags.set(funcDupok, b) }
 func (f *Func) SetWrapper(b bool)                  { f.flags.set(funcWrapper, b) }

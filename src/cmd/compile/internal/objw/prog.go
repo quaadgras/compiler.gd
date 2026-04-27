@@ -43,13 +43,16 @@ import (
 // invocations would have given each invocation's worker N the same
 // slice of memory, racing on Prog field writes during arch
 // emit/assemble.
+//
+// Within ONE invocation, the parallel backend's workers all call
+// NewProgs → progArrayOf concurrently for their respective
+// functions. We sync.Once-protect the array allocation so only
+// the first worker allocates; the rest see the same array.
 func progArrayOf(gd *base.Invocation) *[10000]obj.Prog {
-	if a, _ := gd.ProgArray.(*[10000]obj.Prog); a != nil {
-		return a
-	}
-	a := new([10000]obj.Prog)
-	gd.ProgArray = a
-	return a
+	gd.ProgArrayOnce.Do(func() {
+		gd.ProgArray = new([10000]obj.Prog)
+	})
+	return gd.ProgArray.(*[10000]obj.Prog)
 }
 
 // NewProgs returns a new Progs for fn.

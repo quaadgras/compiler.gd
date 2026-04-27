@@ -265,7 +265,8 @@ type Invocation struct {
 	// same memory. Per-Invocation so each gd has its own
 	// backing array. Type is *[10000]obj.Prog (any to avoid
 	// base→obj import cycle in this struct).
-	ProgArray any // *[10000]obj.Prog
+	ProgArray     any // *[10000]obj.Prog
+	ProgArrayOnce sync.Once
 
 	// IrSyms — was `ir.Syms symsStruct` package-level. Holds
 	// runtime LSyms (Memmove, Newproc, GCWriteBarrier[],
