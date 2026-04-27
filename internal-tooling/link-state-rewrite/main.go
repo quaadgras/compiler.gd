@@ -65,8 +65,14 @@ type config struct {
 // scopeCtx tracks where a *Link "ctxt" is reachable inside a
 // function. A non-empty Carrier means "use this Go expression to
 // access *Link"; "" means none in scope.
+//
+// Shadowed is the set of names (parameters, receiver, locally
+// declared idents) that shadow potential target vars within this
+// function. Idents matching one of these names refer to the local
+// binding, not the package var, so they must be left alone.
 type scopeCtx struct {
-	Carrier string
+	Carrier   string
+	Shadowed  map[string]bool
 }
 
 var (
@@ -188,41 +194,105 @@ func loadConfig(path string) config {
 }
 
 // newScopeCtx looks at a function declaration and decides whether a
-// *Link is reachable, and via what expression.
+// *Link is reachable, and via what expression. It also collects the
+// names declared at function-signature scope (receiver, parameters,
+// named results) so a Go ident matching one of those names is
+// treated as a local binding, not a package-level reference.
 func newScopeCtx(fn *ast.FuncDecl) *scopeCtx {
+	ctx := &scopeCtx{Shadowed: map[string]bool{}}
+
 	// Method receiver of type *Link → carrier is the receiver name.
 	if fn.Recv != nil && len(fn.Recv.List) == 1 {
 		f := fn.Recv.List[0]
 		recvName := ""
 		if len(f.Names) > 0 {
 			recvName = f.Names[0].Name
+			ctx.Shadowed[recvName] = true
 		}
 		if isLinkPtrType(f.Type) {
-			return &scopeCtx{Carrier: recvName}
-		}
-		// Method on a struct that has a *Link field. We don't
-		// type-check; we just hardcode known carriers.
-		if recvName != "" {
+			ctx.Carrier = recvName
+		} else if recvName != "" {
 			if c := knownLinkField(f.Type, recvName); c != "" {
-				return &scopeCtx{Carrier: c}
+				ctx.Carrier = c
 			}
 		}
 	}
 
-	// Parameter of type *Link.
-	if fn.Type.Params != nil {
-		for _, p := range fn.Type.Params.List {
-			if !isLinkPtrType(p.Type) {
-				continue
+	// Parameters and named results.
+	collectNames := func(fl *ast.FieldList) {
+		if fl == nil {
+			return
+		}
+		for _, p := range fl.List {
+			for _, n := range p.Names {
+				ctx.Shadowed[n.Name] = true
 			}
-			if len(p.Names) == 0 {
-				continue
+			if ctx.Carrier == "" && isLinkPtrType(p.Type) && len(p.Names) > 0 {
+				ctx.Carrier = p.Names[0].Name
 			}
-			return &scopeCtx{Carrier: p.Names[0].Name}
 		}
 	}
+	collectNames(fn.Type.Params)
+	collectNames(fn.Type.Results)
 
-	return &scopeCtx{Carrier: ""}
+	// Walk the function body and collect every name declared inside
+	// it. Over-approximates: a name declared mid-function shadows
+	// references before its declaration too. For our use case (we
+	// never want to rewrite a name used as a local at all), that's
+	// the right call.
+	collectBodyDecls(fn.Body, ctx.Shadowed)
+
+	return ctx
+}
+
+func collectBodyDecls(body *ast.BlockStmt, shadow map[string]bool) {
+	if body == nil {
+		return
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE { // :=
+				for _, lhs := range x.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+						shadow[id.Name] = true
+					}
+				}
+			}
+		case *ast.ValueSpec:
+			for _, n := range x.Names {
+				if n.Name != "_" {
+					shadow[n.Name] = true
+				}
+			}
+		case *ast.RangeStmt:
+			if id, ok := x.Key.(*ast.Ident); ok && id.Name != "_" {
+				shadow[id.Name] = true
+			}
+			if id, ok := x.Value.(*ast.Ident); ok && id.Name != "_" {
+				shadow[id.Name] = true
+			}
+		case *ast.TypeSwitchStmt:
+			if as, ok := x.Assign.(*ast.AssignStmt); ok {
+				if id, ok := as.Lhs[0].(*ast.Ident); ok && id.Name != "_" {
+					shadow[id.Name] = true
+				}
+			}
+		case *ast.FuncLit:
+			// Closure parameters & locals shadow within the closure.
+			// We over-approximate by treating them as shadowed for
+			// the entire enclosing function, which is fine since we
+			// only want to leave package-var aliases alone.
+			if x.Type.Params != nil {
+				for _, p := range x.Type.Params.List {
+					for _, n := range p.Names {
+						shadow[n.Name] = true
+					}
+				}
+			}
+		}
+		return true
+	})
 }
 
 // isLinkPtrType reports whether expr is *Link or *ld.Link.
@@ -288,6 +358,11 @@ func buildReplacement(name string, ctx *scopeCtx, targets map[string]string, fn 
 	if !ok {
 		return nil, false
 	}
+	// Local binding (parameter, receiver, named result) shadows the
+	// package var: don't touch this ident, don't report missing.
+	if ctx.Shadowed[name] {
+		return nil, false
+	}
 	if ctx.Carrier == "" {
 		missing[funcName(fn)] = true
 		return nil, false
@@ -297,6 +372,36 @@ func buildReplacement(name string, ctx *scopeCtx, targets map[string]string, fn 
 
 // makeSelector parses a dotted carrier (e.g. "ctxt" or "d.linkctxt")
 // and returns a SelectorExpr ending in `.field`.
+// isStructLikeType returns true if the type literal looks like a
+// struct (an Ident or qualified Ident or anonymous *ast.StructType).
+// Map/array/slice composite literals are not struct-like.
+func isStructLikeType(t ast.Expr) bool {
+	if t == nil {
+		// Nested composite literal (key only specified at outer
+		// level). Treat as struct-like to be conservative.
+		return true
+	}
+	switch t := t.(type) {
+	case *ast.StructType:
+		return true
+	case *ast.Ident:
+		// Likely a named type. Heuristic: assume struct unless
+		// it's a builtin that's not a struct (none of map/slice
+		// look like Idents standalone).
+		_ = t
+		return true
+	case *ast.SelectorExpr:
+		return true // qualified type like pkg.Foo
+	case *ast.MapType, *ast.ArrayType:
+		return false
+	case *ast.StarExpr:
+		// *Foo composite literals don't exist in Go directly, but
+		// the pointer to an anonymous struct would. Treat as struct.
+		return true
+	}
+	return false
+}
+
 func makeSelector(carrier, field string) ast.Expr {
 	parts := strings.Split(carrier, ".")
 	var x ast.Expr = &ast.Ident{Name: parts[0]}
@@ -426,10 +531,22 @@ func apply(n ast.Node, visit func(parent ast.Node, set func(ast.Node)) bool) {
 		applyExpr(&x.X, visit)
 	case *ast.CompositeLit:
 		applyExpr(&x.Type, visit)
+		// In struct literals, KeyValueExpr.Key is a field NAME,
+		// not an identifier reference — don't visit Key in that
+		// case. For map/array literals the Key IS an expression
+		// and should be visited; we approximate "is struct" by
+		// looking at whether x.Type is a struct-shaped type.
+		isStruct := isStructLikeType(x.Type)
 		for i := range x.Elts {
+			if kv, ok := x.Elts[i].(*ast.KeyValueExpr); ok && isStruct {
+				applyExpr(&kv.Value, visit)
+				continue
+			}
 			applyExpr(&x.Elts[i], visit)
 		}
 	case *ast.KeyValueExpr:
+		// Top-level KeyValueExpr (rare outside CompositeLit): visit
+		// both sides. The struct-literal case is handled above.
 		applyExpr(&x.Key, visit)
 		applyExpr(&x.Value, visit)
 	case *ast.TypeAssertExpr:

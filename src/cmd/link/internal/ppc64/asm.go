@@ -566,16 +566,16 @@ func rewritetonop(target *ld.Target, ldr *loader.Loader, su *loader.SymbolBuilde
 	rewritetoinsn(target, ldr, su, offset, mask, check, OP_NOP)
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	if target.IsElf() {
-		return addelfdynrel(target, ldr, syms, s, r, rIdx)
+		return addelfdynrel(ctxt, target, ldr, syms, s, r, rIdx)
 	} else if target.IsAIX() {
 		return ld.Xcoffadddynrel(target, ldr, syms, s, r, rIdx)
 	}
 	return false
 }
 
-func addelfdynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func addelfdynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -632,7 +632,7 @@ func addelfdynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s lo
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_ADDRPOWER_PCREL34)
 		if !targType.IsText() {
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_PPC64_GLOB_DAT))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_PPC64_GLOB_DAT))
 			su.SetRelocSym(rIdx, syms.GOT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymGot(targ)))
 		} else {
@@ -754,7 +754,7 @@ func addelfdynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s lo
 		su.SetRelocType(rIdx, objabi.R_POWER_TOC)
 		if targType == sym.SDYNIMPORT {
 			// This is an external symbol, make space in the GOT and retarget the reloc.
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_PPC64_GLOB_DAT))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_PPC64_GLOB_DAT))
 			su.SetRelocSym(rIdx, syms.GOT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymGot(targ)))
 		} else if targType.IsText() {

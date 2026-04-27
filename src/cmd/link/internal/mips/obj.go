@@ -100,7 +100,7 @@ func archinit(ctxt *ld.Link) {
 	}
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	ld.Exitf("adddynrel currently unimplemented for MIPS")
 	return false
 }

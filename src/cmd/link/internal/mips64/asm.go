@@ -93,7 +93,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -121,7 +121,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if r.Add() != 0 {
 			ldr.Errorf(s, "PLT call with non-zero addend (%v)", r.Add())
 		}
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(ldr.SymPlt(targ)))
@@ -221,7 +221,7 @@ func elfsetupplt(ctxt *ld.Link, ldr *loader.Loader, plt, gotplt *loader.SymbolBu
 	gotLocalCount++
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}

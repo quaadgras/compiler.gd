@@ -73,7 +73,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	initfunc.AddUint32(ctxt.Arch, 0)
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -132,7 +132,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		ldr.SetRelocVariant(s, rIdx, sym.RV_390_DBL)
 		su.SetRelocAdd(rIdx, r.Add()+int64(r.Siz()))
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			r.SetSym(syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
 		}
@@ -144,7 +144,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocAdd(rIdx, r.Add()+int64(r.Siz()))
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			r.SetSym(syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
 		}
@@ -201,7 +201,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		return true
 
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_390_GOTENT):
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_390_GLOB_DAT))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_390_GLOB_DAT))
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		ldr.SetRelocVariant(s, rIdx, sym.RV_390_DBL)
@@ -382,7 +382,7 @@ func archrelocvariant(target *ld.Target, ldr *loader.Loader, r loader.Reloc, rv 
 	}
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}

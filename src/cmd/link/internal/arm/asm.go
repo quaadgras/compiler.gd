@@ -96,7 +96,7 @@ func braddoff(a int32, b int32) int32 {
 	return int32((uint32(a))&0xff000000 | 0x00ffffff&uint32(a+b))
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 
 	targ := r.Sym()
 	var targType sym.SymKind
@@ -117,7 +117,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su.SetRelocType(rIdx, objabi.R_CALLARM)
 
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, int64(braddoff(int32(r.Add()), ldr.SymPlt(targ)/4)))
 		}
@@ -132,7 +132,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if targType != sym.SDYNIMPORT {
 			addgotsyminternal(target, ldr, syms, targ)
 		} else {
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
 		}
 
 		su := ldr.MakeSymbolUpdater(s)
@@ -145,7 +145,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if targType != sym.SDYNIMPORT {
 			addgotsyminternal(target, ldr, syms, targ)
 		} else {
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
 		}
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_PCREL)
@@ -169,7 +169,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_CALLARM)
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, int64(braddoff(int32(r.Add()), ldr.SymPlt(targ)/4)))
 		}
@@ -194,7 +194,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_CALLARM)
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, int64(braddoff(int32(r.Add()), ldr.SymPlt(targ)/4)))
 		}
@@ -217,7 +217,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// External linker will do this relocation.
 			return true
 		}
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(braddoff(int32(r.Add()), ldr.SymPlt(targ)/4))) // TODO: don't use r.Add for instruction bytes (issue 19811)
@@ -246,7 +246,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if targType != sym.SDYNIMPORT {
 			ldr.Errorf(s, "R_GOTPCREL target is not SDYNIMPORT symbol: %v", ldr.SymName(targ))
 		}
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_ARM_GLOB_DAT))
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocSym(rIdx, syms.GOT)
@@ -613,7 +613,7 @@ func addpltreloc(ldr *loader.Loader, plt *loader.SymbolBuilder, got *loader.Symb
 	plt.Grow(plt.Size())
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}

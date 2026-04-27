@@ -74,7 +74,7 @@ func TestAddGotSym(t *testing.T) {
 		ctxt := setUpContext(test.arch, iself, test.ht, test.bm, test.lm)
 		foo := ctxt.loader.CreateSymForUpdate("foo", 0)
 		ctxt.loader.CreateExtSym("bar", 0)
-		AddGotSym(&ctxt.Target, ctxt.loader, &ctxt.ArchSyms, foo.Sym(), 0)
+		AddGotSym(ctxt, &ctxt.Target, ctxt.loader, &ctxt.ArchSyms, foo.Sym(), 0)
 
 		if iself {
 			rel := ctxt.loader.Lookup(test.rel, 0)

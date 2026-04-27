@@ -57,7 +57,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	rel3.SetSym(addmoduledata)
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -88,7 +88,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_LARCH_B26),
 		objabi.ElfRelocOffset + objabi.RelocType(elf.R_LARCH_CALL36):
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su := ldr.MakeSymbolUpdater(s)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
@@ -110,7 +110,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// TODO: turn LDR of GOT entry into ADR of symbol itself
 		}
 
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_LARCH_64))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_LARCH_64))
 		su := ldr.MakeSymbolUpdater(s)
 		if r.Type() == objabi.ElfRelocOffset+objabi.RelocType(elf.R_LARCH_GOT_PC_HI20) {
 			su.SetRelocType(rIdx, objabi.R_LOONG64_ADDR_HI)
@@ -157,7 +157,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 	case objabi.ElfRelocOffset + objabi.RelocType(elf.R_LARCH_B16),
 		objabi.ElfRelocOffset + objabi.RelocType(elf.R_LARCH_B21):
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su := ldr.MakeSymbolUpdater(s)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
@@ -192,7 +192,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		}
 
 		// Build a PLT entry and change the relocation target to that entry.
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(ldr.SymPlt(targ)))
@@ -203,7 +203,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// The code is asking for the address of an external
 			// function. We provide it with the address of the
 			// correspondent GOT symbol.
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_LARCH_64))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_LARCH_64))
 			su := ldr.MakeSymbolUpdater(s)
 			su.SetRelocSym(rIdx, syms.GOT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymGot(targ)))
@@ -290,7 +290,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 	case objabi.R_LOONG64_GOT_HI,
 		objabi.R_LOONG64_GOT_LO:
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_LARCH_64))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_LARCH_64))
 		su := ldr.MakeSymbolUpdater(s)
 		if r.Type() == objabi.R_LOONG64_GOT_HI {
 			su.SetRelocType(rIdx, objabi.R_LOONG64_ADDR_HI)
@@ -343,7 +343,7 @@ func elfsetupplt(ctxt *ld.Link, ldr *loader.Loader, plt, gotplt *loader.SymbolBu
 	}
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}

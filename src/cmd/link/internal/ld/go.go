@@ -129,7 +129,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				havedynamic = 1
 
 				if ctxt.HeadType == objabi.Hdarwin {
-					machoadddynlib(lib, ctxt.LinkMode)
+					machoadddynlib(ctxt, lib, ctxt.LinkMode)
 				} else {
 					dynlib = append(dynlib, lib)
 				}
@@ -154,7 +154,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				}
 				havedynamic = 1
 				if lib != "" && ctxt.IsDarwin() {
-					machoadddynlib(lib, ctxt.LinkMode)
+					machoadddynlib(ctxt, lib, ctxt.LinkMode)
 				}
 			}
 

@@ -4,7 +4,10 @@
 
 package ld
 
-import "cmd/internal/dwarf"
+import (
+	"cmd/internal/dwarf"
+	"cmd/link/internal/loader"
+)
 
 // linkState holds per-Invocation linker state that was previously
 // stored in package-level vars in dwarf.go, elf.go, lib.go, etc.
@@ -26,4 +29,21 @@ type linkState struct {
 	elfstrdat     []byte // contents of .shstrtab
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
+
+	// mach-o state (was in macho.go)
+	machohdr      MachoHdr
+	load          []MachoLoad
+	machoPlatform MachoPlatform
+	seg           [16]MachoSeg
+	nseg          int
+	ndebug        int
+	nsect         int
+	nkind         [NumSymKind]int
+	sortsym       []loader.Sym
+	nsortsym      int
+	loadBudget    int // initialised to INITIAL_MACHO_HEADR-2*1024 by linknew
+	dylib         []string
+	linkoff       int64
+	machorebase   []machoRebaseRecord
+	machobind     []machoBindRecord
 }

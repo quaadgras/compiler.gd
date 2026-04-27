@@ -199,7 +199,7 @@ type Arch struct {
 	Plan9Magic  uint32
 	Plan9_64Bit bool
 
-	Adddynrel func(*Target, *loader.Loader, *ArchSyms, loader.Sym, loader.Reloc, int) bool
+	Adddynrel func(*Link, *Target, *loader.Loader, *ArchSyms, loader.Sym, loader.Reloc, int) bool
 	Archinit  func(*Link)
 	// Archreloc is an arch-specific hook that assists in relocation processing
 	// (invoked by 'relocsym'); it handles target-specific relocation tasks.
@@ -1459,7 +1459,7 @@ func (ctxt *Link) hostlink() {
 
 	// On darwin, whether to combine DWARF into executable.
 	// Only macOS supports unmapped segments such as our __DWARF segment.
-	combineDwarf := ctxt.IsDarwin() && !*FlagW && machoPlatform == PLATFORM_MACOS
+	combineDwarf := ctxt.IsDarwin() && !*FlagW && ctxt.machoPlatform == PLATFORM_MACOS
 
 	var isMSVC bool // used on Windows
 	wlPrefix := "-Wl,--"
@@ -1615,7 +1615,7 @@ func (ctxt *Link) hostlink() {
 	switch ctxt.BuildMode {
 	case BuildModeExe:
 		if ctxt.HeadType == objabi.Hdarwin {
-			if machoPlatform == PLATFORM_MACOS && ctxt.IsAMD64() {
+			if ctxt.machoPlatform == PLATFORM_MACOS && ctxt.IsAMD64() {
 				argv = append(argv, "-Wl,-no_pie")
 			}
 		}
@@ -2969,7 +2969,7 @@ func ElfSymForReloc(ctxt *Link, s loader.Sym) int32 {
 	}
 }
 
-func AddGotSym(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym, elfRelocTyp uint32) {
+func AddGotSym(ctxt *Link, target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym, elfRelocTyp uint32) {
 	if ldr.SymGot(s) >= 0 {
 		return
 	}
@@ -2997,7 +2997,7 @@ func AddGotSym(target *Target, ldr *loader.Loader, syms *ArchSyms, s loader.Sym,
 			// Mach-O relocations are a royal pain to lay out.
 			// They use a compact stateful bytecode representation.
 			// Here we record what are needed and encode them later.
-			MachoAddBind(int64(ldr.SymGot(s)), s)
+			MachoAddBind(ctxt, int64(ldr.SymGot(s)), s)
 		}
 	} else {
 		ldr.Errorf(s, "addgotsym: unsupported binary format")

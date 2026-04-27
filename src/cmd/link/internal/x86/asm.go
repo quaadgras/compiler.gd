@@ -131,7 +131,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	o(0xc3)
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -163,7 +163,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocAdd(rIdx, r.Add()+4)
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
 		}
@@ -202,7 +202,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			return false
 		}
 
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_386_GLOB_DAT))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_386_GLOB_DAT))
 		su.SetRelocType(rIdx, objabi.R_CONST) // write r->add during relocsym
 		su.SetRelocSym(rIdx, 0)
 		su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymGot(targ)))
@@ -245,7 +245,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// External linker will do this relocation.
 			return true
 		}
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(ldr.SymPlt(targ)))
@@ -404,7 +404,7 @@ func elfsetupplt(ctxt *ld.Link, ldr *loader.Loader, plt, got *loader.SymbolBuild
 	}
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}

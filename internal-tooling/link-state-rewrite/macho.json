@@ -1,0 +1,19 @@
+{
+  "fields": [
+    {"var": "machohdr", "field": "machohdr"},
+    {"var": "load", "field": "load"},
+    {"var": "machoPlatform", "field": "machoPlatform"},
+    {"var": "seg", "field": "seg"},
+    {"var": "nseg", "field": "nseg"},
+    {"var": "ndebug", "field": "ndebug"},
+    {"var": "nsect", "field": "nsect"},
+    {"var": "nkind", "field": "nkind"},
+    {"var": "sortsym", "field": "sortsym"},
+    {"var": "nsortsym", "field": "nsortsym"},
+    {"var": "loadBudget", "field": "loadBudget"},
+    {"var": "dylib", "field": "dylib"},
+    {"var": "linkoff", "field": "linkoff"},
+    {"var": "machorebase", "field": "machorebase"},
+    {"var": "machobind", "field": "machobind"}
+  ]
+}

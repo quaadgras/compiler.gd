@@ -65,7 +65,7 @@ func gentext(ctxt *ld.Link, ldr *loader.Loader) {
 	o(0xc3)
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 	var targType sym.SymKind
 	if targ != 0 {
@@ -109,7 +109,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocAdd(rIdx, r.Add()+4)
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
 		}
@@ -136,7 +136,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 		// fall back to using GOT and hope for the best (CMOV*)
 		// TODO: just needs relocation, no need to put in .dynsym
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_X86_64_GLOB_DAT))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_X86_64_GLOB_DAT))
 
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocSym(rIdx, syms.GOT)
@@ -215,7 +215,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 	case objabi.MachoRelocOffset + ld.MACHO_X86_64_RELOC_BRANCH*2 + 1:
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su := ldr.MakeSymbolUpdater(s)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocType(rIdx, objabi.R_PCREL)
@@ -260,7 +260,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if targType != sym.SDYNIMPORT {
 			ldr.Errorf(s, "unexpected GOT reloc for non-dynamic symbol %s", ldr.SymName(targ))
 		}
-		ld.AddGotSym(target, ldr, syms, targ, 0)
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, 0)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_PCREL)
 		su.SetRelocSym(rIdx, syms.GOT)
@@ -284,7 +284,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		}
 		// Internal linking, for both ELF and Mach-O.
 		// Build a PLT entry and change the relocation target to that entry.
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(ldr.SymPlt(targ)))
@@ -303,7 +303,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 				su.MakeWritable()
 				su.Data()[r.Off()-2] = 0x8b
 				if target.IsInternal() {
-					ld.AddGotSym(target, ldr, syms, targ, 0)
+					ld.AddGotSym(ctxt, target, ldr, syms, targ, 0)
 					su.SetRelocSym(rIdx, syms.GOT)
 					su.SetRelocAdd(rIdx, int64(ldr.SymGot(targ)))
 				} else {
@@ -318,7 +318,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		if ldr.SymType(s).IsText() && target.IsElf() {
 			su := ldr.MakeSymbolUpdater(s)
 			if target.IsSolaris() {
-				addpltsym(target, ldr, syms, targ)
+				addpltsym(ctxt, target, ldr, syms, targ)
 				su.SetRelocSym(rIdx, syms.PLT)
 				su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
 				return true
@@ -326,7 +326,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// The code is asking for the address of an external
 			// function. We provide it with the address of the
 			// correspondent GOT symbol.
-			ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_X86_64_GLOB_DAT))
+			ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_X86_64_GLOB_DAT))
 
 			su.SetRelocSym(rIdx, syms.GOT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymGot(targ)))
@@ -419,7 +419,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// Mach-O relocations are a royal pain to lay out.
 			// They use a compact stateful bytecode representation.
 			// Here we record what are needed and encode them later.
-			ld.MachoAddRebase(s, int64(r.Off()))
+			ld.MachoAddRebase(ctxt, s, int64(r.Off()))
 			// Not mark r done here. So we still apply it statically,
 			// so in the file content we'll also have the right offset
 			// to the relocation target. So it can be examined statically
@@ -637,7 +637,7 @@ func elfsetupplt(ctxt *ld.Link, ldr *loader.Loader, plt, got *loader.SymbolBuild
 	}
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}
@@ -680,7 +680,7 @@ func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 
 		ldr.SetPlt(s, int32(plt.Size()-16))
 	} else if target.IsDarwin() {
-		ld.AddGotSym(target, ldr, syms, s, 0)
+		ld.AddGotSym(ctxt, target, ldr, syms, s, 0)
 
 		sDynid := ldr.SymDynid(s)
 		lep := ldr.MakeSymbolUpdater(syms.LinkEditPLT)

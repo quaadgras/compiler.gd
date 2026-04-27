@@ -60,7 +60,7 @@ func findHI20Reloc(ldr *loader.Loader, s loader.Sym, val int64) *loader.Reloc {
 	return nil
 }
 
-func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
+func adddynrel(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym, r loader.Reloc, rIdx int) bool {
 	targ := r.Sym()
 
 	var targType sym.SymKind
@@ -73,7 +73,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 		objabi.ElfRelocOffset + objabi.RelocType(elf.R_RISCV_CALL_PLT):
 
 		if targType == sym.SDYNIMPORT {
-			addpltsym(target, ldr, syms, targ)
+			addpltsym(ctxt, target, ldr, syms, targ)
 			su := ldr.MakeSymbolUpdater(s)
 			su.SetRelocSym(rIdx, syms.PLT)
 			su.SetRelocAdd(rIdx, r.Add()+int64(ldr.SymPlt(targ)))
@@ -90,7 +90,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			// TODO(jsing): Could convert to non-GOT reference.
 		}
 
-		ld.AddGotSym(target, ldr, syms, targ, uint32(elf.R_RISCV_64))
+		ld.AddGotSym(ctxt, target, ldr, syms, targ, uint32(elf.R_RISCV_64))
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocType(rIdx, objabi.R_RISCV_GOT_HI20)
 		su.SetRelocSym(rIdx, syms.GOT)
@@ -188,7 +188,7 @@ func adddynrel(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loade
 			ldr.Errorf(s, "PLT reference with non-zero addend (%v)", r.Add())
 		}
 		// Build a PLT entry and change the relocation target to that entry.
-		addpltsym(target, ldr, syms, targ)
+		addpltsym(ctxt, target, ldr, syms, targ)
 		su := ldr.MakeSymbolUpdater(s)
 		su.SetRelocSym(rIdx, syms.PLT)
 		su.SetRelocAdd(rIdx, int64(ldr.SymPlt(targ)))
@@ -388,7 +388,7 @@ func elfsetupplt(ctxt *ld.Link, ldr *loader.Loader, plt, gotplt *loader.SymbolBu
 	gotplt.AddUint64(ctxt.Arch, 0)            // got.plt[1] = link map
 }
 
-func addpltsym(target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
+func addpltsym(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.ArchSyms, s loader.Sym) {
 	if ldr.SymPlt(s) >= 0 {
 		return
 	}
