@@ -519,7 +519,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.OpRISCV64LoweredPanicBoundsRR, ssa.OpRISCV64LoweredPanicBoundsRC, ssa.OpRISCV64LoweredPanicBoundsCR, ssa.OpRISCV64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
@@ -604,7 +604,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p = s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.PanicBounds
+		p.To.Sym = ir.Syms(gd).PanicBounds
 
 	case ssa.OpRISCV64LoweredAtomicLoad8:
 		s.Prog(riscv.AFENCE)

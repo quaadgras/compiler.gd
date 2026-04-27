@@ -588,13 +588,13 @@ func (lv *Liveness) markUnsafePoints(gd *base.Invocation) {
 			for {
 				if v.MemoryArg() != nil {
 					// Single instruction to load (and maybe compare) the write barrier flag.
-					if sym, ok := v.Aux.(*obj.LSym); ok && sym == ir.Syms.WriteBarrier {
+					if sym, ok := v.Aux.(*obj.LSym); ok && sym == ir.Syms(gd).WriteBarrier {
 						load = v
 						break
 					}
 					// Some architectures have to materialize the address separate from
 					// the load.
-					if sym, ok := v.Args[0].Aux.(*obj.LSym); ok && sym == ir.Syms.WriteBarrier {
+					if sym, ok := v.Args[0].Aux.(*obj.LSym); ok && sym == ir.Syms(gd).WriteBarrier {
 						load = v
 						break
 					}
@@ -654,7 +654,8 @@ func (lv *Liveness) hasStackMap(v *ssa.Value) bool {
 	// wbZero and wbCopy are write barriers and
 	// deeply non-preemptible. They are unsafe points and
 	// hence should not have liveness maps.
-	if sym, ok := v.Aux.(*ssa.AuxCall); ok && (sym.Fn == ir.Syms.WBZero || sym.Fn == ir.Syms.WBMove) {
+	gd := lv.f.Config.GD()
+	if sym, ok := v.Aux.(*ssa.AuxCall); ok && (sym.Fn == ir.Syms(gd).WBZero || sym.Fn == ir.Syms(gd).WBMove) {
 		return false
 	}
 	return true

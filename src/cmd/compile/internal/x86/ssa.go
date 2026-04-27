@@ -650,12 +650,12 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	case ssa.Op386DUFFZERO:
 		p := s.Prog(obj.ADUFFZERO)
 		p.To.Type = obj.TYPE_ADDR
-		p.To.Sym = ir.Syms.Duffzero
+		p.To.Sym = ir.Syms(gd).Duffzero
 		p.To.Offset = v.AuxInt
 	case ssa.Op386DUFFCOPY:
 		p := s.Prog(obj.ADUFFCOPY)
 		p.To.Type = obj.TYPE_ADDR
-		p.To.Sym = ir.Syms.Duffcopy
+		p.To.Sym = ir.Syms(gd).Duffcopy
 		p.To.Offset = v.AuxInt
 
 	case ssa.OpCopy: // TODO: use MOVLreg for reg->reg copies instead of OpCopy?
@@ -739,7 +739,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.Op386LoweredPanicBoundsRR, ssa.Op386LoweredPanicBoundsRC, ssa.Op386LoweredPanicBoundsCR, ssa.Op386LoweredPanicBoundsCC,
 		ssa.Op386LoweredPanicExtendRR, ssa.Op386LoweredPanicExtendRC:
@@ -896,9 +896,9 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		if extend {
-			p.To.Sym = ir.Syms.PanicExtend
+			p.To.Sym = ir.Syms(gd).PanicExtend
 		} else {
-			p.To.Sym = ir.Syms.PanicBounds
+			p.To.Sym = ir.Syms(gd).PanicBounds
 		}
 
 	case ssa.Op386CALLstatic, ssa.Op386CALLclosure, ssa.Op386CALLinter:

@@ -1321,12 +1321,12 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 	case ssa.OpARM64LoweredMemEq:
 		p := s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Memequal
+		p.To.Sym = ir.Syms(gd).Memequal
 
 	case ssa.OpARM64LoweredPanicBoundsRR, ssa.OpARM64LoweredPanicBoundsRC, ssa.OpARM64LoweredPanicBoundsCR, ssa.OpARM64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
@@ -1411,7 +1411,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p = s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.PanicBounds
+		p.To.Sym = ir.Syms(gd).PanicBounds
 
 	case ssa.OpARM64LoweredNilCheck:
 		// Issue a load which will fault if arg is nil.

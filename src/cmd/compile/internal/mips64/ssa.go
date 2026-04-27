@@ -380,7 +380,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p = s.Prog(obj.ADUFFZERO)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Duffzero
+		p.To.Sym = ir.Syms(gd).Duffzero
 		p.To.Offset = v.AuxInt
 	case ssa.OpMIPS64LoweredZero:
 		// SUBV	$8, R1
@@ -430,7 +430,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p := s.Prog(obj.ADUFFCOPY)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Duffcopy
+		p.To.Sym = ir.Syms(gd).Duffcopy
 		p.To.Offset = v.AuxInt
 	case ssa.OpMIPS64LoweredMove:
 		// SUBV	$8, R1
@@ -497,7 +497,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.OpMIPS64LoweredPanicBoundsRR, ssa.OpMIPS64LoweredPanicBoundsRC, ssa.OpMIPS64LoweredPanicBoundsCR, ssa.OpMIPS64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
@@ -583,7 +583,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p = s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.PanicBounds
+		p.To.Sym = ir.Syms(gd).PanicBounds
 
 	case ssa.OpMIPS64LoweredAtomicLoad8, ssa.OpMIPS64LoweredAtomicLoad32, ssa.OpMIPS64LoweredAtomicLoad64:
 		as := mips.AMOVV

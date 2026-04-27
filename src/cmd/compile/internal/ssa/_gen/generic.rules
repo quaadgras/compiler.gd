@@ -1618,7 +1618,7 @@
 // Recognise make([]T, 0) and replace it with a pointer to the zerobase
 (StaticLECall {callAux} _ (Const(64|32) [0]) (Const(64|32) [0]) mem)
 	&& isSameCall(callAux, "runtime.makeslice")
-	=> (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms.Zerobase} (SB)) mem)
+	=> (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms(b.Func.Config.GD()).Zerobase} (SB)) mem)
 
 // Evaluate constant address comparisons.
 (EqPtr  x x) => (ConstBool [true])

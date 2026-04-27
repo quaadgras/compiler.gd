@@ -218,7 +218,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpWasmLoweredStaticCall, ssa.OpWasmLoweredClosureCall, ssa.OpWasmLoweredInterCall, ssa.OpWasmLoweredTailCall:
 		s.PrepareCall(v)
-		if call, ok := v.Aux.(*ssa.AuxCall); ok && call.Fn == ir.Syms.Deferreturn {
+		if call, ok := v.Aux.(*ssa.AuxCall); ok && call.Fn == ir.Syms(gd).Deferreturn {
 			// The runtime needs to inject jumps to
 			// deferreturn calls using the address in
 			// _func.deferreturn. Hence, the call to
@@ -262,7 +262,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		s.Prog(wasm.AI64Eqz)
 		s.Prog(wasm.AIf)
 		p := s.Prog(wasm.ACALLNORESUME)
-		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms.SigPanic}
+		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms(gd).SigPanic}
 		s.Prog(wasm.AEnd)
 		if logopt.Enabled() {
 			logopt.LogOpt(gd, v.Pos, "nilcheck", "genssa", v.Block.Func.Name)
@@ -274,7 +274,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	case ssa.OpWasmLoweredWB:
 		p := s.Prog(wasm.ACall)
 		// AuxInt encodes how many buffer entries we need.
-		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms.GCWriteBarrier[v.AuxInt-1]}
+		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]}
 		setReg(s, v.Reg0()) // move result from wasm stack to register local
 
 	case ssa.OpWasmI64Store8, ssa.OpWasmI64Store16, ssa.OpWasmI64Store32, ssa.OpWasmI64Store, ssa.OpWasmF32Store, ssa.OpWasmF64Store:
@@ -417,7 +417,7 @@ func ssaGenValueOnStack(s *ssagen.State, v *ssa.Value, extend bool) {
 		if v.Type.Size() == 8 {
 			// Division of int64 needs helper function wasmDiv to handle the MinInt64 / -1 case.
 			p := s.Prog(wasm.ACall)
-			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms.WasmDiv}
+			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms(nil).WasmDiv}
 			break
 		}
 		s.Prog(wasm.AI64DivS)

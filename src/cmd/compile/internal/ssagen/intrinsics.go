@@ -351,7 +351,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	makeAtomicStoreGuardedIntrinsicLoong64 := func(op0, op1 ssa.Op, typ types.Kind, emit atomicOpEmitter) intrinsicBuilder {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// Target Atomic feature is identified by dynamic detection
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.Loong64HasLAM_BH, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAM_BH, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -433,7 +433,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				emit(s, n, args, op1, typ, needReturn)
 			} else {
 				// Target Atomic feature is identified by dynamic detection
-				addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.ARM64HasATOMICS, s.sb)
+				addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).ARM64HasATOMICS, s.sb)
 				v := s.load(types.Types[types.TBOOL], addr)
 				b := s.endBlock()
 				b.Kind = ssa.BlockIf
@@ -491,7 +491,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 
 	makeAtomicXchg8GuardedIntrinsicLoong64 := func(op ssa.Op) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.Loong64HasLAM_BH, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAM_BH, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -594,7 +594,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	makeAtomicCasGuardedIntrinsicLoong64 := func(op0, op1 ssa.Op, emit atomicOpEmitter) intrinsicBuilder {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// Target Atomic feature is identified by dynamic detection
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.Loong64HasLAMCAS, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAMCAS, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -820,7 +820,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue3(ssa.OpFMA, types.Types[types.TFLOAT64], args[0], args[1], args[2])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms.X86HasFMA)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasFMA)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -848,7 +848,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		sys.AMD64)
 	addF("math", "FMA",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.ARMHasVFPv4, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).ARMHasVFPv4, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -882,7 +882,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TFLOAT64], args[0])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms.X86HasSSE41)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasSSE41)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -1099,7 +1099,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TINT], args[0])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms.X86HasPOPCNT)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasPOPCNT)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -1128,7 +1128,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 
 	makeOnesCountLoong64 := func(op ssa.Op) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.Loong64HasLSX, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLSX, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -1162,7 +1162,7 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TINT], args[0])
 			}
 
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms.RISCV64HasZbb, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).RISCV64HasZbb, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -1270,9 +1270,9 @@ func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// check for divide-by-zero/overflow and panic with appropriate message
 			cmpZero := s.newValue2(s.ssaOp(ir.ONE, types.Types[types.TUINT64]), types.Types[types.TBOOL], args[2], s.zeroVal(types.Types[types.TUINT64]))
-			s.check(cmpZero, ir.Syms.Panicdivide)
+			s.check(cmpZero, ir.Syms(gd).Panicdivide)
 			cmpOverflow := s.newValue2(s.ssaOp(ir.OLT, types.Types[types.TUINT64]), types.Types[types.TBOOL], args[0], args[2])
-			s.check(cmpOverflow, ir.Syms.Panicoverflow)
+			s.check(cmpOverflow, ir.Syms(gd).Panicoverflow)
 			return s.newValue3(ssa.OpDiv128u, types.NewTuple(types.Types[types.TUINT64], types.Types[types.TUINT64]), args[0], args[1], args[2])
 		},
 		sys.AMD64)
@@ -2065,7 +2065,7 @@ func opLen2Imm8_II(gd *base.Invocation, op ssa.Op, t *types.Type, _ int) func(s 
 			if idx & ^(3+3<<4) == 0 {
 				s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx)), args[0], args[3])
 			} else {
-				sNew.rtcall(ir.Syms.PanicSimdImm, false, nil)
+				sNew.rtcall(ir.Syms(gd).PanicSimdImm, false, nil)
 			}
 		})
 	}

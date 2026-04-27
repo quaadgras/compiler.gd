@@ -486,7 +486,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.OpMIPSLoweredPanicBoundsRR, ssa.OpMIPSLoweredPanicBoundsRC, ssa.OpMIPSLoweredPanicBoundsCR, ssa.OpMIPSLoweredPanicBoundsCC,
 		ssa.OpMIPSLoweredPanicExtendRR, ssa.OpMIPSLoweredPanicExtendRC:
@@ -643,9 +643,9 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		if extend {
-			p.To.Sym = ir.Syms.PanicExtend
+			p.To.Sym = ir.Syms(gd).PanicExtend
 		} else {
-			p.To.Sym = ir.Syms.PanicBounds
+			p.To.Sym = ir.Syms(gd).PanicBounds
 		}
 
 	case ssa.OpMIPSLoweredAtomicLoad8,

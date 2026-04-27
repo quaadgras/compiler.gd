@@ -26,7 +26,7 @@ func zerorange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64,
 		p.Reg = ppc64.REGSP
 		p = pp.Append(gd, p, obj.ADUFFZERO, obj.TYPE_NONE, 0, 0, obj.TYPE_MEM, 0, 0)
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Duffzero
+		p.To.Sym = ir.Syms(gd).Duffzero
 		p.To.Offset = 4 * (128 - cnt/int64(types.PtrSize))
 	} else {
 		p = pp.Append(gd, p, ppc64.AMOVD, obj.TYPE_CONST, 0, gd.Ctxt.Arch.FixedFrameSize+off-8, obj.TYPE_REG, ppc64.REGTMP, 0)

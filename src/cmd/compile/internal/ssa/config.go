@@ -61,6 +61,12 @@ type mulRecipe struct {
 	build func(*Value, *Value) *Value // build(m, v) returns v * x built at m.
 }
 
+// GD returns the *base.Invocation that owns this Config.
+// Used by code that has a *Config / Func / Value but no separately
+// plumbed gd (ssa rewrite, liveness helpers, arch-specific
+// ssaGenValue implementations, etc.).
+func (c *Config) GD() *base.Invocation { return c.gd }
+
 type (
 	blockRewriter func(*Block) bool
 	valueRewriter func(*Value) bool

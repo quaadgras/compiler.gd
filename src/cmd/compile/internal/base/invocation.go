@@ -267,6 +267,15 @@ type Invocation struct {
 	// base→obj import cycle in this struct).
 	ProgArray any // *[10000]obj.Prog
 
+	// IrSyms — was `ir.Syms symsStruct` package-level. Holds
+	// runtime LSyms (Memmove, Newproc, GCWriteBarrier[],
+	// MallocGC*, etc.) populated in ssagen.InitConfig from
+	// gd.Ctxt.Lookup. Per-Invocation so the LSyms remain
+	// Ctxt-local; otherwise concurrent host.Run invocations'
+	// InitConfigs overwrite each other's entries and emitted
+	// relocations point at the wrong invocation's LSym.
+	IrSyms any // *ir.SymsStruct
+
 	// Pathsyms maps each types.Pkg to the importpath LSym
 	// (`type:.importpath.<prefix>.`) emitted for it in this
 	// invocation. Was a `Pathsym *obj.LSym` field on types.Pkg —

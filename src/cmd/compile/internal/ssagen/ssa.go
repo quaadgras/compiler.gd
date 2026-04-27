@@ -116,92 +116,177 @@ func InitConfig(gd *base.Invocation) {
 	cfg.Race = gd.Flag.Race
 	gd.SsaConfig = cfg
 	gd.SsaCaches = make([]ssa.Cache, gd.Flag.LowerC)
+	ir.Syms(
 
-	// Set up some runtime functions we'll need to call.
-	ir.Syms.AssertE2I = typecheck.LookupRuntimeFunc(gd, "assertE2I")
-	ir.Syms.AssertE2I2 = typecheck.LookupRuntimeFunc(gd, "assertE2I2")
-	ir.Syms.CgoCheckMemmove = typecheck.LookupRuntimeFunc(gd, "cgoCheckMemmove")
-	ir.Syms.CgoCheckPtrWrite = typecheck.LookupRuntimeFunc(gd, "cgoCheckPtrWrite")
-	ir.Syms.CheckPtrAlignment = typecheck.LookupRuntimeFunc(gd, "checkptrAlignment")
-	ir.Syms.Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
-	ir.Syms.Deferprocat = typecheck.LookupRuntimeFunc(gd, "deferprocat")
-	ir.Syms.DeferprocStack = typecheck.LookupRuntimeFunc(gd, "deferprocStack")
-	ir.Syms.Deferreturn = typecheck.LookupRuntimeFunc(gd, "deferreturn")
-	ir.Syms.Duffcopy = typecheck.LookupRuntimeFunc(gd, "duffcopy")
-	ir.Syms.Duffzero = typecheck.LookupRuntimeFunc(gd, "duffzero")
-	ir.Syms.GCWriteBarrier[0] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier1")
-	ir.Syms.GCWriteBarrier[1] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier2")
-	ir.Syms.GCWriteBarrier[2] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier3")
-	ir.Syms.GCWriteBarrier[3] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier4")
-	ir.Syms.GCWriteBarrier[4] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier5")
-	ir.Syms.GCWriteBarrier[5] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier6")
-	ir.Syms.GCWriteBarrier[6] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier7")
-	ir.Syms.GCWriteBarrier[7] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier8")
-	ir.Syms.Goschedguarded = typecheck.LookupRuntimeFunc(gd, "goschedguarded")
-	ir.Syms.Growslice = typecheck.LookupRuntimeFunc(gd, "growslice")
-	ir.Syms.GrowsliceBuf = typecheck.LookupRuntimeFunc(gd, "growsliceBuf")
-	ir.Syms.GrowsliceBufNoAlias = typecheck.LookupRuntimeFunc(gd, "growsliceBufNoAlias")
-	ir.Syms.GrowsliceNoAlias = typecheck.LookupRuntimeFunc(gd, "growsliceNoAlias")
-	ir.Syms.MoveSlice = typecheck.LookupRuntimeFunc(gd, "moveSlice")
-	ir.Syms.MoveSliceNoScan = typecheck.LookupRuntimeFunc(gd, "moveSliceNoScan")
-	ir.Syms.MoveSliceNoCap = typecheck.LookupRuntimeFunc(gd, "moveSliceNoCap")
-	ir.Syms.MoveSliceNoCapNoScan = typecheck.LookupRuntimeFunc(gd, "moveSliceNoCapNoScan")
-	ir.Syms.InterfaceSwitch = typecheck.LookupRuntimeFunc(gd, "interfaceSwitch")
-	for i := 1; i < len(ir.Syms.MallocGCSmallNoScan); i++ {
-		ir.Syms.MallocGCSmallNoScan[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcSmallNoScanSC%d", i))
+		// Set up some runtime functions we'll need to call.
+		gd).
+		AssertE2I = typecheck.LookupRuntimeFunc(gd, "assertE2I")
+	ir.Syms(gd).
+		AssertE2I2 = typecheck.LookupRuntimeFunc(gd, "assertE2I2")
+	ir.Syms(gd).
+		CgoCheckMemmove = typecheck.LookupRuntimeFunc(gd, "cgoCheckMemmove")
+	ir.Syms(gd).
+		CgoCheckPtrWrite = typecheck.LookupRuntimeFunc(gd, "cgoCheckPtrWrite")
+	ir.Syms(gd).
+		CheckPtrAlignment = typecheck.LookupRuntimeFunc(gd, "checkptrAlignment")
+	ir.Syms(gd).
+		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
+	ir.Syms(gd).
+		Deferprocat = typecheck.LookupRuntimeFunc(gd, "deferprocat")
+	ir.Syms(gd).
+		DeferprocStack = typecheck.LookupRuntimeFunc(gd, "deferprocStack")
+	ir.Syms(gd).
+		Deferreturn = typecheck.LookupRuntimeFunc(gd, "deferreturn")
+	ir.Syms(gd).
+		Duffcopy = typecheck.LookupRuntimeFunc(gd, "duffcopy")
+	ir.Syms(gd).
+		Duffzero = typecheck.LookupRuntimeFunc(gd, "duffzero")
+	ir.Syms(gd).
+		GCWriteBarrier[0] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier1")
+	ir.Syms(gd).
+		GCWriteBarrier[1] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier2")
+	ir.Syms(gd).
+		GCWriteBarrier[2] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier3")
+	ir.Syms(gd).
+		GCWriteBarrier[3] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier4")
+	ir.Syms(gd).
+		GCWriteBarrier[4] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier5")
+	ir.Syms(gd).
+		GCWriteBarrier[5] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier6")
+	ir.Syms(gd).
+		GCWriteBarrier[6] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier7")
+	ir.Syms(gd).
+		GCWriteBarrier[7] = typecheck.LookupRuntimeFunc(gd, "gcWriteBarrier8")
+	ir.Syms(gd).
+		Goschedguarded = typecheck.LookupRuntimeFunc(gd, "goschedguarded")
+	ir.Syms(gd).
+		Growslice = typecheck.LookupRuntimeFunc(gd, "growslice")
+	ir.Syms(gd).
+		GrowsliceBuf = typecheck.LookupRuntimeFunc(gd, "growsliceBuf")
+	ir.Syms(gd).
+		GrowsliceBufNoAlias = typecheck.LookupRuntimeFunc(gd, "growsliceBufNoAlias")
+	ir.Syms(gd).
+		GrowsliceNoAlias = typecheck.LookupRuntimeFunc(gd, "growsliceNoAlias")
+	ir.Syms(gd).
+		MoveSlice = typecheck.LookupRuntimeFunc(gd, "moveSlice")
+	ir.Syms(gd).
+		MoveSliceNoScan = typecheck.LookupRuntimeFunc(gd, "moveSliceNoScan")
+	ir.Syms(gd).
+		MoveSliceNoCap = typecheck.LookupRuntimeFunc(gd, "moveSliceNoCap")
+	ir.Syms(gd).
+		MoveSliceNoCapNoScan = typecheck.LookupRuntimeFunc(gd, "moveSliceNoCapNoScan")
+	ir.Syms(gd).
+		InterfaceSwitch = typecheck.LookupRuntimeFunc(gd, "interfaceSwitch")
+	for i := 1; i < len(ir.Syms(gd).MallocGCSmallNoScan); i++ {
+		ir.Syms(gd).
+			MallocGCSmallNoScan[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcSmallNoScanSC%d", i))
 	}
-	for i := 1; i < len(ir.Syms.MallocGCSmallScanNoHeader); i++ {
-		ir.Syms.MallocGCSmallScanNoHeader[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcSmallScanNoHeaderSC%d", i))
+	for i := 1; i < len(ir.Syms(gd).MallocGCSmallScanNoHeader); i++ {
+		ir.Syms(gd).
+			MallocGCSmallScanNoHeader[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcSmallScanNoHeaderSC%d", i))
 	}
-	for i := 1; i < len(ir.Syms.MallocGCTiny); i++ {
-		ir.Syms.MallocGCTiny[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcTinySize%d", i))
+	for i := 1; i < len(ir.Syms(gd).MallocGCTiny); i++ {
+		ir.Syms(gd).
+			MallocGCTiny[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcTinySize%d", i))
 	}
-	ir.Syms.MallocGC = typecheck.LookupRuntimeFunc(gd, "mallocgc")
-	ir.Syms.Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
-	ir.Syms.Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
-	ir.Syms.SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
-	ir.Syms.Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
-	ir.Syms.Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
-	ir.Syms.Msanmove = typecheck.LookupRuntimeFunc(gd, "msanmove")
-	ir.Syms.Asanread = typecheck.LookupRuntimeFunc(gd, "asanread")
-	ir.Syms.Asanwrite = typecheck.LookupRuntimeFunc(gd, "asanwrite")
-	ir.Syms.MaybeInPlace = typecheck.LookupRuntimeFunc(gd, "maybeInPlace")
-	ir.Syms.Newobject = typecheck.LookupRuntimeFunc(gd, "newobject")
-	ir.Syms.Newproc = typecheck.LookupRuntimeFunc(gd, "newproc")
-	ir.Syms.PanicBounds = typecheck.LookupRuntimeFunc(gd, "panicBounds")
-	ir.Syms.PanicExtend = typecheck.LookupRuntimeFunc(gd, "panicExtend")
-	ir.Syms.Panicdivide = typecheck.LookupRuntimeFunc(gd, "panicdivide")
-	ir.Syms.PanicdottypeE = typecheck.LookupRuntimeFunc(gd, "panicdottypeE")
-	ir.Syms.PanicdottypeI = typecheck.LookupRuntimeFunc(gd, "panicdottypeI")
-	ir.Syms.Panicnildottype = typecheck.LookupRuntimeFunc(gd, "panicnildottype")
-	ir.Syms.Panicoverflow = typecheck.LookupRuntimeFunc(gd, "panicoverflow")
-	ir.Syms.Panicshift = typecheck.LookupRuntimeFunc(gd, "panicshift")
-	ir.Syms.PanicSimdImm = typecheck.LookupRuntimeFunc(gd, "panicSimdImm")
-	ir.Syms.Racefuncenter = typecheck.LookupRuntimeFunc(gd, "racefuncenter")
-	ir.Syms.Racefuncexit = typecheck.LookupRuntimeFunc(gd, "racefuncexit")
-	ir.Syms.Raceread = typecheck.LookupRuntimeFunc(gd, "raceread")
-	ir.Syms.Racereadrange = typecheck.LookupRuntimeFunc(gd, "racereadrange")
-	ir.Syms.Racewrite = typecheck.LookupRuntimeFunc(gd, "racewrite")
-	ir.Syms.Racewriterange = typecheck.LookupRuntimeFunc(gd, "racewriterange")
-	ir.Syms.TypeAssert = typecheck.LookupRuntimeFunc(gd, "typeAssert")
-	ir.Syms.WBZero = typecheck.LookupRuntimeFunc(gd, "wbZero")
-	ir.Syms.WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
-	ir.Syms.X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")               // bool
-	ir.Syms.X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")               // bool
-	ir.Syms.X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")         // bool
-	ir.Syms.X86HasSSE41 = typecheck.LookupRuntimeVar(gd, "x86HasSSE41")           // bool
-	ir.Syms.ARMHasVFPv4 = typecheck.LookupRuntimeVar(gd, "armHasVFPv4")           // bool
-	ir.Syms.ARM64HasATOMICS = typecheck.LookupRuntimeVar(gd, "arm64HasATOMICS")   // bool
-	ir.Syms.Loong64HasLAMCAS = typecheck.LookupRuntimeVar(gd, "loong64HasLAMCAS") // bool
-	ir.Syms.Loong64HasLAM_BH = typecheck.LookupRuntimeVar(gd, "loong64HasLAM_BH") // bool
-	ir.Syms.Loong64HasLSX = typecheck.LookupRuntimeVar(gd, "loong64HasLSX")       // bool
-	ir.Syms.RISCV64HasZbb = typecheck.LookupRuntimeVar(gd, "riscv64HasZbb")       // bool
-	ir.Syms.Staticuint64s = typecheck.LookupRuntimeVar(gd, "staticuint64s")
-	ir.Syms.Typedmemmove = typecheck.LookupRuntimeFunc(gd, "typedmemmove")
-	ir.Syms.Udiv = typecheck.LookupRuntimeVar(gd, "udiv")                 // asm func with special ABI
-	ir.Syms.WriteBarrier = typecheck.LookupRuntimeVar(gd, "writeBarrier") // struct { bool; ... }
-	ir.Syms.Zerobase = typecheck.LookupRuntimeVar(gd, "zerobase")
-	ir.Syms.ZeroVal = typecheck.LookupRuntimeVar(gd, "zeroVal")
+	ir.Syms(gd).
+		MallocGC = typecheck.LookupRuntimeFunc(gd, "mallocgc")
+	ir.Syms(gd).
+		Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
+	ir.Syms(gd).
+		Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
+	ir.Syms(gd).
+		SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
+	ir.Syms(gd).
+		Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
+	ir.Syms(gd).
+		Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
+	ir.Syms(gd).
+		Msanmove = typecheck.LookupRuntimeFunc(gd, "msanmove")
+	ir.Syms(gd).
+		Asanread = typecheck.LookupRuntimeFunc(gd, "asanread")
+	ir.Syms(gd).
+		Asanwrite = typecheck.LookupRuntimeFunc(gd, "asanwrite")
+	ir.Syms(gd).
+		MaybeInPlace = typecheck.LookupRuntimeFunc(gd, "maybeInPlace")
+	ir.Syms(gd).
+		Newobject = typecheck.LookupRuntimeFunc(gd, "newobject")
+	ir.Syms(gd).
+		Newproc = typecheck.LookupRuntimeFunc(gd, "newproc")
+	ir.Syms(gd).
+		PanicBounds = typecheck.LookupRuntimeFunc(gd, "panicBounds")
+	ir.Syms(gd).
+		PanicExtend = typecheck.LookupRuntimeFunc(gd, "panicExtend")
+	ir.Syms(gd).
+		Panicdivide = typecheck.LookupRuntimeFunc(gd, "panicdivide")
+	ir.Syms(gd).
+		PanicdottypeE = typecheck.LookupRuntimeFunc(gd, "panicdottypeE")
+	ir.Syms(gd).
+		PanicdottypeI = typecheck.LookupRuntimeFunc(gd, "panicdottypeI")
+	ir.Syms(gd).
+		Panicnildottype = typecheck.LookupRuntimeFunc(gd, "panicnildottype")
+	ir.Syms(gd).
+		Panicoverflow = typecheck.LookupRuntimeFunc(gd, "panicoverflow")
+	ir.Syms(gd).
+		Panicshift = typecheck.LookupRuntimeFunc(gd, "panicshift")
+	ir.Syms(gd).
+		PanicSimdImm = typecheck.LookupRuntimeFunc(gd, "panicSimdImm")
+	ir.Syms(gd).
+		Racefuncenter = typecheck.LookupRuntimeFunc(gd, "racefuncenter")
+	ir.Syms(gd).
+		Racefuncexit = typecheck.LookupRuntimeFunc(gd, "racefuncexit")
+	ir.Syms(gd).
+		Raceread = typecheck.LookupRuntimeFunc(gd, "raceread")
+	ir.Syms(gd).
+		Racereadrange = typecheck.LookupRuntimeFunc(gd, "racereadrange")
+	ir.Syms(gd).
+		Racewrite = typecheck.LookupRuntimeFunc(gd, "racewrite")
+	ir.Syms(gd).
+		Racewriterange = typecheck.LookupRuntimeFunc(gd, "racewriterange")
+	ir.Syms(gd).
+		TypeAssert = typecheck.LookupRuntimeFunc(gd, "typeAssert")
+	ir.Syms(gd).
+		WBZero = typecheck.LookupRuntimeFunc(gd, "wbZero")
+	ir.Syms(gd).
+		WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
+	ir.Syms(gd).
+		X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")
+	ir.Syms(gd). // bool
+			X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")
+	ir.Syms(gd). // bool
+			X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")
+	ir.Syms(gd). // bool
+			X86HasSSE41 = typecheck.LookupRuntimeVar(gd, "x86HasSSE41")
+	ir.Syms(gd). // bool
+			ARMHasVFPv4 = typecheck.LookupRuntimeVar(gd, "armHasVFPv4")
+	ir.Syms(gd). // bool
+			ARM64HasATOMICS = typecheck.LookupRuntimeVar(gd, "arm64HasATOMICS")
+	ir.Syms( // bool
+		gd).
+		Loong64HasLAMCAS = typecheck.LookupRuntimeVar(gd, "loong64HasLAMCAS")
+	ir. // bool
+		Syms(gd).
+		Loong64HasLAM_BH = typecheck.LookupRuntimeVar(gd, "loong64HasLAM_BH")
+	ir. // bool
+		Syms(gd).
+		Loong64HasLSX = typecheck.LookupRuntimeVar(gd, "loong64HasLSX")
+	ir.Syms( // bool
+		gd).
+		RISCV64HasZbb = typecheck.LookupRuntimeVar(gd, "riscv64HasZbb")
+	ir.Syms( // bool
+		gd).
+		Staticuint64s = typecheck.LookupRuntimeVar(gd, "staticuint64s")
+	ir.Syms(gd).
+		Typedmemmove = typecheck.LookupRuntimeFunc(gd, "typedmemmove")
+	ir.Syms(gd).
+		Udiv = typecheck.LookupRuntimeVar(gd, "udiv")
+	ir.Syms(gd). // asm func with special ABI
+			WriteBarrier = typecheck.LookupRuntimeVar(gd, "writeBarrier")
+	ir. // struct { bool; ... }
+		Syms(gd).
+		Zerobase = typecheck.LookupRuntimeVar(gd, "zerobase")
+	ir.Syms(gd).
+		ZeroVal = typecheck.LookupRuntimeVar(gd, "zeroVal")
 
 	if Arch.LinkArch.Family == sys.Wasm {
 		BoundsCheckFunc[ssa.BoundsIndex] = typecheck.LookupRuntimeFunc(gd, "goPanicIndex")
@@ -222,12 +307,17 @@ func InitConfig(gd *base.Invocation) {
 		BoundsCheckFunc[ssa.BoundsSlice3CU] = typecheck.LookupRuntimeFunc(gd, "goPanicSlice3CU")
 		BoundsCheckFunc[ssa.BoundsConvert] = typecheck.LookupRuntimeFunc(gd, "goPanicSliceConvert")
 	}
+	ir.Syms(
 
-	// Wasm (all asm funcs with special ABIs)
-	ir.Syms.WasmDiv = typecheck.LookupRuntimeVar(gd, "wasmDiv")
-	ir.Syms.WasmTruncS = typecheck.LookupRuntimeVar(gd, "wasmTruncS")
-	ir.Syms.WasmTruncU = typecheck.LookupRuntimeVar(gd, "wasmTruncU")
-	ir.Syms.SigPanic = typecheck.LookupRuntimeFunc(gd, "sigpanic")
+		// Wasm (all asm funcs with special ABIs)
+		gd).
+		WasmDiv = typecheck.LookupRuntimeVar(gd, "wasmDiv")
+	ir.Syms(gd).
+		WasmTruncS = typecheck.LookupRuntimeVar(gd, "wasmTruncS")
+	ir.Syms(gd).
+		WasmTruncU = typecheck.LookupRuntimeVar(gd, "wasmTruncU")
+	ir.Syms(gd).
+		SigPanic = typecheck.LookupRuntimeFunc(gd, "sigpanic")
 }
 
 func InitTables(gd *base.Invocation) {
@@ -586,7 +676,7 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 
 	// Convert the AST-based IR to the SSA-based IR
 	if s.instrumentEnterExit {
-		s.rtcall(ir.Syms.Racefuncenter, true, nil, s.newValue0(ssa.OpGetCallerPC, types.Types[types.TUINTPTR]))
+		s.rtcall(ir.Syms(gd).Racefuncenter, true, nil, s.newValue0(ssa.OpGetCallerPC, types.Types[types.TUINTPTR]))
 	}
 	s.zeroResults()
 	s.paramsToHeap()
@@ -832,7 +922,7 @@ func (s *state) flushPendingHeapAllocations() {
 		argTypes = append(argTypes, unsafePtrTyp)
 	}
 
-	mallocSym := ir.Syms.MallocGC
+	mallocSym := ir.Syms(s.gd).MallocGC
 	if specialMallocSym := s.specializedMallocSym(size, false); specialMallocSym != nil {
 		mallocSym = specialMallocSym
 	}
@@ -870,12 +960,12 @@ func (s *state) specializedMallocSym(size int64, hasPointers bool) *obj.LSym {
 	divRoundUp := func(n, a uintptr) uintptr { return (n + a - 1) / a }
 	sizeClass := gc.SizeToSizeClass8[divRoundUp(uintptr(size), gc.SmallSizeDiv)]
 	if hasPointers {
-		return ir.Syms.MallocGCSmallScanNoHeader[sizeClass]
+		return ir.Syms(s.gd).MallocGCSmallScanNoHeader[sizeClass]
 	}
 	if size < gc.TinySize {
-		return ir.Syms.MallocGCTiny[size]
+		return ir.Syms(s.gd).MallocGCTiny[size]
 	}
-	return ir.Syms.MallocGCSmallNoScan[sizeClass]
+	return ir.Syms(s.gd).MallocGCSmallNoScan[sizeClass]
 }
 
 func (s *state) sizeSpecializedMallocEnabled() bool {
@@ -949,7 +1039,7 @@ func (s *state) maybeInPlaceAlloc(n *ir.Name) *ssa.Value {
 	// dead-zero-store rules can't see through, so the redundant
 	// initialisation stores after maybeInPlace get elided just as
 	// they are after newobject.
-	ret := s.rtcall(ir.Syms.MaybeInPlace, true,
+	ret := s.rtcall(ir.Syms(s.gd).MaybeInPlace, true,
 		[]*types.Type{types.NewPtr(n.Type())},
 		outBuf, rtype)[0]
 	return ret
@@ -958,7 +1048,7 @@ func (s *state) maybeInPlaceAlloc(n *ir.Name) *ssa.Value {
 // newObject returns an SSA value denoting new(typ).
 func (s *state) newObject(typ *types.Type) *ssa.Value {
 	if typ.Size() == 0 {
-		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms.Zerobase, s.sb)
+		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	rtype := s.reflectType(typ)
 	if specialMallocSym := s.specializedMallocSym(typ.Size(), typ.HasPointers()); specialMallocSym != nil {
@@ -968,19 +1058,19 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 			s.constBool(true),
 		)[0]
 	}
-	return s.rtcall(ir.Syms.Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
+	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
 }
 
 // newObjectNonSpecialized returns an SSA value denoting new(typ). It does
 // not produce size-specialized malloc functions.
 func (s *state) newObjectNonSpecialized(typ *types.Type, rtype *ssa.Value) *ssa.Value {
 	if typ.Size() == 0 {
-		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms.Zerobase, s.sb)
+		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	if rtype == nil {
 		rtype = s.reflectType(typ)
 	}
-	return s.rtcall(ir.Syms.Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
+	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
 }
 
 func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value) {
@@ -1011,7 +1101,7 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 	} else {
 		rtype = s.reflectType(elem)
 	}
-	s.rtcall(ir.Syms.CheckPtrAlignment, true, nil, v, rtype, count)
+	s.rtcall(ir.Syms(s.gd).CheckPtrAlignment, true, nil, v, rtype, count)
 }
 
 // reflectType returns an SSA value representing a pointer to typ's
@@ -1800,7 +1890,7 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 	// Inline (cold) path: runtime helper constructs a fresh inline
 	// header from the shifted bytes.
 	s.startBlock(bInline)
-	res := s.rtcall(ir.Syms.SliceInlineString, true, []*types.Type{strT}, v, lo, hi)
+	res := s.rtcall(ir.Syms(s.gd).SliceInlineString, true, []*types.Type{strT}, v, lo, hi)
 	s.vars[marker] = res[0]
 	s.endBlock().AddEdgeTo(bEnd)
 
@@ -1911,7 +2001,7 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	lptr := s.stringBytesTransient(l, ptrT)
 	rptr := s.stringBytesTransient(r, ptrT)
 	sizeU := s.newValue1(ssa.OpCopy, uT, llen)
-	res := s.rtcall(ir.Syms.Memequal, true, []*types.Type{boolT}, lptr, rptr, sizeU)
+	res := s.rtcall(ir.Syms(s.gd).Memequal, true, []*types.Type{boolT}, lptr, rptr, sizeU)
 	s.vars[marker] = res[0]
 	s.endBlock().AddEdgeTo(bEnd)
 
@@ -2321,11 +2411,11 @@ func (s *state) instrument2(t *types.Type, addr, addr2 *ssa.Value, kind instrume
 	if s.gd.Flag.MSan {
 		switch kind {
 		case instrumentRead:
-			fn = ir.Syms.Msanread
+			fn = ir.Syms(s.gd).Msanread
 		case instrumentWrite:
-			fn = ir.Syms.Msanwrite
+			fn = ir.Syms(s.gd).Msanwrite
 		case instrumentMove:
-			fn = ir.Syms.Msanmove
+			fn = ir.Syms(s.gd).Msanmove
 		default:
 			panic("unreachable")
 		}
@@ -2336,9 +2426,9 @@ func (s *state) instrument2(t *types.Type, addr, addr2 *ssa.Value, kind instrume
 		// composites with only one element don't have subobjects, though.
 		switch kind {
 		case instrumentRead:
-			fn = ir.Syms.Racereadrange
+			fn = ir.Syms(s.gd).Racereadrange
 		case instrumentWrite:
-			fn = ir.Syms.Racewriterange
+			fn = ir.Syms(s.gd).Racewriterange
 		default:
 			panic("unreachable")
 		}
@@ -2348,18 +2438,18 @@ func (s *state) instrument2(t *types.Type, addr, addr2 *ssa.Value, kind instrume
 		// address, as any write must write the first byte.
 		switch kind {
 		case instrumentRead:
-			fn = ir.Syms.Raceread
+			fn = ir.Syms(s.gd).Raceread
 		case instrumentWrite:
-			fn = ir.Syms.Racewrite
+			fn = ir.Syms(s.gd).Racewrite
 		default:
 			panic("unreachable")
 		}
 	} else if s.gd.Flag.ASan {
 		switch kind {
 		case instrumentRead:
-			fn = ir.Syms.Asanread
+			fn = ir.Syms(s.gd).Asanread
 		case instrumentWrite:
-			fn = ir.Syms.Asanwrite
+			fn = ir.Syms(s.gd).Asanwrite
 		default:
 			panic("unreachable")
 		}
@@ -2428,14 +2518,14 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		// Cases where this is happening must pass mayOverlap to false.
 		// (Currently this only happens when unmarshaling results of a call.)
 		if t.HasPointers() {
-			s.rtcall(ir.Syms.Typedmemmove, true, nil, s.reflectType(t), dst, src)
+			s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), dst, src)
 			// We would have otherwise implemented this move with straightline code,
 			// including a write barrier. Pretend we issue a write barrier here,
 			// so that the write barrier tests work. (Otherwise they'd need to know
 			// the details of IsInlineableMemmove.)
 			s.curfn.SetWBPos(s.gd, s.peekPos())
 		} else {
-			s.rtcall(ir.Syms.Memmove, true, nil, dst, src, s.constInt(types.Types[types.TUINTPTR], t.Size()))
+			s.rtcall(ir.Syms(s.gd).Memmove, true, nil, dst, src, s.constInt(types.Types[types.TUINTPTR], t.Size()))
 		}
 		ssa.LogLargeCopy(s.gd, s.f.Name, s.peekPos(), t.Size())
 		return
@@ -3129,7 +3219,7 @@ func (s *state) stmt(n ir.Node) {
 			s.startBlock(cacheMiss)
 		}
 
-		r := s.rtcall(ir.Syms.InterfaceSwitch, true, []*types.Type{typs.Int, typs.BytePtr}, d, t)
+		r := s.rtcall(ir.Syms(s.gd).InterfaceSwitch, true, []*types.Type{typs.Int, typs.BytePtr}, d, t)
 		s.assign(n.Case, r[0], false, 0)
 		s.assign(n.Itab, r[1], false, 0)
 
@@ -3185,7 +3275,7 @@ func (s *state) exit() *ssa.Block {
 			// the deferreturn retrieved from the pcln information.
 			// opendefers would remain a problem, however.
 			s.pushLine(s.curfn.Endlineno)
-			s.rtcall(ir.Syms.Deferreturn, true, nil)
+			s.rtcall(ir.Syms(s.gd).Deferreturn, true, nil)
 			s.popLine()
 		}
 	}
@@ -3223,7 +3313,7 @@ func (s *state) exit() *ssa.Block {
 	// Note: This has to happen after we load any heap-allocated results,
 	// otherwise races will be attributed to the caller instead.
 	if s.instrumentEnterExit {
-		s.rtcall(ir.Syms.Racefuncexit, true, nil)
+		s.rtcall(ir.Syms(s.gd).Racefuncexit, true, nil)
 	}
 
 	results[len(results)-1] = s.mem()
@@ -3856,7 +3946,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			//
 			// TODO(mdempsky): Investigate using "len != 0" instead of "ptr != nil".
 			cond := s.newValue2(ssa.OpNeqPtr, types.Types[types.TBOOL], ptr, s.constNil(ptr.Type))
-			zerobase := s.newValue1A(ssa.OpAddr, ptr.Type, ir.Syms.Zerobase, s.sb)
+			zerobase := s.newValue1A(ssa.OpAddr, ptr.Type, ir.Syms(s.gd).Zerobase, s.sb)
 			ptr = s.ternary(cond, ptr, zerobase)
 		}
 		len := s.stringLen(str)
@@ -4201,7 +4291,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		bt := b.Type
 		if bt.IsSigned() {
 			cmp := s.newValue2(s.ssaOp(ir.OLE, bt), types.Types[types.TBOOL], s.zeroVal(bt), b)
-			s.check(cmp, ir.Syms.Panicshift)
+			s.check(cmp, ir.Syms(s.gd).Panicshift)
 			bt = bt.ToUnsigned()
 		}
 		return s.newValue2(s.ssaShiftOp(n.Op(), n.Type(), bt), a.Type, a, b)
@@ -4933,23 +5023,23 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			s.defvars[s.f.Entry.ID][memVar] = mem
 			info.usedStatic = true
 		}
-		fn := ir.Syms.GrowsliceBuf
+		fn := ir.Syms(s.gd).GrowsliceBuf
 		if goexperiment.RuntimeFreegc && n.AppendNoAlias && !et.HasPointers() {
 			// The append is for a non-aliased slice where the runtime knows how to free
 			// the old logically dead backing store after growth.
 			// TODO(thepudds): for now, we only use the NoAlias version for element types
 			// without pointers while waiting on additional runtime support (CL 698515).
-			fn = ir.Syms.GrowsliceBufNoAlias
+			fn = ir.Syms(s.gd).GrowsliceBufNoAlias
 		}
 		r = s.rtcall(fn, true, []*types.Type{n.Type()}, p, l, c, nargs, taddr, s.addr(info.store), s.constInt(types.Types[types.TINT], info.K))
 	} else {
-		fn := ir.Syms.Growslice
+		fn := ir.Syms(s.gd).Growslice
 		if goexperiment.RuntimeFreegc && n.AppendNoAlias && !et.HasPointers() {
 			// The append is for a non-aliased slice where the runtime knows how to free
 			// the old logically dead backing store after growth.
 			// TODO(thepudds): for now, we only use the NoAlias version for element types
 			// without pointers while waiting on additional runtime support (CL 698515).
-			fn = ir.Syms.GrowsliceNoAlias
+			fn = ir.Syms(s.gd).GrowsliceNoAlias
 		}
 		r = s.rtcall(fn, true, []*types.Type{n.Type()}, p, l, c, nargs, taddr)
 	}
@@ -5098,16 +5188,16 @@ func (s *state) move2heap(n *ir.MoveToHeapExpr) *ssa.Value {
 	if et.HasPointers() {
 		typ := s.expr(n.RType)
 		if n.PreserveCapacity {
-			newSlice = s.rtcall(ir.Syms.MoveSlice, true, []*types.Type{slice.Type}, typ, p, l, c)[0]
+			newSlice = s.rtcall(ir.Syms(s.gd).MoveSlice, true, []*types.Type{slice.Type}, typ, p, l, c)[0]
 		} else {
-			newSlice = s.rtcall(ir.Syms.MoveSliceNoCap, true, []*types.Type{slice.Type}, typ, p, l)[0]
+			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoCap, true, []*types.Type{slice.Type}, typ, p, l)[0]
 		}
 	} else {
 		elemSize := s.constInt(types.Types[types.TUINTPTR], et.Size())
 		if n.PreserveCapacity {
-			newSlice = s.rtcall(ir.Syms.MoveSliceNoScan, true, []*types.Type{slice.Type}, elemSize, p, l, c)[0]
+			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoScan, true, []*types.Type{slice.Type}, elemSize, p, l, c)[0]
 		} else {
-			newSlice = s.rtcall(ir.Syms.MoveSliceNoCapNoScan, true, []*types.Type{slice.Type}, elemSize, p, l)[0]
+			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoCapNoScan, true, []*types.Type{slice.Type}, elemSize, p, l)[0]
 		}
 	}
 	// Decompose output slice
@@ -5931,7 +6021,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 
 		// Call runtime.deferprocStack with pointer to _defer record.
 		ACArgs = append(ACArgs, types.Types[types.TUINTPTR])
-		aux := ssa.StaticAuxCall(ir.Syms.DeferprocStack, s.f.ABIDefault.ABIAnalyzeTypes(ACArgs, ACResults))
+		aux := ssa.StaticAuxCall(ir.Syms(s.gd).DeferprocStack, s.f.ABIDefault.ABIAnalyzeTypes(ACArgs, ACResults))
 		callArgs = append(callArgs, addr, s.mem())
 		call = s.newValue0A(ssa.OpStaticLECall, aux.LateExpansionResultType(), aux)
 		call.AddArgs(callArgs...)
@@ -5993,14 +6083,14 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		// call target
 		switch {
 		case k == callDefer:
-			sym := ir.Syms.Deferproc
+			sym := ir.Syms(s.gd).Deferproc
 			if dextra != nil {
-				sym = ir.Syms.Deferprocat
+				sym = ir.Syms(s.gd).Deferprocat
 			}
 			aux := ssa.StaticAuxCall(sym, s.f.ABIDefault.ABIAnalyzeTypes(ACArgs, ACResults)) // TODO paramResultInfo for Deferproc(at)
 			call = s.newValue0A(ssa.OpStaticLECall, aux.LateExpansionResultType(), aux)
 		case k == callGo:
-			aux := ssa.StaticAuxCall(ir.Syms.Newproc, s.f.ABIDefault.ABIAnalyzeTypes(ACArgs, ACResults))
+			aux := ssa.StaticAuxCall(ir.Syms(s.gd).Newproc, s.f.ABIDefault.ABIAnalyzeTypes(ACArgs, ACResults))
 			call = s.newValue0A(ssa.OpStaticLECall, aux.LateExpansionResultType(), aux) // TODO paramResultInfo for Newproc
 		case closure != nil:
 			// rawLoad because loading the code pointer from a
@@ -6203,7 +6293,7 @@ func (s *state) addr(n ir.Node) *ssa.Value {
 		// &x[i], which will always panic when evaluated.
 		// We just return something reasonable in this case.
 		// It will be dynamically unreachable. See issue 77635.
-		return s.newValue1A(ssa.OpAddr, n.Type().PtrTo(), ir.Syms.Zerobase, s.sb)
+		return s.newValue1A(ssa.OpAddr, n.Type().PtrTo(), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 
 	t := types.NewPtr(n.Type())
@@ -6525,7 +6615,7 @@ func (s *state) intDivide(n ir.Node, a, b *ssa.Value) *ssa.Value {
 	if needcheck {
 		// do a size-appropriate check for zero
 		cmp := s.newValue2(s.ssaOp(ir.ONE, n.Type()), types.Types[types.TBOOL], b, s.zeroVal(n.Type()))
-		s.check(cmp, ir.Syms.Panicdivide)
+		s.check(cmp, ir.Syms(s.gd).Panicdivide)
 	}
 	return s.newValue2(s.ssaOp(n.Op(), n.Type()), a.Type, a, b)
 }
@@ -7309,7 +7399,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			if !commaok {
 				// On failure, panic by calling panicnildottype.
 				s.startBlock(bFail)
-				s.rtcall(ir.Syms.Panicnildottype, false, nil, target)
+				s.rtcall(ir.Syms(s.gd).Panicnildottype, false, nil, target)
 
 				// On success, return (perhaps modified) input interface.
 				s.startBlock(bOk)
@@ -7381,7 +7471,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			b.AddEdgeTo(bMerge)
 		} else {
 			// Panic if input is nil.
-			s.rtcall(ir.Syms.Panicnildottype, false, nil, target)
+			s.rtcall(ir.Syms(s.gd).Panicnildottype, false, nil, target)
 		}
 
 		// Get typ, possibly by loading out of itab.
@@ -7486,13 +7576,13 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 
 		// Call into runtime to get itab for result.
 		if descriptor != nil {
-			itab = s.rtcall(ir.Syms.TypeAssert, true, []*types.Type{byteptr}, d, typ)[0]
+			itab = s.rtcall(ir.Syms(s.gd).TypeAssert, true, []*types.Type{byteptr}, d, typ)[0]
 		} else {
 			var fn *obj.LSym
 			if commaok {
-				fn = ir.Syms.AssertE2I2
+				fn = ir.Syms(s.gd).AssertE2I2
 			} else {
-				fn = ir.Syms.AssertE2I
+				fn = ir.Syms(s.gd).AssertE2I
 			}
 			itab = s.rtcall(fn, true, []*types.Type{byteptr}, target, typ)[0]
 		}
@@ -7590,9 +7680,9 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			taddr = s.reflectType(src)
 		}
 		if src.IsEmptyInterface() {
-			s.rtcall(ir.Syms.PanicdottypeE, false, nil, itab, target, taddr)
+			s.rtcall(ir.Syms(s.gd).PanicdottypeE, false, nil, itab, target, taddr)
 		} else {
-			s.rtcall(ir.Syms.PanicdottypeI, false, nil, itab, target, taddr)
+			s.rtcall(ir.Syms(s.gd).PanicdottypeI, false, nil, itab, target, taddr)
 		}
 
 		// on success, return data from interface
@@ -7785,6 +7875,12 @@ type State struct {
 func (s *State) FuncInfo() *obj.FuncInfo {
 	return s.pp.CurFunc.LSym.Func()
 }
+
+// GD returns the *base.Invocation that owns this State. Used by
+// arch-specific ssaGenValue implementations
+// (cmd/compile/internal/{amd64,arm,arm64,wasm,...}) to look up
+// runtime LSyms via ir.Syms(s.GD()).Foo.
+func (s *State) GD() *base.Invocation { return s.gd }
 
 // Prog appends a new Prog.
 func (s *State) Prog(as obj.As) *obj.Prog {
@@ -8278,7 +8374,7 @@ func genssa(gd *base.Invocation, f *ssa.Func, pp *objw.Progs) {
 		p := s.pp.Prog(e.gd, obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Deferreturn
+		p.To.Sym = ir.Syms(gd).Deferreturn
 
 		// Load results into registers. So when a deferred function
 		// recovers a panic, it will return to caller with right results.
@@ -8958,7 +9054,7 @@ func (s *State) PrepareCall(v *ssa.Value) {
 	idx := s.livenessMap.Get(v)
 	if !idx.StackMapValid() {
 		// See Liveness.hasStackMap.
-		if sym, ok := v.Aux.(*ssa.AuxCall); !ok || !(sym.Fn == ir.Syms.WBZero || sym.Fn == ir.Syms.WBMove) {
+		if sym, ok := v.Aux.(*ssa.AuxCall); !ok || !(sym.Fn == ir.Syms(s.GD()).WBZero || sym.Fn == ir.Syms(s.GD()).WBMove) {
 			s.gd.Fatalf("missing stack map index for %v", v.LongString())
 		}
 	}
@@ -9091,17 +9187,17 @@ func (e *ssafn) UseWriteBarrier() bool {
 func (e *ssafn) Syslook(name string) *obj.LSym {
 	switch name {
 	case "goschedguarded":
-		return ir.Syms.Goschedguarded
+		return ir.Syms(e.gd).Goschedguarded
 	case "writeBarrier":
-		return ir.Syms.WriteBarrier
+		return ir.Syms(e.gd).WriteBarrier
 	case "wbZero":
-		return ir.Syms.WBZero
+		return ir.Syms(e.gd).WBZero
 	case "wbMove":
-		return ir.Syms.WBMove
+		return ir.Syms(e.gd).WBMove
 	case "cgoCheckMemmove":
-		return ir.Syms.CgoCheckMemmove
+		return ir.Syms(e.gd).CgoCheckMemmove
 	case "cgoCheckPtrWrite":
-		return ir.Syms.CgoCheckPtrWrite
+		return ir.Syms(e.gd).CgoCheckPtrWrite
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

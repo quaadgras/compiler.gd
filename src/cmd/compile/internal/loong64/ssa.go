@@ -630,7 +630,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p2 := s.Prog(loong64.AMOVBU)
 		p2.From.Type = obj.TYPE_MEM
 		p2.From.Name = obj.NAME_EXTERN
-		p2.From.Sym = ir.Syms.Loong64HasLSX
+		p2.From.Sym = ir.Syms(gd).Loong64HasLSX
 		p2.To.Type = obj.TYPE_REG
 		p2.To.Reg = flagReg
 
@@ -833,7 +833,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.OpLOONG64LoweredPubBarrier:
 		// DBAR 0x1A
@@ -925,7 +925,7 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p = s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.PanicBounds
+		p.To.Sym = ir.Syms(gd).PanicBounds
 
 	case ssa.OpLOONG64LoweredAtomicLoad8, ssa.OpLOONG64LoweredAtomicLoad32, ssa.OpLOONG64LoweredAtomicLoad64:
 		// MOVB	(Rarg0), Rout

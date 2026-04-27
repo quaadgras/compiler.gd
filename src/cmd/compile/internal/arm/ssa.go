@@ -707,13 +707,13 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p := s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Udiv
+		p.To.Sym = ir.Syms(gd).Udiv
 	case ssa.OpARMLoweredWB:
 		p := s.Prog(obj.ACALL)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		// AuxInt encodes how many buffer entries we need.
-		p.To.Sym = ir.Syms.GCWriteBarrier[v.AuxInt-1]
+		p.To.Sym = ir.Syms(gd).GCWriteBarrier[v.AuxInt-1]
 
 	case ssa.OpARMLoweredPanicBoundsRR, ssa.OpARMLoweredPanicBoundsRC, ssa.OpARMLoweredPanicBoundsCR, ssa.OpARMLoweredPanicBoundsCC,
 		ssa.OpARMLoweredPanicExtendRR, ssa.OpARMLoweredPanicExtendRC:
@@ -870,22 +870,22 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
 		if extend {
-			p.To.Sym = ir.Syms.PanicExtend
+			p.To.Sym = ir.Syms(gd).PanicExtend
 		} else {
-			p.To.Sym = ir.Syms.PanicBounds
+			p.To.Sym = ir.Syms(gd).PanicBounds
 		}
 
 	case ssa.OpARMDUFFZERO:
 		p := s.Prog(obj.ADUFFZERO)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Duffzero
+		p.To.Sym = ir.Syms(gd).Duffzero
 		p.To.Offset = v.AuxInt
 	case ssa.OpARMDUFFCOPY:
 		p := s.Prog(obj.ADUFFCOPY)
 		p.To.Type = obj.TYPE_MEM
 		p.To.Name = obj.NAME_EXTERN
-		p.To.Sym = ir.Syms.Duffcopy
+		p.To.Sym = ir.Syms(gd).Duffcopy
 		p.To.Offset = v.AuxInt
 	case ssa.OpARMLoweredNilCheck:
 		// Issue a load which will fault if arg is nil.

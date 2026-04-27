@@ -31582,7 +31582,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		}
 		v.reset(OpMakeResult)
 		v0 := b.NewValue0(v.Pos, OpAddr, v.Type.FieldType(0))
-		v0.Aux = symToAux(ir.Syms.Zerobase)
+		v0.Aux = symToAux(ir.Syms(b.Func.Config.GD()).Zerobase)
 		v1 := b.NewValue0(v.Pos, OpSB, typ.Uintptr)
 		v0.AddArg(v1)
 		v.AddArg2(v0, mem)
@@ -31607,7 +31607,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		}
 		v.reset(OpMakeResult)
 		v0 := b.NewValue0(v.Pos, OpAddr, v.Type.FieldType(0))
-		v0.Aux = symToAux(ir.Syms.Zerobase)
+		v0.Aux = symToAux(ir.Syms(b.Func.Config.GD()).Zerobase)
 		v1 := b.NewValue0(v.Pos, OpSB, typ.Uintptr)
 		v0.AddArg(v1)
 		v.AddArg2(v0, mem)

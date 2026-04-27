@@ -10,10 +10,27 @@ import (
 	"cmd/internal/obj"
 )
 
-// Syms holds known symbols.
-var Syms symsStruct
+// Syms returns gd's per-Invocation runtime-symbol table, lazy-
+// initialised on first call. Was a package-level
+// `var Syms symsStruct`; the LSym pointers are minted via
+// gd.Ctxt.Lookup so they must be Ctxt-local. Concurrent host.Run
+// invocations would otherwise have raced on InitConfig writes
+// AND any compiler that read ir.Syms.X during its compile would
+// see whichever invocation last wrote to it — emitting cross-
+// invocation LSym references that the linker rejects.
+func Syms(gd *base.Invocation) *SymsStruct {
+	s, _ := gd.IrSyms.(*SymsStruct)
+	if s == nil {
+		s = &SymsStruct{}
+		gd.IrSyms = s
+	}
+	return s
+}
 
-type symsStruct struct {
+// SymsStruct collects the well-known runtime LSyms cached during
+// ssagen.InitConfig. Public so tests and debug helpers can
+// construct instances.
+type SymsStruct struct {
 	AssertE2I                 *obj.LSym
 	AssertE2I2                *obj.LSym
 	Asanread                  *obj.LSym

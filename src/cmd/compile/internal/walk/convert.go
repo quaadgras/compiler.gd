@@ -193,7 +193,7 @@ func dataWord(gd *base.Invocation, conv *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// n is zero-sized. Use zerobase.
 		diagnose("using global for zero-sized interface value", n)
 		cheapExpr(gd, n, init) // Evaluate n for side-effects. See issue 19246.
-		value = ir.NewLinksymExpr(gd, gd.Pos, ir.Syms.Zerobase, types.Types[types.TUINTPTR])
+		value = ir.NewLinksymExpr(gd, gd.Pos, ir.Syms(gd).Zerobase, types.Types[types.TUINTPTR])
 	case isBool || fromType.Size() == 1 && isInteger:
 		// n is a bool/byte. Use staticuint64s[n * 8] on little-endian
 		// and staticuint64s[n * 8 + 7] on big-endian.
@@ -207,11 +207,11 @@ func dataWord(gd *base.Invocation, conv *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		}
 		// The actual type is [256]uint64, but we use [256*8]uint8 so we can address
 		// individual bytes.
-		staticuint64s := ir.NewLinksymExpr(gd, gd.Pos, ir.Syms.Staticuint64s, types.NewArray(types.Types[types.TUINT8], 256*8))
+		staticuint64s := ir.NewLinksymExpr(gd, gd.Pos, ir.Syms(gd).Staticuint64s, types.NewArray(types.Types[types.TUINT8], 256*8))
 		xe := ir.NewIndexExpr(gd, gd.Pos, staticuint64s, index)
 		xe.SetBounded(true)
 		value = xe
-	case n.Op() == ir.OLINKSYMOFFSET && n.(*ir.LinksymOffsetExpr).Linksym == ir.Syms.ZeroVal && n.(*ir.LinksymOffsetExpr).Offset_ == 0:
+	case n.Op() == ir.OLINKSYMOFFSET && n.(*ir.LinksymOffsetExpr).Linksym == ir.Syms(gd).ZeroVal && n.(*ir.LinksymOffsetExpr).Offset_ == 0:
 		// n is using zeroVal, so we can use n directly.
 		// (Note that n does not have a proper pos in this case, so using conv for the diagnostic instead.)
 		diagnose("using global for zero value interface value", conv)
