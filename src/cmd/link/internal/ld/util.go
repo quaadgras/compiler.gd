@@ -12,38 +12,62 @@ import (
 	"runtime"
 )
 
-var atExitFuncs []func()
+// currentLink is the *Link Main is currently driving. Published by
+// Main itself (set after linknew, cleared on exit) so that
+// package-level helpers (AtExit, Exit) can route through the active
+// invocation's atExitFuncs without plumbing ctxt through every call
+// site. Held under linkRunMu serialization in cmd/link/host.Run; for
+// parallel link invocations these helpers would need explicit ctxt
+// plumbing through every call site.
+var currentLink *Link
 
-func AtExit(f func()) {
-	atExitFuncs = append(atExitFuncs, f)
-}
-
-// runAtExitFuncs runs the queued set of AtExit functions.
-func runAtExitFuncs() {
-	for i := len(atExitFuncs) - 1; i >= 0; i-- {
-		atExitFuncs[i]()
-	}
-	atExitFuncs = nil
-}
-
-// inProcessStatus, when non-nil, redirects Exit's process-termination
-// path: instead of os.Exit it writes the code to *inProcessStatus and
-// calls runtime.Goexit so the caller's goroutine survives. Set by
-// cmd/link/host.Run before invoking Main on a worker goroutine, and
-// cleared once Main returns.
+// inProcessStatus, when non-nil, redirects Exit to write the code
+// there and call runtime.Goexit instead of os.Exit. Set by
+// cmd/link/host.Run.
 var inProcessStatus *int
 
-// SetInProcess wires Exit to runtime.Goexit + status writeback. Called
-// by cmd/link/host.Run; not for general use.
+// SetInProcess wires Exit to runtime.Goexit + status writeback.
+// Called by cmd/link/host.Run before invoking Main on a worker
+// goroutine.
 func SetInProcess(status *int) { inProcessStatus = status }
 
 // ClearInProcess restores Exit's process-termination behaviour.
 func ClearInProcess() { inProcessStatus = nil }
 
+// AtExit registers f to run when Exit is called. The slice lives on
+// the currentLink (set by Main after linknew) so concurrent in-process
+// invocations don't race on append/drain. Falls back to a package-
+// level slice for callers that run before Main publishes currentLink
+// (early-startup paths).
+func AtExit(f func()) {
+	if currentLink != nil {
+		currentLink.atExitFuncs = append(currentLink.atExitFuncs, f)
+		return
+	}
+	legacyAtExitFuncs = append(legacyAtExitFuncs, f)
+}
+
+var legacyAtExitFuncs []func()
+
+// runAtExitFuncs runs the queued set of AtExit functions: per-Link
+// hooks first (LIFO), then the legacy fallback.
+func runAtExitFuncs() {
+	if currentLink != nil {
+		for i := len(currentLink.atExitFuncs) - 1; i >= 0; i-- {
+			currentLink.atExitFuncs[i]()
+		}
+		currentLink.atExitFuncs = nil
+	}
+	for i := len(legacyAtExitFuncs) - 1; i >= 0; i-- {
+		legacyAtExitFuncs[i]()
+	}
+	legacyAtExitFuncs = nil
+}
+
 // Exit exits with code after executing all atExitFuncs. Under
-// cmd/link/host.Run (in-process mode) it writes the code to a status
-// pointer and calls runtime.Goexit instead of os.Exit, so the calling
-// goroutine in cmd/go survives.
+// cmd/link/host.Run (inProcessStatus non-nil) it writes the code to
+// the status pointer and calls runtime.Goexit instead of os.Exit so
+// the calling goroutine in cmd/go survives.
 func Exit(code int) {
 	runAtExitFuncs()
 	if inProcessStatus != nil {

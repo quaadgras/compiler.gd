@@ -248,15 +248,22 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	counter.Inc("link/invocations")
 
 	// Reset package-level state that the previous in-process invocation
-	// (if any) may have left dirty. Exit's runAtExitFuncs already clears
-	// atExitFuncs, but errored exits may bypass it.
+	// (if any) may have left dirty. atExitFuncs is now per-Link via
+	// currentLink so doesn't need resetting here.
 	nerrors = 0
 	strictDupMsgCount = 0
-	atExitFuncs = nil
+	legacyAtExitFuncs = nil
 
 	ctxt := linknew(arch)
 	ctxt.thearch = theArch
 	ctxt.Bso = bufio.NewWriter(os.Stdout)
+
+	// Publish ctxt as the currentLink so package-level AtExit/Exit
+	// helpers route through it. Under linkRunMu serialization this is
+	// safe; lifting that mutex would require explicit ctxt threading
+	// through all AtExit/Exit call sites.
+	currentLink = ctxt
+	defer func() { currentLink = nil }()
 
 	// flag.Parse reads from os.Args. Under in-process invocation we
 	// need it to see args, not whatever cmd/go's own argv is. The

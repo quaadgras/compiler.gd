@@ -44,6 +44,12 @@ type linkState struct {
 	// thearch and other lib.go state
 	thearch Arch
 
+	// atExit hook list and in-process status pointer (was util.go
+	// package-level vars). Per-Link so concurrent host.Run invocations
+	// don't race on append/drain or pointer assignment.
+	atExitFuncs     []func()
+	inProcessStatus *int // set by cmd/link/host.Run; Exit writes here + Goexit instead of os.Exit
+
 	// CarrierSymByType tracks carrier symbols and their sizes (was symtab.go).
 	CarrierSymByType [sym.SFirstUnallocated]struct {
 		Sym  loader.Sym
