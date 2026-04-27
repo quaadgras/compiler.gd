@@ -56,7 +56,7 @@ func putelfstr(ctxt *Link, s string) int {
 	return off
 }
 
-func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shndx elf.SectionIndex, other int) {
+func putelfsyment(ctxt *Link, out *OutBuf, off int, addr int64, size int64, info uint8, shndx elf.SectionIndex, other int) {
 	if elf64 {
 		out.Write32(uint32(off))
 		out.Write8(info)
@@ -64,7 +64,7 @@ func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shnd
 		out.Write16(uint16(shndx))
 		out.Write64(uint64(addr))
 		out.Write64(uint64(size))
-		symSize += ELF64SYMSIZE
+		ctxt.symSize += ELF64SYMSIZE
 	} else {
 		out.Write32(uint32(off))
 		out.Write32(uint32(addr))
@@ -72,7 +72,7 @@ func putelfsyment(out *OutBuf, off int, addr int64, size int64, info uint8, shnd
 		out.Write8(info)
 		out.Write8(uint8(other))
 		out.Write16(uint16(shndx))
-		symSize += ELF32SYMSIZE
+		ctxt.symSize += ELF32SYMSIZE
 	}
 }
 
@@ -167,7 +167,7 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 		// (*sym.Symbol).ElfsymForReloc). This is approximately equivalent to the
 		// ELF linker -Bsymbolic-functions option, but that is buggy on
 		// several platforms.
-		putelfsyment(ctxt.Out, putelfstr(ctxt, "local."+sname), addr, size, elf.ST_INFO(elf.STB_LOCAL, typ), elfshnum, other)
+		putelfsyment(ctxt, ctxt.Out, putelfstr(ctxt, "local."+sname), addr, size, elf.ST_INFO(elf.STB_LOCAL, typ), elfshnum, other)
 		ldr.SetSymLocalElfSym(x, int32(ctxt.numelfsym))
 		ctxt.numelfsym++
 		return
@@ -175,13 +175,13 @@ func putelfsym(ctxt *Link, x loader.Sym, typ elf.SymType, curbind elf.SymBind) {
 		return
 	}
 
-	putelfsyment(ctxt.Out, putelfstr(ctxt, sname), addr, size, elf.ST_INFO(bind, typ), elfshnum, other)
+	putelfsyment(ctxt, ctxt.Out, putelfstr(ctxt, sname), addr, size, elf.ST_INFO(bind, typ), elfshnum, other)
 	ldr.SetSymElfSym(x, int32(ctxt.numelfsym))
 	ctxt.numelfsym++
 }
 
 func putelfsectionsym(ctxt *Link, out *OutBuf, s loader.Sym, shndx elf.SectionIndex) {
-	putelfsyment(out, 0, 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_SECTION), shndx, 0)
+	putelfsyment(ctxt, out, 0, 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_SECTION), shndx, 0)
 	ctxt.loader.SetSymElfSym(s, int32(ctxt.numelfsym))
 	ctxt.numelfsym++
 }
@@ -267,7 +267,7 @@ func genelfsym(ctxt *Link, elfbind elf.SymBind) {
 func asmElfSym(ctxt *Link) {
 
 	// the first symbol entry is reserved
-	putelfsyment(ctxt.Out, 0, 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_NOTYPE), 0, 0)
+	putelfsyment(ctxt, ctxt.Out, 0, 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_NOTYPE), 0, 0)
 
 	dwarfaddelfsectionsyms(ctxt)
 
@@ -275,13 +275,13 @@ func asmElfSym(ctxt *Link) {
 	// Avoid having the working directory inserted into the symbol table.
 	// It is added with a name to avoid problems with external linking
 	// encountered on some versions of Solaris. See issue #14957.
-	putelfsyment(ctxt.Out, putelfstr(ctxt, "go.go"), 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_FILE), elf.SHN_ABS, 0)
+	putelfsyment(ctxt, ctxt.Out, putelfstr(ctxt, "go.go"), 0, 0, elf.ST_INFO(elf.STB_LOCAL, elf.STT_FILE), elf.SHN_ABS, 0)
 	ctxt.numelfsym++
 
 	bindings := []elf.SymBind{elf.STB_LOCAL, elf.STB_GLOBAL}
 	for _, elfbind := range bindings {
 		if elfbind == elf.STB_GLOBAL {
-			elfglobalsymndx = ctxt.numelfsym
+			ctxt.elfglobalsymndx = ctxt.numelfsym
 		}
 		genelfsym(ctxt, elfbind)
 	}
@@ -306,8 +306,7 @@ func putplan9sym(ctxt *Link, ldr *loader.Loader, s loader.Sym, char SymbolType) 
 	name = mangleABIName(ctxt, ldr, s, name)
 	ctxt.Out.WriteString(name)
 	ctxt.Out.Write8(0)
-
-	symSize += int32(l) + 1 + int32(len(name)) + 1
+	ctxt.symSize += int32(l) + 1 + int32(len(name)) + 1
 }
 
 func asmbPlan9Sym(ctxt *Link) {

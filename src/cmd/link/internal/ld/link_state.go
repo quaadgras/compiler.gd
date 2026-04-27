@@ -30,6 +30,24 @@ type linkState struct {
 	buildinfoData []byte // .note.gnu.build-id payload (renamed from var "buildinfo" to avoid colliding with (*Link).buildinfo method)
 	elfverneed    int    // count of .gnu.version_r entries
 
+	// lib.go scalars
+	dynlib          []string
+	ldflag          []string
+	havedynamic     int
+	Funcalign       int
+	iscgo           bool
+	elfglobalsymndx int
+	interpreter     string
+	debug_s         bool
+	HEADR           int32
+	hostobj         []Hostobj
+	hostobjcounter  int
+	lcSize          int32
+	spSize          int32
+	symSize         int32
+	abiInternalVer  int    // sym.SymVerABIInternal in linknew
+	rpath           Rpath
+
 	// misc state migrated from various files
 	pkglistfornote   []byte    // was in main.go
 	windowsgui       bool      // was in main.go

@@ -124,14 +124,14 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			}
 
 			if local == "_" && remote == "_" {
-				// allow #pragma dynimport _ _ "foo.so"
-				// to force a link of foo.so.
-				havedynamic = 1
+				ctxt.havedynamic = // allow #pragma dynimport _ _ "foo.so"
+					// to force a link of foo.so.
+					1
 
 				if ctxt.HeadType == objabi.Hdarwin {
 					machoadddynlib(ctxt, lib, ctxt.LinkMode)
 				} else {
-					dynlib = append(dynlib, lib)
+					ctxt.dynlib = append(ctxt.dynlib, lib)
 				}
 				continue
 			}
@@ -152,7 +152,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				} else {
 					hostObjSyms[s] = struct{}{}
 				}
-				havedynamic = 1
+				ctxt.havedynamic = 1
 				if lib != "" && ctxt.IsDarwin() {
 					machoadddynlib(ctxt, lib, ctxt.LinkMode)
 				}
@@ -261,13 +261,12 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			}
 
 			if *flagInterpreter == "" {
-				if interpreter != "" && interpreter != f[1] {
-					fmt.Fprintf(os.Stderr, "%s: conflict dynlinker: %s and %s\n", os.Args[0], interpreter, f[1])
+				if ctxt.interpreter != "" && ctxt.interpreter != f[1] {
+					fmt.Fprintf(os.Stderr, "%s: conflict dynlinker: %s and %s\n", os.Args[0], ctxt.interpreter, f[1])
 					nerrors++
 					return
 				}
-
-				interpreter = f[1]
+				ctxt.interpreter = f[1]
 			}
 			continue
 
@@ -275,7 +274,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			if len(f) != 2 {
 				break
 			}
-			ldflag = append(ldflag, f[1])
+			ctxt.ldflag = append(ctxt.ldflag, f[1])
 			continue
 		}
 
@@ -443,7 +442,7 @@ func (ctxt *Link) addexport() {
 		Adddynsym(ctxt, ctxt.loader, &ctxt.Target, &ctxt.ArchSyms, s)
 	}
 
-	for _, lib := range dedupLibraries(ctxt, dynlib) {
+	for _, lib := range dedupLibraries(ctxt, ctxt.dynlib) {
 		adddynlib(ctxt, lib)
 	}
 }

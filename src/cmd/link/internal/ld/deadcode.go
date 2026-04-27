@@ -103,9 +103,9 @@ func (d *deadcodePass) init() {
 	for _, name := range names {
 		// Mark symbol as a data/ABI0 symbol.
 		d.mark(d.ldr.Lookup(name, 0), 0)
-		if abiInternalVer != 0 {
+		if d.ctxt.abiInternalVer != 0 {
 			// Also mark any Go functions (internal ABI).
-			d.mark(d.ldr.Lookup(name, abiInternalVer), 0)
+			d.mark(d.ldr.Lookup(name, d.ctxt.abiInternalVer), 0)
 		}
 	}
 
@@ -124,7 +124,7 @@ func (d *deadcodePass) init() {
 		d.mark(s, 0)
 	}
 
-	d.mapinitnoop = d.ldr.Lookup("runtime.mapinitnoop", abiInternalVer)
+	d.mapinitnoop = d.ldr.Lookup("runtime.mapinitnoop", d.ctxt.abiInternalVer)
 	if d.mapinitnoop == 0 {
 		panic("could not look up runtime.mapinitnoop")
 	}

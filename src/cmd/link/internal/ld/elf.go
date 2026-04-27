@@ -1562,8 +1562,8 @@ func (ctxt *Link) doelf() {
 			Elfwritedynent(ctxt.Arch, dynamic, elf.DT_RELENT, ELF32RELSIZE)
 		}
 
-		if rpath.val != "" {
-			Elfwritedynent(ctxt.Arch, dynamic, elf.DT_RUNPATH, uint64(dynstr.Addstring(rpath.val)))
+		if ctxt.rpath.val != "" {
+			Elfwritedynent(ctxt.Arch, dynamic, elf.DT_RUNPATH, uint64(dynstr.Addstring(ctxt.rpath.val)))
 		}
 
 		if ctxt.IsPPC64() {
@@ -1743,7 +1743,7 @@ func asmbElf(ctxt *Link) {
 		elfreserve += elfreserve + numtext*64*2
 	}
 
-	startva := *FlagTextAddr - int64(HEADR)
+	startva := *FlagTextAddr - int64(ctxt.HEADR)
 	resoff := elfreserve
 
 	var pph *ElfPhdr
@@ -1792,8 +1792,8 @@ func asmbElf(ctxt *Link) {
 	pph.Type = elf.PT_PHDR
 	pph.Flags = elf.PF_R
 	pph.Off = uint64(eh.Ehsize)
-	pph.Vaddr = uint64(*FlagTextAddr) - uint64(HEADR) + pph.Off
-	pph.Paddr = uint64(*FlagTextAddr) - uint64(HEADR) + pph.Off
+	pph.Vaddr = uint64(*FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
+	pph.Paddr = uint64(*FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
 	pph.Align = uint64(*FlagRound)
 
 	// PHDR must be in a loaded segment. Adjust the text
@@ -1815,50 +1815,50 @@ func asmbElf(ctxt *Link) {
 		sh.Flags = uint64(elf.SHF_ALLOC)
 		sh.Addralign = 1
 
-		if interpreter == "" && buildcfg.GOOS == runtime.GOOS && buildcfg.GOARCH == runtime.GOARCH && buildcfg.GO_LDSO != "" {
-			interpreter = buildcfg.GO_LDSO
+		if ctxt.interpreter == "" && buildcfg.GOOS == runtime.GOOS && buildcfg.GOARCH == runtime.GOARCH && buildcfg.GO_LDSO != "" {
+			ctxt.interpreter = buildcfg.GO_LDSO
 		}
 
-		if interpreter == "" {
+		if ctxt.interpreter == "" {
 			switch ctxt.HeadType {
 			case objabi.Hlinux:
 				if buildcfg.GOOS == "android" {
-					interpreter = thearch.ELF.Androiddynld
-					if interpreter == "" {
+					ctxt.interpreter = thearch.ELF.Androiddynld
+					if ctxt.interpreter == "" {
 						Exitf("ELF interpreter not set")
 					}
 				} else {
-					interpreter = thearch.ELF.Linuxdynld
+					ctxt.interpreter = thearch.ELF.Linuxdynld
 					// If interpreter does not exist, try musl instead.
 					// This lets the same cmd/link binary work on
 					// both glibc-based and musl-based systems.
-					if _, err := os.Stat(interpreter); err != nil {
+					if _, err := os.Stat(ctxt.interpreter); err != nil {
 						if musl := thearch.ELF.LinuxdynldMusl; musl != "" {
 							if _, err := os.Stat(musl); err == nil {
-								interpreter = musl
+								ctxt.interpreter = musl
 							}
 						}
 					}
 				}
 
 			case objabi.Hfreebsd:
-				interpreter = thearch.ELF.Freebsddynld
+				ctxt.interpreter = thearch.ELF.Freebsddynld
 
 			case objabi.Hnetbsd:
-				interpreter = thearch.ELF.Netbsddynld
+				ctxt.interpreter = thearch.ELF.Netbsddynld
 
 			case objabi.Hopenbsd:
-				interpreter = thearch.ELF.Openbsddynld
+				ctxt.interpreter = thearch.ELF.Openbsddynld
 
 			case objabi.Hdragonfly:
-				interpreter = thearch.ELF.Dragonflydynld
+				ctxt.interpreter = thearch.ELF.Dragonflydynld
 
 			case objabi.Hsolaris:
-				interpreter = thearch.ELF.Solarisdynld
+				ctxt.interpreter = thearch.ELF.Solarisdynld
 			}
 		}
 
-		resoff -= int64(elfinterp(sh, uint64(startva), uint64(resoff), interpreter))
+		resoff -= int64(elfinterp(sh, uint64(startva), uint64(resoff), ctxt.interpreter))
 
 		ph := newElfPhdr()
 		ph.Type = elf.PT_INTERP
@@ -2187,15 +2187,15 @@ elfobj:
 		sh := elfshname(".symtab")
 		sh.Type = uint32(elf.SHT_SYMTAB)
 		sh.Off = uint64(symo)
-		sh.Size = uint64(symSize)
+		sh.Size = uint64(ctxt.symSize)
 		sh.Addralign = uint64(ctxt.Arch.RegSize)
 		sh.Entsize = 8 + 2*uint64(ctxt.Arch.RegSize)
 		sh.link = elfshname(".strtab")
-		sh.Info = uint32(elfglobalsymndx)
+		sh.Info = uint32(ctxt.elfglobalsymndx)
 
 		sh = elfshname(".strtab")
 		sh.Type = uint32(elf.SHT_STRTAB)
-		sh.Off = uint64(symo) + uint64(symSize)
+		sh.Off = uint64(symo) + uint64(ctxt.symSize)
 		sh.Size = uint64(len(ctxt.elfstrdat))
 		sh.Addralign = 1
 		shstroff = sh.Off + sh.Size
@@ -2300,8 +2300,8 @@ elfobj:
 
 	// Verify the amount of space allocated for the elf header is sufficient.  The file offsets are
 	// already computed in layout, so we could spill into another section.
-	if a > int64(HEADR) {
-		Errorf("HEADR too small: %d > %d with %d text sections", a, HEADR, numtext)
+	if a > int64(ctxt.HEADR) {
+		Errorf("HEADR too small: %d > %d with %d text sections", a, ctxt.HEADR, numtext)
 	}
 }
 

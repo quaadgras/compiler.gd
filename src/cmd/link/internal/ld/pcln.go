@@ -816,7 +816,7 @@ func writePCToFunc(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, sta
 // writeFuncs writes the func structures and pcdata to runtime.functab.
 func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSyms map[loader.Sym]loader.Sym, startLocations, cuOffsets []uint32, nameOffsets map[loader.Sym]uint32) {
 	ldr := ctxt.loader
-	deferReturnSym := ldr.Lookup("runtime.deferreturn", abiInternalVer)
+	deferReturnSym := ldr.Lookup("runtime.deferreturn", ctxt.abiInternalVer)
 	textStart := ldr.SymValue(ldr.Lookup("runtime.text", 0))
 	funcdata := []loader.Sym{}
 	var pcsp, pcfile, pcline, pcinline loader.Sym

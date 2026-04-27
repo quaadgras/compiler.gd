@@ -541,8 +541,7 @@ func (f *xcoffFile) getXCOFFscnum(sect *sym.Section) int16 {
 // already known header information.
 func Xcoffinit(ctxt *Link) {
 	xfile.dynLibraries = make(map[string]int)
-
-	HEADR = int32(Rnd(XCOFFHDRRESERVE, XCOFFSECTALIGN))
+	ctxt.HEADR = int32(Rnd(XCOFFHDRRESERVE, XCOFFSECTALIGN))
 	if *FlagRound != -1 {
 		Errorf("-R not available on AIX")
 	}
@@ -550,7 +549,7 @@ func Xcoffinit(ctxt *Link) {
 	if *FlagTextAddr != -1 {
 		Errorf("-T not available on AIX")
 	}
-	*FlagTextAddr = Rnd(XCOFFTEXTBASE, *FlagRound) + int64(HEADR)
+	*FlagTextAddr = Rnd(XCOFFTEXTBASE, *FlagRound) + int64(ctxt.HEADR)
 }
 
 // SYMBOL TABLE
@@ -627,11 +626,11 @@ func (f *xcoffFile) addSymbol(sym xcoffSym) {
 }
 
 // xcoffAlign returns the log base 2 of the symbol's alignment.
-func xcoffAlign(ldr *loader.Loader, x loader.Sym, t SymbolType) uint8 {
+func xcoffAlign(ctxt *Link, ldr *loader.Loader, x loader.Sym, t SymbolType) uint8 {
 	align := ldr.SymAlign(x)
 	if align == 0 {
 		if t == TextSym {
-			align = int32(Funcalign)
+			align = int32(ctxt.Funcalign)
 		} else {
 			align = symalign(ldr, x)
 		}
@@ -749,7 +748,7 @@ func (f *xcoffFile) writeSymbolNewFile(ctxt *Link, name string, firstEntry uint6
 
 	aux := &XcoffAuxCSect64{
 		Xsmclas:  XMC_PR,
-		Xsmtyp:   XTY_SD | logBase2(Funcalign)<<3,
+		Xsmtyp:   XTY_SD | logBase2(ctxt.Funcalign)<<3,
 		Xauxtype: _AUX_CSECT,
 	}
 	f.addSymbol(aux)
@@ -870,7 +869,7 @@ func (f *xcoffFile) writeSymbolFunc(ctxt *Link, x loader.Sym) []xcoffSym {
 		Xsmtyp:    XTY_LD, // label definition (based on C)
 		Xauxtype:  _AUX_CSECT,
 	}
-	a4.Xsmtyp |= xcoffAlign(ldr, x, TextSym) << 3
+	a4.Xsmtyp |= xcoffAlign(ctxt, ldr, x, TextSym) << 3
 
 	syms = append(syms, a4)
 	return syms
@@ -920,7 +919,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 				Xsmclas:   XMC_PR,
 				Xsmtyp:    XTY_SD,
 			}
-			a4.Xsmtyp |= xcoffAlign(ldr, x, TextSym) << 3
+			a4.Xsmtyp |= xcoffAlign(ctxt, ldr, x, TextSym) << 3
 			syms = append(syms, a4)
 		}
 
@@ -981,7 +980,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 			a4.Xsmtyp |= XTY_CM
 		}
 
-		a4.Xsmtyp |= xcoffAlign(ldr, x, t) << 3
+		a4.Xsmtyp |= xcoffAlign(ctxt, ldr, x, t) << 3
 
 		syms = append(syms, a4)
 
@@ -1146,7 +1145,7 @@ func (f *xcoffFile) asmaixsym(ctxt *Link) {
 	}
 
 	if ctxt.Debugvlog != 0 {
-		ctxt.Logf("symsize = %d\n", uint32(symSize))
+		ctxt.Logf("symsize = %d\n", uint32(ctxt.symSize))
 	}
 	xfile.updatePreviousFile(ctxt, true)
 }

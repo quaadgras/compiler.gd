@@ -80,10 +80,9 @@ func asmb2(ctxt *Link) {
 		thearch.Asmb2(ctxt, ctxt.loader)
 		return
 	}
-
-	symSize = 0
-	spSize = 0
-	lcSize = 0
+	ctxt.symSize = 0
+	ctxt.spSize = 0
+	ctxt.lcSize = 0
 
 	switch ctxt.HeadType {
 	default:
@@ -119,14 +118,14 @@ func asmb2(ctxt *Link) {
 		fmt.Printf("textsize=%d\n", Segtext.Filelen)
 		fmt.Printf("datsize=%d\n", Segdata.Filelen)
 		fmt.Printf("bsssize=%d\n", Segdata.Length-Segdata.Filelen)
-		fmt.Printf("symsize=%d\n", symSize)
-		fmt.Printf("lcsize=%d\n", lcSize)
-		fmt.Printf("total=%d\n", Segtext.Filelen+Segdata.Length+uint64(symSize)+uint64(lcSize))
+		fmt.Printf("symsize=%d\n", ctxt.symSize)
+		fmt.Printf("lcsize=%d\n", ctxt.lcSize)
+		fmt.Printf("total=%d\n", Segtext.Filelen+Segdata.Length+uint64(ctxt.symSize)+uint64(ctxt.lcSize))
 	}
 }
 
 // writePlan9Header writes out the plan9 header at the present position in the OutBuf.
-func writePlan9Header(buf *OutBuf, magic uint32, entry int64, is64Bit bool) {
+func writePlan9Header(ctxt *Link, buf *OutBuf, magic uint32, entry int64, is64Bit bool) {
 	if is64Bit {
 		magic |= 0x00008000
 	}
@@ -134,14 +133,14 @@ func writePlan9Header(buf *OutBuf, magic uint32, entry int64, is64Bit bool) {
 	buf.Write32b(uint32(Segtext.Filelen))
 	buf.Write32b(uint32(Segdata.Filelen))
 	buf.Write32b(uint32(Segdata.Length - Segdata.Filelen))
-	buf.Write32b(uint32(symSize))
+	buf.Write32b(uint32(ctxt.symSize))
 	if is64Bit {
 		buf.Write32b(uint32(entry &^ 0x80000000))
 	} else {
 		buf.Write32b(uint32(entry))
 	}
-	buf.Write32b(uint32(spSize))
-	buf.Write32b(uint32(lcSize))
+	buf.Write32b(uint32(ctxt.spSize))
+	buf.Write32b(uint32(ctxt.lcSize))
 	// amd64 includes the entry at the beginning of the symbol table.
 	if is64Bit {
 		buf.Write64b(uint64(entry))
@@ -157,7 +156,7 @@ func asmbPlan9(ctxt *Link) {
 		asmbPlan9Sym(ctxt)
 	}
 	ctxt.Out.SeekSet(0)
-	writePlan9Header(ctxt.Out, thearch.Plan9Magic, Entryvalue(ctxt), thearch.Plan9_64Bit)
+	writePlan9Header(ctxt, ctxt.Out, thearch.Plan9Magic, Entryvalue(ctxt), thearch.Plan9_64Bit)
 }
 
 // sizeExtRelocs precomputes the size needed for the reloc records,

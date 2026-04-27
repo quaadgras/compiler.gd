@@ -947,7 +947,7 @@ func windynrelocsym(ctxt *Link, rel *loader.SymbolBuilder, s loader.Sym) error {
 // windynrelocsyms generates jump table to C library functions that will be
 // added later. windynrelocsyms writes the table into .rel symbol.
 func (ctxt *Link) windynrelocsyms() {
-	if !(ctxt.IsWindows() && iscgo && ctxt.IsInternal()) {
+	if !(ctxt.IsWindows() && ctxt.iscgo && ctxt.IsInternal()) {
 		return
 	}
 
@@ -2533,7 +2533,7 @@ func (ctxt *Link) textaddress() {
 	// and then letting threads copy down, but probably not worth it.
 	sect := Segtext.Sections[0]
 
-	sect.Align = int32(Funcalign)
+	sect.Align = int32(ctxt.Funcalign)
 
 	ldr := ctxt.loader
 
@@ -2583,7 +2583,7 @@ func (ctxt *Link) textaddress() {
 		ctxt.Textp[0] = text
 	}
 
-	start := uint64(Rnd(*FlagTextAddr, int64(Funcalign)))
+	start := uint64(Rnd(*FlagTextAddr, int64(ctxt.Funcalign)))
 	va := start
 	n := 1
 	sect.Vaddr = va
@@ -2716,7 +2716,7 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 	}
 
 	align := ldr.SymAlign(s)
-	align = max(align, int32(Funcalign))
+	align = max(align, int32(ctxt.Funcalign))
 	va = uint64(Rnd(int64(va), int64(align)))
 	if sect.Align < align {
 		sect.Align = align
@@ -2788,7 +2788,7 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 				if align := ldr.SymAlign(s); align != 0 {
 					va = uint64(Rnd(int64(va), int64(align)))
 				} else {
-					va = uint64(Rnd(int64(va), int64(Funcalign)))
+					va = uint64(Rnd(int64(va), int64(ctxt.Funcalign)))
 				}
 			}
 			n++
@@ -3168,7 +3168,7 @@ func (ctxt *Link) layout(order []*sym.Segment) uint64 {
 	var prev *sym.Segment
 	for _, seg := range order {
 		if prev == nil {
-			seg.Fileoff = uint64(HEADR)
+			seg.Fileoff = uint64(ctxt.HEADR)
 		} else {
 			switch ctxt.HeadType {
 			default:

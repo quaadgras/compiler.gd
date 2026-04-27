@@ -54,12 +54,12 @@ func archinit(ctxt *ld.Link) {
 		ld.Exitf("unknown -H option: %v", ctxt.HeadType)
 	case objabi.Hlinux: /* loong64 elf */
 		ld.Elfinit(ctxt)
-		ld.HEADR = ld.ELFRESERVE
+		ctxt.HEADR = ld.ELFRESERVE
 		if *ld.FlagRound == -1 {
 			*ld.FlagRound = 0x10000
 		}
 		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ld.HEADR)
+			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ctxt.HEADR)
 		}
 	}
 }

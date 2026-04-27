@@ -328,6 +328,8 @@ func knownLinkField(recvType ast.Expr, recvName string) string {
 		return recvName + ".linkctxt"
 	case "relocSymState":
 		return recvName + ".link"
+	case "deadcodePass":
+		return recvName + ".ctxt"
 	}
 	return ""
 }

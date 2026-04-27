@@ -133,8 +133,8 @@ var (
 // overwrite the value on each pass, so callers must reset those
 // targets to their defaults before parsing if they care about
 // invocation-to-invocation isolation.
-func setupFlags() {
-	flag.Var(&rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
+func setupFlags(ctxt *Link) {
+	flag.Var(&ctxt.rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
 	flag.Var(&flagExtld, "extld", "use `linker` when linking in external mode")
 	flag.Var(&flagExtldflags, "extldflags", "pass `flags` to external linker")
 	flag.Var(&flagW, "w", "disable DWARF generation")
@@ -191,9 +191,10 @@ func setupFlags() {
 	benchmarkFileFlag = flag.String("benchmarkprofile", "", "emit phase profiles to `base`_phase.{cpu,mem}prof")
 }
 
-func init() {
-	setupFlags()
-}
+// Was: init() calls setupFlags() to register on the default flag.CommandLine.
+// Removed because Main replaces flag.CommandLine on every invocation and
+// re-registers; the init-time registration was unused under in-process
+// host.Run.
 
 // ternaryFlag is like a boolean flag, but has a default value that is
 // neither true nor false, allowing it to be set from context (e.g. from another
@@ -273,10 +274,9 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	flag.CommandLine = flag.NewFlagSet(savedArgs[0], flag.ExitOnError)
 	flagW = ternaryFlagUnset
 	flag8 = false
-	rpath = Rpath{} // reset Var-style targets
 	flagExtld = nil
 	flagExtldflags = nil
-	setupFlags()
+	setupFlags(ctxt)
 
 	// For testing behavior of go command when tools crash silently.
 	// Undocumented, not in standard flag parser to avoid
@@ -385,7 +385,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	}
 
 	if !buildcfg.Experiment.RegabiWrappers {
-		abiInternalVer = 0
+		ctxt.abiInternalVer = 0
 	}
 
 	startProfile()
@@ -404,7 +404,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 		}
 	}
 
-	interpreter = *flagInterpreter
+	ctxt.interpreter = *flagInterpreter
 
 	if *flagHostBuildid == "" && *flagBuildid != "" {
 		*flagHostBuildid = "gobuildid"

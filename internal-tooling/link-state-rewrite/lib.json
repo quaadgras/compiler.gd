@@ -1,0 +1,20 @@
+{
+  "fields": [
+    {"var": "dynlib", "field": "dynlib"},
+    {"var": "ldflag", "field": "ldflag"},
+    {"var": "havedynamic", "field": "havedynamic"},
+    {"var": "Funcalign", "field": "Funcalign"},
+    {"var": "iscgo", "field": "iscgo"},
+    {"var": "elfglobalsymndx", "field": "elfglobalsymndx"},
+    {"var": "interpreter", "field": "interpreter"},
+    {"var": "debug_s", "field": "debug_s"},
+    {"var": "HEADR", "field": "HEADR"},
+    {"var": "hostobj", "field": "hostobj"},
+    {"var": "hostobjcounter", "field": "hostobjcounter"},
+    {"var": "lcSize", "field": "lcSize"},
+    {"var": "spSize", "field": "spSize"},
+    {"var": "symSize", "field": "symSize"},
+    {"var": "abiInternalVer", "field": "abiInternalVer"},
+    {"var": "rpath", "field": "rpath"}
+  ]
+}

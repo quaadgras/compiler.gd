@@ -53,11 +53,12 @@ func linknew(arch *sys.Arch) *Link {
 		ErrorReporter: ErrorReporter{ErrorReporter: ler},
 		generatorSyms: make(map[loader.Sym]generatorFunc),
 		linkState: linkState{
-			loadBudget:  INITIAL_MACHO_HEADR - 2*1024,
-			PESECTALIGN: 0x1000,
-			PEFILEALIGN: 2 << 8,
-			isLabel:     map[loader.Sym]bool{},
-			seenlib:     map[string]bool{},
+			loadBudget:     INITIAL_MACHO_HEADR - 2*1024,
+			PESECTALIGN:    0x1000,
+			PEFILEALIGN:    2 << 8,
+			isLabel:        map[loader.Sym]bool{},
+			seenlib:        map[string]bool{},
+			abiInternalVer: sym.SymVerABIInternal,
 		},
 	}
 

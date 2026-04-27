@@ -136,7 +136,7 @@ func mustLinkExternal(ctxt *Link) (res bool, reason string) {
 		return true, "asan"
 	}
 
-	if iscgo && platform.MustLinkExternal(buildcfg.GOOS, buildcfg.GOARCH, true) {
+	if ctxt.iscgo && platform.MustLinkExternal(buildcfg.GOOS, buildcfg.GOARCH, true) {
 		return true, buildcfg.GOARCH + " does not support internal cgo"
 	}
 
@@ -205,7 +205,7 @@ func determineLinkMode(ctxt *Link) {
 			if preferExternal && ctxt.Debugvlog > 0 {
 				ctxt.Logf("external linking prefer list is %v\n", ctxt.preferlinkext)
 			}
-			if extNeeded || (iscgo && (ctxt.externalobj || preferExternal)) {
+			if extNeeded || (ctxt.iscgo && (ctxt.externalobj || preferExternal)) {
 				ctxt.LinkMode = LinkExternal
 			} else {
 				ctxt.LinkMode = LinkInternal

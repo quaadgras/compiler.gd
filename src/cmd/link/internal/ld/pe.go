@@ -1038,7 +1038,7 @@ func (f *peFile) writeOptionalHeader(ctxt *Link) {
 	// the actual stack bounds so that the stack size doesn't need
 	// to be hard-coded into the runtime.
 	oh64.SizeOfStackReserve = 0x00200000
-	if !iscgo {
+	if !ctxt.iscgo {
 		oh64.SizeOfStackCommit = 0x00001000
 	} else {
 		// TODO(brainman): Maybe remove optional header writing altogether for cgo.
@@ -1048,7 +1048,7 @@ func (f *peFile) writeOptionalHeader(ctxt *Link) {
 	}
 
 	oh.SizeOfStackReserve = 0x00100000
-	if !iscgo {
+	if !ctxt.iscgo {
 		oh.SizeOfStackCommit = 0x00001000
 	} else {
 		oh.SizeOfStackCommit = 0x00100000 - 0x2000 // account for 2 guard pages
@@ -1132,8 +1132,7 @@ func Peinit(ctxt *Link) {
 			ctxt.loader.SetAttrLocal(sb.Sym(), true)
 		}
 	}
-
-	HEADR = ctxt.PEFILEHEADR
+	ctxt.HEADR = ctxt.PEFILEHEADR
 	if *FlagRound == -1 {
 		*FlagRound = ctxt.PESECTALIGN
 	}

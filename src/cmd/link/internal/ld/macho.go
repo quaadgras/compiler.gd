@@ -385,7 +385,7 @@ func (ctxt *Link) domacho() {
 	}
 
 	// Copy platform load command.
-	for _, h := range hostobj {
+	for _, h := range ctxt.hostobj {
 		load, err := hostobjMachoPlatform(&h)
 		if err != nil {
 			Exitf("%v", err)
@@ -494,7 +494,7 @@ func (ctxt *Link) domacho() {
 			ver := 0
 			// _cgo_panic is a Go function, so it uses ABIInternal.
 			if name == "_cgo_panic" {
-				ver = abiInternalVer
+				ver = ctxt.abiInternalVer
 			}
 			s := ctxt.loader.Lookup(name, ver)
 			if s != 0 {
@@ -517,7 +517,7 @@ func machoadddynlib(ctxt *Link, lib string, linkmode LinkMode) {
 	ctxt.loadBudget -= (len(lib)+7)/8*8 + 24
 
 	if ctxt.loadBudget < 0 {
-		HEADR += 4096
+		ctxt.HEADR += 4096
 		*FlagTextAddr += 4096
 		ctxt.loadBudget += 4096
 	}
@@ -606,7 +606,7 @@ func asmbMacho(ctxt *Link) {
 	ldr := ctxt.loader
 
 	/* apple MACH */
-	va := *FlagTextAddr - int64(HEADR)
+	va := *FlagTextAddr - int64(ctxt.HEADR)
 
 	mh := getMachoHdr(ctxt)
 	switch ctxt.Arch.Family {
@@ -639,7 +639,7 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	/* text */
-	v := Rnd(int64(uint64(HEADR)+Segtext.Length), *FlagRound)
+	v := Rnd(int64(uint64(ctxt.HEADR)+Segtext.Length), *FlagRound)
 
 	var mstext *MachoSeg
 	if ctxt.LinkMode != LinkExternal {
@@ -716,8 +716,8 @@ func asmbMacho(ctxt *Link) {
 
 		case sys.ARM64:
 			ml := newMachoLoad(ctxt, ctxt.Arch, imacho.LC_MAIN, 4)
-			ml.data[0] = uint32(uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(HEADR)))
-			ml.data[1] = uint32((uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(HEADR))) >> 32)
+			ml.data[0] = uint32(uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(ctxt.HEADR)))
+			ml.data[1] = uint32((uint64(Entryvalue(ctxt)) - (Segtext.Vaddr - uint64(ctxt.HEADR))) >> 32)
 		}
 	}
 
@@ -803,8 +803,8 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	a := machowrite(ctxt, ctxt.Arch, ctxt.Out, ctxt.LinkMode)
-	if int32(a) > HEADR {
-		Exitf("HEADR too small: %d > %d", a, HEADR)
+	if int32(a) > ctxt.HEADR {
+		Exitf("HEADR too small: %d > %d", a, ctxt.HEADR)
 	}
 
 	// Now we have written everything. Compute the code signature (which
@@ -1133,7 +1133,7 @@ func doMachoLink(ctxt *Link) int64 {
 	}
 
 	if size > 0 {
-		ctxt.linkoff = Rnd(int64(uint64(HEADR)+Segtext.Length), *FlagRound) + Rnd(int64(Segrelrodata.Filelen), *FlagRound) + Rnd(int64(Segdata.Filelen), *FlagRound) + Rnd(int64(Segdwarf.Filelen), *FlagRound)
+		ctxt.linkoff = Rnd(int64(uint64(ctxt.HEADR)+Segtext.Length), *FlagRound) + Rnd(int64(Segrelrodata.Filelen), *FlagRound) + Rnd(int64(Segdata.Filelen), *FlagRound) + Rnd(int64(Segdwarf.Filelen), *FlagRound)
 		ctxt.Out.SeekSet(ctxt.linkoff)
 
 		ctxt.Out.Write(ldr.Data(s1))

@@ -83,12 +83,12 @@ func archinit(ctxt *ld.Link) {
 		ld.Exitf("unknown -H option: %v", ctxt.HeadType)
 
 	case objabi.Hplan9: /* plan 9 */
-		ld.HEADR = 32
+		ctxt.HEADR = 32
 		if *ld.FlagRound == -1 {
 			*ld.FlagRound = 4096
 		}
 		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(4096, *ld.FlagRound) + int64(ld.HEADR)
+			*ld.FlagTextAddr = ld.Rnd(4096, *ld.FlagRound) + int64(ctxt.HEADR)
 		}
 
 	case objabi.Hlinux, /* arm elf */
@@ -98,12 +98,12 @@ func archinit(ctxt *ld.Link) {
 		*ld.FlagD = false
 		// with dynamic linking
 		ld.Elfinit(ctxt)
-		ld.HEADR = ld.ELFRESERVE
+		ctxt.HEADR = ld.ELFRESERVE
 		if *ld.FlagRound == -1 {
 			*ld.FlagRound = 0x10000
 		}
 		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ld.HEADR)
+			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ctxt.HEADR)
 		}
 	}
 }

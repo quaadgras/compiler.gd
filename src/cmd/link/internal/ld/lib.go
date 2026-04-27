@@ -151,7 +151,7 @@ func (ctxt *Link) setArchSyms() {
 	ctxt.mkArchSym(".dynamic", 0, &ctxt.Dynamic)
 	ctxt.mkArchSym(".dynsym", 0, &ctxt.DynSym)
 	ctxt.mkArchSym(".dynstr", 0, &ctxt.DynStr)
-	ctxt.mkArchSym("runtime.unreachableMethod", abiInternalVer, &ctxt.unreachableMethod)
+	ctxt.mkArchSym("runtime.unreachableMethod", ctxt.abiInternalVer, &ctxt.unreachableMethod)
 
 	if ctxt.IsPPC64() {
 		ctxt.mkArchSym("TOC", 0, &ctxt.TOC)
@@ -270,15 +270,10 @@ type Arch struct {
 
 var (
 	thearch Arch
-	lcSize  int32
-	rpath   Rpath
-	spSize  int32
-	symSize int32
 )
 
 // Symbol version of ABIInternal symbols. It is sym.SymVerABIInternal if ABI wrappers
 // are used, 0 otherwise.
-var abiInternalVer = sym.SymVerABIInternal
 
 // DynlinkingGo reports whether we are producing Go code that can live
 // in separate shared libraries linked together at runtime.
@@ -303,16 +298,8 @@ func (ctxt *Link) NeedCodeSign() bool {
 }
 
 var (
-	dynlib          []string
-	ldflag          []string
-	havedynamic     int
-	Funcalign       int
-	iscgo           bool
-	elfglobalsymndx int
-	interpreter     string
 
-	debug_s bool // backup old value of debug['s']
-	HEADR   int32
+	// backup old value of debug['s']
 
 	nerrors  int
 	liveness int64 // size of liveness data (funcdata), printed if -v
@@ -371,9 +358,9 @@ func mayberemoveoutfile() {
 
 func libinit(ctxt *Link) {
 	if *FlagFuncAlign != 0 {
-		Funcalign = *FlagFuncAlign
+		ctxt.Funcalign = *FlagFuncAlign
 	} else {
-		Funcalign = thearch.Funcalign
+		ctxt.Funcalign = thearch.Funcalign
 	}
 
 	// add goroot to the end of the libdir list.
@@ -561,21 +548,21 @@ func (ctxt *Link) loadlib() {
 			loadobjfile(ctxt, lib)
 		}
 	}
-	// At this point, the Go objects are "preloaded". Not all the symbols are
-	// added to the symbol table (only defined package symbols are). Looking
-	// up symbol by name may not get expected result.
-
-	iscgo = ctxt.LibraryByPkg["runtime/cgo"] != nil
+	ctxt.
+		// At this point, the Go objects are "preloaded". Not all the symbols are
+		// added to the symbol table (only defined package symbols are). Looking
+		// up symbol by name may not get expected result.
+		iscgo = ctxt.LibraryByPkg["runtime/cgo"] != nil
 
 	// Plugins a require cgo support to function. Similarly, plugins may require additional
 	// internal linker support on some platforms which may not be implemented.
-	ctxt.canUsePlugins = ctxt.LibraryByPkg["plugin"] != nil && iscgo &&
+	ctxt.canUsePlugins = ctxt.LibraryByPkg["plugin"] != nil && ctxt.iscgo &&
 		platform.BuildModeSupported("gc", "plugin", buildcfg.GOOS, buildcfg.GOARCH)
 
 	// We now have enough information to determine the link mode.
 	determineLinkMode(ctxt)
 
-	if ctxt.LinkMode == LinkExternal && !iscgo && !(buildcfg.GOOS == "darwin" && ctxt.BuildMode != BuildModePlugin && ctxt.Arch.Family == sys.AMD64) {
+	if ctxt.LinkMode == LinkExternal && !ctxt.iscgo && !(buildcfg.GOOS == "darwin" && ctxt.BuildMode != BuildModePlugin && ctxt.Arch.Family == sys.AMD64) {
 		// This indicates a user requested -linkmode=external.
 		// The startup code uses an import of runtime/cgo to decide
 		// whether to initialize the TLS.  So give it one. This could
@@ -613,7 +600,7 @@ func (ctxt *Link) loadlib() {
 	hostobjs(ctxt)
 	hostlinksetup(ctxt)
 
-	if ctxt.LinkMode == LinkInternal && len(hostobj) != 0 {
+	if ctxt.LinkMode == LinkInternal && len(ctxt.hostobj) != 0 {
 		// If we have any undefined symbols in external
 		// objects, try to read them from the libgcc file.
 		any := false
@@ -831,7 +818,7 @@ func (ctxt *Link) linksetup() {
 	// Also leave it enabled on Solaris which doesn't support
 	// statically linked binaries.
 	if ctxt.BuildMode == BuildModeExe {
-		if havedynamic == 0 && ctxt.HeadType != objabi.Hdarwin && ctxt.HeadType != objabi.Hsolaris {
+		if ctxt.havedynamic == 0 && ctxt.HeadType != objabi.Hdarwin && ctxt.HeadType != objabi.Hsolaris {
 			*FlagD = true
 		}
 	}
@@ -902,7 +889,7 @@ func (ctxt *Link) linksetup() {
 		// Set runtime.disableMemoryProfiling bool if
 		// runtime.memProfileInternal is not retained in the binary after
 		// deadcode (and we're not dynamically linking).
-		memProfile := ctxt.loader.Lookup("runtime.memProfileInternal", abiInternalVer)
+		memProfile := ctxt.loader.Lookup("runtime.memProfileInternal", ctxt.abiInternalVer)
 		if memProfile != 0 && !ctxt.loader.AttrReachable(memProfile) && !ctxt.DynlinkingGo() {
 			memProfSym := ctxt.loader.LookupOrCreateSym("runtime.disableMemoryProfiling", 0)
 			sb := ctxt.loader.MakeSymbolUpdater(memProfSym)
@@ -1163,8 +1150,6 @@ type Hostobj struct {
 	length int64
 }
 
-var hostobj []Hostobj
-
 // These packages can use internal linking mode.
 // Others trigger external mode.
 var internalpkg = []string{
@@ -1205,9 +1190,8 @@ func ldhostobj(ctxt *Link, ld func(*Link, *bio.Reader, string, int64, string), h
 	if !isinternal {
 		ctxt.externalobj = true
 	}
-
-	hostobj = append(hostobj, Hostobj{})
-	h := &hostobj[len(hostobj)-1]
+	ctxt.hostobj = append(ctxt.hostobj, Hostobj{})
+	h := &ctxt.hostobj[len(ctxt.hostobj)-1]
 	h.ld = ld
 	h.pkg = pkg
 	h.pn = pn
@@ -1223,8 +1207,8 @@ func hostobjs(ctxt *Link) {
 	}
 	var h *Hostobj
 
-	for i := 0; i < len(hostobj); i++ {
-		h = &hostobj[i]
+	for i := 0; i < len(ctxt.hostobj); i++ {
+		h = &ctxt.hostobj[i]
 		f, err := bio.Open(h.file)
 		if err != nil {
 			Exitf("cannot reopen %s: %v", h.pn, err)
@@ -1236,7 +1220,7 @@ func hostobjs(ctxt *Link) {
 		}
 		h.ld(ctxt, f, h.pkg, h.length, h.pn)
 		if *flagCaptureHostObjs != "" {
-			captureHostObj(h)
+			captureHostObj(ctxt, h)
 		}
 		f.Close()
 	}
@@ -1246,11 +1230,12 @@ func hostlinksetup(ctxt *Link) {
 	if ctxt.LinkMode != LinkExternal {
 		return
 	}
+	ctxt.
 
-	// For external link, record that we need to tell the external linker -s,
-	// and turn off -s internally: the external linker needs the symbol
-	// information for its final link.
-	debug_s = *FlagS
+		// For external link, record that we need to tell the external linker -s,
+		// and turn off -s internally: the external linker needs the symbol
+		// information for its final link.
+		debug_s = *FlagS
 	*FlagS = false
 
 	// create temporary directory and arrange cleanup
@@ -1299,7 +1284,7 @@ func cleanTimeStamps(files []string) {
 func (ctxt *Link) hostobjCopy() (paths []string) {
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, runtime.NumCPU()) // limit open file descriptors
-	for i, h := range hostobj {
+	for i, h := range ctxt.hostobj {
 		h := h
 		dst := filepath.Join(*flagTmpdir, fmt.Sprintf("%06d.o", i))
 		paths = append(paths, dst)
@@ -1376,7 +1361,7 @@ func (ctxt *Link) archive() {
 		const printProgName = "--print-prog-name=ar"
 		cc := ctxt.extld()
 		*flagExtar = "ar"
-		if linkerFlagSupported(ctxt.Arch, cc[0], "", printProgName) {
+		if linkerFlagSupported(ctxt, ctxt.Arch, cc[0], "", printProgName) {
 			*flagExtar = ctxt.findExtLinkTool("ar")
 		}
 	}
@@ -1435,7 +1420,7 @@ func (ctxt *Link) hostlink() {
 	argv = append(argv, ctxt.extld()...)
 	argv = append(argv, hostlinkArchArgs(ctxt.Arch)...)
 
-	if *FlagS || debug_s {
+	if *FlagS || ctxt.debug_s {
 		if ctxt.HeadType == objabi.Hdarwin {
 			// Recent versions of macOS print
 			//	ld: warning: option -s is obsolete and being ignored
@@ -1473,7 +1458,7 @@ func (ctxt *Link) hostlink() {
 		}
 		if !combineDwarf {
 			argv = append(argv, "-Wl,-S") // suppress STAB (symbolic debugging) symbols
-			if debug_s {
+			if ctxt.debug_s {
 				// We are generating a binary with symbol table suppressed.
 				// Suppress local symbols. We need to keep dynamically exported
 				// and referenced symbols so the dynamic linker can resolve them.
@@ -1488,7 +1473,7 @@ func (ctxt *Link) hostlink() {
 		if ctxt.BuildMode != BuildModePIE {
 			argv = append(argv, "-Wl,-nopie")
 		}
-		if linkerFlagSupported(ctxt.Arch, argv[0], "", "-Wl,-z,nobtcfi") {
+		if linkerFlagSupported(ctxt, ctxt.Arch, argv[0], "", "-Wl,-z,nobtcfi") {
 			// -Wl,-z,nobtcfi is only supported on OpenBSD 7.4+, remove guard
 			// when OpenBSD 7.5 is released and 7.3 is no longer supported.
 			argv = append(argv, "-Wl,-z,nobtcfi")
@@ -1543,7 +1528,7 @@ func (ctxt *Link) hostlink() {
 	// PC relative relocations might be generated by Go. Only targets compiling ELF
 	// binaries might generate these relocations.
 	if ctxt.IsPPC64() && ctxt.IsElf() && buildcfg.GOPPC64 >= 10 {
-		if !linkerFlagSupported(ctxt.Arch, argv[0], "", "-mcpu=power10") {
+		if !linkerFlagSupported(ctxt, ctxt.Arch, argv[0], "", "-mcpu=power10") {
 			Exitf("The external toolchain does not support -mcpu=power10. " +
 				" This is required to externally link GOPPC64 >= power10")
 		}
@@ -1582,7 +1567,7 @@ func (ctxt *Link) hostlink() {
 			heopt = heon
 		} else {
 			// Test to see whether "--disable-dynamicbase" works.
-			newer := linkerFlagSupported(ctxt.Arch, argv[0], "", dboff)
+			newer := linkerFlagSupported(ctxt, ctxt.Arch, argv[0], "", dboff)
 			if newer {
 				// Newer compiler, which supports both on/off options.
 				dbopt = dboff
@@ -1730,7 +1715,7 @@ func (ctxt *Link) hostlink() {
 		argv = append(argv, "-fuse-ld="+altLinker)
 	}
 
-	if ctxt.IsELF && linkerFlagSupported(ctxt.Arch, argv[0], "", "-Wl,--build-id=0x1234567890abcdef") { // Solaris ld doesn't support --build-id.
+	if ctxt.IsELF && linkerFlagSupported(ctxt, ctxt.Arch, argv[0], "", "-Wl,--build-id=0x1234567890abcdef") { // Solaris ld doesn't support --build-id.
 		if len(ctxt.buildinfoData) > 0 {
 			argv = append(argv, fmt.Sprintf("-Wl,--build-id=0x%x", ctxt.buildinfoData))
 		} else if *flagHostBuildid == "none" {
@@ -1751,8 +1736,8 @@ func (ctxt *Link) hostlink() {
 	argv = append(argv, "-o")
 	argv = append(argv, outopt)
 
-	if rpath.val != "" {
-		argv = append(argv, fmt.Sprintf("-Wl,-rpath,%s", rpath.val))
+	if ctxt.rpath.val != "" {
+		argv = append(argv, fmt.Sprintf("-Wl,-rpath,%s", ctxt.rpath.val))
 	}
 
 	if *flagInterpreter != "" {
@@ -1766,7 +1751,7 @@ func (ctxt *Link) hostlink() {
 	// Force global symbols to be exported for dlopen, etc.
 	switch {
 	case ctxt.IsELF:
-		if ctxt.DynlinkingGo() || ctxt.BuildMode == BuildModeCShared || !linkerFlagSupported(ctxt.Arch, argv[0], altLinker, "-Wl,--export-dynamic-symbol=main") {
+		if ctxt.DynlinkingGo() || ctxt.BuildMode == BuildModeCShared || !linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, "-Wl,--export-dynamic-symbol=main") {
 			argv = append(argv, "-rdynamic")
 		} else {
 			var exports []string
@@ -1789,7 +1774,7 @@ func (ctxt *Link) hostlink() {
 	}
 
 	const unusedArguments = "-Qunused-arguments"
-	if linkerFlagSupported(ctxt.Arch, argv[0], altLinker, unusedArguments) {
+	if linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, unusedArguments) {
 		argv = append(argv, unusedArguments)
 	}
 
@@ -1799,13 +1784,13 @@ func (ctxt *Link) hostlink() {
 		// linked binaries that are otherwise identical other than
 		// the date/time they were linked.
 		const noTimeStamp = "-Wl,--no-insert-timestamp"
-		if linkerFlagSupported(ctxt.Arch, argv[0], altLinker, noTimeStamp) {
+		if linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, noTimeStamp) {
 			argv = append(argv, noTimeStamp)
 		}
 	}
 
 	const compressDWARF = "-Wl,--compress-debug-sections=zlib"
-	if ctxt.compressDWARF && linkerFlagSupported(ctxt.Arch, argv[0], altLinker, compressDWARF) {
+	if ctxt.compressDWARF && linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, compressDWARF) {
 		argv = append(argv, compressDWARF)
 	}
 
@@ -1855,7 +1840,7 @@ func (ctxt *Link) hostlink() {
 			dir, base := filepath.Split(path)
 			if !seenDirs[dir] {
 				argv = append(argv, "-L"+dir)
-				if !rpath.set {
+				if !ctxt.rpath.set {
 					argv = append(argv, "-Wl,-rpath="+dir)
 				}
 				seenDirs[dir] = true
@@ -1898,7 +1883,7 @@ func (ctxt *Link) hostlink() {
 		}
 	}
 
-	for _, p := range ldflag {
+	for _, p := range ctxt.ldflag {
 		argv = append(argv, p)
 		checkStatic(p)
 	}
@@ -1913,7 +1898,7 @@ func (ctxt *Link) hostlink() {
 	if ctxt.BuildMode == BuildModeExe && !ctxt.linkShared && !(ctxt.IsDarwin() && ctxt.IsARM64()) {
 		// GCC uses -no-pie, clang uses -nopie.
 		for _, nopie := range []string{"-no-pie", "-nopie"} {
-			if linkerFlagSupported(ctxt.Arch, argv[0], altLinker, nopie) {
+			if linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, nopie) {
 				argv = append(argv, nopie)
 				break
 			}
@@ -2081,7 +2066,7 @@ func (ctxt *Link) hostlink() {
 		// Remove STAB (symbolic debugging) symbols after we are done with them (by dsymutil).
 		// They contain temporary file paths and make the build not reproducible.
 		var stripArgs = []string{"-S"}
-		if debug_s {
+		if ctxt.debug_s {
 			// We are generating a binary with symbol table suppressed.
 			// Suppress local symbols. We need to keep dynamically exported
 			// and referenced symbols so the dynamic linker can resolve them.
@@ -2140,7 +2125,7 @@ func (ctxt *Link) passLongArgsInResponseFile(argv []string, altLinker string) []
 	if err := os.WriteFile(response, nil, 0644); err != nil {
 		log.Fatalf("failed while testing response file: %v", err)
 	}
-	if !linkerFlagSupported(ctxt.Arch, argv[0], altLinker, "@"+response) {
+	if !linkerFlagSupported(ctxt, ctxt.Arch, argv[0], altLinker, "@"+response) {
 		if ctxt.Debugvlog != 0 {
 			ctxt.Logf("not using response file because linker does not support one")
 		}
@@ -2166,7 +2151,7 @@ func (ctxt *Link) passLongArgsInResponseFile(argv []string, altLinker string) []
 
 var createTrivialCOnce sync.Once
 
-func linkerFlagSupported(arch *sys.Arch, linker, altLinker, flag string) bool {
+func linkerFlagSupported(ctxt *Link, arch *sys.Arch, linker, altLinker, flag string) bool {
 	createTrivialCOnce.Do(func() {
 		src := filepath.Join(*flagTmpdir, "trivial.c")
 		if err := os.WriteFile(src, []byte("int main() { return 0; }"), 0666); err != nil {
@@ -2176,7 +2161,7 @@ func linkerFlagSupported(arch *sys.Arch, linker, altLinker, flag string) bool {
 
 	flags := hostlinkArchArgs(arch)
 
-	moreFlags := trimLinkerArgv(append(ldflag, flagExtldflags...))
+	moreFlags := trimLinkerArgv(append(ctxt.ldflag, flagExtldflags...))
 	flags = append(flags, moreFlags...)
 
 	if altLinker != "" {
@@ -2518,7 +2503,7 @@ func hostObject(ctxt *Link, objname string, path string) {
 	f.MustSeek(h.off, 0)
 	h.ld(ctxt, f, h.pkg, h.length, h.pn)
 	if *flagCaptureHostObjs != "" {
-		captureHostObj(h)
+		captureHostObj(ctxt, h)
 	}
 }
 
@@ -2678,7 +2663,7 @@ func ldshlibsyms(ctxt *Link, shlib string) {
 		ver := 0
 		symname := elfsym.Name // (unmangled) symbol name
 		if elf.ST_TYPE(elfsym.Info) == elf.STT_FUNC && strings.HasPrefix(elfsym.Name, "type:") {
-			ver = abiInternalVer
+			ver = ctxt.abiInternalVer
 		} else if buildcfg.Experiment.RegabiWrappers && elf.ST_TYPE(elfsym.Info) == elf.STT_FUNC {
 			// Demangle the ABI name. Keep in sync with symtab.go:mangleABIName.
 			if strings.HasSuffix(elfsym.Name, ".abiinternal") {
@@ -2999,18 +2984,16 @@ func AddGotSym(ctxt *Link, target *Target, ldr *loader.Loader, syms *ArchSyms, s
 	}
 }
 
-var hostobjcounter int
-
 // captureHostObj writes out the content of a host object (pulled from
 // an archive or loaded from a *.o file directly) to a directory
 // specified via the linker's "-capturehostobjs" debugging flag. This
 // is intended to make it easier for a developer to inspect the actual
 // object feeding into "CGO internal" link step.
-func captureHostObj(h *Hostobj) {
+func captureHostObj(ctxt *Link, h *Hostobj) {
 	// Form paths for info file and obj file.
-	ofile := fmt.Sprintf("captured-obj-%d.o", hostobjcounter)
-	ifile := fmt.Sprintf("captured-obj-%d.txt", hostobjcounter)
-	hostobjcounter++
+	ofile := fmt.Sprintf("captured-obj-%d.o", ctxt.hostobjcounter)
+	ifile := fmt.Sprintf("captured-obj-%d.txt", ctxt.hostobjcounter)
+	ctxt.hostobjcounter++
 	opath := filepath.Join(*flagCaptureHostObjs, ofile)
 	ipath := filepath.Join(*flagCaptureHostObjs, ifile)
 
