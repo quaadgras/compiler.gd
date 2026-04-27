@@ -163,7 +163,7 @@ func StaticCall(gd *base.Invocation, s *State, call *ir.CallExpr) {
 	// Receiver parameter size may have changed; need to update
 	// call.Type to get correct stack offsets for result
 	// parameters.
-	types.CheckSize(x.Type())
+	types.CheckSize(gd, x.Type())
 	switch ft := x.Type(); ft.NumResults() {
 	case 0:
 	case 1:

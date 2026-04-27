@@ -222,7 +222,7 @@ type Type struct {
 // If t must be passed by memory, Registers returns (math.MaxUint8,
 // math.MaxUint8).
 func (t *Type) Registers() (uint8, uint8) {
-	CalcSize(t)
+	CalcSize(nil, t)
 	return t.intRegs, t.floatRegs
 }
 
@@ -953,7 +953,7 @@ func (t *Type) AllMethods() []*Field {
 	if t.kind == TINTER {
 		// Calculate the full method set of an interface type on the fly
 		// now, if not done yet.
-		CalcSize(t)
+		CalcSize(nil, t)
 	}
 	return t.allMethods.Slice()
 }
@@ -1016,13 +1016,13 @@ func (t *Type) Size() int64 {
 	if t.kind == TSSA {
 		return t.width
 	}
-	CalcSize(t)
+	CalcSize(nil, t)
 	return t.width
 }
 
 // Alignment returns the alignment of t in bytes.
 func (t *Type) Alignment() int64 {
-	CalcSize(t)
+	CalcSize(nil, t)
 	return int64(t.align)
 }
 
@@ -1602,7 +1602,7 @@ func (t *Type) IsUntyped() bool {
 // HasPointers reports whether t contains a heap pointer.
 // Note that this function ignores pointers to not-in-heap types.
 func (t *Type) HasPointers() bool {
-	return PtrDataSize(t) > 0
+	return PtrDataSize(nil, t) > 0
 }
 
 var recvType *Type
@@ -1919,7 +1919,7 @@ func IsReflexive(t *Type) bool {
 // Can this type be stored directly in an interface word?
 // Yes, if the representation is a single pointer.
 func IsDirectIface(t *Type) bool {
-	return t.Size() == int64(PtrSize) && PtrDataSize(t) == int64(PtrSize)
+	return t.Size() == int64(PtrSize) && PtrDataSize(nil, t) == int64(PtrSize)
 }
 
 // IsInlineIface reports whether t is eligible for inline storage in the
@@ -1934,7 +1934,7 @@ func IsDirectIface(t *Type) bool {
 // (see (*pollDesc).makeArg) so assertions must read from Data, and the
 // user-level any(p) path must agree with that layout.
 func IsInlineIface(t *Type) bool {
-	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(t) == 0 && t.Alignment() <= 8 && !t.IsPtrShaped()
+	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(nil, t) == 0 && t.Alignment() <= 8 && !t.IsPtrShaped()
 }
 
 // IsSpreadIface reports whether t is eligible for spread storage in an
@@ -2087,7 +2087,7 @@ func TypeSymLookup(gd *base.Invocation, name string) *Sym {
 func TypeSymName(t *Type) string {
 	name := t.LinkString()
 	// Use a separate symbol name for Noalg types for #17752.
-	if TypeHasNoAlg(t) {
+	if TypeHasNoAlg(nil, t) {
 		name = "noalg." + name
 	}
 	return name

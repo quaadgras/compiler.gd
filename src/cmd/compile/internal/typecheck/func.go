@@ -232,7 +232,7 @@ func tcCall(gd *base.Invocation, n *ir.CallExpr, top int) ir.Node {
 		n.SetType(nil)
 		return n
 	}
-	types.CheckSize(t)
+	types.CheckSize(gd, t)
 
 	switch l.Op() {
 	case ir.ODOTINTER:
@@ -368,7 +368,7 @@ func tcAppend(gd *base.Invocation, n *ir.CallExpr) ir.Node {
 			continue
 		}
 		as[i] = AssignConv(gd, n, t.Elem(), "append")
-		types.CheckSize(as[i].Type()) // ensure width is calculated for backend
+		types.CheckSize(gd, as[i].Type()) // ensure width is calculated for backend
 	}
 	return n
 }

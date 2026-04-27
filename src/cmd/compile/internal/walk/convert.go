@@ -338,7 +338,7 @@ func walkStringToBytes(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.N
 		if ir.NodeStackAllocatable(n) && len(sc) <= int(ir.MaxImplicitStackVarSize) {
 			a = stackBufAddr(gd, t.NumElem(), t.Elem())
 		} else {
-			types.CalcSize(t)
+			types.CalcSize(gd, t)
 			a = ir.NewUnaryExpr(gd, gd.Pos, ir.ONEW, nil)
 			a.SetType(types.NewPtr(t))
 			a.SetTypecheck(1)

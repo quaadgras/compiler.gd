@@ -75,7 +75,7 @@ func tcArith(gd *base.Invocation, n ir.Node, op ir.Op, l, r ir.Node) (ir.Node, i
 					return l, r, nil
 				}
 
-				types.CalcSize(l.Type())
+				types.CalcSize(gd, l.Type())
 				if r.Type().IsInterface() == l.Type().IsInterface() || l.Type().Size() >= 1<<16 {
 					l = ir.NewConvExpr(gd, gd.Pos, aop, r.Type(), l)
 					l.SetTypecheck(1)
@@ -94,7 +94,7 @@ func tcArith(gd *base.Invocation, n ir.Node, op ir.Op, l, r ir.Node) (ir.Node, i
 					return l, r, nil
 				}
 
-				types.CalcSize(r.Type())
+				types.CalcSize(gd, r.Type())
 				if r.Type().IsInterface() == l.Type().IsInterface() || r.Type().Size() >= 1<<16 {
 					r = ir.NewConvExpr(gd, gd.Pos, aop, l.Type(), r)
 					r.SetTypecheck(1)
@@ -211,7 +211,7 @@ func tcCompLit(gd *base.Invocation, n *ir.CompLitExpr) (res ir.Node) {
 
 	case types.TSTRUCT:
 		// Need valid field offsets for Xoffset below.
-		types.CalcSize(t)
+		types.CalcSize(gd, t)
 
 		errored := false
 		if len(n.List) != 0 && nokeys(n.List) {
@@ -343,7 +343,7 @@ func tcStructLitKey(gd *base.Invocation, typ *types.Type, kv *ir.KeyExpr) *ir.St
 
 // tcConv typechecks an OCONV node.
 func tcConv(gd *base.Invocation, n *ir.ConvExpr) ir.Node {
-	types.CheckSize(n.Type()) // ensure width is calculated for backend
+	types.CheckSize(gd, n.Type()) // ensure width is calculated for backend
 	n.X = Expr(gd, n.X)
 	n.X = convlit1(gd, n.X, n.Type(), true, nil)
 	t := n.X.Type()
@@ -418,7 +418,7 @@ func DotField(gd *base.Invocation, pos src.XPos, x ir.Node, index int) *ir.Selec
 	}
 
 	// TODO(mdempsky): This is the backend's responsibility.
-	types.CalcSize(typ)
+	types.CalcSize(gd, typ)
 
 	field := typ.Field(index)
 	return dot(gd, pos, field.Type, op, x, field)
@@ -497,7 +497,7 @@ func tcDot(gd *base.Invocation, n *ir.SelectorExpr, top int) ir.Node {
 			return n
 		}
 		n.SetOp(ir.ODOTPTR)
-		types.CheckSize(t)
+		types.CheckSize(gd, t)
 	}
 
 	if n.Sel.IsBlank() {
@@ -773,7 +773,7 @@ func tcSlice(gd *base.Invocation, n *ir.SliceExpr) ir.Node {
 	} else if t.IsPtr() && t.Elem().IsArray() {
 		tp = t.Elem()
 		n.SetType(types.NewSlice(tp.Elem()))
-		types.CalcSize(n.Type())
+		types.CalcSize(gd, n.Type())
 		if hasmax {
 			n.SetOp(ir.OSLICE3ARR)
 		} else {

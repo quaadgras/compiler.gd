@@ -38,7 +38,7 @@ func tcAssign(gd *base.Invocation, n *ir.AssignStmt) {
 
 	// TODO(mdempsky): This seems out of place.
 	if !ir.IsBlank(n.X) {
-		types.CheckSize(n.X.Type()) // ensure width is calculated for backend
+		types.CheckSize(gd, n.X.Type()) // ensure width is calculated for backend
 	}
 }
 

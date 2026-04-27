@@ -612,7 +612,7 @@ func AutoVar(v *Value) (*ir.Name, int64) {
 
 // CanSSA reports whether values of type t can be represented as a Value.
 func CanSSA(t *types.Type) bool {
-	types.CalcSize(t)
+	types.CalcSize(nil, t)
 	if t.IsSIMD() {
 		return true
 	}

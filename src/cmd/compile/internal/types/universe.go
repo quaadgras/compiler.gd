@@ -56,114 +56,115 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 	// them invalidates pointer-equality checks against types
 	// captured by an earlier invocation (notably unsafe.Pointer
 	// references in imported sigs).
-	first := false
-	initTypesOnce.Do(func() { first = true })
-	if !first {
-		return
-	}
+	//
+	// The actual init runs INSIDE Do so concurrent invocations
+	// block until the first one finishes; otherwise a second
+	// invocation would observe partially-initialised Types[]
+	// before returning from InitTypes.
+	initTypesOnce.Do(func() {
+		SlicePtrOffset = 0
+		SliceLenOffset = RoundUp(SlicePtrOffset+int64(PtrSize), int64(PtrSize))
+		SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
+		SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
 
-	SlicePtrOffset = 0
-	SliceLenOffset = RoundUp(SlicePtrOffset+int64(PtrSize), int64(PtrSize))
-	SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
-	SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
+		// gd: string header grows from 2 words to 3 words. See
+		// doc/gd/sso-string.md / src/internal/abi/string.go.
+		//   word 0 @ 0            : data ptr (heap) / nil (inline)
+		//   word 1 @ PtrSize      : cached hash (heap) / bytes[0:8] (inline)
+		//   word 2 @ 2*PtrSize    : tag<<60 | len-or-inline-bytes
+		StringPtrOffset = 0
+		StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
+		StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
+		StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
 
-	// gd: string header grows from 2 words to 3 words. See
-	// doc/gd/sso-string.md / src/internal/abi/string.go.
-	//   word 0 @ 0            : data ptr (heap) / nil (inline)
-	//   word 1 @ PtrSize      : cached hash (heap) / bytes[0:8] (inline)
-	//   word 2 @ 2*PtrSize    : tag<<60 | len-or-inline-bytes
-	StringPtrOffset = 0
-	StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
-	StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
-	StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
-
-	for et := Kind(0); et < NTYPE; et++ {
-		SimType[et] = et
-	}
-
-	Types[TANY] = newType(TANY) // note: an old placeholder type, NOT the new builtin 'any' alias for interface{}
-	Types[TINTER] = NewInterface(nil)
-	CheckSize(Types[TINTER])
-
-	defBasic := func(kind Kind, pkg *Pkg, name string) *Type {
-		typ := newType(kind)
-		obj := defTypeName(pkg.Lookup(name), typ)
-		typ.obj = obj
-		if kind != TANY {
-			CheckSize(typ)
+		for et := Kind(0); et < NTYPE; et++ {
+			SimType[et] = et
 		}
-		return typ
-	}
 
-	builtinPkg := BuiltinPkg(gd)
-	unsafePkg := UnsafePkg(gd)
+		Types[TANY] = newType(TANY) // note: an old placeholder type, NOT the new builtin 'any' alias for interface{}
+		Types[TINTER] = NewInterface(nil)
+		CheckSize(gd, Types[TINTER])
 
-	for _, s := range &basicTypes {
-		Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
-	}
-
-	for _, s := range &typedefs {
-		sameas := s.sameas32
-		if PtrSize == 8 {
-			sameas = s.sameas64
+		defBasic := func(kind Kind, pkg *Pkg, name string) *Type {
+			typ := newType(kind)
+			obj := defTypeName(pkg.Lookup(name), typ)
+			typ.obj = obj
+			if kind != TANY {
+				CheckSize(gd, typ)
+			}
+			return typ
 		}
-		SimType[s.etype] = sameas
 
-		Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
-	}
+		builtinPkg := BuiltinPkg(gd)
+		unsafePkg := UnsafePkg(gd)
 
-	// We create separate byte and rune types for better error messages
-	// rather than just creating type alias *Sym's for the uint8 and
-	// int32  Hence, (bytetype|runtype).Sym.isAlias() is false.
-	// TODO(gri) Should we get rid of this special case (at the cost
-	// of less informative error messages involving bytes and runes)?
-	// NOTE(rsc): No, the error message quality is important.
-	// (Alternatively, we could introduce an OTALIAS node representing
-	// type aliases, albeit at the cost of having to deal with it everywhere).
-	ByteType = defBasic(TUINT8, builtinPkg, "byte")
-	RuneType = defBasic(TINT32, builtinPkg, "rune")
+		for _, s := range &basicTypes {
+			Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
+		}
 
-	// error type
-	DeferCheckSize()
-	ErrorType = defBasic(TFORW, builtinPkg, "error")
-	ErrorType.SetUnderlying(makeErrorInterface(gd))
-	ResumeCheckSize()
+		for _, s := range &typedefs {
+			sameas := s.sameas32
+			if PtrSize == 8 {
+				sameas = s.sameas64
+			}
+			SimType[s.etype] = sameas
 
-	// comparable type (interface)
-	DeferCheckSize()
-	ComparableType = defBasic(TFORW, builtinPkg, "comparable")
-	ComparableType.SetUnderlying(makeComparableInterface())
-	ResumeCheckSize()
+			Types[s.etype] = defBasic(s.etype, builtinPkg, s.name)
+		}
 
-	// any type (interface)
-	DeferCheckSize()
-	AnyType = defBasic(TFORW, builtinPkg, "any")
-	AnyType.SetUnderlying(NewInterface(nil))
-	ResumeCheckSize()
+		// We create separate byte and rune types for better error messages
+		// rather than just creating type alias *Sym's for the uint8 and
+		// int32  Hence, (bytetype|runtype).Sym.isAlias() is false.
+		// TODO(gri) Should we get rid of this special case (at the cost
+		// of less informative error messages involving bytes and runes)?
+		// NOTE(rsc): No, the error message quality is important.
+		// (Alternatively, we could introduce an OTALIAS node representing
+		// type aliases, albeit at the cost of having to deal with it everywhere).
+		ByteType = defBasic(TUINT8, builtinPkg, "byte")
+		RuneType = defBasic(TINT32, builtinPkg, "rune")
 
-	Types[TUNSAFEPTR] = defBasic(TUNSAFEPTR, unsafePkg, "Pointer")
+		// error type
+		DeferCheckSize(gd)
+		ErrorType = defBasic(TFORW, builtinPkg, "error")
+		ErrorType.SetUnderlying(makeErrorInterface(gd))
+		ResumeCheckSize(gd)
 
-	Types[TBLANK] = newType(TBLANK)
-	Types[TNIL] = newType(TNIL)
+		// comparable type (interface)
+		DeferCheckSize(gd)
+		ComparableType = defBasic(TFORW, builtinPkg, "comparable")
+		ComparableType.SetUnderlying(makeComparableInterface())
+		ResumeCheckSize(gd)
 
-	// simple aliases
-	SimType[TMAP] = TPTR
-	SimType[TCHAN] = TPTR
-	SimType[TFUNC] = TPTR
-	SimType[TUNSAFEPTR] = TPTR
+		// any type (interface)
+		DeferCheckSize(gd)
+		AnyType = defBasic(TFORW, builtinPkg, "any")
+		AnyType.SetUnderlying(NewInterface(nil))
+		ResumeCheckSize(gd)
 
-	for et := TINT8; et <= TUINT64; et++ {
-		IsInt[et] = true
-	}
-	IsInt[TINT] = true
-	IsInt[TUINT] = true
-	IsInt[TUINTPTR] = true
+		Types[TUNSAFEPTR] = defBasic(TUNSAFEPTR, unsafePkg, "Pointer")
 
-	IsFloat[TFLOAT32] = true
-	IsFloat[TFLOAT64] = true
+		Types[TBLANK] = newType(TBLANK)
+		Types[TNIL] = newType(TNIL)
 
-	IsComplex[TCOMPLEX64] = true
-	IsComplex[TCOMPLEX128] = true
+		// simple aliases
+		SimType[TMAP] = TPTR
+		SimType[TCHAN] = TPTR
+		SimType[TFUNC] = TPTR
+		SimType[TUNSAFEPTR] = TPTR
+
+		for et := TINT8; et <= TUINT64; et++ {
+			IsInt[et] = true
+		}
+		IsInt[TINT] = true
+		IsInt[TUINT] = true
+		IsInt[TUINTPTR] = true
+
+		IsFloat[TFLOAT32] = true
+		IsFloat[TFLOAT64] = true
+
+		IsComplex[TCOMPLEX64] = true
+		IsComplex[TCOMPLEX128] = true
+	})
 }
 
 func makeErrorInterface(gd *base.Invocation) *Type {

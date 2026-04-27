@@ -290,7 +290,7 @@ func isSmallSliceLit(n *ir.CompLitExpr) bool {
 func slicelit(gd *base.Invocation, ctxt initContext, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
 	// make an array type corresponding the number of elements we have
 	t := types.NewArray(n.Type().Elem(), n.Len)
-	types.CalcSize(t)
+	types.CalcSize(gd, t)
 
 	if ctxt == inNonInitFunction {
 		// put everything into static array
@@ -442,8 +442,8 @@ func maplit(gd *base.Invocation, n *ir.CompLitExpr, m ir.Node, init *ir.Nodes) {
 		// TODO(#47904): mark tk and te NoAlg here once the
 		// compiler/linker can handle NoAlg types correctly.
 
-		types.CalcSize(tk)
-		types.CalcSize(te)
+		types.CalcSize(gd, tk)
+		types.CalcSize(gd, te)
 
 		// make and initialize static arrays
 		vstatk := readonlystaticname(gd, tk)

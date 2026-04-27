@@ -59,56 +59,56 @@ func Init(gd *base.Invocation) {
 	// arch. Re-initialising would invalidate pointer-equality
 	// checks against types from earlier invocations (e.g. unsafe
 	// references in imported sigs).
-	first := false
-	initOnce.Do(func() { first = true })
-	if !first {
-		return
-	}
-	Type = FromReflect(gd, reflect.TypeFor[abi.Type]())
-	ArrayType = FromReflect(gd, reflect.TypeFor[abi.ArrayType]())
-	ChanType = FromReflect(gd, reflect.TypeFor[abi.ChanType]())
-	FuncType = FromReflect(gd, reflect.TypeFor[abi.FuncType]())
-	InterfaceType = FromReflect(gd, reflect.TypeFor[abi.InterfaceType]())
-	MapType = FromReflect(gd, reflect.TypeFor[abi.MapType]())
-	PtrType = FromReflect(gd, reflect.TypeFor[abi.PtrType]())
-	SliceType = FromReflect(gd, reflect.TypeFor[abi.SliceType]())
-	StructType = FromReflect(gd, reflect.TypeFor[abi.StructType]())
+	// Init runs INSIDE Do so concurrent invocations block until the
+	// first one finishes; otherwise a second invocation would
+	// observe partially-initialised rttype.* before returning.
+	initOnce.Do(func() {
+		Type = FromReflect(gd, reflect.TypeFor[abi.Type]())
+		ArrayType = FromReflect(gd, reflect.TypeFor[abi.ArrayType]())
+		ChanType = FromReflect(gd, reflect.TypeFor[abi.ChanType]())
+		FuncType = FromReflect(gd, reflect.TypeFor[abi.FuncType]())
+		InterfaceType = FromReflect(gd, reflect.TypeFor[abi.InterfaceType]())
+		MapType = FromReflect(gd, reflect.TypeFor[abi.MapType]())
+		PtrType = FromReflect(gd, reflect.TypeFor[abi.PtrType]())
+		SliceType = FromReflect(gd, reflect.TypeFor[abi.SliceType]())
+		StructType = FromReflect(gd, reflect.TypeFor[abi.StructType]())
 
-	IMethod = FromReflect(gd, reflect.TypeFor[abi.Imethod]())
-	Method = FromReflect(gd, reflect.TypeFor[abi.Method]())
-	StructField = FromReflect(gd, reflect.TypeFor[abi.StructField]())
-	UncommonType = FromReflect(gd, reflect.TypeFor[abi.UncommonType]())
+		IMethod = FromReflect(gd, reflect.TypeFor[abi.Imethod]())
+		Method = FromReflect(gd, reflect.TypeFor[abi.Method]())
+		StructField = FromReflect(gd, reflect.TypeFor[abi.StructField]())
+		UncommonType = FromReflect(gd, reflect.TypeFor[abi.UncommonType]())
 
-	InterfaceSwitch = FromReflect(gd, reflect.TypeFor[abi.InterfaceSwitch]())
-	TypeAssert = FromReflect(gd, reflect.TypeFor[abi.TypeAssert]())
+		InterfaceSwitch = FromReflect(gd, reflect.TypeFor[abi.InterfaceSwitch]())
+		TypeAssert = FromReflect(gd, reflect.TypeFor[abi.TypeAssert]())
 
-	ITab = FromReflect(gd, reflect.TypeFor[abi.ITab]())
+		ITab = FromReflect(gd, reflect.TypeFor[abi.ITab]())
 
-	// Make sure abi functions are correct. These functions are used
-	// by the linker which doesn't have the ability to do type layout,
-	// so we check the functions it uses here.
-	ptrSize := types.PtrSize
-	if got, want := int64(abi.CommonSize(ptrSize)), Type.Size(); got != want {
-		gd.Fatalf("abi.CommonSize() == %d, want %d", got, want)
-	}
-	if got, want := int64(abi.StructFieldSize(ptrSize)), StructField.Size(); got != want {
-		gd.Fatalf("abi.StructFieldSize() == %d, want %d", got, want)
-	}
-	if got, want := int64(abi.UncommonSize()), UncommonType.Size(); got != want {
-		gd.Fatalf("abi.UncommonSize() == %d, want %d", got, want)
-	}
-	if got, want := int64(abi.TFlagOff(ptrSize)), Type.OffsetOf("TFlag"); got != want {
-		gd.Fatalf("abi.TFlagOff() == %d, want %d", got, want)
-	}
-	if got, want := int64(abi.ITabTypeOff(ptrSize)), ITab.OffsetOf("Type"); got != want {
-		gd.Fatalf("abi.ITabTypeOff() == %d, want %d", got, want)
-	}
+		// Make sure abi functions are correct. These functions are used
+		// by the linker which doesn't have the ability to do type layout,
+		// so we check the functions it uses here.
+		ptrSize := types.PtrSize
+		if got, want := int64(abi.CommonSize(ptrSize)), Type.Size(); got != want {
+			gd.Fatalf("abi.CommonSize() == %d, want %d", got, want)
+		}
+		if got, want := int64(abi.StructFieldSize(ptrSize)), StructField.Size(); got != want {
+			gd.Fatalf("abi.StructFieldSize() == %d, want %d", got, want)
+		}
+		if got, want := int64(abi.UncommonSize()), UncommonType.Size(); got != want {
+			gd.Fatalf("abi.UncommonSize() == %d, want %d", got, want)
+		}
+		if got, want := int64(abi.TFlagOff(ptrSize)), Type.OffsetOf("TFlag"); got != want {
+			gd.Fatalf("abi.TFlagOff() == %d, want %d", got, want)
+		}
+		if got, want := int64(abi.ITabTypeOff(ptrSize)), ITab.OffsetOf("Type"); got != want {
+			gd.Fatalf("abi.ITabTypeOff() == %d, want %d", got, want)
+		}
+	})
 }
 
 // FromReflect translates from a host type to the equivalent target type.
 func FromReflect(gd *base.Invocation, rt reflect.Type) *types.Type {
 	t := reflectToType(gd, rt)
-	types.CalcSize(t)
+	types.CalcSize(gd, t)
 	return t
 }
 

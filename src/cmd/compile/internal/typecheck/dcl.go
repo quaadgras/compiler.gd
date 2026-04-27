@@ -64,7 +64,7 @@ func TempAt(gd *base.Invocation, pos src.XPos, curfn *ir.Func, typ *types.Type) 
 	if typ.Kind() == types.TFUNC && typ.Recv() != nil {
 		gd.FatalfAt(pos, "misuse of method type: %v", typ)
 	}
-	types.CalcSize(typ)
+	types.CalcSize(gd, typ)
 
 	sym := &types.Sym{
 		Name: autotmpname(len(curfn.Dcl)),

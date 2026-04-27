@@ -158,7 +158,7 @@ func dumpGlobal(gd *base.Invocation, n *ir.Name) {
 	if n.Sym().Pkg != types.LocalPkg(gd) {
 		return
 	}
-	types.CalcSize(n.Type())
+	types.CalcSize(gd, n.Type())
 	ggloblnod(gd, n)
 	if n.CoverageAuxVar() || n.Linksym().Static() {
 		return

@@ -113,7 +113,7 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 	// liveness doesn't see, and we'd hit "bad live variable at
 	// entry" otherwise.
 	backing.SetEsc(ir.EscHeap)
-	types.CalcSize(backing.Type())
+	types.CalcSize(gd, backing.Type())
 	fn.Dcl = append(fn.Dcl, backing)
 
 	// addr: the pointer to the active storage. PAUTO *T. Starts
@@ -125,7 +125,7 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 	addr.Curfn = fn
 	addr.SetUsed(true)
 	addr.SetAutoTemp(true)
-	types.CalcSize(addr.Type())
+	types.CalcSize(gd, addr.Type())
 	fn.Dcl = append(fn.Dcl, addr)
 
 	// Prologue: addr = &backing.

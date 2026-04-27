@@ -17,8 +17,8 @@ import (
 )
 
 // IsRegularMemory reports whether t can be compared/hashed as regular memory.
-func IsRegularMemory(t *types.Type) bool {
-	return types.AlgType(t) == types.AMEM
+func IsRegularMemory(gd *base.Invocation, t *types.Type) bool {
+	return types.AlgType(gd, t) == types.AMEM
 }
 
 // Memrun finds runs of struct fields for which memory-only algs are appropriate.
@@ -37,7 +37,7 @@ func Memrun(gd *base.Invocation, t *types.Type, start int) (size int64, next int
 			break
 		}
 		// Also, stop before a blank or non-memory field.
-		if f := t.Field(next); f.Sym.IsBlank() || !IsRegularMemory(f.Type) {
+		if f := t.Field(next); f.Sym.IsBlank() || !IsRegularMemory(gd, f.Type) {
 			break
 		}
 		// For issue 46283, don't combine fields if the resulting load would
@@ -192,7 +192,7 @@ func EqStruct(gd *base.Invocation, t *types.Type, np, nq ir.Node) ([]ir.Node, bo
 		typeCanPanic := EqCanPanic(f.Type)
 
 		// Compare non-memory fields with field equality.
-		if !IsRegularMemory(f.Type) {
+		if !IsRegularMemory(gd, f.Type) {
 			if typeCanPanic {
 				// Enforce ordering by starting a new set of reorderable conditions.
 				conds = append(conds, []ir.Node{})

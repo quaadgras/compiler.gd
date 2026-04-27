@@ -230,7 +230,7 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 		// This is a basic literal or nil that we can store
 		// directly in the read-only data section.
 		n = typecheck.DefaultLit(o.gd, n, nil)
-		types.CalcSize(n.Type())
+		types.CalcSize(o.gd, n.Type())
 		vstat := readonlystaticname(o.gd, n.Type())
 		var s staticinit.Schedule
 		s.StaticAssign(o.gd, vstat, 0, n, n.Type())

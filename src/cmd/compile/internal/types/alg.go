@@ -5,6 +5,7 @@
 package types
 
 import (
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/fatal"
 )
 
@@ -53,20 +54,20 @@ func (t *Type) setAlg(a AlgKind) {
 }
 
 // AlgType returns the AlgKind used for comparing and hashing Type t.
-func AlgType(t *Type) AlgKind {
-	CalcSize(t)
+func AlgType(gd *base.Invocation, t *Type) AlgKind {
+	CalcSize(gd, t)
 	return t.alg
 }
 
 // TypeHasNoAlg reports whether t does not have any associated hash/eq
 // algorithms because t, or some component of t, is marked Noalg.
-func TypeHasNoAlg(t *Type) bool {
-	return AlgType(t) == ANOALG
+func TypeHasNoAlg(gd *base.Invocation, t *Type) bool {
+	return AlgType(gd, t) == ANOALG
 }
 
 // IsComparable reports whether t is a comparable type.
 func IsComparable(t *Type) bool {
-	a := AlgType(t)
+	a := AlgType(nil, t)
 	return a != ANOEQ && a != ANOALG
 }
 

@@ -166,20 +166,20 @@ func createtypes(gd *base.Invocation) (*types.Type, *types.Type, *types.Type) {
 		nfield(nxp, fname(gd, "sourceLocation"), up),
 		nfield(nxp, fname(gd, "odrIndicator"), up),
 	})
-	types.CalcSize(asanGlobal)
+	types.CalcSize(gd, asanGlobal)
 
 	asanLocation := types.NewStruct([]*types.Field{
 		nfield(nxp, fname(gd, "filename"), up),
 		nfield(nxp, fname(gd, "line"), i32),
 		nfield(nxp, fname(gd, "column"), i32),
 	})
-	types.CalcSize(asanLocation)
+	types.CalcSize(gd, asanLocation)
 
 	defString := types.NewStruct([]*types.Field{
 		types.NewField(nxp, fname(gd, "data"), up),
 		types.NewField(nxp, fname(gd, "len"), up),
 	})
-	types.CalcSize(defString)
+	types.CalcSize(gd, defString)
 
 	return asanGlobal, asanLocation, defString
 }

@@ -37,8 +37,8 @@ func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 
 	keytype := t.Key()
 	elemtype := t.Elem()
-	types.CalcSize(keytype)
-	types.CalcSize(elemtype)
+	types.CalcSize(gd, keytype)
+	types.CalcSize(gd, elemtype)
 	if keytype.Size() > abi.MapMaxKeyBytes {
 		keytype = types.NewPtr(keytype)
 	}
@@ -63,7 +63,7 @@ func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 
 	group := types.NewStruct(fields)
 	group.SetNoalg(true)
-	types.CalcSize(group)
+	types.CalcSize(gd, group)
 
 	// Check invariants that map code depends on.
 	if !types.IsComparable(t.Key()) {
@@ -127,7 +127,7 @@ func mapTableType(gd *base.Invocation) *types.Type {
 	n.SetTypecheck(1)
 
 	table.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(table)
+	types.CalcSize(gd, table)
 
 	// The size of table should be 32 bytes on 64 bit
 	// and 24 bytes on 32 bit platforms.
@@ -183,7 +183,7 @@ func MapType(gd *base.Invocation) *types.Type {
 	n.SetTypecheck(1)
 
 	m.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(m)
+	types.CalcSize(gd, m)
 
 	// The size of Map should be 48 bytes on 64 bit
 	// and 32 bytes on 32 bit platforms.
@@ -249,7 +249,7 @@ func MapIterType(gd *base.Invocation) *types.Type {
 	n.SetTypecheck(1)
 
 	iter.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(iter)
+	types.CalcSize(gd, iter)
 
 	// The size of Iter should be 96 bytes on 64 bit
 	// and 64 bytes on 32 bit platforms.

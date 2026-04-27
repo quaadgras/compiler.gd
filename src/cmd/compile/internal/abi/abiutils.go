@@ -602,7 +602,7 @@ func setup() {
 			types.NewField(nxp, fname("len"), it),
 			types.NewField(nxp, fname("cap"), it),
 		})
-		types.CalcStructSize(synthSlice)
+		types.CalcStructSize(nil, synthSlice)
 		// gd small-string optimization: 3-word header
 		// { data ptr / nil, hash / bytes[0:8], tag<<60|len / tag|bytes[8:15] }.
 		// See doc/gd/sso-string.md. data is the sole pointer word;
@@ -613,7 +613,7 @@ func setup() {
 			types.NewField(nxp, fname("hash"), up),
 			types.NewField(nxp, fname("len"), it),
 		})
-		types.CalcStructSize(synthString)
+		types.CalcStructSize(nil, synthString)
 		unsp := types.Types[types.TUNSAFEPTR]
 		c128 := types.Types[types.TCOMPLEX128]
 		// gd fat-interface layout: { tab/_type, data, inline complex128 }.
@@ -627,7 +627,7 @@ func setup() {
 			types.NewField(nxp, fname("f2"), unsp),
 			types.NewField(nxp, fname("f3"), c128),
 		})
-		types.CalcStructSize(synthIface)
+		types.CalcStructSize(nil, synthIface)
 	})
 }
 

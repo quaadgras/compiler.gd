@@ -61,10 +61,10 @@ func walkExpr(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 
 	// Eagerly compute sizes of all expressions for the back end.
 	if typ := n.Type(); typ != nil && typ.Kind() != types.TBLANK && !typ.IsFuncArgStruct() {
-		types.CheckSize(typ)
+		types.CheckSize(gd, typ)
 	}
 	if n, ok := n.(*ir.Name); ok && n.Heapaddr != nil {
-		types.CheckSize(n.Heapaddr.Type())
+		types.CheckSize(gd, n.Heapaddr.Type())
 	}
 	if ir.IsConst(n, constant.String) {
 		// Emit string symbol now to avoid emitting

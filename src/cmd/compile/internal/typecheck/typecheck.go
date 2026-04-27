@@ -189,7 +189,7 @@ func typecheck(gd *base.Invocation, n ir.Node, top int) (res ir.Node) {
 			break
 
 		default:
-			types.CheckSize(t)
+			types.CheckSize(gd, t)
 		}
 	}
 
@@ -830,7 +830,7 @@ func derefall(t *types.Type) *types.Type {
 func Lookdot(gd *base.Invocation, n *ir.SelectorExpr, t *types.Type, dostrcmp int) *types.Field {
 	s := n.Sel
 
-	types.CalcSize(t)
+	types.CalcSize(gd, t)
 	var f1 *types.Field
 	if t.IsStruct() {
 		f1 = Lookdot1(gd, n, s, t, t.Fields(), dostrcmp)
@@ -878,7 +878,7 @@ func Lookdot(gd *base.Invocation, n *ir.SelectorExpr, t *types.Type, dostrcmp in
 		}
 		orig := n.X
 		tt := n.X.Type()
-		types.CalcSize(tt)
+		types.CalcSize(gd, tt)
 		rcvr := f2.Type.Recv().Type
 		if !types.Identical(rcvr, tt) {
 			if rcvr.IsPtr() && types.Identical(rcvr.Elem(), tt) {

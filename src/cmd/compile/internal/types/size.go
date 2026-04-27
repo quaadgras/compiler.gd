@@ -64,8 +64,11 @@ func typePos(t *Type) src.XPos {
 // MaxWidth is the maximum size of a value on the target architecture.
 var MaxWidth int64
 
-// CalcSizeDisabled indicates whether it is safe
-// to calculate Types' widths and alignments. See CalcSize.
+// CalcSizeDisabled is per-Invocation: gd.CalcSizeDisabled. Set
+// true by gd.compileFunctions during the parallel backend phase to
+// catch CalcSize calls that would race on shared Type fields. The
+// package-level var is kept as a no-op for legacy callers; new
+// code should toggle gd.CalcSizeDisabled directly.
 var CalcSizeDisabled bool
 
 // machine size and rounding alignment is dictated around
@@ -82,7 +85,7 @@ func RoundUp(o int64, r int64) int64 {
 
 // expandiface computes the method set for interface type t by
 // expanding embedded interfaces.
-func expandiface(t *Type) {
+func expandiface(gd *base.Invocation, t *Type) {
 	seen := make(map[*Sym]*Field)
 	var methods []*Field
 
@@ -123,7 +126,7 @@ func expandiface(t *Type) {
 			continue
 		}
 
-		CheckSize(m.Type)
+		CheckSize(gd, m.Type)
 		addMethod(m, true)
 	}
 
@@ -168,9 +171,9 @@ func expandiface(t *Type) {
 // calcStructOffset computes the offsets of a sequence of fields,
 // starting at the given offset. It returns the resulting offset and
 // maximum field alignment.
-func calcStructOffset(t *Type, fields []*Field, offset int64) int64 {
+func calcStructOffset(gd *base.Invocation, t *Type, fields []*Field, offset int64) int64 {
 	for _, f := range fields {
-		CalcSize(f.Type)
+		CalcSize(gd, f.Type)
 		offset = RoundUp(offset, int64(f.Type.align))
 
 		if t.IsStruct() { // param offsets depend on ABI
@@ -214,7 +217,7 @@ func isAtomicStdPkg(p *Pkg) bool {
 // If CalcSizeDisabled is set, and the size/alignment
 // have not already been calculated, it calls Fatal.
 // This is used to prevent data races in the back end.
-func CalcSize(t *Type) {
+func CalcSize(gd *base.Invocation, t *Type) {
 	// Calling CalcSize when typecheck tracing enabled is not safe.
 	// See issue #33658.
 	if base.EnableTrace && SkipSizeForTracing {
@@ -240,12 +243,12 @@ func CalcSize(t *Type) {
 		return
 	}
 
-	if CalcSizeDisabled {
+	if gd != nil && gd.CalcSizeDisabled {
 		fatal.Error("width not calculated: %v", t)
 	}
 
 	// defer CheckSize calls until after we're done
-	DeferCheckSize()
+	DeferCheckSize(gd)
 
 	t.width = -2
 	t.align = 0  // 0 means use t.Width, below
@@ -317,7 +320,7 @@ func CalcSize(t *Type) {
 	case TPTR:
 		w = int64(PtrSize)
 		t.intRegs = 1
-		CheckSize(t.Elem())
+		CheckSize(gd, t.Elem())
 		t.ptrBytes = int64(PtrSize) // See PtrDataSize
 
 	case TUNSAFEPTR:
@@ -343,7 +346,7 @@ func CalcSize(t *Type) {
 		}
 		t.intRegs = 2
 		t.floatRegs = 2
-		expandiface(t)
+		expandiface(gd, t)
 		if len(t.allMethods.Slice()) == 0 {
 			t.setAlg(ANILINTER)
 		} else {
@@ -356,21 +359,21 @@ func CalcSize(t *Type) {
 		t.intRegs = 1
 		t.ptrBytes = int64(PtrSize)
 
-		CheckSize(t.Elem())
+		CheckSize(gd, t.Elem())
 
 		// Make fake type to trigger channel element size check after
 		// any top-level recursive type has been completed.
 		t1 := NewChanArgs(t)
-		CheckSize(t1)
+		CheckSize(gd, t1)
 
 	case TCHANARGS:
 		t1 := t.ChanArgs()
-		CalcSize(t1) // just in case
+		CalcSize(gd, t1) // just in case
 		// Make sure size of t1.Elem() is calculated at this point. We can
 		// use CalcSize() here rather than CheckSize(), because the top-level
 		// (possibly recursive) type will have been calculated before the fake
 		// chanargs is handled.
-		CalcSize(t1.Elem())
+		CalcSize(gd, t1.Elem())
 		if t1.Elem().width >= 1<<16 {
 			fatal.Error("channel element type too large (>64kB)")
 		}
@@ -379,8 +382,8 @@ func CalcSize(t *Type) {
 	case TMAP: // implemented as pointer
 		w = int64(PtrSize)
 		t.intRegs = 1
-		CheckSize(t.Elem())
-		CheckSize(t.Key())
+		CheckSize(gd, t.Elem())
+		CheckSize(gd, t.Key())
 		t.setAlg(ANOEQ)
 		t.ptrBytes = int64(PtrSize)
 
@@ -404,7 +407,7 @@ func CalcSize(t *Type) {
 		if t.Elem() == nil {
 			break
 		}
-		CalcArraySize(t)
+		CalcArraySize(gd, t)
 		w = t.width
 
 	case TSLICE:
@@ -412,7 +415,7 @@ func CalcSize(t *Type) {
 			break
 		}
 		w = SliceSize
-		CheckSize(t.Elem())
+		CheckSize(gd, t.Elem())
 		t.align = uint8(PtrSize)
 		t.intRegs = 3
 		t.setAlg(ANOEQ)
@@ -424,14 +427,14 @@ func CalcSize(t *Type) {
 		if t.IsFuncArgStruct() {
 			fatal.ErrorAt(typePos(t), 0, "CalcSize fn struct %v", t)
 		}
-		CalcStructSize(t)
+		CalcStructSize(gd, t)
 		w = t.width
 
 	// make fake type to check later to
 	// trigger function argument computation.
 	case TFUNC:
 		t1 := NewFuncArgs(t)
-		CheckSize(t1)
+		CheckSize(gd, t1)
 		w = int64(PtrSize) // width of func type is pointer
 		t.intRegs = 1
 		t.setAlg(ANOEQ)
@@ -442,10 +445,10 @@ func CalcSize(t *Type) {
 	case TFUNCARGS:
 		t1 := t.FuncArgs()
 		// TODO(mdempsky): Should package abi be responsible for computing argwid?
-		w = calcStructOffset(t1, t1.Recvs(), 0)
-		w = calcStructOffset(t1, t1.Params(), w)
+		w = calcStructOffset(gd, t1, t1.Recvs(), 0)
+		w = calcStructOffset(gd, t1, t1.Params(), w)
 		w = RoundUp(w, int64(RegSize))
-		w = calcStructOffset(t1, t1.Results(), w)
+		w = calcStructOffset(gd, t1, t1.Results(), w)
 		w = RoundUp(w, int64(RegSize))
 		t1.extra.(*Func).Argwid = w
 		t.align = 1
@@ -463,7 +466,7 @@ func CalcSize(t *Type) {
 		t.align = uint8(w)
 	}
 
-	ResumeCheckSize()
+	ResumeCheckSize(gd)
 }
 
 // simdify marks as type as "SIMD", either as a tag field,
@@ -489,7 +492,7 @@ func simdify(st *Type, isTag bool) {
 // CalcStructSize calculates the size of t,
 // filling in t.width, t.align, t.intRegs, and t.floatRegs,
 // even if size calculation is otherwise disabled.
-func CalcStructSize(t *Type) {
+func CalcStructSize(gd *base.Invocation, t *Type) {
 	var maxAlign uint8 = 1
 
 	// Recognize special types. This logic is duplicated in go/types and
@@ -518,7 +521,7 @@ func CalcStructSize(t *Type) {
 
 	fields := t.Fields()
 
-	size := calcStructOffset(t, fields, 0)
+	size := calcStructOffset(gd, t, fields, 0)
 
 	// For non-zero-sized structs which end in a zero-sized field, we
 	// add an extra byte of padding to the type. This padding ensures
@@ -585,7 +588,7 @@ func CalcStructSize(t *Type) {
 	// Compute ptrBytes.
 	for i := len(fields) - 1; i >= 0; i-- {
 		f := fields[i]
-		if size := PtrDataSize(f.Type); size > 0 {
+		if size := PtrDataSize(gd, f.Type); size > 0 {
 			t.ptrBytes = f.Offset + size
 			break
 		}
@@ -600,10 +603,10 @@ func CalcStructSize(t *Type) {
 // CalcArraySize calculates the size of t,
 // filling in t.width, t.align, t.alg, and t.ptrBytes,
 // even if size calculation is otherwise disabled.
-func CalcArraySize(t *Type) {
+func CalcArraySize(gd *base.Invocation, t *Type) {
 	elem := t.Elem()
 	n := t.NumElem()
-	CalcSize(elem)
+	CalcSize(gd, elem)
 	t.SetNotInHeap(elem.NotInHeap())
 	if elem.width != 0 {
 		cap := (uint64(MaxWidth) - 1) / uint64(elem.width)
@@ -647,7 +650,7 @@ func CalcArraySize(t *Type) {
 		}
 	}
 	if n > 0 {
-		x := PtrDataSize(elem)
+		x := PtrDataSize(gd, elem)
 		if x > 0 {
 			t.ptrBytes = elem.width*(n-1) + x
 		}
@@ -676,7 +679,7 @@ func (t *Type) widthCalculated() bool {
 
 var deferredTypeStack []*Type
 
-func CheckSize(t *Type) {
+func CheckSize(gd *base.Invocation, t *Type) {
 	if t == nil {
 		return
 	}
@@ -688,7 +691,7 @@ func CheckSize(t *Type) {
 	}
 
 	if defercalc == 0 {
-		CalcSize(t)
+		CalcSize(gd, t)
 		return
 	}
 
@@ -699,17 +702,17 @@ func CheckSize(t *Type) {
 	}
 }
 
-func DeferCheckSize() {
+func DeferCheckSize(gd *base.Invocation) {
 	defercalc++
 }
 
-func ResumeCheckSize() {
+func ResumeCheckSize(gd *base.Invocation) {
 	if defercalc == 1 {
 		for len(deferredTypeStack) > 0 {
 			t := deferredTypeStack[len(deferredTypeStack)-1]
 			deferredTypeStack = deferredTypeStack[:len(deferredTypeStack)-1]
 			t.SetDeferwidth(false)
-			CalcSize(t)
+			CalcSize(gd, t)
 		}
 	}
 
@@ -721,8 +724,8 @@ func ResumeCheckSize() {
 //
 // PtrDataSize is only defined for actual Go types. It's an error to
 // use it on compiler-internal types (e.g., TSSA, TRESULTS).
-func PtrDataSize(t *Type) int64 {
-	CalcSize(t)
+func PtrDataSize(gd *base.Invocation, t *Type) int64 {
+	CalcSize(gd, t)
 	x := t.ptrBytes
 	if t.Kind() == TPTR && t.Elem().NotInHeap() {
 		// Note: this is done here instead of when we're setting

@@ -62,7 +62,7 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 		} else {
 			// Initialize ABI wrappers if necessary.
 			ir.InitLSym(gd, fn, false)
-			types.CalcSize(fn.Type())
+			types.CalcSize(gd, fn.Type())
 			a := ssagen.AbiForBodylessFuncStackMap(gd, fn)
 			abiInfo := a.ABIAnalyzeFuncType(fn.Type()) // abiInfo has spill/home locations for wrapper
 			if fn.ABI == obj.ABI0 {
@@ -116,7 +116,7 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 	}
 
 	// Calculate parameter offsets.
-	types.CalcSize(fn.Type())
+	types.CalcSize(gd, fn.Type())
 
 	// Generate wrappers between Go ABI and Wasm ABI, for a wasmexport
 	// function.
@@ -226,7 +226,7 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 		}
 	}
 
-	types.CalcSizeDisabled = true // not safe to calculate sizes concurrently
+	gd.CalcSizeDisabled = true // not safe to calculate sizes concurrently
 	gd.Ctxt.InParallel = true
 
 	compile(cq)
@@ -234,5 +234,5 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 	wg.Wait()
 
 	gd.Ctxt.InParallel = false
-	types.CalcSizeDisabled = false
+	gd.CalcSizeDisabled = false
 }

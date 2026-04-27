@@ -240,6 +240,23 @@ type Invocation struct {
 	SiggenSet any // map[*types.Sym]bool
 	SiggenMu  sync.Mutex
 
+	// Defercalc / DeferredTypeStack — were package-level
+	// `defercalc int` / `deferredTypeStack []*Type` in
+	// cmd/compile/internal/types. Per-Invocation so concurrent
+	// in-process compile invocations bracket their CheckSize
+	// deferrals independently. DeferredTypeStack stores
+	// []*types.Type (any to avoid base→types import cycle).
+	Defercalc         int
+	DeferredTypeStack []any
+
+	// CalcSizeDisabled — was a package-level
+	// `var CalcSizeDisabled bool` in types/size.go. Set true
+	// during gd's parallel backend phase to catch CalcSize
+	// calls that would race on shared Type fields. Per-
+	// Invocation so concurrent host.Run calls don't leak each
+	// other's flag state.
+	CalcSizeDisabled bool
+
 	// Pathsyms maps each types.Pkg to the importpath LSym
 	// (`type:.importpath.<prefix>.`) emitted for it in this
 	// invocation. Was a `Pathsym *obj.LSym` field on types.Pkg —

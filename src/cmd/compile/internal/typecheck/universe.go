@@ -75,11 +75,12 @@ var initUniverseOnce sync.Once
 // or invalidate pointer-equality against types captured by earlier
 // invocations.
 func InitUniverse(gd *base.Invocation) {
-	first := false
-	initUniverseOnce.Do(func() { first = true })
-	if !first {
-		return
-	}
+	initUniverseOnce.Do(func() {
+		initUniverse(gd)
+	})
+}
+
+func initUniverse(gd *base.Invocation) {
 	types.InitTypes(gd, func(sym *types.Sym, typ *types.Type) types.Object {
 		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, sym)
 		n.SetType(typ)

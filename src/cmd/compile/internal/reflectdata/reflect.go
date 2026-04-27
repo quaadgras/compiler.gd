@@ -654,7 +654,7 @@ func ABIKindOfType(t *types.Type) abi.Kind {
 
 // dcommontype dumps the contents of a reflect.rtype (runtime._type) to c.
 func dcommontype(gd *base.Invocation, c rttype.Cursor, t *types.Type) {
-	types.CalcSize(t)
+	types.CalcSize(gd, t)
 	eqfunc := geneq(gd, t)
 
 	sptrWeak := true
@@ -698,7 +698,7 @@ func dcommontype(gd *base.Invocation, c rttype.Cursor, t *types.Type) {
 	if t.Sym() != nil && t.Sym().Name != "" {
 		tflag |= abi.TFlagNamed
 	}
-	if compare.IsRegularMemory(t) {
+	if compare.IsRegularMemory(gd, t) {
 		tflag |= abi.TFlagRegularMemory
 	}
 	if onDemand {
@@ -1205,7 +1205,7 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 		}
 	}
 	// Do not put Noalg types in typelinks.  See issue #22605.
-	if types.TypeHasNoAlg(t) {
+	if types.TypeHasNoAlg(gd, t) {
 		keep = false
 	}
 	lsym.Set(obj.AttrMakeTypelink, keep)
@@ -1559,7 +1559,7 @@ func GCSym(gd *base.Invocation, t *types.Type, onDemandAllowed bool) (lsym *obj.
 // at runtime, and the ptrdata field to record in the reflect type information.
 // When write is true, it writes the symbol data.
 func dgcsym(gd *base.Invocation, t *types.Type, write, onDemandAllowed bool) (lsym *obj.LSym, onDemand bool, ptrdata int64) {
-	ptrdata = types.PtrDataSize(t)
+	ptrdata = types.PtrDataSize(gd, t)
 	if !onDemandAllowed || ptrdata/int64(types.PtrSize) <= abi.MaxPtrmaskBytes*8 {
 		lsym = dgcptrmask(gd, t, write)
 		return
@@ -1573,7 +1573,7 @@ func dgcsym(gd *base.Invocation, t *types.Type, write, onDemandAllowed bool) (ls
 // dgcptrmask emits and returns the symbol containing a pointer mask for type t.
 func dgcptrmask(gd *base.Invocation, t *types.Type, write bool) *obj.LSym {
 	// Bytes we need for the ptrmask.
-	n := (types.PtrDataSize(t)/int64(types.PtrSize) + 7) / 8
+	n := (types.PtrDataSize(gd, t)/int64(types.PtrSize) + 7) / 8
 	// Runtime wants ptrmasks padded to a multiple of uintptr in size.
 	n = (n + int64(types.PtrSize) - 1) &^ (int64(types.PtrSize) - 1)
 	ptrmask := make([]byte, n)
@@ -1602,7 +1602,7 @@ func fillptrmask(gd *base.Invocation, t *types.Type, ptrmask []byte) {
 	vec := bitvec.New(gd, 8*int32(len(ptrmask)))
 	typebits.Set(t, 0, vec)
 
-	nptr := types.PtrDataSize(t) / int64(types.PtrSize)
+	nptr := types.PtrDataSize(gd, t) / int64(types.PtrSize)
 	for i := int64(0); i < nptr; i++ {
 		if vec.Get(int32(i)) {
 			ptrmask[i/8] |= 1 << (uint(i) % 8)

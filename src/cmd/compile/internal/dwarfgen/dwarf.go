@@ -193,7 +193,7 @@ func createDwarfVars(gd *base.Invocation, fnsym *obj.LSym, complexOK bool, fn *i
 			if n.Class != ir.PAUTO {
 				continue
 			}
-			types.CalcSize(n.Type())
+			types.CalcSize(gd, n.Type())
 			if n.Type().Size() == 0 {
 				decls = append(decls, n)
 				vars = append(vars, createSimpleVar(gd, fnsym, n, closureVars))

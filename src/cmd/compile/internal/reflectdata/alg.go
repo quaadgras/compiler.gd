@@ -20,7 +20,7 @@ import (
 // AlgType returns the fixed-width AMEMxx variants instead of the general
 // AMEM kind when possible.
 func AlgType(gd *base.Invocation, t *types.Type) types.AlgKind {
-	a := types.AlgType(t)
+	a := types.AlgType(gd, t)
 	if a == types.AMEM {
 		if t.Alignment() < int64(gd.Ctxt.Arch.Alignment) && t.Alignment() < t.Size() {
 			// For example, we can't treat [2]int16 as an int32 if int32s require
@@ -200,7 +200,7 @@ func hashFunc(gd *base.Invocation, t *types.Type) *ir.Func {
 			}
 
 			// Hash non-memory fields with appropriate hash function.
-			if !compare.IsRegularMemory(f.Type) {
+			if !compare.IsRegularMemory(gd, f.Type) {
 				hashel := hashfor(gd, f.Type)
 				call := ir.NewCallExpr(gd, gd.Pos, ir.OCALL, hashel, nil)
 				na := typecheck.NodAddr(gd, typecheck.DotField(gd, gd.Pos, np, i))
@@ -254,7 +254,7 @@ func runtimeHashFor(gd *base.Invocation, name string, t *types.Type) *ir.Name {
 
 // hashfor returns the function to compute the hash of a value of type t.
 func hashfor(gd *base.Invocation, t *types.Type) *ir.Name {
-	switch types.AlgType(t) {
+	switch types.AlgType(gd, t) {
 	case types.AMEM:
 		gd.Fatalf("hashfor with AMEM type")
 	case types.AINTER:
@@ -646,7 +646,7 @@ func eqFunc(gd *base.Invocation, t *types.Type) *ir.Func {
 // EqFor returns ONAME node represents type t's equal function, and a boolean
 // to indicates whether a length needs to be passed when calling the function.
 func EqFor(gd *base.Invocation, t *types.Type) (ir.Node, bool) {
-	switch types.AlgType(t) {
+	switch types.AlgType(gd, t) {
 	case types.AMEM:
 		return typecheck.LookupRuntime(gd, "memequal", t, t), true
 	case types.ASPECIAL:

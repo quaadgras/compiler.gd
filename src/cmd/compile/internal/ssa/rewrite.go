@@ -2184,7 +2184,7 @@ func rewriteFixedLoad(v *Value, sym Sym, sb *Value, off int64) *Value {
 					return v
 				case "PtrBytes":
 					v.reset(ptrSizedOpConst)
-					v.AuxInt = types.PtrDataSize(t)
+					v.AuxInt = types.PtrDataSize(nil, t)
 					return v
 				case "Hash":
 					v.reset(OpConst32)

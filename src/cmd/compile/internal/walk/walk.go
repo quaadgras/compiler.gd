@@ -71,7 +71,7 @@ func Walk(gd *base.Invocation, fn *ir.Func) {
 
 	// Eagerly compute sizes of all variables for SSA.
 	for _, n := range fn.Dcl {
-		types.CalcSize(n.Type())
+		types.CalcSize(gd, n.Type())
 	}
 }
 
@@ -112,7 +112,7 @@ func convas(gd *base.Invocation, n *ir.AssignStmt, init *ir.Nodes) *ir.AssignStm
 		n.Y = typecheck.AssignConv(gd, n.Y, lt, "assignment")
 		n.Y = walkExpr(gd, n.Y, init)
 	}
-	types.CalcSize(n.Y.Type())
+	types.CalcSize(gd, n.Y.Type())
 
 	return n
 }

@@ -232,7 +232,7 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 			fn.Dcl = fn.Dcl[:i]
 			break
 		}
-		types.CalcSize(n.Type())
+		types.CalcSize(gd, n.Type())
 		w := n.Type().Size()
 		if w >= types.MaxWidth || w < 0 {
 			gd.Fatalf("bad width")

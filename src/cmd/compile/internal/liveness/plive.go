@@ -1344,7 +1344,7 @@ func (lv *Liveness) emit(gd *base.Invocation) (argsSym, liveSym *obj.LSym) {
 	// Next, find the offset of the largest pointer in the largest node.
 	var maxArgs int64
 	if maxArgNode != nil {
-		maxArgs = maxArgNode.FrameOffset() + types.PtrDataSize(maxArgNode.Type())
+		maxArgs = maxArgNode.FrameOffset() + types.PtrDataSize(gd, maxArgNode.Type())
 	}
 
 	// Size locals bitmaps to be stkptrsize sized.

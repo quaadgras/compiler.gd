@@ -31,7 +31,7 @@ func LookupRuntime(gd *base.Invocation, name string, types_ ...*types.Type) *ir.
 // type syntax expression n.Type.
 func substArgTypes(gd *base.Invocation, old *ir.Name, types_ ...*types.Type) *ir.Name {
 	for _, t := range types_ {
-		types.CalcSize(t)
+		types.CalcSize(gd, t)
 	}
 	n := ir.NewNameAt(gd, old.Pos(), old.Sym(), types.SubstAny(old.Type(), &types_))
 	n.Class = old.Class

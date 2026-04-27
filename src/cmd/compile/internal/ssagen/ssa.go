@@ -904,7 +904,7 @@ func (s *state) setHeapaddr(pos src.XPos, n *ir.Name, ptr *ssa.Value) {
 	sym := &types.Sym{Name: "&" + n.Sym().Name, Pkg: types.LocalPkg(s.gd)}
 	addr := s.curfn.NewLocal(s.gd, pos, sym, types.NewPtr(n.Type()))
 	addr.SetUsed(true)
-	types.CalcSize(addr.Type())
+	types.CalcSize(s.gd, addr.Type())
 
 	if n.Class == ir.PPARAMOUT {
 		addr.SetIsOutputParamHeapAddr(true)
@@ -3999,8 +3999,8 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			return v
 		}
 
-		types.CalcSize(from)
-		types.CalcSize(to)
+		types.CalcSize(s.gd, from)
+		types.CalcSize(s.gd, to)
 		if from.Size() != to.Size() {
 			s.Fatalf("CONVNOP width mismatch %v (%d) -> %v (%d)\n", from, from.Size(), to, to.Size())
 			return nil
@@ -4683,17 +4683,17 @@ func (s *state) getBackingStoreInfo(n ir.Node) *backingStoreInfo {
 	K := maxStackSize / et.Size() // rounds down
 	KT := types.NewArray(et, K)
 	KT.SetNoalg(true)
-	types.CalcArraySize(KT)
+	types.CalcArraySize(s.gd, KT)
 	// Align more than naturally for the type KT. See issue 73199.
 	align := types.NewArray(types.Types[types.TUINTPTR], 0)
-	types.CalcArraySize(align)
+	types.CalcArraySize(s.gd, align)
 	blankSym := types.BlankSym(s.gd)
 	storeTyp := types.NewStruct([]*types.Field{
 		{Sym: blankSym, Type: align},
 		{Sym: blankSym, Type: KT},
 	})
 	storeTyp.SetNoalg(true)
-	types.CalcStructSize(storeTyp)
+	types.CalcStructSize(s.gd, storeTyp)
 
 	// Make backing store variable.
 	backingStore := typecheck.TempAt(s.gd, n.Pos(), s.curfn, storeTyp)
@@ -5346,7 +5346,7 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 		return
 	}
 	t := left.Type()
-	types.CalcSize(t)
+	types.CalcSize(s.gd, t)
 	if s.canSSA(left) {
 		if deref {
 			s.Fatalf("can SSA LHS %v but not RHS %s", left, right)
@@ -5906,7 +5906,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 	}
 
 	params := callABI.ABIAnalyze(n.Fun.Type(), false /* Do not set (register) nNames from caller side -- can cause races. */)
-	types.CalcSize(fn.Type())
+	types.CalcSize(s.gd, fn.Type())
 	stksize := params.ArgWidth() // includes receiver, args, and results
 
 	res := n.Fun.Type().Results()
@@ -9052,7 +9052,7 @@ func (e *ssafn) SplitSlot(parent *ssa.LocalSlot, suffix string, offset int64, t 
 	n := e.curfn.NewLocal(e.gd, parent.N.Pos(), sym, t)
 	n.SetUsed(true)
 	n.SetEsc(ir.EscNever)
-	types.CalcSize(t)
+	types.CalcSize(e.gd, t)
 	return ssa.LocalSlot{N: n, Type: t, Off: 0, SplitOf: parent, SplitOffset: offset}
 }
 
@@ -9179,7 +9179,7 @@ func deferstruct(gd *base.Invocation) *types.Type {
 
 	// build struct holding the above fields
 	typ.SetUnderlying(types.NewStruct(fields))
-	types.CalcStructSize(typ)
+	types.CalcStructSize(gd, typ)
 
 	deferType = typ
 	return typ

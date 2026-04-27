@@ -494,7 +494,7 @@ func (pr *pkgReader) typIdx(info typeInfo, dict *readerDict, wrapped bool) *type
 	}
 
 	if !typ.IsUntyped() {
-		types.CheckSize(typ)
+		types.CheckSize(pr.gd, typ)
 	}
 
 	return typ
@@ -850,9 +850,9 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 
 		// We need to defer CheckSize until we've called SetUnderlying to
 		// handle recursive types.
-		types.DeferCheckSize()
+		types.DeferCheckSize(pr.gd)
 		typ.SetUnderlying(r.typWrapped(false))
-		types.ResumeCheckSize()
+		types.ResumeCheckSize(pr.gd)
 
 		if r.hasTypeParams() && !r.dict.shaped {
 			todoDictsAppend(r.gd, func() {
@@ -2525,7 +2525,7 @@ func (r *reader) expr() (res ir.Node) {
 	case exprOffsetof:
 		pos := r.pos()
 		typ := r.typ()
-		types.CalcSize(typ)
+		types.CalcSize(r.gd, typ)
 
 		var offset int64
 		for i := r.Len(); i >= 0; i-- {

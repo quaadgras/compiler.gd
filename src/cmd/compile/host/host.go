@@ -33,7 +33,6 @@ import (
 	"fmt"
 	"internal/buildcfg"
 	"io"
-	"sync"
 )
 
 // archInits mirrors the table in cmd/compile/main.go.
@@ -54,24 +53,6 @@ var archInits = map[string]func(*ssagen.ArchInfo){
 	"wasm":     wasm.Init,
 }
 
-// runMu serialises Run calls. After the per-Invocation migration
-// of ssaConfig / ssaCaches / Pathsyms / SiggenSet (and the
-// atomic.Pointer Type.cache.{ptr,slice}), the front-end / SSA-build
-// phases largely parallelise across invocations, but several
-// process-global state pieces still need migration before runMu can
-// be dropped:
-//
-//   - types.defercalc / deferredTypeStack (CheckSize bracket).
-//   - types.CalcSizeDisabled (within-invocation backend guard
-//     that's also process-global).
-//   - ir.Syms (200+ call sites) and ssagen.BoundsCheckFunc.
-//   - escape.leakTagCache map.
-//
-// With runMu, cmd/go gets in-process compile (no fork/exec) and
-// each compile uses its internal -c=N backend parallelism, but
-// outer parallelism is lost.
-var runMu sync.Mutex
-
 // Run drives one cmd/compile invocation in the calling process.
 // args is the argv that would be passed to the standalone `compile`
 // binary, NOT including argv[0]. stdout and stderr are reserved for
@@ -82,10 +63,14 @@ var runMu sync.Mutex
 // error and -V paths) calls runtime.Goexit. Run handles this
 // internally — the caller's goroutine survives.
 //
-// Run serialises concurrent calls via runMu. See runMu's comment.
+// Concurrent invocations: per-Invocation state lives on
+// *base.Invocation (ssaConfig/ssaCaches/Pathsyms/SiggenSet/
+// Defercalc/DeferredTypeStack/CalcSizeDisabled). Shared types from
+// types.Types[] / rttype.* / abi.synth* are computed via sync.Once
+// during process init; their Type.cache.{ptr,slice} are
+// atomic.Pointer; subsequent NewPtr/NewSlice calls on shared elem
+// types CAS-then-reload to preserve pointer-identity.
 func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
-	runMu.Lock()
-	defer runMu.Unlock()
 	archInit, ok := archInits[buildcfg.GOARCH]
 	if !ok {
 		return 2, fmt.Errorf("compile/host.Run: unknown architecture %q", buildcfg.GOARCH)
