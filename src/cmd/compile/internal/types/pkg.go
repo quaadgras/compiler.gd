@@ -6,7 +6,6 @@ package types
 
 import (
 	"cmd/compile/internal/base"
-	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"fmt"
 	"strconv"
@@ -14,11 +13,10 @@ import (
 )
 
 type Pkg struct {
-	Path    string // string literal used in import statement, e.g. "internal/runtime/sys"
-	Name    string // package name, e.g. "sys"
-	Prefix  string // escaped path for use in symbol table
-	Syms    map[string]*Sym
-	Pathsym *obj.LSym
+	Path   string // string literal used in import statement, e.g. "internal/runtime/sys"
+	Name   string // package name, e.g. "sys"
+	Prefix string // escaped path for use in symbol table
+	Syms   map[string]*Sym
 
 	Direct bool // imported directly
 	Local  bool // true for the package currently being compiled (set by cmd/compile main on the Pkg returned by NewPkg(gd, gd.Ctxt.Pkgpath, ""))

@@ -35,6 +35,10 @@ func WriteObjFile(ctxt *Link, b *bio.Writer) {
 
 	genFuncInfoSyms(ctxt)
 
+	if os.Getenv("GOGD_INPROC_VALIDATE") == "1" {
+		validateSymIndices(ctxt)
+	}
+
 	w := writer{
 		Writer:  goobj.NewWriter(b),
 		ctxt:    ctxt,
@@ -566,6 +570,80 @@ func makeSymRef(s *LSym) goobj.SymRef {
 		panic("unindexed symbol reference")
 	}
 	return goobj.SymRef{PkgIdx: uint32(s.PkgIdx), SymIdx: uint32(s.SymIdx)}
+}
+
+// validateSymIndices walks every Reloc/Aux SymRef the writer is about to emit
+// and verifies the (PkgIdx, SymIdx) pair would resolve in range when the
+// linker reads this object. If a reference points to an LSym with a SymIdx
+// that exceeds this Ctxt's section sizes, it likely came from a previous
+// in-process invocation that left stale PkgIdx/SymIdx fields on a shared
+// LSym pointer.
+func validateSymIndices(ctxt *Link) {
+	ndef := int32(len(ctxt.defs))
+	nh64 := int32(len(ctxt.hashed64defs))
+	nh := int32(len(ctxt.hasheddefs))
+	nnp := int32(len(ctxt.nonpkgdefs))
+	nnpr := int32(len(ctxt.nonpkgrefs))
+	check := func(parent *LSym, kind string, rs *LSym) {
+		if rs == nil || rs.PkgIdx == 0 {
+			return
+		}
+		var max int32
+		switch rs.PkgIdx {
+		case goobj.PkgIdxSelf:
+			max = ndef
+		case goobj.PkgIdxHashed64:
+			max = nh64
+		case goobj.PkgIdxHashed:
+			max = nh
+		case goobj.PkgIdxNone:
+			max = nnp + nnpr
+		default:
+			return
+		}
+		if rs.SymIdx < 0 || rs.SymIdx >= max {
+			fmt.Fprintf(os.Stderr, "STALE SYMREF pkg=%s kind=%s parent=%q target=%q PkgIdx=%d SymIdx=%d max=%d (ndef=%d nh64=%d nh=%d nnp=%d nnpr=%d)\n",
+				ctxt.Pkgpath, kind, parent.Name, rs.Name, rs.PkgIdx, rs.SymIdx, max, ndef, nh64, nh, nnp, nnpr)
+		}
+	}
+	walk := func(s *LSym) {
+		for i := range s.R {
+			check(s, "reloc", s.R[i].Sym)
+		}
+		if s.Gotype != nil {
+			check(s, "gotype", s.Gotype)
+		}
+		if fn := s.Func(); fn != nil {
+			check(s, "funcinfo", fn.FuncInfoSym)
+			for _, d := range fn.Pcln.Funcdata {
+				check(s, "funcdata", d)
+			}
+			if fn.dwarfInfoSym != nil {
+				check(s, "dwarf-info", fn.dwarfInfoSym)
+			}
+			if fn.dwarfLocSym != nil {
+				check(s, "dwarf-loc", fn.dwarfLocSym)
+			}
+			if fn.dwarfRangesSym != nil {
+				check(s, "dwarf-ranges", fn.dwarfRangesSym)
+			}
+			if fn.dwarfDebugLinesSym != nil {
+				check(s, "dwarf-lines", fn.dwarfDebugLinesSym)
+			}
+		}
+	}
+	for _, s := range ctxt.defs {
+		walk(s)
+	}
+	for _, s := range ctxt.hashed64defs {
+		walk(s)
+	}
+	for _, s := range ctxt.hasheddefs {
+		walk(s)
+	}
+	for _, s := range ctxt.nonpkgdefs {
+		walk(s)
+	}
 }
 
 func (w *writer) Reloc(r *Reloc) {

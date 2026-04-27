@@ -347,9 +347,24 @@ func imethods(gd *base.Invocation, t *types.Type) []*typeSig {
 	return methods
 }
 
-func dimportpath(gd *base.Invocation, p *types.Pkg) {
-	if p.Pathsym != nil {
-		return
+// pathsymsOf returns gd's per-Invocation Pkg→importpath-LSym map,
+// lazy-initialising on first call. The map was once a Pathsym field
+// on types.Pkg; for process-shared Pkgs (BuiltinPkg, UnsafePkg, the
+// nopkg used by reflectdata.makefield's nil-Pkg Lookup) the cached
+// LSym leaked across in-process invocations.
+func pathsymsOf(gd *base.Invocation) map[*types.Pkg]*obj.LSym {
+	m, _ := gd.Pathsyms.(map[*types.Pkg]*obj.LSym)
+	if m == nil {
+		m = make(map[*types.Pkg]*obj.LSym)
+		gd.Pathsyms = m
+	}
+	return m
+}
+
+func dimportpath(gd *base.Invocation, p *types.Pkg) *obj.LSym {
+	pathsyms := pathsymsOf(gd)
+	if s := pathsyms[p]; s != nil {
+		return s
 	}
 
 	if p == types.LocalPkg(gd) && gd.Ctxt.Pkgpath == "" {
@@ -360,14 +375,15 @@ func dimportpath(gd *base.Invocation, p *types.Pkg) {
 	// -- localpkg and Pkgs.Runtime. We don't want to produce import path symbols for
 	// both of them, so just produce one for localpkg.
 	if gd.Ctxt.Pkgpath == "runtime" && p == ir.Pkgs(gd).Runtime {
-		return
+		return nil
 	}
 
 	s := gd.Ctxt.Lookup("type:.importpath." + p.Prefix + ".")
 	ot := dnameData(gd, s, 0, p.Path, "", nil, false, false)
 	objw.Global(gd, s, int32(ot), obj.DUPOK|obj.RODATA)
 	s.Set(obj.AttrContentAddressable, true)
-	p.Pathsym = s
+	pathsyms[p] = s
+	return s
 }
 
 func dgopkgpath(gd *base.Invocation, c rttype.Cursor, pkg *types.Pkg) {
@@ -377,8 +393,7 @@ func dgopkgpath(gd *base.Invocation, c rttype.Cursor, pkg *types.Pkg) {
 		return
 	}
 
-	dimportpath(gd, pkg)
-	c.WritePtr(pkg.Pathsym)
+	c.WritePtr(dimportpath(gd, pkg))
 }
 
 // dgopkgpathOff writes an offset relocation to the pkg path symbol to c.
@@ -388,8 +403,7 @@ func dgopkgpathOff(gd *base.Invocation, c rttype.Cursor, pkg *types.Pkg) {
 		return
 	}
 
-	dimportpath(gd, pkg)
-	c.WriteSymPtrOff(pkg.Pathsym, false)
+	c.WriteSymPtrOff(dimportpath(gd, pkg), false)
 }
 
 // symMethodEq reports whether two method-name Syms denote the same

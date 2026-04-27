@@ -222,6 +222,20 @@ type Invocation struct {
 	TypesUnsafePkg  any // *types.Pkg
 	TypesBlankSym   any // *types.Sym
 
+	// Pathsyms maps each types.Pkg to the importpath LSym
+	// (`type:.importpath.<prefix>.`) emitted for it in this
+	// invocation. Was a `Pathsym *obj.LSym` field on types.Pkg —
+	// process-shared Pkgs (BuiltinPkg, UnsafePkg, the nopkg used
+	// for synthetic struct field Syms via makefield, etc.) caused
+	// the LSym to leak across in-process invocations: invocation 1
+	// populated Pathsym with an LSym from its Ctxt, invocation 2
+	// reused that LSym in relocation sym-refs, but the LSym's
+	// stale {PkgIdxHashed, SymIdx} pointed outside invocation 2's
+	// hashed-defs section, and the linker tripped on
+	// out-of-range index when reading invocation 2's .o file.
+	// Storing per-Invocation keeps the LSym Ctxt-local.
+	Pathsyms any // map[*types.Pkg]*obj.LSym
+
 	// walk.scasetype's cached *types.Type. Was a package-level
 	// `var scase`; pinned invocation 1's LocalPkg-local Syms for
 	// the "c" / "elem" fields, breaking selector lookups in later
