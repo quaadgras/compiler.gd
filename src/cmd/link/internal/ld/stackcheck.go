@@ -61,7 +61,7 @@ func (ctxt *Link) doStackCheck() {
 	// The call to morestack in every splittable function ensures
 	// that there are at least StackLimit bytes available below SP
 	// when morestack returns.
-	limit := objabi.StackNosplit(*flagRace) - sc.callSize
+	limit := objabi.StackNosplit(ctxt.flagRace) - sc.callSize
 	if buildcfg.GOARCH == "arm64" {
 		// Need an extra 8 bytes below SP to save FP.
 		limit -= 8
@@ -149,7 +149,7 @@ func (sc *stackCheck) check(sym loader.Sym) int {
 	// Store the sentinel so we can detect cycles.
 	sc.height[sym] = stackCheckCycle
 	// Compute and record the height and optionally edges.
-	h, edges := sc.computeHeight(sym, *flagDebugNosplit || sc.graph != nil)
+	h, edges := sc.computeHeight(sym, sc.ctxt.flagDebugNosplit || sc.graph != nil)
 	if h > int(stackCheckCycle) { // Prevent integer overflow
 		h = int(stackCheckCycle)
 	}
@@ -158,7 +158,7 @@ func (sc *stackCheck) check(sym loader.Sym) int {
 		sc.graph[sym] = edges
 	}
 
-	if *flagDebugNosplit {
+	if sc.ctxt.flagDebugNosplit {
 		for _, edge := range edges {
 			fmt.Printf("nosplit: %s +%d", sc.symName(sym), edge.growth)
 			if edge.target == 0 {

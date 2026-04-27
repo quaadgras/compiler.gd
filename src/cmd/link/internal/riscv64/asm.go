@@ -704,7 +704,7 @@ func trampoline(ctxt *ld.Link, ldr *loader.Loader, ri int, rs, s loader.Sym) {
 
 		// Relocation symbol has an address and is directly reachable,
 		// therefore there is no need for a trampoline.
-		if ldr.SymValue(rs) != 0 && off >= -(1<<20) && off < (1<<20) && (*ld.FlagDebugTramp <= 1 || ldr.SymPkg(s) == ldr.SymPkg(rs)) {
+		if ldr.SymValue(rs) != 0 && off >= -(1<<20) && off < (1<<20) && (ctxt.FlagDebugTramp <= 1 || ldr.SymPkg(s) == ldr.SymPkg(rs)) {
 			break
 		}
 

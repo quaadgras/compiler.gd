@@ -56,6 +56,11 @@ import (
 type fieldSpec struct {
 	Var   string `json:"var"`
 	Field string `json:"field"`
+	// Deref marks a `*T` flag pointer var. Reads in source typically
+	// look like `*flagX`; the rewrite replaces the whole `*flagX`
+	// expression with `ctxt.<field>` (no leading &). Naked `flagX`
+	// references are left alone (rare; usually `&flagX` for flag.Var).
+	Deref bool `json:"deref,omitempty"`
 }
 
 type config struct {
@@ -93,8 +98,13 @@ func main() {
 
 	cfg := loadConfig(configPath)
 	targets := make(map[string]string, len(cfg.Fields))
+	derefTargets := make(map[string]string, len(cfg.Fields))
 	for _, fs := range cfg.Fields {
-		targets[fs.Var] = fs.Field
+		if fs.Deref {
+			derefTargets[fs.Var] = fs.Field
+		} else {
+			targets[fs.Var] = fs.Field
+		}
 	}
 
 	fset := token.NewFileSet()
@@ -128,7 +138,7 @@ func main() {
 				continue
 			}
 			ctx := newScopeCtx(fn)
-			rewriteBlock(fn.Body, ctx, targets, fn, &changed, fileMissing)
+			rewriteBlock(fn.Body, ctx, targets, derefTargets, fn, &changed, fileMissing)
 		}
 
 		// Also delete the package-level var declarations whose
@@ -142,7 +152,14 @@ func main() {
 		//   )
 		//
 		// We only delete a spec if its name is in targets.
-		af.Decls = filterVarDecls(af.Decls, targets, &changed)
+		allTargets := make(map[string]string, len(targets)+len(derefTargets))
+		for k, v := range targets {
+			allTargets[k] = v
+		}
+		for k, v := range derefTargets {
+			allTargets[k] = v
+		}
+		af.Decls = filterVarDecls(af.Decls, allTargets, &changed)
 
 		if len(fileMissing) > 0 {
 			missing[path] = fileMissing
@@ -337,15 +354,29 @@ func knownLinkField(recvType ast.Expr, recvName string) string {
 // rewriteBlock walks a function body, rewriting target var references
 // to ctx.Carrier.<field>. Tracks local var shadowing and skips
 // rewrites where the target is shadowed.
-func rewriteBlock(body *ast.BlockStmt, ctx *scopeCtx, targets map[string]string, fn *ast.FuncDecl, changed *bool, missing map[string]bool) {
+//
+// derefTargets are flag-pointer vars (`*T`) read in source as `*flagX`.
+// For these, we match a UnaryExpr (op=*) whose X is the target Ident
+// and replace the entire UnaryExpr with the selector — dropping the *.
+func rewriteBlock(body *ast.BlockStmt, ctx *scopeCtx, targets, derefTargets map[string]string, fn *ast.FuncDecl, changed *bool, missing map[string]bool) {
 	if body == nil {
 		return
 	}
 	apply(body, func(parent ast.Node, set func(ast.Node)) bool {
-		// Rewrite identifier nodes that match a target name. We never
-		// rewrite the .Sel slot of a SelectorExpr (apply() handles
-		// that by not recursing into Sel) so "foo.gdbscript" reads of
-		// some other type's field don't get clobbered.
+		// Deref: `*flagX` (StarExpr) where X is a target ident.
+		// Rewrite the whole StarExpr to ctxt.<field>, dropping the *.
+		// (Go's AST uses StarExpr for pointer dereference; UnaryExpr
+		// is for prefix - ! ^ &.)
+		if s, ok := parent.(*ast.StarExpr); ok {
+			if id, ok := s.X.(*ast.Ident); ok {
+				if rep, ok := buildReplacement(id.Name, ctx, derefTargets, fn, missing); ok {
+					set(rep)
+					*changed = true
+					return false
+				}
+			}
+		}
+		// Plain ident matching a non-deref target.
 		if id, ok := parent.(*ast.Ident); ok {
 			if rep, ok := buildReplacement(id.Name, ctx, targets, fn, missing); ok {
 				set(rep)

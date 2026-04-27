@@ -62,7 +62,7 @@ var (
 )
 
 func gentext(ctxt *ld.Link, ldr *loader.Loader) {
-	if *ld.FlagD || ctxt.Target.IsExternal() {
+	if ctxt.FlagD || ctxt.Target.IsExternal() {
 		return
 	}
 

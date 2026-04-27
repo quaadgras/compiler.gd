@@ -44,7 +44,7 @@ func (ctxt *Link) inittasks() {
 		ctxt.mainInittasks = ctxt.inittaskSym([]string{"main..inittask"}, "go:main.inittasks")
 	case BuildModePlugin:
 		// For plugins, the list will be run on plugin load.
-		ctxt.mainInittasks = ctxt.inittaskSym([]string{fmt.Sprintf("%s..inittask", objabi.PathToPrefix(*flagPluginPath))}, "go:plugin.inittasks")
+		ctxt.mainInittasks = ctxt.inittaskSym([]string{fmt.Sprintf("%s..inittask", objabi.PathToPrefix(ctxt.flagPluginPath))}, "go:plugin.inittasks")
 		// Make symbol local so multiple plugins don't clobber each other's inittask list.
 		ctxt.loader.SetAttrLocal(ctxt.mainInittasks, true)
 	case BuildModeShared:

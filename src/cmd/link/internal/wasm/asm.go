@@ -255,7 +255,7 @@ func asmb2(ctxt *ld.Link, ldr *loader.Loader) {
 	writeCodeSec(ctxt, fns)
 	writeDataSec(ctxt)
 	writeProducerSec(ctxt)
-	if !*ld.FlagS {
+	if !ctxt.FlagS {
 		writeNameSec(ctxt, len(hostImports), fns)
 	}
 }

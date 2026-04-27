@@ -1711,7 +1711,7 @@ func (d *dwctxt) writegdbscript() dwarfSecInfo {
 // that switches based on symbol instead.
 
 func dwarfEnabled(ctxt *Link) bool {
-	if *FlagW { // disable dwarf
+	if ctxt.FlagW { // disable dwarf
 		return false
 	}
 	if ctxt.HeadType == objabi.Hplan9 || ctxt.HeadType == objabi.Hjs || ctxt.HeadType == objabi.Hwasip1 {
@@ -2390,7 +2390,7 @@ func (d *dwctxt) collectUnitLocs(u *sym.CompilationUnit) []loader.Sym {
 }
 
 func dwarfaddelfsectionsyms(ctxt *Link) {
-	if *FlagW { // disable dwarf
+	if ctxt.FlagW { // disable dwarf
 		return
 	}
 	if ctxt.LinkMode != LinkExternal {

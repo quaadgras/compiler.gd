@@ -128,11 +128,11 @@ func mustLinkExternal(ctxt *Link) (res bool, reason string) {
 		return true, fmt.Sprintf("%s/%s requires external linking", buildcfg.GOOS, buildcfg.GOARCH)
 	}
 
-	if *flagMsan {
+	if ctxt.flagMsan {
 		return true, "msan"
 	}
 
-	if *flagAsan {
+	if ctxt.flagAsan {
 		return true, "asan"
 	}
 

@@ -81,11 +81,11 @@ func archinit(ctxt *ld.Link) {
 	case objabi.Hlinux: // s390x ELF
 		ld.Elfinit(ctxt)
 		ctxt.HEADR = ld.ELFRESERVE
-		if *ld.FlagRound == -1 {
-			*ld.FlagRound = 0x10000
+		if ctxt.FlagRound == -1 {
+			ctxt.FlagRound = 0x10000
 		}
-		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ctxt.HEADR)
+		if ctxt.FlagTextAddr == -1 {
+			ctxt.FlagTextAddr = ld.Rnd(0x10000, ctxt.FlagRound) + int64(ctxt.HEADR)
 		}
 	}
 }

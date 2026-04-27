@@ -72,24 +72,32 @@ func Exit(code int) {
 	os.Exit(code)
 }
 
-// Exitf logs an error message then calls Exit(2).
+// Exitf logs an error message then calls Exit(2). Reads flagH and
+// nerrors from currentLink (set by Main); pre-Main calls fall back
+// to direct os.Exit since the package-level state no longer exists.
 func Exitf(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, os.Args[0]+": "+format+"\n", a...)
-	nerrors++
-	if *flagH {
-		panic("error")
+	if currentLink != nil {
+		currentLink.nerrors++
+		if currentLink.flagH {
+			panic("error")
+		}
 	}
 	Exit(2)
 }
 
 // afterErrorAction updates 'nerrors' on error and invokes exit or
-// panics in the proper circumstances.
+// panics in the proper circumstances. Routes through currentLink
+// (set by Main) for per-Link error counters and flag values.
 func afterErrorAction() {
-	nerrors++
-	if *flagH {
+	if currentLink == nil {
+		return // pre-Main; nothing to update
+	}
+	currentLink.nerrors++
+	if currentLink.flagH {
 		panic("error")
 	}
-	if nerrors > 20 && !*flagAllErrors {
+	if currentLink.nerrors > 20 && !currentLink.flagAllErrors {
 		Exitf("too many errors")
 	}
 }

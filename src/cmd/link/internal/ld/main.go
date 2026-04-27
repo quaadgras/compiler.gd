@@ -34,7 +34,6 @@ import (
 	"bufio"
 	"cmd/internal/goobj"
 	"cmd/internal/objabi"
-	"cmd/internal/quoted"
 	"cmd/internal/sys"
 	"cmd/internal/telemetry/counter"
 	"cmd/link/internal/benchmark"
@@ -63,64 +62,10 @@ var counterOpenOnce sync.Once
 // can install a fresh flag.CommandLine and re-register all flags onto
 // it (otherwise flag.String("H", ...) inside Main panics with
 // "flag redefined" on the second invocation).
-var (
-	flagBuildid *string
-	flagBindNow *bool
 
-	flagOutfile    *string
-	flagPluginPath *string
-	flagFipso      *string
+// use 64-bit addresses in symbol table
 
-	flagInstallSuffix *string
-	flagDumpDep       *bool
-	flagRace          *bool
-	flagMsan          *bool
-	flagAsan          *bool
-	flagAslr          *bool
-
-	flagFieldTrack *string
-	flagLibGCC     *string
-	flagTmpdir     *string
-
-	flagExtld      quoted.Flag
-	flagExtldflags quoted.Flag
-	flagExtar      *string
-
-	flagCaptureHostObjs *string
-
-	flagA             *bool
-	FlagC             *bool
-	FlagD             *bool
-	flagF             *bool
-	flagG             *bool
-	flagH             *bool
-	flagN             *bool
-	FlagS             *bool
-	flag8             bool // use 64-bit addresses in symbol table
-	flagHostBuildid   *string
-	flagInterpreter   *string
-	flagCheckLinkname *bool
-	FlagDebugTramp    *int
-	FlagDebugTextSize *int
-	flagDebugNosplit  *bool
-	FlagStrictDups    *int
-	FlagRound         *int64
-	FlagTextAddr      *int64
-	FlagDataAddr      *int64
-	FlagFuncAlign     *int
-	flagEntrySymbol   *string
-	flagPruneWeakMap  *bool
-	flagRandLayout    *int64
-	flagAllErrors     *bool
-	cpuprofile        *string
-	memprofile        *string
-	memprofilerate    *int64
-	benchmarkFlag     *string
-	benchmarkFileFlag *string
-
-	flagW ternaryFlag
-	FlagW = new(bool) // the -w flag, computed in main from flagW
-)
+// the -w flag, computed in main from flagW
 
 // setupFlags registers every linker flag onto the current
 // flag.CommandLine. Called from init (default CommandLine) and from
@@ -135,60 +80,60 @@ var (
 // invocation-to-invocation isolation.
 func setupFlags(ctxt *Link) {
 	flag.Var(&ctxt.rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
-	flag.Var(&flagExtld, "extld", "use `linker` when linking in external mode")
-	flag.Var(&flagExtldflags, "extldflags", "pass `flags` to external linker")
-	flag.Var(&flagW, "w", "disable DWARF generation")
+	flag.Var(&ctxt.flagExtld, "extld", "use `linker` when linking in external mode")
+	flag.Var(&ctxt.flagExtldflags, "extldflags", "pass `flags` to external linker")
+	flag.Var(&ctxt.flagW, "w", "disable DWARF generation")
 
-	flagBuildid = flag.String("buildid", "", "record `id` as Go toolchain build id")
-	flagBindNow = flag.Bool("bindnow", false, "mark a dynamically linked ELF object for immediate function binding")
+	flag.StringVar(&ctxt.flagBuildid, "buildid", "", "record `id` as Go toolchain build id")
+	flag.BoolVar(&ctxt.flagBindNow, "bindnow", false, "mark a dynamically linked ELF object for immediate function binding")
 
-	flagOutfile = flag.String("o", "", "write output to `file`")
-	flagPluginPath = flag.String("pluginpath", "", "full path name for plugin")
-	flagFipso = flag.String("fipso", "", "write fips module to `file`")
+	flag.StringVar(&ctxt.flagOutfile, "o", "", "write output to `file`")
+	flag.StringVar(&ctxt.flagPluginPath, "pluginpath", "", "full path name for plugin")
+	flag.StringVar(&ctxt.flagFipso, "fipso", "", "write fips module to `file`")
 
-	flagInstallSuffix = flag.String("installsuffix", "", "set package directory `suffix`")
-	flagDumpDep = flag.Bool("dumpdep", false, "dump symbol dependency graph")
-	flagRace = flag.Bool("race", false, "enable race detector")
-	flagMsan = flag.Bool("msan", false, "enable MSan interface")
-	flagAsan = flag.Bool("asan", false, "enable ASan interface")
-	flagAslr = flag.Bool("aslr", true, "enable ASLR for buildmode=c-shared on windows")
+	flag.StringVar(&ctxt.flagInstallSuffix, "installsuffix", "", "set package directory `suffix`")
+	flag.BoolVar(&ctxt.flagDumpDep, "dumpdep", false, "dump symbol dependency graph")
+	flag.BoolVar(&ctxt.flagRace, "race", false, "enable race detector")
+	flag.BoolVar(&ctxt.flagMsan, "msan", false, "enable MSan interface")
+	flag.BoolVar(&ctxt.flagAsan, "asan", false, "enable ASan interface")
+	flag.BoolVar(&ctxt.flagAslr, "aslr", true, "enable ASLR for buildmode=c-shared on windows")
 
-	flagFieldTrack = flag.String("k", "", "set field tracking `symbol`")
-	flagLibGCC = flag.String("libgcc", "", "compiler support lib for internal linking; use \"none\" to disable")
-	flagTmpdir = flag.String("tmpdir", "", "use `directory` for temporary files")
+	flag.StringVar(&ctxt.flagFieldTrack, "k", "", "set field tracking `symbol`")
+	flag.StringVar(&ctxt.flagLibGCC, "libgcc", "", "compiler support lib for internal linking; use \"none\" to disable")
+	flag.StringVar(&ctxt.flagTmpdir, "tmpdir", "", "use `directory` for temporary files")
 
-	flagExtar = flag.String("extar", "", "archive program for buildmode=c-archive")
+	flag.StringVar(&ctxt.flagExtar, "extar", "", "archive program for buildmode=c-archive")
 
-	flagCaptureHostObjs = flag.String("capturehostobjs", "", "capture host object files loaded during internal linking to specified dir")
+	flag.StringVar(&ctxt.flagCaptureHostObjs, "capturehostobjs", "", "capture host object files loaded during internal linking to specified dir")
 
-	flagA = flag.Bool("a", false, "no-op (deprecated)")
-	FlagC = flag.Bool("c", false, "dump call graph")
-	FlagD = flag.Bool("d", false, "disable dynamic executable")
-	flagF = flag.Bool("f", false, "ignore version mismatch")
-	flagG = flag.Bool("g", false, "disable go package data checks")
-	flagH = flag.Bool("h", false, "halt on error")
-	flagN = flag.Bool("n", false, "no-op (deprecated)")
-	FlagS = flag.Bool("s", false, "disable symbol table")
-	flagHostBuildid = flag.String("B", "", "set ELF NT_GNU_BUILD_ID `note` or Mach-O UUID; use \"gobuildid\" to generate it from the Go build ID; \"none\" to disable")
-	flagInterpreter = flag.String("I", "", "use `linker` as ELF dynamic linker")
-	flagCheckLinkname = flag.Bool("checklinkname", true, "check linkname symbol references")
-	FlagDebugTramp = flag.Int("debugtramp", 0, "debug trampolines")
-	FlagDebugTextSize = flag.Int("debugtextsize", 0, "debug text section max size")
-	flagDebugNosplit = flag.Bool("debugnosplit", false, "dump nosplit call graph")
-	FlagStrictDups = flag.Int("strictdups", 0, "sanity check duplicate symbol contents during object file reading (1=warn 2=err).")
-	FlagRound = flag.Int64("R", -1, "set address rounding `quantum`")
-	FlagTextAddr = flag.Int64("T", -1, "set the start address of text symbols")
-	FlagDataAddr = flag.Int64("D", -1, "set the start address of data symbols")
-	FlagFuncAlign = flag.Int("funcalign", 0, "set function align to `N` bytes")
-	flagEntrySymbol = flag.String("E", "", "set `entry` symbol name")
-	flagPruneWeakMap = flag.Bool("pruneweakmap", true, "prune weak mapinit refs")
-	flagRandLayout = flag.Int64("randlayout", 0, "randomize function layout")
-	flagAllErrors = flag.Bool("e", false, "no limit on number of errors reported")
-	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
-	memprofile = flag.String("memprofile", "", "write memory profile to `file`")
-	memprofilerate = flag.Int64("memprofilerate", 0, "set runtime.MemProfileRate to `rate`")
-	benchmarkFlag = flag.String("benchmark", "", "set to 'mem' or 'cpu' to enable phase benchmarking")
-	benchmarkFileFlag = flag.String("benchmarkprofile", "", "emit phase profiles to `base`_phase.{cpu,mem}prof")
+	flag.BoolVar(&ctxt.flagA, "a", false, "no-op (deprecated)")
+	flag.BoolVar(&ctxt.FlagC, "c", false, "dump call graph")
+	flag.BoolVar(&ctxt.FlagD, "d", false, "disable dynamic executable")
+	flag.BoolVar(&ctxt.flagF, "f", false, "ignore version mismatch")
+	flag.BoolVar(&ctxt.flagG, "g", false, "disable go package data checks")
+	flag.BoolVar(&ctxt.flagH, "h", false, "halt on error")
+	flag.BoolVar(&ctxt.flagN, "n", false, "no-op (deprecated)")
+	flag.BoolVar(&ctxt.FlagS, "s", false, "disable symbol table")
+	flag.StringVar(&ctxt.flagHostBuildid, "B", "", "set ELF NT_GNU_BUILD_ID `note` or Mach-O UUID; use \"gobuildid\" to generate it from the Go build ID; \"none\" to disable")
+	flag.StringVar(&ctxt.flagInterpreter, "I", "", "use `linker` as ELF dynamic linker")
+	flag.BoolVar(&ctxt.flagCheckLinkname, "checklinkname", true, "check linkname symbol references")
+	flag.IntVar(&ctxt.FlagDebugTramp, "debugtramp", 0, "debug trampolines")
+	flag.IntVar(&ctxt.FlagDebugTextSize, "debugtextsize", 0, "debug text section max size")
+	flag.BoolVar(&ctxt.flagDebugNosplit, "debugnosplit", false, "dump nosplit call graph")
+	flag.IntVar(&ctxt.FlagStrictDups, "strictdups", 0, "sanity check duplicate symbol contents during object file reading (1=warn 2=err).")
+	flag.Int64Var(&ctxt.FlagRound, "R", -1, "set address rounding `quantum`")
+	flag.Int64Var(&ctxt.FlagTextAddr, "T", -1, "set the start address of text symbols")
+	flag.Int64Var(&ctxt.FlagDataAddr, "D", -1, "set the start address of data symbols")
+	flag.IntVar(&ctxt.FlagFuncAlign, "funcalign", 0, "set function align to `N` bytes")
+	flag.StringVar(&ctxt.flagEntrySymbol, "E", "", "set `entry` symbol name")
+	flag.BoolVar(&ctxt.flagPruneWeakMap, "pruneweakmap", true, "prune weak mapinit refs")
+	flag.Int64Var(&ctxt.flagRandLayout, "randlayout", 0, "randomize function layout")
+	flag.BoolVar(&ctxt.flagAllErrors, "e", false, "no limit on number of errors reported")
+	flag.StringVar(&ctxt.cpuprofile, "cpuprofile", "", "write cpu profile to `file`")
+	flag.StringVar(&ctxt.memprofile, "memprofile", "", "write memory profile to `file`")
+	flag.Int64Var(&ctxt.memprofilerate, "memprofilerate", 0, "set runtime.MemProfileRate to `rate`")
+	flag.StringVar(&ctxt.benchmarkFlag, "benchmark", "", "set to 'mem' or 'cpu' to enable phase benchmarking")
+	flag.StringVar(&ctxt.benchmarkFileFlag, "benchmarkprofile", "", "emit phase profiles to `base`_phase.{cpu,mem}prof")
 }
 
 // Was: init() calls setupFlags() to register on the default flag.CommandLine.
@@ -280,10 +225,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	// calls and so the local-to-Main flag.String("H", ...) below
 	// doesn't trip "flag redefined" on the second pass.
 	flag.CommandLine = flag.NewFlagSet(savedArgs[0], flag.ExitOnError)
-	flagW = ternaryFlagUnset
-	flag8 = false
-	flagExtld = nil
-	flagExtldflags = nil
+	// Var-style flag targets are now per-Link fields on ctxt (fresh
+	// per linknew), so explicit resets are no longer needed.
 	setupFlags(ctxt)
 
 	// For testing behavior of go command when tools crash silently.
@@ -315,7 +258,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 
 	// TODO(matloob): define these above and then check flag values here
 	if ctxt.Arch.Family == sys.AMD64 && buildcfg.GOOS == "plan9" {
-		flag.BoolVar(&flag8, "8", false, "use 64-bit addresses in symbol table")
+		flag.BoolVar(&ctxt.flag8, "8", false, "use 64-bit addresses in symbol table")
 	}
 	flagHeadType := flag.String("H", "", "set header `type`")
 	flag.BoolVar(&ctxt.linkShared, "linkshared", false, "link against installed Go shared libraries")
@@ -359,36 +302,36 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 		ctxt.HeadType.Set(buildcfg.GOOS)
 	}
 
-	if !*flagAslr && ctxt.BuildMode != BuildModeCShared {
+	if !ctxt.flagAslr && ctxt.BuildMode != BuildModeCShared {
 		Errorf("-aslr=false is only allowed for -buildmode=c-shared")
 		usage()
 	}
 
-	if *FlagD && ctxt.UsesLibc() {
+	if ctxt.FlagD && ctxt.UsesLibc() {
 		Exitf("dynamic linking required on %s; -d flag cannot be used", buildcfg.GOOS)
 	}
 
 	isPowerOfTwo := func(n int64) bool {
 		return n > 0 && n&(n-1) == 0
 	}
-	if *FlagRound != -1 && (*FlagRound < 4096 || !isPowerOfTwo(*FlagRound)) {
-		Exitf("invalid -R value 0x%x", *FlagRound)
+	if ctxt.FlagRound != -1 && (ctxt.FlagRound < 4096 || !isPowerOfTwo(ctxt.FlagRound)) {
+		Exitf("invalid -R value 0x%x", ctxt.FlagRound)
 	}
-	if *FlagFuncAlign != 0 && !isPowerOfTwo(int64(*FlagFuncAlign)) {
-		Exitf("invalid -funcalign value %d", *FlagFuncAlign)
+	if ctxt.FlagFuncAlign != 0 && !isPowerOfTwo(int64(ctxt.FlagFuncAlign)) {
+		Exitf("invalid -funcalign value %d", ctxt.FlagFuncAlign)
 	}
 
-	checkStrictDups = *FlagStrictDups
+	ctxt.checkStrictDups = ctxt.FlagStrictDups
 
-	switch flagW {
+	switch ctxt.flagW {
 	case ternaryFlagFalse:
-		*FlagW = false
+		ctxt.FlagW = false
 	case ternaryFlagTrue:
-		*FlagW = true
+		ctxt.FlagW = true
 	case ternaryFlagUnset:
-		*FlagW = *FlagS // -s implies -w if not explicitly set
+		ctxt.FlagW = ctxt.FlagS // -s implies -w if not explicitly set
 		if ctxt.IsDarwin() && ctxt.BuildMode == BuildModeCShared {
-			*FlagW = true // default to -w in c-shared mode on darwin, see #61229
+			ctxt.FlagW = true // default to -w in c-shared mode on darwin, see #61229
 		}
 	}
 
@@ -396,7 +339,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 		ctxt.abiInternalVer = 0
 	}
 
-	startProfile()
+	startProfile(ctxt)
 	if ctxt.BuildMode == BuildModeUnset {
 		ctxt.BuildMode.Set("exe")
 	}
@@ -405,29 +348,29 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 		usage()
 	}
 
-	if *flagOutfile == "" {
-		*flagOutfile = "a.out"
+	if ctxt.flagOutfile == "" {
+		ctxt.flagOutfile = "a.out"
 		if ctxt.HeadType == objabi.Hwindows {
-			*flagOutfile += ".exe"
+			ctxt.flagOutfile += ".exe"
 		}
 	}
 
-	ctxt.interpreter = *flagInterpreter
+	ctxt.interpreter = ctxt.flagInterpreter
 
-	if *flagHostBuildid == "" && *flagBuildid != "" {
-		*flagHostBuildid = "gobuildid"
+	if ctxt.flagHostBuildid == "" && ctxt.flagBuildid != "" {
+		ctxt.flagHostBuildid = "gobuildid"
 	}
 	addbuildinfo(ctxt)
 
 	// enable benchmarking
 	var bench *benchmark.Metrics
-	if len(*benchmarkFlag) != 0 {
-		if *benchmarkFlag == "mem" {
-			bench = benchmark.New(benchmark.GC, *benchmarkFileFlag)
-		} else if *benchmarkFlag == "cpu" {
-			bench = benchmark.New(benchmark.NoGC, *benchmarkFileFlag)
+	if len(ctxt.benchmarkFlag) != 0 {
+		if ctxt.benchmarkFlag == "mem" {
+			bench = benchmark.New(benchmark.GC, ctxt.benchmarkFileFlag)
+		} else if ctxt.benchmarkFlag == "cpu" {
+			bench = benchmark.New(benchmark.NoGC, ctxt.benchmarkFileFlag)
 		} else {
-			Errorf("unknown benchmark flag: %q", *benchmarkFlag)
+			Errorf("unknown benchmark flag: %q", ctxt.benchmarkFlag)
 			usage()
 		}
 	}
@@ -439,8 +382,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	bench.Start("Archinit")
 	ctxt.thearch.Archinit(ctxt)
 
-	if *FlagDataAddr != -1 && *FlagDataAddr%*FlagRound != 0 {
-		Exitf("invalid -D value 0x%x: not aligned to rounding quantum 0x%x", *FlagDataAddr, *FlagRound)
+	if ctxt.FlagDataAddr != -1 && ctxt.FlagDataAddr%ctxt.FlagRound != 0 {
+		Exitf("invalid -D value 0x%x: not aligned to rounding quantum 0x%x", ctxt.FlagDataAddr, ctxt.FlagRound)
 	}
 
 	if ctxt.linkShared && !ctxt.IsELF {
@@ -454,8 +397,8 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 			}
 			return "off"
 		}
-		ctxt.Logf("build mode: %s, symbol table: %s, DWARF: %s\n", ctxt.BuildMode, onOff(!*FlagS), onOff(dwarfEnabled(ctxt)))
-		ctxt.Logf("HEADER = -H%d -T0x%x -R0x%x\n", ctxt.HeadType, uint64(*FlagTextAddr), uint32(*FlagRound))
+		ctxt.Logf("build mode: %s, symbol table: %s, DWARF: %s\n", ctxt.BuildMode, onOff(!ctxt.FlagS), onOff(dwarfEnabled(ctxt)))
+		ctxt.Logf("HEADER = -H%d -T0x%x -R0x%x\n", ctxt.HeadType, uint64(ctxt.FlagTextAddr), uint32(ctxt.FlagRound))
 	}
 
 	zerofp := goobj.FingerprintType{}
@@ -475,7 +418,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 			addlibpath(ctxt, "command line", "command line", file, pkgpath, "", zerofp)
 		}
 	case BuildModePlugin:
-		addlibpath(ctxt, "command line", "command line", flag.Arg(0), *flagPluginPath, "", zerofp)
+		addlibpath(ctxt, "command line", "command line", flag.Arg(0), ctxt.flagPluginPath, "", zerofp)
 	default:
 		addlibpath(ctxt, "command line", "command line", flag.Arg(0), "main", "", zerofp)
 	}
@@ -495,7 +438,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	ctxt.dostrdata()
 	if buildcfg.Experiment.FieldTrack {
 		bench.Start("fieldtrack")
-		fieldtrack(ctxt.Arch, ctxt.loader)
+		fieldtrack(ctxt, ctxt.Arch, ctxt.loader)
 	}
 
 	bench.Start("dwarfGenerateDebugInfo")
@@ -587,7 +530,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 		ctxt.thearch.GenSymsLate(ctxt, ctxt.loader)
 	}
 
-	asmbfips(ctxt, *flagFipso)
+	asmbfips(ctxt, ctxt.flagFipso)
 
 	bench.Start("Asmb2")
 	asmb2(ctxt)
@@ -625,9 +568,9 @@ func (r *Rpath) String() string {
 	return r.val
 }
 
-func startProfile() {
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
+func startProfile(ctxt *Link) {
+	if ctxt.cpuprofile != "" {
+		f, err := os.Create(ctxt.cpuprofile)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -641,27 +584,24 @@ func startProfile() {
 			}
 		})
 	}
-	if *memprofile != "" {
-		if *memprofilerate != 0 {
-			runtime.MemProfileRate = int(*memprofilerate)
+	if ctxt.memprofile != "" {
+		if ctxt.memprofilerate != 0 {
+			runtime.MemProfileRate = int(ctxt.memprofilerate)
 		}
-		f, err := os.Create(*memprofile)
+		memprofile := ctxt.memprofile
+		f, err := os.Create(memprofile)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
 		AtExit(func() {
 			// Profile all outstanding allocations.
 			runtime.GC()
-			// compilebench parses the memory profile to extract memstats,
-			// which are only written in the legacy pprof format.
-			// See golang.org/issue/18641 and runtime/pprof/pprof.go:writeHeap.
 			const writeLegacyFormat = 1
 			if err := pprof.Lookup("heap").WriteTo(f, writeLegacyFormat); err != nil {
 				log.Fatalf("%v", err)
 			}
-			// Close the file after writing the profile.
 			if err := f.Close(); err != nil {
-				log.Fatalf("could not close %v: %v", *memprofile, err)
+				log.Fatalf("could not close %v: %v", memprofile, err)
 			}
 		})
 	}

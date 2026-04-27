@@ -540,14 +540,14 @@ func Xcoffinit(ctxt *Link) {
 	ctxt.xfile.
 		dynLibraries = make(map[string]int)
 	ctxt.HEADR = int32(Rnd(XCOFFHDRRESERVE, XCOFFSECTALIGN))
-	if *FlagRound != -1 {
+	if ctxt.FlagRound != -1 {
 		Errorf("-R not available on AIX")
 	}
-	*FlagRound = XCOFFSECTALIGN
-	if *FlagTextAddr != -1 {
+	ctxt.FlagRound = XCOFFSECTALIGN
+	if ctxt.FlagTextAddr != -1 {
 		Errorf("-T not available on AIX")
 	}
-	*FlagTextAddr = Rnd(XCOFFTEXTBASE, *FlagRound) + int64(ctxt.HEADR)
+	ctxt.FlagTextAddr = Rnd(XCOFFTEXTBASE, ctxt.FlagRound) + int64(ctxt.HEADR)
 }
 
 // SYMBOL TABLE
@@ -1302,7 +1302,7 @@ func (ctxt *Link) doxcoff() {
 	toc.SetVisibilityHidden(true)
 
 	// Add entry point to .loader symbols.
-	ep := ldr.Lookup(*flagEntrySymbol, 0)
+	ep := ldr.Lookup(ctxt.flagEntrySymbol, 0)
 	if ep == 0 || !ldr.AttrReachable(ep) {
 		Exitf("wrong entry point")
 	}
@@ -1429,7 +1429,7 @@ func (f *xcoffFile) writeLdrScn(ctxt *Link, globalOff uint64) {
 		return r1.symndx < r2.symndx
 	})
 
-	ep := ldr.Lookup(*flagEntrySymbol, 0)
+	ep := ldr.Lookup(ctxt.flagEntrySymbol, 0)
 	xldr := &XcoffLdRel64{
 		Lvaddr:  uint64(ldr.SymValue(ep)),
 		Lrtype:  0x3F00,
@@ -1543,7 +1543,7 @@ func (f *xcoffFile) writeFileHeader(ctxt *Link) {
 	f.xfhdr.Fnscns = uint16(len(f.sections))
 	f.xfhdr.Ftimedat = 0
 
-	if !*FlagS {
+	if !ctxt.FlagS {
 		f.xfhdr.Fsymptr = uint64(f.symtabOffset)
 		f.xfhdr.Fnsyms = int32(f.symbolCount)
 	}
@@ -1557,7 +1557,7 @@ func (f *xcoffFile) writeFileHeader(ctxt *Link) {
 		f.xahdr.Ovstamp = 1 // based on dump -o
 		f.xahdr.Omagic = 0x10b
 		copy(f.xahdr.Omodtype[:], "1L")
-		entry := ldr.Lookup(*flagEntrySymbol, 0)
+		entry := ldr.Lookup(ctxt.flagEntrySymbol, 0)
 		f.xahdr.Oentry = uint64(ldr.SymValue(entry))
 		f.xahdr.Osnentry = f.getXCOFFscnum(ctxt, ldr.SymSect(entry))
 		toc := ldr.Lookup("TOC", 0)
@@ -1590,7 +1590,7 @@ func xcoffwrite(ctxt *Link) {
 func asmbXcoff(ctxt *Link) {
 	ctxt.Out.SeekSet(0)
 	fileoff := int64(ctxt.Segdwarf.Fileoff + ctxt.Segdwarf.Filelen)
-	fileoff = Rnd(fileoff, *FlagRound)
+	fileoff = Rnd(fileoff, ctxt.FlagRound)
 	ctxt.xfile.
 		sectNameToScnum = make(map[string]int16)
 
@@ -1805,7 +1805,7 @@ dwarfLoop:
 // -Wl,-bE option.
 // ld won't export symbols unless they are listed in an export file.
 func xcoffCreateExportFile(ctxt *Link) (fname string) {
-	fname = filepath.Join(*flagTmpdir, "export_file.exp")
+	fname = filepath.Join(ctxt.flagTmpdir, "export_file.exp")
 	var buf bytes.Buffer
 
 	ldr := ctxt.loader

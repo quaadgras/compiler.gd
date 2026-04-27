@@ -116,7 +116,7 @@ func asmb2(ctxt *Link) {
 		asmbElf(ctxt)
 	}
 
-	if *FlagC {
+	if ctxt.FlagC {
 		fmt.Printf("textsize=%d\n", ctxt.Segtext.Filelen)
 		fmt.Printf("datsize=%d\n", ctxt.Segdata.Filelen)
 		fmt.Printf("bsssize=%d\n", ctxt.Segdata.Length-ctxt.Segdata.Filelen)
@@ -151,8 +151,8 @@ func writePlan9Header(ctxt *Link, buf *OutBuf, magic uint32, entry int64, is64Bi
 
 // asmbPlan9 assembles a plan 9 binary.
 func asmbPlan9(ctxt *Link) {
-	if !*FlagS {
-		*FlagS = true
+	if !ctxt.FlagS {
+		ctxt.FlagS = true
 		symo := int64(ctxt.Segdata.Fileoff + ctxt.Segdata.Filelen)
 		ctxt.Out.SeekSet(symo)
 		asmbPlan9Sym(ctxt)

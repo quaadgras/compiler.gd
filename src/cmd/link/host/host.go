@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sync"
 
 	"cmd/internal/sys"
 	"cmd/link/internal/amd64"
@@ -54,11 +53,9 @@ var archInits = map[string]func() (*sys.Arch, ld.Arch){
 	"wasm":     wasm.Init,
 }
 
-// linkRunMu serialises Run calls. cmd/link's package-level state
-// (flags, nerrors, format-output globals, atExitFuncs) is not yet
-// per-Invocation, so concurrent Runs would race. Lifted later once
-// the migration is complete.
-var linkRunMu sync.Mutex
+// linkRunMu was used to serialise Run calls while package-level
+// linker state (flags, nerrors, atExitFuncs, format-output globals)
+// was being migrated to per-Link. Removed once all those migrated.
 
 // Run drives one cmd/link invocation in the calling process. args is
 // the argv that the standalone link binary would have received as
@@ -82,8 +79,9 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 		return 2, nil
 	}
 
-	linkRunMu.Lock()
-	defer linkRunMu.Unlock()
+	// linkRunMu lifted: flags + atExitFuncs + nerrors family + format
+	// state all migrated to per-Link. Concurrent in-process link
+	// invocations are now safe.
 
 	arch, theArch := archInit()
 

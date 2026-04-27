@@ -294,7 +294,7 @@ func putplan9sym(ctxt *Link, ldr *loader.Loader, s loader.Sym, char SymbolType) 
 	}
 	l := 4
 	addr := ldr.SymValue(s)
-	if ctxt.IsAMD64() && !flag8 {
+	if ctxt.IsAMD64() && !ctxt.flag8 {
 		ctxt.Out.Write32b(uint32(addr >> 32))
 		l = 8
 	}
@@ -420,7 +420,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	if !ctxt.IsAIX() && !ctxt.IsWasm() {
 		switch ctxt.BuildMode {
 		case BuildModeCArchive, BuildModeCShared:
-			s := ldr.Lookup(*flagEntrySymbol, sym.SymVerABI0)
+			s := ldr.Lookup(ctxt.flagEntrySymbol, sym.SymVerABI0)
 			if s != 0 {
 				addinitarrdata(ctxt, ldr, s)
 			}
@@ -566,7 +566,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	}
 
 	if ctxt.BuildMode == BuildModeShared {
-		abihashgostr := ldr.CreateSymForUpdate("go:link.abihash."+filepath.Base(*flagOutfile), 0)
+		abihashgostr := ldr.CreateSymForUpdate("go:link.abihash."+filepath.Base(ctxt.flagOutfile), 0)
 		abihashgostr.SetType(sym.SRODATA)
 		hashsym := ldr.LookupOrCreateSym("go:link.abihashbytes", 0)
 		abihashgostr.AddAddr(ctxt.Arch, hashsym)
@@ -719,7 +719,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	}
 
 	if ctxt.BuildMode == BuildModePlugin {
-		addgostring(ctxt, ldr, moduledata, "go:link.thispluginpath", objabi.PathToPrefix(*flagPluginPath))
+		addgostring(ctxt, ldr, moduledata, "go:link.thispluginpath", objabi.PathToPrefix(ctxt.flagPluginPath))
 
 		pkghashes := ldr.CreateSymForUpdate("go:link.pkghashes", 0)
 		pkghashes.SetLocal(true)
@@ -759,7 +759,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	}
 
 	if len(ctxt.Shlibs) > 0 {
-		thismodulename := filepath.Base(*flagOutfile)
+		thismodulename := filepath.Base(ctxt.flagOutfile)
 		switch ctxt.BuildMode {
 		case BuildModeExe, BuildModePIE:
 			// When linking an executable, outfile is just "a.out". Make

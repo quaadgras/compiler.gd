@@ -862,7 +862,7 @@ func elfwritefreebsdsig(ctxt *Link, out *OutBuf) int {
 	out.Write32(ELF_NOTE_FREEBSD_DESCSZ)
 	out.Write32(ELF_NOTE_FREEBSD_FEATURE_CTL_TAG)
 	out.WriteString(ELF_NOTE_FREEBSD_NAME)
-	if *flagRace {
+	if ctxt.flagRace {
 		// The race detector can't handle ASLR, turn the ASLR off when compiling with -race.
 		out.Write32(ELF_NOTE_FREEBSD_FCTL_ASLR_DISABLE)
 	} else {
@@ -873,12 +873,12 @@ func elfwritefreebsdsig(ctxt *Link, out *OutBuf) int {
 }
 
 func addbuildinfo(ctxt *Link) {
-	val := *flagHostBuildid
+	val := ctxt.flagHostBuildid
 	if val == "" || val == "none" {
 		return
 	}
 	if val == "gobuildid" {
-		buildID := *flagBuildid
+		buildID := ctxt.flagBuildid
 		if buildID == "" {
 			Exitf("-B gobuildid requires a Go build ID supplied via -buildid")
 		}
@@ -934,8 +934,8 @@ func elfbuildinfo(ctxt *Link, sh *ElfShdr, startva uint64, resoff uint64) int {
 	return elfnote(sh, startva, resoff, n)
 }
 
-func elfgobuildid(sh *ElfShdr, startva uint64, resoff uint64) int {
-	n := len(ELF_NOTE_GO_NAME) + int(Rnd(int64(len(*flagBuildid)), 4))
+func elfgobuildid(ctxt *Link, sh *ElfShdr, startva uint64, resoff uint64) int {
+	n := len(ELF_NOTE_GO_NAME) + int(Rnd(int64(len(ctxt.flagBuildid)), 4))
 	return elfnote(sh, startva, resoff, n)
 }
 
@@ -954,15 +954,15 @@ func elfwritebuildinfo(ctxt *Link, out *OutBuf) int {
 }
 
 func elfwritegobuildid(ctxt *Link, out *OutBuf) int {
-	sh := elfwritenotehdr(ctxt, out, ".note.go.buildid", uint32(len(ELF_NOTE_GO_NAME)), uint32(len(*flagBuildid)), ELF_NOTE_GOBUILDID_TAG)
+	sh := elfwritenotehdr(ctxt, out, ".note.go.buildid", uint32(len(ELF_NOTE_GO_NAME)), uint32(len(ctxt.flagBuildid)), ELF_NOTE_GOBUILDID_TAG)
 	if sh == nil {
 		return 0
 	}
 
 	out.Write(ELF_NOTE_GO_NAME)
-	out.Write([]byte(*flagBuildid))
+	out.Write([]byte(ctxt.flagBuildid))
 	var zero = make([]byte, 4)
-	out.Write(zero[:int(Rnd(int64(len(*flagBuildid)), 4)-int64(len(*flagBuildid)))])
+	out.Write(zero[:int(Rnd(int64(len(ctxt.flagBuildid)), 4)-int64(len(ctxt.flagBuildid)))])
 
 	return int(sh.Size)
 }
@@ -1133,7 +1133,7 @@ func elfdynhash(ctxt *Link) {
 	s = ldr.CreateSymForUpdate(".dynamic", 0)
 
 	var dtFlags1 elf.DynFlag1
-	if *flagBindNow {
+	if ctxt.flagBindNow {
 		dtFlags1 |= elf.DF_1_NOW
 		Elfwritedynent(ctxt, ctxt.Arch, s, elf.DT_FLAGS, uint64(elf.DF_BIND_NOW))
 	}
@@ -1179,7 +1179,7 @@ func elfphload(ctxt *Link, seg *sym.Segment) *ElfPhdr {
 	ph.Memsz = seg.Length
 	ph.Off = seg.Fileoff
 	ph.Filesz = seg.Filelen
-	ph.Align = uint64(*FlagRound)
+	ph.Align = uint64(ctxt.FlagRound)
 
 	return ph
 }
@@ -1193,7 +1193,7 @@ func elfphrelro(ctxt *Link, seg *sym.Segment) {
 	ph.Memsz = seg.Length
 	ph.Off = seg.Fileoff
 	ph.Filesz = seg.Filelen
-	ph.Align = uint64(*FlagRound)
+	ph.Align = uint64(ctxt.FlagRound)
 }
 
 // elfshname finds or creates a section given its name.
@@ -1462,10 +1462,10 @@ func (ctxt *Link) doelf() {
 	ldr := ctxt.loader
 
 	if ctxt.IsExternal() {
-		*FlagD = true
+		ctxt.FlagD = true
 	}
 
-	if !*FlagD { // -d suppresses dynamic loader format
+	if !ctxt.FlagD { // -d suppresses dynamic loader format
 		// dynamic symbol table - first entry all zeros
 		dynsym := ldr.CreateSymForUpdate(".dynsym", 0)
 
@@ -1507,7 +1507,7 @@ func (ctxt *Link) doelf() {
 		hash.SetType(sym.SELFROSECT)
 
 		gotplt := ldr.CreateSymForUpdate(".got.plt", 0)
-		if ctxt.UseRelro() && *flagBindNow {
+		if ctxt.UseRelro() && ctxt.flagBindNow {
 			gotplt.SetType(sym.SELFRELROSECT)
 		} else {
 			gotplt.SetType(sym.SELFSECT) // writable
@@ -1620,8 +1620,8 @@ func (ctxt *Link) doelf() {
 		addgonote(ctxt, ".note.go.deps", ELF_NOTE_GODEPS_TAG, []byte(strings.Join(deplist, "\n")))
 	}
 
-	if ctxt.LinkMode == LinkExternal && *flagBuildid != "" {
-		addgonote(ctxt, ".note.go.buildid", ELF_NOTE_GOBUILDID_TAG, []byte(*flagBuildid))
+	if ctxt.LinkMode == LinkExternal && ctxt.flagBuildid != "" {
+		addgonote(ctxt, ".note.go.buildid", ELF_NOTE_GOBUILDID_TAG, []byte(ctxt.flagBuildid))
 	}
 
 	//type mipsGnuAttributes struct {
@@ -1753,7 +1753,7 @@ func asmbElf(ctxt *Link) {
 		elfreserve += elfreserve + numtext*64*2
 	}
 
-	startva := *FlagTextAddr - int64(ctxt.HEADR)
+	startva := ctxt.FlagTextAddr - int64(ctxt.HEADR)
 	resoff := elfreserve
 
 	var pph *ElfPhdr
@@ -1766,7 +1766,7 @@ func asmbElf(ctxt *Link) {
 		}
 		return pnote
 	}
-	if *flagRace && ctxt.IsNetbsd() {
+	if ctxt.flagRace && ctxt.IsNetbsd() {
 		sh := elfshname(ctxt, ".note.netbsd.pax")
 		resoff -= int64(elfnetbsdpax(sh, uint64(startva), uint64(resoff)))
 		phsh(getpnote(), sh)
@@ -1787,7 +1787,7 @@ func asmbElf(ctxt *Link) {
 			sh.Type = uint32(elf.SHT_NOTE)
 		}
 
-		if *flagBuildid != "" {
+		if ctxt.flagBuildid != "" {
 			sh := elfshname(ctxt, ".note.go.buildid")
 			sh.Type = uint32(elf.SHT_NOTE)
 			sh.Flags = uint64(elf.SHF_ALLOC)
@@ -1802,9 +1802,9 @@ func asmbElf(ctxt *Link) {
 	pph.Type = elf.PT_PHDR
 	pph.Flags = elf.PF_R
 	pph.Off = uint64(eh.Ehsize)
-	pph.Vaddr = uint64(*FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
-	pph.Paddr = uint64(*FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
-	pph.Align = uint64(*FlagRound)
+	pph.Vaddr = uint64(ctxt.FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
+	pph.Paddr = uint64(ctxt.FlagTextAddr) - uint64(ctxt.HEADR) + pph.Off
+	pph.Align = uint64(ctxt.FlagRound)
 
 	// PHDR must be in a loaded segment. Adjust the text
 	// segment boundaries downwards to include it.
@@ -1821,7 +1821,7 @@ func asmbElf(ctxt *Link) {
 			Filelen += uint64(o)
 	}
 
-	if !*FlagD { // -d suppresses dynamic loader format
+	if !ctxt.FlagD { // -d suppresses dynamic loader format
 		// interpreter
 		sh := elfshname(ctxt, ".interp")
 
@@ -1908,9 +1908,9 @@ func asmbElf(ctxt *Link) {
 		phsh(getpnote(), sh)
 	}
 
-	if *flagBuildid != "" {
+	if ctxt.flagBuildid != "" {
 		sh := elfshname(ctxt, ".note.go.buildid")
-		resoff -= int64(elfgobuildid(sh, uint64(startva), uint64(resoff)))
+		resoff -= int64(elfgobuildid(ctxt, sh, uint64(startva), uint64(resoff)))
 		phsh(getpnote(), sh)
 	}
 
@@ -1927,7 +1927,7 @@ func asmbElf(ctxt *Link) {
 	elfphload(ctxt, &ctxt.Segdata)
 
 	// Dynamic linking sections
-	if !*FlagD {
+	if !ctxt.FlagD {
 		sh := elfshname(ctxt, ".dynsym")
 		sh.Type = uint32(elf.SHT_DYNSYM)
 		sh.Flags = uint64(elf.SHF_ALLOC)
@@ -2130,7 +2130,7 @@ elfobj:
 	}
 
 	// put these sections early in the list
-	if !*FlagS {
+	if !ctxt.FlagS {
 		elfshname(ctxt, ".symtab")
 		elfshname(ctxt, ".strtab")
 	}
@@ -2184,7 +2184,7 @@ elfobj:
 
 	var shstrtabLen uint32
 	ctxt.Out.SeekSet(symo)
-	if *FlagS {
+	if ctxt.FlagS {
 		shstrtabLen = elfWriteShstrtab(ctxt)
 	} else {
 		asmElfSym(ctxt)
@@ -2197,7 +2197,7 @@ elfobj:
 	ctxt.Out.SeekSet(0)
 
 	var shstroff uint64
-	if !*FlagS {
+	if !ctxt.FlagS {
 		sh := elfshname(ctxt, ".symtab")
 		sh.Type = uint32(elf.SHT_SYMTAB)
 		sh.Off = uint64(symo)
@@ -2280,7 +2280,7 @@ elfobj:
 	a += int64(elfwritehdr(ctxt, ctxt.Out))
 	a += int64(elfwritephdrs(ctxt, ctxt.Out))
 	a += int64(elfwriteshdrs(ctxt, ctxt.Out))
-	if !*FlagD {
+	if !ctxt.FlagD {
 		a += int64(elfwriteinterp(ctxt, ctxt.Out))
 	}
 	if ctxt.IsMIPS() {
@@ -2300,11 +2300,11 @@ elfobj:
 		if len(ctxt.buildinfoData) > 0 {
 			a += int64(elfwritebuildinfo(ctxt, ctxt.Out))
 		}
-		if *flagBuildid != "" {
+		if ctxt.flagBuildid != "" {
 			a += int64(elfwritegobuildid(ctxt, ctxt.Out))
 		}
 	}
-	if *flagRace && ctxt.IsNetbsd() {
+	if ctxt.flagRace && ctxt.IsNetbsd() {
 		a += int64(elfwritenetbsdpax(ctxt, ctxt.Out))
 	}
 

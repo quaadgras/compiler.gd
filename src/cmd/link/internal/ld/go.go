@@ -31,7 +31,7 @@ import (
 //		libmach, so that other linkers and ar can share.
 
 func ldpkg(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, filename string) {
-	if *flagG {
+	if ctxt.flagG {
 		return
 	}
 
@@ -117,7 +117,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				lib = f[3]
 			}
 
-			if *FlagD {
+			if ctxt.FlagD {
 				fmt.Fprintf(os.Stderr, "%s: %s: cannot use dynamic imports with -d flag\n", os.Args[0], file)
 				nerrors++
 				return
@@ -260,7 +260,7 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				break
 			}
 
-			if *flagInterpreter == "" {
+			if ctxt.flagInterpreter == "" {
 				if ctxt.interpreter != "" && ctxt.interpreter != f[1] {
 					fmt.Fprintf(os.Stderr, "%s: conflict dynlinker: %s and %s\n", os.Args[0], ctxt.interpreter, f[1])
 					nerrors++
@@ -375,7 +375,7 @@ func Adddynsym(ctxt *Link, ldr *loader.Loader, target *Target, syms *ArchSyms, s
 	}
 }
 
-func fieldtrack(arch *sys.Arch, l *loader.Loader) {
+func fieldtrack(ctxt *Link, arch *sys.Arch, l *loader.Loader) {
 	var buf strings.Builder
 	for i := loader.Sym(1); i < loader.Sym(l.NSym()); i++ {
 		if name := l.SymName(i); strings.HasPrefix(name, "go:track.") {
@@ -392,16 +392,16 @@ func fieldtrack(arch *sys.Arch, l *loader.Loader) {
 		}
 	}
 	l.Reachparent = nil // we are done with it
-	if *flagFieldTrack == "" {
+	if ctxt.flagFieldTrack == "" {
 		return
 	}
-	s := l.Lookup(*flagFieldTrack, 0)
+	s := l.Lookup(ctxt.flagFieldTrack, 0)
 	if s == 0 || !l.AttrReachable(s) {
 		return
 	}
 	bld := l.MakeSymbolUpdater(s)
 	bld.SetType(sym.SDATA)
-	addstrdata(arch, l, *flagFieldTrack, buf.String())
+	addstrdata(arch, l, ctxt.flagFieldTrack, buf.String())
 }
 
 func (ctxt *Link) addexport() {

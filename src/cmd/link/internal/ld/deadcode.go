@@ -72,18 +72,18 @@ func (d *deadcodePass) init() {
 		// The external linker refers main symbol directly.
 		if d.ctxt.LinkMode == LinkExternal && (d.ctxt.BuildMode == BuildModeExe || d.ctxt.BuildMode == BuildModePIE) {
 			if d.ctxt.HeadType == objabi.Hwindows && d.ctxt.Arch.Family == sys.I386 {
-				*flagEntrySymbol = "_main"
+				d.ctxt.flagEntrySymbol = "_main"
 			} else {
-				*flagEntrySymbol = "main"
+				d.ctxt.flagEntrySymbol = "main"
 			}
 		}
-		names = append(names, *flagEntrySymbol)
+		names = append(names, d.ctxt.flagEntrySymbol)
 	}
 	// runtime.unreachableMethod is a function that will throw if called.
 	// We redirect unreachable methods to it.
 	names = append(names, "runtime.unreachableMethod")
 	if d.ctxt.BuildMode == BuildModePlugin {
-		names = append(names, objabi.PathToPrefix(*flagPluginPath)+"..inittask", objabi.PathToPrefix(*flagPluginPath)+".main", "go:plugin.tabs")
+		names = append(names, objabi.PathToPrefix(d.ctxt.flagPluginPath)+"..inittask", objabi.PathToPrefix(d.ctxt.flagPluginPath)+".main", "go:plugin.tabs")
 
 		// We don't keep the go.plugin.exports symbol,
 		// but we do keep the symbols it refers to.
@@ -363,7 +363,7 @@ func (d *deadcodePass) mark(symIdx, parent loader.Sym) {
 		if buildcfg.Experiment.FieldTrack && d.ldr.Reachparent[symIdx] == 0 {
 			d.ldr.Reachparent[symIdx] = parent
 		}
-		if *flagDumpDep {
+		if d.ctxt.flagDumpDep {
 			to := d.ldr.SymName(symIdx)
 			if to != "" {
 				to = d.dumpDepAddFlags(to, symIdx)
@@ -473,7 +473,7 @@ func deadcode(ctxt *Link) {
 		}
 		d.flood()
 	}
-	if *flagPruneWeakMap {
+	if ctxt.flagPruneWeakMap {
 		d.mapinitcleanup()
 	}
 }

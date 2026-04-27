@@ -475,7 +475,7 @@ func (f *peFile) addDWARFSection(ctxt *Link, name string, size int) *peSection {
 
 // addDWARF adds DWARF information to the COFF file f.
 func (f *peFile) addDWARF(ctxt *Link) {
-	if *FlagW { // disable dwarf
+	if ctxt.FlagW { // disable dwarf
 		return
 	}
 	for _, sect := range ctxt.Segdwarf.Sections {
@@ -543,7 +543,7 @@ func (f *peFile) addInitArray(ctxt *Link) *peSection {
 	ctxt.Out.SeekSet(int64(sect.pointerToRawData))
 	sect.checkOffset(ctxt.Out.Offset())
 
-	init_entry := ctxt.loader.Lookup(*flagEntrySymbol, 0)
+	init_entry := ctxt.loader.Lookup(ctxt.flagEntrySymbol, 0)
 	addr := uint64(ctxt.loader.SymValue(init_entry)) - ctxt.loader.SymSect(init_entry).Vaddr
 	if ctxt.pe64 {
 		ctxt.Out.Write64(addr)
@@ -867,7 +867,7 @@ func (f *peFile) writeSymbolTableAndStringTable(ctxt *Link) {
 	f.symtabOffset = ctxt.Out.Offset()
 
 	// write COFF symbol table
-	if !*FlagS || ctxt.LinkMode == LinkExternal {
+	if !ctxt.FlagS || ctxt.LinkMode == LinkExternal {
 		f.writeSymbols(ctxt)
 	}
 
@@ -1133,11 +1133,11 @@ func Peinit(ctxt *Link) {
 		}
 	}
 	ctxt.HEADR = ctxt.PEFILEHEADR
-	if *FlagRound == -1 {
-		*FlagRound = ctxt.PESECTALIGN
+	if ctxt.FlagRound == -1 {
+		ctxt.FlagRound = ctxt.PESECTALIGN
 	}
-	if *FlagTextAddr == -1 {
-		*FlagTextAddr = Rnd(ctxt.PEBASE, *FlagRound) + int64(ctxt.PESECTHEADR)
+	if ctxt.FlagTextAddr == -1 {
+		ctxt.FlagTextAddr = Rnd(ctxt.PEBASE, ctxt.FlagRound) + int64(ctxt.PESECTHEADR)
 	}
 }
 
@@ -1393,7 +1393,7 @@ func addexports(ctxt *Link) {
 	var e IMAGE_EXPORT_DIRECTORY
 
 	nexport := len(ctxt.dexport)
-	size := binary.Size(&e) + 10*nexport + len(*flagOutfile) + 1
+	size := binary.Size(&e) + 10*nexport + len(ctxt.flagOutfile) + 1
 	for _, s := range ctxt.dexport {
 		size += len(ldr.SymExtname(s)) + 1
 	}
@@ -1437,7 +1437,7 @@ func addexports(ctxt *Link) {
 	}
 
 	// put EXPORT Name Pointer Table
-	v := int(e.Name + uint32(len(*flagOutfile)) + 1)
+	v := int(e.Name + uint32(len(ctxt.flagOutfile)) + 1)
 
 	for _, s := range ctxt.dexport {
 		out.Write32(uint32(v))
@@ -1450,7 +1450,7 @@ func addexports(ctxt *Link) {
 	}
 
 	// put Names
-	out.WriteStringN(*flagOutfile, len(*flagOutfile)+1)
+	out.WriteStringN(ctxt.flagOutfile, len(ctxt.flagOutfile)+1)
 
 	for _, s := range ctxt.dexport {
 		name := ldr.SymExtname(s)
@@ -1762,7 +1762,7 @@ func asmbPe(ctxt *Link) {
 // peCreateExportFile creates a file with exported symbols for Windows .def files.
 // ld will export all symbols, even those not marked for export, unless a .def file is provided.
 func peCreateExportFile(ctxt *Link, libName string) (fname string) {
-	fname = filepath.Join(*flagTmpdir, "export_file.def")
+	fname = filepath.Join(ctxt.flagTmpdir, "export_file.def")
 	var buf bytes.Buffer
 
 	if ctxt.BuildMode == BuildModeCShared {

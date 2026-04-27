@@ -88,22 +88,22 @@ func archinit(ctxt *ld.Link) {
 
 	case objabi.Hplan9: /* plan 9 */
 		ctxt.HEADR = 32
-		if *ld.FlagRound == -1 {
-			*ld.FlagRound = 16 * 1024
+		if ctxt.FlagRound == -1 {
+			ctxt.FlagRound = 16 * 1024
 		}
-		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(16*1024, *ld.FlagRound) + int64(ctxt.HEADR)
+		if ctxt.FlagTextAddr == -1 {
+			ctxt.FlagTextAddr = ld.Rnd(16*1024, ctxt.FlagRound) + int64(ctxt.HEADR)
 		}
 
 	case objabi.Hlinux, /* mips64 elf */
 		objabi.Hopenbsd:
 		ld.Elfinit(ctxt)
 		ctxt.HEADR = ld.ELFRESERVE
-		if *ld.FlagRound == -1 {
-			*ld.FlagRound = 0x10000
+		if ctxt.FlagRound == -1 {
+			ctxt.FlagRound = 0x10000
 		}
-		if *ld.FlagTextAddr == -1 {
-			*ld.FlagTextAddr = ld.Rnd(0x10000, *ld.FlagRound) + int64(ctxt.HEADR)
+		if ctxt.FlagTextAddr == -1 {
+			ctxt.FlagTextAddr = ld.Rnd(0x10000, ctxt.FlagRound) + int64(ctxt.HEADR)
 		}
 	}
 

@@ -6,6 +6,7 @@ package ld
 
 import (
 	"cmd/internal/dwarf"
+	"cmd/internal/quoted"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
 )
@@ -49,6 +50,66 @@ type linkState struct {
 	// don't race on append/drain or pointer assignment.
 	atExitFuncs     []func()
 	inProcessStatus *int // set by cmd/link/host.Run; Exit writes here + Goexit instead of os.Exit
+
+	// Error reporting state (was package-level vars in lib.go).
+	// Read from currentLink by free Errorf/Exitf/afterErrorAction.
+	nerrors           int
+	liveness          int64 // size of liveness data (funcdata)
+	strictDupMsgCount int
+	checkStrictDups   int // 0=off 1=warning 2=error
+
+	// Flags. Were package-level *T pointers reassigned per Main call;
+	// concurrent invocations clobbered each other. Per-Link storage,
+	// populated by setupFlags via flag.StringVar/BoolVar/etc binding.
+	flagBuildid         string
+	flagBindNow         bool
+	flagOutfile         string
+	flagPluginPath      string
+	flagFipso           string
+	flagInstallSuffix   string
+	flagDumpDep         bool
+	flagRace            bool
+	flagMsan            bool
+	flagAsan            bool
+	flagAslr            bool
+	flagFieldTrack      string
+	flagLibGCC          string
+	flagTmpdir          string
+	flagExtar           string
+	flagCaptureHostObjs string
+	flagA               bool
+	FlagC               bool
+	FlagD               bool
+	flagF               bool
+	flagG               bool
+	flagH               bool
+	flagN               bool
+	FlagS               bool
+	flagHostBuildid     string
+	flagInterpreter     string
+	flagCheckLinkname   bool
+	FlagDebugTramp      int
+	FlagDebugTextSize   int
+	flagDebugNosplit    bool
+	FlagStrictDups      int
+	FlagRound           int64
+	FlagTextAddr        int64
+	FlagDataAddr        int64
+	FlagFuncAlign       int
+	flagEntrySymbol     string
+	flagPruneWeakMap    bool
+	flagRandLayout      int64
+	flagAllErrors       bool
+	cpuprofile          string
+	memprofile          string
+	memprofilerate      int64
+	benchmarkFlag       string
+	benchmarkFileFlag   string
+	flagW               ternaryFlag
+	FlagW               bool // -w flag, computed in main from flagW
+	flag8               bool // use 64-bit addresses in symbol table
+	flagExtld           quoted.Flag
+	flagExtldflags      quoted.Flag
 
 	// CarrierSymByType tracks carrier symbols and their sizes (was symtab.go).
 	CarrierSymByType [sym.SFirstUnallocated]struct {

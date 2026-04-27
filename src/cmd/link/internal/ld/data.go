@@ -120,7 +120,7 @@ func trampoline(ctxt *Link, s loader.Sym) {
 			// don't randomize the function order).
 			// Except that if SymPkg(s) == "", it is a host object symbol
 			// which may call an external symbol via PLT.
-			if ldr.SymPkg(s) != "" && ldr.SymPkg(rs) == ldr.SymPkg(s) && ldr.SymType(rs) == ldr.SymType(s) && *flagRandLayout == 0 {
+			if ldr.SymPkg(s) != "" && ldr.SymPkg(rs) == ldr.SymPkg(s) && ldr.SymType(rs) == ldr.SymType(s) && ctxt.flagRandLayout == 0 {
 				// RISC-V is only able to reach +/-1MiB via a JAL instruction.
 				// We need to generate a trampoline when an address is
 				// currently unknown.
@@ -129,7 +129,7 @@ func trampoline(ctxt *Link, s loader.Sym) {
 				}
 			}
 			// Runtime packages are laid out together.
-			if isRuntimeDepPkg(ldr.SymPkg(s)) && isRuntimeDepPkg(ldr.SymPkg(rs)) && *flagRandLayout == 0 {
+			if isRuntimeDepPkg(ldr.SymPkg(s)) && isRuntimeDepPkg(ldr.SymPkg(rs)) && ctxt.flagRandLayout == 0 {
 				continue
 			}
 		}
@@ -1006,7 +1006,7 @@ func (state *dodataState) dynreloc(ctxt *Link) {
 	}
 	// -d suppresses dynamic loader format, so we may as well not
 	// compute these sections or mark their symbols as reachable.
-	if *FlagD {
+	if ctxt.FlagD {
 		return
 	}
 
@@ -1240,7 +1240,7 @@ func addstrdata1(ctxt *Link, arg string) {
 	}
 	pkg := arg[:dot]
 	if ctxt.BuildMode == BuildModePlugin && pkg == "main" {
-		pkg = *flagPluginPath
+		pkg = ctxt.flagPluginPath
 	}
 	pkg = objabi.PathToPrefix(pkg)
 	name := pkg + arg[dot:eq]
@@ -2071,7 +2071,7 @@ func (state *dodataState) allocateDataSections(ctxt *Link) {
 	if len(state.data[sym.STLSBSS]) > 0 {
 		var sect *sym.Section
 		// FIXME: not clear why it is sometimes necessary to suppress .tbss section creation.
-		if (ctxt.IsELF || ctxt.HeadType == objabi.Haix) && (ctxt.LinkMode == LinkExternal || !*FlagD) {
+		if (ctxt.IsELF || ctxt.HeadType == objabi.Haix) && (ctxt.LinkMode == LinkExternal || !ctxt.FlagD) {
 			sect = addsection(ldr, ctxt.Arch, &ctxt.Segdata, ".tbss", 06)
 			sect.Align = int32(ctxt.Arch.PtrSize)
 			// FIXME: why does this need to be set to zero?
@@ -2455,7 +2455,7 @@ func (state *dodataState) dodataSect(ctxt *Link, symn sym.SymKind, syms []loader
 // at the very beginning of the text segment.
 // This “header” is read by cmd/go.
 func (ctxt *Link) textbuildid() {
-	if ctxt.IsELF || *flagBuildid == "" {
+	if ctxt.IsELF || ctxt.flagBuildid == "" {
 		return
 	}
 
@@ -2463,7 +2463,7 @@ func (ctxt *Link) textbuildid() {
 	s := ldr.CreateSymForUpdate("go:buildid", 0)
 	// The \xff is invalid UTF-8, meant to make it less likely
 	// to find one of these accidentally.
-	data := "\xff Go build ID: " + strconv.Quote(*flagBuildid) + "\n \xff"
+	data := "\xff Go build ID: " + strconv.Quote(ctxt.flagBuildid) + "\n \xff"
 	s.SetType(sym.STEXT)
 	s.SetData([]byte(data))
 	s.SetSize(int64(len(data)))
@@ -2535,8 +2535,8 @@ func (ctxt *Link) textaddress() {
 
 	ldr := ctxt.loader
 
-	if *flagRandLayout != 0 {
-		r := rand.New(rand.NewSource(*flagRandLayout))
+	if ctxt.flagRandLayout != 0 {
+		r := rand.New(rand.NewSource(ctxt.flagRandLayout))
 		textp := ctxt.Textp
 		i := 0
 		// don't move the buildid symbol
@@ -2581,7 +2581,7 @@ func (ctxt *Link) textaddress() {
 		ctxt.Textp[0] = text
 	}
 
-	start := uint64(Rnd(*FlagTextAddr, int64(ctxt.Funcalign)))
+	start := uint64(Rnd(ctxt.FlagTextAddr, int64(ctxt.Funcalign)))
 	va := start
 	n := 1
 	sect.Vaddr = va
@@ -2590,10 +2590,10 @@ func (ctxt *Link) textaddress() {
 	if limit == 0 {
 		limit = 1 << 63 // unlimited
 	}
-	if *FlagDebugTextSize != 0 {
-		limit = uint64(*FlagDebugTextSize)
+	if ctxt.FlagDebugTextSize != 0 {
+		limit = uint64(ctxt.FlagDebugTextSize)
 	}
-	if *FlagDebugTramp > 1 {
+	if ctxt.FlagDebugTramp > 1 {
 		limit = 1 // debug mode, force generating trampolines for everything
 	}
 
@@ -2733,8 +2733,8 @@ func assignAddress(ctxt *Link, sect *sym.Section, n int, s loader.Sym, va uint64
 		// For debugging purposes, allow text size limit to be cranked down,
 		// so as to stress test the code that handles multiple text sections.
 		var textSizelimit uint64 = ctxt.thearch.TrampLimit
-		if *FlagDebugTextSize != 0 {
-			textSizelimit = uint64(*FlagDebugTextSize)
+		if ctxt.FlagDebugTextSize != 0 {
+			textSizelimit = uint64(ctxt.FlagDebugTextSize)
 		}
 
 		// Sanity check: make sure the limit is larger than any
@@ -2848,7 +2848,7 @@ const wasmMinDataAddr = 4096 + 8192
 func (ctxt *Link) address() []*sym.Segment {
 	var order []*sym.Segment // Layout order
 
-	va := uint64(*FlagTextAddr)
+	va := uint64(ctxt.FlagTextAddr)
 	order = append(order, &ctxt.Segtext)
 	ctxt.Segtext.
 		Rwx = 05
@@ -2864,7 +2864,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		}
 	}
 	ctxt.Segtext.
-		Length = va - uint64(*FlagTextAddr)
+		Length = va - uint64(ctxt.FlagTextAddr)
 
 	if len(ctxt.Segrodata.Sections) > 0 {
 		// align to page boundary so as not to mix
@@ -2877,7 +2877,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		// will be such that the last page of the text segment will be
 		// mapped twice, once r-x and once starting out rw- and, after
 		// relocation processing, changed to r--.
-		va = uint64(Rnd(int64(va), *FlagRound))
+		va = uint64(Rnd(int64(va), ctxt.FlagRound))
 
 		order = append(order, &ctxt.Segrodata)
 		ctxt.Segrodata.
@@ -2895,7 +2895,7 @@ func (ctxt *Link) address() []*sym.Segment {
 	if len(ctxt.Segrelrodata.Sections) > 0 {
 		// align to page boundary so as not to mix
 		// rodata, rel-ro data, and executable text.
-		va = uint64(Rnd(int64(va), *FlagRound))
+		va = uint64(Rnd(int64(va), ctxt.FlagRound))
 		if ctxt.HeadType == objabi.Haix {
 			// Relro data are inside data segment on AIX.
 			va += uint64(XCOFFDATABASE) - uint64(XCOFFTEXTBASE)
@@ -2915,7 +2915,7 @@ func (ctxt *Link) address() []*sym.Segment {
 			Length = va - ctxt.Segrelrodata.Vaddr
 	}
 
-	va = uint64(Rnd(int64(va), *FlagRound))
+	va = uint64(Rnd(int64(va), ctxt.FlagRound))
 	if ctxt.HeadType == objabi.Haix && len(ctxt.Segrelrodata.Sections) == 0 {
 		// Data sections are moved to an unreachable segment
 		// to ensure that they are position-independent.
@@ -2925,9 +2925,9 @@ func (ctxt *Link) address() []*sym.Segment {
 	order = append(order, &ctxt.Segdata)
 	ctxt.Segdata.
 		Rwx = 06
-	if *FlagDataAddr != -1 {
+	if ctxt.FlagDataAddr != -1 {
 		ctxt.Segdata.
-			Vaddr = uint64(*FlagDataAddr)
+			Vaddr = uint64(ctxt.FlagDataAddr)
 		va = ctxt.Segdata.Vaddr
 	} else {
 		ctxt.Segdata.
@@ -2971,7 +2971,7 @@ func (ctxt *Link) address() []*sym.Segment {
 		Filelen = bss.Vaddr - ctxt.Segdata.Vaddr
 
 	if len(ctxt.Segpdata.Sections) > 0 {
-		va = uint64(Rnd(int64(va), *FlagRound))
+		va = uint64(Rnd(int64(va), ctxt.FlagRound))
 		order = append(order, &ctxt.Segpdata)
 		ctxt.Segpdata.
 			Rwx = 04
@@ -2989,7 +2989,7 @@ func (ctxt *Link) address() []*sym.Segment {
 	}
 
 	if len(ctxt.Segxdata.Sections) > 0 {
-		va = uint64(Rnd(int64(va), *FlagRound))
+		va = uint64(Rnd(int64(va), ctxt.FlagRound))
 		order = append(order, &ctxt.Segxdata)
 		ctxt.Segxdata.
 			Rwx = 04
@@ -3006,7 +3006,7 @@ func (ctxt *Link) address() []*sym.Segment {
 			Length = va - ctxt.Segxdata.Vaddr
 	}
 
-	va = uint64(Rnd(int64(va), *FlagRound))
+	va = uint64(Rnd(int64(va), ctxt.FlagRound))
 	order = append(order, &ctxt.Segdwarf)
 	ctxt.Segdwarf.
 		Rwx = 06
@@ -3130,7 +3130,7 @@ func (ctxt *Link) address() []*sym.Segment {
 	ctxt.xdefine("runtime.end", sym.SBSS, int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length))
 
 	if fuzzCounters != nil {
-		if *flagAsan {
+		if ctxt.flagAsan {
 			// ASAN requires that the symbol marking the end
 			// of the section be aligned on an 8 byte boundary.
 			// See issue #66966.
@@ -3195,9 +3195,9 @@ func (ctxt *Link) layout(order []*sym.Segment) uint64 {
 				// aligned, the following rounding
 				// should ensure that this segment's
 				// VA ≡ Fileoff mod FlagRound.
-				seg.Fileoff = uint64(Rnd(int64(prev.Fileoff+prev.Filelen), *FlagRound))
-				if seg.Vaddr%uint64(*FlagRound) != seg.Fileoff%uint64(*FlagRound) {
-					Exitf("bad segment rounding (Vaddr=%#x Fileoff=%#x FlagRound=%#x)", seg.Vaddr, seg.Fileoff, *FlagRound)
+				seg.Fileoff = uint64(Rnd(int64(prev.Fileoff+prev.Filelen), ctxt.FlagRound))
+				if seg.Vaddr%uint64(ctxt.FlagRound) != seg.Fileoff%uint64(ctxt.FlagRound) {
+					Exitf("bad segment rounding (Vaddr=%#x Fileoff=%#x FlagRound=%#x)", seg.Vaddr, seg.Fileoff, ctxt.FlagRound)
 				}
 			case objabi.Hwindows:
 				seg.Fileoff = prev.Fileoff + uint64(Rnd(int64(prev.Filelen), ctxt.PEFILEALIGN))
@@ -3221,7 +3221,7 @@ func (ctxt *Link) AddTramp(s *loader.SymbolBuilder, typ sym.SymKind) {
 	s.SetReachable(true)
 	s.SetOnList(true)
 	ctxt.tramps = append(ctxt.tramps, s.Sym())
-	if *FlagDebugTramp > 0 && ctxt.Debugvlog > 0 {
+	if ctxt.FlagDebugTramp > 0 && ctxt.Debugvlog > 0 {
 		ctxt.Logf("trampoline %s inserted\n", s.Name())
 	}
 }

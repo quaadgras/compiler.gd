@@ -337,15 +337,20 @@ func Lflag(ctxt *Link, arg string) {
  * S_ISREG() does not exist on Plan 9.
  */
 func mayberemoveoutfile() {
-	if fi, err := os.Lstat(*flagOutfile); err == nil && !fi.Mode().IsRegular() {
+	// gd fork: read flagOutfile from currentLink (set by Main).
+	// Pre-Main calls have nothing to remove anyway.
+	if currentLink == nil {
 		return
 	}
-	os.Remove(*flagOutfile)
+	if fi, err := os.Lstat(currentLink.flagOutfile); err == nil && !fi.Mode().IsRegular() {
+		return
+	}
+	os.Remove(currentLink.flagOutfile)
 }
 
 func libinit(ctxt *Link) {
-	if *FlagFuncAlign != 0 {
-		ctxt.Funcalign = *FlagFuncAlign
+	if ctxt.FlagFuncAlign != 0 {
+		ctxt.Funcalign = ctxt.FlagFuncAlign
 	} else {
 		ctxt.Funcalign = ctxt.thearch.Funcalign
 	}
@@ -354,16 +359,16 @@ func libinit(ctxt *Link) {
 	suffix := ""
 
 	suffixsep := ""
-	if *flagInstallSuffix != "" {
+	if ctxt.flagInstallSuffix != "" {
 		suffixsep = "_"
-		suffix = *flagInstallSuffix
-	} else if *flagRace {
+		suffix = ctxt.flagInstallSuffix
+	} else if ctxt.flagRace {
 		suffixsep = "_"
 		suffix = "race"
-	} else if *flagMsan {
+	} else if ctxt.flagMsan {
 		suffixsep = "_"
 		suffix = "msan"
-	} else if *flagAsan {
+	} else if ctxt.flagAsan {
 		suffixsep = "_"
 		suffix = "asan"
 	}
@@ -374,16 +379,16 @@ func libinit(ctxt *Link) {
 
 	mayberemoveoutfile()
 
-	if err := ctxt.Out.Open(*flagOutfile); err != nil {
-		Exitf("cannot create %s: %v", *flagOutfile, err)
+	if err := ctxt.Out.Open(ctxt.flagOutfile); err != nil {
+		Exitf("cannot create %s: %v", ctxt.flagOutfile, err)
 	}
 
-	if *flagEntrySymbol == "" {
+	if ctxt.flagEntrySymbol == "" {
 		switch ctxt.BuildMode {
 		case BuildModeCShared, BuildModeCArchive:
-			*flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s_lib", buildcfg.GOARCH, buildcfg.GOOS)
+			ctxt.flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s_lib", buildcfg.GOARCH, buildcfg.GOOS)
 		case BuildModeExe, BuildModePIE:
-			*flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s", buildcfg.GOARCH, buildcfg.GOOS)
+			ctxt.flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s", buildcfg.GOARCH, buildcfg.GOOS)
 		case BuildModeShared, BuildModePlugin:
 			// No *flagEntrySymbol for -buildmode=shared and plugin
 		default:
@@ -448,18 +453,18 @@ func loadinternal(ctxt *Link, name string) *sym.Library {
 
 // extld returns the current external linker.
 func (ctxt *Link) extld() []string {
-	if len(flagExtld) == 0 {
+	if len(ctxt.flagExtld) == 0 {
 		// Return the default external linker for the platform.
 		// This only matters when link tool is called directly without explicit -extld,
 		// go tool already passes the correct linker in other cases.
 		switch buildcfg.GOOS {
 		case "darwin", "freebsd", "openbsd":
-			flagExtld = []string{"clang"}
+			ctxt.flagExtld = []string{"clang"}
 		default:
-			flagExtld = []string{"gcc"}
+			ctxt.flagExtld = []string{"gcc"}
 		}
 	}
-	return flagExtld
+	return ctxt.flagExtld
 }
 
 // findLibPathCmd uses cmd command to find gcc library libname.
@@ -490,16 +495,16 @@ func (ctxt *Link) findLibPath(libname string) string {
 
 func (ctxt *Link) loadlib() {
 	var flags uint32
-	if *flagCheckLinkname {
+	if ctxt.flagCheckLinkname {
 		flags |= loader.FlagCheckLinkname
 	}
-	switch *FlagStrictDups {
+	switch ctxt.FlagStrictDups {
 	case 0:
 		// nothing to do
 	case 1, 2:
 		flags |= loader.FlagStrictDups
 	default:
-		log.Fatalf("invalid -strictdups flag value %d", *FlagStrictDups)
+		log.Fatalf("invalid -strictdups flag value %d", ctxt.FlagStrictDups)
 	}
 	ctxt.loader = loader.NewLoader(flags, &ctxt.ErrorReporter.ErrorReporter)
 	ctxt.ErrorReporter.SymName = func(s loader.Sym) string {
@@ -519,13 +524,13 @@ func (ctxt *Link) loadlib() {
 	}
 
 	// load internal packages, if not already
-	if *flagRace {
+	if ctxt.flagRace {
 		loadinternal(ctxt, "runtime/race")
 	}
-	if *flagMsan {
+	if ctxt.flagMsan {
 		loadinternal(ctxt, "runtime/msan")
 	}
-	if *flagAsan {
+	if ctxt.flagAsan {
 		loadinternal(ctxt, "runtime/asan")
 	}
 	loadinternal(ctxt, "runtime")
@@ -601,27 +606,27 @@ func (ctxt *Link) loadlib() {
 			}
 		}
 		if any {
-			if *flagLibGCC == "" {
-				*flagLibGCC = ctxt.findLibPathCmd("--print-libgcc-file-name", "libgcc")
+			if ctxt.flagLibGCC == "" {
+				ctxt.flagLibGCC = ctxt.findLibPathCmd("--print-libgcc-file-name", "libgcc")
 			}
-			if runtime.GOOS == "freebsd" && strings.HasPrefix(filepath.Base(*flagLibGCC), "libclang_rt.builtins") {
-				// On newer versions of FreeBSD, libgcc is returned as something like
-				// /usr/lib/clang/18/lib/freebsd/libclang_rt.builtins-x86_64.a.
-				// Unfortunately this ends up missing a bunch of symbols we need from
-				// libcompiler_rt.
-				*flagLibGCC = ctxt.findLibPathCmd("--print-file-name=libcompiler_rt.a", "libcompiler_rt")
+			if runtime.GOOS == "freebsd" && strings.HasPrefix(filepath.Base(ctxt.flagLibGCC), "libclang_rt.builtins") {
+				ctxt.flagLibGCC = // On newer versions of FreeBSD, libgcc is returned as something like
+					// /usr/lib/clang/18/lib/freebsd/libclang_rt.builtins-x86_64.a.
+					// Unfortunately this ends up missing a bunch of symbols we need from
+					// libcompiler_rt.
+					ctxt.findLibPathCmd("--print-file-name=libcompiler_rt.a", "libcompiler_rt")
 			}
-			if runtime.GOOS == "openbsd" && *flagLibGCC == "libgcc.a" {
-				// On OpenBSD `clang --print-libgcc-file-name` returns "libgcc.a".
-				// In this case we fail to load libgcc.a and can encounter link
-				// errors - see if we can find libcompiler_rt.a instead.
-				*flagLibGCC = ctxt.findLibPathCmd("--print-file-name=libcompiler_rt.a", "libcompiler_rt")
+			if runtime.GOOS == "openbsd" && ctxt.flagLibGCC == "libgcc.a" {
+				ctxt.flagLibGCC = // On OpenBSD `clang --print-libgcc-file-name` returns "libgcc.a".
+					// In this case we fail to load libgcc.a and can encounter link
+					// errors - see if we can find libcompiler_rt.a instead.
+					ctxt.findLibPathCmd("--print-file-name=libcompiler_rt.a", "libcompiler_rt")
 			}
 			if ctxt.HeadType == objabi.Hwindows {
 				loadWindowsHostArchives(ctxt)
 			}
-			if *flagLibGCC != "none" {
-				hostArchive(ctxt, *flagLibGCC)
+			if ctxt.flagLibGCC != "none" {
+				hostArchive(ctxt, ctxt.flagLibGCC)
 			}
 			// For glibc systems, the linker setup used by GCC
 			// looks like
@@ -677,7 +682,7 @@ func loadWindowsHostArchives(ctxt *Link) {
 				hostObject(ctxt, "crt2", p)
 			}
 		}
-		if *flagRace {
+		if ctxt.flagRace {
 			if p := ctxt.findLibPath("libsynchronization.a"); p != "none" {
 				hostArchive(ctxt, p)
 			}
@@ -789,9 +794,10 @@ func (ctxt *Link) linksetup() {
 	}
 
 	if ctxt.LinkMode == LinkExternal {
-		// When external linking, we are creating an object file. The
-		// absolute address is irrelevant.
-		*FlagTextAddr = 0
+		ctxt.
+			// When external linking, we are creating an object file. The
+			// absolute address is irrelevant.
+			FlagTextAddr = 0
 	}
 
 	// If there are no dynamic libraries needed, gcc disables dynamic linking.
@@ -806,7 +812,7 @@ func (ctxt *Link) linksetup() {
 	// statically linked binaries.
 	if ctxt.BuildMode == BuildModeExe {
 		if ctxt.havedynamic == 0 && ctxt.HeadType != objabi.Hdarwin && ctxt.HeadType != objabi.Hsolaris {
-			*FlagD = true
+			ctxt.FlagD = true
 		}
 	}
 
@@ -1206,7 +1212,7 @@ func hostobjs(ctxt *Link) {
 			continue
 		}
 		h.ld(ctxt, f, h.pkg, h.length, h.pn)
-		if *flagCaptureHostObjs != "" {
+		if ctxt.flagCaptureHostObjs != "" {
 			captureHostObj(ctxt, h)
 		}
 		f.Close()
@@ -1222,19 +1228,19 @@ func hostlinksetup(ctxt *Link) {
 		// For external link, record that we need to tell the external linker -s,
 		// and turn off -s internally: the external linker needs the symbol
 		// information for its final link.
-		debug_s = *FlagS
-	*FlagS = false
+		debug_s = ctxt.FlagS
+	ctxt.FlagS = false
 
 	// create temporary directory and arrange cleanup
-	if *flagTmpdir == "" {
+	if ctxt.flagTmpdir == "" {
 		dir, err := os.MkdirTemp("", "go-link-")
 		if err != nil {
 			log.Fatal(err)
 		}
-		*flagTmpdir = dir
+		ctxt.flagTmpdir = dir
 		ctxt.ownTmpDir = true
 		AtExit(func() {
-			os.RemoveAll(*flagTmpdir)
+			os.RemoveAll(ctxt.flagTmpdir)
 		})
 	}
 
@@ -1244,7 +1250,7 @@ func hostlinksetup(ctxt *Link) {
 	}
 	mayberemoveoutfile()
 
-	p := filepath.Join(*flagTmpdir, "go.o")
+	p := filepath.Join(ctxt.flagTmpdir, "go.o")
 	if err := ctxt.Out.Open(p); err != nil {
 		Exitf("cannot create %s: %v", p, err)
 	}
@@ -1273,7 +1279,7 @@ func (ctxt *Link) hostobjCopy() (paths []string) {
 	sema := make(chan struct{}, runtime.NumCPU()) // limit open file descriptors
 	for i, h := range ctxt.hostobj {
 		h := h
-		dst := filepath.Join(*flagTmpdir, fmt.Sprintf("%06d.o", i))
+		dst := filepath.Join(ctxt.flagTmpdir, fmt.Sprintf("%06d.o", i))
 		paths = append(paths, dst)
 		if ctxt.Debugvlog != 0 {
 			ctxt.Logf("host obj copy: %s from pkg %s -> %s\n", h.pn, h.pkg, dst)
@@ -1315,9 +1321,9 @@ func (ctxt *Link) hostobjCopy() (paths []string) {
 // directory. writeGDBLinkerScript returns created file path.
 // The script is used to work around gcc bug
 // (see https://golang.org/issue/20183 for details).
-func writeGDBLinkerScript() string {
+func writeGDBLinkerScript(ctxt *Link) string {
 	name := "fix_debug_gdb_scripts.ld"
-	path := filepath.Join(*flagTmpdir, name)
+	path := filepath.Join(ctxt.flagTmpdir, name)
 	src := `SECTIONS
 {
   .debug_gdb_scripts BLOCK(__section_alignment__) (NOLOAD) :
@@ -1344,12 +1350,12 @@ func (ctxt *Link) archive() {
 
 	exitIfErrors()
 
-	if *flagExtar == "" {
+	if ctxt.flagExtar == "" {
 		const printProgName = "--print-prog-name=ar"
 		cc := ctxt.extld()
-		*flagExtar = "ar"
+		ctxt.flagExtar = "ar"
 		if linkerFlagSupported(ctxt, ctxt.Arch, cc[0], "", printProgName) {
-			*flagExtar = ctxt.findExtLinkTool("ar")
+			ctxt.flagExtar = ctxt.findExtLinkTool("ar")
 		}
 	}
 
@@ -1358,19 +1364,19 @@ func (ctxt *Link) archive() {
 	// Force the buffer to flush here so that external
 	// tools will see a complete file.
 	if err := ctxt.Out.Close(); err != nil {
-		Exitf("error closing %v", *flagOutfile)
+		Exitf("error closing %v", ctxt.flagOutfile)
 	}
 
-	argv := []string{*flagExtar, "-q", "-c", "-s"}
+	argv := []string{ctxt.flagExtar, "-q", "-c", "-s"}
 	if ctxt.HeadType == objabi.Haix {
 		argv = append(argv, "-X64")
 	}
-	godotopath := filepath.Join(*flagTmpdir, "go.o")
+	godotopath := filepath.Join(ctxt.flagTmpdir, "go.o")
 	cleanTimeStamps([]string{godotopath})
 	hostObjCopyPaths := ctxt.hostobjCopy()
 	cleanTimeStamps(hostObjCopyPaths)
 
-	argv = append(argv, *flagOutfile)
+	argv = append(argv, ctxt.flagOutfile)
 	argv = append(argv, godotopath)
 	argv = append(argv, hostObjCopyPaths...)
 
@@ -1407,7 +1413,7 @@ func (ctxt *Link) hostlink() {
 	argv = append(argv, ctxt.extld()...)
 	argv = append(argv, hostlinkArchArgs(ctxt.Arch)...)
 
-	if *FlagS || ctxt.debug_s {
+	if ctxt.FlagS || ctxt.debug_s {
 		if ctxt.HeadType == objabi.Hdarwin {
 			// Recent versions of macOS print
 			//	ld: warning: option -s is obsolete and being ignored
@@ -1415,7 +1421,7 @@ func (ctxt *Link) hostlink() {
 		} else {
 			argv = append(argv, "-s")
 		}
-	} else if *FlagW {
+	} else if ctxt.FlagW {
 		if !ctxt.IsAIX() && !ctxt.IsSolaris() { // The AIX and Solaris linkers' -S has different meaning
 			argv = append(argv, "-Wl,-S") // suppress debugging symbols
 		}
@@ -1423,7 +1429,7 @@ func (ctxt *Link) hostlink() {
 
 	// On darwin, whether to combine DWARF into executable.
 	// Only macOS supports unmapped segments such as our __DWARF segment.
-	combineDwarf := ctxt.IsDarwin() && !*FlagW && ctxt.machoPlatform == PLATFORM_MACOS
+	combineDwarf := ctxt.IsDarwin() && !ctxt.FlagW && ctxt.machoPlatform == PLATFORM_MACOS
 
 	var isMSVC bool // used on Windows
 	wlPrefix := "-Wl,--"
@@ -1452,7 +1458,7 @@ func (ctxt *Link) hostlink() {
 				argv = append(argv, "-Wl,-x")
 			}
 		}
-		if *flagHostBuildid == "none" {
+		if ctxt.flagHostBuildid == "none" {
 			argv = append(argv, "-Wl,-no_uuid")
 		}
 	case objabi.Hopenbsd:
@@ -1583,7 +1589,7 @@ func (ctxt *Link) hostlink() {
 				argv = append(argv, "-Wl,-no_pie")
 			}
 		}
-		if *flagRace && ctxt.HeadType == objabi.Hwindows {
+		if ctxt.flagRace && ctxt.HeadType == objabi.Hwindows {
 			// Current windows/amd64 race detector tsan support
 			// library can't handle PIE mode (see #53539 for more details).
 			// For now, explicitly disable PIE (since some compilers
@@ -1594,13 +1600,13 @@ func (ctxt *Link) hostlink() {
 		switch ctxt.HeadType {
 		case objabi.Hdarwin, objabi.Haix:
 		case objabi.Hwindows:
-			if *flagAslr && *flagRace {
-				// Current windows/amd64 race detector tsan support
-				// library can't handle PIE mode (see #53539 for more details).
-				// Disable alsr if -race in effect.
-				*flagAslr = false
+			if ctxt.flagAslr && ctxt.flagRace {
+				ctxt.flagAslr = // Current windows/amd64 race detector tsan support
+					// library can't handle PIE mode (see #53539 for more details).
+					// Disable alsr if -race in effect.
+					false
 			}
-			argv = addASLRargs(argv, *flagAslr)
+			argv = addASLRargs(argv, ctxt.flagAslr)
 		default:
 			// ELF.
 			if ctxt.UseRelro() {
@@ -1617,7 +1623,7 @@ func (ctxt *Link) hostlink() {
 			}
 			argv = append(argv, "-shared")
 			if ctxt.HeadType == objabi.Hwindows {
-				argv = addASLRargs(argv, *flagAslr)
+				argv = addASLRargs(argv, ctxt.flagAslr)
 			} else {
 				// Pass -z nodelete to mark the shared library as
 				// non-closeable: a dlclose will do nothing.
@@ -1643,7 +1649,7 @@ func (ctxt *Link) hostlink() {
 	}
 
 	var altLinker string
-	if ctxt.IsELF && (ctxt.DynlinkingGo() || *flagBindNow) {
+	if ctxt.IsELF && (ctxt.DynlinkingGo() || ctxt.flagBindNow) {
 		// For ELF targets, when producing dynamically linked Go code
 		// or when immediate binding is explicitly requested,
 		// we force all symbol resolution to be done at program startup
@@ -1674,7 +1680,7 @@ func (ctxt *Link) hostlink() {
 			// If gold is not installed, gcc will silently switch
 			// back to ld.bfd. So we parse the version information
 			// and provide a useful error if gold is missing.
-			name, args := flagExtld[0], flagExtld[1:]
+			name, args := ctxt.flagExtld[0], ctxt.flagExtld[1:]
 			args = append(args, "-fuse-ld=gold", "-Wl,--version")
 			cmd := exec.Command(name, args...)
 			if out, err := cmd.CombinedOutput(); err == nil {
@@ -1689,7 +1695,7 @@ func (ctxt *Link) hostlink() {
 		altLinker = "bfd"
 
 		// Provide a useful error if ld.bfd is missing.
-		name, args := flagExtld[0], flagExtld[1:]
+		name, args := ctxt.flagExtld[0], ctxt.flagExtld[1:]
 		args = append(args, "-fuse-ld=bfd", "-Wl,--version")
 		cmd := exec.Command(name, args...)
 		if out, err := cmd.CombinedOutput(); err == nil {
@@ -1705,7 +1711,7 @@ func (ctxt *Link) hostlink() {
 	if ctxt.IsELF && linkerFlagSupported(ctxt, ctxt.Arch, argv[0], "", "-Wl,--build-id=0x1234567890abcdef") { // Solaris ld doesn't support --build-id.
 		if len(ctxt.buildinfoData) > 0 {
 			argv = append(argv, fmt.Sprintf("-Wl,--build-id=0x%x", ctxt.buildinfoData))
-		} else if *flagHostBuildid == "none" {
+		} else if ctxt.flagHostBuildid == "none" {
 			argv = append(argv, "-Wl,--build-id=none")
 		}
 	}
@@ -1716,7 +1722,7 @@ func (ctxt *Link) hostlink() {
 	// will decide that the file already has an extension. We
 	// only want to do this when producing a Windows output file
 	// on a Windows host.
-	outopt := *flagOutfile
+	outopt := ctxt.flagOutfile
 	if buildcfg.GOOS == "windows" && runtime.GOOS == "windows" && filepath.Ext(outopt) == "" {
 		outopt += "."
 	}
@@ -1727,12 +1733,12 @@ func (ctxt *Link) hostlink() {
 		argv = append(argv, fmt.Sprintf("-Wl,-rpath,%s", ctxt.rpath.val))
 	}
 
-	if *flagInterpreter != "" {
+	if ctxt.flagInterpreter != "" {
 		// Many linkers support both -I and the --dynamic-linker flags
 		// to set the ELF interpreter, but lld only supports
 		// --dynamic-linker so prefer that (ld on very old Solaris only
 		// supports -I but that seems less important).
-		argv = append(argv, fmt.Sprintf("-Wl,--dynamic-linker,%s", *flagInterpreter))
+		argv = append(argv, fmt.Sprintf("-Wl,--dynamic-linker,%s", ctxt.flagInterpreter))
 	}
 
 	// Force global symbols to be exported for dlopen, etc.
@@ -1751,7 +1757,7 @@ func (ctxt *Link) hostlink() {
 	case ctxt.IsAIX():
 		fileName := xcoffCreateExportFile(ctxt)
 		argv = append(argv, "-Wl,-bE:"+fileName)
-	case ctxt.IsWindows() && !slices.Contains(flagExtldflags, wlPrefix+"export-all-symbols"):
+	case ctxt.IsWindows() && !slices.Contains(ctxt.flagExtldflags, wlPrefix+"export-all-symbols"):
 		fileName := peCreateExportFile(ctxt, filepath.Base(outopt))
 		prefix := ""
 		if isMSVC {
@@ -1783,7 +1789,7 @@ func (ctxt *Link) hostlink() {
 
 	hostObjCopyPaths := ctxt.hostobjCopy()
 	cleanTimeStamps(hostObjCopyPaths)
-	godotopath := filepath.Join(*flagTmpdir, "go.o")
+	godotopath := filepath.Join(ctxt.flagTmpdir, "go.o")
 	cleanTimeStamps([]string{godotopath})
 
 	argv = append(argv, godotopath)
@@ -1892,7 +1898,7 @@ func (ctxt *Link) hostlink() {
 		}
 	}
 
-	for _, p := range flagExtldflags {
+	for _, p := range ctxt.flagExtldflags {
 		argv = append(argv, p)
 		checkStatic(p)
 	}
@@ -1901,7 +1907,7 @@ func (ctxt *Link) hostlink() {
 		// case used has specified "-fuse-ld=...".
 		extld := ctxt.extld()
 		name, args := extld[0], extld[1:]
-		args = append(args, trimLinkerArgv(flagExtldflags)...)
+		args = append(args, trimLinkerArgv(ctxt.flagExtldflags)...)
 		args = append(args, "-Wl,--version")
 		cmd := exec.Command(name, args...)
 		usingLLD := false
@@ -1914,10 +1920,10 @@ func (ctxt *Link) hostlink() {
 		// use gcc linker script to work around gcc bug
 		// (see https://golang.org/issue/20183 for details).
 		if !usingLLD {
-			p := writeGDBLinkerScript()
+			p := writeGDBLinkerScript(ctxt)
 			argv = append(argv, "-Wl,-T,"+p)
 		}
-		if *flagRace {
+		if ctxt.flagRace {
 			// Apparently --print-file-name doesn't work with -msvc clang.
 			// (The library name is synchronization.lib, but even with that
 			// name it still doesn't print the full path.) Assume it always
@@ -2002,8 +2008,8 @@ func (ctxt *Link) hostlink() {
 	// dwarf combining and UUID update).
 	updateMachoOutFile := func(op string, updateFunc machoUpdateFunc) {
 		// For os.Rename to work reliably, must be in same directory as outfile.
-		rewrittenOutput := *flagOutfile + "~"
-		exef, err := os.Open(*flagOutfile)
+		rewrittenOutput := ctxt.flagOutfile + "~"
+		exef, err := os.Open(ctxt.flagOutfile)
 		if err != nil {
 			Exitf("%s: %s failed: %v", os.Args[0], op, err)
 		}
@@ -2015,8 +2021,8 @@ func (ctxt *Link) hostlink() {
 		if err := updateFunc(ctxt, exef, exem, rewrittenOutput); err != nil {
 			Exitf("%s: %s failed: %v", os.Args[0], op, err)
 		}
-		os.Remove(*flagOutfile)
-		if err := os.Rename(rewrittenOutput, *flagOutfile); err != nil {
+		os.Remove(ctxt.flagOutfile)
+		if err := os.Rename(rewrittenOutput, ctxt.flagOutfile); err != nil {
 			Exitf("%s: %v", os.Args[0], err)
 		}
 	}
@@ -2027,14 +2033,14 @@ func (ctxt *Link) hostlink() {
 		dsymutilCmd := ctxt.findExtLinkTool("dsymutil")
 		stripCmd := ctxt.findExtLinkTool("strip")
 
-		dsym := filepath.Join(*flagTmpdir, "go.dwarf")
-		cmd := exec.Command(dsymutilCmd, "-f", *flagOutfile, "-o", dsym)
+		dsym := filepath.Join(ctxt.flagTmpdir, "go.dwarf")
+		cmd := exec.Command(dsymutilCmd, "-f", ctxt.flagOutfile, "-o", dsym)
 		// dsymutil may not clean up its temp directory at exit.
 		// Set DSYMUTIL_REPRODUCER_PATH to work around. see issue 59026.
 		// dsymutil (Apple LLVM version 16.0.0) deletes the directory
 		// even if it is not empty. We still need our tmpdir, so give a
 		// subdirectory to dsymutil.
-		dsymDir := filepath.Join(*flagTmpdir, "dsymutil")
+		dsymDir := filepath.Join(ctxt.flagTmpdir, "dsymutil")
 		err := os.MkdirAll(dsymDir, 0777)
 		if err != nil {
 			Exitf("fail to create temp dir: %v", err)
@@ -2059,7 +2065,7 @@ func (ctxt *Link) hostlink() {
 			// and referenced symbols so the dynamic linker can resolve them.
 			stripArgs = append(stripArgs, "-x")
 		}
-		stripArgs = append(stripArgs, *flagOutfile)
+		stripArgs = append(stripArgs, ctxt.flagOutfile)
 		if ctxt.Debugvlog != 0 {
 			ctxt.Logf("host link strip: %q", stripCmd)
 			for _, v := range stripArgs {
@@ -2086,9 +2092,9 @@ func (ctxt *Link) hostlink() {
 				return machoRewriteUuid(ctxt, exef, exem, outexe)
 			})
 	}
-	hostlinkfips(ctxt, *flagOutfile, *flagFipso)
+	hostlinkfips(ctxt, ctxt.flagOutfile, ctxt.flagFipso)
 	if ctxt.NeedCodeSign() {
-		err := machoCodeSign(ctxt, *flagOutfile)
+		err := machoCodeSign(ctxt, ctxt.flagOutfile)
 		if err != nil {
 			Exitf("%s: code signing failed: %v", os.Args[0], err)
 		}
@@ -2108,7 +2114,7 @@ func (ctxt *Link) passLongArgsInResponseFile(argv []string, altLinker string) []
 	}
 
 	// Only use response files if they are supported.
-	response := filepath.Join(*flagTmpdir, "response")
+	response := filepath.Join(ctxt.flagTmpdir, "response")
 	if err := os.WriteFile(response, nil, 0644); err != nil {
 		log.Fatalf("failed while testing response file: %v", err)
 	}
@@ -2140,7 +2146,7 @@ var createTrivialCOnce sync.Once
 
 func linkerFlagSupported(ctxt *Link, arch *sys.Arch, linker, altLinker, flag string) bool {
 	createTrivialCOnce.Do(func() {
-		src := filepath.Join(*flagTmpdir, "trivial.c")
+		src := filepath.Join(ctxt.flagTmpdir, "trivial.c")
 		if err := os.WriteFile(src, []byte("int main() { return 0; }"), 0666); err != nil {
 			Errorf("WriteFile trivial.c failed: %v", err)
 		}
@@ -2148,14 +2154,14 @@ func linkerFlagSupported(ctxt *Link, arch *sys.Arch, linker, altLinker, flag str
 
 	flags := hostlinkArchArgs(arch)
 
-	moreFlags := trimLinkerArgv(append(ctxt.ldflag, flagExtldflags...))
+	moreFlags := trimLinkerArgv(append(ctxt.ldflag, ctxt.flagExtldflags...))
 	flags = append(flags, moreFlags...)
 
 	if altLinker != "" {
 		flags = append(flags, "-fuse-ld="+altLinker)
 	}
-	trivialPath := filepath.Join(*flagTmpdir, "trivial.c")
-	outPath := filepath.Join(*flagTmpdir, "a.out")
+	trivialPath := filepath.Join(ctxt.flagTmpdir, "trivial.c")
+	outPath := filepath.Join(ctxt.flagTmpdir, "a.out")
 	flags = append(flags, "-o", outPath, flag, trivialPath)
 
 	cmd := exec.Command(linker, flags...)
@@ -2490,7 +2496,7 @@ func hostObject(ctxt *Link, objname string, path string) {
 	h.length = f.MustSeek(0, 2)
 	f.MustSeek(h.off, 0)
 	h.ld(ctxt, f, h.pkg, h.length, h.pn)
-	if *flagCaptureHostObjs != "" {
+	if ctxt.flagCaptureHostObjs != "" {
 		captureHostObj(ctxt, h)
 	}
 }
@@ -2830,7 +2836,7 @@ func datoff(ctxt *Link, ldr *loader.Loader, s loader.Sym, addr int64) int64 {
 }
 
 func Entryvalue(ctxt *Link) int64 {
-	a := *flagEntrySymbol
+	a := ctxt.flagEntrySymbol
 	if a[0] >= '0' && a[0] <= '9' {
 		return atolwhex(a)
 	}
@@ -2842,7 +2848,7 @@ func Entryvalue(ctxt *Link) int64 {
 	}
 	st := ldr.SymType(s)
 	if st == 0 {
-		return *FlagTextAddr
+		return ctxt.FlagTextAddr
 	}
 	if !ctxt.IsAIX() && !st.IsText() {
 		ldr.Errorf(s, "entry not text")
@@ -2851,7 +2857,7 @@ func Entryvalue(ctxt *Link) int64 {
 }
 
 func (ctxt *Link) callgraph() {
-	if !*FlagC {
+	if !ctxt.FlagC {
 		return
 	}
 
@@ -2982,8 +2988,8 @@ func captureHostObj(ctxt *Link, h *Hostobj) {
 	ofile := fmt.Sprintf("captured-obj-%d.o", ctxt.hostobjcounter)
 	ifile := fmt.Sprintf("captured-obj-%d.txt", ctxt.hostobjcounter)
 	ctxt.hostobjcounter++
-	opath := filepath.Join(*flagCaptureHostObjs, ofile)
-	ipath := filepath.Join(*flagCaptureHostObjs, ifile)
+	opath := filepath.Join(ctxt.flagCaptureHostObjs, ofile)
+	ipath := filepath.Join(ctxt.flagCaptureHostObjs, ifile)
 
 	// Write the info file.
 	info := fmt.Sprintf("pkg: %s\npn: %s\nfile: %s\noff: %d\nlen: %d\n",
@@ -3035,7 +3041,7 @@ func (ctxt *Link) findExtLinkTool(toolname string) string {
 func (ctxt *Link) isMSVC() bool {
 	extld := ctxt.extld()
 	name, args := extld[0], extld[1:]
-	args = append(args, trimLinkerArgv(flagExtldflags)...)
+	args = append(args, trimLinkerArgv(ctxt.flagExtldflags)...)
 	args = append(args, "--version")
 	cmd := exec.Command(name, args...)
 	if out, err := cmd.CombinedOutput(); err == nil {

@@ -380,7 +380,7 @@ func machowrite(ctxt *Link, arch *sys.Arch, out *OutBuf, linkmode LinkMode) int 
 }
 
 func (ctxt *Link) domacho() {
-	if *FlagD {
+	if ctxt.FlagD {
 		return
 	}
 
@@ -518,7 +518,7 @@ func machoadddynlib(ctxt *Link, lib string, linkmode LinkMode) {
 
 	if ctxt.loadBudget < 0 {
 		ctxt.HEADR += 4096
-		*FlagTextAddr += 4096
+		ctxt.FlagTextAddr += 4096
 		ctxt.loadBudget += 4096
 	}
 
@@ -597,7 +597,7 @@ func machoshbits(ctxt *Link, mseg *MachoSeg, sect *sym.Section, segname string) 
 func asmbMacho(ctxt *Link) {
 	machlink := doMachoLink(ctxt)
 	if ctxt.IsExternal() {
-		symo := int64(ctxt.Segdwarf.Fileoff + uint64(Rnd(int64(ctxt.Segdwarf.Filelen), *FlagRound)) + uint64(machlink))
+		symo := int64(ctxt.Segdwarf.Fileoff + uint64(Rnd(int64(ctxt.Segdwarf.Filelen), ctxt.FlagRound)) + uint64(machlink))
 		ctxt.Out.SeekSet(symo)
 		machoEmitReloc(ctxt)
 	}
@@ -606,7 +606,7 @@ func asmbMacho(ctxt *Link) {
 	ldr := ctxt.loader
 
 	/* apple MACH */
-	va := *FlagTextAddr - int64(ctxt.HEADR)
+	va := ctxt.FlagTextAddr - int64(ctxt.HEADR)
 
 	mh := getMachoHdr(ctxt)
 	switch ctxt.Arch.Family {
@@ -639,7 +639,7 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	/* text */
-	v := Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), *FlagRound)
+	v := Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), ctxt.FlagRound)
 
 	var mstext *MachoSeg
 	if ctxt.LinkMode != LinkExternal {
@@ -689,7 +689,7 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	/* dwarf */
-	if !*FlagW {
+	if !ctxt.FlagW {
 		if ctxt.LinkMode != LinkExternal {
 			ms = newMachoSeg(ctxt, "__DWARF", 20)
 			ms.vaddr = ctxt.Segdwarf.Vaddr
@@ -722,7 +722,7 @@ func asmbMacho(ctxt *Link) {
 	}
 
 	var codesigOff int64
-	if !*FlagD {
+	if !ctxt.FlagD {
 		// must match doMachoLink below
 		s1 := ldr.SymSize(ldr.Lookup(".machorebase", 0))
 		s2 := ldr.SymSize(ldr.Lookup(".machobind", 0))
@@ -734,7 +734,7 @@ func asmbMacho(ctxt *Link) {
 
 		if ctxt.LinkMode != LinkExternal {
 			ms := newMachoSeg(ctxt, "__LINKEDIT", 0)
-			ms.vaddr = uint64(Rnd(int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length), *FlagRound))
+			ms.vaddr = uint64(Rnd(int64(ctxt.Segdata.Vaddr+ctxt.Segdata.Length), ctxt.FlagRound))
 			ms.vsize = uint64(s1 + s2 + s3 + s4 + s5 + s6 + s7)
 			ms.fileoffset = uint64(ctxt.linkoff)
 			ms.filesize = ms.vsize
@@ -848,7 +848,7 @@ func collectmachosyms(ctxt *Link) {
 	// See data.go:/textaddress
 	// NOTE: runtime.text.N symbols (if we split text sections) are not added, though,
 	// so we handle them here.
-	if !*FlagS {
+	if !ctxt.FlagS {
 		if !ctxt.DynlinkingGo() {
 			s := ldr.Lookup("runtime.text", 0)
 			if ldr.SymType(s).IsText() {
@@ -873,7 +873,7 @@ func collectmachosyms(ctxt *Link) {
 
 	// Add text symbols.
 	for _, s := range ctxt.Textp {
-		if *FlagS && !ldr.AttrCgoExportDynamic(s) {
+		if ctxt.FlagS && !ldr.AttrCgoExportDynamic(s) {
 			continue
 		}
 		addsym(s)
@@ -904,7 +904,7 @@ func collectmachosyms(ctxt *Link) {
 			if !shouldBeInSymbolTable(s) {
 				continue
 			}
-			if *FlagS && !ldr.AttrCgoExportDynamic(s) {
+			if ctxt.FlagS && !ldr.AttrCgoExportDynamic(s) {
 				continue
 			}
 			addsym(s)
@@ -983,7 +983,7 @@ func machoShouldExport(ctxt *Link, ldr *loader.Loader, s loader.Sym) bool {
 	if !ctxt.DynlinkingGo() || ldr.AttrLocal(s) {
 		return false
 	}
-	if ctxt.BuildMode == BuildModePlugin && strings.HasPrefix(ldr.SymExtname(s), objabi.PathToPrefix(*flagPluginPath)) {
+	if ctxt.BuildMode == BuildModePlugin && strings.HasPrefix(ldr.SymExtname(s), objabi.PathToPrefix(ctxt.flagPluginPath)) {
 		return true
 	}
 	name := ldr.SymName(s)
@@ -1133,7 +1133,7 @@ func doMachoLink(ctxt *Link) int64 {
 	}
 
 	if size > 0 {
-		ctxt.linkoff = Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), *FlagRound) + Rnd(int64(ctxt.Segrelrodata.Filelen), *FlagRound) + Rnd(int64(ctxt.Segdata.Filelen), *FlagRound) + Rnd(int64(ctxt.Segdwarf.Filelen), *FlagRound)
+		ctxt.linkoff = Rnd(int64(uint64(ctxt.HEADR)+ctxt.Segtext.Length), ctxt.FlagRound) + Rnd(int64(ctxt.Segrelrodata.Filelen), ctxt.FlagRound) + Rnd(int64(ctxt.Segdata.Filelen), ctxt.FlagRound) + Rnd(int64(ctxt.Segdwarf.Filelen), ctxt.FlagRound)
 		ctxt.Out.SeekSet(ctxt.linkoff)
 
 		ctxt.Out.Write(ldr.Data(s1))
@@ -1148,7 +1148,7 @@ func doMachoLink(ctxt *Link) int64 {
 		size += ldr.SymSize(s7)
 	}
 
-	return Rnd(size, *FlagRound)
+	return Rnd(size, ctxt.FlagRound)
 }
 
 func machorelocsect(ctxt *Link, out *OutBuf, sect *sym.Section, syms []loader.Sym) {

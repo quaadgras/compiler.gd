@@ -26,10 +26,10 @@ func Init() (*sys.Arch, ld.Arch) {
 }
 
 func archinit(ctxt *ld.Link) {
-	if *ld.FlagRound == -1 {
-		*ld.FlagRound = 4096
+	if ctxt.FlagRound == -1 {
+		ctxt.FlagRound = 4096
 	}
-	if *ld.FlagTextAddr == -1 {
-		*ld.FlagTextAddr = 0
+	if ctxt.FlagTextAddr == -1 {
+		ctxt.FlagTextAddr = 0
 	}
 }
