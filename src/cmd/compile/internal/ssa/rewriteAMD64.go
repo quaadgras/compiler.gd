@@ -68045,12 +68045,12 @@ func rewriteValueAMD64_OpCvt32Fto32(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (Cvt32Fto32 <t> x)
-	// cond: base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (XORL <t> y (SARLconst <t> [31] (ANDL <t> y:(CVTTSS2SL <t> x) (NOTL <typ.Int32> (MOVLf2i x)))))
 	for {
 		t := v.Type
 		x := v_0
-		if !(base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64XORL)
@@ -68070,12 +68070,12 @@ func rewriteValueAMD64_OpCvt32Fto32(v *Value) bool {
 		return true
 	}
 	// match: (Cvt32Fto32 <t> x)
-	// cond: !base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: !base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (CVTTSS2SL <t> x)
 	for {
 		t := v.Type
 		x := v_0
-		if !(!base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(!base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64CVTTSS2SL)
@@ -68090,12 +68090,12 @@ func rewriteValueAMD64_OpCvt32Fto64(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (Cvt32Fto64 <t> x)
-	// cond: base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (XORQ <t> y (SARQconst <t> [63] (ANDQ <t> y:(CVTTSS2SQ <t> x) (NOTQ <typ.Int64> (MOVQf2i (CVTSS2SD <typ.Float64> x))) )))
 	for {
 		t := v.Type
 		x := v_0
-		if !(base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64XORQ)
@@ -68117,12 +68117,12 @@ func rewriteValueAMD64_OpCvt32Fto64(v *Value) bool {
 		return true
 	}
 	// match: (Cvt32Fto64 <t> x)
-	// cond: !base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: !base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (CVTTSS2SQ <t> x)
 	for {
 		t := v.Type
 		x := v_0
-		if !(!base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(!base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64CVTTSS2SQ)
@@ -68169,12 +68169,12 @@ func rewriteValueAMD64_OpCvt64Fto32(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (Cvt64Fto32 <t> x)
-	// cond: base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (XORL <t> y (SARLconst <t> [31] (ANDL <t> y:(CVTTSD2SL <t> x) (NOTL <typ.Int32> (MOVLf2i (CVTSD2SS <typ.Float32> x))))))
 	for {
 		t := v.Type
 		x := v_0
-		if !(base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64XORL)
@@ -68196,12 +68196,12 @@ func rewriteValueAMD64_OpCvt64Fto32(v *Value) bool {
 		return true
 	}
 	// match: (Cvt64Fto32 <t> x)
-	// cond: !base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: !base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (CVTTSD2SL <t> x)
 	for {
 		t := v.Type
 		x := v_0
-		if !(!base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(!base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64CVTTSD2SL)
@@ -68216,12 +68216,12 @@ func rewriteValueAMD64_OpCvt64Fto64(v *Value) bool {
 	b := v.Block
 	typ := &b.Func.Config.Types
 	// match: (Cvt64Fto64 <t> x)
-	// cond: base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (XORQ <t> y (SARQconst <t> [63] (ANDQ <t> y:(CVTTSD2SQ <t> x) (NOTQ <typ.Int64> (MOVQf2i x)))))
 	for {
 		t := v.Type
 		x := v_0
-		if !(base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64XORQ)
@@ -68241,12 +68241,12 @@ func rewriteValueAMD64_OpCvt64Fto64(v *Value) bool {
 		return true
 	}
 	// match: (Cvt64Fto64 <t> x)
-	// cond: !base.ConvertHash.MatchPos(v.Pos, nil)
+	// cond: !base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)
 	// result: (CVTTSD2SQ <t> x)
 	for {
 		t := v.Type
 		x := v_0
-		if !(!base.ConvertHash.MatchPos(v.Pos, nil)) {
+		if !(!base.ConvertHash.MatchPosCtxt(b.Func.Config.GD().Ctxt, v.Pos, nil)) {
 			break
 		}
 		v.reset(OpAMD64CVTTSD2SQ)

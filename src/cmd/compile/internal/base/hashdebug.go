@@ -297,6 +297,26 @@ func (d *HashDebug) MatchPos(pos src.XPos, desc func() string) bool {
 	return d.matchPos(d.currentCtxt(), pos, desc)
 }
 
+// MatchPosCtxt is like MatchPos but takes an explicit Ctxt for the
+// PosTable. Used by SSA rewrite rules and other callers under
+// concurrent in-process compile invocations, where the global
+// currentCtxt atomic is non-deterministic across invocations.
+func (d *HashDebug) MatchPosCtxt(ctxt *obj.Link, pos src.XPos, desc func() string) bool {
+	if d == nil {
+		return true
+	}
+	return d.matchPos(ctxt, pos, desc)
+}
+
+// MatchPosWithInfoCtxt is like MatchPosWithInfo but takes an
+// explicit Ctxt. See MatchPosCtxt.
+func (d *HashDebug) MatchPosWithInfoCtxt(ctxt *obj.Link, pos src.XPos, info any, desc func() string) bool {
+	if d == nil {
+		return true
+	}
+	return d.matchPosWithInfo(ctxt, pos, info, desc)
+}
+
 func (d *HashDebug) matchPos(ctxt *obj.Link, pos src.XPos, note func() string) bool {
 	return d.matchPosWithInfo(ctxt, pos, nil, note)
 }

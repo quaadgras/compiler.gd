@@ -858,7 +858,7 @@ func (f *Func) useFMA(v *Value) bool {
 	if base.FmaHash == nil {
 		return true
 	}
-	return base.FmaHash.MatchPos(v.Pos, nil)
+	return base.FmaHash.MatchPosCtxt(v.Block.Func.Config.GD().Ctxt, v.Pos, nil)
 }
 
 // NewLocal returns a new anonymous local variable of the given type.
