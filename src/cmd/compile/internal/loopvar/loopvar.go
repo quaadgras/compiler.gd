@@ -104,7 +104,7 @@ func ForCapture(gd *base.Invocation, fn *ir.Func) []VarAndLoop {
 				desc := func() string {
 					return describe(n)
 				}
-				if base.LoopVarHash.MatchPos(n.Pos(), desc) {
+				if base.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
 					// Rename the loop key, prefix body with assignment from loop key
 					transformed = append(transformed, VarAndLoop{n, x, lastPos})
 					tk := typecheck.TempAt(gd, gd.Pos, fn, n.Type())
@@ -215,7 +215,7 @@ func ForCapture(gd *base.Invocation, fn *ir.Func) []VarAndLoop {
 							return describe(n)
 						}
 						// Hash on n.Pos() for most precise failure location.
-						if base.LoopVarHash.MatchPos(n.Pos(), desc) {
+						if base.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
 							leaked = append(leaked, n)
 						}
 					}

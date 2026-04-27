@@ -3816,7 +3816,7 @@ func (s *state) conv(n ir.Node, v *ssa.Value, ft, tt *types.Type) *ssa.Value {
 		conv, ok := fpConvOpToSSA[twoTypes{cft, ctt}]
 		// there's a change to a conversion-op table, this restores the old behavior if ConvertHash is false.
 		// use salted hash to distinguish unsigned convert at a Pos from signed convert at a Pos
-		if ctt == types.TUINT32 && ft.IsFloat() && !base.ConvertHash.MatchPosWithInfo(n.Pos(), "U", nil) {
+		if ctt == types.TUINT32 && ft.IsFloat() && !base.ConvertHash.MatchPosWithInfoCtxt(s.gd.Ctxt, n.Pos(), "U", nil) {
 			// revert to old behavior
 			conv.op1 = ssa.OpCvt64Fto64
 			if cft == types.TFLOAT32 {
@@ -4761,7 +4761,7 @@ func (s *state) getBackingStoreInfo(n ir.Node) *backingStoreInfo {
 	if s.gd.Flag.N != 0 {
 		return nil
 	}
-	if !base.VariableMakeHash.MatchPos(n.Pos(), nil) {
+	if !base.VariableMakeHash.MatchPosCtxt(s.gd.Ctxt, n.Pos(), nil) {
 		return nil
 	}
 	i := s.backingStores[n]
@@ -7253,7 +7253,7 @@ func (s *state) floatToUint(cvttab *f2uCvtTab, n ir.Node, x *ssa.Value, ft, tt *
 
 	var bThen, bZero *ssa.Block
 	// use salted hash to distinguish unsigned convert at a Pos from signed convert at a Pos
-	newConversion := base.ConvertHash.MatchPosWithInfo(n.Pos(), "U", nil)
+	newConversion := base.ConvertHash.MatchPosWithInfoCtxt(s.gd.Ctxt, n.Pos(), "U", nil)
 	if newConversion {
 		bZero = s.f.NewBlock(ssa.BlockPlain)
 		bThen = s.f.NewBlock(ssa.BlockIf)

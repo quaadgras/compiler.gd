@@ -324,7 +324,7 @@ func (config *ABIConfig) NumParamRegs(typ *types.Type) int {
 // corresponding method/function type, except that all the embedded parameter names are nil.
 // This is intended for use by ssagen/ssa.go:(*state).rtcall, for runtime functions that lack a parsed function type.
 func (config *ABIConfig) ABIAnalyzeTypes(params, results []*types.Type) *ABIParamResultInfo {
-	setup()
+	setup(config.gd)
 	s := assignState{
 		stackOffset: config.offsetForLocals,
 		rTotal:      config.regAmounts,
@@ -362,7 +362,7 @@ func (config *ABIConfig) ABIAnalyzeTypes(params, results []*types.Type) *ABIPara
 // and results will be passed (in registers or on the stack), returning
 // an ABIParamResultInfo object that holds the results of the analysis.
 func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Type) *ABIParamResultInfo {
-	setup()
+	setup(config.gd)
 	s := assignState{
 		stackOffset: config.offsetForLocals,
 		rTotal:      config.regAmounts,
@@ -585,7 +585,7 @@ var synthIface *types.Type
 
 // setup performs setup for the register assignment utilities, manufacturing
 // a small set of synthesized types that we'll need along the way.
-func setup() {
+func setup(gd *base.Invocation) {
 	synthOnce.Do(func() {
 		// gd: BuiltinPkg is per-Invocation; the synth* types built
 		// here are process-global and only reference the field
@@ -602,7 +602,7 @@ func setup() {
 			types.NewField(nxp, fname("len"), it),
 			types.NewField(nxp, fname("cap"), it),
 		})
-		types.CalcStructSize(nil, synthSlice)
+		types.CalcStructSize(gd, synthSlice)
 		// gd small-string optimization: 3-word header
 		// { data ptr / nil, hash / bytes[0:8], tag<<60|len / tag|bytes[8:15] }.
 		// See doc/gd/sso-string.md. data is the sole pointer word;
@@ -613,7 +613,7 @@ func setup() {
 			types.NewField(nxp, fname("hash"), up),
 			types.NewField(nxp, fname("len"), it),
 		})
-		types.CalcStructSize(nil, synthString)
+		types.CalcStructSize(gd, synthString)
 		unsp := types.Types[types.TUNSAFEPTR]
 		c128 := types.Types[types.TCOMPLEX128]
 		// gd fat-interface layout: { tab/_type, data, inline complex128 }.
@@ -627,7 +627,7 @@ func setup() {
 			types.NewField(nxp, fname("f2"), unsp),
 			types.NewField(nxp, fname("f3"), c128),
 		})
-		types.CalcStructSize(nil, synthIface)
+		types.CalcStructSize(gd, synthIface)
 	})
 }
 

@@ -481,7 +481,7 @@ func walkMakeSlice(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node 
 			return walkExpr(gd, typecheck.Expr(gd, typecheck.Conv(gd, s, n.Type())), init)
 		}
 		// Check that this optimization is enabled in general and for this node.
-		tryStack = gd.Flag.N == 0 && base.VariableMakeHash.MatchPos(n.Pos(), nil)
+		tryStack = gd.Flag.N == 0 && base.VariableMakeHash.MatchPosCtxt(gd.Ctxt, n.Pos(), nil)
 	}
 
 	// The final result is assigned to this variable.

@@ -763,7 +763,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 					b.gd.Fatalf("unexpected BasicLit Kind")
 				}
 				if constant.Compare(lit.Val(), token.GEQ, constant.MakeInt64(0)) {
-					if !base.LiteralAllocHash.MatchPos(n.Pos(), nil) {
+					if !base.LiteralAllocHash.MatchPosCtxt(b.gd.Ctxt, n.Pos(), nil) {
 						// De-selected by literal alloc optimizations debug hash.
 						return
 					}
@@ -794,7 +794,7 @@ func (b *batch) rewriteWithLiterals(n ir.Node, fn *ir.Func) {
 			}
 			v := ro.StaticValue(conv.X)
 			if v != nil && v.Op() == ir.OLITERAL && ir.ValidTypeForConst(b.gd, conv.X.Type(), v.Val()) {
-				if !base.LiteralAllocHash.MatchPos(n.Pos(), nil) {
+				if !base.LiteralAllocHash.MatchPosCtxt(b.gd.Ctxt, n.Pos(), nil) {
 					// De-selected by literal alloc optimizations debug hash.
 					return
 				}

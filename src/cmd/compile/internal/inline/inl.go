@@ -1021,7 +1021,7 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 		return false, inlineHotMaxBudget, metric, false
 	}
 
-	if !base.PGOHash.MatchPosWithInfo(n.Pos(), "inline", nil) {
+	if !base.PGOHash.MatchPosWithInfoCtxt(gd.Ctxt, n.Pos(), "inline", nil) {
 		// De-selected by PGO Hash.
 		return false, maxCost, metric, false
 	}

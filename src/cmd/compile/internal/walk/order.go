@@ -248,7 +248,7 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 	}
 	optEnabled := func(n ir.Node) bool {
 		// Do this optimization only when enabled for this node.
-		return base.LiteralAllocHash.MatchPos(n.Pos(), nil)
+		return base.LiteralAllocHash.MatchPosCtxt(o.gd.Ctxt, n.Pos(), nil)
 	}
 	if (v.Op() == ir.OSTRUCTLIT || v.Op() == ir.OARRAYLIT) && !o.gd.Ctxt.IsFIPS() {
 		if ir.IsZero(v) && 0 < v.Type().Size() && v.Type().Size() <= abi.ZeroValSize && optEnabled(n) {

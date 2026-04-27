@@ -428,7 +428,7 @@ func (cs *cstate) setupHashBisection(gd *base.Invocation, cands []*ir.Name) {
 	deselected := make(map[*ir.Name]bool)
 	selCount := 0
 	for _, cand := range cands {
-		if !base.MergeLocalsHash.MatchPosWithInfo(cand.Pos(), "mergelocals", nil) {
+		if !base.MergeLocalsHash.MatchPosWithInfoCtxt(gd.Ctxt, cand.Pos(), "mergelocals", nil) {
 			deselected[cand] = true
 		} else {
 			deselected[cand] = false

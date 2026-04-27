@@ -174,7 +174,7 @@ func analyze(gd *base.Invocation, fn *ir.Func) {
 		if s.Type().Elem().Size() > maxStackSize {
 			continue
 		}
-		if !base.VariableMakeHash.MatchPos(s.Pos(), nil) {
+		if !base.VariableMakeHash.MatchPosCtxt(gd.Ctxt, s.Pos(), nil) {
 			continue
 		}
 		s.Opt = &sliceInfo{s: s} // start tracking s

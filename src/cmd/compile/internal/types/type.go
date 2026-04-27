@@ -220,9 +220,11 @@ type Type struct {
 // ABIInternal calling conventions.
 //
 // If t must be passed by memory, Registers returns (math.MaxUint8,
-// math.MaxUint8).
+// math.MaxUint8). Caller must ensure t.widthCalculated() before
+// calling — Registers no longer triggers a defensive CalcSize, so
+// it can be safely used from goroutines that don't carry a gd
+// (ssa rewrite rules, etc.).
 func (t *Type) Registers() (uint8, uint8) {
-	CalcSize(nil, t)
 	return t.intRegs, t.floatRegs
 }
 

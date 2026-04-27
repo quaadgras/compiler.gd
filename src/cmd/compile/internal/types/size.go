@@ -72,9 +72,22 @@ var MaxWidth int64
 // code should toggle gd.CalcSizeDisabled directly.
 var CalcSizeDisabled bool
 
-// machine size and rounding alignment is dictated around
-// the size of a pointer, set in gc.Main (see ../gc/main.go).
-var defercalc int
+// defercalc / deferredTypeStack live on *base.Invocation
+// (gd.Defercalc / gd.DeferredTypeStack). Nil-gd CalcSize/CheckSize
+// callers (Type method defensive paths, ssa.CanSSA, etc.) skip
+// the bracket entirely — they operate on already-calculated types
+// in practice (the widthCalculated() fast path returns
+// immediately), and the t.width=-2 sentinel still loudly catches
+// the rare case where a nil-gd caller hits an uncalculated
+// recursive type.
+//
+// The per-Invocation move matters because concurrent in-process
+// compile invocations would each DeferCheckSize / ResumeCheckSize
+// independently; with shared counters one invocation's
+// ResumeCheckSize fires when defercalc hits 1 — but that 1 might
+// be the OTHER invocation's bracket; types get processed at the
+// wrong time, and the originating invocation's frontend exits
+// without having calc'd its deferred types.
 
 // RoundUp rounds o to a multiple of r, r is a power of 2.
 func RoundUp(o int64, r int64) int64 {
@@ -288,8 +301,18 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		fatal.Error("width not calculated: %v", t)
 	}
 
-	// defer CheckSize calls until after we're done
-	DeferCheckSize(gd)
+	// defer CheckSize calls until after we're done. Nil-gd
+	// callers (Type.Size/Alignment defensive paths, CanSSA, etc.)
+	// skip the bracket: by the time these run, the type tree
+	// has been calculated by frontend, so child CheckSize calls
+	// resolve via the t.widthCalculated() fast path with no
+	// recursion. The width=-2 sentinel still catches the (rare)
+	// case where a nil-gd caller hits an uncalculated recursive
+	// type — the resulting fatal makes the precondition violation
+	// loud rather than racy.
+	if gd != nil {
+		DeferCheckSize(gd)
+	}
 
 	t.width = -2
 	t.align = 0  // 0 means use t.Width, below
@@ -507,7 +530,9 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		t.align = uint8(w)
 	}
 
-	ResumeCheckSize(gd)
+	if gd != nil {
+		ResumeCheckSize(gd)
+	}
 }
 
 // simdify marks as type as "SIMD", either as a tag field,
@@ -718,8 +743,6 @@ func (t *Type) widthCalculated() bool {
 // is needed immediately.  CheckSize makes sure the
 // size is evaluated eventually.
 
-var deferredTypeStack []*Type
-
 func CheckSize(gd *base.Invocation, t *Type) {
 	if t == nil {
 		return
@@ -731,7 +754,16 @@ func CheckSize(gd *base.Invocation, t *Type) {
 		fatal.Error("CheckSize %v", t)
 	}
 
-	if defercalc == 0 {
+	// Nil-gd path: no defer bracket; fast-CalcSize directly.
+	// This is safe because nil-gd callers operate on already-
+	// calculated types in practice — the CalcSize call short-
+	// circuits at widthCalculated.
+	if gd == nil {
+		CalcSize(nil, t)
+		return
+	}
+
+	if gd.Defercalc == 0 {
 		CalcSize(gd, t)
 		return
 	}
@@ -739,25 +771,25 @@ func CheckSize(gd *base.Invocation, t *Type) {
 	// if type has not yet been pushed on deferredTypeStack yet, do it now
 	if !t.Deferwidth() {
 		t.SetDeferwidth(true)
-		deferredTypeStack = append(deferredTypeStack, t)
+		gd.DeferredTypeStack = append(gd.DeferredTypeStack, t)
 	}
 }
 
 func DeferCheckSize(gd *base.Invocation) {
-	defercalc++
+	gd.Defercalc++
 }
 
 func ResumeCheckSize(gd *base.Invocation) {
-	if defercalc == 1 {
-		for len(deferredTypeStack) > 0 {
-			t := deferredTypeStack[len(deferredTypeStack)-1]
-			deferredTypeStack = deferredTypeStack[:len(deferredTypeStack)-1]
+	if gd.Defercalc == 1 {
+		for len(gd.DeferredTypeStack) > 0 {
+			t := gd.DeferredTypeStack[len(gd.DeferredTypeStack)-1].(*Type)
+			gd.DeferredTypeStack = gd.DeferredTypeStack[:len(gd.DeferredTypeStack)-1]
 			t.SetDeferwidth(false)
 			CalcSize(gd, t)
 		}
 	}
 
-	defercalc--
+	gd.Defercalc--
 }
 
 // PtrDataSize returns the length in bytes of the prefix of t
