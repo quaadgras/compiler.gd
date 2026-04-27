@@ -221,4 +221,11 @@ type Invocation struct {
 	TypesBuiltinPkg any // *types.Pkg
 	TypesUnsafePkg  any // *types.Pkg
 	TypesBlankSym   any // *types.Sym
+
+	// walk.scasetype's cached *types.Type. Was a package-level
+	// `var scase`; pinned invocation 1's LocalPkg-local Syms for
+	// the "c" / "elem" fields, breaking selector lookups in later
+	// invocations. Per-Invocation so each compile builds scase
+	// against its own LocalPkg.
+	WalkScaseType any // *types.Type
 }

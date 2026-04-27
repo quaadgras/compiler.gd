@@ -283,20 +283,27 @@ func bytePtrToIndex(gd *base.Invocation, n ir.Node, i int64) ir.Node {
 	return typecheck.ConvNop(gd, s, t)
 }
 
-var scase *types.Type
-
 // Keep in sync with src/runtime/select.go.
+//
+// Per-Invocation: was a package-level `var scase` cache. The fields
+// "c" / "elem" come from typecheck.Lookup(gd, ...) which routes
+// through gd.LocalPkg — so the cached scase pinned the first
+// invocation's LocalPkg-local Syms, and selectors emitted in
+// subsequent invocations (also via LocalPkg(gd N).Lookup) miss the
+// pointer compare in Lookdot1.
 func scasetype(gd *base.Invocation) *types.Type {
-	if scase == nil {
-		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).Runtime.Lookup("scase"))
-		scase = types.NewNamed(n)
-		n.SetType(scase)
-		n.SetTypecheck(1)
-
-		scase.SetUnderlying(types.NewStruct([]*types.Field{
-			types.NewField(gd.Pos, typecheck.Lookup(gd, "c"), types.Types[types.TUNSAFEPTR]),
-			types.NewField(gd.Pos, typecheck.Lookup(gd, "elem"), types.Types[types.TUNSAFEPTR]),
-		}))
+	if t, _ := gd.WalkScaseType.(*types.Type); t != nil {
+		return t
 	}
-	return scase
+	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).Runtime.Lookup("scase"))
+	t := types.NewNamed(n)
+	n.SetType(t)
+	n.SetTypecheck(1)
+
+	t.SetUnderlying(types.NewStruct([]*types.Field{
+		types.NewField(gd.Pos, typecheck.Lookup(gd, "c"), types.Types[types.TUNSAFEPTR]),
+		types.NewField(gd.Pos, typecheck.Lookup(gd, "elem"), types.Types[types.TUNSAFEPTR]),
+	}))
+	gd.WalkScaseType = t
+	return t
 }

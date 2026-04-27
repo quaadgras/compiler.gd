@@ -392,6 +392,28 @@ func dgopkgpathOff(gd *base.Invocation, c rttype.Cursor, pkg *types.Pkg) {
 	c.WriteSymPtrOff(pkg.Pathsym, false)
 }
 
+// symMethodEq reports whether two method-name Syms denote the same
+// method by Go semantics. Same rule as typecheck.methodSymEqual:
+// exported names match by name alone (any package's "Error" Sym is
+// the same method), unexported by name+pkgpath. Required for in-
+// process compile where shared types pin Sym pointers to one
+// invocation's LocalPkg while user-defined types use another's.
+func symMethodEq(a, b *types.Sym) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Name != b.Name {
+		return false
+	}
+	if types.IsExported(a.Name) {
+		return true
+	}
+	return a.Pkg != nil && b.Pkg != nil && a.Pkg.Path == b.Pkg.Path
+}
+
 // dnameField dumps a reflect.name for a struct field.
 func dnameField(gd *base.Invocation, c rttype.Cursor, spkg *types.Pkg, ft *types.Field) {
 	if !types.IsExported(ft.Sym.Name) && ft.Sym.Pkg != spkg {
@@ -1257,9 +1279,13 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 	entrySigs := make([]*typeSig, 0, len(sigs))
 
 	// both sigs and methods are sorted by name,
-	// so we can find the intersection in a single pass
+	// so we can find the intersection in a single pass.
+	// gd in-process: compare by name+pkgpath instead of bare Sym
+	// pointer because interface method Syms (e.g. ErrorType.Error)
+	// can be locked to invocation 1's LocalPkg via universe init,
+	// while typ's methods are minted in invocation N's LocalPkg.
 	for _, m := range methods(gd, typ) {
-		if m.name == sigs[0].Sym {
+		if symMethodEq(m.name, sigs[0].Sym) {
 			entries = append(entries, m.isym)
 			entrySigs = append(entrySigs, m)
 			if m.isym == nil {

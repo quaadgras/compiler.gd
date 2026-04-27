@@ -756,7 +756,13 @@ func Lookdot1(gd *base.Invocation, errnode ir.Node, s *types.Sym, t *types.Type,
 		if dostrcmp == 2 && strings.EqualFold(f.Sym.Name, s.Name) {
 			return f
 		}
-		if f.Sym != s {
+		// gd in-process: tolerate cross-invocation Sym pointers for
+		// exported names (any pkg's "Error" matches an interface's
+		// "Error"); strict pointer compare is the upstream norm but
+		// fails when the lookup target Sym is locked to invocation
+		// 1's LocalPkg via a shared universe type. Falls back to
+		// name+pkgpath for unexported (matching Go encapsulation).
+		if !methodSymEqual(f.Sym, s) {
 			continue
 		}
 		if r != nil {
