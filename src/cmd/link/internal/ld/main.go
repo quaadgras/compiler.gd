@@ -236,12 +236,12 @@ func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean 
 // Main is the main entry point for the linker code.
 //
 // args is the argv that the standalone link binary would have received
-// as os.Args[1:]. Under cmd/link/host.Run (in-process), Main is called
-// from a worker goroutine; under linkRunMu so concurrent host.Run
-// invocations don't race on the package-level flag globals or
-// os.Args. Long-term plan: refactor flags onto a per-Link Context
-// (asm playbook) and lift the mutex.
-func Main(arch *sys.Arch, theArch Arch, args []string) {
+// as os.Args[1:]. status, when non-nil, makes Exit write the exit code
+// to *status and call runtime.Goexit instead of os.Exit — used by
+// cmd/link/host.Run to drive Main on a worker goroutine without
+// terminating cmd/go's process. Pass nil for the standalone binary
+// path.
+func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	log.SetPrefix("link: ")
 	log.SetFlags(0)
 	counterOpenOnce.Do(counter.Open)
@@ -257,6 +257,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	ctxt := linknew(arch)
 	ctxt.thearch = theArch
 	ctxt.Bso = bufio.NewWriter(os.Stdout)
+	ctxt.inProcessStatus = status
 
 	// Publish ctxt as the currentLink so package-level AtExit/Exit
 	// helpers route through it. Under linkRunMu serialization this is

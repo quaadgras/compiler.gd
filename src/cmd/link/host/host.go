@@ -90,15 +90,14 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	// inProcessStatus + runtime.Goexit dance: ld.Exit writes the
 	// status to *st and Goexits, the worker goroutine unwinds (running
 	// AtExit funcs along the way), the main goroutine sees done close
-	// and reads st.
+	// and reads st. The status pointer is per-Link (passed into Main,
+	// stored on ctxt) so concurrent host.Run invocations don't race.
 	var st int
-	ld.SetInProcess(&st)
-	defer ld.ClearInProcess()
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ld.Main(arch, theArch, args)
+		ld.Main(arch, theArch, args, &st)
 	}()
 	<-done
 

@@ -21,18 +21,13 @@ import (
 // plumbing through every call site.
 var currentLink *Link
 
-// inProcessStatus, when non-nil, redirects Exit to write the code
-// there and call runtime.Goexit instead of os.Exit. Set by
-// cmd/link/host.Run.
-var inProcessStatus *int
+// SetInProcess is retained for compatibility but is a no-op: the
+// status pointer now lives on *Link (set by Main from its parameter).
+// Exit reads the active *Link's inProcessStatus via currentLink.
+func SetInProcess(status *int) {}
 
-// SetInProcess wires Exit to runtime.Goexit + status writeback.
-// Called by cmd/link/host.Run before invoking Main on a worker
-// goroutine.
-func SetInProcess(status *int) { inProcessStatus = status }
-
-// ClearInProcess restores Exit's process-termination behaviour.
-func ClearInProcess() { inProcessStatus = nil }
+// ClearInProcess is retained for compatibility but is a no-op.
+func ClearInProcess() {}
 
 // AtExit registers f to run when Exit is called. The slice lives on
 // the currentLink (set by Main after linknew) so concurrent in-process
@@ -65,13 +60,13 @@ func runAtExitFuncs() {
 }
 
 // Exit exits with code after executing all atExitFuncs. Under
-// cmd/link/host.Run (inProcessStatus non-nil) it writes the code to
-// the status pointer and calls runtime.Goexit instead of os.Exit so
-// the calling goroutine in cmd/go survives.
+// cmd/link/host.Run (currentLink.inProcessStatus non-nil) it writes
+// the code to the status pointer and calls runtime.Goexit instead
+// of os.Exit so the calling goroutine in cmd/go survives.
 func Exit(code int) {
 	runAtExitFuncs()
-	if inProcessStatus != nil {
-		*inProcessStatus = code
+	if currentLink != nil && currentLink.inProcessStatus != nil {
+		*currentLink.inProcessStatus = code
 		runtime.Goexit()
 	}
 	os.Exit(code)
