@@ -2260,15 +2260,17 @@ func span6(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 var instinitOnce sync.Once
 
 func instinit(ctxt *obj.Link) {
-	first := false
-	instinitOnce.Do(func() { first = true })
-	if !first {
-		// Already initialized; stop now. Was a ycover[0]!=0 check
-		// (works for cmd/asm test re-init) but racy under concurrent
-		// in-process compile invocations; sync.Once handles both.
-		return
-	}
+	// Run the body INSIDE Do so concurrent invocations block
+	// until the first one finishes; otherwise B's instinit could
+	// return after A's Once.Do returned but BEFORE A had populated
+	// opindex/ycover, leaving B's assembler with nil opindex
+	// entries (manifests as `asmins: missing op <Prog>`).
+	instinitOnce.Do(func() {
+		instinitImpl(ctxt)
+	})
+}
 
+func instinitImpl(ctxt *obj.Link) {
 	switch ctxt.Headtype {
 	case objabi.Hplan9:
 		plan9privates = ctxt.Lookup("_privates")

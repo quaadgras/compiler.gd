@@ -257,6 +257,16 @@ type Invocation struct {
 	// other's flag state.
 	CalcSizeDisabled bool
 
+	// ProgArray — was the package-level
+	// `var sharedProgArray = new([10000]obj.Prog)` in
+	// cmd/compile/internal/objw. NewProgs slices this array per
+	// worker; concurrent host.Run invocations all using
+	// `sharedProgArray[sz*worker:sz*(worker+1)]` raced on the
+	// same memory. Per-Invocation so each gd has its own
+	// backing array. Type is *[10000]obj.Prog (any to avoid
+	// base→obj import cycle in this struct).
+	ProgArray any // *[10000]obj.Prog
+
 	// Pathsyms maps each types.Pkg to the importpath LSym
 	// (`type:.importpath.<prefix>.`) emitted for it in this
 	// invocation. Was a `Pathsym *obj.LSym` field on types.Pkg —

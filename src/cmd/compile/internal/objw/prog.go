@@ -38,15 +38,28 @@ import (
 	"internal/abi"
 )
 
-var sharedProgArray = new([10000]obj.Prog) // *T instead of T to work around issue 19839
+// progArrayOf returns gd's per-Invocation [10000]Prog backing array.
+// Was a package-level `sharedProgArray`; concurrent host.Run
+// invocations would have given each invocation's worker N the same
+// slice of memory, racing on Prog field writes during arch
+// emit/assemble.
+func progArrayOf(gd *base.Invocation) *[10000]obj.Prog {
+	if a, _ := gd.ProgArray.(*[10000]obj.Prog); a != nil {
+		return a
+	}
+	a := new([10000]obj.Prog)
+	gd.ProgArray = a
+	return a
+}
 
 // NewProgs returns a new Progs for fn.
 // worker indicates which of the backend workers will use the Progs.
 func NewProgs(gd *base.Invocation, fn *ir.Func, worker int) *Progs {
 	pp := new(Progs)
 	if gd.Ctxt.CanReuseProgs() {
-		sz := len(sharedProgArray) / gd.Flag.LowerC
-		pp.Cache = sharedProgArray[sz*worker : sz*(worker+1)]
+		arr := progArrayOf(gd)
+		sz := len(arr) / gd.Flag.LowerC
+		pp.Cache = arr[sz*worker : sz*(worker+1)]
 	}
 	pp.CurFunc = fn
 
