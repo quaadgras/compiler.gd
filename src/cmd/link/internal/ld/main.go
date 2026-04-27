@@ -38,8 +38,6 @@ import (
 	"cmd/internal/sys"
 	"cmd/internal/telemetry/counter"
 	"cmd/link/internal/benchmark"
-	"cmd/link/internal/loader"
-	"cmd/link/internal/sym"
 	"flag"
 	"internal/buildcfg"
 	"log"
@@ -255,10 +253,6 @@ func Main(arch *sys.Arch, theArch Arch, args []string) {
 	nerrors = 0
 	strictDupMsgCount = 0
 	atExitFuncs = nil
-	CarrierSymByType = [sym.SFirstUnallocated]struct {
-		Sym  loader.Sym
-		Size int64
-	}{}
 
 	ctxt := linknew(arch)
 	ctxt.thearch = theArch

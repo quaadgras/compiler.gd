@@ -1347,7 +1347,7 @@ func gensymlate(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 
 	// Also for carrier symbols (for which SymSize is 0)
-	for _, ss := range ld.CarrierSymByType {
+	for _, ss := range ctxt.CarrierSymByType {
 		if ss.Sym != 0 && ss.Size > limit {
 			addLabelSyms(ss.Sym, limit, ss.Size)
 		}

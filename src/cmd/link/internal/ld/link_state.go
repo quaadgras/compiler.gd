@@ -44,6 +44,12 @@ type linkState struct {
 	// thearch and other lib.go state
 	thearch Arch
 
+	// CarrierSymByType tracks carrier symbols and their sizes (was symtab.go).
+	CarrierSymByType [sym.SFirstUnallocated]struct {
+		Sym  loader.Sym
+		Size int64
+	}
+
 	// data.go state
 	covCounterDataStartOff uint64
 	covCounterDataLen      uint64

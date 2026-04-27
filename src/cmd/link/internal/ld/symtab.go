@@ -480,8 +480,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			symtype = s.Sym()
 			symtyperel = s.Sym()
 		}
-		setCarrierSym(sym.STYPE, symtype)
-		setCarrierSym(sym.STYPERELRO, symtyperel)
+		setCarrierSym(ctxt, sym.STYPE, symtype)
+		setCarrierSym(ctxt, sym.STYPERELRO, symtyperel)
 	}
 
 	groupSym := func(name string, t sym.SymKind) loader.Sym {
@@ -490,7 +490,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		s.SetSize(0)
 		s.SetAlign(int32(ctxt.Arch.PtrSize))
 		s.SetLocal(true)
-		setCarrierSym(t, s.Sym())
+		setCarrierSym(ctxt, t, s.Sym())
 		return s.Sym()
 	}
 	var (
@@ -820,27 +820,21 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	return symGroupType
 }
 
-// CarrierSymByType tracks carrier symbols and their sizes.
-var CarrierSymByType [sym.SFirstUnallocated]struct {
-	Sym  loader.Sym
-	Size int64
-}
-
-func setCarrierSym(typ sym.SymKind, s loader.Sym) {
-	if CarrierSymByType[typ].Sym != 0 {
+func setCarrierSym(ctxt *Link, typ sym.SymKind, s loader.Sym) {
+	if ctxt.CarrierSymByType[typ].Sym != 0 {
 		panic(fmt.Sprintf("carrier symbol for type %v already set", typ))
 	}
-	CarrierSymByType[typ].Sym = s
+	ctxt.CarrierSymByType[typ].Sym = s
 }
 
-func setCarrierSize(typ sym.SymKind, sz int64) {
+func setCarrierSize(ctxt *Link, typ sym.SymKind, sz int64) {
 	if typ == sym.Sxxx {
 		panic("setCarrierSize(Sxxx)")
 	}
-	if CarrierSymByType[typ].Size != 0 {
+	if ctxt.CarrierSymByType[typ].Size != 0 {
 		panic(fmt.Sprintf("carrier symbol size for type %v already set", typ))
 	}
-	CarrierSymByType[typ].Size = sz
+	ctxt.CarrierSymByType[typ].Size = sz
 }
 
 func isStaticTmp(name string) bool {

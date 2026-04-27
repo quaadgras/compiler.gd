@@ -972,7 +972,7 @@ func (ctxt *Link) pclntab(container loader.Bitmap) *pclntab {
 	state.carrier = ldr.LookupOrCreateSym("runtime.pclntab", 0)
 	ldr.MakeSymbolUpdater(state.carrier).SetType(sym.SPCLNTAB)
 	ldr.SetAttrReachable(state.carrier, true)
-	setCarrierSym(sym.SPCLNTAB, state.carrier)
+	setCarrierSym(ctxt, sym.SPCLNTAB, state.carrier)
 
 	// Aign pclntab to at least a pointer boundary,
 	// for pcHeader. This may be raised further by subsymbols.
