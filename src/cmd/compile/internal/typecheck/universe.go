@@ -6,6 +6,7 @@ package typecheck
 
 import (
 	"go/constant"
+	"sync"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -63,8 +64,22 @@ var unsafeFuncs = [...]struct {
 	{"StringData", ir.OUNSAFESTRINGDATA},
 }
 
+var initUniverseOnce sync.Once
+
 // InitUniverse initializes the universe block.
+//
+// Process-global once: the universe (predeclared int/string/error
+// types, true/false consts, blank Sym, builtin funcs) is invariant
+// across in-process compile invocations targeting the same arch.
+// Re-initialising would either trip importsym duplicate-Def checks
+// or invalidate pointer-equality against types captured by earlier
+// invocations.
 func InitUniverse(gd *base.Invocation) {
+	first := false
+	initUniverseOnce.Do(func() { first = true })
+	if !first {
+		return
+	}
 	types.InitTypes(gd, func(sym *types.Sym, typ *types.Type) types.Object {
 		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, sym)
 		n.SetType(typ)

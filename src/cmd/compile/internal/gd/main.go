@@ -64,6 +64,11 @@ func handlePanic(gd *base.Invocation) {
 // an embedder calling Main on a worker goroutine survives a single
 // invocation's exit.
 func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
+	// gd in-process: BuiltinPkg / UnsafePkg are process-global
+	// (shared across invocations so types match by pointer); their
+	// Syms accumulate per-invocation flags like Siggen that need to
+	// reset between invocations.
+	types.ResetSharedPkgPerInvocationFlags()
 	gd.Timer.Start("fe", "init")
 	counter.Open()
 	counter.Inc("compile/invocations")

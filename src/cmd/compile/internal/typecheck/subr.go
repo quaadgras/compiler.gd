@@ -612,6 +612,34 @@ func Implements(gd *base.Invocation, t, iface *types.Type) bool {
 	return implements(gd, t, iface, &missing, &have, &ptr)
 }
 
+// methodSymEqual reports whether two method-set Syms refer to the
+// same method by Go semantics. Pointer equality alone is insufficient
+// in the in-process compile harness: BuiltinPkg's predeclared types
+// (e.g. ErrorType) are constructed once per process via
+// types.LocalPkg(gd).Lookup("Error"), pinning the first invocation's
+// LocalPkg-local Sym. User code defining an Error method in a later
+// invocation gets a Sym from THAT invocation's LocalPkg — different
+// pointer, same exported name, semantically equal.
+//
+// For exported names (Selector(gd, name) routes to LocalPkg(gd) for
+// any pkg) the rule is name-only equality; for unexported names the
+// rule is name+pkgpath, matching Go's encapsulation rules.
+func methodSymEqual(a, b *types.Sym) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Name != b.Name {
+		return false
+	}
+	if types.IsExported(a.Name) {
+		return true
+	}
+	return a.Pkg != nil && b.Pkg != nil && a.Pkg.Path == b.Pkg.Path
+}
+
 // ImplementsExplain reports whether t implements the interface iface. t can be
 // an interface, a type parameter, or a concrete type. If t does not implement
 // iface, a non-empty string is returned explaining why.
@@ -624,9 +652,9 @@ func ImplementsExplain(gd *base.Invocation, t, iface *types.Type) string {
 
 	if isptrto(t, types.TINTER) {
 		return fmt.Sprintf("%v is pointer to interface, not interface", t)
-	} else if have != nil && have.Sym == missing.Sym && have.Nointerface() {
+	} else if have != nil && methodSymEqual(have.Sym, missing.Sym) && have.Nointerface() {
 		return fmt.Sprintf("%v does not implement %v (%v method is marked 'nointerface')", t, iface, missing.Sym)
-	} else if have != nil && have.Sym == missing.Sym {
+	} else if have != nil && methodSymEqual(have.Sym, missing.Sym) {
 		return fmt.Sprintf("%v does not implement %v (wrong type for %v method)\n"+
 			"\t\thave %v%S\n\t\twant %v%S", t, iface, missing.Sym, have.Sym, have.Type, missing.Sym, missing.Type)
 	} else if ptr != 0 {
@@ -653,7 +681,7 @@ func implements(gd *base.Invocation, t, iface *types.Type, m, samename **types.F
 		i := 0
 		tms := t.AllMethods()
 		for _, im := range iface.AllMethods() {
-			for i < len(tms) && tms[i].Sym != im.Sym {
+			for i < len(tms) && !methodSymEqual(tms[i].Sym, im.Sym) {
 				i++
 			}
 			if i == len(tms) {
@@ -682,7 +710,7 @@ func implements(gd *base.Invocation, t, iface *types.Type, m, samename **types.F
 	}
 	i := 0
 	for _, im := range iface.AllMethods() {
-		for i < len(tms) && tms[i].Sym != im.Sym {
+		for i < len(tms) && !methodSymEqual(tms[i].Sym, im.Sym) {
 			i++
 		}
 		if i == len(tms) {

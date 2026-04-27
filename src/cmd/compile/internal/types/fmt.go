@@ -15,24 +15,62 @@ import (
 	"cmd/internal/hash"
 )
 
-// BuiltinPkg returns gd's per-Invocation pseudo-package that
-// declares the universe block (int, string, true, false, etc.).
-// Lazy-initialised on first call.
-func BuiltinPkg(gd *base.Invocation) *Pkg {
-	p, _ := gd.TypesBuiltinPkg.(*Pkg)
-	if p == nil {
-		p = NewPkg(gd, "go.builtin", "")
-		p.Prefix = "go:builtin"
-		gd.TypesBuiltinPkg = p
-	}
-	return p
+// BuiltinPkg / UnsafePkg are process-global pseudo-packages shared
+// across in-process compile invocations. They were per-Invocation in
+// an earlier iteration, but in-process compilation surfaced types
+// flowing across invocations (cached pkgReaders, imported sigs that
+// captured *Type pointers from the prior gd.Main) which made the
+// per-Invocation pointers diverge with no way to remap them. Both
+// Pkgs are universe-level and never package-locally extended; their
+// Syms tables are write-once-then-read-many after InitUniverse
+// completes, so a single shared Pkg per process is sufficient.
+//
+// pkgInitOnce serialises the first BuiltinPkg / UnsafePkg lookup so
+// concurrent in-process invocations don't race on the construction.
+// Subsequent lookups are lock-free.
+var (
+	pkgInitOnce  sync.Once
+	builtinPkgP *Pkg
+	unsafePkgP  *Pkg
+)
+
+func initSharedPkgs() {
+	pkgInitOnce.Do(func() {
+		builtinPkgP = &Pkg{Path: "go.builtin", Prefix: "go:builtin", Syms: map[string]*Sym{}}
+		unsafePkgP = &Pkg{Name: "unsafe", Path: "unsafe", Prefix: "unsafe", Syms: map[string]*Sym{}}
+	})
 }
 
-// SetBuiltinPkg pins the BuiltinPkg pointer on gd. Used by gd.Main
-// (and equivalent embedders) when an existing Pkg should serve as
-// the universe — not commonly needed; callers usually let
-// BuiltinPkg(gd) lazy-init.
-func SetBuiltinPkg(gd *base.Invocation, p *Pkg) { gd.TypesBuiltinPkg = p }
+// ResetSharedPkgPerInvocationFlags clears per-invocation Sym flags
+// (notably Siggen) on Syms that live in the process-global
+// BuiltinPkg / UnsafePkg. Each gd.Main calls this at start so
+// per-invocation wrapper-generation tracking starts clean. Without
+// this, a Siggen flag set by invocation 1 (e.g. for error.Error's
+// wrapper) leaks into invocation 2 and trips the
+// "already generated wrapper" assertion.
+func ResetSharedPkgPerInvocationFlags() {
+	if builtinPkgP != nil {
+		for _, s := range builtinPkgP.Syms {
+			s.SetSiggen(false)
+		}
+	}
+	if unsafePkgP != nil {
+		for _, s := range unsafePkgP.Syms {
+			s.SetSiggen(false)
+		}
+	}
+}
+
+// BuiltinPkg returns the process-global pseudo-package that declares
+// the universe block (int, string, true, false, etc.).
+func BuiltinPkg(gd *base.Invocation) *Pkg {
+	initSharedPkgs()
+	return builtinPkgP
+}
+
+// SetBuiltinPkg is retained for source compatibility but is a no-op
+// — BuiltinPkg is now process-global.
+func SetBuiltinPkg(gd *base.Invocation, p *Pkg) {}
 
 // LocalPkg is the package being compiled.
 func LocalPkg(gd *base.Invocation) *Pkg {
@@ -42,27 +80,22 @@ func LocalPkg(gd *base.Invocation) *Pkg {
 	return gd.LocalPkg.(*Pkg)
 }
 
-// UnsafePkg returns gd's per-Invocation pseudo-package "unsafe"
-// (containing unsafe.Pointer). Lazy-initialised.
+// UnsafePkg returns the process-global pseudo-package "unsafe".
 func UnsafePkg(gd *base.Invocation) *Pkg {
-	p, _ := gd.TypesUnsafePkg.(*Pkg)
-	if p == nil {
-		p = NewPkg(gd, "unsafe", "unsafe")
-		gd.TypesUnsafePkg = p
-	}
-	return p
+	initSharedPkgs()
+	return unsafePkgP
 }
 
-// BlankSym returns gd's per-Invocation blank ("_") symbol.
-// Populated by typecheck.InitUniverse; nil before that runs.
-func BlankSym(gd *base.Invocation) *Sym {
-	s, _ := gd.TypesBlankSym.(*Sym)
-	return s
-}
+// BlankSym returns the blank ("_") symbol. Populated by
+// typecheck.InitUniverse; nil before that runs. Process-global since
+// it lives in the process-global BuiltinPkg.
+var blankSymP *Sym
+
+func BlankSym(gd *base.Invocation) *Sym { return blankSymP }
 
 // SetBlankSym is called by InitUniverse after looking up "_" in
 // BuiltinPkg.
-func SetBlankSym(gd *base.Invocation, s *Sym) { gd.TypesBlankSym = s }
+func SetBlankSym(gd *base.Invocation, s *Sym) { blankSymP = s }
 
 // numImport tracks how often a package with a given name is imported.
 // It is used to provide a better error message (by using the package

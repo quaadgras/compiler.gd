@@ -18,6 +18,7 @@ import (
 	"cmd/internal/obj"
 	"internal/abi"
 	"reflect"
+	"sync"
 )
 
 // The type structures shared with the runtime.
@@ -45,10 +46,24 @@ var TypeAssert *types.Type
 // Interface tables (itabs)
 var ITab *types.Type
 
+var initOnce sync.Once
+
 func Init(gd *base.Invocation) {
 	// Note: this has to be called explicitly instead of being
 	// an init function so it runs after the types package has
 	// been properly initialized.
+	//
+	// Process-global init: the rttype.* vars below capture types
+	// derived from the abi package layout, which is identical
+	// across all in-process compile invocations targeting the same
+	// arch. Re-initialising would invalidate pointer-equality
+	// checks against types from earlier invocations (e.g. unsafe
+	// references in imported sigs).
+	first := false
+	initOnce.Do(func() { first = true })
+	if !first {
+		return
+	}
 	Type = FromReflect(gd, reflect.TypeFor[abi.Type]())
 	ArrayType = FromReflect(gd, reflect.TypeFor[abi.ArrayType]())
 	ChanType = FromReflect(gd, reflect.TypeFor[abi.ChanType]())

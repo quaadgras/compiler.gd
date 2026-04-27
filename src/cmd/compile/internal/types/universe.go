@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/fatal"
 	"cmd/internal/src"
+	"sync"
 )
 
 var basicTypes = [...]struct {
@@ -41,9 +42,24 @@ var typedefs = [...]struct {
 	{"uintptr", TUINTPTR, TUINT32, TUINT64},
 }
 
+var initTypesOnce sync.Once
+
 func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object) {
 	if PtrSize == 0 {
 		fatal.Error("InitTypes called before PtrSize was set")
+	}
+	// Make the universe init process-global. Types[], ByteType,
+	// RuneType, ErrorType, ComparableType, AnyType etc. are
+	// derived purely from PtrSize and the static basicTypes/typedefs
+	// tables; they're identical across in-process compile
+	// invocations targeting the same arch, and re-initialising
+	// them invalidates pointer-equality checks against types
+	// captured by an earlier invocation (notably unsafe.Pointer
+	// references in imported sigs).
+	first := false
+	initTypesOnce.Do(func() { first = true })
+	if !first {
+		return
 	}
 
 	SlicePtrOffset = 0
