@@ -164,24 +164,40 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 		// can be running concurrently.
 		workq := make(chan func(int))
 		done := make(chan int)
+		// Dispatcher exits once workq is closed AND every dispatched
+		// worker has reported back via done. Without the close-and-
+		// drain protocol the loop ran forever, leaving one dispatcher
+		// goroutine per in-process compile invocation pinned in memory
+		// along with all the func closures it had ever appended to
+		// pending — observed as 333 stuck goroutines holding ~3 GB.
 		go func() {
 			ids := make([]int, nWorkers)
 			for i := range ids {
 				ids[i] = i
 			}
 			var pending []func(int)
+			active := 0
 			for {
 				select {
-				case work := <-workq:
+				case work, ok := <-workq:
+					if !ok {
+						workq = nil
+						break
+					}
 					pending = append(pending, work)
 				case id := <-done:
 					ids = append(ids, id)
+					active--
+				}
+				if workq == nil && len(pending) == 0 && active == 0 {
+					return
 				}
 				for len(pending) > 0 && len(ids) > 0 {
 					work := pending[len(pending)-1]
 					id := ids[len(ids)-1]
 					pending = pending[:len(pending)-1]
 					ids = ids[:len(ids)-1]
+					active++
 					go func() {
 						// Always signal `done`, even if `work` panics
 						// or calls runtime.Goexit (e.g. via gd.Fatalf
@@ -198,6 +214,7 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 		queue = func(work func(int)) {
 			workq <- work
 		}
+		defer close(workq)
 	}
 
 	var wg sync.WaitGroup
