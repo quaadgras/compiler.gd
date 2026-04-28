@@ -6,19 +6,23 @@ package ir
 
 import "sync/atomic"
 
-// bitset8 / bitset16 use atomic.Uint32 so concurrent in-process
-// compile invocations setting different bits on the same shared
-// miniNode.bitset (predeclared *Names from BuiltinPkg/UnsafePkg
-// reachable from any invocation's typecheck path) don't race on
-// the underlying byte/word.
-type bitset8 atomic.Uint32
+// bitset8 / bitset16 wrap a plain uint32 accessed via the atomic
+// package's free functions, NOT atomic.Uint32. The struct must be
+// copyable (miniNode embeds it, and node_gen.go's `c := *n` shallow-
+// copy methods rely on that); atomic.Uint32 carries a noCopy marker
+// that would make every generated copy method fail vet's copylocks.
+//
+// Concurrent in-process compile invocations setting different bits
+// on the same shared miniNode.bitset (predeclared *Names from
+// BuiltinPkg/UnsafePkg reachable from any invocation's typecheck
+// path) still race-free thanks to the atomic.LoadUint32 / CAS pair.
+type bitset8 struct{ n uint32 }
 
-func (f *bitset8) load() uint8 { return uint8((*atomic.Uint32)(f).Load()) }
+func (f *bitset8) load() uint8 { return uint8(atomic.LoadUint32(&f.n)) }
 
 func (f *bitset8) set(mask uint8, b bool) {
-	a := (*atomic.Uint32)(f)
 	for {
-		old := a.Load()
+		old := atomic.LoadUint32(&f.n)
 		var new uint32
 		if b {
 			new = old | uint32(mask)
@@ -28,41 +32,39 @@ func (f *bitset8) set(mask uint8, b bool) {
 		if old == new {
 			return
 		}
-		if a.CompareAndSwap(old, new) {
+		if atomic.CompareAndSwapUint32(&f.n, old, new) {
 			return
 		}
 	}
 }
 
 func (f *bitset8) get2(shift uint8) uint8 {
-	return uint8((*atomic.Uint32)(f).Load()>>shift) & 3
+	return uint8(atomic.LoadUint32(&f.n)>>shift) & 3
 }
 
 // set2 sets two bits in f using the bottom two bits of b.
 func (f *bitset8) set2(shift uint8, b uint8) {
-	a := (*atomic.Uint32)(f)
 	mask := uint32(3) << shift
 	bits := uint32(b&3) << shift
 	for {
-		old := a.Load()
+		old := atomic.LoadUint32(&f.n)
 		new := (old &^ mask) | bits
 		if old == new {
 			return
 		}
-		if a.CompareAndSwap(old, new) {
+		if atomic.CompareAndSwapUint32(&f.n, old, new) {
 			return
 		}
 	}
 }
 
-type bitset16 atomic.Uint32
+type bitset16 struct{ n uint32 }
 
-func (f *bitset16) load() uint16 { return uint16((*atomic.Uint32)(f).Load()) }
+func (f *bitset16) load() uint16 { return uint16(atomic.LoadUint32(&f.n)) }
 
 func (f *bitset16) set(mask uint16, b bool) {
-	a := (*atomic.Uint32)(f)
 	for {
-		old := a.Load()
+		old := atomic.LoadUint32(&f.n)
 		var new uint32
 		if b {
 			new = old | uint32(mask)
@@ -72,7 +74,7 @@ func (f *bitset16) set(mask uint16, b bool) {
 		if old == new {
 			return
 		}
-		if a.CompareAndSwap(old, new) {
+		if atomic.CompareAndSwapUint32(&f.n, old, new) {
 			return
 		}
 	}

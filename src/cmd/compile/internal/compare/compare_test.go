@@ -93,7 +93,7 @@ func TestEqStructCost(t *testing.T) {
 				fields[i] = types.NewField(src.NoXPos, typecheck.LookupNum(testGd, "f", i), ftyp)
 			}
 			typ := types.NewStruct(fields)
-			types.CalcSize(typ)
+			types.CalcSize(testGd, typ)
 
 			want := tc.cost
 			testGd.Ctxt.Arch.CanMergeLoads = true

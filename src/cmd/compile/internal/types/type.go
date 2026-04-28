@@ -814,11 +814,34 @@ func substFields(fields []*Field, types *[]*Type) []*Field {
 }
 
 // copy returns a shallow copy of the Type.
+//
+// Field-by-field copy (rather than `nt := *t`) because Type.cache
+// contains atomic.Pointer values whose noCopy markers vet's copylocks
+// would flag. The new Type starts with a zero cache — composite types
+// it might cache (NewPtr/NewSlice of nt) haven't been created yet.
+// flags is copied via copyTo so the underlying uint32 is read+written
+// atomically.
 func (t *Type) copy() *Type {
 	if t == nil {
 		return nil
 	}
-	nt := *t
+	nt := &Type{
+		extra:      t.extra,
+		width:      t.width,
+		methods:    t.methods,
+		allMethods: t.allMethods,
+		obj:        t.obj,
+		underlying: t.underlying,
+		kind:       t.kind,
+		align:      t.align,
+		intRegs:    t.intRegs,
+		floatRegs:  t.floatRegs,
+		alg:        t.alg,
+		isSIMDTag:  t.isSIMDTag,
+		isSIMD:     t.isSIMD,
+		ptrBytes:   t.ptrBytes,
+	}
+	t.flags.copyTo(&nt.flags)
 	// copy any *T Extra fields, to avoid aliasing
 	switch t.kind {
 	case TMAP:
@@ -847,9 +870,9 @@ func (t *Type) copy() *Type {
 	}
 	// TODO(mdempsky): Find out why this is necessary and explain.
 	if t.underlying == t {
-		nt.underlying = &nt
+		nt.underlying = nt
 	}
-	return &nt
+	return nt
 }
 
 func (f *Field) Copy() *Field {

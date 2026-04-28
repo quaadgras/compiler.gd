@@ -106,7 +106,7 @@ func difftokens(atoks []string, etoks []string) string {
 }
 
 func nrtest(t *testing.T, ft *types.Type, expected int) {
-	types.CalcSize(ft)
+	types.CalcSize(testGd, ft)
 	got := configAMD64.NumParamRegs(ft)
 	if got != expected {
 		t.Errorf("]\nexpected num regs = %d, got %d, type %v", expected, got, ft)
@@ -115,7 +115,7 @@ func nrtest(t *testing.T, ft *types.Type, expected int) {
 
 func abitest(t *testing.T, ft *types.Type, exp expectedDump) {
 
-	types.CalcSize(ft)
+	types.CalcSize(testGd, ft)
 
 	// Analyze with full set of registers.
 	regRes := configAMD64.ABIAnalyze(ft, false)
