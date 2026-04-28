@@ -5,9 +5,12 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"math"
+	"runtime"
 	"slices"
+	"strconv"
 	"sync"
 
 	"cmd/compile/internal/base"
@@ -233,11 +236,17 @@ func isAtomicStdPkg(p *Pkg) bool {
 // Type.width=-2 in-progress sentinel.
 //
 // Reentrant CalcSize calls (CheckSize → CalcSize within the same
-// goroutine) bypass the Once via the widthCalculated() fast path
-// after the first call has stored the final width.
+// goroutine on the same type — happens for legitimate cycles like
+// chan/chanargs with gd=nil, where CheckSize doesn't defer) cannot
+// go through the Once because sync.Once.Do is not reentrant on the
+// same Mutex. Track per-goroutine in-progress types in calcSizeInProgress
+// and skip the Once when the current goroutine is already computing t.
 var (
 	calcSizeOnceMu sync.Mutex
 	calcSizeOnce   = map[*Type]*sync.Once{}
+
+	calcSizeInProgressMu sync.Mutex
+	calcSizeInProgress   = map[int64]map[*Type]struct{}{}
 )
 
 func calcSizeOnceFor(t *Type) *sync.Once {
@@ -249,6 +258,55 @@ func calcSizeOnceFor(t *Type) *sync.Once {
 		calcSizeOnce[t] = o
 	}
 	return o
+}
+
+// calcSizeReenter reports whether the current goroutine is already
+// computing CalcSize for t. If false, it records t as in-progress and
+// returns a release func the caller must defer.
+func calcSizeReenter(t *Type) (reenter bool, release func()) {
+	gid := calcSizeGoroutineID()
+	calcSizeInProgressMu.Lock()
+	defer calcSizeInProgressMu.Unlock()
+	if _, ok := calcSizeInProgress[gid][t]; ok {
+		return true, nil
+	}
+	set := calcSizeInProgress[gid]
+	if set == nil {
+		set = map[*Type]struct{}{}
+		calcSizeInProgress[gid] = set
+	}
+	set[t] = struct{}{}
+	return false, func() {
+		calcSizeInProgressMu.Lock()
+		defer calcSizeInProgressMu.Unlock()
+		delete(calcSizeInProgress[gid], t)
+		if len(calcSizeInProgress[gid]) == 0 {
+			delete(calcSizeInProgress, gid)
+		}
+	}
+}
+
+// calcSizeGoroutineID parses goroutine id out of runtime.Stack output.
+// Slow but only used on the Once-entry path when a Type isn't yet
+// calculated; cached results take the widthCalculated() fast path.
+func calcSizeGoroutineID() int64 {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	b := buf[:n]
+	const prefix = "goroutine "
+	if !bytes.HasPrefix(b, []byte(prefix)) {
+		return 0
+	}
+	b = b[len(prefix):]
+	end := bytes.IndexByte(b, ' ')
+	if end < 0 {
+		return 0
+	}
+	id, err := strconv.ParseInt(string(b[:end]), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // CalcSize calculates and stores the size, alignment, eq/hash algorithm,
@@ -276,6 +334,20 @@ func CalcSize(gd *base.Invocation, t *Type) {
 	if t.widthCalculated() {
 		return
 	}
+
+	// Recursive same-goroutine call (e.g. TCHANARGS calcSizeBody
+	// triggers CalcSize on the source TCHAN type while that TCHAN's
+	// CalcSize is still on the goroutine's call stack — happens with
+	// gd=nil because CheckSize takes the no-defer path). sync.Once.Do
+	// is not reentrant, so check first and bail before locking the
+	// per-Type Once mutex. The outer calcSizeBody handles the cycle
+	// itself (legitimate cycles complete; illegal ones fatal via the
+	// width=-2 sentinel).
+	reenter, release := calcSizeReenter(t)
+	if reenter {
+		return
+	}
+	defer release()
 
 	// Wrap the actual size calculation in a per-Type sync.Once so
 	// concurrent invocations don't race on the Type.width=-2
