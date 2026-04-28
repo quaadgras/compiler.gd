@@ -11,6 +11,7 @@ import (
 	"cmd/go/internal/str"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -20,28 +21,34 @@ import (
 // when toolexec wrapping is needed.
 //
 // Default-on saves the per-package fork/exec cost; the compile is
-// statically linked into bin/go via cmd/compile/host. Concurrent
-// invocations are serialised internally by host.Run's runMu while
-// the lingering process-global state in types.NewPtr's caches and
-// elsewhere is migrated; cmd/go still benefits from the avoided
-// fork/exec, and each compile uses its own -c=N backend parallelism.
+// statically linked into bin/go via cmd/compile/host.
+//
+// During all.bash bootstrap, dist drives toolchain2/toolchain3 install
+// via the toolchain1-built go_bootstrap binary. In those phases
+// pkg/tool/compile is replaced (toolchain2's, then toolchain3's) but
+// go_bootstrap's embedded compile is still toolchain1's source/binary.
+// cmd/go's cache keys are computed from pkg/tool/compile, so taking
+// the in-process path then produces artifacts whose embedded build ID
+// won't match the one cmd/go expects to read back, and dist's
+// checkNotStale fails. Detect go_bootstrap by argv0 basename and
+// force fork/exec for that case.
 func useInProcessCompile() bool {
-	return os.Getenv("GOGD_INPROC") != "0"
+	return os.Getenv("GOGD_INPROC") != "0" && !isBootstrapDriver()
 }
 
 // useInProcessLink reports whether cmd/go should drive cmd/link
 // in-process. Default-on; set GOGD_INPROC_LINK=0 to force fork/exec.
-//
-// Most of cmd/link's previously-package-level state (DWARF caches,
-// Mach-O/ELF/PE format vars, segments, thearch, etc.) has been
-// migrated onto a per-Link Context. The remaining package-level
-// state (nerrors family, flag values reset by setupFlags) is safe
-// across back-to-back in-process invocations because linkRunMu in
-// cmd/link/host.Run serialises them and Main resets the relevant
-// vars at start. Lifting linkRunMu for parallel link invocations
-// is future work.
+// Same bootstrap-driver guard as useInProcessCompile.
 func useInProcessLink() bool {
-	return os.Getenv("GOGD_INPROC_LINK") != "0"
+	return os.Getenv("GOGD_INPROC_LINK") != "0" && !isBootstrapDriver()
+}
+
+// isBootstrapDriver reports whether this cmd/go binary was launched
+// as go_bootstrap (the toolchain1-built cmd/go used by dist for
+// toolchain2/toolchain3 install phases). The in-process compile/link
+// paths are unsafe in those phases — see useInProcessCompile.
+func isBootstrapDriver() bool {
+	return filepath.Base(os.Args[0]) == "go_bootstrap"
 }
 
 // inProcessCompile drives a single cmd/compile invocation in the

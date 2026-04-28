@@ -736,7 +736,11 @@ func runInstall(pkg string, ch chan struct{}) {
 	// ispkg predicts whether the package should be linked as a binary, based
 	// on the name. There should be no "main" packages in vendor, since
 	// 'go mod vendor' will only copy imported packages there.
-	ispkg := !strings.HasPrefix(pkg, "cmd/") || strings.Contains(pkg, "/internal/") || strings.Contains(pkg, "/vendor/")
+	//
+	// gd fork: cmd/asm/host and cmd/link/host are library packages exposing
+	// in-process entry points (Run) imported by cmd/go. Treat any cmd/X/host
+	// as a library so dist doesn't try to link it as a binary.
+	ispkg := !strings.HasPrefix(pkg, "cmd/") || strings.Contains(pkg, "/internal/") || strings.Contains(pkg, "/vendor/") || strings.HasSuffix(pkg, "/host")
 
 	// Start final link command line.
 	// Note: code below knows that link.p[targ] is the target.

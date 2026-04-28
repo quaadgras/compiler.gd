@@ -95,11 +95,16 @@ func (ib intrinsicBuilders) lookup(arch *sys.Arch, pkg, fn string) intrinsicBuil
 var initIntrinsicsOnce sync.Once
 
 func initIntrinsics(gd *base.Invocation, cfg *intrinsicBuildConfig) {
-	first := false
-	initIntrinsicsOnce.Do(func() { first = true })
-	if !first {
-		return
-	}
+	initIntrinsicsOnce.Do(func() { initIntrinsicsBody(gd, cfg) })
+}
+
+// initIntrinsicsBody populates the package-level intrinsics map.
+// Wrapped by initIntrinsicsOnce so concurrent in-process compile
+// invocations all wait for the first caller's population to finish
+// before reading intrinsics — earlier "set first=true inside Do, run
+// the body outside" pattern raced because non-first callers returned
+// immediately and started using the still-being-populated map.
+func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	if cfg == nil {
 		cfg = &intrinsicBuildConfig{
 			instrumenting: gd.Flag.Cfg.Instrumenting,
