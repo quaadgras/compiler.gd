@@ -31565,7 +31565,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 	}
 	// match: (StaticLECall {callAux} _ (Const64 [0]) (Const64 [0]) mem)
 	// cond: isSameCall(callAux, "runtime.makeslice")
-	// result: (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms.Zerobase} (SB)) mem)
+	// result: (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms(b.Func.Config.GD()).Zerobase} (SB)) mem)
 	for {
 		if len(v.Args) != 4 {
 			break
@@ -31590,7 +31590,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 	}
 	// match: (StaticLECall {callAux} _ (Const32 [0]) (Const32 [0]) mem)
 	// cond: isSameCall(callAux, "runtime.makeslice")
-	// result: (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms.Zerobase} (SB)) mem)
+	// result: (MakeResult (Addr <v.Type.FieldType(0)> {ir.Syms(b.Func.Config.GD()).Zerobase} (SB)) mem)
 	for {
 		if len(v.Args) != 4 {
 			break

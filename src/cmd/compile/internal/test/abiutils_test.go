@@ -242,6 +242,7 @@ func TestABIUtilsEmptyFieldAtEndOfStruct(t *testing.T) {
 
 	// Test that NumParamRegs doesn't assign registers to trailing padding.
 	typ := mkstruct(i64, i64, mkstruct())
+	types.CalcSize(testGd, typ)
 	have := configAMD64.NumParamRegs(typ)
 	if have != 2 {
 		t.Errorf("NumParams(%v): have %v, want %v", typ, have, 2)
