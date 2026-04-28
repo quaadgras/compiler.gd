@@ -175,8 +175,20 @@ func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean 
 // where util.Errorf / loader.ErrorReporter.Errorf route their
 // diagnostic output; pass nil to fall back to os.Stderr.
 func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout, stderr io.Writer) {
+	// log is process-global. In-process linking under cmd/go shares
+	// it with the calling process, so any prefix/flags we set here
+	// would leak into cmd/go's subsequent log.Printf calls — the
+	// runtime/race TestOutput test was matching `exit status 66`
+	// in the captured output but seeing `link: exit status 66`
+	// because base.RunStdin's Errorf landed under our "link: "
+	// prefix. Save and restore around the link.
+	oldPrefix, oldFlags := log.Prefix(), log.Flags()
 	log.SetPrefix("link: ")
 	log.SetFlags(0)
+	defer func() {
+		log.SetPrefix(oldPrefix)
+		log.SetFlags(oldFlags)
+	}()
 	counterOpenOnce.Do(counter.Open)
 	counter.Inc("link/invocations")
 
