@@ -56,9 +56,15 @@ func mkzdefaultcc(dir, file string) {
 		return
 	}
 
+	// gd fork: cgo's defaults now live in cmd/cgo/internal/cgomain
+	// (package cgomain), not the cmd/cgo wrapper itself.
+	pkgName := "cgomain"
+	if !strings.Contains(file, filepath.FromSlash("cmd/cgo/internal/cgomain")) {
+		pkgName = "main"
+	}
 	var buf strings.Builder
 	writeHeader(&buf)
-	fmt.Fprintf(&buf, "package main\n")
+	fmt.Fprintf(&buf, "package %s\n", pkgName)
 	fmt.Fprintln(&buf)
 	fmt.Fprintf(&buf, "const defaultPkgConfig = `%s`\n", defaultpkgconfig)
 	buf.WriteString(defaultCCFunc("defaultCC", defaultcc))

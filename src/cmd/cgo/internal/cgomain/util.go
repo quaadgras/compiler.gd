@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package cgomain
 
 import (
 	"bytes"
@@ -74,6 +74,15 @@ func lineno(pos token.Pos) string {
 	return fset.Position(pos).String()
 }
 
+// ExitFunc is the process-exit hook fatalf and friends call when
+// cgo encounters an unrecoverable error. The standalone cmd/cgo
+// binary leaves it as os.Exit. cmd/cgo/host.Run replaces it with a
+// runtime.Goexit-on-worker-goroutine variant so an in-process cgo
+// invocation can fail without taking the calling cmd/go process
+// down. Mirrors the pattern in cmd/compile/internal/gd.Exit and
+// cmd/link/internal/ld.Exit.
+var ExitFunc = os.Exit
+
 // Die with an error message.
 func fatalf(msg string, args ...any) {
 	// If we've already printed other errors, they might have
@@ -81,7 +90,7 @@ func fatalf(msg string, args ...any) {
 	if nerrors == 0 {
 		fmt.Fprintf(os.Stderr, "cgo: "+msg+"\n", args...)
 	}
-	os.Exit(2)
+	ExitFunc(2)
 }
 
 var nerrors int

@@ -4,7 +4,7 @@
 
 // Parse input AST and prepare Prog structure.
 
-package main
+package cgomain
 
 import (
 	"fmt"
@@ -28,7 +28,7 @@ func parse(name string, src []byte, flags parser.Mode) *ast.File {
 			for _, e := range list {
 				fmt.Fprintln(os.Stderr, e)
 			}
-			os.Exit(2)
+			ExitFunc(2)
 		}
 		fatalf("parsing %s: %s", name, err)
 	}

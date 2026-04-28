@@ -5,7 +5,7 @@
 // Annotate Ref in Prog with C types by parsing gcc debug output.
 // Conversion of debug output to Go types.
 
-package main
+package cgomain
 
 import (
 	"bytes"
@@ -2288,7 +2288,7 @@ func runGcc(stdin []byte, args []string) (string, string) {
 	}
 	if !ok {
 		os.Stderr.Write(stderr)
-		os.Exit(2)
+		ExitFunc(2)
 	}
 	return string(stdout), string(stderr)
 }

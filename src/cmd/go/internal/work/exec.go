@@ -3046,7 +3046,12 @@ func (b *Builder) runCgo(ctx context.Context, a *Action) error {
 		cgoflags = append(cgoflags, "-trimpath", strings.Join(trimpath, ";"))
 	}
 
-	if err := sh.run(p.Dir, p.ImportPath, cgoenv, cfg.BuildToolexec, cgoExe, "-objdir", objdir, "-importpath", p.ImportPath, cgoflags, ldflagsOption, "--", cgoCPPFLAGS, cgoCFLAGS, cgofiles); err != nil {
+	cgoArgs := []any{cfg.BuildToolexec, cgoExe, "-objdir", objdir, "-importpath", p.ImportPath, cgoflags, ldflagsOption, "--", cgoCPPFLAGS, cgoCFLAGS, cgofiles}
+	if useInProcessCgo() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cgoenv) {
+		if err := inProcessCgo(sh, p.Dir, p.ImportPath, cgoenv, cgoArgs); err != nil {
+			return err
+		}
+	} else if err := sh.run(p.Dir, p.ImportPath, cgoenv, cgoArgs...); err != nil {
 		return err
 	}
 
@@ -3295,7 +3300,13 @@ func (b *Builder) dynimport(a *Action, objdir, importGo, cgoExe string, cflags, 
 	if p.Standard && p.ImportPath == "runtime/cgo" {
 		cgoflags = []string{"-dynlinker"} // record path to dynamic linker
 	}
-	err = sh.run(base.Cwd(), p.ImportPath, b.cCompilerEnv(), cfg.BuildToolexec, cgoExe, "-dynpackage", p.Name, "-dynimport", dynobj, "-dynout", importGo, cgoflags)
+	cgoEnv := b.cCompilerEnv()
+	dynArgs := []any{cfg.BuildToolexec, cgoExe, "-dynpackage", p.Name, "-dynimport", dynobj, "-dynout", importGo, cgoflags}
+	if useInProcessCgo() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cgoEnv) {
+		err = inProcessCgo(sh, base.Cwd(), p.ImportPath, cgoEnv, dynArgs)
+	} else {
+		err = sh.run(base.Cwd(), p.ImportPath, cgoEnv, dynArgs...)
+	}
 	if err != nil {
 		return "", "", err
 	}

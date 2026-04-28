@@ -37,6 +37,8 @@ var bootstrapDirs = []string{
 	"cmd/asm/host",
 	"cmd/asm/internal/...",
 	"cmd/cgo",
+	"cmd/cgo/host",
+	"cmd/cgo/internal/cgomain",
 	"cmd/compile",
 	"cmd/compile/internal/...",
 	"cmd/internal/archive",
@@ -190,9 +192,14 @@ func bootstrapBuildTools() {
 				}
 
 				xmkdirall(dst)
-				if path == "cmd/cgo" {
-					// Write to src because we need the file both for bootstrap
-					// and for later in the main build.
+				if path == "cmd/cgo/internal/cgomain" {
+					// gd fork: cgo's defaultCC/defaultCXX/defaultPkgConfig
+					// constants live in cmd/cgo/internal/cgomain (cgo's
+					// logic was factored out so cmd/cgo/host can drive it
+					// in-process — cmd/cgo itself is now just a 5-line
+					// wrapper around cgomain.Run). Write to both src and
+					// the bootstrap copy so toolchain1 and the main build
+					// both pick them up.
 					mkzdefaultcc("", pathf("%s/zdefaultcc.go", src))
 					mkzdefaultcc("", pathf("%s/zdefaultcc.go", dst))
 				}
