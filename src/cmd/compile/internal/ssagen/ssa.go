@@ -2575,7 +2575,7 @@ func (s *state) stmt(n ir.Node) {
 	// Expression statements
 	case ir.OCALLFUNC:
 		n := n.(*ir.CallExpr)
-		if ir.IsIntrinsicCall(n) {
+		if ir.IsIntrinsicCall(s.gd, n) {
 			s.intrinsicCall(n)
 			return
 		}
@@ -2654,7 +2654,7 @@ func (s *state) stmt(n ir.Node) {
 		// We come here only when it is an intrinsic call returning two values.
 		n := n.(*ir.AssignListStmt)
 		call := n.Rhs[0].(*ir.CallExpr)
-		if !ir.IsIntrinsicCall(call) {
+		if !ir.IsIntrinsicCall(s.gd, call) {
 			s.Fatalf("non-intrinsic AS2FUNC not expanded %v", call)
 		}
 		v := s.intrinsicCall(call)
@@ -4660,7 +4660,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 
 	case ir.OCALLFUNC:
 		n := n.(*ir.CallExpr)
-		if ir.IsIntrinsicCall(n) {
+		if ir.IsIntrinsicCall(s.gd, n) {
 			return s.intrinsicCall(n)
 		}
 		fallthrough

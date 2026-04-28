@@ -132,7 +132,7 @@ func walkAssignFunc(gd *base.Invocation, init *ir.Nodes, n *ir.AssignListStmt) i
 	walkExprListSafe(gd, n.Lhs, init)
 	r = walkExpr(gd, r, init)
 
-	if ir.IsIntrinsicCall(r.(*ir.CallExpr)) {
+	if ir.IsIntrinsicCall(gd, r.(*ir.CallExpr)) {
 		n.Rhs = []ir.Node{r}
 		return n
 	}

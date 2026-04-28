@@ -623,14 +623,14 @@ opSwitch:
 
 		if cheap {
 			if v.debug {
-				if ir.IsIntrinsicCall(n) {
+				if ir.IsIntrinsicCall(v.gd, n) {
 					v.gd.Logf("%v: cheap call is also intrinsic, %v\n", ir.Line(v.gd, n), n)
 				}
 			}
 			break // treat like any other node, that is, cost of 1
 		}
 
-		if ir.IsIntrinsicCall(n) {
+		if ir.IsIntrinsicCall(v.gd, n) {
 			if v.debug {
 				v.gd.Logf("%v: intrinsic call, %v\n", ir.Line(v.gd, n), n)
 			}
@@ -900,7 +900,7 @@ func inlineCallCheck(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr) 
 		return false, true
 	}
 
-	if ir.IsIntrinsicCall(call) {
+	if ir.IsIntrinsicCall(gd, call) {
 		return false, true
 	}
 	return true, false

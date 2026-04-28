@@ -1066,11 +1066,22 @@ func StaticCalleeName(n Node) *Name {
 	return nil
 }
 
-// IsIntrinsicCall reports whether the compiler back end will treat the call as an intrinsic operation.
-var IsIntrinsicCall = func(*CallExpr) bool { return false }
+// IsIntrinsicCall reports whether the compiler back end will treat
+// the call as an intrinsic operation.
+//
+// gd fork: takes the per-Invocation gd because the intrinsic table
+// is filtered by per-call flags (notably gd.Flag.Race, which excludes
+// sync/atomic intrinsics so the race detector can intercept them).
+// Callbacks need to consult the *current* invocation, not whichever
+// invocation first set the var — capturing gd in a closure would
+// route a race-enabled in-process compile through a non-race
+// invocation's flags and trigger a nil-deref in intrinsicCall.
+var IsIntrinsicCall = func(*base.Invocation, *CallExpr) bool { return false }
 
-// IsIntrinsicSym reports whether the compiler back end will treat a call to this symbol as an intrinsic operation.
-var IsIntrinsicSym = func(*types.Sym) bool { return false }
+// IsIntrinsicSym reports whether the compiler back end will treat a
+// call to this symbol as an intrinsic operation. Same per-Invocation
+// rationale as IsIntrinsicCall.
+var IsIntrinsicSym = func(*base.Invocation, *types.Sym) bool { return false }
 
 // SameSafeExpr checks whether it is safe to reuse one of l and r
 // instead of computing both. SameSafeExpr assumes that l and r are

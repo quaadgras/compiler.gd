@@ -235,17 +235,14 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 			ssagen.Arch.SoftFloat = true
 		}
 		ir.EscFmt = escape.Fmt
-		// Note: ir.IsIntrinsicCall / ir.IsIntrinsicSym capture the
-		// first invocation's gd. The intrinsic table is process-
-		// global so all invocations see the same intrinsics; the
-		// captured gd is only used for table lookups, not per-call
-		// state.
-		ir.IsIntrinsicCall = func(ce *ir.CallExpr) bool {
-			return ssagen.IsIntrinsicCall(gd, ce)
-		}
-		ir.IsIntrinsicSym = func(s *types.Sym) bool {
-			return ssagen.IsIntrinsicSym(gd, s)
-		}
+		// ir.IsIntrinsicCall / ir.IsIntrinsicSym now take gd at the
+		// call site rather than capturing it once: findIntrinsic
+		// filters by per-Invocation flags (e.g. gd.Flag.Race
+		// excludes sync/atomic), so capturing the first invocation's
+		// gd would mismatch a later race-enabled call and crash with
+		// a nil intrinsicBuilder dereference in intrinsicCall.
+		ir.IsIntrinsicCall = ssagen.IsIntrinsicCall
+		ir.IsIntrinsicSym = ssagen.IsIntrinsicSym
 		inline.SSADumpInline = ssagen.DumpInline
 		ssagen.InitEnv()
 		types.PtrSize = ssagen.Arch.LinkArch.PtrSize

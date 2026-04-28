@@ -53,7 +53,7 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 	}
 
 	if len(fn.Body) == 0 {
-		if ir.IsIntrinsicSym(fn.Sym()) && fn.Sym().Linkname == "" && !symABIs.HasDef(fn.Sym()) {
+		if ir.IsIntrinsicSym(gd, fn.Sym()) && fn.Sym().Linkname == "" && !symABIs.HasDef(fn.Sym()) {
 			// Generate the function body for a bodyless intrinsic, in case it
 			// is used in a non-call context (e.g. as a function pointer).
 			// We skip functions defined in assembly, or has a linkname (which
