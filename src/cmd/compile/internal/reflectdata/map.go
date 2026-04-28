@@ -5,6 +5,8 @@
 package reflectdata
 
 import (
+	"sync"
+
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/rttype"
@@ -88,14 +90,21 @@ func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 	return group
 }
 
-var cachedMapTableType *types.Type
+var (
+	cachedMapTableType     *types.Type
+	cachedMapTableTypeOnce sync.Once
+)
 
 // mapTableType returns a type interchangeable with internal/runtime/maps.table.
 // Make sure this stays in sync with internal/runtime/maps/table.go.
+//
+// Wrapped in sync.Once so concurrent in-process compile invocations
+// don't both create their own *types.Type and then disagree on which
+// is "the" one — without this, walk's saved type for `from` of a
+// CONVNOP and ssagen's recomputed `mt` could end up unequal,
+// triggering "CONVNOP unrecognized non-integer *internal/runtime/maps.Map".
 func mapTableType(gd *base.Invocation) *types.Type {
-	if cachedMapTableType != nil {
-		return cachedMapTableType
-	}
+	cachedMapTableTypeOnce.Do(func() {
 
 	// type table struct {
 	//     used       uint16
@@ -121,32 +130,36 @@ func mapTableType(gd *base.Invocation) *types.Type {
 		makefield("groups_lengthMask", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("table"))
-	table := types.NewNamed(n)
-	n.SetType(table)
-	n.SetTypecheck(1)
+		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("table"))
+		table := types.NewNamed(n)
+		n.SetType(table)
+		n.SetTypecheck(1)
 
-	table.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(gd, table)
+		table.SetUnderlying(types.NewStruct(fields))
+		types.CalcSize(gd, table)
 
-	// The size of table should be 32 bytes on 64 bit
-	// and 24 bytes on 32 bit platforms.
-	if size := int64(3*2 + 2*1 /* one extra for padding */ + 1*8 + 2*types.PtrSize); table.Size() != size {
-		gd.Fatalf("internal/runtime/maps.table size not correct: got %d, want %d", table.Size(), size)
-	}
+		// The size of table should be 32 bytes on 64 bit
+		// and 24 bytes on 32 bit platforms.
+		if size := int64(3*2 + 2*1 /* one extra for padding */ + 1*8 + 2*types.PtrSize); table.Size() != size {
+			gd.Fatalf("internal/runtime/maps.table size not correct: got %d, want %d", table.Size(), size)
+		}
 
-	cachedMapTableType = table
-	return table
+		cachedMapTableType = table
+	})
+	return cachedMapTableType
 }
 
-var cachedMapType *types.Type
+var (
+	cachedMapType     *types.Type
+	cachedMapTypeOnce sync.Once
+)
 
 // MapType returns a type interchangeable with internal/runtime/maps.Map.
 // Make sure this stays in sync with internal/runtime/maps/map.go.
+//
+// Wrapped in sync.Once — see mapTableType comment.
 func MapType(gd *base.Invocation) *types.Type {
-	if cachedMapType != nil {
-		return cachedMapType
-	}
+	cachedMapTypeOnce.Do(func() {
 
 	// type Map struct {
 	//     used uint64
@@ -177,34 +190,38 @@ func MapType(gd *base.Invocation) *types.Type {
 		makefield("clearSeq", types.Types[types.TUINT64]),
 	}
 
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Map"))
-	m := types.NewNamed(n)
-	n.SetType(m)
-	n.SetTypecheck(1)
+		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Map"))
+		m := types.NewNamed(n)
+		n.SetType(m)
+		n.SetTypecheck(1)
 
-	m.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(gd, m)
+		m.SetUnderlying(types.NewStruct(fields))
+		types.CalcSize(gd, m)
 
-	// The size of Map should be 48 bytes on 64 bit
-	// and 32 bytes on 32 bit platforms.
-	if size := int64(2*8 + 4*types.PtrSize /* one extra for globalDepth/globalShift/writing + padding */); m.Size() != size {
-		gd.Fatalf("internal/runtime/maps.Map size not correct: got %d, want %d", m.Size(), size)
-	}
+		// The size of Map should be 48 bytes on 64 bit
+		// and 32 bytes on 32 bit platforms.
+		if size := int64(2*8 + 4*types.PtrSize /* one extra for globalDepth/globalShift/writing + padding */); m.Size() != size {
+			gd.Fatalf("internal/runtime/maps.Map size not correct: got %d, want %d", m.Size(), size)
+		}
 
-	cachedMapType = m
-	return m
+		cachedMapType = m
+	})
+	return cachedMapType
 }
 
-var cachedMapIterType *types.Type
+var (
+	cachedMapIterType     *types.Type
+	cachedMapIterTypeOnce sync.Once
+)
 
 // MapIterType returns a type interchangeable with internal/runtime/maps.Iter.
 // Make sure this stays in sync with internal/runtime/maps/table.go.
+//
+// Wrapped in sync.Once — see mapTableType comment.
 func MapIterType(gd *base.Invocation) *types.Type {
-	if cachedMapIterType != nil {
-		return cachedMapIterType
-	}
+	cachedMapIterTypeOnce.Do(func() {
 
-	// type Iter struct {
+		// type Iter struct {
 	//    key  unsafe.Pointer // *Key
 	//    elem unsafe.Pointer // *Elem
 	//    typ  unsafe.Pointer // *MapType
@@ -257,8 +274,9 @@ func MapIterType(gd *base.Invocation) *types.Type {
 		gd.Fatalf("internal/runtime/maps.Iter size not correct: got %d, want %d", iter.Size(), size)
 	}
 
-	cachedMapIterType = iter
-	return iter
+		cachedMapIterType = iter
+	})
+	return cachedMapIterType
 }
 
 func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.Cursor) {
