@@ -200,6 +200,13 @@ type Type struct {
 		slice atomic.Pointer[Type] // []T, or nil
 	}
 
+	// calcSizeOnce serialises CalcSize for t across goroutines. Lives
+	// on the Type so it's GC-eligible together with t — earlier
+	// implementations used a process-global map[*Type]*sync.Once which
+	// pinned every Type for the lifetime of cmd/go and caused RSS to
+	// climb linearly with package count under in-process compile.
+	calcSizeOnce sync.Once
+
 	kind  Kind  // kind of type
 	align uint8 // the required alignment of this type, in bytes (0 means Width and Align have not yet been computed)
 

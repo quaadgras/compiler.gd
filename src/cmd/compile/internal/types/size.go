@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strconv"
 	"sync"
-	"sync/atomic"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/fatal"
@@ -337,21 +336,16 @@ func CalcSize(gd *base.Invocation, t *Type) {
 	}
 	defer release()
 
-	// Claim CalcSize for t by CASing width 0 → -2. Whoever wins runs
-	// the body; everyone else spins until widthCalculated() flips on
-	// (calcSizeBody sets t.align last, satisfying widthCalculated).
-	// Replaces an earlier map[*Type]*sync.Once which leaked — the
-	// map kept every Type ever sized alive for the process lifetime,
-	// and a long-lived cmd/go's RSS climbed linearly with package
-	// count under in-process compile.
-	if !atomic.CompareAndSwapInt64(&t.width, 0, -2) {
-		// Another goroutine is computing or finished. Wait.
-		for !t.widthCalculated() {
-			runtime.Gosched()
-		}
-		return
-	}
-	calcSizeBody(gd, t)
+	// Per-Type sync.Once stored on the Type itself (no global map,
+	// so the Type is GC-eligible once nothing else references it —
+	// fixes the unbounded RSS growth a process-global
+	// map[*Type]*sync.Once caused under in-process compile). Multiple
+	// goroutines hitting the same shared Type serialise inside Do;
+	// same-goroutine reentry is excluded by the calcSizeReenter check
+	// above so we never deadlock the Once on its own goroutine.
+	t.calcSizeOnce.Do(func() {
+		calcSizeBody(gd, t)
+	})
 }
 
 func calcSizeBody(gd *base.Invocation, t *Type) {
@@ -359,11 +353,12 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		return
 	}
 
-	// CalcSize CAS's t.width 0→-2 before calling us, so width is
-	// already -2 here in the normal path. The legacy "invalid
-	// recursive type" fatal that used to live at this point can't
-	// fire under the CAS+calcSizeReenter coordination, so it was
-	// dropped along with the leaky calcSizeOnce map.
+	if t.width == -2 {
+		t.width = 0
+		t.align = 1
+		fatal.Error("invalid recursive type %v", t)
+		return
+	}
 
 	if gd != nil && gd.CalcSizeDisabled {
 		fatal.Error("width not calculated: %v", t)
