@@ -103,6 +103,21 @@ func RoundUp(o int64, r int64) int64 {
 // expandiface computes the method set for interface type t by
 // expanding embedded interfaces.
 func expandiface(gd *base.Invocation, t *Type) {
+	// Defer CheckSize calls during this expansion. Without the
+	// bracket, CheckSize on a direct method's signature
+	// (line below) recursively CalcSize's the parameter and
+	// result types — which for mutually-recursive generic
+	// interfaces reaches another expandiface call before this
+	// one has finished setting t.allMethods. The recursive
+	// expandiface then iterates t.Methods()->m.Type.AllMethods()
+	// and gets the unfinished empty slice, freezing both
+	// interfaces with allMethods = []. See test/fixedbugs/
+	// issue65362.go (Vector[V] embeds ReadVector[V] embeds
+	// Comparisons[ReadVector[V], Vector[V]]).
+	if gd != nil {
+		DeferCheckSize(gd)
+		defer ResumeCheckSize(gd)
+	}
 	seen := make(map[*Sym]*Field)
 	var methods []*Field
 
@@ -161,6 +176,18 @@ func expandiface(gd *base.Invocation, t *Type) {
 
 		// Embedded interface: duplicate all methods
 		// and add to t's method set.
+		//
+		// Force m.Type's expansion through *our* gd so the inner
+		// expandiface participates in our DeferCheckSize bracket.
+		// Without this, m.Type.AllMethods() below would call
+		// CalcSize(nil, m.Type) (see (*Type).AllMethods) and the
+		// nested expandiface would run unprotected — for mutually
+		// recursive generic interfaces it then iterates *our*
+		// (still incomplete) allMethods, freezing m.Type with a
+		// truncated method set.
+		if gd != nil {
+			CalcSize(gd, m.Type)
+		}
 		for _, t1 := range m.Type.AllMethods() {
 			f := NewField(m.Pos, t1.Sym, t1.Type)
 			addMethod(f, false)
