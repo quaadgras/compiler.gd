@@ -39,6 +39,7 @@ import (
 	"cmd/link/internal/benchmark"
 	"flag"
 	"internal/buildcfg"
+	"io"
 	"log"
 	"os"
 	"runtime"
@@ -169,8 +170,9 @@ func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean 
 // to *status and call runtime.Goexit instead of os.Exit — used by
 // cmd/link/host.Run to drive Main on a worker goroutine without
 // terminating cmd/go's process. Pass nil for the standalone binary
-// path.
-func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
+// path. stdout receives ctxt.Bso flushes (-v / progress chatter); pass
+// nil to fall back to os.Stdout for the standalone binary.
+func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout io.Writer) {
 	log.SetPrefix("link: ")
 	log.SetFlags(0)
 	counterOpenOnce.Do(counter.Open)
@@ -184,7 +186,10 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 
 	ctxt := linknew(arch)
 	ctxt.thearch = theArch
-	ctxt.Bso = bufio.NewWriter(os.Stdout)
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	ctxt.Bso = bufio.NewWriter(stdout)
 	ctxt.inProcessStatus = status
 
 	// Per-Link *flag.FlagSet — never mutate flag.CommandLine. Concurrent

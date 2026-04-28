@@ -5,12 +5,12 @@
 package work
 
 import (
+	"bytes"
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/str"
 	"cmd/link/host"
 	"fmt"
-	"os"
 	"strings"
 )
 
@@ -30,6 +30,15 @@ import (
 // can be lifted once the migration completes.
 func inProcessLink(sh *Shell, dir, desc string, env []string, args []any) error {
 	cmdline := str.StringList(args...)
+
+	// Mirror Shell.runOut: reject @-prefixed args before we hand
+	// them off. The subprocess path checks this in runOut; the
+	// in-process path bypasses runOut so re-implement the check here.
+	for _, arg := range cmdline {
+		if strings.HasPrefix(arg, "@") {
+			return fmt.Errorf("invalid command-line argument %s in command: %s", arg, joinUnambiguously(cmdline))
+		}
+	}
 
 	linkTool := base.Tool("link")
 	idx := -1
@@ -58,12 +67,32 @@ func inProcessLink(sh *Shell, dir, desc string, env []string, args []any) error 
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	status, runErr := host.Run(cmdline[idx+1:], os.Stdout, os.Stderr)
-	if runErr != nil {
-		return runErr
+	// Capture link diagnostics into buffers and route through
+	// sh.reportCmd, mirroring sh.run / sh.runOut for subprocess
+	// link. Without this, ctxt.Bso (the linker's -v / verbose
+	// stream, wired to os.Stdout in ld.Main) writes straight to
+	// cmd/go's stdout — but tests like testdata/script/ldflag.txt
+	// match the verbose output against cmd/go's stderr (where
+	// reportCmd places combined tool output for failed and
+	// successful-but-noisy invocations).
+	var outBuf, errBuf bytes.Buffer
+	status, runErr := host.Run(cmdline[idx+1:], &outBuf, &errBuf)
+	out := append(outBuf.Bytes(), errBuf.Bytes()...)
+
+	if desc == "" {
+		desc = sh.fmtCmd(dir, "%s", strings.Join(cmdline, " "))
 	}
-	if status != 0 {
-		return fmt.Errorf("exit status %d", status)
+	var cmdErr error
+	switch {
+	case runErr != nil:
+		cmdErr = fmt.Errorf("%s: %v", linkTool, runErr)
+	case status != 0:
+		// Format mirrors os/exec.(*Cmd).Run for a non-zero exit so
+		// reportCmd, vet, and tests grepping for the tool path
+		// (e.g. testdata/script/linkname.txt expects
+		// `tool/.../link` in stderr) see the same shape under
+		// in-process linking as under subprocess execution.
+		cmdErr = fmt.Errorf("%s: exit status %d", linkTool, status)
 	}
-	return nil
+	return sh.reportCmd(desc, dir, out, cmdErr)
 }
