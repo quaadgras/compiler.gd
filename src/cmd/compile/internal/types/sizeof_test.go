@@ -27,9 +27,13 @@ func TestSizeof(t *testing.T) {
 		// gd parallelism-ast: Type gained a cache struct of two
 		// atomic.Pointer[Type] (cache.ptr, cache.slice) so concurrent
 		// in-process compile invocations don't race on shared composite-
-		// type caching. +16 B on 64-bit / +8 B on 32-bit.
+		// type caching. +16 B on 64-bit / +8 B on 32-bit. Then a
+		// per-Type calcSizeOnce sync.Once was added to replace the
+		// process-global map[*Type]*sync.Once that pinned every Type
+		// for cmd/go's lifetime under in-process compile (commit
+		// 31c94ef222). +12 B on 64-bit / +8 B on 32-bit, padded.
 		{Sym{}, 64, 96},
-		{Type{}, 104, 136},
+		{Type{}, 112, 144},
 		{Map{}, 12, 24},
 		{Forward{}, 20, 32},
 		{Func{}, 32, 56},
