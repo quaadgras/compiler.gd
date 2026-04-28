@@ -399,15 +399,13 @@ func (ctxt *Link) errorexit() {
 }
 
 // exitIfErrors / errorexit / mayberemoveoutfile are used by leaf
-// helpers (elf.go internal-error paths, sym.go AtExit closures) that
-// don't carry a *Link. They route through currentLink. Concurrent
-// in-process invocations can read another Main's currentLink here, but
-// these paths are either unreachable in normal operation (internal
-// errors) or already inside an error-driven exit, so the misroute is
-// benign.
+// helpers (elf.go internal-error paths) that don't carry a *Link.
+// They route through linkForGoroutine, which finds the *Link this
+// goroutine is currently driving — safe under concurrent in-process
+// host.Run.
 func exitIfErrors() {
-	if currentLink != nil {
-		currentLink.exitIfErrors()
+	if l := linkForGoroutine(); l != nil {
+		l.exitIfErrors()
 		return
 	}
 	Exit(2)
@@ -419,8 +417,8 @@ func errorexit() {
 }
 
 func mayberemoveoutfile() {
-	if currentLink != nil {
-		currentLink.mayberemoveoutfile()
+	if l := linkForGoroutine(); l != nil {
+		l.mayberemoveoutfile()
 	}
 }
 
@@ -1253,7 +1251,7 @@ func hostlinksetup(ctxt *Link) {
 		}
 		ctxt.flagTmpdir = dir
 		ctxt.ownTmpDir = true
-		AtExit(func() {
+		ctxt.AtExit(func() {
 			os.RemoveAll(ctxt.flagTmpdir)
 		})
 	}
@@ -1404,7 +1402,7 @@ func (ctxt *Link) archive() {
 	// large applications), since when the archive command runs we
 	// won't be holding onto all of the linker's live memory.
 	if syscallExecSupported && !ctxt.ownTmpDir {
-		runAtExitFuncs()
+		ctxt.runAtExitFuncs()
 		ctxt.execArchive(argv)
 		panic("should not get here")
 	}
@@ -2802,8 +2800,8 @@ func addsection(ldr *loader.Loader, arch *sys.Arch, seg *sym.Segment, name strin
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "usage: link [options] main.o\n")
-	if currentLink != nil && currentLink.flagSet != nil {
-		objabi.FlagprintFS(currentLink.flagSet, os.Stderr)
+	if l := linkForGoroutine(); l != nil && l.flagSet != nil {
+		objabi.FlagprintFS(l.flagSet, os.Stderr)
 	} else {
 		objabi.Flagprint(os.Stderr)
 	}

@@ -198,10 +198,15 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	}
 	ctxt.flagSet = flag.NewFlagSet(progName, flag.ContinueOnError)
 
-	// Publish ctxt as the currentLink so package-level AtExit/Exit
-	// helpers route through it.
+	// Publish ctxt as the currentLink (used outside the worker goroutine)
+	// and as this goroutine's link (used by AtExit/Exit/Errorf to route
+	// to the correct invocation under concurrent host.Run calls).
 	currentLink = ctxt
-	defer func() { currentLink = nil }()
+	SetCurrentLink(ctxt)
+	defer func() {
+		currentLink = nil
+		SetCurrentLink(nil)
+	}()
 
 	setupFlags(ctxt)
 
@@ -260,7 +265,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 	}
 	if ctxt.Debugvlog > 1 {
 		// dump symbol info on error
-		AtExit(func() {
+		ctxt.AtExit(func() {
 			if ctxt.nerrors > 0 {
 				ctxt.loader.Dump()
 			}
@@ -557,7 +562,7 @@ func startProfile(ctxt *Link) {
 		if err := pprof.StartCPUProfile(f); err != nil {
 			log.Fatalf("%v", err)
 		}
-		AtExit(func() {
+		ctxt.AtExit(func() {
 			pprof.StopCPUProfile()
 			if err = f.Close(); err != nil {
 				log.Fatalf("error closing cpu profile: %v", err)
@@ -573,7 +578,7 @@ func startProfile(ctxt *Link) {
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
-		AtExit(func() {
+		ctxt.AtExit(func() {
 			// Profile all outstanding allocations.
 			runtime.GC()
 			const writeLegacyFormat = 1

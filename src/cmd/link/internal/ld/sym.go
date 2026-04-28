@@ -74,7 +74,7 @@ func linknew(arch *sys.Arch) *Link {
 		log.Fatalf("invalid buildcfg.GOARCH %s (want %s)", buildcfg.GOARCH, arch.Name)
 	}
 
-	AtExit(func() {
+	ctxt.AtExit(func() {
 		if ctxt.nerrors > 0 {
 			ctxt.Out.ErrorClose()
 			ctxt.mayberemoveoutfile()
