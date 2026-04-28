@@ -356,7 +356,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	makeAtomicStoreGuardedIntrinsicLoong64 := func(op0, op1 ssa.Op, typ types.Kind, emit atomicOpEmitter) intrinsicBuilder {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// Target Atomic feature is identified by dynamic detection
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAM_BH, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).Loong64HasLAM_BH, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -438,7 +438,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				emit(s, n, args, op1, typ, needReturn)
 			} else {
 				// Target Atomic feature is identified by dynamic detection
-				addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).ARM64HasATOMICS, s.sb)
+				addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).ARM64HasATOMICS, s.sb)
 				v := s.load(types.Types[types.TBOOL], addr)
 				b := s.endBlock()
 				b.Kind = ssa.BlockIf
@@ -496,7 +496,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 
 	makeAtomicXchg8GuardedIntrinsicLoong64 := func(op ssa.Op) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAM_BH, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).Loong64HasLAM_BH, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -599,7 +599,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	makeAtomicCasGuardedIntrinsicLoong64 := func(op0, op1 ssa.Op, emit atomicOpEmitter) intrinsicBuilder {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// Target Atomic feature is identified by dynamic detection
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLAMCAS, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).Loong64HasLAMCAS, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -825,7 +825,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue3(ssa.OpFMA, types.Types[types.TFLOAT64], args[0], args[1], args[2])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasFMA)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(s.gd).X86HasFMA)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -853,7 +853,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		sys.AMD64)
 	addF("math", "FMA",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).ARMHasVFPv4, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).ARMHasVFPv4, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -887,7 +887,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TFLOAT64], args[0])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasSSE41)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(s.gd).X86HasSSE41)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -1104,7 +1104,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TINT], args[0])
 			}
 
-			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(gd).X86HasPOPCNT)
+			v := s.entryNewValue0A(ssa.OpHasCPUFeature, types.Types[types.TBOOL], ir.Syms(s.gd).X86HasPOPCNT)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(v)
@@ -1133,7 +1133,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 
 	makeOnesCountLoong64 := func(op ssa.Op) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).Loong64HasLSX, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).Loong64HasLSX, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -1167,7 +1167,7 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 				return s.newValue1(op, types.Types[types.TINT], args[0])
 			}
 
-			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(gd).RISCV64HasZbb, s.sb)
+			addr := s.entryNewValue1A(ssa.OpAddr, types.Types[types.TBOOL].PtrTo(), ir.Syms(s.gd).RISCV64HasZbb, s.sb)
 			v := s.load(types.Types[types.TBOOL], addr)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
@@ -1275,9 +1275,9 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			// check for divide-by-zero/overflow and panic with appropriate message
 			cmpZero := s.newValue2(s.ssaOp(ir.ONE, types.Types[types.TUINT64]), types.Types[types.TBOOL], args[2], s.zeroVal(types.Types[types.TUINT64]))
-			s.check(cmpZero, ir.Syms(gd).Panicdivide)
+			s.check(cmpZero, ir.Syms(s.gd).Panicdivide)
 			cmpOverflow := s.newValue2(s.ssaOp(ir.OLT, types.Types[types.TUINT64]), types.Types[types.TBOOL], args[0], args[2])
-			s.check(cmpOverflow, ir.Syms(gd).Panicoverflow)
+			s.check(cmpOverflow, ir.Syms(s.gd).Panicoverflow)
 			return s.newValue3(ssa.OpDiv128u, types.NewTuple(types.Types[types.TUINT64], types.Types[types.TUINT64]), args[0], args[1], args[2])
 		},
 		sys.AMD64)
@@ -1964,7 +1964,7 @@ func opLen4_31(op ssa.Op, t *types.Type) func(s *state, n *ir.CallExpr, args []*
 	}
 }
 
-func immJumpTable(gd *base.Invocation, s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp func(*state, int)) *ssa.Value {
+func immJumpTable(s *state, idx *ssa.Value, intrinsicCall *ir.CallExpr, genOp func(*state, int)) *ssa.Value {
 	// Make blocks we'll need.
 	bEnd := s.f.NewBlock(ssa.BlockPlain)
 
@@ -1979,7 +1979,7 @@ func immJumpTable(gd *base.Invocation, s *state, idx *ssa.Value, intrinsicCall *
 	b := s.curBlock
 	b.Kind = ssa.BlockJumpTable
 	b.Pos = intrinsicCall.Pos()
-	if gd.Flag.Cfg.SpectreIndex {
+	if s.gd.Flag.Cfg.SpectreIndex {
 		// Potential Spectre vulnerability hardening?
 		idx = s.newValue2(ssa.OpSpectreSliceIndex, t, idx, s.uintptrConstant(255))
 	}
@@ -2011,7 +2011,7 @@ func opLen1Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue1I(op, t, args[1].AuxInt<<int64(offset), args[0])
 		}
-		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue1I(op, t, int64(int8(idx<<offset)), args[0])
 		})
@@ -2023,7 +2023,7 @@ func opLen2Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2])
 		}
-		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset)), args[0], args[2])
 		})
@@ -2035,7 +2035,7 @@ func opLen3Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue3I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2], args[3])
 		}
-		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue3I(op, t, int64(int8(idx<<offset)), args[0], args[2], args[3])
 		})
@@ -2047,7 +2047,7 @@ func opLen2Imm8_2I(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) fu
 		if args[2].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, args[2].AuxInt<<int64(offset), args[0], args[1])
 		}
-		return immJumpTable(gd, s, args[2], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[2], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset)), args[0], args[1])
 		})
@@ -2056,6 +2056,13 @@ func opLen2Imm8_2I(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) fu
 
 // Two immediates instead of just 1.  Offset is ignored, so it is a _ parameter instead.
 func opLen2Imm8_II(gd *base.Invocation, op ssa.Op, t *types.Type, _ int) func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+	// gd is unused: the intrinsic builder closures capture s at apply
+	// time (s.gd is the current invocation's *Invocation). Capturing gd
+	// here would bind to whichever invocation first ran initIntrinsics,
+	// and ir.Syms(s.gd).PanicSimdImm would then be an LSym from a stale
+	// link context — the linker rejects it as "relocation target not
+	// defined". Same fix applied to the other opLenN_*_II helpers.
+	_ = gd
 	return func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 		if args[1].Op == ssa.OpConst8 && args[2].Op == ssa.OpConst8 && args[1].AuxInt & ^3 == 0 && args[2].AuxInt & ^3 == 0 {
 			i1, i2 := args[1].AuxInt, args[2].AuxInt
@@ -2064,13 +2071,13 @@ func opLen2Imm8_II(gd *base.Invocation, op ssa.Op, t *types.Type, _ int) func(s 
 		four := s.constInt64(types.Types[types.TUINT8], 4)
 		shifted := s.newValue2(ssa.OpLsh8x8, types.Types[types.TUINT8], args[2], four)
 		combined := s.newValue2(ssa.OpAdd8, types.Types[types.TUINT8], args[1], shifted)
-		return immJumpTable(gd, s, combined, n, func(sNew *state, idx int) {
+		return immJumpTable(s, combined, n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			// TODO for "zeroing" values, panic instead.
 			if idx & ^(3+3<<4) == 0 {
 				s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx)), args[0], args[3])
 			} else {
-				sNew.rtcall(ir.Syms(gd).PanicSimdImm, false, nil)
+				sNew.rtcall(ir.Syms(s.gd).PanicSimdImm, false, nil)
 			}
 		})
 	}
@@ -2082,7 +2089,7 @@ func opLen2Imm8_SHA1RNDS4(gd *base.Invocation, op ssa.Op, t *types.Type, offset 
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue2I(op, t, (args[1].AuxInt<<int64(offset))&0b11, args[0], args[2])
 		}
-		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue2I(op, t, int64(int8(idx<<offset))&0b11, args[0], args[2])
 		})
@@ -2094,7 +2101,7 @@ func opLen3Imm8_2I(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) fu
 		if args[2].Op == ssa.OpConst8 {
 			return s.newValue3I(op, t, args[2].AuxInt<<int64(offset), args[0], args[1], args[3])
 		}
-		return immJumpTable(gd, s, args[2], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[2], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue3I(op, t, int64(int8(idx<<offset)), args[0], args[1], args[3])
 		})
@@ -2106,7 +2113,7 @@ func opLen4Imm8(gd *base.Invocation, op ssa.Op, t *types.Type, offset int) func(
 		if args[1].Op == ssa.OpConst8 {
 			return s.newValue4I(op, t, args[1].AuxInt<<int64(offset), args[0], args[2], args[3], args[4])
 		}
-		return immJumpTable(gd, s, args[1], n, func(sNew *state, idx int) {
+		return immJumpTable(s, args[1], n, func(sNew *state, idx int) {
 			// Encode as int8 due to requirement of AuxInt, check its comment for details.
 			s.vars[n] = sNew.newValue4I(op, t, int64(int8(idx<<offset)), args[0], args[2], args[3], args[4])
 		})

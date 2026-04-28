@@ -3044,14 +3044,22 @@ func (v Value) UnsafePointer() unsafe.Pointer {
 		return (*unsafeheader.Slice)(v.dataPtr()).Data
 	case String:
 		// gd: for inline-rep strings Data is nil and the bytes live
-		// in the header itself — return &s.Hash so callers get a
-		// valid byte pointer. Lifetime is tied to the Value's
-		// flagIndir storage.
+		// in the header itself. Returning &v.inline would expose a
+		// pointer to UnsafePointer's stack frame — invalid once we
+		// return, and outright wrong under -d=maymorestack which
+		// moves the stack between UnsafePointer returning and the
+		// caller dereferencing. Allocate a stable heap copy.
 		sh := (*unsafeheader.String)(v.dataPtr())
 		if sh.Data != nil {
 			return sh.Data
 		}
-		return unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize)
+		s := v.String()
+		if len(s) == 0 {
+			return nil
+		}
+		buf := make([]byte, len(s))
+		copy(buf, s)
+		return unsafe.Pointer(unsafe.SliceData(buf))
 	}
 	panic(&ValueError{"reflect.Value.UnsafePointer", v.kind()})
 }
