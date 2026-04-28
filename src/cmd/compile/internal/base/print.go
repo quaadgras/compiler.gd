@@ -78,6 +78,23 @@ func (gd *Invocation) stderr() io.Writer {
 	return os.Stderr
 }
 
+// stdout returns the writer where -m inline diagnostics, -d=loopvar=3,
+// and other progress/log fmt.Printf calls should go. Same plumbing
+// rationale as stderr().
+func (gd *Invocation) stdout() io.Writer {
+	if gd.Stdout != nil {
+		return gd.Stdout
+	}
+	return os.Stdout
+}
+
+// Logf writes to gd.stdout() — replaces fmt.Printf calls scattered
+// across the compile that emit "-m" inline decisions, loopvar
+// messages, etc. so in-process callers can capture the output.
+func (gd *Invocation) Logf(format string, args ...any) {
+	fmt.Fprintf(gd.stdout(), format, args...)
+}
+
 // FlushErrors sorts errors seen so far by line number, prints them to
 // gd.stderr(), and empties the errors array.
 func (gd *Invocation) FlushErrors() {

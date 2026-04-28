@@ -34,6 +34,14 @@ type Invocation struct {
 	// leaking onto cmd/go's own os.Stderr.
 	Stderr io.Writer
 
+	// Stdout is the counterpart for the bunch of fmt.Printf calls in
+	// cmd/compile that emit -m inline-decision logs, -d=loopvar=3
+	// loopvar messages, -W and similar debug dumps. Same fall-back
+	// rules as Stderr. Required for in-process invocations because
+	// compile's os.Stdout in that mode is cmd/go's terminal stdout,
+	// not a captured pipe.
+	Stdout io.Writer
+
 	// Flagset is the per-Invocation flag set used by registerFlags
 	// and ParseFlags. Each Invocation owns its own *flag.FlagSet so
 	// multiple compile invocations in the same process don't fight
