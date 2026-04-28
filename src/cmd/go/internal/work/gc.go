@@ -180,7 +180,7 @@ func (gcToolchain) gc(b *Builder, a *Action, archive string, importcfg, embedcfg
 	// -toolexec is configured (the wrapper needs an actual
 	// subprocess), -n is set (dry run), or GOGD_INPROC=0 is set
 	// (debug escape hatch).
-	if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+	if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cfgChangedEnv) {
 		output, err = inProcessCompile(sh, base.Cwd(), cfgChangedEnv, args)
 		return ofile, output, err
 	}
@@ -425,7 +425,7 @@ func (gcToolchain) asm(b *Builder, a *Action, sfiles []string) ([]string, error)
 		// rules as the compile path — fall back to fork/exec when a
 		// -toolexec wrapper is configured, -n is set, or
 		// GOGD_INPROC=0 is set explicitly.
-		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cfgChangedEnv) {
 			if err := inProcessAssemble(b.Shell(a), p.Dir, cfgChangedEnv, args1); err != nil {
 				return nil, err
 			}
@@ -459,7 +459,7 @@ func (gcToolchain) symabis(b *Builder, a *Action, sfiles []string) (string, erro
 		}
 
 		// gd fork: drive cmd/asm in-process for symabis too. Same gating.
-		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+		if useInProcessCompile() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cfgChangedEnv) {
 			return inProcessAssemble(sh, p.Dir, cfgChangedEnv, args)
 		}
 		return sh.run(p.Dir, p.ImportPath, cfgChangedEnv, args...)
@@ -699,7 +699,7 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 	// etc.) is not yet per-Link; back-to-back invocations would carry
 	// stale state. Default stays fork/exec until that migration
 	// finishes.
-	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(env) {
 		return inProcessLink(b.Shell(root), dir, root.Package.ImportPath, env, args)
 	}
 	return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
@@ -752,7 +752,7 @@ func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action,
 
 	args := []any{cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags}
 	// gd fork: in-process link gated by GOGD_INPROC_LINK=1 (see ld above).
-	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN {
+	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cfgChangedEnv) {
 		return inProcessLink(b.Shell(root), dir, targetPath, cfgChangedEnv, args)
 	}
 	return b.Shell(root).run(dir, targetPath, cfgChangedEnv, args...)

@@ -11,6 +11,7 @@ import (
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/str"
 	"fmt"
+	"internal/buildcfg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,14 @@ func useInProcessCompile() bool {
 	return os.Getenv("GOGD_INPROC") != "0" && !isBootstrapDriver()
 }
 
+// canRunInProcess reports whether cmd/go can safely drive
+// compile/asm/link in-process for an invocation whose env is `env`.
+// Refuses cross-builds because internal/buildcfg.GOARCH/GOOS are
+// process-globals and the in-process tool can't see env's override.
+func canRunInProcess(env []string) bool {
+	return !isCrossBuild(env)
+}
+
 // useInProcessLink reports whether cmd/go should drive cmd/link
 // in-process. Default-on; set GOGD_INPROC_LINK=0 to force fork/exec.
 // Same bootstrap-driver guard as useInProcessCompile.
@@ -50,6 +59,25 @@ func useInProcessLink() bool {
 // paths are unsafe in those phases — see useInProcessCompile.
 func isBootstrapDriver() bool {
 	return filepath.Base(os.Args[0]) == "go_bootstrap"
+}
+
+// isCrossBuild reports whether cmd/go's resolved target GOOS/GOARCH
+// (cfg.Goos/Goarch — may have come from a GOENV file, env vars, or
+// build defaults) differs from this process's buildcfg (which is
+// process-global, set at package init from the launching env, and
+// immutable thereafter). In-process compile/asm/link share buildcfg
+// with cmd/go and would emit host-arch artefacts despite the
+// caller's cross-target intent; fall back to fork/exec so the
+// subprocess re-reads buildcfg from its own env / GOENV.
+//
+// Comparing cfg vs buildcfg directly (instead of scanning the
+// per-call env slice cfgChangedEnv) catches GOENV-driven cross
+// builds, where cfg.Getenv chases the GOENV file and matches
+// cfg.Goarch — so makeCfgChangedEnv adds nothing, but the in-
+// process tool still has the host arch.
+func isCrossBuild(env []string) bool {
+	_ = env
+	return cfg.Goarch != buildcfg.GOARCH || cfg.Goos != buildcfg.GOOS
 }
 
 // inProcessCompile drives a single cmd/compile invocation in the
@@ -74,6 +102,18 @@ func isBootstrapDriver() bool {
 // off the hot path only when we can prove it's safe to take it.
 func inProcessCompile(sh *Shell, dir string, env []string, args []any) ([]byte, error) {
 	cmdline := str.StringList(args...)
+
+	// Mirror Shell.runOut: reject @-prefixed args before we hand
+	// them off. GNU binutils interpret @foo as a response file and
+	// fork upstreams the rejection on the subprocess path; the
+	// in-process path bypasses runOut so we re-implement the check
+	// here. TestBadCommandLines depends on this rejection happening
+	// even when no actual exec occurs.
+	for _, arg := range cmdline {
+		if strings.HasPrefix(arg, "@") {
+			return nil, fmt.Errorf("invalid command-line argument %s in command: %s", arg, joinUnambiguously(cmdline))
+		}
+	}
 
 	// Locate the compile tool in cmdline. cmd/go always emits it
 	// at position 0 unless -toolexec was set; we already gated that
