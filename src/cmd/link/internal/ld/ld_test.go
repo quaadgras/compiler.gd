@@ -108,6 +108,16 @@ func TestArchiveBuildInvokeWithExec(t *testing.T) {
 	case "openbsd", "windows":
 		t.Skip("c-archive unsupported")
 	}
+	// gd fork: cmd/link/host runs in-process inside cmd/go, so the
+	// syscall.Exec optimisation is disabled (it would replace cmd/go
+	// itself with the archiver). With GOGD_INPROC_LINK off, the
+	// subprocess linker behaves like stock and the optimisation
+	// fires; otherwise skip — there's nothing to assert. We detect
+	// the fork via runtime.Version() ("gd1.26.x") because
+	// runtime.Compiler stays "gc" — gd reuses the gc backend.
+	if strings.HasPrefix(runtime.Version(), "gd") && os.Getenv("GOGD_INPROC_LINK") != "0" {
+		t.Skip("syscall.Exec archiver optimisation disabled under in-process link")
+	}
 	dir := t.TempDir()
 
 	srcfile := filepath.Join(dir, "test.go")

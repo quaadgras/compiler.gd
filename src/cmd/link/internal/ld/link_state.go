@@ -11,6 +11,7 @@ import (
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
 	"flag"
+	"io"
 	"sync"
 )
 
@@ -229,6 +230,13 @@ type linkState struct {
 	// goroutines).
 	mmaps   [][]byte
 	mmapsMu sync.Mutex
+
+	// stderr is the writer link diagnostics target. Wired by Main
+	// from its stderr argument; cmd/link/host.Run plumbs cmd/go's
+	// per-Invocation stderr buffer here so reportCmd captures the
+	// link tool's output. nil falls back to os.Stderr (standalone
+	// link binary, pre-Main paths).
+	stderr io.Writer
 }
 
 // absorbMmaps takes ownership of the read-only mappings a closed

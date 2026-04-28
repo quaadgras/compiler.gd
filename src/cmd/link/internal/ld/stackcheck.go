@@ -160,12 +160,12 @@ func (sc *stackCheck) check(sym loader.Sym) int {
 
 	if sc.ctxt.flagDebugNosplit {
 		for _, edge := range edges {
-			fmt.Printf("nosplit: %s +%d", sc.symName(sym), edge.growth)
+			sc.ctxt.Logf("nosplit: %s +%d", sc.symName(sym), edge.growth)
 			if edge.target == 0 {
 				// Local stack growth or leaf function.
-				fmt.Printf("\n")
+				sc.ctxt.Logf("\n")
 			} else {
-				fmt.Printf(" -> %s\n", sc.symName(edge.target))
+				sc.ctxt.Logf(" -> %s\n", sc.symName(edge.target))
 			}
 		}
 	}
@@ -396,26 +396,26 @@ func (sc *stackCheck) report(sym loader.Sym, depth int, chain *[]stackCheckChain
 			if i == 0 {
 				// chain[0] is just the root function,
 				// not a stack growth.
-				fmt.Printf("%s\n", sc.symName(ent.target))
+				sc.ctxt.Logf("%s\n", sc.symName(ent.target))
 				continue
 			}
 
 			indent = strings.Repeat("    ", i)
-			fmt.Print(indent)
+			sc.ctxt.Logf("%s", indent)
 			// Grows the stack X bytes and (maybe) calls Y.
-			fmt.Printf("grows %d bytes", ent.growth)
+			sc.ctxt.Logf("grows %d bytes", ent.growth)
 			if ent.target == 0 {
 				// Not a call, just a leaf. Print nothing.
 			} else {
-				fmt.Printf(", calls %s", sc.symName(ent.target))
+				sc.ctxt.Logf(", calls %s", sc.symName(ent.target))
 			}
-			fmt.Printf("\n")
+			sc.ctxt.Logf("\n")
 		}
 		// Print how far over this chain went.
 		if isCycle {
-			fmt.Printf("%sinfinite cycle\n", indent)
+			sc.ctxt.Logf("%sinfinite cycle\n", indent)
 		} else {
-			fmt.Printf("%s%d bytes over limit\n", indent, -depth)
+			sc.ctxt.Logf("%s%d bytes over limit\n", indent, -depth)
 		}
 	}
 }

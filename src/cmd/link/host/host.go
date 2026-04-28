@@ -56,8 +56,6 @@ var archInits = map[string]func() (*sys.Arch, ld.Arch){
 // link's many Exitf call sites can terminate cleanly without taking
 // down the calling cmd/go process.
 func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
-	_ = stderr // ld writes errors via log + Errorf which still target os.Stderr.
-
 	if buildcfg.Error != nil {
 		fmt.Fprintf(os.Stderr, "link: %v\n", buildcfg.Error)
 		return 2, nil
@@ -80,7 +78,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ld.Main(arch, theArch, args, &st, stdout)
+		ld.Main(arch, theArch, args, &st, stdout, stderr)
 	}()
 	<-done
 

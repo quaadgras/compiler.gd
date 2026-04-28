@@ -12,7 +12,22 @@ import (
 	"cmd/link/host"
 	"fmt"
 	"strings"
+	"sync"
 )
+
+// lockedWriter serialises writes from ctxt.Bso and util.Errorf so
+// the shared capture buffer in inProcessLink doesn't get corrupted
+// when an error path interleaves with -v progress output.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  *bytes.Buffer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
+}
 
 // inProcessLink drives a single cmd/link invocation in the calling
 // process via cmd/link/host.Run, mirroring (*Shell).run for a single
@@ -67,17 +82,19 @@ func inProcessLink(sh *Shell, dir, desc string, env []string, args []any) error 
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	// Capture link diagnostics into buffers and route through
-	// sh.reportCmd, mirroring sh.run / sh.runOut for subprocess
-	// link. Without this, ctxt.Bso (the linker's -v / verbose
-	// stream, wired to os.Stdout in ld.Main) writes straight to
-	// cmd/go's stdout — but tests like testdata/script/ldflag.txt
-	// match the verbose output against cmd/go's stderr (where
-	// reportCmd places combined tool output for failed and
-	// successful-but-noisy invocations).
-	var outBuf, errBuf bytes.Buffer
-	status, runErr := host.Run(cmdline[idx+1:], &outBuf, &errBuf)
-	out := append(outBuf.Bytes(), errBuf.Bytes()...)
+	// Capture link diagnostics into a single buffer and route
+	// through sh.reportCmd, mirroring sh.run / sh.runOut for
+	// subprocess link. ld.Main's stdout (ctxt.Bso, -v / progress
+	// chatter) and stderr (util.Errorf / loader.ErrorReporter
+	// diagnostics like "nosplit stack over N byte limit") share
+	// the buffer so write-order interleaving — which the
+	// testStackCheckOutput stanza parser depends on — survives.
+	// Stock cmd/go gets the same effect for free via
+	// exec.Cmd.CombinedOutput on the link subprocess.
+	var buf bytes.Buffer
+	lw := &lockedWriter{w: &buf}
+	status, runErr := host.Run(cmdline[idx+1:], lw, lw)
+	out := buf.Bytes()
 
 	if desc == "" {
 		desc = sh.fmtCmd(dir, "%s", strings.Join(cmdline, " "))

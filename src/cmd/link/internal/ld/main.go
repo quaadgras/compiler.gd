@@ -171,8 +171,10 @@ func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean 
 // cmd/link/host.Run to drive Main on a worker goroutine without
 // terminating cmd/go's process. Pass nil for the standalone binary
 // path. stdout receives ctxt.Bso flushes (-v / progress chatter); pass
-// nil to fall back to os.Stdout for the standalone binary.
-func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout io.Writer) {
+// nil to fall back to os.Stdout for the standalone binary. stderr is
+// where util.Errorf / loader.ErrorReporter.Errorf route their
+// diagnostic output; pass nil to fall back to os.Stderr.
+func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout, stderr io.Writer) {
 	log.SetPrefix("link: ")
 	log.SetFlags(0)
 	counterOpenOnce.Do(counter.Open)
@@ -190,6 +192,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout io.Wr
 		stdout = os.Stdout
 	}
 	ctxt.Bso = bufio.NewWriter(stdout)
+	ctxt.stderr = stderr // nil falls back to os.Stderr in stderrFor
 	ctxt.inProcessStatus = status
 
 	// Per-Link *flag.FlagSet — never mutate flag.CommandLine. Concurrent

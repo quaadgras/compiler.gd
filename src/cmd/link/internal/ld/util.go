@@ -9,6 +9,7 @@ import (
 	"cmd/link/internal/loader"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -145,10 +146,25 @@ func Exit(code int) {
 	os.Exit(code)
 }
 
+// stderrFor returns the writer link errors should target. Routes
+// through the per-Link stderr (host.Run plumbs cmd/go's stderr buffer
+// here so reportCmd captures the link tool's diagnostic output and
+// surfaces it under the import-path comment line — tests in
+// cmd/link/internal/ld/*_test.go grep CombinedOutput for stanzas
+// like "func: nosplit stack over N byte limit"). Falls back to
+// os.Stderr when no per-goroutine *Link is registered (early
+// startup, or the standalone link binary's main).
+func stderrFor() io.Writer {
+	if l := linkForGoroutine(); l != nil && l.stderr != nil {
+		return l.stderr
+	}
+	return os.Stderr
+}
+
 // Exitf logs an error message then calls Exit(2). Reads flagH and
 // nerrors from this goroutine's *Link.
 func Exitf(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, os.Args[0]+": "+format+"\n", a...)
+	fmt.Fprintf(stderrFor(), os.Args[0]+": "+format+"\n", a...)
 	if l := linkForGoroutine(); l != nil {
 		l.nerrors++
 		if l.flagH {
@@ -184,7 +200,7 @@ func afterErrorAction() {
 // output file and return a non-zero error code.
 func Errorf(format string, args ...any) {
 	format += "\n"
-	fmt.Fprintf(os.Stderr, format, args...)
+	fmt.Fprintf(stderrFor(), format, args...)
 	afterErrorAction()
 }
 
@@ -202,7 +218,7 @@ func (ctxt *Link) Errorf(s loader.Sym, format string, args ...any) {
 	// Note: this is not expected to happen very often.
 	format = fmt.Sprintf("sym %d: %s", s, format)
 	format += "\n"
-	fmt.Fprintf(os.Stderr, format, args...)
+	fmt.Fprintf(stderrFor(), format, args...)
 	afterErrorAction()
 }
 

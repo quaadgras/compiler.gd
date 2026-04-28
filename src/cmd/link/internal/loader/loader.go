@@ -2833,6 +2833,11 @@ func (l *Loader) AssignTextSymbolOrder(libs []*sym.Library, intlibs []bool, exts
 type ErrorReporter struct {
 	ldr              *Loader
 	AfterErrorAction func()
+	// Stderr is where Errorf writes diagnostic output. nil falls
+	// back to os.Stderr. cmd/link/host.Run plumbs cmd/go's per-
+	// Invocation stderr buffer here via Loader.SetErrorStderr so
+	// reportCmd captures the link tool's output.
+	Stderr io.Writer
 }
 
 // Errorf method logs an error message.
@@ -2852,8 +2857,19 @@ func (reporter *ErrorReporter) Errorf(s Sym, format string, args ...any) {
 		format = fmt.Sprintf("sym %d: %s", s, format)
 	}
 	format += "\n"
-	fmt.Fprintf(os.Stderr, format, args...)
+	w := reporter.Stderr
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, format, args...)
 	reporter.AfterErrorAction()
+}
+
+// SetErrorStderr wires the writer ErrorReporter.Errorf will use.
+// Used by cmd/link/internal/ld.Main to plumb a per-Link stderr from
+// cmd/link/host.Run into the loader's error reporter.
+func (l *Loader) SetErrorStderr(w io.Writer) {
+	l.errorReporter.Stderr = w
 }
 
 // GetErrorReporter returns the loader's associated error reporter.

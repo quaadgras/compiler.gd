@@ -519,6 +519,9 @@ func (ctxt *Link) loadlib() {
 		log.Fatalf("invalid -strictdups flag value %d", ctxt.FlagStrictDups)
 	}
 	ctxt.loader = loader.NewLoader(flags, &ctxt.ErrorReporter.ErrorReporter)
+	if ctxt.stderr != nil {
+		ctxt.loader.SetErrorStderr(ctxt.stderr)
+	}
 	ctxt.ErrorReporter.SymName = func(s loader.Sym) string {
 		return ctxt.loader.SymName(s)
 	}
@@ -1403,7 +1406,14 @@ func (ctxt *Link) archive() {
 	// This will reduce peak RSS for the link (and speed up linking of
 	// large applications), since when the archive command runs we
 	// won't be holding onto all of the linker's live memory.
-	if syscallExecSupported && !ctxt.ownTmpDir {
+	//
+	// gd fork: in-process link (cmd/link/host.Run) shares the calling
+	// cmd/go process — syscall.Exec would replace cmd/go itself with
+	// the archiver, which is obviously catastrophic. inProcessStatus
+	// is non-nil exactly when host.Run drove this Main, so skip the
+	// exec optimisation in that case and fall through to the regular
+	// fork+exec path.
+	if syscallExecSupported && !ctxt.ownTmpDir && ctxt.inProcessStatus == nil {
 		ctxt.runAtExitFuncs()
 		ctxt.execArchive(argv)
 		panic("should not get here")
