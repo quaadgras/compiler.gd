@@ -10,6 +10,7 @@ import (
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
 	"flag"
+	"sync"
 )
 
 // linkState holds per-Invocation linker state that was previously
@@ -66,6 +67,11 @@ type linkState struct {
 	// (which previously triggered "concurrent map writes" inside
 	// flag.(*FlagSet).Var).
 	flagSet *flag.FlagSet
+
+	// createTrivialCOnce gates writing the throwaway trivial.c that
+	// linkerFlagSupported feeds into the host linker probe — per-Link
+	// because each invocation has its own flagTmpdir.
+	createTrivialCOnce sync.Once
 
 	// Flags. Were package-level *T pointers reassigned per Main call;
 	// concurrent invocations clobbered each other. Per-Link storage,

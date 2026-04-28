@@ -2154,10 +2154,15 @@ func (ctxt *Link) passLongArgsInResponseFile(argv []string, altLinker string) []
 	}
 }
 
-var createTrivialCOnce sync.Once
-
 func linkerFlagSupported(ctxt *Link, arch *sys.Arch, linker, altLinker, flag string) bool {
-	createTrivialCOnce.Do(func() {
+	// trivial.c lives in this invocation's flagTmpdir. The previous
+	// implementation used a process-level sync.Once, but with concurrent
+	// in-process Run calls only the first invocation's tmpdir got the
+	// file written — subsequent invocations would fail to find it (and
+	// their flagTmpdir might also have been deleted already by the
+	// first's AtExit). Per-Link sync.Once on linkState ensures one
+	// write per invocation, repeat-safe within an invocation.
+	ctxt.createTrivialCOnce.Do(func() {
 		src := filepath.Join(ctxt.flagTmpdir, "trivial.c")
 		if err := os.WriteFile(src, []byte("int main() { return 0; }"), 0666); err != nil {
 			Errorf("WriteFile trivial.c failed: %v", err)
