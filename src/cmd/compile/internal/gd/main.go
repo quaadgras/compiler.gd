@@ -120,8 +120,14 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	gd.DebugSSA = ssa.PhaseOption
 	gd.ParseFlags(args)
 
+	// Skip AdjustStartingHeap when running in-process (cmd/compile/host.Run
+	// from cmd/go). It calls debug.SetGCPercent process-wide to delay GC
+	// until heap reaches ~128 MB; in a fork/exec compile that's reclaimed
+	// when the process exits, but in-process the cranked-up GOGC sticks
+	// across every concurrent invocation in cmd/go's process and RSS grows
+	// until the kernel SIGKILLs it. Explicit -d=gcstart still wins.
 	if flagGCStart := gd.Debug.GCStart; flagGCStart > 0 || // explicit flags overrides environment variable disable of GC boost
-		os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && gd.Flag.LowerC != 1 { // explicit GC knobs or no concurrency implies default heap
+		(!gd.InProcess && os.Getenv("GOGC") == "" && os.Getenv("GOMEMLIMIT") == "" && gd.Flag.LowerC != 1) { // explicit GC knobs or no concurrency implies default heap
 		startHeapMB := int64(128)
 		if flagGCStart > 0 {
 			startHeapMB = int64(flagGCStart)

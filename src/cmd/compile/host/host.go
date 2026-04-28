@@ -76,7 +76,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 		return 2, fmt.Errorf("compile/host.Run: unknown architecture %q", buildcfg.GOARCH)
 	}
 
-	gd_ := new(base.Invocation)
+	gd_ := &base.Invocation{InProcess: true}
 
 	// Run gd.Main on a worker goroutine. gd.Exit (used by error
 	// paths, -V, usage) calls runtime.Goexit; calling it directly

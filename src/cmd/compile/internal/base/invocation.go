@@ -14,6 +14,16 @@ import (
 type Invocation struct {
 	atExitFuncs []func()
 
+	// InProcess is set by cmd/compile/host.Run for invocations driven
+	// in-process from cmd/go. It gates process-wide tweaks that are
+	// safe in a standalone compile but harmful when many compiles
+	// share one process — most importantly AdjustStartingHeap, which
+	// calls debug.SetGCPercent(big) to delay GC until the heap reaches
+	// ~128 MB. Standalone compiles exit and free everything; in-process
+	// compiles all leave GOGC cranked up at once and cmd/go's RSS
+	// climbs without bound until the kernel SIGKILLs it.
+	InProcess bool
+
 	// Flagset is the per-Invocation flag set used by registerFlags
 	// and ParseFlags. Each Invocation owns its own *flag.FlagSet so
 	// multiple compile invocations in the same process don't fight
