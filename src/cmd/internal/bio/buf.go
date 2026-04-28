@@ -16,6 +16,17 @@ import (
 type Reader struct {
 	f *os.File
 	*bufio.Reader
+
+	// mmaps tracks every read-only mmap'd block sliceOS handed out
+	// for this Reader so the caller can transfer ownership to a
+	// longer-lived sink (typically *Link.mmaps in cmd/link/host's
+	// in-process linker, where the bin/go process outlives the
+	// individual link). Without a sink, the mappings live until the
+	// process exits — matches the historical "never unmapped"
+	// contract that was safe under fork/exec but leaks GBs of VM
+	// when the linker runs in-process across hundreds of links.
+	mmaps     [][]byte
+	mmapDrain func([][]byte) // see SetMmapSink
 }
 
 // Writer implements a seekable buffered io.Writer.
@@ -92,7 +103,23 @@ func (w *Writer) Offset() int64 {
 }
 
 func (r *Reader) Close() error {
+	if r.mmapDrain != nil && len(r.mmaps) > 0 {
+		r.mmapDrain(r.mmaps)
+		r.mmaps = nil
+	}
 	return r.f.Close()
+}
+
+// SetMmapSink registers a callback Reader.Close will invoke with
+// every mmap'd block this Reader has handed out. The callback is
+// expected to retain the slices for the lifetime of any data they
+// back, then call Munmap on each before exit.
+//
+// This is a fork addition: stock cmd's bio leaks every mmap until
+// process teardown, which was free under fork/exec but accumulates
+// GBs of VM in long-lived processes (cmd/link/host inside cmd/go).
+func (r *Reader) SetMmapSink(drain func([][]byte)) {
+	r.mmapDrain = drain
 }
 
 func (w *Writer) Close() error {
@@ -114,9 +141,9 @@ func (w *Writer) File() *os.File {
 
 // Slice reads the next length bytes of r into a slice.
 //
-// This slice may be backed by mmap'ed memory. Currently, this memory
-// will never be unmapped. The second result reports whether the
-// backing memory is read-only.
+// This slice may be backed by mmap'ed memory; see SliceRO and
+// SetMmapSink for the mapping lifecycle. The second result reports
+// whether the backing memory is read-only.
 func (r *Reader) Slice(length uint64) ([]byte, bool, error) {
 	if length == 0 {
 		return []byte{}, false, nil
@@ -138,7 +165,12 @@ func (r *Reader) Slice(length uint64) ([]byte, bool, error) {
 // SliceRO returns a slice containing the next length bytes of r
 // backed by a read-only mmap'd data. If the mmap cannot be
 // established (limit exceeded, region too small, etc) a nil slice
-// will be returned. If mmap succeeds, it will never be unmapped.
+// will be returned.
+//
+// The mapping is recorded against the Reader and is unmapped only
+// if the caller has registered a sink via SetMmapSink and later
+// calls Munmap on the entries the sink received; otherwise the
+// mapping survives until process exit (the historical contract).
 func (r *Reader) SliceRO(length uint64) []byte {
 	data, ok := r.sliceOS(length)
 	if ok {

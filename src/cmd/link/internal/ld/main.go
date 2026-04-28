@@ -208,6 +208,13 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int) {
 		SetCurrentLink(nil)
 	}()
 
+	// Free every mmap'd input block bio handed out during the link.
+	// Without this the long-lived bin/go (cmd/link/host runs in-process)
+	// accumulates GBs of file-backed VM across hundreds of test-binary
+	// links — bio's contract used to be "never unmapped" because the
+	// stock linker exits per invocation. See linkState.mmaps.
+	defer ctxt.releaseMmaps()
+
 	setupFlags(ctxt)
 
 	// For testing behavior of go command when tools crash silently.

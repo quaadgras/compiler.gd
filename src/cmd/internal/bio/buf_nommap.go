@@ -9,3 +9,8 @@ package bio
 func (r *Reader) sliceOS(length uint64) ([]byte, bool) {
 	return nil, false
 }
+
+// Munmap is a no-op on platforms that don't mmap in sliceOS.
+func Munmap(data []byte) error {
+	return nil
+}

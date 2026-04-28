@@ -115,6 +115,7 @@ func hostArchive(ctxt *Link, name string) {
 		}
 		Exitf("cannot open file %s: %v", name, err)
 	}
+	f.SetMmapSink(ctxt.absorbMmaps)
 	defer f.Close()
 
 	var magbuf [len(ARMAG)]byte

@@ -1069,6 +1069,7 @@ func loadobjfile(ctxt *Link, lib *sym.Library) {
 	if err != nil {
 		Exitf("cannot open file %s: %v", lib.File, err)
 	}
+	f.SetMmapSink(ctxt.absorbMmaps)
 	defer f.Close()
 	defer func() {
 		if pkg == "main" && !lib.Main {
@@ -1218,6 +1219,7 @@ func hostobjs(ctxt *Link) {
 		if err != nil {
 			Exitf("cannot reopen %s: %v", h.pn, err)
 		}
+		f.SetMmapSink(ctxt.absorbMmaps)
 		f.MustSeek(h.off, 0)
 		if h.ld == nil {
 			Errorf("%s: unrecognized object file format", h.pn)
@@ -2504,6 +2506,7 @@ func hostObject(ctxt *Link, objname string, path string) {
 	if err != nil {
 		Exitf("cannot open host object %q file %s: %v", objname, path, err)
 	}
+	f.SetMmapSink(ctxt.absorbMmaps)
 	defer f.Close()
 	h := ldobj(ctxt, f, &objlib, 0, path, path)
 	if h.ld == nil {

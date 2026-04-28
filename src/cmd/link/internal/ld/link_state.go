@@ -5,6 +5,7 @@
 package ld
 
 import (
+	"cmd/internal/bio"
 	"cmd/internal/dwarf"
 	"cmd/internal/quoted"
 	"cmd/link/internal/loader"
@@ -215,4 +216,43 @@ type linkState struct {
 	linkoff       int64
 	machorebase   []machoRebaseRecord
 	machobind     []machoBindRecord
+
+	// mmaps collects every read-only mmap'd block bio.Reader hands out
+	// during this link. bio's old "If mmap succeeds, it will never be
+	// unmapped" was harmless when cmd/link was a short-lived subprocess
+	// — process teardown reclaimed the mappings — but in cmd/link/host
+	// (in-process linker) the mappings accumulate forever in the
+	// long-lived bin/go. Each Reader Open passes &mmaps as its
+	// MmapSink (see (*bio.Reader).SetMmapSink); ld.Main defers
+	// bio.Munmap on every entry. mmapsMu serialises writes from
+	// concurrent readers (asmb2, dwarf, etc. read input sections from
+	// goroutines).
+	mmaps   [][]byte
+	mmapsMu sync.Mutex
+}
+
+// absorbMmaps takes ownership of the read-only mappings a closed
+// bio.Reader handed out during this link. Wired into each bio.Open
+// site via (*bio.Reader).SetMmapSink.
+func (ctxt *Link) absorbMmaps(mm [][]byte) {
+	if len(mm) == 0 {
+		return
+	}
+	ctxt.mmapsMu.Lock()
+	ctxt.mmaps = append(ctxt.mmaps, mm...)
+	ctxt.mmapsMu.Unlock()
+}
+
+// releaseMmaps unmaps every block previously absorbed by
+// absorbMmaps. Called from a defer in Main so the mappings are
+// freed regardless of how Main exits (return, Goexit via Exit,
+// panic).
+func (ctxt *Link) releaseMmaps() {
+	ctxt.mmapsMu.Lock()
+	mm := ctxt.mmaps
+	ctxt.mmaps = nil
+	ctxt.mmapsMu.Unlock()
+	for _, m := range mm {
+		bio.Munmap(m)
+	}
 }

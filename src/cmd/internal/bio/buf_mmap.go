@@ -56,7 +56,18 @@ func (r *Reader) sliceOS(length uint64) ([]byte, bool) {
 		return nil, false
 	}
 
+	r.mmaps = append(r.mmaps, data)
 	data = data[off-aoff:]
 	r.MustSeek(int64(length), 1)
 	return data, true
+}
+
+// Munmap unmaps a single block previously returned to a Reader's
+// mmap-sink callback. Safe to call on a slice that was returned
+// from sliceOS.
+func Munmap(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	return syscall.Munmap(data)
 }
