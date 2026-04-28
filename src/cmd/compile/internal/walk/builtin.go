@@ -332,7 +332,21 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 
 	// var m *Map
 	var m ir.Node
-	if ir.NodeStackAllocatable(n) {
+	// gd: require strict EscNone here, NOT the EscCandidate-extended
+	// NodeStackAllocatable. The escape-bits Phase D wrap that
+	// materializes a stack-alloc'd value to heap fires only on the
+	// argument side of a call; if the made map escapes via *return*
+	// (e.g. liveness.newliveness's `lv.partLiveArgs = make(...)`,
+	// returned through liveness.Compute), there is no wrap and the
+	// stack-allocated Map header outlives its frame. Two concurrent
+	// compile workers' frames then alias on the stack, two
+	// `s.partLiveArgs` end up pointing at overlapping storage, and
+	// the runtime fatals with "concurrent map read and map write".
+	// (Maps are also unsafe for the wrap's memmove-based heap
+	// migration: the Map struct's dirPtr aliases group storage we
+	// also stack-allocate just below — copying the header doesn't
+	// fix the dangling group pointer.)
+	if ir.StackAllocatable(n.Esc()) {
 		// Allocate hmap on stack.
 
 		// var mv Map
@@ -392,7 +406,10 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 		// For hint <= abi.MapGroupSlots no groups will be
 		// allocated by makemap. Therefore, no groups need to be
 		// allocated in this code path.
-		if ir.NodeStackAllocatable(n) {
+		// gd: see comment above — require strict EscNone, not
+		// EscCandidate, to avoid stack-allocating maps that escape
+		// via return.
+		if ir.StackAllocatable(n.Esc()) {
 			// Only need to initialize m.seed since
 			// m map has been allocated on the stack already.
 			// m.seed = uintptr(rand())
