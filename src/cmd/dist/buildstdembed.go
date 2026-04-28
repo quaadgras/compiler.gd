@@ -26,11 +26,6 @@ import (
 // keeps it in sync with whatever sources are about to be compiled
 // into bin/go.
 func mkstdembed(dir, file string) {
-	srcDir := pathf("%s/src", goroot)
-	if _, err := os.Stat(srcDir); err != nil {
-		fatalf("mkstdembed: %s missing: %v", srcDir, err)
-	}
-
 	tmp := file + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
@@ -40,33 +35,87 @@ func mkstdembed(dir, file string) {
 	tw := tar.NewWriter(gz)
 
 	count := 0
-	walkErr := filepath.WalkDir(srcDir, func(path string, d fs.DirEntry, err error) error {
+
+	// Walk $GOROOT/src into archive entries prefixed with "src/", with
+	// the usual exclusions (cmd/, testdata/, _test.go, dotfiles).
+	count += embedTree(tw, pathf("%s/src", goroot), "src/", embedSkipFilter)
+
+	// pkg/include — small (~12 KB) but every stdlib asm file
+	// includes textflag.h / funcdata.h, and gcc gets -I $GOROOT/
+	// pkg/include during cgo compiles. Without it the toolchain
+	// can't build runtime.
+	count += embedTree(tw, pathf("%s/pkg/include", goroot), "pkg/include/", nil)
+
+	// Top-level config / version files. Tiny, but cmd/go reads
+	// go.env at startup and runtime.Version() / build cache hashing
+	// peek at VERSION.
+	count += embedFile(tw, pathf("%s/VERSION", goroot), "VERSION")
+	count += embedFile(tw, pathf("%s/go.env", goroot), "go.env")
+
+	if err := tw.Close(); err != nil {
+		fatalf("mkstdembed: close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		fatalf("mkstdembed: close gzip: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		fatalf("mkstdembed: close: %v", err)
+	}
+	if err := os.Rename(tmp, file); err != nil {
+		fatalf("mkstdembed: rename: %v", err)
+	}
+
+	st, _ := os.Stat(file)
+	xprintf("stdembed: %d files, %d bytes -> %s\n", count, st.Size(), file)
+}
+
+// embedSkipFilter is the WalkDir filter used for the src/ tree:
+// drop cmd/, testdata/, _test.go, and dotfiles. Returns (skipDir,
+// skipFile) — true means stop descending / don't include this file.
+func embedSkipFilter(rel string, d fs.DirEntry) (skipDir, skipFile bool) {
+	if rel == "cmd" || strings.HasPrefix(rel, "cmd"+string(filepath.Separator)) {
+		return true, false
+	}
+	base := filepath.Base(rel)
+	if base == "testdata" {
+		return true, false
+	}
+	if strings.HasSuffix(base, "_test.go") {
+		return false, true
+	}
+	if strings.HasPrefix(base, ".") {
+		return d.IsDir(), !d.IsDir()
+	}
+	return false, false
+}
+
+// embedTree walks root into the tar writer, prefixing every entry's
+// archive name with prefix. filter (optional) decides what to skip.
+// Returns the number of regular files written.
+func embedTree(tw *tar.Writer, root, prefix string, filter func(rel string, d fs.DirEntry) (skipDir, skipFile bool)) int {
+	if _, err := os.Stat(root); err != nil {
+		fatalf("mkstdembed: %s missing: %v", root, err)
+	}
+	count := 0
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(srcDir, path)
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		if rel == "." {
 			return nil
 		}
-		// Skip cmd/ entirely.
-		if rel == "cmd" || strings.HasPrefix(rel, "cmd"+string(filepath.Separator)) {
-			return fs.SkipDir
-		}
-		base := filepath.Base(rel)
-		if base == "testdata" {
-			return fs.SkipDir
-		}
-		if strings.HasSuffix(base, "_test.go") {
-			return nil
-		}
-		if strings.HasPrefix(base, ".") {
-			if d.IsDir() {
+		if filter != nil {
+			skipDir, skipFile := filter(rel, d)
+			if skipDir {
 				return fs.SkipDir
 			}
-			return nil
+			if skipFile {
+				return nil
+			}
 		}
 
 		info, err := d.Info()
@@ -77,13 +126,7 @@ func mkstdembed(dir, file string) {
 		if err != nil {
 			return err
 		}
-		// Prefix with "src/" so the materialised tree matches the
-		// $GDROOT/src/<pkg> layout the rest of the toolchain expects.
-		hdr.Name = "src/" + filepath.ToSlash(rel)
-		// Use a fixed mtime so the archive content is deterministic
-		// from one make.bash run to the next when the source hasn't
-		// changed. Otherwise the SHA-256 stdembed.Hash() drifts on
-		// every rebuild and $GDPATH/std re-extracts unnecessarily.
+		hdr.Name = prefix + filepath.ToSlash(rel)
 		hdr.ModTime = unixEpoch
 		hdr.AccessTime = unixEpoch
 		hdr.ChangeTime = unixEpoch
@@ -122,24 +165,41 @@ func mkstdembed(dir, file string) {
 		return nil
 	})
 	if walkErr != nil {
-		fatalf("mkstdembed: walk: %v", walkErr)
+		fatalf("mkstdembed: walk %s: %v", root, walkErr)
 	}
+	return count
+}
 
-	if err := tw.Close(); err != nil {
-		fatalf("mkstdembed: close tar: %v", err)
+// embedFile adds a single file at path to the tar writer under the
+// given archive name. Skips silently when the file is missing — some
+// optional GOROOT files (like go.env on very old trees) may not be
+// present.
+func embedFile(tw *tar.Writer, path, name string) int {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
 	}
-	if err := gz.Close(); err != nil {
-		fatalf("mkstdembed: close gzip: %v", err)
+	hdr, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		fatalf("mkstdembed: header %s: %v", path, err)
 	}
-	if err := f.Close(); err != nil {
-		fatalf("mkstdembed: close: %v", err)
+	hdr.Name = name
+	hdr.ModTime = unixEpoch
+	hdr.AccessTime = unixEpoch
+	hdr.ChangeTime = unixEpoch
+	hdr.Typeflag = tar.TypeReg
+	if err := tw.WriteHeader(hdr); err != nil {
+		fatalf("mkstdembed: write header %s: %v", path, err)
 	}
-	if err := os.Rename(tmp, file); err != nil {
-		fatalf("mkstdembed: rename: %v", err)
+	f, err := os.Open(path)
+	if err != nil {
+		fatalf("mkstdembed: open %s: %v", path, err)
 	}
-
-	st, _ := os.Stat(file)
-	xprintf("stdembed: %d files, %d bytes -> %s\n", count, st.Size(), file)
+	defer f.Close()
+	if _, err := io.Copy(tw, f); err != nil {
+		fatalf("mkstdembed: copy %s: %v", path, err)
+	}
+	return 1
 }
 
 // unixEpoch is the deterministic mtime stamped into every archive
