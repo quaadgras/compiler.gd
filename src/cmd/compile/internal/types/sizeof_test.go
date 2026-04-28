@@ -23,8 +23,13 @@ func TestSizeof(t *testing.T) {
 		// gd small-string optimization: each `string` field grows by
 		// 8 B on 64-bit / 4 B on 32-bit. Sym has 2 string fields
 		// (Linkname, Name) → +16 / +8.
+		//
+		// gd parallelism-ast: Type gained a cache struct of two
+		// atomic.Pointer[Type] (cache.ptr, cache.slice) so concurrent
+		// in-process compile invocations don't race on shared composite-
+		// type caching. +16 B on 64-bit / +8 B on 32-bit.
 		{Sym{}, 64, 96},
-		{Type{}, 96, 128},
+		{Type{}, 104, 136},
 		{Map{}, 12, 24},
 		{Forward{}, 20, 32},
 		{Func{}, 32, 56},

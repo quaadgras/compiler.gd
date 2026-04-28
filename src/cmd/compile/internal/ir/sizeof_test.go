@@ -20,10 +20,16 @@ func TestSizeof(t *testing.T) {
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
-		{Func{}, 212, 360},
-		{Name{}, 152, 232},
-		{miniExpr{}, 40, 64},
-		{miniNode{}, 20, 24},
+		// gd fork: bitset8 widened from uint8 → struct{n uint32} so
+		// concurrent in-process compile invocations can CAS bit-flag
+		// updates on shared (BuiltinPkg/UnsafePkg) miniNode bitsets.
+		// That adds 8 bytes (3 bytes pad before the uint32 + 4 bytes
+		// data + 1 byte pad after esc) on every Node — accounted for
+		// in the +8 across all four sizes below.
+		{Func{}, 220, 376},
+		{Name{}, 160, 248},
+		{miniExpr{}, 48, 72},
+		{miniNode{}, 28, 32},
 	}
 
 	for _, tt := range tests {
