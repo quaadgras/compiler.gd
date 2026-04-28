@@ -79,21 +79,23 @@ func inProcessCgo(sh *Shell, dir, desc string, env []string, args []any) error {
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	// Restore CWD around the call: cgomain reads -srcdir relative
-	// to the working directory and may chdir internally.
-	savedCwd, _ := os.Getwd()
-	if dir != "" && dir != "." {
-		if err := os.Chdir(dir); err != nil {
-			return err
-		}
-		defer os.Chdir(savedCwd)
-	}
+	// Do NOT os.Chdir(dir) here: CWD is process-global and the
+	// in-process cgo path runs under runMu only with respect to
+	// other cgo invocations. Concurrent compile/link/asm goroutines
+	// would race on CWD. cmd/go now passes -I <pkgdir> in CFLAGS so
+	// gcc's quoted-include resolution (#include "foo.h") works
+	// regardless of CWD; cgo itself takes -objdir as an absolute
+	// path and does not depend on CWD.
 
 	// Capture link diagnostics into a single buffer and route
 	// through sh.reportCmd, mirroring sh.run for subprocess cgo.
+	// env is forwarded to host.Run, which applies it to os.Environ
+	// under runMu and restores on return: cmd/go relies on the env
+	// clearing CGO_LDFLAGS to avoid double-recording //go:cgo_ldflag
+	// entries (env CGO_LDFLAGS plus the -ldflags= cmd-line arg).
 	var buf bytes.Buffer
 	lw := &lockedWriter{w: &buf}
-	status, runErr := host.Run(cmdline[idx+1:], lw, lw)
+	status, runErr := host.Run(cmdline[idx+1:], env, lw, lw)
 	out := buf.Bytes()
 
 	if desc == "" {

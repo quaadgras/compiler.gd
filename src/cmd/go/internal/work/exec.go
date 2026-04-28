@@ -3048,7 +3048,14 @@ func (b *Builder) runCgo(ctx context.Context, a *Action) error {
 
 	cgoArgs := []any{cfg.BuildToolexec, cgoExe, "-objdir", objdir, "-importpath", p.ImportPath, cgoflags, ldflagsOption, "--", cgoCPPFLAGS, cgoCFLAGS, cgofiles}
 	if useInProcessCgo() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(cgoenv) {
-		if err := inProcessCgo(sh, p.Dir, p.ImportPath, cgoenv, cgoArgs); err != nil {
+		// In-process cgo cannot rely on per-invocation CWD because
+		// os.Chdir is process-global and races with concurrent
+		// in-process tool invocations. Add -I p.Dir explicitly so
+		// gcc resolves quoted includes (e.g. #include "jni.h") via
+		// the search path instead of CWD.
+		inprocCFLAGS := append([]string{"-I", p.Dir}, cgoCFLAGS...)
+		inprocArgs := []any{cfg.BuildToolexec, cgoExe, "-objdir", objdir, "-importpath", p.ImportPath, cgoflags, ldflagsOption, "--", cgoCPPFLAGS, inprocCFLAGS, cgofiles}
+		if err := inProcessCgo(sh, p.Dir, p.ImportPath, cgoenv, inprocArgs); err != nil {
 			return err
 		}
 	} else if err := sh.run(p.Dir, p.ImportPath, cgoenv, cgoArgs...); err != nil {

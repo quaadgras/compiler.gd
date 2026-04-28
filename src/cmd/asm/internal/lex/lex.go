@@ -68,7 +68,8 @@ func NewLexer(name string, includes, defines []string, trimPath string) TokenRea
 	input := NewInput(name, includes, defines, trimPath)
 	fd, err := os.Open(name)
 	if err != nil {
-		log.Fatalf("%s\n", err)
+		log.Printf("%s", err)
+		ExitFunc(1)
 	}
 	input.Push(NewTokenizer(name, fd, fd, trimPath))
 	return input

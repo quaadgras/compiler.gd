@@ -107,7 +107,8 @@ func (p *Parser) errorf(format string, args ...any) {
 	fmt.Fprintf(p.errorWriter, format, args...)
 	p.errorCount++
 	if p.errorCount > 10 && !p.allErrors {
-		log.Fatal("too many errors")
+		log.Print("too many errors")
+		lex.ExitFunc(1)
 	}
 }
 

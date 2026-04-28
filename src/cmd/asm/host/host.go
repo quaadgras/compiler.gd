@@ -18,6 +18,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"sync"
 
 	"cmd/asm/internal/arch"
@@ -48,6 +50,39 @@ var counterOpenOnce sync.Once
 // process-globals. Architecture tables (x86.Anames, obj.Anames, etc.)
 // are init-time-immutable and safe to share.
 func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
+	// Mirror compile/link/cgo: run the assembler on a worker
+	// goroutine so any os.Exit-replacement (lex.ExitFunc) that
+	// bottoms out in runtime.Goexit terminates only this worker, not
+	// the calling cmd/go process. Without this, an os.Exit anywhere
+	// in the asm internals (e.g. lex.Input.Error, asm.parser.errorf
+	// after >10 errors) kills cmd/go before closeBuilders runs and
+	// leaks WorkDir under TMPDIR.
+	var st int
+	prevLexExit := lex.ExitFunc
+	lex.ExitFunc = func(code int) {
+		st = code
+		runtime.Goexit()
+	}
+	defer func() { lex.ExitFunc = prevLexExit }()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "asm: panic: %v\n", r)
+				os.Stderr.Write(debug.Stack())
+				st = 2
+			}
+		}()
+		st = runMain(args, stdout, stderr)
+	}()
+	<-done
+
+	return st, nil
+}
+
+func runMain(args []string, stdout, stderr io.Writer) int {
 	_ = stdout
 	_ = stderr
 
@@ -58,21 +93,21 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 
 	if buildcfg.Error != nil {
 		fmt.Fprintf(os.Stderr, "asm: %v\n", buildcfg.Error)
-		return 2, nil
+		return 2
 	}
 	GOARCH := buildcfg.GOARCH
 
 	ctx, perr := flags.Parse(args, os.Stderr)
 	if perr != nil {
 		// flags.Parse already printed usage / error to os.Stderr.
-		return 2, nil
+		return 2
 	}
 	counter.Inc("asm/invocations")
 
 	architecture := arch.Set(GOARCH, ctx.Shared || ctx.Dynlink)
 	if architecture == nil {
 		fmt.Fprintf(os.Stderr, "asm: unrecognized architecture %s\n", GOARCH)
-		return 1, nil
+		return 1
 	}
 	ctxt := obj.Linknew(architecture.LinkArch)
 	ctxt.CompressInstructions = ctx.DebugFlags.CompressInstructions != 0
@@ -89,7 +124,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	switch ctx.Spectre {
 	default:
 		fmt.Fprintf(os.Stderr, "asm: unknown setting -spectre=%s\n", ctx.Spectre)
-		return 2, nil
+		return 2
 	case "":
 		// nothing
 	case "index":
@@ -107,7 +142,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	buf, ferr := bio.Create(ctx.OutputFile)
 	if ferr != nil {
 		fmt.Fprintf(os.Stderr, "asm: %v\n", ferr)
-		return 1, nil
+		return 1
 	}
 	defer buf.Close()
 
@@ -161,7 +196,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 		}
 		buf.Close()
 		os.Remove(ctx.OutputFile)
-		return 1, nil
+		return 1
 	}
-	return 0, nil
+	return 0
 }

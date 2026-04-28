@@ -46,6 +46,13 @@ func NewInput(name string, includes, defines []string, trimPath string) *Input {
 	}
 }
 
+// ExitFunc is the process-exit hook lex error paths call. The
+// standalone asm binary leaves this as os.Exit. cmd/asm/host.Run
+// replaces it with a runtime.Goexit-on-worker variant so an
+// in-process asm fatal doesn't take down the calling cmd/go
+// process (and bypass closeBuilders, leaking $WORK under TMPDIR).
+var ExitFunc = os.Exit
+
 // predefine installs the macros set by the -D flag on the command line.
 func predefine(defines []string) map[string]*Macro {
 	macros := make(map[string]*Macro)
@@ -58,7 +65,7 @@ func predefine(defines []string) map[string]*Macro {
 		tokens := Tokenize(name, "")
 		if len(tokens) != 1 || tokens[0].ScanToken != scanner.Ident {
 			fmt.Fprintf(os.Stderr, "asm: parsing -D: %q is not a valid identifier name\n", tokens[0])
-			os.Exit(2)
+			ExitFunc(2)
 		}
 		macros[name] = &Macro{
 			name:   name,
@@ -76,7 +83,7 @@ func (in *Input) Error(args ...any) {
 		panic(fmt.Errorf("%s:%d: %s", in.File(), in.Line(), fmt.Sprintln(args...)))
 	}
 	fmt.Fprintf(os.Stderr, "%s:%d: %s", in.File(), in.Line(), fmt.Sprintln(args...))
-	os.Exit(1)
+	ExitFunc(1)
 }
 
 // expectText is like Error but adds "got XXX" where XXX is a quoted representation of the most recent token.

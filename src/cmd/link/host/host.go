@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"cmd/internal/sys"
 	"cmd/link/internal/amd64"
@@ -78,6 +79,13 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(stderr, "link: panic: %v\n", r)
+				stderr.Write(debug.Stack())
+				st = 2
+			}
+		}()
 		ld.Main(arch, theArch, args, &st, stdout, stderr)
 	}()
 	<-done

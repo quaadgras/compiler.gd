@@ -773,15 +773,15 @@ func DumpInlCallSiteScores(gd *base.Invocation, profile *pgoir.Profile, budgetCa
 		}
 
 		if len(sl) != 0 {
-			fmt.Fprintf(os.Stdout, "# scores for package %s\n", types.LocalPkg(gd).Path)
-			fmt.Fprintf(os.Stdout, "# Score  Adjustment  Status  Callee  CallerPos Flags ScoreFlags\n")
+			gd.Logf("# scores for package %s\n", types.LocalPkg(gd).Path)
+			gd.Logf("# Score  Adjustment  Status  Callee  CallerPos Flags ScoreFlags\n")
 		}
 		for _, cs := range sl {
 			hairyval := cs.Callee.Inl.Cost
 			adj := int32(cs.Score) - hairyval
 			nm := mkname(cs.Callee)
 			ecc := EncodeCallSiteKey(gd, cs)
-			fmt.Fprintf(os.Stdout, "%d  %d\t%s\t%s\t%s\t%s\n",
+			gd.Logf("%d  %d\t%s\t%s\t%s\t%s\n",
 				cs.Score, adj, genstatus(cs),
 				nm, ecc,
 				cs.ScoreMask.String())

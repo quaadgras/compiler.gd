@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"internal/buildcfg"
 	"io"
+	"runtime/debug"
 )
 
 // archInits mirrors the table in cmd/compile/main.go.
@@ -82,9 +83,22 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 	// paths, -V, usage) calls runtime.Goexit; calling it directly
 	// would terminate the caller's goroutine. Mirror the dance in
 	// cmd/compile/main.go.
+	//
+	// Recover panics: an unrecovered panic in this worker would
+	// terminate the entire cmd/go process, bypassing closeBuilders
+	// and leaking b.WorkDir under TMPDIR. Recover, print the stack
+	// to stderr (so the bug is still visible), and surface as
+	// status=2.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(stderr, "compile: panic: %v\n", r)
+				stderr.Write(debug.Stack())
+				gd_.Status = 2
+			}
+		}()
 		gd.Main(archInit, gd_, args)
 	}()
 	<-done
