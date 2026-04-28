@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"internal/buildcfg"
 	"internal/types/errors"
+	"io"
 	"os"
 	"runtime/debug"
 	"sort"
@@ -64,19 +65,21 @@ func (x byPos) Len() int           { return len(x) }
 func (x byPos) Less(i, j int) bool { return x[i].pos.Before(x[j].pos) }
 func (x byPos) Swap(i, j int)      { x[i], x[j] = x[j], x[i] }
 
-// FlushErrors sorts errors seen so far by line number, prints them to stderr,
-// and empties the errors array.
-//
-// Stock cmd/compile uses fmt.Print (stdout) here because cmd/go captures
-// the compile subprocess's combined stdout+stderr into one buffer and
-// re-emits it on cmd/go's own stderr — so the user always sees errors
-// on stderr regardless. Under cmd/compile/host.Run (in-process from
-// cmd/go) there's no capture: the compile writes go directly to cmd/go's
-// stdout, so script tests like cmd/compile/TestScript/embedbad that
-// expect "stderr: invalid go:embed: …" find their match on stdout
-// instead and fail. Writing to stderr here matches the user-observable
-// behaviour and keeps fork/exec callers working since they already
-// merge the two streams.
+// stderr returns the writer Errorf/FlushErrors/FatalfAt should target.
+// Routes through gd.Stderr when set (cmd/compile/host.Run plumbs cmd/go's
+// stderr there so cgo-name regex translation, -json build-output capture,
+// and combined-output assertions in TestScript still see compile
+// diagnostics). Standalone compile leaves Stderr nil and falls back to
+// os.Stderr.
+func (gd *Invocation) stderr() io.Writer {
+	if gd.Stderr != nil {
+		return gd.Stderr
+	}
+	return os.Stderr
+}
+
+// FlushErrors sorts errors seen so far by line number, prints them to
+// gd.stderr(), and empties the errors array.
 func (gd *Invocation) FlushErrors() {
 	if gd.Ctxt != nil && gd.Ctxt.Bso != nil {
 		gd.Ctxt.Bso.Flush()
@@ -85,9 +88,10 @@ func (gd *Invocation) FlushErrors() {
 		return
 	}
 	sort.Stable(byPos(gd.errorMsgs))
+	w := gd.stderr()
 	for i, err := range gd.errorMsgs {
 		if i == 0 || err.msg != gd.errorMsgs[i-1].msg {
-			fmt.Fprint(os.Stderr, err.msg)
+			fmt.Fprint(w, err.msg)
 		}
 	}
 	gd.errorMsgs = gd.errorMsgs[:0]
@@ -135,7 +139,7 @@ func (gd *Invocation) ErrorfAt(pos src.XPos, code errors.Code, format string, ar
 	gd.hcrash()
 	if gd.numErrors >= 10 && gd.Flag.LowerE == 0 {
 		gd.FlushErrors()
-		fmt.Fprintf(os.Stderr, "%v: too many errors\n", gd.FmtPos(pos))
+		fmt.Fprintf(gd.stderr(), "%v: too many errors\n", gd.FmtPos(pos))
 		gd.ErrorExit()
 	}
 }
@@ -208,20 +212,21 @@ func (gd *Invocation) FatalfAt(pos src.XPos, format string, args ...any) {
 	bugStack.Inc()
 
 	if gd.Debug.Panic != 0 || gd.numErrors == 0 {
-		fmt.Fprintf(os.Stderr, "%v: internal compiler error: ", gd.FmtPos(pos))
-		fmt.Fprintf(os.Stderr, format, args...)
-		fmt.Fprintln(os.Stderr)
+		w := gd.stderr()
+		fmt.Fprintf(w, "%v: internal compiler error: ", gd.FmtPos(pos))
+		fmt.Fprintf(w, format, args...)
+		fmt.Fprintln(w)
 
 		// If this is a released compiler version, ask for a bug report.
 		if gd.Debug.Panic == 0 && strings.HasPrefix(buildcfg.Version, "go") && !strings.Contains(buildcfg.Version, "devel") {
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, "Please file a bug report including a short program that triggers the error.")
-			fmt.Fprintln(os.Stderr, "https://go.dev/issue/new")
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "Please file a bug report including a short program that triggers the error.")
+			fmt.Fprintln(w, "https://go.dev/issue/new")
 		} else {
 			// Not a release; dump a stack trace, too.
-			fmt.Fprintln(os.Stderr)
-			os.Stderr.Write(debug.Stack())
-			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(w)
+			w.Write(debug.Stack())
+			fmt.Fprintln(w)
 		}
 	}
 

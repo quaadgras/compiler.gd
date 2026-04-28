@@ -8,6 +8,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/src"
 	"flag"
+	"io"
 	"sync"
 )
 
@@ -23,6 +24,15 @@ type Invocation struct {
 	// compiles all leave GOGC cranked up at once and cmd/go's RSS
 	// climbs without bound until the kernel SIGKILLs it.
 	InProcess bool
+
+	// Stderr is where Errorf / FlushErrors / Fatalf write diagnostics.
+	// Standalone compile (cmd/compile/main.go) leaves this nil and we
+	// fall back to os.Stderr. cmd/compile/host.Run sets it to the
+	// stderr writer cmd/go provided so each in-process invocation's
+	// diagnostics go through cmd/go's reportCmd (cgo error translation,
+	// build-output JSON capture for `go test -json`, etc.) instead of
+	// leaking onto cmd/go's own os.Stderr.
+	Stderr io.Writer
 
 	// Flagset is the per-Invocation flag set used by registerFlags
 	// and ParseFlags. Each Invocation owns its own *flag.FlagSet so

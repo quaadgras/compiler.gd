@@ -5,6 +5,7 @@
 package work
 
 import (
+	"bytes"
 	"cmd/compile/host"
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
@@ -107,23 +108,24 @@ func inProcessCompile(sh *Shell, dir string, env []string, args []any) ([]byte, 
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	// Compile errors and warnings go to this process's os.Stderr
-	// directly (compile internals write there). Returning an empty
-	// byte slice as "captured output" loses runOut's diagnostic
-	// capture behaviour, but redirecting os.Stderr concurrently is
-	// fundamentally racy under parallel invocations and the user
-	// still sees the diagnostics on the terminal. cmd/go's build
-	// driver only reads the returned bytes for additional log
-	// output beyond the exit status.
-	status, runErr := host.Run(cmdline[idx+1:], os.Stdout, os.Stderr)
+	// Capture diagnostics into a per-Invocation buffer so cmd/go's
+	// reportCmd can post-process (cgo type-name regex translation,
+	// trimming \[…cgo1.go:N:M\] annotations, capturing into JSON
+	// build-output for `go test -json`). cmd/compile/host.Run plumbs
+	// stderr to base.Invocation.Stderr; FlushErrors / FatalfAt write
+	// there. Stdout gets a buffer too in case future output is added,
+	// but compile is silent on stdout today.
+	var outBuf, errBuf bytes.Buffer
+	status, runErr := host.Run(cmdline[idx+1:], &outBuf, &errBuf)
 
+	out := append(outBuf.Bytes(), errBuf.Bytes()...)
 	if runErr != nil {
-		return nil, runErr
+		return out, runErr
 	}
 	if status != 0 {
 		// Match exec.Cmd's *ExitError formatting for downstream
 		// consumers in build.go that look for "exit status N".
-		return nil, fmt.Errorf("exit status %d", status)
+		return out, fmt.Errorf("exit status %d", status)
 	}
-	return nil, nil
+	return out, nil
 }

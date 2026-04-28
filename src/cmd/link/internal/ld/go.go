@@ -313,6 +313,13 @@ func openbsdTrimLibVersion(lib string) (string, bool) {
 // for the same library, resulting in a failure when ld.so attempts to load
 // the Go binary.
 func dedupLibrariesOpenBSD(ctxt *Link, libs []string) []string {
+	if ctxt.seenlib == nil {
+		// Tests build a bare &Link{} without going through linknew, so
+		// the per-Link seenlib map (initialised by linknew in production)
+		// is nil. Lazily allocate so the test path doesn't panic on
+		// "assignment to entry in nil map".
+		ctxt.seenlib = map[string]bool{}
+	}
 	libraries := make(map[string]string)
 	for _, lib := range libs {
 		if name, ok := openbsdTrimLibVersion(lib); ok {
