@@ -323,8 +323,7 @@ func (gd *Invocation) ParseFlags(args []string) {
 	}
 
 	if gd.Flag.GoVersion != "" && !versionsCompatible(runtime.Version(), gd.Flag.GoVersion) {
-		fmt.Printf("compile: version %q does not match go tool version %q\n", runtime.Version(), gd.Flag.GoVersion)
-		gd.Exit(2)
+		gd.UsageError("version %q does not match go tool version %q", runtime.Version(), gd.Flag.GoVersion)
 	}
 
 	if *gd.Flag.LowerP == "" {
@@ -366,7 +365,7 @@ func (gd *Invocation) ParseFlags(args []string) {
 	}
 
 	if gd.Flag.LowerC < 1 {
-		log.Fatalf("-c must be at least 1, got %d", gd.Flag.LowerC)
+		gd.UsageError("-c must be at least 1, got %d", gd.Flag.LowerC)
 	}
 	if !gd.concurrentBackendAllowed() {
 		gd.Flag.LowerC = 1

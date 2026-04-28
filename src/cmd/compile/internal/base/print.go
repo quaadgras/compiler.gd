@@ -95,6 +95,19 @@ func (gd *Invocation) Logf(format string, args ...any) {
 	fmt.Fprintf(gd.stdout(), format, args...)
 }
 
+// UsageError writes a "compile: <msg>\n" line to gd.stderr() and
+// terminates the invocation with status 2 via gd.Exit (runtime.Goexit
+// on the worker goroutine — does NOT os.Exit, so an in-process
+// caller's process survives). Replaces log.Fatal/Fatalf calls in
+// flag-handling code paths whose messages tests match against
+// "compile: ..." in stderr; the standalone-binary log prefix
+// wasn't applied under in-process compile because cmd/compile's
+// main() never runs.
+func (gd *Invocation) UsageError(format string, args ...any) {
+	fmt.Fprintf(gd.stderr(), "compile: "+format+"\n", args...)
+	gd.Exit(2)
+}
+
 // FlushErrors sorts errors seen so far by line number, prints them to
 // gd.stderr(), and empties the errors array.
 func (gd *Invocation) FlushErrors() {
