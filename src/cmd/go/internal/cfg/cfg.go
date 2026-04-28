@@ -25,6 +25,7 @@ import (
 
 	"cmd/go/internal/fsys"
 	"cmd/internal/pathcache"
+	"cmd/internal/stdembed"
 )
 
 // Global build parameters (used during package load)
@@ -203,18 +204,40 @@ func defaultContext() build.Context {
 	return ctxt
 }
 
+// isGdRuntime reports whether bin/go was built by the gd fork
+// toolchain. We check runtime.Version() rather than runtime.Compiler
+// because the fork reuses the gc backend (Compiler stays "gc") but
+// stamps a "gd"-prefixed version string into the binary at link
+// time. Compiler != "gd" was leaving the gd-only init paths dormant
+// in fork-built binaries.
+func isGdRuntime() bool {
+	return strings.HasPrefix(runtime.Version(), "gd")
+}
+
 func init() {
 	SetGOROOT(Getenv("GOROOT"), false)
-	initGDROOT()
+	// initGDPATH first so initGDROOT can fall back to $GDPATH/std,
+	// the embedded-stdlib materialisation path. The materialisation
+	// itself happens here too (idempotent — only extracts when the
+	// embedded archive's hash differs from $GDPATH/std/.embed-hash).
 	initGDPATH()
+	if GDPATH != "" {
+		// Best-effort. If the user has no writable $GDPATH, leave
+		// GDROOT to fall through to GOROOT below; we only succeed
+		// at materialise when bin/go was built with an actual
+		// archive (cmd/dist's mkstdembed step) and $GDPATH is
+		// writable.
+		_ = stdembed.Materialize(filepath.Join(GDPATH, "std"))
+	}
+	initGDROOT()
 }
 
 // initGDROOT resolves GDROOT for the gd toolchain. It checks $GDROOT,
-// then the install path of the running binary, then GOROOT as a final
-// fallback (used during make.bash bootstrap where both roots are the
-// same tree).
+// then the install path of the running binary, then $GDPATH/std (the
+// embedded-stdlib materialisation path), and finally GOROOT (used
+// during make.bash bootstrap where both roots are the same tree).
 func initGDROOT() {
-	if runtime.Compiler != "gd" {
+	if !isGdRuntime() {
 		return
 	}
 	if env := os.Getenv("GDROOT"); env != "" {
@@ -229,6 +252,17 @@ func initGDROOT() {
 			return
 		}
 	}
+	// Try $GDPATH/std — the embedded-stdlib materialisation path.
+	// initGDPATH runs before initGDROOT (see Go's package init order;
+	// initGDPATH is called from the same Init function below), so
+	// GDPATH is already resolved here.
+	if GDPATH != "" {
+		std := filepath.Join(GDPATH, "std")
+		if fi, err := os.Stat(filepath.Join(std, "src", "runtime")); err == nil && fi.IsDir() {
+			GDROOT = std
+			return
+		}
+	}
 	GDROOT = GOROOT
 }
 
@@ -236,7 +270,7 @@ func initGDROOT() {
 // $HOME/gd (the gd analogue of GOPATH's ~/go default). Activated by
 // -compiler=gd, which swaps BuildContext.GOPATH to this value.
 func initGDPATH() {
-	if runtime.Compiler != "gd" {
+	if !isGdRuntime() {
 		return
 	}
 	if env := os.Getenv("GDPATH"); env != "" {

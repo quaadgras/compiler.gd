@@ -675,6 +675,13 @@ var gentab = []struct {
 	{"cmd/go/internal/cfg", "zdefaultcc.go", mkzdefaultcc},
 	{"internal/runtime/sys", "zversion.go", mkzversion},
 	{"time/tzdata", "zzipdata.go", mktzdata},
+	// gd fork: cmd/internal/stdembed embeds a gzip-tar of $GDROOT/src
+	// (excluding cmd/) into bin/go so distributed binaries can
+	// materialise the stdlib at $GDPATH/std without shipping a
+	// separate src tree. Regenerated here so make.bash (and
+	// rebuild-tools.sh, which also runs gentab) picks up any source
+	// changes since the last build.
+	{"cmd/internal/stdembed", "stdlib.tar.gz", mkstdembed},
 }
 
 // installed maps from a dir name (as given to install) to a chan
