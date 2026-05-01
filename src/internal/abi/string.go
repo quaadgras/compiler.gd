@@ -81,7 +81,7 @@ type stringHeader struct {
 //
 //go:nosplit
 func StringIsInline(s string) bool {
-	sh := (*stringHeader)(unsafe.Pointer(&s))
+	sh := (*stringHeader)(NoEscape(unsafe.Pointer(&s)))
 	return sh.w2>>StringTagShift != 0
 }
 
@@ -114,4 +114,33 @@ func StringHeapBytes(s string) []byte {
 	sh := (*stringHeader)(unsafe.Pointer(&s))
 	n := sh.w2 & StringLenMask
 	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(n))
+}
+
+// StringBytes returns a []byte view of *sp regardless of representation.
+// NO COPY. For heap-rep strings the slice aliases the heap data
+// pointer (stable for the string's lifetime in the heap). For
+// inline-rep strings it aliases the *sp variable's header (bytes
+// start at &(*sp).w1) — so the slice is only valid for *sp's
+// lifetime in the calling frame.
+//
+// CALLER LIFETIME RULE: for inline rep, the slice's backing is *sp's
+// stack storage. The slice must not outlive *sp. Pass &s rather than
+// s by value — taking the parameter by pointer ensures the alias is
+// to the caller's local, not StringBytes's. (If StringBytes took s
+// by value and were not inlined, the slice would alias StringBytes's
+// frame and dangle on return.)
+//
+// The returned slice MUST NOT be modified; strings are immutable.
+//
+//go:nosplit
+func StringBytes(sp *string) []byte {
+	sh := (*stringHeader)(unsafe.Pointer(sp))
+	if sh.w0 != 0 {
+		// heap: data pointer in w0, length in low 60 bits of w2.
+		return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(sh.w2&StringLenMask))
+	}
+	// inline: bytes start at &sh.w1 inside *sp.
+	// Empty heap-rep strings have w0==0 and tag==0, yielding length 0
+	// — also fine, returns an empty slice.
+	return unsafe.Slice((*byte)(unsafe.Pointer(&sh.w1)), int(sh.w2>>StringTagShift))
 }

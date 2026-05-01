@@ -8,6 +8,7 @@
 package strings
 
 import (
+	"internal/abi"
 	"internal/bytealg"
 	"internal/stringslite"
 	"math/bits"
@@ -1010,20 +1011,32 @@ func TrimLeft(s, cutset string) string {
 }
 
 func trimLeftByte(s string, c byte) string {
-	for len(s) > 0 && s[0] == c {
-		s = s[1:]
+	// gd: take a no-copy []byte view of s once, walk it to find the
+	// first non-c byte, then slice the original string in one shot.
+	// Avoids paying SSO heap-vs-inline dispatch on every s[0] read
+	// and every s = s[1:] re-slice (the original loop did N+1 SSO
+	// checks per call; this does 2).
+	b := abi.StringBytes(&s)
+	i := 0
+	for i < len(b) && b[i] == c {
+		i++
 	}
-	return s
+	if i == 0 {
+		return s
+	}
+	return s[i:]
 }
 
 func trimLeftASCII(s string, as *asciiSet) string {
-	for len(s) > 0 {
-		if !as.contains(s[0]) {
-			break
-		}
-		s = s[1:]
+	b := abi.StringBytes(&s)
+	i := 0
+	for i < len(b) && as.contains(b[i]) {
+		i++
 	}
-	return s
+	if i == 0 {
+		return s
+	}
+	return s[i:]
 }
 
 func trimLeftUnicode(s, cutset string) string {
@@ -1055,20 +1068,27 @@ func TrimRight(s, cutset string) string {
 }
 
 func trimRightByte(s string, c byte) string {
-	for len(s) > 0 && s[len(s)-1] == c {
-		s = s[:len(s)-1]
+	b := abi.StringBytes(&s)
+	i := len(b)
+	for i > 0 && b[i-1] == c {
+		i--
 	}
-	return s
+	if i == len(b) {
+		return s
+	}
+	return s[:i]
 }
 
 func trimRightASCII(s string, as *asciiSet) string {
-	for len(s) > 0 {
-		if !as.contains(s[len(s)-1]) {
-			break
-		}
-		s = s[:len(s)-1]
+	b := abi.StringBytes(&s)
+	i := len(b)
+	for i > 0 && as.contains(b[i-1]) {
+		i--
 	}
-	return s
+	if i == len(b) {
+		return s
+	}
+	return s[:i]
 }
 
 func trimRightUnicode(s, cutset string) string {
