@@ -4,6 +4,8 @@
 
 package abi
 
+import "unsafe"
+
 // String header layout (gd small-string optimization).
 //
 // The gd fork grows the string header from 2 words (16 B) to 3 words
@@ -63,3 +65,53 @@ const (
 	// StringLenMask masks the length field of word2 for heap-rep strings.
 	StringLenMask = 1<<StringTagShift - 1
 )
+
+// stringHeader is the gd-fork string layout (3 × uint64 = 24 B).
+// It mirrors stringStruct in runtime/string.go but is exported here so
+// SSO-aware fast-path helpers below can be used by any package without
+// going through linkname or runtime calls.
+type stringHeader struct {
+	w0 uint64 // heap data ptr (0 if inline)
+	w1 uint64 // heap: cached hash; inline: bytes 0..7
+	w2 uint64 // upper 4 bits = tag; heap: low 60 = len; inline: low 56 = bytes 8..14
+}
+
+// StringIsInline reports whether s uses the fork's inline (SSO) rep.
+// The check is a single shift+test; the result is cmov-able.
+//
+//go:nosplit
+func StringIsInline(s string) bool {
+	sh := (*stringHeader)(unsafe.Pointer(&s))
+	return sh.w2>>StringTagShift != 0
+}
+
+// StringInlineWords returns the inline payload of s as two uint64 words
+// plus the byte count. lo holds bytes 0..7, hi's low 56 bits hold bytes
+// 8..14 (high 8 bits of hi are length-tag and padding; mask them off
+// when reading). Caller must ensure StringIsInline(s) — otherwise lo/hi
+// are unspecified.
+//
+//go:nosplit
+func StringInlineWords(s string) (lo, hi uint64, n int) {
+	sh := (*stringHeader)(unsafe.Pointer(&s))
+	return sh.w1, sh.w2 & StringLenMask, int(sh.w2 >> StringTagShift)
+}
+
+// StringHeapBytes returns s as a []byte view aliasing the same backing
+// storage. NO COPY. The returned slice's backing is the string's data
+// pointer, so mutating it would violate string immutability — DO NOT
+// modify. Caller must ensure !StringIsInline(s) (use StringIsInline
+// first) — for inline strings the heap data pointer is nil and the
+// returned slice would be empty.
+//
+// Intended for byte-scanning fast paths in unicode/utf8, strings,
+// bytes, regexp, etc.: dispatch on StringIsInline at the top of the
+// function, do bitwise ops on the inline words, and delegate to the
+// existing []byte implementation for the heap branch.
+//
+//go:nosplit
+func StringHeapBytes(s string) []byte {
+	sh := (*stringHeader)(unsafe.Pointer(&s))
+	n := sh.w2 & StringLenMask
+	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(n))
+}

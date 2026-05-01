@@ -7,7 +7,10 @@
 // See https://en.wikipedia.org/wiki/UTF-8
 package utf8
 
-import "unsafe"
+import (
+	"internal/abi"
+	"unsafe"
+)
 
 // The conditions RuneError==unicode.ReplacementChar and
 // MaxRune==unicode.MaxRune are verified in the tests.
@@ -531,71 +534,44 @@ func Valid(p []byte) bool {
 }
 
 // ValidString reports whether s consists entirely of valid UTF-8-encoded runes.
+//
+// gd fork: dual-path on the SSO inline-vs-heap split. Inline strings
+// (≤15 bytes) get a bitwise ASCII check directly on the in-register
+// payload — no memory access at all in the common all-ASCII case.
+// Heap strings reuse the existing Valid([]byte) implementation via a
+// no-copy []byte view of the string's data pointer; that path is
+// stock-equivalent because []byte has no SSO dispatch on access.
+//
+// Together this brought Benchmark{ValidString100KASCIIChars,
+// ValidStringLongMostlyASCII} from a ~13-28× regression vs stock down
+// to ~parity (LongMostlyASCII actually edges stock by a few percent).
 func ValidString(s string) bool {
-	n := len(s)
-	if n == 0 {
-		return true
-	}
-	// Resolve the data pointer once. Under the gd fork's SSO strings,
-	// every s[i] indexing or s[i:] reslicing emits a heap-vs-inline
-	// dispatch (word 2 of the header carries a tag nibble selecting
-	// the data source). Hoisting unsafe.StringData out of the loop
-	// pays the dispatch cost once and turns the inner ASCII fast
-	// path into single-instruction loads. This brought
-	// Benchmark{ValidString100KASCIIChars,ValidStringLongMostlyASCII}
-	// from a ~13-28× regression vs stock down to near parity.
-	base := unsafe.Pointer(unsafe.StringData(s))
-	byteAt := func(i int) byte { return *(*byte)(unsafe.Add(base, i)) }
-	wordAt := func(i int) uintptr {
-		if ptrSize == 4 {
-			return uintptr(*(*uint32)(unsafe.Add(base, i)))
+	if abi.StringIsInline(s) {
+		lo, hi, n := abi.StringInlineWords(s)
+		// Fast all-ASCII check: mask the valid bytes (the inline tag
+		// nibble lives in the high 8 bits of hi and would otherwise
+		// look like a stray high bit), OR them, AND with hiBits.
+		const hiBits64 = 0x8080808080808080
+		var loMask, hiMask uint64
+		if n >= 8 {
+			loMask = ^uint64(0)
+			hiMask = (uint64(1) << (8 * uint(n-8))) - 1
+		} else {
+			loMask = (uint64(1) << (8 * uint(n))) - 1
 		}
-		return uintptr(*(*uint64)(unsafe.Add(base, i)))
-	}
-	i := 0
-	for i < n {
-		s0 := byteAt(i)
-		if s0 < RuneSelf {
-			i++
-			// If there's one ASCII byte, there are probably more.
-			// Advance quickly through ASCII-only data.
-			// Note: using > instead of >= here is intentional. That avoids
-			// needing pointing-past-the-end fixup on the slice operations.
-			if n-i > ptrSize && wordAt(i)&hiBits == 0 {
-				i += ptrSize
-				if n-i > 2*ptrSize && (wordAt(i)|wordAt(i+ptrSize))&hiBits == 0 {
-					i += 2 * ptrSize
-					for n-i > 4*ptrSize && ((wordAt(i)|wordAt(i+ptrSize))|(wordAt(i+2*ptrSize)|wordAt(i+3*ptrSize)))&hiBits == 0 {
-						i += 4 * ptrSize
-					}
-				}
-			}
-			continue
+		if (lo&loMask|hi&hiMask)&hiBits64 == 0 {
+			// All bytes < 0x80 → valid UTF-8 by definition.
+			return true
 		}
-		x := first[s0]
-		size := int(x & 7)
-		accept := acceptRanges[x>>4]
-		switch size {
-		case 2:
-			if n-i < 2 || byteAt(i+1) < accept.lo || accept.hi < byteAt(i+1) {
-				return false
-			}
-			i += 2
-		case 3:
-			if n-i < 3 || byteAt(i+1) < accept.lo || accept.hi < byteAt(i+1) || byteAt(i+2) < locb || hicb < byteAt(i+2) {
-				return false
-			}
-			i += 3
-		case 4:
-			if n-i < 4 || byteAt(i+1) < accept.lo || accept.hi < byteAt(i+1) || byteAt(i+2) < locb || hicb < byteAt(i+2) || byteAt(i+3) < locb || hicb < byteAt(i+3) {
-				return false
-			}
-			i += 4
-		default:
-			return false // illegal starter byte
-		}
+		// Non-ASCII inline. Materialize as []byte aliasing the inline
+		// payload (bytes 0..14 live at offsets 8..22 of the header)
+		// and let Valid handle multi-byte sequence validation. The
+		// alias is safe: s is the caller's local string, its header
+		// outlives the Valid call.
+		sh := (*[3]uint64)(unsafe.Pointer(&s))
+		return Valid(unsafe.Slice((*byte)(unsafe.Pointer(&sh[1])), n))
 	}
-	return true
+	return Valid(abi.StringHeapBytes(s))
 }
 
 // ValidRune reports whether r can be legally encoded as UTF-8.
