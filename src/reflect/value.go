@@ -1491,11 +1491,51 @@ func (v Value) Elem() Value {
 	k := v.kind()
 	switch k {
 	case Interface:
-		x := unpackEface(packIfaceValueIntoEmptyIface(v))
-		if x.flag != 0 {
-			x.flag |= v.flag.ro()
+		// gd: read the interface header directly from v's storage and
+		// produce the result Value in-place. The legacy path went
+		// through `packIfaceValueIntoEmptyIface(v)` which under
+		// fat-iface returns a 32-byte `any` (Type+Data+Inline) only
+		// for `unpackEface` to immediately destructure it again — a
+		// 32-byte struct round-trip per call that breaks inlining
+		// and dominates hot dispatch paths like gob.encodeInterface
+		// (3 calls/element × 1000 elements = 3000 calls/op).
+		//
+		// For non-empty interfaces (interface{ M() }) the first word
+		// is *ITab, not *Type. The concrete type lives at itab.Type.
+		// Empty and non-empty share the {Data, Inline} tail layout.
+		ci := (*abi.CommonInterface)(v.dataPtr())
+		var t *abi.Type
+		if toRType(v.typ()).NumMethod() == 0 {
+			t = (*abi.EmptyInterface)(unsafe.Pointer(ci)).Type
+		} else {
+			itab := (*abi.NonEmptyInterface)(unsafe.Pointer(ci)).ITab
+			if itab != nil {
+				t = itab.Type
+			}
 		}
-		return x
+		if t == nil {
+			return Value{}
+		}
+		f := flag(t.Kind()) | v.flag.ro()
+		if !t.IsDirectIface() {
+			f |= flagIndir
+		}
+		if t.IsInlineIface() {
+			var x Value
+			x.typ_ = t
+			typedmemmove(t, unsafe.Pointer(&x.inline), unsafe.Pointer(&ci.Inline))
+			x.flag = f | flagInline
+			return x
+		}
+		if t.IsSpreadIface() {
+			var x Value
+			x.typ_ = t
+			x.ptr = ci.Data
+			*(*[16]byte)(unsafe.Pointer(&x.inline)) = *(*[16]byte)(unsafe.Pointer(&ci.Inline))
+			x.flag = f | flagSpread
+			return x
+		}
+		return Value{typ_: t, ptr: ci.Data, flag: f}
 	case Pointer:
 		ptr := v.dataPtr()
 		if v.flag&flagIndir != 0 {
