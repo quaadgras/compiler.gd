@@ -188,7 +188,7 @@ func walkFor(gd *base.Invocation, n *ir.ForStmt) ir.Node {
 
 	n.Post = walkStmt(gd, n.Post)
 	walkStmtList(gd, n.Body)
-	return n
+	return autoHeapifyForLoop(gd, n)
 }
 
 // validGoDeferCall reports whether call is a valid call to appear in
