@@ -78,11 +78,11 @@ func hlog(format string, args ...any) {
 }
 
 // enabled reports whether the pass should run for the current
-// invocation. Off by default; enable with GOAUTOHEAPIFY=1. For
+// invocation. On by default; disable with GOAUTOHEAPIFY=0. For
 // bisection, set GOHEAPIFY_PKGS to a comma-separated list of package
 // path prefixes; only matching packages get heapified.
 func enabled(gd *base.Invocation) bool {
-	if os.Getenv("GOAUTOHEAPIFY") != "1" {
+	if os.Getenv("GOAUTOHEAPIFY") == "0" {
 		return false
 	}
 	if pkgs := os.Getenv("GOHEAPIFY_PKGS"); pkgs != "" {
