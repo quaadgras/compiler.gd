@@ -1900,23 +1900,31 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 	return result
 }
 
-// stringEqFast returns l == r as a *ssa.Value<bool>. Three-phase
+// stringEqFast returns l == r as a *ssa.Value<bool>. Four-phase
 // control flow:
 //
 //  1. Fast path — all three header words match (same heap pointer, or
 //     two inline strings with identical content) → true. This is the
 //     stock-shaped check.
 //
-//  2. Hash-reject path — both operands are heap-rep (word 0 non-nil)
+//  2. Both-inline reject — fast path failed AND both word 0 are nil
+//     (both operands are inline-rep). The fast path checked all 24
+//     content bytes (word 1 = bytes 0..7, word 2 = tag + bytes 8..14),
+//     so a fast-path miss with both inline proves inequality without
+//     touching the slow path. Targets short-string `==` in tight
+//     loops (route lookup, map iteration, struct field equality).
+//
+//  3. Hash-reject path — both operands are heap-rep (word 0 non-nil)
 //     with sealed cached hashes (word 1 non-zero) AND the hashes
 //     differ. Under the gd cache these values are byte-deterministic,
 //     so a mismatch proves inequality without touching memequal.
 //     Saves the O(len) memequal for same-length distinct strings
 //     (e.g., misses in map lookups, negative HasPrefix checks).
 //
-//  3. Slow path — decoded-length check plus runtime.memequal. Handles
-//     inline strings, unsealed heap strings, and hash-collision
-//     (different bytes happening to hash the same).
+//  4. Slow path — decoded-length check plus runtime.memequal. Handles
+//     mixed inline-vs-heap operands (same bytes, different rep),
+//     unsealed heap strings, and hash-collision (different bytes
+//     happening to hash the same).
 func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	boolT := types.Types[types.TBOOL]
 	intT := types.Types[types.TINT]
@@ -1940,6 +1948,8 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	fast := s.newValue2(ssa.OpAndB, boolT, eq0, s.newValue2(ssa.OpAndB, boolT, eq1, eq2))
 
 	bFast := s.f.NewBlock(ssa.BlockPlain)
+	bInlineCheck := s.f.NewBlock(ssa.BlockPlain)
+	bInlineReject := s.f.NewBlock(ssa.BlockPlain)
 	bHashCheck := s.f.NewBlock(ssa.BlockPlain)
 	bHashReject := s.f.NewBlock(ssa.BlockPlain)
 	bSlow := s.f.NewBlock(ssa.BlockPlain)
@@ -1952,7 +1962,7 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	b.SetControl(fast)
 	b.Likely = ssa.BranchLikely
 	b.AddEdgeTo(bFast)
-	b.AddEdgeTo(bHashCheck)
+	b.AddEdgeTo(bInlineCheck)
 
 	marker := ssaMarker("stringEq")
 
@@ -1960,9 +1970,24 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	s.vars[marker] = s.constBool(true)
 	s.endBlock().AddEdgeTo(bEnd)
 
+	// Both-inline reject path.
+	nilPtr := s.constNil(ptrT)
+	s.startBlock(bInlineCheck)
+	lInline := s.newValue2(ssa.OpEqPtr, boolT, lw0, nilPtr)
+	rInline := s.newValue2(ssa.OpEqPtr, boolT, rw0, nilPtr)
+	bothInline := s.newValue2(ssa.OpAndB, boolT, lInline, rInline)
+	bIC := s.endBlock()
+	bIC.Kind = ssa.BlockIf
+	bIC.SetControl(bothInline)
+	bIC.AddEdgeTo(bInlineReject)
+	bIC.AddEdgeTo(bHashCheck)
+
+	s.startBlock(bInlineReject)
+	s.vars[marker] = s.constBool(false)
+	s.endBlock().AddEdgeTo(bEnd)
+
 	// Hash-reject path.
 	s.startBlock(bHashCheck)
-	nilPtr := s.constNil(ptrT)
 	zeroU := s.constInt64(uT, 0)
 	lHeap := s.newValue2(ssa.OpNeqPtr, boolT, lw0, nilPtr)
 	rHeap := s.newValue2(ssa.OpNeqPtr, boolT, rw0, nilPtr)
