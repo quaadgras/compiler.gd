@@ -97,19 +97,28 @@ func (v *Value) Load() (val any) {
 
 // claim spins on CAS to acquire the write window. Returns the pre-claim
 // seq value (always even). procPin keeps the goroutine on its current
-// P while it holds the window so the publish step (a single uint64
-// store a few instructions later) can't be preempted, which would
-// leave readers spinning on the odd-seq check.
+// P only between CAS-success and publish so the publish step (a single
+// uint64 store a few instructions later) can't be preempted — that
+// would leave readers/writers spinning on the odd-seq check until the
+// scheduler resumed the writer (microseconds, but observably slow
+// under heavy concurrent Store load: dropping procPin entirely
+// regressed TestValueSwapConcurrent from ~120s to >300s timeout).
+//
+// The losers in the CAS race are NOT pinned, so the Go scheduler can
+// preempt them periodically and let other work make progress. Holding
+// procPin across the contended spin live-locked under heavy concurrent
+// Store: more goroutines than cores, all CAS-spinning pinned, no
+// scheduler timeslice ever firing.
 func (v *Value) claim() uint64 {
-	runtime_procPin()
 	for {
 		cur := LoadUint64(&v.seq)
 		if cur&1 == 0 {
+			runtime_procPin()
 			if CompareAndSwapUint64(&v.seq, cur, cur+1) {
 				return cur
 			}
+			runtime_procUnpin()
 		}
-		// Spin until the seq is even and our CAS wins.
 	}
 }
 
