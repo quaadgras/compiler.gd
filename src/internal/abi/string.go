@@ -144,3 +144,57 @@ func StringBytes(sp *string) []byte {
 	// — also fine, returns an empty slice.
 	return unsafe.Slice((*byte)(unsafe.Pointer(&sh.w1)), int(sh.w2>>StringTagShift))
 }
+
+// Heapify returns *sp as a heap-rep string. The result has tag
+// nibble 0 (provably heap), so byte-level access on the returned
+// string skips the SSO inline-vs-heap dispatch — every s[i] is a
+// single MOVZX, every s[i:j] is a 16-byte header construction.
+//
+// If *sp is already heap-rep, Heapify returns it unchanged.
+// If *sp is inline-rep, Heapify materialises the inline bytes
+// to a stable byte buffer (typically caller-frame stack via escape
+// analysis) and returns a heap-rep string pointing there. The result
+// aliases the caller's frame for the inline case — DO NOT let the
+// returned string escape past the caller's lifetime.
+//
+// Intended use: hoist out of byte-scanning loops, e.g.
+//
+//	cs := abi.Heapify(&s)
+//	for i := 0; i < len(cs); i++ { ... cs[i] ... }
+//
+// The hoisted Heapify call pays the inline-vs-heap dispatch
+// once; in-loop accesses pay none. This is the manual version of the
+// optimisation a future SSA pass should do automatically when it
+// proves a string is loop-invariant and non-escaping.
+//
+// gd note: takes *string (not string by value) for the same reason
+// StringBytes does — for the inline case the result aliases the
+// caller's local string variable's header (after the autotmp copy
+// targets that header's bytes). The pointer parameter makes the
+// lifetime contract explicit.
+//
+//go:nosplit
+func Heapify(sp *string) string {
+	sh := (*stringHeader)(unsafe.Pointer(sp))
+	if sh.w0 != 0 {
+		// Heap-rep input. Reconstruct via unsafe.String so the
+		// returned string's tag is provably 0 from the compiler's
+		// point of view — without this, returning *sp directly
+		// loses the rep-fact through the type system and per-byte
+		// dispatch is preserved at the caller's access sites.
+		// unsafe.String is a compiler intrinsic that emits an
+		// OpStringMake with a Const64 zero-tag word2, which the
+		// existing const-fold chain (StringWord2(StringMake) →
+		// Const64) propagates through to eliminate the dispatch.
+		return unsafe.String((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(sh.w2&StringLenMask))
+	}
+	// Inline. unsafe.String over the inline payload constructs a
+	// heap-rep string {ptr=&sh.w1, hash=0, len=tag} aliasing the
+	// caller's local. The new string carries tag==0 so subsequent
+	// indexing folds away the dispatch.
+	n := int(sh.w2 >> StringTagShift)
+	if n == 0 {
+		return ""
+	}
+	return unsafe.String((*byte)(unsafe.Pointer(&sh.w1)), n)
+}
