@@ -141,6 +141,19 @@ func (v *Value) Store(val any) {
 	}
 	np := *(*abi.EmptyInterface)(unsafe.Pointer(&val))
 
+	// Fast path: if the current published value is bytewise equal to
+	// np, there's nothing to do. Skipping claim/publish here is what
+	// keeps parallel Store of the same value (e.g. expvar's repeated
+	// String.Set) from CAS-spinning every caller — under heavy
+	// contention claim() serialises all writers, but a no-op store
+	// can be observed lock-free via the same protocol Load uses.
+	if s1 := LoadUint64(&v.seq); s1 != 0 && s1&1 == 0 {
+		local := *v.readSlot(s1)
+		if LoadUint64(&v.seq) == s1 && ifaceEq(local, np) {
+			return
+		}
+	}
+
 	cur := v.claim()
 	if cur > 0 {
 		curSlot := v.readSlot(cur)
@@ -150,6 +163,15 @@ func (v *Value) Store(val any) {
 		}
 	}
 	v.publish(cur, np)
+}
+
+// ifaceEq reports whether two 32-byte iface headers are bytewise
+// identical. Reads them as 4×uint64 so the compiler turns this into
+// four cmp+jne pairs with no branches in the equal case.
+func ifaceEq(x, y abi.EmptyInterface) bool {
+	xp := (*[4]uint64)(unsafe.Pointer(&x))
+	yp := (*[4]uint64)(unsafe.Pointer(&y))
+	return xp[0] == yp[0] && xp[1] == yp[1] && xp[2] == yp[2] && xp[3] == yp[3]
 }
 
 // Swap stores new into Value and returns the previous value. It returns nil if
