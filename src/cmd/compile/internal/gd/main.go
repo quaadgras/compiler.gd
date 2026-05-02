@@ -17,6 +17,7 @@ import (
 	"cmd/compile/internal/inline/interleaved"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
+	"cmd/compile/internal/loopheapify"
 	"cmd/compile/internal/loopvar"
 	"cmd/compile/internal/noder"
 	"cmd/compile/internal/pgoir"
@@ -326,6 +327,12 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	symABIs.GenABIWrappers()
 
 	deadlocals.Funcs(gd, typecheck.Target(gd).Funcs)
+
+	// Loop-heapify pass: hoist SSO inline-vs-heap dispatch out of
+	// for-loop bodies that byte-index a string. Must run before
+	// escape analysis so the synthesized OUNSAFESTRINGDATA spills
+	// participate in the escape solver's flow graph.
+	loopheapify.Funcs(gd, typecheck.Target(gd).Funcs)
 
 	// Escape analysis.
 	// Required for moving heap allocations onto stack,
