@@ -1,6 +1,7 @@
 # Regions — generalising Phase G to dynamic memory
 
-Status: design draft, 2026-05-03.
+Status: design draft, 2026-05-03 (rev 2 — single-pointer ABI, per-pointer
+region map).
 Companion to: `escape-bits.md`, `escape-bits-phase-g-plan.md`.
 
 ## Problem
@@ -18,122 +19,107 @@ p := f(nil)                // f mallocs, returns the heap pointer
 
 The runtime helper `maybeInPlace(outBuf unsafe.Pointer, typ *abi.Type)`
 chooses between zero-and-return-outBuf and `mallocgc(typ.Size_, typ, true)`
-based on whether the caller passed a buffer. This works because the size
-is fixed (`typ.Size_` known at compile time) and the only allocation is
-the result struct itself.
+based on whether the caller passed a buffer.
 
-Dynamic-size returned values — `string`, `[]T`, `map[K]V`, anything that
-the callee builds up by appending or growing — don't fit this shape:
+This works for one fixed-size result but breaks down for dynamic memory:
 
 - A `string` result needs a byte buffer of unknown length.
 - A `[]T` result needs a backing array; growth via `append` may need
   multiple reallocations during construction.
 - A `map[K]V` result has hashtable buckets, overflow chains, and the
   hash table itself.
+- A returned struct can have several pointer fields (string + slice +
+  pointer-to-other-struct), each with its own desired lifetime.
 
-For each, the heap allocations happen *inside the callee* during
-construction — well before the result is returned. A single `outBuf`
-parameter can't accommodate them.
+A single `outBuf` per result can't accommodate any of these, and even
+multiple `outBuf`s don't compose well across call chains.
 
-The generalisation: instead of one `outBuf` per result, the caller
-hands the callee a *region* — a bump-style allocator that the callee
-treats as the destination for all dynamic memory associated with the
-result. When the caller's lifetime for the result ends, the caller
-resets the region; everything goes away at once with no GC pressure.
+## Design
 
-This is the standard region-based memory management story (Tofte–Talpin,
-Cyclone). What we're adding is the gd-specific machinery: ABI for
-passing regions through the call graph, a runtime allocator that
-honours the region, and an inference path that decides when a callee
-should write into the caller's region vs. the heap.
+**Replace** the `outBuf` injected-pointer pattern. Reuse the same
+register-passed pointer slot, but point it at a per-pointer region map
+rather than at storage:
 
-## Mental model
-
-A Phase G outBuf is a region of size 1 holding a single object of known
-type. Generalised:
-
-- A **region** is a runtime-managed bump arena with a known parent
-  lifetime. The region is a `*Region` value passed implicitly through
-  the ABI alongside the regular args.
-- An **allocation site inside the callee** that would normally call
-  `mallocgc` — `make([]T, n)`, string concat, map create, slice grow,
-  composite literal — checks "did my caller pass me a region?" and:
-  - If yes, bumps the region's pointer (no GC).
-  - If no, falls back to `mallocgc` (GC-managed; same cost as today).
-- The **caller's region pointer is decided at call site**, exactly the
-  way Phase G's `outBuf` is decided today: from the local escape
-  analysis of the callee's results.
-
-The four region kinds we need:
-
-- `&heap` (nil) — current behaviour. Default.
-- `&frame` — caller's stack frame; auto-resets on caller return.
-  Equivalent to today's Phase G outBuf, generalised to many alloc sites.
-- `&arena` — caller-allocated bump arena that lives until explicit
-  `Reset()`. Used for tree-shaped data the caller builds and discards
-  (parser ASTs, scratch builders).
-- `&inherit` — "use whatever region the caller is in". Default for
-  transitive calls so plumbing isn't manual through every layer.
-
-## Why this fits the fork
-
-Three pieces are already in place:
-
-1. **Per-method escape mask** in iface tabs (`escape-bits.md`) tells the
-   call-site whether a callee retains a pointer arg. The same mechanism
-   can carry per-result mask bits saying "this result honours a region
-   parameter".
-2. **`outBuf` per pointer return** machinery in `escape-bits-phase-g-plan.md`
-   already adds an implicit return-slot argument per result. Region is
-   the same shape with a different runtime meaning (one pointer, but to a
-   `Region` instead of to a fixed-size buffer).
-3. **`maybeInPlace`** in `runtime/escape_bits.go:80` is the call-site
-   runtime helper that picks stack-vs-heap. We extend it to a
-   `regionAlloc(region, size, align, typ)` that picks region-bump vs.
-   heap.
-
-So Phase G already laid the ABI groundwork. What's missing is:
-
-- Variable-size allocation against the region (vs. fixed `typ.Size_`).
-- Routing the existing dynamic-allocation lowerings (`makeslice`,
-  `mapassign`, `concatstrings`, `growslice`, etc.) through the
-  region helper when one is in scope.
-
-## Region descriptor
-
-```go
-// runtime/region.go (new file)
-type Region struct {
-    base   unsafe.Pointer   // backing memory start
-    bump   unsafe.Pointer   // current allocation pointer
-    end    unsafe.Pointer   // backing memory end
-    next   *Region          // chained when capacity exhausted
-    parent *Region          // for nested scopes (sub-region inside arena)
-    flags  uint32           // see below
-}
-
-const (
-    regionFlagPooled  = 1 << 0  // came from per-P pool, return on Reset
-    regionFlagFrame   = 1 << 1  // backing is on caller's stack
-    regionFlagInherit = 1 << 2  // forward allocations to parent if local exhausted
-)
+```
+*injected → *[N]byte
+            ^^^^^^^
+            One byte per pointer-bearing slot in the function's
+            full pointer signature (params receivers + results).
+            Byte value is the region index in the caller's per-G
+            region table:
+              0       — heap (default; matches stock Go semantics)
+              1..255  — caller-managed region descriptors
 ```
 
-The descriptor itself is one cache line. It sits on the caller's stack
-when the region kind is `frame` or is allocated lazily when the kind
-is `arena`. Per-P pools amortise the cost of obtaining backing memory
-for short-lived arenas.
+Pointer count `N` is a compile-time property of the function signature:
+walk the param + result + receiver types in canonical order
+(depth-first, fields-in-decl-order, slice/string/map header pointer
+first, then any embedded pointer fields), count pointer slots. The
+ptrmask machinery already does this for GC; we mirror it. A
+`func(string, []byte) (Foo, error)` where `Foo struct{ Name string;
+Children []*Foo }` and `error` is heap-iface has:
+
+- string param: 1 ptr (data)
+- []byte param: 1 ptr (data)
+- Foo result: 2 ptrs (Name.data, Children.data)
+- error result: 1 ptr (iface data)
+
+Total `N=5`. The injected `*[5]byte` describes which region each of
+those 5 pointers lives in (or comes from, on the param side).
+
+**One register, one indirection, full coverage.** Same ABI shape as
+today's outBuf — the slot survives unchanged from Phase G, only the
+referent semantics change.
+
+## Region table (per-G)
+
+```go
+// runtime/region.go
+type Region struct {
+    base, bump, end unsafe.Pointer
+    parent          *Region          // for cross-region promotion check
+    flags           uint32
+}
+
+type regionTable struct {
+    regions [256]*Region   // index 0 unused; heap is implicit
+    top     uint8          // next free slot
+}
+
+// gp.region carries the per-G table.
+```
+
+Caller-side pseudocode for a typical region scope:
+
+```go
+// arena := arena.New()
+arenaIdx := gp.region.push(arena.Region())   // returns assigned index
+// Build the byte array for the call:
+var rmap = [3]byte{arenaIdx, arenaIdx, 0}    // result's two pointers
+                                              // → arena; error iface
+                                              // pointer → heap (escapes)
+result := f(&rmap, args...)
+// ... use result ...
+gp.region.pop(arenaIdx)
+arena.Reset()
+```
+
+The `push`/`pop` is amortised (per-arena, not per-call). For *frame*
+regions (auto-reset on caller return) the index is established at
+function entry and released at function exit.
 
 ## Allocator path
 
-A region-aware allocator wrapper:
+Every dynamic allocation lowering threads through a region-aware
+helper that consults the per-G table:
 
 ```go
 //go:nosplit
-func regionAlloc(r *Region, size, align uintptr, typ *abi.Type) unsafe.Pointer {
-    if r == nil {
+func regionAllocAt(idx uint8, size, align uintptr, typ *abi.Type) unsafe.Pointer {
+    if idx == 0 {
         return mallocgc(size, typ, true)
     }
+    r := gp.region.regions[idx]
     asize := alignUp(size, align)
     p := alignUp(uintptr(r.bump), align)
     if p+asize > uintptr(r.end) {
@@ -141,230 +127,284 @@ func regionAlloc(r *Region, size, align uintptr, typ *abi.Type) unsafe.Pointer {
     }
     r.bump = unsafe.Pointer(p + asize)
     if typ.Pointers() {
-        // Region carries its own ptrmask shadow so the GC scans
-        // pointer-bearing fields during the region's lifetime.
         regionMarkPointers(r, unsafe.Pointer(p), typ)
     }
     return unsafe.Pointer(p)
 }
 ```
 
-The `regionGrow` slow path either chains a new backing chunk (for
-arenas) or falls through to `mallocgc` and links the result to the
-region's "promoted" list (for `frame` regions that exhausted their
-stack budget).
+Allocation sites that are determined at compile time to fill a specific
+result-pointer-slot read the corresponding byte from the injected map
+and pass it to `regionAllocAt`. Sites for purely internal temporaries
+that don't flow to a result get a per-function default (frame for the
+common case; heap for opt-out).
+
+## Per-pointer lifetime — Rust-style with runtime fallback
+
+The per-pointer byte map gives us a Rust-borrow-checker-shaped thing
+without the ergonomic cost: each pointer in the function signature
+declares which region it belongs to. The compiler infers these bytes
+from the call graph; the *runtime* enforces the lifetimes via an
+extended write barrier, so we don't need to reject programs that defeat
+static analysis — they just degrade to the heap path.
+
+The two static checks the compiler performs at every call site:
+
+1. **Outflow safety.** For each pointer the callee will produce
+   (results), the caller assigns a region index. Static rule: the
+   chosen region must outlive every use of the produced pointer. Where
+   the caller can't prove this, byte=0 (heap) is the conservative
+   default.
+
+2. **Inflow safety.** For each pointer the callee receives (params),
+   the caller declares which region the pointer's pointee lives in.
+   Callee uses this to decide whether storing the param into a
+   long-lived structure requires runtime promotion.
+
+Where static analysis is incomplete (indirect calls, reflection,
+pointer-bearing closures), the byte map is computed at runtime by
+combining the caller's intent with the callee's published per-method
+mask (same shape as escape-bits resolution today). The
+`runtime_resolveRegionMap(staticBytes [N]byte, methodMask uint64)`
+helper performs the AND/OR.
+
+The **runtime safety net** is the cross-region write barrier:
+
+```go
+// On any pointer field write `dst.field = src`:
+if isInRegion(dst) {
+    dstRegion := regionOf(dst)
+    if isInRegion(src) {
+        srcRegion := regionOf(src)
+        if srcRegion.depth > dstRegion.depth {
+            // src dies first; promote it into dst's region (or heap).
+            src = promote(src, dstRegion)
+        }
+    }
+}
+*dstField = src
+```
+
+Promotion copies the pointee tree breadth-first into the longer-lived
+region until reachable region depth is uniform. Unbounded? In theory
+yes, but bounded in practice by the size of the promoted subgraph,
+which is exactly what Rust-borrowed code would have refused to compile
+— here we accept the copy and keep going.
+
+## Why this is better than the per-slot mask sketch
+
+Previous draft proposed a 64-bit "region word" with 6 bits per slot
+encoding kind+index. Drawbacks of that approach:
+
+- Only 10 slot positions (10×6 + 4 metadata) — insufficient for
+  multi-pointer structs.
+- Conflates struct field positions with parameter positions.
+- Requires per-callee decoding of the kind nibble in every prologue.
+- Doesn't share machinery with the existing outBuf injected-pointer
+  ABI; needs a new register.
+
+The byte-map approach:
+
+- 256 distinct regions per call, indexed by 1-byte bytes.
+- Granularity matches the natural structure of pointers (one byte per
+  pointer slot, regardless of how they're packed into params/results).
+- No metadata bits in the word — metadata moves to the per-method
+  escape mask in the iface tab where it already lives.
+- Reuses the existing injected-pointer slot from Phase G; no extra
+  register reservation.
 
 ## ABI
 
-Per-result implicit `*Region` parameter, encoded the same way as Phase G's
-`outBuf`. The escape mask grows a "region-honoured" bit per result —
-when set, the callee body uses `regionAlloc` for the named result's
-working memory.
+Per-function single hidden pointer parameter (already in place from
+Phase G), now interpreted as `*[N]byte` where N is the function's
+total ptr-slot count. nil = "all heap" — same semantics as today's
+nil outBuf.
 
-Three call-site shapes:
+For static call sites the compiler emits the byte array as an
+immediate stack value:
 
 ```go
-// Caller passes its frame region (auto-reset on return):
-result := f(stackRegion(&_regionBuf), args...)
-
-// Caller passes an explicit arena (reset by caller later):
-result := f(myArena.Region(), args...)
-
-// Caller can't prove non-escape, falls back to heap:
-result := f(nil, args...)
+var rmap = [3]byte{0, 1, 0}
+result := f(&rmap, args...)
 ```
 
-The `stackRegion(&_regionBuf)` form mirrors Phase G's `&buf` outBuf:
-the region descriptor is a stack value; backing memory is a fixed
-inline buffer (e.g. 256 B) that grows by chaining heap chunks if the
-callee blows past it.
+For indirect calls the byte array is computed at runtime from the
+caller's intended map AND the callee's published per-pointer
+honour-mask:
+
+```go
+honour := iface.tab.regionHonourMask         // []byte, len N
+intent := caller's static rmap               // []byte, len N
+for i := range intent {
+    if honour[i] == 0 {
+        rmap[i] = 0   // callee won't honour this slot, force heap
+    } else {
+        rmap[i] = intent[i]
+    }
+}
+```
+
+Per-method honour mask is published in the same iface-tab area as the
+existing escape-bits mask. Bit-for-pointer-slot encoding rather than
+bit-for-param.
 
 ## Per-type plan
 
 ### Strings
 
-Lowest-hanging fruit. The hot pattern (Pattern 2 in the allocations
-report) is:
-
 ```go
 func Quote(s string) string {
-    buf := make([]byte, ...)         // heap alloc 1
+    buf := make([]byte, ...)
     // ... fill buf ...
-    return string(buf)               // heap alloc 2 (slicebytetostring copy)
+    return string(buf)
 }
 ```
 
-Region-aware version:
+Becomes (with the rmap injection invisible at source level):
 
 ```go
-func Quote(s string, r *Region) string {
-    buf := regionMakeByteSlice(r, ...)
+func Quote(s string, rmap *[2]byte) string {
+    // rmap[0] = caller's region for s.data (input lifetime)
+    // rmap[1] = caller's region for the returned string.data
+    buf := regionMakeByteSliceAt(rmap[1], ...)
     // ... fill buf ...
-    return regionString(r, buf)      // alias if r == frame, or copy to heap
+    return regionStringAt(rmap[1], buf)
 }
 ```
 
-Caller passes `frame` if it doesn't retain the result, `nil` otherwise.
-For `frame` callers we get one heap-rep header (caller's frame, free)
-and the bytes live in the caller's region (free). Net: zero heap
-allocs for the common case.
-
-The `regionString` helper takes care of the SSO inline-rep case
-(byte count ≤ 15 → fits in the header, no region storage needed) and
-the heap-rep case (header points at region storage; region must outlive
-the string).
+Caller passes `rmap[1]=frameIdx` when result is local; rmap[1]=0
+otherwise.
 
 ### Slices
 
-`make([]T, n)` becomes `regionMakeSlice(r, T, n, n)`. `growslice` for
-appended elements becomes `regionGrowSlice(r, T, oldSlice, newcap)`.
-
-For `frame` regions we keep the slice on the caller's stack as long
-as it fits the inline buffer; spillage goes to a chained heap chunk
-linked to the region (freed at Reset).
-
-The annoying edge: `append` may grow a slice across multiple region
-extensions. Each grow leaves a dead chunk in the region until Reset.
-Acceptable for the common build-then-consume pattern; pathological for
-long-lived growing slices (those should opt out and use the heap).
+`make([]T, n)` becomes `regionMakeSliceAt(rmap[k], T, n, n)` where k
+is the canonical pointer index of the slice header's data ptr in the
+function's signature.
 
 ### Maps
 
-Hardest. Map state is a header + hash table + bucket arrays + overflow
-chains. Each is a separate alloc today. Region-allocating all of them
-needs a region-aware variant of `runtime.mapcreate`/`mapassign` that
-threads `*Region` through every internal allocation:
+`make(map[K]V)` becomes `regionMapMakeAt(rmap[k], …)`. The map
+runtime threads the same idx through bucket/overflow allocations.
 
-- `hmap` itself in the region.
-- Initial `buckets` array in the region.
-- Overflow buckets in the region.
-- Key/value slots are inline in buckets, no separate allocs.
+### Receiver/param pointers
 
-Defer maps to phase 3. The win for build-and-discard maps is real
-(JSON decode populating a temporary map, regexp's compile-time symbol
-table) but requires more runtime surgery than strings/slices.
+For *input* pointers, the byte tells the callee what region the
+pointee lives in. The callee uses this in two places:
 
-### Pointer fields inside region-allocated values
+- When *retaining* the input (storing into a longer-lived structure),
+  the write barrier compares regions and may promote.
+- When *forwarding* the input to a sub-call, it passes the same byte
+  in the sub-call's rmap so the sub-callee gets the same region info.
 
-If a region-allocated value `*T` has a field that points to heap-allocated
-memory, the GC must scan the region during the GC cycle to keep the
-pointee alive. Solution: each region carries a set of (pointer, type)
-records for the values it holds; GC scan adds those to the work list.
+## Static analysis (Rust-light)
 
-If a region-allocated value's field is later overwritten with a pointer
-to a *shorter-lived* region, we have a use-after-free hazard. Solution:
-write barrier on stores into region-allocated objects. The barrier
-checks `dst.region.lifetime ≥ src.region.lifetime`; if not, either
-copy-promote `src` to `dst.region` (eager) or refuse and panic
-(strict). Eager promotion is the safer default; it costs a per-store
-region-compare on writes into region objects only.
+The compiler runs a per-function lifetime inference:
 
-Containers stored *into* the heap that point into a region are a
-similar risk; the heap-write barrier already runs on every heap
-pointer write, so we extend it with a region-promote check. This is
-the only barrier-side change required.
+1. Build a constraint graph: each pointer slot has a region variable;
+   constraints flow from "pointer is stored into longer-lived
+   structure" → "stored region must outlive containing region".
+2. Solve to a single region per slot (use unification).
+3. Where solving fails (cyclic or under-constrained), pick the
+   conservative heap region for the unsolved slots.
+4. Emit the byte array at every call site based on the solved
+   variables.
 
-## Inference
+This is much narrower than full Rust borrow checking:
 
-Same shape as Phase G. The escape solver gains a per-result "region
-candidate" bit alongside the existing "stack candidate" bit. Walk's
-call-site rewrite passes the appropriate region descriptor (or nil)
-based on the bit. Annotated callees opt in to honouring the region
-via `//gd:region` (per function) or via type-level region parameters
-in a future syntax extension (out of scope here).
+- No borrow vs owned distinction; everything is owned by some region.
+- No reject-on-failure; failures degrade to heap.
+- No lifetime annotations in source; analysis is purely flow-based.
+- No subtyping/variance lattice; just region inclusion (parent of).
 
-For the MVP, infer from the existing Phase G analysis: any function
-already eligible for outBuf passing is automatically eligible for
-region passing once its body is region-aware. Programmer-annotated
-opt-in handles the broader cases (parsers, encoders, builders).
+The escape solver already does ~half this work. Extending its
+existing edge tracking from "escapes / doesn't escape" to "escapes
+to which region" is ~+30% solver code.
 
 ## Phased rollout
 
-**Phase R1 — runtime + ABI scaffold.** Add `runtime.Region`,
-`regionAlloc`, `regionString`, region-aware `growslice`. Add the per-result
-region-mask bit to escape-bits encoding. No code generation changes
-yet; gates everything off by default.
+**Phase R1 — runtime + ABI scaffold.** `runtime.Region`,
+`regionAllocAt`, per-G region table, byte-map ABI plumbing.
+Re-purpose Phase G's injected-pointer slot. No allocator changes yet
+(everything still goes through `mallocgc`); this is the wiring pass.
 
-**Phase R2 — strings.** Switch `runtime.concatstrings`, `slicebytetostring`,
-and `intstring` to the region-aware path when the result has a region
-parameter. Annotate one or two stdlib functions (`strconv.Quote`,
-`net.hexString`) for end-to-end validation. Land with `GOREGIONS=1`
-gate.
+**Phase R2 — strings.** Wire `concatstrings`, `slicebytetostring`,
+`intstring` to consult `rmap`. Annotate `strconv.Quote`,
+`net.hexString` for end-to-end validation.
 
-**Phase R3 — slices.** Region-aware `makeslice` and `growslice`. Cover
-the common build-up patterns in `bytes.Buffer.Write*`,
-`strings.Builder.Write*` (the buf grow inside their methods).
+**Phase R3 — slices.** Region-aware `makeslice`, `growslice`. Cover
+`bytes.Buffer.Write*`, `strings.Builder.Write*` internals.
 
-**Phase R4 — maps.** Full region-aware `mapcreate`/`mapassign`.
+**Phase R4 — maps.** Region-aware `mapcreate`/`mapassign`.
 
-**Phase R5 — caller-side inference.** Compiler emits region-passing for
-any callee whose escape mask says the result-bit is honourable, when
-the result is locally non-escaping. Defaults regions to on; opt-out per
-file.
+**Phase R5 — write barrier extension.** Cross-region promotion in the
+write barrier. Until this lands, R2-R4 must conservatively heap any
+allocation that could outlive its source region (compiler enforces).
 
-**Phase R6 — programmer-facing arena API.** Expose `runtime.Arena` (or
-a `arena` package) for explicit lifetime control. Bridges to the
-existing region machinery.
+**Phase R6 — Rust-light solver.** Replace the conservative
+"all-heap-unless-trivially-frame" inference with the flow-based
+region-variable solver. Unlocks the harder cases (parsers, encoders,
+builders that thread state through multiple frames).
+
+**Phase R7 — programmer-facing arena API.** Expose `runtime.Arena`
+(or an `arena` package) for explicit lifetime control.
 
 ## Open questions
 
-1. **Granularity of the region parameter** — one region per function or
-   one per result? Per-function is simpler ABI-wise; per-result is more
-   precise (some functions return both heap-bound and frame-bound
-   results). Start with per-function.
+1. **Per-G table size.** 255 active regions per goroutine feels large
+   but the byte-pop/push cost is constant. If a typical call stack has
+   ≤30 region-honouring frames each declaring 1-3 regions, the table
+   stays well under 100. Fixed 256 entries × 8 B = 2 KB per G — a
+   tax but not catastrophic.
 
-2. **`frame` region exhaustion** — what's the inline buffer size? Too
-   small → frequent spill to heap, no win. Too big → wasted stack on
-   the common short case. Probably 256 B with two `next`-chained
-   heap fallbacks that the per-P pool reuses.
+2. **Pointer-slot canonical ordering.** The byte's position in the
+   array must match a stable, compiler-and-runtime-agreed traversal
+   order. Re-use `abi.Type.GcData` ptrmask order? Likely yes — both
+   sides already share that scheme for GC.
 
-3. **Goroutine boundaries** — a region passed to a function that calls
-   `go` would need to either prevent the spawned goroutine from
-   capturing region pointers, or promote those captures to the heap.
-   Conservative: any `go`/`defer` in a region-aware function falls
-   back to heap allocation for captured state. Same conservative
-   stance as Phase G.
+3. **Functions with too many ptr-slots.** Cap at 255? Or fall through
+   to a longer encoding when N>255? Practical max for stdlib is
+   ~10-20; the cap question is theoretical.
 
-4. **Reflection** — `reflect.MakeSlice`, `reflect.New`, etc. don't
-   know about regions. Either they always heap-allocate (safe but
-   loses the win for reflect-heavy code), or we add region-aware
-   variants to the reflect API.
+4. **Reflection and unsafe.** `reflect.MakeSlice` etc. don't know
+   the caller's intended region. They always heap-allocate. Same for
+   `unsafe.Slice` of an existing pointer; the pointer's region is
+   whatever it already had, the slice header is heap or frame as
+   escape would have decided.
 
-5. **`map` deletion semantics** — region-allocated maps can't free
-   buckets back to the region (bump-only). For build-up patterns this
-   is fine; for "build then prune" patterns we'd need a free-list
-   inside the map's region slice, which is beyond MVP.
+5. **Closures.** A closure value records the rmap that was in scope
+   at creation. Captured pointers carry their region info; the
+   closure body uses them as if it were the original frame.
+
+6. **Goroutine boundaries.** A region passed into a closure that's
+   then used as `go func()` would extend past the creator's frame
+   lifetime. Conservative: any pointer captured by a goroutine-spawning
+   closure must be promoted to heap at the `go` statement. This is
+   the Phase G stance generalised.
 
 ## Non-goals
 
-- Compile-time lifetime checking (Rust borrows). The fork stays
-  garbage-collected; safety is enforced by the write barrier
-  promoting cross-region pointers, not by static analysis.
-- User-visible region syntax. The MVP is invisible to source code
-  except for opt-in pragmas.
-- Inter-goroutine region passing. Regions are per-G; cross-G handoff
-  always goes through the heap.
+- Source-visible region/lifetime syntax. The scheme is invisible at
+  source level except for opt-in pragmas (`//gd:noregion`,
+  `//gd:region`).
+- Compile-time rejection. Failure modes degrade to heap; Go's
+  programming model is preserved.
+- Inter-goroutine region passing. Always heap-promoted.
 
 ## Files that will change
 
-- `src/runtime/region.go` (new) — `Region` type, `regionAlloc`,
-  `regionString`, growth logic.
-- `src/runtime/string.go` — region-aware `concatstrings`,
-  `slicebytetostring`, `intstring` variants.
-- `src/runtime/slice.go` — region-aware `makeslice`, `growslice`.
-- `src/runtime/mbarrier.go` — write barrier extended with region-promote
-  check.
+- `src/runtime/region.go` (new) — `Region`, table, allocator helpers.
+- `src/runtime/string.go`, `slice.go`, `map.go` — region-aware variants.
+- `src/runtime/mbarrier.go` — write barrier with promotion.
 - `src/runtime/mgc.go` — GC scan picks up active regions.
-- `src/internal/abi/escape.go` — per-result region-mask bit encoding.
-- `src/cmd/compile/internal/escape/` — per-result region-candidate
-  inference; piggybacks on Phase G.
-- `src/cmd/compile/internal/walk/phaseg_return.go` — call-site
-  rewrite: emit region descriptor as the implicit parameter.
+- `src/internal/abi/escape.go` — per-pointer-slot honour mask
+  encoding (replaces / extends per-result mask).
+- `src/cmd/compile/internal/escape/` — region-variable inference
+  (Rust-light solver).
+- `src/cmd/compile/internal/walk/phaseg_return.go` → renamed
+  `phaseg_region.go`; emits the rmap at call sites instead of an
+  outBuf.
 - `src/cmd/compile/internal/ssagen/ssa.go` — lowering of
-  `make`/`growslice`/string-concat to the region-aware runtime calls
-  when in a region-honoured context.
+  `make`/`growslice`/string-concat to region-aware runtime calls.
 
-Estimated diff size for the full design: ~2-3k LOC across runtime and
-compiler. Phase R1+R2 (strings only, MVP) is roughly 600-800 LOC and
-should land first; the rest follows the same pattern with mostly
-mechanical extension.
+Estimated diff size for the full design: ~3-4k LOC across runtime and
+compiler. R1+R2 (strings only) is roughly 700-900 LOC.
