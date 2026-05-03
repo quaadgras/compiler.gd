@@ -84,6 +84,97 @@ func TestEscapeBitsClosureEscape(t *testing.T) {
 	}
 }
 
+// escBitsCapturedPtrs is the destination slice the
+// escBitsCapturingClosure / escBitsCapturingIface implementations
+// append to. Each call adds exactly one *int. Because the slice
+// retains every pointer it receives, every iteration's pointer must
+// reference distinct heap storage holding that iteration's value.
+var escBitsCapturedPtrs []*int
+
+// escBitsCapturingClosure stores its pointer arg into a slice that
+// retains every captured value. Used by
+// TestEscapeBitsClosureLoopScopedDistinctness to expose any
+// optimization that collapses per-iteration heap storage into a
+// shared slot — captured pointers from earlier iterations would then
+// alias to the final iteration's value, a soundness bug.
+var escBitsCapturingClosure func(p *int)
+
+func init() {
+	escBitsCapturingClosure = func(p *int) {
+		escBitsCapturedPtrs = append(escBitsCapturedPtrs, p)
+	}
+}
+
+// TestEscapeBitsClosureLoopScopedDistinctness pins down the rule that
+// when a loop-scoped variable's address is passed through an opaque
+// closure dispatch and the closure retains the pointer, each
+// iteration's pointer must reference distinct storage holding that
+// iteration's value. The compiler is free to amortise the heap alloc
+// when the previous iter's value is provably unobservable, but as
+// soon as an observer captures a pointer that could outlive the
+// iteration, distinctness is mandatory.
+//
+// Regression test: gd's box-promotion mechanism (walk/escape_bits.go)
+// previously shared a single heap-allocated backing slot across all
+// iterations of any loop containing an EscCandidate var, which
+// silently aliased every captured pointer to the last-iteration
+// value (`values = [9, 9, …, 9]` instead of `[0, 1, …, 9]`). Stock
+// Go has always handled this correctly because it heap-allocates the
+// loop-scoped local per iteration when its address escapes.
+func TestEscapeBitsClosureLoopScopedDistinctness(t *testing.T) {
+	escBitsCapturedPtrs = escBitsCapturedPtrs[:0]
+	const N = 10
+	for i := 0; i < N; i++ {
+		var x int = i
+		escBitsCapturingClosure(&x)
+	}
+	if got, want := len(escBitsCapturedPtrs), N; got != want {
+		t.Fatalf("captured %d pointers, want %d", got, want)
+	}
+	for i, p := range escBitsCapturedPtrs {
+		if got, want := *p, i; got != want {
+			t.Errorf("iter %d: deref captured pointer = %d, want %d", i, got, want)
+		}
+	}
+}
+
+// escBitsCapturingIfaceImpl implements escBitsHandler by appending
+// the received pointer into the package-level capture slice. The
+// iface variable is declared package-level so the call site can't
+// see the concrete body.
+type escBitsCapturingIfaceImpl struct{}
+
+func (escBitsCapturingIfaceImpl) Handle(p *int) {
+	escBitsCapturedPtrs = append(escBitsCapturedPtrs, p)
+}
+
+var escBitsCapturingIface escBitsHandler
+
+func init() {
+	escBitsCapturingIface = escBitsCapturingIfaceImpl{}
+}
+
+// TestEscapeBitsIfaceLoopScopedDistinctness mirrors the closure
+// regression test for iface dispatch: the same shared-backing bug
+// applies regardless of whether the dispatch is through a func var
+// or an interface method.
+func TestEscapeBitsIfaceLoopScopedDistinctness(t *testing.T) {
+	escBitsCapturedPtrs = escBitsCapturedPtrs[:0]
+	const N = 10
+	for i := 0; i < N; i++ {
+		var x int = i
+		escBitsCapturingIface.Handle(&x)
+	}
+	if got, want := len(escBitsCapturedPtrs), N; got != want {
+		t.Fatalf("captured %d pointers, want %d", got, want)
+	}
+	for i, p := range escBitsCapturedPtrs {
+		if got, want := *p, i; got != want {
+			t.Errorf("iter %d: deref captured pointer = %d, want %d", i, got, want)
+		}
+	}
+}
+
 // escBitsIface + its two implementations exercise the interface-
 // method-dispatch side of the same optimization. One impl retains
 // the arg, the other merely reads.
