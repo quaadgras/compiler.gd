@@ -13,20 +13,34 @@ import (
 	"cmd/internal/src"
 )
 
-// escapeBoxes maps each promoted EscCandidate local to the pointer
-// var that wrap sites can re-home at a dynamic call. Populated by
-// promoteEscapeCandidates at the start of walking a function and
-// cleared at the end. The pointer-var initially holds &name (the
-// stack backing); at a wrap site we update it to the heap copy
-// returned by runtime.maybeEscape…Arg when the mask bit fires, and
-// the call-argument rewrite substitutes the pointer-var's value in
-// place of `&name`.
+// escapeBox records the two PAUTOs we synthesize for each promoted
+// EscCandidate local: addr (the *T pointer routed via Heapaddr) and
+// backing (the actual stack storage). We need both to re-emit the
+// `addr = &backing` reset at each ODCL site, which is what gives
+// loop-scoped candidates fresh per-iteration storage. Without the
+// reset, once a wrap site re-homes addr to a heap slot, every later
+// iteration writes through *addr to that same heap slot and earlier
+// captured pointers alias the latest value.
+type escapeBox struct {
+	addr    *ir.Name
+	backing *ir.Name
+}
+
+// escapeBoxes maps each promoted EscCandidate local to its
+// {addr, backing} pair. Populated by promoteEscapeCandidates at
+// the start of walking a function and cleared at the end. addr
+// initially holds &backing (the stack slot); at a wrap site we
+// update addr to the heap copy returned by runtime.materializeToHeap
+// when the mask bit fires, and the call-argument rewrite substitutes
+// addr's value in place of `&name`. At every ODCL of a promoted name
+// we re-emit `addr = &backing` so each scope re-entry (loop
+// iteration) starts from the stack slot again.
 //
 // Per-function state lives on Invocation (gd.WalkEscapeBoxes) rather
 // than as a package var so concurrent compile invocations can't
 // clobber each other's transient walk state.
-func escapeBoxes(gd *base.Invocation) map[*ir.Name]*ir.Name {
-	m, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*ir.Name)
+func escapeBoxes(gd *base.Invocation) map[*ir.Name]*escapeBox {
+	m, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*escapeBox)
 	return m
 }
 
@@ -128,23 +142,39 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 	types.CalcSize(gd, addr.Type())
 	fn.Dcl = append(fn.Dcl, addr)
 
-	// Prologue: addr = &backing.
-	takeAddr := typecheck.NodAddrAt(gd, pos, backing)
-	takeAddr.SetType(addr.Type())
-	takeAddr.SetTypecheck(1)
-	as := ir.NewAssignStmt(gd, pos, addr, takeAddr)
-	as.SetTypecheck(1)
-	prologue.Append(as)
+	box := &escapeBox{addr: addr, backing: backing}
+
+	// Prologue: addr = &backing. Covers the (rare) shape where a
+	// promoted name is read before its ODCL fires — the per-ODCL
+	// reset alone wouldn't, but the prologue ensures addr is always
+	// initialized to the stack slot at function entry.
+	prologue.Append(emitEscapeBoxReset(gd, pos, box))
 
 	// Route every later access of name through *addr.
 	name.Heapaddr = addr
 
-	eb, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*ir.Name)
+	eb, _ := gd.WalkEscapeBoxes.(map[*ir.Name]*escapeBox)
 	if eb == nil {
-		eb = make(map[*ir.Name]*ir.Name)
+		eb = make(map[*ir.Name]*escapeBox)
 		gd.WalkEscapeBoxes = eb
 	}
-	eb[name] = addr
+	eb[name] = box
+}
+
+// emitEscapeBoxReset returns the IR for `box.addr = &box.backing`.
+// We re-emit this at the function prologue and at every ODCL of a
+// promoted name. The ODCL reset is the load-bearing one for
+// loop-scoped candidates: each iteration's scope re-entry resets
+// addr to the stack slot, so the next wrap-site materialize allocates
+// a fresh heap copy distinct from any earlier iteration's captured
+// pointer.
+func emitEscapeBoxReset(gd *base.Invocation, pos src.XPos, box *escapeBox) ir.Node {
+	takeAddr := typecheck.NodAddrAt(gd, pos, box.backing)
+	takeAddr.SetType(box.addr.Type())
+	takeAddr.SetTypecheck(1)
+	as := ir.NewAssignStmt(gd, pos, box.addr, takeAddr)
+	as.SetTypecheck(1)
+	return as
 }
 
 // wrapEscapeCandidateArgs rewrites each candidate arg of n (a closure
@@ -267,7 +297,7 @@ func candidateStorageAddr(gd *base.Invocation, arg ir.Node) (*ir.Name, bool) {
 	if ae, ok := arg.(*ir.AddrExpr); ok {
 		if name, ok := ae.X.(*ir.Name); ok {
 			if box, ok := eb[name]; ok {
-				return box, true
+				return box.addr, true
 			}
 		}
 	}

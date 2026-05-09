@@ -89,8 +89,22 @@ func walkStmt(gd *base.Invocation, n ir.Node) ir.Node {
 		ir.OLABEL,
 		ir.OJUMPTABLE,
 		ir.OINTERFACESWITCH,
-		ir.ODCL,
 		ir.OCHECKNIL:
+		return n
+
+	case ir.ODCL:
+		// gd escape-bits: at each declaration of a promoted
+		// EscCandidate local, reset its addr-pointer to &backing.
+		// For loop-scoped candidates this fires per iteration, so a
+		// prior iteration's heap migration doesn't alias subsequent
+		// writes. See doc/gd/escape-bits.md and the regression
+		// covered by TestEscapeBitsClosureLoopScopedDistinctness.
+		dcl := n.(*ir.Decl)
+		if eb := escapeBoxes(gd); eb != nil {
+			if box, ok := eb[dcl.X]; ok {
+				return ir.NewBlockStmt(gd, n.Pos(), []ir.Node{n, emitEscapeBoxReset(gd, n.Pos(), box)})
+			}
+		}
 		return n
 
 	case ir.OBLOCK:
