@@ -56,6 +56,7 @@ import (
 	"cmd/internal/src"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -300,6 +301,16 @@ func findCandidates(fs *ir.ForStmt) []*ir.Name {
 	for nm := range candNames {
 		out = append(out, nm)
 	}
+	// Sort for determinism: candNames is iterated as a Go map, so its
+	// range order is randomized. Caller (tryHeapifyForLoop) creates a
+	// fresh __heap autotmp per candidate via typecheck.TempAt, which
+	// uses an auto-incrementing suffix — so the order of `out` decides
+	// which candidate gets which suffix, and any non-deterministic
+	// order leaks into the function's symbol table and machine code.
+	// Reproducible builds require a stable order.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Sym().Name < out[j].Sym().Name
+	})
 	return out
 }
 

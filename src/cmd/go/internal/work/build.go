@@ -275,11 +275,15 @@ func (c buildCompiler) Set(value string) error {
 		BuildToolchain = gcToolchain{}
 	case "gd":
 		BuildToolchain = gcToolchain{}
-		// Under the gd binary, swap cfg.GOROOT to cfg.GDROOT so stdlib
-		// and tools are resolved from the gd install, and swap the
-		// active workspace (GOPATH + derived GOMODCACHE) to GDPATH. On
-		// a non-gd binary, "gd" is accepted but behaves like "gc".
-		if runtime.Compiler == "gd" {
+		// Under a gd-runtime binary (the fork), swap cfg.GOROOT to
+		// cfg.GDROOT so stdlib and tools are resolved from the gd
+		// install, and swap the active workspace (GOPATH + derived
+		// GOMODCACHE) to GDPATH. On a non-gd binary, "gd" is accepted
+		// but behaves like "gc". Gated on cfg.IsGdRuntime() — checking
+		// runtime.Compiler doesn't work because the fork reuses the gc
+		// backend so runtime.Compiler stays "gc"; the fork identity
+		// lives in runtime.Version()'s "gd" prefix instead.
+		if cfg.IsGdRuntime() {
 			if cfg.GDROOT != "" && cfg.GDROOT != cfg.GOROOT {
 				cfg.SetGOROOT(cfg.GDROOT, false)
 			}
@@ -306,15 +310,17 @@ func (c buildCompiler) String() string {
 
 func init() {
 	defaultCompiler := build.Default.Compiler
-	if runtime.Compiler == "gd" {
-		// The gd binary defaults to the stock gc toolchain (dispatched
-		// via $GOROOT). Users opt into the gd toolchain with
-		// -compiler=gd. During bootstrap, dist passes the flag
-		// explicitly, so the init default only matters post-install.
-		defaultCompiler = "gc"
+	if cfg.IsGdRuntime() {
+		// The gd binary defaults to the gd toolchain so the GDROOT/
+		// GDPATH swap (in Set) fires without users passing
+		// -compiler=gd. dist's bootstrap also relies on this — the
+		// staleness check at the end of all.bash needs the same
+		// toolchain identity to be in effect during the build and
+		// during the check, otherwise build IDs disagree.
+		defaultCompiler = "gd"
 	}
 	switch defaultCompiler {
-	case "gc", "gccgo":
+	case "gc", "gd", "gccgo":
 		buildCompiler{}.Set(defaultCompiler)
 	}
 }

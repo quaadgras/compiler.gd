@@ -245,10 +245,9 @@ func xinit() {
 	os.Setenv("GOPPC64", goppc64)
 	os.Setenv("GORISCV64", goriscv64)
 	os.Setenv("GOROOT", goroot)
-	if toolchainName == "gd" {
-		// During bootstrap the gd install and GOROOT are the same tree.
-		os.Setenv("GDROOT", goroot)
-	}
+	// Fork: dist always produces the gd toolchain. During bootstrap the
+	// gd install and GOROOT are the same tree.
+	os.Setenv("GDROOT", goroot)
 	os.Setenv("GOFIPS140", gofips140)
 
 	// Set GOBIN to GOROOT/bin. The meaning of GOBIN has drifted over time
@@ -1487,15 +1486,16 @@ func cmdbootstrap() {
 	// over the build process, we'll set this back to the original
 	// GOEXPERIMENT.
 	//
-	// Exception (-stop=toolchain1): when toolchain1 is the final
-	// toolchain (we aren't going to build toolchain2/3), it must
-	// use normal experiments so its embedded runtime.buildVersion
-	// matches binaries built against fork stdlib (baseline dwarf5
-	// etc. on). Otherwise compile's self-check fails at runtime
-	// with "version ... does not match go tool version".
-	if stop != "toolchain1" {
-		os.Setenv("GOEXPERIMENT", "none")
-	}
+	// Fork: don't toggle GOEXPERIMENT=none for toolchain1 + go_bootstrap.
+	// Stock dist builds those early stages with experiments OFF then
+	// restores GOEXPERIMENT for toolchain2/3 + std (line 1602-1603).
+	// The fork's baseline turns dwarf5/greenteagc/randomizedheapbase64
+	// ON; the post-build go_bootstrap-driven staleness check then sees
+	// a cache built with baseline ON but go_bootstrap was built OFF,
+	// reporting build-ID mismatches on every dep with an experiment
+	// fingerprint. Keep experiments at the user's value (default =
+	// baseline) for the entire build so the staleness check agrees
+	// with what's in cache.
 
 	if isdir(pathf("%s/src/pkg", goroot)) {
 		fatalf("\n\n"+
@@ -1781,14 +1781,10 @@ func goCmd(env []string, goBinary string, cmd string, args ...string) {
 	if noOpt {
 		goCmd = append(goCmd, "-tags=noopt")
 	}
-	if toolchainName == "gd" {
-		// Under the gd fork, cmd/go defaults to -compiler=gc (stock
-		// dispatch) post-install. During bootstrap we want the gd
-		// toolchain so runtime.Compiler resolves to "gd" in the built
-		// stdlib, so pass the flag explicitly. goCmd is used for
-		// "install" and "build" which both accept -compiler.
-		goCmd = append(goCmd, "-compiler=gd")
-	}
+	// Fork: dist always produces the gd toolchain. Pass -compiler=gd
+	// explicitly so the GDROOT/GDPATH swap fires even if the cmd/go
+	// being driven was somehow built without IsGdRuntime defaults.
+	goCmd = append(goCmd, "-compiler=gd")
 	goCmd = appendCompilerFlags(goCmd)
 	if vflag > 0 {
 		goCmd = append(goCmd, "-v")
@@ -1807,9 +1803,8 @@ func checkNotStale(env []string, goBinary string, targets ...string) {
 	if noOpt {
 		goCmd = append(goCmd, "-tags=noopt")
 	}
-	if toolchainName == "gd" {
-		goCmd = append(goCmd, "-compiler=gd")
-	}
+	// Fork: see goCmd above for why -compiler=gd is unconditional.
+	goCmd = append(goCmd, "-compiler=gd")
 	goCmd = appendCompilerFlags(goCmd)
 	goCmd = append(goCmd, "-f={{if .Stale}}\tSTALE {{.ImportPath}}: {{.StaleReason}}{{end}}")
 

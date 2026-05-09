@@ -204,13 +204,13 @@ func defaultContext() build.Context {
 	return ctxt
 }
 
-// isGdRuntime reports whether bin/go was built by the gd fork
+// IsGdRuntime reports whether bin/go was built by the gd fork
 // toolchain. We check runtime.Version() rather than runtime.Compiler
 // because the fork reuses the gc backend (Compiler stays "gc") but
 // stamps a "gd"-prefixed version string into the binary at link
 // time. Compiler != "gd" was leaving the gd-only init paths dormant
 // in fork-built binaries.
-func isGdRuntime() bool {
+func IsGdRuntime() bool {
 	return strings.HasPrefix(runtime.Version(), "gd")
 }
 
@@ -237,7 +237,7 @@ func init() {
 // embedded-stdlib materialisation path), and finally GOROOT (used
 // during make.bash bootstrap where both roots are the same tree).
 func initGDROOT() {
-	if !isGdRuntime() {
+	if !IsGdRuntime() {
 		return
 	}
 	if env := os.Getenv("GDROOT"); env != "" {
@@ -270,7 +270,7 @@ func initGDROOT() {
 // $HOME/gd (the gd analogue of GOPATH's ~/go default). Activated by
 // -compiler=gd, which swaps BuildContext.GOPATH to this value.
 func initGDPATH() {
-	if !isGdRuntime() {
+	if !IsGdRuntime() {
 		return
 	}
 	if env := os.Getenv("GDPATH"); env != "" {
