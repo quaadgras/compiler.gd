@@ -999,6 +999,19 @@ func walkUnsafeString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.
 		fnname := "unsafestringcheckptr"
 		fn := typecheck.LookupRuntime(gd, fnname)
 		init.Append(mkcall1(gd, fn, nil, init, unsafePtr, typecheck.Conv(gd, len, lenType)))
+	} else if n.Bounded() {
+		// gd: caller has marked this OUNSAFESTRING as bounded — len is
+		// statically known to be in [0, ptr-addressable-range]. Skip the
+		// open-coded length and aliasing checks. The loopheapify pass
+		// uses this to synthesize unsafe.String(ptr, len(s)) where
+		// len(s) is guaranteed >= 0 and within the byte range backing s,
+		// so the otherwise-emitted "if len < 0 { panic }" check would
+		// fire as a "Disproved Less64" prove-pass message at the loop's
+		// source position — noise that breaks testdir/prove.go and
+		// testdir/loopbce.go matching.
+		if !len.Type().IsKind(types.TIDEAL) && len.Type().Size() > types.Types[types.TUINT].Size() {
+			lenType = types.Types[types.TINT]
+		}
 	} else {
 		// Otherwise, open code unsafe.String to prevent runtime call overhead.
 		// Keep this code in sync with runtime.unsafestring{,64}

@@ -365,6 +365,13 @@ func mkHeapAssign(gd *base.Invocation, pos src.XPos, heap, name *ir.Name) ir.Nod
 	ln := ir.NewUnaryExpr(gd, pos, ir.OLEN, name)
 	us := ir.NewBinaryExpr(gd, pos, ir.OUNSAFESTRING, sd, ln)
 	us.SetEsc(ir.EscNone)
+	// len(name) is statically non-negative and within the byte range
+	// backing name. Marking the OUNSAFESTRING as Bounded tells
+	// walkUnsafeString to skip the open-coded len/aliasing checks
+	// (otherwise the synthesized "if len < 0 { panic }" surfaces in
+	// prove-pass output as a Disproved Less64 message at the source
+	// loop's position, breaking testdir/prove.go etc.).
+	us.SetBounded(true)
 	return ir.NewAssignStmt(gd, pos, heap, us)
 }
 

@@ -311,13 +311,14 @@ func (c buildCompiler) String() string {
 func init() {
 	defaultCompiler := build.Default.Compiler
 	if cfg.IsGdRuntime() {
-		// The gd binary defaults to the gd toolchain so the GDROOT/
-		// GDPATH swap (in Set) fires without users passing
-		// -compiler=gd. dist's bootstrap also relies on this — the
-		// staleness check at the end of all.bash needs the same
-		// toolchain identity to be in effect during the build and
-		// during the check, otherwise build IDs disagree.
-		defaultCompiler = "gd"
+		// The gd binary user-facing default is the stock gc toolchain
+		// (dispatched via $GOROOT, GOPATH = $HOME/go) so existing Go
+		// workflows are unaffected. Users opt into the gd toolchain
+		// explicitly with -compiler=gd, which triggers the GDROOT/
+		// GDPATH swap in Set above. dist's bootstrap passes
+		// -compiler=gd explicitly so the staleness check at the end
+		// of all.bash agrees with the build phases.
+		defaultCompiler = "gc"
 	}
 	switch defaultCompiler {
 	case "gc", "gd", "gccgo":
