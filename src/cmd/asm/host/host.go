@@ -44,12 +44,18 @@ var counterOpenOnce sync.Once
 // the standalone binary did) and Bso flushes to os.Stdout. Errors
 // from the assembler (status != 0) are returned via status.
 //
+// workDir is the directory relative source/#include paths resolve
+// against. The standalone binary passes "" (use the process working
+// directory); cmd/go passes the package source directory when driving
+// the assembler in-process, because the in-process assembler shares
+// cmd/go's working directory rather than cd'ing into the package.
+//
 // Concurrent invocations: per-invocation flag state lives on a fresh
 // flags.Context, the obj.Link is allocated fresh per call, and the
 // Parser carries Debug/AllErrors/etc. as fields rather than reading
 // process-globals. Architecture tables (x86.Anames, obj.Anames, etc.)
 // are init-time-immutable and safe to share.
-func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
+func Run(args []string, workDir string, stdout, stderr io.Writer) (status int, err error) {
 	// Mirror compile/link/cgo: run the assembler on a worker
 	// goroutine so any os.Exit-replacement (lex.ExitFunc) that
 	// bottoms out in runtime.Goexit terminates only this worker, not
@@ -75,14 +81,14 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 				st = 2
 			}
 		}()
-		st = runMain(args, stdout, stderr)
+		st = runMain(args, workDir, stdout, stderr)
 	}()
 	<-done
 
 	return st, nil
 }
 
-func runMain(args []string, stdout, stderr io.Writer) int {
+func runMain(args []string, workDir string, stdout, stderr io.Writer) int {
 	_ = stdout
 	_ = stderr
 
@@ -162,7 +168,7 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	var ok, diag bool
 	var failedFile string
 	for _, f := range ctx.Args {
-		lexer := lex.NewLexer(f, ctx.I, ctx.D, ctx.TrimPath)
+		lexer := lex.NewLexer(f, ctx.I, ctx.D, ctx.TrimPath, workDir)
 		parser := asm.NewParser(ctxt, architecture, lexer)
 		parser.SetFlags(ctx.Debug, ctx.AllErrors)
 		ctxt.DiagFunc = func(format string, args ...any) {

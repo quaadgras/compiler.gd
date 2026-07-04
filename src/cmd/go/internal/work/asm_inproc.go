@@ -57,7 +57,12 @@ func inProcessAssemble(sh *Shell, dir string, env []string, args []any) error {
 		sh.ShowCmd(dir, "%s", envcmdline)
 	}
 
-	status, runErr := host.Run(cmdline[idx+1:], os.Stdout, os.Stderr)
+	// dir is the package source directory. The in-process assembler
+	// shares cmd/go's working directory, so pass dir explicitly to
+	// resolve the .s file and its #include paths (e.g. go_asm.h)
+	// against the package rather than cmd/go's cwd, matching the
+	// fork/exec path which runs asm with cwd == dir.
+	status, runErr := host.Run(cmdline[idx+1:], dir, os.Stdout, os.Stderr)
 	if runErr != nil {
 		return runErr
 	}

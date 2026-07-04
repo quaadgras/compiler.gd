@@ -24,6 +24,7 @@ type Input struct {
 	Stack
 	includes        []string
 	trimPath        string // -trimpath, retained for #line pragma PosBase construction.
+	workDir         string // base for resolving relative paths; "" means the process working directory.
 	beginningOfLine bool
 	ifdefStack      []bool
 	macros          map[string]*Macro
@@ -36,14 +37,33 @@ type Input struct {
 // NewInput returns an Input from the given path. includes/defines/trimPath
 // come from the per-invocation flags Context; was a no-arg version
 // reading package-level flag globals.
-func NewInput(name string, includes, defines []string, trimPath string) *Input {
+//
+// workDir is the directory that relative file paths (the #include search
+// and the source file itself) resolve against. The standalone asm binary
+// passes "" so paths keep resolving against the process working directory,
+// exactly as before. cmd/asm/host.Run passes the package source directory
+// when driving the assembler in-process inside cmd/go, whose working
+// directory would otherwise be cmd/go's rather than the package's.
+func NewInput(name string, includes, defines []string, trimPath, workDir string) *Input {
 	return &Input{
 		// include directories: look in source dir, then -I directories.
 		includes:        append([]string{filepath.Dir(name)}, includes...),
 		trimPath:        trimPath,
+		workDir:         workDir,
 		beginningOfLine: true,
 		macros:          predefine(defines),
 	}
+}
+
+// openRelative opens path, resolving a relative path against in.workDir
+// when one is set. With an empty workDir a relative path is left
+// untouched so os.Open uses the process working directory — the
+// standalone binary's behaviour.
+func (in *Input) openRelative(path string) (*os.File, error) {
+	if in.workDir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(in.workDir, path)
+	}
+	return os.Open(path)
 }
 
 // ExitFunc is the process-exit hook lex error paths call. The
@@ -420,11 +440,13 @@ func (in *Input) include() {
 		in.Error("unquoting include file name: ", err)
 	}
 	in.expectNewline("#include")
-	// Push tokenizer for file onto stack.
-	fd, err := os.Open(name)
+	// Push tokenizer for file onto stack. Relative paths resolve against
+	// in.workDir (the package source dir under in-process cmd/go) rather
+	// than the process working directory; see openRelative.
+	fd, err := in.openRelative(name)
 	if err != nil {
 		for _, dir := range in.includes {
-			fd, err = os.Open(filepath.Join(dir, name))
+			fd, err = in.openRelative(filepath.Join(dir, name))
 			if err == nil {
 				break
 			}

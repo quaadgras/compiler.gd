@@ -14,7 +14,9 @@ import (
 )
 
 func main() {
-	status, err := host.Run(os.Args[1:], os.Stdout, os.Stderr)
+	// workDir "" — the standalone binary resolves relative paths against
+	// its own process working directory, as it always has.
+	status, err := host.Run(os.Args[1:], "", os.Stdout, os.Stderr)
 	if err != nil {
 		// Genuinely unexpected error from host.Run itself (not an
 		// assembler diagnostic). Print and exit non-zero.

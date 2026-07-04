@@ -8,7 +8,6 @@ package lex
 import (
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"text/scanner"
 
@@ -64,9 +63,13 @@ func (t ScanToken) String() string {
 // Was a no-arg version that read package-level flag globals;
 // the gd fork moves flags onto a per-invocation Context so concurrent
 // in-process asm runs don't alias state.
-func NewLexer(name string, includes, defines []string, trimPath string) TokenReader {
-	input := NewInput(name, includes, defines, trimPath)
-	fd, err := os.Open(name)
+//
+// workDir is the base for resolving a relative source path or #include;
+// "" keeps the standalone binary's process-working-directory behaviour.
+// See NewInput.
+func NewLexer(name string, includes, defines []string, trimPath, workDir string) TokenReader {
+	input := NewInput(name, includes, defines, trimPath, workDir)
+	fd, err := input.openRelative(name)
 	if err != nil {
 		log.Printf("%s", err)
 		ExitFunc(1)
