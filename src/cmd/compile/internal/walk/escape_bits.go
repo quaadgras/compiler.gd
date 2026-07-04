@@ -122,11 +122,21 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 	backing.Curfn = fn
 	backing.SetUsed(true)
 	backing.SetAutoTemp(true)
-	// Mark backing as EscHeap so liveness/shouldTrack skips it —
-	// the callee writes the backing through a pointer, which
-	// liveness doesn't see, and we'd hit "bad live variable at
-	// entry" otherwise.
-	backing.SetEsc(ir.EscHeap)
+	// backing is a real stack slot whose address escapes to the
+	// callee (via addr), which reads and writes it through that
+	// pointer. Mark it address-taken so liveness keeps it live across
+	// the call and — crucially — includes its pointer words in the
+	// stack map. Earlier this instead did backing.SetEsc(ir.EscHeap)
+	// to silence a "bad live variable at entry" error, but EscHeap
+	// excludes the slot from the stack map entirely: for a pointer-
+	// containing candidate type whose mask bit is clear (no
+	// materialize), backing then held live heap references the GC
+	// never scanned, so the referent (e.g. a map's hmap) could be
+	// freed out from under the callee — a use-after-free. Instead we
+	// give backing a proper definition: zero-initialize it in the
+	// prologue (below), which both establishes the liveness def point
+	// and guarantees no stale pointer words at entry.
+	backing.SetAddrtaken(true)
 	types.CalcSize(gd, backing.Type())
 	fn.Dcl = append(fn.Dcl, backing)
 
@@ -144,10 +154,22 @@ func registerEscapeBox(gd *base.Invocation, fn *ir.Func, name *ir.Name, prologue
 
 	box := &escapeBox{addr: addr, backing: backing}
 
-	// Prologue: addr = &backing. Covers the (rare) shape where a
-	// promoted name is read before its ODCL fires — the per-ODCL
-	// reset alone wouldn't, but the prologue ensures addr is always
-	// initialized to the stack slot at function entry.
+	// Prologue: zero backing, then addr = &backing.
+	//
+	// The zero-init gives backing a definition point at function
+	// entry (it is address-taken and written only through the pointer,
+	// which liveness cannot see) and clears any stale pointer words so
+	// the GC stack map is sound before the first write. walkStmtList
+	// runs after promoteEscapeCandidates, so this OAS is lowered to a
+	// VARDEF + zeroing on the normal path.
+	zeroBacking := ir.NewAssignStmt(gd, pos, backing, nil)
+	zeroBacking.SetTypecheck(1)
+	prologue.Append(zeroBacking)
+
+	// addr = &backing. Covers the (rare) shape where a promoted name
+	// is read before its ODCL fires — the per-ODCL reset alone
+	// wouldn't, but the prologue ensures addr is always initialized to
+	// the stack slot at function entry.
 	prologue.Append(emitEscapeBoxReset(gd, pos, box))
 
 	// Route every later access of name through *addr.

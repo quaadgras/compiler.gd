@@ -5,6 +5,7 @@
 package test
 
 import (
+	"runtime"
 	"testing"
 	"unsafe"
 )
@@ -298,6 +299,81 @@ func escBitsClobberStack(d int) int {
 		return buf[d%64]
 	}
 	return escBitsClobberStack(d+1) + buf[d]
+}
+
+// escBitsMapHolder is a pointer-containing candidate type: a struct
+// whose only field is a map. When its address is passed to a
+// non-retaining dynamic callee, the escape-bits wrap leaves it on the
+// caller's stack (mask bit clear, no materialize) — so the map it
+// holds is reachable only through that stack slot during the call.
+type escBitsMapHolder struct {
+	m map[int]int
+}
+
+type escBitsMapReader interface {
+	Read(h *escBitsMapHolder) int
+}
+
+type escBitsMapReaderImpl struct{}
+
+// Read does not retain h; it forces a GC mid-call so a stack slot the
+// collector fails to scan would have its map reclaimed between the two
+// reads.
+//
+//go:noinline
+func (escBitsMapReaderImpl) Read(h *escBitsMapHolder) int {
+	sum := 0
+	for k, v := range h.m {
+		sum += k + v
+	}
+	// Churn the heap and collect: if h's backing slot is excluded from
+	// the stack map, h.m's buckets are freed here.
+	for i := 0; i < 64; i++ {
+		_ = make([]byte, 512)
+	}
+	runtime.GC()
+	for k, v := range h.m {
+		sum += k + v
+	}
+	return sum
+}
+
+var escBitsOpaqueMapReader escBitsMapReader
+
+func init() { escBitsOpaqueMapReader = escBitsMapReaderImpl{} }
+
+// TestEscapeBitsBackingGCScan is the regression test for the escape-
+// bits backing-slot GC-safety bug. A candidate local of a pointer-
+// containing type (here a struct holding a map) whose address is
+// passed to a non-retaining dynamic callee stays on the caller's
+// stack. Its heap contents (the map's buckets) are reachable only
+// through that stack slot for the duration of the call, so the slot's
+// pointer words MUST be in the stack map.
+//
+// Previously the synthesized backing slot was marked EscHeap purely to
+// silence a "bad live variable at entry" liveness error, which also
+// excluded it from the stack map. A GC while the callee ran then freed
+// the map out from under it — a use-after-free that surfaced as
+// corruption (e.g. "concurrent map read and map write") deep in
+// unrelated code, and miscompiled the fork's own compiler when it was
+// self-hosted. The fix gives backing a proper zero-init definition and
+// marks it address-taken so the GC scans it.
+func TestEscapeBitsBackingGCScan(t *testing.T) {
+	const N = 8
+	want := 0
+	for k := 0; k < N; k++ {
+		want += (k + k*10) * 2
+	}
+	for i := 0; i < 40; i++ {
+		var h escBitsMapHolder
+		h.m = make(map[int]int, N)
+		for k := 0; k < N; k++ {
+			h.m[k] = k * 10
+		}
+		if got := escBitsOpaqueMapReader.Read(&h); got != want {
+			t.Fatalf("iter %d: Read = %d, want %d (candidate backing slot not GC-scanned?)", i, got, want)
+		}
+	}
 }
 
 // BenchmarkEscapeBitsClosureNonEscape measures the alloc + time
