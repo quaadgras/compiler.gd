@@ -113,14 +113,28 @@ func IsPgoHotFunc(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile) bool
 		return false
 	}
 	if n, ok := profile.WeightedCG.IRNodes[ir.LinkFuncName(fn)]; ok {
-		_, ok := candHotCalleeMapOf(gd)[n]
+		// Read-only, nil-safe: see HasPgoHotInline. Must not use the
+		// lazy-init candHotCalleeMapOf here — this runs in the parallel
+		// backend (ssagen.Compile), and writing gd from a worker races.
+		m, _ := gd.InlPgoCandHotCalleeMap.(map[*pgoir.IRNode]struct{})
+		_, ok := m[n]
 		return ok
 	}
 	return false
 }
 
 func HasPgoHotInline(gd *base.Invocation, fn *ir.Func) bool {
-	_, has := hasHotCallOf(gd)[fn]
+	// Read-only, nil-safe. This is called from the parallel backend
+	// (ssagen.Compile → pgen.go), so it MUST NOT lazy-init the map via
+	// hasHotCallOf: that reads-then-writes gd.InlPgoHasHotCall, and with
+	// no PGO profile the field is nil, so every backend worker would race
+	// to create it (a data race on the interface field, and concurrent
+	// map creation). The map is only ever populated by mkinlcall during
+	// the serial inline phase, which completes before the backend starts
+	// — so a plain nil-safe read here is correct and race-free (a nil map
+	// lookup yields false).
+	m, _ := gd.InlPgoHasHotCall.(map[*ir.Func]struct{})
+	_, has := m[fn]
 	return has
 }
 
