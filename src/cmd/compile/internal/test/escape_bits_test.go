@@ -232,6 +232,74 @@ func TestEscapeBitsIfaceEscape(t *testing.T) {
 	}
 }
 
+// escBitsIdentityIface returns its pointer arg unchanged. The param
+// therefore leaks to the result but never to the heap directly —
+// esc.Heap() == -1, esc.Result(0) == 0. This is the shape that
+// exposed the computeEscMask soundness hole: deriving the mask bit
+// from Heap() alone left the bit clear, so the call-site wrap skipped
+// materializeToHeap, and a caller that retained the returned pointer
+// (below: stores it to a global) kept a pointer into its own dead
+// stack frame.
+type escBitsIdentityIface interface {
+	Id(p *int) *int
+}
+
+type escBitsIdentityImpl struct{}
+
+func (escBitsIdentityImpl) Id(p *int) *int { return p }
+
+var escBitsOpaqueIdentity escBitsIdentityIface
+
+// escBitsRetained holds pointers handed back through the identity
+// method so they genuinely outlive the caller frame.
+var escBitsRetained []*int
+
+func init() {
+	escBitsOpaqueIdentity = escBitsIdentityImpl{}
+}
+
+// TestEscapeBitsIfaceResultLeak is the regression test for the
+// result-leak miscompilation: a param that flows out through the
+// callee's result must be materialized before an indirect call,
+// because the runtime wrap can't see what the caller does with the
+// returned pointer. We store each iteration's returned pointer into a
+// retained slice, then re-check every earlier pointer still reads its
+// own value. Before the fix, all captured pointers aliased one reused
+// stack slot and every deref returned the final iteration's value.
+func TestEscapeBitsIfaceResultLeak(t *testing.T) {
+	escBitsRetained = escBitsRetained[:0]
+	const N = 16
+	for i := 0; i < N; i++ {
+		x := i * 100
+		escBitsRetained = append(escBitsRetained, escBitsOpaqueIdentity.Id(&x))
+	}
+	// Overwrite the stack region the loop used, so any pointer that
+	// wrongly still references stack storage reads clobbered bytes.
+	escBitsClobberStack(0)
+	for i, p := range escBitsRetained {
+		if got, want := *p, i*100; got != want {
+			t.Errorf("iter %d: deref returned pointer = %d, want %d (arg leaked through result but stayed on stack)", i, got, want)
+		}
+	}
+	for i := 1; i < len(escBitsRetained); i++ {
+		if escBitsRetained[i] == escBitsRetained[i-1] {
+			t.Fatalf("iter %d and %d returned the same address; distinct escaping allocations collapsed to one slot", i-1, i)
+		}
+	}
+}
+
+//go:noinline
+func escBitsClobberStack(d int) int {
+	var buf [64]int
+	for j := range buf {
+		buf[j] = 0x5eeded
+	}
+	if d >= 8 {
+		return buf[d%64]
+	}
+	return escBitsClobberStack(d+1) + buf[d]
+}
+
 // BenchmarkEscapeBitsClosureNonEscape measures the alloc + time
 // win of the escape-bits wrap when the closure does NOT retain its
 // arg. Stock Go allocates &x on the heap every iteration (the

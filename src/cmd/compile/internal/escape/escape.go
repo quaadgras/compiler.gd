@@ -561,16 +561,37 @@ const (
 // computeEscMask derives the per-argument heap-escape mask for the
 // function signature sig from the leaks tags already installed on its
 // params. Bit k+1 (0-indexed from the first call argument, counting
-// the receiver as arg 0 for methods) is set iff that argument can
-// reach the heap. Bit 0 is reserved as the dynamic-mask discriminator
-// (see doc/gd/escape-bits.md Phase F).
+// the receiver as arg 0 for methods) is set iff that argument's
+// pointee must outlive the call. Bit 0 is reserved as the dynamic-mask
+// discriminator (see doc/gd/escape-bits.md Phase F).
 //
 // The leaks encoding (see leaks.go) uses the empty string as a space-
 // optimized spelling of "Heap() == 0" (the pessimistic default —
 // argument escapes). A non-empty "esc:..." string encodes either
-// "Heap() == -1" (doesn't flow to heap) or "Heap() > 0" (flows after
-// N derefs, which the caller must still treat as escaping because it
-// may chain). We set the bit iff the flow is non-negative.
+// "== -1" (no flow along that axis) or "> 0" (flows after N derefs,
+// which the caller must still treat as escaping because it may chain).
+// We set the bit iff a retaining flow is non-negative.
+//
+// Two axes force the bit:
+//
+//   - Heap(): the callee stores the pointer somewhere the GC roots
+//     from, so the pointee must live past the call.
+//
+//   - Result(k): the callee may hand the pointer back through its
+//     k'th result. The runtime materialization wrap runs at the call
+//     site and cannot see what the caller does with that result — if
+//     the caller lets it escape (return it, store to a global, capture
+//     it), a stack-kept arg becomes a dangling pointer into a dead
+//     frame. Dropping this axis was unsound: a `func(p *T) *T { return
+//     p }` reached through an interface left &x on the stack while the
+//     caller stored the result to a global. We conservatively
+//     materialize; a caller that discards the result pays one avoidable
+//     alloc, which is acceptable versus miscompilation.
+//
+// Mutator()/Callee() flows are deliberately excluded: they use the
+// pointer during the call (`*p = …`, invoking p) but don't retain it,
+// so the pointee only needs to survive the call, which the caller's
+// live frame already guarantees.
 //
 // Arguments beyond position 62 exceed the mask width; we leave their
 // bits unset. Consumers must treat absence of a bit past position 62
@@ -585,7 +606,13 @@ func computeEscMask(gd *base.Invocation, sig *types.Type) uint64 {
 			break
 		}
 		esc := parseLeaks(gd, f.Note)
-		if esc.Heap() >= 0 {
+		retains := esc.Heap() >= 0
+		for k := 0; k < numEscResults && !retains; k++ {
+			if esc.Result(k) >= 0 {
+				retains = true
+			}
+		}
+		if retains {
 			mask |= 1 << uint(i+1)
 		}
 	}
