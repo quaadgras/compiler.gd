@@ -585,15 +585,18 @@ func (v Value) call(op string, in []Value) []Value {
 		}
 	}
 	for i := 0; i < n; i++ {
-		if xt, targ := in[i].Type(), t.In(i); !xt.AssignableTo(toRType(targ)) {
+		// UserIn, not In: on a variadic Phase G-extended sig the
+		// synthesised outBufs sit before the trailing ...T param, so
+		// raw indexing would hand back an outBuf here.
+		if xt, targ := in[i].Type(), t.UserIn(i); !xt.AssignableTo(toRType(targ)) {
 			panic("reflect: " + op + " using " + xt.String() + " as type " + stringFor(targ))
 		}
 	}
 	if !isSlice && isVariadic {
 		// prepare slice for remaining values
 		m := len(in) - n
-		slice := MakeSlice(toRType(t.In(n)), m, m)
-		elem := toRType(t.In(n)).Elem() // FIXME cast to slice type and Elem()
+		slice := MakeSlice(toRType(t.UserIn(n)), m, m)
+		elem := toRType(t.UserIn(n)).Elem() // FIXME cast to slice type and Elem()
 		for i := 0; i < m; i++ {
 			x := in[n+i]
 			if xt := x.Type(); !xt.AssignableTo(elem) {
@@ -611,15 +614,19 @@ func (v Value) call(op string, in []Value) []Value {
 	// marshaling loop below covers the full extended frame. Each
 	// outBuf slot has type unsafe.Pointer; Zero() gives us a
 	// correctly-shaped nil that marshals to an empty register /
-	// stack slot.
+	// stack slot. The nils are inserted at the outBufs' raw
+	// positions — the tail for ordinary sigs, but before the
+	// trailing ...T slice for variadic ones — so `in` lines up
+	// positionally with the raw param list the frame layout uses.
 	if nOut > 0 {
 		ins := t.InSlice()
+		start := t.OutBufStart()
 		padded := make([]Value, 0, len(in)+nOut)
-		padded = append(padded, in...)
-		totalIn := t.NumIn() // masks PhaseGExtendedFlag
-		for i := totalIn - nOut; i < totalIn; i++ {
+		padded = append(padded, in[:start]...)
+		for i := start; i < start+nOut; i++ {
 			padded = append(padded, Zero(toRType(ins[i])))
 		}
+		padded = append(padded, in[start:]...)
 		in = padded
 	}
 
@@ -1009,10 +1016,13 @@ func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool, regs 
 	// gd Phase G.2.1: strip synthesised outBuf args before handing
 	// the in[] slice to the user's MakeFunc callback. The user
 	// wrote a function matching the source-level signature, so
-	// they see N user args only; the K trailing outBufs stay in
-	// the frame untouched.
+	// they see N user args only; the K outBufs stay in the frame
+	// untouched. Strip by position: outBufs sit at the raw tail,
+	// except on variadic sigs, where they sit before the trailing
+	// ...T param.
 	if nOut := ftyp.NumOutBufs(); nOut > 0 && len(in) >= nOut {
-		in = in[:len(in)-nOut]
+		start := ftyp.OutBufStart()
+		in = append(in[:start], in[start+nOut:]...)
 	}
 
 	// Call underlying function.

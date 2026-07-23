@@ -583,6 +583,35 @@ func (t *FuncType) NumUserIn() int {
 	return t.NumIn() - t.NumOutBufs()
 }
 
+// OutBufStart returns the index in the raw In list of the first
+// synthesised Phase G outBuf param. outBufs sit at the tail of the
+// raw param list, except for variadic sigs, where the compiler
+// inserts them before the trailing ...T param so it stays last (see
+// types.NewSignature). Equals NumIn() when the sig carries no
+// outBufs.
+func (t *FuncType) OutBufStart() int {
+	n := t.NumOutBufs()
+	if n == 0 {
+		return t.NumIn()
+	}
+	start := t.NumIn() - n
+	if t.IsVariadic() {
+		start--
+	}
+	return start
+}
+
+// UserIn returns the i'th user-visible input parameter, skipping any
+// synthesised Phase G outBuf params (which, on a variadic sig, sit
+// between the fixed params and the trailing ...T param rather than
+// at the tail).
+func (t *FuncType) UserIn(i int) *Type {
+	if i >= t.OutBufStart() {
+		i += t.NumOutBufs()
+	}
+	return t.InSlice()[i]
+}
+
 func (t *FuncType) InSlice() []*Type {
 	uadd := unsafe.Sizeof(*t)
 	if t.TFlag&TFlagUncommon != 0 {

@@ -827,7 +827,11 @@ func (t *rtype) In(i int) Type {
 		panic("reflect: In of non-func type " + t.String())
 	}
 	tt := (*abi.FuncType)(unsafe.Pointer(t))
-	return toType(tt.InSlice()[i])
+	// gd Phase G.2.1: index the user-visible view. Synthesised outBuf
+	// params sit at the raw tail — except on variadic sigs, where they
+	// sit before the trailing ...T param — so UserIn maps around them
+	// rather than assuming a trailing block.
+	return toType(tt.UserIn(i))
 }
 
 func (t *rtype) NumIn() int {
