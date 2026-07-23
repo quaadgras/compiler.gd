@@ -14,6 +14,11 @@ var funcIDs = map[string]abi.FuncID{
 	"asmcgocall":         abi.FuncID_asmcgocall,
 	"asyncPreempt":       abi.FuncID_asyncPreempt,
 	"cgocallback":        abi.FuncID_cgocallback,
+	// fastcbentry (the fastcb direct C-ABI virtual-call entry) arranges its
+	// goroutine-stack frame exactly like cgocallback — fake return PC on top
+	// of a fixed-size frame matching the tracked pcsp delta — so it shares
+	// cgocallback's funcID to get the same SPWrite exemption in the unwinder.
+	"fastcbentry": abi.FuncID_cgocallback,
 	"corostart":          abi.FuncID_corostart,
 	"debugCallV2":        abi.FuncID_debugCallV2,
 	"gcBgMarkWorker":     abi.FuncID_gcBgMarkWorker,

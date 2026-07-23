@@ -450,6 +450,62 @@ var (
 	fastcbYieldFlag                                       uintptr
 )
 
+// Direct C-ABI virtual-call entry (fastcbentry, fastcb_amd64.s): while
+// resident-callback mode is engaged, the engine can call the thunk with the
+// virtual-call arguments still in C ABI registers and reach Go in a few dozen
+// instructions, instead of the full C-shim -> crosscall2 -> cgocallback ->
+// cgocallbackg -> cgo-export-shim chain. fastcbEntryFn is the
+// framework-registered dispatch target; fastcbEntryFallback is the stock C
+// entry (same five-argument signature) the thunk tail-jumps to whenever the
+// fast path's preconditions do not hold — foreign threads, unarmed residency,
+// or the yielded (_Gsyscall) gap between frames, whose first callback
+// re-engages residency through the stock protocol.
+var (
+	fastcbEntryFn       func(instance, userdata, result, args uintptr)
+	fastcbEntryFallback uintptr
+)
+
+// fastcbArmEntry registers the virtual dispatch target and the stock fallback
+// entry, and returns the C-callable PC of the direct entry thunk (0 when the
+// platform does not support it). The framework points the engine's
+// call_virtual_with_data_func at the returned PC; arming is required only
+// once, before or after residency engages — the thunk self-checks residency
+// on every call.
+//
+//go:linkname fastcbArmEntry
+func fastcbArmEntry(dispatch func(instance, userdata, result, args uintptr), fallback unsafe.Pointer) uintptr {
+	if !fastcbEntrySupported || dispatch == nil || fallback == nil {
+		return 0
+	}
+	fastcbEntryFn = dispatch
+	fastcbEntryFallback = uintptr(fallback)
+	return abi.FuncPCABI0(fastcbentry)
+}
+
+// fastcbentrygo is the Go half of fastcbentry. It runs on the resident
+// goroutine's stack with the Go execution context fully established, so it is
+// ordinary splittable Go code: its prologue performs stack growth, preemption
+// and scan cooperation exactly as in normal running code. After the dispatch
+// it performs the same deferred yield/clear epilogue as the resident fast
+// path in cgocallbackg, so the per-frame fastcbYield handshake keeps working
+// when the frame's last callback arrived through the direct entry. (The
+// Windows preemptExtLock discipline is absent here: the direct entry is
+// gated to platforms where osPreemptExtEnter/Exit are no-ops.)
+func fastcbentrygo(instance, userdata, args, ret uintptr) {
+	fastcbEntryFn(instance, userdata, ret, args)
+	if fastcbCallCDepth == 0 && (fastcbYieldFlag != 0 || fastcbM == 0) {
+		fastcbYieldFlag = 0
+		if fastcbSavedPC != 0 {
+			gp := getg()
+			bp := uintptr(0)
+			if fastcbSavedBPDepth != 0 {
+				bp = gp.stack.hi - fastcbSavedBPDepth
+			}
+			reentersyscall(fastcbSavedPC, gp.stack.hi-fastcbSavedSPDepth, bp)
+		}
+	}
+}
+
 // Call from C back to Go. fn must point to an ABIInternal Go entry-point.
 //
 //go:nosplit
