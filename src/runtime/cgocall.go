@@ -307,6 +307,149 @@ func callbackUpdateSystemStack(mp *m, sp uintptr, signal bool) {
 	g0.stackguard1 = g0.stackguard0
 }
 
+// fastcb: resident-callback mode.
+//
+// A goroutine that enters C via asmcgocall stays _Grunning with its P wired —
+// the state the runtime itself uses for its own internal C calls. If that C
+// code calls back into Go on the same thread, no per-callback GC or scheduler
+// coordination is needed at the boundary: the goroutine never left _Grunning,
+// so concurrent stack scans are already excluded by the ordinary suspendG
+// cooperation protocol, preemption and scan requests are honored by the
+// ordinary stackguard0 check the moment the callback executes Go code, and
+// allocation / stack growth / blocking / panics all use the stock machinery
+// because this IS ordinary execution. GC coordination is thereby deferred to
+// the points that already perform it (malloc, prologues), and the GC is held
+// off only while the thread is actually inside C between callbacks.
+//
+// The mode is opt-in per m: the goroutine (which must be locked to its OS
+// thread) calls fastcbSetResident before entering C via asmcgocall and
+// fastcbClearResident after it returns. While set, C->Go callbacks on that m
+// skip exitsyscall/reentersyscall and both status CASes entirely.
+var fastcbM muintptr
+
+// graphicsFastcbPCs holds the entry PCs of the fastcb runtime hooks,
+// published by the first C->Go callback. graphics.gd's internal/fastcb
+// package aliases it via a pull linkname (under its gd build tag) to
+// detect that this runtime carries the resident-callback machinery: on
+// runtimes without it the slots stay zero and graphics.gd's wiring
+// no-ops. Plain uintptr stores, so no write barriers are needed and
+// the publish is safe from the nosplit callback entry.
+//
+// This differs from the stock-toolchain overlay bundled with the gd
+// CLI, which pushes into graphics.gd's own var (the overlay is only
+// ever linked into graphics.gd programs); here the machinery is part
+// of every program's runtime, so the runtime owns the storage and must
+// not reference graphics.gd.
+//
+//go:linkname graphicsFastcbPCs
+var graphicsFastcbPCs [4]uintptr
+
+// fastcbSetResident marks the current m as hosting resident callbacks. The
+// caller must be locked to its OS thread (enforced here — this is what makes
+// a per-callback lockOSThread unnecessary: blocking or preemption inside a
+// callback keeps the g bound to this m via the ordinary lockedg machinery)
+// and must enter C via asmcgocall (not cgocall) so it remains _Grunning for
+// the duration.
+//
+// A panic that escapes a resident callback into C is fatal (no unwindm); a
+// panic recovered within the callback behaves normally.
+//
+// On Windows the resident paths preserve the stock protocol's
+// osPreemptExtEnter/Exit pairing (returning to C with preemptExtLock held,
+// releasing it around each callback's Go code) and the m.winsyscall
+// save/restore, so ExitProcess in engine C code cannot race preemptM's
+// SuspendThread; both are no-ops on other platforms.
+//
+//go:linkname fastcbSetResident
+//go:nosplit
+func fastcbSetResident() {
+	gp := getg()
+	if gp.lockedm == 0 {
+		throw("fastcbSetResident: goroutine not locked to OS thread")
+	}
+	fastcbM.set(gp.m)
+}
+
+// fastcbClearResident ends resident-callback mode. On a foreign (extra-m)
+// thread it may be called from inside a callback: the callback's return then
+// performs the deferred reentersyscall so the thread unwinds through the
+// stock protocol. On an asmcgocall-outer thread, call it after the outer
+// asmcgocall returns.
+//
+//go:linkname fastcbClearResident
+//go:nosplit
+func fastcbClearResident() {
+	fastcbM = 0
+}
+
+// fastcbYield requests that, when the current callback returns, the resident
+// g re-enter _Gsyscall (via the deferred reentersyscall) instead of staying
+// _Grunning in C. Call it from the last callback of a frame, before the host
+// goes idle: during the idle gap the GC can scan the g and sysmon can retake
+// the P, and the first callback of the next frame re-engages residency
+// through the stock path (one stock-priced callback per frame).
+//
+//go:linkname fastcbYield
+//go:nosplit
+func fastcbYield() {
+	fastcbYieldFlag = 1
+}
+
+// fastcbCallC runs the C function fn(arg) on the system stack via asmcgocall
+// while the calling goroutine stays _Grunning with its P wired — the resident
+// OUTBOUND path. C->Go callbacks nested inside fn therefore see _Grunning and
+// take the resident fast path in cgocallbackg, instead of the stock transition
+// they pay when the outbound call goes through cgocall (whose entersyscall
+// leaves the g in _Gsyscall). The caller must be the resident goroutine
+// (fastcbSetResident) and arg must NOT point into any goroutine stack: a
+// nested callback may grow and therefore MOVE the stack, and neither asmcgocall
+// nor the C code adjusts raw pointers the way cgo-generated shims do (their
+// _cgo_topofstack dance). graphics.gd passes global staging buffers.
+//
+// The osPreemptExtEnter/Exit pair (no-ops off Windows) preserves the stock
+// protocol's invariant that preemptExtLock is held whenever this thread is in
+// external C code, so engine calls to ExitProcess cannot race preemptM's
+// SuspendThread. It also keeps the resident fast path's lock discipline
+// balanced: nested callbacks release the lock around their Go code and retake
+// it on return, exactly as they do below a stock base entry.
+//
+// fastcbCallCDepth gates the deferred-yield logic in the fast path: a yield
+// (or clear) observed while an outbound resident C call is in flight must NOT
+// perform the base entry's deferred reentersyscall — that would roll the g
+// back to the base syscall PC/SP while Go frames above it are still live. The
+// flag stays set and is consumed when a base-level (depth 0) callback returns.
+//
+//go:linkname fastcbCallC
+//go:nosplit
+func fastcbCallC(fn, arg unsafe.Pointer) int32 {
+	gp := getg()
+	osPreemptExtEnter(gp.m)
+	fastcbCallCDepth++
+	errno := asmcgocall(fn, arg)
+	fastcbCallCDepth--
+	osPreemptExtExit(gp.m)
+	return errno
+}
+
+// fastcbCallCDepth counts resident outbound C calls (fastcbCallC) in flight on
+// the resident m. A single resident m exists at a time and the counter is only
+// touched from that thread, so a plain global suffices.
+var fastcbCallCDepth uintptr
+
+// Deferred-return state for resident callbacks on threads whose base entry
+// went through the stock path (foreign/extra-m threads): the syscall pc/sp/bp
+// that reentersyscall must restore when residency yields or ends. The sp and
+// bp are stored as OFFSETS from gp.stack.hi, not absolute addresses: a
+// resident callback may grow the stack, and copystack preserves each frame's
+// offset from stack.hi but cannot adjust addresses stashed in globals.
+// fastcbSavedPC==0 means no stashed state (asmcgocall-outer threads, where no
+// deferred transition is ever needed). A single resident m exists at a time,
+// so globals suffice.
+var (
+	fastcbSavedPC, fastcbSavedSPDepth, fastcbSavedBPDepth uintptr
+	fastcbYieldFlag                                       uintptr
+)
+
 // Call from C back to Go. fn must point to an ABIInternal Go entry-point.
 //
 //go:nosplit
@@ -315,6 +458,74 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	if gp != gp.m.curg {
 		println("runtime: bad g in cgocallback")
 		exit(2)
+	}
+
+	if graphicsFastcbPCs[0] == 0 {
+		graphicsFastcbPCs[1] = abi.FuncPCABIInternal(fastcbClearResident)
+		graphicsFastcbPCs[2] = abi.FuncPCABIInternal(fastcbYield)
+		graphicsFastcbPCs[3] = abi.FuncPCABIInternal(fastcbCallC)
+		graphicsFastcbPCs[0] = abi.FuncPCABIInternal(fastcbSetResident)
+	}
+
+	// fastcb resident fast path — see fastcbM above. The status check admits
+	// a transient _Gscanrunning: that is suspendG pinning the status word from
+	// another thread while it sets a preemption request; the g itself keeps
+	// running through it, and the request is honored at the next prologue.
+	// The cgo-generated fn is an ordinary splittable Go function, so calling
+	// it directly from this nosplit frame is fine: its own prologue performs
+	// stack growth, preemption, and scan cooperation, exactly as in normal
+	// running code. The g is locked to this m (enforced by fastcbSetResident),
+	// so any scheduling inside the callback returns it to this thread.
+	if fastcbM != 0 && fastcbM.ptr() == gp.m && ctxt == 0 {
+		if s := gp.atomicstatus.Load(); s == _Grunning || s == _Gscanrunning {
+			// Windows discipline (both calls are no-ops elsewhere): a stock
+			// base entry (foreign thread, fastcbSavedPC != 0) returned to C
+			// resident with preemptExtLock held, because engine C code may
+			// call ExitProcess, which deadlocks against preemptM's
+			// SuspendThread. Release the lock while the callback's Go code
+			// runs (Go code is ordinarily preemptible) and retake it for the
+			// return to C, mirroring the stock path's osPreemptExtExit/Enter
+			// pair. m.winsyscall is saved/restored around the callback
+			// exactly as the stock path does. asmcgocall-outer threads
+			// (fastcbSavedPC == 0: the musl/archive Scene loop) never took
+			// the lock, so leave it untouched there to stay balanced. A
+			// callback nested under fastcbCallC always has the lock held
+			// (taken by fastcbCallC itself), even before the thread's first
+			// base entry has stashed a saved PC.
+			stockBase := fastcbSavedPC != 0 || fastcbCallCDepth != 0
+			winsyscall := gp.m.winsyscall
+			if stockBase {
+				osPreemptExtExit(gp.m)
+			}
+			var cb func(frame unsafe.Pointer)
+			cbFV := funcval{uintptr(fn)}
+			*(*unsafe.Pointer)(unsafe.Pointer(&cb)) = noescape(unsafe.Pointer(&cbFV))
+			cb(frame)
+			if stockBase {
+				osPreemptExtEnter(gp.m)
+			}
+			if fastcbCallCDepth == 0 && (fastcbYieldFlag != 0 || fastcbM == 0) {
+				// Yield requested, or residency ended, during this callback.
+				// If the base entry came through the stock path (foreign
+				// thread), perform its deferred reentersyscall so we return
+				// to C in _Gsyscall as the stock protocol expects (with the
+				// ext lock already retaken above, matching stock order).
+				// Skipped while nested under fastcbCallC: the base entry's
+				// saved PC/SP must not be restored while Go frames above it
+				// (the outbound caller's) are live — the flag stays set and
+				// the next base-level callback return performs the yield.
+				fastcbYieldFlag = 0
+				if fastcbSavedPC != 0 {
+					bp := uintptr(0)
+					if fastcbSavedBPDepth != 0 {
+						bp = gp.stack.hi - fastcbSavedBPDepth
+					}
+					reentersyscall(fastcbSavedPC, gp.stack.hi-fastcbSavedSPDepth, bp)
+				}
+			}
+			gp.m.winsyscall = winsyscall
+			return
+		}
 	}
 
 	sp := gp.m.g0.sched.sp // system sp saved by cgocallback.
@@ -360,6 +571,36 @@ func cgocallbackg(fn, frame unsafe.Pointer, ctxt uintptr) {
 	}
 
 	cgocallbackg1(fn, frame, ctxt)
+
+	// fastcb: if resident mode was engaged during this callback and there is
+	// no enclosing outbound cgocall on this thread (ncgo == 0: we are at the
+	// thread's base C level, foreign or asmcgocall-entered), return to C
+	// still _Grunning with the P wired: subsequent callbacks take the
+	// zero-coordination fast path above. The syscall pc/sp/bp this entry
+	// saved are stashed so a later yield or clear can perform the deferred
+	// reentersyscall. incgo stays false and the g0 bounds set by
+	// callbackUpdateSystemStack stay in place (they remain accurate for this
+	// thread).
+	if fastcbM != 0 && fastcbM.ptr() == gp.m && gp.m.ncgo == 0 {
+		unlockOSThread()
+		if gp.m != checkm {
+			throw("m changed unexpectedly in cgocallbackg")
+		}
+		fastcbSavedPC = savedpc
+		fastcbSavedSPDepth = gp.stack.hi - uintptr(savedsp)
+		if savedbp != nil {
+			fastcbSavedBPDepth = gp.stack.hi - uintptr(savedbp)
+		} else {
+			fastcbSavedBPDepth = 0
+		}
+		// Return to C marked in-external-code (no-op off Windows): the
+		// engine's C code may call ExitProcess, which must not race
+		// preemptM's SuspendThread — see preemptExtLock. The resident fast
+		// path above releases the lock around each nested callback's Go code
+		// and retakes it on the way back to C.
+		osPreemptExtEnter(gp.m)
+		return
+	}
 
 	// At this point we're about to call unlockOSThread.
 	// The following code must not change to a different m.

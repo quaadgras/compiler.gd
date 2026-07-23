@@ -364,6 +364,15 @@ func Getgoextlinkenabled() string {
 func toolTags() []string {
 	tags := experimentTags()
 	tags = append(tags, gogoarchTags()...)
+	// gd fork: define the "gd" build tag so packages can supply
+	// fork-specific files (e.g. graphics.gd wires its resident-
+	// callback detection to runtime.graphicsFastcbPCs under this
+	// tag). Stock toolchains never set it, so such files simply
+	// drop out of stock builds. Note this is a tool tag, not the
+	// context Compiler (which stays "gc" — the fork reuses the gc
+	// backend, and flipping it would deselect every `gc`-tagged
+	// file in the ecosystem).
+	tags = append(tags, "gd")
 	return tags
 }
 
