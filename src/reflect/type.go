@@ -665,7 +665,12 @@ func (t *rtype) Method(i int) (m Method) {
 	for _, ret := range ft.OutSlice() {
 		out = append(out, toRType(ret))
 	}
-	mt := FuncOf(in, out, ft.IsVariadic())
+	// gd Phase G: InSlice is the raw slice — when the method sig was
+	// extended with synthesised outBuf params they are in there too,
+	// and the synthesized receiver-prepended type must keep both the
+	// params and the extended flag so NumIn/In stay user-visible
+	// while Call retains the extended ABI.
+	mt := funcOf(in, out, ft.IsVariadic(), ft.IsPhaseGExtended())
 	m.Type = mt
 	tfn := t.textOff(p.Tfn)
 	fn := unsafe.Pointer(&tfn)
@@ -1936,6 +1941,19 @@ func initFuncTypes(n int) Type {
 // panics if the in[len(in)-1] does not represent a slice and variadic is
 // true.
 func FuncOf(in, out []Type, variadic bool) Type {
+	return funcOf(in, out, variadic, false)
+}
+
+// funcOf is FuncOf plus the gd Phase G dimension: when phaseGExtended
+// is set, in is the raw (receiver/user params + synthesised trailing
+// outBuf) slice and the built type carries abi.PhaseGExtendedFlag, so
+// NumIn/In expose only the user-visible params while Call/MakeFunc
+// still see the extended ABI. rtype.Method uses this to synthesize
+// receiver-prepended method types that stay call-compatible with the
+// extended method code. Flagged and unflagged types never unify in
+// the caches: haveIdenticalUnderlyingType compares raw InCount, which
+// includes the flag bit.
+func funcOf(in, out []Type, variadic bool, phaseGExtended bool) Type {
 	if variadic && (len(in) == 0 || in[len(in)-1].Kind() != Slice) {
 		panic("reflect.FuncOf: last arg of variadic func must be slice")
 	}
@@ -1964,6 +1982,9 @@ func FuncOf(in, out []Type, variadic bool) Type {
 	if variadic {
 		hash = fnv1(hash, 'v')
 	}
+	if phaseGExtended {
+		hash = fnv1(hash, 'G')
+	}
 	hash = fnv1(hash, '.')
 	for _, out := range out {
 		t := out.(*rtype)
@@ -1974,6 +1995,9 @@ func FuncOf(in, out []Type, variadic bool) Type {
 	ft.TFlag = abi.TFlagDirectIface
 	ft.Hash = hash
 	ft.InCount = uint16(len(in))
+	if phaseGExtended {
+		ft.InCount |= abi.PhaseGExtendedFlag
+	}
 	ft.OutCount = uint16(len(out))
 	if variadic {
 		ft.OutCount |= 1 << 15
@@ -2033,7 +2057,7 @@ func funcStr(ft *funcType) string {
 		if i > 0 {
 			repr = append(repr, ", "...)
 		}
-		if ft.IsVariadic() && i == int(ft.InCount)-1 {
+		if ft.IsVariadic() && i == ft.NumIn()-1 {
 			repr = append(repr, "..."...)
 			repr = append(repr, stringFor((*sliceType)(unsafe.Pointer(t)).Elem)...)
 		} else {
