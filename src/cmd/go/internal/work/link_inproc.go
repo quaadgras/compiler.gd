@@ -91,9 +91,21 @@ func inProcessLink(sh *Shell, dir, desc string, env []string, args []any) error 
 	// testStackCheckOutput stanza parser depends on — survives.
 	// Stock cmd/go gets the same effect for free via
 	// exec.Cmd.CombinedOutput on the link subprocess.
+	// dir is the directory the subprocess path would have run the
+	// linker in — "." for ordinary links, the output directory for
+	// c-shared/plugin links, whose -o is a bare filename precisely so
+	// the temp path stays out of the artifact's recorded name (see
+	// gcToolchain.ld). Pass it through so the in-process linker can
+	// resolve the relative -o without a subprocess cwd; without this
+	// the output landed in cmd/go's own cwd and the install step
+	// failed with "open $WORK/b001/exe/a.out: no such file".
+	workDir := dir
+	if workDir == "." {
+		workDir = ""
+	}
 	var buf bytes.Buffer
 	lw := &lockedWriter{w: &buf}
-	status, runErr := host.Run(cmdline[idx+1:], lw, lw)
+	status, runErr := host.Run(cmdline[idx+1:], workDir, lw, lw)
 	out := buf.Bytes()
 
 	if desc == "" {

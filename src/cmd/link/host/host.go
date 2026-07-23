@@ -50,13 +50,19 @@ var archInits = map[string]func() (*sys.Arch, ld.Arch){
 
 // Run drives one cmd/link invocation in the calling process. args is
 // the argv that the standalone link binary would have received as
-// os.Args[1:]. stdout/stderr are reserved (link internals write to
-// os.Stdout/os.Stderr; ctxt.Bso flushes to os.Stdout).
+// os.Args[1:]. workDir is the directory a relative -o resolves
+// against — cmd/go runs the c-shared/plugin link "in" the output
+// directory with a bare filename (see gcToolchain.ld), which the
+// subprocess path implements via the child's cwd; in-process callers
+// pass that directory here instead. Pass "" when the caller's own
+// cwd applies (the standalone binary). stdout/stderr are reserved
+// (link internals write to os.Stdout/os.Stderr; ctxt.Bso flushes to
+// os.Stdout).
 //
 // Run uses a worker goroutine + ld.Exit's runtime.Goexit hook so
 // link's many Exitf call sites can terminate cleanly without taking
 // down the calling cmd/go process.
-func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
+func Run(args []string, workDir string, stdout, stderr io.Writer) (status int, err error) {
 	if buildcfg.Error != nil {
 		fmt.Fprintf(os.Stderr, "link: %v\n", buildcfg.Error)
 		return 2, nil
@@ -86,7 +92,7 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 				st = 2
 			}
 		}()
-		ld.Main(arch, theArch, args, &st, stdout, stderr)
+		ld.Main(arch, theArch, args, workDir, &st, stdout, stderr)
 	}()
 	<-done
 

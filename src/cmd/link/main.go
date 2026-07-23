@@ -27,7 +27,7 @@ import (
 // packages a second chance to modify the linker's configuration
 // via the ld.Arch.Archinit function.
 func main() {
-	status, err := host.Run(os.Args[1:], os.Stdout, os.Stderr)
+	status, err := host.Run(os.Args[1:], "", os.Stdout, os.Stderr)
 	if err != nil {
 		os.Stderr.WriteString("link: " + err.Error() + "\n")
 		os.Exit(1)

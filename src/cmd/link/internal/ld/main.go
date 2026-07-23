@@ -42,6 +42,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/pprof"
 	"strconv"
@@ -170,11 +171,14 @@ func (t *ternaryFlag) IsBoolFlag() bool { return true } // parse like a boolean 
 // to *status and call runtime.Goexit instead of os.Exit — used by
 // cmd/link/host.Run to drive Main on a worker goroutine without
 // terminating cmd/go's process. Pass nil for the standalone binary
-// path. stdout receives ctxt.Bso flushes (-v / progress chatter); pass
+// path. workDir is the directory a relative -o resolves against for
+// in-process invocations, where there is no subprocess cwd to lean
+// on; pass "" for the standalone binary (its own cwd already applies).
+// stdout receives ctxt.Bso flushes (-v / progress chatter); pass
 // nil to fall back to os.Stdout for the standalone binary. stderr is
 // where util.Errorf / loader.ErrorReporter.Errorf route their
 // diagnostic output; pass nil to fall back to os.Stderr.
-func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout, stderr io.Writer) {
+func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *int, stdout, stderr io.Writer) {
 	// log is process-global. In-process linking under cmd/go shares
 	// it with the calling process, so any prefix/flags we set here
 	// would leak into cmd/go's subsequent log.Printf calls — the
@@ -365,6 +369,21 @@ func Main(arch *sys.Arch, theArch Arch, args []string, status *int, stdout, stde
 		if ctxt.HeadType == objabi.Hwindows {
 			ctxt.flagOutfile += ".exe"
 		}
+	}
+
+	// gd in-process linking: cmd/go deliberately runs the c-shared /
+	// plugin link from the output directory with a bare -o filename
+	// (see gcToolchain.ld) so temp paths don't end up in the
+	// artifact's recorded name. The standalone linker resolves that
+	// against its subprocess cwd; in-process there is no subprocess,
+	// so resolve against the workDir cmd/go passes. Name-embedding
+	// sites (LC_ID_DYLIB on darwin, the PE export name on windows)
+	// would see the absolute path, but those targets cannot reach the
+	// in-process path today: cross-builds always fork/exec
+	// (canRunInProcess), native support is linux/amd64, and ELF
+	// derives DT_SONAME independently of -o.
+	if workDir != "" && !filepath.IsAbs(ctxt.flagOutfile) {
+		ctxt.flagOutfile = filepath.Join(workDir, ctxt.flagOutfile)
 	}
 
 	ctxt.interpreter = ctxt.flagInterpreter
