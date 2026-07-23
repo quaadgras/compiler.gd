@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/amd64"
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/gd"
+	"fmt"
 	"internal/buildcfg"
 	"os"
 	"path/filepath"
@@ -85,6 +86,44 @@ func TestInProcessTwoCompiles(t *testing.T) {
 	out2 := filepath.Join(tmp, "b.o")
 	if status := runInProcess(t, "b", src2, out2); status != 0 {
 		t.Fatalf("second compile: status=%d, want 0", status)
+	}
+}
+
+// TestInProcessErrorEmbedWrappers drives two in-process compiles where
+// both packages define a type that embeds the universe error interface
+// AND declares its own Error method. Regression test: BuiltinPkg's
+// types are constructed once per process, pinning the error
+// interface's "Error" method Sym to the FIRST invocation's LocalPkg.
+// CalcMethods' promoted-method dedup used Sym pointer identity (the
+// Uniq flag), so the second invocation saw its declared Error method
+// (a distinct Sym with the same exported name) fail to shadow the
+// embedded one and generated a duplicate method wrapper:
+//
+//	internal compiler error: already generated wrapper T.Error
+func TestInProcessErrorEmbedWrappers(t *testing.T) {
+	if buildcfg.GOARCH != "amd64" || runtime.GOOS == "wasip1" {
+		t.Skip("test wired to amd64 host arch only")
+	}
+
+	const src = `package %s
+
+type T struct{ error }
+
+func (T) Error() string { return "boom" }
+
+func New(err error) T { return T{err} }
+`
+
+	tmp := t.TempDir()
+	for i, pkg := range []string{"a", "b"} {
+		file := filepath.Join(tmp, pkg+".go")
+		if err := os.WriteFile(file, []byte(fmt.Sprintf(src, pkg)), 0644); err != nil {
+			t.Fatal(err)
+		}
+		out := filepath.Join(tmp, pkg+".o")
+		if status := runInProcess(t, pkg, file, out); status != 0 {
+			t.Fatalf("compile %d (package %s): status=%d, want 0", i+1, pkg, status)
+		}
 	}
 }
 

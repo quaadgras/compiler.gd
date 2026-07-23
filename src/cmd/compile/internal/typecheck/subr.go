@@ -102,8 +102,17 @@ func CalcMethods(t *types.Type) {
 
 	// mark top-level method symbols
 	// so that expand1 doesn't consider them.
+	//
+	// The seen set is keyed by methodSeenKey rather than marking the
+	// Syms' Uniq bit: pointer identity is the wrong dedup rule in the
+	// in-process compile harness (BuiltinPkg's error interface pins the
+	// first invocation's "Error" Sym, so a later invocation's declared
+	// Error method is a different pointer with the same exported name —
+	// see methodSymEqual), and flag bits on shared Syms race between
+	// concurrent invocations.
+	seen := make(map[methodSeenKey]bool)
 	for _, f := range t.Methods() {
-		f.Sym.SetUniq(true)
+		seen[methodSeen(f.Sym)] = true
 	}
 
 	// generate all reachable methods. Use a per-call visited
@@ -111,13 +120,12 @@ func CalcMethods(t *types.Type) {
 	// slist on the Type/package — concurrent in-process compile
 	// invocations would otherwise race on the bitset and slice.
 	var localSlist []symlink
-	expand1(t, true, map[*types.Type]bool{}, &localSlist)
+	expand1(t, true, map[*types.Type]bool{}, &localSlist, seen)
 
 	// check each method to be uniquely reachable
 	var ms []*types.Field
 	for i, sl := range localSlist {
 		localSlist[i].field = nil
-		sl.field.Sym.SetUniq(false)
 
 		var f *types.Field
 		path, _ := dotpath(sl.field.Sym, t, &f, false)
@@ -140,10 +148,6 @@ func CalcMethods(t *types.Type) {
 			}
 		}
 		ms = append(ms, f)
-	}
-
-	for _, f := range t.Methods() {
-		f.Sym.SetUniq(false)
 	}
 
 	ms = append(ms, t.Methods()...)
@@ -530,7 +534,24 @@ func dotpath(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) (
 	}
 }
 
-func expand0(t *types.Type, slist *[]symlink) {
+// methodSeenKey identifies a method for CalcMethods' promotion dedup,
+// under the same equality rule as methodSymEqual: exported names are
+// equal by name alone (their Syms may be distinct pointers when the
+// once-per-process BuiltinPkg types are involved); unexported names
+// are qualified by package.
+type methodSeenKey struct {
+	name string
+	pkg  *types.Pkg // nil for exported names
+}
+
+func methodSeen(s *types.Sym) methodSeenKey {
+	if types.IsExported(s.Name) {
+		return methodSeenKey{name: s.Name}
+	}
+	return methodSeenKey{name: s.Name, pkg: s.Pkg}
+}
+
+func expand0(t *types.Type, slist *[]symlink, seen map[methodSeenKey]bool) {
 	u := t
 	if u.IsPtr() {
 		u = u.Elem()
@@ -538,11 +559,10 @@ func expand0(t *types.Type, slist *[]symlink) {
 
 	if u.IsInterface() {
 		for _, f := range u.AllMethods() {
-			if f.Sym.Uniq() {
-				continue
+			if k := methodSeen(f.Sym); !seen[k] {
+				seen[k] = true
+				*slist = append(*slist, symlink{field: f})
 			}
-			f.Sym.SetUniq(true)
-			*slist = append(*slist, symlink{field: f})
 		}
 
 		return
@@ -551,23 +571,22 @@ func expand0(t *types.Type, slist *[]symlink) {
 	u = types.ReceiverBaseType(t)
 	if u != nil {
 		for _, f := range u.Methods() {
-			if f.Sym.Uniq() {
-				continue
+			if k := methodSeen(f.Sym); !seen[k] {
+				seen[k] = true
+				*slist = append(*slist, symlink{field: f})
 			}
-			f.Sym.SetUniq(true)
-			*slist = append(*slist, symlink{field: f})
 		}
 	}
 }
 
-func expand1(t *types.Type, top bool, visited map[*types.Type]bool, slist *[]symlink) {
+func expand1(t *types.Type, top bool, visited map[*types.Type]bool, slist *[]symlink, seen map[methodSeenKey]bool) {
 	if visited[t] {
 		return
 	}
 	visited[t] = true
 
 	if !top {
-		expand0(t, slist)
+		expand0(t, slist, seen)
 	}
 
 	u := t
@@ -589,7 +608,7 @@ func expand1(t *types.Type, top bool, visited map[*types.Type]bool, slist *[]sym
 			if f.Sym == nil {
 				continue
 			}
-			expand1(f.Type, false, visited, slist)
+			expand1(f.Type, false, visited, slist, seen)
 		}
 	}
 
@@ -789,7 +808,11 @@ func lookdot0(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) 
 			fields = u.AllMethods()
 		}
 		for _, f := range fields {
-			if f.Sym == s || (ignorecase && f.IsMethod() && strings.EqualFold(f.Sym.Name, s.Name)) {
+			// methodSymEqual rather than pointer identity: the
+			// once-per-process BuiltinPkg error interface pins the first
+			// invocation's "Error" Sym, so an equal exported name can
+			// arrive on a distinct Sym in later invocations.
+			if methodSymEqual(f.Sym, s) || (ignorecase && f.IsMethod() && strings.EqualFold(f.Sym.Name, s.Name)) {
 				if save != nil {
 					*save = f
 				}
@@ -806,7 +829,7 @@ func lookdot0(s *types.Sym, t *types.Type, save **types.Field, ignorecase bool) 
 	u = types.ReceiverBaseType(u)
 	if u != nil {
 		for _, f := range u.Methods() {
-			if f.Embedded == 0 && (f.Sym == s || (ignorecase && strings.EqualFold(f.Sym.Name, s.Name))) {
+			if f.Embedded == 0 && (methodSymEqual(f.Sym, s) || (ignorecase && strings.EqualFold(f.Sym.Name, s.Name))) {
 				if save != nil {
 					*save = f
 				}
