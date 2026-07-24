@@ -143,3 +143,112 @@ fallback:
 	JMP	AX
 drop:
 	RET
+
+// fastcbCallCFast is the resident OUTBOUND crossing, fused: it is
+// fastcbCallC + asmcgocall specialized for the one callsite that matters —
+// the resident goroutine, on the main thread, calling a C function that
+// takes a single pointer argument and whose errno result is ignored. The
+// generic path pays for an ABIInternal→ABI0 bridge, the wrapper's
+// getg/osPreemptExt bookkeeping, asmcgocall's am-I-on-g0/gsignal entry
+// checks, FP-relative argument reloads, and the landingpad hop; none of
+// that is needed here.
+//
+// What IS kept is the full nested-callback contract, bit-for-bit with
+// asmcgocall's:
+//
+//   - curg's sched.pc/sp/bp are published (gosave_systemstack_switch
+//     inlined) before leaving the goroutine stack: a nested fastcbentry
+//     resumes the goroutine stack at sched.sp with sched.pc as the fake
+//     return PC, and the traceback anchor is systemstack_switch+8 exactly
+//     as asmcgocall leaves it. With NOFRAME and no pushes, SP at body
+//     points at our return PC slot, which is precisely what sched.sp must
+//     address.
+//   - TLS g is switched to g0 for the duration of the C call (the signal
+//     path and any system-stack excursion read g from TLS).
+//   - our goroutine SP is saved as a DEPTH from stack.hi in the g0 frame:
+//     a nested callback may grow and therefore MOVE the stack, and
+//     copystack adjusts g.sched but cannot see raw SPs stashed on the g0
+//     stack.
+//   - X15 is re-zeroed after C returns (caller-saved in the C ABI,
+//     must-be-zero in ABIInternal); R14/g are restored from the g0 frame.
+//
+// fastcbCallCDepth is maintained here (the Go wrapper did it before) so
+// the deferred-yield gate in fastcbentrygo still sees outbound calls in
+// flight. osPreemptExtEnter/Exit are Linux no-ops; graphics.gd only
+// selects this crossing where the entry thunk armed (linux/amd64), so the
+// Windows preemptExtLock discipline is never bypassed.
+TEXT runtime·fastcbCallCFast<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-16
+	NO_LOCAL_POINTERS
+	// AX = fn, BX = arg (ABIInternal argument registers).
+	INCQ	runtime·fastcbCallCDepth(SB)
+	MOVQ	g_m(R14), R8
+	MOVQ	m_g0(R8), SI		// SI = g0
+
+	// Publish the resume point: a fake systemstack_switch frame. The
+	// anchor PC is systemstack_switch+8, and at that PC the unwinder's
+	// pcsp delta is 8 (the function is non-leaf, so it has a BP-push
+	// prologue): it reads the frame's saved BP at sched.sp+0 and its
+	// return PC at sched.sp+8, then continues into that PC's frame at
+	// sched.sp+16. Pushing BP here makes the goroutine stack match that
+	// layout exactly — [sched.sp]=saved BP, [sched.sp+8]=our return
+	// PC — so a GC scan or copystack that unwinds a nested callback
+	// down through the fake PC walks cleanly into our caller. (The
+	// stock gosave_systemstack_switch anchor does NOT satisfy this —
+	// [sched.sp+8] lands on asmcgocall's fn argument — but plain cgo
+	// syscall goroutines are unwound from syscallpc/sp instead, so it
+	// never fires there. The resident goroutine stays _Grunning and IS
+	// unwound through this anchor when preempt-scanned inside a nested
+	// callback, so the layout must be exact.)
+	// Capture the PREVIOUS sched anchor before overwriting it, so it can
+	// be restored on the way out. sched must stay canonical at all times:
+	// a later engine->Go entry (the direct thunk or a stock cgocallback)
+	// consumes sched.sp/pc as its stack-switch target, and a stale anchor
+	// left by a returned crossing points into stack space that has been
+	// reused by live frames. The old sp is stored as a DEPTH from
+	// stack.hi (a nested callback may move the stack; copystack cannot
+	// adjust raw pointers stashed on the g0 stack).
+	MOVQ	(g_stack+stack_hi)(R14), R10
+	SUBQ	(g_sched+gobuf_sp)(R14), R10	// R10 = old sched.sp depth
+	MOVQ	(g_sched+gobuf_pc)(R14), R11	// R11 = old sched.pc
+
+	PUSHQ	BP
+	MOVQ	$runtime·systemstack_switch+8(SB), R9
+	MOVQ	R9, (g_sched+gobuf_pc)(R14)
+	MOVQ	SP, (g_sched+gobuf_sp)(R14)
+	MOVQ	BP, (g_sched+gobuf_bp)(R14)
+
+	// Switch to the system stack.
+	MOVQ	SP, DX
+	get_tls(CX)
+	MOVQ	SI, g(CX)
+	MOVQ	(g_sched+gobuf_sp)(SI), SP
+	SUBQ	$32, SP
+	ANDQ	$~15, SP		// alignment for the gcc ABI
+	MOVQ	R14, 8(SP)		// save curg
+	MOVQ	(g_stack+stack_hi)(R14), DI
+	SUBQ	DX, DI
+	MOVQ	DI, 0(SP)		// save depth (stack may move)
+	MOVQ	R10, 16(SP)		// old sched.sp depth
+	MOVQ	R11, 24(SP)		// old sched.pc
+	MOVQ	BX, DI			// C argument
+	CALL	AX
+
+	// Back from C: restore g, goroutine SP (via depth), the previous
+	// sched anchor, and the ABI registers. All g0-frame slots are read
+	// before SP leaves the system stack.
+	get_tls(CX)
+	MOVQ	8(SP), R14
+	MOVQ	16(SP), R10		// old sched.sp depth
+	MOVQ	24(SP), R11		// old sched.pc
+	MOVQ	(g_stack+stack_hi)(R14), SI
+	MOVQ	SI, DX
+	SUBQ	0(SP), SI		// SI = our goroutine SP
+	SUBQ	R10, DX			// DX = old sched.sp (move-adjusted)
+	MOVQ	R14, g(CX)
+	MOVQ	DX, (g_sched+gobuf_sp)(R14)
+	MOVQ	R11, (g_sched+gobuf_pc)(R14)
+	MOVQ	SI, SP
+	POPQ	BP			// unwind the fake systemstack_switch frame
+	XORPS	X15, X15
+	DECQ	runtime·fastcbCallCDepth(SB)
+	RET
