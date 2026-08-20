@@ -23,36 +23,12 @@ func walkCompLit(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 		// n can be directly represented in the read-only data section.
 		// Make direct reference to the static data. See issue 12841.
 		vstat := readonlystaticname(gd, n.Type())
-		fixedlit(gd, inInitFunction, initKindStatic, n, vstat, init)
+		fixedlit(gd, initKindStatic, n, vstat, init)
 		return typecheck.Expr(gd, vstat)
 	}
 	var_ := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), n.Type())
 	anylit(gd, n, var_, init)
 	return var_
-}
-
-// initContext is the context in which static data is populated.
-// It is either in an init function or in any other function.
-// Static data populated in an init function will be written either
-// zero times (as a readonly, static data symbol) or
-// one time (during init function execution).
-// Either way, there is no opportunity for races or further modification,
-// so the data can be written to a (possibly readonly) data symbol.
-// Static data populated in any other function needs to be local to
-// that function to allow multiple instances of that function
-// to execute concurrently without clobbering each others' data.
-type initContext uint8
-
-const (
-	inInitFunction initContext = iota
-	inNonInitFunction
-)
-
-func (c initContext) String() string {
-	if c == inInitFunction {
-		return "inInitFunction"
-	}
-	return "inNonInitFunction"
 }
 
 // readonlystaticname returns a name backed by a read-only static data symbol.
@@ -85,9 +61,7 @@ const (
 func getdyn(gd *base.Invocation, n ir.Node, top bool) initGenType {
 	switch n.Op() {
 	default:
-		// Handle constants in linker, except that linker cannot do
-		// the relocations necessary for string constants in FIPS packages.
-		if ir.IsConstNode(n) && (!n.Type().IsString() || !gd.Ctxt.IsFIPS()) {
+		if isStaticLiteral(gd, n) {
 			return initConst
 		}
 		return initDynamic
@@ -127,7 +101,17 @@ func getdyn(gd *base.Invocation, n ir.Node, top bool) initGenType {
 	return mode
 }
 
-// isStaticCompositeLiteral reports whether n is a compile-time constant.
+// isStaticLiteral reports whether n is a compile-time (non-composite)
+// constant, which can be represented in the read-only data section.
+func isStaticLiteral(gd *base.Invocation, n ir.Node) bool {
+	// A string reference requires a relocation, not allowed
+	// in static data in FIPS mode.
+	return ir.IsConstNode(n) && !(gd.Ctxt.IsFIPS() && n.Type().IsString())
+}
+
+// isStaticCompositeLiteral reports whether a composite literal n
+// is a compile-time constant, which can be represented in the
+// read-only data section.
 func isStaticCompositeLiteral(gd *base.Invocation, n ir.Node) bool {
 	switch n.Op() {
 	case ir.OSLICELIT:
@@ -152,8 +136,10 @@ func isStaticCompositeLiteral(gd *base.Invocation, n ir.Node) bool {
 			}
 		}
 		return true
-	case ir.OLITERAL, ir.ONIL:
+	case ir.ONIL:
 		return true
+	case ir.OLITERAL:
+		return isStaticLiteral(gd, n)
 	case ir.OCONVIFACE:
 		// See staticinit.Schedule.StaticAssign's OCONVIFACE case for comments.
 		if gd.Ctxt.IsFIPS() && gd.Ctxt.Flag_shared {
@@ -194,7 +180,7 @@ const (
 
 // fixedlit handles struct, array, and slice literals.
 // TODO: expand documentation.
-func fixedlit(gd *base.Invocation, ctxt initContext, kind initKind, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
+func fixedlit(gd *base.Invocation, kind initKind, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
 	isBlank := var_ == ir.BlankNode
 	var splitnode func(ir.Node) (a ir.Node, value ir.Node)
 	switch n.Op() {
@@ -220,7 +206,7 @@ func fixedlit(gd *base.Invocation, ctxt initContext, kind initKind, n *ir.CompLi
 				return ir.BlankNode, r.Value
 			}
 			ir.SetPos(gd, r)
-			return ir.NewSelectorExpr(gd, gd.Pos, ir.ODOT, var_, r.Sym()), r.Value
+			return ir.NewSelectorExpr(gd, gd.Pos, ir.OXDOT, var_, r.Sym()), r.Value
 		}
 	default:
 		gd.Fatalf("fixedlit bad op: %v", n.Op())
@@ -236,29 +222,18 @@ func fixedlit(gd *base.Invocation, ctxt initContext, kind initKind, n *ir.CompLi
 		switch value.Op() {
 		case ir.OSLICELIT:
 			value := value.(*ir.CompLitExpr)
-			if (kind == initKindStatic && ctxt == inNonInitFunction) || (kind == initKindDynamic && ctxt == inInitFunction) {
-				var sinit ir.Nodes
-				slicelit(gd, ctxt, value, a, &sinit)
-				if kind == initKindStatic {
-					// When doing static initialization, init statements may contain dynamic
-					// expression, which will be initialized later, causing liveness analysis
-					// confuses about variables lifetime. So making sure those expressions
-					// are ordered correctly here. See issue #52673.
-					orderBlock(gd, &sinit, map[string][]*ir.Name{})
-					typecheck.Stmts(gd, sinit)
-					walkStmtList(gd, sinit)
-				}
-				init.Append(sinit...)
+			if kind == initKindDynamic {
+				slicelit(gd, value, a, init)
 				continue
 			}
 
 		case ir.OARRAYLIT, ir.OSTRUCTLIT:
 			value := value.(*ir.CompLitExpr)
-			fixedlit(gd, ctxt, kind, value, a, init)
+			fixedlit(gd, kind, value, a, init)
 			continue
 		}
 
-		islit := ir.IsConstNode(value)
+		islit := isStaticLiteral(gd, value)
 		if (kind == initKindStatic && !islit) || (kind == initKindDynamic && islit) {
 			continue
 		}
@@ -287,27 +262,10 @@ func isSmallSliceLit(n *ir.CompLitExpr) bool {
 	return n.Type().Elem().Size() == 0 || n.Len <= ir.MaxSmallArraySize/n.Type().Elem().Size()
 }
 
-func slicelit(gd *base.Invocation, ctxt initContext, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
+func slicelit(gd *base.Invocation, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nodes) {
 	// make an array type corresponding the number of elements we have
 	t := types.NewArray(n.Type().Elem(), n.Len)
 	types.CalcSize(gd, t)
-
-	if ctxt == inNonInitFunction {
-		// put everything into static array
-		vstat := staticinit.StaticName(gd, t)
-
-		fixedlit(gd, ctxt, initKindStatic, n, vstat, init)
-		fixedlit(gd, ctxt, initKindDynamic, n, vstat, init)
-
-		// copy static to slice
-		var_ = typecheck.AssignExpr(gd, var_)
-		name, offset, ok := staticinit.StaticLoc(gd, var_)
-		if !ok || name.Class != ir.PEXTERN {
-			gd.Fatalf("slicelit: %v", var_)
-		}
-		staticdata.InitSlice(gd, name, offset, vstat.Linksym(), t.NumElem())
-		return
-	}
 
 	// recipe for var = []t{...}
 	// 1. make a static array
@@ -334,12 +292,8 @@ func slicelit(gd *base.Invocation, ctxt initContext, n *ir.CompLitExpr, var_ ir.
 
 	mode := getdyn(gd, n, true)
 	if mode&initConst != 0 && !isSmallSliceLit(n) {
-		if ctxt == inInitFunction {
-			vstat = readonlystaticname(gd, t)
-		} else {
-			vstat = staticinit.StaticName(gd, t)
-		}
-		fixedlit(gd, ctxt, initKindStatic, n, vstat, init)
+		vstat = readonlystaticname(gd, t)
+		fixedlit(gd, initKindStatic, n, vstat, init)
 	}
 
 	// make new auto *array (3 declare)
@@ -394,11 +348,11 @@ func slicelit(gd *base.Invocation, ctxt initContext, n *ir.CompLitExpr, var_ ir.
 				// See issue #31987.
 				k = initKindLocalCode
 			}
-			fixedlit(gd, ctxt, k, value, a, init)
+			fixedlit(gd, k, value, a, init)
 			continue
 		}
 
-		if vstat != nil && ir.IsConstNode(value) { // already set by copy from static value
+		if vstat != nil && isStaticLiteral(gd, value) { // already set by copy from static value
 			continue
 		}
 
@@ -456,8 +410,8 @@ func maplit(gd *base.Invocation, n *ir.CompLitExpr, m ir.Node, init *ir.Nodes) {
 			datak.List.Append(r.Key)
 			datae.List.Append(r.Value)
 		}
-		fixedlit(gd, inInitFunction, initKindStatic, datak, vstatk, init)
-		fixedlit(gd, inInitFunction, initKindStatic, datae, vstate, init)
+		fixedlit(gd, initKindStatic, datak, vstatk, init)
+		fixedlit(gd, initKindStatic, datae, vstate, init)
 
 		// loop adding structure elements to map
 		// for i = 0; i < len(vstatk); i++ {
@@ -567,13 +521,13 @@ func anylit(gd *base.Invocation, n ir.Node, var_ ir.Node, init *ir.Nodes) {
 			// lay out static data
 			vstat := readonlystaticname(gd, t)
 
-			fixedlit(gd, inInitFunction, initKindStatic, n, vstat, init)
+			fixedlit(gd, initKindStatic, n, vstat, init)
 
 			// copy static to var
 			appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, var_, vstat))
 
 			// add expressions to automatic
-			fixedlit(gd, inInitFunction, initKindDynamic, n, var_, init)
+			fixedlit(gd, initKindDynamic, n, var_, init)
 			break
 		}
 
@@ -588,11 +542,11 @@ func anylit(gd *base.Invocation, n ir.Node, var_ ir.Node, init *ir.Nodes) {
 			appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, var_, nil))
 		}
 
-		fixedlit(gd, inInitFunction, initKindLocalCode, n, var_, init)
+		fixedlit(gd, initKindLocalCode, n, var_, init)
 
 	case ir.OSLICELIT:
 		n := n.(*ir.CompLitExpr)
-		slicelit(gd, inInitFunction, n, var_, init)
+		slicelit(gd, n, var_, init)
 
 	case ir.OMAPLIT:
 		n := n.(*ir.CompLitExpr)

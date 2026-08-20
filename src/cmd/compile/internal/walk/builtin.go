@@ -137,17 +137,18 @@ func walkGrowslice(gd *base.Invocation, slice *ir.Name, init *ir.Nodes, oldPtr, 
 }
 
 // walkClear walks an OCLEAR node.
-func walkClear(gd *base.Invocation, n *ir.UnaryExpr) ir.Node {
+func walkClear(gd *base.Invocation, n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
+	x := walkExpr(gd, n.X, init)
 	typ := n.X.Type()
 	switch {
 	case typ.IsSlice():
-		if n := arrayClear(gd, n.X.Pos(), n.X, nil); n != nil {
+		if n := arrayClear(gd, x.Pos(), x, nil); n != nil {
 			return n
 		}
 		// If n == nil, we are clearing an array which takes zero memory, do nothing.
 		return ir.NewBlockStmt(gd, n.Pos(), nil)
 	case typ.IsMap():
-		return mapClear(gd, n.X, reflectdata.TypePtrAt(gd, n.X.Pos(), n.X.Type()))
+		return mapClear(gd, x, reflectdata.TypePtrAt(gd, x.Pos(), typ))
 	}
 	panic("unreachable")
 }
@@ -486,7 +487,7 @@ func walkMakeSlice(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node 
 			niflen := ir.NewIfStmt(gd, gd.Pos, ir.NewBinaryExpr(gd, gd.Pos, ir.OLT, len, ir.NewInt(gd, gd.Pos, 0)), nil, nil)
 			niflen.Body = []ir.Node{mkcall(gd, "panicmakeslicelen", nil, init)}
 			nif.Body.Append(niflen, mkcall(gd, "panicmakeslicecap", nil, init))
-			init.Append(typecheck.Stmt(gd, nif))
+			appendWalkStmt(gd, init, nif)
 
 			// var arr [cap]E
 			// s = arr[:len]
@@ -784,7 +785,7 @@ func walkPrint(gd *base.Invocation, nn *ir.CallExpr, init *ir.Nodes) ir.Node {
 				}
 			}
 		default:
-			badtype(gd, ir.OPRINT, n.Type(), nil)
+			badtype(gd, nn.Op(), n.Type(), nil)
 			continue
 		}
 

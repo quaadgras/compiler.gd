@@ -12,7 +12,6 @@ import (
 
 	"fmt"
 	"go/constant"
-	"go/token"
 )
 
 // MakeDotArgs package all the arguments that match a ... T parameter into a []T.
@@ -588,11 +587,6 @@ func tcMake(gd *base.Invocation, n *ir.CallExpr) ir.Node {
 			n.SetType(nil)
 			return n
 		}
-		if ir.IsConst(l, constant.Int) && r != nil && ir.IsConst(r, constant.Int) && constant.Compare(l.Val(), token.GTR, r.Val()) {
-			gd.Errorf("len larger than cap in make(%v)", t)
-			n.SetType(nil)
-			return n
-		}
 		nn = ir.NewMakeExpr(gd, n.Pos(), ir.OMAKESLICE, l, r)
 
 	case types.TMAP:
@@ -679,14 +673,6 @@ func tcMakeSliceCopy(gd *base.Invocation, n *ir.MakeExpr) ir.Node {
 		gd.Errorf("non-integer len argument in OMAKESLICECOPY")
 	}
 
-	if ir.IsConst(n.Len, constant.Int) {
-		if ir.ConstOverflow(gd, n.Len.Val(), types.Types[types.TINT]) {
-			gd.Fatalf("len for OMAKESLICECOPY too large")
-		}
-		if constant.Sign(n.Len.Val()) < 0 {
-			gd.Fatalf("len for OMAKESLICECOPY must be non-negative")
-		}
-	}
 	return n
 }
 

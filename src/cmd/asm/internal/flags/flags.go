@@ -32,6 +32,7 @@ type Context struct {
 	SymABIs    bool
 	Importpath string
 	Spectre    string
+	Std        bool
 
 	D MultiFlag
 	I MultiFlag
@@ -95,6 +96,7 @@ func Parse(args []string, stderr io.Writer) (*Context, error) {
 	fs.BoolVar(&ctx.SymABIs, "gensymabis", false, "write symbol ABI information to output file, don't assemble")
 	fs.StringVar(&ctx.Importpath, "p", obj.UnlinkablePkg, "set expected package import to path")
 	fs.StringVar(&ctx.Spectre, "spectre", "", "enable spectre mitigations in `list` (all, ret)")
+	fs.BoolVar(&ctx.Std, "std", false, "building standard library")
 
 	fs.Var(&ctx.D, "D", "predefined symbol with optional simple value -D=identifier=value; can be set multiple times")
 	fs.Var(&ctx.I, "I", "include directory; can be set multiple times")

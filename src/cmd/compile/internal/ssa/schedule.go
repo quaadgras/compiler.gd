@@ -21,9 +21,9 @@ const (
 	ScoreMemory
 	ScoreReadFlags
 	ScoreDefault
-	ScoreInductionInc // an increment of an induction variable
 	ScoreFlags
-	ScoreControl // towards bottom of block
+	ScoreInductionInc // an increment of an induction variable
+	ScoreControl      // towards bottom of block
 )
 
 type ValHeap struct {

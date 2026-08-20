@@ -248,7 +248,7 @@ func printhex(v uint64) {
 func printquoted(s string) {
 	printlock()
 	gwrite([]byte(`"`))
-	for _, r := range s {
+	for i, r := range s {
 		switch r {
 		case '\n':
 			gwrite([]byte(`\n`))
@@ -263,6 +263,14 @@ func printquoted(s string) {
 		case '\\', '"':
 			gwrite([]byte{byte('\\'), byte(r)})
 			continue
+		case runeError:
+			// Distinguish errors from a valid encoding of U+FFFD.
+			if _, j := decoderune(s, uint(i)); j == uint(i+1) {
+				gwrite([]byte{'\\', 'x'}) // gd Phase C: see below
+				printhexopts(false, 2, uint64(s[i]))
+				continue
+			}
+			// Fall through to quoting.
 		}
 		// For now, only allow basic printable ascii through unescaped
 		if r >= ' ' && r <= '~' {

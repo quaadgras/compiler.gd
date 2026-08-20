@@ -7,6 +7,7 @@ package ld
 import (
 	"bytes"
 	"cmd/internal/codesign"
+	"cmd/internal/hash"
 	imacho "cmd/internal/macho"
 	"cmd/internal/objabi"
 	"cmd/internal/sys"
@@ -19,6 +20,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"unsafe"
 )
@@ -379,6 +381,50 @@ func machowrite(ctxt *Link, arch *sys.Arch, out *OutBuf, linkmode LinkMode) int 
 	return int(out.Offset() - o1)
 }
 
+type macVersionFlag [3]byte
+
+func (f *macVersionFlag) String() string {
+	return fmt.Sprintf("%d.%d.%d", f[0], f[1], f[2])
+}
+
+func (f *macVersionFlag) Set(s string) error {
+	var parsed macVersionFlag
+	nums := strings.Split(s, ".")
+	if len(nums) > 3 {
+		goto Error
+	}
+	for i, num := range nums {
+		n, err := strconv.Atoi(num)
+		if err != nil || n < 0 || n > 0xFF {
+			goto Error
+		}
+		parsed[i] = byte(n)
+	}
+	// success, now modify f
+	*f = parsed
+	return nil
+
+Error:
+	return fmt.Errorf("invalid version %q", s)
+}
+
+func (f *macVersionFlag) version() uint32 {
+	return uint32(f[0])<<16 | uint32(f[1])<<8 | uint32(f[2])
+}
+
+var (
+	// On advice from Apple engineers, we keep macOS set to the
+	// oldest supported macOS version but keep macSDK to the newest
+	// tested OS/SDK version. If these defaults are not good enough,
+	// the -macos and -macsdk linker flags can override them.
+	// For past problems involving these values, see
+	//	go.dev/issue/30488
+	//	go.dev/issue/56784
+	//	go.dev/issue/77917
+	macOS  = macVersionFlag{13, 0, 0}
+	macSDK = macVersionFlag{26, 2, 0}
+)
+
 func (ctxt *Link) domacho() {
 	if ctxt.FlagD {
 		return
@@ -390,8 +436,7 @@ func (ctxt *Link) domacho() {
 		if err != nil {
 			Exitf("%v", err)
 		}
-		if load != nil {
-			ctxt.machoPlatform = load.platform
+		if load != nil && load.platform != PLATFORM_MACOS {
 			ml := newMachoLoad(ctxt, ctxt.Arch, load.cmd.type_, uint32(len(load.cmd.data)))
 			copy(ml.data, load.cmd.data)
 			break
@@ -402,23 +447,12 @@ func (ctxt *Link) domacho() {
 		if buildcfg.GOOS == "ios" {
 			ctxt.machoPlatform = PLATFORM_IOS
 		}
-		if ctxt.LinkMode == LinkInternal && ctxt.machoPlatform == PLATFORM_MACOS {
-			var version uint32
-			switch ctxt.Arch.Family {
-			case sys.ARM64, sys.AMD64:
-				// This must be fairly recent for Apple signing (go.dev/issue/30488).
-				// Having too old a version here was also implicated in some problems
-				// calling into macOS libraries (go.dev/issue/56784).
-				// CL 460476 noted that in general this can be the most recent supported
-				// macOS version, but we haven't tested if going higher than Go's oldest
-				// supported macOS version could cause new problems.
-				version = 12<<16 | 0<<8 | 0<<0 // 12.0.0
-			}
+		if ctxt.load == nil && ctxt.machoPlatform == PLATFORM_MACOS {
 			ml := newMachoLoad(ctxt, ctxt.Arch, imacho.LC_BUILD_VERSION, 4)
 			ml.data[0] = uint32(ctxt.machoPlatform)
-			ml.data[1] = version // OS version
-			ml.data[2] = version // SDK version
-			ml.data[3] = 0       // ntools
+			ml.data[1] = macOS.version()
+			ml.data[2] = macSDK.version()
+			ml.data[3] = 0 // ntools
 		}
 	}
 
@@ -781,18 +815,24 @@ func asmbMacho(ctxt *Link) {
 			}
 		}
 
-		if ctxt.IsInternal() && len(ctxt.buildinfoData) > 0 {
+		if ctxt.IsInternal() && ctxt.flagHostBuildid != "none" {
 			ml := newMachoLoad(ctxt, ctxt.Arch, imacho.LC_UUID, 4)
-			// Mach-O UUID is 16 bytes
-			if len(ctxt.buildinfoData) < 16 {
-				ctxt.buildinfoData = append(ctxt.buildinfoData, make([]byte, 16)...)
+			var uuid [16]byte
+			if len(ctxt.buildinfoData) >= 16 {
+				copy(uuid[:], ctxt.buildinfoData)
+			} else {
+				// Note: When setting macSDK to 26.2, dyld refuses to run any
+				// binary without an LC_UUID, which makes bootstrap fail.
+				// To work around that situation, if buildinfo is missing we
+				// construct a hash of the binary written so far and use that.
+				// Using -B none will bypass this if desired,
+				// but the resulting binary may not be runnable.
+				copy(uuid[:], uuidFromHash(hash.Sum32(ctxt.Out.Data())))
 			}
-			// By default, buildinfo is already in UUIDv3 format
-			// (see uuidFromGoBuildId).
-			ml.data[0] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData)
-			ml.data[1] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[4:])
-			ml.data[2] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[8:])
-			ml.data[3] = ctxt.Arch.ByteOrder.Uint32(ctxt.buildinfoData[12:])
+			ml.data[0] = ctxt.Arch.ByteOrder.Uint32(uuid[0:])
+			ml.data[1] = ctxt.Arch.ByteOrder.Uint32(uuid[4:])
+			ml.data[2] = ctxt.Arch.ByteOrder.Uint32(uuid[8:])
+			ml.data[3] = ctxt.Arch.ByteOrder.Uint32(uuid[12:])
 		}
 
 		if ctxt.IsInternal() && ctxt.NeedCodeSign() {
@@ -815,7 +855,7 @@ func asmbMacho(ctxt *Link) {
 		if int64(len(data)) != codesigOff {
 			panic("wrong size")
 		}
-		codesign.Sign(ldr.Data(cs), bytes.NewReader(data), "a.out", codesigOff, int64(mstext.fileoffset), int64(mstext.filesize), ctxt.IsExe() || ctxt.IsPIE())
+		codesign.Sign(ldr.Data(cs), bytes.NewBuffer(data), "a.out", codesigOff, int64(mstext.fileoffset), int64(mstext.filesize), ctxt.IsExe() || ctxt.IsPIE())
 		ctxt.Out.SeekSet(codesigOff)
 		ctxt.Out.Write(ldr.Data(cs))
 	}
@@ -980,7 +1020,7 @@ func AddMachoSym(ctxt *Link, ldr *loader.Loader, s loader.Sym) {
 // When dynamically linking, all non-local variables and plugin-exported
 // symbols need to be exported.
 func machoShouldExport(ctxt *Link, ldr *loader.Loader, s loader.Sym) bool {
-	if !ctxt.DynlinkingGo() || ldr.AttrLocal(s) {
+	if !ctxt.DynlinkingGo() || ldr.AttrLocal(s) || (ldr.IsContentHashed(s) && ldr.SymType(s).IsText()) {
 		return false
 	}
 	if ctxt.BuildMode == BuildModePlugin && strings.HasPrefix(ldr.SymExtname(s), objabi.PathToPrefix(ctxt.flagPluginPath)) {
@@ -1310,19 +1350,22 @@ func MachoAddRebase(ctxt *Link, s loader.Sym, off int64) {
 	ctxt.machorebase = append(ctxt.machorebase, machoRebaseRecord{s, off})
 }
 
-// A bind entry tells the dynamic linker the data at GOT+off should be bound
+// A bind entry tells the dynamic linker the data at sym+off should be bound
 // to the address of the target symbol, which is a dynamic import.
+// sym is the symbol containing the pointer (e.g. the GOT or a data symbol),
+// off is the offset within that symbol, and targ is the dynamic import target.
 // For now, the only kind of entry we support is that the data is an absolute
-// address, and the source symbol is always the GOT. That seems all we need.
+// address. That seems all we need.
 // In the binary it uses a compact stateful bytecode encoding. So we record
 // entries as we go and build the table at the end.
 type machoBindRecord struct {
+	sym  loader.Sym
 	off  int64
 	targ loader.Sym
 }
 
-func MachoAddBind(ctxt *Link, off int64, targ loader.Sym) {
-	ctxt.machobind = append(ctxt.machobind, machoBindRecord{off, targ})
+func MachoAddBind(ctxt *Link, sym loader.Sym, off int64, targ loader.Sym) {
+	ctxt.machobind = append(ctxt.machobind, machoBindRecord{sym, off, targ})
 }
 
 // Generate data for the dynamic linker, used in LC_DYLD_INFO_ONLY load command.
@@ -1382,12 +1425,10 @@ func machoDyldInfo(ctxt *Link) {
 	// Bind table.
 	// TODO: compact encoding, as above.
 	// TODO: lazy binding?
-	got := ctxt.GOT
-	seg := ldr.SymSect(got).Seg
-	gotAddr := ldr.SymValue(got)
 	bind.AddUint8(BIND_OPCODE_SET_TYPE_IMM | BIND_TYPE_POINTER)
 	for _, r := range ctxt.machobind {
-		off := uint64(gotAddr+r.off) - seg.Vaddr
+		seg := ldr.SymSect(r.sym).Seg
+		off := uint64(ldr.SymValue(r.sym)+r.off) - seg.Vaddr
 		bind.AddUint8(BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB | segId(seg))
 		bind.AddUleb(off)
 

@@ -261,7 +261,7 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 			// v can be directly represented in the read-only data section.
 			lit := v.(*ir.CompLitExpr)
 			vstat := readonlystaticname(o.gd, n.Type())
-			fixedlit(o.gd, inInitFunction, initKindStatic, lit, vstat, nil) // nil init
+			fixedlit(o.gd, initKindStatic, lit, vstat, nil) // nil init
 			vstat = typecheck.Expr(o.gd, vstat).(*ir.Name)
 			return vstat
 		}

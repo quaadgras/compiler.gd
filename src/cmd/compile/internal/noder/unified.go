@@ -26,6 +26,10 @@ import (
 	"cmd/internal/src"
 )
 
+// uirVersion is the unified IR version to use for encoding/decoding.
+// Use V4 for generic methods.
+const uirVersion = pkgbits.V4
+
 // localPkgReader returns the package reader used for reading the local
 // package, set up by unified() and consumed by the unified IR linker.
 // Lives on Invocation (gd.NoderLocalPkgReader) so multiple compiles
@@ -82,7 +86,7 @@ func LookupFunc(gd *base.Invocation, fullName string) (*ir.Func, error) {
 // readBodies to post-process any funcs on the "todoBodies" list
 // that were added as a result of the lookup operations.
 func PostLookupCleanup(gd *base.Invocation) {
-	readBodies(gd, typecheck.Target(gd), false)
+	readBodies(gd, typecheck.Target(gd), false, nil)
 }
 
 func lookupFunction(gd *base.Invocation, pkg *types.Pkg, symName string) (*ir.Func, error) {
@@ -223,7 +227,7 @@ func unified(gd *base.Invocation, m posMap, noders []*noder) {
 	r := localPR.newReader(pkgbits.SectionMeta, pkgbits.PrivateRootIdx, pkgbits.SyncPrivate)
 	r.pkgInit(types.LocalPkg(gd), target)
 
-	readBodies(gd, target, false)
+	readBodies(gd, target, false, nil)
 
 	// Check that nothing snuck past typechecking.
 	for _, fn := range target.Funcs {
@@ -257,7 +261,7 @@ func unified(gd *base.Invocation, m posMap, noders []*noder) {
 // If duringInlining is true, then the inline.InlineDecls is called as
 // necessary on instantiations of imported generic functions, so their
 // inlining costs can be computed.
-func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool) {
+func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool, profile *pgoir.Profile) {
 	var inlDecls []*ir.Func
 
 	// Don't use range--bodyIdx can add closures to todoBodies.
@@ -326,7 +330,7 @@ func readBodies(gd *base.Invocation, target *ir.Package, duringInlining bool) {
 
 		oldLowerM := gd.Flag.LowerM
 		gd.Flag.LowerM = 0
-		inline.CanInlineFuncs(gd, inlDecls, nil)
+		inline.CanInlineFuncs(gd, inlDecls, profile)
 		gd.Flag.LowerM = oldLowerM
 
 		for _, fn := range inlDecls {
@@ -488,10 +492,8 @@ func readPackage(gd *base.Invocation, pr *pkgReader, importpkg *types.Pkg, local
 // writeUnifiedExport writes to `out` the finalized, self-contained
 // Unified IR export data file for the current compilation unit.
 func writeUnifiedExport(gd *base.Invocation, out io.Writer) {
-	// Use V2 as the encoded version for aliastypeparams.
-	version := pkgbits.V2
 	l := linker{
-		pw: pkgbits.NewPkgEncoder(version, gd.Debug.SyncFrames),
+		pw: pkgbits.NewPkgEncoder(uirVersion, gd.Debug.SyncFrames),
 
 		pkgs:   make(map[string]index),
 		decls:  make(map[*types.Sym]index),
@@ -511,6 +513,12 @@ func writeUnifiedExport(gd *base.Invocation, out io.Writer) {
 
 		r.Sync(pkgbits.SyncPkg)
 		selfPkgIdx = l.relocIdx(gd, pr, pkgbits.SectionPkg, r.Reloc(pkgbits.SectionPkg))
+
+		// Versions must match.
+		// TODO: It seems that we should be able to use r.Version() for NewPkgEncoder
+		// instead of passing uirVersion, but NewPkgEncoder is created before r.
+		// If that is correct, we should make that happen.
+		assert(gd, r.Version() == uirVersion)
 
 		if r.Version().Has(pkgbits.HasInit) {
 			r.Bool()

@@ -4,7 +4,10 @@
 
 package abi
 
-import "unsafe"
+import (
+	"internal/goarch"
+	"unsafe"
+)
 
 // The first word of every non-empty interface type contains an *ITab.
 // It records the underlying concrete type (Type), the interface type it
@@ -27,6 +30,21 @@ type ITab struct {
 	// pessimistic answer the compiler uses today for unknown callees.
 	// Phase D will source real values from the concrete method's
 	// escape profile.
+}
+
+// Size returns the size of the itab in memory, including the gd
+// escape-mask tail. This must match the sizes used by every ITab
+// allocator (runtime getitab's persistentalloc, the compiler's static
+// emission, and the linker's .itab layout), because the runtime walks
+// the module's itab section with it.
+func (it *ITab) Size() int {
+	if it.Fun[0] == 0 {
+		// Type does not implement Inter: the compiler emits a single
+		// zero Fun slot plus one escape-mask word (see
+		// reflectdata.writeITab), regardless of Inter's method count.
+		return ITabSize(goarch.PtrSize, 1)
+	}
+	return ITabSize(goarch.PtrSize, len(it.Inter.Methods))
 }
 
 // ITabEscMaskOff returns the byte offset of EscMask[k] relative to the

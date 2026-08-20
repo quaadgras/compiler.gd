@@ -121,9 +121,10 @@ func (gd *Invocation) addVersionFlag(binName string) {
 }
 
 // expandResponseFiles expands any "@file" arguments in args by
-// reading the named file and substituting CR/CRLF-separated tokens
-// (each decoded via objabi.DecodeArg). Mirrors objabi.expandArgs but
-// is a pure function: no os.Args mutation, no global state.
+// reading the named file and substituting its whitespace-separated,
+// GCC-style quoted tokens (parsed via objabi.ParseArgs). Mirrors
+// objabi.expandArgs but is a pure function: no os.Args mutation, no
+// global state.
 //
 // Returned slice may alias args when nothing was expanded.
 func expandResponseFiles(args []string) []string {
@@ -138,10 +139,7 @@ func expandResponseFiles(args []string) []string {
 			if err != nil {
 				log.Fatal(err)
 			}
-			tokens := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(slurp), "\r", "")), "\n")
-			for j, tok := range tokens {
-				tokens[j] = objabi.DecodeArg(tok)
-			}
+			tokens := objabi.ParseArgs(slurp)
 			out = append(out, expandResponseFiles(tokens)...)
 		} else if out != nil {
 			out = append(out, s)

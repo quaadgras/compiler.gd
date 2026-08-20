@@ -81,25 +81,36 @@ func getAddressableNameFromNode(n ir.Node) *ir.Name {
 	return nil
 }
 
+// getKeepAliveNodes analyzes an IR node and returns a list of nodes that must be kept alive.
+func getKeepAliveNodes(gd *base.Invocation, pos src.XPos, n ir.Node) ir.Nodes {
+	name := getAddressableNameFromNode(n)
+	if name != nil {
+		debugName(gd, name, pos)
+		return ir.Nodes{name}
+	} else if deref, ok := n.(*ir.StarExpr); ok && deref != nil {
+		if gd.Flag.LowerM > 1 {
+			gd.WarnfAt(pos, "dereference will be kept alive")
+		}
+		return ir.Nodes{deref}
+	} else if gd.Flag.LowerM > 1 {
+		gd.WarnfAt(pos, "expr is unknown to bloop pass")
+	}
+	return nil
+}
+
 // keepAliveAt returns a statement that is either curNode, or a
 // block containing curNode followed by a call to runtime.KeepAlive for each
 // node in ns. These calls ensure that nodes in ns will be live until
 // after curNode's execution.
-func keepAliveAt(gd *base.Invocation, ns []ir.Node, curNode ir.Node) ir.Node {
+func keepAliveAt(gd *base.Invocation, ns ir.Nodes, curNode ir.Node) ir.Node {
 	if len(ns) == 0 {
 		return curNode
 	}
 
 	pos := curNode.Pos()
-	calls := []ir.Node{curNode}
+	calls := ir.Nodes{curNode}
 	for _, n := range ns {
-		if n == nil {
-			continue
-		}
-		if n.Sym() == nil {
-			continue
-		}
-		if n.Sym().IsBlank() {
+		if n == nil || n.Sym() == nil || n.Sym().IsBlank() {
 			continue
 		}
 		if !ir.IsAddressable(n) {
@@ -111,9 +122,7 @@ func keepAliveAt(gd *base.Invocation, ns []ir.Node, curNode ir.Node) ir.Node {
 			arg.TypeWord = srcRType0
 			arg.SrcRType = srcRType0
 		}
-		callExpr := typecheck.Call(gd, pos,
-			typecheck.LookupRuntime(gd, "KeepAlive"),
-			[]ir.Node{arg}, false).(*ir.CallExpr)
+		callExpr := typecheck.Call(gd, pos, typecheck.LookupRuntime(gd, "KeepAlive"), ir.Nodes{arg}, false).(*ir.CallExpr)
 		callExpr.IsCompilerVarLive = true
 		callExpr.NoInline = true
 		calls = append(calls, callExpr)
@@ -132,11 +141,85 @@ func debugName(gd *base.Invocation, name *ir.Name, pos src.XPos) {
 	}
 }
 
+// preserveCallResults assigns the results of a call statement to temporary variables to ensure they remain alive.
+func preserveCallResults(gd *base.Invocation, curFn *ir.Func, call *ir.CallExpr) ir.Node {
+	var ns ir.Nodes
+	lhs := make(ir.Nodes, call.Fun.Type().NumResults())
+	for i, res := range call.Fun.Type().Results() {
+		tmp := typecheck.TempAt(gd, call.Pos(), curFn, res.Type)
+		lhs[i] = tmp
+		ns = append(ns, tmp)
+	}
+
+	if gd.Flag.LowerM > 1 {
+		plural := ""
+		if call.Fun.Type().NumResults() > 1 {
+			plural = "s"
+		}
+		gd.WarnfAt(call.Pos(), "function result%s will be kept alive", plural)
+	}
+
+	assign := typecheck.AssignExpr(gd, ir.NewAssignListStmt(gd, call.Pos(), ir.OAS2, lhs, ir.Nodes{call})).(*ir.AssignListStmt)
+	assign.Def = true
+	for _, tmp := range lhs {
+		// Place temp declarations in the loop body to help escape analysis.
+		assign.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, assign.Pos(), ir.ODCL, tmp.(*ir.Name))))
+	}
+	return keepAliveAt(gd, ns, assign)
+}
+
+// preserveCallArgs ensures the arguments of a call statement are kept alive by transforming them into temporaries if necessary.
+func preserveCallArgs(gd *base.Invocation, curFn *ir.Func, call *ir.CallExpr) ir.Node {
+	var argTmps ir.Nodes
+	var names ir.Nodes
+	preserveTmp := func(pos src.XPos, n ir.Node) ir.Node {
+		tmp := typecheck.TempAt(gd, pos, curFn, n.Type())
+		assign := ir.NewAssignStmt(gd, pos, tmp, n)
+		assign.Def = true
+		// Place temp declarations in the loop body to help escape analysis.
+		assign.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, assign.Pos(), ir.ODCL, tmp)))
+		argTmps = append(argTmps, typecheck.AssignExpr(gd, assign))
+		names = append(names, tmp)
+		if gd.Flag.LowerM > 1 {
+			gd.WarnfAt(call.Pos(), "function arg will be kept alive")
+		}
+		return tmp
+	}
+	for i, a := range call.Args {
+		if name := getAddressableNameFromNode(a); name != nil {
+			// If they are name, keep them alive directly.
+			debugName(gd, name, call.Pos())
+			names = append(names, name)
+		} else if a.Op() == ir.OSLICELIT {
+			// variadic args are encoded as slice literal.
+			s := a.(*ir.CompLitExpr)
+			var ns ir.Nodes
+			for i, elem := range s.List {
+				if name := getAddressableNameFromNode(elem); name != nil {
+					debugName(gd, name, call.Pos())
+					ns = append(ns, name)
+				} else {
+					// We need a temporary to save this arg.
+					s.List[i] = preserveTmp(elem.Pos(), elem)
+				}
+			}
+			names = append(names, ns...)
+		} else {
+			// expressions, we need to assign them to temps and change the original arg to reference them.
+			call.Args[i] = preserveTmp(call.Pos(), a)
+		}
+	}
+	if len(argTmps) > 0 {
+		argTmps = append(argTmps, call)
+		return keepAliveAt(gd, names, ir.NewBlockStmt(gd, call.Pos(), argTmps))
+	}
+	return keepAliveAt(gd, names, call)
+}
+
 // preserveStmt transforms stmt so that any names defined/assigned within it
 // are used after stmt's execution, preventing their dead code elimination
 // and dead store elimination. The return value is the transformed statement.
-func preserveStmt(gd *base.Invocation, curFn *ir.Func, stmt ir.Node) (ret ir.Node) {
-	ret = stmt
+func preserveStmt(gd *base.Invocation, curFn *ir.Func, stmt ir.Node) ir.Node {
 	switch n := stmt.(type) {
 	case *ir.AssignStmt:
 		// If the left hand side is blank, we need to assign it to a temp
@@ -149,21 +232,9 @@ func preserveStmt(gd *base.Invocation, curFn *ir.Func, stmt ir.Node) (ret ir.Nod
 			stmt = typecheck.AssignExpr(gd, n)
 			n = stmt.(*ir.AssignStmt)
 		}
-		// Peel down struct and slice indexing to get the names
-		name := getAddressableNameFromNode(n.X)
-		if name != nil {
-			debugName(gd, name, n.Pos())
-			ret = keepAliveAt(gd, []ir.Node{name}, n)
-		} else if deref, ok := n.X.(*ir.StarExpr); ok && deref != nil {
-			ret = keepAliveAt(gd, []ir.Node{deref}, n)
-			if gd.Flag.LowerM > 1 {
-				gd.WarnfAt(n.Pos(), "dereference will be kept alive")
-			}
-		} else if gd.Flag.LowerM > 1 {
-			gd.WarnfAt(n.Pos(), "expr is unknown to bloop pass")
-		}
+		return keepAliveAt(gd, getKeepAliveNodes(gd, n.Pos(), n.X), n)
 	case *ir.AssignListStmt:
-		ns := []ir.Node{}
+		var ns ir.Nodes
 		hasBlank := false
 		for i, lhs := range n.Lhs {
 			if ir.IsBlank(lhs) {
@@ -186,20 +257,8 @@ func preserveStmt(gd *base.Invocation, curFn *ir.Func, stmt ir.Node) (ret ir.Nod
 				n.Lhs[i] = tmp
 				n.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, n.Pos(), ir.ODCL, tmp)))
 				hasBlank = true
-				lhs = tmp
 			}
-			name := getAddressableNameFromNode(lhs)
-			if name != nil {
-				debugName(gd, name, n.Pos())
-				ns = append(ns, name)
-			} else if deref, ok := lhs.(*ir.StarExpr); ok && deref != nil {
-				ns = append(ns, deref)
-				if gd.Flag.LowerM > 1 {
-					gd.WarnfAt(n.Pos(), "dereference will be kept alive")
-				}
-			} else if gd.Flag.LowerM > 1 {
-				gd.WarnfAt(n.Pos(), "expr is unknown to bloop pass")
-			}
+			ns = append(ns, getKeepAliveNodes(gd, n.Pos(), n.Lhs[i])...)
 		}
 		if hasBlank {
 			// blank nodes are rewritten to temps, we need to typecheck the node again.
@@ -207,111 +266,18 @@ func preserveStmt(gd *base.Invocation, curFn *ir.Func, stmt ir.Node) (ret ir.Nod
 			stmt = typecheck.AssignExpr(gd, n)
 			n = stmt.(*ir.AssignListStmt)
 		}
-		ret = keepAliveAt(gd, ns, n)
+		return keepAliveAt(gd, ns, n)
 	case *ir.AssignOpStmt:
-		name := getAddressableNameFromNode(n.X)
-		if name != nil {
-			debugName(gd, name, n.Pos())
-			ret = keepAliveAt(gd, []ir.Node{name}, n)
-		} else if deref, ok := n.X.(*ir.StarExpr); ok && deref != nil {
-			ret = keepAliveAt(gd, []ir.Node{deref}, n)
-			if gd.Flag.LowerM > 1 {
-				gd.WarnfAt(n.Pos(), "dereference will be kept alive")
-			}
-		} else if gd.Flag.LowerM > 1 {
-			gd.WarnfAt(n.Pos(), "expr is unknown to bloop pass")
-		}
+		return keepAliveAt(gd, getKeepAliveNodes(gd, n.Pos(), n.X), n)
 	case *ir.CallExpr:
-		curNode := stmt
+		// The function's results are not assigned, preserve them.
 		if n.Fun != nil && n.Fun.Type() != nil && n.Fun.Type().NumResults() != 0 {
-			ns := []ir.Node{}
-			// This function's results are not assigned, assign them to
-			// auto tmps and then keepAliveAt these autos.
-			// Note: markStmt assumes the context that it's called - this CallExpr is
-			// not within another OAS2, which is guaranteed by the case above.
-			results := n.Fun.Type().Results()
-			lhs := make([]ir.Node, len(results))
-			for i, res := range results {
-				tmp := typecheck.TempAt(gd, n.Pos(), curFn, res.Type)
-				lhs[i] = tmp
-				ns = append(ns, tmp)
-			}
-
-			// Create an assignment statement.
-			assign := typecheck.AssignExpr(gd,
-				ir.NewAssignListStmt(gd, n.Pos(), ir.OAS2, lhs,
-					[]ir.Node{n})).(*ir.AssignListStmt)
-			assign.Def = true
-			for _, tmp := range lhs {
-				// Place temp declarations in the loop body to help escape analysis.
-				assign.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, assign.Pos(), ir.ODCL, tmp.(*ir.Name))))
-			}
-			curNode = assign
-			plural := ""
-			if len(results) > 1 {
-				plural = "s"
-			}
-			if gd.Flag.LowerM > 1 {
-				gd.WarnfAt(n.Pos(), "function result%s will be kept alive", plural)
-			}
-			ret = keepAliveAt(gd, ns, curNode)
-		} else {
-			// This function probably doesn't return anything, keep its args alive.
-			argTmps := []ir.Node{}
-			names := []ir.Node{}
-			for i, a := range n.Args {
-				if name := getAddressableNameFromNode(a); name != nil {
-					// If they are name, keep them alive directly.
-					debugName(gd, name, n.Pos())
-					names = append(names, name)
-				} else if a.Op() == ir.OSLICELIT {
-					// variadic args are encoded as slice literal.
-					s := a.(*ir.CompLitExpr)
-					ns := []ir.Node{}
-					for i, elem := range s.List {
-						if name := getAddressableNameFromNode(elem); name != nil {
-							debugName(gd, name, n.Pos())
-							ns = append(ns, name)
-						} else {
-							// We need a temporary to save this arg.
-							tmp := typecheck.TempAt(gd, elem.Pos(), curFn, elem.Type())
-							assign := ir.NewAssignStmt(gd, elem.Pos(), tmp, elem)
-							assign.Def = true
-							// Place temp declarations in the loop body to help escape analysis.
-							assign.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, assign.Pos(), ir.ODCL, tmp)))
-							argTmps = append(argTmps, typecheck.AssignExpr(gd, assign))
-							names = append(names, tmp)
-							s.List[i] = tmp
-							if gd.Flag.LowerM > 1 {
-								gd.WarnfAt(n.Pos(), "function arg will be kept alive")
-							}
-						}
-					}
-					names = append(names, ns...)
-				} else {
-					// expressions, we need to assign them to temps and change the original arg to reference
-					// them.
-					tmp := typecheck.TempAt(gd, n.Pos(), curFn, a.Type())
-					assign := ir.NewAssignStmt(gd, n.Pos(), tmp, a)
-					assign.Def = true
-					// Place temp declarations in the loop body to help escape analysis.
-					assign.PtrInit().Append(typecheck.Stmt(gd, ir.NewDecl(gd, assign.Pos(), ir.ODCL, tmp)))
-					argTmps = append(argTmps, typecheck.AssignExpr(gd, assign))
-					names = append(names, tmp)
-					n.Args[i] = tmp
-					if gd.Flag.LowerM > 1 {
-						gd.WarnfAt(n.Pos(), "function arg will be kept alive")
-					}
-				}
-			}
-			if len(argTmps) > 0 {
-				argTmps = append(argTmps, n)
-				curNode = ir.NewBlockStmt(gd, n.Pos(), argTmps)
-			}
-			ret = keepAliveAt(gd, names, curNode)
+			return preserveCallResults(gd, curFn, n)
 		}
+		// This function doesn't return anything, keep its args alive.
+		return preserveCallArgs(gd, curFn, n)
 	}
-	return
+	return stmt
 }
 
 func preserveStmts(gd *base.Invocation, curFn *ir.Func, list ir.Nodes) {
@@ -322,7 +288,7 @@ func preserveStmts(gd *base.Invocation, curFn *ir.Func, list ir.Nodes) {
 
 // isTestingBLoop returns true if it matches the node as a
 // testing.(*B).Loop. See issue #61515.
-func isTestingBLoop(gd *base.Invocation, t ir.Node) bool {
+func isTestingBLoop(t ir.Node) bool {
 	if t.Op() != ir.OFOR {
 		return false
 	}
@@ -353,7 +319,7 @@ type editor struct {
 }
 
 func (e editor) edit(n ir.Node) ir.Node {
-	e.inBloop = isTestingBLoop(e.gd, n) || e.inBloop
+	e.inBloop = isTestingBLoop(n) || e.inBloop
 	// It's in bloop, mark the stmts with bodies.
 	ir.EditChildren(n, e.edit)
 	if e.inBloop {
@@ -377,7 +343,7 @@ func (e editor) edit(n ir.Node) ir.Node {
 	return n
 }
 
-// BloopWalk performs a walk on all functions in the package
+// Walk performs a walk on all functions in the package
 // if it imports testing and wrap the results of all qualified
 // statements in a runtime.KeepAlive intrinsic call. See package
 // doc for more details.
@@ -385,7 +351,7 @@ func (e editor) edit(n ir.Node) ir.Node {
 //	for b.Loop() {...}
 //
 // loop's body.
-func BloopWalk(gd *base.Invocation, pkg *ir.Package) {
+func Walk(gd *base.Invocation, pkg *ir.Package) {
 	hasTesting := false
 	for _, i := range pkg.Imports {
 		if i.Path == "testing" {
@@ -399,5 +365,9 @@ func BloopWalk(gd *base.Invocation, pkg *ir.Package) {
 	for _, fn := range pkg.Funcs {
 		e := editor{gd, false, fn}
 		ir.EditChildren(fn, e.edit)
+		if ir.MatchAstDump(gd, fn, "bloop") {
+			ir.AstDump(gd, fn, "bloop, "+ir.FuncName(fn))
+		}
 	}
+
 }

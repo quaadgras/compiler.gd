@@ -192,18 +192,18 @@ func walkCompare(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.Node 
 		// is handled by walkCompare.
 		fn, needsLength := reflectdata.EqFor(gd, t)
 		call := ir.NewCallExpr(gd, gd.Pos, ir.OCALL, fn, nil)
-		addrCmpl := typecheck.NodAddr(gd, cmpl)
+		addrCmpL := typecheck.NodAddr(gd, cmpl)
 		addrCmpR := typecheck.NodAddr(gd, cmpr)
 		if !types.IsNoRacePkg(types.LocalPkg(gd)) && gd.Flag.Race {
-			ptrL := typecheck.Conv(gd, typecheck.Conv(gd, addrCmpl, types.Types[types.TUNSAFEPTR]), types.Types[types.TUINTPTR])
+			ptrL := typecheck.Conv(gd, typecheck.Conv(gd, addrCmpL, types.Types[types.TUNSAFEPTR]), types.Types[types.TUINTPTR])
 			ptrR := typecheck.Conv(gd, typecheck.Conv(gd, addrCmpR, types.Types[types.TUNSAFEPTR]), types.Types[types.TUINTPTR])
 			raceFn := typecheck.LookupRuntime(gd, "racereadrange")
 			size := ir.NewInt(gd, gd.Pos, t.Size())
 			call.PtrInit().Append(mkcall1(gd, raceFn, nil, init, ptrL, size))
 			call.PtrInit().Append(mkcall1(gd, raceFn, nil, init, ptrR, size))
 		}
-		call.Args.Append(addrCmpl)
-		call.Args.Append(addrCmpR)
+		call.Args.Append(typecheck.Conv(gd, addrCmpL, types.Types[types.TUNSAFEPTR]))
+		call.Args.Append(typecheck.Conv(gd, addrCmpR, types.Types[types.TUNSAFEPTR]))
 		if needsLength {
 			call.Args.Append(ir.NewInt(gd, gd.Pos, t.Size()))
 		}

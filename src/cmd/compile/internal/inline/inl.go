@@ -230,7 +230,7 @@ func simdCreditMultiplier(fn *ir.Func) int32 {
 	// awesome SIMD performance will be missed.
 	for _, v := range fn.ClosureVars {
 		if v.Type().IsSIMD() {
-			return 11 // 11 ought to be enough.
+			return 16 // <strike>11</strike> 16 ought to be enough.
 		}
 	}
 
@@ -325,6 +325,8 @@ func CanInline(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile) {
 	// locals, and we use this map to produce a pruned Inline.Dcl
 	// list. See issue 25459 for more context.
 
+	dbg := ir.MatchAstDump(gd, fn, "inline")
+
 	visitor := hairyVisitor{
 		gd:            gd,
 		curFunc:       fn,
@@ -334,10 +336,17 @@ func CanInline(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile) {
 		maxBudget:     budget,
 		extraCallCost: cc,
 		profile:       profile,
+		dbg:           dbg, // Useful for downstream debugging
 	}
+
 	if visitor.tooHairy(fn) {
 		reason = visitor.reason
+		if dbg {
+			ir.AstDump(gd, fn, "inline, too hairy because "+visitor.reason+", "+ir.FuncName(fn))
+		}
 		return
+	} else if dbg {
+		ir.AstDump(gd, fn, "inline, OK, "+ir.FuncName(fn))
 	}
 
 	n.Func.Inl = &ir.Inline{
@@ -355,9 +364,9 @@ func CanInline(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile) {
 // function is inlinable.
 func noteInlinableFunc(gd *base.Invocation, n *ir.Name, fn *ir.Func, cost int32) {
 	if gd.Flag.LowerM > 1 {
-		gd.Logf("%v: can inline %v with cost %d as: %v { %v }\n", ir.Line(gd, fn), n, cost, fn.Type(), fn.Body)
+		gd.Logf("%v: can inline %v with cost %d as: %v { %v }\n", ir.Line(gd, fn), n.DiagName(), cost, fn.Type(), fn.Body)
 	} else if gd.Flag.LowerM != 0 {
-		gd.Logf("%v: can inline %v\n", ir.Line(gd, fn), n)
+		gd.Logf("%v: can inline %v\n", ir.Line(gd, fn), n.DiagName())
 	}
 	// JSON optimization log output.
 	if logopt.Enabled() {
@@ -483,6 +492,7 @@ type hairyVisitor struct {
 	usedLocals    ir.NameSet
 	do            func(ir.Node) bool
 	profile       *pgoir.Profile
+	dbg           bool
 }
 
 func isDebugFn(fn *ir.Func) bool {
@@ -944,7 +954,7 @@ func TryInlineCall(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr, bi
 	}
 
 	if fn := inlCallee(gd, callerfn, call.Fun, profile, false); fn != nil && typecheck.HaveInlineBody(gd, fn) {
-		return mkinlcall(gd, callerfn, call, fn, bigCaller, closureCalledOnce)
+		return mkinlcall(gd, callerfn, call, fn, bigCaller, closureCalledOnce, profile)
 	}
 	return nil
 }
@@ -990,7 +1000,7 @@ var SSADumpInline = func(*ir.Func) {}
 
 // InlineCall allows the inliner implementation to be overridden.
 // If it returns nil, the function will not be inlined.
-var InlineCall = func(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr, fn *ir.Func, inlIndex int) *ir.InlinedCallExpr {
+var InlineCall = func(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr, fn *ir.Func, inlIndex int, profile *pgoir.Profile) *ir.InlinedCallExpr {
 	gd.Fatalf("inline.InlineCall not overridden")
 	panic("unreachable")
 }
@@ -1185,7 +1195,7 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 // The result of mkinlcall MUST be assigned back to n, e.g.
 //
 //	n.Left = mkinlcall(n.Left, fn, isddd)
-func mkinlcall(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, fn *ir.Func, bigCaller, closureCalledOnce bool) *ir.InlinedCallExpr {
+func mkinlcall(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, fn *ir.Func, bigCaller, closureCalledOnce bool, profile *pgoir.Profile) *ir.InlinedCallExpr {
 	ok, score, hot := canInlineCallExpr(gd, callerfn, n, fn, bigCaller, closureCalledOnce, true)
 	if !ok {
 		return nil
@@ -1257,19 +1267,19 @@ func mkinlcall(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, fn *ir.Fu
 	if gd.Flag.LowerM != 0 {
 		if buildcfg.Experiment.NewInliner {
 			gd.Logf("%v: inlining call to %v with score %d\n",
-				ir.Line(gd, n), fn, score)
+				ir.Line(gd, n), fn.Nname.DiagName(), score)
 		} else {
-			gd.Logf("%v: inlining call to %v\n", ir.Line(gd, n), fn)
+			gd.Logf("%v: inlining call to %v\n", ir.Line(gd, n), fn.Nname.DiagName())
 		}
 	}
 	if gd.Flag.LowerM > 2 {
 		gd.Logf("%v: Before inlining: %+v\n", ir.Line(gd, n), n)
 	}
 
-	res := InlineCall(gd, callerfn, n, fn, inlIndex)
+	res := InlineCall(gd, callerfn, n, fn, inlIndex, profile)
 
 	if res == nil {
-		gd.FatalfAt(n.Pos(), "inlining call to %v failed", fn)
+		gd.FatalfAt(n.Pos(), "inlining call to %v failed", fn.Nname.DiagName())
 	}
 
 	if gd.Flag.LowerM > 2 {

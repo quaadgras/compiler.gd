@@ -462,7 +462,7 @@ func (v Value) append(dst []byte) []byte {
 	case KindDuration:
 		return append(dst, time.Duration(v.any.(kindDuration)).String()...)
 	case KindTime:
-		return append(dst, v.time().String()...)
+		return v.time().AppendFormat(dst, "2006-01-02 15:04:05.999999999 -0700 MST")
 	case KindGroup:
 		return fmt.Append(dst, v.group())
 	case KindAny, KindLogValuer:

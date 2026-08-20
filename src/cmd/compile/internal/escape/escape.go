@@ -526,6 +526,11 @@ func (b *batch) finish(fns []*ir.Func) {
 		}
 	}
 
+	for _, fn := range fns {
+		if ir.MatchAstDump(b.gd, fn, "escape") {
+			ir.AstDump(b.gd, fn, "escape, "+ir.FuncName(fn))
+		}
+	}
 }
 
 // inMutualBatch reports whether function fn is in the batch of

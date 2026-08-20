@@ -15,6 +15,7 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"internal/abi"
+	"internal/buildcfg"
 )
 
 // MapGroupType makes the map slot group type given the type of the map.
@@ -28,14 +29,6 @@ func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 	// a correct GC program for it.
 	//
 	// Make sure this stays in sync with internal/runtime/maps/group.go.
-	//
-	// type group struct {
-	//     ctrl uint64
-	//     slots [abi.MapGroupSlots]struct {
-	//         key  keyType
-	//         elem elemType
-	//     }
-	// }
 
 	keytype := t.Key()
 	elemtype := t.Elem()
@@ -48,19 +41,48 @@ func MapGroupType(gd *base.Invocation, t *types.Type) *types.Type {
 		elemtype = types.NewPtr(elemtype)
 	}
 
-	slotFields := []*types.Field{
-		makefield("key", keytype),
-		makefield("elem", elemtype),
-	}
-	slot := types.NewStruct(slotFields)
-	slot.SetNoalg(true)
+	var fields []*types.Field
+	if buildcfg.Experiment.MapSplitGroup {
+		// Split layout (KKKKVVVV):
+		// type group struct {
+		//     ctrl  uint64
+		//     keys  [abi.MapGroupSlots]keyType
+		//     elems [abi.MapGroupSlots]elemType
+		// }
+		keyArr := types.NewArray(keytype, abi.MapGroupSlots)
+		keyArr.SetNoalg(true)
 
-	slotArr := types.NewArray(slot, abi.MapGroupSlots)
-	slotArr.SetNoalg(true)
+		elemArr := types.NewArray(elemtype, abi.MapGroupSlots)
+		elemArr.SetNoalg(true)
 
-	fields := []*types.Field{
-		makefield("ctrl", types.Types[types.TUINT64]),
-		makefield("slots", slotArr),
+		fields = []*types.Field{
+			makefield("ctrl", types.Types[types.TUINT64]),
+			makefield("keys", keyArr),
+			makefield("elems", elemArr),
+		}
+	} else {
+		// Interleaved slot layout (KVKVKVKV):
+		// type group struct {
+		//     ctrl  uint64
+		//     slots [abi.MapGroupSlots]struct {
+		//         key  keyType
+		//         elem elemType
+		//     }
+		// }
+		slotFields := []*types.Field{
+			makefield("key", keytype),
+			makefield("elem", elemtype),
+		}
+		slot := types.NewStruct(slotFields)
+		slot.SetNoalg(true)
+
+		slotArr := types.NewArray(slot, abi.MapGroupSlots)
+		slotArr.SetNoalg(true)
+
+		fields = []*types.Field{
+			makefield("ctrl", types.Types[types.TUINT64]),
+			makefield("slots", slotArr),
+		}
 	}
 
 	group := types.NewStruct(fields)
@@ -106,29 +128,29 @@ var (
 func mapTableType(gd *base.Invocation) *types.Type {
 	cachedMapTableTypeOnce.Do(func() {
 
-	// type table struct {
-	//     used       uint16
-	//     capacity   uint16
-	//     growthLeft uint16
-	//     localDepth uint8
-	//     // N.B Padding
-	//
-	//     index int
-	//
-	//     // From groups.
-	//     groups_data       unsafe.Pointer
-	//     groups_lengthMask uint64
-	// }
-	// must match internal/runtime/maps/table.go:table.
-	fields := []*types.Field{
-		makefield("used", types.Types[types.TUINT16]),
-		makefield("capacity", types.Types[types.TUINT16]),
-		makefield("growthLeft", types.Types[types.TUINT16]),
-		makefield("localDepth", types.Types[types.TUINT8]),
-		makefield("index", types.Types[types.TINT]),
-		makefield("groups_data", types.Types[types.TUNSAFEPTR]),
-		makefield("groups_lengthMask", types.Types[types.TUINT64]),
-	}
+		// type table struct {
+		//     used       uint16
+		//     capacity   uint16
+		//     growthLeft uint16
+		//     localDepth uint8
+		//     // N.B Padding
+		//
+		//     index int
+		//
+		//     // From groups.
+		//     groups_data       unsafe.Pointer
+		//     groups_lengthMask uint64
+		// }
+		// must match internal/runtime/maps/table.go:table.
+		fields := []*types.Field{
+			makefield("used", types.Types[types.TUINT16]),
+			makefield("capacity", types.Types[types.TUINT16]),
+			makefield("growthLeft", types.Types[types.TUINT16]),
+			makefield("localDepth", types.Types[types.TUINT8]),
+			makefield("index", types.Types[types.TINT]),
+			makefield("groups_data", types.Types[types.TUNSAFEPTR]),
+			makefield("groups_lengthMask", types.Types[types.TUINT64]),
+		}
 
 		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("table"))
 		table := types.NewNamed(n)
@@ -161,34 +183,34 @@ var (
 func MapType(gd *base.Invocation) *types.Type {
 	cachedMapTypeOnce.Do(func() {
 
-	// type Map struct {
-	//     used uint64
-	//     seed uintptr
-	//
-	//     dirPtr unsafe.Pointer
-	//     dirLen int
-	//
-	//     globalDepth uint8
-	//     globalShift uint8
-	//
-	//     writing uint8
-	//     tombstonePossible bool
-	//     // N.B Padding
-	//
-	//     clearSeq uint64
-	// }
-	// must match internal/runtime/maps/map.go:Map.
-	fields := []*types.Field{
-		makefield("used", types.Types[types.TUINT64]),
-		makefield("seed", types.Types[types.TUINTPTR]),
-		makefield("dirPtr", types.Types[types.TUNSAFEPTR]),
-		makefield("dirLen", types.Types[types.TINT]),
-		makefield("globalDepth", types.Types[types.TUINT8]),
-		makefield("globalShift", types.Types[types.TUINT8]),
-		makefield("writing", types.Types[types.TUINT8]),
-		makefield("tombstonePossible", types.Types[types.TBOOL]),
-		makefield("clearSeq", types.Types[types.TUINT64]),
-	}
+		// type Map struct {
+		//     used uint64
+		//     seed uintptr
+		//
+		//     dirPtr unsafe.Pointer
+		//     dirLen int
+		//
+		//     globalDepth uint8
+		//     globalShift uint8
+		//
+		//     writing uint8
+		//     tombstonePossible bool
+		//     // N.B Padding
+		//
+		//     clearSeq uint64
+		// }
+		// must match internal/runtime/maps/map.go:Map.
+		fields := []*types.Field{
+			makefield("used", types.Types[types.TUINT64]),
+			makefield("seed", types.Types[types.TUINTPTR]),
+			makefield("dirPtr", types.Types[types.TUNSAFEPTR]),
+			makefield("dirLen", types.Types[types.TINT]),
+			makefield("globalDepth", types.Types[types.TUINT8]),
+			makefield("globalShift", types.Types[types.TUINT8]),
+			makefield("writing", types.Types[types.TUINT8]),
+			makefield("tombstonePossible", types.Types[types.TBOOL]),
+			makefield("clearSeq", types.Types[types.TUINT64]),
+		}
 
 		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Map"))
 		m := types.NewNamed(n)
@@ -222,57 +244,57 @@ func MapIterType(gd *base.Invocation) *types.Type {
 	cachedMapIterTypeOnce.Do(func() {
 
 		// type Iter struct {
-	//    key  unsafe.Pointer // *Key
-	//    elem unsafe.Pointer // *Elem
-	//    typ  unsafe.Pointer // *MapType
-	//    m    *Map
-	//
-	//    groupSlotOffset uint64
-	//    dirOffset       uint64
-	//
-	//    clearSeq uint64
-	//
-	//    globalDepth uint8
-	//    // N.B. padding
-	//
-	//    dirIdx int
-	//
-	//    tab *table
-	//
-	//    group unsafe.Pointer // actually groupReference.data
-	//
-	//    entryIdx uint64
-	// }
-	// must match internal/runtime/maps/table.go:Iter.
-	fields := []*types.Field{
-		makefield("key", types.Types[types.TUNSAFEPTR]),  // Used in range.go for TMAP.
-		makefield("elem", types.Types[types.TUNSAFEPTR]), // Used in range.go for TMAP.
-		makefield("typ", types.Types[types.TUNSAFEPTR]),
-		makefield("m", types.NewPtr(MapType(gd))),
-		makefield("groupSlotOffset", types.Types[types.TUINT64]),
-		makefield("dirOffset", types.Types[types.TUINT64]),
-		makefield("clearSeq", types.Types[types.TUINT64]),
-		makefield("globalDepth", types.Types[types.TUINT8]),
-		makefield("dirIdx", types.Types[types.TINT]),
-		makefield("tab", types.NewPtr(mapTableType(gd))),
-		makefield("group", types.Types[types.TUNSAFEPTR]),
-		makefield("entryIdx", types.Types[types.TUINT64]),
-	}
+		//    key  unsafe.Pointer // *Key
+		//    elem unsafe.Pointer // *Elem
+		//    typ  unsafe.Pointer // *MapType
+		//    m    *Map
+		//
+		//    groupSlotOffset uint64
+		//    dirOffset       uint64
+		//
+		//    clearSeq uint64
+		//
+		//    globalDepth uint8
+		//    // N.B. padding
+		//
+		//    dirIdx int
+		//
+		//    tab *table
+		//
+		//    group unsafe.Pointer // actually groupReference.data
+		//
+		//    entryIdx uint64
+		// }
+		// must match internal/runtime/maps/table.go:Iter.
+		fields := []*types.Field{
+			makefield("key", types.Types[types.TUNSAFEPTR]),  // Used in range.go for TMAP.
+			makefield("elem", types.Types[types.TUNSAFEPTR]), // Used in range.go for TMAP.
+			makefield("typ", types.Types[types.TUNSAFEPTR]),
+			makefield("m", types.NewPtr(MapType(gd))),
+			makefield("groupSlotOffset", types.Types[types.TUINT64]),
+			makefield("dirOffset", types.Types[types.TUINT64]),
+			makefield("clearSeq", types.Types[types.TUINT64]),
+			makefield("globalDepth", types.Types[types.TUINT8]),
+			makefield("dirIdx", types.Types[types.TINT]),
+			makefield("tab", types.NewPtr(mapTableType(gd))),
+			makefield("group", types.Types[types.TUNSAFEPTR]),
+			makefield("entryIdx", types.Types[types.TUINT64]),
+		}
 
-	// build iterator struct holding the above fields
-	n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Iter"))
-	iter := types.NewNamed(n)
-	n.SetType(iter)
-	n.SetTypecheck(1)
+		// build iterator struct holding the above fields
+		n := ir.NewDeclNameAt(gd, src.NoXPos, ir.OTYPE, ir.Pkgs(gd).InternalMaps.Lookup("Iter"))
+		iter := types.NewNamed(n)
+		n.SetType(iter)
+		n.SetTypecheck(1)
 
-	iter.SetUnderlying(types.NewStruct(fields))
-	types.CalcSize(gd, iter)
+		iter.SetUnderlying(types.NewStruct(fields))
+		types.CalcSize(gd, iter)
 
-	// The size of Iter should be 96 bytes on 64 bit
-	// and 64 bytes on 32 bit platforms.
-	if size := 8*types.PtrSize /* one extra for globalDepth + padding */ + 4*8; iter.Size() != int64(size) {
-		gd.Fatalf("internal/runtime/maps.Iter size not correct: got %d, want %d", iter.Size(), size)
-	}
+		// The size of Iter should be 96 bytes on 64 bit
+		// and 64 bytes on 32 bit platforms.
+		if size := 8*types.PtrSize /* one extra for globalDepth + padding */ + 4*8; iter.Size() != int64(size) {
+			gd.Fatalf("internal/runtime/maps.Iter size not correct: got %d, want %d", iter.Size(), size)
+		}
 
 		cachedMapIterType = iter
 	})
@@ -287,14 +309,37 @@ func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.C
 	s3 := writeType(gd, gtyp)
 	hasher := genhash(gd, t.Key())
 
-	slotTyp := gtyp.Field(1).Type.Elem()
-	elemOff := slotTyp.Field(1).Offset
-	if AlgType(gd, t.Key()) == types.AMEM64 && elemOff != 8 {
-		gd.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
-	}
-	if AlgType(gd, t.Key()) == types.ASTRING && elemOff != types.StringSize {
-		// gd small-string optimization: string header is 3 words (24 B).
-		gd.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
+	var keysOff int64
+	var keyStride int64
+	var elemsOff int64
+	var elemStride int64
+	var elemOff int64
+	if buildcfg.Experiment.MapSplitGroup {
+		// Split layout: field 1 is keys array, field 2 is elems array.
+		keysOff = gtyp.Field(1).Offset
+		keyStride = gtyp.Field(1).Type.Elem().Size()
+		elemsOff = gtyp.Field(2).Offset
+		elemStride = gtyp.Field(2).Type.Elem().Size()
+	} else {
+		// Interleaved layout: field 1 is slots array.
+		// KeysOff = offset of slots array (first key).
+		// KeyStride = ElemStride = slot stride.
+		// ElemsOff = offset of slots + offset of elem within slot.
+		keysOff = gtyp.Field(1).Offset
+		slotTyp := gtyp.Field(1).Type.Elem()
+		slotSize := slotTyp.Size()
+		elemOffInSlot := slotTyp.Field(1).Offset
+		keyStride = slotSize
+		elemsOff = keysOff + elemOffInSlot
+		elemStride = slotSize
+		elemOff = slotTyp.Field(1).Offset
+		if types.AlgType(gd, t.Key()) == types.AMEM && t.Key().Size() == 8 && elemOff != 8 {
+			gd.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
+		}
+		if types.AlgType(gd, t.Key()) == types.ASTRING && elemOff != types.StringSize {
+			// gd small-string optimization: string header is 3 words (24 B).
+			gd.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
+		}
 	}
 
 	c.Field("Key").WritePtr(s1)
@@ -302,7 +347,10 @@ func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.C
 	c.Field("Group").WritePtr(s3)
 	c.Field("Hasher").WritePtr(hasher)
 	c.Field("GroupSize").WriteUintptr(uint64(gtyp.Size()))
-	c.Field("SlotSize").WriteUintptr(uint64(slotTyp.Size()))
+	c.Field("KeysOff").WriteUintptr(uint64(keysOff))
+	c.Field("KeyStride").WriteUintptr(uint64(keyStride))
+	c.Field("ElemsOff").WriteUintptr(uint64(elemsOff))
+	c.Field("ElemStride").WriteUintptr(uint64(elemStride))
 	c.Field("ElemOff").WriteUintptr(uint64(elemOff))
 	var flags uint32
 	if needkeyupdate(gd, t.Key()) {
@@ -314,7 +362,7 @@ func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.C
 	if t.Key().Size() > abi.MapMaxKeyBytes {
 		flags |= abi.MapIndirectKey
 	}
-	if t.Elem().Size() > abi.MapMaxKeyBytes {
+	if t.Elem().Size() > abi.MapMaxElemBytes {
 		flags |= abi.MapIndirectElem
 	}
 	c.Field("Flags").WriteUint32(flags)

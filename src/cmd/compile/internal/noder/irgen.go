@@ -12,8 +12,11 @@ import (
 	"sort"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/midway"
 	"cmd/compile/internal/rangefunc"
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/typecheck"
+	"cmd/compile/internal/types"
 	"cmd/compile/internal/types2"
 	"cmd/internal/src"
 )
@@ -44,6 +47,9 @@ func checkFiles(gd *base.Invocation, m posMap, noders []*noder) (*types2.Package
 		fileBaseMap[p.file.Pos().FileBase()] = p.file
 	}
 
+	didMidway := false
+
+recheck:
 	// typechecking
 	ctxt := types2.NewContext()
 	importer := gcimports{
@@ -57,7 +63,6 @@ func checkFiles(gd *base.Invocation, m posMap, noders []*noder) (*types2.Package
 		IgnoreBranchErrors: true, // parser already checked via syntax.CheckBranches mode
 		Importer:           &importer,
 		Sizes:              types2.SizesFor("gc", buildcfg.GOARCH),
-		EnableAlias:        true,
 	}
 	if gd.Flag.ErrorURL {
 		conf.ErrorURL = " [go.dev/e/%s]"
@@ -173,6 +178,33 @@ func checkFiles(gd *base.Invocation, m posMap, noders []*noder) (*types2.Package
 	}
 	gd.ExitIfErrors()
 
+	if len(gd.Debug.AstDump) > 0 {
+		dumpSyntax(gd, pkg, info, files, "checked")
+	}
+
+	if buildcfg.Experiment.SIMD && !didMidway {
+		didMidway = true
+		// Perform midway transformation on AST directly
+		if midway.RewriteWrapper(gd, pkg, info, files) {
+			// midway made changes; type checking must be repeated.
+			if len(gd.Debug.AstDump) > 0 {
+				// TODO how should this interact with -W and textual dumps
+				dumpSyntax(gd, pkg, info, files, "midway before recheck")
+			}
+			// necessary to reset type checking
+			for _, p := range types.PkgMapOf(gd) {
+				p.Direct = false
+			}
+			// necessary to reset type checking
+			typecheck.Target(gd).Imports = nil
+			goto recheck
+		}
+	}
+
+	if len(gd.Debug.AstDump) > 0 {
+		dumpSyntax(gd, pkg, info, files, "midway after recheck")
+	}
+
 	// Rewrite range over function to explicit function calls
 	// with the loop bodies converted into new implicit closures.
 	// We do this now, before serialization to unified IR, so that if the
@@ -182,7 +214,23 @@ func checkFiles(gd *base.Invocation, m posMap, noders []*noder) (*types2.Package
 	// and bodyReaderFor will fail.
 	rangeInfo := rangefunc.Rewrite(gd, pkg, info, files)
 
+	if len(gd.Debug.AstDump) > 0 {
+		dumpSyntax(gd, pkg, info, files, "rangefunc")
+	}
+
 	return pkg, info, rangeInfo
+}
+
+func dumpSyntax(gd *base.Invocation, pkg *types2.Package, info *types2.Info, files []*syntax.File, phase string) {
+	for _, file := range files {
+		for _, decl := range file.DeclList {
+			if fn, ok := decl.(*syntax.FuncDecl); ok {
+				if MatchASTDump(gd, fn) {
+					DumpNodeHTML(gd, pkg, file, info, fn, phase, fn)
+				}
+			}
+		}
+	}
 }
 
 // A cycleFinder detects anonymous interface cycles (go.dev/issue/56103).

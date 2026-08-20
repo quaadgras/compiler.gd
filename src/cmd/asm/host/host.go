@@ -126,6 +126,7 @@ func runMain(args []string, workDir string, stdout, stderr io.Writer) int {
 	ctxt.Debugpcln = ctx.DebugFlags.PCTab
 	ctxt.IsAsm = true
 	ctxt.Pkgpath = ctx.Importpath
+	ctxt.Std = ctx.Std
 	ctxt.DwTextCount = objabi.DummyDwarfFunctionCountForAssembler()
 	switch ctx.Spectre {
 	default:

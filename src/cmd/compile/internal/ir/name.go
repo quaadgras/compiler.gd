@@ -183,6 +183,10 @@ func (*Name) CanBeNtype()    {}
 func (*Name) CanBeAnSSASym() {}
 func (*Name) CanBeAnSSAAux() {}
 
+// DiagName returns the symbol name for diagnostics.
+// XXX should it be part of the formatter?
+func (n *Name) DiagName() string { return obj.TrimInlineHash(fmt.Sprint(n.Sym())) }
+
 // Pragma returns the PragmaFlag for p, which must be for an OTYPE.
 func (n *Name) Pragma() PragmaFlag { return n.pragma }
 
@@ -214,20 +218,22 @@ const (
 	nameNonMergeable             // not a candidate for stack slot merging
 )
 
-func (n *Name) Readonly() bool                 { return n.flags.load()&nameReadonly != 0 }
-func (n *Name) Needzero() bool                 { return n.flags.load()&nameNeedzero != 0 }
-func (n *Name) AutoTemp() bool                 { return n.flags.load()&nameAutoTemp != 0 }
-func (n *Name) Used() bool                     { return n.flags.load()&nameUsed != 0 }
-func (n *Name) IsClosureVar() bool             { return n.flags.load()&nameIsClosureVar != 0 }
-func (n *Name) IsOutputParamHeapAddr() bool    { return n.flags.load()&nameIsOutputParamHeapAddr != 0 }
-func (n *Name) IsOutputParamInRegisters() bool { return n.flags.load()&nameIsOutputParamInRegisters != 0 }
-func (n *Name) Addrtaken() bool                { return n.flags.load()&nameAddrtaken != 0 }
-func (n *Name) InlFormal() bool                { return n.flags.load()&nameInlFormal != 0 }
-func (n *Name) InlLocal() bool                 { return n.flags.load()&nameInlLocal != 0 }
-func (n *Name) OpenDeferSlot() bool            { return n.flags.load()&nameOpenDeferSlot != 0 }
-func (n *Name) Libfuzzer8BitCounter() bool     { return n.flags.load()&nameLibfuzzer8BitCounter != 0 }
-func (n *Name) CoverageAuxVar() bool           { return n.flags.load()&nameCoverageAuxVar != 0 }
-func (n *Name) NonMergeable() bool             { return n.flags.load()&nameNonMergeable != 0 }
+func (n *Name) Readonly() bool              { return n.flags.load()&nameReadonly != 0 }
+func (n *Name) Needzero() bool              { return n.flags.load()&nameNeedzero != 0 }
+func (n *Name) AutoTemp() bool              { return n.flags.load()&nameAutoTemp != 0 }
+func (n *Name) Used() bool                  { return n.flags.load()&nameUsed != 0 }
+func (n *Name) IsClosureVar() bool          { return n.flags.load()&nameIsClosureVar != 0 }
+func (n *Name) IsOutputParamHeapAddr() bool { return n.flags.load()&nameIsOutputParamHeapAddr != 0 }
+func (n *Name) IsOutputParamInRegisters() bool {
+	return n.flags.load()&nameIsOutputParamInRegisters != 0
+}
+func (n *Name) Addrtaken() bool            { return n.flags.load()&nameAddrtaken != 0 }
+func (n *Name) InlFormal() bool            { return n.flags.load()&nameInlFormal != 0 }
+func (n *Name) InlLocal() bool             { return n.flags.load()&nameInlLocal != 0 }
+func (n *Name) OpenDeferSlot() bool        { return n.flags.load()&nameOpenDeferSlot != 0 }
+func (n *Name) Libfuzzer8BitCounter() bool { return n.flags.load()&nameLibfuzzer8BitCounter != 0 }
+func (n *Name) CoverageAuxVar() bool       { return n.flags.load()&nameCoverageAuxVar != 0 }
+func (n *Name) NonMergeable() bool         { return n.flags.load()&nameNonMergeable != 0 }
 
 func (n *Name) setReadonly(b bool)                 { n.flags.set(nameReadonly, b) }
 func (n *Name) SetNeedzero(b bool)                 { n.flags.set(nameNeedzero, b) }

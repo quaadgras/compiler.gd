@@ -210,6 +210,7 @@ type CallExpr struct {
 	// fully local (Esc==EscNone, stack buffer here) or it truly
 	// escapes (heap fallback, nil outBuf).
 	GdForwardOutBufResult uint8
+	Reshape               bool
 }
 
 func NewCallExpr(gd *base.Invocation, pos src.XPos, op Op, fun Node, args []Node) *CallExpr {
@@ -395,6 +396,7 @@ type InlinedCallExpr struct {
 	miniExpr
 	Body       Nodes
 	ReturnVars Nodes // must be side-effect free
+	Reshape    bool
 }
 
 func NewInlinedCallExpr(gd *base.Invocation, pos src.XPos, body, retvars []Node) *InlinedCallExpr {
@@ -412,10 +414,16 @@ func (n *InlinedCallExpr) SingleResult() Node {
 	if have := len(n.ReturnVars); have != 1 {
 		gd.FatalfAt(n.Pos(), "inlined call has %v results, expected 1", have)
 	}
-	if !n.Type().HasShape() && n.ReturnVars[0].Type().HasShape() {
-		// If the type of the call is not a shape, but the type of the return value
-		// is a shape, we need to do an implicit conversion, so the real type
-		// of n is maintained.
+
+	// If the type of the call is not a shape, but the type of the return value
+	// is a shape, we need to do an implicit conversion, so the real type
+	// of n is maintained.
+	needImplicitConv := !n.Type().HasShape() && n.ReturnVars[0].Type().HasShape()
+	if n.Reshape { // or if the inlined call expr needs reshaping.
+		needImplicitConv = true
+	}
+
+	if needImplicitConv {
 		r := NewConvExpr(gd, n.Pos(), OCONVNOP, n.Type(), n.ReturnVars[0])
 		r.SetTypecheck(1)
 		return r

@@ -24,7 +24,7 @@ import "unsafe"
 // memhashFallback (seed=0) delivers.
 func strhashPort(s string) uint64 {
 	if len(s) == 0 {
-		return uint64(memhashFallback(nil, 0, 0))
+		return uint64(memhash(nil, 0, 0))
 	}
-	return uint64(memhashFallback(unsafe.Pointer(unsafe.StringData(s)), 0, uintptr(len(s))))
+	return uint64(memhash(unsafe.Pointer(unsafe.StringData(s)), 0, uintptr(len(s))))
 }

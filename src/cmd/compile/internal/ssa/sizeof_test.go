@@ -23,7 +23,7 @@ func TestSizeof(t *testing.T) {
 		{Value{}, 88, 128},
 		{Block{}, 184, 328},
 		{LocalSlot{}, 28, 40},
-		{valState{}, 28, 40},
+		{valState{}, 36, 48},
 	}
 
 	for _, tt := range tests {

@@ -120,6 +120,16 @@ func walkAssign(gd *base.Invocation, init *ir.Nodes, n ir.Node) ir.Node {
 // walkAssignDotType walks an OAS2DOTTYPE node.
 func walkAssignDotType(gd *base.Invocation, n *ir.AssignListStmt, init *ir.Nodes) ir.Node {
 	walkExprListSafe(gd, n.Lhs, init)
+
+	if r, ok := n.Rhs[0].(*ir.TypeAssertExpr); ok && r.Op() == ir.ODOTTYPE2 && !r.Type().IsInterface() {
+		if shapeTypeAssertImpossible(gd, r.X, r.Type()) {
+			init.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, ir.BlankNode, walkExpr(gd, r.X, init))))
+			init.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, n.Lhs[0], ir.NewZero(gd, gd.Pos, r.Type()))))
+			init.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, n.Lhs[1], ir.NewBool(gd, gd.Pos, false))))
+			return ir.NewBlockStmt(gd, gd.Pos, nil)
+		}
+	}
+
 	n.Rhs[0] = walkExpr(gd, n.Rhs[0], init)
 	return n
 }
@@ -219,7 +229,7 @@ func walkAssignRecv(gd *base.Invocation, init *ir.Nodes, n *ir.AssignListStmt) i
 	fn := chanfn(gd, "chanrecv2", 2, r.X.Type())
 	ok := n.Lhs[1]
 	call := mkcall1(gd, fn, types.Types[types.TBOOL], init, r.X, n1)
-	return typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, ok, call))
+	return walkAssign(gd, init, typecheck.Stmt(gd, ir.NewAssignStmt(gd, gd.Pos, ok, call)))
 }
 
 // walkReturn walks an ORETURN node.

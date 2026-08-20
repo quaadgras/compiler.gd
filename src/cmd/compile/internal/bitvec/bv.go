@@ -8,7 +8,6 @@ import (
 	"math/bits"
 
 	"cmd/compile/internal/base"
-	"cmd/internal/src"
 )
 
 const (
@@ -37,12 +36,9 @@ type Bulk struct {
 	nword int32
 }
 
-func NewBulk(gd *base.Invocation, nbit int32, count int32, pos src.XPos) Bulk {
+func NewBulk(gd *base.Invocation, nbit int32, count int32) Bulk {
 	nword := (nbit + wordBits - 1) / wordBits
 	size := int64(nword) * int64(count)
-	if int64(int32(size*4)) != size*4 {
-		gd.FatalfAt(pos, "NewBulk too big: nbit=%d count=%d nword=%d size=%d", nbit, count, nword, size)
-	}
 	return Bulk{
 		words: make([]uint32, size),
 		nbit:  nbit,

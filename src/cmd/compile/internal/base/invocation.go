@@ -94,15 +94,15 @@ type Invocation struct {
 	// Per-compile counters used to mint unique synthesised names.
 	// Were package-level globals; threaded here so multiple compile
 	// invocations in one process don't share name spaces.
-	Renameinitgen     int   // noder/noder.go (renameinit name minter)
-	NoderInlgen       int   // noder/reader.go (inlined-call name minter)
-	Dnamecount        int   // reflectdata/reflect.go (dname name minter)
-	Slicedatagen      int   // staticdata/data.go (sliceData name minter)
-	Statuniqgen       int   // staticinit/sched.go (static temp name minter)
-	Mapinitgen        int   // staticinit/sched.go (map-init name minter)
-	TypeAssertGen     int   // walk/expr.go (type-assert helper minter)
-	InterfaceSwitchGen int  // walk/switch.go (iface-switch helper minter)
-	GlobClosgen       int32 // ir/func.go (closure name minter)
+	Renameinitgen      int   // noder/noder.go (renameinit name minter)
+	NoderInlgen        int   // noder/reader.go (inlined-call name minter)
+	Dnamecount         int   // reflectdata/reflect.go (dname name minter)
+	Slicedatagen       int   // staticdata/data.go (sliceData name minter)
+	Statuniqgen        int   // staticinit/sched.go (static temp name minter)
+	Mapinitgen         int   // staticinit/sched.go (map-init name minter)
+	TypeAssertGen      int   // walk/expr.go (type-assert helper minter)
+	InterfaceSwitchGen int   // walk/switch.go (iface-switch helper minter)
+	GlobClosgen        int32 // ir/func.go (closure name minter)
 
 	// Per-compile noder reader maps. Type-asserted at use site to
 	// avoid an import cycle (noder imports base, not the other
@@ -127,7 +127,7 @@ type Invocation struct {
 	// on exit (via defer). Stored on Invocation rather than as
 	// package vars so concurrent compile invocations don't clobber
 	// each other's transient walk state.
-	WalkStaticValues any // map[ir.Node]ir.Node — findStaticValues result
+	WalkStaticValues any // *walk.walkAnalysis — static values + shape-conv sources
 	WalkEscapeBoxes  any // map[*ir.Name]*ir.Name — promoted-EscCandidate boxes
 
 	// pkginit asan instrumentation tables — populated only under
@@ -179,6 +179,19 @@ type Invocation struct {
 	// gd compile loop: functions waiting to be backend-compiled.
 	// Populated by enqueueFunc, drained by compileFunctions.
 	GdCompileQueue any // []*ir.Func
+
+	// -d=astdump text/HTML dump state (ir/dump.go, noder/dump.go).
+	// AstDumpMu serialises writes to the per-function .ast/.html
+	// files; the maps/slices track which files have been created and
+	// which HTML writers are open so CloseHTMLWriters can flush them
+	// in order. Per-Invocation so concurrent in-process compiles don't
+	// share writers across packages.
+	AstDumpMu             sync.Mutex
+	AstDumpFiles          any // map[string]bool — ir text dump files already truncated
+	IrHTMLWriters         any // map[*ir.Func]*ir.HTMLWriter
+	IrHTMLOrderedFuncs    any // []*ir.Func
+	NoderHTMLWriters      any // map[*syntax.FuncDecl]*noder.HTMLWriter
+	NoderHTMLOrderedFuncs any // []*syntax.FuncDecl
 
 	// reflectdata pending itab EscMask slots — populated by writeITab
 	// while emitting itabs and consumed by FinalizeItabMasks after

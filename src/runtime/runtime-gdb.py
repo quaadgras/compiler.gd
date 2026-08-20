@@ -186,6 +186,10 @@ class MapTypePrinter:
 		cnt = 0
 		# Yield keys and elements in group.
 		# group is a value of type *group[K,V]
+		# The group layout depends on GOEXPERIMENT=mapsplitgroup:
+		#   split:       group.keys[i] / group.elems[i]
+		#   interleaved: group.slots[i].key / group.slots[i].elem
+		# Detect which layout by checking for the 'keys' field.
 		def group_slots(group):
 			ctrl = group['ctrl']
 
@@ -196,8 +200,15 @@ class MapTypePrinter:
 					continue
 
 				# Full
-				yield str(cnt), group['slots'][i]['key']
-				yield str(cnt+1), group['slots'][i]['elem']
+				# The group layout depends on GOEXPERIMENT=mapsplitgroup:
+				#   split:       group.keys[i] / group.elems[i]
+				#   interleaved: group.slots[i].key / group.slots[i].elem
+				try:
+					yield str(cnt), group['slots'][i]['key']
+					yield str(cnt+1), group['slots'][i]['elem']
+				except gdb.error:
+					yield str(cnt), group['keys'][i]
+					yield str(cnt+1), group['elems'][i]
 
 		# The linker DWARF generation
 		# (cmd/link/internal/ld.(*dwctxt).synthesizemaptypes) records

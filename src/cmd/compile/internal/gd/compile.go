@@ -125,6 +125,9 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 
 	gd.CurFunc = fn
 	walk.Walk(gd, fn)
+	if ir.MatchAstDump(gd, fn, "walk") {
+		ir.AstDump(gd, fn, "walk, "+ir.FuncName(fn))
+	}
 	gd.CurFunc = nil // enforce no further uses of CurFunc
 
 	gd.Ctxt.DwTextCount++
@@ -147,108 +150,60 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 		// Compile the longest functions first,
 		// since they're most likely to be the slowest.
 		// This helps avoid stragglers.
+		// Since we remove from the end of the slice queue,
+		// that means shortest to longest.
 		slices.SortFunc(cq, func(a, b *ir.Func) int {
-			return cmp.Compare(len(b.Body), len(a.Body))
+			return cmp.Compare(len(a.Body), len(b.Body))
 		})
 	}
 
-	// By default, we perform work right away on the current goroutine
-	// as the solo worker.
-	queue := func(work func(int)) {
-		work(0)
-	}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	mu.Lock()
 
-	if nWorkers := gd.Flag.LowerC; nWorkers > 1 {
-		// For concurrent builds, we allow the work queue
-		// to grow arbitrarily large, but only nWorkers work items
-		// can be running concurrently.
-		workq := make(chan func(int))
-		done := make(chan int)
-		// Dispatcher exits once workq is closed AND every dispatched
-		// worker has reported back via done. Without the close-and-
-		// drain protocol the loop ran forever, leaving one dispatcher
-		// goroutine per in-process compile invocation pinned in memory
-		// along with all the func closures it had ever appended to
-		// pending — observed as 333 stuck goroutines holding ~3 GB.
+	for workerId := range gd.Flag.LowerC {
+		// TODO: replace with wg.Go when the oldest bootstrap has it.
+		// With the current policy, that'd be go1.27.
+		wg.Add(1)
 		go func() {
-			ids := make([]int, nWorkers)
-			for i := range ids {
-				ids[i] = i
-			}
-			var pending []func(int)
-			active := 0
-			for {
-				select {
-				case work, ok := <-workq:
-					if !ok {
-						workq = nil
-						break
-					}
-					pending = append(pending, work)
-				case id := <-done:
-					ids = append(ids, id)
-					active--
+			// Always call wg.Done, even when ssagen.Compile panics
+			// or runtime.Goexit's (e.g. via gd.Fatalf → gd.ErrorExit
+			// → gd.Exit). Without this defer, wg.Wait hangs forever
+			// and we never get to see the real error. Translate a
+			// panic that isn't a known compiler abort into gd.Fatalf
+			// so the standard error-reporting path runs.
+			defer wg.Done()
+			var cur *ir.Func
+			defer func() {
+				if r := recover(); r != nil {
+					gd.Fatalf("panic during compile of %v: %v", cur, r)
 				}
-				if workq == nil && len(pending) == 0 && active == 0 {
+			}()
+			var closures []*ir.Func
+			for {
+				mu.Lock()
+				cq = append(cq, closures...)
+				remaining := len(cq)
+				if remaining == 0 {
+					mu.Unlock()
 					return
 				}
-				for len(pending) > 0 && len(ids) > 0 {
-					work := pending[len(pending)-1]
-					id := ids[len(ids)-1]
-					pending = pending[:len(pending)-1]
-					ids = ids[:len(ids)-1]
-					active++
-					go func() {
-						// Always signal `done`, even if `work` panics
-						// or calls runtime.Goexit (e.g. via gd.Fatalf
-						// → gd.ErrorExit → gd.Exit). Without this the
-						// dispatcher deadlocks waiting for a value
-						// that never arrives, masking the real compile
-						// error that triggered the abort.
-						defer func() { done <- id }()
-						work(id)
-					}()
-				}
+				fn := cq[len(cq)-1]
+				cq = cq[:len(cq)-1]
+				mu.Unlock()
+				cur = fn
+				ssagen.Compile(gd, fn, workerId, profile)
+				closures = fn.Closures
 			}
 		}()
-		queue = func(work func(int)) {
-			workq <- work
-		}
-		defer close(workq)
-	}
-
-	var wg sync.WaitGroup
-	var compile func([]*ir.Func)
-	compile = func(fns []*ir.Func) {
-		wg.Add(len(fns))
-		for _, fn := range fns {
-			fn := fn
-			queue(func(worker int) {
-				// Always call wg.Done, even when ssagen.Compile
-				// panics or runtime.Goexit's (e.g. via gd.Fatalf →
-				// gd.ErrorExit → gd.Exit). Without this defer,
-				// wg.Wait hangs forever and we never get to see the
-				// real error. Translate a panic that isn't a known
-				// compiler abort into gd.Fatalf so the standard
-				// error-reporting path runs.
-				defer wg.Done()
-				defer func() {
-					if r := recover(); r != nil {
-						gd.Fatalf("panic during compile of %v: %v", fn, r)
-					}
-				}()
-				ssagen.Compile(gd, fn, worker, profile)
-				compile(fn.Closures)
-			})
-		}
 	}
 
 	gd.CalcSizeDisabled = true // not safe to calculate sizes concurrently
 	gd.Ctxt.InParallel = true
 
-	compile(cq)
-	gd.GdCompileQueue = nil
+	mu.Unlock()
 	wg.Wait()
+	gd.GdCompileQueue = nil
 
 	gd.Ctxt.InParallel = false
 	gd.CalcSizeDisabled = false

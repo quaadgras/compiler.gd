@@ -6,6 +6,7 @@ package maps
 
 import (
 	"internal/abi"
+	"internal/goexperiment"
 	"internal/race"
 	"internal/runtime/sys"
 	"unsafe"
@@ -18,7 +19,9 @@ func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Poi
 
 	ctrls := *g.ctrls()
 	slotKey := g.key(typ, 0)
-	slotSize := typ.SlotSize
+	// gd: string keys are 3 words (24 B), so the key stride is never
+	// 2*PtrSize; typ.KeyStride is correct for both group layouts.
+	keyStride := typ.KeyStride
 
 	// The 64 threshold was chosen based on performance of BenchmarkMapStringKeysEight,
 	// where there are 8 keys to check, all of which don't quick-match the lookup key.
@@ -36,7 +39,7 @@ func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Poi
 				}
 				j = i
 			}
-			slotKey = unsafe.Pointer(uintptr(slotKey) + slotSize)
+			slotKey = unsafe.Pointer(uintptr(slotKey) + keyStride)
 			ctrls >>= 8
 		}
 		if j == abi.MapGroupSlots {
@@ -46,24 +49,36 @@ func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Poi
 		// There's exactly one slot that passed the quick test. Do the single expensive comparison.
 		slotKey = g.key(typ, uintptr(j))
 		if key == *(*string)(slotKey) {
-			// gd: string header is 3 words (24 B) — elem follows the key.
-			return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
+			if goexperiment.MapSplitGroup {
+				return g.elem(typ, uintptr(j))
+			} else {
+				return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
+			}
 		}
 		return nil
 	}
 
 dohash:
 	// This path will cost 1 hash and 1+ε comparisons.
-	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&key)), m.seed)
+	// gd: route through typ.Hasher (runtime.strhash) rather than
+	// memHashAES so the cached / fixed-seed string hash stays in
+	// lockstep with the generic map paths and compiler-emitted
+	// literal hashes (see doc/gd/sso-string.md).
+	k := key
+	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
 	h2 := uint8(h2(hash))
 	ctrls = *g.ctrls()
 	slotKey = g.key(typ, 0)
 
-	for range abi.MapGroupSlots {
+	for i := range uintptr(abi.MapGroupSlots) {
 		if uint8(ctrls) == h2 && key == *(*string)(slotKey) {
-			return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
+			if goexperiment.MapSplitGroup {
+				return g.elem(typ, i)
+			} else {
+				return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
+			}
 		}
-		slotKey = unsafe.Pointer(uintptr(slotKey) + slotSize)
+		slotKey = unsafe.Pointer(uintptr(slotKey) + keyStride)
 		ctrls >>= 8
 	}
 	return nil
@@ -76,90 +91,24 @@ func longStringQuickEqualityTest(a, b string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	x, y := stringPtr(a), stringPtr(b)
+	x, y := unsafe.Pointer(unsafe.StringData(a)), unsafe.Pointer(unsafe.StringData(b))
 	// Check first 8 bytes.
 	if *(*[8]byte)(x) != *(*[8]byte)(y) {
 		return false
 	}
 	// Check last 8 bytes.
-	x = unsafe.Pointer(uintptr(x) + uintptr(len(a)) - 8)
-	y = unsafe.Pointer(uintptr(y) + uintptr(len(a)) - 8)
+	x = add(x, uintptr(len(a)-8))
+	y = add(y, uintptr(len(a)-8))
 	if *(*[8]byte)(x) != *(*[8]byte)(y) {
 		return false
 	}
 	return true
 }
-func stringPtr(s string) unsafe.Pointer {
-	// Shadow of runtime.stringStruct under the gd small-string
-	// optimization: 3-word header (see doc/gd/sso-string.md). Only
-	// the ptr slot (word 0) is read here — heap-rep strings store
-	// their data pointer there, inline-rep strings store nil.
-	type stringStruct struct {
-		ptr  unsafe.Pointer
-		hash uint
-		len  uint
-	}
-	return (*stringStruct)(unsafe.Pointer(&s)).ptr
-}
 
 //go:linkname runtime_mapaccess1_faststr runtime.mapaccess1_faststr
 func runtime_mapaccess1_faststr(typ *abi.MapType, m *Map, key string) unsafe.Pointer {
-	if race.Enabled && m != nil {
-		callerpc := sys.GetCallerPC()
-		pc := abi.FuncPCABIInternal(runtime_mapaccess1_faststr)
-		race.ReadPC(unsafe.Pointer(m), callerpc, pc)
-	}
-
-	if m == nil || m.Used() == 0 {
-		return unsafe.Pointer(&zeroVal[0])
-	}
-
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
-		return nil
-	}
-
-	if m.dirLen <= 0 {
-		elem := m.getWithoutKeySmallFastStr(typ, key)
-		if elem == nil {
-			return unsafe.Pointer(&zeroVal[0])
-		}
-		return elem
-	}
-
-	k := key
-	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
-
-	// Select table.
-	idx := m.directoryIndex(hash)
-	t := m.directoryAt(idx)
-
-	// Probe table.
-	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
-	h2Hash := h2(hash)
-	for ; ; seq = seq.next() {
-		g := t.groups.group(typ, seq.offset)
-
-		match := g.ctrls().matchH2(h2Hash)
-
-		for match != 0 {
-			i := match.first()
-
-			slotKey := g.key(typ, i)
-			if key == *(*string)(slotKey) {
-				slotElem := unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
-				return slotElem
-			}
-			match = match.removeFirst()
-		}
-
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
-			// Finding an empty slot means we've reached the end of
-			// the probe sequence.
-			return unsafe.Pointer(&zeroVal[0])
-		}
-	}
+	p, _ := runtime_mapaccess2_faststr(typ, m, key)
+	return p
 }
 
 //go:linkname runtime_mapaccess2_faststr runtime.mapaccess2_faststr
@@ -187,6 +136,10 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 		return elem, true
 	}
 
+	// gd: route through typ.Hasher (runtime.strhash) rather than
+	// memHashAES so the cached / fixed-seed string hash stays in
+	// lockstep with the generic map paths and compiler-emitted
+	// literal hashes (see doc/gd/sso-string.md).
 	k := key
 	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
 
@@ -207,8 +160,11 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 
 			slotKey := g.key(typ, i)
 			if key == *(*string)(slotKey) {
-				slotElem := unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
-				return slotElem, true
+				if goexperiment.MapSplitGroup {
+					return g.elem(typ, i), true
+				} else {
+					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
+				}
 			}
 			match = match.removeFirst()
 		}
@@ -248,7 +204,8 @@ func (m *Map) putSlotSmallFastStr(typ *abi.MapType, hash uintptr, key string) un
 	// more efficient than matchEmpty.
 	match = g.ctrls().matchEmptyOrDeleted()
 	if match == 0 {
-		fatal("small map with no empty slot (concurrent map writes?)")
+		// No empty slot found. Need to grow the map.
+		return nil
 	}
 
 	i := match.first()
@@ -262,6 +219,36 @@ func (m *Map) putSlotSmallFastStr(typ *abi.MapType, hash uintptr, key string) un
 	m.used++
 
 	return slotElem
+}
+
+func (t *table) uncheckedPutSlotForAssignFastStr(typ *abi.MapType, hash uintptr, key string) unsafe.Pointer {
+	if t.growthLeft == 0 {
+		panic("invariant failed: growthLeft is unexpectedly 0")
+	}
+
+	// Given key and its hash hash(key), to insert it, we construct a
+	// probeSeq, and use it to find the first group with an unoccupied (empty
+	// or deleted) slot. We place the key/value into the first such slot in
+	// the group and mark it as full with key's H2.
+	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
+	for ; ; seq = seq.next() {
+		g := t.groups.group(typ, seq.offset)
+
+		match := g.ctrls().matchEmptyOrDeleted()
+		if match != 0 {
+			i := match.first()
+
+			slotKey := g.key(typ, i)
+			*(*string)(slotKey) = key
+
+			slotElem := g.elem(typ, i)
+
+			t.growthLeft--
+			t.used++
+			g.ctrls().set(i, ctrl(h2(hash)))
+			return slotElem
+		}
+	}
 }
 
 //go:linkname runtime_mapassign_faststr runtime.mapassign_faststr
@@ -278,6 +265,10 @@ func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poin
 		fatal("concurrent map writes")
 	}
 
+	// gd: route through typ.Hasher (runtime.strhash) rather than
+	// memHashAES so the cached / fixed-seed string hash stays in
+	// lockstep with the generic map paths and compiler-emitted
+	// literal hashes (see doc/gd/sso-string.md).
 	k := key
 	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
 
@@ -290,19 +281,23 @@ func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poin
 	}
 
 	if m.dirLen == 0 {
-		if m.used < abi.MapGroupSlots {
-			elem := m.putSlotSmallFastStr(typ, hash, key)
+		elem := m.putSlotSmallFastStr(typ, hash, key)
+		if elem == nil {
+			// Can't fit another entry, grow to full size map.
+			tab := m.growToTable(typ)
 
-			if m.writing == 0 {
-				fatal("concurrent map writes")
-			}
-			m.writing ^= 1
+			elem = tab.uncheckedPutSlotForAssignFastStr(typ, hash, key)
+			m.used++
 
-			return elem
+			tab.checkInvariants(typ, m)
 		}
 
-		// Can't fit another entry, grow to full size map.
-		m.growToTable(typ)
+		if m.writing == 0 {
+			fatal("concurrent map writes")
+		}
+		m.writing ^= 1
+
+		return elem
 	}
 
 	var slotElem unsafe.Pointer

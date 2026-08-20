@@ -161,16 +161,7 @@ func Elfinit(ctxt *Link) {
 
 	switch ctxt.Arch.Family {
 	// 64-bit architectures
-	case sys.PPC64, sys.S390X:
-		if ctxt.Arch.ByteOrder == binary.BigEndian && ctxt.HeadType != objabi.Hopenbsd {
-			ctxt.ehdr.
-				Flags = 1 // Version 1 ABI
-		} else {
-			ctxt.ehdr.
-				Flags = 2 // Version 2 ABI
-		}
-		fallthrough
-	case sys.AMD64, sys.ARM64, sys.Loong64, sys.MIPS64, sys.RISCV64:
+	case sys.AMD64, sys.ARM64, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64, sys.S390X:
 		if ctxt.Arch.Family == sys.MIPS64 {
 			ctxt.ehdr.
 				Flags = 0x20000004 // MIPS 3 CPIC
@@ -183,18 +174,19 @@ func Elfinit(ctxt *Link) {
 			ctxt.ehdr.
 				Flags = 0x4 // RISCV Float ABI Double
 		}
+		if ctxt.Arch.Family == sys.S390X {
+			ctxt.ehdr.Flags = 1 // Version 1 ABI
+		}
+		if ctxt.Arch.Family == sys.PPC64 {
+			ctxt.ehdr.Flags = 2 // Version 2 ABI
+		}
 		ctxt.elf64 = true
-		ctxt.ehdr.
-			Phoff = ELF64HDRSIZE
-		ctxt.ehdr. // Must be ELF64HDRSIZE: first PHdr must follow ELF header
-				Shoff = ELF64HDRSIZE
-		ctxt.ehdr. // Will move as we add PHeaders
-				Ehsize = ELF64HDRSIZE
-		ctxt.ehdr. // Must be ELF64HDRSIZE
-				Phentsize = ELF64PHDRSIZE
-		ctxt. // Must be ELF64PHDRSIZE
-			ehdr.
-			Shentsize = ELF64SHDRSIZE // Must be ELF64SHDRSIZE
+
+		ctxt.ehdr.Phoff = ELF64HDRSIZE      // Must be ELF64HDRSIZE: first PHdr must follow ELF header
+		ctxt.ehdr.Shoff = ELF64HDRSIZE      // Will move as we add PHeaders
+		ctxt.ehdr.Ehsize = ELF64HDRSIZE     // Must be ELF64HDRSIZE
+		ctxt.ehdr.Phentsize = ELF64PHDRSIZE // Must be ELF64PHDRSIZE
+		ctxt.ehdr.Shentsize = ELF64SHDRSIZE // Must be ELF64SHDRSIZE
 
 	// 32-bit architectures
 	case sys.ARM, sys.MIPS:
@@ -884,7 +876,7 @@ func addbuildinfo(ctxt *Link) {
 		}
 
 		if ctxt.IsDarwin() {
-			ctxt.buildinfoData = uuidFromGoBuildId(buildID)
+			ctxt.buildinfoData = uuidFromHash(hash.Sum32([]byte(buildID)))
 			return
 		}
 
@@ -1542,12 +1534,7 @@ func (ctxt *Link) doelf() {
 			dynamic.SetType(sym.SELFSECT)
 		}
 
-		if ctxt.IsS390X() {
-			// S390X uses .got instead of .got.plt
-			gotplt = got
-		}
-		ctxt.thearch.
-			ELF.SetupPLT(ctxt, ctxt.loader, plt, gotplt, dynamic.Sym())
+		ctxt.thearch.ELF.SetupPLT(ctxt, ctxt.loader, plt, gotplt, dynamic.Sym())
 
 		// .dynamic table
 		elfWriteDynEntSym(ctxt, dynamic, elf.DT_HASH, hash.Sym())

@@ -904,6 +904,7 @@ func callExprUserArgs(n *CallExpr) Nodes {
 //	%v	Go syntax, semicolon-separated
 //	%.v	Go syntax, comma-separated
 //	%+v	Debug syntax, as in DumpList.
+//
 // Format implements fmt.Formatter for a Nodes. The signature is the
 // standard Format(fmt.State, rune) so fmt's reflection-based dispatch
 // finds it; without that, fmt falls back to default slice rendering
@@ -943,11 +944,19 @@ func (l Nodes) Format(s fmt.State, verb rune) {
 // Dump
 
 // Dump prints the message s followed by a debug dump of n.
+// This includes all the recursive structure under n.
 func Dump(s string, n Node) {
 	fmt.Printf("%s%+v\n", s, n)
 }
 
+// FDump prints to w the message s followed by a debug dump of n.
+// This includes all the recursive structure under n.
+func FDump(w io.Writer, s string, n Node) {
+	fmt.Fprintf(w, "%s%+v\n", s, n)
+}
+
 // DumpList prints the message s followed by a debug dump of each node in the list.
+// This includes all the recursive structure under each node in the list.
 func DumpList(gd *base.Invocation, s string, list Nodes) {
 	var buf bytes.Buffer
 	FDumpList(gd, &buf, s, list)
@@ -955,6 +964,7 @@ func DumpList(gd *base.Invocation, s string, list Nodes) {
 }
 
 // FDumpList prints to w the message s followed by a debug dump of each node in the list.
+// This includes all the recursive structure under each node in the list.
 func FDumpList(gd *base.Invocation, w io.Writer, s string, list Nodes) {
 	io.WriteString(w, s)
 	dumpNodes(gd, w, list, 1)

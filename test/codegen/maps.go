@@ -58,7 +58,7 @@ func AccessStringStruct2(m map[string]Struct, k string) bool {
 }
 
 func AccessIntArrayLarge2(m map[int][512]int, k int) bool {
-	// amd64:-"REP",-"MOVSQ"
+	// amd64:-"REP" -"MOVSQ"
 	_, ok := m[k]
 	return ok
 }

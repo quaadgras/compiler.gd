@@ -10,7 +10,6 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
-	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/rttype"
 	"cmd/compile/internal/ssagen"
 	"cmd/compile/internal/typecheck"
@@ -24,10 +23,11 @@ const tmpstringbufsize = 32
 func Walk(gd *base.Invocation, fn *ir.Func) {
 	gd.CurFunc = fn
 
-	// Set and then clear a per-Invocation cache of static values for this fn.
+	// Build pre-walk analysis caches with a single AST traversal and
+	// hang them off the Invocation for the duration of this fn.
 	// (At some point, it might be worthwhile to have a walkState structure
 	// that gets passed everywhere where things like this can go.)
-	gd.WalkStaticValues = findStaticValues(fn)
+	gd.WalkStaticValues = analyzePreWalk(fn)
 	defer func() { gd.WalkStaticValues = nil }()
 
 	errorsBefore := gd.Errors()
@@ -233,7 +233,7 @@ func mapfast(gd *base.Invocation, t *types.Type) int {
 	if t.Elem().Size() > abi.MapMaxElemBytes {
 		return mapslow
 	}
-	switch reflectdata.AlgType(gd, t.Key()) {
+	switch algType(gd, t.Key()) {
 	case types.AMEM32:
 		if !t.Key().HasPointers() {
 			return mapfast32
@@ -255,6 +255,35 @@ func mapfast(gd *base.Invocation, t *types.Type) int {
 		return mapfaststr
 	}
 	return mapslow
+}
+
+// algType returns the fixed-width AMEMxx variants instead of the general
+// AMEM kind when possible.
+func algType(gd *base.Invocation, t *types.Type) types.AlgKind {
+	a := types.AlgType(gd, t)
+	if a == types.AMEM {
+		if t.Alignment() < int64(gd.Ctxt.Arch.Alignment) && t.Alignment() < t.Size() {
+			// For example, we can't treat [2]int16 as an int32 if int32s require
+			// 4-byte alignment. See issue 46283.
+			return a
+		}
+		switch t.Size() {
+		case 0:
+			return types.AMEM0
+		case 1:
+			return types.AMEM8
+		case 2:
+			return types.AMEM16
+		case 4:
+			return types.AMEM32
+		case 8:
+			return types.AMEM64
+		case 16:
+			return types.AMEM128
+		}
+	}
+
+	return a
 }
 
 func walkAppendArgs(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) {
@@ -450,30 +479,65 @@ func ifaceData(gd *base.Invocation, pos src.XPos, n ir.Node, t *types.Type) ir.N
 // The current use case is reducing OCONVIFACE allocations, and hence
 // staticValue is currently only useful when given an *ir.ConvExpr.X as n.
 func staticValue(gd *base.Invocation, n ir.Node) ir.Node {
-	sv, _ := gd.WalkStaticValues.(map[ir.Node]ir.Node)
-	if sv == nil {
+	wa := curWalkAnalysis(gd)
+	if wa == nil {
 		gd.Fatalf("WalkStaticValues is nil. staticValue called outside of walk.Walk?")
 	}
-	return sv[n]
+	return wa.staticValues[n]
 }
 
-// findStaticValues returns a map of static values for fn.
-func findStaticValues(fn *ir.Func) map[ir.Node]ir.Node {
-	// We can't use an ir.ReassignOracle or ir.StaticValue in the
-	// middle of walk because they don't currently handle
-	// transformed assignments (e.g., will complain about 'RHS == nil').
-	// So we instead build this map to use in walk.
+// walkAnalysis holds the pre-walk analysis caches for the function
+// currently being walked. It is stored in gd.WalkStaticValues so that
+// concurrent in-process compile invocations don't share it.
+type walkAnalysis struct {
+	// staticValues is a cache of static values for use by staticValue.
+	staticValues map[ir.Node]ir.Node
+
+	// shapeConvSources maps an *ir.Name (a PAUTO interface variable) to
+	// the shape type of the OCONVIFACE expression that is its single
+	// static value, if any.
+	shapeConvSources map[*ir.Name]*types.Type
+}
+
+// curWalkAnalysis returns the walkAnalysis for the function currently
+// being walked, or nil outside of walk.Walk.
+func curWalkAnalysis(gd *base.Invocation) *walkAnalysis {
+	wa, _ := gd.WalkStaticValues.(*walkAnalysis)
+	return wa
+}
+
+// analyzePreWalk populates staticValues and shapeConvSources using a
+// single AST traversal. We can't use an ir.ReassignOracle or
+// ir.StaticValue in the middle of walk because they don't currently
+// handle transformed assignments (e.g., will complain about
+// 'RHS == nil'). So we build these maps before walk begins.
+func analyzePreWalk(fn *ir.Func) *walkAnalysis {
 	ro := &ir.ReassignOracle{}
 	ro.Init(fn)
-	m := make(map[ir.Node]ir.Node)
+	sv := make(map[ir.Node]ir.Node)
+	scs := make(map[*ir.Name]*types.Type)
 	ir.Visit(fn, func(n ir.Node) {
-		if n.Op() == ir.OCONVIFACE {
+		switch n.Op() {
+		case ir.OCONVIFACE:
 			x := n.(*ir.ConvExpr).X
 			v := ro.StaticValue(x)
 			if v != nil && v != x {
-				m[x] = v
+				sv[x] = v
+			}
+		case ir.ONAME:
+			name := n.(*ir.Name).Canonical()
+			if name.Class != ir.PAUTO || name.Type() == nil || !name.Type().IsInterface() {
+				return
+			}
+			val := ro.StaticValue(name)
+			if val == nil || val.Op() != ir.OCONVIFACE {
+				return
+			}
+			srcType := val.(*ir.ConvExpr).X.Type()
+			if srcType != nil && !srcType.IsInterface() && srcType.IsShape() {
+				scs[name] = srcType
 			}
 		}
 	})
-	return m
+	return &walkAnalysis{staticValues: sv, shapeConvSources: scs}
 }

@@ -1083,7 +1083,7 @@ func TestMemHashGlobalSeed(t *testing.T) {
 
 	testenv.MustHaveExec(t)
 
-	// aeshash and memhashFallback use separate per-process seeds, so test
+	// aeshash and memHashFallback use separate per-process seeds, so test
 	// both.
 	t.Run("aes", func(t *testing.T) {
 		if !*runtime.UseAeshash {

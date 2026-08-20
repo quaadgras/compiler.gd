@@ -386,6 +386,10 @@ func Run(rawArgs []string) {
 		conf.Mode &^= printer.SourcePos
 	}
 
+	if *objDir == "" {
+		*objDir = "_obj"
+	}
+
 	args := flag.Args()
 	if len(args) < 1 {
 		usage()
@@ -522,14 +526,6 @@ func Run(rawArgs []string) {
 	<-q.Idle()
 
 	cPrefix = fmt.Sprintf("_%x", h.Sum(nil)[0:6])
-
-	if *objDir == "" {
-		*objDir = "_obj"
-	}
-	// make sure that `objDir` directory exists, so that we can write
-	// all the output files there.
-	os.MkdirAll(*objDir, 0o700)
-	*objDir += string(filepath.Separator)
 
 	for i, input := range goFiles {
 		f := fs[i]

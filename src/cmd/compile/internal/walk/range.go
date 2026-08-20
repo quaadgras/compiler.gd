@@ -23,7 +23,7 @@ func cheapComputableIndex(width int64) bool {
 	// MIPS does not have R+R addressing
 	// Arm64 may lack ability to generate this code in our assembler,
 	// but the architecture supports it.
-	case sys.PPC64, sys.S390X:
+	case sys.Loong64, sys.PPC64, sys.S390X:
 		return width == 1
 	case sys.AMD64, sys.I386, sys.ARM64, sys.ARM:
 		switch width {
@@ -348,6 +348,8 @@ func walkRange(gd *base.Invocation, nrange *ir.RangeStmt) ir.Node {
 		// } else {
 		// hv2, hv1 = decoderune(ha, hv1)
 		fn := typecheck.LookupRuntime(gd, "decoderune")
+		// decoderune expects a uint, but hv1 is an int.
+		// This is safe because hv1 is always >= 0.
 		call := mkcall1(gd, fn, fn.Type().ResultsTuple(), &nif.Else, ha, hv1)
 		a := ir.NewAssignListStmt(gd, gd.Pos, ir.OAS2, []ir.Node{hv2, hv1}, []ir.Node{call})
 		nif.Else.Append(a)
@@ -477,7 +479,7 @@ func mapClear(gd *base.Invocation, m, rtyp ir.Node) ir.Node {
 	// instantiate mapclear(typ *type, hmap map[any]any)
 	fn := typecheck.LookupRuntime(gd, "mapclear", t.Key(), t.Elem())
 	n := mkcallstmt1(gd, fn, rtyp, m)
-	return walkStmt(gd, typecheck.Stmt(gd, n))
+	return typecheck.Stmt(gd, n)
 }
 
 // Lower n into runtime·memclr if possible, for
@@ -559,14 +561,17 @@ func arrayClear(gd *base.Invocation, wbPos src.XPos, a ir.Node, nrange *ir.Range
 	}
 
 	// Convert to
-	// if len(a) != 0 {
+	// if ln := len(a); ln != 0 {
 	// 	hp = &a[0]
 	// 	hn = len(a)*sizeof(elem(a))
 	// 	memclr{NoHeap,Has}Pointers(hp, hn)
-	// 	i = len(a) - 1
+	// 	i = ln - 1
 	// }
 	n := ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
-	n.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.ONE, ir.NewUnaryExpr(gd, gd.Pos, ir.OLEN, a), ir.NewInt(gd, gd.Pos, 0))
+	ln := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TINT])
+	as := ir.NewAssignStmt(gd, gd.Pos, ln, ir.NewUnaryExpr(gd, gd.Pos, ir.OLEN, a))
+	n.PtrInit().Append(typecheck.Stmt(gd, as))
+	n.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.ONE, ln, ir.NewInt(gd, gd.Pos, 0))
 
 	// hp = &a[0]
 	hp := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TUNSAFEPTR])
@@ -578,7 +583,7 @@ func arrayClear(gd *base.Invocation, wbPos src.XPos, a ir.Node, nrange *ir.Range
 
 	// hn = len(a) * sizeof(elem(a))
 	hn := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TUINTPTR])
-	mul := typecheck.Conv(gd, ir.NewBinaryExpr(gd, gd.Pos, ir.OMUL, ir.NewUnaryExpr(gd, gd.Pos, ir.OLEN, a), ir.NewInt(gd, gd.Pos, elemsize)), types.Types[types.TUINTPTR])
+	mul := typecheck.Conv(gd, ir.NewBinaryExpr(gd, gd.Pos, ir.OMUL, ln, ir.NewInt(gd, gd.Pos, elemsize)), types.Types[types.TUINTPTR])
 	n.Body.Append(ir.NewAssignStmt(gd, gd.Pos, hn, mul))
 
 	var fn ir.Node
@@ -595,7 +600,7 @@ func arrayClear(gd *base.Invocation, wbPos src.XPos, a ir.Node, nrange *ir.Range
 
 	// For array range clear, also set "i = len(a) - 1"
 	if nrange != nil {
-		idx := ir.NewAssignStmt(gd, gd.Pos, nrange.Key, typecheck.Conv(gd, ir.NewBinaryExpr(gd, gd.Pos, ir.OSUB, ir.NewUnaryExpr(gd, gd.Pos, ir.OLEN, a), ir.NewInt(gd, gd.Pos, 1)), nrange.Key.Type()))
+		idx := ir.NewAssignStmt(gd, gd.Pos, nrange.Key, typecheck.Conv(gd, ir.NewBinaryExpr(gd, gd.Pos, ir.OSUB, ln, ir.NewInt(gd, gd.Pos, 1)), nrange.Key.Type()))
 		n.Body.Append(idx)
 	}
 

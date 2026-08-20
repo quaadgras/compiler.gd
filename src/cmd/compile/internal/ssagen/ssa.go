@@ -185,108 +185,54 @@ func InitConfig(gd *base.Invocation) {
 		ir.Syms(gd).
 			MallocGCSmallScanNoHeader[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcSmallScanNoHeaderSC%d", i))
 	}
-	for i := 1; i < len(ir.Syms(gd).MallocGCTiny); i++ {
-		ir.Syms(gd).
-			MallocGCTiny[i] = typecheck.LookupRuntimeFunc(gd, fmt.Sprintf("mallocgcTinySize%d", i))
-	}
-	ir.Syms(gd).
-		MallocGC = typecheck.LookupRuntimeFunc(gd, "mallocgc")
-	ir.Syms(gd).
-		Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
-	ir.Syms(gd).
-		Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
-	ir.Syms(gd).
-		SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
-	ir.Syms(gd).
-		Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
-	ir.Syms(gd).
-		Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
-	ir.Syms(gd).
-		Msanmove = typecheck.LookupRuntimeFunc(gd, "msanmove")
-	ir.Syms(gd).
-		Asanread = typecheck.LookupRuntimeFunc(gd, "asanread")
-	ir.Syms(gd).
-		Asanwrite = typecheck.LookupRuntimeFunc(gd, "asanwrite")
-	ir.Syms(gd).
-		MaybeInPlace = typecheck.LookupRuntimeFunc(gd, "maybeInPlace")
-	ir.Syms(gd).
-		Newobject = typecheck.LookupRuntimeFunc(gd, "newobject")
-	ir.Syms(gd).
-		Newproc = typecheck.LookupRuntimeFunc(gd, "newproc")
-	ir.Syms(gd).
-		PanicBounds = typecheck.LookupRuntimeFunc(gd, "panicBounds")
-	ir.Syms(gd).
-		PanicExtend = typecheck.LookupRuntimeFunc(gd, "panicExtend")
-	ir.Syms(gd).
-		Panicdivide = typecheck.LookupRuntimeFunc(gd, "panicdivide")
-	ir.Syms(gd).
-		PanicdottypeE = typecheck.LookupRuntimeFunc(gd, "panicdottypeE")
-	ir.Syms(gd).
-		PanicdottypeI = typecheck.LookupRuntimeFunc(gd, "panicdottypeI")
-	ir.Syms(gd).
-		Panicnildottype = typecheck.LookupRuntimeFunc(gd, "panicnildottype")
-	ir.Syms(gd).
-		Panicoverflow = typecheck.LookupRuntimeFunc(gd, "panicoverflow")
-	ir.Syms(gd).
-		Panicshift = typecheck.LookupRuntimeFunc(gd, "panicshift")
-	ir.Syms(gd).
-		PanicSimdImm = typecheck.LookupRuntimeFunc(gd, "panicSimdImm")
-	ir.Syms(gd).
-		Racefuncenter = typecheck.LookupRuntimeFunc(gd, "racefuncenter")
-	ir.Syms(gd).
-		Racefuncexit = typecheck.LookupRuntimeFunc(gd, "racefuncexit")
-	ir.Syms(gd).
-		Raceread = typecheck.LookupRuntimeFunc(gd, "raceread")
-	ir.Syms(gd).
-		Racereadrange = typecheck.LookupRuntimeFunc(gd, "racereadrange")
-	ir.Syms(gd).
-		Racewrite = typecheck.LookupRuntimeFunc(gd, "racewrite")
-	ir.Syms(gd).
-		Racewriterange = typecheck.LookupRuntimeFunc(gd, "racewriterange")
-	ir.Syms(gd).
-		TypeAssert = typecheck.LookupRuntimeFunc(gd, "typeAssert")
-	ir.Syms(gd).
-		WBZero = typecheck.LookupRuntimeFunc(gd, "wbZero")
-	ir.Syms(gd).
-		WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
-	ir.Syms(gd).
-		X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")
-	ir.Syms(gd). // bool
-			X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")
-	ir.Syms(gd). // bool
-			X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")
-	ir.Syms(gd). // bool
-			X86HasSSE41 = typecheck.LookupRuntimeVar(gd, "x86HasSSE41")
-	ir.Syms(gd). // bool
-			ARMHasVFPv4 = typecheck.LookupRuntimeVar(gd, "armHasVFPv4")
-	ir.Syms(gd). // bool
-			ARM64HasATOMICS = typecheck.LookupRuntimeVar(gd, "arm64HasATOMICS")
-	ir.Syms( // bool
-		gd).
-		Loong64HasLAMCAS = typecheck.LookupRuntimeVar(gd, "loong64HasLAMCAS")
-	ir. // bool
-		Syms(gd).
-		Loong64HasLAM_BH = typecheck.LookupRuntimeVar(gd, "loong64HasLAM_BH")
-	ir. // bool
-		Syms(gd).
-		Loong64HasLSX = typecheck.LookupRuntimeVar(gd, "loong64HasLSX")
-	ir.Syms( // bool
-		gd).
-		RISCV64HasZbb = typecheck.LookupRuntimeVar(gd, "riscv64HasZbb")
-	ir.Syms( // bool
-		gd).
-		Staticuint64s = typecheck.LookupRuntimeVar(gd, "staticuint64s")
-	ir.Syms(gd).
-		Typedmemmove = typecheck.LookupRuntimeFunc(gd, "typedmemmove")
-	ir.Syms(gd).
-		Udiv = typecheck.LookupRuntimeVar(gd, "udiv")
-	ir.Syms(gd). // asm func with special ABI
-			WriteBarrier = typecheck.LookupRuntimeVar(gd, "writeBarrier")
-	ir. // struct { bool; ... }
-		Syms(gd).
-		Zerobase = typecheck.LookupRuntimeVar(gd, "zerobase")
-	ir.Syms(gd).
-		ZeroVal = typecheck.LookupRuntimeVar(gd, "zeroVal")
+	ir.Syms(gd).MallocGCTiny = typecheck.LookupRuntimeFunc(gd, "mallocgcTinySC2")
+	ir.Syms(gd).MallocGC = typecheck.LookupRuntimeFunc(gd, "mallocgc")
+	ir.Syms(gd).Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
+	ir.Syms(gd).Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
+	ir.Syms(gd).SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
+	ir.Syms(gd).Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
+	ir.Syms(gd).Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
+	ir.Syms(gd).Msanmove = typecheck.LookupRuntimeFunc(gd, "msanmove")
+	ir.Syms(gd).Asanread = typecheck.LookupRuntimeFunc(gd, "asanread")
+	ir.Syms(gd).Asanwrite = typecheck.LookupRuntimeFunc(gd, "asanwrite")
+	ir.Syms(gd).MaybeInPlace = typecheck.LookupRuntimeFunc(gd, "maybeInPlace")
+	ir.Syms(gd).Newobject = typecheck.LookupRuntimeFunc(gd, "newobject")
+	ir.Syms(gd).Newproc = typecheck.LookupRuntimeFunc(gd, "newproc")
+	ir.Syms(gd).PanicBounds = typecheck.LookupRuntimeFunc(gd, "panicBounds")
+	ir.Syms(gd).PanicExtend = typecheck.LookupRuntimeFunc(gd, "panicExtend")
+	ir.Syms(gd).Panicdivide = typecheck.LookupRuntimeFunc(gd, "panicdivide")
+	ir.Syms(gd).PanicdottypeE = typecheck.LookupRuntimeFunc(gd, "panicdottypeE")
+	ir.Syms(gd).PanicdottypeI = typecheck.LookupRuntimeFunc(gd, "panicdottypeI")
+	ir.Syms(gd).Panicnildottype = typecheck.LookupRuntimeFunc(gd, "panicnildottype")
+	ir.Syms(gd).Panicoverflow = typecheck.LookupRuntimeFunc(gd, "panicoverflow")
+	ir.Syms(gd).Panicshift = typecheck.LookupRuntimeFunc(gd, "panicshift")
+	ir.Syms(gd).PanicSimdImm = typecheck.LookupRuntimeFunc(gd, "panicSimdImm")
+	ir.Syms(gd).Racefuncenter = typecheck.LookupRuntimeFunc(gd, "racefuncenter")
+	ir.Syms(gd).Racefuncexit = typecheck.LookupRuntimeFunc(gd, "racefuncexit")
+	ir.Syms(gd).Raceread = typecheck.LookupRuntimeFunc(gd, "raceread")
+	ir.Syms(gd).Racereadrange = typecheck.LookupRuntimeFunc(gd, "racereadrange")
+	ir.Syms(gd).Racewrite = typecheck.LookupRuntimeFunc(gd, "racewrite")
+	ir.Syms(gd).Racewriterange = typecheck.LookupRuntimeFunc(gd, "racewriterange")
+	ir.Syms(gd).TypeAssert = typecheck.LookupRuntimeFunc(gd, "typeAssert")
+	ir.Syms(gd).WBZero = typecheck.LookupRuntimeFunc(gd, "wbZero")
+	ir.Syms(gd).WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
+	ir.Syms(gd).X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")                       // bool
+	ir.Syms(gd).X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")                       // bool
+	ir.Syms(gd).X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")                 // bool
+	ir.Syms(gd).X86HasSSE41 = typecheck.LookupRuntimeVar(gd, "x86HasSSE41")                   // bool
+	ir.Syms(gd).ARMHasVFPv4 = typecheck.LookupRuntimeVar(gd, "armHasVFPv4")                   // bool
+	ir.Syms(gd).ARM64HasATOMICS = typecheck.LookupRuntimeVar(gd, "arm64HasATOMICS")           // bool
+	ir.Syms(gd).Loong64HasLAMCAS = typecheck.LookupRuntimeVar(gd, "loong64HasLAMCAS")         // bool
+	ir.Syms(gd).Loong64HasLAM_BH = typecheck.LookupRuntimeVar(gd, "loong64HasLAM_BH")         // bool
+	ir.Syms(gd).Loong64HasDBAR_HINTS = typecheck.LookupRuntimeVar(gd, "loong64HasDBAR_HINTS") // bool
+	ir.Syms(gd).Loong64HasLSX = typecheck.LookupRuntimeVar(gd, "loong64HasLSX")               // bool
+	ir.Syms(gd).RISCV64HasZbb = typecheck.LookupRuntimeVar(gd, "riscv64HasZbb")               // bool
+	ir.Syms(gd).Staticuint64s = typecheck.LookupRuntimeVar(gd, "staticuint64s")
+	ir.Syms(gd).Typedmemmove = typecheck.LookupRuntimeFunc(gd, "typedmemmove")
+	ir.Syms(gd).Udiv = typecheck.LookupRuntimeVar(gd, "udiv")                 // asm func with special ABI
+	ir.Syms(gd).WriteBarrier = typecheck.LookupRuntimeVar(gd, "writeBarrier") // struct { bool; ... }
+	ir.Syms(gd).Zerobase = typecheck.LookupRuntimeVar(gd, "zerobase")
+	ir.Syms(gd).ZeroVal = typecheck.LookupRuntimeVar(gd, "zeroVal")
 
 	if Arch.LinkArch.Family == sys.Wasm {
 		BoundsCheckFunc[ssa.BoundsIndex] = typecheck.LookupRuntimeFunc(gd, "goPanicIndex")
@@ -330,12 +276,11 @@ func InitTables(gd *base.Invocation) {
 // any ABI wrapper that is present is nosplit, hence a precise
 // stack map is not needed there (the parameters survive only long
 // enough to call the wrapped assembly function).
-// This always returns a freshly copied ABI.
 func AbiForBodylessFuncStackMap(gd *base.Invocation, fn *ir.Func) *abi.ABIConfig {
-	return ssaConfigOf(gd).ABI0.Copy() // No idea what races will result, be safe
+	return ssaConfigOf(gd).ABI0
 }
 
-// abiForFunc implements ABI policy for a function, but does not return a copy of the ABI.
+// abiForFunc implements ABI policy for a function.
 // Passing a nil function returns the default ABI based on experiment configuration.
 func abiForFunc(gd *base.Invocation, fn *ir.Func, abi0, abi1 *abi.ABIConfig) *abi.ABIConfig {
 	if buildcfg.Experiment.RegabiArgs {
@@ -389,6 +334,7 @@ func (s *state) emitOpenDeferInfo() {
 
 	x := s.gd.Ctxt.Lookup(s.curfn.LSym.Name + ".opendefer")
 	x.Set(obj.AttrContentAddressable, true)
+	x.Align = 1
 	s.curfn.LSym.Func().OpenCodedDeferInfo = x
 
 	off := 0
@@ -950,11 +896,8 @@ func (s *state) specializedMallocSym(size int64, hasPointers bool) *obj.LSym {
 	if !s.sizeSpecializedMallocEnabled() {
 		return nil
 	}
-	ptrSize := s.config.PtrSize
-	ptrBits := ptrSize * 8
-	minSizeForMallocHeader := ptrSize * ptrBits
-	heapBitsInSpan := size <= minSizeForMallocHeader
-	if !heapBitsInSpan {
+	const specializedMallocMax = 80 // This must match the constant in mkmalloc.
+	if size > specializedMallocMax {
 		return nil
 	}
 	divRoundUp := func(n, a uintptr) uintptr { return (n + a - 1) / a }
@@ -963,7 +906,7 @@ func (s *state) specializedMallocSym(size int64, hasPointers bool) *obj.LSym {
 		return ir.Syms(s.gd).MallocGCSmallScanNoHeader[sizeClass]
 	}
 	if size < gc.TinySize {
-		return ir.Syms(s.gd).MallocGCTiny[size]
+		return ir.Syms(s.gd).MallocGCTiny
 	}
 	return ir.Syms(s.gd).MallocGCSmallNoScan[sizeClass]
 }
@@ -4490,16 +4433,14 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 				bound := n.X.Type().NumElem()
 				a := s.expr(n.X)
 				i := s.expr(n.Index)
-				if bound == 0 {
-					// Bounds check will never succeed.  Might as well
-					// use constants for the bounds check.
-					z := s.constInt(types.Types[types.TINT], 0)
-					s.boundsCheck(z, z, ssa.BoundsIndex, false)
-					// The return value won't be live, return junk.
-					// But not quite junk, in case bounds checks are turned off. See issue 48092.
-					return s.zeroVal(n.Type())
-				}
 				len := s.constInt(types.Types[types.TINT], bound)
+				if bound == 0 {
+					// Bounds check will never succeed.
+					s.boundsCheck(i, len, ssa.BoundsIndex, false)
+					// The return value won't be live. In case bounds checks
+					// are turned off, load from (*T)(nil) to cause a segfault.
+					return s.load(n.Type(), s.constNil(n.Type().PtrTo()))
+				}
 				s.boundsCheck(i, len, ssa.BoundsIndex, n.Bounded()) // checks i == 0
 				return s.newValue1I(ssa.OpArraySelect, n.Type(), 0, a)
 			}
@@ -5518,10 +5459,19 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 
 			i := s.expr(left.Index) // index
 			if n == 0 {
+				_ = s.expr(left.X) // Evaluating left.X for any side-effects.
 				// The bounds check must fail.  Might as well
 				// ignore the actual index and just use zeros.
 				z := s.constInt(types.Types[types.TINT], 0)
 				s.boundsCheck(z, z, ssa.BoundsIndex, false)
+				return
+			}
+			if t.Size() == 0 {
+				_ = s.expr(left.X) // Evaluating left.X for any side-effects.
+				// Generate bounds check for left, since this can happen
+				// for 0-size assignment case, see issue #79236.
+				len := s.constInt(types.Types[types.TINT], n)
+				s.boundsCheck(i, len, ssa.BoundsIndex, false)
 				return
 			}
 			if n != 1 {
@@ -5533,9 +5483,8 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 				// they are somewhere inside an outer [0].
 				// We can ignore the actual assignment, it is dynamically
 				// unreachable. See issue 77635.
-				return
-			}
-			if t.Size() == 0 {
+				// Still, evaluating left.X for any side-effects.
+				_ = s.expr(left.X)
 				return
 			}
 
@@ -6010,7 +5959,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		fn := fn.(*ir.SelectorExpr)
 		var iclosure *ssa.Value
 		iclosure, rcvr = s.getClosureAndRcvr(fn)
-		if k == callNormal {
+		if k == callNormal || k == callTail {
 			codeptr = s.load(types.Types[types.TUINTPTR], iclosure)
 		} else {
 			closure = iclosure
@@ -6130,6 +6079,10 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 			// Note that the "receiver" parameter is nil because the actual receiver is the first input parameter.
 			aux := ssa.InterfaceAuxCall(params)
 			call = s.newValue1A(ssa.OpInterLECall, aux.LateExpansionResultType(), aux, codeptr)
+			if k == callTail {
+				call.Op = ssa.OpTailLECallInter
+				stksize = 0 // Tail call does not use stack. We reuse caller's frame.
+			}
 		case calleeLSym != nil:
 			aux := ssa.StaticAuxCall(calleeLSym, params)
 			call = s.newValue0A(ssa.OpStaticLECall, aux.LateExpansionResultType(), aux)
@@ -6158,6 +6111,22 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		s.vars[memVar] = s.newValue1A(ssa.OpVarLive, types.TypeMem, v, s.mem())
 	}
 
+	// Build result value (before we might end the defer block, below).
+	var result *ssa.Value
+	if len(res) == 0 || k != callNormal {
+		result = nil
+	} else {
+		fp := res[0]
+		if returnResultAddr {
+			result = s.resultAddrOfCall(call, 0, fp.Type)
+		} else {
+			result = s.newValue1I(ssa.OpSelectN, fp.Type, 0, call)
+		}
+		if n.Reshape {
+			result = s.newValue1(ssa.OpCopy, n.Type(), result)
+		}
+	}
+
 	// Finish block for defers
 	if k == callDefer || k == callDeferStack || isCallDeferRangeFunc {
 		b := s.endBlock()
@@ -6177,15 +6146,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		s.startBlock(bNext)
 	}
 
-	if len(res) == 0 || k != callNormal {
-		// call has no return value. Continue with the next statement.
-		return nil
-	}
-	fp := res[0]
-	if returnResultAddr {
-		return s.resultAddrOfCall(call, 0, fp.Type)
-	}
-	return s.newValue1I(ssa.OpSelectN, fp.Type, 0, call)
+	return result
 }
 
 // maybeNilCheckClosure checks if a nil check of a closure is needed in some
@@ -6318,6 +6279,7 @@ func (s *state) addr(n ir.Node) *ssa.Value {
 		// &x[i], which will always panic when evaluated.
 		// We just return something reasonable in this case.
 		// It will be dynamically unreachable. See issue 77635.
+		s.boundsCheckArrayIndex(n)
 		return s.newValue1A(ssa.OpAddr, n.Type().PtrTo(), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 
@@ -6510,6 +6472,21 @@ func (s *state) nilCheck(ptr *ssa.Value) *ssa.Value {
 		return ptr
 	}
 	return s.newValue2(ssa.OpNilCheck, ptr.Type, ptr, s.mem())
+}
+
+// boundsCheckArrayIndex generates bounds checking code for array indexing operations.
+func (s *state) boundsCheckArrayIndex(n ir.Node) {
+	if n.Op() != ir.OINDEX {
+		return
+	}
+	nn := n.(*ir.IndexExpr)
+	typ := nn.X.Type()
+	if typ.IsArray() {
+		_ = s.expr(nn.X) // for side effects
+		idx := s.expr(nn.Index)
+		len := s.constInt(types.Types[types.TINT], typ.NumElem())
+		s.boundsCheck(idx, len, ssa.BoundsIndex, nn.Bounded())
+	}
 }
 
 // boundsCheck generates bounds checking code. Checks if 0 <= idx <[=] len, branches to exit if not.
@@ -8010,6 +7987,7 @@ func emitArgInfo(e *ssafn, f *ssa.Func, pp *objw.Progs) {
 // emit argument info (locations on stack) of f for traceback.
 func EmitArgInfo(gd *base.Invocation, f *ir.Func, abiInfo *abi.ABIParamResultInfo) *obj.LSym {
 	x := gd.Ctxt.Lookup(fmt.Sprintf("%s.arginfo%d", f.LSym.Name, f.ABI))
+	x.Align = 1
 	// NOTE: do not set ContentAddressable here. This may be referenced from
 	// assembly code by name (in this case f is a declaration).
 	// Instead, set it in emitArgInfo above.
@@ -8136,6 +8114,7 @@ func emitWrappedFuncInfo(e *ssafn, pp *objw.Progs) {
 	x := e.gd.Ctxt.LookupInit(fmt.Sprintf("%s.wrapinfo", wsym.Name), func(x *obj.LSym) {
 		objw.SymPtrOff(e.gd, x, 0, wsym)
 		x.Set(obj.AttrContentAddressable, true)
+		x.Align = 4
 	})
 	e.curfn.LSym.Func().WrapInfo = x
 

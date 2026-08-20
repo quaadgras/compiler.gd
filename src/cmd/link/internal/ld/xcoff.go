@@ -576,30 +576,18 @@ func xcoffUpdateOuterSize(ctxt *Link, size int64, stype sym.SymKind) {
 	switch stype {
 	default:
 		Errorf("unknown XCOFF outer symbol for type %s", stype.String())
-	case sym.SRODATA, sym.SRODATARELRO, sym.SFUNCTAB, sym.SSTRING:
+	case sym.SRODATA, sym.SRODATARELRO, sym.SSTRING:
 		// Nothing to do
-	case sym.STYPERELRO:
-		if ctxt.UseRelro() && (ctxt.BuildMode == BuildModeCArchive || ctxt.BuildMode == BuildModeCShared || ctxt.BuildMode == BuildModePIE) {
-			// runtime.types size must be removed, as it's a real symbol.
-			tsize := ldr.SymSize(ldr.Lookup("runtime.types", 0))
-			ctxt.outerSymSize["typerel.*"] = size - tsize
-			return
-		}
-		fallthrough
 	case sym.STYPE:
-		if !ctxt.DynlinkingGo() {
-			// runtime.types size must be removed, as it's a real symbol.
-			tsize := ldr.SymSize(ldr.Lookup("runtime.types", 0))
-			ctxt.outerSymSize["type:*"] = size - tsize
-		}
+		// runtime.types size must be removed, as it's a real symbol.
+		tsize := ldr.SymSize(ldr.Lookup("runtime.types", 0))
+		ctxt.outerSymSize["type:*"] = size - tsize
 	case sym.SGOSTRING:
 		ctxt.outerSymSize["go:string.*"] = size
 	case sym.SGOFUNC:
 		if !ctxt.DynlinkingGo() {
 			ctxt.outerSymSize["go:funcdesc"] = size
 		}
-	case sym.SGOFUNCRELRO:
-		ctxt.outerSymSize["go:funcdescrel"] = size
 	case sym.SGCBITS:
 		ctxt.outerSymSize["runtime.gcbits.*"] = size
 	case sym.SPCLNTAB:
@@ -610,6 +598,8 @@ func xcoffUpdateOuterSize(ctxt *Link, size int64, stype sym.SymKind) {
 		fsize = Rnd(fsize, int64(symalign(ctxt, ldr, fft)))
 		tsize := ldr.SymSize(fft)
 		ctxt.outerSymSize["runtime.pclntab"] = size - (fsize + tsize)
+	case sym.SGCMASK:
+		ctxt.outerSymSize["runtime.gcmask.*"] = size
 	}
 }
 
@@ -838,7 +828,7 @@ func (f *xcoffFile) writeSymbolFunc(ctxt *Link, x loader.Sym) []xcoffSym {
 		Nnumaux: 2,
 	}
 
-	if ldr.IsFileLocal(x) || ldr.AttrVisibilityHidden(x) || ldr.AttrLocal(x) {
+	if ldr.IsFileLocal(x) || ldr.AttrVisibilityHidden(x) || ldr.AttrLocal(x) || ldr.IsContentHashed(x) {
 		s.Nsclass = C_HIDEXT
 	}
 
@@ -959,7 +949,7 @@ func putaixsym(ctxt *Link, x loader.Sym, t SymbolType) {
 			Xscnlenhi: uint32(size >> 32),
 		}
 
-		if ty := ldr.SymType(x); ty >= sym.STYPE && ty <= sym.SPCLNTAB {
+		if ty := ldr.SymType(x); ty >= sym.SSTRING && ty <= sym.SPCLNTAB {
 			if ctxt.IsExternal() && strings.HasPrefix(ldr.SymSect(x).Name, ".data.rel.ro") {
 				// During external linking, read-only datas with relocation
 				// must be in .data.
@@ -1118,7 +1108,7 @@ func (f *xcoffFile) asmaixsym(ctxt *Link) {
 				putaixsym(ctxt, s, TLSSym)
 			}
 
-		case st == sym.SBSS, st == sym.SNOPTRBSS, st == sym.SLIBFUZZER_8BIT_COUNTER, st == sym.SCOVERAGE_COUNTER:
+		case st == sym.SBSS, st == sym.SNOPTRBSS, st == sym.SGCMASK, st == sym.SLIBFUZZER_8BIT_COUNTER, st == sym.SCOVERAGE_COUNTER:
 			if ldr.AttrReachable(s) {
 				data := ldr.Data(s)
 				if len(data) > 0 {
@@ -1270,7 +1260,7 @@ func Xcoffadddynrel(ctxt *Link, target *Target, ldr *loader.Loader, syms *ArchSy
 			case &ctxt.Segrodata:
 				xldr.symndx = 0 // .text
 			case &ctxt.Segdata:
-				if targType == sym.SBSS || targType == sym.SNOPTRBSS {
+				if targType == sym.SBSS || targType == sym.SNOPTRBSS || targType == sym.SGCMASK {
 					xldr.symndx = 2 // .bss
 				} else {
 					xldr.symndx = 1 // .data

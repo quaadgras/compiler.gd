@@ -224,7 +224,7 @@ func normalizeGoDeferCall(gd *base.Invocation, pos src.XPos, op ir.Op, call ir.N
 	}
 
 	// Create a new wrapper function without parameters or results.
-	wrapperFn := ir.NewClosureFunc(gd, pos, pos, op, types.NewSignature(gd, nil, nil, nil), ir.CurFunc(gd), Target(gd))
+	wrapperFn := ir.NewClosureFunc(gd, pos, pos, op, types.NewSignature(gd, nil, nil, nil), ir.CurFunc(gd), Target(gd), 0)
 	wrapperFn.DeclareParams(gd, true)
 	wrapperFn.SetWrapper(true)
 

@@ -17,6 +17,7 @@ package liveness
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"sort"
@@ -427,7 +428,7 @@ func newliveness(gd *base.Invocation, fn *ir.Func, f *ssa.Func, vars []*ir.Name,
 
 	nblocks := int32(len(f.Blocks))
 	nvars := int32(len(vars))
-	bulk := bitvec.NewBulk(gd, nvars, nblocks*7, fn.Pos())
+	bulk := bitvec.NewBulk(gd, nvars, nblocks*4)
 	for _, b := range f.Blocks {
 		be := lv.blockEffects(b)
 
@@ -1368,6 +1369,10 @@ func (lv *Liveness) emit(gd *base.Invocation) (argsSym, liveSym *obj.LSym) {
 	loff := objw.Uint32(gd, &liveSymTmp, 0, uint32(len(lv.stackMaps))) // number of bitmaps
 	loff = objw.Uint32(gd, &liveSymTmp, loff, uint32(locals.N))        // number of bits in each bitmap
 
+	// Check for overflow before serializing stackmaps
+	checkStackmapOverflow(gd, args, len(lv.stackMaps), lv.fn.Pos())
+	checkStackmapOverflow(gd, locals, len(lv.stackMaps), lv.fn.Pos())
+
 	for _, live := range lv.stackMaps {
 		args.Clear()
 		locals.Clear()
@@ -1474,6 +1479,7 @@ func (lv *Liveness) emitStackObjects(gd *base.Invocation) *obj.LSym {
 	// Format must match runtime/stack.go:stackObjectRecord.
 	x := gd.Ctxt.Lookup(lv.fn.LSym.Name + ".stkobj")
 	x.Set(obj.AttrContentAddressable, true)
+	x.Align = int16(types.PtrSize) // see https://go.dev/issue/80668
 	lv.fn.LSym.Func().StackObjects = x
 	off := 0
 	off = objw.Uintptr(gd, x, off, uint64(len(vars)))
@@ -1567,6 +1573,10 @@ func WriteFuncMap(gd *base.Invocation, fn *ir.Func, abiInfo *abi.ABIParamResultI
 	if fn.Type().NumResults() > 0 {
 		nbitmap = 2
 	}
+
+	// defensive check: function arguments can't realistically be large enough for overflow here
+	checkStackmapOverflow(gd, bv, nbitmap, fn.Pos())
+
 	lsym := gd.Ctxt.Lookup(fn.LSym.Name + ".args_stackmap")
 	lsym.Set(obj.AttrLinkname, true) // allow args_stackmap referenced from assembly
 	off := objw.Uint32(gd, lsym, 0, uint32(nbitmap))
@@ -1583,4 +1593,19 @@ func WriteFuncMap(gd *base.Invocation, fn *ir.Func, abiInfo *abi.ABIParamResultI
 	}
 
 	objw.Global(gd, lsym, int32(off), obj.RODATA|obj.LOCAL)
+}
+
+// checkStackmapOverflow checks for potential overflow in runtime stackmap reading.
+// Runtime computes: n * ((nbit+7)/8) using int32 arithmetic.
+// See runtime.stackmapdata implementation.
+func checkStackmapOverflow(gd *base.Invocation, bv bitvec.BitVec, count int, pos src.XPos) {
+	if bv.N <= 0 || count <= 0 {
+		return
+	}
+	bytesPerBitVec := (int64(bv.N) + 7) >> 3
+	totalBytes := bytesPerBitVec * int64(count)
+	if totalBytes > math.MaxInt32 {
+		// runtime.stackmap has to support 64-bit values to avoid this restriction, see issue 77170
+		gd.FatalfAt(pos, "liveness stackmaps are too large: nbit=%d count=%d totalBytes=%d exceeds MaxInt32", bv.N, count, totalBytes)
+	}
 }

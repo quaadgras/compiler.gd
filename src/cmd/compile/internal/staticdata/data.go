@@ -95,6 +95,7 @@ func StringSym(gd *base.Invocation, pos src.XPos, s string) (data *obj.LSym) {
 		off := dstringdata(gd, symdata, 0, s, pos, "string")
 		objw.Global(gd, symdata, int32(off), obj.DUPOK|obj.RODATA|obj.LOCAL)
 		symdata.Set(obj.AttrContentAddressable, true)
+		symdata.Align = 1
 	}
 
 	return symdata
@@ -112,7 +113,7 @@ func StringSymNoCommon(gd *base.Invocation, s string) (data *obj.LSym) {
 
 // maxFileSize is the maximum file size permitted by the linker
 // (see issue #9862).
-const maxFileSize = int64(2e9)
+const maxFileSize = obj.MaxSymSize
 
 // fileStringSym returns a symbol for the contents and the size of file.
 // If readonly is true, the symbol shares storage with any literal string
@@ -188,6 +189,7 @@ func fileStringSym(gd *base.Invocation, pos src.XPos, file string, readonly bool
 			info.Name = file
 			info.Size = size
 			objw.Global(gd, symdata, int32(size), obj.DUPOK|obj.RODATA|obj.LOCAL)
+			symdata.Align = 1
 			// Note: AttrContentAddressable cannot be set here,
 			// because the content-addressable-handling code
 			// does not know about file symbols.
@@ -214,6 +216,7 @@ func slicedata(gd *base.Invocation, pos src.XPos, s string) *obj.LSym {
 	lsym := types.LocalPkg(gd).Lookup(symname).LinksymABI(gd, obj.ABI0)
 	off := dstringdata(gd, lsym, 0, s, pos, "slice")
 	objw.Global(gd, lsym, int32(off), obj.NOPTR|obj.LOCAL)
+	lsym.Align = 1
 
 	return lsym
 }

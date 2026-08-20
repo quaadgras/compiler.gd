@@ -483,6 +483,7 @@ func condCall(gd *base.Invocation, curfn *ir.Func, pos src.XPos, cond ir.Node, t
 	res := ir.NewInlinedCallExpr(gd, pos, body, retvars)
 	res.SetType(thenCall.Type())
 	res.SetTypecheck(1)
+	res.Reshape = thenCall.Reshape
 	return res
 }
 

@@ -6,7 +6,6 @@ package typecheck
 
 import (
 	"fmt"
-	"go/constant"
 	"internal/types/errors"
 	"strings"
 
@@ -313,6 +312,19 @@ func tcStructLitKey(gd *base.Invocation, typ *types.Type, kv *ir.KeyExpr) *ir.St
 		return ir.NewStructKeyExpr(gd, kv.Pos(), f, kv.Value)
 	}
 
+	var f *types.Field
+	if p, ambig := dotpath(sym, typ, &f, false); p != nil {
+		if ambig {
+			gd.Errorf("ambiguous promoted field '%v' in struct literal of type %v", sym, typ)
+			return nil
+		}
+		if f.IsMethod() {
+			gd.Errorf("cannot use method '%v' in struct literal of type %v", sym, typ)
+			return nil
+		}
+		return ir.NewStructKeyExpr(gd, kv.Pos(), f, kv.Value)
+	}
+
 	if ci := Lookdot1(gd, nil, sym, typ, typ.Fields(), 2); ci != nil { // Case-insensitive lookup.
 		if visible(gd, ci.Sym) {
 			gd.Errorf("unknown field '%v' in struct literal of type %v (but does have %v)", sym, typ, ci.Sym)
@@ -324,7 +336,6 @@ func tcStructLitKey(gd *base.Invocation, typ *types.Type, kv *ir.KeyExpr) *ir.St
 		return nil
 	}
 
-	var f *types.Field
 	p, _ := dotpath(sym, typ, &f, true)
 	if p == nil || f.IsMethod() {
 		gd.Errorf("unknown field '%v' in struct literal of type %v", sym, typ)
@@ -336,8 +347,8 @@ func tcStructLitKey(gd *base.Invocation, typ *types.Type, kv *ir.KeyExpr) *ir.St
 	for ei := len(p) - 1; ei >= 0; ei-- {
 		ep = append(ep, p[ei].field.Sym.Name)
 	}
-	ep = append(ep, sym.Name)
-	gd.Errorf("cannot use promoted field %v in struct literal of type %v", strings.Join(ep, "."), typ)
+	ep = append(ep, f.Sym.Name)
+	gd.Errorf("unknown field '%v' in struct literal of type %v (but does have %v)", sym, typ, strings.Join(ep, "."))
 	return nil
 }
 
@@ -845,10 +856,6 @@ func tcStringHeader(gd *base.Invocation, n *ir.StringHeaderExpr) ir.Node {
 
 	n.Ptr = Expr(gd, n.Ptr)
 	n.Len = DefaultLit(gd, Expr(gd, n.Len), types.Types[types.TINT])
-
-	if ir.IsConst(n.Len, constant.Int) && ir.Int64Val(n.Len) < 0 {
-		gd.Fatalf("len for OSTRINGHEADER must be non-negative")
-	}
 
 	return n
 }

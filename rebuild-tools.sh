@@ -108,7 +108,7 @@ cat > "$OVERLAY" <<EOF
   }
 }
 EOF
-( cd "$SYSGO/src" && unset GOROOT && GOTOOLCHAIN=local $SYSGOBIN build -overlay="$OVERLAY" -o "$TOOLDIR/vet" ./cmd/vet )
+( cd "$SYSGO/src/cmd" && unset GOROOT && GOTOOLCHAIN=local $SYSGOBIN build -overlay="$OVERLAY" -o "$TOOLDIR/vet" ./vet )
 [ -x "$TOOLDIR/vet" ] || die "vet rebuild failed"
 
 # Wipe any cached fork-compiled .a files: freshly-installed compile

@@ -64,6 +64,8 @@ var (
 // already been some compiler errors). It may also be invoked from the explicit panic in
 // hcrash(), in which case, we pass the panic on through.
 func handlePanic(gd *base.Invocation) {
+	ir.CloseHTMLWriters(gd)
+	noder.CloseHTMLWriters(gd)
 	if err := recover(); err != nil {
 		if err == "-h" {
 			// Force real panic now with -h option (hcrash) - the error
@@ -110,7 +112,7 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	base.SetCurrentCtxt(gd.Ctxt)
 	gd.Ctxt.DiagFunc = gd.Errorf
 	gd.Ctxt.DiagFlush = gd.FlushErrors
-	gd.Ctxt.Bso = bufio.NewWriter(os.Stdout)
+	gd.Ctxt.Bso = bufio.NewWriter(gd.StdoutWriter())
 
 	// UseBASEntries is preferred because it shaves about 2% off build time, but LLDB, dsymutil, and dwarfdump
 	// on Darwin don't support it properly, especially since macOS 10.14 (Mojave).  This is exposed as a flag
@@ -303,12 +305,24 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 		}
 	}
 
+	for _, fn := range typecheck.Target(gd).Funcs {
+		if ir.MatchAstDump(gd, fn, "start") {
+			ir.AstDump(gd, fn, "start, "+ir.FuncName(fn))
+		}
+	}
+
 	// Apply bloop markings.
-	bloop.BloopWalk(gd, typecheck.Target(gd))
+	bloop.Walk(gd, typecheck.Target(gd))
 
 	// Interleaved devirtualization and inlining.
 	gd.Timer.Start("fe", "devirtualize-and-inline")
 	interleaved.DevirtualizeAndInlinePackage(gd, typecheck.Target(gd), profile)
+
+	for _, fn := range typecheck.Target(gd).Funcs {
+		if ir.MatchAstDump(gd, fn, "devirtualize-and-inline") {
+			ir.AstDump(gd, fn, "devirtualize-and-inline, "+ir.FuncName(fn))
+		}
+	}
 
 	noder.MakeWrappers(gd, typecheck.Target(gd)) // must happen after inlining
 

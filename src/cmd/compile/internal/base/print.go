@@ -88,6 +88,11 @@ func (gd *Invocation) stdout() io.Writer {
 	return os.Stdout
 }
 
+// StdoutWriter is the exported form of stdout(); gd.Main uses it to
+// seed Ctxt.Bso so -S listings and similar tool output are captured by
+// cmd/go's in-process host instead of leaking to the process stdout.
+func (gd *Invocation) StdoutWriter() io.Writer { return gd.stdout() }
+
 // Logf writes to gd.stdout() — replaces fmt.Printf calls scattered
 // across the compile that emit "-m" inline decisions, loopvar
 // messages, etc. so in-process callers can capture the output.
@@ -117,7 +122,9 @@ func (gd *Invocation) FlushErrors() {
 	if len(gd.errorMsgs) == 0 {
 		return
 	}
-	sort.Stable(byPos(gd.errorMsgs))
+	if gd.Flag.LowerU == 0 {
+		sort.Stable(byPos(gd.errorMsgs))
+	}
 	w := gd.stderr()
 	for i, err := range gd.errorMsgs {
 		if i == 0 || err.msg != gd.errorMsgs[i-1].msg {

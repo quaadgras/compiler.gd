@@ -538,6 +538,12 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		t.intRegs = 1
 		CheckSize(gd, t.Elem())
 		CheckSize(gd, t.Key())
+		if t.Elem().width >= 1<<31 {
+			gd.Errorf("map element type too large")
+		}
+		if t.Key().width >= 1<<31 {
+			gd.Errorf("map key type too large")
+		}
 		t.setAlg(ANOEQ)
 		t.ptrBytes = int64(PtrSize)
 

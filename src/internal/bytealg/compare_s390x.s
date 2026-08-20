@@ -6,13 +6,6 @@
 #include "textflag.h"
 
 TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
-#ifndef GOEXPERIMENT_regabiargs
-	MOVD	a_base+0(FP), R2
-	MOVD	a_len+8(FP), R3
-	MOVD	b_base+24(FP), R4
-	MOVD	b_len+32(FP), R5
-	LA	ret+48(FP), R6
-#else
 	// R2 = a_base
 	// R3 = a_len
 	// R4 = a_cap (unused)
@@ -21,7 +14,6 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	// R7 = b_cap (unused)
 	MOVD	R5, R4
 	MOVD	R6, R5
-#endif
 	BR	cmpbody<>(SB)
 
 // gd: stock cmpstring asm assumed a 16 B string ABI; the fork's
@@ -66,21 +58,12 @@ cmplengths:
 	BLT	lt
 gt:
 	MOVD	$1, R2
-#ifndef GOEXPERIMENT_regabiargs
-	MOVD	R2, 0(R6)
-#endif
 	RET
 lt:
 	MOVD	$-1, R2
-#ifndef GOEXPERIMENT_regabiargs
-	MOVD	R2, 0(R6)
-#endif
 	RET
 eq:
 	MOVD	$0, R2
-#ifndef GOEXPERIMENT_regabiargs
-	MOVD	R2, 0(R6)
-#endif
 	RET
 
 TEXT cmpbodyclc<>(SB),NOSPLIT|NOFRAME,$0-0

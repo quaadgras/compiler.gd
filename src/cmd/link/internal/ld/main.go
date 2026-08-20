@@ -73,6 +73,10 @@ func setupFlags(ctxt *Link) {
 	fs.Var(&ctxt.rpath, "r", "set the ELF dynamic linker search `path` to dir1:dir2:...")
 	fs.Var(&ctxt.flagExtld, "extld", "use `linker` when linking in external mode")
 	fs.Var(&ctxt.flagExtldflags, "extldflags", "pass `flags` to external linker")
+	// TODO(gd): macOS/macSDK are still package-level (upstream go1.27
+	// shape); move them onto linkState once link_state.go grows fields.
+	fs.Var(&macOS, "macos", "mac OS version to write in build info (only used in internal linking)")
+	fs.Var(&macSDK, "macsdk", "mac SDK version to write in build info (only used in internal linking)")
 	fs.Var(&ctxt.flagW, "w", "disable DWARF generation")
 
 	fs.StringVar(&ctxt.flagBuildid, "buildid", "", "record `id` as Go toolchain build id")
@@ -513,8 +517,6 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 
 	bench.Start("textaddress")
 	ctxt.textaddress()
-	bench.Start("typelink")
-	ctxt.typelink()
 	bench.Start("buildinfo")
 	ctxt.buildinfo()
 	bench.Start("pclntab")
