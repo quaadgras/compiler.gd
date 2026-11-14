@@ -139,7 +139,7 @@ Eligibility for inline rep: decided at compile time for string literals,
 at runtime for dynamic strings. Any string of length 1..15 bytes is a
 candidate; length 0 and ≥ 16 are always heap rep.
 
-### 1a. Literal provenance (amd64)
+### 1a. Literal provenance (amd64, arm64)
 
 An inline string built from a compile-time literal also sets word 0 to
 the literal's bytes in a `go:string.*` rodata symbol. Words 1 and 2 are
@@ -149,7 +149,7 @@ records where the bytes came from.
 **Invariant: the length tag alone decides the representation.** Word 0
 being non-nil does not mean heap rep. Everything that dispatches
 (`stringStruct.isInline`, `sealStringHash`, `strhashFallback`, the
-amd64 `strhash` and `cmpstring`, `stringEqFast`, `abi.StringBytes`,
+amd64 and arm64 string assembly, `stringEqFast`, `stringBytesTransient`, `abi.StringBytes`,
 `abi.Heapify`, `cgoStringNormalize`) reads the tag. Equality and
 hashing of inline strings use words 1 and 2 only, so a literal equals,
 and hashes like, the same bytes built inline at runtime.
@@ -165,7 +165,8 @@ What it buys:
 Cost: one `LEAQ` instead of a zero for word 0 when materialising a
 literal, and a write barrier again when a literal is stored to the heap
 during marking. Other 64-bit arches keep word 0 = nil until their
-`cmpstring`/`strhash` assembly dispatches on the tag.
+string assembly (`cmpstring`, `strhash`, `IndexString`,
+`IndexByteString`, `CountString`) dispatches on the tag.
 
 ### 1b. Equality
 

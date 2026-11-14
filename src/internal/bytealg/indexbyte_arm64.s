@@ -32,22 +32,27 @@ TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
 // before returning to the caller. The heap path doesn't use the
 // spill buffer but shares the frame for a single RET.
 TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$24-40
-	CBZ	R0, ibs_inline
+	TST	$0xf000000000000000, R2	// inline iff the length tag is set
+	BEQ	ibs_heap
+	// Inline rep: bytes packed across R1 (0..7) and low 7 bytes of
+	// R2 (8..14); tag = R2 >> 60 is the length. Word 0 is nil, or a
+	// literal's rodata bytes; either way the spill is used. (MOVD+ADD
+	// rather than ADD $8, RSP, R0: vet's asmdecl skips lines it reads
+	// as SP writes, and must see R0 written before the RETs.)
+	MOVD	R1, 8(RSP)
+	MOVD	R2, 16(RSP)
+	MOVD	RSP, R0
+	ADD	$8, R0
+	LSR	$60, R2, R1
+	MOVD	R3, R2
+	BL	indexByteBody<>(SB)
+	RET
+ibs_heap:
 	// Heap rep: R0 already the data pointer; length lives in the
 	// low 60 bits of R2 (top nibble is the zero tag).
 	AND	$0x0fffffffffffffff, R2, R1
 	MOVD	R3, R2
 	// R0=ptr, R1=len, R2=c
-	BL	indexByteBody<>(SB)
-	RET
-ibs_inline:
-	// Inline rep: word0 nil, bytes packed across R1 (0..7) and
-	// low 7 bytes of R2 (8..14); tag = R2 >> 60 is the length.
-	MOVD	R1, 8(RSP)
-	MOVD	R2, 16(RSP)
-	ADD	$8, RSP, R0
-	LSR	$60, R2, R1
-	MOVD	R3, R2
 	BL	indexByteBody<>(SB)
 	RET
 

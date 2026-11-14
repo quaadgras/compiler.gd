@@ -677,7 +677,9 @@ CALLFN(·call1073741824, 1073741824)
 // func strhash(p unsafe.Pointer, h uintptr) uintptr
 //
 // gd fork: 24 B string header with a cached hash in word 1 for heap
-// reps and a 15 B inline rep when word 0 == nil. Heap cache hits
+// reps and a 15 B inline rep when the length tag (word 2's top nibble)
+// is set; an inline literal's word 0 points at its rodata bytes and is
+// ignored here (doc/gd/sso-string.md section 1a). Heap cache hits
 // return immediately. Misses route through aeshashbody (with seed=0
 // and the fork's fixed aeskeysched) so the runtime produces the same
 // hash any other producer would. Inline-rep strings keep their bytes
@@ -689,8 +691,10 @@ CALLFN(·call1073741824, 1073741824)
 // maps.MemHash, which is what both miss paths below call.
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$24-24
 	NO_LOCAL_POINTERS
-	MOVD	(R0), R10		// R10 = word 0 (data ptr, nil for inline)
-	CBZ	R10, strhash_inline
+	MOVD	16(R0), R12		// R12 = word 2 (len|tag)
+	TST	$0xf000000000000000, R12	// inline iff the length tag is set
+	BNE	strhash_inline
+	MOVD	(R0), R10		// R10 = word 0 (data ptr)
 	MOVD	8(R0), R11		// R11 = word 1 (cached hash)
 	CBZ	R11, strhash_heap_unsealed
 	MOVD	R11, R0

@@ -25,7 +25,8 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 // strings; BL + RET so the epilogue restores SP.
 TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$40-56
 	// Decode a: R0=ptr, R1=len on exit.
-	CBZ	R0, cs_a_inline
+	TST	$0xf000000000000000, R2	// inline iff the length tag is set
+	BNE	cs_a_inline
 	AND	$0x0fffffffffffffff, R2, R1
 	B	cs_a_done
 cs_a_inline:
@@ -36,7 +37,8 @@ cs_a_inline:
 cs_a_done:
 
 	// Decode b: R2=ptr, R3=len on exit.
-	CBZ	R3, cs_b_inline
+	TST	$0xf000000000000000, R5
+	BNE	cs_b_inline
 	MOVD	R3, R2
 	AND	$0x0fffffffffffffff, R5, R3
 	B	cs_b_done

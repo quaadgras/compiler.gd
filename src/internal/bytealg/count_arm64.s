@@ -18,18 +18,22 @@ TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
 
 // func CountString(s string, c byte) int
 TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$24-40
-	CBZ	R0, cs_inline
-	// Heap rep: R0 already the data pointer; len in low 60 bits of R2.
-	AND	$0x0fffffffffffffff, R2, R1
+	TST	$0xf000000000000000, R2	// inline iff the length tag is set
+	BEQ	cs_heap
+	// Inline rep: bytes packed in R1 (bytes[0:8]) + low 7 of R2 (bytes[8:14]).
+	// (MOVD+ADD rather than ADD $8, RSP, R0: vet's asmdecl skips lines
+	// it reads as SP writes, and must see R0 written before the RETs.)
+	MOVD	R1, 8(RSP)
+	MOVD	R2, 16(RSP)
+	MOVD	RSP, R0
+	ADD	$8, R0
+	LSR	$60, R2, R1
 	MOVD	R3, R2
 	BL	countBody<>(SB)
 	RET
-cs_inline:
-	// Inline rep: bytes packed in R1 (bytes[0:8]) + low 7 of R2 (bytes[8:14]).
-	MOVD	R1, 8(RSP)
-	MOVD	R2, 16(RSP)
-	ADD	$8, RSP, R0
-	LSR	$60, R2, R1
+cs_heap:
+	// Heap rep: R0 already the data pointer; len in low 60 bits of R2.
+	AND	$0x0fffffffffffffff, R2, R1
 	MOVD	R3, R2
 	BL	countBody<>(SB)
 	RET

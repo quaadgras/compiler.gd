@@ -28,18 +28,21 @@ TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
 // func IndexString(a, b string) int
 TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$40-56
 	// Decode a into R0=ptr, R1=len. Inline spills to 8..23(RSP) (0(RSP) is the saved LR).
-	CBZ	R0, is_a_inline
+	TST	$0xf000000000000000, R2	// inline iff the length tag is set
+	BNE	is_a_inline
 	AND	$0x0fffffffffffffff, R2, R1
 	B	is_a_done
 is_a_inline:
 	MOVD	R1, 8(RSP)
 	MOVD	R2, 16(RSP)
-	ADD	$8, RSP, R0
+	MOVD	RSP, R0			// not ADD $8, RSP, R0: see CountString
+	ADD	$8, R0
 	LSR	$60, R2, R1
 is_a_done:
 
 	// Decode b into R2=ptr, R3=len. Inline spills to 24..39(RSP).
-	CBZ	R3, is_b_inline
+	TST	$0xf000000000000000, R5
+	BNE	is_b_inline
 	MOVD	R3, R2
 	AND	$0x0fffffffffffffff, R5, R3
 	B	is_b_done

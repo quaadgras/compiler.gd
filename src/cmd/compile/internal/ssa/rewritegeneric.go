@@ -7891,11 +7891,11 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		return true
 	}
 	// match: (ConstString {str})
-	// cond: config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch == "amd64"
+	// cond: config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && (config.arch == "amd64" || config.arch == "arm64")
 	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const64 <typ.Uintptr> [stringInlineWord1(str)]) (Const64 <typ.Int> [stringInlineWord2(str)]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch == "amd64") {
+		if !(config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && (config.arch == "amd64" || config.arch == "arm64")) {
 			break
 		}
 		v.reset(OpStringMake)
@@ -7911,11 +7911,11 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		return true
 	}
 	// match: (ConstString {str})
-	// cond: config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64"
+	// cond: config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64" && config.arch != "arm64"
 	// result: (StringMake (ConstNil) (Const64 <typ.Uintptr> [stringInlineWord1(str)]) (Const64 <typ.Int> [stringInlineWord2(str)]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64") {
+		if !(config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64" && config.arch != "arm64") {
 			break
 		}
 		v.reset(OpStringMake)

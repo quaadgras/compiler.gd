@@ -1674,8 +1674,27 @@ func (s *state) stringBytesTransient(str *ssa.Value, resultT *types.Type) *ssa.V
 	s.vars[marker] = w0
 	s.endBlock().AddEdgeTo(bEnd)
 
-	// Inline (cold) path: spill str to an autotmp and point past word 0.
+	// Inline (cold) path. A short literal keeps its rodata bytes in
+	// word 0 (doc/gd/sso-string.md section 1a): use them, so the
+	// pointer is the literal's stable address as on stock Go (graphics.gd's
+	// rodatacheck depends on it). Otherwise spill str to an autotmp and
+	// point past word 0.
 	s.startBlock(bInline)
+	nilPtr := s.constNil(resultT)
+	hasW0 := s.newValue2(ssa.OpNeqPtr, types.Types[types.TBOOL], w0, nilPtr)
+	bProv := s.f.NewBlock(ssa.BlockPlain)
+	bSpill := s.f.NewBlock(ssa.BlockPlain)
+	bi := s.endBlock()
+	bi.Kind = ssa.BlockIf
+	bi.SetControl(hasW0)
+	bi.AddEdgeTo(bProv)
+	bi.AddEdgeTo(bSpill)
+
+	s.startBlock(bProv)
+	s.vars[marker] = w0
+	s.endBlock().AddEdgeTo(bEnd)
+
+	s.startBlock(bSpill)
 	tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, types.Types[types.TSTRING])
 	tmp.SetAddrtaken(true)
 	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
