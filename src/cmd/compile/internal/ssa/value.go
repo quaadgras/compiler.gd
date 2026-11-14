@@ -610,6 +610,9 @@ func AutoVar(v *Value) (*ir.Name, int64) {
 	return nameOff.Name, nameOff.Offset
 }
 
+// maxSSAWords is the largest size, in words, of an SSA-able value.
+const maxSSAWords = 8
+
 // CanSSA reports whether values of type t can be represented as a Value.
 func CanSSA(t *types.Type) bool {
 	types.CalcSize(nil, t)
@@ -619,7 +622,13 @@ func CanSSA(t *types.Type) bool {
 	if t.Size() == 0 {
 		return true
 	}
-	sizeLimit := int64(MaxStruct * types.PtrSize)
+	// gd: stock allows 4 words, sized for slices. The fork's wider
+	// headers (3-word strings, 4-word interfaces, the 5-word
+	// reflect.Value) push ordinary structs past that, e.g. an
+	// interface plus a complex128 is 6 words, and a value that is not
+	// SSA-able is copied through memory at every call and return, with
+	// 16-byte copies of 8-byte stores that stall store forwarding.
+	sizeLimit := int64(maxSSAWords * types.PtrSize)
 	if t.Size() > sizeLimit {
 		// 4*Widthptr is an arbitrary constant. We want it
 		// to be at least 3*Widthptr so slices can be registerized.
@@ -666,7 +675,7 @@ func CanSSA(t *types.Type) bool {
 			return true
 		}
 		i, f := t.Registers()
-		return i+f <= MaxStruct
+		return i+f <= maxSSAWords
 	default:
 		return true
 	}
