@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !amd64
+//go:build !amd64 && !arm64
 
 package runtime
 
-// The direct C-ABI virtual-call entry thunk is amd64-only; see
-// fastcb_entry_amd64.go.
+// The direct C-ABI virtual-call entry thunk exists on amd64 and arm64;
+// see fastcb_entry_amd64.go and fastcb_entry_arm64.go.
 const fastcbEntrySupported = false
 
-func fastcbentry() {
-	throw("fastcbentry: not implemented on this architecture")
-}
+func fastcbEntryPC() uintptr { return 0 }

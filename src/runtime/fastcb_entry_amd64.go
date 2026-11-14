@@ -6,7 +6,10 @@
 
 package runtime
 
-import "unsafe" // also for go:linkname
+import (
+	"internal/abi"
+	"unsafe" // also for go:linkname
+)
 
 // fastcbEntrySupported gates fastcbArmEntry: the direct C-ABI virtual-call
 // entry thunk is implemented for amd64 and validated on Linux. Other systems
@@ -18,6 +21,9 @@ const fastcbEntrySupported = GOOS == "linux"
 // (fastcb_amd64.s). Never called from Go — the engine calls its PC with C
 // ABI arguments.
 func fastcbentry()
+
+// fastcbEntryPC is the C-callable PC of the direct entry thunk.
+func fastcbEntryPC() uintptr { return abi.FuncPCABI0(fastcbentry) }
 
 // fastcbCallCFast is the fused resident outbound crossing (fastcb_amd64.s):
 // fastcbCallC + asmcgocall specialized for the resident goroutine calling a

@@ -526,7 +526,7 @@ func fastcbArmEntry(dispatch func(instance, userdata, result, args uintptr), fal
 	}
 	fastcbEntryFn = dispatch
 	fastcbEntryFallback = uintptr(fallback)
-	return abi.FuncPCABI0(fastcbentry)
+	return fastcbEntryPC()
 }
 
 // fastcbentrygo is the Go half of fastcbentry. It runs on the resident

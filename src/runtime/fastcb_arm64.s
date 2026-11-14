@@ -1,0 +1,270 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#include "go_asm.h"
+#include "funcdata.h"
+#include "textflag.h"
+#include "cgo/abi_arm64.h"
+
+// fastcbEntryFrame is the assembler's total prologue decrement for
+// fastcbentrycall's $32 frame (32 locals + 8 saved LR, padded to keep RSP
+// 16-aligned). The self-heal below depends on it: entry RSP (= sched.sp)
+// is the post-prologue RSP plus this delta, with the saved LR at the
+// post-prologue [RSP].
+#define fastcbEntryFrame 48
+
+// arm64 resident fast paths, the counterpart of fastcb_amd64.s (shared
+// with graphics.gd's stock-toolchain overlay, which device-verified them
+// on darwin and ios). The arm64-specific choices:
+//   - The published resume anchor is CALLER-STYLE (sched.pc = our return
+//     address, sched.sp = RSP at entry), the exact shape entersyscall's
+//     save() produces for syscallpc/syscallsp, so the unwinder handles it
+//     by construction — no systemstack_switch fake-frame layout to
+//     reproduce. cgocallback's splice composes with it directly: a nested
+//     callback opens its frame at sched.sp-48 and unwinds into
+//     (sched.pc, sched.sp), which is the middle of our Go caller.
+//   - C callee-saved state is much larger than amd64's six registers:
+//     X19-X28, the frame record (R29, LR) and the low halves of F8-F15
+//     all belong to the engine and are clobbered by any Go code, so the
+//     entry thunk saves the full block (crosscall2 does the same via
+//     these macros).
+//   - g lives in a register (R28) but the TLS copy must be kept in sync
+//     (load_g/save_g, which clobber R0 and R27; R27 is also the
+//     assembler's address-materialisation scratch, so on the C-ABI paths
+//     no symbol-addressed instruction may execute after R27 is restored).
+//   - RSP must stay 16-byte aligned at every memory access.
+
+// fastcbCallCFast: the fused resident outbound crossing. ABIInternal
+// arguments: R0 = fn, R1 = arg. See fastcb_amd64.s for the contract; the
+// stash that amd64 keeps in g0 stack slots lives in C-callee-saved
+// registers here (the C function preserves X19-X28).
+TEXT runtime·fastcbCallCFast<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-16
+	NO_LOCAL_POINTERS
+	MOVD	runtime·fastcbCallCDepth(SB), R2
+	ADD	$1, R2
+	MOVD	R2, runtime·fastcbCallCDepth(SB)
+
+	// Capture the PREVIOUS sched anchor (depth-encoded sp: a nested
+	// callback may move the stack; copystack adjusts g.sched but cannot
+	// see raw pointers stashed in registers or off-stack memory).
+	MOVD	(g_stack+stack_hi)(g), R2
+	MOVD	(g_sched+gobuf_sp)(g), R3
+	SUB	R3, R2, R19		// R19 = old sched.sp depth
+	MOVD	(g_sched+gobuf_pc)(g), R20	// R20 = old sched.pc
+
+	// Publish the caller-style resume anchor.
+	MOVD	LR, (g_sched+gobuf_pc)(g)
+	MOVD	RSP, R3
+	MOVD	R3, (g_sched+gobuf_sp)(g)
+	MOVD	R29, (g_sched+gobuf_bp)(g)
+
+	// Stash the return context in C-callee-saved registers. Stack
+	// addresses (SP and the caller's frame pointer) are stored as DEPTHS
+	// from stack.hi: a nested callback may grow and therefore MOVE the
+	// stack, and copystack cannot adjust raw pointers held in registers.
+	MOVD	g, R21			// R21 = curg
+	SUB	R3, R2, R22		// R22 = our SP depth (R2 = stack.hi)
+	MOVD	LR, R23			// return address
+	SUB	R29, R2, R24		// R24 = caller frame-pointer depth
+	MOVD	R0, R25			// fn
+	MOVD	R1, R26			// arg
+
+	// Switch to the system stack and TLS g = g0.
+	MOVD	g_m(g), R8
+	MOVW	$1, R9
+	MOVW	R9, m_signalPending(R8)	// fastcbExtEnter: no preemption signals in C
+	MOVD	m_g0(R8), g
+	BL	runtime·save_g(SB)	// clobbers R0, R27
+	MOVD	(g_sched+gobuf_sp)(g), R3
+	SUB	$16, R3
+	AND	$-16, R3		// alignment for the C ABI
+	MOVD	R3, RSP
+
+	// fn(arg)
+	MOVD	R26, R0
+	BL	(R25)
+
+	// Back from C: restore the Go execution context, the goroutine SP
+	// (via depth — the stack may have moved) and the previous anchor.
+	MOVD	R21, g
+	BL	runtime·save_g(SB)	// clobbers R0, R27
+	MOVD	(g_stack+stack_hi)(g), R2
+	SUB	R22, R2, R3
+	MOVD	R3, RSP
+	SUB	R19, R2, R3
+	MOVD	R3, (g_sched+gobuf_sp)(g)
+	MOVD	R20, (g_sched+gobuf_pc)(g)
+	SUB	R24, R2, R29		// caller frame pointer (move-adjusted)
+	MOVD	R23, LR
+	MOVD	g_m(g), R8
+	MOVW	ZR, m_signalPending(R8)	// fastcbExtExit
+	MOVD	runtime·fastcbCallCDepth(SB), R2
+	SUB	$1, R2
+	MOVD	R2, runtime·fastcbCallCDepth(SB)
+	RET
+
+// fastcbentryfast: the direct C-ABI virtual-call entry. The engine calls
+// this PC with the GDExtensionClassCallVirtualWithData arguments in
+// AAPCS64 registers:
+//
+//	R0 = p_instance   R1 = p_name (unused)   R2 = p_virtual_call_userdata
+//	R3 = p_args       R4 = p_ret
+//
+// The full C callee-saved block is saved up front (before load_g, which
+// clobbers R27 and the g register R28 — both engine-owned), so the
+// fallback path only has to restore the four registers the checks
+// clobbered and re-pop the block. Any check failure tail-jumps, with the
+// arguments and all callee-saved state restored, to the stock entry in
+// fastcbEntryFallback.
+//
+// Save-block layout (176 bytes, RSP stays 16-aligned):
+//	  0..79   X19-X28 (engine's values; saved before load_g touches them)
+//	 80..143  F8-F15
+//	144       LR (return into the engine)
+//	152       R29
+//	160..175  pad
+TEXT runtime·fastcbentryfast(SB),NOSPLIT|NOFRAME,$0
+	NO_LOCAL_POINTERS
+	SUB	$176, RSP
+	SAVE_R19_TO_R28(0)
+	SAVE_F8_TO_F15(80)
+	MOVD	LR, 144(RSP)
+	MOVD	R29, 152(RSP)
+
+	MOVD	R0, R9			// stash instance (load_g clobbers R0)
+	BL	runtime·load_g(SB)	// clobbers R0, R27, LR (saved above)
+	CBZ	g, fallback
+	MOVD	g_m(g), R11
+	MOVD	runtime·fastcbM(SB), R12
+	CMP	R12, R11
+	BNE	fallback
+	MOVD	m_curg(R11), R10
+	MOVWU	g_atomicstatus(R10), R13
+	CMPW	$2, R13			// _Grunning
+	BEQ	statusok
+	MOVD	$0x1002, R14		// _Gscanrunning
+	CMPW	R14, R13
+	BNE	fallback
+statusok:
+	// The resume anchor must point into the resident goroutine's stack
+	// (see fastcbArmEntry in cgocall.go). Out of range -> stock entry.
+	MOVD	(g_sched+gobuf_sp)(R10), R13
+	MOVD	(g_stack+stack_lo)(R10), R14
+	CMP	R14, R13
+	BLS	fallback
+	MOVD	(g_stack+stack_hi)(R10), R14
+	CMP	R14, R13
+	BHI	fallback
+	MOVD	runtime·fastcbEntryDepth(SB), R12
+	CMP	$8, R12			// len(fastcbEntrySaved)
+	BGE	fallback
+
+	// Commit. Stash the C context at this nesting depth (16 bytes per
+	// level: [0]=C SP at the save block, [8]=previous g0.sched.sp) and
+	// repoint g0.sched.sp below the engine's live C frames, exactly as
+	// cgocallback does.
+	LSL	$4, R12, R14
+	MOVD	$runtime·fastcbEntrySaved(SB), R15
+	ADD	R14, R15
+	MOVD	RSP, R16
+	MOVD	R16, 0(R15)
+	MOVD	m_g0(R11), R14
+	MOVD	(g_sched+gobuf_sp)(R14), R17
+	MOVD	R17, 8(R15)
+	MOVD	R16, (g_sched+gobuf_sp)(R14)
+	ADD	$1, R12
+	MOVD	R12, runtime·fastcbEntryDepth(SB)
+
+	// Enter the Go execution context: g = curg, TLS in sync (morestack
+	// and the signal path reload g from TLS).
+	MOVD	R10, g
+	BL	runtime·save_g(SB)	// clobbers R0, R27
+
+	// Switch to the resident goroutine's stack. LR = sched.pc makes the
+	// trampoline's own prologue plant the fake return address: its saved
+	// LR IS sched.pc, so the unwind chain is
+	//
+	//	[dispatcher frames] -> fastcbentrycall -> sched.pc -> outer anchor
+	//
+	// with sched.sp as the continuation SP — composing with whatever
+	// contract the outer context left there (fastcbCallCFast's caller
+	// anchor, a stock crossing's gosave anchor, or the goexit bottom).
+	// sched itself is NOT modified; entrycall republishes it on the way
+	// out (parks inside the dispatch zero sched.sp via gogo).
+	MOVD	(g_sched+gobuf_sp)(g), R13
+	MOVD	(g_sched+gobuf_pc)(g), R30
+	MOVD	(g_sched+gobuf_bp)(g), R29
+	MOVD	R13, RSP
+
+	// Dispatcher ABIInternal arguments: R0=instance R1=userdata R2=args
+	// R3=ret (each source read before it is overwritten).
+	MOVD	R2, R1
+	MOVD	R3, R2
+	MOVD	R4, R3
+	MOVD	R9, R0
+	B	runtime·fastcbentrycall(SB)
+
+fallback:
+	// Load the fallback pointer BEFORE restoring R27: the assembler
+	// materialises symbol addresses through R27 (REGTMP), and the engine
+	// owns R27 from here on.
+	MOVD	runtime·fastcbEntryFallback(SB), R16
+	LDP	64(RSP), (R27, g)	// engine's R27, R28
+	MOVD	144(RSP), LR
+	MOVD	R9, R0			// original p_instance
+	ADD	$176, RSP
+	CBZ	R16, drop
+	B	(R16)
+drop:
+	RET
+
+// fastcbentrycall is the dispatcher's caller frame (see fastcbArmEntry in cgocall.go):
+// a real frame whose real CALL keeps the return predictor paired, whose
+// locals are the dispatcher's ABIInternal spill space, and whose saved LR
+// — planted by the thunk via the LR register — is the sched.pc value that
+// chains the unwind into the outer anchor. The prologue decrement and the
+// saved-LR slot are fixed by the arm64 frame layout: entry RSP (= sched.sp)
+// minus the pcsp delta, with the saved LR at the post-prologue [RSP].
+TEXT runtime·fastcbentrycall(SB),NOSPLIT,$32
+	NO_LOCAL_POINTERS
+	CALL	runtime·fastcbentrygo<ABIInternal>(SB)
+	// Self-heal the resume anchor, exactly as stock cgocallback's exit
+	// does: a park inside the dispatch resumed via gogo, which ZEROES
+	// gp.sched.sp. Our own frame locates the anchor (adjusted
+	// automatically if the stack moved): the saved fake LR (= sched.pc)
+	// sits at [RSP] and entry RSP was sched.sp.
+	MOVD	0(RSP), R1
+	MOVD	R1, (g_sched+gobuf_pc)(g)
+	ADD	$fastcbEntryFrame, RSP, R1
+	MOVD	R1, (g_sched+gobuf_sp)(g)
+	B	runtime·fastcbentryexit<ABIInternal>(SB)
+
+// fastcbentryexit unwinds from fastcbentrycall back to the engine's C
+// frame captured by fastcbentryfast at the current nesting depth: restore
+// the previous g0.sched.sp, leave the Go execution context, switch back
+// to the saved C SP and return to the engine with the full C callee-saved
+// block restored. All symbol-addressed instructions run before R27 is
+// restored.
+TEXT runtime·fastcbentryexit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
+	NO_LOCAL_POINTERS
+	MOVD	runtime·fastcbEntryDepth(SB), R12
+	SUB	$1, R12
+	MOVD	R12, runtime·fastcbEntryDepth(SB)
+	LSL	$4, R12, R14
+	MOVD	$runtime·fastcbEntrySaved(SB), R15
+	ADD	R14, R15
+	MOVD	g_m(g), R11
+	MOVD	m_g0(R11), R10
+	MOVD	8(R15), R14
+	MOVD	R14, (g_sched+gobuf_sp)(R10)
+	MOVD	0(R15), R16		// C SP (the save block)
+	MOVD	R10, g
+	BL	runtime·save_g(SB)	// clobbers R0, R27
+	MOVD	R16, RSP
+	MOVD	144(RSP), LR
+	MOVD	152(RSP), R29
+	RESTORE_F8_TO_F15(80)
+	RESTORE_R19_TO_R28(0)
+	ADD	$176, RSP
+	RET
