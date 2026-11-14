@@ -180,6 +180,14 @@ type Invocation struct {
 	// Populated by enqueueFunc, drained by compileFunctions.
 	GdCompileQueue any // []*ir.Func
 
+	// -d=skipextinst experiment state (gd/extinst.go): ExtInstAvail
+	// caches the set of instantiation symbols emitted by imported
+	// packages (read from their archives' __.GDINST members);
+	// ExtInstSkipped records the names skipped locally, re-published
+	// in this package's own __.GDINST member.
+	ExtInstAvail   any // map[string]bool
+	ExtInstSkipped []string
+
 	// -d=astdump text/HTML dump state (ir/dump.go, noder/dump.go).
 	// AstDumpMu serialises writes to the per-function .ast/.html
 	// files; the maps/slices track which files have been created and

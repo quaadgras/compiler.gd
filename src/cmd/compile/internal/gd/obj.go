@@ -70,6 +70,13 @@ func dumpobj1(gd *base.Invocation, outfile string, mode int) {
 		dumpLinkerObj(gd, bout)
 		finishArchiveEntry(bout, start, "_go_.o")
 	}
+	if mode&modeCompilerObj != 0 && gd.Debug.SkipExtInst != 0 {
+		// Experiment (-d=skipextinst): record which instantiation
+		// symbols importers may skip compiling. See gd/extinst.go.
+		start := startArchiveEntry(bout)
+		dumpExtInst(gd, bout)
+		finishArchiveEntry(bout, start, "__.GDINST")
+	}
 
 	if err := bout.Close(); err != nil {
 		gd.FlushErrors()
