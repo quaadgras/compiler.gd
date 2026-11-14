@@ -96048,11 +96048,10 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "LoweredZero",
-		auxType:        auxSymValAndOff,
+		auxType:        auxSizeAndAlign,
 		argLen:         2,
 		faultOnNilArg0: true,
 		addrSinkArg0:   true,
-		symEffect:      SymWrite,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 1006632944, v2: 0}}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -96061,12 +96060,11 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "LoweredZeroLoop",
-		auxType:        auxSymValAndOff,
+		auxType:        auxSizeAndAlign,
 		argLen:         2,
 		needIntTemp:    true,
 		faultOnNilArg0: true,
 		addrSinkArg0:   true,
-		symEffect:      SymWrite,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 1006632944, v2: 0}}, // X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -96076,13 +96074,12 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "LoweredMove",
-		auxType:        auxSymValAndOff,
+		auxType:        auxSizeAndAlign,
 		argLen:         3,
 		faultOnNilArg0: true,
 		faultOnNilArg1: true,
 		addrSinkArg0:   true,
 		addrSinkArg1:   true,
-		symEffect:      SymWrite,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 1006632928, v2: 0}}, // X6 X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30
@@ -96093,13 +96090,12 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:           "LoweredMoveLoop",
-		auxType:        auxSymValAndOff,
+		auxType:        auxSizeAndAlign,
 		argLen:         3,
 		faultOnNilArg0: true,
 		faultOnNilArg1: true,
 		addrSinkArg0:   true,
 		addrSinkArg1:   true,
-		symEffect:      SymWrite,
 		reg: regInfo{
 			inputs: []inputInfo{
 				{0, regMask{v1: 1006632896, v2: 0}}, // X7 X8 X9 X10 X11 X12 X13 X14 X15 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X28 X29 X30

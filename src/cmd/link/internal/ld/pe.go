@@ -1410,6 +1410,10 @@ func peimporteddlls(ctxt *Link) []string {
 	var dlls []string
 
 	for d := ctxt.dr; d != nil; d = d.next {
+		if strings.ContainsAny(d.name, `/\:`) || strings.Contains(d.name, "..") || strings.HasPrefix(d.name, "-") || strings.HasPrefix(d.name, "@") {
+			Errorf("invalid imported DLL name %q", d.name)
+			continue
+		}
 		dlls = append(dlls, "-l"+strings.TrimSuffix(d.name, ".dll"))
 	}
 

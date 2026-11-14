@@ -822,6 +822,9 @@ func (pr *pkgReader) objIdxMayFail(idx index, implicits, explicits []*types.Type
 			sel = r.selector()
 			r.recvTypeParamNames()
 			recv = r.param()
+			if r.Version().Has(pkgbits.PreserveMethodOrder) {
+				_ = r.Len() // method index not needed in compiler
+			}
 		} else {
 			if sym.Name == "init" {
 				sym = Renameinit(r.gd)
@@ -1153,6 +1156,9 @@ func (r *reader) typeParamNames() {
 
 func (r *reader) method(rext *reader) *types.Field {
 	r.Sync(pkgbits.SyncMethod)
+	if r.Version().Has(pkgbits.PreserveMethodOrder) {
+		_ = r.Len() // method index not needed in compiler
+	}
 	npos := r.pos()
 	sym := r.selector()
 	r.typeParamNames()
@@ -3155,7 +3161,22 @@ func shapedMethodExpr(gd *base.Invocation, pos src.XPos, obj *ir.Name, sym *type
 		lsym := obj.Linksym().Name
 		// Since the method is generic, we know the method name must be followed by a bracket.
 		// TODO(mark): It's not ideal to rely on string naming here. Find a more robust solution.
-		msym := sym.Pkg.Lookup(lsym[strings.LastIndex(lsym, sym.Name+"["):])
+		idx := func() int { // Find the index of the bracket following the method name.
+			depth, i := 0, len(lsym)-1
+			for {
+				switch lsym[i] {
+				case ']':
+					depth++
+				case '[':
+					depth--
+				}
+				if depth == 0 {
+					return i
+				}
+				i--
+			}
+		}()
+		msym := sym.Pkg.Lookup(lsym[idx-len(sym.Name):])
 
 		// Note that the field name here includes the type arguments; while also not ideal, the
 		// types package does not seem to complain.
