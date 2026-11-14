@@ -1888,7 +1888,17 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	eq0 := s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0)
 	eq1 := s.newValue2(ssa.OpEq64, boolT, lw1, rw1)
 	eq2 := s.newValue2(ssa.OpEq64, boolT, lw2, rw2)
-	fast := s.newValue2(ssa.OpAndB, boolT, eq0, s.newValue2(ssa.OpAndB, boolT, eq1, eq2))
+	// The tag (top nibble of word 2) alone decides the representation:
+	// an inline literal also carries word 0 = its rodata bytes, so
+	// word 0 is not part of an inline string's value. Equal words 1+2
+	// with a non-zero tag mean equal inline strings, whatever word 0 is.
+	tagShift := s.constInt64(intT, rtabi.StringTagShift)
+	zeroI := s.constInt64(intT, 0)
+	lInl := s.newValue2(ssa.OpNeq64, boolT, s.newValue2(ssa.OpRsh64Ux64, intT, lw2, tagShift), zeroI)
+	rInl := s.newValue2(ssa.OpNeq64, boolT, s.newValue2(ssa.OpRsh64Ux64, intT, rw2, tagShift), zeroI)
+	fast := s.newValue2(ssa.OpAndB, boolT,
+		s.newValue2(ssa.OpOrB, boolT, eq0, lInl),
+		s.newValue2(ssa.OpAndB, boolT, eq1, eq2))
 
 	bFast := s.f.NewBlock(ssa.BlockPlain)
 	bInlineCheck := s.f.NewBlock(ssa.BlockPlain)
@@ -1914,11 +1924,8 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	s.endBlock().AddEdgeTo(bEnd)
 
 	// Both-inline reject path.
-	nilPtr := s.constNil(ptrT)
 	s.startBlock(bInlineCheck)
-	lInline := s.newValue2(ssa.OpEqPtr, boolT, lw0, nilPtr)
-	rInline := s.newValue2(ssa.OpEqPtr, boolT, rw0, nilPtr)
-	bothInline := s.newValue2(ssa.OpAndB, boolT, lInline, rInline)
+	bothInline := s.newValue2(ssa.OpAndB, boolT, lInl, rInl)
 	bIC := s.endBlock()
 	bIC.Kind = ssa.BlockIf
 	bIC.SetControl(bothInline)
@@ -1932,8 +1939,8 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	// Hash-reject path.
 	s.startBlock(bHashCheck)
 	zeroU := s.constInt64(uT, 0)
-	lHeap := s.newValue2(ssa.OpNeqPtr, boolT, lw0, nilPtr)
-	rHeap := s.newValue2(ssa.OpNeqPtr, boolT, rw0, nilPtr)
+	lHeap := s.newValue1(ssa.OpNot, boolT, lInl)
+	rHeap := s.newValue1(ssa.OpNot, boolT, rInl)
 	lSealed := s.newValue2(ssa.OpNeq64, boolT, lw1, zeroU)
 	rSealed := s.newValue2(ssa.OpNeq64, boolT, rw1, zeroU)
 	bothReady := s.newValue2(ssa.OpAndB, boolT, lHeap,

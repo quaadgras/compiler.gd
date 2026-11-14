@@ -1272,9 +1272,15 @@ fences:
 TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$16-24
 	NO_LOCAL_POINTERS
 	// AX = ptr to string struct, BX = caller seed (ignored).
+	// Dispatch on the length tag, not word 0: an inline literal also
+	// carries word 0 = its rodata bytes, and must hash exactly like the
+	// same bytes held inline at runtime. The empty string (tag 0) takes
+	// the heap path, which hashes it as memhash(nil, 0) like any other
+	// empty heap string.
+	MOVQ	16(AX), DX
+	SHRQ	$60, DX
+	JNZ	strhash_inline
 	MOVQ	(AX), CX		// CX = word 0
-	TESTQ	CX, CX
-	JZ	strhash_inline
 	// Heap rep: check cache.
 	MOVQ	8(AX), DX		// DX = cached hash
 	TESTQ	DX, DX

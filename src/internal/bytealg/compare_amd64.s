@@ -46,9 +46,18 @@ TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
 	// and BSWAPQ places that tag at the LSB of word 2, so the unsigned
 	// compare breaks the tie in favour of the longer string (i.e. the
 	// shorter string compares less).
-	MOVQ	AX, R9
-	ORQ	DI, R9
-	JNE	cmpstr_any_heap
+	//
+	// The representation is decided by the length tag (top nibble of
+	// word 2), never by word 0: an inline literal also carries word 0 =
+	// its rodata bytes. R9/R10 = a/b tags, reused below.
+	MOVQ	CX, R9
+	SHRQ	$60, R9
+	MOVQ	R8, R10
+	SHRQ	$60, R10
+	TESTQ	R9, R9
+	JEQ	cmpstr_any_heap
+	TESTQ	R10, R10
+	JEQ	cmpstr_any_heap
 	BSWAPQ	BX
 	BSWAPQ	SI
 	CMPQ	BX, SI
@@ -69,19 +78,27 @@ cmpstr_ii_greater:
 	RET
 
 cmpstr_any_heap:
+	TESTQ	R9, R9
+	JEQ	cmpstr_a_heap
+	// a is inline. A literal already points at its rodata bytes;
+	// otherwise spill the header and point at the inline bytes.
 	TESTQ	AX, AX
-	JNE	cmpstr_a_heap
+	JNE	cmpstr_a_lit
 	MOVQ	BX, 0(SP)
 	MOVQ	CX, 8(SP)
 	LEAQ	0(SP), AX
-	SHRQ	$60, CX   // CX = tag = real length (inline)
+cmpstr_a_lit:
+	MOVQ	R9, CX    // CX = tag = real length (inline)
 cmpstr_a_heap:
+	TESTQ	R10, R10
+	JEQ	cmpstr_b_heap
 	TESTQ	DI, DI
-	JNE	cmpstr_b_heap
+	JNE	cmpstr_b_lit
 	MOVQ	SI, 16(SP)
 	MOVQ	R8, 24(SP)
 	LEAQ	16(SP), DI
-	SHRQ	$60, R8
+cmpstr_b_lit:
+	MOVQ	R10, R8
 cmpstr_b_heap:
 	MOVQ	AX, SI    // SI = a.ptr
 	MOVQ	CX, BX    // BX = a.len

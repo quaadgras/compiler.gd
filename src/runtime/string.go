@@ -329,7 +329,7 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 // (reserved slot), len's tag nibble is zero, so .len reads as a plain
 // length. Inline rep (tag != 0) is never produced in phase A.
 type stringStruct struct {
-	str  unsafe.Pointer // word 0: data ptr (heap) or nil (inline)
+	str  unsafe.Pointer // word 0: data ptr (heap); nil, or the rodata bytes of a literal (inline)
 	hash uint           // word 1: cached hash (heap) or bytes[0:8] (inline)
 	len  uint           // word 2: (tag<<60) | len (heap, tag=0)
 	//                             (tag<<60) | bytes[8:15] packed (inline)
@@ -356,8 +356,13 @@ func (s *stringStruct) length() int {
 }
 
 // isInline reports whether the string is inline-rep.
+//
+// The length tag alone decides the representation: an inline string
+// built from a compile-time literal also carries word 0 = a pointer to
+// the literal's bytes in rodata (see doc/gd/sso-string.md, "literal
+// provenance"), so word 0 being non-nil does not imply heap rep.
 func (s *stringStruct) isInline() bool {
-	return s.str == nil && s.len>>abi.StringTagShift != 0
+	return s.len>>abi.StringTagShift != 0
 }
 
 // bytes returns a pointer to the first data byte. For heap rep it
@@ -447,10 +452,18 @@ func stringDataHeap(s string) *byte {
 //go:linkname cgoStringNormalize
 func cgoStringNormalize(s string) string {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str != nil {
-		return s
-	}
 	n := int(uint64(sh.len) >> abi.StringTagShift)
+	if n == 0 {
+		return s // heap rep (or empty)
+	}
+	if sh.str != nil {
+		// Inline literal: word 0 already points at the bytes in
+		// rodata, so C can read them in place — no copy.
+		var r stringStruct
+		r.str = sh.str
+		r.len = uint(n)
+		return *(*string)(unsafe.Pointer(&r))
+	}
 	if n == 0 {
 		return ""
 	}
@@ -477,7 +490,9 @@ func cgoStringNormalize(s string) string {
 //go:nosplit
 func sealStringHash(s string) string {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str == nil || sh.hash != 0 {
+	// Inline rep (including literals, whose word 0 points at rodata)
+	// keeps bytes in word 1: there is no hash slot to seal.
+	if sh.str == nil || sh.hash != 0 || sh.isInline() {
 		return s
 	}
 	n := int(sh.len & abi.StringLenMask)

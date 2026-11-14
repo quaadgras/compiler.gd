@@ -108,7 +108,7 @@ func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	// fork uses a process-wide fixed seed (aeskeysched loaded from
 	// abi.AeskeyschedSeed) so runtime and static-init emit identical
 	// values.
-	if x.str != nil && x.hash != 0 {
+	if x.str != nil && x.hash != 0 && !x.isInline() {
 		return uintptr(x.hash)
 	}
 	// Cache miss. Inline-rep (x.str==nil) reads bytes from the header

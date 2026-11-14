@@ -137,7 +137,12 @@ func StringBytes(sp *string) []byte {
 	sh := (*stringHeader)(unsafe.Pointer(sp))
 	if sh.w0 != 0 {
 		// heap: data pointer in w0, length in low 60 bits of w2.
-		return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(sh.w2&StringLenMask))
+		// Inline literal: w0 points at its rodata bytes, length is the tag.
+		n := int(sh.w2 >> StringTagShift)
+		if n == 0 {
+			n = int(sh.w2 & StringLenMask)
+		}
+		return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), n)
 	}
 	// inline: bytes start at &sh.w1 inside *sp.
 	// Empty heap-rep strings have w0==0 and tag==0, yielding length 0
@@ -186,7 +191,11 @@ func Heapify(sp *string) string {
 		// OpStringMake with a Const64 zero-tag word2, which the
 		// existing const-fold chain (StringWord2(StringMake) →
 		// Const64) propagates through to eliminate the dispatch.
-		return unsafe.String((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(sh.w2&StringLenMask))
+		n := int(sh.w2 >> StringTagShift) // inline literal: rodata bytes
+		if n == 0 {
+			n = int(sh.w2 & StringLenMask)
+		}
+		return unsafe.String((*byte)(unsafe.Pointer(uintptr(sh.w0))), n)
 	}
 	// Inline. unsafe.String over the inline payload constructs a
 	// heap-rep string {ptr=&sh.w1, hash=0, len=tag} aliasing the

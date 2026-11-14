@@ -1035,7 +1035,21 @@
 // symbol is emitted. Slicing such a literal is safe because OSLICESTR
 // routes through stringSlice (SSA register path for heap, runtime
 // sliceinlinestring for inline — neither exposes an interior ptr).
-(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 =>
+//
+// Literal provenance (amd64): word0 additionally points at the literal's
+// bytes in a go:string symbol, so unsafe.StringData of a literal is a
+// stable rodata address (as on stock Go) and C/cgo can read it in place.
+// Representation is decided by the tag alone; equality and hashing use
+// words 1 and 2 only, so a literal equals the same bytes built inline at
+// runtime. Other arches keep word0 = nil until their cmpstring/strhash
+// assembly dispatches on the tag too.
+(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch == "amd64" =>
+  (StringMake
+    (Addr <typ.BytePtr> {fe.StringData(str)}
+      (SB))
+    (Const64 <typ.Uintptr> [stringInlineWord1(str)])
+    (Const64 <typ.Int>     [stringInlineWord2(str)]))
+(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64" =>
   (StringMake
     (ConstNil)
     (Const64 <typ.Uintptr> [stringInlineWord1(str)])

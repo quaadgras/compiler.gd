@@ -39,11 +39,12 @@ type quoted string
 func bytes(s string) []byte {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
 	if sh.str != nil {
-		// heap rep: alias.
+		// heap rep, or an inline literal whose word 0 points at its
+		// rodata bytes: alias. length() decodes the tag for the latter.
 		var b []byte
 		bp := (*slice)(unsafe.Pointer(&b))
 		bp.array = sh.str
-		bp.len = int(sh.len & abi.StringLenMask)
+		bp.len = sh.length()
 		bp.cap = bp.len
 		return b
 	}

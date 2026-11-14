@@ -452,10 +452,15 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 			const lenMask = 1<<60 - 1
 			word2 := int64(binary.LittleEndian.Uint64(w2buf[:]))&lenMask | slen<<60
 
-			// Word 0 defaults to zero in uninitialized rodata, but
-			// write an explicit 0 to guard against a previous
+			// Literal provenance (amd64, see generic.rules): word 0
+			// points at the literal's bytes in rodata. Elsewhere it
+			// is an explicit 0, guarding against a previous
 			// initializer at the same offset.
-			s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
+			if buildcfg.GOARCH == "amd64" {
+				s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, StringSym(gd, n.Pos(), i), 0)
+			} else {
+				s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
+			}
 			s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, word1)
 			s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, word2)
 			break
