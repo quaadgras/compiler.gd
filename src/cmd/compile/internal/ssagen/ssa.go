@@ -114,6 +114,9 @@ func InitConfig(gd *base.Invocation) {
 	types.SetNewPtrCacheEnabled(false)
 	cfg := ssa.NewConfig(gd, gd.Ctxt.Arch.Name, *types_, gd.Ctxt, gd.Flag.N == 0, Arch.SoftFloat)
 	cfg.Race = gd.Flag.Race
+	if ni, nf := abi.InternalRegCounts(); !Arch.SoftFloat && (ni != cfg.ABI1.NumIntRegs() || nf != cfg.ABI1.NumFloatRegs()) {
+		gd.Fatalf("abi.InternalRegCounts = %d, %d; ssa config has %d, %d", ni, nf, cfg.ABI1.NumIntRegs(), cfg.ABI1.NumFloatRegs())
+	}
 	gd.SsaConfig = cfg
 	gd.SsaCaches = make([]ssa.Cache, gd.Flag.LowerC)
 	ir.Syms(
@@ -6032,6 +6035,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 	var codeptr *ssa.Value   // ptr to target code (if dynamic)
 	var dextra *ssa.Value    // defer extra arg
 	var rcvr *ssa.Value      // receiver to set
+	var extRe, extIm *ssa.Value // gd: inline payload words appended to an interface call (see abi.IfaceExtFits)
 	fn := n.Fun
 	var ACArgs []*types.Type    // AuxCall args
 	var ACResults []*types.Type // AuxCall results
@@ -6084,7 +6088,11 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		}
 		fn := fn.(*ir.SelectorExpr)
 		var iclosure *ssa.Value
-		iclosure, rcvr = s.getClosureAndRcvr(fn)
+		if (k == callNormal || k == callTail) && abi.IfaceExtFits(s.gd, fn.Type()) {
+			iclosure, rcvr, extRe, extIm = s.getClosureAndRcvrExt(fn)
+		} else {
+			iclosure, rcvr = s.getClosureAndRcvr(fn)
+		}
 		if k == callNormal || k == callTail {
 			codeptr = s.load(types.Types[types.TUINTPTR], iclosure)
 		} else {
@@ -6095,7 +6103,11 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		dextra = s.expr(deferExtra)
 	}
 
-	params := callABI.ABIAnalyze(n.Fun.Type(), false /* Do not set (register) nNames from caller side -- can cause races. */)
+	calleeType := n.Fun.Type()
+	if extRe != nil {
+		calleeType = ifaceExtSig(calleeType)
+	}
+	params := callABI.ABIAnalyze(calleeType, false /* Do not set (register) nNames from caller side -- can cause races. */)
 	types.CalcSize(s.gd, fn.Type())
 	stksize := params.ArgWidth() // includes receiver, args, and results
 
@@ -6176,6 +6188,9 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		paramFields := t.Params()
 		for i, n := range args {
 			callArgs = append(callArgs, s.putArg(n, paramFields[i].Type))
+		}
+		if extRe != nil {
+			callArgs = append(callArgs, extRe, extIm)
 		}
 
 		callArgs = append(callArgs, s.mem())
@@ -6283,6 +6298,42 @@ func (s *state) maybeNilCheckClosure(closure *ssa.Value, k callKind) {
 		// TODO(neelance): On other architectures this should be eliminated by the optimization steps
 		s.nilCheck(closure)
 	}
+}
+
+// ifaceExtSig returns sig with two trailing float64 parameters carrying
+// an interface's inline payload words (see abi.IfaceExtFits).
+func ifaceExtSig(sig *types.Type) *types.Type {
+	clone := func(fs []*types.Field) []*types.Field {
+		res := make([]*types.Field, len(fs), len(fs)+2)
+		for i, f := range fs {
+			res[i] = types.NewField(f.Pos, f.Sym, f.Type)
+		}
+		return res
+	}
+	var recv *types.Field
+	if r := sig.Recv(); r != nil {
+		recv = types.NewField(r.Pos, r.Sym, r.Type)
+	}
+	f64 := types.Types[types.TFLOAT64]
+	params := append(clone(sig.Params()), types.NewField(src.NoXPos, nil, f64), types.NewField(src.NoXPos, nil, f64))
+	return types.NewSignatureAsIs(recv, params, clone(sig.Results()), sig.GdReturnOutBuf())
+}
+
+// getClosureAndRcvrExt is getClosureAndRcvr for calls that pass the
+// inline payload as two trailing arguments: the receiver is always the
+// data word, and an inline or spread type's itab entry is an adapter
+// that rebuilds its receiver from the data word and the payload.
+func (s *state) getClosureAndRcvrExt(fn *ir.SelectorExpr) (closure, rcvr, re, im *ssa.Value) {
+	i := s.expr(fn.X)
+	itab := s.newValue1(ssa.OpITab, types.Types[types.TUINTPTR], i)
+	s.nilCheck(itab)
+	itabidx := fn.Offset() + rttype.ITab.OffsetOf("Fun")
+	closure = s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.UintptrPtr, itabidx, itab)
+	rcvr = s.newValue1(ssa.OpIData, s.f.Config.Types.BytePtr, i)
+	f64 := types.Types[types.TFLOAT64]
+	re = s.newValue1(ssa.OpIInlineReal, f64, i)
+	im = s.newValue1(ssa.OpIInlineImag, f64, i)
+	return
 }
 
 // getClosureAndRcvr returns values for the appropriate closure and receiver of an

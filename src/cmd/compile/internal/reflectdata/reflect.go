@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	cabi "cmd/compile/internal/abi"
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/bitvec"
 	"cmd/compile/internal/compare"
@@ -293,9 +294,15 @@ func methods(gd *base.Invocation, t *types.Type) []*typeSig {
 				mfn = name.Func
 			}
 		}
+		isym := methodWrapper(gd, t, f, true)
+		if cabi.IfaceExtType(gd, t) && cabi.IfaceExtFits(gd, f.Type) {
+			// gd: called from interfaces through an adapter taking
+			// the inline payload in registers (see noder.ifaceAdapter).
+			isym = ir.IfaceAdapterSym(gd, t, f.Sym).Linksym(gd)
+		}
 		sig := &typeSig{
 			name:     f.Sym,
-			isym:     methodWrapper(gd, t, f, true),
+			isym:     isym,
 			tsym:     methodWrapper(gd, t, f, false),
 			type_:    typecheck.NewMethodType(gd, f.Type, t),
 			mtype:    typecheck.NewMethodType(gd, f.Type, nil),

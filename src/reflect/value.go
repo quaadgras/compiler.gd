@@ -668,18 +668,22 @@ func (v Value) call(op string, in []Value) []Value {
 		// Guaranteed to only be one word in size,
 		// so it will only take up exactly 1 abiStep (either
 		// in a register or on the stack).
+		ext := abid.ext != 0
 		switch st := abid.call.steps[0]; st.kind {
 		case abiStepStack:
-			storeRcvr(rcvr, stackArgs)
+			storeRcvr(rcvr, stackArgs, ext)
 		case abiStepPointer:
-			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Ptrs[st.ireg]))
+			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Ptrs[st.ireg]), ext)
 			fallthrough
 		case abiStepIntReg:
-			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Ints[st.ireg]))
+			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Ints[st.ireg]), ext)
 		case abiStepFloatReg:
-			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Floats[st.freg]))
+			storeRcvr(rcvr, unsafe.Pointer(&regArgs.Floats[st.freg]), ext)
 		default:
 			panic("unknown ABI parameter kind")
+		}
+		if ext {
+			storeRcvrPayload(&rcvr, &abid, &regArgs)
 		}
 		inStart = 1
 	}
@@ -1170,22 +1174,61 @@ func methodReceiver(op string, v Value, methodIndex int) (rcvrtype *abi.Type, t 
 // encode that receiver at the start of the argument list.
 // Reflect uses the "interface" calling convention for
 // methods, which always uses one word to record the receiver.
-func storeRcvr(v Value, p unsafe.Pointer) {
+//
+// If ext, the method is an inline or spread type's interface adapter
+// (see abiDesc.ext): the receiver word is the interface data word and
+// rcvrPayload supplies the rest.
+func storeRcvr(v Value, p unsafe.Pointer, ext bool) {
 	t := v.typ()
-	if t.Kind() == abi.Interface {
+	if ext {
+		*(*unsafe.Pointer)(p), _ = rcvrPayload(&v)
+	} else if t.Kind() == abi.Interface {
 		// the interface data word becomes the receiver word
 		iface := (*nonEmptyInterface)(v.dataPtr())
-		if iface.itab != nil && iface.itab.Inline != 0 {
+		switch {
+		case iface.itab != nil && iface.itab.Inline == abi.ITabInlineInline:
 			// gd fat-iface: payload lives in the inline slot; the
 			// receiver word is &iface.inline.
 			*(*unsafe.Pointer)(p) = unsafe.Pointer(&iface.inline)
-		} else {
+		case iface.itab != nil && iface.itab.Inline == abi.ITabInlineSpread:
+			// The 3-word header spans word and inline.
+			*(*unsafe.Pointer)(p) = unsafe.Pointer(&iface.word)
+		default:
 			*(*unsafe.Pointer)(p) = iface.word
 		}
 	} else if v.flag&flagIndir != 0 && t.IsDirectIface() {
 		*(*unsafe.Pointer)(p) = *(*unsafe.Pointer)(v.dataPtr())
 	} else {
 		*(*unsafe.Pointer)(p) = v.dataPtr()
+	}
+}
+
+// rcvrPayload returns the interface data word and the two inline payload
+// words of method receiver v, whose concrete type is inline or spread.
+func rcvrPayload(v *Value) (word unsafe.Pointer, w [2]uint64) {
+	t := v.typ()
+	if t.Kind() == abi.Interface {
+		iface := (*nonEmptyInterface)(v.dataPtr())
+		return iface.word, *(*[2]uint64)(unsafe.Pointer(&iface.inline))
+	}
+	p := v.dataPtr()
+	if t.IsSpreadIface() {
+		return *(*unsafe.Pointer)(p), *(*[2]uint64)(add(p, goarch.PtrSize, "spread header words 1-2"))
+	}
+	memmove(unsafe.Pointer(&w), p, t.Size())
+	return nil, w
+}
+
+// storeRcvrPayload puts the inline payload words of receiver v in the
+// float registers abid assigns them (see abiDesc.ext).
+func storeRcvrPayload(v *Value, abid *abiDesc, regs *abi.RegArgs) {
+	_, w := rcvrPayload(v)
+	for i := range 2 {
+		st := abid.call.stepsForValue(abid.ext + i)[0]
+		if st.kind != abiStepFloatReg {
+			panic("reflect: inline receiver payload not in a float register")
+		}
+		regs.Floats[st.freg] = w[i]
 	}
 }
 
@@ -1236,21 +1279,25 @@ func callMethod(ctxt *methodValue, frame unsafe.Pointer, retValid *bool, regs *a
 	var methodRegs abi.RegArgs
 
 	// Deal with the receiver. It's guaranteed to only be one word in size.
+	ext := methodABI.ext != 0
 	switch st := methodABI.call.steps[0]; st.kind {
 	case abiStepStack:
 		// Only copy the receiver to the stack if the ABI says so.
 		// Otherwise, it'll be in a register already.
-		storeRcvr(rcvr, methodFrame)
+		storeRcvr(rcvr, methodFrame, ext)
 	case abiStepPointer:
 		// Put the receiver in a register.
-		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Ptrs[st.ireg]))
+		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Ptrs[st.ireg]), ext)
 		fallthrough
 	case abiStepIntReg:
-		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Ints[st.ireg]))
+		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Ints[st.ireg]), ext)
 	case abiStepFloatReg:
-		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Floats[st.freg]))
+		storeRcvr(rcvr, unsafe.Pointer(&methodRegs.Floats[st.freg]), ext)
 	default:
 		panic("unknown ABI parameter kind")
+	}
+	if ext {
+		storeRcvrPayload(&rcvr, &methodABI, &methodRegs)
 	}
 
 	// Translate the rest of the arguments.

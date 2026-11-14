@@ -367,6 +367,13 @@ type abiDesc struct {
 	// Used by reflectcall to make result pointers visible
 	// to the GC.
 	inRegPtrs, outRegPtrs abi.IntArgRegBitmap
+
+	// ext is the index in call of the first of the two float64
+	// arguments carrying an inline or spread receiver's payload words,
+	// or 0 if the method uses the one-word receiver convention. It
+	// mirrors cmd/compile/internal/abi.IfaceExtFits: the payload is
+	// appended only when both words fit in registers.
+	ext int
 }
 
 func (a *abiDesc) dump() {
@@ -442,6 +449,17 @@ func newAbiDesc(t *funcType, rcvr *abi.Type) abiDesc {
 			}
 		}
 	}
+	ext := 0
+	if rcvr != nil && goarch.PtrSize == 8 && rcvr.TFlag&(abi.TFlagInlineIface|abi.TFlagSpreadIface) != 0 && in.fregs+2 <= floatArgRegs {
+		ext = len(in.valueStart)
+		f64 := abi.TypeOf(float64(0))
+		for range 2 {
+			if in.addArg(f64) != nil {
+				panic("reflect: inline receiver payload not in registers")
+			}
+			spill = align(spill, 8) + 8
+		}
+	}
 	spill = align(spill, goarch.PtrSize)
 
 	// From the input parameters alone, we now know
@@ -476,7 +494,7 @@ func newAbiDesc(t *funcType, rcvr *abi.Type) abiDesc {
 	// Undo the faking from earlier so that stackBytes
 	// is accurate.
 	out.stackBytes -= retOffset
-	return abiDesc{in, out, stackCallArgsSize, retOffset, spill, stackPtrs, inRegPtrs, outRegPtrs}
+	return abiDesc{in, out, stackCallArgsSize, retOffset, spill, stackPtrs, inRegPtrs, outRegPtrs, ext}
 }
 
 // intFromReg loads an argSize sized integer from reg and places it at to.

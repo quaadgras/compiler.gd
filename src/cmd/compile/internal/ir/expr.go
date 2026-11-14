@@ -1231,6 +1231,15 @@ func MethodSym(gd *base.Invocation, recv *types.Type, msym *types.Sym) *types.Sy
 	return sym
 }
 
+// IfaceAdapterSym returns the symbol of the gd interface-call adapter
+// of method msym on the inline or spread type recv (see
+// abi.IfaceExtFits). The returned symbol is marked as a function.
+func IfaceAdapterSym(gd *base.Invocation, recv *types.Type, msym *types.Sym) *types.Sym {
+	sym := MethodSymSuffix(gd, recv, msym, "-ia")
+	sym.SetFunc(true)
+	return sym
+}
+
 // MethodSymSuffix is like MethodSym, but allows attaching a
 // distinguisher suffix. To avoid collisions, the suffix must not
 // start with a letter, number, or period.

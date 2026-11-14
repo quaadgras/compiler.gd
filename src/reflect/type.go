@@ -2296,6 +2296,11 @@ func StructOf(fields []StructField) Type {
 		fs   = make([]structField, len(fields))
 		repr = make([]byte, 0, 64)
 		fset = map[string]struct{}{} // fields' names
+
+		// gd: methods promoted from an embedded inline or spread type,
+		// whose Ifn is an interface-call adapter (see abiDesc.ext).
+		inlineEmbeds []inlineEmbed
+		noPtrs       = true
 	)
 
 	lastzero := uintptr(0)
@@ -2410,6 +2415,9 @@ func StructOf(fields []StructField) Type {
 							// Issue 15924.
 							panic("reflect: embedded interface with unexported method(s) not implemented")
 						}
+						if ft.TFlag&(abi.TFlagInlineIface|abi.TFlagSpreadIface) != 0 {
+							inlineEmbeds = append(inlineEmbeds, inlineEmbed{len(methods), ft, mname.Name()})
+						}
 						methods = append(methods, abi.Method{
 							Name: resolveReflectName(mname),
 							Mtyp: resolveReflectType(typeOffFor(ft, m.Mtyp)),
@@ -2438,6 +2446,7 @@ func StructOf(fields []StructField) Type {
 		}
 
 		comparable = comparable && (ft.Equal != nil)
+		noPtrs = noPtrs && ft.PtrBytes == 0
 
 		offset := align(size, uintptr(ft.Align_))
 		if offset < size {
@@ -2468,6 +2477,23 @@ func StructOf(fields []StructField) Type {
 		size++
 		if size == 0 {
 			panic("reflect.StructOf: struct size would exceed virtual address space")
+		}
+	}
+
+	// gd: like the compiler's types.IsInlineIface, small pointer-free
+	// structs are stored inline in interfaces.
+	inlineIface := noPtrs && typalign <= 8 && align(size, uintptr(typalign)) > 0 && align(size, uintptr(typalign)) <= 16
+	if !inlineIface {
+		// The struct is boxed, so an embedded inline type's adapter,
+		// which rebuilds its receiver from the inline payload, cannot
+		// be its interface method. Use the embedded type's pointer
+		// method instead: the struct starts with that field.
+		for _, e := range inlineEmbeds {
+			ifn := ptrMethodIfn(e.typ, e.name)
+			if ifn == nil {
+				panic("reflect.StructOf: embedded type with methods not implemented for this layout")
+			}
+			methods[e.method].Ifn = resolveReflectText(ifn)
 		}
 	}
 
@@ -2619,8 +2645,33 @@ func StructOf(fields []StructField) Type {
 	default:
 		typ.TFlag &^= abi.TFlagDirectIface
 	}
+	if inlineIface {
+		typ.TFlag |= abi.TFlagInlineIface
+	}
 
 	return addToCache(toType(&typ.Type))
+}
+
+type inlineEmbed struct {
+	method int       // index in StructOf's methods
+	typ    *abi.Type // embedded inline or spread type
+	name   string    // method name
+}
+
+// ptrMethodIfn returns the code pointer of method name of *t, or nil if
+// the binary has no *t method table.
+func ptrMethodIfn(t *abi.Type, name string) unsafe.Pointer {
+	pt := ptrTo(t)
+	u := pt.Uncommon()
+	if u == nil {
+		return nil
+	}
+	for _, m := range u.Methods() {
+		if nameOffFor(pt, m.Name).Name() == name {
+			return textOffFor(pt, m.Ifn)
+		}
+	}
+	return nil
 }
 
 func embeddedIfaceMethStub() {
