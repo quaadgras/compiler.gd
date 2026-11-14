@@ -16,7 +16,12 @@ import (
 func TestCanSSA(t *testing.T) {
 	i64 := types.Types[types.TINT64]
 	v128 := types.TypeVec128
-	s1 := mkstruct(i64, mkstruct(i64, i64, i64, i64))
+	q := mkstruct(i64, i64, i64, i64)
+	if s := mkstruct(i64, q); !ssa.CanSSA(s) {
+		// gd: values up to 8 words stay in SSA.
+		t.Errorf("CanSSA(%v) returned false, expected true", s)
+	}
+	s1 := mkstruct(i64, q, q)
 	if ssa.CanSSA(s1) {
 		// Test size check for struct.
 		t.Errorf("CanSSA(%v) returned true, expected false", s1)
