@@ -174,7 +174,8 @@ drop:
 //
 // fastcbCallCDepth is maintained here (the Go wrapper did it before) so
 // the deferred-yield gate in fastcbentrygo still sees outbound calls in
-// flight. osPreemptExtEnter/Exit are Linux no-ops; graphics.gd only
+// flight, and so is fastcbExtEnter/Exit's m.signalPending bracket (see
+// cgocall.go). osPreemptExtEnter/Exit are Linux no-ops; graphics.gd only
 // selects this crossing where the entry thunk armed (linux/amd64), so the
 // Windows preemptExtLock discipline is never bypassed.
 TEXT runtime·fastcbCallCFast<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-16
@@ -182,6 +183,7 @@ TEXT runtime·fastcbCallCFast<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-16
 	// AX = fn, BX = arg (ABIInternal argument registers).
 	INCQ	runtime·fastcbCallCDepth(SB)
 	MOVQ	g_m(R14), R8
+	MOVL	$1, m_signalPending(R8)	// fastcbExtEnter: no preemption signals in C
 	MOVQ	m_g0(R8), SI		// SI = g0
 
 	// Publish the resume point: a fake systemstack_switch frame. The
@@ -250,5 +252,7 @@ TEXT runtime·fastcbCallCFast<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-16
 	MOVQ	SI, SP
 	POPQ	BP			// unwind the fake systemstack_switch frame
 	XORPS	X15, X15
+	MOVQ	g_m(R14), R8
+	MOVL	$0, m_signalPending(R8)	// fastcbExtExit
 	DECQ	runtime·fastcbCallCDepth(SB)
 	RET
