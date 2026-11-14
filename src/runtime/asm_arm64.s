@@ -687,7 +687,7 @@ CALLFN(·call1073741824, 1073741824)
 // Since go1.27 the AES hash bodies live in internal/runtime/maps
 // (memhash_arm64.s); runtime·memhash is a Go wrapper around
 // maps.MemHash, which is what both miss paths below call.
-TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$16-24
+TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$24-24
 	NO_LOCAL_POINTERS
 	MOVD	(R0), R10		// R10 = word 0 (data ptr, nil for inline)
 	CBZ	R10, strhash_inline
@@ -713,13 +713,14 @@ strhash_inline:
 	// loads (VLD1 into V2.S[2], V2.H[6], V2.B[14]) whose byte layout
 	// doesn't match a contiguous pack of word 1 + word 2 for every
 	// length. Funneling through memory lets aeshashbody run the exact
-	// byte-for-byte sequence it would on a heap-rep string.
+	// byte-for-byte sequence it would on a heap-rep string. The spill
+	// starts at 8(RSP): 0(RSP) holds the saved LR on arm64.
 	MOVD	8(R0), R11
 	MOVD	16(R0), R12
 	LSR	$60, R12, R2		// R2 = length
-	MOVD	R11, 0(RSP)
-	MOVD	R12, 8(RSP)
-	MOVD	RSP, R0
+	MOVD	R11, 8(RSP)
+	MOVD	R12, 16(RSP)
+	ADD	$8, RSP, R0
 	MOVD	$0, R1
 	BL	runtime·memhash<ABIInternal>(SB)
 	RET

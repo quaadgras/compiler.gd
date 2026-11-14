@@ -26,27 +26,27 @@ TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
 	B	indexStringBody<>(SB)
 
 // func IndexString(a, b string) int
-TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$32-56
-	// Decode a into R0=ptr, R1=len. Inline spills to 0..15(RSP).
+TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$40-56
+	// Decode a into R0=ptr, R1=len. Inline spills to 8..23(RSP) (0(RSP) is the saved LR).
 	CBZ	R0, is_a_inline
 	AND	$0x0fffffffffffffff, R2, R1
 	B	is_a_done
 is_a_inline:
-	MOVD	R1, 0(RSP)
-	MOVD	R2, 8(RSP)
-	MOVD	RSP, R0
+	MOVD	R1, 8(RSP)
+	MOVD	R2, 16(RSP)
+	ADD	$8, RSP, R0
 	LSR	$60, R2, R1
 is_a_done:
 
-	// Decode b into R2=ptr, R3=len. Inline spills to 16..31(RSP).
+	// Decode b into R2=ptr, R3=len. Inline spills to 24..39(RSP).
 	CBZ	R3, is_b_inline
 	MOVD	R3, R2
 	AND	$0x0fffffffffffffff, R5, R3
 	B	is_b_done
 is_b_inline:
-	MOVD	R4, 16(RSP)
-	MOVD	R5, 24(RSP)
-	ADD	$16, RSP, R2
+	MOVD	R4, 24(RSP)
+	MOVD	R5, 32(RSP)
+	ADD	$24, RSP, R2
 	LSR	$60, R5, R3
 is_b_done:
 

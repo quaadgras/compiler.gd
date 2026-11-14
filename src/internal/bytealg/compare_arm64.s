@@ -23,15 +23,15 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 // rep → spill words 1+2 to a local 16 B buffer, point at the buffer,
 // take length from word 2's top nibble. 32 B local frame for both
 // strings; BL + RET so the epilogue restores SP.
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$40-56
 	// Decode a: R0=ptr, R1=len on exit.
 	CBZ	R0, cs_a_inline
 	AND	$0x0fffffffffffffff, R2, R1
 	B	cs_a_done
 cs_a_inline:
-	MOVD	R1, 0(RSP)
-	MOVD	R2, 8(RSP)
-	MOVD	RSP, R0
+	MOVD	R1, 8(RSP)
+	MOVD	R2, 16(RSP)
+	ADD	$8, RSP, R0
 	LSR	$60, R2, R1
 cs_a_done:
 
@@ -41,9 +41,9 @@ cs_a_done:
 	AND	$0x0fffffffffffffff, R5, R3
 	B	cs_b_done
 cs_b_inline:
-	MOVD	R4, 16(RSP)
-	MOVD	R5, 24(RSP)
-	ADD	$16, RSP, R2
+	MOVD	R4, 24(RSP)
+	MOVD	R5, 32(RSP)
+	ADD	$24, RSP, R2
 	LSR	$60, R5, R3
 cs_b_done:
 

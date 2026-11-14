@@ -31,7 +31,7 @@ TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
 // go through BL + RET (not tail-call B) so the epilogue restores SP
 // before returning to the caller. The heap path doesn't use the
 // spill buffer but shares the frame for a single RET.
-TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$16-40
+TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$24-40
 	CBZ	R0, ibs_inline
 	// Heap rep: R0 already the data pointer; length lives in the
 	// low 60 bits of R2 (top nibble is the zero tag).
@@ -43,9 +43,9 @@ TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$16-40
 ibs_inline:
 	// Inline rep: word0 nil, bytes packed across R1 (0..7) and
 	// low 7 bytes of R2 (8..14); tag = R2 >> 60 is the length.
-	MOVD	R1, 0(RSP)
-	MOVD	R2, 8(RSP)
-	MOVD	RSP, R0
+	MOVD	R1, 8(RSP)
+	MOVD	R2, 16(RSP)
+	ADD	$8, RSP, R0
 	LSR	$60, R2, R1
 	MOVD	R3, R2
 	BL	indexByteBody<>(SB)

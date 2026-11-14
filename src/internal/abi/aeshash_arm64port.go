@@ -164,162 +164,132 @@ func armAes16(v0 [16]byte, s string) uint64 {
 	return aesLow64(v2)
 }
 
+// armSeedKey returns aeskeysched block j (16 B) scrambled by V30, as
+// the larger branches derive their per-lane keys. memHashAES has
+// already post-incremented R4 past block 0 (which became V0), so lane
+// keys come from blocks 1 onward.
+func armSeedKey(v30 [16]byte, j int) [16]byte {
+	var k [16]byte
+	copy(k[:], AeskeyschedSeed[j*16:(j+1)*16])
+	return armRound(k, v30)
+}
+
+// armLoad16 returns s[off:off+16].
+func armLoad16(s string, off int) [16]byte {
+	var b [16]byte
+	copy(b[:], s[off:off+16])
+	return b
+}
+
+// armFinish runs the shared tail of the 17..128 branches on each lane:
+// two AESE+AESMC rounds and a final AESE, each lane with its own key.
+func armFinish(lanes [][16]byte, keys [][16]byte) {
+	for r := 0; r < 2; r++ {
+		for j := range lanes {
+			lanes[j] = armRound(lanes[j], keys[j])
+		}
+	}
+	for j := range lanes {
+		lanes[j] = armAESEonly(lanes[j], keys[j])
+	}
+}
+
+func xor16(a, b [16]byte) [16]byte {
+	for i := range a {
+		a[i] ^= b[i]
+	}
+	return a
+}
+
+// The data loads below mirror memHashAES's VLD1.P (R0)(R10) idiom: a
+// post-indexed load reads at the base address (the start of s) and
+// only then advances R0 by R10, so the first lanes hold the leading
+// bytes and the later lanes the trailing ones.
+
 func armAes17to32(v0, v30 [16]byte, s string) uint64 {
 	n := len(s)
-	// V1 from aeskeysched[0..16] XOR V30 (second seed).
-	var v1 [16]byte
-	copy(v1[:], AeskeyschedSeed[:16])
-	v1 = armRound(v1, v30)
-
-	var v2, v3 [16]byte
-	copy(v2[:], s[n-16:])
-	copy(v3[:], s[:16])
-
-	v2 = armRound(v2, v0)
-	v3 = armRound(v3, v1)
-	v2 = armRound(v2, v0)
-	v3 = armRound(v3, v1)
-	v2 = armAESEonly(v2, v0)
-	v3 = armAESEonly(v3, v1)
-
-	for i := range v2 {
-		v2[i] ^= v3[i]
-	}
-	return aesLow64(v2)
+	lanes := [][16]byte{armLoad16(s, 0), armLoad16(s, n-16)}
+	armFinish(lanes, [][16]byte{v0, armSeedKey(v30, 1)})
+	return aesLow64(xor16(lanes[0], lanes[1]))
 }
 
 func armAes33to64(v0, v30 [16]byte, s string) uint64 {
 	n := len(s)
-	// V1, V2, V3 loaded from aeskeysched[0..48] XOR V30.
-	var k1, k2, k3 [16]byte
-	copy(k1[:], AeskeyschedSeed[0:16])
-	copy(k2[:], AeskeyschedSeed[16:32])
-	copy(k3[:], AeskeyschedSeed[32:48])
-	k1 = armRound(k1, v30)
-	k2 = armRound(k2, v30)
-	k3 = armRound(k3, v30)
-
-	// Four data blocks: last two (overlapping with first two if len<48)
-	// then first two.
-	var v4, v5, v6, v7 [16]byte
-	copy(v4[:], s[n-32:n-16])
-	copy(v5[:], s[n-16:])
-	copy(v6[:], s[0:16])
-	copy(v7[:], s[16:32])
-
-	for i := 0; i < 2; i++ {
-		v4 = armRound(v4, v0)
-		v5 = armRound(v5, k1)
-		v6 = armRound(v6, k2)
-		v7 = armRound(v7, k3)
-	}
-	v4 = armAESEonly(v4, v0)
-	v5 = armAESEonly(v5, k1)
-	v6 = armAESEonly(v6, k2)
-	v7 = armAESEonly(v7, k3)
-
-	for i := range v4 {
-		v4[i] ^= v6[i]
-		v5[i] ^= v7[i]
-		v4[i] ^= v5[i]
-	}
-	return aesLow64(v4)
+	lanes := [][16]byte{armLoad16(s, 0), armLoad16(s, 16), armLoad16(s, n-32), armLoad16(s, n-16)}
+	keys := [][16]byte{v0, armSeedKey(v30, 1), armSeedKey(v30, 2), armSeedKey(v30, 3)}
+	armFinish(lanes, keys)
+	// V4^=V6; V5^=V7; V4^=V5.
+	a := xor16(lanes[0], lanes[2])
+	b := xor16(lanes[1], lanes[3])
+	return aesLow64(xor16(a, b))
 }
 
 func armAes65to128(v0, v30 [16]byte, s string) uint64 {
 	n := len(s)
-	// Seven more seed keys from aeskeysched[0..112] XOR V30.
-	var k [7][16]byte
-	for j := 0; j < 7; j++ {
-		copy(k[j][:], AeskeyschedSeed[j*16:(j+1)*16])
-		k[j] = armRound(k[j], v30)
+	lanes := make([][16]byte, 8)
+	keys := make([][16]byte, 8)
+	keys[0] = v0
+	for j := 0; j < 4; j++ {
+		lanes[j] = armLoad16(s, j*16)
+		lanes[4+j] = armLoad16(s, n-64+j*16)
 	}
-	// Eight data blocks: last four then first four.
-	var blk [8][16]byte
-	copy(blk[0][:], s[n-64:n-48])
-	copy(blk[1][:], s[n-48:n-32])
-	copy(blk[2][:], s[n-32:n-16])
-	copy(blk[3][:], s[n-16:])
-	copy(blk[4][:], s[0:16])
-	copy(blk[5][:], s[16:32])
-	copy(blk[6][:], s[32:48])
-	copy(blk[7][:], s[48:64])
-
-	keys := [8][16]byte{v0, k[0], k[1], k[2], k[3], k[4], k[5], k[6]}
-
-	for r := 0; r < 2; r++ {
-		for j := 0; j < 8; j++ {
-			blk[j] = armRound(blk[j], keys[j])
-		}
+	for j := 1; j < 8; j++ {
+		keys[j] = armSeedKey(v30, j)
 	}
-	for j := 0; j < 8; j++ {
-		blk[j] = armAESEonly(blk[j], keys[j])
+	armFinish(lanes, keys)
+	// V8^=V12 .. V11^=V15; V8^=V10; V9^=V11; V8^=V9.
+	for j := 0; j < 4; j++ {
+		lanes[j] = xor16(lanes[j], lanes[4+j])
 	}
-
-	// XOR reduce: [0]^=[4]; [1]^=[5]; [2]^=[6]; [3]^=[7];
-	// then [0]^=[2]; [1]^=[3]; [0]^=[1].
-	for i := range blk[0] {
-		blk[0][i] ^= blk[4][i]
-		blk[1][i] ^= blk[5][i]
-		blk[2][i] ^= blk[6][i]
-		blk[3][i] ^= blk[7][i]
-		blk[0][i] ^= blk[2][i]
-		blk[1][i] ^= blk[3][i]
-		blk[0][i] ^= blk[1][i]
-	}
-	return aesLow64(blk[0])
+	lanes[0] = xor16(lanes[0], lanes[2])
+	lanes[1] = xor16(lanes[1], lanes[3])
+	return aesLow64(xor16(lanes[0], lanes[1]))
 }
 
+// armAes129plus mirrors aes129plus, where the roles swap: the eight
+// scrambled seeds are the running state (V0..V7) and the data blocks
+// (V8..V15) are the round keys.
 func armAes129plus(v0, v30 [16]byte, s string) uint64 {
 	n := len(s)
-	// Same seven derived keys as aes65to128.
-	var k [7][16]byte
-	for j := 0; j < 7; j++ {
-		copy(k[j][:], AeskeyschedSeed[j*16:(j+1)*16])
-		k[j] = armRound(k[j], v30)
+	var st, d [8][16]byte
+	st[0] = v0
+	for j := 1; j < 8; j++ {
+		st[j] = armSeedKey(v30, j)
 	}
-
-	// Initial state: last 128 B of s XOR'd with seeds via first round.
-	var state [8][16]byte
+	// The last 128 bytes first.
 	for j := 0; j < 8; j++ {
-		copy(state[j][:], s[n-128+j*16:n-112+j*16])
+		d[j] = armLoad16(s, n-128+j*16)
 	}
-	keys := [8][16]byte{v0, k[0], k[1], k[2], k[3], k[4], k[5], k[6]}
-	for j := 0; j < 8; j++ {
-		state[j] = armRound(state[j], keys[j])
-	}
-
-	// Process blocks from the start, as many full 128-B chunks as fit
-	// before the already-processed tail.
-	blocks := (n - 1) >> 7
 	p := 0
-	for b := 0; b < blocks; b++ {
+	for it := (n - 1) >> 7; it > 0; it-- {
 		for j := 0; j < 8; j++ {
-			var blk [16]byte
-			copy(blk[:], s[p+j*16:p+j*16+16])
-			state[j] = armRound(state[j], blk)
+			st[j] = armRound(st[j], d[j])
 		}
-		p += 128
+		for j := 0; j < 4; j++ {
+			d[j] = armLoad16(s, p+j*16)
+		}
+		p += 64
+		for j := 0; j < 4; j++ {
+			st[j] = armRound(st[j], d[j])
+		}
+		for j := 4; j < 8; j++ {
+			d[j] = armLoad16(s, p+(j-4)*16)
+		}
+		p += 64
+		for j := 4; j < 8; j++ {
+			st[j] = armRound(st[j], d[j])
+		}
 	}
-
-	// Two more full rounds then one AESE-only.
 	for r := 0; r < 2; r++ {
 		for j := 0; j < 8; j++ {
-			state[j] = armRound(state[j], keys[j])
+			st[j] = armRound(st[j], d[j])
 		}
 	}
 	for j := 0; j < 8; j++ {
-		state[j] = armAESEonly(state[j], keys[j])
+		st[j] = armAESEonly(st[j], d[j])
 	}
-
-	for i := range state[0] {
-		state[0][i] ^= state[4][i]
-		state[1][i] ^= state[5][i]
-		state[2][i] ^= state[6][i]
-		state[3][i] ^= state[7][i]
-		state[0][i] ^= state[2][i]
-		state[1][i] ^= state[3][i]
-		state[0][i] ^= state[1][i]
-	}
-	return aesLow64(state[0])
+	// V0^=V1; V2^=V3; V4^=V5; V6^=V7; V0^=V2; V4^=V6; V0^=V4.
+	a := xor16(xor16(st[0], st[1]), xor16(st[2], st[3]))
+	b := xor16(xor16(st[4], st[5]), xor16(st[6], st[7]))
+	return aesLow64(xor16(a, b))
 }
