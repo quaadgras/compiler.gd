@@ -189,6 +189,7 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).MallocGC = typecheck.LookupRuntimeFunc(gd, "mallocgc")
 	ir.Syms(gd).Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
 	ir.Syms(gd).Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
+	ir.Syms(gd).Streqfast = typecheck.LookupRuntimeFunc(gd, "streqfast")
 	ir.Syms(gd).SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
 	ir.Syms(gd).Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
 	ir.Syms(gd).Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
@@ -1843,32 +1844,36 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 	return result
 }
 
-// stringEqFast returns l == r as a *ssa.Value<bool>. Four-phase
-// control flow:
+// stringEqFast returns l == r as a *ssa.Value<bool>.
 //
-//  1. Fast path — all three header words match (same heap pointer, or
-//     two inline strings with identical content) → true. This is the
-//     stock-shaped check.
+// Only the length tag (top nibble of word 2) decides the representation.
+// Word 0 of an inline string is nil or, for a literal, its rodata bytes,
+// and is never part of the value. Inline strings are canonically
+// encoded (padding zero), so two inline strings are equal iff words 1
+// and 2 are; a heap string's word 2 is exactly its length.
 //
-//  2. Both-inline reject — fast path failed AND both word 0 are nil
-//     (both operands are inline-rep). The fast path checked all 24
-//     content bytes (word 1 = bytes 0..7, word 2 = tag + bytes 8..14),
-//     so a fast-path miss with both inline proves inequality without
-//     touching the slow path. Targets short-string `==` in tight
-//     loops (route lookup, map iteration, struct field equality).
+//	w2 equal, inline     → w1 == w1                       (one compare)
+//	w2 equal, heap       → same w0, or both hashes sealed and different
+//	                       (false), else memequal(w0, w0, len)
+//	w2 differ            → false, unless one word 2 is a heap length
+//	                       <= 15 (a short string built by unsafe.String
+//	                       or a substring of a heap string, which can
+//	                       equal an inline one): runtime.streqfast
 //
-//  3. Hash-reject path — both operands are heap-rep (word 0 non-nil)
-//     with sealed cached hashes (word 1 non-zero) AND the hashes
-//     differ. Under the gd cache these values are byte-deterministic,
-//     so a mismatch proves inequality without touching memequal.
-//     Saves the O(len) memequal for same-length distinct strings
-//     (e.g., misses in map lookups, negative HasPrefix checks).
-//
-//  4. Slow path — decoded-length check plus runtime.memequal. Handles
-//     mixed inline-vs-heap operands (same bytes, different rep),
-//     unsealed heap strings, and hash-collision (different bytes
-//     happening to hash the same).
+// Against a constant (switch cases, x == "lit") the constant's words
+// are immediates: a 1..15 byte constant is two compares (plus exact-
+// width loads for a short heap-rep operand, so no call), a longer one
+// is a length compare then pointer / hash / memequal.
 func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
+	if l.Op == ssa.OpConstString && r.Op != ssa.OpConstString {
+		l, r = r, l
+	}
+	if s.config.PtrSize == 8 && r.Op == ssa.OpConstString {
+		if c := ssa.ConstStringValue(r); c != "" {
+			return s.stringEqConst(l, r, c)
+		}
+	}
+
 	boolT := types.Types[types.TBOOL]
 	intT := types.Types[types.TINT]
 	ptrT := s.f.Config.Types.BytePtr
@@ -1878,112 +1883,226 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 	rw0 := s.newValue1(ssa.OpStringPtr, ptrT, r)
 	lw1 := s.newValue1(ssa.OpStringHash, uT, l)
 	rw1 := s.newValue1(ssa.OpStringHash, uT, r)
-	// Fast path requires bit-exact word 2 — StringWord2, not the
-	// decoded-length StringLen. Two inline strings of the same
-	// length can differ in word 2's low bytes (bytes[8:15]); a
-	// logical-length compare would incorrectly let them pass.
 	lw2 := s.newValue1(ssa.OpStringWord2, intT, l)
 	rw2 := s.newValue1(ssa.OpStringWord2, intT, r)
 
-	eq0 := s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0)
-	eq1 := s.newValue2(ssa.OpEq64, boolT, lw1, rw1)
-	eq2 := s.newValue2(ssa.OpEq64, boolT, lw2, rw2)
-	// The tag (top nibble of word 2) alone decides the representation:
-	// an inline literal also carries word 0 = its rodata bytes, so
-	// word 0 is not part of an inline string's value. Equal words 1+2
-	// with a non-zero tag mean equal inline strings, whatever word 0 is.
-	tagShift := s.constInt64(intT, rtabi.StringTagShift)
-	zeroI := s.constInt64(intT, 0)
-	lInl := s.newValue2(ssa.OpNeq64, boolT, s.newValue2(ssa.OpRsh64Ux64, intT, lw2, tagShift), zeroI)
-	rInl := s.newValue2(ssa.OpNeq64, boolT, s.newValue2(ssa.OpRsh64Ux64, intT, rw2, tagShift), zeroI)
-	fast := s.newValue2(ssa.OpAndB, boolT,
-		s.newValue2(ssa.OpOrB, boolT, eq0, lInl),
-		s.newValue2(ssa.OpAndB, boolT, eq1, eq2))
+	e := s.newStrEq()
+	same, diff := e.branch(s.newValue2(ssa.OpEq64, boolT, lw2, rw2), ssa.BranchUnknown)
 
-	bFast := s.f.NewBlock(ssa.BlockPlain)
-	bInlineCheck := s.f.NewBlock(ssa.BlockPlain)
-	bInlineReject := s.f.NewBlock(ssa.BlockPlain)
-	bHashCheck := s.f.NewBlock(ssa.BlockPlain)
-	bHashReject := s.f.NewBlock(ssa.BlockPlain)
-	bSlow := s.f.NewBlock(ssa.BlockPlain)
-	bLenMismatch := s.f.NewBlock(ssa.BlockPlain)
-	bLenMatch := s.f.NewBlock(ssa.BlockPlain)
-	bEnd := s.f.NewBlock(ssa.BlockPlain)
+	s.startBlock(same)
+	inl, heap := e.branch(s.stringTagNonZero(lw2), ssa.BranchUnknown)
+	s.startBlock(inl)
+	e.result(s.newValue2(ssa.OpEq64, boolT, lw1, rw1))
+	s.startBlock(heap)
+	s.stringEqHeapSameLen(e, lw0, rw0, lw1, rw1, lw2)
 
+	s.startBlock(diff)
+	if s.config.PtrSize == 8 {
+		// Different word 2 with equal content needs one heap-rep and
+		// one inline operand of the same length 1..15, so one word 2
+		// is a heap length <= 15. Anything else is unequal: two
+		// unsigned compares, and the rare rest goes out of line.
+		s.stringEqMaybeMixed(e, lw2, rw2, func() {
+			e.result(s.rtcall(ir.Syms(s.gd).Streqfast, true, []*types.Type{boolT}, l, r)[0])
+		})
+	} else {
+		e.result(s.constBool(false)) // no inline rep: w2 is the length
+	}
+	return e.finish()
+}
+
+// stringEqConst is stringEqFast against a non-empty constant c (r).
+func (s *state) stringEqConst(l, r *ssa.Value, c string) *ssa.Value {
+	boolT := types.Types[types.TBOOL]
+	intT := types.Types[types.TINT]
+	ptrT := s.f.Config.Types.BytePtr
+	uT := s.f.Config.Types.Uintptr
+
+	lw0 := s.newValue1(ssa.OpStringPtr, ptrT, l)
+	lw1 := s.newValue1(ssa.OpStringHash, uT, l)
+	lw2 := s.newValue1(ssa.OpStringWord2, intT, l)
+	n := s.constInt64(intT, int64(len(c)))
+	e := s.newStrEq()
+
+	if len(c) <= rtabi.StringInlineCap {
+		c1, c2 := ssa.StringInlineWords(c)
+		inl, other := e.branch(s.newValue2(ssa.OpEq64, boolT, lw2, s.constInt64(intT, c2)), ssa.BranchUnknown)
+		s.startBlock(inl)
+		e.result(s.newValue2(ssa.OpEq64, boolT, lw1, s.constInt64(uT, c1)))
+		// A heap-rep l of the same length (word 2 is exactly the length
+		// when the tag is 0) still has to compare bytes.
+		s.startBlock(other)
+		heap, no := e.branch(s.newValue2(ssa.OpEq64, boolT, lw2, n), ssa.BranchUnlikely)
+		s.startBlock(no)
+		e.result(s.constBool(false))
+		// n is known, so loads of exactly n bytes from the heap data
+		// pointer stay in bounds: no call, and callers stay leaves.
+		s.startBlock(heap)
+		e.result(s.stringBytesEqConst(lw0, c))
+		return e.finish()
+	}
+
+	// A constant longer than 15 bytes is heap rep, so l can only equal
+	// it as a heap string whose word 2 is exactly len(c).
+	ok, no := e.branch(s.newValue2(ssa.OpEq64, boolT, lw2, n), ssa.BranchUnknown)
+	s.startBlock(no)
+	e.result(s.constBool(false))
+	s.startBlock(ok)
+	rw0 := s.newValue1(ssa.OpStringPtr, ptrT, r)
+	rw1 := s.constInt64(uT, ssa.StringConstHash(c))
+	s.stringEqHeapSameLen(e, lw0, rw0, lw1, rw1, lw2)
+	return e.finish()
+}
+
+// stringEqHeapSameLen finishes == for two heap-rep strings whose word 2
+// (their length) is equal: same pointer, sealed hashes that differ, or
+// memequal.
+func (s *state) stringEqHeapSameLen(e *strEq, lw0, rw0, lw1, rw1, n *ssa.Value) {
+	boolT := types.Types[types.TBOOL]
+	uT := s.f.Config.Types.Uintptr
+	same, other := e.branch(s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0), ssa.BranchUnknown)
+	s.startBlock(same)
+	e.result(s.constBool(true))
+	s.startBlock(other)
+	zeroU := s.constInt64(uT, 0)
+	reject := s.newValue2(ssa.OpAndB, boolT,
+		s.newValue2(ssa.OpNeq64, boolT, lw1, rw1),
+		s.newValue2(ssa.OpAndB, boolT,
+			s.newValue2(ssa.OpNeq64, boolT, lw1, zeroU),
+			s.newValue2(ssa.OpNeq64, boolT, rw1, zeroU)))
+	no, mem := e.branch(reject, ssa.BranchUnknown)
+	s.startBlock(no)
+	e.result(s.constBool(false))
+	s.startBlock(mem)
+	e.result(s.rtcall(ir.Syms(s.gd).Memequal, true, []*types.Type{boolT}, lw0, rw0, s.newValue1(ssa.OpCopy, uT, n))[0])
+}
+
+// stringEqMaybeMixed ends the current block, whose operands have
+// different words 2, with false unless either word 2 is a heap length
+// <= 15 (unsigned), in which case cold runs in a new block.
+func (s *state) stringEqMaybeMixed(e *strEq, lw2, rw2 *ssa.Value, cold func()) {
+	boolT := types.Types[types.TBOOL]
+	intT := types.Types[types.TINT]
+	limit := s.constInt64(intT, rtabi.StringInlineCap)
+	bCold := s.f.NewBlock(ssa.BlockPlain)
+	bR := s.f.NewBlock(ssa.BlockPlain)
+	bNo := s.f.NewBlock(ssa.BlockPlain)
+
+	cond := s.newValue2(ssa.OpLeq64U, boolT, lw2, limit)
 	b := s.endBlock()
 	b.Kind = ssa.BlockIf
-	b.SetControl(fast)
-	b.Likely = ssa.BranchLikely
-	b.AddEdgeTo(bFast)
-	b.AddEdgeTo(bInlineCheck)
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bCold)
+	b.AddEdgeTo(bR)
 
-	marker := ssaMarker("stringEq")
+	s.startBlock(bR)
+	cond = s.newValue2(ssa.OpLeq64U, boolT, rw2, limit)
+	b = s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bCold)
+	b.AddEdgeTo(bNo)
 
-	s.startBlock(bFast)
-	s.vars[marker] = s.constBool(true)
-	s.endBlock().AddEdgeTo(bEnd)
+	s.startBlock(bNo)
+	e.result(s.constBool(false))
+	s.startBlock(bCold)
+	cold()
+}
 
-	// Both-inline reject path.
-	s.startBlock(bInlineCheck)
-	bothInline := s.newValue2(ssa.OpAndB, boolT, lInl, rInl)
-	bIC := s.endBlock()
-	bIC.Kind = ssa.BlockIf
-	bIC.SetControl(bothInline)
-	bIC.AddEdgeTo(bInlineReject)
-	bIC.AddEdgeTo(bHashCheck)
+// stringBytesEqConst compares the len(c) bytes at p with c using
+// exact-width little-endian loads (8/4/2/1 bytes).
+func (s *state) stringBytesEqConst(p *ssa.Value, c string) *ssa.Value {
+	boolT := types.Types[types.TBOOL]
+	var res *ssa.Value
+	for i := 0; i < len(c); {
+		var t *types.Type
+		var op ssa.Op
+		var step int
+		switch rem := len(c) - i; {
+		case rem >= 8:
+			t, op, step = types.Types[types.TUINT64], ssa.OpEq64, 8
+		case rem >= 4:
+			t, op, step = types.Types[types.TUINT32], ssa.OpEq32, 4
+		case rem >= 2:
+			t, op, step = types.Types[types.TUINT16], ssa.OpEq16, 2
+		default:
+			t, op, step = types.Types[types.TUINT8], ssa.OpEq8, 1
+		}
+		var want uint64
+		for k := step - 1; k >= 0; k-- {
+			want = want<<8 | uint64(c[i+k])
+		}
+		addr := s.newValue1I(ssa.OpOffPtr, t.PtrTo(), int64(i), p)
+		var cv *ssa.Value
+		switch step {
+		case 8:
+			cv = s.constInt64(t, int64(want))
+		case 4:
+			cv = s.constInt32(t, int32(want))
+		case 2:
+			cv = s.constInt16(t, int16(want))
+		default:
+			cv = s.constInt8(t, int8(want))
+		}
+		eq := s.newValue2(op, boolT, s.load(t, addr), cv)
+		if res == nil {
+			res = eq
+		} else {
+			res = s.newValue2(ssa.OpAndB, boolT, res, eq)
+		}
+		i += step
+	}
+	return res
+}
 
-	s.startBlock(bInlineReject)
-	s.vars[marker] = s.constBool(false)
-	s.endBlock().AddEdgeTo(bEnd)
+// stringTagNonZero reports whether word 2 w2 has a non-zero length tag,
+// i.e. the string is inline rep.
+func (s *state) stringTagNonZero(w2 *ssa.Value) *ssa.Value {
+	intT := types.Types[types.TINT]
+	tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, s.constInt64(intT, rtabi.StringTagShift))
+	return s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, s.constInt64(intT, 0))
+}
 
-	// Hash-reject path.
-	s.startBlock(bHashCheck)
-	zeroU := s.constInt64(uT, 0)
-	lHeap := s.newValue1(ssa.OpNot, boolT, lInl)
-	rHeap := s.newValue1(ssa.OpNot, boolT, rInl)
-	lSealed := s.newValue2(ssa.OpNeq64, boolT, lw1, zeroU)
-	rSealed := s.newValue2(ssa.OpNeq64, boolT, rw1, zeroU)
-	bothReady := s.newValue2(ssa.OpAndB, boolT, lHeap,
-		s.newValue2(ssa.OpAndB, boolT, rHeap,
-			s.newValue2(ssa.OpAndB, boolT, lSealed, rSealed)))
-	hashDiffer := s.newValue1(ssa.OpNot, boolT, eq1)
-	reject := s.newValue2(ssa.OpAndB, boolT, bothReady, hashDiffer)
-	b2 := s.endBlock()
-	b2.Kind = ssa.BlockIf
-	b2.SetControl(reject)
-	b2.AddEdgeTo(bHashReject)
-	b2.AddEdgeTo(bSlow)
+// strEq collects the result blocks of a string comparison into one
+// join block.
+type strEq struct {
+	s      *state
+	marker *ir.Name
+	end    *ssa.Block
+}
 
-	s.startBlock(bHashReject)
-	s.vars[marker] = s.constBool(false)
-	s.endBlock().AddEdgeTo(bEnd)
+func (s *state) newStrEq() *strEq {
+	return &strEq{s: s, marker: ssaMarker("stringEq"), end: s.f.NewBlock(ssa.BlockPlain)}
+}
 
-	s.startBlock(bSlow)
-	llen := s.stringLen(l)
-	rlen := s.stringLen(r)
-	lenEq := s.newValue2(ssa.OpEq64, boolT, llen, rlen)
-	b3 := s.endBlock()
-	b3.Kind = ssa.BlockIf
-	b3.SetControl(lenEq)
-	b3.AddEdgeTo(bLenMatch)
-	b3.AddEdgeTo(bLenMismatch)
+// branch ends the current block on cond and returns its (true, false)
+// successors.
+func (e *strEq) branch(cond *ssa.Value, likely ssa.BranchPrediction) (yes, no *ssa.Block) {
+	yes = e.s.f.NewBlock(ssa.BlockPlain)
+	no = e.s.f.NewBlock(ssa.BlockPlain)
+	b := e.s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = likely
+	b.AddEdgeTo(yes)
+	b.AddEdgeTo(no)
+	return yes, no
+}
 
-	s.startBlock(bLenMismatch)
-	s.vars[marker] = s.constBool(false)
-	s.endBlock().AddEdgeTo(bEnd)
+// result sets the comparison's value in the current block and jumps to
+// the join block.
+func (e *strEq) result(v *ssa.Value) {
+	e.s.vars[e.marker] = v
+	e.s.endBlock().AddEdgeTo(e.end)
+}
 
-	s.startBlock(bLenMatch)
-	lptr := s.stringBytesTransient(l, ptrT)
-	rptr := s.stringBytesTransient(r, ptrT)
-	sizeU := s.newValue1(ssa.OpCopy, uT, llen)
-	res := s.rtcall(ir.Syms(s.gd).Memequal, true, []*types.Type{boolT}, lptr, rptr, sizeU)
-	s.vars[marker] = res[0]
-	s.endBlock().AddEdgeTo(bEnd)
-
-	s.startBlock(bEnd)
-	result := s.variable(marker, boolT)
-	delete(s.vars, marker)
-	return result
+func (e *strEq) finish() *ssa.Value {
+	e.s.startBlock(e.end)
+	v := e.s.variable(e.marker, types.Types[types.TBOOL])
+	delete(e.s.vars, e.marker)
+	return v
 }
 
 // iMakeInline emits an iface SSA value with a populated inline payload

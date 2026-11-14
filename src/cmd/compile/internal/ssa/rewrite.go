@@ -826,6 +826,19 @@ func auxToS390xRotateParams(i Aux) s390x.RotateParams {
 func StringToAux(s string) Aux {
 	return stringAux(s)
 }
+
+// ConstStringValue returns the string of an OpConstString value.
+func ConstStringValue(v *Value) string { return auxToString(v.Aux) }
+
+// StringInlineWords returns the inline-rep words 1 and 2 of a 1..15
+// byte constant, as the ConstString lowering emits them.
+func StringInlineWords(s string) (w1, w2 int64) {
+	return stringInlineWord1(s), stringInlineWord2(s)
+}
+
+// StringConstHash is the cached hash a heap-rep constant carries in
+// word 1 (see stringConstHash).
+func StringConstHash(s string) int64 { return stringConstHash(s) }
 func symToAux(s Sym) Aux {
 	return s
 }

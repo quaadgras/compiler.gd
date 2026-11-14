@@ -167,6 +167,30 @@ literal, and a write barrier again when a literal is stored to the heap
 during marking. Other 64-bit arches keep word 0 = nil until their
 `cmpstring`/`strhash` assembly dispatches on the tag.
 
+### 1b. Equality
+
+`==` (ssagen `stringEqFast`, reached through the `streqfast` intrinsic)
+relies on two facts: the tag alone decides the representation (1a), and
+inline strings are canonically encoded (bytes past the length and bits
+56..59 are zero), so two inline strings are equal iff words 1 and 2 are.
+A heap string's word 2 is exactly its length.
+
+    w2 equal, inline  → w1 == w1
+    w2 equal, heap    → same w0 → true; both hashes sealed and different
+                        → false; else memequal(w0, w0, len)
+    w2 differ         → false, unless either word 2 is <= 15 unsigned (a
+                        heap string of 1..15 bytes, from unsafe.String or
+                        a substring of a heap string, which can equal an
+                        inline one): call runtime.streqfast
+
+Against a constant, walk skips the stock byte-wise rewrite on 64-bit
+(each `s[i]` would pay the tag dispatch) and the constant's words become
+immediates: a 1..15 byte constant is `w2 == C2 ? w1 == C1 : (w2 == n &&
+exact-width loads of n bytes from w0)` — no call, so a function like
+`func isJump(s string) bool { return s == "jump" }` stays a leaf. A
+longer constant is a length compare, then pointer, cached hash, and
+memequal.
+
 ## 2. Eligibility / construction sites
 
 Every site that builds a string must decide inline vs heap:

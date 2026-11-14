@@ -397,6 +397,14 @@ func walkCompareString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir
 			// Length-only checks are ok, though.
 			maxRewriteLen = 0
 		}
+		// gd small-string optimization: on 64-bit, == and != against a
+		// non-empty constant go through streqfast, which compares the
+		// header words against the constant's (two immediates for a
+		// 1..15 byte constant) instead of indexing the string byte by
+		// byte, where every index pays the inline-vs-heap dispatch.
+		if types.PtrSize == 8 && (cmp == ir.OEQ || cmp == ir.ONE) && len(ir.StringVal(cs)) > 0 {
+			maxRewriteLen = 0
+		}
 		if s := ir.StringVal(cs); len(s) <= maxRewriteLen {
 			if len(s) > 0 {
 				ncs = safeExpr(gd, ncs, init)
