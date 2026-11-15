@@ -516,7 +516,8 @@ var passes = [...]pass{
 	{name: "flagalloc", fn: flagalloc, required: true}, // allocate flags register
 	{name: "regalloc", fn: regalloc, required: true},   // allocate int & float registers + stack slots
 	{name: "loop rotate", fn: loopRotate},
-	{name: "trim", fn: trim}, // remove empty blocks
+	{name: "trim", fn: trim},                    // remove empty blocks
+	{name: "wasm structure", fn: wasmStructure}, // wasm: structured control flow
 }
 
 // Double-check phase ordering constraints.

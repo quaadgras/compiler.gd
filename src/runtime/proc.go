@@ -1900,6 +1900,12 @@ func mstart0() {
 	gp.stackguard1 = gp.stackguard0
 	mstart1()
 
+	if jspi {
+		// The scheduler chose the first goroutine and returned;
+		// JavaScript starts it.
+		return
+	}
+
 	// Exit this thread.
 	if mStackIsSystemAllocated() {
 		// Windows, Solaris, illumos, Darwin, AIX and Plan 9 always system-allocate
@@ -3578,6 +3584,9 @@ top:
 	// then wake event handler goroutine which pauses execution
 	// until a callback was triggered.
 	gp, otherReady := beforeIdle(now, pollUntil)
+	if jspi {
+		return nil, false, false
+	}
 	if gp != nil {
 		trace := traceAcquire()
 		casgstatus(gp, _Gwaiting, _Grunnable)
@@ -4148,6 +4157,12 @@ func injectglist(glist *gList) {
 // One round of scheduler: find a runnable goroutine and execute it.
 // Never returns.
 func schedule() {
+	if jspi && jsCallerDepth > 0 {
+		// A callback from JavaScript has parked or exited. Go back
+		// to the goroutine that was set aside for it.
+		jsreturn()
+		return
+	}
 	mp := getg().m
 
 	if mp.locks != 0 {
@@ -4177,6 +4192,18 @@ top:
 	}
 
 	gp, inheritTime, tryWakeP := findRunnable() // blocks until work is available
+	if jspi && gp == nil {
+		// Nothing is runnable: return to the JavaScript event loop.
+		// A timer or an event calls the scheduler again.
+		if mp.spinning {
+			mp.spinning = false
+			if sched.nmspinning.Add(-1) < 0 {
+				throw("schedule: negative nmspinning")
+			}
+		}
+		jsidle()
+		return
+	}
 
 	// May be on a new P.
 	pp = mp.p.ptr()
@@ -4309,6 +4336,7 @@ func park_m(gp *g) {
 				traceRelease(trace)
 			}
 			execute(gp, true) // Schedule it back, never returns.
+			return            // except on js with JSPI, where gogo returns
 		}
 	}
 
@@ -4499,6 +4527,10 @@ func goexit1() {
 		trace.GoEnd()
 		traceRelease(trace)
 	}
+	if jspi {
+		// Unwind to wasm_export_gorun, which runs goexit0 on g0.
+		jsthrowgoexit()
+	}
 	mcall(goexit0)
 }
 
@@ -4516,6 +4548,10 @@ func goexit0(gp *g) {
 }
 
 func gdestroy(gp *g) {
+	if jspi {
+		// gp's WebAssembly stack must be unwound, not parked.
+		jsgdead = 1
+	}
 	mp := getg().m
 	pp := mp.p.ptr()
 

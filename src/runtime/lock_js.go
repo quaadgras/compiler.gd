@@ -236,6 +236,12 @@ func beforeIdle(now, pollUntil int64) (gp *g, otherReady bool) {
 		}
 	}
 
+	if jspi {
+		// Every goroutine is suspended; the scheduler returns to
+		// the JavaScript event loop.
+		return nil, false
+	}
+
 	if len(events) == 0 {
 		// TODO: this is the line that requires the yeswritebarrierrec
 		go handleAsyncEvent()
@@ -310,4 +316,20 @@ var eventHandler func() bool
 //go:linkname setEventHandler syscall/js.setEventHandler
 func setEventHandler(fn func() bool) {
 	eventHandler = fn
+}
+
+// jsdeadlock is called by syscall/js when wasm_exec_node.js reports that
+// Node.js is about to exit while the program is still alive: no
+// goroutine can run and no JavaScript event is pending.
+//
+//go:linkname jsdeadlock syscall/js.deadlock
+func jsdeadlock() {
+	if jspi {
+		// On the system stack, so that every goroutine is listed.
+		systemstack(func() {
+			fatal("all goroutines are asleep - deadlock!")
+		})
+	}
+	// Blocking forever makes the scheduler's deadlock check fire.
+	select {}
 }

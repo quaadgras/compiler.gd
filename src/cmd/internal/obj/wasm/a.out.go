@@ -12,6 +12,9 @@ const (
 	/* mark flags */
 	DONE          = 1 << iota
 	PRESERVEFLAGS // not allowed to clobber flags
+	// UNWINDS marks an ACALLNORESUME whose callee does not return but
+	// may unwind the WebAssembly stack, as a panic does.
+	UNWINDS
 )
 
 /*
@@ -535,6 +538,13 @@ const (
 
 	ARETUNWIND
 
+	// ATRYCATCH opens a try_table block with the single clause
+	// "catch tag", which branches to the block enclosing the
+	// try_table. From.Offset is the tag index. Closed by End.
+	ATRYCATCH
+	// ATHROW throws the tag whose index is From.Offset.
+	ATHROW
+
 	AMOVB
 	AMOVH
 	AMOVW
@@ -633,6 +643,11 @@ const (
 	REG_V15
 
 	REG_PC_B // also first parameter, i32
+
+	// REG_DEFERBASE is a local the assembler adds to functions with
+	// defers on js (see preprocess): the frame's offset from the top of
+	// the goroutine stack, i32.
+	REG_DEFERBASE
 
 	MAXREG
 

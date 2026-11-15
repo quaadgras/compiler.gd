@@ -484,6 +484,8 @@ var Anames = []string{
 	"RESUMEPOINT",
 	"CALLNORESUME",
 	"RETUNWIND",
+	"TRYCATCH",
+	"THROW",
 	"MOVB",
 	"MOVH",
 	"MOVW",

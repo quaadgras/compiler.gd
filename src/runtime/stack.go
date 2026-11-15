@@ -1120,6 +1120,15 @@ func newstack() {
 	// it needs a lock held by the goroutine), that small preemption turns
 	// into a real deadlock.
 	preempt := stackguard0 == stackPreempt
+	if preempt && jspi {
+		// On js with JSPI nothing can ask a running goroutine to
+		// stop (there is one M and no sysmon), and morestack returns
+		// into the function that called it rather than rescheduling.
+		// That function does not repeat its stack check, so clear the
+		// request and grow the stack as if it had been a real one.
+		preempt = false
+		gp.stackguard0 = gp.stack.lo + stackGuard
+	}
 	if preempt {
 		if !canPreemptM(thisg.m) {
 			// Let the goroutine keep running for now.
@@ -1219,6 +1228,8 @@ func newstack() {
 	}
 	casgstatus(gp, _Gcopystack, _Grunning)
 	gogo(&gp.sched)
+	// On js with JSPI gogo returns, and morestack returns into the
+	// function that needed the stack.
 }
 
 //go:nosplit

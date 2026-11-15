@@ -79,6 +79,10 @@ func (c Func) Release() {
 // setEventHandler is defined in the runtime package.
 func setEventHandler(fn func() bool)
 
+// deadlock is defined in the runtime package. It reports a deadlock
+// and does not return.
+func deadlock()
+
 func init() {
 	setEventHandler(handleEvent)
 }
@@ -95,7 +99,7 @@ func handleEvent() bool {
 
 	id := uint32(cb.Get("id").Int())
 	if id == 0 { // zero indicates deadlock
-		select {}
+		deadlock()
 	}
 
 	// Retrieve the associated js.Func

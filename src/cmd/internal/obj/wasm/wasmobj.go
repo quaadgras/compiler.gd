@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"internal/abi"
+	"internal/buildcfg"
 	"io"
 	"math"
 )
@@ -154,6 +155,7 @@ type runtimeSyms struct {
 	sigpanic              *obj.LSym
 	wasm_pc_f_loop_export *obj.LSym
 	runtimeNotInitialized *obj.LSym
+	deferreturn           *obj.LSym
 }
 
 func lookupRuntimeSyms(ctxt *obj.Link) runtimeSyms {
@@ -163,12 +165,19 @@ func lookupRuntimeSyms(ctxt *obj.Link) runtimeSyms {
 		sigpanic:              ctxt.LookupABI("runtime.sigpanic", obj.ABIInternal),
 		wasm_pc_f_loop_export: ctxt.Lookup("wasm_pc_f_loop_export"),
 		runtimeNotInitialized: ctxt.Lookup("runtime.notInitialized"),
+		deferreturn:           ctxt.LookupABI("runtime.deferreturn", obj.ABIInternal),
 	}
 }
 
 const (
 	/* mark flags */
 	WasmImport = 1 << 0
+)
+
+// Exception tags of a js module, in the order the linker defines them.
+const (
+	TagRecover = 0 // a recovered panic unwinding to the deferring frame
+	TagGoexit  = 1 // a goroutine exiting from within nested calls
 )
 
 const (
@@ -235,6 +244,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		genWasmExportWrapper(rt, s, appendp)
 	}
 
+	var pFrame *obj.Prog                             // last instruction of the frame allocation
 	if framesize > 0 && s.Func().WasmExport == nil { // genWasmExportWrapper has its own prologue generation
 		p := s.Func().Text
 		p = appendp(p, AGet, regAddr(REG_SP))
@@ -242,6 +252,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		p = appendp(p, AI32Sub)
 		p = appendp(p, ASet, regAddr(REG_SP))
 		p.Spadj = int32(framesize)
+		pFrame = p
 	}
 
 	// If the framesize is 0, then imply nosplit because it's a specially
@@ -293,6 +304,8 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 
 	// Introduce resume points for CALL instructions
 	// and collect other explicit resume points.
+	jspi := buildcfg.GOWASM.JSPI && ctxt.Headtype == objabi.Hjs
+	hasDefer := false // the function calls deferreturn
 	numResumePoints := 0
 	explicitBlockDepth := 0
 	pc := int64(0) // pc is only incremented when necessary, this avoids bloat of the BrTable instruction
@@ -303,7 +316,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		prevBase := base
 		base = ctxt.PosTable.Pos(p.Pos).Base()
 		switch p.As {
-		case ABlock, ALoop, AIf:
+		case ABlock, ALoop, AIf, ATRYCATCH:
 			explicitBlockDepth++
 
 		case AEnd:
@@ -325,6 +338,16 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			pc++
 
 		case obj.ACALL:
+			if p.To.Sym == rt.deferreturn {
+				hasDefer = true
+			}
+			if jspi {
+				// Goroutines keep their WebAssembly stack, so
+				// nothing resumes after a call. The call still
+				// gets its own pc, for the stack maps.
+				p.As = ACALLNORESUME
+				break
+			}
 			if explicitBlockDepth != 0 {
 				panic("CALL can only be used on toplevel, try CALLNORESUME instead")
 			}
@@ -415,7 +438,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	currentDepth := 0
 	for p := s.Func().Text; p != nil; p = p.Link {
 		switch p.As {
-		case ABlock, ALoop, AIf:
+		case ABlock, ALoop, AIf, ATRYCATCH:
 			currentDepth++
 		case AEnd:
 			currentDepth--
@@ -521,7 +544,10 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			}
 
 			// return value of call is on the top of the stack, indicating whether to unwind the WebAssembly stack
-			if call.As == ACALLNORESUME && call.To.Sym != rt.sigpanic { // sigpanic unwinds the stack, but it never resumes
+			if jspi {
+				// Calls never unwind the WebAssembly stack.
+				p = appendp(p, ADrop)
+			} else if call.As == ACALLNORESUME && call.To.Sym != rt.sigpanic && call.Mark&UNWINDS == 0 { // sigpanic unwinds the stack, but it never resumes
 				// trying to unwind WebAssembly stack but call has no resume point, terminate with error
 				p = appendp(p, AIf)
 				p = appendp(p, obj.AUNDEF)
@@ -679,6 +705,11 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 					}
 
 				case obj.TYPE_MEM:
+					if mov.From.Name == obj.NAME_EXTERN {
+						p = appendp(p, AI32Const, obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: mov.From.Sym})
+						p = appendp(p, loadAs, constAddr(mov.From.Offset))
+						break
+					}
 					p = appendp(p, AGet, regAddr(mov.From.Reg))
 					if mov.From.Reg != REG_SP {
 						p = appendp(p, AI32WrapI64)
@@ -719,8 +750,41 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		}
 	}
 
+	// On js a recovered panic throws the recover tag (runtime.recovery).
+	// A function with defers catches it: if the recovery targets this
+	// frame, it restores SP and re-enters at the resume point before
+	// its deferreturn call (g.sched.pc), else it throws again. The
+	// frame identifies itself by its offset from the top of the
+	// goroutine stack, kept in a local, since the stack may have moved.
+	catchRecover := jspi && hasDefer && pFrame != nil
+	var pAgain *obj.Prog
+	if catchRecover {
+		// DEFERBASE = g.stack.hi - SP
+		p := pFrame
+		p = appendp(p, AGet, regAddr(REGG))
+		p = appendp(p, AI32WrapI64)
+		p = appendp(p, AI32Load, constAddr(int64(ctxt.Arch.PtrSize))) // g.stack.hi
+		p = appendp(p, AGet, regAddr(REG_SP))
+		p = appendp(p, AI32Sub)
+		p = appendp(p, ASet, regAddr(REG_DEFERBASE))
+		// These instructions run with the frame allocated, so they
+		// take the pc of what follows, not of the allocation, whose pc
+		// (the function's entry) must keep an SP delta of zero.
+		if next := p.Link; next != nil {
+			for q := pFrame.Link; q != next; q = q.Link {
+				q.Pc = next.Pc
+			}
+		}
+	}
+
 	{
 		p := s.Func().Text
+		if catchRecover {
+			p = appendp(p, ALoop) // re-entry after a recovery
+			pAgain = p
+			p = appendp(p, ABlock) // the catch clause branches here
+			p = appendp(p, ATRYCATCH, constAddr(TagRecover))
+		}
 		if len(unwindExitBranches) > 0 {
 			p = appendp(p, ABlock) // unwindExit, used to return 1 when unwinding the stack
 			for _, b := range unwindExitBranches {
@@ -753,13 +817,47 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			p = appendp(p, AEnd) // end of unwindExit
 			p = appendp(p, AI32Const, constAddr(1))
 		}
+		if catchRecover {
+			p = appendp(p, AEnd) // end of try_table
+			p = appendp(p, AEnd) // end of the block the catch clause targets
+
+			schedSP := int64(ctxt.Arch.PtrSize) * 7 // g.sched.sp, see runtime.g
+			schedPC := int64(ctxt.Arch.PtrSize) * 8 // g.sched.pc
+
+			// if g.stack.hi - g.sched.sp != DEFERBASE { throw again }
+			p = appendp(p, AGet, regAddr(REGG))
+			p = appendp(p, AI32WrapI64)
+			p = appendp(p, AI32Load, constAddr(int64(ctxt.Arch.PtrSize)))
+			p = appendp(p, AGet, regAddr(REGG))
+			p = appendp(p, AI32WrapI64)
+			p = appendp(p, AI32Load, constAddr(schedSP))
+			p = appendp(p, AI32Sub)
+			p = appendp(p, AGet, regAddr(REG_DEFERBASE))
+			p = appendp(p, AI32Ne)
+			p = appendp(p, AIf)
+			p = appendp(p, ATHROW, constAddr(TagRecover))
+			p = appendp(p, AEnd)
+
+			// SP = g.sched.sp; PC_B = low 16 bits of g.sched.pc
+			p = appendp(p, AGet, regAddr(REGG))
+			p = appendp(p, AI32WrapI64)
+			p = appendp(p, AI32Load, constAddr(schedSP))
+			p = appendp(p, ASet, regAddr(REG_SP))
+			p = appendp(p, AGet, regAddr(REGG))
+			p = appendp(p, AI32WrapI64)
+			p = appendp(p, AI32Load16U, constAddr(schedPC))
+			p = appendp(p, ASet, regAddr(REG_PC_B))
+			p = appendp(p, ABr, obj.Addr{Type: obj.TYPE_BRANCH, Val: pAgain})
+			p = appendp(p, AEnd) // end of the re-entry loop
+			p = appendp(p, obj.AUNDEF)
+		}
 	}
 
 	currentDepth = 0
 	blockDepths := make(map[*obj.Prog]int)
 	for p := s.Func().Text; p != nil; p = p.Link {
 		switch p.As {
-		case ABlock, ALoop, AIf:
+		case ABlock, ALoop, AIf, ATRYCATCH:
 			currentDepth++
 			blockDepths[p] = currentDepth
 		case AEnd:
@@ -1052,31 +1150,36 @@ func regAddr(reg int16) obj.Addr {
 // Most of the Go functions has a single parameter (PC_B) in
 // Wasm ABI. This is a list of exceptions.
 var notUsePC_B = map[string]bool{
-	"_rt0_wasm_js":            true,
-	"_rt0_wasm_wasip1":        true,
-	"_rt0_wasm_wasip1_lib":    true,
-	"wasm_export_run":         true,
-	"wasm_export_resume":      true,
-	"wasm_export_getsp":       true,
-	"wasm_pc_f_loop":          true,
-	"wasm_pc_f_loop_export":   true,
-	"gcWriteBarrier":          true,
-	"runtime.gcWriteBarrier1": true,
-	"runtime.gcWriteBarrier2": true,
-	"runtime.gcWriteBarrier3": true,
-	"runtime.gcWriteBarrier4": true,
-	"runtime.gcWriteBarrier5": true,
-	"runtime.gcWriteBarrier6": true,
-	"runtime.gcWriteBarrier7": true,
-	"runtime.gcWriteBarrier8": true,
-	"runtime.notInitialized":  true,
-	"runtime.wasmDiv":         true,
-	"runtime.wasmTruncS":      true,
-	"runtime.wasmTruncU":      true,
-	"cmpbody":                 true,
-	"memeqbody":               true,
-	"memcmp":                  true,
-	"memchr":                  true,
+	"_rt0_wasm_js":             true,
+	"_rt0_wasm_wasip1":         true,
+	"_rt0_wasm_wasip1_lib":     true,
+	"wasm_export_run":          true,
+	"wasm_export_resume":       true,
+	"wasm_export_getsp":        true,
+	"wasm_export_sched":        true,
+	"wasm_export_gorun":        true,
+	"wasm_export_nextg":        true,
+	"wasm_export_callback":     true,
+	"wasm_export_callbackdone": true,
+	"wasm_pc_f_loop":           true,
+	"wasm_pc_f_loop_export":    true,
+	"gcWriteBarrier":           true,
+	"runtime.gcWriteBarrier1":  true,
+	"runtime.gcWriteBarrier2":  true,
+	"runtime.gcWriteBarrier3":  true,
+	"runtime.gcWriteBarrier4":  true,
+	"runtime.gcWriteBarrier5":  true,
+	"runtime.gcWriteBarrier6":  true,
+	"runtime.gcWriteBarrier7":  true,
+	"runtime.gcWriteBarrier8":  true,
+	"runtime.notInitialized":   true,
+	"runtime.wasmDiv":          true,
+	"runtime.wasmTruncS":       true,
+	"runtime.wasmTruncU":       true,
+	"cmpbody":                  true,
+	"memeqbody":                true,
+	"memcmp":                   true,
+	"memchr":                   true,
 }
 
 func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
@@ -1118,6 +1221,15 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		useAssemblyRegMap()
 	case "wasm_pc_f_loop_export":
 		varDecls = []*varDecl{{count: 2, typ: i32}}
+		useAssemblyRegMap()
+	case "wasm_export_gorun": // R0: i32 parameter; R1, R2: i64
+		varDecls = []*varDecl{{count: 2, typ: i64}}
+		useAssemblyRegMap()
+	case "wasm_export_callback": // R0, R1: i64
+		varDecls = []*varDecl{{count: 2, typ: i64}}
+		useAssemblyRegMap()
+	case "wasm_export_sched", "wasm_export_nextg", "wasm_export_callbackdone": // R0: i64
+		varDecls = []*varDecl{{count: 1, typ: i64}}
 		useAssemblyRegMap()
 	case "memchr", "memcmp":
 		varDecls = []*varDecl{{count: 2, typ: i32}}
@@ -1161,6 +1273,9 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		}
 
 		regs := []int16{REG_SP}
+		if regUsed[REG_DEFERBASE-MINREG] {
+			regs = append(regs, REG_DEFERBASE)
+		}
 		for reg := int16(REG_R0); reg <= REG_V15; reg++ {
 			if regUsed[reg-MINREG] {
 				regs = append(regs, reg)
@@ -1277,6 +1392,20 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			// Despite what the spec implies, this is the format of a 128-bit constant.
 			writeLE64(w, p.From.Offset)
 			writeLE64(w, p.To.Offset)
+			continue
+
+		case ATRYCATCH:
+			w.WriteByte(0x1F)  // try_table
+			w.WriteByte(0x40)  // no result
+			writeUleb128(w, 1) // one clause
+			w.WriteByte(0x00)  // catch
+			writeUleb128(w, uint64(p.From.Offset))
+			writeUleb128(w, 0) // label: the enclosing block
+			continue
+
+		case ATHROW:
+			w.WriteByte(0x08) // throw
+			writeUleb128(w, uint64(p.From.Offset))
 			continue
 		}
 
@@ -1472,7 +1601,7 @@ const (
 
 func regType(reg int16) valueType {
 	switch {
-	case reg == REG_SP:
+	case reg == REG_SP, reg == REG_DEFERBASE:
 		return i32
 	case reg >= REG_R0 && reg <= REG_R15:
 		return i64

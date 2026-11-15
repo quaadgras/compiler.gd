@@ -8062,6 +8062,10 @@ type State struct {
 
 	// wasm: The number of values on the WebAssembly stack. This is only used as a safeguard.
 	OnWasmStackSkipped int
+
+	// WasmCFProgs maps the ID of a block or loop of the function's
+	// structured control flow (ssa.WasmCF) to its instruction.
+	WasmCFProgs map[int32]*obj.Prog
 }
 
 func (s *State) FuncInfo() *obj.FuncInfo {

@@ -14,4 +14,6 @@ DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 # Increase the V8 stack size from the default of 984K
 # to 8192K to ensure all tests can pass without hitting
 # stack size limits.
-exec node --stack-size=8192 "$DIR/wasm_exec_node.js" "$@"
+# --wasm-stack-switching-stack-size is the stack of a goroutine when goroutines
+# run on their own WebAssembly stacks (JSPI, see runtime/jspi_js.go).
+exec node --stack-size=8192 --wasm-stack-switching-stack-size=4096 "$DIR/wasm_exec_node.js" "$@"

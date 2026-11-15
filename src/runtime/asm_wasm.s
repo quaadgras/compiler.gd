@@ -22,8 +22,13 @@ TEXT runtime·rt0_go(SB), NOSPLIT|NOFRAME|TOPFRAME, $0
 	CALLNORESUME runtime·schedinit(SB)
 	MOVD $runtime·mainPC(SB), 0(SP)
 	CALLNORESUME runtime·newproc(SB)
+#ifdef GOWASM_jspi
+	CALLNORESUME runtime·mstart(SB) // returns once the scheduler has chosen the first goroutine
+	RET
+#else
 	CALL runtime·mstart(SB) // WebAssembly stack will unwind when switching to another goroutine
 	UNDEF
+#endif
 
 TEXT runtime·mstart(SB),NOSPLIT|TOPFRAME,$0
 	CALL	runtime·mstart0(SB)
@@ -31,6 +36,9 @@ TEXT runtime·mstart(SB),NOSPLIT|TOPFRAME,$0
 
 DATA  runtime·mainPC+0(SB)/8,$runtime·main(SB)
 GLOBL runtime·mainPC(SB),RODATA,$8
+
+// On js with JSPI, gogo and mcall are in jspi_js_wasm.s.
+#ifndef GOWASM_jspi
 
 TEXT runtime·gogo(SB), NOSPLIT, $0-8
 	MOVD buf+0(FP), R0
@@ -103,6 +111,8 @@ TEXT runtime·mcall(SB), NOSPLIT, $0-8
 	Set SP
 
 	JMP runtime·badmcall2(SB)
+
+#endif
 
 // func systemstack(fn func())
 TEXT runtime·systemstack(SB), NOSPLIT, $0-8
@@ -262,10 +272,26 @@ TEXT runtime·morestack(SB), NOSPLIT, $0-0
 	MOVD g, m_morebuf+gobuf_g(R1)
 
 	// Call newstack on m->g0's stack.
+#ifdef GOWASM_jspi
+	MOVD g, R3
+	MOVD R2, g
+	MOVD g_sched+gobuf_sp(R2), SP
+	CALLNORESUME runtime·newstack(SB)
+	// The stack has grown. Return into f, which reloads SP.
+	MOVD R3, g
+	MOVD $0, runtime·jsnextg(SB)
+	MOVD $0, runtime·jspending(SB)
+	MOVD g_sched+gobuf_sp(R3), SP
+	MOVD g_sched+gobuf_ctxt(R3), CTXT
+	MOVD $0, g_sched+gobuf_ctxt(R3)
+	I32Const $0
+	Return
+#else
 	MOVD R2, g
 	MOVD g_sched+gobuf_sp(R2), SP
 	CALL runtime·newstack(SB)
 	UNDEF // crash if newstack returns
+#endif
 
 // morestack but not preserving ctxt.
 TEXT runtime·morestack_noctxt(SB),NOSPLIT,$0

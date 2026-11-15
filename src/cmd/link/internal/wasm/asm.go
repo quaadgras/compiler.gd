@@ -17,6 +17,7 @@ import (
 	"internal/buildcfg"
 	"io"
 	"regexp"
+	"sync"
 )
 
 const (
@@ -40,6 +41,7 @@ const (
 	sectionElement  = 9
 	sectionCode     = 10
 	sectionData     = 11
+	sectionTag      = 13
 )
 
 // funcValueOffset is the offset between the PC_F value of a function and the index of the function in WebAssembly
@@ -67,32 +69,37 @@ func readWasmImport(ldr *loader.Loader, s loader.Sym) obj.WasmImport {
 }
 
 var wasmFuncTypes = map[string]*wasmFuncType{
-	"_rt0_wasm_js":            {Params: []byte{}},                                         //
-	"_rt0_wasm_wasip1":        {Params: []byte{}},                                         //
-	"_rt0_wasm_wasip1_lib":    {Params: []byte{}},                                         //
-	"wasm_export__start":      {},                                                         //
-	"wasm_export_run":         {Params: []byte{I32, I32}},                                 // argc, argv
-	"wasm_export_resume":      {Params: []byte{}},                                         //
-	"wasm_export_getsp":       {Results: []byte{I32}},                                     // sp
-	"wasm_pc_f_loop":          {Params: []byte{}},                                         //
-	"wasm_pc_f_loop_export":   {Params: []byte{I32}},                                      // pc_f
-	"runtime.wasmDiv":         {Params: []byte{I64, I64}, Results: []byte{I64}},           // x, y -> x/y
-	"runtime.wasmTruncS":      {Params: []byte{F64}, Results: []byte{I64}},                // x -> int(x)
-	"runtime.wasmTruncU":      {Params: []byte{F64}, Results: []byte{I64}},                // x -> uint(x)
-	"gcWriteBarrier":          {Params: []byte{I64}, Results: []byte{I64}},                // #bytes -> bufptr
-	"runtime.gcWriteBarrier1": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier2": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier3": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier4": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier5": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier6": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier7": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.gcWriteBarrier8": {Results: []byte{I64}},                                     // -> bufptr
-	"runtime.notInitialized":  {},                                                         //
-	"cmpbody":                 {Params: []byte{I64, I64, I64, I64}, Results: []byte{I64}}, // a, alen, b, blen -> -1/0/1
-	"memeqbody":               {Params: []byte{I64, I64, I64}, Results: []byte{I64}},      // a, b, len -> 0/1
-	"memcmp":                  {Params: []byte{I32, I32, I32}, Results: []byte{I32}},      // a, b, len -> <0/0/>0
-	"memchr":                  {Params: []byte{I32, I32, I32}, Results: []byte{I32}},      // s, c, len -> index
+	"_rt0_wasm_js":             {Params: []byte{}},                                         //
+	"_rt0_wasm_wasip1":         {Params: []byte{}},                                         //
+	"_rt0_wasm_wasip1_lib":     {Params: []byte{}},                                         //
+	"wasm_export__start":       {},                                                         //
+	"wasm_export_run":          {Params: []byte{I32, I32}},                                 // argc, argv
+	"wasm_export_resume":       {Params: []byte{}},                                         //
+	"wasm_export_getsp":        {Results: []byte{I32}},                                     // sp
+	"wasm_export_sched":        {Results: []byte{I32}},                                     // next gp
+	"wasm_export_gorun":        {Params: []byte{I32}, Results: []byte{I32}},                // gp -> next gp
+	"wasm_export_nextg":        {Results: []byte{I32}},                                     // next gp
+	"wasm_export_callback":     {Results: []byte{I32}},                                     // new gp
+	"wasm_export_callbackdone": {},                                                         //
+	"wasm_pc_f_loop":           {Params: []byte{}},                                         //
+	"wasm_pc_f_loop_export":    {Params: []byte{I32}},                                      // pc_f
+	"runtime.wasmDiv":          {Params: []byte{I64, I64}, Results: []byte{I64}},           // x, y -> x/y
+	"runtime.wasmTruncS":       {Params: []byte{F64}, Results: []byte{I64}},                // x -> int(x)
+	"runtime.wasmTruncU":       {Params: []byte{F64}, Results: []byte{I64}},                // x -> uint(x)
+	"gcWriteBarrier":           {Params: []byte{I64}, Results: []byte{I64}},                // #bytes -> bufptr
+	"runtime.gcWriteBarrier1":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier2":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier3":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier4":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier5":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier6":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier7":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.gcWriteBarrier8":  {Results: []byte{I64}},                                     // -> bufptr
+	"runtime.notInitialized":   {},                                                         //
+	"cmpbody":                  {Params: []byte{I64, I64, I64, I64}, Results: []byte{I64}}, // a, alen, b, blen -> -1/0/1
+	"memeqbody":                {Params: []byte{I64, I64, I64}, Results: []byte{I64}},      // a, b, len -> 0/1
+	"memcmp":                   {Params: []byte{I32, I32, I32}, Results: []byte{I32}},      // a, b, len -> <0/0/>0
+	"memchr":                   {Params: []byte{I32, I32, I32}, Results: []byte{I32}},      // s, c, len -> index
 }
 
 func assignAddress(ldr *loader.Loader, sect *sym.Section, n int, s loader.Sym, va uint64, isTramp bool) (*sym.Section, int, uint64) {
@@ -121,7 +128,10 @@ type wasmDataSect struct {
 	data []byte
 }
 
-var dataSects []wasmDataSect
+// dataSects holds the data sections asmb collects for asmb2, per link:
+// the gd fork runs several links concurrently in one process, which a
+// single package variable let overwrite each other's sections.
+var dataSects sync.Map // *ld.Link -> []wasmDataSect
 
 func asmb(ctxt *ld.Link, ldr *loader.Loader) {
 	sections := []*sym.Section{
@@ -134,11 +144,12 @@ func asmb(ctxt *ld.Link, ldr *loader.Loader) {
 		ldr.SymSect(ldr.Lookup("runtime.data", 0)),
 	}
 
-	dataSects = make([]wasmDataSect, len(sections))
+	sects := make([]wasmDataSect, len(sections))
 	for i, sect := range sections {
 		data := ld.DatblkBytes(ctxt, int64(sect.Vaddr), int64(sect.Length))
-		dataSects[i] = wasmDataSect{sect, data}
+		sects[i] = wasmDataSect{sect, data}
 	}
+	dataSects.Store(ctxt, sects)
 }
 
 // asmb writes the final WebAssembly module binary.
@@ -245,11 +256,19 @@ func asmb2(ctxt *ld.Link, ldr *loader.Loader) {
 		writeBuildID(ctxt, buildid)
 	}
 
+	var tagType uint32
+	if jspi() {
+		tagType = lookupType(&wasmFuncType{}, &types)
+	}
+
 	writeTypeSec(ctxt, types)
 	writeImportSec(ctxt, hostImports)
 	writeFunctionSec(ctxt, fns)
 	writeTableSec(ctxt, fns)
 	writeMemorySec(ctxt, ldr)
+	if jspi() {
+		writeTagSec(ctxt, tagType)
+	}
 	writeGlobalSec(ctxt)
 	writeExportSec(ctxt, ldr, len(hostImports))
 	writeElementSec(ctxt, uint64(len(hostImports)), uint64(len(fns)))
@@ -379,6 +398,27 @@ func writeMemorySec(ctxt *ld.Link, ldr *loader.Loader) {
 	writeSecSize(ctxt, sizeOffset)
 }
 
+// jspi reports whether goroutines run on their own WebAssembly stacks
+// (see runtime/jspi_js.go).
+func jspi() bool {
+	return buildcfg.GOWASM.JSPI && buildcfg.GOOS == "js"
+}
+
+// writeTagSec writes the section that declares the exception tags the
+// runtime throws to unwind a WebAssembly stack: wasm.TagRecover and
+// wasm.TagGoexit, both without values.
+func writeTagSec(ctxt *ld.Link, typ uint32) {
+	sizeOffset := writeSecHeader(ctxt, sectionTag)
+
+	writeUleb128(ctxt.Out, 2) // number of tags
+	for i := 0; i < 2; i++ {
+		ctxt.Out.WriteByte(0x00) // attribute: exception
+		writeUleb128(ctxt.Out, uint64(typ))
+	}
+
+	writeSecSize(ctxt, sizeOffset)
+}
+
 // writeGlobalSec writes the section that declares global variables.
 func writeGlobalSec(ctxt *ld.Link) {
 	sizeOffset := writeSecHeader(ctxt, sectionGlobal)
@@ -447,8 +487,12 @@ func writeExportSec(ctxt *ld.Link, ldr *loader.Loader, lenHostImports int) {
 		ctxt.Out.WriteByte(0x02)      // mem export
 		writeUleb128(ctxt.Out, 0)     // memidx
 	case "js":
-		writeUleb128(ctxt.Out, uint64(4+len(ldr.WasmExports))) // number of exports
-		for _, name := range []string{"run", "resume", "getsp"} {
+		names := []string{"run", "resume", "getsp"}
+		if jspi() {
+			names = []string{"run", "sched", "gorun", "nextg", "callback", "callbackdone", "getsp"}
+		}
+		writeUleb128(ctxt.Out, uint64(len(names)+1+len(ldr.WasmExports))) // number of exports
+		for _, name := range names {
 			s := ldr.Lookup("wasm_export_"+name, 0)
 			if s == 0 {
 				ld.Errorf("export symbol %s not defined", "wasm_export_"+name)
@@ -524,6 +568,9 @@ func writeDataSec(ctxt *ld.Link) {
 
 	// Generate at most this many segments. A higher number of segments gets rejected by some WebAssembly runtimes.
 	const maxNumSegments = 100000
+
+	v, _ := dataSects.LoadAndDelete(ctxt)
+	dataSects, _ := v.([]wasmDataSect)
 
 	var segments []*dataSegment
 	for secIndex, ds := range dataSects {

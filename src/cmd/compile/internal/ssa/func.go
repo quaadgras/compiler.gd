@@ -30,6 +30,10 @@ type Func struct {
 	Blocks []*Block    // unordered set of all basic blocks (note: not indexable by ID)
 	Entry  *Block      // the entry basic block
 
+	// WasmCF is the function's structured control flow, if the wasm
+	// backend is to emit it that way. See wasmStructure.
+	WasmCF *WasmCF
+
 	bid idAlloc // block ID allocator
 	vid idAlloc // value ID allocator
 

@@ -163,10 +163,62 @@ func ginsnop(gd *base.Invocation, pp *objw.Progs) *obj.Prog {
 	return pp.Prog(gd, wasm.ANop)
 }
 
+// ssaMarkMoves runs before the values of each block.
 func ssaMarkMoves(s *ssagen.State, b *ssa.Block) {
+	if cf := b.Func.WasmCF; cf != nil && b == b.Func.Blocks[0] {
+		s.WasmCFProgs = make(map[int32]*obj.Prog)
+		genCF(s, b, cf.Pre)
+	}
+}
+
+// genCF emits structured control flow (see ssa.WasmCF). b is the block
+// whose control value the conditional instructions test.
+func genCF(s *ssagen.State, b *ssa.Block, ops []ssa.WasmCFOp) {
+	branch := func(as obj.As, target int32) {
+		p := s.Prog(as)
+		p.To = obj.Addr{Type: obj.TYPE_BRANCH, Val: s.WasmCFProgs[target]}
+	}
+	for _, op := range ops {
+		switch op.Kind {
+		case ssa.WasmCFBlock:
+			s.WasmCFProgs[op.ID] = s.Prog(wasm.ABlock)
+		case ssa.WasmCFLoop:
+			s.WasmCFProgs[op.ID] = s.Prog(wasm.ALoop)
+		case ssa.WasmCFEnd:
+			s.Prog(wasm.AEnd)
+		case ssa.WasmCFIf:
+			getValue32(s, b.Controls[0])
+			s.Prog(wasm.AIf)
+		case ssa.WasmCFIfNot:
+			getValue32(s, b.Controls[0])
+			s.Prog(wasm.AI32Eqz)
+			s.Prog(wasm.AIf)
+		case ssa.WasmCFBr:
+			branch(wasm.ABr, op.Target)
+		case ssa.WasmCFBrIf:
+			getValue32(s, b.Controls[0])
+			branch(wasm.ABrIf, op.Target)
+		case ssa.WasmCFBrIfNot:
+			getValue32(s, b.Controls[0])
+			s.Prog(wasm.AI32Eqz)
+			branch(wasm.ABrIf, op.Target)
+		case ssa.WasmCFRet:
+			s.Prog(obj.ARET)
+		case ssa.WasmCFExit:
+			s.Prog(obj.AUNDEF)
+		}
+	}
 }
 
 func ssaGenBlock(s *ssagen.State, b, next *ssa.Block) {
+	if cf := b.Func.WasmCF; cf != nil {
+		genCF(s, b, cf.Post[b.ID])
+		if s.OnWasmStackSkipped != 0 {
+			panic("wasm: bad stack")
+		}
+		return
+	}
+
 	switch b.Kind {
 	case ssa.BlockPlain, ssa.BlockDefer:
 		if next != b.Succs[0].Block() {
@@ -237,6 +289,8 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 			p.Pos = v.Pos
 			if v.Op == ssa.OpWasmLoweredTailCall {
 				p.As = obj.ARET
+			} else {
+				noResume(v, p)
 			}
 		} else {
 			getValue64(s, v.Args[0])
@@ -245,6 +299,8 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 			p.Pos = v.Pos
 			if v.Op == ssa.OpWasmLoweredTailCallInter {
 				p.As = obj.ARET
+			} else {
+				noResume(v, p)
 			}
 		}
 
@@ -321,6 +377,18 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		}
 		setReg(s, v.Reg())
 	}
+}
+
+// noResume makes call p of a function with structured control flow one
+// without a resume point. The function is never re-entered after its
+// calls: they do not return, though they may unwind the WebAssembly
+// stack, as a panic does (see ssa.wasmStructure).
+func noResume(v *ssa.Value, p *obj.Prog) {
+	if v.Block.Func.WasmCF == nil {
+		return
+	}
+	p.As = wasm.ACALLNORESUME
+	p.Mark |= wasm.UNWINDS
 }
 
 func ssaGenValueOnStack(s *ssagen.State, v *ssa.Value, extend bool) {

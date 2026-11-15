@@ -686,6 +686,21 @@ func Goexit() {
 	p.goexit = true
 
 	p.start(sys.GetCallerPC(), unsafe.Pointer(sys.GetCallerSP()))
+	if jspi {
+		// A recovered panic that would jump past this Goexit instead
+		// resumes its defer loop (see recovery). On js with JSPI the
+		// recovery is a throw, which jsgoexit catches to run
+		// goexitDefers again.
+		jsgoexit(&p)
+	} else {
+		goexitDefers(&p)
+	}
+
+	goexit1()
+}
+
+// goexitDefers runs the deferred calls for Goexit's panic p.
+func goexitDefers(p *_panic) {
 	for {
 		fn, ok := p.nextDefer()
 		if !ok {
@@ -693,8 +708,6 @@ func Goexit() {
 		}
 		fn()
 	}
-
-	goexit1()
 }
 
 // Call all Error and String methods before freezing the world.
@@ -936,6 +949,12 @@ func (p *_panic) nextDefer() (func(), bool) {
 		}
 
 		if p.recovered {
+			if jspi {
+				// recovery records the frame to resume in
+				// g.sched; that frame catches the throw.
+				recovery(gp)
+				jsthrowrecover()
+			}
 			mcall(recovery) // does not return
 			throw("recovery failed")
 		}
