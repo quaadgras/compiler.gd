@@ -9,11 +9,8 @@
 TEXT _rt0_wasm_js(SB),NOSPLIT,$0
 	I32Const $wasm_export_run(SB)
 	Drop
-	I32Const $wasm_export_resume(SB)
-	Drop
 	I32Const $wasm_export_getsp(SB)
 	Drop
-#ifdef GOWASM_jspi
 	I32Const $wasm_export_sched(SB)
 	Drop
 	I32Const $wasm_export_gorun(SB)
@@ -24,10 +21,9 @@ TEXT _rt0_wasm_js(SB),NOSPLIT,$0
 	Drop
 	I32Const $wasm_export_callbackdone(SB)
 	Drop
-#endif
 
-// wasm_export_run gets called from JavaScript. It initializes the Go runtime and executes Go code until it needs
-// to wait for an event. It does NOT follow the Go ABI. It has two WebAssembly parameters:
+// wasm_export_run gets called from JavaScript. It initializes the Go runtime, which chooses the first goroutine
+// to run (see wasm_export_nextg). It does NOT follow the Go ABI. It has two WebAssembly parameters:
 // R0: argc (i32)
 // R1: argv (i32)
 TEXT wasm_export_run(SB),NOSPLIT,$0
@@ -46,13 +42,8 @@ TEXT wasm_export_run(SB),NOSPLIT,$0
 	I32Const $0 // entry PC_B
 	Call runtime·rt0_go(SB)
 	Drop
-#ifndef GOWASM_jspi
-	Call wasm_pc_f_loop(SB)
-#endif
 
 	Return
-
-#ifdef GOWASM_jspi
 
 // The functions below are called from JavaScript when goroutines run on
 // their own WebAssembly stacks; see jspi_js.go in package runtime.
@@ -189,18 +180,6 @@ TEXT wasm_export_nextg(SB),NOSPLIT,$0
 	I32WrapI64
 	Return
 
-#endif
-
-// wasm_export_resume gets called from JavaScript. It resumes the execution of Go code until it needs to wait for
-// an event.
-TEXT wasm_export_resume(SB),NOSPLIT,$0
-	I32Const $0
-	Call runtime·handleEvent(SB)
-	Drop
-	Call wasm_pc_f_loop(SB)
-
-	Return
-
 // wasm_export_getsp gets called from JavaScript to retrieve the SP.
 TEXT wasm_export_getsp(SB),NOSPLIT,$0
 	Get SP
@@ -209,11 +188,5 @@ TEXT wasm_export_getsp(SB),NOSPLIT,$0
 TEXT runtime·exit(SB), NOSPLIT, $0-4
 	I32Const $0
 	Call runtime·wasmExit(SB)
-#ifdef GOWASM_jspi
 	// Trap: nothing may run after the exit. wasm_exec.js expects it.
 	UNDEF
-#else
-	I32Const $1
-	Set PAUSE
-	RETUNWIND
-#endif

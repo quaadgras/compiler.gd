@@ -391,11 +391,6 @@ func asmArgs(a *Action, p *load.Package) []any {
 		args = append(args, "-D", "GORISCV64_"+cfg.GORISCV64)
 	}
 
-	if cfg.Goarch == "wasm" && buildcfg.GOWASM.JSPI {
-		// gd: temporary, see buildcfg.GOWASM.JSPI.
-		args = append(args, "-D", "GOWASM_jspi")
-	}
-
 	if cfg.Goarch == "arm" {
 		// Define GOARM_value from cfg.GOARM, which can be either a version
 		// like "6", or a version and a FP mode, like "7,hardfloat".

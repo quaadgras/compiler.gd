@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build js && wasm.jspi
+//go:build js && wasm
 
 package runtime
 
@@ -13,10 +13,11 @@ import (
 	"unsafe"
 )
 
-// On js/wasm with JSPI (JavaScript Promise Integration) every goroutine
-// runs on its own WebAssembly stack, which the engine suspends and
-// resumes, instead of the stack being unwound and rewound at every
-// goroutine switch:
+// On js/wasm every goroutine runs on its own WebAssembly stack, which
+// the engine suspends and resumes (JSPI, JavaScript Promise
+// Integration). On wasip1, which has no such thing, the one WebAssembly
+// stack is unwound and rewound at every goroutine switch instead (see
+// asm_wasm.s). Here:
 //
 //   - A goroutine starts in wasm_export_gorun, which wasm_exec.js calls
 //     through WebAssembly.promising.
@@ -63,6 +64,9 @@ func jssched() {
 		throw("jssched: a goroutine is running")
 	}
 	jsbusy()
+	// The timeout beforeIdle scheduled has fired, or will be
+	// scheduled again when the scheduler is next idle.
+	clearIdleTimeout()
 	jsnextg = 0
 	checkTimeouts()
 	schedule()

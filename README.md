@@ -14,7 +14,12 @@ to enable carefully designed programs to run with the GC turned off. Try it!
 
 ### Does it work?
 
-`all.bash` tests are currently passing on `amd64`. Support for `arm64` and `wasm` is roadmapped.
+`all.bash` tests are currently passing on `amd64`, and the standard library tests pass on
+`arm64` and on `js/wasm` (under Node.js).
+
+On `js/wasm` every goroutine runs on its own WebAssembly stack, which needs an engine with
+JavaScript Promise Integration (Chrome 137, Firefox 153, Safari 27, Node.js 24), and functions
+use structured control flow rather than a dispatch loop. `wasip1` is untested.
 
 ### How?
 

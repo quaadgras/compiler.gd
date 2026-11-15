@@ -334,19 +334,10 @@ type gowasmFeatures struct {
 	// Legacy features, now always enabled
 	//SatConv bool
 	//SignExt bool
-
-	// JSPI makes js/wasm run each goroutine on its own engine stack
-	// (JavaScript Promise Integration) instead of unwinding and
-	// rewinding the WebAssembly stack. gd: temporary switch while the
-	// mode is brought up; it will become the only js/wasm mode.
-	JSPI bool
 }
 
 func (f gowasmFeatures) String() string {
 	var flags []string
-	if f.JSPI {
-		flags = append(flags, "jspi")
-	}
 	return strings.Join(flags, ",")
 }
 
@@ -357,8 +348,6 @@ func gowasm() (f gowasmFeatures) {
 			// ignore, always enabled
 		case "signext":
 			// ignore, always enabled
-		case "jspi":
-			f.JSPI = true
 		case "":
 			// ignore
 		default:
@@ -481,9 +470,6 @@ func gogoarchTags() []string {
 		list = append(list, GOARCH+".satconv")
 		// SignExt is always enabled
 		list = append(list, GOARCH+".signext")
-		if GOWASM.JSPI {
-			list = append(list, GOARCH+".jspi")
-		}
 		return list
 	}
 	return nil

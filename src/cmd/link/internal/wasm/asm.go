@@ -74,7 +74,6 @@ var wasmFuncTypes = map[string]*wasmFuncType{
 	"_rt0_wasm_wasip1_lib":     {Params: []byte{}},                                         //
 	"wasm_export__start":       {},                                                         //
 	"wasm_export_run":          {Params: []byte{I32, I32}},                                 // argc, argv
-	"wasm_export_resume":       {Params: []byte{}},                                         //
 	"wasm_export_getsp":        {Results: []byte{I32}},                                     // sp
 	"wasm_export_sched":        {Results: []byte{I32}},                                     // next gp
 	"wasm_export_gorun":        {Params: []byte{I32}, Results: []byte{I32}},                // gp -> next gp
@@ -401,7 +400,7 @@ func writeMemorySec(ctxt *ld.Link, ldr *loader.Loader) {
 // jspi reports whether goroutines run on their own WebAssembly stacks
 // (see runtime/jspi_js.go).
 func jspi() bool {
-	return buildcfg.GOWASM.JSPI && buildcfg.GOOS == "js"
+	return buildcfg.GOOS == "js"
 }
 
 // writeTagSec writes the section that declares the exception tags the
@@ -487,10 +486,8 @@ func writeExportSec(ctxt *ld.Link, ldr *loader.Loader, lenHostImports int) {
 		ctxt.Out.WriteByte(0x02)      // mem export
 		writeUleb128(ctxt.Out, 0)     // memidx
 	case "js":
-		names := []string{"run", "resume", "getsp"}
-		if jspi() {
-			names = []string{"run", "sched", "gorun", "nextg", "callback", "callbackdone", "getsp"}
-		}
+		// inst.exports.* in wasm_exec.js
+		names := []string{"run", "sched", "gorun", "nextg", "callback", "callbackdone", "getsp"}
 		writeUleb128(ctxt.Out, uint64(len(names)+1+len(ldr.WasmExports))) // number of exports
 		for _, name := range names {
 			s := ldr.Lookup("wasm_export_"+name, 0)

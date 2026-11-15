@@ -12,7 +12,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"internal/abi"
-	"internal/buildcfg"
 	"io"
 	"math"
 )
@@ -304,7 +303,9 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 
 	// Introduce resume points for CALL instructions
 	// and collect other explicit resume points.
-	jspi := buildcfg.GOWASM.JSPI && ctxt.Headtype == objabi.Hjs
+	// On js every goroutine has its own WebAssembly stack (JSPI, see
+	// runtime/jspi_js.go), so the stack is never unwound and rewound.
+	jspi := ctxt.Headtype == objabi.Hjs
 	hasDefer := false          // the function calls deferreturn
 	deferReturnPC := int64(-1) // the return address of its first call to it
 	numResumePoints := 0
@@ -1190,7 +1191,6 @@ var notUsePC_B = map[string]bool{
 	"_rt0_wasm_wasip1":         true,
 	"_rt0_wasm_wasip1_lib":     true,
 	"wasm_export_run":          true,
-	"wasm_export_resume":       true,
 	"wasm_export_getsp":        true,
 	"wasm_export_sched":        true,
 	"wasm_export_gorun":        true,
@@ -1251,7 +1251,7 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	// Some functions use a special calling convention.
 	switch s.Name {
 	case "_rt0_wasm_js", "_rt0_wasm_wasip1", "_rt0_wasm_wasip1_lib",
-		"wasm_export_run", "wasm_export_resume", "wasm_export_getsp",
+		"wasm_export_run", "wasm_export_getsp",
 		"wasm_pc_f_loop", "runtime.wasmDiv", "runtime.wasmTruncS", "runtime.wasmTruncU", "memeqbody":
 		varDecls = []*varDecl{}
 		useAssemblyRegMap()

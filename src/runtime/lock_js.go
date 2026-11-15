@@ -7,7 +7,6 @@
 package runtime
 
 import (
-	"internal/runtime/sys"
 	_ "unsafe" // for go:linkname
 )
 
@@ -162,19 +161,6 @@ func checkTimeouts() {
 	}
 }
 
-// events is a stack of calls from JavaScript into Go.
-var events []*event
-
-type event struct {
-	// g was the active goroutine when the call from JavaScript occurred.
-	// It needs to be active when returning to JavaScript.
-	gp *g
-	// returned reports whether the event handler has returned.
-	// When all goroutines are idle and the event handler has returned,
-	// then g gets resumed and returns the execution to JavaScript.
-	returned bool
-}
-
 type timeoutEvent struct {
 	id int32
 	// The time when this timeout will be triggered.
@@ -206,11 +192,10 @@ func (e *timeoutEvent) clear() {
 // The timeout event started by beforeIdle.
 var idleTimeout *timeoutEvent
 
-// beforeIdle gets called by the scheduler if no goroutine is awake.
-// If we are not already handling an event, then we pause for an async event.
-// If an event handler returned, we resume it and it will pause the execution.
-// beforeIdle either returns the specific goroutine to schedule next or
-// indicates with otherReady that some goroutine became ready.
+// beforeIdle gets called by the scheduler if no goroutine is awake. It
+// makes JavaScript run the scheduler again (wasm_export_sched) when the
+// next timer is due. The scheduler then returns to the JavaScript event
+// loop, see jspi_js.go.
 // TODO(drchase): need to understand if write barriers are really okay in this context.
 //
 //go:yeswritebarrierrec
@@ -236,30 +221,7 @@ func beforeIdle(now, pollUntil int64) (gp *g, otherReady bool) {
 		}
 	}
 
-	if jspi {
-		// Every goroutine is suspended; the scheduler returns to
-		// the JavaScript event loop.
-		return nil, false
-	}
-
-	if len(events) == 0 {
-		// TODO: this is the line that requires the yeswritebarrierrec
-		go handleAsyncEvent()
-		return nil, true
-	}
-
-	e := events[len(events)-1]
-	if e.returned {
-		return e.gp, false
-	}
 	return nil, false
-}
-
-var idleStart int64
-
-func handleAsyncEvent() {
-	idleStart = nanotime()
-	pause(sys.GetCallerSP() - 16)
 }
 
 // clearIdleTimeout clears our record of the timeout started by beforeIdle.
@@ -279,36 +241,6 @@ func scheduleTimeoutEvent(ms int64) int32
 //go:wasmimport gojs runtime.clearTimeoutEvent
 func clearTimeoutEvent(id int32)
 
-// handleEvent gets invoked on a call from JavaScript into Go. It calls the event handler of the syscall/js package
-// and then parks the handler goroutine to allow other goroutines to run before giving execution back to JavaScript.
-// When no other goroutine is awake any more, beforeIdle resumes the handler goroutine. Now that the same goroutine
-// is running as was running when the call came in from JavaScript, execution can be safely passed back to JavaScript.
-func handleEvent() {
-	sched.idleTime.Add(nanotime() - idleStart)
-
-	e := &event{
-		gp:       getg(),
-		returned: false,
-	}
-	events = append(events, e)
-
-	if !eventHandler() {
-		// If we did not handle a window event, the idle timeout was triggered, so we can clear it.
-		clearIdleTimeout()
-	}
-
-	// wait until all goroutines are idle
-	e.returned = true
-	gopark(nil, nil, waitReasonZero, traceBlockGeneric, 1)
-
-	events[len(events)-1] = nil
-	events = events[:len(events)-1]
-
-	// return execution to JavaScript
-	idleStart = nanotime()
-	pause(sys.GetCallerSP() - 16)
-}
-
 // eventHandler retrieves and executes handlers for pending JavaScript events.
 // It returns true if an event was handled.
 var eventHandler func() bool
@@ -324,12 +256,8 @@ func setEventHandler(fn func() bool) {
 //
 //go:linkname jsdeadlock syscall/js.deadlock
 func jsdeadlock() {
-	if jspi {
-		// On the system stack, so that every goroutine is listed.
-		systemstack(func() {
-			fatal("all goroutines are asleep - deadlock!")
-		})
-	}
-	// Blocking forever makes the scheduler's deadlock check fire.
-	select {}
+	// On the system stack, so that every goroutine is listed.
+	systemstack(func() {
+		fatal("all goroutines are asleep - deadlock!")
+	})
 }

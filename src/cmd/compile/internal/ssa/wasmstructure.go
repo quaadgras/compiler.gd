@@ -28,13 +28,14 @@ import (
 // f.Blocks reordered to the order the blocks are emitted in.
 //
 // A function qualifies if its control-flow graph is reducible and
-// none of its calls can resume: on js with JSPI no call does (see
-// runtime/jspi_js.go), otherwise only calls that never return, such
-// as panics, do not. Without JSPI that excludes functions with defers,
-// whose deferred calls return and which a recovered panic re-enters at
-// their deferreturn call. With JSPI the function's recovery handler
-// calls deferreturn itself (see cmd/internal/obj/wasm), so the block a
-// BlockDefer goes to on recovery is kept but never run.
+// none of its calls can resume. On js no call does: every goroutine
+// has its own WebAssembly stack (JSPI, see runtime/jspi_js.go). On
+// wasip1 only calls that never return, such as panics, do not, which
+// excludes functions with defers: their deferred calls return, and a
+// recovered panic re-enters them at their deferreturn call. On js the
+// function's recovery handler calls deferreturn itself (see
+// cmd/internal/obj/wasm), so the block a BlockDefer goes to on recovery
+// is kept but never run.
 
 // WasmCF is the structured control flow of a function.
 type WasmCF struct {
@@ -90,7 +91,7 @@ func wasmStructure(f *Func) {
 	if f.Config.arch != "wasm" {
 		return
 	}
-	jspi := buildcfg.GOWASM.JSPI && buildcfg.GOOS == "js"
+	jspi := buildcfg.GOOS == "js"
 
 	for _, b := range f.Blocks {
 		switch b.Kind {

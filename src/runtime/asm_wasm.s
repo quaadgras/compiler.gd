@@ -22,7 +22,7 @@ TEXT runtime·rt0_go(SB), NOSPLIT|NOFRAME|TOPFRAME, $0
 	CALLNORESUME runtime·schedinit(SB)
 	MOVD $runtime·mainPC(SB), 0(SP)
 	CALLNORESUME runtime·newproc(SB)
-#ifdef GOWASM_jspi
+#ifdef GOOS_js
 	CALLNORESUME runtime·mstart(SB) // returns once the scheduler has chosen the first goroutine
 	RET
 #else
@@ -37,8 +37,8 @@ TEXT runtime·mstart(SB),NOSPLIT|TOPFRAME,$0
 DATA  runtime·mainPC+0(SB)/8,$runtime·main(SB)
 GLOBL runtime·mainPC(SB),RODATA,$8
 
-// On js with JSPI, gogo and mcall are in jspi_js_wasm.s.
-#ifndef GOWASM_jspi
+// On js, gogo and mcall are in jspi_js_wasm.s.
+#ifndef GOOS_js
 
 TEXT runtime·gogo(SB), NOSPLIT, $0-8
 	MOVD buf+0(FP), R0
@@ -272,7 +272,7 @@ TEXT runtime·morestack(SB), NOSPLIT, $0-0
 	MOVD g, m_morebuf+gobuf_g(R1)
 
 	// Call newstack on m->g0's stack.
-#ifdef GOWASM_jspi
+#ifdef GOOS_js
 	MOVD g, R3
 	MOVD R2, g
 	MOVD g_sched+gobuf_sp(R2), SP
