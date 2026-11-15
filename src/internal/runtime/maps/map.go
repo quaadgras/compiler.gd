@@ -266,7 +266,10 @@ type Map struct {
 
 // Use 64-bit hash on 64-bit systems, except on Wasm, where we use
 // 32-bit hash (see runtime/hash32.go).
-const Use64BitHash = goarch.PtrSize == 8 && goarch.IsWasm == 0
+// gd: wasm hashes in 64 bits too, unlike stock Go, because the fork's
+// string hashes are 64-bit everywhere (the compiler bakes them into
+// literals, doc/gd/sso-string.md).
+const Use64BitHash = goarch.PtrSize == 8
 
 func depthToShift(depth uint8) uint8 {
 	if !Use64BitHash {

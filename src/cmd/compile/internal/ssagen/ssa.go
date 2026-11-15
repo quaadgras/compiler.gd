@@ -852,25 +852,14 @@ func (s *state) flushPendingHeapAllocations() {
 	size = types.RoundUp(size, align)
 
 	// Convert newObject call to a mallocgc call.
-	// gd Phase G: mallocgc's sig is extended with one outBufK
-	// unsafe.Pointer per pointer result. Since mallocgc returns
-	// unsafe.Pointer, the extended arity is 3 user + 1 outBuf +
-	// mem = 5 values. We build the arg/result type lists and
-	// argslots to match.
-	//
-	// The incoming `call` is the newobject StaticLECall, whose
-	// Args tail may already include Phase G's outBuf nil between
-	// the user args and mem — fetch mem via MemoryArg() rather
-	// than positional indexing so we work for both.
 	unsafePtrTyp := types.Types[types.TUNSAFEPTR]
 	argSize := s.constInt(types.Types[types.TUINTPTR], size)
 	argType := s.constNil(call.Args[0].Type) // a nil *runtime._type
 	argZero := s.constBool(true)             // needZero TODO: false is ok?
 	argMem := call.MemoryArg()
+	// mallocgc and its size-specialized forms return unsafe.Pointer,
+	// so they take no Phase G outBuf (types.RuntimeResultUnextended).
 	argTypes := []*types.Type{argSize.Type, argType.Type, argZero.Type}
-	if types.PhaseGActive {
-		argTypes = append(argTypes, unsafePtrTyp)
-	}
 
 	mallocSym := ir.Syms(s.gd).MallocGC
 	if specialMallocSym := s.specializedMallocSym(size, false); specialMallocSym != nil {
@@ -880,16 +869,9 @@ func (s *state) flushPendingHeapAllocations() {
 		argTypes,
 		[]*types.Type{unsafePtrTyp},
 	))
-	// arg+results size: 1 uintptr + 1 ptr + 1 bool + (1 outBuf if Phase G) + 1 ptr result
-	if types.PhaseGActive {
-		call.AuxInt = 5 * s.config.PtrSize
-		argOutBuf := s.constNil(unsafePtrTyp)
-		call.SetArgs4(argSize, argType, argZero, argOutBuf)
-		call.AddArg(argMem)
-	} else {
-		call.AuxInt = 4 * s.config.PtrSize
-		call.SetArgs4(argSize, argType, argZero, argMem)
-	}
+	// arg+results size: 1 uintptr + 1 ptr + 1 bool + 1 ptr result
+	call.AuxInt = 4 * s.config.PtrSize
+	call.SetArgs4(argSize, argType, argZero, argMem)
 	// TODO: figure out how to pass alignment to runtime
 
 	call.Type = types.NewTuple(types.Types[types.TUNSAFEPTR], types.TypeMem)
@@ -6844,7 +6826,7 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	// rtcall bypasses that layer and builds its own aux directly —
 	// so append matching nil outBufs here to keep caller/callee in
 	// sync. If PhaseGActive is off this is a no-op.
-	if types.PhaseGActive {
+	if name, ok := strings.CutPrefix(fn.Name, "runtime."); types.PhaseGActive && !(ok && types.RuntimeResultUnextended(name)) {
 		for _, r := range results {
 			if r != nil && r.IsPtr() {
 				args = append(args, s.constNil(r))

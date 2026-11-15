@@ -11,7 +11,7 @@
 // those same 64-bit hosts continue to see it and can still emit arm64
 // hashes when GOARCH=arm64.
 
-//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x || wasm
 
 package abi
 

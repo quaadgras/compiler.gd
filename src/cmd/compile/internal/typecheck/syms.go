@@ -77,6 +77,9 @@ func InitRuntime(gd *base.Invocation) {
 		typ := typs[d.typ]
 		switch d.tag {
 		case funcTag:
+			if types.RuntimeResultUnextended(d.name) {
+				typ = types.UnextendedSignature(typ)
+			}
 			importfunc(gd, sym, typ)
 		case varTag:
 			importvar(gd, sym, typ)

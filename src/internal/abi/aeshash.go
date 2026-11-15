@@ -12,7 +12,7 @@
 // types.PtrSize==8 gate), so nothing on those targets bakes an AES
 // hash into rodata that the runtime must reproduce.
 
-//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x || wasm
 
 package abi
 

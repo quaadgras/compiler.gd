@@ -8,7 +8,7 @@
 // path is disabled on 32-bit targets (static-data emits word 1 = 0),
 // no 32-bit consumer of this function remains.
 
-//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x
+//go:build amd64 || arm64 || loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x || wasm
 
 package abi
 

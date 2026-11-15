@@ -141,13 +141,30 @@ var Linkwasm = obj.LinkArch{
 	UnaryDst:   unaryDst,
 }
 
-var (
+// runtimeSyms are the runtime symbols the wasm backend calls. They
+// belong to one obj.Link: the gd fork compiles several packages
+// concurrently in one process, each with its own Link, so they are
+// looked up per Link rather than kept in package variables, where
+// another compile's instinit would overwrite them (a sigpanic call
+// that did not compare equal to this Link's sigpanic was compiled as
+// a no-resume call and trapped when the panic unwound through it).
+type runtimeSyms struct {
 	morestack             *obj.LSym
 	morestackNoCtxt       *obj.LSym
 	sigpanic              *obj.LSym
 	wasm_pc_f_loop_export *obj.LSym
 	runtimeNotInitialized *obj.LSym
-)
+}
+
+func lookupRuntimeSyms(ctxt *obj.Link) runtimeSyms {
+	return runtimeSyms{
+		morestack:             ctxt.Lookup("runtime.morestack"),
+		morestackNoCtxt:       ctxt.Lookup("runtime.morestack_noctxt"),
+		sigpanic:              ctxt.LookupABI("runtime.sigpanic", obj.ABIInternal),
+		wasm_pc_f_loop_export: ctxt.Lookup("wasm_pc_f_loop_export"),
+		runtimeNotInitialized: ctxt.Lookup("runtime.notInitialized"),
+	}
+}
 
 const (
 	/* mark flags */
@@ -163,14 +180,11 @@ const (
 )
 
 func instinit(ctxt *obj.Link) {
-	morestack = ctxt.Lookup("runtime.morestack")
-	morestackNoCtxt = ctxt.Lookup("runtime.morestack_noctxt")
-	sigpanic = ctxt.LookupABI("runtime.sigpanic", obj.ABIInternal)
-	wasm_pc_f_loop_export = ctxt.Lookup("wasm_pc_f_loop_export")
-	runtimeNotInitialized = ctxt.Lookup("runtime.notInitialized")
+	lookupRuntimeSyms(ctxt) // create the symbols up front
 }
 
 func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
+	rt := lookupRuntimeSyms(ctxt)
 	appendp := func(p *obj.Prog, as obj.As, args ...obj.Addr) *obj.Prog {
 		if p.As != obj.ANOP {
 			p2 := obj.Appendp(p, newprog)
@@ -218,7 +232,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		// body is just the code to translate and call the imported function.
 		framesize = 0
 	} else if s.Func().WasmExport != nil {
-		genWasmExportWrapper(s, appendp)
+		genWasmExportWrapper(rt, s, appendp)
 	}
 
 	if framesize > 0 && s.Func().WasmExport == nil { // genWasmExportWrapper has its own prologue generation
@@ -325,7 +339,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		// implicit call, so entering and leaving this section affects the stack trace.
 		if p.As == ACALLNORESUME || p.As == obj.ANOP || p.As == ANop || p.Spadj != 0 || base != prevBase {
 			pc++
-			if p.To.Sym == sigpanic {
+			if p.To.Sym == rt.sigpanic {
 				// The panic stack trace expects the PC at the call of sigpanic,
 				// not the next one. However, runtime.Caller subtracts 1 from the
 				// PC. To make both PC and PC-1 work (have the same line number),
@@ -387,9 +401,9 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		// other architectures.
 		p = appendp(p, obj.ACALL, constAddr(0))
 		if s.Func().Text.From.Sym.NeedCtxt() {
-			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: morestack}
+			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: rt.morestack}
 		} else {
-			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: morestackNoCtxt}
+			p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: rt.morestackNoCtxt}
 		}
 		p = appendp(p, AEnd)
 	}
@@ -457,7 +471,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			p.As = obj.ANOP
 
 			pcAfterCall := call.Link.Pc
-			if call.To.Sym == sigpanic {
+			if call.To.Sym == rt.sigpanic {
 				pcAfterCall-- // sigpanic expects to be called without advancing the pc
 			}
 
@@ -507,7 +521,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			}
 
 			// return value of call is on the top of the stack, indicating whether to unwind the WebAssembly stack
-			if call.As == ACALLNORESUME && call.To.Sym != sigpanic { // sigpanic unwinds the stack, but it never resumes
+			if call.As == ACALLNORESUME && call.To.Sym != rt.sigpanic { // sigpanic unwinds the stack, but it never resumes
 				// trying to unwind WebAssembly stack but call has no resume point, terminate with error
 				p = appendp(p, AIf)
 				p = appendp(p, obj.AUNDEF)
@@ -900,7 +914,7 @@ func genWasmImportWrapper(s *obj.LSym, appendp func(p *obj.Prog, as obj.As, args
 }
 
 // Generate function body for wasmexport wrapper function.
-func genWasmExportWrapper(s *obj.LSym, appendp func(p *obj.Prog, as obj.As, args ...obj.Addr) *obj.Prog) {
+func genWasmExportWrapper(rt runtimeSyms, s *obj.LSym, appendp func(p *obj.Prog, as obj.As, args ...obj.Addr) *obj.Prog) {
 	we := s.Func().WasmExport
 	we.CreateAuxSym()
 	p := s.Func().Text
@@ -917,7 +931,7 @@ func genWasmExportWrapper(s *obj.LSym, appendp func(p *obj.Prog, as obj.As, args
 	p = appendp(p, AGet, regAddr(REG_SP))
 	p = appendp(p, AI32Eqz)
 	p = appendp(p, AIf)
-	p = appendp(p, ACall, obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: runtimeNotInitialized})
+	p = appendp(p, ACall, obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: rt.runtimeNotInitialized})
 	p = appendp(p, AEnd)
 
 	// Now that we've checked the SP, generate the prologue
@@ -987,7 +1001,7 @@ func genWasmExportWrapper(s *obj.LSym, appendp func(p *obj.Prog, as obj.As, args
 	p = appendp(p, AI64Const, constAddr(16))
 	p = appendp(p, AI64ShrU)
 	p = appendp(p, AI32WrapI64)
-	p = appendp(p, ACall, obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: wasm_pc_f_loop_export})
+	p = appendp(p, ACall, obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: rt.wasm_pc_f_loop_export})
 	p = appendp(p, AEnd)
 
 	// Load result

@@ -240,8 +240,13 @@ func poll_runtime_isPollServerDescriptor(fd uintptr) bool {
 	return netpollIsPollDescriptor(fd)
 }
 
+// gd Phase G: the descriptor is returned as uintptr, as
+// internal/poll declares it, so neither side takes an outBuf (a
+// *pollDesc result would add one on this side only, shifting results
+// on wasm). pollDescs are persistentalloc'd, never freed by the GC.
+//
 //go:linkname poll_runtime_pollOpen internal/poll.runtime_pollOpen
-func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
+func poll_runtime_pollOpen(fd uintptr) (uintptr, int) {
 	pd := pollcache.alloc()
 	lock(&pd.lock)
 	wg := pd.wg.Load()
@@ -272,9 +277,9 @@ func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 	errno := netpollopen(fd, pd)
 	if errno != 0 {
 		pollcache.free(pd)
-		return nil, int(errno)
+		return 0, int(errno)
 	}
-	return pd, 0
+	return uintptr(unsafe.Pointer(pd)), 0
 }
 
 //go:linkname poll_runtime_pollClose internal/poll.runtime_pollClose

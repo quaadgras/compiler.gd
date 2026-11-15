@@ -274,3 +274,41 @@ func StockifyCgoSig(t *Type) *Type {
 	results := t.Results()
 	return NewSignatureAsIs(recv, userParams, results, false)
 }
+
+// RuntimeResultUnextended reports whether the runtime function name
+// (without the "runtime." prefix) is declared by the runtime with an
+// unsafe.Pointer result, while the compiler's builtin declaration (or
+// an rtcall site) types that result as *T. Phase G extends only *T
+// results, so the runtime's own compile of these functions takes no
+// outBuf. Callers must not pass one either: on register ABIs the
+// extra argument lands in an unused register and is harmless, but on
+// stack ABIs (wasm) it shifts every result slot.
+//
+// TestBuiltinOutBufMatchesRuntime keeps this list in sync with the
+// runtime source.
+func RuntimeResultUnextended(name string) bool {
+	switch name {
+	case "newobject", "maybeInPlace",
+		"mapaccess1", "mapaccess1_fast32", "mapaccess1_fast64", "mapaccess1_faststr", "mapaccess1_fat",
+		"mapaccess2", "mapaccess2_fast32", "mapaccess2_fast64", "mapaccess2_faststr", "mapaccess2_fat",
+		"mapassign", "mapassign_fast32", "mapassign_fast32ptr", "mapassign_fast64", "mapassign_fast64ptr", "mapassign_faststr",
+		"moveSlice", "moveSliceNoCap", "moveSliceNoScan", "moveSliceNoCapNoScan":
+		return true
+	}
+	// Size-specialized mallocs (mallocgcSmallScanNoHeaderSC1, ...).
+	return strings.HasPrefix(name, "mallocgc")
+}
+
+// UnextendedSignature returns t without its Phase G outBuf params.
+func UnextendedSignature(t *Type) *Type {
+	if !t.GdReturnOutBuf() {
+		return t
+	}
+	var params []*Field
+	for _, p := range t.Params() {
+		if !p.IsOutBufParam() {
+			params = append(params, p)
+		}
+	}
+	return NewSignatureAsIs(nil, params, t.Results(), false)
+}

@@ -59,9 +59,13 @@ type waitq struct {
 	last  *sudog
 }
 
+// gd Phase G: the result is unsafe.Pointer, not *T, so reflect_makechan's sig takes
+// no outBuf and matches the linkname puller's declaration (a *T result
+// would add one on this side only, shifting results on wasm).
+//
 //go:linkname reflect_makechan reflect.makechan
-func reflect_makechan(t *chantype, size int) *hchan {
-	return (*hchan)(makechan(t, size))
+func reflect_makechan(t *chantype, size int) unsafe.Pointer {
+	return makechan(t, size)
 }
 
 // gd Phase G: makechan and makechan64 return unsafe.Pointer (TUNSAFEPTR),

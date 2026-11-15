@@ -206,15 +206,19 @@ func mapclear(t *abi.MapType, m *maps.Map) {
 // Do not remove or change the type signature.
 // See go.dev/issue/67401.
 //
+// gd Phase G: the result is unsafe.Pointer, not *T, so reflect_makemap's sig takes
+// no outBuf and matches the linkname puller's declaration (a *T result
+// would add one on this side only, shifting results on wasm).
+//
 //go:linkname reflect_makemap reflect.makemap
-func reflect_makemap(t *abi.MapType, cap int) *maps.Map {
+func reflect_makemap(t *abi.MapType, cap int) unsafe.Pointer {
 	// Check invariants and reflects math.
 	if t.Key.Equal == nil {
 		throw("runtime.reflect_makemap: unsupported map key type")
 	}
 	// TODO: other checks
 
-	return (*maps.Map)(makemap(t, cap, nil))
+	return makemap(t, cap, nil)
 }
 
 // reflect_mapaccess is for package reflect,
