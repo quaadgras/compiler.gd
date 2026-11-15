@@ -168,7 +168,7 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 // The result is a nil *gcSizes pointer (which is not a valid types.Sizes)
 // if a compiler/architecture pair is not known.
 func gcSizesFor(compiler, arch string) *gcSizes {
-	if compiler != "gc" {
+	if compiler != "gc" && compiler != "gd" { // gd: these sizes are the fork's layouts
 		return nil
 	}
 	return gcArchSizes[arch]

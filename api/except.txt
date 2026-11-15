@@ -610,3 +610,4 @@ pkg syscall (openbsd-386), const ELAST = 91
 pkg syscall (openbsd-386-cgo), const ELAST = 91
 pkg syscall (openbsd-amd64), const ELAST = 91
 pkg syscall (openbsd-amd64-cgo), const ELAST = 91
+pkg runtime, const Compiler = "gc"

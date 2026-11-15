@@ -28,6 +28,11 @@ func notOK() {
 func checkString(desc, s string) {
 	p1 := *(*uintptr)(unsafe.Pointer(&s))
 	p2 := *(*uintptr)(unsafe.Pointer(&hello))
+	if p1 == 0 && len(s) == 0 {
+		// gd: an empty string is canonical, with a nil word 0, so it
+		// cannot point past the end of hello either.
+		return
+	}
 	if p1-p2 >= 5 {
 		notOK()
 		println("string", desc, "has invalid base")

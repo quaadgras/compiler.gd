@@ -1,0 +1,2 @@
+# compiler.gd: runtime.Compiler names the fork (see src/runtime/compiler_gd.go).
+pkg runtime, const Compiler = "gd"

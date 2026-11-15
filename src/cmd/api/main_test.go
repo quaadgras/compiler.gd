@@ -1150,7 +1150,7 @@ func (w *Walker) emitf(format string, args ...any) {
 
 func needApproval(filename string) bool {
 	name := filepath.Base(filename)
-	if name == "go1.txt" {
+	if name == "go1.txt" || name == "go1-gd.txt" { // go1-gd.txt: the compiler.gd fork's own API
 		return false
 	}
 	minor := strings.TrimSuffix(strings.TrimPrefix(name, "go1."), ".txt")
