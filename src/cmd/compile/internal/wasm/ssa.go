@@ -193,6 +193,9 @@ func genCF(s *ssagen.State, b *ssa.Block, ops []ssa.WasmCFOp) {
 			getValue32(s, b.Controls[0])
 			s.Prog(wasm.AI32Eqz)
 			s.Prog(wasm.AIf)
+		case ssa.WasmCFIfNever:
+			i32Const(s, 0)
+			s.Prog(wasm.AIf)
 		case ssa.WasmCFBr:
 			branch(wasm.ABr, op.Target)
 		case ssa.WasmCFBrIf:
@@ -270,12 +273,14 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 	switch v.Op {
 	case ssa.OpWasmLoweredStaticCall, ssa.OpWasmLoweredClosureCall, ssa.OpWasmLoweredInterCall, ssa.OpWasmLoweredTailCall, ssa.OpWasmLoweredTailCallInter:
 		s.PrepareCall(v)
-		if call, ok := v.Aux.(*ssa.AuxCall); ok && call.Fn == ir.Syms(gd).Deferreturn {
+		if call, ok := v.Aux.(*ssa.AuxCall); ok && call.Fn == ir.Syms(gd).Deferreturn && v.Block.Func.WasmCF == nil {
 			// The runtime needs to inject jumps to
 			// deferreturn calls using the address in
 			// _func.deferreturn. Hence, the call to
 			// deferreturn must itself be a resumption
 			// point so it gets a target PC.
+			// (With structured control flow, the function's
+			// recovery handler calls deferreturn instead.)
 			s.Prog(wasm.ARESUMEPOINT)
 		}
 		if v.Op == ssa.OpWasmLoweredClosureCall {
@@ -337,16 +342,16 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		setReg(s, v.Reg0()) // move result from wasm stack to register local
 
 	case ssa.OpWasmI64Store8, ssa.OpWasmI64Store16, ssa.OpWasmI64Store32, ssa.OpWasmI64Store, ssa.OpWasmF32Store, ssa.OpWasmF64Store:
-		getValue32(s, v.Args[0])
+		off := getAddr32(s, v.Args[0], v.AuxInt, true)
 		getValue64(s, v.Args[1])
 		p := s.Prog(v.Op.Asm())
-		p.To = obj.Addr{Type: obj.TYPE_CONST, Offset: v.AuxInt}
+		p.To = off
 
 	case ssa.OpWasmV128Store:
-		getValue32(s, v.Args[0])
+		off := getAddr32(s, v.Args[0], v.AuxInt, true)
 		getValue128(s, v.Args[1])
 		p := s.Prog(v.Op.Asm())
-		p.To = obj.Addr{Type: obj.TYPE_CONST, Offset: v.AuxInt}
+		p.To = off
 
 	case ssa.OpStoreReg:
 		getReg(s, wasm.REG_SP)
@@ -465,9 +470,9 @@ func ssaGenValueOnStack(s *ssagen.State, v *ssa.Value, extend bool) {
 
 	case ssa.OpWasmI64Load8U, ssa.OpWasmI64Load8S, ssa.OpWasmI64Load16U, ssa.OpWasmI64Load16S,
 		ssa.OpWasmI64Load32U, ssa.OpWasmI64Load32S, ssa.OpWasmI64Load, ssa.OpWasmF32Load, ssa.OpWasmF64Load, ssa.OpWasmV128Load:
-		getValue32(s, v.Args[0])
+		off := getAddr32(s, v.Args[0], v.AuxInt, false)
 		p := s.Prog(v.Op.Asm())
-		p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: v.AuxInt}
+		p.From = off
 
 	case ssa.OpWasmI64Eqz:
 		getValue64(s, v.Args[0])
@@ -570,6 +575,48 @@ func isAlready32(v *ssa.Value) bool {
 	default:
 		return false
 	}
+}
+
+// getAddr32 pushes the i32 base of the address v+off for a load or a
+// store and returns the instruction's offset operand.
+//
+// An address that is generated here, at its use, and is a constant
+// offset from SP or a global needs no 64-bit arithmetic: the base is
+// SP, or the symbol's address, and the offset goes in the instruction.
+// For a local variable or parameter the operand is the variable's
+// memory operand, off(SP) once the assembler has added its position in
+// the frame: a load then needs no base pushed (the assembler pushes SP),
+// a store has it pushed here, before the value.
+func getAddr32(s *ssagen.State, v *ssa.Value, off int64, store bool) obj.Addr {
+	if v.OnWasmStack && v.Op == ssa.OpWasmLoweredAddr {
+		switch aux := v.Aux.(type) {
+		case nil: // AuxInt(SP)
+			if base := v.Args[0]; base.Op == ssa.OpSP && off+v.AuxInt >= 0 {
+				s.OnWasmStackSkipped--
+				getReg(s, wasm.REG_SP)
+				return obj.Addr{Type: obj.TYPE_CONST, Offset: off + v.AuxInt}
+			}
+		case *ir.Name: // a variable in the frame
+			if base := v.Args[0]; base.Reg() == wasm.REG_SP {
+				s.OnWasmStackSkipped--
+				if store {
+					getReg(s, wasm.REG_SP)
+				}
+				a := obj.Addr{Type: obj.TYPE_MEM, Reg: wasm.REG_SP, Offset: off}
+				ssagen.AddAux(&a, v)
+				return a
+			}
+		case *obj.LSym: // a global
+			if off >= 0 {
+				s.OnWasmStackSkipped--
+				p := s.Prog(wasm.AI32Const)
+				p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: aux, Offset: v.AuxInt}
+				return obj.Addr{Type: obj.TYPE_CONST, Offset: off}
+			}
+		}
+	}
+	getValue32(s, v)
+	return obj.Addr{Type: obj.TYPE_CONST, Offset: off}
 }
 
 func getValue32(s *ssagen.State, v *ssa.Value) {

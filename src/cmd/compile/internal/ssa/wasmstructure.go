@@ -30,8 +30,11 @@ import (
 // A function qualifies if its control-flow graph is reducible and
 // none of its calls can resume: on js with JSPI no call does (see
 // runtime/jspi_js.go), otherwise only calls that never return, such
-// as panics, do not. Functions with defers are left out for now: a
-// recovered panic re-enters them at their deferreturn call.
+// as panics, do not. Without JSPI that excludes functions with defers,
+// whose deferred calls return and which a recovered panic re-enters at
+// their deferreturn call. With JSPI the function's recovery handler
+// calls deferreturn itself (see cmd/internal/obj/wasm), so the block a
+// BlockDefer goes to on recovery is kept but never run.
 
 // WasmCF is the structured control flow of a function.
 type WasmCF struct {
@@ -60,6 +63,7 @@ const (
 	WasmCFEnd                       // end of a block, loop or if
 	WasmCFIf                        // if the block's control value is true
 	WasmCFIfNot                     // if the block's control value is false
+	WasmCFIfNever                   // if false: the code is kept but not run
 	WasmCFBr                        // br Target
 	WasmCFBrIf                      // br Target if the control value is true
 	WasmCFBrIfNot                   // br Target if the control value is false
@@ -91,8 +95,12 @@ func wasmStructure(f *Func) {
 	for _, b := range f.Blocks {
 		switch b.Kind {
 		case BlockPlain, BlockIf, BlockRet, BlockRetJmp, BlockExit:
+		case BlockDefer:
+			if !jspi {
+				return
+			}
 		default:
-			return // BlockDefer: the function has defers
+			return
 		}
 		for _, v := range b.Values {
 			switch v.Op {
@@ -101,13 +109,13 @@ func wasmStructure(f *Func) {
 				if !wasmNoResume(v, jspi) {
 					return
 				}
-				if call, ok := v.Aux.(*AuxCall); ok && call.Fn != nil && call.Fn.Name == "runtime.deferreturn" {
+				if call, ok := v.Aux.(*AuxCall); ok && call.Fn != nil && call.Fn.Name == "runtime.deferreturn" && !jspi {
 					return
 				}
 			}
 		}
 	}
-	if f.fe.Func().HasDefer() {
+	if f.fe.Func().HasDefer() && !jspi {
 		return
 	}
 
@@ -221,6 +229,13 @@ func wasmStructure(f *Func) {
 		out = &cf.Post[b.ID]
 		switch b.Kind {
 		case BlockPlain:
+			branch(b, b.Succs[0].Block())
+		case BlockDefer:
+			// Succs[1] is where the runtime would resume the
+			// function after a recovered panic.
+			begin(WasmCFIfNever)
+			branch(b, b.Succs[1].Block())
+			end()
 			branch(b, b.Succs[0].Block())
 		case BlockIf:
 			yes, no := b.Succs[0].Block(), b.Succs[1].Block()

@@ -305,7 +305,8 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	// Introduce resume points for CALL instructions
 	// and collect other explicit resume points.
 	jspi := buildcfg.GOWASM.JSPI && ctxt.Headtype == objabi.Hjs
-	hasDefer := false // the function calls deferreturn
+	hasDefer := false          // the function calls deferreturn
+	deferReturnPC := int64(-1) // the return address of its first call to it
 	numResumePoints := 0
 	explicitBlockDepth := 0
 	pc := int64(0) // pc is only incremented when necessary, this avoids bloat of the BrTable instruction
@@ -336,6 +337,11 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			}
 			numResumePoints++
 			pc++
+
+		case ACALLNORESUME:
+			if p.To.Sym == rt.deferreturn {
+				hasDefer = true
+			}
 
 		case obj.ACALL:
 			if p.To.Sym == rt.deferreturn {
@@ -497,6 +503,9 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			if call.To.Sym == rt.sigpanic {
 				pcAfterCall-- // sigpanic expects to be called without advancing the pc
 			}
+			if call.To.Sym == rt.deferreturn && deferReturnPC < 0 {
+				deferReturnPC = pcAfterCall
+			}
 
 			// SP -= 8
 			p = appendp(p, AGet, regAddr(REG_SP))
@@ -657,6 +666,17 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 				p = appendp(p, as, constAddr(from.Offset))
 			}
 
+		case AI32Store, AI64Store, AF32Store, AF64Store, AI32Store8, AI32Store16,
+			AI64Store8, AI64Store16, AI64Store32, AV128Store:
+			// The compiler stores to a variable in the frame with its
+			// memory operand, having pushed SP as the base itself.
+			if p.To.Type == obj.TYPE_MEM {
+				if p.To.Reg != REG_SP {
+					panic("bad base register for *Store")
+				}
+				p.To = constAddr(p.To.Offset)
+			}
+
 		case AMOVB, AMOVH, AMOVW, AMOVD:
 			mov := *p
 			p.As = obj.ANOP
@@ -750,14 +770,14 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		}
 	}
 
-	// On js a recovered panic throws the recover tag (runtime.recovery).
-	// A function with defers catches it: if the recovery targets this
-	// frame, it restores SP and re-enters at the resume point before
-	// its deferreturn call (g.sched.pc), else it throws again. The
+	// On js with JSPI a recovered panic throws the recover tag
+	// (runtime.recovery). A function with defers catches it: if the
+	// recovery targets this frame, it restores SP, calls deferreturn as
+	// if from its first deferreturn call, and returns to its caller,
+	// whose WebAssembly frame is still there; else it throws again. The
 	// frame identifies itself by its offset from the top of the
 	// goroutine stack, kept in a local, since the stack may have moved.
 	catchRecover := jspi && hasDefer && pFrame != nil
-	var pAgain *obj.Prog
 	if catchRecover {
 		// DEFERBASE = g.stack.hi - SP
 		p := pFrame
@@ -780,8 +800,6 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	{
 		p := s.Func().Text
 		if catchRecover {
-			p = appendp(p, ALoop) // re-entry after a recovery
-			pAgain = p
 			p = appendp(p, ABlock) // the catch clause branches here
 			p = appendp(p, ATRYCATCH, constAddr(TagRecover))
 		}
@@ -822,7 +840,6 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			p = appendp(p, AEnd) // end of the block the catch clause targets
 
 			schedSP := int64(ctxt.Arch.PtrSize) * 7 // g.sched.sp, see runtime.g
-			schedPC := int64(ctxt.Arch.PtrSize) * 8 // g.sched.pc
 
 			// if g.stack.hi - g.sched.sp != DEFERBASE { throw again }
 			p = appendp(p, AGet, regAddr(REGG))
@@ -838,18 +855,37 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			p = appendp(p, ATHROW, constAddr(TagRecover))
 			p = appendp(p, AEnd)
 
-			// SP = g.sched.sp; PC_B = low 16 bits of g.sched.pc
+			// SP = g.sched.sp
 			p = appendp(p, AGet, regAddr(REGG))
 			p = appendp(p, AI32WrapI64)
 			p = appendp(p, AI32Load, constAddr(schedSP))
 			p = appendp(p, ASet, regAddr(REG_SP))
-			p = appendp(p, AGet, regAddr(REGG))
-			p = appendp(p, AI32WrapI64)
-			p = appendp(p, AI32Load16U, constAddr(schedPC))
-			p = appendp(p, ASet, regAddr(REG_PC_B))
-			p = appendp(p, ABr, obj.Addr{Type: obj.TYPE_BRANCH, Val: pAgain})
-			p = appendp(p, AEnd) // end of the re-entry loop
-			p = appendp(p, obj.AUNDEF)
+
+			// CALL deferreturn, with the return address of the
+			// function's first call to it.
+			p = appendp(p, AGet, regAddr(REG_SP))
+			p = appendp(p, AI32Const, constAddr(8))
+			p = appendp(p, AI32Sub)
+			p = appendp(p, ASet, regAddr(REG_SP))
+			p = appendp(p, AGet, regAddr(REG_SP))
+			p = appendp(p, AI64Const, obj.Addr{
+				Type:   obj.TYPE_ADDR,
+				Name:   obj.NAME_EXTERN,
+				Sym:    s,
+				Offset: deferReturnPC,
+			})
+			p = appendp(p, AI64Store, constAddr(0))
+			p = appendp(p, AI32Const, constAddr(0))
+			p = appendp(p, ACall, obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: rt.deferreturn})
+			p = appendp(p, ADrop)
+
+			// RET
+			p = appendp(p, AGet, regAddr(REG_SP))
+			p = appendp(p, AI32Const, constAddr(framesize+8))
+			p = appendp(p, AI32Add)
+			p = appendp(p, ASet, regAddr(REG_SP))
+			p = appendp(p, AI32Const, constAddr(0))
+			p = appendp(p, AReturn)
 		}
 	}
 
