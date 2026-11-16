@@ -2161,6 +2161,7 @@ func (g *gcGen) zeroObject(t *types.Type) *obj.LSym {
 
 // runtime calls the function of the runtime named.
 func (g *gcGen) runtime(name string) {
+	g.panicLine(name)
 	p := g.prog(obj.ACALL)
 	p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: g.ctxt.LookupABI(name, obj.ABIInternal)}
 }
@@ -2250,9 +2251,24 @@ func (g *gcGen) zeroElemArg(t *ssa.Value) {
 	g.runtime("runtime.zeroelem")
 }
 
+// panicLine notes, before a call of one of the runtime's functions that
+// panic for the compiler (runtime.panicnil, runtime.panicIndex), the
+// line of the code that fails: see wasm.GCGlobalPanicLine.
+func (g *gcGen) panicLine(name string) {
+	if !strings.HasPrefix(name, "runtime.panic") && !strings.HasPrefix(name, "runtime.goPanic") || !g.pos.IsKnown() {
+		return
+	}
+	p := g.prog(wasm.AI32Const)
+	p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: int64(g.ctxt.InnermostPos(g.pos).RelLine())}
+	g.global(wasm.AGlobalSet, wasm.GCGlobalPanicLine)
+}
+
 func (g *gcGen) call(v *ssa.Value) {
 	aux := v.Aux.(*ssa.AuxCall)
 	args := v.Args[:len(v.Args)-1]
+	if aux.Fn != nil && v.Op == ssa.OpWasmLoweredStaticCall {
+		g.panicLine(aux.Fn.Name)
+	}
 	switch v.Op {
 	case ssa.OpWasmLoweredStaticCall:
 		if aux.Fn == nil {

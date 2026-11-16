@@ -151,9 +151,16 @@ const (
 	// stores its argument in: a use that the engine cannot drop, so
 	// the object is not collected before.
 	GCGlobalKeep = 4
+	// GCGlobalPanicLine is the global (an i32) that holds the line of
+	// the last panic the compiler inserted (a nil dereference, an
+	// index out of range): set before the call of the runtime's
+	// function, it is exact where the engine's position for the frame
+	// may not be (V8's, when it has inlined that function). The host
+	// reads it: it is exported as "panicline".
+	GCGlobalPanicLine = 5
 	// GCGlobals is the number of globals before those of the data
 	// symbols.
-	GCGlobals = 5
+	GCGlobals = 6
 
 	// GCStackRedZone is the room below GCGlobalStackLo that the
 	// runtime switches segments in.
