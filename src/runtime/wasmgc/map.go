@@ -46,6 +46,7 @@ const (
 
 // A mapstore holds the keys or the elements of a table.
 type mapstore struct {
+	typ  *abi.Type
 	size uintptr
 	mem  unsafe.Pointer // without pointers: the block of linear memory
 	addr uintptr        // and its address
@@ -53,7 +54,7 @@ type mapstore struct {
 }
 
 func newmapstore(t *abi.Type, n int) mapstore {
-	s := mapstore{size: t.Size_}
+	s := mapstore{typ: t, size: t.Size_}
 	if t.Pointers() {
 		s.objs = newobjarray(n)
 	} else {
@@ -74,6 +75,16 @@ func (s *mapstore) ptr(i int) unsafe.Pointer {
 // put sets entry i to a copy of what p points to.
 func (s *mapstore) put(i int, p unsafe.Pointer) {
 	if s.objs != nil {
+		if boxobj(p) != p {
+			// A pointer into an object (a field, say: m[a.f] = v):
+			// gcclone copies whole objects and would return it, and
+			// the entry would change with the object.
+			o := newobjectT(s.typ)
+			memstatsMallocs-- // (a copy, as gcclone's)
+			typedmemmove(s.typ, o, p)
+			objarrayset(s.objs, i, o)
+			return
+		}
 		objarrayset(s.objs, i, gcclone(p))
 		return
 	}

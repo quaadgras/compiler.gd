@@ -18,7 +18,7 @@
     1  run: panic: ERRORS
     1  run: panic: never GC'd
     1  run: BUG: defer called from ?:0, want issue5856.go:28
-    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:103
+    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:120
     1  run: illegal cast in main.testN
 
 PASS 235.go 
@@ -641,7 +641,7 @@ PASS fixedbugs/issue7690.go
 PASS fixedbugs/issue7740.go 
 PASS fixedbugs/issue77613.go 
 PASS fixedbugs/issue77779.go 
-FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:103
+FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:120
 PASS fixedbugs/issue78262.go 
 PASS fixedbugs/issue78295.go 
 PASS fixedbugs/issue78303_1.go 
