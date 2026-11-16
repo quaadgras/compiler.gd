@@ -8,6 +8,7 @@ package reflect
 
 import (
 	"internal/abi"
+	"internal/runtime/sys"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -85,6 +86,10 @@ func callWasmGC(op string, t *funcType, fn unsafe.Pointer, rcvr Value, rcvrtype 
 	} else {
 		ctxt = fn
 	}
+	if gcPassDeferred {
+		gcPassDeferred = false
+		passDeferredCall()
+	}
 	ok := gcreflectcall(&t.Type, code, ctxt, unsafe.Pointer(unsafe.SliceData(args)), unsafe.Pointer(unsafe.SliceData(results)), rp, flags)
 	if !ok {
 		// A func type made at run time: the adapter of one of the
@@ -129,6 +134,10 @@ func makeFuncWasmGC(t *abi.Type, ftyp *funcType, fn func([]Value) []Value) Value
 // makeFuncCallGC is what a function that MakeFunc made calls, with the
 // pointers to its arguments: it returns the pointers to its results.
 func makeFuncCallGC(ctxt *makeFuncImpl, args unsafe.Pointer) unsafe.Pointer {
+	// (Whether a panic is running this function as a deferred call:
+	// a method value passes that on to its method. See gcDeferred.)
+	saved := gcDeferred
+	gcDeferred = deferredCall(sys.GetCallerSP())
 	ftyp := ctxt.ftyp
 	nin := ftyp.NumIn()
 	ptrs := unsafe.Slice((*unsafe.Pointer)(args), nin)
@@ -137,7 +146,12 @@ func makeFuncCallGC(ctxt *makeFuncImpl, args unsafe.Pointer) unsafe.Pointer {
 		t := ftyp.In(i)
 		in[i] = Value{typ_: t, ptr: ptrs[i], flag: flagIndir | flag(t.Kind())}
 	}
+	if gcDeferred {
+		// The function recovers as the deferred call it is for.
+		deferHere()
+	}
 	out := ctxt.fn(in)
+	gcDeferred = saved
 	nout := ftyp.NumOut()
 	if len(out) != nout {
 		panic("reflect: wrong return count from function created by MakeFunc")
@@ -328,3 +342,14 @@ func callDirect(t *funcType, impl *makeFuncImpl, in []Value) []Value {
 	}
 	return ret
 }
+
+// gcDeferred is whether the function MakeFunc made that is running was
+// called by a panic, as a deferred call; gcPassDeferred, whether the
+// next call of callWasmGC is the method of a method value that was: a
+// recover in the method then recovers, as it does when the method
+// value is the compiler's.
+var gcDeferred, gcPassDeferred bool
+
+func deferredCall(sp uintptr) bool
+func passDeferredCall()
+func deferHere()

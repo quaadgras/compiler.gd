@@ -118,6 +118,8 @@ FINALIZERS = {
     'deferfin.go', 'tinyfin.go', 'stackobj.go', 'stackobj3.go',
     'fixedbugs/issue27518b.go', 'fixedbugs/issue32477.go',
     'fixedbugs/issue46725.go', 'fixedbugs/issue5493.go', 'fixedbugs/issue54343.go',
+    'fixedbugs/issue24491a.go', 'fixedbugs/issue24491b.go', 'fixedbugs/issue45045.go',
+    'fixedbugs/issue57823.go', 'mallocfin.go', 'finprofiled.go',
 }
 
 

@@ -28,3 +28,6 @@ func linearType[T any](t *T) *T { return t }
 func gcMethodFunc(t *rtype, i int, tfn unsafe.Pointer) unsafe.Pointer { panic("unreachable") }
 
 func gcTypeEqual(t *abi.Type, p, q unsafe.Pointer) bool { return t.Equal(p, q) }
+
+// (See functype_wasmgc.go.)
+var gcDeferred, gcPassDeferred bool

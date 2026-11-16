@@ -713,6 +713,12 @@ func gcmakefunc(t *_type) uintptr
 
 //go:linkname reflect_gcreflectcall reflect.gcreflectcall
 func reflect_gcreflectcall(t *_type, code uintptr, ctxt, args, results, rcvr unsafe.Pointer, flags int) bool {
+	if p := curg.panicking; p != nil && p.passed {
+		// The method of a deferred method value: its caller's frame
+		// ends here (see reflect_passDeferredCall).
+		p.passed = false
+		p.argp = linsp()
+	}
 	return gcreflectcall(t, code, ctxt, args, results, rcvr, flags)
 }
 

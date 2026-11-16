@@ -114,6 +114,7 @@ func makeMethodValue(op string, v Value) Value {
 			callOp = "CallSlice"
 		}
 		return makeFuncWasmGC(v.Type().common(), (*funcType)(unsafe.Pointer(v.Type().common())), func(args []Value) []Value {
+			gcPassDeferred = gcDeferred
 			return m.call(callOp, args)
 		})
 	}

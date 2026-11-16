@@ -6,6 +6,11 @@
 
 package runtime
 
+import (
+	"internal/runtime/sys"
+	_ "unsafe" // for go:linkname
+)
+
 // Defer, panic and recover.
 //
 // There is no stack for the runtime to walk. A function that defers
@@ -34,6 +39,7 @@ type _panic struct {
 	goexit    bool    // it is Goexit, which recover does not stop
 	sp        uintptr // the stack in linear memory when it started
 	argp      uintptr // the stack when the deferred call it runs was made
+	passed    bool    // reflect is calling the method of a deferred method value: see reflect_passDeferredCall
 	link      *_panic
 }
 
@@ -90,6 +96,7 @@ func gopanic(e any) {
 		}
 		gp.deferred = d.link
 		p.argp = linsp()
+		p.passed = false
 		d.fn()
 		if p.recovered {
 			// This panic is over, and so are the earlier ones that
@@ -114,7 +121,10 @@ func gopanic(e any) {
 // begins at fp: it recovers only if that caller is the panic.
 func gorecoverfp(fp uintptr) any {
 	p := curg.panicking
-	if p == nil || p.recovered || p.goexit || fp != p.argp {
+	if p == nil || p.recovered || p.goexit {
+		return nil
+	}
+	if fp != p.argp {
 		return nil
 	}
 	p.recovered = true
@@ -369,4 +379,40 @@ func godebugPanicNil() bool {
 		}
 	}
 	return true
+}
+
+// A method value that reflect made (Value.Method(i).Interface()) may be
+// a deferred call: the method it calls recovers as if the panic had
+// called it, though reflect's functions are in between (as in Go's
+// reflect.methodValueCall, which is a wrapper).
+
+// reflect_deferredCall reports whether the function whose caller's
+// frame ends at sp was called by the panic, as a deferred call.
+//
+//go:linkname reflect_deferredCall reflect.deferredCall
+func reflect_deferredCall(sp uintptr) bool {
+	p := curg.panicking
+	return p != nil && !p.recovered && !p.goexit && p.argp == sp
+}
+
+// reflect_passDeferredCall makes the next function reflect calls (see
+// reflect_gcreflectcall) the deferred call of the panic.
+//
+//go:linkname reflect_passDeferredCall reflect.passDeferredCall
+func reflect_passDeferredCall() {
+	if p := curg.panicking; p != nil {
+		p.passed = true
+	}
+}
+
+// reflect_deferHere makes the next function its caller calls the
+// deferred call of the panic: the function of a deferred function that
+// reflect.MakeFunc made.
+//
+//go:linkname reflect_deferHere reflect.deferHere
+//go:noinline
+func reflect_deferHere() {
+	if p := curg.panicking; p != nil {
+		p.argp = sys.GetCallerSP()
+	}
 }
