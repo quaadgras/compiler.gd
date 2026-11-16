@@ -124,7 +124,11 @@ func printtraceback() {
 	var pcs [64]uintptr
 	n := Callers(3, pcs[:])
 	for _, pc := range pcs[:n] {
-		printstring(FuncForPC(pc).Name())
+		name := FuncForPC(pc).Name()
+		if hasPrefix(name, "runtime.") || name == "go.run" {
+			continue // (as Go's traceback, which leaves the runtime's out)
+		}
+		printstring(name)
 		printstring("(...)\n\t")
 		file, line := pcFileLine(pc)
 		printstring(file)
@@ -432,4 +436,8 @@ func reflect_deferHere() {
 	if p := curg.panicking; p != nil {
 		p.argp = sys.GetCallerSP()
 	}
+}
+
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

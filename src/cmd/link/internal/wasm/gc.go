@@ -398,17 +398,20 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 		size := ld.WasmGCSize(l.ctxt, e)
 		switch {
 		case isObj:
-			if n > 10000 {
-				// Too many to make one by one here: the runtime
-				// makes them, if they are all zero.
+			if n > 32 {
+				// Many to make one by one here (the code of each,
+				// in a function the engine is slow to compile): the
+				// runtime makes them, if they are all zero.
 				newArr := l.ldr.Lookup("runtime.newobjarrayT", 0)
 				zero := !d.hasReloc(off, n*size)
 				for _, b := range d.bytes(off, n*size) {
 					zero = zero && b == 0
 				}
-				if !zero || newArr == 0 || !l.ldr.AttrReachable(newArr) || l.funcIndex == nil {
-					l.ctxt.Errorf(0, "GOWASM=gc: unsupported: a static array of %d structs", n)
-					n = 0
+				if !zero || newArr == 0 || !l.ldr.AttrReachable(newArr) || l.funcIndex == nil || n <= 10000 && !l.numbered(e) {
+					if n > 10000 {
+						l.ctxt.Errorf(0, "GOWASM=gc: unsupported: a static array of %d structs", n)
+						n = 0
+					}
 				} else {
 					writeI32Const(w, int32(l.ldr.SymValue(e)))
 					gcOp(w, 0x1C) // ref.i31: the address of the element type
@@ -620,11 +623,7 @@ func (l *gcLinker) constructors() [][]byte {
 	index := make(map[string]int)
 	empty := &gcData{relocs: make(map[int64]loader.Reloc)}
 	for s := loader.Sym(1); s < loader.Sym(ldr.NSym()); s++ {
-		name := ldr.SymName(s)
-		if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || len(ldr.Data(s)) < 48 {
-			continue
-		}
-		if !l.constructible(s) {
+		if !l.numbered(s) {
 			continue
 		}
 		var w bytes.Buffer
@@ -639,6 +638,18 @@ func (l *gcLinker) constructors() [][]byte {
 		l.ctorOf[s] = n
 	}
 	return ctors
+}
+
+// numbered reports whether the type descriptor s gets the number of a
+// function that makes an object of the type (see constructors), with
+// which the runtime makes one.
+func (l *gcLinker) numbered(s loader.Sym) bool {
+	ldr := l.ldr
+	name := ldr.SymName(s)
+	if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || len(ldr.Data(s)) < 48 {
+		return false
+	}
+	return l.constructible(s)
 }
 
 // constructible reports whether newObject can make an object of typ.

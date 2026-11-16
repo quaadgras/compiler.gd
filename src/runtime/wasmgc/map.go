@@ -28,6 +28,8 @@ type gcmap struct {
 	used uint64 // the number of entries: must be first
 	seed uintptr
 	tab  *maptable
+
+	onStack bool // Go would have it on the stack: see makemap
 }
 
 type maptable struct {
@@ -114,6 +116,13 @@ func makemap_small() *gcmap {
 }
 
 func makemap(t *abi.MapType, hint int, m *gcmap) *gcmap {
+	if hint < 0 {
+		// A small map that does not escape (see walkMakeMap): not an
+		// allocation in Go, nor its first eight entries.
+		m = makemap_small()
+		m.onStack = true
+		return m
+	}
 	memstatsMallocs++
 	m = makemap_small()
 	if hint > 0 {
@@ -256,7 +265,11 @@ func mapassign(t *abi.MapType, m *gcmap, key, zero unsafe.Pointer) unsafe.Pointe
 	}
 	switch tab := m.tab; {
 	case tab == nil:
+		n := memstatsMallocs
 		m.grow(t, 8)
+		if m.onStack {
+			memstatsMallocs = n
+		}
 	case (tab.full+1)*8 > tab.cap*7:
 		// Too full: twice the size, unless deleting has left most
 		// of it free.

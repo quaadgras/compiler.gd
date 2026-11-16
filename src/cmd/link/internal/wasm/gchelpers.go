@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"cmd/internal/obj/wasm"
 	"cmd/link/internal/loader"
+	"strconv"
 	"strings"
 )
 
@@ -1290,14 +1291,25 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 	fns = append(fns, &wasmFunc{Name: wasm.GCBits, Type: l.typeIndex(bits), Code: l.bits(layouts, first+len(fns), first+2*len(gcKinds)+10)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCPtrID, Type: l.typeIndex(ptrid), Code: l.ptrID(first + len(fns))})
 	fns = append(fns, &wasmFunc{Name: wasm.GCCopy, Type: l.typeIndex(copyObj), Code: l.copyObj(first+len(fns), layouts)})
-	fns = append(fns, &wasmFunc{Name: wasm.GCNew, Type: l.typeIndex(newSig), Code: l.newByNumber(ctors)})
+	newFn := &wasmFunc{Name: wasm.GCNew, Type: l.typeIndex(newSig)}
+	fns = append(fns, newFn)
 	fns = append(fns, &wasmFunc{Name: gcSize, Type: l.typeIndex(sizeSig), Code: l.sizeOf(first+len(fns), layouts)})
 	fns = append(fns, &wasmFunc{Name: gcStoreBits, Type: l.typeIndex(storeBitsSig), Code: l.storeBits(layouts, first+2*len(gcKinds)+6, first+2*len(gcKinds)+11)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCPtrEq, Type: l.typeIndex(ptrEqSig), Code: l.ptrEq()})
 	fns = append(fns, &wasmFunc{Name: wasm.GCClear, Type: l.typeIndex(clearSig), Code: l.clearObj(first+len(fns), layouts)})
 	fns = append(fns, &wasmFunc{Name: "wasm.bitstail", Type: l.typeIndex(bitsTailSig), Code: l.bitsTail(first + 2*len(gcKinds) + 2)})
 	fns = append(fns, &wasmFunc{Name: "wasm.storetail", Type: l.typeIndex(storeTailSig), Code: l.storeTail(first + 2*len(gcKinds) + 7)})
-	return append(fns, l.reflectFuncs(first+len(fns), nimport, funcIndex)...)
+	fns = append(fns, l.reflectFuncs(first+len(fns), nimport, funcIndex)...)
+	// The functions that make an object of each type, last.
+	newFn.Code = l.newByNumber(len(ctors), first+len(fns))
+	ctorSig := l.typeIndex(wasm.GCFuncPrefix + ".r")
+	for i, c := range ctors {
+		code := []byte{0x00} // (no locals)
+		code = append(code, c...)
+		code = append(code, 0x0B)
+		fns = append(fns, &wasmFunc{Name: "wasm.new." + strconv.Itoa(i+1), Type: ctorSig, Code: code})
+	}
+	return fns
 }
 
 // clearObj returns the body of the function that zeroes the Go value in
@@ -1812,9 +1824,11 @@ func (l *gcLinker) storeBits(layouts []string, size, tail int) []byte {
 }
 
 // newByNumber returns the body of the function that returns a new
-// object of the type numbered as its argument: ctors[n-1] is the code
-// that pushes it.
-func (l *gcLinker) newByNumber(ctors [][]byte) []byte {
+// object of the type numbered as its argument: function first+n-1
+// makes it. (The code that makes each is in a function of its own:
+// all in one, with a program's thousands of types, took V8 a minute to
+// compile.)
+func (l *gcLinker) newByNumber(n, first int) []byte {
 	a := &gcAsm{l: l}
 	writeUleb128(a, 0)
 	// A negative number: a wasm.generic, for a Go value of the size in
@@ -1841,22 +1855,22 @@ func (l *gcLinker) newByNumber(ctors [][]byte) []byte {
 	}
 	a.gc(0x00, gen) // struct.new
 	a.op(0x0F, 0x0B)
-	n := len(ctors)
 	a.op(0x02, 0x40) // block: no such number
-	for range ctors {
+	for j := 0; j < n; j++ {
 		a.op(0x02, 0x40)
 	}
 	a.get(0)
 	a.op(0x0E) // br_table
 	writeUleb128(a, uint64(n+1))
 	writeUleb128(a, uint64(n)) // 0: none
-	for j := range ctors {
+	for j := 0; j < n; j++ {
 		writeUleb128(a, uint64(j))
 	}
 	writeUleb128(a, uint64(n))
-	for _, c := range ctors {
+	for j := 0; j < n; j++ {
 		a.op(0x0B)
-		a.Write(c)
+		a.op(0x10) // call
+		writeUleb128(a, uint64(first+j))
 		a.op(0x0F)
 	}
 	a.op(0x0B, 0x00) // end; unreachable

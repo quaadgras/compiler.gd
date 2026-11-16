@@ -334,7 +334,11 @@ func reflect_typedslicecopy(t *_type, dst, src sliceHeader) int {
 //go:linkname reflect_growslice reflect.growslice
 func reflect_growslice(t *_type, old sliceHeader, num int) sliceHeader {
 	newLen := old.Len + num
+	// (The capacity Go would give: see roundupcap.)
 	newCap := nextslicecap(newLen, old.Cap)
+	if t.Size_ != 0 {
+		newCap = roundupcap(newCap, int(t.Size_))
+	}
 	p := newarrayT(t, newCap)
 	typedslicecopy(t, p, old.Len, old.Data, old.Len)
 	return sliceHeader{p, old.Len, newCap}

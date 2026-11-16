@@ -336,6 +336,13 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 		// A map is not what the compiler thinks it is (see
 		// runtime/wasmgc/map.go): the runtime makes all of them.
 		if ir.IsConst(hint, constant.Int) && constant.Compare(hint.Val(), token.LEQ, constant.MakeInt64(abi.MapGroupSlots)) {
+			if n.Esc() == ir.EscNone {
+				// A small map that does not escape is on the stack
+				// in Go, its first entries too: the runtime is told
+				// (a hint of -1), for testing.AllocsPerRun.
+				fn := typecheck.LookupRuntime(gd, "makemap", mapType, t.Key(), t.Elem())
+				return mkcall1(gd, fn, n.Type(), init, reflectdata.MakeMapRType(gd, gd.Pos, n), ir.NewInt(gd, gd.Pos, -1), typecheck.NodNil(gd))
+			}
 			fn := typecheck.LookupRuntime(gd, "makemap_small", t.Key(), t.Elem())
 			return mkcall1(gd, fn, n.Type(), init)
 		}
