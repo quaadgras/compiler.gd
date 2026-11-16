@@ -7,6 +7,7 @@ package weak_test
 import (
 	"context"
 	"internal/goarch"
+	"internal/wasmgc"
 	"runtime"
 	"sync"
 	"testing"
@@ -125,6 +126,9 @@ func TestPointerEquality(t *testing.T) {
 }
 
 func TestPointerFinalizer(t *testing.T) {
+	if wasmgc.Enabled {
+		t.Skip("GOWASM=gc: runtime.SetFinalizer does nothing (cleanups work)")
+	}
 	bt := new(T)
 	wt := weak.Make(bt)
 	done := make(chan struct{}, 1)
