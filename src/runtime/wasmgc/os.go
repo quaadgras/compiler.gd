@@ -212,8 +212,11 @@ func subtle_setDITDisabled() {}
 //go:linkname fips140deps_monoTime crypto/internal/fips140deps/time.monoTime
 func fips140deps_monoTime() int64 { return nanotime() }
 
-// (A cache of the boring module would be cleared at each collection:
-// there is no such module here.)
-//
 //go:linkname boring_registerCache crypto/internal/boring/bcache.registerCache
-func boring_registerCache(p unsafe.Pointer) {}
+func boring_registerCache(p unsafe.Pointer) {
+	boringCaches = append(boringCaches, p)
+}
+
+// boringCaches are the caches of crypto/internal/boring/bcache, which a
+// collection clears (see GC).
+var boringCaches []unsafe.Pointer

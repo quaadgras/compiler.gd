@@ -34,6 +34,9 @@ func GC() {
 	if poolcleanup != nil {
 		poolcleanup()
 	}
+	for _, p := range boringCaches {
+		*(*unsafe.Pointer)(p) = nil
+	}
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
 	t0 := nanotime()
