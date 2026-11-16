@@ -1017,34 +1017,35 @@ type gcGrowth struct {
 	off, by int32
 }
 
-// A gcLine is where, in the code of a function, the code of a line
-// starts.
+// A gcLine is a frame of where, in the code of a function, the code of
+// a line starts: the frames of one place follow each other, the
+// innermost first, when calls were inlined there.
 type gcLine struct {
 	off  int32
 	file string
 	line int32
+	name string // the function inlined, or "" for the function itself
 }
 
 // gcLines reads the table of lines the compiler left after the code of
 // a function (see wasm.GCLines in cmd/internal/obj/wasm).
 func gcLines(tab []byte, grown []gcGrowth) []gcLine {
 	var lines []gcLine
-	var off, line int32
+	var off int32
 	var file string
 	g := 0
+	uleb := func() uint64 {
+		v, n := binary.Uvarint(tab)
+		tab = tab[n:]
+		return v
+	}
+	str := func(n uint64) string {
+		s := string(tab[:n-1])
+		tab = tab[n-1:]
+		return s
+	}
 	for len(tab) > 0 {
-		d, n := binary.Uvarint(tab)
-		tab = tab[n:]
-		off += int32(d)
-		l, n := gcSleb(tab)
-		tab = tab[n:]
-		line += int32(l)
-		f, n := binary.Uvarint(tab)
-		tab = tab[n:]
-		if f > 0 {
-			file = string(tab[:f-1])
-			tab = tab[f-1:]
-		}
+		off += int32(uleb())
 		for g < len(grown) && grown[g].off <= off {
 			g++
 		}
@@ -1052,42 +1053,36 @@ func gcLines(tab []byte, grown []gcGrowth) []gcLine {
 		if g > 0 {
 			at += grown[g-1].by
 		}
-		if k := len(lines); k > 0 && lines[k-1].off == at {
+		for k := len(lines); k > 0 && lines[k-1].off == at; k-- {
 			lines = lines[:k-1] // (no code for it)
 		}
-		lines = append(lines, gcLine{at, file, line})
-	}
-	return lines
-}
-
-// gcSleb reads a signed LEB128.
-func gcSleb(b []byte) (int64, int) {
-	var v int64
-	var shift uint
-	for i, c := range b {
-		v |= int64(c&0x7f) << shift
-		shift += 7
-		if c&0x80 == 0 {
-			if shift < 64 && c&0x40 != 0 {
-				v |= -1 << shift
+		for n := uleb(); n > 0; n-- {
+			l := gcLine{off: at, line: int32(uleb())}
+			if f := uleb(); f > 0 {
+				file = str(f)
 			}
-			return v, i + 1
+			l.file = file
+			if f := uleb(); f > 0 {
+				l.name = str(f)
+			}
+			lines = append(lines, l)
 		}
 	}
-	return v, len(b)
+	return lines
 }
 
 // writeLinesSec writes the custom section "go.lines", from which the
 // host tells runtime.Caller and the like the file and line of a place
 // in the code (see lib/wasm/wasm_gc.js). It is omitted with -s. In it
-// are the names of the files, then each function that has lines: its
-// index, where its code is in the module, and where each line starts
-// in it (the offset since the last, the file, the line since the last).
+// are the names of the files, the names of the functions inlined, then
+// each function that has lines: its index, where its code is in the
+// module, and its frames (see gcLine): the offset since the last, the
+// file, the line since the last, and 0 or 1 + the function inlined.
 func writeLinesSec(ctxt *ld.Link, nimport int, fns []*wasmFunc, starts []int64) {
 	sizeOffset := writeSecHeader(ctxt, sectionCustom)
 	writeName(ctxt.Out, "go.lines")
-	files := make(map[string]int)
-	var names []string
+	files, funcs := make(map[string]int), make(map[string]int)
+	var fileNames, funcNames []string
 	nfn := 0
 	for _, fn := range fns {
 		if len(fn.Lines) > 0 {
@@ -1095,16 +1090,24 @@ func writeLinesSec(ctxt *ld.Link, nimport int, fns []*wasmFunc, starts []int64) 
 		}
 		for _, l := range fn.Lines {
 			if _, ok := files[l.file]; !ok {
-				files[l.file] = len(names)
-				names = append(names, l.file)
+				files[l.file] = len(fileNames)
+				fileNames = append(fileNames, l.file)
+			}
+			if _, ok := funcs[l.name]; !ok && l.name != "" {
+				funcs[l.name] = len(funcNames)
+				funcNames = append(funcNames, l.name)
 			}
 		}
 	}
-	writeUleb128(ctxt.Out, uint64(len(names)))
-	for _, name := range names {
+	writeUleb128(ctxt.Out, uint64(len(fileNames)))
+	for _, name := range fileNames {
 		if root := buildcfg.GOROOT; root != "" && strings.HasPrefix(name, "$GOROOT/") {
 			name = root + name[len("$GOROOT"):]
 		}
+		writeName(ctxt.Out, name)
+	}
+	writeUleb128(ctxt.Out, uint64(len(funcNames)))
+	for _, name := range funcNames {
 		writeName(ctxt.Out, name)
 	}
 	writeUleb128(ctxt.Out, uint64(nfn))
@@ -1120,6 +1123,11 @@ func writeLinesSec(ctxt *ld.Link, nimport int, fns []*wasmFunc, starts []int64) 
 			writeUleb128(ctxt.Out, uint64(l.off-off))
 			writeUleb128(ctxt.Out, uint64(files[l.file]))
 			writeSleb128(ctxt.Out, int64(l.line-line))
+			if l.name == "" {
+				writeUleb128(ctxt.Out, 0)
+			} else {
+				writeUleb128(ctxt.Out, uint64(funcs[l.name]+1))
+			}
 			off, line = l.off, l.line
 		}
 	}

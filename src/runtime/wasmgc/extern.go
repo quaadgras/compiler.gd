@@ -153,6 +153,7 @@ func Stack(buf []byte, all bool) int {
 type Func struct {
 	opaque struct{}
 	entry  uintptr
+	pc     uintptr // the pc it was found for: a frame of a call inlined has its own name
 }
 
 // Frames may be used to get function/file/line information for a slice
@@ -190,7 +191,7 @@ func FuncForPC(pc uintptr) *Func {
 	if pc == 0 {
 		return nil
 	}
-	return &Func{entry: pc &^ 0xffff}
+	return &Func{entry: pc &^ 0xffff, pc: pc}
 }
 
 // Name returns the name of the function, which the host knows from the
@@ -200,7 +201,11 @@ func (f *Func) Name() string {
 		return ""
 	}
 	buf := make([]byte, 512)
-	n := funcname(uint64(f.entry), uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	pc := f.pc
+	if pc == 0 {
+		pc = f.entry
+	}
+	n := funcname(uint64(pc), uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
 	return string(buf[:n])
 }
 

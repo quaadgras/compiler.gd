@@ -948,6 +948,16 @@ out with `-s`. The host reads it when first asked. A pc is the function
 table the code is at, so `runtime.Caller`, `CallersFrames`,
 `Func.FileLine` and `debug.Stack` report files and lines.
 
+Where calls were inlined by the compiler, a place in the code has the
+frames of each: the engine's one frame is given as several, as Go's
+`CallersFrames` does from its inlining tree. The wrappers the compiler
+makes for methods (of no file) and the runtime's call of a function on
+a new segment of stack are not frames, as in Go's tracebacks: package
+testing counts frames to find the line of a `t.Errorf`.
+
+`go test` and `go run` link with `-w` only for GOWASM=gc, not `-s -w`:
+the lines of a failing test are in the section `-s` leaves out.
+
 V8 gives the position of the call for each frame of a stack trace. Where
 it has inlined the function called (a small one: `runtime.panicnil`),
 the position it gives for the caller can be that of an earlier

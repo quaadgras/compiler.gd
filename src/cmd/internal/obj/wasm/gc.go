@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
+	"cmd/internal/src"
+	"slices"
 )
 
 // With GOWASM=gc, Go objects are WebAssembly structs and arrays in the
@@ -457,41 +459,73 @@ const GCLines = "wasm.lines"
 
 // A gcLineTable is the table of the files and lines of a function's
 // code: an entry where they change, as the offset in the code since
-// the last entry (unsigned LEB128), the line since the last (signed),
-// and 0 for the same file or else 1 + the length of the name of the
-// file and the name.
+// the last entry (unsigned LEB128) and the frames there, the innermost
+// first: more than one where calls were inlined. A frame is its line,
+// its file (0 for the same as the last written, or else 1 + the length
+// of its name and the name), and the function inlined (0 for none: the
+// function itself, the outermost frame; or else its name likewise).
 type gcLineTable struct {
-	buf   bytes.Buffer
-	files []string
-	off   int
-	file  string
-	line  int32
+	buf    bytes.Buffer
+	files  []string
+	off    int
+	last   src.XPos
+	frames []gcLineFrame // the last written
+	file   string
+}
+
+type gcLineFrame struct {
+	file, name string
+	line       int32
 }
 
 func (t *gcLineTable) add(ctxt *obj.Link, off int, p *obj.Prog) {
-	pos := ctxt.InnermostPos(p.Pos)
-	if !pos.IsKnown() {
+	if !p.Pos.IsKnown() || p.Pos == t.last {
 		return
 	}
 	if t.files == nil {
 		t.files = ctxt.PosTable.FileTable()
 	}
-	file, line := "", int32(pos.RelLine())
-	if i := pos.FileIndex(); i >= 0 && i < len(t.files) {
-		file = t.files[i]
+	var frames []gcLineFrame
+	at := func(xpos src.XPos, name string) {
+		pos := ctxt.InnermostPos(xpos)
+		f := gcLineFrame{name: name, line: int32(pos.RelLine())}
+		if i := pos.FileIndex(); i >= 0 && i < len(t.files) {
+			f.file = t.files[i]
+		}
+		frames = append(frames, f)
 	}
-	if file == t.file && line == t.line {
-		return
+	xpos := p.Pos
+	for ix := ctxt.InnermostPos(xpos).Base().InliningIndex(); ix >= 0; ix = ctxt.InlTree.Parent(ix) {
+		at(xpos, ctxt.InlTree.InlinedFunction(ix).Name)
+		xpos = ctxt.InlTree.CallPos(ix)
 	}
+	at(xpos, "")
+	t.last = p.Pos
+	if slices.Equal(frames, t.frames) {
+		return // the same lines
+	}
+	t.frames = frames
 	writeUleb128(&t.buf, uint64(off-t.off))
-	writeSleb128(&t.buf, int64(line-t.line))
-	if file == t.file {
-		writeUleb128(&t.buf, 0)
-	} else {
-		writeUleb128(&t.buf, uint64(len(file)+1))
-		t.buf.WriteString(file)
+	t.off = off
+	writeUleb128(&t.buf, uint64(len(frames)))
+	str := func(s string) {
+		writeUleb128(&t.buf, uint64(len(s)+1))
+		t.buf.WriteString(s)
 	}
-	t.off, t.file, t.line = off, file, line
+	for _, f := range frames {
+		writeUleb128(&t.buf, uint64(f.line))
+		if f.file == t.file {
+			writeUleb128(&t.buf, 0)
+		} else {
+			str(f.file)
+			t.file = f.file
+		}
+		if f.name == "" {
+			writeUleb128(&t.buf, 0)
+		} else {
+			str(f.name)
+		}
+	}
 }
 
 func (t *gcLineTable) write(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer) {

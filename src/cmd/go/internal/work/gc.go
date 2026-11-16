@@ -636,7 +636,14 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 		ldflags = append(ldflags, "-installsuffix", cfg.BuildContext.InstallSuffix)
 	}
 	if root.Package.Internal.OmitDebug {
-		ldflags = append(ldflags, "-s", "-w")
+		if cfg.Goarch == "wasm" && slices.Contains(cfg.BuildContext.ToolTags, "wasm.gc") {
+			// With GOWASM=gc, -s leaves out the files and lines of the
+			// code (which other ports keep): a test that fails would
+			// not say where.
+			ldflags = append(ldflags, "-w")
+		} else {
+			ldflags = append(ldflags, "-s", "-w")
+		}
 	}
 	if cfg.BuildBuildmode == "plugin" {
 		ldflags = append(ldflags, "-pluginpath", pluginPath(root))
