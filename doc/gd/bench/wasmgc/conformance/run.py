@@ -107,7 +107,19 @@ def reason(text):
     return (text.strip().split('\n') or ['?'])[0][:80]
 
 
+# Tests that check finalizers run: runtime.SetFinalizer does nothing on
+# GOWASM=gc (a finalizer needs its object, which the host only reports
+# once it is gone; runtime.AddCleanup works).
+FINALIZERS = {
+    'deferfin.go', 'tinyfin.go', 'stackobj.go', 'stackobj3.go',
+    'fixedbugs/issue27518b.go', 'fixedbugs/issue32477.go',
+    'fixedbugs/issue46725.go', 'fixedbugs/issue5493.go', 'fixedbugs/issue54343.go',
+}
+
+
 def run(cfg, name, imports):
+    if name in FINALIZERS:
+        return name, 'SKIP', 'finalizers'
     missing = imports - IMPORTABLE
     if missing:
         return name, 'SKIP', 'imports ' + ' '.join(sorted(missing))

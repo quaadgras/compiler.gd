@@ -187,7 +187,7 @@ func _Ranger[Elem any]() (*_Sender[Elem], *_Receiver[Elem]) {
 		values: c,
 		done:   d,
 	}
-	runtime.SetFinalizer(r, (*_Receiver[Elem]).finalize)
+	runtime.AddCleanup(r, func(done chan struct{}) { close(done) }, d)
 	return s, r
 }
 
@@ -231,11 +231,6 @@ func (r *_Receiver[Elem]) Next(ctx context.Context) (v Elem, ok bool) {
 	case v, ok = <-r.values:
 	}
 	return v, ok
-}
-
-// finalize is a finalizer for the receiver.
-func (r *_Receiver[Elem]) finalize() {
-	close(r.done)
 }
 
 func TestReadAll() {
@@ -392,7 +387,7 @@ func TestRanger() {
 
 	<-c1
 
-	// Force a garbage collection to try to get the finalizers to run.
+	// Force a garbage collection to try to get the cleanups to run.
 	runtime.GC()
 
 	select {
