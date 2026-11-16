@@ -50,7 +50,7 @@ var (
 
 // Per RFC 8259, section 9, implementations may enforce a maximum depth.
 // Such a limit is necessary to prevent stack overflows.
-const maxNestingDepth = 10000
+// (It is maxNestingDepth, in depth.go and depth_wasmgc.go.)
 
 type state struct {
 	// Tokens validates whether the next token kind is valid.
