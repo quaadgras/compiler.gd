@@ -17,7 +17,7 @@ container/ring ok
 context ok
 crypto ok
 crypto/aes ok
-crypto/cipher FAIL RuntimeError: unreachable
+crypto/cipher ok
 crypto/des ok
 crypto/dsa ok
 crypto/ecdh ok
@@ -27,10 +27,10 @@ crypto/elliptic ok
 crypto/fips140 ok
 crypto/hkdf ok
 crypto/hmac ok
-crypto/hpke FAIL RuntimeError: unreachable
+crypto/hpke ok
 crypto/internal/boring ok
 crypto/internal/boring/bbig SKIP no test files
-crypto/internal/boring/bcache FAIL --- FAIL: TestCache | cache_test.go:83: after Clear, c.Get(17879) = 20001, want nil
+crypto/internal/boring/bcache FAIL --- FAIL: TestCache | cache_test.go:83: after Clear, c.Get(16443) = 20001, want nil
 crypto/internal/boring/sig SKIP no test files
 crypto/internal/constanttime SKIP no test files
 crypto/internal/cryptotest ok
@@ -54,7 +54,7 @@ crypto/internal/fips140/edwards25519/field ok
 crypto/internal/fips140/hkdf SKIP no test files
 crypto/internal/fips140/hmac SKIP no test files
 crypto/internal/fips140/mldsa ok
-crypto/internal/fips140/mlkem FAIL --- FAIL: TestCASTRejectionPaths | cast_test.go:25: unexpected private key hash
+crypto/internal/fips140/mlkem ok
 crypto/internal/fips140/nistec ok
 crypto/internal/fips140/nistec/fiat ok
 crypto/internal/fips140/pbkdf2 SKIP no test files
@@ -74,7 +74,7 @@ crypto/internal/fips140deps/godebug SKIP no test files
 crypto/internal/fips140deps/time SKIP no test files
 crypto/internal/fips140hash SKIP no test files
 crypto/internal/fips140only ok
-crypto/internal/fips140test FAIL RuntimeError: unreachable
+crypto/internal/fips140test FAIL --- FAIL: TestIndicator | indicator_test.go:61: indicator should be false if RecordApproved is called in a different goroutine
 crypto/internal/impl SKIP no test files
 crypto/internal/rand SKIP no test files
 crypto/internal/randutil SKIP no test files
@@ -82,7 +82,7 @@ crypto/internal/sysrand ok
 crypto/internal/sysrand/internal/seccomp SKIP no test files
 crypto/md5 ok
 crypto/mldsa ok
-crypto/mlkem FAIL --- FAIL: TestRoundTrip TestAccumulated
+crypto/mlkem ok
 crypto/mlkem/mlkemtest SKIP no test files
 crypto/pbkdf2 ok
 crypto/rand ok
@@ -93,7 +93,7 @@ crypto/sha256 ok
 crypto/sha3 ok (186s, as natively: over the 120s of the survey; run with -timeout 400s)
 crypto/sha512 ok
 crypto/subtle ok
-crypto/tls FAIL RuntimeError: unreachable
+crypto/tls ok
 crypto/tls/internal/fips140tls SKIP no test files
 crypto/x509 FAIL RuntimeError: unreachable
 crypto/x509/pkix SKIP no test files
@@ -105,7 +105,7 @@ debug/dwarf ok
 debug/elf ok
 debug/gosym ok
 debug/macho ok
-debug/pe FAIL RuntimeError: unreachable
+debug/pe ok
 debug/plan9obj ok
 embed ok
 embed/internal/embedtest ok
@@ -118,13 +118,13 @@ encoding/binary ok
 encoding/csv ok
 encoding/gob ok
 encoding/hex ok
-encoding/json FAIL fatal error: stack overflow
+encoding/json ok
 encoding/json/internal SKIP no test files
 encoding/json/internal/jsonflags ok
-encoding/json/internal/jsonopts FAIL panic: interface conversion: interface {} is bool, not bool (types from different scopes) [recovered]
+encoding/json/internal/jsonopts ok
 encoding/json/internal/jsontest SKIP no test files
 encoding/json/internal/jsonwire ok
-encoding/json/jsontext FAIL fatal error: stack overflow
+encoding/json/jsontext ok
 encoding/json/v2 ok
 encoding/pem ok
 encoding/xml ok
@@ -237,7 +237,7 @@ internal/singleflight ok
 internal/strconv ok
 internal/stringslite SKIP no test files
 internal/sync ok
-internal/synctest FAIL hard timeout (killed)
+internal/synctest ok
 internal/syscall/execenv SKIP no test files
 internal/syscall/unix ok
 internal/sysinfo ok
@@ -288,12 +288,12 @@ net/http BUILD net/http.TestParseRangeLimit.func1: call of runtime/metrics.runti
 net/http/cgi ok
 net/http/cookiejar ok
 net/http/fcgi ok
-net/http/httptest FAIL --- FAIL: TestServer TestTLSServerWithHTTP2 TestClientExampleCom TestServerInMemoryNetwork | server_test.go:178: Get "https://127.0.0.1:34": local error: tls: bad record MAC
+net/http/httptest ok
 net/http/httptrace ok
 net/http/httputil ok
 net/http/internal ok
 net/http/internal/ascii ok
-net/http/internal/http2 FAIL RuntimeError: unreachable
+net/http/internal/http2 FAIL --- FAIL: TestTransportUsesGetBodyWhenPresent | transport_internal_test.go:158: req2.Body unchanged
 net/http/internal/httpcommon SKIP no test files
 net/http/internal/httpsfv SKIP no test files
 net/http/internal/testcert SKIP no test files
@@ -304,7 +304,7 @@ net/mail ok
 net/netip ok
 net/rpc ok
 net/rpc/jsonrpc ok
-net/smtp FAIL --- FAIL: TestNewClientWithTLS TestTLSConnState | smtp_test.go:647: server: write: local error: tls: bad record MAC
+net/smtp ok
 net/textproto ok
 net/url ok
 os ok
@@ -353,7 +353,7 @@ time/tzdata SKIP no test files
 unicode ok
 unicode/utf16 ok
 unicode/utf8 ok
-unique FAIL RuntimeError: unreachable
+unique ok
 unsafe SKIP no test files
 uuid ok
 vendor/golang.org/x/crypto/chacha20 SKIP no test files
@@ -384,3 +384,4 @@ weak FAIL panic: test timed out after 2m0s
 # Survey of 2026-11-17 (release 977a6cbfde): BUILD 8 FAIL 43 SKIP 124 ok 204
 
 # Survey of 2026-11-17 (release a890a4aa49): BUILD 8 FAIL 26 SKIP 124 ok 222
+# Branch wasmgc-pkgtests at 3e06f90566: BUILD 8 FAIL 13 SKIP 124 ok 235
