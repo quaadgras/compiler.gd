@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"internal/buildcfg"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -767,7 +768,11 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	var buildid []byte
 	fns := make([]*wasmFunc, len(ctxt.Textp), len(ctxt.Textp)+16)
 	for i, fn := range ctxt.Textp {
-		name := nameRegexp.ReplaceAllString(ldr.SymName(fn), "_")
+		// The name is Go's, which runtime.FuncForPC and
+		// CallersFrames report (from the name section): only
+		// spaces, which the names of some generated functions have,
+		// are replaced.
+		name := gcSpaceRegexp.ReplaceAllString(ldr.SymName(fn), "_")
 		if ldr.SymName(fn) == "go:buildid" {
 			buildid = ldr.Data(fn)
 			fns[i] = &wasmFunc{Name: name, Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: []byte{0x00, 0x0b}}
@@ -1193,3 +1198,5 @@ func writeLinesSec(ctxt *ld.Link, nimport int, fns []*wasmFunc, starts []int64) 
 	}
 	writeSecSize(ctxt, sizeOffset)
 }
+
+var gcSpaceRegexp = regexp.MustCompile(`\s`)
