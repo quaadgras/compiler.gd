@@ -792,6 +792,33 @@ func (l *gcLinker) move(copyObj, size int) []byte {
 	a.op(0x6B)
 	a.op(0x47, 0x72) // i32.ne, i32.or
 	none()
+	// And it is all within the bytes to copy (a value seen as of
+	// another type than it was made as may end within a field: that is
+	// left to the runtime, scalar by scalar).
+	a.get(12)
+	a.i32(15)
+	a.op(0x71)
+	a.i32(gcKindArray)
+	a.op(0x46)                 // i32.eq
+	a.op(0x04, wasm.GCTypeI32) // if (result i32)
+	a.get(7)
+	a.get(9)
+	a.call(l.fnFlen)
+	a.else_()
+	a.get(12)
+	a.i32(8)
+	a.op(0x76) // i32.shr_u
+	a.end()
+	a.set(13)
+	a.get(9)
+	a.load(gcFieldOff)
+	a.get(4)
+	a.op(0x6B) // i32.sub
+	a.get(13)
+	a.op(0x6A) // i32.add
+	a.get(2)
+	a.op(0x4B) // i32.gt_u
+	none()
 	a.get(12)
 	a.i32(15)
 	a.op(0x71)
@@ -800,6 +827,12 @@ func (l *gcLinker) move(copyObj, size int) []byte {
 	a.i32(gcKindArray)
 	a.op(0x46) // i32.eq
 	a.if_()
+	a.get(6)
+	a.get(8)
+	a.call(l.fnFlen)
+	a.get(13)
+	a.op(0x47) // i32.ne
+	none()
 	a.fieldOf(1, 7, 9)
 	a.call(l.fnFgetr)
 	a.fieldOf(0, 6, 8)
@@ -917,8 +950,38 @@ func (l *gcLinker) zero(clearObj, size int) []byte {
 	a.brIf(1)
 	a.get(5)
 	a.load(gcFieldInfo)
-	a.i32(15)
+	a.i32(0xFFFF)
 	a.op(0x71) // i32.and
+	a.set(7)
+	// The field is all within the bytes to zero, or it is left to the
+	// runtime.
+	a.get(7)
+	a.i32(15)
+	a.op(0x71)
+	a.i32(gcKindArray)
+	a.op(0x46)                 // i32.eq
+	a.op(0x04, wasm.GCTypeI32) // if (result i32)
+	a.get(4)
+	a.get(5)
+	a.call(l.fnFlen)
+	a.else_()
+	a.get(7)
+	a.i32(8)
+	a.op(0x76) // i32.shr_u
+	a.end()
+	a.set(8)
+	a.get(5)
+	a.load(gcFieldOff)
+	a.get(2)
+	a.op(0x6B) // i32.sub
+	a.get(8)
+	a.op(0x6A) // i32.add
+	a.get(1)
+	a.op(0x4B) // i32.gt_u
+	none()
+	a.get(7)
+	a.i32(15)
+	a.op(0x71)
 	a.set(7)
 	a.get(7)
 	a.i32(gcKindArray)
