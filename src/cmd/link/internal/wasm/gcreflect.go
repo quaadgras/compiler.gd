@@ -313,9 +313,12 @@ func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
 // functions they dispatch to, the first of which is to be the function
 // numbered first; nimport is the number of functions imported.
 func (l *gcLinker) reflectFuncs(first, nimport int, funcIndex func(loader.Sym) int64) []*wasmFunc {
+	// (A function that nothing reachable calls is not needed, nor is
+	// what it would dispatch to: the adapters are a function for each
+	// func type of the program.)
 	used := func(name string) bool {
 		for v := 0; v < 2; v++ {
-			if l.ldr.Lookup(name, v) != 0 {
+			if s := l.ldr.Lookup(name, v); s != 0 && l.ldr.AttrReachable(s) {
 				return true
 			}
 		}

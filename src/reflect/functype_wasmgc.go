@@ -47,6 +47,30 @@ func gcValuePtr(x Value, t *abi.Type) unsafe.Pointer {
 	return p
 }
 
+// gcMethodValue is gcMakeMethodValue, once a Value is of a method:
+// Value.method, which makes each, sets it. A function made of a method
+// value calls through the code the linker generates for each func type
+// of the program, and makeMethodValue is called by Value.Interface, as
+// any program that prints calls: called through this variable, it is
+// linked, with that code, only into a program that has such a Value.
+var gcMethodValue func(op string, v Value) Value
+
+// gcMakeMethodValue is makeMethodValue: a function made of the method
+// call, as MakeFunc makes.
+func gcMakeMethodValue(op string, v Value) Value {
+	methodReceiver(op, v, int(v.flag)>>flagMethodShift)
+	m := v
+	// (The arguments of a variadic function come packed.)
+	callOp := "Call"
+	if v.Type().IsVariadic() {
+		callOp = "CallSlice"
+	}
+	return makeFuncWasmGC(v.Type().common(), (*funcType)(unsafe.Pointer(v.Type().common())), func(args []Value) []Value {
+		gcPassDeferred = gcDeferred
+		return m.call(callOp, args)
+	})
+}
+
 func callWasmGC(op string, t *funcType, fn unsafe.Pointer, rcvr Value, rcvrtype *abi.Type, in []Value) []Value {
 	if _, ok := gcDirectFuncs.Load(fn); ok && rcvrtype == nil {
 		return callDirect(t, (*makeFuncImpl)(fn), in)
@@ -55,7 +79,9 @@ func callWasmGC(op string, t *funcType, fn unsafe.Pointer, rcvr Value, rcvrtype 
 		if m, ok := gcMethodFuncs.Load(fn); ok {
 			// Type.Method(i).Func: the method value of the receiver.
 			mf := m.(gcMethod)
-			v := in[0].assignTo("reflect.Value.Call", &mf.t.t, nil).Method(mf.i)
+			// (Not Method, which would keep every method of the
+			// program: a caller of Type.Method does that.)
+			v := in[0].assignTo("reflect.Value.Call", &mf.t.t, nil).method(mf.i)
 			if t.IsVariadic() {
 				return v.CallSlice(in[1:])
 			}

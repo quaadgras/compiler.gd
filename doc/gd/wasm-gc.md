@@ -1072,8 +1072,39 @@ done without changing how compiled code reaches a field: only the order
 of the fields in the struct needs to be canonical (pointers first, then
 by width), not their widths.
 
-What is large in the hello world now, of the linker's own: the adapters
-for reflect (`wasm.reflectcall` and `wasm.makefunc`, 51 KB: one for
-each func type of the program, whether or not reflect can reach it) and
-the start function (23 KB).
+**Every exported method of the program was linked.** The linker keeps
+all of them once a function that calls `reflect.Value.Method` or
+`reflect.Type.Method` is reachable, as any method could then be called
+(the compiler marks such functions). With GOWASM=gc reflect had one of
+its own: `callWasmGC`, which calls a function that `Type.Method(i).Func`
+gave as the method value of its receiver, and which `Value.Interface`
+reaches (through `makeMethodValue`), so any program that prints did:
+the hello world had `time.Parse`, `os.Getwd` and 1,250 other functions
+that nothing could call. Now:
+
+- `callWasmGC` calls an unexported `Value.method`, which `Method` is a
+  wrapper of (not inlined, so that its callers stay marked): only a
+  program that calls `Method` or `Type.Method` itself keeps its
+  methods, as on other ports;
+- a function made of a method value (`makeMethodValue`), which calls
+  through the adapters the linker generates for each func type of the
+  program, is reached through a variable that `Value.method` sets, as
+  only a `Value` made by it is of a method: a program that makes none
+  links neither it nor the adapters, which the linker now generates
+  only if something reachable calls `wasm.reflectcall` or
+  `wasm.makefunc`.
+
+| `fmt` hello world        | start of the stage | layouts as data | methods |
+|--------------------------|----------:|----------:|--------:|
+| module                   | 1,752,893 | 1,579,357 | 577,911 |
+| with `-ldflags="-s -w"`  | 1,571,876 | 1,399,436 | 522,117 |
+| gzip -9, with `-s -w`    | 368,535   | 344,761   | 147,567 |
+| functions                | 2,341     | 2,237     | 560     |
+
+(The same program for js/wasm, in linear memory, is 2,283,831 bytes.)
+
+What is large in it now: `fmt`'s `printValue` (20 KB), three
+instantiations of `slices`' stable sort for `internal/fmtsort` (49 KB:
+a `[]struct{Key, Value reflect.Value}`, whose every move is 12 fields),
+the start function (15 KB), and the functions above by field (31 KB).
 

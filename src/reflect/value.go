@@ -2376,7 +2376,20 @@ func copyVal(typ *abi.Type, fl flag, ptr unsafe.Pointer) Value {
 //
 // Calling this method will force the linker to retain all exported methods in all packages.
 // This may make the executable binary larger but will not affect execution time.
+//
+//go:noinline
 func (v Value) Method(i int) Value {
+	// (Not inlined: the compiler marks the functions that call Method,
+	// for the linker.)
+	return v.method(i)
+}
+
+// method is Method. A function that calls Method makes the linker keep
+// every exported method of the program, as any could then be called;
+// what in this package calls a method that a caller of Method or of
+// Type.Method has chosen calls method, so that the package itself does
+// not.
+func (v Value) method(i int) Value {
 	if v.typ() == nil {
 		panic(&ValueError{"reflect.Value.Method", Invalid})
 	}
@@ -2385,6 +2398,9 @@ func (v Value) Method(i int) Value {
 	}
 	if v.typ().Kind() == abi.Interface && v.IsNil() {
 		panic("reflect: Method on nil interface value")
+	}
+	if wasmGCMode {
+		gcMethodValue = gcMakeMethodValue
 	}
 	(&v).materialize() // method value holds a reference to receiver data
 	fl := v.flag.ro() | (v.flag & flagIndir)

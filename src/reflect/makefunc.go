@@ -105,18 +105,7 @@ func makeMethodValue(op string, v Value) Value {
 	}
 
 	if wasmGCMode {
-		// A function made of the method call, as MakeFunc makes.
-		methodReceiver(op, v, int(v.flag)>>flagMethodShift)
-		m := v
-		// (The arguments of a variadic function come packed.)
-		callOp := "Call"
-		if v.Type().IsVariadic() {
-			callOp = "CallSlice"
-		}
-		return makeFuncWasmGC(v.Type().common(), (*funcType)(unsafe.Pointer(v.Type().common())), func(args []Value) []Value {
-			gcPassDeferred = gcDeferred
-			return m.call(callOp, args)
-		})
+		return gcMethodValue(op, v)
 	}
 
 	// Ignoring the flagMethod bit, v describes the receiver, not the method type.
