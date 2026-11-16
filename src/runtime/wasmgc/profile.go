@@ -30,7 +30,6 @@ func ThreadCreateProfile(p []StackRecord) (n int, ok bool) { return 0, true }
 func GoroutineProfile(p []StackRecord) (n int, ok bool)    { return 0, true }
 func BlockProfile(p []BlockProfileRecord) (n int, ok bool) { return 0, true }
 func MutexProfile(p []BlockProfileRecord) (n int, ok bool) { return 0, true }
-func SetCPUProfileRate(hz int)                             {}
 func StartTrace() error                                    { return errorString("tracing is not supported") }
 func StopTrace()                                           {}
 func ReadTrace() (buf []byte)                              { return nil }
@@ -72,8 +71,52 @@ func pprof_makeProfStack() []uintptr { return make([]uintptr, 32) }
 //go:linkname pprof_cyclesPerSecond runtime/pprof.runtime_cyclesPerSecond
 func pprof_cyclesPerSecond() int64 { return 1e9 }
 
+// A CPU profile has no samples (nothing interrupts a goroutine to take
+// them), but it is well formed: the record of its rate, then the end
+// when profiling stops.
+var (
+	cpuprofRate   int
+	cpuprofHeader bool // the record of the rate is to be read
+	cpuprofEOF    bool // profiling stopped: the end is to be read
+	cpuprofReader *g   // blocked in readProfile
+)
+
+// SetCPUProfileRate sets the CPU profiling rate to hz samples per
+// second; hz <= 0 turns profiling off.
+func SetCPUProfileRate(hz int) {
+	if hz < 0 {
+		hz = 0
+	}
+	switch {
+	case hz > 0 && cpuprofRate == 0:
+		cpuprofRate = hz
+		cpuprofHeader = true
+		cpuprofEOF = false
+	case hz > 0:
+		print("runtime: cannot set cpu profile rate until previous profile has finished.\n")
+	case cpuprofRate != 0:
+		cpuprofRate = 0
+		cpuprofEOF = true
+		if gp := cpuprofReader; gp != nil {
+			cpuprofReader = nil
+			goready(gp)
+		}
+	}
+}
+
 //go:linkname runtime_pprof_readProfile runtime/pprof.readProfile
-func runtime_pprof_readProfile() ([]uint64, []unsafe.Pointer, bool) { return nil, nil, true }
+func runtime_pprof_readProfile() ([]uint64, []unsafe.Pointer, bool) {
+	if cpuprofHeader {
+		cpuprofHeader = false
+		return []uint64{3, 0, uint64(cpuprofRate)}, []unsafe.Pointer{nil}, false
+	}
+	for cpuprofRate != 0 && !cpuprofEOF {
+		cpuprofReader = curg
+		gopark("profile read")
+	}
+	cpuprofEOF = false
+	return nil, nil, true
+}
 
 //go:linkname pprof_FrameStartLine runtime/pprof.runtime_FrameStartLine
 func pprof_FrameStartLine(f *Frame) int { return 0 }
