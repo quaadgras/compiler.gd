@@ -15,8 +15,9 @@ import "unsafe"
 // that one keep it alive; and when it is collected, the host calls
 // linfree with the address of the block (see linregister).
 //
-// TODO: blocks are freed only when the host runs finalizers, which a
-// program that never returns to the event loop does not let it do.
+// The host runs finalizers only when the program returns to its event
+// loop, so the allocator does, as Go's collector is paced: each time
+// the bytes in use have doubled since it last did (see lincollect).
 
 // The compiler replaces calls to these by instructions.
 
@@ -89,22 +90,67 @@ var (
 
 const linheader = 8
 
+var (
+	linLive       uintptr           // the bytes of the blocks in use
+	linTrigger    uintptr = 4 << 20 // lincollect is due when linLive reaches it
+	linCollecting bool
+)
+
+// linLimit is where the blocks end at most: an address in linear
+// memory is kept in 31 bits (an i31).
+const linLimit = 1 << 31
+
+// lincollect lets the host collect garbage and free the blocks whose
+// owners are gone, with the goroutine suspended meanwhile. It reports
+// whether it could: not on the system stack, which is the host's.
+func lincollect() bool {
+	if onSysStack || linCollecting {
+		return false
+	}
+	linCollecting = true
+	hostgc()
+	linCollecting = false
+	// Again when what is left has doubled (GOGC=100).
+	linTrigger = 2 * linLive
+	if linTrigger < 4<<20 {
+		linTrigger = 4 << 20
+	}
+	return true
+}
+
 // linalloc returns the address of n zeroed bytes.
 func linalloc(n uintptr) uintptr {
 	c := uintptr(4)
 	for 1<<c < n+linheader {
 		c++
 	}
-	if b := linfreelist[c]; b != 0 {
-		linfreelist[c] = uintptr(linload64(b + linheader))
-		linzero(b+linheader, 1<<c-linheader)
-		return b + linheader
+	if linLive >= linTrigger {
+		lincollect()
 	}
 	if linbrk == 0 {
 		// Past everything the linker laid out (the size of the memory
 		// before the host reserved more). Memory grown is zero.
 		linbrk = uintptr(heapstart())
 	}
+	for tried := false; ; tried = true {
+		if b := linfreelist[c]; b != 0 {
+			linfreelist[c] = uintptr(linload64(b + linheader))
+			linzero(b+linheader, 1<<c-linheader)
+			linLive += 1 << c
+			return b + linheader
+		}
+		if c < 31 && linbrk+1<<c <= linLimit {
+			break
+		}
+		// No room: once more after the host has freed what it can.
+		if tried || !lincollect() {
+			printstring("runtime: out of memory: cannot allocate ")
+			printuint(uint64(n))
+			printstring("-byte block (linear memory is limited to 2 GB)\n")
+			fatal("out of memory")
+		}
+	}
+	linLive += 1 << c
 	b := linbrk
 	linbrk += 1 << c
 	if size := linsize(); linbrk > size {
@@ -129,6 +175,7 @@ func linfree(addr uintptr) {
 		c &= 1<<32 - 1
 		systemstack(func() { queueLinearCleanups(uint64(i - 1)) })
 	}
+	linLive -= 1 << c
 	linstore64(b+linheader, uint64(linfreelist[c]))
 	linfreelist[c] = b
 }

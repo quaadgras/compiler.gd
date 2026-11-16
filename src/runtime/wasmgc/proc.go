@@ -167,8 +167,23 @@ func gorun(id int64) {
 	linsetsplim(gp.stacklo)
 	linsetsp(gp.stack + gStackSize)
 	gp.fn()
+	// The goroutine's stack is freed: what the host calls next (sched)
+	// must not keep its frame there, where an allocation could
+	// overwrite it. It runs on a stack of the host's calls.
+	if hostStack == 0 {
+		hostStack = linalloc(hostStackSize)
+	}
+	linsetsplim(hostStack + stackRedZone)
+	linsetsp(hostStack + hostStackSize)
 	gdone(gp)
 }
+
+// hostStack is the stack in linear memory that the functions the host
+// calls use once a goroutine has ended (while one is parked, they use
+// what is free of its stack).
+var hostStack uintptr
+
+const hostStackSize = 64 << 10
 
 // gdone records that gp has ended.
 func gdone(gp *g) {

@@ -73,9 +73,9 @@ func GOROOT() string {
 }
 
 var defaultGOROOT string // set by cmd/link
-func Breakpoint()     {}
-func LockOSThread()   {}
-func UnlockOSThread() {}
+func Breakpoint()        {}
+func LockOSThread()      {}
+func UnlockOSThread()    {}
 
 // Caller and Callers walk the host's stack trace: a pc is a function
 // (as on js/wasm, its index << 16) plus one. Files and lines are not
