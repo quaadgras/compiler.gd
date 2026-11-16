@@ -252,13 +252,11 @@ func maps_clone(m any) any {
 //go:linkname fips_fatal crypto/internal/fips140.fatal
 func fips_fatal(s string) { throw(s) }
 
-var fipsIndicator uint8
-
 //go:linkname fips_getIndicator crypto/internal/fips140.getIndicator
-func fips_getIndicator() uint8 { return fipsIndicator }
+func fips_getIndicator() uint8 { return curg.fipsIndicator }
 
 //go:linkname fips_setIndicator crypto/internal/fips140.setIndicator
-func fips_setIndicator(i uint8) { fipsIndicator = i }
+func fips_setIndicator(i uint8) { curg.fipsIndicator = i }
 
 // There are no signals: os/signal's loop blocks forever.
 

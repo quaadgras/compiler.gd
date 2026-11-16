@@ -55,6 +55,8 @@ type g struct {
 	selectDone bool
 	waiting    string // why it is not running, for the deadlock report
 
+	fipsIndicator uint8 // crypto/internal/fips140's service indicator, per goroutine
+
 	bubble  *synctestBubble // its synctest bubble (synctest.go)
 	durable bool            // parked, durably blocked in its bubble
 }
