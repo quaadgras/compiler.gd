@@ -64,6 +64,7 @@ type file struct {
 	stdoutOrErr bool                    // whether this is stdout or stderr
 	appendMode  bool                    // whether file is opened for appending
 	inRoot      bool                    // whether file is opened in a Root
+	cleanup     runtime.Cleanup         // closes the descriptor, if noFinalizers
 }
 
 // fd is the Unix implementation of Fd.
@@ -222,9 +223,19 @@ func newFile(fd int, name string, kind newFileKind, nonBlocking bool) *File {
 		}
 	}
 
-	runtime.SetFinalizer(f.file, (*file).close)
+	if noFinalizers {
+		// Without finalizers, a cleanup closes the descriptor. (There is
+		// no poller to tell, and the directory buffer goes with the file.)
+		f.cleanup = runtime.AddCleanup(f.file, closeFD, fd)
+	} else {
+		runtime.SetFinalizer(f.file, (*file).close)
+	}
 	return f
 }
+
+// closeFD is the cleanup of a file or root that was not closed, if
+// noFinalizers.
+func closeFD(fd int) { syscall.Close(fd) }
 
 func sigpipe() // implemented in package runtime
 
@@ -321,6 +332,7 @@ func (file *file) close() error {
 
 	// no need for a finalizer anymore
 	runtime.SetFinalizer(file, nil)
+	file.cleanup.Stop()
 	return err
 }
 

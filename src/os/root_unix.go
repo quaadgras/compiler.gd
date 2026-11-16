@@ -56,7 +56,11 @@ func newRoot(fd int, name string) (*Root, error) {
 		fd:   fd,
 		name: name,
 	}}
-	runtime.SetFinalizer(r.root, (*root).Close)
+	if noFinalizers {
+		r.root.cleanup = runtime.AddCleanup(r.root, closeFD, fd)
+	} else {
+		runtime.SetFinalizer(r.root, (*root).Close)
+	}
 	return r, nil
 }
 

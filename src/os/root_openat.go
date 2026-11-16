@@ -27,6 +27,8 @@ type root struct {
 	fd     sysfdType
 	refs   int  // number of active operations
 	closed bool // set when closed
+
+	cleanup runtime.Cleanup // closes fd, if noFinalizers (unix)
 }
 
 func (r *root) Close() error {
@@ -37,6 +39,7 @@ func (r *root) Close() error {
 	}
 	r.closed = true
 	runtime.SetFinalizer(r, nil) // no need for a finalizer any more
+	r.cleanup.Stop()
 	return nil
 }
 
