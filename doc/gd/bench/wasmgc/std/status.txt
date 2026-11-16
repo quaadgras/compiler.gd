@@ -154,7 +154,7 @@ hash/adler32 ok
 hash/crc32 ok
 hash/crc64 ok
 hash/fnv ok
-hash/maphash ok
+hash/maphash ok (once, in a survey, the process did not exit after PASS)
 html ok
 html/template ok
 image ok
@@ -320,7 +320,7 @@ reflect/internal/example1 SKIP no test files
 reflect/internal/example2 SKIP no test files
 regexp ok
 regexp/syntax ok
-runtime SKIP no test files (package runtime is src/runtime/wasmgc under GOWASM=gc; the tests of src/runtime do not apply)
+runtime SKIP no test files
 runtime/coverage SKIP no test files
 runtime/debug ok
 runtime/metrics ok
@@ -422,3 +422,4 @@ weak ok
 #     compiler to note the call positions where V8 cannot be trusted.
 #
 # needs linker helper change: none found.
+# Survey of 2026-11-17 (release, after the merge of wasmgc-pkgtests): FAIL 5 SKIP 124 ok 251 (BUILD 0)
