@@ -30,7 +30,7 @@ crypto/hmac ok
 crypto/hpke ok
 crypto/internal/boring ok
 crypto/internal/boring/bbig SKIP no test files
-crypto/internal/boring/bcache FAIL --- FAIL: TestCache | cache_test.go:83: after Clear, c.Get(16443) = 20001, want nil
+crypto/internal/boring/bcache ok
 crypto/internal/boring/sig SKIP no test files
 crypto/internal/constanttime SKIP no test files
 crypto/internal/cryptotest ok
@@ -74,7 +74,7 @@ crypto/internal/fips140deps/godebug SKIP no test files
 crypto/internal/fips140deps/time SKIP no test files
 crypto/internal/fips140hash SKIP no test files
 crypto/internal/fips140only ok
-crypto/internal/fips140test FAIL --- FAIL: TestIndicator | indicator_test.go:61: indicator should be false if RecordApproved is called in a different goroutine
+crypto/internal/fips140test ok
 crypto/internal/impl SKIP no test files
 crypto/internal/rand SKIP no test files
 crypto/internal/randutil SKIP no test files
@@ -90,12 +90,12 @@ crypto/rc4 ok
 crypto/rsa ok
 crypto/sha1 ok
 crypto/sha256 ok
-crypto/sha3 ok (186s, as natively: over the 120s of the survey; run with -timeout 400s)
+crypto/sha3 ok
 crypto/sha512 ok
 crypto/subtle ok
 crypto/tls ok
 crypto/tls/internal/fips140tls SKIP no test files
-crypto/x509 FAIL RuntimeError: unreachable
+crypto/x509 ok
 crypto/x509/pkix SKIP no test files
 database/sql ok
 database/sql/driver ok
@@ -133,7 +133,7 @@ expvar ok
 flag ok
 fmt ok
 go/ast ok
-go/build FAIL --- FAIL: TestDependencies | deps_test.go:954: unexpected dependency: runtime/wasmgc imports [internal/runtime/sys]
+go/build ok
 go/build/constraint ok
 go/constant ok
 go/doc ok
@@ -177,7 +177,7 @@ internal/chacha8rand ok
 internal/copyright ok
 internal/coverage SKIP no test files
 internal/coverage/calloc SKIP no test files
-internal/coverage/cfile BUILD internal/coverage/cfile.emitCounterDataToDirectory: call of internal/coverage/cfile.getCovCounterList, which is not defined
+internal/coverage/cfile ok
 internal/coverage/cformat ok
 internal/coverage/cmerge ok
 internal/coverage/decodecounter SKIP no test files
@@ -196,11 +196,11 @@ internal/dag ok
 internal/diff ok
 internal/exportdata SKIP no test files
 internal/filepathlite SKIP no test files
-internal/fmtsort BUILD internal/fmtsort/sort_test.go:191:16: undefined: runtime.Pinner
+internal/fmtsort ok
 internal/fuzz ok
 internal/gate ok
 internal/goarch SKIP no test files
-internal/godebug BUILD internal/godebug_test.TestMetrics: call of runtime/metrics.runtime_readMetrics, which is not defined
+internal/godebug ok
 internal/godebugs ok
 internal/goexperiment SKIP no test files
 internal/goos SKIP no test files
@@ -221,8 +221,8 @@ internal/profile ok
 internal/profilerecord SKIP no test files
 internal/race SKIP no test files
 internal/reflectlite ok
-internal/runtime/atomic BUILD internal/runtime/atomic_test.TestStorepNoWB: call of internal/runtime/atomic.StorepNoWB, which is not defined
-internal/runtime/cgroup BUILD internal/runtime/cgroup.parseCPUMount: call of internal/runtime/cgroup.throw, which is not defined
+internal/runtime/atomic ok
+internal/runtime/cgroup ok
 internal/runtime/exithook SKIP no test files
 internal/runtime/gc SKIP no test files
 internal/runtime/gc/internal/gen SKIP no test files
@@ -267,7 +267,7 @@ io/ioutil ok
 iter ok
 log ok
 log/internal SKIP no test files
-log/slog FAIL --- FAIL: TestJSONAndTextHandlers TestJSONAllocs TestCallDepth TestAlloc TestRecordSource | handler_test.go:577:
+log/slog FAIL --- FAIL: TestCallDepth | logger_test.go:211: got (testing.tRunner, testing.go, 2032), want (log/slog.TestCallDepth, logger_test.go, 214)
 log/slog/internal SKIP no test files
 log/slog/internal/benchmarks ok
 log/slog/internal/buffer ok
@@ -284,7 +284,7 @@ mime ok
 mime/multipart ok
 mime/quotedprintable ok
 net ok
-net/http BUILD net/http.TestParseRangeLimit.func1: call of runtime/metrics.runtime_readMetrics, which is not defined
+net/http FAIL panic: test timed out after 2m0s
 net/http/cgi ok
 net/http/cookiejar ok
 net/http/fcgi ok
@@ -293,11 +293,11 @@ net/http/httptrace ok
 net/http/httputil ok
 net/http/internal ok
 net/http/internal/ascii ok
-net/http/internal/http2 FAIL --- FAIL: TestTransportUsesGetBodyWhenPresent | transport_internal_test.go:158: req2.Body unchanged
+net/http/internal/http2 ok
 net/http/internal/httpcommon SKIP no test files
 net/http/internal/httpsfv SKIP no test files
 net/http/internal/testcert SKIP no test files
-net/http/pprof FAIL panic: runtime/pprof: converting profile: truncated profile
+net/http/pprof FAIL --- FAIL: TestHandlers | pprof_test.go:66: status code: got 500; want 200
 net/internal/cgotest ok
 net/internal/socktest SKIP no test files
 net/mail ok
@@ -320,11 +320,11 @@ reflect/internal/example1 SKIP no test files
 reflect/internal/example2 SKIP no test files
 regexp ok
 regexp/syntax ok
-runtime SKIP no test files
+runtime SKIP no test files (package runtime is src/runtime/wasmgc under GOWASM=gc; the tests of src/runtime do not apply)
 runtime/coverage SKIP no test files
-runtime/debug FAIL --- FAIL: TestReadGCStats TestFreeOSMemory TestWriteHeapDumpNonempty | garbage_test.go:34: stats.NumGC = 0, but mstats.NumGC = 1
-runtime/metrics BUILD runtime/metrics_test.TestNames: call of runtime/metrics_test.runtime_readMetricNames, which is not defined
-runtime/pprof BUILD runtime/pprof.TestBlockProfileBias: call of runtime.blockevent, which is not defined
+runtime/debug ok
+runtime/metrics ok
+runtime/pprof FAIL panic: timed out waiting for `(?m)^goroutine \d+ \[chan receive\]:\n(?:.+\n\t.+\n)*runtime/pprof\.blockChanRecv`
 runtime/race SKIP no test files
 runtime/trace FAIL --- FAIL: TestFlightRecorderDoubleStart TestFlightRecorderEnabled TestFlightRecorderWriteToDisabled TestFlightRecorderConcurrentWriteTo TestFlightRecorder TestFlightRecorderStartStop ... | flightrecorder_test.go:24: unexpected error on Start: runtime error: tracing is not supported
 runtime/wasmgc SKIP no test files
@@ -334,8 +334,8 @@ strconv ok
 strings ok
 structs SKIP no test files
 sync ok
-sync/atomic FAIL panic: test timed out after 2m0s
-syscall FAIL --- FAIL: TestClearenv | env_unix_test.go:109: GODEBUG=panicnil=1 did not allow for nil panic: got &runtime.PanicNilError{_:[0]*runtime.PanicNilError{}}
+sync/atomic ok
+syscall ok
 testing ok
 testing/cryptotest ok
 testing/fstest ok
@@ -348,7 +348,7 @@ text/scanner ok
 text/tabwriter ok
 text/template ok
 text/template/parse ok
-time FAIL --- FAIL: TestTimerGC | tick_test.go:305: After did not get GC'ed: 10000 allocations
+time ok
 time/tzdata SKIP no test files
 unicode ok
 unicode/utf16 ok
@@ -379,9 +379,46 @@ vendor/golang.org/x/text/secure/bidirule SKIP no test files
 vendor/golang.org/x/text/transform SKIP no test files
 vendor/golang.org/x/text/unicode/bidi SKIP no test files
 vendor/golang.org/x/text/unicode/norm SKIP no test files
-weak FAIL panic: test timed out after 2m0s
+weak ok
 #
 # Survey of 2026-11-17 (release 977a6cbfde): BUILD 8 FAIL 43 SKIP 124 ok 204
 
 # Survey of 2026-11-17 (release a890a4aa49): BUILD 8 FAIL 26 SKIP 124 ok 222
 # Branch wasmgc-pkgtests at 3e06f90566: BUILD 8 FAIL 13 SKIP 124 ok 235
+# Branch wasmgc-pkgtests at 12d84c3d95: FAIL 5 SKIP 124 ok 251 (BUILD 0)
+
+# Tests skipped with GOWASM=gc on the branch (internal/wasmgc.Enabled), each
+# because it cannot apply to this target:
+#   sync/atomic TestHammerStoreLoad: only its pointer cases (a pointer cannot
+#     hold an arbitrary 64-bit integer)
+#   weak TestPointerFinalizer: runtime.SetFinalizer does nothing
+#   time TestTimerGC: MemStats.Frees is not counted
+#   runtime/metrics TestNames: the runtime has only a few of the metrics
+#   runtime/debug TestFreeOSMemory (linear memory does not shrink),
+#     TestWriteHeapDump* (the heap is the engine's)
+#   encoding/json/jsontext: maximum nesting depth 2000, not 10000 (engine stack)
+#
+# Remaining failures, by cause:
+#   runtime/trace, net/http/pprof (TestHandlers//debug/pprof/trace): there is
+#     no execution tracer in runtime/wasmgc (StartTrace reports an error).
+#     Would need the tracer; or skip the tests that start a trace.
+#   runtime/pprof: TestMemoryProfiler (no memory profile, by design) and
+#     TestBlockProfile, which waits for runtime.Stack(all) to show another
+#     goroutine blocked in chan receive: the stacks of other goroutines cannot
+#     be walked here. Then the package times out. Candidates for SKIP.
+#   net/http: TestTransportGCRequest hangs: the cleanup on the *Request never
+#     runs, so something keeps it reachable. Not found. Suspected: a
+#     WebAssembly local of a frame that is still running (a parked
+#     goroutine's, or the test's own) still holds it; the engine keeps every
+#     local alive, Go's liveness does not. Clearing dead reference locals
+#     before runtime.GC calls (tried) did not fix it. The rest of net/http
+#     passes (go test -skip TestTransportGCRequest).
+#   log/slog TestCallDepth: runtime.Callers in a function with defers (its
+#     code is in a try block): for the call of an inlined Logger method, V8
+#     gives a position near the start of the function, not the call's, so
+#     the inlined frames are lost and the line is wrong. lib/wasm now
+#     corrects the case where V8 gives the instruction just before the call;
+#     this one it does not. Engine behaviour; a fix would be for the
+#     compiler to note the call positions where V8 cannot be trusted.
+#
+# needs linker helper change: none found.
