@@ -1,0 +1,385 @@
+# go test -short -timeout 120s, GOOS=wasip1 GOARCH=wasm GOWASM=gc, every package of
+# `go list std` but cmd/... (survey.py; logs in /tmp/wasmgc-survey).
+# ok | FAIL reason | BUILD reason | SKIP reason
+#
+# Survey of 2026-11-17 (release 977a6cbfde): BUILD 8 FAIL 43 SKIP 124 ok 204
+
+archive/tar ok
+archive/zip ok
+bufio ok
+bytes ok
+cmp ok
+compress/bzip2 ok
+compress/flate ok
+compress/gzip ok
+compress/lzw ok
+compress/zlib ok
+container/heap ok
+container/list ok
+container/ring ok
+context FAIL RuntimeError: unreachable
+crypto ok
+crypto/aes ok
+crypto/cipher FAIL RuntimeError: unreachable
+crypto/des ok
+crypto/dsa ok
+crypto/ecdh ok
+crypto/ecdsa ok
+crypto/ed25519 ok
+crypto/elliptic ok
+crypto/fips140 ok
+crypto/hkdf ok
+crypto/hmac ok
+crypto/hpke FAIL RuntimeError: unreachable
+crypto/internal/boring ok
+crypto/internal/boring/bbig SKIP no test files
+crypto/internal/boring/bcache FAIL --- FAIL: TestCache | cache_test.go:83: after Clear, c.Get(2523) = 20001, want nil
+crypto/internal/boring/sig SKIP no test files
+crypto/internal/constanttime SKIP no test files
+crypto/internal/cryptotest ok
+crypto/internal/cryptotest/wycheproof SKIP no test files
+crypto/internal/cryptotest/x509limbo SKIP no test files
+crypto/internal/entropy SKIP no test files
+crypto/internal/entropy/v1.0.0 SKIP no test files
+crypto/internal/fips140 ok
+crypto/internal/fips140/aes ok
+crypto/internal/fips140/aes/gcm ok
+crypto/internal/fips140/alias SKIP no test files
+crypto/internal/fips140/bigmod ok
+crypto/internal/fips140/check SKIP no test files
+crypto/internal/fips140/check/checktest SKIP no test files
+crypto/internal/fips140/drbg ok
+crypto/internal/fips140/ecdh ok
+crypto/internal/fips140/ecdsa ok
+crypto/internal/fips140/ed25519 SKIP no test files
+crypto/internal/fips140/edwards25519 ok
+crypto/internal/fips140/edwards25519/field FAIL --- FAIL: TestInvert | fe_test.go:372: random inversion identity failed, got: 30303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030 for field element 303030303030303030303030303030303030303030303030303030303030303030303030303
+crypto/internal/fips140/hkdf SKIP no test files
+crypto/internal/fips140/hmac SKIP no test files
+crypto/internal/fips140/mldsa FAIL RuntimeError: unreachable
+crypto/internal/fips140/mlkem FAIL RuntimeError: unreachable
+crypto/internal/fips140/nistec ok
+crypto/internal/fips140/nistec/fiat ok
+crypto/internal/fips140/pbkdf2 SKIP no test files
+crypto/internal/fips140/rsa ok
+crypto/internal/fips140/sha256 SKIP no test files
+crypto/internal/fips140/sha3 SKIP no test files
+crypto/internal/fips140/sha512 SKIP no test files
+crypto/internal/fips140/ssh SKIP no test files
+crypto/internal/fips140/subtle ok
+crypto/internal/fips140/tls12 SKIP no test files
+crypto/internal/fips140/tls13 SKIP no test files
+crypto/internal/fips140cache ok
+crypto/internal/fips140deps ok
+crypto/internal/fips140deps/byteorder SKIP no test files
+crypto/internal/fips140deps/cpu SKIP no test files
+crypto/internal/fips140deps/godebug SKIP no test files
+crypto/internal/fips140deps/time SKIP no test files
+crypto/internal/fips140hash SKIP no test files
+crypto/internal/fips140only ok
+crypto/internal/fips140test FAIL RuntimeError: unreachable
+crypto/internal/impl SKIP no test files
+crypto/internal/rand SKIP no test files
+crypto/internal/randutil SKIP no test files
+crypto/internal/sysrand ok
+crypto/internal/sysrand/internal/seccomp SKIP no test files
+crypto/md5 ok
+crypto/mldsa FAIL RuntimeError: unreachable
+crypto/mlkem FAIL RuntimeError: unreachable
+crypto/mlkem/mlkemtest SKIP no test files
+crypto/pbkdf2 ok
+crypto/rand FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+crypto/rc4 ok
+crypto/rsa ok
+crypto/sha1 ok
+crypto/sha256 ok
+crypto/sha3 FAIL panic: subtle.XORBytes: invalid overlap [recovered]
+crypto/sha512 ok
+crypto/subtle ok
+crypto/tls FAIL RuntimeError: unreachable
+crypto/tls/internal/fips140tls SKIP no test files
+crypto/x509 FAIL RuntimeError: unreachable
+crypto/x509/pkix SKIP no test files
+database/sql FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+database/sql/driver ok
+database/sql/internal SKIP no test files
+debug/buildinfo ok
+debug/dwarf ok
+debug/elf ok
+debug/gosym ok
+debug/macho ok
+debug/pe FAIL RuntimeError: unreachable
+debug/plan9obj ok
+embed ok
+embed/internal/embedtest ok
+encoding SKIP no test files
+encoding/ascii85 ok
+encoding/asn1 ok
+encoding/base32 ok
+encoding/base64 ok
+encoding/binary ok
+encoding/csv ok
+encoding/gob ok
+encoding/hex ok
+encoding/json FAIL fatal error: stack overflow
+encoding/json/internal SKIP no test files
+encoding/json/internal/jsonflags ok
+encoding/json/internal/jsonopts FAIL panic: interface conversion: interface {} is bool, not bool (types from different scopes) [recovered]
+encoding/json/internal/jsontest SKIP no test files
+encoding/json/internal/jsonwire ok
+encoding/json/jsontext FAIL fatal error: stack overflow
+encoding/json/v2 ok
+encoding/pem ok
+encoding/xml ok
+errors ok
+expvar ok
+flag ok
+fmt ok
+go/ast ok
+go/build FAIL --- FAIL: TestDependencies | deps_test.go:954: unexpected dependency: runtime/wasmgc imports [internal/runtime/sys]
+go/build/constraint ok
+go/constant ok
+go/doc ok
+go/doc/comment ok
+go/format ok
+go/importer ok
+go/internal/gccgoimporter ok
+go/internal/gcimporter ok
+go/internal/srcimporter ok
+go/parser ok
+go/printer ok
+go/scanner ok
+go/token ok
+go/types ok
+go/version ok
+hash ok
+hash/adler32 ok
+hash/crc32 ok
+hash/crc64 ok
+hash/fnv ok
+hash/maphash FAIL --- FAIL: TestComparable TestWriteComparable | maphash_test.go:273: Comparable(seed, NaN) == Comparable(seed, NaN)
+html ok
+html/template ok
+image FAIL --- FAIL: TestImage TestYCbCr TestYCbCrSlicesDontOverlap | image_test.go:63: *image.RGBA: at (6, 3) was not opaque
+image/color ok
+image/color/palette SKIP no test files
+image/draw FAIL --- FAIL: TestDraw TestDrawOverlap | draw_test.go:500: draw (3,5)-(12,10) nop on *image.RGBA: at (8, 8) {85 0 0 255} versus {136 0 0 255}
+image/gif ok
+image/internal/imageutil SKIP no test files
+image/jpeg FAIL --- FAIL: TestDecodeEOF TestEncodeYCbCr | reader_test.go:131: Decode with Read() = 1, EOF: unexpected EOF
+image/png ok
+index/suffixarray ok
+internal/abi ok
+internal/asan SKIP no test files
+internal/bisect SKIP no test files
+internal/buildcfg ok
+internal/bytealg SKIP no test files
+internal/byteorder SKIP no test files
+internal/cfg SKIP no test files
+internal/chacha8rand ok
+internal/copyright ok
+internal/coverage SKIP no test files
+internal/coverage/calloc SKIP no test files
+internal/coverage/cfile BUILD internal/coverage/cfile.emitCounterDataToDirectory: call of internal/coverage/cfile.getCovCounterList, which is not defined
+internal/coverage/cformat ok
+internal/coverage/cmerge ok
+internal/coverage/decodecounter SKIP no test files
+internal/coverage/decodemeta SKIP no test files
+internal/coverage/encodecounter SKIP no test files
+internal/coverage/encodemeta SKIP no test files
+internal/coverage/pods ok
+internal/coverage/rtcov SKIP no test files
+internal/coverage/slicereader ok
+internal/coverage/slicewriter ok
+internal/coverage/stringtab SKIP no test files
+internal/coverage/test ok
+internal/coverage/uleb128 SKIP no test files
+internal/cpu ok
+internal/dag ok
+internal/diff ok
+internal/exportdata SKIP no test files
+internal/filepathlite SKIP no test files
+internal/fmtsort BUILD internal/fmtsort/sort_test.go:191:16: undefined: runtime.Pinner
+internal/fuzz ok
+internal/gate ok
+internal/goarch SKIP no test files
+internal/godebug BUILD internal/godebug_test.TestMetrics: call of runtime/metrics.runtime_readMetrics, which is not defined
+internal/godebugs ok
+internal/goexperiment SKIP no test files
+internal/goos SKIP no test files
+internal/goroot SKIP no test files
+internal/gover ok
+internal/goversion SKIP no test files
+internal/lazyregexp SKIP no test files
+internal/lazytemplate SKIP no test files
+internal/msan SKIP no test files
+internal/nettest FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+internal/nettrace SKIP no test files
+internal/obscuretestdata SKIP no test files
+internal/oserror SKIP no test files
+internal/pkgbits ok
+internal/platform ok
+internal/poll ok
+internal/profile ok
+internal/profilerecord SKIP no test files
+internal/race SKIP no test files
+internal/reflectlite ok
+internal/runtime/atomic BUILD internal/runtime/atomic_test.TestStorepNoWB: call of internal/runtime/atomic.StorepNoWB, which is not defined
+internal/runtime/cgroup BUILD internal/runtime/cgroup.parseCPUMount: call of internal/runtime/cgroup.throw, which is not defined
+internal/runtime/exithook SKIP no test files
+internal/runtime/gc SKIP no test files
+internal/runtime/gc/internal/gen SKIP no test files
+internal/runtime/gc/scan ok
+internal/runtime/maps SKIP no test files
+internal/runtime/math ok
+internal/runtime/pprof/label SKIP no test files
+internal/runtime/sys ok
+internal/runtime/wasitest ok
+internal/saferio ok
+internal/singleflight ok
+internal/strconv ok
+internal/stringslite SKIP no test files
+internal/sync ok
+internal/synctest FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+internal/syscall/execenv SKIP no test files
+internal/syscall/unix ok
+internal/sysinfo ok
+internal/syslist SKIP no test files
+internal/testenv ok
+internal/testhash SKIP no test files
+internal/testlog SKIP no test files
+internal/testpty SKIP no test files
+internal/trace ok
+internal/trace/internal/testgen SKIP no test files
+internal/trace/internal/tracev1 ok
+internal/trace/raw SKIP no test files
+internal/trace/testtrace ok
+internal/trace/tracev2 ok
+internal/trace/traceviewer SKIP no test files
+internal/trace/traceviewer/format SKIP no test files
+internal/trace/version SKIP no test files
+internal/txtar SKIP no test files
+internal/types/errors ok
+internal/unsafeheader ok
+internal/wasmgc SKIP no test files
+internal/xcoff ok
+internal/zstd ok
+io ok
+io/fs ok
+io/ioutil ok
+iter ok
+log ok
+log/internal SKIP no test files
+log/slog FAIL --- FAIL: TestJSONAndTextHandlers TestJSONAllocs TestCallDepth TestAlloc TestRecordSource | handler_test.go:577:
+log/slog/internal SKIP no test files
+log/slog/internal/benchmarks ok
+log/slog/internal/buffer ok
+log/syslog ok
+maps ok
+math ok
+math/big ok
+math/big/internal/asmgen ok
+math/bits ok
+math/cmplx ok
+math/rand ok
+math/rand/v2 ok
+mime ok
+mime/multipart FAIL fatal error: crypto/rand: failed to read random data (see https://go.dev/issue/66821): Value too large for defined data type
+mime/quotedprintable ok
+net FAIL RuntimeError: unreachable
+net/http BUILD net/http.TestParseRangeLimit.func1: call of runtime/metrics.runtime_readMetrics, which is not defined
+net/http/cgi ok
+net/http/cookiejar ok
+net/http/fcgi ok
+net/http/httptest FAIL RuntimeError: unreachable
+net/http/httptrace ok
+net/http/httputil ok
+net/http/internal ok
+net/http/internal/ascii ok
+net/http/internal/http2 FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+net/http/internal/httpcommon SKIP no test files
+net/http/internal/httpsfv SKIP no test files
+net/http/internal/testcert SKIP no test files
+net/http/pprof FAIL panic: runtime/pprof: converting profile: truncated profile
+net/internal/cgotest ok
+net/internal/socktest SKIP no test files
+net/mail ok
+net/netip ok
+net/rpc ok
+net/rpc/jsonrpc ok
+net/smtp FAIL RuntimeError: unreachable
+net/textproto ok
+net/url ok
+os ok
+os/exec ok
+os/exec/internal/fdtest ok
+os/signal ok
+os/user ok
+path ok
+path/filepath ok
+plugin ok
+reflect ok
+reflect/internal/example1 SKIP no test files
+reflect/internal/example2 SKIP no test files
+regexp ok
+regexp/syntax ok
+runtime SKIP no test files (package runtime is src/runtime/wasmgc under GOWASM=gc; its tests are those of src/runtime, which do not apply)
+runtime/coverage SKIP no test files
+runtime/debug FAIL --- FAIL: TestReadGCStats TestFreeOSMemory TestWriteHeapDumpNonempty | garbage_test.go:34: stats.NumGC = 0, but mstats.NumGC = 1
+runtime/metrics BUILD runtime/metrics_test.TestNames: call of runtime/metrics_test.runtime_readMetricNames, which is not defined
+runtime/pprof BUILD runtime/pprof.TestBlockProfileBias: call of runtime.blockevent, which is not defined
+runtime/race SKIP no test files
+runtime/trace FAIL --- FAIL: TestFlightRecorderDoubleStart TestFlightRecorderEnabled TestFlightRecorderWriteToDisabled TestFlightRecorderConcurrentWriteTo TestFlightRecorder TestFlightRecorderStartStop ... | flightrecorder_test.go:24: unexpected error on Start: runtime error: tracing is not supported
+runtime/wasmgc SKIP no test files
+slices ok
+sort ok
+strconv ok
+strings ok
+structs SKIP no test files
+sync ok
+sync/atomic FAIL panic: test timed out after 2m0s
+syscall FAIL --- FAIL: TestClearenv | env_unix_test.go:109: GODEBUG=panicnil=1 did not allow for nil panic: got &runtime.PanicNilError{_:[0]*runtime.PanicNilError{}}
+testing ok
+testing/cryptotest FAIL RuntimeError: unreachable
+testing/fstest ok
+testing/internal/testdeps SKIP no test files
+testing/iotest ok
+testing/quick ok
+testing/slogtest ok
+testing/synctest FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+text/scanner ok
+text/tabwriter ok
+text/template ok
+text/template/parse ok
+time FAIL --- FAIL: TestTimerGC | tick_test.go:305: After did not get GC'ed: 10000 allocations
+time/tzdata SKIP no test files
+unicode ok
+unicode/utf16 ok
+unicode/utf8 ok
+unique FAIL RuntimeError: unreachable
+unsafe SKIP no test files
+uuid FAIL panic: synctest is not supported with GOWASM=gc [recovered]
+vendor/golang.org/x/crypto/chacha20 SKIP no test files
+vendor/golang.org/x/crypto/chacha20poly1305 SKIP no test files
+vendor/golang.org/x/crypto/cryptobyte SKIP no test files
+vendor/golang.org/x/crypto/cryptobyte/asn1 SKIP no test files
+vendor/golang.org/x/crypto/hkdf SKIP no test files
+vendor/golang.org/x/crypto/internal/alias SKIP no test files
+vendor/golang.org/x/crypto/internal/poly1305 SKIP no test files
+vendor/golang.org/x/net/dns/dnsmessage SKIP no test files
+vendor/golang.org/x/net/http/httpguts SKIP no test files
+vendor/golang.org/x/net/http/httpproxy SKIP no test files
+vendor/golang.org/x/net/http2/hpack SKIP no test files
+vendor/golang.org/x/net/http3 SKIP no test files
+vendor/golang.org/x/net/idna SKIP no test files
+vendor/golang.org/x/net/internal/http3 SKIP no test files
+vendor/golang.org/x/net/internal/httpcommon SKIP no test files
+vendor/golang.org/x/net/internal/quic/quicwire SKIP no test files
+vendor/golang.org/x/net/nettest SKIP no test files
+vendor/golang.org/x/net/quic SKIP no test files
+vendor/golang.org/x/sys/cpu SKIP no test files
+vendor/golang.org/x/text/secure/bidirule SKIP no test files
+vendor/golang.org/x/text/transform SKIP no test files
+vendor/golang.org/x/text/unicode/bidi SKIP no test files
+vendor/golang.org/x/text/unicode/norm SKIP no test files
+weak FAIL panic: test timed out after 2m0s
