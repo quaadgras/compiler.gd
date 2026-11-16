@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>GOWASM=gc in a browser</title>
+<!-- index.html?wasm=prog.wasm&arg=a&arg=b: run a GOWASM=gc program with
+     lib/wasm/wasm_gc_browser.js. Serve the repository's root: python3 -m
+     http.server, then open /doc/gd/bench/wasmgc/browser/. -->
+<pre id="out"></pre>
+<script type="module">
+import { runGo } from '../../../../../lib/wasm/wasm_gc_browser.js';
+const q = new URLSearchParams(location.search);
+const out = document.getElementById('out');
+const print = (t) => { out.textContent += t + '\n'; };
+const t0 = performance.now();
+try {
+  const code = await runGo(q.get('wasm') || 'hello.wasm', {
+    args: ['prog', ...q.getAll('arg')],
+    stdout: print,
+    stderr: print,
+  });
+  print(`[exit ${code} after ${Math.round(performance.now() - t0)} ms]`);
+} catch (e) {
+  print('[error] ' + (e.stack || e));
+}
+document.title = 'done';
+</script>

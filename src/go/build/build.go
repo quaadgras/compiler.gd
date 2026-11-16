@@ -810,6 +810,10 @@ func (ctxt *Context) Import(path string, srcDir string, mode ImportMode) (*Packa
 	}
 
 Found:
+	if ctxt.wasmGC() && p.Goroot && p.ImportPath == "runtime" && ctxt.isDir(ctxt.joinPath(p.Dir, "wasmgc")) {
+		// GOWASM=gc has a runtime of its own.
+		p.Dir = ctxt.joinPath(p.Dir, "wasmgc")
+	}
 	if p.Root != "" {
 		p.SrcRoot = ctxt.joinPath(p.Root, "src")
 		p.PkgRoot = ctxt.joinPath(p.Root, "pkg")
@@ -920,6 +924,16 @@ Found:
 		case ".S", ".sx":
 			// special case for cgo, handled at end
 			Sfiles = append(Sfiles, name)
+			continue
+		case ".s":
+			if ctxt.wasmGC() {
+				// GOWASM=gc has no assembly: Go has the same.
+				p.IgnoredOtherFiles = append(p.IgnoredOtherFiles, name)
+				continue
+			}
+			if list := fileListForExt(p, ext); list != nil {
+				*list = append(*list, name)
+			}
 			continue
 		default:
 			if list := fileListForExt(p, ext); list != nil {
@@ -2043,4 +2057,10 @@ func IsLocalImport(path string) bool {
 // no longer vary by architecture; they are compile, link, .o, and a.out, respectively.
 func ArchChar(goarch string) (string, error) {
 	return "?", errors.New("architecture letter no longer used")
+}
+
+// wasmGC reports whether ctxt builds for GOWASM=gc, which has no
+// assembly and a runtime of its own (src/runtime/wasmgc).
+func (ctxt *Context) wasmGC() bool {
+	return ctxt.GOARCH == "wasm" && slices.Contains(ctxt.ToolTags, "wasm.gc")
 }

@@ -2755,7 +2755,7 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		switch e := recover().(type) {
 		case nil:
 		case gcUnsupported:
-			if os.Getenv("GOWASMGC_QUIET") == "" {
+			if os.Getenv("GOWASMGC_NOTES") != "" {
 				fmt.Fprintf(os.Stderr, "GOWASM=gc: %s traps: not supported yet: %s\n", f.Name, string(e))
 			}
 			s.OnWasmStackSkipped = 0

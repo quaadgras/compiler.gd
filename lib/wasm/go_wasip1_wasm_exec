@@ -3,6 +3,13 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
+# GOWASM=gc programs need WebAssembly GC and JSPI: node runs them.
+case ",$GOWASM," in
+	*,gc,*)
+		NODE_OPTIONS= exec node --disable-warning=ExperimentalWarning --stack-size=4000 "$(dirname "$0")/wasm_gc_node.mjs" "$1" "${@:2}"
+		;;
+esac
+
 case "$GOWASIRUNTIME" in
 	"wasmedge")
 		exec wasmedge --dir=/ --env PWD="$PWD" --env PATH="$PATH" ${GOWASIRUNTIMEARGS:-} "$1" "${@:2}"

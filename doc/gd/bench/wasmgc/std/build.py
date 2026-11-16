@@ -15,7 +15,7 @@ import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
 OUT = os.path.join(HERE, 'out')
-ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM='gc', NODE_OPTIONS='')
+ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM='gc', NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
 HOSTENV = dict(os.environ, GOROOT=GOROOT)
 for k in ('GOOS', 'GOARCH', 'GOWASM'):
     HOSTENV.pop(k, None)

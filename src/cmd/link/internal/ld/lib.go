@@ -511,7 +511,9 @@ func (ctxt *Link) findLibPath(libname string) string {
 
 func (ctxt *Link) loadlib() {
 	var flags uint32
-	if ctxt.flagCheckLinkname {
+	// (GOWASM=gc: the runtime, runtime/wasmgc, provides by linkname
+	// what the regular one provides by other means.)
+	if ctxt.flagCheckLinkname && !(buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC) {
 		flags |= loader.FlagCheckLinkname
 	}
 	switch ctxt.FlagStrictDups {

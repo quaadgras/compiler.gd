@@ -29,6 +29,12 @@ func linstore16(addr uintptr, v uint16)
 func linstore32(addr uintptr, v uint32)
 func linstore64(addr uintptr, v uint64)
 
+// heapstart returns the size of linear memory as the module made it:
+// where the blocks of linalloc start.
+//
+//go:wasmimport gd heapstart
+func heapstart() uint64
+
 // linsize returns the size of linear memory.
 func linsize() uintptr
 
@@ -95,8 +101,9 @@ func linalloc(n uintptr) uintptr {
 		return b + linheader
 	}
 	if linbrk == 0 {
-		// Past everything the linker laid out. Memory grown is zero.
-		linbrk = linsize()
+		// Past everything the linker laid out (the size of the memory
+		// before the host reserved more). Memory grown is zero.
+		linbrk = uintptr(heapstart())
 	}
 	b := linbrk
 	linbrk += 1 << c

@@ -1,26 +1,30 @@
-936 pass, 26 fail, 3 skipped (of 965 "// run" tests)
+927 pass, 35 fail, 3 skipped (of 965 "// run" tests)
 
     5  run: panic: runtime error: invalid memory address or nil pointer derefer
+    3  run: panic: not all finalizers are called
+    3  run: panic: never GC'd
     2  run: fatal error: all goroutines are asleep - deadlock!
-    1  run: timeout
+    2  run: panic: heap object finalized at the wrong time
+    1  run: panic: some of the tiny objects are not profiled
     1  run: panic: main.allocInterleavedN:N want objects in [N: N], got
     1  run: table index is out of bounds in main.main
     1  run: panic: initN
     1  run: panic: fail
     1  run: panic: N
+    1  run: panic: heap object never collected
+    1  run: panic: bad liveness
     1  run: panic: unsafe.SliceData NxN != NxN
     1  run: panic: FAIL
     1  run: memory access out of bounds in wasm.load.l
     1  run: panic: got ?:N; want /foo/bar.go:N (or suffix /foo/bar.go)
     1  run: panic: runtime error: index out of range N with length N [recover
     1  run: panic: got ?:N; want ??:N (or suffix /??)
-    1  run: panic: normal: p failed
-    1  run: panic: GC early
+    1  run: memory access out of bounds in wasm.load.r
     1  run: panic: ERRORS
-    1  run: panic: never GC'd
     1  run: BUG: defer called from ?:0, want issue5856.go:28
-    1  run: file:///home/quentin/git/go/doc/gd/bench/wasmgc/compiled/run.mjs:92
+    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:103
     1  run: illegal cast in main.testN
+    1  run: timeout
 
 PASS 235.go 
 PASS alias1.go 
@@ -73,7 +77,7 @@ PASS copy.go
 PASS ddd.go 
 PASS decl.go 
 PASS defer.go 
-PASS deferfin.go 
+FAIL deferfin.go run: panic: not all finalizers are called
 PASS defernil.go 
 PASS deferprint.go 
 FAIL devirtualization_nil_panics.go run: panic: runtime error: invalid memory address or nil pointer derefer
@@ -82,7 +86,7 @@ PASS divmod.go
 PASS env.go 
 PASS escape.go 
 PASS escape3.go 
-FAIL finprofiled.go run: timeout
+FAIL finprofiled.go run: panic: some of the tiny objects are not profiled
 PASS fixedbugs/bug000.go 
 PASS fixedbugs/bug002.go 
 PASS fixedbugs/bug003.go 
@@ -383,8 +387,8 @@ PASS fixedbugs/issue23837.go
 PASS fixedbugs/issue24419.go 
 PASS fixedbugs/issue24449.go 
 PASS fixedbugs/issue24488.go 
-FAIL fixedbugs/issue24491a.go run: panic: normal: p failed
-FAIL fixedbugs/issue24491b.go run: panic: GC early
+FAIL fixedbugs/issue24491a.go run: memory access out of bounds in wasm.load.r
+FAIL fixedbugs/issue24491b.go run: fatal error: all goroutines are asleep - deadlock!
 PASS fixedbugs/issue24503.go 
 PASS fixedbugs/issue24547.go 
 PASS fixedbugs/issue24763.go 
@@ -410,7 +414,7 @@ FAIL fixedbugs/issue27201.go run: panic: runtime error: invalid memory address o
 PASS fixedbugs/issue27278.go 
 PASS fixedbugs/issue27289.go 
 PASS fixedbugs/issue27518a.go 
-PASS fixedbugs/issue27518b.go 
+FAIL fixedbugs/issue27518b.go run: panic: heap object finalized at the wrong time
 PASS fixedbugs/issue27695.go 
 PASS fixedbugs/issue27695b.go 
 PASS fixedbugs/issue27695c.go 
@@ -451,7 +455,7 @@ PASS fixedbugs/issue31987.go
 PASS fixedbugs/issue32175.go 
 PASS fixedbugs/issue32187.go 
 PASS fixedbugs/issue32288.go 
-PASS fixedbugs/issue32477.go 
+FAIL fixedbugs/issue32477.go run: panic: heap object finalized at the wrong time
 PASS fixedbugs/issue32560.go 
 PASS fixedbugs/issue33062.go 
 PASS fixedbugs/issue33724.go 
@@ -505,7 +509,7 @@ PASS fixedbugs/issue4618.go
 PASS fixedbugs/issue4620.go 
 PASS fixedbugs/issue46304.go 
 PASS fixedbugs/issue4667.go 
-PASS fixedbugs/issue46725.go 
+FAIL fixedbugs/issue46725.go run: panic: never GC'd
 PASS fixedbugs/issue4748.go 
 PASS fixedbugs/issue4752.go 
 PASS fixedbugs/issue47771.go 
@@ -546,11 +550,11 @@ PASS fixedbugs/issue53653.go
 PASS fixedbugs/issue53702.go 
 PASS fixedbugs/issue5373.go 
 PASS fixedbugs/issue54220.go 
-PASS fixedbugs/issue54343.go 
+FAIL fixedbugs/issue54343.go run: panic: never GC'd
 PASS fixedbugs/issue54348.go 
 PASS fixedbugs/issue54467.go 
 PASS fixedbugs/issue54632.go 
-FAIL fixedbugs/issue5493.go run: fatal error: all goroutines are asleep - deadlock!
+FAIL fixedbugs/issue5493.go run: panic: not all finalizers are called
 PASS fixedbugs/issue54959.go 
 PASS fixedbugs/issue55122.go 
 PASS fixedbugs/issue55122b.go 
@@ -642,7 +646,7 @@ PASS fixedbugs/issue7690.go
 PASS fixedbugs/issue7740.go 
 PASS fixedbugs/issue77613.go 
 PASS fixedbugs/issue77779.go 
-FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/doc/gd/bench/wasmgc/compiled/run.mjs:92
+FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:103
 PASS fixedbugs/issue78262.go 
 PASS fixedbugs/issue78295.go 
 PASS fixedbugs/issue78303_1.go 
@@ -824,15 +828,15 @@ PASS simassign.go
 PASS sizeof.go 
 PASS slicecap.go 
 PASS stack.go 
-PASS stackobj.go 
+FAIL stackobj.go run: panic: heap object never collected
 PASS stackobj2.go 
-PASS stackobj3.go 
+FAIL stackobj3.go run: panic: bad liveness
 PASS strcopy.go 
 PASS string_lit.go 
 PASS stringrange.go 
 PASS struct0.go 
 PASS switch.go 
-PASS tinyfin.go 
+FAIL tinyfin.go run: panic: not all finalizers are called
 PASS turing.go 
 PASS typeparam/absdiff.go 
 PASS typeparam/absdiff2.go 
@@ -840,7 +844,7 @@ PASS typeparam/absdiff3.go
 PASS typeparam/adder.go 
 PASS typeparam/append.go 
 PASS typeparam/boundmethod.go 
-PASS typeparam/chans.go 
+FAIL typeparam/chans.go run: timeout
 PASS typeparam/combine.go 
 PASS typeparam/cons.go 
 PASS typeparam/devirtualize1.go 

@@ -121,7 +121,9 @@ def run(cfg, name, imports):
     if r.returncode:
         return name, 'FAIL', 'link: ' + reason(r.stderr + r.stdout)
     try:
-        r = sh(['node', '--disable-warning=ExperimentalWarning', '--stack-size=4000', RUNNER, base + '.wasm'], timeout=60)
+        # (Output compared as Go's test/run.go does: stdout and stderr together.)
+        r = subprocess.run(['node', '--disable-warning=ExperimentalWarning', '--stack-size=4000', RUNNER, base + '.wasm'],
+                           env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=60)
     except subprocess.TimeoutExpired:
         return name, 'FAIL', 'run: timeout'
     finally:
@@ -131,7 +133,7 @@ def run(cfg, name, imports):
             except OSError:
                 pass
     if r.returncode:
-        why = reason(r.stdout + r.stderr)
+        why = reason(r.stdout)
         if 'unreachable' in why and 'not supported yet' in notes:
             why = 'unsupported: ' + reason(notes)
         return name, 'FAIL', 'run: ' + why

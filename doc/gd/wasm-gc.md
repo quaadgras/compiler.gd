@@ -874,3 +874,52 @@ linker refuses); V8 sometimes aborts with `IsOnCentralStack` in tests
 with many goroutines (seen in `compress/flate` and `regexp` runs).
 Conformance: 923 of 965 (`issue34123` now fails: it wants line numbers
 from `runtime.Callers`).
+
+### Stage 8: the go command and browsers (2026-11-16)
+
+**`go build`, `go run`, `go test`.** With `GOOS=wasip1 GOARCH=wasm
+GOWASM=gc` the go command builds a program as `std/build.py` does:
+
+- the `wasm.gc` tool tag (which buildcfg sets for GOWASM=gc) makes
+  `go/build` and the go command's module index (`cmd/go/internal/
+  modindex`) leave out assembly files and take package `runtime` from
+  `src/runtime/wasmgc`;
+- the go command does not pass `-complete` (functions without a body
+  are intrinsics, or pushed by the runtime with linknames), and the
+  linker does not check linknames for GOWASM=gc;
+- `lib/wasm/go_wasip1_wasm_exec` runs a GOWASM=gc binary with node and
+  `lib/wasm/wasm_gc_node.mjs` (with `$GOROOT/lib/wasm` on `PATH`, as for
+  wasip1), so `go run` and `go test` work:
+
+      GOOS=wasip1 GOARCH=wasm GOWASM=gc PATH=$GOROOT/lib/wasm:$PATH go test -short strings
+
+- The compiler's notes about functions it compiles to a trap are printed
+  only with `GOWASMGC_NOTES=1` (`std/build.py` sets it).
+
+**The host, in three parts** (`lib/wasm`):
+
+- `wasm_gc.js`: what does not depend on where the program runs: the
+  scheduler (goroutines on JSPI stacks), the `gd` imports, the
+  registries for linear memory and cleanups. `runWasmGC(module, host)`.
+- `wasm_gc_node.mjs`: node's WASI (files under `/`), and the V8 flags
+  node allows: no Liftoff, eager compilation, `gc()`.
+- `wasm_gc_browser.js`: `runGo(url, {args, env, stdout, stderr})`, with
+  a WASI of its own: standard output and error by line, the clocks,
+  random numbers, arguments and environment; no files (ENOSYS). A
+  browser cannot be asked to collect, so `runtime.GC` only yields, and
+  the host reserves 64 MB up front (memory that grows on a goroutine's
+  stack can make V8 collect there); the runtime starts its heap where
+  the module's memory ended (`gd.heapstart`), so the reserve is used.
+  `bench/wasmgc/browser/index.html?wasm=prog.wasm&arg=...` runs one.
+
+Checked in Chrome 152 (the built-in browser of the desktop app): hello
+world; goroutines, channels, timers, reflect, regexp, a 100 MB
+allocation past the reserve, `runtime.GC`; the benchmark (trees 344 ms,
+frames 901 ms: Chrome starts in its baseline compiler, which node is
+told not to); recursion 10000 deep. A large function recursing deeply
+(`regexp/syntax`'s compiler on `x{1,1000}`) overflows the stack, which
+under node `--no-liftoff` avoids. Not checked: Firefox and Safari
+(WebAssembly GC and JSPI there).
+
+`runtime.SetFinalizer` does nothing now (the user's choice; cleanups
+work). `MemStats.Frees` is not counted.

@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -131,6 +132,10 @@ var (
 // using the index, for instance because the index is disabled, or the package
 // is not in a module.
 func GetPackage(modroot, pkgdir string) (*IndexPackage, error) {
+	if wasmGC() && filepath.Clean(pkgdir) == filepath.Join(cfg.GOROOTsrc, "runtime") {
+		// GOWASM=gc has a runtime of its own.
+		pkgdir = filepath.Join(pkgdir, "wasmgc")
+	}
 	mi, err := GetModule(modroot)
 	if err == nil {
 		return mi.Package(relPath(pkgdir, modroot)), nil
@@ -537,6 +542,16 @@ func (rp *IndexPackage) Import(bctxt build.Context, mode build.ImportMode) (p *b
 		case ".S", ".sx":
 			// special case for cgo, handled at end
 			Sfiles = append(Sfiles, name)
+			continue
+		case ".s":
+			if wasmGC() {
+				// GOWASM=gc has no assembly: Go has the same.
+				p.IgnoredOtherFiles = append(p.IgnoredOtherFiles, name)
+				continue
+			}
+			if list := fileListForExt(p, ext); list != nil {
+				*list = append(*list, name)
+			}
 			continue
 		default:
 			if list := fileListForExt(p, ext); list != nil {
@@ -1048,4 +1063,10 @@ func (r *reader) tokpos() token.Position {
 		Line:     r.int(),
 		Column:   r.int(),
 	}
+}
+
+// wasmGC reports whether the build is for GOWASM=gc, which has no
+// assembly and a runtime of its own (src/runtime/wasmgc).
+func wasmGC() bool {
+	return cfg.BuildContext.GOARCH == "wasm" && slices.Contains(cfg.BuildContext.ToolTags, "wasm.gc")
 }

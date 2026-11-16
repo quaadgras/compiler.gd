@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 
@@ -96,6 +97,11 @@ func (gcToolchain) gc(b *Builder, a *Action, archive string, importcfg, embedcfg
 		case "sync", "syscall", "time":
 			extFiles++
 		}
+	}
+	if cfg.Goarch == "wasm" && slices.Contains(cfg.BuildContext.ToolTags, "wasm.gc") {
+		// GOWASM=gc: functions without a body are intrinsics, or
+		// linknames to the runtime (which has no assembly).
+		extFiles++
 	}
 	if extFiles == 0 {
 		defaultGcFlags = append(defaultGcFlags, "-complete")

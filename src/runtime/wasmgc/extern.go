@@ -7,7 +7,6 @@
 package runtime
 
 import (
-	"internal/abi"
 	"internal/goos"
 	"unsafe"
 )
@@ -38,7 +37,7 @@ func GC() {
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
 	hostgc()
-	// The cleanups and finalizers the collection queued may run.
+	// The cleanups the collection queued may run.
 	Gosched()
 }
 
@@ -51,82 +50,13 @@ func KeepAlive(x any) {}
 // SetFinalizer does nothing.
 //
 // TODO: with the host's FinalizationRegistry.
-// SetFinalizer sets the finalizer of the object obj points to. The host
-// tells when the object is collected (as for AddCleanup), and the
-// finalizer runs on a goroutine with a copy of the object as it was when
-// the finalizer was set: the object itself is gone. Only finalizers of
-// one pointer or interface argument run; a pointer that is not to the
-// start of an object, or to linear memory, has none.
+// SetFinalizer does nothing: finalizers never run, which the
+// specification allows (a finalizer needs the object, which the host
+// has collected when it says so). runtime.AddCleanup works.
 func SetFinalizer(obj any, finalizer any) {
-	e := efaceOf(&obj)
-	if e._type == 0 {
+	if efaceOf(&obj)._type == 0 {
 		panic(plainError("runtime.SetFinalizer: first argument is nil"))
 	}
-	p := e.data
-	if p == nil || trylinaddr(p) != 0 || boxoff(p) != 0 {
-		return
-	}
-	key := uintptr(p) // (its identity)
-	if id, ok := finalizerOf[key]; ok {
-		delete(finalizers, id)
-		delete(finalizerOf, key)
-		hostuncleanup(id)
-	}
-	if finalizer == nil {
-		return
-	}
-	ft := (*abi.FuncType)(unsafe.Pointer(efaceOf(&finalizer)._type))
-	if ft.Kind() != abi.Func || ft.InCount != 1 {
-		panic(plainError("runtime.SetFinalizer: second argument is not a function of one argument"))
-	}
-	var asIface bool
-	switch ft.InSlice()[0].Kind() {
-	case abi.Pointer, abi.UnsafePointer:
-	case abi.Interface:
-		asIface = true
-	default:
-		return
-	}
-	if ft.OutCount != 0 {
-		return // (its results would not match the call)
-	}
-	if finalizers == nil {
-		finalizers = make(map[int64]finalizerRec)
-		finalizerOf = make(map[uintptr]int64)
-	}
-	if cleanups == nil {
-		cleanups = make(map[int64]func())
-	}
-	cleanupExport = runcleanup
-	lastCleanup++
-	finalizers[lastCleanup] = finalizerRec{fn: efaceOf(&finalizer).data, arg: gcclone(p), typ: e._type, iface: asIface}
-	finalizerOf[key] = lastCleanup
-	hostcleanup(p, lastCleanup)
-}
-
-// A finalizerRec is a finalizer to run, and the copy of its object.
-type finalizerRec struct {
-	fn    unsafe.Pointer // the func value
-	arg   unsafe.Pointer
-	typ   uintptr // of the object, for an argument that is an interface
-	iface bool
-}
-
-var (
-	finalizers  map[int64]finalizerRec
-	finalizerOf map[uintptr]int64 // by the identity of the object
-)
-
-func runFinalizer(r finalizerRec) {
-	fv := r.fn
-	if r.iface {
-		var x any
-		e := efaceOf(&x)
-		e._type, e.data = r.typ, r.arg
-		(*(*func(any))(unsafe.Pointer(&fv)))(x)
-		return
-	}
-	(*(*func(unsafe.Pointer))(unsafe.Pointer(&fv)))(r.arg)
 }
 
 func GOMAXPROCS(n int) int { return 1 }
@@ -519,26 +449,15 @@ func runcleanup(id int64) {
 	systemstack(func() { queueCleanup(id) })
 }
 
-// queueCleanup queues the cleanup or finalizer id, whose object was
+// queueCleanup queues the cleanup id, whose object was
 // collected, for a goroutine to run.
 func queueCleanup(id int64) {
-	if r, ok := finalizers[id]; ok {
-		delete(finalizers, id)
-		for k, v := range finalizerOf {
-			if v == id {
-				delete(finalizerOf, k)
-				break
-			}
-		}
-		finalizerQueue = append(finalizerQueue, r)
-	} else {
-		fn := cleanups[id]
-		if fn == nil {
-			return
-		}
-		delete(cleanups, id)
-		cleanupQueue = append(cleanupQueue, fn)
+	fn := cleanups[id]
+	if fn == nil {
+		return
 	}
+	delete(cleanups, id)
+	cleanupQueue = append(cleanupQueue, fn)
 	if !cleanupG {
 		cleanupG = true
 		newproc(runCleanups)
@@ -546,21 +465,13 @@ func queueCleanup(id int64) {
 }
 
 func runCleanups() {
-	for len(cleanupQueue) > 0 || len(finalizerQueue) > 0 {
-		if len(finalizerQueue) > 0 {
-			r := finalizerQueue[0]
-			finalizerQueue = finalizerQueue[1:]
-			runFinalizer(r)
-			continue
-		}
+	for len(cleanupQueue) > 0 {
 		fn := cleanupQueue[0]
 		cleanupQueue = cleanupQueue[1:]
 		fn()
 	}
 	cleanupG = false
 }
-
-var finalizerQueue []finalizerRec
 
 //go:wasmimport gd cleanup
 func hostcleanup(p unsafe.Pointer, id int64)
