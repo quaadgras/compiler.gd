@@ -935,3 +935,21 @@ Go does, `fatal error: stack overflow`, which deferred calls do not see.
 Packages that bound recursion against hostile input bound it lower under
 GOWASM=gc (`internal/wasmgc.Enabled`): asn1 at 500, xml at 1,000, glob at
 1,000.
+
+### Files and lines
+
+The assembler leaves, after the code of each function, a table of where
+the code of each line starts (`wasm.GCLines`); the linker, which knows
+where the indexes it writes make the code longer, turns them into the
+custom section `go.lines`: the names of the files, then for each
+function where each line starts as an offset in the module. It is left
+out with `-s`. The host reads it when first asked. A pc is the function
+(its index << 16) plus, in its low bits, which entry of the function's
+table the code is at, so `runtime.Caller`, `CallersFrames`,
+`Func.FileLine` and `debug.Stack` report files and lines.
+
+V8 gives the position of the call for each frame of a stack trace. Where
+it has inlined the function called (a small one: `runtime.panicnil`),
+the position it gives for the caller can be that of an earlier
+instruction, so the line of a nil dereference or an index out of range
+is sometimes that of the statement before.

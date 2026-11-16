@@ -449,3 +449,57 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 	}
 	return true
 }
+
+// GCLines names the relocation that marks, in a function of GOWASM=gc,
+// the end of its code: after it is the table of the lines of the code,
+// from which the linker makes the module's (see gcLineTable).
+const GCLines = "wasm.lines"
+
+// A gcLineTable is the table of the files and lines of a function's
+// code: an entry where they change, as the offset in the code since
+// the last entry (unsigned LEB128), the line since the last (signed),
+// and 0 for the same file or else 1 + the length of the name of the
+// file and the name.
+type gcLineTable struct {
+	buf   bytes.Buffer
+	files []string
+	off   int
+	file  string
+	line  int32
+}
+
+func (t *gcLineTable) add(ctxt *obj.Link, off int, p *obj.Prog) {
+	pos := ctxt.InnermostPos(p.Pos)
+	if !pos.IsKnown() {
+		return
+	}
+	if t.files == nil {
+		t.files = ctxt.PosTable.FileTable()
+	}
+	file, line := "", int32(pos.RelLine())
+	if i := pos.FileIndex(); i >= 0 && i < len(t.files) {
+		file = t.files[i]
+	}
+	if file == t.file && line == t.line {
+		return
+	}
+	writeUleb128(&t.buf, uint64(off-t.off))
+	writeSleb128(&t.buf, int64(line-t.line))
+	if file == t.file {
+		writeUleb128(&t.buf, 0)
+	} else {
+		writeUleb128(&t.buf, uint64(len(file)+1))
+		t.buf.WriteString(file)
+	}
+	t.off, t.file, t.line = off, file, line
+}
+
+func (t *gcLineTable) write(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer) {
+	s.AddRel(ctxt, obj.Reloc{
+		Type: objabi.R_WASMTYPE,
+		Off:  int32(w.Len()),
+		Siz:  0,
+		Sym:  ctxt.Lookup(GCLines),
+	})
+	w.Write(t.buf.Bytes())
+}

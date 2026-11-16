@@ -1378,7 +1378,11 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		updateLocalSP(w)
 	}
 
+	var lines gcLineTable
 	for p := s.Func().Text; p != nil; p = p.Link {
+		if gc != nil {
+			lines.add(ctxt, w.Len(), p)
+		}
 		if gc != nil && assembleGC(ctxt, s, w, p) {
 			continue
 		}
@@ -1614,6 +1618,9 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 
 	w.WriteByte(0x0b) // end
 
+	if gc != nil {
+		lines.write(ctxt, s, w)
+	}
 	s.P = w.Bytes()
 }
 

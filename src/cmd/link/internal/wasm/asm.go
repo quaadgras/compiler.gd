@@ -55,6 +55,7 @@ type wasmFunc struct {
 	Name   string
 	Type   uint32
 	Code   []byte
+	Lines  []gcLine // GOWASM=gc: the lines of the code
 }
 
 type wasmFuncType struct {

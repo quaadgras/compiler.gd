@@ -746,10 +746,20 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		relocs := ldr.Relocs(fn)
 		P := ldr.Data(fn)
 		off := int32(0)
+		// After the code may be the table of its lines (see
+		// wasm.GCLines), whose offsets are in the code as it is here:
+		// grown records where the linker's indexes went.
+		var lines []byte
+		var grown []gcGrowth
 		for ri := 0; ri < relocs.Count(); ri++ {
 			r := relocs.At(ri)
 			rs := r.Sym()
 			if r.Siz() == 0 {
+				if r.Type() == objabi.R_WASMTYPE && ldr.SymName(rs) == wasm.GCLines {
+					lines = P[r.Off():]
+					P = P[:r.Off()]
+					continue
+				}
 				if r.Type() == objabi.R_WASMTYPE && typ < 0 {
 					typ = int64(l.typeIndex(ldr.SymName(rs)))
 				}
@@ -782,6 +792,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			default:
 				ldr.Errorf(fn, "bad reloc type %d (%s)", r.Type(), sym.RelocName(ctxt.Arch, r.Type()))
 			}
+			grown = append(grown, gcGrowth{off, int32(wfn.Len()) - off})
 		}
 		wfn.Write(P[off:])
 		if typ < 0 {
@@ -789,6 +800,9 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			typ = 0
 		}
 		fns[i] = &wasmFunc{Name: name, Type: uint32(typ), Code: wfn.Bytes()}
+		if !ctxt.FlagS {
+			fns[i].Lines = gcLines(lines, grown)
+		}
 	}
 
 	// The start function, which creates the objects, and the
@@ -959,7 +973,18 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	section(sectionDataCount, func(w *bytes.Buffer) {
 		writeUleb128(w, uint64(1+len(sects)))
 	})
-	writeCodeSec(ctxt, fns)
+	// (As writeCodeSec, noting where each function is.)
+	starts := make([]int64, len(fns))
+	{
+		sizeOffset := writeSecHeader(ctxt, sectionCode)
+		writeUleb128(ctxt.Out, uint64(len(fns)))
+		for i, fn := range fns {
+			writeUleb128(ctxt.Out, uint64(len(fn.Code)))
+			starts[i] = ctxt.Out.Offset()
+			ctxt.Out.Write(fn.Code)
+		}
+		writeSecSize(ctxt, sizeOffset)
+	}
 	section(sectionData, func(w *bytes.Buffer) {
 		writeUleb128(w, uint64(1+len(sects)))
 		// Segment 0 is passive: the data of the arrays.
@@ -980,4 +1005,123 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// table is kept on other ports), and package testing finds its
 	// frames by name.
 	writeNameSec(ctxt, len(hostImports), fns)
+	if !ctxt.FlagS {
+		writeLinesSec(ctxt, len(hostImports), fns, starts)
+	}
+}
+
+// A gcGrowth is how much longer the code of a function is, from an
+// offset in the code the compiler wrote, for the indexes the linker
+// wrote there.
+type gcGrowth struct {
+	off, by int32
+}
+
+// A gcLine is where, in the code of a function, the code of a line
+// starts.
+type gcLine struct {
+	off  int32
+	file string
+	line int32
+}
+
+// gcLines reads the table of lines the compiler left after the code of
+// a function (see wasm.GCLines in cmd/internal/obj/wasm).
+func gcLines(tab []byte, grown []gcGrowth) []gcLine {
+	var lines []gcLine
+	var off, line int32
+	var file string
+	g := 0
+	for len(tab) > 0 {
+		d, n := binary.Uvarint(tab)
+		tab = tab[n:]
+		off += int32(d)
+		l, n := gcSleb(tab)
+		tab = tab[n:]
+		line += int32(l)
+		f, n := binary.Uvarint(tab)
+		tab = tab[n:]
+		if f > 0 {
+			file = string(tab[:f-1])
+			tab = tab[f-1:]
+		}
+		for g < len(grown) && grown[g].off <= off {
+			g++
+		}
+		at := off
+		if g > 0 {
+			at += grown[g-1].by
+		}
+		if k := len(lines); k > 0 && lines[k-1].off == at {
+			lines = lines[:k-1] // (no code for it)
+		}
+		lines = append(lines, gcLine{at, file, line})
+	}
+	return lines
+}
+
+// gcSleb reads a signed LEB128.
+func gcSleb(b []byte) (int64, int) {
+	var v int64
+	var shift uint
+	for i, c := range b {
+		v |= int64(c&0x7f) << shift
+		shift += 7
+		if c&0x80 == 0 {
+			if shift < 64 && c&0x40 != 0 {
+				v |= -1 << shift
+			}
+			return v, i + 1
+		}
+	}
+	return v, len(b)
+}
+
+// writeLinesSec writes the custom section "go.lines", from which the
+// host tells runtime.Caller and the like the file and line of a place
+// in the code (see lib/wasm/wasm_gc.js). It is omitted with -s. In it
+// are the names of the files, then each function that has lines: its
+// index, where its code is in the module, and where each line starts
+// in it (the offset since the last, the file, the line since the last).
+func writeLinesSec(ctxt *ld.Link, nimport int, fns []*wasmFunc, starts []int64) {
+	sizeOffset := writeSecHeader(ctxt, sectionCustom)
+	writeName(ctxt.Out, "go.lines")
+	files := make(map[string]int)
+	var names []string
+	nfn := 0
+	for _, fn := range fns {
+		if len(fn.Lines) > 0 {
+			nfn++
+		}
+		for _, l := range fn.Lines {
+			if _, ok := files[l.file]; !ok {
+				files[l.file] = len(names)
+				names = append(names, l.file)
+			}
+		}
+	}
+	writeUleb128(ctxt.Out, uint64(len(names)))
+	for _, name := range names {
+		if root := buildcfg.GOROOT; root != "" && strings.HasPrefix(name, "$GOROOT/") {
+			name = root + name[len("$GOROOT"):]
+		}
+		writeName(ctxt.Out, name)
+	}
+	writeUleb128(ctxt.Out, uint64(nfn))
+	for i, fn := range fns {
+		if len(fn.Lines) == 0 {
+			continue
+		}
+		writeUleb128(ctxt.Out, uint64(nimport+i))
+		writeUleb128(ctxt.Out, uint64(starts[i]))
+		writeUleb128(ctxt.Out, uint64(len(fn.Lines)))
+		var off, line int32
+		for _, l := range fn.Lines {
+			writeUleb128(ctxt.Out, uint64(l.off-off))
+			writeUleb128(ctxt.Out, uint64(files[l.file]))
+			writeSleb128(ctxt.Out, int64(l.line-line))
+			off, line = l.off, l.line
+		}
+	}
+	writeSecSize(ctxt, sizeOffset)
 }

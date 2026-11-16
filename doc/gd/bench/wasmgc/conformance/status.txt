@@ -1,6 +1,6 @@
-932 pass, 24 fail, 9 skipped (of 965 "// run" tests)
+938 pass, 18 fail, 9 skipped (of 965 "// run" tests)
 
-    5  run: panic: runtime error: invalid memory address or nil pointer derefer
+    4  run: panic: runtime error: invalid memory address or nil pointer derefer
     2  run: fatal error: all goroutines are asleep - deadlock!
     1  run: panic: some of the tiny objects are not profiled
     1  run: panic: main.allocInterleavedN:N want objects in [N: N], got
@@ -10,14 +10,9 @@
     1  run: panic: N
     1  run: panic: FAIL
     1  run: memory access out of bounds in wasm.load.l
-    1  run: panic: got ?:N; want /foo/bar.go:N (or suffix /foo/bar.go)
     1  run: panic: runtime error: index out of range N with length N [recover
-    1  run: panic: got ?:N; want ??:N (or suffix /??)
     1  run: memory access out of bounds in wasm.load.r
-    1  run: panic: ERRORS
     1  run: panic: never GC'd
-    1  run: BUG: defer called from ?:0, want issue5856.go:28
-    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:126
     1  run: illegal cast in main.testN
 
 PASS 235.go 
@@ -74,7 +69,7 @@ PASS defer.go
 SKIP deferfin.go finalizers
 PASS defernil.go 
 PASS deferprint.go 
-FAIL devirtualization_nil_panics.go run: panic: runtime error: invalid memory address or nil pointer derefer
+PASS devirtualization_nil_panics.go 
 PASS divide.go 
 PASS divmod.go 
 PASS env.go 
@@ -329,7 +324,7 @@ PASS fixedbugs/issue17039.go
 PASS fixedbugs/issue17381.go 
 PASS fixedbugs/issue17640.go 
 PASS fixedbugs/issue17752.go 
-FAIL fixedbugs/issue18149.go run: panic: got ?:N; want /foo/bar.go:N (or suffix /foo/bar.go)
+PASS fixedbugs/issue18149.go 
 PASS fixedbugs/issue18410.go 
 PASS fixedbugs/issue18595.go 
 PASS fixedbugs/issue18636.go 
@@ -361,7 +356,7 @@ PASS fixedbugs/issue21963.go
 FAIL fixedbugs/issue22083.go run: panic: runtime error: index out of range N with length N [recover
 PASS fixedbugs/issue22326.go 
 PASS fixedbugs/issue22605.go 
-FAIL fixedbugs/issue22662.go run: panic: got ?:N; want ??:N (or suffix /??)
+PASS fixedbugs/issue22662.go 
 PASS fixedbugs/issue22683.go 
 PASS fixedbugs/issue22781.go 
 PASS fixedbugs/issue22881.go 
@@ -427,7 +422,7 @@ PASS fixedbugs/issue29312.go
 PASS fixedbugs/issue29362.go 
 PASS fixedbugs/issue29362b.go 
 PASS fixedbugs/issue29402.go 
-FAIL fixedbugs/issue29504.go run: panic: ERRORS
+PASS fixedbugs/issue29504.go 
 PASS fixedbugs/issue29735.go 
 PASS fixedbugs/issue29943.go 
 PASS fixedbugs/issue30041.go 
@@ -565,7 +560,7 @@ PASS fixedbugs/issue5809.go
 PASS fixedbugs/issue5820.go 
 PASS fixedbugs/issue58300.go 
 PASS fixedbugs/issue58300b.go 
-FAIL fixedbugs/issue5856.go run: BUG: defer called from ?:0, want issue5856.go:28
+PASS fixedbugs/issue5856.go 
 PASS fixedbugs/issue58671.go 
 PASS fixedbugs/issue59293.go 
 PASS fixedbugs/issue59338.go 
@@ -640,7 +635,7 @@ PASS fixedbugs/issue7690.go
 PASS fixedbugs/issue7740.go 
 PASS fixedbugs/issue77613.go 
 PASS fixedbugs/issue77779.go 
-FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:126
+PASS fixedbugs/issue78081.go 
 PASS fixedbugs/issue78262.go 
 PASS fixedbugs/issue78295.go 
 PASS fixedbugs/issue78303_1.go 

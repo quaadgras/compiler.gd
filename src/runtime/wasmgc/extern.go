@@ -78,15 +78,30 @@ func LockOSThread()      {}
 func UnlockOSThread()    {}
 
 // Caller and Callers walk the host's stack trace: a pc is a function
-// (as on js/wasm, its index << 16) plus one. Files and lines are not
-// known.
+// (as on js/wasm, its index << 16) plus one and, if the program was not
+// linked with -s, which of its lines (see pcFileLine).
 func Caller(skip int) (pc uintptr, file string, line int, ok bool) {
 	var pcs [1]uintptr
 	if Callers(skip+2, pcs[:]) == 0 {
 		return 0, "", 0, false
 	}
-	return pcs[0], "?", 0, true
+	file, line = pcFileLine(pcs[0])
+	return pcs[0], file, line, true
 }
+
+// pcFileLine returns the file and line of the code at pc, which the
+// host knows from the module's section of lines: "?" and 0 without it.
+func pcFileLine(pc uintptr) (file string, line int) {
+	var buf [512]byte
+	r := pcline(uint64(pc), uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	if r == 0 {
+		return "?", 0
+	}
+	return string(buf[:r>>32]), int(uint32(r))
+}
+
+//go:wasmimport gd pcline
+func pcline(pc, addr uint64, n uint32) uint64
 
 //go:noinline
 func Callers(skip int, pc []uintptr) int {
@@ -121,7 +136,12 @@ func Stack(buf []byte, all bool) int {
 	b = append(b, "goroutine 1 [running]:\n"...)
 	for _, pc := range pcs[:n] {
 		b = append(b, FuncForPC(pc).Name()...)
-		b = append(b, "(...)\n\t?:0\n"...)
+		b = append(b, "(...)\n\t"...)
+		file, line := pcFileLine(pc)
+		b = append(b, file...)
+		b = append(b, ':')
+		b = appendInt(b, line)
+		b = append(b, " +0x0\n"...) // (as Go's: the offset is not known)
 	}
 	if len(b) > len(buf) {
 		b = b[:len(buf)]
@@ -161,7 +181,8 @@ func (ci *Frames) Next() (frame Frame, more bool) {
 	pc := ci.callers[0]
 	ci.callers = ci.callers[1:]
 	f := FuncForPC(pc)
-	return Frame{PC: pc, Func: f, Function: f.Name(), File: "?", Entry: pc &^ 0xffff}, len(ci.callers) > 0
+	file, line := pcFileLine(pc)
+	return Frame{PC: pc, Func: f, Function: f.Name(), File: file, Line: line, Entry: pc &^ 0xffff}, len(ci.callers) > 0
 }
 
 // FuncForPC returns a Func that knows nothing, or nil for 0.
@@ -195,7 +216,32 @@ func (f *Func) Entry() uintptr {
 //
 //go:wasmimport gd funcname
 func funcname(pc, addr uint64, n uint32) uint32
-func (f *Func) FileLine(pc uintptr) (file string, line int) { return "", 0 }
+
+// FileLine returns the file and line of the code at pc.
+func (f *Func) FileLine(pc uintptr) (file string, line int) {
+	if file, line = pcFileLine(pc); line == 0 {
+		return "", 0
+	}
+	return file, line
+}
+
+func appendInt(b []byte, v int) []byte {
+	if v < 0 {
+		b = append(b, '-')
+		v = -v
+	}
+	var d [20]byte
+	i := len(d)
+	for {
+		i--
+		d[i] = byte('0' + v%10)
+		v /= 10
+		if v == 0 {
+			break
+		}
+	}
+	return append(b, d[i:]...)
+}
 
 // A MemStats records statistics about the memory allocator: none are
 // known here.

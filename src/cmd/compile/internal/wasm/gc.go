@@ -14,6 +14,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
 	"cmd/internal/objabi"
+	"cmd/internal/src"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -88,8 +89,9 @@ type gcGen struct {
 	// recovering from a panic throws (see runtime/wasmgc/panic.go).
 	hasDefer bool
 
-	scratchI32, scratchRef, scratchI64 int32 // scratch locals, or -1
-	scratchNil                         int32 // the scratch local of intToPtr, or -1
+	scratchI32, scratchRef, scratchI64 int32    // scratch locals, or -1
+	scratchNil                         int32    // the scratch local of intToPtr, or -1
+	pos                                src.XPos // of the value being generated
 
 	// typedLoc is, for a pointer that is the base of more than one
 	// access, a local that holds it as a reference to the type of
@@ -505,7 +507,16 @@ func (g *gcGen) get(v *ssa.Value, want32 bool) {
 	switch {
 	case v.OnWasmStack:
 		g.s.OnWasmStackSkipped--
+		// Computed where it is used, but at its own line: a load that
+		// faults is of the statement that has it (issue27201.go).
+		old := g.pos
+		if v.Pos.IsKnown() {
+			g.pos = v.Pos
+			g.s.SetPos(v.Pos)
+		}
 		g.onStack(v, !want32)
+		g.pos = old
+		g.s.SetPos(old)
 		if !want32 || gcIs32(v) {
 			return
 		}
@@ -2971,6 +2982,7 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		}
 		for _, v := range b.Values {
 			s.SetPos(v.Pos)
+			g.pos = v.Pos
 			g.value(v)
 		}
 		g.blockEnd(b)
