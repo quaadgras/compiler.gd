@@ -39,14 +39,25 @@ var bubbleGen uint64
 // bubble. unlockf, if not nil, is called once the goroutine counts as
 // blocked: if it returns false, the goroutine does not park.
 func goparkIdle(why string, unlockf func(gp *g) bool) {
-	gp := curg
-	b := gp.bubble
-	if b == nil {
-		if unlockf == nil || unlockf(gp) {
+	if curg.bubble == nil {
+		if unlockf == nil || unlockf(curg) {
 			gopark(why)
 		}
 		return
 	}
+	bubblePark(why, unlockf)
+}
+
+// bubblePark and bubbleGoEnd are set by synctest.Run, so that a
+// program without bubbles does not have their code.
+var (
+	bubblePark  func(why string, unlockf func(gp *g) bool)
+	bubbleGoEnd func(gp *g)
+)
+
+func goparkIdle1(why string, unlockf func(gp *g) bool) {
+	gp := curg
+	b := gp.bubble
 	b.active++
 	gp.durable = true
 	b.running--
@@ -62,6 +73,8 @@ func goparkIdle(why string, unlockf func(gp *g) bool) {
 
 // wakeDurable is called by goready: a goroutine durably blocked in a
 // bubble runs again.
+//
+//go:noinline
 func wakeDurable(gp *g) {
 	gp.durable = false
 	gp.bubble.running++
@@ -74,7 +87,9 @@ func (b *synctestBubble) goStart() {
 	b.running++
 }
 
-func (b *synctestBubble) goEnd(gp *g) {
+func goEnd(gp *g) {
+	b := gp.bubble
+	gp.bubble = nil
 	b.total--
 	b.running--
 	if gp == b.main {
@@ -140,6 +155,7 @@ func synctest_Run(f func()) {
 	if gp.bubble != nil {
 		panic("synctest.Run called from within a synctest bubble")
 	}
+	bubblePark, bubbleGoEnd = goparkIdle1, goEnd
 	bubbleGen++
 	b := &synctestBubble{id: bubbleGen, total: 1, running: 1, root: gp}
 	const synctestBaseTime = 946684800000000000 // midnight UTC 2000-01-01
@@ -155,6 +171,7 @@ func synctest_Run(f func()) {
 	for {
 		b.runTimers()
 		goparkIdle("synctest.Run", func(gp *g) bool {
+			b := gp.bubble
 			// active counts what Run holds and what goparkIdle
 			// holds while it calls this.
 			if b.running == 0 && b.active == 2 {
@@ -216,6 +233,7 @@ func synctest_Wait() {
 	}
 	b.waiting = true
 	goparkIdle("synctest.Wait", func(gp *g) bool {
+		b := gp.bubble
 		if b.running == 0 && b.active == 0 {
 			throw("running == 0 && active == 0")
 		}

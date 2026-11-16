@@ -207,9 +207,8 @@ func gdone(gp *g) {
 	gp.dead = true
 	gp.fn = nil
 	ngoroutine--
-	if b := gp.bubble; b != nil {
-		gp.bubble = nil
-		b.goEnd(gp)
+	if gp.bubble != nil {
+		bubbleGoEnd(gp)
 	}
 	if gp == &maing {
 		return
