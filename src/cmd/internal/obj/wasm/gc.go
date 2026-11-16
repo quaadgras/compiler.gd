@@ -166,9 +166,26 @@ const (
 	// may not be (V8's, when it has inlined that function). The host
 	// reads it: it is exported as "panicline".
 	GCGlobalPanicLine = 5
+	// GCGlobalDefer is the global (an i32) that holds the address of
+	// the record of the innermost running function that defers calls,
+	// in its frame in linear memory (0 if there is none): where the
+	// record of the function that defers around it is (GCDeferPrev),
+	// where in the function the call it is making is (GCDeferSite, as
+	// ALinePlace gives it), and the function, as a func value has it
+	// (GCDeferFunc). Such a function's code is in a try block, and V8's
+	// optimizing compiler gives, for a frame that is at a call inside
+	// one, the position of the last call before the block: the host
+	// takes the place from the record instead. It is exported as
+	// "deferframe"; the runtime keeps it by goroutine.
+	GCGlobalDefer = 6
 	// GCGlobals is the number of globals before those of the data
 	// symbols.
-	GCGlobals = 6
+	GCGlobals = 7
+
+	GCDeferPrev = 0
+	GCDeferSite = 4
+	GCDeferFunc = 8
+	GCDeferSize = 16
 
 	// GCStackRedZone is the room below GCGlobalStackLo that the
 	// runtime switches segments in.
@@ -405,6 +422,14 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 	case ATypeConst:
 		w.WriteByte(0x41) // i32.const
 		gcLayoutRef(ctxt, s, w, gcTypeAddr(p))
+	case ALinePlace:
+		w.WriteByte(0x41) // i32.const
+		s.AddRel(ctxt, obj.Reloc{
+			Type: objabi.R_WASMTYPE,
+			Off:  int32(w.Len()),
+			Siz:  4, // actually variable sized
+			Sym:  ctxt.Lookup(GCPlace),
+		})
 	case ARefNull:
 		w.WriteByte(0xD0)
 		w.WriteByte(GCHeapEq)
@@ -483,6 +508,11 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 // the end of its code: after it is the table of the lines of the code,
 // from which the linker makes the module's (see gcLineTable).
 const GCLines = "wasm.lines"
+
+// GCPlace names the relocation of ALinePlace: the linker, which knows
+// where the indexes it writes make the code longer, writes the offset
+// of the instruction in the function.
+const GCPlace = "wasm.place"
 
 // A gcLineTable is the table of the files and lines of a function's
 // code: an entry where they change, as the offset in the code since

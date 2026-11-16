@@ -53,7 +53,8 @@ type g struct {
 	// the channels of a select, only the first to try does it.
 	param      *sudog
 	selectDone bool
-	waiting    string // why it is not running, for the deadlock report
+	waiting    string  // why it is not running, for the deadlock report
+	deferRec   uintptr // its innermost function that defers (lindefer), while it is parked
 
 	fipsIndicator uint8 // crypto/internal/fips140's service indicator, per goroutine
 
@@ -79,6 +80,13 @@ func park(id uint32)
 
 //go:wasmimport gd exit
 func exit(code int32)
+
+// lindefer and linsetdefer return and set the record of the innermost
+// running function that defers calls, which is in its frame (see
+// wasm.GCGlobalDefer in cmd/internal/obj/wasm): each goroutine has its
+// own. The compiler replaces calls to them.
+func lindefer() uintptr
+func linsetdefer(rec uintptr)
 
 // linsetsp sets the top of the stack in linear memory. The compiler
 // replaces a call to it by the instruction.
@@ -134,9 +142,11 @@ func gopark(why string) {
 	gp.waiting = why
 	gp.sp = linsp()
 	gp.stacklo = linsplim()
+	gp.deferRec = lindefer()
 	park(uint32(gp.id))
 	linsetsp(gp.sp)
 	linsetsplim(gp.stacklo)
+	linsetdefer(gp.deferRec)
 	gp.waiting = ""
 }
 
@@ -185,7 +195,9 @@ func gorun(id int64) {
 	gp.stacklo = gp.stack + stackRedZone
 	linsetsplim(gp.stacklo)
 	linsetsp(gp.stack + gStackSize)
+	linsetdefer(0)
 	gp.fn()
+	linsetdefer(0)
 	// The goroutine's stack is freed: what the host calls next (sched)
 	// must not keep its frame there, where an allocation could
 	// overwrite it. It runs on a stack of the host's calls.

@@ -584,6 +584,9 @@ const (
 	// ATypeConst pushes, as an i32, the layout of the struct type
 	// To.Sym: what the header of an object of it holds.
 	ATypeConst
+	// ALinePlace pushes, as an i32, the place of the instruction in
+	// the code of the function as it is linked: its offset.
+	ALinePlace
 	// ARefBlock opens a block whose result is a non-null reference to
 	// the type To.Sym.
 	ARefBlock

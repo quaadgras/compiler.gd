@@ -29,8 +29,8 @@ type hchan struct {
 	recvx    uint
 	recvq    waitq
 	sendq    waitq
-	timer    bool   // the channel of a timer: it looks unbuffered
-	tm       *timer // its timer, which may be due (see maybeRunChan)
+	timer    bool            // the channel of a timer: it looks unbuffered
+	tm       *timer          // its timer, which may be due (see maybeRunChan)
 	bubble   *synctestBubble // the synctest bubble it was made in
 }
 

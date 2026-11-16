@@ -83,6 +83,13 @@ type gcGen struct {
 	csp       int32 // the top of the stack on entry: where the caller's frame ends
 	newSeg    int32 // set if the frame is in a segment of the stack of its own
 
+	// deferRec is the offset, in the frame of a function that defers
+	// calls, of its record for the host (see wasm.GCGlobalDefer), and
+	// sites is set once the record is made: the place of each call is
+	// then noted in it.
+	deferRec int64
+	sites    bool
+
 	// hasDefer is set if the function defers calls. Its frame is
 	// then what the runtime knows its deferred calls by, and its
 	// body is in a try block that catches the exception that
@@ -2256,6 +2263,7 @@ func (g *gcGen) zeroObject(t *types.Type) *obj.LSym {
 // runtime calls the function of the runtime named.
 func (g *gcGen) runtime(name string) {
 	g.panicLine(name)
+	g.site()
 	p := g.prog(obj.ACALL)
 	p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: g.ctxt.LookupABI(name, obj.ABIInternal)}
 }
@@ -2360,6 +2368,7 @@ func (g *gcGen) panicLine(name string) {
 func (g *gcGen) call(v *ssa.Value) {
 	aux := v.Aux.(*ssa.AuxCall)
 	args := v.Args[:len(v.Args)-1]
+	g.site()
 	if aux.Fn != nil && v.Op == ssa.OpWasmLoweredStaticCall {
 		g.panicLine(aux.Fn.Name)
 	}
@@ -2488,6 +2497,12 @@ func (g *gcGen) call(v *ssa.Value) {
 	case "runtime.linsplim":
 		g.global(wasm.AGlobalGet, wasm.GCGlobalStackLo)
 		g.prog(wasm.AI64ExtendI32U)
+	case "runtime.lindefer":
+		g.global(wasm.AGlobalGet, wasm.GCGlobalDefer)
+		g.prog(wasm.AI64ExtendI32U)
+	case "runtime.linsetdefer":
+		g.get(args[0], true)
+		g.global(wasm.AGlobalSet, wasm.GCGlobalDefer)
 	case "runtime.linsetsp":
 		g.get(args[0], true)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
@@ -3039,6 +3054,12 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 			}
 		}
 	}
+	if g.hasDefer {
+		// The record of the function for the host (see
+		// wasm.GCGlobalDefer).
+		g.deferRec = g.frameSize
+		g.frameSize += wasm.GCDeferSize
+	}
 	if (g.hasDefer || len(g.frame) > 0 || calls && (!f.Frontend().Func().Wrapper() || inlined)) && g.frameSize == 0 {
 		// (A variable of size zero still has an address.)
 		g.frameSize = 8 // so that no other frame is at the same address
@@ -3072,6 +3093,21 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		}
 		g.local(wasm.ALocalGet, g.fp)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
+	}
+	if g.hasDefer {
+		// The record becomes the innermost: its function, and the
+		// one before it.
+		g.local(wasm.ALocalGet, g.fp)
+		g.global(wasm.AGlobalGet, wasm.GCGlobalDefer)
+		g.prog(wasm.AI32Store).To = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferPrev}
+		g.local(wasm.ALocalGet, g.fp)
+		g.prog(wasm.AI64Const).From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: f.Frontend().Func().LSym}
+		g.prog(wasm.AI64Store).To = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferFunc}
+		g.local(wasm.ALocalGet, g.fp)
+		i32Const(s, -1) // no call yet
+		g.prog(wasm.AI32Store).To = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferSite}
+		g.deferRecord()
+		g.sites = true
 	}
 	names := make([]*ir.Name, 0, len(g.objs))
 	for _, b := range f.Blocks {
@@ -3566,10 +3602,15 @@ func (g *gcGen) value(v *ssa.Value) {
 // that follows a deferproc that "returns 1" does; otherwise the
 // exception goes on up.
 func (g *gcGen) recovery() {
+	// (The functions the exception came through have returned.)
+	g.deferRecord()
 	g.runtime("runtime.recoveringFrame")
 	g.frameID()
 	g.prog(wasm.AI64Ne)
 	g.prog(wasm.AIf)
+	g.local(wasm.ALocalGet, g.fp)
+	g.prog(wasm.AI32Load).From = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferPrev}
+	g.global(wasm.AGlobalSet, wasm.GCGlobalDefer)
 	g.prog(wasm.ATHROW).From = obj.Addr{Type: obj.TYPE_CONST, Offset: wasm.GCTagRecover}
 	g.prog(wasm.AEnd)
 	// The frames below are gone, and the segments of the stack they
@@ -3596,6 +3637,28 @@ func (g *gcGen) recovery() {
 	}
 }
 
+// deferRecord makes the record of the function, which defers calls,
+// the innermost (see wasm.GCGlobalDefer).
+func (g *gcGen) deferRecord() {
+	g.local(wasm.ALocalGet, g.fp)
+	if g.deferRec != 0 {
+		i32Const(g.s, int32(g.deferRec))
+		g.prog(wasm.AI32Add)
+	}
+	g.global(wasm.AGlobalSet, wasm.GCGlobalDefer)
+}
+
+// site notes, in the record of a function that defers calls, where
+// the call that follows is: the engine may not give it.
+func (g *gcGen) site() {
+	if !g.sites {
+		return
+	}
+	g.local(wasm.ALocalGet, g.fp)
+	g.prog(wasm.ALinePlace)
+	g.prog(wasm.AI32Store).To = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferSite}
+}
+
 // frameID pushes what identifies the frame of the function to the
 // runtime: its address on the stack in linear memory.
 func (g *gcGen) frameID() {
@@ -3617,6 +3680,13 @@ func (g *gcGen) callerSP() {
 }
 
 func (g *gcGen) popFrame() {
+	if g.hasDefer {
+		// The record of the function that defers around this one is
+		// the innermost again.
+		g.local(wasm.ALocalGet, g.fp)
+		g.prog(wasm.AI32Load).From = obj.Addr{Type: obj.TYPE_CONST, Offset: g.deferRec + wasm.GCDeferPrev}
+		g.global(wasm.AGlobalSet, wasm.GCGlobalDefer)
+	}
 	if g.frameSize > 0 {
 		g.local(wasm.ALocalGet, g.newSeg)
 		g.prog(wasm.AIf)

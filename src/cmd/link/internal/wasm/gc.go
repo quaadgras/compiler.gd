@@ -819,6 +819,10 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			case objabi.R_WASMIMPORT:
 				writeSleb128(wfn, hostImportMap[rs])
 			case objabi.R_WASMTYPE:
+				if r.Siz() == 4 { // where the instruction is in the function (wasm.GCPlace)
+					writeSleb128(wfn, int64(wfn.Len()))
+					break
+				}
 				if r.Siz() == 3 { // the layout of a struct, for the header of an object
 					writeSleb128(wfn, l.layout(ldr.SymName(rs)))
 					break
@@ -940,7 +944,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	section(sectionGlobal, func(w *bytes.Buffer) {
 		writeUleb128(w, uint64(wasm.GCGlobals+len(l.globals)))
 		for i := 0; i < wasm.GCGlobals+len(l.globals); i++ {
-			if i == wasm.GCGlobalSP || i == wasm.GCGlobalID || i == wasm.GCGlobalStackLo || i == wasm.GCGlobalPanicLine {
+			if i == wasm.GCGlobalSP || i == wasm.GCGlobalID || i == wasm.GCGlobalStackLo || i == wasm.GCGlobalPanicLine || i == wasm.GCGlobalDefer {
 				w.Write([]byte{wasm.GCTypeI32, 0x01})
 				switch i {
 				case wasm.GCGlobalSP:
@@ -985,7 +989,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	}
 	section(sectionExport, func(w *bytes.Buffer) {
-		writeUleb128(w, uint64(3+len(exports)))
+		writeUleb128(w, uint64(4+len(exports)))
 		for _, e := range exports {
 			writeName(w, e.name)
 			w.WriteByte(0x00) // func export
@@ -1000,6 +1004,9 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		writeName(w, "panicline")
 		w.WriteByte(0x03) // global export
 		writeUleb128(w, wasm.GCGlobalPanicLine)
+		writeName(w, "deferframe")
+		w.WriteByte(0x03) // global export
+		writeUleb128(w, wasm.GCGlobalDefer)
 	})
 	section(sectionStart, func(w *bytes.Buffer) {
 		writeUleb128(w, uint64(start))
