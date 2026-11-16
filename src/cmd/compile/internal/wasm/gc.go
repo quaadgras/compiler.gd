@@ -1890,6 +1890,18 @@ func (g *gcGen) fuseStores(v *ssa.Value, t *types.Type) map[int64]*ssa.Value {
 		return true
 	}
 	var fused map[int64]*ssa.Value
+	// written are the bytes stores before have written that were not
+	// fused: a later store there must stay after them.
+	type span struct{ off, end int64 }
+	var written []span
+	overwrites := func(off, size int64) bool {
+		for _, w := range written {
+			if off < w.end && w.off < off+size {
+				return true
+			}
+		}
+		return false
+	}
 	for _, u := range b.Values[pos[v]+1:] {
 		if u == ptr || u.Op == ssa.OpSelectN && u.Args[0] == v {
 			continue
@@ -1912,12 +1924,15 @@ func (g *gcGen) fuseStores(v *ssa.Value, t *types.Type) map[int64]*ssa.Value {
 			l, ok := leaves[off]
 			st := u.Aux.(*types.Type)
 			if addr == ptr && ok && l.kind != 'a' && fused[off] == nil && st.Size() == gcLeafSize(l) && !w.OnWasmStack && !self(w) &&
-				early(w) && gcFusible(l.kind, g.wtype(st), g.wtype(w.Type)) {
+				early(w) && gcFusible(l.kind, g.wtype(st), g.wtype(w.Type)) && !overwrites(off, st.Size()) {
 				if fused == nil {
 					fused = make(map[int64]*ssa.Value)
 				}
 				fused[off] = u
 				continue
+			}
+			if addr == ptr {
+				written = append(written, span{off, off + st.Size()})
 			}
 		}
 		if uses(u) {
