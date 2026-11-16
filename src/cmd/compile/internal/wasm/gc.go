@@ -3679,6 +3679,26 @@ func (g *gcGen) colorLocals() {
 			}
 		}
 	}
+	// argReads calls do for each value whose local the code for u
+	// reads. A pointer compared that was converted from an integer is
+	// compared as the integer (see OpEqPtr), which is then read there.
+	argReads := func(u *ssa.Value, do func(*ssa.Value)) {
+		for _, a := range u.Args {
+			reads(a, do)
+		}
+		if u.Op != ssa.OpEqPtr && u.Op != ssa.OpNeqPtr {
+			return
+		}
+		for _, a := range u.Args {
+			for (a.Op == ssa.OpCopy || a.Op == ssa.OpConvert || a.Op == ssa.OpWasmLoweredConvert) && g.wtype(a.Type) == 'r' {
+				a = a.Args[0]
+				if g.wtype(a.Type) == 'l' {
+					reads(a, do)
+					break
+				}
+			}
+		}
+	}
 	// defs[u] are the values that the code for u sets: u, or the
 	// results of a call.
 	sel := make(map[ssa.ID][]*ssa.Value)
@@ -3725,9 +3745,7 @@ func (g *gcGen) colorLocals() {
 				if u.Op == ssa.OpPhi {
 					continue
 				}
-				for _, a := range u.Args {
-					reads(a, func(x *ssa.Value) { live[x.ID] = true })
-				}
+				argReads(u, func(x *ssa.Value) { live[x.ID] = true })
 			}
 			for id := range live {
 				if !liveIn[b.ID][id] {
@@ -3791,9 +3809,7 @@ func (g *gcGen) colorLocals() {
 			if u.Op == ssa.OpPhi {
 				continue
 			}
-			for _, a := range u.Args {
-				reads(a, func(x *ssa.Value) { live[x.ID] = true })
-			}
+			argReads(u, func(x *ssa.Value) { live[x.ID] = true })
 		}
 		// The phis of a block are all set before it starts.
 		for _, p := range phis {
