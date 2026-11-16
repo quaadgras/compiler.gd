@@ -9,6 +9,10 @@ not in STD are skipped.
 
 The results go to status.txt: one line per test, and a summary of the reasons
 for the failures.
+
+With GOWASIRUNTIME=chromium (or firefox) in the environment the tests run in
+that browser (lib/wasm/wasm_gc_browser_exec.mjs), and the results go to
+status-chromium.txt.
 """
 import collections, concurrent.futures, os, re, subprocess, sys
 
@@ -27,6 +31,10 @@ TOOL = os.path.join(GOROOT, 'pkg/tool',
                     subprocess.check_output([GO, 'env', 'GOHOSTOS'], env=HOSTENV, text=True).strip() + '_' +
                     subprocess.check_output([GO, 'env', 'GOHOSTARCH'], env=HOSTENV, text=True).strip())
 RUNNER = os.path.join(HERE, '../compiled/run.mjs')
+BROWSER = os.environ.get('GOWASIRUNTIME', '')
+if BROWSER not in ('chromium', 'firefox'):
+    BROWSER = ''
+STATUS = os.path.join(HERE, 'status-%s.txt' % BROWSER if BROWSER else 'status.txt')
 
 # The packages of the standard library that tests may import: those
 # that build are importable.
@@ -158,8 +166,12 @@ def run(cfg, name, imports):
         return name, 'FAIL', 'link: ' + reason(r.stderr + r.stdout)
     try:
         # (Output compared as Go's test/run.go does: stdout and stderr together.)
-        r = subprocess.run(['node', '--disable-warning=ExperimentalWarning', '--stack-size=4000', RUNNER, base + '.wasm'],
-                           env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=60)
+        cmd = ['node', '--disable-warning=ExperimentalWarning', '--stack-size=4000', RUNNER, base + '.wasm']
+        env = ENV
+        if BROWSER:
+            cmd = [os.path.join(GOROOT, 'lib/wasm/go_wasip1_wasm_exec'), base + '.wasm']
+            env = dict(ENV, GOWASM='gc', GOWASIRUNTIME=BROWSER)
+        r = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=60)
     except subprocess.TimeoutExpired:
         return name, 'FAIL', 'run: timeout'
     finally:
@@ -197,7 +209,7 @@ def main():
     summary += ['%5d  %s' % (n, w) for w, n in why.most_common()]
     print('\n'.join(summary[:40]))
     if not args:
-        with open(os.path.join(HERE, 'status.txt'), 'w') as f:
+        with open(STATUS, 'w') as f:
             f.write('\n'.join(summary) + '\n\n')
             for name, status, w in sorted(results):
                 f.write('%s %s %s\n' % (status, name, w))

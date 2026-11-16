@@ -420,4 +420,4 @@ weak ok
 #
 # needs linker helper change: none found.
 # Survey of 2026-11-17 (release, after the merge of wasmgc-pkgtests): FAIL 5 SKIP 124 ok 251 (BUILD 0)
-# Survey of 2026-11-17 (with the skips above and the fix for log/slog): FAIL 0 SKIP 124 ok 256 (BUILD 0)
+# Survey of 2026-11-17 (with the skips above and the fix for log/slog): FAIL 0 SKIP 124 ok 255 (BUILD 0)

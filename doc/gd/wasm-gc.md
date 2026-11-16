@@ -1113,9 +1113,9 @@ the start function (15 KB), and the functions above by field (31 KB).
 
 `std/survey.py` runs `go test -short` over every package of `go list
 std` and keeps `std/status.txt`: a line for each package, the tests
-that are skipped and why, and what is known of each failure. Of the 256
+that are skipped and why, and what is known of each failure. Of the 255
 packages that have tests, 204 passed at the first survey (43 failed, 8
-did not build); 251 pass now, and none fails to build. The five left:
+did not build); 250 pass now, and none fails to build. The five left:
 `runtime/pprof`, `runtime/trace` and `net/http/pprof` want profiles and
 traces the runtime does not have; `net/http`'s `TestTransportGCRequest`
 waits for a cleanup that does not run (what holds the request is not
@@ -1136,7 +1136,7 @@ nowhere when the buffer was an object (`syscall.RandomGet`), the
 identity of a pointer to the first element of an array a struct starts
 with, `memmove` within one object.
 
-Later the same day all 256 pass. `log/slog` by a fix: V8's optimizing
+Later the same day all 255 pass. `log/slog` by a fix: V8's optimizing
 compiler gives, for every call inside a try block, the position of the
 last call before the block, and the code of a function that defers is
 in one, so `runtime.Callers` had the wrong line there and missed the
@@ -1153,3 +1153,73 @@ its variables last held, live or not, as the host's collector has no
 liveness for the frames of a suspended stack. That one is a property
 of the design worth knowing: a goroutine that waits in a loop holds on
 to the last thing it handled.
+
+### Stage 11: the tests in a browser (2026-11-17)
+
+`GOWASIRUNTIME=chromium` (or `firefox`) makes `go_wasip1_wasm_exec` run
+a program in that browser instead of under node, so `go test` and `go
+run` work there:
+
+    GOOS=wasip1 GOARCH=wasm GOWASM=gc GOWASIRUNTIME=chromium go test strings
+
+`lib/wasm/wasm_gc_browser_exec.mjs` starts the browser, headless and
+with a profile of its own, on a page of a server it runs on the same
+machine; the page runs the program in a worker with
+`wasm_gc_browser.js`. A browser has no files, and tests need them
+(their data, temporary directories, the standard output), so the worker
+gets the system interface from the server: `runGo` takes
+`options.wasi`, the calls a page has more of, and each of these sends
+its arguments and the memory it reads to the server, which makes the
+call with node's WASI on a memory of its own, at the same addresses,
+and sends back what was written. That is node's interface as
+`wasm_gc_node.mjs` has it, corrections included (now in
+`wasm_gc_wasi_node.mjs`, which both use), so a test sees the same
+files either way. The worker must wait for each answer. A synchronous
+request takes 750 µs; the calls go instead through memory the worker
+shares with a second worker that has a WebSocket to the server (150 µs
+a call, against 6 under node: `os`'s tests take 52 s, not 7). The
+runner starts the browser again if its page does not load, ends it if
+the runner is killed, and reports a page that crashed.
+
+The browser is as its users have it: no flags of the engine. Chromium
+155, with the results in `conformance/status-chromium.txt` and
+`std/status-chromium.txt`:
+
+- the language's tests: 944 of 947 pass (all 947 under node);
+- the standard library: 240 of 255 packages pass (all 255 under node).
+
+The failures are what a page cannot ask of the engine:
+
+- **The stack.** Ten of them are `fatal error: stack overflow`
+  (`stack.go`, `stackobj2.go`; `encoding/json`, `encoding/json/jsontext`,
+  `encoding/xml`, `fmt`, `go/parser`, `go/internal/srcimporter`,
+  `path/filepath`, `regexp`). A goroutine's stack is the engine's, 8 MB
+  under node by a flag and about 1 MB in a browser, where it cannot be
+  set: a small function recurses 100,000 deep under node and 10,000 in
+  Chromium, one with a dozen arguments 10,000 and 1,000.
+- **Collection.** Eight test that something is collected after
+  `runtime.GC`, which only yields in a browser (`init1.go`;
+  `crypto/internal/fips140cache`, `crypto/tls`, `io`, `reflect`, `sync`,
+  `unique`, `weak`). Three pass when the page is given a collector
+  (`GOWASIRUNTIMEARGS=--js-flags=--expose-gc`), the rest when Chromium
+  also compiles with its optimizing compiler from the start
+  (`--js-flags=--expose-gc,--no-liftoff`): the baseline compiler, which
+  a browser starts every function in, keeps what a dead variable held.
+
+Firefox 160 (with JSPI turned on in the profile, which the runner does)
+runs programs and the tests of the packages tried (`bytes`, `errors`,
+`os`, `time`); the suites have not been run there.
+
+Found on the way: node's WASI reads past a path that ends where the
+memory it is given does, and crashes; and `survey.py` counted a line of
+its own header as a package (255 packages have tests, not 256).
+
+The stack could grow. A function that finds its segment of the stack in
+linear memory full (the check every function with a frame already makes)
+could, instead of taking another segment on the same engine stack, call
+itself again on a new one: an import that suspends the stack
+(`WebAssembly.Suspending`) and calls the function back through
+`WebAssembly.promising`, one JavaScript function for every signature.
+Tried by hand in node and Chromium: recursion 10,000,000 deep, 20,000
+stacks nested, 15 to 25 µs for each change of stack (it must start from
+a microtask, or the host's stack fills at 1,300 nested). Not built.

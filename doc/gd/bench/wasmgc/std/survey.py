@@ -9,18 +9,24 @@ script), keeping the others. Each line is `pkg ok`, `pkg FAIL reason`,
 `pkg BUILD reason` or `pkg SKIP reason`. Logs go to $SURVEY_LOGS
 (default /tmp/wasmgc-survey). GOROOT, PATH (with $GOROOT/lib/wasm) and
 GOCACHE are taken from the environment.
+
+With GOWASIRUNTIME=chromium (or firefox) the tests run in that browser
+(lib/wasm/wasm_gc_browser_exec.mjs) and the file is status-chromium.txt.
 """
 
 import argparse, os, re, signal, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-STATUS = os.path.join(HERE, "status.txt")
+BROWSER = os.environ.get("GOWASIRUNTIME", "")
+if BROWSER not in ("chromium", "firefox"):
+    BROWSER = ""
+STATUS = os.path.join(HERE, "status-%s.txt" % BROWSER if BROWSER else "status.txt")
 LOGS = os.environ.get("SURVEY_LOGS", "/tmp/wasmgc-survey")
 
 # Lines in status.txt that are not package results start with one of these.
 def is_result(line):
-    return bool(re.match(r"^\S+ (ok|FAIL|BUILD|SKIP)\b", line))
+    return bool(re.match(r"^[^#\s]\S* (ok|FAIL|BUILD|SKIP)\b", line))
 
 def classify(pkg, out, rc, timedout):
     if timedout:
