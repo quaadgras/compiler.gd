@@ -71,7 +71,11 @@ func semacquire(addr *uint32, why string) { semacquire1(addr, false, why) }
 
 // semacquire1 is semacquire, with the waiter queued first if lifo (it
 // has waited before).
-func semacquire1(addr *uint32, lifo bool, why string) {
+func semacquire1(addr *uint32, lifo bool, why string) { semacquire2(addr, lifo, why, false) }
+
+// semacquire2 is semacquire1, durably blocked in a synctest bubble if
+// durable.
+func semacquire2(addr *uint32, lifo bool, why string, durable bool) {
 	for *addr == 0 {
 		w := &semaWaiter{gp: curg}
 		q := semaQueueOf(unsafe.Pointer(addr), true)
@@ -80,7 +84,11 @@ func semacquire1(addr *uint32, lifo bool, why string) {
 		} else {
 			q.push(w)
 		}
-		gopark(why)
+		if durable {
+			goparkIdle(why, nil)
+		} else {
+			gopark(why)
+		}
 		if w.granted {
 			return
 		}
@@ -123,7 +131,7 @@ func poll_runtime_Semacquire(addr *uint32) { semacquire(addr, "semacquire") }
 
 //go:linkname sync_runtime_SemacquireWaitGroup sync.runtime_SemacquireWaitGroup
 func sync_runtime_SemacquireWaitGroup(addr *uint32, synctestDurable bool) {
-	semacquire(addr, "sync.WaitGroup.Wait")
+	semacquire2(addr, false, "sync.WaitGroup.Wait", synctestDurable)
 }
 
 //go:linkname sync_runtime_SemacquireMutex internal/sync.runtime_SemacquireMutex
@@ -177,7 +185,7 @@ func notifyListWait(l *notifyList, t uint32) {
 		return // already notified
 	}
 	semaQueueOf(unsafe.Pointer(l), true).push(&semaWaiter{gp: curg, t: t})
-	gopark("sync.Cond.Wait")
+	goparkIdle("sync.Cond.Wait", nil)
 }
 
 //go:linkname notifyListNotifyAll sync.runtime_notifyListNotifyAll

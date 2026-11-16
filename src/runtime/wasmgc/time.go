@@ -28,6 +28,34 @@ type timer struct {
 	// delivers the value of one that is due (maybeRunChan). when is 0
 	// once it has fired, or when it is stopped.
 	blocked int32
+
+	bubble *synctestBubble // a timer of a synctest bubble, on its clock
+	rand   uint32          // orders the timers of a bubble due at once
+}
+
+// heap returns the heap the timer is in when it is in one: the
+// bubble's, for a timer of a synctest bubble.
+func (t *timer) heap() *[]*timer {
+	if t.bubble != nil {
+		return &t.bubble.timers
+	}
+	return &timers
+}
+
+// now returns the time on the timer's clock.
+func (t *timer) now() int64 {
+	if t.bubble != nil {
+		return t.bubble.now
+	}
+	return nanotime()
+}
+
+// curNow returns the time on the clock of the current goroutine.
+func curNow() int64 {
+	if b := curg.bubble; b != nil {
+		return b.now
+	}
+	return nanotime()
 }
 
 // timeTimer is what package time knows as a Timer: its channel and
@@ -40,48 +68,59 @@ type timeTimer struct {
 
 var timers []*timer
 
-func (t *timer) less(u *timer) bool { return t.when < u.when }
+func (t *timer) less(u *timer) bool {
+	if t.when == u.when && t.bubble != nil {
+		// Timers of a bubble due at the same instant fire in a
+		// random order, as natively.
+		return t.rand < u.rand
+	}
+	return t.when < u.when
+}
 
-func timerUp(i int) {
+func timerUp(h []*timer, i int) {
 	for i > 0 {
 		p := (i - 1) / 2
-		if !timers[i].less(timers[p]) {
+		if !h[i].less(h[p]) {
 			break
 		}
-		timerSwap(i, p)
+		timerSwap(h, i, p)
 		i = p
 	}
 }
 
-func timerDown(i int) {
-	n := len(timers)
+func timerDown(h []*timer, i int) {
+	n := len(h)
 	for {
 		l := 2*i + 1
 		if l >= n {
 			return
 		}
 		m := l
-		if r := l + 1; r < n && timers[r].less(timers[l]) {
+		if r := l + 1; r < n && h[r].less(h[l]) {
 			m = r
 		}
-		if !timers[m].less(timers[i]) {
+		if !h[m].less(h[i]) {
 			return
 		}
-		timerSwap(i, m)
+		timerSwap(h, i, m)
 		i = m
 	}
 }
 
-func timerSwap(i, j int) {
-	timers[i], timers[j] = timers[j], timers[i]
-	timers[i].idx = i
-	timers[j].idx = j
+func timerSwap(h []*timer, i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].idx = i
+	h[j].idx = j
 }
 
 func (t *timer) add() {
-	t.idx = len(timers)
-	timers = append(timers, t)
-	timerUp(t.idx)
+	hp := t.heap()
+	if t.bubble != nil {
+		t.rand = uint32(rand())
+	}
+	t.idx = len(*hp)
+	*hp = append(*hp, t)
+	timerUp(*hp, t.idx)
 }
 
 // remove takes t out of the heap and reports whether it was in it.
@@ -90,17 +129,31 @@ func (t *timer) remove() bool {
 	if i < 0 {
 		return false
 	}
-	last := len(timers) - 1
+	hp := t.heap()
+	h := *hp
+	last := len(h) - 1
 	if i != last {
-		timerSwap(i, last)
+		timerSwap(h, i, last)
 	}
-	timers[last] = nil
-	timers = timers[:last]
+	h[last] = nil
+	h = h[:last]
+	*hp = h
 	if i != last {
-		timerDown(i)
-		timerUp(i)
+		timerDown(h, i)
+		timerUp(h, i)
 	}
 	t.idx = -1
+	return true
+}
+
+// fakeDue runs the timer t of a synctest bubble, which is not in a
+// heap, if it is due now: it is run by the goroutine that sets it, as
+// time does not advance until the bubble blocks.
+func (t *timer) fakeDue() bool {
+	if t.bubble == nil || t.idx >= 0 || t.when == 0 || t.when > t.bubble.now {
+		return false
+	}
+	t.fire(t.bubble.now)
 	return true
 }
 
@@ -142,7 +195,7 @@ func maybeRunChan(c *hchan) {
 	if t == nil || t.when == 0 {
 		return
 	}
-	now := nanotime()
+	now := t.now()
 	if t.when > now {
 		return
 	}
@@ -199,20 +252,25 @@ func timerwait1() int64 {
 
 //go:linkname newTimer time.newTimer
 func newTimer(when, period int64, f func(arg any, seq uintptr, delay int64), arg any, c *hchan) *timeTimer {
-	t := &timeTimer{init: true, t: &timer{when: when, period: period, f: f, arg: arg, ch: c, idx: -1}}
+	t := &timeTimer{init: true, t: &timer{when: when, period: period, f: f, arg: arg, ch: c, idx: -1, bubble: curg.bubble}}
 	if c != nil {
 		// Lazy: see timer.blocked.
 		c.timer = true
 		c.tm = t.t
 		return t
 	}
-	t.t.add()
+	if !t.t.fakeDue() {
+		t.t.add()
+	}
 	return t
 }
 
 //go:linkname stopTimer time.stopTimer
 func stopTimer(t *timeTimer) bool {
 	tt := t.t
+	if tt.bubble != nil && curg.bubble != tt.bubble {
+		fatal("stop of synctest timer from outside bubble")
+	}
 	pending := tt.remove()
 	if tt.ch != nil {
 		// Armed: not fired, or fired lazily, which is the same.
@@ -229,10 +287,16 @@ func stopTimer(t *timeTimer) bool {
 
 //go:linkname resetTimer time.resetTimer
 func resetTimer(t *timeTimer, when, period int64) bool {
-	pending := stopTimer(t)
 	tt := t.t
+	if tt.bubble != nil && curg.bubble != tt.bubble {
+		fatal("reset of synctest timer from outside bubble")
+	}
+	pending := stopTimer(t)
 	tt.when = when
 	tt.period = period
+	if tt.ch == nil && tt.fakeDue() {
+		return pending
+	}
 	if tt.ch == nil || tt.blocked > 0 {
 		tt.add()
 	}
@@ -257,13 +321,13 @@ func timeSleep(ns int64) {
 	if ns <= 0 {
 		return
 	}
-	when := nanotime() + ns
+	when := curNow() + ns
 	if when < 0 { // overflow
 		when = 1<<63 - 1
 	}
-	t := &timer{when: when, f: goreadyTimer, arg: curg, idx: -1}
+	t := &timer{when: when, f: goreadyTimer, arg: curg, idx: -1, bubble: curg.bubble}
 	t.add()
-	gopark("sleep")
+	goparkIdle("sleep", nil)
 }
 
 func goreadyTimer(arg any, seq uintptr, delay int64) {
@@ -271,16 +335,20 @@ func goreadyTimer(arg any, seq uintptr, delay int64) {
 }
 
 //go:linkname time_runtimeNano time.runtimeNano
-func time_runtimeNano() int64 { return nanotime() }
+func time_runtimeNano() int64 { return curNow() }
 
 //go:linkname time_runtimeNow time.runtimeNow
 func time_runtimeNow() (sec int64, nsec int32, mono int64) {
+	if b := curg.bubble; b != nil {
+		// No monotonic time in a bubble, as natively.
+		return b.now / 1e9, int32(b.now % 1e9), 0
+	}
 	ns := walltime()
 	return ns / 1e9, int32(ns % 1e9), nanotime()
 }
 
 //go:linkname time_runtimeIsBubbled time.runtimeIsBubbled
-func time_runtimeIsBubbled() bool { return false }
+func time_runtimeIsBubbled() bool { return curg.bubble != nil }
 
 //go:wasmimport gd walltime
 func walltime() int64

@@ -132,29 +132,6 @@ func poll_runtime_pollUnblock(ctx uintptr) {}
 //go:linkname poll_runtime_isPollServerDescriptor internal/poll.runtime_isPollServerDescriptor
 func poll_runtime_isPollServerDescriptor(fd uintptr) bool { return false }
 
-// There are no synctest bubbles.
-
-//go:linkname synctest_IsInBubble internal/synctest.IsInBubble
-func synctest_IsInBubble() bool { return false }
-
-//go:linkname synctest_acquire internal/synctest.acquire
-func synctest_acquire() any { return nil }
-
-//go:linkname synctest_release internal/synctest.release
-func synctest_release(any) {}
-
-//go:linkname synctest_inBubble internal/synctest.inBubble
-func synctest_inBubble(bubble any, f func()) { f() }
-
-//go:linkname synctest_associate internal/synctest.associate
-func synctest_associate(p unsafe.Pointer) int { return 0 }
-
-//go:linkname synctest_disassociate internal/synctest.disassociate
-func synctest_disassociate(b unsafe.Pointer) {}
-
-//go:linkname synctest_isAssociated internal/synctest.isAssociated
-func synctest_isAssociated(p unsafe.Pointer) bool { return false }
-
 // Random numbers.
 
 var randState uint64
@@ -205,16 +182,6 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 func reflectcall(stackArgsType *_type, fn, stackArgs unsafe.Pointer, stackArgsSize, stackRetOffset, frameSize uint32, regArgs unsafe.Pointer) {
 	fatal("reflectcall is not supported with GOWASM=gc")
 }
-
-// Bubbles need a clock of their own and to know when their goroutines
-// are all blocked, which this runtime does not do: a test that uses
-// testing/synctest fails.
-
-//go:linkname synctest_Run internal/synctest.Run
-func synctest_Run(f func()) { panic(plainError("synctest is not supported with GOWASM=gc")) }
-
-//go:linkname synctest_Wait internal/synctest.Wait
-func synctest_Wait() { panic(plainError("synctest is not supported with GOWASM=gc")) }
 
 // What packages of crypto ask of the runtime.
 

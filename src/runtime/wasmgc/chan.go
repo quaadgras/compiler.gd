@@ -31,6 +31,7 @@ type hchan struct {
 	sendq    waitq
 	timer    bool   // the channel of a timer: it looks unbuffered
 	tm       *timer // its timer, which may be due (see maybeRunChan)
+	bubble   *synctestBubble // the synctest bubble it was made in
 }
 
 // A sudog is a goroutine waiting on a channel.
@@ -102,7 +103,7 @@ func makechan(t *abi.ChanType, size int, zero unsafe.Pointer) *hchan {
 		panic(plainError("makechan: size out of range"))
 	}
 	memstatsMallocs++
-	c := &hchan{dataqsiz: uint(size), elemtype: elem, zero: zero}
+	c := &hchan{dataqsiz: uint(size), elemtype: elem, zero: zero, bubble: curg.bubble}
 	if size > 0 {
 		c.buf = newmapstore(elem, size)
 	}
@@ -182,8 +183,11 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool) bool {
 		if !block {
 			return false
 		}
-		gopark("chan send (nil chan)")
+		goparkIdle("chan send (nil chan)", nil)
 		throw("unreachable")
+	}
+	if c.bubble != nil && curg.bubble != c.bubble {
+		fatal("send on synctest channel from outside bubble")
 	}
 	if c.closed {
 		panic(plainError("send on closed channel"))
@@ -205,7 +209,7 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool) bool {
 	}
 	sg := &sudog{g: curg, c: c, elem: ep}
 	c.sendq.enqueue(sg)
-	gopark("chan send")
+	c.park("chan send")
 	if !sg.success {
 		panic(plainError("send on closed channel"))
 	}
@@ -230,8 +234,11 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 		if !block {
 			return false, false
 		}
-		gopark("chan receive (nil chan)")
+		goparkIdle("chan receive (nil chan)", nil)
 		throw("unreachable")
+	}
+	if c.bubble != nil && curg.bubble != c.bubble {
+		fatal("receive on synctest channel from outside bubble")
 	}
 	if c.timer {
 		maybeRunChan(c)
@@ -267,7 +274,7 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	if c.timer {
 		blockTimerChan(c)
 	}
-	gopark("chan receive")
+	c.park("chan receive")
 	if c.timer {
 		unblockTimerChan(c)
 	}
@@ -277,6 +284,9 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 func closechan(c *hchan) {
 	if c == nil {
 		panic(plainError("close of nil channel"))
+	}
+	if c.bubble != nil && curg.bubble != c.bubble {
+		fatal("close of synctest channel from outside bubble")
 	}
 	if c.closed {
 		panic(plainError("close of closed channel"))
@@ -314,7 +324,17 @@ func selectnbrecv(elem unsafe.Pointer, c *hchan) (selected, received bool) {
 
 // block is select with no cases.
 func block() {
-	gopark("select (no cases)")
+	goparkIdle("select (no cases)", nil)
+}
+
+// park parks the goroutine on c: durably blocked if c is in its
+// bubble.
+func (c *hchan) park(why string) {
+	if c.bubble != nil {
+		goparkIdle(why, nil)
+	} else {
+		gopark(why)
+	}
 }
 
 // A scase is a case of a select: the compiler builds an array of
@@ -364,10 +384,14 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	gp.selectDone = false
 	gp.param = nil
 	sgs := make([]*sudog, ncases)
+	allSynctest := true
 	for i := range cases {
 		cas := &cases[i]
 		if cas.c == nil {
 			continue
+		}
+		if cas.c.bubble == nil {
+			allSynctest = false
 		}
 		sg := &sudog{g: gp, c: cas.c, elem: cas.elem, isSelect: true}
 		sgs[i] = sg
@@ -380,7 +404,11 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 			}
 		}
 	}
-	gopark("select")
+	if allSynctest && gp.bubble != nil {
+		goparkIdle("select", nil)
+	} else {
+		gopark("select")
+	}
 	for i := nsends; i < ncases; i++ {
 		if c := cases[i].c; c != nil && c.timer {
 			unblockTimerChan(c)

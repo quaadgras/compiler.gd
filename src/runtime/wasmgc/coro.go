@@ -25,6 +25,12 @@ func newcoro(f func(*coro)) *coro {
 	gp := &g{id: len(allgs), fn: corostart, coroarg: c}
 	allgs = append(allgs, gp)
 	ngoroutine++
+	if b := curg.bubble; b != nil {
+		// In the bubble, durably blocked until it is switched to.
+		gp.bubble = b
+		b.total++
+		gp.durable = true
+	}
 	c.gp = gp // created, not runnable
 	return c
 }
@@ -36,8 +42,10 @@ func coroswitch(c *coro) {
 		fatal("coroswitch on an exited coro")
 	}
 	c.gp = curg
+	// next is readied first: the bubble, if any, has a goroutine
+	// running throughout.
 	goready(next)
-	gopark("coroutine")
+	goparkIdle("coroutine", nil)
 }
 
 // corostart runs the function of a coro, then wakes the goroutine

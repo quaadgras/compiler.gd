@@ -54,6 +54,9 @@ type g struct {
 	param      *sudog
 	selectDone bool
 	waiting    string // why it is not running, for the deadlock report
+
+	bubble  *synctestBubble // its synctest bubble (synctest.go)
+	durable bool            // parked, durably blocked in its bubble
 }
 
 var (
@@ -89,17 +92,31 @@ func rt0gc() {
 
 // newproc is what a go statement calls.
 func newproc(fn func()) {
+	newproc1(fn)
+}
+
+// newproc1 starts a goroutine and returns it. It is in the bubble of
+// the goroutine that starts it.
+func newproc1(fn func()) *g {
 	if len(allgs) == 0 {
 		allgs = append(allgs, nil, &maing)
 	}
 	gp := &g{id: len(allgs), fn: fn}
 	allgs = append(allgs, gp)
 	ngoroutine++
+	if b := curg.bubble; b != nil {
+		gp.bubble = b
+		b.goStart()
+	}
 	goready(gp)
+	return gp
 }
 
 // goready makes gp runnable.
 func goready(gp *g) {
+	if gp.durable {
+		wakeDurable(gp)
+	}
 	gp.link = nil
 	if runqTail == nil {
 		runqHead = gp
@@ -190,6 +207,10 @@ func gdone(gp *g) {
 	gp.dead = true
 	gp.fn = nil
 	ngoroutine--
+	if b := gp.bubble; b != nil {
+		gp.bubble = nil
+		b.goEnd(gp)
+	}
 	if gp == &maing {
 		return
 	}
