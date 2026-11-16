@@ -2070,11 +2070,19 @@ func (g *gcGen) zeroValue(v *ssa.Value, t *types.Type) {
 	gcEach(t, func(l gcLeaf) { parts = append(parts, l) })
 	for i, l := range parts {
 		gen := func() {
-			if root, style := g.root(v.Args[0]); l.kind == 'a' && style == gcFrame {
+			root, style := g.root(v.Args[0])
+			if l.kind == 'a' && style == gcFrame {
 				g.frameAddr(v.Args[0], root, l.off)
 				i32Const(g.s, 0)
 				i32Const(g.s, int32(l.t.Size()))
 				g.prog(wasm.AMemoryFill)
+				return
+			}
+			if l.kind == 'a' && style == gcUnknown {
+				// (See moveValue.)
+				g.typeDesc(l.t)
+				g.pointerAt(v.Args[0], l.off)
+				g.runtime("runtime.typedmemclr")
 				return
 			}
 			if l.kind == 'a' {
@@ -2160,6 +2168,15 @@ func (g *gcGen) moveValue(v *ssa.Value, t *types.Type) {
 					return
 				}
 				k, isObj := gcElem(l.t.Elem())
+				if dstyle == gcUnknown || sstyle == gcUnknown {
+					// A pointer whose type is not to be believed (see
+					// root): by the type of the array, in the runtime.
+					g.typeDesc(l.t)
+					g.pointerAt(v.Args[0], l.off)
+					g.pointerAt(v.Args[1], l.off)
+					g.runtime("runtime.typedmemmove")
+					return
+				}
 				if isObj {
 					g.loadRef(g.place(v.Args[1], l.off, l.t))
 					g.loadRef(g.place(v.Args[0], l.off, l.t))
@@ -2338,10 +2355,21 @@ func (g *gcGen) call(v *ssa.Value) {
 		}
 	case ssa.OpWasmLoweredTailCall:
 		// The results of the call are those of the function.
-		if len(gcStackParams(aux.ABIInfo())) > 0 {
+		// Arguments and results not in registers are where the
+		// function's own are (a method wrapper's): its objects.
+		callee, own := gcStackParams(aux.ABIInfo()), gcStackParams(g.f.OwnAux.ABIInfo())
+		if len(callee) != len(own) {
 			g.unsupported(v, "tail call with arguments not in registers")
 		}
+		for i := range callee {
+			if callee[i].Offset() != own[i].Offset() || gcLayoutKey(callee[i].Type) != gcLayoutKey(own[i].Type) {
+				g.unsupported(v, "tail call with arguments not in registers")
+			}
+		}
 		g.args(aux, args)
+		for i := range callee {
+			g.local(wasm.ALocalGet, g.nparam-int32(len(own))+int32(i))
+		}
 		p := g.prog(obj.ACALL)
 		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: aux.Fn}
 		p.Pos = v.Pos
