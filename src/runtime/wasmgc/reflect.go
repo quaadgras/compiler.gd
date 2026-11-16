@@ -448,15 +448,21 @@ func reflect_resolveTextOff(rtype unsafe.Pointer, off int32) unsafe.Pointer {
 // reflectOffs[i].
 var reflectOffs []unsafe.Pointer
 
+// reflectOffsInv finds the index of a pointer in reflectOffs.
+var reflectOffsInv map[unsafe.Pointer]int32
+
 //go:linkname reflect_addReflectOff reflect.addReflectOff
 func reflect_addReflectOff(ptr unsafe.Pointer) int32 {
-	for i, p := range reflectOffs {
-		if p == ptr {
-			return int32(-1 - i)
-		}
+	if id, ok := reflectOffsInv[ptr]; ok {
+		return id
+	}
+	if reflectOffsInv == nil {
+		reflectOffsInv = make(map[unsafe.Pointer]int32)
 	}
 	reflectOffs = append(reflectOffs, ptr)
-	return int32(-len(reflectOffs))
+	id := int32(-len(reflectOffs))
+	reflectOffsInv[ptr] = id
+	return id
 }
 
 var typelinks []*_type
