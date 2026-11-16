@@ -581,7 +581,8 @@ const (
 	// if it cannot be cast to the non-null type From.Sym (i31 if
 	// nil), and otherwise leaves it cast.
 	ABrOnCastFail
-	// ATypeConst pushes, as an i32, the index of the type To.Sym.
+	// ATypeConst pushes, as an i32, the layout of the struct type
+	// To.Sym: what the header of an object of it holds.
 	ATypeConst
 	// ARefBlock opens a block whose result is a non-null reference to
 	// the type To.Sym.

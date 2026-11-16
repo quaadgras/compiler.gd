@@ -159,10 +159,22 @@ func typedmemmove(t *_type, dst, src unsafe.Pointer) {
 		lincopy(d, s, t.Size_)
 		return
 	}
+	if gcmove(dst, src, t.Size_) {
+		return
+	}
 	typeScalars(t, 0, func(k byte, off uintptr) {
 		copyScalar(k, add(dst, off), add(src, off))
 	})
 }
+
+// gcmove copies the size bytes of a Go value at src to dst, if both
+// are within objects that are structs, and reports whether they are;
+// gczero zeroes those at p likewise. The compiler replaces a call to
+// them by a call of the functions the linker generates, which go by
+// the layouts of the objects: the fields in those bytes, whatever the
+// type of the value.
+func gcmove(dst, src unsafe.Pointer, size uintptr) bool
+func gczero(p unsafe.Pointer, size uintptr) bool
 
 // typedmemclr zeroes the value of type t at p.
 func typedmemclr(t *_type, p unsafe.Pointer) {
@@ -171,6 +183,9 @@ func typedmemclr(t *_type, p unsafe.Pointer) {
 	}
 	if a := trylinaddr(p); a != 0 {
 		linzero(a, t.Size_)
+		return
+	}
+	if gczero(p, t.Size_) {
 		return
 	}
 	typeScalars(t, 0, func(k byte, off uintptr) {

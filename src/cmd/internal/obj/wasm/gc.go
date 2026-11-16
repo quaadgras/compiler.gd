@@ -40,8 +40,10 @@ import (
 // in the offsets are the same WebAssembly type.
 //
 // The header of a struct is two 32-bit fields: the layout, which is the
-// index of the type the object was created as, and the identity of the
-// object, assigned when it is first converted to an integer.
+// address in linear memory of the description of the Go layout the
+// object was created with (the linker writes one for each: the fields
+// by offset), and the identity of the object, assigned when it is first
+// converted to an integer.
 //
 // A pointer is an eqref. It is one of:
 //   - an object: a pointer to the whole of it, cast to the type the code
@@ -128,6 +130,12 @@ const (
 	// GCCopy copies the Go value in one object to another of the
 	// same type: its arguments are the source and the destination.
 	GCCopy = "wasm.copy"
+	// GCMove copies the bytes of a Go value from one place to another:
+	// its arguments are the destination, the source, both any pointers,
+	// and the size. It reports whether it did: it does if both are
+	// within structs. GCZero zeroes the bytes of one likewise.
+	GCMove = "wasm.move"
+	GCZero = "wasm.zero"
 
 	// GCGlobalCtxt is the global (an eqref) in which a call of a
 	// closure passes the closure to the function.
@@ -326,6 +334,18 @@ func gcHeapRef(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, sym *obj.LSym) {
 	})
 }
 
+// gcLayoutRef writes a reference to the layout of the struct sym names:
+// what the header of an object of it holds, a constant that the linker
+// fills in (the address of the layout's description; see the linker).
+func gcLayoutRef(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, sym *obj.LSym) {
+	s.AddRel(ctxt, obj.Reloc{
+		Type: objabi.R_WASMTYPE,
+		Off:  int32(w.Len()),
+		Siz:  3, // actually variable sized
+		Sym:  sym,
+	})
+}
+
 // assembleGC assembles p if it is one of the instructions of GOWASM=gc,
 // and reports whether it was.
 func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool {
@@ -384,7 +404,7 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 		heap(0x17)
 	case ATypeConst:
 		w.WriteByte(0x41) // i32.const
-		gcHeapRef(ctxt, s, w, gcTypeAddr(p))
+		gcLayoutRef(ctxt, s, w, gcTypeAddr(p))
 	case ARefNull:
 		w.WriteByte(0xD0)
 		w.WriteByte(GCHeapEq)

@@ -2366,6 +2366,17 @@ func (g *gcGen) call(v *ssa.Value) {
 		g.get(args[1], false)
 		g.get(args[0], false)
 		g.helper(wasm.GCCopy)
+	case "runtime.gcmove":
+		g.get(args[0], false)
+		g.get(args[1], false)
+		g.get(args[2], true)
+		g.helper(wasm.GCMove)
+		g.prog(wasm.AI64ExtendI32U)
+	case "runtime.gczero":
+		g.get(args[0], false)
+		g.get(args[1], true)
+		g.helper(wasm.GCZero)
+		g.prog(wasm.AI64ExtendI32U)
 	case "runtime.linsetsplim":
 		g.get(args[0], true)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalStackLo)

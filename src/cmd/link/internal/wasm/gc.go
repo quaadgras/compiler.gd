@@ -67,6 +67,17 @@ type gcLinker struct {
 	globalType map[uint32]uint32 // the type of the object of each global of a data symbol
 
 	passive bytes.Buffer // the data of the arrays created by array.new_data
+
+	// The layouts of the structs of which there are objects (see
+	// gclayout.go).
+	layouts     []string         // by number
+	layoutAddr  map[string]int64 // the address of the description of each
+	layoutBase  int64            // the address of the first
+	layoutNext  int64            // the address of the next
+	layoutsDone bool             // the functions that go by layout are written
+
+	// The indexes of the functions that read a layout and its fields.
+	fnFind, fnFlen, fnFget, fnFgetr, fnFset int
 }
 
 func (l *gcLinker) typeIndex(name string) uint32 {
@@ -438,8 +449,9 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 		}
 		return
 	}
-	t := l.typeIndex(l.structName(typ))
-	writeI32Const(w, int32(t)) // the layout
+	name := l.structName(typ)
+	t := l.typeIndex(name)
+	writeI32Const(w, int32(l.layout(name)))
 	writeI32Const(w, 0)
 	for _, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
 		o := off + lf.Off
@@ -565,7 +577,7 @@ func (l *gcLinker) initGlobals() []byte {
 			}
 			name += fmt.Sprintf("/%d", n*8)
 			t := l.typeIndex(name)
-			writeI32Const(&create, int32(t))
+			writeI32Const(&create, int32(l.layout(name)))
 			writeI32Const(&create, 0)
 			for j := int64(0); j < n; j++ {
 				v := int64(d.uint(j*8, 8))
@@ -693,8 +705,17 @@ func asmbGC(ctxt *ld.Link, ldr *loader.Loader) {
 }
 
 func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
-	l := &gcLinker{ctxt: ctxt, ldr: ldr, typeIdx: make(map[string]uint32), globalIdx: make(map[loader.Sym]uint32)}
+	l := &gcLinker{ctxt: ctxt, ldr: ldr, typeIdx: make(map[string]uint32), globalIdx: make(map[loader.Sym]uint32), layoutAddr: make(map[string]int64)}
 	l.typeIndex(wasm.GCHeader) // before its subtypes
+
+	// The descriptions of the layouts follow the data in linear memory.
+	// (Address 0 is no layout.)
+	{
+		v, _ := dataSects.Load(ctxt)
+		sects, _ := v.([]wasmDataSect)
+		l.layoutBase = int64(max(gcDataEnd(ldr, sects), 8)+7) &^ 7
+		l.layoutNext = l.layoutBase
+	}
 
 	// The functions imported from the host.
 	var hostImports []*wasmFunc
@@ -793,7 +814,11 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			case objabi.R_WASMIMPORT:
 				writeSleb128(wfn, hostImportMap[rs])
 			case objabi.R_WASMTYPE:
-				if r.Siz() == 2 { // a heap type or a constant
+				if r.Siz() == 3 { // the layout of a struct, for the header of an object
+					writeSleb128(wfn, l.layout(ldr.SymName(rs)))
+					break
+				}
+				if r.Siz() == 2 { // a heap type
 					writeSleb128(wfn, int64(l.typeIndex(ldr.SymName(rs))))
 					break
 				}
@@ -889,18 +914,10 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			}
 		}
 	}
-	end := uint64(0)
-	for _, ds := range sects {
-		end = max(end, ds.sect.Vaddr+ds.sect.Length)
-	}
-	// The variables without pointers that start as zeros are in linear
-	// memory too, with nothing to initialize.
-	for _, name := range []string{"runtime.noptrbss", "runtime.bss"} {
-		if s := ldr.Lookup(name, 0); s != 0 {
-			if sect := ldr.SymSect(s); sect != nil {
-				end = max(end, sect.Vaddr+sect.Length)
-			}
-		}
+	end := gcDataEnd(ldr, sects)
+	layouts := l.layoutTable()
+	if len(layouts) > 0 {
+		end = uint64(l.layoutBase) + uint64(len(layouts))
 	}
 	const wasmPageSize = 64 << 10
 	// The stack follows the data.
@@ -984,8 +1001,12 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	})
 	// (All functions: MakeFunc calls the stubs the linker generates.)
 	writeElementSec(ctxt, uint64(len(hostImports)), uint64(len(fns)))
+	nseg := 1 + len(sects)
+	if len(layouts) > 0 {
+		nseg++
+	}
 	section(sectionDataCount, func(w *bytes.Buffer) {
-		writeUleb128(w, uint64(1+len(sects)))
+		writeUleb128(w, uint64(nseg))
 	})
 	// (As writeCodeSec, noting where each function is.)
 	starts := make([]int64, len(fns))
@@ -1000,7 +1021,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		writeSecSize(ctxt, sizeOffset)
 	}
 	section(sectionData, func(w *bytes.Buffer) {
-		writeUleb128(w, uint64(1+len(sects)))
+		writeUleb128(w, uint64(nseg))
 		// Segment 0 is passive: the data of the arrays.
 		w.WriteByte(0x01)
 		writeUleb128(w, uint64(l.passive.Len()))
@@ -1012,6 +1033,13 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			writeUleb128(w, uint64(len(ds.data)))
 			w.Write(ds.data)
 		}
+		if len(layouts) > 0 {
+			writeUleb128(w, 0) // active, memory 0
+			writeI32Const(w, int32(l.layoutBase))
+			w.WriteByte(0x0b) // end
+			writeUleb128(w, uint64(len(layouts)))
+			w.Write(layouts)
+		}
 	})
 	writeProducerSec(ctxt)
 	// The names of the functions are kept with -s: they are what
@@ -1022,6 +1050,24 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	if !ctxt.FlagS {
 		writeLinesSec(ctxt, len(hostImports), fns, starts)
 	}
+}
+
+// gcDataEnd returns the end of the program's data in linear memory:
+// that of sects and of the variables without pointers that start as
+// zeros, which are there too, with nothing to initialize.
+func gcDataEnd(ldr *loader.Loader, sects []wasmDataSect) uint64 {
+	end := uint64(0)
+	for _, ds := range sects {
+		end = max(end, ds.sect.Vaddr+ds.sect.Length)
+	}
+	for _, name := range []string{"runtime.noptrbss", "runtime.bss"} {
+		if s := ldr.Lookup(name, 0); s != 0 {
+			if sect := ldr.SymSect(s); sect != nil {
+				end = max(end, sect.Vaddr+sect.Length)
+			}
+		}
+	}
+	return end
 }
 
 // A gcGrowth is how much longer the code of a function is, from an

@@ -62,10 +62,14 @@ func (l *gcLinker) helperIndex(name string) (int, bool) {
 		return 2*len(gcKinds) + 8, true
 	case name == wasm.GCClear:
 		return 2*len(gcKinds) + 9, true
-	case name == wasm.GCReflectCall:
+	case name == wasm.GCMove:
 		return 2*len(gcKinds) + 12, true
-	case name == wasm.GCMakeFunc:
+	case name == wasm.GCZero:
 		return 2*len(gcKinds) + 13, true
+	case name == wasm.GCReflectCall:
+		return 2*len(gcKinds) + 14, true
+	case name == wasm.GCMakeFunc:
+		return 2*len(gcKinds) + 15, true
 	}
 	return 0, false
 }
@@ -165,30 +169,9 @@ func (a *gcAsm) memory(k byte, store bool, tmp uint32) {
 	}
 }
 
-// field writes a load (store if store) of field f of the struct t
-// pushed, a scalar of kind k.
-func (a *gcAsm) field(t, f uint32, k byte, store bool) {
-	narrow := k == 'b' || k == 'h' || k == 'w'
-	if store {
-		a.get(2)
-		if narrow {
-			a.op(0xA7) // i32.wrap_i64
-		}
-		a.gc(0x05, t, f)
-		return
-	}
-	if k == 'b' || k == 'h' {
-		a.gc(0x04, t, f) // struct.get_u
-	} else {
-		a.gc(0x02, t, f)
-	}
-	if narrow {
-		a.op(0xAD) // i64.extend_i32_u
-	}
-}
+// element writes a load (store if store) of the element of the array,
+// of the type of arrays of kind k, and the index pushed.
 
-// element is field for the element of the array, of the type of
-// arrays of kind k, and the index pushed.
 func (a *gcAsm) element(k byte, store bool) {
 	t := a.typ(wasm.GCArrayPrefix + string(k))
 	narrow := k == 'b' || k == 'h' || k == 'w'
@@ -215,7 +198,7 @@ func (a *gcAsm) element(k byte, store bool) {
 //
 //	local 0: the pointer; local 1: the offset;
 //	local 2: the value to store; the last local: scratch.
-func (l *gcLinker) access(k byte, store bool, layouts []string, bits, size, storeBits, ptrid int) []byte {
+func (l *gcLinker) access(k byte, store bool, bits, size, storeBits, ptrid int) []byte {
 	a := &gcAsm{l: l}
 	// An integer can be loaded from where there is another scalar:
 	// part of a wider one, the bits of a float, the identity of the
@@ -263,33 +246,30 @@ func (l *gcLinker) access(k byte, store bool, layouts []string, bits, size, stor
 	sz := tmp + 1
 	shift, ref := sz+1, sz+2
 	done := func() { a.op(0x0F) } // return
-	writeUleb128(a, 4)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeI32)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeI64)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI64, wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
+	c := gcLoc{obj: 0, off: 1, d: ref + 1, e: ref + 2, info: ref + 3, rel: ref + 4}
+	// descend goes on in the nested array that the field found is, if
+	// the offset is in it: depth is the number of blocks it is written
+	// in, inside the loop.
+	descend := func(depth int) {
+		a.kindIs(c, 'A')
+		a.if_()
+		a.get(c.rel)
+		a.arraySize(c)
+		a.op(0x49) // i32.lt_u
+		a.if_()
+		a.field(c, 0)
+		a.call(l.fnFgetr)
+		a.set(0)
+		a.get(c.rel)
+		a.set(1)
+		a.br(depth + 2)
+		a.end()
+		a.end()
+	}
 
-	linear, box := a.typ(wasm.GCLinear), a.typ(wasm.GCBox)
+	linear, box, hdr := a.typ(wasm.GCLinear), a.typ(wasm.GCBox), a.typ(wasm.GCHeader)
 	a.op(0x03, 0x40) // loop: again, with the object a box or an element is in
-	// Linear memory.
-	a.isA(int64(linear), func() {
-		a.gc(0x02, linear, wasm.GCLinearAddr)
-		a.get(1)
-		a.op(0x6A) // i32.add
-		a.memory(k, store, sz)
-		done()
-	})
-	a.isA(-1, func() {
-		a.op(0xFB, 0x1E) // i31.get_u
-		a.get(1)
-		a.op(0x6A)
-		a.memory(k, store, sz)
-		done()
-	})
 	// A pointer into an object.
 	a.isA(int64(box), func() {
 		a.set(tmp)
@@ -312,6 +292,151 @@ func (l *gcLinker) access(k byte, store bool, layouts []string, bits, size, stor
 			a.genericAccess(k, store, tmp, sz, shift, ref)
 		})
 	}
+	// A struct: by the description of its layout.
+	a.isA(int64(hdr), func() {
+		a.op(0x1A) // drop
+		a.locate(c)
+		a.get(c.e)
+		a.if_()
+		a.within(c)
+		if k == 'r' {
+			a.get(c.rel)
+			a.op(0x45) // i32.eqz
+			a.if_()
+			// The pointer itself.
+			a.kindIs(c, 'r')
+			a.if_()
+			a.field(c, 0)
+			if store {
+				a.i64(0)
+				a.get(2)
+				a.call(l.fnFset)
+			} else {
+				a.call(l.fnFgetr)
+			}
+			done()
+			a.end()
+			// A pointer kept as an integer, as the type word of an
+			// interface is: the address of a type descriptor or an
+			// itab.
+			a.kindIs(c, 'l')
+			a.if_()
+			a.field(c, 0)
+			if store {
+				a.get(2)
+				a.call(ptrid)
+				gcRefNull(&a.Buffer)
+				a.call(l.fnFset)
+			} else {
+				a.call(l.fnFget)
+				a.addrToRef(sz)
+			}
+			done()
+			a.end()
+			a.end()
+			descend(2)
+			a.end()
+			a.op(0x00) // unreachable: no pointer there
+			return
+		}
+		// The bytes of a scalar that is no pointer, all or some: the
+		// scalar itself, part of a wider one, the bits of a float.
+		n := gcKindSize(k)
+		mask := func() {
+			if n < 8 {
+				a.i64(int64(1)<<(8*uint(n)) - 1)
+				a.op(0x83) // i64.and
+			}
+		}
+		a.kind(c)
+		a.i32(int64(strings.IndexByte(gcKinds, 'r')))
+		a.op(0x49) // i32.lt_u
+		a.if_()
+		a.get(c.rel)
+		a.i32(n)
+		a.op(0x6A) // i32.add
+		a.scalarSize(c)
+		a.op(0x4D) // i32.le_u
+		a.if_()
+		if !store {
+			a.field(c, 0)
+			a.call(l.fnFget)
+			a.get(c.rel)
+			a.i32(3)
+			a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
+			mask()
+			switch k {
+			case 'f':
+				a.op(0xA7, 0xBE) // i32.wrap_i64, f32.reinterpret_i32
+			case 'd':
+				a.op(0xBF) // f64.reinterpret_i64
+			}
+			done()
+		} else {
+			value := func() {
+				a.get(2)
+				switch k {
+				case 'f':
+					a.op(0xBC, 0xAD) // i32.reinterpret_f32, i64.extend_i32_u
+				case 'd':
+					a.op(0xBD) // i64.reinterpret_f64
+				}
+			}
+			// All of it.
+			a.scalarSize(c)
+			a.i32(n)
+			a.op(0x46) // i32.eq
+			a.if_()
+			a.field(c, 0)
+			value()
+			gcRefNull(&a.Buffer)
+			a.call(l.fnFset)
+			done()
+			a.end()
+			// Some of its bytes.
+			a.get(c.rel)
+			a.i32(3)
+			a.op(0x74, 0xAD) // i32.shl, i64.extend_i32_u
+			a.set(shift)
+			a.field(c, 0)
+			a.field(c, 0)
+			a.call(l.fnFget)
+			a.i64(int64(1)<<(8*uint(n)) - 1)
+			a.get(shift)
+			a.op(0x86) // i64.shl
+			a.i64(-1)
+			a.op(0x85, 0x83) // i64.xor, i64.and
+			value()
+			mask()
+			a.get(shift)
+			a.op(0x86, 0x84) // i64.shl, i64.or
+			gcRefNull(&a.Buffer)
+			a.call(l.fnFset)
+			done()
+		}
+		a.end()
+		a.else_()
+		descend(3)
+		a.end()
+		a.end()
+		// Anything else there: its bytes, with those of what follows.
+		punned()
+	})
+	// Linear memory.
+	a.isA(int64(linear), func() {
+		a.gc(0x02, linear, wasm.GCLinearAddr)
+		a.get(1)
+		a.op(0x6A) // i32.add
+		a.memory(k, store, sz)
+		done()
+	})
+	a.isA(-1, func() {
+		a.op(0xFB, 0x1E) // i31.get_u
+		a.get(1)
+		a.op(0x6A)
+		a.memory(k, store, sz)
+		done()
+	})
 	// An array of objects: go on in the element, whose size that of
 	// the first says.
 	objs := a.typ(wasm.GCArrayPrefix + "o")
@@ -347,117 +472,12 @@ func (l *gcLinker) access(k byte, store bool, layouts []string, bits, size, stor
 		a.element(k, store)
 		done()
 	})
+	// An array of other scalars.
 	if pun {
-		// An array of other scalars.
-		a.get(0)
-		a.op(0xFB, 0x14)
-		writeSleb128(a, int64(a.typ(wasm.GCHeader))) // ref.test
-		a.op(0x45, 0x04, 0x40)                       // i32.eqz, if
 		punned()
-		a.op(0x0B)
+	} else {
+		a.op(0x00) // unreachable: no pointer there
 	}
-	// A struct: go by its layout.
-	n := len(layouts)
-	a.op(0x02, 0x40) // block: no such layout
-	for range layouts {
-		a.op(0x02, 0x40)
-	}
-	a.get(0)
-	a.cast(a.typ(wasm.GCHeader))
-	a.gc(0x02, a.typ(wasm.GCHeader), 0)
-	index := make(map[string]int)
-	for j, name := range layouts {
-		index[name] = j
-	}
-	a.op(0x0E) // br_table
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for j, name := range layouts {
-		a.op(0x0B) // end: the layout
-		t := a.typ(name)
-		for i, f := range gcParseStruct(name) {
-			field := uint32(wasm.GCHeaderFields + i)
-			self := func() {
-				a.get(0)
-				a.cast(t)
-			}
-			rel := func() { // the offset within the field
-				a.get(1)
-				a.i32(f.off)
-				a.op(0x6B) // i32.sub
-			}
-			switch {
-			case f.letter == k:
-				a.get(1)
-				a.i32(f.off)
-				a.op(0x46, 0x04, 0x40) // i32.eq, if
-				self()
-				a.field(t, field, k, store)
-				done()
-				a.op(0x0B)
-			case f.letter == 'l' && k == 'r':
-				// A pointer kept as an integer, as the type
-				// word of an interface is: the address of a
-				// type descriptor or an itab.
-				a.get(1)
-				a.i32(f.off)
-				a.op(0x46, 0x04, 0x40) // i32.eq, if
-				self()
-				if store {
-					a.get(2)
-					a.op(0x10) // call
-					writeUleb128(a, uint64(ptrid))
-					a.gc(0x05, t, field)
-				} else {
-					a.gc(0x02, t, field)
-					a.addrToRef(sz)
-				}
-				done()
-				a.op(0x0B)
-			case f.letter == 'A' && (f.elem == k || f.elem == 'o'):
-				arr := a.typ(wasm.GCArrayPrefix + string(f.elem))
-				rel()
-				a.i32(f.esize * f.n)
-				a.op(0x49, 0x04, 0x40) // i32.lt_u, if
-				self()
-				a.gc(0x02, t, field)
-				a.cast(arr)
-				rel()
-				a.i32(f.esize)
-				a.op(0x6E) // i32.div_u
-				if f.elem == k {
-					a.element(k, store)
-					done()
-				} else {
-					// An element that is an object: go on in it.
-					a.gc(0x0B, arr)
-					a.op(0xFB, 0x16, wasm.GCHeapEq) // ref.cast eq
-					a.set(tmp)
-					rel()
-					a.i32(f.esize)
-					a.op(0x70) // i32.rem_u
-					a.set(1)
-					a.get(tmp)
-					a.set(0)
-					a.br(n - j + 1)
-				}
-				a.op(0x0B)
-			}
-		}
-		if pun {
-			punned()
-		} else {
-			a.op(0x00) // unreachable: no such scalar there
-		}
-	}
-	a.op(0x0B, 0x00) // end; unreachable: not a struct of the program
 	a.op(0x0B, 0x00) // end of the loop
 	a.op(0x0B)
 	return a.Bytes()
@@ -465,13 +485,10 @@ func (l *gcLinker) access(k byte, store bool, layouts []string, bits, size, stor
 
 // addPtr returns the body of the function that adds a byte offset to a
 // pointer.
-func (l *gcLinker) addPtr(layouts []string) []byte {
+func (l *gcLinker) addPtr() []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 2)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeI32)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
+	c := gcLoc{obj: 0, off: 1, d: 4, e: 5, info: 6, rel: 7}
 	linear, box := a.typ(wasm.GCLinear), a.typ(wasm.GCBox)
 	// Bit 30 of the offset says that the pointer is to a struct, not
 	// into an array nested where it starts (wasm.GCAddPtrStruct).
@@ -531,69 +548,41 @@ func (l *gcLinker) addPtr(layouts []string) []byte {
 	// A pointer into an array nested in a struct is one into the
 	// array, which is an object of its own: so slices of it are.
 	hdr := a.typ(wasm.GCHeader)
-	var nested []string
-	for _, name := range layouts {
-		for _, f := range gcParseStruct(name) {
-			if f.letter == 'A' {
-				nested = append(nested, name)
-				break
-			}
-		}
-	}
 	a.get(0)
 	a.op(0xFB, 0x14)
 	writeSleb128(a, int64(hdr)) // ref.test
 	a.get(3)
 	a.op(0x45, 0x71) // i32.eqz, i32.and
-	a.op(0x04, 0x40) // if
-	n := len(nested)
-	a.op(0x02, 0x40)
-	for range nested {
-		a.op(0x02, 0x40)
-	}
-	a.get(0)
-	a.cast(hdr)
-	a.gc(0x02, hdr, 0)
-	index := make(map[string]int)
-	for j, name := range nested {
-		index[name] = j
-	}
-	a.op(0x0E)
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for j, name := range nested {
-		a.op(0x0B)
-		t := a.typ(name)
-		for i, f := range gcParseStruct(name) {
-			if f.letter != 'A' {
-				continue
-			}
-			field := uint32(wasm.GCHeaderFields + i)
-			a.get(1)
-			a.i32(f.off)
-			a.op(0x6B) // i32.sub
-			a.i32(f.esize * f.n)
-			a.op(0x49, 0x04, 0x40) // i32.lt_u, if
-			a.get(0)
-			a.cast(t)
-			a.gc(0x02, t, field)
-			a.get(1)
-			a.i32(f.off)
-			a.op(0x6B)
-			a.gc(0x00, box)
-			a.op(0x0F, 0x0B)
-		}
-		a.br(n - j - 1)
-	}
-	a.op(0x0B) // no nested array there
-	a.op(0x0B) // end if
+	a.if_()
+	a.layoutOf(c)
+	a.get(c.d)
+	a.if_()
+	a.get(c.d)
+	a.load(gcLayoutArrays)
+	a.if_()
+	a.get(c.d)
+	a.get(1)
+	a.call(l.fnFind)
+	a.tee(c.e)
+	a.if_()
+	a.within(c)
+	a.kindIs(c, 'A')
+	a.if_()
+	a.get(c.rel)
+	a.arraySize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	a.field(c, 0)
+	a.call(l.fnFgetr)
+	a.get(c.rel)
+	a.gc(0x00, box)
+	a.ret()
+	a.end()
+	a.end()
+	a.end()
+	a.end()
+	a.end()
+	a.end()
 	a.get(0)
 	a.get(1)
 	a.gc(0x00, box)
@@ -605,13 +594,9 @@ func (l *gcLinker) addPtr(layouts []string) []byte {
 // holds a Go value. self is the index of the function.
 //
 //	local 0: the object; 1: the same; 2: the copy; 3: a length; 4: an index
-func (l *gcLinker) clone(self int, layouts []string) []byte {
+func (l *gcLinker) clone(self int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 2)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeI32)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
 
 	// newArray starts the copy of the array of type t pushed.
 	newArray := func(t uint32) {
@@ -631,7 +616,7 @@ func (l *gcLinker) clone(self int, layouts []string) []byte {
 			return
 		}
 		a.set(1)
-		a.i32(int64(gen))
+		a.i32(0) // no layout
 		a.i32(0)
 		a.get(1)
 		a.cast(gen)
@@ -708,35 +693,26 @@ func (l *gcLinker) clone(self int, layouts []string) []byte {
 	})
 	// A struct: by its layout. Anything else is not a Go value that
 	// is copied: a pointer is.
+	//
+	//	local 5: the layout
 	hdr := a.typ(wasm.GCHeader)
-	n := len(layouts)
 	a.isA(int64(hdr), func() {
-		a.op(0x1A)       // drop
-		a.op(0x02, 0x40) // block: no such layout
-		for range layouts {
-			a.op(0x02, 0x40)
+		a.op(0x1A) // drop
+		a.layoutOf(gcLoc{obj: 0, d: 5})
+		a.get(5)
+		a.op(0x45) // i32.eqz
+		a.if_()
+		a.unreachable()
+		a.end()
+		num := func() {
+			a.get(5)
+			a.load(gcLayoutNum)
 		}
-		a.get(0)
-		a.cast(hdr)
-		a.gc(0x02, hdr, 0)
-		index := make(map[string]int)
-		for j, name := range layouts {
-			index[name] = j
-		}
-		a.op(0x0E) // br_table
-		writeUleb128(a, uint64(len(l.types)))
-		for _, name := range l.types {
-			if j, ok := index[name]; ok {
-				writeUleb128(a, uint64(j))
-			} else {
-				writeUleb128(a, uint64(n))
-			}
-		}
-		writeUleb128(a, uint64(n))
-		for _, name := range layouts {
-			a.op(0x0B) // end: the layout
+		// (Each layout has its code here, a few bytes for a field: a
+		// slice of structs that grows copies each of them.)
+		a.byLayout(num, func(string) bool { return true }, func(name string) {
 			t := a.typ(name)
-			a.i32(int64(t))
+			a.get(5)
 			a.i32(0)
 			for i, f := range gcParseStruct(name) {
 				field := uint32(wasm.GCHeaderFields + i)
@@ -747,53 +723,38 @@ func (l *gcLinker) clone(self int, layouts []string) []byte {
 					a.gc(0x04, t, field) // struct.get_u
 				case 'A':
 					a.gc(0x02, t, field)
-					a.op(0x10)
-					writeUleb128(a, uint64(self))
+					a.call(self)
 				default:
 					a.gc(0x02, t, field)
 				}
 			}
 			a.gc(0x00, t)
-			a.op(0x0F)
-		}
-		a.op(0x0B, 0x00) // end; unreachable
+			a.ret()
+		})
+		a.unreachable()
 	})
 	a.get(0)
 	a.op(0x0B)
 	return a.Bytes()
 }
 
-// bits returns the bodies of the functions that return the n bytes at
-// a byte offset from a pointer as an integer (n at most 8): those of
-// the scalar there, from the offset to its end, and as many of the
-// next as are wanted (a wide load where there are narrower scalars:
-// two bools compared as a uint16). Padding reads as zeros.
-//
-// They are wasm.bits (self), which calls core; core, which finds what
-// the pointer is to, and for a struct calls the function of its
-// layout (function first+j for layouts[j]); and those. (All in one
-// function, with a program's thousands of layouts, V8 ran out of
-// memory compiling it.)
+// bits returns the body of the function that returns the n bytes at a
+// byte offset from a pointer as an integer (n at most 8): those of the
+// scalar there, from the offset to its end, and as many of the next as
+// are wanted (a wide load where there are narrower scalars: two bools
+// compared as a uint16). Padding reads as zeros. tail is the index of
+// bitsTail.
 //
 //	local 0: the pointer; local 1: the offset; local 2: n;
-//	locals 3 and 4: the pointer and the offset given to wasm.bits
-func (l *gcLinker) bits(layouts []string, self, tail, core, first int) (wrapper, coreBody []byte, perLayout [][]byte) {
-	ptrid := self + 1
-	{
-		a := &gcAsm{l: l}
-		writeUleb128(a, 0)
-		a.get(0)
-		a.get(1)
-		a.get(2)
-		a.get(0)
-		a.get(1)
-		a.op(0x10) // call
-		writeUleb128(a, uint64(core))
-		a.op(0x0B)
-		wrapper = a.Bytes()
-	}
+//	3, 4: the pointer and the offset given; 5: scratch; 6 to 9: the
+//	place in a struct; 10: the value found; 11: its bytes
+func (l *gcLinker) bits(tail, size int) []byte {
+	ptrid := l.ptridFunc
+	a := &gcAsm{l: l}
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI64, wasm.GCTypeI32)
+	c := gcLoc{obj: 0, off: 1, d: 6, e: 7, info: 8, rel: 9}
 	// toI64 converts the scalar of kind k pushed to an i64.
-	toI64 := func(a *gcAsm, k byte) {
+	toI64 := func(k byte) {
 		switch k {
 		case 'b', 'h', 'w':
 			a.op(0xAD) // i64.extend_i32_u
@@ -802,23 +763,25 @@ func (l *gcLinker) bits(layouts []string, self, tail, core, first int) (wrapper,
 		case 'd':
 			a.op(0xBD) // i64.reinterpret_f64
 		case 'r':
-			a.op(0x10)
-			writeUleb128(a, uint64(ptrid))
+			a.call(ptrid)
 		}
 	}
-	all := func(a *gcAsm) {
-		for i := uint32(0); i < 5; i++ {
-			a.get(i)
-		}
+	// found returns the value pushed, whose bytes are those that n
+	// pushes, and the bytes after it if more are wanted (bitsTail).
+	found := func(n func()) {
+		n()
+		a.get(3)
+		a.get(4)
+		a.get(2)
+		a.call(tail)
+		a.ret()
 	}
-
-	// core. Local 5: scratch.
-	a := &gcAsm{l: l}
-	writeUleb128(a, 1)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
+	a.get(0)
+	a.set(3)
+	a.get(1)
+	a.set(4)
 	linear, box := a.typ(wasm.GCLinear), a.typ(wasm.GCBox)
-	a.op(0x03, 0x40) // loop
+	a.loop()
 	a.isA(int64(linear), func() {
 		a.gc(0x02, linear, wasm.GCLinearAddr)
 		a.get(1)
@@ -843,6 +806,32 @@ func (l *gcLinker) bits(layouts []string, self, tail, core, first int) (wrapper,
 		a.set(0)
 		a.br(1)
 	})
+	// An array of objects: go on in the element, whose size that of
+	// the first says.
+	objs := a.typ(wasm.GCArrayPrefix + "o")
+	a.isA(int64(objs), func() {
+		a.set(5)
+		a.get(5)
+		a.cast(objs)
+		a.i32(0)
+		a.gc(0x0B, objs)
+		a.op(0xFB, 0x16, wasm.GCHeapEq) // ref.cast eq
+		a.call(size)
+		a.set(c.rel)
+		a.get(5)
+		a.cast(objs)
+		a.get(1)
+		a.get(c.rel)
+		a.op(0x6E) // i32.div_u
+		a.gc(0x0B, objs)
+		a.op(0xFB, 0x16, wasm.GCHeapEq)
+		a.set(0)
+		a.get(1)
+		a.get(c.rel)
+		a.op(0x70) // i32.rem_u
+		a.set(1)
+		a.br(1)
+	})
 	for i := range gcKinds {
 		k := gcKinds[i]
 		t := a.typ(wasm.GCArrayPrefix + string(k))
@@ -860,186 +849,65 @@ func (l *gcLinker) bits(layouts []string, self, tail, core, first int) (wrapper,
 			} else {
 				a.gc(0x0B, t)
 			}
-			toI64(a, k)
+			toI64(k)
 			rel()
 			a.i32(3)
 			a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
-			// The value, its bytes, and those after it (bitsTail).
-			a.i32(gcKindSize(k))
-			rel()
-			a.op(0x6B) // i32.sub
-			a.get(3)
-			a.get(4)
-			a.get(2)
-			a.op(0x10) // call
-			writeUleb128(a, uint64(tail))
-			a.op(0x0F)
+			found(func() {
+				a.i32(gcKindSize(k))
+				rel()
+				a.op(0x6B) // i32.sub
+			})
 		})
 	}
-	n := len(layouts)
-	a.op(0x02, 0x40)
-	for range layouts {
-		a.op(0x02, 0x40)
-	}
-	a.get(0)
-	a.cast(a.typ(wasm.GCHeader))
-	a.gc(0x02, a.typ(wasm.GCHeader), 0)
-	index := make(map[string]int)
-	for j, name := range layouts {
-		index[name] = j
-	}
-	a.op(0x0E)
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for j := range layouts {
-		a.op(0x0B)
-		all(a)
-		a.op(0x10) // call
-		writeUleb128(a, uint64(first+j))
-		a.op(0x0F)
-	}
-	a.op(0x0B, 0x00)
-	a.op(0x0B, 0x00)
-	a.op(0x0B)
-	coreBody = a.Bytes()
-
-	// The function of each layout. Local 5: scratch; local 6: the
-	// bytes found; local 7: their value; local 8: a pointer found,
-	// whose identity is its value; local 9: the bytes of it before the
-	// offset.
-	for _, name := range layouts {
-		a := &gcAsm{l: l}
-		writeUleb128(a, 5)
-		writeUleb128(a, 1)
-		a.op(wasm.GCTypeEqRef)
-		writeUleb128(a, 1)
-		a.op(wasm.GCTypeI32)
-		writeUleb128(a, 1)
-		a.op(wasm.GCTypeI64)
-		writeUleb128(a, 1)
-		a.op(wasm.GCTypeEqRef)
-		writeUleb128(a, 1)
-		a.op(wasm.GCTypeI32)
-		a.op(0x02, 0x40) // block: after it, the bytes found and what follows
-		t := a.typ(name)
-		for i, f := range gcParseStruct(name) {
-			field := uint32(wasm.GCHeaderFields + i)
-			rel := func() {
-				a.get(1)
-				a.i32(f.off)
-				a.op(0x6B)
-			}
-			if f.letter == 'A' {
-				// Go on in the array, or in the element that is
-				// an object.
-				arr := a.typ(wasm.GCArrayPrefix + string(f.elem))
-				rel()
-				a.i32(f.esize * f.n)
-				a.op(0x49, 0x04, 0x40) // i32.lt_u, if
-				a.get(0)
-				a.cast(t)
-				a.gc(0x02, t, field)
-				if f.elem == 'o' {
-					a.cast(arr)
-					rel()
-					a.i32(f.esize)
-					a.op(0x6E)
-					a.gc(0x0B, arr)
-					a.op(0xFB, 0x16, wasm.GCHeapEq)
-					a.set(5)
-					rel()
-					a.i32(f.esize)
-					a.op(0x70)
-					a.set(1)
-					a.get(5)
-					a.set(0)
-				} else {
-					a.set(5)
-					rel()
-					a.set(1)
-					a.get(5)
-					a.set(0)
-				}
-				all(a)
-				a.op(0x10) // call
-				writeUleb128(a, uint64(core))
-				a.op(0x0F, 0x0B)
-				continue
-			}
-			rel()
-			a.i32(gcKindSize(f.letter))
-			a.op(0x49, 0x04, 0x40)
-			a.get(0)
-			a.cast(t)
-			if f.letter == 'b' || f.letter == 'h' {
-				a.gc(0x04, t, field)
-			} else {
-				a.gc(0x02, t, field)
-			}
-			if f.letter == 'r' {
-				// (Its identity is asked for once, below.)
-				a.set(8)
-				rel()
-				a.set(9)
-			} else {
-				toI64(a, f.letter)
-				rel()
-				a.i32(3)
-				a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
-				a.set(7)
-			}
-			a.i32(gcKindSize(f.letter))
-			rel()
-			a.op(0x6B) // i32.sub
-			a.set(6)
-			a.br(1)
-			a.op(0x0B)
-		}
-		// Padding: a zero byte.
-		a.i32(1)
-		a.set(6)
-		a.op(0x0B)
-		// The value found and, if more bytes are wanted, those after
-		// it.
-		a.get(8)
-		a.op(0xD1, 0x45, 0x04, 0x40) // ref.is_null, i32.eqz, if: a pointer
-		a.get(8)
-		a.op(0x10)
-		writeUleb128(a, uint64(ptrid))
-		a.get(9)
-		a.i32(3)
-		a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
-		a.set(7)
-		a.op(0x0B)
-		a.get(2)
-		a.get(6)
-		a.op(0x4A, 0x04, 0x40) // i32.gt_s, if
-		a.get(7)
-		a.get(3)
-		a.get(4)
-		a.get(6)
-		a.op(0x6A) // i32.add
-		a.get(2)
-		a.get(6)
-		a.op(0x6B) // i32.sub
-		a.op(0x10) // call
-		writeUleb128(a, uint64(self))
-		a.get(6)
-		a.i32(3)
-		a.op(0x74, 0xAD, 0x86, 0x84, 0x0F) // i32.shl, i64.extend_i32_u, i64.shl, i64.or, return
-		a.op(0x0B)
-		a.get(7)
-		a.op(0x0B)
-		perLayout = append(perLayout, a.Bytes())
-	}
-	return wrapper, coreBody, perLayout
+	// A struct: by the description of its layout. Where there is no
+	// field is padding: a zero byte.
+	a.locate(c)
+	a.i32(1)
+	a.set(11)
+	a.get(c.e)
+	a.if_()
+	a.within(c)
+	a.kindIs(c, 'A')
+	a.if_()
+	// Go on in the array.
+	a.get(c.rel)
+	a.arraySize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	a.field(c, 0)
+	a.call(l.fnFgetr)
+	a.set(0)
+	a.get(c.rel)
+	a.set(1)
+	a.br(3)
+	a.end()
+	a.else_()
+	a.get(c.rel)
+	a.scalarSize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	// The scalar, from the offset to its end (of a pointer, its
+	// identity).
+	a.field(c, 0)
+	a.call(l.fnFget)
+	a.get(c.rel)
+	a.i32(3)
+	a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
+	a.set(10)
+	a.scalarSize(c)
+	a.get(c.rel)
+	a.op(0x6B) // i32.sub
+	a.set(11)
+	a.end()
+	a.end()
+	a.end()
+	a.get(10)
+	found(func() { a.get(11) })
+	a.end()
+	a.unreachable()
+	a.end()
+	return a.Bytes()
 }
 
 // bitsTail returns the body of the function that ends wasm.bits: the
@@ -1177,11 +1045,9 @@ func (l *gcLinker) ptrID(self int) []byte {
 // one object to another of the same type. self is its index.
 //
 //	local 0: the source; 1: the destination; 2: a length; 3: an index
-func (l *gcLinker) copyObj(self int, layouts []string) []byte {
+func (l *gcLinker) copyObj(self int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 1)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeI32)
+	a.locals(wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
 	gen := a.typ(wasm.GCGeneric)
 	a.isA(int64(gen), func() {
 		if !l.generic() {
@@ -1251,31 +1117,20 @@ func (l *gcLinker) copyObj(self int, layouts []string) []byte {
 		a.op(0x0B, 0x0B, 0x0F)
 	})
 	// A struct: by its layout.
-	hdr := a.typ(wasm.GCHeader)
-	n := len(layouts)
-	a.op(0x02, 0x40)
-	for range layouts {
-		a.op(0x02, 0x40)
+	//
+	//	local 4: the layout; 5: the kind of a field
+	a.layoutOf(gcLoc{obj: 0, d: 4})
+	a.get(4)
+	a.op(0x45) // i32.eqz
+	a.if_()
+	a.unreachable()
+	a.end()
+	num := func() {
+		a.get(4)
+		a.load(gcLayoutNum)
 	}
-	a.get(0)
-	a.cast(hdr)
-	a.gc(0x02, hdr, 0)
-	index := make(map[string]int)
-	for j, name := range layouts {
-		index[name] = j
-	}
-	a.op(0x0E)
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for _, name := range layouts {
-		a.op(0x0B)
+	// A small one: field by field.
+	a.byLayout(num, gcSmall, func(name string) {
 		t := a.typ(name)
 		for i, f := range gcParseStruct(name) {
 			field := uint32(wasm.GCHeaderFields + i)
@@ -1285,8 +1140,7 @@ func (l *gcLinker) copyObj(self int, layouts []string) []byte {
 					a.cast(t)
 					a.gc(0x02, t, field)
 				}
-				a.op(0x10)
-				writeUleb128(a, uint64(self))
+				a.call(self)
 				continue
 			}
 			a.get(1)
@@ -1294,16 +1148,65 @@ func (l *gcLinker) copyObj(self int, layouts []string) []byte {
 			a.get(0)
 			a.cast(t)
 			if f.letter == 'b' || f.letter == 'h' {
-				a.gc(0x04, t, field)
+				a.gc(0x04, t, field) // struct.get_u
 			} else {
 				a.gc(0x02, t, field)
 			}
 			a.gc(0x05, t, field)
 		}
-		a.op(0x0F)
-	}
-	a.op(0x0B, 0x00)
-	a.op(0x0B)
+		a.ret()
+	})
+	// Any other: by its description.
+	a.i32(0)
+	a.set(3)
+	a.get(4)
+	a.load(gcLayoutFields)
+	a.set(2)
+	a.block()
+	a.loop()
+	a.get(3)
+	a.get(2)
+	a.op(0x4F) // i32.ge_u
+	a.brIf(1)
+	a.infoAt(4, 3)
+	a.i32(15)
+	a.op(0x71) // i32.and
+	a.set(5)
+	a.get(5)
+	a.i32(gcKindArray)
+	a.op(0x46) // i32.eq
+	a.if_()
+	a.fieldAt(0, 4, 3)
+	a.call(l.fnFgetr)
+	a.fieldAt(1, 4, 3)
+	a.call(l.fnFgetr)
+	a.call(self)
+	a.else_()
+	a.get(5)
+	a.i32(int64(strings.IndexByte(gcKinds, 'r')))
+	a.op(0x46)
+	a.if_()
+	a.fieldAt(1, 4, 3)
+	a.i64(0)
+	a.fieldAt(0, 4, 3)
+	a.call(l.fnFgetr)
+	a.call(l.fnFset)
+	a.else_()
+	a.fieldAt(1, 4, 3)
+	a.fieldAt(0, 4, 3)
+	a.call(l.fnFget)
+	gcRefNull(&a.Buffer)
+	a.call(l.fnFset)
+	a.end()
+	a.end()
+	a.get(3)
+	a.i32(1)
+	a.op(0x6A) // i32.add
+	a.set(3)
+	a.br(0)
+	a.end()
+	a.end()
+	a.end()
 	return a.Bytes()
 }
 
@@ -1311,7 +1214,7 @@ func (l *gcLinker) copyObj(self int, layouts []string) []byte {
 // helperIndex. first is the index of the first.
 func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex func(loader.Sym) int64) []*wasmFunc {
 	l.helperFirst = first
-	// Every type they use, before the layouts are listed.
+	// Every type they use.
 	for i := range gcKinds {
 		l.typeIndex(wasm.GCArrayPrefix + gcKinds[i:i+1])
 	}
@@ -1354,42 +1257,49 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 	storeTailSig := wasm.GCFuncPrefix + "rilii."
 	l.typeIndex(storeTailSig)
 	l.typeIndex(clearSig)
+	moveSig := wasm.GCFuncPrefix + "rri.i"
+	l.typeIndex(moveSig)
+	zeroSig := wasm.GCFuncPrefix + "ri.i"
+	l.typeIndex(zeroSig)
 	l.typeIndex(wasm.GCHeader)
 
-	var layouts []string
-	for _, name := range l.types {
-		if strings.HasPrefix(name, wasm.GCStructPrefix) {
-			layouts = append(layouts, name)
-		}
+	fieldSigs := map[string]string{
+		"wasm.find":  wasm.GCFuncPrefix + "ii.i",
+		"wasm.flen":  wasm.GCFuncPrefix + "ii.i",
+		"wasm.fget":  wasm.GCFuncPrefix + "rii.l",
+		"wasm.fgetr": wasm.GCFuncPrefix + "rii.r",
+		"wasm.fset":  wasm.GCFuncPrefix + "riilr.",
 	}
-	l.ptridFunc = first + 2*len(gcKinds) + 3
-	var fns []*wasmFunc
-	for i, sig := range sigs {
-		k, store := gcKinds[i%len(gcKinds)], i >= len(gcKinds)
-		name := wasm.GCLoadPrefix
-		if store {
-			name = wasm.GCStorePrefix
-		}
-		fns = append(fns, &wasmFunc{Name: name + string(k), Type: l.typeIndex(sig), Code: l.access(k, store, layouts, first+2*len(gcKinds)+2, first+2*len(gcKinds)+6, first+2*len(gcKinds)+7, first+2*len(gcKinds)+3)})
+	for _, sig := range fieldSigs {
+		l.typeIndex(sig)
 	}
-	fns = append(fns, &wasmFunc{Name: wasm.GCAddPtr, Type: l.typeIndex(addptr), Code: l.addPtr(layouts)})
-	fns = append(fns, &wasmFunc{Name: wasm.GCClone, Type: l.typeIndex(clone), Code: l.clone(first+len(fns), layouts)})
-	bitsSelf := first + len(fns)
-	bitsFn := &wasmFunc{Name: wasm.GCBits, Type: l.typeIndex(bits)}
-	fns = append(fns, bitsFn)
-	fns = append(fns, &wasmFunc{Name: wasm.GCPtrID, Type: l.typeIndex(ptrid), Code: l.ptrID(first + len(fns))})
-	fns = append(fns, &wasmFunc{Name: wasm.GCCopy, Type: l.typeIndex(copyObj), Code: l.copyObj(first+len(fns), layouts)})
-	newFn := &wasmFunc{Name: wasm.GCNew, Type: l.typeIndex(newSig)}
-	fns = append(fns, newFn)
-	fns = append(fns, &wasmFunc{Name: gcSize, Type: l.typeIndex(sizeSig), Code: l.sizeOf(first+len(fns), layouts)})
-	fns = append(fns, &wasmFunc{Name: gcStoreBits, Type: l.typeIndex(storeBitsSig), Code: l.storeBits(layouts, first+2*len(gcKinds)+6, first+2*len(gcKinds)+11)})
-	fns = append(fns, &wasmFunc{Name: wasm.GCPtrEq, Type: l.typeIndex(ptrEqSig), Code: l.ptrEq()})
-	fns = append(fns, &wasmFunc{Name: wasm.GCClear, Type: l.typeIndex(clearSig), Code: l.clearObj(first+len(fns), layouts)})
-	fns = append(fns, &wasmFunc{Name: "wasm.bitstail", Type: l.typeIndex(bitsTailSig), Code: l.bitsTail(first + 2*len(gcKinds) + 2)})
-	fns = append(fns, &wasmFunc{Name: "wasm.storetail", Type: l.typeIndex(storeTailSig), Code: l.storeTail(first + 2*len(gcKinds) + 7)})
+
+	// The functions that compiled code calls come first, in the order
+	// of helperIndex; their code is written last, once the layouts are
+	// all known: the adapters of reflect and the functions that make an
+	// object of each type may add some.
+	const (
+		addPtrFn    = 2*len(gcKinds) + iota // wasm.addptr
+		cloneFn                             // wasm.clone
+		bitsFn                              // wasm.bits
+		ptridFn                             // wasm.ptrid
+		copyFn                              // wasm.copy
+		newFn                               // wasm.new
+		sizeFn                              // wasm.size
+		storeBitsFn                         // wasm.storebits
+		ptrEqFn                             // wasm.ptreq
+		clearFn                             // wasm.clear
+		bitsTailFn                          // wasm.bitstail
+		storeTailFn                         // wasm.storetail
+		moveFn                              // wasm.move
+		zeroFn                              // wasm.zero
+		reflectFn                           // wasm.reflectcall, and what follows it
+	)
+	l.ptridFunc = first + ptridFn
+	fns := make([]*wasmFunc, reflectFn)
 	fns = append(fns, l.reflectFuncs(first+len(fns), nimport, funcIndex)...)
-	// The functions that make an object of each type, last.
-	newFn.Code = l.newByNumber(len(ctors), first+len(fns))
+	// The functions that make an object of each type.
+	ctorFirst := first + len(fns)
 	ctorSig := l.typeIndex(wasm.GCFuncPrefix + ".r")
 	for i, c := range ctors {
 		code := []byte{0x00} // (no locals)
@@ -1397,15 +1307,48 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 		code = append(code, 0x0B)
 		fns = append(fns, &wasmFunc{Name: "wasm.new." + strconv.Itoa(i+1), Type: ctorSig, Code: code})
 	}
-	// wasm.bits for each layout.
-	bitsCore := first + len(fns)
-	bitsSig := l.typeIndex(wasm.GCFuncPrefix + "riiri.l")
-	wrapper, core, per := l.bits(layouts, bitsSelf, first+2*len(gcKinds)+10, bitsCore, bitsCore+1)
-	bitsFn.Code = wrapper
-	fns = append(fns, &wasmFunc{Name: "wasm.bits.core", Type: bitsSig, Code: core})
-	for j, code := range per {
-		fns = append(fns, &wasmFunc{Name: "wasm.bits." + strconv.Itoa(j), Type: bitsSig, Code: code})
+	// The functions that read the descriptions of the layouts, and the
+	// fields of each (see gclayout.go).
+	l.layoutsDone = true
+	add := func(name string, index *int) *wasmFunc {
+		*index = first + len(fns)
+		fn := &wasmFunc{Name: name, Type: l.typeIndex(fieldSigs[name])}
+		fns = append(fns, fn)
+		return fn
 	}
+	find := add("wasm.find", &l.fnFind)
+	flen := add("wasm.flen", &l.fnFlen)
+	fget := add("wasm.fget", &l.fnFget)
+	fgetr := add("wasm.fgetr", &l.fnFgetr)
+	fset := add("wasm.fset", &l.fnFset)
+	find.Code = l.find()
+	flen.Code = l.flen()
+	fget.Code = l.fget()
+	fgetr.Code = l.fgetr()
+	fset.Code = l.fset()
+
+	for i, sig := range sigs {
+		k, store := gcKinds[i%len(gcKinds)], i >= len(gcKinds)
+		name := wasm.GCLoadPrefix
+		if store {
+			name = wasm.GCStorePrefix
+		}
+		fns[i] = &wasmFunc{Name: name + string(k), Type: l.typeIndex(sig), Code: l.access(k, store, first+bitsFn, first+sizeFn, first+storeBitsFn, first+ptridFn)}
+	}
+	fns[addPtrFn] = &wasmFunc{Name: wasm.GCAddPtr, Type: l.typeIndex(addptr), Code: l.addPtr()}
+	fns[cloneFn] = &wasmFunc{Name: wasm.GCClone, Type: l.typeIndex(clone), Code: l.clone(first + cloneFn)}
+	fns[bitsFn] = &wasmFunc{Name: wasm.GCBits, Type: l.typeIndex(bits), Code: l.bits(first+bitsTailFn, first+sizeFn)}
+	fns[ptridFn] = &wasmFunc{Name: wasm.GCPtrID, Type: l.typeIndex(ptrid), Code: l.ptrID(first + ptridFn)}
+	fns[copyFn] = &wasmFunc{Name: wasm.GCCopy, Type: l.typeIndex(copyObj), Code: l.copyObj(first + copyFn)}
+	fns[newFn] = &wasmFunc{Name: wasm.GCNew, Type: l.typeIndex(newSig), Code: l.newByNumber(len(ctors), ctorFirst)}
+	fns[sizeFn] = &wasmFunc{Name: gcSize, Type: l.typeIndex(sizeSig), Code: l.sizeOf(first + sizeFn)}
+	fns[storeBitsFn] = &wasmFunc{Name: gcStoreBits, Type: l.typeIndex(storeBitsSig), Code: l.storeBits(first+sizeFn, first+storeTailFn)}
+	fns[ptrEqFn] = &wasmFunc{Name: wasm.GCPtrEq, Type: l.typeIndex(ptrEqSig), Code: l.ptrEq()}
+	fns[clearFn] = &wasmFunc{Name: wasm.GCClear, Type: l.typeIndex(clearSig), Code: l.clearObj(first + clearFn)}
+	fns[bitsTailFn] = &wasmFunc{Name: "wasm.bitstail", Type: l.typeIndex(bitsTailSig), Code: l.bitsTail(first + bitsFn)}
+	fns[storeTailFn] = &wasmFunc{Name: "wasm.storetail", Type: l.typeIndex(storeTailSig), Code: l.storeTail(first + storeBitsFn)}
+	fns[moveFn] = &wasmFunc{Name: wasm.GCMove, Type: l.typeIndex(moveSig), Code: l.move(first+copyFn, first+sizeFn)}
+	fns[zeroFn] = &wasmFunc{Name: wasm.GCZero, Type: l.typeIndex(zeroSig), Code: l.zero(first+clearFn, first+sizeFn)}
 	return fns
 }
 
@@ -1413,11 +1356,9 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 // an object. self is its index.
 //
 //	local 0: the object; 1: a length; 2: an index
-func (l *gcLinker) clearObj(self int, layouts []string) []byte {
+func (l *gcLinker) clearObj(self int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 1)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeI32)
+	a.locals(wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
 	zero := func(k byte) {
 		switch gcStorage(k) {
 		case wasm.GCTypeI64:
@@ -1469,49 +1410,61 @@ func (l *gcLinker) clearObj(self int, layouts []string) []byte {
 		a.br(0)
 		a.op(0x0B, 0x0B, 0x0F)
 	})
-	hdr := a.typ(wasm.GCHeader)
-	n := len(layouts)
-	a.op(0x02, 0x40)
-	for range layouts {
-		a.op(0x02, 0x40)
-	}
-	a.get(0)
-	a.cast(hdr)
-	a.gc(0x02, hdr, 0)
-	index := make(map[string]int)
-	for j, name := range layouts {
-		index[name] = j
-	}
-	a.op(0x0E)
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for _, name := range layouts {
-		a.op(0x0B)
-		t := a.typ(name)
-		for i, f := range gcParseStruct(name) {
-			field := uint32(wasm.GCHeaderFields + i)
-			a.get(0)
-			a.cast(t)
-			if f.letter == 'A' {
-				a.gc(0x02, t, field)
-				a.op(0x10)
-				writeUleb128(a, uint64(self))
-				continue
-			}
-			zero(f.letter)
-			a.gc(0x05, t, field)
-		}
-		a.op(0x0F)
-	}
-	a.op(0x0B) // not an object: nothing to clear
-	a.op(0x0B)
+	// A struct: by the description of its layout.
+	//
+	//	local 3: the layout; 4: the kind of a field
+	a.layoutOf(gcLoc{obj: 0, d: 3})
+	a.get(3)
+	a.op(0x45) // i32.eqz
+	a.if_()
+	a.ret() // not a struct of the program: nothing to clear
+	a.end()
+	a.i32(0)
+	a.set(2)
+	a.get(3)
+	a.load(gcLayoutFields)
+	a.set(1)
+	a.block()
+	a.loop()
+	a.get(2)
+	a.get(1)
+	a.op(0x4F) // i32.ge_u
+	a.brIf(1)
+	a.infoAt(3, 2)
+	a.i32(15)
+	a.op(0x71) // i32.and
+	a.set(4)
+	a.get(4)
+	a.i32(gcKindArray)
+	a.op(0x46) // i32.eq
+	a.if_()
+	a.fieldAt(0, 3, 2)
+	a.call(l.fnFgetr)
+	a.call(self)
+	a.else_()
+	a.get(4)
+	a.i32(int64(strings.IndexByte(gcKinds, 'r')))
+	a.op(0x46)
+	a.if_()
+	a.fieldAt(0, 3, 2)
+	a.i64(0)
+	gcRefNull(&a.Buffer)
+	a.call(l.fnFset)
+	a.else_()
+	a.fieldAt(0, 3, 2)
+	a.i64(0)
+	gcRefNull(&a.Buffer)
+	a.call(l.fnFset)
+	a.end()
+	a.end()
+	a.get(2)
+	a.i32(1)
+	a.op(0x6A) // i32.add
+	a.set(2)
+	a.br(0)
+	a.end()
+	a.end()
+	a.end()
 	return a.Bytes()
 }
 
@@ -1603,19 +1556,10 @@ func (l *gcLinker) ptrEq() []byte {
 //	local 0: the pointer; 1: the offset; 2: the bits; 3: how many bytes;
 //	4: scratch; 5: a size; 6: the mask of the bytes; 7: the shift;
 //	8 and 9: the pointer and the offset given
-func (l *gcLinker) storeBits(layouts []string, size, tail int) []byte {
+func (l *gcLinker) storeBits(size, tail int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 5)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeI32)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeI64)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeI32)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI64, wasm.GCTypeI64, wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
+	c := gcLoc{obj: 0, off: 1, d: 10, e: 11, info: 12, rel: 13}
 	linear, box := a.typ(wasm.GCLinear), a.typ(wasm.GCBox)
 	a.get(0)
 	a.set(8)
@@ -1811,110 +1755,83 @@ func (l *gcLinker) storeBits(layouts []string, size, tail int) []byte {
 			})
 		})
 	}
-	n := len(layouts)
-	a.op(0x02, 0x40)
-	for range layouts {
-		a.op(0x02, 0x40)
-	}
-	a.get(0)
-	a.cast(a.typ(wasm.GCHeader))
-	a.gc(0x02, a.typ(wasm.GCHeader), 0)
-	index := make(map[string]int)
-	for j, name := range layouts {
-		index[name] = j
-	}
-	a.op(0x0E)
-	writeUleb128(a, uint64(len(l.types)))
-	for _, name := range l.types {
-		if j, ok := index[name]; ok {
-			writeUleb128(a, uint64(j))
-		} else {
-			writeUleb128(a, uint64(n))
-		}
-	}
-	writeUleb128(a, uint64(n))
-	for j, name := range layouts {
-		a.op(0x0B)
-		t := a.typ(name)
-		for i, f := range gcParseStruct(name) {
-			field := uint32(wasm.GCHeaderFields + i)
-			rel := func() {
-				a.get(1)
-				a.i32(f.off)
-				a.op(0x6B)
-			}
-			if f.letter == 'A' {
-				arr := a.typ(wasm.GCArrayPrefix + string(f.elem))
-				rel()
-				a.i32(f.esize * f.n)
-				a.op(0x49, 0x04, 0x40)
-				a.get(0)
-				a.cast(t)
-				a.gc(0x02, t, field)
-				if f.elem == 'o' {
-					a.cast(arr)
-					rel()
-					a.i32(f.esize)
-					a.op(0x6E)
-					a.gc(0x0B, arr)
-					a.op(0xFB, 0x16, wasm.GCHeapEq)
-					a.set(4)
-					rel()
-					a.i32(f.esize)
-					a.op(0x70)
-					a.set(1)
-					a.get(4)
-					a.set(0)
-				} else {
-					a.set(4)
-					rel()
-					a.set(1)
-					a.get(4)
-					a.set(0)
-				}
-				a.br(n - j + 1)
-				a.op(0x0B)
-				continue
-			}
-			if f.letter == 'r' {
-				// Zeros stored over a pointer clear it.
-				rel()
-				a.i32(8)
-				a.op(0x49, 0x04, 0x40) // i32.lt_u, if
-				a.get(2)
-				a.op(0x50, 0x04, 0x40) // i64.eqz, if
-				a.get(0)
-				a.cast(t)
-				gcRefNull(&a.Buffer)
-				a.gc(0x05, t, field)
-				a.op(0x0F, 0x0B)
-				a.op(0x00, 0x0B) // unreachable: not zeros
-				continue
-			}
-			rel()
-			a.i32(gcKindSize(f.letter))
-			a.op(0x49, 0x04, 0x40) // i32.lt_u, if
-			rmw(f.letter, rel, func() {
-				a.get(0)
-				a.cast(t)
-			}, func() {
-				a.get(0)
-				a.cast(t)
-				if f.letter == 'b' || f.letter == 'h' {
-					a.gc(0x04, t, field)
-				} else {
-					a.gc(0x02, t, field)
-				}
-			}, func() {
-				a.gc(0x05, t, field)
-			})
-			a.op(0x0B)
-		}
-		// Padding: a byte skipped.
-		rest(func() { a.i32(1) })
-		a.op(0x0F)
-	}
-	a.op(0x0B, 0x00)
+	// A struct: by the description of its layout.
+	a.locate(c)
+	a.get(c.e)
+	a.if_()
+	a.within(c)
+	a.kindIs(c, 'A')
+	a.if_()
+	// Go on in the array.
+	a.get(c.rel)
+	a.arraySize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	a.field(c, 0)
+	a.call(l.fnFgetr)
+	a.set(0)
+	a.get(c.rel)
+	a.set(1)
+	a.br(3)
+	a.end()
+	a.else_()
+	a.kindIs(c, 'r')
+	a.if_()
+	// Zeros stored over a pointer clear it.
+	a.get(c.rel)
+	a.i32(8)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	a.get(2)
+	a.op(0x50) // i64.eqz
+	a.if_()
+	a.field(c, 0)
+	a.i64(0)
+	gcRefNull(&a.Buffer)
+	a.call(l.fnFset)
+	a.ret()
+	a.end()
+	a.unreachable() // not zeros
+	a.end()
+	a.else_()
+	a.get(c.rel)
+	a.scalarSize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	// The bytes, in those of the scalar.
+	a.get(c.rel)
+	a.i32(3)
+	a.op(0x74, 0xAD) // i32.shl, i64.extend_i32_u
+	a.set(7)
+	a.field(c, 0)
+	a.field(c, 0)
+	a.call(l.fnFget)
+	a.get(6)
+	a.get(7)
+	a.op(0x86) // i64.shl
+	a.i64(-1)
+	a.op(0x85, 0x83) // i64.xor, i64.and
+	a.get(2)
+	a.get(7)
+	a.op(0x86)
+	a.get(6)
+	a.get(7)
+	a.op(0x86, 0x83, 0x84) // i64.shl, i64.and, i64.or
+	gcRefNull(&a.Buffer)
+	a.call(l.fnFset)
+	rest(func() {
+		a.scalarSize(c)
+		a.get(c.rel)
+		a.op(0x6B) // i32.sub
+	})
+	a.ret()
+	a.end()
+	a.end()
+	a.end()
+	a.end()
+	// Padding: a byte skipped.
+	rest(func() { a.i32(1) })
+	a.ret()
 	a.op(0x0B, 0x00)
 	a.op(0x0B)
 	return a.Bytes()
@@ -1934,7 +1851,7 @@ func (l *gcLinker) newByNumber(n, first int) []byte {
 	a.get(0)
 	a.i32(0)
 	a.op(0x48, 0x04, 0x40) // i32.lt_s, if
-	a.i32(int64(gen))
+	a.i32(0)               // no layout
 	a.i32(0)
 	size := func() {
 		a.get(0)
@@ -1976,9 +1893,9 @@ func (l *gcLinker) newByNumber(n, first int) []byte {
 }
 
 // sizeOf returns the body of gcSize. self is its index.
-func (l *gcLinker) sizeOf(self int, layouts []string) []byte {
+func (l *gcLinker) sizeOf(self int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 0)
+	a.locals(wasm.GCTypeI32)
 	for i := range gcKinds {
 		t := a.typ(wasm.GCArrayPrefix + gcKinds[i:i+1])
 		a.isA(int64(t), func() {
@@ -2012,37 +1929,18 @@ func (l *gcLinker) sizeOf(self int, layouts []string) []byte {
 			a.op(0x0F)
 		})
 	}
+	// A struct: its layout says.
 	hdr := a.typ(wasm.GCHeader)
-	n := len(layouts)
 	a.isA(int64(hdr), func() {
-		a.op(0x1A)       // drop
-		a.op(0x02, 0x40) // block: no such layout
-		for range layouts {
-			a.op(0x02, 0x40)
-		}
-		a.get(0)
-		a.cast(hdr)
 		a.gc(0x02, hdr, 0)
-		index := make(map[string]int)
-		for j, name := range layouts {
-			index[name] = j
-		}
-		a.op(0x0E) // br_table
-		writeUleb128(a, uint64(len(l.types)))
-		for _, name := range l.types {
-			if j, ok := index[name]; ok {
-				writeUleb128(a, uint64(j))
-			} else {
-				writeUleb128(a, uint64(n))
-			}
-		}
-		writeUleb128(a, uint64(n))
-		for _, name := range layouts {
-			a.op(0x0B)
-			a.i32(gcStructSize(name))
-			a.op(0x0F)
-		}
-		a.op(0x0B, 0x00)
+		a.tee(1)
+		a.op(0x45) // i32.eqz
+		a.if_()
+		a.unreachable() // not a struct of the program
+		a.end()
+		a.get(1)
+		a.load(gcLayoutSize)
+		a.ret()
 	})
 	a.op(0x00) // unreachable
 	a.op(0x0B)

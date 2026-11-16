@@ -963,3 +963,117 @@ it has inlined the function called (a small one: `runtime.panicnil`),
 the position it gives for the caller can be that of an earlier
 instruction, so the line of a nil dereference or an index out of range
 is sometimes that of the statement before.
+
+### Stage 9: layouts as data (2026-11-17)
+
+The functions that resolve a pointer at run time (`wasm.load.*`,
+`wasm.store.*`, `wasm.bits`, `wasm.storebits`, `wasm.copy`,
+`wasm.clear`, `wasm.clone`) each held the code of every struct layout
+of the program: 243 KB of a 1,753 KB `fmt` hello world (106 layouts,
+836 fields), 1.3 MB of reflect's test binary. They are now loops over
+a description of the layout, which the linker writes as data
+(`cmd/link/internal/wasm/gclayout.go`):
+
+- **The header of an object is the address of its layout's
+  description** in linear memory, after the program's data (it was the
+  index of the WebAssembly type): the size of the Go value, and for
+  each field its offset, its kind and size, and for a nested array the
+  size and number of its elements; then an index, by 8 bytes of the Go
+  value, of the first field there, so that the field at an offset is
+  found without a search. A description is 24 bytes, 8 for each field
+  and 2 for each 8 bytes of the value: 11 KB for the hello world.
+- **Only the access to a field is still code for each layout**, as a
+  field of a WebAssembly struct is named by the instruction:
+  `wasm.fget`, `wasm.fgetr` and `wasm.fset` read and write field *i*
+  of layout *n* (about 14 bytes a field, with the cast shared by the
+  fields of a layout), and so do `wasm.clone` for every layout (9 bytes
+  a field: a slice of structs that grows clones each element) and
+  `wasm.copy` for layouts of up to 12 fields (18 bytes a field; a
+  larger one is copied by the loop).
+- **`wasm.move` and `wasm.zero`**, new: the bytes of a Go value copied
+  from one place in a struct to another, or zeroed, by the fields the
+  descriptions say are there. The runtime's `typedmemmove` and
+  `typedmemclr`, which know a value only by its type descriptor, call
+  them instead of going scalar by scalar through the accessors (two
+  boxes, a load and a store for each scalar): half of the time of a
+  program that copies structs was there.
+- A load or store of some bytes of a wider scalar (a byte of an inline
+  string, which `cmpstring` and `memhash` read) is done where the field
+  is found, not by a second pass in `wasm.bits`. A struct is the first
+  thing a pointer is tested for, after a pointer into an object.
+- The compiler is unchanged but for the constant it puts in a header
+  (a relocation of its own, of size 3) and the two calls.
+
+| `fmt` hello world        | before    | after     |          |
+|--------------------------|----------:|----------:|---------:|
+| module                   | 1,752,893 | 1,579,357 | −9.9%    |
+| with `-ldflags="-s -w"`  | 1,571,876 | 1,399,436 | −11.0%   |
+| gzip -9                  | 451,498   | 427,799   | −5.2%    |
+| the functions above      | 243 KB    | 62 KB + 11 KB of data | |
+
+(The code that went was repetitive, so it compressed well: less is
+gained gzipped.) The benchmark (`compiled/main.go`) goes from 258 KB to
+200 KB, and runs as fast as it did (trees 137-157 ms, frames 763-818
+ms).
+
+Speed, on a program of the operations that go through these functions
+(best of 5, node 24, ms):
+
+|                                 | before | after |
+|---------------------------------|-------:|------:|
+| `append` to `[]string`, `[]any` | 91, 81 | 91, 81 |
+| `append` to a slice of a 10-field struct | 33 | 34 |
+| `copy` of `[]string`            | 157    | 53    |
+| `copy` of a slice of structs    | 666    | 57    |
+| a map of struct keys and elements | 102  | 94    |
+| `map[string]string`             | 80     | 86    |
+| a channel of structs            | 29     | 30    |
+| `sort.Strings`                  | 265    | 210   |
+| `fmt.Sprintf`                   | 465    | 460   |
+| loads and stores through `&s[i].f` | 14  | 18    |
+
+The last line is what is lost: an access through a pointer into a
+struct is about 10 ns where it was 8 (the field is found in the
+description and then reached through `wasm.fget` or `wasm.fset`,
+where there was a chain of comparisons with the access at its end).
+Conformance is unchanged (947 of 965).
+
+**What was proposed, and why this instead.** The proposal was to make
+the struct of most Go types one of a fixed budget of presets: (number
+of pointer words, number of 8-byte words of bits), pointers first, a
+64-bit header whose high half is the bitmap of which Go word is a
+pointer, and `wasm.generic` (an array of references and an array of
+words) for every type outside the budget, with fields narrower than a
+word shifted out of their word. Its insight is kept: the helpers
+dispatch over the physical shapes only and read the Go layout from
+data, not from code specialized by layout. Its representation is not,
+for what was measured on the hello world:
+
+- sharing is modest: the 106 layouts are 104 distinct WebAssembly
+  types now, and would be 42 presets; 11 of them (10 with a nested
+  array, among them `fmt`'s `pp` and `fmt`, and one of 73 words) would
+  become `wasm.generic`: three objects each and an array access for
+  every field;
+- every access to a field narrower than a word (a bool, an int32: 191
+  of the 836 fields) would be a shift and a mask in the compiled code,
+  and a store a read, a mask and a write: the 977 KB of Go code would
+  grow to shrink the helpers, and such stores would be slower;
+- every object would be 8 bytes larger for the 64-bit header;
+- the compiled code, the start function, the constructors, reflect's
+  adapters and the runtime would all change representation, where this
+  changes the linker's helpers alone and no object.
+
+With the layouts as data the helpers cost about 90 bytes a field where
+they cost 290; presets would save perhaps 30 KB more here, before what
+the Go code would grow by. If a larger program shows the per-field code
+(`wasm.fget`, `wasm.fset`, `wasm.clone`, `wasm.copy`: about 60 bytes a
+field) to matter, sharing those by shape is the next step, and can be
+done without changing how compiled code reaches a field: only the order
+of the fields in the struct needs to be canonical (pointers first, then
+by width), not their widths.
+
+What is large in the hello world now, of the linker's own: the adapters
+for reflect (`wasm.reflectcall` and `wasm.makefunc`, 51 KB: one for
+each func type of the program, whether or not reflect can reach it) and
+the start function (23 KB).
+
