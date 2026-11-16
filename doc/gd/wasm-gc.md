@@ -1223,3 +1223,54 @@ itself again on a new one: an import that suspends the stack
 Tried by hand in node and Chromium: recursion 10,000,000 deep, 20,000
 stacks nested, 15 to 25 µs for each change of stack (it must start from
 a microtask, or the host's stack fills at 1,300 nested). Not built.
+
+### Stage 12: files in a browser, as Emscripten has them (2026-11-17)
+
+A program in a page had no files (`ENOSYS`). It now has what an
+Emscripten program has, through the same interface, so that the two can
+share them (`lib/wasm/wasm_gc_fs.js`):
+
+- `wasiFS(fs, mem)` makes the file calls of WASI that package os and
+  syscall use (`path_open`, `fd_read`, `fd_readdir`, `path_rename`...)
+  from an object with the interface of Emscripten's `FS`: `open`,
+  `read`, `write`, `llseek`, `stat`, `readdir`, `mkdir`, `rename`,
+  `symlink`... Descriptor 3 is the root, the one directory the program
+  is given; a path is resolved from where its directory is now
+  (`FS.getPath`), and may not leave it. Emscripten numbers its errors as
+  WASI does, so they pass through.
+- `memFS()` is such an object for a page without Emscripten: files in
+  memory, as Emscripten's MEMFS, with `/tmp`, `/home/web_user`,
+  `/dev/null` and `/dev/urandom`; and `fs.persist(dir)`, which keeps a
+  directory in IndexedDB exactly as Emscripten's IDBFS mounted at `dir`
+  does: the database of that name (version 21), the store `FILE_DATA`
+  of `{timestamp, mode, contents}` by path, written a moment after a
+  change and at exit, by comparing timestamps as IDBFS does.
+
+`runGo` takes `fs` (the default is `memFS()`; `Module.FS` of an
+Emscripten program gives the Go program that program's files, whatever
+is mounted in them; `null` is no files), `persist` (directories of the
+default kept in IndexedDB) and `files` (contents to start with).
+
+Checked three ways. Under node, `browser/memfs.mjs` runs a program as a
+page would, with a copy of the working directory in memory, so that `go
+test -exec` runs Go's own tests on it: all of `os` and `io/fs` pass on
+`memFS()`, and the other packages tried (archive/zip, embed,
+text/template, net/http, testing/fstest...) but for tests that want
+files of the machine outside their directory. With the `FS` of a real
+Emscripten program (5.0.1) instead, `os` passes but for three tests of
+hard links, which Emscripten does not have (`ENOTSUP`); two more passed
+once `wasiFS` did what Emscripten's does not: refuse to create a file
+exclusively through a dangling link, and take a path that ends in a
+slash for a directory. And in Chromium, `browser/fs_test.mjs` has a
+page with an Emscripten program and IDBFS at `/data`: a Go program with
+`persist: ['/data']` reads what Emscripten stored, Emscripten then reads
+what Go stored (and no longer has what Go removed), a second run of the
+Go program finds it all again, and a run with `fs: Module.FS` reads the
+file the C program wrote and writes one the page reads back.
+
+What differs from a system's files: no permissions and no users in
+`memFS()` (Emscripten checks modes); times in milliseconds with
+Emscripten's `FS` (nanoseconds in `memFS()`, though IndexedDB keeps
+milliseconds); links are not kept in IndexedDB (IDBFS fails on them;
+`persist` leaves them out).
+

@@ -1,0 +1,13 @@
+go reads: written by Emscripten
+go lists /data: from_emscripten.txt sub | /data/sub: x.bin
+exit 0
+emscripten reads: written by Go | deep
+emscripten lists /data/sub: go
+go reads again: written by Go | deep
+go lists /data: from_emscripten.txt from_go.txt sub | /data/sub: go
+exit 0
+go reads live: written by C | written by Go
+go lists /data: from_emscripten.txt renamed.txt sub
+exit 0
+emscripten reads live: written by Go, live
+emscripten lists /data: from_emscripten.txt renamed.txt sub
