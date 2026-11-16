@@ -75,6 +75,9 @@ func f32hash(p unsafe.Pointer, h uintptr) uintptr {
 	if f == 0 {
 		return uintptr(mix(uint64(h), 0)) // +0, -0
 	}
+	if f != f {
+		return uintptr(mix(uint64(h), rand())) // any hash: a NaN is equal to nothing
+	}
 	return uintptr(mix(uint64(h), float64bits(float64(f))))
 }
 
@@ -82,6 +85,9 @@ func f64hash(p unsafe.Pointer, h uintptr) uintptr {
 	f := *(*float64)(p)
 	if f == 0 {
 		return uintptr(mix(uint64(h), 0)) // +0, -0
+	}
+	if f != f {
+		return uintptr(mix(uint64(h), rand())) // any hash: a NaN is equal to nothing
 	}
 	return uintptr(mix(uint64(h), float64bits(f)))
 }
