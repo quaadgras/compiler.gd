@@ -62,9 +62,9 @@ func (l *gcLinker) helperIndex(name string) (int, bool) {
 	case name == wasm.GCClear:
 		return 2*len(gcKinds) + 9, true
 	case name == wasm.GCReflectCall:
-		return 2*len(gcKinds) + 10, true
+		return 2*len(gcKinds) + 12, true
 	case name == wasm.GCMakeFunc:
-		return 2*len(gcKinds) + 11, true
+		return 2*len(gcKinds) + 13, true
 	}
 	return 0, false
 }
@@ -771,7 +771,7 @@ func (l *gcLinker) clone(self int, layouts []string) []byte {
 //	local 0: the pointer; local 1: the offset; local 2: n;
 //	local 3: scratch; locals 4 and 5: the pointer and the offset given;
 //	local 6: the bytes found; local 7: their value.
-func (l *gcLinker) bits(layouts []string, self int) []byte {
+func (l *gcLinker) bits(layouts []string, self, tail int) []byte {
 	ptrid := self + 1
 	a := &gcAsm{l: l}
 	writeUleb128(a, 3)
@@ -786,27 +786,16 @@ func (l *gcLinker) bits(layouts []string, self int) []byte {
 	a.set(4)
 	a.get(1)
 	a.set(5)
-	// more returns the value found (local 7, local 6 bytes) and, if
-	// more bytes are wanted, those after it.
-	more := func() {
-		a.get(2)
-		a.get(6)
-		a.op(0x4A, 0x04, 0x40) // i32.gt_s, if
-		a.get(7)
+	// more returns the value pushed, of the number of bytes that found
+	// pushes, and, if more bytes are wanted, those after it (see
+	// bitsTail: the code is at every scalar of every layout).
+	more := func(found func()) {
+		found()
 		a.get(4)
 		a.get(5)
-		a.get(6)
-		a.op(0x6A) // i32.add
 		a.get(2)
-		a.get(6)
-		a.op(0x6B) // i32.sub
 		a.op(0x10) // call
-		writeUleb128(a, uint64(self))
-		a.get(6)
-		a.i32(3)
-		a.op(0x74, 0xAD, 0x86, 0x84, 0x0F) // i32.shl, i64.extend_i32_u, i64.shl, i64.or, return
-		a.op(0x0B)
-		a.get(7)
+		writeUleb128(a, uint64(tail))
 		a.op(0x0F)
 	}
 	// toBits converts the scalar of kind k pushed to an i64, shifts it
@@ -826,12 +815,11 @@ func (l *gcLinker) bits(layouts []string, self int) []byte {
 		rel()
 		a.i32(3)
 		a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
-		a.set(7)
-		a.i32(gcKindSize(k))
-		rel()
-		a.op(0x6B) // i32.sub
-		a.set(6)
-		more()
+		more(func() {
+			a.i32(gcKindSize(k))
+			rel()
+			a.op(0x6B) // i32.sub
+		})
 	}
 	a.op(0x03, 0x40) // loop
 	a.isA(int64(linear), func() {
@@ -959,13 +947,69 @@ func (l *gcLinker) bits(layouts []string, self int) []byte {
 		}
 		// Padding: a zero byte.
 		writeI64Const(a, 0)
-		a.set(7)
-		a.i32(1)
-		a.set(6)
-		more()
+		more(func() { a.i32(1) })
 	}
 	a.op(0x0B, 0x00)
 	a.op(0x0B, 0x00)
+	a.op(0x0B)
+	return a.Bytes()
+}
+
+// bitsTail returns the body of the function that ends wasm.bits: the
+// value found, and the bytes after it if more are wanted.
+//
+//	local 0: the value; 1: its bytes; 2: the pointer; 3: the offset;
+//	4: the bytes wanted
+func (l *gcLinker) bitsTail(bits int) []byte {
+	a := &gcAsm{l: l}
+	writeUleb128(a, 0)
+	a.get(4)
+	a.get(1)
+	a.op(0x4A, 0x04, 0x40) // i32.gt_s, if
+	a.get(0)
+	a.get(2)
+	a.get(3)
+	a.get(1)
+	a.op(0x6A) // i32.add
+	a.get(4)
+	a.get(1)
+	a.op(0x6B) // i32.sub
+	a.op(0x10) // call
+	writeUleb128(a, uint64(bits))
+	a.get(1)
+	a.i32(3)
+	a.op(0x74, 0xAD, 0x86, 0x84, 0x0F) // i32.shl, i64.extend_i32_u, i64.shl, i64.or, return
+	a.op(0x0B)
+	a.get(0)
+	a.op(0x0B)
+	return a.Bytes()
+}
+
+// storeTail returns the body of the function that goes on with
+// gcStoreBits after the bytes of a scalar.
+//
+//	local 0: the pointer; 1: the offset; 2: the bits; 3: how many
+//	bytes; 4: those stored
+func (l *gcLinker) storeTail(storeBits int) []byte {
+	a := &gcAsm{l: l}
+	writeUleb128(a, 0)
+	a.get(3)
+	a.get(4)
+	a.op(0x4A, 0x04, 0x40) // i32.gt_s, if
+	a.get(0)
+	a.get(1)
+	a.get(4)
+	a.op(0x6A) // i32.add
+	a.get(2)
+	a.get(4)
+	a.i32(3)
+	a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
+	a.get(3)
+	a.get(4)
+	a.op(0x6B) // i32.sub
+	a.op(0x10) // call
+	writeUleb128(a, uint64(storeBits))
+	a.op(0x0B)
 	a.op(0x0B)
 	return a.Bytes()
 }
@@ -1218,6 +1262,10 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 	ptrEqSig := wasm.GCFuncPrefix + "rr.i"
 	l.typeIndex(ptrEqSig)
 	clearSig := wasm.GCFuncPrefix + "r."
+	bitsTailSig := wasm.GCFuncPrefix + "lirii.l"
+	l.typeIndex(bitsTailSig)
+	storeTailSig := wasm.GCFuncPrefix + "rilii."
+	l.typeIndex(storeTailSig)
 	l.typeIndex(clearSig)
 	l.typeIndex(wasm.GCHeader)
 
@@ -1239,14 +1287,16 @@ func (l *gcLinker) helpers(first int, ctors [][]byte, nimport int, funcIndex fun
 	}
 	fns = append(fns, &wasmFunc{Name: wasm.GCAddPtr, Type: l.typeIndex(addptr), Code: l.addPtr(layouts)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCClone, Type: l.typeIndex(clone), Code: l.clone(first+len(fns), layouts)})
-	fns = append(fns, &wasmFunc{Name: wasm.GCBits, Type: l.typeIndex(bits), Code: l.bits(layouts, first+len(fns))})
+	fns = append(fns, &wasmFunc{Name: wasm.GCBits, Type: l.typeIndex(bits), Code: l.bits(layouts, first+len(fns), first+2*len(gcKinds)+10)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCPtrID, Type: l.typeIndex(ptrid), Code: l.ptrID(first + len(fns))})
 	fns = append(fns, &wasmFunc{Name: wasm.GCCopy, Type: l.typeIndex(copyObj), Code: l.copyObj(first+len(fns), layouts)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCNew, Type: l.typeIndex(newSig), Code: l.newByNumber(ctors)})
 	fns = append(fns, &wasmFunc{Name: gcSize, Type: l.typeIndex(sizeSig), Code: l.sizeOf(first+len(fns), layouts)})
-	fns = append(fns, &wasmFunc{Name: gcStoreBits, Type: l.typeIndex(storeBitsSig), Code: l.storeBits(layouts, first+2*len(gcKinds)+6, first+len(fns))})
+	fns = append(fns, &wasmFunc{Name: gcStoreBits, Type: l.typeIndex(storeBitsSig), Code: l.storeBits(layouts, first+2*len(gcKinds)+6, first+2*len(gcKinds)+11)})
 	fns = append(fns, &wasmFunc{Name: wasm.GCPtrEq, Type: l.typeIndex(ptrEqSig), Code: l.ptrEq()})
 	fns = append(fns, &wasmFunc{Name: wasm.GCClear, Type: l.typeIndex(clearSig), Code: l.clearObj(first+len(fns), layouts)})
+	fns = append(fns, &wasmFunc{Name: "wasm.bitstail", Type: l.typeIndex(bitsTailSig), Code: l.bitsTail(first + 2*len(gcKinds) + 2)})
+	fns = append(fns, &wasmFunc{Name: "wasm.storetail", Type: l.typeIndex(storeTailSig), Code: l.storeTail(first + 2*len(gcKinds) + 7)})
 	return append(fns, l.reflectFuncs(first+len(fns), nimport, funcIndex)...)
 }
 
@@ -1444,7 +1494,7 @@ func (l *gcLinker) ptrEq() []byte {
 //	local 0: the pointer; 1: the offset; 2: the bits; 3: how many bytes;
 //	4: scratch; 5: a size; 6: the mask of the bytes; 7: the shift;
 //	8 and 9: the pointer and the offset given
-func (l *gcLinker) storeBits(layouts []string, size, self int) []byte {
+func (l *gcLinker) storeBits(layouts []string, size, tail int) []byte {
 	a := &gcAsm{l: l}
 	writeUleb128(a, 5)
 	writeUleb128(a, 1)
@@ -1462,27 +1512,17 @@ func (l *gcLinker) storeBits(layouts []string, size, self int) []byte {
 	a.set(8)
 	a.get(1)
 	a.set(9)
-	// rest stores what is left after the c bytes that c pushes.
+	// rest stores what is left after the bytes that c pushes (see
+	// storeTail).
 	rest := func(c func()) {
-		a.get(3)
-		c()
-		a.op(0x4A, 0x04, 0x40) // i32.gt_s, if
 		a.get(8)
 		a.get(9)
-		c()
-		a.op(0x6A) // i32.add
 		a.get(2)
-		c()
-		a.i32(3)
-		a.op(0x74, 0xAD, 0x88) // i32.shl, i64.extend_i32_u, i64.shr_u
 		a.get(3)
 		c()
-		a.op(0x6B) // i32.sub
 		a.op(0x10) // call
-		writeUleb128(a, uint64(self))
-		a.op(0x0B)
+		writeUleb128(a, uint64(tail))
 	}
-
 	// The mask: n bytes.
 	writeI64Const(a, -1)
 	writeI64Const(a, 1)

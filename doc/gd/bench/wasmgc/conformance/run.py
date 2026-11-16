@@ -37,7 +37,8 @@ STD = ['fmt', 'os', 'strings', 'strconv', 'reflect', 'sort', 'math', 'time', 'sy
        'io/ioutil', 'path/filepath', 'os/exec', 'os/signal', 'go/ast', 'go/parser', 'go/token', 'text/template',
        'encoding/json', 'internal/race', 'internal/abi', 'internal/goarch', 'internal/testenv', 'testing',
        'unique', 'weak', 'syscall', 'runtime/pprof', 'context', 'crypto/sha256', 'hash/fnv', 'hash/maphash',
-       'strings', 'embed', 'internal/asan', 'internal/msan', 'internal/godebug', 'math/rand/v2', 'structs']
+       'strings', 'embed', 'internal/asan', 'internal/msan', 'internal/godebug', 'math/rand/v2', 'structs',
+       'crypto/md5', 'encoding/xml']
 IMPORTABLE = {'runtime', 'unsafe'}
 DIRS = ['.', 'fixedbugs', 'ken', 'chan', 'interface', 'typeparam']
 
@@ -83,7 +84,10 @@ def tests(patterns):
             if m and not build_ok(m.group(1)):
                 continue
             head = src.split('\nfunc ', 1)[0]
-            imports = set(re.findall(r'^\s*(?:import\s+)?(?:[\w.]+\s+)?"([\w/.]+)"\s*$', head, re.M))
+            # (Only import declarations: a struct tag is a string too.)
+            imports = set(re.findall(r'^import\s+(?:[\w.]+\s+)?"([\w/.]+)"', head, re.M))
+            for block in re.findall(r'^import\s*\((.*?)^\)', head, re.M | re.S):
+                imports |= set(re.findall(r'"([\w/.]+)"', block))
             yield name, imports
 
 

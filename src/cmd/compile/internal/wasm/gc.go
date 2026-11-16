@@ -580,8 +580,36 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 		}
 
 	case ssa.OpEqPtr, ssa.OpNeqPtr:
-		ints := g.wtype(v.Args[0].Type) == 'l' || g.wtype(v.Args[1].Type) == 'l'
-		for _, a := range v.Args {
+		// A pointer made from an integer right here (p == unsafe.Pointer(u),
+		// u perhaps the identity of an object: see ptrToInt) is compared as
+		// the integer: the conversion would lose the identity.
+		args := [2]*ssa.Value{v.Args[0], v.Args[1]}
+		for i, a := range args {
+			if g.wtype(v.Args[1-i].Type) != 'r' {
+				// (Against an integer, a type word say, the pointer
+				// is an address: the integer may have more bits.)
+				continue
+			}
+			for (a.Op == ssa.OpCopy || a.Op == ssa.OpConvert || a.Op == ssa.OpWasmLoweredConvert) && g.wtype(a.Type) == 'r' {
+				from := a.Args[0]
+				if from.OnWasmStack && !a.OnWasmStack {
+					break // (computed already, into the pointer)
+				}
+				if g.wtype(from.Type) == 'l' {
+					// (What is passed over was to be computed here.)
+					for c := args[i]; c != from; c = c.Args[0] {
+						if c.OnWasmStack {
+							s.OnWasmStackSkipped--
+						}
+					}
+					args[i] = from
+					break
+				}
+				a = from
+			}
+		}
+		ints := g.wtype(args[0].Type) == 'l' || g.wtype(args[1].Type) == 'l'
+		for _, a := range args {
 			g.get(a, false)
 			if ints && g.wtype(a.Type) == 'r' {
 				g.ptrToInt()
@@ -590,7 +618,7 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 		switch {
 		case ints:
 			g.prog(wasm.AI64Eq)
-		case v.Args[0].Op == ssa.OpConstNil || v.Args[1].Op == ssa.OpConstNil:
+		case args[0].Op == ssa.OpConstNil || args[1].Op == ssa.OpConstNil:
 			g.prog(wasm.ARefEq)
 		default:
 			// The same place may be pointed to by different
@@ -3157,6 +3185,11 @@ func (g *gcGen) stackify(b *ssa.Block) {
 		// The addresses of a move are computed once per field (see
 		// again): the stores in between must not change them.
 		if v.Op == ssa.OpMove || v.Op == ssa.OpZero || v.Op == ssa.OpWasmI64DivS || v.Op == ssa.OpPtrIndex || gcUsesTypeTwice(v) {
+			continue
+		}
+		// The integer a pointer is made from stays available: a
+		// comparison of the pointer compares the integer (see EqPtr).
+		if (v.Op == ssa.OpConvert || v.Op == ssa.OpWasmLoweredConvert) && g.wtype(v.Type) == 'r' && g.wtype(v.Args[0].Type) == 'l' {
 			continue
 		}
 		for _, a := range v.Args {

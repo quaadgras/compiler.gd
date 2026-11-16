@@ -1,4 +1,4 @@
-928 pass, 25 fail, 12 skipped (of 965 "// run" tests)
+932 pass, 24 fail, 9 skipped (of 965 "// run" tests)
 
     5  run: panic: runtime error: invalid memory address or nil pointer derefer
     2  run: fatal error: all goroutines are asleep - deadlock!
@@ -8,7 +8,6 @@
     1  run: panic: initN
     1  run: panic: fail
     1  run: panic: N
-    1  run: panic: unsafe.SliceData NxN != NxN
     1  run: panic: FAIL
     1  run: memory access out of bounds in wasm.load.l
     1  run: panic: got ?:N; want /foo/bar.go:N (or suffix /foo/bar.go)
@@ -18,7 +17,7 @@
     1  run: panic: ERRORS
     1  run: panic: never GC'd
     1  run: BUG: defer called from ?:0, want issue5856.go:28
-    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:120
+    1  run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:126
     1  run: illegal cast in main.testN
 
 PASS 235.go 
@@ -175,7 +174,7 @@ PASS fixedbugs/bug246.go
 PASS fixedbugs/bug247.go 
 PASS fixedbugs/bug253.go 
 PASS fixedbugs/bug254.go 
-SKIP fixedbugs/bug257.go imports crypto/md5
+PASS fixedbugs/bug257.go 
 PASS fixedbugs/bug258.go 
 PASS fixedbugs/bug259.go 
 PASS fixedbugs/bug260.go 
@@ -641,7 +640,7 @@ PASS fixedbugs/issue7690.go
 PASS fixedbugs/issue7740.go 
 PASS fixedbugs/issue77613.go 
 PASS fixedbugs/issue77779.go 
-FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:120
+FAIL fixedbugs/issue78081.go run: file:///home/quentin/git/go/lib/wasm/wasm_gc.js:126
 PASS fixedbugs/issue78262.go 
 PASS fixedbugs/issue78295.go 
 PASS fixedbugs/issue78303_1.go 
@@ -864,7 +863,7 @@ PASS typeparam/issue44688.go
 PASS typeparam/issue45722.go 
 PASS typeparam/issue45817.go 
 PASS typeparam/issue46472.go 
-SKIP typeparam/issue46591.go imports x
+PASS typeparam/issue46591.go 
 PASS typeparam/issue47258.go 
 PASS typeparam/issue47272.go 
 PASS typeparam/issue47514.go 
@@ -898,7 +897,7 @@ PASS typeparam/issue48253.go
 PASS typeparam/issue48276a.go 
 PASS typeparam/issue48276b.go 
 PASS typeparam/issue48317.go 
-SKIP typeparam/issue48318.go imports encoding/xml
+PASS typeparam/issue48318.go 
 PASS typeparam/issue48344.go 
 PASS typeparam/issue48424.go 
 PASS typeparam/issue48453.go 
@@ -977,7 +976,7 @@ PASS typeparam/value.go
 PASS typeswitch.go 
 PASS typeswitch1.go 
 PASS uintptrescapes3.go 
-FAIL unsafe_slice_data.go run: panic: unsafe.SliceData NxN != NxN
+PASS unsafe_slice_data.go 
 PASS unsafe_string.go 
 PASS unsafe_string_data.go 
 FAIL unsafebuiltins.go run: panic: FAIL
