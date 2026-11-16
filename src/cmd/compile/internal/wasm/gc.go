@@ -1129,6 +1129,7 @@ func (g *gcGen) frameAddr(addr, root *ssa.Value, off int64) {
 // how to resolve it.
 func (g *gcGen) root(v *ssa.Value) (*ssa.Value, int) {
 	style := gcObject
+	addr := v
 	for {
 		switch v.Op {
 		case ssa.OpOffPtr:
@@ -1185,7 +1186,11 @@ func (g *gcGen) root(v *ssa.Value) (*ssa.Value, int) {
 		}
 		break
 	}
-	if style == gcObject && !v.Type.IsPtr() {
+	if style == gcObject && (!v.Type.IsPtr() || v.Op == ssa.OpWasmLoweredGetClosurePtr ||
+		v != addr && !v.Type.Elem().IsStruct() && !v.Type.Elem().IsArray()) {
+		// The type of the pointer is not to be believed: a closure
+		// is addressed as a *uint8, and so is the data word of an
+		// interface, which CSE may share between the types asserted.
 		style = gcUnknown
 	}
 	if style == gcObject && gcIsNew(v) {
