@@ -984,7 +984,10 @@ func RandomGet(b []byte) error {
 	if uint64(len(b)) > uint64(^size(0)) {
 		return EINVAL
 	}
-	errno := random_get(unsafe.SliceData(b), size(len(b)))
+	lb := linearBytes(b)
+	errno := random_get(unsafe.SliceData(lb), size(len(lb)))
+	runtime.KeepAlive(lb)
+	copy(b, lb)
 	return errnoErr(errno)
 }
 
