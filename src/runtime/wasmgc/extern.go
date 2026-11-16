@@ -114,7 +114,13 @@ func Callers(skip int, pc []uintptr) int {
 	if len(pc) == 0 {
 		return 0
 	}
-	buf := make([]uintptr, len(pc)+skip+16)
+	// (On the stack when it fits: Callers does not allocate, as
+	// log/slog's tests check.)
+	var small [64]uintptr
+	buf := small[:]
+	if need := len(pc) + skip + 16; need > len(small) {
+		buf = make([]uintptr, need)
+	}
 	n := int(callers(uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf))))
 	// Frames above Callers are the host's.
 	start := 0
