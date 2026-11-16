@@ -289,6 +289,42 @@ func (a *gcAsm) within(c gcLoc) {
 	a.set(c.rel)
 }
 
+// nested goes on in the array nested in the struct c.obj that the
+// offset c.off is in, if it is in one: c.obj becomes the array and
+// c.off the offset in it, and the loop that the code is in, depth
+// blocks out, runs again.
+func (a *gcAsm) nested(c gcLoc, depth int) {
+	a.layoutOf(c)
+	a.get(c.d)
+	a.if_()
+	a.get(c.d)
+	a.load(gcLayoutArrays)
+	a.if_()
+	a.get(c.d)
+	a.get(c.off)
+	a.call(a.l.fnFind)
+	a.tee(c.e)
+	a.if_()
+	a.within(c)
+	a.kindIs(c, 'A')
+	a.if_()
+	a.get(c.rel)
+	a.arraySize(c)
+	a.op(0x49) // i32.lt_u
+	a.if_()
+	a.field(c, c.obj)
+	a.call(a.l.fnFgetr)
+	a.set(c.obj)
+	a.get(c.rel)
+	a.set(c.off)
+	a.br(depth + 5)
+	a.end()
+	a.end()
+	a.end()
+	a.end()
+	a.end()
+}
+
 // kind pushes the kind of the field c.e.
 func (a *gcAsm) kind(c gcLoc) {
 	a.get(c.info)

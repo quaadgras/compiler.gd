@@ -971,61 +971,81 @@ func (l *gcLinker) storeTail(storeBits int) []byte {
 
 // ptrID returns the body of the function that converts a pointer to an
 // integer. self is its index.
+//
+// A pointer into an array nested in a struct has the identity of the
+// array, however it was made: the address of the struct is that of the
+// first element of an array it starts with, and is so as an integer
+// too (code that asks whether two slices of bytes overlap compares
+// such addresses).
+//
+//	local 0: the pointer; 1: scratch; 2: the offset in what it points
+//	into; 3 to 6: the place in a struct
 func (l *gcLinker) ptrID(self int) []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 1)
-	writeUleb128(a, 1)
-	a.op(wasm.GCTypeEqRef)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
+	c := gcLoc{obj: 0, off: 2, d: 3, e: 4, info: 5, rel: 6}
 	linear, box, hdr := a.typ(wasm.GCLinear), a.typ(wasm.GCBox), a.typ(wasm.GCHeader)
+	// plus adds the offset to the identity pushed, and returns it.
+	plus := func() {
+		a.get(2)
+		a.op(0xAD, 0x7C, 0x0F) // i64.extend_i32_u, i64.add, return
+	}
 	a.get(0)
 	a.op(0xD1, 0x04, 0x40) // ref.is_null, if
 	writeI64Const(a, 0)
 	a.op(0x0F, 0x0B)
+	a.loop()
 	a.isA(-1, func() {
-		a.op(0xFB, 0x1E, 0xAD, 0x0F) // i31.get_u, i64.extend_i32_u, return
+		a.op(0xFB, 0x1E, 0xAD) // i31.get_u, i64.extend_i32_u
+		plus()
 	})
 	a.isA(int64(linear), func() {
 		a.gc(0x02, linear, wasm.GCLinearAddr)
-		a.op(0xAD, 0x0F)
+		a.op(0xAD)
+		plus()
 	})
 	a.isA(int64(box), func() {
-		// The identity of the object, plus the offset: the identity
-		// of an object leaves room for its bytes (see below).
+		// What it is a pointer into, at its offset.
 		a.set(1)
-		a.get(1)
-		a.cast(box)
-		a.gc(0x02, box, wasm.GCBoxObject)
-		a.op(0x10)
-		writeUleb128(a, uint64(self))
 		a.get(1)
 		a.cast(box)
 		a.gc(0x02, box, wasm.GCBoxOffset)
-		a.op(0xAD, 0x7C, 0x0F) // i64.extend_i32_u, i64.add, return
+		a.get(2)
+		a.op(0x6A) // i32.add
+		a.set(2)
+		a.get(1)
+		a.cast(box)
+		a.gc(0x02, box, wasm.GCBoxObject)
+		a.set(0)
+		a.br(1)
 	})
 	a.isA(int64(hdr), func() {
+		a.op(0x1A) // drop
+		a.nested(c, 1)
 		// The identity in the header, assigned now if there is none.
-		// It is set apart from the addresses of linear memory.
-		a.set(1)
-		a.get(1)
+		// It is set apart from the addresses of linear memory, and
+		// leaves room for the bytes of the object.
+		a.get(0)
 		a.cast(hdr)
 		a.gc(0x02, hdr, 1)
 		a.op(0x45, 0x04, 0x40) // i32.eqz, if
 		a.op(0x23, wasm.GCGlobalID)
 		a.i32(1)
 		a.op(0x6A, 0x24, wasm.GCGlobalID) // i32.add, global.set
-		a.get(1)
+		a.get(0)
 		a.cast(hdr)
 		a.op(0x23, wasm.GCGlobalID)
 		a.gc(0x05, hdr, 1)
 		a.op(0x0B)
-		a.get(1)
+		a.get(0)
 		a.cast(hdr)
 		a.gc(0x02, hdr, 1)
 		a.op(0xAD)
 		writeI64Const(a, 1<<40)
 		a.op(0x84) // i64.or
 		writeI64Const(a, 20)
-		a.op(0x86, 0x0F) // i64.shl: room for the bytes of the object; return
+		a.op(0x86) // i64.shl
+		plus()
 	})
 	// An array: the host gives it an identity, set apart from those
 	// above.
@@ -1037,6 +1057,9 @@ func (l *gcLinker) ptrID(self int) []byte {
 	a.op(0x84) // i64.or
 	writeI64Const(a, 20)
 	a.op(0x86) // i64.shl
+	plus()
+	a.end()
+	a.unreachable()
 	a.op(0x0B)
 	return a.Bytes()
 }
@@ -1472,15 +1495,12 @@ func (l *gcLinker) clearObj(self int) []byte {
 // pointers are equal: they point to the same place, whatever they are.
 //
 //	local 0, 1: the pointers; 2, 3: what they are pointers into, or
-//	null for linear memory; 4, 5: the byte offsets in it
+//	null for linear memory; 4, 5: the byte offsets in it; 6 to 9: the
+//	place in a struct
 func (l *gcLinker) ptrEq() []byte {
 	a := &gcAsm{l: l}
-	writeUleb128(a, 2)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeEqRef)
-	writeUleb128(a, 2)
-	a.op(wasm.GCTypeI32)
-	linear, box := a.typ(wasm.GCLinear), a.typ(wasm.GCBox)
+	a.locals(wasm.GCTypeEqRef, wasm.GCTypeEqRef, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32, wasm.GCTypeI32)
+	linear, box, hdr := a.typ(wasm.GCLinear), a.typ(wasm.GCBox), a.typ(wasm.GCHeader)
 	a.get(0)
 	a.get(1)
 	a.op(0xD3, 0x04, 0x40) // ref.eq, if
@@ -1533,7 +1553,14 @@ func (l *gcLinker) ptrEq() []byte {
 		a.set(off)
 		a.br(2)
 		a.op(0x0B)
-		// An object.
+		// An object; a struct, at an offset in an array nested in it,
+		// is the array (see ptrID).
+		a.get(p)
+		a.op(0xFB, 0x14)
+		writeSleb128(a, int64(hdr)) // ref.test
+		a.if_()
+		a.nested(gcLoc{obj: p, off: off, d: 6, e: 7, info: 8, rel: 9}, 1)
+		a.end()
 		a.get(p)
 		a.set(base)
 		a.op(0x0B, 0x0B) // end loop, end block
