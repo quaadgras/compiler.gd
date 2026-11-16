@@ -888,7 +888,9 @@ var depsRules = `
 	< math/big/internal/asmgen;
 
 	# The runtime for GOWASM=gc (see doc/gd/wasm-gc.md).
-	internal/abi, internal/bytealg, internal/goos, internal/profilerecord, internal/strconv < runtime/wasmgc;
+	internal/abi, internal/bytealg, internal/coverage/rtcov, internal/godebugs, internal/goos,
+	internal/profilerecord, internal/runtime/sys, internal/strconv
+	< runtime/wasmgc;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".

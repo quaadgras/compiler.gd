@@ -15,6 +15,7 @@ import (
 	"go/parser"
 	"go/token"
 	"internal/diff"
+	"internal/wasmgc"
 	"os"
 	"regexp"
 	"runtime/metrics"
@@ -30,6 +31,9 @@ import (
 func runtime_readMetricNames() []string
 
 func TestNames(t *testing.T) {
+	if wasmgc.Enabled {
+		t.Skip("GOWASM=gc: the engine's collector manages the heap; the runtime keeps only a few of the metrics")
+	}
 	// Note that this regexp is promised in the package docs for Description. Do not change.
 	r := regexp.MustCompile("^(?P<name>/[^:]+):(?P<unit>[^:*/]+(?:[*/][^:*/]+)*)$")
 	all := metrics.All()

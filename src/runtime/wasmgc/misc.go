@@ -127,8 +127,6 @@ func godebugEnv() string {
 //go:linkname godebug_setNewIncNonDefault internal/godebug.setNewIncNonDefault
 func godebug_setNewIncNonDefault(newIncNonDefault func(string) func()) {}
 
-//go:linkname godebug_registerMetric internal/godebug.registerMetric
-func godebug_registerMetric(name string, read func() uint64) {}
 
 // A MemProfileRecord describes the live objects allocated by a
 // particular call sequence: none are recorded.

@@ -5,6 +5,7 @@
 package metrics
 
 import (
+	"internal/wasmgc"
 	_ "runtime" // depends on the runtime via a linkname'd function
 	"unsafe"
 )
@@ -44,6 +45,14 @@ func runtime_readMetrics(unsafe.Pointer, int, int)
 // as KindBad to indicate that the name is unknown.
 func Read(m []Sample) {
 	if len(m) == 0 {
+		return
+	}
+	if wasmgc.Enabled {
+		// Each Sample is an object of its own there: the runtime is
+		// given one at a time.
+		for i := range m {
+			runtime_readMetrics(unsafe.Pointer(&m[i]), 1, 1)
+		}
 		return
 	}
 	runtime_readMetrics(unsafe.Pointer(&m[0]), len(m), cap(m))
