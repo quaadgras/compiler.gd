@@ -134,7 +134,9 @@ func Stack(buf []byte, all bool) int {
 	var pcs [64]uintptr
 	n := Callers(1, pcs[:])
 	b := buf[:0]
-	b = append(b, "goroutine 1 [running]:\n"...)
+	b = append(b, "goroutine "...)
+	b = appendInt(b, curg.id)
+	b = append(b, " [running]:\n"...)
 	for _, pc := range pcs[:n] {
 		b = append(b, FuncForPC(pc).Name()...)
 		b = append(b, "(...)\n\t"...)
