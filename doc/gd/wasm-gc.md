@@ -1108,3 +1108,30 @@ instantiations of `slices`' stable sort for `internal/fmtsort` (49 KB:
 a `[]struct{Key, Value reflect.Value}`, whose every move is 12 fields),
 the start function (15 KB), and the functions above by field (31 KB).
 
+
+### Stage 10: the tests of all of std (2026-11-17)
+
+`std/survey.py` runs `go test -short` over every package of `go list
+std` and keeps `std/status.txt`: a line for each package, the tests
+that are skipped and why, and what is known of each failure. Of the 256
+packages that have tests, 204 passed at the first survey (43 failed, 8
+did not build); 251 pass now, and none fails to build. The five left:
+`runtime/pprof`, `runtime/trace` and `net/http/pprof` want profiles and
+traces the runtime does not have; `net/http`'s `TestTransportGCRequest`
+waits for a cleanup that does not run (what holds the request is not
+found); `log/slog`'s `TestCallDepth` gets, for a call in a function
+that defers, a position from V8 that is not the call's. Conformance is
+unchanged (947 of 965), and so is the speed of the programs measured
+in stage 9. The hello world is 583,673 bytes (527,801 with `-s -w`,
+149,701 of that gzipped).
+
+Bugs of the compiler that the tests found, each one a wrong result
+without an error: a store moved into the making of an object before
+what it stores was computed (`&Image{Pix: pix[i:]}`), or over an
+earlier store to the same field; a local shared by an integer and the
+pointer it is compared as; the slots of two calls whose arguments on
+the stack differ in type; the address of an element of an array at an
+offset in linear memory. And of the runtime: random bytes written
+nowhere when the buffer was an object (`syscall.RandomGet`), the
+identity of a pointer to the first element of an array a struct starts
+with, `memmove` within one object.
