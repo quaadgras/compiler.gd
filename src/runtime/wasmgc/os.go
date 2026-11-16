@@ -76,20 +76,36 @@ func syscall_runtime_envs() []string {
 
 //go:linkname syscall_runtimeSetenv syscall.runtimeSetenv
 func syscall_runtimeSetenv(key, value string) {
-	if key == "GODEBUG" && godebugUpdate != nil {
-		godebugUpdate(godebugDefault, value)
+	if key == "GODEBUG" {
+		p := new(string)
+		*p = value
+		setGodebugEnv(p)
 	}
 }
 
 //go:linkname syscall_runtimeUnsetenv syscall.runtimeUnsetenv
 func syscall_runtimeUnsetenv(key string) {
-	if key == "GODEBUG" && godebugUpdate != nil {
-		godebugUpdate(godebugDefault, "")
+	if key == "GODEBUG" {
+		setGodebugEnv(new(string))
 	}
 }
 
 //go:linkname syscall_runtimeClearenv syscall.runtimeClearenv
-func syscall_runtimeClearenv(env map[string]int) {}
+func syscall_runtimeClearenv(env map[string]int) {
+	setGodebugEnv(new(string))
+}
+
+// setGodebugEnv records GODEBUG as the program sets it, which the
+// runtime reads from then on (godebugEnv), and tells internal/godebug.
+func setGodebugEnv(p *string) {
+	godebugEnvSet = p
+	if godebugUpdate != nil {
+		godebugUpdate(godebugDefault, *p)
+	}
+}
+
+// godebugEnvSet is GODEBUG once the program has set it.
+var godebugEnvSet *string
 
 //go:linkname os_beforeExit os.runtime_beforeExit
 func os_beforeExit(exitCode int) {}

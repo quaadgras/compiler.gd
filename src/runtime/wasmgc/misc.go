@@ -112,6 +112,9 @@ var (
 )
 
 func godebugEnv() string {
+	if godebugEnvSet != nil {
+		return *godebugEnvSet
+	}
 	hostArgs()
 	for _, kv := range envs {
 		if len(kv) > 8 && kv[:8] == "GODEBUG=" {
