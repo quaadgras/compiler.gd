@@ -36,8 +36,10 @@ func GC() {
 	}
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
-	linCollections++
+	t0 := nanotime()
 	hostgc()
+	gcRecord(nanotime()-t0, walltime())
+	gcForced++
 	// The cleanups the collection queued may run.
 	Gosched()
 }
@@ -302,7 +304,33 @@ func ReadMemStats(m *MemStats) {
 		HeapSys:    uint64(linsize()),
 		HeapInuse:  uint64(linLive),
 		NumGC:      linCollections,
+
+		NumForcedGC:  gcForced,
+		LastGC:       gcLast,
+		PauseTotalNs: gcPauseTotal,
+		PauseNs:      gcPauseNs,
+		PauseEnd:     gcPauseEnd,
 	}
+}
+
+// The collections runtime.GC asked the host for: how long each took
+// (the "pause": the program waits for it) and when it ended, the last
+// 256 of them as in MemStats.
+var (
+	gcLast       uint64
+	gcPauseTotal uint64
+	gcPauseNs    [256]uint64
+	gcPauseEnd   [256]uint64
+	gcForced     uint32 // by runtime.GC
+)
+
+func gcRecord(pause, end int64) {
+	i := linCollections % uint32(len(gcPauseNs))
+	gcPauseNs[i] = uint64(pause)
+	gcPauseEnd[i] = uint64(end)
+	gcPauseTotal += uint64(pause)
+	gcLast = uint64(end)
+	linCollections++
 }
 
 // memstatsMallocs counts the allocations that Go makes on its heap:

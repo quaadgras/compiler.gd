@@ -78,7 +78,29 @@ func setMaxThreads(in int) int { return 1 }
 func setPanicOnFault(new bool) bool { return false }
 
 //go:linkname readGCStats runtime/debug.readGCStats
-func readGCStats(pauses *[]int64) {}
+func readGCStats(pauses *[]uint64) {
+	// As the native runtime's readGCStats_m: pauses, then when they
+	// ended, the most recent first; then the last collection, their
+	// number and the total pause.
+	p := *pauses
+	if cap(p) < len(gcPauseNs)+3 {
+		throw("short slice passed to readGCStats")
+	}
+	n := linCollections
+	if n > uint32(len(gcPauseNs)) {
+		n = uint32(len(gcPauseNs))
+	}
+	p = p[:cap(p)]
+	for i := uint32(0); i < n; i++ {
+		j := (linCollections - 1 - i) % uint32(len(gcPauseNs))
+		p[i] = gcPauseNs[j]
+		p[n+i] = gcPauseEnd[j]
+	}
+	p[n+n] = gcLast
+	p[n+n+1] = uint64(linCollections)
+	p[n+n+2] = gcPauseTotal
+	*pauses = p[:n+n+3]
+}
 
 //go:linkname freeOSMemory runtime/debug.freeOSMemory
 func freeOSMemory() {}
@@ -126,7 +148,6 @@ func godebugEnv() string {
 
 //go:linkname godebug_setNewIncNonDefault internal/godebug.setNewIncNonDefault
 func godebug_setNewIncNonDefault(newIncNonDefault func(string) func()) {}
-
 
 // A MemProfileRecord describes the live objects allocated by a
 // particular call sequence: none are recorded.

@@ -6,6 +6,7 @@ package debug_test
 
 import (
 	"internal/testenv"
+	"internal/wasmgc"
 	"os"
 	"runtime"
 	. "runtime/debug"
@@ -91,6 +92,9 @@ func TestReadGCStats(t *testing.T) {
 var big []byte
 
 func TestFreeOSMemory(t *testing.T) {
+	if wasmgc.Enabled {
+		t.Skip("GOWASM=gc: WebAssembly's linear memory cannot be returned to the system (it does not shrink)")
+	}
 	// Tests FreeOSMemory by making big susceptible to collection
 	// and checking that at least that much memory is returned to
 	// the OS after.

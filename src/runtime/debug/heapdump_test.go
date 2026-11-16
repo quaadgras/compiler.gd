@@ -5,6 +5,7 @@
 package debug_test
 
 import (
+	"internal/wasmgc"
 	"os"
 	"runtime"
 	. "runtime/debug"
@@ -12,8 +13,8 @@ import (
 )
 
 func TestWriteHeapDumpNonempty(t *testing.T) {
-	if runtime.GOOS == "js" {
-		t.Skipf("WriteHeapDump is not available on %s.", runtime.GOOS)
+	if runtime.GOOS == "js" || wasmgc.Enabled {
+		t.Skipf("WriteHeapDump is not available on %s (GOWASM=gc: the heap is the engine's).", runtime.GOOS)
 	}
 	f, err := os.CreateTemp("", "heapdumptest")
 	if err != nil {
@@ -41,8 +42,8 @@ func objfin(x *Obj) {
 }
 
 func TestWriteHeapDumpFinalizers(t *testing.T) {
-	if runtime.GOOS == "js" {
-		t.Skipf("WriteHeapDump is not available on %s.", runtime.GOOS)
+	if runtime.GOOS == "js" || wasmgc.Enabled {
+		t.Skipf("WriteHeapDump is not available on %s (GOWASM=gc: the heap is the engine's).", runtime.GOOS)
 	}
 	f, err := os.CreateTemp("", "heapdumptest")
 	if err != nil {
@@ -80,8 +81,8 @@ var dummy I = G[int]{}
 var dummy2 I = G[G[int]]{}
 
 func TestWriteHeapDumpTypeName(t *testing.T) {
-	if runtime.GOOS == "js" {
-		t.Skipf("WriteHeapDump is not available on %s.", runtime.GOOS)
+	if runtime.GOOS == "js" || wasmgc.Enabled {
+		t.Skipf("WriteHeapDump is not available on %s (GOWASM=gc: the heap is the engine's).", runtime.GOOS)
 	}
 	f, err := os.CreateTemp("", "heapdumptest")
 	if err != nil {

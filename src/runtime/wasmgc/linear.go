@@ -110,8 +110,9 @@ func lincollect() bool {
 		return false
 	}
 	linCollecting = true
-	linCollections++
+	t0 := nanotime()
 	hostgc()
+	gcRecord(nanotime()-t0, walltime())
 	linCollecting = false
 	// Again when what is left has doubled (GOGC=100).
 	linTrigger = 2 * linLive
