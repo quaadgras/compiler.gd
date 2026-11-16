@@ -6,9 +6,11 @@ package atomic_test
 
 import (
 	"fmt"
+	"internal/wasmgc"
 	"reflect"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	. "sync/atomic"
 	"testing"
@@ -2655,6 +2657,16 @@ func TestHammerStoreLoad(t *testing.T) {
 		hammerStoreLoadUintptrMethod, hammerStoreLoadPointerMethod,
 		hammerStoreLoadInt64, hammerStoreLoadUint64,
 		hammerStoreLoadInt64Method, hammerStoreLoadUint64Method,
+	}
+	if wasmgc.Enabled {
+		// A pointer is a reference to an object, or an address in
+		// linear memory (31 bits): it cannot hold the integers that
+		// hammerStoreLoadPointer stores as pointers.
+		t.Log("GOWASM=gc: not hammering StorePointer and LoadPointer with integers")
+		tests = slices.DeleteFunc(tests, func(f func(*testing.T, unsafe.Pointer)) bool {
+			name := runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()
+			return strings.HasSuffix(name, "Pointer") || strings.HasSuffix(name, "PointerMethod")
+		})
 	}
 	n := int(1e6)
 	if testing.Short() {
