@@ -497,6 +497,9 @@ func TestRootChmod(t *testing.T) {
 }
 
 func TestRootChtimes(t *testing.T) {
+	if runtime.GOOS == "wasip1" && os.Getenv("GOWASIRUNTIME") == "node" {
+		t.Skip("node does not set file times to the nanosecond")
+	}
 	// Don't check atimes if the fs is mounted noatime,
 	// or on Plan 9 which does not permit changing atimes to arbitrary values.
 	checkAtimes := !hasNoatime() && runtime.GOOS != "plan9"
@@ -1660,8 +1663,11 @@ func TestRootRenameAfterOpen(t *testing.T) {
 	case "js", "plan9":
 		t.Skip("openat not supported on " + runtime.GOOS)
 	case "wasip1":
-		if os.Getenv("GOWASIRUNTIME") == "wazero" {
+		switch os.Getenv("GOWASIRUNTIME") {
+		case "wazero":
 			t.Skip("wazero does not track renamed directories")
+		case "node":
+			t.Skip("node does not track renamed directories")
 		}
 	}
 

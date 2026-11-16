@@ -1395,6 +1395,9 @@ func TestChtimes(t *testing.T) {
 }
 
 func TestChtimesOmit(t *testing.T) {
+	if runtime.GOOS == "wasip1" && Getenv("GOWASIRUNTIME") == "node" {
+		t.Skip("node does not set file times to the nanosecond")
+	}
 	t.Parallel()
 
 	testChtimesOmit(t, true, false)
