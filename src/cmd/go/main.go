@@ -308,6 +308,11 @@ func invoke(cmd *base.Command, args []string) {
 			os.Setenv(env.Name, env.Value)
 		}
 	}
+	// The compiler and linker run in this process (see
+	// internal/work/link_inproc.go) read buildcfg.GOROOT, which was
+	// read from the environment before GOROOT was set there: the
+	// subprocess tools see the value set above.
+	buildcfg.GOROOT = cfg.GOROOT
 
 	cmd.Flag.Usage = func() { cmd.Usage() }
 	if cmd.CustomFlags {

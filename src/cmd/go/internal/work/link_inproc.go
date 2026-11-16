@@ -63,7 +63,9 @@ func inProcessLink(sh *Shell, dir, desc string, env []string, args []any) error 
 			break
 		}
 	}
-	if idx < 0 {
+	if idx < 0 || cfg.BuildTrimpath {
+		// (With -trimpath the linker's GOROOT is empty, and this
+		// process's buildcfg.GOROOT is not: see main.go.)
 		return sh.run(dir, desc, env, args...)
 	}
 

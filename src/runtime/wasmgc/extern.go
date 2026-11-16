@@ -69,8 +69,10 @@ func GOROOT() string {
 			return kv[7:]
 		}
 	}
-	return "/"
+	return defaultGOROOT
 }
+
+var defaultGOROOT string // set by cmd/link
 func Breakpoint()     {}
 func LockOSThread()   {}
 func UnlockOSThread() {}
