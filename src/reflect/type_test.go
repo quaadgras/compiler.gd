@@ -35,6 +35,11 @@ func TestTypeFor(t *testing.T) {
 }
 
 func TestStructOfEmbeddedIfaceMethodCall(t *testing.T) {
+	if reflect.WasmGCMode {
+		// The method is one function for every signature, which
+		// WebAssembly does not call: the engine stops the program.
+		t.Skip("a call of the wrong signature traps with GOWASM=gc")
+	}
 	type Named interface {
 		Name() string
 	}

@@ -40,11 +40,35 @@ type gcReflectFunc struct {
 func gcRegLetters(ps [][]ld.WasmGCReg) string {
 	var b strings.Builder
 	for _, p := range ps {
+		if gcOnStack(p) {
+			continue
+		}
 		for _, r := range p {
 			b.WriteByte(r.Reg)
 		}
 	}
 	return b.String()
+}
+
+// gcOnStack reports whether an argument or a result is not in
+// registers: the caller passes an object for it, after the arguments
+// in registers (those of the arguments, then those of the results).
+func gcOnStack(p []ld.WasmGCReg) bool {
+	return len(p) == 1 && p[0].Reg == ld.WasmGCOnStack
+}
+
+// gcStackRefs returns one 'r' for each argument and result of f that
+// is not in registers.
+func gcStackRefs(f gcReflectFunc) string {
+	n := 0
+	for _, ps := range [][][]ld.WasmGCReg{f.in, f.out} {
+		for _, p := range ps {
+			if gcOnStack(p) {
+				n++
+			}
+		}
+	}
+	return strings.Repeat("r", n)
 }
 
 // reflectTypes returns the func types of the program that reflect can
@@ -151,16 +175,32 @@ func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 			a.get(4)
 		}
 		for i, p := range f.in {
+			if gcOnStack(p) {
+				continue
+			}
 			for _, r := range p {
 				a.loadReg(r, elem(2, i))
+			}
+		}
+		// Those not in registers: the object of the argument (a
+		// copy that reflect made), and the object for the result,
+		// which the function fills.
+		for i, p := range f.in {
+			if gcOnStack(p) {
+				elem(2, i)()
+			}
+		}
+		for j, p := range f.out {
+			if gcOnStack(p) {
+				elem(3, j)()
 			}
 		}
 		a.get(0)
 		writeI64Const(a, 16)
 		a.op(0x88, 0xA7) // i64.shr_u, i32.wrap_i64
-		sig := wasm.GCFuncPrefix + ins + "." + outs
+		sig := wasm.GCFuncPrefix + ins + gcStackRefs(f) + "." + outs
 		if rcvr {
-			sig = wasm.GCFuncPrefix + "r" + ins + "." + outs
+			sig = wasm.GCFuncPrefix + "r" + ins + gcStackRefs(f) + "." + outs
 		}
 		a.op(0x11) // call_indirect
 		writeUleb128(a, uint64(a.typ(sig)))
@@ -180,6 +220,9 @@ func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 	a.op(0x0B)
 	n := 0
 	for j, p := range f.out {
+		if gcOnStack(p) {
+			continue
+		}
 		for _, r := range p {
 			v := uint32(6 + n)
 			a.storeReg(r, elem(3, j), func() { a.get(v) })
@@ -195,7 +238,10 @@ func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
 	a := &gcAsm{l: l}
 	ins := gcRegLetters(f.in)
-	nparam := uint32(len(ins))
+	// (After the arguments in registers, the objects of those that
+	// are not, and of such results.)
+	stack := uint32(len(ins))
+	nparam := stack + uint32(len(gcStackRefs(f)))
 	args, obj, res := nparam, nparam+1, nparam+2
 	writeUleb128(a, 1)
 	writeUleb128(a, 3)
@@ -209,6 +255,16 @@ func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
 	empty := &gcData{relocs: make(map[int64]loader.Reloc)}
 	p := uint32(0)
 	for i, regs := range f.in {
+		if gcOnStack(regs) {
+			// The caller's object, which is the function's to keep.
+			a.get(args)
+			a.cast(refs)
+			a.i32(int64(i))
+			a.get(stack)
+			a.gc(0x0E, refs) // array.set
+			stack++
+			continue
+		}
 		t := ld.WasmGCFuncIn(l.ctxt, f.typ, &relocs, i)
 		l.newObject(&a.Buffer, t, empty, 0)
 		a.set(obj)
@@ -228,14 +284,25 @@ func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
 	a.op(0x10)
 	writeUleb128(a, uint64(call))
 	a.set(res)
+	copyObj, _ := l.helperIndex(wasm.GCCopy)
 	for j, regs := range f.out {
+		result := func() {
+			a.get(res)
+			a.i32(int64(j) * 8)
+			a.op(0x10)
+			writeUleb128(a, uint64(l.helperFirst+loadr))
+		}
+		if gcOnStack(regs) {
+			// Into the caller's object for it.
+			result()
+			a.get(stack)
+			a.op(0x10)
+			writeUleb128(a, uint64(l.helperFirst+copyObj))
+			stack++
+			continue
+		}
 		for _, r := range regs {
-			a.loadReg(r, func() {
-				a.get(res)
-				a.i32(int64(j) * 8)
-				a.op(0x10)
-				writeUleb128(a, uint64(l.helperFirst+loadr))
-			})
+			a.loadReg(r, result)
 		}
 	}
 	a.op(0x0B)
@@ -303,7 +370,7 @@ func (l *gcLinker) reflectFuncs(first, nimport int, funcIndex func(loader.Sym) i
 		}
 		if call != 0 && l.ldr.AttrReachable(call) {
 			for _, f := range types {
-				sig := l.typeIndex(wasm.GCFuncPrefix + gcRegLetters(f.in) + "." + gcRegLetters(f.out))
+				sig := l.typeIndex(wasm.GCFuncPrefix + gcRegLetters(f.in) + gcStackRefs(f) + "." + gcRegLetters(f.out))
 				stubs[f.typ] = next
 				next++
 				extra = append(extra, &wasmFunc{Name: "wasm.makefunc." + l.ldr.SymName(f.typ), Type: sig, Code: l.makeFuncStub(f, uint32(funcIndex(call)))})

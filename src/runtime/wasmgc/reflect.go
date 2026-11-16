@@ -357,6 +357,10 @@ func reflect_unsafeslice(t *_type, ptr unsafe.Pointer, len int) {
 	if size != 0 && uintptr(len) > ^uintptr(0)/size || uintptr(len)*size > -uintptr(ptr) {
 		panic(plainError("unsafe.Slice: len out of range"))
 	}
+	// A pointer to linear memory, where addresses end at linLimit.
+	if a := trylinaddr(ptr); a != 0 && uintptr(len)*size > linLimit-a {
+		panic(plainError("unsafe.Slice: len out of range"))
+	}
 }
 
 //go:linkname reflect_memmove reflect.memmove
@@ -479,6 +483,7 @@ func mapKeyArg(t *_type, p unsafe.Pointer) unsafe.Pointer {
 		return p
 	}
 	x := newobjectT(t)
+	memstatsMallocs-- // (a copy that Go does not make)
 	typedmemmove(t, x, p)
 	return x
 }
@@ -491,6 +496,8 @@ func reflect_makemap(t *abi.MapType, cap int) unsafe.Pointer {
 //go:linkname reflect_mapaccess reflect.mapaccess
 func reflect_mapaccess(t *abi.MapType, m *gcmap, key unsafe.Pointer) unsafe.Pointer {
 	if m == nil || m.used == 0 {
+		// (A key that cannot be hashed panics all the same.)
+		mapKeyCheck(t, key)
 		return nil
 	}
 	i := m.find(t, key)

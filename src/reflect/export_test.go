@@ -162,3 +162,8 @@ var IsRegularMemory = isRegularMemory
 func MapGroupOf(x, y Type) Type {
 	return groupOf(x, y)
 }
+
+// WasmGCMode reports whether the program is built for GOWASM=gc, where
+// a type descriptor has no bitmap of its pointers: the objects are the
+// engine's.
+const WasmGCMode = wasmGCMode

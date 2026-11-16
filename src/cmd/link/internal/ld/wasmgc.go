@@ -177,10 +177,15 @@ func wasmGCAppendRegs(ctxt *Link, rs []WasmGCReg, typ loader.Sym, off int64) []W
 	return rs
 }
 
+// WasmGCOnStack is the Reg of the one WasmGCReg that WasmGCFunc gives
+// for an argument or a result that is not in registers.
+const WasmGCOnStack = 'S'
+
 // WasmGCFunc returns the scalars of the arguments and of the results
-// of the func type typ, by argument and result, and reports whether the
-// register ABI passes them all in registers (of which there are
-// intRegs and floatRegs).
+// of the func type typ, by argument and result, as the register ABI
+// passes them (there are intRegs and floatRegs registers). One that
+// does not fit in the registers left is not in registers at all (and
+// leaves them to those after it): it is a single WasmGCOnStack.
 func WasmGCFunc(ctxt *Link, typ loader.Sym, intRegs, floatRegs int) (in, out [][]WasmGCReg, ok bool) {
 	ldr, arch := ctxt.loader, ctxt.Arch
 	data := ldr.Data(typ)
@@ -191,6 +196,7 @@ func WasmGCFunc(ctxt *Link, typ loader.Sym, intRegs, floatRegs int) (in, out [][
 		for i := 0; i < n; i++ {
 			t := at(i)
 			rs := WasmGCRegs(ctxt, t)
+			i0, f0 := ni, nf
 			for _, r := range rs {
 				if r.Reg == 'f' || r.Reg == 'd' {
 					nf++
@@ -199,7 +205,8 @@ func WasmGCFunc(ctxt *Link, typ loader.Sym, intRegs, floatRegs int) (in, out [][
 				}
 			}
 			if ni > intRegs || nf > floatRegs {
-				return nil, false
+				ni, nf = i0, f0
+				rs = []WasmGCReg{{Reg: WasmGCOnStack}}
 			}
 			ps = append(ps, rs)
 		}

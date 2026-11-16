@@ -7342,6 +7342,9 @@ func init() {
 var empty = []byte{}
 
 func TestGCBits(t *testing.T) {
+	if WasmGCMode {
+		t.Skip("no pointer bitmaps with GOWASM=gc")
+	}
 	verifyGCBits(t, TypeOf((*byte)(nil)), []byte{1})
 
 	verifyGCBits(t, TypeOf(Xscalar{}), empty)

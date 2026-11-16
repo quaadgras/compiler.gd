@@ -3151,6 +3151,23 @@ func (g *gcGen) stackSlots() {
 			v.SetArg(0, a)
 		}
 	}
+	// A slot that nothing reads or writes (a result that is not used)
+	// is an object all the same: the function called is given it.
+	for _, sl := range slots {
+		if addrs[sl.name] != nil {
+			continue
+		}
+		var sp *ssa.Value
+		for _, v := range f.Entry.Values {
+			if v.Op == ssa.OpSP {
+				sp = v
+			}
+		}
+		if sp == nil {
+			sp = f.Entry.NewValue0(f.Entry.Pos, ssa.OpSP, types.Types[types.TUINTPTR])
+		}
+		addrs[sl.name] = f.Entry.NewValue2A(f.Entry.Pos, ssa.OpLocalAddr, types.NewPtr(sl.t), sl.name, sp, mem)
+	}
 }
 
 // params finds the WebAssembly parameter of each ABI register.
