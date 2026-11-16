@@ -6,6 +6,7 @@ package time_test
 
 import (
 	"fmt"
+	"internal/wasmgc"
 	"runtime"
 	"sync"
 	"testing"
@@ -266,6 +267,9 @@ func BenchmarkTickerResetNaive(b *testing.B) {
 }
 
 func TestTimerGC(t *testing.T) {
+	if wasmgc.Enabled {
+		t.Skip("GOWASM=gc: MemStats.Frees is not counted (the engine collects objects without telling)")
+	}
 	run := func(t *testing.T, what string, f func()) {
 		t.Helper()
 		t.Run(what, func(t *testing.T) {
