@@ -36,6 +36,7 @@ func GC() {
 	}
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
+	linCollections++
 	hostgc()
 	// The cleanups the collection queued may run.
 	Gosched()
@@ -285,9 +286,21 @@ type MemStats struct {
 }
 
 // ReadMemStats reports the number of allocations of Go heap memory
-// (as testing.AllocsPerRun counts them), and nothing else.
+// (as testing.AllocsPerRun counts them) and what is known of linear
+// memory: its size, the bytes of its blocks in use and allocated in
+// all, and how many times the host was let collect. The engine's heap,
+// where the objects are, is not measured.
 func ReadMemStats(m *MemStats) {
-	*m = MemStats{Mallocs: memstatsMallocs}
+	*m = MemStats{
+		Mallocs:    memstatsMallocs,
+		Alloc:      uint64(linLive),
+		HeapAlloc:  uint64(linLive),
+		TotalAlloc: linTotal,
+		Sys:        uint64(linsize()),
+		HeapSys:    uint64(linsize()),
+		HeapInuse:  uint64(linLive),
+		NumGC:      linCollections,
+	}
 }
 
 // memstatsMallocs counts the allocations that Go makes on its heap:

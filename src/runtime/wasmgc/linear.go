@@ -91,9 +91,11 @@ var (
 const linheader = 8
 
 var (
-	linLive       uintptr           // the bytes of the blocks in use
-	linTrigger    uintptr = 4 << 20 // lincollect is due when linLive reaches it
-	linCollecting bool
+	linLive        uintptr           // the bytes of the blocks in use
+	linTrigger     uintptr = 4 << 20 // lincollect is due when linLive reaches it
+	linCollecting  bool
+	linTotal       uint64 // the bytes of all the blocks allocated
+	linCollections uint32 // how many times the host was let collect
 )
 
 // linLimit is where the blocks end at most: an address in linear
@@ -108,6 +110,7 @@ func lincollect() bool {
 		return false
 	}
 	linCollecting = true
+	linCollections++
 	hostgc()
 	linCollecting = false
 	// Again when what is left has doubled (GOGC=100).
@@ -137,6 +140,7 @@ func linalloc(n uintptr) uintptr {
 			linfreelist[c] = uintptr(linload64(b + linheader))
 			linzero(b+linheader, 1<<c-linheader)
 			linLive += 1 << c
+			linTotal += 1 << c
 			return b + linheader
 		}
 		if c < 31 && linbrk+1<<c <= linLimit {
@@ -151,6 +155,7 @@ func linalloc(n uintptr) uintptr {
 		}
 	}
 	linLive += 1 << c
+	linTotal += 1 << c
 	b := linbrk
 	linbrk += 1 << c
 	if size := linsize(); linbrk > size {

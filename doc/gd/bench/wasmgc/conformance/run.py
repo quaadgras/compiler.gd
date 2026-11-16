@@ -123,9 +123,27 @@ FINALIZERS = {
 }
 
 
+# Tests of what GOWASM=gc does not have: an address for an object. A
+# uintptr made from a pointer to one is its identity, which only a
+# conversion the compiler sees (unsafe.Pointer(v.Pointer())) undoes, and
+# no pointer is past the end of an address space.
+NOADDRESS = {
+    'fixedbugs/issue15329.go',  # a uintptr from a method value converted back
+    'unsafebuiltins.go',        # unsafe.Slice of the last byte of the address space
+}
+
+
+# The heap is the engine's: there is no profile of its allocations.
+NOPROFILE = {'heapsampling.go'}
+
+
 def run(cfg, name, imports):
+    if name in NOPROFILE:
+        return name, 'SKIP', 'no heap profile'
     if name in FINALIZERS:
         return name, 'SKIP', 'finalizers'
+    if name in NOADDRESS:
+        return name, 'SKIP', 'objects have no address'
     missing = imports - IMPORTABLE
     if missing:
         return name, 'SKIP', 'imports ' + ' '.join(sorted(missing))

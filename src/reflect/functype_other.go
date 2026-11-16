@@ -31,3 +31,7 @@ func gcTypeEqual(t *abi.Type, p, q unsafe.Pointer) bool { return t.Equal(p, q) }
 
 // (See functype_wasmgc.go.)
 var gcDeferred, gcPassDeferred bool
+
+func gcKeep(unsafe.Pointer) {}
+
+func gcNewLinear(n int) unsafe.Pointer { return unsafe_NewArray(rtypeOf(byte(0)), n) }

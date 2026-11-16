@@ -20,6 +20,19 @@ import (
 
 // walkConv walks an OCONV or OCONVNOP (but not OCONVIFACE) node.
 func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC && n.Op() == ir.OCONVNOP && n.Type().IsUnsafePtr() && n.X.Type().IsUintptr() && n.X.Op() == ir.OCALLFUNC {
+		// unsafe.Pointer(v.Pointer()), v a reflect.Value: with
+		// GOWASM=gc the uintptr of an object is not an address to
+		// convert back, so the pointer is asked for as one
+		// (v.UnsafePointer()). The conversion and the call are
+		// together: see golang.org/issue/15329.
+		call := n.X.(*ir.CallExpr)
+		if name := ir.StaticCalleeName(call.Fun); name != nil && name.Sym().Pkg.Path == "reflect" && name.Sym().Name == "Value.Pointer" && len(call.Args) == 1 {
+			recv := call.Args[0]
+			m := typecheck.XDotMethod(gd, n.Pos(), recv, recv.Type().Sym().Pkg.Lookup("UnsafePointer"), true)
+			return walkExpr(gd, typecheck.Call(gd, n.Pos(), m, nil, false), init)
+		}
+	}
 	n.X = walkExpr(gd, n.X, init)
 	if n.Op() == ir.OCONVNOP && n.Type() == n.X.Type() {
 		return n.X

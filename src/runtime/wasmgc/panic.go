@@ -114,7 +114,24 @@ func gopanic(e any) {
 	printstring("goroutine ")
 	printint(int64(gp.id))
 	printstring(" [running]:\n")
+	printtraceback()
 	exit(2)
+}
+
+// printtraceback prints the stack of the goroutine, as Go's traceback
+// of a panic does, from the host's stack trace.
+func printtraceback() {
+	var pcs [64]uintptr
+	n := Callers(3, pcs[:])
+	for _, pc := range pcs[:n] {
+		printstring(FuncForPC(pc).Name())
+		printstring("(...)\n\t")
+		file, line := pcFileLine(pc)
+		printstring(file)
+		printstring(":")
+		printint(int64(line))
+		printnl()
+	}
 }
 
 // gorecoverfp is recover, called by the function whose caller's frame

@@ -5018,7 +5018,9 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// TODO: handle ... append case? Currently we handle only
 	// a fixed number of appended elements.
 	var info *backingStoreInfo
-	if !inplace {
+	if !inplace && !(buildcfg.GOWASM.GC && n.Type().Elem().HasPointers()) {
+		// (With GOWASM=gc the elements of such a slice are objects,
+		// in an array of objects: an array on the stack is not one.)
 		info = s.getBackingStoreInfoForAppend(n)
 	}
 

@@ -19,7 +19,7 @@ import (
 // not one the program can allocate.
 func newFuncType(n int) (*funcType, []*rtype) {
 	size := unsafe.Sizeof(funcType{}) + uintptr(n)*unsafe.Sizeof((*rtype)(nil))
-	p := unsafe_NewArray(rtypeOf(byte(0)), int(size))
+	p := gcNewLinear(int(size))
 	ft := (*funcType)(p)
 	args := unsafe.Slice((**rtype)(unsafe.Add(p, unsafe.Sizeof(funcType{}))), n)[0:0:n]
 	return ft, args
@@ -176,9 +176,25 @@ func makeFuncCallGC(ctxt *makeFuncImpl, args unsafe.Pointer) unsafe.Pointer {
 // variable is an object).
 func linearType[T any](t *T) *T {
 	var zero T
-	p := (*T)(unsafe_NewArray(rtypeOf(byte(0)), int(unsafe.Sizeof(zero))))
+	p := (*T)(gcNewLinear(int(unsafe.Sizeof(zero))))
 	*p = *t
 	return p
+}
+
+// gcKept are the pointers to the linear memory of the types and names
+// made at run time. A type descriptor refers to its names, its fields
+// and other types by their addresses, which do not keep their blocks
+// from being freed when the host collects: they are kept for good, as
+// the types Go makes at run time are.
+var gcKept struct {
+	sync.Mutex
+	ptrs []unsafe.Pointer
+}
+
+func gcKeep(p unsafe.Pointer) {
+	gcKept.Lock()
+	gcKept.ptrs = append(gcKept.ptrs, p)
+	gcKept.Unlock()
 }
 
 // gcSameLayout returns a func type of the program whose arguments and
@@ -353,3 +369,11 @@ var gcDeferred, gcPassDeferred bool
 func deferredCall(sp uintptr) bool
 func passDeferredCall()
 func deferHere()
+
+// gcNewLinear returns n zeroed bytes of linear memory for the data of a
+// type made at run time, which are kept for good (see gcKept).
+func gcNewLinear(n int) unsafe.Pointer {
+	p := unsafe_NewArray(rtypeOf(byte(0)), n)
+	gcKeep(p)
+	return p
+}

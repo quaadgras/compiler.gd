@@ -117,6 +117,11 @@ func (t rtype) textOff(off textOff) uintptr {
 	if off == -1 {
 		return abi.FuncPCABIInternal(unreachableMethod)
 	}
+	if off < 0 {
+		// The method of a type that reflect made (StructOf with an
+		// embedded field): the code it gave.
+		return uintptr(reflectOffs[-1-off])
+	}
 	return (firstmoduledata.text + uintptr(off)) << 16
 }
 

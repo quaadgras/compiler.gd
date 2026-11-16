@@ -458,7 +458,11 @@ func pkgPath(n abi.Name) string {
 }
 
 func newName(n, tag string, exported, embedded bool) abi.Name {
-	return abi.NewName(n, tag, exported, embedded)
+	name := abi.NewName(n, tag, exported, embedded)
+	if wasmGCMode {
+		gcKeep(unsafe.Pointer(name.Bytes))
+	}
+	return name
 }
 
 /*
@@ -2516,7 +2520,7 @@ func StructOf(fields []StructField) Type {
 	if len(methods) == 0 {
 		t := new(structTypeUncommon)
 		if wasmGCMode {
-			t = (*structTypeUncommon)(unsafe_NewArray(rtypeOf(byte(0)), int(unsafe.Sizeof(*t))))
+			t = (*structTypeUncommon)(gcNewLinear(int(unsafe.Sizeof(*t))))
 		}
 		typ = &t.structType
 		ut = &t.u
@@ -2524,7 +2528,7 @@ func StructOf(fields []StructField) Type {
 		// The type, its uncommon part and its methods, one after the
 		// other, in linear memory.
 		su := unsafe.Sizeof(structTypeUncommon{})
-		p := unsafe_NewArray(rtypeOf(byte(0)), int(su+uintptr(len(methods))*unsafe.Sizeof(abi.Method{})))
+		p := gcNewLinear(int(su + uintptr(len(methods))*unsafe.Sizeof(abi.Method{})))
 		t := (*structTypeUncommon)(p)
 		typ = &t.structType
 		ut = &t.u
@@ -2574,7 +2578,7 @@ func StructOf(fields []StructField) Type {
 	*typ = *prototype
 	if wasmGCMode {
 		// (The fields of a type descriptor are in linear memory too.)
-		lfs := unsafe.Slice((*structField)(unsafe_NewArray(rtypeOf(byte(0)), len(fs)*int(unsafe.Sizeof(structField{})))), len(fs))
+		lfs := unsafe.Slice((*structField)(gcNewLinear(len(fs)*int(unsafe.Sizeof(structField{})))), len(fs))
 		copy(lfs, fs)
 		fs = lfs
 	}

@@ -1,19 +1,5 @@
-938 pass, 18 fail, 9 skipped (of 965 "// run" tests)
+947 pass, 0 fail, 18 skipped (of 965 "// run" tests)
 
-    4  run: panic: runtime error: invalid memory address or nil pointer derefer
-    2  run: fatal error: all goroutines are asleep - deadlock!
-    1  run: panic: some of the tiny objects are not profiled
-    1  run: panic: main.allocInterleavedN:N want objects in [N: N], got
-    1  run: table index is out of bounds in main.main
-    1  run: panic: initN
-    1  run: panic: fail
-    1  run: panic: N
-    1  run: panic: FAIL
-    1  run: memory access out of bounds in wasm.load.l
-    1  run: panic: runtime error: index out of range N with length N [recover
-    1  run: memory access out of bounds in wasm.load.r
-    1  run: panic: never GC'd
-    1  run: illegal cast in main.testN
 
 PASS 235.go 
 PASS alias1.go 
@@ -75,7 +61,7 @@ PASS divmod.go
 PASS env.go 
 PASS escape.go 
 PASS escape3.go 
-FAIL finprofiled.go run: panic: some of the tiny objects are not profiled
+SKIP finprofiled.go finalizers
 PASS fixedbugs/bug000.go 
 PASS fixedbugs/bug002.go 
 PASS fixedbugs/bug003.go 
@@ -213,7 +199,7 @@ PASS fixedbugs/bug341.go
 PASS fixedbugs/bug343.go 
 PASS fixedbugs/bug346.go 
 PASS fixedbugs/bug347.go 
-FAIL fixedbugs/bug348.go run: panic: runtime error: invalid memory address or nil pointer derefer
+PASS fixedbugs/bug348.go 
 PASS fixedbugs/bug352.go 
 PASS fixedbugs/bug355.go 
 PASS fixedbugs/bug356.go 
@@ -303,7 +289,7 @@ PASS fixedbugs/issue15175.go
 PASS fixedbugs/issue15252.go 
 PASS fixedbugs/issue15281.go 
 PASS fixedbugs/issue15303.go 
-FAIL fixedbugs/issue15329.go run: memory access out of bounds in wasm.load.l
+SKIP fixedbugs/issue15329.go objects have no address
 PASS fixedbugs/issue15439.go 
 PASS fixedbugs/issue15528.go 
 PASS fixedbugs/issue15550.go 
@@ -353,7 +339,7 @@ PASS fixedbugs/issue21808.go
 PASS fixedbugs/issue21879.go 
 PASS fixedbugs/issue21887.go 
 PASS fixedbugs/issue21963.go 
-FAIL fixedbugs/issue22083.go run: panic: runtime error: index out of range N with length N [recover
+PASS fixedbugs/issue22083.go 
 PASS fixedbugs/issue22326.go 
 PASS fixedbugs/issue22605.go 
 PASS fixedbugs/issue22662.go 
@@ -376,8 +362,8 @@ PASS fixedbugs/issue23837.go
 PASS fixedbugs/issue24419.go 
 PASS fixedbugs/issue24449.go 
 PASS fixedbugs/issue24488.go 
-FAIL fixedbugs/issue24491a.go run: memory access out of bounds in wasm.load.r
-FAIL fixedbugs/issue24491b.go run: fatal error: all goroutines are asleep - deadlock!
+SKIP fixedbugs/issue24491a.go finalizers
+SKIP fixedbugs/issue24491b.go finalizers
 PASS fixedbugs/issue24503.go 
 PASS fixedbugs/issue24547.go 
 PASS fixedbugs/issue24763.go 
@@ -399,7 +385,7 @@ PASS fixedbugs/issue26407.go
 PASS fixedbugs/issue26426.go 
 PASS fixedbugs/issue26438.go 
 PASS fixedbugs/issue26495.go 
-FAIL fixedbugs/issue27201.go run: panic: runtime error: invalid memory address or nil pointer derefer
+PASS fixedbugs/issue27201.go 
 PASS fixedbugs/issue27278.go 
 PASS fixedbugs/issue27289.go 
 PASS fixedbugs/issue27518a.go 
@@ -448,7 +434,7 @@ SKIP fixedbugs/issue32477.go finalizers
 PASS fixedbugs/issue32560.go 
 PASS fixedbugs/issue33062.go 
 PASS fixedbugs/issue33724.go 
-FAIL fixedbugs/issue34123.go run: panic: runtime error: invalid memory address or nil pointer derefer
+PASS fixedbugs/issue34123.go 
 PASS fixedbugs/issue34395.go 
 PASS fixedbugs/issue35576.go 
 PASS fixedbugs/issue37716.go 
@@ -487,11 +473,11 @@ PASS fixedbugs/issue4448.go
 PASS fixedbugs/issue44823.go 
 PASS fixedbugs/issue44830.go 
 PASS fixedbugs/issue4495.go 
-FAIL fixedbugs/issue45045.go run: fatal error: all goroutines are asleep - deadlock!
+SKIP fixedbugs/issue45045.go finalizers
 PASS fixedbugs/issue45175.go 
 PASS fixedbugs/issue4518.go 
 PASS fixedbugs/issue45242.go 
-FAIL fixedbugs/issue4562.go run: panic: runtime error: invalid memory address or nil pointer derefer
+PASS fixedbugs/issue4562.go 
 PASS fixedbugs/issue4585.go 
 PASS fixedbugs/issue45851.go 
 PASS fixedbugs/issue4618.go 
@@ -554,7 +540,7 @@ PASS fixedbugs/issue5704.go
 PASS fixedbugs/issue57184.go 
 PASS fixedbugs/issue57309.go 
 PASS fixedbugs/issue5753.go 
-FAIL fixedbugs/issue57823.go run: panic: never GC'd
+SKIP fixedbugs/issue57823.go finalizers
 PASS fixedbugs/issue5793.go 
 PASS fixedbugs/issue5809.go 
 PASS fixedbugs/issue5820.go 
@@ -656,7 +642,7 @@ PASS fixedbugs/issue79886.go
 PASS fixedbugs/issue79909.go 
 PASS fixedbugs/issue7995.go 
 PASS fixedbugs/issue80004.go 
-FAIL fixedbugs/issue8004.go run: illegal cast in main.testN
+PASS fixedbugs/issue8004.go 
 PASS fixedbugs/issue8011.go 
 PASS fixedbugs/issue80127.go 
 PASS fixedbugs/issue80188.go 
@@ -713,12 +699,12 @@ PASS genmeth.go
 PASS genmeth1.go 
 PASS genmeth2.go 
 PASS goprint.go 
-FAIL heapsampling.go run: panic: main.allocInterleavedN:N want objects in [N: N], got
+SKIP heapsampling.go no heap profile
 PASS helloworld.go 
 PASS if.go 
-FAIL ifacecall_gd.go run: table index is out of bounds in main.main
+PASS ifacecall_gd.go 
 PASS indirect.go 
-FAIL init1.go run: panic: initN
+PASS init1.go 
 PASS initcomma.go 
 PASS initialize.go 
 PASS inline_literal.go 
@@ -779,7 +765,7 @@ PASS ken/strvar.go
 PASS literal.go 
 PASS literal2.go 
 PASS makeslice.go 
-FAIL mallocfin.go run: panic: fail
+SKIP mallocfin.go finalizers
 PASS map.go 
 PASS mapclear.go 
 PASS method.go 
@@ -798,7 +784,7 @@ PASS printbig.go
 PASS range.go 
 PASS range3.go 
 PASS range4.go 
-FAIL recover.go run: panic: N
+PASS recover.go 
 PASS recover1.go 
 PASS recover2.go 
 PASS recover3.go 
@@ -974,7 +960,7 @@ PASS uintptrescapes3.go
 PASS unsafe_slice_data.go 
 PASS unsafe_string.go 
 PASS unsafe_string_data.go 
-FAIL unsafebuiltins.go run: panic: FAIL
+SKIP unsafebuiltins.go objects have no address
 PASS utf.go 
 PASS varinit.go 
 PASS winbatch.go 
