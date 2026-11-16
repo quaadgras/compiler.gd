@@ -26,9 +26,6 @@ const (
 	reseed = 4  // reseed with 4 words
 )
 
-// block is the chacha8rand block function.
-func block(seed *[4]uint64, blocks *[32]uint64, counter uint32)
-
 // A State holds the state for a single random generator.
 // It must be used from one goroutine at a time.
 // If used by multiple goroutines at a time, the goroutines

@@ -3,6 +3,8 @@
 // license that can be found in the LICENSE file.
 
 // Package maps implements Go's builtin map type.
+//go:build !wasm.gc
+
 package maps
 
 import (

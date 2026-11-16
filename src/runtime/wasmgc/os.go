@@ -205,3 +205,32 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 func reflectcall(stackArgsType *_type, fn, stackArgs unsafe.Pointer, stackArgsSize, stackRetOffset, frameSize uint32, regArgs unsafe.Pointer) {
 	fatal("reflectcall is not supported with GOWASM=gc")
 }
+
+// Bubbles need a clock of their own and to know when their goroutines
+// are all blocked, which this runtime does not do: a test that uses
+// testing/synctest fails.
+
+//go:linkname synctest_Run internal/synctest.Run
+func synctest_Run(f func()) { panic(plainError("synctest is not supported with GOWASM=gc")) }
+
+//go:linkname synctest_Wait internal/synctest.Wait
+func synctest_Wait() { panic(plainError("synctest is not supported with GOWASM=gc")) }
+
+// What packages of crypto ask of the runtime.
+
+// (There is no data-independent timing mode to set.)
+//
+//go:linkname subtle_setDITEnabled crypto/subtle.setDITEnabled
+func subtle_setDITEnabled() bool { return false }
+
+//go:linkname subtle_setDITDisabled crypto/subtle.setDITDisabled
+func subtle_setDITDisabled() {}
+
+//go:linkname fips140deps_monoTime crypto/internal/fips140deps/time.monoTime
+func fips140deps_monoTime() int64 { return nanotime() }
+
+// (A cache of the boring module would be cleared at each collection:
+// there is no such module here.)
+//
+//go:linkname boring_registerCache crypto/internal/boring/bcache.registerCache
+func boring_registerCache(p unsafe.Pointer) {}
