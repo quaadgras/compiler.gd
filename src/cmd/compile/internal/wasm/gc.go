@@ -949,6 +949,13 @@ func (g *gcGen) pointer(v *ssa.Value) {
 			g.castEq()
 			g.br(wasm.ABr, done, nil)
 			g.prog(wasm.AEnd)
+			// What place left is the pointer it started from: the
+			// base of p if p is an address it went through (an
+			// OffPtr), which is then made again.
+			if g.remat[p.ID] {
+				g.prog(wasm.ADrop)
+				g.get(p, false)
+			}
 			offset()
 			g.prog(wasm.AEnd)
 		}
