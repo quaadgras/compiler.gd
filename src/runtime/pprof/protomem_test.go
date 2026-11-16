@@ -18,6 +18,7 @@ import (
 )
 
 func TestConvertMemProfile(t *testing.T) {
+	skipNoProfiles(t)
 	addr1, addr2, map1, map2 := testPCs(t)
 
 	// MemProfileRecord stacks are return PCs, so add one to the
@@ -120,6 +121,7 @@ func locationToStrings(loc *profile.Location, funcs []string) []string {
 
 // This is a regression test for https://go.dev/issue/64528.
 func TestGenericsHashKeyInPprofBuilder(t *testing.T) {
+	skipNoProfiles(t)
 	if asan.Enabled {
 		t.Skip("extra allocations with -asan throw off the test; see #70079")
 	}
@@ -182,6 +184,7 @@ func nonRecursiveGenericAllocFunction[CurrentOp any, OtherOp any](alloc bool) {
 }
 
 func TestGenericsInlineLocations(t *testing.T) {
+	skipNoProfiles(t)
 	if asan.Enabled {
 		t.Skip("extra allocations with -asan throw off the test; see #70079")
 	}
@@ -240,6 +243,7 @@ func growMap() {
 // Runtime frames are hidden in heap profiles.
 // This is a regression test for https://go.dev/issue/71174.
 func TestHeapRuntimeFrames(t *testing.T) {
+	skipNoProfiles(t)
 	previousRate := runtime.MemProfileRate
 	runtime.MemProfileRate = 1
 	defer func() {

@@ -16,6 +16,7 @@ import (
 )
 
 func TestSubscribers(t *testing.T) {
+	skipNoTracer(t)
 	validate := func(t *testing.T, source string, tr []byte) {
 		t.Log("validating", source)
 		defer func() {

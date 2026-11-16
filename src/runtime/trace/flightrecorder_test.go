@@ -9,6 +9,7 @@ import (
 	"context"
 	inttrace "internal/trace"
 	"internal/trace/testtrace"
+	"internal/wasmgc"
 	"io"
 	"runtime/trace"
 	"slices"
@@ -18,7 +19,17 @@ import (
 	"time"
 )
 
+// skipNoTracer skips a test that records a trace where the runtime
+// cannot: with GOWASM=gc it has no execution tracer.
+func skipNoTracer(t *testing.T) {
+	t.Helper()
+	if wasmgc.Enabled {
+		t.Skip("skipping: no execution tracer with GOWASM=gc")
+	}
+}
+
 func TestFlightRecorderDoubleStart(t *testing.T) {
+	skipNoTracer(t)
 	fr := trace.NewFlightRecorder(trace.FlightRecorderConfig{})
 	if err := fr.Start(); err != nil {
 		t.Fatalf("unexpected error on Start: %v", err)
@@ -30,6 +41,7 @@ func TestFlightRecorderDoubleStart(t *testing.T) {
 }
 
 func TestFlightRecorderEnabled(t *testing.T) {
+	skipNoTracer(t)
 	fr := trace.NewFlightRecorder(trace.FlightRecorderConfig{})
 
 	if fr.Enabled() {
@@ -48,6 +60,7 @@ func TestFlightRecorderEnabled(t *testing.T) {
 }
 
 func TestFlightRecorderWriteToDisabled(t *testing.T) {
+	skipNoTracer(t)
 	var buf bytes.Buffer
 
 	fr := trace.NewFlightRecorder(trace.FlightRecorderConfig{})
@@ -64,6 +77,7 @@ func TestFlightRecorderWriteToDisabled(t *testing.T) {
 }
 
 func TestFlightRecorderConcurrentWriteTo(t *testing.T) {
+	skipNoTracer(t)
 	fr := trace.NewFlightRecorder(trace.FlightRecorderConfig{})
 	if err := fr.Start(); err != nil {
 		t.Fatalf("unexpected error on Start: %v", err)
@@ -224,6 +238,7 @@ func TestFlightRecorderGenerationCount(t *testing.T) {
 type flightRecorderTestFunc func(snapshot func())
 
 func testFlightRecorder(t *testing.T, fr *trace.FlightRecorder, f flightRecorderTestFunc) []byte {
+	skipNoTracer(t)
 	if trace.IsEnabled() {
 		t.Skip("cannot run flight recorder tests when tracing is enabled")
 	}
@@ -298,6 +313,7 @@ func testReader(t *testing.T, tb []byte, exp *testtrace.Expectation) {
 }
 
 func TestTraceAndFlightRecorder(t *testing.T) {
+	skipNoTracer(t)
 	var tBuf, frBuf bytes.Buffer
 	if err := trace.Start(&tBuf); err != nil {
 		t.Errorf("unable to start execution tracer: %s", err)

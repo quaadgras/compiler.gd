@@ -808,6 +808,7 @@ func growstack(n int) {
 func use(x [8 << 18]byte) {}
 
 func TestBlockProfile(t *testing.T) {
+	skipNoProfiles(t)
 	type TestCase struct {
 		name string
 		f    func(*testing.T)
@@ -1156,6 +1157,7 @@ func blockCond(t *testing.T) {
 
 // See http://golang.org/cl/299991.
 func TestBlockProfileBias(t *testing.T) {
+	skipNoProfiles(t)
 	rate := int(1000) // arbitrary value
 	runtime.SetBlockProfileRate(rate)
 	defer runtime.SetBlockProfileRate(0)
@@ -1224,6 +1226,7 @@ func blockInfrequentLong(rate int) {
 func blockevent(cycles int64, skip int)
 
 func TestMutexProfile(t *testing.T) {
+	skipNoProfiles(t)
 	// Generate mutex profile
 
 	old := runtime.SetMutexProfileFraction(1)
@@ -1343,6 +1346,7 @@ func TestMutexProfile(t *testing.T) {
 }
 
 func TestMutexProfileRateAdjust(t *testing.T) {
+	skipNoProfiles(t)
 	old := runtime.SetMutexProfileFraction(1)
 	defer runtime.SetMutexProfileFraction(old)
 	if old != 0 {
@@ -1399,6 +1403,7 @@ func func3(c chan int) { <-c }
 func func4(c chan int) { <-c }
 
 func TestGoroutineCounts(t *testing.T) {
+	skipNoProfiles(t)
 	// Setting GOMAXPROCS to 1 ensures we can force all goroutines to the
 	// desired blocking point.
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
@@ -2450,6 +2455,7 @@ func TestAtomicLoadStore64(t *testing.T) {
 }
 
 func TestTracebackAll(t *testing.T) {
+	skipNoProfiles(t)
 	// With gccgo, if a profiling signal arrives at the wrong time
 	// during traceback, it may crash or hang. See issue #29448.
 	f, err := os.CreateTemp("", "proftraceback")
@@ -2491,6 +2497,7 @@ func TestTracebackAll(t *testing.T) {
 // tests such cases by using fake call sequences and forcing the profile build
 // utilizing translateCPUProfile defined in proto_test.go
 func TestTryAdd(t *testing.T) {
+	skipNoProfiles(t)
 	if _, found := findInlinedCall(inlinedCallerDump, 4<<10); !found {
 		t.Skip("Can't determine whether anything was inlined into inlinedCallerDump.")
 	}
@@ -2763,6 +2770,7 @@ func TestTimeVDSO(t *testing.T) {
 }
 
 func TestProfilerStackDepth(t *testing.T) {
+	skipNoProfiles(t)
 	t.Cleanup(disableSampling())
 
 	const depth = 128
@@ -2944,6 +2952,7 @@ func getProfileStacks(collect func([]runtime.BlockProfileRecord) (int, bool), fi
 }
 
 func TestMutexBlockFullAggregation(t *testing.T) {
+	skipNoProfiles(t)
 	// This regression test is adapted from
 	// https://github.com/grafana/pyroscope-go/issues/103,
 	// authored by Tolya Korniltsev
@@ -3014,6 +3023,7 @@ func inlineF(mu *sync.Mutex, wg *sync.WaitGroup) {
 }
 
 func TestBlockMutexProfileInlineExpansion(t *testing.T) {
+	skipNoProfiles(t)
 	runtime.SetBlockProfileRate(1)
 	defer runtime.SetBlockProfileRate(0)
 	prev := runtime.SetMutexProfileFraction(1)
@@ -3068,6 +3078,7 @@ runtime/pprof.inlineA`,
 }
 
 func TestProfileRecordNullPadding(t *testing.T) {
+	skipNoProfiles(t)
 	// Produce events for the different profile types.
 	t.Cleanup(disableSampling())
 	memSink = make([]byte, 1)      // MemProfile

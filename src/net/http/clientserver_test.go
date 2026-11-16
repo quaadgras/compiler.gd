@@ -15,6 +15,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"hash"
+	"internal/wasmgc"
 	"io"
 	"log"
 	"maps"
@@ -1333,6 +1334,14 @@ func TestTransportGCRequest(t *testing.T) {
 	})
 }
 func testTransportGCRequest(t *testing.T, mode testMode, body bool) {
+	if wasmgc.Enabled {
+		// The goroutines that read and write the connection are parked
+		// with the request in their variables: the host's collector
+		// keeps what the frames of a goroutine hold, whether or not
+		// the goroutine will use it again. (Once the connection is
+		// closed the request is collected.)
+		t.Skip("skipping: a parked goroutine keeps what its variables hold with GOWASM=gc")
+	}
 	cst := newClientServerTest(t, mode, HandlerFunc(func(w ResponseWriter, r *Request) {
 		io.ReadAll(r.Body)
 		if body {

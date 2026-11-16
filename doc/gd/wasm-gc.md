@@ -1135,3 +1135,21 @@ offset in linear memory. And of the runtime: random bytes written
 nowhere when the buffer was an object (`syscall.RandomGet`), the
 identity of a pointer to the first element of an array a struct starts
 with, `memmove` within one object.
+
+Later the same day all 256 pass. `log/slog` by a fix: V8's optimizing
+compiler gives, for every call inside a try block, the position of the
+last call before the block, and the code of a function that defers is
+in one, so `runtime.Callers` had the wrong line there and missed the
+frames of inlined calls. Such a function now keeps, in a record in its
+frame that a global points to, where the call it is making is (see
+`GCGlobalDefer`), and the host takes it from there. The others by
+leaving out what the target does not have: the tests of the execution
+tracer (`runtime/trace`, one handler of `net/http/pprof`), those of
+`runtime/pprof` for profiles of memory, blocking and the stacks of
+other goroutines (there is no way to sample a running program for a
+CPU profile either, which is why none of this was built), and
+`net/http`'s `TestTransportGCRequest`: a parked goroutine keeps what
+its variables last held, live or not, as the host's collector has no
+liveness for the frames of a suspended stack. That one is a property
+of the design worth knowing: a goroutine that waits in a loop holds on
+to the last thing it handled.

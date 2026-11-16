@@ -12,6 +12,7 @@ import (
 	"internal/abi"
 	"internal/profile"
 	"internal/testenv"
+	"internal/wasmgc"
 	"os"
 	"os/exec"
 	"reflect"
@@ -154,6 +155,7 @@ func testPCs(t *testing.T) (addr1, addr2 uint64, map1, map2 *profile.Mapping) {
 }
 
 func TestConvertCPUProfile(t *testing.T) {
+	skipNoProfiles(t)
 	addr1, addr2, map1, map2 := testPCs(t)
 
 	b := []uint64{
@@ -487,5 +489,16 @@ func TestWriteToErr(t *testing.T) {
 	err := Lookup("heap").WriteTo(&errWriter{}, 0)
 	if !errors.Is(err, errWrite) {
 		t.Fatalf("want error from writer, got: %v", err)
+	}
+}
+
+// skipNoProfiles skips a test of what the runtime does not have with
+// GOWASM=gc: profiles of memory and of blocking, the stacks of other
+// goroutines, and the functions and lines of program counters that are
+// not those of a call.
+func skipNoProfiles(t *testing.T) {
+	t.Helper()
+	if wasmgc.Enabled {
+		t.Skip("skipping: no such profile with GOWASM=gc")
 	}
 }

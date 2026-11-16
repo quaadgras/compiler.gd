@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"internal/profile"
 	"internal/testenv"
+	"internal/wasmgc"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +58,9 @@ func TestHandlers(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.path, func(t *testing.T) {
+			if wasmgc.Enabled && strings.HasPrefix(tc.path, "/debug/pprof/trace") {
+				t.Skip("skipping: no execution tracer with GOWASM=gc")
+			}
 			req := httptest.NewRequest("GET", "http://example.com"+tc.path, nil)
 			w := httptest.NewRecorder()
 			tc.handler(w, req)
