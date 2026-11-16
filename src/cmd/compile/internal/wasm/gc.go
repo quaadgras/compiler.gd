@@ -246,6 +246,39 @@ func gcIndexedArray(v *ssa.Value) *types.Type {
 	return at
 }
 
+// gcLayoutKey spells the objects a value of type t is made of, down to
+// the elements of its arrays: two types with the same key can be
+// accessed one as the other.
+func gcLayoutKey(t *types.Type) string {
+	var b strings.Builder
+	var key func(t *types.Type)
+	key = func(t *types.Type) {
+		if gcIsArray(t) {
+			fmt.Fprintf(&b, "[%d]", t.NumElem())
+			if k, obj := gcElem(t.Elem()); obj {
+				b.WriteByte('{')
+				key(t.Elem())
+				b.WriteByte('}')
+			} else {
+				b.WriteByte(k)
+			}
+			return
+		}
+		for _, l := range gcLeaves(t) {
+			fmt.Fprintf(&b, "%d:", l.off)
+			if l.kind == 'a' {
+				key(l.t)
+			} else {
+				b.WriteByte(l.kind)
+			}
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "/%d", t.Size())
+	}
+	key(t)
+	return b.String()
+}
+
 func gcIsArray(t *types.Type) bool {
 	return t.IsArray() && t.NumElem() >= 2
 }
@@ -3129,7 +3162,10 @@ func (g *gcGen) stackSlots() {
 				off := int64(pa.Offset())
 				var name *ir.Name
 				for _, sl := range slots {
-					if sl.off == off && types.Identical(sl.t, pa.Type) {
+					// Two types with the same objects (A and B of
+					// type A [n]T; type B A) share the slot: its
+					// addresses are not told apart by call.
+					if sl.off == off && (types.Identical(sl.t, pa.Type) || gcLayoutKey(sl.t) == gcLayoutKey(pa.Type)) {
 						name = sl.name
 					}
 				}
@@ -3152,17 +3188,19 @@ func (g *gcGen) stackSlots() {
 		}
 	}
 	addrs := make(map[*ir.Name]*ssa.Value)
+	var users map[*ssa.Value][]*ssa.Value
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
 			if v.Op != ssa.OpOffPtr || v.Args[0].Op != ssa.OpSP {
 				continue
 			}
 			var found *slot
+			ambiguous := false
 			for i := range slots {
 				sl := &slots[i]
 				if sl.off <= v.AuxInt && v.AuxInt < sl.off+sl.t.Size() {
 					if found != nil && found.name != sl.name {
-						g.unsupported(v, "stack slots of two types at once")
+						ambiguous = true
 					}
 					found = sl
 				}
@@ -3170,13 +3208,55 @@ func (g *gcGen) stackSlots() {
 			if found == nil {
 				g.unsupported(v, "an address on the stack")
 			}
-			a := addrs[found.name]
-			if a == nil {
-				a = f.Entry.NewValue2A(v.Pos, ssa.OpLocalAddr, types.NewPtr(found.t), found.name, v.Args[0], mem)
-				addrs[found.name] = a
+			addrOf := func(sl *slot) *ssa.Value {
+				a := addrs[sl.name]
+				if a == nil {
+					a = f.Entry.NewValue2A(v.Pos, ssa.OpLocalAddr, types.NewPtr(sl.t), sl.name, v.Args[0], mem)
+					addrs[sl.name] = a
+				}
+				return a
+			}
+			if ambiguous {
+				// The slots of calls with arguments or results of
+				// different types overlap: each use of the address
+				// is given the slot of the call it is for.
+				if users == nil {
+					users = gcUsers(f)
+				}
+				off, sp := v.AuxInt, v.Args[0]
+				clones := make(map[*slot]*ssa.Value)
+				for _, u := range users[v] {
+					call := gcSlotCall(u, v, users)
+					var sl *slot
+					if call != nil {
+						for _, n := range g.callSlots[call.ID] {
+							for i := range slots {
+								if slots[i].name == n && slots[i].off <= off && off < slots[i].off+slots[i].t.Size() {
+									sl = &slots[i]
+								}
+							}
+						}
+					}
+					if sl == nil {
+						g.unsupported(v, "stack slots of two types at once")
+						break
+					}
+					nv := clones[sl]
+					if nv == nil {
+						nv = b.NewValue1I(v.Pos, ssa.OpOffPtr, v.Type, off-sl.off, sp)
+						nv.SetArg(0, addrOf(sl))
+						clones[sl] = nv
+					}
+					for i, x := range u.Args {
+						if x == v {
+							u.SetArg(i, nv)
+						}
+					}
+				}
+				continue
 			}
 			v.AuxInt -= found.off
-			v.SetArg(0, a)
+			v.SetArg(0, addrOf(found))
 		}
 	}
 	// A slot that nothing reads or writes (a result that is not used)
@@ -3196,6 +3276,70 @@ func (g *gcGen) stackSlots() {
 		}
 		addrs[sl.name] = f.Entry.NewValue2A(f.Entry.Pos, ssa.OpLocalAddr, types.NewPtr(sl.t), sl.name, sp, mem)
 	}
+}
+
+// gcUsers returns the values that use each value.
+func gcUsers(f *ssa.Func) map[*ssa.Value][]*ssa.Value {
+	users := make(map[*ssa.Value][]*ssa.Value)
+	for _, b := range f.Blocks {
+		for _, u := range b.Values {
+			for _, a := range u.Args {
+				if n := len(users[a]); n == 0 || users[a][n-1] != u {
+					users[a] = append(users[a], u)
+				}
+			}
+		}
+	}
+	return users
+}
+
+func gcIsCall(v *ssa.Value) bool {
+	switch v.Op {
+	case ssa.OpWasmLoweredStaticCall, ssa.OpWasmLoweredClosureCall, ssa.OpWasmLoweredInterCall:
+		return true
+	}
+	return false
+}
+
+// gcSlotCall returns the call whose argument or result slot on the
+// stack u accesses through the address addr: for a store to the slot,
+// the next call in the order of memory; for a load from it, the call
+// before.
+func gcSlotCall(u, addr *ssa.Value, users map[*ssa.Value][]*ssa.Value) *ssa.Value {
+	if u.Type.IsMemory() && len(u.Args) > 0 && u.Args[0] == addr && u.Op != ssa.OpLoad {
+		m := u
+		for range 10000 {
+			var next *ssa.Value
+			for _, x := range users[m] {
+				if x.Type.IsMemory() && x.Op != ssa.OpPhi {
+					next = x
+				}
+			}
+			if next == nil {
+				return nil
+			}
+			if gcIsCall(next) {
+				return next
+			}
+			m = next
+		}
+		return nil
+	}
+	m := u.MemoryArg()
+	for range 10000 {
+		if m == nil {
+			return nil
+		}
+		if gcIsCall(m) {
+			return m
+		}
+		if m.Op == ssa.OpSelectN {
+			m = m.Args[0]
+			continue
+		}
+		m = m.MemoryArg()
+	}
+	return nil
 }
 
 // params finds the WebAssembly parameter of each ABI register.
