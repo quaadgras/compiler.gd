@@ -28,6 +28,9 @@ type (
 // cmd/link/internal/ld/symtab.go writes. Only a few of the fields are
 // used here.
 type moduledata struct {
+	// pcHeader through findfunctab are zero. The linker does not emit
+	// pclntab: a function is named from the low bits of its PC, and
+	// file:line comes from the host.
 	pcHeader     *byte
 	funcnametab  []byte
 	cutab        []uint32
@@ -48,7 +51,7 @@ type moduledata struct {
 	types, typedesclen, etypes uintptr
 	itaboffset, itabsize       uintptr
 	rodata                     uintptr
-	gofunc                     uintptr
+	gofunc                     uintptr // zero: no funcdata
 	epclntab                   uintptr
 
 	textsectmap []byte

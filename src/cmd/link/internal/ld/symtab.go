@@ -593,29 +593,33 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		moduledata.AddUint(ctxt.Arch, 0)
 	}
 
-	// The pcHeader
-	moduledata.AddAddr(ctxt.Arch, pcln.pcheader)
+	// pcHeader through ftab. GOWASM=gc leaves the table out; the fields
+	// stay so moduledata matches the runtime's layout.
+	if pcln.pcheader == 0 {
+		moduledata.AddUint(ctxt.Arch, 0) // pcHeader
+		nilSlice()                       // funcnametab
+		nilSlice()                       // cutab
+		nilSlice()                       // filetab
+		nilSlice()                       // pctab
+		nilSlice()                       // pclntable
+		nilSlice()                       // ftab
+	} else {
+		moduledata.AddAddr(ctxt.Arch, pcln.pcheader)
+		sliceSym(pcln.funcnametab)
+		slice(pcln.cutab, uint64(ldr.SymSize(pcln.cutab))/4)
+		sliceSym(pcln.filetab)
+		sliceSym(pcln.pctab)
+		sliceSym(pcln.pclntab)
+		slice(pcln.pclntab, uint64(pcln.nfunc+1))
+	}
 
-	// The function name slice
-	sliceSym(pcln.funcnametab)
-
-	// The cutab slice
-	slice(pcln.cutab, uint64(ldr.SymSize(pcln.cutab))/4)
-
-	// The filetab slice
-	sliceSym(pcln.filetab)
-
-	// The pctab slice
-	sliceSym(pcln.pctab)
-
-	// The pclntab slice
-	sliceSym(pcln.pclntab)
-
-	// The ftab slice
-	slice(pcln.pclntab, uint64(pcln.nfunc+1))
-
-	// findfunctab
-	moduledata.AddAddr(ctxt.Arch, pcln.findfunctab)
+	// findfunctab. GOWASM=gc leaves the symbol out; the field stays
+	// so moduledata matches the runtime's layout.
+	if pcln.findfunctab == 0 {
+		moduledata.AddUint(ctxt.Arch, 0)
+	} else {
+		moduledata.AddAddr(ctxt.Arch, pcln.findfunctab)
+	}
 	// minpc, maxpc
 	moduledata.AddAddr(ctxt.Arch, pcln.firstFunc)
 	moduledata.AddAddrPlus(ctxt.Arch, pcln.lastFunc, ldr.SymSize(pcln.lastFunc))
@@ -644,7 +648,12 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	ctxt.moduledataItabSizeOffset = moduledata.Size()
 	moduledata.AddUint(ctxt.Arch, 0) // filled in by dodataSect
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.rodata", 0))
-	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("go:func.*", 0))
+	// go:func.* is the funcdata copied into pclntab. GOWASM=gc omits it.
+	if s := ldr.Lookup("go:func.*", 0); s != 0 {
+		moduledata.AddAddr(ctxt.Arch, s)
+	} else {
+		moduledata.AddUint(ctxt.Arch, 0)
+	}
 	moduledata.AddAddr(ctxt.Arch, ldr.Lookup("runtime.epclntab", 0))
 
 	if ctxt.IsAIX() && ctxt.IsExternal() {

@@ -929,6 +929,56 @@ func writeFuncs(ctxt *Link, sb *loader.SymbolBuilder, funcs []loader.Sym, inlSym
 
 // pclntab generates the pcln table for the link output.
 func (ctxt *Link) pclntab(container loader.Bitmap) *pclntab {
+	state, compUnits, funcs := makePclntab(ctxt, container)
+
+	// GOWASM=gc names a function from the low bits of its PC and reads
+	// file and line from the host (the name section and go.lines). It
+	// never reads this table. The moduledata fields stay, as zeros.
+	// Mark the aux payloads special so dodata does not emit them into
+	// rodata in the table's place.
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+		omitPclnPayloads(ctxt, funcs)
+		return state
+	}
+
+	return ctxt.genpclntab(state, compUnits, funcs)
+}
+
+// omitPclnPayloads marks pcdata and funcdata aux symbols special.
+// Reachable aux symbols are otherwise laid out as ordinary rodata.
+func omitPclnPayloads(ctxt *Link, funcs []loader.Sym) {
+	ldr := ctxt.loader
+	var pcdata, fd []loader.Sym
+	mark := func(p loader.Sym) {
+		if p != 0 {
+			ldr.SetAttrSpecial(p, true)
+		}
+	}
+	for _, s := range funcs {
+		fi := ldr.FuncInfo(s)
+		if !fi.Valid() {
+			continue
+		}
+		fi.Preload()
+		var pcsp, pcfile, pcline, pcinline loader.Sym
+		pcsp, pcfile, pcline, pcinline, pcdata = ldr.PcdataAuxs(s, pcdata)
+		mark(pcsp)
+		mark(pcfile)
+		mark(pcline)
+		mark(pcinline)
+		for _, p := range pcdata {
+			mark(p)
+		}
+		// Funcdata, not funcData: the linker is what builds inline
+		// trees, and those are not created on this path.
+		fd = ldr.Funcdata(s, fd)
+		for _, p := range fd {
+			mark(p)
+		}
+	}
+}
+
+func (ctxt *Link) genpclntab(state *pclntab, compUnits []*sym.CompilationUnit, funcs []loader.Sym) *pclntab {
 	// Go 1.2's symtab layout is documented in golang.org/s/go12symtab, but the
 	// layout and data has changed since that time.
 	//
@@ -965,8 +1015,6 @@ func (ctxt *Link) pclntab(container loader.Bitmap) *pclntab {
 	//
 	//      runtime.funcdata
 	//        []byte of deduplicated funcdata
-
-	state, compUnits, funcs := makePclntab(ctxt, container)
 
 	ldr := ctxt.loader
 	state.carrier = ldr.LookupOrCreateSym("runtime.pclntab", 0)
@@ -1008,6 +1056,14 @@ const (
 // findfunctab generates a lookup table to quickly find the containing
 // function for a pc. See src/runtime/symtab.go:findfunc for details.
 func (ctxt *Link) findfunctab(state *pclntab, container loader.Bitmap) {
+	// GOWASM=gc names a function from the low bits of its PC and never
+	// reads this table. A PC there is a function index shifted left by
+	// 16, so the table would hold an entry for every 256 bytes of that
+	// empty space, about 256 bytes for each function.
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+		return
+	}
+
 	ldr := ctxt.loader
 
 	// find min and max address
