@@ -1827,6 +1827,23 @@ func (g *gcGen) fuseStores(v *ssa.Value, t *types.Type) map[int64]*ssa.Value {
 		}
 		return false
 	}
+	// early reports whether w has its value where the object is made:
+	// it is computed before, or is computed where it is used from what
+	// is (a pointer and an offset that are: the pointer of pix[i:]
+	// stored as the object is made was pix, the offset not yet being
+	// known).
+	var early func(w *ssa.Value) bool
+	early = func(w *ssa.Value) bool {
+		if !g.remat[w.ID] {
+			return w.Block != b || pos[w] < pos[v]
+		}
+		for _, a := range w.Args {
+			if a.Type.IsMemory() || !early(a) {
+				return false
+			}
+		}
+		return true
+	}
 	var fused map[int64]*ssa.Value
 	for _, u := range b.Values[pos[v]+1:] {
 		if u == ptr || u.Op == ssa.OpSelectN && u.Args[0] == v {
@@ -1850,7 +1867,7 @@ func (g *gcGen) fuseStores(v *ssa.Value, t *types.Type) map[int64]*ssa.Value {
 			l, ok := leaves[off]
 			st := u.Aux.(*types.Type)
 			if addr == ptr && ok && l.kind != 'a' && fused[off] == nil && st.Size() == gcLeafSize(l) && !w.OnWasmStack && !self(w) &&
-				(w.Block != b || pos[w] < pos[v] || g.remat[w.ID]) && gcFusible(l.kind, g.wtype(st), g.wtype(w.Type)) {
+				early(w) && gcFusible(l.kind, g.wtype(st), g.wtype(w.Type)) {
 				if fused == nil {
 					fused = make(map[int64]*ssa.Value)
 				}
