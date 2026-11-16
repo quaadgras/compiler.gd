@@ -975,7 +975,9 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	})
 	writeProducerSec(ctxt)
-	if !ctxt.FlagS {
-		writeNameSec(ctxt, len(hostImports), fns)
-	}
+	// The names of the functions are kept with -s: they are what
+	// runtime.FuncForPC and runtime.CallersFrames report (as the pc-value
+	// table is kept on other ports), and package testing finds its
+	// frames by name.
+	writeNameSec(ctxt, len(hostImports), fns)
 }
