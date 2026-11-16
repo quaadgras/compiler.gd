@@ -5,10 +5,12 @@
 (Last ___) => v.Args[len(v.Args)-1]
 
 // Lowering arithmetic
-(Add(64|32|16|8|Ptr) ...) => (I64Add ...)
+(Add(64|32|16|8) ...) => (I64Add ...)
+(AddPtr x y) && !config.WasmGC => (I64Add x y)
 (Add(64|32)F ...) => (F(64|32)Add ...)
 
-(Sub(64|32|16|8|Ptr) ...) => (I64Sub ...)
+(Sub(64|32|16|8) ...) => (I64Sub ...)
+(SubPtr x y) && !config.WasmGC => (I64Sub x y)
 (Sub(64|32)F ...) => (F(64|32)Sub ...)
 
 (Mul(64|32|16|8) ...) => (I64Mul ...)
@@ -78,7 +80,7 @@
 (Select1 <t> (Mul64uhilo x y)) => (I64Mul x y)
 
 // Lowering pointer arithmetic
-(OffPtr ...) => (I64AddConst ...)
+(OffPtr [off] ptr) && !config.WasmGC => (I64AddConst [off] ptr)
 
 // Lowering extension
 // It is unnecessary to extend loads
@@ -209,7 +211,7 @@
 (Eq16  x y) => (I64Eq (ZeroExt16to64 x) (ZeroExt16to64 y))
 (Eq8   x y) => (I64Eq (ZeroExt8to64  x) (ZeroExt8to64  y))
 (EqB   ...) => (I64Eq ...)
-(EqPtr ...) => (I64Eq ...)
+(EqPtr x y) && !config.WasmGC => (I64Eq x y)
 (Eq(64|32)F ...) => (F(64|32)Eq ...)
 
 (Neq64  ...) => (I64Ne ...)
@@ -217,109 +219,109 @@
 (Neq16  x y) => (I64Ne (ZeroExt16to64 x) (ZeroExt16to64 y))
 (Neq8   x y) => (I64Ne (ZeroExt8to64  x) (ZeroExt8to64  y))
 (NeqB   ...) => (I64Ne ...)
-(NeqPtr ...) => (I64Ne ...)
+(NeqPtr x y) && !config.WasmGC => (I64Ne x y)
 (Neq(64|32)F ...) => (F(64|32)Ne ...)
 
 // Lowering loads
-(Load <t> ptr mem) && is32BitFloat(t) => (F32Load ptr mem)
-(Load <t> ptr mem) && is64BitFloat(t) => (F64Load ptr mem)
-(Load <t> ptr mem) && t.Size() == 16 => (V128Load ptr mem)
-(Load <t> ptr mem) && t.Size() == 8 => (I64Load ptr mem)
-(Load <t> ptr mem) && t.Size() == 4 && !t.IsSigned() => (I64Load32U ptr mem)
-(Load <t> ptr mem) && t.Size() == 4 &&  t.IsSigned() => (I64Load32S ptr mem)
-(Load <t> ptr mem) && t.Size() == 2 && !t.IsSigned() => (I64Load16U ptr mem)
-(Load <t> ptr mem) && t.Size() == 2 &&  t.IsSigned() => (I64Load16S ptr mem)
-(Load <t> ptr mem) && t.Size() == 1 && !t.IsSigned() => (I64Load8U ptr mem)
-(Load <t> ptr mem) && t.Size() == 1 &&  t.IsSigned() => (I64Load8S ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && is32BitFloat(t) => (F32Load ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && is64BitFloat(t) => (F64Load ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 16 => (V128Load ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 8 => (I64Load ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 4 && !t.IsSigned() => (I64Load32U ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 4 &&  t.IsSigned() => (I64Load32S ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 2 && !t.IsSigned() => (I64Load16U ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 2 &&  t.IsSigned() => (I64Load16S ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 1 && !t.IsSigned() => (I64Load8U ptr mem)
+(Load <t> ptr mem) && !config.WasmGC && t.Size() == 1 &&  t.IsSigned() => (I64Load8S ptr mem)
 
 // Lowering stores
-(Store {t} ptr val mem) && is64BitFloat(t) => (F64Store ptr val mem)
-(Store {t} ptr val mem) && is32BitFloat(t) => (F32Store ptr val mem)
-(Store {t} ptr val mem) && t.Size() == 16 => (V128Store ptr val mem)
-(Store {t} ptr val mem) && t.Size() == 8 => (I64Store ptr val mem)
-(Store {t} ptr val mem) && t.Size() == 4 => (I64Store32 ptr val mem)
-(Store {t} ptr val mem) && t.Size() == 2 => (I64Store16 ptr val mem)
-(Store {t} ptr val mem) && t.Size() == 1 => (I64Store8 ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && is64BitFloat(t) => (F64Store ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && is32BitFloat(t) => (F32Store ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && t.Size() == 16 => (V128Store ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && t.Size() == 8 => (I64Store ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && t.Size() == 4 => (I64Store32 ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && t.Size() == 2 => (I64Store16 ptr val mem)
+(Store {t} ptr val mem) && !config.WasmGC && t.Size() == 1 => (I64Store8 ptr val mem)
 
 (ZeroSIMD <t>) => (V128Zero <t>)
 
 // Lowering moves
-(Move [0] _ _ mem) => mem
-(Move [1] dst src mem) => (I64Store8 dst (I64Load8U src mem) mem)
-(Move [2] dst src mem) => (I64Store16 dst (I64Load16U src mem) mem)
-(Move [4] dst src mem) => (I64Store32 dst (I64Load32U src mem) mem)
-(Move [8] dst src mem) => (I64Store dst (I64Load src mem) mem)
-(Move [16] dst src mem) =>
+(Move [0] _ _ mem) && !config.WasmGC => mem
+(Move [1] dst src mem) && !config.WasmGC => (I64Store8 dst (I64Load8U src mem) mem)
+(Move [2] dst src mem) && !config.WasmGC => (I64Store16 dst (I64Load16U src mem) mem)
+(Move [4] dst src mem) && !config.WasmGC => (I64Store32 dst (I64Load32U src mem) mem)
+(Move [8] dst src mem) && !config.WasmGC => (I64Store dst (I64Load src mem) mem)
+(Move [16] dst src mem) && !config.WasmGC =>
 	(I64Store [8] dst (I64Load [8] src mem)
 		(I64Store dst (I64Load src mem) mem))
-(Move [3] dst src mem) =>
+(Move [3] dst src mem) && !config.WasmGC =>
 	(I64Store8 [2] dst (I64Load8U [2] src mem)
 		(I64Store16 dst (I64Load16U src mem) mem))
-(Move [5] dst src mem) =>
+(Move [5] dst src mem) && !config.WasmGC =>
 	(I64Store8 [4] dst (I64Load8U [4] src mem)
 		(I64Store32 dst (I64Load32U src mem) mem))
-(Move [6] dst src mem) =>
+(Move [6] dst src mem) && !config.WasmGC =>
 	(I64Store16 [4] dst (I64Load16U [4] src mem)
 		(I64Store32 dst (I64Load32U src mem) mem))
-(Move [7] dst src mem) =>
+(Move [7] dst src mem) && !config.WasmGC =>
 	(I64Store32 [3] dst (I64Load32U [3] src mem)
 		(I64Store32 dst (I64Load32U src mem) mem))
-(Move [s] dst src mem) && s > 8 && s < 16 =>
+(Move [s] dst src mem) && !config.WasmGC && s > 8 && s < 16 =>
 	(I64Store [s-8] dst (I64Load [s-8] src mem)
 		(I64Store dst (I64Load src mem) mem))
 
 // Large copying uses helper.
-(Move [s] dst src mem) && logLargeCopy(v, s) =>
+(Move [s] dst src mem) && !config.WasmGC && logLargeCopy(v, s) =>
 	(LoweredMove [s] dst src mem)
 
 // Lowering Zero instructions
-(Zero [0] _ mem) => mem
-(Zero [1] destptr mem) => (I64Store8 destptr (I64Const [0]) mem)
-(Zero [2] destptr mem) => (I64Store16 destptr (I64Const [0]) mem)
-(Zero [4] destptr mem) => (I64Store32 destptr (I64Const [0]) mem)
-(Zero [8] destptr mem) => (I64Store destptr (I64Const [0]) mem)
+(Zero [0] _ mem) && !config.WasmGC => mem
+(Zero [1] destptr mem) && !config.WasmGC => (I64Store8 destptr (I64Const [0]) mem)
+(Zero [2] destptr mem) && !config.WasmGC => (I64Store16 destptr (I64Const [0]) mem)
+(Zero [4] destptr mem) && !config.WasmGC => (I64Store32 destptr (I64Const [0]) mem)
+(Zero [8] destptr mem) && !config.WasmGC => (I64Store destptr (I64Const [0]) mem)
 
-(Zero [3] destptr mem) =>
+(Zero [3] destptr mem) && !config.WasmGC =>
 	(I64Store8 [2] destptr (I64Const [0])
 		(I64Store16 destptr (I64Const [0]) mem))
-(Zero [5] destptr mem) =>
+(Zero [5] destptr mem) && !config.WasmGC =>
 	(I64Store8 [4] destptr (I64Const [0])
 		(I64Store32 destptr (I64Const [0]) mem))
-(Zero [6] destptr mem) =>
+(Zero [6] destptr mem) && !config.WasmGC =>
 	(I64Store16 [4] destptr (I64Const [0])
 		(I64Store32 destptr (I64Const [0]) mem))
-(Zero [7] destptr mem) =>
+(Zero [7] destptr mem) && !config.WasmGC =>
 	(I64Store32 [3] destptr (I64Const [0])
 		(I64Store32 destptr (I64Const [0]) mem))
 
 // Strip off any fractional word zeroing.
-(Zero [s] destptr mem) && s%8 != 0 && s > 8 && s < 32 =>
+(Zero [s] destptr mem) && !config.WasmGC && s%8 != 0 && s > 8 && s < 32 =>
 	(Zero [s-s%8] (OffPtr <destptr.Type> destptr [s%8])
 		(I64Store destptr (I64Const [0]) mem))
 
 // Zero small numbers of words directly.
-(Zero [16] destptr mem) =>
+(Zero [16] destptr mem) && !config.WasmGC =>
 	(I64Store [8] destptr (I64Const [0])
 		(I64Store destptr (I64Const [0]) mem))
-(Zero [24] destptr mem) =>
+(Zero [24] destptr mem) && !config.WasmGC =>
 	(I64Store [16] destptr (I64Const [0])
 		(I64Store [8] destptr (I64Const [0])
 			(I64Store destptr (I64Const [0]) mem)))
-(Zero [32] destptr mem) =>
+(Zero [32] destptr mem) && !config.WasmGC =>
 	(I64Store [24] destptr (I64Const [0])
 		(I64Store [16] destptr (I64Const [0])
 			(I64Store [8] destptr (I64Const [0])
 				(I64Store destptr (I64Const [0]) mem))))
 
 // Large zeroing uses helper.
-(Zero [s] destptr mem) =>
+(Zero [s] destptr mem) && !config.WasmGC =>
 	(LoweredZero [s] destptr mem)
 
 // Lowering constants
 (Const64 ...) => (I64Const ...)
 (Const(32|16|8) [c]) => (I64Const [int64(c)])
 (Const(64|32)F ...) => (F(64|32)Const ...)
-(ConstNil) => (I64Const [0])
+(ConstNil) && !config.WasmGC => (I64Const [0])
 (ConstBool [c]) => (I64Const [b2i(c)])
 
 // Lowering calls
@@ -331,16 +333,16 @@
 
 // Miscellaneous
 (Convert ...) => (LoweredConvert ...)
-(IsNonNil p) => (I64Eqz (I64Eqz p))
+(IsNonNil p) && !config.WasmGC => (I64Eqz (I64Eqz p))
 (IsInBounds ...) => (I64LtU ...)
 (IsSliceInBounds ...) => (I64LeU ...)
 (NilCheck ...) => (LoweredNilCheck ...)
 (GetClosurePtr ...) => (LoweredGetClosurePtr ...)
 (GetCallerPC ...) => (LoweredGetCallerPC ...)
 (GetCallerSP ...) => (LoweredGetCallerSP ...)
-(Addr {sym} base) => (LoweredAddr {sym} [0] base)
-(LocalAddr <t> {sym} base mem) && t.Elem().HasPointers() => (LoweredAddr {sym} (SPanchored base mem))
-(LocalAddr <t> {sym} base _)  && !t.Elem().HasPointers() => (LoweredAddr {sym} base)
+(Addr {sym} base) && !config.WasmGC => (LoweredAddr {sym} [0] base)
+(LocalAddr <t> {sym} base mem) && t.Elem().HasPointers() && !config.WasmGC => (LoweredAddr {sym} (SPanchored base mem))
+(LocalAddr <t> {sym} base _)  && !t.Elem().HasPointers() && !config.WasmGC => (LoweredAddr {sym} base)
 
 // Write barrier.
 (WB ...) => (LoweredWB ...)

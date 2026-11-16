@@ -438,6 +438,17 @@ const (
 	R_DWTXTADDR_U3
 	R_DWTXTADDR_U4
 
+	// R_WASMTYPE resolves to the index of a WebAssembly type: that of
+	// the struct or array type, or the function signature, which the
+	// target symbol's name spells out (GOWASM=gc; see
+	// cmd/internal/obj/wasm/gc.go). With size 0 at offset 0 of a
+	// function, it gives the type of the function itself.
+	R_WASMTYPE
+
+	// R_WASMGLOBAL resolves to the index of the WebAssembly global that
+	// holds the object of the target data symbol (GOWASM=gc).
+	R_WASMGLOBAL
+
 	// R_WEAK marks the relocation as a weak reference.
 	// A weak relocation does not make the symbol it refers to reachable,
 	// and is only honored by the linker if the symbol is in some other way

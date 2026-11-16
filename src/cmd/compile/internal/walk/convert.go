@@ -7,6 +7,7 @@ package walk
 import (
 	"encoding/binary"
 	"go/constant"
+	"internal/buildcfg"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -402,6 +403,10 @@ func walkStringToRunes(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.N
 func dataWordFuncName(gd *base.Invocation, from *types.Type) (fnname string, argType *types.Type, needsaddr bool) {
 	if from.IsInterface() {
 		gd.Fatalf("can only handle non-interfaces")
+	}
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+		// The object made must be of the type converted.
+		return "convT", types.Types[types.TUNSAFEPTR], true
 	}
 	switch {
 	case from.Size() == 2 && uint8(from.Alignment()) == 2:

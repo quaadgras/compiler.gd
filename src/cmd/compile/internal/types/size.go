@@ -791,6 +791,15 @@ func CalcArraySize(gd *base.Invocation, t *Type) {
 	default:
 		t.intRegs = math.MaxUint8
 		t.floatRegs = math.MaxUint8
+		if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+			// GOWASM=gc has no stack to pass arguments on: an array
+			// is passed in registers, element by element, which are
+			// WebAssembly parameters and results.
+			i, f := uint64(n)*uint64(elem.intRegs), uint64(n)*uint64(elem.floatRegs)
+			if i < math.MaxUint8 && f < math.MaxUint8 {
+				t.intRegs, t.floatRegs = uint8(i), uint8(f)
+			}
+		}
 	}
 	t.alg = AMEM // default
 	if t.Noalg() {

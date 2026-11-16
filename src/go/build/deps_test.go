@@ -68,6 +68,7 @@ var depsRules = `
 	  unicode/utf8,
 	  unicode/utf16;
 
+
 	internal/goarch, math/bits < internal/abi;
 	internal/byteorder, internal/cpu, internal/goarch < internal/chacha8rand;
 	internal/goarch, math/bits < internal/strconv;
@@ -883,6 +884,9 @@ var depsRules = `
 
 	FMT
 	< math/big/internal/asmgen;
+
+	# The runtime for GOWASM=gc (see doc/gd/wasm-gc.md).
+	internal/abi, internal/bytealg, internal/goos, internal/profilerecord, internal/strconv < runtime/wasmgc;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".

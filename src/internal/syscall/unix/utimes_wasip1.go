@@ -8,7 +8,6 @@ package unix
 
 import (
 	"syscall"
-	"unsafe"
 )
 
 //go:wasmimport wasi_snapshot_preview1 path_filestat_set_times
@@ -32,7 +31,7 @@ func Utimensat(dirfd int, path string, times *[2]syscall.Timespec, flag int) err
 	errno := path_filestat_set_times(
 		int32(dirfd),
 		syscall.LOOKUP_SYMLINK_FOLLOW,
-		unsafe.StringData(path),
+		linearString(path),
 		size(len(path)),
 		uint64(atime),
 		uint64(mtime),

@@ -9,7 +9,7 @@
 // heap, inline, and mixed representations. The per-arch compare_*.s
 // stubs jump here via ·cmpstringFallback.
 
-//go:build loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x || wasm
+//go:build loong64 || mips64 || mips64le || ppc64 || ppc64le || riscv64 || s390x || (wasm && !wasm.gc)
 
 package bytealg
 

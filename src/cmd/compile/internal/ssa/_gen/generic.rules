@@ -968,7 +968,7 @@
 // indexing operations
 // Note: bounds check has already been done
 (PtrIndex <t> ptr idx) && config.PtrSize == 4 && is32Bit(t.Elem().Size()) => (AddPtr ptr (Mul32 <typ.Int> idx (Const32 <typ.Int> [int32(t.Elem().Size())])))
-(PtrIndex <t> ptr idx) && config.PtrSize == 8 => (AddPtr ptr (Mul64 <typ.Int> idx (Const64 <typ.Int> [t.Elem().Size()])))
+(PtrIndex <t> ptr idx) && config.PtrSize == 8 && !config.WasmGC => (AddPtr ptr (Mul64 <typ.Int> idx (Const64 <typ.Int> [t.Elem().Size()])))
 
 // struct operations
 (StructSelect [i] x:(StructMake ___)) => x.Args[i]

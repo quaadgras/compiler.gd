@@ -1,0 +1,981 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package wasm
+
+import (
+	"bytes"
+	"cmd/internal/obj/wasm"
+	"cmd/internal/objabi"
+	"cmd/link/internal/ld"
+	"cmd/link/internal/loader"
+	"cmd/link/internal/sym"
+	"encoding/binary"
+	"fmt"
+	"internal/buildcfg"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Linking for GOWASM=gc: Go objects in the WebAssembly
+// garbage-collected heap. See doc/gd/wasm-gc.md, and
+// cmd/internal/obj/wasm/gc.go for how WebAssembly types are named and
+// cmd/compile/internal/wasm/gc.go for how Go values are laid out.
+//
+// The linker defines every WebAssembly type that the code names, and
+// turns every data symbol that the code refers to as an object (a
+// global variable, a string constant, a composite literal) into a
+// WebAssembly global that holds the object. The start function of the
+// module creates the objects from the data of the symbols: first all
+// of them, then the pointers between them.
+//
+// Data that is not an object stays in linear memory, at the address the
+// linker gave it: type descriptors, itabs.
+
+func gcMode() bool { return buildcfg.GOWASM.GC }
+
+// gcExports are the functions of the runtime that the host calls, by
+// the name they are exported under.
+var gcExports = map[string]string{
+	"free":      "runtime.linfree",
+	"sched":     "runtime.sched",
+	"gorun":     "runtime.gorun",
+	"deadlock":  "runtime.deadlock",
+	"timerwait": "runtime.timerwait",
+	"cleanup":   "runtime.runcleanup",
+}
+
+const sectionDataCount = 12
+
+type gcLinker struct {
+	ctorOf      map[loader.Sym]int     // the number of the constructor of each type
+	objidFunc   int                    // the index of the import that gives an array an identity
+	ptridFunc   int                    // the index of wasm.ptrid
+	helperFirst int                    // the index of the first function the linker generates
+	funcIndex   func(loader.Sym) int64 // the index of a Go function
+
+	ctxt *ld.Link
+	ldr  *loader.Loader
+
+	types   []string
+	typeIdx map[string]uint32
+
+	globals    []loader.Sym
+	globalIdx  map[loader.Sym]uint32
+	globalType map[uint32]uint32 // the type of the object of each global of a data symbol
+
+	passive bytes.Buffer // the data of the arrays created by array.new_data
+}
+
+func (l *gcLinker) typeIndex(name string) uint32 {
+	if i, ok := l.typeIdx[name]; ok {
+		return i
+	}
+	i := uint32(len(l.types))
+	l.types = append(l.types, name)
+	l.typeIdx[name] = i
+	return i
+}
+
+// globalIndex returns the index of the global that holds the object of
+// the data symbol s.
+func (l *gcLinker) globalIndex(s loader.Sym) uint32 {
+	if i, ok := l.globalIdx[s]; ok {
+		return i
+	}
+	if typ := l.ldr.SymGoType(s); typ != 0 && l.ldr.SymSize(s) > 0 && ld.WasmGCPtrdata(l.ctxt, typ) == 0 {
+		l.ctxt.Errorf(s, "GOWASM=gc: a variable without pointers is referred to as an object")
+	}
+	i := uint32(wasm.GCGlobals + len(l.globals))
+	l.globals = append(l.globals, s)
+	l.globalIdx[s] = i
+	return i
+}
+
+// linear reports whether s is addressed in linear memory (or is a
+// function) rather than being an object. The compiler decides for the
+// symbols that code refers to (see gcLinear there); of the others,
+// which only data refers to, the objects are those that have a Go
+// type and the function values.
+func (l *gcLinker) linear(s loader.Sym) bool {
+	if l.ldr.SymType(s).IsText() {
+		return true
+	}
+	name := l.ldr.SymName(s)
+	if strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "go:itab.") || strings.HasPrefix(name, "go:string.") || name == "runtime.zeroVal" || strings.Contains(name, "..typeAssert.") || strings.Contains(name, "..interfaceSwitch.") || strings.Contains(name, "..dict.") {
+		return true
+	}
+	if typ := l.ldr.SymGoType(s); typ != 0 && l.ldr.SymSize(s) > 0 && ld.WasmGCPtrdata(l.ctxt, typ) == 0 {
+		// A variable without pointers (as the compiler decides too).
+		return true
+	}
+	if _, ok := l.globalIdx[s]; ok {
+		return false
+	}
+	return l.ldr.SymGoType(s) == 0 && !strings.HasSuffix(name, "·f")
+}
+
+func gcStorage(k byte) byte {
+	switch k {
+	case 'b':
+		return 0x78
+	case 'h':
+		return 0x77
+	case 'w', 'i':
+		return wasm.GCTypeI32
+	case 'l':
+		return wasm.GCTypeI64
+	case 'f':
+		return wasm.GCTypeF32
+	case 'd':
+		return wasm.GCTypeF64
+	case 'r':
+		return wasm.GCTypeEqRef
+	case 'o':
+		return 0x6E // anyref
+	}
+	panic("bad wasm type letter " + string(k))
+}
+
+// A gcField is a field of the struct of a Go value, as its name
+// spells it (see cmd/internal/obj/wasm/gc.go).
+type gcField struct {
+	letter byte  // of the scalar, or A for a nested array
+	off    int64 // in the Go value
+	// Of a nested array:
+	esize int64 // the size of an element
+	n     int64 // the number of elements
+	elem  byte  // the letter of the array
+}
+
+// gcStructSize returns the size of the Go value of the struct name
+// spells.
+func gcStructSize(name string) int64 {
+	_, size, _ := strings.Cut(name[len(wasm.GCStructPrefix):], "/")
+	n, _ := strconv.ParseInt(size, 10, 64)
+	return n
+}
+
+func gcParseStruct(name string) []gcField {
+	var fs []gcField
+	fields, _, _ := strings.Cut(name[len(wasm.GCStructPrefix):], "/")
+	for _, tok := range strings.Split(fields, ",") {
+		if tok == "" {
+			continue
+		}
+		f := gcField{letter: tok[0]}
+		if f.letter == 'A' {
+			parts := strings.Split(tok[1:], ":")
+			f.off, _ = strconv.ParseInt(parts[0], 10, 64)
+			f.esize, _ = strconv.ParseInt(parts[1], 10, 64)
+			f.n, _ = strconv.ParseInt(parts[2][:len(parts[2])-1], 10, 64)
+			f.elem = parts[2][len(parts[2])-1]
+		} else {
+			f.off, _ = strconv.ParseInt(tok[1:], 10, 64)
+		}
+		fs = append(fs, f)
+	}
+	return fs
+}
+
+// writeType writes the definition of the type that name spells out.
+func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
+	switch {
+	case name == wasm.GCHeader:
+		// Open to subtypes: the structs of Go values.
+		w.Write([]byte{0x50, 0x00, 0x5F, 0x02, wasm.GCTypeI32, 0x00, wasm.GCTypeI32, 0x01})
+	case name == wasm.GCBox:
+		w.Write([]byte{0x5F, 0x02, wasm.GCTypeEqRef, 0x00, wasm.GCTypeI32, 0x00})
+	case name == wasm.GCGeneric:
+		w.Write([]byte{0x4F, 0x01}) // final, with one supertype
+		writeUleb128(w, uint64(l.typeIndex(wasm.GCHeader)))
+		w.Write([]byte{0x5F, 0x05, wasm.GCTypeI32, 0x00, wasm.GCTypeI32, 0x01, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x00, wasm.GCTypeEqRef, 0x00})
+	case name == wasm.GCLinear:
+		w.Write([]byte{0x5F, 0x02, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x01})
+	case strings.HasPrefix(name, wasm.GCStructPrefix):
+		fields := gcParseStruct(name)
+		w.Write([]byte{0x4F, 0x01}) // final, with one supertype
+		writeUleb128(w, uint64(l.typeIndex(wasm.GCHeader)))
+		w.WriteByte(0x5F)
+		writeUleb128(w, uint64(wasm.GCHeaderFields+len(fields)))
+		w.Write([]byte{wasm.GCTypeI32, 0x00, wasm.GCTypeI32, 0x01})
+		for _, f := range fields {
+			if f.letter == 'A' {
+				w.WriteByte(wasm.GCTypeEqRef)
+			} else {
+				w.WriteByte(gcStorage(f.letter))
+			}
+			w.WriteByte(0x01) // mutable
+		}
+	case strings.HasPrefix(name, wasm.GCArrayPrefix):
+		w.WriteByte(0x5E)
+		w.WriteByte(gcStorage(name[len(wasm.GCArrayPrefix)]))
+		w.WriteByte(0x01) // mutable
+	case strings.HasPrefix(name, wasm.GCFuncPrefix):
+		params, results, _ := strings.Cut(name[len(wasm.GCFuncPrefix):], ".")
+		w.WriteByte(0x60)
+		writeUleb128(w, uint64(len(params)))
+		for i := range params {
+			w.WriteByte(gcStorage(params[i]))
+		}
+		writeUleb128(w, uint64(len(results)))
+		for i := range results {
+			w.WriteByte(gcStorage(results[i]))
+		}
+	default:
+		panic("bad wasm type name " + name)
+	}
+}
+
+func gcSigName(params, results []byte) string {
+	letter := func(t byte) byte {
+		switch t {
+		case I32:
+			return 'i'
+		case I64:
+			return 'l'
+		case F32:
+			return 'f'
+		case F64:
+			return 'd'
+		}
+		panic("bad wasm value type")
+	}
+	var b strings.Builder
+	b.WriteString(wasm.GCFuncPrefix)
+	for _, t := range params {
+		b.WriteByte(letter(t))
+	}
+	b.WriteByte('.')
+	for _, t := range results {
+		b.WriteByte(letter(t))
+	}
+	return b.String()
+}
+
+// Object types.
+
+func (l *gcLinker) structName(typ loader.Sym) string {
+	var b strings.Builder
+	b.WriteString(wasm.GCStructPrefix)
+	for i, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		if lf.Kind == 'a' {
+			n, e, _ := ld.WasmGCArray(l.ctxt, lf.Type)
+			k, _ := l.elem(e)
+			fmt.Fprintf(&b, "A%d:%d:%d%c", lf.Off, ld.WasmGCSize(l.ctxt, e), n, k)
+		} else {
+			fmt.Fprintf(&b, "%c%d", lf.Kind, lf.Off)
+		}
+	}
+	fmt.Fprintf(&b, "/%d", ld.WasmGCSize(l.ctxt, typ))
+	return b.String()
+}
+
+// elem reports how the elements of an array of the type elem are
+// stored (see gcElem in the compiler).
+func (l *gcLinker) elem(elem loader.Sym) (kind byte, obj bool) {
+	ls := ld.WasmGCLeaves(l.ctxt, elem)
+	if len(ls) == 1 && ls[0].Kind != 'a' && ls[0].Off == 0 && gcKindSize(ls[0].Kind) == ld.WasmGCSize(l.ctxt, elem) {
+		return ls[0].Kind, false
+	}
+	return 'o', true
+}
+
+func gcKindSize(k byte) int64 {
+	switch k {
+	case 'b':
+		return 1
+	case 'h':
+		return 2
+	case 'w', 'f':
+		return 4
+	}
+	return 8
+}
+
+// objType returns the index of the WebAssembly type of objects of the
+// Go type typ.
+func (l *gcLinker) objType(typ loader.Sym) uint32 {
+	if _, e, ok := ld.WasmGCArray(l.ctxt, typ); ok {
+		k, _ := l.elem(e)
+		return l.typeIndex(wasm.GCArrayPrefix + string(k))
+	}
+	return l.typeIndex(l.structName(typ))
+}
+
+// Instructions.
+
+func gcOp(w *bytes.Buffer, op byte, idx ...uint32) {
+	w.WriteByte(0xFB)
+	w.WriteByte(op)
+	for _, i := range idx {
+		writeUleb128(w, uint64(i))
+	}
+}
+
+// gcCast writes a cast to a non-null reference to the type, whose index
+// is written as a heap type: signed.
+func gcCast(w *bytes.Buffer, typ uint32) {
+	w.Write([]byte{0xFB, 0x16})
+	writeSleb128(w, int64(typ))
+}
+func gcGlobalGet(w *bytes.Buffer, i uint32)       { w.WriteByte(0x23); writeUleb128(w, uint64(i)) }
+func gcGlobalSet(w *bytes.Buffer, i uint32)       { w.WriteByte(0x24); writeUleb128(w, uint64(i)) }
+func gcRefNull(w *bytes.Buffer)                   { w.Write([]byte{0xD0, wasm.GCHeapEq}) }
+func gcStructSet(w *bytes.Buffer, t, f uint32)    { gcOp(w, 0x05, t, f) }
+func gcStructGet(w *bytes.Buffer, t, f uint32)    { gcOp(w, 0x02, t, f) }
+func gcArraySet(w *bytes.Buffer, t uint32)        { gcOp(w, 0x0E, t) }
+func gcArrayGet(w *bytes.Buffer, t uint32)        { gcOp(w, 0x0B, t) }
+func gcArrayNewDefault(w *bytes.Buffer, t uint32) { gcOp(w, 0x07, t) }
+
+// A gcData is the data of a symbol and its relocations.
+type gcData struct {
+	p      []byte
+	relocs map[int64]loader.Reloc
+	offs   []int64 // the offsets of the relocations, sorted
+}
+
+func (l *gcLinker) data(s loader.Sym) *gcData {
+	d := &gcData{p: l.ldr.Data(s), relocs: make(map[int64]loader.Reloc)}
+	if size := l.ldr.SymSize(s); int64(len(d.p)) < size {
+		// Data the linker generated, such as the module data, which
+		// it has written out to linear memory (see asmbGC) since.
+		v, _ := dataSects.Load(l.ctxt)
+		sects, _ := v.([]wasmDataSect)
+		addr := uint64(l.ldr.SymValue(s))
+		for _, ds := range sects {
+			if ds.sect.Vaddr <= addr && addr+uint64(size) <= ds.sect.Vaddr+uint64(len(ds.data)) {
+				d.p = ds.data[addr-ds.sect.Vaddr:][:size]
+			}
+		}
+	}
+	relocs := l.ldr.Relocs(s)
+	for i := 0; i < relocs.Count(); i++ {
+		r := relocs.At(i)
+		if r.Siz() == 0 || r.Sym() == 0 {
+			continue
+		}
+		d.relocs[int64(r.Off())] = r
+		d.offs = append(d.offs, int64(r.Off()))
+	}
+	sort.Slice(d.offs, func(i, j int) bool { return d.offs[i] < d.offs[j] })
+	return d
+}
+
+// hasReloc reports whether d has a relocation in [off, off+size).
+func (d *gcData) hasReloc(off, size int64) bool {
+	i := sort.Search(len(d.offs), func(i int) bool { return d.offs[i] >= off })
+	return i < len(d.offs) && d.offs[i] < off+size
+}
+
+// bytes returns the size bytes of d at off: zero past the end.
+func (d *gcData) bytes(off, size int64) []byte {
+	b := make([]byte, size)
+	if off < int64(len(d.p)) {
+		copy(b, d.p[off:])
+	}
+	return b
+}
+
+func (d *gcData) uint(off, size int64) uint64 {
+	var b [8]byte
+	copy(b[:], d.bytes(off, size))
+	return binary.LittleEndian.Uint64(b[:])
+}
+
+// newObject writes the instructions that push a new object of the Go
+// type typ with the data of d at off. References are left null: see
+// fill.
+func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int64) {
+	if n, e, ok := ld.WasmGCArray(l.ctxt, typ); ok {
+		k, isObj := l.elem(e)
+		t := l.typeIndex(wasm.GCArrayPrefix + string(k))
+		size := ld.WasmGCSize(l.ctxt, e)
+		switch {
+		case isObj:
+			if n > 10000 {
+				// Too many to make one by one here: the runtime
+				// makes them, if they are all zero.
+				newArr := l.ldr.Lookup("runtime.newobjarrayT", 0)
+				zero := !d.hasReloc(off, n*size)
+				for _, b := range d.bytes(off, n*size) {
+					zero = zero && b == 0
+				}
+				if !zero || newArr == 0 || !l.ldr.AttrReachable(newArr) || l.funcIndex == nil {
+					l.ctxt.Errorf(0, "GOWASM=gc: unsupported: a static array of %d structs", n)
+					n = 0
+				} else {
+					writeI32Const(w, int32(l.ldr.SymValue(e)))
+					gcOp(w, 0x1C) // ref.i31: the address of the element type
+					writeI64Const(w, n)
+					w.WriteByte(0x10) // call
+					writeUleb128(w, uint64(l.funcIndex(newArr)))
+					gcCast(w, t)
+					return
+				}
+			}
+			for i := int64(0); i < n; i++ {
+				l.newObject(w, e, d, off+i*size)
+			}
+			gcOp(w, 0x08, t, uint32(n)) // array.new_fixed
+		case k == 'r' || off >= int64(len(d.p)):
+			writeI32Const(w, int32(n))
+			gcArrayNewDefault(w, t)
+		default:
+			// The data of the array is its elements.
+			writeI32Const(w, int32(l.passive.Len()))
+			writeI32Const(w, int32(n))
+			gcOp(w, 0x09, t, 0) // array.new_data, of data segment 0
+			l.passive.Write(d.bytes(off, n*size))
+		}
+		return
+	}
+	t := l.typeIndex(l.structName(typ))
+	writeI32Const(w, int32(t)) // the layout
+	writeI32Const(w, 0)
+	for _, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
+		o := off + lf.Off
+		switch lf.Kind {
+		case 'a':
+			l.newObject(w, lf.Type, d, o)
+		case 'r':
+			gcRefNull(w)
+		case 'f':
+			w.WriteByte(0x43)
+			w.Write(d.bytes(o, 4))
+		case 'd':
+			w.WriteByte(0x44)
+			w.Write(d.bytes(o, 8))
+		case 'l':
+			v := int64(d.uint(o, 8))
+			if r, ok := d.relocs[o]; ok {
+				// An address in linear memory, or a function.
+				v = l.ldr.SymValue(r.Sym()) + r.Add()
+			}
+			writeI64Const(w, v)
+		default:
+			writeI32Const(w, int32(d.uint(o, gcKindSize(lf.Kind))))
+		}
+	}
+	gcOp(w, 0x00, t) // struct.new
+}
+
+// ref writes the instructions that push the pointer that the
+// relocation r stands for.
+func (l *gcLinker) ref(w *bytes.Buffer, r loader.Reloc) {
+	rs := r.Sym()
+	if l.linear(rs) {
+		writeI32Const(w, int32(l.ldr.SymValue(rs)+r.Add()))
+		gcOp(w, 0x1C) // ref.i31
+		return
+	}
+	if r.Add() == 0 {
+		gcGlobalGet(w, l.globalIndex(rs))
+		return
+	}
+	// A pointer into the object.
+	gcGlobalGet(w, l.globalIndex(rs))
+	writeI32Const(w, int32(r.Add()))
+	gcOp(w, 0x00, l.typeIndex(wasm.GCBox))
+}
+
+// fill writes the instructions that set the references of the object
+// of the Go type typ that the instructions path push: those for which d
+// has a relocation, at off.
+func (l *gcLinker) fill(w *bytes.Buffer, path []byte, typ loader.Sym, d *gcData, off int64) {
+	if !d.hasReloc(off, ld.WasmGCSize(l.ctxt, typ)) {
+		return
+	}
+	if n, e, ok := ld.WasmGCArray(l.ctxt, typ); ok {
+		k, isObj := l.elem(e)
+		t := l.typeIndex(wasm.GCArrayPrefix + string(k))
+		size := ld.WasmGCSize(l.ctxt, e)
+		for i := int64(0); i < n; i++ {
+			o := off + i*size
+			if !d.hasReloc(o, size) {
+				continue
+			}
+			var p bytes.Buffer
+			p.Write(path)
+			writeI32Const(&p, int32(i))
+			if isObj {
+				gcArrayGet(&p, t)
+				gcCast(&p, l.objType(e))
+				l.fill(w, p.Bytes(), e, d, o)
+				continue
+			}
+			if r, ok := d.relocs[o]; ok && k == 'r' {
+				w.Write(p.Bytes())
+				l.ref(w, r)
+				gcArraySet(w, t)
+			}
+		}
+		return
+	}
+	t := l.typeIndex(l.structName(typ))
+	for i, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
+		o := off + lf.Off
+		field := uint32(wasm.GCHeaderFields + i)
+		switch lf.Kind {
+		case 'a':
+			var p bytes.Buffer
+			p.Write(path)
+			gcStructGet(&p, t, field)
+			gcCast(&p, l.objType(lf.Type))
+			l.fill(w, p.Bytes(), lf.Type, d, o)
+		case 'r':
+			if r, ok := d.relocs[o]; ok {
+				w.Write(path)
+				l.ref(w, r)
+				gcStructSet(w, t, field)
+			}
+		}
+	}
+}
+
+// initGlobals returns the body of the function that creates the
+// objects of the data symbols.
+func (l *gcLinker) initGlobals() []byte {
+	var create, fill bytes.Buffer
+	l.globalType = make(map[uint32]uint32)
+	// The list grows as the pointers of one object lead to another.
+	for i := 0; i < len(l.globals); i++ {
+		s := l.globals[i]
+		gi := l.globalIdx[s]
+		d := l.data(s)
+		typ := l.ldr.SymGoType(s)
+		if typ == 0 {
+			// Words: a function value, which is the address of the
+			// function and what it closes over.
+			n := (l.ldr.SymSize(s) + 7) / 8
+			name := wasm.GCStructPrefix
+			for j := int64(0); j < n; j++ {
+				if j > 0 {
+					name += ","
+				}
+				name += fmt.Sprintf("l%d", j*8)
+			}
+			name += fmt.Sprintf("/%d", n*8)
+			t := l.typeIndex(name)
+			writeI32Const(&create, int32(t))
+			writeI32Const(&create, 0)
+			for j := int64(0); j < n; j++ {
+				v := int64(d.uint(j*8, 8))
+				if r, ok := d.relocs[j*8]; ok {
+					if !l.linear(r.Sym()) {
+						l.ctxt.Errorf(s, "GOWASM=gc: data without a type points to an object")
+					}
+					v = l.ldr.SymValue(r.Sym()) + r.Add()
+				}
+				writeI64Const(&create, v)
+			}
+			gcOp(&create, 0x00, t)
+			gcGlobalSet(&create, gi)
+			l.globalType[gi] = t
+			continue
+		}
+		l.newObject(&create, typ, d, 0)
+		gcGlobalSet(&create, gi)
+		l.globalType[gi] = l.objType(typ)
+
+		var path bytes.Buffer
+		gcGlobalGet(&path, gi)
+		gcCast(&path, l.objType(typ))
+		l.fill(&fill, path.Bytes(), typ, d, 0)
+	}
+	var body bytes.Buffer
+	writeUleb128(&body, 0) // no locals
+	body.Write(create.Bytes())
+	body.Write(fill.Bytes())
+	body.WriteByte(0x0b) // end
+	return body.Bytes()
+}
+
+// gcTypeGCDataOff is the offset of the GCData word in an abi.Type,
+// where the number of the type's constructor goes.
+const gcTypeGCDataOff = 32
+
+// constructors returns the code that pushes a new object of each type
+// whose descriptor is in the program, if the program makes objects of
+// types it knows by their descriptors (with wasm.new): the number of a
+// type's code, from 1, is in l.ctorOf.
+func (l *gcLinker) constructors() [][]byte {
+	ldr := l.ldr
+	used := false
+	for v := 0; v < 2; v++ {
+		if s := ldr.Lookup(wasm.GCNew, v); s != 0 {
+			used = true
+		}
+	}
+	l.ctorOf = make(map[loader.Sym]int)
+	if !used {
+		return nil
+	}
+	var ctors [][]byte
+	index := make(map[string]int)
+	empty := &gcData{relocs: make(map[int64]loader.Reloc)}
+	for s := loader.Sym(1); s < loader.Sym(ldr.NSym()); s++ {
+		name := ldr.SymName(s)
+		if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || len(ldr.Data(s)) < 48 {
+			continue
+		}
+		if !l.constructible(s) {
+			continue
+		}
+		var w bytes.Buffer
+		l.newObject(&w, s, empty, 0)
+		key := w.String()
+		n, ok := index[key]
+		if !ok {
+			ctors = append(ctors, w.Bytes())
+			n = len(ctors)
+			index[key] = n
+		}
+		l.ctorOf[s] = n
+	}
+	return ctors
+}
+
+// constructible reports whether newObject can make an object of typ.
+func (l *gcLinker) constructible(typ loader.Sym) bool {
+	if n, e, ok := ld.WasmGCArray(l.ctxt, typ); ok {
+		if _, isObj := l.elem(e); isObj {
+			return n <= 10000 && l.constructible(e)
+		}
+		return true
+	}
+	for _, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
+		if lf.Kind == 'a' && !l.constructible(lf.Type) {
+			return false
+		}
+	}
+	return true
+}
+
+// asmbGC collects the data that stays in linear memory.
+func asmbGC(ctxt *ld.Link, ldr *loader.Loader) {
+	var sects []wasmDataSect
+	for _, name := range []string{"runtime.rodata", "runtime.types", "go:funcdesc", "runtime.firstmoduledata", "runtime.pclntab", "runtime.noptrdata", "runtime.data"} {
+		s := ldr.Lookup(name, 0)
+		if s == 0 {
+			continue
+		}
+		sect := ldr.SymSect(s)
+		if sect == nil || sect.Length == 0 {
+			continue
+		}
+		dup := false
+		for _, o := range sects {
+			dup = dup || o.sect == sect
+		}
+		if dup {
+			continue
+		}
+		sects = append(sects, wasmDataSect{sect, ld.DatblkBytes(ctxt, int64(sect.Vaddr), int64(sect.Length))})
+	}
+	dataSects.Store(ctxt, sects)
+}
+
+func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
+	l := &gcLinker{ctxt: ctxt, ldr: ldr, typeIdx: make(map[string]uint32), globalIdx: make(map[loader.Sym]uint32)}
+	l.typeIndex(wasm.GCHeader) // before its subtypes
+
+	// The functions imported from the host.
+	var hostImports []*wasmFunc
+	hostImportMap := make(map[loader.Sym]int64)
+	for _, fn := range ctxt.Textp {
+		relocs := ldr.Relocs(fn)
+		for ri := 0; ri < relocs.Count(); ri++ {
+			if relocs.At(ri).Type() != objabi.R_WASMIMPORT {
+				continue
+			}
+			wsym := ldr.WasmImportSym(fn)
+			if wsym == 0 {
+				panic(fmt.Sprintf("missing wasm symbol for %s", ldr.SymName(fn)))
+			}
+			wi := readWasmImport(ldr, wsym)
+			// The type of the import is that of its wrapper, with
+			// the integers as narrow as the import wants them.
+			sig := []byte(gcSigName(fieldsToTypes(wi.Params), fieldsToTypes(wi.Results)))
+			for rj := 0; rj < relocs.Count(); rj++ {
+				if r := relocs.At(rj); r.Type() == objabi.R_WASMTYPE && r.Siz() == 0 {
+					wrapper := ldr.SymName(r.Sym())
+					for i := len(wasm.GCFuncPrefix); i < len(sig) && i < len(wrapper); i++ {
+						if wrapper[i] == 'r' && (wasm.GCImportRefs(wi.Module) || i >= len(wasm.GCFuncPrefix)+len(wi.Params)) {
+							sig[i] = 'r'
+						}
+					}
+					break
+				}
+			}
+			hostImportMap[fn] = int64(len(hostImports))
+			hostImports = append(hostImports, &wasmFunc{
+				Module: wi.Module,
+				Name:   wi.Name,
+				Type:   l.typeIndex(string(sig)),
+			})
+		}
+	}
+	// The identity of an object that has no header to keep it in:
+	// an array.
+	objid := len(hostImports)
+	hostImports = append(hostImports, &wasmFunc{Module: "gd", Name: "objid", Type: l.typeIndex(wasm.GCFuncPrefix + "r.i")})
+	l.objidFunc = objid
+	funcIndex := func(s loader.Sym) int64 {
+		return int64(len(hostImports)) + ldr.SymValue(s)>>16 - funcValueOffset
+	}
+	l.funcIndex = funcIndex
+
+	// The functions.
+	var buildid []byte
+	fns := make([]*wasmFunc, len(ctxt.Textp), len(ctxt.Textp)+16)
+	for i, fn := range ctxt.Textp {
+		name := nameRegexp.ReplaceAllString(ldr.SymName(fn), "_")
+		if ldr.SymName(fn) == "go:buildid" {
+			buildid = ldr.Data(fn)
+			fns[i] = &wasmFunc{Name: name, Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: []byte{0x00, 0x0b}}
+			continue
+		}
+		wfn := new(bytes.Buffer)
+		typ := int64(-1)
+		relocs := ldr.Relocs(fn)
+		P := ldr.Data(fn)
+		off := int32(0)
+		for ri := 0; ri < relocs.Count(); ri++ {
+			r := relocs.At(ri)
+			rs := r.Sym()
+			if r.Siz() == 0 {
+				if r.Type() == objabi.R_WASMTYPE && typ < 0 {
+					typ = int64(l.typeIndex(ldr.SymName(rs)))
+				}
+				continue
+			}
+			wfn.Write(P[off:r.Off()])
+			off = r.Off()
+			switch r.Type() {
+			case objabi.R_ADDR:
+				writeSleb128(wfn, ldr.SymValue(rs)+r.Add())
+			case objabi.R_CALL:
+				if h, ok := l.helperIndex(ldr.SymName(rs)); ok {
+					writeSleb128(wfn, int64(len(hostImports)+len(ctxt.Textp)+h))
+					break
+				}
+				if !ldr.SymType(rs).IsText() {
+					ldr.Errorf(fn, "call of %s, which is not defined", ldr.SymName(rs))
+				}
+				writeSleb128(wfn, funcIndex(rs))
+			case objabi.R_WASMIMPORT:
+				writeSleb128(wfn, hostImportMap[rs])
+			case objabi.R_WASMTYPE:
+				if r.Siz() == 2 { // a heap type or a constant
+					writeSleb128(wfn, int64(l.typeIndex(ldr.SymName(rs))))
+					break
+				}
+				writeUleb128(wfn, uint64(l.typeIndex(ldr.SymName(rs))))
+			case objabi.R_WASMGLOBAL:
+				writeUleb128(wfn, uint64(l.globalIndex(rs)))
+			default:
+				ldr.Errorf(fn, "bad reloc type %d (%s)", r.Type(), sym.RelocName(ctxt.Arch, r.Type()))
+			}
+		}
+		wfn.Write(P[off:])
+		if typ < 0 {
+			ldr.Errorf(fn, "GOWASM=gc: function without a WebAssembly type")
+			typ = 0
+		}
+		fns[i] = &wasmFunc{Name: name, Type: uint32(typ), Code: wfn.Bytes()}
+	}
+
+	// The start function, which creates the objects, and the
+	// functions that resolve pointers. The start function comes
+	// first: it may add layouts.
+	init := &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
+	ctors := l.constructors()
+	fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
+	start := len(hostImports) + len(fns)
+	fns = append(fns, init)
+
+	entry := loader.Sym(0)
+	for v := 0; v < 2 && entry == 0; v++ {
+		entry = ldr.Lookup("runtime.rt0gc", v)
+	}
+	if entry == 0 {
+		ctxt.Errorf(0, "GOWASM=gc: runtime.rt0gc not defined")
+	}
+	// The function the host calls: initialize the packages, then run
+	// the program.
+	// TODO: on a goroutine, by the runtime.
+	var body bytes.Buffer
+	writeUleb128(&body, 0) // no locals
+	for _, fn := range append(ld.WasmGCInitFuncs(ctxt), entry) {
+		body.WriteByte(0x10) // call
+		writeUleb128(&body, uint64(funcIndex(fn)))
+	}
+	body.WriteByte(0x0b)
+	run := len(hostImports) + len(fns)
+	fns = append(fns, &wasmFunc{Name: "go.run", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: body.Bytes()})
+
+	out := ctxt.Out
+	out.Write([]byte{0x00, 0x61, 0x73, 0x6d}) // magic
+	out.Write([]byte{0x01, 0x00, 0x00, 0x00}) // version
+	if len(buildid) != 0 {
+		writeBuildID(ctxt, buildid)
+	}
+	section := func(id uint8, body func(w *bytes.Buffer)) {
+		var b bytes.Buffer
+		body(&b)
+		sizeOffset := writeSecHeader(ctxt, id)
+		out.Write(b.Bytes())
+		writeSecSize(ctxt, sizeOffset)
+	}
+
+	section(sectionType, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(len(l.types)))
+		for _, name := range l.types {
+			l.writeType(w, name)
+		}
+	})
+	section(sectionImport, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(len(hostImports)))
+		for _, fn := range hostImports {
+			writeName(w, fn.Module)
+			writeName(w, fn.Name)
+			w.WriteByte(0x00) // func import
+			writeUleb128(w, uint64(fn.Type))
+		}
+	})
+	writeFunctionSec(ctxt, fns)
+	writeTableSec(ctxt, fns)
+
+	// Linear memory, and its data.
+	v, _ := dataSects.LoadAndDelete(ctxt)
+	sects, _ := v.([]wasmDataSect)
+	// The number of each type's constructor, in its descriptor.
+	for typ, n := range l.ctorOf {
+		addr := uint64(ldr.SymValue(typ)) + gcTypeGCDataOff
+		for _, ds := range sects {
+			if ds.sect.Vaddr <= addr && addr+8 <= ds.sect.Vaddr+uint64(len(ds.data)) {
+				binary.LittleEndian.PutUint64(ds.data[addr-ds.sect.Vaddr:], uint64(n))
+			}
+		}
+	}
+	end := uint64(0)
+	for _, ds := range sects {
+		end = max(end, ds.sect.Vaddr+ds.sect.Length)
+	}
+	// The variables without pointers that start as zeros are in linear
+	// memory too, with nothing to initialize.
+	for _, name := range []string{"runtime.noptrbss", "runtime.bss"} {
+		if s := ldr.Lookup(name, 0); s != 0 {
+			if sect := ldr.SymSect(s); sect != nil {
+				end = max(end, sect.Vaddr+sect.Length)
+			}
+		}
+	}
+	const wasmPageSize = 64 << 10
+	// The stack follows the data.
+	stackTop := (end+wasmPageSize-1)&^(wasmPageSize-1) + wasm.GCStackSize
+	section(sectionMemory, func(w *bytes.Buffer) {
+		writeUleb128(w, 1) // number of memories
+		w.WriteByte(0x00)  // no maximum memory size
+		writeUleb128(w, stackTop/wasmPageSize)
+	})
+	section(sectionTag, func(w *bytes.Buffer) {
+		writeUleb128(w, 1) // number of tags: wasm.GCTagRecover
+		w.WriteByte(0x00)  // an exception
+		writeUleb128(w, uint64(l.typeIndex(wasm.GCFuncPrefix+".")))
+	})
+	section(sectionGlobal, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(wasm.GCGlobals+len(l.globals)))
+		for i := 0; i < wasm.GCGlobals+len(l.globals); i++ {
+			if i == wasm.GCGlobalSP || i == wasm.GCGlobalID || i == wasm.GCGlobalStackLo {
+				w.Write([]byte{wasm.GCTypeI32, 0x01})
+				switch i {
+				case wasm.GCGlobalSP:
+					writeI32Const(w, int32(stackTop))
+				case wasm.GCGlobalStackLo:
+					writeI32Const(w, int32(stackTop-wasm.GCStackSize+wasm.GCStackRedZone))
+				default:
+					writeI32Const(w, 0)
+				}
+				w.WriteByte(0x0b)
+				continue
+			}
+			if t, ok := l.globalType[uint32(i)]; ok {
+				// The object's own type: no cast where it is used.
+				w.WriteByte(0x63) // ref null
+				writeSleb128(w, int64(t))
+				w.WriteByte(0x01)           // mutable
+				w.Write([]byte{0xD0, 0x71}) // ref.null none
+				w.WriteByte(0x0b)
+				continue
+			}
+			w.WriteByte(wasm.GCTypeEqRef)
+			w.WriteByte(0x01) // mutable
+			gcRefNull(w)
+			w.WriteByte(0x0b) // end
+		}
+	})
+	// What the host calls: to free a block of linear memory whose
+	// owner was collected, and to run goroutines (see
+	// runtime/wasmgc/proc.go).
+	type export struct {
+		name string
+		fn   loader.Sym
+	}
+	var exports []export
+	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}} {
+		for v := 0; v < 2 && e.fn == 0; v++ {
+			e.fn = ldr.Lookup(gcExports[e.name], v)
+		}
+		if e.fn != 0 && ldr.AttrReachable(e.fn) {
+			exports = append(exports, e)
+		}
+	}
+	section(sectionExport, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(2+len(exports)))
+		for _, e := range exports {
+			writeName(w, e.name)
+			w.WriteByte(0x00) // func export
+			writeUleb128(w, uint64(funcIndex(e.fn)))
+		}
+		writeName(w, "run")
+		w.WriteByte(0x00) // func export
+		writeUleb128(w, uint64(run))
+		writeName(w, "mem")
+		w.WriteByte(0x02) // mem export
+		writeUleb128(w, 0)
+	})
+	section(sectionStart, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(start))
+	})
+	// (All functions: MakeFunc calls the stubs the linker generates.)
+	writeElementSec(ctxt, uint64(len(hostImports)), uint64(len(fns)))
+	section(sectionDataCount, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(1+len(sects)))
+	})
+	writeCodeSec(ctxt, fns)
+	section(sectionData, func(w *bytes.Buffer) {
+		writeUleb128(w, uint64(1+len(sects)))
+		// Segment 0 is passive: the data of the arrays.
+		w.WriteByte(0x01)
+		writeUleb128(w, uint64(l.passive.Len()))
+		w.Write(l.passive.Bytes())
+		for _, ds := range sects {
+			writeUleb128(w, 0) // active, memory 0
+			writeI32Const(w, int32(ds.sect.Vaddr))
+			w.WriteByte(0x0b) // end
+			writeUleb128(w, uint64(len(ds.data)))
+			w.Write(ds.data)
+		}
+	})
+	writeProducerSec(ctxt)
+	if !ctxt.FlagS {
+		writeNameSec(ctxt, len(hostImports), fns)
+	}
+}

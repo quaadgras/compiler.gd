@@ -13,6 +13,7 @@ import (
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
+	"internal/buildcfg"
 )
 
 // walkCompLit walks a composite literal node:
@@ -35,7 +36,11 @@ func walkCompLit(gd *base.Invocation, n ir.Node, init *ir.Nodes) ir.Node {
 func readonlystaticname(gd *base.Invocation, t *types.Type) *ir.Name {
 	n := staticinit.StaticName(gd, t)
 	n.MarkReadonly()
-	n.Linksym().Set(obj.AttrContentAddressable, true)
+	if !buildcfg.GOWASM.GC {
+		// (With GOWASM=gc the variable is an object, of its type:
+		// it is not to be merged with other data of the same bytes.)
+		n.Linksym().Set(obj.AttrContentAddressable, true)
+	}
 	n.Linksym().Set(obj.AttrLocal, true)
 	return n
 }

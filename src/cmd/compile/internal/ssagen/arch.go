@@ -47,6 +47,9 @@ type ArchInfo struct {
 	// for all values in the block before SSAGenBlock.
 	SSAGenBlock func(s *State, b, next *ssa.Block)
 
+	// GenWasmGC generates the whole of a function for GOWASM=gc.
+	GenWasmGC func(s *State, f *ssa.Func)
+
 	// LoadRegResult emits instructions that loads register-assigned result
 	// at n+off (n is PPARAMOUT) to register reg. The result is already in
 	// memory. Used in open-coded defer return path.

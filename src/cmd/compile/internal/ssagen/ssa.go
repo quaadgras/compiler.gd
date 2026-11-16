@@ -455,7 +455,9 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 
 	s.hasOpenDefers = gd.Flag.N == 0 && s.hasdefer && !s.curfn.OpenCodedDeferDisallowed()
 	switch {
-	case gd.Debug.NoOpenDefer != 0:
+	case gd.Debug.NoOpenDefer != 0, buildcfg.GOWASM.GC:
+		// (With GOWASM=gc there is no stack for the runtime to
+		// find the deferred calls of a frame in.)
 		s.hasOpenDefers = false
 	case s.hasOpenDefers && (gd.Ctxt.Flag_shared || gd.Ctxt.Flag_dynlink) && gd.Ctxt.Arch.Name == "386":
 		// Don't support open-coded defers for 386 ONLY when using shared
@@ -785,7 +787,8 @@ func (s *state) newHeapaddr(n *ir.Name) {
 		// Fall through: tagged but no outBuf found. Heap-alloc.
 	}
 	size := allocSize(n.Type())
-	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 {
+	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC {
+		// (With GOWASM=gc every variable is an object of its own.)
 		s.setHeapaddr(n.Pos(), n, s.newObject(n.Type()))
 		return
 	}
@@ -980,6 +983,10 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	rtype := s.reflectType(typ)
+	if s.f.Config.WasmGC {
+		// The backend allocates an object of the WebAssembly type.
+		return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
+	}
 	if specialMallocSym := s.specializedMallocSym(typ.Size(), typ.HasPointers()); specialMallocSym != nil {
 		return s.rtcall(specialMallocSym, true, []*types.Type{types.NewPtr(typ)},
 			s.constInt(types.Types[types.TUINTPTR], typ.Size()),
@@ -2715,7 +2722,7 @@ func (s *state) stmt(n ir.Node) {
 			s.openDeferRecord(n.Call.(*ir.CallExpr))
 		} else {
 			d := callDefer
-			if n.Esc() == ir.EscNever && n.DeferAt == nil {
+			if n.Esc() == ir.EscNever && n.DeferAt == nil && !buildcfg.GOWASM.GC {
 				d = callDeferStack
 			}
 			s.call(n.Call.(*ir.CallExpr), d, false, n.DeferAt)
@@ -6033,11 +6040,11 @@ func (s *state) callAddr(n *ir.CallExpr, k callKind) *ssa.Value {
 // Returns the address of the return value (or nil if none).
 func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExtra ir.Expr) *ssa.Value {
 	s.prevCall = nil
-	var calleeLSym *obj.LSym // target function (if static)
-	var closure *ssa.Value   // ptr to closure to run (if dynamic)
-	var codeptr *ssa.Value   // ptr to target code (if dynamic)
-	var dextra *ssa.Value    // defer extra arg
-	var rcvr *ssa.Value      // receiver to set
+	var calleeLSym *obj.LSym    // target function (if static)
+	var closure *ssa.Value      // ptr to closure to run (if dynamic)
+	var codeptr *ssa.Value      // ptr to target code (if dynamic)
+	var dextra *ssa.Value       // defer extra arg
+	var rcvr *ssa.Value         // receiver to set
 	var extRe, extIm *ssa.Value // gd: inline payload words appended to an interface call (see abi.IfaceExtFits)
 	fn := n.Fun
 	var ACArgs []*types.Type    // AuxCall args
@@ -8063,6 +8070,10 @@ type State struct {
 	// wasm: The number of values on the WebAssembly stack. This is only used as a safeguard.
 	OnWasmStackSkipped int
 
+	// WasmGC is the state of the code generator for GOWASM=gc
+	// (see cmd/compile/internal/wasm/gc.go), or nil.
+	WasmGC any
+
 	// WasmCFProgs maps the ID of a block or loop of the function's
 	// structured control flow (ssa.WasmCF) to its instruction.
 	WasmCFProgs map[int32]*obj.Prog
@@ -8325,6 +8336,15 @@ func genssa(gd *base.Invocation, f *ssa.Func, pp *objw.Progs) {
 	var s State
 	s.gd = gd
 	s.ABI = f.OwnAux.Fn.ABI()
+
+	if f.Config.WasmGC {
+		// The function has no frame in linear memory: no stack
+		// maps, no argument spills, no stack growth.
+		s.pp = pp
+		s.bstart = make([]*obj.Prog, f.NumBlocks())
+		Arch.GenWasmGC(&s, f)
+		return
+	}
 
 	e := f.Frontend().(*ssafn)
 

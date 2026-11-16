@@ -44,6 +44,11 @@ type WasmCF struct {
 	// Post[b.ID] is emitted after block b's values, in place of
 	// its jumps.
 	Post [][]WasmCFOp
+	// For a dispatch loop (see wasmDispatch): the IDs of the blocks
+	// that a WasmCFDispatch branches to, by the state, and the local
+	// that holds the state, which the backend sets.
+	Table []int32
+	State int32
 }
 
 // WasmCFOp is one control-flow instruction.
@@ -59,17 +64,19 @@ type WasmCFOp struct {
 type WasmCFKind uint8
 
 const (
-	WasmCFBlock   WasmCFKind = iota // block
-	WasmCFLoop                      // loop
-	WasmCFEnd                       // end of a block, loop or if
-	WasmCFIf                        // if the block's control value is true
-	WasmCFIfNot                     // if the block's control value is false
-	WasmCFIfNever                   // if false: the code is kept but not run
-	WasmCFBr                        // br Target
-	WasmCFBrIf                      // br Target if the control value is true
-	WasmCFBrIfNot                   // br Target if the control value is false
-	WasmCFRet                       // return from the function
-	WasmCFExit                      // not reached: the block ends in a call that does not return
+	WasmCFBlock    WasmCFKind = iota // block
+	WasmCFLoop                       // loop
+	WasmCFEnd                        // end of a block, loop or if
+	WasmCFIf                         // if the block's control value is true
+	WasmCFIfNot                      // if the block's control value is false
+	WasmCFIfNever                    // if false: the code is kept but not run
+	WasmCFBr                         // br Target
+	WasmCFBrIf                       // br Target if the control value is true
+	WasmCFBrIfNot                    // br Target if the control value is false
+	WasmCFRet                        // return from the function
+	WasmCFExit                       // not reached: the block ends in a call that does not return
+	WasmCFSet                        // set WasmCF.State to Target, the index of a block
+	WasmCFDispatch                   // br_table on WasmCF.State, to the blocks of WasmCF.Table
 )
 
 // wasmNoResume reports whether call v never returns to its caller's
@@ -91,7 +98,8 @@ func wasmStructure(f *Func) {
 	if f.Config.arch != "wasm" {
 		return
 	}
-	jspi := buildcfg.GOOS == "js"
+	// GOWASM=gc runs goroutines on stacks of their own on any GOOS.
+	jspi := buildcfg.GOOS == "js" || f.Config.WasmGC
 
 	for _, b := range f.Blocks {
 		switch b.Kind {
@@ -122,6 +130,9 @@ func wasmStructure(f *Func) {
 
 	po := f.Postorder()
 	if len(po) != len(f.Blocks) {
+		if f.Config.WasmGC {
+			wasmDispatch(f)
+		}
 		return // unreachable blocks
 	}
 	rpo := make([]int32, f.NumBlocks()) // reverse postorder number
@@ -140,6 +151,9 @@ func wasmStructure(f *Func) {
 			s := e.Block()
 			if rpo[s.ID] <= rpo[b.ID] {
 				if !sdom.IsAncestorEq(s, b) {
+					if f.Config.WasmGC {
+						wasmDispatch(f)
+					}
 					return // irreducible
 				}
 				loopHeader[s.ID] = true
@@ -294,5 +308,68 @@ func wasmStructure(f *Func) {
 		f.Fatalf("wasmStructure: placed %d of %d blocks, %d constructs left open", len(order), len(f.Blocks), len(open))
 	}
 	copy(f.Blocks, order)
+	f.WasmCF = cf
+}
+
+// wasmDispatch gives a function whose control flow cannot be
+// structured (for GOWASM=gc, which has no other scheme) a dispatch
+// loop: the index of the block to run next is in a local, and every
+// jump sets it and branches to the loop, whose br_table goes to the
+// block.
+//
+//	loop L
+//	  block X[n-1] ... block X[0]
+//	    br_table on the state, to X[0] ... X[n-1]
+//	  end X[0]; block 0; set the state, br L
+//	  ...
+//	end X[n-1]; block n-1; ...
+//	end L; unreachable
+func wasmDispatch(f *Func) {
+	n := len(f.Blocks)
+	index := make([]int32, f.NumBlocks())
+	for i, b := range f.Blocks {
+		index[b.ID] = int32(i)
+	}
+	if f.Blocks[0] != f.Entry {
+		f.Fatalf("wasmDispatch: the entry is not the first block")
+	}
+	cf := &WasmCF{Post: make([][]WasmCFOp, f.NumBlocks()), Table: make([]int32, n)}
+	const loop = 1
+	cf.Pre = append(cf.Pre, WasmCFOp{Kind: WasmCFLoop, ID: loop})
+	for i := n - 1; i >= 0; i-- {
+		cf.Table[i] = int32(2 + i)
+		cf.Pre = append(cf.Pre, WasmCFOp{Kind: WasmCFBlock, ID: int32(2 + i)})
+	}
+	cf.Pre = append(cf.Pre, WasmCFOp{Kind: WasmCFDispatch}, WasmCFOp{Kind: WasmCFEnd, ID: 2})
+	jump := func(post *[]WasmCFOp, to *Block) {
+		*post = append(*post, WasmCFOp{Kind: WasmCFSet, Target: index[to.ID]}, WasmCFOp{Kind: WasmCFBr, Target: loop})
+	}
+	for i, b := range f.Blocks {
+		post := &cf.Post[b.ID]
+		switch b.Kind {
+		case BlockPlain:
+			jump(post, b.Succs[0].Block())
+		case BlockDefer:
+			// Succs[1] is where the runtime would resume the
+			// function after a recovered panic: not here.
+			jump(post, b.Succs[0].Block())
+		case BlockIf:
+			*post = append(*post,
+				WasmCFOp{Kind: WasmCFSet, Target: index[b.Succs[1].Block().ID]},
+				WasmCFOp{Kind: WasmCFIf, ID: int32(2 + n)},
+				WasmCFOp{Kind: WasmCFSet, Target: index[b.Succs[0].Block().ID]},
+				WasmCFOp{Kind: WasmCFEnd, ID: int32(2 + n)},
+				WasmCFOp{Kind: WasmCFBr, Target: loop})
+		case BlockRet:
+			*post = append(*post, WasmCFOp{Kind: WasmCFRet})
+		default: // BlockExit, BlockRetJmp
+			*post = append(*post, WasmCFOp{Kind: WasmCFExit})
+		}
+		if i+1 < n {
+			*post = append(*post, WasmCFOp{Kind: WasmCFEnd, ID: int32(2 + i + 1)})
+		} else {
+			*post = append(*post, WasmCFOp{Kind: WasmCFEnd, ID: loop}, WasmCFOp{Kind: WasmCFExit})
+		}
+	}
 	f.WasmCF = cf
 }

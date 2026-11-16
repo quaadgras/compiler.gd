@@ -27,13 +27,13 @@ func Unlinkat(dirfd int, path string, flags int) error {
 	if flags&AT_REMOVEDIR == 0 {
 		return errnoErr(path_unlink_file(
 			int32(dirfd),
-			unsafe.StringData(path),
+			linearString(path),
 			size(len(path)),
 		))
 	} else {
 		return errnoErr(path_remove_directory(
 			int32(dirfd),
-			unsafe.StringData(path),
+			linearString(path),
 			size(len(path)),
 		))
 	}
@@ -56,13 +56,21 @@ func Fstatat(dirfd int, path string, stat *syscall.Stat_t, flags int) error {
 	if flags&AT_SYMLINK_NOFOLLOW == 0 {
 		filestatFlags |= syscall.LOOKUP_SYMLINK_FOLLOW
 	}
-	return errnoErr(path_filestat_get(
+	// (With GOWASM=gc, stat may be an object, not memory the host can
+	// write: then the host writes a Stat_t in linear memory.)
+	lst := stat
+	if uintptr(unsafe.Pointer(stat)) >= 1<<32 {
+		lst = &make([]syscall.Stat_t, 1)[0]
+	}
+	errno := path_filestat_get(
 		int32(dirfd),
 		uint32(filestatFlags),
-		unsafe.StringData(path),
+		linearString(path),
 		size(len(path)),
-		unsafe.Pointer(stat),
-	))
+		unsafe.Pointer(lst),
+	)
+	*stat = *lst
+	return errnoErr(errno)
 }
 
 //go:wasmimport wasi_snapshot_preview1 path_filestat_get
@@ -73,7 +81,7 @@ func Readlinkat(dirfd int, path string, buf []byte) (int, error) {
 	var nwritten size
 	errno := path_readlink(
 		int32(dirfd),
-		unsafe.StringData(path),
+		linearString(path),
 		size(len(path)),
 		&buf[0],
 		size(len(buf)),
@@ -96,7 +104,7 @@ func Mkdirat(dirfd int, path string, mode uint32) error {
 	}
 	return errnoErr(path_create_directory(
 		int32(dirfd),
-		unsafe.StringData(path),
+		linearString(path),
 		size(len(path)),
 	))
 }
@@ -121,10 +129,10 @@ func Renameat(olddirfd int, oldpath string, newdirfd int, newpath string) error 
 	}
 	return errnoErr(path_rename(
 		int32(olddirfd),
-		unsafe.StringData(oldpath),
+		linearString(oldpath),
 		size(len(oldpath)),
 		int32(newdirfd),
-		unsafe.StringData(newpath),
+		linearString(newpath),
 		size(len(newpath)),
 	))
 }
@@ -140,10 +148,10 @@ func Linkat(olddirfd int, oldpath string, newdirfd int, newpath string, flag int
 	return errnoErr(path_link(
 		int32(olddirfd),
 		0,
-		unsafe.StringData(oldpath),
+		linearString(oldpath),
 		size(len(oldpath)),
 		int32(newdirfd),
-		unsafe.StringData(newpath),
+		linearString(newpath),
 		size(len(newpath)),
 	))
 }
@@ -157,10 +165,10 @@ func Symlinkat(oldpath string, newdirfd int, newpath string) error {
 		return syscall.EINVAL
 	}
 	return errnoErr(path_symlink(
-		unsafe.StringData(oldpath),
+		linearString(oldpath),
 		size(len(oldpath)),
 		int32(newdirfd),
-		unsafe.StringData(newpath),
+		linearString(newpath),
 		size(len(newpath)),
 	))
 }
@@ -174,4 +182,17 @@ func errnoErr(errno syscall.Errno) error {
 		return nil
 	}
 	return errno
+}
+
+// linearString returns a pointer to the bytes of s in linear memory,
+// which the host can read: with GOWASM=gc, the bytes of a string made
+// at run time are an object, so they are copied.
+func linearString(s string) *byte {
+	p := unsafe.StringData(s)
+	if len(s) == 0 || uintptr(unsafe.Pointer(p)) < 1<<32 {
+		return p
+	}
+	b := make([]byte, len(s))
+	copy(b, s)
+	return &b[0]
 }

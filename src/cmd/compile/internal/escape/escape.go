@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/constant"
 	"go/token"
+	"internal/buildcfg"
 	"internal/goexperiment"
 
 	"cmd/compile/internal/base"
@@ -368,6 +369,10 @@ func isCandidateLoc(n ir.Node) bool {
 // kill switch in case a new failure mode surfaces.
 func shouldEnableEscapeCandidate(fn *ir.Func) bool {
 	if fn == nil || fn.Nname == nil {
+		return false
+	}
+	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+		// The stack is not memory that a copy could be taken from.
 		return false
 	}
 	return true

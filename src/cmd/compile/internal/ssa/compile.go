@@ -71,6 +71,9 @@ func Compile(f *Func) {
 		if !f.Config.optimize && !p.required || p.disabled {
 			continue
 		}
+		if f.Config.WasmGC && wasmGCSkip[p.name] {
+			continue
+		}
 		f.pass = &p
 		phaseName = p.name
 		if f.Log() {
@@ -636,4 +639,22 @@ func init() {
 			log.Panicf("passes %s and %s out of order", a, b)
 		}
 	}
+}
+
+// wasmGCSkip are the passes that do not apply when objects live in the
+// WebAssembly garbage-collected heap (GOWASM=gc): there is no write
+// barrier, a load cannot span the fields of an object, and values are
+// held in WebAssembly locals rather than in registers and stack slots,
+// which cmd/compile/internal/wasm assigns itself. It relies on the
+// critical edges staying split, so trim is skipped too.
+var wasmGCSkip = map[string]bool{
+	"writebarrier": true,
+	"memcombine":   true,
+	"checkLower":   true,
+	"regalloc":     true,
+	"loop rotate":  true,
+	"trim":         true,
+	// A nil pointer does not fault in a way that can be recovered
+	// from: the checks stay.
+	"late nilcheck": true,
 }

@@ -11,6 +11,7 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/src"
+	"internal/buildcfg"
 )
 
 // A Config holds readonly compilation information.
@@ -39,6 +40,7 @@ type Config struct {
 	floatParamRegs []int8         // register numbers of floating param (in/out) registers
 	ABI1           *abi.ABIConfig // "ABIInternal" under development // TODO change comment when this becomes current
 	ABI0           *abi.ABIConfig
+	WasmGC         bool      // GOWASM=gc: objects are WebAssembly GC structs and arrays
 	FPReg          int8      // register number of frame pointer, -1 if not used
 	LinkReg        int8      // register number of link register if it is a general purpose register, -1 if not used
 	hasGReg        bool      // has hardware g register
@@ -382,6 +384,15 @@ func NewConfig(gd *base.Invocation, arch string, types Types, ctxt *obj.Link, op
 		c.hasGReg = true
 		c.unalignedOK = true
 		c.haveCondSelect = true
+		if buildcfg.GOWASM.GC {
+			// Objects live in the WebAssembly garbage-collected
+			// heap. Arguments and results are WebAssembly
+			// parameters and results: every one is "in a
+			// register".
+			c.WasmGC = true
+			c.intParamRegs = make([]int8, 120)
+			c.floatParamRegs = make([]int8, 120)
+		}
 	default:
 		ctxt.Diag("arch %s not implemented", arch)
 	}
@@ -393,6 +404,9 @@ func NewConfig(gd *base.Invocation, arch string, types Types, ctxt *obj.Link, op
 	}
 
 	c.ABI0 = abi.NewABIConfig(gd, 0, 0, ctxt.Arch.FixedFrameSize, 0)
+	if c.WasmGC {
+		c.ABI0 = abi.NewABIConfig(gd, len(c.intParamRegs), len(c.floatParamRegs), ctxt.Arch.FixedFrameSize, 0)
+	}
 	c.ABI1 = abi.NewABIConfig(gd, len(c.intParamRegs), len(c.floatParamRegs), ctxt.Arch.FixedFrameSize, 1)
 
 	if ctxt.Flag_shared {

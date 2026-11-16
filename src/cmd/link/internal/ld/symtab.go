@@ -786,7 +786,9 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	// creating the moduledata from scratch and it does not have a
 	// compiler-provided size, so read it from the type data.
 	moduledatatype := ldr.Lookup("type:runtime.moduledata", 0)
-	moduledata.SetSize(decodetypeSize(ctxt.Arch, ldr.Data(moduledatatype)))
+	if moduledatatype != 0 { // absent from the runtime for GOWASM=gc
+		moduledata.SetSize(decodetypeSize(ctxt.Arch, ldr.Data(moduledatatype)))
+	}
 	moduledata.Grow(moduledata.Size())
 
 	lastmoduledatap := ldr.CreateSymForUpdate("runtime.lastmoduledatap", 0)

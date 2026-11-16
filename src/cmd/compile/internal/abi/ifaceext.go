@@ -45,6 +45,10 @@ func InternalRegCounts() (ints, floats int) {
 		return 12, 12
 	case "s390x":
 		return 8, 16
+	case "wasm":
+		if buildcfg.GOWASM.GC {
+			return 120, 120
+		}
 	}
 	return 0, 0
 }
@@ -56,6 +60,11 @@ func InternalRegCounts() (ints, floats int) {
 func IfaceExtFits(gd *base.Invocation, sig *types.Type) bool {
 	ni, nf := InternalRegCounts()
 	if nf < 2 || types.PtrSize != 8 {
+		return false
+	}
+	if buildcfg.GOWASM.GC {
+		// A WebAssembly function cannot be called with arguments it
+		// does not declare, as the method of a boxed type would be.
 		return false
 	}
 	params := make([]*types.Type, 0, sig.NumParams()+3)

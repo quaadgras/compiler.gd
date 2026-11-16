@@ -167,7 +167,7 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 
 	var mls *liveness.MergeLocalsState
 	var leaders map[*ir.Name]int64
-	if gd.Debug.MergeLocals != 0 {
+	if gd.Debug.MergeLocals != 0 && !f.Config.WasmGC {
 		mls = liveness.MergeLocals(gd, fn, f)
 		if gd.Debug.MergeLocalsTrace > 0 && mls != nil {
 			savedNP, savedP := mls.EstSavings()

@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	"go/token"
 	"internal/abi"
+	"internal/buildcfg"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -330,6 +331,17 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 	t := n.Type()
 	mapType := reflectdata.MapType(gd)
 	hint := n.Len
+
+	if buildcfg.GOWASM.GC {
+		// A map is not what the compiler thinks it is (see
+		// runtime/wasmgc/map.go): the runtime makes all of them.
+		if ir.IsConst(hint, constant.Int) && constant.Compare(hint.Val(), token.LEQ, constant.MakeInt64(abi.MapGroupSlots)) {
+			fn := typecheck.LookupRuntime(gd, "makemap_small", t.Key(), t.Elem())
+			return mkcall1(gd, fn, n.Type(), init)
+		}
+		fn := typecheck.LookupRuntime(gd, "makemap", mapType, t.Key(), t.Elem())
+		return mkcall1(gd, fn, n.Type(), init, reflectdata.MakeMapRType(gd, gd.Pos, n), typecheck.Conv(gd, hint, types.Types[types.TINT]), typecheck.NodNil(gd))
+	}
 
 	// var m *Map
 	var m ir.Node
@@ -910,7 +922,9 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 		nif.Body.Append(mkcall(gd, "panicunsafeslicelen", nil, &nif.Body))
 		appendWalkStmt(gd, init, nif)
 
-		if sliceType.Elem().Size() == 0 {
+		if sliceType.Elem().Size() == 0 || buildcfg.GOWASM.GC {
+			// (With GOWASM=gc a pointer has no address for the
+			// slice to run past the end of the address space.)
 			// if ptr == nil && len > 0  {
 			//      panicunsafesliceptrnil()
 			// }
@@ -1047,7 +1061,15 @@ func walkUnsafeString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.
 		nifPtr := ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
 		nifPtr.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OEQ, unsafePtr, typecheck.NodNil(gd))
 		nifPtr.Body.Append(mkcall(gd, "panicunsafestringnilptr", nil, &nifPtr.Body))
-		nifLen.Body.Append(nifPtr, mkcall(gd, "panicunsafestringlen", nil, &nifLen.Body))
+		if buildcfg.GOWASM.GC {
+			// A pointer has no address for the string to run past
+			// the end of the address space:
+			// if ptr == nil && len > 0 { panicunsafestringnilptr() }
+			nifLen.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OGT, typecheck.Conv(gd, len, lenType), ir.NewInt(gd, gd.Pos, 0))
+			nifLen.Body.Append(nifPtr)
+		} else {
+			nifLen.Body.Append(nifPtr, mkcall(gd, "panicunsafestringlen", nil, &nifLen.Body))
+		}
 		appendWalkStmt(gd, init, nifLen)
 	}
 	h := ir.NewStringHeaderExpr(gd, n.Pos(),

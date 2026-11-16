@@ -674,6 +674,12 @@ func (t *rtype) Method(i int) (m Method) {
 	m.Type = mt
 	tfn := t.textOff(p.Tfn)
 	fn := unsafe.Pointer(&tfn)
+	if wasmGCMode {
+		// Called through the method value of its receiver (see
+		// callWasmGC): no adapter is made for a func type with the
+		// receiver first.
+		fn = gcMethodFunc(t, i, tfn)
+	}
 	m.Func = Value{typ_: &mt.(*rtype).t, ptr: fn, flag: fl}
 
 	m.Index = i
@@ -1452,7 +1458,7 @@ func (t *rtype) ptrTo() *abi.Type {
 
 	pp.Elem = at
 
-	pi, _ := ptrMap.LoadOrStore(t, &pp)
+	pi, _ := ptrMap.LoadOrStore(t, linearType(&pp))
 	return &pi.(*ptrType).Type
 }
 
@@ -1494,7 +1500,7 @@ func (t *rtype) ConvertibleTo(u Type) bool {
 }
 
 func (t *rtype) Comparable() bool {
-	return t.t.Equal != nil
+	return gcHasEqual(&t.t)
 }
 
 // implements reports whether the type V implements the interface type T.
@@ -1886,7 +1892,7 @@ func ChanOf(dir ChanDir, t Type) Type {
 	ch.Hash = fnv1(typ.Hash, 'c', byte(dir))
 	ch.Elem = typ
 
-	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&ch.Type))
+	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&linearType(&ch).Type))
 	return ti.(Type)
 }
 
@@ -1938,6 +1944,15 @@ func FuncOf(in, out []Type, variadic bool) Type {
 // extended method code. Flagged and unflagged types never unify in
 // the caches: haveIdenticalUnderlyingType compares raw InCount, which
 // includes the flag bit.
+// newFuncType returns a func type followed by room for n arguments and
+// results, which args is.
+func newFuncTypeStruct(n int) (ft *funcType, args []*rtype) {
+	o := New(initFuncTypes(n)).Elem()
+	ft = (*funcType)(unsafe.Pointer(o.Field(0).Addr().Pointer()))
+	args = unsafe.Slice((**rtype)(unsafe.Pointer(o.Field(1).Addr().Pointer())), n)[0:0:n]
+	return ft, args
+}
+
 func funcOf(in, out []Type, variadic bool, phaseGExtended bool) Type {
 	if variadic && (len(in) == 0 || toType(in[len(in)-1].common()).Kind() != Slice) {
 		panic("reflect.FuncOf: last arg of variadic func must be slice")
@@ -1952,9 +1967,7 @@ func funcOf(in, out []Type, variadic bool, phaseGExtended bool) Type {
 		panic("reflect.FuncOf: too many arguments")
 	}
 
-	o := New(initFuncTypes(n)).Elem()
-	ft := (*funcType)(unsafe.Pointer(o.Field(0).Addr().Pointer()))
-	args := unsafe.Slice((**rtype)(unsafe.Pointer(o.Field(1).Addr().Pointer())), n)[0:0:n]
+	ft, args := newFuncType(n)
 	*ft = *prototype
 
 	// Build a hash and minimally populate ft.
@@ -2189,7 +2202,7 @@ func SliceOf(t Type) Type {
 	slice.Elem = typ
 	slice.PtrToThis = 0
 
-	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&slice.Type))
+	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&linearType(&slice).Type))
 	return ti.(Type)
 }
 
@@ -2445,7 +2458,7 @@ func StructOf(fields []StructField) Type {
 			repr = append(repr, ';')
 		}
 
-		comparable = comparable && (ft.Equal != nil)
+		comparable = comparable && gcHasEqual(ft)
 		noPtrs = noPtrs && ft.PtrBytes == 0
 
 		offset := align(size, uintptr(ft.Align_))
@@ -2502,8 +2515,20 @@ func StructOf(fields []StructField) Type {
 
 	if len(methods) == 0 {
 		t := new(structTypeUncommon)
+		if wasmGCMode {
+			t = (*structTypeUncommon)(unsafe_NewArray(rtypeOf(byte(0)), int(unsafe.Sizeof(*t))))
+		}
 		typ = &t.structType
 		ut = &t.u
+	} else if wasmGCMode {
+		// The type, its uncommon part and its methods, one after the
+		// other, in linear memory.
+		su := unsafe.Sizeof(structTypeUncommon{})
+		p := unsafe_NewArray(rtypeOf(byte(0)), int(su+uintptr(len(methods))*unsafe.Sizeof(abi.Method{})))
+		t := (*structTypeUncommon)(p)
+		typ = &t.structType
+		ut = &t.u
+		copy(unsafe.Slice((*abi.Method)(unsafe.Add(p, su)), len(methods)), methods)
 	} else {
 		// A *rtype representing a struct is followed directly in memory by an
 		// array of method objects representing the methods attached to the
@@ -2547,6 +2572,12 @@ func StructOf(fields []StructField) Type {
 	var istruct any = struct{}{}
 	prototype := *(**structType)(unsafe.Pointer(&istruct))
 	*typ = *prototype
+	if wasmGCMode {
+		// (The fields of a type descriptor are in linear memory too.)
+		lfs := unsafe.Slice((*structField)(unsafe_NewArray(rtypeOf(byte(0)), len(fs)*int(unsafe.Sizeof(structField{})))), len(fs))
+		copy(lfs, fs)
+		fs = lfs
+	}
 	typ.Fields = fs
 	if pkgpath != "" {
 		typ.PkgPath = newName(pkgpath, "", false, false)
@@ -2625,6 +2656,12 @@ func StructOf(fields []StructField) Type {
 		}
 	}
 
+	if wasmGCMode {
+		// No constructor: the runtime allocates a struct type made
+		// here in linear memory.
+		typ.GCData = nil
+		typ.TFlag &^= abi.TFlagGCMaskOnDemand
+	}
 	typ.Equal = nil
 	if comparable {
 		typ.Equal = func(p, q unsafe.Pointer) bool {
@@ -2636,6 +2673,14 @@ func StructOf(fields []StructField) Type {
 				}
 			}
 			return true
+		}
+		if wasmGCMode {
+			// A type descriptor, in linear memory, cannot hold a
+			// closure (an object): the flag, which has no other use
+			// there, says that the runtime compares the values field
+			// by field.
+			typ.Equal = nil
+			typ.TFlag |= abi.TFlagGCMaskOnDemand
 		}
 	}
 
@@ -2823,7 +2868,11 @@ func ArrayOf(length int, elem Type) Type {
 	esize := etyp.Size()
 
 	array.Equal = nil
-	if eequal := etyp.Equal; eequal != nil {
+	if wasmGCMode && gcHasEqual(etyp) {
+		// As for StructOf: compared element by element, by the
+		// runtime (a closure cannot be in the descriptor).
+		array.TFlag |= abi.TFlagGCMaskOnDemand
+	} else if eequal := etyp.Equal; eequal != nil {
 		array.Equal = func(p, q unsafe.Pointer) bool {
 			for i := 0; i < length; i++ {
 				pi := arrayAt(p, i, esize, "i < length")
@@ -2844,7 +2893,12 @@ func ArrayOf(length int, elem Type) Type {
 		array.TFlag &^= abi.TFlagDirectIface
 	}
 
-	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&array.Type))
+	if wasmGCMode {
+		// GCData is the number of a constructor (the runtime
+		// makes a new array type element by element).
+		array.GCData = nil
+	}
+	ti, _ := lookupCache.LoadOrStore(ckey, toRType(&linearType(&array).Type))
 	return ti.(Type)
 }
 
@@ -3042,4 +3096,11 @@ func addTypeBits(bv *bitVector, offset uintptr, t *abi.Type) {
 			addTypeBits(bv, offset+f.Offset, f.Typ)
 		}
 	}
+}
+
+// gcHasEqual reports whether values of type t can be compared: with
+// GOWASM=gc, a struct type made by StructOf has no Equal but a flag
+// (see StructOf).
+func gcHasEqual(t *abi.Type) bool {
+	return t.Equal != nil || wasmGCMode && (t.Kind() == abi.Struct || t.Kind() == abi.Array) && t.TFlag&abi.TFlagGCMaskOnDemand != 0
 }

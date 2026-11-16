@@ -6,6 +6,7 @@ package walk
 
 import (
 	"go/constant"
+	"internal/buildcfg"
 	"unicode/utf8"
 
 	"cmd/compile/internal/base"
@@ -136,7 +137,9 @@ func walkRange(gd *base.Invocation, nrange *ir.RangeStmt) ir.Node {
 		}
 
 		// for v1, v2 := range ha { body }
-		if cheapComputableIndex(elem.Size()) {
+		if cheapComputableIndex(elem.Size()) || buildcfg.GOWASM.GC {
+			// (With GOWASM=gc there is no pointer to step
+			// through the elements with.)
 			// v1, v2 = hv1, ha[hv1]
 			tmp := ir.NewIndexExpr(gd, gd.Pos, ha, hv1)
 			tmp.SetBounded(true)

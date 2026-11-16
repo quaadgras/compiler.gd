@@ -53,6 +53,10 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 
 	ftyp := (*funcType)(unsafe.Pointer(t))
 
+	if wasmGCMode {
+		return makeFuncWasmGC(t, ftyp, fn)
+	}
+
 	code := abi.FuncPCABI0(makeFuncStub)
 
 	// makeFuncImpl contains a stack map for use by the runtime
@@ -98,6 +102,20 @@ type methodValue struct {
 func makeMethodValue(op string, v Value) Value {
 	if v.flag&flagMethod == 0 {
 		panic("reflect: internal error: invalid use of makeMethodValue")
+	}
+
+	if wasmGCMode {
+		// A function made of the method call, as MakeFunc makes.
+		methodReceiver(op, v, int(v.flag)>>flagMethodShift)
+		m := v
+		// (The arguments of a variadic function come packed.)
+		callOp := "Call"
+		if v.Type().IsVariadic() {
+			callOp = "CallSlice"
+		}
+		return makeFuncWasmGC(v.Type().common(), (*funcType)(unsafe.Pointer(v.Type().common())), func(args []Value) []Value {
+			return m.call(callOp, args)
+		})
 	}
 
 	// Ignoring the flagMethod bit, v describes the receiver, not the method type.

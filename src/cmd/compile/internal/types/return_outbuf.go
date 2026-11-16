@@ -5,6 +5,7 @@
 package types
 
 import (
+	"internal/buildcfg"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -45,7 +46,11 @@ import (
 // CompilingRuntime gate from PhaseGApplies so every Go program's
 // pointer-returning sigs are uniformly extended. Requires
 // completing (2) and (3) first.
-const PhaseGActive = true
+//
+// With GOWASM=gc it is off: there is no stack in linear memory that a
+// result with pointers could be written to, and a WebAssembly function
+// cannot be called with an argument it does not declare.
+var PhaseGActive = !buildcfg.GOWASM.GC
 
 // OutBufNamePrefix is the Sym.Name prefix every gd Phase G
 // synthesised outBufK param carries. Used as a marker — consumers

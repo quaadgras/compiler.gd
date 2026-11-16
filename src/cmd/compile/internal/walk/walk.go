@@ -7,6 +7,7 @@ package walk
 import (
 	"fmt"
 	"internal/abi"
+	"internal/buildcfg"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -230,6 +231,9 @@ var mapassign = mkmapnames("mapassign", "ptr")
 var mapdelete = mkmapnames("mapdelete", "")
 
 func mapfast(gd *base.Invocation, t *types.Type) int {
+	if buildcfg.GOWASM.GC {
+		return mapslow // the runtime has no variants for kinds of keys
+	}
 	if t.Elem().Size() > abi.MapMaxElemBytes {
 		return mapslow
 	}

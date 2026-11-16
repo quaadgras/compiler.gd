@@ -192,6 +192,10 @@ func instinit(ctxt *obj.Link) {
 }
 
 func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
+	if s.Func().WasmGC != nil {
+		preprocessGC(ctxt, s, newprog)
+		return
+	}
 	rt := lookupRuntimeSyms(ctxt)
 	appendp := func(p *obj.Prog, as obj.As, args ...obj.Addr) *obj.Prog {
 		if p.As != obj.ANOP {
@@ -1227,6 +1231,7 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	type varDecl struct {
 		count uint64
 		typ   valueType
+		sym   *obj.LSym // GOWASM=gc: the type a nullable reference refers to
 	}
 
 	hasLocalSP := false
@@ -1244,6 +1249,23 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	useAssemblyRegMap := func() {
 		for i := int16(0); i < 16; i++ {
 			regVars[REG_R0+i-MINREG] = &regVar{false, uint64(i)}
+		}
+	}
+
+	gc := s.Func().WasmGC
+	if gc != nil {
+		// The function's own type, then its locals.
+		s.AddRel(ctxt, obj.Reloc{Type: objabi.R_WASMTYPE, Sym: gc.Sig})
+		for i, t := range gc.Locals {
+			var sym *obj.LSym
+			if i < len(gc.LocalTypes) {
+				sym = gc.LocalTypes[i]
+			}
+			if n := len(varDecls); n > 0 && varDecls[n-1].typ == valueType(t) && varDecls[n-1].sym == sym {
+				varDecls[n-1].count++
+				continue
+			}
+			varDecls = append(varDecls, &varDecl{count: 1, typ: valueType(t), sym: sym})
 		}
 	}
 
@@ -1288,6 +1310,9 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		// no locals
 		useAssemblyRegMap()
 	default:
+		if gc != nil {
+			break
+		}
 		if s.Func().WasmExport != nil {
 			// no local SP, not following Go calling convention
 			useAssemblyRegMap()
@@ -1340,6 +1365,11 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	writeUleb128(w, uint64(len(varDecls)))
 	for _, decl := range varDecls {
 		writeUleb128(w, decl.count)
+		if decl.sym != nil {
+			w.WriteByte(0x63) // ref null
+			gcHeapRef(ctxt, s, w, decl.sym)
+			continue
+		}
 		w.WriteByte(byte(decl.typ))
 	}
 
@@ -1349,6 +1379,9 @@ func assemble(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 	}
 
 	for p := s.Func().Text; p != nil; p = p.Link {
+		if gc != nil && assembleGC(ctxt, s, w, p) {
+			continue
+		}
 		switch p.As {
 		case AGet:
 			if p.From.Type != obj.TYPE_REG {

@@ -710,6 +710,15 @@ func (l *Loader) resolve(r *oReader, s goobj.SymRef) Sym {
 		if bi := l.builtinSyms[s.SymIdx]; bi != 0 {
 			return bi
 		}
+		if buildcfg.GOWASM.GC {
+			// The runtime for GOWASM=gc is incomplete: leave the
+			// builtin undefined, which is an error only if
+			// something reachable refers to it.
+			name, abi := goobj.BuiltinName(int(s.SymIdx))
+			bi := l.LookupOrCreateSym(name, abi)
+			l.builtinSyms[s.SymIdx] = bi
+			return bi
+		}
 		l.reportMissingBuiltin(int(s.SymIdx), r.unit.Lib.Pkg)
 		return 0
 	case goobj.PkgIdxSelf:

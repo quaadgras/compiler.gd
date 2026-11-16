@@ -28018,13 +28018,13 @@ func rewriteValuegeneric_OpPtrIndex(v *Value) bool {
 		return true
 	}
 	// match: (PtrIndex <t> ptr idx)
-	// cond: config.PtrSize == 8
+	// cond: config.PtrSize == 8 && !config.WasmGC
 	// result: (AddPtr ptr (Mul64 <typ.Int> idx (Const64 <typ.Int> [t.Elem().Size()])))
 	for {
 		t := v.Type
 		ptr := v_0
 		idx := v_1
-		if !(config.PtrSize == 8) {
+		if !(config.PtrSize == 8 && !config.WasmGC) {
 			break
 		}
 		v.reset(OpAddPtr)

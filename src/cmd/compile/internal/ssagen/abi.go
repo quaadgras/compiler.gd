@@ -377,6 +377,21 @@ func CreateWasmImportWrapper(gd *base.Invocation, fn *ir.Func) bool {
 	ir.InitLSym(gd, fn, true)
 
 	setupWasmImport(gd, fn)
+	if buildcfg.GOWASM.GC {
+		// The wrapper's arguments and results are WebAssembly
+		// parameters and results, which
+		// cmd/internal/obj/wasm converts to those of the import.
+		info := AbiForBodylessFuncStackMap(gd, fn).ABIAnalyzeFuncType(fn.Type())
+		sig := wasm.GCFuncPrefix
+		for _, t := range abi.RegisterTypes(info.InParams()) {
+			sig += string(WasmGCKind(gd, t))
+		}
+		sig += "."
+		for _, t := range abi.RegisterTypes(info.OutParams()) {
+			sig += string(WasmGCKind(gd, t))
+		}
+		fn.LSym.Func().WasmGC = &obj.WasmGCFunc{Sig: wasm.GCTypeSym(gd.Ctxt, sig)}
+	}
 
 	pp := objw.NewProgs(gd, fn, 0)
 	defer pp.Free(gd)
@@ -462,8 +477,13 @@ func paramsToWasmFields(gd *base.Invocation, f *ir.Func, pragma string, result *
 			case types.TSTRING:
 				// Two parts, (ptr, len)
 				wt = obj.WasmPtr
-				wfs = append(wfs, obj.WasmField{Type: wt, Offset: p.FrameOffset(gd, result)})
-				wfs = append(wfs, obj.WasmField{Type: wt, Offset: p.FrameOffset(gd, result) + int64(types.PtrSize)})
+				wf := obj.WasmField{Type: wt}
+				if len(p.Registers) == 0 {
+					wf.Offset = p.FrameOffset(gd, result)
+				}
+				wfs = append(wfs, wf)
+				wf.Offset += int64(types.PtrSize)
+				wfs = append(wfs, wf)
 				continue
 			case types.TPTR:
 				if wasmElemTypeAllowed(t.Elem()) {
@@ -475,7 +495,11 @@ func paramsToWasmFields(gd *base.Invocation, f *ir.Func, pragma string, result *
 				gd.ErrorfAt(f.Pos(), 0, "%s: unsupported parameter type %s", pragma, t.String())
 			}
 		}
-		wfs = append(wfs, obj.WasmField{Type: wt, Offset: p.FrameOffset(gd, result)})
+		wf := obj.WasmField{Type: wt}
+		if len(p.Registers) == 0 {
+			wf.Offset = p.FrameOffset(gd, result)
+		}
+		wfs = append(wfs, wf)
 	}
 	return wfs
 }
@@ -514,7 +538,9 @@ func resultsToWasmFields(gd *base.Invocation, f *ir.Func, pragma string, result 
 				gd.ErrorfAt(f.Pos(), 0, "%s: unsupported result type %s", pragma, t.String())
 			}
 		}
-		wfs[i].Offset = p.FrameOffset(gd, result)
+		if len(p.Registers) == 0 {
+			wfs[i].Offset = p.FrameOffset(gd, result)
+		}
 	}
 	return wfs
 }
@@ -601,4 +627,23 @@ func setupWasmExport(gd *base.Invocation, f, wrapped *ir.Func) {
 	we.Params = paramsToWasmFields(gd, wrapped, "go:wasmexport", abiInfo, abiInfo.InParams())
 	we.Results = resultsToWasmFields(gd, wrapped, "go:wasmexport", abiInfo, abiInfo.OutParams())
 	f.LSym.Func().WasmExport = &we
+}
+
+// WasmGCKind returns the WebAssembly type that holds a value of type t
+// with GOWASM=gc: r for a reference, l for a 64-bit integer, f and d
+// for floats of 32 and 64 bits.
+func WasmGCKind(gd *base.Invocation, t *types.Type) byte {
+	switch {
+	case t.IsPtrShaped():
+		return 'r'
+	case t.IsFloat():
+		if t.Size() == 4 {
+			return 'f'
+		}
+		return 'd'
+	case t.IsInteger(), t.IsBoolean():
+		return 'l'
+	}
+	gd.Fatalf("GOWASM=gc: no WebAssembly type for %v", t)
+	return 0
 }

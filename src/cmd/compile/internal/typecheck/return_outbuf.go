@@ -13,7 +13,7 @@ import (
 // PhaseGActive aliases types.PhaseGActive so consumers in this
 // package keep their familiar reference point without importing
 // state across the types/typecheck boundary.
-const PhaseGActive = types.PhaseGActive
+var PhaseGActive = types.PhaseGActive
 
 // FillOutBufArgs ensures n.Args has a trailing nil for each
 // synthesised outBuf param of the callee's signature. Called from

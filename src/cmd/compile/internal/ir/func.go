@@ -13,6 +13,7 @@ import (
 	"cmd/internal/src"
 	"encoding/base64"
 	"fmt"
+	"internal/buildcfg"
 	"unicode/utf8"
 )
 
@@ -692,7 +693,7 @@ func FuncPC(gd *base.Invocation, pos src.XPos, n Node, wantABI obj.ABI) Node {
 	if fn := IsIfaceOfFunc(n); fn != nil {
 		name := fn.Nname
 		abi := fn.ABI
-		if abi != wantABI {
+		if abi != wantABI && !(buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC) { // GOWASM=gc has no assembly, so no ABI0
 			gd.ErrorfAt(pos, 0, "internal/abi.FuncPC%s expects an %v function, %s is defined as %v", wantABI, wantABI, name.Sym().Name, abi)
 		}
 		var e Node = NewLinksymExpr(gd, pos, name.LinksymABI(abi), types.Types[types.TUINTPTR])

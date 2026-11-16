@@ -379,6 +379,9 @@ func libinit(ctxt *Link) {
 			ctxt.flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s_lib", buildcfg.GOARCH, buildcfg.GOOS)
 		case BuildModeExe, BuildModePIE:
 			ctxt.flagEntrySymbol = fmt.Sprintf("_rt0_%s_%s", buildcfg.GOARCH, buildcfg.GOOS)
+			if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
+				ctxt.flagEntrySymbol = "runtime.rt0gc"
+			}
 		case BuildModeShared, BuildModePlugin:
 			// No *flagEntrySymbol for -buildmode=shared and plugin
 		default:

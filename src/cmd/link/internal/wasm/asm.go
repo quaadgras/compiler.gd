@@ -133,6 +133,10 @@ type wasmDataSect struct {
 var dataSects sync.Map // *ld.Link -> []wasmDataSect
 
 func asmb(ctxt *ld.Link, ldr *loader.Loader) {
+	if gcMode() {
+		asmbGC(ctxt, ldr)
+		return
+	}
 	sections := []*sym.Section{
 		ldr.SymSect(ldr.Lookup("runtime.rodata", 0)),
 		ldr.SymSect(ldr.Lookup("runtime.types", 0)),
@@ -154,6 +158,10 @@ func asmb(ctxt *ld.Link, ldr *loader.Loader) {
 // asmb writes the final WebAssembly module binary.
 // Spec: https://webassembly.github.io/spec/core/binary/modules.html
 func asmb2(ctxt *ld.Link, ldr *loader.Loader) {
+	if gcMode() {
+		asmb2GC(ctxt, ldr)
+		return
+	}
 	types := []*wasmFuncType{
 		// For normal Go functions, the single parameter is PC_B,
 		// the return value is

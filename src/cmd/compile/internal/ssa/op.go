@@ -547,3 +547,6 @@ type arm64ConditionalParams struct {
 	constValue uint8 // Immediate value for constant comparisons
 	ind        bool  // Constant comparison indicator
 }
+
+// IsGeneric reports whether o is an architecture-independent op.
+func (o Op) IsGeneric() bool { return opcodeTable[o].generic }

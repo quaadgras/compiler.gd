@@ -140,6 +140,7 @@ func Init(arch *ssagen.ArchInfo) {
 	arch.SSAMarkMoves = ssaMarkMoves
 	arch.SSAGenValue = ssaGenValue
 	arch.SSAGenBlock = ssaGenBlock
+	arch.GenWasmGC = genWasmGC
 }
 
 func zeroRange(gd *base.Invocation, pp *objw.Progs, p *obj.Prog, off, cnt int64, state *uint32) *obj.Prog {
@@ -209,6 +210,20 @@ func genCF(s *ssagen.State, b *ssa.Block, ops []ssa.WasmCFOp) {
 			s.Prog(obj.ARET)
 		case ssa.WasmCFExit:
 			s.Prog(obj.AUNDEF)
+		case ssa.WasmCFSet:
+			i32Const(s, op.Target)
+			p := s.Prog(wasm.ALocalSet)
+			p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: int64(b.Func.WasmCF.State)}
+		case ssa.WasmCFDispatch:
+			// Inside the innermost of the blocks of the table.
+			p := s.Prog(wasm.ALocalGet)
+			p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: int64(b.Func.WasmCF.State)}
+			n := len(b.Func.WasmCF.Table)
+			idxs := make([]uint64, n+1)
+			for i := range n {
+				idxs[i] = uint64(i)
+			}
+			s.Prog(wasm.ABrTable).To = obj.Addr{Val: idxs}
 		}
 	}
 }
@@ -620,6 +635,10 @@ func getAddr32(s *ssagen.State, v *ssa.Value, off int64, store bool) obj.Addr {
 }
 
 func getValue32(s *ssagen.State, v *ssa.Value) {
+	if g := gcOf(s); g != nil {
+		g.get(v, true)
+		return
+	}
 	if v.OnWasmStack {
 		s.OnWasmStackSkipped--
 		ssaGenValueOnStack(s, v, false)
@@ -637,6 +656,10 @@ func getValue32(s *ssagen.State, v *ssa.Value) {
 }
 
 func getValue64(s *ssagen.State, v *ssa.Value) {
+	if g := gcOf(s); g != nil {
+		g.get(v, false)
+		return
+	}
 	if v.OnWasmStack {
 		s.OnWasmStackSkipped--
 		ssaGenValueOnStack(s, v, true)
@@ -651,6 +674,10 @@ func getValue64(s *ssagen.State, v *ssa.Value) {
 }
 
 func getValue128(s *ssagen.State, v *ssa.Value) {
+	if g := gcOf(s); g != nil {
+		g.get(v, false)
+		return
+	}
 	if v.OnWasmStack {
 		s.OnWasmStackSkipped--
 		ssaGenValueOnStack(s, v, true)
@@ -662,6 +689,10 @@ func getValue128(s *ssagen.State, v *ssa.Value) {
 }
 
 func getValueFxx(s *ssagen.State, v *ssa.Value) {
+	if g := gcOf(s); g != nil {
+		g.get(v, false)
+		return
+	}
 	if v.OnWasmStack {
 		s.OnWasmStackSkipped--
 		ssaGenValueOnStack(s, v, true)

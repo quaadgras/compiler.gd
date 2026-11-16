@@ -334,10 +334,18 @@ type gowasmFeatures struct {
 	// Legacy features, now always enabled
 	//SatConv bool
 	//SignExt bool
+
+	// GC keeps Go objects in the WebAssembly garbage-collected heap
+	// (typed structs and arrays) instead of linear memory.
+	// See doc/gd/wasm-gc.md.
+	GC bool
 }
 
 func (f gowasmFeatures) String() string {
 	var flags []string
+	if f.GC {
+		flags = append(flags, "gc")
+	}
 	return strings.Join(flags, ",")
 }
 
@@ -348,6 +356,8 @@ func gowasm() (f gowasmFeatures) {
 			// ignore, always enabled
 		case "signext":
 			// ignore, always enabled
+		case "gc":
+			f.GC = true
 		case "":
 			// ignore
 		default:
@@ -470,6 +480,9 @@ func gogoarchTags() []string {
 		list = append(list, GOARCH+".satconv")
 		// SignExt is always enabled
 		list = append(list, GOARCH+".signext")
+		if GOWASM.GC {
+			list = append(list, GOARCH+".gc")
+		}
 		return list
 	}
 	return nil

@@ -504,6 +504,7 @@ type FuncInfo struct {
 
 	WasmImport *WasmImport
 	WasmExport *WasmExport
+	WasmGC     *WasmGCFunc // set for a function compiled with GOWASM=gc
 
 	sehUnwindInfoSym *LSym
 }
@@ -636,6 +637,20 @@ func (s *LSym) ItabInfo() *ItabInfo {
 	}
 	i, _ := (*s.Extra).(*ItabInfo)
 	return i
+}
+
+// WasmGCFunc describes a function compiled with GOWASM=gc: its
+// arguments and results are WebAssembly parameters and results, and its
+// values are held in WebAssembly locals.
+type WasmGCFunc struct {
+	Sig    *LSym  // names the function's WebAssembly type
+	Locals []byte // the WebAssembly value type of each local after the parameters
+	// LocalTypes, where not nil, is the type that a local of
+	// reference type refers to (nullable): Locals has 0 there.
+	LocalTypes []*LSym
+	// Trap is set if the function uses something the compiler does
+	// not support yet: its body is replaced by a trap.
+	Trap bool
 }
 
 // WasmImport represents a WebAssembly (WASM) imported function with

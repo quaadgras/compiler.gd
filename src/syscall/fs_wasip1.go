@@ -517,7 +517,7 @@ func preparePath(path string) (int32, *byte, size) {
 		path = "."
 	}
 
-	return dirFd, unsafe.StringData(path), size(len(path))
+	return dirFd, linearString(path), size(len(path))
 }
 
 func Open(path string, openmode int, perm uint32) (int, error) {
@@ -529,7 +529,7 @@ func Open(path string, openmode int, perm uint32) (int, error) {
 }
 
 func Openat(dirFd int, path string, openmode int, perm uint32) (int, error) {
-	return openat(int32(dirFd), unsafe.StringData(path), size(len(path)), openmode, perm)
+	return openat(int32(dirFd), linearString(path), size(len(path)), openmode, perm)
 }
 
 func openat(dirFd int32, pathPtr *byte, pathLen size, openmode int, perm uint32) (int, error) {
@@ -658,9 +658,20 @@ func Stat(path string, st *Stat_t) error {
 		return EINVAL
 	}
 	dirFd, pathPtr, pathLen := preparePath(path)
-	errno := path_filestat_get(dirFd, LOOKUP_SYMLINK_FOLLOW, pathPtr, pathLen, unsafe.Pointer(st))
+	lst := linearStat(st)
+	errno := path_filestat_get(dirFd, LOOKUP_SYMLINK_FOLLOW, pathPtr, pathLen, unsafe.Pointer(lst))
+	*st = *lst
 	setDefaultMode(st)
 	return errnoErr(errno)
+}
+
+// linearStat returns st, or (with GOWASM=gc, where a Stat_t may be an
+// object, not memory the host can write) a Stat_t in linear memory.
+func linearStat(st *Stat_t) *Stat_t {
+	if uintptr(unsafe.Pointer(st)) < 1<<32 {
+		return st
+	}
+	return &make([]Stat_t, 1)[0]
 }
 
 func Lstat(path string, st *Stat_t) error {
@@ -668,13 +679,17 @@ func Lstat(path string, st *Stat_t) error {
 		return EINVAL
 	}
 	dirFd, pathPtr, pathLen := preparePath(path)
-	errno := path_filestat_get(dirFd, 0, pathPtr, pathLen, unsafe.Pointer(st))
+	lst := linearStat(st)
+	errno := path_filestat_get(dirFd, 0, pathPtr, pathLen, unsafe.Pointer(lst))
+	*st = *lst
 	setDefaultMode(st)
 	return errnoErr(errno)
 }
 
 func Fstat(fd int, st *Stat_t) error {
-	errno := fd_filestat_get(int32(fd), unsafe.Pointer(st))
+	lst := linearStat(st)
+	errno := fd_filestat_get(int32(fd), unsafe.Pointer(lst))
+	*st = *lst
 	setDefaultMode(st)
 	return errnoErr(errno)
 }
@@ -876,7 +891,7 @@ func Symlink(path, link string) error {
 	}
 	dirFd, pathPtr, pathlen := preparePath(link)
 	errno := path_symlink(
-		unsafe.StringData(path),
+		linearString(path),
 		size(len(path)),
 		dirFd,
 		pathPtr,
@@ -897,31 +912,50 @@ func makeIOVec(b []byte) *iovec {
 	}
 }
 
+// linearBytes returns b, or a copy of it if it is not in linear memory,
+// which is where the host reads and writes: with GOWASM=gc a slice of
+// bytes may be part of an object, whose address is then not one of
+// linear memory (which is under 4 GB).
+func linearBytes(b []byte) []byte {
+	if uintptr(unsafe.Pointer(unsafe.SliceData(b))) < 1<<32 {
+		return b
+	}
+	lb := make([]byte, len(b))
+	copy(lb, b)
+	return lb
+}
+
 func Read(fd int, b []byte) (int, error) {
 	var nread size
-	errno := fd_read(int32(fd), makeIOVec(b), 1, &nread)
-	runtime.KeepAlive(b)
+	lb := linearBytes(b)
+	errno := fd_read(int32(fd), makeIOVec(lb), 1, &nread)
+	runtime.KeepAlive(lb)
+	copy(b, lb[:nread])
 	return int(nread), errnoErr(errno)
 }
 
 func Write(fd int, b []byte) (int, error) {
 	var nwritten size
-	errno := fd_write(int32(fd), makeIOVec(b), 1, &nwritten)
-	runtime.KeepAlive(b)
+	lb := linearBytes(b)
+	errno := fd_write(int32(fd), makeIOVec(lb), 1, &nwritten)
+	runtime.KeepAlive(lb)
 	return int(nwritten), errnoErr(errno)
 }
 
 func Pread(fd int, b []byte, offset int64) (int, error) {
 	var nread size
-	errno := fd_pread(int32(fd), makeIOVec(b), 1, filesize(offset), &nread)
-	runtime.KeepAlive(b)
+	lb := linearBytes(b)
+	errno := fd_pread(int32(fd), makeIOVec(lb), 1, filesize(offset), &nread)
+	runtime.KeepAlive(lb)
+	copy(b, lb[:nread])
 	return int(nread), errnoErr(errno)
 }
 
 func Pwrite(fd int, b []byte, offset int64) (int, error) {
 	var nwritten size
-	errno := fd_pwrite(int32(fd), makeIOVec(b), 1, filesize(offset), &nwritten)
-	runtime.KeepAlive(b)
+	lb := linearBytes(b)
+	errno := fd_pwrite(int32(fd), makeIOVec(lb), 1, filesize(offset), &nwritten)
+	runtime.KeepAlive(lb)
 	return int(nwritten), errnoErr(errno)
 }
 
@@ -952,4 +986,17 @@ func RandomGet(b []byte) error {
 	}
 	errno := random_get(unsafe.SliceData(b), size(len(b)))
 	return errnoErr(errno)
+}
+
+// linearString returns a pointer to the bytes of s in linear memory,
+// which the host can read: with GOWASM=gc, the bytes of a string made
+// at run time may be an object, so they are copied.
+func linearString(s string) *byte {
+	p := unsafe.StringData(s)
+	if len(s) == 0 || uintptr(unsafe.Pointer(p)) < 1<<32 {
+		return p
+	}
+	b := make([]byte, len(s))
+	copy(b, s)
+	return &b[0]
 }

@@ -635,6 +635,9 @@ func (v Value) call(op string, in []Value) []Value {
 		panic("reflect.Value.Call: wrong argument count")
 	}
 	nout := t.NumOut()
+	if wasmGCMode {
+		return callWasmGC(op, t, fn, rcvr, rcvrtype, in)
+	}
 
 	// Register argument space.
 	var regArgs abi.RegArgs
@@ -1677,6 +1680,11 @@ func (v Value) Field(i int) Value {
 		return sub
 	}
 	ptr := add(v.ptr, field.Offset, "same as non-reflect &v.field")
+	if wasmGCMode && field.Typ.Kind() == abi.Struct && field.Offset != 0 {
+		// A pointer to a struct, not into an array it starts with
+		// (see GCAddPtrStruct in cmd/internal/obj/wasm).
+		ptr = unsafe.Add(v.ptr, field.Offset|1<<30)
+	}
 	return Value{typ_: typ, ptr: ptr, flag: fl}
 }
 
@@ -2126,11 +2134,11 @@ func (v Value) IsZero() bool {
 		}
 		typ := (*abi.ArrayType)(unsafe.Pointer(v.typ()))
 		// If the type is comparable, then compare directly with zero.
-		if typ.Equal != nil && typ.Size() <= abi.ZeroValSize {
+		if gcHasEqual(&typ.Type) && typ.Size() <= abi.ZeroValSize {
 			// v.ptr doesn't escape, as Equal functions are compiler generated
 			// and never escape. The escape analysis doesn't know, as it is a
 			// function pointer call.
-			return typ.Equal(abi.NoEscape(v.dataPtr()), unsafe.Pointer(&zeroVal[0]))
+			return gcTypeEqual(&typ.Type, abi.NoEscape(v.dataPtr()), unsafe.Pointer(&zeroVal[0]))
 		}
 		if typ.TFlag&abi.TFlagRegularMemory != 0 {
 			// For some types where the zero value is a value where all bits of this type are 0
@@ -2157,9 +2165,9 @@ func (v Value) IsZero() bool {
 		}
 		typ := (*abi.StructType)(unsafe.Pointer(v.typ()))
 		// If the type is comparable, then compare directly with zero.
-		if typ.Equal != nil && typ.Size() <= abi.ZeroValSize {
+		if gcHasEqual(&typ.Type) && typ.Size() <= abi.ZeroValSize {
 			// See noescape justification above.
-			return typ.Equal(abi.NoEscape(v.dataPtr()), unsafe.Pointer(&zeroVal[0]))
+			return gcTypeEqual(&typ.Type, abi.NoEscape(v.dataPtr()), unsafe.Pointer(&zeroVal[0]))
 		}
 		if typ.TFlag&abi.TFlagRegularMemory != 0 {
 			// For some types where the zero value is a value where all bits of this type are 0

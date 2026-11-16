@@ -545,6 +545,60 @@ const (
 	// ATHROW throws the tag whose index is From.Offset.
 	ATHROW
 
+	// Instructions on garbage-collected objects (GOWASM=gc). The type
+	// is named by To.Sym (see gc.go); To.Offset is a field index or an
+	// element count.
+	AStructNew
+	AStructNewDefault
+	AStructGet
+	AStructGetS
+	AStructGetU
+	AStructSet
+	AArrayNew
+	AArrayNewDefault
+	AArrayNewFixed
+	AArrayGet
+	AArrayGetS
+	AArrayGetU
+	AArraySet
+	AArrayLen
+	AArrayFill
+	AArrayCopy
+	ARefTest
+	ARefCast     // to a non-null reference
+	ARefCastNull // to a nullable reference
+	ARefNull     // the null eqref
+	ARefIsNull
+	ARefAsNonNull
+	ARefEq
+	ARefI31
+	AI31GetS
+	AI31GetU
+	// ABrOnCast branches to To, carrying the eqref on the stack cast
+	// to the non-null type From.Sym (i31 if nil), if the cast succeeds.
+	ABrOnCast
+	// ABrOnCastFail branches to To, carrying the eqref on the stack,
+	// if it cannot be cast to the non-null type From.Sym (i31 if
+	// nil), and otherwise leaves it cast.
+	ABrOnCastFail
+	// ATypeConst pushes, as an i32, the index of the type To.Sym.
+	ATypeConst
+	// ARefBlock opens a block whose result is a non-null reference to
+	// the type To.Sym.
+	ARefBlock
+	// ARefSelect is select on two eqrefs.
+	ARefSelect
+	// ABrOnNonNull branches to To, carrying the reference on the
+	// stack, if it is not null; and drops it otherwise.
+	ABrOnNonNull
+	// ARefNullNone pushes the null reference of the bottom heap type,
+	// which a local of any reference type can hold.
+	ARefNullNone
+	// ARefGlobalGet and ARefGlobalSet read and write the global that
+	// holds the object of the data symbol To.Sym.
+	ARefGlobalGet
+	ARefGlobalSet
+
 	AMOVB
 	AMOVH
 	AMOVW
