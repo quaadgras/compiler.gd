@@ -9,6 +9,7 @@ import (
 	"encoding"
 	"errors"
 	"fmt"
+	"internal/wasmgc"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -316,15 +317,17 @@ func (d *Decoder) unmarshalAttr(val reflect.Value, attr Attr) error {
 var attrType = reflect.TypeFor[Attr]()
 
 const (
-	maxUnmarshalDepth     = 10000
-	maxUnmarshalDepthWasm = 5000 // go.dev/issue/56498
+	maxUnmarshalDepth       = 10000
+	maxUnmarshalDepthWasm   = 5000 // go.dev/issue/56498
+	maxUnmarshalDepthWasmGC = 1000 // (GOWASM=gc: see internal/wasmgc)
 )
 
 var errUnmarshalDepth = errors.New("exceeded max depth")
 
 // Unmarshal a single XML element into val.
 func (d *Decoder) unmarshal(val reflect.Value, start *StartElement) error {
-	if d.stkDepth > maxUnmarshalDepth || runtime.GOARCH == "wasm" && d.stkDepth > maxUnmarshalDepthWasm {
+	if d.stkDepth > maxUnmarshalDepth || runtime.GOARCH == "wasm" && d.stkDepth > maxUnmarshalDepthWasm ||
+		wasmgc.Enabled && d.stkDepth > maxUnmarshalDepthWasmGC {
 		return errUnmarshalDepth
 	}
 	// Find start element if we need it.

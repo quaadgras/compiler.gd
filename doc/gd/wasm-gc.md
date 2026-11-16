@@ -923,3 +923,15 @@ under node `--no-liftoff` avoids. Not checked: Firefox and Safari
 
 `runtime.SetFinalizer` does nothing now (the user's choice; cleanups
 work). `MemStats.Frees` is not counted.
+
+### Stack overflow
+
+The engine's stacks do not grow (a goroutine's under node is 8 MB, set
+by `--wasm-stack-switching-stack-size`; a browser's cannot be set), and Go
+frames are WebAssembly frames, some of them large: under node, recursion
+through `encoding/asn1`'s decoder reaches about 780 levels, `encoding/xml`'s
+about 1,700, `io/fs.Glob`'s about 2,300. The host reports running out as
+Go does, `fatal error: stack overflow`, which deferred calls do not see.
+Packages that bound recursion against hostile input bound it lower under
+GOWASM=gc (`internal/wasmgc.Enabled`): asn1 at 500, xml at 1,000, glob at
+1,000.

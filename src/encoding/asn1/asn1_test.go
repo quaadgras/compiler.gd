@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"internal/wasmgc"
 	"math"
 	"math/big"
 	"reflect"
@@ -1262,6 +1263,9 @@ func TestUnmarshalNestingLimitSlice(t *testing.T) {
 	if runtime.GOARCH == "wasm" {
 		limit = 5000
 	}
+	if wasmgc.Enabled {
+		limit = 500
+	}
 
 	makeData := func(t *testing.T, depth int) []byte {
 		var r Recursive
@@ -1307,6 +1311,9 @@ func TestUnmarshalNestingLimitStruct(t *testing.T) {
 	limit := 5000
 	if runtime.GOARCH == "wasm" {
 		limit = 2500
+	}
+	if wasmgc.Enabled {
+		limit = 250
 	}
 
 	makeData := func(t *testing.T, depth int) []byte {

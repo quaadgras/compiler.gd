@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"internal/saferio"
+	"internal/wasmgc"
 	"math"
 	"math/big"
 	"reflect"
@@ -710,10 +711,12 @@ func invalidLength(offset, length, sliceLength int) bool {
 func parseField(v reflect.Value, bytes []byte, initOffset int, params fieldParameters, depth int) (offset int, err error) {
 	depth++
 	const (
-		maxDecodeDepth     = 10000
-		maxDecodeDepthWasm = 5000 // go.dev/issue/56498
+		maxDecodeDepth       = 10000
+		maxDecodeDepthWasm   = 5000 // go.dev/issue/56498
+		maxDecodeDepthWasmGC = 500  // (GOWASM=gc: see internal/wasmgc)
 	)
-	if depth > maxDecodeDepth || runtime.GOARCH == "wasm" && depth > maxDecodeDepthWasm {
+	if depth > maxDecodeDepth || runtime.GOARCH == "wasm" && depth > maxDecodeDepthWasm ||
+		wasmgc.Enabled && depth > maxDecodeDepthWasmGC {
 		return initOffset, StructuralError{"nesting depth exceeded"}
 	}
 	offset = initOffset

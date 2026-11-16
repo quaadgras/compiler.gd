@@ -61,6 +61,7 @@ var depsRules = `
 	  internal/syslist,
 	  internal/trace/tracev2,
 	  internal/trace/traceviewer/format,
+	  internal/wasmgc,
 	  log/internal,
 	  math/bits,
 	  structs,
@@ -88,6 +89,7 @@ var depsRules = `
 	internal/runtime/pprof/label,
 	internal/strconv,
 	internal/trace/tracev2,
+	internal/wasmgc,
 	math/bits,
 	structs,
 	simd/archsimd
