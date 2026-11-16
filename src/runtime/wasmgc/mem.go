@@ -26,7 +26,15 @@ func memmove(to, from unsafe.Pointer, n uintptr) {
 		lincopy(t, f, n)
 		return
 	}
-	// TODO: overlapping moves within an object.
+	// Within an object, pointers are ordered as integers (their
+	// identity is that of the object, plus the offset): a move to
+	// after where it overlaps goes backwards.
+	if t, f := uintptr(to), uintptr(from); t > f && t-f < n {
+		for i := n; i > 0; i-- {
+			*(*byte)(add(to, i-1)) = *(*byte)(add(from, i-1))
+		}
+		return
+	}
 	for i := uintptr(0); i < n; i++ {
 		*(*byte)(add(to, i)) = *(*byte)(add(from, i))
 	}
