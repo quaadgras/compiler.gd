@@ -164,6 +164,16 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 			return s.newValue2(ssa.OpMul64uover, types.NewTuple(types.Types[types.TUINT], types.Types[types.TUINT]), args[0], args[1])
 		},
 		sys.AMD64, sys.I386, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64, sys.ARM64)
+	// gd fork: internal/abi.NoEscape is its argument. Escape analysis
+	// still reads its body (it is not inlined, being an intrinsic), so
+	// nothing flows from its argument to its result; but the code is the
+	// pointer itself, not a round trip through uintptr, which with
+	// GOWASM=gc,split would make a pointer with no array of pointers.
+	add("internal/abi", "NoEscape",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			return args[0]
+		},
+		all...)
 	add("runtime", "KeepAlive",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			data := s.newValue1(ssa.OpIData, s.f.Config.Types.BytePtr, args[0])

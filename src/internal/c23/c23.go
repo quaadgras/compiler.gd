@@ -36,6 +36,7 @@ package c23
 
 import (
 	"fmt"
+	"internal/abi"
 	"math"
 	"strings"
 	"sync"
@@ -76,7 +77,7 @@ func (p Ptr) header() *header {
 	if p.ti&1 == 0 {
 		return nil
 	}
-	return (*header)(noescape(unsafe.Add(p.obj, -int(hdrSize))))
+	return (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
 }
 
 // A Fault is what a C access that its capability does not allow panics with.

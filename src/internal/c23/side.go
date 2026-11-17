@@ -5,6 +5,7 @@
 package c23
 
 import (
+	"internal/abi"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -135,7 +136,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 			*slot = unsafe.Pointer(tb)
 		}
 		// Entries below this frame are in frames that have returned.
-		sp := uintptr(noescape(unsafe.Pointer(&kind)))
+		sp := uintptr(abi.NoEscape(unsafe.Pointer(&kind)))
 		j := 0
 		for _, e := range tb.e {
 			if e.addr >= sp && e.addr != key {
