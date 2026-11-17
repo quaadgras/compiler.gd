@@ -378,6 +378,12 @@ func (h *header) makeSlots() unsafe.Pointer {
 	return atomic.LoadPointer(&h.aux)
 }
 
+// check returns the address of n bytes at p, which its capability must
+// cover. cmd/compile makes it an intrinsic (ssagen's c23Check): Go's own
+// tests of a slice's bounds, which its prove pass reasons about, so that
+// a check another dominates goes, and a call of boundsPanic, in a block
+// that does not return. This body is the same check, for where the
+// intrinsic is not used.
 func check(p Ptr, n uintptr) unsafe.Pointer {
 	// A pointer with no capability has size 0; a negative offset is
 	// past any size.
@@ -387,6 +393,13 @@ func check(p Ptr, n uintptr) unsafe.Pointer {
 		panic(boundsFault{uintptr(p.obj), p.size, p.ti, n, p.off})
 	}
 	return unsafe.Add(p.obj, p.off)
+}
+
+// boundsPanic is check's fault, as the intrinsic calls it.
+//
+//go:noinline
+func boundsPanic(obj unsafe.Pointer, size, ti, n uintptr, off int) {
+	panic(boundsFault{uintptr(obj), size, ti, n, off})
 }
 
 // checkFail faults for an access check refuses: apart, so that check

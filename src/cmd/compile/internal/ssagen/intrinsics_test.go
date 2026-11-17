@@ -33,6 +33,20 @@ type testIntrinsicKey struct {
 }
 
 var wantIntrinsics = map[testIntrinsicKey]struct{}{
+	{"386", "internal/c23", "check"}:                                   struct{}{},
+	{"amd64", "internal/c23", "check"}:                                 struct{}{},
+	{"arm", "internal/c23", "check"}:                                   struct{}{},
+	{"arm64", "internal/c23", "check"}:                                 struct{}{},
+	{"loong64", "internal/c23", "check"}:                               struct{}{},
+	{"mips", "internal/c23", "check"}:                                  struct{}{},
+	{"mips64", "internal/c23", "check"}:                                struct{}{},
+	{"mips64le", "internal/c23", "check"}:                              struct{}{},
+	{"mipsle", "internal/c23", "check"}:                                struct{}{},
+	{"ppc64", "internal/c23", "check"}:                                 struct{}{},
+	{"ppc64le", "internal/c23", "check"}:                               struct{}{},
+	{"riscv64", "internal/c23", "check"}:                               struct{}{},
+	{"s390x", "internal/c23", "check"}:                                 struct{}{},
+	{"wasm", "internal/c23", "check"}:                                  struct{}{},
 	{"386", "internal/runtime/math", "MulUintptr"}:                     struct{}{},
 	{"386", "internal/runtime/sys", "Bswap32"}:                         struct{}{},
 	{"386", "internal/runtime/sys", "Bswap64"}:                         struct{}{},

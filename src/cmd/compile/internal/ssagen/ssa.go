@@ -6862,6 +6862,22 @@ func (s *state) check(cmp *ssa.Value, fn *obj.LSym) {
 	s.startBlock(bNext)
 }
 
+// c23Check continues if cmp holds, and otherwise calls fn with args, in
+// a block that does not return (internal/c23's check: its intrinsic).
+func (s *state) c23Check(cmp *ssa.Value, fn *obj.LSym, args ...*ssa.Value) {
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cmp)
+	b.Likely = ssa.BranchLikely
+	bNext := s.f.NewBlock(ssa.BlockPlain)
+	bPanic := s.f.NewBlock(ssa.BlockPlain)
+	b.AddEdgeTo(bNext)
+	b.AddEdgeTo(bPanic)
+	s.startBlock(bPanic)
+	s.rtcall(fn, false, nil, args...)
+	s.startBlock(bNext)
+}
+
 func (s *state) intDivide(n ir.Node, a, b *ssa.Value) *ssa.Value {
 	needcheck := true
 	switch b.Op {
