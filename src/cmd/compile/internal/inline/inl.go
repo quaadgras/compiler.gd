@@ -57,6 +57,7 @@ const (
 
 	inlineBigFunctionNodes      = 5000                 // Functions with this many nodes are considered "big".
 	inlineBigFunctionMaxCost    = 20                   // Max cost of inlinee when inlining into a "big" function.
+	inlineC23MaxBudget          = 200                  // Max cost of an internal/c23 inlinee (isC23), into any function.
 	inlineClosureCalledOnceCost = 10 * inlineMaxBudget // if a closure is just called once, inline it.
 )
 
@@ -218,6 +219,15 @@ func CanInlineFuncs(gd *base.Invocation, funcs []*ir.Func, profile *pgoir.Profil
 	})
 }
 
+// isC23 reports whether fn is of internal/c23, the run-time support of
+// C that cmd/cc translates: its accesses through C's pointers (a check,
+// the fast path of a pointer load) are inlined with a bigger budget, and
+// even into big functions, as C's interpreter loops (Lua's, SQLite's) are,
+// which do little else.
+func isC23(fn *ir.Func) bool {
+	return fn.Sym() != nil && fn.Sym().Pkg != nil && fn.Sym().Pkg.Path == "internal/c23"
+}
+
 func simdCreditMultiplier(fn *ir.Func) int32 {
 	for _, field := range fn.Type().RecvParamsResults() {
 		if field.Type.IsSIMD() {
@@ -251,6 +261,9 @@ func inlineBudget(gd *base.Invocation, fn *ir.Func, profile *pgoir.Profile, rela
 	budget := int32(inlineMaxBudget)
 
 	budget *= simdCreditMultiplier(fn)
+	if isC23(fn) {
+		budget = max(budget, inlineC23MaxBudget)
+	}
 
 	if IsPgoHotFunc(gd, fn, profile) {
 		budget = inlineHotMaxBudgetOf(gd)
@@ -1015,7 +1028,7 @@ var InlineCall = func(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr,
 func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, bigCaller, closureCalledOnce bool) (bool, int32, int32, bool) {
 	maxCost := int32(inlineMaxBudget)
 
-	if bigCaller {
+	if bigCaller && !isC23(callee) {
 		// We use this to restrict inlining into very big functions.
 		// See issue 26546 and 17566.
 		maxCost = inlineBigFunctionMaxCost
@@ -1031,6 +1044,15 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 	}
 
 	maxCost = max(maxCost, simdMaxCost)
+	if isC23(callee) {
+		// Into a big function, only the checks: more makes its
+		// compilation take far longer (SQLite's VDBE loop).
+		if bigCaller {
+			maxCost = max(maxCost, inlineMaxBudget)
+		} else {
+			maxCost = max(maxCost, inlineC23MaxBudget)
+		}
+	}
 
 	metric := callee.Inl.Cost
 	if inlheur.Enabled(gd) {

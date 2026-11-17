@@ -381,6 +381,8 @@ func check(p Ptr, n uintptr) unsafe.Pointer {
 	// A pointer with no capability has size 0; a negative offset is
 	// past any size.
 	if off := uintptr(p.off); off > p.size || n > p.size-off {
+		// A panic, not a call: Go knows it does not return, so values
+		// need not be saved around it.
 		panic(boundsFault{uintptr(p.obj), p.size, p.ti, n, p.off})
 	}
 	return unsafe.Add(p.obj, p.off)
@@ -441,25 +443,31 @@ func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
 	return FromInt(w)
 }
 
-// LoadPtr loads the pointer at p.
+// LoadPtr loads the pointer at p. Its fast path, which cmd/compile
+// inlines, is a C object's slot holding the header of the C object the
+// word is still in.
 func LoadPtr(p Ptr) Ptr {
-	a := checkPtrWord(p)
-	if p.ti&1 != 0 {
-		// C's object: the slot's capability, if the word is still in
-		// it. A slot is only set by a pointer store, which checked the
-		// word may hold one.
+	// C's object (whose base is aligned), an aligned word in bounds.
+	if off := uintptr(p.off); p.ti&1 != 0 && off&7 == 0 && off < p.size && p.size-off >= 8 {
+		// A slot is only set by a pointer store, which checked the word
+		// may hold one.
 		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
 		if t := atomic.LoadPointer(&h.aux); t != nil {
-			if c := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, uintptr(p.off)/8*8))); c != nil {
-				q := fromCap(c)
-				if q.off = int(*(*uintptr)(a) - uintptr(q.obj)); uintptr(q.off) <= q.size {
-					return q
+			c := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, off)))
+			if c != nil && *(*uintptr)(c) == magic {
+				ch := (*header)(c)
+				obj := unsafe.Add(c, hdrSize)
+				if o := *(*uintptr)(unsafe.Add(p.obj, off)) - uintptr(obj); o <= ch.size {
+					return Ptr{obj: obj, size: ch.size, off: int(o), ti: ch.ti.ref | 1}
 				}
 			}
 		}
 	}
-	return loadPtr(p, a)
+	return loadPtrSlow(p)
 }
+
+//go:noinline
+func loadPtrSlow(p Ptr) Ptr { return loadPtr(p, checkPtrWord(p)) }
 
 func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 	k := p.info().kindAt(uintptr(p.off))
@@ -501,9 +509,31 @@ func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 	return derive(w, p.info().elemAt(uintptr(p.off)))
 }
 
-// StorePtr stores the pointer v at p.
+// StorePtr stores the pointer v at p. Its fast path, which cmd/compile
+// inlines, is C's pointer into C's object stored in a split word of C's
+// object (a union's, say).
 func StorePtr(p, v Ptr) {
-	a := checkPtrWord(p)
+	if off := uintptr(p.off); p.ti&v.ti&1 != 0 && off&7 == 0 && off < p.size && p.size-off >= 8 {
+		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
+		// A split word, found by a mask: C's arrays' elements are mostly
+		// of a size that is a power of two (malloc's bytes, one).
+		if t := atomic.LoadPointer(&h.aux); t != nil && (h.ti.mask != 0 || h.ti.size == 1) && h.ti.kinds[(off&h.ti.mask)/8] == wSplit {
+			// The capability first, so that what it points to stays
+			// alive; a plain store, with the write barrier: a load
+			// racing with it sees the old capability or the new one, as
+			// Go's memory model has a word-sized read see one write.
+			*(*unsafe.Pointer)(unsafe.Add(t, off)) = unsafe.Add(v.obj, -int(hdrSize))
+			*(*uintptr)(unsafe.Add(p.obj, off)) = Addr(v)
+			return
+		}
+	}
+	storePtrSlow(p, v)
+}
+
+//go:noinline
+func storePtrSlow(p, v Ptr) { storePtr(p, v, checkPtrWord(p)) }
+
+func storePtr(p, v Ptr, a unsafe.Pointer) {
 	k := p.info().kindAt(uintptr(p.off))
 	switch k {
 	case wScalar:
@@ -515,10 +545,7 @@ func StorePtr(p, v Ptr) {
 		// The capability first, so that what it points to stays alive.
 		c := capOf(v)
 		if s := h.slot(uintptr(p.off), c != nil); s != nil {
-			// A plain store, with the write barrier: a load racing
-			// with it sees the old capability or the new one, as Go's
-			// memory model has a word-sized read see one write.
-			*s = c
+			*s = c // as above
 		}
 		if k == wSplit {
 			*(*uintptr)(a) = Addr(v)
