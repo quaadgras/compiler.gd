@@ -147,7 +147,7 @@ go/parser ok
 go/printer ok
 go/scanner ok
 go/token ok
-go/types FAIL --- FAIL: TestSizeof | sizeof_test.go:64: unsafe.Sizeof(types.Chan) = 32, want 28
+go/types FAIL --- FAIL: TestSizeof | sizeof_test.go:64: unsafe.Sizeof(types.Basic) = 24, want 20
 go/version ok
 hash ok
 hash/adler32 ok
@@ -267,7 +267,7 @@ io/ioutil ok
 iter ok
 log ok
 log/internal SKIP no test files
-log/slog FAIL --- FAIL: TestAlloc | logger_test.go:351: got 1 allocs, want 0
+log/slog ok
 log/slog/internal SKIP no test files
 log/slog/internal/benchmarks ok
 log/slog/internal/buffer ok
@@ -301,7 +301,7 @@ net/http/pprof ok
 net/internal/cgotest ok
 net/internal/socktest SKIP no test files
 net/mail ok
-net/netip FAIL --- FAIL: TestAddrStringAllocs | netip_test.go:2337: allocs=1, want 0
+net/netip ok
 net/rpc ok
 net/rpc/jsonrpc ok
 net/smtp ok
@@ -353,7 +353,7 @@ time/tzdata SKIP no test files
 unicode ok
 unicode/utf16 ok
 unicode/utf8 ok
-unique FAIL --- FAIL: TestMakeAllocs | handle_test.go:281: string to any: got 1 allocs, want 0
+unique ok
 unsafe SKIP no test files
 uuid ok
 vendor/golang.org/x/crypto/chacha20 SKIP no test files
