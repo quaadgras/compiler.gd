@@ -564,8 +564,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 			str := ldr.CreateSymForUpdate("go:link.pkghash."+l.Pkg, 0)
 			str.SetType(sym.SRODATA)
 			str.AddAddr(ctxt.Arch, s.Sym())
-			str.AddUint(ctxt.Arch, 0) // gd: hash slot, phase A = 0
-			str.AddUint(ctxt.Arch, uint64(len(l.Fingerprint)))
+			addStringRest(ctxt.Arch, str, uint64(len(l.Fingerprint)))
 		}
 	}
 
@@ -726,9 +725,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	} else {
 		// gd: empty string field is 3 words (ptr, hash, len).
 		moduledata.AddUint(ctxt.Arch, 0) // pluginpath.ptr
-		moduledata.AddUint(ctxt.Arch, 0) // pluginpath.hash
-		moduledata.AddUint(ctxt.Arch, 0) // pluginpath.len
-		nilSlice()                       // pkghashes slice
+		addStringRest(ctxt.Arch, moduledata, 0)
+		nilSlice() // pkghashes slice
 	}
 	// Add inittasks slice
 	t := ctxt.mainInittasks
@@ -778,9 +776,8 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	} else {
 		// gd: empty string field is 3 words (ptr, hash, len).
 		moduledata.AddUint(ctxt.Arch, 0) // modulename.ptr
-		moduledata.AddUint(ctxt.Arch, 0) // modulename.hash
-		moduledata.AddUint(ctxt.Arch, 0) // modulename.len
-		nilSlice()                       // modulehashes slice
+		addStringRest(ctxt.Arch, moduledata, 0)
+		nilSlice() // modulehashes slice
 	}
 
 	hasmain := ctxt.BuildMode == BuildModeExe || ctxt.BuildMode == BuildModePIE

@@ -175,9 +175,8 @@ func maps_rand() uint64 { return rand() }
 // stringDataHeap returns a pointer to the bytes of s that stays valid:
 // those of a short string are copied out of its words.
 func stringDataHeap(s string) *byte {
-	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str != nil {
-		return (*byte)(sh.str)
+	if p := stringData(&s); p != nil {
+		return (*byte)(p)
 	}
 	n := len(s)
 	if n == 0 {

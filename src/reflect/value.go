@@ -1839,9 +1839,19 @@ func (v Value) Index(i int) Value {
 		// into the returned Value's own inline slot (uint8 fits) and
 		// hand back a self-contained flagInline sub-Value.
 		s := (*unsafeheader.String)(v.dataPtr())
-		// (A tag read from a 4-byte word as a uint64 is 0: with 4-byte
-		// words a string has no inline form.)
-		if tag := uint64(s.Len) >> abi.StringTagShift; tag != 0 {
+		// (With 4-byte words, wasm32's string, internal/abi's
+		// string_ptr32.go: its tag is not in Len.)
+		if sp := (*string)(v.dataPtr()); goarch.PtrSize == 4 && abi.StringIsInline(*sp) {
+			if uint(i) >= uint(len(*sp)) {
+				panic("reflect: string index out of range")
+			}
+			var sub Value
+			sub.typ_ = uint8Type
+			*(*byte)(unsafe.Pointer(&sub.inline)) = abi.StringBytes(sp)[i]
+			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
+			return sub
+		}
+		if tag := uint64(s.Len) >> abi.StringTagShift; goarch.PtrSize == 8 && tag != 0 {
 			if uint64(i) >= tag {
 				panic("reflect: string index out of range")
 			}
@@ -2333,6 +2343,9 @@ func (v Value) lenNonSlice() int {
 		// String is bigger than a word; assume flagIndir. gd: Len is
 		// the raw word2 (tag nibble + length/bytes); decode the tag
 		// to get the logical length.
+		if goarch.PtrSize == 4 {
+			return len(*(*string)(v.dataPtr()))
+		}
 		raw := uint64((*unsafeheader.String)(v.dataPtr()).Len)
 		if tag := raw >> abi.StringTagShift; tag != 0 {
 			return int(tag)
@@ -2582,6 +2595,9 @@ func (v Value) Pointer() uintptr {
 		// inline-rep the bytes live in the header itself — return
 		// &s.Hash, which points at the first inline byte. The
 		// lifetime matches the Value's flagIndir storage.
+		if goarch.PtrSize == 4 {
+			return uintptr(unsafe.Pointer(unsafe.SliceData(abi.StringBytes((*string)(v.dataPtr())))))
+		}
 		sh := (*unsafeheader.String)(v.dataPtr())
 		if sh.Data != nil {
 			return uintptr(sh.Data)
@@ -2865,7 +2881,9 @@ func (v Value) Slice(i, j int) Value {
 		s := (*unsafeheader.String)(v.dataPtr())
 		raw := uint64(s.Len)
 		var logicalLen int
-		if tag := raw >> abi.StringTagShift; tag != 0 {
+		if goarch.PtrSize == 4 {
+			logicalLen = len(*(*string)(v.dataPtr()))
+		} else if tag := raw >> abi.StringTagShift; tag != 0 {
 			logicalLen = int(tag)
 		} else {
 			logicalLen = int(raw & abi.StringLenMask)
@@ -3186,7 +3204,7 @@ func (v Value) UnsafePointer() unsafe.Pointer {
 		// moves the stack between UnsafePointer returning and the
 		// caller dereferencing. Allocate a stable heap copy.
 		sh := (*unsafeheader.String)(v.dataPtr())
-		if sh.Data != nil {
+		if goarch.PtrSize == 4 && !abi.StringIsInline(*(*string)(v.dataPtr())) || goarch.PtrSize == 8 && sh.Data != nil {
 			return sh.Data
 		}
 		s := v.String()
@@ -3430,7 +3448,11 @@ func Copy(dst, src Value) int {
 		srcPtr := (&src).dataPtr()
 		sh := *(*unsafeheader.String)(srcPtr)
 		raw := uint64(sh.Len)
-		if tag := raw >> abi.StringTagShift; tag != 0 {
+		if goarch.PtrSize == 4 {
+			sb := abi.StringBytes((*string)(srcPtr))
+			ss.Data = unsafe.Pointer(unsafe.SliceData(sb))
+			ss.Len = len(sb)
+		} else if tag := raw >> abi.StringTagShift; tag != 0 {
 			ss.Data = unsafe.Pointer(uintptr(srcPtr) + goarch.PtrSize)
 			ss.Len = int(tag)
 		} else {

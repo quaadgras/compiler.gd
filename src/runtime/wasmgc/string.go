@@ -12,25 +12,48 @@ import (
 	"unsafe"
 )
 
-// A string is three words (see doc/gd/sso-string.md): up to 15 bytes
-// are in the second and third words, with the length in the top four
-// bits of the third; a longer string is a pointer to its bytes, which
-// are in linear memory, and its length in the third word.
-
-// With words of 4 bytes (wasm32) a string has no inline form, as the
-// compiler has it for any 32-bit target: its third word is all of its
-// length, and stringInline is 0.
+// A string of up to 15 bytes is kept in its words (see
+// doc/gd/sso-string.md): its bytes in two uint64s, A and B, the length
+// in the top four bits of B (the tag). A longer string, or one made of
+// bytes elsewhere, has a pointer to its bytes, which are in linear
+// memory, in word 0, and its length in another word.
+//
+// With words of 8 bytes a string is three: word 0 (nil if inline), A
+// (or the cached hash) and B (or the length). With words of 4 bytes
+// (wasm32) it is four, and A and B are all of them: word 0 is the
+// pointer and word 1 the length of a string that is not inline, so
+// word 0 is read as a pointer only if the tag is 0 (stringData).
 const (
 	stringTagShift = 60
 	stringLenMask  = 1<<stringTagShift - 1
-	stringInline   = 15 * (goarch.PtrSize / 8) // the longest string kept in the words
+	stringInline   = 15 // the longest string kept in the words
+
+	stringAOff = 8 * (goarch.PtrSize / 8) // the offset of A: 8, or 0 with 4-byte words
+	stringBOff = stringAOff + 8
 )
 
 type stringStruct struct {
-	str  unsafe.Pointer // the bytes, or nil
-	hash uint           // the cached hash, or bytes 0 to 7
-	len  uint           // the length, or tag<<60 and bytes 8 to 14
+	str  unsafe.Pointer // the bytes, or nil (or bytes 0 to 3, with 4-byte words)
+	hash uint           // the cached hash, or bytes 0 to 7 (the length, or bytes 4 to 7)
+	len  uint           // the length, or tag<<60 and bytes 8 to 14 (with 4-byte words: bytes 8 to 11, or the hash)
 }
+
+// stringTag returns the tag of *s: its length if it is kept in its
+// words, else 0.
+func stringTag(s *string) int {
+	return int(*(*uint64)(add(unsafe.Pointer(s), stringBOff)) >> stringTagShift)
+}
+
+// stringData returns the pointer to the bytes of *s, which is not kept
+// in its words, or nil if it is (word 0 of such a string with 4-byte
+// words is text, not to be read as a pointer).
+func stringData(s *string) unsafe.Pointer {
+	if goarch.PtrSize == 4 && stringTag(s) != 0 {
+		return nil
+	}
+	return (*stringStruct)(unsafe.Pointer(s)).str
+}
+
 
 // tmpBuf is the buffer on the caller's stack that the compiler offers
 // for a result that does not escape: used, as Go does, for a string too
@@ -39,10 +62,16 @@ type tmpBuf [32]byte
 
 // inlineString returns the string of the n <= 15 bytes in the words.
 func inlineString(w1, w2 uint64, n int) string {
-	var r stringStruct
-	r.hash = uint(w1)
-	r.len = uint(w2&stringLenMask | uint64(n)<<stringTagShift)
-	return *(*string)(unsafe.Pointer(&r))
+	if goarch.PtrSize == 8 {
+		var r stringStruct
+		r.hash = uint(w1)
+		r.len = uint(w2&stringLenMask | uint64(n)<<stringTagShift)
+		return *(*string)(unsafe.Pointer(&r))
+	}
+	var r string
+	*(*uint64)(add(unsafe.Pointer(&r), stringAOff)) = w1
+	*(*uint64)(add(unsafe.Pointer(&r), stringBOff)) = w2&stringLenMask | uint64(n)<<stringTagShift
+	return r
 }
 
 // A stringBuilder builds a string of a known length a byte at a time.
@@ -90,7 +119,11 @@ func (b *stringBuilder) byte(c byte) {
 
 func (b *stringBuilder) string(s string) {
 	if b.l > stringInline {
-		if src := trylinaddr((*stringStruct)(unsafe.Pointer(&s)).str); src != 0 {
+		p := (*stringStruct)(unsafe.Pointer(&s)).str
+		if goarch.PtrSize == 4 {
+			p = stringData(&s)
+		}
+		if src := trylinaddr(p); src != 0 {
 			lincopy(b.addr+uintptr(b.n), src, uintptr(len(s)))
 			b.n += len(s)
 			return
@@ -187,7 +220,11 @@ func stringtoslicebyte(buf *tmpBuf, s string) []byte {
 	if buf != nil && len(s) <= len(buf) {
 		memstatsMallocs-- // (Go would use buf)
 	}
-	if src := trylinaddr((*stringStruct)(unsafe.Pointer(&s)).str); src != 0 && len(s) > 0 {
+	p := (*stringStruct)(unsafe.Pointer(&s)).str
+	if goarch.PtrSize == 4 {
+		p = stringData(&s)
+	}
+	if src := trylinaddr(p); src != 0 && len(s) > 0 {
 		lincopy(linaddr(unsafe.Pointer(unsafe.SliceData(b))), src, uintptr(len(s)))
 		return b
 	}

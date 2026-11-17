@@ -2591,7 +2591,19 @@ func (ft *factsTable) addValueFact(b *Block, v *Value) {
 		// (tag==0); otherwise the fact lets prove substitute the
 		// raw word 2 for len, corrupting callers that expect the
 		// decoded length.
-		if v.Args[0].Op == OpStringMake {
+		if v.Args[0].Op == OpStringMake && b.Func.Config.stringWasm32() {
+			// wasm32: a string made with a pointer and a length
+			// (ssagen's sMake) has A = address | length<<32 and B =
+			// 0; in any other the values may be bytes.
+			a, b2 := v.Args[0].Args[1], v.Args[0].Args[2]
+			if b2.Op == OpConst64 && b2.AuxInt == 0 && a.Op == OpOr64 {
+				for _, x := range a.Args {
+					if x.Op == OpLsh64x64 && x.Args[0].Op == OpZeroExt32to64 && x.Args[1].Op == OpConst64 && x.Args[1].AuxInt == 32 {
+						ft.update(b, v, x.Args[0].Args[0], signed, eq)
+					}
+				}
+			}
+		} else if v.Args[0].Op == OpStringMake {
 			a2 := v.Args[0].Args[2]
 			if a2.Op != OpConst64 || uint64(a2.AuxInt)>>60 == 0 {
 				ft.update(b, v, a2, signed, eq)

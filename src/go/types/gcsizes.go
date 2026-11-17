@@ -12,6 +12,11 @@ import "internal/buildcfg"
 type gcSizes struct {
 	WordSize int64 // word size in bytes - must be >= 4 (32bits)
 	MaxAlign int64 // maximum alignment in bytes - must be >= 1
+
+	// gd: a string is four words, not three, with the 4-byte words
+	// of wasm (its inline form: cmd/compile/internal/types's
+	// StringWasm32).
+	stringWords4 bool
 }
 
 func (s *gcSizes) Alignof(T Type) (result int64) {
@@ -117,7 +122,11 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 			}
 		}
 		if k == String {
-			// gd small-string optimization: 3-word header.
+			// gd small-string optimization: 3-word header (4 words
+			// on wasm32).
+			if s.stringWords4 {
+				return s.WordSize * 4
+			}
 			return s.WordSize * 3
 		}
 	case *Array:
@@ -182,7 +191,8 @@ func gcSizesFor(compiler, arch string) *gcSizes {
 	if arch == "wasm" {
 		// gd: the word of GOARCH=wasm depends on GOWASM (4 bytes for
 		// the GC port, 8 for Go's own); see buildcfg's PtrSize.
-		return &gcSizes{int64(buildcfg.GOWASM.PtrSize()), 8}
+		ps := int64(buildcfg.GOWASM.PtrSize())
+		return &gcSizes{WordSize: ps, MaxAlign: 8, stringWords4: ps == 4}
 	}
 	return gcArchSizes[arch]
 }

@@ -425,10 +425,18 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		// RAW word 2 (tag<<60 | len-or-bytes), NOT the tag-decoded length;
 		// otherwise inline-rep strings lose their tag nibble when passed
 		// across a call boundary and the callee sees a broken header.
+		if types.StringWasm32() && !rc.hasRegs() {
+			// Word 0 and A overlap (types.StringWasm32): stored
+			// whole, which dec orders.
+			dst := x.offsetFrom(b, rc.storeDest, rc.storeOffset, types.NewPtr(at))
+			return b.NewValue3A(pos, OpStore, types.TypeMem, at, dst, a, mem)
+		}
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpStringPtr, &rc)
 		pos = pos.WithNotStmt()
-		mem = x.decomposeOne(pos, b, a, mem, x.typs.Uintptr, OpStringHash, &rc)
-		return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpStringWord2, &rc)
+		e1 := b.NewValue1(pos, OpStringHash, x.typs.StringWord1, a)
+		mem = x.decomposeAsNecessary(pos, b, e1, mem, rc.nextStringWord1(x.typs.StringWord1))
+		e := b.NewValue1(pos, OpStringWord2, x.typs.StringWord2, a)
+		return x.decomposeAsNecessary(pos, b, e, mem, rc.nextStringWord2(x.typs.StringWord2))
 
 	case types.TINTER:
 		// gd fat-interface: iface/eface is (tab, data, inline complex128).
@@ -604,8 +612,8 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		// gd: 3-slot decomposition (ptr, hash, len).
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr)))
 		pos = pos.WithNotStmt()
-		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr)))
-		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Int, rc.next(x.typs.Int)))
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.StringWord1, rc.nextStringWord1(x.typs.StringWord1)))
+		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.StringWord2, rc.nextStringWord2(x.typs.StringWord2)))
 		a = makeOf(a, OpStringMake, args)
 		x.commonSelectors[sk] = a
 		return a
@@ -767,10 +775,17 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 
 	case types.TSTRING:
 		// gd: 3-slot wide store (ptr, hash, len).
+		if types.StringWasm32() {
+			// Word 0 and A overlap (types.StringWasm32): stored
+			// whole, which dec orders.
+			v := x.rewriteSelectOrArg(pos, b, container, nil, m0, at, rc)
+			dst := x.offsetFrom(b, rc.storeDest, rc.storeOffset, types.NewPtr(at))
+			return b.NewValue3A(pos, OpStore, types.TypeMem, at, dst, v, m0)
+		}
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr))
 		pos = pos.WithNotStmt()
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr))
-		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Int, rc.next(x.typs.Int))
+		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.StringWord2, rc.nextStringWord2(x.typs.StringWord2))
 		return m0
 
 	case types.TINTER:
@@ -878,6 +893,37 @@ func (c *registerCursor) next(t *types.Type) registerCursor {
 	c.storeOffset = types.RoundUp(c.storeOffset, t.Alignment())
 	rc := *c
 	c.storeOffset = types.RoundUp(c.storeOffset+t.Size(), t.Alignment())
+	if int(c.nextSlice) < len(c.regs) {
+		w := c.config.NumParamRegs(t)
+		c.nextSlice += Abi1RO(w)
+	}
+	return rc
+}
+
+// nextStringWord1 is next for the second value of a string: with
+// types.StringWasm32, A, which is at offset 0 in the string, as word 0
+// is (the first value, a pointer).
+func (c *registerCursor) nextStringWord1(t *types.Type) registerCursor {
+	if !types.StringWasm32() {
+		return c.next(t)
+	}
+	c.storeOffset -= int64(types.PtrSize)
+	rc := *c
+	c.storeOffset += t.Size()
+	if int(c.nextSlice) < len(c.regs) {
+		w := c.config.NumParamRegs(t)
+		c.nextSlice += Abi1RO(w)
+	}
+	return rc
+}
+
+// nextStringWord2 is next for the third value of a string, at
+// types.StringLenOffset in the string whatever the string's alignment:
+// with the 4-byte words of wasm32 it is a uint64 (words 2 and 3) in a
+// string aligned to 4, which next would align to 8.
+func (c *registerCursor) nextStringWord2(t *types.Type) registerCursor {
+	rc := *c
+	c.storeOffset += t.Size()
 	if int(c.nextSlice) < len(c.regs) {
 		w := c.config.NumParamRegs(t)
 		c.nextSlice += Abi1RO(w)

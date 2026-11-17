@@ -318,6 +318,14 @@ func gcAppendRegs(b []byte, t *abi.Type, off uintptr) []byte {
 			b = gcAppendRegs(b, at.Elem, off+i*at.Elem.Size())
 		}
 	case abi.String, abi.Slice:
+		if k == abi.String && goarch.PtrSize == 4 {
+			// wasm32's string (ld.WasmGCRegs): word 0 as a pointer
+			// if the tag is 0, A over it, and B.
+			add(0, 's', 'r', false)
+			add(0, 'l', 'l', false)
+			add(8, 'l', 'l', false)
+			break
+		}
 		add(0, 'r', 'r', false)
 		add(goarch.PtrSize, gcWordKind, 'l', false)
 		add(2*goarch.PtrSize, gcWordKind, 'l', false)

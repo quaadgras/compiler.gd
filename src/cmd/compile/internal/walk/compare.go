@@ -402,7 +402,8 @@ func walkCompareString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir
 		// header words against the constant's (two immediates for a
 		// 1..15 byte constant) instead of indexing the string byte by
 		// byte, where every index pays the inline-vs-heap dispatch.
-		if types.PtrSize == 8 && (cmp == ir.OEQ || cmp == ir.ONE) && len(ir.StringVal(cs)) > 0 {
+		// (So on wasm32 too, whose strings have an inline form.)
+		if types.StringInlineCap > 0 && (cmp == ir.OEQ || cmp == ir.ONE) && len(ir.StringVal(cs)) > 0 {
 			maxRewriteLen = 0
 		}
 		if s := ir.StringVal(cs); len(s) <= maxRewriteLen {

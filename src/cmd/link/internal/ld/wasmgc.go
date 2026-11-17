@@ -174,6 +174,15 @@ func wasmGCAppendRegs(ctxt *Link, rs []WasmGCReg, typ loader.Sym, off int64) []W
 		}
 	case abi.String, abi.Slice:
 		ps, w := int64(arch.PtrSize), WasmGCWordKind(arch)
+		if k == abi.String && wasm32String(arch) {
+			// Word 0 as a pointer ('s': only if the tag is 0), then
+			// A over it and B (cmd/compile/internal/types's
+			// StringWasm32).
+			add(0, 's', 'r', false)
+			add(0, 'l', 'l', false)
+			add(8, 'l', 'l', false)
+			break
+		}
 		add(0, 'r', 'r', false)
 		add(ps, w, 'l', false)
 		add(2*ps, w, 'l', false)

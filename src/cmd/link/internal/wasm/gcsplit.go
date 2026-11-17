@@ -759,6 +759,27 @@ func (a *gcAsm) splitLoadReg(r ld.WasmGCReg, ptr func()) {
 		i, _ := l.splitHelperIndex(name)
 		a.call(l.helperFirst + i)
 	}
+	if r.Mem == 's' {
+		// Word 0 of a string of wasm32 (ld.WasmGCRegs): a pointer if
+		// the tag, the top 4 bits of its byte 15, is 0, else nil
+		// without reading the word as one.
+		a.op(0x02) // block (result (ref null ptr))
+		l.splitValType(&a.Buffer, 'r')
+		a.op(0xD0, 0x71) // ref.null none
+		ptr()
+		a.gc(0x02, l.typeIndex(wasm.GCPtr), wasm.GCPtrAddr)
+		a.op(0x2D, 0) // i32.load8_u
+		writeUleb128(a, uint64(r.Off+15))
+		a.i32(4)
+		a.op(0x76)    // i32.shr_u
+		a.op(0x0D, 0) // br_if 0
+		a.op(0x1A)    // drop
+		ptr()
+		a.i32(r.Off)
+		helper(wasm.GCSplitLoadPtr)
+		a.end()
+		return
+	}
 	ptr()
 	switch {
 	case r.Reg == 'r' && r.Mem == 'r':
@@ -793,7 +814,9 @@ func (a *gcAsm) splitStoreReg(r ld.WasmGCReg, ptr, val func()) {
 		a.call(l.helperFirst + i)
 	}
 	ptr()
-	if r.Reg == 'r' && r.Mem == 'r' {
+	if r.Reg == 'r' && (r.Mem == 'r' || r.Mem == 's') {
+		// (Word 0 of a string, 's', is stored as a pointer before A,
+		// the next register, writes the word again.)
 		a.i32(r.Off)
 		val()
 		helper(wasm.GCSplitStorePtr)

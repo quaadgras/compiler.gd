@@ -779,6 +779,33 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 	case ssa.OpLocalAddr, ssa.OpAddr, ssa.OpOffPtr, ssa.OpPtrIndex, ssa.OpAddPtr:
 		g.pointer(v)
 
+	case ssa.OpPtrBits:
+		// The address of a pointer, as an integer: word 0 of a
+		// string made of a pointer (types.StringWasm32).
+		g.get(v.Args[0], false)
+		if g.wtype(v.Args[0].Type) == 'r' {
+			g.ptrToInt()
+		}
+
+	case ssa.OpStringLoadPtr:
+		// Word 0 of the string at Args[0] as a pointer, if the tag in
+		// its B (Args[1]) is 0; nil, without reading the word, if it
+		// is inline (types.StringWasm32).
+		if !gcSplit() {
+			g.unsupported(v, "string of wasm32 without split")
+		}
+		blk := g.block('r')
+		g.prog(wasm.ARefNull)
+		g.get(v.Args[1], false)
+		i64Const(s, 60)
+		g.prog(wasm.AI64ShrU)
+		g.prog(wasm.AI32WrapI64)
+		g.br(wasm.ABrIf, blk, nil)
+		g.prog(wasm.ADrop)
+		g.spPushPtrRel(g.spResolve(v.Args[0]))
+		g.helper(wasm.GCSplitLoadPtr)
+		g.prog(wasm.AEnd)
+
 	case ssa.OpCopy, ssa.OpWasmLoweredConvert, ssa.OpConvert:
 		g.get(v.Args[0], false)
 		switch from, to := g.wtype(v.Args[0].Type), g.wtype(v.Type); {
@@ -3774,7 +3801,7 @@ func (g *gcGen) stackify(b *ssa.Block) {
 		}
 		// The addresses of a move are computed once per field (see
 		// again): the stores in between must not change them.
-		if v.Op == ssa.OpMove || v.Op == ssa.OpZero || v.Op == ssa.OpWasmI64DivS || v.Op == ssa.OpPtrIndex || gcUsesTypeTwice(v) {
+		if v.Op == ssa.OpMove || v.Op == ssa.OpZero || v.Op == ssa.OpWasmI64DivS || v.Op == ssa.OpPtrIndex || v.Op == ssa.OpStringLoadPtr || gcUsesTypeTwice(v) {
 			continue
 		}
 		// The integer a pointer is made from stays available: a
@@ -3834,6 +3861,15 @@ func (g *gcGen) value(v *ssa.Value) {
 				g.get(v.Args[1], want32)
 			}
 		}, v)
+
+	case ssa.OpStringStorePtr:
+		// Word 0 of a string, as a pointer: the word and its element
+		// of the array (nil for an inline string, whose A is stored
+		// over the word next: types.StringWasm32).
+		if !gcSplit() {
+			g.unsupported(v, "string of wasm32 without split")
+		}
+		g.splitStore(v.Args[0], g.f.Config.Types.BytePtr, g.wtype(v.Args[1].Type), func() { g.get(v.Args[1], false) }, v)
 
 	case ssa.OpZero:
 		if gcSplit() {

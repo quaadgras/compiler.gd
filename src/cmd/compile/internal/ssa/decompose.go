@@ -154,7 +154,7 @@ func decomposeStringPhi(v *Value) {
 	types := &v.Block.Func.Config.Types
 	ptrType := types.BytePtr
 	hashType := types.Uintptr
-	lenType := types.Int
+	lenType := types.StringWord2
 
 	ptr := v.Block.NewValue0(v.Pos, OpPhi, ptrType)
 	hash := v.Block.NewValue0(v.Pos, OpPhi, hashType)

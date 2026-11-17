@@ -7097,6 +7097,19 @@ func clobber() {
 	runtime.GC()
 }
 
+// stringsBitmap is the pointer bitmap of n strings in a row, up to the
+// last pointer: word 0 of each.
+func stringsBitmap(n int) []byte {
+	var b []byte
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b = append(b, make([]byte, unsafe.Sizeof("")/goarch.PtrSize-1)...)
+		}
+		b = append(b, 1)
+	}
+	return b
+}
+
 func TestFuncLayout(t *testing.T) {
 	align := func(x uintptr) uintptr {
 		return (x + goarch.PtrSize - 1) &^ (goarch.PtrSize - 1)
@@ -7123,16 +7136,16 @@ func TestFuncLayout(t *testing.T) {
 	tests := []test{
 		{
 			// gd small-string optimization: each string is 3 words
-			// (ptr, hash, len). func(a, b string) string =
+			// (ptr, hash, len), 4 on wasm32. func(a, b string) string =
 			// 3*3 = 9 words; argsize/retOffset = 2*3 = 6 words.
 			// Pointer bitmap: word 0 of each string is a pointer
-			// (ptr slot), the other two slots are scalar.
+			// (ptr slot), the other slots are scalar.
 			typ:       ValueOf(func(a, b string) string { return "" }).Type(),
-			size:      9 * goarch.PtrSize,
-			argsize:   6 * goarch.PtrSize,
-			retOffset: 6 * goarch.PtrSize,
-			stack:     []byte{1, 0, 0, 1, 0, 0, 1},
-			gc:        []byte{1, 0, 0, 1, 0, 0, 1},
+			size:      3 * unsafe.Sizeof(""),
+			argsize:   2 * unsafe.Sizeof(""),
+			retOffset: 2 * unsafe.Sizeof(""),
+			stack:     stringsBitmap(3),
+			gc:        stringsBitmap(3),
 		},
 		{
 			typ:       ValueOf(func(a, b, c uint32, p *byte, d uint16) {}).Type(),

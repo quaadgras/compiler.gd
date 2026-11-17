@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !wasm.ptr32
+
 package abi
 
 import "unsafe"
@@ -66,13 +68,18 @@ const (
 	StringLenMask = 1<<StringTagShift - 1
 )
 
+// StringInlineOff is the offset of the bytes of an inline string in
+// its header.
+const StringInlineOff = unsafe.Sizeof(uintptr(0))
+
 // stringHeader is the gd-fork string layout (3 words: 24 B with
 // 8-byte words). It mirrors stringStruct in runtime/string.go but is
 // exported here so SSO-aware fast-path helpers below can be used by any
 // package without going through linkname or runtime calls.
 //
-// With words of 4 bytes (wasm32) a string has no inline form: w2 is the
-// length, and its tag, read as a uint64 (tag), is always 0.
+// With words of 4 bytes (386, arm, mips) a string has no inline form: w2
+// is the length, and its tag, read as a uint64 (tag), is always 0.
+// (wasm32's strings are four words: string_ptr32.go.)
 type stringHeader struct {
 	w0 uintptr // heap data ptr (0 if inline)
 	w1 uintptr // heap: cached hash; inline: bytes 0..7

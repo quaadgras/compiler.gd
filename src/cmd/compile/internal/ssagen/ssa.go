@@ -694,6 +694,12 @@ func (s *state) storeParameterRegsToStack(abi *abi.ABIConfig, paramAssignment *a
 		v := s.newValue0I(op, t, reg)
 		v.Aux = aux
 		p := s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), o, addr)
+		if types.StringWasm32() && t.IsPtrShaped() && i+1 < len(offs) && offs[i+1] == o {
+			// Word 0 of a string, which A (next) overlaps: see
+			// types.StringWasm32.
+			s.vars[memVar] = s.newValue3(ssa.OpStringStorePtr, types.TypeMem, p, v, s.mem())
+			continue
+		}
 		s.store(t, p, v)
 	}
 }
@@ -1586,6 +1592,9 @@ func (s *state) iMake(t *types.Type, tab, data *ssa.Value) *ssa.Value {
 // (ptr, hash, tag<<60|len).
 func (s *state) sMake(t *types.Type, ptr, length *ssa.Value) *ssa.Value {
 	hash := s.constInt(s.f.Config.Types.Uintptr, 0)
+	if types.StringWasm32() {
+		return s.sMakeWasm32(t, ptr, length)
+	}
 	return s.curBlock.NewValue3(s.peekPos(), ssa.OpStringMake, t, ptr, hash, length)
 }
 
@@ -1631,6 +1640,9 @@ func (s *state) stringLen(str *ssa.Value) *ssa.Value {
 func (s *state) stringBytesTransient(str *ssa.Value, resultT *types.Type) *ssa.Value {
 	if resultT == nil {
 		resultT = s.f.Config.Types.BytePtr
+	}
+	if types.StringWasm32() {
+		return s.stringWasm32Data(str, resultT)
 	}
 	w0 := s.newValue1(ssa.OpStringPtr, resultT, str)
 	// 32-bit targets have no inline strings (see stringLen), so word 0
@@ -1714,6 +1726,9 @@ func (s *state) stringIndex(str, i *ssa.Value) *ssa.Value {
 	intT := types.Types[types.TINT]
 	ptrT := s.f.Config.Types.BytePtr
 
+	if types.StringWasm32() {
+		return s.stringWasm32Index(str, i)
+	}
 	ptr := s.newValue1(ssa.OpStringPtr, ptrT, str)
 	if s.config.PtrSize < 8 {
 		addr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, i)
@@ -1807,19 +1822,24 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 	mask := s.newValue1(ssa.OpSlicemask, intT, newLen)
 	delta := s.newValue2(ssa.OpAnd64, intT, lo, mask)
 
-	// 32-bit: no inline rep, always heap path.
-	if s.config.PtrSize < 8 {
+	// 32-bit: no inline rep, always heap path (but wasm32's).
+	if s.config.PtrSize < 8 && !types.StringWasm32() {
 		ptr := s.newValue1(ssa.OpStringPtr, ptrT, v)
 		newPtr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, delta)
 		return s.sMake(strT, newPtr, newLen)
 	}
 
 	// 64-bit: branch on tag.
-	w2 := s.newValue1(ssa.OpStringWord2, intT, v)
-	shift := s.constInt64(intT, rtabi.StringTagShift)
-	tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, shift)
-	zero := s.constInt64(intT, 0)
-	cond := s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+	var cond *ssa.Value
+	if types.StringWasm32() {
+		cond = s.stringWasm32Inline(v)
+	} else {
+		w2 := s.newValue1(ssa.OpStringWord2, intT, v)
+		shift := s.constInt64(intT, rtabi.StringTagShift)
+		tag := s.newValue2(ssa.OpRsh64Ux64, intT, w2, shift)
+		zero := s.constInt64(intT, 0)
+		cond = s.newValue2(ssa.OpNeq64, types.Types[types.TBOOL], tag, zero)
+	}
 
 	bInline := s.f.NewBlock(ssa.BlockPlain)
 	bHeap := s.f.NewBlock(ssa.BlockPlain)
@@ -6926,6 +6946,21 @@ func (s *state) storeType(t *types.Type, left, right *ssa.Value, skip skipMask, 
 		return
 	}
 
+	if types.StringWasm32() {
+		// No write barrier (GOWASM=gc), and word 0 of a string is
+		// written as a pointer before A writes it again: pointers
+		// first.
+		if skip == 0 {
+			s.vars[memVar] = s.newValue3Apos(ssa.OpStore, types.TypeMem, t, left, right, s.mem(), leftIsStmt)
+			return
+		}
+		if skip&skipPtr == 0 && t.HasPointers() {
+			s.storeTypePtrs(t, left, right)
+		}
+		s.storeTypeScalars(t, left, right, skip)
+		return
+	}
+
 	// store scalar fields first, so write barrier stores for
 	// pointer fields can be grouped together, and scalar values
 	// don't need to be live across the write barrier call.
@@ -6947,6 +6982,11 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 			s.store(t, left, right) // see issue 42032
 		}
 		// otherwise, no scalar fields.
+	case t.IsString() && types.StringWasm32():
+		// A and B (word 0 again, after storeTypePtrs).
+		w1T, w2T := s.f.Config.Types.StringWord1, s.f.Config.Types.StringWord2
+		s.store(w1T, s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.StringWord1Ptr, 0, left), s.newValue1(ssa.OpStringHash, w1T, right))
+		s.store(w2T, s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.StringWord2Ptr, 2*s.config.PtrSize, left), s.newValue1(ssa.OpStringWord2, w2T, right))
 	case t.IsString():
 		// gd small-string optimization: 3-word string header
 		// (ptr at 0, hash at PtrSize, len at 2*PtrSize). storeTypePtrs
@@ -6960,9 +7000,10 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 		}
 		// Store the raw word 2 (tag-encoded), not the decoded length —
 		// we need to faithfully reproduce the string header.
-		len := s.newValue1(ssa.OpStringWord2, types.Types[types.TINT], right)
-		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, 2*s.config.PtrSize, left)
-		s.store(types.Types[types.TINT], lenAddr, len)
+		w2T := s.f.Config.Types.StringWord2
+		len := s.newValue1(ssa.OpStringWord2, w2T, right)
+		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.StringWord2Ptr, 2*s.config.PtrSize, left)
+		s.store(w2T, lenAddr, len)
 	case t.IsSlice():
 		if skip&skipLen == 0 {
 			len := s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], right)
@@ -7018,6 +7059,10 @@ func (s *state) storeTypePtrs(t *types.Type, left, right *ssa.Value) {
 		s.store(t, left, right)
 	case t.IsString():
 		ptr := s.newValue1(ssa.OpStringPtr, s.f.Config.Types.BytePtr, right)
+		if types.StringWasm32() {
+			s.vars[memVar] = s.newValue3(ssa.OpStringStorePtr, types.TypeMem, left, ptr, s.mem())
+			break
+		}
 		s.store(s.f.Config.Types.BytePtr, left, ptr)
 	case t.IsSlice():
 		elType := types.NewPtr(t.Elem())

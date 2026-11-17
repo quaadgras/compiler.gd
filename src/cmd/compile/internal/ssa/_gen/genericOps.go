@@ -542,6 +542,14 @@ var genericOps = []opData{
 	{name: "StringLen", argLength: 1, typ: "Int"},        // len(arg0): logical length (tag-decoded)
 	{name: "StringWord2", argLength: 1, typ: "Int"},      // word 2 of arg0 raw (tag nibble + packed). Use by helpers that need tag access.
 
+	// The string of wasm32 (types.StringWasm32), whose word 0 is text
+	// in an inline string and the address of the bytes otherwise, and
+	// in SSA both a pointer (nil if inline) and the low half of A.
+	// Generated only for GOWASM=gc,split, whose backend compiles them.
+	{name: "PtrBits", argLength: 1, typ: "Uintptr"},                // the address of the pointer arg0, as an integer (no memory argument)
+	{name: "StringLoadPtr", argLength: 3, typ: "BytePtr"},          // word 0 of the string at arg0 as a pointer if arg1 (its B) has a tag of 0, else nil. arg2=mem
+	{name: "StringStorePtr", argLength: 3, typ: "Mem"},            // store the pointer arg1 as word 0 of the string at arg0 (the word and its element of the array of pointers); A is stored after it. arg2=mem
+
 	// Interfaces
 	// gd fat-interface: IMake carries the full 32B iface header in SSA.
 	// arg0=itab, arg1=data (boxed pointer, nil when inline), arg2=inline real

@@ -322,6 +322,8 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpPopCount64(v)
 	case OpPopCount8:
 		return rewriteValuegeneric_OpPopCount8(v)
+	case OpPtrBits:
+		return rewriteValuegeneric_OpPtrBits(v)
 	case OpPtrIndex:
 		return rewriteValuegeneric_OpPtrIndex(v)
 	case OpRotateLeft16:
@@ -7837,11 +7839,69 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 	fe := b.Func.fe
 	typ := &b.Func.Config.Types
 	// match: (ConstString {str})
-	// cond: config.PtrSize == 4 && str == ""
+	// cond: config.stringWasm32() && str == ""
+	// result: (StringMake (ConstNil) (Const64 <typ.UInt64> [0]) (Const64 <typ.UInt64> [0]))
+	for {
+		str := auxToString(v.Aux)
+		if !(config.stringWasm32() && str == "") {
+			break
+		}
+		v.reset(OpStringMake)
+		v0 := b.NewValue0(v.Pos, OpConstNil, typ.BytePtr)
+		v1 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v1.AuxInt = int64ToAuxInt(0)
+		v.AddArg3(v0, v1, v1)
+		return true
+	}
+	// match: (ConstString {str})
+	// cond: config.stringWasm32() && len(str) > 0 && int64(len(str)) <= types.StringInlineCap
+	// result: (StringMake (ConstNil) (Const64 <typ.UInt64> [stringInlineWord1(str)]) (Const64 <typ.UInt64> [stringInlineWord2(str)]))
+	for {
+		str := auxToString(v.Aux)
+		if !(config.stringWasm32() && len(str) > 0 && int64(len(str)) <= types.StringInlineCap) {
+			break
+		}
+		v.reset(OpStringMake)
+		v0 := b.NewValue0(v.Pos, OpConstNil, typ.BytePtr)
+		v1 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v1.AuxInt = int64ToAuxInt(stringInlineWord1(str))
+		v2 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v2.AuxInt = int64ToAuxInt(stringInlineWord2(str))
+		v.AddArg3(v0, v1, v2)
+		return true
+	}
+	// match: (ConstString {str})
+	// cond: config.stringWasm32() && int64(len(str)) > types.StringInlineCap
+	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Or64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> (PtrBits <typ.UInt32> (Addr <typ.BytePtr> {fe.StringData(str)} (SB)))) (Const64 <typ.UInt64> [int64(len(str))<<32])) (Const64 <typ.UInt64> [0]))
+	for {
+		str := auxToString(v.Aux)
+		if !(config.stringWasm32() && int64(len(str)) > types.StringInlineCap) {
+			break
+		}
+		v.reset(OpStringMake)
+		v0 := b.NewValue0(v.Pos, OpAddr, typ.BytePtr)
+		v0.Aux = symToAux(fe.StringData(str))
+		v1 := b.NewValue0(v.Pos, OpSB, typ.Uintptr)
+		v0.AddArg(v1)
+		v2 := b.NewValue0(v.Pos, OpOr64, typ.UInt64)
+		v3 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v4 := b.NewValue0(v.Pos, OpPtrBits, typ.UInt32)
+		v4.AddArg(v0)
+		v3.AddArg(v4)
+		v5 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v5.AuxInt = int64ToAuxInt(int64(len(str)) << 32)
+		v2.AddArg2(v3, v5)
+		v6 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v6.AuxInt = int64ToAuxInt(0)
+		v.AddArg3(v0, v2, v6)
+		return true
+	}
+	// match: (ConstString {str})
+	// cond: config.PtrSize == 4 && !config.stringWasm32() && str == ""
 	// result: (StringMake (ConstNil) (Const32 <typ.Uintptr> [0]) (Const32 <typ.Int> [0]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.PtrSize == 4 && str == "") {
+		if !(config.PtrSize == 4 && !config.stringWasm32() && str == "") {
 			break
 		}
 		v.reset(OpStringMake)
@@ -7871,11 +7931,11 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		return true
 	}
 	// match: (ConstString {str})
-	// cond: config.PtrSize == 4 && str != ""
+	// cond: config.PtrSize == 4 && !config.stringWasm32() && str != ""
 	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const32 <typ.Uintptr> [0]) (Const32 <typ.Int> [int32(len(str))]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.PtrSize == 4 && str != "") {
+		if !(config.PtrSize == 4 && !config.stringWasm32() && str != "") {
 			break
 		}
 		v.reset(OpStringMake)
@@ -27993,6 +28053,22 @@ func rewriteValuegeneric_OpPopCount8(v *Value) bool {
 	}
 	return false
 }
+func rewriteValuegeneric_OpPtrBits(v *Value) bool {
+	v_0 := v.Args[0]
+	// match: (PtrBits <t> (ConstNil))
+	// result: (Const32 <t> [0])
+	for {
+		t := v.Type
+		if v_0.Op != OpConstNil {
+			break
+		}
+		v.reset(OpConst32)
+		v.Type = t
+		v.AuxInt = int32ToAuxInt(0)
+		return true
+	}
+	return false
+}
 func rewriteValuegeneric_OpPtrIndex(v *Value) bool {
 	v_1 := v.Args[1]
 	v_0 := v.Args[0]
@@ -34772,7 +34848,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		return true
 	}
 	// match: (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
-	// cond: (isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && resetCopy(m, mem) && clobber(sbts) && clobber(key)
+	// cond: (isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && !config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)
 	// result: (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
 	for {
 		if len(v.Args) != 4 {
@@ -34796,7 +34872,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		ptr := sbts.Args[1]
 		len := sbts.Args[2]
 		m := v.Args[3]
-		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !((isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
+		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !((isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && !config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
 			break
 		}
 		v.reset(OpStaticLECall)
@@ -34806,6 +34882,56 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		v1 := b.NewValue0(v.Pos, OpConst32, typ.Uintptr)
 		v1.AuxInt = int32ToAuxInt(0)
 		v0.AddArg3(ptr, v1, len)
+		v.AddArg4(typ_, map_, v0, mem)
+		return true
+	}
+	// match: (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
+	// cond: (isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)
+	// result: (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Or64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> (PtrBits <typ.UInt32> ptr)) (Lsh64x64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> len) (Const64 <typ.UInt64> [32]))) (Const64 <typ.UInt64> [0])) mem)
+	for {
+		if len(v.Args) != 4 {
+			break
+		}
+		argsize := auxIntToInt32(v.AuxInt)
+		f := auxToCall(v.Aux)
+		_ = v.Args[3]
+		typ_ := v.Args[0]
+		map_ := v.Args[1]
+		key := v.Args[2]
+		if key.Op != OpSelectN || auxIntToInt64(key.AuxInt) != 0 {
+			break
+		}
+		sbts := key.Args[0]
+		if sbts.Op != OpStaticLECall || len(sbts.Args) != 4 {
+			break
+		}
+		g := auxToCall(sbts.Aux)
+		mem := sbts.Args[3]
+		ptr := sbts.Args[1]
+		len := sbts.Args[2]
+		m := v.Args[3]
+		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !((isSameCall(f, "runtime.mapaccess1_faststr") || isSameCall(f, "runtime.mapaccess2_faststr") || isSameCall(f, "runtime.mapdelete_faststr")) && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
+			break
+		}
+		v.reset(OpStaticLECall)
+		v.AuxInt = int32ToAuxInt(argsize)
+		v.Aux = callToAux(f)
+		v0 := b.NewValue0(v.Pos, OpStringMake, typ.String)
+		v1 := b.NewValue0(v.Pos, OpOr64, typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v3 := b.NewValue0(v.Pos, OpPtrBits, typ.UInt32)
+		v3.AddArg(ptr)
+		v2.AddArg(v3)
+		v4 := b.NewValue0(v.Pos, OpLsh64x64, typ.UInt64)
+		v5 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v5.AddArg(len)
+		v6 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v6.AuxInt = int64ToAuxInt(32)
+		v4.AddArg2(v5, v6)
+		v1.AddArg2(v2, v4)
+		v7 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v7.AuxInt = int64ToAuxInt(0)
+		v0.AddArg3(ptr, v1, v7)
 		v.AddArg4(typ_, map_, v0, mem)
 		return true
 	}
@@ -34847,7 +34973,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		return true
 	}
 	// match: (StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
-	// cond: isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && resetCopy(m, mem) && clobber(sbts) && clobber(key)
+	// cond: isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && !config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)
 	// result: (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
 	for {
 		if len(v.Args) != 3 {
@@ -34870,7 +34996,7 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		ptr := sbts.Args[1]
 		len := sbts.Args[2]
 		m := v.Args[2]
-		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !(isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
+		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !(isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.PtrSize == 4 && !config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
 			break
 		}
 		v.reset(OpStaticLECall)
@@ -34880,6 +35006,55 @@ func rewriteValuegeneric_OpStaticLECall(v *Value) bool {
 		v1 := b.NewValue0(v.Pos, OpConst32, typ.Uintptr)
 		v1.AuxInt = int32ToAuxInt(0)
 		v0.AddArg3(ptr, v1, len)
+		v.AddArg3(dict_, v0, mem)
+		return true
+	}
+	// match: (StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
+	// cond: isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)
+	// result: (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Or64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> (PtrBits <typ.UInt32> ptr)) (Lsh64x64 <typ.UInt64> (ZeroExt32to64 <typ.UInt64> len) (Const64 <typ.UInt64> [32]))) (Const64 <typ.UInt64> [0])) mem)
+	for {
+		if len(v.Args) != 3 {
+			break
+		}
+		argsize := auxIntToInt32(v.AuxInt)
+		f := auxToCall(v.Aux)
+		_ = v.Args[2]
+		dict_ := v.Args[0]
+		key := v.Args[1]
+		if key.Op != OpSelectN || auxIntToInt64(key.AuxInt) != 0 {
+			break
+		}
+		sbts := key.Args[0]
+		if sbts.Op != OpStaticLECall || len(sbts.Args) != 4 {
+			break
+		}
+		g := auxToCall(sbts.Aux)
+		mem := sbts.Args[3]
+		ptr := sbts.Args[1]
+		len := sbts.Args[2]
+		m := v.Args[2]
+		if m.Op != OpSelectN || auxIntToInt64(m.AuxInt) != 1 || sbts != m.Args[0] || !(isSameCall(f, "unique.Make[go.shape.string]") && isSameCall(g, "runtime.slicebytetostring") && key.Uses == 1 && sbts.Uses == 2 && config.stringWasm32() && resetCopy(m, mem) && clobber(sbts) && clobber(key)) {
+			break
+		}
+		v.reset(OpStaticLECall)
+		v.AuxInt = int32ToAuxInt(argsize)
+		v.Aux = callToAux(f)
+		v0 := b.NewValue0(v.Pos, OpStringMake, typ.String)
+		v1 := b.NewValue0(v.Pos, OpOr64, typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v3 := b.NewValue0(v.Pos, OpPtrBits, typ.UInt32)
+		v3.AddArg(ptr)
+		v2.AddArg(v3)
+		v4 := b.NewValue0(v.Pos, OpLsh64x64, typ.UInt64)
+		v5 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v5.AddArg(len)
+		v6 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v6.AuxInt = int64ToAuxInt(32)
+		v4.AddArg2(v5, v6)
+		v1.AddArg2(v2, v4)
+		v7 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v7.AuxInt = int64ToAuxInt(0)
+		v0.AddArg3(ptr, v1, v7)
 		v.AddArg3(dict_, v0, mem)
 		return true
 	}
@@ -35675,12 +35850,33 @@ func rewriteValuegeneric_OpStringHash(v *Value) bool {
 		v.AuxInt = int64ToAuxInt(c)
 		return true
 	}
+	// match: (StringHash (StringMake _ (Const32 <t> [c]) _))
+	// result: (Const32 <t> [c])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[1]
+		v_0_1 := v_0.Args[1]
+		if v_0_1.Op != OpConst32 {
+			break
+		}
+		t := v_0_1.Type
+		c := auxIntToInt32(v_0_1.AuxInt)
+		v.reset(OpConst32)
+		v.Type = t
+		v.AuxInt = int32ToAuxInt(c)
+		return true
+	}
 	return false
 }
 func rewriteValuegeneric_OpStringLen(v *Value) bool {
 	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
 	// match: (StringLen (StringMake _ _ (Const64 <t> [c])))
-	// cond: uint64(c)>>60 == 0
+	// cond: config.PtrSize == 8 && uint64(c)>>60 == 0
 	// result: (Const64 <t> [c])
 	for {
 		if v_0.Op != OpStringMake {
@@ -35693,7 +35889,7 @@ func rewriteValuegeneric_OpStringLen(v *Value) bool {
 		}
 		t := v_0_2.Type
 		c := auxIntToInt64(v_0_2.AuxInt)
-		if !(uint64(c)>>60 == 0) {
+		if !(config.PtrSize == 8 && uint64(c)>>60 == 0) {
 			break
 		}
 		v.reset(OpConst64)
@@ -35702,7 +35898,7 @@ func rewriteValuegeneric_OpStringLen(v *Value) bool {
 		return true
 	}
 	// match: (StringLen (StringMake _ _ (Const64 <t> [c])))
-	// cond: uint64(c)>>60 != 0
+	// cond: config.PtrSize == 8 && uint64(c)>>60 != 0
 	// result: (Const64 <t> [int64(uint64(c)>>60)])
 	for {
 		if v_0.Op != OpStringMake {
@@ -35715,13 +35911,87 @@ func rewriteValuegeneric_OpStringLen(v *Value) bool {
 		}
 		t := v_0_2.Type
 		c := auxIntToInt64(v_0_2.AuxInt)
-		if !(uint64(c)>>60 != 0) {
+		if !(config.PtrSize == 8 && uint64(c)>>60 != 0) {
 			break
 		}
 		v.reset(OpConst64)
 		v.Type = t
 		v.AuxInt = int64ToAuxInt(int64(uint64(c) >> 60))
 		return true
+	}
+	// match: (StringLen (StringMake _ _ (Const64 [c])))
+	// cond: config.stringWasm32() && uint64(c)>>60 != 0
+	// result: (Const32 <typ.Int> [int32(uint64(c)>>60)])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_0_2.AuxInt)
+		if !(config.stringWasm32() && uint64(c)>>60 != 0) {
+			break
+		}
+		v.reset(OpConst32)
+		v.Type = typ.Int
+		v.AuxInt = int32ToAuxInt(int32(uint64(c) >> 60))
+		return true
+	}
+	// match: (StringLen (StringMake _ (Const64 [a]) (Const64 [0])))
+	// cond: config.stringWasm32()
+	// result: (Const32 <typ.Int> [int32(uint64(a)>>32)])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_1 := v_0.Args[1]
+		if v_0_1.Op != OpConst64 {
+			break
+		}
+		a := auxIntToInt64(v_0_1.AuxInt)
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpConst64 || auxIntToInt64(v_0_2.AuxInt) != 0 || !(config.stringWasm32()) {
+			break
+		}
+		v.reset(OpConst32)
+		v.Type = typ.Int
+		v.AuxInt = int32ToAuxInt(int32(uint64(a) >> 32))
+		return true
+	}
+	// match: (StringLen (StringMake _ (Or64 _ (Const64 [a])) (Const64 [0])))
+	// cond: config.stringWasm32() && uint32(a) == 0
+	// result: (Const32 <typ.Int> [int32(uint64(a)>>32)])
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_1 := v_0.Args[1]
+		if v_0_1.Op != OpOr64 {
+			break
+		}
+		_ = v_0_1.Args[1]
+		v_0_1_0 := v_0_1.Args[0]
+		v_0_1_1 := v_0_1.Args[1]
+		for _i0 := 0; _i0 <= 1; _i0, v_0_1_0, v_0_1_1 = _i0+1, v_0_1_1, v_0_1_0 {
+			if v_0_1_1.Op != OpConst64 {
+				continue
+			}
+			a := auxIntToInt64(v_0_1_1.AuxInt)
+			v_0_2 := v_0.Args[2]
+			if v_0_2.Op != OpConst64 || auxIntToInt64(v_0_2.AuxInt) != 0 || !(config.stringWasm32() && uint32(a) == 0) {
+				continue
+			}
+			v.reset(OpConst32)
+			v.Type = typ.Int
+			v.AuxInt = int32ToAuxInt(int32(uint64(a) >> 32))
+			return true
+		}
+		break
 	}
 	return false
 }
