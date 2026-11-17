@@ -321,6 +321,12 @@ func goType(t *ctype) string {
 		return "int64"
 	case kULong, kULLong:
 		return "uint64"
+	case kBitInt, kUBitInt:
+		u := ""
+		if t.kind == kUBitInt {
+			u = "u"
+		}
+		return fmt.Sprintf("%sint%d", u, t.sizeof()*8)
 	case kFloat:
 		return "float32"
 	case kDouble, kLDouble:
@@ -493,6 +499,8 @@ func unionAlign(a int64) string {
 
 func constLit(t *ctype, v int64) string {
 	switch {
+	case t.kind == kUBitInt:
+		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
 	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList:
 		if v == 0 {
 			return "c23.Ptr{}"

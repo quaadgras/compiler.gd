@@ -327,6 +327,7 @@ func (p *parser) declSpecs() specs {
 	var s specs
 	var q qual
 	nlong, nint := 0, 0
+	bitN := int64(0)
 	unsigned, signed, short := false, false, false
 	base := ""
 	seen := false
@@ -407,7 +408,17 @@ func (p *parser) declSpecs() specs {
 		case "_Complex":
 			p.errorf("_Complex is not supported")
 		case "_BitInt":
-			p.errorf("_BitInt is not supported")
+			p.next()
+			p.expect("(")
+			n := p.constInt(p.conditional())
+			p.expect(")")
+			if n > 64 {
+				p.errorf("_BitInt(%d) is wider than BITINT_MAXWIDTH (64)", n)
+			}
+			s.t = bitInt(n, false) // signedness below
+			bitN = n
+			seen = true
+			continue
 		case "__int128":
 			p.errorf("__int128 is not supported")
 		case "_Decimal32", "_Decimal64":
@@ -458,6 +469,12 @@ func (p *parser) declSpecs() specs {
 		p.next()
 	}
 done:
+	if bitN > 0 {
+		s.t = bitInt(bitN, unsigned)
+		if bitN < 1 || bitN < 2 && !unsigned {
+			p.errorf("_BitInt(%d) is too narrow", bitN)
+		}
+	}
 	if s.t == nil {
 		switch {
 		case base == "void":

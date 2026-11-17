@@ -473,9 +473,9 @@ func (g *gen) rv(e expr) string {
 		case "!":
 			return "c23.B2I(" + g.cond(e) + ")"
 		case "-":
-			return "(-" + g.rv(e.x) + ")"
+			return wrapBits("(-"+g.rv(e.x)+")", e.t)
 		case "~":
-			return "(^" + g.rv(e.x) + ")"
+			return wrapBits("(^"+g.rv(e.x)+")", e.t)
 		}
 	case *binary:
 		return g.binary(e)
@@ -539,7 +539,20 @@ func (g *gen) binary(e *binary) string {
 			y = "c23.Val(" + y + ")"
 		}
 	}
-	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
+	return wrapBits(fmt.Sprintf("(%s %s %s)", x, e.op, y), e.t)
+}
+
+// wrapBits wraps x, a Go value of t's Go type, to t's width if t is a
+// _BitInt narrower than its Go type.
+func wrapBits(x string, t *ctype) string {
+	if !t.isBitInt() || t.n == t.sizeof()*8 {
+		return x
+	}
+	w := t.sizeof() * 8
+	if t.kind == kUBitInt {
+		return fmt.Sprintf("(%s & %d)", x, uint64(1)<<t.n-1)
+	}
+	return fmt.Sprintf("(%s << %d >> %d)", x, w-t.n, w-t.n)
 }
 
 // elemSize is the size of what a pointer of type t points to.
@@ -610,10 +623,16 @@ func convertCode(x string, from, to *ctype) string {
 		return fmt.Sprintf("c23.B2U8(%s != 0)", x)
 	case to.isInteger():
 		if fromPtr {
-			return fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x)
+			return wrapBits(fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x), to)
 		}
 		if goType(from) == goType(to) {
+			if to.isBitInt() && !(from.isBitInt() && from.n <= to.n && from.isUnsigned() == to.isUnsigned()) {
+				return wrapBits(x, to)
+			}
 			return x
+		}
+		if from.isFloat() || to.isBitInt() {
+			return wrapBits(fmt.Sprintf("%s(%s)", goType(to), x), to)
 		}
 		return fmt.Sprintf("%s(%s)", goType(to), x)
 	case to.isFloat():
@@ -728,7 +747,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		}
 		return new
 	}
-	if !value && l.goVar != "" && t.isArith() && t.kind != kBool {
+	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
 	}
@@ -752,7 +771,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		}
 	default:
 		op := e.op[:1]
-		nv = fmt.Sprintf("(%s %s 1)", old, op)
+		nv = wrapBits(fmt.Sprintf("(%s %s 1)", old, op), t)
 	}
 	if value && !e.post {
 		n := g.tmp(goType(t))
@@ -1057,6 +1076,21 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
+	case "overflow":
+		op := e.args[0].(*intConst).v
+		a, b := e.args[1], e.args[2]
+		rt := e.args[4].ty()
+		pred := e.args[5].(*intConst).v != 0
+		code := fmt.Sprintf("c23.Overflow(%d, int64(%s), %v, int64(%s), %v, %d, %v)", op,
+			g.rv(a), a.ty().isUnsigned(), g.rv(b), b.ty().isUnsigned(), rt.width(), rt.isUnsigned())
+		v, over := g.tmp("int64"), g.tmp("bool")
+		g.p("%s, %s = %s", v, over, code)
+		if !pred {
+			g.store(g.rv(e.args[3]), rt, fmt.Sprintf("%s(%s)", goType(rt), v), nil)
+		} else {
+			g.effect(e.args[3])
+		}
+		return fmt.Sprintf("c23.B2U8(%s)", over)
 	case "atomic_load":
 		return atomicLoad(g.rv(e.args[0]), e.t)
 	case "atomic_store":
@@ -1102,6 +1136,9 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		return t
 	case "assert":
 		return fmt.Sprintf("c23.AssertC(%s, %s, %s, %s)", g.cond(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2]), g.rv(e.args[3]))
+	}
+	if strings.HasPrefix(e.name, "bits:") {
+		return fmt.Sprintf("c23.%s(%s)", e.name[5:], g.rv(e.args[0]))
 	}
 	g.errorf(e.p, "internal error: builtin %s", e.name)
 	return ""

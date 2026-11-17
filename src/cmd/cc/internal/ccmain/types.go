@@ -29,6 +29,8 @@ const (
 	kULong
 	kLLong
 	kULLong
+	kBitInt  // _BitInt(n)
+	kUBitInt // unsigned _BitInt(n)
 	kFloat
 	kDouble
 	kLDouble
@@ -131,7 +133,27 @@ func funcOf(ret *ctype, params ...*ctype) *ctype {
 	return &ctype{kind: kFunc, fn: &funcType{ret: ret, params: params, proto: true}}
 }
 
-func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kULLong }
+func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kUBitInt }
+func (t *ctype) isBitInt() bool  { return t.kind == kBitInt || t.kind == kUBitInt }
+
+// width is an integer type's width in bits.
+func (t *ctype) width() int64 {
+	if t.isBitInt() {
+		return t.n
+	}
+	if t.kind == kBool {
+		return 1
+	}
+	return t.sizeof() * 8
+}
+
+// bitInt is _BitInt(n), unsigned if u.
+func bitInt(n int64, u bool) *ctype {
+	if u {
+		return &ctype{kind: kUBitInt, n: n}
+	}
+	return &ctype{kind: kBitInt, n: n}
+}
 func (t *ctype) isFloat() bool   { return t.kind >= kFloat && t.kind <= kLDouble }
 func (t *ctype) isArith() bool   { return t.isInteger() || t.isFloat() }
 func (t *ctype) isPtr() bool     { return t.kind == kPtr }
@@ -155,7 +177,7 @@ func (t *ctype) isVLA() bool {
 
 func (t *ctype) isUnsigned() bool {
 	switch t.kind {
-	case kBool, kUChar, kUShort, kUInt, kULong, kULLong:
+	case kBool, kUChar, kUShort, kUInt, kULong, kULLong, kUBitInt:
 		return true
 	}
 	return false
@@ -175,21 +197,24 @@ func (t *ctype) isComplete() bool {
 	return true
 }
 
-// rank is the integer conversion rank.
+// rank is the integer conversion rank: by width, a bit-precise type's
+// below a standard type's of its width (C23 6.3.1.1).
 func (t *ctype) rank() int {
 	switch t.kind {
 	case kBool:
 		return 0
 	case kChar, kSChar, kUChar:
-		return 1
+		return 80
 	case kShort, kUShort:
-		return 2
+		return 160
 	case kInt, kUInt:
-		return 3
+		return 320
 	case kLong, kULong:
-		return 4
+		return 640
 	case kLLong, kULLong:
-		return 5
+		return 641
+	case kBitInt, kUBitInt:
+		return int(t.n)*10 - 5
 	}
 	return -1
 }
@@ -207,6 +232,16 @@ func (t *ctype) sizeof() int64 {
 	case kLDouble:
 		// x86-64's layout, with a double's value (doc/gd/cc.md).
 		return 16
+	case kBitInt, kUBitInt:
+		switch {
+		case t.n <= 8:
+			return 1
+		case t.n <= 16:
+			return 2
+		case t.n <= 32:
+			return 4
+		}
+		return 8
 	case kArray:
 		if t.n < 0 {
 			return 0
@@ -255,6 +290,9 @@ func (t *ctype) unqual() *ctype {
 }
 
 func (t *ctype) unsignedOf() *ctype {
+	if t.isBitInt() {
+		return bitInt(t.n, true)
+	}
 	switch t.kind {
 	case kChar, kSChar, kUChar:
 		return tUChar
@@ -272,7 +310,7 @@ func (t *ctype) unsignedOf() *ctype {
 
 // promote is the integer promotion of t.
 func promote(t *ctype) *ctype {
-	if t.isInteger() && t.rank() < 3 {
+	if t.isInteger() && !t.isBitInt() && t.rank() < 320 {
 		return tInt
 	}
 	if t.isInteger() || t.isFloat() {
@@ -293,7 +331,7 @@ func usual(a, b *ctype) *ctype {
 		return tFloat
 	}
 	a, b = promote(a), promote(b)
-	if a.kind == b.kind {
+	if a.kind == b.kind && a.width() == b.width() {
 		return a
 	}
 	if a.isUnsigned() == b.isUnsigned() {
@@ -309,7 +347,7 @@ func usual(a, b *ctype) *ctype {
 	if u.rank() >= s.rank() {
 		return u
 	}
-	if s.sizeof() > u.sizeof() {
+	if s.width() > u.width() {
 		return s
 	}
 	return s.unsignedOf()
@@ -331,6 +369,8 @@ func compatible(a, b *ctype) bool {
 		return false
 	}
 	switch a.kind {
+	case kBitInt, kUBitInt:
+		return a.n == b.n
 	case kPtr:
 		return compatible(a.elem, b.elem)
 	case kArray:
@@ -487,6 +527,13 @@ func (t *ctype) String() string {
 	if t.enum != nil {
 		return q + "enum " + t.enum.tag
 	}
+	if t.isBitInt() {
+		u := ""
+		if t.kind == kUBitInt {
+			u = "unsigned "
+		}
+		return fmt.Sprintf("%s%s_BitInt(%d)", q, u, t.n)
+	}
 	return q + kindNames[t.kind]
 }
 
@@ -533,6 +580,12 @@ func wrap(t *ctype, v int64) int64 {
 		return int64(int32(v))
 	case kUInt:
 		return int64(uint32(v))
+	case kBitInt:
+		return v << (64 - t.n) >> (64 - t.n)
+	case kUBitInt:
+		if t.n < 64 {
+			return v & (1<<t.n - 1)
+		}
 	}
 	return v
 }

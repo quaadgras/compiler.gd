@@ -1632,9 +1632,25 @@ func (p *parser) builtin(name string, at pos) expr {
 		c := p.scalarCond(p.rvalue(as[0]), at)
 		return &builtinCall{node{tVoid, at}, "assert", []expr{c, p.rvalue(as[1]), p.rvalue(as[2]), p.rvalue(as[3])}}
 	}
+	if e := p.bitBuiltin(name, at); e != nil {
+		return e
+	}
 	// A library function by its other name.
 	if s := p.lookup(name[10:]); s != nil && s.kind == symFunc {
 		p.pos-- // back to "("
+		return &varRef{node{s.t, at}, s}
+	}
+	if t := libcType(name[10:]); t != nil {
+		// Declared by its header, included or not.
+		s := p.u.scope[name[10:]]
+		if s == nil || s.kind != symFunc {
+			s = &symbol{name: name[10:], kind: symFunc, t: t, global: true, linkage: 'e', p: at}
+			if p.u.scope[name[10:]] == nil {
+				p.u.scope[name[10:]] = s
+			}
+			p.u.syms = append(p.u.syms, s)
+		}
+		p.pos--
 		return &varRef{node{s.t, at}, s}
 	}
 	p.errorAt(at, "%s is not supported", name)
@@ -1680,6 +1696,96 @@ func (p *parser) atomicBuiltin(op string, as []expr, at pos) expr {
 	}
 	d := p.assignConvert(p.rvalue(as[2]), et, at, "assignment")
 	return &builtinCall{node{tBool, at}, op, []expr{ptr, exp, d}}
+}
+
+// bitBuiltin parses GCC's bit and overflow builtins, after "(": nil if
+// name is not one.
+func (p *parser) bitBuiltin(name string, at pos) expr {
+	base := name[len("__builtin_"):]
+	type bitFn struct {
+		arg, res *ctype
+		fn       string
+	}
+	fns := map[string]bitFn{
+		"clz": {tUInt, tInt, "Clz32"}, "clzl": {tULong, tInt, "Clz64"}, "clzll": {tULLong, tInt, "Clz64"},
+		"ctz": {tUInt, tInt, "Ctz32"}, "ctzl": {tULong, tInt, "Ctz64"}, "ctzll": {tULLong, tInt, "Ctz64"},
+		"popcount": {tUInt, tInt, "Popcount32"}, "popcountl": {tULong, tInt, "Popcount64"}, "popcountll": {tULLong, tInt, "Popcount64"},
+		"parity": {tUInt, tInt, "Parity32"}, "parityl": {tULong, tInt, "Parity64"}, "parityll": {tULLong, tInt, "Parity64"},
+		"ffs": {tInt, tInt, "Ffs32"}, "ffsl": {tLong, tInt, "Ffs64"}, "ffsll": {tLLong, tInt, "Ffs64"},
+		"clrsb": {tInt, tInt, "Clrsb32"}, "clrsbl": {tLong, tInt, "Clrsb64"}, "clrsbll": {tLLong, tInt, "Clrsb64"},
+		"bswap16": {tUShort, tUShort, "Bswap16"}, "bswap32": {tUInt, tUInt, "Bswap32"}, "bswap64": {tULong, tULong, "Bswap64"},
+	}
+	if f, ok := fns[base]; ok {
+		x := p.assignConvert(p.rvalue(p.assignment()), f.arg, at, "argument")
+		p.expect(")")
+		return &builtinCall{node{f.res, at}, "bits:" + f.fn, []expr{x}}
+	}
+	switch base {
+	case "prefetch":
+		var as []expr
+		for !p.is(")") {
+			as = append(as, p.rvalueVoid(p.assignment()))
+			if !p.accept(",") {
+				break
+			}
+		}
+		p.expect(")")
+		var e expr = &cast{node{tVoid, at}, p.intc(0, tInt, at)}
+		if len(as) > 0 {
+			e = &binary{node{tVoid, at}, ",", as[0], e}
+		}
+		return e
+	case "classify_type":
+		x := p.assignment()
+		p.expect(")")
+		t := x.ty()
+		c := int64(-1)
+		switch {
+		case t.kind == kVoid:
+			c = 0
+		case t.enum != nil:
+			c = 3
+		case t.kind == kBool:
+			c = 4
+		case t.isInteger():
+			c = 1
+		case t.isPtr():
+			c = 5
+		case t.isFloat():
+			c = 8
+		case t.kind == kStruct && t.rec.union:
+			c = 13
+		case t.kind == kStruct:
+			c = 12
+		case t.kind == kArray:
+			c = 14
+		case t.kind == kFunc:
+			c = 10
+		}
+		return p.intc(c, tInt, at)
+	case "add_overflow", "sub_overflow", "mul_overflow", "add_overflow_p", "sub_overflow_p", "mul_overflow_p":
+		a := p.rvalue(p.assignment())
+		p.expect(",")
+		b := p.rvalue(p.assignment())
+		p.expect(",")
+		r := p.rvalue(p.assignment())
+		p.expect(")")
+		if !a.ty().isInteger() || !b.ty().isInteger() {
+			p.errorAt(at, "%s of non-integers", name)
+		}
+		var rt *ctype
+		if base[len(base)-1] == 'p' {
+			rt = r.ty() // the third's type; it is not stored to
+		} else {
+			if !r.ty().isPtr() || !r.ty().elem.isInteger() {
+				p.errorAt(at, "%s's result is not a pointer to an integer", name)
+			}
+			rt = r.ty().elem
+		}
+		op := map[byte]int64{'a': '+', 's': '-', 'm': '*'}[base[0]]
+		return &builtinCall{node{tBool, at}, "overflow", []expr{p.intc(op, tInt, at), a, b, r, &cast{node{rt, at}, p.intc(0, tInt, at)}, p.intc(b2i(base[len(base)-1] == 'p'), tInt, at)}}
+	}
+	return nil
 }
 
 func (p *parser) checkVaList(e expr, at pos) {

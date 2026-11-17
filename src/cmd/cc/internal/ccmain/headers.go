@@ -591,6 +591,7 @@ void *alloca(size_t size);
 #define LLONG_MIN (-9223372036854775807LL-1)
 #define LLONG_MAX 9223372036854775807LL
 #define ULLONG_MAX 18446744073709551615ULL
+#define BITINT_MAXWIDTH 64
 #endif
 `,
 	"setjmp.h": `#ifndef __CC_SETJMP_H
@@ -714,6 +715,14 @@ typedef _Atomic ptrdiff_t atomic_ptrdiff_t;
 typedef _Atomic intmax_t atomic_intmax_t;
 typedef _Atomic uintmax_t atomic_uintmax_t;
 #define __STDC_VERSION_STDATOMIC_H__ 202311L
+#endif
+`,
+	"stdckdint.h": `#ifndef __CC_STDCKDINT_H
+#define __CC_STDCKDINT_H
+#define ckd_add(result, a, b) __builtin_add_overflow(a, b, result)
+#define ckd_sub(result, a, b) __builtin_sub_overflow(a, b, result)
+#define ckd_mul(result, a, b) __builtin_mul_overflow(a, b, result)
+#define __STDC_VERSION_STDCKDINT_H__ 202311L
 #endif
 `,
 	"stdalign.h": ``,

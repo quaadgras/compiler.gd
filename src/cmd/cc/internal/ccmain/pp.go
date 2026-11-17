@@ -10,6 +10,7 @@ package ccmain
 
 import (
 	"fmt"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -1659,6 +1660,20 @@ func convertNumber(t token) (token, error) {
 		l = true
 	case "uz", "zu":
 		u, l = true, true
+	case "wb", "uwb", "wbu":
+		// C23's _BitInt literals: the narrowest that holds v.
+		n := int64(bits.Len64(v))
+		if suffix == "wb" {
+			n++
+			if n < 2 {
+				n = 2
+			}
+			if n > 64 {
+				return errf("integer constant %q is too large for _BitInt(64)", t.text)
+			}
+		}
+		t.kind, t.ival, t.ty = tkInt, int64(v), bitInt(max(n, 1), suffix != "wb")
+		return t, nil
 	default:
 		return errf("invalid suffix %q on integer constant", t.text[len(t.text)-len(suffix):])
 	}
