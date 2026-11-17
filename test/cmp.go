@@ -17,7 +17,16 @@ var global bool
 
 func use(b bool) { global = b }
 
-func stringptr(s string) uintptr { return *(*uintptr)(unsafe.Pointer(&s)) }
+// stringptr returns the address of the bytes of s, or 0 if they are in
+// the string itself: with gd's strings of 16 bytes on a 32-bit target
+// (wasm32), a short string's bytes start at its word 0, and the top 4
+// bits of its last byte are its length.
+func stringptr(s string) uintptr {
+	if unsafe.Sizeof(s) == 16 && unsafe.Sizeof(uintptr(0)) == 4 && *(*byte)(unsafe.Add(unsafe.Pointer(&s), 15))>>4 != 0 {
+		return 0
+	}
+	return *(*uintptr)(unsafe.Pointer(&s))
+}
 
 func isfalse(b bool) {
 	if b {
