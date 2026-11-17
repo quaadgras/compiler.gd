@@ -1487,3 +1487,95 @@ hosts and the tests carry over; the compiler's code for memory, the
 linker's objects and helpers, and the runtime's memory (allocation,
 slices, maps, strings, reflection) are what change.
 
+
+#### Built (2026-11-17)
+
+`GOWASM=gc,split` builds and runs `println` and `fmt.Println` hello
+worlds and the ten programs of `compiled/tests` (`GOWASM=gc,split
+compiled/test.sh`; `std/build.py` and the go command both take the
+setting from the environment, `build.py` into `std/out-split`).
+
+What changed from the decision above, and why:
+
+- **The array has an element for every word, not for every pointer.**
+  The pointer at byte b of an allocation is element b/8 of its array,
+  whatever is before it, and the third field of a pointer is the offset
+  in bytes of its address from where element 0 is (not an index of
+  pointers). With elements by pointer, the element of a pointer at a
+  byte offset known only at run time is a count of the pointers before
+  it in the type, which only the type knows: `reflect` (`add(v.ptr,
+  field.Offset)`), `unsafe.Add`, `typedmemmove` by size, the runtime's
+  maps and channels and every `memmove` of a value with pointers would
+  each need the type. By word, a pointer moved by any number of bytes is
+  still right (`wasm.addptr` adds to the address and the offset), a
+  copy of n bytes is `memory.copy` and `array.copy` of the words they
+  span, and the runtime is written as Go is elsewhere. What it costs:
+  an array of a word for every 8 bytes of a value that has pointers
+  (4 or 8 bytes of the engine's for each), where by pointer it was one
+  for each pointer; none at all for one without (an array of length
+  0, which is what the block is freed by).
+- **All the data is covered by one array**, from address 0 to the end
+  of the data (`wasm.GCGlobalSlots`), not only the variables that have
+  pointers: the descriptors of types, itabs and function values have
+  their pointers in it too, so a pointer read from them is read as any
+  other. The start function sets the element of each word that a
+  relocation makes a pointer to data (a list of the words, after the
+  data in linear memory). A pointer made of an integer
+  (`unsafe.Pointer(u)`, `wasm.inttoptr`) has this array if the address
+  is in the data, and none otherwise.
+- **A pointer read from memory is checked against the integer there.**
+  `wasm.loadptr` returns the element of the array only if its address
+  is what the word in memory holds; otherwise the word was last written
+  as an integer, and the pointer is made of the integer. The compiler
+  writes the word of an interface that holds its type, and some other
+  words, as integers, where the runtime reads them as pointers.
+
+How it is put together:
+
+- **Types** (`cmd/internal/obj/wasm/gc.go`): `wasm.ptr`
+  (`{addr i32, slots (ref null wasm.slots), off i32}`, immutable) and
+  `wasm.slots` (an array of mutable `(ref null wasm.ptr)`), one
+  recursion group, which the linker makes types 0 and 1; `r` in a
+  signature, a local or a global is `(ref null wasm.ptr)`.
+- **Compiler** (`cmd/compile/internal/wasm/gcsplit.go`, called from the
+  top of the functions of `gc.go` it replaces): an address is resolved
+  to a base (a pointer, a variable in the frame, a variable in a local
+  that holds a pointer to it, static data) plus a constant and terms
+  computed at run time; a scalar is a load or store at the address, a
+  pointer a call of `wasm.loadptr` or `wasm.storeptr`, a copy or a
+  zeroing of a value with pointers a call of `wasm.smove` or
+  `wasm.szero`, and of one without inline loads and stores (up to 64
+  bytes) or `memory.copy`/`memory.fill`. Every variable whose address
+  is taken is in the frame in linear memory (but in wrappers, which
+  have none: allocated), which has an array if one of them has
+  pointers, and a pointer to it (`fptr`). Typed locals, casts, the
+  second case of every access and allocation by `struct.new` are gone.
+- **Linker** (`cmd/link/internal/wasm/gcsplit.go`): the helpers (eight
+  small functions) instead of those by layout; the globals: the array
+  of data, a pointer to address 0 with it, and a pointer to each data
+  symbol the code takes the address of as a pointer (immutable,
+  initialized where declared); no objects, layouts or constructors.
+  The module exports `slotsof`, the array of a pointer, which the host
+  registers instead of the pointer to free a block (and keeps for a
+  cleanup).
+- **Runtime** (`runtime/wasmgc/split.go`): `newobject`, `makeslice`,
+  `growslice` and `newarray` allocate a block and an array; `memmove`,
+  `typedmemmove` and the like are `wasm.smove`. The rest of the runtime
+  is shared, with `splitMode` (a constant) choosing where the models
+  differ; what only the other model uses stays, compiled out. `reflect`
+  has `wasmSplitMode` likewise.
+
+Work list (kept current):
+
+1. [done] Types, helpers, frames, `println` hello world.
+2. [done] `compiled/tests`, `fmt` hello world.
+3. Conformance suite in split mode (`conformance/run.py` with
+   `GOWASM=gc,split` writes `status-split.txt`).
+4. `reflect.Value.Call`, methods and `MakeFunc` (`gcreflect.go`: the
+   adapters load registers through the accessors of the other model;
+   in split they are loads from linear memory). Not built:
+   `reflect_gcreflectcall` and `reflect_gcmakefunc` trap.
+5. Weak pointers by the array of a block (`weak.go`: they are strong
+   now in split); cleanups are registered by the array already.
+6. Size and speed: the helpers are calls; the most common (a pointer
+   load) could be inline.

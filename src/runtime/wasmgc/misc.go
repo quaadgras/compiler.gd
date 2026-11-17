@@ -236,7 +236,7 @@ func maps_clone(m any) any {
 	var it mapIter
 	for mapIterStart(t, src, &it); it.key != nil; mapIterNext(&it) {
 		var zero unsafe.Pointer
-		if t.Elem.Pointers() {
+		if t.Elem.Pointers() && !splitMode {
 			zero = newobjectT(t.Elem)
 		}
 		p := mapassign(t, dst, it.key, zero)

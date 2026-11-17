@@ -28,6 +28,9 @@ func gcnew(n uintptr) unsafe.Pointer
 // newobjectT returns a new zeroed value of type t.
 func newobjectT(t *_type) unsafe.Pointer {
 	memstatsMallocs++
+	if splitMode {
+		return newarray(t, 1)
+	}
 	n := uintptr(unsafe.Pointer(t.GCData))
 	if n == 0 && t.Kind() == abi.Array {
 		// A type made by reflect.ArrayOf: element by element.
@@ -155,6 +158,10 @@ func typedmemmove(t *_type, dst, src unsafe.Pointer) {
 	if dst == src || t.Size_ == 0 {
 		return
 	}
+	if splitMode {
+		splitmove(dst, src, t.Size_)
+		return
+	}
 	if d, s := trylinaddr(dst), trylinaddr(src); d != 0 && s != 0 {
 		lincopy(d, s, t.Size_)
 		return
@@ -181,6 +188,10 @@ func typedmemclr(t *_type, p unsafe.Pointer) {
 	if t.Size_ == 0 {
 		return
 	}
+	if splitMode {
+		splitzero(p, t.Size_)
+		return
+	}
 	if a := trylinaddr(p); a != 0 {
 		linzero(a, t.Size_)
 		return
@@ -203,6 +214,10 @@ func typedslicecopy(t *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.P
 		return n
 	}
 	size := t.Size_
+	if splitMode {
+		splitmove(dstPtr, srcPtr, uintptr(n)*size)
+		return n
+	}
 	if d, s := trylinaddr(dstPtr), trylinaddr(srcPtr); d != 0 && s != 0 {
 		lincopy(d, s, uintptr(n)*size)
 		return n
@@ -225,6 +240,9 @@ func typedslicecopy(t *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe.P
 func newarrayT(t *_type, n int) unsafe.Pointer {
 	if n < 0 {
 		panicmakeslicelen()
+	}
+	if splitMode {
+		return newarray(t, n)
 	}
 	if !t.Pointers() {
 		return makeslicelin(int(t.Size_), n, n)
@@ -321,6 +339,10 @@ func reflect_typedmemclr(t *_type, p unsafe.Pointer) { typedmemclr(t, p) }
 
 //go:linkname reflect_typedmemclrpartial reflect.typedmemclrpartial
 func reflect_typedmemclrpartial(t *_type, p unsafe.Pointer, off, size uintptr) {
+	if splitMode {
+		splitzero(add(p, off), size)
+		return
+	}
 	typeScalars(t, 0, func(k byte, o uintptr) {
 		if o >= off && o < off+size {
 			clearScalar(k, add(p, o))

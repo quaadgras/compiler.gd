@@ -32,7 +32,8 @@ var (
 
 //go:linkname weak_runtime_registerWeakPointer weak.runtime_registerWeakPointer
 func weak_runtime_registerWeakPointer(p unsafe.Pointer) unsafe.Pointer {
-	if a := trylinaddr(p); a != 0 {
+	if a := trylinaddr(p); a != 0 || splitMode {
+		// TODO(split): weak, by the array of p.
 		if weakLinear == nil {
 			weakLinear = make(map[uintptr]*weakHandle)
 		}

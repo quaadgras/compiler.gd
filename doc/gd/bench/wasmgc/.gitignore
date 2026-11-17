@@ -1,3 +1,5 @@
 out/
 *.wasm
 *.a
+out-split/
+status-split.txt.tmp

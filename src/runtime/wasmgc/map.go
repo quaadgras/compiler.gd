@@ -57,6 +57,10 @@ type mapstore struct {
 
 func newmapstore(t *abi.Type, n int) mapstore {
 	s := mapstore{typ: t, size: t.Size_}
+	if splitMode {
+		s.mem = newarray(t, n)
+		return s
+	}
 	if t.Pointers() {
 		s.objs = newobjarray(n)
 	} else {
@@ -68,6 +72,9 @@ func newmapstore(t *abi.Type, n int) mapstore {
 
 // ptr returns a pointer to entry i.
 func (s *mapstore) ptr(i int) unsafe.Pointer {
+	if splitMode {
+		return add(s.mem, uintptr(i)*s.size)
+	}
 	if s.objs != nil {
 		return objarrayget(s.objs, i)
 	}
@@ -76,6 +83,10 @@ func (s *mapstore) ptr(i int) unsafe.Pointer {
 
 // put sets entry i to a copy of what p points to.
 func (s *mapstore) put(i int, p unsafe.Pointer) {
+	if splitMode {
+		memmove(s.ptr(i), p, s.size)
+		return
+	}
 	if s.objs != nil {
 		if boxobj(p) != p {
 			// A pointer into an object (a field, say: m[a.f] = v):
@@ -95,6 +106,10 @@ func (s *mapstore) put(i int, p unsafe.Pointer) {
 
 // move sets entry i to entry j of old.
 func (s *mapstore) move(i int, old *mapstore, j int) {
+	if splitMode {
+		memmove(s.ptr(i), old.ptr(j), s.size)
+		return
+	}
 	if s.objs != nil {
 		objarrayset(s.objs, i, objarrayget(old.objs, j))
 		return
@@ -294,7 +309,7 @@ func mapassign(t *abi.MapType, m *gcmap, key, zero unsafe.Pointer) unsafe.Pointe
 	switch {
 	case zero != nil:
 		tab.elems.put(i, zero)
-	case tab.elems.objs != nil:
+	case tab.elems.objs != nil && !splitMode:
 		// (From reflect, which has no zero object to copy.)
 		objarrayset(tab.elems.objs, i, newobjectT(t.Elem))
 	default:
@@ -315,10 +330,16 @@ func mapdelete(t *abi.MapType, m *gcmap, key unsafe.Pointer) {
 	}
 	tab := m.tab
 	tab.hashes[i] = slotDeleted
-	if tab.keys.objs != nil {
+	if splitMode && t.Key.Pointers() {
+		memclrNoHeapPointers(tab.keys.ptr(i), tab.keys.size)
+	}
+	if splitMode && t.Elem.Pointers() {
+		memclrNoHeapPointers(tab.elems.ptr(i), tab.elems.size)
+	}
+	if tab.keys.objs != nil && !splitMode {
 		objarrayset(tab.keys.objs, i, nil)
 	}
-	if tab.elems.objs != nil {
+	if tab.elems.objs != nil && !splitMode {
 		objarrayset(tab.elems.objs, i, nil)
 	}
 	m.used--

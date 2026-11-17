@@ -9,6 +9,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
+	"internal/buildcfg"
 	"slices"
 	"strings"
 )
@@ -200,6 +201,43 @@ const (
 	GCDeferFunc = 8
 	GCDeferSize = 16
 
+	// With GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md) the bytes
+	// of every Go value are in linear memory, pointer words included
+	// (the address, as an integer), and the pointers themselves are in
+	// one array of references per allocation (GCSlots), one element
+	// per 8-byte word of the allocation: the pointer at byte b of it is
+	// element b/8. A pointer is a GCPtr: the address it points to, the
+	// array of the allocation it points into (null if there is none)
+	// and the offset in bytes of the address from where element 0 of
+	// the array is. These two are the only types of Go values: the
+	// linker makes them types 0 and 1, one recursion group, and 'r' in
+	// a signature or a local is (ref null GCPtr).
+	GCPtr      = "wasm.ptr"
+	GCPtrAddr  = 0
+	GCPtrSlots = 1
+	GCPtrOff   = 2
+	GCSlots    = "wasm.slots"
+
+	// The functions the linker generates for split. See
+	// cmd/link/internal/wasm/gcsplit.go.
+	GCSplitLoadPtr  = "wasm.loadptr"  // (p, rel i32) ptr: the pointer at byte rel from p
+	GCSplitStorePtr = "wasm.storeptr" // (p, rel i32, v ptr): store v there
+	GCSplitAddPtr   = "wasm.addptr"   // (p, rel i32) ptr: p + rel
+	GCSplitPtrAddr  = "wasm.ptraddr"  // (p) i32: the address, 0 for nil
+	GCSplitIntToPtr = "wasm.inttoptr" // (i64) ptr: the pointer of an address
+	GCSplitMove     = "wasm.smove"    // (dst, drel i32, src, srel i32, n i32): copy n bytes and their pointers
+	GCSplitZero     = "wasm.szero"    // (p, rel i32, n i32): zero n bytes and their pointers
+	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32) ptr: a pointer to a new block
+
+	// GCGlobalSlots is the global (with split) that holds the array of
+	// the program's data, which covers all of it from address 0, and
+	// GCGlobalStatic the one that holds a GCPtr to address 0 with that
+	// array: a pointer to data is that plus the address.
+	GCGlobalSlots  = 7
+	GCGlobalStatic = 8
+	// GCSplitGlobals is GCGlobals with split.
+	GCSplitGlobals = 9
+
 	// GCStackRatio is how much of the engine's stack a function may
 	// take for each byte of its frame in linear memory, and
 	// GCEngineFrame what a frame of the engine's is taken to be beyond
@@ -363,6 +401,9 @@ func preprocessGC(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			case obj.WasmPtr:
 				if sig[i] != 'r' {
 					add(AI32WrapI64)
+				} else if !GCImportRefs(wi.Module) && buildcfg.GOWASM.Split {
+					p := add(ACall)
+					p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ctxt.Lookup(GCSplitPtrAddr)}
 				} else if !GCImportRefs(wi.Module) {
 					p := add(ACall)
 					p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ctxt.Lookup(GCPtrID)}
@@ -523,6 +564,10 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 		})
 	case ARefNull:
 		w.WriteByte(0xD0)
+		if buildcfg.GOWASM.Split {
+			w.WriteByte(0x71) // none: a null of any reference type
+			break
+		}
 		w.WriteByte(GCHeapEq)
 	case ARefIsNull:
 		w.WriteByte(0xD1)
@@ -552,6 +597,12 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 		gcHeapRef(ctxt, s, w, p.From.Sym)
 	case ARefBlock:
 		w.WriteByte(0x02) // block
+		if p.From.Offset == 1 {
+			// (ref null To.Sym)
+			w.WriteByte(GCRefNull)
+			gcHeapRef(ctxt, s, w, gcTypeAddr(p))
+			break
+		}
 		w.WriteByte(GCRefNonNull)
 		if p.To.Sym == nil {
 			w.WriteByte(0x6C) // i31
@@ -567,6 +618,11 @@ func assembleGC(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer, p *obj.Prog) bool 
 	case ARefSelect:
 		w.WriteByte(0x1C) // select t*
 		writeUleb128(w, 1)
+		if buildcfg.GOWASM.Split {
+			w.WriteByte(GCRefNull)
+			gcHeapRef(ctxt, s, w, ctxt.Lookup(GCPtr))
+			break
+		}
 		w.WriteByte(GCTypeEqRef)
 	case ARefGlobalGet, ARefGlobalSet:
 		if p.As == ARefGlobalGet {

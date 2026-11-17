@@ -129,7 +129,7 @@ func (c *hchan) copyelem(dst, src unsafe.Pointer) {
 	case dst == nil:
 	case isRefType(c.elemtype):
 		*(*unsafe.Pointer)(dst) = *(*unsafe.Pointer)(src)
-	case c.zero != nil:
+	case c.zero != nil && !splitMode:
 		gccopy(dst, src)
 	default:
 		memmove(dst, src, c.elemtype.Size_)
@@ -142,7 +142,7 @@ func (c *hchan) clearelem(dst unsafe.Pointer) {
 	case dst == nil:
 	case isRefType(c.elemtype):
 		*(*unsafe.Pointer)(dst) = nil
-	case c.zero != nil:
+	case c.zero != nil && !splitMode:
 		gccopy(dst, c.zero)
 	default:
 		memclrNoHeapPointers(dst, c.elemtype.Size_)
@@ -162,7 +162,9 @@ func (c *hchan) buffer(ep unsafe.Pointer) {
 // unbuffer takes the first element of the buffer of c, to ep.
 func (c *hchan) unbuffer(ep unsafe.Pointer) {
 	c.copyelem(ep, c.buf.ptr(int(c.recvx)))
-	if c.buf.objs != nil {
+	if splitMode && c.elemtype.Pointers() {
+		memclrNoHeapPointers(c.buf.ptr(int(c.recvx)), c.elemtype.Size_)
+	} else if c.buf.objs != nil && !splitMode {
 		objarrayset(c.buf.objs, int(c.recvx), nil)
 	}
 	c.recvx++

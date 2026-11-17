@@ -523,7 +523,11 @@ func addCleanup(p unsafe.Pointer, fn func()) int64 {
 		linCleanups[i-1] = append(linCleanups[i-1], lastCleanup)
 		return lastCleanup
 	}
-	hostcleanup(boxobj(p), lastCleanup)
+	if splitMode {
+		hostcleanup(p, lastCleanup)
+	} else {
+		hostcleanup(boxobj(p), lastCleanup)
+	}
 	return lastCleanup
 }
 

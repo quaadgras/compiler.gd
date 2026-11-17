@@ -21,6 +21,10 @@ func memmove(to, from unsafe.Pointer, n uintptr) {
 	if n == 0 {
 		return
 	}
+	if splitMode {
+		splitmove(to, from, n)
+		return
+	}
 	t, f := trylinaddr(to), trylinaddr(from)
 	if t != 0 && f != 0 {
 		lincopy(t, f, n)
@@ -72,6 +76,10 @@ func memequal(p, q unsafe.Pointer, n uintptr) bool {
 }
 
 func memclrNoHeapPointers(p unsafe.Pointer, n uintptr) {
+	if splitMode {
+		splitzero(p, n)
+		return
+	}
 	if a := trylinaddr(p); a != 0 {
 		linzero(a, n)
 		return

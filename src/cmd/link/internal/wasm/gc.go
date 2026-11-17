@@ -97,10 +97,13 @@ func (l *gcLinker) globalIndex(s loader.Sym) uint32 {
 	if i, ok := l.globalIdx[s]; ok {
 		return i
 	}
-	if typ := l.ldr.SymGoType(s); typ != 0 && l.ldr.SymSize(s) > 0 && ld.WasmGCPtrdata(l.ctxt, typ) == 0 {
+	if typ := l.ldr.SymGoType(s); typ != 0 && l.ldr.SymSize(s) > 0 && ld.WasmGCPtrdata(l.ctxt, typ) == 0 && !splitMode() {
 		l.ctxt.Errorf(s, "GOWASM=gc: a variable without pointers is referred to as an object")
 	}
 	i := uint32(wasm.GCGlobals + len(l.globals))
+	if splitMode() {
+		i = uint32(wasm.GCSplitGlobals + len(l.globals))
+	}
 	l.globals = append(l.globals, s)
 	l.globalIdx[s] = i
 	return i
@@ -230,10 +233,18 @@ func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
 		w.WriteByte(0x60)
 		writeUleb128(w, uint64(len(params)))
 		for i := range params {
+			if splitMode() {
+				l.splitValType(w, params[i])
+				continue
+			}
 			w.WriteByte(gcStorage(params[i]))
 		}
 		writeUleb128(w, uint64(len(results)))
 		for i := range results {
+			if splitMode() {
+				l.splitValType(w, results[i])
+				continue
+			}
 			w.WriteByte(gcStorage(results[i]))
 		}
 	default:
@@ -713,7 +724,12 @@ func asmbGC(ctxt *ld.Link, ldr *loader.Loader) {
 
 func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	l := &gcLinker{ctxt: ctxt, ldr: ldr, typeIdx: make(map[string]uint32), globalIdx: make(map[loader.Sym]uint32), layoutAddr: make(map[string]int64)}
-	l.typeIndex(wasm.GCHeader) // before its subtypes
+	if splitMode() {
+		l.typeIndex(wasm.GCPtr) // types 0 and 1
+		l.typeIndex(wasm.GCSlots)
+	} else {
+		l.typeIndex(wasm.GCHeader) // before its subtypes
+	}
 
 	// The descriptions of the layouts follow the data in linear memory.
 	// (Address 0 is no layout.)
@@ -787,9 +803,11 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 	// The identity of an object that has no header to keep it in:
 	// an array.
-	objid := len(hostImports)
-	hostImports = append(hostImports, &wasmFunc{Module: "gd", Name: "objid", Type: l.typeIndex(wasm.GCFuncPrefix + "r.i")})
-	l.objidFunc = objid
+	if !splitMode() {
+		objid := len(hostImports)
+		hostImports = append(hostImports, &wasmFunc{Module: "gd", Name: "objid", Type: l.typeIndex(wasm.GCFuncPrefix + "r.i")})
+		l.objidFunc = objid
+	}
 	funcIndex := func(s loader.Sym) int64 {
 		return int64(len(hostImports)) + ldr.SymValue(s)>>16 - funcValueOffset
 	}
@@ -843,7 +861,11 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 					writeSleb128(wfn, hopIndex[sigOf(fn)])
 					break
 				}
-				if h, ok := l.helperIndex(ldr.SymName(rs)); ok {
+				if h, ok := l.splitHelperIndex(ldr.SymName(rs)); ok && splitMode() {
+					writeSleb128(wfn, int64(len(hostImports)+len(ctxt.Textp)+h))
+					break
+				}
+				if h, ok := l.helperIndex(ldr.SymName(rs)); ok && !splitMode() {
 					writeSleb128(wfn, int64(len(hostImports)+len(ctxt.Textp)+h))
 					break
 				}
@@ -888,8 +910,21 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// The start function, which creates the objects, and the
 	// functions that resolve pointers. The start function comes
 	// first: it may add layouts.
-	init := &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
-	ctors := l.constructors()
+	var init *wasmFunc
+	var ctors [][]byte
+	var splitWords []uint32
+	var splitEnd, splitWordsAddr int64
+	if splitMode() {
+		v, _ := dataSects.Load(ctxt)
+		sects, _ := v.([]wasmDataSect)
+		splitEnd = int64(gcDataEnd(ldr, sects))
+		splitWords = l.splitDataSlots(sects, uint64(splitEnd))
+		splitWordsAddr = (splitEnd + 7) &^ 7
+		init = &wasmFunc{Name: "go.initdata", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.splitInit(splitWordsAddr, int64(len(splitWords)))}
+	} else {
+		init = &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
+		ctors = l.constructors()
+	}
 	for _, fn := range ctxt.Textp { // (in the order of the functions, which a build keeps)
 		sig := sigOf(fn)
 		if imp := hops[sig]; imp != nil {
@@ -898,7 +933,11 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			delete(hops, sig)
 		}
 	}
-	fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
+	if splitMode() {
+		fns = append(fns, l.splitHelpers(len(hostImports)+len(fns), splitEnd)...)
+	} else {
+		fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
+	}
 	start := len(hostImports) + len(fns)
 	fns = append(fns, init)
 
@@ -937,6 +976,15 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	}
 
 	section(sectionType, func(w *bytes.Buffer) {
+		if splitMode() {
+			// (The first two are one recursion group.)
+			writeUleb128(w, uint64(len(l.types)-1))
+			l.writeSplitTypes(w)
+			for _, name := range l.types[2:] {
+				l.writeType(w, name)
+			}
+			return
+		}
 		writeUleb128(w, uint64(len(l.types)))
 		for _, name := range l.types {
 			l.writeType(w, name)
@@ -967,7 +1015,14 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	}
 	end := gcDataEnd(ldr, sects)
-	layouts := l.layoutTable()
+	var layouts []byte
+	if splitMode() {
+		// The list of the words of data that are pointers, which the
+		// start function reads, follows the data.
+		end = uint64(splitWordsAddr) + 4*uint64(len(splitWords))
+	} else {
+		layouts = l.layoutTable()
+	}
 	if len(layouts) > 0 {
 		end = uint64(l.layoutBase) + uint64(len(layouts))
 	}
@@ -985,6 +1040,10 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		writeUleb128(w, uint64(l.typeIndex(wasm.GCFuncPrefix+".")))
 	})
 	section(sectionGlobal, func(w *bytes.Buffer) {
+		if splitMode() {
+			l.splitGlobals(w, stackTop, uint64(splitEnd))
+			return
+		}
 		writeUleb128(w, uint64(wasm.GCGlobals+len(l.globals)))
 		for i := 0; i < wasm.GCGlobals+len(l.globals); i++ {
 			if i == wasm.GCGlobalSP || i == wasm.GCGlobalID || i == wasm.GCGlobalStackLo || i == wasm.GCGlobalPanicLine || i == wasm.GCGlobalDefer {
@@ -1032,7 +1091,18 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	}
 	section(sectionExport, func(w *bytes.Buffer) {
-		writeUleb128(w, uint64(5+len(exports)))
+		n := 5 + len(exports)
+		if splitMode() {
+			n++
+		}
+		writeUleb128(w, uint64(n))
+		if splitMode() {
+			// The array of a pointer, for the host (see gcSplitSlotsOf).
+			writeName(w, "slotsof")
+			w.WriteByte(0x00)
+			i, _ := l.splitHelperIndex(gcSplitSlotsOf)
+			writeUleb128(w, uint64(len(hostImports)+len(ctxt.Textp)+i))
+		}
 		for _, e := range exports {
 			writeName(w, e.name)
 			w.WriteByte(0x00) // func export
@@ -1061,7 +1131,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// (All functions: MakeFunc calls the stubs the linker generates.)
 	writeElementSec(ctxt, uint64(len(hostImports)), uint64(len(fns)))
 	nseg := 1 + len(sects)
-	if len(layouts) > 0 {
+	if len(layouts) > 0 || len(splitWords) > 0 {
 		nseg++
 	}
 	section(sectionDataCount, func(w *bytes.Buffer) {
@@ -1091,6 +1161,15 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			w.WriteByte(0x0b) // end
 			writeUleb128(w, uint64(len(ds.data)))
 			w.Write(ds.data)
+		}
+		if len(splitWords) > 0 {
+			writeUleb128(w, 0) // active, memory 0
+			writeI32Const(w, int32(splitWordsAddr))
+			w.WriteByte(0x0b) // end
+			writeUleb128(w, uint64(4*len(splitWords)))
+			for _, word := range splitWords {
+				w.Write(binary.LittleEndian.AppendUint32(nil, word))
+			}
 		}
 		if len(layouts) > 0 {
 			writeUleb128(w, 0) // active, memory 0

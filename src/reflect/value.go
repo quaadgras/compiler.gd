@@ -1680,7 +1680,7 @@ func (v Value) Field(i int) Value {
 		return sub
 	}
 	ptr := add(v.ptr, field.Offset, "same as non-reflect &v.field")
-	if wasmGCMode && field.Typ.Kind() == abi.Struct && field.Offset != 0 {
+	if wasmGCMode && !wasmSplitMode && field.Typ.Kind() == abi.Struct && field.Offset != 0 {
 		// A pointer to a struct, not into an array it starts with
 		// (see GCAddPtrStruct in cmd/internal/obj/wasm).
 		ptr = unsafe.Add(v.ptr, field.Offset|1<<30)

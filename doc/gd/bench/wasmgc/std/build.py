@@ -14,8 +14,12 @@ import json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
-OUT = os.path.join(HERE, 'out')
-ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM='gc', NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
+# GOWASM=gc,split in the environment builds for that model (stage 15 of
+# wasm-gc.md), in out-split; anything else is GOWASM=gc.
+SPLIT = 'split' in os.environ.get('GOWASM', '').split(',')
+GOWASM = 'gc,split' if SPLIT else 'gc'
+OUT = os.path.join(HERE, 'out-split' if SPLIT else 'out')
+ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM=GOWASM, NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
 HOSTENV = dict(os.environ, GOROOT=GOROOT)
 for k in ('GOOS', 'GOARCH', 'GOWASM'):
     HOSTENV.pop(k, None)
@@ -30,6 +34,21 @@ def golist(*args):
 
 
 _lock = None
+
+# The build tags of the runtime's files (see build_ok).
+TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | ({'wasm.split'} if SPLIT else set())
+
+
+def build_ok(path):
+    """Reports whether the //go:build line of the file, if any, is satisfied."""
+    import re
+    for line in open(path):
+        if line.startswith('//go:build '):
+            py = re.sub(r'[\w.]+', lambda m: str(m.group(0) in TAGS), line[len('//go:build '):])
+            return eval(py.replace('&&', ' and ').replace('||', ' or ').replace('!', ' not '))
+        if line.startswith('package '):
+            break
+    return True
 
 
 def build(want, keep=True, log=print):
@@ -78,7 +97,7 @@ def build(want, keep=True, log=print):
         if path == 'runtime':
             imports = set(rtImports)
             d = GOROOT + '/src/runtime/wasmgc'
-            files = sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith('.go'))
+            files = sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith('.go') and build_ok(os.path.join(d, f)))
             flags = ['-+']
         if imports & failed:
             failed.add(path)

@@ -193,6 +193,9 @@ func linfree(addr uintptr) {
 // linnew returns a pointer to n zeroed bytes of linear memory, freed
 // when it and the pointers derived from it are collected.
 func linnew(n uintptr) unsafe.Pointer {
+	if splitMode {
+		return splitalloc(n, 0)
+	}
 	addr := linalloc(n)
 	p := newlinear(addr)
 	linregister(p, addr)
@@ -207,7 +210,14 @@ func linnew(n uintptr) unsafe.Pointer {
 // linbase returns the address of the block of linear memory (from
 // linalloc) that p points into, or 0 if p points to no such block (to
 // data, a stack, or an object). The compiler replaces calls to it.
-func linbase(p unsafe.Pointer) uintptr
+func linbase(p unsafe.Pointer) uintptr {
+	if splitMode {
+		return splitbase(p)
+	}
+	return gclinbase(p)
+}
+
+func gclinbase(p unsafe.Pointer) uintptr
 
 // trylinaddr returns the address of a pointer to linear memory, or 0 if
 // p is not one. The compiler replaces calls to it by instructions.

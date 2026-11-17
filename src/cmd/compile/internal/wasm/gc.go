@@ -103,6 +103,8 @@ type gcGen struct {
 	hasDefer bool
 
 	scratchI32, scratchRef, scratchI64 int32    // scratch locals, or -1
+	scratchI32b                        int32    // a second i32 scratch local (split), or -1
+	fptr                               int32    // split: the local of the pointer to the frame
 	scratchNil                         int32    // the scratch local of intToPtr, or -1
 	pos                                src.XPos // of the value being generated
 
@@ -431,6 +433,9 @@ func (g *gcGen) newTypedLocal(sym *obj.LSym) int32 {
 
 // fillTyped sets the typed local of v, if it has one, after v is set.
 func (g *gcGen) fillTyped(v *ssa.Value) {
+	if gcSplit() {
+		return
+	}
 	if la, ok := g.linLoc[v.ID]; ok {
 		done := g.block('i')
 		slow := g.block('r')
@@ -516,6 +521,9 @@ func (g *gcGen) chooseTyped() {
 }
 
 func (g *gcGen) newLocal(kind byte) int32 {
+	if kind == 'r' && gcSplit() {
+		return g.newTypedLocal(g.ptrSym())
+	}
 	g.locals = append(g.locals, wasm.GCValueType(kind))
 	return g.nparam + int32(len(g.locals)) - 1
 }
@@ -606,6 +614,19 @@ func (g *gcGen) discard(v *ssa.Value) {
 // an i32 unless extend is set.
 func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 	s := g.s
+	if gcSplit() {
+		switch v.Op {
+		case ssa.OpLoad:
+			g.splitLoad(v)
+			return
+		case ssa.OpLocalAddr, ssa.OpAddr, ssa.OpOffPtr, ssa.OpPtrIndex, ssa.OpAddPtr:
+			g.splitPointer(v)
+			return
+		case ssa.OpEqPtr, ssa.OpNeqPtr:
+			g.splitEqPtr(v, extend)
+			return
+		}
+	}
 	switch v.Op {
 	case ssa.OpStructMake, ssa.OpArrayMake1:
 		// Of a single field: the field.
@@ -803,6 +824,11 @@ func gcLinearAddr(v *ssa.Value) (base *ssa.Value, off int64) {
 // ptrToInt converts the pointer pushed to an integer: the address of a
 // pointer to linear memory, the identity of an object (see wasm.GCPtrID).
 func (g *gcGen) ptrToInt() {
+	if gcSplit() {
+		g.helper(wasm.GCSplitPtrAddr)
+		g.prog(wasm.AI64ExtendI32U)
+		return
+	}
 	tmp := g.scratch('r')
 	g.local(wasm.ALocalSet, tmp)
 	done := g.block('l')
@@ -820,6 +846,10 @@ func (g *gcGen) ptrToInt() {
 // intToPtr converts the integer pushed, an address in linear memory,
 // to a pointer.
 func (g *gcGen) intToPtr() {
+	if gcSplit() {
+		g.helper(wasm.GCSplitIntToPtr)
+		return
+	}
 	// 0 is nil.
 	g.prog(wasm.AI32WrapI64)
 	if g.scratchNil < 0 {
@@ -980,6 +1010,11 @@ func (g *gcGen) pointer(v *ssa.Value) {
 // block opens a block whose result is of the WebAssembly type the
 // letter stands for (0 for none).
 func (g *gcGen) block(result byte) *obj.Prog {
+	if result == 'r' && gcSplit() {
+		p := g.typed(wasm.ARefBlock, g.ptrSym(), 0)
+		p.From.Offset = 1 // nullable
+		return p
+	}
 	p := g.prog(wasm.ABlock)
 	if result != 0 {
 		p.From.Offset = 0x80 - int64(wasm.GCValueType(result))
@@ -2002,6 +2037,10 @@ func (g *gcGen) newObjectInit(t *types.Type, fused map[int64]*ssa.Value) {
 // typeDesc pushes a pointer to the type descriptor of t, which is in
 // linear memory.
 func (g *gcGen) typeDesc(t *types.Type) {
+	if gcSplit() {
+		g.splitTypeDesc(t)
+		return
+	}
 	p := g.prog(wasm.AI32Const)
 	p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: reflectdata.TypeLinksym(g.s.GD(), t)}
 	g.prog(wasm.ARefI31)
@@ -2010,6 +2049,10 @@ func (g *gcGen) typeDesc(t *types.Type) {
 // zerobase pushes the address of runtime.zerobase, which is in linear
 // memory.
 func (g *gcGen) zerobase() {
+	if gcSplit() {
+		g.splitStatic(g.ctxt.Lookup("runtime.zerobase"))
+		return
+	}
 	p := g.prog(wasm.AI32Const)
 	p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: g.ctxt.Lookup("runtime.zerobase")}
 	g.prog(wasm.ARefI31)
@@ -2017,6 +2060,10 @@ func (g *gcGen) zerobase() {
 
 // newObject pushes a new, zeroed object of type t.
 func (g *gcGen) newObject(t *types.Type) {
+	if gcSplit() {
+		g.splitNewObject(t)
+		return
+	}
 	if t.Size() == 0 {
 		// Every variable of size zero is at the same address.
 		g.zerobase()
@@ -2538,6 +2585,10 @@ func (g *gcGen) call(v *ssa.Value) {
 	}
 	fn := aux.Fn
 	name := fn.Name
+	if gcSplit() && g.splitCall(v, name, args) {
+		g.results(v)
+		return
+	}
 	if name == "runtime.memclrNoHeapPointers" {
 		// Objects (structs, arrays of structs) are cleared by type.
 		p := args[0]
@@ -2931,7 +2982,7 @@ func (g *gcGen) call(v *ssa.Value) {
 		g.prog(wasm.ADrop)
 		i64Const(g.s, 0)
 		g.prog(wasm.AEnd)
-	case "runtime.linbase":
+	case "runtime.gclinbase":
 		// The address of the block of linear memory a pointer is
 		// into (its owner's), or 0 if it is not into one.
 		done := g.block('l')
@@ -2990,6 +3041,12 @@ func (g *gcGen) call(v *ssa.Value) {
 // v that are not in registers (see stackSlots).
 func (g *gcGen) slotArgs(v *ssa.Value) {
 	for _, n := range g.callSlots[v.ID] {
+		if off, ok := g.frame[n]; ok && gcSplit() {
+			g.local(wasm.ALocalGet, g.fptr)
+			i32Const(g.s, int32(off))
+			g.helper(wasm.GCSplitAddPtr)
+			continue
+		}
 		g.local(wasm.ALocalGet, g.objs[n])
 	}
 }
@@ -3056,7 +3113,7 @@ func gcRemat(v *ssa.Value) bool {
 }
 
 func genWasmGC(s *ssagen.State, f *ssa.Func) {
-	g := &gcGen{s: s, f: f, ctxt: s.GD().Ctxt, scratchI32: -1, scratchRef: -1, scratchI64: -1, scratchNil: -1, fused: make(map[ssa.ID]bool)}
+	g := &gcGen{s: s, f: f, ctxt: s.GD().Ctxt, scratchI32: -1, scratchRef: -1, scratchI64: -1, scratchNil: -1, scratchI32b: -1, fptr: -1, fused: make(map[ssa.ID]bool)}
 	s.WasmGC = g
 	defer func() {
 		// TODO: nothing should be unsupported.
@@ -3129,6 +3186,11 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 				_, inFrame := g.frame[n]
 				switch {
 				case isObj, inFrame:
+				case gcSplit() && !frameless:
+					// Every variable whose address is taken is in
+					// the frame, with split.
+					g.frame[n] = g.frameSize
+					g.frameSize += (n.Type().Size() + 7) &^ 7
 				case !n.Type().HasPointers() && !g.forceObj[n] && !frameless:
 					g.frame[n] = g.frameSize
 					g.frameSize += (n.Type().Size() + 7) &^ 7
@@ -3220,6 +3282,9 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		g.local(wasm.ALocalGet, g.fp)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
 	}
+	if gcSplit() {
+		g.splitFrame()
+	}
 	if g.hasDefer {
 		// The record becomes the innermost: its function, and the
 		// one before it.
@@ -3255,7 +3320,9 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		g.objs[n] = -g.objs[n] - 1
 	}
 
-	g.chooseTyped()
+	if !gcSplit() {
+		g.chooseTyped()
+	}
 	if g.hasDefer {
 		g.block(0)
 		g.prog(wasm.ATRYCATCH).From = obj.Addr{Type: obj.TYPE_CONST, Offset: wasm.GCTagRecover}
@@ -3677,6 +3744,10 @@ func (g *gcGen) value(v *ssa.Value) {
 			return
 		}
 		t := v.Aux.(*types.Type)
+		if gcSplit() {
+			g.splitStore(v.Args[0], t, g.wtype(v.Args[1].Type), func() { g.get(v.Args[1], false) }, v)
+			return
+		}
 		g.accessStore(v.Args[0], 0, t, func(want32 bool) {
 			// The value may be a pointer stored as an integer, or
 			// the reverse: the type word of an interface.
@@ -3696,9 +3767,17 @@ func (g *gcGen) value(v *ssa.Value) {
 		}, v)
 
 	case ssa.OpZero:
+		if gcSplit() {
+			g.splitZero(v, v.Aux.(*types.Type))
+			return
+		}
 		g.zeroValue(v, v.Aux.(*types.Type))
 
 	case ssa.OpMove:
+		if gcSplit() {
+			g.splitMove(v, v.Aux.(*types.Type))
+			return
+		}
 		g.moveValue(v, v.Aux.(*types.Type))
 
 	case ssa.OpWasmLoweredStaticCall, ssa.OpWasmLoweredClosureCall, ssa.OpWasmLoweredInterCall,
