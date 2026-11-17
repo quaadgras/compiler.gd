@@ -37,20 +37,21 @@ type genError struct{ msg string }
 
 // pkgGen generates the Go of a package: one or more units.
 type pkgGen struct {
-	o       options
-	file    string
-	units   []*unit
-	types   strings.Builder // the mirror types
-	vars    strings.Builder // package-level variables
-	inits   strings.Builder // func init's statements
-	funcs   strings.Builder
-	mirrors map[string]string // a record's layout key to its mirror's name
-	strs    map[string]string
-	ext     map[string]*symbol // the definitions with external linkage
-	names   map[*symbol]string
-	descs   map[string]bool // function descriptors made
-	recN    int
-	uses    map[string]bool // imports used
+	o        options
+	file     string
+	units    []*unit
+	types    strings.Builder // the mirror types
+	vars     strings.Builder // package-level variables
+	inits    strings.Builder // func init's statements
+	descInit strings.Builder // the function descriptors' assignments
+	funcs    strings.Builder
+	mirrors  map[string]string // a record's layout key to its mirror's name
+	strs     map[string]string
+	ext      map[string]*symbol // the definitions with external linkage
+	names    map[*symbol]string
+	descs    map[string]bool // function descriptors made
+	recN     int
+	uses     map[string]bool // imports used
 }
 
 // gen generates one function, or file-scope code, of a unit.
@@ -119,6 +120,11 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
 	b.WriteString(pg.types.String())
 	b.WriteString(pg.vars.String())
+	if pg.descInit.Len() > 0 {
+		b.WriteString("\nfunc init() {\n")
+		b.WriteString(pg.descInit.String())
+		b.WriteString("}\n")
+	}
 	if pg.inits.Len() > 0 {
 		b.WriteString("\nfunc init() {\n")
 		b.WriteString(pg.inits.String())

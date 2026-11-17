@@ -888,8 +888,12 @@ func (g *gen) funcPtr(s *symbol) string {
 	}
 	d := "fd_" + strings.ReplaceAll(name, ".", "_")
 	if !g.descs[d] {
+		// Set in an init of its own, before C's initializers use it: a
+		// package-level initializer would make a cycle if the function
+		// uses its own address.
 		g.descs[d] = true
-		fmt.Fprintf(&g.vars, "var %s = c23.NewFunc(%s)\n", d, name)
+		fmt.Fprintf(&g.vars, "var %s c23.Ptr\n", d)
+		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, name)
 	}
 	return d
 }

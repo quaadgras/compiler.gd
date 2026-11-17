@@ -9,7 +9,7 @@
 //
 // Usage:
 //
-//	go tool cc [-pkg name] [-main] -o out.go in.c
+//	go tool cc [-pkg name] [-main] [-I dir]... -o out.go file.c...
 //
 // Standalone binary. Forwards to cmd/cc/internal/ccmain.Run, which holds
 // the logic, so that cmd/go can drive it in-process via cmd/cc/host.
