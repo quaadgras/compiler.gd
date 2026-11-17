@@ -337,8 +337,8 @@ type gowasmFeatures struct {
 
 	// GC keeps Go objects in the WebAssembly garbage-collected heap
 	// (typed structs and arrays) instead of linear memory.
-	// See doc/gd/wasm-gc.md. It is the default for GOOS=js:
-	// GOWASM=linear is Go's own port.
+	// See doc/gd/wasm-gc.md. With Split, it is the default for
+	// GOOS=js: GOWASM=gc is this alone, GOWASM=linear Go's own port.
 	GC bool
 
 	// Split, with GC, keeps the bytes of every Go value in linear
@@ -364,11 +364,7 @@ func (f gowasmFeatures) String() string {
 }
 
 func gowasm() (f gowasmFeatures) {
-	// gc is what GOOS=js means, unless linear is asked for: Go's own
-	// port, with every Go value in linear memory and Go's collector.
-	// (Not GOOS=wasip1: gc needs a host that tells it when an object
-	// is collected, which a WASI host is not.)
-	f.GC = GOARCH == "wasm" && GOOS == "js"
+	var gc, split, linear bool
 	for opt := range strings.SplitSeq(envOr("GOWASM", ""), ",") {
 		switch opt {
 		case "satconv":
@@ -376,19 +372,38 @@ func gowasm() (f gowasmFeatures) {
 		case "signext":
 			// ignore, always enabled
 		case "gc":
-			f.GC = true
-		case "linear":
-			f.GC = false
+			gc = true
 		case "split":
-			f.Split = true
+			split = true
+		case "linear":
+			linear = true
 		case "":
 			// ignore
 		default:
 			Error = fmt.Errorf("invalid GOWASM: no such feature %q", opt)
 		}
 	}
-	if f.Split && !f.GC {
-		Error = fmt.Errorf("invalid GOWASM: split is a feature of gc")
+	// What GOOS=js means, unless GOWASM says otherwise, is gc with
+	// split. gc alone has Go's structs as the engine's; linear is Go's
+	// own port, with every Go value in linear memory and Go's
+	// collector. (GOOS=wasip1 is Go's own port unless gc is given: gc
+	// needs a host that tells it when an object is collected, which a
+	// WASI host is not.)
+	js := GOARCH == "wasm" && GOOS == "js"
+	switch {
+	case linear:
+		if gc || split {
+			Error = fmt.Errorf("invalid GOWASM: linear is not gc")
+		}
+	case gc:
+		f.GC, f.Split = true, split
+	case split:
+		if !js {
+			Error = fmt.Errorf("invalid GOWASM: split is a feature of gc")
+		}
+		f.GC, f.Split = true, true
+	default:
+		f.GC, f.Split = js, js
 	}
 	return
 }

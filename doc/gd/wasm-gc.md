@@ -2146,3 +2146,45 @@ variables that are objects), which is mostly std's tables for js
 (syscall's errors and their names); `syscall/js` itself is 16 KB and
 the runtime 11 KB more. With split it is 460,122 against 372,305. Not
 reduced yet.
+
+
+### Stage 19: tables that are mostly empty, and split for GOOS=js (2026-11-17)
+
+**A table by number, of which few are used, cost what all of it would.**
+An `fmt` hello world for `GOOS=js` was 139 KB more than one for
+`GOOS=wasip1` (676,078 against 537,301 bytes with `GOWASM=gc`), and 81
+KB of that was one variable: `syscall.errorstr`, the messages of the
+errors by their numbers, an array of some 2,000 strings of which about
+130 are set. `GOWASMGC_GLOBALS=1` at link time prints the bytes of the
+function that makes the global objects that each data symbol takes,
+which is how it was found (32,346 for this one). In the linker now:
+
+- What is zero in the data is not written, where 16 bytes or more of it
+  are: memory is zero to begin with (49 KB of the data of a js binary
+  was this array's, zero, in both models).
+- An array of more than 32 objects of which half or fewer are not zero
+  is made by the runtime, all zero, and only those that are not have
+  code, which makes each and puts it in its place (4,429 bytes for the
+  array, not 32,346).
+
+|                                 | before  | after   |
+|---------------------------------|--------:|--------:|
+| `GOOS=js`, `GOWASM=gc`          | 676,078 | 599,107 |
+| `GOOS=js`, `GOWASM=gc,split`    | 460,122 | 411,056 |
+| `GOOS=wasip1`, `GOWASM=gc`      | 537,301 | 535,038 |
+| `GOOS=wasip1`, `GOWASM=gc,split`| 372,305 | 369,978 |
+
+What a js binary still has more than a wasip1 one (`GOWASM=gc`, 64 KB):
+`syscall/js` (16 KB), what the linker generates for more layouts and
+globals (12 KB), the runtime's calls from JavaScript (11 KB), `syscall`
+(3 KB), and their data.
+
+**`GOOS=js` means `GOWASM=gc,split`** (decided by the user: "let's make
+split the default"), where it meant `GOWASM=gc`: the bytes in linear
+memory and the pointers in an array (stage 15). `GOWASM=gc` alone is
+the other model, a WebAssembly struct for each Go struct, which
+allocates some 20 times faster and is half as large again;
+`GOWASM=linear` is Go's own port. `GOOS=wasip1` is as it was (Go's own
+port unless `GOWASM=gc` or `gc,split` is given). An `fmt` hello world
+built with `GOOS=js GOARCH=wasm` and nothing else: 411,056 bytes
+(352,128 with `-ldflags="-s -w"`, 128,129 of that gzipped).
