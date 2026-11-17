@@ -1217,12 +1217,6 @@ func (g *gcGen) root(v *ssa.Value) (*ssa.Value, int) {
 		// A new object is what its type says.
 		style = gcStatic
 	}
-	if style == gcObject && v.Type.IsPtr() && v.Type.Elem().Size() > 0 && !v.Type.Elem().HasPointers() {
-		// A value without pointers is in linear memory (the runtime
-		// allocates it there, and a variable is on the stack there),
-		// unless it is within an object.
-		style = gcMemory
-	}
 	return v, style
 }
 
