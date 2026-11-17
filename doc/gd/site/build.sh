@@ -63,5 +63,11 @@ cat > "$out/_headers" <<HEADERS
   Cache-Control: public, max-age=31536000, immutable
 /playground/manifest.json
   Cache-Control: no-cache
+/*.css
+  Cache-Control: no-cache
+/playground/*.js
+  Cache-Control: no-cache
+/playground/*.mjs
+  Cache-Control: no-cache
 HEADERS
 ls -l "$out" "$out/playground" >&2
