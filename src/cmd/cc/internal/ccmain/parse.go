@@ -303,7 +303,7 @@ var typeWords = map[string]bool{
 	"__inline__": true, "__restrict": true, "__restrict__": true, "__const": true, "__const__": true,
 	"__volatile__": true, "__volatile": true, "__signed__": true, "__signed": true, "__auto_type": true,
 	"_Complex": true, "__builtin_va_list": true, "__attribute__": true, "__attribute": true,
-	"__extension__": true, "_BitInt": true, "__int128": true, "_Float32": true, "_Float64": true,
+	"__extension__": true, "_BitInt": true, "__int128": true, "__int128__": true, "_Float32": true, "_Float64": true,
 	"__thread": true, "__declspec": true, "__complex__": true, "__complex": true, "_Decimal32": true, "_Decimal64": true,
 }
 
@@ -421,8 +421,11 @@ func (p *parser) declSpecs() specs {
 			bitN = n
 			seen = true
 			continue
-		case "__int128":
-			p.errorf("__int128 is not supported")
+		case "__int128", "__int128__":
+			if base != "" || s.t != nil {
+				p.errorf("two or more data types in declaration specifiers")
+			}
+			base = "__int128"
 		case "_Decimal32", "_Decimal64":
 			p.errorf("decimal floating types are not supported")
 		case "struct", "union":
@@ -487,6 +490,12 @@ done:
 		s.t = bitInt(bitN, unsigned)
 		if bitN < 1 || bitN < 2 && !unsigned {
 			p.errorf("_BitInt(%d) is too narrow", bitN)
+		}
+	}
+	if s.t == nil && base == "__int128" {
+		s.t = &ctype{kind: kInt128}
+		if unsigned {
+			s.t = &ctype{kind: kUInt128}
 		}
 	}
 	if s.t == nil {

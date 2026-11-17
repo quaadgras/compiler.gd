@@ -326,6 +326,10 @@ func goType(t *ctype) string {
 			return "complex64"
 		}
 		return "complex128"
+	case kInt128:
+		return "c23.Int128"
+	case kUInt128:
+		return "c23.Uint128"
 	case kBitInt, kUBitInt:
 		u := ""
 		if t.kind == kUBitInt {
@@ -506,6 +510,10 @@ func unionAlign(a int64) string {
 
 func constLit(t *ctype, v int64) string {
 	switch {
+	case t.kind == kInt128:
+		return fmt.Sprintf("c23.I128(%d)", v)
+	case t.kind == kUInt128:
+		return fmt.Sprintf("c23.U128(%d)", v)
 	case t.kind == kUBitInt:
 		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
 	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList:
@@ -583,4 +591,18 @@ func naturalLayout(r *record) bool {
 	}
 	size := (off + align - 1) / align * align
 	return size == r.size && align == r.align
+}
+
+// constLitStr is constLit of a constant written in decimal.
+func constLitStr(t *ctype, s string) string {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		u, _ := strconv.ParseUint(s, 10, 64)
+		v = int64(u)
+		if t.kind == kInt128 {
+			return fmt.Sprintf("c23.I128U(%d)", u)
+		}
+		return fmt.Sprintf("c23.U128U(%d)", u)
+	}
+	return constLit(t, v)
 }

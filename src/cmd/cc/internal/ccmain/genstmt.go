@@ -25,7 +25,7 @@ func localKindOf(s *symbol) localKind {
 	switch {
 	case s.t.isVLA():
 		return lkHeap
-	case s.t.alignof() > 8:
+	case s.t.alignof() > 8 && (s.t.align > 0 || s.addr || s.t.isAggregate()):
 		return lkAligned
 	case s.addr || s.t.isAggregate():
 		return lkCell
@@ -237,8 +237,8 @@ func (g *gen) ret(v string) {
 }
 
 func zeroOf(t *ctype) string {
-	if goType(t) == "c23.Ptr" {
-		return "c23.Ptr{}"
+	if goType(t) == "c23.Ptr" || is128(t) {
+		return goType(t) + "{}"
 	}
 	return "0"
 }

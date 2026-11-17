@@ -200,6 +200,10 @@ func loadCode(addr string, t *ctype) string {
 		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
 	case kStruct, kArray:
 		return addr
+	case kInt128:
+		return fmt.Sprintf("c23.LoadI128(%s)", addr)
+	case kUInt128:
+		return fmt.Sprintf("c23.LoadU128(%s)", addr)
 	case kComplex:
 		switch t.elem.kind {
 		case kFloat:
@@ -240,6 +244,10 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 		g.p("c23.StorePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
 		g.p("c23.Memmove(%s, %s, %d)", addr, v, t.sizeof())
+	case kInt128:
+		g.p("c23.StoreI128(%s, %s)", addr, v)
+	case kUInt128:
+		g.p("c23.StoreU128(%s, %s)", addr, v)
 	case kComplex:
 		switch t.elem.kind {
 		case kFloat:
@@ -453,11 +461,17 @@ func (g *gen) cond(e expr) string {
 	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList {
 		return fmt.Sprintf("(c23.Addr(%s) != 0)", v)
 	}
+	if is128(t) {
+		return fmt.Sprintf("!%s.IsZero()", v)
+	}
 	return fmt.Sprintf("(%s != 0)", v)
 }
 
 func (g *gen) compare(e *binary) string {
 	x, y := g.rv(e.x), g.rv(e.y)
+	if is128(e.x.ty()) {
+		return fmt.Sprintf("(%s.Cmp(%s) %s 0)", x, y, e.op)
+	}
 	if e.x.ty().isPtr() || e.x.ty().kind == kNullptr {
 		return fmt.Sprintf("(%s %s %s)", g.addrCode(e.x, x), e.op, g.addrCode(e.y, y))
 	}
@@ -511,8 +525,14 @@ func (g *gen) rv(e expr) string {
 		case "!":
 			return "c23.B2I(" + g.cond(e) + ")"
 		case "-":
+			if is128(e.t) {
+				return g.rv(e.x) + ".Neg()"
+			}
 			return wrapBits("(-"+g.rv(e.x)+")", e.t)
 		case "~":
+			if is128(e.t) {
+				return g.rv(e.x) + ".Not()"
+			}
 			return wrapBits("(^"+g.rv(e.x)+")", e.t)
 		}
 	case *binary:
@@ -576,6 +596,9 @@ func (g *gen) binary(e *binary) string {
 		if c, ok := e.y.(*floatConst); ok && c.v == 0 {
 			y = "c23.Val(" + y + ")"
 		}
+	}
+	if is128(e.t) {
+		return arith128(e.op, x, y)
 	}
 	return wrapBits(fmt.Sprintf("(%s %s %s)", x, e.op, y), e.t)
 }
@@ -672,6 +695,12 @@ func (g *gen) castCode(e *cast) string {
 var constConv = regexp.MustCompile(`^(u?int(8|16|32|64))\((-?[0-9]+)\)$`)
 
 func convertCode(x string, from, to *ctype) string {
+	if is128(to) || is128(from) {
+		if m := constConv.FindStringSubmatch(x); m != nil && is128(to) {
+			return constLitStr(to, m[3])
+		}
+		return convert128(x, from, to)
+	}
 	if to.kind == kComplex || from.kind == kComplex {
 		return complexConvert(x, from, to)
 	}
@@ -764,7 +793,11 @@ func (g *gen) assign(e *assign, value bool) string {
 			if (op == "/" || op == "%") && isConstExpr(e.y) {
 				y = "c23.Val(" + y + ")"
 			}
-			v = convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
+			if is128(e.ct) {
+				v = convertCode(arith128(op, x, y), e.ct, t.unqual())
+			} else {
+				v = convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
+			}
 		}
 	}
 	var c expr
@@ -817,7 +850,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		}
 		return new
 	}
-	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() {
+	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
 	}
@@ -839,6 +872,8 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		} else {
 			nv = fmt.Sprintf("(1 - %s)", old)
 		}
+	case is128(t):
+		nv = arith128(e.op[:1], old, constLit(t, 1))
 	default:
 		op := e.op[:1]
 		nv = wrapBits(fmt.Sprintf("(%s %s 1)", old, op), t)
@@ -1179,7 +1214,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		v, over := g.tmp("int64"), g.tmp("bool")
 		g.p("%s, %s = %s", v, over, code)
 		if !pred {
-			g.store(g.rv(e.args[3]), rt, fmt.Sprintf("%s(%s)", goType(rt), v), nil)
+			g.store(g.rv(e.args[3]), rt, convertCode(v, tLLong, rt), nil)
 		} else {
 			g.effect(e.args[3])
 		}

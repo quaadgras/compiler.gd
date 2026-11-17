@@ -1227,6 +1227,10 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 			return &intConst{node{t, at}, b2i(v)}
 		}
 	}
+	if is128(t) && !(func() bool { c, ok := e.(*intConst); return ok && c.v >= 0 })() {
+		// Not folded: an int64 holds only some of its values.
+		return &cast{node{t, at}, e}
+	}
 	if t.isInteger() || t.isPtr() && et.isInteger() || t.kind == kNullptr {
 		if c, ok := e.(*intConst); ok && (c.t.isInteger() || c.t.kind == kNullptr || t.isPtr() && c.t.isPtr() || t.isInteger() && c.t.isPtr()) {
 			return &intConst{node{t, at}, wrap(t, c.v)}
@@ -1362,6 +1366,9 @@ func (p *parser) constInt(e expr) int64 {
 
 // fold folds an operation on constants.
 func (p *parser) fold(e expr) expr {
+	if is128(e.ty()) {
+		return e // int64's arithmetic is not __int128's
+	}
 	switch e := e.(type) {
 	case *unary:
 		if x, ok := e.x.(*intConst); ok && e.x.ty().isInteger() {

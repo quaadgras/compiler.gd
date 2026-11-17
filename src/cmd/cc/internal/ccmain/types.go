@@ -29,6 +29,8 @@ const (
 	kULong
 	kLLong
 	kULLong
+	kInt128  // GCC's __int128
+	kUInt128 // unsigned __int128
 	kBitInt  // _BitInt(n)
 	kUBitInt // unsigned _BitInt(n)
 	kFloat
@@ -184,7 +186,7 @@ func (t *ctype) isVLA() bool {
 
 func (t *ctype) isUnsigned() bool {
 	switch t.kind {
-	case kBool, kUChar, kUShort, kUInt, kULong, kULLong, kUBitInt:
+	case kBool, kUChar, kUShort, kUInt, kULong, kULLong, kUBitInt, kUInt128:
 		return true
 	}
 	return false
@@ -220,6 +222,8 @@ func (t *ctype) rank() int {
 		return 640
 	case kLLong, kULLong:
 		return 641
+	case kInt128, kUInt128:
+		return 1280
 	case kBitInt, kUBitInt:
 		return int(t.n)*10 - 5
 	}
@@ -241,6 +245,8 @@ func (t *ctype) sizeof() int64 {
 		return 16
 	case kComplex:
 		return 2 * t.elem.sizeof()
+	case kInt128, kUInt128:
+		return 16
 	case kBitInt, kUBitInt:
 		switch {
 		case t.n <= 8:
@@ -303,6 +309,9 @@ func (t *ctype) unqual() *ctype {
 func (t *ctype) unsignedOf() *ctype {
 	if t.isBitInt() {
 		return bitInt(t.n, true)
+	}
+	if t.kind == kInt128 {
+		return &ctype{kind: kUInt128}
 	}
 	switch t.kind {
 	case kChar, kSChar, kUChar:
@@ -582,7 +591,7 @@ var kindNames = [...]string{
 	kShort: "short", kUShort: "unsigned short", kInt: "int", kUInt: "unsigned int",
 	kLong: "long", kULong: "unsigned long", kLLong: "long long", kULLong: "unsigned long long",
 	kFloat: "float", kDouble: "double", kLDouble: "long double", kNullptr: "nullptr_t",
-	kVaList: "__builtin_va_list",
+	kVaList: "__builtin_va_list", kInt128: "__int128", kUInt128: "unsigned __int128",
 }
 
 // wrap truncates v to t's width and signedness (the bits, for 64-bit

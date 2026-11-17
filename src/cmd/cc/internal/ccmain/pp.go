@@ -1491,6 +1491,9 @@ const predefined = `
 #define __STDC_EMBED_FOUND__ 1
 #define __STDC_EMBED_EMPTY__ 2
 #define __GD_CC__ 1
+#define __SIZEOF_INT128__ 16
+#define __int128_t __int128
+#define __uint128_t unsigned __int128
 #define __LP64__ 1
 #define _LP64 1
 #define __CHAR_BIT__ 8
