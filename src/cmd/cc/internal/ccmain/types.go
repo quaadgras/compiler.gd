@@ -403,13 +403,31 @@ func composite(a, b *ctype) *ctype {
 			}
 		}
 	case kArray:
-		if a.n < 0 && b.n >= 0 {
-			return b
+		if a.n < 0 && (b.n >= 0 || a.vla == nil && b.vla != nil) {
+			c := *b
+			c.elem = composite(a.elem, b.elem)
+			return &c
+		}
+		if e := composite(a.elem, b.elem); e != a.elem {
+			c := *a
+			c.elem = e
+			return &c
 		}
 	case kFunc:
+		ft := *a.fn
 		if !a.fn.proto && b.fn.proto {
-			return b
+			ft = *b.fn
 		}
+		ft.ret = composite(a.fn.ret, b.fn.ret)
+		if a.fn.proto && b.fn.proto && len(a.fn.params) == len(b.fn.params) {
+			ft.params = make([]*ctype, len(a.fn.params))
+			for i := range ft.params {
+				ft.params[i] = composite(a.fn.params[i], b.fn.params[i])
+			}
+		}
+		c := *a
+		c.fn = &ft
+		return &c
 	}
 	return a
 }

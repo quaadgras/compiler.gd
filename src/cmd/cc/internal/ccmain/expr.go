@@ -546,15 +546,29 @@ func (p *parser) castExpr() expr {
 	if p.is("(") && p.isTypeStart(1) {
 		at := p.here()
 		save := p.pos
+		n := len(p.pendingVLA)
 		p.next()
 		t := p.typeName()
 		p.expect(")")
 		if p.is("{") {
 			// A compound literal.
+			p.pendingVLA = p.pendingVLA[:n]
 			p.pos = save
 			return p.postfix(p.unaryExpr())
 		}
+		// The type's lengths are evaluated after the operand.
+		typeVLA := append([]stmt(nil), p.pendingVLA[n:]...)
+		p.pendingVLA = p.pendingVLA[:n]
 		x := p.rvalue(p.castExpr())
+		if len(typeVLA) > 0 && p.fn != nil {
+			if t.kind == kVoid {
+				return &seqExpr{node{tVoid, at}, append([]stmt{&exprStmt{x}}, typeVLA...), &cast{node{tVoid, at}, p.intc(0, tInt, at)}}
+			}
+			tmp := p.newLocal("cast", x.ty().unqual(), at)
+			tmp.init = &initializer{scalar: x}
+			pre := append([]stmt{&declStmt{syms: []*symbol{tmp}}}, typeVLA...)
+			x = &seqExpr{node{x.ty().unqual(), at}, pre, &varRef{node{tmp.t, at}, tmp}}
+		}
 		if t.kind == kVoid {
 			return &cast{node{tVoid, at}, x}
 		}
@@ -641,6 +655,11 @@ func (p *parser) unaryExpr() expr {
 				return p.withVLA(p.sizeofType(ty, at))
 			}
 			x := p.unaryExpr()
+			if x.ty().isVLA() {
+				// The operand of a variable length array type is
+				// evaluated.
+				return p.withVLA(&seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, p.sizeofType(x.ty(), at)})
+			}
 			return p.withVLA(p.sizeofType(x.ty(), at))
 		case "_Alignof", "alignof", "__alignof__", "__alignof":
 			p.next()
@@ -679,7 +698,11 @@ func (p *parser) unaryExpr() expr {
 				ty = p.typeName()
 				p.expect(")")
 			} else {
-				ty = p.unaryExpr().ty()
+				x := p.unaryExpr()
+				ty = x.ty()
+				if ty.kind == kArray && ty.vla != nil {
+					return p.withVLA(&seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, ty.vla})
+				}
 			}
 			if ty.kind != kArray {
 				p.errorAt(at, "_Countof of a %s", ty)
@@ -708,6 +731,15 @@ func (p *parser) withVLA(e expr) expr {
 	pre := p.pendingVLA
 	p.pendingVLA = nil
 	return &seqExpr{node{e.ty(), e.at()}, pre, e}
+}
+
+// vlaOperand is the operand of sizeof or _Countof of VLA type, to
+// evaluate for its effects: its address (it is an array).
+func (p *parser) vlaOperand(x expr) expr {
+	if isLvalue(x) {
+		return &addrOf{node{ptrTo(x.ty()), x.at()}, x}
+	}
+	return x
 }
 
 func (p *parser) sizeofType(t *ctype, at pos) expr {
@@ -1130,7 +1162,14 @@ func (p *parser) convert(e expr, t *ctype) expr {
 
 func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 	et := e.ty()
-	if et == t || compatible(et, t) && et.kind != kStruct && et.kind != kArray && et.q == t.q {
+	if et == t {
+		return e
+	}
+	if compatible(et, t) && et.kind != kStruct && et.kind != kArray && et.q == t.q {
+		if c, ok := e.(*intConst); ok {
+			// The same value, with the (composite) type.
+			return &intConst{node{t, at}, c.v}
+		}
 		return e
 	}
 	if t.kind == kStruct || et.kind == kStruct {

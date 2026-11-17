@@ -743,11 +743,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 	var nv string
 	switch {
 	case t.isPtr():
-		n := g.elemSize(t)
-		if e.op == "--" {
-			n = -n
-		}
-		nv = fmt.Sprintf("c23.Add(%s, %d)", old, n)
+		nv = g.ptrAdd(old, t, &intConst{node{tLong, e.p}, 1}, e.op == "--")
 	case t.kind == kBool:
 		if e.op == "++" {
 			nv = "uint8(1)"

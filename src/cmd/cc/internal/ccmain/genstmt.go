@@ -122,7 +122,7 @@ func (g *gen) function(f *funcDecl) {
 	var body strings.Builder
 	g.out, g.ind = &body, 1
 	g.sret = ft.ret.kind == kStruct
-	var names []string
+	names := []string{} // not nil: named
 	for _, ps := range f.params {
 		if localKindOf(ps) == lkVar {
 			names = append(names, g.localName(ps))
