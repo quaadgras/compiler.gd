@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -86,6 +87,13 @@ func ifaceEqual(t *_type, x, y *eface) bool {
 		yb := [2]uint64{float64bits(y.w0), float64bits(y.w1)}
 		return typeEqual(t, noescape(unsafe.Pointer(&xb)), noescape(unsafe.Pointer(&yb)))
 	case t.IsSpreadIface():
+		if goarch.PtrSize == 4 {
+			// (A string, held as word 0 and its 16 bytes.)
+			var xs, ys string
+			abi.UnspreadString((*string)(noescape(unsafe.Pointer(&xs))), x.data, &[2]uint64{float64bits(x.w0), float64bits(x.w1)})
+			abi.UnspreadString((*string)(noescape(unsafe.Pointer(&ys))), y.data, &[2]uint64{float64bits(y.w0), float64bits(y.w1)})
+			return typeEqual(t, noescape(unsafe.Pointer(&xs)), noescape(unsafe.Pointer(&ys)))
+		}
 		xs := &spread{x.data, float64bits(x.w0), float64bits(x.w1)}
 		ys := &spread{y.data, float64bits(y.w0), float64bits(y.w1)}
 		return typeEqual(t, unsafe.Pointer(xs), unsafe.Pointer(ys))

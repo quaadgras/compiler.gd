@@ -1999,22 +1999,22 @@ func IsInlineIface(t *Type) bool {
 // IsSpreadIface can be converted to any/eface with zero allocation —
 // the whole 24 B header is rematerialized in-place at each use site.
 //
-// Gated on 64-bit: the spread codegen (iMakeSpreadFromValue and the
-// reverse spreadExtract) bit-casts words 1/2 through uint64 temps. On
-// 32-bit targets that emits generic Store ops the arch rules do not
-// match, and string/slice headers are only 12 B anyway so the
-// allocation benefit would be marginal. 32-bit targets fall back to
-// stock boxing, matching upstream Go.
+// With 8-byte words a string or a slice is spread; with the 4-byte
+// words of wasm32 only a string is (types.StringWasm32): word 0 as a
+// pointer (nil if inline) in the data slot and A and B, the string's
+// 16 bytes, in the inline slot (not contiguous with the data slot, as
+// with 8-byte words). Slices are boxed there, as on other 32-bit
+// targets, which spread nothing.
 func IsSpreadIface(t *Type) bool {
 	if !SpreadIfaces() {
 		return false
 	}
-	return t.IsString() || t.IsSlice()
+	return t.IsString() || t.IsSlice() && PtrSize == 8
 }
 
 // SpreadIfaces reports whether any type is stored spread in an
-// interface (see IsSpreadIface): not with pointers of 4 bytes.
-func SpreadIfaces() bool { return PtrSize == 8 }
+// interface (see IsSpreadIface).
+func SpreadIfaces() bool { return PtrSize == 8 || StringWasm32() }
 
 // IsInterfaceMethod reports whether (field) m is
 // an interface method. Such methods have the

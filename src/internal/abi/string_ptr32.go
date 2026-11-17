@@ -101,3 +101,34 @@ func Heapify(sp *string) string {
 	}
 	return unsafe.String((*byte)(sh.w0), int(sh.n))
 }
+
+// SpreadString returns the string at sp as an interface holds it (a
+// string is spread there, cmd/compile/internal/types's IsSpreadIface):
+// word 0 as a pointer in the data word, nil for an inline string (it is
+// read as a pointer only after the tag), and its 16 bytes, A and B, in
+// the inline payload.
+func SpreadString(sp *string) (data unsafe.Pointer, words [2]uint64) {
+	words = *(*[2]uint64)(unsafe.Pointer(sp))
+	if words[1]>>StringTagShift == 0 {
+		data = *(*unsafe.Pointer)(unsafe.Pointer(sp))
+	}
+	return data, words
+}
+
+// UnspreadString sets *sp to the string that an interface holds as data
+// and words (see SpreadString).
+func UnspreadString(sp *string, data unsafe.Pointer, words *[2]uint64) {
+	// Word 0 as a pointer first, which sets its element of the array of
+	// pointers (nil for an inline string), then the bytes over it.
+	setStringWord0(sp, data)
+	*(*[2]uint64)(unsafe.Pointer(sp)) = *words
+}
+
+// setStringWord0 stores p as word 0 of *sp. It is a function of its own
+// so that the store is not taken for dead, the bytes being stored over
+// it next.
+//
+//go:noinline
+func setStringWord0(sp *string, p unsafe.Pointer) {
+	*(*unsafe.Pointer)(unsafe.Pointer(sp)) = p
+}

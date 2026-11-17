@@ -2193,9 +2193,11 @@ func (s *state) iMakeSpreadFromValue(ifaceT *types.Type, tab *ssa.Value, valNode
 	var w0, w1, w2 *ssa.Value
 	switch {
 	case valT.IsString():
+		// (With types.StringWasm32, word 0 as a pointer, nil if
+		// inline, and A and B: all the string's bytes.)
 		w0 = s.newValue1(ssa.OpStringPtr, byteptr, src)
-		w1 = s.newValue1(ssa.OpStringHash, s.f.Config.Types.Uintptr, src)
-		w2 = s.newValue1(ssa.OpStringWord2, types.Types[types.TINT], src)
+		w1 = s.newValue1(ssa.OpStringHash, s.f.Config.Types.StringWord1, src)
+		w2 = s.newValue1(ssa.OpStringWord2, s.f.Config.Types.StringWord2, src)
 	case valT.IsSlice():
 		elemPtrT := valT.Elem().PtrTo()
 		w0 = s.newValue1(ssa.OpSlicePtr, elemPtrT, src)
@@ -2344,8 +2346,8 @@ func (s *state) spreadExtract(pos src.XPos, t *types.Type, iface *ssa.Value) *ss
 
 	switch {
 	case t.IsString():
-		hash := s.newValue1(ssa.OpCopy, s.f.Config.Types.Uintptr, w1)
-		word2 := s.newValue1(ssa.OpCopy, types.Types[types.TINT], w2)
+		hash := s.newValue1(ssa.OpCopy, s.f.Config.Types.StringWord1, w1)
+		word2 := s.newValue1(ssa.OpCopy, s.f.Config.Types.StringWord2, w2)
 		return s.newValue3(ssa.OpStringMake, t, data, hash, word2)
 	case t.IsSlice():
 		// Reinterpret iface data (BytePtr) as *T via OpCopy; both are
@@ -6413,14 +6415,26 @@ func (s *state) getClosureAndRcvr(fn *ir.SelectorExpr) (*ssa.Value, *ssa.Value) 
 	boxedData := s.newValue1(ssa.OpIData, byteptr, i)
 
 	// Inline stage (16 B, complex128-shaped).
-	stage16 := s.inlineStageTemp(fn.Pos())
+	var stage16 *ssa.Value
+	if types.StringWasm32() {
+		// wasm32: one stage, a string, for an inline type and for a
+		// string (the only type spread with 4-byte words), which is
+		// the data word as word 0's pointer (nil for an inline type
+		// or an inline string), then the 16 bytes of the payload
+		// over it (types.StringWasm32).
+		stage16 = s.spreadStageTemp(fn.Pos())
+		s.vars[memVar] = s.newValue3(ssa.OpStringStorePtr, types.TypeMem, stage16, boxedData, s.mem())
+	} else {
+		stage16 = s.inlineStageTemp(fn.Pos())
+	}
 	s.store(f64, stage16, realH)
 	imagSlot16 := s.newValue1I(ssa.OpOffPtr, f64Ptr, 8, stage16)
 	s.store(f64, imagSlot16, imagH)
 	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stage16)
 
-	if !types.SpreadIfaces() {
-		// (No type is spread with 4-byte pointers: staged is inline.)
+	if !types.SpreadIfaces() || types.StringWasm32() {
+		// (No type is spread with 4-byte pointers but on wasm32, whose
+		// stage serves both: staged is inline.)
 		bStaged := s.f.NewBlock(ssa.BlockPlain)
 		bBoxed := s.f.NewBlock(ssa.BlockPlain)
 		bMerge := s.f.NewBlock(ssa.BlockPlain)

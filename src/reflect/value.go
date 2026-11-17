@@ -144,9 +144,36 @@ func (v *Value) dataPtr() unsafe.Pointer {
 		return abi.NoEscape(unsafe.Pointer(&v.inline))
 	}
 	if v.flag&flagSpread != 0 {
+		if goarch.PtrSize == 4 {
+			return spreadData32(v)
+		}
 		return abi.NoEscape(unsafe.Pointer(&v.ptr))
 	}
 	return v.ptr
+}
+
+// With 4-byte words (wasm32) only a string is spread, and v holds it as
+// an interface does (abi.SpreadString): word 0 as a pointer in v.ptr
+// (nil if the string is inline) and its 16 bytes in v.inline, which
+// are not a string in memory (word 0's pointer is not with them). What
+// reads the string as a whole uses spreadString32; what needs its
+// address (dataPtr) gets a copy on the heap, which v then holds.
+
+// spreadString32 returns the string that v, spread, holds.
+func spreadString32(v *Value) string {
+	var s string
+	abi.UnspreadString(&s, v.ptr, (*[2]uint64)(abi.NoEscape(unsafe.Pointer(&v.inline))))
+	return s
+}
+
+// spreadData32 makes v hold its string, spread, on the heap, and
+// returns its address.
+func spreadData32(v *Value) unsafe.Pointer {
+	c := unsafe_New(v.typ())
+	*(*string)(c) = spreadString32(v)
+	v.ptr = c
+	v.flag &^= flagSpread
+	return c
 }
 
 // materialize moves inline or spread data to a fresh heap allocation so
@@ -161,6 +188,10 @@ func (v *Value) materialize() {
 		typedmemmove(t, c, unsafe.Pointer(&v.inline))
 		v.ptr = c
 		v.flag &^= flagInline
+		return
+	}
+	if v.flag&flagSpread != 0 && goarch.PtrSize == 4 {
+		spreadData32(v)
 		return
 	}
 	if v.flag&flagSpread != 0 {
@@ -206,9 +237,22 @@ func packEface(v Value) any {
 		// pointing at a 24 B heap-allocated header. Unpack word 0 into
 		// ei.Data and words 1+2 into ei.Inline so the iface layout
 		// matches the compiler's 4-slot OMAKEFACE.
-		src := v.dataPtr()
-		ei.Data = *(*unsafe.Pointer)(src)
-		*(*[16]byte)(unsafe.Pointer(&ei.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+		if goarch.PtrSize == 4 {
+			// wasm32: a string, as word 0 and its 16 bytes
+			// (abi.SpreadString), as v holds it if spread.
+			if v.flag&flagSpread != 0 {
+				ei.Data = v.ptr
+				ei.Inline = v.inline
+			} else {
+				var w [2]uint64
+				ei.Data, w = abi.SpreadString((*string)(v.dataPtr()))
+				*(*[2]uint64)(unsafe.Pointer(&ei.Inline)) = w
+			}
+		} else {
+			src := v.dataPtr()
+			ei.Data = *(*unsafe.Pointer)(src)
+			*(*[16]byte)(unsafe.Pointer(&ei.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+		}
 	} else {
 		ei.Data = packEfaceData(v)
 	}
@@ -840,7 +884,7 @@ func (v Value) call(op string, in []Value) []Value {
 			// the three register halves directly into the Value's own
 			// storage (ptr + inline, contiguous in the struct) and set
 			// flagSpread — no heap alloc per call-return.
-			if tv.IsSpreadIface() {
+			if tv.IsSpreadIface() && goarch.PtrSize == 8 {
 				var v Value
 				v.typ_ = tv
 				base := unsafe.Pointer(&v.ptr)
@@ -1193,6 +1237,12 @@ func storeRcvr(v Value, p unsafe.Pointer, ext bool) {
 			// gd fat-iface: payload lives in the inline slot; the
 			// receiver word is &iface.inline.
 			*(*unsafe.Pointer)(p) = unsafe.Pointer(&iface.inline)
+		case iface.itab != nil && iface.itab.Inline == abi.ITabInlineSpread && goarch.PtrSize == 4:
+			// wasm32: a copy of the string, which is not in a row in
+			// the interface.
+			c := new(string)
+			abi.UnspreadString(c, iface.word, (*[2]uint64)(unsafe.Pointer(&iface.inline)))
+			*(*unsafe.Pointer)(p) = unsafe.Pointer(c)
 		case iface.itab != nil && iface.itab.Inline == abi.ITabInlineSpread:
 			// The 3-word header spans word and inline.
 			*(*unsafe.Pointer)(p) = unsafe.Pointer(&iface.word)
@@ -1838,6 +1888,17 @@ func (v Value) Index(i int) Value {
 		// into it would dangle after Index returns. Copy the byte out
 		// into the returned Value's own inline slot (uint8 fits) and
 		// hand back a self-contained flagInline sub-Value.
+		if goarch.PtrSize == 4 && v.flag&flagSpread != 0 {
+			str := spreadString32(&v)
+			if uint(i) >= uint(len(str)) {
+				panic("reflect: string index out of range")
+			}
+			var sub Value
+			sub.typ_ = uint8Type
+			*(*byte)(unsafe.Pointer(&sub.inline)) = str[i]
+			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
+			return sub
+		}
 		s := (*unsafeheader.String)(v.dataPtr())
 		// (With 4-byte words, wasm32's string, internal/abi's
 		// string_ptr32.go: its tag is not in Len.)
@@ -2029,9 +2090,18 @@ func TypeAssert[T any](v Value) (T, bool) {
 				// (words 1+2). v.dataPtr() returns the start of the
 				// header whether it lives inline in the Value
 				// (flagSpread) or at a heap address (flagIndir only).
-				src := v.dataPtr()
-				outC.Data = *(*unsafe.Pointer)(src)
-				*(*[16]byte)(unsafe.Pointer(&outC.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+				if goarch.PtrSize == 4 && v.flag&flagSpread != 0 {
+					outC.Data = v.ptr
+					*(*complex128)(unsafe.Pointer(&outC.Inline)) = v.inline
+				} else if goarch.PtrSize == 4 {
+					var w [2]uint64
+					outC.Data, w = abi.SpreadString((*string)(v.dataPtr()))
+					*(*[2]uint64)(unsafe.Pointer(&outC.Inline)) = w
+				} else {
+					src := v.dataPtr()
+					outC.Data = *(*unsafe.Pointer)(src)
+					*(*[16]byte)(unsafe.Pointer(&outC.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+				}
 			} else {
 				outC.Data = packEfaceData(v)
 			}
@@ -2344,6 +2414,9 @@ func (v Value) lenNonSlice() int {
 		// the raw word2 (tag nibble + length/bytes); decode the tag
 		// to get the logical length.
 		if goarch.PtrSize == 4 {
+			if v.flag&flagSpread != 0 {
+				return len(spreadString32(&v))
+			}
 			return len(*(*string)(v.dataPtr()))
 		}
 		raw := uint64((*unsafeheader.String)(v.dataPtr()).Len)
@@ -2367,7 +2440,7 @@ func copyVal(typ *abi.Type, fl flag, ptr unsafe.Pointer) Value {
 		// gd Phase D: strings and slices (spread types) ride inside
 		// the Value struct itself — word 0 in v.ptr, words 1+2 in
 		// v.inline. No heap alloc per map entry / call-return.
-		if typ.IsSpreadIface() {
+		if typ.IsSpreadIface() && goarch.PtrSize == 8 {
 			var v Value
 			v.typ_ = typ
 			v.ptr = *(*unsafe.Pointer)(ptr)
@@ -2878,12 +2951,20 @@ func (v Value) Slice(i, j int) Value {
 		// source goes out of scope); build the result via
 		// runtime.sliceinlinestring which returns a self-contained
 		// inline value.
+		if goarch.PtrSize == 4 {
+			// (wasm32: the string, which v may hold spread.)
+			src := v.String()
+			if i < 0 || j < i || j > len(src) {
+				panic("reflect.Value.Slice: string slice index out of bounds")
+			}
+			t := src[i:j]
+			fl := v.flag &^ (flagSpread | flagInline) | flagIndir
+			return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: fl}
+		}
 		s := (*unsafeheader.String)(v.dataPtr())
 		raw := uint64(s.Len)
 		var logicalLen int
-		if goarch.PtrSize == 4 {
-			logicalLen = len(*(*string)(v.dataPtr()))
-		} else if tag := raw >> abi.StringTagShift; tag != 0 {
+		if tag := raw >> abi.StringTagShift; tag != 0 {
 			logicalLen = int(tag)
 		} else {
 			logicalLen = int(raw & abi.StringLenMask)
@@ -2997,6 +3078,9 @@ func (v Value) String() string {
 	// abi.NoEscape on &v.ptr keeps v from leaking into escape analysis
 	// (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(String)|flagSpread {
+		if goarch.PtrSize == 4 {
+			return spreadString32(&v)
+		}
 		return *(*string)(abi.NoEscape(unsafe.Pointer(&v.ptr)))
 	}
 	return v.stringNonString()

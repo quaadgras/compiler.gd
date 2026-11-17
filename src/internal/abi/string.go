@@ -222,3 +222,15 @@ func Heapify(sp *string) string {
 	}
 	return unsafe.String((*byte)(unsafe.Pointer(&sh.w1)), n)
 }
+
+// SpreadString and UnspreadString are those of wasm32 (string_ptr32.go),
+// whose interfaces do not hold a string as its words in a row; with
+// other words an interface holds a string as it is in memory, from the
+// data word on, and they are not used.
+func SpreadString(sp *string) (data unsafe.Pointer, words [2]uint64) {
+	panic("abi.SpreadString")
+}
+
+func UnspreadString(sp *string, data unsafe.Pointer, words *[2]uint64) {
+	panic("abi.UnspreadString")
+}

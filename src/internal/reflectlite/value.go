@@ -166,6 +166,13 @@ func packEface(v Value) any {
 		// back into the iface's data slot (word 0) and inline slot
 		// (words 1+2) — no heap alloc. Mirrors reflect.packEface.
 		src := v.dataPtr()
+		if goarch.PtrSize == 4 {
+			// wasm32: a string, as word 0 and its 16 bytes.
+			var w [2]uint64
+			e.Data, w = abi.SpreadString((*string)(src))
+			*(*[2]uint64)(unsafe.Pointer(&e.Inline)) = w
+			break
+		}
 		e.Data = *(*unsafe.Pointer)(src)
 		*(*[16]byte)(unsafe.Pointer(&e.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 	case !t.IsDirectIface():
@@ -216,6 +223,13 @@ func unpackEface(i any) Value {
 		typedmemmove(t, unsafe.Pointer(&v.inline), unsafe.Pointer(&e.Inline))
 		v.flag = f | flagInline
 		return v
+	}
+	if t.IsSpreadIface() && goarch.PtrSize == 4 {
+		// wasm32: a copy of the string, which is not in a row in the
+		// interface.
+		c := unsafe_New(t)
+		abi.UnspreadString((*string)(c), e.Data, (*[2]uint64)(unsafe.Pointer(&e.Inline)))
+		return Value{typ_: t, ptr: c, flag: f}
 	}
 	if t.IsSpreadIface() {
 		// gd Phase D: carry the 24 B spread header inside Value itself

@@ -475,6 +475,12 @@ func (s *Schedule) StaticAssign(gd *base.Invocation, l *ir.Name, loff int64, r i
 			return false
 		}
 
+		if types.StringWasm32() && types.IsSpreadIface(val.Type()) && val.Op() != ir.OLITERAL && val.Op() != ir.ONIL {
+			// (A string spread in an interface is written below from
+			// its literal only, with 4-byte words.)
+			return false
+		}
+
 		reflectdata.MarkTypeUsedInInterface(gd, val.Type(), l.Linksym())
 
 		var itab *ir.AddrExpr
@@ -509,6 +515,17 @@ func (s *Schedule) StaticAssign(gd *base.Invocation, l *ir.Name, loff int64, r i
 				return true
 			}
 			ir.SetPos(gd, val)
+			if types.StringWasm32() {
+				// wasm32: word 0 as a pointer in the data slot (none
+				// for an inline string), and the string's 16 bytes,
+				// A and B, in the inline slot.
+				str := ir.StringVal(val)
+				if int64(len(str)) > types.StringInlineCap {
+					staticdata.InitAddr(gd, l, loff+int64(types.PtrSize), staticdata.StringSym(gd, val.Pos(), str))
+				}
+				assign(gd.Pos, l, loff+2*int64(types.PtrSize), val)
+				return true
+			}
 			assign(gd.Pos, l, loff+int64(types.PtrSize), val)
 		} else if types.IsDirectIface(val.Type()) {
 			if val.Op() == ir.ONIL {

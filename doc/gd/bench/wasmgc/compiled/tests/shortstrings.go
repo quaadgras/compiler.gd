@@ -8,6 +8,8 @@ package main
 // and keep nothing alive.
 
 import (
+	"fmt"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -25,6 +27,20 @@ func inline(s string) bool {
 
 var sink any
 var ssink string
+
+// A string type with methods, called through interfaces.
+type name string
+
+func (n name) String() string { return "<" + string(n) + ">" }
+func (n name) Len() int       { return len(n) }
+
+type lener interface{ Len() int }
+
+//go:noinline
+func viaIface(x any) (string, int) {
+	s := x.(fmt.Stringer).String()
+	return s, x.(lener).Len()
+}
 
 func main() {
 	src := []byte(strings.Repeat("abcdefghijklmnopqrstuvwxyz0123456789", 3))
@@ -64,6 +80,32 @@ func main() {
 	}
 	key := string(src[:9])
 	println("map", good, int(testing.AllocsPerRun(100, func() { _ = m[string(src[:9])] })), m[key])
+
+	// Strings in interfaces: compared, hashed, asserted, reflected,
+	// and as receivers of methods.
+	short, long := string(src[:5]), string(src[:30])
+	anys := map[any]int{short: 1, long: 2, name(short): 3, 7: 4}
+	println("anys", anys[string(src[:5])], anys[string(src[:30])], anys[name(string(src[:5]))], len(anys))
+	var x, y any = short, string(src[:5])
+	println("eq", x == y, x == any(long), x.(string) == short)
+	switch v := x.(type) {
+	case int:
+		println("int", v)
+	case string:
+		println("switch", v, len(v))
+	}
+	for _, n := range []name{name(short), name(long), ""} {
+		str, l := viaIface(n)
+		println("method", str, l)
+	}
+	rv := reflect.ValueOf(any(long))
+	println("reflect", rv.Len(), rv.String()[25:], rv.Index(3).Uint(), rv.Slice(2, 6).String(), rv.Interface().(string) == long)
+	rv = reflect.ValueOf(any(short))
+	println("reflect", rv.Len(), rv.String(), rv.Index(3).Uint(), rv.Slice(2, 4).String(), rv.Interface() == any(short))
+	fmt.Println("fmt", short, long, name(short), []any{short, name(long)})
+	println("allocs any", int(testing.AllocsPerRun(100, func() { sink = name(short) })),
+		int(testing.AllocsPerRun(100, func() { ssink, _ = viaIface(sink) })),
+		int(testing.AllocsPerRun(100, func() { ssink = reflect.ValueOf(sink).String() })))
 
 	// Bytes of a string kept in its words that are the address of a
 	// live object: the string is text, and the object is collected.
