@@ -181,25 +181,32 @@ func ReadDirent(fd int, buf []byte) (int, error) {
 }
 
 func setStat(st *Stat_t, jsSt js.Value) {
-	st.Dev = int64(jsSt.Get("dev").Int())
-	st.Ino = uint64(jsSt.Get("ino").Int())
-	st.Mode = uint32(jsSt.Get("mode").Int())
-	st.Nlink = uint32(jsSt.Get("nlink").Int())
-	st.Uid = uint32(jsSt.Get("uid").Int())
-	st.Gid = uint32(jsSt.Get("gid").Int())
-	st.Rdev = int64(jsSt.Get("rdev").Int())
-	st.Size = int64(jsSt.Get("size").Int())
-	st.Blksize = int32(jsSt.Get("blksize").Int())
-	st.Blocks = int32(jsSt.Get("blocks").Int())
-	atime := int64(jsSt.Get("atimeMs").Int())
+	st.Dev = jsInt64(jsSt.Get("dev"))
+	st.Ino = uint64(jsInt64(jsSt.Get("ino")))
+	st.Mode = uint32(jsInt64(jsSt.Get("mode")))
+	st.Nlink = uint32(jsInt64(jsSt.Get("nlink")))
+	st.Uid = uint32(jsInt64(jsSt.Get("uid")))
+	st.Gid = uint32(jsInt64(jsSt.Get("gid")))
+	st.Rdev = jsInt64(jsSt.Get("rdev"))
+	st.Size = jsInt64(jsSt.Get("size"))
+	st.Blksize = int32(jsInt64(jsSt.Get("blksize")))
+	st.Blocks = int32(jsInt64(jsSt.Get("blocks")))
+	atime := jsInt64(jsSt.Get("atimeMs"))
 	st.Atime = atime / 1000
 	st.AtimeNsec = (atime % 1000) * 1000000
-	mtime := int64(jsSt.Get("mtimeMs").Int())
+	mtime := jsInt64(jsSt.Get("mtimeMs"))
 	st.Mtime = mtime / 1000
 	st.MtimeNsec = (mtime % 1000) * 1000000
-	ctime := int64(jsSt.Get("ctimeMs").Int())
+	ctime := jsInt64(jsSt.Get("ctimeMs"))
 	st.Ctime = ctime / 1000
 	st.CtimeNsec = (ctime % 1000) * 1000000
+}
+
+// jsInt64 is v as an int64: Value.Int is an int, of 32 bits where
+// pointers are (GOWASM=gc), which a size, a time in milliseconds or an
+// inode number does not fit in.
+func jsInt64(v js.Value) int64 {
+	return int64(v.Float())
 }
 
 func Stat(path string, st *Stat_t) error {

@@ -2006,11 +2006,15 @@ func IsInlineIface(t *Type) bool {
 // allocation benefit would be marginal. 32-bit targets fall back to
 // stock boxing, matching upstream Go.
 func IsSpreadIface(t *Type) bool {
-	if PtrSize != 8 {
+	if !SpreadIfaces() {
 		return false
 	}
 	return t.IsString() || t.IsSlice()
 }
+
+// SpreadIfaces reports whether any type is stored spread in an
+// interface (see IsSpreadIface): not with pointers of 4 bytes.
+func SpreadIfaces() bool { return PtrSize == 8 }
 
 // IsInterfaceMethod reports whether (field) m is
 // an interface method. Such methods have the

@@ -566,13 +566,11 @@ func rewriteValueWasm(v *Value) bool {
 		v.Op = OpWasmLoweredInterCall
 		return true
 	case OpIsInBounds:
-		v.Op = OpWasmI64LtU
-		return true
+		return rewriteValueWasm_OpIsInBounds(v)
 	case OpIsNonNil:
 		return rewriteValueWasm_OpIsNonNil(v)
 	case OpIsSliceInBounds:
-		v.Op = OpWasmI64LeU
-		return true
+		return rewriteValueWasm_OpIsSliceInBounds(v)
 	case OpLast:
 		return rewriteValueWasm_OpLast(v)
 	case OpLeq16:
@@ -2121,6 +2119,44 @@ func rewriteValueWasm_OpHmul64u(v *Value) bool {
 		return true
 	}
 }
+func rewriteValueWasm_OpIsInBounds(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (IsInBounds idx len)
+	// cond: config.PtrSize == 4
+	// result: (I64LtU (ZeroExt32to64 idx) (ZeroExt32to64 len))
+	for {
+		idx := v_0
+		len := v_1
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpWasmI64LtU)
+		v0 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v0.AddArg(idx)
+		v1 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v1.AddArg(len)
+		v.AddArg2(v0, v1)
+		return true
+	}
+	// match: (IsInBounds idx len)
+	// cond: config.PtrSize == 8
+	// result: (I64LtU idx len)
+	for {
+		idx := v_0
+		len := v_1
+		if !(config.PtrSize == 8) {
+			break
+		}
+		v.reset(OpWasmI64LtU)
+		v.AddArg2(idx, len)
+		return true
+	}
+	return false
+}
 func rewriteValueWasm_OpIsNonNil(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
@@ -2138,6 +2174,44 @@ func rewriteValueWasm_OpIsNonNil(v *Value) bool {
 		v0 := b.NewValue0(v.Pos, OpWasmI64Eqz, typ.Bool)
 		v0.AddArg(p)
 		v.AddArg(v0)
+		return true
+	}
+	return false
+}
+func rewriteValueWasm_OpIsSliceInBounds(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (IsSliceInBounds idx len)
+	// cond: config.PtrSize == 4
+	// result: (I64LeU (ZeroExt32to64 idx) (ZeroExt32to64 len))
+	for {
+		idx := v_0
+		len := v_1
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpWasmI64LeU)
+		v0 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v0.AddArg(idx)
+		v1 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v1.AddArg(len)
+		v.AddArg2(v0, v1)
+		return true
+	}
+	// match: (IsSliceInBounds idx len)
+	// cond: config.PtrSize == 8
+	// result: (I64LeU idx len)
+	for {
+		idx := v_0
+		len := v_1
+		if !(config.PtrSize == 8) {
+			break
+		}
+		v.reset(OpWasmI64LeU)
+		v.AddArg2(idx, len)
 		return true
 	}
 	return false
@@ -5753,7 +5827,28 @@ func rewriteValueWasm_OpSignExt8to64(v *Value) bool {
 func rewriteValueWasm_OpSlicemask(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	typ := &b.Func.Config.Types
+	// match: (Slicemask x)
+	// cond: config.PtrSize == 4
+	// result: (I64ShrS (I64Sub (I64Const [0]) (ZeroExt32to64 x)) (I64Const [63]))
+	for {
+		x := v_0
+		if !(config.PtrSize == 4) {
+			break
+		}
+		v.reset(OpWasmI64ShrS)
+		v0 := b.NewValue0(v.Pos, OpWasmI64Sub, typ.Int64)
+		v1 := b.NewValue0(v.Pos, OpWasmI64Const, typ.Int64)
+		v1.AuxInt = int64ToAuxInt(0)
+		v2 := b.NewValue0(v.Pos, OpZeroExt32to64, typ.UInt64)
+		v2.AddArg(x)
+		v0.AddArg2(v1, v2)
+		v3 := b.NewValue0(v.Pos, OpWasmI64Const, typ.Int64)
+		v3.AuxInt = int64ToAuxInt(63)
+		v.AddArg2(v0, v3)
+		return true
+	}
 	// match: (Slicemask x)
 	// result: (I64ShrS (I64Sub (I64Const [0]) x) (I64Const [63]))
 	for {

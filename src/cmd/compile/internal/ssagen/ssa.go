@@ -6399,6 +6399,29 @@ func (s *state) getClosureAndRcvr(fn *ir.SelectorExpr) (*ssa.Value, *ssa.Value) 
 	s.store(f64, imagSlot16, imagH)
 	inlineAddr := s.newValue1I(ssa.OpOffPtr, byteptr, 0, stage16)
 
+	if !types.SpreadIfaces() {
+		// (No type is spread with 4-byte pointers: staged is inline.)
+		bStaged := s.f.NewBlock(ssa.BlockPlain)
+		bBoxed := s.f.NewBlock(ssa.BlockPlain)
+		bMerge := s.f.NewBlock(ssa.BlockPlain)
+		b := s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(condStaged)
+		b.Likely = ssa.BranchUnlikely
+		b.AddEdgeTo(bStaged)
+		b.AddEdgeTo(bBoxed)
+		s.startBlock(bStaged)
+		s.vars[rcvrVar] = inlineAddr
+		s.endBlock().AddEdgeTo(bMerge)
+		s.startBlock(bBoxed)
+		s.vars[rcvrVar] = boxedData
+		s.endBlock().AddEdgeTo(bMerge)
+		s.startBlock(bMerge)
+		rcvr := s.variable(rcvrVar, byteptr)
+		delete(s.vars, rcvrVar)
+		return closure, rcvr
+	}
+
 	// Spread stage (24 B, string-shaped). Word 0 = iface.data (pointer),
 	// words 1-2 = iface.inline halves stored as raw 8-byte scalars. The
 	// f64 stores write the bit pattern the wrapper will read back as

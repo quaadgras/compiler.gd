@@ -92,6 +92,20 @@ func makeslice(et *_type, len, cap int) unsafe.Pointer {
 	return newarray(et, cap)
 }
 
+// makeslice64 is makeslice for a length or a capacity of 64 bits where
+// an int is 32 (wasm32).
+func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
+	len := int(len64)
+	if int64(len) != len64 {
+		panicmakeslicelen()
+	}
+	cap := int(cap64)
+	if int64(cap) != cap64 {
+		panicmakeslicecap()
+	}
+	return makeslice(et, len, cap)
+}
+
 func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
 	oldLen := newLen - num
 	size := int(et.Size_)

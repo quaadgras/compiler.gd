@@ -9,5 +9,7 @@
 // package only says how wide a hash is, for hash/maphash.
 package maps
 
-// Use64BitHash reports whether hashes are 64 bits.
-const Use64BitHash = true
+import "internal/goarch"
+
+// Use64BitHash reports whether hashes are 64 bits: as a uintptr is.
+const Use64BitHash = goarch.PtrSize == 8

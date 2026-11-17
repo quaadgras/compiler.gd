@@ -97,6 +97,7 @@
 (ZeroExt16to(64|32)   x) => (I64And x (I64Const [0xffff]))
 (ZeroExt8to(64|32|16) x) => (I64And x (I64Const [0xff]))
 
+(Slicemask x) && config.PtrSize == 4 => (I64ShrS (I64Sub (I64Const [0]) (ZeroExt32to64 x)) (I64Const [63]))
 (Slicemask x) => (I64ShrS (I64Sub (I64Const [0]) x) (I64Const [63]))
 
 // Lowering truncation
@@ -334,8 +335,13 @@
 // Miscellaneous
 (Convert ...) => (LoweredConvert ...)
 (IsNonNil p) && !config.WasmGC => (I64Eqz (I64Eqz p))
-(IsInBounds ...) => (I64LtU ...)
-(IsSliceInBounds ...) => (I64LeU ...)
+// (With 4-byte pointers, wasm32, an int is 32 bits in a 64-bit
+// register, whose high bits may be anything: an index and a length are
+// extended first.)
+(IsInBounds idx len) && config.PtrSize == 4 => (I64LtU (ZeroExt32to64 idx) (ZeroExt32to64 len))
+(IsSliceInBounds idx len) && config.PtrSize == 4 => (I64LeU (ZeroExt32to64 idx) (ZeroExt32to64 len))
+(IsInBounds idx len) && config.PtrSize == 8 => (I64LtU idx len)
+(IsSliceInBounds idx len) && config.PtrSize == 8 => (I64LeU idx len)
 (NilCheck ...) => (LoweredNilCheck ...)
 (GetClosurePtr ...) => (LoweredGetClosurePtr ...)
 (GetCallerPC ...) => (LoweredGetCallerPC ...)

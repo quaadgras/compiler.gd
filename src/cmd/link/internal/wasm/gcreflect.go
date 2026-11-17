@@ -78,7 +78,7 @@ func (l *gcLinker) reflectTypes() []gcReflectFunc {
 	var fs []gcReflectFunc
 	for s := loader.Sym(1); s < loader.Sym(ldr.NSym()); s++ {
 		name := ldr.SymName(s)
-		if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || len(ldr.Data(s)) < 48 {
+		if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || int64(len(ldr.Data(s))) < 4*l.ptrSize()+16 /* an abi.Type */ {
 			continue
 		}
 		if !ld.WasmGCIsFunc(l.ctxt, s) {

@@ -33,7 +33,8 @@ type stringStruct struct {
 }
 
 // tmpBuf is the buffer on the caller's stack that the compiler offers
-// for a result that does not escape. It is not used here.
+// for a result that does not escape: used, as Go does, for a string too
+// long to be kept in its words (any, with words of 4 bytes) that fits.
 type tmpBuf [32]byte
 
 // inlineString returns the string of the n <= 15 bytes in the words.
@@ -53,7 +54,20 @@ type stringBuilder struct {
 }
 
 func newString(l int) stringBuilder {
+	return newStringBuf(l, nil, 0)
+}
+
+// newStringBuf is newString with the buffer buf of n bytes that the
+// compiler offers (or nil), whose bytes are used if they are in linear
+// memory and enough.
+func newStringBuf(l int, buf unsafe.Pointer, n int) stringBuilder {
 	b := stringBuilder{l: l}
+	if l > stringInline && buf != nil && l <= n {
+		if a := trylinaddr(buf); a != 0 {
+			b.p, b.addr = buf, a
+			return b
+		}
+	}
 	if l > stringInline {
 		memstatsMallocs++
 		b.p = linnew(uintptr(l))
@@ -102,7 +116,7 @@ func concatstrings(buf *tmpBuf, a []string) string {
 		}
 		l += len(x)
 	}
-	b := newString(l)
+	b := newStringBuf(l, unsafe.Pointer(buf), len(buf))
 	for _, x := range a {
 		b.string(x)
 	}
@@ -110,14 +124,14 @@ func concatstrings(buf *tmpBuf, a []string) string {
 }
 
 func concatstring2(buf *tmpBuf, a0, a1 string) string {
-	b := newString(len(a0) + len(a1))
+	b := newStringBuf(len(a0) + len(a1), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	return b.result()
 }
 
 func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
-	b := newString(len(a0) + len(a1) + len(a2))
+	b := newStringBuf(len(a0) + len(a1) + len(a2), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -125,7 +139,7 @@ func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
 }
 
 func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
-	b := newString(len(a0) + len(a1) + len(a2) + len(a3))
+	b := newStringBuf(len(a0) + len(a1) + len(a2) + len(a3), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -134,7 +148,7 @@ func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
 }
 
 func concatstring5(buf *tmpBuf, a0, a1, a2, a3, a4 string) string {
-	b := newString(len(a0) + len(a1) + len(a2) + len(a3) + len(a4))
+	b := newStringBuf(len(a0) + len(a1) + len(a2) + len(a3) + len(a4), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -153,10 +167,7 @@ func sliceinlinestring(s string, lo, hi int) string {
 }
 
 func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
-	b := newString(n)
-	if buf != nil && n <= len(buf) && n > stringInline {
-		memstatsMallocs-- // (Go would use buf)
-	}
+	b := newStringBuf(n, unsafe.Pointer(buf), len(buf))
 	if n > stringInline {
 		memmove(b.p, unsafe.Pointer(ptr), uintptr(n))
 		return b.result()
@@ -192,7 +203,7 @@ func intstring(buf *[4]byte, v int64) string {
 	}
 	var tmp [4]byte
 	n := encoderune(tmp[:], rune(v))
-	b := newString(n)
+	b := newStringBuf(n, unsafe.Pointer(buf), len(buf))
 	for i := 0; i < n; i++ {
 		b.byte(tmp[i])
 	}
@@ -219,7 +230,7 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 	for _, r := range a {
 		l += encoderune(tmp[:], r)
 	}
-	b := newString(l)
+	b := newStringBuf(l, unsafe.Pointer(buf), len(buf))
 	for _, r := range a {
 		n := encoderune(tmp[:], r)
 		for i := 0; i < n; i++ {
