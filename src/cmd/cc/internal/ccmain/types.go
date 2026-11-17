@@ -10,7 +10,8 @@ import (
 )
 
 // C's types, as cmd/cc lays them out: LP64, little-endian, long double
-// the same as double (doc/gd/cc.md).
+// with x86-64's size and alignment (16) but a double's value
+// (doc/gd/cc.md).
 
 type kind uint8
 
@@ -200,8 +201,11 @@ func (t *ctype) sizeof() int64 {
 		return 2
 	case kInt, kUInt, kFloat:
 		return 4
-	case kLong, kULong, kLLong, kULLong, kDouble, kLDouble, kPtr, kNullptr, kVaList:
+	case kLong, kULong, kLLong, kULLong, kDouble, kPtr, kNullptr, kVaList:
 		return 8
+	case kLDouble:
+		// x86-64's layout, with a double's value (doc/gd/cc.md).
+		return 16
 	case kArray:
 		if t.n < 0 {
 			return 0
@@ -511,7 +515,7 @@ func (r *record) layout() {
 			if r.union {
 				f.off, f.bitAt = 0, 0
 				size = max(size, (int64(f.bits)+7)/8)
-				if f.name != "" || f.bits > 0 {
+				if f.name != "" {
 					align = max(align, fa)
 				}
 				continue

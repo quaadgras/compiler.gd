@@ -233,7 +233,16 @@ func (g *gen) unit() {
 		}
 		objs = append(objs, s)
 	}
-	objs = append(objs, g.u.statics...)
+	// Compound literals at file scope first: initializers use them.
+	var lits, rest []*symbol
+	for _, s := range g.u.statics {
+		if strings.HasPrefix(s.name, "complit.") {
+			lits = append(lits, s)
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	objs = append(append(lits, objs...), rest...)
 	for _, s := range objs {
 		g.globalVar(s)
 	}
@@ -320,6 +329,8 @@ func (g *gen) mirror(t *ctype) string {
 		return "unsafe.Pointer"
 	case kVaList:
 		return "*c23.VaList"
+	case kLDouble:
+		return "c23.LDouble"
 	case kFunc:
 		return "c23.Func"
 	}
@@ -335,8 +346,12 @@ func (g *gen) record(t *ctype) string {
 	}
 	bytes := r.union || r.packed > 0 || t.rec.align > 8
 	var fields []string
-	for _, f := range r.fields {
+	for i, f := range r.fields {
 		if f.bits >= 0 || f.t.align > f.t.unqual().alignofNatural() {
+			bytes = true
+		}
+		if i == len(r.fields)-1 && f.t.sizeof() == 0 {
+			// Go pads a struct that ends in a zero-size field.
 			bytes = true
 		}
 	}

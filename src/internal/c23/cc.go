@@ -123,6 +123,13 @@ func AssertC(ok bool, text, file Ptr, line int32) {
 	}
 }
 
+// LDouble is C's long double in memory: x86-64's 16 bytes, holding a
+// double.
+type LDouble struct {
+	V float64
+	_ uint64
+}
+
 // A VaList is C's va_list: the variable arguments, and the next.
 type VaList struct {
 	args []any

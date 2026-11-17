@@ -23,7 +23,7 @@ func (p *parser) initializer(sym *symbol) *initializer {
 	if t.isVLA() && !p.is("{") {
 		p.errorf("variable-sized object may not be initialized")
 	}
-	ip := &initParser{p: p}
+	ip := &initParser{p: p, top: t}
 	if t.kind == kArray && t.n < 0 {
 		ip.open = true
 	}
@@ -73,6 +73,11 @@ type initParser struct {
 	maxEnd int64 // the end of the last element stored, for arrays of unknown length
 	count  int64
 	open   bool
+	// An initializer expression already parsed, for the next scalar: a
+	// struct's elements, when it turned out not to be the struct's value.
+	pending expr
+	top     *ctype           // the object's type
+	unions  map[int64]*field // the member each union is initialized as
 }
 
 func (ip *initParser) add(it initItem) {
@@ -138,7 +143,11 @@ func (ip *initParser) braced(t *ctype, off int64) {
 		p.accept(",")
 		for !p.accept("}") {
 			// Excess elements: GCC warns.
-			p.assignment()
+			if p.accept("{") {
+				ip.skipBraced()
+			} else {
+				p.assignment()
+			}
 			if !p.accept(",") {
 				p.expect("}")
 				break
@@ -160,7 +169,7 @@ func (ip *initParser) braced(t *ctype, off int64) {
 		// An initialized union's other bytes are zero.
 		ip.add(initItem{off: off, t: t, zero: true})
 	}
-	ip.list(t, off, true)
+	ip.list(t, off, true, false)
 }
 
 func (p *parser) peekString() (*strLit, bool) {
@@ -184,10 +193,11 @@ func (p *parser) initExprOrBraced(t *ctype, off int64, ip *initParser) expr {
 
 // list parses the elements of the aggregate t at off, up to the "}"
 // that ends its braces (if braced) or as many as it holds (if not, by
-// brace elision).
-func (ip *initParser) list(t *ctype, off int64, braced bool) {
+// brace elision). If desig, it starts with a designator of t's: the rest
+// of a designation like [1].b, after which the following initializers
+// continue in t (C23 6.7.11's current object).
+func (ip *initParser) list(t *ctype, off int64, braced, desig bool) {
 	p := ip.p
-	idx := int64(0) // the next element or field
 	var fields []*field
 	if t.kind == kStruct {
 		for _, f := range t.rec.fields {
@@ -199,9 +209,6 @@ func (ip *initParser) list(t *ctype, off int64, braced bool) {
 	n := int64(-1)
 	if t.kind == kArray {
 		n = t.n
-		if t.n < 0 && !ip.open {
-			n = -1
-		}
 	} else {
 		n = int64(len(fields))
 		if t.rec.union {
@@ -215,55 +222,85 @@ func (ip *initParser) list(t *ctype, off int64, braced bool) {
 		f := fields[i]
 		return f.t, off + f.off, f
 	}
+	top := t == ip.top
+	idx := int64(0)
+	first := true
 	for {
-		if braced && p.accept("}") {
-			return
-		}
-		if !braced && (p.is("}") || n >= 0 && idx >= n && !p.is(".") && !p.is("[")) {
-			return
-		}
-		if !braced && (p.is(".") || p.is("[")) && idx > 0 {
-			// A designator belongs to an enclosing brace level.
-			return
-		}
-		designated := false
-		if p.is("[") || p.is(".") {
-			if !braced && idx == 0 {
+		isDes := false
+		if ip.pending == nil {
+			if braced && p.accept("}") {
 				return
 			}
-			et, eoff, ef, next := ip.designation(t, off, fields)
-			designated = true
-			idx = next
-			ip.element(et, eoff, ef, true)
-			idx++
-			if t.kind == kArray && ip.open && off == 0 {
-				ip.count = max(ip.count, idx)
+			if !braced && (p.is("}") || p.peek().kind == tkEOF) {
+				return
 			}
-		} else {
-			if n >= 0 && idx >= n {
-				if t.kind == kStruct && t.rec.flex && idx == n {
-					// No more members: excess.
-				}
-				// Excess initializers: GCC warns and drops them.
-				p.assignment()
-				if !p.accept(",") && braced {
-					p.expect("}")
-					return
-				}
-				continue
-			}
-			et, eoff, ef := elemAt(idx)
-			if t.kind == kStruct && t.rec.union {
-				ip.element(et, eoff, ef, false)
-			} else {
-				ip.element(et, eoff, ef, false)
-			}
-			idx++
-			if t.kind == kArray && ip.open && off == 0 {
-				ip.count = max(ip.count, idx)
+			isDes = p.is("[") || p.is(".")
+			if isDes && !braced && !(first && desig) {
+				return // the enclosing brace level's
 			}
 		}
-		_ = designated
+		switch {
+		case isDes:
+			k, hi := ip.designator(t, off, fields)
+			idx = k
+			et, eoff, ef := elemAt(k)
+			if t.kind == kStruct && t.rec.union {
+				ip.unionMember(off, t, ef)
+			}
+			start := len(ip.items)
+			if p.is("[") || p.is(".") {
+				if !et.isAggregate() {
+					p.errorf("designator for a member of a non-aggregate")
+				}
+				ip.list(et, eoff, false, true)
+			} else {
+				if !p.accept("=") {
+					p.errorf("expected \"=\" after a designator")
+				}
+				ip.element(et, eoff, ef, true)
+			}
+			if hi > k {
+				// GNU's [lo ... hi]: the same for each.
+				size := t.elem.sizeof()
+				items := append([]initItem(nil), ip.items[start:]...)
+				for j := k + 1; j <= hi; j++ {
+					for _, it := range items {
+						c := it
+						c.off += (j - k) * size
+						ip.add(c)
+					}
+				}
+				idx = hi
+			}
+			idx++
+		case n >= 0 && idx >= n && !(t.kind == kArray && t.n < 0):
+			// Excess initializers: GCC warns and drops them.
+			if ip.pending != nil {
+				ip.pending = nil
+			} else if p.is("{") {
+				p.next()
+				ip.skipBraced()
+			} else {
+				p.assignment()
+			}
+		default:
+			et, eoff, ef := elemAt(idx)
+			if t.kind == kStruct && t.rec.union {
+				ip.unionMember(off, t, ef)
+			}
+			ip.element(et, eoff, ef, false)
+			idx++
+		}
+		if top && t.kind == kArray {
+			ip.count = max(ip.count, idx)
+		}
+		first = false
+		if !braced && n >= 0 && idx >= n && !(t.kind == kArray && t.n < 0) {
+			return // full: what follows, a comma first, is the enclosing list's
+		}
+		if !braced && p.is(",") && (p.isAt(1, ".") || p.isAt(1, "[")) {
+			return // a designator: the enclosing list's
+		}
 		if !p.accept(",") {
 			if braced {
 				p.expect("}")
@@ -273,12 +310,86 @@ func (ip *initParser) list(t *ctype, off int64, braced bool) {
 	}
 }
 
+// skipBraced skips a braced initializer, after its "{".
+func (ip *initParser) skipBraced() {
+	p := ip.p
+	depth := 1
+	for depth > 0 {
+		t := p.next()
+		switch {
+		case t.kind == tkEOF:
+			p.errorf("unterminated initializer")
+		case t.kind == tkPunct && t.text == "{":
+			depth++
+		case t.kind == tkPunct && t.text == "}":
+			depth--
+		}
+	}
+}
+
+// unionMember notes that the union at off is initialized as member f:
+// its bytes are zeroed first if it was another.
+func (ip *initParser) unionMember(off int64, t *ctype, f *field) {
+	if ip.unions == nil {
+		ip.unions = map[int64]*field{}
+	}
+	if cur, ok := ip.unions[off]; ok && cur == f {
+		return
+	}
+	ip.unions[off] = f
+	ip.add(initItem{off: off, t: t, zero: true})
+}
+
+// designator parses one designator of t, [i], [lo ... hi] or .f: the
+// index of the element (or member) it designates, and for a range the
+// last.
+func (ip *initParser) designator(t *ctype, off int64, fields []*field) (int64, int64) {
+	p := ip.p
+	if p.accept("[") {
+		if t.kind != kArray {
+			p.errorf("array index in non-array initializer")
+		}
+		i := p.constInt(p.conditional())
+		hi := i
+		if p.accept("...") {
+			hi = p.constInt(p.conditional())
+		}
+		p.expect("]")
+		if i < 0 || hi < i || t.n >= 0 && hi >= t.n {
+			p.errorf("array index in initializer exceeds array bounds")
+		}
+		return i, hi
+	}
+	p.expect(".")
+	name := p.ident()
+	if t.kind != kStruct {
+		p.errorf("field name not in record or union initializer")
+	}
+	path := t.rec.lookupField(name)
+	if path == nil {
+		p.errorf("%s has no member named %q", t, name)
+	}
+	top := path[0]
+	for i, f := range fields {
+		if f == top {
+			if len(path) > 1 {
+				// A member of an anonymous member: designate that, then
+				// the rest of the path inside it.
+				p.pos -= 2
+			}
+			return int64(i), int64(i)
+		}
+	}
+	p.errorf("%s has no member named %q", t, name)
+	return 0, 0
+}
+
 // element parses the initializer of one element (or member): braced,
 // a string for a char array, a value of its type, or, by brace elision,
 // the first of its own elements.
 func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator bool) {
 	p := ip.p
-	if p.is("{") {
+	if p.is("{") && ip.pending == nil {
 		if f != nil && f.bits >= 0 {
 			p.expect("{")
 			e := p.initExpr()
@@ -287,38 +398,56 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 			ip.add(initItem{off: off, t: t, f: f, x: p.assignConvert(p.rvalue(e), t, e.at(), "initializer")})
 			return
 		}
+		if t.kind == kArray && t.n == 0 && f != nil {
+			// A flexible array member: as long as its initializer.
+			t = arrayOf(t.elem, -1)
+		}
 		ip.braced(t, off)
 		return
 	}
-	if t.kind == kArray && t.n == 0 && f != nil && !afterDesignator {
-		// A flexible array member with no braces: nothing.
-		return
+	if t.kind == kArray && t.n == 0 && f != nil {
+		// A flexible array member, by brace elision (GNU): the rest.
+		t = arrayOf(t.elem, -1)
 	}
 	if t.isAggregate() {
-		if t.kind == kArray {
+		if t.kind == kArray && ip.pending == nil {
 			if s, ok := p.peekStringAny(); ok && isCharArrayFor(t, s) {
 				p.next()
 				ip.addString(t, off, s)
 				return
 			}
 		}
-		// A struct value, or brace elision.
+		if s, ok := ip.pending.(*strLit); ok && t.kind == kArray && isCharArrayFor(t, s) {
+			ip.pending = nil
+			ip.addString(t, off, s)
+			return
+		}
+		// A struct value, or brace elision: parse the expression once,
+		// and if it is not this struct's value it is the first of its
+		// elements'.
 		if t.kind == kStruct {
-			save := p.pos
-			e := p.initExpr()
+			e := ip.pending
+			if e == nil {
+				e = p.initExpr()
+			}
+			ip.pending = nil
 			if et := e.ty(); et.kind == kStruct && compatible(et.unqual(), t.unqual()) {
 				ip.add(initItem{off: off, t: t, x: p.rvalue(e)})
 				return
 			}
-			p.pos = save
+			ip.pending = e
 		}
 		if t.kind == kStruct && t.rec.union {
 			ip.add(initItem{off: off, t: t, zero: true})
 		}
-		ip.list(t, off, false)
+		ip.list(t, off, false, false)
 		return
 	}
-	e := p.initExpr()
+	e := ip.pending
+	ip.pending = nil
+	if e == nil {
+		e = p.initExpr()
+	}
 	x := p.assignConvert(p.rvalue(e), t, e.at(), "initializer")
 	if f != nil && f.bits >= 0 {
 		ip.add(initItem{off: off, t: t, f: f, x: x})
@@ -334,92 +463,4 @@ func (p *parser) peekStringAny() (*strLit, bool) {
 		return &strLit{node{arrayOf(t.ty, n), p.here()}, t.str}, true
 	}
 	return nil, false
-}
-
-// designation parses a designation, [i], [i ... j] or .f, possibly
-// nested, up to "=": the element it designates, and the index of the
-// first designator in t.
-func (ip *initParser) designation(t *ctype, off int64, fields []*field) (*ctype, int64, *field, int64) {
-	p := ip.p
-	var idx int64
-	cur, curOff := t, off
-	var cf *field
-	first := true
-	var rangeHi int64 = -1
-	for p.is("[") || p.is(".") {
-		if p.accept("[") {
-			if cur.kind != kArray {
-				p.errorf("array index in non-array initializer")
-			}
-			i := p.constInt(p.conditional())
-			hi := i
-			if p.accept("...") {
-				hi = p.constInt(p.conditional())
-			}
-			p.expect("]")
-			if i < 0 || cur.n >= 0 && hi >= cur.n && !(ip.open && cur == t) {
-				p.errorf("array index in initializer exceeds array bounds")
-			}
-			if first {
-				idx = i
-				if hi != i {
-					rangeHi = hi
-				}
-			}
-			curOff += i * cur.elem.sizeof()
-			if hi != i {
-				// GNU's ranges: the rest repeats for each index.
-				defer func(elem *ctype, base int64, lo, hi int64) {
-					// Copy the items made for lo to lo+1..hi.
-					var copies []initItem
-					start := base + lo*elem.sizeof()
-					end := start + elem.sizeof()
-					for _, it := range ip.items {
-						if it.off >= start && it.off < end {
-							copies = append(copies, it)
-						}
-					}
-					for k := lo + 1; k <= hi; k++ {
-						for _, it := range copies {
-							c := it
-							c.off += (k - lo) * elem.sizeof()
-							ip.add(c)
-						}
-					}
-				}(cur.elem, curOff-i*cur.elem.sizeof(), i, hi)
-			}
-			cur, cf = cur.elem, nil
-		} else {
-			p.next()
-			name := p.ident()
-			if cur.kind != kStruct {
-				p.errorf("field name not in record or union initializer")
-			}
-			path := cur.rec.lookupField(name)
-			if path == nil {
-				p.errorf("%s has no member named %q", cur, name)
-			}
-			if first {
-				top := path[0]
-				for i, f := range fields {
-					if f == top {
-						idx = int64(i)
-					}
-				}
-			}
-			for k, f := range path {
-				if cur.rec.union && (k < len(path)-1 || true) {
-					ip.add(initItem{off: curOff, t: cur, zero: true})
-				}
-				curOff += f.off
-				cur, cf = f.t, f
-			}
-		}
-		first = false
-	}
-	p.accept("=")
-	if rangeHi >= 0 {
-		idx = rangeHi
-	}
-	return cur, curOff, cf, idx
 }

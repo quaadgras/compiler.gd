@@ -136,6 +136,11 @@ func (p *parser) conditional() expr {
 	at := p.here()
 	p.next()
 	c = p.scalarCond(p.rvalue(c), at)
+	if v, ok := p.foldTruth(c); ok {
+		if _, isInt := c.(*intConst); !isInt {
+			c = p.intc(b2i(v), tInt, at)
+		}
+	}
 	var x expr
 	if p.is(":") {
 		// GNU's c ?: y.
@@ -232,18 +237,18 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 	switch op {
 	case "&&", "||":
 		x, y = p.scalarCond(x, at), p.scalarCond(y, at)
-		if xv, ok := p.foldInt(x); ok {
-			if yv, ok := p.foldInt(y); ok {
+		if xv, ok := p.foldTruth(x); ok {
+			if yv, ok := p.foldTruth(y); ok {
 				if op == "&&" {
-					return p.intc(b2i(xv != 0 && yv != 0), tInt, at)
+					return p.intc(b2i(xv && yv), tInt, at)
 				}
-				return p.intc(b2i(xv != 0 || yv != 0), tInt, at)
+				return p.intc(b2i(xv || yv), tInt, at)
 			}
 			// Short-circuited: the result is known.
-			if op == "&&" && xv == 0 {
+			if op == "&&" && !xv {
 				return p.intc(0, tInt, at)
 			}
-			if op == "||" && xv != 0 {
+			if op == "||" && xv {
 				return p.intc(1, tInt, at)
 			}
 		}
@@ -254,18 +259,31 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 		}
 		if xt.isPtr() && yt.isInteger() {
 			p.checkPtrArith(xt, at)
-			return &binary{node{xt, at}, "+", x, p.convert(y, tLong)}
+			y = p.convert(y, tLong)
+			if c, ok := p.ptrConstAdd(x, y, false); ok {
+				return c
+			}
+			return &binary{node{xt, at}, "+", x, y}
 		}
 	case "-":
 		if xt.isPtr() && yt.isInteger() {
 			p.checkPtrArith(xt, at)
-			return &binary{node{xt, at}, "-", x, p.convert(y, tLong)}
+			y = p.convert(y, tLong)
+			if c, ok := p.ptrConstAdd(x, y, true); ok {
+				return c
+			}
+			return &binary{node{xt, at}, "-", x, y}
 		}
 		if xt.isPtr() && yt.isPtr() {
 			if !compatible(xt.elem.unqual(), yt.elem.unqual()) {
 				p.errorAt(at, "invalid operands to binary - (have %s and %s)", xt, yt)
 			}
 			p.checkPtrArith(xt, at)
+			cx, ok1 := x.(*intConst)
+			cy, ok2 := y.(*intConst)
+			if sz := elemSizeOf(xt); ok1 && ok2 && sz > 0 {
+				return p.intc((cx.v-cy.v)/sz, tLong, at)
+			}
 			return &binary{node{tLong, at}, "-", x, y}
 		}
 	case "==", "!=", "<", ">", "<=", ">=":
@@ -303,6 +321,67 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 		rt = tInt
 	}
 	return p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)})
+}
+
+func elemSizeOf(t *ctype) int64 {
+	if t.elem.kind == kVoid || t.elem.kind == kFunc {
+		return 1
+	}
+	return t.elem.sizeof()
+}
+
+// ptrConstAdd folds a constant pointer plus or minus a constant.
+func (p *parser) ptrConstAdd(x, y expr, neg bool) (expr, bool) {
+	cx, ok1 := x.(*intConst)
+	cy, ok2 := y.(*intConst)
+	if !ok1 || !ok2 || x.ty().elem.isVLA() {
+		return nil, false
+	}
+	n := cy.v * elemSizeOf(x.ty())
+	if neg {
+		n = -n
+	}
+	return &intConst{node{x.ty(), x.at()}, cx.v + n}, true
+}
+
+// foldTruth evaluates a scalar constant as a condition: integer and
+// floating constants, and addresses of objects and functions, which are
+// never null.
+func (p *parser) foldTruth(e expr) (bool, bool) {
+	switch e := e.(type) {
+	case *intConst:
+		return e.v != 0, true
+	case *floatConst:
+		return e.v != 0, true
+	case *cast:
+		if e.t.isPtr() || e.t.kind == kBool {
+			return p.foldTruth(e.x)
+		}
+	case *decay:
+		return isStaticAddr(e.x)
+	case *addrOf:
+		return isStaticAddr(e.x)
+	}
+	return false, false
+}
+
+// isStaticAddr reports whether &e is an address constant (so not null).
+func isStaticAddr(e expr) (bool, bool) {
+	switch e := e.(type) {
+	case *varRef:
+		if e.sym.global || e.sym.kind == symFunc {
+			return true, true
+		}
+	case *strLit:
+		return true, true
+	case *compoundLit:
+		if e.sym.global {
+			return true, true
+		}
+	case *member:
+		return isStaticAddr(e.x)
+	}
+	return false, false
 }
 
 // toPtrish leaves pointers as they are and makes integers (null
@@ -380,7 +459,7 @@ func (p *parser) castExpr() expr {
 		if t.isFloat() && x.ty().isPtr() || t.isPtr() && x.ty().isFloat() {
 			p.errorAt(at, "cannot convert between pointer and floating types")
 		}
-		return p.convertAt(x, t.unqual(), at)
+		return p.withVLA(p.convertAt(x, t.unqual(), at))
 	}
 	return p.unaryExpr()
 }
@@ -436,10 +515,10 @@ func (p *parser) unaryExpr() expr {
 					cl := p.compoundLiteral(ty, at)
 					return p.sizeofType(p.postfix(cl).ty(), at)
 				}
-				return p.sizeofType(ty, at)
+				return p.withVLA(p.sizeofType(ty, at))
 			}
 			x := p.unaryExpr()
-			return p.sizeofType(x.ty(), at)
+			return p.withVLA(p.sizeofType(x.ty(), at))
 		case "_Alignof", "alignof", "__alignof__", "__alignof":
 			p.next()
 			if p.is("(") && p.isTypeStart(1) {
@@ -478,6 +557,17 @@ func (p *parser) unaryExpr() expr {
 		}
 	}
 	return p.postfix(p.primary())
+}
+
+// withVLA makes e evaluate the lengths of the variable length array
+// types parsed since the last declaration first.
+func (p *parser) withVLA(e expr) expr {
+	if len(p.pendingVLA) == 0 {
+		return e
+	}
+	pre := p.pendingVLA
+	p.pendingVLA = nil
+	return &seqExpr{node{e.ty(), e.at()}, pre, e}
 }
 
 func (p *parser) sizeofType(t *ctype, at pos) expr {
@@ -870,11 +960,8 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 		p.errorAt(at, "incompatible types: %s and %s", et, t)
 	}
 	if t.kind == kBool {
-		if c, ok := e.(*intConst); ok {
-			return &intConst{node{t, at}, b2i(c.v != 0)}
-		}
-		if c, ok := e.(*floatConst); ok {
-			return &intConst{node{t, at}, b2i(c.v != 0)}
+		if v, ok := p.foldTruth(e); ok {
+			return &intConst{node{t, at}, b2i(v)}
 		}
 	}
 	if t.isInteger() || t.isPtr() && et.isInteger() || t.kind == kNullptr {

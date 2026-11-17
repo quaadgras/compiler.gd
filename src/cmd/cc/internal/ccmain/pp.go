@@ -1475,7 +1475,7 @@ const predefined = `
 #define __SIZEOF_POINTER__ 8
 #define __SIZEOF_FLOAT__ 4
 #define __SIZEOF_DOUBLE__ 8
-#define __SIZEOF_LONG_DOUBLE__ 8
+#define __SIZEOF_LONG_DOUBLE__ 16
 #define __SIZEOF_SIZE_T__ 8
 #define __SIZEOF_PTRDIFF_T__ 8
 #define __SIZEOF_WCHAR_T__ 4

@@ -22,7 +22,10 @@ import (
 	"cmd/cc/internal/ccmain"
 )
 
-var update = flag.Bool("update", false, "rewrite testdata/slimcc/status.txt with the tests that pass")
+var (
+	update = flag.Bool("update", false, "rewrite testdata/slimcc/status.txt with the tests that pass")
+	keep   = flag.String("keep", "", "keep the slimcc tests' Go in this directory")
+)
 
 // TestSlimcc runs slimcc's tests (testdata/slimcc, MIT; see README), C23
 // and the GNU extensions slimcc supports, each linked with its
@@ -47,7 +50,25 @@ func TestSlimcc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The tests expect to be test/NAME.c, as in slimcc's tree.
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	root := t.TempDir()
+	if err := os.Symlink(abs, filepath.Join(root, "test")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(wd)
 	mod := t.TempDir()
+	if *keep != "" {
+		mod = *keep
+		os.MkdirAll(mod, 0o777)
+	}
 	if err := os.WriteFile(filepath.Join(mod, "go.mod"), []byte("module slimcc\n\ngo 1.27\n"), 0o666); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +80,7 @@ func TestSlimcc(t *testing.T) {
 			name := strings.TrimSuffix(filepath.Base(test), ".c")
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
-				err := runSlimcc(t, mod, name, test, filepath.Join(dir, "host", "common.c"))
+				err := runSlimcc(t, mod, name, filepath.Join("test", name+".c"), filepath.Join("test", "host", "common.c"))
 				mu.Lock()
 				defer mu.Unlock()
 				if err == nil {
@@ -70,6 +91,7 @@ func TestSlimcc(t *testing.T) {
 					return
 				}
 				why[name] = err.Error()
+				t.Log(err)
 				if want[name] && !*update {
 					t.Errorf("%v", err)
 				}
@@ -95,7 +117,7 @@ func TestSlimcc(t *testing.T) {
 		for _, name := range passed {
 			b.WriteString(name + "\n")
 		}
-		if err := os.WriteFile(filepath.Join(dir, "status.txt"), b.Bytes(), 0o666); err != nil {
+		if err := os.WriteFile(filepath.Join(abs, "status.txt"), b.Bytes(), 0o666); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -103,7 +125,7 @@ func TestSlimcc(t *testing.T) {
 
 // runSlimcc translates, builds and runs one test.
 func runSlimcc(t *testing.T, mod, name string, files ...string) error {
-	src, err := ccmain.Program(files, "main", []string{filepath.Dir(files[0])})
+	src, err := ccmain.Program(files, "main", []string{"test"})
 	if err != nil {
 		return fmt.Errorf("cc: %v", err)
 	}

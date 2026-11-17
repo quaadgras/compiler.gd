@@ -308,6 +308,11 @@ func (g *gen) effect(e expr) {
 		}
 	case *compoundLit:
 		g.compound(e)
+	case *seqExpr:
+		for _, s := range e.pre {
+			g.stmt(s)
+		}
+		g.effect(e.x)
 	default:
 		v := g.rv(e)
 		if !isSimple(v) {
@@ -433,6 +438,11 @@ func (g *gen) rv(e expr) string {
 		return g.stmtExprCode(e, true)
 	case *vlaSizeof:
 		return g.vlaSize(e.of)
+	case *seqExpr:
+		for _, s := range e.pre {
+			g.stmt(s)
+		}
+		return g.rv(e.x)
 	case *vaOp:
 		return g.vaOp(e)
 	case *builtinCall:
@@ -764,10 +774,14 @@ func (g *gen) funcPtr(s *symbol) string {
 func (g *gen) callCode(c *call) string {
 	var fn string
 	direct := false
+	callee := c.ft // the type the function has where it is defined
 	if d, ok := c.fn.(*decay); ok {
 		if v, ok := d.x.(*varRef); ok && v.sym.kind == symFunc {
 			fn = g.funcName(v.sym, c.p)
 			direct = true
+			if t := g.calleeType(v.sym); t != nil {
+				callee = t.fn
+			}
 		}
 	}
 	if !direct {
@@ -781,9 +795,19 @@ func (g *gen) callCode(c *call) string {
 	}
 	for i, a := range c.args {
 		v := g.rv(a)
-		if i >= len(c.ft.params) && a.ty().kind == kStruct {
+		if i >= len(callee.params) && a.ty().kind == kStruct {
 			// By value, in variable arguments: a copy.
 			v = fmt.Sprintf("c23.Copy(%s, %d)", v, a.ty().sizeof())
+		}
+		if callee != c.ft {
+			// Declared here with another type than where it is
+			// defined: what the ABI would pass.
+			switch {
+			case i < len(callee.params):
+				v = abiConvert(v, a, callee.params[i])
+			case !callee.variadic && (callee.proto || len(callee.params) > 0):
+				continue // an extra argument: ignored
+			}
 		}
 		args = append(args, v)
 	}
@@ -791,6 +815,21 @@ func (g *gen) callCode(c *call) string {
 		// Untyped: see allocCall.
 	}
 	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
+	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
+		switch {
+		case callee.ret.kind == kVoid:
+			g.p("%s", code)
+			return zeroOf(c.ft.ret)
+		case c.ft.ret.kind == kVoid:
+			g.p("_ = %s", code)
+			return ""
+		case c.ft.ret.kind == kBool && callee.ret.isInteger():
+			// The low byte, as on x86-64.
+			return fmt.Sprintf("uint8(%s)", code)
+		case c.ft.ret.isScalar() && callee.ret.isScalar():
+			return convertCode(code, callee.ret, c.ft.ret)
+		}
+	}
 	if sret != "" {
 		g.p("%s", code)
 		return sret
@@ -799,6 +838,35 @@ func (g *gen) callCode(c *call) string {
 		return code
 	}
 	return code
+}
+
+// calleeType is the type of the function s calls: as its definition (or
+// its library header) declares it.
+func (g *gen) calleeType(s *symbol) *ctype {
+	if s.linkage == 'e' {
+		if d := g.ext[s.name]; d != nil && d.defined {
+			return d.t
+		}
+	}
+	if s.defined {
+		return s.t
+	}
+	if _, ok := libc[s.name]; ok {
+		return libcType(s.name)
+	}
+	return nil
+}
+
+// abiConvert converts an argument a (Go value v) to a parameter of type to.
+func abiConvert(v string, a expr, to *ctype) string {
+	from := a.ty()
+	if compatible(from.unqual(), to.unqual()) || !from.isScalar() || !to.isScalar() {
+		return v
+	}
+	if c, ok := a.(*intConst); ok && to.isInteger() {
+		return constLit(to, c.v)
+	}
+	return convertCode(v, from, to)
 }
 
 // allocCall generates malloc, calloc or realloc whose result is converted

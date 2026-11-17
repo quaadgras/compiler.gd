@@ -4,6 +4,12 @@
 
 package ccmain
 
+import (
+	"fmt"
+	"strings"
+	"sync"
+)
+
 // libc maps the functions of the headers cmd/cc provides to their Go.
 var libc = map[string]string{
 	"printf": "Printf", "fprintf": "Fprintf", "sprintf": "Sprintf", "snprintf": "Snprintf",
@@ -22,4 +28,34 @@ var libc = map[string]string{
 	"strcmp": "Strcmp", "strncmp": "Strncmp", "strlen": "Strlen", "strchr": "Strchr",
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
+}
+
+var (
+	libcTypesOnce sync.Once
+	libcTypesMap  map[string]*ctype
+)
+
+// libcType is the type of a library function, as its header declares it.
+func libcType(name string) *ctype {
+	libcTypesOnce.Do(func() {
+		libcTypesMap = map[string]*ctype{}
+		var src strings.Builder
+		for _, h := range Headers() {
+			fmt.Fprintf(&src, "#include <%s>\n", h)
+		}
+		toks, err := lexUnit([]source{{"<headers>", src.String()}})
+		if err != nil {
+			panic(err)
+		}
+		u, err := parse("<headers>", toks)
+		if err != nil {
+			panic(err)
+		}
+		for _, s := range u.syms {
+			if s.kind == symFunc {
+				libcTypesMap[s.name] = s.t
+			}
+		}
+	})
+	return libcTypesMap[name]
 }

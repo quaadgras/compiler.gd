@@ -135,6 +135,13 @@ type (
 		ap  expr
 		src expr
 	}
+	// Statements, then x: the lengths of variable length array types
+	// that an expression names (sizeof(int[n])).
+	seqExpr struct {
+		node
+		pre []stmt
+		x   expr
+	}
 	// A call of a built-in function, cmd/cc's own.
 	builtinCall struct {
 		node
