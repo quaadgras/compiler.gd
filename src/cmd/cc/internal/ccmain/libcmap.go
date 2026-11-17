@@ -28,7 +28,7 @@ var libc = map[string]string{
 	"strcmp": "Strcmp", "strncmp": "Strncmp", "strlen": "Strlen", "strchr": "Strchr",
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
-	"alloca":  "Malloc",
+	"alloca": "Malloc",
 
 	// pthread.h
 	"pthread_create": "PthreadCreate", "pthread_join": "PthreadJoin", "pthread_detach": "PthreadDetach",
@@ -39,7 +39,7 @@ var libc = map[string]string{
 	"pthread_cond_destroy": "PthreadCondDestroy", "pthread_cond_wait": "PthreadCondWait",
 	"pthread_cond_signal": "PthreadCondSignal", "pthread_cond_broadcast": "PthreadCondBroadcast",
 	"sched_yield": "SchedYield",
-	"longjmp": "Longjmp", "_longjmp": "Longjmp", "siglongjmp": "Longjmp",
+	"longjmp":     "Longjmp", "_longjmp": "Longjmp", "siglongjmp": "Longjmp",
 	"strnlen": "Strnlen", "strpbrk": "Strpbrk", "strcoll": "Strcoll", "strtok": "Strtok",
 	"strtok_r": "StrtokR", "strerror": "Strerror", "memset_explicit": "MemsetExplicit",
 

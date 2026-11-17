@@ -134,9 +134,9 @@ func mutexOf(p Ptr) *sync.Mutex {
 }
 
 func PthreadMutexInit(m, attr Ptr) int32 { mutexOf(m); return 0 }
-func PthreadMutexDestroy(m Ptr) int32  { return 0 }
-func PthreadMutexLock(m Ptr) int32     { mutexOf(m).Lock(); return 0 }
-func PthreadMutexUnlock(m Ptr) int32   { mutexOf(m).Unlock(); return 0 }
+func PthreadMutexDestroy(m Ptr) int32    { return 0 }
+func PthreadMutexLock(m Ptr) int32       { mutexOf(m).Lock(); return 0 }
+func PthreadMutexUnlock(m Ptr) int32     { mutexOf(m).Unlock(); return 0 }
 func PthreadMutexTrylock(m Ptr) int32 {
 	if mutexOf(m).TryLock() {
 		return 0
