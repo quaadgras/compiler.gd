@@ -22,6 +22,9 @@ type lval struct {
 	addr  string
 	t     *ctype
 	f     *field // a bit-field
+	// The Go expression of the value, if the object is known statically:
+	// Go's own typed access, safe without c23's checks.
+	direct string
 }
 
 func (g *gen) lv(e expr) lval {
@@ -36,27 +39,43 @@ func (g *gen) lv(e expr) lval {
 				// The calling thread's.
 				return lval{addr: g.globalName(s) + ".Get()", t: s.t}
 			}
-			return lval{addr: g.globalName(s), t: s.t}
+			def := s
+			if d := g.ext[s.name]; s.linkage == 'e' && d != nil {
+				def = d
+			}
+			return lval{addr: g.globalName(s), t: s.t, direct: g.objs[def]}
 		}
 		n := g.localName(s)
 		if localKindOf(s) == lkVar {
 			return lval{goVar: n, t: s.t}
 		}
-		return lval{addr: n, t: s.t}
+		return lval{addr: n, t: s.t, direct: g.objs[s]}
 	case *deref:
+		if l, ok := g.directElem(e); ok {
+			return l
+		}
 		return lval{addr: g.rv(e.x), t: e.t}
 	case *member:
-		var base string
+		var base, direct string
 		if isLvalue(e.x) {
 			l := g.lv(e.x)
 			if l.goVar != "" {
 				g.errorf(e.p, "internal error: member of a register struct")
 			}
 			base = l.addr
+			if l.direct != "" && e.f.bits < 0 {
+				if r := e.x.ty().rec; !r.bytes && r.goName != "" {
+					for i, f := range r.fields {
+						if f == e.f {
+							direct = l.direct + "." + g.fieldName(f, i)
+						}
+					}
+				}
+			}
 		} else {
 			base = g.rv(e.x)
 		}
-		l := lval{addr: addOff(base, e.f.off), t: e.t}
+		l := lval{addr: addOff(base, e.f.off), t: e.t, direct: direct}
 		if e.f.bits >= 0 {
 			l.f = e.f
 		}
@@ -132,6 +151,9 @@ func isSimple(s string) bool {
 func (g *gen) load(l lval) string {
 	if l.goVar != "" {
 		return l.goVar
+	}
+	if l.direct != "" && directScalar(l.t) && l.f == nil {
+		return l.direct
 	}
 	if l.f != nil {
 		return g.bitLoad(l.addr, l.f)
@@ -266,6 +288,11 @@ func (g *gen) storeL(l lval, v string, c expr) {
 	switch {
 	case l.goVar != "":
 		g.p("%s = %s", l.goVar, v)
+	case l.direct != "" && directScalar(l.t) && l.f == nil:
+		if k, ok := c.(*intConst); ok {
+			v = constLit(l.t, k.v)
+		}
+		g.p("%s = %s", l.direct, v)
 	case l.f != nil:
 		g.bitStore(l.addr, l.f, v, c)
 	case isAtomic(l):
@@ -1293,4 +1320,71 @@ func hasPointers(t *ctype) bool {
 		}
 	}
 	return false
+}
+
+// directScalar reports whether a t in an object Go reaches directly is
+// loaded and stored as Go's value of it: a scalar that is not a pointer
+// (whose capability c23 keeps) or atomic, and whose mirror is its Go type.
+func directScalar(t *ctype) bool {
+	if t.q&qAtomic != 0 {
+		return false
+	}
+	switch {
+	case t.isInteger():
+		return !is128(t)
+	case t.kind == kFloat || t.kind == kDouble:
+		return true
+	}
+	return false
+}
+
+// directElem is the lvalue of *(a + i) or *a, where a is an array whose
+// object Go reaches directly: its element, by Go's index (which Go
+// checks).
+func (g *gen) directElem(e *deref) (lval, bool) {
+	var arr, idx expr
+	switch x := e.x.(type) {
+	case *decay:
+		arr = x.x
+	case *binary:
+		if x.op != "+" {
+			return lval{}, false
+		}
+		d, ok := x.x.(*decay)
+		if !ok || !x.y.ty().isInteger() {
+			return lval{}, false
+		}
+		arr, idx = d.x, x.y
+	default:
+		return lval{}, false
+	}
+	at := arr.ty()
+	if at.kind != kArray || at.n < 0 || at.isVLA() || !isLvalue(arr) {
+		return lval{}, false
+	}
+	if _, ok := arr.(*strLit); ok {
+		return lval{}, false
+	}
+	al := g.lv(arr)
+	if al.direct == "" {
+		return lval{}, false
+	}
+	if c, ok := idx.(*intConst); ok && (c.v < 0 || c.v >= at.n) {
+		return lval{}, false // Go would reject the constant index
+	}
+	i := "0"
+	if idx != nil {
+		i = g.rv(idx)
+		if !isSimple(i) && !isConvLit(i) {
+			t := g.tmp(goType(idx.ty()))
+			g.p("%s = %s", t, i)
+			i = t
+		}
+	}
+	pt := ptrTo(at.elem)
+	addr := al.addr
+	if idx != nil {
+		addr = g.ptrAdd(al.addr, pt, &goVal{node{idx.ty(), e.p}, i}, false)
+	}
+	return lval{addr: addr, t: e.t, direct: fmt.Sprintf("%s[%s]", al.direct, i)}, true
 }

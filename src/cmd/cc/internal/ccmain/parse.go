@@ -685,7 +685,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	}
 	if prev != nil {
 		// C23: the same tag and contents again is the same type.
-		if prev.kind != kStruct || !sameRecord(prev.rec, r) {
+		if prev.kind != kStruct || !sameRecord(prev.rec, r, nil) {
 			p.errorf("redefinition of %q", tag)
 		}
 		p.sc.tags[tag] = prev

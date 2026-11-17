@@ -49,7 +49,8 @@ type pkgGen struct {
 	strs     map[string]string
 	ext      map[string]*symbol // the definitions with external linkage
 	names    map[*symbol]string
-	descs    map[string]bool // function descriptors made
+	descs    map[string]bool    // function descriptors made
+	objs     map[*symbol]string // the Go expression of an object's value, known statically
 	recN     int
 	uses     map[string]bool // imports used
 }
@@ -96,7 +97,7 @@ func catch(err *error) {
 
 func newPkgGen(file string, o options) *pkgGen {
 	return &pkgGen{o: o, file: file, mirrors: map[string]string{}, strs: map[string]string{},
-		ext: map[string]*symbol{}, names: map[*symbol]string{}, descs: map[string]bool{}, uses: map[string]bool{}}
+		ext: map[string]*symbol{}, names: map[*symbol]string{}, descs: map[string]bool{}, uses: map[string]bool{}, objs: map[*symbol]string{}}
 }
 
 // generate translates units, one program or package, to Go source.
@@ -290,7 +291,13 @@ func (g *gen) globalVar(s *symbol) {
 	} else if a := s.t.alignof(); a > 8 {
 		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
 	} else {
-		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.objMirror(s.t))
+		if m := g.objMirror(s.t); m == g.mirror(s.t) {
+			// A Go object that Go code can reach directly.
+			fmt.Fprintf(&g.vars, "var o_%s = new(c23.Obj[%s])\nvar %s = c23.Local(o_%s)\n", name, m, name, name)
+			g.objs[s] = "o_" + name + ".V"
+		} else {
+			fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, m)
+		}
 	}
 	if s.init != nil {
 		save, saveInd := g.out, g.ind
@@ -390,6 +397,7 @@ func (g *gen) record(t *ctype) string {
 		return r.goName
 	}
 	bytes := r.union || r.packed > 0 || t.rec.align > 8 || !naturalLayout(r)
+	defer func() { r.bytes = bytes }()
 	var fields []string
 	for i, f := range r.fields {
 		if f.bits >= 0 || f.packed || f.t.align > f.t.unqual().alignofNatural() {

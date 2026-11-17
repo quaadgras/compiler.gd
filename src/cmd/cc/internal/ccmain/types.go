@@ -80,6 +80,7 @@ type record struct {
 	flex     bool  // a flexible array member last
 	id       int   // unique in the translation unit
 	goName   string
+	bytes    bool // its mirror is bytes (gen.go's record)
 }
 
 type field struct {
@@ -385,7 +386,11 @@ func usual(a, b *ctype) *ctype {
 
 // compatible reports whether a and b are compatible types (C23 6.2.7),
 // ignoring top-level qualifiers if unq.
-func compatible(a, b *ctype) bool {
+func compatible(a, b *ctype) bool { return compat(a, b, nil) }
+
+// compat is compatible; seen holds the pairs of records being compared,
+// for structs that point to themselves (assumed the same meanwhile).
+func compat(a, b *ctype, seen map[[2]*record]bool) bool {
 	if a == b {
 		return true
 	}
@@ -404,17 +409,17 @@ func compatible(a, b *ctype) bool {
 	case kComplex:
 		return a.elem.kind == b.elem.kind
 	case kPtr:
-		return compatible(a.elem, b.elem)
+		return compat(a.elem, b.elem, seen)
 	case kArray:
 		if a.n >= 0 && b.n >= 0 && a.n != b.n {
 			return false
 		}
-		return compatible(a.elem, b.elem)
+		return compat(a.elem, b.elem, seen)
 	case kStruct:
-		return a.rec == b.rec || sameRecord(a.rec, b.rec)
+		return a.rec == b.rec || sameRecord(a.rec, b.rec, seen)
 	case kFunc:
 		fa, fb := a.fn, b.fn
-		if !compatible(fa.ret, fb.ret) {
+		if !compat(fa.ret, fb.ret, seen) {
 			return false
 		}
 		if !fa.proto || !fb.proto {
@@ -424,7 +429,7 @@ func compatible(a, b *ctype) bool {
 			return false
 		}
 		for i := range fa.params {
-			if !compatible(fa.params[i].unqual(), fb.params[i].unqual()) {
+			if !compat(fa.params[i].unqual(), fb.params[i].unqual(), seen) {
 				return false
 			}
 		}
@@ -434,23 +439,23 @@ func compatible(a, b *ctype) bool {
 
 // sameRecord reports whether two struct types with the same tag and
 // members are compatible, as C23 lets them be.
-func sameRecord(a, b *record) bool {
+func sameRecord(a, b *record, seen map[[2]*record]bool) bool {
 	if a.tag == "" {
 		return false
 	}
-	return sameMembers(a, b)
+	return sameMembers(a, b, seen)
 }
 
-// comparing holds the pairs of records being compared, for structs that
-// point to themselves (assumed the same while they are compared).
-var comparing = map[[2]*record]bool{}
-
-func sameMembers(a, b *record) bool {
-	if comparing[[2]*record{a, b}] {
+func sameMembers(a, b *record, seen map[[2]*record]bool) bool {
+	k := [2]*record{a, b}
+	if seen[k] {
 		return true
 	}
-	comparing[[2]*record{a, b}] = true
-	defer delete(comparing, [2]*record{a, b})
+	if seen == nil {
+		seen = map[[2]*record]bool{}
+	}
+	seen[k] = true
+	defer delete(seen, k)
 	if a.tag != b.tag || a.union != b.union || !a.complete || !b.complete || len(a.fields) != len(b.fields) {
 		return false
 	}
@@ -460,12 +465,12 @@ func sameMembers(a, b *record) bool {
 			return false
 		}
 		if f.name == "" && f.t.kind == kStruct && g.t.kind == kStruct && f.t.rec.tag == "" && g.t.rec.tag == "" {
-			if !sameMembers(f.t.rec, g.t.rec) {
+			if !sameMembers(f.t.rec, g.t.rec, seen) {
 				return false
 			}
 			continue
 		}
-		if !compatible(f.t, g.t) {
+		if !compat(f.t, g.t, seen) {
 			return false
 		}
 	}

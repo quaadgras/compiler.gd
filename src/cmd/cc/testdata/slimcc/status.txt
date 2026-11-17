@@ -54,6 +54,7 @@ plat_typedef
 pointer
 postfix_inc_dec
 pragma_pack
+scope
 setjmp
 sizeof
 stmtexpr2

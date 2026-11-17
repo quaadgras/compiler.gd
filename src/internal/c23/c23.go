@@ -161,14 +161,14 @@ const hdrSize = unsafe.Sizeof(header{})
 // C stores their address.
 type Obj[T any] struct {
 	h header
-	v T
+	V T // the value: what Go that cmd/cc generates reaches directly, when it knows the object
 }
 
 // Local returns the C pointer for a local C object.
 func Local[T any](o *Obj[T]) Ptr {
 	ti := tinfoOf[T]()
-	o.h = header{magic: magic, ti: ti, size: unsafe.Sizeof(o.v)}
-	return Ptr{obj: unsafe.Pointer(&o.v), size: unsafe.Sizeof(o.v), ti: cref(ti)}
+	o.h = header{magic: magic, ti: ti, size: unsafe.Sizeof(o.V)}
+	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: cref(ti)}
 }
 
 // New allocates a T for C in the heap.
