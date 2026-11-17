@@ -1,0 +1,28 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <assert.h>
+
+#define ASSERT(x, y) test_assert((int)(x), (int)(y), __LINE__, #y)
+#define SASSERT(x) static_assert(x,"")
+#define EASSERT(x,y) static_assert((int)(x) == (int)(y),"")
+
+#if defined(__slimcc__) || defined(__clang__)
+#define NOTGCC
+#endif
+#if defined(__slimcc__) || !defined(__clang__)
+#define NOTCLANG
+#endif
+
+#if __GNUC__ >= 14
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+#endif
+
+extern
+#if defined __cplusplus
+"C"
+#endif
+void test_assert(int expected, int actual, int line, const char *code);

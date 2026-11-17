@@ -67,3 +67,25 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
+
+// Program translates the C files files, a whole program with main, to
+// the Go source of package pkg.
+func Program(files []string, pkg string) ([]byte, error) {
+	var srcs []source
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		srcs = append(srcs, source{f, string(b)})
+	}
+	toks, err := lexUnit(srcs)
+	if err != nil {
+		return nil, err
+	}
+	u, err := parse(files[0], toks)
+	if err != nil {
+		return nil, err
+	}
+	return generate(files[0], u, options{pkg: pkg, main: true})
+}
