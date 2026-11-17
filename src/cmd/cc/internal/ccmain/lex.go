@@ -43,6 +43,7 @@ type token struct {
 	bol      bool  // first on its line
 	noexpand bool  // names a macro that was disabled when it was read
 	pack     int64 // "struct" and "union": #pragma pack's alignment (0: none)
+	imag     bool  // tkFloat: an imaginary constant (GNU's 2.0i)
 }
 
 func (t token) String() string {

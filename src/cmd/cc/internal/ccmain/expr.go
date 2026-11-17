@@ -543,6 +543,10 @@ func isNullConst(e expr) bool {
 }
 
 func (p *parser) castExpr() expr {
+	if p.is("(") && p.isAt(1, "__extension__") && !p.isTypeStart(2) {
+		// (__extension__ expr)
+		return p.postfix(p.primary())
+	}
 	if p.is("(") && p.isTypeStart(1) {
 		at := p.here()
 		save := p.pos
@@ -597,6 +601,10 @@ func (p *parser) unaryExpr() expr {
 		case "+", "-", "~":
 			p.next()
 			x := p.rvalue(p.castExpr())
+			if t.text == "~" && x.ty().kind == kComplex {
+				// GNU: the conjugate.
+				return &builtinCall{node{x.ty(), at}, "conj", []expr{x}}
+			}
 			if !x.ty().isArith() || t.text == "~" && !x.ty().isInteger() {
 				p.errorAt(at, "wrong type argument to unary %s", t.text)
 			}
@@ -715,8 +723,33 @@ func (p *parser) unaryExpr() expr {
 		case "__extension__":
 			p.next()
 			return p.castExpr()
-		case "__real__", "__imag__":
-			p.errorf("complex numbers are not supported")
+		case "__real__", "__real", "__imag__", "__imag":
+			p.next()
+			lx := p.castExpr()
+			if lx.ty().kind == kComplex && isLvalue(lx) {
+				// An lvalue: the part, in memory.
+				et := lx.ty().elem
+				ptr := &cast{node{ptrTo(et), at}, p.addressOf(lx, at)}
+				if t.text[2] == 'r' {
+					return &deref{node{et, at}, ptr}
+				}
+				return &deref{node{et, at}, &binary{node{ptrTo(et), at}, "+", ptr, p.intc(1, tLong, at)}}
+			}
+			x := p.rvalue(lx)
+			if !x.ty().isArith() {
+				p.errorAt(at, "%s of a %s", t.text, x.ty())
+			}
+			if x.ty().kind != kComplex {
+				if t.text[2] == 'r' {
+					return x
+				}
+				return &binary{node{x.ty(), at}, ",", x, p.convert(p.intc(0, tInt, at), x.ty())}
+			}
+			name := "creal"
+			if t.text[2] == 'i' {
+				name = "cimag"
+			}
+			return &builtinCall{node{x.ty().elem, at}, name, []expr{x}}
 		}
 	}
 	return p.postfix(p.primary())
@@ -970,12 +1003,18 @@ func (p *parser) primary() expr {
 	case tkInt, tkChar:
 		return &intConst{node{t.ty, at}, t.ival}
 	case tkFloat:
+		if t.imag {
+			return &complexConst{node{complexOf(t.ty), at}, 0, t.fval}
+		}
 		return &floatConst{node{t.ty, at}, t.fval}
 	case tkString:
 		n := int64(len(t.str))/t.ty.sizeof() + 1
 		return &strLit{node{arrayOf(t.ty, n), at}, t.str}
 	case tkPunct:
 		if t.text == "(" {
+			for p.is("__extension__") && !p.isTypeStart(1) {
+				p.next()
+			}
 			if p.is("{") {
 				return p.stmtExprOf(at)
 			}
@@ -1631,6 +1670,21 @@ func (p *parser) builtin(name string, at pos) expr {
 		// In the heap: the collector frees it.
 		n := p.convert(p.rvalue(as[0]), tULong)
 		return &builtinCall{node{ptrTo(tVoid), at}, "alloca", []expr{n}}
+	case "__builtin_complex":
+		as := args(2)
+		re, im := p.rvalue(as[0]), p.rvalue(as[1])
+		if !re.ty().isFloat() {
+			p.errorAt(at, "__builtin_complex of a %s", re.ty())
+		}
+		t := complexOf(re.ty().unqual())
+		return &builtinCall{node{t, at}, "complex", []expr{re, p.convert(im, re.ty().unqual())}}
+	case "__builtin_creal", "__builtin_cimag", "__builtin_crealf", "__builtin_cimagf", "__builtin_creall", "__builtin_cimagl":
+		as := args(1)
+		x := p.convert(p.rvalue(as[0]), complexOf(map[byte]*ctype{'f': tFloat, 'l': tLDouble}[name[len(name)-1]]))
+		if c := x.ty(); c.elem == nil {
+			x = p.convert(p.rvalue(as[0]), complexOf(tDouble))
+		}
+		return &builtinCall{node{x.ty().elem, at}, name[10:15], []expr{x}}
 	case "__builtin_assert":
 		// cmd/cc's assert: (cond, text, file, line).
 		as := args(4)

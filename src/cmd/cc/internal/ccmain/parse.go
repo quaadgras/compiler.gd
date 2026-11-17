@@ -304,7 +304,7 @@ var typeWords = map[string]bool{
 	"__volatile__": true, "__volatile": true, "__signed__": true, "__signed": true, "__auto_type": true,
 	"_Complex": true, "__builtin_va_list": true, "__attribute__": true, "__attribute": true,
 	"__extension__": true, "_BitInt": true, "__int128": true, "_Float32": true, "_Float64": true,
-	"__thread": true, "__declspec": true, "_Decimal32": true, "_Decimal64": true,
+	"__thread": true, "__declspec": true, "__complex__": true, "__complex": true, "_Decimal32": true, "_Decimal64": true,
 }
 
 // isTypeStart reports whether the token at i starts declaration
@@ -329,6 +329,7 @@ func (p *parser) declSpecs() specs {
 	var q qual
 	nlong, nint := 0, 0
 	bitN := int64(0)
+	cplx := false
 	unsigned, signed, short := false, false, false
 	base := ""
 	seen := false
@@ -406,8 +407,8 @@ func (p *parser) declSpecs() specs {
 				p.errorf("two or more data types in declaration specifiers")
 			}
 			base = w
-		case "_Complex":
-			p.errorf("_Complex is not supported")
+		case "_Complex", "__complex__", "__complex":
+			cplx = true
 		case "_BitInt":
 			p.next()
 			p.expect("(")
@@ -470,6 +471,18 @@ func (p *parser) declSpecs() specs {
 		p.next()
 	}
 done:
+	if cplx {
+		switch {
+		case base == "float":
+			s.t = complexOf(tFloat)
+		case base == "double" && nlong > 0:
+			s.t = complexOf(tLDouble)
+		case base == "double" || base == "":
+			s.t = complexOf(tDouble)
+		default:
+			p.errorf("_Complex %s is not supported", base)
+		}
+	}
 	if bitN > 0 {
 		s.t = bitInt(bitN, unsigned)
 		if bitN < 1 || bitN < 2 && !unsigned {

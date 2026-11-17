@@ -321,6 +321,11 @@ func goType(t *ctype) string {
 		return "int64"
 	case kULong, kULLong:
 		return "uint64"
+	case kComplex:
+		if t.elem.kind == kFloat {
+			return "complex64"
+		}
+		return "complex128"
 	case kBitInt, kUBitInt:
 		u := ""
 		if t.kind == kUBitInt {
@@ -365,6 +370,8 @@ func (g *gen) mirror(t *ctype) string {
 		return "*c23.VaList"
 	case kLDouble:
 		return "c23.LDouble"
+	case kComplex:
+		return fmt.Sprintf("[2]%s", g.mirror(t.elem))
 	case kFunc:
 		return "c23.Func"
 	}

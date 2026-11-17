@@ -200,6 +200,14 @@ func loadCode(addr string, t *ctype) string {
 		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
 	case kStruct, kArray:
 		return addr
+	case kComplex:
+		switch t.elem.kind {
+		case kFloat:
+			return fmt.Sprintf("c23.LoadC64(%s)", addr)
+		case kLDouble:
+			return fmt.Sprintf("c23.LoadCL(%s)", addr)
+		}
+		return fmt.Sprintf("c23.LoadC128(%s)", addr)
 	}
 	panic(fmt.Sprintf("load of %s", t))
 }
@@ -232,6 +240,15 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 		g.p("c23.StorePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
 		g.p("c23.Memmove(%s, %s, %d)", addr, v, t.sizeof())
+	case kComplex:
+		switch t.elem.kind {
+		case kFloat:
+			g.p("c23.StoreC64(%s, %s)", addr, v)
+		case kLDouble:
+			g.p("c23.StoreCL(%s, %s)", addr, v)
+		default:
+			g.p("c23.StoreC128(%s, %s)", addr, v)
+		}
 	default:
 		panic(fmt.Sprintf("store of %s", t))
 	}
@@ -462,6 +479,8 @@ func (g *gen) rv(e expr) string {
 		return constLit(e.t, e.v)
 	case *floatConst:
 		return floatLit(e.t, e.v)
+	case *complexConst:
+		return fmt.Sprintf("%s(complex(%s, %s))", goType(e.t), floatLit(tDouble, e.re), floatLit(tDouble, e.im))
 	case *strLit:
 		return g.str(e)
 	case *varRef:
@@ -561,6 +580,24 @@ func (g *gen) binary(e *binary) string {
 	return wrapBits(fmt.Sprintf("(%s %s %s)", x, e.op, y), e.t)
 }
 
+// complexConvert converts to or from a complex type.
+func complexConvert(x string, from, to *ctype) string {
+	switch {
+	case to.kind == kComplex && from.kind == kComplex:
+		if goType(from) == goType(to) {
+			return x
+		}
+		return fmt.Sprintf("%s(%s)", goType(to), x)
+	case to.kind == kComplex:
+		f := goType(to.elem)
+		return fmt.Sprintf("complex(%s(%s), 0)", f, convertCode(x, from, to.elem))
+	case to.kind == kBool:
+		return fmt.Sprintf("c23.B2U8(%s != 0)", x)
+	}
+	// C takes the real part.
+	return convertCode(fmt.Sprintf("real(%s)", x), from.elem, to)
+}
+
 // wrapBits wraps x, a Go value of t's Go type, to t's width if t is a
 // _BitInt narrower than its Go type.
 func wrapBits(x string, t *ctype) string {
@@ -635,6 +672,9 @@ func (g *gen) castCode(e *cast) string {
 var constConv = regexp.MustCompile(`^(u?int(8|16|32|64))\((-?[0-9]+)\)$`)
 
 func convertCode(x string, from, to *ctype) string {
+	if to.kind == kComplex || from.kind == kComplex {
+		return complexConvert(x, from, to)
+	}
 	if m := constConv.FindStringSubmatch(x); m != nil && to.isInteger() && !to.isBitInt() {
 		// A constant: converted here, as Go would reject an overflow.
 		if v, err := strconv.ParseInt(m[3], 10, 64); err == nil {
@@ -1113,6 +1153,16 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
+	case "conj":
+		x := g.tmp(goType(e.t))
+		g.p("%s = %s", x, g.rv(e.args[0]))
+		return fmt.Sprintf("complex(real(%s), -imag(%s))", x, x)
+	case "creal":
+		return fmt.Sprintf("real(%s)", g.rv(e.args[0]))
+	case "cimag":
+		return fmt.Sprintf("imag(%s)", g.rv(e.args[0]))
+	case "complex":
+		return fmt.Sprintf("complex(%s, %s)", g.rv(e.args[0]), g.rv(e.args[1]))
 	case "overflow":
 		op := e.args[0].(*intConst).v
 		a, b := e.args[1], e.args[2]

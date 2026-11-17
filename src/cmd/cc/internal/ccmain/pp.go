@@ -1485,7 +1485,6 @@ const predefined = `
 #define __STDC_UTF_32__ 1
 #define __STDC_IEC_559__ 1
 #define __STDC_NO_ATOMICS__ 1
-#define __STDC_NO_COMPLEX__ 1
 #define __STDC_NO_THREADS__ 1
 #define __STDC_NO_VLA__ 1
 #define __STDC_EMBED_NOT_FOUND__ 0
@@ -1624,6 +1623,20 @@ func convertNumber(t token) (token, error) {
 	}
 	s := strings.ReplaceAll(t.text, "'", "")
 	low := strings.ToLower(s)
+	// GNU's imaginary constants: an i or j among the suffix's letters.
+	if k := strings.LastIndexAny(low, "ij"); k > 0 && !strings.HasPrefix(low, "0x") || k > 1 && strings.HasPrefix(low, "0x") && k == len(low)-1 {
+		if rest := low[k+1:]; strings.Trim(rest, "fl") == "" {
+			c, err := convertNumber(token{file: t.file, line: t.line, text: s[:k] + s[k+1:], kind: tkPPNum})
+			if err != nil {
+				return t, err
+			}
+			if c.kind == tkInt {
+				c.kind, c.fval, c.ty = tkFloat, float64(c.ival), tDouble
+			}
+			c.imag = true
+			return c, nil
+		}
+	}
 	hex := strings.HasPrefix(low, "0x")
 	isFloat := strings.Contains(s, ".") || hex && strings.Contains(low, "p") ||
 		!hex && strings.ContainsAny(low, "e") && !strings.HasPrefix(low, "0b")

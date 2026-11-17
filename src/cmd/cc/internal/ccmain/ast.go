@@ -37,6 +37,11 @@ type (
 		node
 		v float64
 	}
+	// A complex constant (from GNU's imaginary constants).
+	complexConst struct {
+		node
+		re, im float64
+	}
 	// A string literal: an array (t) of its elements, data the bytes.
 	strLit struct {
 		node

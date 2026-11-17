@@ -776,6 +776,58 @@ typedef _Atomic uintmax_t atomic_uintmax_t;
 #define __STDC_VERSION_STDCKDINT_H__ 202311L
 #endif
 `,
+	"complex.h": `#ifndef __CC_COMPLEX_H
+#define __CC_COMPLEX_H
+#define complex _Complex
+#define _Complex_I (__extension__ 1.0iF)
+#define I _Complex_I
+#define CMPLX(x, y) __builtin_complex((double)(x), (double)(y))
+#define CMPLXF(x, y) __builtin_complex((float)(x), (float)(y))
+#define CMPLXL(x, y) __builtin_complex((long double)(x), (long double)(y))
+double creal(double complex z);
+double cimag(double complex z);
+double complex conj(double complex z);
+double cabs(double complex z);
+double carg(double complex z);
+double complex cproj(double complex z);
+double complex cexp(double complex z);
+double complex clog(double complex z);
+double complex csqrt(double complex z);
+double complex cpow(double complex x, double complex y);
+double complex csin(double complex z);
+double complex ccos(double complex z);
+double complex ctan(double complex z);
+double complex casin(double complex z);
+double complex cacos(double complex z);
+double complex catan(double complex z);
+double complex csinh(double complex z);
+double complex ccosh(double complex z);
+double complex ctanh(double complex z);
+double complex casinh(double complex z);
+double complex cacosh(double complex z);
+double complex catanh(double complex z);
+float crealf(float complex z);
+float cimagf(float complex z);
+float complex conjf(float complex z);
+float cabsf(float complex z);
+float cargf(float complex z);
+float complex cexpf(float complex z);
+float complex clogf(float complex z);
+float complex csqrtf(float complex z);
+float complex cpowf(float complex x, float complex y);
+float complex csinf(float complex z);
+float complex ccosf(float complex z);
+#define creall(z) creal(z)
+#define cimagl(z) cimag(z)
+#define conjl(z) conj(z)
+#define cabsl(z) cabs(z)
+#define cargl(z) carg(z)
+#define cexpl(z) cexp(z)
+#define clogl(z) clog(z)
+#define csqrtl(z) csqrt(z)
+#define cpowl(x, y) cpow(x, y)
+#endif
+`,
 	"stdalign.h": ``,
 	"stdarg.h": `#ifndef __CC_STDARG_H
 #define __CC_STDARG_H

@@ -35,6 +35,7 @@ const (
 	kDouble
 	kLDouble
 	kNullptr
+	kComplex // elem: float, double or long double
 	kPtr
 	kArray
 	kStruct // and union: rec.union
@@ -157,8 +158,11 @@ func bitInt(n int64, u bool) *ctype {
 	}
 	return &ctype{kind: kBitInt, n: n}
 }
-func (t *ctype) isFloat() bool  { return t.kind >= kFloat && t.kind <= kLDouble }
-func (t *ctype) isArith() bool  { return t.isInteger() || t.isFloat() }
+func (t *ctype) isFloat() bool { return t.kind >= kFloat && t.kind <= kLDouble }
+func (t *ctype) isArith() bool { return t.isInteger() || t.isFloat() || t.kind == kComplex }
+func (t *ctype) isReal() bool  { return t.isInteger() || t.isFloat() }
+
+func complexOf(t *ctype) *ctype { return &ctype{kind: kComplex, elem: t} }
 func (t *ctype) isPtr() bool    { return t.kind == kPtr }
 func (t *ctype) isScalar() bool { return t.isArith() || t.isPtr() || t.kind == kNullptr }
 func (t *ctype) isRecord() bool { return t.kind == kStruct }
@@ -235,6 +239,8 @@ func (t *ctype) sizeof() int64 {
 	case kLDouble:
 		// x86-64's layout, with a double's value (doc/gd/cc.md).
 		return 16
+	case kComplex:
+		return 2 * t.elem.sizeof()
 	case kBitInt, kUBitInt:
 		switch {
 		case t.n <= 8:
@@ -266,6 +272,8 @@ func (t *ctype) alignof() int64 {
 		a = t.elem.alignof()
 	case kStruct:
 		a = t.rec.align
+	case kComplex:
+		a = t.elem.alignof()
 	case kFunc, kVoid:
 		a = 1
 	default:
@@ -324,6 +332,16 @@ func promote(t *ctype) *ctype {
 
 // usual is the common type of the usual arithmetic conversions.
 func usual(a, b *ctype) *ctype {
+	if a.kind == kComplex || b.kind == kComplex {
+		ra, rb := a, b
+		if a.kind == kComplex {
+			ra = a.elem
+		}
+		if b.kind == kComplex {
+			rb = b.elem
+		}
+		return complexOf(usual(ra, rb))
+	}
 	if a.isFloat() || b.isFloat() {
 		if a.kind == kLDouble || b.kind == kLDouble {
 			return tLDouble
@@ -374,6 +392,8 @@ func compatible(a, b *ctype) bool {
 	switch a.kind {
 	case kBitInt, kUBitInt:
 		return a.n == b.n
+	case kComplex:
+		return a.elem.kind == b.elem.kind
 	case kPtr:
 		return compatible(a.elem, b.elem)
 	case kArray:
@@ -529,6 +549,9 @@ func (t *ctype) String() string {
 	}
 	if t.enum != nil {
 		return q + "enum " + t.enum.tag
+	}
+	if t.kind == kComplex {
+		return q + "_Complex " + t.elem.String()
 	}
 	if t.isBitInt() {
 		u := ""
