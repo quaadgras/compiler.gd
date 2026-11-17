@@ -2226,7 +2226,10 @@ Work list (kept current):
 5. Not done: the struct model with 4-byte words (identities of
    objects need another scheme: a range of addresses above linear
    memory given to an object when its address is taken, say).
-6. Not done: cgo (above).
+6. Not done: cgo (above). C compiled by cmd/cc (cgo off, `doc/gd/cc.md`)
+   has clang's wasm32 data model here: pointers, `long` and `size_t` of 4
+   bytes, so its structs and Go's mirrors of them are laid out as clang
+   lays them out (cc.md, "C on wasm32"; `bench/wasmgc/cclayout`).
 7. Seen, not looked into: `compiled/test.sh` compares with the native
    build, and the native amd64 build of `compiled/tests/goroutines.go`
    prints garbage for a recovered nil dereference in a goroutine, or
