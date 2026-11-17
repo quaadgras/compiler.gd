@@ -123,3 +123,23 @@ func TestInterop(t *testing.T) {
 		}
 	}
 }
+
+// TestInternalC23 checks that only Go that cc generated may import
+// internal/c23.
+func TestInternalC23(t *testing.T) {
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/basic.c", true)
+	if out := goRun(t, dir); !strings.Contains(out, "fib(20) = 6765") {
+		t.Fatalf("generated code did not run:\n%s", out)
+	}
+	user := "package main\n\nimport \"internal/c23\"\n\nvar _ = c23.Malloc\n"
+	if err := os.WriteFile(filepath.Join(dir, "user.go"), []byte(user), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	cmd := testenv.Command(t, testenv.GoToolPath(t), "build", ".")
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "use of internal package internal/c23 not allowed") {
+		t.Fatalf("user code imported internal/c23: err %v\n%s", err, out)
+	}
+}

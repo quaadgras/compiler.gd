@@ -5,7 +5,7 @@
 // Cc translates C to Go in which C's pointers are checked against typed
 // capabilities, so that C shares Go's heap, stack and collector and
 // cannot break what Go relies on (doc/gd/cc.md). The Go it writes
-// imports runtime/c23.
+// imports internal/c23.
 //
 // Usage:
 //
