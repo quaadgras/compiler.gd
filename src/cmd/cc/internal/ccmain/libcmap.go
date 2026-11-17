@@ -155,6 +155,33 @@ var libc = map[string]string{
 	"lroundl": "Lround", "lrintl": "Lrint", "llroundl": "Lround", "llrintl": "Lrint",
 	"ldexpl": "Ldexp", "scalbnl": "Scalbn", "scalblnl": "Scalbln", "frexpl": "Frexp",
 	"modfl": "Modf", "nanl": "Nan",
+
+	// POSIX: stdio.h, stdlib.h, string.h
+	"fileno": "Fileno", "fdopen": "Fdopen",
+	"aligned_alloc": "AlignedAlloc", "posix_memalign": "PosixMemalign", "setenv": "Setenv",
+	"unsetenv": "Unsetenv", "mkstemp": "Mkstemp", "realpath": "Realpath",
+	"stpcpy": "Stpcpy", "stpncpy": "Stpncpy", "strlcpy": "Strlcpy", "strlcat": "Strlcat",
+
+	// unistd.h
+	"read": "Read", "write": "Write", "close": "Close", "lseek": "Lseek", "unlink": "Unlink",
+	"rmdir": "Rmdir", "access": "Access", "getpid": "Getpid", "getppid": "Getppid",
+	"getuid": "Getuid", "geteuid": "Geteuid", "getgid": "Getgid", "getegid": "Getegid",
+	"isatty": "Isatty", "getcwd": "Getcwd", "chdir": "Chdir", "sleep": "Sleep",
+	"usleep": "Usleep", "_exit": "ExitRaw", "dup": "Dup", "dup2": "Dup2", "pipe": "Pipe",
+	"sysconf": "Sysconf", "gethostname": "Gethostname", "getopt": "Getopt",
+	"__cc_optarg": "OptargLoc", "__cc_optind": "OptindLoc", "__cc_opterr": "OpterrLoc",
+	"__cc_optopt": "OptoptLoc",
+
+	// fcntl.h, sys/stat.h, dirent.h, sys/time.h
+	"open": "Open", "creat": "Creat", "fcntl": "Fcntl",
+	"stat": "Stat", "lstat": "Lstat", "fstat": "Fstat", "mkdir": "Mkdir", "chmod": "Chmod",
+	"fchmod": "Fchmod", "umask": "Umask",
+	"opendir": "Opendir", "readdir": "Readdir", "closedir": "Closedir", "rewinddir": "Rewinddir",
+	"gettimeofday": "Gettimeofday",
+
+	// strings.h
+	"strcasecmp": "Strcasecmp", "strncasecmp": "Strncasecmp", "bzero": "Bzero", "bcopy": "Bcopy",
+	"ffs": "Ffs", "ffsl": "Ffsl", "ffsll": "Ffsl", "index": "Strchr", "rindex": "Strrchr",
 }
 
 var (

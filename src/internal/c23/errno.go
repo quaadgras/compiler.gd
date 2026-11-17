@@ -141,9 +141,19 @@ func Strerror(e int32) Ptr {
 	return p
 }
 
+// errnoErr is an error of errno's value e, which setErrnoOf sets.
+type errnoErr int32
+
+func (e errnoErr) Error() string { return strerror(int32(e)) }
+
 // setErrnoOf sets errno to err's: its system error number (a
 // syscall.Errno) if it has one.
 func setErrnoOf(err error) {
+	var en errnoErr
+	if errors.As(err, &en) {
+		SetErrno(int32(en))
+		return
+	}
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		t := reflect.TypeOf(e)
 		if t.PkgPath() == "syscall" && t.Name() == "Errno" && t.Kind() == reflect.Uintptr {

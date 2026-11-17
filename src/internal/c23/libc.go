@@ -613,7 +613,7 @@ func SetErrno(e int32) { Store32(errnoObj, uint32(e)) }
 // flushed first, and a write after reads moves the file back to where C
 // read up to.
 type File struct {
-	f      *os.File
+	fd     int32 // the file descriptor, whose file it reads and writes
 	w      *bufio.Writer
 	r      *bufio.Reader
 	unget  []byte // what ungetc pushed back, the next last
@@ -643,11 +643,12 @@ func fileOf(p Ptr) *File {
 	return f
 }
 
-func newFile(f *os.File, rd, wr bool) Ptr {
+// newFile returns a stream of the file descriptor fd.
+func newFile(fd int32, rd, wr bool) Ptr {
 	p := New[File]()
 	fl := (*File)(p.obj)
-	fl.f = f
-	fl.w = bufio.NewWriter(f)
+	fl.fd = fd
+	fl.w = bufio.NewWriter(fdIO{fl})
 	fl.rd, fl.wr = rd, wr
 	filesMu.Lock()
 	files = append(files, fl)
@@ -658,9 +659,9 @@ func newFile(f *os.File, rd, wr bool) Ptr {
 // Stdio returns stdin (0), stdout (1) or stderr (2).
 func Stdio(n int32) Ptr {
 	stdioOnce.Do(func() {
-		stdio[0] = newFile(os.Stdin, true, false)
-		stdio[1] = newFile(os.Stdout, false, true)
-		stdio[2] = newFile(os.Stderr, false, true)
+		stdio[0] = newFile(0, true, false)
+		stdio[1] = newFile(1, false, true)
+		stdio[2] = newFile(2, false, true)
 		(*File)(stdio[2].obj).unbuf = true
 	})
 	return stdio[n]
@@ -672,7 +673,9 @@ func (f *File) unread() {
 		return
 	}
 	if n := f.r.Buffered() + len(f.unget); n > 0 {
-		f.f.Seek(int64(-n), io.SeekCurrent)
+		if of := f.osFile(); of != nil {
+			of.Seek(int64(-n), io.SeekCurrent)
+		}
 	}
 	f.r, f.unget = nil, nil
 }
@@ -706,7 +709,7 @@ func (f *File) write(b []byte) bool {
 func (f *File) fail(err error) {
 	f.err = true
 	setErrnoOf(err)
-	f.w.Reset(f.f)
+	f.w.Reset(fdIO{f})
 }
 
 func (f *File) flush() int32 {
@@ -808,12 +811,12 @@ func (f *File) readable() bool {
 
 func (f *File) reader() *bufio.Reader {
 	if f.r == nil {
-		if f.f == os.Stdin {
+		if f.fd == 0 {
 			Fflush(Ptr{})
 		} else {
 			f.flush()
 		}
-		f.r = bufio.NewReader(f.f)
+		f.r = bufio.NewReader(fdIO{f})
 	}
 	return f.r
 }
@@ -954,7 +957,7 @@ func Fopen(name, mode Ptr) Ptr {
 		setErrnoOf(err)
 		return Ptr{}
 	}
-	return newFile(f, rd, wr)
+	return newFile(fdNew(f, cflags(flag)), rd, wr)
 }
 
 // Freopen is freopen: it closes the stream's file and opens name in its
@@ -964,13 +967,13 @@ func Freopen(name, mode, p Ptr) Ptr {
 	f := fileOf(p)
 	f.flush()
 	flag, rd, wr, ok := openMode(GoString(mode))
-	path := f.f.Name()
+	var path string
 	if Addr(name) != 0 {
 		path = GoString(name)
+	} else if of := f.osFile(); of != nil {
+		path = of.Name()
 	}
-	if f.f != os.Stdin && f.f != os.Stdout && f.f != os.Stderr {
-		f.f.Close()
-	}
+	fdClose(f.fd)
 	if !ok {
 		SetErrno(EINVAL)
 		f.close()
@@ -982,8 +985,8 @@ func Freopen(name, mode, p Ptr) Ptr {
 		f.close()
 		return Ptr{}
 	}
-	f.f = nf
-	f.w.Reset(nf)
+	fdSet(f.fd, nf, cflags(flag))
+	f.w.Reset(fdIO{f})
 	f.r, f.unget = nil, nil
 	f.eof, f.err = false, false
 	f.rd, f.wr = rd, wr
@@ -1043,7 +1046,7 @@ func Tmpnam(s Ptr) Ptr {
 func Fclose(p Ptr) int32 {
 	f := fileOf(p)
 	r := f.flush()
-	if err := f.f.Close(); err != nil {
+	if err := fdClose(f.fd); err != nil {
 		setErrnoOf(err)
 		r = -1
 	}
@@ -1060,7 +1063,7 @@ func Tmpfile() Ptr {
 		return Ptr{}
 	}
 	os.Remove(f.Name())
-	return newFile(f, true, true)
+	return newFile(fdNew(f, O_RDWR), true, true)
 }
 
 func Fseek(p Ptr, off int64, whence int32) int32 {
@@ -1076,7 +1079,7 @@ func Fseek(p Ptr, off int64, whence int32) int32 {
 		off -= int64(f.r.Buffered() + len(f.unget))
 	}
 	f.r, f.unget = nil, nil
-	if _, err := f.f.Seek(off, int(whence)); err != nil {
+	if _, err := f.seek(off, int(whence)); err != nil {
 		setErrnoOf(err)
 		return -1
 	}
@@ -1086,7 +1089,7 @@ func Fseek(p Ptr, off int64, whence int32) int32 {
 
 func Ftell(p Ptr) int64 {
 	f := fileOf(p)
-	pos, err := f.f.Seek(0, io.SeekCurrent)
+	pos, err := f.seek(0, io.SeekCurrent)
 	if err != nil {
 		setErrnoOf(err)
 		return -1
