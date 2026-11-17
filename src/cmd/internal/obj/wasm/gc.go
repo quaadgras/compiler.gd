@@ -269,13 +269,38 @@ func gcTypeAddr(p *obj.Prog) *obj.LSym {
 	return p.To.Sym
 }
 
+// The comparisons of integers, each with the one that is true when it
+// is not.
+var gcNot = map[obj.As]obj.As{
+	AI32Eq: AI32Ne, AI32Ne: AI32Eq, AI32LtS: AI32GeS, AI32GeS: AI32LtS, AI32LtU: AI32GeU, AI32GeU: AI32LtU,
+	AI32GtS: AI32LeS, AI32LeS: AI32GtS, AI32GtU: AI32LeU, AI32LeU: AI32GtU,
+	AI64Eq: AI64Ne, AI64Ne: AI64Eq, AI64LtS: AI64GeS, AI64GeS: AI64LtS, AI64LtU: AI64GeU, AI64GeU: AI64LtU,
+	AI64GtS: AI64LeS, AI64LeS: AI64GtS, AI64GtU: AI64LeU, AI64LeU: AI64GtU,
+}
+
 // gcPeephole shortens the code of s where the compiler set a variable
 // and read it at once: the value is left on the stack if that is the
 // only place the variable is read (and it is a number: a reference
 // read from a variable has the variable's type, which what follows may
 // count on), and the variable is set as the value passes otherwise
-// (local.tee).
+// (local.tee). And where it negated a comparison of integers, which is
+// another comparison, or narrowed a constant.
 func gcPeephole(s *obj.LSym) {
+	for p := s.Func().Text; p != nil; p = p.Link {
+		q := p.Link
+		if q == nil {
+			break
+		}
+		switch {
+		case q.As == AI32Eqz && gcNot[p.As] != 0:
+			p.As = gcNot[p.As]
+			p.Link = q.Link
+		case p.As == AI64Const && q.As == AI32WrapI64 && p.From.Type == obj.TYPE_CONST && p.From.Sym == nil:
+			p.As = AI32Const
+			p.From.Offset = int64(int32(p.From.Offset))
+			p.Link = q.Link
+		}
+	}
 	fn := s.Func()
 	sig := fn.WasmGC.Sig.Name[len(GCFuncPrefix):]
 	nparam := int64(strings.IndexByte(sig, '.'))

@@ -401,8 +401,8 @@ func (d *gcData) uint(off, size int64) uint64 {
 }
 
 // newObject writes the instructions that push a new object of the Go
-// type typ with the data of d at off. References are left null: see
-// fill.
+// type typ with the data of d at off. References to objects are left
+// null: see fill.
 func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int64) {
 	if n, e, ok := ld.WasmGCArray(l.ctxt, typ); ok {
 		k, isObj := l.elem(e)
@@ -460,7 +460,13 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 		case 'a':
 			l.newObject(w, lf.Type, d, o)
 		case 'r':
-			gcRefNull(w)
+			// (A pointer to linear memory is a constant: it is in
+			// the object as it is made.)
+			if r, ok := d.relocs[o]; ok && l.linear(r.Sym()) {
+				l.ref(w, r)
+			} else {
+				gcRefNull(w)
+			}
 		case 'f':
 			w.WriteByte(0x43)
 			w.Write(d.bytes(o, 4))
@@ -545,7 +551,7 @@ func (l *gcLinker) fill(w *bytes.Buffer, path []byte, typ loader.Sym, d *gcData,
 			gcCast(&p, l.objType(lf.Type))
 			l.fill(w, p.Bytes(), lf.Type, d, o)
 		case 'r':
-			if r, ok := d.relocs[o]; ok {
+			if r, ok := d.relocs[o]; ok && !l.linear(r.Sym()) {
 				w.Write(path)
 				l.ref(w, r)
 				gcStructSet(w, t, field)

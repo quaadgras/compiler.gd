@@ -1337,10 +1337,14 @@ loop:
 		}
 		v = v.Args[0]
 	}
-	i32Const(g.s, int32(off))
-	for _, d := range dyn {
+	if off != 0 || len(dyn) == 0 {
+		i32Const(g.s, int32(off))
+	}
+	for i, d := range dyn {
 		d()
-		g.prog(wasm.AI32Add)
+		if off != 0 || i > 0 {
+			g.prog(wasm.AI32Add)
+		}
 	}
 }
 

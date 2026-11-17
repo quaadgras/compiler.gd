@@ -1353,3 +1353,66 @@ host calls directly (the scheduler, a cleanup) run on its own stack,
 which cannot be left: they are bounded, and use a stack in linear
 memory of their own that fails if it fills.
 
+### Stage 14: smaller code (2026-11-17)
+
+What a general optimizer still finds in the linker's output is a
+measure of what the compiler leaves: binaryen's `wasm-opt -Oz` made
+hello world (without its lines) 435 KB from 529, and no faster (V8's
+optimizing compiler does the same work when the program runs; the
+benchmarks ran the same optimized or not). Its passes, one at a time,
+say where: the locals first. The port is to have no tool to depend on,
+so the compiler does what was worth it:
+
+- **A struct is copied in the object found once.** A value of several
+  scalars was copied scalar by scalar through the two addresses, and
+  the code for each scalar found the object the address is in again:
+  whether the pointer is the array or a box of one, the index, the
+  element, the cast. Fifty bytes a field: three functions that
+  `internal/fmtsort` has of package slices, which move a struct of two
+  `reflect.Value`s (ten scalars), were 48.6 KB, 12% of the code of
+  hello world. `fields` finds each object once, into a local of its
+  type, and copies or zeroes the fields between them (the scalars of a
+  value are fields that follow each other in the struct that holds it);
+  an address that is not what its type says goes to `typedmemmove` or
+  `typedmemclr`. Values with arrays in them, which are objects of
+  their own, are copied as before. −30.9 KB.
+- **A phi has the local of its argument.** The copies into the phis
+  at the end of a block are all read before any is written, so a phi
+  does not conflict with what they read, only with what lives on; the
+  coloring then gives a phi and its argument one local where it can,
+  and no copy. −8.6 KB.
+- **Peepholes**, in the assembler: a local set and read at once is set
+  as the value passes (`local.tee`), or not at all if it is read
+  nowhere else and is a number (−4.2 KB); a comparison of integers that
+  is negated is the opposite comparison, a 64-bit constant that is
+  narrowed is a 32-bit one, and an offset of zero is not added
+  (−3.8 KB).
+- **A pointer to linear memory in a global object** is a constant: it
+  is in the object as `go.initglobals` makes it, not set afterwards
+  through the global (−3.2 KB).
+
+hello world is 534,579 bytes from 585,252 (8.7% less), 478,606 from
+529,239 without the lines (147,232 from 152,589 gzipped: what was
+removed was repetitive); the benchmark program 642,853 from 698,980,
+at the same speed. `wasm-opt -Oz` now finds 15% rather than 18%.
+
+The estimate of the passes was misleading in one way worth knowing:
+binaryen's own reading of the module adds locals (for results that are
+several values), which its passes for locals then remove, so
+`simplify-locals` seemed to find 26 KB where there were 12.
+
+What is left, by what it would take:
+
+- Each access through a pointer has, inline, the case that the pointer
+  is the object its type says, and a call for when it is not (a box,
+  linear memory): about 16 bytes more than the access itself, at some
+  2,500 places, 40 KB. Functions for each field of each type, which
+  the optimizing compiler would inline again, would be smaller, and
+  slower in the baseline compiler a browser starts in.
+- The descriptors of types are 47 KB of the 92 KB of data, with the
+  tables of methods of types that no interface holds (`reflect.Value`
+  and its pointer: 3.7 KB).
+- A cast after `global.get` of an object whose global already has its
+  type (816 of them, 2 KB), and the line noted before each call of a
+  panic of the runtime (825, 4 KB).
+
