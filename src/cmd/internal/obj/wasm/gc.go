@@ -10,6 +10,7 @@ import (
 	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"slices"
+	"strings"
 )
 
 // With GOWASM=gc, Go objects are WebAssembly structs and arrays in the
@@ -268,6 +269,48 @@ func gcTypeAddr(p *obj.Prog) *obj.LSym {
 	return p.To.Sym
 }
 
+// gcPeephole shortens the code of s where the compiler set a variable
+// and read it at once: the value is left on the stack if that is the
+// only place the variable is read (and it is a number: a reference
+// read from a variable has the variable's type, which what follows may
+// count on), and the variable is set as the value passes otherwise
+// (local.tee).
+func gcPeephole(s *obj.LSym) {
+	fn := s.Func()
+	sig := fn.WasmGC.Sig.Name[len(GCFuncPrefix):]
+	nparam := int64(strings.IndexByte(sig, '.'))
+	number := func(n int64) bool {
+		if n < nparam {
+			return sig[n] != 'r'
+		}
+		switch fn.WasmGC.Locals[n-nparam] {
+		case GCTypeI32, GCTypeI64, GCTypeF32, GCTypeF64:
+			return true
+		}
+		return false
+	}
+	gets := make(map[int64]int)
+	for p := fn.Text; p != nil; p = p.Link {
+		if p.As == ALocalGet {
+			gets[p.From.Offset]++
+		}
+	}
+	var prev *obj.Prog
+	for p := fn.Text; p != nil; prev, p = p, p.Link {
+		q := p.Link
+		if p.As != ALocalSet || q == nil || q.As != ALocalGet || p.From.Offset != q.From.Offset {
+			continue
+		}
+		if n := p.From.Offset; gets[n] == 1 && number(n) && prev != nil {
+			prev.Link = q.Link
+			p = prev
+		} else {
+			p.As = ALocalTee
+			p.Link = q.Link
+		}
+	}
+}
+
 // preprocessGC prepares a function compiled with GOWASM=gc. Such a
 // function has no frame in linear memory and is never re-entered, so
 // all there is to do is to resolve its branches.
@@ -324,6 +367,7 @@ func preprocessGC(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		p.As = obj.AUNDEF
 		return
 	}
+	gcPeephole(s)
 	depth := 0
 	depths := make(map[*obj.Prog]int)
 	for p := s.Func().Text; p != nil; p = p.Link {

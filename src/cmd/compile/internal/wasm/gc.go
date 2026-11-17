@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 )
 
@@ -3866,6 +3867,11 @@ func (g *gcGen) blockEnd(b *ssa.Block) {
 			phis = append(phis, v)
 		}
 	}
+	// (A phi that has the local of its argument is set already.)
+	phis = slices.DeleteFunc(phis, func(v *ssa.Value) bool {
+		a := v.Args[e.Index()]
+		return g.loc[a.ID] == g.loc[v.ID] && !a.OnWasmStack && !g.remat[a.ID] && g.wtype(a.Type) == g.wtype(v.Type)
+	})
 	// The copies are parallel: push every source, then pop.
 	for _, v := range phis {
 		a := v.Args[e.Index()]
@@ -4027,6 +4033,9 @@ func (g *gcGen) colorLocals() {
 		conflict[x][y] = true
 		conflict[y][x] = true
 	}
+	// partners are the phis and their arguments: they are given the
+	// same local where they can be.
+	partners := make(map[ssa.ID][]ssa.ID)
 	var order []*ssa.Value
 	for _, b := range f.Blocks {
 		live := make(set, len(liveOut[b.ID]))
@@ -4034,14 +4043,23 @@ func (g *gcGen) colorLocals() {
 			live[id] = true
 		}
 		// A phi's local is set at the end of each predecessor,
-		// while what is live out of it is.
+		// while what is live out of it is. (Not what the copies into
+		// the phis read: they are all read before any phi is set, see
+		// blockEnd. A phi can then have the local of its argument,
+		// and no copy.)
 		if len(b.Succs) == 1 {
 			for _, v := range b.Succs[0].Block().Values {
 				if v.Op == ssa.OpPhi && isVar(v) {
 					for id := range live {
 						add(v.ID, id)
 					}
-					endReads(b, func(a *ssa.Value) { add(v.ID, a.ID) })
+					for _, c := range b.ControlValues() {
+						reads(c, func(a *ssa.Value) { add(v.ID, a.ID) })
+					}
+					if a := v.Args[b.Succs[0].Index()]; isVar(a) && g.wtype(a.Type) == g.wtype(v.Type) {
+						partners[v.ID] = append(partners[v.ID], a.ID)
+						partners[a.ID] = append(partners[a.ID], v.ID)
+					}
 				}
 			}
 		}
@@ -4108,10 +4126,18 @@ func (g *gcGen) colorLocals() {
 			}
 		}
 		l := int32(-1)
+		for _, id := range partners[v.ID] {
+			if pl := g.loc[id]; pl >= 0 && !used[pl] && slices.Contains(slots[k], pl) {
+				l = pl
+				break
+			}
+		}
 		for _, s := range slots[k] {
+			if l >= 0 {
+				break
+			}
 			if !used[s] {
 				l = s
-				break
 			}
 		}
 		if l < 0 {
