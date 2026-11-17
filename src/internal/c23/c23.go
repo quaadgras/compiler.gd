@@ -88,6 +88,26 @@ type Fault struct {
 
 func (f *Fault) Error() string { return fmt.Sprintf("c23: %s (address %#x)", f.Msg, f.Addr) }
 
+// A boundsFault is an access check's Fault, its message made when it is
+// read, so that check stays small enough to inline.
+//
+// It holds no pointer, so that the Ptr it describes does not escape.
+type boundsFault struct {
+	obj, size, ti, n uintptr
+	off              int
+}
+
+func (b boundsFault) Error() string { return b.fault().Error() }
+
+func (b boundsFault) fault() *Fault {
+	addr := b.obj + uintptr(b.off)
+	if b.obj == 0 {
+		return &Fault{"access through a pointer with no capability", addr}
+	}
+	ti := (*tinfoTab.Load())[b.ti>>1]
+	return &Fault{fmt.Sprintf("access of %d bytes out of bounds of %s", b.n, capString(true, ti, b.size, b.off)), addr}
+}
+
 func fault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
 
 // Addr returns the address p holds.
@@ -295,6 +315,9 @@ type auxTable struct {
 	mu    sync.Mutex
 	m     map[uintptr]auxEntry
 	dense []auxEntry // C's object's: by offset/8, valid if ok
+	// seq is odd while dense is being written: a reader reads without
+	// the lock, and again if seq changed (a seqlock).
+	seq atomic.Uint64
 }
 
 type auxEntry struct {
@@ -304,15 +327,24 @@ type auxEntry struct {
 }
 
 func (t *auxTable) get(key uintptr) (auxEntry, bool) {
-	t.mu.Lock()
-	var e auxEntry
 	if t.dense != nil {
-		if i := key / 8; i < uintptr(len(t.dense)) {
-			e = t.dense[i]
+		i := key / 8
+		if i >= uintptr(len(t.dense)) {
+			return auxEntry{}, false
 		}
-	} else {
-		e = t.m[key]
+		for {
+			s := t.seq.Load()
+			if s&1 != 0 {
+				continue
+			}
+			e := t.dense[i]
+			if t.seq.Load() == s {
+				return e, e.ok
+			}
+		}
 	}
+	t.mu.Lock()
+	e := t.m[key]
 	t.mu.Unlock()
 	return e, e.ok
 }
@@ -329,14 +361,24 @@ func (h *header) table(create bool) *auxTable {
 }
 
 func check(p Ptr, n uintptr) unsafe.Pointer {
+	// A pointer with no capability has size 0; a negative offset is
+	// past any size.
+	if off := uintptr(p.off); off > p.size || n > p.size-off {
+		panic(boundsFault{uintptr(p.obj), p.size, p.ti, n, p.off})
+	}
+	return unsafe.Add(p.obj, p.off)
+}
+
+// checkFail faults for an access check refuses: apart, so that check
+// is small enough to inline.
+//
+//go:noinline
+func checkFail(p Ptr, n uintptr) {
 	if p.obj == nil {
 		fault("access through a pointer with no capability", Addr(p))
 	}
-	if p.off < 0 || uintptr(p.off)+n > p.size {
-		ti, size, off := p.info(), p.size, p.off
-		fault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
-	}
-	return unsafe.Add(p.obj, p.off)
+	ti, size, off := p.info(), p.size, p.off
+	fault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
 }
 
 func checkPtrWord(p Ptr) unsafe.Pointer {
@@ -351,10 +393,14 @@ func checkPtrWord(p Ptr) unsafe.Pointer {
 // checkScalar checks a store of n bytes at p.
 func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 	a := check(p, n)
-	ti := p.info()
-	if ti.scalarOnly {
+	if (*tinfoTab.Load())[p.ti>>1].scalarOnly {
 		return a
 	}
+	return checkScalarWords(p, n, a)
+}
+
+func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
+	ti := p.info()
 	end := uintptr(p.off) + n
 	for b := uintptr(p.off); b < end; b = (b + 8) &^ 7 {
 		switch ti.kindAt(b) {
