@@ -1416,3 +1416,74 @@ What is left, by what it would take:
   type (816 of them, 2 KB), and the line noted before each call of a
   panic of the runtime (825, 4 KB).
 
+### Stage 15: the bytes in linear memory, the pointers in an array (decided 2026-11-17)
+
+What the code of a program is made of, after stage 14: for the 323
+functions that hello world and its amd64 build have in common, the
+WebAssembly is 1.59 times the machine code (224 KB against 140). The
+model is why. A pointer may be an object, a box of one and an offset,
+an address in linear memory or a constant, so each access has the case
+the compiler expects and a call of the runtime for the others (2,568 of
+them), a cast where the type is not known (4,600), and each layout of a
+struct has its part of five functions the linker generates and a table
+(600 bytes a layout: 678 KB of the 13.9 MB of code of the tests of
+net/http, which have 848). Two ways to less of it were tried and did
+not go far: leaving out the second case where the whole program shows
+there is no pointer into an object of the type (12 KB of hello world,
+and five packages of std trapped: the rules for what a pointer may be
+are many), and sharing the generated functions between layouts that
+begin alike (1 to 2%).
+
+The other way is a model in which a pointer is one thing. Decided, with
+the allocation it costs accepted (the fork avoids allocating: that is
+what it is for):
+
+- **The bytes of every value are in linear memory**, laid out as Go
+  lays them out, the words of pointers included: they hold the address
+  of what is pointed to, as an integer. A struct is copied with
+  `memory.copy`, compared and hashed as bytes, and `unsafe` sees what it
+  sees elsewhere.
+- **An allocation that has pointers also has one array**, a WebAssembly
+  GC array of references, with the pointers of the value in order: the
+  first pointer word is element 0, whatever its offset. The engine's
+  collector follows those; the integers in memory are for the program.
+  The array of a block (of no elements, if the value has no pointers) is
+  what the block is freed by: the host calls the runtime when it is
+  collected (FinalizationRegistry).
+- **A pointer is one kind of object**: the address, the array, and the
+  index in the array of the first pointer of what is pointed to. A
+  pointer into the middle of a value has the same array and another
+  index; one to a variable on the stack has the array of the frame, one
+  to a variable of the program the array of them all, and one to data
+  that has none (a string's bytes, the descriptor of a type) no array.
+- A scalar is read by the address: `struct.get` and a load. A pointer is
+  read from the array, at the index plus the number of the pointer in
+  the type, which the compiler knows; and written there and, as its
+  address, in memory.
+
+There are then two WebAssembly types for all the values of Go, no
+functions by layout, no tables, no casts and no second case. What it
+costs:
+
+- An allocation is a block of linear memory, an array and the
+  registration of the array with the host: measured, 300 to 380 ns for
+  a slice of 24 bytes (which is made this way now) against 14 to 20 for
+  an object, and the host's call when it is collected is as much again.
+- The engine does not see the memory of the blocks, and they are freed
+  only when the program is not running: a loop that allocates grows
+  linear memory until it parks.
+- A pointer is followed in two reads, the pointer and the array.
+- Data that the linker lays out and that is not a variable (the
+  descriptors of types, the tables of interfaces) has no array: a
+  pointer read from it is made from the integer.
+
+Counting what would go from hello world as it is (the second cases, the
+casts, the functions by layout and their tables, the code that sets a
+local of a type): about 100 KB of 534. An estimate: nothing is built.
+
+It is built next to the present model, behind `GOWASM=gc,split`, until
+it passes the suites: the scheduler, the stacks, deferred calls, the
+hosts and the tests carry over; the compiler's code for memory, the
+linker's objects and helpers, and the runtime's memory (allocation,
+slices, maps, strings, reflection) are what change.
+
