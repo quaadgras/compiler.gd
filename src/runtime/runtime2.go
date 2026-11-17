@@ -617,6 +617,11 @@ type g struct {
 	// valgrindStackID is used to track what memory is used for stacks when a program is
 	// built with the "valgrind" build tag, otherwise it is unused.
 	valgrindStackID uintptr
+
+	// c23 is runtime/c23's side table of the capabilities that C stored
+	// in this goroutine's stack and that its words cannot carry
+	// (doc/gd/cc.md). copystack re-keys it through c23StackMove.
+	c23 unsafe.Pointer
 }
 
 // gTrackingPeriod is the number of transitions out of _Grunning between

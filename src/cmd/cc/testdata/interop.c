@@ -115,3 +115,8 @@ int locals(void) {
 	swap_ints(&x, &y);
 	return x * 100 + y * 10 + a.v;
 }
+
+// A slice's whole array, kept in an int* field.
+void keep_array(struct holder *h, int a[]) { h->random_int = a; }
+
+int at(struct holder *h, int i) { return h->random_int[i]; }

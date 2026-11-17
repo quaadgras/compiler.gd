@@ -97,6 +97,20 @@ func runTool(ctx context.Context, cmd *base.Command, args []string) {
 	}
 	toolName := args[0]
 
+	if run, ok := inProcessTools[toolName]; ok {
+		counter.Inc("go/subcommand:tool-" + toolName)
+		if toolN {
+			fmt.Printf("go tool %s %s\n", toolName, strings.Join(args[1:], " "))
+			return
+		}
+		status, err := run(args[1:], os.Stdout, os.Stderr)
+		if err != nil {
+			base.Fatalf("go tool %s: %v", toolName, err)
+		}
+		base.SetExitStatus(status)
+		return
+	}
+
 	toolPath, err := base.ToolPath(toolName)
 	if err != nil {
 		if toolName == "dist" && len(args) > 1 && args[1] == "list" {
@@ -157,6 +171,12 @@ func listTools(ld *modload.Loader, ctx context.Context) {
 		fmt.Fprintf(os.Stderr, "go: can't read tool directory: %s\n", err)
 		base.SetExitStatus(2)
 		return
+	}
+
+	for name := range inProcessTools {
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
 	}
 
 	ambiguous := make(map[string]bool) // names that can't be used as aliases because they are ambiguous

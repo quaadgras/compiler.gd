@@ -7,7 +7,9 @@ not of the compiler: it emits Go source that the existing toolchain
 compiles. The generated Go imports `runtime/c23`, the run-time support.
 Like the fork's other tools, cc is an importable package: `cmd/cc/host`
 runs it in-process (`Run`, `Translate`), and the logic is in
-`cmd/cc/internal/ccmain`, with no package-level state.
+`cmd/cc/internal/ccmain`, with no package-level state. It is part of the
+go binary: `go tool cc` runs it in-process, with no binary in the tool
+directory.
 
 ## What Go may rely on, with no checks
 
@@ -54,13 +56,21 @@ capability is kept in a side table, so C can still use it as what it is.
   memory says it points to: a `*T` field gives one `T`. Go's own
   invariant makes that exact.
 - *A capability a word cannot give back* (a slice's array stored in an
-  `int *`, an out-of-bounds pointer) is kept, if the word is in C's
-  object, in that object's side table: made when first needed, reached
-  from the header, keyed by the word's offset, so that it moves with the
-  object (on the stack too) and dies with it. It is found again only while
-  the word is unchanged. Go's memory has no table: there such a
-  capability is always dropped, and C gets back what the word's type
-  gives (or nothing, for an out-of-bounds word).
+  `int *`, an out-of-bounds pointer) is kept in a side table, wherever
+  the word is, so a pointer C stores anywhere comes back with the
+  capability it had. An entry is used only while its word still holds
+  what was stored with it, so a stale entry can only give back a
+  capability C once had for that exact word. The tables
+  (`runtime/c23/side.go`):
+  - *in C's object*: in its header, by the word's offset, so it moves
+    with the object (on the stack too) and dies with it;
+  - *in a goroutine's stack*: in the goroutine (`g.c23`), by address.
+    `copystack` re-keys it when the stack moves (every address shifts by
+    the same delta), entries of returned frames are dropped as new ones
+    are made, and `gdestroy` drops the table;
+  - *in Go's heap*: by the object, removed by a cleanup when the object
+    dies;
+  - *in Go's globals*: by address.
 
 **Stores keep Go's invariant**, and each decides from its own operands
 only, so no check races with another thread:
@@ -96,17 +106,20 @@ C's locals: 213
 allocations per call: sumPair 0 locals 0
 30 C reads arr[2] of Go's slice                 ok
 C reads arr[3] of Go's slice                 trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 12}
-word C stored past the end: 0x8019c3ad208028
+word C stored past the end: 0x8021fa44fa0148
 Go dereferences it                           trapped: runtime error: invalid memory address or nil pointer dereference
 30 C brings it back in bounds (arr[2])          ok
 C dereferences it out of bounds              trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 24}
-...stored in Go's object instead             trapped: c23: access through a pointer with no capability
+30 ...stored in Go's heap object instead        ok
+30 ...stored in Go's stack, which then moves    ok
+30 C keeps a slice's array in Go's int* field   ok
+...and indexes past it                       trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 12}
 60 C one-based indexing                         ok
 C writes an integer over a pointer word      trapped: c23: scalar store over a pointer word
 C dereferences an integer                    trapped: c23: access through a pointer with no capability
 C hides a pointer in bytes                   trapped: c23: pointer store into a word the collector does not scan
 C puns a pointer word of a stack local       trapped: c23: scalar store over a pointer word
-int* stored in a struct node* field: 0x8019c3ad208060
+int* stored in a struct node* field: 0x8021fa44fa01a0
 Go follows it                                trapped: runtime error: invalid memory address or nil pointer dereference
 42 C uses it as the int it is                   ok
 C writes a plain field of a Go value         ok
@@ -134,8 +147,9 @@ and Go's stack values point to into the heap.
   s390x and amd64's LAM treat it differently. The tag should be a hook per
   architecture, with a reserved unmapped region where no faulting bit
   exists.
-- **The side table** is a map under a mutex per object; an array of
-  capabilities per word would be faster.
+- **The side tables** are maps under a mutex (a list, for a stack); an
+  array of capabilities per word would be faster. Each pointer load from
+  Go's memory looks for a table.
 - **Unions and untyped memory** (Godot's `Variant`, placement `new` in a
   byte pool) are not supported: every word is statically a pointer or
   not. The plan is the `GOWASM=gc,split` rule on native: such words are

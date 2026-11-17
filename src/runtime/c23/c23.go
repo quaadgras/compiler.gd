@@ -270,12 +270,17 @@ func ToGoUnsafe(p Ptr) unsafe.Pointer {
 	return w
 }
 
-// The capabilities that the words of C's object do not give back by
-// themselves: tagged words, and capabilities wider than the word's type (a
-// slice's array stored in an int*), by the offset of the word. A table
-// belongs to its object, moves with it (on the stack too) and dies with
-// it. Go's memory has none: a capability its word cannot carry is dropped
-// there, always, and C gets back only what the word's type gives.
+// The capabilities that words do not give back by themselves: tagged
+// words, and capabilities wider than the word's type (a slice's array
+// stored in an int*). An entry is used only while its word still holds
+// what was stored with it; a stale one can only give back a capability C
+// once had for that exact word. Where the table is (side.go):
+//
+//   - in C's object: in its header, by the word's offset;
+//   - in a goroutine's stack: in the goroutine, by address, re-keyed by
+//     the runtime when the stack moves;
+//   - in Go's heap: by the object, removed when the object dies;
+//   - in Go's globals: by address.
 type auxTable struct {
 	mu sync.Mutex
 	m  map[uintptr]auxEntry
@@ -342,18 +347,11 @@ func LoadPtr(p Ptr) Ptr {
 		return FromInt(*(*uintptr)(a))
 	}
 	w := *(*unsafe.Pointer)(a)
-	if h := p.header(); h != nil {
-		if t := h.table(false); t != nil {
-			t.mu.Lock()
-			e, ok := t.m[uintptr(p.off)]
-			t.mu.Unlock()
-			if ok && e.word == uintptr(w) {
-				return e.p
-			}
-		}
+	if c, ok := auxLoad(p, a, uintptr(w)); ok {
+		return c
 	}
 	if uintptr(w)&Tag != 0 {
-		// Copied or written by Go: the capability is lost.
+		// Copied by Go, or a stale word: the capability is lost.
 		return FromInt(uintptr(w) &^ Tag)
 	}
 	return derive(w, p.info().elemAt(uintptr(p.off)))
@@ -376,17 +374,7 @@ func StorePtr(p, v Ptr) {
 		d := derive(w, want)
 		keep = d.obj == nil || Addr(Ptr{obj: d.obj}) != Addr(Ptr{obj: v.obj}) || d.size != v.size || d.ti != v.ti
 	}
-	if h := p.header(); h != nil {
-		if t := h.table(keep); t != nil {
-			t.mu.Lock()
-			if keep {
-				t.m[uintptr(p.off)] = auxEntry{uintptr(w), v}
-			} else {
-				delete(t.m, uintptr(p.off))
-			}
-			t.mu.Unlock()
-		}
-	}
+	auxStore(p, a, keep, uintptr(w), v)
 	*(*unsafe.Pointer)(a) = w // with the write barrier
 }
 

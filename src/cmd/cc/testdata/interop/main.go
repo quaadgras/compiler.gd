@@ -81,7 +81,12 @@ func main() {
 	try("C dereferences it out of bounds", func() { C_load_back(h, 0) })
 	gh := &struct_holder{}
 	C_store_past(gh, arr, 3)
-	try("...stored in Go's object instead", func() { C_load_back(gh, 4) })
+	try("...stored in Go's heap object instead", func() { fmt.Print(C_load_back(gh, 4), " ") })
+	try("...stored in Go's stack, which then moves", func() { fmt.Print(stackRoundTrip(arr), " ") })
+	ga := &struct_holder{}
+	C_keep_array(ga, arr)
+	try("C keeps a slice's array in Go's int* field", func() { fmt.Print(C_at(ga, 2), " ") })
+	try("...and indexes past it", func() { C_at(ga, 3) })
 	try("C one-based indexing", func() { fmt.Print(C_one_based_sum(arr, 3), " ") })
 	try("C writes an integer over a pointer word", func() { C_pun(h) })
 	try("C dereferences an integer", func() { C_forge(int64(uintptr(unsafe.Pointer(&arr[0])))) })
@@ -111,4 +116,29 @@ func sumPair() int64 {
 	b := struct_node{v: 2}
 	a := struct_node{v: 1, next: &b}
 	return C_sum_pair(&a)
+}
+
+// stackRoundTrip has C store an out-of-bounds pointer into a holder on
+// this goroutine's stack, moves the stack, and has C bring it back.
+//
+//go:noinline
+func stackRoundTrip(arr []int32) int32 {
+	var h struct_holder
+	C_store_past(&h, arr, 3)
+	before := uintptr(unsafe.Pointer(&h))
+	grow(2000)
+	if uintptr(unsafe.Pointer(&h)) == before {
+		panic("the stack did not move")
+	}
+	return C_load_back(&h, 4)
+}
+
+//go:noinline
+func grow(n int) int {
+	var buf [512]byte
+	buf[n%512] = byte(n)
+	if n == 0 {
+		return int(buf[0])
+	}
+	return grow(n-1) + int(buf[n%512])
 }

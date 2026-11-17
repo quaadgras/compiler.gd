@@ -6,7 +6,7 @@ package runtime
 
 import (
 	"internal/runtime/gc"
-	_ "unsafe"
+	"unsafe"
 )
 
 // Hooks for C compiled with derived capabilities (doc/gd/cc.md).
@@ -37,3 +37,25 @@ func c23Object(p uintptr) (base, size uintptr) {
 	}
 	return base, size
 }
+
+// c23Stack returns the bounds of the calling goroutine's stack.
+//
+//go:linkname c23Stack
+func c23Stack() (lo, hi uintptr) {
+	gp := getg()
+	return gp.stack.lo, gp.stack.hi
+}
+
+// c23GTable returns the calling goroutine's side table slot.
+//
+//go:linkname c23GTable
+func c23GTable() *unsafe.Pointer { return &getg().c23 }
+
+// c23StackMove re-keys a goroutine's side table when copystack moves its
+// stack: every address in [lo, hi) moves by delta. It runs on the system
+// stack with the goroutine stopped, and must not allocate or write
+// pointers.
+var c23StackMove func(t unsafe.Pointer, lo, hi, delta uintptr)
+
+//go:linkname c23SetStackMove
+func c23SetStackMove(f func(t unsafe.Pointer, lo, hi, delta uintptr)) { c23StackMove = f }
