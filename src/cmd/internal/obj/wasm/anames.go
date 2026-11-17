@@ -515,6 +515,7 @@ var Anames = []string{
 	"BrOnCast",
 	"BrOnCastFail",
 	"TypeConst",
+	"LinePlace",
 	"RefBlock",
 	"RefSelect",
 	"BrOnNonNull",
