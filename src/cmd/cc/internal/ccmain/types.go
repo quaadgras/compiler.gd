@@ -154,11 +154,11 @@ func bitInt(n int64, u bool) *ctype {
 	}
 	return &ctype{kind: kBitInt, n: n}
 }
-func (t *ctype) isFloat() bool   { return t.kind >= kFloat && t.kind <= kLDouble }
-func (t *ctype) isArith() bool   { return t.isInteger() || t.isFloat() }
-func (t *ctype) isPtr() bool     { return t.kind == kPtr }
-func (t *ctype) isScalar() bool  { return t.isArith() || t.isPtr() || t.kind == kNullptr }
-func (t *ctype) isRecord() bool  { return t.kind == kStruct }
+func (t *ctype) isFloat() bool  { return t.kind >= kFloat && t.kind <= kLDouble }
+func (t *ctype) isArith() bool  { return t.isInteger() || t.isFloat() }
+func (t *ctype) isPtr() bool    { return t.kind == kPtr }
+func (t *ctype) isScalar() bool { return t.isArith() || t.isPtr() || t.kind == kNullptr }
+func (t *ctype) isRecord() bool { return t.kind == kStruct }
 func (t *ctype) isAggregate() bool {
 	return t.kind == kArray || t.kind == kStruct
 }
