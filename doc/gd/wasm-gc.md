@@ -1274,3 +1274,82 @@ Emscripten's `FS` (nanoseconds in `memFS()`, though IndexedDB keeps
 milliseconds); links are not kept in IndexedDB (IDBFS fails on them;
 `persist` leaves them out).
 
+### Stage 13: a goroutine's stack grows (2026-11-17)
+
+The frames of a goroutine are frames of the engine, on a stack the host
+makes for it (JSPI), and the engine's stacks do not grow: 8 MB under
+node by a flag, about 1 MB in a browser, where recursion a few thousand
+deep ended the program (stage 11) and the packages that recurse on
+their input had been given lower limits for it. Now a goroutine goes on
+on another stack when one is nearly full, as Go's first stacks did in
+segments:
+
+- The stack in linear memory was already in segments of 64 KB, with a
+  check in every function that has a frame there (every function that
+  calls others): `fp < StackLo`. The frame is now at least an eighth
+  (`wasm.GCStackRatio`) of what the function may take of the engine's
+  stack, which the compiler estimates as a slot for each parameter and
+  variable, which is what V8's baseline compiler gives them, and 128
+  bytes (`padFrame`). The engine's stack cannot be measured, but this
+  one can: a segment that is not full is a stack of the engine's that
+  has used less than 512 KB.
+- A function that finds the segment full used to take a new one and
+  run on, on the same engine stack. It now calls
+  `runtime.morestackgc`, which makes the segment and leaves the top of
+  the stack there, and then calls *itself*, with its own arguments,
+  through an import: `wasm.hop`. The host starts the function on a new
+  stack of the engine's (`WebAssembly.promising`), from a microtask,
+  and the stack that called is suspended until it returns
+  (`WebAssembly.Suspending`), exactly as when a goroutine parks; then
+  `runtime.lessstackgc` frees the segment and the function returns what
+  the call returned. A panic comes back through the import as the
+  exception it is.
+- The import has the type of the function, plus the function itself as
+  a func value (the host finds it in the table, now exported): the
+  linker makes one import for each type of function that needs it, 137
+  in hello world, all of them the one JavaScript function of ten
+  lines, which does not look at the arguments it passes on.
+
+What it costs: nothing where it does not happen (the check was there;
+the code of a function is a few bytes shorter, as it no longer tests
+at each return whether it took a segment). hello world is 585,252
+bytes, from 585,512 (the imports and their types are 2.4 KB, the code
+2.7 KB less); 529,239 from 527,801 without the lines. The benchmarks
+do not move. A change of stack is 2 to 4 µs: the worst case is a call
+in a loop that needs one every time, because the loop runs where a
+segment is nearly full and the function called has a large frame in
+linear memory (a 16 KB array: 2 µs a call instead of 0.15).
+
+What it gives: recursion a million deep in node, Chromium 155 and
+Firefox 160, on the main goroutine or another, through interfaces,
+closures and deferred calls, with a recover at the top; and with the
+engine's stacks at half a browser's size, under either of V8's
+compilers (`GOWASMGC_V8FLAGS='--wasm-stack-switching-stack-size=492
+--liftoff --liftoff-only'`; at a quarter the larger functions overflow,
+so the estimate has a factor of two to spare in V8). node no longer
+sets the size of the stacks: it runs with a browser's. Recursion
+without end is Go's `goroutine stack exceeds 1000000000-byte limit`,
+`fatal error: stack overflow`, after a second: the segments of one
+goroutine are limited to 128 MB, which is 1 GB of the engine's.
+
+In Chromium the tests that overflowed pass: 946 of the 947 tests of
+the language and 248 of the 255 packages of the library, and what is
+left is what stage 11 found a page cannot ask for, a collection
+(`init1.go`; `crypto/internal/fips140cache`, `crypto/tls`, `io`,
+`reflect`, `sync`, `unique`, `weak`). Under node all of both pass, as
+before.
+
+The limits are Go's again: `encoding/asn1`, `encoding/xml`,
+`io/fs.Glob` and `encoding/json/jsontext` bound their recursion as
+they do for any wasm, not lower.
+
+Not done: under node, `runtime.Callers`, and so a traceback, has the
+frames of the engine's stack it is on, not those of the stacks before
+it: 100,000 calls deep it returned 164 frames (Go prints a hundred of
+a traceback). Chromium's engine follows the stacks back, as it does
+calls that await, and returned all 100,070. The estimate is of V8's frames: other
+engines were only tried (Firefox), not measured. And the functions the
+host calls directly (the scheduler, a cleanup) run on its own stack,
+which cannot be left: they are bounded, and use a stack in linear
+memory of their own that fails if it fills.
+

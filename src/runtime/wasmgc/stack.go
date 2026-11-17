@@ -29,14 +29,24 @@ package runtime
 const (
 	stackRedZone  = 4 << 10 // cmd/internal/obj/wasm.GCStackRedZone
 	stackSegSize  = 64 << 10
-	stackMaxTotal = 1 << 30 // as the 1 GB of a goroutine's stack elsewhere
+	// A goroutine's stack elsewhere is at most 1 GB. Here that is what
+	// the engine's stacks may take: wasm.GCStackRatio times as much as
+	// the segments, which are what is counted.
+	stackMaxTotal = 128 << 20
 )
 
 type stackSeg struct {
 	base, size uintptr
-	lo         uintptr // the limit to go back to
+	lo, sp     uintptr // the limit and the top of the stack to go back to
 	prev       *stackSeg
 }
+
+// lincallersp returns where the stack in linear memory was when the
+// function that calls it was called, and linsetcallersp sets where it
+// is to be when that function returns. The compiler replaces calls to
+// them.
+func lincallersp() uintptr
+func linsetcallersp(sp uintptr)
 
 // linsetsplim and linsplim set and return the limit of the stack. The
 // compiler replaces calls to them.
@@ -44,11 +54,12 @@ func linsetsplim(lo uintptr)
 func linsplim() uintptr
 
 // morestackgc makes a segment for the frame of n bytes of the function
-// that calls it, and returns the top of it: the function then calls
-// itself on a new stack of the engine's, where its frame is there.
+// that calls it, and leaves the top of the stack at the top of it: the
+// function then calls itself on a new stack of the engine's, where its
+// frame is there.
 //
 //go:nosplit
-func morestackgc(n uintptr) uintptr {
+func morestackgc(n uintptr) {
 	lo := linsplim()
 	linsetsplim(0) // no checks while this runs, in the red zone
 	if onSysStack {
@@ -61,7 +72,7 @@ func morestackgc(n uintptr) uintptr {
 	}
 	gp.stackTotal += size
 	if gp.stackTotal > stackMaxTotal {
-		printstring("runtime: goroutine stack exceeds 1000000000-byte limit\n")
+		printstring("runtime: goroutine stack exceeds 1000000000-byte limit\n") // (of the engine's stack)
 		fatal("stack overflow")
 	}
 	seg := gp.spareSeg
@@ -72,10 +83,11 @@ func morestackgc(n uintptr) uintptr {
 	}
 	seg.prev = gp.segs
 	seg.lo = lo
+	seg.sp = lincallersp()
 	gp.segs = seg
 	gp.stacklo = seg.base + stackRedZone
 	linsetsplim(gp.stacklo)
-	return seg.base + seg.size
+	linsetcallersp(seg.base + seg.size)
 }
 
 // lessstackgc is called by the function that called morestackgc when
@@ -94,6 +106,7 @@ func lessstackgc() {
 		linfree(seg.base)
 	}
 	linsetsplim(gp.stacklo)
+	linsetcallersp(seg.sp)
 }
 
 // stackunwindgc is called by a function that a recovered panic returns

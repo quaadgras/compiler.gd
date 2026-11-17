@@ -1,9 +1,8 @@
 # go test -short -timeout 120s, GOOS=wasip1 GOARCH=wasm GOWASM=gc GOWASIRUNTIME=chromium
 # (Chromium 155, headless, with no flags of the engine), every package of `go list std`
-# but cmd/... (survey.py). The failures are of two kinds: recursion deeper than the
-# engine's stack, which a page cannot make larger (fatal error: stack overflow), and
-# tests that an object is collected after runtime.GC, which only yields in a browser
-# (they pass with GOWASIRUNTIMEARGS=--js-flags=--expose-gc,--no-liftoff).
+# but cmd/... (survey.py). The failures are tests that an object is collected after
+# runtime.GC, which only yields in a browser (they pass with
+# GOWASIRUNTIMEARGS=--js-flags=--expose-gc,--no-liftoff).
 # ok | FAIL reason | BUILD reason | SKIP reason
 archive/tar ok
 archive/zip ok
@@ -122,20 +121,20 @@ encoding/binary ok
 encoding/csv ok
 encoding/gob ok
 encoding/hex ok
-encoding/json FAIL fatal error: stack overflow
+encoding/json ok
 encoding/json/internal SKIP no test files
 encoding/json/internal/jsonflags ok
 encoding/json/internal/jsonopts ok
 encoding/json/internal/jsontest SKIP no test files
 encoding/json/internal/jsonwire ok
-encoding/json/jsontext FAIL fatal error: stack overflow
+encoding/json/jsontext ok
 encoding/json/v2 ok
 encoding/pem ok
-encoding/xml FAIL fatal error: stack overflow
+encoding/xml ok
 errors ok
 expvar ok
 flag ok
-fmt FAIL fatal error: stack overflow
+fmt ok
 go/ast ok
 go/build ok
 go/build/constraint ok
@@ -146,8 +145,8 @@ go/format ok
 go/importer ok
 go/internal/gccgoimporter ok
 go/internal/gcimporter ok
-go/internal/srcimporter FAIL fatal error: stack overflow
-go/parser FAIL fatal error: stack overflow
+go/internal/srcimporter ok
+go/parser ok
 go/printer ok
 go/scanner ok
 go/token ok
@@ -317,12 +316,12 @@ os/exec/internal/fdtest ok
 os/signal ok
 os/user ok
 path ok
-path/filepath FAIL fatal error: stack overflow
+path/filepath ok
 plugin ok
 reflect FAIL --- FAIL: TestCallReturnsEmpty | all_test.go:2251: cleanup did not run
 reflect/internal/example1 SKIP no test files
 reflect/internal/example2 SKIP no test files
-regexp FAIL fatal error: stack overflow
+regexp ok
 regexp/syntax ok
 runtime SKIP no test files
 runtime/coverage SKIP no test files

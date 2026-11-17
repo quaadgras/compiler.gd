@@ -2509,6 +2509,15 @@ func (g *gcGen) call(v *ssa.Value) {
 	case "runtime.linsetsp":
 		g.get(args[0], true)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
+	case "runtime.lincallersp":
+		g.callerSP()
+	case "runtime.linsetcallersp":
+		// (Where the top of the stack is when the function returns.)
+		if g.frameSize == 0 {
+			g.unsupported(v, "linsetcallersp in a function without a frame")
+		}
+		g.get(args[0], true)
+		g.local(wasm.ALocalSet, g.csp)
 	case "runtime.deferproc", "runtime.deferreturn":
 		// The runtime is told whose deferred calls they are, and
 		// (to defer a call) where the caller's frame ends. (The
@@ -3083,17 +3092,15 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 			g.global(wasm.AGlobalGet, wasm.GCGlobalStackLo)
 			g.prog(wasm.AI32LtU)
 			g.prog(wasm.AIf)
+			// (morestackgc leaves the top of the stack at the top of
+			// the new segment, and lessstackgc where it was.)
 			g.frameProgs = append(g.frameProgs, i64Const(s, g.frameSize))
 			g.runtime("runtime.morestackgc")
-			g.prog(wasm.AI32WrapI64)
-			g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
 			for p := int32(0); p < g.nparam; p++ {
 				g.local(wasm.ALocalGet, p)
 			}
 			g.prog(wasm.AI64Const).From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: f.Frontend().Func().LSym}
 			g.helper(wasm.GCHop)
-			g.local(wasm.ALocalGet, g.csp)
-			g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
 			g.runtime("runtime.lessstackgc")
 			g.prog(obj.ARET)
 			g.prog(wasm.AEnd)

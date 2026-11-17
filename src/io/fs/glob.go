@@ -5,7 +5,6 @@
 package fs
 
 import (
-	"internal/wasmgc"
 	"path"
 )
 
@@ -39,8 +38,7 @@ func globWithLimit(fsys FS, pattern string, depth int) (matches []string, err er
 	// This limit is added to prevent stack exhaustion issues. See
 	// CVE-2022-30630.
 	const pathSeparatorsLimit = 10000
-	const pathSeparatorsLimitWasmGC = 1000 // (GOWASM=gc: see internal/wasmgc)
-	if depth > pathSeparatorsLimit || wasmgc.Enabled && depth > pathSeparatorsLimitWasmGC {
+	if depth > pathSeparatorsLimit {
 		return nil, path.ErrBadPattern
 	}
 	if fsys, ok := fsys.(GlobFS); ok {

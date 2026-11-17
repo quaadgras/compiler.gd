@@ -7,7 +7,6 @@ package xml
 import (
 	"bytes"
 	"errors"
-	"internal/wasmgc"
 	"io"
 	"os"
 	"reflect"
@@ -1154,9 +1153,6 @@ func TestDecodeElementRecursion(t *testing.T) {
 	maxDepth := maxUnmarshalDepth
 	if runtime.GOARCH == "wasm" {
 		maxDepth = maxUnmarshalDepthWasm
-	}
-	if wasmgc.Enabled {
-		maxDepth = maxUnmarshalDepthWasmGC
 	}
 	tests := []struct {
 		name    string

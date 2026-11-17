@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"internal/wasmgc"
 	"io"
 	"maps"
 	"math"
@@ -2916,21 +2915,17 @@ func TestUnmarshalRescanLiteralMangledUnquote(t *testing.T) {
 }
 
 func TestUnmarshalMaxDepth(t *testing.T) {
-	maxNestingDepth := 10000
-	if wasmgc.Enabled {
-		maxNestingDepth = 2000 // as jsontext has it with GOWASM=gc
-	}
 	tests := []struct {
 		CaseName
 		data        string
 		errMaxDepth bool
 	}{{
 		CaseName:    Name("ArrayUnderMaxNestingDepth"),
-		data:        `{"a":` + strings.Repeat(`[`, maxNestingDepth-1) + strings.Repeat(`]`, maxNestingDepth-1) + `}`,
+		data:        `{"a":` + strings.Repeat(`[`, 10000-1) + strings.Repeat(`]`, 10000-1) + `}`,
 		errMaxDepth: false,
 	}, {
 		CaseName:    Name("ArrayOverMaxNestingDepth"),
-		data:        `{"a":` + strings.Repeat(`[`, maxNestingDepth) + strings.Repeat(`]`, maxNestingDepth) + `}`,
+		data:        `{"a":` + strings.Repeat(`[`, 10000) + strings.Repeat(`]`, 10000) + `}`,
 		errMaxDepth: true,
 	}, {
 		CaseName:    Name("ArrayOverStackDepth"),
@@ -2938,11 +2933,11 @@ func TestUnmarshalMaxDepth(t *testing.T) {
 		errMaxDepth: true,
 	}, {
 		CaseName:    Name("ObjectUnderMaxNestingDepth"),
-		data:        `{"a":` + strings.Repeat(`{"a":`, maxNestingDepth-1) + `0` + strings.Repeat(`}`, maxNestingDepth-1) + `}`,
+		data:        `{"a":` + strings.Repeat(`{"a":`, 10000-1) + `0` + strings.Repeat(`}`, 10000-1) + `}`,
 		errMaxDepth: false,
 	}, {
 		CaseName:    Name("ObjectOverMaxNestingDepth"),
-		data:        `{"a":` + strings.Repeat(`{"a":`, maxNestingDepth) + `0` + strings.Repeat(`}`, maxNestingDepth) + `}`,
+		data:        `{"a":` + strings.Repeat(`{"a":`, 10000) + `0` + strings.Repeat(`}`, 10000) + `}`,
 		errMaxDepth: true,
 	}, {
 		CaseName:    Name("ObjectOverStackDepth"),

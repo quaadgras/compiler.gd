@@ -1,6 +1,5 @@
-944 pass, 3 fail, 18 skipped (of 965 "// run" tests)
+946 pass, 1 fail, 18 skipped (of 965 "// run" tests)
 
-    2  run: fatal error: stack overflow
     1  run: panic: initN
 
 PASS 235.go 
@@ -804,9 +803,9 @@ PASS shift3.go
 PASS simassign.go 
 PASS sizeof.go 
 PASS slicecap.go 
-FAIL stack.go run: fatal error: stack overflow
+PASS stack.go 
 SKIP stackobj.go finalizers
-FAIL stackobj2.go run: fatal error: stack overflow
+PASS stackobj2.go 
 SKIP stackobj3.go finalizers
 PASS strcopy.go 
 PASS string_lit.go 
