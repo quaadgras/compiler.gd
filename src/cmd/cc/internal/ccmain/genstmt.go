@@ -105,11 +105,11 @@ func (g *gen) declareLocal(s *symbol) {
 		fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, goType(s.t), n)
 	case lkCell:
 		g.tmpN++
-		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.Local(&o%d)\n_ = %s\n", g.tmpN, g.mirror(s.t), n, g.tmpN, n)
+		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.Local(&o%d)\n_ = %s\n", g.tmpN, g.objMirror(s.t), n, g.tmpN, n)
 	case lkHeap:
 		fmt.Fprintf(&g.locals, "var %s c23.Ptr\n_ = %s\n", n, n)
 	case lkAligned:
-		fmt.Fprintf(&g.cells, "%s := c23.NewAligned[%s](%d)\n_ = %s\n", n, g.mirror(s.t), s.t.alignof(), n)
+		fmt.Fprintf(&g.cells, "%s := c23.NewAligned[%s](%d)\n_ = %s\n", n, g.objMirror(s.t), s.t.alignof(), n)
 	}
 }
 

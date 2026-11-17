@@ -1158,6 +1158,12 @@ func (g *gen) allocCall(c *call, to *ctype) (string, bool) {
 			return "", false
 		}
 	}
+	if !hasPointers(e) {
+		// Scalars only: untyped memory, which may still come to hold
+		// pointers (a header before the memory a pointer to it gives
+		// out, as allocators do).
+		return "", false
+	}
 	m := g.mirror(e)
 	switch v.sym.name {
 	case "malloc":
@@ -1270,4 +1276,21 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	}
 	g.errorf(e.p, "internal error: builtin %s", e.name)
 	return ""
+}
+
+// hasPointers reports whether a value of t holds a pointer.
+func hasPointers(t *ctype) bool {
+	switch t.kind {
+	case kPtr, kVaList, kNullptr:
+		return true
+	case kArray:
+		return hasPointers(t.elem)
+	case kStruct:
+		for _, f := range t.rec.fields {
+			if hasPointers(f.t) {
+				return true
+			}
+		}
+	}
+	return false
 }

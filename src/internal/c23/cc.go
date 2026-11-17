@@ -254,6 +254,12 @@ func VaArg[T any](ap Ptr) T {
 		return v
 	}
 	var r T
+	if _, ok := any(r).(Ptr); ok {
+		// An integer passed for a pointer (0 for a null pointer).
+		if n, ok := intArgValue(a); ok {
+			return any(FromInt(uintptr(n))).(T)
+		}
+	}
 	rv := reflect.ValueOf(&r).Elem()
 	av := reflect.ValueOf(a)
 	switch {
@@ -293,4 +299,18 @@ func ReallocOf[T any](p Ptr, n uintptr) Ptr {
 		Memmove(q, p, min(n, p.size-uintptr(p.off)))
 	}
 	return q
+}
+
+func intArgValue(a any) (int64, bool) {
+	switch v := a.(type) {
+	case int32:
+		return int64(v), true
+	case int64:
+		return v, true
+	case uint32:
+		return int64(v), true
+	case uint64:
+		return int64(v), true
+	}
+	return 0, false
 }

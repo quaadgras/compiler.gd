@@ -441,7 +441,16 @@ func sameRecord(a, b *record) bool {
 	return sameMembers(a, b)
 }
 
+// comparing holds the pairs of records being compared, for structs that
+// point to themselves (assumed the same while they are compared).
+var comparing = map[[2]*record]bool{}
+
 func sameMembers(a, b *record) bool {
+	if comparing[[2]*record{a, b}] {
+		return true
+	}
+	comparing[[2]*record{a, b}] = true
+	defer delete(comparing, [2]*record{a, b})
 	if a.tag != b.tag || a.union != b.union || !a.complete || !b.complete || len(a.fields) != len(b.fields) {
 		return false
 	}

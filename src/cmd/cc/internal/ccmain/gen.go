@@ -275,7 +275,7 @@ func (g *gen) globalVar(s *symbol) {
 	if s.tls {
 		// Each thread's, made when it first uses it.
 		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
-		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.mirror(s.t))
+		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.objMirror(s.t))
 		if s.init != nil {
 			save, saveInd := g.out, g.ind
 			g.out = &g.vars
@@ -288,9 +288,9 @@ func (g *gen) globalVar(s *symbol) {
 	if s.allocSize > s.t.sizeof() {
 		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, g.mirror(s.t), s.allocSize)
 	} else if a := s.t.alignof(); a > 8 {
-		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.mirror(s.t), a)
+		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
 	} else {
-		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.mirror(s.t))
+		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.objMirror(s.t))
 	}
 	if s.init != nil {
 		save, saveInd := g.out, g.ind
@@ -605,4 +605,15 @@ func constLitStr(t *ctype, s string) string {
 		return fmt.Sprintf("c23.U128U(%d)", u)
 	}
 	return constLit(t, v)
+}
+
+// objMirror is the Go type of an object of type t: its mirror, but for
+// an array of chars, which is untyped memory, so that C may keep
+// pointers in it (a struct copied there and back, as in Fil-C).
+func (g *gen) objMirror(t *ctype) string {
+	b := baseElem(t)
+	if t.kind == kArray && t.n > 0 && (b.kind == kChar || b.kind == kSChar || b.kind == kUChar) {
+		return fmt.Sprintf("[%d]c23.Raw", t.sizeof())
+	}
+	return g.mirror(t)
 }
