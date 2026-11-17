@@ -108,7 +108,8 @@ func Heapify(sp *string) string {
 // read as a pointer only after the tag), and its 16 bytes, A and B, in
 // the inline payload.
 func SpreadString(sp *string) (data unsafe.Pointer, words [2]uint64) {
-	words = *(*[2]uint64)(unsafe.Pointer(sp))
+	w := (*[2]uint64)(unsafe.Pointer(sp))
+	words[0], words[1] = w[0], w[1]
 	if words[1]>>StringTagShift == 0 {
 		data = *(*unsafe.Pointer)(unsafe.Pointer(sp))
 	}
@@ -120,8 +121,12 @@ func SpreadString(sp *string) (data unsafe.Pointer, words [2]uint64) {
 func UnspreadString(sp *string, data unsafe.Pointer, words *[2]uint64) {
 	// Word 0 as a pointer first, which sets its element of the array of
 	// pointers (nil for an inline string), then the bytes over it.
+	// (The words one at a time: a copy of the array would be a move,
+	// which also copies the elements of the array of pointers of the
+	// source, none, over that of word 0.)
 	setStringWord0(sp, data)
-	*(*[2]uint64)(unsafe.Pointer(sp)) = *words
+	w := (*[2]uint64)(unsafe.Pointer(sp))
+	w[0], w[1] = words[0], words[1]
 }
 
 // setStringWord0 stores p as word 0 of *sp. It is a function of its own
