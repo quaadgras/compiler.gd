@@ -124,14 +124,14 @@ func concatstrings(buf *tmpBuf, a []string) string {
 }
 
 func concatstring2(buf *tmpBuf, a0, a1 string) string {
-	b := newStringBuf(len(a0) + len(a1), unsafe.Pointer(buf), len(buf))
+	b := newStringBuf(len(a0)+len(a1), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	return b.result()
 }
 
 func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
-	b := newStringBuf(len(a0) + len(a1) + len(a2), unsafe.Pointer(buf), len(buf))
+	b := newStringBuf(len(a0)+len(a1)+len(a2), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -139,7 +139,7 @@ func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
 }
 
 func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
-	b := newStringBuf(len(a0) + len(a1) + len(a2) + len(a3), unsafe.Pointer(buf), len(buf))
+	b := newStringBuf(len(a0)+len(a1)+len(a2)+len(a3), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -148,7 +148,7 @@ func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
 }
 
 func concatstring5(buf *tmpBuf, a0, a1, a2, a3, a4 string) string {
-	b := newStringBuf(len(a0) + len(a1) + len(a2) + len(a3) + len(a4), unsafe.Pointer(buf), len(buf))
+	b := newStringBuf(len(a0)+len(a1)+len(a2)+len(a3)+len(a4), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
