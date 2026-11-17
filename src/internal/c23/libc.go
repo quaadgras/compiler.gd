@@ -327,10 +327,10 @@ func Strtol(s, end Ptr, base int32) int64 {
 	setEnd(end, s, n)
 	switch {
 	case neg && (of || v > 1<<63):
-		Errno = ERANGE
+		SetErrno(ERANGE)
 		return math.MinInt64
 	case !neg && (of || v > math.MaxInt64):
-		Errno = ERANGE
+		SetErrno(ERANGE)
 		return math.MaxInt64
 	case neg:
 		return -int64(v)
@@ -342,7 +342,7 @@ func Strtoul(s, end Ptr, base int32) uint64 {
 	v, neg, of, n := strtoParse(GoString(s), int(base))
 	setEnd(end, s, n)
 	if of {
-		Errno = ERANGE
+		SetErrno(ERANGE)
 		return math.MaxUint64
 	}
 	if neg {
@@ -392,9 +392,18 @@ func Getenv(name Ptr) Ptr {
 
 // errno.h
 
-var Errno int32
+// errnoObj is errno: a C int, which C reads and writes through the
+// pointer ErrnoLoc returns.
+var errnoObj = New[int32]()
 
-const ERANGE = 34
+// ErrnoLoc returns the pointer to errno (__cc_errno).
+func ErrnoLoc() Ptr { return errnoObj }
+
+// Errno returns errno.
+func Errno() int32 { return int32(Load32(errnoObj)) }
+
+// SetErrno sets errno.
+func SetErrno(e int32) { Store32(errnoObj, uint32(e)) }
 
 // stdio.h
 

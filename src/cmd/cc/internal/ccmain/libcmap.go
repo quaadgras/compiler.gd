@@ -22,4 +22,7 @@ var libc = map[string]string{
 	"strcmp": "Strcmp", "strncmp": "Strncmp", "strlen": "Strlen", "strchr": "Strchr",
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
+
+	// errno.h
+	"__cc_errno": "ErrnoLoc",
 }

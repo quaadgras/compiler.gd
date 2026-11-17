@@ -9,6 +9,39 @@ import "sort"
 // sysHeaders are the standard headers cmd/cc provides. The functions
 // they declare are implemented in Go, in internal/c23.
 var sysHeaders = map[string]string{
+	"errno.h": `#ifndef __CC_ERRNO_H
+#define __CC_ERRNO_H
+int *__cc_errno(void);
+#define errno (*__cc_errno())
+#define EPERM 1
+#define ENOENT 2
+#define ESRCH 3
+#define EINTR 4
+#define EIO 5
+#define E2BIG 7
+#define EBADF 9
+#define ECHILD 10
+#define EAGAIN 11
+#define ENOMEM 12
+#define EACCES 13
+#define EBUSY 16
+#define EEXIST 17
+#define EXDEV 18
+#define ENOTDIR 20
+#define EISDIR 21
+#define EINVAL 22
+#define EMFILE 24
+#define ENOSPC 28
+#define ESPIPE 29
+#define EROFS 30
+#define EPIPE 32
+#define EDOM 33
+#define ERANGE 34
+#define ENAMETOOLONG 36
+#define ENOTEMPTY 39
+#define EILSEQ 84
+#endif
+`,
 	"assert.h": `#undef assert
 #ifdef NDEBUG
 #define assert(...) ((void)0)
