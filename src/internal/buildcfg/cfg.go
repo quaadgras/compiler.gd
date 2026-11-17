@@ -339,12 +339,23 @@ type gowasmFeatures struct {
 	// (typed structs and arrays) instead of linear memory.
 	// See doc/gd/wasm-gc.md.
 	GC bool
+
+	// Split, with GC, keeps the bytes of every Go value in linear
+	// memory, laid out as Go lays them out, and only its pointers in
+	// the garbage-collected heap, in one array of references for each
+	// allocation: a pointer is then one kind of object (the address,
+	// the array, and where in it the pointers of what it points to
+	// start). See stage 15 of doc/gd/wasm-gc.md.
+	Split bool
 }
 
 func (f gowasmFeatures) String() string {
 	var flags []string
 	if f.GC {
 		flags = append(flags, "gc")
+	}
+	if f.Split {
+		flags = append(flags, "split")
 	}
 	return strings.Join(flags, ",")
 }
@@ -358,11 +369,16 @@ func gowasm() (f gowasmFeatures) {
 			// ignore, always enabled
 		case "gc":
 			f.GC = true
+		case "split":
+			f.Split = true
 		case "":
 			// ignore
 		default:
 			Error = fmt.Errorf("invalid GOWASM: no such feature %q", opt)
 		}
+	}
+	if f.Split && !f.GC {
+		Error = fmt.Errorf("invalid GOWASM: split is a feature of gc")
 	}
 	return
 }
@@ -482,6 +498,9 @@ func gogoarchTags() []string {
 		list = append(list, GOARCH+".signext")
 		if GOWASM.GC {
 			list = append(list, GOARCH+".gc")
+		}
+		if GOWASM.Split {
+			list = append(list, GOARCH+".split")
 		}
 		return list
 	}
