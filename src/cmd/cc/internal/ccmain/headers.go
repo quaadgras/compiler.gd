@@ -482,6 +482,13 @@ size_t wcrtomb(char *restrict s, wchar_t wc, mbstate_t *restrict ps);
 #define __STDC_VERSION_WCHAR_H__ 202311L
 #endif
 `,
+	"alloca.h": `#ifndef __CC_ALLOCA_H
+#define __CC_ALLOCA_H
+#include <stddef.h>
+void *alloca(size_t size);
+#define alloca(size) __builtin_alloca(size)
+#endif
+`,
 	"assert.h": `#undef assert
 #ifdef NDEBUG
 #define assert(...) ((void)0)

@@ -177,6 +177,14 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	if base == nil || size < hdrSize {
 		return Ptr{}, false
 	}
+	if *(*uintptr)(base) == alignMagic {
+		// An over-aligned object (NewAligned): its header is further in.
+		off := *(*uintptr)(unsafe.Add(base, 8))
+		if off < hdrSize || off > size {
+			return Ptr{}, false
+		}
+		base = unsafe.Add(base, off-hdrSize)
+	}
 	h := (*header)(base)
 	if h.magic != magic || h.ti == nil {
 		return Ptr{}, false

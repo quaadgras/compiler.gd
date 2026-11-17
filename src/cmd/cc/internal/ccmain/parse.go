@@ -27,14 +27,16 @@ type parser struct {
 	u    *unit
 	fn   *funcDecl
 
-	breakOK    int // depth of loops and switches
-	continueOK int
-	sw         *switchStmt
-	caseN      int
-	recordN    int
-	symN       int
-	stmtExprs  int
-	pendingVLA []stmt // declarations of VLA lengths, before the next declaration
+	breakOK     int // depth of loops and switches
+	continueOK  int
+	sw          *switchStmt
+	caseN       int
+	recordN     int
+	symN        int
+	stmtExprs   int
+	staticInit  int     // in the initializer of an object of static duration
+	typeStorage storage // the storage class in the last type name
+	pendingVLA  []stmt  // declarations of VLA lengths, before the next declaration
 }
 
 type parseError struct{ msg string }
@@ -1036,6 +1038,8 @@ func (p *parser) typeName() *ctype {
 	if name != "" {
 		p.errorf("unexpected name %q in a type name", name)
 	}
+	// For a compound literal: C23's storage classes.
+	p.typeStorage = s.storage
 	if s.align > 0 {
 		c := *t
 		c.align = s.align
@@ -1229,7 +1233,13 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			sym.t = e.ty().unqual().qualified(s.q)
 			sym.init = p.initFor(sym.t, e)
 		} else {
+			if sym.global {
+				p.staticInit++
+			}
 			sym.init = p.initializer(sym)
+			if sym.global {
+				p.staticInit--
+			}
 		}
 		sym.defined = true
 		if sym.storage == sExtern {

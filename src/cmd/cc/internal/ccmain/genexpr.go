@@ -236,6 +236,10 @@ func (g *gen) bitStore(addr string, f *field, v string, c expr) {
 	if n < 64 {
 		m &= uint64(1)<<n - 1
 	}
+	if k, ok := c.(*intConst); ok {
+		g.p("c23.Store%d(%s, c23.Load%d(%s)&^%d | %d)", n, addr, n, addr, m, (uint64(k.v)<<f.bitAt)&m)
+		return
+	}
 	g.p("c23.Store%d(%s, c23.Load%d(%s)&^%d | (%s<<%d)&%d)", n, addr, n, addr, m, bitsOf(n, f.t, v, c), f.bitAt, m)
 }
 
@@ -961,6 +965,8 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
+	case "alloca":
+		return fmt.Sprintf("c23.Malloc(%s)", g.rv(e.args[0]))
 	case "setjmp":
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")

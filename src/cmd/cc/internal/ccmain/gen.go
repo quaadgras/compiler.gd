@@ -265,7 +265,11 @@ func (g *gen) globalVar(s *symbol) {
 		g.errorf(s.p, "storage size of %q isn't known", s.name)
 	}
 	name := g.names[s]
-	fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.mirror(s.t))
+	if a := s.t.alignof(); a > 8 {
+		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.mirror(s.t), a)
+	} else {
+		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.mirror(s.t))
+	}
 	if s.init != nil {
 		save, saveInd := g.out, g.ind
 		g.out, g.ind = &g.inits, 1
@@ -346,7 +350,7 @@ func (g *gen) record(t *ctype) string {
 	if r.goName != "" {
 		return r.goName
 	}
-	bytes := r.union || r.packed > 0 || t.rec.align > 8
+	bytes := r.union || r.packed > 0 || t.rec.align > 8 || !naturalLayout(r)
 	var fields []string
 	for i, f := range r.fields {
 		if f.bits >= 0 || f.t.align > f.t.unqual().alignofNatural() {
@@ -519,4 +523,27 @@ func sorted[V any](m map[string]V) []string {
 	}
 	sort.Strings(ks)
 	return ks
+}
+
+// naturalLayout reports whether r has the layout Go gives a struct of
+// its members: no attribute changed it.
+func naturalLayout(r *record) bool {
+	off, align := int64(0), int64(1)
+	for _, f := range r.fields {
+		if f.bits >= 0 {
+			return false
+		}
+		a := f.t.unqual().alignofNatural()
+		if f.t.kind == kStruct {
+			a = min(f.t.rec.align, 8)
+		}
+		off = (off + a - 1) / a * a
+		if off != f.off {
+			return false
+		}
+		off += f.t.sizeof()
+		align = max(align, a)
+	}
+	size := (off + align - 1) / align * align
+	return size == r.size && align == r.align
 }

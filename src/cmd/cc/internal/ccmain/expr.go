@@ -569,6 +569,11 @@ func (p *parser) unaryExpr() expr {
 				ty := p.typeName()
 				p.pendingVLA = p.pendingVLA[:n] // not evaluated
 				p.expect(")")
+				if p.is("{") {
+					// _Alignof (T){...}
+					x := p.postfix(p.compoundLiteral(ty, at))
+					return p.intc(x.ty().alignof(), tULong, at)
+				}
 				return p.intc(ty.alignof(), tULong, at)
 			}
 			if p.is("(") && p.isTypeStart(1) {
@@ -587,6 +592,7 @@ func (p *parser) unaryExpr() expr {
 		case "_Countof", "__countof__":
 			p.next()
 			var ty *ctype
+			n := len(p.pendingVLA)
 			if p.is("(") && p.isTypeStart(1) {
 				p.next()
 				ty = p.typeName()
@@ -598,8 +604,9 @@ func (p *parser) unaryExpr() expr {
 				p.errorAt(at, "_Countof of a %s", ty)
 			}
 			if ty.vla != nil {
-				return ty.vla
+				return p.withVLA(ty.vla)
 			}
+			p.pendingVLA = p.pendingVLA[:n] // not evaluated
 			return p.intc(ty.n, tULong, at)
 		case "__extension__":
 			p.next()
@@ -924,13 +931,20 @@ func (p *parser) primary() expr {
 
 func (p *parser) compoundLiteral(t *ctype, at pos) expr {
 	var sym *symbol
-	if p.fn == nil {
+	static := p.typeStorage == sStatic
+	p.typeStorage = sAuto
+	if p.fn == nil || p.staticInit > 0 || static {
 		p.symN++
 		sym = &symbol{name: "complit." + itoa(int64(p.symN)), kind: symVar, t: t, global: true, storage: sStatic, p: at, defined: true}
-		p.u.statics = append(p.u.statics, sym)
+		// After its initializer's own compound literals, which it uses.
+		defer func() { p.u.statics = append(p.u.statics, sym) }()
 	} else {
 		sym = p.newLocal("complit", t, at)
 		sym.addr = true
+	}
+	if sym.global {
+		p.staticInit++
+		defer func() { p.staticInit-- }()
 	}
 	sym.init = p.initializer(sym)
 	return &compoundLit{node{sym.t, at}, sym}
@@ -1471,6 +1485,14 @@ func (p *parser) builtin(name string, at pos) expr {
 		}
 		p.fn.setjmps++
 		return &builtinCall{node{tInt, at}, "setjmp", []expr{env, p.intc(int64(p.fn.setjmps), tInt, at)}}
+	case "__builtin_alloca", "__builtin_alloca_with_align":
+		as := args(-1)
+		if len(as) < 1 {
+			p.errorAt(at, "too few arguments to %s", name)
+		}
+		// In the heap: the collector frees it.
+		n := p.convert(p.rvalue(as[0]), tULong)
+		return &builtinCall{node{ptrTo(tVoid), at}, "alloca", []expr{n}}
 	case "__builtin_assert":
 		// cmd/cc's assert: (cond, text, file, line).
 		as := args(4)

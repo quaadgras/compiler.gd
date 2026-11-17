@@ -33,6 +33,20 @@ func (p *parser) blockItem() []stmt {
 		}
 		return nil
 	}
+	if p.is("[") && p.isAt(1, "[") {
+		// Attributes, of a declaration or a statement.
+		save := p.pos
+		p.attributes()
+		if p.accept(";") {
+			return nil
+		}
+		decl := p.isDecl()
+		p.pos = save
+		if !decl {
+			p.attributes()
+			return []stmt{p.statement()}
+		}
+	}
 	if p.isDecl() {
 		return p.declaration()
 	}
@@ -318,6 +332,9 @@ func (p *parser) statement() stmt {
 func (p *parser) labeledBody() stmt {
 	if p.is("}") {
 		return &emptyStmt{}
+	}
+	if p.is("[") && p.isAt(1, "[") {
+		return &block{list: p.blockItem()}
 	}
 	if p.isDecl() {
 		return &block{list: p.declaration()}

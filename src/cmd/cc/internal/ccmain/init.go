@@ -156,13 +156,26 @@ func (ip *initParser) braced(t *ctype, off int64) {
 		return
 	}
 	if t.kind == kArray {
-		if s, ok := p.peekString(); ok && isCharArrayFor(t, s) {
-			// char a[] = {"..."}.
-			p.next()
-			ip.addString(t, off, s)
-			p.accept(",")
-			p.expect("}")
-			return
+		// char a[] = {"..."}, or {("...")}.
+		k := 0
+		for p.isAt(k, "(") {
+			k++
+		}
+		if p.peekAt(k).kind == tkString {
+			j := k + 1
+			for i := 0; i < k && p.isAt(j, ")"); i++ {
+				j++
+			}
+			if j == 2*k+1 && (p.isAt(j, "}") || p.isAt(j, ",") && p.isAt(j+1, "}")) {
+				e := p.initExpr()
+				if s, ok := e.(*strLit); ok && isCharArrayFor(t, s) {
+					ip.addString(t, off, s)
+					p.accept(",")
+					p.expect("}")
+					return
+				}
+				p.errorAt(e.at(), "invalid initializer for %s", t)
+			}
 		}
 	}
 	if t.kind == kStruct && t.rec.union {
@@ -416,6 +429,14 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 				ip.addString(t, off, s)
 				return
 			}
+			if k := p.parenString(); k > 0 {
+				e := p.initExpr()
+				if s, ok := e.(*strLit); ok && isCharArrayFor(t, s) {
+					ip.addString(t, off, s)
+					return
+				}
+				ip.pending = e
+			}
 		}
 		if s, ok := ip.pending.(*strLit); ok && t.kind == kArray && isCharArrayFor(t, s) {
 			ip.pending = nil
@@ -454,6 +475,24 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 		return
 	}
 	ip.add(initItem{off: off, t: t, x: x})
+}
+
+// parenString reports whether a string literal in parentheses is next:
+// how many parentheses, or 0.
+func (p *parser) parenString() int {
+	k := 0
+	for p.isAt(k, "(") {
+		k++
+	}
+	if k == 0 || p.peekAt(k).kind != tkString {
+		return 0
+	}
+	for i := 0; i < k; i++ {
+		if !p.isAt(k+1+i, ")") {
+			return 0
+		}
+	}
+	return k
 }
 
 func (p *parser) peekStringAny() (*strLit, bool) {
