@@ -23,8 +23,11 @@ SPLIT = 'split' in os.environ.get('GOWASM', '').split(',')
 PTR64 = 'ptr64' in os.environ.get('GOWASM', '').split(',')
 PTR32 = SPLIT and not PTR64
 GOWASM = ('gc,split' if SPLIT else 'gc') + (',ptr64' if PTR64 else '')
-OUT = os.path.join(HERE, ('out-split' if SPLIT else 'out') + ('-ptr64' if PTR64 else ''))
-ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM=GOWASM, NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
+# GOOS=js in the environment builds for GOOS=js (its runtime and
+# syscall/js), in out-js...; anything else is GOOS=wasip1.
+GOOS = 'js' if os.environ.get('GOOS') == 'js' else 'wasip1'
+OUT = os.path.join(HERE, ('out-split' if SPLIT else 'out') + ('-ptr64' if PTR64 else '') + ('-js' if GOOS == 'js' else ''))
+ENV = dict(os.environ, GOROOT=GOROOT, GOOS=GOOS, GOARCH='wasm', GOWASM=GOWASM, NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
 HOSTENV = dict(os.environ, GOROOT=GOROOT)
 for k in ('GOOS', 'GOARCH', 'GOWASM'):
     HOSTENV.pop(k, None)
@@ -41,7 +44,7 @@ def golist(*args):
 _lock = None
 
 # The build tags of the runtime's files (see build_ok).
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | ({'wasm.split'} if SPLIT else set()) | ({'wasm.ptr32'} if PTR32 else set())
+TAGS = {GOOS, 'wasm', 'gc', 'wasm.gc'} | ({'wasm.split'} if SPLIT else set()) | ({'wasm.ptr32'} if PTR32 else set())
 
 
 def build_ok(path):

@@ -140,7 +140,7 @@ func Callers(skip int, pc []uintptr) int {
 	// Frames above Callers are the host's.
 	start := 0
 	for i := 0; i < n && i < 8; i++ {
-		if FuncForPC(uintptr(buf[i])).Name() == "runtime.Callers" {
+		if funcNameIs(buf[i], "runtime.Callers") {
 			start = i
 			break
 		}
@@ -247,6 +247,15 @@ func (f *Func) Entry() uintptr {
 		return 0
 	}
 	return f.entry
+}
+
+// funcNameIs reports whether the function of pc is named name, without
+// allocating (a short name is a string of its own only with inline
+// strings).
+func funcNameIs(pc uint64, name string) bool {
+	var buf [64]byte
+	n := funcname(pc, uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	return string(buf[:n]) == name
 }
 
 // funcname writes the name of the function whose code is pc at addr,
