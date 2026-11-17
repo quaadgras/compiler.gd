@@ -11,6 +11,7 @@ import (
 	"cmd/link/internal/ld"
 	"cmd/link/internal/loader"
 	"internal/buildcfg"
+	"os"
 	"sort"
 )
 
@@ -94,11 +95,19 @@ func (l *gcLinker) writeSplitTypes(w *bytes.Buffer) {
 		panic("wasm: split types not first")
 	}
 	w.Write([]byte{0x4E, 0x02}) // rec, two types
-	// GCPtr: final, immutable fields.
-	w.Write([]byte{0x5F, 0x03, wasm.GCTypeI32, 0x00})
+	// GCPtr: the address and the offset are mutable, the array not.
+	// (Nothing changes them. But an engine may keep the value of an
+	// immutable field it has read, or that it knows from where the
+	// object was made, and let the object go: the code would then use
+	// the address while nothing keeps the array alive, and the block
+	// would be freed in use. A mutable field of an object others may
+	// have is read again after a call, and the host frees a block
+	// only from a call: the pointer, and its array, stay live as long
+	// as the address is used.)
+	w.Write([]byte{0x5F, 0x03, wasm.GCTypeI32, 0x01})
 	w.WriteByte(wasm.GCRefNull)
 	writeSleb128(w, int64(slots))
-	w.Write([]byte{0x00, wasm.GCTypeI32, 0x00})
+	w.Write([]byte{0x00, wasm.GCTypeI32, 0x01})
 	// GCSlots: an array of mutable nullable GCPtrs.
 	w.WriteByte(0x5E)
 	w.WriteByte(wasm.GCRefNull)
@@ -306,11 +315,30 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.op(0xAD) // i64.extend_i32_u
 			a.end()
 			a.op(0x37, 0x03, 0x00) // i64.store
+			// (For debugging: a pointer to a block stored where
+			// there is no array keeps nothing alive.)
+			check := func() {
+				if os.Getenv("GOWASMGC_SPLITCHECK") == "" {
+					return
+				}
+				a.get(2)
+				isNull(a)
+				a.op(0x45) // i32.eqz
+				a.get(2)
+				get(a, wasm.GCPtrSlots)
+				isNull(a)
+				a.op(0x45)
+				a.op(0x71) // i32.and
+				a.if_()
+				a.unreachable()
+				a.end()
+			}
 			a.get(0)
 			get(a, wasm.GCPtrSlots)
 			a.tee(3)
 			isNull(a)
 			a.if_()
+			check()
 			ret(a)
 			a.end()
 			a.get(0)
@@ -324,6 +352,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.gc(0x0F)
 			a.op(0x4F)
 			a.if_()
+			check()
 			ret(a)
 			a.end()
 			a.get(3)
@@ -332,8 +361,8 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.gc(0x0E, slots) // array.set
 			a.end()
 		case wasm.GCSplitAddPtr:
-			// p 0, rel 1
-			a.splitLocals("")
+			// p 0, rel 1; q 2
+			a.splitLocals("r")
 			a.get(0)
 			isNull(a)
 			a.if_()
@@ -353,6 +382,13 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(1)
 			a.op(0x6A)
 			a.gc(0x00, ptr)
+			// (Kept where others could see it, so that an engine that
+			// inlines this does not take the new pointer apart: see
+			// writeSplitTypes.)
+			a.op(0x22) // local.tee
+			writeUleb128(a, 2)
+			gcGlobalSet(&a.Buffer, wasm.GCGlobalKeep)
+			a.get(2)
 			a.end()
 		case wasm.GCSplitPtrAddr:
 			a.splitLocals("")
@@ -384,14 +420,27 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			l.splitValType(&a.Buffer, 'a')
 			gcGlobalGet(&a.Buffer, wasm.GCGlobalSlots)
 			a.else_()
+			if os.Getenv("GOWASMGC_SPLITCHECK") != "" {
+				// (For debugging: a pointer made of the address of
+				// a block keeps nothing alive. Not one beyond memory:
+				// a function's.)
+				a.get(1)
+				a.op(0x3F, 0x00) // memory.size
+				a.i32(16)
+				a.op(0x74) // i32.shl
+				a.op(0x49) // i32.lt_u
+				a.if_()
+				a.unreachable()
+				a.end()
+			}
 			refNull(a)
 			a.end()
 			a.get(1)
 			a.gc(0x00, ptr)
 			a.end()
 		case wasm.GCSplitMove:
-			// d 0, drel 1, s 2, srel 3, n 4; da 5, sa 6, di 7, si 8, cnt 9, first 10
-			a.splitLocals("aaiiii")
+			// d 0, drel 1, s 2, srel 3, n 4; da 5, sa 6, di 7, si 8, cnt 9, first 10, k 11
+			a.splitLocals("aaiiiii")
 			a.get(0)
 			get(a, wasm.GCPtrAddr)
 			a.get(1)
@@ -450,24 +499,43 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.i32(7)
 			a.op(0x71) // i32.and
 			a.brIf(0)
+			// The source's elements from its first word: as many as
+			// there are (k), and nil for the rest.
+			a.get(6)
+			a.gc(0x0F)
 			a.get(8)
 			a.i32(7)
 			a.op(0x6A)
 			a.i32(3)
 			a.op(0x76)
 			a.tee(8)
-			a.get(9)
-			a.op(0x6A)
-			a.get(6)
-			a.gc(0x0F)
-			a.op(0x4B) // i32.gt_u
+			a.op(0x6B) // i32.sub
+			a.tee(11)
+			a.i32(0)
+			a.op(0x4C) // i32.le_s
 			a.brIf(0)
+			a.get(9)
+			a.get(11)
+			a.get(9)
+			a.get(11)
+			a.op(0x49) // i32.lt_u
+			a.op(0x1B) // select
+			a.set(11)
 			a.get(5)
 			a.get(10)
 			a.get(6)
 			a.get(8)
-			a.get(9)
+			a.get(11)
 			a.gc(0x11, slots, slots) // array.copy
+			a.get(5)
+			a.get(10)
+			a.get(11)
+			a.op(0x6A)
+			refNull(a)
+			a.get(9)
+			a.get(11)
+			a.op(0x6B)
+			a.gc(0x10, slots) // array.fill
 			ret(a)
 			a.end()
 			// No pointers to copy: the destination has none there.

@@ -71,12 +71,12 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 			continue
 		case ssa.OpPtrIndex:
 			if e := v.Type.Elem(); e.Size() != 0 {
-				a.dyn = append(a.dyn, spTerm{v.Args[1], e.Size()})
+				a.addTerm(v.Args[1], e.Size())
 			}
 			v = v.Args[0]
 			continue
 		case ssa.OpAddPtr:
-			a.dyn = append(a.dyn, spTerm{v.Args[1], 1})
+			a.addTerm(v.Args[1], 1)
 			v = v.Args[0]
 			continue
 		case ssa.OpLocalAddr:
@@ -106,6 +106,16 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 		a.base = v
 		return a
 	}
+}
+
+// addTerm adds x*scale to the address, x an integer: to the constant
+// if x is one (computed where it is used, so nothing is left to do).
+func (a *spAddr) addTerm(x *ssa.Value, scale int64) {
+	if x.Op == ssa.OpWasmI64Const {
+		a.off += x.AuxInt * scale
+		return
+	}
+	a.dyn = append(a.dyn, spTerm{x, scale})
 }
 
 // spDyn pushes the sum of the terms computed at run time, and reports

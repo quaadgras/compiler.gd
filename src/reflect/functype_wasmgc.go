@@ -420,6 +420,10 @@ func deferHere()
 // type made at run time, which are kept for good (see gcKept).
 func gcNewLinear(n int) unsafe.Pointer {
 	p := unsafe_NewArray(rtypeOf(byte(0)), n)
+	if wasmSplitMode {
+		// Words that may be pointers, which split keeps with them.
+		p = unsafe_NewArray(rtypeOf(unsafe.Pointer(nil)), (n+7)/8)
+	}
 	gcKeep(p)
 	return p
 }

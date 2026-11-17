@@ -1582,6 +1582,32 @@ of `[][]*T`) runs off the end of the source's array, finds no pointers
 to copy, and the pointers in the copy are then integers that keep
 nothing alive: the blocks they point to were freed while in use.
 
+**A block in use was freed, because the engine is clever.** A pointer
+was first all immutable fields. V8's optimizing compiler, having
+inlined the function that makes a pointer (`runtime.makeslice` down to
+`wasm.snew`), knows the address from where it made the object, uses it
+directly, and drops the object, and with it the array: the array is
+collected, the host frees the block, and the loop that is still
+counting in it (`counts[f()]++`, f allocating) writes into memory that
+has been given to something else (`math/rand/v2`, `compress/flate`,
+`go/doc/comment`, `crypto/tls`, `go/internal/srcimporter`: wrong values
+or a corrupted free list, depending on timing; none of it with V8's
+baseline compiler or without inlining). The address and the offset of a
+pointer are now mutable fields, which nothing writes: an engine must
+read them again after a call, as a call may have changed them, and the
+host frees a block only from within a call (a goroutine that parks, a
+collection), so the pointer and its array stay live as long as its
+address is used. A pointer that `wasm.addptr` makes is also stored in a
+global (`GCGlobalKeep`), so that an engine that inlines it does not take
+it apart either. This is a property of the model to keep in mind:
+whatever is made of an address alone (an integer kept across a call)
+keeps nothing alive.
+
+`GOWASMGC_SPLITCHECK=1` at link time makes the module trap where a
+pointer to a block loses its array (made of an integer by
+`wasm.inttoptr`, or stored where there is no array by
+`wasm.storeptr`): for finding such holes.
+
 Work list (kept current):
 
 1. [done] Types, helpers, frames, `println` hello world.
@@ -1597,4 +1623,5 @@ Work list (kept current):
 7. `wasm.smove` makes the destination's pointers nil when the source's
    array is shorter than the bytes copied (it cannot be, now, for
    allocations); it could copy what there is.
-8. The tests of std (`std/survey.py`) have not been run in split.
+8. The tests of std: `GOWASM=gc,split std/survey.py` writes
+   `std/status-split.txt`; see there for what fails.

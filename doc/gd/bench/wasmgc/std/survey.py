@@ -12,6 +12,10 @@ GOCACHE are taken from the environment.
 
 With GOWASIRUNTIME=chromium (or firefox) the tests run in that browser
 (lib/wasm/wasm_gc_browser_exec.mjs) and the file is status-chromium.txt.
+
+With GOWASM=gc,split in the environment the tests are built for that model
+(stage 15 of wasm-gc.md) and the file is status-split.txt
+(status-split-chromium.txt in a browser); the logs go to $SURVEY_LOGS-split.
 """
 
 import argparse, os, re, signal, subprocess, sys, time
@@ -21,8 +25,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BROWSER = os.environ.get("GOWASIRUNTIME", "")
 if BROWSER not in ("chromium", "firefox"):
     BROWSER = ""
-STATUS = os.path.join(HERE, "status-%s.txt" % BROWSER if BROWSER else "status.txt")
-LOGS = os.environ.get("SURVEY_LOGS", "/tmp/wasmgc-survey")
+SPLIT = "split" in os.environ.get("GOWASM", "").split(",")
+GOWASM = "gc,split" if SPLIT else "gc"
+STATUS = os.path.join(HERE, "status" + ("-split" if SPLIT else "") + ("-" + BROWSER if BROWSER else "") + ".txt")
+LOGS = os.environ.get("SURVEY_LOGS", "/tmp/wasmgc-survey") + ("-split" if SPLIT else "")
 
 # Lines in status.txt that are not package results start with one of these.
 def is_result(line):
@@ -64,7 +70,7 @@ def classify(pkg, out, rc, timedout):
     return "FAIL rc=%d" % rc
 
 def run(pkg, timeout, gotimeout):
-    env = dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM="gc", NODE_OPTIONS="")
+    env = dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM=GOWASM, NODE_OPTIONS="")
     cmd = ["go", "test", "-short", "-timeout", gotimeout, pkg]
     t0 = time.time()
     p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -98,7 +104,7 @@ def main():
     a = ap.parse_args()
     pkgs = a.pkgs
     if not pkgs:
-        out = subprocess.check_output(["go", "list", "std"], env=dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM="gc")).decode()
+        out = subprocess.check_output(["go", "list", "std"], env=dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM=GOWASM)).decode()
         pkgs = [p for p in out.split() if not p.startswith("cmd/")]
     old = {}
     header, footer = [], []
