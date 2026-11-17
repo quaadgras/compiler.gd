@@ -1531,6 +1531,44 @@ const predefined = `
 #define __UINTPTR_TYPE__ unsigned long
 #define __CHAR16_TYPE__ unsigned short
 #define __CHAR32_TYPE__ unsigned int
+#define __INT_LEAST8_TYPE__ signed char
+#define __INT_LEAST16_TYPE__ short
+#define __INT_LEAST32_TYPE__ int
+#define __INT_LEAST64_TYPE__ long
+#define __UINT_LEAST8_TYPE__ unsigned char
+#define __UINT_LEAST16_TYPE__ unsigned short
+#define __UINT_LEAST32_TYPE__ unsigned int
+#define __UINT_LEAST64_TYPE__ unsigned long
+#define __INT_FAST8_TYPE__ signed char
+#define __INT_FAST16_TYPE__ long
+#define __INT_FAST32_TYPE__ long
+#define __INT_FAST64_TYPE__ long
+#define __UINT_FAST8_TYPE__ unsigned char
+#define __UINT_FAST16_TYPE__ unsigned long
+#define __UINT_FAST32_TYPE__ unsigned long
+#define __UINT_FAST64_TYPE__ unsigned long
+#define __FLT_MIN__ 1.17549435082228750796873653722224568e-38F
+#define __FLT_MAX__ 3.40282346638528859811704183484516925e+38F
+#define __FLT_EPSILON__ 1.19209289550781250000000000000000000e-7F
+#define __FLT_DENORM_MIN__ 1.40129846432481707092372958328991613e-45F
+#define __FLT_MANT_DIG__ 24
+#define __FLT_DIG__ 6
+#define __FLT_MIN_EXP__ (-125)
+#define __FLT_MAX_EXP__ 128
+#define __FLT_RADIX__ 2
+#define __DBL_MIN__ ((double)2.22507385850720138309023271733240406e-308L)
+#define __DBL_MAX__ ((double)1.79769313486231570814527423731704357e+308L)
+#define __DBL_EPSILON__ ((double)2.22044604925031308084726333618164062e-16L)
+#define __DBL_DENORM_MIN__ ((double)4.94065645841246544176568792868221372e-324L)
+#define __DBL_MANT_DIG__ 53
+#define __DBL_DIG__ 15
+#define __DBL_MIN_EXP__ (-1021)
+#define __DBL_MAX_EXP__ 1024
+#define __LDBL_MIN__ 2.22507385850720138309023271733240406e-308L
+#define __LDBL_MAX__ 1.79769313486231570814527423731704357e+308L
+#define __LDBL_EPSILON__ 2.22044604925031308084726333618164062e-16L
+#define __LDBL_MANT_DIG__ 53
+#define __LDBL_DIG__ 15
 #define __INT8_TYPE__ signed char
 #define __INT16_TYPE__ short
 #define __INT32_TYPE__ int

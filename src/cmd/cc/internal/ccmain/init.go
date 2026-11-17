@@ -169,6 +169,7 @@ func (ip *initParser) braced(t *ctype, off int64) {
 				j++
 			}
 			if j == 2*k+1 && (p.isAt(j, "}") || p.isAt(j, ",") && p.isAt(j+1, "}")) {
+				save := p.pos
 				e := p.initExpr()
 				if s, ok := e.(*strLit); ok && isCharArrayFor(t, s) {
 					ip.addString(t, off, s)
@@ -176,7 +177,7 @@ func (ip *initParser) braced(t *ctype, off int64) {
 					p.expect("}")
 					return
 				}
-				p.errorAt(e.at(), "invalid initializer for %s", t)
+				p.pos = save // the first row's, say: {"12"} for char[2][3]
 			}
 		}
 	}
@@ -242,6 +243,15 @@ func (ip *initParser) list(t *ctype, off int64, braced, desig bool) {
 	first := true
 	for {
 		isDes := false
+		if ip.pending == nil && t.kind == kStruct && p.peek().kind == tkIdent && p.isAt(1, ":") {
+			// GCC's old designators: name: value.
+			name := p.ident()
+			p.next()
+			p.pos -= 2
+			p.toks[p.pos] = token{kind: tkPunct, text: ".", file: p.peek().file, line: p.peek().line}
+			p.toks[p.pos+1] = token{kind: tkIdent, text: name, file: p.peek().file, line: p.peek().line}
+			p.toks = append(p.toks[:p.pos+2], append([]token{{kind: tkPunct, text: "="}}, p.toks[p.pos+2:]...)...)
+		}
 		if ip.pending == nil {
 			if braced && p.accept("}") {
 				return

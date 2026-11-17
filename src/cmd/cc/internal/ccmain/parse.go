@@ -642,11 +642,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		p.expect(";")
 	}
 	a.merge(p.attributes())
-	for i, f := range fields {
+	for _, f := range fields {
 		if f.t.kind == kArray && f.t.n < 0 {
-			if i != len(fields)-1 {
-				p.errorf("flexible array member not at end of struct")
-			}
+			// GCC: not last, it is an array of none.
 			f.t = arrayOf(f.t.elem, 0)
 			r.flex = true
 		} else if !f.t.isComplete() && !(f.t.kind == kArray && f.t.n == 0) {
