@@ -1102,15 +1102,18 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	section(sectionExport, func(w *bytes.Buffer) {
 		n := 5 + len(exports)
 		if splitMode() {
-			n++
+			n += 2
 		}
 		writeUleb128(w, uint64(n))
 		if splitMode() {
-			// The array of a pointer, for the host (see gcSplitSlotsOf).
-			writeName(w, "slotsof")
-			w.WriteByte(0x00)
-			i, _ := l.splitHelperIndex(gcSplitSlotsOf)
-			writeUleb128(w, uint64(len(hostImports)+len(ctxt.Textp)+i))
+			// For the host: the array of a pointer (see
+			// gcSplitSlotsOf), and a pointer of its parts.
+			for _, e := range [][2]string{{"slotsof", gcSplitSlotsOf}, {"mkptr", gcSplitMkPtr}} {
+				writeName(w, e[0])
+				w.WriteByte(0x00)
+				i, _ := l.splitHelperIndex(e[1])
+				writeUleb128(w, uint64(len(hostImports)+len(ctxt.Textp)+i))
+			}
 		}
 		for _, e := range exports {
 			writeName(w, e.name)

@@ -15,6 +15,7 @@ const splitMode = false
 // compiler leaves out here.
 
 func splitalloc(n, nslots uintptr) unsafe.Pointer  { panic("split") }
+func ptroff(p unsafe.Pointer) uintptr              { panic("split") }
 func splitbase(p unsafe.Pointer) uintptr           { panic("split") }
 func newarray(t *_type, n int) unsafe.Pointer      { panic("split") }
 func splitmove(dst, src unsafe.Pointer, n uintptr) { panic("split") }

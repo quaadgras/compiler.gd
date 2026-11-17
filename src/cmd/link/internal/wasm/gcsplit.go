@@ -42,12 +42,18 @@ var gcSplitHelpers = []string{
 	wasm.GCSplitZero,
 	wasm.GCSplitNew,
 	gcSplitSlotsOf,
+	gcSplitMkPtr,
 }
 
 // gcSplitSlotsOf is the function, exported to the host as "slotsof",
 // that returns the array of a pointer: what the host keeps a block of
 // linear memory by (gd.register, weak pointers, cleanups).
 const gcSplitSlotsOf = "wasm.slotsof"
+
+// gcSplitMkPtr is the function, exported to the host as "mkptr", that
+// makes a pointer of an address, an array and an offset: a weak
+// pointer made strong (gd.weakgetat).
+const gcSplitMkPtr = "wasm.mkptr"
 
 func (l *gcLinker) splitHelperIndex(name string) (int, bool) {
 	for i, h := range gcSplitHelpers {
@@ -210,6 +216,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		wasm.GCSplitZero:     "rii.",
 		wasm.GCSplitNew:      "ii.r",
 		gcSplitSlotsOf:       "r.a",
+		gcSplitMkPtr:         "iai.r",
 	}
 	index := func(name string) int {
 		i, _ := l.splitHelperIndex(name)
@@ -530,6 +537,13 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.splitLocals("")
 			a.get(0)
 			get(a, wasm.GCPtrSlots)
+			a.end()
+		case gcSplitMkPtr:
+			a.splitLocals("")
+			a.get(0)
+			a.get(1)
+			a.get(2)
+			a.gc(0x00, ptr)
 			a.end()
 		}
 		fns = append(fns, &wasmFunc{Name: name, Type: l.typeIndex(wasm.GCFuncPrefix + sigs[name]), Code: a.Bytes()})

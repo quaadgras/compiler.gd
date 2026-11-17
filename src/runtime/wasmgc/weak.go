@@ -18,6 +18,7 @@ type weakHandle struct {
 	id     int32
 	off    uintptr
 	strong unsafe.Pointer
+	addr   uintptr // split: the address
 }
 
 type weakKey struct {
@@ -32,8 +33,22 @@ var (
 
 //go:linkname weak_runtime_registerWeakPointer weak.runtime_registerWeakPointer
 func weak_runtime_registerWeakPointer(p unsafe.Pointer) unsafe.Pointer {
+	if splitMode && p != nil && uintptr(p) >= uintptr(heapstart()) && uintptr(p) < linbrk {
+		// A block: weak on its array, which the host keeps a
+		// WeakRef to.
+		k := weakKey{weakmake(p), uintptr(p)}
+		if weakHandles == nil {
+			weakHandles = make(map[weakKey]*weakHandle)
+		}
+		h := weakHandles[k]
+		if h == nil {
+			h = &weakHandle{id: k.id, off: ptroff(p), addr: uintptr(p)}
+			weakHandles[k] = h
+		}
+		return unsafe.Pointer(h)
+	}
 	if a := trylinaddr(p); a != 0 || splitMode {
-		// TODO(split): weak, by the array of p.
+		// (Data or a stack: never freed.)
 		if weakLinear == nil {
 			weakLinear = make(map[uintptr]*weakHandle)
 		}
@@ -61,6 +76,9 @@ func weak_runtime_makeStrongFromWeak(u unsafe.Pointer) unsafe.Pointer {
 	h := (*weakHandle)(u)
 	if h.strong != nil {
 		return h.strong
+	}
+	if splitMode {
+		return weakgetat(h.id, uint32(h.addr), uint32(h.off))
 	}
 	p := weakget(h.id)
 	if p == nil || h.off == 0 {
@@ -94,6 +112,9 @@ func weakmake(p unsafe.Pointer) int32
 
 //go:wasmimport gd weakget
 func weakget(id int32) unsafe.Pointer
+
+//go:wasmimport gd weakgetat
+func weakgetat(id int32, addr, off uint32) unsafe.Pointer
 
 //go:linkname sync_test_runtime_blockUntilEmptyCleanupQueue sync_test.runtime_blockUntilEmptyCleanupQueue
 func sync_test_runtime_blockUntilEmptyCleanupQueue(timeout int64) bool {
