@@ -5,40 +5,66 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Playground — compiler.gd</title>
 <meta name="description" content="Compile and run Go in your browser with the gd go command, itself compiled to WebAssembly.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2300add8'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
 <link rel="stylesheet" href="style.css">
 <style>
   main.wide { max-width: 64rem; }
-  .play { display: grid; gap: .75rem; }
-  .tools { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
-  .tools button, .tools select {
-    font: inherit; font-size: .92rem; padding: .4rem .95rem; border-radius: 6px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--code-bg); color: var(--fg);
+  .lede { margin-bottom: 1.5rem; }
+  .panel { border: 1px solid var(--line); border-radius: 10px; background: var(--code-bg); overflow: hidden; }
+  .pbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .55rem .6rem; }
+  .pbar.top { background: var(--bg); border-bottom: 1px solid var(--line); position: relative; }
+  .btn {
+    font: inherit; font-size: .88rem; line-height: 1.2; padding: .45rem .85rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
   }
-  .tools button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
-  .tools button:disabled { opacity: .45; cursor: default; }
-  .tools .status { color: var(--muted); font-size: .9rem; margin-left: auto; font-variant-numeric: tabular-nums; }
-  .progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn:focus-visible, select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn .hint { font-weight: 400; opacity: .75; margin-left: .45rem; font-size: .8em; }
+  .pbar .status { color: var(--muted); font-size: .85rem; margin-left: auto; font-variant-numeric: tabular-nums; padding-right: .25rem; }
+  .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
   .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
   .progress[hidden] { display: none; }
-  textarea, .out {
-    width: 100%; margin: 0; padding: 1rem; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--code-bg); color: var(--fg); line-height: 1.5; tab-size: 4;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem;
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem; line-height: 1.55; tab-size: 4; }
+  .editor { display: flex; }
+  .gutter {
+    flex: none; overflow: hidden; padding: 1rem .6rem 1rem .9rem; text-align: right; color: var(--muted); opacity: .6;
+    user-select: none; white-space: pre; border-right: 1px solid var(--line); min-width: 2.6rem;
   }
-  textarea { min-height: 22rem; resize: vertical; white-space: pre; overflow: auto; }
-  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .out { min-height: 8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .out .e { color: #d0453a; }
-  .stats, .build { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; min-height: 1.2em; }
-  .stats { margin-top: -.35rem; }
-  .build { display: flex; align-items: center; gap: .5rem; margin: -.25rem 0 -.35rem; }
-  .build.failed { color: #d0453a; }
+  textarea {
+    flex: 1; min-width: 0; min-height: 22rem; margin: 0; padding: 1rem; border: 0; border-radius: 0; resize: vertical;
+    background: transparent; color: var(--fg); white-space: pre; overflow: auto; caret-color: var(--accent);
+  }
+  textarea:focus { outline: none; }
+  .editor:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pbar.mid { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); padding: .4rem 1rem; font-size: .8rem; min-height: 2.1rem; }
+  .pbar.mid .label { font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: .72rem; }
+  .build { display: flex; align-items: center; gap: .45rem; margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .build.failed { color: var(--err); }
   .build .spin { width: .7rem; height: .7rem; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .build .spin { animation-duration: 2s; } }
-  @media (prefers-color-scheme: dark) { .out .e, .build.failed { color: #ff8a7a; } }
+  .out { margin: 0; padding: 1rem; min-height: 7rem; max-height: 28rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; border-radius: 0; }
+  .out .e { color: var(--err); }
+  .out:empty::before { content: "Output appears here."; color: var(--muted); opacity: .7; font-family: inherit; }
+  .stats { border-top: 1px solid var(--line); padding: .35rem 1rem; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .stats:empty { display: none; }
+  details.about { margin-top: 2.25rem; border-top: 1px solid var(--line); padding-top: .5rem; }
+  details.about summary { cursor: pointer; font-weight: 600; font-size: 1.05rem; padding: .5rem 0; list-style: none; display: flex; align-items: center; gap: .5rem; }
+  details.about summary::-webkit-details-marker { display: none; }
+  details.about summary::before { content: ""; width: .45rem; height: .45rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: .15rem; }
+  details.about[open] summary::before { transform: rotate(45deg); }
+  details.about summary:hover { color: var(--accent); }
   kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--line); border-radius: 4px; padding: 0 .3em; }
+  @media (max-width: 40rem) {
+    /* (Under 16px, iOS zooms into the editor.) */
+    .mono { font-size: 16px; }
+    textarea { min-height: 16rem; }
+    .btn .hint { display: none; }
+    .pbar .status { width: 100%; margin-left: 0; order: 9; padding: 0 .25rem; }
+  }
 </style>
 </head>
 <body>
@@ -53,29 +79,34 @@
   <h1>Play<span>ground</span></h1>
   <p class="lede">Go, compiled in your browser by the gd <code>go</code> command — itself compiled to WebAssembly — and run on the WebAssembly GC.</p>
 
-  <div class="play">
-    <div class="tools">
-      <button id="run" class="primary" disabled>Run</button>
-      <button id="stop" hidden>Stop</button>
-      <select id="example" aria-label="Examples"><option value="" hidden>Examples</option></select>
-      <button id="share" title="Copy a link with this code">Share</button>
+  <section class="panel" aria-label="Playground">
+    <div class="pbar top">
+      <button id="run" class="btn primary" disabled title="Run (Ctrl+Enter)">Run<span class="hint" id="hint">Ctrl ↵</span></button>
+      <button id="stop" class="btn" hidden>Stop</button>
+      <select id="example" class="btn" aria-label="Examples"><option value="" hidden>Examples</option></select>
+      <button id="share" class="btn" title="Copy a link with this code">Share</button>
       <span class="status" id="status">loading…</span>
+      <div class="progress" id="progress" hidden><i></i></div>
     </div>
-    <div class="progress" id="progress" hidden><i></i></div>
-    <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Go source"></textarea>
-    <div class="build" id="build" aria-live="polite"></div>
-    <pre class="out" id="out" aria-live="polite"></pre>
+    <div class="editor">
+      <div class="gutter mono" id="gutter" aria-hidden="true">1</div>
+      <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Go source"></textarea>
+    </div>
+    <div class="pbar mid"><span class="label">Output</span><div class="build" id="build" aria-live="polite"></div></div>
+    <pre class="out mono" id="out" aria-live="polite"></pre>
     <div class="stats" id="stats"></div>
-  </div>
+  </section>
 
-  <h2>How it works</h2>
-  <ul>
-    <li>The page downloads the <code>go</code> command for <code>GOOS=js</code> (24 MB, once: your browser keeps it) and the standard library's source, and runs <code>go build</code> in a worker. <code>compile</code> and <code>link</code> are part of that one binary.</li>
-    <li>Programs are built for <code>js/wasm</code> on the WebAssembly GC runtime (<code>GOWASM=gc,split</code>): each allocation keeps its bytes in linear memory and its pointers in a WebAssembly GC array, so the browser’s collector frees it.</li>
-    <li>The build cache lives in IndexedDB. Common packages come precompiled; anything else is compiled on first use (a minute or so for a large package), then cached.</li>
-    <li>Only the standard library: there's no network access for modules. Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run.</li>
-    <li>Needs WebAssembly GC and JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27.</li>
-  </ul>
+  <details class="about">
+    <summary>How it works</summary>
+    <ul>
+      <li>The page downloads the <code>go</code> command for <code>GOOS=js</code> (24 MB, once: your browser keeps it) and the standard library's source, and runs <code>go build</code> in a worker. <code>compile</code> and <code>link</code> are part of that one binary.</li>
+      <li>Programs are built for <code>js/wasm</code> on the WebAssembly GC runtime (<code>GOWASM=gc,split</code>): each allocation keeps its bytes in linear memory and its pointers in a WebAssembly GC array, so the browser’s collector frees it.</li>
+      <li>The build cache lives in IndexedDB. Common packages come precompiled; anything else is compiled on first use (a minute or so for a large package), then cached.</li>
+      <li>Only the standard library: there's no network access for modules. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd> on a Mac) runs.</li>
+      <li>Needs WebAssembly GC and JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27.</li>
+    </ul>
+  </details>
 
   <footer>
     <a href="https://github.com/quaadgras/compiler.gd">github.com/quaadgras/compiler.gd</a> · MIT licensed
@@ -194,6 +225,23 @@ let saved = null;
 try { saved = localStorage.getItem('gd-play-src'); } catch {}
 src.value = saved || examples.Hello;
 
+// Line numbers, kept beside the text as it scrolls.
+const gutter = $('gutter');
+let shownLines = 0;
+const numberLines = () => {
+  const n = src.value.split('\n').length;
+  if (n === shownLines) return;
+  shownLines = n;
+  gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n') + '\n';
+};
+src.addEventListener('input', numberLines);
+src.addEventListener('scroll', () => { gutter.scrollTop = src.scrollTop; });
+numberLines();
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+  $('hint').textContent = '⌘ ↵';
+  $('run').title = 'Run (⌘+Enter)';
+}
+
 // Sharing: the code, deflated and in base64url, is the URL's fragment
 // (#code=...), which browsers do not send to the server.
 const toB64 = (bytes) => {
@@ -211,6 +259,7 @@ async function loadShared() {
   if (!m) return;
   try {
     src.value = await decode(m[1]);
+    numberLines();
     $('example').value = '';
   } catch {
     print('This link\'s code could not be read.', 2);
@@ -342,6 +391,7 @@ stop.onclick = () => {
 $('example').onchange = (e) => {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   src.value = examples[e.target.value];
+  numberLines();
   clear();
 };
 src.addEventListener('keydown', (e) => {
