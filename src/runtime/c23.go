@@ -9,19 +9,19 @@ import (
 	_ "unsafe"
 )
 
-// Hooks for C compiled with derived capabilities (doc/gd/cfront.md).
+// Hooks for C compiled with derived capabilities (doc/gd/cc.md).
 //
 // C's heap objects begin with a header that holds their type and size.
-// When C loads a pointer word that points into one, ccapObject finds the
+// When C loads a pointer word that points into one, c23Object finds the
 // object, so that the pointer gets the capability of the whole object back.
 
-// ccapObject returns the base and size of the heap object that contains
+// c23Object returns the base and size of the heap object that contains
 // address p, or 0, 0 if p is not in an object in the heap. The base and
 // size are those of the value, not of the allocation slot: an allocation
 // header is excluded.
 //
-//go:linkname ccapObject
-func ccapObject(p uintptr) (base, size uintptr) {
+//go:linkname c23Object
+func c23Object(p uintptr) (base, size uintptr) {
 	s := spanOfHeap(p)
 	if s == nil {
 		return 0, 0

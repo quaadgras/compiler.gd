@@ -1,5 +1,9 @@
-// Package ccap is the run-time support of C compiled by cfront: pointers
-// with typed capabilities (doc/gd/cfront.md).
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package c23 is the run-time support of C compiled by cmd/cc: pointers
+// with typed capabilities (doc/gd/cc.md).
 //
 // In a register (a Go variable) a C pointer is a Ptr: a capability (the
 // base, size and type of the memory it may reach) and an offset, which may
@@ -28,7 +32,7 @@
 // with invariants, a pointer store may only write a pointer word. Checks
 // read the capability's type, not the heap, so C's objects and Go's may be
 // on the stack: escape analysis keeps there what C does not store.
-package ccap
+package c23
 
 import (
 	"fmt"
@@ -38,7 +42,7 @@ import (
 	"unsafe"
 )
 
-//go:linkname object runtime.ccapObject
+//go:linkname object runtime.c23Object
 func object(p uintptr) (base, size uintptr)
 
 // Tag marks a pointer word whose address is not a whole value of the
@@ -88,7 +92,7 @@ type Fault struct {
 	Addr uintptr
 }
 
-func (f *Fault) Error() string { return fmt.Sprintf("ccap: %s (address %#x)", f.Msg, f.Addr) }
+func (f *Fault) Error() string { return fmt.Sprintf("c23: %s (address %#x)", f.Msg, f.Addr) }
 
 func fault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
 

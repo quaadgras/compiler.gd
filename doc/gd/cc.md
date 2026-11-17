@@ -1,10 +1,13 @@
 # C with typed capabilities: a prototype
 
-`doc/gd/cfront` translates a subset of C to Go so that C and Go share one
+`cmd/cc` translates a subset of C to Go so that C and Go share one
 heap, one stack, one collector and one pointer representation, and C
 cannot break what Go relies on. It is a prototype of the memory rules,
 not of the compiler: it emits Go source that the existing toolchain
-compiles.
+compiles. The generated Go imports `runtime/c23`, the run-time support.
+Like the fork's other tools, cc is an importable package: `cmd/cc/host`
+runs it in-process (`Run`, `Translate`), and the logic is in
+`cmd/cc/internal/ccmain`, with no package-level state.
 
 ## What Go may rely on, with no checks
 
@@ -23,7 +26,7 @@ kept on the heap for C's sake.
 
 ## The rules
 
-**A C pointer in a register** is `ccap.Ptr{obj, size, off, ti}`: a
+**A C pointer in a register** is `c23.Ptr{obj, size, off, ti}`: a
 capability (the base, size and type of the memory it may reach) and an
 offset, which may be anything. Arithmetic is never checked. Every access
 is checked against the capability and its type.
@@ -40,11 +43,11 @@ capability is kept in a side table, so C can still use it as what it is.
 
 - *C's objects* (`malloc`, globals, locals) begin with a header holding
   their type and exact size. A word that points into one gets the whole
-  object back (`runtime.ccapObject` finds the object; the header is
+  object back (`runtime.c23Object` finds the object; the header is
   trusted only if its type descriptor is a registered one, which safe Go
   code cannot forge).
 - *Go's pointers* get the capability of their static type, as cgo's rules
-  say what C may reach: `ccap.FromGo(p)` the value `*p`, `ccap.FromSlice(s)`
+  say what C may reach: `c23.FromGo(p)` the value `*p`, `c23.FromSlice(s)`
   the slice's whole array. A C parameter declared as an array
   (`int a[]`) makes the generated wrapper take a slice.
 - *A word loaded from Go's memory* gets the capability of the type the
@@ -71,18 +74,18 @@ only, so no check races with another thread:
   and compared, not dereferenced.
 
 **Types, not the heap, answer every check**, so C's objects and Go's may
-be on the stack. Each C local is a Go variable of type `ccap.Obj[T]`;
+be on the stack. Each C local is a Go variable of type `c23.Obj[T]`;
 escape analysis keeps it on the stack unless C stores its address
 (`StorePtr` makes what it stores escape), exactly as it does for Go. A
 Go caller's stack variables passed to C stay on the stack too: the demo
 measures no allocations for either.
 
-## What the demo shows (`go test` in doc/gd/cfront)
+## What the tests show (`go test cmd/cc`)
 
 `testdata/basic.c` (structs, typedefs, enums, switch, static locals,
 pointer arithmetic, strings, malloc) prints the same as gcc's build.
 
-`demo/interop` (from `testdata/interop.c`):
+`testdata/interop.c` with the Go side in `testdata/interop/main.go`:
 
 ```
 C's list in Go: 1 2 3 4 5
@@ -92,23 +95,23 @@ Go's stack pair summed by C: 3
 C's locals: 213
 allocations per call: sumPair 0 locals 0
 30 C reads arr[2] of Go's slice                 ok
-C reads arr[3] of Go's slice                 trapped: ccap: access of 4 bytes out of bounds of {int32, size 12, off 12}
+C reads arr[3] of Go's slice                 trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 12}
 word C stored past the end: 0x8019c3ad208028
 Go dereferences it                           trapped: runtime error: invalid memory address or nil pointer dereference
 30 C brings it back in bounds (arr[2])          ok
-C dereferences it out of bounds              trapped: ccap: access of 4 bytes out of bounds of {int32, size 12, off 24}
-...stored in Go's object instead             trapped: ccap: access through a pointer with no capability
+C dereferences it out of bounds              trapped: c23: access of 4 bytes out of bounds of {int32, size 12, off 24}
+...stored in Go's object instead             trapped: c23: access through a pointer with no capability
 60 C one-based indexing                         ok
-C writes an integer over a pointer word      trapped: ccap: scalar store over a pointer word
-C dereferences an integer                    trapped: ccap: access through a pointer with no capability
-C hides a pointer in bytes                   trapped: ccap: pointer store into a word the collector does not scan
-C puns a pointer word of a stack local       trapped: ccap: scalar store over a pointer word
+C writes an integer over a pointer word      trapped: c23: scalar store over a pointer word
+C dereferences an integer                    trapped: c23: access through a pointer with no capability
+C hides a pointer in bytes                   trapped: c23: pointer store into a word the collector does not scan
+C puns a pointer word of a stack local       trapped: c23: scalar store over a pointer word
 int* stored in a struct node* field: 0x8019c3ad208060
 Go follows it                                trapped: runtime error: invalid memory address or nil pointer dereference
 42 C uses it as the int it is                   ok
 C writes a plain field of a Go value         ok
-C writes the length of a Go slice            trapped: ccap: store into a word of a Go value with invariants (main.goThing)
-C writes past a Go value                     trapped: ccap: access of 8 bytes out of bounds of {main.goThing, size 32, off 32}
+C writes the length of a Go slice            trapped: c23: store into a word of a Go value with invariants (main.goThing)
+C writes past a Go value                     trapped: c23: access of 8 bytes out of bounds of {main.goThing, size 32, off 32}
 Go's value after: 7 2
 ```
 

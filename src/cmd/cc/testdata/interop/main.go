@@ -1,7 +1,6 @@
-// Go and C sharing memory with typed capabilities.
+// Go and C sharing memory with typed capabilities: the Go side of
+// interop.c (see TestInterop).
 package main
-
-//go:generate go run ../.. -o interop_c.go ../../testdata/interop.c
 
 import (
 	"fmt"
@@ -10,7 +9,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"cfront/ccap"
+	"runtime/c23"
 )
 
 func try(what string, f func()) {
@@ -101,9 +100,9 @@ func main() {
 	try("C uses it as the int it is", func() { fmt.Print(C_unconfuse(n), " ") })
 
 	g := &goThing{n: 1, data: []int32{1, 2}}
-	try("C writes a plain field of a Go value", func() { c_poke(ccap.FromGo(g), 0, 7) })
-	try("C writes the length of a Go slice", func() { c_poke(ccap.FromGo(g), 2, 1000) })
-	try("C writes past a Go value", func() { c_poke(ccap.FromGo(g), 4, 1) })
+	try("C writes a plain field of a Go value", func() { c_poke(c23.FromGo(g), 0, 7) })
+	try("C writes the length of a Go slice", func() { c_poke(c23.FromGo(g), 2, 1000) })
+	try("C writes past a Go value", func() { c_poke(c23.FromGo(g), 4, 1) })
 	fmt.Println("Go's value after:", g.n, len(g.data))
 }
 

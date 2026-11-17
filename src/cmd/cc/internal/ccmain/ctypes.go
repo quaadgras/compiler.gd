@@ -1,4 +1,8 @@
-package main
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package ccmain
 
 import (
 	"fmt"
@@ -227,7 +231,7 @@ func goType(t *ctype) string {
 	case kDouble:
 		return "float64"
 	case kPtr:
-		return "ccap.Ptr"
+		return "c23.Ptr"
 	}
 	panic(fmt.Sprintf("no Go type for %s", t))
 }
