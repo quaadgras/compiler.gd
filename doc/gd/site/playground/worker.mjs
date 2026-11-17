@@ -99,7 +99,10 @@ onmessage = async ({ data }) => {
       post({ build: `build failed after ${ms(t0)}`, failed: true });
     }
   } catch (e) {
-    post({ line: String((e && e.stack) || e), fd: 2 });
+    // (Safari's stack does not have the message.)
+    const stack = (e && e.stack) || '';
+    post({ line: stack.includes(String(e)) ? stack : String(e) + (stack ? '\n' + stack : ''), fd: 2 });
+    post({ build: 'failed', failed: true });
   }
   post({ finished: true });
 };

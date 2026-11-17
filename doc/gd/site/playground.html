@@ -249,6 +249,7 @@ const setBuild = (text, failed) => {
   clearInterval(ticker);
   build.className = 'build' + (failed ? ' failed' : '');
   build.textContent = text;
+  if (text === 'failed') build.textContent = 'build failed';
   if (text !== 'building') return;
   // Building: a spinner and the time so far.
   const t0 = performance.now();
