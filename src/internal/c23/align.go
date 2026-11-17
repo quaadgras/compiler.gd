@@ -18,15 +18,14 @@ const alignMagic = 0xA11_C0DE_CAB_A11 & (1<<(8*wordSize) - 1)
 // object of a power-of-two size class at a multiple of that size within
 // its page-aligned span, and a large object at the start of a page, so
 // the object is made one of those. Alignments beyond a page are a page.
-func NewAligned[T any](align uintptr) Ptr {
-	ti := tinfoOf[T]()
-	return newAligned(ti, ti.t, align)
-}
+func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(tinfoOf[T](), align) }
+
+// NewAlignedT is NewAligned, of the type whose Type is t.
+func NewAlignedT(t *Type, align uintptr) Ptr { return newAligned(t, t.t, align) }
 
 // mallocAligned is Malloc of n bytes aligned to align bytes.
 func mallocAligned(align, n uintptr) Ptr {
-	ti := tinfoOf[Raw]()
-	return newAligned(ti, reflect.ArrayOf(int(n), ti.t), align)
+	return newAligned(rawInfo, reflect.ArrayOf(int(n), rawInfo.t), align)
 }
 
 // newAligned allocates a vt, an array of ti's type, aligned to align

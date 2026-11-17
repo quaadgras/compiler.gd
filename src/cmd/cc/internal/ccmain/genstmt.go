@@ -83,7 +83,7 @@ func (g *gen) cellTmp(t *ctype) string {
 		g.p("_ = %s", n)
 		return n
 	}
-	fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\nt%d := c23.Local(&o%d)\n_ = t%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.tmpN)
+	fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\nt%d := c23.LocalT(&o%d, %s)\n_ = t%d\n", g.tmpN, g.mirror(t), g.tmpN, g.tmpN, g.typeDesc(g.mirror(t)), g.tmpN)
 	return fmt.Sprintf("t%d", g.tmpN)
 }
 
@@ -105,14 +105,14 @@ func (g *gen) declareLocal(s *symbol) {
 		fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, goType(s.t), n)
 	case lkCell:
 		g.tmpN++
-		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.Local(&o%d)\n_ = %s\n", g.tmpN, g.objMirror(s.t), n, g.tmpN, n)
+		fmt.Fprintf(&g.cells, "var o%d c23.Obj[%s]\n%s := c23.LocalT(&o%d, %s)\n_ = %s\n", g.tmpN, g.objMirror(s.t), n, g.tmpN, g.typeDesc(g.objMirror(s.t)), n)
 		if g.objMirror(s.t) == g.mirror(s.t) {
 			g.objs[s] = fmt.Sprintf("o%d.V", g.tmpN)
 		}
 	case lkHeap:
 		fmt.Fprintf(&g.locals, "var %s c23.Ptr\n_ = %s\n", n, n)
 	case lkAligned:
-		fmt.Fprintf(&g.cells, "%s := c23.NewAligned[%s](%d)\n_ = %s\n", n, g.objMirror(s.t), s.t.alignof(), n)
+		fmt.Fprintf(&g.cells, "%s := c23.NewAlignedT(%s, %d)\n_ = %s\n", n, g.typeDesc(g.objMirror(s.t)), s.t.alignof(), n)
 	}
 }
 
@@ -613,7 +613,7 @@ func (g *gen) localInit(s *symbol) {
 	switch localKindOf(s) {
 	case lkHeap:
 		size := g.vlaSize(s.t)
-		g.p("%s = c23.NewArray[%s](uintptr(%s))", n, g.mirror(baseElem(s.t)), size)
+		g.p("%s = c23.NewArrayT(%s, uintptr(%s))", n, g.typeDesc(g.mirror(baseElem(s.t))), size)
 		return
 	case lkVar:
 		if s.init != nil {

@@ -45,6 +45,11 @@ type tinfo struct {
 	// storesFree: no word a scalar store may not write (all are scalar
 	// or split), so scalar stores need no check of the words.
 	storesFree bool
+	// noStore has a bit for each word a scalar store may not write
+	// (wPtr, wRO), if the type has at most 64 words (fewWords).
+	noStore  uint64
+	fewWords bool
+	hasRO    bool // a word of a Go value with invariants (wRO)
 	mask       uintptr // size-1, if size is a power of two
 	recip      uint64  // ceil(2^64/size): off%size by multiplication (Lemire's)
 	ref        uintptr // what a Ptr's ti is for it (tref)
@@ -79,6 +84,10 @@ var (
 	tinfoMu sync.Mutex
 )
 
+// tinfoFast holds the first tinfos by id, as tinfoTab does, where Ptr.info
+// finds them with one load (a program has a few thousand types at most).
+var tinfoFast [4096]atomic.Pointer[tinfo]
+
 // registered holds every tinfo, so that a header found in memory can be
 // trusted: safe Go code cannot make a *tinfo, so it cannot forge one.
 var registered sync.Map // *tinfo -> struct{}
@@ -96,7 +105,14 @@ func infoOf(t reflect.Type) *tinfo {
 	}
 	ti.recip = ^uint64(0)/uint64(ti.size) + 1
 	ti.scalarOnly, ti.storesFree = true, true
-	for _, k := range ti.kinds {
+	ti.fewWords = len(ti.kinds) <= 64
+	for i, k := range ti.kinds {
+		if k == wRO {
+			ti.hasRO = true
+		}
+		if (k == wPtr || k == wRO) && ti.fewWords {
+			ti.noStore |= 1 << i
+		}
 		if k != wScalar {
 			ti.scalarOnly = false
 		}
@@ -116,6 +132,9 @@ func infoOf(t reflect.Type) *tinfo {
 		ti.ref |= 2
 	}
 	tinfoTab.Store(&tab)
+	if ti.id < len(tinfoFast) {
+		tinfoFast[ti.id].Store(ti)
+	}
 	tinfos.Store(t, ti)
 	registered.Store(ti, struct{}{})
 	return ti

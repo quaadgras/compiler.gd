@@ -70,7 +70,12 @@ type Ptr struct {
 // pointer made of an integer, is the same on every target.
 func tref(ti *tinfo) uintptr { return ti.ref }
 
-func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>2] }
+func (p Ptr) info() *tinfo {
+	if i := p.ti >> 2; i < uintptr(len(tinfoFast)) {
+		return tinfoFast[i].Load()
+	}
+	return (*tinfoTab.Load())[p.ti>>2]
+}
 
 // cref is tref for a capability of C's object, which has a header.
 func cref(ti *tinfo) uintptr { return tref(ti) | 1 }
@@ -161,21 +166,40 @@ type Obj[T any] struct {
 }
 
 // Local returns the C pointer for a local C object.
-func Local[T any](o *Obj[T]) Ptr {
-	ti := tinfoOf[T]()
-	o.h = header{magic: magic, ti: ti, size: unsafe.Sizeof(o.V)}
-	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: cref(ti)}
+func Local[T any](o *Obj[T]) Ptr { return LocalT(o, tinfoOf[T]()) }
+
+// A Type describes a type for C's checks: cmd/cc makes one for each type
+// once (TypeOf), in a package variable, and passes it to the allocations
+// of its functions (LocalT, NewT, NewArrayT, NewAlignedT), which so do
+// not look the type up.
+type Type = tinfo
+
+// TypeOf returns T's Type.
+func TypeOf[T any]() *Type { return tinfoOf[T]() }
+
+// LocalT is Local, of a T whose Type is t.
+func LocalT[T any](o *Obj[T], t *Type) Ptr {
+	o.h = header{magic: magic, ti: t, size: unsafe.Sizeof(o.V)}
+	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: t.ref | 1}
 }
 
 // New allocates a T for C in the heap.
 func New[T any]() Ptr { return Local(new(Obj[T])) }
 
+// NewT is New, of a T whose Type is t.
+func NewT[T any](t *Type) Ptr { return LocalT(new(Obj[T]), t) }
+
 // NewArray allocates n bytes for C as an array of T, in the heap.
 func NewArray[T any](n uintptr) Ptr { return newOf(tinfoOf[T](), n) }
 
+// NewArrayT allocates n bytes for C as an array of t's type, in the heap.
+func NewArrayT(t *Type, n uintptr) Ptr { return newOf(t, n) }
+
+var rawInfo = tinfoOf[Raw]()
+
 // Malloc is C's malloc: n bytes of untyped memory, in which C may keep
 // pointers.
-func Malloc(n uint64) Ptr { return NewArray[Raw](uintptr(n)) }
+func Malloc(n uint64) Ptr { return newOf(rawInfo, uintptr(n)) }
 
 // Free is C's free, which does nothing: the collector frees what is not
 // reachable.
@@ -434,6 +458,16 @@ func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 
 func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
 	ti := p.info()
+	if ti.fewWords && n > 0 {
+		// The words the store covers, in one value of the type, against
+		// the mask of those it may not write.
+		if o := ti.mod(uintptr(p.off)); o+n <= ti.size {
+			w0, w1 := o/wordSize, (o+n-1)/wordSize
+			if ti.noStore>>w0&(2<<(w1-w0)-1) == 0 {
+				return a
+			}
+		}
+	}
 	end := uintptr(p.off) + n
 	for b := uintptr(p.off); b < end; b = (b + wordSize) &^ (wordSize - 1) {
 		switch ti.kindAt(b) {
@@ -622,6 +656,12 @@ func Memmove(dst, src Ptr, n uintptr) {
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
+	if dst.ti == src.ti && dst.ti&1 != 0 && n%wordSize == 0 {
+		if ti := dst.info(); ti.size%wordSize == 0 && !ti.hasRO && ti.mod(uintptr(dst.off)) == ti.mod(uintptr(src.off)) {
+			moveSame(dst, src, n, d, s, ti)
+			return
+		}
+	}
 	nw := n / wordSize
 	if !overlaps(dst, src, n) {
 		// Word by word: no copy aside needed.
@@ -677,6 +717,61 @@ func Memmove(dst, src Ptr, n uintptr) {
 		t := checkScalar(Add(dst, int(nw*wordSize)), uintptr(len(tail)))
 		copy(unsafe.Slice((*byte)(t), len(tail)), tail)
 	}
+}
+
+// moveSame is Memmove of n bytes, whole words, at d and s, between C's
+// objects of one type, ti, at the same offset in a value of it: a word is
+// of one kind in both, so each is copied as it is, a pointer word with the
+// write barrier, and the slots of the capabilities with them, as Fil-C
+// copies its auxiliary words.
+func moveSame(dst, src Ptr, n uintptr, d, s unsafe.Pointer, ti *tinfo) {
+	nw := n / wordSize
+	// The slots first, so that what the pointers point to stays alive.
+	var ss unsafe.Pointer
+	if t := atomic.LoadPointer(&src.header().aux); t != nil {
+		ss = unsafe.Add(t, uintptr(src.off))
+	}
+	dh := dst.header()
+	dt := atomic.LoadPointer(&dh.aux)
+	if dt == nil && ss != nil {
+		dt = dh.makeSlots()
+	}
+	if dt != nil {
+		ds := unsafe.Slice((*unsafe.Pointer)(unsafe.Add(dt, uintptr(dst.off))), nw)
+		if ss != nil {
+			copy(ds, unsafe.Slice((*unsafe.Pointer)(ss), nw))
+		} else {
+			clear(ds)
+		}
+	}
+	nk := uintptr(len(ti.kinds))
+	k := ti.mod(uintptr(src.off)) / wordSize
+	if uintptr(d) > uintptr(s) && uintptr(d) < uintptr(s)+n {
+		// Overlapping, the destination later: from the end.
+		k = (k + nw - 1) % nk
+		for i := nw; i > 0; i-- {
+			moveWordOf(ti.kinds[k], unsafe.Add(d, (i-1)*wordSize), unsafe.Add(s, (i-1)*wordSize))
+			if k == 0 {
+				k = nk
+			}
+			k--
+		}
+		return
+	}
+	for i := uintptr(0); i < nw; i++ {
+		moveWordOf(ti.kinds[k], unsafe.Add(d, i*wordSize), unsafe.Add(s, i*wordSize))
+		if k++; k == nk {
+			k = 0
+		}
+	}
+}
+
+func moveWordOf(k wordKind, d, s unsafe.Pointer) {
+	if k == wPtr {
+		*(*unsafe.Pointer)(d) = *(*unsafe.Pointer)(s) // with the write barrier
+		return
+	}
+	*(*uintptr)(d) = *(*uintptr)(s)
 }
 
 // overlaps reports whether n bytes at a and at b may overlap.

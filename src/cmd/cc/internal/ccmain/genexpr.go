@@ -1200,9 +1200,9 @@ func (g *gen) allocCall(c *call, to *ctype) (string, bool) {
 	m := g.mirror(e)
 	switch v.sym.name {
 	case "malloc":
-		return fmt.Sprintf("c23.NewArray[%s](uintptr(%s))", m, g.rv(c.args[0])), true
+		return fmt.Sprintf("c23.NewArrayT(%s, uintptr(%s))", g.typeDesc(m), g.rv(c.args[0])), true
 	case "calloc":
-		return fmt.Sprintf("c23.NewArray[%s](uintptr(%s) * uintptr(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
+		return fmt.Sprintf("c23.NewArrayT(%s, uintptr(%s) * uintptr(%s))", g.typeDesc(m), g.rv(c.args[0]), g.rv(c.args[1])), true
 	case "realloc":
 		return fmt.Sprintf("c23.ReallocOf[%s](%s, uintptr(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
 	}

@@ -40,10 +40,12 @@ type pkgGen struct {
 	o        options
 	file     string
 	units    []*unit
-	types    strings.Builder // the mirror types
-	vars     strings.Builder // package-level variables
-	inits    strings.Builder // func init's statements
-	descInit strings.Builder // the function descriptors' assignments
+	types    strings.Builder   // the mirror types
+	vars     strings.Builder   // package-level variables
+	inits    strings.Builder   // func init's statements
+	tdescs   map[string]string // the variable holding each mirror type's c23.Type
+	tdVars   strings.Builder   // their declarations
+	descInit strings.Builder   // the function descriptors' assignments
 	funcs    strings.Builder
 	mirrors  map[string]string // a record's layout key to its mirror's name
 	strs     map[string]string
@@ -97,7 +99,7 @@ func catch(err *error) {
 
 func newPkgGen(file string, o options) *pkgGen {
 	return &pkgGen{o: o, file: file, mirrors: map[string]string{}, strs: map[string]string{},
-		ext: map[string]*symbol{}, names: map[*symbol]string{}, descs: map[string]bool{}, uses: map[string]bool{}, objs: map[*symbol]string{}}
+		ext: map[string]*symbol{}, names: map[*symbol]string{}, descs: map[string]bool{}, uses: map[string]bool{}, objs: map[*symbol]string{}, tdescs: map[string]string{}}
 }
 
 // generate translates units, one program or package, to Go source.
@@ -120,6 +122,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 	b.WriteString("import (\n\t\"math\"\n\t\"os\"\n\t\"unsafe\"\n\n\t\"internal/c23\"\n)\n\n")
 	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
 	b.WriteString(pg.types.String())
+	b.WriteString(pg.tdVars.String())
 	b.WriteString(pg.vars.String())
 	if pg.descInit.Len() > 0 {
 		b.WriteString("\nfunc init() {\n")
@@ -624,4 +627,17 @@ func (g *gen) objMirror(t *ctype) string {
 		return fmt.Sprintf("[%d]c23.Raw", t.sizeof())
 	}
 	return g.mirror(t)
+}
+
+// typeDesc returns the package variable that holds the c23.Type of the
+// mirror type m, which the allocations in functions pass, so that they
+// do not look the type up each time.
+func (g *pkgGen) typeDesc(m string) string {
+	if n, ok := g.tdescs[m]; ok {
+		return n
+	}
+	n := fmt.Sprintf("tdesc%d", len(g.tdescs))
+	g.tdescs[m] = n
+	fmt.Fprintf(&g.tdVars, "var %s = c23.TypeOf[%s]()\n", n, m)
+	return n
 }
