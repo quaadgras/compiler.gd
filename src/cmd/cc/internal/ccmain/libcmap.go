@@ -12,7 +12,7 @@ var libc = map[string]string{
 	"getchar": "Getchar", "fgetc": "Fgetc", "getc": "Fgetc", "fgets": "Fgets", "fwrite": "Fwrite",
 	"fread": "Fread", "fflush": "Fflush",
 	"malloc": "Malloc", "calloc": "Calloc", "realloc": "Realloc", "free": "Free",
-	"abort": "Abort", "exit": "Exit", "_Exit": "Exit", "abs": "Abs", "labs": "Labs", "llabs": "Labs",
+	"abort": "Abort", "exit": "Exit", "_Exit": "ExitNow", "abs": "Abs", "labs": "Labs", "llabs": "Labs",
 	"atoi": "Atoi", "atol": "Atol", "atoll": "Atol", "strtol": "Strtol", "strtoul": "Strtoul",
 	"strtoll": "Strtol", "strtoull": "Strtoul", "strtod": "Strtod", "atof": "Atof",
 	"rand": "Rand", "srand": "Srand", "getenv": "Getenv",
@@ -22,6 +22,18 @@ var libc = map[string]string{
 	"strcmp": "Strcmp", "strncmp": "Strncmp", "strlen": "Strlen", "strchr": "Strchr",
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
+	"strnlen": "Strnlen", "strpbrk": "Strpbrk", "strcoll": "Strcoll", "strtok": "Strtok",
+	"strtok_r": "StrtokR", "strerror": "Strerror", "memset_explicit": "MemsetExplicit",
+
+	// stdio.h
+	"fopen": "Fopen", "fclose": "Fclose", "tmpfile": "Tmpfile", "fseek": "Fseek", "ftell": "Ftell",
+	"rewind": "Rewind", "feof": "Feof", "ferror": "Ferror", "clearerr": "Clearerr",
+	"ungetc": "Ungetc", "setvbuf": "Setvbuf", "setbuf": "Setbuf", "remove": "Remove",
+	"rename": "Rename", "perror": "Perror",
+
+	// stdlib.h
+	"strtof": "Strtof", "strtold": "Strtold", "atexit": "Atexit", "qsort": "Qsort",
+	"bsearch": "Bsearch",
 
 	// errno.h
 	"__cc_errno": "ErrnoLoc",
@@ -31,15 +43,18 @@ var libc = map[string]string{
 	"isdigit": "Isdigit", "isgraph": "Isgraph", "islower": "Islower", "isprint": "Isprint",
 	"ispunct": "Ispunct", "isspace": "Isspace", "isupper": "Isupper", "isxdigit": "Isxdigit",
 	"tolower": "Tolower", "toupper": "Toupper",
+
 	// inttypes.h, time.h
 	"imaxabs": "Labs", "strtoimax": "Strtol", "strtoumax": "Strtoul",
 	"time": "Time", "clock": "Clock", "difftime": "Difftime",
+
 	// uchar.h, wchar.h
 	"mbrtoc8": "Mbrtoc8", "c8rtomb": "C8rtomb", "mbrtoc16": "Mbrtoc16", "c16rtomb": "C16rtomb",
 	"mbrtoc32": "Mbrtoc32", "c32rtomb": "C32rtomb", "mbrtowc": "Mbrtowc", "wcrtomb": "Wcrtomb",
 	"mbrlen": "Mbrlen", "mbsinit": "Mbsinit", "btowc": "Btowc", "wctob": "Wctob",
 	"wcslen": "Wcslen", "wcscmp": "Wcscmp", "wcsncmp": "Wcsncmp", "wcscpy": "Wcscpy",
 	"wcscat": "Wcscat", "wcschr": "Wcschr",
+
 	// math.h
 	"__cc_fpclassify": "Fpclassify", "__cc_fpclassifyf": "Fpclassifyf", "__cc_signbit": "Signbit",
 	"sin": "Sin", "cos": "Cos", "tan": "Tan", "asin": "Asin", "acos": "Acos", "atan": "Atan",

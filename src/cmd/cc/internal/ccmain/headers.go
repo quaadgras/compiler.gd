@@ -27,6 +27,39 @@ int tolower(int c);
 int toupper(int c);
 #endif
 `,
+	"errno.h": `#ifndef __CC_ERRNO_H
+#define __CC_ERRNO_H
+int *__cc_errno(void);
+#define errno (*__cc_errno())
+#define EPERM 1
+#define ENOENT 2
+#define ESRCH 3
+#define EINTR 4
+#define EIO 5
+#define E2BIG 7
+#define EBADF 9
+#define ECHILD 10
+#define EAGAIN 11
+#define ENOMEM 12
+#define EACCES 13
+#define EBUSY 16
+#define EEXIST 17
+#define EXDEV 18
+#define ENOTDIR 20
+#define EISDIR 21
+#define EINVAL 22
+#define EMFILE 24
+#define ENOSPC 28
+#define ESPIPE 29
+#define EROFS 30
+#define EPIPE 32
+#define EDOM 33
+#define ERANGE 34
+#define ENAMETOOLONG 36
+#define ENOTEMPTY 39
+#define EILSEQ 84
+#endif
+`,
 	"inttypes.h": `#ifndef __CC_INTTYPES_H
 #define __CC_INTTYPES_H
 #include <stdint.h>
@@ -449,39 +482,6 @@ size_t wcrtomb(char *restrict s, wchar_t wc, mbstate_t *restrict ps);
 #define __STDC_VERSION_WCHAR_H__ 202311L
 #endif
 `,
-	"errno.h": `#ifndef __CC_ERRNO_H
-#define __CC_ERRNO_H
-int *__cc_errno(void);
-#define errno (*__cc_errno())
-#define EPERM 1
-#define ENOENT 2
-#define ESRCH 3
-#define EINTR 4
-#define EIO 5
-#define E2BIG 7
-#define EBADF 9
-#define ECHILD 10
-#define EAGAIN 11
-#define ENOMEM 12
-#define EACCES 13
-#define EBUSY 16
-#define EEXIST 17
-#define EXDEV 18
-#define ENOTDIR 20
-#define EISDIR 21
-#define EINVAL 22
-#define EMFILE 24
-#define ENOSPC 28
-#define ESPIPE 29
-#define EROFS 30
-#define EPIPE 32
-#define EDOM 33
-#define ERANGE 34
-#define ENAMETOOLONG 36
-#define ENOTEMPTY 39
-#define EILSEQ 84
-#endif
-`,
 	"assert.h": `#undef assert
 #ifdef NDEBUG
 #define assert(...) ((void)0)
@@ -739,6 +739,29 @@ char *fgets(char *restrict s, int n, FILE *restrict stream);
 size_t fwrite(const void *restrict ptr, size_t size, size_t nmemb, FILE *restrict stream);
 size_t fread(void *restrict ptr, size_t size, size_t nmemb, FILE *restrict stream);
 int fflush(FILE *stream);
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+#define FILENAME_MAX 4096
+#define FOPEN_MAX 16
+FILE *fopen(const char *restrict filename, const char *restrict mode);
+int fclose(FILE *stream);
+FILE *tmpfile(void);
+int fseek(FILE *stream, long offset, int whence);
+long ftell(FILE *stream);
+void rewind(FILE *stream);
+int feof(FILE *stream);
+int ferror(FILE *stream);
+void clearerr(FILE *stream);
+int ungetc(int c, FILE *stream);
+int setvbuf(FILE *restrict stream, char *restrict buf, int mode, size_t size);
+void setbuf(FILE *restrict stream, char *restrict buf);
+int remove(const char *filename);
+int rename(const char *old, const char *new);
+void perror(const char *s);
 #define __STDC_VERSION_STDIO_H__ 202311L
 #endif
 `,
@@ -766,10 +789,16 @@ unsigned long strtoul(const char *restrict nptr, char **restrict endptr, int bas
 long long strtoll(const char *restrict nptr, char **restrict endptr, int base);
 unsigned long long strtoull(const char *restrict nptr, char **restrict endptr, int base);
 double strtod(const char *restrict nptr, char **restrict endptr);
+float strtof(const char *restrict nptr, char **restrict endptr);
+long double strtold(const char *restrict nptr, char **restrict endptr);
 double atof(const char *nptr);
 int rand(void);
 void srand(unsigned int seed);
 char *getenv(const char *name);
+int atexit(void (*func)(void));
+void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+#define MB_CUR_MAX ((size_t)4)
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,
@@ -801,6 +830,13 @@ char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
 size_t strspn(const char *s1, const char *s2);
 size_t strcspn(const char *s1, const char *s2);
+size_t strnlen(const char *s, size_t n);
+char *strpbrk(const char *s1, const char *s2);
+int strcoll(const char *s1, const char *s2);
+char *strtok(char *restrict s1, const char *restrict s2);
+char *strtok_r(char *restrict s, const char *restrict sep, char **restrict lasts);
+char *strerror(int errnum);
+void *memset_explicit(void *s, int c, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
 #endif
 `,

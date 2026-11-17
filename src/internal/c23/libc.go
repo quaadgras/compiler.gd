@@ -6,6 +6,7 @@ package c23
 
 import (
 	"bufio"
+	"io"
 	"math"
 	"os"
 	"strconv"
@@ -185,6 +186,57 @@ func Strndup(s Ptr, n uint64) Ptr {
 	return CString(g)
 }
 
+func Strnlen(p Ptr, max uint64) uint64 {
+	n := uint64(0)
+	for n < max && Load8(Add(p, int(n))) != 0 {
+		n++
+	}
+	return n
+}
+
+func Strpbrk(s, set Ptr) Ptr {
+	n := Strcspn(s, set)
+	if Load8(Add(s, int(n))) == 0 {
+		return Ptr{}
+	}
+	return Add(s, int(n))
+}
+
+// Strcoll is strcoll in the C locale: strcmp.
+func Strcoll(a, b Ptr) int32 { return Strcmp(a, b) }
+
+// MemsetExplicit is memset_explicit: memset, which the Go compiler does
+// not remove.
+func MemsetExplicit(p Ptr, c int32, n uint64) Ptr { return Memset(p, c, n) }
+
+var strtokSave = New[unsafe.Pointer]()
+
+// Strtok is strtok, whose state is its last string's rest.
+func Strtok(s, sep Ptr) Ptr { return StrtokR(s, sep, strtokSave) }
+
+// StrtokR is strtok_r.
+func StrtokR(s, sep, save Ptr) Ptr {
+	if Addr(s) == 0 {
+		s = LoadPtr(save)
+		if Addr(s) == 0 {
+			return Ptr{}
+		}
+	}
+	s = Add(s, int(Strspn(s, sep)))
+	if Load8(s) == 0 {
+		StorePtr(save, Ptr{})
+		return Ptr{}
+	}
+	e := Add(s, int(Strcspn(s, sep)))
+	if Load8(e) == 0 {
+		StorePtr(save, Ptr{})
+	} else {
+		Store8(e, 0)
+		StorePtr(save, Add(e, 1))
+	}
+	return s
+}
+
 // Memcpy is memcpy and memmove.
 func Memcpy(dst, src Ptr, n uint64) Ptr {
 	Memmove(dst, src, uintptr(n))
@@ -239,10 +291,122 @@ func Abort() {
 	panic(&Fault{"abort", 0})
 }
 
-// Exit is exit: it flushes C's streams and ends the program.
+// Exit is exit: it calls the functions atexit registered, flushes C's
+// streams and ends the program.
 func Exit(status int32) {
+	runAtexit()
 	Fflush(Ptr{})
 	os.Exit(int(status))
+}
+
+// ExitNow is _Exit: exit without the functions atexit registered.
+func ExitNow(status int32) {
+	Fflush(Ptr{})
+	os.Exit(int(status))
+}
+
+// cmpFunc is the Go function of a C comparison function, as qsort and
+// bsearch take.
+func cmpFunc(cmp Ptr) func(Ptr, Ptr) int32 { return FuncOf[func(Ptr, Ptr) int32](cmp) }
+
+// qsorter sorts n elements of size bytes at base: it swaps them through
+// a temporary object, so that the pointers they hold keep their
+// capabilities.
+type qsorter struct {
+	base Ptr
+	size int
+	tmp  Ptr
+	cmp  func(Ptr, Ptr) int32
+}
+
+func (q *qsorter) at(i int) Ptr       { return Add(q.base, i*q.size) }
+func (q *qsorter) less(i, j int) bool { return q.cmp(q.at(i), q.at(j)) < 0 }
+func (q *qsorter) swap(i, j int) {
+	sz := uintptr(q.size)
+	Memmove(q.tmp, q.at(i), sz)
+	Memmove(q.at(i), q.at(j), sz)
+	Memmove(q.at(j), q.tmp, sz)
+}
+
+// siftDown restores the heap of the first n elements from element i.
+func (q *qsorter) siftDown(i, n int) {
+	for {
+		c := 2*i + 1
+		if c >= n {
+			return
+		}
+		if c+1 < n && q.less(c, c+1) {
+			c++
+		}
+		if !q.less(i, c) {
+			return
+		}
+		q.swap(i, c)
+		i = c
+	}
+}
+
+// Qsort is qsort: a heapsort, in place and in O(n log n).
+func Qsort(base Ptr, n, size uint64, cmp Ptr) {
+	if n < 2 || size == 0 {
+		return
+	}
+	q := &qsorter{base: base, size: int(size), tmp: Malloc(size), cmp: cmpFunc(cmp)}
+	k := int(n)
+	for i := k/2 - 1; i >= 0; i-- {
+		q.siftDown(i, k)
+	}
+	for end := k - 1; end > 0; end-- {
+		q.swap(0, end)
+		q.siftDown(0, end)
+	}
+}
+
+func Bsearch(key, base Ptr, n, size uint64, cmp Ptr) Ptr {
+	f := cmpFunc(cmp)
+	lo, hi := uint64(0), n
+	for lo < hi {
+		m := lo + (hi-lo)/2
+		e := Add(base, int(m*size))
+		switch c := f(key, e); {
+		case c == 0:
+			return e
+		case c < 0:
+			hi = m
+		default:
+			lo = m + 1
+		}
+	}
+	return Ptr{}
+}
+
+var (
+	atexitMu sync.Mutex
+	atexitFn []Ptr
+)
+
+// Atexit is atexit: Exit calls f, after the functions registered later.
+func Atexit(f Ptr) int32 {
+	FuncOf[func()](f)
+	atexitMu.Lock()
+	atexitFn = append(atexitFn, f)
+	atexitMu.Unlock()
+	return 0
+}
+
+// runAtexit calls the functions atexit registered, the last first.
+func runAtexit() {
+	for {
+		atexitMu.Lock()
+		if len(atexitFn) == 0 {
+			atexitMu.Unlock()
+			return
+		}
+		f := atexitFn[len(atexitFn)-1]
+		atexitFn = atexitFn[:len(atexitFn)-1]
+		atexitMu.Unlock()
+		FuncOf[func()](f)()
+	}
 }
 
 func Abs(j int32) int32 {
@@ -351,7 +515,12 @@ func Strtoul(s, end Ptr, base int32) uint64 {
 	return v
 }
 
-func Strtod(s, end Ptr) float64 {
+func Strtod(s, end Ptr) float64  { return strtod(s, end, 64) }
+func Strtof(s, end Ptr) float32  { return float32(strtod(s, end, 32)) }
+func Strtold(s, end Ptr) float64 { return strtod(s, end, 64) }
+
+// strtod is strtod of a float of the given bits.
+func strtod(s, end Ptr, bits int) float64 {
 	str := GoString(s)
 	i := 0
 	for i < len(str) && strings.IndexByte(" \t\n\v\f\r", str[i]) >= 0 {
@@ -363,8 +532,15 @@ func Strtod(s, end Ptr) float64 {
 		if strings.Contains(t, "_") {
 			continue
 		}
-		f, err := strconv.ParseFloat(t, 64)
+		if k := strings.IndexAny(t, "xX"); k >= 0 && !strings.ContainsAny(t, "pP") {
+			// C's hexadecimal floats need no exponent; Go's do.
+			t += "p0"
+		}
+		f, err := strconv.ParseFloat(t, bits)
 		if err == nil || err.(*strconv.NumError).Err == strconv.ErrRange {
+			if err != nil {
+				SetErrno(ERANGE)
+			}
 			setEnd(end, s, j)
 			return f
 		}
@@ -407,12 +583,18 @@ func SetErrno(e int32) { Store32(errnoObj, uint32(e)) }
 
 // stdio.h
 
-// A File is C's FILE.
+// A File is C's FILE. It is reading while r is not nil: its writes are
+// flushed first, and a write after reads moves the file back to where C
+// read up to.
 type File struct {
-	f   *os.File
-	w   *bufio.Writer
-	r   *bufio.Reader
-	eof bool
+	f      *os.File
+	w      *bufio.Writer
+	r      *bufio.Reader
+	unget  []byte // what ungetc pushed back, the next last
+	eof    bool
+	err    bool
+	unbuf  bool
+	closed bool
 }
 
 var (
@@ -427,7 +609,11 @@ func fileOf(p Ptr) *File {
 	if p.obj == nil || p.info() != fileInfo || p.off != 0 {
 		fault("not a FILE", Addr(p))
 	}
-	return (*File)(p.obj)
+	f := (*File)(p.obj)
+	if f.closed {
+		fault("use of a closed FILE", Addr(p))
+	}
+	return f
 }
 
 func newFile(f *os.File) Ptr {
@@ -451,11 +637,36 @@ func Stdio(n int32) Ptr {
 	return stdio[n]
 }
 
-func (f *File) write(b []byte) {
-	f.w.Write(b)
-	if f.f == os.Stderr {
-		f.w.Flush()
+// unread ends reading: it moves the file back over what was read ahead.
+func (f *File) unread() {
+	if f.r == nil {
+		return
 	}
+	if n := f.r.Buffered() + len(f.unget); n > 0 {
+		f.f.Seek(int64(-n), io.SeekCurrent)
+	}
+	f.r, f.unget = nil, nil
+}
+
+func (f *File) write(b []byte) bool {
+	f.unread()
+	_, err := f.w.Write(b)
+	if err == nil && (f.unbuf || f.f == os.Stderr) {
+		err = f.w.Flush()
+	}
+	if err != nil {
+		f.err = true
+		return false
+	}
+	return true
+}
+
+func (f *File) flush() int32 {
+	if err := f.w.Flush(); err != nil {
+		f.err = true
+		return -1
+	}
+	return 0
 }
 
 // Fflush flushes a stream, or every stream if p is null.
@@ -463,13 +674,13 @@ func Fflush(p Ptr) int32 {
 	if p.obj == nil {
 		filesMu.Lock()
 		defer filesMu.Unlock()
+		r := int32(0)
 		for _, f := range files {
-			f.w.Flush()
+			r |= f.flush()
 		}
-		return 0
+		return r
 	}
-	fileOf(p).w.Flush()
-	return 0
+	return fileOf(p).flush()
 }
 
 func out() *File { return fileOf(Stdio(1)) }
@@ -511,57 +722,96 @@ func Vsnprintf(s Ptr, n uint64, format, ap Ptr) int32 {
 }
 
 func Puts(s Ptr) int32 {
-	out().write(append([]byte(GoString(s)), '\n'))
+	if !out().write(append([]byte(GoString(s)), '\n')) {
+		return -1
+	}
 	return 0
 }
 
 func Fputs(s, f Ptr) int32 {
-	fileOf(f).write([]byte(GoString(s)))
+	if !fileOf(f).write([]byte(GoString(s))) {
+		return -1
+	}
 	return 0
 }
 
-func Putchar(c int32) int32 {
-	out().write([]byte{byte(c)})
-	return c
-}
+func Putchar(c int32) int32 { return Fputc(c, Stdio(1)) }
 
 func Fputc(c int32, f Ptr) int32 {
-	fileOf(f).write([]byte{byte(c)})
-	return c
+	if !fileOf(f).write([]byte{byte(c)}) {
+		return -1
+	}
+	return int32(uint8(c))
 }
 
 func Fwrite(p Ptr, size, n uint64, f Ptr) uint64 {
-	fileOf(f).write(bytesAt(p, uintptr(size*n)))
+	if size == 0 || !fileOf(f).write(bytesAt(p, uintptr(size*n))) {
+		return 0
+	}
 	return n
 }
 
 func (f *File) reader() *bufio.Reader {
 	if f.r == nil {
-		Fflush(Ptr{})
+		if f.f == os.Stdin {
+			Fflush(Ptr{})
+		} else {
+			f.flush()
+		}
 		f.r = bufio.NewReader(f.f)
 	}
 	return f.r
 }
 
-func Fgetc(f Ptr) int32 {
-	c, err := fileOf(f).reader().ReadByte()
+func (f *File) readErr(err error) {
+	if err == io.EOF {
+		f.eof = true
+	} else {
+		f.err = true
+	}
+}
+
+func (f *File) getc() int32 {
+	if n := len(f.unget); n > 0 {
+		c := f.unget[n-1]
+		f.unget = f.unget[:n-1]
+		return int32(c)
+	}
+	c, err := f.reader().ReadByte()
 	if err != nil {
-		fileOf(f).eof = true
+		f.readErr(err)
 		return -1
 	}
 	return int32(c)
 }
 
+func Fgetc(f Ptr) int32 { return fileOf(f).getc() }
+
 func Getchar() int32 { return Fgetc(Stdio(0)) }
+
+func Ungetc(c int32, p Ptr) int32 {
+	if c == -1 {
+		return -1
+	}
+	f := fileOf(p)
+	f.reader()
+	f.unget = append(f.unget, byte(c))
+	f.eof = false
+	return int32(uint8(c))
+}
 
 func Fgets(s Ptr, n int32, f Ptr) Ptr {
 	if n <= 0 {
 		return Ptr{}
 	}
+	fl := fileOf(f)
 	i := int32(0)
 	for i < n-1 {
-		c := Fgetc(f)
+		c := fl.getc()
 		if c < 0 {
+			if fl.err {
+				return Ptr{}
+			}
 			break
 		}
 		Store8(Add(s, int(i)), uint8(c))
@@ -570,7 +820,7 @@ func Fgets(s Ptr, n int32, f Ptr) Ptr {
 			break
 		}
 	}
-	if i == 0 {
+	if i == 0 && n > 1 {
 		return Ptr{}
 	}
 	Store8(Add(s, int(i)), 0)
@@ -578,20 +828,179 @@ func Fgets(s Ptr, n int32, f Ptr) Ptr {
 }
 
 func Fread(p Ptr, size, n uint64, f Ptr) uint64 {
+	if size == 0 || n == 0 {
+		return 0
+	}
+	fl := fileOf(f)
 	b := bytesAt(p, uintptr(size*n))
 	k := 0
-	r := fileOf(f).reader()
+	for k < len(b) && len(fl.unget) > 0 {
+		b[k] = byte(fl.getc())
+		k++
+	}
+	r := fl.reader()
 	for k < len(b) {
 		m, err := r.Read(b[k:])
 		k += m
 		if err != nil {
+			fl.readErr(err)
 			break
 		}
 	}
-	if size == 0 {
-		return 0
-	}
 	return uint64(k) / size
+}
+
+// Fopen is fopen: mode is r, w or a, then any of + (update), b (no
+// effect) and x (the file must not exist).
+func Fopen(name, mode Ptr) Ptr {
+	m := GoString(mode)
+	var flag int
+	switch {
+	case strings.HasPrefix(m, "r"):
+		flag = os.O_RDONLY
+	case strings.HasPrefix(m, "w"):
+		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	case strings.HasPrefix(m, "a"):
+		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	default:
+		SetErrno(EINVAL)
+		return Ptr{}
+	}
+	for _, c := range m[1:] {
+		switch c {
+		case '+':
+			flag = flag&^(os.O_RDONLY|os.O_WRONLY) | os.O_RDWR
+		case 'x':
+			flag |= os.O_EXCL
+		case 'b':
+		default:
+			SetErrno(EINVAL)
+			return Ptr{}
+		}
+	}
+	f, err := os.OpenFile(GoString(name), flag, 0o666)
+	if err != nil {
+		setErrnoOf(err)
+		return Ptr{}
+	}
+	return newFile(f)
+}
+
+func Fclose(p Ptr) int32 {
+	f := fileOf(p)
+	r := f.flush()
+	if err := f.f.Close(); err != nil {
+		setErrnoOf(err)
+		r = -1
+	}
+	f.closed = true
+	filesMu.Lock()
+	for i, g := range files {
+		if g == f {
+			files = append(files[:i], files[i+1:]...)
+			break
+		}
+	}
+	filesMu.Unlock()
+	return r
+}
+
+// Tmpfile is tmpfile: a new file, opened w+, removed when closed (on
+// Unix, at once).
+func Tmpfile() Ptr {
+	f, err := os.CreateTemp("", "tmpf")
+	if err != nil {
+		setErrnoOf(err)
+		return Ptr{}
+	}
+	os.Remove(f.Name())
+	return newFile(f)
+}
+
+func Fseek(p Ptr, off int64, whence int32) int32 {
+	f := fileOf(p)
+	if whence < 0 || whence > 2 {
+		SetErrno(EINVAL)
+		return -1
+	}
+	if f.flush() != 0 {
+		return -1
+	}
+	if f.r != nil && whence == io.SeekCurrent {
+		off -= int64(f.r.Buffered() + len(f.unget))
+	}
+	f.r, f.unget = nil, nil
+	if _, err := f.f.Seek(off, int(whence)); err != nil {
+		setErrnoOf(err)
+		return -1
+	}
+	f.eof = false
+	return 0
+}
+
+func Ftell(p Ptr) int64 {
+	f := fileOf(p)
+	pos, err := f.f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		setErrnoOf(err)
+		return -1
+	}
+	if f.r != nil {
+		return pos - int64(f.r.Buffered()+len(f.unget))
+	}
+	return pos + int64(f.w.Buffered())
+}
+
+func Rewind(p Ptr) {
+	Fseek(p, 0, io.SeekStart)
+	fileOf(p).err = false
+}
+
+func Feof(p Ptr) int32   { return B2I(fileOf(p).eof) }
+func Ferror(p Ptr) int32 { return B2I(fileOf(p).err) }
+
+func Clearerr(p Ptr) {
+	f := fileOf(p)
+	f.eof, f.err = false, false
+}
+
+// Setvbuf is setvbuf: _IONBF (2) makes the stream unbuffered; line
+// buffering is full buffering. C's buffer is not used.
+func Setvbuf(p, buf Ptr, mode int32, size uint64) int32 {
+	if mode < 0 || mode > 2 {
+		return -1
+	}
+	fileOf(p).unbuf = mode == 2
+	return 0
+}
+
+func Setbuf(p, buf Ptr) {
+	fileOf(p).unbuf = Addr(buf) == 0
+}
+
+func Remove(name Ptr) int32 {
+	if err := os.Remove(GoString(name)); err != nil {
+		setErrnoOf(err)
+		return -1
+	}
+	return 0
+}
+
+func Rename(old, new Ptr) int32 {
+	if err := os.Rename(GoString(old), GoString(new)); err != nil {
+		setErrnoOf(err)
+		return -1
+	}
+	return 0
+}
+
+// Perror is perror: s, then the message of errno, on stderr.
+func Perror(s Ptr) {
+	msg := strerror(Errno())
+	if Addr(s) != 0 && Load8(s) != 0 {
+		msg = GoString(s) + ": " + msg
+	}
+	fileOf(Stdio(2)).write([]byte(msg + "\n"))
 }
 
 // formatC formats as C's printf.
