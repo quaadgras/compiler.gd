@@ -296,4 +296,15 @@ C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
 headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
 
 `go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);
-`testdata/slimcc/status.txt` lists the 75 of 106 that pass.
+`testdata/slimcc/status.txt` lists the 75 of 106 that pass. Given
+checkouts, `-run CTestsuite -ctestsuite DIR` runs c-testsuite (all 220
+single-exec tests pass) and `-run Torture -torture DIR` GCC's
+`gcc.c-torture/execute` (1396 of the 1576 that gcc passes); neither is
+vendored, as their licenses are not MIT, but `testdata/*.status` list what
+passes. Most of the torture tests that fail use inline assembly or vector
+types, or keep pointers in integers.
+
+Complex numbers are Go's complex64 and complex128 (`complex.h` is
+`math/cmplx`); `_BitInt(N)` goes to 64 bits (`BITINT_MAXWIDTH`, the least
+C23 allows); GNU's nested functions are Go closures (still valid after
+their parent returns, unlike GCC's trampolines).
