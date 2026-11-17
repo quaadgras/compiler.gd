@@ -97,6 +97,8 @@ type funcType struct {
 	variadic bool
 	proto    bool // has a prototype (not int f())
 	noreturn bool
+	psyms    []*symbol // the parameters, as parsed: a definition's
+	vlas     []*symbol // the lengths of VLA types in the parameters
 }
 
 type enumType struct {

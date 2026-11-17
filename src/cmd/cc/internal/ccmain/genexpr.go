@@ -355,7 +355,9 @@ func (g *gen) effect(e expr) {
 	case *stmtExpr:
 		g.stmtExprCode(e, false)
 	case *vaOp:
-		g.vaOp(e)
+		if v := g.vaOp(e); v != "" {
+			g.p("_ = %s", v) // va_arg moves ap on
+		}
 	case *builtinCall:
 		if v := g.builtinCode(e); v != "" && isSimple(v) {
 			g.p("_ = %s", v)

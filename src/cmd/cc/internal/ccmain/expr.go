@@ -1144,6 +1144,11 @@ func (p *parser) rvalue(e expr) expr {
 	if c, ok := p.constexprLoad(e); ok {
 		return c
 	}
+	if f := bitField(e); f != nil && t.isInteger() && !t.isBitInt() && f.bits < 32 {
+		// A bit-field narrower than int is an int (C23 6.3.1.1; GCC's
+		// rule for its wider base types too).
+		return &cast{node{tInt, e.at()}, e}
+	}
 	if v, ok := e.(*varRef); ok && v.sym.constx && v.sym.cval != nil {
 		if c, ok := v.sym.cval.(*intConst); ok {
 			return &intConst{node{t.unqual(), e.at()}, c.v}

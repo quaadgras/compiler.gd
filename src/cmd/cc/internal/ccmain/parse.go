@@ -35,8 +35,9 @@ type parser struct {
 	recordN     int
 	symN        int
 	stmtExprs   int
-	staticInit  int     // in the initializer of an object of static duration
-	typeStorage storage // the storage class in the last type name
+	paramVLA    *[]*symbol // collecting a parameter list\'s VLA lengths
+	staticInit  int        // in the initializer of an object of static duration
+	typeStorage storage    // the storage class in the last type name
 	typeTLS     bool
 	pendingVLA  []stmt // declarations of VLA lengths, before the next declaration
 }
@@ -1018,8 +1019,16 @@ func (p *parser) suffixes(t *ctype) *ctype {
 // vlaLength makes a variable length array's length a local, computed
 // where the declaration is, and returns a reference to it.
 func (p *parser) vlaLength(e expr, elem *ctype) expr {
+	if p.fn == nil && p.paramVLA != nil {
+		// A parameter's: computed on entry, if the function is defined.
+		p.symN++
+		sym := &symbol{name: fmt.Sprintf("vla.%d", p.symN), kind: symVar, t: tULong, p: e.at()}
+		sym.init = &initializer{scalar: p.convert(e, tULong)}
+		*p.paramVLA = append(*p.paramVLA, sym)
+		return &varRef{node{tULong, e.at()}, sym}
+	}
 	if p.fn == nil {
-		// File scope, or a prototype's parameter: a pointer anyway.
+		// File scope: a pointer anyway.
 		return &intConst{node{tULong, e.at()}, 0}
 	}
 	sym := p.newLocal("vla", tULong, e.at())
@@ -1060,6 +1069,13 @@ func (p *parser) params() *funcType {
 		return ft
 	}
 	p.push()
+	saveVLA := p.paramVLA
+	var vlas []*symbol
+	p.paramVLA = &vlas
+	defer func() {
+		ft.vlas = vlas
+		p.paramVLA = saveVLA
+	}()
 	for {
 		if p.accept("...") {
 			ft.variadic = true
@@ -1076,7 +1092,12 @@ func (p *parser) params() *funcType {
 		ft.names = append(ft.names, name)
 		if name != "" {
 			// In scope for later parameters' sizes.
-			p.sc.vars[name] = &symbol{name: name, kind: symVar, t: t}
+			ps := &symbol{name: name, kind: symVar, t: t}
+			p.sc.vars[name] = ps
+			for len(ft.psyms) < len(ft.params)-1 {
+				ft.psyms = append(ft.psyms, nil)
+			}
+			ft.psyms = append(ft.psyms, ps)
 		}
 		if !p.accept(",") {
 			break
@@ -1439,6 +1460,11 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 			pn = ft.names[i]
 		}
 		ps := &symbol{name: pn, kind: symVar, t: pt, p: at, isParam: true}
+		if i < len(ft.psyms) && ft.psyms[i] != nil {
+			// The one its parameters' VLA lengths refer to.
+			ps = ft.psyms[i]
+			ps.t, ps.p, ps.isParam = pt, at, true
+		}
 		if pn == "" {
 			ps.name = fmt.Sprintf("_%d", i)
 		} else {
@@ -1453,7 +1479,12 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	p.sc.vars["__func__"] = fs
 	p.sc.vars["__FUNCTION__"] = fs
 	p.u.statics = append(p.u.statics, fs)
+	f.locals = append(f.locals, ft.vlas...)
 	f.body = p.blockBody()
+	if len(ft.vlas) > 0 {
+		// The parameters' VLA lengths, on entry, in order.
+		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)
+	}
 	p.pop()
 	p.fn = nil
 	for _, l := range f.labels {

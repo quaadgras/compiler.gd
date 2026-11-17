@@ -277,6 +277,9 @@ func unescape(s string) (v uint32, n int, ucn bool, err error) {
 			return uint32(s[0]), 1, false, nil
 		}
 		r, size := utf8.DecodeRuneInString(s)
+		if r == utf8.RuneError && size == 1 {
+			return uint32(s[0]), 1, false, nil // a raw byte, not UTF-8
+		}
 		return uint32(r), size, true, nil
 	}
 	if len(s) < 2 {
