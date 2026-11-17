@@ -164,7 +164,12 @@ func System(command Ptr) int32 {
 	}
 	cmd := exec.Command("/bin/sh", "-c", GoString(command))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
+	return waitStatus(cmd, cmd.Run())
+}
+
+// waitStatus is the status, as wait gives it, of cmd, which ran with err,
+// or -1 (with errno) if it did not run.
+func waitStatus(cmd *exec.Cmd, err error) int32 {
 	if cmd.ProcessState == nil {
 		setErrnoOf(err)
 		return -1

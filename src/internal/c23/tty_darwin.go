@@ -6,4 +6,7 @@ package c23
 
 import "syscall"
 
-const ioctlGetattr = syscall.TIOCGETA
+const (
+	ioctlGetattr  = syscall.TIOCGETA
+	ioctlFIONREAD = 0x4004667f
+)

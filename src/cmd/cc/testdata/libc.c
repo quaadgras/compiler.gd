@@ -7,17 +7,24 @@
 #include <limits.h>
 #include <locale.h>
 #include <math.h>
+#include <memory.h>
+#include <pthread.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <time.h>
 #include <uchar.h>
 #include <unistd.h>
+#include <utime.h>
 #include <wchar.h>
 
 static void testMath(void) {
@@ -756,6 +763,267 @@ static void testPosixStdlib(void) {
 	printf("timersub %ld %ld %d\n", (long)t.tv_sec, (long)t.tv_usec, timercmp(&a, &b, <));
 }
 
+static void testLocks(void) {
+	int fd = open("lock.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	struct flock fl = {.l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 10};
+	printf("sizeof flock %zu, F_SETLK %d\n", sizeof(struct flock), fcntl(fd, F_SETLK, &fl));
+	struct flock q = {.l_type = F_WRLCK, .l_whence = SEEK_SET};
+	int r = fcntl(fd, F_GETLK, &q);
+	printf("F_GETLK %d unlocked %d\n", r, q.l_type == F_UNLCK);
+	fl.l_type = F_RDLCK;
+	printf("F_SETLKW read %d\n", fcntl(fd, F_SETLKW, &fl));
+	fl.l_type = F_UNLCK;
+	printf("unlock %d\n", fcntl(fd, F_SETLK, &fl));
+	fl.l_type = 7;
+	errno = 0;
+	r = fcntl(fd, F_SETLK, &fl);
+	printf("bad type %d %d\n", r, errno == EINVAL);
+	fl.l_type = F_RDLCK;
+	r = fcntl(99, F_SETLK, &fl);
+	printf("bad fd %d %d\n", r, errno == EBADF);
+	int wfd = open("lock.txt", O_WRONLY);
+	errno = 0;
+	r = fcntl(wfd, F_SETLK, &fl);
+	printf("read lock of write-only %d %d\n", r, errno == EBADF);
+	close(wfd);
+
+	long w = pwrite(fd, "hello world", 11, 5);
+	printf("pwrite %ld lseek %ld\n", w, (long)lseek(fd, 0, SEEK_CUR));
+	char b[32] = {0};
+	long n = pread(fd, b, sizeof b - 1, 5);
+	printf("pread %ld %s", n, b);
+	printf(" past %ld\n", (long)pread(fd, b, 4, 100));
+	errno = 0;
+	n = pread(fd, b, 4, -1);
+	printf("pread negative %ld %d\n", n, errno == EINVAL);
+	struct stat st;
+	printf("ftruncate %d", ftruncate(fd, 8));
+	fstat(fd, &st);
+	printf(" size %ld fsync %d", (long)st.st_size, fsync(fd));
+	printf(" fdatasync %d\n", fdatasync(fd));
+	int avail = -1;
+	lseek(fd, 3, SEEK_SET);
+	r = ioctl(fd, FIONREAD, &avail);
+	printf("FIONREAD %d %d\n", r, avail);
+	struct winsize ws;
+	errno = 0;
+	r = ioctl(fd, TIOCGWINSZ, &ws);
+	printf("TIOCGWINSZ of a file %d %d\n", r, errno == ENOTTY);
+	int p[2];
+	pipe(p);
+	write(p[1], "abcde", 5);
+	r = ioctl(p[0], FIONREAD, &avail);
+	printf("FIONREAD of a pipe %d %d\n", r, avail);
+	close(p[0]);
+	close(p[1]);
+	close(fd);
+	printf("truncate %d", truncate("lock.txt", 2));
+	stat("lock.txt", &st);
+	printf(" size %ld", (long)st.st_size);
+	errno = 0;
+	r = truncate("no-such-file", 0);
+	printf(" missing %d %d\n", r, errno == ENOENT);
+}
+
+static void testLinks(void) {
+	char b[64];
+	printf("symlink %d", symlink("lock.txt", "sym.txt"));
+	long n = readlink("sym.txt", b, sizeof b);
+	printf(" readlink %ld %.*s", n, (int)n, b);
+	n = readlink("sym.txt", b, 4);
+	printf(" short %ld %.*s", n, (int)n, b);
+	errno = 0;
+	n = readlink("lock.txt", b, sizeof b);
+	printf(" not a link %ld %d\n", n, errno == EINVAL);
+	struct stat st;
+	printf("link %d", link("lock.txt", "hard.txt"));
+	stat("lock.txt", &st);
+	printf(" nlink %ld", (long)st.st_nlink);
+	errno = 0;
+	int r = link("lock.txt", "hard.txt");
+	printf(" again %d %d\n", r, errno == EEXIST);
+	int fd = open("lock.txt", O_RDONLY);
+	printf("chown %d", chown("lock.txt", -1, -1));
+	printf(" lchown %d", lchown("sym.txt", -1, -1));
+	printf(" fchown %d\n", fchown(fd, -1, -1));
+	close(fd);
+	struct utimbuf ub = {1000000000, 1234567890};
+	printf("utime %d", utime("lock.txt", &ub));
+	stat("lock.txt", &st);
+	printf(" %ld %ld", (long)st.st_atime, (long)st.st_mtime);
+	printf(" now %d", utime("lock.txt", NULL));
+	stat("lock.txt", &st);
+	printf(" %d\n", st.st_mtime > 1600000000);
+	struct timeval tv[2] = {{1, 0}, {2000000000, 500000}};
+	printf("utimes %d", utimes("lock.txt", tv));
+	stat("lock.txt", &st);
+	printf(" %ld %ld %ld\n", (long)st.st_atime, (long)st.st_mtime, st.st_mtim.tv_nsec);
+	unlink("sym.txt");
+	unlink("hard.txt");
+}
+
+static void testMmap(void) {
+	unsigned char *a = mmap(NULL, 10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	int zero = 1;
+	for (int i = 0; i < 10000; i++)
+		zero &= a[i] == 0;
+	a[9999] = 7;
+	printf("mmap anonymous %d %d %d", a != MAP_FAILED, zero, a[9999]);
+	printf(" msync %d", msync(a, 10000, MS_SYNC));
+	printf(" mprotect %d", mprotect(a, 10000, PROT_READ));
+	printf(" munmap %d\n", munmap(a, 10000));
+	int fd = open("map.txt", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	write(fd, "mapped file", 11);
+	char *m = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+	printf("mmap file %d %.11s %d", m != MAP_FAILED, m, m[11]);
+	munmap(m, 4096);
+	errno = 0;
+	m = mmap(NULL, 0, PROT_READ, MAP_PRIVATE, fd, 0);
+	printf(" empty %d %d", m == MAP_FAILED, errno == EINVAL);
+	errno = 0;
+	m = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 1);
+	printf(" unaligned %d %d\n", m == MAP_FAILED, errno == EINVAL);
+	close(fd);
+}
+
+static void testPopen(void) {
+	char line[64];
+	FILE *f = popen("echo hello; echo world", "r");
+	while (fgets(line, sizeof line, f))
+		printf("popen read: %s", line);
+	printf("pclose %d\n", pclose(f));
+	f = popen("exit 3", "r");
+	printf("pclose exit 3: %d\n", pclose(f) >> 8);
+	f = popen("cat > popen.txt", "w");
+	fputs("through cat\n", f);
+	printf("pclose w %d\n", pclose(f));
+	f = fopen("popen.txt", "r");
+	fgets(line, sizeof line, f);
+	printf("popen wrote: %s", line);
+	fclose(f);
+	printf("bad mode %d\n", popen("true", "x") == NULL);
+}
+
+static void testClocks(void) {
+	struct timespec ts = {0, 1000000}, rem = {9, 9};
+	int r = nanosleep(&ts, &rem);
+	printf("nanosleep %d", r);
+	ts.tv_nsec = 1000000000;
+	errno = 0;
+	r = nanosleep(&ts, NULL);
+	printf(" bad %d %d\n", r, errno == EINVAL);
+	struct timespec a, b;
+	clock_gettime(CLOCK_REALTIME, &a);
+	time_t t = time(NULL);
+	printf("CLOCK_REALTIME %d", a.tv_sec - t <= 1 && t - a.tv_sec <= 1 && a.tv_nsec >= 0 && a.tv_nsec < 1000000000);
+	clock_gettime(CLOCK_MONOTONIC, &a);
+	nanosleep(&(struct timespec){0, 2000000}, NULL);
+	clock_gettime(CLOCK_MONOTONIC, &b);
+	printf(" CLOCK_MONOTONIC %d", (b.tv_sec - a.tv_sec) * 1000000000L + (b.tv_nsec - a.tv_nsec) >= 2000000);
+	errno = 0;
+	r = clock_gettime(99, &a);
+	printf(" bad %d %d", r, errno == EINVAL);
+	printf(" getres %d\n", clock_getres(CLOCK_MONOTONIC, &a) == 0 && a.tv_sec == 0 && a.tv_nsec > 0);
+	printf("getpagesize %d\n", getpagesize() == sysconf(_SC_PAGESIZE));
+	struct rusage ru;
+	r = getrusage(RUSAGE_SELF, &ru);
+	printf("getrusage %d %d", r, ru.ru_utime.tv_usec >= 0 && ru.ru_utime.tv_usec < 1000000 && ru.ru_stime.tv_usec < 1000000);
+	errno = 0;
+	r = getrusage(5, &ru);
+	printf(" bad %d %d\n", r, errno == EINVAL);
+}
+
+static void testPwd(void) {
+	struct passwd *pw = getpwnam("root");
+	printf("getpwnam root %d", pw != NULL);
+	if (pw)
+		printf(" %s %u %u %s", pw->pw_name, pw->pw_uid, pw->pw_gid, pw->pw_dir);
+	pw = getpwuid(0);
+	printf(" getpwuid 0 %s", pw ? pw->pw_name : "(none)");
+	pw = getpwuid(getuid());
+	printf(" self %d", pw == NULL || pw->pw_uid == getuid());
+	printf(" missing %d", getpwnam("no-such-user-here") == NULL);
+	printf(" %d\n", getpwuid(4000000000u) == NULL);
+	char buf[8];
+	memcpy(buf, "memory", 7);
+	printf("memory.h %s\n", buf);
+}
+
+static int onceN, destroyed;
+static void onceF(void) { onceN++; }
+static pthread_key_t key;
+static void keyDtor(void *p) { destroyed += *(int *)p; }
+static int keyVal = 5;
+static void *keyThread(void *arg) {
+	int ok = pthread_getspecific(key) == NULL;
+	pthread_setspecific(key, &keyVal);
+	ok &= pthread_getspecific(key) == &keyVal;
+	return ok ? arg : NULL;
+}
+static pthread_mutex_t rmu;
+static int shared;
+static void *rThread(void *arg) {
+	for (int i = 0; i < 1000; i++) {
+		pthread_mutex_lock(&rmu);
+		pthread_mutex_lock(&rmu);
+		shared++;
+		pthread_mutex_unlock(&rmu);
+		pthread_mutex_unlock(&rmu);
+	}
+	return NULL;
+}
+
+static void testPthread(void) {
+	pthread_once_t once = PTHREAD_ONCE_INIT;
+	pthread_once(&once, onceF);
+	pthread_once(&once, onceF);
+	printf("pthread_once %d\n", onceN);
+	pthread_mutexattr_t attr;
+	int type = -1;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_gettype(&attr, &type);
+	printf("default type %d", type == PTHREAD_MUTEX_DEFAULT);
+	printf(" bad %d", pthread_mutexattr_settype(&attr, 99) == EINVAL);
+	printf(" settype %d", pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE));
+	pthread_mutexattr_gettype(&attr, &type);
+	printf(" recursive %d\n", type == PTHREAD_MUTEX_RECURSIVE);
+	pthread_mutex_init(&rmu, &attr);
+	pthread_mutexattr_destroy(&attr);
+	printf("recursive lock %d", pthread_mutex_lock(&rmu));
+	printf(" %d", pthread_mutex_lock(&rmu));
+	printf(" trylock %d", pthread_mutex_trylock(&rmu));
+	for (int i = 0; i < 3; i++)
+		printf(" unlock %d", pthread_mutex_unlock(&rmu));
+	printf(" trylock %d", pthread_mutex_trylock(&rmu));
+	printf(" unlock %d\n", pthread_mutex_unlock(&rmu));
+	pthread_t t1, t2;
+	pthread_create(&t1, NULL, rThread, NULL);
+	pthread_create(&t2, NULL, rThread, NULL);
+	pthread_join(t1, NULL);
+	pthread_join(t2, NULL);
+	printf("recursive shared %d\n", shared);
+	pthread_mutex_t emu;
+	pthread_mutexattr_init(&attr);
+	pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+	pthread_mutex_init(&emu, &attr);
+	printf("errorcheck %d", pthread_mutex_lock(&emu));
+	printf(" relock %d", pthread_mutex_lock(&emu) == EDEADLK);
+	printf(" trylock %d", pthread_mutex_trylock(&emu) == EBUSY);
+	printf(" unlock %d", pthread_mutex_unlock(&emu));
+	printf(" again %d\n", pthread_mutex_unlock(&emu) == EPERM);
+	pthread_mutex_destroy(&emu);
+	pthread_mutex_destroy(&rmu);
+	printf("key_create %d", pthread_key_create(&key, keyDtor));
+	void *ret;
+	pthread_t t;
+	pthread_create(&t, NULL, keyThread, &keyVal);
+	pthread_join(t, &ret);
+	printf(" thread %d destructor %d main %d", ret == &keyVal, destroyed, pthread_getspecific(key) == NULL);
+	printf(" set %d", pthread_setspecific(key, &onceN));
+	printf(" get %d", pthread_getspecific(key) == &onceN);
+	printf(" delete %d\n", pthread_key_delete(key));
+}
+
 int main(void) {
 #ifndef __GD_CC__
 	setlocale(LC_ALL, "C.UTF-8");
@@ -778,5 +1046,12 @@ int main(void) {
 	testUnistd();
 	testStrings();
 	testPosixStdlib();
+	testLocks();
+	testLinks();
+	testMmap();
+	testPopen();
+	testClocks();
+	testPwd();
+	testPthread();
 	return 0;
 }

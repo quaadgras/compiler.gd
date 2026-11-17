@@ -566,15 +566,18 @@ func goMode(mode uint32) os.FileMode {
 
 // Fcntl is fcntl, for F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_SETFD (FD_CLOEXEC,
 // which only F_GETFD reads back), F_GETFL and F_SETFL (O_APPEND and
-// O_NONBLOCK, which only F_GETFL reads back).
+// O_NONBLOCK, which only F_GETFL reads back), and the advisory record locks
+// F_GETLK, F_SETLK and F_SETLKW (the system's, where it has them).
 func Fcntl(fd, cmd int32, va ...any) int32 {
 	var arg int32
-	if len(va) > 0 {
+	if len(va) > 0 && cmd != F_GETLK && cmd != F_SETLK && cmd != F_SETLKW {
 		arg = int32(toInt64(va[0]))
 	}
 	switch cmd {
 	case F_DUPFD, F_DUPFD_CLOEXEC:
 		return dupFrom(fd, arg, cmd == F_DUPFD_CLOEXEC)
+	case F_GETLK, F_SETLK, F_SETLKW:
+		return fcntlLock(fd, cmd, VaArg[Ptr](VaStart(va)))
 	}
 	fdMu.Lock()
 	defer fdMu.Unlock()

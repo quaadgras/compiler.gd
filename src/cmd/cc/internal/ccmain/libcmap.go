@@ -72,6 +72,10 @@ var libc = map[string]string{
 	"pthread_mutex_unlock": "PthreadMutexUnlock", "pthread_cond_init": "PthreadCondInit",
 	"pthread_cond_destroy": "PthreadCondDestroy", "pthread_cond_wait": "PthreadCondWait",
 	"pthread_cond_signal": "PthreadCondSignal", "pthread_cond_broadcast": "PthreadCondBroadcast",
+	"pthread_mutexattr_init": "PthreadMutexattrInit", "pthread_mutexattr_destroy": "PthreadMutexattrDestroy",
+	"pthread_mutexattr_settype": "PthreadMutexattrSettype", "pthread_mutexattr_gettype": "PthreadMutexattrGettype",
+	"pthread_once": "PthreadOnce", "pthread_key_create": "PthreadKeyCreate", "pthread_key_delete": "PthreadKeyDelete",
+	"pthread_getspecific": "PthreadGetspecific", "pthread_setspecific": "PthreadSetspecific",
 	"sched_yield": "SchedYield",
 	"longjmp":     "Longjmp", "_longjmp": "Longjmp", "siglongjmp": "Longjmp",
 	"strnlen": "Strnlen", "strpbrk": "Strpbrk", "strcoll": "Strcoll", "strtok": "Strtok",
@@ -171,6 +175,18 @@ var libc = map[string]string{
 	"sysconf": "Sysconf", "gethostname": "Gethostname", "getopt": "Getopt",
 	"__cc_optarg": "OptargLoc", "__cc_optind": "OptindLoc", "__cc_opterr": "OpterrLoc",
 	"__cc_optopt": "OptoptLoc",
+	"ftruncate":   "Ftruncate", "truncate": "Truncate", "fsync": "Fsync", "fdatasync": "Fdatasync",
+	"chown": "Chown", "lchown": "Lchown", "fchown": "Fchown", "readlink": "Readlink",
+	"symlink": "Symlink", "link": "Link", "pread": "Pread", "pwrite": "Pwrite",
+	"getpagesize": "Getpagesize",
+
+	// stdio.h, time.h, sys/time.h, utime.h
+	"popen": "Popen", "pclose": "Pclose", "clock_gettime": "ClockGettime",
+	"clock_getres": "ClockGetres", "nanosleep": "Nanosleep", "utimes": "Utimes", "utime": "Utime",
+
+	// sys/ioctl.h, pwd.h, sys/resource.h, sys/mman.h
+	"ioctl": "Ioctl", "getpwuid": "Getpwuid", "getpwnam": "Getpwnam", "getrusage": "Getrusage",
+	"mmap": "Mmap", "munmap": "Munmap", "msync": "Msync", "mprotect": "Mprotect", "madvise": "Madvise",
 
 	// fcntl.h, sys/stat.h, dirent.h, sys/time.h
 	"open": "Open", "creat": "Creat", "fcntl": "Fcntl",

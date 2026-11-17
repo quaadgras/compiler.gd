@@ -27,8 +27,9 @@ func init() { setStackMove(stackMove) }
 // Only its goroutine uses it, and the runtime re-keys it while the
 // goroutine is stopped, so it needs no lock.
 type gTable struct {
-	e   []gEntry
-	tls map[*TLS]Ptr // the goroutine's _Thread_local objects (thread.go)
+	e    []gEntry
+	tls  map[*TLS]Ptr   // the goroutine's _Thread_local objects (thread.go)
+	keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
 }
 
 type gEntry struct {

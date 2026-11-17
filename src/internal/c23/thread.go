@@ -23,14 +23,21 @@ type TLS struct {
 
 func NewTLS(new func() Ptr) *TLS { return &TLS{new: new} }
 
-// Get returns the calling goroutine's object.
-func (t *TLS) Get() Ptr {
+// gSelf returns the calling goroutine's table, which identifies it while
+// it runs.
+func gSelf() *gTable {
 	slot := gTableSlot()
 	tb := (*gTable)(*slot)
 	if tb == nil {
 		tb = new(gTable)
 		*slot = unsafe.Pointer(tb)
 	}
+	return tb
+}
+
+// Get returns the calling goroutine's object.
+func (t *TLS) Get() Ptr {
+	tb := gSelf()
 	if p, ok := tb.tls[t]; ok {
 		return p
 	}
@@ -68,6 +75,7 @@ func PthreadCreate(thr, attr, start, arg Ptr) int32 {
 	go func() {
 		Store64(threadID.Get(), id)
 		defer close(t.done)
+		defer runKeyDestructors()
 		defer func() {
 			if r := recover(); r != nil {
 				if e, ok := r.(threadExit); ok {
@@ -118,30 +126,119 @@ func PthreadEqual(a, b uint64) int32 { return B2I(a == b) }
 // Mutexes and condition variables: kept by the address of the C object,
 // which never moves (it is shared, so not on a goroutine's stack).
 
+// pthread_mutexattr_settype's types: glibc's and musl's.
+const (
+	PTHREAD_MUTEX_NORMAL     = 0
+	PTHREAD_MUTEX_RECURSIVE  = 1
+	PTHREAD_MUTEX_ERRORCHECK = 2
+)
+
+// A mutex is a pthread_mutex_t. One of type PTHREAD_MUTEX_RECURSIVE or
+// PTHREAD_MUTEX_ERRORCHECK knows its owner, the goroutine that locked it.
+type mutex struct {
+	mu    sync.Mutex
+	kind  int32
+	owner atomic.Pointer[gTable]
+	count int // the owner's locks of a recursive mutex
+}
+
 var (
-	mutexes sync.Map // uintptr -> *sync.Mutex
+	mutexes sync.Map // uintptr -> *mutex
 	conds   sync.Map // uintptr -> *sync.Cond
 )
 
-func mutexOf(p Ptr) *sync.Mutex {
+func mutexOf(p Ptr) *mutex {
 	check(p, 4)
 	a := Addr(p)
 	if m, ok := mutexes.Load(a); ok {
-		return m.(*sync.Mutex)
+		return m.(*mutex)
 	}
-	m, _ := mutexes.LoadOrStore(a, new(sync.Mutex))
-	return m.(*sync.Mutex)
+	m, _ := mutexes.LoadOrStore(a, new(mutex))
+	return m.(*mutex)
 }
 
-func PthreadMutexInit(m, attr Ptr) int32 { mutexOf(m); return 0 }
-func PthreadMutexDestroy(m Ptr) int32    { return 0 }
-func PthreadMutexLock(m Ptr) int32       { mutexOf(m).Lock(); return 0 }
-func PthreadMutexUnlock(m Ptr) int32     { mutexOf(m).Unlock(); return 0 }
-func PthreadMutexTrylock(m Ptr) int32 {
-	if mutexOf(m).TryLock() {
+// PthreadMutexInit is pthread_mutex_init, of the type attr has (a
+// normal mutex if attr is null).
+func PthreadMutexInit(m, attr Ptr) int32 {
+	check(m, 4)
+	mu := new(mutex)
+	if Addr(attr) != 0 {
+		mu.kind = int32(Load32(attr))
+	}
+	mutexes.Store(Addr(m), mu)
+	return 0
+}
+
+func PthreadMutexDestroy(m Ptr) int32 {
+	if mu, ok := mutexes.Load(Addr(m)); ok && mu.(*mutex).owner.Load() == nil && mu.(*mutex).mu.TryLock() {
+		mutexes.Delete(Addr(m))
+	}
+	return 0
+}
+
+func PthreadMutexLock(m Ptr) int32 { return mutexOf(m).lock(false) }
+
+func PthreadMutexTrylock(m Ptr) int32 { return mutexOf(m).lock(true) }
+
+func (m *mutex) lock(try bool) int32 {
+	if m.kind == PTHREAD_MUTEX_NORMAL {
+		if try && !m.mu.TryLock() {
+			return EBUSY
+		} else if !try {
+			m.mu.Lock()
+		}
 		return 0
 	}
-	return 16 // EBUSY
+	self := gSelf()
+	if m.owner.Load() == self {
+		if m.kind == PTHREAD_MUTEX_RECURSIVE {
+			m.count++
+			return 0
+		}
+		return If[int32](try, EBUSY, EDEADLK)
+	}
+	if try && !m.mu.TryLock() {
+		return EBUSY
+	} else if !try {
+		m.mu.Lock()
+	}
+	m.owner.Store(self)
+	m.count = 1
+	return 0
+}
+
+func PthreadMutexUnlock(m Ptr) int32 {
+	mu := mutexOf(m)
+	if mu.kind != PTHREAD_MUTEX_NORMAL {
+		if mu.owner.Load() != gSelf() {
+			return EPERM
+		}
+		if mu.count--; mu.count > 0 {
+			return 0
+		}
+		mu.owner.Store(nil)
+	}
+	mu.mu.Unlock()
+	return 0
+}
+
+// PthreadMutexattrInit is pthread_mutexattr_init: pthread_mutexattr_t
+// holds the type.
+func PthreadMutexattrInit(attr Ptr) int32 { Store32(attr, PTHREAD_MUTEX_NORMAL); return 0 }
+
+func PthreadMutexattrDestroy(attr Ptr) int32 { return 0 }
+
+func PthreadMutexattrSettype(attr Ptr, kind int32) int32 {
+	if kind < PTHREAD_MUTEX_NORMAL || kind > PTHREAD_MUTEX_ERRORCHECK {
+		return EINVAL
+	}
+	Store32(attr, uint32(kind))
+	return 0
+}
+
+func PthreadMutexattrGettype(attr, kind Ptr) int32 {
+	Store32(kind, Load32(attr))
+	return 0
 }
 
 func condOf(c, m Ptr) *sync.Cond {
@@ -149,13 +246,33 @@ func condOf(c, m Ptr) *sync.Cond {
 	if v, ok := conds.Load(a); ok {
 		return v.(*sync.Cond)
 	}
-	v, _ := conds.LoadOrStore(a, sync.NewCond(mutexOf(m)))
+	v, _ := conds.LoadOrStore(a, sync.NewCond(&mutexOf(m).mu))
 	return v.(*sync.Cond)
 }
 
 func PthreadCondInit(c, attr Ptr) int32 { return 0 }
 func PthreadCondDestroy(c Ptr) int32    { return 0 }
-func PthreadCondWait(c, m Ptr) int32    { condOf(c, m).Wait(); return 0 }
+
+// PthreadCondWait is pthread_cond_wait, which unlocks a recursive mutex
+// however many times its owner locked it, and locks it as many again.
+func PthreadCondWait(c, m Ptr) int32 {
+	mu := mutexOf(m)
+	if mu.kind == PTHREAD_MUTEX_NORMAL {
+		condOf(c, m).Wait()
+		return 0
+	}
+	self := gSelf()
+	if mu.owner.Load() != self {
+		return EPERM
+	}
+	n := mu.count
+	mu.owner.Store(nil)
+	condOf(c, m).Wait()
+	mu.owner.Store(self)
+	mu.count = n
+	return 0
+}
+
 func PthreadCondSignal(c Ptr) int32 {
 	if v, ok := conds.Load(Addr(c)); ok {
 		v.(*sync.Cond).Signal()
@@ -167,6 +284,107 @@ func PthreadCondBroadcast(c Ptr) int32 {
 		v.(*sync.Cond).Broadcast()
 	}
 	return 0
+}
+
+// pthread_once: pthread_once_t is an int, 0 (PTHREAD_ONCE_INIT) until
+// the function has run.
+
+var onces sync.Map // uintptr -> *sync.Once
+
+// PthreadOnce is pthread_once.
+func PthreadOnce(once, f Ptr) int32 {
+	if AtomicLoad[int32](once) != 0 {
+		return 0
+	}
+	v, _ := onces.LoadOrStore(Addr(once), new(sync.Once))
+	v.(*sync.Once).Do(func() {
+		FuncOf[func()](f)()
+		AtomicStore[int32](once, 1)
+	})
+	return 0
+}
+
+// Thread-specific data: pthread_key_t is an index in keys, and each
+// goroutine's values are in its gTable.
+
+type key struct {
+	destructor Ptr
+	live       bool
+}
+
+var (
+	keysMu sync.Mutex
+	keys   []key
+)
+
+// PthreadKeyCreate is pthread_key_create.
+func PthreadKeyCreate(k, destructor Ptr) int32 {
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if len(keys) >= 1024 { // PTHREAD_KEYS_MAX
+		return EAGAIN
+	}
+	keys = append(keys, key{destructor, true})
+	Store32(k, uint32(len(keys)-1))
+	return 0
+}
+
+func PthreadKeyDelete(k uint32) int32 {
+	keysMu.Lock()
+	defer keysMu.Unlock()
+	if int(k) >= len(keys) || !keys[k].live {
+		return EINVAL
+	}
+	keys[k] = key{}
+	return 0
+}
+
+func PthreadGetspecific(k uint32) Ptr {
+	return gSelf().keys[k]
+}
+
+func PthreadSetspecific(k uint32, v Ptr) int32 {
+	keysMu.Lock()
+	ok := int(k) < len(keys) && keys[k].live
+	keysMu.Unlock()
+	if !ok {
+		return EINVAL
+	}
+	tb := gSelf()
+	if tb.keys == nil {
+		tb.keys = map[uint32]Ptr{}
+	}
+	tb.keys[k] = v
+	return 0
+}
+
+// runKeyDestructors runs, as a thread ends, the destructors of its
+// non-null values (again for values they set, at most 4 times:
+// PTHREAD_DESTRUCTOR_ITERATIONS).
+func runKeyDestructors() {
+	tb := gSelf()
+	for range 4 {
+		ran := false
+		for k, v := range tb.keys {
+			if Addr(v) == 0 {
+				continue
+			}
+			delete(tb.keys, k)
+			keysMu.Lock()
+			var d Ptr
+			if int(k) < len(keys) && keys[k].live {
+				d = keys[k].destructor
+			}
+			keysMu.Unlock()
+			if Addr(d) != 0 {
+				FuncOf[func(Ptr)](d)(v)
+				ran = true
+			}
+		}
+		if !ran {
+			return
+		}
+	}
 }
 
 func SchedYield() int32 { runtime.Gosched(); return 0 }

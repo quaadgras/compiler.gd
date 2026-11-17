@@ -491,6 +491,17 @@ struct tm *localtime_r(const time_t *timer, struct tm *buf);
 size_t strftime(char *restrict s, size_t maxsize, const char *restrict format, const struct tm *restrict timeptr);
 int timespec_get(struct timespec *ts, int base);
 int timespec_getres(struct timespec *ts, int base);
+#ifndef __CC_CLOCKID_T
+#define __CC_CLOCKID_T
+typedef int clockid_t;
+#endif
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID 3
+int clock_gettime(clockid_t clock_id, struct timespec *tp);
+int clock_getres(clockid_t clock_id, struct timespec *res);
+int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
 #define __STDC_VERSION_TIME_H__ 202311L
 #endif
 `,
@@ -681,6 +692,15 @@ typedef struct { long __c[6]; } pthread_cond_t;
 typedef struct { int __a; } pthread_condattr_t;
 #define PTHREAD_MUTEX_INITIALIZER {{0}}
 #define PTHREAD_COND_INITIALIZER {{0}}
+typedef int pthread_once_t;
+#define PTHREAD_ONCE_INIT 0
+typedef unsigned int pthread_key_t;
+#define PTHREAD_KEYS_MAX 1024
+#define PTHREAD_DESTRUCTOR_ITERATIONS 4
+#define PTHREAD_MUTEX_NORMAL 0
+#define PTHREAD_MUTEX_RECURSIVE 1
+#define PTHREAD_MUTEX_ERRORCHECK 2
+#define PTHREAD_MUTEX_DEFAULT 0
 int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg);
 int pthread_join(pthread_t thread, void **retval);
 int pthread_detach(pthread_t thread);
@@ -692,11 +712,20 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex);
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
+int pthread_mutexattr_gettype(const pthread_mutexattr_t *restrict attr, int *restrict type);
 int pthread_cond_init(pthread_cond_t *restrict cond, const pthread_condattr_t *restrict attr);
 int pthread_cond_destroy(pthread_cond_t *cond);
 int pthread_cond_wait(pthread_cond_t *restrict cond, pthread_mutex_t *restrict mutex);
 int pthread_cond_signal(pthread_cond_t *cond);
 int pthread_cond_broadcast(pthread_cond_t *cond);
+int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
+int pthread_key_delete(pthread_key_t key);
+void *pthread_getspecific(pthread_key_t key);
+int pthread_setspecific(pthread_key_t key, const void *value);
 int sched_yield(void);
 #endif
 `,
@@ -1014,6 +1043,8 @@ void perror(const char *s);
 FILE *freopen(const char *restrict filename, const char *restrict mode, FILE *restrict stream);
 int fileno(FILE *stream);
 FILE *fdopen(int fd, const char *mode);
+FILE *popen(const char *command, const char *mode);
+int pclose(FILE *stream);
 #define L_tmpnam 20
 #define TMP_MAX 238328
 char *tmpnam(char *s);
@@ -1189,6 +1220,10 @@ typedef long blksize_t;
 typedef long blkcnt_t;
 typedef unsigned int useconds_t;
 typedef long suseconds_t;
+#ifndef __CC_CLOCKID_T
+#define __CC_CLOCKID_T
+typedef int clockid_t;
+#endif
 #ifndef __CC_TIME_T
 #define __CC_TIME_T
 typedef long time_t;
@@ -1239,6 +1274,19 @@ int dup2(int fd, int fd2);
 int pipe(int fds[2]);
 long sysconf(int name);
 int gethostname(char *name, size_t namelen);
+int ftruncate(int fd, off_t length);
+int truncate(const char *path, off_t length);
+int fsync(int fd);
+int fdatasync(int fd);
+int chown(const char *path, uid_t owner, gid_t group);
+int lchown(const char *path, uid_t owner, gid_t group);
+int fchown(int fd, uid_t owner, gid_t group);
+ssize_t readlink(const char *restrict path, char *restrict buf, size_t bufsize);
+int symlink(const char *path1, const char *path2);
+int link(const char *path1, const char *path2);
+ssize_t pread(int fd, void *buf, size_t nbyte, off_t offset);
+ssize_t pwrite(int fd, const void *buf, size_t nbyte, off_t offset);
+int getpagesize(void);
 int getopt(int argc, char *const argv[], const char *optstring);
 char **__cc_optarg(void);
 int *__cc_optind(void);
@@ -1278,6 +1326,19 @@ int *__cc_optopt(void);
 #define F_SETFL 4
 #define F_DUPFD_CLOEXEC 1030
 #define FD_CLOEXEC 1
+#define F_GETLK 5
+#define F_SETLK 6
+#define F_SETLKW 7
+#define F_RDLCK 0
+#define F_WRLCK 1
+#define F_UNLCK 2
+struct flock {
+	short l_type;
+	short l_whence;
+	off_t l_start;
+	off_t l_len;
+	pid_t l_pid;
+};
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2
@@ -1406,11 +1467,111 @@ struct timezone {
 	int tz_dsttime;
 };
 int gettimeofday(struct timeval *restrict tv, void *restrict tz);
+int utimes(const char *path, const struct timeval times[2]);
 #define timerisset(t) ((t)->tv_sec || (t)->tv_usec)
 #define timerclear(t) ((t)->tv_sec = (t)->tv_usec = 0)
 #define timercmp(a, b, CMP) ((a)->tv_sec == (b)->tv_sec ? (a)->tv_usec CMP (b)->tv_usec : (a)->tv_sec CMP (b)->tv_sec)
 #define timeradd(a, b, r) do { (r)->tv_sec = (a)->tv_sec + (b)->tv_sec; (r)->tv_usec = (a)->tv_usec + (b)->tv_usec; if ((r)->tv_usec >= 1000000) { (r)->tv_sec++; (r)->tv_usec -= 1000000; } } while (0)
 #define timersub(a, b, r) do { (r)->tv_sec = (a)->tv_sec - (b)->tv_sec; (r)->tv_usec = (a)->tv_usec - (b)->tv_usec; if ((r)->tv_usec < 0) { (r)->tv_sec--; (r)->tv_usec += 1000000; } } while (0)
+#endif
+`,
+	"sys/ioctl.h": `#ifndef __CC_SYS_IOCTL_H
+#define __CC_SYS_IOCTL_H
+struct winsize {
+	unsigned short ws_row;
+	unsigned short ws_col;
+	unsigned short ws_xpixel;
+	unsigned short ws_ypixel;
+};
+#define TIOCGWINSZ 0x5413
+#define FIONREAD 0x541B
+#define FIONBIO 0x5421
+#define FIONCLEX 0x5450
+#define FIOCLEX 0x5451
+int ioctl(int fd, unsigned long request, ...);
+#endif
+`,
+	"pwd.h": `#ifndef __CC_PWD_H
+#define __CC_PWD_H
+#include <sys/types.h>
+struct passwd {
+	char *pw_name;
+	char *pw_passwd;
+	uid_t pw_uid;
+	gid_t pw_gid;
+	char *pw_gecos;
+	char *pw_dir;
+	char *pw_shell;
+};
+struct passwd *getpwuid(uid_t uid);
+struct passwd *getpwnam(const char *name);
+#endif
+`,
+	"sys/resource.h": `#ifndef __CC_SYS_RESOURCE_H
+#define __CC_SYS_RESOURCE_H
+#include <sys/time.h>
+struct rusage {
+	struct timeval ru_utime;
+	struct timeval ru_stime;
+	long ru_maxrss;
+	long ru_ixrss;
+	long ru_idrss;
+	long ru_isrss;
+	long ru_minflt;
+	long ru_majflt;
+	long ru_nswap;
+	long ru_inblock;
+	long ru_oublock;
+	long ru_msgsnd;
+	long ru_msgrcv;
+	long ru_nsignals;
+	long ru_nvcsw;
+	long ru_nivcsw;
+};
+#define RUSAGE_SELF 0
+#define RUSAGE_CHILDREN (-1)
+#define RUSAGE_THREAD 1
+int getrusage(int who, struct rusage *r_usage);
+#endif
+`,
+	"memory.h": `#include <string.h>
+`,
+	"utime.h": `#ifndef __CC_UTIME_H
+#define __CC_UTIME_H
+#include <sys/types.h>
+struct utimbuf {
+	time_t actime;
+	time_t modtime;
+};
+int utime(const char *path, const struct utimbuf *times);
+#endif
+`,
+	"sys/mman.h": `#ifndef __CC_SYS_MMAN_H
+#define __CC_SYS_MMAN_H
+#include <sys/types.h>
+#define PROT_NONE 0
+#define PROT_READ 1
+#define PROT_WRITE 2
+#define PROT_EXEC 4
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_FIXED 0x10
+#define MAP_ANONYMOUS 0x20
+#define MAP_ANON MAP_ANONYMOUS
+#define MAP_FAILED ((void *) -1)
+#define MS_ASYNC 1
+#define MS_INVALIDATE 2
+#define MS_SYNC 4
+#define MADV_NORMAL 0
+#define MADV_RANDOM 1
+#define MADV_SEQUENTIAL 2
+#define MADV_WILLNEED 3
+#define MADV_DONTNEED 4
+void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off);
+int munmap(void *addr, size_t len);
+int msync(void *addr, size_t len, int flags);
+int mprotect(void *addr, size_t len, int prot);
+int madvise(void *addr, size_t len, int advice);
 #endif
 `,
 }

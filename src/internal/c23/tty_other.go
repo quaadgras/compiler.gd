@@ -17,3 +17,10 @@ func isatty(f *os.File) bool {
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&fs.ModeCharDevice != 0
 }
+
+// ioctlInRead is FIONREAD of what is not a regular file, which the system
+// does not give.
+func ioctlInRead(f *os.File) (int64, error) { return 0, errnoErr(ENOTTY) }
+
+// ioctlWinsize is TIOCGWINSZ, which the system does not give.
+func ioctlWinsize(f *os.File) ([4]uint16, error) { return [4]uint16{}, errnoErr(ENOTTY) }
