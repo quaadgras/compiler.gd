@@ -86,7 +86,8 @@ type field struct {
 	bits   int // a bit-field's width; -1 if not a bit-field
 	bitAt  int // a bit-field's first bit in its storage unit at off
 	unit   *ctype
-	packed bool // __attribute__((packed)) on the member: alignment 1
+	packed bool  // __attribute__((packed)) on the member: alignment 1
+	ubytes int64 // a packed bit-field's: the bytes it spans, from off
 }
 
 type funcType struct {
@@ -630,11 +631,12 @@ func (r *record) layout() {
 			if r.packed == 0 && pos+int64(f.bits) > unitStart+usz*8 {
 				unitStart = (pos + usz*8 - 1) / (usz * 8) * (usz * 8)
 				pos = unitStart
-			} else if r.packed > 0 {
+			} else if r.packed > 0 || f.packed {
+				// Packed: from the byte it starts in, in as many bytes as
+				// it needs, a power of two of them.
 				unitStart = pos / 8 * 8
-				for pos+int64(f.bits) > unitStart+usz*8 {
-					unitStart += 8
-				}
+				need := (pos%8 + int64(f.bits) + 7) / 8
+				f.ubytes = min(need, 8) // a 64-bit field across 9 bytes: not supported
 			}
 			f.off = unitStart / 8
 			f.bitAt = int(pos - unitStart)

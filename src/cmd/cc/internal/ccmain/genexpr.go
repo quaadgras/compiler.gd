@@ -6,6 +6,8 @@ package ccmain
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -260,6 +262,10 @@ func (g *gen) storeL(l lval, v string, c expr) {
 func (g *gen) bitLoad(addr string, f *field) string {
 	n := int(f.unit.sizeof() * 8)
 	raw := fmt.Sprintf("c23.Load%d(%s)", n, addr)
+	if f.ubytes > 0 {
+		n = 64
+		raw = fmt.Sprintf("c23.LoadBytes(%s, %d)", addr, f.ubytes)
+	}
 	t := f.t
 	if t.isUnsigned() {
 		v := fmt.Sprintf("((%s >> %d) & %d)", raw, f.bitAt, uint64(1)<<f.bits-1)
@@ -274,6 +280,9 @@ func (g *gen) bitLoad(addr string, f *field) string {
 
 func (g *gen) bitStore(addr string, f *field, v string, c expr) {
 	n := int(f.unit.sizeof() * 8)
+	if f.ubytes > 0 {
+		n = 64
+	}
 	if !isSimple(addr) {
 		t := g.tmp("c23.Ptr")
 		g.p("%s = %s", t, addr)
@@ -287,11 +296,15 @@ func (g *gen) bitStore(addr string, f *field, v string, c expr) {
 	if n < 64 {
 		m &= uint64(1)<<n - 1
 	}
+	load, store := fmt.Sprintf("c23.Load%d(%s)", n, addr), fmt.Sprintf("c23.Store%d(%s, ", n, addr)
+	if f.ubytes > 0 {
+		load, store = fmt.Sprintf("c23.LoadBytes(%s, %d)", addr, f.ubytes), fmt.Sprintf("c23.StoreBytes(%s, %d, ", addr, f.ubytes)
+	}
 	if k, ok := c.(*intConst); ok {
-		g.p("c23.Store%d(%s, c23.Load%d(%s)&^%d | %d)", n, addr, n, addr, m, (uint64(k.v)<<f.bitAt)&m)
+		g.p("%s%s&^%d | %d)", store, load, m, (uint64(k.v)<<f.bitAt)&m)
 		return
 	}
-	g.p("c23.Store%d(%s, c23.Load%d(%s)&^%d | (%s<<%d)&%d)", n, addr, n, addr, m, bitsOf(n, f.t, v, c), f.bitAt, m)
+	g.p("%s%s&^%d | (%s<<%d)&%d)", store, load, m, bitsOf(n, f.t, v, c), f.bitAt, m)
 }
 
 // effect evaluates e for its effects.
@@ -344,7 +357,11 @@ func (g *gen) effect(e expr) {
 	case *vaOp:
 		g.vaOp(e)
 	case *builtinCall:
-		g.p("%s", g.builtinCode(e))
+		if v := g.builtinCode(e); v != "" && isSimple(v) {
+			g.p("_ = %s", v)
+		} else if v != "" {
+			g.p("%s", v)
+		}
 	case *unary:
 		g.effect(e.x)
 	case *decay:
@@ -613,7 +630,18 @@ func (g *gen) castCode(e *cast) string {
 }
 
 // convertCode converts the Go value x of C type from to C type to.
+var constConv = regexp.MustCompile(`^(u?int(8|16|32|64))\((-?[0-9]+)\)$`)
+
 func convertCode(x string, from, to *ctype) string {
+	if m := constConv.FindStringSubmatch(x); m != nil && to.isInteger() && !to.isBitInt() {
+		// A constant: converted here, as Go would reject an overflow.
+		if v, err := strconv.ParseInt(m[3], 10, 64); err == nil {
+			return constLit(to, v)
+		}
+		if v, err := strconv.ParseUint(m[3], 10, 64); err == nil {
+			return constLit(to, int64(v))
+		}
+	}
 	fromPtr := from.isPtr() || from.kind == kNullptr || from.kind == kVaList
 	switch {
 	case to.kind == kBool:

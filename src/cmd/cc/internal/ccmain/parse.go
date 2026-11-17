@@ -997,6 +997,9 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			p.errorf("declaration of an array of functions")
 		}
 		at := arrayOf(inner, n)
+		if n > 0 && inner.sizeof() > 0 && n > (1<<47)/inner.sizeof() {
+			p.errorf("size of array is too large")
+		}
 		if vla != nil {
 			at.vla = p.vlaLength(vla, inner)
 		}
