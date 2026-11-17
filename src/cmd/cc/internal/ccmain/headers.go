@@ -36,28 +36,50 @@ int *__cc_errno(void);
 #define ESRCH 3
 #define EINTR 4
 #define EIO 5
+#define ENXIO 6
 #define E2BIG 7
+#define ENOEXEC 8
 #define EBADF 9
 #define ECHILD 10
 #define EAGAIN 11
 #define ENOMEM 12
 #define EACCES 13
+#define EFAULT 14
+#define ENOTBLK 15
 #define EBUSY 16
 #define EEXIST 17
 #define EXDEV 18
+#define ENODEV 19
 #define ENOTDIR 20
 #define EISDIR 21
 #define EINVAL 22
+#define ENFILE 23
 #define EMFILE 24
+#define ENOTTY 25
+#define ETXTBSY 26
+#define EFBIG 27
 #define ENOSPC 28
 #define ESPIPE 29
 #define EROFS 30
+#define EMLINK 31
 #define EPIPE 32
 #define EDOM 33
 #define ERANGE 34
+#define EDEADLK 35
 #define ENAMETOOLONG 36
+#define ENOLCK 37
+#define ENOSYS 38
 #define ENOTEMPTY 39
+#define ELOOP 40
+#define EOVERFLOW 75
 #define EILSEQ 84
+#define ENOTSOCK 88
+#define EOPNOTSUPP 95
+#define EADDRINUSE 98
+#define ECONNRESET 104
+#define ETIMEDOUT 110
+#define ECONNREFUSED 111
+#define ENOTSUP EOPNOTSUPP
 #endif
 `,
 	"inttypes.h": `#ifndef __CC_INTTYPES_H
@@ -208,6 +230,8 @@ int *__cc_errno(void);
 intmax_t imaxabs(intmax_t j);
 intmax_t strtoimax(const char *restrict nptr, char **restrict endptr, int base);
 uintmax_t strtoumax(const char *restrict nptr, char **restrict endptr, int base);
+typedef struct { intmax_t quot; intmax_t rem; } imaxdiv_t;
+imaxdiv_t imaxdiv(intmax_t numer, intmax_t denom);
 #endif
 `,
 	"math.h": `#ifndef __CC_MATH_H
@@ -434,6 +458,33 @@ typedef long clock_t;
 time_t time(time_t *timer);
 clock_t clock(void);
 double difftime(time_t time1, time_t time0);
+struct tm {
+	int tm_sec;
+	int tm_min;
+	int tm_hour;
+	int tm_mday;
+	int tm_mon;
+	int tm_year;
+	int tm_wday;
+	int tm_yday;
+	int tm_isdst;
+};
+struct timespec {
+	time_t tv_sec;
+	long tv_nsec;
+};
+#define TIME_UTC 1
+time_t mktime(struct tm *timeptr);
+time_t timegm(struct tm *timeptr);
+struct tm *gmtime(const time_t *timer);
+struct tm *gmtime_r(const time_t *timer, struct tm *buf);
+struct tm *localtime(const time_t *timer);
+struct tm *localtime_r(const time_t *timer, struct tm *buf);
+[[deprecated]] char *asctime(const struct tm *timeptr);
+[[deprecated]] char *ctime(const time_t *timer);
+size_t strftime(char *restrict s, size_t maxsize, const char *restrict format, const struct tm *restrict timeptr);
+int timespec_get(struct timespec *ts, int base);
+int timespec_getres(struct timespec *ts, int base);
 #define __STDC_VERSION_TIME_H__ 202311L
 #endif
 `,
@@ -902,6 +953,16 @@ void setbuf(FILE *restrict stream, char *restrict buf);
 int remove(const char *filename);
 int rename(const char *old, const char *new);
 void perror(const char *s);
+FILE *freopen(const char *restrict filename, const char *restrict mode, FILE *restrict stream);
+#define L_tmpnam 20
+#define TMP_MAX 238328
+char *tmpnam(char *s);
+int scanf(const char *restrict format, ...);
+int fscanf(FILE *restrict stream, const char *restrict format, ...);
+int sscanf(const char *restrict s, const char *restrict format, ...);
+int vscanf(const char *restrict format, va_list arg);
+int vfscanf(FILE *restrict stream, const char *restrict format, va_list arg);
+int vsscanf(const char *restrict s, const char *restrict format, va_list arg);
 #define __STDC_VERSION_STDIO_H__ 202311L
 #endif
 `,
@@ -938,8 +999,70 @@ char *getenv(const char *name);
 int atexit(void (*func)(void));
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+int system(const char *string);
+typedef struct { int quot; int rem; } div_t;
+typedef struct { long quot; long rem; } ldiv_t;
+typedef struct { long long quot; long long rem; } lldiv_t;
+div_t div(int numer, int denom);
+ldiv_t ldiv(long numer, long denom);
+lldiv_t lldiv(long long numer, long long denom);
 #define MB_CUR_MAX ((size_t)4)
 #define __STDC_VERSION_STDLIB_H__ 202311L
+#endif
+`,
+	"locale.h": `#ifndef __CC_LOCALE_H
+#define __CC_LOCALE_H
+#include <stddef.h>
+struct lconv {
+	char *decimal_point;
+	char *thousands_sep;
+	char *grouping;
+	char *int_curr_symbol;
+	char *currency_symbol;
+	char *mon_decimal_point;
+	char *mon_thousands_sep;
+	char *mon_grouping;
+	char *positive_sign;
+	char *negative_sign;
+	char int_frac_digits;
+	char frac_digits;
+	char p_cs_precedes;
+	char p_sep_by_space;
+	char n_cs_precedes;
+	char n_sep_by_space;
+	char p_sign_posn;
+	char n_sign_posn;
+	char int_p_cs_precedes;
+	char int_p_sep_by_space;
+	char int_n_cs_precedes;
+	char int_n_sep_by_space;
+	char int_p_sign_posn;
+	char int_n_sign_posn;
+};
+#define LC_CTYPE 0
+#define LC_NUMERIC 1
+#define LC_TIME 2
+#define LC_COLLATE 3
+#define LC_MONETARY 4
+#define LC_ALL 6
+char *setlocale(int category, const char *locale);
+struct lconv *localeconv(void);
+#endif
+`,
+	"signal.h": `#ifndef __CC_SIGNAL_H
+#define __CC_SIGNAL_H
+typedef int sig_atomic_t;
+#define SIG_DFL ((void (*)(int))0)
+#define SIG_IGN ((void (*)(int))1)
+#define SIG_ERR ((void (*)(int))-1)
+#define SIGINT 2
+#define SIGILL 4
+#define SIGABRT 6
+#define SIGFPE 8
+#define SIGSEGV 11
+#define SIGTERM 15
+void (*signal(int sig, void (*func)(int)))(int);
+int raise(int sig);
 #endif
 `,
 	"stdnoreturn.h": `#ifndef __CC_STDNORETURN_H

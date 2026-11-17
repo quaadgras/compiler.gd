@@ -47,11 +47,16 @@ var libc = map[string]string{
 	"fopen": "Fopen", "fclose": "Fclose", "tmpfile": "Tmpfile", "fseek": "Fseek", "ftell": "Ftell",
 	"rewind": "Rewind", "feof": "Feof", "ferror": "Ferror", "clearerr": "Clearerr",
 	"ungetc": "Ungetc", "setvbuf": "Setvbuf", "setbuf": "Setbuf", "remove": "Remove",
-	"rename": "Rename", "perror": "Perror",
+	"rename": "Rename", "perror": "Perror", "freopen": "Freopen", "tmpnam": "Tmpnam",
+	"scanf": "Scanf", "fscanf": "Fscanf", "sscanf": "Sscanf", "vscanf": "Vscanf",
+	"vfscanf": "Vfscanf", "vsscanf": "Vsscanf",
 
 	// stdlib.h
 	"strtof": "Strtof", "strtold": "Strtold", "atexit": "Atexit", "qsort": "Qsort",
-	"bsearch": "Bsearch",
+	"bsearch": "Bsearch", "system": "System", "div": "Div", "ldiv": "Ldiv", "lldiv": "Ldiv",
+
+	// locale.h, signal.h
+	"setlocale": "Setlocale", "localeconv": "Localeconv", "signal": "Signal", "raise": "Raise",
 
 	// errno.h
 	"__cc_errno": "ErrnoLoc",
@@ -64,7 +69,11 @@ var libc = map[string]string{
 
 	// inttypes.h, time.h
 	"imaxabs": "Labs", "strtoimax": "Strtol", "strtoumax": "Strtoul",
-	"time": "Time", "clock": "Clock", "difftime": "Difftime",
+	"imaxdiv": "Ldiv",
+	"time":    "Time", "clock": "Clock", "difftime": "Difftime", "mktime": "Mktime",
+	"timegm": "Timegm", "gmtime": "Gmtime", "gmtime_r": "GmtimeR", "localtime": "Localtime",
+	"localtime_r": "LocaltimeR", "asctime": "Asctime", "ctime": "Ctime", "strftime": "Strftime",
+	"timespec_get": "TimespecGet", "timespec_getres": "TimespecGetres",
 
 	// uchar.h, wchar.h
 	"mbrtoc8": "Mbrtoc8", "c8rtomb": "C8rtomb", "mbrtoc16": "Mbrtoc16", "c16rtomb": "C16rtomb",

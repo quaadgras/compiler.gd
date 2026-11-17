@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -286,7 +287,19 @@ func Realloc(p Ptr, n uint64) Ptr {
 	return q
 }
 
+// Abort is abort: it calls SIGABRT's handler, if it has one, then ends
+// the program.
 func Abort() {
+	sigMu.Lock()
+	h := sigHandler[SIGABRT]
+	sigMu.Unlock()
+	if a := Addr(h); a != sigDfl && a != sigIgn {
+		FuncOf[func(int32)](h)(SIGABRT)
+	}
+	abort()
+}
+
+func abort() {
 	Fflush(Ptr{})
 	panic(&Fault{"abort", 0})
 }
@@ -421,6 +434,19 @@ func Labs(j int64) int64 {
 		return -j
 	}
 	return j
+}
+
+// Div is div: it stores the div_t {quot, rem} of n/d at sret.
+func Div(sret Ptr, n, d int32) {
+	Store32(sret, uint32(n/d))
+	Store32(Add(sret, 4), uint32(n%d))
+}
+
+// Ldiv is ldiv, lldiv and imaxdiv: it stores the ldiv_t {quot, rem} of
+// n/d at sret.
+func Ldiv(sret Ptr, n, d int64) {
+	Store64(sret, uint64(n/d))
+	Store64(Add(sret, 8), uint64(n%d))
 }
 
 func Atoi(s Ptr) int32   { return int32(Strtol(s, Ptr{}, 10)) }
@@ -595,6 +621,7 @@ type File struct {
 	err    bool
 	unbuf  bool
 	closed bool
+	rd, wr bool // the mode allows reading, writing
 }
 
 var (
@@ -616,11 +643,12 @@ func fileOf(p Ptr) *File {
 	return f
 }
 
-func newFile(f *os.File) Ptr {
+func newFile(f *os.File, rd, wr bool) Ptr {
 	p := New[File]()
 	fl := (*File)(p.obj)
 	fl.f = f
 	fl.w = bufio.NewWriter(f)
+	fl.rd, fl.wr = rd, wr
 	filesMu.Lock()
 	files = append(files, fl)
 	filesMu.Unlock()
@@ -630,9 +658,10 @@ func newFile(f *os.File) Ptr {
 // Stdio returns stdin (0), stdout (1) or stderr (2).
 func Stdio(n int32) Ptr {
 	stdioOnce.Do(func() {
-		stdio[0] = newFile(os.Stdin)
-		stdio[1] = newFile(os.Stdout)
-		stdio[2] = newFile(os.Stderr)
+		stdio[0] = newFile(os.Stdin, true, false)
+		stdio[1] = newFile(os.Stdout, false, true)
+		stdio[2] = newFile(os.Stderr, false, true)
+		(*File)(stdio[2].obj).unbuf = true
 	})
 	return stdio[n]
 }
@@ -648,22 +677,41 @@ func (f *File) unread() {
 	f.r, f.unget = nil, nil
 }
 
+// badf fails an operation the stream's mode does not allow, as glibc
+// does: it sets the error indicator and errno to EBADF.
+func (f *File) badf() {
+	f.err = true
+	SetErrno(EBADF)
+}
+
 func (f *File) write(b []byte) bool {
+	if !f.wr {
+		f.badf()
+		return false
+	}
 	f.unread()
 	_, err := f.w.Write(b)
-	if err == nil && (f.unbuf || f.f == os.Stderr) {
+	if err == nil && f.unbuf {
 		err = f.w.Flush()
 	}
 	if err != nil {
-		f.err = true
+		f.fail(err)
 		return false
 	}
 	return true
 }
 
+// fail records a write's error: it sets the error indicator and errno,
+// and drops what was buffered.
+func (f *File) fail(err error) {
+	f.err = true
+	setErrnoOf(err)
+	f.w.Reset(f.f)
+}
+
 func (f *File) flush() int32 {
 	if err := f.w.Flush(); err != nil {
-		f.err = true
+		f.fail(err)
 		return -1
 	}
 	return 0
@@ -694,15 +742,13 @@ func Snprintf(s Ptr, n uint64, format Ptr, va ...any) int32 {
 	return Vsnprintf(s, n, format, VaStart(va))
 }
 
-func Vprintf(format, ap Ptr) int32 {
-	b := formatC(GoString(format), vaOf(ap))
-	out().write(b)
-	return int32(len(b))
-}
+func Vprintf(format, ap Ptr) int32 { return Vfprintf(Stdio(1), format, ap) }
 
 func Vfprintf(f, format, ap Ptr) int32 {
 	b := formatC(GoString(format), vaOf(ap))
-	fileOf(f).write(b)
+	if !fileOf(f).write(b) {
+		return -1
+	}
 	return int32(len(b))
 }
 
@@ -751,6 +797,15 @@ func Fwrite(p Ptr, size, n uint64, f Ptr) uint64 {
 	return n
 }
 
+// readable reports whether the stream's mode allows reading, and fails
+// the stream if not.
+func (f *File) readable() bool {
+	if !f.rd {
+		f.badf()
+	}
+	return f.rd
+}
+
 func (f *File) reader() *bufio.Reader {
 	if f.r == nil {
 		if f.f == os.Stdin {
@@ -777,6 +832,9 @@ func (f *File) getc() int32 {
 		f.unget = f.unget[:n-1]
 		return int32(c)
 	}
+	if !f.readable() {
+		return -1
+	}
 	c, err := f.reader().ReadByte()
 	if err != nil {
 		f.readErr(err)
@@ -794,6 +852,9 @@ func Ungetc(c int32, p Ptr) int32 {
 		return -1
 	}
 	f := fileOf(p)
+	if !f.readable() {
+		return -1
+	}
 	f.reader()
 	f.unget = append(f.unget, byte(c))
 	f.eof = false
@@ -832,6 +893,9 @@ func Fread(p Ptr, size, n uint64, f Ptr) uint64 {
 		return 0
 	}
 	fl := fileOf(f)
+	if !fl.readable() {
+		return 0
+	}
 	b := bytesAt(p, uintptr(size*n))
 	k := 0
 	for k < len(b) && len(fl.unget) > 0 {
@@ -850,49 +914,84 @@ func Fread(p Ptr, size, n uint64, f Ptr) uint64 {
 	return uint64(k) / size
 }
 
-// Fopen is fopen: mode is r, w or a, then any of + (update), b (no
-// effect) and x (the file must not exist).
-func Fopen(name, mode Ptr) Ptr {
-	m := GoString(mode)
-	var flag int
+// openMode returns the flags of fopen's mode: r, w or a, then any of +
+// (update), b (no effect) and x (the file must not exist).
+func openMode(m string) (flag int, rd, wr, ok bool) {
 	switch {
 	case strings.HasPrefix(m, "r"):
-		flag = os.O_RDONLY
+		flag, rd = os.O_RDONLY, true
 	case strings.HasPrefix(m, "w"):
-		flag = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		flag, wr = os.O_WRONLY|os.O_CREATE|os.O_TRUNC, true
 	case strings.HasPrefix(m, "a"):
-		flag = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		flag, wr = os.O_WRONLY|os.O_CREATE|os.O_APPEND, true
 	default:
-		SetErrno(EINVAL)
-		return Ptr{}
+		return 0, false, false, false
 	}
 	for _, c := range m[1:] {
 		switch c {
 		case '+':
 			flag = flag&^(os.O_RDONLY|os.O_WRONLY) | os.O_RDWR
+			rd, wr = true, true
 		case 'x':
 			flag |= os.O_EXCL
 		case 'b':
 		default:
-			SetErrno(EINVAL)
-			return Ptr{}
+			return 0, false, false, false
 		}
+	}
+	return flag, rd, wr, true
+}
+
+// Fopen is fopen.
+func Fopen(name, mode Ptr) Ptr {
+	flag, rd, wr, ok := openMode(GoString(mode))
+	if !ok {
+		SetErrno(EINVAL)
+		return Ptr{}
 	}
 	f, err := os.OpenFile(GoString(name), flag, 0o666)
 	if err != nil {
 		setErrnoOf(err)
 		return Ptr{}
 	}
-	return newFile(f)
+	return newFile(f, rd, wr)
 }
 
-func Fclose(p Ptr) int32 {
+// Freopen is freopen: it closes the stream's file and opens name in its
+// place, or, if name is null, the stream's file again with the new mode.
+// The stream is closed if that fails.
+func Freopen(name, mode, p Ptr) Ptr {
 	f := fileOf(p)
-	r := f.flush()
-	if err := f.f.Close(); err != nil {
-		setErrnoOf(err)
-		r = -1
+	f.flush()
+	flag, rd, wr, ok := openMode(GoString(mode))
+	path := f.f.Name()
+	if Addr(name) != 0 {
+		path = GoString(name)
 	}
+	if f.f != os.Stdin && f.f != os.Stdout && f.f != os.Stderr {
+		f.f.Close()
+	}
+	if !ok {
+		SetErrno(EINVAL)
+		f.close()
+		return Ptr{}
+	}
+	nf, err := os.OpenFile(path, flag, 0o666)
+	if err != nil {
+		setErrnoOf(err)
+		f.close()
+		return Ptr{}
+	}
+	f.f = nf
+	f.w.Reset(nf)
+	f.r, f.unget = nil, nil
+	f.eof, f.err = false, false
+	f.rd, f.wr = rd, wr
+	return p
+}
+
+// close marks the stream closed.
+func (f *File) close() {
 	f.closed = true
 	filesMu.Lock()
 	for i, g := range files {
@@ -902,6 +1001,53 @@ func Fclose(p Ptr) int32 {
 		}
 	}
 	filesMu.Unlock()
+}
+
+// tmpnamMu guards tmpnamBuf, tmpnam's array for a null s.
+var (
+	tmpnamMu  sync.Mutex
+	tmpnamBuf Ptr
+	tmpnamN   uint64
+)
+
+// Tmpnam is tmpnam: a name in /tmp of no existing file, at s or, if s is
+// null, in an array the next call reuses. Its names are at most
+// L_tmpnam (20) bytes long, with the null.
+func Tmpnam(s Ptr) Ptr {
+	tmpnamMu.Lock()
+	defer tmpnamMu.Unlock()
+	if Addr(s) == 0 {
+		if tmpnamBuf.obj == nil {
+			tmpnamBuf = Malloc(20)
+		}
+		s = tmpnamBuf
+	}
+	const digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	for range 238328 { // TMP_MAX
+		tmpnamN++
+		x := uint64(os.Getpid())*2654435761 + tmpnamN*0x9e3779b97f4a7c15 + uint64(time.Now().UnixNano())
+		name := []byte("/tmp/tmpnam_")
+		for range 6 {
+			name = append(name, digits[x%62])
+			x /= 62
+		}
+		if _, err := os.Lstat(string(name)); err == nil {
+			continue
+		}
+		copy(bytesAt(s, uintptr(len(name)+1)), append(name, 0))
+		return s
+	}
+	return Ptr{}
+}
+
+func Fclose(p Ptr) int32 {
+	f := fileOf(p)
+	r := f.flush()
+	if err := f.f.Close(); err != nil {
+		setErrnoOf(err)
+		r = -1
+	}
+	f.close()
 	return r
 }
 
@@ -914,7 +1060,7 @@ func Tmpfile() Ptr {
 		return Ptr{}
 	}
 	os.Remove(f.Name())
-	return newFile(f)
+	return newFile(f, true, true)
 }
 
 func Fseek(p Ptr, off int64, whence int32) int32 {
