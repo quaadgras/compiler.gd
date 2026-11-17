@@ -567,7 +567,7 @@ func (g *gcGen) splitCall(v *ssa.Value, name string, args []*ssa.Value) bool {
 		p.Pos = v.Pos
 	case "runtime.gccopy", "runtime.gcmove", "runtime.gczero", "runtime.gcclone", "runtime.gcnew", "runtime.boxobj", "runtime.boxoff",
 		"runtime.isobjarray", "runtime.newobjarray", "runtime.objarrayget", "runtime.objarrayset", "runtime.newlinear",
-		"runtime.gclinbase", "runtime.gcreflectcall", "runtime.gcmakefunc":
+		"runtime.gclinbase":
 		// The other model's.
 		g.unsupported(v, "with split, "+name)
 	default:

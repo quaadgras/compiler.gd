@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"cmd/internal/obj/wasm"
 	"cmd/internal/objabi"
+	"cmd/link/internal/ld"
 	"cmd/link/internal/loader"
 	"internal/buildcfg"
 	"sort"
@@ -53,6 +54,12 @@ func (l *gcLinker) splitHelperIndex(name string) (int, bool) {
 		if h == name {
 			return i, true
 		}
+	}
+	switch name {
+	case wasm.GCReflectCall:
+		return len(gcSplitHelpers), true
+	case wasm.GCMakeFunc:
+		return len(gcSplitHelpers) + 1, true
 	}
 	return 0, false
 }
@@ -584,4 +591,142 @@ func (l *gcLinker) splitGlobals(w *bytes.Buffer, stackTop, dataEnd uint64) {
 		gcOp(w, 0x00, ptr)
 		w.WriteByte(0x0b)
 	}
+}
+
+// loadPtrAt pushes the pointer at byte off of what the pointer in local
+// p points to.
+func (a *gcAsm) loadPtrAt(p uint32, off int64) {
+	a.get(p)
+	a.i32(off)
+	if splitMode() {
+		i, _ := a.l.splitHelperIndex(wasm.GCSplitLoadPtr)
+		a.call(a.l.helperFirst + i)
+		return
+	}
+	loadr, _ := a.l.helperIndex(wasm.GCLoadPrefix + "r")
+	a.call(a.l.helperFirst + loadr)
+}
+
+// splitLoadReg is loadReg with split: register r of the value that the
+// pointer pushed by ptr points to.
+func (a *gcAsm) splitLoadReg(r ld.WasmGCReg, ptr func()) {
+	l := a.l
+	helper := func(name string) {
+		i, _ := l.splitHelperIndex(name)
+		a.call(l.helperFirst + i)
+	}
+	ptr()
+	switch {
+	case r.Reg == 'r' && r.Mem == 'r':
+		a.i32(r.Off)
+		helper(wasm.GCSplitLoadPtr)
+		return
+	case r.Reg == 'r':
+		// (The word of an interface that holds its type: an integer
+		// in memory.)
+		a.gc(0x02, l.typeIndex(wasm.GCPtr), wasm.GCPtrAddr)
+		a.op(0x29, 0x03)
+		writeUleb128(a, uint64(r.Off))
+		helper(wasm.GCSplitIntToPtr)
+		return
+	}
+	a.gc(0x02, l.typeIndex(wasm.GCPtr), wasm.GCPtrAddr)
+	type op struct{ u, s, align byte }
+	ops := map[byte]op{'b': {0x31, 0x30, 0}, 'h': {0x33, 0x32, 1}, 'w': {0x35, 0x34, 2}, 'l': {0x29, 0x29, 3}, 'f': {0x2A, 0x2A, 2}, 'd': {0x2B, 0x2B, 3}}
+	o := ops[r.Mem]
+	if r.Signed {
+		a.op(o.s, o.align)
+	} else {
+		a.op(o.u, o.align)
+	}
+	writeUleb128(a, uint64(r.Off))
+}
+
+// splitStoreReg is storeReg with split.
+func (a *gcAsm) splitStoreReg(r ld.WasmGCReg, ptr, val func()) {
+	l := a.l
+	helper := func(name string) {
+		i, _ := l.splitHelperIndex(name)
+		a.call(l.helperFirst + i)
+	}
+	ptr()
+	if r.Reg == 'r' && r.Mem == 'r' {
+		a.i32(r.Off)
+		val()
+		helper(wasm.GCSplitStorePtr)
+		return
+	}
+	a.gc(0x02, l.typeIndex(wasm.GCPtr), wasm.GCPtrAddr)
+	val()
+	if r.Reg == 'r' {
+		helper(wasm.GCSplitPtrAddr)
+		a.op(0xAD) // i64.extend_i32_u
+	}
+	type op struct{ op, align byte }
+	ops := map[byte]op{'b': {0x3C, 0}, 'h': {0x3D, 1}, 'w': {0x3E, 2}, 'l': {0x37, 3}, 'f': {0x38, 2}, 'd': {0x39, 3}}
+	o := ops[r.Mem]
+	a.op(o.op, o.align)
+	writeUleb128(a, uint64(r.Off))
+}
+
+// splitMakeFuncStub is makeFuncStub with split: the stub asks
+// reflect.makeFuncArgsGC for a pointer to the pointers to new values
+// of its arguments, stores its arguments there, calls call
+// (reflect.makeFuncCallGC) with them and returns the results that the
+// pointers it returns point to.
+func (l *gcLinker) splitMakeFuncStub(f gcReflectFunc, call uint32) []byte {
+	a := &gcAsm{l: l}
+	ins := gcRegLetters(f.in)
+	stack := uint32(len(ins))
+	nparam := stack + uint32(len(gcStackRefs(f)))
+	args, res := nparam, nparam+1
+	a.splitLocals("rr")
+	helper := func(name string) {
+		i, _ := l.splitHelperIndex(name)
+		a.call(l.helperFirst + i)
+	}
+	gcGlobalGet(&a.Buffer, wasm.GCGlobalCtxt)
+	a.call(int(l.makeFuncArgs))
+	a.set(args)
+	p := uint32(0)
+	for i, regs := range f.in {
+		if gcOnStack(regs) {
+			// The caller's value, which the function is given.
+			a.get(args)
+			a.i32(int64(i) * 8)
+			a.get(stack)
+			helper(wasm.GCSplitStorePtr)
+			stack++
+			continue
+		}
+		for _, r := range regs {
+			v := p
+			a.storeReg(r, func() { a.loadPtrAt(args, int64(i)*8) }, func() { a.get(v) })
+			p++
+		}
+	}
+	gcGlobalGet(&a.Buffer, wasm.GCGlobalCtxt)
+	a.get(args)
+	a.call(int(call))
+	a.set(res)
+	relocs := l.ldr.Relocs(f.typ)
+	for j, regs := range f.out {
+		if gcOnStack(regs) {
+			// Into the caller's value for it.
+			t := ld.WasmGCFuncOut(l.ctxt, f.typ, &relocs, j)
+			a.get(stack)
+			a.i32(0)
+			a.loadPtrAt(res, int64(j)*8)
+			a.i32(0)
+			a.i32(ld.WasmGCSize(l.ctxt, t))
+			helper(wasm.GCSplitMove)
+			stack++
+			continue
+		}
+		for _, r := range regs {
+			a.loadReg(r, func() { a.loadPtrAt(res, int64(j)*8) })
+		}
+	}
+	a.end()
+	return a.Bytes()
 }

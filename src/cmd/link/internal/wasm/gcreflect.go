@@ -96,6 +96,10 @@ func (l *gcLinker) reflectTypes() []gcReflectFunc {
 // load pushes register r of the value that the pointer pushed by ptr
 // points to.
 func (a *gcAsm) loadReg(r ld.WasmGCReg, ptr func()) {
+	if splitMode() {
+		a.splitLoadReg(r, ptr)
+		return
+	}
 	ptr()
 	a.i32(r.Off)
 	k := r.Mem
@@ -120,6 +124,10 @@ func (a *gcAsm) loadReg(r ld.WasmGCReg, ptr func()) {
 // storeReg stores register r, which val pushes, in the value that the
 // pointer pushed by ptr points to.
 func (a *gcAsm) storeReg(r ld.WasmGCReg, ptr, val func()) {
+	if splitMode() {
+		a.splitStoreReg(r, ptr, val)
+		return
+	}
 	ptr()
 	a.i32(r.Off)
 	val()
@@ -153,21 +161,19 @@ func gcRegType(k byte) byte {
 func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 	a := &gcAsm{l: l}
 	outs := gcRegLetters(f.out)
-	writeUleb128(a, uint64(len(outs)))
-	for i := range outs {
-		writeUleb128(a, 1)
-		a.op(gcRegType(outs[i]))
+	if splitMode() {
+		a.splitLocals(outs)
+	} else {
+		writeUleb128(a, uint64(len(outs)))
+		for i := range outs {
+			writeUleb128(a, 1)
+			a.op(gcRegType(outs[i]))
+		}
 	}
 	// The arrays of pointers may be anything a pointer is: an array,
 	// a variable on the stack...
-	loadr, _ := l.helperIndex(wasm.GCLoadPrefix + "r")
 	elem := func(arr uint32, i int) func() {
-		return func() {
-			a.get(arr)
-			a.i32(int64(i) * 8)
-			a.op(0x10)
-			writeUleb128(a, uint64(l.helperFirst+loadr))
-		}
+		return func() { a.loadPtrAt(arr, int64(i)*8) }
 	}
 	ins := gcRegLetters(f.in)
 	call := func(rcvr bool) {
@@ -236,6 +242,9 @@ func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 // makeFuncStub returns the body of the function of type f that a
 // function that MakeFunc makes runs.
 func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
+	if splitMode() {
+		return l.splitMakeFuncStub(f, call)
+	}
 	a := &gcAsm{l: l}
 	ins := gcRegLetters(f.in)
 	// (After the arguments in registers, the objects of those that
@@ -370,6 +379,18 @@ func (l *gcLinker) reflectFuncs(first, nimport int, funcIndex func(loader.Sym) i
 		var call loader.Sym
 		for v := 0; v < 2 && call == 0; v++ {
 			call = l.ldr.Lookup("reflect.makeFuncCallGC", v)
+		}
+		if splitMode() {
+			// (The stubs call it for the pointers to their arguments.)
+			var args loader.Sym
+			for v := 0; v < 2 && args == 0; v++ {
+				args = l.ldr.Lookup("reflect.makeFuncArgsGC", v)
+			}
+			if args == 0 || !l.ldr.AttrReachable(args) {
+				call = 0
+			} else {
+				l.makeFuncArgs = uint32(funcIndex(args))
+			}
 		}
 		if call != 0 && l.ldr.AttrReachable(call) {
 			for _, f := range types {

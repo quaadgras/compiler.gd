@@ -77,6 +77,9 @@ type gcLinker struct {
 	layoutNext  int64            // the address of the next
 	layoutsDone bool             // the functions that go by layout are written
 
+	// split: the index of reflect.makeFuncArgsGC.
+	makeFuncArgs uint32
+
 	// The indexes of the functions that read a layout and its fields.
 	fnFind, fnFlen, fnFget, fnFgetr, fnFset int
 }
@@ -934,7 +937,13 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	}
 	if splitMode() {
-		fns = append(fns, l.splitHelpers(len(hostImports)+len(fns), splitEnd)...)
+		first := len(hostImports) + len(fns)
+		l.helperFirst = first
+		helpers := l.splitHelpers(first, splitEnd)
+		fns = append(fns, helpers...)
+		// (wasm.reflectcall and wasm.makefunc follow: see
+		// splitHelperIndex.)
+		fns = append(fns, l.reflectFuncs(first+len(helpers), len(hostImports), funcIndex)...)
 	} else {
 		fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
 	}

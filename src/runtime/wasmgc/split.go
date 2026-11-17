@@ -58,9 +58,11 @@ func newarray(t *_type, n int) unsafe.Pointer {
 		panicmakeslicelen()
 	}
 	size := uintptr(n) * t.Size_
+	// (An element for every word, to the end: a copy of whole values
+	// copies the words of each, pointers or not.)
 	var nslots uintptr
-	if t.Pointers() && n > 0 {
-		nslots = (size - t.Size_ + t.PtrBytes + 7) / 8
+	if t.Pointers() {
+		nslots = (size + 7) / 8
 	}
 	return splitalloc(size, nslots)
 }

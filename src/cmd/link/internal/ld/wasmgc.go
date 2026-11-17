@@ -231,6 +231,11 @@ func WasmGCFuncIn(ctxt *Link, typ loader.Sym, relocs *loader.Relocs, i int) load
 	return decodetypeFuncInType(ctxt.loader, ctxt.Arch, typ, relocs, i)
 }
 
+// WasmGCFuncOut returns the type of result i of the func type typ.
+func WasmGCFuncOut(ctxt *Link, typ loader.Sym, relocs *loader.Relocs, i int) loader.Sym {
+	return decodetypeFuncOutType(ctxt.loader, ctxt.Arch, typ, relocs, i)
+}
+
 // WasmGCPtrdata returns the number of bytes of a value of the Go type
 // typ that can hold pointers.
 func WasmGCPtrdata(ctxt *Link, typ loader.Sym) int64 {

@@ -1565,17 +1565,36 @@ How it is put together:
   differ; what only the other model uses stays, compiled out. `reflect`
   has `wasmSplitMode` likewise.
 
+- **reflect's calls** (`gcreflect.go`): the adapters and the stubs of
+  `MakeFunc` are those of the other model, with the registers loaded
+  from and stored to linear memory (`splitLoadReg`, `splitStoreReg`); a
+  stub gets the pointers to new values of its arguments from
+  `reflect.makeFuncArgsGC` rather than making objects.
+
+Conformance (`GOWASM=gc,split conformance/run.py`, which writes
+`status-split.txt` and builds in `conformance/out-split`): 947 of 965,
+as with `GOWASM=gc`; the 18 skipped are the same.
+
+A bug found on the way, which is a property of the model worth
+knowing: the array of an allocation must cover all of it, not only up
+to its last pointer (`PtrBytes`), or a copy of whole values (`growslice`
+of `[][]*T`) runs off the end of the source's array, finds no pointers
+to copy, and the pointers in the copy are then integers that keep
+nothing alive: the blocks they point to were freed while in use.
+
 Work list (kept current):
 
 1. [done] Types, helpers, frames, `println` hello world.
 2. [done] `compiled/tests`, `fmt` hello world.
-3. Conformance suite in split mode (`conformance/run.py` with
-   `GOWASM=gc,split` writes `status-split.txt`).
-4. `reflect.Value.Call`, methods and `MakeFunc` (`gcreflect.go`: the
-   adapters load registers through the accessors of the other model;
-   in split they are loads from linear memory). Not built:
-   `reflect_gcreflectcall` and `reflect_gcmakefunc` trap.
+3. [done] Conformance suite: 947 of 965, as `GOWASM=gc`.
+4. [done] `reflect.Value.Call`, methods and `MakeFunc`.
 5. Weak pointers by the array of a block (`weak.go`: they are strong
-   now in split); cleanups are registered by the array already.
+   in split, so `weak` and `unique` never see a value collected);
+   cleanups are registered by the array already.
 6. Size and speed: the helpers are calls; the most common (a pointer
-   load) could be inline.
+   load) could be inline. A constant index (`PtrIndex` by 0) is
+   multiplied at run time.
+7. `wasm.smove` makes the destination's pointers nil when the source's
+   array is shorter than the bytes copied (it cannot be, now, for
+   allocations); it could copy what there is.
+8. The tests of std (`std/survey.py`) have not been run in split.

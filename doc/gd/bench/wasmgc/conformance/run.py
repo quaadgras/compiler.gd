@@ -13,6 +13,10 @@ for the failures.
 With GOWASIRUNTIME=chromium (or firefox) in the environment the tests run in
 that browser (lib/wasm/wasm_gc_browser_exec.mjs), and the results go to
 status-chromium.txt.
+
+With GOWASM=gc,split in the environment the tests are built for that model
+(stage 15 of wasm-gc.md), in out-split, and the results go to
+status-split.txt (status-split-chromium.txt in a browser).
 """
 import collections, concurrent.futures, os, re, subprocess, sys
 
@@ -21,7 +25,8 @@ import build as stdbuild
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
-OUT = os.path.join(HERE, 'out')
+SPLIT = stdbuild.SPLIT
+OUT = os.path.join(HERE, 'out-split' if SPLIT else 'out')
 ENV = stdbuild.ENV
 HOSTENV = dict(os.environ, GOROOT=GOROOT, GOWASM='')
 for k in ('GOOS', 'GOARCH'):
@@ -34,7 +39,7 @@ RUNNER = os.path.join(HERE, '../compiled/run.mjs')
 BROWSER = os.environ.get('GOWASIRUNTIME', '')
 if BROWSER not in ('chromium', 'firefox'):
     BROWSER = ''
-STATUS = os.path.join(HERE, 'status-%s.txt' % BROWSER if BROWSER else 'status.txt')
+STATUS = os.path.join(HERE, 'status' + ('-split' if SPLIT else '') + ('-' + BROWSER if BROWSER else '') + '.txt')
 
 # The packages of the standard library that tests may import: those
 # that build are importable.
@@ -65,7 +70,7 @@ def build_std():
 
 
 # The build tags of GOOS=wasip1 GOARCH=wasm with the gc toolchain.
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)}
+TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set())
 
 
 def build_ok(expr):
@@ -170,7 +175,7 @@ def run(cfg, name, imports):
         env = ENV
         if BROWSER:
             cmd = [os.path.join(GOROOT, 'lib/wasm/go_wasip1_wasm_exec'), base + '.wasm']
-            env = dict(ENV, GOWASM='gc', GOWASIRUNTIME=BROWSER)
+            env = dict(ENV, GOWASIRUNTIME=BROWSER)
         r = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=60)
     except subprocess.TimeoutExpired:
         return name, 'FAIL', 'run: timeout'

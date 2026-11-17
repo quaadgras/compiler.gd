@@ -141,6 +141,9 @@ var gcMakeFuncCall func(*makeFuncImpl, unsafe.Pointer) unsafe.Pointer
 
 func makeFuncWasmGC(t *abi.Type, ftyp *funcType, fn func([]Value) []Value) Value {
 	gcMakeFuncCall = makeFuncCallGC
+	if wasmSplitMode {
+		gcMakeFuncArgs = makeFuncArgsGC
+	}
 	code := gcmakefunc(t)
 	if code == 0 {
 		if rep := gcSameLayout(ftyp); rep != nil {
@@ -155,6 +158,23 @@ func makeFuncWasmGC(t *abi.Type, ftyp *funcType, fn func([]Value) []Value) Value
 		gcDirectFuncs.Store(unsafe.Pointer(impl), true)
 	}
 	return Value{typ_: t, ptr: unsafe.Pointer(impl), flag: flag(Func)}
+}
+
+// gcMakeFuncArgs is makeFuncArgsGC, for the linker to find likewise
+// (GOWASM=gc,split).
+var gcMakeFuncArgs func(*makeFuncImpl) unsafe.Pointer
+
+// makeFuncArgsGC returns, with GOWASM=gc,split, the pointers to new
+// values of the arguments of a function that MakeFunc made, which the
+// function stores its arguments in before it calls makeFuncCallGC
+// with them.
+func makeFuncArgsGC(ctxt *makeFuncImpl) unsafe.Pointer {
+	ftyp := ctxt.ftyp
+	args := make([]unsafe.Pointer, ftyp.NumIn()+1)
+	for i := range ftyp.NumIn() {
+		args[i] = unsafe_New(ftyp.In(i))
+	}
+	return unsafe.Pointer(unsafe.SliceData(args))
 }
 
 // makeFuncCallGC is what a function that MakeFunc made calls, with the
