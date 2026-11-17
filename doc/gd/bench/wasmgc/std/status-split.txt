@@ -1,10 +1,13 @@
+# go test -short -timeout 120s, GOOS=wasip1 GOARCH=wasm GOWASM=gc,split, every package of
+# `go list std` but cmd/... (GOWASM=gc,split survey.py; logs in /tmp/wasmgc-survey-split).
+# ok | FAIL reason | BUILD reason | SKIP reason
 archive/tar ok
 archive/zip ok
 bufio ok
 bytes ok
 cmp ok
 compress/bzip2 ok
-compress/flate FAIL --- FAIL: TestWriteBlock TestWriteBlockDynamic TestWriteBlockDynamicSync | huffman_bit_writer_test.go:230: Testing "testdata/huffman-null-max.wb.expect"
+compress/flate ok
 compress/gzip ok
 compress/lzw ok
 compress/zlib ok
@@ -90,11 +93,11 @@ crypto/sha256 ok
 crypto/sha3 ok
 crypto/sha512 ok
 crypto/subtle ok
-crypto/tls FAIL panic: unknown cipher suite: 0x0000 [recovered]
+crypto/tls ok
 crypto/tls/internal/fips140tls SKIP no test files
 crypto/x509 ok
 crypto/x509/pkix SKIP no test files
-database/sql FAIL RuntimeError: null function or function signature mismatch
+database/sql ok
 database/sql/driver ok
 database/sql/internal SKIP no test files
 debug/buildinfo ok
@@ -134,12 +137,12 @@ go/build ok
 go/build/constraint ok
 go/constant ok
 go/doc ok
-go/doc/comment FAIL --- FAIL: TestWrap | wrap_test.go:22: -wrapseed=0x18e8ba09b79af340
+go/doc/comment ok
 go/format ok
 go/importer ok
 go/internal/gccgoimporter ok
 go/internal/gcimporter ok
-go/internal/srcimporter FAIL RuntimeError: null function or function signature mismatch
+go/internal/srcimporter ok
 go/parser ok
 go/printer ok
 go/scanner ok
@@ -258,7 +261,7 @@ internal/unsafeheader ok
 internal/wasmgc SKIP no test files
 internal/xcoff ok
 internal/zstd ok
-io FAIL --- FAIL: TestMultiReaderFreesExhaustedReaders | multi_test.go:347: timeout waiting for collection of buf1
+io ok
 io/fs ok
 io/ioutil ok
 iter ok
@@ -276,21 +279,21 @@ math/big/internal/asmgen ok
 math/bits ok
 math/cmplx ok
 math/rand ok
-math/rand/v2 FAIL --- FAIL: TestUniformFactorial | rand_test.go:460: mean 9.057433472616976e+07 != 5 (allowed error 0.316227766016838, 0.08)
+math/rand/v2 ok
 mime ok
 mime/multipart ok
 mime/quotedprintable ok
-net FAIL panic: runtime error: invalid memory address or nil pointer dereference
-net/http FAIL fatal error: select: woken by no case
+net ok
+net/http ok
 net/http/cgi ok
 net/http/cookiejar ok
 net/http/fcgi ok
 net/http/httptest ok
 net/http/httptrace ok
-net/http/httputil FAIL fatal error: select: woken by no case
+net/http/httputil ok
 net/http/internal ok
 net/http/internal/ascii ok
-net/http/internal/http2 FAIL RuntimeError: null function or function signature mismatch
+net/http/internal/http2 ok
 net/http/internal/httpcommon SKIP no test files
 net/http/internal/httpsfv SKIP no test files
 net/http/internal/testcert SKIP no test files
@@ -312,7 +315,7 @@ os/user ok
 path ok
 path/filepath ok
 plugin ok
-reflect FAIL panic: did not panic [recovered]
+reflect ok
 reflect/internal/example1 SKIP no test files
 reflect/internal/example2 SKIP no test files
 regexp ok
@@ -333,14 +336,14 @@ structs SKIP no test files
 sync ok
 sync/atomic ok
 syscall ok
-testing FAIL panic: nil
+testing ok
 testing/cryptotest ok
 testing/fstest ok
 testing/internal/testdeps SKIP no test files
 testing/iotest ok
 testing/quick ok
 testing/slogtest ok
-testing/synctest FAIL panic: trying to put back buffer of the wrong size in the copyBufPool
+testing/synctest ok
 text/scanner ok
 text/tabwriter ok
 text/template ok
@@ -350,7 +353,7 @@ time/tzdata SKIP no test files
 unicode ok
 unicode/utf16 ok
 unicode/utf8 ok
-unique FAIL --- FAIL: TestNestedHandle | handle_test.go:110: value {{<nil>} [1 2 3 4 5 6]} still referenced by a handle (or tiny block?): internal pointer 0x86b3b8
+unique ok
 unsafe SKIP no test files
 uuid ok
 vendor/golang.org/x/crypto/chacha20 SKIP no test files
@@ -376,4 +379,7 @@ vendor/golang.org/x/text/secure/bidirule SKIP no test files
 vendor/golang.org/x/text/transform SKIP no test files
 vendor/golang.org/x/text/unicode/bidi SKIP no test files
 vendor/golang.org/x/text/unicode/norm SKIP no test files
-weak FAIL --- FAIL: TestPointerEquality | pointer_test.go:117: expected weak pointer to be nil, got 0xa58d8
+weak ok
+# Survey of 2026-11-17 (GOWASM=gc,split, first): FAIL 17 SKIP 124 ok 238 (BUILD 0)
+# Survey of 2026-11-17 (GOWASM=gc,split: mutable pointers, the host's stack while parked, an array per variable): FAIL 1 SKIP 124 ok 254 (BUILD 0)
+# crypto/tls run again alone: ok (TestWeakCertCache waits 4 s for a collection, which 14 packages at once delayed).

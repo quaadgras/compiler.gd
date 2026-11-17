@@ -1547,9 +1547,13 @@ How it is put together:
   `wasm.szero`, and of one without inline loads and stores (up to 64
   bytes) or `memory.copy`/`memory.fill`. Every variable whose address
   is taken is in the frame in linear memory (but in wrappers, which
-  have none: allocated), which has an array if one of them has
-  pointers, and a pointer to it (`fptr`). Typed locals, casts, the
-  second case of every access and allocation by `struct.new` are gone.
+  have none: allocated); each one that has pointers has an array and a
+  pointer of its own, made on entry (`framePtrs`), and the others are
+  reached from a pointer to the frame without one (`fptr`). (One array
+  for the frame, as decided, kept what every variable pointed to while
+  any was used: weak, unique, io and reflect's tests saw values not
+  collected.) Typed locals, casts, the second case of every access and
+  allocation by `struct.new` are gone.
 - **Linker** (`cmd/link/internal/wasm/gcsplit.go`): the helpers (eight
   small functions) instead of those by layout; the globals: the array
   of data, a pointer to address 0 with it, and a pointer to each data
@@ -1581,6 +1585,15 @@ to its last pointer (`PtrBytes`), or a copy of whole values (`growslice`
 of `[][]*T`) runs off the end of the source's array, finds no pointers
 to copy, and the pointers in the copy are then integers that keep
 nothing alive: the blocks they point to were freed while in use.
+
+**A goroutine's frames were overwritten while it was parked** (found
+by `database/sql`, `testing`, `net/http`), a bug of the runtime in
+both models that split's larger frames brought out: the host found the
+top of the stack in linear memory where the last goroutine left it,
+and one that ends restores the top it was started with, which may be
+above the frames of a goroutine parked since; what the host called next
+put its frames over them. A goroutine that parks now moves the top to
+the host's stack (`gopark`).
 
 **A block in use was freed, because the engine is clever.** A pointer
 was first all immutable fields. V8's optimizing compiler, having
@@ -1614,14 +1627,16 @@ Work list (kept current):
 2. [done] `compiled/tests`, `fmt` hello world.
 3. [done] Conformance suite: 947 of 965, as `GOWASM=gc`.
 4. [done] `reflect.Value.Call`, methods and `MakeFunc`.
-5. Weak pointers by the array of a block (`weak.go`: they are strong
-   in split, so `weak` and `unique` never see a value collected);
-   cleanups are registered by the array already.
+5. [done] Weak pointers: by the array of a block (`gd.weakmake` takes
+   the array, `gd.weakgetat` and the export `mkptr` make the pointer
+   again).
 6. Size and speed: the helpers are calls; the most common (a pointer
    load) could be inline. A constant index (`PtrIndex` by 0) is
    multiplied at run time.
 7. `wasm.smove` makes the destination's pointers nil when the source's
    array is shorter than the bytes copied (it cannot be, now, for
    allocations); it could copy what there is.
-8. The tests of std: `GOWASM=gc,split std/survey.py` writes
-   `std/status-split.txt`; see there for what fails.
+8. [done] The tests of std: `GOWASM=gc,split std/survey.py` writes
+   `std/status-split.txt`: all 255 packages pass under node (the first
+   survey had 238; what the others found is above). Not run in a
+   browser.

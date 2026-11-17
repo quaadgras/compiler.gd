@@ -215,13 +215,15 @@ func spScalar(t *types.Type) *types.Type {
 		switch {
 		case t.IsStruct():
 			var only *types.Type
+			n := 0
 			for _, f := range t.Fields() {
 				if f.Type.Size() == 0 {
 					continue
 				}
 				only = f.Type
+				n++
 			}
-			if only == nil {
+			if n != 1 {
 				return t
 			}
 			t = only
