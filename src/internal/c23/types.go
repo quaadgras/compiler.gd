@@ -47,11 +47,13 @@ var tinfos sync.Map // reflect.Type -> *tinfo
 // tinfoTab holds every tinfo by id, copied when one is added (types are
 // few), so that reading it needs no lock.
 var (
-	tinfoTab atomic.Pointer[[]*tinfo]
-	tinfoMu  sync.Mutex
+	tinfoTab = func() *atomic.Pointer[[]*tinfo] {
+		var p atomic.Pointer[[]*tinfo]
+		p.Store(new([]*tinfo))
+		return &p
+	}()
+	tinfoMu sync.Mutex
 )
-
-func init() { tinfoTab.Store(new([]*tinfo)) }
 
 // registered holds every tinfo, so that a header found in memory can be
 // trusted: safe Go code cannot make a *tinfo, so it cannot forge one.

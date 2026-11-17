@@ -1,0 +1,567 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package ccmain
+
+import (
+	"fmt"
+	"strings"
+)
+
+// C's types, as cmd/cc lays them out: LP64, little-endian, long double
+// the same as double (doc/gd/cc.md).
+
+type kind uint8
+
+const (
+	kVoid kind = iota
+	kBool
+	kChar
+	kSChar
+	kUChar
+	kShort
+	kUShort
+	kInt
+	kUInt
+	kLong
+	kULong
+	kLLong
+	kULLong
+	kFloat
+	kDouble
+	kLDouble
+	kNullptr
+	kPtr
+	kArray
+	kStruct // and union: rec.union
+	kFunc
+	kVaList // __builtin_va_list
+)
+
+type qual uint8
+
+const (
+	qConst qual = 1 << iota
+	qVolatile
+	qRestrict
+	qAtomic
+)
+
+type ctype struct {
+	kind kind
+	q    qual
+	elem *ctype // kPtr, kArray
+
+	n   int64 // kArray: the length, or -1 if not known
+	vla expr  // kArray: the length of a variable length array
+
+	rec  *record   // kStruct
+	fn   *funcType // kFunc
+	enum *enumType // an integer kind that is an enumeration
+
+	align int64 // _Alignas or aligned, if more than the type's own
+}
+
+type record struct {
+	tag      string
+	union    bool
+	fields   []*field
+	complete bool
+	size     int64
+	align    int64
+	packed   int64 // #pragma pack or packed: the maximum field alignment
+	flex     bool  // a flexible array member last
+	id       int   // unique in the translation unit
+	goName   string
+}
+
+type field struct {
+	name  string // "" for an anonymous member or a padding bit-field
+	t     *ctype
+	off   int64
+	bits  int // a bit-field's width; -1 if not a bit-field
+	bitAt int // a bit-field's first bit in its storage unit at off
+	unit  *ctype
+}
+
+type funcType struct {
+	ret      *ctype
+	params   []*ctype
+	names    []string
+	variadic bool
+	proto    bool // has a prototype (not int f())
+	noreturn bool
+}
+
+type enumType struct {
+	tag      string
+	complete bool
+	fixed    bool // C23's enum E : type
+}
+
+var (
+	tVoid    = &ctype{kind: kVoid}
+	tBool    = &ctype{kind: kBool}
+	tChar    = &ctype{kind: kChar}
+	tSChar   = &ctype{kind: kSChar}
+	tUChar   = &ctype{kind: kUChar}
+	tShort   = &ctype{kind: kShort}
+	tUShort  = &ctype{kind: kUShort}
+	tInt     = &ctype{kind: kInt}
+	tUInt    = &ctype{kind: kUInt}
+	tLong    = &ctype{kind: kLong}
+	tULong   = &ctype{kind: kULong}
+	tLLong   = &ctype{kind: kLLong}
+	tULLong  = &ctype{kind: kULLong}
+	tFloat   = &ctype{kind: kFloat}
+	tDouble  = &ctype{kind: kDouble}
+	tLDouble = &ctype{kind: kLDouble}
+	tNullptr = &ctype{kind: kNullptr}
+	tVaList  = &ctype{kind: kVaList}
+)
+
+func ptrTo(t *ctype) *ctype { return &ctype{kind: kPtr, elem: t} }
+
+func arrayOf(t *ctype, n int64) *ctype { return &ctype{kind: kArray, elem: t, n: n} }
+
+func funcOf(ret *ctype, params ...*ctype) *ctype {
+	return &ctype{kind: kFunc, fn: &funcType{ret: ret, params: params, proto: true}}
+}
+
+func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kULLong }
+func (t *ctype) isFloat() bool   { return t.kind >= kFloat && t.kind <= kLDouble }
+func (t *ctype) isArith() bool   { return t.isInteger() || t.isFloat() }
+func (t *ctype) isPtr() bool     { return t.kind == kPtr }
+func (t *ctype) isScalar() bool  { return t.isArith() || t.isPtr() || t.kind == kNullptr }
+func (t *ctype) isRecord() bool  { return t.kind == kStruct }
+func (t *ctype) isAggregate() bool {
+	return t.kind == kArray || t.kind == kStruct
+}
+func (t *ctype) isVoid() bool { return t.kind == kVoid }
+func (t *ctype) isFuncPtr() bool {
+	return t.kind == kPtr && t.elem.kind == kFunc
+}
+func (t *ctype) isVLA() bool {
+	for ; t.kind == kArray; t = t.elem {
+		if t.vla != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *ctype) isUnsigned() bool {
+	switch t.kind {
+	case kBool, kUChar, kUShort, kUInt, kULong, kULLong:
+		return true
+	}
+	return false
+}
+
+func (t *ctype) isComplete() bool {
+	switch t.kind {
+	case kVoid:
+		return false
+	case kArray:
+		return (t.n >= 0 || t.vla != nil) && t.elem.isComplete()
+	case kStruct:
+		return t.rec.complete
+	case kFunc:
+		return false
+	}
+	return true
+}
+
+// rank is the integer conversion rank.
+func (t *ctype) rank() int {
+	switch t.kind {
+	case kBool:
+		return 0
+	case kChar, kSChar, kUChar:
+		return 1
+	case kShort, kUShort:
+		return 2
+	case kInt, kUInt:
+		return 3
+	case kLong, kULong:
+		return 4
+	case kLLong, kULLong:
+		return 5
+	}
+	return -1
+}
+
+func (t *ctype) sizeof() int64 {
+	switch t.kind {
+	case kVoid, kBool, kChar, kSChar, kUChar:
+		return 1
+	case kShort, kUShort:
+		return 2
+	case kInt, kUInt, kFloat:
+		return 4
+	case kLong, kULong, kLLong, kULLong, kDouble, kLDouble, kPtr, kNullptr, kVaList:
+		return 8
+	case kArray:
+		if t.n < 0 {
+			return 0
+		}
+		return t.n * t.elem.sizeof()
+	case kStruct:
+		return t.rec.size
+	case kFunc:
+		return 1 // GNU: sizeof a function
+	}
+	return 0
+}
+
+// alignof is t's alignment, before _Alignas on a declaration.
+func (t *ctype) alignof() int64 {
+	a := int64(1)
+	switch t.kind {
+	case kArray:
+		a = t.elem.alignof()
+	case kStruct:
+		a = t.rec.align
+	case kFunc, kVoid:
+		a = 1
+	default:
+		a = t.sizeof()
+	}
+	return max(a, t.align)
+}
+
+func (t *ctype) qualified(q qual) *ctype {
+	if q == 0 || t.q&q == q {
+		return t
+	}
+	c := *t
+	c.q |= q
+	return &c
+}
+
+func (t *ctype) unqual() *ctype {
+	if t.q == 0 {
+		return t
+	}
+	c := *t
+	c.q = 0
+	return &c
+}
+
+func (t *ctype) unsignedOf() *ctype {
+	switch t.kind {
+	case kChar, kSChar, kUChar:
+		return tUChar
+	case kShort, kUShort:
+		return tUShort
+	case kInt, kUInt:
+		return tUInt
+	case kLong, kULong:
+		return tULong
+	case kLLong, kULLong:
+		return tULLong
+	}
+	return t
+}
+
+// promote is the integer promotion of t.
+func promote(t *ctype) *ctype {
+	if t.isInteger() && t.rank() < 3 {
+		return tInt
+	}
+	if t.isInteger() || t.isFloat() {
+		return t.unqual()
+	}
+	return t
+}
+
+// usual is the common type of the usual arithmetic conversions.
+func usual(a, b *ctype) *ctype {
+	if a.isFloat() || b.isFloat() {
+		if a.kind == kLDouble || b.kind == kLDouble {
+			return tLDouble
+		}
+		if a.kind == kDouble || b.kind == kDouble {
+			return tDouble
+		}
+		return tFloat
+	}
+	a, b = promote(a), promote(b)
+	if a.kind == b.kind {
+		return a
+	}
+	if a.isUnsigned() == b.isUnsigned() {
+		if a.rank() >= b.rank() {
+			return a
+		}
+		return b
+	}
+	u, s := a, b
+	if s.isUnsigned() {
+		u, s = b, a
+	}
+	if u.rank() >= s.rank() {
+		return u
+	}
+	if s.sizeof() > u.sizeof() {
+		return s
+	}
+	return s.unsignedOf()
+}
+
+// compatible reports whether a and b are compatible types (C23 6.2.7),
+// ignoring top-level qualifiers if unq.
+func compatible(a, b *ctype) bool {
+	if a == b {
+		return true
+	}
+	if a.q != b.q {
+		return false
+	}
+	if a.enum != nil && b.enum != nil && a.enum != b.enum {
+		return false
+	}
+	if a.kind != b.kind {
+		return false
+	}
+	switch a.kind {
+	case kPtr:
+		return compatible(a.elem, b.elem)
+	case kArray:
+		if a.n >= 0 && b.n >= 0 && a.n != b.n {
+			return false
+		}
+		return compatible(a.elem, b.elem)
+	case kStruct:
+		return a.rec == b.rec || sameRecord(a.rec, b.rec)
+	case kFunc:
+		fa, fb := a.fn, b.fn
+		if !compatible(fa.ret, fb.ret) {
+			return false
+		}
+		if !fa.proto || !fb.proto {
+			return true
+		}
+		if len(fa.params) != len(fb.params) || fa.variadic != fb.variadic {
+			return false
+		}
+		for i := range fa.params {
+			if !compatible(fa.params[i].unqual(), fb.params[i].unqual()) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// sameRecord reports whether two struct types with the same tag and
+// members are compatible, as C23 lets them be.
+func sameRecord(a, b *record) bool {
+	if a.tag != b.tag || a.tag == "" || a.union != b.union || !a.complete || !b.complete || len(a.fields) != len(b.fields) {
+		return false
+	}
+	for i, f := range a.fields {
+		g := b.fields[i]
+		if f.name != g.name || f.bits != g.bits || f.off != g.off || !compatible(f.t, g.t) {
+			return false
+		}
+	}
+	return true
+}
+
+// composite is the composite type of compatible a and b.
+func composite(a, b *ctype) *ctype {
+	switch a.kind {
+	case kArray:
+		if a.n < 0 && b.n >= 0 {
+			return b
+		}
+	case kFunc:
+		if !a.fn.proto && b.fn.proto {
+			return b
+		}
+	}
+	return a
+}
+
+// lookupField finds a member, through anonymous members: the path of
+// fields to it.
+func (r *record) lookupField(name string) []*field {
+	for _, f := range r.fields {
+		if f.name == name {
+			return []*field{f}
+		}
+		if f.name == "" && f.t.kind == kStruct {
+			if p := f.t.rec.lookupField(name); p != nil {
+				return append([]*field{f}, p...)
+			}
+		}
+	}
+	return nil
+}
+
+func (t *ctype) String() string {
+	var q string
+	if t.q&qConst != 0 {
+		q += "const "
+	}
+	if t.q&qVolatile != 0 {
+		q += "volatile "
+	}
+	switch t.kind {
+	case kPtr:
+		if t.elem.kind == kFunc {
+			return t.elem.funcString("(*)")
+		}
+		s := t.elem.String() + " *"
+		if q != "" {
+			s += strings.TrimSpace(q)
+		}
+		return s
+	case kArray:
+		if t.n < 0 {
+			return t.elem.String() + "[]"
+		}
+		return fmt.Sprintf("%s[%d]", t.elem, t.n)
+	case kFunc:
+		return t.funcString("")
+	case kStruct:
+		kw := "struct"
+		if t.rec.union {
+			kw = "union"
+		}
+		tag := t.rec.tag
+		if tag == "" {
+			tag = "<anonymous>"
+		}
+		return q + kw + " " + tag
+	}
+	if t.enum != nil {
+		return q + "enum " + t.enum.tag
+	}
+	return q + kindNames[t.kind]
+}
+
+func (t *ctype) funcString(name string) string {
+	var ps []string
+	for _, p := range t.fn.params {
+		ps = append(ps, p.String())
+	}
+	if t.fn.variadic {
+		ps = append(ps, "...")
+	}
+	if len(ps) == 0 && t.fn.proto {
+		ps = []string{"void"}
+	}
+	return fmt.Sprintf("%s %s(%s)", t.fn.ret, name, strings.Join(ps, ", "))
+}
+
+var kindNames = [...]string{
+	kVoid: "void", kBool: "bool", kChar: "char", kSChar: "signed char", kUChar: "unsigned char",
+	kShort: "short", kUShort: "unsigned short", kInt: "int", kUInt: "unsigned int",
+	kLong: "long", kULong: "unsigned long", kLLong: "long long", kULLong: "unsigned long long",
+	kFloat: "float", kDouble: "double", kLDouble: "long double", kNullptr: "nullptr_t",
+	kVaList: "__builtin_va_list",
+}
+
+// wrap truncates v to t's width and signedness (the bits, for 64-bit
+// unsigned types).
+func wrap(t *ctype, v int64) int64 {
+	switch t.kind {
+	case kBool:
+		if v != 0 {
+			return 1
+		}
+		return 0
+	case kChar, kSChar:
+		return int64(int8(v))
+	case kUChar:
+		return int64(uint8(v))
+	case kShort:
+		return int64(int16(v))
+	case kUShort:
+		return int64(uint16(v))
+	case kInt:
+		return int64(int32(v))
+	case kUInt:
+		return int64(uint32(v))
+	}
+	return v
+}
+
+// layout lays out a struct or union, as the SysV ABI does, bit-fields
+// included.
+func (r *record) layout() {
+	var off, bit int64 // the next free bit is at off*8 + bit
+	align := int64(1)
+	size := int64(0)
+	for _, f := range r.fields {
+		fa := f.t.alignof()
+		if r.packed > 0 {
+			fa = min(fa, r.packed)
+		}
+		if f.t.align > 0 && r.packed == 0 {
+			fa = max(fa, f.t.align)
+		}
+		if f.bits >= 0 {
+			// A bit-field: in a unit of its type's size, if it fits.
+			usz := f.t.sizeof()
+			f.unit = f.t
+			if r.union {
+				f.off, f.bitAt = 0, 0
+				size = max(size, (int64(f.bits)+7)/8)
+				if f.name != "" || f.bits > 0 {
+					align = max(align, fa)
+				}
+				continue
+			}
+			pos := off*8 + bit
+			if f.bits == 0 {
+				// Ends the unit.
+				pos = (pos + usz*8 - 1) / (usz * 8) * (usz * 8)
+				off, bit = pos/8, pos%8
+				continue
+			}
+			unitStart := pos / (usz * 8) * (usz * 8)
+			if r.packed == 0 && pos+int64(f.bits) > unitStart+usz*8 {
+				unitStart = (pos + usz*8 - 1) / (usz * 8) * (usz * 8)
+				pos = unitStart
+			} else if r.packed > 0 {
+				unitStart = pos / 8 * 8
+				for pos+int64(f.bits) > unitStart+usz*8 {
+					unitStart += 8
+				}
+			}
+			f.off = unitStart / 8
+			f.bitAt = int(pos - unitStart)
+			pos += int64(f.bits)
+			off, bit = pos/8, pos%8
+			if f.name != "" {
+				align = max(align, fa)
+			}
+			continue
+		}
+		if bit > 0 {
+			off, bit = off+1, 0
+		}
+		if r.union {
+			f.off = 0
+			size = max(size, f.t.sizeof())
+		} else {
+			off = (off + fa - 1) / fa * fa
+			f.off = off
+			off += f.t.sizeof()
+		}
+		align = max(align, fa)
+	}
+	if !r.union {
+		size = off
+		if bit > 0 {
+			size++
+		}
+	}
+	r.align = align
+	r.size = (size + align - 1) / align * align
+	r.complete = true
+}

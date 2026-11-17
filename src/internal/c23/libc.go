@@ -5,33 +5,56 @@
 package c23
 
 import (
-	"fmt"
+	"bufio"
+	"math"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 )
 
+// C's library, in Go: the functions the headers cmd/cc provides declare
+// (cmd/cc's headers.go), with the Go types of their C types.
+
 // CString allocates s as a C string.
 func CString(s string) Ptr {
-	p := Malloc(uintptr(len(s) + 1))
+	p := Malloc(uint64(len(s) + 1))
 	copy(unsafe.Slice((*byte)(p.obj), len(s)), s)
 	return p
 }
 
 // GoString reads the C string at p.
 func GoString(p Ptr) string {
-	var b strings.Builder
+	var b []byte
 	for {
 		c := Load8(p)
 		if c == 0 {
-			return b.String()
+			return string(b)
 		}
-		b.WriteByte(c)
+		b = append(b, c)
 		p = Add(p, 1)
 	}
 }
 
-func Strlen(p Ptr) uint64 { return uint64(len(GoString(p))) }
+// bytesAt reads n bytes at p.
+func bytesAt(p Ptr, n uintptr) []byte {
+	if n == 0 {
+		return nil
+	}
+	a := check(p, n)
+	return unsafe.Slice((*byte)(a), n)
+}
+
+// string.h
+
+func Strlen(p Ptr) uint64 {
+	n := uint64(0)
+	for Load8(Add(p, int(n))) != 0 {
+		n++
+	}
+	return n
+}
 
 func Strcmp(a, b Ptr) int32 {
 	for {
@@ -41,6 +64,17 @@ func Strcmp(a, b Ptr) int32 {
 		}
 		a, b = Add(a, 1), Add(b, 1)
 	}
+}
+
+func Strncmp(a, b Ptr, n uint64) int32 {
+	for ; n > 0; n-- {
+		x, y := Load8(a), Load8(b)
+		if x != y || x == 0 {
+			return int32(x) - int32(y)
+		}
+		a, b = Add(a, 1), Add(b, 1)
+	}
+	return 0
 }
 
 func Strcpy(d, s Ptr) Ptr {
@@ -55,88 +89,729 @@ func Strcpy(d, s Ptr) Ptr {
 	}
 }
 
-func B2I(b bool) int32 {
-	if b {
-		return 1
+func Strncpy(d, s Ptr, n uint64) Ptr {
+	r := d
+	for ; n > 0; n-- {
+		c := Load8(s)
+		Store8(d, c)
+		d = Add(d, 1)
+		if c != 0 {
+			s = Add(s, 1)
+		}
+	}
+	return r
+}
+
+func Strcat(d, s Ptr) Ptr {
+	Strcpy(Add(d, int(Strlen(d))), s)
+	return d
+}
+
+func Strncat(d, s Ptr, n uint64) Ptr {
+	e := Add(d, int(Strlen(d)))
+	for ; n > 0; n-- {
+		c := Load8(s)
+		if c == 0 {
+			break
+		}
+		Store8(e, c)
+		e, s = Add(e, 1), Add(s, 1)
+	}
+	Store8(e, 0)
+	return d
+}
+
+func Strchr(s Ptr, c int32) Ptr {
+	for {
+		x := Load8(s)
+		if x == uint8(c) {
+			return s
+		}
+		if x == 0 {
+			return Ptr{}
+		}
+		s = Add(s, 1)
+	}
+}
+
+func Strrchr(s Ptr, c int32) Ptr {
+	var r Ptr
+	for {
+		x := Load8(s)
+		if x == uint8(c) {
+			r = s
+		}
+		if x == 0 {
+			return r
+		}
+		s = Add(s, 1)
+	}
+}
+
+func Strstr(s, sub Ptr) Ptr {
+	h, n := GoString(s), GoString(sub)
+	i := strings.Index(h, n)
+	if i < 0 {
+		return Ptr{}
+	}
+	return Add(s, i)
+}
+
+func Strspn(s, set Ptr) uint64 {
+	h, cs := GoString(s), GoString(set)
+	n := 0
+	for n < len(h) && strings.IndexByte(cs, h[n]) >= 0 {
+		n++
+	}
+	return uint64(n)
+}
+
+func Strcspn(s, set Ptr) uint64 {
+	h, cs := GoString(s), GoString(set)
+	n := 0
+	for n < len(h) && strings.IndexByte(cs, h[n]) < 0 {
+		n++
+	}
+	return uint64(n)
+}
+
+func Strdup(s Ptr) Ptr { return CString(GoString(s)) }
+
+func Strndup(s Ptr, n uint64) Ptr {
+	g := GoString(s)
+	if uint64(len(g)) > n {
+		g = g[:n]
+	}
+	return CString(g)
+}
+
+// Memcpy is memcpy and memmove.
+func Memcpy(dst, src Ptr, n uint64) Ptr {
+	Memmove(dst, src, uintptr(n))
+	return dst
+}
+
+func Memccpy(dst, src Ptr, c int32, n uint64) Ptr {
+	for i := uint64(0); i < n; i++ {
+		x := Load8(Add(src, int(i)))
+		Store8(Add(dst, int(i)), x)
+		if x == uint8(c) {
+			return Add(dst, int(i+1))
+		}
+	}
+	return Ptr{}
+}
+
+func Memcmp(a, b Ptr, n uint64) int32 {
+	for i := uint64(0); i < n; i++ {
+		x, y := Load8(Add(a, int(i))), Load8(Add(b, int(i)))
+		if x != y {
+			return int32(x) - int32(y)
+		}
 	}
 	return 0
 }
 
-func Puts(p Ptr) int32 { fmt.Println(GoString(p)); return 0 }
-
-func Putchar(c int32) int32 { os.Stdout.Write([]byte{byte(c)}); return c }
-
-func Abort() { panic(&Fault{"abort", 0}) }
-
-func Assert(ok bool, what string) {
-	if !ok {
-		panic(&Fault{"assertion failed: " + what, 0})
+func Memchr(s Ptr, c int32, n uint64) Ptr {
+	for i := uint64(0); i < n; i++ {
+		if Load8(Add(s, int(i))) == uint8(c) {
+			return Add(s, int(i))
+		}
 	}
+	return Ptr{}
 }
 
-// Printf formats as C's printf, for the conversions d i u x X c s p f g e
-// and %%, with the flags and widths fmt shares with C.
-func Printf(format Ptr, args ...any) int32 {
-	s := Sprintf(GoString(format), args...)
-	os.Stdout.WriteString(s)
-	return int32(len(s))
+// stdlib.h
+
+func Calloc(n, size uint64) Ptr { return Malloc(n * size) }
+
+// Realloc is realloc: untyped memory, with what p's object holds from p on.
+func Realloc(p Ptr, n uint64) Ptr {
+	q := Malloc(n)
+	if p.obj != nil {
+		Memmove(q, p, min(uintptr(n), p.size-uintptr(p.off)))
+	}
+	return q
 }
 
-func Sprintf(f string, args ...any) string {
-	var out strings.Builder
-	ai := 0
-	next := func() any {
-		if ai >= len(args) {
-			return 0
-		}
-		a := args[ai]
-		ai++
-		return a
+func Abort() {
+	Fflush(Ptr{})
+	panic(&Fault{"abort", 0})
+}
+
+// Exit is exit: it flushes C's streams and ends the program.
+func Exit(status int32) {
+	Fflush(Ptr{})
+	os.Exit(int(status))
+}
+
+func Abs(j int32) int32 {
+	if j < 0 {
+		return -j
 	}
-	for i := 0; i < len(f); i++ {
-		if f[i] != '%' {
-			out.WriteByte(f[i])
-			continue
-		}
-		j := i + 1
-		for j < len(f) && strings.IndexByte("-+ #0123456789.", f[j]) >= 0 {
-			j++
-		}
-		spec := f[i+1 : j]
-		for j < len(f) && strings.IndexByte("hlzjt", f[j]) >= 0 {
-			j++
-		}
-		if j >= len(f) {
+	return j
+}
+
+func Labs(j int64) int64 {
+	if j < 0 {
+		return -j
+	}
+	return j
+}
+
+func Atoi(s Ptr) int32   { return int32(Strtol(s, Ptr{}, 10)) }
+func Atol(s Ptr) int64   { return Strtol(s, Ptr{}, 10) }
+func Atof(s Ptr) float64 { return Strtod(s, Ptr{}) }
+
+// strtoParse parses an integer as strtol does: the value's magnitude,
+// whether it is negative, and how many bytes it took (0: none).
+func strtoParse(s string, base int) (v uint64, neg, overflow bool, n int) {
+	i := 0
+	for i < len(s) && strings.IndexByte(" \t\n\v\f\r", s[i]) >= 0 {
+		i++
+	}
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		neg = s[i] == '-'
+		i++
+	}
+	switch {
+	case (base == 0 || base == 16) && i+2 < len(s) && s[i] == '0' && (s[i+1] == 'x' || s[i+1] == 'X') && digitVal(s[i+2]) < 16:
+		i += 2
+		base = 16
+	case (base == 0 || base == 2) && i+2 < len(s) && s[i] == '0' && (s[i+1] == 'b' || s[i+1] == 'B') && digitVal(s[i+2]) < 2:
+		i += 2
+		base = 2
+	case base == 0 && i < len(s) && s[i] == '0':
+		base = 8
+	case base == 0:
+		base = 10
+	}
+	start := i
+	for i < len(s) {
+		d := digitVal(s[i])
+		if d >= base {
 			break
 		}
-		conv := f[j]
-		i = j
-		switch conv {
-		case '%':
-			out.WriteByte('%')
-		case 'd', 'i':
-			fmt.Fprintf(&out, "%"+spec+"d", toInt(next()))
-		case 'u':
-			fmt.Fprintf(&out, "%"+spec+"d", toUint(next()))
-		case 'x', 'X', 'o':
-			fmt.Fprintf(&out, "%"+spec+string(conv), toUint(next()))
-		case 'c':
-			out.WriteByte(byte(toInt(next())))
-		case 's':
-			p, _ := next().(Ptr)
-			fmt.Fprintf(&out, "%"+spec+"s", GoString(p))
-		case 'p':
-			p, _ := next().(Ptr)
-			fmt.Fprintf(&out, "%#x", Addr(p))
-		case 'f', 'g', 'e', 'F', 'G', 'E':
-			v, _ := next().(float64)
-			fmt.Fprintf(&out, "%"+spec+string(conv), v)
+		if v > (math.MaxUint64-uint64(d))/uint64(base) {
+			overflow = true
 		}
+		v = v*uint64(base) + uint64(d)
+		i++
 	}
-	return out.String()
+	if i == start {
+		return 0, false, false, 0
+	}
+	return v, neg, overflow, i
 }
 
-func toInt(a any) int64 {
+func digitVal(c byte) int {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0')
+	case c >= 'a' && c <= 'z':
+		return int(c-'a') + 10
+	case c >= 'A' && c <= 'Z':
+		return int(c-'A') + 10
+	}
+	return 99
+}
+
+func setEnd(end, s Ptr, n int) {
+	if Addr(end) != 0 {
+		StorePtr(end, Add(s, n))
+	}
+}
+
+func Strtol(s, end Ptr, base int32) int64 {
+	v, neg, of, n := strtoParse(GoString(s), int(base))
+	setEnd(end, s, n)
+	switch {
+	case neg && (of || v > 1<<63):
+		Errno = ERANGE
+		return math.MinInt64
+	case !neg && (of || v > math.MaxInt64):
+		Errno = ERANGE
+		return math.MaxInt64
+	case neg:
+		return -int64(v)
+	}
+	return int64(v)
+}
+
+func Strtoul(s, end Ptr, base int32) uint64 {
+	v, neg, of, n := strtoParse(GoString(s), int(base))
+	setEnd(end, s, n)
+	if of {
+		Errno = ERANGE
+		return math.MaxUint64
+	}
+	if neg {
+		return -v
+	}
+	return v
+}
+
+func Strtod(s, end Ptr) float64 {
+	str := GoString(s)
+	i := 0
+	for i < len(str) && strings.IndexByte(" \t\n\v\f\r", str[i]) >= 0 {
+		i++
+	}
+	// The longest prefix that parses.
+	for j := len(str); j > i; j-- {
+		t := str[i:j]
+		if strings.Contains(t, "_") {
+			continue
+		}
+		f, err := strconv.ParseFloat(t, 64)
+		if err == nil || err.(*strconv.NumError).Err == strconv.ErrRange {
+			setEnd(end, s, j)
+			return f
+		}
+	}
+	setEnd(end, s, 0)
+	return 0
+}
+
+var randState uint64 = 1
+
+func Rand() int32 {
+	randState = randState*6364136223846793005 + 1442695040888963407
+	return int32(randState >> 33)
+}
+
+func Srand(seed uint32) { randState = uint64(seed) }
+
+func Getenv(name Ptr) Ptr {
+	v, ok := os.LookupEnv(GoString(name))
+	if !ok {
+		return Ptr{}
+	}
+	return CString(v)
+}
+
+// errno.h
+
+var Errno int32
+
+const ERANGE = 34
+
+// stdio.h
+
+// A File is C's FILE.
+type File struct {
+	f   *os.File
+	w   *bufio.Writer
+	r   *bufio.Reader
+	eof bool
+}
+
+var (
+	stdioOnce sync.Once
+	stdio     [3]Ptr
+	files     []*File
+	filesMu   sync.Mutex
+	fileInfo  = tinfoOf[File]()
+)
+
+func fileOf(p Ptr) *File {
+	if p.obj == nil || p.info() != fileInfo || p.off != 0 {
+		fault("not a FILE", Addr(p))
+	}
+	return (*File)(p.obj)
+}
+
+func newFile(f *os.File) Ptr {
+	p := New[File]()
+	fl := (*File)(p.obj)
+	fl.f = f
+	fl.w = bufio.NewWriter(f)
+	filesMu.Lock()
+	files = append(files, fl)
+	filesMu.Unlock()
+	return p
+}
+
+// Stdio returns stdin (0), stdout (1) or stderr (2).
+func Stdio(n int32) Ptr {
+	stdioOnce.Do(func() {
+		stdio[0] = newFile(os.Stdin)
+		stdio[1] = newFile(os.Stdout)
+		stdio[2] = newFile(os.Stderr)
+	})
+	return stdio[n]
+}
+
+func (f *File) write(b []byte) {
+	f.w.Write(b)
+	if f.f == os.Stderr {
+		f.w.Flush()
+	}
+}
+
+// Fflush flushes a stream, or every stream if p is null.
+func Fflush(p Ptr) int32 {
+	if p.obj == nil {
+		filesMu.Lock()
+		defer filesMu.Unlock()
+		for _, f := range files {
+			f.w.Flush()
+		}
+		return 0
+	}
+	fileOf(p).w.Flush()
+	return 0
+}
+
+func out() *File { return fileOf(Stdio(1)) }
+
+func Printf(format Ptr, va ...any) int32 { return Vprintf(format, VaStart(va)) }
+func Fprintf(f, format Ptr, va ...any) int32 {
+	return Vfprintf(f, format, VaStart(va))
+}
+func Sprintf(s, format Ptr, va ...any) int32 { return Vsprintf(s, format, VaStart(va)) }
+func Snprintf(s Ptr, n uint64, format Ptr, va ...any) int32 {
+	return Vsnprintf(s, n, format, VaStart(va))
+}
+
+func Vprintf(format, ap Ptr) int32 {
+	b := formatC(GoString(format), vaOf(ap))
+	out().write(b)
+	return int32(len(b))
+}
+
+func Vfprintf(f, format, ap Ptr) int32 {
+	b := formatC(GoString(format), vaOf(ap))
+	fileOf(f).write(b)
+	return int32(len(b))
+}
+
+func Vsprintf(s, format, ap Ptr) int32 {
+	b := formatC(GoString(format), vaOf(ap))
+	copy(bytesAt(s, uintptr(len(b)+1)), append(b, 0))
+	return int32(len(b))
+}
+
+func Vsnprintf(s Ptr, n uint64, format, ap Ptr) int32 {
+	b := formatC(GoString(format), vaOf(ap))
+	if n > 0 {
+		k := min(uint64(len(b)), n-1)
+		copy(bytesAt(s, uintptr(k+1)), append(b[:k:k], 0))
+	}
+	return int32(len(b))
+}
+
+func Puts(s Ptr) int32 {
+	out().write(append([]byte(GoString(s)), '\n'))
+	return 0
+}
+
+func Fputs(s, f Ptr) int32 {
+	fileOf(f).write([]byte(GoString(s)))
+	return 0
+}
+
+func Putchar(c int32) int32 {
+	out().write([]byte{byte(c)})
+	return c
+}
+
+func Fputc(c int32, f Ptr) int32 {
+	fileOf(f).write([]byte{byte(c)})
+	return c
+}
+
+func Fwrite(p Ptr, size, n uint64, f Ptr) uint64 {
+	fileOf(f).write(bytesAt(p, uintptr(size*n)))
+	return n
+}
+
+func (f *File) reader() *bufio.Reader {
+	if f.r == nil {
+		Fflush(Ptr{})
+		f.r = bufio.NewReader(f.f)
+	}
+	return f.r
+}
+
+func Fgetc(f Ptr) int32 {
+	c, err := fileOf(f).reader().ReadByte()
+	if err != nil {
+		fileOf(f).eof = true
+		return -1
+	}
+	return int32(c)
+}
+
+func Getchar() int32 { return Fgetc(Stdio(0)) }
+
+func Fgets(s Ptr, n int32, f Ptr) Ptr {
+	if n <= 0 {
+		return Ptr{}
+	}
+	i := int32(0)
+	for i < n-1 {
+		c := Fgetc(f)
+		if c < 0 {
+			break
+		}
+		Store8(Add(s, int(i)), uint8(c))
+		i++
+		if c == '\n' {
+			break
+		}
+	}
+	if i == 0 {
+		return Ptr{}
+	}
+	Store8(Add(s, int(i)), 0)
+	return s
+}
+
+func Fread(p Ptr, size, n uint64, f Ptr) uint64 {
+	b := bytesAt(p, uintptr(size*n))
+	k := 0
+	r := fileOf(f).reader()
+	for k < len(b) {
+		m, err := r.Read(b[k:])
+		k += m
+		if err != nil {
+			break
+		}
+	}
+	if size == 0 {
+		return 0
+	}
+	return uint64(k) / size
+}
+
+// formatC formats as C's printf.
+func formatC(f string, ap *VaList) []byte {
+	var out []byte
+	for i := 0; i < len(f); i++ {
+		if f[i] != '%' {
+			out = append(out, f[i])
+			continue
+		}
+		i++
+		var minus, plus, space, alt, zero bool
+	flags:
+		for ; i < len(f); i++ {
+			switch f[i] {
+			case '-':
+				minus = true
+			case '+':
+				plus = true
+			case ' ':
+				space = true
+			case '#':
+				alt = true
+			case '0':
+				zero = true
+			default:
+				break flags
+			}
+		}
+		width, prec := 0, -1
+		if i < len(f) && f[i] == '*' {
+			width = int(int32(toInt64(ap.next())))
+			if width < 0 {
+				minus, width = true, -width
+			}
+			i++
+		} else {
+			for i < len(f) && f[i] >= '0' && f[i] <= '9' {
+				width = width*10 + int(f[i]-'0')
+				i++
+			}
+		}
+		if i < len(f) && f[i] == '.' {
+			i++
+			prec = 0
+			if i < len(f) && f[i] == '*' {
+				prec = int(int32(toInt64(ap.next())))
+				i++
+			} else {
+				for i < len(f) && f[i] >= '0' && f[i] <= '9' {
+					prec = prec*10 + int(f[i]-'0')
+					i++
+				}
+			}
+		}
+		size := 4 // 1 hh, 2 h, 8 l ll z j t
+		for i < len(f) && strings.IndexByte("hlLqjzt", f[i]) >= 0 {
+			if f[i] == 'h' {
+				if size == 2 {
+					size = 1
+				} else {
+					size = 2
+				}
+			} else {
+				size = 8
+			}
+			i++
+		}
+		if i >= len(f) {
+			break
+		}
+		conv := f[i]
+		var body []byte
+		sign, prefix := "", ""
+		numeric := false
+		switch conv {
+		case '%':
+			out = append(out, '%')
+			continue
+		case 'd', 'i':
+			v := intArg(ap, size)
+			numeric = true
+			if v < 0 {
+				sign = "-"
+				body = strconv.AppendUint(nil, uint64(-v), 10)
+			} else {
+				body = strconv.AppendUint(nil, uint64(v), 10)
+				if plus {
+					sign = "+"
+				} else if space {
+					sign = " "
+				}
+			}
+			body = precDigits(body, prec)
+		case 'u', 'x', 'X', 'o', 'b', 'B':
+			v := uintArg(ap, size)
+			numeric = true
+			base := 10
+			switch conv {
+			case 'x', 'X':
+				base = 16
+			case 'o':
+				base = 8
+			case 'b', 'B':
+				base = 2
+			}
+			body = strconv.AppendUint(nil, v, base)
+			if conv == 'X' {
+				body = []byte(strings.ToUpper(string(body)))
+			}
+			body = precDigits(body, prec)
+			if alt && v != 0 {
+				switch conv {
+				case 'x':
+					prefix = "0x"
+				case 'X':
+					prefix = "0X"
+				case 'b':
+					prefix = "0b"
+				case 'B':
+					prefix = "0B"
+				}
+			}
+			if alt && conv == 'o' && (len(body) == 0 || body[0] != '0') {
+				body = append([]byte{'0'}, body...)
+			}
+		case 'c':
+			body = []byte{byte(toInt64(ap.next()))}
+		case 's':
+			p, _ := ap.next().(Ptr)
+			var s string
+			switch {
+			case Addr(p) == 0:
+				s = "(null)"
+			case prec >= 0:
+				var b []byte
+				for k := 0; k < prec; k++ {
+					c := Load8(Add(p, k))
+					if c == 0 {
+						break
+					}
+					b = append(b, c)
+				}
+				s = string(b)
+			default:
+				s = GoString(p)
+			}
+			body = []byte(s)
+		case 'p':
+			p, _ := ap.next().(Ptr)
+			if Addr(p) == 0 {
+				body = []byte("(nil)")
+			} else {
+				body = strconv.AppendUint([]byte("0x"), uint64(Addr(p)), 16)
+			}
+		case 'f', 'F', 'e', 'E', 'g', 'G', 'a', 'A':
+			a := ap.next()
+			v, ok := a.(float64)
+			if !ok {
+				fault("printf: a non-double argument for a floating conversion", 0)
+			}
+			numeric = true
+			if math.Signbit(v) && !math.IsNaN(v) {
+				sign = "-"
+				v = -v
+			} else if plus {
+				sign = "+"
+			} else if space {
+				sign = " "
+			}
+			body = formatFloat(v, conv, prec, alt)
+			if math.IsInf(v, 0) || math.IsNaN(v) {
+				zero = false
+			}
+		case 'n':
+			p, _ := ap.next().(Ptr)
+			Store32(p, uint32(len(out)))
+			continue
+		default:
+			out = append(out, '%', conv)
+			continue
+		}
+		n := len(sign) + len(prefix) + len(body)
+		pad := width - n
+		switch {
+		case pad <= 0:
+			out = append(append(append(out, sign...), prefix...), body...)
+		case minus:
+			out = append(append(append(out, sign...), prefix...), body...)
+			out = append(out, strings.Repeat(" ", pad)...)
+		case zero && numeric && (prec < 0 || strings.IndexByte("fFeEgGaA", conv) >= 0):
+			out = append(append(out, sign...), prefix...)
+			out = append(out, strings.Repeat("0", pad)...)
+			out = append(out, body...)
+		default:
+			out = append(out, strings.Repeat(" ", pad)...)
+			out = append(append(append(out, sign...), prefix...), body...)
+		}
+	}
+	return out
+}
+
+func intArg(ap *VaList, size int) int64 {
+	v := toInt64(ap.next())
+	switch size {
+	case 1:
+		return int64(int8(v))
+	case 2:
+		return int64(int16(v))
+	case 8:
+		return v
+	}
+	return int64(int32(v))
+}
+
+func uintArg(ap *VaList, size int) uint64 {
+	v := uint64(toInt64(ap.next()))
+	switch size {
+	case 1:
+		return uint64(uint8(v))
+	case 2:
+		return uint64(uint16(v))
+	case 8:
+		return v
+	}
+	return uint64(uint32(v))
+}
+
+func toInt64(a any) int64 {
 	switch v := a.(type) {
 	case int8:
 		return int64(v)
@@ -151,41 +826,104 @@ func toInt(a any) int64 {
 	case uint16:
 		return int64(v)
 	case uint32:
-		return int64(int32(v))
+		return int64(v)
 	case uint64:
 		return int64(v)
-	case int:
-		return int64(v)
+	case Ptr:
+		return int64(Addr(v))
 	}
+	fault("printf: a non-integer argument for an integer conversion", 0)
 	return 0
 }
 
-func toUint(a any) uint64 {
-	switch v := a.(type) {
-	case int8:
-		return uint64(uint8(v))
-	case int16:
-		return uint64(uint16(v))
-	case int32:
-		return uint64(uint32(v))
-	case uint32:
-		return uint64(v)
+func precDigits(b []byte, prec int) []byte {
+	if prec == 0 && len(b) == 1 && b[0] == '0' {
+		return nil
 	}
-	return uint64(toInt(a))
+	if prec > len(b) {
+		return append([]byte(strings.Repeat("0", prec-len(b))), b...)
+	}
+	return b
 }
 
-// Memcpy is C's memcpy and memmove.
-func Memcpy(dst, src Ptr, n uintptr) Ptr {
-	Memmove(dst, src, n)
-	return dst
+// formatFloat formats v, not negative, as C's %f, %e, %g or %a do.
+func formatFloat(v float64, conv byte, prec int, alt bool) []byte {
+	upper := conv >= 'A' && conv <= 'Z'
+	var s string
+	switch {
+	case math.IsInf(v, 0):
+		s = "inf"
+	case math.IsNaN(v):
+		s = "nan"
+	default:
+		if prec < 0 && conv != 'a' && conv != 'A' {
+			prec = 6
+		}
+		switch conv | 0x20 {
+		case 'f':
+			s = strconv.FormatFloat(v, 'f', prec, 64)
+			if alt && prec == 0 {
+				s += "."
+			}
+		case 'e':
+			s = cExp(strconv.FormatFloat(v, 'e', prec, 64))
+			if alt && prec == 0 {
+				s = strings.Replace(s, "e", ".e", 1)
+			}
+		case 'g':
+			p := prec
+			if p == 0 {
+				p = 1
+			}
+			x := 0
+			if v != 0 {
+				e := strconv.FormatFloat(v, 'e', p-1, 64)
+				x, _ = strconv.Atoi(e[strings.IndexByte(e, 'e')+1:])
+			}
+			if p > x && x >= -4 {
+				s = strconv.FormatFloat(v, 'f', p-1-x, 64)
+			} else {
+				s = cExp(strconv.FormatFloat(v, 'e', p-1, 64))
+			}
+			if !alt {
+				mant, exp := s, ""
+				if i := strings.IndexByte(s, 'e'); i >= 0 {
+					mant, exp = s[:i], s[i:]
+				}
+				if strings.Contains(mant, ".") {
+					mant = strings.TrimRight(strings.TrimRight(mant, "0"), ".")
+				}
+				s = mant + exp
+			}
+		case 'a':
+			s = strconv.FormatFloat(v, 'x', prec, 64)
+			// Go writes p+01; C writes p+1.
+			if i := strings.IndexByte(s, 'p'); i >= 0 {
+				e, _ := strconv.Atoi(s[i+1:])
+				sign := "+"
+				if e < 0 {
+					sign = "-"
+					e = -e
+				}
+				s = s[:i+1] + sign + strconv.Itoa(e)
+			}
+		}
+	}
+	if upper {
+		s = strings.ToUpper(s)
+	}
+	return []byte(s)
 }
 
-// Realloc allocates n bytes as an array of T and copies what p's object
-// holds from p on.
-func Realloc[T any](p Ptr, n uintptr) Ptr {
-	q := NewArray[T](n)
-	if p.obj != nil {
-		Memmove(q, p, min(n, p.size-uintptr(p.off)))
+// cExp makes Go's exponent C's: at least two digits.
+func cExp(s string) string {
+	i := strings.IndexByte(s, 'e')
+	if i < 0 {
+		return s
 	}
-	return q
+	exp := s[i+2:]
+	if len(exp) < 2 {
+		exp = "0" + exp
+	}
+	return s[:i+2] + exp
 }

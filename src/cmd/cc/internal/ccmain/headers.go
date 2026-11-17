@@ -242,9 +242,10 @@ typedef unsigned long uintmax_t;
 #define EOF (-1)
 #define BUFSIZ 8192
 typedef struct __cc_FILE FILE;
-extern FILE *stdin;
-extern FILE *stdout;
-extern FILE *stderr;
+FILE *__cc_stdio(int);
+#define stdin (__cc_stdio(0))
+#define stdout (__cc_stdio(1))
+#define stderr (__cc_stdio(2))
 int printf(const char *restrict format, ...);
 int fprintf(FILE *restrict stream, const char *restrict format, ...);
 int sprintf(char *restrict s, const char *restrict format, ...);

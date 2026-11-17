@@ -162,11 +162,12 @@ func NewArray[T any](n uintptr) Ptr {
 	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
 }
 
-// Malloc allocates n bytes of untyped memory, in which C may keep
+// Malloc is C's malloc: n bytes of untyped memory, in which C may keep
 // pointers.
-func Malloc(n uintptr) Ptr { return NewArray[Raw](n) }
+func Malloc(n uint64) Ptr { return NewArray[Raw](uintptr(n)) }
 
-// Free does nothing: the collector frees what is not reachable.
+// Free is C's free, which does nothing: the collector frees what is not
+// reachable.
 func Free(p Ptr) {}
 
 // cobject returns the capability of C's allocation that contains w, if it
@@ -479,7 +480,8 @@ func Memmove(dst, src Ptr, n uintptr) {
 }
 
 // Memset sets n bytes at p to c. Pointer words may only be set to zero.
-func Memset(p Ptr, c int32, n uintptr) Ptr {
+func Memset(p Ptr, c int32, size uint64) Ptr {
+	n := uintptr(size)
 	a := check(p, n)
 	for i := uintptr(0); i < n; {
 		q := Add(p, int(i))

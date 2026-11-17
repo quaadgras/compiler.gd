@@ -1,0 +1,889 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package ccmain
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Expressions. rv returns a Go expression of a C value (goType of its
+// type; a struct's is the c23.Ptr to it), emitting first the statements
+// it needs. Where C leaves the order unspecified, those statements may
+// run before the operands they are beside.
+
+// An lval is a C lvalue: a Go variable, or memory at a c23.Ptr.
+type lval struct {
+	goVar string
+	addr  string
+	t     *ctype
+	f     *field // a bit-field
+}
+
+func (g *gen) lv(e expr) lval {
+	switch e := e.(type) {
+	case *varRef:
+		s := e.sym
+		if s.kind != symVar {
+			g.errorf(e.p, "%s is not an object", s.name)
+		}
+		if s.global {
+			return lval{addr: g.globalName(s), t: s.t}
+		}
+		n := g.localName(s)
+		if localKindOf(s) == lkVar {
+			return lval{goVar: n, t: s.t}
+		}
+		return lval{addr: n, t: s.t}
+	case *deref:
+		return lval{addr: g.rv(e.x), t: e.t}
+	case *member:
+		var base string
+		if isLvalue(e.x) {
+			l := g.lv(e.x)
+			if l.goVar != "" {
+				g.errorf(e.p, "internal error: member of a register struct")
+			}
+			base = l.addr
+		} else {
+			base = g.rv(e.x)
+		}
+		l := lval{addr: addOff(base, e.f.off), t: e.t}
+		if e.f.bits >= 0 {
+			l.f = e.f
+		}
+		return l
+	case *compoundLit:
+		return lval{addr: g.compound(e), t: e.t}
+	case *strLit:
+		return lval{addr: g.str(e), t: e.t}
+	}
+	if e.ty().kind == kStruct {
+		return lval{addr: g.rv(e), t: e.ty()}
+	}
+	g.errorf(e.at(), "internal error: %T is not an lvalue", e)
+	return lval{}
+}
+
+func (g *gen) globalName(s *symbol) string {
+	if def := g.ext[s.name]; s.linkage == 'e' && def != nil {
+		s = def
+	}
+	n, ok := g.names[s]
+	if !ok {
+		g.errorf(s.p, "internal error: no name for %s", s.name)
+	}
+	if s.kind == symVar && !s.t.isComplete() {
+		g.errorf(s.p, "undefined reference to %q", s.name)
+	}
+	if s.kind == symVar && s.storage == sExtern && !s.defined {
+		g.errorf(s.p, "undefined reference to %q", s.name)
+	}
+	return n
+}
+
+// compound initializes a compound literal where it is evaluated: its
+// object's c23.Ptr.
+func (g *gen) compound(e *compoundLit) string {
+	s := e.sym
+	if s.global {
+		return g.globalName(s)
+	}
+	n := g.localName(s)
+	if s.init != nil {
+		if s.init.scalar == nil {
+			g.p("c23.Memset(%s, 0, %d)", n, s.t.sizeof())
+		}
+		g.initObject(n, s.t, s.init)
+	}
+	return n
+}
+
+// bind makes l's address a temporary, so that it is evaluated once.
+func (g *gen) bind(l *lval) {
+	if l.goVar != "" || isSimple(l.addr) {
+		return
+	}
+	t := g.tmp("c23.Ptr")
+	g.p("%s = %s", t, l.addr)
+	l.addr = t
+}
+
+func isSimple(s string) bool {
+	for _, c := range s {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *gen) load(l lval) string {
+	if l.goVar != "" {
+		return l.goVar
+	}
+	if l.f != nil {
+		return g.bitLoad(l.addr, l.f)
+	}
+	return loadCode(l.addr, l.t)
+}
+
+func loadCode(addr string, t *ctype) string {
+	switch t.kind {
+	case kBool, kUChar:
+		return fmt.Sprintf("c23.Load8(%s)", addr)
+	case kChar, kSChar:
+		return fmt.Sprintf("int8(c23.Load8(%s))", addr)
+	case kShort:
+		return fmt.Sprintf("int16(c23.Load16(%s))", addr)
+	case kUShort:
+		return fmt.Sprintf("c23.Load16(%s)", addr)
+	case kInt:
+		return fmt.Sprintf("int32(c23.Load32(%s))", addr)
+	case kUInt:
+		return fmt.Sprintf("c23.Load32(%s)", addr)
+	case kLong, kLLong:
+		return fmt.Sprintf("int64(c23.Load64(%s))", addr)
+	case kULong, kULLong:
+		return fmt.Sprintf("c23.Load64(%s)", addr)
+	case kFloat:
+		return fmt.Sprintf("c23.LoadF32(%s)", addr)
+	case kDouble, kLDouble:
+		return fmt.Sprintf("c23.LoadF64(%s)", addr)
+	case kPtr, kNullptr, kVaList:
+		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
+	case kStruct, kArray:
+		return addr
+	}
+	panic(fmt.Sprintf("load of %s", t))
+}
+
+// bitsOf is v, a Go expression of t's Go type, as an unsigned integer of
+// n bits; c is v's node, if a constant.
+func bitsOf(n int, t *ctype, v string, c expr) string {
+	if k, ok := c.(*intConst); ok {
+		return fmt.Sprintf("uint%d(%d)", n, uint64(k.v)&(^uint64(0)>>(64-n)))
+	}
+	return fmt.Sprintf("uint%d(%s)", n, v)
+}
+
+// store stores v, of type t, at addr; c is v's node, for constants.
+func (g *gen) store(addr string, t *ctype, v string, c expr) {
+	switch t.kind {
+	case kBool, kChar, kSChar, kUChar:
+		g.p("c23.Store8(%s, %s)", addr, bitsOf(8, t, v, c))
+	case kShort, kUShort:
+		g.p("c23.Store16(%s, %s)", addr, bitsOf(16, t, v, c))
+	case kInt, kUInt:
+		g.p("c23.Store32(%s, %s)", addr, bitsOf(32, t, v, c))
+	case kLong, kULong, kLLong, kULLong:
+		g.p("c23.Store64(%s, %s)", addr, bitsOf(64, t, v, c))
+	case kFloat:
+		g.p("c23.StoreF32(%s, %s)", addr, v)
+	case kDouble, kLDouble:
+		g.p("c23.StoreF64(%s, %s)", addr, v)
+	case kPtr, kNullptr, kVaList:
+		g.p("c23.StorePtr(%s, %s)", addr, v)
+	case kStruct, kArray:
+		g.p("c23.Memmove(%s, %s, %d)", addr, v, t.sizeof())
+	default:
+		panic(fmt.Sprintf("store of %s", t))
+	}
+}
+
+func (g *gen) storeL(l lval, v string, c expr) {
+	switch {
+	case l.goVar != "":
+		g.p("%s = %s", l.goVar, v)
+	case l.f != nil:
+		g.bitStore(l.addr, l.f, v, c)
+	default:
+		g.store(l.addr, l.t, v, c)
+	}
+}
+
+// Bit-fields: in a unit of their type's size at the field's offset.
+
+func (g *gen) bitLoad(addr string, f *field) string {
+	n := int(f.unit.sizeof() * 8)
+	raw := fmt.Sprintf("c23.Load%d(%s)", n, addr)
+	t := f.t
+	if t.isUnsigned() {
+		v := fmt.Sprintf("((%s >> %d) & %d)", raw, f.bitAt, uint64(1)<<f.bits-1)
+		if f.bits == 64 {
+			v = raw
+		}
+		return fmt.Sprintf("%s(%s)", goType(t), v)
+	}
+	// Signed: shift it to the top, then back down with its sign.
+	return fmt.Sprintf("%s(int%d(%s << %d) >> %d)", goType(t), n, raw, n-f.bitAt-f.bits, n-f.bits)
+}
+
+func (g *gen) bitStore(addr string, f *field, v string, c expr) {
+	n := int(f.unit.sizeof() * 8)
+	if !isSimple(addr) {
+		t := g.tmp("c23.Ptr")
+		g.p("%s = %s", t, addr)
+		addr = t
+	}
+	mask := (uint64(1)<<f.bits - 1) << f.bitAt
+	if f.bits == 64 {
+		mask = ^uint64(0)
+	}
+	m := mask
+	if n < 64 {
+		m &= uint64(1)<<n - 1
+	}
+	g.p("c23.Store%d(%s, c23.Load%d(%s)&^%d | (%s<<%d)&%d)", n, addr, n, addr, m, bitsOf(n, f.t, v, c), f.bitAt, m)
+}
+
+// effect evaluates e for its effects.
+func (g *gen) effect(e expr) {
+	switch e := e.(type) {
+	case *assign:
+		g.assign(e, false)
+	case *incDec:
+		g.incDec(e, false)
+	case *binary:
+		switch e.op {
+		case ",":
+			g.effect(e.x)
+			g.effect(e.y)
+			return
+		case "&&", "||":
+			c := g.cond(e.x)
+			if e.op == "||" {
+				c = "!(" + c + ")"
+			}
+			g.p("if %s {", c)
+			g.effect(e.y)
+			g.p("}")
+			return
+		}
+		g.effect(e.x)
+		g.effect(e.y)
+	case *cond:
+		c := g.cond(e.c)
+		g.p("if %s {", c)
+		g.effect(e.x)
+		g.p("} else {")
+		g.effect(e.y)
+		g.p("}")
+	case *call:
+		v := g.callCode(e)
+		if strings.HasPrefix(v, "t") && isSimple(v) {
+			return
+		}
+		if e.t.kind != kVoid && e.t.kind != kStruct {
+			g.p("_ = %s", v)
+		} else if v != "" {
+			g.p("%s", v)
+		}
+	case *cast:
+		g.effect(e.x)
+	case *intConst, *floatConst, *strLit, *varRef:
+	case *stmtExpr:
+		g.stmtExprCode(e, false)
+	case *vaOp:
+		g.vaOp(e)
+	case *builtinCall:
+		g.p("%s", g.builtinCode(e))
+	case *unary:
+		g.effect(e.x)
+	case *decay:
+		g.effect(e.x)
+	case *addrOf:
+		if _, ok := e.x.(*compoundLit); ok {
+			g.rv(e)
+		}
+		g.effect(e.x)
+	case *member:
+		g.effect(e.x)
+	case *deref:
+		v := g.rv(e)
+		if e.t.kind != kStruct && e.t.kind != kArray {
+			g.p("_ = %s", v)
+		}
+	case *compoundLit:
+		g.compound(e)
+	default:
+		v := g.rv(e)
+		if !isSimple(v) {
+			g.p("_ = %s", v)
+		}
+	}
+}
+
+// cond returns e, a scalar, as a Go bool.
+func (g *gen) cond(e expr) string {
+	switch e := e.(type) {
+	case *binary:
+		switch e.op {
+		case "&&", "||":
+			x := g.cond(e.x)
+			var y string
+			pre := g.capture(func() { y = g.cond(e.y) })
+			if pre == "" {
+				return fmt.Sprintf("(%s %s %s)", x, e.op, y)
+			}
+			t := g.tmp("bool")
+			g.p("%s = %s", t, x)
+			if e.op == "&&" {
+				g.p("if %s {", t)
+			} else {
+				g.p("if !%s {", t)
+			}
+			g.out.WriteString(pre)
+			g.p("%s = %s", t, y)
+			g.p("}")
+			return t
+		case "==", "!=", "<", ">", "<=", ">=":
+			return g.compare(e)
+		}
+	case *unary:
+		if e.op == "!" {
+			return "!(" + g.cond(e.x) + ")"
+		}
+	case *intConst:
+		if e.v != 0 {
+			return "true"
+		}
+		return "false"
+	}
+	v := g.rv(e)
+	t := e.ty()
+	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList {
+		return fmt.Sprintf("(c23.Addr(%s) != 0)", v)
+	}
+	return fmt.Sprintf("(%s != 0)", v)
+}
+
+func (g *gen) compare(e *binary) string {
+	x, y := g.rv(e.x), g.rv(e.y)
+	if e.x.ty().isPtr() || e.x.ty().kind == kNullptr {
+		return fmt.Sprintf("(%s %s %s)", g.addrCode(e.x, x), e.op, g.addrCode(e.y, y))
+	}
+	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
+}
+
+// addrCode is a pointer's address, for comparisons.
+func (g *gen) addrCode(e expr, v string) string {
+	if c, ok := e.(*intConst); ok {
+		return fmt.Sprintf("uintptr(%d)", uint64(c.v))
+	}
+	return "c23.Addr(" + v + ")"
+}
+
+// rv returns e's value.
+func (g *gen) rv(e expr) string {
+	switch e := e.(type) {
+	case *intConst:
+		return constLit(e.t, e.v)
+	case *floatConst:
+		return floatLit(e.t, e.v)
+	case *strLit:
+		return g.str(e)
+	case *varRef:
+		if e.sym.kind == symFunc {
+			return g.funcPtr(e.sym)
+		}
+		return g.load(g.lv(e))
+	case *deref, *member, *compoundLit:
+		return g.load(g.lv(e))
+	case *decay:
+		if e.x.ty().kind == kFunc {
+			if v, ok := e.x.(*varRef); ok {
+				return g.funcPtr(v.sym)
+			}
+			return g.rv(e.x)
+		}
+		return g.lv(e.x).addr
+	case *addrOf:
+		if v, ok := e.x.(*varRef); ok && v.sym.kind == symFunc {
+			return g.funcPtr(v.sym)
+		}
+		if isLvalue(e.x) {
+			return g.lv(e.x).addr
+		}
+		return g.rv(e.x) // a struct value's memory
+	case *unary:
+		switch e.op {
+		case "!":
+			return "c23.B2I(" + g.cond(e) + ")"
+		case "-":
+			return "(-" + g.rv(e.x) + ")"
+		case "~":
+			return "(^" + g.rv(e.x) + ")"
+		}
+	case *binary:
+		return g.binary(e)
+	case *assign:
+		return g.assign(e, true)
+	case *incDec:
+		return g.incDec(e, true)
+	case *cond:
+		return g.condExpr(e)
+	case *call:
+		return g.callCode(e)
+	case *cast:
+		return g.castCode(e)
+	case *stmtExpr:
+		return g.stmtExprCode(e, true)
+	case *vlaSizeof:
+		return g.vlaSize(e.of)
+	case *vaOp:
+		return g.vaOp(e)
+	case *builtinCall:
+		return g.builtinCode(e)
+	}
+	g.errorf(e.at(), "internal error: unexpected expression %T", e)
+	return ""
+}
+
+func (g *gen) binary(e *binary) string {
+	switch e.op {
+	case ",":
+		g.effect(e.x)
+		return g.rv(e.y)
+	case "&&", "||", "==", "!=", "<", ">", "<=", ">=":
+		return "c23.B2I(" + g.cond(e) + ")"
+	}
+	xt := e.x.ty()
+	if xt.isPtr() {
+		p := g.rv(e.x)
+		if e.y.ty().isPtr() {
+			q := g.rv(e.y)
+			return fmt.Sprintf("int64(c23.Sub(%s, %s) / %d)", p, q, max(g.elemSize(xt), 1))
+		}
+		return g.ptrAdd(p, xt, e.y, e.op == "-")
+	}
+	x, y := g.rv(e.x), g.rv(e.y)
+	if (e.op == "/" || e.op == "%" || e.op == "<<" || e.op == ">>") && isConstExpr(e.y) {
+		// A constant Go would reject at compile time (division by zero,
+		// a negative shift), which C rejects only if it runs.
+		if c, ok := e.y.(*intConst); ok && (c.v == 0 && (e.op == "/" || e.op == "%") || c.v < 0) {
+			y = "c23.Val(" + y + ")"
+		}
+		if c, ok := e.y.(*floatConst); ok && c.v == 0 {
+			y = "c23.Val(" + y + ")"
+		}
+	}
+	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
+}
+
+// elemSize is the size of what a pointer of type t points to.
+func (g *gen) elemSize(t *ctype) int64 {
+	if t.elem.kind == kVoid || t.elem.kind == kFunc {
+		return 1
+	}
+	return t.elem.sizeof()
+}
+
+// ptrAdd is p plus or minus i elements.
+func (g *gen) ptrAdd(p string, pt *ctype, i expr, neg bool) string {
+	if pt.elem.isVLA() {
+		size := g.vlaSize(pt.elem)
+		sign := ""
+		if neg {
+			sign = "-"
+		}
+		return fmt.Sprintf("c23.Add(%s, %sint(%s)*int(%s))", p, sign, g.rv(i), size)
+	}
+	size := g.elemSize(pt)
+	if c, ok := i.(*intConst); ok {
+		n := c.v * size
+		if neg {
+			n = -n
+		}
+		if n == 0 {
+			return p
+		}
+		return fmt.Sprintf("c23.Add(%s, %d)", p, n)
+	}
+	sign := ""
+	if neg {
+		sign = "-"
+	}
+	if size == 1 {
+		return fmt.Sprintf("c23.Add(%s, %sint(%s))", p, sign, g.rv(i))
+	}
+	return fmt.Sprintf("c23.Add(%s, %sint(%s)*%d)", p, sign, g.rv(i), size)
+}
+
+func (g *gen) castCode(e *cast) string {
+	to := e.t
+	from := e.x.ty()
+	if to.kind == kVoid {
+		g.effect(e.x)
+		return ""
+	}
+	if to.isPtr() {
+		if c, ok := e.x.(*call); ok {
+			if code, ok := g.allocCall(c, to); ok {
+				return code
+			}
+		}
+	}
+	x := g.rv(e.x)
+	return convertCode(x, from, to)
+}
+
+// convertCode converts the Go value x of C type from to C type to.
+func convertCode(x string, from, to *ctype) string {
+	fromPtr := from.isPtr() || from.kind == kNullptr || from.kind == kVaList
+	switch {
+	case to.kind == kBool:
+		if fromPtr {
+			return fmt.Sprintf("c23.B2U8(c23.Addr(%s) != 0)", x)
+		}
+		return fmt.Sprintf("c23.B2U8(%s != 0)", x)
+	case to.isInteger():
+		if fromPtr {
+			return fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x)
+		}
+		if goType(from) == goType(to) {
+			return x
+		}
+		return fmt.Sprintf("%s(%s)", goType(to), x)
+	case to.isFloat():
+		if goType(from) == goType(to) {
+			return x
+		}
+		return fmt.Sprintf("%s(%s)", goType(to), x)
+	case to.isPtr() || to.kind == kNullptr || to.kind == kVaList:
+		if fromPtr {
+			return x
+		}
+		return fmt.Sprintf("c23.FromInt(uintptr(%s))", x)
+	case to.kind == kStruct:
+		return x
+	}
+	panic(fmt.Sprintf("conversion of %s to %s", from, to))
+}
+
+func (g *gen) assign(e *assign, value bool) string {
+	t := e.x.ty()
+	if t.kind == kStruct {
+		l := g.lv(e.x)
+		g.bind(&l)
+		src := g.rv(e.y)
+		g.p("c23.Memmove(%s, %s, %d)", l.addr, src, t.sizeof())
+		return l.addr
+	}
+	l := g.lv(e.x)
+	var v string
+	if e.op == "=" {
+		v = g.rv(e.y)
+		if l.goVar == "" {
+			g.bind(&l)
+		}
+	} else {
+		g.bind(&l)
+		cur := g.load(l)
+		op := e.op[:len(e.op)-1]
+		if t.isPtr() {
+			v = g.ptrAdd(cur, t, e.y, op == "-")
+		} else {
+			x := convertCode(cur, t.unqual(), e.ct)
+			y := g.rv(e.y)
+			if (op == "/" || op == "%") && isConstExpr(e.y) {
+				y = "c23.Val(" + y + ")"
+			}
+			v = convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
+		}
+	}
+	var c expr
+	if e.op == "=" {
+		c = e.y
+	}
+	if !value {
+		g.storeL(l, v, c)
+		return ""
+	}
+	if l.goVar != "" {
+		g.storeL(l, v, c)
+		return l.goVar
+	}
+	tv := g.tmp(goType(t))
+	if c, ok := e.y.(*intConst); ok && e.op == "=" {
+		v = constLit(t, c.v)
+	}
+	g.p("%s = %s", tv, v)
+	g.storeL(l, tv, nil)
+	if l.f != nil {
+		return g.bitLoad(l.addr, l.f)
+	}
+	return tv
+}
+
+func (g *gen) incDec(e *incDec, value bool) string {
+	t := e.t
+	l := g.lv(e.x)
+	if !value && l.goVar != "" && t.isArith() && t.kind != kBool {
+		g.p("%s%s", l.goVar, e.op)
+		return ""
+	}
+	g.bind(&l)
+	old := g.load(l)
+	var res string
+	if value && e.post {
+		o := g.tmp(goType(t))
+		g.p("%s = %s", o, old)
+		old, res = o, o
+	}
+	var nv string
+	switch {
+	case t.isPtr():
+		n := g.elemSize(t)
+		if e.op == "--" {
+			n = -n
+		}
+		nv = fmt.Sprintf("c23.Add(%s, %d)", old, n)
+	case t.kind == kBool:
+		if e.op == "++" {
+			nv = "uint8(1)"
+		} else {
+			nv = fmt.Sprintf("(1 - %s)", old)
+		}
+	default:
+		op := e.op[:1]
+		nv = fmt.Sprintf("(%s %s 1)", old, op)
+	}
+	if value && !e.post {
+		n := g.tmp(goType(t))
+		g.p("%s = %s", n, nv)
+		nv, res = n, n
+	}
+	g.storeL(l, nv, nil)
+	if l.f != nil && value && !e.post {
+		return g.bitLoad(l.addr, l.f)
+	}
+	return res
+}
+
+func (g *gen) condExpr(e *cond) string {
+	c := g.cond(e.c)
+	if e.t.kind == kVoid {
+		g.p("if %s {", c)
+		g.effect(e.x)
+		g.p("} else {")
+		g.effect(e.y)
+		g.p("}")
+		return ""
+	}
+	var x, y string
+	preX := g.capture(func() { x = g.rv(e.x) })
+	preY := g.capture(func() { y = g.rv(e.y) })
+	if preX == "" && preY == "" && isPure(x) && isPure(y) {
+		return fmt.Sprintf("c23.If(%s, %s, %s)", c, x, y)
+	}
+	t := g.tmp(goType(e.t))
+	g.p("if %s {", c)
+	g.out.WriteString(preX)
+	g.p("%s = %s", t, x)
+	g.p("} else {")
+	g.out.WriteString(preY)
+	g.p("%s = %s", t, y)
+	g.p("}")
+	return t
+}
+
+// isPure reports whether evaluating the Go expression s can have no
+// effect and cannot fail: no call but conversions, no memory.
+func isPure(s string) bool {
+	return !strings.Contains(s, "(") || strings.HasPrefix(s, "int") && !strings.Contains(s[1:], "(") ||
+		isConvLit(s)
+}
+
+func isConvLit(s string) bool {
+	i := strings.Index(s, "(")
+	if i < 0 || !strings.HasSuffix(s, ")") {
+		return false
+	}
+	switch s[:i] {
+	case "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64":
+		return !strings.ContainsAny(s[i+1:len(s)-1], "()")
+	}
+	return false
+}
+
+func (g *gen) stmtExprCode(e *stmtExpr, value bool) string {
+	if e.t.kind == kVoid || !value {
+		g.p("{")
+		for _, s := range e.body.list {
+			g.stmt(s)
+		}
+		if e.last != nil {
+			g.effect(e.last)
+		}
+		g.p("}")
+		return ""
+	}
+	t := g.tmp(goType(e.t))
+	g.p("{")
+	for _, s := range e.body.list {
+		g.stmt(s)
+	}
+	g.p("%s = %s", t, g.rv(e.last))
+	g.p("}")
+	return t
+}
+
+// Calls.
+
+// libc maps the functions of the headers cmd/cc provides to their Go.
+var libc = map[string]string{
+	"printf": "Printf", "fprintf": "Fprintf", "sprintf": "Sprintf", "snprintf": "Snprintf",
+	"vprintf": "Vprintf", "vfprintf": "Vfprintf", "vsprintf": "Vsprintf", "vsnprintf": "Vsnprintf",
+	"puts": "Puts", "fputs": "Fputs", "putchar": "Putchar", "fputc": "Fputc", "putc": "Fputc",
+	"getchar": "Getchar", "fgetc": "Fgetc", "getc": "Fgetc", "fgets": "Fgets", "fwrite": "Fwrite",
+	"fread": "Fread", "fflush": "Fflush",
+	"malloc": "Malloc", "calloc": "Calloc", "realloc": "Realloc", "free": "Free",
+	"abort": "Abort", "exit": "Exit", "_Exit": "Exit", "abs": "Abs", "labs": "Labs", "llabs": "Labs",
+	"atoi": "Atoi", "atol": "Atol", "atoll": "Atol", "strtol": "Strtol", "strtoul": "Strtoul",
+	"strtoll": "Strtol", "strtoull": "Strtoul", "strtod": "Strtod", "atof": "Atof",
+	"rand": "Rand", "srand": "Srand", "getenv": "Getenv",
+	"memcpy": "Memcpy", "memmove": "Memcpy", "memset": "Memset", "memcmp": "Memcmp", "memchr": "Memchr",
+	"memccpy": "Memccpy",
+	"strcpy":  "Strcpy", "strncpy": "Strncpy", "strcat": "Strcat", "strncat": "Strncat",
+	"strcmp": "Strcmp", "strncmp": "Strncmp", "strlen": "Strlen", "strchr": "Strchr",
+	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
+	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
+}
+
+// funcName is the Go function a call of s calls.
+func (g *gen) funcName(s *symbol, at pos) string {
+	def := s
+	if s.linkage == 'e' {
+		if d := g.ext[s.name]; d != nil {
+			def = d
+		}
+	}
+	if !def.defined {
+		if n, ok := libc[s.name]; ok {
+			return "c23." + n
+		}
+		g.errorf(at, "undefined reference to %q", s.name)
+	}
+	return g.names[def]
+}
+
+// funcPtr is the c23.Ptr to a function: its descriptor.
+func (g *gen) funcPtr(s *symbol) string {
+	name := g.funcName(s, s.p)
+	d := "fd_" + strings.ReplaceAll(name, ".", "_")
+	if !g.descs[d] {
+		g.descs[d] = true
+		fmt.Fprintf(&g.vars, "var %s = c23.NewFunc(%s)\n", d, name)
+	}
+	return d
+}
+
+func (g *gen) callCode(c *call) string {
+	var fn string
+	direct := false
+	if d, ok := c.fn.(*decay); ok {
+		if v, ok := d.x.(*varRef); ok && v.sym.kind == symFunc {
+			fn = g.funcName(v.sym, c.p)
+			direct = true
+		}
+	}
+	if !direct {
+		fn = fmt.Sprintf("c23.FuncOf[%s](%s)", g.funcSig(c.ft, nil), g.rv(c.fn))
+	}
+	var args []string
+	var sret string
+	if c.ft.ret.kind == kStruct {
+		sret = g.cellTmp(c.ft.ret)
+		args = append(args, sret)
+	}
+	for i, a := range c.args {
+		v := g.rv(a)
+		if i >= len(c.ft.params) && a.ty().kind == kStruct {
+			// By value, in variable arguments: a copy.
+			v = fmt.Sprintf("c23.Copy(%s, %d)", v, a.ty().sizeof())
+		}
+		args = append(args, v)
+	}
+	if direct && (fn == "c23.Malloc" || fn == "c23.Calloc" || fn == "c23.Realloc") {
+		// Untyped: see allocCall.
+	}
+	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
+	if sret != "" {
+		g.p("%s", code)
+		return sret
+	}
+	if c.ft.noreturn || fn == "c23.Exit" || fn == "c23.Abort" {
+		return code
+	}
+	return code
+}
+
+// allocCall generates malloc, calloc or realloc whose result is converted
+// to the pointer type to: memory typed as to's elements, so that C keeps
+// its pointers in it as Go pointers.
+func (g *gen) allocCall(c *call, to *ctype) (string, bool) {
+	d, ok := c.fn.(*decay)
+	if !ok {
+		return "", false
+	}
+	v, ok := d.x.(*varRef)
+	if !ok || v.sym.kind != symFunc || v.sym.defined || g.ext[v.sym.name] != nil && g.ext[v.sym.name].defined {
+		return "", false
+	}
+	e := to.elem
+	switch e.kind {
+	case kVoid, kChar, kSChar, kUChar, kFunc:
+		return "", false
+	case kStruct:
+		if !e.rec.complete {
+			return "", false
+		}
+	case kArray:
+		if e.isVLA() {
+			return "", false
+		}
+	}
+	m := g.mirror(e)
+	switch v.sym.name {
+	case "malloc":
+		return fmt.Sprintf("c23.NewArray[%s](uintptr(%s))", m, g.rv(c.args[0])), true
+	case "calloc":
+		return fmt.Sprintf("c23.NewArray[%s](uintptr(%s) * uintptr(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
+	case "realloc":
+		return fmt.Sprintf("c23.ReallocOf[%s](%s, uintptr(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
+	}
+	return "", false
+}
+
+func (g *gen) vaOp(e *vaOp) string {
+	switch e.op {
+	case "start":
+		l := g.lv(e.ap)
+		g.storeL(l, "c23.VaStart(va)", nil)
+	case "end":
+	case "copy":
+		l := g.lv(e.ap)
+		g.storeL(l, fmt.Sprintf("c23.VaCopy(%s)", g.rv(e.src)), nil)
+	case "arg":
+		ap := g.rv(e.ap)
+		if e.t.kind == kStruct {
+			return fmt.Sprintf("c23.VaArgPtr(%s)", ap)
+		}
+		return fmt.Sprintf("c23.VaArg[%s](%s)", goType(e.t), ap)
+	}
+	return ""
+}
+
+func (g *gen) builtinCode(e *builtinCall) string {
+	switch e.name {
+	case "trap":
+		return "c23.Trap()"
+	case "assert":
+		return fmt.Sprintf("c23.AssertC(%s, %s, %s, %s)", g.cond(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2]), g.rv(e.args[3]))
+	}
+	g.errorf(e.p, "internal error: builtin %s", e.name)
+	return ""
+}

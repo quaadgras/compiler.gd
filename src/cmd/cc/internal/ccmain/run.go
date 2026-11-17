@@ -26,7 +26,8 @@ func Translate(file string, src []byte, pkg string, withMain bool) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	return generate(file, u, options{pkg: pkg, main: withMain})
+	out, _, err := generate(file, []*unit{u}, options{pkg: pkg, main: withMain})
+	return out, err
 }
 
 // Run runs cc with the command-line arguments args (without the command
@@ -71,21 +72,22 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // Program translates the C files files, a whole program with main, to
 // the Go source of package pkg. incDirs are searched for #include.
 func Program(files []string, pkg string, incDirs []string) ([]byte, error) {
-	var srcs []source
+	var units []*unit
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, source{f, string(b)})
+		toks, err := lexUnitDirs([]source{{f, string(b)}}, incDirs)
+		if err != nil {
+			return nil, err
+		}
+		u, err := parse(f, toks)
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, u)
 	}
-	toks, err := lexUnitDirs(srcs, incDirs)
-	if err != nil {
-		return nil, err
-	}
-	u, err := parse(files[0], toks)
-	if err != nil {
-		return nil, err
-	}
-	return generate(files[0], u, options{pkg: pkg, main: true})
+	out, _, err := generate(files[0], units, options{pkg: pkg, main: true})
+	return out, err
 }

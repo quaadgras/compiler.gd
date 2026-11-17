@@ -1,0 +1,1313 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package ccmain
+
+import (
+	"math"
+)
+
+// Expressions: parsed, checked and typed (C23 6.5).
+
+func (p *parser) expr() expr {
+	e := p.assignment()
+	for p.is(",") {
+		at := p.here()
+		p.next()
+		y := p.rvalue(p.assignment())
+		e = &binary{node{y.ty(), at}, ",", p.rvalueVoid(e), y}
+	}
+	return e
+}
+
+// rvalueVoid is e evaluated for its effects: any type, void included.
+func (p *parser) rvalueVoid(e expr) expr {
+	if e.ty().kind == kVoid {
+		return e
+	}
+	return p.rvalue(e)
+}
+
+func isAssignOp(s string) bool {
+	switch s {
+	case "=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "|=", "^=":
+		return true
+	}
+	return false
+}
+
+func (p *parser) assignment() expr {
+	x := p.conditional()
+	t := p.peek()
+	if t.kind != tkPunct || !isAssignOp(t.text) {
+		return x
+	}
+	at := p.here()
+	p.next()
+	y := p.rvalue(p.assignment())
+	return p.makeAssign(at, t.text, x, y)
+}
+
+func (p *parser) makeAssign(at pos, op string, x, y expr) expr {
+	p.checkModifiable(x, at)
+	xt := x.ty()
+	if op == "=" {
+		return &assign{node{xt.unqual(), at}, "=", x, p.assignConvert(y, xt, at, "assignment"), xt}
+	}
+	bop := op[:len(op)-1]
+	// x op= y is x = x op y, with x evaluated once.
+	if xt.isPtr() && (bop == "+" || bop == "-") {
+		if !y.ty().isInteger() {
+			p.errorAt(at, "invalid operands to %s", op)
+		}
+		p.checkPtrArith(xt, at)
+		return &assign{node{xt.unqual(), at}, op, x, p.convert(y, tLong), xt}
+	}
+	if !xt.isArith() || !y.ty().isArith() {
+		p.errorAt(at, "invalid operands to %s (have %s and %s)", op, xt, y.ty())
+	}
+	var ct *ctype
+	if bop == "<<" || bop == ">>" {
+		if !xt.isInteger() || !y.ty().isInteger() {
+			p.errorAt(at, "invalid operands to %s", op)
+		}
+		ct = promote(xt)
+		y = p.convert(y, promote(y.ty()))
+	} else {
+		ct = usual(xt, y.ty())
+		if (bop == "%" || bop == "&" || bop == "|" || bop == "^") && !ct.isInteger() {
+			p.errorAt(at, "invalid operands to %s", op)
+		}
+		y = p.convert(y, ct)
+	}
+	return &assign{node{xt.unqual(), at}, op, x, y, ct}
+}
+
+func (p *parser) checkModifiable(x expr, at pos) {
+	if !isLvalue(x) {
+		p.errorAt(at, "lvalue required as left operand of assignment")
+	}
+	t := x.ty()
+	if t.q&qConst != 0 {
+		p.errorAt(at, "assignment of read-only location")
+	}
+	if t.kind == kArray {
+		p.errorAt(at, "assignment to expression with array type")
+	}
+	if t.kind == kStruct && hasConstMember(t) {
+		p.errorAt(at, "assignment of read-only location")
+	}
+}
+
+func hasConstMember(t *ctype) bool {
+	for _, f := range t.rec.fields {
+		if f.t.q&qConst != 0 || f.t.kind == kStruct && hasConstMember(f.t) {
+			return true
+		}
+	}
+	return false
+}
+
+func isLvalue(e expr) bool {
+	switch e := e.(type) {
+	case *varRef:
+		return e.sym.kind == symVar
+	case *deref, *compoundLit, *strLit:
+		return true
+	case *member:
+		return isLvalue(e.x) || isStructValue(e.x)
+	}
+	return false
+}
+
+// isStructValue reports whether e is a struct value that lives in a
+// temporary (a call's result, an assignment's value...): its members are
+// not lvalues, but cmd/cc can still reach them in memory.
+func isStructValue(e expr) bool {
+	return e.ty().kind == kStruct
+}
+
+func (p *parser) conditional() expr {
+	c := p.binaryExpr(0)
+	if !p.is("?") {
+		return c
+	}
+	at := p.here()
+	p.next()
+	c = p.scalarCond(p.rvalue(c), at)
+	var x expr
+	if p.is(":") {
+		// GNU's c ?: y.
+		x = c
+	} else {
+		x = p.rvalueVoid(p.expr())
+	}
+	p.expect(":")
+	y := p.rvalueVoid(p.conditional())
+	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {
+		// Keep it a constant expression.
+		t := p.condType(x, y, at)
+		if cv != 0 {
+			return p.convert(x, t)
+		}
+		return p.convert(y, t)
+	}
+	t := p.condType(x, y, at)
+	if t.kind != kVoid && t.kind != kStruct {
+		x, y = p.convert(x, t), p.convert(y, t)
+	}
+	return &cond{node{t, at}, c, x, y}
+}
+
+func isConstExpr(e expr) bool {
+	switch e.(type) {
+	case *intConst, *floatConst:
+		return true
+	}
+	return false
+}
+
+// condType is the type of c ? x : y.
+func (p *parser) condType(x, y expr, at pos) *ctype {
+	xt, yt := x.ty(), y.ty()
+	switch {
+	case xt.isArith() && yt.isArith():
+		return usual(xt, yt)
+	case xt.kind == kStruct && yt.kind == kStruct && compatible(xt.unqual(), yt.unqual()):
+		return xt.unqual()
+	case xt.kind == kVoid || yt.kind == kVoid:
+		return tVoid
+	case xt.kind == kNullptr && yt.kind == kNullptr:
+		return tNullptr
+	case xt.isPtr() && (isNullConst(y) || yt.kind == kNullptr):
+		return xt
+	case yt.isPtr() && (isNullConst(x) || xt.kind == kNullptr):
+		return yt
+	case xt.isPtr() && yt.isPtr():
+		q := xt.elem.q | yt.elem.q
+		if xt.elem.kind == kVoid {
+			return ptrTo(xt.elem.qualified(q))
+		}
+		if yt.elem.kind == kVoid {
+			return ptrTo(yt.elem.qualified(q))
+		}
+		if !compatible(xt.elem.unqual(), yt.elem.unqual()) {
+			// GCC warns; the first.
+			return xt
+		}
+		return ptrTo(composite(xt.elem, yt.elem).qualified(q))
+	case xt.isPtr() && yt.isInteger():
+		return xt
+	case yt.isPtr() && xt.isInteger():
+		return yt
+	}
+	p.errorAt(at, "type mismatch in conditional expression (%s and %s)", xt, yt)
+	return nil
+}
+
+var binPrec = map[string]int{
+	"||": 1, "&&": 2, "|": 3, "^": 4, "&": 5, "==": 6, "!=": 6,
+	"<": 7, ">": 7, "<=": 7, ">=": 7, "<<": 8, ">>": 8, "+": 9, "-": 9, "*": 10, "/": 10, "%": 10,
+}
+
+func (p *parser) binaryExpr(min int) expr {
+	x := p.castExpr()
+	for {
+		t := p.peek()
+		prec, ok := binPrec[t.text]
+		if t.kind != tkPunct || !ok || prec <= min {
+			return x
+		}
+		at := p.here()
+		p.next()
+		y := p.binaryExpr(prec)
+		x = p.binop(at, t.text, p.rvalue(x), p.rvalue(y))
+	}
+}
+
+// binop types x op y, both rvalues.
+func (p *parser) binop(at pos, op string, x, y expr) expr {
+	xt, yt := x.ty(), y.ty()
+	switch op {
+	case "&&", "||":
+		x, y = p.scalarCond(x, at), p.scalarCond(y, at)
+		if xv, ok := p.foldInt(x); ok {
+			if yv, ok := p.foldInt(y); ok {
+				if op == "&&" {
+					return p.intc(b2i(xv != 0 && yv != 0), tInt, at)
+				}
+				return p.intc(b2i(xv != 0 || yv != 0), tInt, at)
+			}
+			// Short-circuited: the result is known.
+			if op == "&&" && xv == 0 {
+				return p.intc(0, tInt, at)
+			}
+			if op == "||" && xv != 0 {
+				return p.intc(1, tInt, at)
+			}
+		}
+		return &binary{node{tInt, at}, op, x, y}
+	case "+":
+		if xt.isInteger() && yt.isPtr() {
+			x, y, xt, yt = y, x, yt, xt
+		}
+		if xt.isPtr() && yt.isInteger() {
+			p.checkPtrArith(xt, at)
+			return &binary{node{xt, at}, "+", x, p.convert(y, tLong)}
+		}
+	case "-":
+		if xt.isPtr() && yt.isInteger() {
+			p.checkPtrArith(xt, at)
+			return &binary{node{xt, at}, "-", x, p.convert(y, tLong)}
+		}
+		if xt.isPtr() && yt.isPtr() {
+			if !compatible(xt.elem.unqual(), yt.elem.unqual()) {
+				p.errorAt(at, "invalid operands to binary - (have %s and %s)", xt, yt)
+			}
+			p.checkPtrArith(xt, at)
+			return &binary{node{tLong, at}, "-", x, y}
+		}
+	case "==", "!=", "<", ">", "<=", ">=":
+		if xt.isPtr() || yt.isPtr() || xt.kind == kNullptr || yt.kind == kNullptr {
+			eq := op == "==" || op == "!="
+			switch {
+			case xt.isPtr() && yt.isPtr():
+			case eq && (xt.isPtr() || xt.kind == kNullptr) && (isNullConst(y) || yt.kind == kNullptr):
+			case eq && (yt.isPtr() || yt.kind == kNullptr) && (isNullConst(x) || xt.kind == kNullptr):
+			case xt.isPtr() && yt.isInteger() || yt.isPtr() && xt.isInteger():
+				// GCC allows it, with a warning.
+			default:
+				p.errorAt(at, "invalid operands to %s (have %s and %s)", op, xt, yt)
+			}
+			return &binary{node{tInt, at}, op, p.toPtrish(x), p.toPtrish(y)}
+		}
+	}
+	if !xt.isArith() || !yt.isArith() {
+		p.errorAt(at, "invalid operands to binary %s (have %s and %s)", op, xt, yt)
+	}
+	if op == "<<" || op == ">>" {
+		if !xt.isInteger() || !yt.isInteger() {
+			p.errorAt(at, "invalid operands to binary %s", op)
+		}
+		t := promote(xt)
+		return p.fold(&binary{node{t, at}, op, p.convert(x, t), p.convert(y, promote(yt))})
+	}
+	t := usual(xt, yt)
+	if (op == "%" || op == "&" || op == "|" || op == "^") && !t.isInteger() {
+		p.errorAt(at, "invalid operands to binary %s (have %s and %s)", op, xt, yt)
+	}
+	rt := t
+	switch op {
+	case "==", "!=", "<", ">", "<=", ">=":
+		rt = tInt
+	}
+	return p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)})
+}
+
+// toPtrish leaves pointers as they are and makes integers (null
+// constants, nullptr) comparable with them.
+func (p *parser) toPtrish(e expr) expr {
+	if e.ty().isPtr() {
+		return e
+	}
+	if e.ty().kind == kNullptr {
+		return p.convert(e, ptrTo(tVoid))
+	}
+	return p.convert(e, ptrTo(tVoid))
+}
+
+func (p *parser) checkPtrArith(t *ctype, at pos) {
+	if t.elem.kind == kStruct && !t.elem.rec.complete {
+		p.errorAt(at, "arithmetic on a pointer to an incomplete type")
+	}
+}
+
+func b2i(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// scalarCond checks that e may be a condition.
+func (p *parser) scalarCond(e expr, at pos) expr {
+	if !e.ty().isScalar() {
+		p.errorAt(at, "used %s where a scalar is required", e.ty())
+	}
+	return e
+}
+
+func isNullConst(e expr) bool {
+	for {
+		c, ok := e.(*cast)
+		if !ok || !(c.t.isPtr() && c.t.elem.kind == kVoid && c.t.elem.q == 0) {
+			break
+		}
+		e = c.x
+	}
+	if c, ok := e.(*intConst); ok && c.v == 0 && (c.t.isInteger() || c.t.isPtr() && c.t.elem.kind == kVoid) {
+		return true
+	}
+	return false
+}
+
+func (p *parser) castExpr() expr {
+	if p.is("(") && p.isTypeStart(1) {
+		at := p.here()
+		save := p.pos
+		p.next()
+		t := p.typeName()
+		p.expect(")")
+		if p.is("{") {
+			// A compound literal.
+			p.pos = save
+			return p.postfix(p.unaryExpr())
+		}
+		x := p.rvalue(p.castExpr())
+		if t.kind == kVoid {
+			return &cast{node{tVoid, at}, x}
+		}
+		if !t.isScalar() {
+			if t.kind == kStruct && compatible(t.unqual(), x.ty().unqual()) {
+				return x // GNU: a cast to the same struct type
+			}
+			p.errorAt(at, "conversion to non-scalar type %s requested", t)
+		}
+		if !x.ty().isScalar() {
+			p.errorAt(at, "%s used where a scalar is required", x.ty())
+		}
+		if t.isFloat() && x.ty().isPtr() || t.isPtr() && x.ty().isFloat() {
+			p.errorAt(at, "cannot convert between pointer and floating types")
+		}
+		return p.convertAt(x, t.unqual(), at)
+	}
+	return p.unaryExpr()
+}
+
+func (p *parser) unaryExpr() expr {
+	at := p.here()
+	t := p.peek()
+	if t.kind == tkPunct {
+		switch t.text {
+		case "+", "-", "~":
+			p.next()
+			x := p.rvalue(p.castExpr())
+			if !x.ty().isArith() || t.text == "~" && !x.ty().isInteger() {
+				p.errorAt(at, "wrong type argument to unary %s", t.text)
+			}
+			rt := promote(x.ty())
+			x = p.convert(x, rt)
+			if t.text == "+" {
+				return x
+			}
+			return p.fold(&unary{node{rt, at}, t.text, x})
+		case "!":
+			p.next()
+			x := p.scalarCond(p.rvalue(p.castExpr()), at)
+			return p.fold(&unary{node{tInt, at}, "!", x})
+		case "&":
+			p.next()
+			x := p.castExpr()
+			return p.addressOf(x, at)
+		case "*":
+			p.next()
+			x := p.rvalue(p.castExpr())
+			return p.derefOf(x, at)
+		case "++", "--":
+			p.next()
+			x := p.unaryExpr()
+			return p.incDecOf(x, t.text, false, at)
+		case "&&":
+			p.errorf("labels as values are not supported")
+		}
+	}
+	if t.kind == tkIdent {
+		switch t.text {
+		case "sizeof":
+			p.next()
+			if p.is("(") && p.isTypeStart(1) {
+				p.next()
+				ty := p.typeName()
+				p.expect(")")
+				if p.is("{") {
+					// sizeof (T){...}
+					p.pos -= 0
+					cl := p.compoundLiteral(ty, at)
+					return p.sizeofType(p.postfix(cl).ty(), at)
+				}
+				return p.sizeofType(ty, at)
+			}
+			x := p.unaryExpr()
+			return p.sizeofType(x.ty(), at)
+		case "_Alignof", "alignof", "__alignof__", "__alignof":
+			p.next()
+			if p.is("(") && p.isTypeStart(1) {
+				p.next()
+				ty := p.typeName()
+				p.expect(")")
+				return p.intc(ty.alignof(), tULong, at)
+			}
+			x := p.unaryExpr()
+			if v, ok := x.(*varRef); ok {
+				return p.intc(v.sym.t.alignof(), tULong, at)
+			}
+			return p.intc(x.ty().alignof(), tULong, at)
+		case "_Countof", "__countof__":
+			p.next()
+			var ty *ctype
+			if p.is("(") && p.isTypeStart(1) {
+				p.next()
+				ty = p.typeName()
+				p.expect(")")
+			} else {
+				ty = p.unaryExpr().ty()
+			}
+			if ty.kind != kArray {
+				p.errorAt(at, "_Countof of a %s", ty)
+			}
+			if ty.vla != nil {
+				return ty.vla
+			}
+			return p.intc(ty.n, tULong, at)
+		case "__extension__":
+			p.next()
+			return p.castExpr()
+		case "__real__", "__imag__":
+			p.errorf("complex numbers are not supported")
+		}
+	}
+	return p.postfix(p.primary())
+}
+
+func (p *parser) sizeofType(t *ctype, at pos) expr {
+	if t.isVLA() {
+		return &vlaSizeof{node{tULong, at}, t}
+	}
+	if t.kind == kFunc {
+		return p.intc(1, tULong, at)
+	}
+	if !t.isComplete() && t.kind != kVoid && !(t.kind == kArray && t.n == 0) {
+		p.errorAt(at, "invalid application of sizeof to an incomplete type %s", t)
+	}
+	return p.intc(t.sizeof(), tULong, at)
+}
+
+// addressOf types &x.
+func (p *parser) addressOf(x expr, at pos) expr {
+	switch x := x.(type) {
+	case *varRef:
+		if x.sym.kind == symFunc {
+			return &addrOf{node{ptrTo(x.sym.t), at}, x}
+		}
+		if x.sym.kind != symVar {
+			p.errorAt(at, "lvalue required as unary & operand")
+		}
+		if x.sym.storage == sRegister {
+			p.errorAt(at, "address of register variable %q requested", x.sym.name)
+		}
+		x.sym.addr = true
+	case *deref:
+		// &*e is e, which needn't be valid to dereference.
+		if x.x.ty().isPtr() {
+			return &cast{node{ptrTo(x.t), at}, x.x}
+		}
+	case *member:
+		if x.f.bits >= 0 {
+			p.errorAt(at, "cannot take address of bit-field %q", x.f.name)
+		}
+		markAddr(x)
+		if !isLvalue(x) && !isStructValue(x.x) {
+			p.errorAt(at, "lvalue required as unary & operand")
+		}
+	case *compoundLit, *strLit:
+	case *stmtExpr, *call, *cond, *assign:
+		if x.ty().kind == kStruct {
+			break // GNU: the address of a temporary
+		}
+		p.errorAt(at, "lvalue required as unary & operand")
+	default:
+		p.errorAt(at, "lvalue required as unary & operand")
+	}
+	return &addrOf{node{ptrTo(x.ty()), at}, x}
+}
+
+// markAddr marks the variable a member expression is in as being in
+// memory.
+func markAddr(e expr) {
+	for {
+		switch x := e.(type) {
+		case *member:
+			e = x.x
+		case *varRef:
+			x.sym.addr = true
+			return
+		default:
+			return
+		}
+	}
+}
+
+func (p *parser) derefOf(x expr, at pos) expr {
+	t := x.ty()
+	if !t.isPtr() {
+		p.errorAt(at, "invalid type argument of unary * (have %s)", t)
+	}
+	if t.elem.kind == kFunc {
+		// *f is f.
+		return x
+	}
+	return &deref{node{t.elem, at}, x}
+}
+
+func (p *parser) incDecOf(x expr, op string, post bool, at pos) expr {
+	p.checkModifiable(x, at)
+	t := x.ty()
+	if !t.isArith() && !t.isPtr() {
+		p.errorAt(at, "wrong type argument to %s", op)
+	}
+	if t.isPtr() {
+		p.checkPtrArith(t, at)
+	}
+	return &incDec{node{t.unqual(), at}, op, post, x}
+}
+
+func (p *parser) postfix(x expr) expr {
+	for {
+		at := p.here()
+		switch {
+		case p.accept("["):
+			i := p.rvalue(p.expr())
+			p.expect("]")
+			b := p.rvalue(x)
+			if !b.ty().isPtr() && i.ty().isPtr() {
+				b, i = i, b
+			}
+			if !b.ty().isPtr() || !i.ty().isInteger() {
+				p.errorAt(at, "subscripted value is neither array nor pointer")
+			}
+			x = p.derefOf(p.binop(at, "+", b, i), at)
+		case p.accept("("):
+			x = p.callOf(x, at)
+		case p.accept("."):
+			name := p.ident()
+			x = p.memberOf(x, name, at)
+		case p.accept("->"):
+			name := p.ident()
+			b := p.rvalue(x)
+			if !b.ty().isPtr() || b.ty().elem.kind != kStruct {
+				p.errorAt(at, "invalid type argument of -> (have %s)", b.ty())
+			}
+			x = p.memberOf(p.derefOf(b, at), name, at)
+		case p.is("++") || p.is("--"):
+			op := p.next().text
+			x = p.incDecOf(x, op, true, at)
+		default:
+			return x
+		}
+	}
+}
+
+func (p *parser) memberOf(x expr, name string, at pos) expr {
+	t := x.ty()
+	if t.kind != kStruct {
+		p.errorAt(at, "request for member %q in something not a structure or union", name)
+	}
+	if !t.rec.complete {
+		p.errorAt(at, "invalid use of incomplete type %s", t)
+	}
+	path := t.rec.lookupField(name)
+	if path == nil {
+		p.errorAt(at, "%s has no member named %q", t, name)
+	}
+	for _, f := range path {
+		ft := f.t
+		if t.q != 0 {
+			ft = ft.qualified(t.q)
+		}
+		x = &member{node{ft, at}, x, f}
+		t = ft
+	}
+	return x
+}
+
+// callOf types a call of x, after its "(".
+func (p *parser) callOf(x expr, at pos) expr {
+	if v, ok := x.(*varRef); ok && v.sym.kind == symFunc {
+		v.sym.used = true
+	}
+	fx := p.rvalue(x)
+	ft := fx.ty()
+	if ft.isPtr() && ft.elem.kind == kFunc {
+		ft = ft.elem
+	} else {
+		p.errorAt(at, "called object is not a function or function pointer")
+	}
+	f := ft.fn
+	var args []expr
+	for !p.is(")") {
+		a := p.rvalue(p.assignment())
+		i := len(args)
+		switch {
+		case f.proto && i < len(f.params):
+			a = p.assignConvert(a, f.params[i], a.at(), "argument")
+		case f.proto && !f.variadic:
+			p.errorAt(at, "too many arguments to function")
+		case !f.proto && i < len(f.params):
+			a = p.convert(a, f.params[i])
+		default:
+			a = p.convert(a, promoteArg(a.ty()))
+		}
+		args = append(args, a)
+		if !p.accept(",") {
+			break
+		}
+	}
+	p.expect(")")
+	if f.proto && len(args) < len(f.params) {
+		p.errorAt(at, "too few arguments to function")
+	}
+	if f.ret.kind == kStruct && !f.ret.rec.complete {
+		p.errorAt(at, "calling a function returning an incomplete type")
+	}
+	if p.fn != nil && f.ret.kind == kStruct {
+		// The result lives in a temporary.
+	}
+	return &call{node{f.ret.unqual(), at}, fx, f, args}
+}
+
+func (p *parser) intc(v int64, t *ctype, at pos) expr {
+	return &intConst{node{t, at}, wrap(t, v)}
+}
+
+func (p *parser) primary() expr {
+	at := p.here()
+	t := p.next()
+	switch t.kind {
+	case tkInt, tkChar:
+		return &intConst{node{t.ty, at}, t.ival}
+	case tkFloat:
+		return &floatConst{node{t.ty, at}, t.fval}
+	case tkString:
+		n := int64(len(t.str))/t.ty.sizeof() + 1
+		return &strLit{node{arrayOf(t.ty, n), at}, t.str}
+	case tkPunct:
+		if t.text == "(" {
+			if p.is("{") {
+				return p.stmtExprOf(at)
+			}
+			if p.isTypeStart(0) {
+				ty := p.typeName()
+				p.expect(")")
+				return p.compoundLiteral(ty, at)
+			}
+			x := p.expr()
+			p.expect(")")
+			return x
+		}
+	case tkIdent:
+		switch t.text {
+		case "true":
+			return p.intc(1, tBool, at)
+		case "false":
+			return p.intc(0, tBool, at)
+		case "nullptr":
+			return &intConst{node{tNullptr, at}, 0}
+		case "_Generic":
+			return p.generic(at)
+		case "__func__", "__FUNCTION__", "__PRETTY_FUNCTION__":
+			if s := p.lookup("__func__"); s != nil {
+				return &varRef{node{s.t, at}, s}
+			}
+			p.errorAt(at, "__func__ outside a function")
+		}
+		if len(t.text) > 10 && t.text[:10] == "__builtin_" {
+			return p.builtin(t.text, at)
+		}
+		s := p.lookup(t.text)
+		if s == nil {
+			if p.is("(") {
+				// C89's implicit declaration: int f().
+				sym := &symbol{name: t.text, kind: symFunc, t: &ctype{kind: kFunc, fn: &funcType{ret: tInt}}, global: true, linkage: 'e', p: at}
+				if g := p.u.scope[t.text]; g != nil {
+					sym = g
+				} else {
+					p.u.scope[t.text] = sym
+					p.u.syms = append(p.u.syms, sym)
+				}
+				return &varRef{node{sym.t, at}, sym}
+			}
+			p.errorAt(at, "%q undeclared", t.text)
+		}
+		switch s.kind {
+		case symEnumConst:
+			return p.intc(s.val, s.t, at)
+		case symTypedef:
+			p.errorAt(at, "unexpected type name %q", t.text)
+		}
+		if s.constx && s.cval != nil {
+			// A constexpr object's value is a constant; its address
+			// still an object's.
+			return &varRef{node{s.t, at}, s}
+		}
+		s.used = true
+		return &varRef{node{s.t, at}, s}
+	}
+	p.pos--
+	p.errorf("expected an expression, found %s", t)
+	return nil
+}
+
+func (p *parser) compoundLiteral(t *ctype, at pos) expr {
+	var sym *symbol
+	if p.fn == nil {
+		p.symN++
+		sym = &symbol{name: "complit." + itoa(int64(p.symN)), kind: symVar, t: t, global: true, storage: sStatic, p: at, defined: true}
+		p.u.statics = append(p.u.statics, sym)
+	} else {
+		sym = p.newLocal("complit", t, at)
+		sym.addr = true
+	}
+	sym.init = p.initializer(sym)
+	return &compoundLit{node{sym.t, at}, sym}
+}
+
+// stmtExprOf parses GNU's statement expression ({ ... }), after its "(".
+func (p *parser) stmtExprOf(at pos) expr {
+	if p.fn == nil {
+		p.errorAt(at, "statement expression outside a function")
+	}
+	p.stmtExprs++
+	b := p.blockBody()
+	p.stmtExprs--
+	p.expect(")")
+	e := &stmtExpr{node{tVoid, at}, b, nil}
+	if n := len(b.list); n > 0 {
+		if es, ok := b.list[n-1].(*exprStmt); ok {
+			e.last = p.rvalueVoid(es.x)
+			b.list = b.list[:n-1]
+			e.t = e.last.ty()
+		}
+	}
+	return e
+}
+
+func (p *parser) generic(at pos) expr {
+	p.expect("(")
+	var ct *ctype
+	if p.isTypeStart(0) {
+		// C2y: _Generic(type-name, ...).
+		ct = p.typeName()
+	} else {
+		x := p.assignment()
+		ct = p.rvalue(x).ty().unqual()
+	}
+	var chosen, dflt expr
+	for p.accept(",") {
+		if p.accept("default") {
+			p.expect(":")
+			dflt = p.assignment()
+			continue
+		}
+		t := p.typeName()
+		p.expect(":")
+		e := p.assignment()
+		if chosen == nil && compatible(t, ct) {
+			chosen = e
+		}
+	}
+	p.expect(")")
+	if chosen == nil {
+		chosen = dflt
+	}
+	if chosen == nil {
+		p.errorAt(at, "_Generic selector of type %s is not compatible with any association", ct)
+	}
+	return chosen
+}
+
+// rvalue is e's value: lvalue conversion, and arrays and functions
+// decayed to pointers.
+func (p *parser) rvalue(e expr) expr {
+	t := e.ty()
+	switch t.kind {
+	case kArray:
+		if v, ok := e.(*varRef); ok {
+			v.sym.addr = true
+		}
+		markAddr(e)
+		return &decay{node{ptrTo(t.elem), e.at()}, e}
+	case kFunc:
+		return &decay{node{ptrTo(t), e.at()}, e}
+	case kVoid:
+		p.errorAt(e.at(), "void value not ignored as it ought to be")
+	}
+	if v, ok := e.(*varRef); ok && v.sym.constx && v.sym.cval != nil {
+		if c, ok := v.sym.cval.(*intConst); ok {
+			return &intConst{node{t.unqual(), e.at()}, c.v}
+		}
+		if c, ok := v.sym.cval.(*floatConst); ok {
+			return &floatConst{node{t.unqual(), e.at()}, c.v}
+		}
+	}
+	return e
+}
+
+// convert converts e to t (C23 6.3), folding constants.
+func (p *parser) convert(e expr, t *ctype) expr {
+	return p.convertAt(e, t, e.at())
+}
+
+func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
+	et := e.ty()
+	if et == t || compatible(et, t) && et.kind != kStruct && et.kind != kArray && et.q == t.q {
+		return e
+	}
+	if t.kind == kStruct || et.kind == kStruct {
+		if compatible(et.unqual(), t.unqual()) {
+			return e
+		}
+		p.errorAt(at, "incompatible types: %s and %s", et, t)
+	}
+	if t.kind == kBool {
+		if c, ok := e.(*intConst); ok {
+			return &intConst{node{t, at}, b2i(c.v != 0)}
+		}
+		if c, ok := e.(*floatConst); ok {
+			return &intConst{node{t, at}, b2i(c.v != 0)}
+		}
+	}
+	if t.isInteger() || t.isPtr() && et.isInteger() || t.kind == kNullptr {
+		if c, ok := e.(*intConst); ok && (c.t.isInteger() || c.t.kind == kNullptr || t.isPtr() && c.t.isPtr() || t.isInteger() && c.t.isPtr()) {
+			return &intConst{node{t, at}, wrap(t, c.v)}
+		}
+		if c, ok := e.(*floatConst); ok && t.isInteger() {
+			return &intConst{node{t, at}, wrap(t, floatToInt(c.v, t))}
+		}
+	}
+	if t.isFloat() {
+		if c, ok := e.(*intConst); ok && c.t.isInteger() {
+			v := float64(c.v)
+			if c.t.isUnsigned() && c.t.sizeof() == 8 {
+				v = float64(uint64(c.v))
+			}
+			if t.kind == kFloat {
+				v = float64(float32(v))
+			}
+			return &floatConst{node{t, at}, v}
+		}
+		if c, ok := e.(*floatConst); ok {
+			v := c.v
+			if t.kind == kFloat {
+				v = float64(float32(v))
+			}
+			return &floatConst{node{t, at}, v}
+		}
+	}
+	if t.isPtr() && et.isPtr() {
+		if c, ok := e.(*intConst); ok {
+			return &intConst{node{t, at}, c.v}
+		}
+	}
+	return &cast{node{t, at}, e}
+}
+
+func floatToInt(f float64, t *ctype) int64 {
+	if t.isUnsigned() && t.sizeof() == 8 {
+		if f >= 9223372036854775808.0 {
+			return int64(uint64(f))
+		}
+	}
+	if math.IsNaN(f) {
+		return 0
+	}
+	return int64(f)
+}
+
+// assignConvert converts e as assignment does: for =, arguments,
+// return and initializers.
+func (p *parser) assignConvert(e expr, t *ctype, at pos, what string) expr {
+	et := e.ty()
+	tu := t.unqual()
+	switch {
+	case tu.isArith() && et.isArith():
+	case tu.kind == kBool && (et.isPtr() || et.kind == kNullptr):
+	case tu.kind == kStruct && et.kind == kStruct:
+		if !compatible(tu, et.unqual()) {
+			p.errorAt(at, "incompatible types when %s to type %s from type %s", whatVerb(what), t, et)
+		}
+		return e
+	case tu.isPtr() && (et.kind == kNullptr || isNullConst(e)):
+		return p.convertAt(e, tu, at)
+	case tu.kind == kNullptr && (et.kind == kNullptr || isNullConst(e)):
+		return p.convertAt(e, tu, at)
+	case tu.isPtr() && et.isPtr():
+		// GCC warns about incompatible pointers; cmd/cc accepts them,
+		// and keeps C's checks at run time.
+	case tu.isPtr() && et.isInteger() || tu.isInteger() && et.isPtr():
+		// GCC warns (an error in GCC 14), but accepts it.
+	case tu.kind == kVaList && et.kind == kVaList:
+		return e
+	default:
+		p.errorAt(at, "incompatible types when %s to type %s from type %s", whatVerb(what), t, et)
+	}
+	return p.convertAt(e, tu, at)
+}
+
+func whatVerb(what string) string {
+	switch what {
+	case "argument":
+		return "passing an argument"
+	case "return":
+		return "returning"
+	case "initializer":
+		return "initializing"
+	}
+	return "assigning"
+}
+
+// Constants.
+
+// foldInt evaluates an integer constant expression.
+func (p *parser) foldInt(e expr) (int64, bool) {
+	switch e := e.(type) {
+	case *intConst:
+		if e.t.isInteger() || e.t.kind == kNullptr {
+			return e.v, true
+		}
+	case *cast:
+		if e.t.isInteger() {
+			if v, ok := p.foldInt(e.x); ok {
+				return wrap(e.t, v), true
+			}
+			if f, ok := p.foldFloat(e.x); ok {
+				return wrap(e.t, floatToInt(f, e.t)), true
+			}
+		}
+	}
+	return 0, false
+}
+
+func (p *parser) foldFloat(e expr) (float64, bool) {
+	switch e := e.(type) {
+	case *floatConst:
+		return e.v, true
+	case *intConst:
+		if e.t.isUnsigned() && e.t.sizeof() == 8 {
+			return float64(uint64(e.v)), true
+		}
+		return float64(e.v), true
+	}
+	return 0, false
+}
+
+func (p *parser) constInt(e expr) int64 {
+	v, ok := p.foldInt(p.rvalue(e))
+	if !ok {
+		p.errorAt(e.at(), "expression is not an integer constant expression")
+	}
+	return v
+}
+
+// fold folds an operation on constants.
+func (p *parser) fold(e expr) expr {
+	switch e := e.(type) {
+	case *unary:
+		if x, ok := e.x.(*intConst); ok && e.x.ty().isInteger() {
+			switch e.op {
+			case "-":
+				return &intConst{node{e.t, e.p}, wrap(e.t, -x.v)}
+			case "~":
+				return &intConst{node{e.t, e.p}, wrap(e.t, ^x.v)}
+			case "!":
+				return &intConst{node{e.t, e.p}, b2i(x.v == 0)}
+			}
+		}
+		if x, ok := e.x.(*floatConst); ok {
+			switch e.op {
+			case "-":
+				return &floatConst{node{e.t, e.p}, -x.v}
+			case "!":
+				return &intConst{node{e.t, e.p}, b2i(x.v == 0)}
+			}
+		}
+		if x, ok := e.x.(*intConst); ok && e.op == "!" {
+			return &intConst{node{e.t, e.p}, b2i(x.v == 0)}
+		}
+	case *binary:
+		x, xok := e.x.(*intConst)
+		y, yok := e.y.(*intConst)
+		if xok && yok && x.t.isInteger() && y.t.isInteger() {
+			if v, ok := foldOp(e.op, x.t, x.v, y.v); ok {
+				return &intConst{node{e.t, e.p}, wrap(e.t, v)}
+			}
+		}
+		fx, fxok := e.x.(*floatConst)
+		fy, fyok := e.y.(*floatConst)
+		if fxok && fyok {
+			if v, isBool, ok := foldFloatOp(e.op, fx.v, fy.v); ok {
+				if isBool {
+					return &intConst{node{e.t, e.p}, int64(v)}
+				}
+				if e.t.kind == kFloat {
+					v = float64(float32(v))
+				}
+				return &floatConst{node{e.t, e.p}, v}
+			}
+		}
+	}
+	return e
+}
+
+// foldOp computes x op y in t (the operands' type), as C does.
+func foldOp(op string, t *ctype, x, y int64) (int64, bool) {
+	if t.isUnsigned() {
+		ux, uy := uint64(x), uint64(y)
+		if t.sizeof() == 4 {
+			ux, uy = uint64(uint32(x)), uint64(uint32(y))
+		}
+		switch op {
+		case "/":
+			if uy == 0 {
+				return 0, false
+			}
+			return int64(ux / uy), true
+		case "%":
+			if uy == 0 {
+				return 0, false
+			}
+			return int64(ux % uy), true
+		case ">>":
+			if t.sizeof() == 4 {
+				return int64(uint32(x) >> uint64(y)), true
+			}
+			return int64(ux >> uint64(y)), true
+		case "<":
+			return b2i(ux < uy), true
+		case ">":
+			return b2i(ux > uy), true
+		case "<=":
+			return b2i(ux <= uy), true
+		case ">=":
+			return b2i(ux >= uy), true
+		}
+	}
+	switch op {
+	case "+":
+		return x + y, true
+	case "-":
+		return x - y, true
+	case "*":
+		return x * y, true
+	case "/":
+		if y == 0 {
+			return 0, false
+		}
+		if y == -1 {
+			return -x, true
+		}
+		return x / y, true
+	case "%":
+		if y == 0 {
+			return 0, false
+		}
+		if y == -1 {
+			return 0, true
+		}
+		return x % y, true
+	case "<<":
+		if y < 0 || y >= 64 {
+			return 0, false
+		}
+		return x << uint64(y), true
+	case ">>":
+		if y < 0 || y >= 64 {
+			return 0, false
+		}
+		return x >> uint64(y), true
+	case "&":
+		return x & y, true
+	case "|":
+		return x | y, true
+	case "^":
+		return x ^ y, true
+	case "==":
+		return b2i(x == y), true
+	case "!=":
+		return b2i(x != y), true
+	case "<":
+		return b2i(x < y), true
+	case ">":
+		return b2i(x > y), true
+	case "<=":
+		return b2i(x <= y), true
+	case ">=":
+		return b2i(x >= y), true
+	}
+	return 0, false
+}
+
+func foldFloatOp(op string, x, y float64) (v float64, isBool, ok bool) {
+	switch op {
+	case "+":
+		return x + y, false, true
+	case "-":
+		return x - y, false, true
+	case "*":
+		return x * y, false, true
+	case "/":
+		return x / y, false, true
+	case "==":
+		return float64(b2i(x == y)), true, true
+	case "!=":
+		return float64(b2i(x != y)), true, true
+	case "<":
+		return float64(b2i(x < y)), true, true
+	case ">":
+		return float64(b2i(x > y)), true, true
+	case "<=":
+		return float64(b2i(x <= y)), true, true
+	case ">=":
+		return float64(b2i(x >= y)), true, true
+	}
+	return 0, false, false
+}
+
+// Built-in functions.
+
+func (p *parser) builtin(name string, at pos) expr {
+	p.expect("(")
+	args := func(n int) []expr {
+		var as []expr
+		for !p.is(")") {
+			as = append(as, p.assignment())
+			if !p.accept(",") {
+				break
+			}
+		}
+		p.expect(")")
+		if n >= 0 && len(as) != n {
+			p.errorAt(at, "%s takes %d arguments", name, n)
+		}
+		return as
+	}
+	switch name {
+	case "__builtin_va_start":
+		as := args(-1)
+		if len(as) < 1 {
+			p.errorAt(at, "too few arguments to va_start")
+		}
+		if p.fn == nil || !p.fn.sym.t.fn.variadic {
+			p.errorAt(at, "va_start used in a function with fixed arguments")
+		}
+		p.fn.usesVA = true
+		p.checkVaList(as[0], at)
+		return &vaOp{node{tVoid, at}, "start", as[0], nil}
+	case "__builtin_va_end":
+		as := args(1)
+		p.checkVaList(as[0], at)
+		return &vaOp{node{tVoid, at}, "end", as[0], nil}
+	case "__builtin_va_copy":
+		as := args(2)
+		p.checkVaList(as[0], at)
+		return &vaOp{node{tVoid, at}, "copy", as[0], p.rvalue(as[1])}
+	case "__builtin_va_arg":
+		ap := p.assignment()
+		p.expect(",")
+		t := p.typeName()
+		p.expect(")")
+		p.checkVaList(ap, at)
+		return &vaOp{node{t.unqual(), at}, "arg", ap, nil}
+	case "__builtin_offsetof":
+		t := p.typeName()
+		p.expect(",")
+		off := int64(0)
+		cur := t
+		first := true
+		for {
+			if first || p.accept(".") {
+				first = false
+				name := p.ident()
+				if cur.kind != kStruct {
+					p.errorAt(at, "offsetof of a non-struct")
+				}
+				path := cur.rec.lookupField(name)
+				if path == nil {
+					p.errorAt(at, "%s has no member %q", cur, name)
+				}
+				for _, f := range path {
+					off += f.off
+					cur = f.t
+				}
+				continue
+			}
+			if p.accept("[") {
+				i := p.constInt(p.expr())
+				p.expect("]")
+				if cur.kind != kArray {
+					p.errorAt(at, "offsetof subscript of a non-array")
+				}
+				cur = cur.elem
+				off += i * cur.sizeof()
+				continue
+			}
+			break
+		}
+		p.expect(")")
+		return p.intc(off, tULong, at)
+	case "__builtin_types_compatible_p":
+		a := p.typeName()
+		p.expect(",")
+		b := p.typeName()
+		p.expect(")")
+		return p.intc(b2i(compatible(a.unqual(), b.unqual())), tInt, at)
+	case "__builtin_constant_p":
+		as := args(1)
+		_, ok := p.foldInt(as[0])
+		if !ok {
+			_, ok = p.foldFloat(as[0])
+		}
+		return p.intc(b2i(ok), tInt, at)
+	case "__builtin_expect", "__builtin_expect_with_probability":
+		as := args(-1)
+		if len(as) < 2 {
+			p.errorAt(at, "too few arguments to %s", name)
+		}
+		return p.convert(p.rvalue(as[0]), tLong)
+	case "__builtin_unreachable", "__builtin_trap", "__builtin_abort":
+		args(0)
+		return &builtinCall{node{tVoid, at}, "trap", nil}
+	case "__builtin_choose_expr":
+		c := p.constInt(p.assignment())
+		p.expect(",")
+		x := p.assignment()
+		p.expect(",")
+		y := p.assignment()
+		p.expect(")")
+		if c != 0 {
+			return x
+		}
+		return y
+	case "__builtin_assert":
+		// cmd/cc's assert: (cond, text, file, line).
+		as := args(4)
+		c := p.scalarCond(p.rvalue(as[0]), at)
+		return &builtinCall{node{tVoid, at}, "assert", []expr{c, p.rvalue(as[1]), p.rvalue(as[2]), p.rvalue(as[3])}}
+	}
+	// A library function by its other name.
+	if s := p.lookup(name[10:]); s != nil && s.kind == symFunc {
+		p.pos-- // back to "("
+		return &varRef{node{s.t, at}, s}
+	}
+	p.errorAt(at, "%s is not supported", name)
+	return nil
+}
+
+func (p *parser) checkVaList(e expr, at pos) {
+	if e.ty().kind != kVaList {
+		p.errorAt(at, "first argument to va_ macro is not a va_list")
+	}
+	if !isLvalue(e) {
+		p.errorAt(at, "va_list is not an lvalue")
+	}
+}
