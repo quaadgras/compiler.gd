@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !purego
+//go:build !purego && !wasm.ptr32
+
+// (wasm.ptr32: with words of 4 bytes, the generic code of nat_noasm.go.)
 
 package bigmod
 

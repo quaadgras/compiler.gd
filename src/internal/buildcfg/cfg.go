@@ -349,20 +349,25 @@ type gowasmFeatures struct {
 	// start). See stage 15 of doc/gd/wasm-gc.md.
 	Split bool
 
-	// Ptr64, with GC, makes a pointer, uintptr and int 8 bytes, as in
-	// Go's own port. Without it a GC build has 4-byte words (wasm32,
-	// laid out as clang's wasm32 lays out C: stage 16 of
-	// doc/gd/wasm-gc.md). Registers are 8 bytes either way.
+	// Ptr64, with GC and Split, makes a pointer, uintptr and int 8
+	// bytes, as in Go's own port. Without it split has 4-byte words
+	// (wasm32, laid out as clang's wasm32 lays out C: stage 16 of
+	// doc/gd/wasm-gc.md). Registers are 8 bytes either way. GC
+	// without Split (the struct model) has 8-byte words always: a
+	// pointer to an object of the engine's is, as an integer, an
+	// identity that needs more than 32 bits.
 	Ptr64 bool
 }
 
 // PtrSize is the size in bytes of a pointer, uintptr and int for
-// GOARCH=wasm: 4 for the GC port unless Ptr64 is set, 8 for Go's own
-// port (GOWASM=linear and GOOS=wasip1's default). This is where the
-// word size of GOARCH=wasm is chosen; the tools set sys.ArchWasm's
-// PtrSize from it, and the tool tag wasm.ptr32 says it is 4.
+// GOARCH=wasm: 4 for GOWASM=gc,split (GOOS=js's default) unless Ptr64
+// is set, 8 for GOWASM=gc alone and for Go's own port (GOWASM=linear
+// and GOOS=wasip1's default). This is where the word size of
+// GOARCH=wasm is chosen; sys.ArchWasm's PtrSize, the SSA config and
+// the sizes of types2 and go/types read it, and the tool tag
+// wasm.ptr32 says it is 4.
 func (f gowasmFeatures) PtrSize() int {
-	if f.GC && !f.Ptr64 {
+	if f.GC && f.Split && !f.Ptr64 {
 		return 4
 	}
 	return 8

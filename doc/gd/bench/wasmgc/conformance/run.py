@@ -70,7 +70,7 @@ def build_std():
 
 
 # The build tags of GOOS=wasip1 GOARCH=wasm with the gc toolchain.
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set()) | (set() if stdbuild.PTR64 else {'wasm.ptr32'})
+TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set()) | ({'wasm.ptr32'} if stdbuild.PTR32 else set())
 
 
 def build_ok(expr):
@@ -150,6 +150,12 @@ NOADDRESS = {
 NOPROFILE = {'heapsampling.go'}
 
 
+# With 4-byte words (wasm32: GOWASM=gc,split), the tests that Go's own
+# runner leaves out on 32-bit targets (types2Failures32Bit in
+# cmd/internal/testdir): a constant that an int of 32 bits does not hold.
+INT32 = {'printbig.go', 'fixedbugs/bug114.go', 'fixedbugs/issue23305.go'}
+
+
 def run(cfg, name, imports):
     if name in NOPROFILE:
         return name, 'SKIP', 'no heap profile'
@@ -157,6 +163,8 @@ def run(cfg, name, imports):
         return name, 'SKIP', 'finalizers'
     if name in NOADDRESS:
         return name, 'SKIP', 'objects have no address'
+    if name in INT32 and stdbuild.PTR32:
+        return name, 'SKIP', 'an int of 32 bits (as Go skips it on 32-bit targets)'
     missing = imports - IMPORTABLE
     if missing:
         return name, 'SKIP', 'imports ' + ' '.join(sorted(missing))
