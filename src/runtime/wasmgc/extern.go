@@ -45,7 +45,9 @@ func GC() {
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
 	t0 := nanotime()
+	jsbusy(1)
 	hostgc(0)
+	jsbusy(0)
 	gcRecord(nanotime()-t0, walltime())
 	gcForced++
 	// The cleanups the collection queued may run.

@@ -10,6 +10,10 @@ script), keeping the others. Each line is `pkg ok`, `pkg FAIL reason`,
 (default /tmp/wasmgc-survey). GOROOT, PATH (with $GOROOT/lib/wasm) and
 GOCACHE are taken from the environment.
 
+With GOOS=js in the environment the tests are of GOOS=js (stage 18 of
+wasm-gc.md), the file is status-js.txt (status-js-split.txt...), the logs
+go to $SURVEY_LOGS-js, and GOJSRUNTIME names a browser.
+
 With GOWASIRUNTIME=chromium (or firefox) the tests run in that browser
 (lib/wasm/wasm_gc_browser_exec.mjs) and the file is status-chromium.txt.
 
@@ -22,13 +26,14 @@ import argparse, os, re, signal, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BROWSER = os.environ.get("GOWASIRUNTIME", "")
+GOOS = "js" if os.environ.get("GOOS") == "js" else "wasip1"
+BROWSER = os.environ.get("GOJSRUNTIME" if GOOS == "js" else "GOWASIRUNTIME", "")
 if BROWSER not in ("chromium", "firefox"):
     BROWSER = ""
 SPLIT = "split" in os.environ.get("GOWASM", "").split(",")
 GOWASM = "gc,split" if SPLIT else "gc"
-STATUS = os.path.join(HERE, "status" + ("-split" if SPLIT else "") + ("-" + BROWSER if BROWSER else "") + ".txt")
-LOGS = os.environ.get("SURVEY_LOGS", "/tmp/wasmgc-survey") + ("-split" if SPLIT else "")
+STATUS = os.path.join(HERE, "status" + ("-js" if GOOS == "js" else "") + ("-split" if SPLIT else "") + ("-" + BROWSER if BROWSER else "") + ".txt")
+LOGS = os.environ.get("SURVEY_LOGS", "/tmp/wasmgc-survey") + ("-js" if GOOS == "js" else "") + ("-split" if SPLIT else "")
 
 # Lines in status.txt that are not package results start with one of these.
 def is_result(line):
@@ -70,7 +75,7 @@ def classify(pkg, out, rc, timedout):
     return "FAIL rc=%d" % rc
 
 def run(pkg, timeout, gotimeout):
-    env = dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM=GOWASM, NODE_OPTIONS="")
+    env = dict(os.environ, GOOS=GOOS, GOARCH="wasm", GOWASM=GOWASM, NODE_OPTIONS="")
     cmd = ["go", "test", "-short", "-timeout", gotimeout, pkg]
     t0 = time.time()
     p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -104,7 +109,7 @@ def main():
     a = ap.parse_args()
     pkgs = a.pkgs
     if not pkgs:
-        out = subprocess.check_output(["go", "list", "std"], env=dict(os.environ, GOOS="wasip1", GOARCH="wasm", GOWASM=GOWASM)).decode()
+        out = subprocess.check_output(["go", "list", "std"], env=dict(os.environ, GOOS=GOOS, GOARCH="wasm", GOWASM=GOWASM)).decode()
         pkgs = [p for p in out.split() if not p.startswith("cmd/")]
     old = {}
     header, footer = [], []

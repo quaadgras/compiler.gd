@@ -645,9 +645,11 @@ var allocTests = []struct {
 	// - makeValue: new(ref)
 	// - makeArgSlices: argVals = make([]Value, size)
 	// - makeArgSlices: argRefs = make([]ref, size)
-	{17, 3},
-	{32, 3},
-	{42, 3},
+	// (With GOWASM=gc, 2: there is no slice of the Values, which the
+	// host has from before the call; see manyArgAllocs.)
+	{17, manyArgAllocs},
+	{32, manyArgAllocs},
+	{42, manyArgAllocs},
 }
 
 // TestCallAllocations ensures the correct allocation profile for Value.Call

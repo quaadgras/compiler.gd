@@ -52,7 +52,9 @@ func growmem(pages uintptr) {
 		hostgrowsync(int32(pages))
 		return
 	}
+	jsbusy(1)
 	hostgrow(int32(pages))
+	jsbusy(0)
 }
 
 //go:wasmimport gd grow
@@ -121,7 +123,9 @@ func lincollect() bool {
 	} else if n > 1<<30 {
 		n = 1 << 30
 	}
+	jsbusy(1)
 	hostgc(int32(n))
+	jsbusy(0)
 	gcRecord(nanotime()-t0, walltime())
 	linCollecting = false
 	// Again when what is left has doubled (GOGC=100).

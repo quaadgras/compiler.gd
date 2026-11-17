@@ -7,5 +7,9 @@
 package runtime
 
 // jssync reports whether the goroutine running is that of a call from
-// JavaScript that has not returned (see js_js.go): never.
+// JavaScript that has not returned (see jscall.go): never.
 func jssync() bool { return false }
+
+// jsbusy tells the host that the runtime's state is or is not (on) to be
+// left as it is while the goroutine is suspended (see jscall.go): no.
+func jsbusy(on int32) {}

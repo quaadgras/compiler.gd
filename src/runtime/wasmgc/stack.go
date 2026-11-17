@@ -75,7 +75,7 @@ func morestackgc(n uintptr) {
 		// The goroutine of a call from JavaScript that has not
 		// returned goes on on another stack of the engine's only
 		// once the call has returned (a promise): its own stack
-		// cannot be suspended but to block (js_js.go).
+		// cannot be suspended but to block (jscall.go).
 		Gosched()
 	}
 	size := uintptr(stackSegSize)

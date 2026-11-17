@@ -95,6 +95,11 @@ func makeValue(x *externref) Value {
 	return Value{typ: Type(ret[0]) &^ retThrew, num: ret[1], ext: x}
 }
 
+// yield lets other goroutines run now and then after calls into
+// JavaScript, which may have called into Go (in the runtime: a
+// workaround for node 24).
+func yield()
+
 // threw reports whether the value the host just returned is an
 // exception that the call threw.
 func threw() bool {
@@ -276,7 +281,25 @@ func str(s string) (unsafe.Pointer, int) {
 	if len(s) < len(strbuf) {
 		return unsafe.Pointer(&strbuf), copy(strbuf[:], s)
 	}
-	return unsafe.Pointer(unsafe.StringData(s)), len(s)
+	p := unsafe.Pointer(unsafe.StringData(s))
+	if !isLinear(p) {
+		p = unsafe.Pointer(&[]byte(s)[0])
+	}
+	return p, len(s)
+}
+
+// isLinear reports whether p points into linear memory, which the host
+// reads and writes: with GOWASM=gc, a []byte that new or a composite
+// literal made is an object of the engine's, which the host cannot.
+// Such bytes are copied. (In the runtime.)
+func isLinear(p unsafe.Pointer) bool
+
+// linear returns b, or a copy of it in linear memory (see isLinear).
+func linear(b []byte) []byte {
+	if len(b) == 0 || isLinear(unsafe.Pointer(&b[0])) {
+		return b
+	}
+	return append(make([]byte, 0, len(b)), b...)
 }
 
 // Type represents the JavaScript type of a Value.
@@ -453,7 +476,9 @@ func (v Value) Call(m string, args ...any) Value {
 	storeArgs(args, argNums)
 	mp, mn := str(m)
 	res := makeValue(valueCall(v.ext, mp, mn, argNums))
-	if threw() {
+	bad := threw() // (before yield, after which ret is another call's)
+	yield()
+	if bad {
 		if vType := v.Type(); !vType.isObject() { // check here to avoid overhead in success case
 			panic(&ValueError{"Value.Call", vType})
 		}
@@ -477,7 +502,9 @@ func (v Value) Invoke(args ...any) Value {
 	storeArgs(args, argNums)
 	xe, xn := v.arg()
 	res := makeValue(valueInvoke(xe, xn, argNums))
-	if threw() {
+	bad := threw() // (before yield, after which ret is another call's)
+	yield()
+	if bad {
 		if vType := v.Type(); vType != TypeFunction { // check here to avoid overhead in success case
 			panic(&ValueError{"Value.Invoke", vType})
 		}
@@ -498,7 +525,9 @@ func (v Value) New(args ...any) Value {
 	storeArgs(args, argNums)
 	xe, xn := v.arg()
 	res := makeValue(valueNew(xe, xn, argNums))
-	if threw() {
+	bad := threw() // (before yield, after which ret is another call's)
+	yield()
+	if bad {
 		if vType := v.Type(); vType != TypeFunction { // check here to avoid overhead in success case
 			panic(&ValueError{"Value.New", vType})
 		}
@@ -629,7 +658,11 @@ func (e *ValueError) Error() string {
 // It panics if src is not a Uint8Array or Uint8ClampedArray.
 // It returns the number of bytes copied, which will be the minimum of the lengths of src and dst.
 func CopyBytesToGo(dst []byte, src Value) int {
-	n := copyBytesToGo(dst, src.ext)
+	buf := linear(dst)
+	n := copyBytesToGo(buf, src.ext)
+	if n > 0 && &buf[0] != &dst[0] {
+		copy(dst, buf[:n])
+	}
 	if n < 0 {
 		panic("syscall/js: CopyBytesToGo: expected src to be a Uint8Array or Uint8ClampedArray")
 	}
@@ -647,7 +680,7 @@ func copyBytesToGo(dst []byte, src *externref) int
 // It panics if dst is not a Uint8Array or Uint8ClampedArray.
 // It returns the number of bytes copied, which will be the minimum of the lengths of src and dst.
 func CopyBytesToJS(dst Value, src []byte) int {
-	n := copyBytesToJS(dst.ext, src)
+	n := copyBytesToJS(dst.ext, linear(src))
 	if n < 0 {
 		panic("syscall/js: CopyBytesToJS: expected dst to be a Uint8Array or Uint8ClampedArray")
 	}

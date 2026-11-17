@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build wasm.gc
+//go:build wasm.gc && js
 
 package runtime
 
-import _ "unsafe" // for go:linkname
+import "unsafe"
 
 // GOOS=js: calls from JavaScript into Go (the functions syscall/js.FuncOf
 // makes). See doc/gd/wasm-gc.md, stage 18.
@@ -58,19 +58,63 @@ var jsCallers []jsCaller
 
 // jscallback is called by the host when JavaScript calls into Go: it
 // makes the goroutine that makes the call, and returns its number, for
-// the host to start it with gorun.
+// the host to start it with gorun. (On the system stack: it allocates,
+// and nothing may suspend the stack it is called on, which has the
+// host's frames, nor ask the host to collect.)
 //
 //go:nosplit
 func jscallback() int64 {
+	jsCaller0 = jsCaller{curg, nil, linsp(), linsplim(), lindefer()}
+	systemstack(jscallback1)
+	return int64(jsCallers[len(jsCallers)-1].callee.id)
+}
+
+var jsCaller0 jsCaller
+
+func jscallback1() {
 	if len(allgs) == 0 {
 		allgs = append(allgs, nil, &maing)
 	}
 	gp := &g{id: len(allgs), fn: jsCall}
-	jsCallers = append(jsCallers, jsCaller{curg, gp, linsp(), linsplim(), lindefer()})
+	jsCalls++
 	allgs = append(allgs, gp)
 	ngoroutine++
+	c := jsCaller0
+	c.callee = gp
+	jsCallers = append(jsCallers, c)
 	gostart(gp)
-	return int64(gp.id)
+}
+
+// jsbusy tells the host that the goroutine running is about to be
+// suspended where the runtime's state must be left as it is (on is 1:
+// in the allocator, growing memory, or in a collection), or that it is
+// no longer (0). A call from JavaScript that comes meanwhile (an event,
+// node's callback of a file operation) is made later, when the
+// goroutine has blocked or ended, and returns a promise: a goroutine
+// that ran then could find a channel, say, half changed (a receiver
+// that found nothing in the buffer and had not yet said it waits).
+//
+//go:wasmimport gojs runtime.busy
+func jsbusy(on int32)
+
+// jsCalls counts the calls from JavaScript since jsYield last yielded.
+var jsCalls int
+
+// jsYield is called by syscall/js after a call into JavaScript, which
+// may have called into Go: after 256 such calls, a goroutine (not that
+// of a call from JavaScript that has not returned) yields. Node 24's V8
+// (13.6) loses about 1 KB of its stack (--stack-size) for each call from
+// JavaScript into Go made while a goroutine is in a call to JavaScript,
+// until that goroutine's stack is suspended: a goroutine that made a
+// few thousand such calls without blocking ended with "Maximum call
+// stack size exceeded". Chromium 155 and Firefox 160 do not.
+//
+//go:linkname jsYield syscall/js.yield
+func jsYield() {
+	if jsCalls >= 256 && !jssync() {
+		jsCalls = 0
+		Gosched()
+	}
 }
 
 // jssync reports whether the goroutine running is that of a call from
@@ -95,4 +139,13 @@ func jscallbackdone() {
 	linsetsp(c.sp)
 	linsetsplim(c.lim)
 	linsetdefer(c.rec)
+}
+
+// jsIsLinear reports whether p points into linear memory, where the host
+// can read and write what it points to. (With GOWASM=gc a []byte may
+// also be an object of the engine's: one that new or a struct made.)
+//
+//go:linkname jsIsLinear syscall/js.isLinear
+func jsIsLinear(p unsafe.Pointer) bool {
+	return trylinaddr(p) != 0
 }

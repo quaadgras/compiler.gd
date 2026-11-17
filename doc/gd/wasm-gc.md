@@ -1946,47 +1946,173 @@ goroutine (the others run from the event loop), so if the function
 blocks, the call returns a promise of its result, and the goroutine
 goes on when it is woken, as any other. Meanwhile the goroutine that
 called into JavaScript, if one did, is still in that call
-(`runtime.jscallback` sets it aside, `jscallbackdone` puts it back).
-Until the call has returned, the goroutine of the call must not be
-suspended but to block: an engine suspends a stack at every call of a
-`WebAssembly.Suspending` function, whatever it returns (found the hard
-way: V8 does), and only a goroutine that blocks is one the scheduler
-knows how to resume. So in that time (`runtime.jssync`) memory grows
-at once, on the goroutine's stack (the host does not ask the engine to
-collect there), `runtime.GC` returns without collecting, and a stack
-that would grow (stage 13) first yields, which makes the call return a
-promise. A function that prints under node blocks (node's `fs.write`
-calls back later) and so returns a promise, as with wasm_exec.js; in a
-page, output goes through a `writeSync` and does not block.
+(`runtime.jscallback` sets it aside, on the system stack, as it
+allocates; `jscallbackdone` puts it back). Decided so because it is
+what the fork's linear port does and what keeps a handler that does not
+block synchronous, as JavaScript expects (an event handler that calls
+`preventDefault`, a getter): a handler that blocks in wasm_exec.js
+blocks the event loop and deadlocks; here it becomes a promise.
+
+Three things had to be found to make that hold:
+
+- **A stack is suspended at every call of a `WebAssembly.Suspending`
+  function**, whatever it returns (V8 does so; a value that is not a
+  promise is awaited). Until the call has returned, the goroutine of
+  the call may be suspended only when it blocks, which is the one
+  suspension the scheduler knows how to resume and which does not run
+  the scheduler then (`park`, while `callGo` is on the stack). So in
+  that time (`runtime.jssync`) memory grows at once on the goroutine's
+  stack (and the host does not ask the engine to collect there),
+  `runtime.GC` returns without collecting, and a stack that would grow
+  (stage 13) first yields, which makes the call return a promise.
+- **A call can come while a goroutine is suspended inside the
+  runtime**: an event, or node's callback of a file operation, comes
+  from the event loop while the goroutine running waits for memory to
+  grow or for a collection (`grow`, `gc`). Go code that ran then found
+  the runtime half way through something: a receive that had found the
+  channel's buffer empty and not yet said it waits missed the value the
+  callback sent, and the program deadlocked (with split, in the tests of
+  `os`, `go/build`, `internal/copyright`; a walk over `src` read 559
+  files of 12,164). The runtime tells the host around those two imports
+  (`gojs runtime.busy`, only for GOOS=js); a call that comes meanwhile
+  is made when the scheduler next runs, and returns a promise.
+- **Node 24's V8 (13.6) loses about 1 KB of its stack (`--stack-size`)
+  for each call from JavaScript into Go made while a goroutine is in a
+  call to JavaScript**, until that goroutine's stack is suspended: a
+  goroutine that made 4,000 such calls without blocking ended with
+  "Maximum call stack size exceeded" (Chromium 155 and Firefox 160 made
+  100,000). As a workaround, after 256 calls from JavaScript, a
+  goroutine that returns from `Call`, `Invoke` or `New` yields
+  (`runtime.jsYield`).
+
+A function that prints under node blocks (node's `fs.write` calls back
+later) and so returns a promise, as with wasm_exec.js; in a page, the
+files are synchronous (below) and printing does not block.
 
 `//go:wasmexport` works with `GOWASM=gc` (the tests of `syscall/js`
 call one): its wrapper converts the WebAssembly arguments to Go's
 registers and back, for numbers and booleans. It runs as the goroutine
 that is running (the test's, suspended in the import that called it).
 
-GOOS=js under node (`go_js_wasm_exec`, `wasm_gc_node.mjs`): the program
-has node's globals and `fs`, `path` and `require`, as under
+**Under node** (`go_js_wasm_exec`, which runs Go's own port with
+`wasm_exec_node.js` only if `GOWASM` has `linear`; `wasm_gc_node.mjs`):
+the program has node's globals and `fs`, `path` and `require`, as under
 wasm_exec_node.js, and the arguments and the environment as WASI gives
 them (the runtime reads them as for wasip1). A program with no
-goroutine that can run and no timer waits for JavaScript to call it;
-it is deadlocked when node's event loop is empty (`beforeExit`).
+goroutine that can run and no timer waits for JavaScript to call it; it
+is deadlocked when node's event loop is empty (`beforeExit`).
+
+**In a page** (`runGo` of `wasm_gc_browser.js`, for a module that
+imports `gojs`): the program runs where `runGo` is called, `js.Global()`
+is that global (`options.global`), and on a page's main thread it has
+the `document`. Its files are `options.fs` (`memFS()` by default, or an
+Emscripten program's `FS`), as for wasip1, through globals `fs`,
+`process` and `path` with node's interface (`nodeFS` in
+`wasm_gc_fs.js`: callbacks called before the function returns, errors
+with node's codes, Stats with `isDirectory`), which `runGo` sets on the
+global if it has none. A program built for wasip1 or for js sees the
+same files. `browser/js_page_test.mjs` checks it in Chromium and
+Firefox, both models: a program on a page's main thread adds to the
+`document`, has a listener called by `click()` while it waits in the
+call, is called by JavaScript for a result, copies bytes both ways,
+reads a file the page gave it, writes one the page reads, and waits for
+a `setTimeout` callback.
+
+**Tests in a browser** (`GOJSRUNTIME=chromium` or `firefox` for
+`go_js_wasm_exec`; `wasm_gc_browser_exec.mjs`): the program runs in a
+worker, whose global is `js.Global()`, with `fs`, `process` and `path`
+that are node's on the server (each call made there with its
+synchronous function, through the same channel as wasip1's calls), so
+the files and the working directory are those it has under node.
+
+**Bytes that are not in linear memory.** With `GOWASM=gc` the bytes of
+a `[]byte` that `new` or a struct made are an object of the engine's,
+which the host cannot read: `CopyBytesToGo`, `CopyBytesToJS` and a
+string that is not in linear memory copy through a buffer that is
+(`runtime.trylinaddr` says), and `crypto/internal/sysrand` reads into a
+buffer of its own (`rand_js_wasmgc.go`). (The same holds of wasip1's
+calls with such a slice, which were not looked at.)
+
+Measured (node 24, as `go_js_wasm_exec` runs it; ns a call):
+
+|                                   | gc    | gc,split | linear (Go's port) |
+|-----------------------------------|------:|---------:|-------------------:|
+| `Get` of a number                 | 167   | 131      | 275 |
+| `Get` of an object                | 153   | 126      | 1,521 |
+| `Call("add", 1, 2)`               | 643   | 643      | 635 |
+| `Call("id", object)`              | 669   | 619      | 2,193 |
+| `Set` of a number                 | 189   | 157      | 434 |
+| `String()` of a short string      | 683   | 788      | 2,899 |
+| JavaScript calls a `FuncOf`       | 5,098 | 6,500    | (crashed: below) |
+
+(The names of properties, short and ASCII, are made into strings by the
+host without a `TextDecoder`, which took 100 ns of the 280 a `Get`
+took.)
+
+An object costs no table entry and no finalizer (Go's port registers
+one for every object it receives, which is most of its 1.5 µs). A call
+from JavaScript is slow: a goroutine and a stack of the engine's for
+each, and `handleEvent` (shared with Go's port) makes ten calls into
+JavaScript to read the event. Go's own port (`GOWASM=linear`) crashed
+node (a segmentation fault) in the loop of calls from JavaScript; not
+looked into.
+
+Sizes of an `fmt` hello world (bytes; with `-ldflags="-s -w"`; that
+gzipped), against wasip1 built the same day:
+
+|                        | wasip1                      | js                          |
+|------------------------|----------------------------:|----------------------------:|
+| `GOWASM=gc`            | 537,202 / 480,203 / 148,044 | 675,078 / 613,390 / 163,955 |
+| `GOWASM=gc,split`      | 372,216 / 317,549 / 115,730 | 459,414 / 400,111 / 127,371 |
+| `GOWASM=linear`        |                             | 2,285,210 / 2,239,650       |
+
+The wasip1 sizes are those before this stage (a build differs from the
+next by a few bytes: the linker is not quite deterministic here). What
+GOOS=js adds is std's: `os` and `syscall` go to node's `fs` through
+`syscall/js`, with a `js.FuncOf` and a goroutine for each call. With
+`GOWASM=gc`, 35 KB of the 138 is the start function, which builds the
+global variables of the program as objects (`syscall`'s tables of
+errors, among them): with split they are data.
 
 Work list (kept current):
 
 1. [done] `fmt` hello world under node, both models (M1).
-2. `go test syscall/js` under node, both models: all pass but
-   `TestCallAllocations`, `TestInvokeAllocations` and
-   `TestNewAllocations` for more than 16 arguments: they want 3
-   allocations where there are 2. The third is wasm_exec.js's slice of
-   the `Value`s of the arguments, kept alive through the call; here the
-   host has them from before the call and no such slice is made. (For
-   16 or fewer, 1, as they want: the slice of numbers is on the stack,
-   and the one allocation is the object of the result.) The tests are
-   not changed; the slice is not made to please them.
-   `TestGarbageCollection` counts wasm_exec.js's table of values
-   (`jsGo._values`): the host's object has an empty one, as there is
-   no table.
-3. The survey of std for GOOS=js under node (M3).
-4. Files in a page from `memFS`, `runGo` for js binaries, the
-   headless-browser runner (M4).
-5. Sizes and speed of a call.
+2. [done] `go test syscall/js`, both models, under node, in Chromium
+   155 and in Firefox 160: all 37 pass (M2). `TestCallAllocations`,
+   `TestInvokeAllocations` and `TestNewAllocations` wanted 3 allocations
+   for a call of more than 16 arguments where there are 2: the third is
+   wasm_exec.js's slice of the `Value`s of the arguments, kept alive
+   through the call, and here the host has them from before the call and
+   no such slice is made. (For 16 or fewer, 1, as they want: the slice of
+   numbers is on the stack, and the one allocation is the object of the
+   result.) Decided by the user ("test can check the new outcome"): the
+   tests expect `manyArgAllocs`, 2 with `wasm.gc` (`allocs_wasmgc_test.go`)
+   and 3 for Go's port (`allocs_test.go`, which still passes with
+   `GOWASM=linear`); measured exactly 2 in both models, under node and
+   in both browsers. `TestGarbageCollection` counts wasm_exec.js's table
+   of values (`jsGo._values`): the host's object has an empty one, as
+   there is no table, so it passes without testing anything here.
+3. [done] The survey of std for GOOS=js under node (M3, M5):
+   `GOOS=js std/survey.py` writes `std/status-js.txt` (and
+   `status-js-split.txt`). 255 of the 256 packages with tests pass in
+   either model (`go test -short`, `GOWASMGC_POISON` not set); `wasip1`
+   has 255 with tests, js 256. What fails:
+   - `bytes`, `TestIssue65571` (a test only for js/wasm): `make([]byte,
+     1<<31+1)` panics, `makeslice: len out of range`. The runtime's
+     linear memory holds blocks of at most 1 GB (`maxLinear`), below 2
+     GB (`linLimit`: with `GOWASM=gc` an address is kept in an `i31`).
+     Go's port has 4 GB. Not changed: a limit of the design, for both
+     models and for wasip1 too (whose tests do not try it).
+   - `syscall/js` failed in the full surveys, before the decision above
+     (run again since: ok).
+   With split the first survey also had `os`, `go/build` and
+   `internal/copyright` time out: the calls that came while the runtime
+   was busy (above).
+4. [done] Files in a page (`nodeFS` over `memFS` or an Emscripten
+   `FS`), `runGo` for js binaries, the runner of tests in a browser,
+   and a page that uses the `document` (M4).
+5. Not done: the std survey in a browser for GOOS=js; a call from
+   JavaScript without a goroutine and a stack each, and `handleEvent`
+   reading the event in one call; the start function's 35 KB with
+   `GOWASM=gc`; arguments of a call passed without a host call for each
+   that is not a number.
