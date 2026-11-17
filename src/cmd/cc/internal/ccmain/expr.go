@@ -252,6 +252,15 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 				return p.intc(1, tInt, at)
 			}
 		}
+		// Known but for x's effects: (x, value).
+		if eff, xv, ok := constCond(x); ok && eff != nil && (op == "&&" && !xv || op == "||" && xv) {
+			return &binary{node{tInt, at}, ",", eff, p.intc(b2i(xv), tInt, at)}
+		}
+		if yv, ok := p.foldTruth(y); ok && (op == "&&" && !yv || op == "||" && yv) {
+			if _, isConst := x.(*intConst); !isConst {
+				return &binary{node{tInt, at}, ",", x, p.intc(b2i(yv), tInt, at)}
+			}
+		}
 		return &binary{node{tInt, at}, op, x, y}
 	case "+":
 		if xt.isInteger() && yt.isPtr() {
@@ -498,7 +507,19 @@ func (p *parser) unaryExpr() expr {
 			x := p.unaryExpr()
 			return p.incDecOf(x, t.text, false, at)
 		case "&&":
-			p.errorf("labels as values are not supported")
+			// GNU's labels as values.
+			p.next()
+			if p.fn == nil {
+				p.errorAt(at, "label address outside a function")
+			}
+			l := p.label(p.ident())
+			if l.id == 0 {
+				p.fn.labelIDs++
+				l.id = p.fn.labelIDs
+				p.fn.addrLabels = append(p.fn.addrLabels, l)
+			}
+			p.fn.hasGoto = true
+			return &labelAddr{node{ptrTo(tVoid), at}, l}
 		}
 	}
 	if t.kind == tkIdent {
@@ -1121,6 +1142,9 @@ func (p *parser) fold(e expr) expr {
 		if x, ok := e.x.(*intConst); ok && e.op == "!" {
 			return &intConst{node{e.t, e.p}, b2i(x.v == 0)}
 		}
+		if eff, v, ok := constCond(e.x); ok && eff != nil && e.op == "!" {
+			return &binary{node{tInt, e.p}, ",", eff, &intConst{node{tInt, e.p}, b2i(!v)}}
+		}
 	case *binary:
 		x, xok := e.x.(*intConst)
 		y, yok := e.y.(*intConst)
@@ -1375,6 +1399,17 @@ func (p *parser) builtin(name string, at pos) expr {
 			return x
 		}
 		return y
+	case "__builtin_setjmp":
+		as := args(1)
+		if p.fn == nil {
+			p.errorAt(at, "setjmp outside a function")
+		}
+		env := p.rvalue(as[0])
+		if !env.ty().isPtr() {
+			p.errorAt(at, "setjmp of a %s", env.ty())
+		}
+		p.fn.setjmps++
+		return &builtinCall{node{tInt, at}, "setjmp", []expr{env, p.intc(int64(p.fn.setjmps), tInt, at)}}
 	case "__builtin_assert":
 		// cmd/cc's assert: (cond, text, file, line).
 		as := args(4)

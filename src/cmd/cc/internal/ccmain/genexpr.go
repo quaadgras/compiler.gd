@@ -438,6 +438,8 @@ func (g *gen) rv(e expr) string {
 		return g.stmtExprCode(e, true)
 	case *vlaSizeof:
 		return g.vlaSize(e.of)
+	case *labelAddr:
+		return fmt.Sprintf("c23.FromInt(%d)", e.l.id)
 	case *seqExpr:
 		for _, s := range e.pre {
 			g.stmt(s)
@@ -720,24 +722,25 @@ func isConvLit(s string) bool {
 }
 
 func (g *gen) stmtExprCode(e *stmtExpr, value bool) string {
-	if e.t.kind == kVoid || !value {
-		g.p("{")
+	body := func() {
 		for _, s := range e.body.list {
-			g.stmt(s)
+			if g.flatSt != nil {
+				g.flatStmt(s)
+			} else {
+				g.stmt(s)
+			}
 		}
+	}
+	if e.t.kind == kVoid || !value {
+		body()
 		if e.last != nil {
 			g.effect(e.last)
 		}
-		g.p("}")
 		return ""
 	}
 	t := g.tmp(goType(e.t))
-	g.p("{")
-	for _, s := range e.body.list {
-		g.stmt(s)
-	}
+	body()
 	g.p("%s = %s", t, g.rv(e.last))
-	g.p("}")
 	return t
 }
 
@@ -929,6 +932,16 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
+	case "setjmp":
+		k := e.args[1].(*intConst).v
+		t := g.tmp("int32")
+		g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+		// longjmp comes back here.
+		g.p("J%d:", k)
+		g.p("if jsite == %d {", k)
+		g.p("%s, jsite = jval, 0", t)
+		g.p("}")
+		return t
 	case "assert":
 		return fmt.Sprintf("c23.AssertC(%s, %s, %s, %s)", g.cond(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2]), g.rv(e.args[3]))
 	}

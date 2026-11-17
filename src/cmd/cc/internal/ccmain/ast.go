@@ -142,6 +142,11 @@ type (
 		pre []stmt
 		x   expr
 	}
+	// &&l: a label's address, GNU's.
+	labelAddr struct {
+		node
+		l *label
+	}
 	// A call of a built-in function, cmd/cc's own.
 	builtinCall struct {
 		node
@@ -214,9 +219,14 @@ type funcDecl struct {
 	hasGoto bool
 	usesVA  bool
 	inline  bool
+	setjmps int // calls of setjmp: their sites are 1...setjmps
+
+	labelIDs   int
+	addrLabels []*label // labels whose address is taken
 }
 
 type label struct {
+	id   int // its address's value, if taken (&&l)
 	name string
 	used bool
 	p    pos
@@ -265,13 +275,18 @@ type (
 		sw     *switchStmt
 		id     int
 	}
-	breakStmt    struct{}
-	continueStmt struct{}
-	returnStmt   struct {
+	breakStmt struct {
+		label string // C2y: break label
+	}
+	continueStmt struct {
+		label string
+	}
+	returnStmt struct {
 		x expr
 	}
 	gotoStmt struct {
 		l *label
+		x expr // goto *x
 	}
 	// goto *p: not supported.
 	labelStmt struct {

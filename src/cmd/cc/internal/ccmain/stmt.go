@@ -27,6 +27,12 @@ func (p *parser) blockItem() []stmt {
 		p.staticAssert()
 		return nil
 	}
+	if p.is("__label__") {
+		// GNU's local labels: function-wide here.
+		for p.next(); !p.accept(";"); p.next() {
+		}
+		return nil
+	}
 	if p.isDecl() {
 		return p.declaration()
 	}
@@ -225,12 +231,25 @@ func (p *parser) statement() stmt {
 			if p.breakOK == 0 {
 				p.errorAt(at, "break statement not within loop or switch")
 			}
+			if p.peek().kind == tkIdent {
+				// C2y: break out of the loop or switch with this label.
+				p.fn.hasGoto = true
+				l := p.ident()
+				p.expect(";")
+				return &breakStmt{l}
+			}
 			p.expect(";")
 			return &breakStmt{}
 		case "continue":
 			p.next()
 			if p.continueOK == 0 {
 				p.errorAt(at, "continue statement not within a loop")
+			}
+			if p.peek().kind == tkIdent {
+				p.fn.hasGoto = true
+				l := p.ident()
+				p.expect(";")
+				return &continueStmt{l}
 			}
 			p.expect(";")
 			return &continueStmt{}
@@ -253,13 +272,19 @@ func (p *parser) statement() stmt {
 			return &returnStmt{p.assignConvert(p.rvalue(x), rt, at, "return")}
 		case "goto":
 			p.next()
-			if p.is("*") {
-				p.errorAt(at, "computed goto is not supported")
+			if p.accept("*") {
+				x := p.rvalue(p.expr())
+				p.expect(";")
+				if !x.ty().isPtr() {
+					p.errorAt(at, "computed goto of a %s", x.ty())
+				}
+				p.fn.hasGoto = true
+				return &gotoStmt{x: x}
 			}
 			name := p.ident()
 			p.expect(";")
 			p.fn.hasGoto = true
-			return &gotoStmt{p.label(name)}
+			return &gotoStmt{l: p.label(name)}
 		case "asm", "__asm__", "__asm":
 			p.errorAt(at, "inline assembly is not supported")
 		}

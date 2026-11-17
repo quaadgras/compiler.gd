@@ -135,20 +135,66 @@ func (g *gen) function(f *funcDecl) {
 	if f.usesVA {
 		fmt.Fprintf(&g.locals, "_ = va\n")
 	}
-	for _, s := range f.body.list {
-		g.stmt(s)
+	g.jmp = f.setjmps > 0
+	g.flatSt = nil
+	if needsFlat(f) {
+		g.flatSt = &flatState{cases: map[*caseStmt]string{}}
+		g.flatStmt(f.body)
+	} else {
+		g.stmt(f.body)
 	}
 	name := g.names[f.sym]
 	sig := g.funcSig(ft, names)
+	hasRes := ft.ret.kind != kVoid && ft.ret.kind != kStruct
 	fmt.Fprintf(&g.funcs, "func %s%s {\n", name, strings.TrimPrefix(sig, "func"))
 	g.funcs.WriteString(g.locals.String())
 	g.funcs.WriteString(g.cells.String())
-	g.funcs.WriteString(body.String())
-	if ft.ret.kind != kVoid && ft.ret.kind != kStruct {
-		fmt.Fprintf(&g.funcs, "\treturn %s\n", zeroOf(ft.ret))
+	text := body.String()
+	if g.flatSt != nil {
+		text = dropUnusedLabels(text)
+	}
+	if !g.jmp {
+		g.funcs.WriteString(text)
+		if hasRes {
+			fmt.Fprintf(&g.funcs, "\treturn %s\n", zeroOf(ft.ret))
+		}
+	} else {
+		// setjmp: the body runs again from a setjmp's site when longjmp
+		// unwinds to it (c23.Longjmp).
+		g.funcs.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
+		if hasRes {
+			fmt.Fprintf(&g.funcs, "r, ok := func() (r %s, ok bool) {\n", goType(ft.ret))
+		} else {
+			g.funcs.WriteString("ok := func() (ok bool) {\n")
+		}
+		g.funcs.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := jf.Catch(x)\nif !mine {\npanic(x)\n}\njsite, jval = s, v\n}\n}()\nswitch jsite {\n")
+		for k := 1; k <= f.setjmps; k++ {
+			fmt.Fprintf(&g.funcs, "case %d:\ngoto J%d\n", k, k)
+		}
+		g.funcs.WriteString("}\n")
+		g.funcs.WriteString(text)
+		if hasRes {
+			fmt.Fprintf(&g.funcs, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", zeroOf(ft.ret))
+		} else {
+			g.funcs.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
+		}
 	}
 	g.funcs.WriteString("}\n\n")
 	g.fn = nil
+}
+
+// ret emits a return of v ("" if none).
+func (g *gen) ret(v string) {
+	switch {
+	case g.jmp && v != "":
+		g.p("return %s, true", v)
+	case g.jmp:
+		g.p("return true")
+	case v != "":
+		g.p("return %s", v)
+	default:
+		g.p("return")
+	}
 }
 
 func zeroOf(t *ctype) string {
@@ -162,7 +208,7 @@ func (g *gen) stmt(s stmt) {
 	switch s := s.(type) {
 	case nil, *emptyStmt:
 	case *block:
-		for _, x := range s.list {
+		for _, x := range live(s.list) {
 			g.stmt(x)
 		}
 	case *exprStmt:
@@ -172,6 +218,17 @@ func (g *gen) stmt(s stmt) {
 			g.localInit(sym)
 		}
 	case *ifStmt:
+		if eff, v, ok := constCond(s.c); ok && !hasTarget(s) {
+			if eff != nil {
+				g.effect(eff)
+			}
+			if v {
+				g.stmt(s.then)
+			} else {
+				g.stmt(s.els)
+			}
+			return
+		}
 		c := g.cond(s.c)
 		g.p("if %s {", c)
 		g.stmt(s.then)
@@ -261,18 +318,30 @@ func (g *gen) stmt(s stmt) {
 		switch {
 		case s.x == nil:
 			if g.fn.sym.t.fn.ret.kind != kVoid && g.fn.sym.t.fn.ret.kind != kStruct {
-				g.p("return %s", zeroOf(g.fn.sym.t.fn.ret))
+				g.ret(zeroOf(g.fn.sym.t.fn.ret))
 			} else {
-				g.p("return")
+				g.ret("")
 			}
 		case s.x.ty().kind == kStruct:
 			v := g.rv(s.x)
 			g.p("c23.Memmove(sret, %s, %d)", v, s.x.ty().sizeof())
-			g.p("return")
+			g.ret("")
 		default:
-			g.p("return %s", g.rv(s.x))
+			g.ret(g.rv(s.x))
 		}
 	case *gotoStmt:
+		if s.x != nil {
+			// goto *x: to the label whose address x is.
+			g.p("switch c23.Addr(%s) {", g.rv(s.x))
+			for _, l := range g.fn.addrLabels {
+				g.p("case %d:", l.id)
+				g.p("goto L_%s", goIdent(l.name))
+			}
+			g.p("default:")
+			g.p("c23.Trap()")
+			g.p("}")
+			return
+		}
 		s.l.used = true
 		g.p("goto L_%s", goIdent(s.l.name))
 	case *labelStmt:

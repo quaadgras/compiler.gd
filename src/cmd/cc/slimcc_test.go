@@ -126,10 +126,14 @@ func TestSlimcc(t *testing.T) {
 // runSlimcc translates, builds and runs one test.
 func runSlimcc(t *testing.T, mod, name string, files ...string) error {
 	src, err := ccmain.Program(files, "main", []string{"test"})
+	pkg := filepath.Join(mod, name)
+	if src != nil {
+		os.MkdirAll(pkg, 0o777)
+		os.WriteFile(filepath.Join(pkg, "c.go"), src, 0o666)
+	}
 	if err != nil {
 		return fmt.Errorf("cc: %v", err)
 	}
-	pkg := filepath.Join(mod, name)
 	if err := os.MkdirAll(pkg, 0o777); err != nil {
 		return err
 	}

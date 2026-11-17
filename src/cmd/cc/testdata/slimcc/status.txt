@@ -9,6 +9,8 @@ compat
 complit
 const
 constexpr
+control
+dead_elim
 decl
 decl2
 digit_separator
@@ -20,6 +22,7 @@ generic
 generic2
 gibberish
 imm_arith_opt
+labeled_loop_sw
 line
 macro
 macro2
@@ -31,6 +34,7 @@ macro_spacing
 offsetof
 pointer
 pragma_pack
+setjmp
 sizeof
 string
 struct

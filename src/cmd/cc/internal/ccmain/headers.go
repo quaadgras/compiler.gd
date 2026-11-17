@@ -113,6 +113,19 @@ var sysHeaders = map[string]string{
 #define ULLONG_MAX 18446744073709551615ULL
 #endif
 `,
+	"setjmp.h": `#ifndef __CC_SETJMP_H
+#define __CC_SETJMP_H
+typedef struct { void *__p; } jmp_buf[1];
+typedef jmp_buf sigjmp_buf;
+#define setjmp(env) __builtin_setjmp(env)
+#define _setjmp(env) __builtin_setjmp(env)
+#define sigsetjmp(env, save) __builtin_setjmp(env)
+[[noreturn]] void longjmp(jmp_buf env, int val);
+[[noreturn]] void _longjmp(jmp_buf env, int val);
+[[noreturn]] void siglongjmp(sigjmp_buf env, int val);
+#define __STDC_VERSION_SETJMP_H__ 202311L
+#endif
+`,
 	"stdalign.h": ``,
 	"stdarg.h": `#ifndef __CC_STDARG_H
 #define __CC_STDARG_H

@@ -68,6 +68,8 @@ type gen struct {
 	inExpr  int    // inside a statement expression's closure
 	retType string // the Go result type of the closure being generated
 	sret    bool
+	flatSt  *flatState // a flat function's (flat.go)
+	jmp     bool       // the function calls setjmp: its body is a closure
 }
 
 func (g *gen) errorf(at pos, format string, args ...any) {
