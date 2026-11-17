@@ -242,7 +242,7 @@ func TestBuildTag(t *testing.T) {
 #include "add.h"`, "cgo: 5\n"},
 		{"ldflags", `#cgo LDFLAGS: -lm
 #include "add.h"`, "no cgo\n"},
-		{"system header", `#include <signal.h>
+		{"system header", `#include <unistd.h>
 #include "add.h"`, "no cgo\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

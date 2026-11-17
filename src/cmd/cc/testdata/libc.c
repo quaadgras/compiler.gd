@@ -2,16 +2,16 @@
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
+#include <locale.h>
 #include <math.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <uchar.h>
 #include <wchar.h>
-#ifndef __GD_CC__
-#include <locale.h>
-#endif
 
 static void testMath(void) {
 	double xs[] = {0.5, 1.0, 2.5, -3.75, 10.0};
@@ -210,6 +210,75 @@ static void testTime(void) {
 		(int)CLOCKS_PER_SEC);
 }
 
+// testTm uses only UTC: the zone of the program is the environment's.
+static void testTm(void) {
+	time_t t = 1700000000;
+	struct tm *tm = gmtime(&t);
+	printf("gmtime %d %d %d %d %d %d %d %d %d\n", tm->tm_year, tm->tm_mon, tm->tm_mday, tm->tm_hour,
+		tm->tm_min, tm->tm_sec, tm->tm_wday, tm->tm_yday, tm->tm_isdst);
+	printf("asctime %s", asctime(tm));
+	char buf[256];
+	size_t k = strftime(buf, sizeof buf, "%a %A %b %B %C %d %D %e %F %g %G %h %H %I %j %m %M %n %p %r "
+		"%R %S %t %T %u %U %V %w %W %x %X %y %Y %% %c %Ey %OH", tm);
+	printf("strftime %zu [%s]\n", k, buf);
+	printf("strftime short %zu\n", strftime(buf, 7, "%Y-%m", tm));
+	struct tm tt = {0};
+	tt.tm_year = 124;
+	tt.tm_mon = 13;
+	tt.tm_mday = 35;
+	tt.tm_hour = 25;
+	tt.tm_min = -5;
+	time_t tg = timegm(&tt);
+	printf("timegm %ld: %d %d %d %d %d %d %d\n", (long)tg, tt.tm_year, tt.tm_mon, tt.tm_mday,
+		tt.tm_hour, tt.tm_min, tt.tm_wday, tt.tm_yday);
+	time_t ts[] = {0, 946684800, 1104537600, 1230681600, 1293753600, 1609459200, -86400 * 365, 951782400};
+	for (int i = 0; i < 8; i++) {
+		struct tm b;
+		gmtime_r(&ts[i], &b);
+		strftime(buf, sizeof buf, "%G-W%V-%u %g %U %W %j %I%p", &b);
+		printf("week %s\n", buf);
+	}
+	struct tm lt;
+	localtime_r(&t, &lt);
+	time_t back = mktime(&lt);
+	printf("mktime %d %d\n", back == t, localtime(&t)->tm_min == lt.tm_min);
+	printf("ctime %d\n", strlen(ctime(&t)) == 25);
+	struct timespec sp;
+	int base = timespec_get(&sp, TIME_UTC);
+	printf("timespec_get %d %d\n", base == TIME_UTC,
+		sp.tv_sec > 1700000000 && sp.tv_nsec >= 0 && sp.tv_nsec < 1000000000);
+}
+
+static volatile sig_atomic_t caught;
+static void onSignal(int sig) { caught = sig; }
+
+static void testSignal(void) {
+	int dfl = signal(SIGINT, onSignal) == SIG_DFL;
+	int r = raise(SIGINT);
+	printf("signal %d raise %d caught %d\n", dfl, r, caught);
+	int prev = signal(SIGTERM, SIG_IGN) == SIG_DFL;
+	caught = 0;
+	r = raise(SIGTERM);
+	printf("ignored %d raise %d caught %d\n", prev, r, caught);
+	prev = signal(SIGTERM, onSignal) == SIG_IGN;
+	raise(SIGTERM);
+	printf("handler %d caught %d\n", prev, caught);
+	prev = signal(SIGINT, SIG_DFL) == onSignal;
+	signal(SIGTERM, SIG_DFL);
+	printf("restored %d %d\n", prev, SIGABRT + SIGFPE + SIGILL + SIGSEGV);
+}
+
+// testLocale runs after the tests that need a UTF-8 locale.
+static void testLocale(void) {
+	struct lconv *lc = localeconv();
+	printf("lconv [%s] [%s] [%s] [%s] [%s] %d %d %d\n", lc->decimal_point, lc->thousands_sep,
+		lc->grouping, lc->currency_symbol, lc->int_curr_symbol, lc->frac_digits == CHAR_MAX,
+		lc->p_sign_posn == CHAR_MAX, lc->int_n_sign_posn == CHAR_MAX);
+	printf("setlocale %s", setlocale(LC_NUMERIC, "C"));
+	printf(" %s", setlocale(LC_NUMERIC, "POSIX"));
+	printf(" %s\n", setlocale(LC_NUMERIC, NULL));
+}
+
 struct rec {
 	const char *name;
 	int key;
@@ -260,6 +329,88 @@ static void testStdlib(void) {
 	atexit(bye2);
 }
 
+static void testDiv(void) {
+	div_t d = div(-7, 2);
+	ldiv_t ld = ldiv(7L, -2L);
+	lldiv_t lld = lldiv(-9LL, -4LL);
+	imaxdiv_t im = imaxdiv(100, 7);
+	printf("div %d %d ldiv %ld %ld lldiv %lld %lld imaxdiv %jd %jd\n", d.quot, d.rem, ld.quot, ld.rem,
+		lld.quot, lld.rem, im.quot, im.rem);
+	fflush(stdout);
+	int sh = system(NULL) != 0;
+	int st = system("exit 3");
+	int ok = system("true");
+	printf("system %d %d %d\n", sh, st, ok);
+}
+
+static void testScanf(void) {
+	int a = 0, n = 0, pos = 0;
+	unsigned u = 0, x = 0;
+	char s[20], c[3], set[20];
+	double f = 0;
+	float g = 0;
+	long l = 0;
+	short h = 0;
+	signed char hh = 0;
+	long long ll = 0;
+	int r = sscanf("  42 0x1F 17 ff hello abc!def 3.5e2 -1.25", "%d %i %o %x %s %3c %[a-z!]%lf %f",
+		&a, &n, &u, &x, s, c, set, &f, &g);
+	printf("sscanf %d: %d %d %u %u %s %.3s %s %g %g\n", r, a, n, u, x, s, c, set, f, g);
+	r = sscanf("12abc 99", "%2d%*[a-c]%n %ld", &a, &pos, &l);
+	printf("sscanf %d: %d %d %ld\n", r, a, pos, l);
+	printf("sscanf empty %d\n", sscanf("", "%d", &a));
+	printf("sscanf blank %d\n", sscanf("   ", " %d", &a));
+	printf("sscanf mismatch %d\n", sscanf("x", "%d", &a));
+	printf("sscanf 100ergs %d\n", sscanf("100ergs", "%lf%s", &f, s));
+	r = sscanf("-12 % 7 0777 -0x10 300", "%hd %% %i %i %i %hhd", &h, &a, &n, &x, &hh);
+	printf("sscanf %d: %d %d %d %d\n", r, h, a, n, (int)x);
+	r = sscanf("inf -nan 0x1p4 1e-2", "%lf %lf %lf %lf", &f, &f, &f, &f);
+	printf("sscanf %d %g\n", r, f);
+	printf("sscanf literal %d %d\n", sscanf("abc", "abd"), sscanf("abc5", "abc%d", &a));
+	r = sscanf("9223372036854775807 x:y", "%lld %[^:]:%1s", &ll, set, s);
+	printf("sscanf %d: %lld %s %s\n", r, ll, set, s);
+	r = sscanf("123456", "%3d%2u%c", &a, &u, c);
+	printf("sscanf %d: %d %u %c\n", r, a, u, c[0]);
+	r = sscanf(".5 -.25e+1 0.", "%f %f %f", &g, &g, &g);
+	printf("sscanf %d %g\n", r, g);
+
+	FILE *fp = fopen("libc_scan.tmp", "w");
+	fprintf(fp, "10 20\nword 2.5\n");
+	fclose(fp);
+	fp = fopen("libc_scan.tmp", "r");
+	r = fscanf(fp, "%d %d %s %lf", &a, &n, s, &f);
+	printf("fscanf %d: %d %d %s %g\n", r, a, n, s, f);
+	r = fscanf(fp, "%d", &a);
+	printf("fscanf eof %d %d\n", r, !!feof(fp));
+	fclose(fp);
+	fp = fopen("libc_scan.tmp", "r");
+	r = fscanf(fp, "%d", &a);
+	int next = fgetc(fp);
+	printf("fscanf %d %d next %d\n", r, a, next);
+
+	// A stream opened for reading only fails writes at once.
+	int e = fputs("x", fp);
+	printf("fputs read-only %d error %d\n", e, !!ferror(fp));
+	clearerr(fp);
+	size_t w = fwrite("ab", 1, 2, fp);
+	int pc = fputc('a', fp);
+	int pf = fprintf(fp, "x");
+	printf("fwrite %zu fputc %d fprintf %d error %d\n", w, pc, pf < 0, !!ferror(fp));
+	printf("fclose %d\n", fclose(fp));
+	fp = fopen("libc_scan.tmp", "a");
+	int gc = fgetc(fp);
+	printf("fgetc write-only %d error %d\n", gc, !!ferror(fp));
+	FILE *fp2 = freopen("libc_scan.tmp", "r", fp);
+	int same = fp2 == fp;
+	gc = fgetc(fp);
+	printf("freopen %d %c\n", same, gc);
+	fclose(fp);
+	remove("libc_scan.tmp");
+	char tn[L_tmpnam];
+	int self = tmpnam(tn) == tn;
+	printf("tmpnam %d %d %d %d\n", self, strlen(tn) < L_tmpnam, tmpnam(NULL) != NULL, TMP_MAX >= 25);
+}
+
 static void testString(void) {
 	char s[] = "  the quick,brown  fox,,jumps ";
 	for (char *t = strtok(s, " ,"); t; t = strtok(NULL, " ,"))
@@ -273,6 +424,7 @@ static void testString(void) {
 	printf("strpbrk %s %d\n", strpbrk("hello, world", " ,"), strpbrk("abc", "xyz") == NULL);
 	printf("strnlen %zu %zu strcoll %d %d\n", strnlen("hello", 3), strnlen("hi", 10),
 		strcoll("abc", "abd") < 0, strcoll("b", "a") > 0);
+	printf("strerror %s|%s|%s|%s\n", strerror(ENOENT), strerror(EBADF), strerror(EACCES), strerror(ENOTDIR));
 }
 
 static void testStdio(void) {
@@ -338,8 +490,13 @@ int main(void) {
 	testErrno();
 	testUchar();
 	testTime();
+	testTm();
+	testSignal();
+	testDiv();
+	testScanf();
 	testStdlib();
 	testString();
 	testStdio();
+	testLocale();
 	return 0;
 }
