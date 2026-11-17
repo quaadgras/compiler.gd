@@ -304,6 +304,13 @@ vendored, as their licenses are not MIT, but `testdata/*.status` list what
 passes. Most of the torture tests that fail use inline assembly or vector
 types, or keep pointers in integers.
 
+Real programs: Lua 5.4 and SQLite 3.46.1 (the amalgamation and its
+shell) translate, build and run unmodified, with only the headers cmd/cc
+provides; Lua passes its test suite's files, and SQLite gives the same
+output as when gcc builds it. Both run 20 to 40 times slower than
+native: every access is a call, and a pointer in untyped memory (a
+union's, malloc's) goes through a side table.
+
 Complex numbers are Go's complex64 and complex128 (`complex.h` is
 `math/cmplx`); `_BitInt(N)` goes to 64 bits (`BITINT_MAXWIDTH`, the least
 C23 allows); GNU's nested functions are Go closures (still valid after
