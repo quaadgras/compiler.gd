@@ -137,7 +137,7 @@ func fillStat(buf Ptr, fi fs.FileInfo) {
 	Store32(Add(buf, 32), uint32(get(uint64(uint32(os.Getgid())), "Gid")))
 	Store64(Add(buf, 40), get(0, "Rdev"))
 	Store64(Add(buf, 48), uint64(size))
-	Store64(Add(buf, 56), get(4096, "Blksize"))
+	storeLong(Add(buf, 56), int64(get(4096, "Blksize")))
 	Store64(Add(buf, 64), get(uint64(size+511)/512, "Blocks"))
 	mt := fi.ModTime()
 	ts := func(off int, names ...string) {
@@ -146,7 +146,7 @@ func fillStat(buf Ptr, fi fs.FileInfo) {
 			s, ns = mt.Unix(), int64(mt.Nanosecond())
 		}
 		Store64(Add(buf, off), uint64(s))
-		Store64(Add(buf, off+8), uint64(ns))
+		storeLong(Add(buf, off+8), int64(ns))
 	}
 	ts(72, "Atim", "Atimespec", "Atime")
 	ts(88, "Mtim", "Mtimespec", "Mtime")

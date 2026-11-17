@@ -1215,6 +1215,9 @@ func formatC(f string, ap *VaList) []byte {
 				}
 			} else {
 				size = 8
+				if strings.IndexByte("lzt", f[i]) >= 0 && f[i-1] != 'l' && (i+1 >= len(f) || f[i+1] != 'l') {
+					size = int(longSize) // long, size_t, ptrdiff_t; long long is "ll"
+				}
 			}
 			i++
 		}

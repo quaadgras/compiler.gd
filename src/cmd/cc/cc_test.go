@@ -6,6 +6,7 @@ package main
 
 import (
 	"cmd/cc/host"
+	"fmt"
 	"internal/testenv"
 	"os"
 	"os/exec"
@@ -118,10 +119,12 @@ func TestInterop(t *testing.T) {
 	for _, target := range []struct {
 		name string
 		env  []string
+		word int // the size of a pointer and of C's long (cmd/cc's target.go)
 	}{
-		{"native", nil},
-		{"wasm-linear", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=linear"}},
-		{"wasm-split", []string{"GOOS=js", "GOARCH=wasm"}},
+		{"native", nil, 8},
+		{"wasm-linear", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=linear"}, 8},
+		{"wasm-split", []string{"GOOS=js", "GOARCH=wasm"}, 4},
+		{"wasm-split-ptr64", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=gc,split,ptr64"}, 8},
 	} {
 		t.Run(target.name, func(t *testing.T) {
 			wasm := target.env != nil
@@ -130,12 +133,12 @@ func TestInterop(t *testing.T) {
 					t.Skip("no node")
 				}
 			}
-			testInterop(t, target.env, target.name == "wasm-split")
+			testInterop(t, target.env, strings.HasPrefix(target.name, "wasm-split"), target.word)
 		})
 	}
 }
 
-func testInterop(t *testing.T, env []string, split bool) {
+func testInterop(t *testing.T, env []string, split bool, word int) {
 	dir := t.TempDir()
 	files := map[string]string{"go.mod": "module cctest\n\ngo 1.27\n"}
 	ents, err := os.ReadDir("testdata/interop")
@@ -166,10 +169,17 @@ func testInterop(t *testing.T, env []string, split bool) {
 		t.Fatalf("go run: %v\n%s", err, b)
 	}
 	out := string(b)
+	// What depends on the word: C's long (a sum that wraps with 32 bits),
+	// struct node and main.goThing (an int64 and a slice).
+	sum := int64(5000050000)
+	if word == 4 {
+		sum = int64(int32(sum))
+	}
+	thing := (8 + 3*word + 7) / 8 * 8
 	for _, want := range []string{
 		"C's list in Go: 1 2 3 4 5\n",
 		"Go's list summed by C: 60\n",
-		"after 3 collections: Go 5000050000 C 5000050000\n",
+		fmt.Sprintf("after 3 collections: Go 5000050000 C %d\n", sum),
 		"Go's stack pair summed by C: 3\n",
 		"C's locals: 213\n",
 		"allocations per call: sumPair 0 locals 0\n",
@@ -187,7 +197,7 @@ func testInterop(t *testing.T, env []string, split bool) {
 		"C dereferences an integer                    trapped: c23: access through a pointer with no capability",
 		"C keeps a pointer in untyped bytes           ok",
 		"variant's list, after a collection: 10 type 2 bytes 8\n",
-		"C reads the double as a pointer              trapped: c23: access of 4 bytes out of bounds of {C.struct_node, size 16",
+		fmt.Sprintf("C reads the double as a pointer              trapped: c23: access of 4 bytes out of bounds of {C.struct_node, size %d", 2*word),
 		"objects in a pool, after a collection: 9\n",
 		"Go sees the pool's objects only as bytes     trapped: runtime error: invalid memory address",
 		"C puns a pointer word of a stack local       trapped: c23: scalar store over a pointer word",
@@ -195,7 +205,7 @@ func testInterop(t *testing.T, env []string, split bool) {
 		"42 C uses it as the int it is                   ok",
 		"C writes a plain field of a Go value         ok",
 		"C writes the length of a Go slice            trapped: c23: store into a word of a Go value with invariants (main.goThing)",
-		"C writes past a Go value                     trapped: c23: access of 8 bytes out of bounds of {main.goThing, size 32, off 32}",
+		fmt.Sprintf("C writes past a Go value                     trapped: c23: access of %d bytes out of bounds of {main.goThing, size %d, off %d}", word, thing, thing),
 		"Go's value after: 7 2\n",
 	} {
 		if split {

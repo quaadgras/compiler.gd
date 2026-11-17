@@ -9,7 +9,7 @@ import (
 	"unsafe"
 )
 
-const alignMagic = 0xA11_C0DE_CAB_A11
+const alignMagic = 0xA11_C0DE_CAB_A11 & (1<<(8*wordSize) - 1)
 
 // NewAligned allocates a T for C in the heap, aligned to align bytes:
 // more than Go aligns anything to (C's _Alignas). The object is bigger
@@ -35,7 +35,8 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 	const page = 8192
 	align = min(max(align, 8), page)
 	size := vt.Size()
-	off := (16 + hdrSize + align - 1) / align * align
+	const mark = unsafe.Sizeof([2]uintptr{}) // M, below
+	off := (mark + hdrSize + align - 1) / align * align
 	// Go may put a header of its own at the start of an object; the
 	// first try finds out how far the T lands from a multiple of align,
 	// and the next moves it there.
@@ -55,7 +56,7 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 		}
 		st := reflect.StructOf([]reflect.StructField{
 			{Name: "M", Type: reflect.TypeFor[[2]uintptr]()},
-			{Name: "P", Type: reflect.ArrayOf(int(off-16-hdrSize), reflect.TypeFor[byte]())},
+			{Name: "P", Type: reflect.ArrayOf(int(off-mark-hdrSize), reflect.TypeFor[byte]())},
 			{Name: "H", Type: reflect.TypeFor[header]()},
 			{Name: "V", Type: vt},
 			{Name: "T", Type: reflect.ArrayOf(int(objSize-total), reflect.TypeFor[byte]())},

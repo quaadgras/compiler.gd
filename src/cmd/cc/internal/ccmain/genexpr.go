@@ -189,9 +189,9 @@ func loadCode(addr string, t *ctype) string {
 	case kUInt:
 		return fmt.Sprintf("c23.Load32(%s)", addr)
 	case kLong, kLLong:
-		return fmt.Sprintf("int64(c23.Load64(%s))", addr)
+		return fmt.Sprintf("%s(c23.Load%d(%s))", goType(t), t.sizeof()*8, addr)
 	case kULong, kULLong:
-		return fmt.Sprintf("c23.Load64(%s)", addr)
+		return fmt.Sprintf("c23.Load%d(%s)", t.sizeof()*8, addr)
 	case kFloat:
 		return fmt.Sprintf("c23.LoadF32(%s)", addr)
 	case kDouble, kLDouble:
@@ -235,7 +235,7 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 	case kInt, kUInt:
 		g.p("c23.Store32(%s, %s)", addr, bitsOf(32, t, v, c))
 	case kLong, kULong, kLLong, kULLong:
-		g.p("c23.Store64(%s, %s)", addr, bitsOf(64, t, v, c))
+		g.p("c23.Store%d(%s, %s)", t.sizeof()*8, addr, bitsOf(int(t.sizeof()*8), t, v, c))
 	case kFloat:
 		g.p("c23.StoreF32(%s, %s)", addr, v)
 	case kDouble, kLDouble:
@@ -1023,7 +1023,7 @@ func (g *gen) funcPtr(s *symbol) string {
 		// uses its own address.
 		g.descs[d] = true
 		fmt.Fprintf(&g.vars, "var %s c23.Ptr\n", d)
-		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, name)
+		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, g.libcAdapter(name, s))
 	}
 	return d
 }
@@ -1066,6 +1066,9 @@ func (g *gen) callCode(c *call) string {
 				continue // an extra argument: ignored
 			}
 		}
+		if direct && strings.HasPrefix(fn, "c23.") && i < len(callee.params) {
+			v = libcConv(v, callee.params[i], true)
+		}
 		if !direct && !isSimple(v) && !isPure(v) {
 			// C evaluates the arguments before the call, whose pointer
 			// is checked when Go evaluates the function.
@@ -1079,6 +1082,9 @@ func (g *gen) callCode(c *call) string {
 		args = append(args, v)
 	}
 	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
+	if direct && strings.HasPrefix(fn, "c23.") {
+		code = libcConv(code, callee.ret, false)
+	}
 	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
 		switch {
 		case callee.ret.kind == kVoid:

@@ -71,7 +71,7 @@ func PthreadCreate(thr, attr, start, arg Ptr) int32 {
 	threadsMu.Lock()
 	threads[id] = t
 	threadsMu.Unlock()
-	Store64(thr, id)
+	storeLong(thr, int64(id)) // pthread_t is unsigned long
 	go func() {
 		Store64(threadID.Get(), id)
 		defer close(t.done)

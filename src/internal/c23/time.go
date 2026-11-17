@@ -364,7 +364,7 @@ func TimespecGet(ts Ptr, base int32) int32 {
 	}
 	now := time.Now()
 	Store64(ts, uint64(now.Unix()))
-	Store64(Add(ts, 8), uint64(now.Nanosecond()))
+	storeLong(Add(ts, 8), int64(now.Nanosecond()))
 	return base
 }
 
@@ -376,7 +376,7 @@ func TimespecGetres(ts Ptr, base int32) int32 {
 	}
 	if Addr(ts) != 0 {
 		Store64(ts, 0)
-		Store64(Add(ts, 8), 1)
+		storeLong(Add(ts, 8), 1)
 	}
 	return base
 }

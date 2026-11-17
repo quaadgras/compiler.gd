@@ -175,7 +175,7 @@ func (t *auxTable) set(key uintptr, keep bool, e auxEntry) {
 	t.mu.Lock()
 	switch {
 	case t.dense != nil:
-		if i := key / 8; i < uintptr(len(t.dense)) {
+		if i := key / wordSize; i < uintptr(len(t.dense)) {
 			t.seq.Add(1)
 			if keep {
 				t.dense[i] = e

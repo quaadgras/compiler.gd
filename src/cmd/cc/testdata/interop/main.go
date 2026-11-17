@@ -123,13 +123,15 @@ func main() {
 
 	g := &goThing{n: 1, data: []int32{1, 2}}
 	try("C writes a plain field of a Go value", func() { C.poke(unsafe.Pointer(g), 0, 7) })
-	try("C writes the length of a Go slice", func() { C.poke(unsafe.Pointer(g), 2, 1000) })
-	try("C writes past a Go value", func() { C.poke(unsafe.Pointer(g), 4, 1) })
+	// poke indexes by longs, which are words.
+	word := unsafe.Sizeof(C.long(0))
+	try("C writes the length of a Go slice", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Offsetof(g.data)/word+1), 1000) })
+	try("C writes past a Go value", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Sizeof(*g)/word), 1) })
 	fmt.Println("Go's value after:", g.n, len(g.data))
 }
 
 //go:noinline
-func sumPair() int64 {
+func sumPair() C.long {
 	b := C.struct_node{v: 2}
 	a := C.struct_node{v: 1, next: &b}
 	return C.sum_pair(&a)

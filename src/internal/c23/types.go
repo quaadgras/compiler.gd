@@ -37,7 +37,7 @@ type tinfo struct {
 	id         int // in tinfoTab
 	t          reflect.Type
 	size       uintptr
-	kinds      []wordKind     // per 8-byte word of one value
+	kinds      []wordKind     // per word (wordSize bytes) of one value
 	elems      []reflect.Type // per word: the pointee of a wPtr word (nil: unsafe.Pointer)
 	scalarOnly bool
 	mask       uintptr // size-1, if size is a power of two
@@ -65,7 +65,7 @@ func infoOf(t reflect.Type) *tinfo {
 		return ti.(*tinfo)
 	}
 	size := t.Size()
-	n := (size + 7) / 8
+	n := (size + wordSize - 1) / wordSize
 	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1))}
 	ti.walk(t, 0)
 	if ti.size&(ti.size-1) == 0 {
@@ -97,7 +97,7 @@ func tinfoOf[T any]() *tinfo { return infoOf(reflect.TypeFor[T]()) }
 var rank = [...]int{wScalar: 0, wSplit: 1, wPtr: 2, wRO: 3}
 
 func (ti *tinfo) mark(off uintptr, k wordKind, elem reflect.Type) {
-	w := off / 8
+	w := off / wordSize
 	if rank[ti.kinds[w]] > rank[k] {
 		return
 	}
@@ -112,7 +112,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 	case reflect.UnsafePointer:
 		ti.mark(off, wPtr, nil)
 	case reflect.Bool, reflect.String, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan, reflect.Func:
-		for b := off; b < off+t.Size(); b += 8 - b%8 {
+		for b := off; b < off+t.Size(); b += wordSize - b%wordSize {
 			ti.mark(b, wRO, nil)
 		}
 	case reflect.Array:
@@ -123,7 +123,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if f.Tag.Get("c23") == "union" {
-				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += 8 - b%8 {
+				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += wordSize - b%wordSize {
 					ti.mark(b, wSplit, nil)
 				}
 				continue
@@ -143,13 +143,13 @@ func (ti *tinfo) kindAt(off uintptr) wordKind {
 			off %= ti.size
 		}
 	}
-	return ti.kinds[off/8]
+	return ti.kinds[off/wordSize]
 }
 
 // elemAt returns what the pointer word at off points to: nil for
 // unsafe.Pointer.
 func (ti *tinfo) elemAt(off uintptr) *tinfo {
-	if e := ti.elems[off%ti.size/8]; e != nil {
+	if e := ti.elems[off%ti.size/wordSize]; e != nil {
 		return infoOf(e)
 	}
 	return nil

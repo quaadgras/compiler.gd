@@ -161,7 +161,7 @@ func preprocess(srcs []source, incDirs []string) (toks []token, err error) {
 	for i := len(srcs) - 1; i >= 0; i-- {
 		p.pushFile(srcs[i].name, srcs[i].text, token{file: srcs[i].name})
 	}
-	pre, err := lexRaw("<built-in>", predefined, 1)
+	pre, err := lexRaw("<built-in>", predefinedMacros(), 1)
 	if err != nil {
 		return nil, err
 	}
@@ -1744,6 +1744,9 @@ func convertNumber(t token) (token, error) {
 	default:
 		// Too big for long long: GCC makes it unsigned.
 		t.ty = tULong
+	}
+	if target.ilp32() {
+		t.ty = ilp32IntLit(t.ty, v, suffix, base == 10)
 	}
 	t.kind, t.ival = tkInt, int64(v)
 	return t, nil

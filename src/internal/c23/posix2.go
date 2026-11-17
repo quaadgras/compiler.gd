@@ -352,7 +352,7 @@ const (
 
 func storeTimespec(ts Ptr, sec, nsec int64) {
 	Store64(ts, uint64(sec))
-	Store64(Add(ts, 8), uint64(nsec))
+	storeLong(Add(ts, 8), nsec)
 }
 
 // ClockGettime is clock_gettime. The processor-time clocks give the time
@@ -389,7 +389,7 @@ func ClockGetres(id int32, ts Ptr) int32 {
 // Nanosleep is nanosleep, which is not interrupted, so it does not store
 // what is left at rem.
 func Nanosleep(req, rem Ptr) int32 {
-	sec, nsec := int64(Load64(req)), int64(Load64(Add(req, 8)))
+	sec, nsec := int64(Load64(req)), loadLong(Add(req, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		SetErrno(EINVAL)
 		return -1
@@ -495,13 +495,14 @@ func pwResult(e pwEntry, ok bool) Ptr {
 	}
 	uid, _ := strconv.ParseUint(e[2], 10, 32)
 	gid, _ := strconv.ParseUint(e[3], 10, 32)
+	var pw passwd
 	StorePtr(pwBuf, CString(e[0]))
-	StorePtr(Add(pwBuf, 8), CString(e[1]))
-	Store32(Add(pwBuf, 16), uint32(uid))
-	Store32(Add(pwBuf, 20), uint32(gid))
-	StorePtr(Add(pwBuf, 24), CString(e[4]))
-	StorePtr(Add(pwBuf, 32), CString(e[5]))
-	StorePtr(Add(pwBuf, 40), CString(e[6]))
+	StorePtr(Add(pwBuf, int(unsafe.Offsetof(pw.passwd))), CString(e[1]))
+	Store32(Add(pwBuf, int(unsafe.Offsetof(pw.uid))), uint32(uid))
+	Store32(Add(pwBuf, int(unsafe.Offsetof(pw.gid))), uint32(gid))
+	StorePtr(Add(pwBuf, int(unsafe.Offsetof(pw.gecos))), CString(e[4]))
+	StorePtr(Add(pwBuf, int(unsafe.Offsetof(pw.dir))), CString(e[5]))
+	StorePtr(Add(pwBuf, int(unsafe.Offsetof(pw.shell))), CString(e[6]))
 	return pwBuf
 }
 
@@ -539,7 +540,11 @@ func Getrusage(who int32, usage Ptr) int32 {
 		return -1
 	}
 	for i, v := range ru {
-		Store64(Add(usage, 8*i), uint64(v))
+		if i < 4 {
+			Store64(Add(usage, 8*i), uint64(v)) // time_t and suseconds_t
+		} else {
+			storeLong(Add(usage, 32+int(longSize)*(i-4)), v)
+		}
 	}
 	return 0
 }

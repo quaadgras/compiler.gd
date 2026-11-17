@@ -318,9 +318,9 @@ func goType(t *ctype) string {
 	case kUInt:
 		return "uint32"
 	case kLong, kLLong:
-		return "int64"
+		return fmt.Sprintf("int%d", t.sizeof()*8)
 	case kULong, kULLong:
-		return "uint64"
+		return fmt.Sprintf("uint%d", t.sizeof()*8)
 	case kComplex:
 		if t.elem.kind == kFloat {
 			return "complex64"

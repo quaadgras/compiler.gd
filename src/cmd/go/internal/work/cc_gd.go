@@ -26,6 +26,11 @@ func (b *Builder) buildC(a *Action) ([]string, error) {
 	if cfg.BuildN {
 		return nil, nil
 	}
+	if isCrossBuild(nil) {
+		// cc lays C out for the target internal/buildcfg describes,
+		// which is this process's environment's (cmd/cc's target.go).
+		return nil, fmt.Errorf("%s: cmd/cc builds C for the GOOS and GOARCH of the environment, not of a go env file: set them in the environment", p.ImportPath)
+	}
 	files, err := cchost.Package(p.Dir, p.Name, p.Internal.CCFiles, p.CFiles)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %v", p.ImportPath, err)

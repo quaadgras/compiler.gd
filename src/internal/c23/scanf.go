@@ -337,6 +337,10 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 			}
 			i++
 		}
+		isize := min(size, 8) // an integer's
+		if k := i - 1; size == 8 && strings.IndexByte("lzt", f[k]) >= 0 && f[k-1] != 'l' {
+			isize = int(longSize) // long, size_t, ptrdiff_t; long long is "ll"
+		}
 		if i >= len(f) {
 			return result()
 		}
@@ -353,7 +357,7 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 		case 'n':
 			if !suppress {
 				p, _ := ap.next().(Ptr)
-				storeInt(p, min(size, 8), uint64(s.n))
+				storeInt(p, isize, uint64(s.n))
 			}
 			continue
 		case 'd', 'i', 'u', 'x', 'X', 'o', 'p':
@@ -378,7 +382,7 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 				if conv == 'p' {
 					StorePtr(dst, FromInt(uintptr(v)))
 				} else {
-					storeInt(dst, min(size, 8), v)
+					storeInt(dst, isize, v)
 				}
 			}
 		case 'a', 'A', 'e', 'E', 'f', 'F', 'g', 'G':

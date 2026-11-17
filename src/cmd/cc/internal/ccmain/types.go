@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// C's types, as cmd/cc lays them out: LP64, little-endian, long double
+// C's types, as cmd/cc lays them out: LP64 (ILP32 on wasm32: target.go),
+// little-endian, long double
 // with x86-64's size and alignment (16) but a double's value
 // (doc/gd/cc.md).
 
@@ -238,7 +239,11 @@ func (t *ctype) sizeof() int64 {
 		return 2
 	case kInt, kUInt, kFloat:
 		return 4
-	case kLong, kULong, kLLong, kULLong, kDouble, kPtr, kNullptr, kVaList:
+	case kLong, kULong:
+		return target.longSize
+	case kPtr, kNullptr, kVaList:
+		return target.ptrSize
+	case kLLong, kULLong, kDouble:
 		return 8
 	case kLDouble:
 		// x86-64's layout, with a double's value (doc/gd/cc.md).
