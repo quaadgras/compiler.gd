@@ -293,7 +293,7 @@ func (p *parser) declSpecs() specs {
 	seen := false
 	for {
 		t := p.peek()
-		if t.kind != tkIdent {
+		if t.kind != tkIdent && t.text != "[" {
 			break
 		}
 		switch t.text {
@@ -313,6 +313,18 @@ func (p *parser) declSpecs() specs {
 			nlong++
 		case "void", "char", "int", "float", "double":
 			base = t.text
+		case "__builtin_va_list":
+			// Not supported yet: an opaque pointer.
+			s.t = ptrTo(tVoid)
+			seen = true
+			p.next()
+			continue
+		case "[":
+			if p.peekAt(1).text != "[" {
+				goto done
+			}
+			p.skipAttrs()
+			continue
 		case "_Bool":
 			p.errorf("_Bool is not supported")
 		case "struct", "union":
@@ -376,6 +388,27 @@ done:
 		}
 	}
 	return s
+}
+
+// skipAttrs skips attribute specifiers, [[...]], which cmd/cc may ignore.
+func (p *parser) skipAttrs() {
+	for p.is("[") && p.peekAt(1).text == "[" {
+		depth := 0
+		for {
+			t := p.next()
+			if t.kind == tkEOF {
+				p.errorf("unterminated attribute")
+			}
+			if t.text == "[" {
+				depth++
+			} else if t.text == "]" {
+				depth--
+				if depth == 0 {
+					break
+				}
+			}
+		}
+	}
 }
 
 func (p *parser) structSpec(union bool) *ctype {
@@ -862,35 +895,9 @@ func (p *parser) primary() expr {
 	t := p.next()
 	switch t.kind {
 	case tkInt:
-		ty := tInt
-		suffix := ""
-		for i := len(t.text) - 1; i >= 0 && (t.text[i] == 'u' || t.text[i] == 'U' || t.text[i] == 'l' || t.text[i] == 'L'); i-- {
-			suffix += string(t.text[i])
-		}
-		u := false
-		l := false
-		for _, c := range suffix {
-			if c == 'u' || c == 'U' {
-				u = true
-			} else {
-				l = true
-			}
-		}
-		switch {
-		case l || t.ival > 0x7fffffff && !u:
-			ty = tLong
-			if u || uint64(t.ival) > 0x7fffffffffffffff {
-				ty = tULong
-			}
-		case u:
-			ty = tUInt
-			if uint64(t.ival) > 0xffffffff {
-				ty = tULong
-			}
-		}
-		return &intLit{l: t.line, v: t.ival, t: ty}
+		return &intLit{l: t.line, v: t.ival, t: t.ty}
 	case tkChar:
-		return &intLit{l: t.line, v: t.ival, t: tInt}
+		return &intLit{l: t.line, v: t.ival, t: t.ty}
 	case tkFloat:
 		return &floatLit{l: t.line, v: t.fval}
 	case tkString:

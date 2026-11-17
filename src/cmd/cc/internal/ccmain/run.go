@@ -69,8 +69,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 }
 
 // Program translates the C files files, a whole program with main, to
-// the Go source of package pkg.
-func Program(files []string, pkg string) ([]byte, error) {
+// the Go source of package pkg. incDirs are searched for #include.
+func Program(files []string, pkg string, incDirs []string) ([]byte, error) {
 	var srcs []source
 	for _, f := range files {
 		b, err := os.ReadFile(f)
@@ -79,7 +79,7 @@ func Program(files []string, pkg string) ([]byte, error) {
 		}
 		srcs = append(srcs, source{f, string(b)})
 	}
-	toks, err := lexUnit(srcs)
+	toks, err := lexUnitDirs(srcs, incDirs)
 	if err != nil {
 		return nil, err
 	}

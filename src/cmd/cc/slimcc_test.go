@@ -103,7 +103,7 @@ func TestSlimcc(t *testing.T) {
 
 // runSlimcc translates, builds and runs one test.
 func runSlimcc(t *testing.T, mod, name string, files ...string) error {
-	src, err := ccmain.Program(files, "main")
+	src, err := ccmain.Program(files, "main", []string{filepath.Dir(files[0])})
 	if err != nil {
 		return fmt.Errorf("cc: %v", err)
 	}

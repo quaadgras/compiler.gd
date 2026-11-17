@@ -254,6 +254,9 @@ func (g *gen) mirrorType(t *ctype) string {
 	case kArray:
 		return fmt.Sprintf("[%d]%s", max(t.n, 0), g.mirrorType(t.elem))
 	case kStruct:
+		if !t.complete {
+			return "byte" // opaque, as void
+		}
 		return g.structName(t)
 	case kVoid:
 		return "byte"
