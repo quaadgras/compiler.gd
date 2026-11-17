@@ -1,5 +1,5 @@
 // worker.mjs: the playground's go command (GOOS=js, built by
-// ../build.sh) in a worker of play.html, so that the page stays live
+// ../build.sh) in a worker of playground.html, so that the page stays live
 // while it compiles. Its files are in memory (memFS): GOROOT at /goroot;
 // the program at /work; $HOME at /home, kept in IndexedDB, with the build
 // cache, which starts as the one build.sh made of common packages.

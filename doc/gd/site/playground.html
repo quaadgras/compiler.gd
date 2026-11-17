@@ -45,7 +45,7 @@
 <main class="wide">
   <nav>
     <a href="/">compiler.gd</a>
-    <a href="/play" aria-current="page">Playground</a>
+    <a href="/playground" aria-current="page">Playground</a>
     <a href="/c11">Go → C11 (experimental)</a>
     <a href="https://github.com/quaadgras/compiler.gd">GitHub</a>
   </nav>
@@ -57,7 +57,8 @@
     <div class="tools">
       <button id="run" class="primary" disabled>Run</button>
       <button id="stop" hidden>Stop</button>
-      <select id="example" aria-label="Examples"></select>
+      <select id="example" aria-label="Examples"><option value="" hidden>Examples</option></select>
+      <button id="share" title="Copy a link with this code">Share</button>
       <span class="status" id="status">loading…</span>
     </div>
     <div class="progress" id="progress" hidden><i></i></div>
@@ -193,6 +194,53 @@ let saved = null;
 try { saved = localStorage.getItem('gd-play-src'); } catch {}
 src.value = saved || examples.Hello;
 
+// Sharing: the code, deflated and in base64url, is the URL's fragment
+// (#code=...), which browsers do not send to the server.
+const toB64 = (bytes) => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const fromB64 = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+const encode = async (code) => toB64(await pipe(new TextEncoder().encode(code), new CompressionStream('deflate-raw')));
+const decode = async (text) => new TextDecoder().decode(await pipe(fromB64(text), new DecompressionStream('deflate-raw')));
+
+async function loadShared() {
+  const m = location.hash.match(/^#code=([A-Za-z0-9_-]+)$/);
+  if (!m) return;
+  try {
+    src.value = await decode(m[1]);
+    $('example').value = '';
+  } catch {
+    print('This link\'s code could not be read.', 2);
+  }
+}
+loadShared();
+addEventListener('hashchange', loadShared);
+// The link is of the code as shared: an edit makes it stale.
+src.addEventListener('input', () => {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+});
+
+const share = $('share');
+let shareReset = 0;
+share.onclick = async () => {
+  const url = location.origin + location.pathname + '#code=' + await encode(src.value);
+  history.replaceState(null, '', url);
+  try { localStorage.setItem('gd-play-src', src.value); } catch {}
+  clearTimeout(shareReset);
+  try {
+    await navigator.clipboard.writeText(url);
+    share.textContent = 'Link copied';
+  } catch {
+    // No clipboard (an insecure page, or not allowed): the link is in
+    // the address bar.
+    share.textContent = 'Link in address bar';
+  }
+  shareReset = setTimeout(() => { share.textContent = 'Share'; }, 2000);
+};
+
 // The playground's own notes (fd 0: exit status, load time) go under the
 // output, not in it; how the build went, above it.
 const stats = $('stats'), build = $('build');
@@ -237,7 +285,7 @@ const loads = new Map();
 function start() {
   ready = false;
   run.disabled = true;
-  worker = new Worker('play/worker.mjs', { type: 'module' });
+  worker = new Worker('playground/worker.mjs', { type: 'module' });
   worker.onerror = (e) => { print('worker: ' + (e.message || 'failed to start'), 2); status.textContent = 'failed'; };
   worker.onmessage = ({ data }) => {
     if ('line' in data) print(data.line, data.fd);
@@ -290,7 +338,11 @@ stop.onclick = () => {
   print('[stopped]', 0);
   start();
 };
-$('example').onchange = (e) => { src.value = examples[e.target.value]; clear(); };
+$('example').onchange = (e) => {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  src.value = examples[e.target.value];
+  clear();
+};
 src.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
@@ -299,6 +351,7 @@ src.addEventListener('keydown', (e) => {
     e.preventDefault();
     const { selectionStart: a, selectionEnd: b } = src;
     src.setRangeText('\t', a, b, 'end');
+    src.dispatchEvent(new Event('input'));
   }
 });
 
