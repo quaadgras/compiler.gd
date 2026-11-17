@@ -202,6 +202,7 @@ def main():
     if args[:1] == ['-j']:
         jobs, args = int(args[1]), args[2:]
     cfg = build_std()
+    os.makedirs(OUT, exist_ok=True)
     results = []
     with concurrent.futures.ThreadPoolExecutor(jobs) as ex:
         for res in ex.map(lambda t: run(cfg, *t), tests(args)):
