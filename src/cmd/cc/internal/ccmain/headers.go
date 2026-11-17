@@ -863,6 +863,18 @@ float complex ccosf(float complex z);
 #define cpowl(x, y) cpow(x, y)
 #endif
 `,
+	"dlfcn.h": `#ifndef __CC_DLFCN_H
+#define __CC_DLFCN_H
+#define RTLD_LAZY 1
+#define RTLD_NOW 2
+#define RTLD_GLOBAL 0x100
+#define RTLD_LOCAL 0
+void *dlopen(const char *path, int flags);
+void *dlsym(void *restrict handle, const char *restrict name);
+int dlclose(void *handle);
+char *dlerror(void);
+#endif
+`,
 	"stdalign.h": ``,
 	"stdarg.h": `#ifndef __CC_STDARG_H
 #define __CC_STDARG_H

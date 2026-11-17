@@ -314,3 +314,14 @@ func intArgValue(a any) (int64, bool) {
 	}
 	return 0, false
 }
+
+// dlfcn.h: C compiled by cmd/cc cannot load native code, so dlopen
+// fails, as for a library not found.
+
+func Dlopen(path Ptr, flags int32) Ptr { return Ptr{} }
+func Dlsym(h, name Ptr) Ptr            { return Ptr{} }
+func Dlclose(h Ptr) int32              { return 0 }
+
+var dlMsg = CString("dynamic loading is not supported by cmd/cc")
+
+func Dlerror() Ptr { return dlMsg }

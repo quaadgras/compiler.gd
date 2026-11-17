@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -578,8 +579,7 @@ func Mmap(addr Ptr, length uint64, prot, flags, fd int32, off int64) Ptr {
 		return mapFailed
 	}
 	if share == MAP_SHARED {
-		SetErrno(ENODEV)
-		return mapFailed
+		return mapShared(f, length, off, page)
 	}
 	p := mallocAligned(uintptr(page), uintptr(length))
 	if _, err := f.ReadAt(bytesAt(p, uintptr(length)), off); err != nil && err != io.EOF {
@@ -607,3 +607,38 @@ func Mprotect(addr Ptr, length uint64, prot int32) int32 { return 0 }
 
 // Madvise is madvise, which takes no advice.
 func Madvise(addr Ptr, length uint64, advice int32) int32 { return 0 }
+
+// Shared file mappings: within the process, every mapping of the same
+// region of the same file is the same memory, read from the file when
+// first mapped. What is written to it does not reach the file, and other
+// processes do not share it: enough for a file used only to share memory
+// in a process, as SQLite's WAL index is when one process uses it.
+var (
+	sharedMu   sync.Mutex
+	sharedMaps = map[sharedKey]Ptr{}
+)
+
+type sharedKey struct {
+	file     string
+	off, len int64
+}
+
+func mapShared(f *os.File, length uint64, off, page int64) Ptr {
+	name := f.Name()
+	if abs, err := filepath.Abs(name); err == nil {
+		name = abs
+	}
+	k := sharedKey{name, off, int64(length)}
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if p, ok := sharedMaps[k]; ok {
+		return p
+	}
+	p := mallocAligned(uintptr(page), uintptr(length))
+	if _, err := f.ReadAt(bytesAt(p, uintptr(length)), off); err != nil && err != io.EOF {
+		setErrnoOf(err)
+		return mapFailed
+	}
+	sharedMaps[k] = p
+	return p
+}

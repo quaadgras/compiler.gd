@@ -62,6 +62,7 @@ var libc = map[string]string{
 	"cpowf":  "Cpowf",
 	"csinf":  "Csinf",
 	"ccosf":  "Ccosf",
+	"dlopen": "Dlopen", "dlsym": "Dlsym", "dlclose": "Dlclose", "dlerror": "Dlerror",
 	"alloca": "Malloc",
 
 	// pthread.h
