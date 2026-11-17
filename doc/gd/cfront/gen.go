@@ -201,11 +201,20 @@ func (g *gen) wrappers(b *strings.Builder) {
 		var ps, as []string
 		for i, pt := range ft.params {
 			n := fmt.Sprintf("a%d", i)
-			ps = append(ps, n+" "+g.mirrorType(pt))
-			if pt.isPtr() {
-				as = append(as, fmt.Sprintf("ccap.FromGo(unsafe.Pointer(%s))", n))
-			} else {
+			switch {
+			case !pt.isPtr():
+				ps = append(ps, n+" "+g.mirrorType(pt))
 				as = append(as, n)
+			case ft.paramArray[i]:
+				// int a[]: Go passes a slice, and C may reach its array.
+				ps = append(ps, n+" []"+g.mirrorType(pt.elem))
+				as = append(as, fmt.Sprintf("ccap.FromSlice(%s)", n))
+			case g.mirrorType(pt) == "unsafe.Pointer":
+				ps = append(ps, n+" unsafe.Pointer")
+				as = append(as, fmt.Sprintf("ccap.FromGoUnsafe(%s)", n))
+			default:
+				ps = append(ps, n+" "+g.mirrorType(pt))
+				as = append(as, fmt.Sprintf("ccap.FromGo(%s)", n))
 			}
 		}
 		res := ""
@@ -217,8 +226,10 @@ func (g *gen) wrappers(b *strings.Builder) {
 		switch {
 		case ft.ret.kind == kVoid:
 			fmt.Fprintf(b, "\t%s\n", callExpr)
+		case g.mirrorType(ft.ret) == "unsafe.Pointer":
+			fmt.Fprintf(b, "\treturn ccap.ToGoUnsafe(%s)\n", callExpr)
 		case ft.ret.isPtr():
-			fmt.Fprintf(b, "\treturn (%s)(ccap.ToGo(%s))\n", g.mirrorType(ft.ret), callExpr)
+			fmt.Fprintf(b, "\treturn ccap.ToGo[%s](%s)\n", g.mirrorType(ft.ret.elem), callExpr)
 		default:
 			fmt.Fprintf(b, "\treturn %s\n", callExpr)
 		}
@@ -259,7 +270,8 @@ func (g *gen) function(f *funcDecl) {
 			params = append(params, fmt.Sprintf("p_%s %s", name, goType(pt)))
 			n, t := name, pt
 			cells = append(cells, func() {
-				g.p("v_%s := ccap.New[%s]()", n, g.mirrorType(t))
+				g.p("var o_%s ccap.Obj[%s]", n, g.mirrorType(t))
+				g.p("v_%s := ccap.Local(&o_%s)", n, n)
 				g.storeStmt(lval{addr: "v_" + n, t: t}, val{code: "p_" + n, t: t})
 				g.scopes[len(g.scopes)-1][n] = &sym{goName: "v_" + n, t: t, cell: true}
 			})
@@ -483,7 +495,8 @@ func (g *gen) localDecl(v *varDecl) {
 	}
 	name := "v_" + v.name
 	if v.t.kind == kArray || v.t.kind == kStruct || g.fn.addr[v.name] {
-		g.p("%s := ccap.New[%s]()", name, g.mirrorType(v.t))
+		g.p("var o_%s ccap.Obj[%s]", v.name, g.mirrorType(v.t))
+		g.p("%s := ccap.Local(&o_%s)", name, v.name)
 		g.p("_ = %s", name)
 		if v.init != nil {
 			g.initStore(name, v.t, v.init)

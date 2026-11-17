@@ -475,10 +475,12 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			}
 			s := p.declSpecs()
 			name, pt := p.declarator(s.t)
-			if pt.kind == kArray {
+			isArray := pt.kind == kArray
+			if isArray {
 				pt = ptrTo(pt.elem)
 			}
 			ft.params = append(ft.params, pt)
+			ft.paramArray = append(ft.paramArray, isArray)
 			ft.paramNames = append(ft.paramNames, name)
 			if !p.accept(",") {
 				p.expect(")")

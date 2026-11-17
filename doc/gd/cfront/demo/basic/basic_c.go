@@ -172,27 +172,33 @@ func c_name(v_c int32) ccap.Ptr {
 func c_main() int32 {
 	var v_i int32
 	_ = v_i
-	v_x := ccap.New[int32]()
+	var o_x ccap.Obj[int32]
+	v_x := ccap.Local(&o_x)
 	_ = v_x
-	v_y := ccap.New[int32]()
+	var o_y ccap.Obj[int32]
+	v_y := ccap.Local(&o_y)
 	_ = v_y
 	var v_list ccap.Ptr = ccap.Ptr{}
 	_ = v_list
-	v_p := ccap.New[struct_point]()
+	var o_p ccap.Obj[struct_point]
+	v_p := ccap.Local(&o_p)
 	_ = v_p
 	ccap.Store64(v_p, uint64(1))
 	ccap.Store64(ccap.Add(v_p, 8), uint64(2))
 	ccap.Memmove(ccap.Add(v_p, 16), s_4, 3)
-	v_q := ccap.New[struct_point]()
+	var o_q ccap.Obj[struct_point]
+	v_q := ccap.Local(&o_q)
 	_ = v_q
-	v_arr := ccap.New[[5]int32]()
+	var o_arr ccap.Obj[[5]int32]
+	v_arr := ccap.Local(&o_arr)
 	_ = v_arr
 	ccap.Store32(v_arr, uint32(5))
 	ccap.Store32(ccap.Add(v_arr, 4), uint32(3))
 	ccap.Store32(ccap.Add(v_arr, 8), uint32(9))
 	ccap.Store32(ccap.Add(v_arr, 12), uint32(1))
 	ccap.Store32(ccap.Add(v_arr, 16), uint32(7))
-	v_buf := ccap.New[[32]int8]()
+	var o_buf ccap.Obj[[32]int8]
+	v_buf := ccap.Local(&o_buf)
 	_ = v_buf
 	var v_dyn ccap.Ptr
 	_ = v_dyn
@@ -278,32 +284,32 @@ func C_fib(a0 int32) int32 {
 
 // C_push calls C's push with Go's pointers.
 func C_push(a0 *struct_node, a1 int32) *struct_node {
-	return (*struct_node)(ccap.ToGo(c_push(ccap.FromGo(unsafe.Pointer(a0)), a1)))
+	return ccap.ToGo[struct_node](c_push(ccap.FromGo(a0), a1))
 }
 
 // C_sum calls C's sum with Go's pointers.
 func C_sum(a0 *struct_node) int32 {
-	return c_sum(ccap.FromGo(unsafe.Pointer(a0)))
+	return c_sum(ccap.FromGo(a0))
 }
 
 // C_swap calls C's swap with Go's pointers.
 func C_swap(a0 *int32, a1 *int32) {
-	c_swap(ccap.FromGo(unsafe.Pointer(a0)), ccap.FromGo(unsafe.Pointer(a1)))
+	c_swap(ccap.FromGo(a0), ccap.FromGo(a1))
 }
 
 // C_sort calls C's sort with Go's pointers.
 func C_sort(a0 *int32, a1 int32) {
-	c_sort(ccap.FromGo(unsafe.Pointer(a0)), a1)
+	c_sort(ccap.FromGo(a0), a1)
 }
 
 // C_hash calls C's hash with Go's pointers.
 func C_hash(a0 *int8) uint32 {
-	return c_hash(ccap.FromGo(unsafe.Pointer(a0)))
+	return c_hash(ccap.FromGo(a0))
 }
 
 // C_name calls C's name with Go's pointers.
 func C_name(a0 int32) *int8 {
-	return (*int8)(ccap.ToGo(c_name(a0)))
+	return ccap.ToGo[int8](c_name(a0))
 }
 
 func main() {

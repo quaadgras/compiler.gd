@@ -1,0 +1,164 @@
+package ccap
+
+import (
+	"reflect"
+	"sync"
+	"unsafe"
+)
+
+// What C may do with a word of memory, from the Go type of the memory.
+type wordKind uint8
+
+const (
+	wScalar wordKind = iota // C may read and write it as bytes
+	wPtr                    // a pointer: C reads and writes it with LoadPtr and StorePtr
+	wRO                     // a word of a Go value with invariants (bool, string, slice,
+	// interface, map, chan, func): C may read it, never write it
+)
+
+// A tinfo describes a type for C's checks: what each word of one value of
+// it is, and what its pointer words point to. Memory a capability covers is
+// an array of its tinfo's type.
+type tinfo struct {
+	t          reflect.Type
+	size       uintptr
+	kinds      []wordKind     // per 8-byte word of one value
+	elems      []reflect.Type // per word: the pointee of a wPtr word (nil: unsafe.Pointer)
+	scalarOnly bool
+}
+
+var tinfos sync.Map // reflect.Type -> *tinfo
+
+// registered holds every tinfo, so that a header found in memory can be
+// trusted: safe Go code cannot make a *tinfo, so it cannot forge one.
+var registered sync.Map // *tinfo -> struct{}
+
+func infoOf(t reflect.Type) *tinfo {
+	if ti, ok := tinfos.Load(t); ok {
+		return ti.(*tinfo)
+	}
+	size := t.Size()
+	n := (size + 7) / 8
+	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1))}
+	ti.walk(t, 0)
+	ti.scalarOnly = true
+	for _, k := range ti.kinds {
+		if k != wScalar {
+			ti.scalarOnly = false
+		}
+	}
+	actual, _ := tinfos.LoadOrStore(t, ti)
+	registered.Store(actual.(*tinfo), struct{}{})
+	return actual.(*tinfo)
+}
+
+func tinfoOf[T any]() *tinfo { return infoOf(reflect.TypeFor[T]()) }
+
+func (ti *tinfo) mark(off uintptr, k wordKind, elem reflect.Type) {
+	w := off / 8
+	if ti.kinds[w] == wRO || ti.kinds[w] == wPtr && k == wScalar {
+		return
+	}
+	ti.kinds[w] = k
+	ti.elems[w] = elem
+}
+
+func (ti *tinfo) walk(t reflect.Type, off uintptr) {
+	switch t.Kind() {
+	case reflect.Pointer:
+		ti.mark(off, wPtr, t.Elem())
+	case reflect.UnsafePointer:
+		ti.mark(off, wPtr, nil)
+	case reflect.Bool, reflect.String, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan, reflect.Func:
+		for b := off; b < off+t.Size(); b += 8 - b%8 {
+			ti.mark(b, wRO, nil)
+		}
+	case reflect.Array:
+		for i := 0; i < t.Len(); i++ {
+			ti.walk(t.Elem(), off+uintptr(i)*t.Elem().Size())
+		}
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			ti.walk(f.Type, off+f.Offset)
+		}
+	}
+}
+
+// kindAt returns the kind of the byte at off in memory that is an array of
+// ti's type.
+func (ti *tinfo) kindAt(off uintptr) wordKind { return ti.kinds[off%ti.size/8] }
+
+// elemAt returns what the pointer word at off points to: nil for
+// unsafe.Pointer.
+func (ti *tinfo) elemAt(off uintptr) *tinfo {
+	if e := ti.elems[off%ti.size/8]; e != nil {
+		return infoOf(e)
+	}
+	return nil
+}
+
+type subKey struct {
+	have, want *tinfo
+	off        uintptr
+}
+
+var subCache sync.Map // subKey -> bool
+
+// holds reports whether memory that is an array of have, at off, holds a
+// whole value of want: what a Go pointer to want may point at. A value
+// with no pointer or read-only words may be any bytes with none either.
+func holds(have *tinfo, off uintptr, want *tinfo) bool {
+	k := subKey{have, want, off % have.size}
+	if r, ok := subCache.Load(k); ok {
+		return r.(bool)
+	}
+	var r bool
+	if want.scalarOnly {
+		r = true
+		for b := off; b < off+want.size; b++ {
+			if have.kindAt(b) != wScalar {
+				r = false
+				break
+			}
+		}
+	} else {
+		r = sub(have.t, off%have.size, want.t)
+	}
+	subCache.Store(k, r)
+	return r
+}
+
+// sub reports whether t has a sub-object of type want at off.
+func sub(t reflect.Type, off uintptr, want reflect.Type) bool {
+	if off == 0 && t == want {
+		return true
+	}
+	switch t.Kind() {
+	case reflect.Array:
+		e := t.Elem()
+		if e.Size() == 0 || off >= t.Size() {
+			return false
+		}
+		return sub(e, off%e.Size(), want)
+	case reflect.Struct:
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if off >= f.Offset && off < f.Offset+f.Type.Size() {
+				return sub(f.Type, off-f.Offset, want)
+			}
+		}
+	}
+	return false
+}
+
+// reflectArrayObj returns the type of C's allocation of n values of t:
+// a header, then the array.
+func reflectArrayObj(t reflect.Type, n int) reflect.Type {
+	return reflect.StructOf([]reflect.StructField{
+		{Name: "H", Type: reflect.TypeFor[header]()},
+		{Name: "V", Type: reflect.ArrayOf(n, t)},
+	})
+}
+
+func newObj(t reflect.Type) unsafe.Pointer { return reflect.New(t).UnsafePointer() }

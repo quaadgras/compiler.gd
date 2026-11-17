@@ -1,4 +1,4 @@
-// Go and C sharing memory with derived capabilities.
+// Go and C sharing memory with typed capabilities.
 package main
 
 //go:generate go run ../.. -o interop_c.go ../../testdata/interop.c
@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/debug"
+	"testing"
 	"unsafe"
+
+	"cfront/ccap"
 )
 
 func try(what string, f func()) {
@@ -18,6 +21,12 @@ func try(what string, f func()) {
 	}()
 	f()
 	fmt.Printf("%-44s ok\n", what)
+}
+
+// A Go type with invariants C must not break.
+type goThing struct {
+	n    int64
+	data []int32
 }
 
 func main() {
@@ -46,13 +55,21 @@ func main() {
 	}
 	fmt.Println("100000 nodes, after 3 collections: Go", sum, "C", C_sum_list(long))
 
-	arr := []int32{10, 20, 30}
-	try("C reads arr[2] of Go's slice", func() { fmt.Print(C_read_at(&arr[0], 2), " ") })
-	try("C reads arr[3] (inside the 16-byte size class)", func() { fmt.Print(C_read_at(&arr[0], 3), " ") })
-	try("C reads arr[4] of Go's slice", func() { C_read_at(&arr[0], 4) })
+	// Go's stack, passed to C (escape analysis keeps it there: see
+	// TestStackStaysOnStack).
+	fmt.Println("Go's stack pair summed by C:", sumPair())
+	fmt.Println("C's locals:", c_locals())
+	fmt.Println("allocations per call: sumPair", testing.AllocsPerRun(100, func() { sumPair() }),
+		"locals", testing.AllocsPerRun(100, func() { c_locals() }))
 
-	h := &struct_holder{}
-	C_store_past(h, &arr[0], 3)
+	arr := []int32{10, 20, 30}
+	try("C reads arr[2] of Go's slice", func() { fmt.Print(C_read_at(arr, 2), " ") })
+	try("C reads arr[3] of Go's slice", func() { C_read_at(arr, 3) })
+
+	// In C's object, C keeps the capability; in Go's, the word's type is
+	// all that is left.
+	h := C_new_holder()
+	C_store_past(h, arr, 3)
 	runtime.GC()
 	fmt.Printf("word C stored past the end: %#x\n", uintptr(unsafe.Pointer(h.random_int)))
 	// A fault at a non-canonical address is fatal in Go unless the
@@ -63,8 +80,36 @@ func main() {
 	})
 	try("C brings it back in bounds (arr[2])", func() { fmt.Print(C_load_back(h, 4), " ") })
 	try("C dereferences it out of bounds", func() { C_load_back(h, 0) })
-	try("C one-based indexing", func() { fmt.Print(C_one_based_sum(&arr[0], 3), " ") })
+	gh := &struct_holder{}
+	C_store_past(gh, arr, 3)
+	try("...stored in Go's object instead", func() { C_load_back(gh, 4) })
+	try("C one-based indexing", func() { fmt.Print(C_one_based_sum(arr, 3), " ") })
 	try("C writes an integer over a pointer word", func() { C_pun(h) })
 	try("C dereferences an integer", func() { C_forge(int64(uintptr(unsafe.Pointer(&arr[0])))) })
 	try("C hides a pointer in bytes", func() { C_hide(golist) })
+	try("C puns a pointer word of a stack local", func() { C_stack_pun() })
+
+	n := C_make_list(1)
+	x := new(int32)
+	*x = 42
+	C_confuse(n, x)
+	fmt.Printf("int* stored in a struct node* field: %#x\n", uintptr(unsafe.Pointer(n.next)))
+	try("Go follows it", func() {
+		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
+		_ = n.next.v
+	})
+	try("C uses it as the int it is", func() { fmt.Print(C_unconfuse(n), " ") })
+
+	g := &goThing{n: 1, data: []int32{1, 2}}
+	try("C writes a plain field of a Go value", func() { c_poke(ccap.FromGo(g), 0, 7) })
+	try("C writes the length of a Go slice", func() { c_poke(ccap.FromGo(g), 2, 1000) })
+	try("C writes past a Go value", func() { c_poke(ccap.FromGo(g), 4, 1) })
+	fmt.Println("Go's value after:", g.n, len(g.data))
+}
+
+//go:noinline
+func sumPair() int64 {
+	b := struct_node{v: 2}
+	a := struct_node{v: 1, next: &b}
+	return C_sum_pair(&a)
 }

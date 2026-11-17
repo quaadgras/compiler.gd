@@ -34,11 +34,14 @@ long sum_list(struct node *n) {
 }
 
 // C indexes memory that Go gave it: checked against the derived capability.
-int read_at(int *p, int i) { return p[i]; }
+int read_at(int p[], int i) { return p[i]; }
 
 // C stores a pointer outside its object where Go can see it: the word is
 // tagged, so that Go cannot use it, and C keeps its capability.
-void store_past(struct holder *h, int *arr, int n) { h->random_int = arr + n + 3; }
+void store_past(struct holder *h, int arr[], int n) { h->random_int = arr + n + 3; }
+
+// A holder that C allocates.
+struct holder *new_holder(void) { return malloc(sizeof(struct holder)); }
 
 // C loads it back and brings it into bounds.
 int load_back(struct holder *h, int k) {
@@ -47,7 +50,7 @@ int load_back(struct holder *h, int k) {
 }
 
 // One-based arrays: a pointer before its object, in a register only.
-int one_based_sum(int *a, int n) {
+int one_based_sum(int a[], int n) {
 	int *b = a - 1;
 	int s = 0;
 	for (int i = 1; i <= n; i++)
@@ -72,4 +75,43 @@ void hide(struct node *n) {
 	char *buf = malloc(16);
 	struct node **slot = (struct node **)buf;
 	*slot = n;
+}
+
+// C's locals on the stack: an integer over a pointer word of a local.
+int stack_pun(void) {
+	struct node a, b;
+	long *p = (long *)&a.next;
+	a.v = 1;
+	b.v = 2;
+	a.next = &b;
+	*p = 0x41414141;
+	return a.v;
+}
+
+// A pointer of the wrong type in a typed field: n->next to an int.
+void confuse(struct node *n, int *x) { n->next = (struct node *)x; }
+
+// ...which C can still use as what it is.
+int unconfuse(struct node *n) { return *(int *)n->next; }
+
+// C writes words of whatever Go passed it.
+void poke(long *p, int i, long v) { p[i] = v; }
+
+// Go passes a pointer to its stack; C only reads through it.
+long sum_pair(struct node *n) { return n->v + n->next->v; }
+
+void swap_ints(int *a, int *b) {
+	int t = *a;
+	*a = *b;
+	*b = t;
+}
+
+// Address-taken locals and a local struct: all on the stack.
+int locals(void) {
+	int x = 1, y = 2;
+	struct node a;
+	a.v = 3;
+	a.next = 0;
+	swap_ints(&x, &y);
+	return x * 100 + y * 10 + a.v;
 }
