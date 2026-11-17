@@ -143,6 +143,17 @@ func gopark(why string) {
 	gp.sp = linsp()
 	gp.stacklo = linsplim()
 	gp.deferRec = lindefer()
+	// What the host calls while the goroutine is parked (another
+	// goroutine's gorun, free...) runs on the host's stack: below this
+	// goroutine's frames would do, but the top of the stack the host
+	// finds is whatever the last goroutine left there, which may be
+	// above them (a goroutine that ends restores the top it was started
+	// with).
+	if hostStack == 0 {
+		hostStack = linalloc(hostStackSize)
+	}
+	linsetsplim(hostStack + stackRedZone)
+	linsetsp(hostStack + hostStackSize)
 	park(uint32(gp.id))
 	linsetsp(gp.sp)
 	linsetsplim(gp.stacklo)

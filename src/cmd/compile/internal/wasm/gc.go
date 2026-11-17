@@ -2564,6 +2564,13 @@ func (g *gcGen) call(v *ssa.Value) {
 		// args[0] is the function: its index in the table, shifted
 		// as in a program counter (see the linker).
 		code := args[0]
+		if os.Getenv("GOWASMGC_CALLLINE") != "" && g.pos.IsKnown() {
+			// (For debugging: the line of the last call through a
+			// function value, in the global the host reports.)
+			p := g.prog(wasm.AI32Const)
+			p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: int64(g.ctxt.InnermostPos(g.pos).RelLine())}
+			g.global(wasm.AGlobalSet, wasm.GCGlobalPanicLine)
+		}
 		args = args[1:]
 		if v.Op == ssa.OpWasmLoweredClosureCall {
 			g.get(args[0], false)
