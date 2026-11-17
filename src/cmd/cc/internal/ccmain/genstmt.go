@@ -15,10 +15,10 @@ import (
 type localKind uint8
 
 const (
-	lkVar  localKind = iota // a Go variable of its value
-	lkCell                  // a c23.Obj on the stack; the Go variable is its c23.Ptr
-	lkHeap                  // a variable length array: the Go variable is its c23.Ptr
-	lkAligned               // aligned more than Go aligns: in the heap (c23.NewAligned)
+	lkVar     localKind = iota // a Go variable of its value
+	lkCell                     // a c23.Obj on the stack; the Go variable is its c23.Ptr
+	lkHeap                     // a variable length array: the Go variable is its c23.Ptr
+	lkAligned                  // aligned more than Go aligns: in the heap (c23.NewAligned)
 )
 
 func localKindOf(s *symbol) localKind {
