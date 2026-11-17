@@ -337,7 +337,7 @@ type gowasmFeatures struct {
 
 	// GC keeps Go objects in the WebAssembly garbage-collected heap
 	// (typed structs and arrays) instead of linear memory.
-	// See doc/gd/wasm-gc.md. It is the default for GOARCH=wasm:
+	// See doc/gd/wasm-gc.md. It is the default for GOOS=js:
 	// GOWASM=linear is Go's own port.
 	GC bool
 
@@ -354,7 +354,7 @@ func (f gowasmFeatures) String() string {
 	var flags []string
 	if f.GC {
 		flags = append(flags, "gc")
-	} else if GOARCH == "wasm" {
+	} else if GOARCH == "wasm" && GOOS == "js" {
 		flags = append(flags, "linear")
 	}
 	if f.Split {
@@ -364,10 +364,11 @@ func (f gowasmFeatures) String() string {
 }
 
 func gowasm() (f gowasmFeatures) {
-	// gc is what GOARCH=wasm means, unless linear is asked for: Go's
-	// own port, with every Go value in linear memory and Go's
-	// collector.
-	f.GC = GOARCH == "wasm"
+	// gc is what GOOS=js means, unless linear is asked for: Go's own
+	// port, with every Go value in linear memory and Go's collector.
+	// (Not GOOS=wasip1: gc needs a host that tells it when an object
+	// is collected, which a WASI host is not.)
+	f.GC = GOARCH == "wasm" && GOOS == "js"
 	for opt := range strings.SplitSeq(envOr("GOWASM", ""), ",") {
 		switch opt {
 		case "satconv":

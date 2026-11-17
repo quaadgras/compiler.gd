@@ -1867,10 +1867,12 @@ is free to ignore it.
 In Firefox the host's errors also had no message (its `stack` does not
 begin with it, as V8's does): the message is now printed first.
 
-**`GOWASM=gc` is what `GOARCH=wasm` means** (2026-11-17, decided by the
+**`GOWASM=gc` is what `GOOS=js` means** (2026-11-17, decided by the
 user): `GOWASM=linear` is Go's own port, with every value in linear
 memory and Go's collector (an `fmt` hello world for `GOOS=js`:
-2,283,873 bytes). That port had not built since a morning's commit
+2,283,873 bytes). `GOOS=wasip1` is that port unless `GOWASM=gc` is
+given: gc frees linear memory when the host says an object was
+collected, which a WASI host has no way to say. Go's port had not built since a morning's commit
 that gave the assembler an instruction (`LinePlace`) without its name
 in `anames.go`: the assembly files of the linear port find
 instructions by name, and every name after it was one off

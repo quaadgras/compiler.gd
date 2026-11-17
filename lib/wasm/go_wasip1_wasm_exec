@@ -3,12 +3,10 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-# Programs need WebAssembly GC and JSPI (unless they are built with
-# GOWASM=linear): node runs them, or a browser if GOWASIRUNTIME names
-# one.
+# GOWASM=gc programs need WebAssembly GC and JSPI: node runs them, or a
+# browser if GOWASIRUNTIME names one.
 case ",$GOWASM," in
-	*,linear,*) ;;
-	*)
+	*,gc,*)
 		case "$GOWASIRUNTIME" in
 			chromium | firefox)
 				NODE_OPTIONS= exec node --disable-warning=ExperimentalWarning "$(dirname "$0")/wasm_gc_browser_exec.mjs" "$1" "${@:2}"
