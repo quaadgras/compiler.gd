@@ -1,6 +1,5 @@
-944 pass, 1 fail, 21 skipped (of 966 "// run" tests)
+945 pass, 0 fail, 21 skipped (of 966 "// run" tests)
 
-    1  run: panic: compiler too smart -- got same string
 
 PASS 235.go 
 PASS alias1.go 
@@ -37,7 +36,7 @@ PASS closure1.go
 PASS closure2.go 
 PASS closure4.go 
 PASS closure7.go 
-FAIL cmp.go run: panic: compiler too smart -- got same string
+PASS cmp.go 
 PASS complit.go 
 PASS complit2.go 
 PASS compos.go 

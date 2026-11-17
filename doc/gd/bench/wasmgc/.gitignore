@@ -3,3 +3,7 @@ out/
 *.a
 out-split/
 status-split.txt.tmp
+out-js/
+out-split-js/
+out-split-ptr64/
+out-split-ptr64-js/
