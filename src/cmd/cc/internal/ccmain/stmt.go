@@ -4,6 +4,8 @@
 
 package ccmain
 
+import "fmt"
+
 // Statements (C23 6.8).
 
 // blockBody parses a compound statement, from its "{".
@@ -89,6 +91,18 @@ func (p *parser) declaration() []stmt {
 		a.merge(s.attrs)
 		if name == "" {
 			p.errorf("expected a declarator")
+		}
+		if t.kind == kFunc && p.is("{") {
+			out = append(out, p.nestedFuncDef(name, t, at))
+			return out
+		}
+		if t.kind == kFunc && s.auto {
+			// auto int g(int): a nested function's declaration.
+			p.sc.vars[name] = &symbol{name: name, kind: symFunc, t: t, p: at, nested: true}
+			if !p.accept(",") {
+				break
+			}
+			continue
 		}
 		sym := p.declarator2(name, t, s, a, at)
 		if len(p.pendingVLA) > 0 {
@@ -491,6 +505,51 @@ func hasCleanup(d *declStmt) bool {
 		}
 	}
 	return false
+}
+
+// nestedFuncDef parses GNU's nested function definition, after its
+// declarator.
+func (p *parser) nestedFuncDef(name string, t *ctype, at pos) stmt {
+	sym := &symbol{name: name, kind: symFunc, t: t, p: at, defined: true, nested: true}
+	if old, ok := p.sc.vars[name]; ok && old.kind == symFunc && old.nested && !old.defined {
+		sym = old // declared auto before
+		sym.t, sym.defined = t, true
+	}
+	p.sc.vars[name] = sym
+	outer := p.fn
+	saveB, saveC, saveSw := p.breakOK, p.continueOK, p.sw
+	p.breakOK, p.continueOK, p.sw = 0, 0, nil
+	f := &funcDecl{sym: sym, labels: map[string]*label{}}
+	sym.fn = f
+	p.fn = f
+	p.push()
+	ft := t.fn
+	for i, pt := range ft.params {
+		pn := ""
+		if i < len(ft.names) {
+			pn = ft.names[i]
+		}
+		ps := &symbol{name: pn, kind: symVar, t: pt, p: at, isParam: true}
+		if i < len(ft.psyms) && ft.psyms[i] != nil {
+			ps = ft.psyms[i]
+			ps.t, ps.p, ps.isParam = pt, at, true
+		}
+		if pn == "" {
+			ps.name = fmt.Sprintf("_%d", i)
+		} else {
+			p.declare(ps, at)
+		}
+		f.params = append(f.params, ps)
+	}
+	f.locals = append(f.locals, ft.vlas...)
+	f.body = p.blockBody()
+	if len(ft.vlas) > 0 {
+		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)
+	}
+	p.pop()
+	p.fn = outer
+	p.breakOK, p.continueOK, p.sw = saveB, saveC, saveSw
+	return &nestedFuncStmt{f}
 }
 
 // withDecls puts a statement after the declarations of its condition.

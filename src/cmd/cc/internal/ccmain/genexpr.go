@@ -951,6 +951,9 @@ func (g *gen) stmtExprCode(e *stmtExpr, value bool) string {
 
 // funcName is the Go function a call of s calls.
 func (g *gen) funcName(s *symbol, at pos) string {
+	if s.nested {
+		return g.localName(s)
+	}
 	def := s
 	if s.linkage == 'e' {
 		if d := g.ext[s.name]; d != nil {
@@ -974,6 +977,9 @@ func (g *gen) funcPtr(s *symbol) string {
 	name := g.funcName(s, s.p)
 	if name == "" {
 		return "c23.Ptr{}" // weak, and not defined
+	}
+	if s.nested {
+		return fmt.Sprintf("c23.NewFunc(%s)", name)
 	}
 	d := "fd_" + strings.ReplaceAll(name, ".", "_")
 	if !g.descs[d] {

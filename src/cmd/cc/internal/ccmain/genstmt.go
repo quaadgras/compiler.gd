@@ -114,10 +114,18 @@ func (g *gen) declareLocal(s *symbol) {
 }
 
 func (g *gen) function(f *funcDecl) {
+	g.tmpN = 0
+	lit := g.funcLit(f)
+	fmt.Fprintf(&g.funcs, "func %s%s\n\n", g.names[f.sym], strings.TrimPrefix(lit, "func"))
+	g.fn = nil
+}
+
+// funcLit generates f as a Go function literal.
+func (g *gen) funcLit(f *funcDecl) string {
 	g.fn = f
 	g.locals.Reset()
 	g.cells.Reset()
-	g.tmpN = 0
+	var fb strings.Builder
 	ft := f.sym.t.fn
 	var body strings.Builder
 	g.out, g.ind = &body, 1
@@ -148,44 +156,62 @@ func (g *gen) function(f *funcDecl) {
 	} else {
 		g.stmt(f.body)
 	}
-	name := g.names[f.sym]
 	sig := g.funcSig(ft, names)
 	hasRes := ft.ret.kind != kVoid && ft.ret.kind != kStruct
-	fmt.Fprintf(&g.funcs, "func %s%s {\n", name, strings.TrimPrefix(sig, "func"))
-	g.funcs.WriteString(g.locals.String())
-	g.funcs.WriteString(g.cells.String())
+	fmt.Fprintf(&fb, "%s {\n", sig)
+	fb.WriteString(g.locals.String())
+	fb.WriteString(g.cells.String())
 	text := body.String()
 	if g.flatSt != nil {
 		text = dropUnusedLabels(text)
 	}
 	if !g.jmp {
-		g.funcs.WriteString(text)
+		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&g.funcs, "\treturn %s\n", zeroOf(ft.ret))
+			fmt.Fprintf(&fb, "\treturn %s\n", zeroOf(ft.ret))
 		}
 	} else {
 		// setjmp: the body runs again from a setjmp's site when longjmp
 		// unwinds to it (c23.Longjmp).
-		g.funcs.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
+		fb.WriteString("jf := c23.NewJmpFrame()\ndefer jf.Done()\nvar jsite, jval int32\n_ = jval\nfor {\n")
 		if hasRes {
-			fmt.Fprintf(&g.funcs, "r, ok := func() (r %s, ok bool) {\n", goType(ft.ret))
+			fmt.Fprintf(&fb, "r, ok := func() (r %s, ok bool) {\n", goType(ft.ret))
 		} else {
-			g.funcs.WriteString("ok := func() (ok bool) {\n")
+			fb.WriteString("ok := func() (ok bool) {\n")
 		}
-		g.funcs.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := jf.Catch(x)\nif !mine {\npanic(x)\n}\njsite, jval = s, v\n}\n}()\nswitch jsite {\n")
+		fb.WriteString("defer func() {\nif x := recover(); x != nil {\ns, v, mine := jf.Catch(x)\nif !mine {\npanic(x)\n}\njsite, jval = s, v\n}\n}()\nswitch jsite {\n")
 		for k := 1; k <= f.setjmps; k++ {
-			fmt.Fprintf(&g.funcs, "case %d:\ngoto J%d\n", k, k)
+			fmt.Fprintf(&fb, "case %d:\ngoto J%d\n", k, k)
 		}
-		g.funcs.WriteString("}\n")
-		g.funcs.WriteString(text)
+		fb.WriteString("}\n")
+		fb.WriteString(text)
 		if hasRes {
-			fmt.Fprintf(&g.funcs, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", zeroOf(ft.ret))
+			fmt.Fprintf(&fb, "return %s, true\n}()\nif ok {\nreturn r\n}\n}\n", zeroOf(ft.ret))
 		} else {
-			g.funcs.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
+			fb.WriteString("return true\n}()\nif ok {\nreturn\n}\n}\n")
 		}
 	}
-	g.funcs.WriteString("}\n\n")
-	g.fn = nil
+	fb.WriteString("}")
+	return fb.String()
+}
+
+// nestedFunc generates GNU's nested function f where it is defined: a
+// Go closure, which its own locals and the enclosing function's reach.
+func (g *gen) nestedFunc(f *funcDecl) {
+	saveFn, saveOut, saveInd := g.fn, g.out, g.ind
+	saveLocals, saveCells := g.locals.String(), g.cells.String()
+	saveSret, saveJmp, saveFlat, saveFrames := g.sret, g.jmp, g.flatSt, g.frames
+	g.frames = nil
+	lit := g.funcLit(f)
+	g.fn, g.out, g.ind = saveFn, saveOut, saveInd
+	g.locals.Reset()
+	g.locals.WriteString(saveLocals)
+	g.cells.Reset()
+	g.cells.WriteString(saveCells)
+	g.sret, g.jmp, g.flatSt, g.frames = saveSret, saveJmp, saveFlat, saveFrames
+	name := g.localName(f.sym)
+	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", name, g.funcSig(f.sym.t.fn, nil), name)
+	g.p("%s = %s", name, lit)
 }
 
 // ret emits a return of v ("" if none).
@@ -222,6 +248,8 @@ func (g *gen) stmt(s stmt) {
 	case nil, *emptyStmt:
 	case *block:
 		g.blockStmts(s, g.stmt)
+	case *nestedFuncStmt:
+		g.nestedFunc(s.f)
 	case *deferStmt:
 		// Not in a block's list: its own block.
 		g.stmt(s.body)

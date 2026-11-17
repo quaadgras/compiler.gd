@@ -219,6 +219,7 @@ type symbol struct {
 	isParam   bool
 	weak      bool    // __attribute__((weak)): null if not defined
 	cleanup   *symbol // __attribute__((cleanup(f))): f(&it) when its block is left
+	nested    bool    // GNU's nested function
 	vlaSize   string  // the Go temp with a VLA's size in bytes
 	allocSize int64   // more than its type\'s size: a flexible array member\'s initializer
 }
@@ -308,6 +309,10 @@ type (
 		body stmt
 	}
 	emptyStmt struct{}
+	// GNU's nested function: defined here, a closure.
+	nestedFuncStmt struct {
+		f *funcDecl
+	}
 	// C2y's defer: body runs when the block is left.
 	deferStmt struct {
 		body stmt
