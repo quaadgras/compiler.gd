@@ -13,6 +13,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"cmd/go/internal/cfg"
@@ -62,6 +63,10 @@ func ccContext(bp *build.Package, err error) (build.Context, bool) {
 	var noGo *build.NoGoError
 	if err != nil && !errors.As(err, &noGo) || ctx.CgoEnabled || bp == nil || len(bp.IgnoredGoFiles) == 0 {
 		// A package whose only Go files import "C" has none with cgo off.
+		return ctx, false
+	}
+	// GOWASM=gc without split has no addresses for C's pointers.
+	if slices.Contains(ctx.ToolTags, "wasm.gc") && !slices.Contains(ctx.ToolTags, "wasm.split") {
 		return ctx, false
 	}
 	ctx.CgoEnabled = true

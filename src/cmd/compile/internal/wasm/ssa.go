@@ -337,8 +337,15 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		s.Prog(wasm.AMemoryFill)
 
 	case ssa.OpWasmLoweredNilCheck:
+		// A pointer is nil or at least 1<<32 (p-1 >= 1<<32 - 1,
+		// unsigned): an address of linear memory is 32 bits, and a load
+		// keeps only those, so a pointer that C tagged (internal/c23's
+		// Tag, bit 55) would otherwise reach memory (gd fork, doc/gd/cc.md).
 		getValue64(s, v.Args[0])
-		s.Prog(wasm.AI64Eqz)
+		i64Const(s, 1)
+		s.Prog(wasm.AI64Sub)
+		i64Const(s, 1<<32-1)
+		s.Prog(wasm.AI64GeU)
 		s.Prog(wasm.AIf)
 		p := s.Prog(wasm.ACALLNORESUME)
 		p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ir.Syms(gd).SigPanic}

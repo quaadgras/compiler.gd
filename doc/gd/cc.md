@@ -200,17 +200,42 @@ descriptor as an integer (descriptors live for ever), and fault messages
 are built from the type alone; otherwise every check would move what C's
 and Go's stack values point to into the heap.
 
+## On wasm
+
+The same package runs on wasm (`go test cmd/cc` runs the interop test on
+each, with node):
+
+- **GOWASM=linear** (Go's own port; what wasip1 means): Go's runtime, so
+  the same hooks. Addresses are 32 bits, and a load keeps only those, so
+  a tagged word would reach memory: the compiler's explicit nil checks on
+  wasm also stop a pointer of 1<<32 or more
+  (`OpWasmLoweredNilCheck`), so Go's use of a tagged word is a nil
+  dereference panic, which it can recover from (better than native,
+  where it is a fault).
+- **GOWASM=gc,split** (what js means): every value has an address in
+  linear memory and every pointer its block's array of pointers, so
+  `runtime.c23Object` is the block's base, with no lookup
+  (runtime/wasmgc/c23.go), and stacks never move, so no table needs
+  re-keying. `internal/c23` never makes a pointer of an integer there (a
+  pointer made of an integer has no array of pointers): a capability's
+  type is an index (`tinfoTab`), not a pointer, and `noescape` is the
+  pointer itself. Addresses are under 1<<31, so the tag is bit 31: a
+  tagged word is past the end of memory, and Go's use of it traps (the
+  program stops; it cannot recover).
+- **GOWASM=gc** without split has no addresses: cmd/go does not build a
+  package with cc there, as if it could not.
+
 ## What it does not do yet
 
-- **Go's fault on a tagged word is fatal** (`unexpected fault address
+- **Go's fault on a tagged word is fatal** natively, and a trap with
+  GOWASM=gc,split (on linear wasm it is a panic) (`unexpected fault address
   0x0`): the kernel reports a non-canonical address as `SI_KERNEL` with no
   address, which `sigpanic` does not turn into a panic. Safe, but the demo
   needs `debug.SetPanicOnFault`. The runtime could treat that fault in Go
   code as `panicmem`.
-- **Bit 55 is not portable**: 32-bit targets have no such bit, and LA57,
-  s390x and amd64's LAM treat it differently. The tag should be a hook per
-  architecture, with a reserved unmapped region where no faulting bit
-  exists.
+- **The tag is bit 55 (31 with split), which not every target can use**:
+  32-bit targets have no bit 55, and LA57, s390x and amd64's LAM treat
+  it differently.
 - **The side tables** are maps under a mutex (a list, for a stack); an
   array of capabilities per word would be faster. Each pointer load from
   Go's memory looks for a table.

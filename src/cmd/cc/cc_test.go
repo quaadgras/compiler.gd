@@ -84,17 +84,42 @@ func TestBasic(t *testing.T) {
 
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
-// cmd/cc because cgo is off.
+// cmd/cc because cgo is off, natively and on wasm (with node).
 func TestInterop(t *testing.T) {
 	testenv.MustHaveGoRun(t)
+	for _, target := range []struct {
+		name string
+		env  []string
+	}{
+		{"native", nil},
+		{"wasm-linear", []string{"GOOS=js", "GOARCH=wasm", "GOWASM=linear"}},
+		{"wasm-split", []string{"GOOS=js", "GOARCH=wasm"}},
+	} {
+		t.Run(target.name, func(t *testing.T) {
+			wasm := target.env != nil
+			if wasm {
+				if _, err := exec.LookPath("node"); err != nil {
+					t.Skip("no node")
+				}
+			}
+			testInterop(t, target.env, target.name == "wasm-split")
+		})
+	}
+}
+
+func testInterop(t *testing.T, env []string, split bool) {
 	dir := t.TempDir()
 	files := map[string]string{"go.mod": "module cctest\n\ngo 1.27\n"}
-	for _, f := range []string{"main.go", "interop.c", "interop.h"} {
-		b, err := os.ReadFile(filepath.Join("testdata/interop", f))
+	ents, err := os.ReadDir("testdata/interop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range ents {
+		b, err := os.ReadFile(filepath.Join("testdata/interop", e.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
-		files[f] = string(b)
+		files[e.Name()] = string(b)
 	}
 	for name, data := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o666); err != nil {
@@ -103,7 +128,11 @@ func TestInterop(t *testing.T) {
 	}
 	cmd := testenv.Command(t, testenv.GoToolPath(t), "run", ".")
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "NODE_OPTIONS=")
+	if env != nil {
+		cmd.Env = append(cmd.Env, env...)
+		cmd.Env = append(cmd.Env, "PATH="+filepath.Join(testenv.GOROOT(t), "lib", "wasm")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	}
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go run: %v\n%s", err, b)
@@ -141,6 +170,16 @@ func TestInterop(t *testing.T) {
 		"C writes past a Go value                     trapped: c23: access of 8 bytes out of bounds of {main.goThing, size 32, off 32}",
 		"Go's value after: 7 2\n",
 	} {
+		if split {
+			// No panic to recover from (deref_split.go), and escape
+			// analysis keeps less on the stack (noescape_split.go).
+			if strings.Contains(want, "trapped: runtime error") {
+				want = want[:strings.Index(want, "trapped:")] + "not tried"
+			}
+			if strings.HasPrefix(want, "allocations per call") {
+				continue
+			}
+		}
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}

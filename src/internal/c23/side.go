@@ -55,23 +55,24 @@ var (
 )
 
 // where finds the table of the word at a in p's memory and its key.
-// kind: 'c' C's object, 's' this goroutine's stack, 'h' Go's heap or
-// globals (then base is the table's key).
-func where(p Ptr, a unsafe.Pointer) (kind byte, base, key uintptr) {
+// kind: 'c' C's object, 's' this goroutine's stack, 'h' Go's heap (obj is
+// the object) or globals (obj is nil, and the key the address).
+func where(p Ptr, a unsafe.Pointer) (kind byte, obj unsafe.Pointer, key uintptr) {
 	if p.header() != nil {
-		return 'c', 0, uintptr(p.off)
+		return 'c', nil, uintptr(p.off)
 	}
 	if lo, hi := stackBounds(); uintptr(a) >= lo && uintptr(a) < hi {
-		return 's', 0, uintptr(a)
+		return 's', nil, uintptr(a)
 	}
-	base, _ = object(uintptr(a))
-	return 'h', base, uintptr(a) - base
+	obj, _ = object(a)
+	return 'h', obj, uintptr(a) - uintptr(obj)
 }
 
 // auxLoad returns the capability kept for the word at a, if the word still
 // holds w (or whatever it holds, if !exact: a split word).
 func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
-	kind, base, key := where(p, a)
+	kind, obj, key := where(p, a)
+	base := uintptr(obj)
 	var e auxEntry
 	var ok bool
 	switch kind {
@@ -116,7 +117,8 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 // auxStore keeps v for the word at a, which is being set to w, if keep;
 // otherwise it forgets what was kept for it.
 func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
-	kind, base, key := where(p, a)
+	kind, obj, key := where(p, a)
+	base := uintptr(obj)
 	switch kind {
 	case 'c':
 		if t := p.header().table(keep); t != nil {
@@ -157,7 +159,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 			if !loaded {
 				goTableN.Add(1)
 				if base != 0 {
-					runtime.AddCleanup((*byte)(unsafe.Pointer(base)), func(b uintptr) {
+					runtime.AddCleanup((*byte)(obj), func(b uintptr) {
 						goTables.Delete(b)
 						goTableN.Add(-1)
 					}, base)

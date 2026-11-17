@@ -75,9 +75,9 @@ func main() {
 	fmt.Printf("word C stored past the end: %#x\n", uintptr(unsafe.Pointer(h.random_int)))
 	// A fault at a non-canonical address is fatal in Go unless the
 	// goroutine asks for a panic.
-	try("Go dereferences it", func() {
+	tryDeref("Go dereferences it", func() {
 		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		_ = *h.random_int
+		sink = *h.random_int
 	})
 	try("C brings it back in bounds (arr[2])", func() { fmt.Print(C.load_back(h, 4), " ") })
 	try("C dereferences it out of bounds", func() { C.load_back(h, 0) })
@@ -104,9 +104,9 @@ func main() {
 	C.make_pool()
 	runtime.GC()
 	fmt.Println("objects in a pool, after a collection:", C.pool_sum())
-	try("Go sees the pool's objects only as bytes", func() {
+	tryDeref("Go sees the pool's objects only as bytes", func() {
 		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		_ = C.in_pool().v
+		sink = C.in_pool().v
 	})
 	try("C puns a pointer word of a stack local", func() { C.stack_pun() })
 
@@ -115,9 +115,9 @@ func main() {
 	*x = 42
 	C.confuse(n, x)
 	fmt.Printf("int* stored in a struct node* field: %#x\n", uintptr(unsafe.Pointer(n.next)))
-	try("Go follows it", func() {
+	tryDeref("Go follows it", func() {
 		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
-		_ = n.next.v
+		sink = n.next.v
 	})
 	try("C uses it as the int it is", func() { fmt.Print(C.unconfuse(n), " ") })
 
@@ -144,7 +144,7 @@ func stackRoundTrip(arr []int32) int32 {
 	C.store_past(&h, &arr[0], 3)
 	before := uintptr(unsafe.Pointer(&h))
 	grow(2000)
-	if uintptr(unsafe.Pointer(&h)) == before {
+	if stacksMove && uintptr(unsafe.Pointer(&h)) == before {
 		panic("the stack did not move")
 	}
 	return C.load_back(&h, 4)
@@ -159,3 +159,15 @@ func grow(n int) int {
 	}
 	return grow(n-1) + int(buf[n%512])
 }
+
+// tryDeref is try, for Go's use of a word that C tagged.
+func tryDeref(what string, f func()) {
+	if !derefPanics {
+		fmt.Printf("%-44s not tried: a trap would stop the program\n", what)
+		return
+	}
+	try(what, f)
+}
+
+// sink makes Go really load what it dereferences.
+var sink C.int

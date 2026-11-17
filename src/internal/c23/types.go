@@ -7,6 +7,7 @@ package c23
 import (
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -33,6 +34,7 @@ type Raw struct {
 // it is, and what its pointer words point to. Memory a capability covers is
 // an array of its tinfo's type.
 type tinfo struct {
+	id         int // in tinfoTab
 	t          reflect.Type
 	size       uintptr
 	kinds      []wordKind     // per 8-byte word of one value
@@ -41,6 +43,15 @@ type tinfo struct {
 }
 
 var tinfos sync.Map // reflect.Type -> *tinfo
+
+// tinfoTab holds every tinfo by id, copied when one is added (types are
+// few), so that reading it needs no lock.
+var (
+	tinfoTab atomic.Pointer[[]*tinfo]
+	tinfoMu  sync.Mutex
+)
+
+func init() { tinfoTab.Store(new([]*tinfo)) }
 
 // registered holds every tinfo, so that a header found in memory can be
 // trusted: safe Go code cannot make a *tinfo, so it cannot forge one.
@@ -60,9 +71,17 @@ func infoOf(t reflect.Type) *tinfo {
 			ti.scalarOnly = false
 		}
 	}
-	actual, _ := tinfos.LoadOrStore(t, ti)
-	registered.Store(actual.(*tinfo), struct{}{})
-	return actual.(*tinfo)
+	tinfoMu.Lock()
+	defer tinfoMu.Unlock()
+	if old, ok := tinfos.Load(t); ok {
+		return old.(*tinfo)
+	}
+	tab := append(append([]*tinfo(nil), *tinfoTab.Load()...), ti)
+	ti.id = len(tab) - 1
+	tinfoTab.Store(&tab)
+	tinfos.Store(t, ti)
+	registered.Store(ti, struct{}{})
+	return ti
 }
 
 func tinfoOf[T any]() *tinfo { return infoOf(reflect.TypeFor[T]()) }

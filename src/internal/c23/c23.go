@@ -43,12 +43,14 @@ import (
 	"unsafe"
 )
 
+// object returns the base of the heap object that p points into, as a
+// pointer derived from p (with GOWASM=gc,split, that keeps p's array of
+// pointers), and its size; nil, 0 if p does not point into the heap. p
+// does not escape: the base is only ever that of a heap object.
+//
+//go:noescape
 //go:linkname object runtime.c23Object
-func object(p uintptr) (base, size uintptr)
-
-// Tag marks a pointer word whose address is not a whole value of the
-// type it points to.
-const Tag = 1 << 55
+func object(p unsafe.Pointer) (base unsafe.Pointer, size uintptr)
 
 // Ptr is a C pointer in a register.
 type Ptr struct {
@@ -58,13 +60,14 @@ type Ptr struct {
 	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object
 }
 
-// A Ptr holds its *tinfo as an integer: tinfos live for ever (registered
-// holds them), and escape analysis, which sees a Ptr as one value, would
-// otherwise take every use of the type as a use of the memory, and move
-// what the memory points to off the stack.
-func tref(ti *tinfo) uintptr { return uintptr(unsafe.Pointer(ti)) }
+// A Ptr holds its *tinfo as an index into tinfoTab, and bit 0 says the
+// memory is C's object: escape analysis, which sees a Ptr as one value,
+// would otherwise take every use of the type as a use of the memory and
+// move what the memory points to off the stack; and an index, unlike a
+// pointer made of an integer, is the same on every target.
+func tref(ti *tinfo) uintptr { return uintptr(ti.id) << 1 }
 
-func (p Ptr) info() *tinfo { return (*tinfo)(unsafe.Pointer(p.ti &^ 1)) }
+func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>1] }
 
 // cref is tref for a capability of C's object, which has a header.
 func cref(ti *tinfo) uintptr { return tref(ti) | 1 }
@@ -74,17 +77,6 @@ func (p Ptr) header() *header {
 		return nil
 	}
 	return (*header)(noescape(unsafe.Add(p.obj, -int(hdrSize))))
-}
-
-// noescape hides a pointer from escape analysis, as the runtime's does.
-// The header is part of its object and lives exactly as long as it does;
-// without this, making the object's side table would count as a leak of
-// everything the object points to.
-//
-//go:nosplit
-func noescape(p unsafe.Pointer) unsafe.Pointer {
-	x := uintptr(p)
-	return unsafe.Pointer(x ^ 0)
 }
 
 // A Fault is what a C access that its capability does not allow panics with.
@@ -179,23 +171,23 @@ func Free(p Ptr) {}
 // cobject returns the capability of C's allocation that contains w, if it
 // is one.
 func cobject(w unsafe.Pointer) (Ptr, bool) {
-	base, size := object(uintptr(w))
-	if base == 0 || size < hdrSize {
+	base, size := object(w)
+	if base == nil || size < hdrSize {
 		return Ptr{}, false
 	}
-	h := (*header)(unsafe.Pointer(base))
+	h := (*header)(base)
 	if h.magic != magic || h.ti == nil {
 		return Ptr{}, false
 	}
 	if _, ok := registered.Load(h.ti); !ok {
 		return Ptr{}, false
 	}
-	data := base + hdrSize
-	if uintptr(w) < data || uintptr(w) > data+h.size {
+	data := unsafe.Add(base, hdrSize)
+	off := int(uintptr(w) - uintptr(data))
+	if off < 0 || uintptr(off) > h.size {
 		return Ptr{}, false
 	}
-	obj := unsafe.Add(w, -int(uintptr(w)-data))
-	return Ptr{obj: obj, size: h.size, off: int(uintptr(w) - data), ti: cref(h.ti)}, true
+	return Ptr{obj: data, size: h.size, off: off, ti: cref(h.ti)}, true
 }
 
 // derive returns the capability of the untagged word w, which points to a
