@@ -3,54 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>gd-compiler — Go to portable C11</title>
+<title>Go to C11: gd-compiler</title>
 <meta name="description" content="An experimental compiler from Go to portable C11: one .c file per .go file, a small runtime header, and the Go standard library from source.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
-  <nav>
-    <a href="/">compiler.gd</a>
-    <a href="/playground">Playground</a>
-    <a href="/c11" aria-current="page">Go → C11 (experimental)</a>
-    <a href="https://github.com/quaadgras/gd-compiler">GitHub</a>
-  </nav>
-
-  <span class="tag">Experimental</span>
-  <h1>Go → <span>C11</span></h1>
-  <p class="lede">An exploratory compiler from Go to portable C11: readable output that any C11 compiler can build, and that sits next to C without cgo.</p>
+  <div class="titlebar">
+    <a class="back" href="/" aria-label="Back to compiler.gd" title="compiler.gd">←</a>
+    <h1>Go → <span>C11</span></h1>
+    <span class="tag">Experimental</span>
+  </div>
+  <p class="lede">A compiler from Go to portable C11. Readable output that any C11 compiler can build, next to C without cgo.</p>
 
   <div class="stat">
     <div><b>1983 / 2018</b><small>upstream Go tests passing (<code>$GOROOT/test</code>, excluding skips)</small><div class="bar"><i style="width:98.3%"></i></div></div>
     <div><b>generics, reflect</b><small>type parameters, range-over-func, <code>reflect.Call</code>, <code>MakeFunc</code>, <code>Select</code></small></div>
-    <div><b>stdlib from source</b><small><code>fmt</code>, <code>time</code>, <code>sync</code>, <code>os</code>, <code>errors</code>, <code>log</code>, …</small></div>
+    <div><b>stdlib from source</b><small><code>fmt</code>, <code>time</code>, <code>sync</code>, <code>os</code>, <code>errors</code>, <code>log</code>…</small></div>
   </div>
 
-  <h2>What it does</h2>
-  <ul>
-    <li>Each <code>.go</code> file becomes a matching <code>.c</code> file; each package gets a private and a public <code>.h</code>.</li>
-    <li>A small <code>&lt;go.h&gt;</code> header holds the runtime and the representation of builtin types, so you can swap it out.</li>
-    <li>The standard library is compiled from Go's own source, with a few C11 hooks (<code>os</code>, parts of <code>reflect</code>) where Go would reach into its runtime.</li>
-    <li>Errors are reported exactly as <code>gc</code> reports them, using its parser.</li>
-  </ul>
+  <h2>What does it do?</h2>
+  <ol>
+    <li>Each <code>.go</code> file becomes a <code>.c</code> file; each package a private and a public <code>.h</code>.</li>
+    <li>A small, replaceable <code>&lt;go.h&gt;</code> holds the runtime and the builtin types.</li>
+    <li>The standard library compiles from Go's source, with a few C11 hooks (<code>os</code>, parts of <code>reflect</code>).</li>
+    <li>Errors are reported exactly as <code>gc</code> reports them (it uses gc's parser).</li>
+  </ol>
 
-  <h2>Why C</h2>
-  <ul>
-    <li><a href="https://fil-c.org/">Fil-C</a>: memory-safe C. Unsafe code is checked, and data races can't corrupt runtime structures.</li>
-    <li><a href="https://justine.lol/cosmopolitan/">Cosmopolitan Libc</a>: one binary that runs on Linux, macOS, Windows and the BSDs.</li>
-    <li>Calling C is just calling C, with no cgo trampolines.</li>
-  </ul>
+  <h2>Why C?</h2>
+  <ol>
+    <li><a href="https://fil-c.org/">Fil-C</a>: memory-safe C, so unsafe code is checked and data races can't corrupt the runtime.</li>
+    <li><a href="https://justine.lol/cosmopolitan/">Cosmopolitan Libc</a>: one binary for Linux, macOS, Windows and the BSDs.</li>
+    <li>Calling C is just calling C (no cgo trampolines).</li>
+  </ol>
 
   <h2>Try it</h2>
 <pre><code>go install github.com/quaadgras/gd-compiler@latest
 cd your/go/package
-gd-compiler build
-gd-compiler test</code></pre>
-  <p class="note">The output needs a garbage collector: link with <a href="https://www.hboehm.info/gc/">Boehm GC</a>, or build with a C compiler that has one, such as Fil-C. Set the compiler with <code>GD_CC</code>.</p>
-
-  <h2>Status</h2>
-  <p>Experimental. Conformance is measured against Go's own test suite on every change; the remaining failures are mostly runtime internals and <code>gc</code>-specific behaviour.</p>
+gd-compiler build</code></pre>
+  <p class="note">The output needs a garbage collector: link <a href="https://www.hboehm.info/gc/">Boehm GC</a>, or use a C compiler that has one (Fil-C). Set the compiler with <code>GD_CC</code>.</p>
 
   <footer>
     <a href="https://github.com/quaadgras/gd-compiler">github.com/quaadgras/gd-compiler</a> ·

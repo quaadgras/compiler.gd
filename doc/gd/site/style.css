@@ -19,6 +19,11 @@ nav { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; font-size: .95rem; mar
 nav a { color: var(--muted); text-decoration: none; }
 nav a[aria-current] { color: var(--fg); font-weight: 600; }
 nav a:hover { color: var(--accent); }
+.titlebar { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .75rem; margin: 0 0 .5rem; }
+.titlebar h1 { margin: 0; }
+.titlebar .tag { margin: 0; }
+.back { color: var(--muted); text-decoration: none; font-size: 2rem; line-height: 1; padding: .1rem .35rem .25rem; margin-left: -.35rem; border-radius: 6px; }
+.back:hover { color: var(--accent); background: var(--code-bg); }
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88em; }
 code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
 pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; line-height: 1.5; }

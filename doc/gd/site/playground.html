@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Playground — compiler.gd</title>
+<title>Playground: compiler.gd</title>
 <meta name="description" content="Compile and run Go in your browser with the gd go command, itself compiled to WebAssembly.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
 <link rel="stylesheet" href="style.css">
@@ -69,15 +69,11 @@
 </head>
 <body>
 <main class="wide">
-  <nav>
-    <a href="/">compiler.gd</a>
-    <a href="/playground" aria-current="page">Playground</a>
-    <a href="/c11">Go → C11 (experimental)</a>
-    <a href="https://github.com/quaadgras/compiler.gd">GitHub</a>
-  </nav>
-
-  <h1>Play<span>ground</span></h1>
-  <p class="lede">Go (or C), compiled in your browser by the gd <code>go</code> command — itself compiled to WebAssembly — and run on the WebAssembly GC.</p>
+  <div class="titlebar">
+    <a class="back" href="/" aria-label="Back to compiler.gd" title="compiler.gd">←</a>
+    <h1>Play<span>ground</span></h1>
+  </div>
+  <p class="lede">Go (or C) compiled in your browser by the gd <code>go</code> command, which is itself compiled to WebAssembly.</p>
 
   <section class="panel" aria-label="Playground">
     <div class="pbar top">
@@ -99,15 +95,15 @@
 
   <details class="about">
     <summary>How it works</summary>
-    <ul>
-      <li>The page downloads the <code>go</code> command for <code>GOOS=js</code> (24 MB, once: your browser keeps it) and the standard library's source, and runs <code>go build</code> in a worker. <code>compile</code> and <code>link</code> are part of that one binary.</li>
-      <li>Programs are built for <code>js/wasm</code> on the WebAssembly GC runtime (<code>GOWASM=gc,split</code>): each allocation keeps its bytes in linear memory and its pointers in a WebAssembly GC array, so the browser’s collector frees it.</li>
-      <li>The build cache lives in IndexedDB. Common packages come precompiled; anything else is compiled on first use (a minute or so for a large package), then cached.</li>
-      <li>C works through cgo's <code>import "C"</code>: with no C compiler in the page, the go command translates the C into Go with its own front end, <code>cc</code>, which checks every access (out of bounds is a panic) and lets C and Go share the heap. It has <code>&lt;stdio.h&gt;</code>, <code>&lt;stdlib.h&gt;</code>, <code>&lt;string.h&gt;</code> and a few other headers.</li>
-      <li>Code whose first line (past comments) is not <code>package</code> is C: the playground builds it as <code>main.c</code> with a Go <code>main</code> that calls its <code>int main(void)</code>.</li>
-      <li>Only the standard library: there's no network access for modules. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd> on a Mac) runs.</li>
-      <li>Needs WebAssembly GC and JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27.</li>
-    </ul>
+    <ol>
+      <li>The <code>go</code> command for <code>GOOS=js</code> (24 MB, downloaded once) builds in a worker; <code>compile</code> and <code>link</code> are part of it.</li>
+      <li>Programs run on the WebAssembly GC: bytes in linear memory, pointers in GC arrays, freed by the browser's collector.</li>
+      <li>The build cache lives in IndexedDB. Common packages come precompiled; others compile on first use.</li>
+      <li>C works through cgo's <code>import "C"</code>, translated by the fork's own C front end (<code>cc</code>), which bounds-checks every access.</li>
+      <li>Code that doesn't start with <code>package</code> is C, run from its <code>int main(void)</code>.</li>
+      <li>Standard library only (no modules). <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs.</li>
+      <li>Needs WebAssembly GC and JSPI: Chrome 137, Firefox 153, Safari 27.</li>
+    </ol>
   </details>
 
   <footer>
@@ -466,7 +462,7 @@ function start() {
         for (const l of loads.values()) { done += l.done; total += l.total; }
         progress.hidden = false;
         progress.firstElementChild.style.width = (100 * done / total).toFixed(1) + '%';
-        status.textContent = `${data.status} — ${(done / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB`;
+        status.textContent = `${data.status}: ${(done / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB`;
       } else {
         status.textContent = data.status + (data.status === 'failed' ? '' : '…');
       }
