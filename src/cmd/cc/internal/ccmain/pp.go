@@ -1574,7 +1574,7 @@ func convertNumber(t token) (token, error) {
 		case strings.HasSuffix(low, "f"):
 			t.ty, num = tFloat, low[:len(low)-1]
 		case strings.HasSuffix(low, "l"):
-			num = low[:len(low)-1]
+			t.ty, num = tLDouble, low[:len(low)-1]
 		}
 		if hex && !strings.Contains(num, "p") {
 			return errf("hexadecimal floating constant %q requires an exponent", t.text)

@@ -676,6 +676,9 @@ func (g *gen) incDec(e *incDec, value bool) string {
 }
 
 func (g *gen) condExpr(e *cond) string {
+	if e.x == e.c && e.t.kind != kVoid {
+		return g.elvis(e)
+	}
 	c := g.cond(e.c)
 	if e.t.kind == kVoid {
 		g.p("if %s {", c)
@@ -700,6 +703,26 @@ func (g *gen) condExpr(e *cond) string {
 	g.p("%s = %s", t, y)
 	g.p("}")
 	return t
+}
+
+// elvis generates GNU's c ?: y, with c evaluated once.
+func (g *gen) elvis(e *cond) string {
+	{
+		t := g.tmp(goType(e.t))
+		g.p("%s = %s", t, g.rv(e.x))
+		var y string
+		preY := g.capture(func() { y = g.rv(e.y) })
+		truth := t + " != 0"
+		if goType(e.t) == "c23.Ptr" {
+			truth = "c23.Addr(" + t + ") != 0"
+		}
+		g.p("if %s {", truth)
+		g.p("} else {")
+		g.out.WriteString(preY)
+		g.p("%s = %s", t, y)
+		g.p("}")
+		return t
+	}
 }
 
 // isPure reports whether evaluating the Go expression s can have no
@@ -758,6 +781,9 @@ func (g *gen) funcName(s *symbol, at pos) string {
 		if n, ok := libc[s.name]; ok {
 			return "c23." + n
 		}
+		if s.weak || def.weak {
+			return ""
+		}
 		g.errorf(at, "undefined reference to %q", s.name)
 	}
 	return g.names[def]
@@ -766,6 +792,9 @@ func (g *gen) funcName(s *symbol, at pos) string {
 // funcPtr is the c23.Ptr to a function: its descriptor.
 func (g *gen) funcPtr(s *symbol) string {
 	name := g.funcName(s, s.p)
+	if name == "" {
+		return "c23.Ptr{}" // weak, and not defined
+	}
 	d := "fd_" + strings.ReplaceAll(name, ".", "_")
 	if !g.descs[d] {
 		g.descs[d] = true
@@ -787,7 +816,7 @@ func (g *gen) callCode(c *call) string {
 			}
 		}
 	}
-	if !direct {
+	if !direct || fn == "" {
 		fn = fmt.Sprintf("c23.FuncOf[%s](%s)", g.funcSig(c.ft, nil), g.rv(c.fn))
 	}
 	var args []string

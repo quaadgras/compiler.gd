@@ -1,7 +1,11 @@
 # The slimcc tests that cmd/cc passes (go test cmd/cc -run Slimcc -update).
+agg_eval
+arith
 assign
 attr_section
+attr_weak
 attribute_hiding
+autotype
 bitfield
 builtin
 commonsym
@@ -24,6 +28,7 @@ gibberish
 imm_arith_opt
 labeled_loop_sw
 line
+literal
 macro
 macro2
 macro_direcitve_in_fnlike
@@ -31,11 +36,13 @@ macro_has_include
 macro_pmarks
 macro_rescan
 macro_spacing
+nullptr
 offsetof
 pointer
 pragma_pack
 setjmp
 sizeof
+stmtexpr2
 string
 struct
 typedef

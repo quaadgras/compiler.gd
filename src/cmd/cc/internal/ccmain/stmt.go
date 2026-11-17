@@ -94,6 +94,13 @@ func (p *parser) declaration() []stmt {
 
 func (p *parser) statement() stmt {
 	at := p.here()
+	if p.is("[") && p.isAt(1, "[") || p.is("__attribute__") {
+		// Attributes of a statement ([[fallthrough]];).
+		p.attributes()
+		if p.accept(";") {
+			return &emptyStmt{}
+		}
+	}
 	t := p.peek()
 	if t.kind == tkPunct {
 		switch t.text {

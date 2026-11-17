@@ -156,11 +156,13 @@ type attrs struct {
 	cleanup  string
 	vector   int64
 	unused   bool
+	weak     bool
 }
 
 func (a *attrs) merge(b attrs) {
 	a.aligned = max(a.aligned, b.aligned)
 	a.packed = a.packed || b.packed
+	a.weak = a.weak || b.weak
 	a.noreturn = a.noreturn || b.noreturn
 	if b.cleanup != "" {
 		a.cleanup = b.cleanup
@@ -247,6 +249,8 @@ func (p *parser) attr(a *attrs, name string) {
 		return
 	case "unused", "maybe_unused":
 		a.unused = true
+	case "weak":
+		a.weak = true
 	}
 	if p.is("(") {
 		p.skipParens()
@@ -279,6 +283,7 @@ type specs struct {
 	noreturn bool
 	constx   bool
 	auto     bool // C23 auto: the type is the initializer's
+	q        qual // with auto: the qualifiers
 	align    int64
 	attrs    attrs
 }
@@ -432,9 +437,9 @@ func (p *parser) declSpecs() specs {
 		default:
 			if base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
 				if sym := p.lookup(w); sym != nil && sym.kind == symTypedef {
-					// A typedef name, unless declared again: int T; in
-					// a scope where T is a typedef declares T.
-					if !(seen && false) {
+					// A typedef name, unless it is the declarator: auto
+					// T = 1; declares T.
+					if !(s.auto && (p.isAt(1, "=") || p.isAt(1, ";") || p.isAt(1, ","))) {
 						s.t = sym.t
 						sym.used = true
 						seen = true
@@ -505,6 +510,7 @@ done:
 	} else if q != 0 {
 		s.auto = true
 	}
+	s.q = q
 	return s
 }
 
@@ -776,10 +782,18 @@ func (p *parser) enumSpec() *ctype {
 	t.enum.complete = true
 	t.enum.fixed = fixed != nil
 	// C23: after the body, the constants have the enum's type if int
-	// can't hold them.
+	// can't hold them all.
+	fitInt := true
 	for _, c := range consts {
-		if fixed != nil || c.t.kind != kInt {
+		if c.val > 0x7fffffff || c.val < -0x80000000 || c.t.isUnsigned() && c.t.sizeof() == 8 && c.val < 0 {
+			fitInt = false
+		}
+	}
+	for _, c := range consts {
+		if fixed != nil || !fitInt {
 			c.t = t
+		} else {
+			c.t = tInt
 		}
 	}
 	if tag != "" {
@@ -858,6 +872,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	}
 	a.merge(p.attributes())
 	t = p.suffixes(t)
+	a.merge(p.attributes())
 	return name, t, a
 }
 
@@ -1145,7 +1160,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			ft.noreturn = true
 			t = &ctype{kind: kFunc, fn: &ft, q: t.q}
 		}
-		return p.declareFunc(name, t, s, at)
+		sym := p.declareFunc(name, t, s, at)
+		sym.weak = sym.weak || a.weak
+		return sym
 	}
 	global := p.fn == nil || s.storage == sStatic || s.storage == sExtern
 	sym := &symbol{name: name, kind: symVar, t: t, storage: s.storage, global: global, tls: s.tls, p: at, constx: s.constx}
@@ -1209,7 +1226,7 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		if s.auto && s.t == nil {
 			// C23 auto: the initializer's type, after lvalue conversion.
 			e := p.rvalue(p.initExpr())
-			sym.t = e.ty().unqual()
+			sym.t = e.ty().unqual().qualified(s.q)
 			sym.init = p.initFor(sym.t, e)
 		} else {
 			sym.init = p.initializer(sym)

@@ -307,6 +307,12 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 			default:
 				p.errorAt(at, "invalid operands to %s (have %s and %s)", op, xt, yt)
 			}
+			cx, ok1 := x.(*intConst)
+			cy, ok2 := y.(*intConst)
+			if ok1 && ok2 {
+				v, _ := foldOp(op, tULong, cx.v, cy.v)
+				return p.intc(v, tInt, at)
+			}
 			return &binary{node{tInt, at}, op, p.toPtrish(x), p.toPtrish(y)}
 		}
 	}
@@ -330,6 +336,17 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 		rt = tInt
 	}
 	return p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)})
+}
+
+// qualifyDeep qualifies t, or an array's elements (an array's
+// qualifiers are its elements').
+func qualifyDeep(t *ctype, q qual) *ctype {
+	if t.kind == kArray {
+		c := *t
+		c.elem = qualifyDeep(t.elem, q)
+		return &c
+	}
+	return t.qualified(q)
 }
 
 func elemSizeOf(t *ctype) int64 {
@@ -378,7 +395,11 @@ func (p *parser) foldTruth(e expr) (bool, bool) {
 func isStaticAddr(e expr) (bool, bool) {
 	switch e := e.(type) {
 	case *varRef:
-		if e.sym.global || e.sym.kind == symFunc {
+		if e.sym.weak {
+			return false, false
+		}
+		if e.sym.kind == symFunc || e.sym.kind == symVar && e.sym.storage != sRegister {
+			// An object's address is never null.
 			return true, true
 		}
 	case *strLit:
@@ -544,9 +565,19 @@ func (p *parser) unaryExpr() expr {
 			p.next()
 			if p.is("(") && p.isTypeStart(1) {
 				p.next()
+				n := len(p.pendingVLA)
 				ty := p.typeName()
+				p.pendingVLA = p.pendingVLA[:n] // not evaluated
 				p.expect(")")
 				return p.intc(ty.alignof(), tULong, at)
+			}
+			if p.is("(") && p.isTypeStart(1) {
+				// _Alignof (T){...}
+				p.next()
+				ty := p.typeName()
+				p.expect(")")
+				x := p.postfix(p.compoundLiteral(ty, at))
+				return p.intc(x.ty().alignof(), tULong, at)
 			}
 			x := p.unaryExpr()
 			if v, ok := x.(*varRef); ok {
@@ -605,7 +636,28 @@ func (p *parser) sizeofType(t *ctype, at pos) expr {
 }
 
 // addressOf types &x.
+// constAddr is the address of an lvalue at a constant address, as in
+// &((struct S *)0)->m, the old offsetof.
+func constAddr(e expr) (int64, bool) {
+	switch e := e.(type) {
+	case *deref:
+		if c, ok := e.x.(*intConst); ok {
+			return c.v, true
+		}
+	case *member:
+		if v, ok := constAddr(e.x); ok {
+			return v + e.f.off, true
+		}
+	}
+	return 0, false
+}
+
 func (p *parser) addressOf(x expr, at pos) expr {
+	if v, ok := constAddr(x); ok {
+		if m, isMember := x.(*member); !isMember || m.f.bits < 0 {
+			return &intConst{node{ptrTo(x.ty()), at}, v}
+		}
+	}
 	switch x := x.(type) {
 	case *varRef:
 		if x.sym.kind == symFunc {
@@ -734,7 +786,7 @@ func (p *parser) memberOf(x expr, name string, at pos) expr {
 	for _, f := range path {
 		ft := f.t
 		if t.q != 0 {
-			ft = ft.qualified(t.q)
+			ft = qualifyDeep(ft, t.q)
 		}
 		x = &member{node{ft, at}, x, f}
 		t = ft
@@ -830,7 +882,8 @@ func (p *parser) primary() expr {
 			if s := p.lookup("__func__"); s != nil {
 				return &varRef{node{s.t, at}, s}
 			}
-			p.errorAt(at, "__func__ outside a function")
+			// GCC: "" outside a function.
+			return &strLit{node{arrayOf(tChar, 1), at}, ""}
 		}
 		if len(t.text) > 10 && t.text[:10] == "__builtin_" {
 			return p.builtin(t.text, at)
@@ -911,7 +964,11 @@ func (p *parser) generic(at pos) expr {
 		ct = p.typeName()
 	} else {
 		x := p.assignment()
-		ct = p.rvalue(x).ty().unqual()
+		if x.ty().kind == kVoid {
+			ct = tVoid
+		} else {
+			ct = p.rvalue(x).ty().unqual()
+		}
 	}
 	var chosen, dflt expr
 	for p.accept(",") {
@@ -943,6 +1000,9 @@ func (p *parser) rvalue(e expr) expr {
 	t := e.ty()
 	switch t.kind {
 	case kArray:
+		if v, ok := constAddr(e); ok {
+			return &intConst{node{ptrTo(t.elem), e.at()}, v}
+		}
 		if v, ok := e.(*varRef); ok {
 			v.sym.addr = true
 		}
@@ -1056,6 +1116,7 @@ func (p *parser) assignConvert(e expr, t *ctype, at pos, what string) expr {
 		// GCC warns (an error in GCC 14), but accepts it.
 	case tu.kind == kVaList && et.kind == kVaList:
 		return e
+	case tu.isPtr() && et.kind == kVaList:
 	default:
 		p.errorAt(at, "incompatible types when %s to type %s from type %s", whatVerb(what), t, et)
 	}

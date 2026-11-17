@@ -362,12 +362,28 @@ func compatible(a, b *ctype) bool {
 // sameRecord reports whether two struct types with the same tag and
 // members are compatible, as C23 lets them be.
 func sameRecord(a, b *record) bool {
-	if a.tag != b.tag || a.tag == "" || a.union != b.union || !a.complete || !b.complete || len(a.fields) != len(b.fields) {
+	if a.tag == "" {
+		return false
+	}
+	return sameMembers(a, b)
+}
+
+func sameMembers(a, b *record) bool {
+	if a.tag != b.tag || a.union != b.union || !a.complete || !b.complete || len(a.fields) != len(b.fields) {
 		return false
 	}
 	for i, f := range a.fields {
 		g := b.fields[i]
-		if f.name != g.name || f.bits != g.bits || f.off != g.off || !compatible(f.t, g.t) {
+		if f.name != g.name || f.bits != g.bits || f.off != g.off {
+			return false
+		}
+		if f.name == "" && f.t.kind == kStruct && g.t.kind == kStruct && f.t.rec.tag == "" && g.t.rec.tag == "" {
+			if !sameMembers(f.t.rec, g.t.rec) {
+				return false
+			}
+			continue
+		}
+		if !compatible(f.t, g.t) {
 			return false
 		}
 	}
@@ -377,6 +393,14 @@ func sameRecord(a, b *record) bool {
 // composite is the composite type of compatible a and b.
 func composite(a, b *ctype) *ctype {
 	switch a.kind {
+	case kPtr:
+		if b.kind == kPtr {
+			if e := composite(a.elem, b.elem); e != a.elem {
+				c := *a
+				c.elem = e
+				return &c
+			}
+		}
 	case kArray:
 		if a.n < 0 && b.n >= 0 {
 			return b

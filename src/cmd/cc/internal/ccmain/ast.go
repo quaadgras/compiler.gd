@@ -207,6 +207,7 @@ type symbol struct {
 	p       pos
 	used    bool
 	isParam bool
+	weak    bool   // __attribute__((weak)): null if not defined
 	vlaSize string // the Go temp with a VLA's size in bytes
 }
 

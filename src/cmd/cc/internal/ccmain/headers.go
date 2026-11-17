@@ -149,6 +149,7 @@ typedef unsigned long size_t;
 typedef long ptrdiff_t;
 typedef int wchar_t;
 typedef long max_align_t;
+typedef typeof(nullptr) nullptr_t;
 #define offsetof(type, member) __builtin_offsetof(type, member)
 #define unreachable() __builtin_unreachable()
 #define __STDC_VERSION_STDDEF_H__ 202311L
