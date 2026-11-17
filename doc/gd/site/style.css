@@ -29,6 +29,14 @@ nav a:hover { color: var(--accent); }
 /* (No margin to put it in: before the title.) */
 @media (max-width: 54rem) { .back { position: static; transform: none; margin: 0 -.35rem 0 -.6rem; } }
 @media (max-width: 72rem) { .wide .back { position: static; transform: none; margin: 0 -.35rem 0 -.6rem; } }
+/* Phones: a bar at the top, the title small and centred, the way back at the left edge. */
+@media (max-width: 40rem) {
+  main { padding-top: .75rem; }
+  .titlebar { justify-content: center; min-height: 2.75rem; margin-bottom: 1rem; }
+  .titlebar h1 { font-size: 1.5rem; }
+  .titlebar .tag { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: .65rem; }
+  .back, .wide .back { position: absolute; left: 0; right: auto; top: 50%; transform: translateY(-50%); margin: 0 0 0 -.45rem; }
+}
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88em; }
 code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
 pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
