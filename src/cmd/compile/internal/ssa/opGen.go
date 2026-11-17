@@ -7077,6 +7077,7 @@ const (
 	OpStringLen
 	OpStringWord2
 	OpPtrBits
+	OpStringLenAB
 	OpStringLoadPtr
 	OpStringStorePtr
 	OpIMake
@@ -107230,6 +107231,11 @@ var opcodeTable = [...]opInfo{
 	{
 		name:    "PtrBits",
 		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "StringLenAB",
+		argLen:  2,
 		generic: true,
 	},
 	{

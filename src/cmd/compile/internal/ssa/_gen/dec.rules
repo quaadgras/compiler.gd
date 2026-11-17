@@ -55,11 +55,9 @@
 // A (bytes 0 to 7, or word 0 and the length in word 1) and B (bytes 8
 // to 14 and the tag in the top 4 bits, or the hash and 0). The length
 // is the tag if it is not 0, else the high half of A.
-(StringLen   (StringMake _    wa wb)) && config.stringWasm32() =>
-  (CondSelect <typ.Int>
-    (Trunc64to32 <typ.Int> (Rsh64Ux64 <typ.UInt64> wb (Const64 <typ.UInt64> [60])))
-    (Trunc64to32 <typ.Int> (Rsh64Ux64 <typ.UInt64> wa (Const64 <typ.UInt64> [32])))
-    (Neq64 (Rsh64Ux64 <typ.UInt64> wb (Const64 <typ.UInt64> [60])) (Const64 <typ.UInt64> [0])))
+// (A call of a helper, wasm.strlen, which is less code than the
+// select at each use.)
+(StringLen   (StringMake _    wa wb)) && config.stringWasm32() => (StringLenAB <typ.Int> wa wb)
 // 64-bit: decode tag-encoded word 2 without CondSelect so every arch
 // (incl. ARM, MIPS, S390X, RISCV64) lowers cleanly. Formula:
 //   tag    = w2 >>u 60           (0 for heap, 1..15 for inline)

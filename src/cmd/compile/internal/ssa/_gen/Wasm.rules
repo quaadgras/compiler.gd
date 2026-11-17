@@ -452,6 +452,9 @@
 (I64Add x (I64Const <t> [y])) && !t.IsPtr() => (I64AddConst [y] x)
 (I64AddConst [0] x) => x
 (I64Eqz (I64Eqz (I64Eqz x))) => (I64Eqz x)
+// A select on a value shifted right by 32 or more is on its low half
+// (the tag of a string of wasm32: types.StringWasm32).
+(Select x y (I64Eqz (I64Eqz z:(I64ShrU _ (I64Const [c]))))) && c >= 32 && c < 64 => (Select x y z)
 
 // folding offset into load/store
 ((I64Load|I64Load32U|I64Load32S|I64Load16U|I64Load16S|I64Load8U|I64Load8S) [off] (I64AddConst [off2] ptr) mem)

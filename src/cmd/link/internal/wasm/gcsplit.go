@@ -117,17 +117,27 @@ const gcSplitMkPtr = "wasm.mkptr"
 // keeps the block from being freed (see writeSplitTypes).
 const gcSplitSetPtr = "wasm.setptr"
 
+// splitHelperNames is gcSplitHelpers, and with 4-byte words (wasm32)
+// the helpers of its strings.
+func (l *gcLinker) splitHelperNames() []string {
+	if l.ptrSize() == 4 {
+		return append(gcSplitHelpers[:len(gcSplitHelpers):len(gcSplitHelpers)], wasm.GCSplitStrLen)
+	}
+	return gcSplitHelpers
+}
+
 func (l *gcLinker) splitHelperIndex(name string) (int, bool) {
-	for i, h := range gcSplitHelpers {
+	names := l.splitHelperNames()
+	for i, h := range names {
 		if h == name {
 			return i, true
 		}
 	}
 	switch name {
 	case wasm.GCReflectCall:
-		return len(gcSplitHelpers), true
+		return len(names), true
 	case wasm.GCMakeFunc:
-		return len(gcSplitHelpers) + 1, true
+		return len(names) + 1, true
 	}
 	return 0, false
 }
@@ -293,6 +303,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		gcSplitSlotsOf:       "r.a",
 		gcSplitMkPtr:         "iai.r",
 		gcSplitSetPtr:        "rii.",
+		wasm.GCSplitStrLen:   "ll.l",
 	}
 	index := func(name string) int {
 		i, _ := l.splitHelperIndex(name)
@@ -315,7 +326,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		a.op(0x1B) // select
 	}
 	var fns []*wasmFunc
-	for _, name := range gcSplitHelpers {
+	for _, name := range l.splitHelperNames() {
 		a := &gcAsm{l: l}
 		switch name {
 		case wasm.GCSplitLoadPtr:
@@ -665,6 +676,22 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(1)
 			a.get(2)
 			a.gc(0x00, ptr)
+			a.end()
+		case wasm.GCSplitStrLen:
+			// The tag (the top 4 bits of b), or else the length in
+			// the high half of a (cmd/compile/internal/types's
+			// StringWasm32).
+			a.splitLocals("l")
+			a.get(1)
+			a.op(0x42, 60) // i64.const 60
+			a.op(0x88)     // i64.shr_u
+			a.tee(2)
+			a.get(0)
+			a.op(0x42, 32) // i64.const 32
+			a.op(0x88)
+			a.get(2)
+			a.op(0xA7) // i32.wrap_i64
+			a.op(0x1B) // select
 			a.end()
 		case gcSplitSetPtr:
 			a.splitLocals("")

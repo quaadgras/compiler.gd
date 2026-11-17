@@ -787,6 +787,13 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 			g.ptrToInt()
 		}
 
+	case ssa.OpStringLenAB:
+		// The length of a string of wasm32 from its A and B
+		// (types.StringWasm32).
+		g.get(v.Args[0], false)
+		g.get(v.Args[1], false)
+		g.helper(wasm.GCSplitStrLen)
+
 	case ssa.OpStringLoadPtr:
 		// Word 0 of the string at Args[0] as a pointer, if the tag in
 		// its B (Args[1]) is 0; nil, without reading the word, if it

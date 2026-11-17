@@ -247,6 +247,7 @@ const (
 	GCSplitMove     = "wasm.smove"    // (dst, drel i32, src, srel i32, n i32): copy n bytes and their pointers
 	GCSplitZero     = "wasm.szero"    // (p, rel i32, n i32): zero n bytes and their pointers
 	GCSplitNew      = "wasm.snew"     // (addr i32, nslots i32) ptr: a pointer to a new block
+	GCSplitStrLen   = "wasm.strlen"   // (a, b i64) i64: the length of the string of wasm32 whose A and B these are (with 4-byte words only)
 
 	// GCGlobalSlots is the global (with split) that holds the array of
 	// the program's data, which covers all of it from address 0, and

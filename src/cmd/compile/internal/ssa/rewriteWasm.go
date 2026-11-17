@@ -1395,6 +1395,8 @@ func rewriteValueWasm(v *Value) bool {
 		return rewriteValueWasm_OpWasmI64Sub(v)
 	case OpWasmI64Xor:
 		return rewriteValueWasm_OpWasmI64Xor(v)
+	case OpWasmSelect:
+		return rewriteValueWasm_OpWasmSelect(v)
 	case OpXor16:
 		v.Op = OpWasmI64Xor
 		return true
@@ -7408,6 +7410,42 @@ func rewriteValueWasm_OpWasmI64Xor(v *Value) bool {
 		v0 := b.NewValue0(v.Pos, OpWasmI64Const, typ.Int64)
 		v0.AuxInt = int64ToAuxInt(x)
 		v.AddArg2(y, v0)
+		return true
+	}
+	return false
+}
+func rewriteValueWasm_OpWasmSelect(v *Value) bool {
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (Select x y (I64Eqz (I64Eqz z:(I64ShrU _ (I64Const [c])))))
+	// cond: c >= 32 && c < 64
+	// result: (Select x y z)
+	for {
+		x := v_0
+		y := v_1
+		if v_2.Op != OpWasmI64Eqz {
+			break
+		}
+		v_2_0 := v_2.Args[0]
+		if v_2_0.Op != OpWasmI64Eqz {
+			break
+		}
+		z := v_2_0.Args[0]
+		if z.Op != OpWasmI64ShrU {
+			break
+		}
+		_ = z.Args[1]
+		z_1 := z.Args[1]
+		if z_1.Op != OpWasmI64Const {
+			break
+		}
+		c := auxIntToInt64(z_1.AuxInt)
+		if !(c >= 32 && c < 64) {
+			break
+		}
+		v.reset(OpWasmSelect)
+		v.AddArg3(x, y, z)
 		return true
 	}
 	return false

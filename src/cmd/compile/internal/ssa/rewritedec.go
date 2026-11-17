@@ -1029,7 +1029,7 @@ func rewriteValuedec_OpStringLen(v *Value) bool {
 	}
 	// match: (StringLen (StringMake _ wa wb))
 	// cond: config.stringWasm32()
-	// result: (CondSelect <typ.Int> (Trunc64to32 <typ.Int> (Rsh64Ux64 <typ.UInt64> wb (Const64 <typ.UInt64> [60]))) (Trunc64to32 <typ.Int> (Rsh64Ux64 <typ.UInt64> wa (Const64 <typ.UInt64> [32]))) (Neq64 (Rsh64Ux64 <typ.UInt64> wb (Const64 <typ.UInt64> [60])) (Const64 <typ.UInt64> [0])))
+	// result: (StringLenAB <typ.Int> wa wb)
 	for {
 		if v_0.Op != OpStringMake {
 			break
@@ -1039,25 +1039,9 @@ func rewriteValuedec_OpStringLen(v *Value) bool {
 		if !(config.stringWasm32()) {
 			break
 		}
-		v.reset(OpCondSelect)
+		v.reset(OpStringLenAB)
 		v.Type = typ.Int
-		v0 := b.NewValue0(v.Pos, OpTrunc64to32, typ.Int)
-		v1 := b.NewValue0(v.Pos, OpRsh64Ux64, typ.UInt64)
-		v2 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
-		v2.AuxInt = int64ToAuxInt(60)
-		v1.AddArg2(wb, v2)
-		v0.AddArg(v1)
-		v3 := b.NewValue0(v.Pos, OpTrunc64to32, typ.Int)
-		v4 := b.NewValue0(v.Pos, OpRsh64Ux64, typ.UInt64)
-		v5 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
-		v5.AuxInt = int64ToAuxInt(32)
-		v4.AddArg2(wa, v5)
-		v3.AddArg(v4)
-		v6 := b.NewValue0(v.Pos, OpNeq64, typ.Bool)
-		v7 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
-		v7.AuxInt = int64ToAuxInt(0)
-		v6.AddArg2(v1, v7)
-		v.AddArg3(v0, v3, v6)
+		v.AddArg2(wa, wb)
 		return true
 	}
 	// match: (StringLen (StringMake _ _ w2))

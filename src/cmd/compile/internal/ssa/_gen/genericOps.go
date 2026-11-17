@@ -547,6 +547,7 @@ var genericOps = []opData{
 	// in SSA both a pointer (nil if inline) and the low half of A.
 	// Generated only for GOWASM=gc,split, whose backend compiles them.
 	{name: "PtrBits", argLength: 1, typ: "Uintptr"},                // the address of the pointer arg0, as an integer (no memory argument)
+	{name: "StringLenAB", argLength: 2, typ: "Int"},                // the length of the string whose A and B are arg0 and arg1
 	{name: "StringLoadPtr", argLength: 3, typ: "BytePtr"},          // word 0 of the string at arg0 as a pointer if arg1 (its B) has a tag of 0, else nil. arg2=mem
 	{name: "StringStorePtr", argLength: 3, typ: "Mem"},            // store the pointer arg1 as word 0 of the string at arg0 (the word and its element of the array of pointers); A is stored after it. arg2=mem
 
