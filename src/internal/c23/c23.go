@@ -58,17 +58,24 @@ type Ptr struct {
 	obj  unsafe.Pointer // base of the capability; nil: none
 	size uintptr        // bytes the capability covers
 	off  int            // address - base; with no capability, the address
-	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object
+	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object; bit 1: scalars only
 }
 
-// A Ptr holds its *tinfo as an index into tinfoTab, and bit 0 says the
-// memory is C's object: escape analysis, which sees a Ptr as one value,
+// A Ptr holds its *tinfo as an index into tinfoTab (and bits saying the
+// memory is C's object, and holds no pointers, which checks read without
+// the table): escape analysis, which sees a Ptr as one value,
 // would otherwise take every use of the type as a use of the memory and
 // move what the memory points to off the stack; and an index, unlike a
 // pointer made of an integer, is the same on every target.
-func tref(ti *tinfo) uintptr { return uintptr(ti.id) << 1 }
+func tref(ti *tinfo) uintptr {
+	r := uintptr(ti.id) << 2
+	if ti.scalarOnly {
+		r |= 2
+	}
+	return r
+}
 
-func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>1] }
+func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>2] }
 
 // cref is tref for a capability of C's object, which has a header.
 func cref(ti *tinfo) uintptr { return tref(ti) | 1 }
@@ -104,7 +111,7 @@ func (b boundsFault) fault() *Fault {
 	if b.obj == 0 {
 		return &Fault{"access through a pointer with no capability", addr}
 	}
-	ti := (*tinfoTab.Load())[b.ti>>1]
+	ti := (*tinfoTab.Load())[b.ti>>2]
 	return &Fault{fmt.Sprintf("access of %d bytes out of bounds of %s", b.n, capString(true, ti, b.size, b.off)), addr}
 }
 
@@ -393,7 +400,7 @@ func checkPtrWord(p Ptr) unsafe.Pointer {
 // checkScalar checks a store of n bytes at p.
 func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 	a := check(p, n)
-	if (*tinfoTab.Load())[p.ti>>1].scalarOnly {
+	if p.ti&2 != 0 { // scalars only
 		return a
 	}
 	return checkScalarWords(p, n, a)
