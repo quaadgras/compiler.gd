@@ -1,6 +1,5 @@
-946 pass, 1 fail, 18 skipped (of 965 "// run" tests)
+947 pass, 0 fail, 18 skipped (of 965 "// run" tests)
 
-    1  run: panic: initN
 
 PASS 235.go 
 PASS alias1.go 
@@ -705,7 +704,7 @@ PASS helloworld.go
 PASS if.go 
 PASS ifacecall_gd.go 
 PASS indirect.go 
-FAIL init1.go run: panic: initN
+PASS init1.go 
 PASS initcomma.go 
 PASS initialize.go 
 PASS inline_literal.go 
