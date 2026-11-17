@@ -11,7 +11,6 @@ root=$(cd "$here/../../.." && pwd)
 out=${1:-$here/dist}
 rm -rf "$out"
 mkdir -p "$out/playground"
-cp "$here"/*.html "$here"/style.css "$out/"
 cp "$here"/playground/*.mjs "$out/playground/"
 cp "$root"/lib/wasm/{wasm_gc.js,wasm_gc_js.js,wasm_gc_fs.js,wasm_gc_browser.js} "$out/playground/"
 tmp=$(mktemp -d)
@@ -50,24 +49,6 @@ goroot=$(name goroot "$tmp/goroot.tar.gz" .tar.gz)
 cache=$(name cache "$tmp/cache.tar.gz" .tar.gz)
 cp "$tmp/goroot.tar.gz" "$out/playground/$goroot"
 cp "$tmp/cache.tar.gz" "$out/playground/$cache"
-rm "$out/playground/prebuild.mjs"
-cat > "$out/playground/manifest.json" <<JSON
-{"go": "$wasm", "goSize": $(stat -c %s "$tmp/go.wasm"), "goroot": "$goroot", "cache": "$cache",
- "version": "$(cd "$root" && git rev-parse --short HEAD)"}
-JSON
-cat > "$out/_redirects" <<REDIRECTS
-/play /playground 301
-REDIRECTS
-cat > "$out/_headers" <<HEADERS
-/playground/*.gz
-  Cache-Control: public, max-age=31536000, immutable
-/playground/manifest.json
-  Cache-Control: no-cache
-/*.css
-  Cache-Control: no-cache
-/playground/*.js
-  Cache-Control: no-cache
-/playground/*.mjs
-  Cache-Control: no-cache
-HEADERS
+rm "$out"/playground/*.mjs "$out"/playground/*.js
+"$here/pages.sh" "$out"
 ls -l "$out" "$out/playground" >&2

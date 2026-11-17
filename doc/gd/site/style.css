@@ -18,6 +18,7 @@ main { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 3rem; }
 nav { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; font-size: .95rem; margin-bottom: 3rem; }
 nav a { color: var(--muted); text-decoration: none; }
 nav a[aria-current] { color: var(--fg); font-weight: 600; }
+nav a:first-child { margin-right: auto; }
 nav a:hover { color: var(--accent); }
 .titlebar { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .75rem; margin: 0 0 .5rem; }
 .titlebar h1 { margin: 0; }
