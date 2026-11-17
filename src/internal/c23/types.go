@@ -49,10 +49,10 @@ type tinfo struct {
 	// (wPtr, wRO), if the type has at most 64 words (fewWords).
 	noStore  uint64
 	fewWords bool
-	hasRO    bool // a word of a Go value with invariants (wRO)
-	mask       uintptr // size-1, if size is a power of two
-	recip      uint64  // ceil(2^64/size): off%size by multiplication (Lemire's)
-	ref        uintptr // what a Ptr's ti is for it (tref)
+	hasRO    bool    // a word of a Go value with invariants (wRO)
+	mask     uintptr // size-1, if size is a power of two
+	recip    uint64  // ceil(2^64/size): off%size by multiplication (Lemire's)
+	ref      uintptr // what a Ptr's ti is for it (tref)
 
 	elemInfo []atomic.Pointer[tinfo] // elems' tinfos, found when first needed
 	// Recent answers of holds for this type, as memory mostly holds a
