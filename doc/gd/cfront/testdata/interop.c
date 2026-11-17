@@ -1,0 +1,75 @@
+// C that shares its memory with Go (demo/interop/main.go).
+#include <stdlib.h>
+
+struct node {
+	int v;
+	struct node *next;
+};
+
+struct holder {
+	int *random_int;
+	long tag;
+};
+
+// C allocates; Go walks the list with plain field loads.
+struct node *make_list(int n) {
+	struct node *head = 0;
+	for (int i = n; i > 0; i--) {
+		struct node *x = malloc(sizeof *x);
+		x->v = i;
+		x->next = head;
+		head = x;
+	}
+	return head;
+}
+
+// Go allocates; C walks the list, deriving each capability from the address.
+long sum_list(struct node *n) {
+	long s = 0;
+	while (n) {
+		s += n->v;
+		n = n->next;
+	}
+	return s;
+}
+
+// C indexes memory that Go gave it: checked against the derived capability.
+int read_at(int *p, int i) { return p[i]; }
+
+// C stores a pointer outside its object where Go can see it: the word is
+// tagged, so that Go cannot use it, and C keeps its capability.
+void store_past(struct holder *h, int *arr, int n) { h->random_int = arr + n + 3; }
+
+// C loads it back and brings it into bounds.
+int load_back(struct holder *h, int k) {
+	int *p = h->random_int - k;
+	return *p;
+}
+
+// One-based arrays: a pointer before its object, in a register only.
+int one_based_sum(int *a, int n) {
+	int *b = a - 1;
+	int s = 0;
+	for (int i = 1; i <= n; i++)
+		s += b[i];
+	return s;
+}
+
+// An integer written over a pointer word: Go would read it as a pointer.
+void pun(struct holder *h) {
+	long *w = (long *)h;
+	*w = 0x1234;
+}
+
+// A pointer made of an integer has no capability.
+int forge(long addr) {
+	int *p = (int *)addr;
+	return *p;
+}
+
+// A pointer stored in memory with no pointer words (malloc'd as bytes).
+void hide(struct node *n) {
+	char *buf = malloc(16);
+	struct node **slot = (struct node **)buf;
+	*slot = n;
+}
