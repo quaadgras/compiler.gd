@@ -566,6 +566,11 @@ func StoreF64(p Ptr, v float64) { Store64(p, math.Float64bits(v)) }
 // a scalar word becomes its address; a scalar copied into a pointer word
 // must be zero.
 func Memmove(dst, src Ptr, n uintptr) {
+	if n == 8 && (Addr(dst)|Addr(src))%8 == 0 && Addr(dst) != Addr(src) {
+		// One word (a union of C's, often), which moveWord checks.
+		moveWord(dst, src)
+		return
+	}
 	if n == 0 {
 		return
 	}
@@ -643,6 +648,20 @@ func overlaps(a, b Ptr, n uintptr) bool {
 func moveWord(dst, src Ptr) {
 	sk := src.info().kindAt(uintptr(src.off))
 	dk := dst.info().kindAt(uintptr(dst.off))
+	if sk == wSplit && dk == wSplit && dst.ti&src.ti&1 != 0 {
+		// Split words of C's objects (a union copied): the bytes, and
+		// the slot's capability, whatever the bytes are.
+		a, b := checkPtrWord(dst), checkPtrWord(src)
+		var c unsafe.Pointer
+		if s := src.header().slot(uintptr(src.off), false); s != nil {
+			c = atomic.LoadPointer(s)
+		}
+		if s := dst.header().slot(uintptr(dst.off), c != nil); s != nil {
+			*s = c
+		}
+		*(*uintptr)(a) = *(*uintptr)(b)
+		return
+	}
 	if sk != wPtr && sk != wSplit && dk != wPtr && dk != wSplit {
 		Store64(dst, Load64(src))
 		return
