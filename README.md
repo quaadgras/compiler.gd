@@ -2,35 +2,33 @@
 
 `gd` is a compiler for the Go programming language that aggressively allocates
 on the stack. Intended to reduce GC-pressure in real-time graphics and
-to enable carefully designed programs to run with the GC turned off. Try it!
+to enable carefully designed programs to run without a GC. Try it!
 
 ### What's different?
 
-1. Interfaces extended with 16 bytes of inline storage (directly store strings, slices and any numeric type).
-2. Small string optimizations (up to 15 bytes inline or a hash for strings that are on the heap).
+1. Interfaces include 16 bytes of inline storage (strings and slices both fit).
+2. Small string optimizations (stores 15 bytes without allocating or a hash).
 3. Runtime escape-analysis for dynamic dispatch (closures and interfaces).
-4. Pointers returned from functions may be allocated on the stack (if they don't escape).
-5. The `go` command embeds the standard library as well as `asm`, `cgo`, `compile` and `link`.
+4. Pointer results can be allocated on the stack (if they don't escape).
+5. The entire compiler + standard library in a single self-contained binary.
+6. Small wasm/js binaries, under 500kb for a fmt hello world, no dispatch loop.
 
 ### Does it work?
 
-`all.bash` tests are currently passing on `amd64`, and the standard library tests pass on
-`arm64` and on `js/wasm` (under Node.js).
+The language + standard library test suites pass on `amd64`, `arm64` & `js/wasm`.
 
-On `js/wasm` every goroutine runs on its own WebAssembly stack, which needs an engine with
-JavaScript Promise Integration (Chrome 137, Firefox 153, Safari 27, Node.js 24), and functions
-use structured control flow rather than a dispatch loop. `wasip1` is untested.
+### How? Why?
 
-### How?
-
-I directed the high level design and an LLM performed the implementation work. 
-I have a deep understanding of the language but not a comprehensive understanding 
-of the `gc` compiler, AI made it possible to explore a different set of compiler 
-tradeoffs without significant time & attention cost (I have other things to do).
+@Splizard, the project's director, developed an interest (after 10 years of Go)
+in exploring what an alternative Go compiler could look like. Recent technology
+has made an endeavour of this scale far more accessible. The resulting compiler
+is intended to support the https://graphics.gd project.
 
 ### Contributing
 
-Authentic individual contributions are a better fit for the upstream `gc` compiler 
-at https://go.dev. If instead, you would like to contribute to this fork, AI or LLM
-assistance is recommended given how it is built. Please open/comment on an issue 
-before opening any PRs so that any contention can be coordinated.
+Contributions may be a better fit for the upstream `gc` compiler (https://go.dev). 
+If you prefer to support *this* project,
+[consider a sponsorship](https://github.com/sponsors/Splizard).
+If you've run into a compiler bug and you've confirmed it's unique to `gd`, you
+may open a PR to fix it; include an analysis of the issue + new tests. For larger
+changes please don't open a PR unless we've coordinated on a discussion thread.
