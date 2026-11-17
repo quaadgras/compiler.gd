@@ -2121,3 +2121,28 @@ Work list (kept current):
    reading the event in one call; the start function's 35 KB with
    `GOWASM=gc`; arguments of a call passed without a host call for each
    that is not a number.
+
+#### Reviewed and merged (2026-11-17)
+
+Run again on the branch, rebased, in a tree of its own, with freed
+blocks filled with a pattern (`GOWASMGC_POISON=1`), in both models:
+
+- `GOOS=wasip1`: conformance 947 of 965 and std 255 of 255, as before.
+- `GOOS=js`: std 255 of 256 under node; `syscall/js` passes under node,
+  in Chromium and in Firefox.
+
+The one that fails is `bytes` (`TestIssue65571`: a slice of 2 GB and a
+byte): a block of linear memory is 1 GB at most here, and all of them
+are below 2 GB.
+
+The only tests changed are the three of `syscall/js` that count
+allocations, as the user allowed ("test can check the new outcome"):
+`manyArgAllocs` is 2 with `wasm.gc` and 3 for Go's own port.
+
+Where the 139 KB more of a js `fmt` hello world than a wasip1 one are
+(`GOWASM=gc`, 676,078 against 537,301 bytes): 62 KB of data and 39 KB of
+what the linker generates (the start function that makes the global
+variables that are objects), which is mostly std's tables for js
+(syscall's errors and their names); `syscall/js` itself is 16 KB and
+the runtime 11 KB more. With split it is 460,122 against 372,305. Not
+reduced yet.
