@@ -238,10 +238,13 @@ var depsRules = `
 
 	log !< FMT;
 
+	# C's library, for cmd/cc (gd fork).
+	FMT, math/cmplx
+	< internal/c23;
+
 	# Misc packages needing only FMT.
 	FMT
 	< html,
-	  internal/c23,
 	  internal/dag,
 	  internal/goroot,
 	  internal/types/errors,

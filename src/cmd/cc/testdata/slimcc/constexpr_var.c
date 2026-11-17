@@ -1,0 +1,145 @@
+#include "test.h"
+
+
+static constexpr float f = 11.0;
+constexpr long double ld = 22.0;
+
+constexpr long len = 17;
+long double arr0[len];
+
+union U {int i; float f;};
+constexpr union U u1 = {.i = 0x40490fda};
+constexpr union U u2 = u1;
+
+constexpr int *np1 = 0;
+constexpr int *np2 = {};
+constexpr int *np3 = {0};
+
+SASSERT(!np1);
+SASSERT(np2 == 0);
+SASSERT(np3 == NULL);
+
+constexpr int redecl = 123;
+static const int redecl;
+static_assert(redecl == 123);
+
+void local_adr(int recur, const int *local_p, const int *static_p) {
+  if (recur >= 3)
+    return;
+
+  constexpr int local_v = 55;
+  static constexpr int static_v  = 66;
+
+  SASSERT(55 == local_v);
+  SASSERT(66 == static_v);
+
+  if (recur) {
+    ASSERT(55, *local_p);
+    ASSERT(66, *static_p);
+
+    ASSERT(1, &local_v != local_p );
+    ASSERT(1, &static_v == static_p );
+  }
+  local_adr(recur + 1, &local_v, &static_v);
+}
+
+//SREJ constexpr struct INCMPL s = {};
+
+int main() {
+  SASSERT(ld == f * 2);
+  SASSERT(sizeof(arr0) == len * sizeof(typeof(arr0[0])));
+
+  SASSERT(u1.f == 3.1415926f);
+
+  local_adr(0,NULL,NULL);
+
+  union U1 { int i; union { int j; union { int k; int m; }; }; };
+  constexpr union U1 u1 = {.m =77 };
+  SASSERT( u1.m == 77 );
+
+   struct S {
+     char c;
+     struct {
+       float f;
+     }a;
+     struct {
+       unsigned short w :6;
+       short x :7;
+       struct {
+         long double d;
+       };
+       bool b : 1;
+     };
+   };
+  constexpr struct S s = { 11,22,33,-44,55,6};
+
+  SASSERT(s.c == 11);
+  SASSERT(s.a.f == 22);
+  SASSERT(s.w == 33);
+  SASSERT(s.x == -44);
+  SASSERT(s.d == 55);
+  SASSERT(s.b == true);
+
+  {
+    struct S { int i; };
+    constexpr _Bool b = (0 && (((struct S*)0)->i));
+  }
+  {
+    constexpr int32_t x = -6L;
+    constexpr uint64_t y = (uint64_t)x;
+    static_assert((uint64_t)-6L == y);
+  }
+
+  for (constexpr int i = 0; i;) {
+    static_assert(i == 0);
+  }
+
+  {
+    const long i0 = {};
+    const auto i1 = i0 + 1;
+    static const long i2 = { len - 15 };
+    static_assert(i0 == 0);
+    static_assert(i1 == 1);
+    static_assert(i2 == 2);
+    static_assert(_Generic(i1, long:1));
+
+    static_assert((constexpr int){13} + 29 == (constexpr int){42});
+  }
+  {
+    struct S { int i, j, k; };
+    static_assert((constexpr struct S){3,4,5}.i == 3);
+    static_assert((constexpr struct S){3,4,5}.j == (constexpr struct S){3,4,5}.k -1);
+  }
+  {
+    constexpr int *p1 = 0;
+    constexpr const int *p2 = p1;
+    static_assert(_Generic(typeof(p1), int *const: 1));
+    static_assert(_Generic(typeof(p2), const int *const: 1));
+
+    static constexpr volatile int *restrict *p3 = 0;
+    static_assert(_Generic(typeof(p3), volatile int *restrict *const: 1));
+
+    static_assert(_Generic(&(constexpr int *){}, int *const *: 1));
+
+    constexpr int(*fnp)(int) = 0;
+    static_assert(_Generic(typeof(fnp), typeof(int(int)) *const: 1));
+
+    //SREJ static constexpr int noinit;
+    //SREJ constexpr int fn();
+    {
+      //SREJ constexpr volatile int v = 0;
+      //SREJ constexpr _Atomic int a = 0;
+      constexpr volatile int *pv = 0;
+      constexpr _Atomic int *pa = 0;
+      //SREJ constexpr int *_Atomic ap = 0;
+      //SREJ constexpr int *volatile vp = 0;
+      //SREJ constexpr int *restrict rp = 0;
+    }
+  }
+  //SREJ { constexpr struct INCMPL s = {}; }
+  //SREJ { static constexpr struct INCMPL s = {}; }
+
+  printf("OK\n");
+  return 0;
+}
+

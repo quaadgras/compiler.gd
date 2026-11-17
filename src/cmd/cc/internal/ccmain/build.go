@@ -33,9 +33,10 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 		name string
 		src  []byte
 		f    *ast.File
+		unit *unit
 	}
-	var gos []goFile
-	var srcs []source
+	var gos []*goFile
+	var units []*unit
 	for _, name := range goFiles {
 		path := filepath.Join(dir, name)
 		src, err := os.ReadFile(path)
@@ -46,7 +47,10 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 		if err != nil {
 			return nil, err
 		}
-		gos = append(gos, goFile{name, src, f})
+		gf := &goFile{name: name, src: src, f: f}
+		gos = append(gos, gf)
+		// The file's preamble, one translation unit, as in cgo.
+		var pre strings.Builder
 		for _, d := range f.Decls {
 			gd, ok := d.(*ast.GenDecl)
 			if !ok || gd.Tok != gotoken.IMPORT {
@@ -67,9 +71,16 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 				// Blank lines keep the preamble's lines where they are in
 				// the Go file, for errors.
 				line := fset.Position(doc.Pos()).Line
-				srcs = append(srcs, source{path, strings.Repeat("\n", line-1) + preambleText(doc)})
+				pre.WriteString(strings.Repeat("\n", max(line-1-strings.Count(pre.String(), "\n"), 0)))
+				pre.WriteString(preambleText(doc))
 			}
 		}
+		u, err := parseUnit(path, pre.String())
+		if err != nil {
+			return nil, err
+		}
+		gf.unit = u
+		units = append(units, u)
 	}
 	cFiles = append([]string(nil), cFiles...)
 	sort.Strings(cFiles)
@@ -79,24 +90,20 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 		if err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, source{path, string(src)})
-	}
-	toks, err := lexUnit(srcs)
-	if err != nil {
-		return nil, err
-	}
-	u, err := parse(dir, toks)
-	if err != nil {
-		return nil, err
+		u, err := parseUnit(path, string(src))
+		if err != nil {
+			return nil, err
+		}
+		units = append(units, u)
 	}
 	o := options{pkg: pkg, prefix: "_C23"}
-	c, err := generate(dir, u, o)
+	c, pg, err := generate(dir, units, o)
 	if err != nil {
 		return nil, err
 	}
 	out = append(out, File{"_c23_c.go", c})
-	g := newGen(dir, u, o)
 	for _, gf := range gos {
+		g := &gen{pkgGen: pg, u: gf.unit}
 		data, err := g.rewrite(fset, gf.f, gf.src)
 		if err != nil {
 			return nil, err
@@ -104,6 +111,15 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 		out = append(out, File{strings.TrimSuffix(gf.name, ".go") + ".c23.go", data})
 	}
 	return out, nil
+}
+
+// parseUnit preprocesses and parses one translation unit.
+func parseUnit(path, src string) (*unit, error) {
+	toks, err := lexUnit([]source{{path, src}})
+	if err != nil {
+		return nil, err
+	}
+	return parse(path, toks)
 }
 
 // preambleText is a preamble's C: the comment's text, with its line

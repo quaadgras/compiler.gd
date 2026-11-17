@@ -7,96 +7,23 @@ package ccmain
 import (
 	"fmt"
 	"go/format"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
-// A val is a C rvalue as a Go expression.
-type val struct {
-	code    string
-	t       *ctype
-	isConst bool // an integer constant, c (already wrapped to t)
-	c       int64
-	b       string // if not "", the same value as a Go bool expression
-}
-
-// An lval is a C lvalue: a Go variable, or memory at a c23.Ptr.
-type lval struct {
-	goVar string
-	addr  string
-	t     *ctype
-}
-
-type sym struct {
-	goName string
-	t      *ctype
-	cell   bool // the value is in memory at the Ptr goName
-}
-
-type gen struct {
-	pre      string // of every package-level name (options.prefix)
-	file     string
-	u        *unit
-	out      *strings.Builder
-	ind      int
-	strs     map[string]string
-	scopes   []map[string]*sym
-	globals  map[string]*sym
-	defined  map[string]bool
-	fn       *funcDecl
-	tmpN     int
-	inits    strings.Builder // statements of func init
-	globDecl strings.Builder
-}
-
-type genError struct{ msg string }
-
-func (g *gen) errorf(line int, format string, args ...any) {
-	panic(genError{fmt.Sprintf("%s:%d: %s", g.file, line, fmt.Sprintf(format, args...))})
-}
-
-func (g *gen) p(format string, args ...any) {
-	g.out.WriteString(strings.Repeat("\t", g.ind))
-	fmt.Fprintf(g.out, format, args...)
-	g.out.WriteString("\n")
-}
-
-func (g *gen) tmp() string { g.tmpN++; return fmt.Sprintf("t_%d", g.tmpN) }
-
-var goKeywords = map[string]bool{"break": true, "case": true, "chan": true, "const": true, "continue": true,
-	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true, "func": true, "go": true,
-	"goto": true, "if": true, "import": true, "interface": true, "map": true, "package": true, "range": true,
-	"return": true, "select": true, "struct": true, "switch": true, "type": true, "var": true}
-
-// goField is the Go name of a C field: cgo's, a Go keyword prefixed with _.
-func goField(name string) string {
-	if goKeywords[name] {
-		return "_" + name
-	}
-	return name
-}
-
-func (g *gen) structName(t *ctype) string {
-	if t.union {
-		return g.pre + "union_" + t.tag
-	}
-	return g.pre + "struct_" + t.tag
-}
-
-// unionAlign is the zero-size field that gives a union's bytes its
-// alignment.
-func unionAlign(a int64) string {
-	switch a {
-	case 2:
-		return "_ [0]uint16\n"
-	case 4:
-		return "_ [0]uint32\n"
-	case 8:
-		return "_ [0]uint64\n"
-	}
-	return ""
-}
+// The generator: Go from typed translation units.
+//
+// C's objects are Go allocations of mirror types (the Go type with the
+// C type's layout, unions as bytes) and every access goes through a
+// c23.Ptr. A local whose address is never taken is a Go variable; one
+// whose address is, or an array or struct, is a c23.Obj on the Go
+// stack. Every local is declared at the top of its function, so that
+// goto may jump anywhere Go lets it. A struct value is always in memory:
+// as an rvalue it is the c23.Ptr to it, a parameter is copied in by the
+// callee, and a result is written to memory the caller passes.
 
 // options says what to generate.
 type options struct {
@@ -106,71 +33,57 @@ type options struct {
 	// imports "C", so that nothing clashes with the package's own names
 }
 
-func newGen(file string, u *unit, o options) *gen {
-	g := &gen{pre: o.prefix, file: file, u: u, strs: map[string]string{}, globals: map[string]*sym{}, defined: map[string]bool{}}
-	for _, f := range u.funcs {
-		g.defined[f.name] = true
-	}
-	return g
+type genError struct{ msg string }
+
+// pkgGen generates the Go of a package: one or more units.
+type pkgGen struct {
+	o        options
+	file     string
+	units    []*unit
+	types    strings.Builder // the mirror types
+	vars     strings.Builder // package-level variables
+	inits    strings.Builder // func init's statements
+	descInit strings.Builder // the function descriptors' assignments
+	funcs    strings.Builder
+	mirrors  map[string]string // a record's layout key to its mirror's name
+	strs     map[string]string
+	ext      map[string]*symbol // the definitions with external linkage
+	names    map[*symbol]string
+	descs    map[string]bool // function descriptors made
+	recN     int
+	uses     map[string]bool // imports used
 }
 
-// generate translates u to Go source.
-func generate(file string, u *unit, o options) (src []byte, err error) {
-	defer catch(&err)
-	g := newGen(file, u, o)
-	var funcs strings.Builder
+// gen generates one function, or file-scope code, of a unit.
+type gen struct {
+	*pkgGen
+	u     *unit
+	unitN int
+	out   *strings.Builder
+	ind   int
 
-	// Globals: every one is a typed allocation in the heap.
-	g.out = &g.globDecl
-	for _, v := range u.globals {
-		if _, ok := g.globals[v.name]; ok || v.extern {
-			// Declared again, or defined in another file (not supported).
-			continue
-		}
-		g.declareGlobal(v.name, v, g.pre+"g_"+v.name)
-	}
-	g.out = &funcs
-	for _, f := range u.funcs {
-		g.function(f)
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "// Code generated by cmd/cc from %s. DO NOT EDIT.\n\npackage %s\n\n", file, o.pkg)
-	b.WriteString("import (\n\t\"os\"\n\t\"unsafe\"\n\n\t\"internal/c23\"\n)\n\n")
-	fmt.Fprintf(&b, "var _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
-	g.types(&b)
-	keys := make([]string, 0, len(g.strs))
-	for s := range g.strs {
-		keys = append(keys, s)
-	}
-	sort.Slice(keys, func(i, j int) bool { return g.strs[keys[i]] < g.strs[keys[j]] })
-	for _, s := range keys {
-		fmt.Fprintf(&b, "var %s = c23.CString(%s)\n", g.strs[s], strconv.Quote(s))
-	}
-	b.WriteString(g.globDecl.String())
-	if g.inits.Len() > 0 {
-		b.WriteString("\nfunc init() {\n")
-		b.WriteString(g.inits.String())
-		b.WriteString("}\n")
-	}
-	b.WriteString("\n")
-	b.WriteString(funcs.String())
-	if o.main && g.defined["main"] {
-		ft := u.protos["main"]
-		args := ""
-		if len(ft.params) == 2 {
-			args = "int32(len(os.Args)), c23.Ptr{}"
-		}
-		fmt.Fprintf(&b, "\nfunc main() {\n\tos.Exit(int(%sc_main(%s)))\n}\n", g.pre, args)
-	}
-	out, ferr := format.Source([]byte(b.String()))
-	if ferr != nil {
-		return []byte(b.String()), fmt.Errorf("formatting the output: %v", ferr)
-	}
-	return out, nil
+	fn      *funcDecl
+	locals  strings.Builder // the function's hoisted declarations
+	cells   strings.Builder
+	tmpN    int
+	inExpr  int    // inside a statement expression's closure
+	retType string // the Go result type of the closure being generated
+	sret    bool
+	flatSt  *flatState // a flat function's (flat.go)
+	jmp     bool       // the function calls setjmp: its body is a closure
+	frames  []*frame   // the blocks, loops and switches being generated (cleanup.go)
 }
 
-// catch turns a genError panic into *err.
+func (g *gen) errorf(at pos, format string, args ...any) {
+	panic(genError{fmt.Sprintf("%s:%d: %s", at.file, at.line, fmt.Sprintf(format, args...))})
+}
+
+func (g *gen) p(format string, args ...any) {
+	g.out.WriteString(strings.Repeat("\t", g.ind))
+	fmt.Fprintf(g.out, format, args...)
+	g.out.WriteString("\n")
+}
+
 func catch(err *error) {
 	if r := recover(); r != nil {
 		ge, ok := r.(genError)
@@ -181,1167 +94,526 @@ func catch(err *error) {
 	}
 }
 
-// types writes the mirror types of C's structs, unions and typedefs.
-func (g *gen) types(b *strings.Builder) {
-	for _, t := range g.u.structs {
-		name := g.structName(t)
-		if t.union {
-			// As cgo does, Go sees a union as its bytes. The tag tells
-			// internal/c23 that they may hold pointers C stores, whose
-			// capabilities it keeps aside.
-			fmt.Fprintf(b, "// %s is C's union %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
-				name, t.tag, name, unionAlign(t.align), t.size)
-			fmt.Fprintf(b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n", name, t.size, t.size, name)
-			fmt.Fprintf(b, "var _ [unsafe.Alignof(%s{}) - %d]byte\nvar _ [%d - unsafe.Alignof(%s{})]byte\n\n", name, t.align, t.align, name)
-			continue
-		}
-		fmt.Fprintf(b, "// %s is C's struct %s, as Go sees it.\ntype %s struct {\n", name, t.tag, name)
-		for _, f := range t.fields {
-			fmt.Fprintf(b, "\t%s %s\n", goField(f.name), g.mirrorType(f.t))
-		}
-		b.WriteString("}\n\n")
-		fmt.Fprintf(b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n", name, t.size, t.size, name)
-		for _, f := range t.fields {
-			fmt.Fprintf(b, "var _ [unsafe.Offsetof(%s{}.%s) - %d]byte\nvar _ [%d - unsafe.Offsetof(%s{}.%s)]byte\n",
-				name, goField(f.name), f.off, f.off, name, goField(f.name))
-		}
-		b.WriteString("\n")
-	}
-	for _, td := range g.u.typedefs {
-		if td.t.kind == kFunc {
-			continue
-		}
-		fmt.Fprintf(b, "type %st_%s = %s\n", g.pre, td.name, g.mirrorType(td.t))
-	}
+func newPkgGen(file string, o options) *pkgGen {
+	return &pkgGen{o: o, file: file, mirrors: map[string]string{}, strs: map[string]string{},
+		ext: map[string]*symbol{}, names: map[*symbol]string{}, descs: map[string]bool{}, uses: map[string]bool{}}
 }
 
-func (g *gen) declareGlobal(name string, v *varDecl, goName string) *sym {
-	if v.t.kind == kArray && v.t.n < 0 {
-		g.errorf(v.line, "array %s has no length", name)
-	}
-	if v.t.kind == kStruct && !v.t.complete {
-		g.errorf(v.line, "%s has an incomplete type", name)
-	}
-	s := &sym{goName: goName, t: v.t, cell: true}
-	g.globals[name] = s
-	fmt.Fprintf(&g.globDecl, "var %s = c23.New[%s]()\n", goName, g.mirrorType(v.t))
-	if v.init != nil {
-		save, saveInd := g.out, g.ind
-		g.out, g.ind = &g.inits, 1
-		g.initStore(goName, v.t, v.init)
-		g.out, g.ind = save, saveInd
-	}
-	return s
-}
-
-func (g *gen) lookup(name string) *sym {
-	for i := len(g.scopes) - 1; i >= 0; i-- {
-		if s, ok := g.scopes[i][name]; ok {
-			return s
-		}
-	}
-	return g.globals[name]
-}
-
-func (g *gen) push() { g.scopes = append(g.scopes, map[string]*sym{}) }
-func (g *gen) pop()  { g.scopes = g.scopes[:len(g.scopes)-1] }
-
-func (g *gen) function(f *funcDecl) {
-	g.fn = f
-	ft := f.t
-	if ft.ret.kind == kStruct || ft.ret.kind == kArray {
-		g.errorf(f.line, "%s: struct results are not supported", f.name)
-	}
-	g.push()
-	var params []string
-	var cells []func()
-	for i, pt := range ft.params {
-		name := ft.paramNames[i]
-		if name == "" {
-			name = fmt.Sprintf("_%d", i)
-		}
-		if pt.kind == kStruct {
-			g.errorf(f.line, "%s: struct parameters are not supported", f.name)
-		}
-		if f.addr[name] {
-			params = append(params, fmt.Sprintf("p_%s %s", name, goType(pt)))
-			n, t := name, pt
-			cells = append(cells, func() {
-				g.p("var o_%s c23.Obj[%s]", n, g.mirrorType(t))
-				g.p("v_%s := c23.Local(&o_%s)", n, n)
-				g.storeStmt(lval{addr: "v_" + n, t: t}, val{code: "p_" + n, t: t})
-				g.scopes[len(g.scopes)-1][n] = &sym{goName: "v_" + n, t: t, cell: true}
-			})
-		} else {
-			params = append(params, fmt.Sprintf("v_%s %s", name, goType(pt)))
-			g.scopes[len(g.scopes)-1][name] = &sym{goName: "v_" + name, t: pt}
-		}
-	}
-	res := ""
-	if ft.ret.kind != kVoid {
-		res = " " + goType(ft.ret)
-	}
-	g.p("func %sc_%s(%s)%s {", g.pre, f.name, strings.Join(params, ", "), res)
-	g.ind++
-	for _, c := range cells {
-		c()
-	}
-	for _, s := range f.body.list {
-		g.stmt(s)
-	}
-	if ft.ret.kind != kVoid {
-		g.p("panic(\"c23: %s returned no value\")", f.name)
-	}
-	g.ind--
-	g.p("}")
-	g.p("")
-	g.pop()
-	g.fn = nil
-}
-
-// Statements.
-
-func (g *gen) stmt(s stmt) {
-	switch s := s.(type) {
-	case *emptyStmt:
-	case *exprStmt:
-		g.exprStmt(s.x)
-	case *declStmt:
-		for _, v := range s.vars {
-			g.localDecl(v)
-		}
-	case *blockStmt:
-		g.p("{")
-		g.body(s)
-		g.p("}")
-	case *ifStmt:
-		g.p("if %s {", g.cond(s.c))
-		g.body(s.then)
-		for s.els != nil {
-			if e, ok := s.els.(*ifStmt); ok {
-				g.p("} else if %s {", g.cond(e.c))
-				g.body(e.then)
-				s = e
-				continue
+// generate translates units, one program or package, to Go source.
+func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, err error) {
+	defer catch(&err)
+	pg = newPkgGen(file, o)
+	pg.units = units
+	pg.link()
+	for i, u := range units {
+		g := &gen{pkgGen: pg, u: u, unitN: i}
+		for _, t := range u.records {
+			if t.rec.complete {
+				g.record(t)
 			}
-			g.p("} else {")
-			g.body(s.els)
-			break
 		}
-		g.p("}")
-	case *whileStmt:
-		g.p("for %s {", g.cond(s.c))
-		g.body(s.body)
-		g.p("}")
-	case *doStmt:
-		first := g.tmp()
-		g.p("for %s := true; %s || %s; %s = false {", first, first, g.cond(s.c), first)
-		g.body(s.body)
-		g.p("}")
-	case *forStmt:
-		g.p("{")
-		g.ind++
-		g.push()
-		if s.init != nil {
-			g.stmt(s.init)
-		}
-		c := ""
-		if s.c != nil {
-			c = g.cond(s.c)
-		}
-		post := ""
-		if s.post != nil {
-			post = g.capture(func() { g.exprStmt(s.post) })
-			if strings.Count(post, "\n") > 1 || strings.Contains(post, ":=") {
-				post = "func() {\n" + post + "}()"
-			}
-			post = strings.TrimSpace(post)
-		}
-		g.p("for ; %s; %s {", c, post)
-		g.body(s.body)
-		g.p("}")
-		g.pop()
-		g.ind--
-		g.p("}")
-	case *returnStmt:
-		rt := g.fn.t.ret
-		switch {
-		case s.x == nil:
-			g.p("return")
-		case rt.kind == kVoid:
-			g.exprStmt(s.x)
-			g.p("return")
-		default:
-			g.p("return %s", g.cv(g.rv(s.x, rt), rt, s.l).code)
-		}
-	case *breakStmt:
-		g.p("break")
-	case *contStmt:
-		g.p("continue")
-	case *switchStmt:
-		g.switchStmt(s)
-	case *caseLabel:
-		g.errorf(0, "case label outside a switch")
-	default:
-		panic(fmt.Sprintf("unknown statement %T", s))
+		g.unit()
 	}
-}
-
-// body emits s, a block or a single statement, in a new scope.
-func (g *gen) body(s stmt) {
-	g.ind++
-	g.push()
-	if b, ok := s.(*blockStmt); ok {
-		for _, x := range b.list {
-			g.stmt(x)
-		}
-	} else {
-		g.stmt(s)
-	}
-	g.pop()
-	g.ind--
-}
-
-func (g *gen) switchStmt(s *switchStmt) {
-	x := g.rv(s.x, nil)
-	t := promote(x.t)
-	type group struct {
-		labels []*caseLabel
-		body   []stmt
-	}
-	var groups []*group
-	for _, st := range s.body.list {
-		if l, ok := st.(*caseLabel); ok {
-			if len(groups) == 0 || len(groups[len(groups)-1].body) > 0 {
-				groups = append(groups, &group{})
-			}
-			groups[len(groups)-1].labels = append(groups[len(groups)-1].labels, l)
-			continue
-		}
-		if len(groups) > 0 {
-			groups[len(groups)-1].body = append(groups[len(groups)-1].body, st)
-		}
-	}
-	g.p("switch %s {", g.cv(x, t, 0).code)
-	for i, gr := range groups {
-		isDefault := false
-		var vals []string
-		for _, l := range gr.labels {
-			if l.x == nil {
-				isDefault = true
-				continue
-			}
-			v := g.rv(l.x, nil)
-			if !v.isConst {
-				g.errorf(l.x.line(), "case value is not constant")
-			}
-			vals = append(vals, constLit(t, v.c))
-		}
-		if isDefault {
-			g.p("default:")
-		} else {
-			g.p("case %s:", strings.Join(vals, ", "))
-		}
-		g.ind++
-		g.push()
-		for _, st := range gr.body {
-			g.stmt(st)
-		}
-		g.pop()
-		if i < len(groups)-1 && !terminates(gr.body) {
-			g.p("fallthrough")
-		}
-		g.ind--
-	}
-	g.p("}")
-}
-
-func terminates(list []stmt) bool {
-	if len(list) == 0 {
-		return false
-	}
-	switch list[len(list)-1].(type) {
-	case *breakStmt, *returnStmt, *contStmt:
-		return true
-	}
-	return false
-}
-
-func (g *gen) localDecl(v *varDecl) {
-	scope := g.scopes[len(g.scopes)-1]
-	switch {
-	case v.t.kind == kFunc:
-		return
-	case v.extern:
-		if s := g.globals[v.name]; s != nil {
-			scope[v.name] = s
-			return
-		}
-		g.errorf(v.line, "extern %s is not defined", v.name)
-	case v.static:
-		save, saveInd := g.out, g.ind
-		g.out = &g.globDecl
-		s := g.declareGlobal(v.name, v, fmt.Sprintf("%sg_%s_%s", g.pre, g.fn.name, v.name))
-		g.out, g.ind = save, saveInd
-		delete(g.globals, v.name)
-		scope[v.name] = s
-		return
-	}
-	if v.t.kind == kArray && v.t.n < 0 {
-		g.errorf(v.line, "array %s has no length", v.name)
-	}
-	name := "v_" + v.name
-	if v.t.kind == kArray || v.t.kind == kStruct || g.fn.addr[v.name] {
-		g.p("var o_%s c23.Obj[%s]", v.name, g.mirrorType(v.t))
-		g.p("%s := c23.Local(&o_%s)", name, v.name)
-		g.p("_ = %s", name)
-		if v.init != nil {
-			g.initStore(name, v.t, v.init)
-		}
-		scope[v.name] = &sym{goName: name, t: v.t, cell: true}
-		return
-	}
-	if v.init != nil {
-		init := v.init
-		if l, ok := init.(*initList); ok && len(l.elems) == 1 {
-			init = l.elems[0]
-		}
-		// The variable's scope starts before its initializer (sizeof *x).
-		scope[v.name] = &sym{goName: name, t: v.t}
-		code := g.cv(g.rv(init, v.t), v.t, v.line).code
-		g.p("var %s %s = %s", name, goType(v.t), code)
-	} else {
-		scope[v.name] = &sym{goName: name, t: v.t}
-		g.p("var %s %s", name, goType(v.t))
-	}
-	g.p("_ = %s", name)
-}
-
-// initStore stores the initializer in into memory of type t at addr.
-func (g *gen) initStore(addr string, t *ctype, in expr) {
-	switch t.kind {
-	case kArray:
-		if s, ok := in.(*strLit); ok && t.elem.kind == kChar || ok && t.elem.kind == kUChar {
-			n := min(int64(len(s.s)+1), t.n)
-			g.p("c23.Memmove(%s, %s, %d)", addr, g.str(s.s), n)
-			return
-		}
-		l, ok := in.(*initList)
-		if !ok {
-			g.errorf(in.line(), "array initializer must be a list")
-		}
-		for i, e := range l.elems {
-			if int64(i) >= t.n {
-				g.errorf(in.line(), "too many initializers")
-			}
-			g.initStore(addOff(addr, int64(i)*t.elem.sizeof()), t.elem, e)
-		}
-	case kStruct:
-		l, ok := in.(*initList)
-		if !ok {
-			src := g.lvalue(in)
-			g.p("c23.Memmove(%s, %s, %d)", addr, src.addr, t.size)
-			return
-		}
-		for i, e := range l.elems {
-			if i >= len(t.fields) || t.union && i > 0 {
-				g.errorf(in.line(), "too many initializers")
-			}
-			f := t.fields[i]
-			g.initStore(addOff(addr, f.off), f.t, e)
-		}
-	default:
-		if l, ok := in.(*initList); ok {
-			if len(l.elems) != 1 {
-				g.errorf(in.line(), "scalar initializer must have one element")
-			}
-			in = l.elems[0]
-		}
-		g.storeStmt(lval{addr: addr, t: t}, g.cv(g.rv(in, t), t, in.line()))
-	}
-}
-
-func addOff(addr string, off int64) string {
-	if off == 0 {
-		return addr
-	}
-	return fmt.Sprintf("c23.Add(%s, %d)", addr, off)
-}
-
-// capture returns what f emits, instead of emitting it.
-func (g *gen) capture(f func()) string {
-	save, saveInd := g.out, g.ind
 	var b strings.Builder
-	g.out, g.ind = &b, 0
-	f()
-	g.out, g.ind = save, saveInd
+	fmt.Fprintf(&b, "// Code generated by cmd/cc from %s. DO NOT EDIT.\n\npackage %s\n\n", file, o.pkg)
+	b.WriteString("import (\n\t\"math\"\n\t\"os\"\n\t\"unsafe\"\n\n\t\"internal/c23\"\n)\n\n")
+	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
+	b.WriteString(pg.types.String())
+	b.WriteString(pg.vars.String())
+	if pg.descInit.Len() > 0 {
+		b.WriteString("\nfunc init() {\n")
+		b.WriteString(pg.descInit.String())
+		b.WriteString("}\n")
+	}
+	if pg.inits.Len() > 0 {
+		b.WriteString("\nfunc init() {\n")
+		b.WriteString(pg.inits.String())
+		b.WriteString("}\n")
+	}
+	b.WriteString("\n")
+	b.WriteString(pg.funcs.String())
+	if o.main {
+		m := pg.ext["main"]
+		if m == nil || m.kind != symFunc || !m.defined {
+			return nil, nil, fmt.Errorf("%s: no main function", file)
+		}
+		args := ""
+		if len(m.t.fn.params) >= 2 {
+			args = "int32(len(os.Args)), c23.Args()"
+		}
+		ret := fmt.Sprintf("%s(%s)", pg.names[m], args)
+		if m.t.fn.ret.kind == kVoid {
+			fmt.Fprintf(&b, "\nfunc main() {\n\t%s\n\tc23.Exit(0)\n}\n", ret)
+		} else {
+			fmt.Fprintf(&b, "\nfunc main() {\n\tc23.Exit(int32(%s))\n}\n", ret)
+		}
+	}
+	out, ferr := format.Source([]byte(b.String()))
+	if ferr != nil {
+		return []byte(b.String()), pg, fmt.Errorf("formatting the output: %v", ferr)
+	}
+	return out, pg, nil
+}
+
+// link names every symbol with linkage, across the units: one definition
+// for each external name.
+func (pg *pkgGen) link() {
+	for i, u := range pg.units {
+		for _, s := range u.syms {
+			if s.linkage == 'e' {
+				if old := pg.ext[s.name]; old != nil {
+					if old.defined && s.defined && !(s.kind == symVar && (old.init == nil || s.init == nil)) {
+						panic(genError{fmt.Sprintf("%s:%d: multiple definition of %q", s.p.file, s.p.line, s.name)})
+					}
+					if s.defined && (!old.defined || old.init == nil && s.init != nil) {
+						pg.ext[s.name] = s
+					}
+					continue
+				}
+				pg.ext[s.name] = s
+			}
+		}
+		_ = i
+	}
+	for i, u := range pg.units {
+		for _, s := range u.syms {
+			pg.nameGlobal(s, i)
+		}
+		for _, s := range u.statics {
+			pg.nameGlobal(s, i)
+		}
+	}
+}
+
+// goIdent makes a C name a Go identifier.
+func goIdent(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '_' || r < 0x80 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			b.WriteRune(r)
+		case r >= 0x80 && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			b.WriteRune(r)
+		default:
+			fmt.Fprintf(&b, "_x%02x_", r)
+		}
+	}
 	return b.String()
 }
 
-// closure returns a Go function literal, called, whose body is what f
-// emits and whose result is what f returns.
-func (g *gen) closure(t *ctype, f func() string) string {
-	var res string
-	body := g.capture(func() { res = f() })
-	if t.kind == kVoid {
-		return fmt.Sprintf("func() {\n%s}()", body)
-	}
-	return fmt.Sprintf("func() %s {\n%sreturn %s\n}()", goType(t), body, res)
-}
-
-// exprStmt emits e, evaluated for its effects.
-func (g *gen) exprStmt(e expr) {
-	switch e := e.(type) {
-	case *assign:
-		g.assign(e, false)
-	case *incDec:
-		g.incDec(e, false)
-	case *binary:
-		if e.op == "," {
-			g.exprStmt(e.x)
-			g.exprStmt(e.y)
-			return
-		}
-		g.p("_ = %s", g.rv(e, nil).code)
-	case *condExpr:
-		g.p("if %s {", g.cond(e.c))
-		g.ind++
-		g.exprStmt(e.x)
-		g.ind--
-		g.p("} else {")
-		g.ind++
-		g.exprStmt(e.y)
-		g.ind--
-		g.p("}")
-	case *call:
-		g.p("%s", g.call(e, nil).code)
-	case *cast:
-		if e.t.kind == kVoid {
-			g.exprStmt(e.x)
-			return
-		}
-		g.p("_ = %s", g.rv(e, nil).code)
-	default:
-		g.p("_ = %s", g.rv(e, nil).code)
-	}
-}
-
-// bind makes lv's address a temporary, so that it is evaluated once.
-func (g *gen) bind(lv *lval) {
-	if lv.goVar != "" || isSimple(lv.addr) {
+func (pg *pkgGen) nameGlobal(s *symbol, unitN int) {
+	if _, ok := pg.names[s]; ok {
 		return
 	}
-	t := g.tmp()
-	g.p("%s := %s", t, lv.addr)
-	lv.addr = t
-}
-
-func isSimple(s string) bool {
-	for _, c := range s {
-		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
-			return false
-		}
+	pre := pg.o.prefix
+	kind := "g"
+	if s.kind == symFunc {
+		kind = "c"
 	}
-	return true
-}
-
-// assign emits an assignment; if value, it returns the Go expression of
-// the value assigned.
-func (g *gen) assign(a *assign, value bool) string {
-	lv := g.lvalue(a.x)
-	if lv.t.kind == kStruct {
-		if a.op != "=" {
-			g.errorf(a.l, "invalid struct assignment")
-		}
-		src := g.lvalue(a.y)
-		if src.goVar != "" || src.t.kind != kStruct {
-			g.errorf(a.l, "struct assigned from a value that is not a struct")
-		}
-		g.p("c23.Memmove(%s, %s, %d)", lv.addr, src.addr, lv.t.size)
-		if value {
-			g.errorf(a.l, "struct assignment used as a value")
-		}
-		return ""
-	}
-	if lv.t.kind == kArray {
-		g.errorf(a.l, "assignment to an array")
-	}
-	g.bind(&lv)
-	var v val
-	if a.op == "=" {
-		v = g.cv(g.rv(a.y, lv.t), lv.t, a.l)
-	} else {
-		cur := g.load(lv)
-		v = g.cv(g.binop(strings.TrimSuffix(a.op, "="), cur, g.rv(a.y, nil), a.l), lv.t, a.l)
-	}
-	if value && lv.goVar == "" {
-		t := g.tmp()
-		g.p("%s := %s", t, v.code)
-		v = val{code: t, t: lv.t}
-	}
-	g.storeStmt(lv, v)
-	if lv.goVar != "" {
-		return lv.goVar
-	}
-	return v.code
-}
-
-func (g *gen) incDec(e *incDec, value bool) string {
-	lv := g.lvalue(e.x)
-	if !lv.t.isScalar() {
-		g.errorf(e.l, "%s of a %s", e.op, lv.t)
-	}
-	op := e.op[:1]
-	if !value && lv.goVar != "" && lv.t.isInteger() {
-		g.p("%s%s", lv.goVar, e.op)
-		return ""
-	}
-	g.bind(&lv)
-	old := g.load(lv)
-	res := ""
-	if value && e.post {
-		o := g.tmp()
-		g.p("%s := %s", o, old.code)
-		old = val{code: o, t: lv.t}
-		res = o
-	}
-	nv := g.cv(g.binop(op, old, val{code: "int32(1)", t: tInt, isConst: true, c: 1}, e.l), lv.t, e.l)
-	if value && !e.post {
-		n := g.tmp()
-		g.p("%s := %s", n, nv.code)
-		nv = val{code: n, t: lv.t}
-		res = n
-	}
-	g.storeStmt(lv, nv)
-	return res
-}
-
-// Memory.
-
-func loadCode(addr string, t *ctype) string {
-	switch t.kind {
-	case kChar:
-		return fmt.Sprintf("int8(c23.Load8(%s))", addr)
-	case kUChar:
-		return fmt.Sprintf("c23.Load8(%s)", addr)
-	case kShort:
-		return fmt.Sprintf("int16(c23.Load16(%s))", addr)
-	case kUShort:
-		return fmt.Sprintf("c23.Load16(%s)", addr)
-	case kInt:
-		return fmt.Sprintf("int32(c23.Load32(%s))", addr)
-	case kUInt:
-		return fmt.Sprintf("c23.Load32(%s)", addr)
-	case kLong:
-		return fmt.Sprintf("int64(c23.Load64(%s))", addr)
-	case kULong:
-		return fmt.Sprintf("c23.Load64(%s)", addr)
-	case kFloat:
-		return fmt.Sprintf("c23.LoadF32(%s)", addr)
-	case kDouble:
-		return fmt.Sprintf("c23.LoadF64(%s)", addr)
-	case kPtr:
-		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
-	}
-	panic(fmt.Sprintf("load of %s", t))
-}
-
-func (g *gen) storeStmt(lv lval, v val) {
-	if lv.goVar != "" {
-		g.p("%s = %s", lv.goVar, v.code)
-		return
-	}
-	t := lv.t
-	bits := func(n int) string {
-		if v.isConst {
-			return fmt.Sprintf("uint%d(%d)", n, uint64(v.c)&(^uint64(0)>>(64-n)))
-		}
-		return fmt.Sprintf("uint%d(%s)", n, v.code)
-	}
-	switch t.kind {
-	case kChar, kUChar:
-		g.p("c23.Store8(%s, %s)", lv.addr, bits(8))
-	case kShort, kUShort:
-		g.p("c23.Store16(%s, %s)", lv.addr, bits(16))
-	case kInt, kUInt:
-		g.p("c23.Store32(%s, %s)", lv.addr, bits(32))
-	case kLong, kULong:
-		g.p("c23.Store64(%s, %s)", lv.addr, bits(64))
-	case kFloat:
-		g.p("c23.StoreF32(%s, %s)", lv.addr, v.code)
-	case kDouble:
-		g.p("c23.StoreF64(%s, %s)", lv.addr, v.code)
-	case kPtr:
-		g.p("c23.StorePtr(%s, %s)", lv.addr, v.code)
-	default:
-		panic(fmt.Sprintf("store of %s", t))
-	}
-}
-
-// load returns the value of lv; an array decays to a pointer.
-func (g *gen) load(lv lval) val {
 	switch {
-	case lv.t.kind == kArray:
-		return val{code: lv.addr, t: ptrTo(lv.t.elem)}
-	case lv.goVar != "":
-		return val{code: lv.goVar, t: lv.t}
-	case lv.t.kind == kStruct:
-		g.errorf(0, "struct values are only supported in assignments")
+	case s.linkage == 'e':
+		def := pg.ext[s.name]
+		if def != s {
+			if n, ok := pg.names[def]; ok {
+				pg.names[s] = n
+				return
+			}
+			pg.names[def] = pre + kind + "_" + goIdent(s.name)
+		}
+		pg.names[s] = pre + kind + "_" + goIdent(s.name)
+	case s.linkage == 'i':
+		pg.names[s] = fmt.Sprintf("%s%s%d_%s", pre, kind, unitN, goIdent(s.name))
+	default:
+		pg.recN++
+		pg.names[s] = fmt.Sprintf("%s%s%d_%d_%s", pre, kind, unitN, pg.recN, goIdent(strings.ReplaceAll(s.name, ".", "_")))
 	}
-	return val{code: loadCode(lv.addr, lv.t), t: lv.t}
 }
 
-func (g *gen) lvalue(e expr) lval {
-	switch e := e.(type) {
-	case *ident:
-		s := g.lookup(e.name)
-		if s == nil {
-			g.errorf(e.l, "undefined: %s", e.name)
+func (g *gen) unit() {
+	// File-scope objects and statics: allocated, then initialized in
+	// order in init.
+	var objs []*symbol
+	for _, s := range g.u.syms {
+		if s.kind != symVar {
+			continue
 		}
-		if s.cell {
-			return lval{addr: s.goName, t: s.t}
+		if s.linkage == 'e' && g.ext[s.name] != s {
+			continue // defined, or tentatively, elsewhere
 		}
-		return lval{goVar: s.goName, t: s.t}
-	case *unary:
-		if e.op == "*" {
-			p := g.rv(e.x, nil)
-			if !p.t.isPtr() {
-				g.errorf(e.l, "dereference of a %s", p.t)
-			}
-			if p.t.elem.kind == kVoid {
-				g.errorf(e.l, "dereference of a void*")
-			}
-			return lval{addr: p.code, t: p.t.elem}
-		}
-	case *index:
-		b, i := g.rv(e.x, nil), g.rv(e.i, nil)
-		if !b.t.isPtr() && i.t.isPtr() {
-			b, i = i, b
-		}
-		if !b.t.isPtr() || !i.t.isInteger() {
-			g.errorf(e.l, "invalid index of %s", b.t)
-		}
-		return lval{addr: g.ptrAdd(b, i, false).code, t: b.t.elem}
-	case *member:
-		var base string
-		var st *ctype
-		if e.arrow {
-			p := g.rv(e.x, nil)
-			if !p.t.isPtr() || p.t.elem.kind != kStruct {
-				g.errorf(e.l, "-> on a %s", p.t)
-			}
-			base, st = p.code, p.t.elem
+		objs = append(objs, s)
+	}
+	// Compound literals at file scope first: initializers use them.
+	var lits, rest []*symbol
+	for _, s := range g.u.statics {
+		if strings.HasPrefix(s.name, "complit.") {
+			lits = append(lits, s)
 		} else {
-			lv := g.lvalue(e.x)
-			if lv.t.kind != kStruct || lv.goVar != "" {
-				g.errorf(e.l, ". on a %s", lv.t)
-			}
-			base, st = lv.addr, lv.t
+			rest = append(rest, s)
 		}
-		f := st.field(e.name)
-		if f == nil {
-			g.errorf(e.l, "%s has no field %s", st, e.name)
-		}
-		return lval{addr: addOff(base, f.off), t: f.t}
 	}
-	g.errorf(e.line(), "not an lvalue")
-	return lval{}
+	objs = append(append(lits, objs...), rest...)
+	for _, s := range objs {
+		g.globalVar(s)
+	}
+	for _, f := range g.u.funcs {
+		g.function(f)
+	}
 }
 
-// ptrAdd returns p + i (or p - i), scaled by the size of p's element.
-func (g *gen) ptrAdd(p, i val, neg bool) val {
-	size := p.t.elem.sizeof()
-	if i.isConst {
-		n := i.c * size
-		if neg {
-			n = -n
-		}
-		if n == 0 {
-			return val{code: p.code, t: p.t}
-		}
-		return val{code: fmt.Sprintf("c23.Add(%s, %d)", p.code, n), t: p.t}
+func (g *gen) globalVar(s *symbol) {
+	if s.t.kind == kArray && s.t.n < 0 {
+		g.errorf(s.p, "array %q has no length", s.name)
 	}
-	sign := ""
-	if neg {
-		sign = "-"
+	if !s.t.isComplete() {
+		if s.storage == sExtern && !s.defined {
+			// Declared, never defined: an error only if used.
+			return
+		}
+		g.errorf(s.p, "storage size of %q isn't known", s.name)
 	}
-	return val{code: fmt.Sprintf("c23.Add(%s, %sint(%s)*%d)", p.code, sign, i.code, size), t: p.t}
+	name := g.names[s]
+	if s.tls {
+		// Each thread's, made when it first uses it.
+		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
+		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.objMirror(s.t))
+		if s.init != nil {
+			save, saveInd := g.out, g.ind
+			g.out = &g.vars
+			g.initObject("p", s.t, s.init)
+			g.out, g.ind = save, saveInd
+		}
+		g.vars.WriteString("return p\n})\n")
+		return
+	}
+	if s.allocSize > s.t.sizeof() {
+		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, g.mirror(s.t), s.allocSize)
+	} else if a := s.t.alignof(); a > 8 {
+		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
+	} else {
+		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.objMirror(s.t))
+	}
+	if s.init != nil {
+		save, saveInd := g.out, g.ind
+		g.out, g.ind = &g.inits, 1
+		g.initObject(name, s.t, s.init)
+		g.out, g.ind = save, saveInd
+	}
 }
 
-// Expressions.
+// Types.
 
-// cv converts v to t.
-func (g *gen) cv(v val, to *ctype, line int) val {
-	switch {
-	case to.kind == kVoid:
-		return val{code: v.code, t: to}
-	case to.isPtr():
-		if v.t.isPtr() {
-			return val{code: v.code, t: to}
+// goType is the Go type of a C value in a Go variable.
+func goType(t *ctype) string {
+	switch t.kind {
+	case kBool, kUChar:
+		return "uint8"
+	case kChar, kSChar:
+		return "int8"
+	case kShort:
+		return "int16"
+	case kUShort:
+		return "uint16"
+	case kInt:
+		return "int32"
+	case kUInt:
+		return "uint32"
+	case kLong, kLLong:
+		return "int64"
+	case kULong, kULLong:
+		return "uint64"
+	case kComplex:
+		if t.elem.kind == kFloat {
+			return "complex64"
 		}
-		if v.t.isInteger() {
-			if v.isConst && v.c == 0 {
-				return val{code: "c23.Ptr{}", t: to}
-			}
-			return val{code: fmt.Sprintf("c23.FromInt(uintptr(%s))", v.code), t: to}
+		return "complex128"
+	case kInt128:
+		return "c23.Int128"
+	case kUInt128:
+		return "c23.Uint128"
+	case kBitInt, kUBitInt:
+		u := ""
+		if t.kind == kUBitInt {
+			u = "u"
 		}
-	case to.isInteger():
-		if v.t.isPtr() {
-			return val{code: fmt.Sprintf("%s(c23.Addr(%s))", goType(to), v.code), t: to}
-		}
-		if v.isConst {
-			c := wrap(to, v.c)
-			return val{code: constLit(to, c), t: to, isConst: true, c: c}
-		}
-		if v.t.isArith() {
-			if goType(v.t) == goType(to) {
-				return val{code: v.code, t: to}
-			}
-			return val{code: fmt.Sprintf("%s(%s)", goType(to), v.code), t: to}
-		}
-	case to.isFloat():
-		if v.isConst {
-			return val{code: fmt.Sprintf("%s(%d)", goType(to), v.c), t: to}
-		}
-		if v.t.isArith() {
-			if goType(v.t) == goType(to) {
-				return val{code: v.code, t: to}
-			}
-			return val{code: fmt.Sprintf("%s(%s)", goType(to), v.code), t: to}
-		}
-	case to.kind == kStruct && v.t == to:
-		return v
+		return fmt.Sprintf("%sint%d", u, t.sizeof()*8)
+	case kFloat:
+		return "float32"
+	case kDouble, kLDouble:
+		return "float64"
+	case kPtr, kNullptr, kVaList, kStruct, kArray:
+		return "c23.Ptr"
 	}
-	g.errorf(line, "cannot convert %s to %s", v.t, to)
-	return val{}
+	panic(fmt.Sprintf("no Go type for %s", t))
 }
 
-func intConst(t *ctype, c int64) val {
-	c = wrap(t, c)
-	return val{code: constLit(t, c), t: t, isConst: true, c: c}
-}
-
-func boolVal(b string) val {
-	return val{code: "c23.B2I(" + b + ")", t: tInt, b: b}
-}
-
-// cond returns e as a Go bool.
-func (g *gen) cond(e expr) string {
-	v := g.rv(e, nil)
-	if v.b != "" {
-		return v.b
-	}
-	if v.t.isPtr() {
-		return fmt.Sprintf("c23.Addr(%s) != 0", v.code)
-	}
-	if !v.t.isArith() {
-		g.errorf(e.line(), "%s used as a condition", v.t)
-	}
-	return fmt.Sprintf("%s != 0", v.code)
-}
-
-func (g *gen) str(s string) string {
-	n, ok := g.strs[s]
-	if !ok {
-		n = fmt.Sprintf("%ss_%d", g.pre, len(g.strs))
-		g.strs[s] = n
-	}
-	return n
-}
-
-// rv returns e as an rvalue. hint is the type the value is converted to,
-// if known: it types malloc's allocations.
-func (g *gen) rv(e expr, hint *ctype) val {
-	switch e := e.(type) {
-	case *intLit:
-		return intConst(e.t, e.v)
-	case *floatLit:
-		return val{code: "float64(" + strconv.FormatFloat(e.v, 'g', -1, 64) + ")", t: tDouble}
-	case *strLit:
-		return val{code: g.str(e.s), t: ptrTo(tChar)}
-	case *ident:
-		if g.lookup(e.name) == nil {
-			if _, ok := g.u.protos[e.name]; ok {
-				g.errorf(e.l, "function values are not supported")
-			}
-		}
-		return g.load(g.lvalue(e))
-	case *index, *member:
-		return g.load(g.lvalue(e))
-	case *unary:
-		switch e.op {
-		case "*":
-			return g.load(g.lvalue(e))
-		case "&":
-			return g.addrOf(e.x)
-		case "!":
-			return boolVal("!(" + g.cond(e.x) + ")")
-		}
-		x := g.rv(e.x, nil)
-		if !x.t.isArith() {
-			g.errorf(e.l, "%s on a %s", e.op, x.t)
-		}
-		t := promote(x.t)
-		x = g.cv(x, t, e.l)
-		switch e.op {
-		case "+":
-			return x
-		case "-":
-			if x.isConst {
-				return intConst(t, -x.c)
-			}
-			return val{code: "(-" + x.code + ")", t: t}
-		case "~":
-			if x.isConst {
-				return intConst(t, ^x.c)
-			}
-			return val{code: "(^" + x.code + ")", t: t}
-		}
-	case *incDec:
-		lv := g.lvalue(e.x)
-		var res string
-		code := g.closure(lv.t, func() string { res = g.incDec(e, true); return res })
-		return val{code: code, t: lv.t}
-	case *assign:
-		lv := g.lvalue(e.x)
-		code := g.closure(lv.t, func() string { return g.assign(e, true) })
-		return val{code: code, t: lv.t}
-	case *binary:
-		switch e.op {
-		case "&&", "||":
-			return boolVal(fmt.Sprintf("(%s %s %s)", g.cond(e.x), e.op, g.cond(e.y)))
-		case ",":
-			y := g.rv(e.y, hint)
-			code := g.closure(y.t, func() string {
-				g.exprStmt(e.x)
-				return g.rv(e.y, hint).code
-			})
-			return val{code: code, t: y.t}
-		}
-		return g.binop(e.op, g.rv(e.x, nil), g.rv(e.y, nil), e.l)
-	case *condExpr:
-		x, y := g.rv(e.x, hint), g.rv(e.y, hint)
-		var t *ctype
+// mirror is the Go type with t's layout, with pointers where t has
+// them: what C's memory is, and what Go sees it as.
+func (g *gen) mirror(t *ctype) string {
+	switch t.kind {
+	case kPtr:
+		e := t.elem
 		switch {
-		case x.t.isArith() && y.t.isArith():
-			t = usual(x.t, y.t)
-		case x.t.isPtr():
-			t = x.t
-		case y.t.isPtr():
-			t = y.t
-		default:
-			g.errorf(e.l, "invalid conditional of %s and %s", x.t, y.t)
+		case e.kind == kFunc:
+			return "*c23.Func"
+		case e.kind == kVoid || e.kind == kStruct && !e.rec.complete || e.kind == kArray && e.n < 0:
+			return "unsafe.Pointer"
 		}
-		code := g.closure(t, func() string {
-			g.p("if %s {", g.cond(e.c))
-			g.p("return %s", g.cv(g.rv(e.x, hint), t, e.l).code)
-			g.p("}")
-			return g.cv(g.rv(e.y, hint), t, e.l).code
-		})
-		return val{code: code, t: t}
-	case *call:
-		return g.call(e, hint)
-	case *cast:
-		x := g.rv(e.x, e.t)
-		return g.cv(x, e.t, e.l)
-	case *sizeofT:
-		return intConst(tULong, e.t.sizeof())
-	case *sizeofE:
-		return intConst(tULong, g.typeOf(e.x).sizeof())
-	case *initList:
-		g.errorf(e.l, "initializer list in an expression")
+		return "*" + g.mirror(e)
+	case kArray:
+		return fmt.Sprintf("[%d]%s", max(t.n, 0), g.mirror(t.elem))
+	case kStruct:
+		if !t.rec.complete {
+			return "byte"
+		}
+		return g.record(t)
+	case kVoid:
+		return "byte"
+	case kNullptr:
+		return "unsafe.Pointer"
+	case kVaList:
+		return "*c23.VaList"
+	case kLDouble:
+		return "c23.LDouble"
+	case kComplex:
+		return fmt.Sprintf("[2]%s", g.mirror(t.elem))
+	case kFunc:
+		return "c23.Func"
 	}
-	g.errorf(e.line(), "unsupported expression %T", e)
-	return val{}
+	return goType(t)
 }
 
-// typeOf returns the type of e, without decaying arrays.
-func (g *gen) typeOf(e expr) *ctype {
-	switch e := e.(type) {
-	case *ident:
-		if s := g.lookup(e.name); s != nil {
-			return s.t
+// record returns the name of a struct or union's mirror, made the first
+// time: one per layout, so that every unit shares it.
+func (g *gen) record(t *ctype) string {
+	r := t.rec
+	if r.goName != "" {
+		return r.goName
+	}
+	bytes := r.union || r.packed > 0 || t.rec.align > 8 || !naturalLayout(r)
+	var fields []string
+	for i, f := range r.fields {
+		if f.bits >= 0 || f.packed || f.t.align > f.t.unqual().alignofNatural() {
+			bytes = true
 		}
-	case *strLit:
-		return arrayOf(tChar, int64(len(e.s)+1))
-	case *index, *member:
-		return g.lvalue(e).t
-	case *unary:
-		if e.op == "*" {
-			return g.lvalue(e).t
+		if i == len(r.fields)-1 && f.t.sizeof() == 0 {
+			// Go pads a struct that ends in a zero-size field.
+			bytes = true
 		}
 	}
-	var t *ctype
-	g.capture(func() { t = g.rv(e, nil).t })
-	return t
+	// The key: the layout, which identifies the mirror.
+	var key strings.Builder
+	fmt.Fprintf(&key, "%s|%d|%d|%v|", r.tag, r.size, r.align, bytes)
+	if !bytes {
+		for _, f := range r.fields {
+			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, f.t)
+		}
+	}
+	if n, ok := g.mirrors[key.String()]; ok {
+		r.goName = n
+		return n
+	}
+	g.recN++
+	kw := "struct"
+	if r.union {
+		kw = "union"
+	}
+	tag := r.tag
+	if tag == "" {
+		tag = "anon"
+	}
+	name := fmt.Sprintf("%s%s_%s", g.o.prefix, kw, goIdent(tag))
+	if g.mirrorTaken(name) {
+		name = fmt.Sprintf("%s%s_%s_%d", g.o.prefix, kw, goIdent(tag), g.recN)
+	}
+	r.goName = name
+	g.mirrors[key.String()] = name
+	if !bytes {
+		for _, f := range r.fields {
+			fields = append(fields, fmt.Sprintf("%s %s", g.fieldName(f, len(fields)), g.mirror(f.t)))
+		}
+	}
+	var b strings.Builder
+	if bytes {
+		// As cgo does for unions, Go sees the bytes. The tag tells
+		// internal/c23 that they may hold pointers C stores, whose
+		// capabilities it keeps aside.
+		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
+			name, kw, r.tag, name, unionAlign(r.align), r.size)
+	} else {
+		fmt.Fprintf(&b, "// %s is C's %s %s, as Go sees it.\ntype %s struct {\n", name, kw, r.tag, name)
+		for _, f := range fields {
+			fmt.Fprintf(&b, "\t%s\n", f)
+		}
+		b.WriteString("}\n\n")
+		for i, f := range r.fields {
+			fn := g.fieldName(f, i)
+			fmt.Fprintf(&b, "var _ [unsafe.Offsetof(%s{}.%s) - %d]byte\nvar _ [%d - unsafe.Offsetof(%s{}.%s)]byte\n",
+				name, fn, f.off, f.off, name, fn)
+		}
+	}
+	fmt.Fprintf(&b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n\n", name, r.size, r.size, name)
+	g.types.WriteString(b.String())
+	return name
 }
 
-func (g *gen) addrOf(e expr) val {
-	if u, ok := e.(*unary); ok && u.op == "*" {
-		return g.rv(u.x, nil)
-	}
-	lv := g.lvalue(e)
-	if lv.goVar != "" {
-		g.errorf(e.line(), "internal error: address of a variable that is not in memory")
-	}
-	return val{code: lv.addr, t: ptrTo(lv.t)}
-}
-
-func (g *gen) binop(op string, x, y val, line int) val {
-	if x.t.kind == kArray || y.t.kind == kArray {
-		panic("undecayed array")
-	}
-	switch op {
-	case "+":
-		if x.t.isPtr() && y.t.isInteger() {
-			return g.ptrAdd(x, y, false)
+func (g *gen) mirrorTaken(name string) bool {
+	for _, n := range g.mirrors {
+		if n == name {
+			return true
 		}
-		if y.t.isPtr() && x.t.isInteger() {
-			return g.ptrAdd(y, x, false)
-		}
-	case "-":
-		if x.t.isPtr() && y.t.isInteger() {
-			return g.ptrAdd(x, y, true)
-		}
-		if x.t.isPtr() && y.t.isPtr() {
-			return val{code: fmt.Sprintf("int64(c23.Sub(%s, %s) / %d)", x.code, y.code, x.t.elem.sizeof()), t: tLong}
-		}
-	case "==", "!=", "<", ">", "<=", ">=":
-		if x.t.isPtr() || y.t.isPtr() {
-			a, b := "uintptr(0)", "uintptr(0)"
-			if x.t.isPtr() {
-				a = "c23.Addr(" + x.code + ")"
-			} else if !x.isConst || x.c != 0 {
-				a = "uintptr(" + x.code + ")"
-			}
-			if y.t.isPtr() {
-				b = "c23.Addr(" + y.code + ")"
-			} else if !y.isConst || y.c != 0 {
-				b = "uintptr(" + y.code + ")"
-			}
-			return boolVal(fmt.Sprintf("(%s %s %s)", a, op, b))
-		}
-	}
-	if !x.t.isArith() || !y.t.isArith() {
-		g.errorf(line, "invalid operation: %s %s %s", x.t, op, y.t)
-	}
-	var t *ctype
-	if op == "<<" || op == ">>" {
-		t = promote(x.t)
-		if !t.isInteger() || !y.t.isInteger() {
-			g.errorf(line, "shift of a %s", x.t)
-		}
-		y = g.cv(y, promote(y.t), line)
-		x = g.cv(x, t, line)
-		if x.isConst && y.isConst {
-			if op == "<<" {
-				return intConst(t, x.c<<uint64(y.c))
-			}
-			if t.isUnsigned() {
-				return intConst(t, int64(uint64(x.c)>>uint64(y.c)))
-			}
-			return intConst(t, x.c>>uint64(y.c))
-		}
-		return val{code: fmt.Sprintf("(%s %s %s)", x.code, op, y.code), t: t}
-	}
-	t = usual(x.t, y.t)
-	x, y = g.cv(x, t, line), g.cv(y, t, line)
-	if (op == "%" || op == "&" || op == "|" || op == "^") && !t.isInteger() {
-		g.errorf(line, "invalid operation %s on %s", op, t)
-	}
-	if x.isConst && y.isConst {
-		if c, ok := fold(op, t, x.c, y.c); ok {
-			if isCompare(op) {
-				return intConst(tInt, c)
-			}
-			return intConst(t, c)
-		}
-	}
-	code := fmt.Sprintf("(%s %s %s)", x.code, op, y.code)
-	if isCompare(op) {
-		return boolVal(code)
-	}
-	return val{code: code, t: t}
-}
-
-func isCompare(op string) bool {
-	switch op {
-	case "==", "!=", "<", ">", "<=", ">=":
-		return true
 	}
 	return false
 }
 
-// fold computes x op y in t, as C does.
-func fold(op string, t *ctype, x, y int64) (int64, bool) {
-	b := func(c bool) int64 {
-		if c {
-			return 1
-		}
-		return 0
+// fieldName is a member's Go name: cgo's (a Go keyword with _ before it).
+func (g *gen) fieldName(f *field, i int) string {
+	if f.name == "" {
+		return fmt.Sprintf("_anon%d", i)
 	}
-	if t.isUnsigned() {
-		ux, uy := uint64(x), uint64(y)
-		switch op {
-		case "/":
-			if uy == 0 {
-				return 0, false
-			}
-			return int64(ux / uy), true
-		case "%":
-			if uy == 0 {
-				return 0, false
-			}
-			return int64(ux % uy), true
-		case "<":
-			return b(ux < uy), true
-		case ">":
-			return b(ux > uy), true
-		case "<=":
-			return b(ux <= uy), true
-		case ">=":
-			return b(ux >= uy), true
-		}
-	}
-	switch op {
-	case "+":
-		return x + y, true
-	case "-":
-		return x - y, true
-	case "*":
-		return x * y, true
-	case "/":
-		if y == 0 {
-			return 0, false
-		}
-		return x / y, true
-	case "%":
-		if y == 0 {
-			return 0, false
-		}
-		return x % y, true
-	case "&":
-		return x & y, true
-	case "|":
-		return x | y, true
-	case "^":
-		return x ^ y, true
-	case "==":
-		return b(x == y), true
-	case "!=":
-		return b(x != y), true
-	case "<":
-		return b(x < y), true
-	case ">":
-		return b(x > y), true
-	case "<=":
-		return b(x <= y), true
-	case ">=":
-		return b(x >= y), true
-	}
-	return 0, false
+	return goField(f.name)
 }
 
-var builtins = map[string]bool{"printf": true, "puts": true, "putchar": true, "strlen": true, "strcmp": true,
-	"strcpy": true, "memcpy": true, "memmove": true, "memset": true, "malloc": true, "calloc": true,
-	"realloc": true, "free": true, "abort": true, "exit": true, "assert": true}
-
-func (g *gen) call(c *call, hint *ctype) val {
-	if builtins[c.fn] && !g.defined[c.fn] {
-		return g.builtin(c, hint)
-	}
-	ft, ok := g.u.protos[c.fn]
-	if !ok {
-		g.errorf(c.l, "undefined function %s", c.fn)
-	}
-	if len(c.args) < len(ft.params) || len(c.args) > len(ft.params) && !ft.variadic {
-		g.errorf(c.l, "wrong number of arguments to %s", c.fn)
-	}
-	if ft.variadic {
-		g.errorf(c.l, "variadic functions are not supported")
-	}
-	var args []string
-	for i, a := range c.args {
-		pt := ft.params[i]
-		args = append(args, g.cv(g.rv(a, pt), pt, c.l).code)
-	}
-	if !g.defined[c.fn] {
-		g.errorf(c.l, "%s is declared but not defined", c.fn)
-	}
-	return val{code: fmt.Sprintf("%sc_%s(%s)", g.pre, c.fn, strings.Join(args, ", ")), t: ft.ret}
+func (t *ctype) alignofNatural() int64 {
+	c := *t
+	c.align = 0
+	return c.alignof()
 }
 
-// allocType returns the Go type that malloc allocates for a result
-// converted to hint: typed if hint is a pointer to a type with a layout.
-func (g *gen) allocType(hint *ctype) string {
-	if hint == nil || !hint.isPtr() {
-		return "c23.Raw"
+var goKeywords = map[string]bool{"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true, "func": true, "go": true,
+	"goto": true, "if": true, "import": true, "interface": true, "map": true, "package": true, "range": true,
+	"return": true, "select": true, "struct": true, "switch": true, "type": true, "var": true}
+
+// goField is the Go name of a C member: cgo's, a Go keyword prefixed with _.
+func goField(name string) string {
+	if goKeywords[name] {
+		return "_" + name
 	}
-	e := hint.elem
-	switch e.kind {
-	case kVoid, kChar, kUChar, kFunc:
-		return "c23.Raw"
-	}
-	if e.kind == kStruct && !e.complete {
-		return "c23.Raw"
-	}
-	return g.mirrorType(e)
+	return goIdent(name)
 }
 
-func (g *gen) builtin(c *call, hint *ctype) val {
-	arg := func(i int, t *ctype) string {
-		if i >= len(c.args) {
-			g.errorf(c.l, "too few arguments to %s", c.fn)
-		}
-		return g.cv(g.rv(c.args[i], t), t, c.l).code
+// unionAlign is the zero-size field that gives a union's bytes its
+// alignment.
+func unionAlign(a int64) string {
+	switch {
+	case a >= 8:
+		return "\t_ [0]uint64\n"
+	case a == 4:
+		return "\t_ [0]uint32\n"
+	case a == 2:
+		return "\t_ [0]uint16\n"
 	}
-	vp := ptrTo(tVoid)
-	cp := ptrTo(tChar)
-	switch c.fn {
-	case "printf":
-		args := []string{arg(0, cp)}
-		for _, a := range c.args[1:] {
-			v := g.rv(a, nil)
-			switch {
-			case v.t.isInteger():
-				v = g.cv(v, promote(v.t), c.l)
-			case v.t.kind == kFloat:
-				v = g.cv(v, tDouble, c.l)
-			}
-			args = append(args, v.code)
+	return ""
+}
+
+// Constants.
+
+func constLit(t *ctype, v int64) string {
+	switch {
+	case t.kind == kInt128:
+		return fmt.Sprintf("c23.I128(%d)", v)
+	case t.kind == kUInt128:
+		return fmt.Sprintf("c23.U128(%d)", v)
+	case t.kind == kUBitInt:
+		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
+	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList:
+		if v == 0 {
+			return "c23.Ptr{}"
 		}
-		return val{code: fmt.Sprintf("c23.Printf(%s)", strings.Join(args, ", ")), t: tInt}
-	case "puts":
-		return val{code: fmt.Sprintf("c23.Puts(%s)", arg(0, cp)), t: tInt}
-	case "putchar":
-		return val{code: fmt.Sprintf("c23.Putchar(%s)", arg(0, tInt)), t: tInt}
-	case "strlen":
-		return val{code: fmt.Sprintf("c23.Strlen(%s)", arg(0, cp)), t: tULong}
-	case "strcmp":
-		return val{code: fmt.Sprintf("c23.Strcmp(%s, %s)", arg(0, cp), arg(1, cp)), t: tInt}
-	case "strcpy":
-		return val{code: fmt.Sprintf("c23.Strcpy(%s, %s)", arg(0, cp), arg(1, cp)), t: cp}
-	case "memcpy", "memmove":
-		return val{code: fmt.Sprintf("c23.Memcpy(%s, %s, uintptr(%s))", arg(0, vp), arg(1, vp), arg(2, tULong)), t: vp}
-	case "memset":
-		return val{code: fmt.Sprintf("c23.Memset(%s, %s, uintptr(%s))", arg(0, vp), arg(1, tInt), arg(2, tULong)), t: vp}
-	case "malloc":
-		return val{code: fmt.Sprintf("c23.NewArray[%s](uintptr(%s))", g.allocType(hint), arg(0, tULong)), t: vp}
-	case "calloc":
-		return val{code: fmt.Sprintf("c23.NewArray[%s](uintptr(%s) * uintptr(%s))", g.allocType(hint), arg(0, tULong), arg(1, tULong)), t: vp}
-	case "realloc":
-		return val{code: fmt.Sprintf("c23.Realloc[%s](%s, uintptr(%s))", g.allocType(hint), arg(0, vp), arg(1, tULong)), t: vp}
-	case "free":
-		return val{code: fmt.Sprintf("c23.Free(%s)", arg(0, vp)), t: tVoid}
-	case "abort":
-		return val{code: "c23.Abort()", t: tVoid}
-	case "exit":
-		return val{code: fmt.Sprintf("os.Exit(int(%s))", arg(0, tInt)), t: tVoid}
-	case "assert":
-		if len(c.args) != 1 {
-			g.errorf(c.l, "assert takes one argument")
-		}
-		return val{code: fmt.Sprintf("c23.Assert(%s, %q)", g.cond(c.args[0]), fmt.Sprintf("%s:%d", g.file, c.l)), t: tVoid}
+		return fmt.Sprintf("c23.FromInt(%d)", uint64(v))
+	case t.isFloat():
+		return fmt.Sprintf("%s(%d)", goType(t), v)
+	case t.isUnsigned() && t.sizeof() == 8:
+		return fmt.Sprintf("uint64(%d)", uint64(v))
 	}
-	panic("unreachable")
+	return fmt.Sprintf("%s(%d)", goType(t), wrap(t, v))
+}
+
+func floatLit(t *ctype, v float64) string {
+	switch {
+	case v != v:
+		return fmt.Sprintf("%s(math.NaN())", goType(t))
+	case math.IsInf(v, 1):
+		return fmt.Sprintf("%s(math.Inf(1))", goType(t))
+	case math.IsInf(v, -1):
+		return fmt.Sprintf("%s(math.Inf(-1))", goType(t))
+	case v == 0 && 1/v < 0:
+		return fmt.Sprintf("%s(math.Copysign(0, -1))", goType(t))
+	}
+	s := strconv.FormatFloat(v, 'g', -1, 64)
+	if t.kind == kFloat {
+		s = strconv.FormatFloat(float64(float32(v)), 'g', -1, 32)
+	}
+	return fmt.Sprintf("%s(%s)", goType(t), s)
+}
+
+// str returns the Go variable of a string literal's array.
+func (g *gen) str(s *strLit) string {
+	key := s.t.elem.String() + "|" + s.data
+	if n, ok := g.strs[key]; ok {
+		return n
+	}
+	n := fmt.Sprintf("%ss_%d", g.o.prefix, len(g.strs))
+	g.strs[key] = n
+	esz := s.t.elem.sizeof()
+	fmt.Fprintf(&g.vars, "var %s = c23.String[%s](%s)\n", n, g.mirror(s.t.elem), strconv.Quote(s.data+strings.Repeat("\x00", int(esz))))
+	return n
+}
+
+// sorted returns m's keys in order.
+func sorted[V any](m map[string]V) []string {
+	var ks []string
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
+}
+
+// naturalLayout reports whether r has the layout Go gives a struct of
+// its members: no attribute changed it.
+func naturalLayout(r *record) bool {
+	off, align := int64(0), int64(1)
+	for _, f := range r.fields {
+		if f.bits >= 0 {
+			return false
+		}
+		a := f.t.unqual().alignofNatural()
+		if f.t.kind == kStruct {
+			a = min(f.t.rec.align, 8)
+		}
+		off = (off + a - 1) / a * a
+		if off != f.off {
+			return false
+		}
+		off += f.t.sizeof()
+		align = max(align, a)
+	}
+	size := (off + align - 1) / align * align
+	return size == r.size && align == r.align
+}
+
+// constLitStr is constLit of a constant written in decimal.
+func constLitStr(t *ctype, s string) string {
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		u, _ := strconv.ParseUint(s, 10, 64)
+		v = int64(u)
+		if t.kind == kInt128 {
+			return fmt.Sprintf("c23.I128U(%d)", u)
+		}
+		return fmt.Sprintf("c23.U128U(%d)", u)
+	}
+	return constLit(t, v)
+}
+
+// objMirror is the Go type of an object of type t: its mirror, but for
+// an array of chars, which is untyped memory, so that C may keep
+// pointers in it (a struct copied there and back, as in Fil-C).
+func (g *gen) objMirror(t *ctype) string {
+	b := baseElem(t)
+	if t.kind == kArray && t.n > 0 && (b.kind == kChar || b.kind == kSChar || b.kind == kUChar) {
+		return fmt.Sprintf("[%d]c23.Raw", t.sizeof())
+	}
+	return g.mirror(t)
 }

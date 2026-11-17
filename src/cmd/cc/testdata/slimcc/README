@@ -1,0 +1,9 @@
+The tests of slimcc (https://github.com/fuhsnn/slimcc, MIT; see LICENSE),
+from commit 2388c39989886fee05df045b6a669d684aee3946, unchanged: test/*.c,
+test/*.h, the files test/embed.c embeds, and test/host/common.c, which
+slimcc's test driver compiles with the host's C compiler and links with
+every test. slimcc extends chibicc (also MIT, Rui Ueyama), whose tests
+these began as.
+
+TestSlimcc (../../slimcc_test.go) runs them; status.txt lists the ones
+cmd/cc passes.

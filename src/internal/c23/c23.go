@@ -58,17 +58,24 @@ type Ptr struct {
 	obj  unsafe.Pointer // base of the capability; nil: none
 	size uintptr        // bytes the capability covers
 	off  int            // address - base; with no capability, the address
-	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object
+	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object; bit 1: scalars only
 }
 
-// A Ptr holds its *tinfo as an index into tinfoTab, and bit 0 says the
-// memory is C's object: escape analysis, which sees a Ptr as one value,
+// A Ptr holds its *tinfo as an index into tinfoTab (and bits saying the
+// memory is C's object, and holds no pointers, which checks read without
+// the table): escape analysis, which sees a Ptr as one value,
 // would otherwise take every use of the type as a use of the memory and
 // move what the memory points to off the stack; and an index, unlike a
 // pointer made of an integer, is the same on every target.
-func tref(ti *tinfo) uintptr { return uintptr(ti.id) << 1 }
+func tref(ti *tinfo) uintptr {
+	r := uintptr(ti.id) << 2
+	if ti.scalarOnly {
+		r |= 2
+	}
+	return r
+}
 
-func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>1] }
+func (p Ptr) info() *tinfo { return (*tinfoTab.Load())[p.ti>>2] }
 
 // cref is tref for a capability of C's object, which has a header.
 func cref(ti *tinfo) uintptr { return tref(ti) | 1 }
@@ -87,6 +94,26 @@ type Fault struct {
 }
 
 func (f *Fault) Error() string { return fmt.Sprintf("c23: %s (address %#x)", f.Msg, f.Addr) }
+
+// A boundsFault is an access check's Fault, its message made when it is
+// read, so that check stays small enough to inline.
+//
+// It holds no pointer, so that the Ptr it describes does not escape.
+type boundsFault struct {
+	obj, size, ti, n uintptr
+	off              int
+}
+
+func (b boundsFault) Error() string { return b.fault().Error() }
+
+func (b boundsFault) fault() *Fault {
+	addr := b.obj + uintptr(b.off)
+	if b.obj == 0 {
+		return &Fault{"access through a pointer with no capability", addr}
+	}
+	ti := (*tinfoTab.Load())[b.ti>>2]
+	return &Fault{fmt.Sprintf("access of %d bytes out of bounds of %s", b.n, capString(true, ti, b.size, b.off)), addr}
+}
 
 func fault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
 
@@ -163,11 +190,12 @@ func NewArray[T any](n uintptr) Ptr {
 	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
 }
 
-// Malloc allocates n bytes of untyped memory, in which C may keep
+// Malloc is C's malloc: n bytes of untyped memory, in which C may keep
 // pointers.
-func Malloc(n uintptr) Ptr { return NewArray[Raw](n) }
+func Malloc(n uint64) Ptr { return NewArray[Raw](uintptr(n)) }
 
-// Free does nothing: the collector frees what is not reachable.
+// Free is C's free, which does nothing: the collector frees what is not
+// reachable.
 func Free(p Ptr) {}
 
 // cobject returns the capability of C's allocation that contains w, if it
@@ -176,6 +204,14 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	base, size := object(w)
 	if base == nil || size < hdrSize {
 		return Ptr{}, false
+	}
+	if *(*uintptr)(base) == alignMagic {
+		// An over-aligned object (NewAligned): its header is further in.
+		off := *(*uintptr)(unsafe.Add(base, 8))
+		if off < hdrSize || off > size {
+			return Ptr{}, false
+		}
+		base = unsafe.Add(base, off-hdrSize)
 	}
 	h := (*header)(base)
 	if h.magic != magic || h.ti == nil {
@@ -280,21 +316,52 @@ func ToGoUnsafe(p Ptr) unsafe.Pointer {
 //     the runtime when the stack moves;
 //   - in Go's heap: by the object, removed when the object dies;
 //   - in Go's globals: by address.
+//
+// A C object's table is dense, an entry for each word, found by index;
+// the others are maps.
 type auxTable struct {
-	mu sync.Mutex
-	m  map[uintptr]auxEntry
+	mu    sync.Mutex
+	m     map[uintptr]auxEntry
+	dense []auxEntry // C's object's: by offset/8, valid if ok
+	// seq is odd while dense is being written: a reader reads without
+	// the lock, and again if seq changed (a seqlock).
+	seq atomic.Uint64
 }
 
 type auxEntry struct {
 	word uintptr
 	p    Ptr
+	ok   bool
 }
 
-func (h *header) table(make bool) *auxTable {
-	if t := (*auxTable)(atomic.LoadPointer(&h.aux)); t != nil || !make {
+func (t *auxTable) get(key uintptr) (auxEntry, bool) {
+	if t.dense != nil {
+		i := key / 8
+		if i >= uintptr(len(t.dense)) {
+			return auxEntry{}, false
+		}
+		for {
+			s := t.seq.Load()
+			if s&1 != 0 {
+				continue
+			}
+			e := t.dense[i]
+			if t.seq.Load() == s {
+				return e, e.ok
+			}
+		}
+	}
+	t.mu.Lock()
+	e := t.m[key]
+	t.mu.Unlock()
+	return e, e.ok
+}
+
+func (h *header) table(create bool) *auxTable {
+	if t := (*auxTable)(atomic.LoadPointer(&h.aux)); t != nil || !create {
 		return t
 	}
-	t := &auxTable{m: map[uintptr]auxEntry{}}
+	t := &auxTable{dense: make([]auxEntry, (h.size+7)/8)}
 	if atomic.CompareAndSwapPointer(&h.aux, nil, unsafe.Pointer(t)) {
 		return t
 	}
@@ -302,19 +369,30 @@ func (h *header) table(make bool) *auxTable {
 }
 
 func check(p Ptr, n uintptr) unsafe.Pointer {
-	if p.obj == nil {
-		fault("access through a pointer with no capability", Addr(p))
-	}
-	if p.off < 0 || uintptr(p.off)+n > p.size {
-		ti, size, off := p.info(), p.size, p.off
-		fault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
+	// A pointer with no capability has size 0; a negative offset is
+	// past any size.
+	if off := uintptr(p.off); off > p.size || n > p.size-off {
+		panic(boundsFault{uintptr(p.obj), p.size, p.ti, n, p.off})
 	}
 	return unsafe.Add(p.obj, p.off)
 }
 
+// checkFail faults for an access check refuses: apart, so that check
+// is small enough to inline.
+//
+//go:noinline
+func checkFail(p Ptr, n uintptr) {
+	if p.obj == nil {
+		fault("access through a pointer with no capability", Addr(p))
+	}
+	ti, size, off := p.info(), p.size, p.off
+	fault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
+}
+
 func checkPtrWord(p Ptr) unsafe.Pointer {
 	a := check(p, 8)
-	if uintptr(a)%8 != 0 || p.info().kindAt(uintptr(p.off)) != p.info().kindAt(uintptr(p.off)+7) {
+	// Aligned, and the object's types are aligned too: one word.
+	if uintptr(a)%8 != 0 || uintptr(p.off)%8 != 0 {
 		fault("misaligned pointer access", uintptr(a))
 	}
 	return a
@@ -323,11 +401,17 @@ func checkPtrWord(p Ptr) unsafe.Pointer {
 // checkScalar checks a store of n bytes at p.
 func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 	a := check(p, n)
-	if p.info().scalarOnly {
+	if p.ti&2 != 0 { // scalars only
 		return a
 	}
-	for b := uintptr(p.off); b < uintptr(p.off)+n; b++ {
-		switch p.info().kindAt(b) {
+	return checkScalarWords(p, n, a)
+}
+
+func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
+	ti := p.info()
+	end := uintptr(p.off) + n
+	for b := uintptr(p.off); b < end; b = (b + 8) &^ 7 {
+		switch ti.kindAt(b) {
 		case wPtr:
 			fault("scalar store over a pointer word", uintptr(a))
 		case wRO:
@@ -433,12 +517,23 @@ func Memmove(dst, src Ptr, n uintptr) {
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
+	nw := n / 8
+	if !overlaps(dst, src, n) {
+		// Word by word: no copy aside needed.
+		for i := uintptr(0); i < nw; i++ {
+			moveWord(Add(dst, int(i*8)), Add(src, int(i*8)))
+		}
+		if t := n % 8; t > 0 {
+			d2 := checkScalar(Add(dst, int(nw*8)), t)
+			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*8)), t))
+		}
+		return
+	}
 	type word struct {
 		ptr bool
 		p   Ptr
 		u   uint64
 	}
-	nw := n / 8
 	ws := make([]word, nw)
 	for i := range nw {
 		sp := Add(src, int(i*8))
@@ -479,8 +574,50 @@ func Memmove(dst, src Ptr, n uintptr) {
 	}
 }
 
+// overlaps reports whether n bytes at a and at b may overlap.
+func overlaps(a, b Ptr, n uintptr) bool {
+	x, y := Addr(a), Addr(b)
+	return x < y+n && y < x+n
+}
+
+// moveWord copies the word at src to dst, as Memmove does.
+func moveWord(dst, src Ptr) {
+	sk := src.info().kindAt(uintptr(src.off))
+	dk := dst.info().kindAt(uintptr(dst.off))
+	if sk != wPtr && sk != wSplit && dk != wPtr && dk != wSplit {
+		Store64(dst, Load64(src))
+		return
+	}
+	var p Ptr
+	isPtr := false
+	switch sk {
+	case wPtr:
+		p, isPtr = LoadPtr(src), true
+	case wSplit:
+		if c := LoadPtr(src); c.obj != nil {
+			p, isPtr = c, true
+		}
+	}
+	switch {
+	case dk == wPtr:
+		if !isPtr {
+			if u := Load64(src); u != 0 {
+				fault("non-zero scalar copied into a pointer word", Addr(dst))
+			}
+		}
+		StorePtr(dst, p)
+	case isPtr && dk == wSplit:
+		StorePtr(dst, p)
+	case isPtr:
+		Store64(dst, uint64(Addr(p)))
+	default:
+		Store64(dst, Load64(src))
+	}
+}
+
 // Memset sets n bytes at p to c. Pointer words may only be set to zero.
-func Memset(p Ptr, c int32, n uintptr) Ptr {
+func Memset(p Ptr, c int32, size uint64) Ptr {
+	n := uintptr(size)
 	a := check(p, n)
 	for i := uintptr(0); i < n; {
 		q := Add(p, int(i))

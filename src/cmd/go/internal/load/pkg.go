@@ -1980,6 +1980,7 @@ func (p *Package) load(ld *modload.Loader, ctx context.Context, opts PackageOpts
 		if len(p.Internal.CCFiles) > 0 {
 			// What cmd/cc generates imports (gd fork).
 			addImport("internal/c23", true)
+			addImport("math", true)
 			addImport("os", true)
 			addImport("unsafe", true)
 		}

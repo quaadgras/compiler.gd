@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 
+	cchost "cmd/cc/host"
 	"cmd/go/internal/cfg"
 )
 
@@ -134,10 +135,13 @@ func preamble(file string) (string, bool) {
 }
 
 // ccHeaders are the system headers cmd/cc provides.
-var ccHeaders = map[string]bool{
-	"assert.h": true, "stddef.h": true, "stdint.h": true, "stdio.h": true,
-	"stdlib.h": true, "string.h": true,
-}
+var ccHeaders = func() map[string]bool {
+	m := map[string]bool{}
+	for _, h := range cchost.Headers() {
+		m[h] = true
+	}
+	return m
+}()
 
 // ccSource reports whether C source uses no #cgo directive and includes
 // only headers that cmd/cc provides or the package's own ("...").

@@ -1,0 +1,164 @@
+#include "test.h"
+
+#if !1u - 1 > 0
+#error
+#endif
+
+#if !(0xFFFFFFFFU + 1)
+#error
+#endif
+
+#if (defined(__STDC_VERSION__) << 33) != (1LL << 33)
+#error
+#endif
+
+#if (!0 << 33) != (1LL << 33)
+#error
+#endif
+
+#if ((1&&1) << 33) != (1LL << 33)
+#error
+#endif
+
+#if ((1==1) << 33) != (1LL << 33)
+#error
+#endif
+
+#if 1 //SREJ + 1.f
+#endif
+
+extern int extarr[55];
+int garr[11];
+static int sgarr[33];
+_Bool str_lit_bool_init = "abc" ? "foo" && "bar" : 0;
+
+void array_cast_to_bool(int j) {
+  static int slarr[5];
+  int larr[7];
+  char vla[j];
+
+  SASSERT((_Bool)extarr && (_Bool)garr && (_Bool)sgarr &&
+  (_Bool)slarr && (_Bool)larr && (_Bool)vla);
+  ASSERT(1, str_lit_bool_init);
+}
+int extarr[55];
+
+extern int ext_var;
+extern void ext_fn(void);
+SASSERT(2 == ((_Bool)&ext_var + (_Bool)ext_fn));
+#ifdef NOTGCC
+SASSERT(3 == ((_Bool)(long long)&ext_var + (_Bool)(_Bool)ext_fn + (_Bool)(long long)(_Bool)ext_fn));
+#endif
+
+int main(void) {
+  array_cast_to_bool(11);
+
+  SASSERT((_Bool)0.1f == 1);
+  SASSERT((_Bool)2 == 1);
+  SASSERT((_Bool)(0.0f + 0.1f) == 1);
+  SASSERT((_Bool)(2 * 3) == 1);
+
+  SASSERT( -1 < 0 );
+
+  SASSERT( 3U << 31 >> 31 == 1);
+  SASSERT( 1 << 31 >> 31 == -1);
+
+  SASSERT(0.2 > 0.1);
+  SASSERT(0.1 < 0.2);
+  SASSERT(0.2 != 0.1);
+  SASSERT(!(0.2 <= 0.1));
+  SASSERT(!(0.1 >= 0.2));
+  SASSERT(!(0.1 == 0.2));
+  SASSERT(!!0.1);
+
+  SASSERT(0.1 ? 1 : 0);
+
+  SASSERT((long)-0x1U == 4294967295);
+  SASSERT((long)-0x1  == -1);
+  SASSERT((long)-0xFFFFFFF0U == 16);
+  SASSERT((long)-0xFFFFFFF0  == 16);
+
+  SASSERT((long)~0x1U == 4294967294);
+  SASSERT((long)~0x1  == -2);
+  SASSERT((long)~0xFFFFFFF0U == 15);
+  SASSERT((long)~0xFFFFFFF0  == 15);
+
+  SASSERT((long)(0x80000000U << 1) == 0);
+  SASSERT((long)(0xFFFFFFFFU + 1) == 0);
+  SASSERT((long)(0U - 1) == 0xFFFFFFFFU);
+  SASSERT((long)(25989 * 2972383464U) == 4287027336);
+
+  static_assert(INT32_MIN / -1 == INT32_MIN);
+  static_assert(INT64_MIN / -1 == INT64_MIN);
+  static_assert(INT32_MIN % -1 == 0);
+  static_assert(INT64_MIN % -1 == 0);
+
+  SASSERT(13835058055282163712.0  == (double)13835058055282163712ULL);
+  SASSERT(13835058055282163712.0f == (float) 13835058055282163712ULL);
+  SASSERT(13835058055282163712ULL == (unsigned long long) 13835058055282163712.0f);
+  SASSERT(13835058055282163712ULL == (unsigned long long) 13835058055282163712.0);
+
+  SASSERT(13835058055282163711ULL == (unsigned long long) 13835058055282163711.0L);
+  SASSERT(13835058055282163711.0L == (long double) 13835058055282163711ULL);
+
+  SASSERT( 16777217.0 != (float)16777217.0 );
+  SASSERT( 9007199254740993.0L != (double)9007199254740993.0L || sizeof(double) == sizeof(long double) );
+
+#ifdef NOTGCC
+  SASSERT( 127 == (unsigned char)511.0 >> 1 );
+#endif
+  SASSERT( (long long)(0.1f * 1e12f) == 99999997952LL );
+
+  ASSERT(1, ({ int i = 2; char arr[ (i++,3) ]; i == sizeof arr; }) );
+
+  {
+    char (*arr_ptr)[UINT32_MAX + 1ULL];
+    SASSERT( sizeof(*arr_ptr) == (UINT32_MAX + 1ULL));
+  }
+
+  {
+    char arr[3];
+    SASSERT(8 == sizeof((0 ? arr:arr)));
+    SASSERT(8 == sizeof((0 ? 0:arr)));
+    SASSERT(8 == sizeof((0 ? arr:0)));
+    SASSERT(8 == sizeof(({arr;})));
+
+    SASSERT(8 == sizeof((0,arr)));
+    SASSERT(3 == sizeof( (typeof(arr)){0} ));
+  }
+
+  {
+    #define CHK_NON_CONST(...) \
+      SASSERT(1 == _Generic((1?(void *)(intptr_t)((__VA_ARGS__)*0):(int*)0), int*:0,void*:1)); \
+      ASSERT(1, ({ int(*p)[(intptr_t)(__VA_ARGS__)*0+1]=0; typeof(p++)q; p-0!=0; }))
+
+    volatile int x = 1;
+    CHK_NON_CONST(0&&x);
+    CHK_NON_CONST(1||x);
+    CHK_NON_CONST(1,1);
+    CHK_NON_CONST(0?x:1);
+    CHK_NON_CONST(1?1:x);
+    CHK_NON_CONST(1?:x);
+    CHK_NON_CONST(!"foo");
+
+    volatile double f = 1.0;
+    CHK_NON_CONST(0?f:1);
+    CHK_NON_CONST(1?1:f);
+    CHK_NON_CONST(1?:f);
+
+    CHK_NON_CONST(0,0.0);
+
+    const int i = 0&&x;
+    CHK_NON_CONST(i);
+    CHK_NON_CONST((const int){0});
+
+    static const int i2 = 0&&x;
+    CHK_NON_CONST(i2);
+  }
+  {
+    ASSERT(1, ({ const int i = 0; _Generic((1?(void *)i:(int*)0), void*:0, int*:1);}));
+  }
+
+  printf("OK\n");
+  return 0;
+}

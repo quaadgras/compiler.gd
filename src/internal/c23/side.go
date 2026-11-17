@@ -27,7 +27,9 @@ func init() { setStackMove(stackMove) }
 // Only its goroutine uses it, and the runtime re-keys it while the
 // goroutine is stopped, so it needs no lock.
 type gTable struct {
-	e []gEntry
+	e    []gEntry
+	tls  map[*TLS]Ptr   // the goroutine's _Thread_local objects (thread.go)
+	keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
 }
 
 type gEntry struct {
@@ -82,9 +84,7 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 		if t == nil {
 			return Ptr{}, false
 		}
-		t.mu.Lock()
-		e, ok = t.m[key]
-		t.mu.Unlock()
+		e, ok = t.get(key)
 	case 's':
 		tb := (*gTable)(*gTableSlot())
 		if tb == nil {
@@ -104,10 +104,7 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 		if !found {
 			return Ptr{}, false
 		}
-		t := v.(*auxTable)
-		t.mu.Lock()
-		e, ok = t.m[key]
-		t.mu.Unlock()
+		e, ok = v.(*auxTable).get(key)
 	}
 	if !ok || exact && e.word != w {
 		return Ptr{}, false
@@ -123,7 +120,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 	switch kind {
 	case 'c':
 		if t := p.header().table(keep); t != nil {
-			t.set(key, keep, auxEntry{w, v})
+			t.set(key, keep, auxEntry{word: w, p: v})
 		}
 	case 's':
 		slot := gTableSlot()
@@ -147,7 +144,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 		clear(tb.e[j:])
 		tb.e = tb.e[:j]
 		if keep {
-			tb.e = append(tb.e, gEntry{key, auxEntry{w, v}})
+			tb.e = append(tb.e, gEntry{key, auxEntry{w, v, true}})
 		}
 	case 'h':
 		var t *auxTable
@@ -168,16 +165,28 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 			}
 		}
 		if t != nil {
-			t.set(key, keep, auxEntry{w, v})
+			t.set(key, keep, auxEntry{word: w, p: v})
 		}
 	}
 }
 
 func (t *auxTable) set(key uintptr, keep bool, e auxEntry) {
+	e.ok = true
 	t.mu.Lock()
-	if keep {
+	switch {
+	case t.dense != nil:
+		if i := key / 8; i < uintptr(len(t.dense)) {
+			t.seq.Add(1)
+			if keep {
+				t.dense[i] = e
+			} else {
+				t.dense[i] = auxEntry{}
+			}
+			t.seq.Add(1)
+		}
+	case keep:
 		t.m[key] = e
-	} else {
+	default:
 		delete(t.m, key)
 	}
 	t.mu.Unlock()

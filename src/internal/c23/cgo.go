@@ -65,5 +65,5 @@ func FreeGo[P any](p P) {}
 
 // MallocGo is C.malloc.
 func MallocGo[N ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64 | ~uintptr](n N) unsafe.Pointer {
-	return ToGoUnsafe(Malloc(uintptr(n)))
+	return ToGoUnsafe(Malloc(uint64(n)))
 }

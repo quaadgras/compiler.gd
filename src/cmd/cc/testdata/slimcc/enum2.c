@@ -1,0 +1,432 @@
+#include "test.h"
+
+#if (__SIZEOF_INT__ != 4)
+#error
+#endif
+
+#if (__SIZEOF_LONG__ > 4)
+#define FIRST_64BIT_INT long
+#else
+#define FIRST_64BIT_INT long long
+#endif
+
+int extend(void) {
+  enum e0 {
+    e0_i32max = 0x7FFFFFFF,
+  };
+  SASSERT(_Generic(e0_i32max, int32_t:1));
+  SASSERT(_Generic((enum e0)0, uint32_t:1));
+
+  enum e1 {
+    e1_i32max = 0x7FFFFFFF,
+    e1_i32max_plus1,
+  };
+  SASSERT(_Generic(e1_i32max, uint32_t:1));
+  SASSERT(_Generic((enum e1)0, uint32_t:1));
+
+  enum e2 {
+    e2_neg = -1,
+    e2_i32max = 0x7FFFFFFF,
+    e2_i32max_plus1,
+  };
+  SASSERT(_Generic(e2_i32max, FIRST_64BIT_INT:1));
+  SASSERT(_Generic((enum e2)0, FIRST_64BIT_INT:1));
+
+  enum e3 {
+    e3_i32max = 0x7FFFFFFF,
+    e3_neg = -1
+  };
+  SASSERT(_Generic(e3_i32max, int32_t:1));
+  SASSERT(_Generic((enum e3)0, int32_t:1));
+
+  enum e4 {
+    e4_u32max = 0xFFFFFFFF,
+  };
+  SASSERT(_Generic(e4_u32max, uint32_t:1));
+  SASSERT(_Generic((enum e4)0, uint32_t:1));
+
+  enum e5 {
+    e5_u32max = 0xFFFFFFFF,
+    e5_neg = -1
+  };
+  SASSERT(_Generic(e5_u32max, FIRST_64BIT_INT:1));
+  SASSERT(_Generic((enum e5)0, FIRST_64BIT_INT:1));
+
+  enum e6 {
+    e6_u32max = 0xFFFFFFFF,
+    e6_u32max_plus1,
+  };
+  SASSERT(_Generic(e6_u32max_plus1, unsigned FIRST_64BIT_INT:1));
+  SASSERT(_Generic((enum e6)0, unsigned FIRST_64BIT_INT:1));
+
+  enum e7 {
+    e7_u32max = 0xFFFFFFFF,
+    e7_u32max_plus1,
+    e7_neg = -1
+  };
+  SASSERT(_Generic(e7_u32max_plus1, FIRST_64BIT_INT:1));
+  SASSERT(_Generic((enum e7)0, FIRST_64BIT_INT:1));
+
+  {
+    enum {
+        W,
+        X = INT64_MIN,
+        Y,
+        Z = 0,
+        WS = sizeof(W),
+        XS = sizeof(X),
+        YS = sizeof(Y),
+        ZS = sizeof(Z),
+    };
+    SASSERT(4 == WS);
+    SASSERT(8 == XS);
+    SASSERT(8 == YS);
+    SASSERT(4 == ZS);
+    SASSERT(8 == sizeof(W));
+    SASSERT(8 == sizeof(X));
+    SASSERT(8 == sizeof(Y));
+    SASSERT(8 == sizeof(Z));
+  }
+  {
+    enum E : int64_t;
+    enum {
+        X = (int64_t)UINT32_MAX,
+        _X = _Generic(typeof(X),enum E: 1, default:0),
+    };
+    SASSERT(1 == _X);
+    SASSERT(0 == _Generic(typeof(X),enum E: 1, default:0));
+  }
+  {
+    enum {
+    A = (_BitInt(33))0xFFFF'FFFF,
+    B,
+    X = _Generic(A, _BitInt(33): 1, default: 0),
+    Y = _Generic(B, _BitInt(33): 1, default: 0)
+    };
+    SASSERT(0xFFFFFFFF == A);
+    SASSERT(0x100000000 == B);
+    SASSERT(1 == X);
+    SASSERT(0 == Y);
+  }
+  return 1;
+}
+
+static int compat(void) {
+  {
+    enum { A };
+    enum { B };
+    SASSERT(1 == _Generic(       A , typeof(B):1, default:0));
+    SASSERT(1 == _Generic(typeof(A), typeof(B):1, default:0));
+  }
+  {
+    SASSERT(0 == _Generic(typeof(enum { A }), typeof(enum { B }):1, default:0));
+  }
+  {
+    enum : int { A };
+    enum : int { B };
+    SASSERT(0 == _Generic(       A , typeof(B):1, default:0));
+    SASSERT(0 == _Generic(typeof(A), typeof(B):1, default:0));
+  }
+  {
+    SASSERT(0 == _Generic(typeof(enum : int { A }), typeof(enum : int { B }):1, default:0));
+  }
+  {
+    enum { A = (long long)-1 };
+    enum { B = (long long)-1 };
+    SASSERT(1 == _Generic(       A , typeof(B):1, default:0));
+    SASSERT(1 == _Generic(typeof(A), typeof(B):1, default:0));
+  }
+  {
+    enum { A = INT64_MIN };
+    enum { B = INT64_MIN };
+    SASSERT(0 == _Generic(       A , typeof(B):1, default:0));
+    SASSERT(0 == _Generic(typeof(A), typeof(B):1, default:0));
+  }
+  {
+    typedef enum E { A } e1;
+    {
+      enum E e;
+
+      SASSERT(1 == _Generic(       e,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(1 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E { A } e;
+
+      SASSERT(0 == _Generic(       A,  e1:1, default:0));
+      SASSERT(0 == _Generic(typeof(A), e1:1, default:0));
+      SASSERT(1 == _Generic(       e,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(1 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E:int;
+
+      SASSERT(0 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E:int { A } e;
+
+      SASSERT(0 == _Generic(       A,  e1:1, default:0));
+      SASSERT(0 == _Generic(typeof(A), e1:1, default:0));
+      SASSERT(0 == _Generic(       e,  e1:1, default:0));
+      SASSERT(0 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(0 == _Generic(enum E,    e1:1, default:0));
+    }
+  }
+  {
+    typedef enum E:int { A } e1;
+    {
+      enum E e;
+
+      SASSERT(1 == _Generic(       e,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(1 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E { A } e;
+
+      SASSERT(1 == _Generic(       A,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(A), e1:1, default:0));
+      SASSERT(0 == _Generic(       e,  e1:1, default:0));
+      SASSERT(0 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(0 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E:int;
+
+      SASSERT(0 == _Generic(enum E,    e1:1, default:0));
+    }
+    {
+      enum E:int { A } e;
+
+      SASSERT(1 == _Generic(       A,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(A), e1:1, default:0));
+      SASSERT(1 == _Generic(       e,  e1:1, default:0));
+      SASSERT(1 == _Generic(typeof(e), e1:1, default:0));
+      SASSERT(1 == _Generic(enum E,    e1:1, default:0));
+    }
+  }
+  return 1;
+}
+
+static int redecl(void) {
+  {
+    enum E;
+    typedef enum E {A, B} e;
+    {
+      enum E;
+      SASSERT(1 == _Generic(enum E, e:1, default:0));
+      enum E {A, B};
+      SASSERT(1 == _Generic(enum E, e:1, default:0));
+    }
+    {
+      enum E;
+      enum E {A};
+      SASSERT(0 == _Generic(enum E, e:1, default:0));
+    }
+  }
+  {
+    enum E : int;
+    typedef enum E : int {A, B} e;
+    {
+      enum E : int;
+      SASSERT(0 == _Generic(enum E, e:1, default:0));
+      enum E : int {A, B};
+      SASSERT(1 == _Generic(enum E, e:1, default:0));
+    }
+    {
+      enum E : int;
+      enum E : int {A};
+      SASSERT(0 == _Generic(enum E, e:1, default:0));
+    }
+  }
+  {
+    typedef enum E e1;
+    enum E { A } e;
+    typedef enum E e2;
+    typedef enum E { A } e3;
+    SASSERT(_Generic(e, e1:1));
+    SASSERT(_Generic(e, e2:1));
+    SASSERT(_Generic(e, e3:1));
+  }
+  {
+    typedef enum E : long { A } e1;
+    typedef const enum E e2;
+    e2 e;
+    typedef const enum E : long { A } e3;
+    SASSERT(_Generic(e, e1:1));
+    SASSERT(_Generic(e, typeof_unqual(e2):1));
+    SASSERT(_Generic(typeof_unqual(e3), e1:1));
+    SASSERT(_Generic(e2, e3:1));
+    SASSERT(_Generic(const e1, typeof(e):1));
+    SASSERT(_Generic(&e, enum E : long { A } const *:1));
+  }
+  {
+    // llvm-project/issues/70605
+    struct foo { int x; };
+    {
+      //SREJ enum foo : typeof(((struct foo *)0)->x);
+    }
+  }
+  return 1;
+}
+
+int decay() {
+#define CHK_DECAY(b, ...) \
+ static_assert(_Generic(typeof(__VA_ARGS__), enum E: b, default:!b)); \
+ static_assert(_Generic((__VA_ARGS__), enum E: b, default:!b))
+  {
+    enum E : int;
+    enum : int { A } a;
+    CHK_DECAY(0, A);
+    CHK_DECAY(1, +A);
+    CHK_DECAY(1, A+1);
+    CHK_DECAY(1, 1+A);
+    CHK_DECAY(1, A<<1);
+    CHK_DECAY(0, (0,A));
+    CHK_DECAY(0, ({A;}));
+
+    CHK_DECAY(0, a);
+    CHK_DECAY(0, a++);
+    CHK_DECAY(0, ++a);
+    CHK_DECAY(0, a=1);
+    CHK_DECAY(0, a+=1);
+    CHK_DECAY(0, *&a);
+    CHK_DECAY(1, +a);
+    CHK_DECAY(1, ~a);
+    CHK_DECAY(1, a+1);
+    CHK_DECAY(1, 1+a);
+    CHK_DECAY(1, a<<1);
+    CHK_DECAY(0, (0,a));
+    CHK_DECAY(0, ({a;}));
+
+    CHK_DECAY(0, (*({&a;})));
+    CHK_DECAY(1, (+*(&a)));
+    CHK_DECAY(0, (++(*(&a))));
+    CHK_DECAY(0, ((*(&a))++));
+    CHK_DECAY(1, (*(&a) + 1));
+  }
+  {
+    enum E : unsigned;
+    enum { A } a;
+    CHK_DECAY(0, a);
+    CHK_DECAY(0, a++);
+    CHK_DECAY(0, ++a);
+    CHK_DECAY(0, a=1);
+    CHK_DECAY(0, a+=1);
+    CHK_DECAY(0, *&a);
+    CHK_DECAY(1, +a);
+    CHK_DECAY(1, ~a);
+    CHK_DECAY(1, a+1);
+    CHK_DECAY(1, 1+a);
+    CHK_DECAY(1, a<<1);
+    CHK_DECAY(0, (0,a));
+    CHK_DECAY(0, ({a;}));
+  }
+  {
+    enum E : int;
+    _Atomic(enum : int { A }) a;
+    CHK_DECAY(0, a);
+    CHK_DECAY(0, a++);
+    CHK_DECAY(0, ++a);
+    CHK_DECAY(0, a=1);
+    CHK_DECAY(0, a+=1);
+    CHK_DECAY(0, *&a);
+    CHK_DECAY(1, +a);
+    CHK_DECAY(1, ~a);
+    CHK_DECAY(1, a+1);
+    CHK_DECAY(1, 1+a);
+    CHK_DECAY(1, a<<1);
+    CHK_DECAY(0, (0,a));
+    CHK_DECAY(0, ({a;}));
+  }
+  {
+    enum E : int;
+    struct { enum : int {A} j : 3; } s;
+    static_assert(_Generic(s.j, enum E: 0, default:1));
+    static_assert(_Generic(+s.j, enum E: 1, default:0));
+  }
+  {
+    const enum E : uint64_t { X, Y = UINT64_MAX } a;
+    enum {
+      B = X,
+      Bty = _Generic(B, enum E:1, default: 0),
+      Bqual = _Generic(typeof(B), const int: 1, int: 0),
+      C = Y,
+      Cty = _Generic(C, enum E:1, default: 0),
+      Cqual = _Generic(typeof(C), const uint64_t: 1, uint64_t: 0)
+    };
+    static_assert(_Generic(typeof(a), const uint64_t: 1));
+    static_assert(Bty == 0);
+    static_assert(Bqual == 0);
+    static_assert(Cty == 1);
+    static_assert(Cqual == 0);
+  }
+  {
+    enum E : _BitInt(33) { E };
+    enum : _BitInt(33) { A } a;
+    CHK_DECAY(0, A);
+    CHK_DECAY(1, +A);
+    CHK_DECAY(1, A+1);
+    CHK_DECAY(1, 1+A);
+    CHK_DECAY(1, A<<1);
+    CHK_DECAY(0, (0,A));
+    CHK_DECAY(0, ({A;}));
+
+    CHK_DECAY(0, a);
+    CHK_DECAY(0, a++);
+    CHK_DECAY(0, ++a);
+    CHK_DECAY(0, a=1);
+    CHK_DECAY(0, a+=1);
+    CHK_DECAY(0, *&a);
+    CHK_DECAY(1, +a);
+    CHK_DECAY(1, ~a);
+    CHK_DECAY(1, a+1);
+    CHK_DECAY(1, 1+a);
+    CHK_DECAY(1, a<<1);
+    CHK_DECAY(0, (0,a));
+    CHK_DECAY(0, ({a;}));
+  }
+  return 1;
+}
+
+int main(void) {
+  enum E1;
+  typedef enum E1 const C2;
+  typedef C2 *P;
+  P p;
+
+  enum E1 {
+    E1A,
+    E1B = 5000000000,
+  };
+
+  SASSERT(sizeof(*p) == 8);
+  SASSERT(5000000000 == E1B);
+
+  enum E2 : short;
+  enum E2 : short { E2A };
+  SASSERT(sizeof(E2A) == 2);
+
+  enum : short unsigned { ANON_E };
+  SASSERT(sizeof(ANON_E) == 2);
+
+  {
+    enum : bool {
+      A,
+      B,
+      //SREJ C,
+      //SREJ TWO = 2,
+      //SREJ N1 = -1,
+    } e;
+  }
+
+  ASSERT(1, extend());
+  ASSERT(1, compat());
+  ASSERT(1, redecl());
+  ASSERT(1, decay());
+
+  printf("OK\n");
+}

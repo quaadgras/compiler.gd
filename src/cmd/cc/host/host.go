@@ -39,3 +39,9 @@ type File = ccmain.File
 func Package(dir, pkg string, goFiles, cFiles []string) ([]File, error) {
 	return ccmain.Package(dir, pkg, goFiles, cFiles)
 }
+
+// Headers returns the names of the standard headers cmd/cc provides,
+// which C that it compiles may include with <...>.
+func Headers() []string {
+	return ccmain.Headers()
+}

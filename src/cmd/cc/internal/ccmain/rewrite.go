@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	gotoken "go/token"
+	"strings"
 
 	"cmd/internal/edit"
 )
@@ -32,6 +33,7 @@ var cgoBasic = map[string]string{
 func (g *gen) rewrite(fset *gotoken.FileSet, f *ast.File, src []byte) (out []byte, err error) {
 	defer catch(&err)
 	tf := fset.File(f.Pos())
+	g.out = &strings.Builder{}
 	off := func(p gotoken.Pos) int { return tf.Offset(p) }
 	line := func(p gotoken.Pos) int { return fset.Position(p).Line }
 	b := edit.NewBuffer(src)
@@ -81,27 +83,28 @@ func (g *gen) cName(line int, name string) string {
 	if t, ok := cgoBasic[name]; ok {
 		return t
 	}
-	if t, ok := builtinTypedefs()[name]; ok {
-		return g.mirrorType(t)
-	}
-	for _, kw := range []string{"struct_", "union_"} {
+	for _, kw := range []string{"struct_", "union_", "enum_"} {
 		if len(name) > len(kw) && name[:len(kw)] == kw {
-			if t := g.u.tags[name[len(kw):]]; t != nil && t.union == (kw == "union_") {
-				return g.structName(t)
+			if t := g.u.tags[name[len(kw):]]; t != nil {
+				if t.kind == kStruct && t.rec.union == (kw == "union_") && kw != "enum_" {
+					return g.mirror(t)
+				}
+				if kw == "enum_" && t.enum != nil {
+					return goType(t)
+				}
 			}
 		}
 	}
-	for _, td := range g.u.typedefs {
-		if td.name == name {
-			return g.pre + "t_" + name
-		}
-	}
-	if v, ok := g.u.enums[name]; ok {
-		return fmt.Sprintf("(%d)", v)
-	}
-	for _, v := range g.u.globals {
-		if v.name == name && !v.extern {
-			return fmt.Sprintf("(*_c23.ToGo[%s](%sg_%s))", g.mirrorType(v.t), g.pre, name)
+	if s := g.u.scope[name]; s != nil {
+		switch s.kind {
+		case symTypedef:
+			return g.mirror(s.t)
+		case symEnumConst:
+			return fmt.Sprintf("(%d)", s.val)
+		case symVar:
+			return fmt.Sprintf("(*_c23.ToGo[%s](%s))", g.mirror(s.t), g.globalName(s))
+		case symFunc:
+			g.errorf(pos{g.u.file, line}, "C.%s used as a value", name)
 		}
 	}
 	switch name {
@@ -114,38 +117,48 @@ func (g *gen) cName(line int, name string) string {
 	case "malloc":
 		return "_c23.MallocGo"
 	}
-	if _, ok := g.u.protos[name]; ok {
-		g.errorf(line, "C.%s used as a value", name)
-	}
-	g.errorf(line, "C.%s is not defined", name)
+	g.errorf(pos{g.u.file, line}, "C.%s is not defined", name)
 	return ""
 }
 
 // rewriteCall rewrites a call of C.name.
 func (g *gen) rewriteCall(b *edit.Buffer, off func(gotoken.Pos) int, line int, call *ast.CallExpr, name string) {
-	ft, ok := g.u.protos[name]
-	if !ok || !g.defined[name] {
+	s := g.u.scope[name]
+	if s != nil && s.kind == symFunc && s.linkage == 'e' && g.ext[name] != nil {
+		s = g.ext[name]
+	}
+	if s == nil || s.kind != symFunc || !s.defined {
 		// A type conversion (C.int(x)) or a helper (C.CString(s)).
 		b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), g.cName(line, name))
 		return
 	}
+	ft := s.t.fn
+	at := pos{g.u.file, line}
 	if ft.variadic {
-		g.errorf(line, "C.%s: variadic functions are not supported", name)
+		g.errorf(at, "C.%s: variadic functions are not supported", name)
 	}
 	if len(call.Args) != len(ft.params) {
-		g.errorf(line, "C.%s takes %d arguments", name, len(ft.params))
+		g.errorf(at, "C.%s takes %d arguments", name, len(ft.params))
+	}
+	for _, pt := range ft.params {
+		if pt.kind == kStruct {
+			g.errorf(at, "C.%s: struct parameters are not supported", name)
+		}
 	}
 	switch {
-	case ft.ret.isPtr() && g.mirrorType(ft.ret) == "unsafe.Pointer":
+	case ft.ret.isPtr() && g.mirror(ft.ret) == "unsafe.Pointer":
 		b.Insert(off(call.Pos()), "_c23.ToGoUnsafe(")
 		b.Insert(off(call.End()), ")")
 	case ft.ret.isPtr():
-		b.Insert(off(call.Pos()), fmt.Sprintf("_c23.ToGo[%s](", g.mirrorType(ft.ret.elem)))
+		b.Insert(off(call.Pos()), fmt.Sprintf("_c23.ToGo[%s](", g.mirror(ft.ret.elem)))
 		b.Insert(off(call.End()), ")")
 	case ft.ret.kind == kStruct:
-		g.errorf(line, "C.%s: struct results are not supported", name)
+		g.errorf(at, "C.%s: struct results are not supported", name)
+	case ft.ret.kind == kBool:
+		b.Insert(off(call.Pos()), "(")
+		b.Insert(off(call.End()), " != 0)")
 	}
-	b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), fmt.Sprintf("%sc_%s", g.pre, name))
+	b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), g.names[s])
 	for i, a := range call.Args {
 		if !ft.params[i].isPtr() {
 			continue

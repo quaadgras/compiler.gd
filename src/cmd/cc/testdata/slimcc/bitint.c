@@ -1,0 +1,303 @@
+#include "test.h"
+#include <stdckdint.h>
+
+#if (1uwb << 33) != (1LL << 33)
+#error
+#endif
+
+SASSERT(sizeof(_BitInt(7)) == 1);
+SASSERT(sizeof(_BitInt(15)) == 2);
+SASSERT(sizeof(_BitInt(31)) == 4);
+SASSERT(sizeof(_BitInt(63)) == 8);
+
+SASSERT(_Alignof(_BitInt(7)) == 1);
+SASSERT(_Alignof(_BitInt(15)) == 2);
+SASSERT(_Alignof(_BitInt(31)) == 4);
+SASSERT(_Alignof(_BitInt(63)) == 8);
+
+SASSERT(sizeof(_BitInt(7)[17]) == 17);
+SASSERT(sizeof(_BitInt(15)[17]) == 34);
+SASSERT(sizeof(_BitInt(31)[17]) == 68);
+SASSERT(sizeof(_BitInt(63)[17]) == 136);
+
+#define CHK_USUAL_CONV(A, B, C) \
+  SASSERT(_Generic((A)0+(B)0, C:1))
+
+CHK_USUAL_CONV(_BitInt(2) signed, _BitInt(1) unsigned, _BitInt(2));
+CHK_USUAL_CONV(_BitInt(2), unsigned _BitInt(2), unsigned _BitInt(2));
+
+CHK_USUAL_CONV(_BitInt(2), _Bool, int);
+CHK_USUAL_CONV(unsigned _BitInt(1), _Bool, int);
+
+#define W (__SIZEOF_INT__ * 8)
+
+CHK_USUAL_CONV(signed _BitInt(W-1), signed, signed);
+CHK_USUAL_CONV(signed _BitInt(W-1), unsigned, unsigned);
+CHK_USUAL_CONV(unsigned _BitInt(W-1), signed, signed);
+CHK_USUAL_CONV(unsigned _BitInt(W-1), unsigned, unsigned);
+
+CHK_USUAL_CONV(signed _BitInt(W), signed, signed);
+CHK_USUAL_CONV(signed _BitInt(W), unsigned, unsigned);
+CHK_USUAL_CONV(unsigned _BitInt(W), signed, unsigned);
+CHK_USUAL_CONV(unsigned _BitInt(W), unsigned, unsigned);
+
+CHK_USUAL_CONV(signed _BitInt(W+1), signed, signed _BitInt(W+1));
+CHK_USUAL_CONV(signed _BitInt(W+1), unsigned, signed _BitInt(W+1));
+CHK_USUAL_CONV(unsigned _BitInt(W+1), signed, unsigned _BitInt(W+1));
+CHK_USUAL_CONV(unsigned _BitInt(W+1), unsigned, unsigned _BitInt(W+1));
+
+void bitint_bitfiled(void) {
+  ASSERT(1, ({struct { _BitInt(W-1)i:W-1;} s; _Generic(-s.i, _BitInt(W-1):1);}));
+  ASSERT(1, ({struct { _BitInt( W )i:W-1;} s; _Generic(-s.i, _BitInt( W ):1);}));
+  ASSERT(1, ({struct { _BitInt(W+1)i:W-1;} s; _Generic(-s.i, _BitInt(W+1):1);}));
+
+  ASSERT(1, ({struct { _BitInt(W-1)i:W-1;} s; _Generic(0+s.i, int:1);}));
+  ASSERT(1, ({struct { _BitInt( W )i:W-1;} s; _Generic(0+s.i, int:1);}));
+  ASSERT(1, ({struct { _BitInt(W+1)i:W-1;} s; _Generic(0+s.i, _BitInt(W+1):1);}));
+}
+
+SASSERT(_Generic(0wb, _BitInt(1):1));
+SASSERT(_Generic(0uwb, _BitInt(1) unsigned:1));
+SASSERT(_Generic(0b11wb, _BitInt(3):1));
+SASSERT(_Generic(0b10wbu, _BitInt(2) unsigned:1));
+SASSERT(_Generic(012WBu, _BitInt(4) unsigned:1));
+SASSERT(_Generic(0x0B2fUwb, _BitInt(12) unsigned:1));
+SASSERT(_Generic(0xFFFF'FFFF'FFFF'FFFFwb, _BitInt(65):1));
+SASSERT(_Generic(8989898989898989898989898989898989898WB, _BitInt(124):1));
+SASSERT(_Generic(077777777777776666666666666666666667777777777uwb, _BitInt(132)unsigned:1));
+SASSERT(_Generic(0x7fffffffffffffffEEEEEEEEABCabcfeeeeeeeFFFFFFFFFF555555wb, _BitInt(216):1));
+
+typedef struct {
+  _BitInt(256) a : 3, b : 6, c : 7;
+} B;
+
+constexpr B b_c = {-1, 2, -3};
+B b_s = {1, -2, 3};
+
+void bitint_bitfiled_var(int i1, int i2, int i3) {
+  B b_r = {i1, i2, i3};
+  ASSERT(1, b_c.a == b_r.c);
+  ASSERT(1, b_c.b == b_r.b);
+  ASSERT(1, b_c.c == b_r.a);
+
+  ASSERT(1, b_s.a > b_r.c);
+  ASSERT(1, b_s.b != b_r.b);
+  ASSERT(0, b_s.c < b_r.a);
+
+  ASSERT(-2, b_r.a *= b_s.b);
+  ASSERT(1, b_s.a++);
+  ASSERT(4, b_r.b *= b_s.a);
+  ASSERT(-2, --b_r.c);
+  ASSERT(-3, b_s.b += ({ b_c.c % b_r.c; }));
+  ASSERT(-52, ({ b_r.b * b_s.b; }) - ( ({ b_s.c -= b_r.a; }) <<
+    ({ b_s.a *= -2;
+    b_r.c ^ ~b_c.b; }) ) );
+
+  ASSERT(-2, b_r.a);
+  ASSERT(4, b_r.b);
+  ASSERT(-2, b_r.c);
+
+  ASSERT(-4, b_s.a);
+  ASSERT(-3, b_s.b);
+  ASSERT(5, b_s.c);
+}
+
+void bitint_null_ptr_constant(int i) {
+  nullptr_t assign_npt = (_BitInt(222))-1 + 1;
+  void *cast_npt = (nullptr_t)((_BitInt(222))99 * 0);
+
+  ASSERT(1, 0 == cast_npt);
+  ASSERT(1, 0 == assign_npt);
+
+  ASSERT(1, &i == (i ? &i : ((_BitInt(111))-5 / -3 - 1)));
+  ASSERT(1, 0 == (i - 1 ? &i : ((_BitInt(111))5 % 3 - 2)));
+
+  ASSERT(1, (_BitInt(99))0 != (int *){&i});
+  ASSERT(1, (_BitInt(99))0 == (void*)0);
+  ASSERT(1, (_BitInt(99))0 == nullptr);
+
+  #define CHK_NON_CONST(...) \
+    static_assert(_Generic((1?(void *)(__VA_ARGS__):(int*)0),void*:1))
+
+  volatile _BitInt(2) x;
+  CHK_NON_CONST(0,0wb);
+  CHK_NON_CONST(0?x:(_BitInt(300))0);
+  CHK_NON_CONST(1?(_BitInt(300))0:x);
+
+  static_assert(0?x:(_BitInt(300))1);
+  static_assert(1?(_BitInt(300))1:x);
+
+  const _BitInt(2) n1 = 1?0wb:x;
+  const _BitInt(2) n2 = 0?x:0wb;
+  CHK_NON_CONST(n1);
+  CHK_NON_CONST(n2);
+}
+
+int main() {
+  {
+    auto v = 79228162514264337593543950336wb;
+
+    ASSERT(1, 0 == (uint64_t)v);
+    ASSERT(1, 0 == (uint32_t)(v >> 64));
+    ASSERT(1, 1 == (v >> 96));
+  }
+
+  {
+    enum { A = -999wb } e;
+    SASSERT(A == -999);
+
+    alignas(1000 + 24uwb) _BitInt(300wb + 80) i;
+    ASSERT(0, (intptr_t)&i & 1023);
+    ASSERT(48, sizeof(i));
+
+    static_assert(((_BitInt(400))1 << 300));
+    static_assert(__builtin_constant_p((_BitInt(400))1 << 300));
+  }
+  {
+    volatile int i = 303;
+
+    char arr[(_BitInt(77))3 << 3];
+    SASSERT(24 == sizeof arr);
+
+    char (*p)[(_BitInt(22))303] = 0;
+    ASSERT(303, sizeof *p);
+
+    ASSERT(1, &arr[-11] == (arr - 11wb));
+    ASSERT(1, &arr[11wb] == (arr + 11));
+  }
+  {
+    int accum = 0;
+    for (_BitInt(63) z = -42; z <= -40; z++) {
+      switch (z) {
+      case -40: accum += 1; break;
+      case -41wb: accum += 10; break;
+      case -(unsigned _BitInt(22))43: accum += 100; break;
+      case -(_BitInt(22))42: accum += 1000; break;
+      }
+    }
+    ASSERT(1011, accum);
+  }
+  {
+    static_assert(-2 == ((_BitInt(65))0xFFFF'FFFF'FFFF'FFFFwb << 1));
+
+    int x = 0;
+    switch ((_BitInt(65))0xFFFF'FFFF'FFFF'FFFFwb << 1) {
+    case -2:
+        x = 42;
+        break;
+    default:
+        x = 33;
+        break;
+    }
+    ASSERT(42, x);
+  }
+  {
+    const _BitInt(999) i0 = {};
+    const _BitInt(999) i1 = 1;
+    const auto i2 = 4uwb / 2wb;
+    const int i3 = (_BitInt(999))3;
+
+    static_assert(i0 == 0);
+    static_assert(i1 == 1);
+    static_assert(i2 == 2);
+    static_assert(i3 == 3);
+    static_assert(_Generic(i0, _BitInt(999): 1));
+    static_assert(_Generic(i1, _BitInt(999): 1));
+    static_assert(_Generic(i2, unsigned _BitInt(3): 1));
+    static_assert(_Generic(i3, int: 1));
+  }
+  {
+    enum E : _BitInt(6) {
+      MAX = 31,
+      //SREJ MAX_P1,
+      MIN = -32,
+      //SREJ MIN_M1 = -33,
+    };
+    static_assert(31 == MAX);
+    static_assert(-32 == MIN);
+    typedef enum E T;
+    static_assert(_Generic(MIN, T: 1));
+    static_assert(_Generic(MIN, enum E: 1));
+    static_assert(_Generic(MIN, _BitInt(6): 1));
+    static_assert(_Generic(typeof(MIN), T: 1));
+    static_assert(_Generic(typeof(MIN), enum E: 1));
+    static_assert(_Generic(typeof(MIN), _BitInt(6): 1));
+
+    constexpr enum E emax = 31;
+    volatile T emin = -32;
+    static_assert(31 == emax);
+    ASSERT(-32, emin);
+
+    static_assert(_Generic(emax, T: 1));
+    static_assert(_Generic(emax, enum E: 1));
+    static_assert(_Generic(emax, _BitInt(6): 1));
+    static_assert(_Generic(typeof(emax), const T: 1));
+    static_assert(_Generic(typeof(emax), const enum E: 1));
+    static_assert(_Generic(typeof(emax), const _BitInt(6): 1));
+
+    static_assert(_Generic(emin, T: 1));
+    static_assert(_Generic(emin, enum E: 1));
+    static_assert(_Generic(emin, _BitInt(6): 1));
+    static_assert(_Generic(typeof(emin), volatile T: 1));
+    static_assert(_Generic(typeof(emin), volatile enum E: 1));
+    static_assert(_Generic(typeof(emin), volatile _BitInt(6): 1));
+  }
+
+  {
+    enum : _BitInt(1) {
+      A = -1,
+      B = 0,
+      //SREJ C,
+      //SREJ ONE = 1,
+      //SREJ N2 = -2,
+    };
+
+    static_assert(A == -1);
+    static_assert(B == 0);
+    static_assert(-A == -1);
+    static_assert(B - A == -1);
+    static_assert(A < B);
+    static_assert(A <= B);
+    static_assert(B > A);
+    static_assert(B >= A);
+    static_assert(B != A);
+    static_assert(!(B == A));
+
+    {
+      _BitInt(1) c;
+      ASSERT(1, ({ bool b = ckd_add(&c, A, B); b == 0 && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, B, A); b == 0 && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, A, A); b == 1 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, B, B); b == 0 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, A, B); b == 0 && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, B, A); b == 1 && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, A, A); b == 0 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, B, B); b == 0 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, A, B); b == 0 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, B, A); b == 0 && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, A, A); b == 1 && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, B, B); b == 0 && c == 0; }));
+    }
+    {
+      _BitInt(2) c;
+      ASSERT(1, ({ bool b = ckd_add(&c, A, B); !b && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, B, A); !b && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, A, A); !b && c == -2; }));
+      ASSERT(1, ({ bool b = ckd_add(&c, B, B); !b && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, A, B); !b && c == -1; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, B, A); !b && c == 1; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, A, A); !b && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_sub(&c, B, B); !b && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, A, B); !b && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, B, A); !b && c == 0; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, A, A); !b && c == 1; }));
+      ASSERT(1, ({ bool b = ckd_mul(&c, B, B); !b && c == 0; }));
+    }
+  }
+
+  bitint_bitfiled();
+  bitint_bitfiled_var(-3, 2, -1);
+  bitint_null_ptr_constant(1);
+
+  printf("OK\n");
+}
