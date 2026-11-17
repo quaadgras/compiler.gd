@@ -212,6 +212,20 @@ const (
 	// the array is. These two are the only types of Go values: the
 	// linker makes them types 0 and 1, one recursion group, and 'r' in
 	// a signature or a local is (ref null GCPtr).
+	// GCJSBox and GCJSUnbox are the functions the linker generates
+	// for the imports of module gojs (syscall/js) with GOWASM=gc: a
+	// JavaScript value (an externref) is held in an object of type
+	// GCExtern, which Go has as a *syscall/js.externref. GCJSBox (x
+	// externref) r makes one (nil for null), GCJSUnbox (p) externref
+	// gives the value back (null for nil). With split, GCExtern is a
+	// subtype of GCPtr with the externref after its fields, and with
+	// an address of GCExternAddr: not 0, which would be nil, and not
+	// one that anything is at.
+	GCJSBox      = "wasm.jsbox"
+	GCJSUnbox    = "wasm.jsunbox"
+	GCExtern     = "wasm.extern"
+	GCExternAddr = 1
+
 	GCPtr      = "wasm.ptr"
 	GCPtrAddr  = 0
 	GCPtrSlots = 1
@@ -398,6 +412,9 @@ func preprocessGC(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			switch f.Type {
 			case obj.WasmI32, obj.WasmBool:
 				add(AI32WrapI64)
+			case obj.WasmExtern:
+				p := add(ACall)
+				p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ctxt.Lookup(GCJSUnbox)}
 			case obj.WasmPtr:
 				if sig[i] != 'r' {
 					add(AI32WrapI64)
@@ -416,12 +433,54 @@ func preprocessGC(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 		call.Mark = WasmImport
 		for _, f := range wi.Results {
 			switch f.Type {
-			case obj.WasmI32, obj.WasmBool:
-				add(AI64ExtendI32U) // TODO: sign
+			case obj.WasmI32:
+				if wi.Module == GojsModule {
+					add(AI64ExtendI32S) // (gojs: int and int32)
+				} else {
+					add(AI64ExtendI32U) // TODO: sign
+				}
+			case obj.WasmBool:
+				add(AI64ExtendI32U)
+			case obj.WasmExtern:
+				p := add(ACall)
+				p.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: ctxt.Lookup(GCJSBox)}
 			case obj.WasmPtr:
 				if !GCImportRefs(wi.Module) {
 					ctxt.Diag("%v: GOWASM=gc: an imported function cannot return a pointer", s)
 				}
+			}
+		}
+		return
+	}
+	if we := s.Func().WasmExport; we != nil {
+		// The wrapper of an exported function (see setupWasmExportGC
+		// in the compiler): convert the arguments to registers, call,
+		// convert the results.
+		we.CreateAuxSym()
+		p := s.Func().Text
+		p.Link = nil
+		add := func(as obj.As) *obj.Prog {
+			p = obj.Appendp(p, newprog)
+			p.As = as
+			return p
+		}
+		for i, f := range we.Params {
+			add(ALocalGet).From = constAddr(int64(i))
+			switch f.Type {
+			case obj.WasmI32, obj.WasmBool:
+				if f.Offset == 1 {
+					add(AI64ExtendI32S)
+				} else {
+					add(AI64ExtendI32U)
+				}
+			}
+		}
+		call := add(ACall)
+		call.To = obj.Addr{Type: obj.TYPE_MEM, Name: obj.NAME_EXTERN, Sym: we.WrappedSym}
+		for _, f := range we.Results {
+			switch f.Type {
+			case obj.WasmI32, obj.WasmBool:
+				add(AI32WrapI64)
 			}
 		}
 		return

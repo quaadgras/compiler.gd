@@ -1,0 +1,9 @@
+greeting: hello from Go
+button: clicked 3 event type: Event
+goAdd(2, 3) from JavaScript: 5
+bytes: [1 2 3 4] 1-2-3-4
+read: "from the page" <nil>
+write: <nil>
+timeout fired
+exit 0
+page sees: hello from Go | clicked 3 | written by Go

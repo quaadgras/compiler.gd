@@ -85,6 +85,10 @@ func (d *deadcodePass) init() {
 	if buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC {
 		// What the host calls (see cmd/link/internal/wasm/gc.go).
 		names = append(names, "runtime.linfree", "runtime.sched", "runtime.gorun", "runtime.unstart", "runtime.deadlock", "runtime.timerwait")
+		if buildcfg.GOOS == "js" {
+			// syscall/js: a call from JavaScript.
+			names = append(names, "runtime.jscallback", "runtime.jscallbackdone")
+		}
 	}
 	if d.ctxt.BuildMode == BuildModePlugin {
 		names = append(names, objabi.PathToPrefix(d.ctxt.flagPluginPath)+"..inittask", objabi.PathToPrefix(d.ctxt.flagPluginPath)+".main", "go:plugin.tabs")

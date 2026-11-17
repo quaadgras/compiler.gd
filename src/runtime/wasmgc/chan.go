@@ -442,7 +442,8 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 	if chosen < nsends && !sg.success {
 		panic(plainError("send on closed channel"))
 	}
-	return chosen, sg.success
+	// (Whether a value was received: of a send that was done, not.)
+	return chosen, chosen >= nsends && sg.success
 }
 
 func chanlen(c *hchan) int {

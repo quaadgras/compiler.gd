@@ -14,6 +14,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"internal/buildcfg"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -47,6 +48,10 @@ var gcExports = map[string]string{
 	"deadlock":  "runtime.deadlock",
 	"timerwait": "runtime.timerwait",
 	"cleanup":   "runtime.runcleanup",
+
+	// GOOS=js: a call from JavaScript (syscall/js).
+	"callback":     "runtime.jscallback",
+	"callbackdone": "runtime.jscallbackdone",
 }
 
 const sectionDataCount = 12
@@ -69,6 +74,10 @@ type gcLinker struct {
 	globalType map[uint32]uint32 // the type of the object of each global of a data symbol
 
 	passive bytes.Buffer // the data of the arrays created by array.new_data
+	// initLocal is set while the function that makes the objects of
+	// the data symbols is written: it has a local (0, an eqref) that
+	// newObject may use.
+	initLocal bool
 
 	// The layouts of the structs of which there are objects (see
 	// gclayout.go).
@@ -154,6 +163,8 @@ func gcStorage(k byte) byte {
 		return wasm.GCTypeEqRef
 	case 'o':
 		return 0x6E // anyref
+	case 'x':
+		return ExternRef
 	}
 	panic("bad wasm type letter " + string(k))
 }
@@ -211,6 +222,19 @@ func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
 		w.Write([]byte{0x4F, 0x01}) // final, with one supertype
 		writeUleb128(w, uint64(l.typeIndex(wasm.GCHeader)))
 		w.Write([]byte{0x5F, 0x05, wasm.GCTypeI32, 0x00, wasm.GCTypeI32, 0x01, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x00, wasm.GCTypeEqRef, 0x00})
+	case name == wasm.GCExtern:
+		// A JavaScript value, for syscall/js (see wasm.GCJSBox).
+		if splitMode() {
+			// A subtype of GCPtr (which is then open to it: see
+			// writeSplitTypes), with the value after its fields.
+			w.Write([]byte{0x4F, 0x01}) // final, with one supertype
+			writeUleb128(w, uint64(l.typeIndex(wasm.GCPtr)))
+			w.Write([]byte{0x5F, 0x04, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
+			writeSleb128(w, int64(l.typeIndex(wasm.GCSlots)))
+			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, ExternRef, 0x00})
+			break
+		}
+		w.Write([]byte{0x5F, 0x01, ExternRef, 0x00})
 	case name == wasm.GCLinear:
 		w.Write([]byte{0x5F, 0x02, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x01})
 	case strings.HasPrefix(name, wasm.GCStructPrefix):
@@ -267,6 +291,8 @@ func gcSigName(params, results []byte) string {
 			return 'f'
 		case F64:
 			return 'd'
+		case ExternRef:
+			return 'x'
 		}
 		panic("bad wasm value type")
 	}
@@ -434,7 +460,51 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 				for _, b := range d.bytes(off, n*size) {
 					zero = zero && b == 0
 				}
-				if !zero || newArr == 0 || !l.ldr.AttrReachable(newArr) || l.funcIndex == nil || n <= 10000 && !l.numbered(e) {
+				// (How many are not zero.)
+				var set int64
+				for i := int64(0); i < n && !zero; i++ {
+					o := off + i*size
+					isZero := !d.hasReloc(o, size)
+					for _, b := range d.bytes(o, size) {
+						isZero = isZero && b == 0
+					}
+					if !isZero {
+						set++
+					}
+				}
+				if canCall := newArr != 0 && l.ldr.AttrReachable(newArr) && l.funcIndex != nil && l.numbered(e); !zero && 2*set <= n && canCall && l.initLocal && l.flat(e) {
+					// Mostly zero (a table by number, of which few
+					// are used): the runtime makes them all, and
+					// those that are not zero are made here and put
+					// in their places.
+					writeI32Const(w, int32(l.ldr.SymValue(e)))
+					gcOp(w, 0x1C) // ref.i31
+					writeI64Const(w, n)
+					w.WriteByte(0x10) // call
+					writeUleb128(w, uint64(l.funcIndex(newArr)))
+					w.WriteByte(0x21) // local.set
+					writeUleb128(w, 0)
+					for i := int64(0); i < n; i++ {
+						o := off + i*size
+						isZero := !d.hasReloc(o, size)
+						for _, b := range d.bytes(o, size) {
+							isZero = isZero && b == 0
+						}
+						if isZero {
+							continue
+						}
+						w.WriteByte(0x20) // local.get
+						writeUleb128(w, 0)
+						gcCast(w, t)
+						writeI32Const(w, int32(i))
+						l.newObject(w, e, d, o)
+						gcArraySet(w, t)
+					}
+					w.WriteByte(0x20) // local.get
+					writeUleb128(w, 0)
+					gcCast(w, t)
+					return
+				} else if !zero || !canCall && n <= 10000 || newArr == 0 || !l.ldr.AttrReachable(newArr) || l.funcIndex == nil {
 					if n > 10000 {
 						l.ctxt.Errorf(0, "GOWASM=gc: unsupported: a static array of %d structs", n)
 						n = 0
@@ -500,6 +570,20 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 		}
 	}
 	gcOp(w, 0x00, t) // struct.new
+}
+
+// flat reports whether an object of the Go type typ has no objects of
+// its own (so that making one does not use the local of initGlobals).
+func (l *gcLinker) flat(typ loader.Sym) bool {
+	if _, _, ok := ld.WasmGCArray(l.ctxt, typ); ok {
+		return false
+	}
+	for _, lf := range ld.WasmGCLeaves(l.ctxt, typ) {
+		if lf.Kind == 'a' {
+			return false
+		}
+	}
+	return true
 }
 
 // ref writes the instructions that push the pointer that the
@@ -575,14 +659,61 @@ func (l *gcLinker) fill(w *bytes.Buffer, path []byte, typ loader.Sym, d *gcData,
 	}
 }
 
+// A gcDataChunk is data that a segment puts at addr in linear memory.
+type gcDataChunk struct {
+	addr int64
+	data []byte
+}
+
+// gcDataChunks adds to chunks the parts of data, which is at addr, that
+// are not zero: a run of 16 zero bytes or more is left out (a segment
+// costs some 8 bytes).
+func gcDataChunks(chunks []gcDataChunk, addr int64, data []byte) []gcDataChunk {
+	const gap = 16
+	for i := 0; i < len(data); {
+		for i < len(data) && data[i] == 0 {
+			i++
+		}
+		if i == len(data) {
+			break
+		}
+		start, end := i, i
+		for zeros := 0; i < len(data) && zeros < gap; i++ {
+			if data[i] == 0 {
+				zeros++
+			} else {
+				zeros, end = 0, i+1
+			}
+		}
+		chunks = append(chunks, gcDataChunk{addr + int64(start), data[start:end]})
+	}
+	return chunks
+}
+
 // initGlobals returns the body of the function that creates the
 // objects of the data symbols.
 func (l *gcLinker) initGlobals() []byte {
 	var create, fill bytes.Buffer
+	l.initLocal = true
+	defer func() { l.initLocal = false }()
 	l.globalType = make(map[uint32]uint32)
+	// (For finding what makes the function large: GOWASMGC_GLOBALS=1
+	// prints the bytes of it that each data symbol takes.)
+	note := func(string) {}
+	if os.Getenv("GOWASMGC_GLOBALS") != "" {
+		last, at := "", 0
+		note = func(next string) {
+			if n := create.Len() + fill.Len(); last != "" {
+				fmt.Fprintf(os.Stderr, "initglobals %6d %s\n", n-at, last)
+			}
+			last, at = next, create.Len()+fill.Len()
+		}
+		defer note("")
+	}
 	// The list grows as the pointers of one object lead to another.
 	for i := 0; i < len(l.globals); i++ {
 		s := l.globals[i]
+		note(l.ldr.SymName(s))
 		gi := l.globalIdx[s]
 		d := l.data(s)
 		typ := l.ldr.SymGoType(s)
@@ -626,7 +757,10 @@ func (l *gcLinker) initGlobals() []byte {
 		l.fill(&fill, path.Bytes(), typ, d, 0)
 	}
 	var body bytes.Buffer
-	writeUleb128(&body, 0) // no locals
+	// One local, for an array while its elements are set (newObject).
+	writeUleb128(&body, 1)
+	writeUleb128(&body, 1)
+	body.WriteByte(0x6D) // eqref
 	body.Write(create.Bytes())
 	body.Write(fill.Bytes())
 	body.WriteByte(0x0b) // end
@@ -790,7 +924,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 				if r := relocs.At(rj); r.Type() == objabi.R_WASMTYPE && r.Siz() == 0 {
 					wrapper := ldr.SymName(r.Sym())
 					for i := len(wasm.GCFuncPrefix); i < len(sig) && i < len(wrapper); i++ {
-						if wrapper[i] == 'r' && (wasm.GCImportRefs(wi.Module) || i >= len(wasm.GCFuncPrefix)+len(wi.Params)) {
+						if wrapper[i] == 'r' && sig[i] != 'x' && (wasm.GCImportRefs(wi.Module) || i >= len(wasm.GCFuncPrefix)+len(wi.Params)) {
 							sig[i] = 'r'
 						}
 					}
@@ -819,6 +953,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 
 	// The functions.
 	var buildid []byte
+	var jsCalls []gcJSCall
 	fns := make([]*wasmFunc, len(ctxt.Textp), len(ctxt.Textp)+16)
 	for i, fn := range ctxt.Textp {
 		// The name is Go's, which runtime.FuncForPC and
@@ -859,8 +994,23 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			off = r.Off()
 			switch r.Type() {
 			case objabi.R_ADDR:
-				writeSleb128(wfn, ldr.SymValue(rs)+r.Add())
+				v := ldr.SymValue(rs) + r.Add()
+				if r.Off() > 0 && P[r.Off()-1] == 0x41 && v != int64(int32(v)) {
+					// An i32.const: a function's address (its
+					// index << 16) does not fit when there are
+					// more than 28672 functions.
+					ldr.Errorf(fn, "address of %s (%#x) does not fit in an i32.const", ldr.SymName(rs), v)
+				}
+				writeSleb128(wfn, v)
 			case objabi.R_CALL:
+				if k := jsHelper(ldr.SymName(rs)); k >= 0 {
+					// (Made only for a program that calls them,
+					// after the others: the index is written once
+					// it is known.)
+					jsCalls = append(jsCalls, gcJSCall{i, wfn.Len(), k})
+					writeUleb128FixedLength(wfn, 0, 5)
+					break
+				}
 				if ldr.SymName(rs) == wasm.GCHop {
 					writeSleb128(wfn, hopIndex[sigOf(fn)])
 					break
@@ -947,6 +1097,15 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		fns = append(fns, l.reflectFuncs(first+len(helpers), len(hostImports), funcIndex)...)
 	} else {
 		fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
+	}
+	if jsCalls != nil {
+		first := len(hostImports) + len(fns)
+		fns = append(fns, l.jsHelpers()...)
+		for _, c := range jsCalls {
+			var b bytes.Buffer
+			writeUleb128FixedLength(&b, uint64(first+c.helper), 5)
+			copy(fns[c.fn].Code[c.off:], b.Bytes())
+		}
 	}
 	start := len(hostImports) + len(fns)
 	fns = append(fns, init)
@@ -1092,13 +1251,17 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		fn   loader.Sym
 	}
 	var exports []export
-	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "unstart"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}} {
+	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "unstart"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}, {name: "callback"}, {name: "callbackdone"}} {
 		for v := 0; v < 2 && e.fn == 0; v++ {
 			e.fn = ldr.Lookup(gcExports[e.name], v)
 		}
 		if e.fn != 0 && ldr.AttrReachable(e.fn) {
 			exports = append(exports, e)
 		}
+	}
+	// The functions of //go:wasmexport, by the names they give.
+	for _, fn := range ldr.WasmExports {
+		exports = append(exports, export{name: ldr.SymName(fn), fn: fn})
 	}
 	section(sectionExport, func(w *bytes.Buffer) {
 		n := 5 + len(exports)
@@ -1143,7 +1306,13 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	})
 	// (All functions: MakeFunc calls the stubs the linker generates.)
 	writeElementSec(ctxt, uint64(len(hostImports)), uint64(len(fns)))
-	nseg := 1 + len(sects)
+	// (Memory is zero to begin with: what is zero in the data is not
+	// written, where it is long enough to be worth a segment.)
+	var chunks []gcDataChunk
+	for _, ds := range sects {
+		chunks = gcDataChunks(chunks, int64(ds.sect.Vaddr), ds.data)
+	}
+	nseg := 1 + len(chunks)
 	if len(layouts) > 0 || len(splitWords) > 0 {
 		nseg++
 	}
@@ -1168,12 +1337,12 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		w.WriteByte(0x01)
 		writeUleb128(w, uint64(l.passive.Len()))
 		w.Write(l.passive.Bytes())
-		for _, ds := range sects {
+		for _, c := range chunks {
 			writeUleb128(w, 0) // active, memory 0
-			writeI32Const(w, int32(ds.sect.Vaddr))
+			writeI32Const(w, int32(c.addr))
 			w.WriteByte(0x0b) // end
-			writeUleb128(w, uint64(len(ds.data)))
-			w.Write(ds.data)
+			writeUleb128(w, uint64(len(c.data)))
+			w.Write(c.data)
 		}
 		if len(splitWords) > 0 {
 			writeUleb128(w, 0) // active, memory 0

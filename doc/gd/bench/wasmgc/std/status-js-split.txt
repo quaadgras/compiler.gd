@@ -1,0 +1,383 @@
+# go test -short -timeout 120s, GOOS=js GOARCH=wasm GOWASM=gc,split, under node, every package of
+# `go list std` but cmd/... (survey.py; logs in $SURVEY_LOGS-js-split).
+# ok | FAIL reason | BUILD reason | SKIP reason
+archive/tar ok
+archive/zip ok
+bufio ok
+bytes FAIL panic: runtime error: makeslice: len out of range [recovered]
+cmp ok
+compress/bzip2 ok
+compress/flate ok
+compress/gzip ok
+compress/lzw ok
+compress/zlib ok
+container/heap ok
+container/list ok
+container/ring ok
+context ok
+crypto ok
+crypto/aes ok
+crypto/cipher ok
+crypto/des ok
+crypto/dsa ok
+crypto/ecdh ok
+crypto/ecdsa ok
+crypto/ed25519 ok
+crypto/elliptic ok
+crypto/fips140 ok
+crypto/hkdf ok
+crypto/hmac ok
+crypto/hpke ok
+crypto/internal/boring ok
+crypto/internal/boring/bbig SKIP no test files
+crypto/internal/boring/bcache ok
+crypto/internal/boring/sig SKIP no test files
+crypto/internal/constanttime SKIP no test files
+crypto/internal/cryptotest ok
+crypto/internal/cryptotest/wycheproof SKIP no test files
+crypto/internal/cryptotest/x509limbo SKIP no test files
+crypto/internal/entropy SKIP no test files
+crypto/internal/entropy/v1.0.0 SKIP no test files
+crypto/internal/fips140 ok
+crypto/internal/fips140/aes ok
+crypto/internal/fips140/aes/gcm ok
+crypto/internal/fips140/alias SKIP no test files
+crypto/internal/fips140/bigmod ok
+crypto/internal/fips140/check SKIP no test files
+crypto/internal/fips140/check/checktest SKIP no test files
+crypto/internal/fips140/drbg ok
+crypto/internal/fips140/ecdh ok
+crypto/internal/fips140/ecdsa ok
+crypto/internal/fips140/ed25519 SKIP no test files
+crypto/internal/fips140/edwards25519 ok
+crypto/internal/fips140/edwards25519/field ok
+crypto/internal/fips140/hkdf SKIP no test files
+crypto/internal/fips140/hmac SKIP no test files
+crypto/internal/fips140/mldsa ok
+crypto/internal/fips140/mlkem ok
+crypto/internal/fips140/nistec ok
+crypto/internal/fips140/nistec/fiat ok
+crypto/internal/fips140/pbkdf2 SKIP no test files
+crypto/internal/fips140/rsa ok
+crypto/internal/fips140/sha256 SKIP no test files
+crypto/internal/fips140/sha3 SKIP no test files
+crypto/internal/fips140/sha512 SKIP no test files
+crypto/internal/fips140/ssh SKIP no test files
+crypto/internal/fips140/subtle ok
+crypto/internal/fips140/tls12 SKIP no test files
+crypto/internal/fips140/tls13 SKIP no test files
+crypto/internal/fips140cache ok
+crypto/internal/fips140deps ok
+crypto/internal/fips140deps/byteorder SKIP no test files
+crypto/internal/fips140deps/cpu SKIP no test files
+crypto/internal/fips140deps/godebug SKIP no test files
+crypto/internal/fips140deps/time SKIP no test files
+crypto/internal/fips140hash SKIP no test files
+crypto/internal/fips140only ok
+crypto/internal/fips140test ok
+crypto/internal/impl SKIP no test files
+crypto/internal/rand SKIP no test files
+crypto/internal/randutil SKIP no test files
+crypto/internal/sysrand ok
+crypto/internal/sysrand/internal/seccomp SKIP no test files
+crypto/md5 ok
+crypto/mldsa ok
+crypto/mlkem ok
+crypto/mlkem/mlkemtest SKIP no test files
+crypto/pbkdf2 ok
+crypto/rand ok
+crypto/rc4 ok
+crypto/rsa ok
+crypto/sha1 ok
+crypto/sha256 ok
+crypto/sha3 ok
+crypto/sha512 ok
+crypto/subtle ok
+crypto/tls ok
+crypto/tls/internal/fips140tls SKIP no test files
+crypto/x509 ok
+crypto/x509/pkix SKIP no test files
+database/sql ok
+database/sql/driver ok
+database/sql/internal SKIP no test files
+debug/buildinfo ok
+debug/dwarf ok
+debug/elf ok
+debug/gosym ok
+debug/macho ok
+debug/pe ok
+debug/plan9obj ok
+embed ok
+embed/internal/embedtest ok
+encoding SKIP no test files
+encoding/ascii85 ok
+encoding/asn1 ok
+encoding/base32 ok
+encoding/base64 ok
+encoding/binary ok
+encoding/csv ok
+encoding/gob ok
+encoding/hex ok
+encoding/json ok
+encoding/json/internal SKIP no test files
+encoding/json/internal/jsonflags ok
+encoding/json/internal/jsonopts ok
+encoding/json/internal/jsontest SKIP no test files
+encoding/json/internal/jsonwire ok
+encoding/json/jsontext ok
+encoding/json/v2 ok
+encoding/pem ok
+encoding/xml ok
+errors ok
+expvar ok
+flag ok
+fmt ok
+go/ast ok
+go/build ok
+go/build/constraint ok
+go/constant ok
+go/doc ok
+go/doc/comment ok
+go/format ok
+go/importer ok
+go/internal/gccgoimporter ok
+go/internal/gcimporter ok
+go/internal/srcimporter ok
+go/parser ok
+go/printer ok
+go/scanner ok
+go/token ok
+go/types ok
+go/version ok
+hash ok
+hash/adler32 ok
+hash/crc32 ok
+hash/crc64 ok
+hash/fnv ok
+hash/maphash ok
+html ok
+html/template ok
+image ok
+image/color ok
+image/color/palette SKIP no test files
+image/draw ok
+image/gif ok
+image/internal/imageutil SKIP no test files
+image/jpeg ok
+image/png ok
+index/suffixarray ok
+internal/abi ok
+internal/asan SKIP no test files
+internal/bisect SKIP no test files
+internal/buildcfg ok
+internal/bytealg SKIP no test files
+internal/byteorder SKIP no test files
+internal/cfg SKIP no test files
+internal/chacha8rand ok
+internal/copyright ok
+internal/coverage SKIP no test files
+internal/coverage/calloc SKIP no test files
+internal/coverage/cfile ok
+internal/coverage/cformat ok
+internal/coverage/cmerge ok
+internal/coverage/decodecounter SKIP no test files
+internal/coverage/decodemeta SKIP no test files
+internal/coverage/encodecounter SKIP no test files
+internal/coverage/encodemeta SKIP no test files
+internal/coverage/pods ok
+internal/coverage/rtcov SKIP no test files
+internal/coverage/slicereader ok
+internal/coverage/slicewriter ok
+internal/coverage/stringtab SKIP no test files
+internal/coverage/test ok
+internal/coverage/uleb128 SKIP no test files
+internal/cpu ok
+internal/dag ok
+internal/diff ok
+internal/exportdata SKIP no test files
+internal/filepathlite SKIP no test files
+internal/fmtsort ok
+internal/fuzz ok
+internal/gate ok
+internal/goarch SKIP no test files
+internal/godebug ok
+internal/godebugs ok
+internal/goexperiment SKIP no test files
+internal/goos SKIP no test files
+internal/goroot SKIP no test files
+internal/gover ok
+internal/goversion SKIP no test files
+internal/lazyregexp SKIP no test files
+internal/lazytemplate SKIP no test files
+internal/msan SKIP no test files
+internal/nettest ok
+internal/nettrace SKIP no test files
+internal/obscuretestdata SKIP no test files
+internal/oserror SKIP no test files
+internal/pkgbits ok
+internal/platform ok
+internal/poll ok
+internal/profile ok
+internal/profilerecord SKIP no test files
+internal/race SKIP no test files
+internal/reflectlite ok
+internal/runtime/atomic ok
+internal/runtime/cgroup ok
+internal/runtime/exithook SKIP no test files
+internal/runtime/gc SKIP no test files
+internal/runtime/gc/internal/gen SKIP no test files
+internal/runtime/gc/scan ok
+internal/runtime/maps SKIP no test files
+internal/runtime/math ok
+internal/runtime/pprof/label SKIP no test files
+internal/runtime/sys ok
+internal/runtime/wasitest ok
+internal/saferio ok
+internal/singleflight ok
+internal/strconv ok
+internal/stringslite SKIP no test files
+internal/sync ok
+internal/synctest ok
+internal/syscall/execenv SKIP no test files
+internal/syscall/unix ok
+internal/sysinfo ok
+internal/syslist SKIP no test files
+internal/testenv ok
+internal/testhash SKIP no test files
+internal/testlog SKIP no test files
+internal/testpty SKIP no test files
+internal/trace ok
+internal/trace/internal/testgen SKIP no test files
+internal/trace/internal/tracev1 ok
+internal/trace/raw SKIP no test files
+internal/trace/testtrace ok
+internal/trace/tracev2 ok
+internal/trace/traceviewer SKIP no test files
+internal/trace/traceviewer/format SKIP no test files
+internal/trace/version SKIP no test files
+internal/txtar SKIP no test files
+internal/types/errors ok
+internal/unsafeheader ok
+internal/wasmgc SKIP no test files
+internal/xcoff ok
+internal/zstd ok
+io ok
+io/fs ok
+io/ioutil ok
+iter ok
+log ok
+log/internal SKIP no test files
+log/slog ok
+log/slog/internal SKIP no test files
+log/slog/internal/benchmarks ok
+log/slog/internal/buffer ok
+log/syslog ok
+maps ok
+math ok
+math/big ok
+math/big/internal/asmgen ok
+math/bits ok
+math/cmplx ok
+math/rand ok
+math/rand/v2 ok
+mime ok
+mime/multipart ok
+mime/quotedprintable ok
+net ok
+net/http ok
+net/http/cgi ok
+net/http/cookiejar ok
+net/http/fcgi ok
+net/http/httptest ok
+net/http/httptrace ok
+net/http/httputil ok
+net/http/internal ok
+net/http/internal/ascii ok
+net/http/internal/http2 ok
+net/http/internal/httpcommon SKIP no test files
+net/http/internal/httpsfv SKIP no test files
+net/http/internal/testcert SKIP no test files
+net/http/pprof ok
+net/internal/cgotest ok
+net/internal/socktest SKIP no test files
+net/mail ok
+net/netip ok
+net/rpc ok
+net/rpc/jsonrpc ok
+net/smtp ok
+net/textproto ok
+net/url ok
+os ok
+os/exec ok
+os/exec/internal/fdtest ok
+os/signal ok
+os/user ok
+path ok
+path/filepath ok
+plugin ok
+reflect ok
+reflect/internal/example1 SKIP no test files
+reflect/internal/example2 SKIP no test files
+regexp ok
+regexp/syntax ok
+runtime SKIP no test files
+runtime/coverage SKIP no test files
+runtime/debug ok
+runtime/metrics ok
+runtime/pprof ok
+runtime/race SKIP no test files
+runtime/trace ok
+runtime/wasmgc SKIP no test files
+slices ok
+sort ok
+strconv ok
+strings ok
+structs SKIP no test files
+sync ok
+sync/atomic ok
+syscall ok
+syscall/js ok
+testing ok
+testing/cryptotest ok
+testing/fstest ok
+testing/internal/testdeps SKIP no test files
+testing/iotest ok
+testing/quick ok
+testing/slogtest ok
+testing/synctest ok
+text/scanner ok
+text/tabwriter ok
+text/template ok
+text/template/parse ok
+time ok
+time/tzdata SKIP no test files
+unicode ok
+unicode/utf16 ok
+unicode/utf8 ok
+unique ok
+unsafe SKIP no test files
+uuid ok
+vendor/golang.org/x/crypto/chacha20 SKIP no test files
+vendor/golang.org/x/crypto/chacha20poly1305 SKIP no test files
+vendor/golang.org/x/crypto/cryptobyte SKIP no test files
+vendor/golang.org/x/crypto/cryptobyte/asn1 SKIP no test files
+vendor/golang.org/x/crypto/hkdf SKIP no test files
+vendor/golang.org/x/crypto/internal/alias SKIP no test files
+vendor/golang.org/x/crypto/internal/poly1305 SKIP no test files
+vendor/golang.org/x/net/dns/dnsmessage SKIP no test files
+vendor/golang.org/x/net/http/httpguts SKIP no test files
+vendor/golang.org/x/net/http/httpproxy SKIP no test files
+vendor/golang.org/x/net/http2/hpack SKIP no test files
+vendor/golang.org/x/net/http3 SKIP no test files
+vendor/golang.org/x/net/idna SKIP no test files
+vendor/golang.org/x/net/internal/http3 SKIP no test files
+vendor/golang.org/x/net/internal/httpcommon SKIP no test files
+vendor/golang.org/x/net/internal/quic/quicwire SKIP no test files
+vendor/golang.org/x/net/nettest SKIP no test files
+vendor/golang.org/x/net/quic SKIP no test files
+vendor/golang.org/x/sys/cpu SKIP no test files
+vendor/golang.org/x/text/secure/bidirule SKIP no test files
+vendor/golang.org/x/text/transform SKIP no test files
+vendor/golang.org/x/text/unicode/bidi SKIP no test files
+vendor/golang.org/x/text/unicode/norm SKIP no test files
+weak ok

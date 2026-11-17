@@ -105,6 +105,10 @@ func (l *gcLinker) writeSplitTypes(w *bytes.Buffer) {
 		panic("wasm: split types not first")
 	}
 	w.Write([]byte{0x4E, 0x02}) // rec, two types
+	if _, ok := l.typeIdx[wasm.GCExtern]; ok {
+		// Open to GCExtern, the holder of a JavaScript value.
+		w.Write([]byte{0x50, 0x00})
+	}
 	// GCPtr: the address and the offset are mutable, the array not.
 	// (Nothing changes them. But an engine may keep the value of an
 	// immutable field it has read, or that it knows from where the

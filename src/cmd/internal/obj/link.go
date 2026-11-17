@@ -819,6 +819,12 @@ const (
 	// bool is not really a wasm type, but we allow it on wasmimport/wasmexport
 	// function parameters/results. 32-bit on Wasm side, 8-bit on Go side.
 	WasmBool
+
+	// WasmExtern is a JavaScript value (externref), which Go holds as a
+	// *syscall/js.externref (GOWASM=gc, module gojs only): the wrapper
+	// of the import takes it out of the object that holds it, and puts
+	// what the import returns in a new one.
+	WasmExtern
 )
 
 type InlMark struct {
