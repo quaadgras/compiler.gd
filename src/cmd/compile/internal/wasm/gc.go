@@ -82,6 +82,7 @@ type gcGen struct {
 	frameSize    int64
 	fp           int32
 	csp          int32                  // the top of the stack on entry: where the caller's frame ends
+	closure      int32                  // the local of the closure that was called, or -1 (see genFunc)
 	fieldsLocals map[*obj.LSym][2]int32 // see fieldsLocal
 
 	// The instructions that have the size of the frame, which grows
@@ -729,7 +730,11 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 		g.accessLoad(v.Args[0], 0, v.Type, v)
 
 	case ssa.OpWasmLoweredGetClosurePtr:
-		g.global(wasm.AGlobalGet, wasm.GCGlobalCtxt)
+		if g.closure >= 0 {
+			g.local(wasm.ALocalGet, g.closure)
+		} else {
+			g.global(wasm.AGlobalGet, wasm.GCGlobalCtxt)
+		}
 
 	case ssa.OpWasmLoweredGetCallerPC:
 		// There are no program counters.
@@ -2678,6 +2683,11 @@ func (g *gcGen) call(v *ssa.Value) {
 	case "runtime.linsetsp":
 		g.get(args[0], true)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
+	case "runtime.closurectxt":
+		g.global(wasm.AGlobalGet, wasm.GCGlobalCtxt)
+	case "runtime.setclosurectxt":
+		g.get(args[0], false)
+		g.global(wasm.AGlobalSet, wasm.GCGlobalCtxt)
 	case "runtime.lincallersp":
 		g.callerSP()
 	case "runtime.linsetcallersp":
@@ -3233,7 +3243,7 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 	// its caller's frame ends (see gorecoverfp in the runtime).
 	// (A wrapper into which the function it wraps was inlined is
 	// that function.)
-	calls, inlined := false, false
+	calls, inlined, closure := false, false, false
 	for _, b := range f.Blocks {
 		for _, v := range b.Values {
 			switch v.Op {
@@ -3241,6 +3251,33 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 				calls = true
 			case ssa.OpInlMark:
 				inlined = true
+			case ssa.OpWasmLoweredGetClosurePtr:
+				closure = true
+			}
+		}
+	}
+	// The closure that is called is in a global, which every call of
+	// a closure sets, and the function takes it from there where its
+	// code begins. What it calls before that may collect, and other
+	// goroutines run then and call closures of theirs: the memory of
+	// a variable, with split (the function takes the closure first
+	// of all, then); a segment of the stack (runtime.morestackgc
+	// leaves the global as it found it).
+	g.closure = -1
+	if closure && gcSplit() {
+	entry:
+		for _, b := range f.Blocks {
+			for _, v := range b.Values {
+				if v.Op != ssa.OpLocalAddr {
+					continue
+				}
+				n := v.Aux.(*ir.Name)
+				if _, ok := g.objs[n]; ok && !g.paramObjs[n] && n.Type().Size() != 0 {
+					g.closure = g.newLocal('r')
+					g.global(wasm.AGlobalGet, wasm.GCGlobalCtxt)
+					g.local(wasm.ALocalSet, g.closure)
+					break entry
+				}
 			}
 		}
 	}

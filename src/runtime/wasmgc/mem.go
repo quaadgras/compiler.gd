@@ -100,6 +100,13 @@ func memequal128(p, q unsafe.Pointer) bool { return memequal(p, q, 16) }
 // was called through. The compiler replaces calls to it.
 func getclosureptr() uintptr
 
+// closurectxt returns the closure that was last called, which is in a
+// global that the function called takes it from, and setclosurectxt
+// sets it: for what runs between a call and the function's own code
+// (see morestackgc). The compiler replaces calls to them.
+func closurectxt() unsafe.Pointer
+func setclosurectxt(p unsafe.Pointer)
+
 // memequal_varlen and memhash_varlen are the functions of function
 // values that carry a size in their second word.
 

@@ -27,8 +27,8 @@ package runtime
 // can be, as Go's is.
 
 const (
-	stackRedZone  = 4 << 10 // cmd/internal/obj/wasm.GCStackRedZone
-	stackSegSize  = 64 << 10
+	stackRedZone = 4 << 10 // cmd/internal/obj/wasm.GCStackRedZone
+	stackSegSize = 64 << 10
 	// A goroutine's stack elsewhere is at most 1 GB. Here that is what
 	// the engine's stacks may take: wasm.GCStackRatio times as much as
 	// the segments, which are what is counted.
@@ -60,6 +60,11 @@ func linsplim() uintptr
 //
 //go:nosplit
 func morestackgc(n uintptr) {
+	// The function that calls this was perhaps called as a closure,
+	// and takes the closure, when it calls itself, from where the
+	// call left it: the allocation below may collect, and the
+	// goroutines that run meanwhile call closures of theirs.
+	ctxt := closurectxt()
 	lo := linsplim()
 	linsetsplim(0) // no checks while this runs, in the red zone
 	if onSysStack {
@@ -88,6 +93,7 @@ func morestackgc(n uintptr) {
 	gp.stacklo = seg.base + stackRedZone
 	linsetsplim(gp.stacklo)
 	linsetcallersp(seg.base + seg.size)
+	setclosurectxt(ctxt)
 }
 
 // lessstackgc is called by the function that called morestackgc when
