@@ -34,7 +34,7 @@ echo "cache.tar.gz (prebuild)" >&2
 NODE_OPTIONS= node --stack-size=4000 "$out/playground/prebuild.mjs" "$tmp/go.wasm" "$tmp/goroot.tar.gz" "$tmp/cache.tar" \
 	bufio bytes container/heap container/list context encoding/base64 encoding/binary encoding/hex \
 	encoding/json errors fmt hash/crc32 iter maps math math/big math/bits math/rand/v2 os regexp \
-	slices sort strconv strings sync sync/atomic text/tabwriter time unicode unicode/utf8 unique
+	slices sort strconv strings sync sync/atomic text/tabwriter time unicode unicode/utf8 unique internal/c23
 gzip -9n "$tmp/cache.tar"
 
 # Names with a hash of the contents, so the files can be cached forever.

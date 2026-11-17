@@ -77,7 +77,7 @@
   </nav>
 
   <h1>Play<span>ground</span></h1>
-  <p class="lede">Go, compiled in your browser by the gd <code>go</code> command — itself compiled to WebAssembly — and run on the WebAssembly GC.</p>
+  <p class="lede">Go (or C), compiled in your browser by the gd <code>go</code> command — itself compiled to WebAssembly — and run on the WebAssembly GC.</p>
 
   <section class="panel" aria-label="Playground">
     <div class="pbar top">
@@ -90,7 +90,7 @@
     </div>
     <div class="editor">
       <div class="gutter mono" id="gutter" aria-hidden="true">1</div>
-      <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Go source"></textarea>
+      <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Source (Go, or C)"></textarea>
     </div>
     <div class="pbar mid"><span class="label">Output</span><div class="build" id="build" aria-live="polite"></div></div>
     <pre class="out mono" id="out" aria-live="polite"></pre>
@@ -103,6 +103,8 @@
       <li>The page downloads the <code>go</code> command for <code>GOOS=js</code> (24 MB, once: your browser keeps it) and the standard library's source, and runs <code>go build</code> in a worker. <code>compile</code> and <code>link</code> are part of that one binary.</li>
       <li>Programs are built for <code>js/wasm</code> on the WebAssembly GC runtime (<code>GOWASM=gc,split</code>): each allocation keeps its bytes in linear memory and its pointers in a WebAssembly GC array, so the browser’s collector frees it.</li>
       <li>The build cache lives in IndexedDB. Common packages come precompiled; anything else is compiled on first use (a minute or so for a large package), then cached.</li>
+      <li>C works through cgo's <code>import "C"</code>: with no C compiler in the page, the go command translates the C into Go with its own front end, <code>cc</code>, which checks every access (out of bounds is a panic) and lets C and Go share the heap. It has <code>&lt;stdio.h&gt;</code>, <code>&lt;stdlib.h&gt;</code>, <code>&lt;string.h&gt;</code> and a few other headers.</li>
+      <li>Code whose first line (past comments) is not <code>package</code> is C: the playground builds it as <code>main.c</code> with a Go <code>main</code> that calls its <code>int main(void)</code>.</li>
       <li>Only the standard library: there's no network access for modules. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (<kbd>⌘</kbd>+<kbd>Enter</kbd> on a Mac) runs.</li>
       <li>Needs WebAssembly GC and JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27.</li>
     </ul>
@@ -202,6 +204,123 @@ func main() {
 		panic(err)
 	}
 	fmt.Println(string(b))
+}
+`,
+  'C (cgo)': `package main
+
+/*
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct node {
+	int v;
+	struct node *next;
+};
+
+// A list built by C, in memory that Go's collector manages.
+struct node *squares(int n) {
+	struct node *head = NULL;
+	for (int i = n; i > 0; i--) {
+		struct node *x = malloc(sizeof *x);
+		x->v = i * i;
+		x->next = head;
+		head = x;
+	}
+	return head;
+}
+
+long sum(int a[], int n) {
+	long s = 0;
+	for (int i = 0; i < n; i++)
+		s += a[i];
+	return s;
+}
+
+void shout(char *s) {
+	for (size_t i = 0; i < strlen(s); i++)
+		if (s[i] >= 'a' && s[i] <= 'z')
+			s[i] -= 'a' - 'A';
+	printf("C says: %s\\n", s);
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"runtime"
+	"unsafe"
+)
+
+func main() {
+	// C's list, walked by Go as Go structs.
+	fmt.Print("squares from C:")
+	for n := C.squares(5); n != nil; n = n.next {
+		fmt.Print(" ", n.v)
+	}
+	fmt.Println()
+
+	// Go's slice, summed by C.
+	xs := []C.int{1, 2, 3, 4}
+	fmt.Println("C sums Go's slice:", C.sum(&xs[0], C.int(len(xs))))
+
+	// Strings, as with cgo.
+	s := C.CString("hello from go, compiled in your browser")
+	defer C.free(unsafe.Pointer(s))
+	C.shout(s)
+	fmt.Println("Go reads it back:", C.GoString(s))
+
+	// C is checked: reading past Go's slice is a panic, not a wild read.
+	defer func() { fmt.Println("recovered:", recover()) }()
+	runtime.GC()
+	fmt.Println(C.sum(&xs[0], C.int(len(xs)+1)))
+}
+`,
+  'C': `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// C, without Go: the playground runs main. The go command translates it
+// with its own C front end (cc), into Go that checks every access.
+
+struct node {
+	char *word;
+	struct node *next;
+};
+
+static struct node *push(struct node *list, char *word) {
+	struct node *n = malloc(sizeof *n);
+	n->word = word;
+	n->next = list;
+	return n;
+}
+
+int main(void) {
+	char text[] = "C in the browser on the WebAssembly GC";
+	struct node *words = NULL;
+	char *w = text;
+	for (char *p = text; ; p++) {
+		if (*p == ' ' || *p == 0) {
+			int end = *p == 0;
+			*p = 0;
+			words = push(words, w);
+			if (end)
+				break;
+			w = p + 1;
+		}
+	}
+
+	printf("backwards:");
+	for (struct node *n = words; n != NULL; n = n->next)
+		printf(" %s", n->word);
+	printf("\\n");
+
+	int squares[5];
+	for (int i = 0; i < 5; i++)
+		squares[i] = i * i;
+	printf("squares[4] = %d\\n", squares[4]);
+	printf("squares[5] = %d\\n", squares[5]); // out of bounds: caught
+	return 0;
 }
 `,
   'Panic': `package main
