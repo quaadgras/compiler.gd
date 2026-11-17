@@ -547,6 +547,11 @@ func (p *parser) nestedFuncDef(name string, t *ctype, at pos) stmt {
 		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)
 	}
 	p.pop()
+	for _, l := range f.labels {
+		if l.p.line == 0 {
+			p.errorAt(at, "label %q used but not defined (a goto out of a nested function is not supported)", l.name)
+		}
+	}
 	p.fn = outer
 	p.breakOK, p.continueOK, p.sw = saveB, saveC, saveSw
 	return &nestedFuncStmt{f}

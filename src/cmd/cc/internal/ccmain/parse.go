@@ -1032,7 +1032,7 @@ func (p *parser) suffixes(t *ctype) *ctype {
 // vlaLength makes a variable length array's length a local, computed
 // where the declaration is, and returns a reference to it.
 func (p *parser) vlaLength(e expr, elem *ctype) expr {
-	if p.fn == nil && p.paramVLA != nil {
+	if p.paramVLA != nil {
 		// A parameter's: computed on entry, if the function is defined.
 		p.symN++
 		sym := &symbol{name: fmt.Sprintf("vla.%d", p.symN), kind: symVar, t: tULong, p: e.at()}
