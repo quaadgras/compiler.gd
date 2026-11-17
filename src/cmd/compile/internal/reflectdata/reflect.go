@@ -1362,7 +1362,6 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 		c.Field("Inline").WriteUint8(uint8(abi.ITabInlineSpread))
 	}
 
-	var delta int64
 	c = c.Field("Fun")
 	nmethods := len(entries)
 	if !completeItab {
@@ -1371,7 +1370,7 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 		nmethods = 1 // single zero slot; mask tail still gets one uint64 below
 	} else {
 		var a rttype.ArrayCursor
-		a, delta = c.ModifyArray(len(entries))
+		a, _ = c.ModifyArray(len(entries))
 		for i, fn := range entries {
 			a.Elem(i).WritePtrWeak(fn) // method pointer for each method
 		}
@@ -1383,7 +1382,8 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 	// bit k+1 maps to the k-th non-receiver arg the caller sees).
 	// Matches the runtime layout consumed by runtime.maybeEscape
 	// IfaceArg in src/runtime/escape_bits.go.
-	maskOffset := rttype.ITab.Size() + delta
+	// (After Fun, aligned to 8: abi.ITabEscMaskOff.)
+	maskOffset := int64(abi.ITabEscMaskOff(types.PtrSize, nmethods, 0))
 	for i := 0; i < nmethods; i++ {
 		// Reserve the slot now (zeros); the real value is written
 		// by FinalizeItabMasks after escape analysis runs. writeITab
@@ -1400,7 +1400,7 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 			})
 		}
 	}
-	totalSize := rttype.ITab.Size() + delta + int64(nmethods)*8
+	totalSize := int64(abi.ITabSize(types.PtrSize, nmethods))
 
 	// Nothing writes static itabs, so they are read only.
 	objw.Global(gd, lsym, int32(totalSize), int16(obj.DUPOK|obj.RODATA))

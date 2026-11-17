@@ -6,7 +6,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/goarch"
+	"unsafe"
+)
 
 // With GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md) every Go value
 // is in linear memory, laid out as Go lays it out, and the pointers in
@@ -21,6 +24,16 @@ import "unsafe"
 // files, under !splitMode, which the compiler leaves out.
 
 const splitMode = true
+
+// The array of a block has an element for each pointer word
+// (goarch.PtrSize bytes: 4 with wasm32), whatever is in it: the
+// pointer at byte b of a block is element b/goarch.PtrSize.
+
+// splitslots returns the number of elements of the array of a block of
+// n bytes that has pointers: one for every word, to the end.
+func splitslots(n uintptr) uintptr {
+	return (n + goarch.PtrSize - 1) / goarch.PtrSize
+}
 
 // The compiler replaces calls to these by instructions.
 
@@ -62,7 +75,7 @@ func newarray(t *_type, n int) unsafe.Pointer {
 	// copies the words of each, pointers or not.)
 	var nslots uintptr
 	if t.Pointers() {
-		nslots = (size + 7) / 8
+		nslots = splitslots(size)
 	}
 	return splitalloc(size, nslots)
 }

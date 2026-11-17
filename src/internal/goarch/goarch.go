@@ -51,7 +51,9 @@ const DefaultPhysPageSize = _DefaultPhysPageSize
 const PCQuantum = _PCQuantum
 
 // Int64Align is the required alignment for a 64-bit integer (4 on 32-bit systems, 8 on 64-bit).
-const Int64Align = PtrSize
+// It is 8 on wasm whatever the size of a pointer: its registers are of
+// 64 bits (wasm32, GOWASM=gc, lays a struct out as clang's wasm32 does).
+const Int64Align = PtrSize*(1-IsWasm) + 8*IsWasm
 
 // MinFrameSize is the size of the system-reserved words at the bottom
 // of a frame (just above the architectural stack pointer).

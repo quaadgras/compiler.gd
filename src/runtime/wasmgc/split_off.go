@@ -20,3 +20,4 @@ func splitbase(p unsafe.Pointer) uintptr           { panic("split") }
 func newarray(t *_type, n int) unsafe.Pointer      { panic("split") }
 func splitmove(dst, src unsafe.Pointer, n uintptr) { panic("split") }
 func splitzero(p unsafe.Pointer, n uintptr)        { panic("split") }
+func splitslots(n uintptr) uintptr                 { panic("split") }

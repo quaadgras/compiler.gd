@@ -55,15 +55,15 @@ func ITabEscMaskOff(ptrSize, nmethods, k int) int {
 	// Before Fun: Inter + Type (2 pointers) + Hash(4) + Inline(1) +
 	// pad[3] = 2*ptrSize + 8.
 	base := 2*ptrSize + 8
-	// Fun is [nmethods]uintptr. Masks follow.
-	return base + nmethods*ptrSize + k*8
+	// Fun is [nmethods]uintptr. Masks follow, aligned as a uint64
+	// (which matters with 4-byte pointers: wasm32).
+	return (base+nmethods*ptrSize+7)&^7 + k*8
 }
 
 // ITabSize returns the total size of an ITab carrying nmethods methods
 // with the mask tail, for a target with the given pointer size.
 func ITabSize(ptrSize, nmethods int) int {
-	base := 2*ptrSize + 8
-	return base + nmethods*ptrSize + nmethods*8
+	return ITabEscMaskOff(ptrSize, nmethods, nmethods)
 }
 
 // Values for ITab.Inline, selecting how getClosureAndRcvr stages the

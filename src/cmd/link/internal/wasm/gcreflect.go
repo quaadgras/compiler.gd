@@ -173,7 +173,7 @@ func (l *gcLinker) reflectCall(f gcReflectFunc) []byte {
 	// The arrays of pointers may be anything a pointer is: an array,
 	// a variable on the stack...
 	elem := func(arr uint32, i int) func() {
-		return func() { a.loadPtrAt(arr, int64(i)*8) }
+		return func() { a.loadPtrAt(arr, int64(i)*a.l.ptrSize()) }
 	}
 	ins := gcRegLetters(f.in)
 	call := func(rcvr bool) {
@@ -297,7 +297,7 @@ func (l *gcLinker) makeFuncStub(f gcReflectFunc, call uint32) []byte {
 	for j, regs := range f.out {
 		result := func() {
 			a.get(res)
-			a.i32(int64(j) * 8)
+			a.i32(int64(j) * l.ptrSize())
 			a.op(0x10)
 			writeUleb128(a, uint64(l.helperFirst+loadr))
 		}

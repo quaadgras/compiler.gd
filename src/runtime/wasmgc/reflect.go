@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -67,6 +68,10 @@ const (
 	scalarF = 'f' // float32
 	scalarD = 'd' // float64
 	scalarR = 'r' // pointer
+
+	// scalarWord is an int, a uintptr, or a word of a string, a
+	// slice or an interface: 32 or 64 bits, as goarch.PtrSize.
+	scalarWord = scalarW*(goarch.PtrSize/8^1) + scalarL*(goarch.PtrSize/8)
 )
 
 // typeScalars calls do for each scalar of a value of type t at off.
@@ -78,8 +83,10 @@ func typeScalars(t *_type, off uintptr, do func(k byte, off uintptr)) {
 		do(scalarH, off)
 	case abi.Int32, abi.Uint32:
 		do(scalarW, off)
-	case abi.Int, abi.Uint, abi.Int64, abi.Uint64, abi.Uintptr:
+	case abi.Int64, abi.Uint64:
 		do(scalarL, off)
+	case abi.Int, abi.Uint, abi.Uintptr:
+		do(scalarWord, off)
 	case abi.Float32:
 		do(scalarF, off)
 	case abi.Float64:
@@ -94,13 +101,13 @@ func typeScalars(t *_type, off uintptr, do func(k byte, off uintptr)) {
 		do(scalarR, off)
 	case abi.String, abi.Slice:
 		do(scalarR, off)
-		do(scalarL, off+8)
-		do(scalarL, off+16)
+		do(scalarWord, off+goarch.PtrSize)
+		do(scalarWord, off+2*goarch.PtrSize)
 	case abi.Interface:
-		do(scalarL, off)
-		do(scalarR, off+8)
-		do(scalarD, off+16)
-		do(scalarD, off+24)
+		do(scalarWord, off)
+		do(scalarR, off+goarch.PtrSize)
+		do(scalarD, off+2*goarch.PtrSize)
+		do(scalarD, off+2*goarch.PtrSize+8)
 	case abi.Array:
 		at := (*abi.ArrayType)(unsafe.Pointer(t))
 		for i := uintptr(0); i < at.Len; i++ {
@@ -396,7 +403,7 @@ func reflect_unsafeslice(t *_type, ptr unsafe.Pointer, len int) {
 	}
 	// A pointer to linear memory, where addresses end at linLimit
 	// (with split, every pointer is an address of 32 bits).
-	if a := trylinaddr(ptr); splitMode && uintptr(len)*size > 1<<32-a {
+	if a := trylinaddr(ptr); splitMode && uint64(uintptr(len)*size) > 1<<32-uint64(a) {
 		panic(plainError("unsafe.Slice: len out of range"))
 	}
 	if a := trylinaddr(ptr); a != 0 && uintptr(len)*size > linLimit-a && !splitMode {
@@ -500,10 +507,12 @@ var typelinks []*_type
 func reflect_compiledTypelinks() ([]*_type, [][]*_type) {
 	if typelinks == nil {
 		md := &firstmoduledata
-		td := md.types + 8
+		// (Past the word that the linker puts first, as Go's
+		// moduleTypelinks does; descriptors are aligned to a word.)
+		td := md.types + goarch.PtrSize
 		end := md.types + md.typedesclen
 		for td < end {
-			td = (td + 7) &^ 7
+			td = (td + goarch.PtrSize - 1) &^ (goarch.PtrSize - 1)
 			t := (*_type)(unsafe.Pointer(td))
 			typelinks = append(typelinks, t)
 			td += uintptr(t.DescriptorSize())

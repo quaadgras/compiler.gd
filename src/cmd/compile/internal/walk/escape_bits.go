@@ -5,6 +5,8 @@
 package walk
 
 import (
+	"internal/abi"
+
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/reflectdata"
@@ -570,7 +572,7 @@ func wrapClosureCallCandidates(gd *base.Invocation, n *ir.CallExpr, init *ir.Nod
 	// Cache the closure value once: the mask load, the compute-fn
 	// carrier, and the call itself all see the same materialisation.
 	fnCached := cheapExpr(gd, n.Fun, init)
-	mask := emitMaskResolve(gd, pos, init, fnCached, fnCached, int64(types.PtrSize), cands)
+	mask := emitMaskResolve(gd, pos, init, fnCached, fnCached, types.FuncMaskOffset, cands)
 	for _, ca := range cands {
 		emitMaybeMaterialize(gd, pos, n, init, mask, ca)
 	}
@@ -628,10 +630,9 @@ func wrapIfaceCallCandidates(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes
 	//   Fun     [N]uintptr      (N * PtrSize)
 	//   masks   [N]uint64       (N * 8) ← per-method escape masks
 	//
-	// Per-method mask tail starts at funBase + N*PtrSize; methodIdx
-	// selects the 8-byte slot within it.
-	funBase := int64(2*types.PtrSize) + 8 // 2 ptrs + uint32 + uint8 + 3 pad
-	maskOffset := funBase + ni*int64(types.PtrSize) + methodIdx*8
+	// Per-method mask tail starts after Fun, aligned to 8
+	// (abi.ITabEscMaskOff); methodIdx selects the 8-byte slot within it.
+	maskOffset := int64(abi.ITabEscMaskOff(types.PtrSize, int(ni), int(methodIdx)))
 
 	mask := emitMaskResolve(gd, pos, init, itabCached, dataCached, maskOffset, cands)
 	for _, ca := range cands {

@@ -369,7 +369,9 @@ func NewConfig(gd *base.Invocation, arch string, types Types, ctxt *obj.Link, op
 		c.FPReg = framepointerRegRISCV64
 		c.hasGReg = true
 	case "wasm":
-		c.PtrSize = 8
+		// 4 with GOWASM=gc (wasm32), 8 for Go's own port: see
+		// buildcfg's gowasmFeatures.PtrSize.
+		c.PtrSize = int64(ctxt.Arch.PtrSize)
 		c.RegSize = 8
 		c.lowerBlock = rewriteBlockWasm
 		c.lowerValue = rewriteValueWasm

@@ -8,6 +8,7 @@ package runtime
 
 import (
 	_ "internal/bytealg" // for cmpstring
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -16,10 +17,13 @@ import (
 // bits of the third; a longer string is a pointer to its bytes, which
 // are in linear memory, and its length in the third word.
 
+// With words of 4 bytes (wasm32) a string has no inline form, as the
+// compiler has it for any 32-bit target: its third word is all of its
+// length, and stringInline is 0.
 const (
 	stringTagShift = 60
 	stringLenMask  = 1<<stringTagShift - 1
-	stringInline   = 15 // the longest string kept in the words
+	stringInline   = 15 * (goarch.PtrSize / 8) // the longest string kept in the words
 )
 
 type stringStruct struct {

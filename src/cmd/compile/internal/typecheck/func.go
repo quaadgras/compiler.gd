@@ -852,7 +852,7 @@ func NewClosureStructIter(closureVars []*ir.Name) *ClosureStructIter {
 		// skip past the function-entry PC and the per-arg escape mask
 		// — captures begin at offset PtrSize+8. Keep in lockstep with
 		// ClosureType in this file; see doc/gd/escape-bits.md.
-		offset: int64(types.PtrSize) + 8,
+		offset: types.ClosureVarsOffset,
 		next:   0,
 	}
 }

@@ -205,8 +205,9 @@ const (
 	// of every Go value are in linear memory, pointer words included
 	// (the address, as an integer), and the pointers themselves are in
 	// one array of references per allocation (GCSlots), one element
-	// per 8-byte word of the allocation: the pointer at byte b of it is
-	// element b/8. A pointer is a GCPtr: the address it points to, the
+	// per pointer word of the allocation (4 bytes with wasm32, 8 with
+	// GOWASM=gc,ptr64: see GCWordShift): the pointer at byte b of it is
+	// element b/PtrSize. A pointer is a GCPtr: the address it points to, the
 	// array of the allocation it points into (null if there is none)
 	// and the offset in bytes of the address from where element 0 of
 	// the array is. These two are the only types of Go values: the
@@ -226,6 +227,10 @@ const (
 	GCExtern     = "wasm.extern"
 	GCExternAddr = 1
 
+	// (The address of a GCPtr, its offset, and every address the
+	// code computes are i32, GCTypeAddr: linear memory is of 32 bits
+	// whatever the size of a pointer word. A memory64 build would
+	// change GCTypeAddr and what is written with it.)
 	GCPtr      = "wasm.ptr"
 	GCPtrAddr  = 0
 	GCPtrSlots = 1
@@ -799,4 +804,23 @@ func (t *gcLineTable) write(ctxt *obj.Link, s *obj.LSym, w *bytes.Buffer) {
 		Sym:  ctxt.Lookup(GCLines),
 	})
 	w.Write(t.buf.Bytes())
+}
+
+// GCTypeAddr is the WebAssembly type of an address in linear memory,
+// of the fields GCPtrAddr and GCPtrOff of a GCPtr, and of an address
+// that the code computes.
+const GCTypeAddr = GCTypeI32
+
+// GCWordShift returns log2 of ptrSize, the size in bytes of a pointer
+// word (sys.Arch.PtrSize: 4 for wasm32, 8 with GOWASM=gc,ptr64). With
+// split, the pointer at byte b of a block is element b>>GCWordShift of
+// the block's array (GCSlots).
+func GCWordShift(ptrSize int) int64 {
+	switch ptrSize {
+	case 4:
+		return 2
+	case 8:
+		return 3
+	}
+	panic("wasm: no pointer word of this size")
 }

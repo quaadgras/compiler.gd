@@ -52,6 +52,12 @@ var (
 	StringHashOffset int64
 	StringLenOffset  int64
 	StringSize       int64
+
+	// FuncMaskOffset is the offset of the escape mask M of a function
+	// value, and ClosureVarsOffset that of the first captured variable
+	// (see InitTypes).
+	FuncMaskOffset    int64
+	ClosureVarsOffset int64
 )
 
 var SkipSizeForTracing bool

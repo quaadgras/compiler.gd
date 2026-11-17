@@ -22,7 +22,8 @@ import (
 // Every Go value is in linear memory, laid out as Go lays it out, the
 // words of pointers included: they hold the address pointed to. Each
 // allocation that has pointers also has an array of references
-// (wasm.GCSlots), one element per 8-byte word, in which the pointers
+// (wasm.GCSlots), one element per pointer word (types.PtrSize: 4
+// bytes with wasm32, see spSlots), in which the pointers
 // are, so that the engine's collector sees them. A pointer is a
 // wasm.GCPtr: the address, the array of what it points into, and the
 // offset of the address from where element 0 of the array is.
@@ -326,6 +327,14 @@ func (g *gcGen) splitPointer(v *ssa.Value) {
 	g.helper(wasm.GCSplitAddPtr)
 }
 
+// spSlots returns the length of the array of a block of size bytes
+// that has pointers: an element for each pointer word (types.PtrSize
+// bytes: 4 with wasm32), to the end.
+func spSlots(size int64) int64 {
+	ps := int64(types.PtrSize)
+	return (size + ps - 1) / ps
+}
+
 // spSmall is the largest value without pointers that is copied or
 // zeroed by loads and stores rather than by memory.copy and
 // memory.fill.
@@ -520,7 +529,7 @@ func (g *gcGen) splitFrame() {
 			i32Const(g.s, int32(off))
 			g.prog(wasm.AI32Add)
 		}
-		i32Const(g.s, int32((n.Type().Size()+7)/8))
+		i32Const(g.s, int32(spSlots(n.Type().Size())))
 		g.typed(wasm.AArrayNewDefault, wasm.GCTypeSym(g.ctxt, wasm.GCSlots), 0)
 		i32Const(g.s, 0)
 		g.typed(wasm.AStructNew, g.ptrSym(), 0)

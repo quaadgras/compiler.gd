@@ -1839,8 +1839,10 @@ func (v Value) Index(i int) Value {
 		// into the returned Value's own inline slot (uint8 fits) and
 		// hand back a self-contained flagInline sub-Value.
 		s := (*unsafeheader.String)(v.dataPtr())
-		if tag := uint(s.Len) >> abi.StringTagShift; tag != 0 {
-			if uint(i) >= tag {
+		// (A tag read from a 4-byte word as a uint64 is 0: with 4-byte
+		// words a string has no inline form.)
+		if tag := uint64(s.Len) >> abi.StringTagShift; tag != 0 {
+			if uint64(i) >= tag {
 				panic("reflect: string index out of range")
 			}
 			b := *(*byte)(unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize + uintptr(i)))
@@ -2331,7 +2333,7 @@ func (v Value) lenNonSlice() int {
 		// String is bigger than a word; assume flagIndir. gd: Len is
 		// the raw word2 (tag nibble + length/bytes); decode the tag
 		// to get the logical length.
-		raw := uint((*unsafeheader.String)(v.dataPtr()).Len)
+		raw := uint64((*unsafeheader.String)(v.dataPtr()).Len)
 		if tag := raw >> abi.StringTagShift; tag != 0 {
 			return int(tag)
 		}
@@ -2861,7 +2863,7 @@ func (v Value) Slice(i, j int) Value {
 		// runtime.sliceinlinestring which returns a self-contained
 		// inline value.
 		s := (*unsafeheader.String)(v.dataPtr())
-		raw := uint(s.Len)
+		raw := uint64(s.Len)
 		var logicalLen int
 		if tag := raw >> abi.StringTagShift; tag != 0 {
 			logicalLen = int(tag)
@@ -3427,7 +3429,7 @@ func Copy(dst, src Value) int {
 		// at the header's inline-byte area, not nil.
 		srcPtr := (&src).dataPtr()
 		sh := *(*unsafeheader.String)(srcPtr)
-		raw := uint(sh.Len)
+		raw := uint64(sh.Len)
 		if tag := raw >> abi.StringTagShift; tag != 0 {
 			ss.Data = unsafe.Pointer(uintptr(srcPtr) + goarch.PtrSize)
 			ss.Len = int(tag)

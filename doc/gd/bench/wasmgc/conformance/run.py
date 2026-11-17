@@ -26,7 +26,7 @@ import build as stdbuild
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
 SPLIT = stdbuild.SPLIT
-OUT = os.path.join(HERE, 'out-split' if SPLIT else 'out')
+OUT = os.path.join(HERE, ('out-split' if SPLIT else 'out') + ('-ptr64' if stdbuild.PTR64 else ''))
 ENV = stdbuild.ENV
 HOSTENV = dict(os.environ, GOROOT=GOROOT, GOWASM='')
 for k in ('GOOS', 'GOARCH'):
@@ -39,7 +39,7 @@ RUNNER = os.path.join(HERE, '../compiled/run.mjs')
 BROWSER = os.environ.get('GOWASIRUNTIME', '')
 if BROWSER not in ('chromium', 'firefox'):
     BROWSER = ''
-STATUS = os.path.join(HERE, 'status' + ('-split' if SPLIT else '') + ('-' + BROWSER if BROWSER else '') + '.txt')
+STATUS = os.path.join(HERE, 'status' + ('-split' if SPLIT else '') + ('-ptr64' if stdbuild.PTR64 else '') + ('-' + BROWSER if BROWSER else '') + '.txt')
 
 # The packages of the standard library that tests may import: those
 # that build are importable.
@@ -70,7 +70,7 @@ def build_std():
 
 
 # The build tags of GOOS=wasip1 GOARCH=wasm with the gc toolchain.
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set())
+TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set()) | (set() if stdbuild.PTR64 else {'wasm.ptr32'})
 
 
 def build_ok(expr):

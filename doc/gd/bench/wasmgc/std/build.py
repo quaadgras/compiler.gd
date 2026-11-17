@@ -17,8 +17,12 @@ GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
 # GOWASM=gc,split in the environment builds for that model (stage 15 of
 # wasm-gc.md), in out-split; anything else is GOWASM=gc.
 SPLIT = 'split' in os.environ.get('GOWASM', '').split(',')
-GOWASM = 'gc,split' if SPLIT else 'gc'
-OUT = os.path.join(HERE, 'out-split' if SPLIT else 'out')
+# GOWASM=...,ptr64 builds with words of 8 bytes, as before stage 16 of
+# wasm-gc.md; without it words are of 4 (wasm32), and the tool tag
+# wasm.ptr32 holds.
+PTR64 = 'ptr64' in os.environ.get('GOWASM', '').split(',')
+GOWASM = ('gc,split' if SPLIT else 'gc') + (',ptr64' if PTR64 else '')
+OUT = os.path.join(HERE, ('out-split' if SPLIT else 'out') + ('-ptr64' if PTR64 else ''))
 ENV = dict(os.environ, GOROOT=GOROOT, GOOS='wasip1', GOARCH='wasm', GOWASM=GOWASM, NODE_OPTIONS='', GOWASMGC_NOTES='' if os.environ.get('GOWASMGC_QUIET') else '1')
 HOSTENV = dict(os.environ, GOROOT=GOROOT)
 for k in ('GOOS', 'GOARCH', 'GOWASM'):
@@ -36,7 +40,7 @@ def golist(*args):
 _lock = None
 
 # The build tags of the runtime's files (see build_ok).
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | ({'wasm.split'} if SPLIT else set())
+TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | ({'wasm.split'} if SPLIT else set()) | (set() if PTR64 else {'wasm.ptr32'})
 
 
 def build_ok(path):

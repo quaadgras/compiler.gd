@@ -5,6 +5,7 @@
 package ld
 
 import (
+	"cmd/internal/sys"
 	"cmd/link/internal/loader"
 	"internal/abi"
 )
@@ -26,9 +27,24 @@ func WasmGCLeaves(ctxt *Link, typ loader.Sym) []WasmGCLeaf {
 
 func wasmGCAppendLeaves(ctxt *Link, ls []WasmGCLeaf, typ loader.Sym, off int64) []WasmGCLeaf {
 	ldr, arch := ctxt.loader, ctxt.Arch
-	word := func(kinds string) []WasmGCLeaf {
+	// word appends leaves of a word each (arch.PtrSize bytes), of the
+	// kinds given ('i' an integer word), then those of 8 bytes each in
+	// d8, at an offset aligned to 8 (as cmd/compile/internal/wasm's
+	// gcAppendLeaves).
+	word := func(kinds, d8 string) []WasmGCLeaf {
+		o := off
 		for i := range kinds {
-			ls = append(ls, WasmGCLeaf{Off: off + int64(i)*8, Kind: kinds[i]})
+			k := kinds[i]
+			if k == 'i' {
+				k = WasmGCWordKind(arch)
+			}
+			ls = append(ls, WasmGCLeaf{Off: o, Kind: k})
+			o += int64(arch.PtrSize)
+		}
+		o = Rnd(o, 8)
+		for i := range d8 {
+			ls = append(ls, WasmGCLeaf{Off: o, Kind: d8[i]})
+			o += 8
 		}
 		return ls
 	}
@@ -49,21 +65,31 @@ func wasmGCAppendLeaves(ctxt *Link, ls []WasmGCLeaf, typ loader.Sym, off int64) 
 		}
 		return append(ls, WasmGCLeaf{Off: off, Kind: 'a', Type: typ})
 	case abi.String, abi.Slice:
-		return word("rll")
+		return word("rii", "")
 	case abi.Interface:
-		return word("lrdd")
+		return word("ir", "dd")
 	case abi.Complex64:
 		return append(ls, WasmGCLeaf{Off: off, Kind: 'f'}, WasmGCLeaf{Off: off + 4, Kind: 'f'})
 	case abi.Complex128:
-		return word("dd")
+		return word("", "dd")
 	case abi.Pointer, abi.Map, abi.Chan, abi.Func, abi.UnsafePointer:
-		return word("r")
+		return word("r", "")
 	case abi.Float32:
 		return append(ls, WasmGCLeaf{Off: off, Kind: 'f'})
 	case abi.Float64:
-		return word("d")
+		return word("", "d")
 	}
 	return append(ls, WasmGCLeaf{Off: off, Kind: "bh?w???l"[decodetypeSize(arch, data)-1]})
+}
+
+// WasmGCWordKind is the kind of a word that is an integer (an int, a
+// uintptr, the length of a string): 'w' or 'l' as a pointer is 4 or 8
+// bytes.
+func WasmGCWordKind(arch *sys.Arch) byte {
+	if arch.PtrSize == 4 {
+		return 'w'
+	}
+	return 'l'
 }
 
 // WasmGCArray returns the length and the element type of the array
@@ -147,16 +173,19 @@ func wasmGCAppendRegs(ctxt *Link, rs []WasmGCReg, typ loader.Sym, off int64) []W
 			rs = wasmGCAppendRegs(ctxt, rs, e, off+i*size)
 		}
 	case abi.String, abi.Slice:
+		ps, w := int64(arch.PtrSize), WasmGCWordKind(arch)
 		add(0, 'r', 'r', false)
-		add(8, 'l', 'l', false)
-		add(16, 'l', 'l', false)
+		add(ps, w, 'l', false)
+		add(2*ps, w, 'l', false)
 	case abi.Interface:
 		// The word that holds the type is an integer in memory and
-		// a pointer in a register.
-		add(0, 'l', 'r', false)
-		add(8, 'r', 'r', false)
-		add(16, 'd', 'd', false)
-		add(24, 'd', 'd', false)
+		// a pointer in a register. (The two floats of its inline
+		// payload are after two words, at 8 or 16.)
+		ps := int64(arch.PtrSize)
+		add(0, WasmGCWordKind(arch), 'r', false)
+		add(ps, 'r', 'r', false)
+		add(2*ps, 'd', 'd', false)
+		add(2*ps+8, 'd', 'd', false)
 	case abi.Complex64:
 		add(0, 'f', 'f', false)
 		add(4, 'f', 'f', false)
@@ -171,7 +200,7 @@ func wasmGCAppendRegs(ctxt *Link, rs []WasmGCReg, typ loader.Sym, off int64) []W
 		add(0, 'd', 'd', false)
 	default:
 		size := decodetypeSize(arch, data)
-		signed := k == abi.Int8 || k == abi.Int16 || k == abi.Int32
+		signed := k == abi.Int8 || k == abi.Int16 || k == abi.Int32 || k == abi.Int && size < 8
 		add(0, "bh?w???l"[size-1], 'l', signed)
 	}
 	return rs

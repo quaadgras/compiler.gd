@@ -173,8 +173,20 @@ func gcLeafSize(l gcLeaf) int64 {
 		return 4
 	case 'a':
 		return l.t.Size()
+	case 'r':
+		return int64(types.PtrSize)
 	}
 	return 8
+}
+
+// gcWord is the kind of a word that is an integer (an int, a uintptr,
+// the length of a string or a slice): 'w' or 'l', as the size of a
+// pointer is 4 or 8 bytes.
+func gcWord() byte {
+	if types.PtrSize == 4 {
+		return 'w'
+	}
+	return 'l'
 }
 
 func gcLeaves(t *types.Type) []gcLeaf {
@@ -182,9 +194,23 @@ func gcLeaves(t *types.Type) []gcLeaf {
 }
 
 func gcAppendLeaves(ls []gcLeaf, t *types.Type, off int64) []gcLeaf {
-	word := func(kinds string) []gcLeaf {
+	// word appends leaves of a word each (types.PtrSize bytes), of
+	// the kinds given ('i' is gcWord), then those of 8 bytes each in
+	// d8, at an offset aligned to 8.
+	word := func(kinds, d8 string) []gcLeaf {
+		o := off
 		for i := range kinds {
-			ls = append(ls, gcLeaf{off: off + int64(i)*8, kind: kinds[i]})
+			k := kinds[i]
+			if k == 'i' {
+				k = gcWord()
+			}
+			ls = append(ls, gcLeaf{off: o, kind: k})
+			o += int64(types.PtrSize)
+		}
+		o = types.RoundUp(o, 8)
+		for i := range d8 {
+			ls = append(ls, gcLeaf{off: o, kind: d8[i]})
+			o += 8
 		}
 		return ls
 	}
@@ -203,21 +229,21 @@ func gcAppendLeaves(ls []gcLeaf, t *types.Type, off int64) []gcLeaf {
 		}
 		return append(ls, gcLeaf{off: off, kind: 'a', t: t})
 	case t.IsString(), t.IsSlice():
-		return word("rll")
+		return word("rii", "")
 	case t.IsInterface():
-		return word("lrdd")
+		return word("ir", "dd")
 	case t.IsComplex():
 		if t.Size() == 8 {
 			return append(ls, gcLeaf{off: off, kind: 'f'}, gcLeaf{off: off + 4, kind: 'f'})
 		}
-		return word("dd")
+		return word("", "dd")
 	case t.IsPtrShaped():
-		return word("r")
+		return word("r", "")
 	case t.IsFloat():
 		if t.Size() == 4 {
 			return append(ls, gcLeaf{off: off, kind: 'f'})
 		}
-		return word("d")
+		return word("", "d")
 	case t.IsInteger(), t.IsBoolean():
 		return append(ls, gcLeaf{off: off, kind: "bh?w???l"[t.Size()-1]})
 	}

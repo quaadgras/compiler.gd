@@ -9073,12 +9073,48 @@ func AddAux2(a *obj.Addr, v *ssa.Value, offset int64) {
 	}
 }
 
+// extendIndexWide is extendIndex of a 64-bit index where an int is 32
+// bits and a register 64 (wasm32): the index is truncated, and it is
+// out of range if that changed it. The panic has the 64-bit value.
+func (s *state) extendIndexWide(idx, len *ssa.Value, kind ssa.BoundsKind, bounded bool) *ssa.Value {
+	intT, ext := types.Types[types.TUINT], ssa.OpZeroExt32to64
+	if idx.Type.IsSigned() {
+		intT, ext = types.Types[types.TINT], ssa.OpSignExt32to64
+	}
+	lo := s.newValue1(ssa.OpTrunc64to32, intT, idx)
+	if bounded || s.gd.Flag.B != 0 {
+		return lo
+	}
+	back := s.newValue1(ext, idx.Type, lo)
+	cmp := s.newValue2(ssa.OpEq64, types.Types[types.TBOOL], back, idx)
+	bNext := s.f.NewBlock(ssa.BlockPlain)
+	bPanic := s.f.NewBlock(ssa.BlockExit)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cmp)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bNext)
+	b.AddEdgeTo(bPanic)
+	s.startBlock(bPanic)
+	code, signed := kind.Code(s.gd)
+	if !idx.Type.IsSigned() {
+		signed = false
+	}
+	fn := typecheck.LookupRuntimeFunc(s.gd, "goPanicExtendWide")
+	s.rtcall(fn, false, nil, idx, s.constBool(signed), s.constInt8(types.Types[types.TUINT8], int8(code)), len)
+	s.startBlock(bNext)
+	return lo
+}
+
 // extendIndex extends v to a full int width.
 // panic with the given kind if v does not fit in an int (only on 32-bit archs).
 func (s *state) extendIndex(idx, len *ssa.Value, kind ssa.BoundsKind, bounded bool) *ssa.Value {
 	size := idx.Type.Size()
 	if size == s.config.PtrSize {
 		return idx
+	}
+	if size > s.config.PtrSize && s.config.RegSize == 8 {
+		return s.extendIndexWide(idx, len, kind, bounded)
 	}
 	if size > s.config.PtrSize {
 		// truncate 64-bit indexes on 32-bit pointer archs. Test the
