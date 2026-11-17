@@ -30,8 +30,14 @@
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .out { min-height: 8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .out .e { color: #d0453a; }
-  .out .n { color: var(--muted); }
-  @media (prefers-color-scheme: dark) { .out .e { color: #ff8a7a; } }
+  .stats, .build { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; min-height: 1.2em; }
+  .stats { margin-top: -.35rem; }
+  .build { display: flex; align-items: center; gap: .5rem; margin: -.25rem 0 -.35rem; }
+  .build.failed { color: #d0453a; }
+  .build .spin { width: .7rem; height: .7rem; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .build .spin { animation-duration: 2s; } }
+  @media (prefers-color-scheme: dark) { .out .e, .build.failed { color: #ff8a7a; } }
   kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--line); border-radius: 4px; padding: 0 .3em; }
 </style>
 </head>
@@ -56,7 +62,9 @@
     </div>
     <div class="progress" id="progress" hidden><i></i></div>
     <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Go source"></textarea>
+    <div class="build" id="build" aria-live="polite"></div>
     <pre class="out" id="out" aria-live="polite"></pre>
+    <div class="stats" id="stats"></div>
   </div>
 
   <h2>How it works</h2>
@@ -185,11 +193,43 @@ let saved = null;
 try { saved = localStorage.getItem('gd-play-src'); } catch {}
 src.value = saved || examples.Hello;
 
+// The playground's own notes (fd 0: exit status, load time) go under the
+// output, not in it; how the build went, above it.
+const stats = $('stats'), build = $('build');
+let ticker = 0;
+const setBuild = (text, failed) => {
+  clearInterval(ticker);
+  build.className = 'build' + (failed ? ' failed' : '');
+  build.textContent = text;
+  if (text !== 'building') return;
+  // Building: a spinner and the time so far.
+  const t0 = performance.now();
+  build.textContent = '';
+  const spin = document.createElement('i');
+  spin.className = 'spin';
+  const label = document.createElement('span');
+  build.append(spin, label);
+  const tick = () => { label.textContent = `building… ${((performance.now() - t0) / 1000).toFixed(1)} s`; };
+  tick();
+  ticker = setInterval(tick, 100);
+};
+let notes = [];
 const print = (line, fd) => {
+  if (fd === 0) {
+    notes.push(line.replace(/^\[|\]$/g, ''));
+    stats.textContent = notes.join(' · ');
+    return;
+  }
   const s = document.createElement('span');
-  if (fd !== 1) s.className = fd === 2 ? 'e' : 'n';
+  if (fd === 2) s.className = 'e';
   s.textContent = line + '\n';
   out.append(s);
+};
+const clear = () => {
+  out.textContent = '';
+  notes = [];
+  stats.textContent = '';
+  setBuild('');
 };
 
 let worker, ready = false, running = false;
@@ -201,6 +241,7 @@ function start() {
   worker.onerror = (e) => { print('worker: ' + (e.message || 'failed to start'), 2); status.textContent = 'failed'; };
   worker.onmessage = ({ data }) => {
     if ('line' in data) print(data.line, data.fd);
+    if ('build' in data) setBuild(data.build, data.failed);
     if ('status' in data) {
       if (data.total) {
         loads.set(data.status, data);
@@ -234,7 +275,8 @@ function go() {
   running = true;
   run.disabled = true;
   stop.hidden = false;
-  out.textContent = '';
+  status.textContent = '';
+  clear();
   worker.postMessage({ run: src.value });
 }
 
@@ -242,12 +284,13 @@ run.onclick = go;
 stop.onclick = () => {
   // A program may never return: start over (the cache is kept).
   worker.terminate();
+  if (build.querySelector('.spin')) setBuild('build stopped');
   running = false;
   stop.hidden = true;
   print('[stopped]', 0);
   start();
 };
-$('example').onchange = (e) => { src.value = examples[e.target.value]; out.textContent = ''; };
+$('example').onchange = (e) => { src.value = examples[e.target.value]; clear(); };
 src.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();

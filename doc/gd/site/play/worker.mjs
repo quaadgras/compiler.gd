@@ -6,7 +6,8 @@
 //
 // From the page: {run: source}. To the page: {line, fd} (fd 1 and 2 are
 // the programs' output, 0 the playground's notes), {status, done?,
-// total?} while loading, {ready}, {finished} when a run is over.
+// total?} while loading, {ready}, {build: 'building' or how it went,
+// failed?}, {finished} when a run is over.
 import { runGo } from './wasm_gc_browser.js';
 import { memFS } from './wasm_gc_fs.js';
 import { env, untar } from './files.mjs';
@@ -84,18 +85,18 @@ onmessage = async ({ data }) => {
     try { fs.unlink('/work/main.wasm'); } catch {}
     const out = { stdout: (line) => post({ line, fd: 1 }), stderr: (line) => post({ line, fd: 2 }) };
     let t0 = performance.now();
-    post({ status: 'go build' });
+    post({ build: 'building' });
     const code = await runGo(go, { args: ['go', 'build', '-o', '/work/main.wasm', '.'], env, fs, ...out });
     fs.sync().catch(() => {});
     if (code === 0) {
       const bin = fs.readFile('/work/main.wasm');
-      note(`[go build: ${ms(t0)}, ${(bin.length / 1024).toFixed(0)} KB]`);
+      post({ build: `built in ${ms(t0)} · ${(bin.length / 1024).toFixed(0)} KB` });
       t0 = performance.now();
       post({ status: 'running' });
       const run = await runGo(bin, { args: ['main'], env: { PWD: '/work', HOME: '/home' }, fs, ...out });
       note(`[exit ${run} after ${ms(t0)}]`);
     } else {
-      note(`[go build failed after ${ms(t0)}]`);
+      post({ build: `build failed after ${ms(t0)}`, failed: true });
     }
   } catch (e) {
     post({ line: String((e && e.stack) || e), fd: 2 });
