@@ -74,43 +74,63 @@ func FuncOf[F any](p Ptr) F {
 	return f
 }
 
-// adapt makes f callable as an F when F is a function without a
-// prototype (its arguments ...any), as C lets one be called: the
-// arguments, promoted, are converted to f's parameters.
+// adapt makes f callable as an F where C allows the call, with a
+// function or a pointer type without a prototype on one side: the
+// arguments (as ...any, or each) are converted to f's parameters.
 func adapt[F any](f any) (F, bool) {
 	var z F
 	ft, fv := reflect.TypeFor[F](), reflect.ValueOf(f)
 	gt := fv.Type()
-	if !ft.IsVariadic() || ft.NumIn() != 1 || ft.In(0) != reflect.TypeFor[[]any]() ||
-		ft.NumOut() != gt.NumOut() || gt.NumOut() == 1 && !convertible(gt.Out(0), ft.Out(0)) {
+	anyArgs := reflect.TypeFor[[]any]()
+	fLoose := ft.IsVariadic() && ft.NumIn() == 1 && ft.In(0) == anyArgs
+	gLoose := gt.IsVariadic() && gt.NumIn() == 1 && gt.In(0) == anyArgs
+	if !fLoose && !gLoose || ft.NumOut() != gt.NumOut() || gt.NumOut() == 1 && !convertible(gt.Out(0), ft.Out(0)) {
 		return z, false
 	}
 	g := reflect.MakeFunc(ft, func(in []reflect.Value) []reflect.Value {
-		args := in[0].Interface().([]any)
-		var vals []reflect.Value
-		for i := 0; i < gt.NumIn(); i++ {
-			pt := gt.In(i)
-			if gt.IsVariadic() && i == gt.NumIn()-1 {
-				for _, a := range args[min(i, len(args)):] {
-					vals = append(vals, reflect.ValueOf(a))
-				}
-				break
+		// The arguments, as values.
+		var args []reflect.Value
+		if fLoose {
+			for _, a := range in[0].Interface().([]any) {
+				args = append(args, reflect.ValueOf(a))
 			}
-			if i >= len(args) {
-				vals = append(vals, reflect.Zero(pt))
-				continue
-			}
-			v := reflect.ValueOf(args[i])
-			if !convertible(v.Type(), pt) {
-				fault(fmt.Sprintf("call passing a %s for a %s", v.Type(), pt), 0)
-			}
-			vals = append(vals, v.Convert(pt))
+		} else {
+			args = in
 		}
 		var out []reflect.Value
-		if gt.IsVariadic() {
-			out = fv.CallSlice(append(vals[:gt.NumIn()-1:gt.NumIn()-1], reflect.ValueOf(vals[gt.NumIn()-1:])))
+		if gLoose {
+			as := make([]any, len(args))
+			for i, a := range args {
+				as[i] = a.Interface()
+			}
+			out = fv.CallSlice([]reflect.Value{reflect.ValueOf(as)})
 		} else {
-			out = fv.Call(vals)
+			var vals []reflect.Value
+			n := gt.NumIn()
+			if gt.IsVariadic() {
+				n--
+			}
+			for i := 0; i < n; i++ {
+				pt := gt.In(i)
+				if i >= len(args) {
+					vals = append(vals, reflect.Zero(pt))
+					continue
+				}
+				if !convertible(args[i].Type(), pt) {
+					fault(fmt.Sprintf("call passing a %s for a %s", args[i].Type(), pt), 0)
+				}
+				vals = append(vals, args[i].Convert(pt))
+			}
+			if gt.IsVariadic() {
+				var rest []any
+				for _, a := range args[min(n, len(args)):] {
+					rest = append(rest, a.Interface())
+				}
+				vals = append(vals, reflect.ValueOf(rest))
+				out = fv.CallSlice(vals)
+			} else {
+				out = fv.Call(vals)
+			}
 		}
 		if len(out) == 1 {
 			out[0] = out[0].Convert(ft.Out(0))

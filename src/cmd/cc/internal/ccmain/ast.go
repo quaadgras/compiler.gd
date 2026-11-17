@@ -194,27 +194,28 @@ const (
 )
 
 type symbol struct {
-	name    string
-	kind    symKind
-	t       *ctype
-	storage storage
-	global  bool // file scope, or static storage duration
-	linkage byte // 'e' external, 'i' internal, 0 none
-	tls     bool
-	addr    bool // its address is taken: in memory
-	init    *initializer
-	val     int64 // symEnumConst; a constexpr's value
-	constx  bool  // constexpr
-	cval    expr  // a constexpr's (folded) value
-	defined bool
-	fn      *funcDecl
-	goName  string
-	p       pos
-	used    bool
-	isParam bool
-	weak    bool    // __attribute__((weak)): null if not defined
-	cleanup *symbol // __attribute__((cleanup(f))): f(&it) when its block is left
-	vlaSize string  // the Go temp with a VLA's size in bytes
+	name      string
+	kind      symKind
+	t         *ctype
+	storage   storage
+	global    bool // file scope, or static storage duration
+	linkage   byte // 'e' external, 'i' internal, 0 none
+	tls       bool
+	addr      bool // its address is taken: in memory
+	init      *initializer
+	val       int64 // symEnumConst; a constexpr's value
+	constx    bool  // constexpr
+	cval      expr  // a constexpr's (folded) value
+	defined   bool
+	fn        *funcDecl
+	goName    string
+	p         pos
+	used      bool
+	isParam   bool
+	weak      bool    // __attribute__((weak)): null if not defined
+	cleanup   *symbol // __attribute__((cleanup(f))): f(&it) when its block is left
+	vlaSize   string  // the Go temp with a VLA's size in bytes
+	allocSize int64   // more than its type\'s size: a flexible array member\'s initializer
 }
 
 type funcDecl struct {

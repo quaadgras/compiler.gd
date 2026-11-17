@@ -817,7 +817,7 @@ func (p *parser) specQualType() *ctype {
 // declarator parses a declarator for base: the name ("" if abstract),
 // the type, and the attributes on the declarator.
 func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
-	var a attrs
+	a := p.attributes()
 	t := base
 	for p.is("*") || p.is("^") {
 		p.next()
@@ -841,7 +841,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	ptrDone:
 	}
 	a.merge(p.attributes())
-	if p.is("(") && !p.isTypeStart(1) && !p.isAt(1, ")") {
+	if p.is("(") && p.nestedDeclarator() {
 		// ( declarator ): parse what follows it first, then the inner
 		// declarator with that type.
 		p.next()
@@ -875,6 +875,65 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	t = p.suffixes(t)
 	a.merge(p.attributes())
 	return name, t, a
+}
+
+// nestedDeclarator reports whether the "(" next starts a parenthesized
+// declarator, not a function's parameters: (*p), (ATTR *p).
+func (p *parser) nestedDeclarator() bool {
+	k := 1
+	for {
+		switch {
+		case p.isAt(k, "__attribute__") || p.isAt(k, "__attribute"):
+			// __attribute__((...))
+			depth := 0
+			k++
+			for {
+				t := p.peekAt(k)
+				if t.kind == tkEOF {
+					return false
+				}
+				if t.text == "(" {
+					depth++
+				} else if t.text == ")" {
+					depth--
+					if depth == 0 {
+						k++
+						break
+					}
+				}
+				k++
+			}
+			continue
+		case p.isAt(k, "[") && p.isAt(k+1, "["):
+			depth := 0
+			for {
+				t := p.peekAt(k)
+				if t.kind == tkEOF {
+					return false
+				}
+				if t.text == "[" {
+					depth++
+				} else if t.text == "]" {
+					depth--
+					if depth == 0 {
+						k++
+						break
+					}
+				}
+				k++
+			}
+			continue
+		}
+		break
+	}
+	if p.isAt(k, ")") {
+		return false
+	}
+	t := p.peekAt(k)
+	if t.kind == tkPunct {
+		return t.text == "*" || t.text == "(" || t.text == "^" || t.text == "["
+	}
+	return !p.isTypeStart(k)
 }
 
 // isTypeStartWord reports whether the next identifier is a keyword that

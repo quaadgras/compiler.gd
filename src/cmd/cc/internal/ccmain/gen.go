@@ -285,7 +285,9 @@ func (g *gen) globalVar(s *symbol) {
 		g.vars.WriteString("return p\n})\n")
 		return
 	}
-	if a := s.t.alignof(); a > 8 {
+	if s.allocSize > s.t.sizeof() {
+		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, g.mirror(s.t), s.allocSize)
+	} else if a := s.t.alignof(); a > 8 {
 		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.mirror(s.t), a)
 	} else {
 		fmt.Fprintf(&g.vars, "var %s = c23.New[%s]()\n", name, g.mirror(s.t))

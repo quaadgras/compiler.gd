@@ -43,6 +43,7 @@ type pp struct {
 	pack    int64
 	packs   []int64
 	inIf    bool // expanding a controlling expression
+	pushed  map[string][]*macro
 }
 
 // A ppCtx is a list of tokens to read: a file, or a macro's expansion.
@@ -1025,6 +1026,31 @@ func (p *pp) pragma(d token, ts []token) {
 	switch ts[0].text {
 	case "once":
 		p.once[p.curFile()] = true
+	case "push_macro", "pop_macro":
+		// push_macro("name"): save the macro's definition, or that it
+		// has none; pop_macro("name") restores it.
+		if len(ts) < 3 || ts[2].kind != tkString {
+			return
+		}
+		name := ts[2].text[1 : len(ts[2].text)-1]
+		if p.pushed == nil {
+			p.pushed = map[string][]*macro{}
+		}
+		if ts[0].text == "push_macro" {
+			p.pushed[name] = append(p.pushed[name], p.macros[name])
+			return
+		}
+		st := p.pushed[name]
+		if len(st) == 0 {
+			return
+		}
+		m := st[len(st)-1]
+		p.pushed[name] = st[:len(st)-1]
+		if m == nil {
+			delete(p.macros, name)
+		} else {
+			p.macros[name] = m
+		}
 	case "pack":
 		// pack(n), pack(), pack(push[, n]), pack(pop).
 		var args []string

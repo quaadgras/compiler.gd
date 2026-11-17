@@ -49,12 +49,8 @@ func (p *parser) initializer(sym *symbol) *initializer {
 	}
 	if t.kind == kStruct && t.rec.flex && ip.maxEnd > t.sizeof() {
 		// GCC: initializing a flexible array member makes the object
-		// bigger.
-		c := *t
-		r := *t.rec
-		r.size = (ip.maxEnd + r.align - 1) / r.align * r.align
-		c.rec = &r
-		sym.t = &c
+		// bigger, not its type.
+		sym.allocSize = (ip.maxEnd + t.rec.align - 1) / t.rec.align * t.rec.align
 	}
 	if sym.t.isScalar() && len(ip.items) == 1 && ip.items[0].off == 0 {
 		return &initializer{scalar: ip.items[0].x}
