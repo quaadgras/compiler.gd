@@ -249,12 +249,51 @@ each, with node):
 - **cc's output is not in the build cache's key**: the action ID has the
   package's files, but not cc itself, so after changing cmd/cc, clean the
   cache (`go clean -cache`).
-- **One unit per package**: the preambles and C files are translated
-  together, so a `static` name in two of them clashes. Errors in the C
-  name the package's directory, not always the file.
-- **Language:** no bitfields, function pointers, `goto`, variadic
-  definitions, struct parameters or results, compound literals or
-  function-like macros, and Go cannot call a variadic C function. The
-  preprocessor has `#include`, `#define`, `#undef`, `#if`, `#ifdef`,
-  `#ifndef`, `#elif`, `#else` and `#endif`. A few libc functions are built
-  in (`printf`, `malloc`, `memcpy`, `strlen`...).
+- **Language and library:** the gaps are what slimcc's tests show
+  (below): `_BitInt`, `_Complex`, inline assembly, `__int128`, vector
+  types, `static_assert` used as an expression, a `long double` with more
+  than a double's precision, local arrays aligned to 16 as on x86-64 (only
+  `_Alignas` objects are over-aligned, in the heap). Go cannot call a
+  variadic C function. A pointer made from an integer has no capability,
+  by design (`(int *)(long)&x` cannot be used).
+- **Thread-local objects with GOWASM=gc,split** are shared by all
+  goroutines (the runtime keeps one side-table slot there).
+
+## C23, and how much of it
+
+The frontend (cmd/cc/internal/ccmain) has a full C23 preprocessor
+(`pp.go`: macros disabled as GCC disables them, `#embed`, `__has_include`,
+`__VA_OPT__`; `TestPreprocessGCC` compares it with `gcc -E`) and a parser
+that types everything as it parses (`types.go`, `ast.go`, `parse.go`,
+`expr.go`, `stmt.go`, `init.go`): every declarator, bit-fields, designated
+initializers by C's current object, compound literals with storage
+classes, `_Generic`, `typeof`, `auto`, `constexpr`, `nullptr`, VLAs, and
+the GNU extensions slimcc tests (statement expressions, case ranges,
+labels as values, local labels, `cleanup`, `__attribute__`), and C2y's
+`defer`, named `break`/`continue`, declarations in conditions, `_Countof`
+and delimited escapes.
+
+The generator hoists every local to the top of its function, so `goto`
+works; a function Go's structured statements cannot hold (a `goto` into a
+block, a case label nested in a statement, labels as values, `setjmp`) is
+generated flat, as labels and gotos. Struct values live in memory (a
+struct rvalue is its `c23.Ptr`; the callee copies its parameters; results
+are written where the caller says). Function pointers point to
+`c23.Func` objects, and a call through one checks the function's Go type
+(adapting it for a function without a prototype). Variable arguments are
+`...any`, and a `va_list` is a `c23.VaList` object.
+
+`setjmp` and `longjmp` work as in Fil-C: `longjmp` may only return to a
+function still running, which is checked. A function that calls `setjmp`
+runs its body in a closure that recovers `longjmp`'s panic and jumps back
+to the `setjmp`'s site. A C thread is a goroutine (`pthread.h`); a
+`_Thread_local` object is each goroutine's, made on first use; `_Atomic`
+objects and `stdatomic.h` use `sync/atomic`, or a lock for small objects
+and pointers.
+
+C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
+`uchar.go`, `time.go`, `errno.go`, `thread.go`), with C prototypes in the
+headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
+
+`go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);
+`testdata/slimcc/status.txt` lists the 75 of 106 that pass.
