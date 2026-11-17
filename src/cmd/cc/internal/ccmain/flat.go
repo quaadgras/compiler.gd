@@ -168,7 +168,11 @@ func (g *gen) flatStmt(s stmt) {
 		t := g.tmp(goType(s.x.ty()))
 		g.p("%s = %s", t, x)
 		brk := g.label()
-		var dflt string
+		// A Go switch of gotos, which Go makes a jump table (an
+		// interpreter's loop is such a switch); GNU's case ranges are
+		// tested first.
+		dflt := brk
+		var single []*caseStmt
 		for _, c := range s.cases {
 			l := g.label()
 			fs.cases[c] = l
@@ -176,16 +180,18 @@ func (g *gen) flatStmt(s stmt) {
 			case c.dflt:
 				dflt = l
 			case c.lo == c.hi:
-				g.p("if %s == %s { goto %s }", t, constLit(s.x.ty(), c.lo), l)
+				single = append(single, c)
 			default:
 				g.p("if %s >= %s && %s <= %s { goto %s }", t, constLit(s.x.ty(), c.lo), t, constLit(s.x.ty(), c.hi), l)
 			}
 		}
-		if dflt != "" {
-			g.p("goto %s", dflt)
-		} else {
-			g.p("goto %s", brk)
+		g.p("switch %s {", t)
+		for _, c := range single {
+			g.p("case %s:", constLit(s.x.ty(), c.lo))
+			g.p("goto %s", fs.cases[c])
 		}
+		g.p("}")
+		g.p("goto %s", dflt)
 		fs.brk = append(fs.brk, brk)
 		g.named(brk, "")
 		g.inFrame(frSwitch, s.body, g.deadStmt)
