@@ -1,4 +1,4 @@
-947 pass, 0 fail, 18 skipped (of 965 "// run" tests)
+944 pass, 0 fail, 21 skipped (of 965 "// run" tests)
 
 
 PASS 235.go 
@@ -110,7 +110,7 @@ PASS fixedbugs/bug101.go
 PASS fixedbugs/bug102.go 
 PASS fixedbugs/bug111.go 
 PASS fixedbugs/bug113.go 
-PASS fixedbugs/bug114.go 
+SKIP fixedbugs/bug114.go an int of 32 bits (as Go skips it on 32-bit targets)
 PASS fixedbugs/bug116.go 
 PASS fixedbugs/bug119.go 
 PASS fixedbugs/bug120.go 
@@ -348,7 +348,7 @@ PASS fixedbugs/issue22781.go
 PASS fixedbugs/issue22881.go 
 PASS fixedbugs/issue23017.go 
 PASS fixedbugs/issue23188.go 
-PASS fixedbugs/issue23305.go 
+SKIP fixedbugs/issue23305.go an int of 32 bits (as Go skips it on 32-bit targets)
 PASS fixedbugs/issue23489.go 
 PASS fixedbugs/issue23522.go 
 PASS fixedbugs/issue23536.go 
@@ -780,7 +780,7 @@ PASS nilptr2.go
 PASS noinit.go 
 PASS peano.go 
 PASS print.go 
-PASS printbig.go 
+SKIP printbig.go an int of 32 bits (as Go skips it on 32-bit targets)
 PASS range.go 
 PASS range3.go 
 PASS range4.go 
