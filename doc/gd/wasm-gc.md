@@ -2062,17 +2062,22 @@ gzipped), against wasip1 built the same day:
 
 |                        | wasip1                      | js                          |
 |------------------------|----------------------------:|----------------------------:|
-| `GOWASM=gc`            | 537,202 / 480,203 / 148,044 | 675,078 / 613,390 / 163,955 |
-| `GOWASM=gc,split`      | 372,216 / 317,549 / 115,730 | 459,414 / 400,111 / 127,371 |
+| `GOWASM=gc`            | 537,200 / 480,200 / 147,997 | 675,976 / 614,165 / 164,133 |
+| `GOWASM=gc,split`      | 372,217 / 317,549 / 115,730 | 460,034 / 400,612 / 127,601 |
 | `GOWASM=linear`        |                             | 2,285,210 / 2,239,650       |
 
-The wasip1 sizes are those before this stage (a build differs from the
-next by a few bytes: the linker is not quite deterministic here). What
+The wasip1 sizes are as before this stage (537,199 / 480,200 and
+372,216 / 317,549 at its start: a build differs from the next by a few
+bytes, the compiler is not quite deterministic here). What
 GOOS=js adds is std's: `os` and `syscall` go to node's `fs` through
 `syscall/js`, with a `js.FuncOf` and a goroutine for each call. With
 `GOWASM=gc`, 35 KB of the 138 is the start function, which builds the
 global variables of the program as objects (`syscall`'s tables of
 errors, among them): with split they are data.
+
+wasip1 is as it was, run at the end with `GOWASMGC_POISON=1`: the
+conformance suite 947 of 965 in both models (`conformance/run.py -j 8`),
+and the tests of std 255 of 255 in both (`std/survey.py -n -j 8`).
 
 Work list (kept current):
 
