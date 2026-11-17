@@ -20,9 +20,21 @@ const alignMagic = 0xA11_C0DE_CAB_A11
 // the object is made one of those. Alignments beyond a page are a page.
 func NewAligned[T any](align uintptr) Ptr {
 	ti := tinfoOf[T]()
+	return newAligned(ti, ti.t, align)
+}
+
+// mallocAligned is Malloc of n bytes aligned to align bytes.
+func mallocAligned(align, n uintptr) Ptr {
+	ti := tinfoOf[Raw]()
+	return newAligned(ti, reflect.ArrayOf(int(n), ti.t), align)
+}
+
+// newAligned allocates a vt, an array of ti's type, aligned to align
+// bytes.
+func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 	const page = 8192
 	align = min(max(align, 8), page)
-	size := ti.t.Size()
+	size := vt.Size()
 	off := (16 + hdrSize + align - 1) / align * align
 	// Go may put a header of its own at the start of an object; the
 	// first try finds out how far the T lands from a multiple of align,
@@ -45,7 +57,7 @@ func NewAligned[T any](align uintptr) Ptr {
 			{Name: "M", Type: reflect.TypeFor[[2]uintptr]()},
 			{Name: "P", Type: reflect.ArrayOf(int(off-16-hdrSize), reflect.TypeFor[byte]())},
 			{Name: "H", Type: reflect.TypeFor[header]()},
-			{Name: "V", Type: ti.t},
+			{Name: "V", Type: vt},
 			{Name: "T", Type: reflect.ArrayOf(int(objSize-total), reflect.TypeFor[byte]())},
 		})
 		base := newObj(st)

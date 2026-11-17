@@ -452,8 +452,11 @@ long double nanl(const char *tagp);
 	"time.h": `#ifndef __CC_TIME_H
 #define __CC_TIME_H
 #include <stddef.h>
+#ifndef __CC_TIME_T
+#define __CC_TIME_T
 typedef long time_t;
 typedef long clock_t;
+#endif
 #define CLOCKS_PER_SEC ((clock_t)1000000)
 time_t time(time_t *timer);
 clock_t clock(void);
@@ -469,10 +472,13 @@ struct tm {
 	int tm_yday;
 	int tm_isdst;
 };
+#ifndef __CC_TIMESPEC
+#define __CC_TIMESPEC
 struct timespec {
 	time_t tv_sec;
 	long tv_nsec;
 };
+#endif
 #define TIME_UTC 1
 time_t mktime(struct tm *timeptr);
 time_t timegm(struct tm *timeptr);
@@ -1006,6 +1012,8 @@ int remove(const char *filename);
 int rename(const char *old, const char *new);
 void perror(const char *s);
 FILE *freopen(const char *restrict filename, const char *restrict mode, FILE *restrict stream);
+int fileno(FILE *stream);
+FILE *fdopen(int fd, const char *mode);
 #define L_tmpnam 20
 #define TMP_MAX 238328
 char *tmpnam(char *s);
@@ -1059,6 +1067,12 @@ div_t div(int numer, int denom);
 ldiv_t ldiv(long numer, long denom);
 lldiv_t lldiv(long long numer, long long denom);
 #define MB_CUR_MAX ((size_t)4)
+void *aligned_alloc(size_t alignment, size_t size);
+int posix_memalign(void **memptr, size_t alignment, size_t size);
+int setenv(const char *name, const char *value, int overwrite);
+int unsetenv(const char *name);
+int mkstemp(char *template);
+char *realpath(const char *restrict path, char *restrict resolved);
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,
@@ -1152,7 +1166,251 @@ char *strtok(char *restrict s1, const char *restrict s2);
 char *strtok_r(char *restrict s, const char *restrict sep, char **restrict lasts);
 char *strerror(int errnum);
 void *memset_explicit(void *s, int c, size_t n);
+char *stpcpy(char *restrict s1, const char *restrict s2);
+char *stpncpy(char *restrict s1, const char *restrict s2, size_t n);
+size_t strlcpy(char *restrict s1, const char *restrict s2, size_t n);
+size_t strlcat(char *restrict s1, const char *restrict s2, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
+#endif
+`,
+	"sys/types.h": `#ifndef __CC_SYS_TYPES_H
+#define __CC_SYS_TYPES_H
+#include <stddef.h>
+typedef long ssize_t;
+typedef long off_t;
+typedef int pid_t;
+typedef unsigned int uid_t;
+typedef unsigned int gid_t;
+typedef unsigned int mode_t;
+typedef unsigned long dev_t;
+typedef unsigned long ino_t;
+typedef unsigned long nlink_t;
+typedef long blksize_t;
+typedef long blkcnt_t;
+typedef unsigned int useconds_t;
+typedef long suseconds_t;
+#ifndef __CC_TIME_T
+#define __CC_TIME_T
+typedef long time_t;
+typedef long clock_t;
+#endif
+#endif
+`,
+	"unistd.h": `#ifndef __CC_UNISTD_H
+#define __CC_UNISTD_H
+#include <sys/types.h>
+#define STDIN_FILENO 0
+#define STDOUT_FILENO 1
+#define STDERR_FILENO 2
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#define F_OK 0
+#define X_OK 1
+#define W_OK 2
+#define R_OK 4
+#define _SC_CLK_TCK 2
+#define _SC_PAGESIZE 30
+#define _SC_PAGE_SIZE 30
+#define _SC_NPROCESSORS_CONF 83
+#define _SC_NPROCESSORS_ONLN 84
+#define _POSIX_VERSION 200809L
+ssize_t read(int fd, void *buf, size_t nbyte);
+ssize_t write(int fd, const void *buf, size_t nbyte);
+int close(int fd);
+off_t lseek(int fd, off_t offset, int whence);
+int unlink(const char *path);
+int rmdir(const char *path);
+int access(const char *path, int amode);
+pid_t getpid(void);
+pid_t getppid(void);
+uid_t getuid(void);
+uid_t geteuid(void);
+gid_t getgid(void);
+gid_t getegid(void);
+int isatty(int fd);
+char *getcwd(char *buf, size_t size);
+int chdir(const char *path);
+unsigned int sleep(unsigned int seconds);
+int usleep(useconds_t usec);
+[[noreturn]] void _exit(int status);
+int dup(int fd);
+int dup2(int fd, int fd2);
+int pipe(int fds[2]);
+long sysconf(int name);
+int gethostname(char *name, size_t namelen);
+int getopt(int argc, char *const argv[], const char *optstring);
+char **__cc_optarg(void);
+int *__cc_optind(void);
+int *__cc_opterr(void);
+int *__cc_optopt(void);
+#define optarg (*__cc_optarg())
+#define optind (*__cc_optind())
+#define opterr (*__cc_opterr())
+#define optopt (*__cc_optopt())
+#endif
+`,
+	"fcntl.h": `#ifndef __CC_FCNTL_H
+#define __CC_FCNTL_H
+#include <sys/types.h>
+#include <sys/stat.h>
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+#define O_ACCMODE 3
+#define O_CREAT 0100
+#define O_EXCL 0200
+#define O_NOCTTY 0400
+#define O_TRUNC 01000
+#define O_APPEND 02000
+#define O_NONBLOCK 04000
+#define O_NDELAY O_NONBLOCK
+#define O_DSYNC 010000
+#define O_LARGEFILE 0100000
+#define O_DIRECTORY 0200000
+#define O_NOFOLLOW 0400000
+#define O_CLOEXEC 02000000
+#define O_SYNC 04010000
+#define F_DUPFD 0
+#define F_GETFD 1
+#define F_SETFD 2
+#define F_GETFL 3
+#define F_SETFL 4
+#define F_DUPFD_CLOEXEC 1030
+#define FD_CLOEXEC 1
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+int open(const char *path, int oflag, ...);
+int creat(const char *path, mode_t mode);
+int fcntl(int fd, int cmd, ...);
+#endif
+`,
+	"sys/stat.h": `#ifndef __CC_SYS_STAT_H
+#define __CC_SYS_STAT_H
+#include <sys/types.h>
+#ifndef __CC_TIMESPEC
+#define __CC_TIMESPEC
+struct timespec {
+	time_t tv_sec;
+	long tv_nsec;
+};
+#endif
+struct stat {
+	dev_t st_dev;
+	ino_t st_ino;
+	nlink_t st_nlink;
+	mode_t st_mode;
+	uid_t st_uid;
+	gid_t st_gid;
+	int __pad0;
+	dev_t st_rdev;
+	off_t st_size;
+	blksize_t st_blksize;
+	blkcnt_t st_blocks;
+	struct timespec st_atim;
+	struct timespec st_mtim;
+	struct timespec st_ctim;
+	long __unused[3];
+};
+#define st_atime st_atim.tv_sec
+#define st_mtime st_mtim.tv_sec
+#define st_ctime st_ctim.tv_sec
+#define S_IFMT 0170000
+#define S_IFSOCK 0140000
+#define S_IFLNK 0120000
+#define S_IFREG 0100000
+#define S_IFBLK 0060000
+#define S_IFDIR 0040000
+#define S_IFCHR 0020000
+#define S_IFIFO 0010000
+#define S_ISUID 04000
+#define S_ISGID 02000
+#define S_ISVTX 01000
+#define S_IRWXU 0700
+#define S_IRUSR 0400
+#define S_IWUSR 0200
+#define S_IXUSR 0100
+#define S_IRWXG 070
+#define S_IRGRP 040
+#define S_IWGRP 020
+#define S_IXGRP 010
+#define S_IRWXO 07
+#define S_IROTH 04
+#define S_IWOTH 02
+#define S_IXOTH 01
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#define S_ISCHR(m) (((m) & S_IFMT) == S_IFCHR)
+#define S_ISBLK(m) (((m) & S_IFMT) == S_IFBLK)
+#define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
+#define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
+#define S_ISLNK(m) (((m) & S_IFMT) == S_IFLNK)
+#define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
+int stat(const char *restrict path, struct stat *restrict buf);
+int lstat(const char *restrict path, struct stat *restrict buf);
+int fstat(int fd, struct stat *buf);
+int mkdir(const char *path, mode_t mode);
+int chmod(const char *path, mode_t mode);
+int fchmod(int fd, mode_t mode);
+mode_t umask(mode_t cmask);
+#endif
+`,
+	"dirent.h": `#ifndef __CC_DIRENT_H
+#define __CC_DIRENT_H
+#include <sys/types.h>
+typedef struct __cc_DIR DIR;
+struct dirent {
+	ino_t d_ino;
+	off_t d_off;
+	unsigned short d_reclen;
+	unsigned char d_type;
+	char d_name[256];
+};
+#define DT_UNKNOWN 0
+#define DT_FIFO 1
+#define DT_CHR 2
+#define DT_DIR 4
+#define DT_BLK 6
+#define DT_REG 8
+#define DT_LNK 10
+#define DT_SOCK 12
+DIR *opendir(const char *dirname);
+struct dirent *readdir(DIR *dirp);
+int closedir(DIR *dirp);
+void rewinddir(DIR *dirp);
+#endif
+`,
+	"strings.h": `#ifndef __CC_STRINGS_H
+#define __CC_STRINGS_H
+#include <stddef.h>
+int strcasecmp(const char *s1, const char *s2);
+int strncasecmp(const char *s1, const char *s2, size_t n);
+void bzero(void *s, size_t n);
+void bcopy(const void *s1, void *s2, size_t n);
+int ffs(int i);
+int ffsl(long i);
+int ffsll(long long i);
+char *index(const char *s, int c);
+char *rindex(const char *s, int c);
+#endif
+`,
+	"sys/time.h": `#ifndef __CC_SYS_TIME_H
+#define __CC_SYS_TIME_H
+#include <sys/types.h>
+struct timeval {
+	time_t tv_sec;
+	suseconds_t tv_usec;
+};
+struct timezone {
+	int tz_minuteswest;
+	int tz_dsttime;
+};
+int gettimeofday(struct timeval *restrict tv, void *restrict tz);
+#define timerisset(t) ((t)->tv_sec || (t)->tv_usec)
+#define timerclear(t) ((t)->tv_sec = (t)->tv_usec = 0)
+#define timercmp(a, b, CMP) ((a)->tv_sec == (b)->tv_sec ? (a)->tv_usec CMP (b)->tv_usec : (a)->tv_sec CMP (b)->tv_sec)
+#define timeradd(a, b, r) do { (r)->tv_sec = (a)->tv_sec + (b)->tv_sec; (r)->tv_usec = (a)->tv_usec + (b)->tv_usec; if ((r)->tv_usec >= 1000000) { (r)->tv_sec++; (r)->tv_usec -= 1000000; } } while (0)
+#define timersub(a, b, r) do { (r)->tv_sec = (a)->tv_sec - (b)->tv_sec; (r)->tv_usec = (a)->tv_usec - (b)->tv_usec; if ((r)->tv_usec < 0) { (r)->tv_sec--; (r)->tv_usec += 1000000; } } while (0)
 #endif
 `,
 }

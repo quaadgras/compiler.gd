@@ -1,6 +1,8 @@
 // C's library: the output must match gcc's (with glibc or musl).
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <locale.h>
@@ -9,8 +11,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <time.h>
 #include <uchar.h>
+#include <unistd.h>
 #include <wchar.h>
 
 static void testMath(void) {
@@ -480,6 +487,275 @@ static void testStdio(void) {
 	printf("setvbuf %d\n", setvbuf(stdout, NULL, _IOFBF, BUFSIZ));
 }
 
+// POSIX: unistd.h, fcntl.h, sys/stat.h, dirent.h, strings.h, sys/time.h.
+
+// show prints what a call returned, and errno if it failed.
+static void show(const char *what, long r) {
+	if (r < 0)
+		printf("%s %ld errno %d\n", what, r, errno);
+	else
+		printf("%s %ld\n", what, r);
+}
+
+static int cmpStr(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+static void testFd(void) {
+	umask(022);
+	show("mkdir", mkdir("posix_test.d", 0755));
+	show("mkdir again", mkdir("posix_test.d", 0755));
+	show("chdir", chdir("posix_test.d"));
+	char cwd[4096];
+	char *c = getcwd(cwd, sizeof cwd);
+	size_t n = strlen(cwd);
+	printf("getcwd %d %s\n", c == cwd, n > 12 ? cwd + n - 12 : cwd);
+	c = getcwd(cwd + 100, 2);
+	printf("getcwd small %d %d\n", c == NULL, errno == ERANGE);
+	char *dyn = getcwd(NULL, 0);
+	printf("getcwd null %d\n", dyn != NULL && strcmp(dyn, cwd) == 0);
+
+	int fd = open("a.txt", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	show("open", fd);
+	show("write", write(fd, "hello, posix\n", 13));
+	show("lseek", lseek(fd, 0, SEEK_CUR));
+	int fl = fcntl(fd, F_GETFL);
+	printf("F_GETFL %d %d\n", fl & O_ACCMODE, !!(fl & O_APPEND));
+	show("F_GETFD", fcntl(fd, F_GETFD));
+	show("F_SETFD", fcntl(fd, F_SETFD, FD_CLOEXEC));
+	show("F_GETFD", fcntl(fd, F_GETFD));
+	show("close", close(fd));
+	show("close again", close(fd));
+	show("write closed", write(fd, "x", 1));
+
+	fd = open("a.txt", O_RDONLY);
+	char buf[64];
+	ssize_t r = read(fd, buf, 5);
+	buf[r] = 0;
+	printf("read %ld %s\n", (long)r, buf);
+	show("lseek end", lseek(fd, -6, SEEK_END));
+	r = read(fd, buf, sizeof buf - 1);
+	buf[r] = 0;
+	printf("read %ld %s", (long)r, buf);
+	show("read eof", read(fd, buf, 10));
+	show("write rdonly", write(fd, "x", 1));
+	show("lseek bad", lseek(fd, 0, 7));
+	int fd2 = dup(fd);
+	show("dup", fd2);
+	lseek(fd2, 7, SEEK_SET);
+	show("shared offset", lseek(fd, 0, SEEK_CUR));
+	show("dup2", dup2(fd, 9));
+	show("F_DUPFD", fcntl(fd, F_DUPFD, 5));
+	show("dup2 bad", dup2(42, 10));
+	close(9);
+	close(5);
+	close(fd2);
+	struct stat st;
+	show("fstat", fstat(fd, &st));
+	printf("  size %ld reg %d mode %o\n", (long)st.st_size, S_ISREG(st.st_mode), st.st_mode & 0777);
+	close(fd);
+	show("fstat bad", fstat(fd, &st));
+
+	show("open missing", open("missing", O_RDONLY));
+	show("open excl", open("a.txt", O_WRONLY | O_CREAT | O_EXCL, 0600));
+	show("open dir", open("a.txt", O_RDONLY | O_DIRECTORY));
+	fd = open("a.txt", O_WRONLY | O_APPEND);
+	fl = fcntl(fd, F_GETFL);
+	printf("append %d %d\n", fl & O_ACCMODE, !!(fl & O_APPEND));
+	write(fd, "more\n", 5);
+	close(fd);
+	fd = creat("b.txt", 0600);
+	write(fd, "b", 1);
+	close(fd);
+
+	show("stat", stat("a.txt", &st));
+	printf("  size %ld reg %d dir %d mode %o\n", (long)st.st_size, S_ISREG(st.st_mode), S_ISDIR(st.st_mode), st.st_mode & 0777);
+	printf("  nlink %ld mtime %d %d blksize %d uid %d\n", (long)st.st_nlink, st.st_mtime > 1000000000,
+		st.st_mtim.tv_nsec >= 0 && st.st_mtim.tv_nsec < 1000000000, st.st_blksize > 0, st.st_uid == getuid());
+	stat("b.txt", &st);
+	printf("creat mode %o\n", st.st_mode & 0777);
+	show("chmod", chmod("b.txt", 0640));
+	stat("b.txt", &st);
+	printf("chmod mode %o\n", st.st_mode & 0777);
+	show("stat .", stat(".", &st));
+	printf("  dir %d\n", S_ISDIR(st.st_mode));
+	show("stat missing", stat("missing", &st));
+	show("lstat", lstat("a.txt", &st));
+	printf("  reg %d\n", S_ISREG(st.st_mode));
+	printf("sizeof stat %d dirent %d\n", (int)sizeof(struct stat), (int)sizeof(struct dirent));
+	mode_t m1 = umask(077);
+	mode_t m2 = umask(022);
+	printf("umask %o %o\n", m1, m2);
+
+	show("access", access("a.txt", F_OK));
+	show("access rw", access("a.txt", R_OK | W_OK));
+	show("access missing", access("missing", F_OK));
+	show("mkdir sub", mkdir("sub", 0700));
+	FILE *f = fopen("sub/c.txt", "w");
+	show("fileno", fileno(f));
+	fputs("via FILE\n", f);
+	fflush(f);
+	write(fileno(f), "via fd\n", 7);
+	fclose(f);
+	fd = open("sub/c.txt", O_RDONLY);
+	f = fdopen(fd, "r");
+	printf("fdopen %d %d\n", f != NULL, fileno(f) == fd);
+	while (fgets(buf, sizeof buf, f))
+		printf("  %s", buf);
+	fclose(f);
+	show("closed by fclose", close(fd));
+
+	DIR *d = opendir(".");
+	char *names[16];
+	int k = 0;
+	struct dirent *e;
+	while ((e = readdir(d)) != NULL && k < 16) {
+		char tag = e->d_type == DT_DIR ? 'd' : e->d_type == DT_REG ? 'f' : '?';
+		names[k] = malloc(strlen(e->d_name) + 3);
+		sprintf(names[k], "%s:%c", e->d_name, tag);
+		k++;
+	}
+	qsort(names, k, sizeof names[0], cmpStr);
+	printf("readdir");
+	for (int i = 0; i < k; i++)
+		printf(" %s", names[i]);
+	printf("\n");
+	rewinddir(d);
+	int again = 0;
+	while ((e = readdir(d)) != NULL)
+		again += e->d_ino != 0;
+	printf("rewinddir %d\n", again);
+	show("closedir", closedir(d));
+	d = opendir("missing");
+	printf("opendir missing %d %d\n", d == NULL, errno);
+	d = opendir("a.txt");
+	printf("opendir file %d %d\n", d == NULL, errno);
+
+	show("rmdir nonempty", rmdir("sub"));
+	show("unlink dir", unlink("sub"));
+	show("rmdir file", rmdir("a.txt"));
+	show("unlink", unlink("sub/c.txt"));
+	show("unlink", unlink("a.txt"));
+	show("unlink", unlink("b.txt"));
+	show("unlink missing", unlink("b.txt"));
+	show("rmdir", rmdir("sub"));
+
+	char tmpl[] = "tmpXXXXXX";
+	fd = mkstemp(tmpl);
+	printf("mkstemp %d %d %d\n", fd >= 0, strncmp(tmpl, "tmp", 3) == 0, strcmp(tmpl + 3, "XXXXXX") != 0);
+	fstat(fd, &st);
+	printf("mkstemp mode %o\n", st.st_mode & 0777);
+	close(fd);
+	char *rp = realpath(tmpl, NULL);
+	printf("realpath %d %d\n", rp[0] == '/', strncmp(rp, cwd, strlen(cwd)) == 0 && strcmp(rp + strlen(cwd) + 1, tmpl) == 0);
+	char rbuf[4096];
+	rp = realpath("../posix_test.d/./", rbuf);
+	printf("realpath .. %d %d\n", rp == rbuf, strcmp(rbuf, cwd) == 0);
+	rp = realpath("missing", rbuf);
+	printf("realpath missing %d %d\n", rp == NULL, errno);
+	unlink(tmpl);
+	char bad[] = "tmpXXXX";
+	show("mkstemp bad", mkstemp(bad));
+
+	int p[2];
+	show("pipe", pipe(p));
+	printf("pipe fds %d %d\n", p[0], p[1]);
+	write(p[1], "through a pipe", 14);
+	close(p[1]);
+	r = read(p[0], buf, sizeof buf);
+	buf[r] = 0;
+	printf("pipe read %ld %s\n", (long)r, buf);
+	show("pipe eof", read(p[0], buf, 1));
+	show("lseek pipe", lseek(p[0], 0, SEEK_CUR));
+	close(p[0]);
+
+	fd = open(".", O_RDONLY);
+	show("isatty file", isatty(fd));
+	printf("  errno %d\n", errno);
+	close(fd);
+	show("chdir ..", chdir(".."));
+	show("rmdir", rmdir("posix_test.d"));
+}
+
+static void testUnistd(void) {
+	printf("pid %d %d %d\n", getpid() > 0, getppid() > 0, getpid() != getppid());
+	printf("uid %d %d\n", getuid() == geteuid(), getgid() == getegid());
+	printf("sysconf %ld %d\n", sysconf(_SC_PAGESIZE), sysconf(_SC_NPROCESSORS_ONLN) > 0);
+	char host[256];
+	int r = gethostname(host, sizeof host);
+	printf("gethostname %d %d\n", r, strlen(host) > 0);
+	printf("sleep %u usleep %d\n", sleep(0), usleep(1000));
+	printf("STDIN_FILENO %d %d %d\n", STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
+
+	char *argv1[] = {"prog", "-a", "-b", "val", "-cfoo", "-d", "--", "-x", "rest", NULL};
+	int ch;
+	opterr = 0;
+	while ((ch = getopt(9, argv1, "ab:c:d")) != -1)
+		printf("opt %c %s\n", ch, ch == 'b' || ch == 'c' ? optarg : "");
+	printf("optind %d %s\n", optind, argv1[optind]);
+	char *argv2[] = {"prog", "-ab", "-z", "-c", NULL};
+	optind = 0; // glibc starts over (and reads optstring's + or - again) only at 0
+	while ((ch = getopt(4, argv2, ":abc:")) != -1)
+		printf("opt %c optopt %c\n", ch, ch == '?' || ch == ':' ? optopt : '-');
+	char *argv3[] = {"prog", "-a", "file", "-b", NULL};
+	optind = 0;
+	while ((ch = getopt(4, argv3, "+ab")) != -1)
+		printf("opt %c\n", ch);
+	printf("optind %d %s\n", optind, argv3[optind]);
+	optind = 1;
+	opterr = 1;
+}
+
+static void testStrings(void) {
+	printf("strcasecmp %d %d %d\n", strcasecmp("Hello", "hELLO"), strcasecmp("abc", "ABD") < 0, strcasecmp("b", "A") > 0);
+	printf("strncasecmp %d %d\n", strncasecmp("HelloX", "helloY", 5), strncasecmp("a", "B", 0));
+	char b[8] = "abcdefg";
+	bzero(b + 2, 3);
+	printf("bzero %d %d %c\n", b[2], b[4], b[5]);
+	char s[16] = "0123456789";
+	bcopy(s, s + 2, 5);
+	printf("bcopy %s\n", s);
+	printf("ffs %d %d %d %d %d\n", ffs(0), ffs(1), ffs(8), ffs(-2147483647 - 1), ffsl(1L << 40));
+	const char *t = "hello world";
+	printf("index %s rindex %s %d\n", index(t, 'o'), rindex(t, 'o'), index(t, 'z') == NULL);
+	char d[16];
+	char *end = stpcpy(d, "abc");
+	printf("stpcpy %s %d\n", d, (int)(end - d));
+	end = stpncpy(d, "xy", 5);
+	printf("stpncpy %s %d %d\n", d, (int)(end - d), d[4]);
+	size_t n = strlcpy(d, "truncate me", 5);
+	printf("strlcpy %d %s\n", (int)n, d);
+	n = strlcat(d, "+tail", 8);
+	printf("strlcat %d %s\n", (int)n, d);
+	printf("strlcat full %d\n", (int)strlcat(d, "zz", 3));
+}
+
+static void testPosixStdlib(void) {
+	show("setenv", setenv("CC_POSIX_TEST", "one", 1));
+	printf("  %s\n", getenv("CC_POSIX_TEST"));
+	show("setenv keep", setenv("CC_POSIX_TEST", "two", 0));
+	printf("  %s\n", getenv("CC_POSIX_TEST"));
+	show("setenv over", setenv("CC_POSIX_TEST", "three", 1));
+	printf("  %s\n", getenv("CC_POSIX_TEST"));
+	show("setenv bad", setenv("A=B", "x", 1));
+	show("unsetenv", unsetenv("CC_POSIX_TEST"));
+	printf("  %d\n", getenv("CC_POSIX_TEST") == NULL);
+	void *p = aligned_alloc(64, 128);
+	printf("aligned_alloc %d\n", p != NULL && (unsigned long)p % 64 == 0);
+	void *q = NULL;
+	int r = posix_memalign(&q, 256, 10);
+	printf("posix_memalign %d %d\n", r, q != NULL && (unsigned long)q % 256 == 0);
+	printf("posix_memalign bad %d\n", posix_memalign(&q, 12, 10) == EINVAL);
+	free(p);
+	free(q);
+	struct timeval tv;
+	r = gettimeofday(&tv, NULL);
+	printf("gettimeofday %d %d %d\n", r, tv.tv_sec > 1000000000, tv.tv_usec >= 0 && tv.tv_usec < 1000000);
+	struct timeval a = {1, 900000}, b = {2, 200000}, t;
+	timeradd(&a, &b, &t);
+	printf("timeradd %ld %ld\n", (long)t.tv_sec, (long)t.tv_usec);
+	timersub(&b, &a, &t);
+	printf("timersub %ld %ld %d\n", (long)t.tv_sec, (long)t.tv_usec, timercmp(&a, &b, <));
+}
+
 int main(void) {
 #ifndef __GD_CC__
 	setlocale(LC_ALL, "C.UTF-8");
@@ -498,5 +774,9 @@ int main(void) {
 	testString();
 	testStdio();
 	testLocale();
+	testFd();
+	testUnistd();
+	testStrings();
+	testPosixStdlib();
 	return 0;
 }
