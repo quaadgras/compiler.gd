@@ -233,6 +233,11 @@ func appendParamOffsets(offsets []int64, at int64, t *types.Type) ([]int64, int6
 		case types.TSLICE:
 			return appendParamOffsets(offsets, at, synthSlice)
 		case types.TSTRING:
+			if types.StringWasm32() {
+				// Word 0 as a pointer, and A, overlap: offsets
+				// 0, 0 and 8 (see types.StringWasm32).
+				return append(offsets, at, at+types.StringWord1Offset(), at+2*int64(types.PtrSize)), at + w
+			}
 			return appendParamOffsets(offsets, at, synthString)
 		case types.TINTER:
 			return appendParamOffsets(offsets, at, synthIface)
@@ -600,11 +605,16 @@ func setup(gd *base.Invocation) {
 		// { data ptr / nil, hash / bytes[0:8], tag<<60|len / tag|bytes[8:15] }.
 		// See doc/gd/sso-string.md. data is the sole pointer word;
 		// hash and len are non-pointer (uint).
-		up := types.Types[types.TUINT]
+		w1, w2 := types.Types[types.TUINT], it
+		if types.StringWasm32() {
+			// wasm32: A and B (types.StringWasm32), which
+			// appendParamOffsets places.
+			w1, w2 = types.StringWord1Type(), types.StringWord2Type()
+		}
 		synthString = types.NewStruct([]*types.Field{
 			types.NewField(nxp, fname("data"), bp),
-			types.NewField(nxp, fname("hash"), up),
-			types.NewField(nxp, fname("len"), it),
+			types.NewField(nxp, fname("hash"), w1),
+			types.NewField(nxp, fname("len"), w2),
 		})
 		types.CalcStructSize(gd, synthString)
 		unsp := types.Types[types.TUNSAFEPTR]

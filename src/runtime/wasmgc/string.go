@@ -8,36 +8,70 @@ package runtime
 
 import (
 	_ "internal/bytealg" // for cmpstring
+	"internal/goarch"
 	"unsafe"
 )
 
-// A string is three words (see doc/gd/sso-string.md): up to 15 bytes
-// are in the second and third words, with the length in the top four
-// bits of the third; a longer string is a pointer to its bytes, which
-// are in linear memory, and its length in the third word.
-
+// A string of up to 15 bytes is kept in its words (see
+// doc/gd/sso-string.md): its bytes in two uint64s, A and B, the length
+// in the top four bits of B (the tag). A longer string, or one made of
+// bytes elsewhere, has a pointer to its bytes, which are in linear
+// memory, in word 0, and its length in another word.
+//
+// With words of 8 bytes a string is three: word 0 (nil if inline), A
+// (or the cached hash) and B (or the length). With words of 4 bytes
+// (wasm32) it is four, and A and B are all of them: word 0 is the
+// pointer and word 1 the length of a string that is not inline, so
+// word 0 is read as a pointer only if the tag is 0 (stringData).
 const (
 	stringTagShift = 60
 	stringLenMask  = 1<<stringTagShift - 1
 	stringInline   = 15 // the longest string kept in the words
+
+	stringAOff = 8 * (goarch.PtrSize / 8) // the offset of A: 8, or 0 with 4-byte words
+	stringBOff = stringAOff + 8
 )
 
 type stringStruct struct {
-	str  unsafe.Pointer // the bytes, or nil
-	hash uint           // the cached hash, or bytes 0 to 7
-	len  uint           // the length, or tag<<60 and bytes 8 to 14
+	str  unsafe.Pointer // the bytes, or nil (or bytes 0 to 3, with 4-byte words)
+	hash uint           // the cached hash, or bytes 0 to 7 (the length, or bytes 4 to 7)
+	len  uint           // the length, or tag<<60 and bytes 8 to 14 (with 4-byte words: bytes 8 to 11, or the hash)
 }
 
+// stringTag returns the tag of *s: its length if it is kept in its
+// words, else 0.
+func stringTag(s *string) int {
+	return int(*(*uint64)(add(unsafe.Pointer(s), stringBOff)) >> stringTagShift)
+}
+
+// stringData returns the pointer to the bytes of *s, which is not kept
+// in its words, or nil if it is (word 0 of such a string with 4-byte
+// words is text, not to be read as a pointer).
+func stringData(s *string) unsafe.Pointer {
+	if goarch.PtrSize == 4 && stringTag(s) != 0 {
+		return nil
+	}
+	return (*stringStruct)(unsafe.Pointer(s)).str
+}
+
+
 // tmpBuf is the buffer on the caller's stack that the compiler offers
-// for a result that does not escape. It is not used here.
+// for a result that does not escape: used, as Go does, for a string too
+// long to be kept in its words (any, with words of 4 bytes) that fits.
 type tmpBuf [32]byte
 
 // inlineString returns the string of the n <= 15 bytes in the words.
 func inlineString(w1, w2 uint64, n int) string {
-	var r stringStruct
-	r.hash = uint(w1)
-	r.len = uint(w2&stringLenMask | uint64(n)<<stringTagShift)
-	return *(*string)(unsafe.Pointer(&r))
+	if goarch.PtrSize == 8 {
+		var r stringStruct
+		r.hash = uint(w1)
+		r.len = uint(w2&stringLenMask | uint64(n)<<stringTagShift)
+		return *(*string)(unsafe.Pointer(&r))
+	}
+	var r string
+	*(*uint64)(add(unsafe.Pointer(&r), stringAOff)) = w1
+	*(*uint64)(add(unsafe.Pointer(&r), stringBOff)) = w2&stringLenMask | uint64(n)<<stringTagShift
+	return r
 }
 
 // A stringBuilder builds a string of a known length a byte at a time.
@@ -49,7 +83,20 @@ type stringBuilder struct {
 }
 
 func newString(l int) stringBuilder {
+	return newStringBuf(l, nil, 0)
+}
+
+// newStringBuf is newString with the buffer buf of n bytes that the
+// compiler offers (or nil), whose bytes are used if they are in linear
+// memory and enough.
+func newStringBuf(l int, buf unsafe.Pointer, n int) stringBuilder {
 	b := stringBuilder{l: l}
+	if l > stringInline && buf != nil && l <= n {
+		if a := trylinaddr(buf); a != 0 {
+			b.p, b.addr = buf, a
+			return b
+		}
+	}
 	if l > stringInline {
 		memstatsMallocs++
 		b.p = linnew(uintptr(l))
@@ -72,7 +119,11 @@ func (b *stringBuilder) byte(c byte) {
 
 func (b *stringBuilder) string(s string) {
 	if b.l > stringInline {
-		if src := trylinaddr((*stringStruct)(unsafe.Pointer(&s)).str); src != 0 {
+		p := (*stringStruct)(unsafe.Pointer(&s)).str
+		if goarch.PtrSize == 4 {
+			p = stringData(&s)
+		}
+		if src := trylinaddr(p); src != 0 {
 			lincopy(b.addr+uintptr(b.n), src, uintptr(len(s)))
 			b.n += len(s)
 			return
@@ -98,7 +149,7 @@ func concatstrings(buf *tmpBuf, a []string) string {
 		}
 		l += len(x)
 	}
-	b := newString(l)
+	b := newStringBuf(l, unsafe.Pointer(buf), len(buf))
 	for _, x := range a {
 		b.string(x)
 	}
@@ -106,14 +157,14 @@ func concatstrings(buf *tmpBuf, a []string) string {
 }
 
 func concatstring2(buf *tmpBuf, a0, a1 string) string {
-	b := newString(len(a0) + len(a1))
+	b := newStringBuf(len(a0)+len(a1), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	return b.result()
 }
 
 func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
-	b := newString(len(a0) + len(a1) + len(a2))
+	b := newStringBuf(len(a0)+len(a1)+len(a2), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -121,7 +172,7 @@ func concatstring3(buf *tmpBuf, a0, a1, a2 string) string {
 }
 
 func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
-	b := newString(len(a0) + len(a1) + len(a2) + len(a3))
+	b := newStringBuf(len(a0)+len(a1)+len(a2)+len(a3), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -130,7 +181,7 @@ func concatstring4(buf *tmpBuf, a0, a1, a2, a3 string) string {
 }
 
 func concatstring5(buf *tmpBuf, a0, a1, a2, a3, a4 string) string {
-	b := newString(len(a0) + len(a1) + len(a2) + len(a3) + len(a4))
+	b := newStringBuf(len(a0)+len(a1)+len(a2)+len(a3)+len(a4), unsafe.Pointer(buf), len(buf))
 	b.string(a0)
 	b.string(a1)
 	b.string(a2)
@@ -149,10 +200,7 @@ func sliceinlinestring(s string, lo, hi int) string {
 }
 
 func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
-	b := newString(n)
-	if buf != nil && n <= len(buf) && n > stringInline {
-		memstatsMallocs-- // (Go would use buf)
-	}
+	b := newStringBuf(n, unsafe.Pointer(buf), len(buf))
 	if n > stringInline {
 		memmove(b.p, unsafe.Pointer(ptr), uintptr(n))
 		return b.result()
@@ -172,7 +220,11 @@ func stringtoslicebyte(buf *tmpBuf, s string) []byte {
 	if buf != nil && len(s) <= len(buf) {
 		memstatsMallocs-- // (Go would use buf)
 	}
-	if src := trylinaddr((*stringStruct)(unsafe.Pointer(&s)).str); src != 0 && len(s) > 0 {
+	p := (*stringStruct)(unsafe.Pointer(&s)).str
+	if goarch.PtrSize == 4 {
+		p = stringData(&s)
+	}
+	if src := trylinaddr(p); src != 0 && len(s) > 0 {
 		lincopy(linaddr(unsafe.Pointer(unsafe.SliceData(b))), src, uintptr(len(s)))
 		return b
 	}
@@ -188,7 +240,7 @@ func intstring(buf *[4]byte, v int64) string {
 	}
 	var tmp [4]byte
 	n := encoderune(tmp[:], rune(v))
-	b := newString(n)
+	b := newStringBuf(n, unsafe.Pointer(buf), len(buf))
 	for i := 0; i < n; i++ {
 		b.byte(tmp[i])
 	}
@@ -215,7 +267,7 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 	for _, r := range a {
 		l += encoderune(tmp[:], r)
 	}
-	b := newString(l)
+	b := newStringBuf(l, unsafe.Pointer(buf), len(buf))
 	for _, r := range a {
 		n := encoderune(tmp[:], r)
 		for i := 0; i < n; i++ {

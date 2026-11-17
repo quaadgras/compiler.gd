@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !wasm.ptr32
+
 package abi
 
 import "unsafe"
@@ -66,15 +68,29 @@ const (
 	StringLenMask = 1<<StringTagShift - 1
 )
 
-// stringHeader is the gd-fork string layout (3 × uint64 = 24 B).
-// It mirrors stringStruct in runtime/string.go but is exported here so
-// SSO-aware fast-path helpers below can be used by any package without
-// going through linkname or runtime calls.
+// StringInlineOff is the offset of the bytes of an inline string in
+// its header.
+const StringInlineOff = unsafe.Sizeof(uintptr(0))
+
+// stringHeader is the gd-fork string layout (3 words: 24 B with
+// 8-byte words). It mirrors stringStruct in runtime/string.go but is
+// exported here so SSO-aware fast-path helpers below can be used by any
+// package without going through linkname or runtime calls.
+//
+// With words of 4 bytes (386, arm, mips) a string has no inline form: w2
+// is the length, and its tag, read as a uint64 (tag), is always 0.
+// (wasm32's strings are four words: string_ptr32.go.)
 type stringHeader struct {
-	w0 uint64 // heap data ptr (0 if inline)
-	w1 uint64 // heap: cached hash; inline: bytes 0..7
-	w2 uint64 // upper 4 bits = tag; heap: low 60 = len; inline: low 56 = bytes 8..14
+	w0 uintptr // heap data ptr (0 if inline)
+	w1 uintptr // heap: cached hash; inline: bytes 0..7
+	w2 uintptr // upper 4 bits = tag; heap: low 60 = len; inline: low 56 = bytes 8..14
 }
+
+// tag returns the length tag of the string: 0 for a heap-rep string.
+func (sh *stringHeader) tag() int { return int(uint64(sh.w2) >> StringTagShift) }
+
+// heapLen returns the length of a heap-rep string.
+func (sh *stringHeader) heapLen() int { return int(uint64(sh.w2) & StringLenMask) }
 
 // StringIsInline reports whether s uses the fork's inline (SSO) rep.
 // The check is a single shift+test; the result is cmov-able.
@@ -82,7 +98,7 @@ type stringHeader struct {
 //go:nosplit
 func StringIsInline(s string) bool {
 	sh := (*stringHeader)(NoEscape(unsafe.Pointer(&s)))
-	return sh.w2>>StringTagShift != 0
+	return sh.tag() != 0
 }
 
 // StringInlineWords returns the inline payload of s as two uint64 words
@@ -94,7 +110,7 @@ func StringIsInline(s string) bool {
 //go:nosplit
 func StringInlineWords(s string) (lo, hi uint64, n int) {
 	sh := (*stringHeader)(unsafe.Pointer(&s))
-	return sh.w1, sh.w2 & StringLenMask, int(sh.w2 >> StringTagShift)
+	return uint64(sh.w1), uint64(sh.w2) & StringLenMask, sh.tag()
 }
 
 // StringHeapBytes returns s as a []byte view aliasing the same backing
@@ -112,8 +128,7 @@ func StringInlineWords(s string) (lo, hi uint64, n int) {
 //go:nosplit
 func StringHeapBytes(s string) []byte {
 	sh := (*stringHeader)(unsafe.Pointer(&s))
-	n := sh.w2 & StringLenMask
-	return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), int(n))
+	return unsafe.Slice((*byte)(unsafe.Pointer(sh.w0)), sh.heapLen())
 }
 
 // StringBytes returns a []byte view of *sp regardless of representation.
@@ -138,16 +153,16 @@ func StringBytes(sp *string) []byte {
 	if sh.w0 != 0 {
 		// heap: data pointer in w0, length in low 60 bits of w2.
 		// Inline literal: w0 points at its rodata bytes, length is the tag.
-		n := int(sh.w2 >> StringTagShift)
+		n := sh.tag()
 		if n == 0 {
-			n = int(sh.w2 & StringLenMask)
+			n = sh.heapLen()
 		}
-		return unsafe.Slice((*byte)(unsafe.Pointer(uintptr(sh.w0))), n)
+		return unsafe.Slice((*byte)(unsafe.Pointer(sh.w0)), n)
 	}
 	// inline: bytes start at &sh.w1 inside *sp.
 	// Empty heap-rep strings have w0==0 and tag==0, yielding length 0
 	// — also fine, returns an empty slice.
-	return unsafe.Slice((*byte)(unsafe.Pointer(&sh.w1)), int(sh.w2>>StringTagShift))
+	return unsafe.Slice((*byte)(unsafe.Pointer(&sh.w1)), sh.tag())
 }
 
 // Heapify returns *sp as a heap-rep string. The result has tag
@@ -191,19 +206,31 @@ func Heapify(sp *string) string {
 		// OpStringMake with a Const64 zero-tag word2, which the
 		// existing const-fold chain (StringWord2(StringMake) →
 		// Const64) propagates through to eliminate the dispatch.
-		n := int(sh.w2 >> StringTagShift) // inline literal: rodata bytes
+		n := sh.tag() // inline literal: rodata bytes
 		if n == 0 {
-			n = int(sh.w2 & StringLenMask)
+			n = sh.heapLen()
 		}
-		return unsafe.String((*byte)(unsafe.Pointer(uintptr(sh.w0))), n)
+		return unsafe.String((*byte)(unsafe.Pointer(sh.w0)), n)
 	}
 	// Inline. unsafe.String over the inline payload constructs a
 	// heap-rep string {ptr=&sh.w1, hash=0, len=tag} aliasing the
 	// caller's local. The new string carries tag==0 so subsequent
 	// indexing folds away the dispatch.
-	n := int(sh.w2 >> StringTagShift)
+	n := sh.tag()
 	if n == 0 {
 		return ""
 	}
 	return unsafe.String((*byte)(unsafe.Pointer(&sh.w1)), n)
+}
+
+// SpreadString and UnspreadString are those of wasm32 (string_ptr32.go),
+// whose interfaces do not hold a string as its words in a row; with
+// other words an interface holds a string as it is in memory, from the
+// data word on, and they are not used.
+func SpreadString(sp *string) (data unsafe.Pointer, words [2]uint64) {
+	panic("abi.SpreadString")
+}
+
+func UnspreadString(sp *string, data unsafe.Pointer, words *[2]uint64) {
+	panic("abi.UnspreadString")
 }

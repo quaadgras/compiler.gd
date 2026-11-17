@@ -295,6 +295,13 @@ func EqString(gd *base.Invocation, s, t ir.Node) (eqlen *ir.BinaryExpr, eqmem *i
 
 	fn := typecheck.LookupRuntime(gd, "memequal")
 	call := typecheck.Call(gd, gd.Pos, fn, []ir.Node{sptr, tptr, ir.Copy(cmplen)}, false).(*ir.CallExpr)
+	if types.StringWasm32() {
+		// wasm32: the bytes of a string may be in its words, and
+		// a pointer to them is a copy in the frame: compare the
+		// strings in the runtime (as ==), which is less code.
+		fn := typecheck.LookupRuntime(gd, "streqfast")
+		call = typecheck.Call(gd, gd.Pos, fn, []ir.Node{s, t}, false).(*ir.CallExpr)
+	}
 
 	cmp := ir.NewBinaryExpr(gd, gd.Pos, ir.OEQ, slen, tlen)
 	cmp = typecheck.Expr(gd, cmp).(*ir.BinaryExpr)

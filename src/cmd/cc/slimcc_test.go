@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"internal/testenv"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -148,7 +147,7 @@ func runSlimcc(t *testing.T, mod, name string, files ...string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin).CombinedOutput()
+	out, err := targetCommand(ctx, bin).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("run: %v\n%s", err, out)
 	}

@@ -144,10 +144,11 @@ type header struct {
 	magic uintptr
 	ti    *tinfo
 	size  uintptr
-	aux   unsafe.Pointer // the slots of its pointer words: [size/8]unsafe.Pointer, made when first needed
+	aux   unsafe.Pointer // the slots of its pointer words: [size/wordSize]unsafe.Pointer, made when first needed
 }
 
-const magic = 0xC0FFEE_CAB_C0DE
+// magic marks the header of an allocation of C: what of it a word holds.
+const magic = 0xC0FFEE_CAB_C0DE & (1<<(8*wordSize) - 1)
 
 const hdrSize = unsafe.Sizeof(header{})
 
@@ -189,7 +190,7 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	}
 	if *(*uintptr)(base) == alignMagic {
 		// An over-aligned object (NewAligned): its header is further in.
-		off := *(*uintptr)(unsafe.Add(base, 8))
+		off := *(*uintptr)(unsafe.Add(base, wordSize))
 		if off < hdrSize || off > size {
 			return Ptr{}, false
 		}
@@ -333,7 +334,7 @@ type capRec struct {
 	obj   unsafe.Pointer
 }
 
-const recMagic = 0xCAB_5107_CAB
+const recMagic = 0xCAB_5107_CAB & (1<<(8*wordSize) - 1)
 
 // capOf returns what a slot holds for v's capability.
 func capOf(v Ptr) unsafe.Pointer {
@@ -366,11 +367,11 @@ func (h *header) slot(off uintptr, create bool) *unsafe.Pointer {
 		}
 		t = h.makeSlots()
 	}
-	return (*unsafe.Pointer)(unsafe.Add(t, off/8*8))
+	return (*unsafe.Pointer)(unsafe.Add(t, off/wordSize*wordSize))
 }
 
 func (h *header) makeSlots() unsafe.Pointer {
-	t := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((h.size+7)/8, 1))))
+	t := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((h.size+wordSize-1)/wordSize, 1))))
 	if atomic.CompareAndSwapPointer(&h.aux, nil, t) {
 		return t
 	}
@@ -401,9 +402,9 @@ func checkFail(p Ptr, n uintptr) {
 }
 
 func checkPtrWord(p Ptr) unsafe.Pointer {
-	a := check(p, 8)
+	a := check(p, wordSize)
 	// Aligned, and the object's types are aligned too: one word.
-	if uintptr(a)%8 != 0 || uintptr(p.off)%8 != 0 {
+	if uintptr(a)%wordSize != 0 || uintptr(p.off)%wordSize != 0 {
 		fault("misaligned pointer access", uintptr(a))
 	}
 	return a
@@ -421,7 +422,7 @@ func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
 	ti := p.info()
 	end := uintptr(p.off) + n
-	for b := uintptr(p.off); b < end; b = (b + 8) &^ 7 {
+	for b := uintptr(p.off); b < end; b = (b + wordSize) &^ (wordSize - 1) {
 		switch ti.kindAt(b) {
 		case wPtr:
 			fault("scalar store over a pointer word", uintptr(a))
@@ -448,7 +449,7 @@ func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
 // word is still in.
 func LoadPtr(p Ptr) Ptr {
 	// C's object (whose base is aligned), an aligned word in bounds.
-	if off := uintptr(p.off); p.ti&1 != 0 && off&7 == 0 && off < p.size && p.size-off >= 8 {
+	if off := uintptr(p.off); p.ti&1 != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
 		// A slot is only set by a pointer store, which checked the word
 		// may hold one.
 		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
@@ -513,11 +514,11 @@ func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 // inlines, is C's pointer into C's object stored in a split word of C's
 // object (a union's, say).
 func StorePtr(p, v Ptr) {
-	if off := uintptr(p.off); p.ti&v.ti&1 != 0 && off&7 == 0 && off < p.size && p.size-off >= 8 {
+	if off := uintptr(p.off); p.ti&v.ti&1 != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
 		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
 		// A split word, found by a mask: C's arrays' elements are mostly
 		// of a size that is a power of two (malloc's bytes, one).
-		if t := atomic.LoadPointer(&h.aux); t != nil && (h.ti.mask != 0 || h.ti.size == 1) && h.ti.kinds[(off&h.ti.mask)/8] == wSplit {
+		if t := atomic.LoadPointer(&h.aux); t != nil && (h.ti.mask != 0 || h.ti.size == 1) && h.ti.kinds[(off&h.ti.mask)/wordSize] == wSplit {
 			// The capability first, so that what it points to stays
 			// alive; a plain store, with the write barrier: a load
 			// racing with it sees the old capability or the new one, as
@@ -593,7 +594,7 @@ func StoreF64(p Ptr, v float64) { Store64(p, math.Float64bits(v)) }
 // a scalar word becomes its address; a scalar copied into a pointer word
 // must be zero.
 func Memmove(dst, src Ptr, n uintptr) {
-	if n == 8 && (Addr(dst)|Addr(src))%8 == 0 && Addr(dst) != Addr(src) {
+	if n == wordSize && (Addr(dst)|Addr(src))%wordSize == 0 && Addr(dst) != Addr(src) {
 		// One word (a union of C's, often), which moveWord checks.
 		moveWord(dst, src)
 		return
@@ -603,31 +604,31 @@ func Memmove(dst, src Ptr, n uintptr) {
 	}
 	d := check(dst, n)
 	s := check(src, n)
-	if src.info().scalarOnly && dst.info().scalarOnly || uintptr(d)%8 != 0 || uintptr(s)%8 != 0 {
+	if src.info().scalarOnly && dst.info().scalarOnly || uintptr(d)%wordSize != 0 || uintptr(s)%wordSize != 0 {
 		checkScalar(dst, n)
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
-	nw := n / 8
+	nw := n / wordSize
 	if !overlaps(dst, src, n) {
 		// Word by word: no copy aside needed.
 		for i := uintptr(0); i < nw; i++ {
-			moveWord(Add(dst, int(i*8)), Add(src, int(i*8)))
+			moveWord(Add(dst, int(i*wordSize)), Add(src, int(i*wordSize)))
 		}
-		if t := n % 8; t > 0 {
-			d2 := checkScalar(Add(dst, int(nw*8)), t)
-			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*8)), t))
+		if t := n % wordSize; t > 0 {
+			d2 := checkScalar(Add(dst, int(nw*wordSize)), t)
+			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*wordSize)), t))
 		}
 		return
 	}
 	type word struct {
 		ptr bool
 		p   Ptr
-		u   uint64
+		u   uintptr
 	}
 	ws := make([]word, nw)
 	for i := range nw {
-		sp := Add(src, int(i*8))
+		sp := Add(src, int(i*wordSize))
 		switch src.info().kindAt(uintptr(sp.off)) {
 		case wPtr:
 			ws[i] = word{ptr: true, p: LoadPtr(sp)}
@@ -635,16 +636,16 @@ func Memmove(dst, src Ptr, n uintptr) {
 			if c := LoadPtr(sp); c.obj != nil {
 				ws[i] = word{ptr: true, p: c}
 			} else {
-				ws[i] = word{u: Load64(sp)}
+				ws[i] = word{u: loadWord(sp)}
 			}
 		default:
-			ws[i] = word{u: Load64(sp)}
+			ws[i] = word{u: loadWord(sp)}
 		}
 	}
-	tail := make([]byte, n%8)
-	copy(tail, unsafe.Slice((*byte)(unsafe.Add(s, nw*8)), n%8))
+	tail := make([]byte, n%wordSize)
+	copy(tail, unsafe.Slice((*byte)(unsafe.Add(s, nw*wordSize)), n%wordSize))
 	for i, w := range ws {
-		dp := Add(dst, i*8)
+		dp := Add(dst, i*int(wordSize))
 		switch {
 		case dst.info().kindAt(uintptr(dp.off)) == wPtr:
 			if !w.ptr && w.u != 0 {
@@ -654,13 +655,13 @@ func Memmove(dst, src Ptr, n uintptr) {
 		case w.ptr && dst.info().kindAt(uintptr(dp.off)) == wSplit:
 			StorePtr(dp, w.p)
 		case w.ptr:
-			Store64(dp, uint64(Addr(w.p)))
+			storeWord(dp, Addr(w.p))
 		default:
-			Store64(dp, w.u)
+			storeWord(dp, w.u)
 		}
 	}
 	if len(tail) > 0 {
-		t := checkScalar(Add(dst, int(nw*8)), uintptr(len(tail)))
+		t := checkScalar(Add(dst, int(nw*wordSize)), uintptr(len(tail)))
 		copy(unsafe.Slice((*byte)(t), len(tail)), tail)
 	}
 }
@@ -690,7 +691,7 @@ func moveWord(dst, src Ptr) {
 		return
 	}
 	if sk != wPtr && sk != wSplit && dk != wPtr && dk != wSplit {
-		Store64(dst, Load64(src))
+		storeWord(dst, loadWord(src))
 		return
 	}
 	var p Ptr
@@ -706,7 +707,7 @@ func moveWord(dst, src Ptr) {
 	switch {
 	case dk == wPtr:
 		if !isPtr {
-			if u := Load64(src); u != 0 {
+			if u := loadWord(src); u != 0 {
 				fault("non-zero scalar copied into a pointer word", Addr(dst))
 			}
 		}
@@ -714,9 +715,9 @@ func moveWord(dst, src Ptr) {
 	case isPtr && dk == wSplit:
 		StorePtr(dst, p)
 	case isPtr:
-		Store64(dst, uint64(Addr(p)))
+		storeWord(dst, Addr(p))
 	default:
-		Store64(dst, Load64(src))
+		storeWord(dst, loadWord(src))
 	}
 }
 
@@ -726,12 +727,12 @@ func Memset(p Ptr, c int32, size uint64) Ptr {
 	a := check(p, n)
 	for i := uintptr(0); i < n; {
 		q := Add(p, int(i))
-		if (uintptr(a)+i)%8 == 0 && i+8 <= n && p.info().kindAt(uintptr(q.off)) == wPtr {
+		if (uintptr(a)+i)%wordSize == 0 && i+wordSize <= n && p.info().kindAt(uintptr(q.off)) == wPtr {
 			if c&0xff != 0 {
 				fault("non-zero memset of a pointer word", Addr(q))
 			}
 			StorePtr(q, Ptr{})
-			i += 8
+			i += wordSize
 			continue
 		}
 		Store8(q, uint8(c))

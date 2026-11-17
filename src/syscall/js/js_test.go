@@ -177,10 +177,16 @@ func TestIntConversion(t *testing.T) {
 	testIntConversion(t, -1)
 	testIntConversion(t, 1<<20)
 	testIntConversion(t, -1<<20)
-	testIntConversion(t, 1<<40)
-	testIntConversion(t, -1<<40)
-	testIntConversion(t, 1<<60)
-	testIntConversion(t, -1<<60)
+	if ^uint(0)>>63 == 0 {
+		// An int of 32 bits (wasm32).
+		testIntConversion(t, 1<<30)
+		testIntConversion(t, -1<<31)
+		return
+	}
+	for _, shift := range []uint{40, 60} {
+		testIntConversion(t, int(int64(1)<<shift))
+		testIntConversion(t, int(int64(-1)<<shift))
+	}
 }
 
 func testIntConversion(t *testing.T, want int) {

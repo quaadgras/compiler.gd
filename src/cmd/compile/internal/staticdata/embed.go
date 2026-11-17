@@ -130,8 +130,7 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 			// gd small-string optimization: a Go string is now 3 words
 			// (ptr, hash, len). Embed writes hash = 0 in Phase A; len
 			// lives in word 2 (offset 2*PtrSize). See doc/gd/sso-string.md.
-			off = objw.Uintptr(gd, sym, off, 0)            // hash slot, Phase A = 0
-			off = objw.Uintptr(gd, sym, off, uint64(size)) // len
+			off = stringRest(gd, sym, off, uint64(size))
 		} else {
 			// embedBytes: slice header is unchanged at 3 words
 			// (ptr, len, cap). No hash slot.
@@ -159,13 +158,11 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		for _, file := range files {
 			// name string: ptr, hash=0, len
 			off = objw.SymPtr(gd, slicedata, off, StringSym(gd, v.Pos(), file), 0)
-			off = objw.Uintptr(gd, slicedata, off, 0) // string hash slot
-			off = objw.Uintptr(gd, slicedata, off, uint64(len(file)))
+			off = stringRest(gd, slicedata, off, uint64(len(file)))
 			if strings.HasSuffix(file, "/") {
 				// entry for directory - no data; zero out the data string.
 				off = objw.Uintptr(gd, slicedata, off, 0) // data.ptr
-				off = objw.Uintptr(gd, slicedata, off, 0) // data.hash
-				off = objw.Uintptr(gd, slicedata, off, 0) // data.len
+				off = stringRest(gd, slicedata, off, 0)
 				off += hashSize
 			} else {
 				fsym, size, err := fileStringSym(gd, v.Pos(), gd.Flag.Cfg.Embed.Files[file], true, hash)
@@ -174,8 +171,7 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 				}
 				// data string: ptr, hash=0, len
 				off = objw.SymPtr(gd, slicedata, off, fsym, 0)
-				off = objw.Uintptr(gd, slicedata, off, 0) // string hash slot
-				off = objw.Uintptr(gd, slicedata, off, uint64(size))
+				off = stringRest(gd, slicedata, off, uint64(size))
 				off = int(slicedata.WriteBytes(gd.Ctxt, int64(off), hash))
 			}
 		}
@@ -183,4 +179,17 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		sym := v.Linksym()
 		objw.SymPtr(gd, sym, 0, slicedata, 0)
 	}
+}
+
+// stringRest writes the words of a string after its pointer, at off in
+// sym, for a length of n: the hash slot (zero) and n, or with
+// types.StringWasm32 n, then zero for the hash and the last word.
+func stringRest(gd *base.Invocation, sym *obj.LSym, off int, n uint64) int {
+	if types.StringWasm32() {
+		off = objw.Uintptr(gd, sym, off, n)
+		off = objw.Uintptr(gd, sym, off, 0)
+		return objw.Uintptr(gd, sym, off, 0)
+	}
+	off = objw.Uintptr(gd, sym, off, 0) // hash slot
+	return objw.Uintptr(gd, sym, off, n)
 }

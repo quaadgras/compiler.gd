@@ -325,9 +325,9 @@ func goType(t *ctype) string {
 	case kUInt:
 		return "uint32"
 	case kLong, kLLong:
-		return "int64"
+		return fmt.Sprintf("int%d", t.sizeof()*8)
 	case kULong, kULLong:
-		return "uint64"
+		return fmt.Sprintf("uint%d", t.sizeof()*8)
 	case kComplex:
 		if t.elem.kind == kFloat {
 			return "complex64"
@@ -528,7 +528,7 @@ func constLit(t *ctype, v int64) string {
 		if v == 0 {
 			return "c23.Ptr{}"
 		}
-		return fmt.Sprintf("c23.FromInt(%d)", uint64(v))
+		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():
 		return fmt.Sprintf("%s(%d)", goType(t), v)
 	case t.isUnsigned() && t.sizeof() == 8:

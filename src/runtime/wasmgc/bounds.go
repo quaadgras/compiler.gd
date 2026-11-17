@@ -128,3 +128,9 @@ func goPanicSlice3CU(x uint, y int) {
 func goPanicSliceConvert(x int, y int) {
 	panic(boundsError{x: int64(x), signed: true, y: y, code: abi.BoundsConvert})
 }
+
+// goPanicExtendWide panics for an index of 64 bits that an int of 32
+// does not hold (wasm32: the compiler's extendIndexWide).
+func goPanicExtendWide(x int64, signed bool, code abi.BoundsErrorCode, y int) {
+	panic(boundsError{x: x, signed: signed, y: y, code: code})
+}

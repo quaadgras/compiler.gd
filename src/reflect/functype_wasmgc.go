@@ -8,6 +8,7 @@ package reflect
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"internal/runtime/sys"
 	"strconv"
 	"sync"
@@ -289,6 +290,10 @@ func gcFuncKey(t *funcType) string {
 	return string(b)
 }
 
+// gcWordKind is the kind of an integer word (ld.WasmGCWordKind): 'w'
+// with words of 4 bytes, 'l' with 8.
+const gcWordKind = 'w'*(goarch.PtrSize/8^1) + 'l'*(goarch.PtrSize/8)
+
 // gcAppendRegs is cmd/link/internal/ld.wasmGCAppendRegs, spelled.
 func gcAppendRegs(b []byte, t *abi.Type, off uintptr) []byte {
 	add := func(o uintptr, mem, reg byte, signed bool) {
@@ -313,14 +318,22 @@ func gcAppendRegs(b []byte, t *abi.Type, off uintptr) []byte {
 			b = gcAppendRegs(b, at.Elem, off+i*at.Elem.Size())
 		}
 	case abi.String, abi.Slice:
+		if k == abi.String && goarch.PtrSize == 4 {
+			// wasm32's string (ld.WasmGCRegs): word 0 as a pointer
+			// if the tag is 0, A over it, and B.
+			add(0, 's', 'r', false)
+			add(0, 'l', 'l', false)
+			add(8, 'l', 'l', false)
+			break
+		}
 		add(0, 'r', 'r', false)
-		add(8, 'l', 'l', false)
-		add(16, 'l', 'l', false)
+		add(goarch.PtrSize, gcWordKind, 'l', false)
+		add(2*goarch.PtrSize, gcWordKind, 'l', false)
 	case abi.Interface:
-		add(0, 'l', 'r', false)
-		add(8, 'r', 'r', false)
-		add(16, 'd', 'd', false)
-		add(24, 'd', 'd', false)
+		add(0, gcWordKind, 'r', false)
+		add(goarch.PtrSize, 'r', 'r', false)
+		add(2*goarch.PtrSize, 'd', 'd', false)
+		add(2*goarch.PtrSize+8, 'd', 'd', false)
 	case abi.Complex64:
 		add(0, 'f', 'f', false)
 		add(4, 'f', 'f', false)
@@ -334,7 +347,7 @@ func gcAppendRegs(b []byte, t *abi.Type, off uintptr) []byte {
 	case abi.Float64:
 		add(0, 'd', 'd', false)
 	default:
-		signed := k == abi.Int8 || k == abi.Int16 || k == abi.Int32
+		signed := k == abi.Int8 || k == abi.Int16 || k == abi.Int32 || k == abi.Int && t.Size() < 8
 		add(0, "bh?w???l"[t.Size()-1], 'l', signed)
 	}
 	return b
@@ -422,7 +435,7 @@ func gcNewLinear(n int) unsafe.Pointer {
 	p := unsafe_NewArray(rtypeOf(byte(0)), n)
 	if wasmSplitMode {
 		// Words that may be pointers, which split keeps with them.
-		p = unsafe_NewArray(rtypeOf(unsafe.Pointer(nil)), (n+7)/8)
+		p = unsafe_NewArray(rtypeOf(unsafe.Pointer(nil)), (n+goarch.PtrSize-1)/goarch.PtrSize)
 	}
 	gcKeep(p)
 	return p

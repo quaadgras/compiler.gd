@@ -147,7 +147,7 @@ go/parser ok
 go/printer ok
 go/scanner ok
 go/token ok
-go/types ok
+go/types FAIL --- FAIL: TestSizeof | sizeof_test.go:64: unsafe.Sizeof(types.Basic) = 24, want 20
 go/version ok
 hash ok
 hash/adler32 ok
@@ -221,7 +221,7 @@ internal/profile ok
 internal/profilerecord SKIP no test files
 internal/race SKIP no test files
 internal/reflectlite ok
-internal/runtime/atomic ok
+internal/runtime/atomic FAIL --- FAIL: TestUnaligned64 | atomic_test.go:82: Load64 did not panic
 internal/runtime/cgroup ok
 internal/runtime/exithook SKIP no test files
 internal/runtime/gc SKIP no test files
@@ -334,8 +334,8 @@ strconv ok
 strings ok
 structs SKIP no test files
 sync ok
-sync/atomic ok
-syscall ok
+sync/atomic FAIL --- FAIL: TestUnaligned64 | atomic_test.go:2883: LoadUint64 did not panic
+syscall BUILD syscall/fs_wasip1_test.go:82:32: constant 4294967296 overflows int
 testing ok
 testing/cryptotest ok
 testing/fstest ok

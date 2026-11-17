@@ -9,6 +9,7 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
 	"cmd/internal/objabi"
+	"cmd/internal/sys"
 	"cmd/link/internal/ld"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
@@ -120,6 +121,10 @@ func assignAddress(ldr *loader.Loader, sect *sym.Section, n int, s loader.Sym, v
 	// However, there is no PC register, only PC_F and PC_B. PC_F denotes the function,
 	// PC_B the resume point inside of that function. The entry of the function has PC_B = 0.
 	ldr.SetSymSect(s, sect)
+	if pcf := funcValueOffset + va/abi.MINFUNC; pcf >= 1<<16 && sys.ArchWasm.PtrSize == 4 {
+		// With a uintptr of 32 bits (wasm32), PC_F<<16 must fit in it.
+		ld.Exitf("too many functions for GOWASM=gc with 4-byte pointers: at most %d (use GOWASM=gc,ptr64)", 1<<16-funcValueOffset)
+	}
 	ldr.SetSymValue(s, int64(funcValueOffset+va/abi.MINFUNC)<<16) // va starts at zero
 	va += uint64(abi.MINFUNC)
 	return sect, n, va

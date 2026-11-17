@@ -70,6 +70,10 @@ type mulRecipe struct {
 // ssaGenValue implementations, etc.).
 func (c *Config) GD() *base.Invocation { return c.gd }
 
+// stringWasm32 reports whether strings have the form of wasm32
+// (types.StringWasm32).
+func (c *Config) stringWasm32() bool { return c.PtrSize == 4 && types.StringWasm32() }
+
 type (
 	blockRewriter func(*Block) bool
 	valueRewriter func(*Value) bool
@@ -99,10 +103,19 @@ type Types struct {
 	Float32Ptr *types.Type
 	Float64Ptr *types.Type
 	BytePtrPtr *types.Type
-	Vec128     *types.Type
-	Vec256     *types.Type
-	Vec512     *types.Type
-	Mask       *types.Type
+
+	// StringWord1 and StringWord2 are the types of the second and
+	// third values of a string (types.StringWord1Type and
+	// StringWord2Type), at types.StringWord1Offset and 2*PtrSize.
+	StringWord1    *types.Type
+	StringWord1Ptr *types.Type
+	StringWord2    *types.Type
+	StringWord2Ptr *types.Type
+
+	Vec128 *types.Type
+	Vec256 *types.Type
+	Vec512 *types.Type
+	Mask   *types.Type
 }
 
 // NewTypes creates and populates a Types.
@@ -137,6 +150,10 @@ func (t *Types) SetTypPtrs() {
 	t.Float32Ptr = types.NewPtr(types.Types[types.TFLOAT32])
 	t.Float64Ptr = types.NewPtr(types.Types[types.TFLOAT64])
 	t.BytePtrPtr = types.NewPtr(types.NewPtr(types.Types[types.TUINT8]))
+	t.StringWord1 = types.StringWord1Type()
+	t.StringWord1Ptr = types.NewPtr(t.StringWord1)
+	t.StringWord2 = types.StringWord2Type()
+	t.StringWord2Ptr = types.NewPtr(t.StringWord2)
 	t.Vec128 = types.TypeVec128
 	t.Vec256 = types.TypeVec256
 	t.Vec512 = types.TypeVec512
@@ -369,7 +386,9 @@ func NewConfig(gd *base.Invocation, arch string, types Types, ctxt *obj.Link, op
 		c.FPReg = framepointerRegRISCV64
 		c.hasGReg = true
 	case "wasm":
-		c.PtrSize = 8
+		// 4 with GOWASM=gc (wasm32), 8 for Go's own port: see
+		// buildcfg's gowasmFeatures.PtrSize.
+		c.PtrSize = int64(ctxt.Arch.PtrSize)
 		c.RegSize = 8
 		c.lowerBlock = rewriteBlockWasm
 		c.lowerValue = rewriteValueWasm

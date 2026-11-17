@@ -59,7 +59,7 @@ func Fstatat(dirfd int, path string, stat *syscall.Stat_t, flags int) error {
 	// (With GOWASM=gc, stat may be an object, not memory the host can
 	// write: then the host writes a Stat_t in linear memory.)
 	lst := stat
-	if uintptr(unsafe.Pointer(stat)) >= 1<<32 {
+	if !inLinear(unsafe.Pointer(stat)) {
 		lst = &make([]syscall.Stat_t, 1)[0]
 	}
 	errno := path_filestat_get(
@@ -189,10 +189,21 @@ func errnoErr(errno syscall.Errno) error {
 // at run time are an object, so they are copied.
 func linearString(s string) *byte {
 	p := unsafe.StringData(s)
-	if len(s) == 0 || uintptr(unsafe.Pointer(p)) < 1<<32 {
+	if len(s) == 0 || inLinear(unsafe.Pointer(p)) {
 		return p
 	}
 	b := make([]byte, len(s))
 	copy(b, s)
 	return &b[0]
 }
+
+// inLinear reports whether p is an address in linear memory, which the
+// host reads and writes (as syscall.inLinear). With GOWASM=gc a pointer to an object of the
+// engine's is, as an integer, gcObjects or more (any other is an address
+// in linear memory, which is under 2 GB there).
+func inLinear(p unsafe.Pointer) bool {
+	return uint64(uintptr(p)) < gcObjects
+}
+
+// gcObjects is 2^31 with pointers of 4 bytes (wasm32), 2^32 with 8.
+const gcObjects = 1 << (31 + unsafe.Sizeof(uintptr(0))/8)

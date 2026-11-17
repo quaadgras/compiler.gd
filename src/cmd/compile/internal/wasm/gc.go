@@ -173,8 +173,20 @@ func gcLeafSize(l gcLeaf) int64 {
 		return 4
 	case 'a':
 		return l.t.Size()
+	case 'r':
+		return int64(types.PtrSize)
 	}
 	return 8
+}
+
+// gcWord is the kind of a word that is an integer (an int, a uintptr,
+// the length of a string or a slice): 'w' or 'l', as the size of a
+// pointer is 4 or 8 bytes.
+func gcWord() byte {
+	if types.PtrSize == 4 {
+		return 'w'
+	}
+	return 'l'
 }
 
 func gcLeaves(t *types.Type) []gcLeaf {
@@ -182,9 +194,23 @@ func gcLeaves(t *types.Type) []gcLeaf {
 }
 
 func gcAppendLeaves(ls []gcLeaf, t *types.Type, off int64) []gcLeaf {
-	word := func(kinds string) []gcLeaf {
+	// word appends leaves of a word each (types.PtrSize bytes), of
+	// the kinds given ('i' is gcWord), then those of 8 bytes each in
+	// d8, at an offset aligned to 8.
+	word := func(kinds, d8 string) []gcLeaf {
+		o := off
 		for i := range kinds {
-			ls = append(ls, gcLeaf{off: off + int64(i)*8, kind: kinds[i]})
+			k := kinds[i]
+			if k == 'i' {
+				k = gcWord()
+			}
+			ls = append(ls, gcLeaf{off: o, kind: k})
+			o += int64(types.PtrSize)
+		}
+		o = types.RoundUp(o, 8)
+		for i := range d8 {
+			ls = append(ls, gcLeaf{off: o, kind: d8[i]})
+			o += 8
 		}
 		return ls
 	}
@@ -203,21 +229,21 @@ func gcAppendLeaves(ls []gcLeaf, t *types.Type, off int64) []gcLeaf {
 		}
 		return append(ls, gcLeaf{off: off, kind: 'a', t: t})
 	case t.IsString(), t.IsSlice():
-		return word("rll")
+		return word("rii", "")
 	case t.IsInterface():
-		return word("lrdd")
+		return word("ir", "dd")
 	case t.IsComplex():
 		if t.Size() == 8 {
 			return append(ls, gcLeaf{off: off, kind: 'f'}, gcLeaf{off: off + 4, kind: 'f'})
 		}
-		return word("dd")
+		return word("", "dd")
 	case t.IsPtrShaped():
-		return word("r")
+		return word("r", "")
 	case t.IsFloat():
 		if t.Size() == 4 {
 			return append(ls, gcLeaf{off: off, kind: 'f'})
 		}
-		return word("d")
+		return word("", "d")
 	case t.IsInteger(), t.IsBoolean():
 		return append(ls, gcLeaf{off: off, kind: "bh?w???l"[t.Size()-1]})
 	}
@@ -752,6 +778,40 @@ func (g *gcGen) onStack(v *ssa.Value, extend bool) {
 
 	case ssa.OpLocalAddr, ssa.OpAddr, ssa.OpOffPtr, ssa.OpPtrIndex, ssa.OpAddPtr:
 		g.pointer(v)
+
+	case ssa.OpPtrBits:
+		// The address of a pointer, as an integer: word 0 of a
+		// string made of a pointer (types.StringWasm32).
+		g.get(v.Args[0], false)
+		if g.wtype(v.Args[0].Type) == 'r' {
+			g.ptrToInt()
+		}
+
+	case ssa.OpStringLenAB:
+		// The length of a string of wasm32 from its A and B
+		// (types.StringWasm32).
+		g.get(v.Args[0], false)
+		g.get(v.Args[1], false)
+		g.helper(wasm.GCSplitStrLen)
+
+	case ssa.OpStringLoadPtr:
+		// Word 0 of the string at Args[0] as a pointer, if the tag in
+		// its B (Args[1]) is 0; nil, without reading the word, if it
+		// is inline (types.StringWasm32).
+		if !gcSplit() {
+			g.unsupported(v, "string of wasm32 without split")
+		}
+		blk := g.block('r')
+		g.prog(wasm.ARefNull)
+		g.get(v.Args[1], false)
+		i64Const(s, 60)
+		g.prog(wasm.AI64ShrU)
+		g.prog(wasm.AI32WrapI64)
+		g.br(wasm.ABrIf, blk, nil)
+		g.prog(wasm.ADrop)
+		g.spPushPtrRel(g.spResolve(v.Args[0]))
+		g.helper(wasm.GCSplitLoadPtr)
+		g.prog(wasm.AEnd)
 
 	case ssa.OpCopy, ssa.OpWasmLoweredConvert, ssa.OpConvert:
 		g.get(v.Args[0], false)
@@ -3748,7 +3808,7 @@ func (g *gcGen) stackify(b *ssa.Block) {
 		}
 		// The addresses of a move are computed once per field (see
 		// again): the stores in between must not change them.
-		if v.Op == ssa.OpMove || v.Op == ssa.OpZero || v.Op == ssa.OpWasmI64DivS || v.Op == ssa.OpPtrIndex || gcUsesTypeTwice(v) {
+		if v.Op == ssa.OpMove || v.Op == ssa.OpZero || v.Op == ssa.OpWasmI64DivS || v.Op == ssa.OpPtrIndex || v.Op == ssa.OpStringLoadPtr || gcUsesTypeTwice(v) {
 			continue
 		}
 		// The integer a pointer is made from stays available: a
@@ -3808,6 +3868,15 @@ func (g *gcGen) value(v *ssa.Value) {
 				g.get(v.Args[1], want32)
 			}
 		}, v)
+
+	case ssa.OpStringStorePtr:
+		// Word 0 of a string, as a pointer: the word and its element
+		// of the array (nil for an inline string, whose A is stored
+		// over the word next: types.StringWasm32).
+		if !gcSplit() {
+			g.unsupported(v, "string of wasm32 without split")
+		}
+		g.splitStore(v.Args[0], g.f.Config.Types.BytePtr, g.wtype(v.Args[1].Type), func() { g.get(v.Args[1], false) }, v)
 
 	case ssa.OpZero:
 		if gcSplit() {

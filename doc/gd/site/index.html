@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>compiler.gd — a Go compiler that allocates on the stack</title>
+<title>compiler.gd: a Go compiler that allocates on the stack</title>
 <meta name="description" content="gd is a fork of the Go compiler that aggressively allocates on the stack, to reduce GC pressure in real-time graphics.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
 <link rel="stylesheet" href="style.css">
@@ -12,30 +12,31 @@
 <main>
   <nav>
     <a href="/" aria-current="page">compiler.gd</a>
-    <a href="/playground">Playground</a>
-    <a href="/c11">Go → C11 (experimental)</a>
-    <a href="https://github.com/quaadgras/compiler.gd">GitHub</a>
+    <a href="/playground">playground</a>
+    <a href="/c11">go → c11</a>
+    <a href="https://github.com/quaadgras/compiler.gd">github</a>
   </nav>
 
   <h1><span>gd</span> compiler</h1>
-  <p class="lede">A fork of the Go compiler that aggressively allocates on the stack — less GC pressure for real-time graphics, and carefully written programs that can run with the GC turned off.</p>
+  <p class="lede">A compiler for Go that aggressively allocates on the stack. Intended to reduce GC pressure in real-time graphics, and to let carefully designed programs run without a GC.</p>
 
   <div class="stat">
-    <div><b>−59%</b><small>time for calls through closures and interfaces, 1 allocation → 0 (geomean of the escape-bits benchmarks)</small></div>
-    <div><b>16 B</b><small>inline storage in every interface: strings, slices and numbers never box</small></div>
-    <div><b>15 B</b><small>strings stored inline, no heap pointer</small></div>
+    <div><b>−59%</b><small>time for calls through closures and interfaces (1 allocation → 0)</small></div>
+    <div><b>16 B</b><small>inline storage in every interface</small></div>
+    <div><b>15 B</b><small>strings stored without allocating</small></div>
   </div>
 
-  <h2>What's different</h2>
+  <h2>What's different?</h2>
   <ol>
-    <li><b>Fat interfaces.</b> Interfaces carry 16 bytes of inline storage, so strings, slices and any numeric type are stored directly instead of allocated.</li>
-    <li><b>Small strings.</b> Up to 15 bytes live in the string header itself; heap strings use the spare word for a cached hash.</li>
-    <li><b>Escape analysis across dynamic dispatch.</b> Each closure and method carries which of its arguments escape, so the caller keeps arguments on the stack when the actual callee doesn't leak them.</li>
-    <li><b>Pointer results on the caller's stack.</b> A function returning <code>*T</code> writes into a buffer the caller provides when the result doesn't escape.</li>
-    <li><b>One binary.</b> The <code>go</code> command embeds the standard library and <code>asm</code>, <code>cgo</code>, <code>compile</code> and <code>link</code>.</li>
+    <li>Interfaces include 16 bytes of inline storage (strings and slices both fit).</li>
+    <li>Small string optimization (15 bytes stored without allocating or a hash).</li>
+    <li>Escape analysis for dynamic dispatch (closures and interfaces).</li>
+    <li>Pointer results can be allocated on the caller's stack (if they don't escape).</li>
+    <li>The entire compiler and standard library in a single self-contained binary.</li>
+    <li>Small wasm/js binaries: about 400 KB for a fmt hello world, no dispatch loop.</li>
   </ol>
 
-  <h2>Fewer allocations, measured</h2>
+  <h2>Measured</h2>
   <div class="table-wrap">
   <table>
     <thead><tr><th>benchmark</th><th>ns/op stock</th><th>ns/op gd</th><th>allocs</th></tr></thead>
@@ -48,30 +49,25 @@
     </tbody>
   </table>
   </div>
-  <p class="note">Not everything gets faster: larger interfaces and strings mean more bytes to copy, and some benchmarks (for example <code>encoding/json</code> decoding) are slower. The full results are in <a href="https://github.com/quaadgras/compiler.gd/tree/release/doc/gd">doc/gd</a>.</p>
+  <p class="note">Not everything is faster: wider interfaces and strings cost more to copy, and some benchmarks (<code>encoding/json</code> decoding) are slower. Full results in <a href="https://github.com/quaadgras/compiler.gd/tree/release/doc/gd">doc/gd</a>.</p>
 
   <h2>Does it work?</h2>
-  <ul>
-    <li><code>all.bash</code> passes on <code>amd64</code>; the standard library tests pass on <code>arm64</code> and <code>js/wasm</code>.</li>
-    <li>On <code>js/wasm</code> each goroutine runs on its own WebAssembly stack (JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27, Node.js 24), and functions use structured control flow instead of a dispatch loop.</li>
-    <li>In development: a WebAssembly GC target (<code>GOWASM=gc</code>), which already passes the Go spec tests and the standard library's own tests.</li>
-  </ul>
+  <p>The language and standard library test suites pass on <code>amd64</code>, <code>arm64</code> and <code>js/wasm</code>.</p>
 
   <h2>Try it</h2>
-  <p>In your browser: the <a href="/playground">playground</a> runs the gd <code>go</code> command, compiled to WebAssembly. Or build it:</p>
+  <p>In your browser: the <a href="/playground">playground</a>. Or build it:</p>
 <pre><code>git clone https://github.com/quaadgras/compiler.gd
 cd compiler.gd/src &amp;&amp; ./make.bash
-export PATH=$PWD/../bin:$PATH
-go version</code></pre>
-  <p class="note">The ABI differs from stock Go (wider interfaces and strings), so assembly and code that relies on <code>unsafe</code> layouts of those types needs care.</p>
+export PATH=$PWD/../bin:$PATH</code></pre>
+  <p class="note">The ABI differs from stock Go (wider interfaces and strings), so assembly and <code>unsafe</code> code that relies on their layout needs care.</p>
 
-  <h2>How it's built</h2>
-  <p>The high-level design is directed by a person with a deep knowledge of the language; the implementation work is done by an LLM. That makes it practical to explore compiler trade-offs that wouldn't otherwise get the time and attention. Changes go through the Go test suite on every step.</p>
+  <h2>How? Why?</h2>
+  <p><a href="https://github.com/Splizard">@Splizard</a>, the project's director, developed an interest (after 10 years of Go) in exploring what an alternative Go compiler could look like. Recent technology has made an endeavour of this scale far more accessible. The compiler is intended to support <a href="https://graphics.gd">graphics.gd</a>.</p>
 
   <footer>
     <a href="https://github.com/quaadgras/compiler.gd">github.com/quaadgras/compiler.gd</a> ·
     MIT licensed ·
-    individual contributions are a better fit for <a href="https://go.dev">go.dev</a>; open an issue before a PR here
+    contributions may be a better fit for <a href="https://go.dev">go.dev</a>
   </footer>
 </main>
 </body>

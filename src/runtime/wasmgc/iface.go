@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -89,12 +90,11 @@ func getitab(inter *interfacetype, typ *_type, canfail bool) *itab {
 
 	// Not found: build one. As in an itab the compiler emits, the
 	// functions are followed by a word of escape mask for each.
-	n := uintptr(len(inter.Methods))
-	size := unsafe.Sizeof(itab{}) + (n-1)*8 + n*8
+	size := uintptr(abi.ITabSize(goarch.PtrSize, len(inter.Methods)))
 	var m *itab
 	if splitMode {
 		// (With the pointers in it: itabs keeps it.)
-		m = (*itab)(splitalloc(size, size/8))
+		m = (*itab)(splitalloc(size, splitslots(size)))
 	} else {
 		m = (*itab)(unsafe.Pointer(linalloc(size)))
 	}

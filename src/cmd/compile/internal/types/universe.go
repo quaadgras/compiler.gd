@@ -72,10 +72,29 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		//   word 0 @ 0            : data ptr (heap) / nil (inline)
 		//   word 1 @ PtrSize      : cached hash (heap) / bytes[0:8] (inline)
 		//   word 2 @ 2*PtrSize    : tag<<60 | len-or-inline-bytes
+		// gd escape-bits: a function value is {F uintptr; M uint64;
+		// captures...}; M is aligned as a uint64 (to a register), which
+		// with 4-byte pointers and 8-byte registers (wasm32) puts it
+		// after 4 bytes of padding.
+		FuncMaskOffset = RoundUp(int64(PtrSize), int64(RegSize))
+		ClosureVarsOffset = FuncMaskOffset + 8
+
 		StringPtrOffset = 0
 		StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
 		StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
 		StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
+		switch {
+		case PtrSize == 8:
+			StringInlineCap = 15
+		case StringWasm32():
+			// Four words: the address of the bytes, the length, the
+			// cached hash and zero, or up to 15 bytes and the length
+			// in the top 4 bits of the last (see StringWasm32).
+			StringLenOffset = StringPtrOffset + int64(PtrSize)
+			StringHashOffset = StringLenOffset + int64(PtrSize)
+			StringSize = 4 * int64(PtrSize)
+			StringInlineCap = 15
+		}
 
 		for et := Kind(0); et < NTYPE; et++ {
 			SimType[et] = et

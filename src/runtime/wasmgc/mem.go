@@ -6,7 +6,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/goarch"
+	"unsafe"
+)
 
 // Bytes through pointers. A pointer to linear memory is an address, and
 // these are the instructions of linear memory; any other pointer goes
@@ -111,11 +114,11 @@ func setclosurectxt(p unsafe.Pointer)
 // values that carry a size in their second word.
 
 func memequal_varlen(a, b unsafe.Pointer) bool {
-	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + 8))
+	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + goarch.PtrSize))
 	return memequal(a, b, size)
 }
 
 func memhash_varlen(p unsafe.Pointer, h uintptr) uintptr {
-	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + 8))
+	size := *(*uintptr)(unsafe.Pointer(getclosureptr() + goarch.PtrSize))
 	return memhash(p, h, size)
 }

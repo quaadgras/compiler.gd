@@ -179,9 +179,9 @@ func newOf(ti *tinfo, n uintptr) Ptr {
 
 // Args returns main's argv.
 func Args() Ptr {
-	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * 8)
+	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * wordSize)
 	for i, a := range os.Args {
-		StorePtr(Add(argv, i*8), CString(a))
+		StorePtr(Add(argv, i*int(wordSize)), CString(a))
 	}
 	return argv
 }

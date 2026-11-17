@@ -785,6 +785,9 @@ func (p *parser) enumSpec() *ctype {
 		if len(consts) == 0 || v > maxV {
 			maxV = v
 		}
+		if fixed == nil {
+			ct = long64(ct)
+		}
 		sym := &symbol{name: name, kind: symEnumConst, t: ct, val: v, p: at}
 		p.declare(sym, at)
 		consts = append(consts, sym)
@@ -816,6 +819,9 @@ func (p *parser) enumSpec() *ctype {
 		}
 	case maxV > 0xffffffff:
 		kind = kULong
+	}
+	if fixed == nil {
+		kind = long64(&ctype{kind: kind}).kind
 	}
 	t.kind = kind
 	t.enum.complete = true

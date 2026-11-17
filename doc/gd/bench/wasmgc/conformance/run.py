@@ -17,6 +17,10 @@ status-chromium.txt.
 With GOWASM=gc,split in the environment the tests are built for that model
 (stage 15 of wasm-gc.md), in out-split, and the results go to
 status-split.txt (status-split-chromium.txt in a browser).
+
+With GOOS=js in the environment the tests are built for GOOS=js (in
+out-js..., results in status-js...txt; GOJSRUNTIME names a browser). With
+GOWASM=gc,split,ptr64, split with 8-byte words (status-split-ptr64...).
 """
 import collections, concurrent.futures, os, re, subprocess, sys
 
@@ -26,7 +30,7 @@ import build as stdbuild
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOROOT = os.path.abspath(os.path.join(HERE, '../../../../..'))
 SPLIT = stdbuild.SPLIT
-OUT = os.path.join(HERE, 'out-split' if SPLIT else 'out')
+OUT = os.path.join(HERE, ('out-split' if SPLIT else 'out') + ('-ptr64' if stdbuild.PTR64 else '') + ('-js' if stdbuild.GOOS == 'js' else ''))
 ENV = stdbuild.ENV
 HOSTENV = dict(os.environ, GOROOT=GOROOT, GOWASM='')
 for k in ('GOOS', 'GOARCH'):
@@ -36,10 +40,10 @@ TOOL = os.path.join(GOROOT, 'pkg/tool',
                     subprocess.check_output([GO, 'env', 'GOHOSTOS'], env=HOSTENV, text=True).strip() + '_' +
                     subprocess.check_output([GO, 'env', 'GOHOSTARCH'], env=HOSTENV, text=True).strip())
 RUNNER = os.path.join(HERE, '../compiled/run.mjs')
-BROWSER = os.environ.get('GOWASIRUNTIME', '')
+BROWSER = os.environ.get('GOJSRUNTIME' if stdbuild.GOOS == 'js' else 'GOWASIRUNTIME', '')
 if BROWSER not in ('chromium', 'firefox'):
     BROWSER = ''
-STATUS = os.path.join(HERE, 'status' + ('-split' if SPLIT else '') + ('-' + BROWSER if BROWSER else '') + '.txt')
+STATUS = os.path.join(HERE, 'status' + ('-js' if stdbuild.GOOS == 'js' else '') + ('-split' if SPLIT else '') + ('-ptr64' if stdbuild.PTR64 else '') + ('-' + BROWSER if BROWSER else '') + '.txt')
 
 # The packages of the standard library that tests may import: those
 # that build are importable.
@@ -69,8 +73,8 @@ def build_std():
     return cfg
 
 
-# The build tags of GOOS=wasip1 GOARCH=wasm with the gc toolchain.
-TAGS = {'wasip1', 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set())
+# The build tags of GOOS=wasip1 (or js) GOARCH=wasm with the gc toolchain.
+TAGS = {stdbuild.GOOS, 'wasm', 'gc', 'wasm.gc'} | {'go1.%d' % i for i in range(1, 30)} | ({'wasm.split'} if SPLIT else set()) | ({'wasm.ptr32'} if stdbuild.PTR32 else set())
 
 
 def build_ok(expr):
@@ -150,6 +154,12 @@ NOADDRESS = {
 NOPROFILE = {'heapsampling.go'}
 
 
+# With 4-byte words (wasm32: GOWASM=gc,split), the tests that Go's own
+# runner leaves out on 32-bit targets (types2Failures32Bit in
+# cmd/internal/testdir): a constant that an int of 32 bits does not hold.
+INT32 = {'printbig.go', 'fixedbugs/bug114.go', 'fixedbugs/issue23305.go'}
+
+
 def run(cfg, name, imports):
     if name in NOPROFILE:
         return name, 'SKIP', 'no heap profile'
@@ -157,6 +167,8 @@ def run(cfg, name, imports):
         return name, 'SKIP', 'finalizers'
     if name in NOADDRESS:
         return name, 'SKIP', 'objects have no address'
+    if name in INT32 and stdbuild.PTR32:
+        return name, 'SKIP', 'an int of 32 bits (as Go skips it on 32-bit targets)'
     missing = imports - IMPORTABLE
     if missing:
         return name, 'SKIP', 'imports ' + ' '.join(sorted(missing))
@@ -176,6 +188,9 @@ def run(cfg, name, imports):
         if BROWSER:
             cmd = [os.path.join(GOROOT, 'lib/wasm/go_wasip1_wasm_exec'), base + '.wasm']
             env = dict(ENV, GOWASIRUNTIME=BROWSER)
+            if stdbuild.GOOS == 'js':
+                cmd = [os.path.join(GOROOT, 'lib/wasm/go_js_wasm_exec'), base + '.wasm']
+                env = dict(ENV, GOJSRUNTIME=BROWSER)
         r = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace', timeout=60)
     except subprocess.TimeoutExpired:
         return name, 'FAIL', 'run: timeout'

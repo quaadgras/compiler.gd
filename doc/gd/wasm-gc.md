@@ -1740,7 +1740,7 @@ What allocates is 4 to 10 times slower; what copies or follows
 pointers into the middle of values is faster; the rest is near.
 
 
-### Stage 16: pointers of 32 bits, then cgo (decided 2026-11-17, not started)
+### Stage 16: pointers of 32 bits, then cgo (decided 2026-11-17; the pointers built 2026-11-18, cgo not started)
 
 With `GOWASM=gc,split` a Go value is bytes in the memory that C
 compiled by clang for wasm32 has too: a buffer or a struct can be given
@@ -1784,6 +1784,461 @@ interfaces 8, not 16.
 
 A first proof of cgo, after the pointers: Go calls a C function
 compiled without a libc, and they pass a buffer both ways.
+
+#### Built: wasm32 (2026-11-18)
+
+`GOOS=js GOARCH=wasm`, which is `GOWASM=gc,split`, is now wasm32: a
+pointer, a `uintptr`, an `int` and a `uint` are 4 bytes; registers are
+8 (an `int64` is one WebAssembly value and one instruction), and
+`int64`, `uint64` and `float64` are aligned to 8 in a struct. Go and
+clang's `--target=wasm32` lay a struct out alike: `bench/wasmgc/layout`
+checks 15 structs (pointers, `int`, `int64`, `float64`, `bool`, nested
+structs, arrays, a slice), 84 sizes, alignments and offsets, by having
+clang assert each (`layout/check.sh`; it fails with 8-byte words, as
+it should). An `fmt` hello world prints `unsafe.Sizeof` of `int`,
+`uintptr`, `*int`, `string`, `[]byte`, `any`: 4, 4, 4, 12, 12, 24.
+
+What differs from the decision above, and why:
+
+- **Strings are 12 bytes and interfaces 24, not 8 and 8** (strings
+  are now 16 bytes with an inline form: "Built: strings of 16 bytes",
+  below). The
+  decision counted stock Go's headers; this fork's are larger (a string
+  is three words, `doc/gd/sso-string.md`; an interface is two words and
+  16 bytes of inline payload, `doc/gd/fat-iface.md`). With 4-byte words
+  a string is the compiler's 32-bit string, which already existed:
+  three words (pointer, hash, length) and **no inline form** (an inline
+  string needs the tag in the top bits of a 64-bit word; the compiler
+  emits no tag test where `PtrSize` is 4, and `runtime/wasmgc` keeps
+  `stringInline` at 0). An interface is 4 + 4 + 16 = 24 bytes, aligned
+  to 8. Chosen as the conservative reading: it is the layout the fork
+  defines for 32-bit targets, it is what the compiler already knew, and
+  it keeps both headers of whole words. What it costs: a string of 15
+  bytes or fewer made at run time is an allocation (Go's own cost), the
+  short string constants are data with a pointer (a global each for
+  split: 402 globals where there were 263 in hello world), and the
+  fork's tests that count on inline strings or on strings and slices
+  stored spread in an interface (below) see allocations. An inline
+  form of 7 bytes (the tag in the top 4 bits of the 32-bit third word,
+  strings limited to 256 MB) and spread interfaces with 4-byte words
+  are possible, not done (work list).
+- **The struct model (`GOWASM=gc` alone) keeps 8-byte words.** It
+  converts a pointer to an object of the engine's to an integer that
+  is the object's identity, its number shifted left by 20 to leave
+  room for offsets into it and set apart from the addresses of linear
+  memory (`wasm.ptrid`): that needs more than 32 bits. Converted, it
+  built and ran hello world, but closures in a loop and the lifetime
+  test went wrong, and a 32-bit identity would allow some 2,000 objects
+  with room for 1 MB each. The brief allowed it ("a build that is not
+  converted must ... stay 64-bit and still pass"), and the user's
+  words were about the default split build. Both models still share
+  the runtime and std: what depends on the word reads
+  `goarch.PtrSize` and the tool tag `wasm.ptr32`, so no file is
+  doubled for it.
+- **`GOWASM=gc,split,ptr64` is split with 8-byte words**, which proves
+  the word is a parameter: its hello world is 412,014 bytes against
+  412,272 before this stage, and conformance passes with it (947 of
+  965, as before).
+- **The array of a block has an element per 4-byte word**, as it had
+  one per 8-byte word: the plain reading. One per 8 bytes would halve
+  the arrays of values with pointers but make a pointer at a 4-byte
+  offset share an element with its neighbour; not tried.
+
+Where the word size is chosen: `internal/buildcfg`,
+`gowasmFeatures.PtrSize()` (4 for `gc,split` unless `ptr64`, else 8).
+From it: `sys.ArchWasm.PtrSize` (`cmd/internal/sys`, read by the
+compiler, the assembler and the linker), the SSA config (`case "wasm"`),
+the sizes of `types2` and `go/types` (`gcSizesFor`, which `go vet`
+uses: the vet tool must be reinstalled with the others,
+`go install cmd/vet`, or it keeps the old sizes), and the tool tag
+`wasm.ptr32` (what std selects by word size). `internal/goarch`'s
+`PtrSize` follows from `uintptr`; its `Int64Align` is 8 on wasm.
+Everything else derives from those names:
+
+- compiler: `types.PtrSize`; the struct leaves of the backend
+  (`gcWord`), the arrays of frame variables (`spSlots`),
+  `types.FuncMaskOffset`/`ClosureVarsOffset` (the escape mask of a
+  function value is a `uint64` after the code word, aligned to 8),
+  `abi.ITabEscMaskOff` (the masks after an itab's methods, aligned to
+  8), `types.SpreadIfaces()`;
+- linker: `l.ptrSize()` and the helpers that use it, `toSlot`,
+  `toSlotUp`, `wordMisaligned`, `loadWord`, `storeWord`
+  (`cmd/link/internal/wasm/gcsplit.go`), `wasm.GCWordShift`,
+  `ld.WasmGCWordKind` (the registers of reflect's adapters);
+- runtime: `goarch.PtrSize` (`splitslots`, typelinks, itabs, closures
+  of `memequal_varlen`, `scalarWord`, `stringInline`);
+- reflect: `gcWordKind`, `goarch.PtrSize`;
+- the JavaScript hosts read no Go header: the pcs the host writes for
+  `runtime.Callers` are 64 bits whatever the word (the runtime copies
+  them into `uintptr`s), and everything else is passed as arguments.
+
+What the change found, beyond the 8s written out:
+
+- An `int` of 32 bits is in a 64-bit register whose high bits may be
+  anything (`Add32` is `i64.add`): the rules for 32-bit operations
+  extend where it matters, but the bounds checks and `Slicemask` were
+  written for a 64-bit `int` (`Wasm.rules`).
+- An index of 64 bits is checked by truncating it and comparing
+  (`extendIndexWide`, with `runtime.goPanicExtendWide`), not by
+  `Int64Lo`/`Int64Hi`, which 64-bit registers do not have.
+- Escape analysis kept on the heap any variable aligned more than a
+  pointer, so every `int64` (a stack frame here is aligned to 8, as a
+  register: `RegSize`).
+- An interface call staged its receiver for the spread case into a
+  string temporary at offsets 8 and 16: 24 bytes into 12, over the
+  caller's frame (a deferred closure called as garbage). No type is
+  spread with 4-byte words, so that stage is not made.
+- `runtime.linfree` read a block's header through a `uintptr` (its
+  cleanups lost); `runtime.Callers` allocated a string for the name of
+  each frame it looked at; the runtime has `makeslice64` and uses the
+  buffer the compiler offers for a string that does not escape.
+- A function value is `PC_F<<16` in a `uintptr`: a wasm32 program has
+  at most 61,440 functions, and the linker says so when there are more
+  (the test binaries of std are under it).
+- std: `syscall` read sizes, inode numbers and times in milliseconds
+  through `js.Value.Int` (now 32 bits); wasip1's `inLinear` compared
+  addresses with 1<<32; `hash/maphash` took the runtime's hash for 64
+  bits; bigmod's wasm code multiplied 64-bit words as halves (the
+  generic code with `wasm.ptr32`); `internal/abi`'s string helpers read
+  three `uint64`s.
+
+Tests, with `GOWASMGC_POISON=1`, from a copy of the tree (wasip1 is
+`GOWASM=gc,split`):
+
+| suite                                     | before          | wasm32 |
+|-------------------------------------------|-----------------|--------|
+| `compiled/test.sh`, wasip1                | 12 of 12        | 11 of 12 (below) |
+| conformance, wasip1                       | 947, 18 skipped | 944, 21 skipped |
+| conformance, js (new: `GOOS=js run.py`)   | not run         | 945 of 966, 21 skipped |
+| std survey, js (`go test -short`)         | 255 of 256      | 248 of 256 |
+| std survey, wasip1                        | 255 of 255      | 248 of 255 |
+
+In browsers (the default js build): conformance in Chromium 945 of
+966, 21 skipped (`GOOS=js GOJSRUNTIME=chromium run.py`); in Firefox
+the same, 945 of 966 (none fails). `go test syscall/js` passes in Chromium and Firefox and under
+node with its two lines of 64-bit constants left out (below);
+`browser/js_page_test.mjs` with `GOWASM=gc,split` prints what it
+expects in both.
+
+The struct model (8-byte words) is as it was: conformance 947 of 965,
+18 skipped; std 255 of 256 for js (`bytes`, as before) and 255 of 255
+for wasip1 (`compress/gzip` and `crypto/x509` time out when the
+machine is busy, and pass alone). Split with 8-byte words
+(`GOWASM=gc,split,ptr64`), conformance on wasip1: 947 of 965, 18
+skipped, as split was before this stage (`status-split-ptr64.txt`).
+
+Go's own port (`GOWASM=linear`) is as it was: hello world runs, `go
+test` of `strings`, `sort`, `reflect` and `sync` pass under node, and
+`go vet` sees 8-byte words there and 4-byte ones with `gc,split`
+(checked with arrays whose length is zero only for the right size).
+
+What does not pass, and why (no test was changed):
+
+- written for a 64-bit `int`: `bytes` (`bytes_js_wasm_test.go`, a slice
+  of 2 GB and a byte, does not compile: the package's tests do not
+  build), `syscall/js` (`TestIntConversion` passes 1<<40 and 1<<60 as
+  `int`), `syscall` on wasip1 (`TestRandomGetOverflow`, `int(1<<32)`),
+  the conformance tests `printbig.go`, `fixedbugs/bug114.go`,
+  `fixedbugs/issue23305.go` (skipped, as Go's own runner skips them on
+  32-bit targets), and `compiled/tests/lifetime.go` (`unsafe.Add(p, 8)`
+  to the second `int`). With those lines left out (an `-overlay`, the
+  tree untouched) `bytes`, `syscall/js` and `syscall` pass, and so does
+  `lifetime.go`, in both GOOS.
+- written for a 32-bit target that is not this one: `TestUnaligned64`
+  of `sync/atomic` and `internal/runtime/atomic` (on 386 and arm a
+  64-bit atomic at an address not a multiple of 8 panics; WebAssembly
+  does it, and an `int64` here is aligned to 8 anyway), and `go/types`'
+  `TestSizeof` (its 32-bit sizes are 386's, where an interface is
+  aligned to 4; here it is aligned to 8, by its inline payload).
+- counting on inline strings or spread interfaces, which 4-byte words
+  do not have: `net/netip` `TestAddrStringAllocs`, `unique`
+  `TestMakeAllocs` ("string to any"), and `log/slog` `TestAlloc`
+  ("2 pairs", "9 kvs": `slog.StringValue` is a string in an `any`).
+
+Sizes of an `fmt` hello world (bytes, unstripped / `-ldflags="-s -w"`
+/ that gzip -9), built at the start of the stage and now:
+
+|                       | before                      | wasm32 |
+|-----------------------|-----------------------------|--------|
+| js (`gc,split`)       | 412,272 / 352,128 / 128,131 | 385,023 / 325,734 / 121,613 |
+| js `GOWASM=gc`        | 600,322 / 537,783 / 164,681 | 600,970 / 539,047 / 164,933 (8-byte words) |
+| wasip1 `gc`           | 536,257 / 478,536 / 148,282 | 536,924 / 479,785 / 148,670 (8-byte words) |
+| wasip1 `gc,split`     | 371,209 / 315,811 / 115,957 | 346,712 / 292,134 / 109,616 |
+| js `gc,split,ptr64`   | (as js above)               | 412,014 / 352,465 |
+
+(The struct model is some 700 bytes larger: what the runtime gained for
+both models, `makeslice64`, `goPanicExtendWide`, `funcNameIs`.) The
+stripped js module: code 209,988 → 199,611 bytes, data 116,127 →
+97,621, globals 4,393 → 6,756 (the short string constants, above): 26.4
+KB less in all, as estimated (20 to 30 KB of data; it is 18.5 KB of data
+and 10.4 KB of code).
+
+Speed (node 24, `GOOS=js`, best of 5 in each of two runs, the machine
+idle):
+
+|                                  | before | wasm32 |
+|----------------------------------|-------:|-------:|
+| 1,000,000 allocations of a node with a pointer | 244-256 ms | 253-255 ms |
+| `int` arithmetic, 5·10^7 iterations (mul, shift, div, mod) | 150-151 ms | 98-99 ms |
+| sieve of 2·10^7 (`[]bool`, `[]int`) | 128-135 ms | 94-95 ms |
+| `compress/gzip` `TestCVE202230631` | 39.1 s | 42.2 s |
+
+No slowdown from sign extensions shows in the loops (the arithmetic is
+not the same: an `int` of 32 bits, extended before a division or a
+comparison); allocation is as fast; the test of `compress/gzip`, which
+reads many small gzip members, is 8% slower, not looked into (strings
+made at run time that were inline are allocations now, a likely
+reason).
+
+#### Built: strings of 16 bytes, 15 inline (2026-11-18)
+
+The first wasm32 build kept strings of 12 bytes with no inline form
+(above), and short strings made at run time allocated again; the user
+wanted the inline form back. A string with 4-byte words is now **16
+bytes, aligned to 4**, two `uint64`s, A at offset 0 and B at offset 8
+(`doc/gd/sso-string.md` §1c, `types.StringWasm32`,
+`internal/abi/string_ptr32.go`):
+
+- **Inline, 1 to 15 bytes**: the bytes at offsets 0 to 14, the unused
+  ones zero, the length in the top 4 bits of B (the tag). A and B are
+  words 1 and 2 of the 8-byte form, so the inline capacity (15), the tag
+  and its shift, `abi.StringInlineWords` and the constants of the
+  compiler's constant strings are the same in every build.
+- **Otherwise (tag 0)**: word 0 the address of the bytes (nil for the
+  empty string), word 1 the length, word 2 for the cached hash (0 today;
+  at most 60 bits, the top 4 of B being the tag), word 3 zero.
+- `len(s)` is the tag, or word 1; the bytes are at `&s`, or at word 0;
+  two inline strings are equal exactly when A and B are.
+
+This replaced the layout first briefed (12 bytes inline, the length in
+word 0, a number never 1..12 where a heap string has its address): with
+the bytes from offset 0 the inline machinery of the 8-byte form carries
+over with the offsets and the size as its only parameters. The
+fallbacks, in order, were that 12-byte form and an 11-byte form with
+word 0 nil and the length in the last byte (the 8-byte scheme scaled
+down, the only one of the three a native 32-bit target could have).
+
+**Why word 0 may be text here.** The engine never scans linear memory.
+What keeps the bytes of a string alive is the pointer in the element of
+its block's array (stage 15) for word 0, and for an inline string that
+element is nil. So two rules, and every path follows them:
+
+- Word 0 is read as a pointer only after the tag is found to be 0:
+  `OpStringLoadPtr` (the compiler; a block that yields nil without
+  reading the word), `stringData` (runtime/wasmgc), `abi.StringIsInline`,
+  `StringBytes`, `SpreadString` (reflect, reflectlite), and a register
+  kind `'s'` in reflect's adapters (`ld.WasmGCRegs`, `gcAppendRegs`),
+  which tests the tag in byte 15 before `wasm.loadptr`.
+- A string is stored as word 0's pointer first (`OpStringStorePtr`,
+  `wasm.storeptr`: the word, and the element, nil for an inline string)
+  and A over it: storing an inline string over a heap one clears the
+  element, a heap one over an inline one sets it. The two overlap, so
+  the pointer's store is an op of its own that dead-store elimination
+  does not take for shadowed, and runtime code that does it in Go
+  (`abi.UnspreadString`) stores the pointer in a function of its own
+  and then the words one at a time (a move of the 16 bytes would copy
+  the source's elements, none, over it: found with
+  `GOWASMGC_SPLITCHECK=1`).
+
+In SSA a string is still three values: word 0 as a pointer (nil if
+inline), A and B. The register ABI passes them as such
+(`appendParamOffsets` gives offsets 0, 0 and 8); a string spilled or
+passed in memory is stored whole, which the rules order. Static data has
+no relocation, so no element, for an inline string. `len` is a call of
+a helper the linker generates with 4-byte words only, `wasm.strlen`
+(808 bytes less than a select at each use in hello world); indexing
+shifts the byte out of A or B; `==` and the equality functions call
+`runtime.streqfast`, as with 8-byte words on wasm.
+
+**In an interface** a string is spread: the data word holds word 0's
+pointer (nil if inline), the 16-byte payload A and B, so `any(s)` does
+not allocate. (Not in a row, as the 8-byte form is: the runtime's
+equality and hash, reflect and reflectlite rebuild the string with
+`abi.UnspreadString`.) A method of a string type called through an
+interface gets its receiver from one stage, a string temporary, which
+serves inline types too: the data word as word 0's pointer, the payload
+over it, so no call site branches on spread. reflect holds a spread
+string as an interface does and copies it to the heap only where an
+address of it is needed (`dataPtr`); reflectlite copies it. **Slices are
+not spread with 4-byte words** (boxed, as before): a 12-byte slice would
+fit the payload, but the runtime, reflect and the compiler's spread code
+for slices assume the 8-byte header in a row from the data word; not
+done.
+
+What it costs and gives, the `fmt` hello world of `GOOS=js` (bytes;
+"before" is a781e32328, strings of 12 bytes):
+
+|                               | before  | 16-byte strings |
+|-------------------------------|--------:|------:|
+| unstripped                    | 385,097 | 400,539 |
+| `-ldflags="-s -w"`            | 325,734 | 340,881 |
+| gzip -9 of that               | 121,616 | 128,164 |
+| code (stripped)               | 199,611 | 219,422 |
+| data                          | 97,621  | 95,840 |
+| globals                       | 6,756   | 3,662 |
+
+The 16-byte header itself costs little: every string in data is 4 bytes
+longer, but the short constants are no longer `go:string` data with a
+global each, and data is 1.8 KB smaller and the globals 3.1 KB. What
+costs is the code of the inline form, 19.8 KB (10%): the test of the
+tag at each `len`, index, slice and pointer to the bytes (270 of them in
+hello world), making A of an address and a length, the spread
+conversions and the stage of interface calls. The 8-byte form costs as
+much: `GOWASM=gc,split,ptr64`'s code is 209 KB. The 8-byte builds are
+unchanged (`gc,split,ptr64` stripped: the same module, 352,465;
+unstripped 412,086, against 412,088, line numbers of the runtime moved;
+`GOWASM=gc` 601,038 against 601,044, a build that is not deterministic
+by a few bytes before and after).
+
+Speed (node 24, `GOOS=js`, best of 5, two runs each, the machine idle;
+`/tmp/claude-1000/go-split-work/sbench`):
+
+|                                                   | before | 16-byte strings |
+|---------------------------------------------------|-------:|-------:|
+| 2·10^6 keys `"k"+strconv.Itoa(i%1000)`, compared  | 1,337-1,350 ms | 711-726 ms |
+| `map[string]int`, 10-byte keys, 2·10^6 ops        | 462-464 ms | 464-470 ms |
+| `map[string]int`, 20-byte keys, 2·10^6 ops        | 533-535 ms | 586-593 ms |
+| 10^6 allocations of a node                        | 231-238 ms | 237-259 ms |
+| `int` arithmetic, 5·10^7                          | 95-96 ms | 96 ms |
+| sieve of 2·10^7                                   | 82 ms | 78-82 ms |
+
+Short strings made at run time are twice as fast (no allocation); a map
+of keys longer than 15 bytes is 10% slower (the runtime's `strhash` and
+`streqfast` index a string a byte at a time, each index testing the
+tag; going through a view of the bytes instead was slower still, not
+kept). The rest is as it was.
+
+Tests (`GOWASMGC_POISON=1`, from a copy of the tree at the commit):
+
+| suite                                        | before          | 16-byte strings |
+|----------------------------------------------|-----------------|-----------------|
+| conformance, js (`gc,split`)                 | 945 of 966, 21 skipped | 944, 1 fail (`cmp.go`, below), 21 skipped |
+| conformance, wasip1 `gc,split`               | 944 of 965, 21 skipped | 943, 1 fail (`cmp.go`), 21 skipped |
+| conformance, wasip1 `gc,split,ptr64`         | 947, 18 skipped | 947, 18 skipped |
+| conformance, wasip1 `gc` (struct model)      | 947, 18 skipped | 947, 18 skipped |
+| std survey, js                               | 248 of 256      | 251 of 256 |
+| std survey, wasip1 `gc,split`                | 248 of 255      | 251 of 255 |
+| `compiled/test.sh`, wasip1 `gc,split`        | 11 of 12        | 12 of 13 (`lifetime.go`, as before) |
+| conformance in Chromium, js                  | 945 of 966      | 944, 1 fail (`cmp.go`), 21 skipped |
+| conformance in Firefox, js                   | 945 of 966      | 944, 1 fail (`cmp.go`), 21 skipped |
+
+The std surveys pass what they passed and the three tests that count
+allocations (`net/netip` `TestAddrStringAllocs`, `unique` `TestMakeAllocs`
+"string to any", `log/slog` `TestAlloc`); what fails is what failed for
+the reasons given above (`go/types`' `TestSizeof` now reports
+`types.Basic`, which has a string, as 24 against 386's 20). `go test` of
+`strings`, `strconv`, `unicode/utf8`, `bytes` (with the overlay),
+`reflect`, `maps`, `unique`, `net/netip`, `log/slog`, `encoding/json`,
+`fmt`, `sort`, `sync`, `hash/maphash` pass for js; `runtime` has no
+test files with this runtime. The layout check passes (84); Go's own
+port (`GOWASM=linear`) runs hello world.
+
+`compiled/tests/shortstrings.go` (new) prints, for strings of 0, 1, 7,
+8, 12, 15, 16 and 100 bytes made at run time (`string(b)`,
+concatenation, slicing, `strings.Repeat`, `strconv.Itoa`, map keys,
+`any`), whether they are inline and how many allocations making them
+takes (none up to 15), strings in interfaces (compared, hashed in a
+`map[any]`, asserted, switched on, reflected, receivers of methods of a
+string type), and an inline string whose first 8 bytes are the address
+of a live object: it stays text, and the object is collected. It prints
+what the native build prints, with `GOWASMGC_POISON=1` and with
+`GOWASMGC_SPLITCHECK=1`. `unsafe.Sizeof("")` is 16.
+
+Decisions and what was found:
+
+- `reflect`'s `TestFuncLayout` and `unique`'s `TestMakeCloneSeq` (tests
+  the fork wrote for 3-word strings) read the size of a string instead.
+  No other test was changed.
+- `test/cmp.go` fails: its `stringptr` reads word 0 of a string through
+  `unsafe` and takes non-zero for "not inline" (the fork's edit of it,
+  true where word 0 of an inline string is nil). On wasm32 it is text:
+  code that reads word 0 by `unsafe` sees the first bytes of an inline
+  string, the one visible change of this form. Left as it is.
+- `GOWASMGC_SPLITCHECK=1` found the bug of the second rule above. With
+  it, `encoding/json`, `log/slog`, `sync`, `net/netip`, `errors` and
+  `encoding/gob` trap in reflect's `TypeAssert` and
+  `packIfaceValueIntoEmptyIface`, as they do at a781e32328: not looked
+  into. There is no check of its own for a pointer made of an inline
+  string's word 0: a missed tag test reads text, which `wasm.inttoptr`
+  makes a pointer of without a trap unless the text is the address of a
+  block (what shortstrings.go does).
+- A native build with `GOWASM` set in the environment leaves entries in
+  the build cache that make later native builds without it crash the
+  compiler (reading export data: `internal/pkgbits` assertion), at
+  a781e32328 too; `compiled/test.sh` does that. Clearing the cache
+  helps. Not looked into.
+- Not done: arguments and results of a call passed in memory rather
+  than in registers (more than 120 of a kind) read a string's word 0 as
+  a pointer without the tag test (`expand_calls`' leaves); stores of
+  them are whole strings. Nothing in std passes so many.
+
+#### What wasm64 would need
+
+The word is chosen in one place (`gowasmFeatures.PtrSize`) and the
+8-byte word works (`GOWASM=gc,split,ptr64`, and the struct model). What
+is not a parameter is the type of an address: linear memory is of 32
+bits, and an address is an `i32` (`wasm.GCTypeAddr`): the fields
+`addr` and `off` of `wasm.ptr`, the address operands of loads and
+stores the backend and the helpers emit, pointer arithmetic
+(`wasm.addptr`, the `i32.add`s of `spPushAddr`), the start function's
+list of words, `memory.grow`/`memory.size`, the stack pointer and
+other globals, and the pointers of `//go:wasmimport`/`wasmexport`
+(`obj.WasmPtr`, i32). A memory64 build would need: `GCTypeAddr` and the
+helpers' `i32` arithmetic made `i64` (the helpers in
+`cmd/link/internal/wasm/gcsplit.go` and the backend's
+`spPushAddr`/`spPushPtrRel`, which are the places that make an
+address), the memory declared `i64`, every load and store's memarg
+with a 64-bit offset, `runtime/wasmgc`'s `linLimit`/`maxLinear` and
+the `i31` of the struct model's addresses, the hosts' `DataView`s
+(BigInt or Number above 2^53), WASI's imports (whose pointers are 32
+bits by its ABI: wasip1 cannot be memory64), and engines that have
+memory64 (Chrome and Firefox shipped it in 2025, in versions 133 and
+134 as far as is known here; Safari and node 24 were not checked). With 8-byte words a
+function value could keep `PC_F<<16` unbounded; with 4-byte ones it
+bounds the functions to 61,440.
+
+Work list (kept current):
+
+1. [done] wasm32 for `gc,split` (M1), the layout check against clang
+   (M2), conformance and `compiled/test.sh` (M3), the std surveys (M4).
+2. [done] `go vet` sees the sizes of the target (`gcSizesFor`), after
+   `go install cmd/vet`.
+3. [done] Strings of 16 bytes with 15 inline, and spread in an
+   interface (below "Built: strings of 16 bytes"). Not done: slices
+   spread in an interface with 4-byte words; a function value is
+   `PC_F<<16` (below).
+4. Not done: more functions with 4-byte words. A function value is
+   `PC_F<<16` in a `uintptr` (the low 16 bits a place in the function,
+   for `runtime.Callers`), which bounds a wasm32 program to 61,440
+   functions. Giving the function 20 bits and the place 12 would take
+   the shift as one constant of the linker (`asm.go`: the values, the
+   check, the indexes of `call`s and exports; `gc.go`, `gcreflect.go`),
+   the compiler (the `i64.shr_u` by 16 before `call_indirect`, and
+   `runtime.linsize`'s is not one), the runtime (`type.go`'s `textOff`,
+   `extern.go`'s `&^ 0xffff`) and the hosts (`wasm_gc.js`, five places,
+   which would read it from the module, as one host runs builds of both
+   word sizes), and a choice for `funcValueOffset`: kept at 0x1000 the
+   first function would be at 16 MB, among the addresses of linear
+   memory (what `GOWASMGC_SPLITCHECK` tells apart); at 0x10000 the table
+   would have 65,536 empty entries first, or each indirect call one
+   subtraction more. A place past 4,095 would be clamped, as one past
+   32,767 is now. Not contained enough to do with this stage: left.
+5. Not done: the struct model with 4-byte words (identities of
+   objects need another scheme: a range of addresses above linear
+   memory given to an object when its address is taken, say).
+6. Not done: cgo (above). C compiled by cmd/cc (cgo off, `doc/gd/cc.md`)
+   has clang's wasm32 data model here: pointers, `long` and `size_t` of 4
+   bytes, so its structs and Go's mirrors of them are laid out as clang
+   lays them out (cc.md, "C on wasm32"; `bench/wasmgc/cclayout`).
+7. Seen, not looked into: `compiled/test.sh` compares with the native
+   build, and the native amd64 build of `compiled/tests/goroutines.go`
+   prints garbage for a recovered nil dereference in a goroutine, or
+   faults (`unexpected fault address 0x0`), before this stage as after
+   it: the comparison is then wrong, whatever the WebAssembly printed.
+   Built for js by the toolchain before and after this stage, the
+   twelve programs print the same (with `GOWASMGC_SPLITCHECK=1` and
+   `GOWASMGC_POISON=1`), but `lifetime.go`, which adds 8 to reach the
+   second `int`.
 
 
 ### Stage 17: what keeps a block alive made firmer, and the tests that failed in Firefox (2026-11-17)

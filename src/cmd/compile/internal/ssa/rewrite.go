@@ -839,7 +839,8 @@ func StringToAux(s string) Aux {
 func ConstStringValue(v *Value) string { return auxToString(v.Aux) }
 
 // StringInlineWords returns the inline-rep words 1 and 2 of a 1..15
-// byte constant, as the ConstString lowering emits them.
+// byte constant, as the ConstString lowering emits them (with
+// types.StringWasm32, A and B).
 func StringInlineWords(s string) (w1, w2 int64) {
 	return stringInlineWord1(s), stringInlineWord2(s)
 }

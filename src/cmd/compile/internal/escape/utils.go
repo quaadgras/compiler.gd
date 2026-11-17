@@ -187,14 +187,16 @@ func HeapAllocReason(gd *base.Invocation, n ir.Node) string {
 	if n.Type().Size() > ir.MaxStackVarSize {
 		return "too large for stack"
 	}
-	if n.Type().Alignment() > int64(types.PtrSize) {
+	// (A stack is aligned to a register: a pointer but on wasm32,
+	// whose frames in linear memory are aligned to 8.)
+	if n.Type().Alignment() > int64(types.RegSize) {
 		return "too aligned for stack"
 	}
 
 	if (n.Op() == ir.ONEW || n.Op() == ir.OPTRLIT) && n.Type().Elem().Size() > ir.MaxImplicitStackVarSize {
 		return "too large for stack"
 	}
-	if (n.Op() == ir.ONEW || n.Op() == ir.OPTRLIT) && n.Type().Elem().Alignment() > int64(types.PtrSize) {
+	if (n.Op() == ir.ONEW || n.Op() == ir.OPTRLIT) && n.Type().Elem().Alignment() > int64(types.RegSize) {
 		return "too aligned for stack"
 	}
 

@@ -348,6 +348,29 @@ type gowasmFeatures struct {
 	// the array, and where in it the pointers of what it points to
 	// start). See stage 15 of doc/gd/wasm-gc.md.
 	Split bool
+
+	// Ptr64, with GC and Split, makes a pointer, uintptr and int 8
+	// bytes, as in Go's own port. Without it split has 4-byte words
+	// (wasm32, laid out as clang's wasm32 lays out C: stage 16 of
+	// doc/gd/wasm-gc.md). Registers are 8 bytes either way. GC
+	// without Split (the struct model) has 8-byte words always: a
+	// pointer to an object of the engine's is, as an integer, an
+	// identity that needs more than 32 bits.
+	Ptr64 bool
+}
+
+// PtrSize is the size in bytes of a pointer, uintptr and int for
+// GOARCH=wasm: 4 for GOWASM=gc,split (GOOS=js's default) unless Ptr64
+// is set, 8 for GOWASM=gc alone and for Go's own port (GOWASM=linear
+// and GOOS=wasip1's default). This is where the word size of
+// GOARCH=wasm is chosen; sys.ArchWasm's PtrSize, the SSA config and
+// the sizes of types2 and go/types read it, and the tool tag
+// wasm.ptr32 says it is 4.
+func (f gowasmFeatures) PtrSize() int {
+	if f.GC && f.Split && !f.Ptr64 {
+		return 4
+	}
+	return 8
 }
 
 func (f gowasmFeatures) String() string {
@@ -360,11 +383,14 @@ func (f gowasmFeatures) String() string {
 	if f.Split {
 		flags = append(flags, "split")
 	}
+	if f.Ptr64 {
+		flags = append(flags, "ptr64")
+	}
 	return strings.Join(flags, ",")
 }
 
 func gowasm() (f gowasmFeatures) {
-	var gc, split, linear bool
+	var gc, split, linear, ptr64 bool
 	for opt := range strings.SplitSeq(envOr("GOWASM", ""), ",") {
 		switch opt {
 		case "satconv":
@@ -377,6 +403,8 @@ func gowasm() (f gowasmFeatures) {
 			split = true
 		case "linear":
 			linear = true
+		case "ptr64":
+			ptr64 = true
 		case "":
 			// ignore
 		default:
@@ -404,6 +432,12 @@ func gowasm() (f gowasmFeatures) {
 		f.GC, f.Split = true, true
 	default:
 		f.GC, f.Split = js, js
+	}
+	if ptr64 {
+		if !f.GC {
+			Error = fmt.Errorf("invalid GOWASM: ptr64 is a feature of gc")
+		}
+		f.Ptr64 = true
 	}
 	return
 }
@@ -526,6 +560,11 @@ func gogoarchTags() []string {
 		}
 		if GOWASM.Split {
 			list = append(list, GOARCH+".split")
+		}
+		if GOWASM.PtrSize() == 4 {
+			// Pointers, uintptr and int of 4 bytes: what std splits by
+			// word size selects with it (as 386 and arm against amd64).
+			list = append(list, GOARCH+".ptr32")
 		}
 		return list
 	}

@@ -4,7 +4,7 @@
 archive/tar ok
 archive/zip ok
 bufio ok
-bytes FAIL panic: runtime error: makeslice: len out of range [recovered]
+bytes BUILD bytes/bytes_js_wasm_test.go:15:20: 1 << 31 + 1 (untyped int constant 2147483649) overflows int
 cmp ok
 compress/bzip2 ok
 compress/flate ok
@@ -147,7 +147,7 @@ go/parser ok
 go/printer ok
 go/scanner ok
 go/token ok
-go/types ok
+go/types FAIL --- FAIL: TestSizeof | sizeof_test.go:64: unsafe.Sizeof(types.Basic) = 24, want 20
 go/version ok
 hash ok
 hash/adler32 ok
@@ -221,7 +221,7 @@ internal/profile ok
 internal/profilerecord SKIP no test files
 internal/race SKIP no test files
 internal/reflectlite ok
-internal/runtime/atomic ok
+internal/runtime/atomic FAIL --- FAIL: TestUnaligned64 | atomic_test.go:82: Load64 did not panic
 internal/runtime/cgroup ok
 internal/runtime/exithook SKIP no test files
 internal/runtime/gc SKIP no test files
@@ -334,9 +334,9 @@ strconv ok
 strings ok
 structs SKIP no test files
 sync ok
-sync/atomic ok
+sync/atomic FAIL --- FAIL: TestUnaligned64 | atomic_test.go:2883: LoadUint64 did not panic
 syscall ok
-syscall/js ok
+syscall/js BUILD syscall/js/js_test.go:180:23: cannot use 1 << 40 (untyped int constant 1099511627776) as int value in argument to testIntConversion (overflows)
 testing ok
 testing/cryptotest ok
 testing/fstest ok

@@ -96,6 +96,9 @@ func TestUnaligned64(t *testing.T) {
 	if unsafe.Sizeof(int(0)) != 4 {
 		t.Skip("test only runs on 32-bit systems")
 	}
+	if runtime.GOARCH == "wasm" {
+		t.Skip("wasm32 has 64-bit atomics at any address")
+	}
 
 	x := make([]uint32, 4)
 	u := unsafe.Pointer(uintptr(unsafe.Pointer(&x[0])) | 4) // force alignment to 4

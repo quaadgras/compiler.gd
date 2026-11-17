@@ -52,9 +52,70 @@ var (
 	StringHashOffset int64
 	StringLenOffset  int64
 	StringSize       int64
+
+	// StringInlineCap is the longest string kept in its header: 15
+	// with 8-byte words and with the 4-byte words of wasm32
+	// (StringWasm32), 0 on the other 32-bit targets, which have no
+	// inline form.
+	StringInlineCap int64
+
+	// FuncMaskOffset is the offset of the escape mask M of a function
+	// value, and ClosureVarsOffset that of the first captured variable
+	// (see InitTypes).
+	FuncMaskOffset    int64
+	ClosureVarsOffset int64
 )
 
 var SkipSizeForTracing bool
+
+// StringWasm32 reports whether a string has the form of wasm32
+// (GOWASM=gc,split with 4-byte words; doc/gd/sso-string.md, stage 16
+// of doc/gd/wasm-gc.md): 16 bytes, aligned to 4, seen as two uint64s,
+// A at offset 0 and B at offset 8. A string of 1 to StringInlineCap
+// (15) bytes is kept in them: its bytes at offsets 0 to 14, the rest
+// zero, and its length in the top 4 bits of B (the tag, as with 8-byte
+// words, whose words 1 and 2 are A and B). Any other string has the
+// address of its bytes in word 0, its length in word 1, word 2 for the
+// cached hash and word 3 zero (a tag of 0).
+//
+// In SSA a string is three values: word 0 as a pointer (nil for an
+// inline string), A and B. A and the pointer overlap: the pointer is
+// stored (OpStringStorePtr, which writes the word and its element of
+// the array of pointers) before A, which writes the word again, and
+// loaded only if the tag is 0 (OpStringLoadPtr). Word 0 of an inline
+// string is text, which only a target whose collector does not scan
+// the memory of the program can have: WebAssembly with split, where
+// what keeps the bytes of a string alive is the pointer in the element
+// of its block's array, which is nil for an inline string.
+func StringWasm32() bool {
+	return PtrSize == 4 && buildcfg.GOARCH == "wasm"
+}
+
+// StringWord1Type and StringWord2Type are the types of the second and
+// third values of a string in SSA: a uintptr (word 1) and an int (word
+// 2), or two uint64s (A and B) with StringWasm32.
+func StringWord1Type() *Type {
+	if StringWasm32() {
+		return Types[TUINT64]
+	}
+	return Types[TUINTPTR]
+}
+
+func StringWord2Type() *Type {
+	if StringWasm32() {
+		return Types[TUINT64]
+	}
+	return Types[TINT]
+}
+
+// StringWord1Offset is the offset in a string of its second value in
+// SSA (the third's is 2*PtrSize).
+func StringWord1Offset() int64 {
+	if StringWasm32() {
+		return 0
+	}
+	return int64(PtrSize)
+}
 
 // typePos returns the position associated with t.
 // This is where t was declared or where it appeared as a type expression.

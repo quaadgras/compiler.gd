@@ -50,7 +50,14 @@
 (StringPtr   (StringMake ptr  _  _  )) => ptr
 (StringHash  (StringMake _    hash _)) => hash
 (StringWord2 (StringMake _    _  w2)) => w2
-(StringLen   (StringMake _    _  w2)) && config.PtrSize == 4 => w2
+(StringLen   (StringMake _    _  w2)) && config.PtrSize == 4 && !config.stringWasm32() => w2
+// wasm32 (types.StringWasm32): the values are word 0 as a pointer,
+// A (bytes 0 to 7, or word 0 and the length in word 1) and B (bytes 8
+// to 14 and the tag in the top 4 bits, or the hash and 0). The length
+// is the tag if it is not 0, else the high half of A.
+// (A call of a helper, wasm.strlen, which is less code than the
+// select at each use.)
+(StringLen   (StringMake _    wa wb)) && config.stringWasm32() => (StringLenAB <typ.Int> wa wb)
 // 64-bit: decode tag-encoded word 2 without CondSelect so every arch
 // (incl. ARM, MIPS, S390X, RISCV64) lowers cleanly. Formula:
 //   tag    = w2 >>u 60           (0 for heap, 1..15 for inline)
@@ -68,18 +75,36 @@
         (Sub64 <typ.Int> (Rsh64Ux64 <typ.Int> w2 (Const64 <typ.UInt64> [60])) (Const64 <typ.Int> [1]))
         (Const64 <typ.UInt64> [63]))))
 
-(Load <t> ptr mem) && t.IsString() =>
+// wasm32: word 0 is read as a pointer only if the tag is 0, and
+// stored as one (its element of the array set, nil for an inline
+// string) before A writes the word again.
+(Load <t> ptr mem) && t.IsString() && config.stringWasm32() =>
+  (StringMake
+    (StringLoadPtr <typ.BytePtr> ptr
+      (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem)
+      mem)
+    (Load <typ.UInt64> (OffPtr <typ.StringWord1Ptr> [0] ptr) mem)
+    (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem))
+(Store dst (StringMake ptr wa wb) mem) && config.stringWasm32() =>
+  (Store {typ.UInt64}
+    (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] dst)
+    wb
+    (Store {typ.UInt64}
+      (OffPtr <typ.StringWord1Ptr> [0] dst)
+      wa
+      (StringStorePtr dst ptr mem)))
+(Load <t> ptr mem) && t.IsString() && !config.stringWasm32() =>
   (StringMake
     (Load <typ.BytePtr> ptr mem)
     (Load <typ.Uintptr>
       (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
       mem)
-    (Load <typ.Int>
-      (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
+    (Load <typ.StringWord2>
+      (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr)
       mem))
-(Store dst (StringMake ptr hash len) mem) =>
-  (Store {typ.Int}
-    (OffPtr <typ.IntPtr> [2*config.PtrSize] dst)
+(Store dst (StringMake ptr hash len) mem) && !config.stringWasm32() =>
+  (Store {typ.StringWord2}
+    (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] dst)
     len
     (Store {typ.Uintptr}
       (OffPtr <typ.UintptrPtr> [config.PtrSize] dst)
@@ -179,12 +204,18 @@
 (ArraySelect [i] x:(Load <t> ptr mem)) =>
   @x.Block (Load <v.Type> (OffPtr <v.Type.PtrTo()> [t.Elem().Size()*i] ptr) mem)
 
-(StringPtr   x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.BytePtr> ptr mem)
-(StringHash  x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Uintptr>
+(StringPtr   x:(Load <t> ptr mem)) && t.IsString() && config.stringWasm32() => @x.Block (StringLoadPtr <typ.BytePtr> ptr
+      (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem)
+      mem)
+(StringHash  x:(Load <t> ptr mem)) && t.IsString() && config.stringWasm32() => @x.Block (Load <typ.UInt64>
+      (OffPtr <typ.StringWord1Ptr> [0] ptr)
+      mem)
+(StringPtr   x:(Load <t> ptr mem)) && t.IsString() && !config.stringWasm32() => @x.Block (Load <typ.BytePtr> ptr mem)
+(StringHash  x:(Load <t> ptr mem)) && t.IsString() && !config.stringWasm32() => @x.Block (Load <typ.Uintptr>
       (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
       mem)
-(StringWord2 x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.Int>
-      (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
+(StringWord2 x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.StringWord2>
+      (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr)
       mem)
 
 // NOTE removed must-not-be-SSA condition.

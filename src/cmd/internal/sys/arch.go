@@ -6,6 +6,7 @@ package sys
 
 import (
 	"encoding/binary"
+	"internal/buildcfg"
 	"internal/goarch"
 )
 
@@ -256,11 +257,14 @@ var ArchS390X = &Arch{
 	FixedFrameSize: 8, // LR
 }
 
+// ArchWasm's PtrSize depends on GOWASM: 4 for the GC port (wasm32,
+// unless GOWASM has ptr64), 8 for Go's own port. Registers are 8 bytes
+// in both, so int64 arithmetic is one instruction.
 var ArchWasm = &Arch{
 	Name:           "wasm",
 	Family:         Wasm,
 	ByteOrder:      binary.LittleEndian,
-	PtrSize:        8,
+	PtrSize:        buildcfg.GOWASM.PtrSize(),
 	RegSize:        8,
 	MinLC:          1,
 	Alignment:      1,

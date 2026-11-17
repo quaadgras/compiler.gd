@@ -345,12 +345,12 @@ func WriteFuncSyms(gd *base.Invocation) {
 		switch {
 		case gd.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
 			cfFuncsym := FuncLinksym(gd, nam.Func.GdForwarder.SyntheticComputeFn.Nname)
-			objw.SymPtr(gd, sf, int(types.PtrSize), cfFuncsym, 1)
+			objw.SymPtr(gd, sf, int(types.FuncMaskOffset), cfFuncsym, 1)
 		default:
 			mask := computeFuncsymEscMask(nam.Type())
-			objw.UintN(gd, sf, int(types.PtrSize), mask, 8)
+			objw.UintN(gd, sf, int(types.FuncMaskOffset), mask, 8)
 		}
-		objw.Global(gd, sf, int32(types.PtrSize)+8, obj.DUPOK|obj.RODATA)
+		objw.Global(gd, sf, int32(types.ClosureVarsOffset), obj.DUPOK|obj.RODATA)
 	}
 }
 
@@ -440,6 +440,25 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 		// header has no room for 15 B inline bytes.
 		i := constant.StringVal(u)
 		slen := int64(len(i))
+		if types.StringWasm32() {
+			// wasm32 (types.StringWasm32): a string of 1 to 15
+			// bytes is the two uint64s of the words 1 and 2 of
+			// 8-byte words (word 0 is no address: nothing is set in
+			// the array of the data's pointers); a longer one is
+			// the address of its bytes, its length, and zero.
+			if slen >= 1 && slen <= types.StringInlineCap {
+				var b [16]byte
+				copy(b[:], i)
+				b[15] |= byte(slen) << 4
+				s.WriteInt(gd.Ctxt, noff, 8, int64(binary.LittleEndian.Uint64(b[:8])))
+				s.WriteInt(gd.Ctxt, noff+8, 8, int64(binary.LittleEndian.Uint64(b[8:])))
+				break
+			}
+			s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, StringSym(gd, n.Pos(), i), 0)
+			s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
+			s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, 8, 0)
+			break
+		}
 		if types.PtrSize == 8 && slen >= 1 && slen <= 15 {
 			var w1buf [8]byte
 			copy(w1buf[:], i)

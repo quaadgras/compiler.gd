@@ -83,8 +83,52 @@ Invariants:
 - Empty string: `{0, 0, 0}` (heap rep, nil ptr, len 0, hash uncomputed).
   Inline strings of length 0 are not representable by construction — any
   `rawstring(0)` / `""` stays heap rep with nil ptr, matching stock.
-- 32-bit: use `uint64` (not `uintptr`) for all three words so the 15-byte
-  inline cap is preserved; `StringSize = 24` everywhere, both arches.
+- 32-bit: the native 32-bit targets (386, arm, mips) keep three words of
+  4 bytes (12 B) with no inline form. wasm32 (`GOWASM=gc,split` with
+  4-byte words; stage 16 of `wasm-gc.md`) has its own form, §1c.
+
+### 1c. wasm32: 16 bytes, 15 inline
+
+With 4-byte words on WebAssembly a string is **16 bytes, aligned to 4**,
+seen as two `uint64`s, A at offset 0 and B at offset 8:
+
+```
+inline (tag 1..15):  bytes 0..14 at offsets 0..14, the unused ones zero;
+                     the top 4 bits of B (byte 15) are the tag = length;
+                     bits 56..59 of B zero.
+                     (A and B are exactly words 1 and 2 of the 8-byte form.)
+otherwise (tag 0):   word0 @0  address of the bytes (nil for "")
+                     word1 @4  length (32 bits)
+                     word2 @8  cached hash slot (0; at most 60 bits of B)
+                     word3 @12 0
+```
+
+`len(s) = tag != 0 ? tag : word1`; the bytes are at `&s` if the tag is
+not 0, else at word 0; the empty string is all zero; two inline strings
+are equal exactly when their A and B are. The inline capacity, the tag,
+the shift and `StringInlineWords` are those of the 8-byte form.
+
+**Word 0 of an inline string is text, not a pointer.** That breaks the
+premise of §0 for this target only, and it may: the WebAssembly engine
+never scans linear memory. With split (`wasm-gc.md` stage 15) what keeps
+the bytes of a string alive is the element of its block's array of
+pointers for word 0, and that element is nil for an inline string. So
+every path that would read word 0 as a pointer tests the tag first
+(`OpStringLoadPtr` in the compiler, `stringData` in the runtime,
+`abi.StringIsInline`/`StringBytes`/`SpreadString` elsewhere, a register
+kind `'s'` in reflect's adapters), and every store of a string stores
+word 0 as a pointer (setting the element, nil if inline) before the 16
+bytes, which write the word again (`OpStringStorePtr`). A native 32-bit
+target, whose collector scans word 0, could not have this form; the
+fallbacks considered were 12 bytes inline with the length in word 0 (a
+number there, never 1..12, no object at those addresses) and 11 bytes
+inline with word 0 nil and the length in the last byte (the 8-byte
+scheme scaled down, which would suit a native 32-bit target).
+
+In SSA a string is word 0 as a pointer (nil if inline), A and B: the
+pointer and A overlap. In an interface a string is spread as word 0's
+pointer in the data word and A and B in the 16-byte payload (not in a
+row, as the 8-byte form is), so `any(s)` does not allocate.
 
 Why nil in word 0: §0 — preserves stock GC ptrmask semantics. Word 0 is
 always a valid pointer-or-nil, never arbitrary bytes. Costs 8 B of

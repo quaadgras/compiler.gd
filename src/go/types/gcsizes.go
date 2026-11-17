@@ -7,9 +7,16 @@
 
 package types
 
+import "internal/buildcfg"
+
 type gcSizes struct {
 	WordSize int64 // word size in bytes - must be >= 4 (32bits)
 	MaxAlign int64 // maximum alignment in bytes - must be >= 1
+
+	// gd: a string is four words, not three, with the 4-byte words
+	// of wasm (its inline form: cmd/compile/internal/types's
+	// StringWasm32).
+	stringWords4 bool
 }
 
 func (s *gcSizes) Alignof(T Type) (result int64) {
@@ -52,6 +59,12 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 		// Type parameters lead to variable sizes/alignments;
 		// StdSizes.Alignof won't be called for them.
 		assert(!isTypeParam(T))
+		if _, ok := t.(*Interface); ok && s.WordSize < 8 {
+			// gd: an interface ends in a complex128 (its inline
+			// payload), aligned to 8 even with 4-byte words, as
+			// cmd/compile/internal/types aligns it.
+			return 8
+		}
 		return s.WordSize
 	case *Basic:
 		// Strings are like slices and interfaces.
@@ -109,7 +122,11 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 			}
 		}
 		if k == String {
-			// gd small-string optimization: 3-word header.
+			// gd small-string optimization: 3-word header (4 words
+			// on wasm32).
+			if s.stringWords4 {
+				return s.WordSize * 4
+			}
 			return s.WordSize * 3
 		}
 	case *Array:
@@ -170,6 +187,12 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 func gcSizesFor(compiler, arch string) *gcSizes {
 	if compiler != "gc" && compiler != "gd" { // gd: these sizes are the fork's layouts
 		return nil
+	}
+	if arch == "wasm" {
+		// gd: the word of GOARCH=wasm depends on GOWASM (4 bytes for
+		// the GC port, 8 for Go's own); see buildcfg's PtrSize.
+		ps := int64(buildcfg.GOWASM.PtrSize())
+		return &gcSizes{WordSize: ps, MaxAlign: 8, stringWords4: ps == 4}
 	}
 	return gcArchSizes[arch]
 }

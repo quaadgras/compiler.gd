@@ -6,6 +6,7 @@ package types
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -53,6 +54,11 @@ func TestSizeof(t *testing.T) {
 		{Scope{}, 48, 96},  // +1 string (comment)
 		{Package{}, 56, 112}, // +3 strings (path, name, goVersion)
 		{_TypeSet{}, 28, 56},
+	}
+	if !_64bit && runtime.GOARCH == "wasm" {
+		// wasm32 is not the 32-bit column: a string is 16 bytes, and an
+		// interface and an int64 are aligned to 8.
+		t.Skip("the 32-bit sizes are those of 386 and arm")
 	}
 	for _, test := range tests {
 		got := reflect.TypeOf(test.val).Size()

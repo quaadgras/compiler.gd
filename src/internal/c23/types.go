@@ -39,7 +39,7 @@ type tinfo struct {
 	id         int // in tinfoTab
 	t          reflect.Type
 	size       uintptr
-	kinds      []wordKind     // per 8-byte word of one value
+	kinds      []wordKind     // per word (wordSize bytes) of one value
 	elems      []reflect.Type // per word: the pointee of a wPtr word (nil: unsafe.Pointer)
 	scalarOnly bool
 	// storesFree: no word a scalar store may not write (all are scalar
@@ -88,7 +88,7 @@ func infoOf(t reflect.Type) *tinfo {
 		return ti.(*tinfo)
 	}
 	size := t.Size()
-	n := (size + 7) / 8
+	n := (size + wordSize - 1) / wordSize
 	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1)), elemInfo: make([]atomic.Pointer[tinfo], max(n, 1))}
 	ti.walk(t, 0)
 	if ti.size&(ti.size-1) == 0 {
@@ -155,7 +155,9 @@ type fastEntry struct {
 	ti *tinfo
 }
 
-func fastHash(k unsafe.Pointer) uintptr { return uintptr(k) >> 4 * 0x9E3779B97F4A7C15 >> 7 }
+func fastHash(k unsafe.Pointer) uintptr {
+	return uintptr(uint64(uintptr(k)>>4) * 0x9E3779B97F4A7C15 >> 32)
+}
 
 func addFast(k unsafe.Pointer, ti *tinfo) {
 	tinfoMu.Lock()
@@ -197,7 +199,7 @@ func addFast(k unsafe.Pointer, ti *tinfo) {
 var rank = [...]int{wScalar: 0, wSplit: 1, wPtr: 2, wRO: 3}
 
 func (ti *tinfo) mark(off uintptr, k wordKind, elem reflect.Type) {
-	w := off / 8
+	w := off / wordSize
 	if rank[ti.kinds[w]] > rank[k] {
 		return
 	}
@@ -212,7 +214,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 	case reflect.UnsafePointer:
 		ti.mark(off, wPtr, nil)
 	case reflect.Bool, reflect.String, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan, reflect.Func:
-		for b := off; b < off+t.Size(); b += 8 - b%8 {
+		for b := off; b < off+t.Size(); b += wordSize - b%wordSize {
 			ti.mark(b, wRO, nil)
 		}
 	case reflect.Array:
@@ -223,7 +225,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if f.Tag.Get("c23") == "union" {
-				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += 8 - b%8 {
+				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += wordSize - b%wordSize {
 					ti.mark(b, wSplit, nil)
 				}
 				continue
@@ -236,7 +238,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 // kindAt returns the kind of the byte at off in memory that is an array of
 // ti's type.
 func (ti *tinfo) kindAt(off uintptr) wordKind {
-	return ti.kinds[ti.mod(off)/8]
+	return ti.kinds[ti.mod(off)/wordSize]
 }
 
 // mod returns off % ti.size, without dividing for the offsets memory has.
@@ -246,7 +248,7 @@ func (ti *tinfo) mod(off uintptr) uintptr {
 		return off
 	case ti.mask != 0:
 		return off & ti.mask
-	case off < 1<<32:
+	case uint64(off) < 1<<32:
 		hi, _ := bits.Mul64(ti.recip*uint64(off), uint64(ti.size))
 		return uintptr(hi)
 	}
@@ -256,7 +258,7 @@ func (ti *tinfo) mod(off uintptr) uintptr {
 // elemAt returns what the pointer word at off points to: nil for
 // unsafe.Pointer.
 func (ti *tinfo) elemAt(off uintptr) *tinfo {
-	i := ti.mod(off) / 8
+	i := ti.mod(off) / wordSize
 	if e := ti.elemInfo[i].Load(); e != nil {
 		return e
 	}

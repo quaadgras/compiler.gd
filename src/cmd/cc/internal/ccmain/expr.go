@@ -1786,6 +1786,13 @@ func (p *parser) bitBuiltin(name string, at pos) expr {
 		"clrsb": {tInt, tInt, "Clrsb32"}, "clrsbl": {tLong, tInt, "Clrsb64"}, "clrsbll": {tLLong, tInt, "Clrsb64"},
 		"bswap16": {tUShort, tUShort, "Bswap16"}, "bswap32": {tUInt, tUInt, "Bswap32"}, "bswap64": {tULong, tULong, "Bswap64"},
 	}
+	if target.ilp32() {
+		// long has 32 bits; uint64_t is unsigned long long.
+		for _, n := range []string{"clz", "ctz", "popcount", "parity", "ffs", "clrsb"} {
+			fns[n+"l"] = bitFn{fns[n+"l"].arg, tInt, fns[n].fn}
+		}
+		fns["bswap64"] = bitFn{tULLong, tULLong, "Bswap64"}
+	}
 	if f, ok := fns[base]; ok {
 		x := p.assignConvert(p.rvalue(p.assignment()), f.arg, at, "argument")
 		p.expect(")")

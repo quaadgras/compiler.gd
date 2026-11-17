@@ -137,6 +137,17 @@ func runSuite(t *testing.T, dir, statusFile string, expect func(name string) (st
 	}
 }
 
+// targetCommand runs bin, which go build made for the target of the
+// environment: a GOOS=js program under node, as go run runs it (with
+// GOOS=js GOARCH=wasm set, a test binary built for the host runs the
+// suites for js/wasm: cmd/cc, in-process, takes its target from them).
+func targetCommand(ctx context.Context, bin string) *exec.Cmd {
+	if os.Getenv("GOOS") == "js" {
+		return exec.CommandContext(ctx, "go_js_wasm_exec", bin)
+	}
+	return exec.CommandContext(ctx, bin)
+}
+
 func runOne(t *testing.T, mod, name, file, expected string) error {
 	src, err := ccmain.Program([]string{file}, "main", []string{filepath.Dir(file)})
 	if err != nil {
@@ -157,7 +168,7 @@ func runOne(t *testing.T, mod, name, file, expected string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	run := exec.CommandContext(ctx, bin)
+	run := targetCommand(ctx, bin)
 	run.Dir = pkg
 	out, err := run.CombinedOutput()
 	if err != nil {

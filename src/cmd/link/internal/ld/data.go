@@ -1281,11 +1281,47 @@ func addstrdata(arch *sys.Arch, l *loader.Loader, name, value string) {
 	// 2*PtrSize). ASAN build may be larger due to red zone (issue 56175).
 	// Layout: word 0 = data ptr, word 1 = hash (phase A = 0),
 	// word 2 = length. See doc/gd/sso-string.md.
-	bld.SetData(make([]byte, arch.PtrSize*3))
+	bld.SetData(make([]byte, arch.PtrSize*stringWords(arch)))
 	bld.SetReadOnly(false)
 	bld.ResetRelocs()
 	bld.SetAddrPlus(arch, 0, sbld.Sym(), 0)
-	bld.SetUint(arch, int64(arch.PtrSize)*2, uint64(len(value)))
+	bld.SetUint(arch, int64(arch.PtrSize)*stringLenWord(arch), uint64(len(value)))
+}
+
+// wasm32String reports whether a string has the form of wasm32 (four
+// 4-byte words: the address of the bytes, the length, the cached hash
+// and zero, or an inline string; see cmd/compile/internal/types's
+// StringWasm32). The linker writes strings that are not inline.
+func wasm32String(arch *sys.Arch) bool {
+	return arch.Family == sys.Wasm && arch.PtrSize == 4
+}
+
+// stringWords is the number of words of a string; stringLenWord the
+// one that holds the length of a string that is not inline.
+func stringWords(arch *sys.Arch) int {
+	if wasm32String(arch) {
+		return 4
+	}
+	return 3
+}
+
+func stringLenWord(arch *sys.Arch) int64 {
+	if wasm32String(arch) {
+		return 1
+	}
+	return 2
+}
+
+// addStringRest adds the words of a string after its pointer to s, for
+// a string of length n that is not inline.
+func addStringRest(arch *sys.Arch, s *loader.SymbolBuilder, n uint64) {
+	for i := int64(1); i < int64(stringWords(arch)); i++ {
+		if i == stringLenWord(arch) {
+			s.AddUint(arch, n)
+		} else {
+			s.AddUint(arch, 0)
+		}
+	}
 }
 
 func (ctxt *Link) dostrdata() {
@@ -1310,8 +1346,7 @@ func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symnam
 	sdata.SetSize(int64(len(str)))
 	sdata.SetData([]byte(str))
 	s.AddAddr(ctxt.Arch, sdata.Sym())
-	s.AddUint(ctxt.Arch, 0) // word 1: hash slot, phase A = 0
-	s.AddUint(ctxt.Arch, uint64(len(str)))
+	addStringRest(ctxt.Arch, s, uint64(len(str)))
 }
 
 func addinitarrdata(ctxt *Link, ldr *loader.Loader, s loader.Sym) {

@@ -33,10 +33,10 @@ func Localeconv() Ptr {
 		StorePtr(lconvC, CString("."))
 		empty := CString("")
 		for i := 1; i < 10; i++ {
-			StorePtr(Add(lconvC, i*8), empty)
+			StorePtr(Add(lconvC, i*int(wordSize)), empty)
 		}
 		for i := 0; i < 14; i++ {
-			Store8(Add(lconvC, 80+i), 127)
+			Store8(Add(lconvC, 10*int(wordSize)+i), 127)
 		}
 		localeC = CString("C")
 	})

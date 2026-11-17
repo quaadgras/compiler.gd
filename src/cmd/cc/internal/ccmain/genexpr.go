@@ -211,9 +211,9 @@ func loadCode(addr string, t *ctype) string {
 	case kUInt:
 		return fmt.Sprintf("c23.Load32(%s)", addr)
 	case kLong, kLLong:
-		return fmt.Sprintf("int64(c23.Load64(%s))", addr)
+		return fmt.Sprintf("%s(c23.Load%d(%s))", goType(t), t.sizeof()*8, addr)
 	case kULong, kULLong:
-		return fmt.Sprintf("c23.Load64(%s)", addr)
+		return fmt.Sprintf("c23.Load%d(%s)", t.sizeof()*8, addr)
 	case kFloat:
 		return fmt.Sprintf("c23.LoadF32(%s)", addr)
 	case kDouble, kLDouble:
@@ -257,7 +257,7 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 	case kInt, kUInt:
 		g.p("c23.Store32(%s, %s)", addr, bitsOf(32, t, v, c))
 	case kLong, kULong, kLLong, kULLong:
-		g.p("c23.Store64(%s, %s)", addr, bitsOf(64, t, v, c))
+		g.p("c23.Store%d(%s, %s)", t.sizeof()*8, addr, bitsOf(int(t.sizeof()*8), t, v, c))
 	case kFloat:
 		g.p("c23.StoreF32(%s, %s)", addr, v)
 	case kDouble, kLDouble:
@@ -508,7 +508,7 @@ func (g *gen) compare(e *binary) string {
 // addrCode is a pointer's address, for comparisons.
 func (g *gen) addrCode(e expr, v string) string {
 	if c, ok := e.(*intConst); ok {
-		return fmt.Sprintf("uintptr(%d)", uint64(c.v))
+		return fmt.Sprintf("uintptr(%d)", uint64(c.v)&(1<<(8*target.ptrSize)-1))
 	}
 	return "c23.Addr(" + v + ")"
 }
@@ -609,7 +609,7 @@ func (g *gen) binary(e *binary) string {
 		p := g.rv(e.x)
 		if e.y.ty().isPtr() {
 			q := g.rv(e.y)
-			return fmt.Sprintf("int64(c23.Sub(%s, %s) / %d)", p, q, max(g.elemSize(xt), 1))
+			return fmt.Sprintf("%s(c23.Sub(%s, %s) / %d)", goType(e.t), p, q, max(g.elemSize(xt), 1))
 		}
 		return g.ptrAdd(p, xt, e.y, e.op == "-")
 	}
@@ -688,7 +688,7 @@ func (g *gen) ptrAdd(p string, pt *ctype, i expr, neg bool) string {
 		if n == 0 {
 			return p
 		}
-		return fmt.Sprintf("c23.Add(%s, %d)", p, n)
+		return fmt.Sprintf("c23.Add(%s, %d)", p, addrOff(n))
 	}
 	sign := ""
 	if neg {
@@ -863,7 +863,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 				if e.op == "--" {
 					n = -n
 				}
-				return fmt.Sprintf("c23.Add(%s, %d)", cur, n)
+				return fmt.Sprintf("c23.Add(%s, %d)", cur, addrOff(n))
 			case t.kind == kBool:
 				if e.op == "++" {
 					return "uint8(1)"
@@ -1050,7 +1050,7 @@ func (g *gen) funcPtr(s *symbol) string {
 		// uses its own address.
 		g.descs[d] = true
 		fmt.Fprintf(&g.vars, "var %s c23.Ptr\n", d)
-		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, name)
+		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, g.libcAdapter(name, s))
 	}
 	return d
 }
@@ -1093,6 +1093,9 @@ func (g *gen) callCode(c *call) string {
 				continue // an extra argument: ignored
 			}
 		}
+		if direct && strings.HasPrefix(fn, "c23.") && i < len(callee.params) {
+			v = libcConv(v, callee.params[i], true)
+		}
 		if !direct && !isSimple(v) && !isPure(v) {
 			// C evaluates the arguments before the call, whose pointer
 			// is checked when Go evaluates the function.
@@ -1106,6 +1109,9 @@ func (g *gen) callCode(c *call) string {
 		args = append(args, v)
 	}
 	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
+	if direct && strings.HasPrefix(fn, "c23.") {
+		code = libcConv(code, callee.ret, false)
+	}
 	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
 		switch {
 		case callee.ret.kind == kVoid:
@@ -1284,7 +1290,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "atomic_fence":
 		return "c23.Fence()"
 	case "alloca":
-		return fmt.Sprintf("c23.Malloc(%s)", g.rv(e.args[0]))
+		return fmt.Sprintf("c23.Malloc(%s)", libcConv(g.rv(e.args[0]), e.args[0].ty(), true))
 	case "setjmp":
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")

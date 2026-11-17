@@ -8,6 +8,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -128,6 +129,12 @@ func ifaceHash(t *_type, x *eface, h uintptr) uintptr {
 		xb := [2]uint64{float64bits(x.w0), float64bits(x.w1)}
 		return typehash(t, noescape(unsafe.Pointer(&xb)), h)
 	case t.IsSpreadIface():
+		if goarch.PtrSize == 4 {
+			// (A string, held as word 0 and its 16 bytes.)
+			var s string
+			abi.UnspreadString(&s, x.data, &[2]uint64{float64bits(x.w0), float64bits(x.w1)})
+			return strhash(unsafe.Pointer(&s), h) // (t is of kind String)
+		}
 		return typehash(t, unsafe.Pointer(&spread{x.data, float64bits(x.w0), float64bits(x.w1)}), h)
 	}
 	return typehash(t, x.data, h)

@@ -18,7 +18,25 @@ main { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 3rem; }
 nav { display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; font-size: .95rem; margin-bottom: 3rem; }
 nav a { color: var(--muted); text-decoration: none; }
 nav a[aria-current] { color: var(--fg); font-weight: 600; }
+nav a:first-child { margin-right: auto; }
 nav a:hover { color: var(--accent); }
+.titlebar { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .75rem; margin: 0 0 .5rem; }
+.titlebar h1 { margin: 0; }
+.titlebar .tag { margin: 0; }
+/* The way back: a chevron in the margin, left of the title. */
+.back { position: absolute; right: 100%; top: 50%; transform: translateY(-50%); margin-right: .9rem; display: flex; padding: .3rem; border-radius: 8px; color: var(--muted); }
+.back:hover { color: var(--accent); background: var(--code-bg); }
+/* (No margin to put it in: before the title.) */
+@media (max-width: 54rem) { .back { position: static; transform: none; margin: 0 -.35rem 0 -.6rem; } }
+@media (max-width: 72rem) { .wide .back { position: static; transform: none; margin: 0 -.35rem 0 -.6rem; } }
+/* Phones: a bar at the top, the title small and centred, the way back at the left edge. */
+@media (max-width: 40rem) {
+  main { padding-top: .75rem; }
+  .titlebar { justify-content: center; min-height: 2.75rem; margin-bottom: 1rem; }
+  .titlebar h1 { font-size: 1.5rem; }
+  .titlebar .tag { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: .65rem; }
+  .back, .wide .back { position: absolute; left: 0; right: auto; top: 50%; transform: translateY(-50%); margin: 0 0 0 -.45rem; }
+}
 code, pre { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .88em; }
 code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
 pre { background: var(--code-bg); padding: 1rem; border-radius: 8px; overflow-x: auto; line-height: 1.5; }

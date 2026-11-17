@@ -6,7 +6,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/goarch"
+	"unsafe"
+)
 
 // nextslicecap computes the next appropriate slice length.
 func nextslicecap(newLen, oldCap int) int {
@@ -41,7 +44,7 @@ func growslicer(oldPtr *unsafe.Pointer, newLen, oldCap, num int) []unsafe.Pointe
 		panicmakeslicelen()
 	}
 	memstatsMallocs++
-	s := make([]unsafe.Pointer, newLen, roundupcap(nextslicecap(newLen, oldCap), 8))
+	s := make([]unsafe.Pointer, newLen, roundupcap(nextslicecap(newLen, oldCap), goarch.PtrSize))
 	old := unsafe.Slice(oldPtr, oldLen)
 	for i := range old {
 		s[i] = old[i]
@@ -73,7 +76,7 @@ func checkmakeslice(size, len, cap int) {
 // makeslicer is makeslice for elements that are pointers.
 func makeslicer(len, cap int) unsafe.Pointer {
 	memstatsMallocs++
-	checkmakeslice(8, len, cap)
+	checkmakeslice(goarch.PtrSize, len, cap)
 	return unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, cap)))
 }
 
@@ -125,7 +128,7 @@ func boxoff(p unsafe.Pointer) uintptr
 // zero is the zero value.
 func makesliceobj(zero unsafe.Pointer, len, cap int) unsafe.Pointer {
 	memstatsMallocs++
-	checkmakeslice(8, len, cap)
+	checkmakeslice(goarch.PtrSize, len, cap)
 	a := newobjarray(cap)
 	for i := 0; i < cap; i++ {
 		objarrayset(a, i, gcclone(zero))

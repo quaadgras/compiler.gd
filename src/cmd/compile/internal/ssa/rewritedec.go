@@ -483,13 +483,39 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 		return true
 	}
 	// match: (Load <t> ptr mem)
-	// cond: t.IsString()
-	// result: (StringMake (Load <typ.BytePtr> ptr mem) (Load <typ.Uintptr> (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr) mem) (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem))
+	// cond: t.IsString() && config.stringWasm32()
+	// result: (StringMake (StringLoadPtr <typ.BytePtr> ptr (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem) mem) (Load <typ.UInt64> (OffPtr <typ.StringWord1Ptr> [0] ptr) mem) (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem))
 	for {
 		t := v.Type
 		ptr := v_0
 		mem := v_1
-		if !(t.IsString()) {
+		if !(t.IsString() && config.stringWasm32()) {
+			break
+		}
+		v.reset(OpStringMake)
+		v0 := b.NewValue0(v.Pos, OpStringLoadPtr, typ.BytePtr)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
+		v2.AuxInt = int64ToAuxInt(2 * config.PtrSize)
+		v2.AddArg(ptr)
+		v1.AddArg2(v2, mem)
+		v0.AddArg3(ptr, v1, mem)
+		v3 := b.NewValue0(v.Pos, OpLoad, typ.UInt64)
+		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord1Ptr)
+		v4.AuxInt = int64ToAuxInt(0)
+		v4.AddArg(ptr)
+		v3.AddArg2(v4, mem)
+		v.AddArg3(v0, v3, v1)
+		return true
+	}
+	// match: (Load <t> ptr mem)
+	// cond: t.IsString() && !config.stringWasm32()
+	// result: (StringMake (Load <typ.BytePtr> ptr mem) (Load <typ.Uintptr> (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr) mem) (Load <typ.StringWord2> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem))
+	for {
+		t := v.Type
+		ptr := v_0
+		mem := v_1
+		if !(t.IsString() && !config.stringWasm32()) {
 			break
 		}
 		v.reset(OpStringMake)
@@ -500,8 +526,8 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 		v2.AuxInt = int64ToAuxInt(config.PtrSize)
 		v2.AddArg(ptr)
 		v1.AddArg2(v2, mem)
-		v3 := b.NewValue0(v.Pos, OpLoad, typ.Int)
-		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
+		v3 := b.NewValue0(v.Pos, OpLoad, typ.StringWord2)
+		v4 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
 		v4.AuxInt = int64ToAuxInt(2 * config.PtrSize)
 		v4.AddArg(ptr)
 		v3.AddArg2(v4, mem)
@@ -767,8 +793,40 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		v.AddArg3(v0, imag, v1)
 		return true
 	}
+	// match: (Store dst (StringMake ptr wa wb) mem)
+	// cond: config.stringWasm32()
+	// result: (Store {typ.UInt64} (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] dst) wb (Store {typ.UInt64} (OffPtr <typ.StringWord1Ptr> [0] dst) wa (StringStorePtr dst ptr mem)))
+	for {
+		dst := v_0
+		if v_1.Op != OpStringMake {
+			break
+		}
+		wb := v_1.Args[2]
+		ptr := v_1.Args[0]
+		wa := v_1.Args[1]
+		mem := v_2
+		if !(config.stringWasm32()) {
+			break
+		}
+		v.reset(OpStore)
+		v.Aux = typeToAux(typ.UInt64)
+		v0 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
+		v0.AuxInt = int64ToAuxInt(2 * config.PtrSize)
+		v0.AddArg(dst)
+		v1 := b.NewValue0(v.Pos, OpStore, types.TypeMem)
+		v1.Aux = typeToAux(typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord1Ptr)
+		v2.AuxInt = int64ToAuxInt(0)
+		v2.AddArg(dst)
+		v3 := b.NewValue0(v.Pos, OpStringStorePtr, types.TypeMem)
+		v3.AddArg3(dst, ptr, mem)
+		v1.AddArg3(v2, wa, v3)
+		v.AddArg3(v0, wb, v1)
+		return true
+	}
 	// match: (Store dst (StringMake ptr hash len) mem)
-	// result: (Store {typ.Int} (OffPtr <typ.IntPtr> [2*config.PtrSize] dst) len (Store {typ.Uintptr} (OffPtr <typ.UintptrPtr> [config.PtrSize] dst) hash (Store {typ.BytePtr} dst ptr mem)))
+	// cond: !config.stringWasm32()
+	// result: (Store {typ.StringWord2} (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] dst) len (Store {typ.Uintptr} (OffPtr <typ.UintptrPtr> [config.PtrSize] dst) hash (Store {typ.BytePtr} dst ptr mem)))
 	for {
 		dst := v_0
 		if v_1.Op != OpStringMake {
@@ -778,9 +836,12 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		ptr := v_1.Args[0]
 		hash := v_1.Args[1]
 		mem := v_2
+		if !(!config.stringWasm32()) {
+			break
+		}
 		v.reset(OpStore)
-		v.Aux = typeToAux(typ.Int)
-		v0 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
+		v.Aux = typeToAux(typ.StringWord2)
+		v0 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
 		v0.AuxInt = int64ToAuxInt(2 * config.PtrSize)
 		v0.AddArg(dst)
 		v1 := b.NewValue0(v.Pos, OpStore, types.TypeMem)
@@ -900,7 +961,30 @@ func rewriteValuedec_OpStringHash(v *Value) bool {
 		return true
 	}
 	// match: (StringHash x:(Load <t> ptr mem))
-	// cond: t.IsString()
+	// cond: t.IsString() && config.stringWasm32()
+	// result: @x.Block (Load <typ.UInt64> (OffPtr <typ.StringWord1Ptr> [0] ptr) mem)
+	for {
+		x := v_0
+		if x.Op != OpLoad {
+			break
+		}
+		t := x.Type
+		mem := x.Args[1]
+		ptr := x.Args[0]
+		if !(t.IsString() && config.stringWasm32()) {
+			break
+		}
+		b = x.Block
+		v0 := b.NewValue0(v.Pos, OpLoad, typ.UInt64)
+		v.copyOf(v0)
+		v1 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord1Ptr)
+		v1.AuxInt = int64ToAuxInt(0)
+		v1.AddArg(ptr)
+		v0.AddArg2(v1, mem)
+		return true
+	}
+	// match: (StringHash x:(Load <t> ptr mem))
+	// cond: t.IsString() && !config.stringWasm32()
 	// result: @x.Block (Load <typ.Uintptr> (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr) mem)
 	for {
 		x := v_0
@@ -910,7 +994,7 @@ func rewriteValuedec_OpStringHash(v *Value) bool {
 		t := x.Type
 		mem := x.Args[1]
 		ptr := x.Args[0]
-		if !(t.IsString()) {
+		if !(t.IsString() && !config.stringWasm32()) {
 			break
 		}
 		b = x.Block
@@ -930,17 +1014,34 @@ func rewriteValuedec_OpStringLen(v *Value) bool {
 	config := b.Func.Config
 	typ := &b.Func.Config.Types
 	// match: (StringLen (StringMake _ _ w2))
-	// cond: config.PtrSize == 4
+	// cond: config.PtrSize == 4 && !config.stringWasm32()
 	// result: w2
 	for {
 		if v_0.Op != OpStringMake {
 			break
 		}
 		w2 := v_0.Args[2]
-		if !(config.PtrSize == 4) {
+		if !(config.PtrSize == 4 && !config.stringWasm32()) {
 			break
 		}
 		v.copyOf(w2)
+		return true
+	}
+	// match: (StringLen (StringMake _ wa wb))
+	// cond: config.stringWasm32()
+	// result: (StringLenAB <typ.Int> wa wb)
+	for {
+		if v_0.Op != OpStringMake {
+			break
+		}
+		wb := v_0.Args[2]
+		wa := v_0.Args[1]
+		if !(config.stringWasm32()) {
+			break
+		}
+		v.reset(OpStringLenAB)
+		v.Type = typ.Int
+		v.AddArg2(wa, wb)
 		return true
 	}
 	// match: (StringLen (StringMake _ _ w2))
@@ -982,6 +1083,7 @@ func rewriteValuedec_OpStringLen(v *Value) bool {
 func rewriteValuedec_OpStringPtr(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	typ := &b.Func.Config.Types
 	// match: (StringPtr (StringMake ptr _ _ ))
 	// result: ptr
@@ -994,7 +1096,32 @@ func rewriteValuedec_OpStringPtr(v *Value) bool {
 		return true
 	}
 	// match: (StringPtr x:(Load <t> ptr mem))
-	// cond: t.IsString()
+	// cond: t.IsString() && config.stringWasm32()
+	// result: @x.Block (StringLoadPtr <typ.BytePtr> ptr (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem) mem)
+	for {
+		x := v_0
+		if x.Op != OpLoad {
+			break
+		}
+		t := x.Type
+		mem := x.Args[1]
+		ptr := x.Args[0]
+		if !(t.IsString() && config.stringWasm32()) {
+			break
+		}
+		b = x.Block
+		v0 := b.NewValue0(v.Pos, OpStringLoadPtr, typ.BytePtr)
+		v.copyOf(v0)
+		v1 := b.NewValue0(v.Pos, OpLoad, typ.UInt64)
+		v2 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
+		v2.AuxInt = int64ToAuxInt(2 * config.PtrSize)
+		v2.AddArg(ptr)
+		v1.AddArg2(v2, mem)
+		v0.AddArg3(ptr, v1, mem)
+		return true
+	}
+	// match: (StringPtr x:(Load <t> ptr mem))
+	// cond: t.IsString() && !config.stringWasm32()
 	// result: @x.Block (Load <typ.BytePtr> ptr mem)
 	for {
 		x := v_0
@@ -1004,7 +1131,7 @@ func rewriteValuedec_OpStringPtr(v *Value) bool {
 		t := x.Type
 		mem := x.Args[1]
 		ptr := x.Args[0]
-		if !(t.IsString()) {
+		if !(t.IsString() && !config.stringWasm32()) {
 			break
 		}
 		b = x.Block
@@ -1032,7 +1159,7 @@ func rewriteValuedec_OpStringWord2(v *Value) bool {
 	}
 	// match: (StringWord2 x:(Load <t> ptr mem))
 	// cond: t.IsString()
-	// result: @x.Block (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem)
+	// result: @x.Block (Load <typ.StringWord2> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem)
 	for {
 		x := v_0
 		if x.Op != OpLoad {
@@ -1045,9 +1172,9 @@ func rewriteValuedec_OpStringWord2(v *Value) bool {
 			break
 		}
 		b = x.Block
-		v0 := b.NewValue0(v.Pos, OpLoad, typ.Int)
+		v0 := b.NewValue0(v.Pos, OpLoad, typ.StringWord2)
 		v.copyOf(v0)
-		v1 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)
+		v1 := b.NewValue0(v.Pos, OpOffPtr, typ.StringWord2Ptr)
 		v1.AuxInt = int64ToAuxInt(2 * config.PtrSize)
 		v1.AddArg(ptr)
 		v0.AddArg2(v1, mem)

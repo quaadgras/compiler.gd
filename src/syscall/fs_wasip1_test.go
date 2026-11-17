@@ -79,7 +79,11 @@ func BenchmarkJoinPath(b *testing.B) {
 func TestRandomGetOverflow(t *testing.T) {
 	// Use unsafe.Slice to avoid actually allocating ~4GB.
 	var dummy byte
-	b := unsafe.Slice(&dummy, int(1<<32))
+	n := uint64(1) << 32
+	if uint64(int(n)) != n {
+		t.Skip("no slice is that long with an int of 32 bits")
+	}
+	b := unsafe.Slice(&dummy, int(n))
 	if err := syscall.RandomGet(b); err != syscall.EINVAL {
 		t.Errorf("syscall.RandomGet succeeds given a slice that is larger than what random_get supports, want %v", syscall.EINVAL)
 	}

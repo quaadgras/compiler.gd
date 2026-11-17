@@ -225,6 +225,140 @@ each, with node):
 - **GOWASM=gc** without split has no addresses: cmd/go does not build a
   package with cc there, as if it could not.
 
+## C on wasm32
+
+`GOOS=js GOARCH=wasm` (`GOWASM=gc,split`) has 4-byte pointers, `int`
+and `uintptr` (wasm-gc.md, stage 16), and C compiled by cmd/cc there has
+clang's `--target=wasm32` data model, so that a C struct and the Go
+struct that mirrors it (`C.struct_node`) have the same layout.
+
+**Where it is chosen.** `cmd/cc/internal/ccmain/target.go`, once for the
+process, from the word size of the target as `internal/buildcfg` gives
+it to every tool (`GOWASM.PtrSize()`): ILP32 for wasm with 4-byte words,
+LP64 for everything else (native targets, `GOWASM=linear`,
+`GOWASM=gc,split,ptr64`), exactly as before: cc's output for basic.c,
+libc.c, slimcc's and c-testsuite's tests, Lua and SQLite is byte for
+byte what it was natively and for linear and ptr64. The size of a
+pointer and of `long` are two fields (`ptrSize`, `longSize`); the type
+of an address in the generated Go is `uintptr` whatever they are. The go
+command runs cc in-process, so cc sees the target only through the
+environment: `go build` refuses to build C with cc for a GOOS/GOARCH set
+in a go env file instead (`cc_gd.go`), which compile and link handle by
+running out of process.
+
+**The data model** (checked against clang 21: `bench/wasmgc/cclayout`,
+116 sizes, alignments and offsets of 21 structs and unions, and Go's
+layout of the 11 that Go can declare):
+
+| type | LP64 | wasm32 |
+|------|------|--------|
+| `char`, `short`, `int`, `float` | 1, 2, 4, 4 | the same |
+| `long`, `unsigned long` | 8 (Go `int64`) | **4 (Go `int32`, `uint32`)** |
+| pointers, `nullptr_t`, `va_list` | 8 | **4** |
+| `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t` | `long`: 8 | `long`: **4** |
+| `long long`, `double` | 8, aligned 8 | 8, aligned 8 (as Go's `int64`) |
+| `int64_t`, `intmax_t`, `int_least64_t`, `int_fast64_t` | `long` | `long long` |
+| `int_fast16_t`, `int_fast32_t` | `long` | `int` (musl's, wasi-libc's) |
+| `long double` | 16, aligned 16, a double's value | the same (clang: fp128) |
+| `__int128`, `_Complex double` | 16/16, 16/8 | the same |
+| `wchar_t`, enums | 4 | 4; an enum wider than 32 bits is `long long` |
+| `max_align_t` | `long` | `struct { long long; long double; }`: 32, aligned 16, as clang's |
+
+C's `long` is Go's `int32` on wasm32, as cgo's `C.long` is on a 32-bit
+target (cgo's is a distinct type of that size; here it is `int32`
+itself, as `C.long` was `int64` itself before). Integer constants get
+C's types for a 32-bit `long` (`3000000000` is `long long`), constant
+folding wraps at 32 bits, `__builtin_clzl` and the others with `l` work
+on 32 bits, `__builtin_bswap64` on `unsigned long long`; the predefined
+macros are clang's for wasm32 (`__ILP32__`, `__SIZEOF_LONG__ 4`, ...)
+and `inttypes.h`'s formats follow (`PRId64` is `"lld"`).
+
+**The C library's types** that clang cannot give without a libc are
+wasi-libc's and musl's on 32 bits: `time_t`, `clock_t`, `off_t`,
+`blkcnt_t`, `suseconds_t` of 64 bits, `dev_t`, `ino_t`, `nlink_t` of 64;
+`ssize_t`, `blksize_t`, `pthread_t` and `tv_nsec` stay `long`. With
+these, `struct stat`, `struct timespec` and `struct timeval` keep LP64's
+offsets (a 4-byte `long` and padding where LP64 has 8 bytes);
+`struct rusage`'s 14 `long`s, `struct passwd`'s pointers, `struct
+lconv`, `ldiv_t` and `argv` are laid out by the model. The headers stay
+written for LP64; `target.go` edits their text for ILP32 (`ilp32Headers`,
+each edit checked to apply).
+
+**The library's Go keeps LP64's types**: `c23.Strlen` returns `uint64`
+everywhere, and a call from wasm32 C converts a `long` or `size_t`
+argument to `int64`/`uint64` and the result back (`libcConv`); the
+address of such a function is a closure that converts. Where the width
+is the function's meaning, there is a version of it: `strtol` and
+`strtoul` (long's range and `ERANGE`), `ldiv` (its result's layout).
+`printf`'s and `scanf`'s `l`, `z` and `t` are `long`'s size, `ll` and
+`j` 8 bytes.
+
+**internal/c23 with 4-byte words**: a `Ptr` in a register is as it was;
+in memory a pointer is one word, so a tinfo's kinds, the side tables'
+keys, `Memmove`'s, `Memset`'s and `LoadPtr`'s pointer words are
+`wordSize` (4) bytes (`model.go`), C's object header is four words (16
+bytes), and the marker of an over-aligned object two. The tag of an
+out-of-bounds pointer is bit 31 with split, as before. Go strings are
+words C may read and not write, inline or not: c23 never looks inside
+one; `C.CString` and `C.GoString` copy bytes.
+
+**Go's side**: `C.long`, `C.ulong`, `C.size_t`, `C.uintptr_t` are 4
+bytes; a Go struct passed to C and a C struct read by Go have one layout
+(the interop test, which pokes at word indexes computed from the types
+and expects the sizes of its target's word).
+
+**Measured** (`go test cmd/cc` and the suites, `GOWASMGC_POISON=1`):
+the suites run for js from a test binary built for the host with
+`GOOS=js GOARCH=wasm` in its environment (the programs under node):
+
+| suite | native | js, wasm32 | js, `gc,split,ptr64` |
+|-------|--------|------------|----------------------|
+| `go test cmd/cc internal/c23` | ok | ok (`TestInterop/wasm-split`; was a build failure) | ok (`wasm-split-ptr64`, new) |
+| slimcc's tests | 76 of 106 | 60 | 72 |
+| c-testsuite | 220 of 220 | 219 | |
+| GCC's torture tests | 1400 of 1576 | 1397 | |
+| SQLite's shell, smoke.sql | as gcc's | as gcc's | as gcc's |
+| Lua's test files (`-e _U=true`) | 29 of 33 | 26 | 25 |
+
+What fails on wasm32 and not natively: slimcc's tests that assume
+LP64 (12: `sizeof(long) == 8`, `sizeof(void *) == 8`, `(long)1 << 62`,
+a union with a pointer of 8 bytes), and 4 that fail with 8-byte words
+too (`_Alignas(1024)` objects are not so aligned with split, and
+`_Thread_local` is shared there, above); c-testsuite's 00040 and three
+torture tests (`pr43220`, `20040811-1`, `vla-dealloc-1`) run 30 to 40
+seconds under node, past the suites' 20 (they pass alone, with either
+word); `loop-2e` makes a pointer of `INT_MAX & -32` and stores it, and
+bit 31 is the tag. Lua: `calls.lua`'s "C-stack overflow while handling
+C-stack overflow" lets a longjmp escape every frame with split (with
+8-byte words too, and before this change), the stack-overflow tests and
+`heavy.lua` exhaust memory (2 GB of linear memory, or V8's heap), and
+`main.lua` and `files.lua` need `popen` and a seekable stdin. Natively
+nothing moved: cc's output is the same.
+
+Sizes (bytes, `-trimpath`, unstripped / `-ldflags=-s -w` / that gzip -9):
+
+| program | wasm32 | `gc,split,ptr64` |
+|---------|--------|------------------|
+| small C program (a list, printf) | 954,320 / 800,735 / 273,111 | 982,096 / 827,066 / 275,650 |
+| the interop program | 844,286 / 711,289 / 247,525 | 871,755 / 737,896 / 248,009 |
+| Lua 5.4 | 3,077,184 / 2,439,666 / 686,730 | 3,091,116 / 2,461,623 / 683,811 |
+| SQLite's shell | 11,140,842 / 8,558,817 / 2,099,422 | 11,065,198 / 8,537,518 / 2,066,996 |
+
+SQLite is larger with 4-byte words (some 21 KB stripped): a `long` or
+`size_t` passed to the library is converted, and 32-bit arithmetic in
+64-bit registers is extended where 64-bit arithmetic is not. Speed:
+Lua's `bench.lua` (fib, sort, string formatting) 70.0 s against 67.8 s
+for `ptr64`, SQLite's smoke.sql 4.4 s against 4.1 s (best of three under
+node, on a machine shared with other work, load 5 to 12, whose runs varied
+by more than that): no difference shown beyond the noise, and none looked
+into.
+
+
+**Not done**: native 32-bit targets (386, arm) keep LP64, which neither
+cc nor c23 works with (no bit 55); `long double` is a double's value, not
+clang's fp128; a pointer made of an integer with bit 31 set loses it in
+pointer memory with split (the tag), whatever the word size.
+
 ## What it does not do yet
 
 - **Go's fault on a tagged word is fatal** natively, and a trap with

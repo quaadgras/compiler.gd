@@ -566,7 +566,13 @@ func (l *gcLinker) newObject(w *bytes.Buffer, typ loader.Sym, d *gcData, off int
 			}
 			writeI64Const(w, v)
 		default:
-			writeI32Const(w, int32(d.uint(o, gcKindSize(lf.Kind))))
+			v := int32(d.uint(o, gcKindSize(lf.Kind)))
+			if r, ok := d.relocs[o]; ok && lf.Kind == 'w' {
+				// A word of 4 bytes (wasm32): an address in
+				// linear memory, or a function.
+				v = int32(l.ldr.SymValue(r.Sym()) + r.Add())
+			}
+			writeI32Const(w, v)
 		}
 	}
 	gcOp(w, 0x00, t) // struct.new
@@ -720,27 +726,40 @@ func (l *gcLinker) initGlobals() []byte {
 		if typ == 0 {
 			// Words: a function value, which is the address of the
 			// function and what it closes over.
-			n := (l.ldr.SymSize(s) + 7) / 8
+			// (Pointer words: 4 bytes with wasm32. Nothing reads
+			// the escape mask of a function value with GOWASM=gc.)
+			ps := l.ptrSize()
+			size := (l.ldr.SymSize(s) + ps - 1) &^ (ps - 1)
+			kw := ld.WasmGCWordKind(l.ctxt.Arch)
+			var offs []int64
+			var kinds []byte
+			for o := int64(0); o < size; o += ps {
+				offs, kinds = append(offs, o), append(kinds, kw)
+			}
 			name := wasm.GCStructPrefix
-			for j := int64(0); j < n; j++ {
+			for j, o := range offs {
 				if j > 0 {
 					name += ","
 				}
-				name += fmt.Sprintf("l%d", j*8)
+				name += fmt.Sprintf("%c%d", kinds[j], o)
 			}
-			name += fmt.Sprintf("/%d", n*8)
+			name += fmt.Sprintf("/%d", size)
 			t := l.typeIndex(name)
 			writeI32Const(&create, int32(l.layout(name)))
 			writeI32Const(&create, 0)
-			for j := int64(0); j < n; j++ {
-				v := int64(d.uint(j*8, 8))
-				if r, ok := d.relocs[j*8]; ok {
+			for j, o := range offs {
+				v := int64(d.uint(o, gcKindSize(kinds[j])))
+				if r, ok := d.relocs[o]; ok {
 					if !l.linear(r.Sym()) {
 						l.ctxt.Errorf(s, "GOWASM=gc: data without a type points to an object")
 					}
 					v = l.ldr.SymValue(r.Sym()) + r.Add()
 				}
-				writeI64Const(&create, v)
+				if kinds[j] == 'w' {
+					writeI32Const(&create, int32(v))
+				} else {
+					writeI64Const(&create, v)
+				}
 			}
 			gcOp(&create, 0x00, t)
 			gcGlobalSet(&create, gi)
@@ -768,8 +787,9 @@ func (l *gcLinker) initGlobals() []byte {
 }
 
 // gcTypeGCDataOff is the offset of the GCData word in an abi.Type,
-// where the number of the type's constructor goes.
-const gcTypeGCDataOff = 32
+// where the number of the type's constructor goes: after Size_,
+// PtrBytes, 8 bytes of Hash and the kinds, and Equal.
+func (l *gcLinker) gcTypeGCDataOff() int64 { return 3*l.ptrSize() + 8 }
 
 // constructors returns the code that pushes a new object of each type
 // whose descriptor is in the program, if the program makes objects of
@@ -814,7 +834,7 @@ func (l *gcLinker) constructors() [][]byte {
 func (l *gcLinker) numbered(s loader.Sym) bool {
 	ldr := l.ldr
 	name := ldr.SymName(s)
-	if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || len(ldr.Data(s)) < 48 {
+	if !strings.HasPrefix(name, "type:") || strings.HasPrefix(name, "type:.") || !ldr.AttrReachable(s) || ldr.SymType(s).IsText() || ldr.SymValue(s) == 0 || int64(len(ldr.Data(s))) < 4*l.ptrSize()+16 /* an abi.Type */ {
 		return false
 	}
 	return l.constructible(s)
@@ -1176,10 +1196,13 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	sects, _ := v.([]wasmDataSect)
 	// The number of each type's constructor, in its descriptor.
 	for typ, n := range l.ctorOf {
-		addr := uint64(ldr.SymValue(typ)) + gcTypeGCDataOff
+		addr := uint64(ldr.SymValue(typ) + l.gcTypeGCDataOff())
+		ps := uint64(l.ptrSize())
 		for _, ds := range sects {
-			if ds.sect.Vaddr <= addr && addr+8 <= ds.sect.Vaddr+uint64(len(ds.data)) {
-				binary.LittleEndian.PutUint64(ds.data[addr-ds.sect.Vaddr:], uint64(n))
+			if ds.sect.Vaddr <= addr && addr+ps <= ds.sect.Vaddr+uint64(len(ds.data)) {
+				var b [8]byte
+				binary.LittleEndian.PutUint64(b[:], uint64(n))
+				copy(ds.data[addr-ds.sect.Vaddr:][:ps], b[:])
 			}
 		}
 	}

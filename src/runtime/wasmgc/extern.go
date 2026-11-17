@@ -128,16 +128,19 @@ func Callers(skip int, pc []uintptr) int {
 	}
 	// (On the stack when it fits: Callers does not allocate, as
 	// log/slog's tests check.)
-	var small [64]uintptr
+	// (The host writes pcs of 64 bits, whatever the size of a uintptr:
+	// a pc is the function's index << 16 and its place, which fit in
+	// 32 bits with wasm32, see the linker's funcValueOffset.)
+	var small [64]uint64
 	buf := small[:]
 	if need := len(pc) + skip + 16; need > len(small) {
-		buf = make([]uintptr, need)
+		buf = make([]uint64, need)
 	}
 	n := int(callers(uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf))))
 	// Frames above Callers are the host's.
 	start := 0
 	for i := 0; i < n && i < 8; i++ {
-		if FuncForPC(buf[i]).Name() == "runtime.Callers" {
+		if funcNameIs(buf[i], "runtime.Callers") {
 			start = i
 			break
 		}
@@ -146,7 +149,11 @@ func Callers(skip int, pc []uintptr) int {
 	if start >= n {
 		return 0
 	}
-	return copy(pc, buf[start:n])
+	k := 0
+	for ; k < len(pc) && start+k < n; k++ {
+		pc[k] = uintptr(buf[start+k])
+	}
+	return k
 }
 
 //go:wasmimport gd callers
@@ -240,6 +247,15 @@ func (f *Func) Entry() uintptr {
 		return 0
 	}
 	return f.entry
+}
+
+// funcNameIs reports whether the function of pc is named name, without
+// allocating (a short name is a string of its own only with inline
+// strings).
+func funcNameIs(pc uint64, name string) bool {
+	var buf [64]byte
+	n := funcname(pc, uint64(uintptr(unsafe.Pointer(&buf[0]))), uint32(len(buf)))
+	return string(buf[:n]) == name
 }
 
 // funcname writes the name of the function whose code is pc at addr,
