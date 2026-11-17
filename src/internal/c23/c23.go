@@ -288,21 +288,40 @@ func ToGoUnsafe(p Ptr) unsafe.Pointer {
 //     the runtime when the stack moves;
 //   - in Go's heap: by the object, removed when the object dies;
 //   - in Go's globals: by address.
+//
+// A C object's table is dense, an entry for each word, found by index;
+// the others are maps.
 type auxTable struct {
-	mu sync.Mutex
-	m  map[uintptr]auxEntry
+	mu    sync.Mutex
+	m     map[uintptr]auxEntry
+	dense []auxEntry // C's object's: by offset/8, valid if ok
 }
 
 type auxEntry struct {
 	word uintptr
 	p    Ptr
+	ok   bool
 }
 
-func (h *header) table(make bool) *auxTable {
-	if t := (*auxTable)(atomic.LoadPointer(&h.aux)); t != nil || !make {
+func (t *auxTable) get(key uintptr) (auxEntry, bool) {
+	t.mu.Lock()
+	var e auxEntry
+	if t.dense != nil {
+		if i := key / 8; i < uintptr(len(t.dense)) {
+			e = t.dense[i]
+		}
+	} else {
+		e = t.m[key]
+	}
+	t.mu.Unlock()
+	return e, e.ok
+}
+
+func (h *header) table(create bool) *auxTable {
+	if t := (*auxTable)(atomic.LoadPointer(&h.aux)); t != nil || !create {
 		return t
 	}
-	t := &auxTable{m: map[uintptr]auxEntry{}}
+	t := &auxTable{dense: make([]auxEntry, (h.size+7)/8)}
 	if atomic.CompareAndSwapPointer(&h.aux, nil, unsafe.Pointer(t)) {
 		return t
 	}
@@ -322,7 +341,8 @@ func check(p Ptr, n uintptr) unsafe.Pointer {
 
 func checkPtrWord(p Ptr) unsafe.Pointer {
 	a := check(p, 8)
-	if uintptr(a)%8 != 0 || p.info().kindAt(uintptr(p.off)) != p.info().kindAt(uintptr(p.off)+7) {
+	// Aligned, and the object's types are aligned too: one word.
+	if uintptr(a)%8 != 0 || uintptr(p.off)%8 != 0 {
 		fault("misaligned pointer access", uintptr(a))
 	}
 	return a
@@ -331,11 +351,13 @@ func checkPtrWord(p Ptr) unsafe.Pointer {
 // checkScalar checks a store of n bytes at p.
 func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 	a := check(p, n)
-	if p.info().scalarOnly {
+	ti := p.info()
+	if ti.scalarOnly {
 		return a
 	}
-	for b := uintptr(p.off); b < uintptr(p.off)+n; b++ {
-		switch p.info().kindAt(b) {
+	end := uintptr(p.off) + n
+	for b := uintptr(p.off); b < end; b = (b + 8) &^ 7 {
+		switch ti.kindAt(b) {
 		case wPtr:
 			fault("scalar store over a pointer word", uintptr(a))
 		case wRO:
@@ -441,12 +463,23 @@ func Memmove(dst, src Ptr, n uintptr) {
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
+	nw := n / 8
+	if !overlaps(dst, src, n) {
+		// Word by word: no copy aside needed.
+		for i := uintptr(0); i < nw; i++ {
+			moveWord(Add(dst, int(i*8)), Add(src, int(i*8)))
+		}
+		if t := n % 8; t > 0 {
+			d2 := checkScalar(Add(dst, int(nw*8)), t)
+			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*8)), t))
+		}
+		return
+	}
 	type word struct {
 		ptr bool
 		p   Ptr
 		u   uint64
 	}
-	nw := n / 8
 	ws := make([]word, nw)
 	for i := range nw {
 		sp := Add(src, int(i*8))
@@ -484,6 +517,47 @@ func Memmove(dst, src Ptr, n uintptr) {
 	if len(tail) > 0 {
 		t := checkScalar(Add(dst, int(nw*8)), uintptr(len(tail)))
 		copy(unsafe.Slice((*byte)(t), len(tail)), tail)
+	}
+}
+
+// overlaps reports whether n bytes at a and at b may overlap.
+func overlaps(a, b Ptr, n uintptr) bool {
+	x, y := Addr(a), Addr(b)
+	return x < y+n && y < x+n
+}
+
+// moveWord copies the word at src to dst, as Memmove does.
+func moveWord(dst, src Ptr) {
+	sk := src.info().kindAt(uintptr(src.off))
+	dk := dst.info().kindAt(uintptr(dst.off))
+	if sk != wPtr && sk != wSplit && dk != wPtr && dk != wSplit {
+		Store64(dst, Load64(src))
+		return
+	}
+	var p Ptr
+	isPtr := false
+	switch sk {
+	case wPtr:
+		p, isPtr = LoadPtr(src), true
+	case wSplit:
+		if c := LoadPtr(src); c.obj != nil {
+			p, isPtr = c, true
+		}
+	}
+	switch {
+	case dk == wPtr:
+		if !isPtr {
+			if u := Load64(src); u != 0 {
+				fault("non-zero scalar copied into a pointer word", Addr(dst))
+			}
+		}
+		StorePtr(dst, p)
+	case isPtr && dk == wSplit:
+		StorePtr(dst, p)
+	case isPtr:
+		Store64(dst, uint64(Addr(p)))
+	default:
+		Store64(dst, Load64(src))
 	}
 }
 

@@ -83,9 +83,7 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 		if t == nil {
 			return Ptr{}, false
 		}
-		t.mu.Lock()
-		e, ok = t.m[key]
-		t.mu.Unlock()
+		e, ok = t.get(key)
 	case 's':
 		tb := (*gTable)(*gTableSlot())
 		if tb == nil {
@@ -105,10 +103,7 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 		if !found {
 			return Ptr{}, false
 		}
-		t := v.(*auxTable)
-		t.mu.Lock()
-		e, ok = t.m[key]
-		t.mu.Unlock()
+		e, ok = v.(*auxTable).get(key)
 	}
 	if !ok || exact && e.word != w {
 		return Ptr{}, false
@@ -124,7 +119,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 	switch kind {
 	case 'c':
 		if t := p.header().table(keep); t != nil {
-			t.set(key, keep, auxEntry{w, v})
+			t.set(key, keep, auxEntry{word: w, p: v})
 		}
 	case 's':
 		slot := gTableSlot()
@@ -148,7 +143,7 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 		clear(tb.e[j:])
 		tb.e = tb.e[:j]
 		if keep {
-			tb.e = append(tb.e, gEntry{key, auxEntry{w, v}})
+			tb.e = append(tb.e, gEntry{key, auxEntry{w, v, true}})
 		}
 	case 'h':
 		var t *auxTable
@@ -169,16 +164,26 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 			}
 		}
 		if t != nil {
-			t.set(key, keep, auxEntry{w, v})
+			t.set(key, keep, auxEntry{word: w, p: v})
 		}
 	}
 }
 
 func (t *auxTable) set(key uintptr, keep bool, e auxEntry) {
+	e.ok = true
 	t.mu.Lock()
-	if keep {
+	switch {
+	case t.dense != nil:
+		if i := key / 8; i < uintptr(len(t.dense)) {
+			if keep {
+				t.dense[i] = e
+			} else {
+				t.dense[i] = auxEntry{}
+			}
+		}
+	case keep:
 		t.m[key] = e
-	} else {
+	default:
 		delete(t.m, key)
 	}
 	t.mu.Unlock()

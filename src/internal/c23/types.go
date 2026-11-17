@@ -40,6 +40,7 @@ type tinfo struct {
 	kinds      []wordKind     // per 8-byte word of one value
 	elems      []reflect.Type // per word: the pointee of a wPtr word (nil: unsafe.Pointer)
 	scalarOnly bool
+	mask       uintptr // size-1, if size is a power of two
 }
 
 var tinfos sync.Map // reflect.Type -> *tinfo
@@ -67,6 +68,9 @@ func infoOf(t reflect.Type) *tinfo {
 	n := (size + 7) / 8
 	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1))}
 	ti.walk(t, 0)
+	if ti.size&(ti.size-1) == 0 {
+		ti.mask = ti.size - 1
+	}
 	ti.scalarOnly = true
 	for _, k := range ti.kinds {
 		if k != wScalar {
@@ -131,7 +135,16 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 
 // kindAt returns the kind of the byte at off in memory that is an array of
 // ti's type.
-func (ti *tinfo) kindAt(off uintptr) wordKind { return ti.kinds[off%ti.size/8] }
+func (ti *tinfo) kindAt(off uintptr) wordKind {
+	if off >= ti.size {
+		if ti.mask != 0 {
+			off &= ti.mask
+		} else {
+			off %= ti.size
+		}
+	}
+	return ti.kinds[off/8]
+}
 
 // elemAt returns what the pointer word at off points to: nil for
 // unsafe.Pointer.
