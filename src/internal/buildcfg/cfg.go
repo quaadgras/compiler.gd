@@ -337,7 +337,8 @@ type gowasmFeatures struct {
 
 	// GC keeps Go objects in the WebAssembly garbage-collected heap
 	// (typed structs and arrays) instead of linear memory.
-	// See doc/gd/wasm-gc.md.
+	// See doc/gd/wasm-gc.md. It is the default for GOARCH=wasm:
+	// GOWASM=linear is Go's own port.
 	GC bool
 
 	// Split, with GC, keeps the bytes of every Go value in linear
@@ -353,6 +354,8 @@ func (f gowasmFeatures) String() string {
 	var flags []string
 	if f.GC {
 		flags = append(flags, "gc")
+	} else if GOARCH == "wasm" {
+		flags = append(flags, "linear")
 	}
 	if f.Split {
 		flags = append(flags, "split")
@@ -361,6 +364,10 @@ func (f gowasmFeatures) String() string {
 }
 
 func gowasm() (f gowasmFeatures) {
+	// gc is what GOARCH=wasm means, unless linear is asked for: Go's
+	// own port, with every Go value in linear memory and Go's
+	// collector.
+	f.GC = GOARCH == "wasm"
 	for opt := range strings.SplitSeq(envOr("GOWASM", ""), ",") {
 		switch opt {
 		case "satconv":
@@ -369,6 +376,8 @@ func gowasm() (f gowasmFeatures) {
 			// ignore, always enabled
 		case "gc":
 			f.GC = true
+		case "linear":
+			f.GC = false
 		case "split":
 			f.Split = true
 		case "":
