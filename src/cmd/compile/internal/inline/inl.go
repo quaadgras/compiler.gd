@@ -228,6 +228,19 @@ func isC23(fn *ir.Func) bool {
 	return fn.Sym() != nil && fn.Sym().Pkg != nil && fn.Sym().Pkg.Path == "internal/c23"
 }
 
+// isPkgInit reports whether fn is a package's initialization: its
+// variables' ("init") or a func init ("init.N"). It runs once, so C's
+// accesses are not inlined into it more than Go's rules say, which would
+// only make it slow to compile: the initializers of a big program's
+// globals (SQLite's) are one long function.
+func isPkgInit(fn *ir.Func) bool {
+	if fn == nil || fn.Sym() == nil || fn.OClosure != nil {
+		return false
+	}
+	name := fn.Sym().Name
+	return name == "init" || strings.HasPrefix(name, "init.")
+}
+
 func simdCreditMultiplier(fn *ir.Func) int32 {
 	for _, field := range fn.Type().RecvParamsResults() {
 		if field.Type.IsSIMD() {
@@ -1028,7 +1041,7 @@ var InlineCall = func(gd *base.Invocation, callerfn *ir.Func, call *ir.CallExpr,
 func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, bigCaller, closureCalledOnce bool) (bool, int32, int32, bool) {
 	maxCost := int32(inlineMaxBudget)
 
-	if bigCaller && !isC23(callee) {
+	if bigCaller && (!isC23(callee) || isPkgInit(caller)) {
 		// We use this to restrict inlining into very big functions.
 		// See issue 26546 and 17566.
 		maxCost = inlineBigFunctionMaxCost
@@ -1044,14 +1057,8 @@ func inlineCostOK(gd *base.Invocation, n *ir.CallExpr, caller, callee *ir.Func, 
 	}
 
 	maxCost = max(maxCost, simdMaxCost)
-	if isC23(callee) {
-		// Into a big function, only the checks: more makes its
-		// compilation take far longer (SQLite's VDBE loop).
-		if bigCaller {
-			maxCost = max(maxCost, inlineMaxBudget)
-		} else {
-			maxCost = max(maxCost, inlineC23MaxBudget)
-		}
+	if isC23(callee) && !isPkgInit(caller) {
+		maxCost = max(maxCost, inlineC23MaxBudget)
 	}
 
 	metric := callee.Inl.Cost
