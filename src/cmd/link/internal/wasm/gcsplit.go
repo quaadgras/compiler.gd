@@ -169,10 +169,11 @@ func (l *gcLinker) writeSplitTypes(w *bytes.Buffer) {
 	// have is read again after a call, and the host frees a block
 	// only from a call: the pointer, and its array, stay live as long
 	// as the address is used.)
-	w.Write([]byte{0x5F, 0x03, wasm.GCTypeI32, 0x01})
+	// (addr and off are addresses: wasm.GCTypeAddr.)
+	w.Write([]byte{0x5F, 0x03, wasm.GCTypeAddr, 0x01})
 	w.WriteByte(wasm.GCRefNull)
 	writeSleb128(w, int64(slots))
-	w.Write([]byte{0x00, wasm.GCTypeI32, 0x01})
+	w.Write([]byte{0x00, wasm.GCTypeAddr, 0x01})
 	// GCSlots: an array of mutable nullable GCPtrs.
 	w.WriteByte(0x5E)
 	w.WriteByte(wasm.GCRefNull)
