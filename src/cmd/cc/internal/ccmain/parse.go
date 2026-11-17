@@ -1406,7 +1406,9 @@ func (p *parser) constexprValue(sym *symbol, at pos) {
 		p.errorAt(at, "constexpr %q has no initializer", sym.name)
 	}
 	if sym.init.scalar != nil {
-		if v, ok := p.foldInt(sym.init.scalar); ok {
+		if (sym.t.isPtr() || sym.t.kind == kNullptr) && isConstExpr(sym.init.scalar) {
+			sym.cval = sym.init.scalar
+		} else if v, ok := p.foldInt(sym.init.scalar); ok {
 			sym.val = v
 			sym.cval = &intConst{node{sym.t, at}, v}
 		} else if f, ok := p.foldFloat(sym.init.scalar); ok {
@@ -1425,6 +1427,9 @@ func (p *parser) constexprValue(sym *symbol, at pos) {
 		if _, ok := it.x.(*strLit); ok {
 			continue
 		}
+		if isConstexprObj(it.x) {
+			continue
+		}
 		if _, ok := p.foldInt(it.x); ok {
 			continue
 		}
@@ -1440,3 +1445,14 @@ func (p *parser) constexprValue(sym *symbol, at pos) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// isConstexprObj reports whether e is (a member of) a constexpr object.
+func isConstexprObj(e expr) bool {
+	switch e := e.(type) {
+	case *varRef:
+		return e.sym.constx
+	case *member:
+		return isConstexprObj(e.x)
+	}
+	return false
+}

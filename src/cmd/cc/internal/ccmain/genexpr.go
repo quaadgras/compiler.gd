@@ -948,6 +948,7 @@ func (g *gen) vaOp(e *vaOp) string {
 		l := g.lv(e.ap)
 		g.storeL(l, "c23.VaStart(va)", nil)
 	case "end":
+		g.effect(e.ap)
 	case "copy":
 		l := g.lv(e.ap)
 		g.storeL(l, fmt.Sprintf("c23.VaCopy(%s)", g.rv(e.src)), nil)

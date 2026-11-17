@@ -15,7 +15,7 @@ func (p *parser) expr() expr {
 	for p.is(",") {
 		at := p.here()
 		p.next()
-		y := p.rvalue(p.assignment())
+		y := p.rvalueVoid(p.assignment())
 		e = &binary{node{y.ty(), at}, ",", p.rvalueVoid(e), y}
 	}
 	return e
@@ -336,6 +336,72 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 		rt = tInt
 	}
 	return p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)})
+}
+
+// constexprLoad is the value of a scalar in a constexpr object at a
+// constant offset (arr[2], s.f), a constant.
+func (p *parser) constexprLoad(e expr) (expr, bool) {
+	if !e.ty().isScalar() {
+		return nil, false
+	}
+	sym, off, ok := constexprPlace(e)
+	if !ok || sym.init == nil {
+		return nil, false
+	}
+	for i := len(sym.init.items) - 1; i >= 0; i-- {
+		it := sym.init.items[i]
+		if it.f != nil || it.x == nil {
+			continue
+		}
+		if it.off == off && it.t.isScalar() && isConstExpr(it.x) {
+			return p.convert(it.x, e.ty().unqual()), true
+		}
+		if s, ok := it.x.(*strLit); ok && off >= it.off && off < it.off+it.t.sizeof() && e.ty().sizeof() == 1 {
+			k := off - it.off
+			v := int64(0)
+			if k < int64(len(s.data)) {
+				v = int64(s.data[k])
+			}
+			return p.intc(v, e.ty().unqual(), e.at()), true
+		}
+	}
+	// Not initialized: zero.
+	if off >= 0 && off < sym.t.sizeof() {
+		return p.convert(p.intc(0, tInt, e.at()), e.ty().unqual()), true
+	}
+	return nil, false
+}
+
+// constexprPlace finds the constexpr object e is in, and its offset.
+func constexprPlace(e expr) (*symbol, int64, bool) {
+	switch e := e.(type) {
+	case *varRef:
+		if e.sym.constx && !e.sym.t.isScalar() {
+			return e.sym, 0, true
+		}
+	case *member:
+		if s, off, ok := constexprPlace(e.x); ok && e.f.bits < 0 {
+			return s, off + e.f.off, true
+		}
+	case *deref:
+		if b, ok := e.x.(*binary); ok && (b.op == "+" || b.op == "-") {
+			if d, ok := b.x.(*decay); ok {
+				if c, ok := b.y.(*intConst); ok {
+					if s, off, ok := constexprPlace(d.x); ok {
+						n := c.v
+						if b.op == "-" {
+							n = -n
+						}
+						return s, off + n*elemSizeOf(b.t), true
+					}
+				}
+			}
+		}
+		if d, ok := e.x.(*decay); ok {
+			return constexprPlace(d.x)
+		}
+	}
+	return nil, 0, false
 }
 
 // qualifyDeep qualifies t, or an array's elements (an array's
@@ -1027,6 +1093,9 @@ func (p *parser) rvalue(e expr) expr {
 	case kVoid:
 		p.errorAt(e.at(), "void value not ignored as it ought to be")
 	}
+	if c, ok := p.constexprLoad(e); ok {
+		return c
+	}
 	if v, ok := e.(*varRef); ok && v.sym.constx && v.sym.cval != nil {
 		if c, ok := v.sym.cval.(*intConst); ok {
 			return &intConst{node{t.unqual(), e.at()}, c.v}
@@ -1378,7 +1447,7 @@ func (p *parser) builtin(name string, at pos) expr {
 		return as
 	}
 	switch name {
-	case "__builtin_va_start":
+	case "__builtin_va_start", "__builtin_c23_va_start":
 		as := args(-1)
 		if len(as) < 1 {
 			p.errorAt(at, "too few arguments to va_start")
@@ -1388,10 +1457,17 @@ func (p *parser) builtin(name string, at pos) expr {
 		}
 		p.fn.usesVA = true
 		p.checkVaList(as[0], at)
-		return &vaOp{node{tVoid, at}, "start", as[0], nil}
+		var e expr = &vaOp{node{tVoid, at}, "start", as[0], nil}
+		for _, a := range as[1:] {
+			// Evaluated, for its effects.
+			e = &binary{node{tVoid, at}, ",", p.rvalueVoid(a), e}
+		}
+		return e
 	case "__builtin_va_end":
 		as := args(1)
-		p.checkVaList(as[0], at)
+		if as[0].ty().kind != kVaList {
+			p.errorAt(at, "first argument to va_end is not a va_list")
+		}
 		return &vaOp{node{tVoid, at}, "end", as[0], nil}
 	case "__builtin_va_copy":
 		as := args(2)

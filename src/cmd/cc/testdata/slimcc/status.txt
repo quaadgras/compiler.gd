@@ -30,6 +30,7 @@ embed
 enum
 extern
 float
+function
 generic
 generic2
 gibberish
@@ -61,6 +62,7 @@ typedef
 typedef2
 typeof
 unicode
+unicode2
 union
 union2
 usualconv

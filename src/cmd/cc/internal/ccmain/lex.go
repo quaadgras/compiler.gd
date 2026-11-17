@@ -178,6 +178,12 @@ func lexRaw(file, s string, line int) (toks []token, err error) {
 					j++
 				} else if s[j] == '\\' && j+1 < len(s) && (s[j+1] == 'u' || s[j+1] == 'U') {
 					j += 2
+					if j < len(s) && s[j] == '{' {
+						for j < len(s) && s[j] != '}' {
+							j++
+						}
+						j++
+					}
 				} else {
 					break
 				}
@@ -194,7 +200,7 @@ func lexRaw(file, s string, line int) (toks []token, err error) {
 				switch {
 				case (d == '+' || d == '-') && strings.IndexByte("eEpP", s[j-1]) >= 0:
 					j++
-				case isDigit(d) || isIdentStart(d) || d == '.':
+				case isDigit(d) || isIdentStart(d) || d == '.' || d >= 0x80:
 					j++
 				case d == '\'' && j+1 < len(s) && (isDigit(s[j+1]) || isIdentStart(s[j+1])):
 					j += 2
@@ -295,6 +301,30 @@ func unescape(s string) (v uint32, n int, ucn bool, err error) {
 		return 27, 2, false, nil
 	case '\\', '\'', '"', '?':
 		return uint32(s[1]), 2, false, nil
+	case 'x', 'u', 'U', 'o':
+		if len(s) > 2 && s[2] == '{' {
+			// C2y's delimited escapes: \x{...}, \u{...}, \o{...}.
+			j := 3
+			var v uint32
+			base := uint32(16)
+			if s[1] == 'o' {
+				base = 8
+			}
+			for j < len(s) && s[j] != '}' {
+				d := uint32(hexVal(s[j]))
+				if !isHex(s[j]) || d >= base {
+					return 0, 0, false, fmt.Errorf("invalid digit in delimited escape")
+				}
+				v = v*base + d
+				j++
+			}
+			if j >= len(s) || j == 3 {
+				return 0, 0, false, fmt.Errorf("unterminated delimited escape")
+			}
+			return v, j + 1, s[1] == 'u' || s[1] == 'U', nil
+		}
+	}
+	switch s[1] {
 	case 'x':
 		j := 2
 		var v uint32

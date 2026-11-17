@@ -65,10 +65,67 @@ func FuncOf[F any](p Ptr) F {
 	}
 	f, ok := (*Func)(p.obj).f.(F)
 	if !ok {
+		if g, ok := adapt[F]((*Func)(p.obj).f); ok {
+			return g
+		}
 		var z F
 		fault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p.obj).f, z), Addr(p))
 	}
 	return f
+}
+
+// adapt makes f callable as an F when F is a function without a
+// prototype (its arguments ...any), as C lets one be called: the
+// arguments, promoted, are converted to f's parameters.
+func adapt[F any](f any) (F, bool) {
+	var z F
+	ft, fv := reflect.TypeFor[F](), reflect.ValueOf(f)
+	gt := fv.Type()
+	if !ft.IsVariadic() || ft.NumIn() != 1 || ft.In(0) != reflect.TypeFor[[]any]() ||
+		ft.NumOut() != gt.NumOut() || gt.NumOut() == 1 && !convertible(gt.Out(0), ft.Out(0)) {
+		return z, false
+	}
+	g := reflect.MakeFunc(ft, func(in []reflect.Value) []reflect.Value {
+		args := in[0].Interface().([]any)
+		var vals []reflect.Value
+		for i := 0; i < gt.NumIn(); i++ {
+			pt := gt.In(i)
+			if gt.IsVariadic() && i == gt.NumIn()-1 {
+				for _, a := range args[min(i, len(args)):] {
+					vals = append(vals, reflect.ValueOf(a))
+				}
+				break
+			}
+			if i >= len(args) {
+				vals = append(vals, reflect.Zero(pt))
+				continue
+			}
+			v := reflect.ValueOf(args[i])
+			if !convertible(v.Type(), pt) {
+				fault(fmt.Sprintf("call passing a %s for a %s", v.Type(), pt), 0)
+			}
+			vals = append(vals, v.Convert(pt))
+		}
+		var out []reflect.Value
+		if gt.IsVariadic() {
+			out = fv.CallSlice(append(vals[:gt.NumIn()-1:gt.NumIn()-1], reflect.ValueOf(vals[gt.NumIn()-1:])))
+		} else {
+			out = fv.Call(vals)
+		}
+		if len(out) == 1 {
+			out[0] = out[0].Convert(ft.Out(0))
+		}
+		return out
+	})
+	return g.Interface().(F), true
+}
+
+func convertible(a, b reflect.Type) bool {
+	if a == b {
+		return true
+	}
+	num := func(t reflect.Type) bool { return t.Kind() >= reflect.Int && t.Kind() <= reflect.Float64 }
+	return num(a) && num(b)
 }
 
 // String allocates a string literal's array: s holds its elements'
