@@ -96,6 +96,7 @@ var (
 	linCollecting  bool
 	linTotal       uint64 // the bytes of all the blocks allocated
 	linCollections uint32 // how many times the host was let collect
+	linCollected   uint64 // linTotal when it last was
 )
 
 // linLimit is where the blocks end at most: an address in linear
@@ -111,7 +112,16 @@ func lincollect() bool {
 	}
 	linCollecting = true
 	t0 := nanotime()
-	hostgc(1)
+	// (What was allocated since the last time, for a host that can
+	// only tell the engine so: at least 1, and what an int32 holds.)
+	n := linTotal - linCollected
+	linCollected = linTotal
+	if n == 0 {
+		n = 1
+	} else if n > 1<<30 {
+		n = 1 << 30
+	}
+	hostgc(int32(n))
 	gcRecord(nanotime()-t0, walltime())
 	linCollecting = false
 	// Again when what is left has doubled (GOGC=100).

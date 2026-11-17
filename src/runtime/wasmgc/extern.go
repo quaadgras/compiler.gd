@@ -47,13 +47,13 @@ func GC() {
 	Gosched()
 }
 
-// (due is 1 if the collection is due for what is in linear memory, 0
-// if the program asks for it: a host that cannot make the engine
-// collect, only nudge it, does that less often for a program that
-// asks in a loop.)
+// (allocated is the bytes of linear memory allocated since the last
+// collection if this one is due for them, 0 if the program asks for
+// it: for a host that cannot make the engine collect, only tell it
+// what was allocated.)
 //
 //go:wasmimport gd gc
-func hostgc(due int32)
+func hostgc(allocated int32)
 
 // KeepAlive marks its argument as currently reachable.
 func KeepAlive(x any) {}

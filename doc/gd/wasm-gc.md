@@ -1856,13 +1856,20 @@ allocated a megabyte at a time, of which one is kept) failed in
 Firefox and in Chromium: a page cannot tell the engine to collect, and
 the engine, which counts what it allocates itself, knows nothing of
 what the program has in linear memory, so nothing was freed (1.4 GB
-used). Where the host has no `collect`, the runtime's collection (due
-when what is in linear memory has doubled, and `runtime.GC`) now
-allocates and drops 128 MB of `ArrayBuffer`s, which the engine does
-count, and waits up to 50 ms for the blocks that are then collected to
-be freed; for `runtime.GC`, not more than five times a second (a
-program may call it in a loop). It is a nudge and not a certainty: an engine
-is free to ignore it.
+used). Where the host has no `collect`, the engine is told what the
+program allocates, in the only way a page has: when the runtime's
+collection is due (what is in linear memory has doubled), the host
+allocates and drops `ArrayBuffer`s of as many bytes as were allocated
+in linear memory since the last time, which the engine does count, so
+that it collects when it would have for that much of its own; what it
+collects is freed in callbacks, then or at a later time that the
+program waits. `runtime.GC`, which asks for a collection now, allocates
+and drops 128 MB and waits up to 50 ms for the callbacks, not more than
+five times a second (a program may call it in a loop). An engine is
+free to ignore all of it: it is not a certainty. (A first form, 128 MB
+and a wait at every collection that was due, took 50 s in a browser for
+`fixedbugs/issue78081.go`, which allocates 1.6 GB of garbage: 12 s
+under node, and now 30 s in Firefox and 15 s in Chromium.)
 
 In Firefox the host's errors also had no message (its `stack` does not
 begin with it, as V8's does): the message is now printed first.
