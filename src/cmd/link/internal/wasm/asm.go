@@ -26,6 +26,8 @@ const (
 	F32  = 0x7D
 	F64  = 0x7C
 	V128 = 0x7B
+
+	ExternRef = 0x6F // (GOWASM=gc: see obj.WasmExtern)
 )
 
 const (
@@ -754,6 +756,8 @@ func fieldsToTypes(fields []obj.WasmField) []byte {
 			b[i] = F64
 		case obj.WasmV128:
 			b[i] = V128
+		case obj.WasmExtern:
+			b[i] = ExternRef
 		default:
 			panic(fmt.Sprintf("fieldsToTypes: unknown field type: %d", f.Type))
 		}

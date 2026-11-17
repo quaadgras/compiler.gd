@@ -31,6 +31,11 @@ func GC() {
 		Gosched()
 		return
 	}
+	if jssync() {
+		// (A call from JavaScript that has not returned: the host
+		// cannot be waited for.)
+		return
+	}
 	if poolcleanup != nil {
 		poolcleanup()
 	}

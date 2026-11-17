@@ -1885,3 +1885,108 @@ in `anames.go`: the assembly files of the linear port find
 instructions by name, and every name after it was one off
 (`unexpected assembler op: MOVB`, in `reflect`). Fixed, with a test
 (`TestAnames`).
+
+
+### Stage 18: GOOS=js on this runtime, with syscall/js (2026-11-17)
+
+`GOOS=js GOARCH=wasm` is a target of this runtime (the default for
+`GOOS=js`; `GOWASM=linear` is Go's own port): `runtime.GOOS` is `js`,
+the `js` build tag holds, and `syscall/js` works, in both models.
+
+**JavaScript values are references** (decided by the user: "We should
+use reference types for js objects"). A `js.Value` that holds a string,
+a symbol, an object or a function holds a `*syscall/js.externref`: an
+object of the engine's that holds the value as an `externref`. The
+engine's collector frees the JavaScript value when Go drops the
+object: there is no table of values in the host, no `finalizeRef` and
+nothing to release (wasm_exec.js's ids, NaN-boxing and reference counts
+are not used).
+
+- The object (`wasm.extern`, defined by the linker when a program has
+  such imports) is, with `GOWASM=gc`, a struct of one `externref`
+  field; with `GOWASM=gc,split`, a subtype of `wasm.ptr` (which is then
+  declared open to subtypes: two bytes) with the `externref` after its
+  fields, an address of 1 (not 0, which is nil) and no array, so that
+  it is stored, copied and compared as any pointer. Go code never
+  dereferences one.
+- The compiler knows a `*syscall/js.externref` by its name. For the
+  imports of module `gojs` with `GOWASM=gc`, every register of an
+  argument or result is a WebAssembly value of its own (`int`,
+  `uintptr` and integers of 32 bits or fewer as `i32`, `int64` and
+  `uint64` as `i64`, floats, pointers as addresses in linear memory),
+  and a `*externref` is the `externref` it holds: the import's wrapper
+  calls `wasm.jsunbox` (nil is null) and `wasm.jsbox` on a result (null
+  is nil), two functions the linker makes only for a program that calls
+  them. A string cannot be passed (the bytes of one of 15 bytes or fewer
+  are in its words, not in linear memory): `syscall/js` passes a
+  pointer and a length, copying a short string to a buffer.
+- A `Value` is its `Type`, a `float64` (a number, or a boolean) and the
+  `*externref`: numbers, booleans, null and undefined cost no object,
+  and `Type`, `Float`, `Int`, `Bool`, `IsNull`, `IsUndefined` and
+  `Equal` on them ask nothing of the host. A value is passed to the
+  host as a reference and a number (the reference if not nil, else the
+  number, else null if that is NaN; undefined, true, false and NaN
+  itself are passed as references the host gives at start). A value
+  the host returns is a reference only if it is a string, a symbol, an
+  object or a function; its type (plus 8 if it is an exception the call
+  threw) and its number are written by the host into two `float64`s of
+  Go's. The arguments of a call are a slice of numbers, NaN where the
+  argument is one of the references given just before (`valueArg`).
+- `syscall/js` with this runtime is `src/syscall/js/js_gc.go` (`js.go`
+  is the linear port's); `func.go` is shared: the host's object for
+  `jsGo` has `_makeFuncWrapper` and `_pendingEvent` as wasm_exec.js's
+  has. The host is `lib/wasm/wasm_gc_js.js` (the imports of `gojs`),
+  used by `wasm_gc.js` for a module that imports `gojs`.
+
+**A call from JavaScript into Go** (a function `js.FuncOf` made) runs
+on a goroutine of its own, which the host starts at once on a stack of
+the engine's (as the linear port of the fork does): if it ends without
+blocking, the call returns its result. JavaScript cannot wait for a
+goroutine (the others run from the event loop), so if the function
+blocks, the call returns a promise of its result, and the goroutine
+goes on when it is woken, as any other. Meanwhile the goroutine that
+called into JavaScript, if one did, is still in that call
+(`runtime.jscallback` sets it aside, `jscallbackdone` puts it back).
+Until the call has returned, the goroutine of the call must not be
+suspended but to block: an engine suspends a stack at every call of a
+`WebAssembly.Suspending` function, whatever it returns (found the hard
+way: V8 does), and only a goroutine that blocks is one the scheduler
+knows how to resume. So in that time (`runtime.jssync`) memory grows
+at once, on the goroutine's stack (the host does not ask the engine to
+collect there), `runtime.GC` returns without collecting, and a stack
+that would grow (stage 13) first yields, which makes the call return a
+promise. A function that prints under node blocks (node's `fs.write`
+calls back later) and so returns a promise, as with wasm_exec.js; in a
+page, output goes through a `writeSync` and does not block.
+
+`//go:wasmexport` works with `GOWASM=gc` (the tests of `syscall/js`
+call one): its wrapper converts the WebAssembly arguments to Go's
+registers and back, for numbers and booleans. It runs as the goroutine
+that is running (the test's, suspended in the import that called it).
+
+GOOS=js under node (`go_js_wasm_exec`, `wasm_gc_node.mjs`): the program
+has node's globals and `fs`, `path` and `require`, as under
+wasm_exec_node.js, and the arguments and the environment as WASI gives
+them (the runtime reads them as for wasip1). A program with no
+goroutine that can run and no timer waits for JavaScript to call it;
+it is deadlocked when node's event loop is empty (`beforeExit`).
+
+Work list (kept current):
+
+1. [done] `fmt` hello world under node, both models (M1).
+2. `go test syscall/js` under node, both models: all pass but
+   `TestCallAllocations`, `TestInvokeAllocations` and
+   `TestNewAllocations` for more than 16 arguments: they want 3
+   allocations where there are 2. The third is wasm_exec.js's slice of
+   the `Value`s of the arguments, kept alive through the call; here the
+   host has them from before the call and no such slice is made. (For
+   16 or fewer, 1, as they want: the slice of numbers is on the stack,
+   and the one allocation is the object of the result.) The tests are
+   not changed; the slice is not made to please them.
+   `TestGarbageCollection` counts wasm_exec.js's table of values
+   (`jsGo._values`): the host's object has an empty one, as there is
+   no table.
+3. The survey of std for GOOS=js under node (M3).
+4. Files in a page from `memFS`, `runGo` for js binaries, the
+   headless-browser runner (M4).
+5. Sizes and speed of a call.

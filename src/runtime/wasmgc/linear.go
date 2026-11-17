@@ -48,7 +48,7 @@ func lingrow(pages uintptr)
 // goroutine asks the host, which grows it from a microtask while the
 // goroutine is suspended.
 func growmem(pages uintptr) {
-	if onSysStack {
+	if onSysStack || jssync() {
 		hostgrowsync(int32(pages))
 		return
 	}
@@ -107,7 +107,7 @@ const linLimit = 1 << 31
 // owners are gone, with the goroutine suspended meanwhile. It reports
 // whether it could: not on the system stack, which is the host's.
 func lincollect() bool {
-	if onSysStack || linCollecting {
+	if onSysStack || linCollecting || jssync() {
 		return false
 	}
 	linCollecting = true

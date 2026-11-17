@@ -47,6 +47,10 @@ var gcExports = map[string]string{
 	"deadlock":  "runtime.deadlock",
 	"timerwait": "runtime.timerwait",
 	"cleanup":   "runtime.runcleanup",
+
+	// GOOS=js: a call from JavaScript (syscall/js).
+	"callback":     "runtime.jscallback",
+	"callbackdone": "runtime.jscallbackdone",
 }
 
 const sectionDataCount = 12
@@ -154,6 +158,8 @@ func gcStorage(k byte) byte {
 		return wasm.GCTypeEqRef
 	case 'o':
 		return 0x6E // anyref
+	case 'x':
+		return ExternRef
 	}
 	panic("bad wasm type letter " + string(k))
 }
@@ -211,6 +217,19 @@ func (l *gcLinker) writeType(w *bytes.Buffer, name string) {
 		w.Write([]byte{0x4F, 0x01}) // final, with one supertype
 		writeUleb128(w, uint64(l.typeIndex(wasm.GCHeader)))
 		w.Write([]byte{0x5F, 0x05, wasm.GCTypeI32, 0x00, wasm.GCTypeI32, 0x01, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x00, wasm.GCTypeEqRef, 0x00})
+	case name == wasm.GCExtern:
+		// A JavaScript value, for syscall/js (see wasm.GCJSBox).
+		if splitMode() {
+			// A subtype of GCPtr (which is then open to it: see
+			// writeSplitTypes), with the value after its fields.
+			w.Write([]byte{0x4F, 0x01}) // final, with one supertype
+			writeUleb128(w, uint64(l.typeIndex(wasm.GCPtr)))
+			w.Write([]byte{0x5F, 0x04, wasm.GCTypeI32, 0x01, wasm.GCRefNull})
+			writeSleb128(w, int64(l.typeIndex(wasm.GCSlots)))
+			w.Write([]byte{0x00, wasm.GCTypeI32, 0x01, ExternRef, 0x00})
+			break
+		}
+		w.Write([]byte{0x5F, 0x01, ExternRef, 0x00})
 	case name == wasm.GCLinear:
 		w.Write([]byte{0x5F, 0x02, wasm.GCTypeI32, 0x00, wasm.GCTypeEqRef, 0x01})
 	case strings.HasPrefix(name, wasm.GCStructPrefix):
@@ -267,6 +286,8 @@ func gcSigName(params, results []byte) string {
 			return 'f'
 		case F64:
 			return 'd'
+		case ExternRef:
+			return 'x'
 		}
 		panic("bad wasm value type")
 	}
@@ -790,7 +811,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 				if r := relocs.At(rj); r.Type() == objabi.R_WASMTYPE && r.Siz() == 0 {
 					wrapper := ldr.SymName(r.Sym())
 					for i := len(wasm.GCFuncPrefix); i < len(sig) && i < len(wrapper); i++ {
-						if wrapper[i] == 'r' && (wasm.GCImportRefs(wi.Module) || i >= len(wasm.GCFuncPrefix)+len(wi.Params)) {
+						if wrapper[i] == 'r' && sig[i] != 'x' && (wasm.GCImportRefs(wi.Module) || i >= len(wasm.GCFuncPrefix)+len(wi.Params)) {
 							sig[i] = 'r'
 						}
 					}
@@ -819,6 +840,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 
 	// The functions.
 	var buildid []byte
+	var jsCalls []gcJSCall
 	fns := make([]*wasmFunc, len(ctxt.Textp), len(ctxt.Textp)+16)
 	for i, fn := range ctxt.Textp {
 		// The name is Go's, which runtime.FuncForPC and
@@ -861,6 +883,14 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			case objabi.R_ADDR:
 				writeSleb128(wfn, ldr.SymValue(rs)+r.Add())
 			case objabi.R_CALL:
+				if k := jsHelper(ldr.SymName(rs)); k >= 0 {
+					// (Made only for a program that calls them,
+					// after the others: the index is written once
+					// it is known.)
+					jsCalls = append(jsCalls, gcJSCall{i, wfn.Len(), k})
+					writeUleb128FixedLength(wfn, 0, 5)
+					break
+				}
 				if ldr.SymName(rs) == wasm.GCHop {
 					writeSleb128(wfn, hopIndex[sigOf(fn)])
 					break
@@ -947,6 +977,15 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		fns = append(fns, l.reflectFuncs(first+len(helpers), len(hostImports), funcIndex)...)
 	} else {
 		fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
+	}
+	if jsCalls != nil {
+		first := len(hostImports) + len(fns)
+		fns = append(fns, l.jsHelpers()...)
+		for _, c := range jsCalls {
+			var b bytes.Buffer
+			writeUleb128FixedLength(&b, uint64(first+c.helper), 5)
+			copy(fns[c.fn].Code[c.off:], b.Bytes())
+		}
 	}
 	start := len(hostImports) + len(fns)
 	fns = append(fns, init)
@@ -1092,13 +1131,17 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		fn   loader.Sym
 	}
 	var exports []export
-	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "unstart"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}} {
+	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "unstart"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}, {name: "callback"}, {name: "callbackdone"}} {
 		for v := 0; v < 2 && e.fn == 0; v++ {
 			e.fn = ldr.Lookup(gcExports[e.name], v)
 		}
 		if e.fn != 0 && ldr.AttrReachable(e.fn) {
 			exports = append(exports, e)
 		}
+	}
+	// The functions of //go:wasmexport, by the names they give.
+	for _, fn := range ldr.WasmExports {
+		exports = append(exports, export{name: ldr.SymName(fn), fn: fn})
 	}
 	section(sectionExport, func(w *bytes.Buffer) {
 		n := 5 + len(exports)

@@ -436,6 +436,9 @@ func GenWasmExportWrapper(gd *base.Invocation, wrapped *ir.Func) {
 	ir.InitLSym(gd, fn, true)
 
 	setupWasmExport(gd, fn, wrapped)
+	if buildcfg.GOWASM.GC {
+		setupWasmExportGC(gd, fn, wrapped)
+	}
 
 	pp := objw.NewProgs(gd, fn, 0)
 	defer pp.Free(gd)
@@ -586,7 +589,22 @@ func setupWasmImport(gd *base.Invocation, f *ir.Func) {
 		Module: f.WasmImport.Module,
 		Name:   f.WasmImport.Name,
 	}
-	if wi.Module == wasm.GojsModule {
+	if wi.Module == wasm.GojsModule && buildcfg.GOWASM.GC {
+		// With GOWASM=gc (whose syscall/js is js_gc.go) the functions
+		// of the "gojs" module take their arguments as WebAssembly
+		// values, one for each of Go's registers: int, uint, uintptr
+		// and the integers of 32 bits or fewer as i32 (lengths and
+		// indexes), int64 and uint64 as i64, floats, pointers as
+		// addresses in linear memory (the data of a string or a
+		// slice), and a *syscall/js.externref as the JavaScript value
+		// it holds (an externref). They return one value at most.
+		info := AbiForBodylessFuncStackMap(gd, f).ABIAnalyzeFuncType(f.Type())
+		wi.Params = gojsGCFields(gd, f, info.InParams())
+		wi.Results = gojsGCFields(gd, f, info.OutParams())
+		if len(wi.Results) > 1 {
+			gd.ErrorfAt(f.Pos(), 0, "go:wasmimport: too many return values")
+		}
+	} else if wi.Module == wasm.GojsModule {
 		// Functions that are imported from the "gojs" module use a special
 		// ABI that just accepts the stack pointer.
 		// Example:
@@ -614,6 +632,91 @@ func setupWasmImport(gd *base.Invocation, f *ir.Func) {
 		wi.Results = resultsToWasmFields(gd, f, "go:wasmimport", abiInfo, abiInfo.OutParams())
 	}
 	f.LSym.Func().WasmImport = &wi
+}
+
+// setupWasmExportGC gives the wrapper of an exported function its
+// WebAssembly type with GOWASM=gc, where cmd/internal/obj/wasm makes its
+// body: its parameters and results are those of the export, which are
+// converted to and from the registers of the function wrapped. Only
+// numbers and booleans are allowed. The Offset of a field, which only
+// Go's stack ABI has a use for, is 1 for a signed integer of 32 bits or
+// fewer, which is sign-extended to its register.
+func setupWasmExportGC(gd *base.Invocation, f, wrapped *ir.Func) {
+	we := f.LSym.Func().WasmExport
+	sig := wasm.GCFuncPrefix
+	letters := func(ps []abi.ABIParamAssignment, wfs []obj.WasmField) string {
+		var b []byte
+		for i, p := range ps {
+			if i >= len(wfs) || p.Type.IsString() || p.Type.IsPtrShaped() || p.Type.IsSIMD() {
+				gd.ErrorfAt(wrapped.Pos(), 0, "go:wasmexport: GOWASM=gc: unsupported type %v", p.Type)
+				return ""
+			}
+			switch wfs[i].Type {
+			case obj.WasmI32, obj.WasmBool:
+				b = append(b, 'i')
+				if p.Type.IsSigned() {
+					wfs[i].Offset = 1
+				} else {
+					wfs[i].Offset = 0
+				}
+			case obj.WasmI64:
+				b = append(b, 'l')
+			case obj.WasmF32:
+				b = append(b, 'f')
+			case obj.WasmF64:
+				b = append(b, 'd')
+			}
+		}
+		return string(b)
+	}
+	info := AbiForBodylessFuncStackMap(gd, wrapped).ABIAnalyzeFuncType(wrapped.Type())
+	sig += letters(info.InParams(), we.Params) + "." + letters(info.OutParams(), we.Results)
+	f.LSym.Func().WasmGC = &obj.WasmGCFunc{Sig: wasm.GCTypeSym(gd.Ctxt, sig)}
+}
+
+// gojsGCFields returns the WebAssembly values of the registers of params,
+// for an import of module gojs with GOWASM=gc. (Not a string: the bytes
+// of a short one are in its words; see doc/gd/sso-string.md.)
+func gojsGCFields(gd *base.Invocation, f *ir.Func, params []abi.ABIParamAssignment) []obj.WasmField {
+	var ts []*types.Type
+	for _, p := range params {
+		if p.Type.IsString() {
+			gd.ErrorfAt(f.Pos(), 0, "go:wasmimport: a string is passed as a pointer and a length")
+		}
+		ts = append(ts, abi.RegisterTypes([]abi.ABIParamAssignment{p})...)
+	}
+	wfs := make([]obj.WasmField, len(ts))
+	for i, t := range ts {
+		switch {
+		case IsJSExternref(t):
+			wfs[i].Type = obj.WasmExtern
+		case t.IsPtrShaped():
+			wfs[i].Type = obj.WasmPtr
+		case t.IsBoolean():
+			wfs[i].Type = obj.WasmBool
+		case t.Kind() == types.TFLOAT32:
+			wfs[i].Type = obj.WasmF32
+		case t.Kind() == types.TFLOAT64:
+			wfs[i].Type = obj.WasmF64
+		case t.Kind() == types.TINT64, t.Kind() == types.TUINT64:
+			wfs[i].Type = obj.WasmI64
+		case t.IsInteger():
+			wfs[i].Type = obj.WasmI32
+		default:
+			gd.ErrorfAt(f.Pos(), 0, "go:wasmimport: unsupported type %v", t)
+		}
+	}
+	return wfs
+}
+
+// IsJSExternref reports whether t is *syscall/js.externref, a pointer
+// that holds a JavaScript value (see gojsGCFields).
+func IsJSExternref(t *types.Type) bool {
+	if !t.IsPtr() {
+		return false
+	}
+	s := t.Elem().Sym()
+	return s != nil && s.Name == "externref" && s.Pkg != nil && s.Pkg.Path == "syscall/js"
 }
 
 // setupWasmExport calculates the params and results in terms of WebAssembly values for the given function,

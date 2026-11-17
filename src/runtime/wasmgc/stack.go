@@ -71,6 +71,13 @@ func morestackgc(n uintptr) {
 		fatal("system stack overflow")
 	}
 	gp := curg
+	if jssync() {
+		// The goroutine of a call from JavaScript that has not
+		// returned goes on on another stack of the engine's only
+		// once the call has returned (a promise): its own stack
+		// cannot be suspended but to block (js_js.go).
+		Gosched()
+	}
 	size := uintptr(stackSegSize)
 	if need := n + 2*stackRedZone; need > size {
 		size = (need + 4095) &^ 4095
