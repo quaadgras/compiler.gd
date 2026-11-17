@@ -15,17 +15,22 @@ import (
 	"syscall"
 )
 
-// init registers a SIGUSR1 handler that writes a heap profile to
-// /tmp/cmdgo-heap-<pid>.pprof. Useful for diagnosing memory growth in
-// long-running cmd/go processes (in-process compile, large builds).
+// init registers, with GOGD_HEAPPROF=1 in the environment, a SIGUSR1
+// handler that writes a heap profile to /tmp/cmdgo-heap-<pid>.pprof.
+// Useful for diagnosing memory growth in long-running cmd/go processes
+// (in-process compile, large builds).
 //
 // gd fork only — stock cmd/go has no need.
 func init() {
+	if os.Getenv("GOGD_HEAPPROF") != "1" {
+		return
+	}
 	// Sample every allocation. Default 512 KB rate gave a profile that
 	// summed to a few hundred kB even when live heap was multi-GB,
 	// because cmd/go's allocations are mostly small objects that miss
-	// the sample net. Cost is acceptable for an opt-in debugging flag
-	// only triggered by SIGUSR1.
+	// the sample net. That records a stack for every allocation of
+	// everything cmd/go runs in-process (the compiler, cmd/cc), which
+	// made them several times slower (cmd/cc 15x), so it is opt-in.
 	runtime.MemProfileRate = 1
 
 	c := make(chan os.Signal, 1)
