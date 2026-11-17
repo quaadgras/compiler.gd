@@ -629,6 +629,10 @@ func wrap(t *ctype, v int64) int64 {
 		return int64(int32(v))
 	case kUInt:
 		return int64(uint32(v))
+	case kLong, kULong:
+		if t.sizeof() == 4 {
+			return wrap(&ctype{kind: t.kind - kLong + kInt}, v)
+		}
 	case kBitInt:
 		return v << (64 - t.n) >> (64 - t.n)
 	case kUBitInt:

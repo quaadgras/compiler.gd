@@ -308,3 +308,12 @@ func (g *gen) libcAdapter(name string, s *symbol) string {
 	}
 	return fmt.Sprintf("%s { return %s }", g.funcSig(ft, params), libcConv(call, ft.ret, false))
 }
+
+// addrOff is a constant offset of pointer arithmetic, as the target's
+// addresses wrap: an Add's offset is a Go int, of 32 bits on wasm32.
+func addrOff(n int64) int64 {
+	if target.ptrSize == 4 {
+		return int64(int32(n))
+	}
+	return n
+}

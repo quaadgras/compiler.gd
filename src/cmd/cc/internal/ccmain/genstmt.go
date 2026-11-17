@@ -641,13 +641,13 @@ func baseElem(t *ctype) *ctype {
 // array type.
 func (g *gen) vlaSize(t *ctype) string {
 	if t.kind != kArray || !t.isVLA() {
-		return fmt.Sprintf("uint64(%d)", t.sizeof())
+		return fmt.Sprintf("%s(%d)", goType(tULong), t.sizeof())
 	}
 	var n string
 	if t.vla != nil {
 		n = g.rv(t.vla)
 	} else {
-		n = fmt.Sprintf("uint64(%d)", t.n)
+		n = fmt.Sprintf("%s(%d)", goType(tULong), t.n)
 	}
 	return fmt.Sprintf("(%s * %s)", n, g.vlaSize(t.elem))
 }
