@@ -168,8 +168,9 @@ func NewArray[T any](n uintptr) Ptr {
 	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
 }
 
-// Malloc allocates n bytes with no pointer words.
-func Malloc(n uintptr) Ptr { return NewArray[byte](n) }
+// Malloc allocates n bytes of untyped memory, in which C may keep
+// pointers.
+func Malloc(n uintptr) Ptr { return NewArray[Raw](n) }
 
 // Free does nothing: the collector frees what is not reachable.
 func Free(p Ptr) {}
@@ -338,16 +339,38 @@ func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 	return a
 }
 
+// splitLoad loads a pointer from a split word: its capability is the one
+// kept for the word, whatever the bytes hold now, as in Fil-C; every access
+// is checked against it.
+func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
+	w := *(*uintptr)(a)
+	if c, ok := auxLoad(p, a, w, false); ok {
+		return Ptr{obj: c.obj, size: c.size, off: int(w - uintptr(c.obj)), ti: c.ti}
+	}
+	return FromInt(w)
+}
+
+// splitStore stores v in a split word: its capability aside, first, so
+// that what it points to stays alive, then its address as bytes.
+func splitStore(p Ptr, a unsafe.Pointer, v Ptr) {
+	auxStore(p, a, v.obj != nil, Addr(v), v)
+	*(*uintptr)(a) = Addr(v)
+}
+
 // LoadPtr loads the pointer at p.
 func LoadPtr(p Ptr) Ptr {
 	a := checkPtrWord(p)
-	if p.info().kindAt(uintptr(p.off)) != wPtr {
+	switch p.info().kindAt(uintptr(p.off)) {
+	case wSplit:
+		return splitLoad(p, a)
+	case wPtr:
+	default:
 		// An integer, or a word of a Go value, read as a pointer: no
 		// capability.
 		return FromInt(*(*uintptr)(a))
 	}
 	w := *(*unsafe.Pointer)(a)
-	if c, ok := auxLoad(p, a, uintptr(w)); ok {
+	if c, ok := auxLoad(p, a, uintptr(w), true); ok {
 		return c
 	}
 	if uintptr(w)&Tag != 0 {
@@ -361,6 +384,9 @@ func LoadPtr(p Ptr) Ptr {
 func StorePtr(p, v Ptr) {
 	a := checkPtrWord(p)
 	switch p.info().kindAt(uintptr(p.off)) {
+	case wSplit:
+		splitStore(p, a, v)
+		return
 	case wScalar:
 		fault("pointer store into a word the collector does not scan", uintptr(a))
 	case wRO:
@@ -418,9 +444,16 @@ func Memmove(dst, src Ptr, n uintptr) {
 	ws := make([]word, nw)
 	for i := range nw {
 		sp := Add(src, int(i*8))
-		if src.info().kindAt(uintptr(sp.off)) == wPtr {
+		switch src.info().kindAt(uintptr(sp.off)) {
+		case wPtr:
 			ws[i] = word{ptr: true, p: LoadPtr(sp)}
-		} else {
+		case wSplit:
+			if c := LoadPtr(sp); c.obj != nil {
+				ws[i] = word{ptr: true, p: c}
+			} else {
+				ws[i] = word{u: Load64(sp)}
+			}
+		default:
 			ws[i] = word{u: Load64(sp)}
 		}
 	}
@@ -433,6 +466,8 @@ func Memmove(dst, src Ptr, n uintptr) {
 			if !w.ptr && w.u != 0 {
 				fault("non-zero scalar copied into a pointer word", Addr(dp))
 			}
+			StorePtr(dp, w.p)
+		case w.ptr && dst.info().kindAt(uintptr(dp.off)) == wSplit:
 			StorePtr(dp, w.p)
 		case w.ptr:
 			Store64(dp, uint64(Addr(w.p)))

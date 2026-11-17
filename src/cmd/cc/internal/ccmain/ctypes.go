@@ -36,6 +36,7 @@ type ctype struct {
 
 	// kStruct
 	tag      string
+	union    bool // every field at offset 0
 	fields   []*field
 	complete bool
 	size     int64
@@ -137,10 +138,15 @@ func (t *ctype) layout() {
 	off, align := int64(0), int64(1)
 	for _, f := range t.fields {
 		a := f.t.alignof()
+		align = max(align, a)
+		if t.union {
+			f.off = 0
+			off = max(off, f.t.sizeof())
+			continue
+		}
 		off = (off + a - 1) / a * a
 		f.off = off
 		off += f.t.sizeof()
-		align = max(align, a)
 	}
 	t.size = (off + align - 1) / align * align
 	t.align = align
@@ -285,6 +291,9 @@ func (t *ctype) String() string {
 	case kArray:
 		return fmt.Sprintf("%s[%d]", t.elem, t.n)
 	case kStruct:
+		if t.union {
+			return "union " + t.tag
+		}
 		return "struct " + t.tag
 	case kFunc:
 		var ps []string

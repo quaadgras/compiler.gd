@@ -307,11 +307,9 @@ func (p *parser) declSpecs() specs {
 			base = t.text
 		case "_Bool":
 			p.errorf("_Bool is not supported")
-		case "union":
-			p.errorf("unions are not supported")
-		case "struct":
+		case "struct", "union":
 			p.next()
-			s.t = p.structSpec()
+			s.t = p.structSpec(t.text == "union")
 			seen = true
 			continue
 		case "enum":
@@ -372,7 +370,7 @@ done:
 	return s
 }
 
-func (p *parser) structSpec() *ctype {
+func (p *parser) structSpec(union bool) *ctype {
 	tag := ""
 	if p.peek().kind == tkIdent {
 		tag = p.ident()
@@ -386,8 +384,11 @@ func (p *parser) structSpec() *ctype {
 			p.anon++
 			tag = fmt.Sprintf("anon%d", p.anon)
 		}
-		t = &ctype{kind: kStruct, tag: tag}
+		t = &ctype{kind: kStruct, tag: tag, union: union}
 		p.tags[tag] = t
+	}
+	if t.union != union {
+		p.errorf("%s used as both a struct and a union", tag)
 	}
 	if !p.accept("{") {
 		return t

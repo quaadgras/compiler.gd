@@ -75,7 +75,26 @@ func goField(name string) string {
 	return name
 }
 
-func (g *gen) structName(t *ctype) string { return "struct_" + t.tag }
+func (g *gen) structName(t *ctype) string {
+	if t.union {
+		return "union_" + t.tag
+	}
+	return "struct_" + t.tag
+}
+
+// unionAlign is the zero-size field that gives a union's bytes its
+// alignment.
+func unionAlign(a int64) string {
+	switch a {
+	case 2:
+		return "_ [0]uint16\n"
+	case 4:
+		return "_ [0]uint32\n"
+	case 8:
+		return "_ [0]uint64\n"
+	}
+	return ""
+}
 
 // generate translates u to the Go source of package pkg.
 func generate(file string, u *unit, pkg string, withMain bool) (src []byte, err error) {
@@ -118,6 +137,16 @@ func generate(file string, u *unit, pkg string, withMain bool) (src []byte, err 
 	b.WriteString("var _ = os.Exit\nvar _ unsafe.Pointer\n\n")
 	for _, t := range u.structs {
 		name := g.structName(t)
+		if t.union {
+			// As cgo does, Go sees a union as its bytes. The tag tells
+			// runtime/c23 that they may hold pointers C stores, whose
+			// capabilities it keeps aside.
+			fmt.Fprintf(&b, "// %s is C's union %s, as Go sees it: its bytes.\ntype %s struct {\n%s\tb [%d]byte `c23:\"union\"`\n}\n\n",
+				name, t.tag, name, unionAlign(t.align), t.size)
+			fmt.Fprintf(&b, "var _ [unsafe.Sizeof(%s{}) - %d]byte\nvar _ [%d - unsafe.Sizeof(%s{})]byte\n", name, t.size, t.size, name)
+			fmt.Fprintf(&b, "var _ [unsafe.Alignof(%s{}) - %d]byte\nvar _ [%d - unsafe.Alignof(%s{})]byte\n\n", name, t.align, t.align, name)
+			continue
+		}
 		fmt.Fprintf(&b, "// %s is C's struct %s, as Go sees it.\ntype %s struct {\n", name, t.tag, name)
 		for _, f := range t.fields {
 			fmt.Fprintf(&b, "\t%s %s\n", goField(f.name), g.mirrorType(f.t))
@@ -551,7 +580,7 @@ func (g *gen) initStore(addr string, t *ctype, in expr) {
 			return
 		}
 		for i, e := range l.elems {
-			if i >= len(t.fields) {
+			if i >= len(t.fields) || t.union && i > 0 {
 				g.errorf(in.line(), "too many initializers")
 			}
 			f := t.fields[i]
@@ -1282,15 +1311,15 @@ func (g *gen) call(c *call, hint *ctype) val {
 // converted to hint: typed if hint is a pointer to a type with a layout.
 func (g *gen) allocType(hint *ctype) string {
 	if hint == nil || !hint.isPtr() {
-		return "byte"
+		return "c23.Raw"
 	}
 	e := hint.elem
 	switch e.kind {
 	case kVoid, kChar, kUChar, kFunc:
-		return "byte"
+		return "c23.Raw"
 	}
 	if e.kind == kStruct && !e.complete {
-		return "byte"
+		return "c23.Raw"
 	}
 	return g.mirrorType(e)
 }

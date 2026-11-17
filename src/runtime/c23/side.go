@@ -69,8 +69,8 @@ func where(p Ptr, a unsafe.Pointer) (kind byte, base, key uintptr) {
 }
 
 // auxLoad returns the capability kept for the word at a, if the word still
-// holds w.
-func auxLoad(p Ptr, a unsafe.Pointer, w uintptr) (Ptr, bool) {
+// holds w (or whatever it holds, if !exact: a split word).
+func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 	kind, base, key := where(p, a)
 	var e auxEntry
 	var ok bool
@@ -107,7 +107,7 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr) (Ptr, bool) {
 		e, ok = t.m[key]
 		t.mu.Unlock()
 	}
-	if !ok || e.word != w {
+	if !ok || exact && e.word != w {
 		return Ptr{}, false
 	}
 	return e.p, true

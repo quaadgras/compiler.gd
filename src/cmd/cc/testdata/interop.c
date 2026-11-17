@@ -120,3 +120,49 @@ int locals(void) {
 void keep_array(struct holder *h, int a[]) { h->random_int = a; }
 
 int at(struct holder *h, int i) { return h->random_int[i]; }
+
+// A tagged union, like Godot's Variant: the same words hold a long, a
+// double or a pointer.
+union value {
+	long i;
+	double d;
+	struct node *n;
+};
+
+struct variant {
+	int type; // 0 long, 1 double, 2 list
+	union value v;
+};
+
+struct variant *make_variant(int n) {
+	struct variant *v = malloc(sizeof *v);
+	v->type = 2;
+	v->v.n = make_list(n);
+	return v;
+}
+
+long variant_sum(struct variant *v) {
+	if (v->type == 2)
+		return sum_list(v->v.n);
+	return v->v.i;
+}
+
+void variant_set_double(struct variant *v, double d) {
+	v->type = 1;
+	v->v.d = d;
+}
+
+// Reads the union as a pointer whatever it holds.
+long variant_misread(struct variant *v) { return v->v.n->v; }
+
+// Objects placed in untyped memory, as placement new does in a pool.
+struct node *in_pool(void) {
+	char *pool = malloc(64);
+	struct node *a = (struct node *)pool;
+	struct node *b = (struct node *)(pool + 16);
+	a->v = 1;
+	a->next = b;
+	b->v = 2;
+	b->next = make_list(3);
+	return a;
+}

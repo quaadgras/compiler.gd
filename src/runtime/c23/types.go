@@ -18,7 +18,16 @@ const (
 	wPtr                    // a pointer: C reads and writes it with LoadPtr and StorePtr
 	wRO                     // a word of a Go value with invariants (bool, string, slice,
 	// interface, map, chan, func): C may read it, never write it
+	wSplit // bytes of a union or of untyped memory: scalars to Go and the
+	// collector, but C may store pointers in them, whose capabilities are
+	// kept aside (side.go)
 )
+
+// Raw is the element of C's untyped memory (malloc'd bytes, pools that
+// placement new carves up): bytes in which C may also keep pointers.
+type Raw struct {
+	b byte `c23:"union"`
+}
 
 // A tinfo describes a type for C's checks: what each word of one value of
 // it is, and what its pointer words point to. Memory a capability covers is
@@ -58,9 +67,13 @@ func infoOf(t reflect.Type) *tinfo {
 
 func tinfoOf[T any]() *tinfo { return infoOf(reflect.TypeFor[T]()) }
 
+// rank orders the kinds a word may be given more than once: the most
+// restrictive wins.
+var rank = [...]int{wScalar: 0, wSplit: 1, wPtr: 2, wRO: 3}
+
 func (ti *tinfo) mark(off uintptr, k wordKind, elem reflect.Type) {
 	w := off / 8
-	if ti.kinds[w] == wRO || ti.kinds[w] == wPtr && k == wScalar {
+	if rank[ti.kinds[w]] > rank[k] {
 		return
 	}
 	ti.kinds[w] = k
@@ -84,6 +97,12 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 	case reflect.Struct:
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
+			if f.Tag.Get("c23") == "union" {
+				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += 8 - b%8 {
+					ti.mark(b, wSplit, nil)
+				}
+				continue
+			}
 			ti.walk(f.Type, off+f.Offset)
 		}
 	}
@@ -120,8 +139,10 @@ func holds(have *tinfo, off uintptr, want *tinfo) bool {
 	var r bool
 	if want.scalarOnly {
 		r = true
+		// Split words are bytes to Go: a Go pointer to scalars may point
+		// into them.
 		for b := off; b < off+want.size; b++ {
-			if have.kindAt(b) != wScalar {
+			if k := have.kindAt(b); k != wScalar && k != wSplit {
 				r = false
 				break
 			}

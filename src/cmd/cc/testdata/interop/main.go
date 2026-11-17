@@ -90,7 +90,22 @@ func main() {
 	try("C one-based indexing", func() { fmt.Print(C_one_based_sum(arr, 3), " ") })
 	try("C writes an integer over a pointer word", func() { C_pun(h) })
 	try("C dereferences an integer", func() { C_forge(int64(uintptr(unsafe.Pointer(&arr[0])))) })
-	try("C hides a pointer in bytes", func() { C_hide(golist) })
+	try("C keeps a pointer in untyped bytes", func() { C_hide(golist) })
+
+	// Unions: Go sees their bytes, as with cgo; C keeps the capabilities
+	// of the pointers it stores in them.
+	v := C_make_variant(4)
+	runtime.GC()
+	fmt.Println("variant's list, after a collection:", C_variant_sum(v), "type", v.type_, "bytes", len(v.v.b))
+	C_variant_set_double(v, 2.5)
+	try("C reads the double as a pointer", func() { C_variant_misread(v) })
+	pool := c_in_pool()
+	runtime.GC()
+	fmt.Println("objects in a pool, after a collection:", c_sum_list(pool))
+	try("Go sees the pool's objects only as bytes", func() {
+		defer debug.SetPanicOnFault(debug.SetPanicOnFault(true))
+		_ = C_in_pool().v
+	})
 	try("C puns a pointer word of a stack local", func() { C_stack_pun() })
 
 	n := C_make_list(1)
