@@ -58,12 +58,10 @@ var (
 )
 
 // where finds the table of the word at a in p's memory and its key.
-// kind: 'c' C's object, 's' this goroutine's stack, 'h' Go's heap (obj is
-// the object) or globals (obj is nil, and the key the address).
+// kind: 's' this goroutine's stack, 'h' Go's heap (obj is the object) or
+// globals (obj is nil, and the key the address). C's objects keep theirs
+// in their slots (c23.go).
 func where(p Ptr, a unsafe.Pointer) (kind byte, obj unsafe.Pointer, key uintptr) {
-	if p.header() != nil {
-		return 'c', nil, uintptr(p.off)
-	}
 	if lo, hi := stackBounds(); uintptr(a) >= lo && uintptr(a) < hi {
 		return 's', nil, uintptr(a)
 	}
@@ -79,12 +77,6 @@ func auxLoad(p Ptr, a unsafe.Pointer, w uintptr, exact bool) (Ptr, bool) {
 	var e auxEntry
 	var ok bool
 	switch kind {
-	case 'c':
-		t := p.header().table(false)
-		if t == nil {
-			return Ptr{}, false
-		}
-		e, ok = t.get(key)
 	case 's':
 		tb := (*gTable)(*gTableSlot())
 		if tb == nil {
@@ -118,10 +110,6 @@ func auxStore(p Ptr, a unsafe.Pointer, keep bool, w uintptr, v Ptr) {
 	kind, obj, key := where(p, a)
 	base := uintptr(obj)
 	switch kind {
-	case 'c':
-		if t := p.header().table(keep); t != nil {
-			t.set(key, keep, auxEntry{word: w, p: v})
-		}
 	case 's':
 		slot := gTableSlot()
 		tb := (*gTable)(*slot)
@@ -174,16 +162,6 @@ func (t *auxTable) set(key uintptr, keep bool, e auxEntry) {
 	e.ok = true
 	t.mu.Lock()
 	switch {
-	case t.dense != nil:
-		if i := key / 8; i < uintptr(len(t.dense)) {
-			t.seq.Add(1)
-			if keep {
-				t.dense[i] = e
-			} else {
-				t.dense[i] = auxEntry{}
-			}
-			t.seq.Add(1)
-		}
 	case keep:
 		t.m[key] = e
 	default:

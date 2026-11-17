@@ -5,6 +5,8 @@
 package c23
 
 import (
+	"internal/abi"
+	"math/bits"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -40,7 +42,28 @@ type tinfo struct {
 	kinds      []wordKind     // per 8-byte word of one value
 	elems      []reflect.Type // per word: the pointee of a wPtr word (nil: unsafe.Pointer)
 	scalarOnly bool
+	// storesFree: no word a scalar store may not write (all are scalar
+	// or split), so scalar stores need no check of the words.
+	storesFree bool
 	mask       uintptr // size-1, if size is a power of two
+	recip      uint64  // ceil(2^64/size): off%size by multiplication (Lemire's)
+	ref        uintptr // what a Ptr's ti is for it (tref)
+
+	elemInfo []atomic.Pointer[tinfo] // elems' tinfos, found when first needed
+	// Recent answers of holds for this type, as memory mostly holds a
+	// few types of value at a few offsets; replaced round-robin.
+	recentHolds [4]atomic.Pointer[holdsAns]
+	nextHolds   atomic.Uint32
+
+	arrays atomic.Pointer[[arrayBuckets]atomic.Pointer[arrayType]] // arrayObj's types, made when first needed
+}
+
+type arrayType struct{ t reflect.Type }
+
+type holdsAns struct {
+	want *tinfo
+	off  uintptr
+	r    bool
 }
 
 var tinfos sync.Map // reflect.Type -> *tinfo
@@ -66,15 +89,19 @@ func infoOf(t reflect.Type) *tinfo {
 	}
 	size := t.Size()
 	n := (size + 7) / 8
-	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1))}
+	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1)), elemInfo: make([]atomic.Pointer[tinfo], max(n, 1))}
 	ti.walk(t, 0)
 	if ti.size&(ti.size-1) == 0 {
 		ti.mask = ti.size - 1
 	}
-	ti.scalarOnly = true
+	ti.recip = ^uint64(0)/uint64(ti.size) + 1
+	ti.scalarOnly, ti.storesFree = true, true
 	for _, k := range ti.kinds {
 		if k != wScalar {
 			ti.scalarOnly = false
+		}
+		if k != wScalar && k != wSplit {
+			ti.storesFree = false
 		}
 	}
 	tinfoMu.Lock()
@@ -84,13 +111,86 @@ func infoOf(t reflect.Type) *tinfo {
 	}
 	tab := append(append([]*tinfo(nil), *tinfoTab.Load()...), ti)
 	ti.id = len(tab) - 1
+	ti.ref = uintptr(ti.id) << 2
+	if ti.storesFree {
+		ti.ref |= 2
+	}
 	tinfoTab.Store(&tab)
 	tinfos.Store(t, ti)
 	registered.Store(ti, struct{}{})
 	return ti
 }
 
-func tinfoOf[T any]() *tinfo { return infoOf(reflect.TypeFor[T]()) }
+// tinfoOf returns T's tinfo, from fastTinfos, a table by the address of
+// Go's type, without hashing a reflect.Type.
+func tinfoOf[T any]() *tinfo {
+	k := unsafe.Pointer(abi.TypeFor[T]())
+	if tab := fastTinfos.Load(); tab != nil {
+		for i := fastHash(k) & tab.mask; ; i = (i + 1) & tab.mask {
+			e := tab.e[i].Load()
+			if e == nil {
+				break
+			}
+			if e.k == k {
+				return e.ti
+			}
+		}
+	}
+	ti := infoOf(reflect.TypeFor[T]())
+	addFast(k, ti)
+	return ti
+}
+
+// fastTinfos is an open-addressed table, replaced when it gets half full.
+var fastTinfos atomic.Pointer[fastTab]
+
+type fastTab struct {
+	e    []atomic.Pointer[fastEntry]
+	mask uintptr
+	n    int
+}
+
+type fastEntry struct {
+	k  unsafe.Pointer
+	ti *tinfo
+}
+
+func fastHash(k unsafe.Pointer) uintptr { return uintptr(k) >> 4 * 0x9E3779B97F4A7C15 >> 7 }
+
+func addFast(k unsafe.Pointer, ti *tinfo) {
+	tinfoMu.Lock()
+	defer tinfoMu.Unlock()
+	tab := fastTinfos.Load()
+	put := func(tab *fastTab, e *fastEntry) bool {
+		for i := fastHash(e.k) & tab.mask; ; i = (i + 1) & tab.mask {
+			switch old := tab.e[i].Load(); {
+			case old == nil:
+				tab.e[i].Store(e)
+				tab.n++
+				return true
+			case old.k == e.k:
+				return false
+			}
+		}
+	}
+	if tab == nil || 2*(tab.n+1) > len(tab.e) {
+		size := 64
+		if tab != nil {
+			size = 2 * len(tab.e)
+		}
+		nt := &fastTab{e: make([]atomic.Pointer[fastEntry], size), mask: uintptr(size - 1)}
+		if tab != nil {
+			for i := range tab.e {
+				if e := tab.e[i].Load(); e != nil {
+					put(nt, e)
+				}
+			}
+		}
+		tab = nt
+	}
+	put(tab, &fastEntry{k, ti})
+	fastTinfos.Store(tab)
+}
 
 // rank orders the kinds a word may be given more than once: the most
 // restrictive wins.
@@ -136,21 +236,34 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 // kindAt returns the kind of the byte at off in memory that is an array of
 // ti's type.
 func (ti *tinfo) kindAt(off uintptr) wordKind {
-	if off >= ti.size {
-		if ti.mask != 0 {
-			off &= ti.mask
-		} else {
-			off %= ti.size
-		}
+	return ti.kinds[ti.mod(off)/8]
+}
+
+// mod returns off % ti.size, without dividing for the offsets memory has.
+func (ti *tinfo) mod(off uintptr) uintptr {
+	switch {
+	case off < ti.size:
+		return off
+	case ti.mask != 0:
+		return off & ti.mask
+	case off < 1<<32:
+		hi, _ := bits.Mul64(ti.recip*uint64(off), uint64(ti.size))
+		return uintptr(hi)
 	}
-	return ti.kinds[off/8]
+	return off % ti.size
 }
 
 // elemAt returns what the pointer word at off points to: nil for
 // unsafe.Pointer.
 func (ti *tinfo) elemAt(off uintptr) *tinfo {
-	if e := ti.elems[off%ti.size/8]; e != nil {
-		return infoOf(e)
+	i := ti.mod(off) / 8
+	if e := ti.elemInfo[i].Load(); e != nil {
+		return e
+	}
+	if e := ti.elems[i]; e != nil {
+		ei := infoOf(e)
+		ti.elemInfo[i].Store(ei)
+		return ei
 	}
 	return nil
 }
@@ -166,8 +279,15 @@ var subCache sync.Map // subKey -> bool
 // whole value of want: what a Go pointer to want may point at. A value
 // with no pointer or read-only words may be any bytes with none either.
 func holds(have *tinfo, off uintptr, want *tinfo) bool {
-	k := subKey{have, want, off % have.size}
+	off = have.mod(off)
+	for i := range have.recentHolds {
+		if l := have.recentHolds[i].Load(); l != nil && l.want == want && l.off == off {
+			return l.r
+		}
+	}
+	k := subKey{have, want, off}
 	if r, ok := subCache.Load(k); ok {
+		have.remember(&holdsAns{want, off, r.(bool)})
 		return r.(bool)
 	}
 	var r bool
@@ -185,7 +305,12 @@ func holds(have *tinfo, off uintptr, want *tinfo) bool {
 		r = sub(have.t, off%have.size, want.t)
 	}
 	subCache.Store(k, r)
+	have.remember(&holdsAns{want, off, r})
 	return r
+}
+
+func (ti *tinfo) remember(a *holdsAns) {
+	ti.recentHolds[ti.nextHolds.Add(1)%uint32(len(ti.recentHolds))].Store(a)
 }
 
 // sub reports whether t has a sub-object of type want at off.
@@ -209,6 +334,50 @@ func sub(t reflect.Type, off uintptr, want reflect.Type) bool {
 		}
 	}
 	return false
+}
+
+const arrayBuckets = 128
+
+// arrayBucket returns the count n is rounded up to for an allocation of
+// n values of size sz, and its bucket in tinfo.arrays: n itself up to 16;
+// beyond, a count of eight steps in each power of two (at most 1/8 more,
+// as Go's size classes round anyway). -1: not cached (over 32kB, where
+// Go rounds to pages only).
+func arrayBucket(n, sz uintptr) (uintptr, int) {
+	if n <= 16 {
+		return n, int(n)
+	}
+	if n*sz > 32<<10 || sz > 32<<10 {
+		return n, -1
+	}
+	k := bits.Len64(uint64(n - 1)) // 2^(k-1) < n <= 2^k
+	step := uintptr(1) << (k - 4)
+	q := (n + step - 1) / step // 9..16
+	i := 17 + (k-5)*8 + int(q-9)
+	if i >= arrayBuckets {
+		return n, -1
+	}
+	return q * step, i
+}
+
+// arrayObj returns the type of C's allocation of n values of ti's type, or
+// a few more.
+func (ti *tinfo) arrayObj(n uintptr) reflect.Type {
+	n, i := arrayBucket(n, ti.t.Size())
+	if i < 0 {
+		return reflectArrayObj(ti.t, int(n))
+	}
+	tab := ti.arrays.Load()
+	if tab == nil {
+		ti.arrays.CompareAndSwap(nil, new([arrayBuckets]atomic.Pointer[arrayType]))
+		tab = ti.arrays.Load()
+	}
+	if a := tab[i].Load(); a != nil {
+		return a.t
+	}
+	t := reflectArrayObj(ti.t, int(n))
+	tab[i].Store(&arrayType{t})
+	return t
 }
 
 // reflectArrayObj returns the type of C's allocation of n values of t:

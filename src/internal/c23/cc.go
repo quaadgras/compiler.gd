@@ -171,8 +171,7 @@ func newOf(ti *tinfo, n uintptr) Ptr {
 	if sz > 0 {
 		count = (n + sz - 1) / sz
 	}
-	st := reflectArrayObj(ti.t, int(count))
-	base := newObj(st)
+	base := newObj(ti.arrayObj(count))
 	h := (*header)(base)
 	*h = header{magic: magic, ti: ti, size: count * sz}
 	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
