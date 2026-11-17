@@ -668,7 +668,7 @@ func Stat(path string, st *Stat_t) error {
 // linearStat returns st, or (with GOWASM=gc, where a Stat_t may be an
 // object, not memory the host can write) a Stat_t in linear memory.
 func linearStat(st *Stat_t) *Stat_t {
-	if uintptr(unsafe.Pointer(st)) < 1<<32 {
+	if inLinear(unsafe.Pointer(st)) {
 		return st
 	}
 	return &make([]Stat_t, 1)[0]
@@ -915,9 +915,9 @@ func makeIOVec(b []byte) *iovec {
 // linearBytes returns b, or a copy of it if it is not in linear memory,
 // which is where the host reads and writes: with GOWASM=gc a slice of
 // bytes may be part of an object, whose address is then not one of
-// linear memory (which is under 4 GB).
+// linear memory (see inLinear).
 func linearBytes(b []byte) []byte {
-	if uintptr(unsafe.Pointer(unsafe.SliceData(b))) < 1<<32 {
+	if inLinear(unsafe.Pointer(unsafe.SliceData(b))) {
 		return b
 	}
 	lb := make([]byte, len(b))
@@ -996,10 +996,21 @@ func RandomGet(b []byte) error {
 // at run time may be an object, so they are copied.
 func linearString(s string) *byte {
 	p := unsafe.StringData(s)
-	if len(s) == 0 || uintptr(unsafe.Pointer(p)) < 1<<32 {
+	if len(s) == 0 || inLinear(unsafe.Pointer(p)) {
 		return p
 	}
 	b := make([]byte, len(s))
 	copy(b, s)
 	return &b[0]
 }
+
+// inLinear reports whether p is an address in linear memory, which the
+// host reads and writes. With GOWASM=gc a pointer to an object of the
+// engine's is, as an integer, gcObjects or more (any other is an address
+// in linear memory, which is under 2 GB there).
+func inLinear(p unsafe.Pointer) bool {
+	return uint64(uintptr(p)) < gcObjects
+}
+
+// gcObjects is 2^31 with pointers of 4 bytes (wasm32), 2^32 with 8.
+const gcObjects = 1 << (31 + unsafe.Sizeof(uintptr(0))/8)
