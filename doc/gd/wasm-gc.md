@@ -1708,10 +1708,15 @@ is a test of it (values that only locals reach, used on both sides of
 calls that collect and free); it passes under node with V8's baseline
 compiler alone, its optimizing compiler alone and both, in Chromium and
 in Firefox. It was not shown to fail on the model before the fix above
-("A block in use was freed"). A stronger form, if an engine ever does
-take these apart: the address of a block in the object that the host
-holds (its array's owner), read through it at each use, at the cost of
-a load more for each access.
+("A block in use was freed"). What it rests on, to be kept true: every
+pointer that has an array was either read from memory or has been
+given to something the engine cannot see into (the host, a global)
+before a call that may free; nothing but a pointer's address field
+gives the address after such a call; and no engine works out that the
+field is never written (a write of it in a function the module exports
+would make that certain; there is none yet). `runtime.KeepAlive` stores
+the pointer in a global. Not done: freed blocks filled with a pattern
+when testing, so that a use after a free is seen rather than survived.
 
 The benchmark of stage 14 (`GOWASM=gc` against `GOWASM=gc,split`, ms,
 node 24; the binary 643,563 and 429,663 bytes):
