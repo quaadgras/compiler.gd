@@ -1,0 +1,56 @@
+# gd fork: with cgo off, a package that imports "C" whose C cmd/cc can
+# build is loaded as if cgo were on, and built with cmd/cc (doc/gd/cc.md).
+
+env CGO_ENABLED=0
+go list -f '{{range .GoFiles}}{{.}} {{end}}'
+stdout '^cgotag.go $'
+go list -f '{{range .Imports}}{{.}} {{end}}'
+stdout '^C fmt $'
+go run .
+stdout '^5$'
+
+# With a #cgo directive, it is not: cgo's files are left out.
+cp p.go.ldflags p.go
+go list -f '{{range .GoFiles}}{{.}} {{end}}'
+stdout '^nocgo.go $'
+go run .
+stderr '^no cgo$'
+
+-- go.mod --
+module m
+
+go 1.27
+-- p.go --
+package main
+
+// #include "add.h"
+import "C"
+
+func main() { show(int(C.add(2, 3))) }
+-- p.go.ldflags --
+package main
+
+// #cgo LDFLAGS: -lm
+// #include "add.h"
+import "C"
+
+func main() { show(int(C.add(2, 3))) }
+-- cgotag.go --
+//go:build cgo
+
+package main
+
+import "fmt"
+
+func show(n int) { fmt.Println(n) }
+-- nocgo.go --
+//go:build !cgo
+
+package main
+
+func main() { println("no cgo") }
+-- add.h --
+int add(int a, int b);
+-- add.c --
+#include "add.h"
+int add(int a, int b) { return a + b; }

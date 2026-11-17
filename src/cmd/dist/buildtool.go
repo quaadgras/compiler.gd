@@ -36,6 +36,8 @@ var bootstrapDirs = []string{
 	"cmd/asm",
 	"cmd/asm/host",
 	"cmd/asm/internal/...",
+	"cmd/cc/host",
+	"cmd/cc/internal/ccmain",
 	"cmd/cgo",
 	"cmd/cgo/host",
 	"cmd/cgo/internal/cgomain",
