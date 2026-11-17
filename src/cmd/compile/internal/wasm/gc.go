@@ -81,6 +81,8 @@ type gcGen struct {
 	frameSize int64
 	fp        int32
 	csp       int32 // the top of the stack on entry: where the caller's frame ends
+	fieldsLocals map[*obj.LSym][2]int32 // see fieldsLocal
+
 	// The instructions that have the size of the frame, which grows
 	// with what the function takes of the engine's stack (see
 	// padFrame).
@@ -2093,6 +2095,9 @@ func (g *gcGen) again(gen func()) {
 func (g *gcGen) zeroValue(v *ssa.Value, t *types.Type) {
 	var parts []gcLeaf
 	gcEach(t, func(l gcLeaf) { parts = append(parts, l) })
+	if g.fields(v, t, parts, v.Args[:1]) {
+		return
+	}
 	for i, l := range parts {
 		gen := func() {
 			root, style := g.root(v.Args[0])
@@ -2156,6 +2161,103 @@ func (g *gcGen) zeroValue(v *ssa.Value, t *types.Type) {
 	}
 }
 
+// fields copies the value of type t, whose scalars are parts, from the
+// address addrs[1] to the address addrs[0], or zeroes the value at
+// addrs[0] if that is the only one, and reports whether it did: it does
+// if the value is several scalars in an object. The object each address
+// is in is found once, and the fields are then copied or zeroed there:
+// the scalars of a value are fields that follow each other in the
+// struct that holds it, whatever that is. (Field by field through the
+// address, the object is found again for each: fifty bytes of code a
+// field.) An address that does not point where its type says is left to
+// the runtime, which goes by the type.
+func (g *gcGen) fields(v *ssa.Value, t *types.Type, parts []gcLeaf, addrs []*ssa.Value) bool {
+	// (parts has the elements of the small arrays in t, which are
+	// objects of their own: not then.)
+	if gcIsArray(t) || len(parts) < 2 || len(parts) != len(gcLeaves(t)) {
+		return false
+	}
+	for _, l := range parts {
+		if l.kind == 'a' {
+			return false
+		}
+		for _, a := range addrs {
+			if _, style := g.rootAt(a, l.off, l.kind); style != gcObject && style != gcElements && style != gcStatic {
+				return false
+			}
+		}
+	}
+	first := gcKindType(parts[0].kind)
+	done := g.block(0)
+	g.again(func() {
+		outer := g.slow // (restored: the access may be within another)
+		g.slow = g.block('r')
+		var pls [2]gcPlace
+		var locs [2]int32
+		ok := true
+		// (The source first: it is the destination that the copy
+		// starts with.)
+		for i := len(addrs) - 1; i >= 0; i-- {
+			pl := g.place(addrs[i], parts[0].off, first)
+			if pl.field < 0 || pl.kind != parts[0].kind {
+				// Not a field of a struct, or not this one.
+				if pl.field == gcElemPlace {
+					g.prog(wasm.ADrop) // the index
+				}
+				g.br(wasm.ABr, g.slow, nil)
+				ok = false
+				break
+			}
+			pls[i] = pl
+			locs[i] = g.fieldsLocal(pl.sym, i)
+			g.local(wasm.ALocalSet, locs[i])
+		}
+		g.slow = outer
+		if ok {
+			for i, l := range parts {
+				g.local(wasm.ALocalGet, locs[0])
+				if len(addrs) == 2 {
+					g.local(wasm.ALocalGet, locs[1])
+					g.rawLoad(gcPlace{sym: pls[1].sym, field: pls[1].field + int64(i), kind: l.kind}, false)
+				} else {
+					g.zero(l.kind)
+				}
+				g.typed(wasm.AStructSet, pls[0].sym, pls[0].field+int64(i))
+			}
+			g.br(wasm.ABr, done, nil)
+		}
+		g.prog(wasm.AEnd)
+		g.prog(wasm.ADrop)
+	})
+	g.typeDesc(t)
+	g.pointerAt(addrs[0], 0)
+	if len(addrs) == 2 {
+		g.pointerAt(addrs[1], 0)
+		g.runtime("runtime.typedmemmove")
+	} else {
+		g.runtime("runtime.typedmemclr")
+	}
+	g.prog(wasm.AEnd)
+	return true
+}
+
+// fieldsLocal returns a local for the object of type sym that fields
+// copies to (0) or from (1).
+func (g *gcGen) fieldsLocal(sym *obj.LSym, i int) int32 {
+	if g.fieldsLocals == nil {
+		g.fieldsLocals = make(map[*obj.LSym][2]int32)
+	}
+	ls, ok := g.fieldsLocals[sym]
+	if !ok {
+		ls = [2]int32{-1, -1}
+	}
+	if ls[i] < 0 {
+		ls[i] = g.newTypedLocal(sym)
+		g.fieldsLocals[sym] = ls
+	}
+	return ls[i]
+}
+
 // pointerAt pushes a pointer to byte off of what the address v points
 // to.
 func (g *gcGen) pointerAt(v *ssa.Value, off int64) {
@@ -2171,6 +2273,9 @@ func (g *gcGen) pointerAt(v *ssa.Value, off int64) {
 func (g *gcGen) moveValue(v *ssa.Value, t *types.Type) {
 	var parts []gcLeaf
 	gcEach(t, func(l gcLeaf) { parts = append(parts, l) })
+	if g.fields(v, t, parts, v.Args[:2]) {
+		return
+	}
 	for i, l := range parts {
 		gen := func() {
 			if l.kind == 'a' {
