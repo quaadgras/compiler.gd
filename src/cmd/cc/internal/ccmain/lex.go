@@ -6,6 +6,8 @@ package ccmain
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -23,6 +25,7 @@ const (
 )
 
 type token struct {
+	file string
 	kind tokKind
 	text string // identifier, punctuator, or the literal as written
 	str  string // tkString: the bytes
@@ -43,58 +46,54 @@ var puncts = []string{
 	"&&", "||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",
 }
 
-// lex splits src into tokens. Preprocessor lines are handled here: object-
-// like #define is expanded, every other directive is ignored.
+// A source is a piece of C to translate: a .c file, or a preamble.
+type source struct {
+	name string // path, for errors and to find "..." headers
+	text string
+}
+
+// The system headers cmd/cc provides (cmd/go's ccHeaders matches): what
+// they declare is built in.
+var systemHeaders = map[string]bool{
+	"assert.h": true, "stddef.h": true, "stdint.h": true, "stdio.h": true,
+	"stdlib.h": true, "string.h": true,
+}
+
+// lex splits src into tokens.
 func lex(file, src string) ([]token, error) {
-	var toks []token
-	macros := map[string][]token{
-		"NULL":         nil, // filled below
-		"EXIT_SUCCESS": {{kind: tkInt, text: "0"}},
-		"EXIT_FAILURE": {{kind: tkInt, text: "1", ival: 1}},
+	return lexUnit([]source{{file, src}})
+}
+
+// lexUnit splits sources into the tokens of one translation unit. The
+// preprocessor is here: object-like #define and #undef; #include of the
+// system headers above (nothing to read) and of "..." headers, each read
+// once in the unit, relative to the including file; #if, #ifdef, #ifndef,
+// #else and #endif. Other directives are ignored.
+func lexUnit(srcs []source) ([]token, error) {
+	null, _ := lexRaw("", "((void*)0)", 0)
+	st := &pp{
+		macros: map[string][]token{
+			"NULL":         null,
+			"EXIT_SUCCESS": {{kind: tkInt, text: "0"}},
+			"EXIT_FAILURE": {{kind: tkInt, text: "1", ival: 1}},
+		},
+		included: map[string]bool{},
 	}
-	null, _ := lexRaw(file, "((void*)0)", 0)
-	macros["NULL"] = null
-	lines := strings.Split(src, "\n")
-	var body strings.Builder
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "#") {
-			d := strings.TrimSpace(t[1:])
-			if strings.HasPrefix(d, "define") {
-				rest := strings.TrimSpace(d[len("define"):])
-				name := rest
-				val := ""
-				if j := strings.IndexAny(rest, " \t("); j >= 0 {
-					if rest[j] == '(' {
-						return nil, fmt.Errorf("%s:%d: function-like macros are not supported", file, i+1)
-					}
-					name, val = rest[:j], rest[j:]
-				}
-				mt, err := lexRaw(file, val, i+1)
-				if err != nil {
-					return nil, err
-				}
-				macros[name] = mt
-			}
-			body.WriteString("\n")
-			continue
+	for _, s := range srcs {
+		if err := st.file(s.name, s.text); err != nil {
+			return nil, err
 		}
-		body.WriteString(l)
-		body.WriteString("\n")
 	}
-	raw, err := lexRaw(file, body.String(), 1)
-	if err != nil {
-		return nil, err
-	}
+	var toks []token
 	var expand func(ts []token, active map[string]bool)
 	expand = func(ts []token, active map[string]bool) {
 		for _, t := range ts {
 			if t.kind == tkIdent && !active[t.text] {
-				if m, ok := macros[t.text]; ok {
+				if m, ok := st.macros[t.text]; ok {
 					active[t.text] = true
 					var mt []token
 					for _, x := range m {
-						x.line = t.line
+						x.line, x.file = t.line, t.file
 						mt = append(mt, x)
 					}
 					expand(mt, active)
@@ -105,13 +104,229 @@ func lex(file, src string) ([]token, error) {
 			toks = append(toks, t)
 		}
 	}
-	expand(raw, map[string]bool{})
-	toks = append(toks, token{kind: tkEOF, line: len(lines)})
+	expand(st.raw, map[string]bool{})
+	last := ""
+	if len(srcs) > 0 {
+		last = srcs[len(srcs)-1].name
+	}
+	toks = append(toks, token{kind: tkEOF, file: last})
 	return toks, nil
 }
 
-func lexRaw(file, s string, line int) ([]token, error) {
-	var toks []token
+// pp is the preprocessor's state over a unit.
+type pp struct {
+	macros   map[string][]token
+	included map[string]bool
+	raw      []token
+}
+
+func (st *pp) file(name, src string) error {
+	lines := strings.Split(src, "\n")
+	var seg strings.Builder
+	segLine := 1
+	flush := func(next int) error {
+		ts, err := lexRaw(name, seg.String(), segLine)
+		if err != nil {
+			return err
+		}
+		st.raw = append(st.raw, ts...)
+		seg.Reset()
+		segLine = next
+		return nil
+	}
+	errf := func(i int, format string, args ...any) error {
+		return fmt.Errorf("%s:%d: %s", name, i+1, fmt.Sprintf(format, args...))
+	}
+	var conds []bool // whether each open #if's branch is taken
+	var taken []bool // whether some branch of each open #if was
+	active := func() bool {
+		for _, c := range conds {
+			if !c {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(t, "#") {
+			if active() {
+				seg.WriteString(lines[i])
+			}
+			seg.WriteString("\n")
+			continue
+		}
+		start := i
+		for strings.HasSuffix(t, "\\") && i+1 < len(lines) {
+			i++
+			t = t[:len(t)-1] + " " + strings.TrimSpace(lines[i])
+		}
+		for range i - start + 1 {
+			seg.WriteString("\n")
+		}
+		d := strings.TrimSpace(t[1:])
+		word, rest, _ := strings.Cut(d, " ")
+		if j := strings.IndexAny(word, "(<\""); j > 0 {
+			word, rest = word[:j], word[j:]+" "+rest
+		}
+		rest = strings.TrimSpace(rest)
+		switch word {
+		case "ifdef", "ifndef":
+			_, def := st.macros[rest]
+			c := def == (word == "ifdef")
+			conds, taken = append(conds, c), append(taken, c)
+			continue
+		case "if":
+			c, err := st.cond(name, rest, start+1)
+			if err != nil {
+				return err
+			}
+			conds, taken = append(conds, c), append(taken, c)
+			continue
+		case "elif":
+			if len(conds) == 0 {
+				return errf(start, "#elif without #if")
+			}
+			c, err := st.cond(name, rest, start+1)
+			if err != nil {
+				return err
+			}
+			k := len(conds) - 1
+			conds[k] = c && !taken[k]
+			taken[k] = taken[k] || c
+			continue
+		case "else":
+			if len(conds) == 0 {
+				return errf(start, "#else without #if")
+			}
+			k := len(conds) - 1
+			conds[k] = !taken[k]
+			taken[k] = true
+			continue
+		case "endif":
+			if len(conds) == 0 {
+				return errf(start, "#endif without #if")
+			}
+			conds, taken = conds[:len(conds)-1], taken[:len(taken)-1]
+			continue
+		}
+		if !active() {
+			continue
+		}
+		switch word {
+		case "define":
+			mname, val := rest, ""
+			if j := strings.IndexAny(rest, " \t("); j >= 0 {
+				if rest[j] == '(' {
+					return errf(start, "function-like macros are not supported")
+				}
+				mname, val = rest[:j], rest[j:]
+			}
+			mt, err := lexRaw(name, val, start+1)
+			if err != nil {
+				return err
+			}
+			st.macros[mname] = mt
+		case "undef":
+			delete(st.macros, rest)
+		case "include":
+			switch {
+			case strings.HasPrefix(rest, "<"):
+				h := strings.TrimSuffix(rest[1:], ">")
+				if !systemHeaders[h] {
+					return errf(start, "cc does not provide <%s>", h)
+				}
+			case strings.HasPrefix(rest, "\""):
+				h := strings.Trim(rest, "\"")
+				path := filepath.Join(filepath.Dir(name), h)
+				if st.included[path] {
+					break
+				}
+				st.included[path] = true
+				b, err := os.ReadFile(path)
+				if err != nil {
+					return errf(start, "%v", err)
+				}
+				if err := flush(i + 2); err != nil {
+					return err
+				}
+				if err := st.file(path, string(b)); err != nil {
+					return err
+				}
+			default:
+				return errf(start, "bad #include")
+			}
+		case "error":
+			return errf(start, "#error %s", rest)
+		}
+	}
+	if len(conds) > 0 {
+		return fmt.Errorf("%s: #if without #endif", name)
+	}
+	return flush(len(lines) + 1)
+}
+
+// cond evaluates the condition of #if or #elif: an integer constant
+// expression of macros and defined(name).
+func (st *pp) cond(file, expr string, line int) (bool, error) {
+	ts, err := lexRaw(file, expr, line)
+	if err != nil {
+		return false, err
+	}
+	var out []token
+	for i := 0; i < len(ts); i++ {
+		t := ts[i]
+		if t.kind == tkIdent && t.text == "defined" {
+			name := ""
+			if i+1 < len(ts) && ts[i+1].text == "(" && i+3 < len(ts) {
+				name, i = ts[i+2].text, i+3
+			} else if i+1 < len(ts) {
+				name, i = ts[i+1].text, i+1
+			}
+			_, def := st.macros[name]
+			v := int64(0)
+			if def {
+				v = 1
+			}
+			out = append(out, token{kind: tkInt, text: fmt.Sprint(v), ival: v, line: line})
+			continue
+		}
+		if t.kind == tkIdent {
+			if m, ok := st.macros[t.text]; ok && len(m) == 1 && m[0].kind == tkInt {
+				out = append(out, m[0])
+			} else {
+				out = append(out, token{kind: tkInt, text: "0", line: line})
+			}
+			continue
+		}
+		out = append(out, t)
+	}
+	out = append(out, token{kind: tkEOF, line: line})
+	p := &parser{file: file, toks: out, tags: map[string]*ctype{}, enums: map[string]int64{}, u: &unit{protos: map[string]*ctype{}}}
+	p.typedefs = []map[string]*ctype{{}}
+	var v int64
+	err = func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				pe, ok := r.(parseError)
+				if !ok {
+					panic(r)
+				}
+				err = fmt.Errorf("%s", pe.msg)
+			}
+		}()
+		v = p.constExpr(p.conditional())
+		return nil
+	}()
+	return v != 0, err
+}
+
+func lexRaw(file, s string, line int) (toks []token, err error) {
+	defer func() {
+		for i := range toks {
+			toks[i].file = file
+		}
+	}()
 	errf := func(format string, args ...any) error {
 		return fmt.Errorf("%s:%d: %s", file, line, fmt.Sprintf(format, args...))
 	}

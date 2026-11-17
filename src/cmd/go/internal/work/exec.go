@@ -414,6 +414,7 @@ func (b *Builder) buildActionID(a *Action) cache.ActionID {
 	inputFiles := str.StringList(
 		p.GoFiles,
 		p.CgoFiles,
+		p.Internal.CCFiles,
 		p.CFiles,
 		p.CXXFiles,
 		p.FFiles,
@@ -788,6 +789,16 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 	// If we're doing coverage, preprocess the .go files and put them in the work directory
 	if p.Internal.Cover.Mode != "" {
 		gofiles = coverPr.goSources
+	}
+
+	if len(p.Internal.CCFiles) > 0 {
+		// cmd/cc builds the package's C, with cgo off (gd fork).
+		outGo, err := b.buildC(a)
+		if err != nil {
+			return err
+		}
+		gofiles = append(gofiles, outGo...)
+		cfiles = nil
 	}
 
 	if p.UsesCgo() || p.UsesSwig() {

@@ -82,10 +82,33 @@ func TestBasic(t *testing.T) {
 	}
 }
 
-// TestInterop checks what Go and C may do with each other's pointers.
+// TestInterop checks what Go and C may do with each other's pointers: an
+// ordinary cgo package (testdata/interop), which go build compiles with
+// cmd/cc because cgo is off.
 func TestInterop(t *testing.T) {
 	testenv.MustHaveGoRun(t)
-	out := goRun(t, module(t, "testdata/interop.c", false, "testdata/interop/main.go"))
+	dir := t.TempDir()
+	files := map[string]string{"go.mod": "module cctest\n\ngo 1.27\n"}
+	for _, f := range []string{"main.go", "interop.c", "interop.h"} {
+		b, err := os.ReadFile(filepath.Join("testdata/interop", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[f] = string(b)
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := testenv.Command(t, testenv.GoToolPath(t), "run", ".")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	b, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run: %v\n%s", err, b)
+	}
+	out := string(b)
 	for _, want := range []string{
 		"C's list in Go: 1 2 3 4 5\n",
 		"Go's list summed by C: 60\n",
@@ -107,7 +130,7 @@ func TestInterop(t *testing.T) {
 		"C dereferences an integer                    trapped: c23: access through a pointer with no capability",
 		"C keeps a pointer in untyped bytes           ok",
 		"variant's list, after a collection: 10 type 2 bytes 8\n",
-		"C reads the double as a pointer              trapped: c23: access of 4 bytes out of bounds of {main.struct_node, size 16",
+		"C reads the double as a pointer              trapped: c23: access of 4 bytes out of bounds of {C.struct_node, size 16",
 		"objects in a pool, after a collection: 9\n",
 		"Go sees the pool's objects only as bytes     trapped: runtime error: invalid memory address",
 		"C puns a pointer word of a stack local       trapped: c23: scalar store over a pointer word",
@@ -141,5 +164,52 @@ func TestInternalC23(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "use of internal package internal/c23 not allowed") {
 		t.Fatalf("user code imported internal/c23: err %v\n%s", err, out)
+	}
+}
+
+// TestBuildTag checks which import "C" packages go build compiles with
+// cmd/cc when cgo is off: those it can, as if cgo were on (cgo files in,
+// !cgo files out); the others as before, without their cgo files.
+func TestBuildTag(t *testing.T) {
+	testenv.MustHaveGoRun(t)
+	for _, tc := range []struct {
+		name, preamble, want string
+	}{
+		{"cc", `#include <stdio.h>
+#include "add.h"`, "cgo: 5\n"},
+		{"ldflags", `#cgo LDFLAGS: -lm
+#include "add.h"`, "no cgo\n"},
+		{"system header", `#include <math.h>
+#include "add.h"`, "no cgo\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			var pre strings.Builder
+			for _, l := range strings.Split(tc.preamble, "\n") {
+				pre.WriteString("// " + l + "\n")
+			}
+			files := map[string]string{
+				"go.mod":   "module m\n\ngo 1.27\n",
+				"add.h":    "int add(int a, int b);\n",
+				"add.c":    "#include \"add.h\"\nint add(int a, int b) { return a + b; }\n",
+				"cgo.go":   "package main\n\n" + pre.String() + "import \"C\"\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"cgo:\", C.add(2, 3)) }\n",
+				"nocgo.go": "//go:build !cgo\n\npackage main\n\nfunc main() { println(\"no cgo\") }\n",
+			}
+			for name, data := range files {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o666); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := testenv.Command(t, testenv.GoToolPath(t), "run", ".")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("go run: %v\n%s", err, out)
+			}
+			if string(out) != tc.want {
+				t.Errorf("got %q, want %q", out, tc.want)
+			}
+		})
 	}
 }

@@ -26,7 +26,7 @@ func Translate(file string, src []byte, pkg string, withMain bool) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	return generate(file, u, pkg, withMain)
+	return generate(file, u, options{pkg: pkg, main: withMain})
 }
 
 // Run runs cc with the command-line arguments args (without the command

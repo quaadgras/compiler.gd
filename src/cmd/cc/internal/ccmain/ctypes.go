@@ -46,7 +46,6 @@ type ctype struct {
 	ret        *ctype
 	params     []*ctype
 	paramNames []string
-	paramArray []bool // declared as an array (int a[]): a slice in Go
 	variadic   bool
 }
 

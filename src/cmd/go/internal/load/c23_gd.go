@@ -6,7 +6,16 @@ package load
 
 import (
 	"bytes"
+	"errors"
+	"go/ast"
+	"go/build"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"cmd/go/internal/cfg"
 )
 
 // ccGenerated is the header that cmd/cc writes at the top of the Go it
@@ -35,6 +44,113 @@ func importsC23AsGenerated(importer *Package) bool {
 		f.Close()
 		if !bytes.Equal(head[:n], []byte(ccGenerated)) {
 			return false
+		}
+	}
+	return true
+}
+
+// ccContext reports whether bp, loaded with cgo off, is a package that
+// cmd/cc can build instead of cgo (gd fork, doc/gd/cc.md), and if so
+// returns the context to load it again with: cgo on, so that its import
+// "C" files and its files with a cgo build constraint are in, and those
+// with !cgo out, as with cgo. It can if, loaded so, every preamble and C
+// file uses no #cgo directive and includes only headers cmd/cc provides
+// or the package's own, and it has no C++, Objective-C, Fortran or
+// assembly for a C compiler.
+func ccContext(bp *build.Package, err error) (build.Context, bool) {
+	ctx := cfg.BuildContext
+	var noGo *build.NoGoError
+	if err != nil && !errors.As(err, &noGo) || ctx.CgoEnabled || bp == nil || len(bp.IgnoredGoFiles) == 0 {
+		// A package whose only Go files import "C" has none with cgo off.
+		return ctx, false
+	}
+	ctx.CgoEnabled = true
+	cgoFile := false
+	for _, f := range bp.IgnoredGoFiles {
+		if ok, _ := ctx.MatchFile(bp.Dir, f); !ok {
+			continue
+		}
+		pre, imports := preamble(filepath.Join(bp.Dir, f))
+		if !imports {
+			continue
+		}
+		if !ccSource(pre) {
+			return ctx, false
+		}
+		cgoFile = true
+	}
+	if !cgoFile {
+		return ctx, false
+	}
+	for _, f := range append(bp.CXXFiles, append(bp.MFiles, append(bp.FFiles, bp.SFiles...)...)...) {
+		if ok, _ := ctx.MatchFile(bp.Dir, f); ok {
+			return ctx, false
+		}
+	}
+	for _, f := range bp.CFiles {
+		b, err := os.ReadFile(filepath.Join(bp.Dir, f))
+		if err != nil || !ccSource(string(b)) {
+			return ctx, false
+		}
+	}
+	return ctx, true
+}
+
+// preamble returns the cgo preambles of the Go file, and whether it
+// imports "C".
+func preamble(file string) (string, bool) {
+	f, err := parser.ParseFile(token.NewFileSet(), file, nil, parser.ImportsOnly|parser.ParseComments)
+	if err != nil {
+		return "", false
+	}
+	var b strings.Builder
+	imports := false
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.IMPORT {
+			continue
+		}
+		for _, sp := range gd.Specs {
+			is := sp.(*ast.ImportSpec)
+			if is.Path.Value != `"C"` {
+				continue
+			}
+			imports = true
+			doc := is.Doc
+			if doc == nil && len(gd.Specs) == 1 {
+				doc = gd.Doc
+			}
+			if doc != nil {
+				b.WriteString(doc.Text())
+			}
+		}
+	}
+	return b.String(), imports
+}
+
+// ccHeaders are the system headers cmd/cc provides.
+var ccHeaders = map[string]bool{
+	"assert.h": true, "stddef.h": true, "stdint.h": true, "stdio.h": true,
+	"stdlib.h": true, "string.h": true,
+}
+
+// ccSource reports whether C source uses no #cgo directive and includes
+// only headers that cmd/cc provides or the package's own ("...").
+func ccSource(src string) bool {
+	for _, l := range strings.Split(src, "\n") {
+		l = strings.TrimSpace(l)
+		if !strings.HasPrefix(l, "#") {
+			continue
+		}
+		d := strings.TrimSpace(l[1:])
+		switch {
+		case strings.HasPrefix(d, "cgo"):
+			return false
+		case strings.HasPrefix(d, "include"):
+			h := strings.TrimSpace(d[len("include"):])
+			if strings.HasPrefix(h, "<") && !ccHeaders[strings.TrimSuffix(h[1:], ">")] {
+				return false
+			}
 		}
 	}
 	return true

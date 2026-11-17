@@ -28,3 +28,14 @@ func Run(args []string, stdout, stderr io.Writer) (status int, err error) {
 func Translate(file string, src []byte, pkg string, withMain bool) ([]byte, error) {
 	return ccmain.Translate(file, src, pkg, withMain)
 }
+
+// A File is a Go file that Package writes.
+type File = ccmain.File
+
+// Package builds the C of a Go package that imports "C" with cmd/cc
+// instead of cgo, as cmd/go does when cgo is off: goFiles are the files
+// that import "C" and cFiles the C files, in dir. It returns the Go to
+// compile with the package's other files.
+func Package(dir, pkg string, goFiles, cFiles []string) ([]File, error) {
+	return ccmain.Package(dir, pkg, goFiles, cFiles)
+}

@@ -162,6 +162,8 @@ type funcDecl struct {
 }
 
 type unit struct {
+	enums    map[string]int64
+	tags     map[string]*ctype
 	globals  []*varDecl
 	funcs    []*funcDecl
 	protos   map[string]*ctype
@@ -189,7 +191,11 @@ type parser struct {
 type parseError struct{ msg string }
 
 func (p *parser) errorf(format string, args ...any) {
-	panic(parseError{fmt.Sprintf("%s:%d: %s", p.file, p.peek().line, fmt.Sprintf(format, args...))})
+	file := p.file
+	if f := p.peek().file; f != "" {
+		file = f
+	}
+	panic(parseError{fmt.Sprintf("%s:%d: %s", file, p.peek().line, fmt.Sprintf(format, args...))})
 }
 
 func parse(file string, toks []token) (u *unit, err error) {
@@ -208,6 +214,8 @@ func parse(file string, toks []token) (u *unit, err error) {
 	for p.peek().kind != tkEOF {
 		p.topLevel()
 	}
+	p.u.enums = p.enums
+	p.u.tags = p.tags
 	return p.u, nil
 }
 
@@ -480,12 +488,10 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			}
 			s := p.declSpecs()
 			name, pt := p.declarator(s.t)
-			isArray := pt.kind == kArray
-			if isArray {
+			if pt.kind == kArray {
 				pt = ptrTo(pt.elem)
 			}
 			ft.params = append(ft.params, pt)
-			ft.paramArray = append(ft.paramArray, isArray)
 			ft.paramNames = append(ft.paramNames, name)
 			if !p.accept(",") {
 				p.expect(")")

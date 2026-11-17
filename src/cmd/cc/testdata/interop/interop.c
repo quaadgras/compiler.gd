@@ -1,15 +1,9 @@
 // C that shares its memory with Go (demo/interop/main.go).
 #include <stdlib.h>
 
-struct node {
-	int v;
-	struct node *next;
-};
+#include "interop.h"
 
-struct holder {
-	int *random_int;
-	long tag;
-};
+
 
 // C allocates; Go walks the list with plain field loads.
 struct node *make_list(int n) {
@@ -95,7 +89,7 @@ void confuse(struct node *n, int *x) { n->next = (struct node *)x; }
 int unconfuse(struct node *n) { return *(int *)n->next; }
 
 // C writes words of whatever Go passed it.
-void poke(long *p, int i, long v) { p[i] = v; }
+void poke(void *p, int i, long v) { ((long *)p)[i] = v; }
 
 // Go passes a pointer to its stack; C only reads through it.
 long sum_pair(struct node *n) { return n->v + n->next->v; }
@@ -123,16 +117,7 @@ int at(struct holder *h, int i) { return h->random_int[i]; }
 
 // A tagged union, like Godot's Variant: the same words hold a long, a
 // double or a pointer.
-union value {
-	long i;
-	double d;
-	struct node *n;
-};
 
-struct variant {
-	int type; // 0 long, 1 double, 2 list
-	union value v;
-};
 
 struct variant *make_variant(int n) {
 	struct variant *v = malloc(sizeof *v);
@@ -166,3 +151,10 @@ struct node *in_pool(void) {
 	b->next = make_list(3);
 	return a;
 }
+
+// The pool's objects live while C keeps a pointer to them.
+struct node *pool_root;
+
+void make_pool(void) { pool_root = in_pool(); }
+
+long pool_sum(void) { return sum_list(pool_root); }

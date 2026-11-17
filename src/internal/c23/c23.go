@@ -37,6 +37,7 @@ package c23
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -120,7 +121,7 @@ func capString(ok bool, ti *tinfo, size uintptr, off int) string {
 	if !ok {
 		return fmt.Sprintf("{addr %#x, no capability}", off)
 	}
-	return fmt.Sprintf("{%s, size %d, off %d}", ti.t, size, off)
+	return fmt.Sprintf("{%s, size %d, off %d}", typeName(ti), size, off)
 }
 
 // The header of C's allocations.
@@ -217,6 +218,9 @@ func derive(w unsafe.Pointer, want *tinfo) Ptr {
 func FromGo[T any](p *T) Ptr {
 	if p == nil {
 		return Ptr{}
+	}
+	if uintptr(unsafe.Pointer(p))&Tag != 0 {
+		return FromInt(uintptr(unsafe.Pointer(p)) &^ Tag)
 	}
 	if c, ok := cobject(unsafe.Pointer(p)); ok {
 		return c
@@ -333,7 +337,7 @@ func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 		case wPtr:
 			fault("scalar store over a pointer word", uintptr(a))
 		case wRO:
-			fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", p.info().t), uintptr(a))
+			fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", typeName(p.info())), uintptr(a))
 		}
 	}
 	return a
@@ -390,7 +394,7 @@ func StorePtr(p, v Ptr) {
 	case wScalar:
 		fault("pointer store into a word the collector does not scan", uintptr(a))
 	case wRO:
-		fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", p.info().t), uintptr(a))
+		fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", typeName(p.info())), uintptr(a))
 	}
 	want := p.info().elemAt(uintptr(p.off))
 	w, tagged := encode(v, want)
@@ -498,4 +502,13 @@ func Memset(p Ptr, c int32, n uintptr) Ptr {
 		i++
 	}
 	return p
+}
+
+// typeName is a type's name for messages: C's types by cgo's names.
+func typeName(ti *tinfo) string {
+	name := ti.t.String()
+	if i := strings.Index(name, "._C23"); i >= 0 {
+		return "C." + name[i+len("._C23"):]
+	}
+	return name
 }
