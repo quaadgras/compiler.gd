@@ -9,6 +9,479 @@ import "sort"
 // sysHeaders are the standard headers cmd/cc provides. The functions
 // they declare are implemented in Go, in internal/c23.
 var sysHeaders = map[string]string{
+	"ctype.h": `#ifndef __CC_CTYPE_H
+#define __CC_CTYPE_H
+int isalnum(int c);
+int isalpha(int c);
+int isblank(int c);
+int iscntrl(int c);
+int isdigit(int c);
+int isgraph(int c);
+int islower(int c);
+int isprint(int c);
+int ispunct(int c);
+int isspace(int c);
+int isupper(int c);
+int isxdigit(int c);
+int tolower(int c);
+int toupper(int c);
+#endif
+`,
+	"errno.h": `#ifndef __CC_ERRNO_H
+#define __CC_ERRNO_H
+int *__cc_errno(void);
+#define errno (*__cc_errno())
+#define EPERM 1
+#define ENOENT 2
+#define ESRCH 3
+#define EINTR 4
+#define EIO 5
+#define E2BIG 7
+#define EBADF 9
+#define ECHILD 10
+#define EAGAIN 11
+#define ENOMEM 12
+#define EACCES 13
+#define EBUSY 16
+#define EEXIST 17
+#define EXDEV 18
+#define ENOTDIR 20
+#define EISDIR 21
+#define EINVAL 22
+#define EMFILE 24
+#define ENOSPC 28
+#define ESPIPE 29
+#define EROFS 30
+#define EPIPE 32
+#define EDOM 33
+#define ERANGE 34
+#define ENAMETOOLONG 36
+#define ENOTEMPTY 39
+#define EILSEQ 84
+#endif
+`,
+	"inttypes.h": `#ifndef __CC_INTTYPES_H
+#define __CC_INTTYPES_H
+#include <stdint.h>
+#define PRId8 "d"
+#define PRId16 "d"
+#define PRId32 "d"
+#define PRId64 "ld"
+#define PRIdLEAST8 "d"
+#define PRIdLEAST16 "d"
+#define PRIdLEAST32 "d"
+#define PRIdLEAST64 "ld"
+#define PRIdFAST8 "d"
+#define PRIdFAST16 "ld"
+#define PRIdFAST32 "ld"
+#define PRIdFAST64 "ld"
+#define PRIdMAX "ld"
+#define PRIdPTR "ld"
+#define PRIi8 "i"
+#define PRIi16 "i"
+#define PRIi32 "i"
+#define PRIi64 "li"
+#define PRIiLEAST8 "i"
+#define PRIiLEAST16 "i"
+#define PRIiLEAST32 "i"
+#define PRIiLEAST64 "li"
+#define PRIiFAST8 "i"
+#define PRIiFAST16 "li"
+#define PRIiFAST32 "li"
+#define PRIiFAST64 "li"
+#define PRIiMAX "li"
+#define PRIiPTR "li"
+#define PRIo8 "o"
+#define PRIo16 "o"
+#define PRIo32 "o"
+#define PRIo64 "lo"
+#define PRIoLEAST8 "o"
+#define PRIoLEAST16 "o"
+#define PRIoLEAST32 "o"
+#define PRIoLEAST64 "lo"
+#define PRIoFAST8 "o"
+#define PRIoFAST16 "lo"
+#define PRIoFAST32 "lo"
+#define PRIoFAST64 "lo"
+#define PRIoMAX "lo"
+#define PRIoPTR "lo"
+#define PRIu8 "u"
+#define PRIu16 "u"
+#define PRIu32 "u"
+#define PRIu64 "lu"
+#define PRIuLEAST8 "u"
+#define PRIuLEAST16 "u"
+#define PRIuLEAST32 "u"
+#define PRIuLEAST64 "lu"
+#define PRIuFAST8 "u"
+#define PRIuFAST16 "lu"
+#define PRIuFAST32 "lu"
+#define PRIuFAST64 "lu"
+#define PRIuMAX "lu"
+#define PRIuPTR "lu"
+#define PRIx8 "x"
+#define PRIx16 "x"
+#define PRIx32 "x"
+#define PRIx64 "lx"
+#define PRIxLEAST8 "x"
+#define PRIxLEAST16 "x"
+#define PRIxLEAST32 "x"
+#define PRIxLEAST64 "lx"
+#define PRIxFAST8 "x"
+#define PRIxFAST16 "lx"
+#define PRIxFAST32 "lx"
+#define PRIxFAST64 "lx"
+#define PRIxMAX "lx"
+#define PRIxPTR "lx"
+#define PRIX8 "X"
+#define PRIX16 "X"
+#define PRIX32 "X"
+#define PRIX64 "lX"
+#define PRIXLEAST8 "X"
+#define PRIXLEAST16 "X"
+#define PRIXLEAST32 "X"
+#define PRIXLEAST64 "lX"
+#define PRIXFAST8 "X"
+#define PRIXFAST16 "lX"
+#define PRIXFAST32 "lX"
+#define PRIXFAST64 "lX"
+#define PRIXMAX "lX"
+#define PRIXPTR "lX"
+#define PRIb8 "b"
+#define PRIb16 "b"
+#define PRIb32 "b"
+#define PRIb64 "lb"
+#define PRIbMAX "lb"
+#define PRIbPTR "lb"
+#define PRIB8 "B"
+#define PRIB16 "B"
+#define PRIB32 "B"
+#define PRIB64 "lB"
+#define PRIBMAX "lB"
+#define PRIBPTR "lB"
+#define SCNd8 "hhd"
+#define SCNd16 "hd"
+#define SCNd32 "d"
+#define SCNd64 "ld"
+#define SCNdLEAST8 "hhd"
+#define SCNdLEAST16 "hd"
+#define SCNdLEAST32 "d"
+#define SCNdLEAST64 "ld"
+#define SCNdFAST8 "hhd"
+#define SCNdFAST16 "ld"
+#define SCNdFAST32 "ld"
+#define SCNdFAST64 "ld"
+#define SCNdMAX "ld"
+#define SCNdPTR "ld"
+#define SCNi8 "hhi"
+#define SCNi16 "hi"
+#define SCNi32 "i"
+#define SCNi64 "li"
+#define SCNiMAX "li"
+#define SCNiPTR "li"
+#define SCNo8 "hho"
+#define SCNo16 "ho"
+#define SCNo32 "o"
+#define SCNo64 "lo"
+#define SCNoMAX "lo"
+#define SCNoPTR "lo"
+#define SCNu8 "hhu"
+#define SCNu16 "hu"
+#define SCNu32 "u"
+#define SCNu64 "lu"
+#define SCNuLEAST8 "hhu"
+#define SCNuLEAST16 "hu"
+#define SCNuLEAST32 "u"
+#define SCNuLEAST64 "lu"
+#define SCNuFAST8 "hhu"
+#define SCNuFAST16 "lu"
+#define SCNuFAST32 "lu"
+#define SCNuFAST64 "lu"
+#define SCNuMAX "lu"
+#define SCNuPTR "lu"
+#define SCNx8 "hhx"
+#define SCNx16 "hx"
+#define SCNx32 "x"
+#define SCNx64 "lx"
+#define SCNxMAX "lx"
+#define SCNxPTR "lx"
+intmax_t imaxabs(intmax_t j);
+intmax_t strtoimax(const char *restrict nptr, char **restrict endptr, int base);
+uintmax_t strtoumax(const char *restrict nptr, char **restrict endptr, int base);
+#endif
+`,
+	"math.h": `#ifndef __CC_MATH_H
+#define __CC_MATH_H
+typedef float float_t;
+typedef double double_t;
+#define HUGE_VAL 1e10000
+#define HUGE_VALF 1e10000f
+#define HUGE_VALL 1e10000L
+#define INFINITY 1e10000f
+#define NAN (0.0f/0.0f)
+#define FP_NAN 0
+#define FP_INFINITE 1
+#define FP_ZERO 2
+#define FP_SUBNORMAL 3
+#define FP_NORMAL 4
+#define FP_ILOGB0 (-2147483647-1)
+#define FP_ILOGBNAN (-2147483647-1)
+#define MATH_ERRNO 1
+#define MATH_ERREXCEPT 2
+#define math_errhandling MATH_ERRNO
+int __cc_fpclassify(double x);
+int __cc_fpclassifyf(float x);
+int __cc_signbit(double x);
+#define fpclassify(x) _Generic((x), float: __cc_fpclassifyf, default: __cc_fpclassify)(x)
+#define isnan(x) (fpclassify(x) == FP_NAN)
+#define isinf(x) (fpclassify(x) == FP_INFINITE)
+#define isfinite(x) (fpclassify(x) >= FP_ZERO)
+#define isnormal(x) (fpclassify(x) == FP_NORMAL)
+#define signbit(x) __cc_signbit(x)
+#define isgreater(x, y) ((x) > (y))
+#define isgreaterequal(x, y) ((x) >= (y))
+#define isless(x, y) ((x) < (y))
+#define islessequal(x, y) ((x) <= (y))
+#define islessgreater(x, y) ((x) < (y) || (x) > (y))
+#define isunordered(x, y) (isnan(x) || isnan(y))
+#define M_E 2.7182818284590452354
+#define M_LOG2E 1.4426950408889634074
+#define M_LOG10E 0.43429448190325182765
+#define M_LN2 0.69314718055994530942
+#define M_LN10 2.30258509299404568402
+#define M_PI 3.14159265358979323846
+#define M_PI_2 1.57079632679489661923
+#define M_PI_4 0.78539816339744830962
+#define M_1_PI 0.31830988618379067154
+#define M_2_PI 0.63661977236758134308
+#define M_2_SQRTPI 1.12837916709551257390
+#define M_SQRT2 1.41421356237309504880
+#define M_SQRT1_2 0.70710678118654752440
+double sin(double x);
+double cos(double x);
+double tan(double x);
+double asin(double x);
+double acos(double x);
+double atan(double x);
+double sinh(double x);
+double cosh(double x);
+double tanh(double x);
+double asinh(double x);
+double acosh(double x);
+double atanh(double x);
+double exp(double x);
+double exp2(double x);
+double expm1(double x);
+double log(double x);
+double log2(double x);
+double log10(double x);
+double log1p(double x);
+double logb(double x);
+double sqrt(double x);
+double cbrt(double x);
+double fabs(double x);
+double floor(double x);
+double ceil(double x);
+double round(double x);
+double trunc(double x);
+double rint(double x);
+double nearbyint(double x);
+double erf(double x);
+double erfc(double x);
+double tgamma(double x);
+double lgamma(double x);
+double atan2(double x, double y);
+double pow(double x, double y);
+double hypot(double x, double y);
+double fmod(double x, double y);
+double remainder(double x, double y);
+double fmin(double x, double y);
+double fmax(double x, double y);
+double fdim(double x, double y);
+double copysign(double x, double y);
+double nextafter(double x, double y);
+double fma(double x, double y, double z);
+int ilogb(double x);
+long lround(double x);
+long lrint(double x);
+long long llround(double x);
+long long llrint(double x);
+double ldexp(double x, int exp);
+double scalbn(double x, int n);
+double scalbln(double x, long n);
+double frexp(double value, int *exp);
+double modf(double value, double *iptr);
+double nan(const char *tagp);
+float sinf(float x);
+float cosf(float x);
+float tanf(float x);
+float asinf(float x);
+float acosf(float x);
+float atanf(float x);
+float sinhf(float x);
+float coshf(float x);
+float tanhf(float x);
+float asinhf(float x);
+float acoshf(float x);
+float atanhf(float x);
+float expf(float x);
+float exp2f(float x);
+float expm1f(float x);
+float logf(float x);
+float log2f(float x);
+float log10f(float x);
+float log1pf(float x);
+float logbf(float x);
+float sqrtf(float x);
+float cbrtf(float x);
+float fabsf(float x);
+float floorf(float x);
+float ceilf(float x);
+float roundf(float x);
+float truncf(float x);
+float rintf(float x);
+float nearbyintf(float x);
+float erff(float x);
+float erfcf(float x);
+float tgammaf(float x);
+float lgammaf(float x);
+float atan2f(float x, float y);
+float powf(float x, float y);
+float hypotf(float x, float y);
+float fmodf(float x, float y);
+float remainderf(float x, float y);
+float fminf(float x, float y);
+float fmaxf(float x, float y);
+float fdimf(float x, float y);
+float copysignf(float x, float y);
+float nextafterf(float x, float y);
+float fmaf(float x, float y, float z);
+int ilogbf(float x);
+long lroundf(float x);
+long lrintf(float x);
+long long llroundf(float x);
+long long llrintf(float x);
+float ldexpf(float x, int exp);
+float scalbnf(float x, int n);
+float scalblnf(float x, long n);
+float frexpf(float value, int *exp);
+float modff(float value, float *iptr);
+float nanf(const char *tagp);
+long double sinl(long double x);
+long double cosl(long double x);
+long double tanl(long double x);
+long double asinl(long double x);
+long double acosl(long double x);
+long double atanl(long double x);
+long double sinhl(long double x);
+long double coshl(long double x);
+long double tanhl(long double x);
+long double asinhl(long double x);
+long double acoshl(long double x);
+long double atanhl(long double x);
+long double expl(long double x);
+long double exp2l(long double x);
+long double expm1l(long double x);
+long double logl(long double x);
+long double log2l(long double x);
+long double log10l(long double x);
+long double log1pl(long double x);
+long double logbl(long double x);
+long double sqrtl(long double x);
+long double cbrtl(long double x);
+long double fabsl(long double x);
+long double floorl(long double x);
+long double ceill(long double x);
+long double roundl(long double x);
+long double truncl(long double x);
+long double rintl(long double x);
+long double nearbyintl(long double x);
+long double erfl(long double x);
+long double erfcl(long double x);
+long double tgammal(long double x);
+long double lgammal(long double x);
+long double atan2l(long double x, long double y);
+long double powl(long double x, long double y);
+long double hypotl(long double x, long double y);
+long double fmodl(long double x, long double y);
+long double remainderl(long double x, long double y);
+long double fminl(long double x, long double y);
+long double fmaxl(long double x, long double y);
+long double fdiml(long double x, long double y);
+long double copysignl(long double x, long double y);
+long double nextafterl(long double x, long double y);
+long double fmal(long double x, long double y, long double z);
+int ilogbl(long double x);
+long lroundl(long double x);
+long lrintl(long double x);
+long long llroundl(long double x);
+long long llrintl(long double x);
+long double ldexpl(long double x, int exp);
+long double scalbnl(long double x, int n);
+long double scalblnl(long double x, long n);
+long double frexpl(long double value, int *exp);
+long double modfl(long double value, long double *iptr);
+long double nanl(const char *tagp);
+#define __STDC_VERSION_MATH_H__ 202311L
+#endif
+`,
+	"time.h": `#ifndef __CC_TIME_H
+#define __CC_TIME_H
+#include <stddef.h>
+typedef long time_t;
+typedef long clock_t;
+#define CLOCKS_PER_SEC ((clock_t)1000000)
+time_t time(time_t *timer);
+clock_t clock(void);
+double difftime(time_t time1, time_t time0);
+#define __STDC_VERSION_TIME_H__ 202311L
+#endif
+`,
+	"uchar.h": `#ifndef __CC_UCHAR_H
+#define __CC_UCHAR_H
+#include <stddef.h>
+#ifndef __CC_MBSTATE_T
+#define __CC_MBSTATE_T
+typedef struct { int __count; unsigned __value; } mbstate_t;
+#endif
+typedef unsigned char char8_t;
+typedef unsigned short char16_t;
+typedef unsigned int char32_t;
+size_t mbrtoc8(char8_t *restrict pc8, const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t c8rtomb(char *restrict s, char8_t c8, mbstate_t *restrict ps);
+size_t mbrtoc16(char16_t *restrict pc16, const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t c16rtomb(char *restrict s, char16_t c16, mbstate_t *restrict ps);
+size_t mbrtoc32(char32_t *restrict pc32, const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t c32rtomb(char *restrict s, char32_t c32, mbstate_t *restrict ps);
+#define __STDC_VERSION_UCHAR_H__ 202311L
+#endif
+`,
+	"wchar.h": `#ifndef __CC_WCHAR_H
+#define __CC_WCHAR_H
+#include <stddef.h>
+#ifndef __CC_MBSTATE_T
+#define __CC_MBSTATE_T
+typedef struct { int __count; unsigned __value; } mbstate_t;
+#endif
+typedef unsigned int wint_t;
+#define WEOF (0xffffffffu)
+#define WCHAR_MIN (-2147483647-1)
+#define WCHAR_MAX 2147483647
+size_t wcslen(const wchar_t *s);
+int wcscmp(const wchar_t *s1, const wchar_t *s2);
+int wcsncmp(const wchar_t *s1, const wchar_t *s2, size_t n);
+wchar_t *wcscpy(wchar_t *restrict s1, const wchar_t *restrict s2);
+wchar_t *wcscat(wchar_t *restrict s1, const wchar_t *restrict s2);
+wchar_t *wcschr(const wchar_t *s, wchar_t c);
+wint_t btowc(int c);
+int wctob(wint_t c);
+int mbsinit(const mbstate_t *ps);
+size_t mbrlen(const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_t *restrict ps);
+size_t wcrtomb(char *restrict s, wchar_t wc, mbstate_t *restrict ps);
+#define __STDC_VERSION_WCHAR_H__ 202311L
+#endif
+`,
 	"assert.h": `#undef assert
 #ifdef NDEBUG
 #define assert(...) ((void)0)
@@ -280,6 +753,29 @@ char *fgets(char *restrict s, int n, FILE *restrict stream);
 size_t fwrite(const void *restrict ptr, size_t size, size_t nmemb, FILE *restrict stream);
 size_t fread(void *restrict ptr, size_t size, size_t nmemb, FILE *restrict stream);
 int fflush(FILE *stream);
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+#define _IOFBF 0
+#define _IOLBF 1
+#define _IONBF 2
+#define FILENAME_MAX 4096
+#define FOPEN_MAX 16
+FILE *fopen(const char *restrict filename, const char *restrict mode);
+int fclose(FILE *stream);
+FILE *tmpfile(void);
+int fseek(FILE *stream, long offset, int whence);
+long ftell(FILE *stream);
+void rewind(FILE *stream);
+int feof(FILE *stream);
+int ferror(FILE *stream);
+void clearerr(FILE *stream);
+int ungetc(int c, FILE *stream);
+int setvbuf(FILE *restrict stream, char *restrict buf, int mode, size_t size);
+void setbuf(FILE *restrict stream, char *restrict buf);
+int remove(const char *filename);
+int rename(const char *old, const char *new);
+void perror(const char *s);
 #define __STDC_VERSION_STDIO_H__ 202311L
 #endif
 `,
@@ -307,10 +803,16 @@ unsigned long strtoul(const char *restrict nptr, char **restrict endptr, int bas
 long long strtoll(const char *restrict nptr, char **restrict endptr, int base);
 unsigned long long strtoull(const char *restrict nptr, char **restrict endptr, int base);
 double strtod(const char *restrict nptr, char **restrict endptr);
+float strtof(const char *restrict nptr, char **restrict endptr);
+long double strtold(const char *restrict nptr, char **restrict endptr);
 double atof(const char *nptr);
 int rand(void);
 void srand(unsigned int seed);
 char *getenv(const char *name);
+int atexit(void (*func)(void));
+void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
+#define MB_CUR_MAX ((size_t)4)
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,
@@ -342,6 +844,13 @@ char *strdup(const char *s);
 char *strndup(const char *s, size_t n);
 size_t strspn(const char *s1, const char *s2);
 size_t strcspn(const char *s1, const char *s2);
+size_t strnlen(const char *s, size_t n);
+char *strpbrk(const char *s1, const char *s2);
+int strcoll(const char *s1, const char *s2);
+char *strtok(char *restrict s1, const char *restrict s2);
+char *strtok_r(char *restrict s, const char *restrict sep, char **restrict lasts);
+char *strerror(int errnum);
+void *memset_explicit(void *s, int c, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
 #endif
 `,

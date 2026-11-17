@@ -38,6 +38,7 @@ macro_rescan
 macro_spacing
 nullptr
 offsetof
+plat_typedef
 pointer
 pragma_pack
 setjmp
@@ -48,6 +49,7 @@ struct
 typedef
 typedef2
 typeof
+unicode
 union
 union2
 usualconv

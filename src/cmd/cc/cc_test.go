@@ -82,6 +82,34 @@ func TestBasic(t *testing.T) {
 	}
 }
 
+// TestLibc compares the output of C's library, which internal/c23
+// implements, with gcc's and its C library's.
+func TestLibc(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/libc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "libc")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src, "-lm").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).
@@ -214,7 +242,7 @@ func TestBuildTag(t *testing.T) {
 #include "add.h"`, "cgo: 5\n"},
 		{"ldflags", `#cgo LDFLAGS: -lm
 #include "add.h"`, "no cgo\n"},
-		{"system header", `#include <math.h>
+		{"system header", `#include <signal.h>
 #include "add.h"`, "no cgo\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
