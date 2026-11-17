@@ -612,6 +612,110 @@ typedef jmp_buf sigjmp_buf;
 #define __STDC_VERSION_STDDEFER_H__ 202602L
 #endif
 `,
+	"pthread.h": `#ifndef __CC_PTHREAD_H
+#define __CC_PTHREAD_H
+#include <stddef.h>
+typedef unsigned long pthread_t;
+typedef struct { int __a; } pthread_attr_t;
+typedef struct { long __m[5]; } pthread_mutex_t;
+typedef struct { int __a; } pthread_mutexattr_t;
+typedef struct { long __c[6]; } pthread_cond_t;
+typedef struct { int __a; } pthread_condattr_t;
+#define PTHREAD_MUTEX_INITIALIZER {{0}}
+#define PTHREAD_COND_INITIALIZER {{0}}
+int pthread_create(pthread_t *restrict thread, const pthread_attr_t *restrict attr, void *(*start_routine)(void *), void *restrict arg);
+int pthread_join(pthread_t thread, void **retval);
+int pthread_detach(pthread_t thread);
+[[noreturn]] void pthread_exit(void *retval);
+pthread_t pthread_self(void);
+int pthread_equal(pthread_t t1, pthread_t t2);
+int pthread_mutex_init(pthread_mutex_t *restrict mutex, const pthread_mutexattr_t *restrict attr);
+int pthread_mutex_destroy(pthread_mutex_t *mutex);
+int pthread_mutex_lock(pthread_mutex_t *mutex);
+int pthread_mutex_trylock(pthread_mutex_t *mutex);
+int pthread_mutex_unlock(pthread_mutex_t *mutex);
+int pthread_cond_init(pthread_cond_t *restrict cond, const pthread_condattr_t *restrict attr);
+int pthread_cond_destroy(pthread_cond_t *cond);
+int pthread_cond_wait(pthread_cond_t *restrict cond, pthread_mutex_t *restrict mutex);
+int pthread_cond_signal(pthread_cond_t *cond);
+int pthread_cond_broadcast(pthread_cond_t *cond);
+int sched_yield(void);
+#endif
+`,
+	"stdatomic.h": `#ifndef __CC_STDATOMIC_H
+#define __CC_STDATOMIC_H
+#include <stddef.h>
+#include <stdint.h>
+typedef enum memory_order {
+	memory_order_relaxed, memory_order_consume, memory_order_acquire,
+	memory_order_release, memory_order_acq_rel, memory_order_seq_cst
+} memory_order;
+#define ATOMIC_VAR_INIT(value) (value)
+#define kill_dependency(y) (y)
+#define ATOMIC_BOOL_LOCK_FREE 2
+#define ATOMIC_CHAR_LOCK_FREE 2
+#define ATOMIC_CHAR16_T_LOCK_FREE 2
+#define ATOMIC_CHAR32_T_LOCK_FREE 2
+#define ATOMIC_WCHAR_T_LOCK_FREE 2
+#define ATOMIC_SHORT_LOCK_FREE 2
+#define ATOMIC_INT_LOCK_FREE 2
+#define ATOMIC_LONG_LOCK_FREE 2
+#define ATOMIC_LLONG_LOCK_FREE 2
+#define ATOMIC_POINTER_LOCK_FREE 2
+#define atomic_init(obj, value) __cc_atomic_store(obj, value)
+#define atomic_is_lock_free(obj) 1
+#define atomic_thread_fence(order) __cc_atomic_fence()
+#define atomic_signal_fence(order) __cc_atomic_fence()
+#define atomic_store(obj, desired) __cc_atomic_store(obj, desired)
+#define atomic_store_explicit(obj, desired, order) __cc_atomic_store(obj, desired)
+#define atomic_load(obj) __cc_atomic_load(obj)
+#define atomic_load_explicit(obj, order) __cc_atomic_load(obj)
+#define atomic_exchange(obj, desired) __cc_atomic_fetch(obj, '=', desired)
+#define atomic_exchange_explicit(obj, desired, order) __cc_atomic_fetch(obj, '=', desired)
+#define atomic_compare_exchange_strong(obj, expected, desired) __cc_atomic_cmpxchg(obj, expected, desired)
+#define atomic_compare_exchange_strong_explicit(obj, expected, desired, s, f) __cc_atomic_cmpxchg(obj, expected, desired)
+#define atomic_compare_exchange_weak(obj, expected, desired) __cc_atomic_cmpxchg(obj, expected, desired)
+#define atomic_compare_exchange_weak_explicit(obj, expected, desired, s, f) __cc_atomic_cmpxchg(obj, expected, desired)
+#define atomic_fetch_add(obj, arg) __cc_atomic_fetch(obj, '+', arg)
+#define atomic_fetch_add_explicit(obj, arg, order) __cc_atomic_fetch(obj, '+', arg)
+#define atomic_fetch_sub(obj, arg) __cc_atomic_fetch(obj, '-', arg)
+#define atomic_fetch_sub_explicit(obj, arg, order) __cc_atomic_fetch(obj, '-', arg)
+#define atomic_fetch_or(obj, arg) __cc_atomic_fetch(obj, '|', arg)
+#define atomic_fetch_or_explicit(obj, arg, order) __cc_atomic_fetch(obj, '|', arg)
+#define atomic_fetch_xor(obj, arg) __cc_atomic_fetch(obj, '^', arg)
+#define atomic_fetch_xor_explicit(obj, arg, order) __cc_atomic_fetch(obj, '^', arg)
+#define atomic_fetch_and(obj, arg) __cc_atomic_fetch(obj, '&', arg)
+#define atomic_fetch_and_explicit(obj, arg, order) __cc_atomic_fetch(obj, '&', arg)
+typedef struct atomic_flag { _Atomic _Bool __v; } atomic_flag;
+#define ATOMIC_FLAG_INIT {0}
+#define atomic_flag_test_and_set(obj) __cc_atomic_fetch(&(obj)->__v, '=', 1)
+#define atomic_flag_test_and_set_explicit(obj, order) __cc_atomic_fetch(&(obj)->__v, '=', 1)
+#define atomic_flag_clear(obj) __cc_atomic_store(&(obj)->__v, 0)
+#define atomic_flag_clear_explicit(obj, order) __cc_atomic_store(&(obj)->__v, 0)
+typedef _Atomic _Bool atomic_bool;
+typedef _Atomic char atomic_char;
+typedef _Atomic signed char atomic_schar;
+typedef _Atomic unsigned char atomic_uchar;
+typedef _Atomic short atomic_short;
+typedef _Atomic unsigned short atomic_ushort;
+typedef _Atomic int atomic_int;
+typedef _Atomic unsigned int atomic_uint;
+typedef _Atomic long atomic_long;
+typedef _Atomic unsigned long atomic_ulong;
+typedef _Atomic long long atomic_llong;
+typedef _Atomic unsigned long long atomic_ullong;
+typedef _Atomic unsigned short atomic_char16_t;
+typedef _Atomic unsigned int atomic_char32_t;
+typedef _Atomic int atomic_wchar_t;
+typedef _Atomic intptr_t atomic_intptr_t;
+typedef _Atomic uintptr_t atomic_uintptr_t;
+typedef _Atomic size_t atomic_size_t;
+typedef _Atomic ptrdiff_t atomic_ptrdiff_t;
+typedef _Atomic intmax_t atomic_intmax_t;
+typedef _Atomic uintmax_t atomic_uintmax_t;
+#define __STDC_VERSION_STDATOMIC_H__ 202311L
+#endif
+`,
 	"stdalign.h": ``,
 	"stdarg.h": `#ifndef __CC_STDARG_H
 #define __CC_STDARG_H

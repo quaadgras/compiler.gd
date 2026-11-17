@@ -37,7 +37,8 @@ type parser struct {
 	stmtExprs   int
 	staticInit  int     // in the initializer of an object of static duration
 	typeStorage storage // the storage class in the last type name
-	pendingVLA  []stmt  // declarations of VLA lengths, before the next declaration
+	typeTLS     bool
+	pendingVLA  []stmt // declarations of VLA lengths, before the next declaration
 }
 
 type parseError struct{ msg string }
@@ -673,7 +674,7 @@ func (p *parser) enumSpec() *ctype {
 	}
 	p.attributes()
 	var fixed *ctype
-	if p.is(":") {
+	if p.is(":") && p.isTypeStart(1) {
 		p.next()
 		fixed = p.specQualType()
 	}
@@ -1041,6 +1042,7 @@ func (p *parser) typeName() *ctype {
 	}
 	// For a compound literal: C23's storage classes.
 	p.typeStorage = s.storage
+	p.typeTLS = s.tls
 	if s.align > 0 {
 		c := *t
 		c.align = s.align

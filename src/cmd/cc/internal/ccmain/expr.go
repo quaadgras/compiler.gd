@@ -958,7 +958,7 @@ func (p *parser) primary() expr {
 			// GCC: "" outside a function.
 			return &strLit{node{arrayOf(tChar, 1), at}, ""}
 		}
-		if len(t.text) > 10 && t.text[:10] == "__builtin_" {
+		if len(t.text) > 10 && t.text[:10] == "__builtin_" || len(t.text) > 12 && t.text[:12] == "__cc_atomic_" {
 			return p.builtin(t.text, at)
 		}
 		s := p.lookup(t.text)
@@ -998,10 +998,11 @@ func (p *parser) primary() expr {
 func (p *parser) compoundLiteral(t *ctype, at pos) expr {
 	var sym *symbol
 	static := p.typeStorage == sStatic
-	p.typeStorage = sAuto
+	tls := p.typeTLS
+	p.typeStorage, p.typeTLS = sAuto, false
 	if p.fn == nil || p.staticInit > 0 || static {
 		p.symN++
-		sym = &symbol{name: "complit." + itoa(int64(p.symN)), kind: symVar, t: t, global: true, storage: sStatic, p: at, defined: true}
+		sym = &symbol{name: "complit." + itoa(int64(p.symN)), kind: symVar, t: t, global: true, storage: sStatic, p: at, defined: true, tls: tls}
 		// After its initializer's own compound literals, which it uses.
 		defer func() { p.u.statics = append(p.u.statics, sym) }()
 	} else {
@@ -1561,6 +1562,8 @@ func (p *parser) builtin(name string, at pos) expr {
 		}
 		p.fn.setjmps++
 		return &builtinCall{node{tInt, at}, "setjmp", []expr{env, p.intc(int64(p.fn.setjmps), tInt, at)}}
+	case "__cc_atomic_load", "__cc_atomic_store", "__cc_atomic_fetch", "__cc_atomic_cmpxchg", "__cc_atomic_fence":
+		return p.atomicBuiltin(name[len("__cc_"):], args(-1), at)
 	case "__builtin_alloca", "__builtin_alloca_with_align":
 		as := args(-1)
 		if len(as) < 1 {
@@ -1582,6 +1585,47 @@ func (p *parser) builtin(name string, at pos) expr {
 	}
 	p.errorAt(at, "%s is not supported", name)
 	return nil
+}
+
+// atomicBuiltin types the atomic operations stdatomic.h uses.
+func (p *parser) atomicBuiltin(op string, as []expr, at pos) expr {
+	if op == "atomic_fence" {
+		return &builtinCall{node{tVoid, at}, op, nil}
+	}
+	n := map[string]int{"atomic_load": 1, "atomic_store": 2, "atomic_fetch": 3, "atomic_cmpxchg": 3}[op]
+	if len(as) != n {
+		p.errorAt(at, "%s takes %d arguments", op, n)
+	}
+	ptr := p.rvalue(as[0])
+	if !ptr.ty().isPtr() || !ptr.ty().elem.isScalar() {
+		p.errorAt(at, "%s of a %s", op, ptr.ty())
+	}
+	et := ptr.ty().elem.unqual()
+	switch op {
+	case "atomic_load":
+		return &builtinCall{node{et, at}, op, []expr{ptr}}
+	case "atomic_store":
+		v := p.assignConvert(p.rvalue(as[1]), et, at, "assignment")
+		return &builtinCall{node{tVoid, at}, op, []expr{ptr, v}}
+	case "atomic_fetch":
+		code, ok := p.foldInt(as[1])
+		if !ok {
+			p.errorAt(at, "atomic operation not constant")
+		}
+		var v expr
+		if et.isPtr() && code != '=' {
+			v = p.convert(p.rvalue(as[2]), tLong)
+		} else {
+			v = p.assignConvert(p.rvalue(as[2]), et, at, "assignment")
+		}
+		return &builtinCall{node{et, at}, op, []expr{ptr, p.intc(code, tInt, at), v}}
+	}
+	exp := p.rvalue(as[1])
+	if !exp.ty().isPtr() {
+		p.errorAt(at, "atomic_compare_exchange's expected is not a pointer")
+	}
+	d := p.assignConvert(p.rvalue(as[2]), et, at, "assignment")
+	return &builtinCall{node{tBool, at}, op, []expr{ptr, exp, d}}
 }
 
 func (p *parser) checkVaList(e expr, at pos) {

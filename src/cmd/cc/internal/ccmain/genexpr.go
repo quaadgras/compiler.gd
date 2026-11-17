@@ -30,6 +30,10 @@ func (g *gen) lv(e expr) lval {
 			g.errorf(e.p, "%s is not an object", s.name)
 		}
 		if s.global {
+			if s.tls {
+				// The calling thread's.
+				return lval{addr: g.globalName(s) + ".Get()", t: s.t}
+			}
 			return lval{addr: g.globalName(s), t: s.t}
 		}
 		n := g.localName(s)
@@ -89,6 +93,9 @@ func (g *gen) globalName(s *symbol) string {
 func (g *gen) compound(e *compoundLit) string {
 	s := e.sym
 	if s.global {
+		if s.tls {
+			return g.globalName(s) + ".Get()"
+		}
 		return g.globalName(s)
 	}
 	n := g.localName(s)
@@ -127,7 +134,42 @@ func (g *gen) load(l lval) string {
 	if l.f != nil {
 		return g.bitLoad(l.addr, l.f)
 	}
+	if isAtomic(l) {
+		return atomicLoad(l.addr, l.t)
+	}
 	return loadCode(l.addr, l.t)
+}
+
+// isAtomic reports whether l is an _Atomic object in memory.
+func isAtomic(l lval) bool {
+	return l.t.q&qAtomic != 0 && l.goVar == "" && l.f == nil && l.t.isScalar()
+}
+
+func atomicLoad(addr string, t *ctype) string {
+	if goType(t) == "c23.Ptr" {
+		return fmt.Sprintf("c23.AtomicLoadP(%s)", addr)
+	}
+	return fmt.Sprintf("c23.AtomicLoad[%s](%s)", goType(t), addr)
+}
+
+func atomicCAS(addr string, t *ctype, old, new string) string {
+	if goType(t) == "c23.Ptr" {
+		return fmt.Sprintf("c23.AtomicCASP(%s, %s, %s)", addr, old, new)
+	}
+	return fmt.Sprintf("c23.AtomicCAS(%s, %s, %s)", addr, old, new)
+}
+
+// atomicUpdate replaces the _Atomic object l's value v with next(v),
+// atomically: the old and new values' temporaries.
+func (g *gen) atomicUpdate(l lval, next func(cur string) string) (string, string) {
+	t := goType(l.t)
+	old, new := g.tmp(t), g.tmp(t)
+	g.p("for {")
+	g.p("%s = %s", old, atomicLoad(l.addr, l.t))
+	g.p("%s = %s", new, next(old))
+	g.p("if %s { break }", atomicCAS(l.addr, l.t, old, new))
+	g.p("}")
+	return old, new
 }
 
 func loadCode(addr string, t *ctype) string {
@@ -199,6 +241,15 @@ func (g *gen) storeL(l lval, v string, c expr) {
 		g.p("%s = %s", l.goVar, v)
 	case l.f != nil:
 		g.bitStore(l.addr, l.f, v, c)
+	case isAtomic(l):
+		if goType(l.t) == "c23.Ptr" {
+			g.p("c23.AtomicStoreP(%s, %s)", l.addr, v)
+		} else {
+			if k, ok := c.(*intConst); ok {
+				v = constLit(l.t, k.v)
+			}
+			g.p("c23.AtomicStore(%s, %s(%s))", l.addr, goType(l.t), v)
+		}
 	default:
 		g.store(l.addr, l.t, v, c)
 	}
@@ -442,6 +493,8 @@ func (g *gen) rv(e expr) string {
 		return g.stmtExprCode(e, true)
 	case *vlaSizeof:
 		return g.vlaSize(e.of)
+	case *goVal:
+		return e.code
 	case *labelAddr:
 		return fmt.Sprintf("c23.FromInt(%d)", e.l.id)
 	case *seqExpr:
@@ -589,6 +642,21 @@ func (g *gen) assign(e *assign, value bool) string {
 		return l.addr
 	}
 	l := g.lv(e.x)
+	if isAtomic(l) && e.op != "=" {
+		// x op= y: atomically.
+		g.bind(&l)
+		op := e.op[:len(e.op)-1]
+		y := g.tmp(goType(e.y.ty()))
+		g.p("%s = %s", y, g.rv(e.y))
+		_, new := g.atomicUpdate(l, func(cur string) string {
+			if t.isPtr() {
+				return g.ptrAdd(cur, t, &goVal{node{e.y.ty(), e.p}, y}, op == "-")
+			}
+			x := convertCode(cur, t.unqual(), e.ct)
+			return convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
+		})
+		return new
+	}
 	var v string
 	if e.op == "=" {
 		v = g.rv(e.y)
@@ -637,6 +705,29 @@ func (g *gen) assign(e *assign, value bool) string {
 func (g *gen) incDec(e *incDec, value bool) string {
 	t := e.t
 	l := g.lv(e.x)
+	if isAtomic(l) {
+		g.bind(&l)
+		old, new := g.atomicUpdate(l, func(cur string) string {
+			switch {
+			case t.isPtr():
+				n := g.elemSize(t)
+				if e.op == "--" {
+					n = -n
+				}
+				return fmt.Sprintf("c23.Add(%s, %d)", cur, n)
+			case t.kind == kBool:
+				if e.op == "++" {
+					return "uint8(1)"
+				}
+				return fmt.Sprintf("(1 - %s)", cur)
+			}
+			return fmt.Sprintf("(%s %s 1)", cur, e.op[:1])
+		})
+		if e.post {
+			return old
+		}
+		return new
+	}
 	if !value && l.goVar != "" && t.isArith() && t.kind != kBool {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
@@ -966,6 +1057,37 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	switch e.name {
 	case "trap":
 		return "c23.Trap()"
+	case "atomic_load":
+		return atomicLoad(g.rv(e.args[0]), e.t)
+	case "atomic_store":
+		p, v := g.rv(e.args[0]), g.rv(e.args[1])
+		g.storeL(lval{addr: p, t: e.args[0].ty().elem.qualified(qAtomic)}, v, e.args[1])
+		return ""
+	case "atomic_fetch":
+		p := g.rv(e.args[0])
+		op := e.args[1].(*intConst).v
+		v := g.rv(e.args[2])
+		et := e.args[0].ty().elem
+		if goType(et) == "c23.Ptr" {
+			if op == '=' {
+				return fmt.Sprintf("c23.AtomicFetchP(%s, '=', 0, %s)", p, v)
+			}
+			n := fmt.Sprintf("int(%s)*%d", v, max(elemSizeOf(et.unqual()), 1))
+			if op == '-' {
+				n = "-" + n
+			}
+			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, c23.Ptr{})", p, n)
+		}
+		return fmt.Sprintf("c23.AtomicFetch(%s, %d, %s(%s))", p, op, goType(et), v)
+	case "atomic_cmpxchg":
+		p, ex, d := g.rv(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2])
+		et := e.args[0].ty().elem
+		if goType(et) == "c23.Ptr" {
+			return fmt.Sprintf("uint8(c23.AtomicCmpXchgP(%s, %s, %s))", p, ex, d)
+		}
+		return fmt.Sprintf("uint8(c23.AtomicCmpXchg(%s, %s, %s(%s)))", p, ex, goType(et), d)
+	case "atomic_fence":
+		return "c23.Fence()"
 	case "alloca":
 		return fmt.Sprintf("c23.Malloc(%s)", g.rv(e.args[0]))
 	case "setjmp":

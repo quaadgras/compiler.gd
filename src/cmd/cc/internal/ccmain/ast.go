@@ -147,6 +147,11 @@ type (
 		node
 		l *label
 	}
+	// A Go expression the generator made: in an expression it builds.
+	goVal struct {
+		node
+		code string
+	}
 	// A call of a built-in function, cmd/cc's own.
 	builtinCall struct {
 		node

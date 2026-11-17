@@ -3,6 +3,8 @@ agg_eval
 alignof2
 arith
 assign
+atomic
+atomic2
 attr_section
 attr_weak
 attribute
@@ -58,6 +60,8 @@ stmtexpr2
 string
 string2
 struct
+tls
+tls2
 typedef
 typedef2
 typeof

@@ -29,6 +29,16 @@ var libc = map[string]string{
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
 	"alloca":  "Malloc",
+
+	// pthread.h
+	"pthread_create": "PthreadCreate", "pthread_join": "PthreadJoin", "pthread_detach": "PthreadDetach",
+	"pthread_exit": "PthreadExit", "pthread_self": "PthreadSelf", "pthread_equal": "PthreadEqual",
+	"pthread_mutex_init": "PthreadMutexInit", "pthread_mutex_destroy": "PthreadMutexDestroy",
+	"pthread_mutex_lock": "PthreadMutexLock", "pthread_mutex_trylock": "PthreadMutexTrylock",
+	"pthread_mutex_unlock": "PthreadMutexUnlock", "pthread_cond_init": "PthreadCondInit",
+	"pthread_cond_destroy": "PthreadCondDestroy", "pthread_cond_wait": "PthreadCondWait",
+	"pthread_cond_signal": "PthreadCondSignal", "pthread_cond_broadcast": "PthreadCondBroadcast",
+	"sched_yield": "SchedYield",
 	"longjmp": "Longjmp", "_longjmp": "Longjmp", "siglongjmp": "Longjmp",
 	"strnlen": "Strnlen", "strpbrk": "Strpbrk", "strcoll": "Strcoll", "strtok": "Strtok",
 	"strtok_r": "StrtokR", "strerror": "Strerror", "memset_explicit": "MemsetExplicit",

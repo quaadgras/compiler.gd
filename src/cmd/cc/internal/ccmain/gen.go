@@ -266,6 +266,19 @@ func (g *gen) globalVar(s *symbol) {
 		g.errorf(s.p, "storage size of %q isn't known", s.name)
 	}
 	name := g.names[s]
+	if s.tls {
+		// Each thread's, made when it first uses it.
+		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
+		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.mirror(s.t))
+		if s.init != nil {
+			save, saveInd := g.out, g.ind
+			g.out = &g.vars
+			g.initObject("p", s.t, s.init)
+			g.out, g.ind = save, saveInd
+		}
+		g.vars.WriteString("return p\n})\n")
+		return
+	}
 	if a := s.t.alignof(); a > 8 {
 		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.mirror(s.t), a)
 	} else {
