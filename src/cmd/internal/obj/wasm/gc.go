@@ -137,6 +137,18 @@ const (
 	GCMove = "wasm.move"
 	GCZero = "wasm.zero"
 
+	// GCHop is what a function calls, with its own arguments and then
+	// itself (as a func value is: an i64), when its frame does not fit
+	// in what is left of the segment of the stack in linear memory: an
+	// import from the host, of the function's type (the linker makes
+	// one for each type that needs it), which calls the function on a
+	// new stack of the engine's and returns its results. The function
+	// has made a new segment of the stack first (runtime.morestackgc),
+	// so the call finds room; it frees it afterwards. The engine's
+	// stacks (the host makes one for each goroutine: JSPI) do not grow,
+	// and a browser's are small.
+	GCHop = "wasm.hop"
+
 	// GCGlobalCtxt is the global (an eqref) in which a call of a
 	// closure passes the closure to the function.
 	GCGlobalCtxt = 0
@@ -187,6 +199,15 @@ const (
 	GCDeferFunc = 8
 	GCDeferSize = 16
 
+	// GCStackRatio is how much of the engine's stack a function may
+	// take for each byte of its frame in linear memory, and
+	// GCEngineFrame what a frame of the engine's is taken to be beyond
+	// a slot for each parameter and variable (see padFrame in the
+	// compiler). The segments of the stack in linear memory are 64 KB:
+	// the frames of one take no more than 512 KB of the engine's stack.
+	GCStackRatio  = 8
+	GCEngineFrame = 128
+
 	// GCStackRedZone is the room below GCGlobalStackLo that the
 	// runtime switches segments in.
 	GCStackRedZone = 4 << 10
@@ -196,8 +217,9 @@ const (
 	GCTagRecover = 0
 
 	// GCStackSize is the size of the first segment of the stack in
-	// linear memory of the goroutine that runs main.
-	GCStackSize = 1 << 20
+	// linear memory of the goroutine that runs main: as the segments
+	// of the others (see GCStackRatio).
+	GCStackSize = 64 << 10
 )
 
 // The WebAssembly value types of locals and signatures.

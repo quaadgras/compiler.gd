@@ -703,14 +703,16 @@ func getValueFxx(s *ssagen.State, v *ssa.Value) {
 	getReg(s, reg)
 }
 
-func i32Const(s *ssagen.State, val int32) {
+func i32Const(s *ssagen.State, val int32) *obj.Prog {
 	p := s.Prog(wasm.AI32Const)
 	p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: int64(val)}
+	return p
 }
 
-func i64Const(s *ssagen.State, val int64) {
+func i64Const(s *ssagen.State, val int64) *obj.Prog {
 	p := s.Prog(wasm.AI64Const)
 	p.From = obj.Addr{Type: obj.TYPE_CONST, Offset: val}
+	return p
 }
 
 func f32Const(s *ssagen.State, val float64) {

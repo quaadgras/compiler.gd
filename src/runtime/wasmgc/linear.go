@@ -173,7 +173,11 @@ func linalloc(n uintptr) uintptr {
 }
 
 // linfree frees the block at addr. The linker exports it to the host
-// as "free".
+// as "free": it runs on what is free of the stack of whatever goroutine
+// ran last, and cannot get more (the host's stack is not one that
+// morestackgc can leave).
+//
+//go:nosplit
 func linfree(addr uintptr) {
 	b := addr - linheader
 	c := uintptr(linload64(b))

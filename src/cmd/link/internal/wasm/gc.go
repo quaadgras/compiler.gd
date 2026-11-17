@@ -721,9 +721,34 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// The functions imported from the host.
 	var hostImports []*wasmFunc
 	hostImportMap := make(map[loader.Sym]int64)
+	// The imports that call a function again on a new stack of the
+	// engine's (wasm.GCHop): one for each type of function that does,
+	// by the name of the type. It has the function's parameters, then
+	// the function, and its results. (The types are numbered later:
+	// those that the code refers to most come first.)
+	hops := make(map[string]*wasmFunc)
+	hopIndex := make(map[string]int64)
+	sigOf := func(fn loader.Sym) string {
+		relocs := ldr.Relocs(fn)
+		for ri := 0; ri < relocs.Count(); ri++ {
+			if r := relocs.At(ri); r.Type() == objabi.R_WASMTYPE && r.Siz() == 0 && ldr.SymName(r.Sym()) != wasm.GCLines {
+				return ldr.SymName(r.Sym())
+			}
+		}
+		return ""
+	}
 	for _, fn := range ctxt.Textp {
 		relocs := ldr.Relocs(fn)
 		for ri := 0; ri < relocs.Count(); ri++ {
+			if r := relocs.At(ri); r.Type() == objabi.R_CALL && ldr.SymName(r.Sym()) == wasm.GCHop {
+				sig := sigOf(fn)
+				if _, ok := hops[sig]; !ok {
+					hops[sig] = &wasmFunc{Module: "gd", Name: "hop"}
+					hopIndex[sig] = int64(len(hostImports))
+					hostImports = append(hostImports, hops[sig])
+				}
+				continue
+			}
 			if relocs.At(ri).Type() != objabi.R_WASMIMPORT {
 				continue
 			}
@@ -808,6 +833,10 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			case objabi.R_ADDR:
 				writeSleb128(wfn, ldr.SymValue(rs)+r.Add())
 			case objabi.R_CALL:
+				if ldr.SymName(rs) == wasm.GCHop {
+					writeSleb128(wfn, hopIndex[sigOf(fn)])
+					break
+				}
 				if h, ok := l.helperIndex(ldr.SymName(rs)); ok {
 					writeSleb128(wfn, int64(len(hostImports)+len(ctxt.Textp)+h))
 					break
@@ -855,6 +884,14 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	// first: it may add layouts.
 	init := &wasmFunc{Name: "go.initglobals", Type: l.typeIndex(wasm.GCFuncPrefix + "."), Code: l.initGlobals()}
 	ctors := l.constructors()
+	for _, fn := range ctxt.Textp { // (in the order of the functions, which a build keeps)
+		sig := sigOf(fn)
+		if imp := hops[sig]; imp != nil {
+			dot := strings.LastIndexByte(sig, '.')
+			imp.Type = l.typeIndex(sig[:dot] + "l" + sig[dot:])
+			delete(hops, sig)
+		}
+	}
 	fns = append(fns, l.helpers(len(hostImports)+len(fns), ctors, len(hostImports), funcIndex)...)
 	start := len(hostImports) + len(fns)
 	fns = append(fns, init)
@@ -989,7 +1026,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		}
 	}
 	section(sectionExport, func(w *bytes.Buffer) {
-		writeUleb128(w, uint64(4+len(exports)))
+		writeUleb128(w, uint64(5+len(exports)))
 		for _, e := range exports {
 			writeName(w, e.name)
 			w.WriteByte(0x00) // func export
@@ -1000,6 +1037,10 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		writeUleb128(w, uint64(run))
 		writeName(w, "mem")
 		w.WriteByte(0x02) // mem export
+		writeUleb128(w, 0)
+		// (The functions, where a func value says: for wasm.GCHop.)
+		writeName(w, "table")
+		w.WriteByte(0x01) // table export
 		writeUleb128(w, 0)
 		writeName(w, "panicline")
 		w.WriteByte(0x03) // global export

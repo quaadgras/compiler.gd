@@ -81,7 +81,10 @@ type gcGen struct {
 	frameSize int64
 	fp        int32
 	csp       int32 // the top of the stack on entry: where the caller's frame ends
-	newSeg    int32 // set if the frame is in a segment of the stack of its own
+	// The instructions that have the size of the frame, which grows
+	// with what the function takes of the engine's stack (see
+	// padFrame).
+	frameProgs []*obj.Prog
 
 	// deferRec is the offset, in the frame of a function that defers
 	// calls, of its record for the host (see wasm.GCGlobalDefer), and
@@ -3065,28 +3068,34 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		g.frameSize = 8 // so that no other frame is at the same address
 	}
 	if g.frameSize > 0 {
-		// The frame, below the caller's; in a segment of the stack
-		// of its own if there is no room left in this one.
+		// The frame, below the caller's. If there is no room left for
+		// it in the segment of the stack in use, the function calls
+		// itself again on a new stack of the engine's, with a new
+		// segment (see wasm.GCHop): the engine's stacks do not grow.
 		g.fp = g.newLocal('i')
 		g.csp = g.newLocal('i')
-		g.newSeg = g.newLocal('i')
 		g.global(wasm.AGlobalGet, wasm.GCGlobalSP)
 		g.local(wasm.ALocalTee, g.csp)
-		i32Const(s, int32(g.frameSize))
+		g.frameProgs = append(g.frameProgs, i32Const(s, int32(g.frameSize)))
 		g.prog(wasm.AI32Sub)
 		g.local(wasm.ALocalTee, g.fp)
 		if f.Frontend().Func().Pragma&ir.Nosplit == 0 {
 			g.global(wasm.AGlobalGet, wasm.GCGlobalStackLo)
 			g.prog(wasm.AI32LtU)
 			g.prog(wasm.AIf)
-			i64Const(s, g.frameSize)
+			g.frameProgs = append(g.frameProgs, i64Const(s, g.frameSize))
 			g.runtime("runtime.morestackgc")
 			g.prog(wasm.AI32WrapI64)
-			i32Const(s, int32(g.frameSize))
-			g.prog(wasm.AI32Sub)
-			g.local(wasm.ALocalSet, g.fp)
-			i32Const(s, 1)
-			g.local(wasm.ALocalSet, g.newSeg)
+			g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
+			for p := int32(0); p < g.nparam; p++ {
+				g.local(wasm.ALocalGet, p)
+			}
+			g.prog(wasm.AI64Const).From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: f.Frontend().Func().LSym}
+			g.helper(wasm.GCHop)
+			g.local(wasm.ALocalGet, g.csp)
+			g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
+			g.runtime("runtime.lessstackgc")
+			g.prog(obj.ARET)
 			g.prog(wasm.AEnd)
 		} else {
 			g.prog(wasm.ADrop)
@@ -3167,6 +3176,7 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 	}
 	// The function's type is checked at its end.
 	s.Prog(obj.AUNDEF)
+	g.padFrame()
 
 	var localTypes []*obj.LSym
 	if len(g.localSyms) > 0 {
@@ -3180,6 +3190,25 @@ func genWasmGC(s *ssagen.State, f *ssa.Func) {
 		Locals:     g.locals,
 		LocalTypes: localTypes,
 	}
+}
+
+// padFrame makes the frame of the function in linear memory at least
+// 1/wasm.GCStackRatio of what the function may take of the engine's
+// stack: its parameters and variables, each a slot of the frame the
+// engine's baseline compiler makes, and what else a frame has. The
+// engine's stacks do not grow and cannot be measured, but the stack in
+// linear memory can: a segment of it that is not full is then a stack
+// of the engine's that is not full either (see wasm.GCHop).
+func (g *gcGen) padFrame() {
+	if g.frameSize == 0 {
+		return
+	}
+	engine := wasm.GCEngineFrame + 8*(int64(g.nparam)+int64(len(g.locals)))
+	size := max(g.frameSize, (engine/wasm.GCStackRatio+7)&^7)
+	for _, p := range g.frameProgs {
+		p.From.Offset = size
+	}
+	g.frameSize = size
 }
 
 // sig returns the WebAssembly type of the function: a parameter or
@@ -3688,10 +3717,6 @@ func (g *gcGen) popFrame() {
 		g.global(wasm.AGlobalSet, wasm.GCGlobalDefer)
 	}
 	if g.frameSize > 0 {
-		g.local(wasm.ALocalGet, g.newSeg)
-		g.prog(wasm.AIf)
-		g.runtime("runtime.lessstackgc")
-		g.prog(wasm.AEnd)
 		g.local(wasm.ALocalGet, g.csp)
 		g.global(wasm.AGlobalSet, wasm.GCGlobalSP)
 	}

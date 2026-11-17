@@ -13,6 +13,18 @@ package runtime
 // segment of its own, and lessstackgc when it returns. The frames
 // are not moved: a pointer to a variable on the stack is its address.
 // (See cmd/compile/internal/wasm/gc.go and its GCGlobalStackLo.)
+//
+// The segments are also how the stack of the engine grows, which a
+// goroutine's frames are really on (each goroutine has one, from the
+// host), and which is of a size the engine fixes: about 1 MB in a
+// browser. The frame of every function that calls others takes of the
+// stack in linear memory in proportion to what it may take of the
+// engine's (wasm.GCStackRatio), so a segment is full before the
+// engine's stack is; and a function that gets a new segment runs, with
+// it, on a new stack of the engine's: it calls itself again through
+// the host (wasm.GCHop), which starts the stack, and returns what that
+// call returns. A goroutine's stack is then as deep as its segments
+// can be, as Go's is.
 
 const (
 	stackRedZone  = 4 << 10 // cmd/internal/obj/wasm.GCStackRedZone
@@ -31,11 +43,13 @@ type stackSeg struct {
 func linsetsplim(lo uintptr)
 func linsplim() uintptr
 
-// morestackgc gives the frame of n bytes of the function that calls it
-// a segment, and returns the top of it.
+// morestackgc makes a segment for the frame of n bytes of the function
+// that calls it, and returns the top of it: the function then calls
+// itself on a new stack of the engine's, where its frame is there.
 //
 //go:nosplit
 func morestackgc(n uintptr) uintptr {
+	lo := linsplim()
 	linsetsplim(0) // no checks while this runs, in the red zone
 	if onSysStack {
 		fatal("system stack overflow")
@@ -57,15 +71,15 @@ func morestackgc(n uintptr) uintptr {
 		seg = &stackSeg{base: linalloc(size), size: size}
 	}
 	seg.prev = gp.segs
-	seg.lo = gp.stacklo
+	seg.lo = lo
 	gp.segs = seg
 	gp.stacklo = seg.base + stackRedZone
 	linsetsplim(gp.stacklo)
 	return seg.base + seg.size
 }
 
-// lessstackgc is called by the function that called morestackgc as it
-// returns: its segment is no longer in use.
+// lessstackgc is called by the function that called morestackgc when
+// its call of itself returns: the segment is no longer in use.
 //
 //go:nosplit
 func lessstackgc() {
