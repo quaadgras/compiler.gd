@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playground — compiler.gd</title>
+<meta name="description" content="Compile and run Go in your browser with the gd go command, itself compiled to WebAssembly.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2300add8'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
+<link rel="stylesheet" href="style.css">
+<style>
+  main.wide { max-width: 64rem; }
+  .play { display: grid; gap: .75rem; }
+  .tools { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+  .tools button, .tools select {
+    font: inherit; font-size: .92rem; padding: .4rem .95rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--code-bg); color: var(--fg);
+  }
+  .tools button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+  .tools button:disabled { opacity: .45; cursor: default; }
+  .tools .status { color: var(--muted); font-size: .9rem; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .progress[hidden] { display: none; }
+  textarea, .out {
+    width: 100%; margin: 0; padding: 1rem; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--code-bg); color: var(--fg); line-height: 1.5; tab-size: 4;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem;
+  }
+  textarea { min-height: 22rem; resize: vertical; white-space: pre; overflow: auto; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .out { min-height: 8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .out .e { color: #d0453a; }
+  .out .n { color: var(--muted); }
+  @media (prefers-color-scheme: dark) { .out .e { color: #ff8a7a; } }
+  kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--line); border-radius: 4px; padding: 0 .3em; }
+</style>
+</head>
+<body>
+<main class="wide">
+  <nav>
+    <a href="/">compiler.gd</a>
+    <a href="/play" aria-current="page">Playground</a>
+    <a href="/c11">Go → C11 (experimental)</a>
+    <a href="https://github.com/quaadgras/compiler.gd">GitHub</a>
+  </nav>
+
+  <h1>Play<span>ground</span></h1>
+  <p class="lede">Go, compiled in your browser by the gd <code>go</code> command — itself compiled to WebAssembly — and run on the WebAssembly GC.</p>
+
+  <div class="play">
+    <div class="tools">
+      <button id="run" class="primary" disabled>Run</button>
+      <button id="stop" hidden>Stop</button>
+      <select id="example" aria-label="Examples"></select>
+      <span class="status" id="status">loading…</span>
+    </div>
+    <div class="progress" id="progress" hidden><i></i></div>
+    <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Go source"></textarea>
+    <pre class="out" id="out" aria-live="polite"></pre>
+  </div>
+
+  <h2>How it works</h2>
+  <ul>
+    <li>The page downloads the <code>go</code> command for <code>GOOS=js</code> (24 MB, once: your browser keeps it) and the standard library's source, and runs <code>go build</code> in a worker. <code>compile</code> and <code>link</code> are part of that one binary.</li>
+    <li>Programs are built for <code>js/wasm</code> on the WebAssembly GC runtime (<code>GOWASM=gc,split</code>): each allocation keeps its bytes in linear memory and its pointers in a WebAssembly GC array, so the browser’s collector frees it.</li>
+    <li>The build cache lives in IndexedDB. Common packages come precompiled; anything else is compiled on first use (a minute or so for a large package), then cached.</li>
+    <li>Only the standard library: there's no network access for modules. Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to run.</li>
+    <li>Needs WebAssembly GC and JavaScript Promise Integration: Chrome 137, Firefox 153, Safari 27.</li>
+  </ul>
+
+  <footer>
+    <a href="https://github.com/quaadgras/compiler.gd">github.com/quaadgras/compiler.gd</a> · MIT licensed
+  </footer>
+</main>
+<script type="module">
+const examples = {
+  'Hello': `package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+func main() {
+	fmt.Println("Hello from", runtime.GOOS+"/"+runtime.GOARCH, "built in your browser")
+}
+`,
+  'Goroutines': `package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+func main() {
+	results := make(chan string)
+	var wg sync.WaitGroup
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(6-i) * 50 * time.Millisecond)
+			results <- fmt.Sprintf("worker %d done", i)
+		}()
+	}
+	go func() { wg.Wait(); close(results) }()
+	for r := range results {
+		fmt.Println(r)
+	}
+}
+`,
+  'Generics': `package main
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
+
+type Pair[K cmp.Ordered, V any] struct {
+	Key K
+	Val V
+}
+
+func SortedPairs[K cmp.Ordered, V any](m map[K]V) []Pair[K, V] {
+	out := make([]Pair[K, V], 0, len(m))
+	for k, v := range m {
+		out = append(out, Pair[K, V]{k, v})
+	}
+	slices.SortFunc(out, func(a, b Pair[K, V]) int { return cmp.Compare(a.Key, b.Key) })
+	return out
+}
+
+func main() {
+	ages := map[string]int{"gopher": 16, "wasm": 9, "gd": 1}
+	for _, p := range SortedPairs(ages) {
+		fmt.Printf("%-7s %d\\n", p.Key, p.Val)
+	}
+}
+`,
+  'JSON': `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Word struct {
+	Text string \`json:"text"\`
+	Len  int    \`json:"len"\`
+}
+
+func main() {
+	var words []Word
+	for _, w := range strings.Fields("the go command compiled this in the page") {
+		words = append(words, Word{w, len(w)})
+	}
+	b, err := json.MarshalIndent(words[:3], "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(b))
+}
+`,
+  'Panic': `package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		fmt.Println("recovered:", recover())
+	}()
+	var m map[string]int
+	m["boom"] = 1
+}
+`,
+};
+
+const $ = (id) => document.getElementById(id);
+const src = $('src'), out = $('out'), run = $('run'), stop = $('stop'), status = $('status'), progress = $('progress');
+for (const name of Object.keys(examples)) $('example').add(new Option(name, name));
+let saved = null;
+try { saved = localStorage.getItem('gd-play-src'); } catch {}
+src.value = saved || examples.Hello;
+
+const print = (line, fd) => {
+  const s = document.createElement('span');
+  if (fd !== 1) s.className = fd === 2 ? 'e' : 'n';
+  s.textContent = line + '\n';
+  out.append(s);
+};
+
+let worker, ready = false, running = false;
+const loads = new Map();
+function start() {
+  ready = false;
+  run.disabled = true;
+  worker = new Worker('play/worker.mjs', { type: 'module' });
+  worker.onerror = (e) => { print('worker: ' + (e.message || 'failed to start'), 2); status.textContent = 'failed'; };
+  worker.onmessage = ({ data }) => {
+    if ('line' in data) print(data.line, data.fd);
+    if ('status' in data) {
+      if (data.total) {
+        loads.set(data.status, data);
+        let done = 0, total = 0;
+        for (const l of loads.values()) { done += l.done; total += l.total; }
+        progress.hidden = false;
+        progress.firstElementChild.style.width = (100 * done / total).toFixed(1) + '%';
+        status.textContent = `${data.status} — ${(done / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB`;
+      } else {
+        status.textContent = data.status + (data.status === 'failed' ? '' : '…');
+      }
+    }
+    if (data.ready) {
+      ready = true;
+      progress.hidden = true;
+      status.textContent = 'ready';
+      run.disabled = false;
+    }
+    if (data.finished) {
+      running = false;
+      stop.hidden = true;
+      run.disabled = false;
+      status.textContent = 'ready';
+    }
+  };
+}
+
+function go() {
+  if (!ready || running) return;
+  try { localStorage.setItem('gd-play-src', src.value); } catch {}
+  running = true;
+  run.disabled = true;
+  stop.hidden = false;
+  out.textContent = '';
+  worker.postMessage({ run: src.value });
+}
+
+run.onclick = go;
+stop.onclick = () => {
+  // A program may never return: start over (the cache is kept).
+  worker.terminate();
+  running = false;
+  stop.hidden = true;
+  print('[stopped]', 0);
+  start();
+};
+$('example').onchange = (e) => { src.value = examples[e.target.value]; out.textContent = ''; };
+src.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    go();
+  } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const { selectionStart: a, selectionEnd: b } = src;
+    src.setRangeText('\t', a, b, 'end');
+  }
+});
+
+if (!('Suspending' in WebAssembly) || !('promising' in WebAssembly)) {
+  status.textContent = 'not supported here';
+  print('This browser lacks JavaScript Promise Integration (WebAssembly.Suspending), which the playground needs: Chrome 137, Firefox 153 or Safari 27 have it.', 2);
+} else {
+  start();
+}
+</script>
+</body>
+</html>
