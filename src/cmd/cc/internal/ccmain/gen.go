@@ -70,6 +70,7 @@ type gen struct {
 	sret    bool
 	flatSt  *flatState // a flat function's (flat.go)
 	jmp     bool       // the function calls setjmp: its body is a closure
+	frames  []*frame   // the blocks, loops and switches being generated (cleanup.go)
 }
 
 func (g *gen) errorf(at pos, format string, args ...any) {

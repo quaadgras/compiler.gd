@@ -207,8 +207,9 @@ type symbol struct {
 	p       pos
 	used    bool
 	isParam bool
-	weak    bool   // __attribute__((weak)): null if not defined
-	vlaSize string // the Go temp with a VLA's size in bytes
+	weak    bool    // __attribute__((weak)): null if not defined
+	cleanup *symbol // __attribute__((cleanup(f))): f(&it) when its block is left
+	vlaSize string  // the Go temp with a VLA's size in bytes
 }
 
 type funcDecl struct {
@@ -227,10 +228,11 @@ type funcDecl struct {
 }
 
 type label struct {
-	id   int // its address's value, if taken (&&l)
-	name string
-	used bool
-	p    pos
+	id    int // its address's value, if taken (&&l)
+	local int // GNU's local label: a number to tell it from others
+	name  string
+	used  bool
+	p     pos
 }
 
 type stmt interface{}
@@ -295,6 +297,10 @@ type (
 		body stmt
 	}
 	emptyStmt struct{}
+	// C2y's defer: body runs when the block is left.
+	deferStmt struct {
+		body stmt
+	}
 )
 
 // A unit is a parsed translation unit.
@@ -306,4 +312,12 @@ type unit struct {
 	statics []*symbol // block-scope statics, and compound literals at file scope
 	tags    map[string]*ctype
 	scope   map[string]*symbol // file scope: for cgo's names
+}
+
+// goName is a label's Go name, without its L_.
+func (l *label) goName() string {
+	if l.local > 0 {
+		return goIdent(l.name) + "_" + itoa(int64(l.local))
+	}
+	return goIdent(l.name)
 }

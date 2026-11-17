@@ -87,9 +87,9 @@ func (g *gen) flatStmt(s stmt) {
 	switch s := s.(type) {
 	case nil, *emptyStmt:
 	case *block:
-		for _, x := range live(s.list) {
-			g.flatStmt(x)
-		}
+		g.blockStmts(s, g.flatStmt)
+	case *deferStmt:
+		g.flatStmt(s.body)
 	case *ifStmt:
 		if eff, v, ok := constCond(s.c); ok && !hasTarget(s) {
 			if eff != nil {
@@ -129,7 +129,7 @@ func (g *gen) flatStmt(s stmt) {
 		g.p("if !(%s) { goto %s }", g.cond(s.c), brk)
 		fs.brk, fs.cont = append(fs.brk, brk), append(fs.cont, top)
 		g.named(brk, top)
-		g.flatStmt(s.body)
+		g.inFrame(frLoop, s.body, g.flatStmt)
 		fs.brk, fs.cont = fs.brk[:len(fs.brk)-1], fs.cont[:len(fs.cont)-1]
 		g.p("goto %s", top)
 		g.placeLabel(brk)
@@ -138,7 +138,7 @@ func (g *gen) flatStmt(s stmt) {
 		g.placeLabel(top)
 		fs.brk, fs.cont = append(fs.brk, brk), append(fs.cont, cont)
 		g.named(brk, cont)
-		g.flatStmt(s.body)
+		g.inFrame(frLoop, s.body, g.flatStmt)
 		fs.brk, fs.cont = fs.brk[:len(fs.brk)-1], fs.cont[:len(fs.cont)-1]
 		g.placeLabel(cont)
 		g.p("if %s { goto %s }", g.cond(s.c), top)
@@ -155,7 +155,7 @@ func (g *gen) flatStmt(s stmt) {
 		}
 		fs.brk, fs.cont = append(fs.brk, brk), append(fs.cont, cont)
 		g.named(brk, cont)
-		g.flatStmt(s.body)
+		g.inFrame(frLoop, s.body, g.flatStmt)
 		fs.brk, fs.cont = fs.brk[:len(fs.brk)-1], fs.cont[:len(fs.cont)-1]
 		g.placeLabel(cont)
 		if s.post != nil {
@@ -188,26 +188,28 @@ func (g *gen) flatStmt(s stmt) {
 		}
 		fs.brk = append(fs.brk, brk)
 		g.named(brk, "")
-		g.deadStmt(s.body)
+		g.inFrame(frSwitch, s.body, g.deadStmt)
 		fs.brk = fs.brk[:len(fs.brk)-1]
 		g.placeLabel(brk)
 	case *caseStmt:
 		g.placeLabel(fs.cases[s])
 		g.flatStmt(s.body)
 	case *breakStmt:
+		g.exitsForBreak(false)
 		if s.label != "" {
 			g.p("goto %s", fs.named[s.label][0])
 			return
 		}
 		g.p("goto %s", fs.brk[len(fs.brk)-1])
 	case *continueStmt:
+		g.exitsForBreak(true)
 		if s.label != "" {
 			g.p("goto %s", fs.named[s.label][1])
 			return
 		}
 		g.p("goto %s", fs.cont[len(fs.cont)-1])
 	case *labelStmt:
-		g.placeLabel("L_" + goIdent(s.l.name))
+		g.placeLabel("L_" + s.l.goName())
 		fs.pending = append(fs.pending, s.l.name)
 		g.flatStmt(s.body)
 	default:

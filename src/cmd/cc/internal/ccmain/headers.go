@@ -606,6 +606,12 @@ typedef jmp_buf sigjmp_buf;
 #define __STDC_VERSION_SETJMP_H__ 202311L
 #endif
 `,
+	"stddefer.h": `#ifndef __CC_STDDEFER_H
+#define __CC_STDDEFER_H
+#define defer _Defer
+#define __STDC_VERSION_STDDEFER_H__ 202602L
+#endif
+`,
 	"stdalign.h": ``,
 	"stdarg.h": `#ifndef __CC_STDARG_H
 #define __CC_STDARG_H

@@ -190,6 +190,14 @@ func (g *gen) function(f *funcDecl) {
 
 // ret emits a return of v ("" if none).
 func (g *gen) ret(v string) {
+	if g.hasExits(0) {
+		if v != "" {
+			t := g.tmp(goType(g.fn.sym.t.fn.ret))
+			g.p("%s = %s", t, v)
+			v = t
+		}
+		g.exitsForReturn()
+	}
 	switch {
 	case g.jmp && v != "":
 		g.p("return %s, true", v)
@@ -213,9 +221,10 @@ func (g *gen) stmt(s stmt) {
 	switch s := s.(type) {
 	case nil, *emptyStmt:
 	case *block:
-		for _, x := range live(s.list) {
-			g.stmt(x)
-		}
+		g.blockStmts(s, g.stmt)
+	case *deferStmt:
+		// Not in a block's list: its own block.
+		g.stmt(s.body)
 	case *exprStmt:
 		g.effect(s.x)
 	case *declStmt:
@@ -251,13 +260,13 @@ func (g *gen) stmt(s stmt) {
 			g.out.WriteString(pre)
 			g.p("if !(%s) { break }", c)
 		}
-		g.stmt(s.body)
+		g.inFrame(frLoop, s.body, g.stmt)
 		g.p("}")
 	case *doStmt:
 		pre, c := g.condPre(s.c)
 		if !hasContinue(s.body) {
 			g.p("for {")
-			g.stmt(s.body)
+			g.inFrame(frLoop, s.body, g.stmt)
 			g.out.WriteString(pre)
 			g.p("if !(%s) { break }", c)
 			g.p("}")
@@ -270,7 +279,7 @@ func (g *gen) stmt(s stmt) {
 		g.out.WriteString(pre)
 		g.p("if !(%s) { break }", c)
 		g.p("}")
-		g.stmt(s.body)
+		g.inFrame(frLoop, s.body, g.stmt)
 		g.p("}")
 	case *forStmt:
 		g.stmt(s.init)
@@ -306,15 +315,17 @@ func (g *gen) stmt(s stmt) {
 				g.p("if !(%s) { break }", c)
 			}
 		}
-		g.stmt(s.body)
+		g.inFrame(frLoop, s.body, g.stmt)
 		g.p("}")
 	case *switchStmt:
 		g.switchStmt(s)
 	case *caseStmt:
 		g.errorf(pos{g.u.file, 0}, "case label in a statement nested in its switch is not supported")
 	case *breakStmt:
+		g.exitsForBreak(false)
 		g.p("break")
 	case *continueStmt:
+		g.exitsForBreak(true)
 		g.p("continue")
 	case *returnStmt:
 		if g.inExpr > 0 {
@@ -340,7 +351,7 @@ func (g *gen) stmt(s stmt) {
 			g.p("switch c23.Addr(%s) {", g.rv(s.x))
 			for _, l := range g.fn.addrLabels {
 				g.p("case %d:", l.id)
-				g.p("goto L_%s", goIdent(l.name))
+				g.p("goto L_%s", l.goName())
 			}
 			g.p("default:")
 			g.p("c23.Trap()")
@@ -348,10 +359,11 @@ func (g *gen) stmt(s stmt) {
 			return
 		}
 		s.l.used = true
-		g.p("goto L_%s", goIdent(s.l.name))
+		g.exitsForGoto(s.l)
+		g.p("goto L_%s", s.l.goName())
 	case *labelStmt:
 		if s.l.used || g.labelUsed(s.l) {
-			g.p("L_%s:", goIdent(s.l.name))
+			g.p("L_%s:", s.l.goName())
 			g.p(";")
 		}
 		g.stmt(s.body)
@@ -483,6 +495,8 @@ func (g *gen) switchStmt(s *switchStmt) {
 		add(st)
 	}
 	g.p("switch {")
+	g.pushFrame(frSwitch, nil)
+	defer g.popFrame()
 	for i, cl := range clauses {
 		switch {
 		case cl.c.dflt:

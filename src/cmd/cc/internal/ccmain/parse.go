@@ -16,6 +16,7 @@ import (
 type scope struct {
 	vars   map[string]*symbol
 	tags   map[string]*ctype
+	labels map[string]*label // GNU's local labels
 	parent *scope
 }
 
@@ -1184,7 +1185,15 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		sym.t = &c
 	}
 	if a.cleanup != "" {
-		p.errorAt(at, "the cleanup attribute is not supported")
+		f := p.lookup(a.cleanup)
+		if f == nil || f.kind != symFunc {
+			p.errorAt(at, "cleanup argument not a function")
+		}
+		if global {
+			p.errorAt(at, "the cleanup attribute applies only to automatic variables")
+		}
+		sym.cleanup = f
+		sym.addr = true // f(&it)
 	}
 	// The name is in scope in its initializer.
 	if old := p.sc.vars[name]; old != nil && old.global && sym.global && old.kind == symVar {

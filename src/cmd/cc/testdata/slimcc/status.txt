@@ -14,13 +14,17 @@ commonsym
 compat
 complit
 complit2
+cond_decl
+cond_decl_ext
 const
 constexpr
 control
+control2
 countof
 dead_elim
 decl
 decl2
+defer
 digit_separator
 embed
 enum

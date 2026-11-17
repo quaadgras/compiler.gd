@@ -27,10 +27,20 @@ func (p *parser) blockItem() []stmt {
 		p.staticAssert()
 		return nil
 	}
-	if p.is("__label__") {
-		// GNU's local labels: function-wide here.
-		for p.next(); !p.accept(";"); p.next() {
+	if p.accept("__label__") {
+		// GNU's local labels: this block's.
+		for {
+			name := p.ident()
+			if p.sc.labels == nil {
+				p.sc.labels = map[string]*label{}
+			}
+			p.symN++
+			p.sc.labels[name] = &label{name: name, local: p.symN}
+			if !p.accept(",") {
+				break
+			}
 		}
+		p.expect(";")
 		return nil
 	}
 	if p.is("[") && p.isAt(1, "[") {
@@ -131,7 +141,7 @@ func (p *parser) statement() stmt {
 			p.next()
 			p.expect("(")
 			p.push()
-			c := p.condition()
+			decls, c := p.condDecl()
 			p.expect(")")
 			then := p.subStatement()
 			var els stmt
@@ -139,16 +149,19 @@ func (p *parser) statement() stmt {
 				els = p.subStatement()
 			}
 			p.pop()
-			return &ifStmt{c, then, els}
+			return withDecls(decls, &ifStmt{c, then, els})
 		case "while":
 			p.next()
 			p.expect("(")
 			p.push()
-			c := p.condition()
+			decls, c := p.condDecl()
 			p.expect(")")
 			body := p.loopBody()
 			p.pop()
-			return &whileStmt{c, body}
+			if len(decls) == 0 {
+				return &whileStmt{c, body}
+			}
+			return &whileStmt{p.one(), declLoopBody(decls, c, body)}
 		case "do":
 			p.next()
 			body := p.loopBody()
@@ -178,8 +191,9 @@ func (p *parser) statement() stmt {
 				}
 				p.expect(";")
 			}
+			var cdecls []stmt
 			if !p.is(";") {
-				f.c = p.condition()
+				cdecls, f.c = p.condDeclIn(true)
 			}
 			p.expect(";")
 			if !p.is(")") {
@@ -187,13 +201,30 @@ func (p *parser) statement() stmt {
 			}
 			p.expect(")")
 			f.body = p.loopBody()
+			if len(cdecls) > 0 {
+				body := f.body
+				if f.post != nil && !hasContinue(body) {
+					// The condition's objects live until after the
+					// post expression.
+					body = &block{list: []stmt{body, &exprStmt{f.post}}}
+					f.post = nil
+				}
+				f.body = declLoopBody(cdecls, f.c, body)
+				f.c = nil
+			}
 			p.pop()
+			if d, ok := f.init.(*declStmt); ok && hasCleanup(d) {
+				// The for's block: its objects' cleanups run at its end.
+				f.init = nil
+				return &block{list: []stmt{d, f}}
+			}
 			return f
 		case "switch":
 			p.next()
 			p.expect("(")
 			p.push()
-			x := p.rvalue(p.expr())
+			decls, x := p.condDeclExpr(false)
+			x = p.rvalue(x)
 			if !x.ty().isInteger() {
 				p.errorAt(at, "switch quantity not an integer")
 			}
@@ -207,7 +238,7 @@ func (p *parser) statement() stmt {
 			p.breakOK--
 			p.sw = save
 			p.pop()
-			return sw
+			return withDecls(decls, sw)
 		case "case":
 			p.next()
 			if p.sw == nil {
@@ -291,6 +322,15 @@ func (p *parser) statement() stmt {
 				return &block{list: []stmt{&exprStmt{x}, &returnStmt{}}}
 			}
 			return &returnStmt{p.assignConvert(p.rvalue(x), rt, at, "return")}
+		case "_Defer":
+			p.next()
+			if p.fn == nil {
+				p.errorAt(at, "defer outside a function")
+			}
+			p.breakOK, p.continueOK = p.breakOK+1000, p.continueOK+1000
+			body := p.subStatement()
+			p.breakOK, p.continueOK = p.breakOK-1000, p.continueOK-1000
+			return &deferStmt{body}
 		case "goto":
 			p.next()
 			if p.accept("*") {
@@ -363,12 +403,102 @@ func (p *parser) loopBody() stmt {
 }
 
 func (p *parser) label(name string) *label {
+	for s := p.sc; s != nil; s = s.parent {
+		if l, ok := s.labels[name]; ok {
+			return l
+		}
+	}
 	l := p.fn.labels[name]
 	if l == nil {
 		l = &label{name: name}
 		p.fn.labels[name] = l
 	}
 	return l
+}
+
+// condDecl parses C2y's condition of if or switch, which may declare:
+// (declaration; expression), or (declaration), whose value is the last
+// declared object's.
+func (p *parser) condDecl() ([]stmt, expr) {
+	return p.condDeclIn(false)
+}
+
+// condDeclIn is condDecl, for a for's condition if inFor (where ";"
+// ends it).
+func (p *parser) condDeclIn(inFor bool) ([]stmt, expr) {
+	decls, x := p.condDeclExpr(inFor)
+	x = p.rvalue(x)
+	return decls, p.scalarCond(x, x.at())
+}
+
+func (p *parser) condDeclExpr(inFor bool) ([]stmt, expr) {
+	if !p.isDecl() {
+		return nil, p.expr()
+	}
+	at := p.here()
+	var decls []stmt
+	var last *symbol
+again:
+	s := p.declSpecs()
+	for {
+		name, t, a := p.declarator(p.baseOr(s))
+		a.merge(s.attrs)
+		sym := p.declarator2(name, t, s, a, at)
+		decls = append(decls, p.pendingVLA...)
+		p.pendingVLA = nil
+		if sym.kind == symVar && !sym.global {
+			decls = append(decls, &declStmt{syms: []*symbol{sym}})
+		}
+		last = sym
+		if !p.accept(",") {
+			break
+		}
+	}
+	if !inFor && p.accept(";") {
+		if p.isDecl() {
+			goto again
+		}
+		return decls, p.expr()
+	}
+	if last == nil || last.kind != symVar {
+		p.errorAt(at, "a condition declares no object")
+	}
+	return decls, &varRef{node{last.t, at}, last}
+}
+
+func (p *parser) one() expr { return p.intc(1, tInt, p.here()) }
+
+// declLoopBody is a loop's body when its condition declares: each time
+// round, the declarations, then the test, then the body, in a block
+// whose end runs their cleanups.
+func declLoopBody(decls []stmt, c expr, body stmt) stmt {
+	if len(decls) == 0 {
+		if c == nil {
+			return body
+		}
+		// No declarations: the condition stays the loop's.
+		return body
+	}
+	list := append([]stmt(nil), decls...)
+	list = append(list, &ifStmt{c: &unary{node{tInt, c.at()}, "!", c}, then: &breakStmt{}}, body)
+	return &block{list: list}
+}
+
+func hasCleanup(d *declStmt) bool {
+	for _, s := range d.syms {
+		if s.cleanup != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// withDecls puts a statement after the declarations of its condition.
+func withDecls(decls []stmt, s stmt) stmt {
+	if len(decls) == 0 {
+		return s
+	}
+	return &block{list: append(decls, s)}
 }
 
 // condition parses the controlling expression of if, while, do and for.

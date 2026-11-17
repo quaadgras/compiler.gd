@@ -20,6 +20,12 @@ func (p *parser) initializer(sym *symbol) *initializer {
 		e := p.rvalue(p.initExpr())
 		return &initializer{scalar: p.assignConvert(e, t, e.at(), "initializer")}
 	}
+	if t.isVLA() && p.is("{") && p.isAt(1, "}") {
+		// C23: = {} zeroes a VLA, as it is allocated.
+		p.next()
+		p.next()
+		return &initializer{}
+	}
 	if t.isVLA() && !p.is("{") {
 		p.errorf("variable-sized object may not be initialized")
 	}
