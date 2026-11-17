@@ -348,9 +348,16 @@ func (p *parser) constexprLoad(e expr) (expr, bool) {
 	if !ok || sym.init == nil {
 		return nil, false
 	}
+	bf := bitField(e)
 	for i := len(sym.init.items) - 1; i >= 0; i-- {
 		it := sym.init.items[i]
-		if it.f != nil || it.x == nil {
+		if it.x == nil {
+			continue
+		}
+		if bf != nil || it.f != nil {
+			if it.f == bf && it.off == off && isConstExpr(it.x) {
+				return p.convert(it.x, e.ty().unqual()), true
+			}
 			continue
 		}
 		if it.off == off && it.t.isScalar() && isConstExpr(it.x) {
@@ -372,6 +379,14 @@ func (p *parser) constexprLoad(e expr) (expr, bool) {
 	return nil, false
 }
 
+// bitField is the bit-field e names, if it does.
+func bitField(e expr) *field {
+	if m, ok := e.(*member); ok && m.f.bits >= 0 {
+		return m.f
+	}
+	return nil
+}
+
 // constexprPlace finds the constexpr object e is in, and its offset.
 func constexprPlace(e expr) (*symbol, int64, bool) {
 	switch e := e.(type) {
@@ -380,7 +395,7 @@ func constexprPlace(e expr) (*symbol, int64, bool) {
 			return e.sym, 0, true
 		}
 	case *member:
-		if s, off, ok := constexprPlace(e.x); ok && e.f.bits < 0 {
+		if s, off, ok := constexprPlace(e.x); ok {
 			return s, off + e.f.off, true
 		}
 	case *deref:

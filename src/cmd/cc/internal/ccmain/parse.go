@@ -615,10 +615,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			}
 			if fa.packed || s.attrs.packed {
 				// A packed member: alignment 1.
-				if r.packed == 0 {
-					c := *f.t
-					f.t = &c
-				}
+				f.packed = true
 			}
 			fields = append(fields, f)
 			if !p.accept(",") {

@@ -367,7 +367,7 @@ func (g *gen) record(t *ctype) string {
 	bytes := r.union || r.packed > 0 || t.rec.align > 8 || !naturalLayout(r)
 	var fields []string
 	for i, f := range r.fields {
-		if f.bits >= 0 || f.t.align > f.t.unqual().alignofNatural() {
+		if f.bits >= 0 || f.packed || f.t.align > f.t.unqual().alignofNatural() {
 			bytes = true
 		}
 		if i == len(r.fields)-1 && f.t.sizeof() == 0 {

@@ -78,12 +78,13 @@ type record struct {
 }
 
 type field struct {
-	name  string // "" for an anonymous member or a padding bit-field
-	t     *ctype
-	off   int64
-	bits  int // a bit-field's width; -1 if not a bit-field
-	bitAt int // a bit-field's first bit in its storage unit at off
-	unit  *ctype
+	name   string // "" for an anonymous member or a padding bit-field
+	t      *ctype
+	off    int64
+	bits   int // a bit-field's width; -1 if not a bit-field
+	bitAt  int // a bit-field's first bit in its storage unit at off
+	unit   *ctype
+	packed bool // __attribute__((packed)) on the member: alignment 1
 }
 
 type funcType struct {
@@ -528,6 +529,9 @@ func (r *record) layout() {
 		fa := f.t.alignof()
 		if r.packed > 0 {
 			fa = min(fa, r.packed)
+		}
+		if f.packed {
+			fa = 1
 		}
 		if f.t.align > 0 && r.packed == 0 {
 			fa = max(fa, f.t.align)
