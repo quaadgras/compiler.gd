@@ -9,6 +9,7 @@ import (
 	"go/build"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"cmd/go/internal/cfg"
 	"cmd/internal/par"
@@ -18,6 +19,10 @@ import (
 // If the tool cannot be found, Tool exits the process.
 func Tool(toolName string) string {
 	toolPath, err := ToolPath(toolName)
+	if err != nil && LinkedTool(toolName) {
+		// Not on disk, and not needed there.
+		err = nil
+	}
 	if err != nil && len(cfg.BuildToolexec) == 0 {
 		// Give a nice message if there is no tool with that name.
 		fmt.Fprintf(os.Stderr, "go: no such tool %q\n", toolName)
@@ -56,3 +61,17 @@ func ValidToolName(toolName string) bool {
 }
 
 var toolStatCache par.Cache[string, error]
+
+// LinkedTool reports whether the go command runs the tool toolName
+// only as the copy that is linked into it: in WebAssembly (GOOS js or
+// wasip1), which cannot start another program, compile, asm and link.
+func LinkedTool(toolName string) bool {
+	if runtime.GOOS != "js" && runtime.GOOS != "wasip1" {
+		return false
+	}
+	switch toolName {
+	case "compile", "asm", "link":
+		return true
+	}
+	return false
+}

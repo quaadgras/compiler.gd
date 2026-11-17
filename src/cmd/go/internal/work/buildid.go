@@ -18,6 +18,7 @@ import (
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/str"
 	"cmd/internal/buildid"
+	"cmd/internal/objabi"
 	"cmd/internal/pathcache"
 	"cmd/internal/quoted"
 	"cmd/internal/telemetry/counter"
@@ -165,6 +166,15 @@ func (b *Builder) toolID(name string) string {
 		if name == "vet" {
 			path = VetTool
 			desc = VetTool
+		}
+
+		if base.LinkedTool(name) && len(cfg.BuildToolexec) == 0 {
+			// The tool is part of this program: it is what the
+			// go command's own build ID identifies.
+			if id := objabi.BuildID(); id != "" {
+				return contentID(id)
+			}
+			base.Fatalf("go: %s has no build ID to identify %s by", os.Args[0], desc)
 		}
 
 		cmdline := str.StringList(cfg.BuildToolexec, path, "-V=full")
