@@ -985,10 +985,17 @@ func (g *gen) callCode(c *call) string {
 				continue // an extra argument: ignored
 			}
 		}
+		if !direct && !isSimple(v) && !isPure(v) {
+			// C evaluates the arguments before the call, whose pointer
+			// is checked when Go evaluates the function.
+			t := g.tmp(goType(a.ty()))
+			if i >= len(c.ft.params) && a.ty().kind == kStruct {
+				t = g.tmp("c23.Ptr")
+			}
+			g.p("%s = %s", t, v)
+			v = t
+		}
 		args = append(args, v)
-	}
-	if direct && (fn == "c23.Malloc" || fn == "c23.Calloc" || fn == "c23.Realloc") {
-		// Untyped: see allocCall.
 	}
 	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
 	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
