@@ -11,8 +11,10 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
+	"cmp"
 	"internal/buildcfg"
 	"math"
+	"slices"
 )
 
 // Code generation for GOWASM=gc,split (stage 15 of doc/gd/wasm-gc.md).
@@ -56,6 +58,7 @@ type spAddr struct {
 	base  *ssa.Value // spBase
 	local int32      // spLocal
 	sym   *obj.LSym  // spStatic
+	name  *ir.Name   // spFrame: the variable
 	off   int64      // in bytes, from the base (spFrame: from fp)
 	dyn   []spTerm
 }
@@ -83,6 +86,7 @@ func (g *gcGen) spResolve(v *ssa.Value) spAddr {
 			n := v.Aux.(*ir.Name)
 			if off, ok := g.frame[n]; ok {
 				a.kind = spFrame
+				a.name = n
 				a.off += off
 				return a
 			}
@@ -179,7 +183,13 @@ func (g *gcGen) spPushPtrRel(a spAddr) {
 	case spLocal:
 		g.local(wasm.ALocalGet, a.local)
 	case spFrame:
-		g.local(wasm.ALocalGet, g.fptr)
+		if l, ok := g.framePtrs[a.name]; ok {
+			// A variable with pointers: its own pointer, and array.
+			g.local(wasm.ALocalGet, l)
+			a.off -= g.frame[a.name]
+		} else {
+			g.local(wasm.ALocalGet, g.fptr)
+		}
 	case spStatic:
 		g.global(wasm.AGlobalGet, wasm.GCGlobalStatic)
 		p := g.prog(wasm.AI32Const)
@@ -477,28 +487,54 @@ func (g *gcGen) splitNewObject(t *types.Type) {
 }
 
 // splitFrame makes the pointer to the frame in linear memory (g.fptr),
-// with an array for its pointers if any variable in it has some.
+// which has no array, and to each variable in it that has pointers
+// (g.framePtrs), which has an array of its own: what a variable points
+// to is kept as long as the variable is used (or a pointer to it), as
+// Go keeps what a live variable on the stack points to, and not as
+// long as the frame.
 func (g *gcGen) splitFrame() {
 	if len(g.frame) == 0 {
 		return
 	}
-	end := int64(0)
-	ptrs := false
-	for n, off := range g.frame {
-		end = max(end, off+n.Type().Size())
-		ptrs = ptrs || n.Type().HasPointers()
-	}
 	g.fptr = g.newLocal('r')
 	g.local(wasm.ALocalGet, g.fp)
-	if ptrs {
-		i32Const(g.s, int32((end+7)/8))
-		g.typed(wasm.AArrayNewDefault, wasm.GCTypeSym(g.ctxt, wasm.GCSlots), 0)
-	} else {
-		g.prog(wasm.ARefNull)
-	}
+	g.prog(wasm.ARefNull)
 	i32Const(g.s, 0)
 	g.typed(wasm.AStructNew, g.ptrSym(), 0)
 	g.local(wasm.ALocalSet, g.fptr)
+	names := make([]*ir.Name, 0, len(g.frame))
+	for n := range g.frame {
+		if n.Type().HasPointers() {
+			names = append(names, n)
+		}
+	}
+	slices.SortFunc(names, func(a, b *ir.Name) int { return cmp.Compare(g.frame[a], g.frame[b]) })
+	g.framePtrs = make(map[*ir.Name]int32)
+	for _, n := range names {
+		l := g.newLocal('r')
+		g.framePtrs[n] = l
+		g.local(wasm.ALocalGet, g.fp)
+		if off := g.frame[n]; off != 0 {
+			i32Const(g.s, int32(off))
+			g.prog(wasm.AI32Add)
+		}
+		i32Const(g.s, int32((n.Type().Size()+7)/8))
+		g.typed(wasm.AArrayNewDefault, wasm.GCTypeSym(g.ctxt, wasm.GCSlots), 0)
+		i32Const(g.s, 0)
+		g.typed(wasm.AStructNew, g.ptrSym(), 0)
+		g.local(wasm.ALocalSet, l)
+	}
+}
+
+// splitFrameVar pushes a pointer to the variable n in the frame.
+func (g *gcGen) splitFrameVar(n *ir.Name) {
+	if l, ok := g.framePtrs[n]; ok {
+		g.local(wasm.ALocalGet, l)
+		return
+	}
+	g.local(wasm.ALocalGet, g.fptr)
+	i32Const(g.s, int32(g.frame[n]))
+	g.helper(wasm.GCSplitAddPtr)
 }
 
 // splitCall emits the call v, if it is one that split compiles in its

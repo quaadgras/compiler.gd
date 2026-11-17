@@ -394,8 +394,12 @@ func reflect_unsafeslice(t *_type, ptr unsafe.Pointer, len int) {
 	if size != 0 && uintptr(len) > ^uintptr(0)/size || uintptr(len)*size > -uintptr(ptr) {
 		panic(plainError("unsafe.Slice: len out of range"))
 	}
-	// A pointer to linear memory, where addresses end at linLimit.
-	if a := trylinaddr(ptr); a != 0 && uintptr(len)*size > linLimit-a {
+	// A pointer to linear memory, where addresses end at linLimit
+	// (with split, every pointer is an address of 32 bits).
+	if a := trylinaddr(ptr); splitMode && uintptr(len)*size > 1<<32-a {
+		panic(plainError("unsafe.Slice: len out of range"))
+	}
+	if a := trylinaddr(ptr); a != 0 && uintptr(len)*size > linLimit-a && !splitMode {
 		panic(plainError("unsafe.Slice: len out of range"))
 	}
 }

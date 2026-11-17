@@ -78,10 +78,10 @@ type gcGen struct {
 	// The addressed variables that have no pointers are in the frame
 	// of the function on the stack in linear memory, at these offsets
 	// from the local fp.
-	frame     map[*ir.Name]int64
-	frameSize int64
-	fp        int32
-	csp       int32 // the top of the stack on entry: where the caller's frame ends
+	frame        map[*ir.Name]int64
+	frameSize    int64
+	fp           int32
+	csp          int32                  // the top of the stack on entry: where the caller's frame ends
 	fieldsLocals map[*obj.LSym][2]int32 // see fieldsLocal
 
 	// The instructions that have the size of the frame, which grows
@@ -102,11 +102,12 @@ type gcGen struct {
 	// recovering from a panic throws (see runtime/wasmgc/panic.go).
 	hasDefer bool
 
-	scratchI32, scratchRef, scratchI64 int32    // scratch locals, or -1
-	scratchI32b                        int32    // a second i32 scratch local (split), or -1
-	fptr                               int32    // split: the local of the pointer to the frame
-	scratchNil                         int32    // the scratch local of intToPtr, or -1
-	pos                                src.XPos // of the value being generated
+	scratchI32, scratchRef, scratchI64 int32              // scratch locals, or -1
+	scratchI32b                        int32              // a second i32 scratch local (split), or -1
+	fptr                               int32              // split: the local of the pointer to the frame
+	framePtrs                          map[*ir.Name]int32 // split: the local of the pointer to each variable with pointers in the frame
+	scratchNil                         int32              // the scratch local of intToPtr, or -1
+	pos                                src.XPos           // of the value being generated
 
 	// typedLoc is, for a pointer that is the base of more than one
 	// access, a local that holds it as a reference to the type of
@@ -3048,10 +3049,8 @@ func (g *gcGen) call(v *ssa.Value) {
 // v that are not in registers (see stackSlots).
 func (g *gcGen) slotArgs(v *ssa.Value) {
 	for _, n := range g.callSlots[v.ID] {
-		if off, ok := g.frame[n]; ok && gcSplit() {
-			g.local(wasm.ALocalGet, g.fptr)
-			i32Const(g.s, int32(off))
-			g.helper(wasm.GCSplitAddPtr)
+		if _, ok := g.frame[n]; ok && gcSplit() {
+			g.splitFrameVar(n)
 			continue
 		}
 		g.local(wasm.ALocalGet, g.objs[n])
