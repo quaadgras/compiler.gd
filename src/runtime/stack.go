@@ -990,6 +990,9 @@ func copystack(gp *g, newsize uintptr) {
 	adjustctxt(gp, &adjinfo)
 	adjustdefers(gp, &adjinfo)
 	adjustpanics(gp, &adjinfo)
+	if gp.c23 != nil && c23StackMove != nil {
+		c23StackMove(gp.c23, old.lo, old.hi, adjinfo.delta)
+	}
 	if adjinfo.sghi != 0 {
 		adjinfo.sghi += adjinfo.delta
 	}

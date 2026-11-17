@@ -11,6 +11,7 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
 	"cmd/internal/obj/wasm"
+	"cmd/internal/objabi"
 	"cmp"
 	"internal/buildcfg"
 	"math"
@@ -301,6 +302,14 @@ func (g *gcGen) splitStore(addr *ssa.Value, t *types.Type, have byte, val func()
 func (g *gcGen) splitPointer(v *ssa.Value) {
 	a := g.spResolve(v)
 	if g.wtype(v.Type) == 'l' {
+		if a.kind == spStatic && len(a.dyn) == 0 && (a.sym.Type == objabi.STEXT || a.sym.Func() != nil) {
+			// A function's address (its index << 16) is past
+			// what an i32 holds in a program of more than 28672
+			// functions.
+			p := g.prog(wasm.AI64Const)
+			p.From = obj.Addr{Type: obj.TYPE_ADDR, Name: obj.NAME_EXTERN, Sym: a.sym, Offset: a.off}
+			return
+		}
 		off := g.spPushAddr(a)
 		if off != 0 {
 			i32Const(g.s, int32(off))

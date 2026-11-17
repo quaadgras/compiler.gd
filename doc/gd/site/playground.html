@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playground: compiler.gd</title>
+<meta name="description" content="Compile and run Go in your browser with the gd go command, itself compiled to WebAssembly.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
+<link rel="stylesheet" href="style.css">
+<style>
+  main.wide { max-width: 64rem; }
+  .lede { margin-bottom: 1.5rem; }
+  .panel { border: 1px solid var(--line); border-radius: 10px; background: var(--code-bg); overflow: hidden; }
+  .pbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding: .55rem .6rem; }
+  .pbar.top { background: var(--bg); border-bottom: 1px solid var(--line); position: relative; }
+  .btn {
+    font: inherit; font-size: .88rem; line-height: 1.2; padding: .45rem .85rem; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: transparent; color: var(--fg);
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn:focus-visible, select.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn .hint { font-weight: 400; opacity: .75; margin-left: .45rem; font-size: .8em; }
+  .pbar .status { color: var(--muted); font-size: .85rem; margin-left: auto; font-variant-numeric: tabular-nums; padding-right: .25rem; }
+  .progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; }
+  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .progress[hidden] { display: none; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: .86rem; line-height: 1.55; tab-size: 4; }
+  .editor { display: flex; }
+  .gutter {
+    flex: none; overflow: hidden; padding: 1rem .6rem 1rem .9rem; text-align: right; color: var(--muted); opacity: .6;
+    user-select: none; white-space: pre; border-right: 1px solid var(--line); min-width: 2.6rem;
+  }
+  textarea {
+    flex: 1; min-width: 0; min-height: 22rem; margin: 0; padding: 1rem; border: 0; border-radius: 0; resize: vertical;
+    background: transparent; color: var(--fg); white-space: pre; overflow: auto; caret-color: var(--accent);
+  }
+  textarea:focus { outline: none; }
+  .editor:focus-within { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .pbar.mid { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--bg); padding: .4rem 1rem; font-size: .8rem; min-height: 2.1rem; }
+  .pbar.mid .label { font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: .72rem; }
+  .build { display: flex; align-items: center; gap: .45rem; margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .build.failed { color: var(--err); }
+  .build .spin { width: .7rem; height: .7rem; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .build .spin { animation-duration: 2s; } }
+  .out { margin: 0; padding: 1rem; min-height: 7rem; max-height: 28rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: transparent; border-radius: 0; }
+  .out .e { color: var(--err); }
+  .out:empty::before { content: "Output appears here."; color: var(--muted); opacity: .7; font-family: inherit; }
+  .stats { border-top: 1px solid var(--line); padding: .35rem 1rem; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+  .stats:empty { display: none; }
+  details.about { margin-top: 2.25rem; border-top: 1px solid var(--line); padding-top: .5rem; }
+  details.about summary { cursor: pointer; font-weight: 600; font-size: 1.05rem; padding: .5rem 0; list-style: none; display: flex; align-items: center; gap: .5rem; }
+  details.about summary::-webkit-details-marker { display: none; }
+  details.about summary::before { content: ""; width: .45rem; height: .45rem; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform .15s; margin-right: .15rem; }
+  details.about[open] summary::before { transform: rotate(45deg); }
+  details.about summary:hover { color: var(--accent); }
+  kbd { font-family: inherit; font-size: .85em; border: 1px solid var(--line); border-radius: 4px; padding: 0 .3em; }
+  @media (max-width: 40rem) {
+    /* (Under 16px, iOS zooms into the editor.) */
+    .mono { font-size: 16px; }
+    textarea { min-height: 16rem; }
+    .btn .hint { display: none; }
+    .pbar .status { width: 100%; margin-left: 0; order: 9; padding: 0 .25rem; }
+  }
+</style>
+</head>
+<body>
+<main class="wide">
+  <div class="titlebar">
+    <a class="back" href="/" aria-label="Back to compiler.gd" title="compiler.gd"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M15 4.5 7.5 12l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <h1>Play<span>ground</span></h1>
+  </div>
+  <p class="lede">Go (or C) compiled in your browser by the gd <code>go</code> command, which is itself compiled to WebAssembly.</p>
+
+  <section class="panel" aria-label="Playground">
+    <div class="pbar top">
+      <button id="run" class="btn primary" disabled title="Run (Ctrl+Enter)">Run<span class="hint" id="hint">Ctrl ↵</span></button>
+      <button id="stop" class="btn" hidden>Stop</button>
+      <select id="example" class="btn" aria-label="Examples"><option value="" hidden>Examples</option></select>
+      <button id="share" class="btn" title="Copy a link with this code">Share</button>
+      <span class="status" id="status">loading…</span>
+      <div class="progress" id="progress" hidden><i></i></div>
+    </div>
+    <div class="editor">
+      <div class="gutter mono" id="gutter" aria-hidden="true">1</div>
+      <textarea id="src" class="mono" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Source (Go, or C)"></textarea>
+    </div>
+    <div class="pbar mid"><span class="label">Output</span><div class="build" id="build" aria-live="polite"></div></div>
+    <pre class="out mono" id="out" aria-live="polite"></pre>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <details class="about">
+    <summary>How it works</summary>
+    <ol>
+      <li>The <code>go</code> command for <code>GOOS=js</code> (24 MB, downloaded once) builds in a worker; <code>compile</code> and <code>link</code> are part of it.</li>
+      <li>Programs run on the WebAssembly GC: bytes in linear memory, pointers in GC arrays, freed by the browser's collector.</li>
+      <li>The build cache lives in IndexedDB. Common packages come precompiled; others compile on first use.</li>
+      <li>C works through cgo's <code>import "C"</code>, translated by the fork's own C front end (<code>cc</code>), which bounds-checks every access.</li>
+      <li>Code that doesn't start with <code>package</code> is C, run from its <code>int main(void)</code>.</li>
+      <li>Standard library only (no modules). <kbd>Ctrl</kbd>+<kbd>Enter</kbd> runs.</li>
+      <li>Needs WebAssembly GC and JSPI: Chrome 137, Firefox 153, Safari 27.</li>
+    </ol>
+  </details>
+
+  <footer>
+    <a href="https://github.com/quaadgras/compiler.gd">github.com/quaadgras/compiler.gd</a> · MIT licensed
+  </footer>
+</main>
+<script type="module">
+const examples = {
+  'Hello': `package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+func main() {
+	fmt.Println("Hello from", runtime.GOOS+"/"+runtime.GOARCH, "built in your browser")
+}
+`,
+  'Goroutines': `package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+func main() {
+	results := make(chan string)
+	var wg sync.WaitGroup
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			time.Sleep(time.Duration(6-i) * 50 * time.Millisecond)
+			results <- fmt.Sprintf("worker %d done", i)
+		}()
+	}
+	go func() { wg.Wait(); close(results) }()
+	for r := range results {
+		fmt.Println(r)
+	}
+}
+`,
+  'Generics': `package main
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
+
+type Pair[K cmp.Ordered, V any] struct {
+	Key K
+	Val V
+}
+
+func SortedPairs[K cmp.Ordered, V any](m map[K]V) []Pair[K, V] {
+	out := make([]Pair[K, V], 0, len(m))
+	for k, v := range m {
+		out = append(out, Pair[K, V]{k, v})
+	}
+	slices.SortFunc(out, func(a, b Pair[K, V]) int { return cmp.Compare(a.Key, b.Key) })
+	return out
+}
+
+func main() {
+	ages := map[string]int{"gopher": 16, "wasm": 9, "gd": 1}
+	for _, p := range SortedPairs(ages) {
+		fmt.Printf("%-7s %d\\n", p.Key, p.Val)
+	}
+}
+`,
+  'JSON': `package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+type Word struct {
+	Text string \`json:"text"\`
+	Len  int    \`json:"len"\`
+}
+
+func main() {
+	var words []Word
+	for _, w := range strings.Fields("the go command compiled this in the page") {
+		words = append(words, Word{w, len(w)})
+	}
+	b, err := json.MarshalIndent(words[:3], "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(b))
+}
+`,
+  'C (cgo)': `package main
+
+/*
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct node {
+	int v;
+	struct node *next;
+};
+
+// A list built by C, in memory that Go's collector manages.
+struct node *squares(int n) {
+	struct node *head = NULL;
+	for (int i = n; i > 0; i--) {
+		struct node *x = malloc(sizeof *x);
+		x->v = i * i;
+		x->next = head;
+		head = x;
+	}
+	return head;
+}
+
+long sum(int a[], int n) {
+	long s = 0;
+	for (int i = 0; i < n; i++)
+		s += a[i];
+	return s;
+}
+
+void shout(char *s) {
+	for (size_t i = 0; i < strlen(s); i++)
+		if (s[i] >= 'a' && s[i] <= 'z')
+			s[i] -= 'a' - 'A';
+	printf("C says: %s\\n", s);
+}
+*/
+import "C"
+
+import (
+	"fmt"
+	"runtime"
+	"unsafe"
+)
+
+func main() {
+	// C's list, walked by Go as Go structs.
+	fmt.Print("squares from C:")
+	for n := C.squares(5); n != nil; n = n.next {
+		fmt.Print(" ", n.v)
+	}
+	fmt.Println()
+
+	// Go's slice, summed by C.
+	xs := []C.int{1, 2, 3, 4}
+	fmt.Println("C sums Go's slice:", C.sum(&xs[0], C.int(len(xs))))
+
+	// Strings, as with cgo.
+	s := C.CString("hello from go, compiled in your browser")
+	defer C.free(unsafe.Pointer(s))
+	C.shout(s)
+	fmt.Println("Go reads it back:", C.GoString(s))
+
+	// C is checked: reading past Go's slice is a panic, not a wild read.
+	defer func() { fmt.Println("recovered:", recover()) }()
+	runtime.GC()
+	fmt.Println(C.sum(&xs[0], C.int(len(xs)+1)))
+}
+`,
+  'C': `#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// C, without Go: the playground runs main. The go command translates it
+// with its own C front end (cc), into Go that checks every access.
+
+struct node {
+	char *word;
+	struct node *next;
+};
+
+static struct node *push(struct node *list, char *word) {
+	struct node *n = malloc(sizeof *n);
+	n->word = word;
+	n->next = list;
+	return n;
+}
+
+int main(void) {
+	char text[] = "C in the browser on the WebAssembly GC";
+	struct node *words = NULL;
+	char *w = text;
+	for (char *p = text; ; p++) {
+		if (*p == ' ' || *p == 0) {
+			int end = *p == 0;
+			*p = 0;
+			words = push(words, w);
+			if (end)
+				break;
+			w = p + 1;
+		}
+	}
+
+	printf("backwards:");
+	for (struct node *n = words; n != NULL; n = n->next)
+		printf(" %s", n->word);
+	printf("\\n");
+
+	int squares[5];
+	for (int i = 0; i < 5; i++)
+		squares[i] = i * i;
+	printf("squares[4] = %d\\n", squares[4]);
+	printf("squares[5] = %d\\n", squares[5]); // out of bounds: caught
+	return 0;
+}
+`,
+  'Panic': `package main
+
+import "fmt"
+
+func main() {
+	defer func() {
+		fmt.Println("recovered:", recover())
+	}()
+	var m map[string]int
+	m["boom"] = 1
+}
+`,
+};
+
+const $ = (id) => document.getElementById(id);
+const src = $('src'), out = $('out'), run = $('run'), stop = $('stop'), status = $('status'), progress = $('progress');
+for (const name of Object.keys(examples)) $('example').add(new Option(name, name));
+let saved = null;
+try { saved = localStorage.getItem('gd-play-src'); } catch {}
+src.value = saved || examples.Hello;
+
+// Line numbers, kept beside the text as it scrolls.
+const gutter = $('gutter');
+let shownLines = 0;
+const numberLines = () => {
+  const n = src.value.split('\n').length;
+  if (n === shownLines) return;
+  shownLines = n;
+  gutter.textContent = Array.from({ length: n }, (_, i) => i + 1).join('\n') + '\n';
+};
+src.addEventListener('input', numberLines);
+src.addEventListener('scroll', () => { gutter.scrollTop = src.scrollTop; });
+numberLines();
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+  $('hint').textContent = '⌘ ↵';
+  $('run').title = 'Run (⌘+Enter)';
+}
+
+// Sharing: the code, deflated and in base64url, is the URL's fragment
+// (#code=...), which browsers do not send to the server.
+const toB64 = (bytes) => {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const fromB64 = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+const encode = async (code) => toB64(await pipe(new TextEncoder().encode(code), new CompressionStream('deflate-raw')));
+const decode = async (text) => new TextDecoder().decode(await pipe(fromB64(text), new DecompressionStream('deflate-raw')));
+
+async function loadShared() {
+  const m = location.hash.match(/^#code=([A-Za-z0-9_-]+)$/);
+  if (!m) return;
+  try {
+    src.value = await decode(m[1]);
+    numberLines();
+    $('example').value = '';
+  } catch {
+    print('This link\'s code could not be read.', 2);
+  }
+}
+loadShared();
+addEventListener('hashchange', loadShared);
+// The link is of the code as shared: an edit makes it stale.
+src.addEventListener('input', () => {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+});
+
+const share = $('share');
+let shareReset = 0;
+share.onclick = async () => {
+  const url = location.origin + location.pathname + '#code=' + await encode(src.value);
+  history.replaceState(null, '', url);
+  try { localStorage.setItem('gd-play-src', src.value); } catch {}
+  clearTimeout(shareReset);
+  try {
+    await navigator.clipboard.writeText(url);
+    share.textContent = 'Link copied';
+  } catch {
+    // No clipboard (an insecure page, or not allowed): the link is in
+    // the address bar.
+    share.textContent = 'Link in address bar';
+  }
+  shareReset = setTimeout(() => { share.textContent = 'Share'; }, 2000);
+};
+
+// The playground's own notes (fd 0: exit status, load time) go under the
+// output, not in it; how the build went, above it.
+const stats = $('stats'), build = $('build');
+let ticker = 0;
+const setBuild = (text, failed) => {
+  clearInterval(ticker);
+  build.className = 'build' + (failed ? ' failed' : '');
+  build.textContent = text;
+  if (text === 'failed') build.textContent = 'build failed';
+  if (text !== 'building') return;
+  // Building: a spinner and the time so far.
+  const t0 = performance.now();
+  build.textContent = '';
+  const spin = document.createElement('i');
+  spin.className = 'spin';
+  const label = document.createElement('span');
+  build.append(spin, label);
+  const tick = () => { label.textContent = `building… ${((performance.now() - t0) / 1000).toFixed(1)} s`; };
+  tick();
+  ticker = setInterval(tick, 100);
+};
+let notes = [];
+const print = (line, fd) => {
+  if (fd === 0) {
+    notes.push(line.replace(/^\[|\]$/g, ''));
+    stats.textContent = notes.join(' · ');
+    return;
+  }
+  const s = document.createElement('span');
+  if (fd === 2) s.className = 'e';
+  s.textContent = line + '\n';
+  out.append(s);
+};
+const clear = () => {
+  out.textContent = '';
+  notes = [];
+  stats.textContent = '';
+  setBuild('');
+};
+
+let worker, ready = false, running = false;
+const loads = new Map();
+function start() {
+  ready = false;
+  run.disabled = true;
+  worker = new Worker('playground/worker.mjs', { type: 'module' });
+  worker.onerror = (e) => { print('worker: ' + (e.message || 'failed to start'), 2); status.textContent = 'failed'; };
+  worker.onmessage = ({ data }) => {
+    if ('line' in data) print(data.line, data.fd);
+    if ('build' in data) setBuild(data.build, data.failed);
+    if ('status' in data) {
+      if (data.total) {
+        loads.set(data.status, data);
+        let done = 0, total = 0;
+        for (const l of loads.values()) { done += l.done; total += l.total; }
+        progress.hidden = false;
+        progress.firstElementChild.style.width = (100 * done / total).toFixed(1) + '%';
+        status.textContent = `${data.status}: ${(done / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB`;
+      } else {
+        status.textContent = data.status + (data.status === 'failed' ? '' : '…');
+      }
+    }
+    if (data.ready) {
+      ready = true;
+      progress.hidden = true;
+      status.textContent = 'ready';
+      run.disabled = false;
+    }
+    if (data.finished) {
+      running = false;
+      stop.hidden = true;
+      run.disabled = false;
+      status.textContent = 'ready';
+    }
+  };
+}
+
+function go() {
+  if (!ready || running) return;
+  try { localStorage.setItem('gd-play-src', src.value); } catch {}
+  running = true;
+  run.disabled = true;
+  stop.hidden = false;
+  status.textContent = '';
+  clear();
+  worker.postMessage({ run: src.value });
+}
+
+run.onclick = go;
+stop.onclick = () => {
+  // A program may never return: start over (the cache is kept).
+  worker.terminate();
+  if (build.querySelector('.spin')) setBuild('build stopped');
+  running = false;
+  stop.hidden = true;
+  print('[stopped]', 0);
+  start();
+};
+$('example').onchange = (e) => {
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  src.value = examples[e.target.value];
+  numberLines();
+  clear();
+};
+src.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    go();
+  } else if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const { selectionStart: a, selectionEnd: b } = src;
+    src.setRangeText('\t', a, b, 'end');
+    src.dispatchEvent(new Event('input'));
+  }
+});
+
+if (!('Suspending' in WebAssembly) || !('promising' in WebAssembly)) {
+  status.textContent = 'not supported here';
+  print('This browser lacks JavaScript Promise Integration (WebAssembly.Suspending), which the playground needs: Chrome 137, Firefox 153 or Safari 27 have it.', 2);
+} else {
+  start();
+}
+</script>
+</body>
+</html>

@@ -1014,7 +1014,14 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 			off = r.Off()
 			switch r.Type() {
 			case objabi.R_ADDR:
-				writeSleb128(wfn, ldr.SymValue(rs)+r.Add())
+				v := ldr.SymValue(rs) + r.Add()
+				if r.Off() > 0 && P[r.Off()-1] == 0x41 && v != int64(int32(v)) {
+					// An i32.const: a function's address (its
+					// index << 16) does not fit when there are
+					// more than 28672 functions.
+					ldr.Errorf(fn, "address of %s (%#x) does not fit in an i32.const", ldr.SymName(rs), v)
+				}
+				writeSleb128(wfn, v)
 			case objabi.R_CALL:
 				if k := jsHelper(ldr.SymName(rs)); k >= 0 {
 					// (Made only for a program that calls them,

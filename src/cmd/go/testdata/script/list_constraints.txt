@@ -12,7 +12,8 @@ stdout '^cgoimport.go $'
 go list -f '{{range .Imports}}{{.}} {{end}}'
 stdout '^C cgoimport cgotag suffix tag $'
 
-# Disabling cgo should exclude cgo files and their imports.
+# Disabling cgo should exclude cgo files and their imports (in a package
+# that cmd/cc cannot build: gd fork).
 env CGO_ENABLED=0
 go list -f '{{range .GoFiles}}{{.}} {{end}}'
 stdout 'empty.go suffix_linux.go tag.go'
@@ -76,6 +77,9 @@ import _ "cgotag"
 -- cgoimport.go --
 package p
 
+// gd fork: a #cgo directive, so that cmd/cc does not build this package
+// when cgo is off (see cc_cgo_off.txt), and cgo's files are left out.
+// #cgo LDFLAGS: -lm
 import "C"
 
 import _ "cgoimport"

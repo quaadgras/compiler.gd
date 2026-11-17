@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>go build in a page</title>
+<!-- The go command, compiled for GOOS=js, building and running a program
+     in this page (worker.mjs). Run build.sh, serve the repository's root
+     (python3 -m http.server) and open /doc/gd/bench/wasmgc/gocmd/. -->
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --accent: #0071e3; --err: #b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161618; --fg: #ececf0; --muted: #9a9aa2; --line: #3a3a3f; --accent: #4c9dff; --err: #ff8a80; }
+  }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; display: grid; gap: 12px; }
+  textarea, pre { box-sizing: border-box; width: 100%; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px;
+    background: transparent; color: inherit; font: 13px/1.45 ui-monospace, monospace; tab-size: 4; }
+  textarea { height: 220px; resize: vertical; }
+  pre { min-height: 160px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .err { color: var(--err); }
+  .note { color: var(--muted); }
+  .bar { display: flex; gap: 12px; align-items: center; }
+  button { padding: 6px 16px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { color: var(--muted); }
+</style>
+<main>
+  <h1 style="margin:0;font-size:18px">go build, in this page</h1>
+  <textarea id="src" spellcheck="false">package main
+
+import (
+	"fmt"
+	"runtime"
+)
+
+func main() {
+	fmt.Println("hello from a program built in the page, for", runtime.GOOS+"/"+runtime.GOARCH)
+}
+</textarea>
+  <div class="bar"><button id="run" disabled>Build and run</button><span id="status"></span></div>
+  <pre id="out"></pre>
+</main>
+<script type="module">
+const out = document.getElementById('out');
+const button = document.getElementById('run');
+const worker = new Worker('worker.mjs', { type: 'module' });
+const print = (line, fd) => {
+  const span = document.createElement('span');
+  span.className = fd === 2 ? 'err' : fd === 0 ? 'note' : '';
+  span.textContent = line + '\n';
+  out.append(span);
+};
+worker.onmessage = ({ data }) => {
+  if ('line' in data) print(data.line, data.fd);
+  if ('status' in data) document.getElementById('status').textContent = data.status;
+  if (data.done) {
+    button.disabled = false;
+    document.title = 'done';
+  }
+};
+worker.onerror = (e) => print('worker: ' + e.message, 2);
+button.onclick = () => {
+  button.disabled = true;
+  document.title = 'building';
+  out.textContent = '';
+  worker.postMessage({ build: document.getElementById('src').value });
+};
+button.disabled = false;
+if (new URLSearchParams(location.search).has('auto')) button.click();
+</script>
