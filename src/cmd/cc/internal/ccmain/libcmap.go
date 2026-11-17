@@ -23,4 +23,3 @@ var libc = map[string]string{
 	"strrchr": "Strrchr", "strstr": "Strstr", "strdup": "Strdup", "strndup": "Strndup",
 	"strspn": "Strspn", "strcspn": "Strcspn", "__cc_stdio": "Stdio",
 }
-
