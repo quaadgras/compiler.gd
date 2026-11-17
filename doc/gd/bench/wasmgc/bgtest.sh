@@ -14,7 +14,8 @@
 # tree as it is now: its commit and what is changed in it (a new file
 # only if it is staged: git add), or to the commit $GOTESTREV. It
 # builds its own compiler and
-# linker, with its own caches. The results go to $GOTESTOUT (by default
+# linker, with its own caches. The model is $GOTESTWASM (by default gc;
+# gc,split for the other). The results go to $GOTESTOUT (by default
 # /tmp/go-bgtest): a file for each suite (the status of every test) and
 # summary.txt, one line for each suite; nothing of this tree is written.
 set -e
@@ -23,6 +24,9 @@ root=$(cd "$here/../../../.." && pwd)
 tree=${GOTESTTREE:-$(dirname "$root")/go-pkgtests}
 out=${GOTESTOUT:-/tmp/go-bgtest}
 suites=${*:-conformance std}
+wasm=${GOTESTWASM:-gc}
+split=
+case $wasm in *split*) split=-split ;; esac
 mkdir -p "$out"
 
 # One run at a time: they share the tree.
@@ -43,7 +47,7 @@ cd "$tree"
 git checkout -q -f --detach "$snap"
 : >"$out/summary.txt"
 if [ -n "$GOTESTREV" ]; then
-	echo "commit $(git rev-parse --short "$snap"), $(date +%H:%M)" >>"$out/summary.txt"
+	echo "commit $(git rev-parse --short "$snap"), GOWASM=$wasm, $(date +%H:%M)" >>"$out/summary.txt"
 else
 	echo "tree $(git -C "$root" rev-parse --short HEAD) + $(git -C "$root" status --short | grep -vc '^??') files changed, $(date +%H:%M)" >>"$out/summary.txt"
 fi
@@ -54,9 +58,9 @@ if ! "$tree/bin/go" install cmd/compile cmd/asm cmd/link cmd/go >"$out/build.log
 	echo "build FAILED: see $out/build.log" >>"$out/summary.txt"
 	exit 1
 fi
-export GOCACHE=$out/gocache GOOS=wasip1 GOARCH=wasm GOWASM=gc PATH=$tree/bin:$tree/lib/wasm:$PATH
+export GOCACHE=$out/gocache GOOS=wasip1 GOARCH=wasm GOWASM=$wasm PATH=$tree/bin:$tree/lib/wasm:$PATH
 bench=$tree/doc/gd/bench/wasmgc
-mkdir -p "$bench/conformance/out"
+mkdir -p "$bench/conformance/out$split"
 jobs=${GOTESTJOBS:-8}
 
 for suite in $suites; do
@@ -65,7 +69,7 @@ for suite in $suites; do
 	case $suite in
 	conformance*)
 		GOWASIRUNTIME=$browser nice python3 "$bench/conformance/run.py" -j "$jobs" >"$out/$suite.log" 2>&1 || true
-		cp "$bench/conformance/status${browser:+-$browser}.txt" "$out/$suite.txt"
+		cp "$bench/conformance/status$split${browser:+-$browser}.txt" "$out/$suite.txt"
 		echo "$suite: $(head -1 "$out/$suite.txt")" >>"$out/summary.txt"
 		grep '^FAIL' "$out/$suite.txt" | head -20 | cut -c1-200 | sed 's/^/  /' >>"$out/summary.txt"
 		;;
