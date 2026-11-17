@@ -1680,3 +1680,102 @@ Work list (kept current):
    `std/status-split.txt`: all 255 packages pass under node (the first
    survey had 238; what the others found is above). Not run in a
    browser.
+
+#### Reviewed and merged (2026-11-17)
+
+Run again on the branch before it was merged, in a tree of their own
+(`GOTESTWASM=gc,split bgtest.sh`): `GOWASM=gc` is as it was
+(conformance 947 of 965, std 255 of 255); `GOWASM=gc,split` conformance
+947, std 254 and one failure now and then, `sync`'s `TestOnceXGC`
+("wrapped function garbage collected too early"). That one was not the
+model: `linfree` left a block's list of cleanups in its header, and the
+block's next allocation freed ran another block's cleanups (in both
+models; `compiled/tests/cleanups.go`). Fixed.
+
+In a browser: conformance with `GOWASM=gc,split` in Firefox is 943 of
+947, the four that fail failing with `GOWASM=gc` there too (three in
+the host's scheduler, and `init1.go`, which wants memory collected at a
+time of its choosing). Std was not run in a browser.
+
+What keeps a block alive is the part of the model that rests on what
+engines do rather than on what they must: a block is freed when its
+array is collected, and an address in a local keeps no array. What
+stands in the way today: a block's pointer goes to the host when it is
+made (so it is not a value the engine can take apart), a pointer's
+address is a mutable field (read again after a call), and a pointer
+made by `wasm.addptr` is stored in a global. `compiled/tests/lifetime.go`
+is a test of it (values that only locals reach, used on both sides of
+calls that collect and free); it passes under node with V8's baseline
+compiler alone, its optimizing compiler alone and both, in Chromium and
+in Firefox. It was not shown to fail on the model before the fix above
+("A block in use was freed"). A stronger form, if an engine ever does
+take these apart: the address of a block in the object that the host
+holds (its array's owner), read through it at each use, at the cost of
+a load more for each access.
+
+The benchmark of stage 14 (`GOWASM=gc` against `GOWASM=gc,split`, ms,
+node 24; the binary 643,563 and 429,663 bytes):
+
+|                     | gc  | gc,split |
+|---------------------|----:|---------:|
+| append []string     |  90 | 384 |
+| append []rec        |  33 | 342 |
+| append []any        |  80 | 334 |
+| copy []string       |  56 | 1.3 |
+| copy []rec          |  59 | 3.8 |
+| map[key]rec         |  91 | 112 |
+| map[string]string   |  89 |  76 |
+| chan rec            |  30 |  48 |
+| interior pointers   |  19 | 8.4 |
+| sort []string       | 214 | 131 |
+| strings.Fields/Join |  40 |  58 |
+| Sprintf             | 465 | 459 |
+
+What allocates is 4 to 10 times slower; what copies or follows
+pointers into the middle of values is faster; the rest is near.
+
+
+### Stage 16: pointers of 32 bits, then cgo (decided 2026-11-17, not started)
+
+With `GOWASM=gc,split` a Go value is bytes in the memory that C
+compiled by clang for wasm32 has too: a buffer or a struct can be given
+to C as it is. What is in the way is the size of a word: Go's wasm has
+pointers and `int` of 8 bytes, clang's wasm32 of 4, so a C struct with
+a pointer in it is laid out differently on the two sides.
+
+Decided:
+
+- **Pointers of 32 bits**, under `GOARCH=wasm` with `GOWASM=gc` (not a
+  new `GOARCH`: what is tagged `wasm` stays in). `int` and `uintptr`
+  are 32 bits with them, as on 386 and arm (the compiler has one size
+  for all three); registers stay 64 bits, so `int64` arithmetic is one
+  instruction. C and Go then lay a struct out alike, as on 32-bit arm,
+  and existing cgo code needs no change. The arrays of pointers stay: a
+  struct in memory holds the 32-bit addresses, and the pointers that
+  the engine follows are in locals and in the arrays.
+- **cgo by clang's wasm32, linked by our linker**: it reads clang's
+  relocatable objects (`wasm-ld -r` can make one of many), and no other
+  linker makes the module.
+- **C's stack as on native**, but one for each goroutine that is in C
+  (from a pool), since there is one thread: C keeps its stack in linear
+  memory by one global, and a goroutine that blocks in a callback would
+  have its frames written over by the next to enter C.
+- **libc**: `malloc`, `free`, `realloc` and `calloc` are the Go
+  allocator's (V8 aborts when memory grows on a goroutine's stack, and
+  one heap is better than two), and so is what blocks or sleeps; what
+  only computes (`memcpy`, `strlen`, `qsort`, `printf`'s formatting) is
+  C compiled from a libc; files, time and the environment are the WASI
+  imports that Go already uses, so C and Go see the same files.
+
+Also needed: cgo reads the sizes of C's types from the debug
+information of an object file, and has no reader for wasm's.
+
+What it should make smaller, estimated from the sections of the
+stripped `fmt` hello world with `GOWASM=gc,split` (316 KB: code 189 KB,
+data 101 KB, about half of the data the descriptors of types, which are
+mostly words): 20 to 30 KB of data, and some 2,300 conversions between
+32 and 64 bits in the code. Slices are 12 bytes, not 24; strings and
+interfaces 8, not 16.
+
+A first proof of cgo, after the pointers: Go calls a C function
+compiled without a libc, and they pass a buffer both ways.
