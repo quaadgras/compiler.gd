@@ -171,13 +171,9 @@ func testInterop(t *testing.T, env []string, split bool) {
 		"Go's value after: 7 2\n",
 	} {
 		if split {
-			// No panic to recover from (deref_split.go), and escape
-			// analysis keeps less on the stack (noescape_split.go).
+			// No panic to recover from (deref_split.go).
 			if strings.Contains(want, "trapped: runtime error") {
 				want = want[:strings.Index(want, "trapped:")] + "not tried"
-			}
-			if strings.HasPrefix(want, "allocations per call") {
-				continue
 			}
 		}
 		if !strings.Contains(out, want) {
