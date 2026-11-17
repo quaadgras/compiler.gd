@@ -1050,8 +1050,13 @@ func (p *parser) primary() expr {
 		s := p.lookup(t.text)
 		if s == nil {
 			if p.is("(") {
-				// C89's implicit declaration: int f().
-				sym := &symbol{name: t.text, kind: symFunc, t: &ctype{kind: kFunc, fn: &funcType{ret: tInt}}, global: true, linkage: 'e', p: at}
+				// C89's implicit declaration: int f(), unless it is the
+				// library's, whose header says what it is.
+				ft := &ctype{kind: kFunc, fn: &funcType{ret: tInt}}
+				if lt := libcType(t.text); lt != nil {
+					ft = lt
+				}
+				sym := &symbol{name: t.text, kind: symFunc, t: ft, global: true, linkage: 'e', p: at}
 				if g := p.u.scope[t.text]; g != nil {
 					sym = g
 				} else {
