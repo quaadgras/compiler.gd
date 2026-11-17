@@ -43,6 +43,7 @@ var gcExports = map[string]string{
 	"free":      "runtime.linfree",
 	"sched":     "runtime.sched",
 	"gorun":     "runtime.gorun",
+	"unstart":   "runtime.unstart",
 	"deadlock":  "runtime.deadlock",
 	"timerwait": "runtime.timerwait",
 	"cleanup":   "runtime.runcleanup",
@@ -1091,7 +1092,7 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 		fn   loader.Sym
 	}
 	var exports []export
-	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}} {
+	for _, e := range []export{{name: "free"}, {name: "sched"}, {name: "gorun"}, {name: "unstart"}, {name: "deadlock"}, {name: "timerwait"}, {name: "cleanup"}} {
 		for v := 0; v < 2 && e.fn == 0; v++ {
 			e.fn = ldr.Lookup(gcExports[e.name], v)
 		}
@@ -1102,13 +1103,13 @@ func asmb2GC(ctxt *ld.Link, ldr *loader.Loader) {
 	section(sectionExport, func(w *bytes.Buffer) {
 		n := 5 + len(exports)
 		if splitMode() {
-			n += 2
+			n += 3
 		}
 		writeUleb128(w, uint64(n))
 		if splitMode() {
 			// For the host: the array of a pointer (see
 			// gcSplitSlotsOf), and a pointer of its parts.
-			for _, e := range [][2]string{{"slotsof", gcSplitSlotsOf}, {"mkptr", gcSplitMkPtr}} {
+			for _, e := range [][2]string{{"slotsof", gcSplitSlotsOf}, {"mkptr", gcSplitMkPtr}, {"setptr", gcSplitSetPtr}} {
 				writeName(w, e[0])
 				w.WriteByte(0x00)
 				i, _ := l.splitHelperIndex(e[1])

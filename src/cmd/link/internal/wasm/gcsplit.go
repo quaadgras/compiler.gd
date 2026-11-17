@@ -44,6 +44,7 @@ var gcSplitHelpers = []string{
 	wasm.GCSplitNew,
 	gcSplitSlotsOf,
 	gcSplitMkPtr,
+	gcSplitSetPtr,
 }
 
 // gcSplitSlotsOf is the function, exported to the host as "slotsof",
@@ -55,6 +56,15 @@ const gcSplitSlotsOf = "wasm.slotsof"
 // makes a pointer of an address, an array and an offset: a weak
 // pointer made strong (gd.weakgetat).
 const gcSplitMkPtr = "wasm.mkptr"
+
+// gcSplitSetPtr is the function, exported to the host as "setptr",
+// that sets the address and the offset of a pointer. Nothing calls it.
+// It is there so that the two fields are written somewhere that an
+// engine cannot see the callers of: an address is then only known by
+// reading the pointer, again after every call, and a pointer that is
+// read is one that the engine keeps, with its array, which is what
+// keeps the block from being freed (see writeSplitTypes).
+const gcSplitSetPtr = "wasm.setptr"
 
 func (l *gcLinker) splitHelperIndex(name string) (int, bool) {
 	for i, h := range gcSplitHelpers {
@@ -226,6 +236,7 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 		wasm.GCSplitNew:      "ii.r",
 		gcSplitSlotsOf:       "r.a",
 		gcSplitMkPtr:         "iai.r",
+		gcSplitSetPtr:        "rii.",
 	}
 	index := func(name string) int {
 		i, _ := l.splitHelperIndex(name)
@@ -612,6 +623,15 @@ func (l *gcLinker) splitHelpers(first int, staticEnd int64) []*wasmFunc {
 			a.get(1)
 			a.get(2)
 			a.gc(0x00, ptr)
+			a.end()
+		case gcSplitSetPtr:
+			a.splitLocals("")
+			a.get(0)
+			a.get(1)
+			a.gc(0x05, ptr, wasm.GCPtrAddr) // struct.set
+			a.get(0)
+			a.get(2)
+			a.gc(0x05, ptr, wasm.GCPtrOff)
 			a.end()
 		}
 		fns = append(fns, &wasmFunc{Name: name, Type: l.typeIndex(wasm.GCFuncPrefix + sigs[name]), Code: a.Bytes()})

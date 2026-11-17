@@ -111,7 +111,7 @@ func lincollect() bool {
 	}
 	linCollecting = true
 	t0 := nanotime()
-	hostgc()
+	hostgc(1)
 	gcRecord(nanotime()-t0, walltime())
 	linCollecting = false
 	// Again when what is left has doubled (GOGC=100).

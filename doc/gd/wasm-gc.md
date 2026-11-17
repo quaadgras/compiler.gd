@@ -1784,3 +1784,85 @@ interfaces 8, not 16.
 
 A first proof of cgo, after the pointers: Go calls a C function
 compiled without a libc, and they pass a buffer both ways.
+
+
+### Stage 17: what keeps a block alive made firmer, and the tests that failed in Firefox (2026-11-17)
+
+**The fields of a pointer are written somewhere.** With
+`GOWASM=gc,split` the module exports `setptr`, which sets the address
+and the offset of a pointer. Nothing calls it: it is there so that no
+engine can take the two fields for constants of the object. An address
+is then only known by reading the pointer, again after every call, and
+a pointer that is read is kept, with its array.
+
+**Freed blocks can be filled with a pattern.** `GOWASMGC_POISON=1`
+under node (`poison` in the options of `runGo`; the test runner in a
+browser passes the variable on): the host fills a block with 0xA5
+before the runtime frees it, so that what is read from it afterwards is
+seen to be wrong (an address in it is out of memory) rather than what
+was there. A value read through an address kept as an integer across a
+collection reads 0xa5a5a5a5a5a5a5a5 with it, 7 without, in both models.
+The suites pass with it (below).
+
+**An engine has only so many stacks.** Firefox refuses a stack
+("too many continuation stacks") when about 1,960 are in use, and each
+goroutine that has started and not ended has one: three tests that
+have 10,000 goroutines blocked at once failed there
+(`chan/goroutines.go`, `fixedbugs/issue16016.go`, `gcgort.go`), with
+the host's error for a message. Now:
+
+- The runtime counts the stacks in use (`nstacks`). The host, when the
+  engine refuses to start a goroutine, tells the runtime (`unstart`,
+  exported), and the goroutine waits, not started, until one that has
+  a stack ends.
+- From 1,000 stacks in use on (in every engine: the same order
+  everywhere), goroutines that have not started wait in a list of
+  their own (`newq`) and are started only when no started goroutine can
+  run, the newest first. In a chain of goroutines each waiting for the
+  next (`chan/goroutines.go`), the last then runs and ends before the
+  stacks are all taken by those that wait for it, and the chain is done
+  with two stacks more than the thousand.
+- If every stack is held by a goroutine that is blocked and more wait
+  to start, the program cannot go on, and says so: `fatal error: too
+  many goroutines: the WebAssembly engine has stacks for 1960, all of
+  them blocked, and 541 more goroutines wait to start`.
+- `GOWASMGC_MAXSTACKS=n` under node makes the host refuse as Firefox
+  does, to test this without it.
+
+A stack that grows also takes one of the engine's (stage 13): where
+that is refused, the program ends with `fatal error: the WebAssembly
+engine has no more stacks`.
+
+**A closure called was not always the one the function got**, which
+freed blocks filled with a pattern brought out (`go/internal/srcimporter`
+with `GOWASM=gc,split`: "memory access out of bounds", three runs of
+four, with V8's baseline compiler too, so not the engine's doing). The
+closure that is called is in a global, which the function takes it
+from where its code begins. Two things run between the call and that,
+and either may collect, with other goroutines running meanwhile and
+calling closures of theirs:
+
+- With split, a function with no frame allocates the memory of its
+  variables first (`runtime.newobject`): the wrapper of a method value
+  (`conf.Sizes.Sizeof`) then read the receiver from another goroutine's
+  closure. Such a function now takes the closure before that.
+- In both models, `runtime.morestackgc` allocates the segment of the
+  stack, after which the function calls itself and takes the closure
+  again: it now leaves the global as it found it
+  (`runtime.closurectxt`, `runtime.setclosurectxt`).
+
+**A browser is made to want to collect.** `init1.go` (1,000 MB
+allocated a megabyte at a time, of which one is kept) failed in
+Firefox and in Chromium: a page cannot tell the engine to collect, and
+the engine, which counts what it allocates itself, knows nothing of
+what the program has in linear memory, so nothing was freed (1.4 GB
+used). Where the host has no `collect`, the runtime's collection (due
+when what is in linear memory has doubled, and `runtime.GC`) now
+allocates and drops 128 MB of `ArrayBuffer`s, which the engine does
+count, and waits up to 50 ms for the blocks that are then collected to
+be freed; for `runtime.GC`, not more than five times a second (a
+program may call it in a loop). It is a nudge and not a certainty: an engine
+is free to ignore it.
+
+In Firefox the host's errors also had no message (its `stack` does not
+begin with it, as V8's does): the message is now printed first.

@@ -40,15 +40,20 @@ func GC() {
 	// (What KeepAlive kept last is not to be kept by that.)
 	KeepAlive((*byte)(nil))
 	t0 := nanotime()
-	hostgc()
+	hostgc(0)
 	gcRecord(nanotime()-t0, walltime())
 	gcForced++
 	// The cleanups the collection queued may run.
 	Gosched()
 }
 
+// (due is 1 if the collection is due for what is in linear memory, 0
+// if the program asks for it: a host that cannot make the engine
+// collect, only nudge it, does that less often for a program that
+// asks in a loop.)
+//
 //go:wasmimport gd gc
-func hostgc()
+func hostgc(due int32)
 
 // KeepAlive marks its argument as currently reachable.
 func KeepAlive(x any) {}

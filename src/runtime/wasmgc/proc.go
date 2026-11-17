@@ -71,7 +71,24 @@ var (
 	runqHead   *g
 	runqTail   *g
 	ngoroutine = 1
+
+	// Each goroutine that has started and not ended has a stack of
+	// the engine's, and an engine may have only so many (Firefox some
+	// 2,000). nstacks counts them. From stackSoft of them on, and
+	// after the engine has refused one (stackFull, until a goroutine
+	// ends), the goroutines not yet started wait in newq (a list by
+	// link, the newest first; nnew of them), and are started only
+	// when no other can run, the newest first: one that those before it wait for (a chain of channels,
+	// each goroutine receiving from the next) then runs and ends
+	// before the stacks are all taken by those that wait.
+	nstacks    = 1
+	stackFull  bool
+	stackTries int
+	newq       *g
+	nnew       int
 )
+
+const stackSoft = 1000
 
 const gStackSize = 64<<10 - linheader
 
@@ -128,6 +145,10 @@ func goready(gp *g) {
 		wakeDurable(gp)
 	}
 	gp.link = nil
+	if !gp.started && (newq != nil || stackFull) {
+		pushnew(gp)
+		return
+	}
 	if runqTail == nil {
 		runqHead = gp
 	} else {
@@ -180,21 +201,69 @@ func sched() int64 {
 
 func sched1() int64 {
 	runtimers()
-	gp := runqHead
-	if gp == nil {
-		return -1
+	for {
+		gp := runqHead
+		if gp == nil {
+			break
+		}
+		runqHead = gp.link
+		if runqHead == nil {
+			runqTail = nil
+		}
+		gp.link = nil
+		if gp.started {
+			curg = gp
+			return int64(gp.id) << 1
+		}
+		if nstacks < stackSoft && !stackFull {
+			return gostart(gp)
+		}
+		// Stacks are short: it waits in newq.
+		pushnew(gp)
 	}
-	runqHead = gp.link
-	if runqHead == nil {
-		runqTail = nil
+	if gp := newq; gp != nil && !stackFull {
+		newq = gp.link
+		gp.link = nil
+		nnew--
+		return gostart(gp)
 	}
-	gp.link = nil
+	return -1
+}
+
+// gostart is sched's answer that gp, which has not started, is to be.
+func gostart(gp *g) int64 {
 	curg = gp
-	if gp.started {
-		return int64(gp.id) << 1
-	}
 	gp.started = true
+	nstacks++
 	return int64(gp.id)<<1 | 1
+}
+
+// pushnew adds gp, which has not started, to newq.
+func pushnew(gp *g) {
+	gp.link = newq
+	newq = gp
+	nnew++
+}
+
+// unstart is called by the host when it could not run the goroutine
+// that sched told it to start: the engine has no stack for it. The
+// goroutine waits for one (see newq). It reports whether that is so:
+// not if the goroutine ran (the failure is then its own).
+//
+//go:nosplit
+func unstart(id int64) int64 {
+	if id <= 0 || id >= int64(len(allgs)) {
+		return 0
+	}
+	gp := allgs[id]
+	if gp == nil || gp.dead || !gp.started || gp.stack != 0 || gp == &maing {
+		return 0
+	}
+	gp.started = false
+	nstacks--
+	stackFull = true
+	pushnew(gp)
+	return 1
 }
 
 // gorun is called by the host, on a new stack, to run a goroutine.
@@ -232,6 +301,10 @@ func gdone(gp *g) {
 	gp.dead = true
 	gp.fn = nil
 	ngoroutine--
+	// Its stack is the engine's to give again.
+	nstacks--
+	stackFull = false
+	stackTries = 0
 	if gp.bubble != nil {
 		bubbleGoEnd(gp)
 	}
@@ -244,7 +317,8 @@ func gdone(gp *g) {
 }
 
 // deadlock is called by the host when no goroutine can run and nothing
-// is going to wake one.
+// is going to wake one. It returns only if the host is to schedule
+// again (see deadlock1).
 //
 //go:nosplit
 func deadlock() {
@@ -252,6 +326,22 @@ func deadlock() {
 }
 
 func deadlock1() {
+	if newq != nil {
+		// Goroutines wait for a stack of the engine's, which it may
+		// have again by now (it refused one just after a goroutine
+		// ended, say): the host schedules again.
+		if stackTries < 3 {
+			stackTries++
+			stackFull = false
+			return
+		}
+		printstring("fatal error: too many goroutines: the WebAssembly engine has stacks for ")
+		printint(int64(nstacks))
+		printstring(", all of them blocked, and ")
+		printint(int64(nnew))
+		printstring(" more goroutines wait to start\n")
+		exit(2)
+	}
 	if maing.dead && ngoroutine == 0 {
 		printstring("fatal error: no goroutines (main called runtime.Goexit) - deadlock!\n")
 		exit(2)

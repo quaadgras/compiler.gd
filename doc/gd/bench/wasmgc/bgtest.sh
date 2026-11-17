@@ -7,7 +7,7 @@
 #
 # The suites: conformance (the tests of the language, under node), std
 # (go test over the standard library), conformance-chromium and
-# std-chromium (the same in a browser). The default is the first two.
+# std-chromium (the same in a browser; -firefox for the other). The default is the first two.
 #
 # The copy is a git worktree ($GOTESTTREE, by default ../go-pkgtests
 # next to this tree: make it once with git worktree add), set to this
@@ -65,7 +65,7 @@ jobs=${GOTESTJOBS:-8}
 
 for suite in $suites; do
 	browser=
-	case $suite in *-chromium) browser=chromium ;; esac
+	case $suite in *-chromium) browser=chromium ;; *-firefox) browser=firefox ;; esac
 	case $suite in
 	conformance*)
 		GOWASIRUNTIME=$browser nice python3 "$bench/conformance/run.py" -j "$jobs" >"$out/$suite.log" 2>&1 || true
