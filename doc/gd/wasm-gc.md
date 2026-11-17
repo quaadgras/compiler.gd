@@ -1491,9 +1491,11 @@ slices, maps, strings, reflection) are what change.
 #### Built (2026-11-17)
 
 `GOWASM=gc,split` builds and runs `println` and `fmt.Println` hello
-worlds and the ten programs of `compiled/tests` (`GOWASM=gc,split
+worlds, the ten programs of `compiled/tests` (`GOWASM=gc,split
 compiled/test.sh`; `std/build.py` and the go command both take the
-setting from the environment, `build.py` into `std/out-split`).
+setting from the environment, `build.py` into `std/out-split`), the
+conformance suite (947 of 965, as `GOWASM=gc`) and the tests of all of
+std under node (255 of 255).
 
 What changed from the decision above, and why:
 
@@ -1533,7 +1535,8 @@ What changed from the decision above, and why:
 How it is put together:
 
 - **Types** (`cmd/internal/obj/wasm/gc.go`): `wasm.ptr`
-  (`{addr i32, slots (ref null wasm.slots), off i32}`, immutable) and
+  (`{addr i32, slots (ref null wasm.slots), off i32}`; the integers
+  mutable, see below) and
   `wasm.slots` (an array of mutable `(ref null wasm.ptr)`), one
   recursion group, which the linker makes types 0 and 1; `r` in a
   signature, a local or a global is `(ref null wasm.ptr)`.
@@ -1554,7 +1557,7 @@ How it is put together:
   any was used: weak, unique, io and reflect's tests saw values not
   collected.) Typed locals, casts, the second case of every access and
   allocation by `struct.new` are gone.
-- **Linker** (`cmd/link/internal/wasm/gcsplit.go`): the helpers (eight
+- **Linker** (`cmd/link/internal/wasm/gcsplit.go`): the helpers (ten
   small functions) instead of those by layout; the globals: the array
   of data, a pointer to address 0 with it, and a pointer to each data
   symbol the code takes the address of as a pointer (immutable,
@@ -1621,6 +1624,36 @@ pointer to a block loses its array (made of an integer by
 `wasm.inttoptr`, or stored where there is no array by
 `wasm.storeptr`): for finding such holes.
 
+Size, `GOWASM=gc` against `GOWASM=gc,split` (the second column with
+`-ldflags="-s -w"`, the third that gzipped):
+
+|                         | gc                  | gc,split            |
+|-------------------------|--------------------:|--------------------:|
+| `println` hello world   | 184,480 / 163,659 / 58,853 | 126,877 / 107,312 / 46,178 |
+| `fmt.Println` hello world | 535,174 / 478,691 / 147,269 | 370,622 / 316,499 / 115,356 |
+
+(a third less, as estimated: the second case of every access, the
+casts, the functions by layout and their tables are gone, and a copy of
+a struct is a call or a few loads and stores).
+
+Speed, node 24, best of a few runs:
+
+|                                          | gc       | gc,split |
+|------------------------------------------|---------:|---------:|
+| `compiled/main.go`: trees                | 133-155 ms | 3,680-3,740 ms |
+| `compiled/main.go`: 2,000 frames         | 768-829 ms | 4,420-4,450 ms |
+| an allocation of 16 bytes with a pointer | 11 ns    | 205 ns   |
+| a loop over `[]*T` reading `p.q.f`       | 3 ns     | 6 ns     |
+| the update of an entity in `frame`       | 10 ns    | 19 ns    |
+
+Allocation is what costs, as was expected: of the 205 ns, about 150
+are the host's (registering the array with the `FinalizationRegistry`,
+and the callback when it is collected), and the engine's collector does
+more (25% of the time of the benchmark). A pointer read from memory is
+a call of `wasm.loadptr` (the array, the element, and the check that
+the address in memory is still the pointer's), which V8 inlines only
+in part: a loop that follows pointers runs at half the speed.
+
 Work list (kept current):
 
 1. [done] Types, helpers, frames, `println` hello world.
@@ -1630,12 +1663,19 @@ Work list (kept current):
 5. [done] Weak pointers: by the array of a block (`gd.weakmake` takes
    the array, `gd.weakgetat` and the export `mkptr` make the pointer
    again).
-6. Size and speed: the helpers are calls; the most common (a pointer
-   load) could be inline. A constant index (`PtrIndex` by 0) is
-   multiplied at run time.
-7. `wasm.smove` makes the destination's pointers nil when the source's
-   array is shorter than the bytes copied (it cannot be, now, for
-   allocations); it could copy what there is.
+6. Speed. Allocation: the host's `FinalizationRegistry.register` alone
+   is about 350 ns an object in plain JavaScript (an object made is
+   5): no faster way to know that a block is free was found (a
+   `WeakRef` is 1.4 µs). What would make a difference is fewer
+   registrations: small blocks from a slab of linear memory that is
+   registered once, each array also holding the slab's token, so that
+   the slab is freed when all of its blocks are; the cost is that one
+   survivor keeps its whole slab. Not tried: it changes what frees a
+   block. Access: `wasm.loadptr` inline, at least its first case
+   (some 40 bytes at each of thousands of places), or a cheaper check
+   than the one against memory.
+7. [done] `wasm.smove` copies what the source's array has and makes the
+   rest of the destination's nil.
 8. [done] The tests of std: `GOWASM=gc,split std/survey.py` writes
    `std/status-split.txt`: all 255 packages pass under node (the first
    survey had 238; what the others found is above). Not run in a
