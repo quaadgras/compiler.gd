@@ -182,7 +182,11 @@ func linfree(addr uintptr) {
 	b := addr - linheader
 	c := uintptr(linload64(b))
 	if i := c >> 32; i != 0 {
+		// (The header keeps the class alone: the block's next
+		// allocation has no cleanups, and the list is another
+		// block's by then.)
 		c &= 1<<32 - 1
+		linstore64(b, uint64(c))
 		systemstack(func() { queueLinearCleanups(uint64(i - 1)) })
 	}
 	linLive -= 1 << c
