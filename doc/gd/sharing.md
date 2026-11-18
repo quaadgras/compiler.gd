@@ -138,7 +138,11 @@ address (boxing in an interface, a map key, a channel send), walk copies
 the value to the stack first unless it is in a variable of the stack
 (`order.go`'s `addrTemp`). On targets without an inline atomic load (386,
 arm) the lock is read with a call. On arm64 a `DMB ISHLD` follows the
-value's load, so that it is done before the lock is read again.
+value's load, so that it is done before the lock is read again; the
+runtime's own load has a barrier there too, and one after it takes a
+lock, so that the lock is seen held before the stores are (without them
+`TestSharedTear` failed one run in three on an Apple M-series machine,
+and passes there now, as it always did on amd64).
 `-gcflags=all=-d=notear` turns all this off, for measurements.
 
 The loads are memory operations, so that the value's load stays between
@@ -228,6 +232,10 @@ of three runs, 2026-11-19, after the changes above:
 | `fmt` Fprint of an int | 39 ns | 107 ns | 2.7 |
 | `net/http` header write | 326 ns | 939 ns | 2.9 |
 | `encoding/json` encoder | 0.64 ms | 1.88 ms | 2.9 |
+
+The compiler, which is a Go program with a few pools and a lot of
+slices, builds the standard library in 27.5 s with all of this in itself
+and 23.3 s without: 18% more.
 
 Before the lock table was by 64 bytes and `sync.Pool` had its pragma the
 last ones were 6 to 35 times, and Pool itself 119.

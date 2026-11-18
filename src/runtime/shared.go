@@ -377,10 +377,27 @@ func shareLockStripe(i uintptr) {
 	l := &shareSeq[i].seq
 	for spins := 0; ; spins++ {
 		if v := atomic.Load(l); v&1 == 0 && atomic.Cas(l, v, v+1) {
+			// The lock is seen held before any of the stores
+			// that follow is seen, also where stores may be
+			// reordered.
+			publicationBarrier()
 			return
 		}
 		shareYield(spins)
 	}
+}
+
+// shareLoadBarrier orders the loads before it before those after it. It
+// is an atomic operation on a word of its own, which is a barrier where
+// one is needed (arm64 and the like) and nearly free where none is.
+//
+//go:nosplit
+func shareLoadBarrier() {
+	if goarch.IsAmd64|goarch.Is386 != 0 {
+		return
+	}
+	var x uint32
+	atomic.Xadd(&x, 1)
 }
 
 // shareStripeRange calls f for the locks of the blocks of [p, p+size), in
@@ -462,6 +479,9 @@ func shareRead(dst, src unsafe.Pointer, size uintptr) {
 		}
 		if quiet {
 			memmove(dst, src, size)
+			// The loads of the value are done before the locks
+			// are read again, also where loads may be reordered.
+			shareLoadBarrier()
 			for i := uintptr(0); i <= last-first; i++ {
 				quiet = quiet && seq[i] == atomic.Load(&shareSeq[(first+i)&(shareStripes-1)].seq)
 			}
