@@ -41,10 +41,10 @@ import (
 // maxCallBits is the number of bits of a call.
 const maxCallBits = 16
 
-// callSite is a direct call of a function that may take the bits.
+// callSite is a call of a function that may take the bits.
 type callSite struct {
 	call  *ir.CallExpr
-	fn    *ir.Name // the function that is called
+	fn    *ir.Name // the function that is called, or nil if it is not known
 	curfn *ir.Func
 	stmt  int32
 	res   []*location // what the results flow through
@@ -97,14 +97,15 @@ func paramBit(fn *ir.Func, name *ir.Name) int {
 	return 0
 }
 
-// noteCall records the direct call of fn, and returns the holes for its
+// noteCall records the call of fn, or of a function that is only known
+// when the program runs if fn is nil, and returns the holes for its
 // results: each flows through a location of its own, which says where
 // the result goes.
-func (e *escape) noteCall(ks []hole, call *ir.CallExpr, fn *ir.Name) (*callSite, []hole) {
-	if call.GoDefer || fn.Func == nil || !e.callBitsOn() {
+func (e *escape) noteCall(ks []hole, call *ir.CallExpr, fn *ir.Name, fntype *types.Type) (*callSite, []hole) {
+	if call.GoDefer || !e.callBitsOn() {
 		return nil, ks
 	}
-	if !fn.Func.TakesLocalBits && !e.inMutualBatch(fn) {
+	if fn != nil && (fn.Func == nil || !fn.Func.TakesLocalBits && !e.inMutualBatch(fn)) {
 		return nil, ks
 	}
 	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
@@ -118,7 +119,7 @@ func (e *escape) noteCall(ks []hole, call *ir.CallExpr, fn *ir.Name) (*callSite,
 	nks := make([]hole, len(ks))
 	for i, k := range ks {
 		nks[i] = k
-		if i >= fn.Type().NumResults() || !fn.Type().Result(i).Type.HasPointers() || k.derefs < 0 {
+		if i >= fntype.NumResults() || !fntype.Result(i).Type.HasPointers() || k.derefs < 0 {
 			continue
 		}
 		r := e.newLoc(nil, false)
@@ -345,7 +346,7 @@ func (b *batch) callBits() {
 	}
 	uintptrType := types.Types[types.TUINTPTR]
 	for _, cs := range b.calls {
-		if cs.fn.Func == nil || !cs.fn.Func.TakesLocalBits {
+		if cs.fn != nil && (cs.fn.Func == nil || !cs.fn.Func.TakesLocalBits) {
 			continue
 		}
 		pos := cs.call.Pos()
@@ -554,9 +555,43 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 	}
 }
 
+// viaParam reports whether root is the dynamic root of a store through
+// a parameter of fn that is never assigned, and returns that
+// parameter's bit.
+func viaParam(fn *ir.Func, root *location) int {
+	if d := root.dynRoot; d != nil && root.curfn == fn {
+		if v := d.loc; d.plain && v != nil && v.param && !v.reassigned && !v.captured && !v.addrtaken {
+			return paramBit(fn, d.name)
+		}
+	}
+	return 0
+}
+
+// noteParamLeak records that the parameter l, dereferenced derefs
+// times, flows to root, which outlives it: unless root is a result that
+// the escape tag has, or a store through a parameter, what flows must
+// be in the heap.
+func (b *batch) noteParamLeak(l, root *location, derefs int) {
+	if !b.shareTagsOn() {
+		return
+	}
+	if !root.hasAttr(attrEscapes) && root.isName(ir.PPARAMOUT) && root.curfn == l.curfn && root.resultIndex-1 < numEscResults {
+		return
+	}
+	if viaParam(l.curfn, root) != 0 {
+		return
+	}
+	setMinDerefs(&l.shares.Heap, derefs)
+}
+
 // paramShares records on fn what its parameters say.
 func (b *batch) paramShares(fn *ir.Func) {
 	if !b.shareTagsOn() || len(fn.Body) == 0 {
+		return
+	}
+	// Its integers are pointers that its callers keep in the heap, as
+	// the tags say.
+	if fn.Pragma&(ir.UintptrEscapes|ir.UintptrKeepAlive) != 0 {
 		return
 	}
 	params := fn.Type().RecvParams()
@@ -574,6 +609,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 		if loc.hasAttr(attrEscapes) {
 			// The variable is in the heap.
 			b.noteParamHeap(fn, &ps[i], loc, 0)
+			setMinDerefs(&ps[i].Heap, 0)
 		}
 	}
 	fn.ParamShares = ps
@@ -594,7 +630,11 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	if ps == nil {
 		return []hole{e.heapHole().shift(e.gd, x)}
 	}
-	tagKs := []hole{e.ownHeapHole().shift(e.gd, x)}
+	// What the heap of the tag stood for.
+	tagKs := []hole{e.mutatorHole().shift(e.gd, x), e.calleeHole().shift(e.gd, x)}
+	if ps.Heap != 0 {
+		tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
+	}
 	if ps.Share != 0 {
 		tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
 	}
@@ -605,17 +645,19 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 				continue
 			}
 			if k >= len(e.callArgs) {
-				tagKs = append(tagKs, e.shareHole().shift(e.gd, d))
+				tagKs = append(tagKs, e.heapHole().shift(e.gd, d))
 				break
 			}
+			// A store through the argument: the heap, unless
+			// the argument is the address of a variable, which
+			// then holds what is stored for as long as it lives.
 			tagKs = append(tagKs, e.storeThroughArg(e.callArgs[k]).shift(e.gd, d))
 		}
 	}
-	if ks != nil {
-		for i := 0; i < numEscResults && i < len(ks); i++ {
-			if ps.Results&(1<<i) != 0 && esc.Result(i) < 0 {
-				tagKs = append(tagKs, ks[i].shift(e.gd, x))
-			}
+	for i := range ks {
+		all := ps.Results == 0xff
+		if (all || i < 8 && ps.Results&(1<<i) != 0) && (i >= numEscResults || esc.Result(i) < 0) {
+			tagKs = append(tagKs, ks[i].shift(e.gd, x))
 		}
 	}
 	return tagKs

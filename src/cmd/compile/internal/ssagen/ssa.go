@@ -1114,11 +1114,11 @@ func (s *state) takeLocalBits(fn *ir.Func) {
 
 // setLocalBits says the bits of the call that follows, of the function
 // at callee, to that function.
-func (s *state) setLocalBits(bits ir.Node, callee *obj.LSym) {
+func (s *state) setLocalBits(bits ir.Node, callee *ssa.Value) {
 	t := types.Types[types.TUINTPTR]
 	b := s.expr(bits)
 	shift := s.constInt(t, 8*int64(types.PtrSize)-localBitsCount)
-	w := s.newValue2(ssa.OpOr64, t, s.newValue2(ssa.OpLsh64x64, t, b, shift), s.newValue1A(ssa.OpAddr, t, callee, s.sb))
+	w := s.newValue2(ssa.OpOr64, t, s.newValue2(ssa.OpLsh64x64, t, b, shift), callee)
 	s.store(t, s.localBitsAddr(), w)
 }
 
@@ -6399,6 +6399,7 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 	var calleeLSym *obj.LSym    // target function (if static)
 	var closure *ssa.Value      // ptr to closure to run (if dynamic)
 	var codeptr *ssa.Value      // ptr to target code (if dynamic)
+	var closureCode *ssa.Value  // the code of closure, if it was loaded for the bits of the call
 	var dextra *ssa.Value       // defer extra arg
 	var rcvr *ssa.Value         // receiver to set
 	var extRe, extIm *ssa.Value // gd: inline payload words appended to an interface call (see abi.IfaceExtFits)
@@ -6569,12 +6570,24 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 			s.rtcall(ir.Syms(s.gd).Racefuncexit, true, nil)
 		}
 
-		// (Not for unique.Make of a string: a rule takes away the
-		// copy of string(b) in its argument if the call follows the
-		// conversion, and what it returns is shared anyway.)
-		if n.LocalBits != nil && calleeLSym != nil && k == callNormal && closure == nil && codeptr == nil &&
-			calleeLSym.Name != "unique.Make[go.shape.string]" {
-			s.setLocalBits(n.LocalBits, calleeLSym)
+		// What the caller says to the function it calls: the word
+		// has the address of the function, which is the code that a
+		// closure or a method table has for a call that is not
+		// direct. (Not for unique.Make of a string: a rule takes
+		// away the copy of string(b) in its argument if the call
+		// follows the conversion, and what it returns is shared
+		// anyway.)
+		if n.LocalBits != nil && k == callNormal {
+			t := types.Types[types.TUINTPTR]
+			switch {
+			case closure != nil && codeptr == nil:
+				closureCode = s.rawLoad(t, closure)
+				s.setLocalBits(n.LocalBits, closureCode)
+			case codeptr != nil:
+				s.setLocalBits(n.LocalBits, codeptr)
+			case calleeLSym != nil && calleeLSym.Name != "unique.Make[go.shape.string]":
+				s.setLocalBits(n.LocalBits, s.newValue1A(ssa.OpAddr, t, calleeLSym, s.sb))
+			}
 		}
 
 		callArgs = append(callArgs, s.mem())
@@ -6597,7 +6610,10 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 			// can't always figure that out currently, and it's
 			// critical that we not clobber any arguments already
 			// stored onto the stack.
-			codeptr = s.rawLoad(types.Types[types.TUINTPTR], closure)
+			codeptr = closureCode
+			if codeptr == nil {
+				codeptr = s.rawLoad(types.Types[types.TUINTPTR], closure)
+			}
 			aux := ssa.ClosureAuxCall(callABI.ABIAnalyzeTypes(ACArgs, ACResults))
 			call = s.newValue2A(ssa.OpClosureLECall, aux.LateExpansionResultType(), aux, codeptr, closure)
 		case codeptr != nil:

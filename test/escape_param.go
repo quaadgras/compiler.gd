@@ -47,7 +47,7 @@ func param2(p1 *int, p2 **int) { // ERROR "leaking param: p1$" "p2 does not esca
 }
 
 func caller2a() {
-	i := 0 // ERROR "moved to heap: i$"
+	i := 0 // gd: stored through the other argument only, which stays on the stack
 	var p *int
 	param2(&i, &p)
 	_ = p
@@ -163,7 +163,7 @@ func (p *Pair) param4(i *int) { // ERROR "p does not escape$" "leaking param: i$
 }
 
 func caller4a() {
-	i := 0 // ERROR "moved to heap: i$"
+	i := 0 // gd: stored through the other argument only, which stays on the stack
 	p := Pair{}
 	p.param4(&i)
 	_ = p

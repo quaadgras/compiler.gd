@@ -829,4 +829,9 @@ type ParamShare struct {
 	// Results has bit i set if the parameter flows to the function's
 	// i'th result, when the escape tag may not say it.
 	Results uint8
+	// Heap is the least number of dereferences of the parameter that
+	// give what must be in the heap for another reason than a store
+	// through a parameter (Via): what is only stored through one
+	// lives as long as what that one points to.
+	Heap uint8
 }

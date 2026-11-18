@@ -204,6 +204,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					}
 				}
 				l.leakTo(b.gd, root, derefs)
+				b.noteParamLeak(l, root, derefs)
 			}
 			b.noteParamShare(l, root, derefs)
 			if root.hasAttr(attrMutates) {

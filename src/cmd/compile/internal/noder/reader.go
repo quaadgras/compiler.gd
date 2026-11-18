@@ -1290,6 +1290,7 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.Via = uint16(r.Len())
 				ps.ViaDerefs = uint8(r.Len())
 				ps.Results = uint8(r.Len())
+				ps.Heap = uint8(r.Len())
 			}
 		}
 

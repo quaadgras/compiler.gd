@@ -64,7 +64,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// (callbits.go).
 		var cs *callSite
 		if direct {
-			cs, ks = e.noteCall(ks, call, fns[0])
+			cs, ks = e.noteCall(ks, call, fns[0], fns[0].Type())
+		} else {
+			cs, ks = e.noteCall(ks, call, nil, call.Fun.Type())
 		}
 
 		// Wire result flows for in-batch callees.

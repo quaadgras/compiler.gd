@@ -365,6 +365,24 @@ because the callee is unknown.
   argument flows to a heap that nobody reaches by itself
   (`ownHeapLoc`), so that escaping is as before. The elements of an
   appended slice flow there too: the new array is where the result goes.
+- **Escaping follows the same record.** `ParamShare.Heap` is the least
+  number of dereferences that give what must be in the heap for another
+  reason than a store through a parameter. A caller's argument that is
+  only stored through another argument flows to what that argument
+  points to, not to the heap: with `func set(t *T, p *int) { t.p = p }`,
+  `set(&t, &y)` leaves `y` on the stack if `t` is, and moves it to the
+  heap if `t` escapes ("y escapes if t does"). Only for `&x` of a
+  variable: a tracked pointer's contents and the containers known at run
+  time are the heap for escaping. What is stored deeper (`t.q[0] = p`),
+  or in an object that the callee allocates, is in the heap as before.
+- **Indirect calls.** A call of a closure or of an interface method
+  stores the bits with the code pointer that it calls, so a function
+  that is called that way has them too; a wrapper in between forwards
+  bit 0 if it returns the results (it is compiled like any function),
+  and otherwise the word matches no one. Arguments of a function that
+  is not known still flow to the heap and are shared, so only bit 0 is
+  ever set there: the escape masks would have to say, per argument,
+  what `ParamShare` says.
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -386,10 +404,11 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
 
 ### Next
 
-1. **Indirect calls.** The word names the function, so a caller can
-   set it for a closure or an interface method as well (the code
-   pointer it calls); wrappers lose the bits, safely. Then the bits of
-   a call can also carry what the escape masks carry now.
+1. **Arguments of indirect calls.** The callee's `ParamShare` is not
+   known to the caller: either it travels with the closure or the itab
+   as the escape masks do, or the callee decides alone from the bits
+   (bit k+1 for `&x` whose variable would stay local if the callee does
+   not share it, which needs the escape-candidate wrap to agree).
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the
@@ -398,9 +417,8 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
    whole-function container (needs scopes in the graph).
 5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
    closures.
-6. A callee that keeps a parameter as an integer (`shareLoc`) does not
-   tell its caller in the escape tag: `ParamShare.Share` does now, but
-   only where the function has a body that was analysed.
+6. `unique.Make` of a string gets no bits (an SSA rule needs the call to
+   follow the conversion of its argument).
 
 ### The dynamic vectors as first planned
 
