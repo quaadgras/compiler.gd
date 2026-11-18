@@ -308,6 +308,11 @@ const (
 
 	localHeapSize = 1 << 36 * (goarch.IsAmd64 | goarch.IsArm64)
 
+	// The local objects are in the first half of the local range, and
+	// the stacks in the second: a store through a pointer to a stack
+	// does not say what becomes of what is stored (isLocalObject).
+	localObjectsSize = localHeapSize / 2
+
 	// arenaBaseOffset is the pointer value that corresponds to
 	// index 0 in the heap arena map.
 	//
@@ -738,7 +743,11 @@ func mallocinit() {
 		first.addr += localHeapSize
 		hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
 		hint.addr = localHeapBase
-		mheap_.localHints = hint
+		mheap_.localHints[1] = hint
+		hint = (*arenaHint)(mheap_.arenaHintAlloc.alloc())
+		hint.addr = localHeapBase + localObjectsSize
+		mheap_.localHints[2] = hint
+		mheap_.pages.mid = localHeapBase + localObjectsSize
 		mheap_.pages.split = localHeapBase + localHeapSize
 	}
 	// Initialize the memory limit here because the allocator is going to look at it
@@ -765,6 +774,7 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 	assertLockHeld(&h.lock)
 
 	n = alignUp(n, heapArenaBytes)
+	local := hintList == &h.localHints[1] || hintList == &h.localHints[2]
 
 	if hintList == &h.arenaHints {
 		// First, try the arena pre-reservation.
@@ -786,10 +796,10 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		if hint.down {
 			p -= n
 		}
-		if hintList == &h.localHints && p+n > localHeapBase+localHeapSize {
-			// The local range is full.
+		if hintList == &h.localHints[1] && p+n > h.pages.mid || hintList == &h.localHints[2] && p+n > h.pages.split {
+			// The region of the local range is full.
 			v = nil
-		} else if hintList != &h.localHints && p < h.pages.split {
+		} else if !local && p < h.pages.split {
 			// Below the local range: the page allocator looks
 			// there for local memory only.
 			v = nil
@@ -824,7 +834,7 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		h.arenaHintAlloc.free(unsafe.Pointer(hint))
 	}
 
-	if size == 0 && hintList == &h.localHints {
+	if size == 0 && local {
 		return nil, 0
 	}
 	if size == 0 {

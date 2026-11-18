@@ -422,8 +422,10 @@ func (b *batch) markLocal(loc *location) {
 // pointer is a pure path P from a local variable (p, p.f, *p.f: no call,
 // no index), the store has a location of its own, the dynamic root of P
 // in that statement, that is the heap for escaping but that no other
-// goroutine reaches by itself: it is local if what P points to is, which
-// is a compare of P (runtime.isLocal). The solver records on every
+// goroutine reaches by itself: it is local if what P points to is a
+// local object, which is a compare of P (runtime.isLocalObject). A
+// variable on a stack is not one: the function that has it may return
+// or share what a callee stored in it, and the callee cannot tell. The solver records on every
 // location the roots that it, or something reached from it, flows to
 // (location.dyn).
 //
@@ -472,8 +474,8 @@ func (e *escape) noteStmtCall() {
 }
 
 // splitHeap reports whether the target has the two ranges of addresses
-// (runtime.heapSplit), and returns the logarithm of the size of the
-// local one.
+// (runtime.heapSplit), and returns the logarithm of the size of the part
+// of the local one where the objects are.
 func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
 		return 0, false
@@ -485,7 +487,9 @@ func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 	}
 	switch gd.Ctxt.Arch.Family {
 	case sys.AMD64, sys.ARM64:
-		return 36, true
+		// The first half, where the objects are: the stacks are
+		// in the second (runtime.isLocalObject).
+		return 35, true
 	}
 	return 0, false
 }

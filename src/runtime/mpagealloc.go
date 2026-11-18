@@ -257,12 +257,18 @@ type pageAlloc struct {
 
 	// split, if not zero, is the end of the range of addresses of
 	// local memory (heapSplit), which is below every other address of
-	// the heap. searchAddr is then not below split, and localSearch is
-	// the searchAddr of the local range. enterLocal swaps the two and
-	// sets limit, the address that an allocation must end by.
-	split       uintptr
+	// the heap, and mid is where the stacks begin in it: the local
+	// objects are below mid. So there are three regions, each with a
+	// searchAddr of its own, none of which is below the region:
+	// region 0 is the rest of the heap, 1 the local objects, 2 the
+	// stacks. searchAddr is the one of the region that find and alloc
+	// search (region; 0 but between enterLocal and leaveLocal), the
+	// others are in searchAddrs. limit is the address that an
+	// allocation must end by, if not zero.
+	split, mid  uintptr
 	limit       uintptr
-	localSearch offAddr
+	region      int
+	searchAddrs [3]offAddr
 
 	// start and end represent the chunk indices
 	// which pageAlloc knows about. It assumes
@@ -337,7 +343,7 @@ func (p *pageAlloc) init(mheapLock *mutex, sysStat *sysMemStat, test bool) {
 
 	// Start with the searchAddr in a state indicating there's no free memory.
 	p.searchAddr = maxSearchAddr()
-	p.localSearch = maxSearchAddr()
+	p.searchAddrs = [3]offAddr{maxSearchAddr(), maxSearchAddr(), maxSearchAddr()}
 
 	// Set the mheapLock.
 	p.mheapLock = mheapLock
@@ -672,26 +678,38 @@ func (p *pageAlloc) find(npages uintptr) (uintptr, offAddr) {
 
 // searchFor returns the search address of the range that base is in.
 func (p *pageAlloc) searchFor(base uintptr) *offAddr {
-	// Between enterLocal and leaveLocal the two are swapped.
-	if p.split != 0 && (base < p.split) != (p.limit != 0) {
-		return &p.localSearch
+	region := 0
+	if base < p.mid {
+		region = 1
+	} else if base < p.split {
+		region = 2
 	}
-	return &p.searchAddr
+	if region == p.region {
+		return &p.searchAddr
+	}
+	return &p.searchAddrs[region]
 }
 
-// enterLocal makes find and alloc search the local range, until
-// leaveLocal.
+// enterLocal makes find and alloc search a region of the local range
+// (1 or 2), until leaveLocal.
 //
 // p.mheapLock must be held.
-func (p *pageAlloc) enterLocal() {
+func (p *pageAlloc) enterLocal(region int) {
 	assertLockHeld(p.mheapLock)
-	p.searchAddr, p.localSearch = p.localSearch, p.searchAddr
-	p.limit = p.split
+	p.searchAddrs[0] = p.searchAddr
+	p.searchAddr = p.searchAddrs[region]
+	p.region = region
+	p.limit = p.mid
+	if region == 2 {
+		p.limit = p.split
+	}
 }
 
 func (p *pageAlloc) leaveLocal() {
 	assertLockHeld(p.mheapLock)
-	p.searchAddr, p.localSearch = p.localSearch, p.searchAddr
+	p.searchAddrs[p.region] = p.searchAddr
+	p.searchAddr = p.searchAddrs[0]
+	p.region = 0
 	p.limit = 0
 }
 

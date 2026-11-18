@@ -689,6 +689,17 @@ func isLocal(p unsafe.Pointer) bool {
 	return uintptr(p)-localHeapBase < localHeapSize
 }
 
+// isLocalObject reports whether p is in the part of the local range
+// where the objects are: p is not a pointer to a stack. The compiler
+// computes it for the tag of what is stored through p (escape's
+// localTag): what is stored in a local object is local, but what is
+// stored in a variable of a caller's stack is what that caller says.
+//
+//go:nosplit
+func isLocalObject(p unsafe.Pointer) bool {
+	return uintptr(p)-localHeapBase < localObjectsSize
+}
+
 // localType returns typ tagged for the allocation functions that take
 // a type: the object is local.
 func localType(typ *_type) *_type {

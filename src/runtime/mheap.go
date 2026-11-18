@@ -202,15 +202,18 @@ type mheap struct {
 	//
 	// There are two: the second one is in the range of addresses of
 	// local memory (heapSplit).
-	curArenas [2]struct {
+	curArenas [3]struct {
 		base, end uintptr
 	}
 
 	// localHints is where the local range grows, and localFull says
 	// that it cannot grow: what is local is then allocated with the
 	// rest.
-	localHints *arenaHint
-	localFull  bool
+	//
+	// They are indexed by the region of the page allocator: 1 for the
+	// local objects, 2 for the stacks.
+	localHints [3]*arenaHint
+	localFull  [3]bool
 
 	// central free lists for small size classes.
 	// the padding makes sure that the mcentrals are
@@ -1272,7 +1275,18 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// The page cache does not support aligned allocations, so we cannot use
 	// it if we need to provide a physical page aligned stack allocation.
 	// What is local, and the stacks, are in the local range.
-	local := heapSplit && (spanclass.local() || typ == spanAllocStack) && !h.localFull
+	region := 0
+	if heapSplit {
+		if typ == spanAllocStack {
+			region = 2
+		} else if spanclass.local() {
+			region = 1
+		}
+		if h.localFull[region] {
+			region = 0
+		}
+	}
+	local := region != 0
 
 	pp := gp.m.p.ptr()
 	if !local && !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
@@ -1303,7 +1317,7 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 
 retry:
 	if local {
-		h.pages.enterLocal()
+		h.pages.enterLocal(region)
 	}
 
 	if needPhysPageAlign {
@@ -1321,14 +1335,14 @@ retry:
 		base, _ = h.pages.find(npages + extraPages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages+extraPages, local)
+			growth, ok = h.grow(npages+extraPages, region)
 			if !ok && local {
 				// The local range cannot grow. Local memory is
 				// from now on allocated with the rest, where it
 				// counts as shared.
 				h.pages.leaveLocal()
-				h.localFull = true
-				local = false
+				h.localFull[region] = true
+				region, local = 0, false
 				goto retry
 			}
 			if !ok {
@@ -1349,14 +1363,14 @@ retry:
 		base, scav = h.pages.alloc(npages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages, local)
+			growth, ok = h.grow(npages, region)
 			if !ok && local {
 				// The local range cannot grow. Local memory is
 				// from now on allocated with the rest, where it
 				// counts as shared.
 				h.pages.leaveLocal()
-				h.localFull = true
-				local = false
+				h.localFull[region] = true
+				region, local = 0, false
 				goto retry
 			}
 			if !ok {
@@ -1615,14 +1629,14 @@ func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base,
 // returning how much the heap grew by and whether it worked.
 //
 // h.lock must be held.
-func (h *mheap) grow(npage uintptr, local bool) (uintptr, bool) {
+func (h *mheap) grow(npage uintptr, region int) (uintptr, bool) {
 	assertLockHeld(&h.lock)
 
-	curArena := &h.curArenas[0]
+	local := region != 0
+	curArena := &h.curArenas[region]
 	hints := &h.arenaHints
 	if local {
-		curArena = &h.curArenas[1]
-		hints = &h.localHints
+		hints = &h.localHints[region]
 	}
 
 	firstGrow := curArena.base == 0 && !local
