@@ -123,11 +123,13 @@ func Defer() {
 func spillSlotReuse() {
 	// The return values of getp1 and getp2 need to be
 	// spilled around the calls to nopInt. Make sure that
-	// spill slot gets reused.
+	// spill slot gets reused. (The calls' result buffers,
+	// gd Phase G, are autotmps too: the slot's number
+	// depends on how many there are, its offset does not.)
 
-	//arm64:`.*autotmp_2-8\(SP\)`
+	//arm64:`.*autotmp_[0-9]+-8\(SP\)`
 	getp1()[nopInt()] = 0
-	//arm64:`.*autotmp_2-8\(SP\)`
+	//arm64:`.*autotmp_[0-9]+-8\(SP\)`
 	getp2()[nopInt()] = 0
 }
 
