@@ -113,7 +113,7 @@ func methodFieldEscMask(sig *typeSig) uint64 {
 type pendingItabMask struct {
 	lsym   *obj.LSym
 	offset int
-	fn     *ir.Func // nil for imported methods; mask stays 0
+	fn     *ir.Func // nil for imported methods (origType's notes then)
 	// origType captures the concrete method signature at writeITab
 	// time. When fn is nil (imported method) we re-derive the mask
 	// from origType.Params[].Note at finalize time — by then the
@@ -146,34 +146,56 @@ const escFuncTagged = 3
 
 func FinalizeItabMasks(gd *base.Invocation) {
 	for _, p := range pendingItabMasks(gd) {
-		// Phase F4 install. Write a SymPtr reloc to the synth funcsym
-		// with bit 0 set (dynamic-mask discriminator). The PkgIdxSelf
-		// hash this introduces is incompatible with content-addressable
-		// itab dedup; writeITab drops AttrContentAddressable for the
-		// entire itab when install is enabled, so the linker dedups by
-		// name (DUPOK) instead. Disable via `-d=gdforwarderdisable=1`.
-		if gd.Debug.GdForwarderDisable == 0 && p.fn != nil && p.fn.GdForwarder != nil && p.fn.GdForwarder.SyntheticComputeFn != nil {
-			if hasPointerBearingArg(p.fn) {
-				cfSym := staticdata.FuncLinksym(gd, p.fn.GdForwarder.SyntheticComputeFn.Nname)
-				objw.EscMaskFunc(gd, p.lsym, p.offset, cfSym)
-				continue
-			}
-		}
-		var mask uint64
-		switch {
-		case p.fn != nil && p.fn.Esc() >= escFuncTagged:
-			// fn.EscMask carries receiver at bit 1 and args at
-			// bits 2.. — the iface dispatch mask hides the
-			// receiver, so shift right once and clear the newly
-			// exposed low bit (which was "receiver escapes",
-			// meaningless at the dispatch site).
-			mask = (p.fn.EscMask >> 1) & ^uint64(1)
-		case p.origType != nil:
-			mask = computeMethodEscMask(p.origType)
-		}
-		objw.EscMask(gd, p.lsym, p.offset, mask)
+		writeEscMask(gd, p)
 	}
 	gd.ReflectdataPendingItabMasks = nil
+	gd.ReflectdataItabMasksDone = true
+}
+
+// writeEscMask writes the escape mask of one method, in an itab or in
+// a type's method masks (abi.UncommonType.EscMasks): from the
+// method's escape analysis if it was done here, else from its
+// parameters' notes; or, for a forwarder, a pointer to the function
+// that computes it, with bit 0 set.
+func writeEscMask(gd *base.Invocation, p pendingItabMask) {
+	// Phase F4 install. Write a SymPtr reloc to the synth funcsym
+	// with bit 0 set (dynamic-mask discriminator). The PkgIdxSelf
+	// hash this introduces is incompatible with content-addressable
+	// itab dedup; writeITab drops AttrContentAddressable for the
+	// entire itab when install is enabled, so the linker dedups by
+	// name (DUPOK) instead. Disable via `-d=gdforwarderdisable=1`.
+	if gd.Debug.GdForwarderDisable == 0 && p.fn != nil && p.fn.GdForwarder != nil && p.fn.GdForwarder.SyntheticComputeFn != nil {
+		if hasPointerBearingArg(p.fn) {
+			cfSym := staticdata.FuncLinksym(gd, p.fn.GdForwarder.SyntheticComputeFn.Nname)
+			objw.EscMaskFunc(gd, p.lsym, p.offset, cfSym)
+			return
+		}
+	}
+	// (With nothing known of the method, every argument escapes: a
+	// zero mask would say none does.)
+	mask := abi.ITabEscAll
+	switch {
+	case p.fn != nil && p.fn.Esc() >= escFuncTagged:
+		// fn.EscMask carries receiver at bit 1 and args at
+		// bits 2.. — the iface dispatch mask hides the
+		// receiver, so shift right once and clear the newly
+		// exposed low bit (which was "receiver escapes",
+		// meaningless at the dispatch site).
+		mask = (p.fn.EscMask >> 1) & ^uint64(1)
+	case p.origType != nil:
+		mask = computeMethodEscMask(p.origType)
+	}
+	objw.EscMask(gd, p.lsym, p.offset, mask)
+}
+
+// queueEscMask writes p's mask now if escape analysis is done, and
+// else when it is (FinalizeItabMasks).
+func queueEscMask(gd *base.Invocation, p pendingItabMask) {
+	if gd.ReflectdataItabMasksDone {
+		writeEscMask(gd, p)
+		return
+	}
+	gd.ReflectdataPendingItabMasks = append(pendingItabMasks(gd), p)
 }
 
 // hasPointerBearingArg reports whether fn has at least one
@@ -619,6 +641,17 @@ func dextratype(gd *base.Invocation, lsym *obj.LSym, off int64, t *types.Type, d
 		dmethodptrOff(e.Field("Ifn"), a.isym)
 		dmethodptrOff(e.Field("Tfn"), a.tsym)
 	}
+
+	// gd: each method's escape mask, after the methods, for the itabs
+	// the runtime makes (abi.UncommonType.EscMasks): the same words
+	// writeITab gives the itabs the compiler makes.
+	if mcount > 0 {
+		escAt := types.RoundUp(off+int64(dataAdd)+int64(mcount)*rttype.Method.Size(), 8)
+		c.Field("EscOff").WriteUint32(uint32(escAt - off))
+		for i, a := range m {
+			queueEscMask(gd, pendingItabMask{lsym: lsym, offset: int(escAt) + 8*i, fn: a.methodFn, origType: a.origType})
+		}
+	}
 }
 
 func typePkg(t *types.Type) *types.Pkg {
@@ -1062,6 +1095,10 @@ func writeType(gd *base.Invocation, t *types.Type) *obj.LSym {
 	}
 	D := C + int64(dataAdd)
 	E := D + int64(len(methods(gd, t)))*rttype.Method.Size()
+	if n := len(methods(gd, t)); n > 0 {
+		// gd: the methods' escape masks (abi.UncommonType.EscMasks).
+		E = types.RoundUp(E, 8) + int64(n)*8
+	}
 
 	// Write the runtime._type
 	c := rttype.NewCursor(gd, lsym, 0, rt)
@@ -1396,7 +1433,7 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 		objw.EscMask(gd, lsym, int(maskOffset)+i*8, 0)
 		if completeItab && i < len(entrySigs) {
 			sig := entrySigs[i]
-			gd.ReflectdataPendingItabMasks = append(pendingItabMasks(gd), pendingItabMask{
+			queueEscMask(gd, pendingItabMask{
 				lsym:     lsym,
 				offset:   int(maskOffset) + i*8,
 				fn:       sig.methodFn,

@@ -464,7 +464,7 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	oldsym := oldr.Sym(oldli)
 	if osym.Dupok() {
 		if oldsym.Dupok() {
-			if strings.HasPrefix(name, "go:itab.") && l.mergeItab(oldi, r, li) {
+			if (strings.HasPrefix(name, "go:itab.") || strings.HasPrefix(name, "type:")) && l.mergeItab(oldi, r, li, name) {
 				return oldi
 			}
 			if l.flags&FlagStrictDups != 0 {
@@ -769,19 +769,23 @@ func (l *Loader) Lookup(name string, ver int) Sym {
 	return l.symsByName[ver][name]
 }
 
-// mergeItab combines a new copy (r, li) of the DUPOK itab old with the
-// copy, or the copies, it has (gd fork). An itab holds, per method, a
-// mask of the arguments that escape when it is called through the
-// interface; every package that converts the type to the interface
-// writes the itab, from what it knows of the method, and the masks can
-// differ. The linker keeps one itab, so it must be one every package's
-// code is right with: an argument escapes if any copy says so. The
-// words no relocation covers in either copy (the masks; the rest is
-// the same in every copy) are ORed. A copy with more relocations (a
-// mask that is a function of the defining package's, which computes
-// it at each call) is the one kept. It reports false, leaving old as
-// it is, for copies of different lengths.
-func (l *Loader) mergeItab(old Sym, r *oReader, li uint32) bool {
+// mergeItab combines a new copy (r, li) of the DUPOK itab or type
+// descriptor old with the copy, or the copies, it has (gd fork). An
+// itab holds, per method, a mask of the arguments that escape when it
+// is called through the interface, and a type descriptor the same for
+// each of its methods, after its method table (from which the runtime
+// fills the itabs it makes); every package that needs one writes it,
+// from what it knows of the methods, and the masks can differ. The
+// linker keeps one, so it must be one every package's code is right
+// with: an argument escapes if any copy says so. The words no
+// relocation covers in either copy are ORed: in an itab, all of them
+// (the masks; the rest is the same in every copy), in a type
+// descriptor, those after its method table (its last R_METHODOFF). A
+// copy with more relocations (a mask that is a function of the
+// defining package's, which computes it at each call) is the one kept.
+// It reports false, leaving old as it is, for copies of different
+// lengths or a type descriptor with no methods.
+func (l *Loader) mergeItab(old Sym, r *oReader, li uint32, name string) bool {
 	oldr, oldli := l.toLocal(old)
 	cur, merged := l.mergedData[old]
 	if !merged {
@@ -790,6 +794,21 @@ func (l *Loader) mergeItab(old Sym, r *oReader, li uint32) bool {
 	p := r.Data(li)
 	if len(p) != len(cur) || l.SymSize(old) != int64(r.Sym(li).Siz()) {
 		return false
+	}
+	if bytes.Equal(p, cur) && len(r.Relocs(li)) == len(oldr.Relocs(oldli)) {
+		return true // (the usual case: the same copy)
+	}
+	start := 0
+	if strings.HasPrefix(name, "type:") {
+		start = -1
+		for _, rel := range oldr.Relocs(oldli) {
+			if objabi.RelocType(rel.Type()) == objabi.R_METHODOFF && int(rel.Off())+int(rel.Siz()) > start {
+				start = int(rel.Off()) + int(rel.Siz())
+			}
+		}
+		if start < 0 {
+			return false
+		}
 	}
 	covered := func(rr *oReader, i uint32) []bool {
 		c := make([]bool, len(p))
@@ -809,7 +828,7 @@ func (l *Loader) mergeItab(old Sym, r *oReader, li uint32) bool {
 	}
 	out := append([]byte(nil), base...)
 	changed := false
-	for w := 0; w+8 <= len(out); w += 8 {
+	for w := (start + 7) &^ 7; w+8 <= len(out); w += 8 {
 		data := true
 		for b := w; b < w+8; b++ {
 			if baseCov[b] || otherCov[b] {

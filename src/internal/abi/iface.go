@@ -23,13 +23,15 @@ type ITab struct {
 	Fun    [1]uintptr // variable sized. fun[0]==0 means Type does not implement Inter.
 	// gd escape-bits: an unsafe-addressable array of uint64 follows
 	// immediately after the Fun tail, with one entry per interface
-	// method. EscMask(k) returns the k-th entry. Storage is reserved
-	// by every ITab allocator (runtime persistentalloc, compiler
-	// static emission, linker fixups) and initialised to zero, which
-	// means "every pointer arg of method k escapes" — the same
-	// pessimistic answer the compiler uses today for unknown callees.
-	// Phase D will source real values from the concrete method's
-	// escape profile.
+	// method (ITabEscMaskOff): bit i+1 set if the method's i-th
+	// argument after the receiver escapes, so that a call through the
+	// interface moves it to the heap; 0, that none does; or, with bit
+	// 0 set, a function that computes the mask at the call. The
+	// compiler writes them for the itabs it emits (and the linker ORs
+	// the copies of one), and the runtime copies them, for the itabs it
+	// makes, from the concrete type's method masks
+	// (UncommonType.EscMasks), or writes ITabEscAll for a type that has
+	// none. Zero is not a safe default: it says nothing escapes.
 }
 
 // Size returns the size of the itab in memory, including the gd
@@ -46,6 +48,10 @@ func (it *ITab) Size() int {
 	}
 	return ITabSize(goarch.PtrSize, len(it.Inter.Methods))
 }
+
+// ITabEscAll is the escape mask of a method all of whose arguments
+// escape: every argument bit, and bit 0 clear (a mask, not a function).
+const ITabEscAll = ^uint64(1)
 
 // ITabEscMaskOff returns the byte offset of EscMask[k] relative to the
 // start of the ITab, given the interface's method count and the

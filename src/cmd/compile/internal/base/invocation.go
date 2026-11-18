@@ -215,7 +215,8 @@ type Invocation struct {
 	// while emitting itabs and consumed by FinalizeItabMasks after
 	// escape analysis. Per-compile because each Invocation has its
 	// own escape state and itab list.
-	ReflectdataPendingItabMasks any // []reflectdata.pendingItabMask
+	ReflectdataPendingItabMasks any  // []reflectdata.pendingItabMask
+	ReflectdataItabMasksDone    bool // gd: FinalizeItabMasks has run; later masks are written as they are made
 
 	// reflectdata runtime-type-descriptor work queues. signatmu/gcsymmu
 	// guard concurrent access from the parallel SSA backend; signatset

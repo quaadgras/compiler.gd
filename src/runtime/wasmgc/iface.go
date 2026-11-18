@@ -171,6 +171,9 @@ func itabInit(m *itab, firstTime bool) string {
 	ni := len(inter.Methods)
 	nt := int(x.Mcount)
 	xmhdr := unsafe.Slice((*abi.Method)(add(unsafe.Pointer(x), uintptr(x.Moff))), nt)
+	// gd: the escape mask of each method, copied into a new itab
+	// (abi.ITab), or every argument escaping for a type with none.
+	escMasks := x.EscMasks()
 	j := 0
 	methods := unsafe.Slice(&m.Fun[0], ni)
 	var fun0 uintptr
@@ -199,6 +202,13 @@ imethods:
 						fun0 = ifn // we'll set m.Fun[0] at the end
 					} else if firstTime {
 						methods[k] = ifn
+					}
+					if firstTime {
+						mask := abi.ITabEscAll
+						if escMasks != nil {
+							mask = escMasks[j]
+						}
+						*(*uint64)(add(unsafe.Pointer(m), uintptr(abi.ITabEscMaskOff(goarch.PtrSize, ni, k)))) = mask
 					}
 					continue imethods
 				}
