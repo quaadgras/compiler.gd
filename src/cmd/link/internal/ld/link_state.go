@@ -55,6 +55,14 @@ type linkState struct {
 	atExitFuncs     []func()
 	inProcessStatus *int // set by cmd/link/host.Run; Exit writes here + Goexit instead of os.Exit
 
+	// wantHdr is the header of the Go objects this link takes
+	// (objabi.HeaderString), for the target as the link starts (was a
+	// package-level var in lib.go, set at init). In the go command,
+	// which links in-process, the target is set after init, to the
+	// build's (cmd/go/internal/work.setToolTarget): the host's for
+	// "go tool" under another GOARCH, or a GOARCH from a GOENV file.
+	wantHdr string
+
 	// Error reporting state (was package-level vars in lib.go).
 	// Read from currentLink by free Errorf/Exitf/afterErrorAction.
 	nerrors           int

@@ -111,6 +111,12 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			// derefs at 0.
 			derefs = 0
 
+			// gd escape-bits: if root keeps a pointer to l, l
+			// can't be an escape candidate (see addrHeld).
+			if b.holdsAddr(root, l) {
+				l.addrHeld = true
+			}
+
 			// If l's address flows somewhere that
 			// outlives it, then l needs to be heap
 			// allocated.

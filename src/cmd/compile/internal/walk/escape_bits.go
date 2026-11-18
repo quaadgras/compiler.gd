@@ -56,20 +56,18 @@ func escapeBoxes(gd *base.Invocation) map[*ir.Name]*escapeBox {
 //
 // At a dynamic call site `f(&x)` the wrap emits:
 //
-//	&x = runtime.maybeEscape…(&x, …)
+//	if mask bit set { &x = runtime.materializeToHeap(&x, T) }
 //	f(&x)             // the `&x` arg becomes a load of the
 //	                   pointer var, which now holds either the
 //	                   original stack pointer or a migrated heap
 //	                   pointer depending on the mask bit.
 //
-// The transformation only affects the value the callee sees. It
-// does NOT rewrite other uses of x in the caller; callers that read
-// x after the call continue to see the original stack slot. For the
-// current test suite all EscCandidate vars are write-once / pass-
-// address / drop, so stack-vs-heap divergence is unobservable.
-// Extending the rewrite to post-call reads requires routing all
-// accesses through the pointer var (Heapaddr); that's the follow-
-// up documented in doc/gd/escape-bits.md §6a.
+// Every other use of x goes through the pointer var too (Heapaddr,
+// see registerEscapeBox), so after a migration the caller and the
+// callee see the same storage. That needs the box to be the only
+// pointer to the stack slot that outlives an expression: escape
+// analysis doesn't make x a candidate if any other location holds
+// x's address (escape's location.addrHeld).
 func promoteEscapeCandidates(gd *base.Invocation, fn *ir.Func) {
 	if fn == nil || len(fn.Dcl) == 0 {
 		return
@@ -205,10 +203,15 @@ func emitEscapeBoxReset(gd *base.Invocation, pos src.XPos, box *escapeBox) ir.No
 // OCALLFUNC with a dynamic callee, or an OCALLINTER) so that, at
 // runtime, the caller's pointer to the pointee is either left alone
 // (when the callee's escape-mask bit is clear) or re-homed to heap
-// first (when the bit is set). For ONAME PAUTOHEAP args we update
-// the name's Heapaddr pointer var in place so post-call reads of the
-// variable through *Heapaddr agree with the callee's view. For the
-// ONEW / &T{} case the wrap substitutes the call argument directly.
+// first (when the bit is set). A candidate arg is &x for a local x
+// with a box (see registerEscapeBox): the wrap updates the box in
+// place, so later uses of x through *Heapaddr agree with the callee's
+// view, and passes the box's value.
+//
+// Escape analysis only lets x stay on the stack (EscCandidate) when
+// every dynamic call that may receive its address gets it as such an
+// argument and no other pointer to x is held anywhere; see
+// escape.dynamicArgHole and location.addrHeld.
 //
 // Phase D of doc/gd/escape-bits.md.
 func wrapEscapeCandidateArgs(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) {
@@ -232,7 +235,7 @@ func wrapEscapeCandidateArgs(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes
 	// Bail cheaply when no arg is a candidate — the hot path.
 	hasCandidate := false
 	for _, arg := range n.Args {
-		if argIsEscapeCandidate(arg) {
+		if candidateArgBox(gd, arg) != nil {
 			hasCandidate = true
 			break
 		}
@@ -247,85 +250,18 @@ func wrapEscapeCandidateArgs(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes
 	}
 }
 
-// argIsEscapeCandidate reports whether arg points to an object that
-// escape analysis classified as EscCandidate. We check three shapes:
-//
-//  1. The direct node itself (e.g. an ONEW that survived inline
-//     stack-allocation), or a pointer-valued local bound to one.
-//  2. `&name` where name is a PAUTOHEAP-promoted candidate.
-//  3. A Name whose Defn chains back to a candidate expression.
-func argIsEscapeCandidate(arg ir.Node) bool {
-	if arg == nil {
-		return false
-	}
-	if arg.EscCandidate() {
-		return true
-	}
-	switch a := arg.(type) {
-	case *ir.AddrExpr:
-		if a.X != nil && a.X.EscCandidate() {
-			return true
-		}
-		if inner, ok := a.X.(*ir.Name); ok && nameReachesCandidate(inner, 4) {
-			return true
-		}
-	case *ir.Name:
-		return nameReachesCandidate(a, 4)
-	}
-	return false
-}
-
-// nameReachesCandidate reports whether n (or, via Defn, a chain of
-// Name assignments of bounded depth) carries the EscCandidate bit.
-func nameReachesCandidate(n *ir.Name, depth int) bool {
-	if n == nil || depth <= 0 {
-		return false
-	}
-	if n.EscCandidate() {
-		return true
-	}
-	if n.Class != ir.PAUTO {
-		return false
-	}
-	if n.Defn == nil {
-		return false
-	}
-	rhs := n.Defn
-	if as, ok := rhs.(*ir.AssignStmt); ok {
-		rhs = as.Y
-	}
-	if rhs == nil {
-		return false
-	}
-	if rhs.EscCandidate() {
-		return true
-	}
-	if name, ok := rhs.(*ir.Name); ok {
-		return nameReachesCandidate(name, depth-1)
-	}
-	return false
-}
-
-// candidateStorageAddr returns the pointer-var registered in
-// escapeBoxes for `arg` when arg is `&name` for a promoted
-// EscCandidate local. The wrap site updates that pointer var at
-// runtime and the call arg is rewritten to its loaded value, so the
-// callee sees either the original stack pointer or a heap-migrated
-// pointer depending on the mask bit. Returns (nil, false) for
-// fresh-allocation args; those substitute the call arg directly.
-func candidateStorageAddr(gd *base.Invocation, arg ir.Node) (*ir.Name, bool) {
+// candidateArgBox returns the box of x when arg is &x for a local x
+// that promoteEscapeCandidates gave a box, and nil otherwise.
+func candidateArgBox(gd *base.Invocation, arg ir.Node) *escapeBox {
 	eb := escapeBoxes(gd)
-	if eb == nil {
-		return nil, false
+	if eb == nil || arg.Op() != ir.OADDR {
+		return nil
 	}
-	if ae, ok := arg.(*ir.AddrExpr); ok {
-		if name, ok := ae.X.(*ir.Name); ok {
-			if box, ok := eb[name]; ok {
-				return box.addr, true
-			}
-		}
+	name, ok := arg.(*ir.AddrExpr).X.(*ir.Name)
+	if !ok {
+		return nil
 	}
-	return nil, false
+	return eb[name]
 }
 
 // candidateArg captures the per-arg work walk needs to do at one
@@ -334,58 +270,28 @@ func candidateStorageAddr(gd *base.Invocation, arg ir.Node) (*ir.Name, bool) {
 // the boxes, build heapMask, resolve, per-arg test + materialise),
 // rather than threading classification through one mkcall per arg.
 type candidateArg struct {
-	idx       int      // position in n.Args
-	box       *ir.Name // pointer-PAUTO whose value is the live storage; nil for fresh-alloc
-	name      *ir.Name // user local for `p := new(T); f(p)`; nil otherwise
-	freshExpr ir.Node  // raw expression for fresh-alloc args; nil otherwise
-	elemPtr   ir.Node  // *abi.Type for materializeToHeap
-	argType   *types.Type
+	idx     int      // position in n.Args
+	box     *ir.Name // pointer-PAUTO whose value is the live storage
+	elemPtr ir.Node  // *abi.Type for materializeToHeap
 }
 
 // classifyCandidates builds the per-arg work list for n. Returns
-// (nil, false) if no arg is a candidate or none classifies as a
-// supported shape — the caller then bails before emitting any
-// mask-resolution plumbing.
+// (nil, false) if no arg is a candidate — the caller then bails
+// before emitting any mask-resolution plumbing.
 func classifyCandidates(gd *base.Invocation, n *ir.CallExpr) ([]candidateArg, bool) {
 	pos := n.Pos()
 	out := make([]candidateArg, 0, len(n.Args))
 	for i, arg := range n.Args {
-		if !argIsEscapeCandidate(arg) {
+		box := candidateArgBox(gd, arg)
+		if box == nil {
 			continue
 		}
-		argType := arg.Type()
-		if !argType.IsPtr() && !argType.IsUnsafePtr() {
-			continue
-		}
-		ca := candidateArg{idx: i, argType: argType, elemPtr: reflectdata.TypePtrAt(gd, pos, argType.Elem())}
-		if box, ok := candidateStorageAddr(gd, arg); ok {
-			ca.box = box
-		} else if name, ok := candidatePointerName(arg); ok {
-			ca.name = name
-		} else {
-			ca.freshExpr = arg
-		}
-		out = append(out, ca)
+		out = append(out, candidateArg{idx: i, box: box.addr, elemPtr: reflectdata.TypePtrAt(gd, pos, arg.Type().Elem())})
 	}
 	if len(out) == 0 {
 		return nil, false
 	}
 	return out, true
-}
-
-// boxValue returns an ir.Node whose evaluation yields the *T
-// pointer currently in the box / name / fresh expression. This is
-// the value passed to runtime.materializeToHeap and the value
-// tested by runtime.isOnHeap when building heapMask.
-func (ca *candidateArg) boxValue() ir.Node {
-	switch {
-	case ca.box != nil:
-		return ca.box
-	case ca.name != nil:
-		return ca.name
-	default:
-		return ca.freshExpr
-	}
 }
 
 // u64Lit returns a typed-uint64 literal; using ir.NewInt directly
@@ -489,7 +395,7 @@ func emitMaskResolve(gd *base.Invocation, pos src.XPos, init *ir.Nodes, carrier,
 	hmTmp := newU64Temp(gd, pos)
 	dynBody.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, pos, hmTmp, u64Lit(gd, pos, 0))))
 	for _, ca := range cands {
-		boxAsUnsafe := typecheck.ConvNop(gd, ca.boxValue(), unsafePtr)
+		boxAsUnsafe := typecheck.ConvNop(gd, ca.box, unsafePtr)
 		isHeapCall := mkcall(gd, "isOnHeap", types.Types[types.TBOOL], &dynBody, boxAsUnsafe)
 		bit := u64Lit(gd, pos, int64(1)<<uint(ca.idx+1))
 		// Walk lowering of OASOP normally happens during walkStmt;
@@ -526,27 +432,14 @@ const maxComputeMaskDepthForGen = 8
 // coded conditional materialise:
 //
 //	if mask & (1 << (i+1)) != 0 {
-//	    slot = (T)(runtime.materializeToHeap(unsafe.Pointer(slot), &T))
+//	    box = (*T)(runtime.materializeToHeap(unsafe.Pointer(box), &T))
 //	}
 //
-// where `slot` is the storage location whose value reaches the
-// callee — a promoted-PAUTO box, a user pointer-name, or a fresh
-// PAUTO seeded with the original fresh-alloc expression. The call
-// site's argument is then rewritten to reference `slot`.
+// where box is the promoted local's pointer var, whose value reaches
+// the callee: the call site's argument is rewritten to box.
 func emitMaybeMaterialize(gd *base.Invocation, pos src.XPos, n *ir.CallExpr, init *ir.Nodes, mask *ir.Name, ca candidateArg) {
 	unsafePtr := types.Types[types.TUNSAFEPTR]
-
-	var slot *ir.Name
-	switch {
-	case ca.box != nil:
-		slot = ca.box
-	case ca.name != nil:
-		slot = ca.name
-	default:
-		slot = typecheck.TempAt(gd, pos, ir.CurFunc(gd), ca.argType)
-		slot.SetTypecheck(1)
-		init.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, pos, slot, ca.freshExpr)))
-	}
+	slot := ca.box
 
 	var bodyInit ir.Nodes
 	matCall := mkcall(gd, "materializeToHeap", unsafePtr, &bodyInit,
@@ -639,23 +532,4 @@ func wrapIfaceCallCandidates(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes
 		emitMaybeMaterialize(gd, pos, n, init, mask, ca)
 	}
 	sel.X = ifaceVal
-}
-
-// candidatePointerName returns (name, true) when arg is an ONAME
-// PAUTO pointer variable whose Defn chains back to an EscCandidate
-// allocation (`p := new(T)` / `p := &Foo{}` style). In that case the
-// wrap updates p's value in place and the call arg is p itself.
-func candidatePointerName(arg ir.Node) (*ir.Name, bool) {
-	name, ok := arg.(*ir.Name)
-	if !ok || name.Class != ir.PAUTO {
-		return nil, false
-	}
-	t := name.Type()
-	if t == nil || (!t.IsPtr() && !t.IsUnsafePtr()) {
-		return nil, false
-	}
-	if !nameReachesCandidate(name, 4) {
-		return nil, false
-	}
-	return name, true
 }

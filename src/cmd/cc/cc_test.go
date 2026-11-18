@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -80,6 +81,69 @@ func TestBasic(t *testing.T) {
 	}
 	if got := goRun(t, dir); got != string(want) {
 		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestC23 compares the output of C23 that gcc also compiles with gcc's.
+func TestC23(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/c23.c", true)
+	bin := filepath.Join(t.TempDir(), "c23")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, "testdata/c23.c").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestFenv compares the floating-point environment (Annex F: rounding
+// directions, exceptions, the library's conversions) with gcc's, on the
+// architectures that have one.
+func TestFenv(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skip("no rounding directions or exceptions")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/fenv.c", true)
+	bin := filepath.Join(t.TempDir(), "fenv")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-frounding-math", "-w", "-o", bin, "testdata/fenv.c", "-lm").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestFenvRound checks C23's FENV_ROUND, which gcc does not have: the
+// values are gcc's with fesetround instead.
+func TestFenvRound(t *testing.T) {
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skip("no rounding directions")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/fenvround.c", true)
+	want := "0x1.5555555555556p-2 0x1.bb67ae8584cabp+0 0.3 0x1.555556p-2\n" +
+		"-0x1.5555555555555p-2 0x0p+0\n" +
+		"0x1.5555555555555p-2 0.2\n"
+	if got := goRun(t, dir); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 

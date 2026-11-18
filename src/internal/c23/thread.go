@@ -72,8 +72,10 @@ func PthreadCreate(thr, attr, start, arg Ptr) int32 {
 	threads[id] = t
 	threadsMu.Unlock()
 	storeLong(thr, int64(id)) // pthread_t is unsigned long
+	fe := inheritFenv()
 	go func() {
 		Store64(threadID.Get(), id)
+		gSelf().fe = fe
 		defer close(t.done)
 		defer runKeyDestructors()
 		defer func() {

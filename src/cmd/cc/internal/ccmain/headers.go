@@ -276,7 +276,11 @@ typedef double double_t;
 #define FP_ILOGBNAN (-2147483647-1)
 #define MATH_ERRNO 1
 #define MATH_ERREXCEPT 2
+#ifdef __GD_FENV__
+#define math_errhandling (MATH_ERRNO | MATH_ERREXCEPT)
+#else
 #define math_errhandling MATH_ERRNO
+#endif
 int __cc_fpclassify(double x);
 int __cc_fpclassifyf(float x);
 int __cc_signbit(double x);
@@ -841,7 +845,8 @@ void *alloca(size_t size);
 #define FLT_TRUE_MIN 0x1p-149f
 #define DBL_TRUE_MIN 0x1p-1074
 #define LDBL_TRUE_MIN 0x1p-1074L
-#define FLT_ROUNDS 1
+int __cc_flt_rounds(void);
+#define FLT_ROUNDS (__cc_flt_rounds())
 #define FLT_IS_IEC_60559 1
 #define DBL_IS_IEC_60559 1
 #define LDBL_IS_IEC_60559 1
@@ -873,6 +878,7 @@ void *alloca(size_t size);
 `,
 	"limits.h": `#ifndef __CC_LIMITS_H
 #define __CC_LIMITS_H
+#define __STDC_VERSION_LIMITS_H__ 202311L
 #define CHAR_BIT 8
 #define BOOL_WIDTH 1
 #define CHAR_WIDTH 8
@@ -1193,9 +1199,22 @@ wctrans_t wctrans(const char *property);
 typedef struct { int __env; } fenv_t;
 typedef int fexcept_t;
 typedef struct { int __mode; } femode_t;
-/* Go rounds to nearest and keeps no exception flags. */
 #define FE_TONEAREST 0
+#ifdef __GD_FENV__
+/* The hardware's directions and exceptions, numbered as x86's. */
+#define FE_DOWNWARD 0x400
+#define FE_UPWARD 0x800
+#define FE_TOWARDZERO 0xc00
+#define FE_INVALID 0x01
+#define FE_DIVBYZERO 0x04
+#define FE_OVERFLOW 0x08
+#define FE_UNDERFLOW 0x10
+#define FE_INEXACT 0x20
+#define FE_ALL_EXCEPT 0x3d
+#else
+/* No other direction, no exceptions: wasm has none. */
 #define FE_ALL_EXCEPT 0
+#endif
 const void *__cc_fe_dfl(void);
 #define FE_DFL_ENV ((const fenv_t *)__cc_fe_dfl())
 #define FE_DFL_MODE ((const femode_t *)__cc_fe_dfl())

@@ -50,12 +50,30 @@ func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
 	// debugging: their ABI invariants (init ordering, stack
 	// growth, race detector hooks) are sensitive to any extra
 	// stack allocation in the caller frames. Parity with stock.
-	if gd.Ctxt.Pkgpath == "runtime" ||
-		strings.HasPrefix(gd.Ctxt.Pkgpath, "internal/runtime/") ||
-		gd.Ctxt.Pkgpath == "syscall" {
+	if pkg := phaseGOwnerPkg(gd, fn); pkg == "runtime" ||
+		strings.HasPrefix(pkg, "internal/runtime/") ||
+		pkg == "syscall" {
 		return
 	}
 	rewriteStmts(gd, fn, &fn.Body)
+}
+
+// phaseGOwnerPkg returns the path of the package whose code fn is,
+// for deciding whether the call-site rewrite applies. A DUPOK
+// function (a generic instantiation, or a wrapper) is compiled in
+// every package that needs it, and the linker keeps only one copy,
+// so every copy must be the same: the decision has to follow the
+// function's own package, the one its symbol belongs to, not the
+// package being compiled. Otherwise, say, internal/sync's
+// (*HashTrieMap[any,any]).expand forwards its outBuf when compiled
+// in reflect but passes nil when compiled in syscall.
+func phaseGOwnerPkg(gd *base.Invocation, fn *ir.Func) string {
+	if fn.Dupok() {
+		if s := fn.Sym(); s != nil && s.Pkg != nil {
+			return s.Pkg.Path
+		}
+	}
+	return gd.Ctxt.Pkgpath
 }
 
 // rewriteStmts walks stmts in place, rewriting recognised call

@@ -659,17 +659,7 @@ func walkNew(gd *base.Invocation, n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 		if t.Size() > ir.MaxImplicitStackVarSize {
 			gd.Fatalf("large ONEW with EscNone: %v", n)
 		}
-		addr := stackTempAddr(gd, init, t)
-		// gd escape-bits: propagate the EscCandidate bit from the
-		// ONEW to the resulting &stackTemp expression so the
-		// call-site wrap can still detect the candidate at the
-		// call site (ONEW is the node tagged by escape; walk
-		// rewrites it in place and the bit would otherwise be
-		// lost).
-		if n.EscCandidate() {
-			addr.SetEscCandidate(true)
-		}
-		return addr
+		return stackTempAddr(gd, init, t)
 	}
 	types.CalcSize(gd, t)
 	n.MarkNonNil()

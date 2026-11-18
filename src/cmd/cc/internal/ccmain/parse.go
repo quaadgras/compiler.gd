@@ -43,6 +43,9 @@ type parser struct {
 	typeTLS     bool
 	typeConstx  bool
 	pendingVLA  []stmt // declarations of VLA lengths, before the next declaration
+
+	fe              fenvPragmas // the floating-point pragmas in effect (fenv.go)
+	translationTime int         // in an initializer computed as if at translation time
 }
 
 type parseError struct{ msg string }
@@ -71,7 +74,7 @@ func parse(file string, toks []token) (u *unit, err error) {
 			err = fmt.Errorf("%s", pe.msg)
 		}
 	}()
-	p := &parser{file: file, toks: toks}
+	p := &parser{file: file, toks: toks, fe: defaultPragmas}
 	p.u = &unit{file: file, tags: map[string]*ctype{}}
 	p.push()
 	p.u.scope = p.sc.vars
@@ -245,6 +248,9 @@ func (p *parser) attributes() attrs {
 		case p.is("[") && p.isAt(1, "["):
 			p.pos += 2
 			for !p.is("]") {
+				if p.accept(",") {
+					continue // C23: an attribute may be empty, [[a,,b]]
+				}
 				name := p.ident()
 				if p.accept("::") {
 					name = p.ident()
@@ -708,12 +714,13 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		}
 		for {
 			f := &field{bits: -1}
+			var fa attrs // the member's, as GNU and C23 have it
 			if p.is(":") {
 				f.t = s.t
 			} else {
-				f.name, f.t, _ = p.declarator(s.t)
+				f.name, f.t, fa = p.declarator(s.t)
 			}
-			fa := p.attributes()
+			fa.merge(p.attributes())
 			if p.accept(":") {
 				f.bits = int(p.constInt(p.conditional()))
 				if !f.t.isInteger() {
@@ -1006,7 +1013,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 				depth--
 			}
 		}
-		t = p.suffixes(t)
+		t = p.suffixes(t, &a)
 		end := p.pos
 		p.pos = start
 		name, it, ia := p.declarator(t)
@@ -1020,7 +1027,7 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 		name = p.ident()
 	}
 	a.merge(p.attributes())
-	t = p.suffixes(t)
+	t = p.suffixes(t, &a)
 	a.merge(p.attributes())
 	return name, t, a
 }
@@ -1091,8 +1098,11 @@ func (p *parser) isTypeStartWord() bool {
 	return t.kind == tkIdent && typeWords[t.text]
 }
 
-// suffixes parses array and function declarator suffixes.
-func (p *parser) suffixes(t *ctype) *ctype {
+// suffixes parses array and function declarator suffixes. In C23 the
+// attributes after each, [N] [[...]] and (params) [[...]], appertain to
+// the array or function type; cmd/cc gives them, and GNU attributes
+// there, to the declarator, adding them to a.
+func (p *parser) suffixes(t *ctype, a *attrs) *ctype {
 	switch {
 	case p.is("["):
 		p.next()
@@ -1117,7 +1127,8 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			// [*]: a VLA of unspecified size, in a prototype: its size
 			// is never needed (sizeof *p in a later parameter's).
 			p.expect("]")
-			inner := p.suffixes(t)
+			a.merge(p.attributes())
+			inner := p.suffixes(t, a)
 			at := arrayOf(inner, -1)
 			at.q = q
 			at.vla = &intConst{node{tULong, p.here()}, 0}
@@ -1138,8 +1149,8 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			}
 		}
 		p.expect("]")
-		p.attributes()
-		inner := p.suffixes(t)
+		a.merge(p.attributes())
+		inner := p.suffixes(t, a)
 		if inner.kind == kFunc {
 			p.errorf("declaration of an array of functions")
 		}
@@ -1155,7 +1166,8 @@ func (p *parser) suffixes(t *ctype) *ctype {
 	case p.is("("):
 		p.next()
 		ft := p.params()
-		ret := p.suffixes(t)
+		a.merge(p.attributes())
+		ret := p.suffixes(t, a)
 		if ret.kind == kFunc || ret.kind == kArray {
 			p.errorf("function returning an array or function")
 		}
@@ -1360,6 +1372,10 @@ func (p *parser) topLevel() {
 	if p.accept(";") {
 		return
 	}
+	if p.peek().kind == tkPragma {
+		p.stdcPragma(p.next())
+		return
+	}
 	if p.is("_Static_assert") || p.is("static_assert") {
 		p.staticAssert()
 		return
@@ -1369,6 +1385,16 @@ func (p *parser) topLevel() {
 		p.skipParens()
 		p.expect(";")
 		return
+	}
+	if p.is("[") && p.isAt(1, "[") {
+		// C23's attribute declaration, [[...]];, or a declaration's
+		// attributes.
+		save := p.pos
+		p.attributes()
+		if p.accept(";") {
+			return
+		}
+		p.pos = save
 	}
 	at := p.here()
 	s := p.declSpecs()
@@ -1509,7 +1535,13 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		}
 		if s.auto && s.t == nil {
 			// C23 auto: the initializer's type, after lvalue conversion.
+			if s.constx {
+				p.translationTime++
+			}
 			e := p.rvalue(p.initExpr())
+			if s.constx {
+				p.translationTime--
+			}
 			sym.t = e.ty().unqual().qualified(s.q)
 			if s.constx {
 				sym.t = constexprType(sym.t)
@@ -1519,7 +1551,13 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			if sym.global {
 				p.staticInit++
 			}
+			if sym.global || s.constx {
+				p.translationTime++
+			}
 			sym.init = p.initializer(sym)
+			if sym.global || s.constx {
+				p.translationTime--
+			}
 			if sym.global {
 				p.staticInit--
 			}

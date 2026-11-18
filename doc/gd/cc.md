@@ -432,10 +432,10 @@ C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
 headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
 
 `go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);
-`testdata/slimcc/status.txt` lists the 75 of 106 that pass. Given
+`testdata/slimcc/status.txt` lists the 81 of 106 that pass. Given
 checkouts, `-run CTestsuite -ctestsuite DIR` runs c-testsuite (all 220
 single-exec tests pass) and `-run Torture -torture DIR` GCC's
-`gcc.c-torture/execute` (1396 of the 1576 that gcc passes); neither is
+`gcc.c-torture/execute` (1467 of the 1576 that gcc passes); neither is
 vendored, as their licenses are not MIT, but `testdata/*.status` list what
 passes. Most of the torture tests that fail use inline assembly or vector
 types, or keep pointers in integers.
@@ -451,3 +451,23 @@ Complex numbers are Go's complex64 and complex128 (`complex.h` is
 `math/cmplx`); `_BitInt(N)` goes to 64 bits (`BITINT_MAXWIDTH`, the least
 C23 allows); GNU's nested functions are Go closures (still valid after
 their parent returns, unlike GCC's trampolines).
+
+Floating point is Go's: IEC 60559's binary32 and binary64 (`long double`
+is `double`), rounding to nearest. On amd64 and arm64 cmd/cc also has
+Annex F's environment, and claims it (`__STDC_IEC_559__`,
+`__STDC_IEC_60559_BFP__`): each thread has a rounding direction and
+exception flags (internal/c23's `fenv.go`), and code under
+`#pragma STDC FENV_ACCESS ON` or C23's `FENV_ROUND` calls helpers for its
+arithmetic, conversions and relational comparisons, each of which runs its
+one instruction in the direction asked and collects the flags it raises
+(`fenv_amd64.s`, `fenv_arm64.s`). Go's ABI fixes the hardware's direction
+at every call, so the environment cannot stay in MXCSR or FPCR between
+operations. Other code is Go's arithmetic, as C lets it assume the default
+environment there. The library follows the environment: `sqrt`, `fma`,
+the `rint` family, C23's narrowing `fadd` family (rounded once, to odd
+then to float) and `printf`/`strtod` honor the direction, and the math
+functions raise Annex F's exceptions as well as setting `errno`.
+`FP_CONTRACT OFF` keeps Go from fusing a product into an addition.
+`TestFenv` compares it all with gcc's in the four directions. Wasm has no
+rounding directions or flags: there `fenv.h` has only `FE_TONEAREST`, and
+Annex F is not claimed.

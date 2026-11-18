@@ -938,6 +938,22 @@ func foo118(unknown func(*int)) { // ERROR "unknown does not escape$"
 	unknown(&x)
 }
 
+func foo118a(unknown func(*int)) { // ERROR "unknown does not escape$"
+	// gd escape-bits: the wrap at the call only re-homes &x, not the
+	// address of a field, so x escapes as in stock Go.
+	var x struct{ a, i int } // ERROR "moved to heap: x$"
+	unknown(&x.i)
+}
+
+func foo118b(unknown func(*int)) { // ERROR "unknown does not escape$"
+	// gd escape-bits: p would still point at the stack copy after the
+	// wrap moved x to the heap, so x escapes as in stock Go.
+	x := 1 // ERROR "moved to heap: x$"
+	p := &x
+	unknown(&x)
+	*p = 2
+}
+
 func external(*int)
 
 func foo119(x *int) { // ERROR "leaking param: x$"

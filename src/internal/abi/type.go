@@ -266,7 +266,9 @@ type UncommonType struct {
 	Mcount  uint16  // number of methods
 	Xcount  uint16  // number of exported methods
 	Moff    uint32  // offset from this uncommontype to [mcount]Method
-	_       uint32  // unused
+	// gd: offset from this uncommontype to [mcount]uint64, the
+	// escape mask of each method (see EscMasks); 0 if there are none.
+	EscOff uint32
 }
 
 func (t *UncommonType) Methods() []Method {
@@ -274,6 +276,20 @@ func (t *UncommonType) Methods() []Method {
 		return nil
 	}
 	return (*[1 << 16]Method)(addChecked(unsafe.Pointer(t), uintptr(t.Moff), "t.mcount > 0"))[:t.Mcount:t.Mcount]
+}
+
+// EscMasks returns the escape mask of each of t's methods, in the order
+// of Methods (gd fork): for a call through an interface, bit i+1 is set
+// if the method's i-th argument after the receiver escapes; or, with
+// bit 0 set, the word is a function that computes the mask at the call
+// (see ITab). The runtime copies them into the itabs it makes. nil if t
+// has none (a type reflect made): then every argument escapes
+// (ITabEscAll).
+func (t *UncommonType) EscMasks() []uint64 {
+	if t.Mcount == 0 || t.EscOff == 0 {
+		return nil
+	}
+	return (*[1 << 16]uint64)(addChecked(unsafe.Pointer(t), uintptr(t.EscOff), "t.mcount > 0 && t.escoff > 0"))[:t.Mcount:t.Mcount]
 }
 
 func (t *UncommonType) ExportedMethods() []Method {
@@ -896,6 +912,11 @@ func (t *Type) DescriptorSize() int {
 	ret += addSize
 
 	ret += mcount * int(unsafe.Sizeof(Method{}))
+
+	// gd: the methods' escape masks follow, at EscOff (EscMasks).
+	if ut != nil && ut.EscOff != 0 && mcount > 0 {
+		ret = int(uintptr(unsafe.Pointer(ut))-uintptr(unsafe.Pointer(t))) + int(ut.EscOff) + mcount*8
+	}
 
 	return ret
 }

@@ -260,6 +260,13 @@ func (g *gen) unit() {
 		}
 	}
 	objs = append(append(lits, objs...), rest...)
+	for _, s := range g.u.fenv {
+		if s.access {
+			// The library raises its exceptions from the start.
+			g.inits.WriteString("\tc23.UseFenv()\n")
+			break
+		}
+	}
 	for _, s := range objs {
 		g.globalVar(s)
 	}

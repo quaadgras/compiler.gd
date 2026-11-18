@@ -394,6 +394,14 @@ func (f gowasmFeatures) String() string {
 }
 
 func gowasm() (f gowasmFeatures) {
+	// GOWASM is for GOARCH=wasm alone (gd fork): the compiler asks
+	// GOWASM.GC in code for every target, and the environment of a
+	// wasm build can name it while the go command builds for another
+	// GOARCH (a tool for the host: "GOARCH=wasm GOWASM=gc go tool
+	// pprof"; see SetTarget).
+	if GOARCH != "wasm" {
+		return
+	}
 	var gc, split, linear, ptr64 bool
 	for opt := range strings.SplitSeq(envOr("GOWASM", ""), ",") {
 		switch opt {

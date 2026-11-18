@@ -1030,6 +1030,12 @@ func (p *pp) pragma(d token, ts []token) {
 	switch ts[0].text {
 	case "once":
 		p.once[p.curFile()] = true
+	case "STDC":
+		// The floating-point pragmas apply to where they are in the
+		// program, which the parser knows (fenv.go): a token for it.
+		if len(ts) >= 3 && (ts[1].text == "FENV_ACCESS" || ts[1].text == "FENV_ROUND" || ts[1].text == "FP_CONTRACT") {
+			p.out = append(p.out, token{file: d.file, line: d.line, kind: tkPragma, text: ts[1].text, str: ts[2].text})
+		}
 	case "push_macro", "pop_macro":
 		// push_macro("name"): save the macro's definition, or that it
 		// has none; pop_macro("name") restores it.
@@ -1486,7 +1492,6 @@ const predefined = `
 #define __STDC_HOSTED__ 1
 #define __STDC_UTF_16__ 1
 #define __STDC_UTF_32__ 1
-#define __STDC_IEC_559__ 1
 #define __STDC_NO_THREADS__ 1
 #define __STDC_EMBED_NOT_FOUND__ 0
 #define __STDC_EMBED_FOUND__ 1

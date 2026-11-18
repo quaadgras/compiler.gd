@@ -233,6 +233,8 @@ func itabInit(m *itab, firstTime bool) string {
 	ni := len(inter.Methods)
 	nt := int(x.Mcount)
 	xmhdr := unsafe.Slice((*abi.Method)(add(unsafe.Pointer(x), uintptr(x.Moff))), nt)
+	// gd: the escape mask of each method, copied into a new itab.
+	escMasks := x.EscMasks()
 	j := 0
 	// These are code pointers, not heap pointers. Use a uintptr slice so the
 	// store emits no write barrier: on wasm a code pointer can look like a
@@ -265,6 +267,9 @@ imethods:
 					} else if firstTime {
 						methods[k] = uintptr(ifn)
 					}
+					if firstTime {
+						*itabEscMaskPtr(m, k) = methodEscMask(escMasks, j)
+					}
 					continue imethods
 				}
 			}
@@ -293,6 +298,18 @@ imethods:
 //go:nosplit
 func itabEscMaskPtr(m *itab, k int) *uint64 {
 	return (*uint64)(add(unsafe.Pointer(m), uintptr(abi.ITabEscMaskOff(goarch.PtrSize, len(m.Inter.Methods), k))))
+}
+
+// methodEscMask is the escape mask of the type's j-th method, given
+// its masks (abi.UncommonType.EscMasks), or abi.ITabEscAll, every
+// argument escaping, for a type that has none (one reflect made).
+//
+//go:nosplit
+func methodEscMask(masks []uint64, j int) uint64 {
+	if masks == nil {
+		return abi.ITabEscAll
+	}
+	return masks[j]
 }
 
 func itabsinit() {

@@ -16,8 +16,12 @@ func (e *escape) stmt(n ir.Node) {
 	}
 
 	lno := ir.SetPos(e.gd, n)
+	prevStmt := e.curStmt // gd escape-bits: see noteAddrTaken
+	e.nextStmt++
+	e.curStmt = e.nextStmt
 	defer func() {
 		e.gd.Pos = lno
+		e.curStmt = prevStmt
 	}()
 
 	if e.gd.Flag.LowerM > 2 {

@@ -78,6 +78,26 @@ func (g *gen) rewrite(fset *gotoken.FileSet, f *ast.File, src []byte) (out []byt
 	return []byte(fmt.Sprintf("//line %s:1\n%s", name, b.Bytes())), nil
 }
 
+// cgoHelpers are the functions of cgo's that C.name may name.
+var cgoHelpers = map[string]bool{"CString": true, "GoString": true, "free": true, "malloc": true}
+
+// cDefined reports whether C.name means something in u: what cName
+// and rewriteCall accept.
+func cDefined(u *unit, name string) bool {
+	if _, ok := cgoBasic[name]; ok || cgoHelpers[name] || u.scope[name] != nil {
+		return true
+	}
+	for _, kw := range []string{"struct_", "union_", "enum_"} {
+		if t := u.tags[strings.TrimPrefix(name, kw)]; strings.HasPrefix(name, kw) && t != nil {
+			if kw == "enum_" {
+				return t.enum != nil
+			}
+			return t.kind == kStruct && t.rec.union == (kw == "union_")
+		}
+	}
+	return false
+}
+
 // cName returns the Go for C.name used as a type or a value.
 func (g *gen) cName(line int, name string) string {
 	if t, ok := cgoBasic[name]; ok {

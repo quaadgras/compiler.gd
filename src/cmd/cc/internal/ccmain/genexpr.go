@@ -406,7 +406,7 @@ func (g *gen) effect(e expr) {
 		g.effect(e.y)
 		g.p("}")
 	case *call:
-		v := g.callCode(e)
+		v := g.fenvCall(e, g.callCode(e))
 		if strings.HasPrefix(v, "t") && isSimple(v) {
 			return
 		}
@@ -516,6 +516,11 @@ func (g *gen) compare(e *binary) string {
 	if e.x.ty().isPtr() || e.x.ty().kind == kNullptr {
 		return fmt.Sprintf("(%s %s %s)", g.addrCode(e.x, x), e.op, g.addrCode(e.y, y))
 	}
+	if s, ok := g.fenvOf(e); ok {
+		if code := fenvCompare(e.op, x, y, e.x.ty(), s); code != "" {
+			return code
+		}
+	}
 	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
 }
 
@@ -585,7 +590,7 @@ func (g *gen) rv(e expr) string {
 	case *cond:
 		return g.condExpr(e)
 	case *call:
-		return g.callCode(e)
+		return g.fenvCall(e, g.callCode(e))
 	case *cast:
 		return g.castCode(e)
 	case *stmtExpr:
@@ -640,6 +645,11 @@ func (g *gen) binary(e *binary) string {
 	}
 	if is128(e.t) {
 		return arith128(e.op, x, y)
+	}
+	if s, ok := g.fenvOf(e); ok {
+		if code := fenvArith(e.op, x, y, e.t, s); code != "" {
+			return code
+		}
 	}
 	return wrapBits(fmt.Sprintf("(%s %s %s)", x, e.op, y), e.t)
 }
@@ -729,6 +739,9 @@ func (g *gen) castCode(e *cast) string {
 		}
 	}
 	x := g.rv(e.x)
+	if s, ok := g.fenvOf(e); ok {
+		return convertUnder(x, from, to, s)
+	}
 	return convertCode(x, from, to)
 }
 
@@ -829,14 +842,23 @@ func (g *gen) assign(e *assign, value bool) string {
 		if t.isPtr() {
 			v = g.ptrAdd(cur, t, e.y, op == "-")
 		} else {
+			s, fe := g.fenvOf(e)
 			x := convertCode(cur, t.unqual(), e.ct)
+			if fe {
+				x = convertUnder(cur, t.unqual(), e.ct, s)
+			}
 			y := g.rv(e.y)
 			if (op == "/" || op == "%") && isConstExpr(e.y) {
 				y = "c23.Val(" + y + ")"
 			}
-			if is128(e.ct) {
+			switch r := fenvArith(op, x, y, e.ct, s); {
+			case is128(e.ct):
 				v = convertCode(arith128(op, x, y), e.ct, t.unqual())
-			} else {
+			case fe && r != "":
+				v = convertUnder(r, e.ct, t.unqual(), s)
+			case fe:
+				v = convertUnder(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual(), s)
+			default:
 				v = convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
 			}
 		}
@@ -901,7 +923,9 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		}
 		return new
 	}
-	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) {
+	s, fe := g.fenvOf(e)
+	fe = fe && t.isFloat() && s.runtime()
+	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) && !fe {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
 	}
@@ -925,6 +949,8 @@ func (g *gen) incDec(e *incDec, value bool) string {
 		}
 	case is128(t):
 		nv = arith128(e.op[:1], old, constLit(t, 1))
+	case fe:
+		nv = fenvArith(e.op[:1], old, "1", t, s)
 	default:
 		op := e.op[:1]
 		nv = wrapBits(fmt.Sprintf("(%s %s 1)", old, op), t)

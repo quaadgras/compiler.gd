@@ -30,34 +30,38 @@ pointers inside composite literals were being over-eagerly stack-
 promoted. The current rule captures the bread-and-butter win
 (`&localvar` to a dynamic callee) without the aliasing hazards.
 
-It is further restricted by `addrOnlyAtDynamicCalls`: every address
-of the local taken in the function must be a direct `&x` argument of
-a dynamic call, and no closure may capture it. Re-homing copies x and
-repoints its box, so any other pointer to x that is live across the
-call is wrong afterwards. Before this filter (fixed 2026-11-18,
-`escape_bits_alias_test.go`) the fork miscompiled `q := &x; f(&x);
-q.a = 1` (q kept writing the stale stack copy), `&x.f`, `x[:]`,
-pointer-receiver method calls on x and by-reference captures, and
-`p := &x; f(p)`, `f(unsafe.Pointer(&x))` and inlined forwarders
-passed the callee a pointer into a dead frame, since the wrap only
-recognises a literal `&x` argument.
+**2. `dynamicArgHole` routes only `&x` to `candidateHole`.** The
+wrap re-homes one shape of argument: `&x` for a local `x` that
+`isCandidateLoc` admits (walk's `candidateArgBox` recognizes exactly
+that shape). Every other argument of an unknown callee reaches it as
+it is, so it flows to `heapHole` as in stock Go: the address of a
+field or element (`&x.f`, `&a[i]`), a pointer variable, a conversion
+(`unsafe.Pointer(&x)`), a struct, slice, map or interface value
+(`f(P{p: &x})`), and interface receivers. Before this rule, any local
+whose address reached a dynamic call this way stayed on the stack
+with no wrap: a callee that kept `&x.i` kept a dangling pointer, and
+on 32-bit targets sync/atomic's 64-bit operands stayed on the
+4-aligned stack.
 
-**2. `candidateEligibleParamType` gates `tagHole`.** Dynamic callees
-only route pointer-shaped args (*T, unsafe.Pointer, chan) through
-`candidateHole`. Struct-by-value, slice, map, interface, and func
-args fall back to `heapHole`, matching stock Go's behaviour exactly.
-This keeps `&x` nested inside a struct value arg (`f(P{p: &x})`)
-from being candidate-routed despite the struct's methods escaping
-the field. Per-field escape tracking to reclaim the struct case is
-planned — see `memory/project_escape_bits_field_escape_roadmap.md`.
+**3. A candidate's address is held nowhere else
+(`location.addrHeld`).** After the wrap moves `x` to the heap, `x`'s
+box points at the copy, but any other pointer to the stack slot taken
+before the call (`p := &x`, a closure capturing `x`, a range over
+`&x`, an inlined parameter, `x.self = &x`, a pointer stored in
+another candidate) would go stale. The solver marks a location whose
+address flows into any location of the same function that holds
+values (`holdsAddr`: everything but the heap and callee
+pseudo-locations and teeHole's forwarding temporaries), and `finish`
+doesn't make it a candidate. Passing `&x` to static callees that don't
+keep it is fine. So is taking `&x` in other statements; but within a
+statement that passes `&x` to a dynamic call, order and walk may
+evaluate another pointer to `x` into a temporary first
+(`use(id(&x), f(&x))`, `use(a[:], f(&a))`), so `noteAddrTaken` marks a
+location whose address such a statement also takes some other way.
 
-**3. Interface-method receivers are excluded from candidate-eligible
-pointers.** Go synthesises iface-method receivers as `*struct{}` —
-an opaque pointer to empty-struct standing in for the iface's data
-word. A naïve pointer-kind check would treat them as real pointer
-args; we reject `*T` where `T.Kind()==TSTRUCT && T.NumFields()==0`
-so the iface receiver chain (e.g. `Handler → TextHandler →
-commonHandler.w → &buf`) isn't pulled into candidate propagation.
+A location that fails 2 or 3 but has `attrCandidateEscape` is
+finalized exactly like an escaping one (`moved to heap`, or an
+error in the runtime).
 
 ### Box promotion via Heapaddr
 
@@ -80,10 +84,6 @@ dynamic call site, `wrapEscapeCandidateArgs` emits
 &name, typ)` so the pointer gets re-homed to a heap copy iff the
 callee's mask bit fires. Post-call reads through `*Heapaddr` see the
 migrated storage.
-
-For `p := new(T); f(p)` patterns the wrap additionally updates the
-ONAME's value in place (via `updateNameViaWrap`) so subsequent
-`*p` reads stay consistent.
 
 ### Idempotent runtime materialize
 
@@ -579,8 +579,8 @@ that could happen:
 > the object is the one passed at the call. A pointer taken earlier
 > (`q := &x`, `&x.f`, a by-reference closure capture) is neither the
 > caller's "stack copy" nor an escape edge, and keeps the old storage
-> after the wrap re-homes x. See `addrOnlyAtDynamicCalls` in Landed
-> state.
+> after the wrap re-homes x. See `dynamicArgHole` and
+> `location.addrHeld` in Landed state.
 
 The runtime helper is `go:nosplit` because call-site insertion
 happens in argument evaluation: an inopportune stack grow would

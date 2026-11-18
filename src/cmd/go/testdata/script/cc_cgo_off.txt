@@ -16,6 +16,14 @@ stdout '^nocgo.go $'
 go run .
 stderr '^no cgo$'
 
+# Nor if it uses a C name that cmd/cc does not define, from headers it
+# provides (internal/testpty's posix_openpt).
+cp p.go.undefined p.go
+go list -f '{{range .GoFiles}}{{.}} {{end}}'
+stdout '^nocgo.go $'
+go run .
+stderr '^no cgo$'
+
 -- go.mod --
 module m
 
@@ -35,6 +43,14 @@ package main
 import "C"
 
 func main() { show(int(C.add(2, 3))) }
+-- p.go.undefined --
+package main
+
+// #include <stdlib.h>
+// #include "add.h"
+import "C"
+
+func main() { show(int(C.add(2, int(C.posix_openpt(0))))) }
 -- cgotag.go --
 //go:build cgo
 

@@ -194,6 +194,10 @@ type Loader struct {
 
 	objSyms []objSym // global index mapping to local index
 
+	// gd: the data of a DUPOK itab whose copies differ, combined from
+	// them (mergeItab), in place of its object's.
+	mergedData map[Sym][]byte
+
 	symsByName    [2]map[string]Sym // map symbol name to index, two maps are for ABI0 and ABIInternal
 	extStaticSyms map[nameVer]Sym   // externally defined static symbols, keyed by name
 
@@ -460,6 +464,9 @@ func (st *loadState) addSym(name string, ver int, r *oReader, li uint32, kind in
 	oldsym := oldr.Sym(oldli)
 	if osym.Dupok() {
 		if oldsym.Dupok() {
+			if (strings.HasPrefix(name, "go:itab.") || strings.HasPrefix(name, "type:")) && l.mergeItab(oldi, r, li, name) {
+				return oldi
+			}
 			if l.flags&FlagStrictDups != 0 {
 				l.checkdup(name, r, li, oldi)
 			}
@@ -760,6 +767,92 @@ func (l *Loader) Lookup(name string, ver int) Sym {
 		return l.extStaticSyms[nameVer{name, ver}]
 	}
 	return l.symsByName[ver][name]
+}
+
+// mergeItab combines a new copy (r, li) of the DUPOK itab or type
+// descriptor old with the copy, or the copies, it has (gd fork). An
+// itab holds, per method, a mask of the arguments that escape when it
+// is called through the interface, and a type descriptor the same for
+// each of its methods, after its method table (from which the runtime
+// fills the itabs it makes); every package that needs one writes it,
+// from what it knows of the methods, and the masks can differ. The
+// linker keeps one, so it must be one every package's code is right
+// with: an argument escapes if any copy says so. The words no
+// relocation covers in either copy are ORed: in an itab, all of them
+// (the masks; the rest is the same in every copy), in a type
+// descriptor, those after its method table (its last R_METHODOFF). A
+// copy with more relocations (a mask that is a function of the
+// defining package's, which computes it at each call) is the one kept.
+// It reports false, leaving old as it is, for copies of different
+// lengths or a type descriptor with no methods.
+func (l *Loader) mergeItab(old Sym, r *oReader, li uint32, name string) bool {
+	oldr, oldli := l.toLocal(old)
+	cur, merged := l.mergedData[old]
+	if !merged {
+		cur = oldr.Data(oldli)
+	}
+	p := r.Data(li)
+	if len(p) != len(cur) || l.SymSize(old) != int64(r.Sym(li).Siz()) {
+		return false
+	}
+	if bytes.Equal(p, cur) && len(r.Relocs(li)) == len(oldr.Relocs(oldli)) {
+		return true // (the usual case: the same copy)
+	}
+	start := 0
+	if strings.HasPrefix(name, "type:") {
+		start = -1
+		for _, rel := range oldr.Relocs(oldli) {
+			if objabi.RelocType(rel.Type()) == objabi.R_METHODOFF && int(rel.Off())+int(rel.Siz()) > start {
+				start = int(rel.Off()) + int(rel.Siz())
+			}
+		}
+		if start < 0 {
+			return false
+		}
+	}
+	covered := func(rr *oReader, i uint32) []bool {
+		c := make([]bool, len(p))
+		for _, rel := range rr.Relocs(i) {
+			for b := int(rel.Off()); b < int(rel.Off())+int(rel.Siz()) && b < len(c); b++ {
+				c[b] = true
+			}
+		}
+		return c
+	}
+	base, other := cur, p
+	baseCov, otherCov := covered(oldr, oldli), covered(r, li)
+	if len(r.Relocs(li)) > len(oldr.Relocs(oldli)) {
+		l.objSyms[old] = objSym{r.objidx, li}
+		base, other = p, cur
+		baseCov, otherCov = otherCov, baseCov
+	}
+	out := append([]byte(nil), base...)
+	changed := false
+	for w := (start + 7) &^ 7; w+8 <= len(out); w += 8 {
+		data := true
+		for b := w; b < w+8; b++ {
+			if baseCov[b] || otherCov[b] {
+				data = false
+				break
+			}
+		}
+		if !data {
+			continue
+		}
+		for b := w; b < w+8; b++ {
+			if v := out[b] | other[b]; v != out[b] {
+				out[b] = v
+				changed = true
+			}
+		}
+	}
+	if changed || merged {
+		if l.mergedData == nil {
+			l.mergedData = make(map[Sym][]byte)
+		}
+		l.mergedData[old] = out
+	}
+	return true
 }
 
 // Check that duplicate symbols have same contents.
@@ -1332,6 +1425,9 @@ func (l *Loader) Data(i Sym) []byte {
 		}
 		return nil
 	}
+	if d, ok := l.mergedData[i]; ok {
+		return d
+	}
 	r, li := l.toLocal(i)
 	return r.Data(li)
 }
@@ -1341,6 +1437,9 @@ func (l *Loader) DataString(i Sym) string {
 	if l.IsExternal(i) {
 		pp := l.getPayload(i)
 		return string(pp.data)
+	}
+	if d, ok := l.mergedData[i]; ok {
+		return string(d)
 	}
 	r, li := l.toLocal(i)
 	return r.DataString(li)
@@ -2670,7 +2769,7 @@ func (l *Loader) cloneToExternal(symIdx Sym) *extSymPayload {
 		}
 
 		// Copy data
-		pp.data = r.Data(li)
+		pp.data = l.Data(symIdx)
 	}
 
 	// If we're overriding a data symbol, collect the associated

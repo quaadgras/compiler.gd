@@ -12,6 +12,33 @@ import (
 	"testing"
 )
 
+// TestHeaderVersions checks that each C23 header cmd/cc provides defines
+// its __STDC_VERSION_*_H__ as 202311L. (gcc is no reference here: with
+// musl, its limits.h and others are the C library's, which lack them.)
+func TestHeaderVersions(t *testing.T) {
+	for _, h := range []string{
+		"assert", "complex", "fenv", "float", "inttypes", "limits", "math",
+		"setjmp", "stdarg", "stdatomic", "stdbit", "stdckdint", "stddef",
+		"stdint", "stdio", "stdlib", "string", "tgmath", "time", "uchar", "wchar",
+	} {
+		name := "__STDC_VERSION_" + strings.ToUpper(h) + "_H__"
+		toks, err := preprocess([]source{{"v.c", "#include <" + h + ".h>\n" + name + "\n"}}, nil)
+		if err != nil {
+			t.Errorf("%s.h: %v", h, err)
+			continue
+		}
+		last := ""
+		for _, tk := range toks {
+			if tk.kind != tkEOF {
+				last = tk.text
+			}
+		}
+		if last != "202311L" {
+			t.Errorf("<%s.h>: %s is %q, want 202311L", h, name, last)
+		}
+	}
+}
+
 // TestPreprocessGCC compares the tokens the preprocessor makes of the
 // macro tests of testdata/slimcc with those of gcc -E, in the test's own
 // file (the headers differ).

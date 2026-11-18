@@ -25,12 +25,19 @@ func (p *parser) blockBody() *block {
 func (p *parser) funcBody() *block {
 	p.expect("{")
 	b := &block{}
+	saved := p.fe
 	for !p.accept("}") {
 		if p.peek().kind == tkEOF {
 			p.errorf("expected \"}\" at end of input")
 		}
+		if p.peek().kind == tkPragma {
+			// To the end of this compound statement.
+			p.stdcPragma(p.next())
+			continue
+		}
 		b.list = append(b.list, p.blockItem()...)
 	}
+	p.fe = saved
 	return b
 }
 
@@ -154,6 +161,9 @@ func (p *parser) declaration() []stmt {
 }
 
 func (p *parser) statement() stmt {
+	for p.peek().kind == tkPragma {
+		p.stdcPragma(p.next()) // misplaced: from here
+	}
 	at := p.here()
 	if p.is("[") && p.isAt(1, "[") || p.is("__attribute__") {
 		// Attributes of a statement ([[fallthrough]];).

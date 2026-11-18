@@ -577,3 +577,217 @@ func TestEscapeBitsClosureLayout(t *testing.T) {
 		t.Errorf("closure body didn't execute correctly: got captured=%d", captured)
 	}
 }
+
+// escBitsKept holds the pointer the retaining callees below were
+// passed, so it outlives the frame that passed it.
+var escBitsKept *int
+
+func escBitsKeep(p *int) { escBitsKept = p }
+
+func escBitsKeepPtr(pp **int) { escBitsKept = *pp }
+
+func escBitsKeepUnsafe(p unsafe.Pointer) { escBitsKept = (*int)(p) }
+
+type escBitsKeeper interface{ Keep(p *int) }
+
+type escBitsKeeperImpl struct{}
+
+func (escBitsKeeperImpl) Keep(p *int) { escBitsKept = p }
+
+var escBitsOpaqueKeeper escBitsKeeper
+
+func init() { escBitsOpaqueKeeper = escBitsKeeperImpl{} }
+
+// Each escBitsShape function passes a pointer to one of its locals,
+// holding v, to a callee it can't see that keeps the pointer, and
+// returns the local's value after the call. The escape-bits wrap can
+// only re-home &x for a local x whose address is held nowhere else
+// (doc/gd/escape-bits.md), so every other shape must leave the local
+// on the heap, as stock Go does.
+
+//go:noinline
+func escBitsShapeWhole(f func(*int), v int) int {
+	x := v
+	f(&x)
+	return x
+}
+
+//go:noinline
+func escBitsShapeField(f func(*int), v int) int {
+	var x struct{ before, i, after int }
+	x.i = v
+	f(&x.i)
+	return x.i
+}
+
+//go:noinline
+func escBitsShapeElem(f func(*int), v int) int {
+	var a [3]int
+	a[1] = v
+	f(&a[1])
+	return a[1]
+}
+
+//go:noinline
+func escBitsShapePtrVar(f func(*int), v int) int {
+	x := v
+	p := &x
+	f(p)
+	return x
+}
+
+//go:noinline
+func escBitsShapeUnsafe(f func(unsafe.Pointer), v int) int {
+	x := v
+	f(unsafe.Pointer(&x))
+	return x
+}
+
+// escBitsShapeInner passes &p, and the callee keeps *p = &x: x is
+// reachable from the argument without being it.
+//
+//go:noinline
+func escBitsShapeInner(f func(**int), v int) int {
+	x := v
+	p := &x
+	f(&p)
+	return x
+}
+
+//go:noinline
+func escBitsShapeIfaceField(k escBitsKeeper, v int) int {
+	var x struct{ before, i, after int }
+	x.i = v
+	k.Keep(&x.i)
+	return x.i
+}
+
+func escBitsPass(p *int, f func(*int)) { f(p) }
+
+// escBitsShapeInlined passes &x to an inlined function that passes it
+// on: after inlining, the dynamic call's argument is a parameter
+// variable.
+//
+//go:noinline
+func escBitsShapeInlined(f func(*int), v int) int {
+	x := v
+	escBitsPass(&x, f)
+	return x
+}
+
+// escBitsShapeAlias keeps a second pointer to x across the call: a
+// wrap that moved x to the heap would leave p pointing at the stale
+// stack copy.
+//
+//go:noinline
+func escBitsShapeAlias(f func(*int), v int) int {
+	x := 0
+	p := &x
+	f(&x)
+	*p = v
+	return x
+}
+
+//go:noinline
+func escBitsRun(fn func()) { fn() }
+
+// escBitsShapeClosure captures x by reference in a closure that runs
+// after the call.
+//
+//go:noinline
+func escBitsShapeClosure(f func(*int), v int) int {
+	x := v - 1
+	inc := func() { x++ }
+	f(&x)
+	escBitsRun(inc)
+	return x
+}
+
+// escBitsWrite is what escBitsKeepWrite and escBitsKeepWriteArray
+// store through the pointer they keep.
+var escBitsWrite int
+
+func escBitsKeepWrite(p *int) int {
+	escBitsKept = p
+	*p = escBitsWrite
+	return 0
+}
+
+func escBitsKeepWriteArray(p *[1]int) int {
+	escBitsKept = &p[0]
+	p[0] = escBitsWrite
+	return 0
+}
+
+//go:noinline
+func escBitsId(p *int) *int { return p }
+
+//go:noinline
+func escBitsRead(p *int, _ int) int { return *p }
+
+//go:noinline
+func escBitsReadSlice(s []int, _ int) int { return s[0] }
+
+// escBitsShapeResultTemp evaluates escBitsId(&x) into a temporary
+// before the call passing &x, which stores v through the pointer it
+// keeps, and reads x through the temporary after it.
+//
+//go:noinline
+func escBitsShapeResultTemp(f func(*int) int, v int) int {
+	x := 0
+	escBitsWrite = v
+	return escBitsRead(escBitsId(&x), f(&x))
+}
+
+// escBitsShapeSliceTemp is escBitsShapeResultTemp with a slice of
+// the local in the temporary.
+//
+//go:noinline
+func escBitsShapeSliceTemp(f func(*[1]int) int, v int) int {
+	var a [1]int
+	escBitsWrite = v
+	return escBitsReadSlice(a[:], f(&a))
+}
+
+// TestEscapeBitsArgShapes is the regression test for arguments the
+// escape-bits wrap can't re-home. Escape analysis used to keep such a
+// local on the stack whenever its address reached a dynamic call, but
+// the wrap only handles &x: a callee that kept &x.i (or &a[1], p,
+// unsafe.Pointer(&x), ...) was left with a pointer into a dead frame,
+// and a pointer to x held across the call, in a variable or in a
+// temporary of the statement, went stale once the wrap moved x. On
+// 32-bit targets the same bug left sync/atomic's 64-bit operands on
+// the 4-byte-aligned stack.
+func TestEscapeBitsArgShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(v int) int
+	}{
+		{"whole", func(v int) int { return escBitsShapeWhole(escBitsKeep, v) }},
+		{"field", func(v int) int { return escBitsShapeField(escBitsKeep, v) }},
+		{"elem", func(v int) int { return escBitsShapeElem(escBitsKeep, v) }},
+		{"ptrvar", func(v int) int { return escBitsShapePtrVar(escBitsKeep, v) }},
+		{"unsafe", func(v int) int { return escBitsShapeUnsafe(escBitsKeepUnsafe, v) }},
+		{"inner", func(v int) int { return escBitsShapeInner(escBitsKeepPtr, v) }},
+		{"iface-field", func(v int) int { return escBitsShapeIfaceField(escBitsOpaqueKeeper, v) }},
+		{"inlined", func(v int) int { return escBitsShapeInlined(escBitsKeep, v) }},
+		{"alias", func(v int) int { return escBitsShapeAlias(escBitsKeep, v) }},
+		{"closure", func(v int) int { return escBitsShapeClosure(escBitsKeep, v) }},
+		{"result-temp", func(v int) int { return escBitsShapeResultTemp(escBitsKeepWrite, v) }},
+		{"slice-temp", func(v int) int { return escBitsShapeSliceTemp(escBitsKeepWriteArray, v) }},
+	}
+	for i, tt := range tests {
+		v := 1000 + i
+		escBitsKept = nil
+		got := tt.run(v)
+		escBitsClobberStack(0)
+		if got != v {
+			t.Errorf("%s: caller reads %d after the call, want %d", tt.name, got, v)
+		}
+		if escBitsKept == nil {
+			t.Errorf("%s: callee kept no pointer", tt.name)
+		} else if *escBitsKept != v {
+			t.Errorf("%s: kept pointer reads %d, want %d (left pointing at a dead or stale stack slot)", tt.name, *escBitsKept, v)
+		}
+	}
+}

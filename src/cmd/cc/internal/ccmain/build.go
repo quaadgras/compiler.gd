@@ -49,33 +49,7 @@ func Package(dir, pkg string, goFiles, cFiles []string) (out []File, err error) 
 		}
 		gf := &goFile{name: name, src: src, f: f}
 		gos = append(gos, gf)
-		// The file's preamble, one translation unit, as in cgo.
-		var pre strings.Builder
-		for _, d := range f.Decls {
-			gd, ok := d.(*ast.GenDecl)
-			if !ok || gd.Tok != gotoken.IMPORT {
-				continue
-			}
-			for _, sp := range gd.Specs {
-				is := sp.(*ast.ImportSpec)
-				if is.Path.Value != `"C"` {
-					continue
-				}
-				doc := is.Doc
-				if doc == nil && len(gd.Specs) == 1 {
-					doc = gd.Doc
-				}
-				if doc == nil {
-					continue
-				}
-				// Blank lines keep the preamble's lines where they are in
-				// the Go file, for errors.
-				line := fset.Position(doc.Pos()).Line
-				pre.WriteString(strings.Repeat("\n", max(line-1-strings.Count(pre.String(), "\n"), 0)))
-				pre.WriteString(preambleText(doc))
-			}
-		}
-		u, err := parseUnit(path, pre.String())
+		u, err := parseUnit(path, filePreamble(fset, f))
 		if err != nil {
 			return nil, err
 		}
@@ -120,6 +94,68 @@ func parseUnit(path, src string) (*unit, error) {
 		return nil, err
 	}
 	return parse(path, toks)
+}
+
+// filePreamble is the C of a Go file's preambles: one translation unit,
+// as in cgo.
+func filePreamble(fset *gotoken.FileSet, f *ast.File) string {
+	var pre strings.Builder
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != gotoken.IMPORT {
+			continue
+		}
+		for _, sp := range gd.Specs {
+			is := sp.(*ast.ImportSpec)
+			if is.Path.Value != `"C"` {
+				continue
+			}
+			doc := is.Doc
+			if doc == nil && len(gd.Specs) == 1 {
+				doc = gd.Doc
+			}
+			if doc == nil {
+				continue
+			}
+			// Blank lines keep the preamble's lines where they are in the
+			// Go file, for errors.
+			line := fset.Position(doc.Pos()).Line
+			pre.WriteString(strings.Repeat("\n", max(line-1-strings.Count(pre.String(), "\n"), 0)))
+			pre.WriteString(preambleText(doc))
+		}
+	}
+	return pre.String()
+}
+
+// Undefined returns the names that the Go files of a package that
+// imports "C", in dir, use as C.name and that Package would not define:
+// none of their preambles' declarations (with the headers they include),
+// cgo's names for C's basic types, or its helpers. The go command builds
+// a package that uses one with cgo off, as Go does, rather than with
+// cmd/cc: its C needs more than cmd/cc's headers declare.
+func Undefined(dir string, goFiles []string) ([]string, error) {
+	fset := gotoken.NewFileSet()
+	var missing []string
+	for _, name := range goFiles {
+		path := filepath.Join(dir, name)
+		f, err := goparser.ParseFile(fset, path, nil, goparser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		u, err := parseUnit(path, filePreamble(fset, f))
+		if err != nil {
+			return nil, err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok {
+				if id, ok := sel.X.(*ast.Ident); ok && id.Name == "C" && id.Obj == nil && !cDefined(u, sel.Sel.Name) {
+					missing = append(missing, sel.Sel.Name)
+				}
+			}
+			return true
+		})
+	}
+	return missing, nil
 }
 
 // preambleText is a preamble's C: the comment's text, with its line

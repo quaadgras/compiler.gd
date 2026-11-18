@@ -2419,8 +2419,6 @@ func hostlinkArchArgs(arch *sys.Arch) []string {
 	return nil
 }
 
-var wantHdr = objabi.HeaderString()
-
 // ldobj loads an input object. If it is a host object (an object
 // compiled by a non-Go compiler) it returns the Hostobj pointer. If
 // it is a Go object, it returns nil.
@@ -2544,8 +2542,8 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 	}
 
 	// First, check that the basic GOOS, GOARCH, and Version match.
-	if line != wantHdr && !ctxt.flagF {
-		Errorf("%s: linked object header mismatch:\nhave %q\nwant %q\n", pn, line, wantHdr)
+	if line != ctxt.wantHdr && !ctxt.flagF {
+		Errorf("%s: linked object header mismatch:\nhave %q\nwant %q\n", pn, line, ctxt.wantHdr)
 	}
 
 	// Skip over exports and other info -- ends with \n!\n.

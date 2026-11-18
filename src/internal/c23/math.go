@@ -12,25 +12,61 @@ import "math"
 // domain sets errno to EDOM for a domain error, and returns NaN.
 func domain() float64 {
 	SetErrno(EDOM)
+	raiseUsed(FeInvalid)
 	return math.NaN()
 }
 
 // pole sets errno to ERANGE for a pole error, and returns -Inf.
 func pole() float64 {
-	SetErrno(ERANGE)
+	poleErr()
 	return math.Inf(-1)
 }
 
-// ranged sets errno to ERANGE if v overflowed from finite x.
+// poleErr reports a pole error: errno ERANGE, and divide-by-zero.
+func poleErr() {
+	SetErrno(ERANGE)
+	raiseUsed(FeDivByZero)
+}
+
+// raiseUsed raises excepts if a thread has used the floating-point
+// environment: no one else can see them (Annex F's exceptions for the
+// library's special cases, besides errno).
+func raiseUsed(excepts int32) {
+	if fenvUsed.Load() {
+		raise(excepts)
+	}
+}
+
+// ranged sets errno to ERANGE if v overflowed from finite x, raising
+// overflow; a subnormal v raises underflow.
 func ranged(v float64, xs ...float64) float64 {
-	if math.IsInf(v, 0) {
+	switch {
+	case math.IsInf(v, 0):
 		for _, x := range xs {
 			if math.IsInf(x, 0) || math.IsNaN(x) {
 				return v
 			}
 		}
 		SetErrno(ERANGE)
+		raiseUsed(FeOverflow | FeInexact)
+	case v != 0 && math.Abs(v) < 0x1p-1022:
+		raiseUsed(FeUnderflow | FeInexact)
 	}
+	return v
+}
+
+// rangedTo0 is ranged for a function that is 0 only where an argument is:
+// a 0 from finite, nonzero arguments underflowed.
+func rangedTo0(v float64, xs ...float64) float64 {
+	if v != 0 || !fenvUsed.Load() {
+		return ranged(v, xs...)
+	}
+	for _, x := range xs {
+		if x == 0 || math.IsInf(x, 0) || math.IsNaN(x) {
+			return v
+		}
+	}
+	raise(FeUnderflow | FeInexact)
 	return v
 }
 
@@ -88,13 +124,13 @@ func Atanh(x float64) float64 {
 	case x < -1 || x > 1:
 		return domain()
 	case x == 1 || x == -1:
-		SetErrno(ERANGE)
+		poleErr()
 	}
 	return math.Atanh(x)
 }
 
-func Exp(x float64) float64   { return ranged(math.Exp(x), x) }
-func Exp2(x float64) float64  { return ranged(math.Exp2(x), x) }
+func Exp(x float64) float64   { return rangedTo0(math.Exp(x), x) }
+func Exp2(x float64) float64  { return rangedTo0(math.Exp2(x), x) }
 func Expm1(x float64) float64 { return ranged(math.Expm1(x), x) }
 
 func Log(x float64) float64 {
@@ -148,9 +184,11 @@ func Ilogb(x float64) int32 {
 	switch {
 	case x == 0 || math.IsNaN(x):
 		SetErrno(EDOM)
+		raiseUsed(FeInvalid)
 		return math.MinInt32
 	case math.IsInf(x, 0):
 		SetErrno(EDOM)
+		raiseUsed(FeInvalid)
 		return math.MaxInt32
 	}
 	return int32(math.Ilogb(x))
@@ -161,14 +199,21 @@ func Pow(x, y float64) float64 {
 	case x < 0 && !math.IsInf(x, 0) && y != math.Trunc(y) && !math.IsInf(y, 0):
 		return domain()
 	case x == 0 && y < 0:
-		SetErrno(ERANGE)
+		poleErr()
+		return math.Pow(x, y)
 	}
-	return ranged(math.Pow(x, y), x, y)
+	return rangedTo0(math.Pow(x, y), x, y)
 }
 
 func Sqrt(x float64) float64 {
 	if x < 0 {
 		return domain()
+	}
+	if fenvUsed.Load() {
+		e := fenv()
+		r, st := fpSqrt64(fpControl(e.round), x)
+		e.except |= fpExcepts(st)
+		return r
 	}
 	return math.Sqrt(x)
 }
@@ -180,13 +225,22 @@ func Floor(x float64) float64        { return math.Floor(x) }
 func Ceil(x float64) float64         { return math.Ceil(x) }
 func Round(x float64) float64        { return math.Round(x) }
 func Trunc(x float64) float64        { return math.Trunc(x) }
-func Rint(x float64) float64         { return math.RoundToEven(x) }
+func Rint(x float64) float64         { return rint(x, true) }
 func Copysign(x, y float64) float64  { return math.Copysign(x, y) }
-func Nextafter(x, y float64) float64 { return math.Nextafter(x, y) }
-func Fma(x, y, z float64) float64    { return math.FMA(x, y, z) }
-func Erf(x float64) float64          { return math.Erf(x) }
-func Erfc(x float64) float64         { return math.Erfc(x) }
-func Tgamma(x float64) float64       { return ranged(math.Gamma(x), x) }
+func Nextafter(x, y float64) float64 { return nextFlags(x, y, math.Nextafter(x, y), 0x1p-1022) }
+
+func Fma(x, y, z float64) float64 {
+	if fenvUsed.Load() && fpHasFMA {
+		e := fenv()
+		r, st := fpFma64(fpControl(e.round), x, y, z)
+		e.except |= fpExcepts(st)
+		return r
+	}
+	return math.FMA(x, y, z)
+}
+func Erf(x float64) float64    { return math.Erf(x) }
+func Erfc(x float64) float64   { return math.Erfc(x) }
+func Tgamma(x float64) float64 { return ranged(math.Gamma(x), x) }
 
 func Lgamma(x float64) float64 {
 	v, _ := math.Lgamma(x)
@@ -198,13 +252,61 @@ func Lgamma(x float64) float64 {
 func toLong(x float64) int64 {
 	if math.IsNaN(x) || x >= 1<<63 || x < -(1<<63) {
 		SetErrno(EDOM)
+		raiseUsed(FeInvalid)
 		return math.MinInt64
 	}
 	return int64(x)
 }
 
 func Lround(x float64) int64 { return toLong(math.Round(x)) }
-func Lrint(x float64) int64  { return toLong(math.RoundToEven(x)) }
+func Lrint(x float64) int64 {
+	r := roundInt(x, curRound())
+	v := toLong(r)
+	if r != x && r >= -(1<<63) && r < 1<<63 {
+		raiseUsed(FeInexact)
+	}
+	return v
+}
+
+func Nearbyint(x float64) float64  { return rint(x, false) }
+func Nearbyintf(x float32) float32 { return float32(rint(float64(x), false)) }
+
+// rint rounds x to an integer in the thread's direction, raising inexact
+// if it was not one and if raise (rint does, nearbyint does not).
+func rint(x float64, raise bool) float64 {
+	r := roundInt(x, curRound())
+	if raise && r != x && !math.IsNaN(x) {
+		raiseUsed(FeInexact)
+	}
+	return r
+}
+
+// roundInt rounds x to an integer in direction d.
+func roundInt(x float64, d int32) float64 {
+	switch d {
+	case FeDownward:
+		return math.Floor(x)
+	case FeUpward:
+		return math.Ceil(x)
+	case FeTowardZero:
+		return math.Trunc(x)
+	}
+	return math.RoundToEven(x)
+}
+
+// nextFlags raises nextafter's exceptions (Annex F) for r, the number
+// after x toward y in a type whose least normal is tiny: overflow to an
+// infinity, underflow to a subnormal or zero.
+func nextFlags[T float32 | float64](x, y, r T, tiny float64) T {
+	switch {
+	case !fenvUsed.Load() || x == y || x != x || y != y:
+	case math.IsInf(float64(r), 0):
+		raise(FeOverflow | FeInexact)
+	case math.Abs(float64(r)) < tiny:
+		raise(FeUnderflow | FeInexact)
+	}
+	return r
+}
 
 func Fmod(x, y float64) float64 {
 	if math.IsInf(x, 0) || y == 0 {
@@ -339,16 +441,21 @@ func f32f32(f func(float64, float64) float64) func(float32, float32) float32 {
 	return func(x, y float32) float32 { return float32(f(float64(x), float64(y))) }
 }
 
-// rangedf sets errno to ERANGE if v, rounded to float, overflowed.
+// rangedf sets errno to ERANGE if v, rounded to float, overflowed, raising
+// overflow; underflow if it is subnormal, or 0 from a nonzero v.
 func rangedf(v float64, xs ...float32) float32 {
 	r := float32(v)
-	if math.IsInf(float64(r), 0) && !math.IsInf(v, 0) {
+	switch {
+	case math.IsInf(float64(r), 0) && !math.IsInf(v, 0):
 		for _, x := range xs {
 			if math.IsInf(float64(x), 0) || math.IsNaN(float64(x)) {
 				return r
 			}
 		}
 		SetErrno(ERANGE)
+		raiseUsed(FeOverflow | FeInexact)
+	case r != 0 && math.Abs(float64(r)) < 0x1p-126 || r == 0 && v != 0:
+		raiseUsed(FeUnderflow | FeInexact)
 	}
 	return r
 }
@@ -418,7 +525,7 @@ func Floorf(x float32) float32       { return floorf(x) }
 func Ceilf(x float32) float32        { return ceilf(x) }
 func Roundf(x float32) float32       { return roundf(x) }
 func Truncf(x float32) float32       { return truncf(x) }
-func Rintf(x float32) float32        { return rintf(x) }
+func Rintf(x float32) float32        { return float32(rint(float64(x), true)) }
 func Lroundf(x float32) int64        { return Lround(float64(x)) }
 func Lrintf(x float32) int64         { return Lrint(float64(x)) }
 func Copysignf(x, y float32) float32 { return copysignf(x, y) }
@@ -434,6 +541,12 @@ func Fdimf(x, y float32) float32 {
 
 // Fmaf is fmaf: exact in double, but for double rounding.
 func Fmaf(x, y, z float32) float32 {
+	if fenvUsed.Load() && fpHasFMA {
+		e := fenv()
+		r, st := fpFma32(fpControl(e.round), x, y, z)
+		e.except |= fpExcepts(st)
+		return r
+	}
 	return float32(math.FMA(float64(x), float64(y), float64(z)))
 }
 func Erff(x float32) float32  { return erff(x) }
@@ -443,7 +556,7 @@ func Tgammaf(x float32) float32 {
 }
 func Lgammaf(x float32) float32 { return float32(Lgamma(float64(x))) }
 func Nextafterf(x, y float32) float32 {
-	return math.Nextafter32(x, y)
+	return nextFlags(x, y, math.Nextafter32(x, y), 0x1p-126)
 }
 func Ldexpf(x float32, e int32) float32 {
 	return rangedf(math.Ldexp(float64(x), int(max(min(e, 1000), -1000))), x)
