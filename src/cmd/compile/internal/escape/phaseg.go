@@ -48,6 +48,9 @@ import (
 // phaseGTags returns, for each location to place in its function's
 // caller's buffer, the 0-based index of that buffer (outBuf ordinal).
 func (b *batch) phaseGTags(fns []*ir.Func) map[*location]int {
+	if b.gd.Debug.GdEscBitsOff != 0 {
+		return nil
+	}
 	var todo []*ir.Func
 	for _, fn := range fns {
 		if phaseGEligibleFunc(fn) {

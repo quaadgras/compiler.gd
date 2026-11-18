@@ -14,6 +14,12 @@ callee doesn't let them escape. README optimization goal #3.
 > preserved as design history. See §Landed state for the
 > as-implemented summary.
 
+> **Safety:** what the optimisation must preserve, and what each
+> mechanism has to guarantee for it, is stated in
+> `escape-bits-safety.md`, with the checks for each: the run-time
+> checker `GODEBUG=stackptrcheck=1`, the stock-like build
+> `-gcflags=-d=gdescbitsoff`, and the random differential test.
+
 ## Landed state
 
 The optimisation runs unconditionally: `shouldEnableEscapeCandidate`
@@ -464,6 +470,14 @@ TMAP/TCHAN/TINTER to a real pointer.
   value wrappers, 64+ arguments), and self pointers across a move.
 - `src/cmd/compile/internal/test/escape_bits_outbuf_loop_test.go` —
   Phase G with a result assigned by name in a loop.
+- `src/cmd/compile/internal/test/escape_bits_random_test.go` —
+  `TestEscapeBitsRandom`: random programs built with and without
+  `-d=gdescbitsoff` must print the same, the first under
+  `GODEBUG=stackptrcheck=1`. `-escbits.progs`, `-escbits.funcs` and
+  `-escbits.seed` size and seed it (2 programs of 150 functions by
+  default; not in short mode).
+- `src/cmd/compile/internal/test/escape_bits_safety_test.go` — the
+  checker itself, and a finalizer with a pointer result.
 - `src/cmd/compile/internal/test/escape_bits_dynmask_test.go` — 3
   Phase F dynamic-mask tests (forced escape override, call
   integrity, heapMask-driven relational decisions).

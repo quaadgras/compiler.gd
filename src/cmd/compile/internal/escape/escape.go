@@ -477,7 +477,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		escapes := loc.hasAttr(attrEscapes)
 		candidate := false
 		if !escapes && loc.hasAttr(attrCandidateEscape) {
-			if !b.gd.Flag.CompilingRuntime &&
+			if !b.gd.Flag.CompilingRuntime && b.gd.Debug.GdEscBitsOff == 0 &&
 				isCandidateLoc(n) && !loc.addrHeld &&
 				shouldEnableEscapeCandidate(loc.curfn) {
 				candidate = true
