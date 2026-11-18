@@ -4,6 +4,8 @@
 
 package ssa
 
+import "strings"
+
 // layout orders basic blocks in f with the goal of minimizing control flow instructions.
 // After this phase returns, the order of f.Blocks matters and is the order
 // in which those blocks will appear in the assembly output.
@@ -16,6 +18,63 @@ func layout(f *Func) {
 func layoutRegallocOrder(f *Func) []*Block {
 	// remnant of an experiment; perhaps there will be another.
 	return f.Blocks
+}
+
+// isColdCall reports whether v calls a slow path: one of internal/c23's
+// functions whose names end in "Slow", the rest, apart, of a fast path
+// cmd/compile inlines (a pointer's load or store that its fast path does
+// not cover). Go's own code calls none (gd fork).
+func isColdCall(v *Value) bool {
+	if !opcodeTable[v.Op].call {
+		return false
+	}
+	a, ok := v.Aux.(*AuxCall)
+	if !ok || a.Fn == nil {
+		return false
+	}
+	name, ok := strings.CutPrefix(a.Fn.Name, "internal/c23.")
+	return ok && strings.HasSuffix(name, "Slow")
+}
+
+// coldEntries returns, by block ID, the blocks that call a slow path
+// (isColdCall), and those with no call that only go on to one (an edge
+// split before it); nil if there are none.
+func coldEntries(f *Func) []bool {
+	var cold []bool
+	for _, b := range f.Blocks {
+		for _, v := range b.Values {
+			if isColdCall(v) {
+				if cold == nil {
+					cold = make([]bool, f.NumBlocks())
+				}
+				cold[b.ID] = true
+				break
+			}
+		}
+	}
+	if cold == nil {
+		return nil
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, b := range f.Blocks {
+			if cold[b.ID] || len(b.Succs) != 1 || !cold[b.Succs[0].b.ID] || b == f.Entry {
+				continue
+			}
+			call := false
+			for _, v := range b.Values {
+				if opcodeTable[v.Op].call {
+					call = true
+					break
+				}
+			}
+			if !call {
+				cold[b.ID] = true
+				changed = true
+			}
+		}
+	}
+	return cold
 }
 
 func layoutOrder(f *Func) []*Block {
@@ -72,14 +131,53 @@ func layoutOrder(f *Func) []*Block {
 		}
 	}
 
+	// Find cold blocks: those the entry does not reach but through a call
+	// of a slow path (isColdCall), such as the rest of an inlined function
+	// that C's accesses through pointers take apart (gd fork). They are
+	// scheduled after the others but the exits, each once a predecessor
+	// is (register allocation, which visits blocks in this order, needs
+	// one before each block): the fast path falls through, without the
+	// cold code between, and is the one register allocation sees first at
+	// a merge. A function that calls no slow path has none.
+	cold := f.newSparseSet(f.NumBlocks())
+	defer f.retSparseSet(cold)
+	var coldReady []ID // cold blocks with a predecessor scheduled
+	if coldEntry := coldEntries(f); coldEntry != nil {
+		hot := f.newSparseSet(f.NumBlocks())
+		defer f.retSparseSet(hot)
+		hot.add(f.Entry.ID)
+		stack := []*Block{f.Entry}
+		for len(stack) > 0 {
+			b := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			for _, e := range b.Succs {
+				if c := e.b; !hot.contains(c.ID) && !coldEntry[c.ID] {
+					hot.add(c.ID)
+					stack = append(stack, c)
+				}
+			}
+		}
+		for _, b := range f.Blocks {
+			if !hot.contains(b.ID) && !exit.contains(b.ID) {
+				cold.add(b.ID)
+			}
+		}
+	}
+
 	// Initialize indegree of each block
 	for _, b := range f.Blocks {
-		if exit.contains(b.ID) {
-			// exit blocks are always scheduled last
+		if exit.contains(b.ID) || cold.contains(b.ID) {
+			// exit blocks are always scheduled last, cold ones before them
 			continue
 		}
 		indegree[b.ID] = len(b.Preds)
-		if len(b.Preds) == 0 {
+		for _, pe := range b.Preds {
+			if cold.contains(pe.b.ID) {
+				// Not waited for: the cold block is scheduled at the end.
+				indegree[b.ID]--
+			}
+		}
+		if indegree[b.ID] == 0 {
 			// Push an element to the tail of the queue.
 			zerodegree = append(zerodegree, b.ID)
 		} else {
@@ -110,6 +208,14 @@ blockloop:
 		// Note: You need to consider both layout and register allocation when testing performance.
 		for i := len(b.Succs) - 1; i >= 0; i-- {
 			c := b.Succs[i].b
+			if cold.contains(c.ID) {
+				// Scheduled with the cold blocks, now that it has a
+				// predecessor scheduled.
+				if !scheduled[c.ID] {
+					coldReady = append(coldReady, c.ID)
+				}
+				continue
+			}
 			indegree[c.ID]--
 			if indegree[c.ID] == 0 {
 				posdegree.remove(c.ID)
@@ -164,6 +270,15 @@ blockloop:
 		// Still nothing, pick any non-exit block.
 		for posdegree.size() > 0 {
 			cid := posdegree.pop()
+			if !scheduled[cid] {
+				bid = cid
+				continue blockloop
+			}
+		}
+		// Then the cold blocks, depth first, each once a predecessor is.
+		for len(coldReady) > 0 {
+			cid := coldReady[len(coldReady)-1]
+			coldReady = coldReady[:len(coldReady)-1]
 			if !scheduled[cid] {
 				bid = cid
 				continue blockloop

@@ -530,6 +530,11 @@ func LoadPtr(p Ptr) Ptr {
 	return loadPtrSlow(p)
 }
 
+// loadPtrSlow is the rest of LoadPtr, apart from its fast path. A slow
+// path's name ends in "Slow": cmd/compile lays the blocks that call one
+// out after the others (ssa's isColdCall), so that fast paths fall
+// through.
+//
 //go:noinline
 func loadPtrSlow(p Ptr) Ptr { return loadPtr(p, checkPtrWord(p)) }
 
