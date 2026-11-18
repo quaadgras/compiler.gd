@@ -26,7 +26,11 @@ func (e *escape) addr(n ir.Node) hole {
 		if n.Class == ir.PEXTERN {
 			break
 		}
-		k = e.oldLoc(n).asHole()
+		loc := e.oldLoc(n)
+		if loc.paramOut && !e.returning {
+			loc.assignedInBody = true
+		}
+		k = loc.asHole()
 	case ir.OLINKSYMOFFSET:
 		break
 	case ir.ODOT:
@@ -75,7 +79,12 @@ func (e *escape) assignHeap(src ir.Node, why string, where ir.Node) {
 
 // assignList evaluates the assignment dsts... = srcs....
 func (e *escape) assignList(dsts, srcs []ir.Node, why string, where ir.Node) {
-	ks := e.addrs(dsts)
+	e.assignTo(e.addrs(dsts), dsts, srcs, why, where)
+}
+
+// assignTo evaluates the assignment dsts... = srcs..., given the
+// holes ks of dsts.
+func (e *escape) assignTo(ks []hole, dsts, srcs []ir.Node, why string, where ir.Node) {
 	for i, k := range ks {
 		var src ir.Node
 		if i < len(srcs) {

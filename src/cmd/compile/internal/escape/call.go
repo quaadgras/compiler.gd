@@ -411,8 +411,12 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 // a struct, slice or interface holding pointers, an interface
 // receiver. Those flow to the heap, as every argument to an unknown
 // callee does in stock Go. See doc/gd/escape-bits.md.
-func (e *escape) dynamicArgHole(arg ir.Node) hole {
-	if arg.Op() == ir.OADDR && isCandidateLoc(arg.(*ir.AddrExpr).X) {
+//
+// argIdx is at least the argument's position among the call's
+// arguments. One the escape mask has no bit for (ir.EscMaskArgs) is
+// not re-homed either.
+func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
+	if argIdx < ir.EscMaskArgs && arg.Op() == ir.OADDR && isCandidateLoc(arg.(*ir.AddrExpr).X) {
 		return e.candidateHole()
 	}
 	return e.heapHole()
@@ -425,7 +429,9 @@ func (e *escape) dynamicArgHole(arg ir.Node) hole {
 func (e *escape) mergedTagHole(ks []hole, fns []*ir.Name, paramIdx int, fntype *types.Type, arg ir.Node) hole {
 	nParams := len(fntype.Params())
 	if len(fns) == 0 {
-		return e.dynamicArgHole(arg)
+		// (paramIdx+1 is the argument's position when the first
+		// argument is a method expression's receiver.)
+		return e.dynamicArgHole(arg, paramIdx+1)
 	}
 	holes := make([]hole, 0, len(fns))
 	for _, f := range fns {

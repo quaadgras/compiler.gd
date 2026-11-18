@@ -185,7 +185,12 @@ func (e *escape) stmt(n ir.Node) {
 		for i, res := range results {
 			dsts[i] = res.Nname.(*ir.Name)
 		}
-		e.assignList(dsts, n.Results, "return", n)
+		// (Only these assignments of the results end the function:
+		// see location.assignedInBody.)
+		e.returning = true
+		ks := e.addrs(dsts)
+		e.returning = false
+		e.assignTo(ks, dsts, n.Results, "return", n)
 	case ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER, ir.OINLCALL, ir.OCLEAR, ir.OCLOSE, ir.OCOPY, ir.ODELETE, ir.OPANIC, ir.OPRINT, ir.OPRINTLN, ir.ORECOVER:
 		e.call(nil, n)
 	case ir.OGO, ir.ODEFER:

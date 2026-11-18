@@ -196,14 +196,18 @@ func walkMethodValue(gd *base.Invocation, n *ir.SelectorExpr, init *ir.Nodes) ir
 
 	typ := typecheck.MethodValueType(gd, n)
 
-	// The wrapper's EscMask comes from the method-value wrapper
-	// function; use zero here for now and let the compiler populate
-	// once the wrapper's escape analysis runs. Safe default: treat
-	// all args as escaping.
+	// The mask is the wrapper's, which passes its arguments on to
+	// the method. A wrapper that another package made (the method
+	// value is in a function inlined from it) was not analysed here
+	// and has no mask: use the method's own escape notes, which say
+	// the same; an interface method has none, so everything escapes.
+	// (A zero mask would say that nothing does.)
 	wrapper := methodValueWrapper(gd, n)
 	var mask uint64
-	if wrapper.Func != nil {
+	if wrapper.Func != nil && wrapper.Func.Esc() >= ir.EscFuncTagged {
 		mask = wrapper.Func.EscMask
+	} else {
+		mask = ir.EscMaskOf(n.Selection.Type.Params())
 	}
 	maskLit := ir.NewBasicLit(gd, gd.Pos, types.Types[types.TUINT64], constant.MakeUint64(mask))
 

@@ -238,38 +238,6 @@ func dstringdata(gd *base.Invocation, s *obj.LSym, off int, t string, pos src.XP
 // gd.StaticdataFuncsymsMu). Per-compile so concurrent compile
 // invocations in one process don't share or contend on the list.
 
-// computeFuncsymEscMask derives the gd escape-bits mask for sig's
-// parameters by decoding each param's Note tag. Mirrors
-// cmd/compile/internal/escape.computeEscMask — kept here as a small
-// duplicate because that function's return type wraps the private
-// `leaks` type and escape's package can't be imported from
-// staticdata without cycles.
-//
-// Bit k+1 is set iff argument k's Note encodes a heap-reaching
-// leak. Notes that don't start with "esc:" decode to Heap()==0 per
-// leaks' space-optimised spelling — that's the conservative default
-// for untagged (external, assembly) functions. Bit 0 is reserved.
-func computeFuncsymEscMask(sig *types.Type) uint64 {
-	var mask uint64
-	for i, f := range sig.RecvParams() {
-		if i >= 63 {
-			break
-		}
-		note := f.Note
-		if !strings.HasPrefix(note, "esc:") {
-			// Default: Heap()==0 (escapes).
-			mask |= 1 << uint(i+1)
-			continue
-		}
-		// Encoded leaks tag; first byte is Heap() + 1. 0 means -1
-		// (never flows to heap) so bit stays clear.
-		if len(note) >= 5 && note[4] != 0 {
-			mask |= 1 << uint(i+1)
-		}
-	}
-	return mask
-}
-
 // FuncLinksym returns n·f, the function value symbol for n.
 func FuncLinksym(gd *base.Invocation, n *ir.Name) *obj.LSym {
 	if n.Op() != ir.ONAME || n.Class != ir.PFUNC {
@@ -335,47 +303,17 @@ func WriteFuncSyms(gd *base.Invocation) {
 		// references so the wrap at OCALLFUNC always hits a valid
 		// mask word.
 		objw.SymPtr(gd, sf, 0, target, 0)
-		// Phase F4 install (default-on). When the function is a
-		// trivial forwarder (escape.DetectForwarders + Synthesize
-		// ForwarderComputeFns), point the M slot at the synth's
-		// funcsym with bit 0 set so the runtime treats it as a
-		// dynamic mask. Funcsyms are DUPOK rodata + non-content-
-		// addressable, so the per-pkg-hash interaction the itab
-		// install triggers doesn't apply here.
-		switch {
-		case gd.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
-			cfFuncsym := FuncLinksym(gd, nam.Func.GdForwarder.SyntheticComputeFn.Nname)
-			objw.EscMaskFunc(gd, sf, int(types.FuncMaskOffset), cfFuncsym)
-		default:
-			mask := computeFuncsymEscMask(nam.Type())
-			objw.EscMask(gd, sf, int(types.FuncMaskOffset), mask)
-		}
+		// The mask is the static one, from the function's escape
+		// notes, also for a forwarder method (escape.DetectForwarders),
+		// whose itab entries have a dynamic mask instead: the function
+		// that computes that one reads the inner interface through
+		// the receiver, which an interface call site passes it, and
+		// answers for the arguments after the receiver. A call of
+		// this function value ((*W).M)(w, &x) has neither: its
+		// carrier is this symbol and the receiver is argument 0.
+		objw.EscMask(gd, sf, int(types.FuncMaskOffset), ir.EscMaskOf(nam.Type().RecvParams()))
 		objw.Global(gd, sf, int32(types.ClosureVarsOffset), obj.DUPOK|obj.RODATA)
 	}
-}
-
-// hasPointerBearingFuncsymArg mirrors reflectdata.hasPointerBearingArg
-// for funcsym targets (top-level functions). Returns true iff sig
-// has at least one non-receiver param that can carry an
-// EscCandidate pointer.
-func hasPointerBearingFuncsymArg(sig *types.Type) bool {
-	if sig == nil {
-		return false
-	}
-	for _, p := range sig.Params() {
-		t := p.Type
-		if t == nil {
-			continue
-		}
-		switch t.Kind() {
-		case types.TPTR, types.TUNSAFEPTR, types.TINTER, types.TFUNC, types.TMAP, types.TCHAN, types.TSLICE:
-			return true
-		}
-		if t.HasPointers() {
-			return true
-		}
-	}
-	return false
 }
 
 // InitConst writes the static literal c to n.

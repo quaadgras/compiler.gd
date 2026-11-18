@@ -83,6 +83,13 @@ type location struct {
 	param      bool // is this variable a parameter (ONAME of class ir.PPARAM)?
 	paramOut   bool // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
+	// gd Phase G: assignedInBody reports whether this result
+	// variable is assigned other than by a return statement (p =
+	// x, by its function or a closure of it), after which the
+	// function goes on: in a loop, it then holds what an earlier
+	// iteration made while a later one runs. See phaseg.go.
+	assignedInBody bool
+
 	// gd escape-bits: addrHeld reports whether this location's
 	// address flows into a location that holds it (see holdsAddr):
 	// a variable, a closure, a range temporary, not just a callee's

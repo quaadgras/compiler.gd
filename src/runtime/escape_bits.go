@@ -6,6 +6,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"unsafe"
 )
 
@@ -49,7 +50,34 @@ func materializeToHeap(src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
 	// cheap, and typedmemmove overwrites everything in a breath.
 	dst := mallocgc(typ.Size_, typ, true)
 	typedmemmove(typ, dst, src)
+	if typ.PtrBytes != 0 {
+		rebaseSelfPointers(dst, uintptr(src), typ)
+	}
 	return dst
+}
+
+// rebaseSelfPointers makes the pointers in dst, a copy of the typ at
+// src that is taking its place, that point into the original point to
+// the same place in the copy.
+//
+// The compiler only moves a variable whose address it knows to be
+// held nowhere else, but a variable can hold its own address without
+// escape analysis knowing: strings.Builder's copy check does
+// (b.addr = (*Builder)(abi.NoEscape(unsafe.Pointer(b)))), and expects
+// b.addr == b from then on. That holds on the stack, which moves such
+// pointers along with what they point to, so it must hold here.
+func rebaseSelfPointers(dst unsafe.Pointer, src uintptr, typ *abi.Type) {
+	mask := getGCMask(typ)
+	for off := uintptr(0); off < typ.PtrBytes; off += goarch.PtrSize {
+		i := off / goarch.PtrSize
+		if *addb(mask, i/8)>>(i%8)&1 == 0 {
+			continue
+		}
+		slot := (*unsafe.Pointer)(add(dst, off))
+		if d := uintptr(*slot) - src; d < typ.Size_ {
+			*slot = add(dst, d)
+		}
+	}
 }
 
 // maybeInPlace picks storage for a callee's about-to-be-returned

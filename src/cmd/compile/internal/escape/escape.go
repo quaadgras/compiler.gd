@@ -131,6 +131,10 @@ type escape struct {
 	// label with a corresponding backwards "goto" (i.e.,
 	// unstructured loop).
 	loopDepth int
+
+	// returning is set while a return statement's assignments to
+	// the results are made (location.assignedInBody).
+	returning bool
 }
 
 func Funcs(gd *base.Invocation, all []*ir.Func) {
@@ -609,66 +613,24 @@ const (
 	nonlooping
 )
 
-// computeEscMask derives the per-argument heap-escape mask for the
-// function signature sig from the leaks tags already installed on its
-// params. Bit k+1 (0-indexed from the first call argument, counting
-// the receiver as arg 0 for methods) is set iff that argument's
-// pointee must outlive the call. Bit 0 is reserved as the dynamic-mask
-// discriminator (see doc/gd/escape-bits.md Phase F).
-//
-// The leaks encoding (see leaks.go) uses the empty string as a space-
-// optimized spelling of "Heap() == 0" (the pessimistic default —
-// argument escapes). A non-empty "esc:..." string encodes either
-// "== -1" (no flow along that axis) or "> 0" (flows after N derefs,
-// which the caller must still treat as escaping because it may chain).
-// We set the bit iff a retaining flow is non-negative.
-//
-// Two axes force the bit:
-//
-//   - Heap(): the callee stores the pointer somewhere the GC roots
-//     from, so the pointee must live past the call.
-//
-//   - Result(k): the callee may hand the pointer back through its
-//     k'th result. The runtime materialization wrap runs at the call
-//     site and cannot see what the caller does with that result — if
-//     the caller lets it escape (return it, store to a global, capture
-//     it), a stack-kept arg becomes a dangling pointer into a dead
-//     frame. Dropping this axis was unsound: a `func(p *T) *T { return
-//     p }` reached through an interface left &x on the stack while the
-//     caller stored the result to a global. We conservatively
-//     materialize; a caller that discards the result pays one avoidable
-//     alloc, which is acceptable versus miscompilation.
-//
-// Mutator()/Callee() flows are deliberately excluded: they use the
-// pointer during the call (`*p = …`, invoking p) but don't retain it,
-// so the pointee only needs to survive the call, which the caller's
-// live frame already guarantees.
-//
-// Arguments beyond position 62 exceed the mask width; we leave their
-// bits unset. Consumers must treat absence of a bit past position 62
-// conservatively, i.e. heap-alloc the arg up front.
+// computeEscMask returns the escape mask of a function with signature
+// sig, from the leaks tags already installed on its params: see
+// ir.EscMaskOf, which every carrier of a mask uses.
 func computeEscMask(gd *base.Invocation, sig *types.Type) uint64 {
 	if sig == nil || sig.Kind() != types.TFUNC {
 		return 0
 	}
-	var mask uint64
-	for i, f := range sig.RecvParams() {
-		if i >= 63 {
-			break
-		}
-		esc := parseLeaks(gd, f.Note)
-		retains := esc.Heap() >= 0
-		for k := 0; k < numEscResults && !retains; k++ {
-			if esc.Result(k) >= 0 {
-				retains = true
-			}
-		}
-		if retains {
-			mask |= 1 << uint(i+1)
-		}
-	}
-	return mask
+	return ir.EscMaskOf(sig.RecvParams())
 }
+
+// ir.EscMaskOf reads the notes that leaks.Encode writes.
+var (
+	_ [leakResult0 - ir.EscNoteResult0]struct{}
+	_ [ir.EscNoteResult0 - leakResult0]struct{}
+	_ [-leakHeap]struct{}
+	_ [escFuncTagged - ir.EscFuncTagged]struct{}
+	_ [ir.EscFuncTagged - escFuncTagged]struct{}
+)
 
 func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	name := func() string {
@@ -743,8 +705,13 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 		return ""
 	}
 
-	// Unnamed parameters are unused and therefore do not escape.
-	if f.Sym == nil || f.Sym.IsBlank() {
+	// A parameter without a variable is unused and therefore does
+	// not escape. (One without a name has a variable in a wrapper
+	// made from an interface method's signature, K.M or k.M-fm for
+	// interface { M(*T) }, which passes it on; in stock Go nothing
+	// reads such a wrapper's tags, here its escape mask is made of
+	// them.)
+	if f.Nname == nil {
 		var esc leaks
 		return esc.Encode()
 	}
@@ -754,7 +721,7 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 	esc := loc.paramEsc
 	esc.Optimize(b.gd)
 
-	if diagnose && !loc.hasAttr(attrEscapes) {
+	if diagnose && !loc.hasAttr(attrEscapes) && f.Sym != nil && !f.Sym.IsBlank() {
 		b.reportLeaks(f.Pos, name(), esc, fn.Type())
 	}
 

@@ -63,6 +63,39 @@ A location that fails 2 or 3 but has `attrCandidateEscape` is
 finalized exactly like an escaping one (`moved to heap`, or an
 error in the runtime).
 
+### Where a mask comes from
+
+Every mask is made by `ir.EscMaskOf` from a function's escape notes
+(bit k+1 for argument k if it flows to the heap or to a result;
+without a note, it does), so a function's masks agree wherever they
+are: its symbol (`f·f`, the value of a bare function reference), a
+closure, a method value, an itab, a type's method table, here and in
+packages that import it. Until 2026-11-18 there were three copies of
+that rule and they differed:
+
+- A function's symbol only read the heap byte, so `func(p *T) *T {
+  return p }` (or returning p in an interface, a struct, `&p.f`),
+  called through a variable, left x on the caller's stack while the
+  caller kept the result.
+- A parameter without a name was tagged as unused (`esc:`). In a
+  wrapper made from an interface method's signature (`K.M`, `k.M-fm`
+  for `interface{ M(*T) }`) it has a variable and is passed on;
+  `paramTag` now asks whether the parameter has a variable.
+- A method value whose wrapper another package made (the method
+  value is in a function inlined from it) took the wrapper's
+  `EscMask`, which is zero here, where it wasn't analysed: zero says
+  nothing escapes. `walkMethodValue` uses the method's own notes
+  then.
+- A forwarder method's symbol had the dynamic mask its itab entries
+  have, but a call of the method expression `(*W).M` passes the
+  compute fn the symbol, not the receiver, and its receiver is
+  argument 0: it read the inner interface out of rodata. Function
+  symbols always have the static mask now.
+
+The mask has bits for 63 arguments (`ir.EscMaskArgs`); `&x` passed
+after those goes to the heap as in stock Go (it was an internal
+compiler error at argument 62, and never re-homed after it).
+
 ### Box promotion via Heapaddr
 
 For every PAUTO local tagged EscCandidate, walk's
@@ -93,6 +126,13 @@ front: if src is already off-stack, it returns src unchanged. Hot
 loops amortise any migration to zero allocs/run across iterations,
 and repeat calls can't break caller-visible pointer identity
 (e.g. `strings.Builder.copyCheck` panicking on `b.addr != b`).
+
+A pointer in the variable that points into the variable itself is
+moved along (`rebaseSelfPointers`): escape analysis keeps a variable
+whose address it sees stored (`addrHeld`) off this path, but
+`strings.Builder`'s copy check stores its own address behind
+`abi.NoEscape` and expects `b.addr == b` to stay true, as it does when
+the stack moves.
 
 ### Phase F: dynamic compute-fn masks
 
@@ -260,10 +300,10 @@ Synthesis adds the cfn to `typecheck.Target.Funcs` (via
 `typecheck.DeclFunc`'s implicit append) so walk compiles it
 through the normal pipeline.
 
-**Install** (`reflectdata.FinalizeItabMasks` and
-`staticdata.WriteFuncSyms`) writes
+**Install** (`reflectdata.FinalizeItabMasks`) writes
 `objw.SymPtr(slot, off, computeFnFuncsym, 1)` into the wrapper's
-mask carrier — same machinery as F2.
+itab and method table entries — same machinery as F2. (Not into the
+wrapper's function symbol: see "Where a mask comes from".)
 
 **Status (default-on)**: detector, synthesizer, and install all run
 unconditionally. The previous parallel-compile race that surfaced as
@@ -331,7 +371,12 @@ batch, a local declared outside its loop), of exactly the result's
 element type, and that is the only location whose address reaches
 result k, or every such location is the operand of a return statement
 (`if c { return g() }; return &T{}`: each ends the function as soon as
-it is made). An allocation is `new(T)`, `&T{...}`, a local whose
+it is made). An allocation in a loop is not placed there if result k
+is also assigned by name (`for ... { p = &T{next: p} }`): the result
+then holds what an earlier iteration made while a later one runs
+(`location.assignedInBody`; until 2026-11-18 every iteration built
+its object in the one buffer, so that loop returned a node pointing
+to itself). An allocation is `new(T)`, `&T{...}`, a local whose
 address is taken, or a call to a function with an outBuf for its
 result, which is passed the callee's own buffer (chain-fold, walk's
 `forwardParentOutBuf`).
@@ -413,6 +458,12 @@ TMAP/TCHAN/TINTER to a real pointer.
 - `src/cmd/compile/internal/test/escape_bits_alias_test.go` —
   soundness stress tests: aliases, interior pointers, method values,
   captures and pointers that reach the callee without a direct `&x`.
+- `src/cmd/compile/internal/test/escape_bits_mask_test.go` — the
+  mask of each kind of function value (result leaks, interface
+  method wrappers, forwarder method expressions, imported method
+  value wrappers, 64+ arguments), and self pointers across a move.
+- `src/cmd/compile/internal/test/escape_bits_outbuf_loop_test.go` —
+  Phase G with a result assigned by name in a loop.
 - `src/cmd/compile/internal/test/escape_bits_dynmask_test.go` — 3
   Phase F dynamic-mask tests (forced escape override, call
   integrity, heapMask-driven relational decisions).

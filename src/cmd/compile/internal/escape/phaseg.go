@@ -33,8 +33,10 @@ import (
 // taken, a call whose result is forwarded) of exactly the result's
 // element type, and its address must reach nothing else that outlives
 // it: the heap, a dynamic call's candidate location, another result
-// of any function in the batch, or a local declared outside its loop
-// (which could keep an earlier iteration's instance alive).
+// of any function in the batch, or a variable declared outside its
+// loop (which could keep an earlier iteration's instance alive): a
+// local, or result k itself when it is assigned by name rather than
+// only by return statements, which end the function.
 //
 // The solver's own walks skip locations that already escape, so which
 // roots it records leaks for depends on the order it walks them in;
@@ -183,6 +185,12 @@ func (b *batch) phaseGFunc(fn *ir.Func, heap, cand map[*location]bool, results m
 				}
 			}
 			if !ok || keptAcrossIterations(u) {
+				ok = false
+				break
+			}
+			if u.loopDepth > root.loopDepth && root.assignedInBody {
+				// for ... { p = &T{next: p} }: the result
+				// itself keeps an earlier iteration's u.
 				ok = false
 				break
 			}

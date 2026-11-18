@@ -5,6 +5,7 @@
 package walk
 
 import (
+	"go/constant"
 	"internal/abi"
 
 	"cmd/compile/internal/base"
@@ -286,6 +287,11 @@ func classifyCandidates(gd *base.Invocation, n *ir.CallExpr) ([]candidateArg, bo
 		if box == nil {
 			continue
 		}
+		if i >= ir.EscMaskArgs {
+			// The mask has no bit for it: escape analysis makes
+			// no candidate of such an argument.
+			gd.FatalfAt(pos, "escape candidate %v is argument %d", arg, i)
+		}
 		out = append(out, candidateArg{idx: i, box: box.addr, elemPtr: reflectdata.TypePtrAt(gd, pos, arg.Type().Elem())})
 	}
 	if len(out) == 0 {
@@ -298,9 +304,8 @@ func classifyCandidates(gd *base.Invocation, n *ir.CallExpr) ([]candidateArg, bo
 // yields an untyped constant, which trips ssagen's "width not
 // calculated" check when fed into a typed binary op without going
 // through full typecheck propagation.
-func u64Lit(gd *base.Invocation, pos src.XPos, v int64) ir.Node {
-	n := ir.NewInt(gd, pos, v)
-	n.SetType(types.Types[types.TUINT64])
+func u64Lit(gd *base.Invocation, pos src.XPos, v uint64) ir.Node {
+	n := ir.NewBasicLit(gd, pos, types.Types[types.TUINT64], constant.MakeUint64(v))
 	n.SetTypecheck(1)
 	return n
 }
@@ -397,7 +402,7 @@ func emitMaskResolve(gd *base.Invocation, pos src.XPos, init *ir.Nodes, carrier,
 	for _, ca := range cands {
 		boxAsUnsafe := typecheck.ConvNop(gd, ca.box, unsafePtr)
 		isHeapCall := mkcall(gd, "isOnHeap", types.Types[types.TBOOL], &dynBody, boxAsUnsafe)
-		bit := u64Lit(gd, pos, int64(1)<<uint(ca.idx+1))
+		bit := u64Lit(gd, pos, 1<<uint(ca.idx+1))
 		// Walk lowering of OASOP normally happens during walkStmt;
 		// statements we append into a freshly-constructed Nodes
 		// won't be re-walked, so lower hmTmp |= bit by hand to
@@ -448,7 +453,7 @@ func emitMaybeMaterialize(gd *base.Invocation, pos src.XPos, n *ir.CallExpr, ini
 	)
 	bodyInit.Append(typecheck.Stmt(gd, ir.NewAssignStmt(gd, pos, slot, typecheck.ConvNop(gd, matCall, slot.Type()))))
 
-	bit := u64Lit(gd, pos, int64(1)<<uint(ca.idx+1))
+	bit := u64Lit(gd, pos, 1<<uint(ca.idx+1))
 	cond := typecheck.Expr(gd, ir.NewBinaryExpr(gd, pos, ir.ONE,
 		ir.NewBinaryExpr(gd, pos, ir.OAND, mask, bit),
 		u64Lit(gd, pos, 0)))

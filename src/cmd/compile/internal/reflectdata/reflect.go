@@ -279,25 +279,7 @@ func computeMethodEscMask(sig *types.Type) uint64 {
 	if sig == nil || sig.Kind() != types.TFUNC {
 		return 0
 	}
-	var mask uint64
-	for i, f := range sig.Params() {
-		if i >= 63 {
-			break
-		}
-		// As escape.computeEscMask reads the same notes in the
-		// package that defines the method: an argument escapes if
-		// it leaks to the heap or to any result (each a byte after
-		// "esc:", nonzero if it leaks). Reading only the heap byte
-		// called an argument that leaks to a result (Sum(b) appends
-		// to b and returns it) non-escaping, and the itab a package
-		// made for an imported method then disagreed with, and was
-		// less safe than, the defining package's copy of it.
-		note := f.Note
-		if !strings.HasPrefix(note, "esc:") || strings.Trim(note[len("esc:"):], "\x00") != "" {
-			mask |= 1 << uint(i+1)
-		}
-	}
-	return mask
+	return ir.EscMaskOf(sig.Params())
 }
 
 // methods returns the methods of the non-interface type t, sorted by name.
