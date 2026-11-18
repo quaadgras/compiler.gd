@@ -90,12 +90,13 @@ function isGo(source) {
 const cMain = `// Code that runs main.c's main (the playground's).
 package main
 
+// #include <stdlib.h>
 // int main(void);
+// // exit, not os.Exit: it flushes C's stdout (a file, not a terminal).
+// static void run(void) { exit(main()); }
 import "C"
 
-import "os"
-
-func main() { os.Exit(int(C.main())) }
+func main() { C.run() }
 `;
 
 // removeTree removes dir and what is in it.
