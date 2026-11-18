@@ -1,4 +1,4 @@
-// errorcheck -0 -l -d=wb
+// errorcheck -0 -l -d=wb,notear
 
 // Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style

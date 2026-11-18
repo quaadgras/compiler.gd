@@ -546,14 +546,16 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	}
 
 	// What a shared channel holds is shared, but a value received from a
-	// channel only this goroutine can reach may not be: if it is received
-	// straight into shared memory, it goes by way of a temporary.
-	if sharingEnabled && c != nil && ep != nil && c.elemtype.Pointers() && isShared(ep) && !isShared(unsafe.Pointer(c)) {
+	// channel only this goroutine can reach may not be; and a value of
+	// more than one word is stored whole in shared memory. A value
+	// received straight into shared memory goes by way of a temporary
+	// for either.
+	if sharingEnabled && c != nil && ep != nil && c.elemtype.Pointers() && isShared(ep) && (!isShared(unsafe.Pointer(c)) || tearable(c.elemtype)) {
 		tmp := newobject(c.elemtype)
 		selected, received = chanrecv(c, tmp, block)
 		if selected {
 			publishValue(c.elemtype, tmp)
-			typedmemmove(c.elemtype, ep, tmp)
+			shareMove(c.elemtype, ep, tmp, 1)
 		}
 		return
 	}

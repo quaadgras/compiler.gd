@@ -381,3 +381,130 @@ func TestSharedMapRace(t *testing.T) {
 		}
 	}
 }
+
+type tearT struct {
+	s   []int
+	str string
+	i   any
+	st  struct {
+		a []byte
+		n int
+		b string
+	}
+	arr [3]string
+}
+
+type tearA struct{ a, b int }
+type tearB struct{ a, b, c, d, e, f int }
+
+func (x *tearA) sum() int { return x.a + x.b }
+func (x *tearB) sum() int { return x.a + x.b + x.c + x.d + x.e + x.f }
+
+var tearGlobal tearT
+
+// TestSharedTear races goroutines on slices, strings and interfaces of
+// different sizes, with no lock of their own. A reader that got the words
+// of two values would index past an array, or call one type's method on
+// another's value.
+func TestSharedTear(t *testing.T) {
+	skipIfNotSharing(t)
+	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		t.Skip("values of more than one word are not guarded on " + runtime.GOARCH)
+	}
+	const G = 8
+	N := 200000
+	if testing.Short() {
+		N = 40000
+	}
+	small, big := make([]int, 2), make([]int, 4096)
+	for i := range big {
+		big[i] = 7
+	}
+	small[0], small[1] = 7, 7
+	shortStr, longStr := "ab", string(make([]byte, 5000))
+	p := runtime.HeapNew[tearT]()
+	g := &tearGlobal
+	done := make(chan bool)
+	bad := make(chan string, G)
+	for id := 0; id < G; id++ {
+		go func() {
+			defer func() {
+				if e := recover(); e != nil {
+					select {
+					case bad <- "panic: " + e.(error).Error():
+					default:
+					}
+				}
+				done <- true
+			}()
+			for i := 0; i < N; i++ {
+				for _, x := range [2]*tearT{p, g} {
+					if (i+id)%2 == 0 {
+						// Writers.
+						if i%4 < 2 {
+							x.s = small
+							x.str = shortStr
+							x.i = &tearA{1, 2}
+							x.st.a, x.st.b = nil, longStr
+							x.arr = [3]string{shortStr, longStr, shortStr}
+							x.s = append(x.s[:0], 7)
+						} else {
+							x.s = big
+							x.str = longStr
+							x.i = &tearB{1, 2, 3, 4, 5, 6}
+							x.st = struct {
+								a []byte
+								n int
+								b string
+							}{make([]byte, 100), 1, shortStr}
+							x.arr = [3]string{longStr, shortStr, longStr}
+							s := x.s
+							x.s = s[:len(s)/2+1]
+						}
+						continue
+					}
+					// Readers.
+					if s := x.s; len(s) > 0 && s[len(s)-1] != 7 {
+						panic(errorString("slice element"))
+					}
+					if s := x.s; cap(s) > 0 && s[:cap(s)][cap(s)-1] != 7 && s[:cap(s)][cap(s)-1] != 0 {
+						panic(errorString("slice capacity"))
+					}
+					if s := x.str; len(s) > 0 && s[len(s)-1] != 0 && s[len(s)-1] != 'b' {
+						panic(errorString("string byte"))
+					}
+					if v, ok := x.i.(interface{ sum() int }); ok {
+						if n := v.sum(); n != 3 && n != 21 {
+							panic(errorString("interface method"))
+						}
+					}
+					st := x.st
+					if len(st.a) > 0 && st.a[len(st.a)-1] != 0 {
+						panic(errorString("struct slice"))
+					}
+					if len(st.b) > 0 && st.b[len(st.b)-1] != 0 && st.b[len(st.b)-1] != 'b' {
+						panic(errorString("struct string"))
+					}
+					arr := x.arr
+					for _, s := range arr {
+						if len(s) > 0 && s[len(s)-1] != 0 && s[len(s)-1] != 'b' {
+							panic(errorString("array string"))
+						}
+					}
+				}
+			}
+		}()
+	}
+	for id := 0; id < G; id++ {
+		<-done
+	}
+	select {
+	case msg := <-bad:
+		t.Fatal(msg)
+	default:
+	}
+}
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }

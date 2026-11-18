@@ -1,4 +1,4 @@
-// errorcheck -0 -d=ssa/prove/debug=1
+// errorcheck -0 -d=ssa/prove/debug=1,notear
 
 //go:build amd64 || arm64
 

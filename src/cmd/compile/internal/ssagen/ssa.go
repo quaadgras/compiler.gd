@@ -223,6 +223,14 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
 	ir.Syms(gd).PublishPtr = typecheck.LookupRuntimeFunc(gd, "publishptr")
 	ir.Syms(gd).PublishMove = typecheck.LookupRuntimeFunc(gd, "publishmove")
+	ir.Syms(gd).ShareStore = typecheck.LookupRuntimeFunc(gd, "sharestore")
+	ir.Syms(gd).ShareUnlock = typecheck.LookupRuntimeFunc(gd, "shareunlock")
+	ir.Syms(gd).ShareLoadSlice = typecheck.LookupRuntimeFunc(gd, "shareloadslice")
+	ir.Syms(gd).ShareLoadString = typecheck.LookupRuntimeFunc(gd, "shareloadstring")
+	ir.Syms(gd).ShareLoadIface = typecheck.LookupRuntimeFunc(gd, "shareloadiface")
+	ir.Syms(gd).ShareLoadMem = typecheck.LookupRuntimeFunc(gd, "shareloadmem")
+	ir.Syms(gd).ShareTypedmemmove = typecheck.LookupRuntimeFunc(gd, "sharetypedmemmove")
+	ir.Syms(gd).ShareSeq = typecheck.LookupRuntimeVar(gd, "shareSeq")                         // [1024]uint32
 	ir.Syms(gd).X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")                       // bool
 	ir.Syms(gd).X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")                       // bool
 	ir.Syms(gd).X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")                 // bool
@@ -393,6 +401,7 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 	defer s.popLine()
 
 	s.hasdefer = fn.HasDefer()
+	s.tear = gd.Flag.WB && !gd.Flag.CompilingRuntime && gd.Debug.NoShare == 0 && gd.Debug.NoTear == 0 && tearArch(gd.Ctxt.Arch.Family) && tearFunc(fn)
 	if fn.Pragma&ir.CgoUnsafeArgs != 0 {
 		s.cgoUnsafeArgs = true
 	}
@@ -1192,6 +1201,10 @@ type state struct {
 	startmem *ssa.Value
 	sp       *ssa.Value
 	sb       *ssa.Value
+
+	// tear is whether values of more than one word are loaded and
+	// stored whole where goroutines may race on them (share.go).
+	tear bool
 	// value representing address of where deferBits autotmp is stored
 	deferBitsAddr *ssa.Value
 	deferBitsTemp *ir.Name
@@ -2654,6 +2667,16 @@ func (s *state) instrument2(t *types.Type, addr, addr2 *ssa.Value, kind instrume
 
 func (s *state) load(t *types.Type, src *ssa.Value) *ssa.Value {
 	s.instrumentFields(t, src, instrumentRead)
+	if s.tearGuard(t, src) {
+		return s.shareLoad(t, src)
+	}
+	return s.rawLoad(t, src)
+}
+
+// loadWhole is load for memory that no goroutine stores in while it can
+// be loaded: the value an interface points to.
+func (s *state) loadWhole(t *types.Type, src *ssa.Value) *ssa.Value {
+	s.instrumentFields(t, src, instrumentRead)
 	return s.rawLoad(t, src)
 }
 
@@ -2667,6 +2690,14 @@ func (s *state) store(t *types.Type, dst, val *ssa.Value) {
 
 func (s *state) zero(t *types.Type, dst *ssa.Value) {
 	s.instrument(t, dst, instrumentWrite)
+	if s.tearGuard(t, dst) {
+		s.shareZero(t, dst)
+		return
+	}
+	s.rawZero(t, dst)
+}
+
+func (s *state) rawZero(t *types.Type, dst *ssa.Value) {
 	store := s.newValue2I(ssa.OpZero, types.TypeMem, t.Size(), dst, s.mem())
 	store.Aux = t
 	s.vars[memVar] = store
@@ -2714,6 +2745,21 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		ssa.LogLargeCopy(s.gd, s.f.Name, s.peekPos(), t.Size())
 		return
 	}
+	if s.tear && hasTearable(t) && !(ssa.IsStackAddr(dst) && ssa.IsStackAddr(src)) {
+		s.shareMove(t, dst, src)
+		return
+	}
+	s.rawMove(t, dst, src)
+}
+
+// moveWhole is move for a source that no goroutine stores in while it
+// can be read: the value an interface points to.
+func (s *state) moveWhole(t *types.Type, dst, src *ssa.Value) {
+	s.instrumentMove(t, dst, src)
+	s.rawMove(t, dst, src)
+}
+
+func (s *state) rawMove(t *types.Type, dst, src *ssa.Value) {
 	store := s.newValue3I(ssa.OpMove, types.TypeMem, t.Size(), dst, src, s.mem())
 	store.Aux = t
 	s.vars[memVar] = store
@@ -4671,6 +4717,19 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		n := n.(*ir.UnaryExpr)
 		// Note: all constant cases are handled by the frontend. If len or cap
 		// makes it here, we want the side effects of the argument. See issue 72844.
+		if x := n.X; s.tear && x.Type().IsSlice() && !s.canSSA(x) && ir.IsAddressable(x) {
+			// One word of a slice in memory: no other word to be
+			// loaded with.
+			switch x.Op() {
+			case ir.ONAME, ir.ODOT, ir.ODOTPTR, ir.ODEREF, ir.OINDEX:
+				off := types.SliceLenOffset
+				if n.Op() == ir.OCAP {
+					off = types.SliceCapOffset
+				}
+				addr := s.addr(x)
+				return s.rawLoad(types.Types[types.TINT], s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, off, addr))
+			}
+		}
 		a := s.expr(n.X)
 		t := n.X.Type()
 		switch {
@@ -5063,9 +5122,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// Record values of ptr/len/cap before branch.
 	s.vars[ptrVar] = p
 	s.vars[lenVar] = l
-	if !inplace {
-		s.vars[capVar] = c
-	}
+	s.vars[capVar] = c
 
 	b := s.endBlock()
 	b.Kind = ssa.BlockIf
@@ -5244,9 +5301,19 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 				s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, sn, s.mem())
 			}
 		}
+		// In shared memory the pointer and the capacity are stored
+		// together (with the old length, which the new array has).
+		guard := s.tearGuard(n.Type(), addr)
+		var locked *ssa.Value
+		if guard {
+			locked = s.shareLock(addr, n.Type().Size())
+		}
 		capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
 		s.store(types.Types[types.TINT], capaddr, c)
 		s.store(pt, addr, p)
+		if guard {
+			s.shareUnlock(locked, addr, n.Type().Size())
+		}
 	}
 
 	b = s.endBlock()
@@ -5256,15 +5323,44 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	s.startBlock(assign)
 	p = s.variable(ptrVar, pt)                      // generates phi for ptr
 	l = s.variable(lenVar, types.Types[types.TINT]) // generates phi for len
-	if !inplace {
-		c = s.variable(capVar, types.Types[types.TINT]) // generates phi for cap
-	}
+	c = s.variable(capVar, types.Types[types.TINT]) // generates phi for cap
 
 	if inplace {
 		// Update length in place.
 		// We have to wait until here to make sure growslice succeeded.
 		lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
-		s.store(types.Types[types.TINT], lenaddr, l)
+		if s.tearGuard(n.Type(), addr) {
+			// In shared memory another goroutine may have stored
+			// another slice since this one was loaded, and its
+			// capacity may be less than this length: the slice is
+			// stored whole.
+			locked := s.shareLock(addr, n.Type().Size())
+			bAll := s.f.NewBlock(ssa.BlockPlain)
+			bLen := s.f.NewBlock(ssa.BlockPlain)
+			bDone := s.f.NewBlock(ssa.BlockPlain)
+			b := s.endBlock()
+			b.Kind = ssa.BlockIf
+			b.SetControl(locked)
+			b.Likely = ssa.BranchUnlikely
+			b.AddEdgeTo(bAll)
+			b.AddEdgeTo(bLen)
+
+			s.startBlock(bAll)
+			capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
+			s.store(types.Types[types.TINT], lenaddr, l)
+			s.store(types.Types[types.TINT], capaddr, c)
+			s.store(pt, addr, p)
+			s.rtcall(ir.Syms(s.gd).ShareUnlock, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], n.Type().Size()))
+			s.endBlock().AddEdgeTo(bDone)
+
+			s.startBlock(bLen)
+			s.store(types.Types[types.TINT], lenaddr, l)
+			s.endBlock().AddEdgeTo(bDone)
+
+			s.startBlock(bDone)
+		} else {
+			s.store(types.Types[types.TINT], lenaddr, l)
+		}
 	}
 
 	// Evaluate args
@@ -7026,6 +7122,14 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 // do *left = right for type t.
 func (s *state) storeType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 	s.instrument(t, left, instrumentWrite)
+	if s.tearGuard(t, left) {
+		s.shareStoreType(t, left, right, skip, leftIsStmt)
+		return
+	}
+	s.rawStoreType(t, left, right, skip, leftIsStmt)
+}
+
+func (s *state) rawStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 
 	if skip == 0 && (!t.HasPointers() || ssa.IsStackAddr(left)) {
 		// Known to not have write barrier. Store the whole type.
@@ -8044,7 +8148,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		// on success, return data from interface
 		s.startBlock(bOk)
 		if inlineRead {
-			return s.load(dst, inlineSrcPtr()), nil
+			return s.loadWhole(dst, inlineSrcPtr()), nil
 		}
 		if spreadRead {
 			return s.spreadExtract(pos, dst, iface), nil
@@ -8053,7 +8157,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			return s.newValue1(ssa.OpIData, dst, iface), nil
 		}
 		p := s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
-		return s.load(dst, p), nil
+		return s.loadWhole(dst, p), nil
 	}
 
 	// commaok is the more complicated case because we have
@@ -8068,14 +8172,14 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 	if tmp == nil {
 		switch {
 		case inlineRead:
-			s.vars[valVar] = s.load(dst, inlineSrcPtr())
+			s.vars[valVar] = s.loadWhole(dst, inlineSrcPtr())
 		case spreadRead:
 			s.vars[valVar] = s.spreadExtract(pos, dst, iface)
 		case direct:
 			s.vars[valVar] = s.newValue1(ssa.OpIData, dst, iface)
 		default:
 			p := s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
-			s.vars[valVar] = s.load(dst, p)
+			s.vars[valVar] = s.loadWhole(dst, p)
 		}
 	} else {
 		var p *ssa.Value
@@ -8092,7 +8196,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 			p = s.newValue1(ssa.OpIData, types.NewPtr(dst), iface)
 		}
 		if p != nil {
-			s.move(dst, addr, p)
+			s.moveWhole(dst, addr, p)
 		}
 	}
 	s.vars[okVar] = s.constBool(true)
@@ -8116,7 +8220,7 @@ func (s *state) dottype1(pos src.XPos, src, dst *types.Type, iface, source, targ
 		res = s.variable(valVar, dst)
 		delete(s.vars, valVar) // no practical effect, just to indicate typVar is no longer live.
 	} else {
-		res = s.load(dst, addr)
+		res = s.loadWhole(dst, addr)
 	}
 	resok = s.variable(okVar, types.Types[types.TBOOL])
 	delete(s.vars, okVar) // ditto
@@ -9599,7 +9703,7 @@ func (e *ssafn) UseWriteBarrier() bool {
 // store in shared memory (runtime/shared.go). The runtime's packages do
 // it by hand, where they hand a pointer to another goroutine.
 func (e *ssafn) UseShareBarrier() bool {
-	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm
+	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm && tearFunc(e.curfn)
 }
 
 func (e *ssafn) Syslook(name string) *obj.LSym {

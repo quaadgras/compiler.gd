@@ -1,4 +1,4 @@
-// errorcheck -0 -d=ssa/likelyadjust/debug=1,ssa/insert_resched_checks/off
+// errorcheck -0 -d=ssa/likelyadjust/debug=1,ssa/insert_resched_checks/off,notear
 // rescheduling check insertion is turned off because the inserted conditional branches perturb the errorcheck
 
 //go:build amd64

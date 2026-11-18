@@ -90,6 +90,14 @@ type SymsStruct struct {
 	WBMove                    *obj.LSym
 	PublishPtr                *obj.LSym
 	PublishMove               *obj.LSym
+	ShareStore                *obj.LSym
+	ShareUnlock               *obj.LSym
+	ShareLoadSlice            *obj.LSym
+	ShareLoadString           *obj.LSym
+	ShareLoadIface            *obj.LSym
+	ShareLoadMem              *obj.LSym
+	ShareTypedmemmove         *obj.LSym
+	ShareSeq                  *obj.LSym
 	// Wasm
 	SigPanic             *obj.LSym
 	Staticuint64s        *obj.LSym

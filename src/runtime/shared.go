@@ -263,12 +263,260 @@ func maps_shareAlloc(p unsafe.Pointer) {
 
 //go:linkname maps_lockYield internal/runtime/maps.lockYield
 func maps_lockYield(spins int) {
+	shareYield(spins)
+}
+
+// shareYield waits for a lock that was not free the last spins times.
+func shareYield(spins int) {
 	switch {
 	case spins < 4:
 		procyield(20)
-	case spins < 16:
+	case spins < 16 || getg().m.locks != 0:
+		// (A goroutine that may not be descheduled, as one that
+		// sync.Pool pinned, can only give its thread away.)
 		osyield()
 	default:
 		Gosched()
 	}
+}
+
+// Values of more than one word.
+//
+// A slice, a string and an interface are several words, and a goroutine
+// that loads one while another stores it may get the words of two values:
+// a pointer with another array's length. So the stores of such a value in
+// shared memory, and its loads from memory that may be shared, are made
+// atomic with sequence locks: a store takes the locks of the pages it
+// writes, and a load checks that the lock of the page it reads from did
+// not move and was not held meanwhile, and starts again if it did.
+//
+// The compiler does the loads inline (cmd/compile/internal/ssagen's
+// shareLoad) with no test of the shared bit: memory that is not shared has
+// no other writer, and its locks never move for it. For a store it calls
+// sharestore, which takes the locks only if the memory is shared, and then
+// shareunlock.
+//
+// A lock is found from the address of a value's first byte, and a store
+// takes the lock of every page it touches, so a load of a value inside a
+// larger one that is being stored sees the lock held.
+
+const (
+	sharePageShift = 12
+	shareStripes   = 1 << 10 // must match ssagen's shareLoad
+)
+
+// shareSeq are the sequence locks: odd while a store holds one.
+var shareSeq [shareStripes]uint32
+
+func shareLockStripe(i uintptr) {
+	l := &shareSeq[i]
+	for spins := 0; ; spins++ {
+		if v := atomic.Load(l); v&1 == 0 && atomic.Cas(l, v, v+1) {
+			return
+		}
+		shareYield(spins)
+	}
+}
+
+// shareStripeRange calls f for the locks of the pages of [p, p+size), in
+// the order in which every goroutine takes them: by index.
+func shareStripeRange(p, size uintptr, f func(i uintptr)) {
+	first, last := p>>sharePageShift, (p+size-1)>>sharePageShift
+	if last-first >= shareStripes-1 {
+		for i := uintptr(0); i < shareStripes; i++ {
+			f(i)
+		}
+		return
+	}
+	lo, hi := first&(shareStripes-1), last&(shareStripes-1)
+	if lo <= hi {
+		for i := lo; i <= hi; i++ {
+			f(i)
+		}
+		return
+	}
+	for i := uintptr(0); i <= hi; i++ {
+		f(i)
+	}
+	for i := lo; i < shareStripes; i++ {
+		f(i)
+	}
+}
+
+func shareLockRange(p, size uintptr) {
+	shareStripeRange(p, size, shareLockStripe)
+}
+
+func shareUnlockRange(p, size uintptr) {
+	shareStripeRange(p, size, func(i uintptr) { atomic.Xadd(&shareSeq[i], 1) })
+}
+
+// sharestore is called by compiled code before it stores size bytes that
+// hold a value of more than one word at dst. If dst is shared it takes
+// the locks and reports true, and the caller calls shareunlock after the
+// store.
+//
+// The goroutine is not preempted while it holds the locks: one that
+// waits for them may be unable to give its P away.
+func sharestore(dst unsafe.Pointer, size uintptr) bool {
+	if !isShared(dst) {
+		return false
+	}
+	acquirem()
+	shareLockRange(uintptr(dst), size)
+	return true
+}
+
+func shareunlock(dst unsafe.Pointer, size uintptr) {
+	shareUnlockRange(uintptr(dst), size)
+	releasem(getg().m)
+}
+
+// shareRead copies the size bytes at src to dst, which only this goroutine
+// can reach, as no store in progress left them.
+func shareRead(dst, src unsafe.Pointer, size uintptr) {
+	first, last := uintptr(src)>>sharePageShift, (uintptr(src)+size-1)>>sharePageShift
+	if last-first >= 4 {
+		// Many locks to watch: with them held there is no store in
+		// progress.
+		mp := acquirem()
+		shareLockRange(uintptr(src), size)
+		memmove(dst, src, size)
+		shareUnlockRange(uintptr(src), size)
+		releasem(mp)
+		return
+	}
+	// As the inline load does, without taking the locks: a reader that
+	// took them would send the other readers of the page here.
+	var seq [4]uint32
+	for spins := 0; ; spins++ {
+		quiet := true
+		for i := uintptr(0); i <= last-first; i++ {
+			seq[i] = atomic.Load(&shareSeq[(first+i)&(shareStripes-1)])
+			quiet = quiet && seq[i]&1 == 0
+		}
+		if quiet {
+			memmove(dst, src, size)
+			for i := uintptr(0); i <= last-first; i++ {
+				quiet = quiet && seq[i] == atomic.Load(&shareSeq[(first+i)&(shareStripes-1)])
+			}
+			if quiet {
+				return
+			}
+		}
+		shareYield(spins)
+	}
+}
+
+// The loads that compiled code calls when its inline load found a store
+// in progress.
+
+func shareloadslice(p *slice) (v slice) {
+	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	return
+}
+
+func shareloadstring(p *string) (v string) {
+	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	return
+}
+
+func shareloadiface(p *eface) (v eface) {
+	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	return
+}
+
+// shareloadmem is the load of a value that is not loaded in registers:
+// size bytes from src to dst, which is in the stack.
+func shareloadmem(dst, src unsafe.Pointer, size uintptr) {
+	shareRead(dst, src, size)
+}
+
+// tearable reports whether a value of type t holds a slice, a string or
+// an interface.
+func tearable(t *_type) bool {
+	if !t.Pointers() {
+		return false
+	}
+	switch t.Kind() {
+	case abi.String, abi.Slice, abi.Interface:
+		return true
+	case abi.Array:
+		a := (*arraytype)(unsafe.Pointer(t))
+		return a.Len > 0 && tearable(a.Elem)
+	case abi.Struct:
+		// Remember the answer for the structs: one word, the type
+		// with the answer in its low bit.
+		c := &tearableCache[(uintptr(unsafe.Pointer(t))>>4)%uintptr(len(tearableCache))]
+		if v := atomic.Loaduintptr(c); v&^1 == uintptr(unsafe.Pointer(t)) {
+			return v&1 != 0
+		}
+		st := (*structtype)(unsafe.Pointer(t))
+		var is uintptr
+		for i := range st.Fields {
+			if tearable(st.Fields[i].Typ) {
+				is = 1
+				break
+			}
+		}
+		atomic.Storeuintptr(c, uintptr(unsafe.Pointer(t))|is)
+		return is != 0
+	}
+	return false
+}
+
+var tearableCache [256]uintptr
+
+// shareMove copies n values of type typ from src to dst, as typedmemmove
+// and typedslicecopy do, for memory that may be shared: the values of
+// more than one word are read and written whole.
+func shareMove(typ *_type, dst, src unsafe.Pointer, n uintptr) {
+	size := n * typ.Size_
+	sd, ss := isShared(dst), isShared(src)
+	if size == 0 || dst == src || !sd && !ss || !tearable(typ) {
+		shareMoveRaw(typ, dst, src, n)
+		return
+	}
+	if sd && ss {
+		// By way of a copy, so that the locks of one are not held
+		// while waiting for the other's.
+		tmp := mallocgc(size, typ, true)
+		shareMoveLocked(typ, tmp, src, n, uintptr(src))
+		shareMoveLocked(typ, dst, tmp, n, uintptr(dst))
+		return
+	}
+	if ss {
+		shareMoveLocked(typ, dst, src, n, uintptr(src))
+	} else {
+		shareMoveLocked(typ, dst, src, n, uintptr(dst))
+	}
+}
+
+// shareMoveLocked copies with the locks of the n values at p held. The
+// goroutine is not preempted meanwhile: see sharestore.
+func shareMoveLocked(typ *_type, dst, src unsafe.Pointer, n, p uintptr) {
+	mp := acquirem()
+	shareLockRange(p, n*typ.Size_)
+	shareMoveRaw(typ, dst, src, n)
+	shareUnlockRange(p, n*typ.Size_)
+	releasem(mp)
+}
+
+func shareMoveRaw(typ *_type, dst, src unsafe.Pointer, n uintptr) {
+	size := n * typ.Size_
+	if writeBarrier.enabled && typ.Pointers() {
+		bulkBarrierPreWrite(uintptr(dst), uintptr(src), size-typ.Size_+typ.PtrBytes, typ)
+	}
+	memmove(dst, src, size)
+}
+
+// sharetypedmemmove is typedmemmove for compiled code that copies a value
+// with values of more than one word between two places that are not in
+// the stack.
+func sharetypedmemmove(typ *_type, dst, src unsafe.Pointer) {
+	if dst == src {
+		return
+	}
+	publishStore(typ, dst, src)
+	shareMove(typ, dst, src, 1)
 }

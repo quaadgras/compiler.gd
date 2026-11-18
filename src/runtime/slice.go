@@ -281,7 +281,16 @@ func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice 
 			bulkBarrierPreWriteSrcOnly(uintptr(p), uintptr(oldPtr), lenmem-et.Size_+et.PtrBytes, et)
 		}
 	}
-	memmove(p, oldPtr, lenmem)
+	if sharingEnabled && lenmem > 0 && isShared(oldPtr) && tearable(et) {
+		// Another goroutine may be storing an element.
+		mp := acquirem()
+		shareLockRange(uintptr(oldPtr), lenmem)
+		memmove(p, oldPtr, lenmem)
+		shareUnlockRange(uintptr(oldPtr), lenmem)
+		releasem(mp)
+	} else {
+		memmove(p, oldPtr, lenmem)
+	}
 
 	return slice{p, newLen, newcap}
 }
