@@ -1492,8 +1492,9 @@ typedef unsigned char uint_fast8_t;
 typedef unsigned long uint_fast16_t;
 typedef unsigned long uint_fast32_t;
 typedef unsigned long uint_fast64_t;
-typedef long intptr_t;
-typedef unsigned long uintptr_t;
+/* Integers that carry a pointer's capability (CHERI C's __intcap). */
+typedef __intcap intptr_t;
+typedef unsigned __intcap uintptr_t;
 typedef long intmax_t;
 typedef unsigned long uintmax_t;
 #define INT8_WIDTH 8

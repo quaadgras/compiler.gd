@@ -370,7 +370,7 @@ func goType(t *ctype) string {
 		return "float32"
 	case kDouble, kLDouble:
 		return "float64"
-	case kPtr, kNullptr, kVaList, kStruct, kArray:
+	case kPtr, kNullptr, kVaList, kStruct, kArray, kIntCap, kUIntCap:
 		return "c23.Ptr"
 	}
 	panic(fmt.Sprintf("no Go type for %s", t))
@@ -380,6 +380,8 @@ func goType(t *ctype) string {
 // them: what C's memory is, and what Go sees it as.
 func (g *gen) mirror(t *ctype) string {
 	switch t.kind {
+	case kIntCap, kUIntCap:
+		return "c23.Intcap"
 	case kPtr:
 		e := t.elem
 		switch {
@@ -547,7 +549,7 @@ func constLit(t *ctype, v int64) string {
 		return fmt.Sprintf("c23.U128(%d)", v)
 	case t.kind == kUBitInt:
 		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
-	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList:
+	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap():
 		if v == 0 {
 			return "c23.Ptr{}"
 		}

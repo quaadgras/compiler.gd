@@ -383,7 +383,7 @@ var typeWords = map[string]bool{
 	"__inline__": true, "__restrict": true, "__restrict__": true, "__const": true, "__const__": true,
 	"__volatile__": true, "__volatile": true, "__signed__": true, "__signed": true, "__auto_type": true,
 	"_Complex": true, "__builtin_va_list": true, "__attribute__": true, "__attribute": true,
-	"__extension__": true, "_BitInt": true, "__int128": true, "__int128__": true, "_Float32": true, "_Float64": true,
+	"__extension__": true, "_BitInt": true, "__int128": true, "__intcap": true, "__int128__": true, "_Float32": true, "_Float64": true,
 	"__thread": true, "__declspec": true, "__complex__": true, "__complex": true, "_Decimal32": true, "_Decimal64": true,
 }
 
@@ -505,6 +505,11 @@ func (p *parser) declSpecs() specs {
 				p.errorf("two or more data types in declaration specifiers")
 			}
 			base = "__int128"
+		case "__intcap":
+			if base != "" || s.t != nil {
+				p.errorf("two or more data types in declaration specifiers")
+			}
+			base = "__intcap"
 		case "_Decimal32", "_Decimal64":
 			p.errorf("decimal floating types are not supported")
 		case "struct", "union":
@@ -575,6 +580,12 @@ done:
 		s.t = bitInt(bitN, unsigned)
 		if bitN < 1 || bitN < 2 && !unsigned {
 			p.errorf("_BitInt(%d) is too narrow", bitN)
+		}
+	}
+	if s.t == nil && base == "__intcap" {
+		s.t = tIntCap
+		if unsigned {
+			s.t = tUIntCap
 		}
 	}
 	if s.t == nil && base == "__int128" {
@@ -723,7 +734,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			fa.merge(p.attributes())
 			if p.accept(":") {
 				f.bits = int(p.constInt(p.conditional()))
-				if !f.t.isInteger() {
+				if !f.t.isInteger() || f.t.isCap() {
 					p.errorf("bit-field %q has an invalid type", f.name)
 				}
 				if f.bits < 0 || int64(f.bits) > f.t.sizeof()*8 {

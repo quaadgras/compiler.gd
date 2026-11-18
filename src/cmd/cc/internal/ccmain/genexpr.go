@@ -230,7 +230,7 @@ func loadCode(addr string, t *ctype) string {
 		return fmt.Sprintf("c23.LoadF32(%s)", addr)
 	case kDouble, kLDouble:
 		return fmt.Sprintf("c23.LoadF64(%s)", addr)
-	case kPtr, kNullptr, kVaList:
+	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
 		return fmt.Sprintf("c23.LoadPtr(%s)", addr)
 	case kStruct, kArray:
 		return addr
@@ -274,7 +274,7 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 		g.p("c23.StoreF32(%s, %s)", addr, v)
 	case kDouble, kLDouble:
 		g.p("c23.StoreF64(%s, %s)", addr, v)
-	case kPtr, kNullptr, kVaList:
+	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
 		g.p("c23.StorePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
 		g.p("%s", moveCode(addr, v, t))
@@ -499,7 +499,7 @@ func (g *gen) cond(e expr) string {
 	}
 	v := g.rv(e)
 	t := e.ty()
-	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList {
+	if t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap() {
 		return fmt.Sprintf("(c23.Addr(%s) != 0)", v)
 	}
 	if is128(t) {
@@ -520,6 +520,12 @@ func (g *gen) compare(e *binary) string {
 		if code := fenvCompare(e.op, x, y, e.x.ty(), s); code != "" {
 			return code
 		}
+	}
+	if t := e.x.ty(); t.isCap() {
+		if t.kind == kIntCap {
+			return fmt.Sprintf("(int(c23.Addr(%s)) %s int(c23.Addr(%s)))", x, e.op, y)
+		}
+		return fmt.Sprintf("(c23.Addr(%s) %s c23.Addr(%s))", x, e.op, y)
 	}
 	return fmt.Sprintf("(%s %s %s)", x, e.op, y)
 }
@@ -574,10 +580,16 @@ func (g *gen) rv(e expr) string {
 			if is128(e.t) {
 				return g.rv(e.x) + ".Neg()"
 			}
+			if e.t.isCap() {
+				return "c23.CapUnary('-', " + g.rv(e.x) + ")"
+			}
 			return wrapBits("(-"+g.rv(e.x)+")", e.t)
 		case "~":
 			if is128(e.t) {
 				return g.rv(e.x) + ".Not()"
+			}
+			if e.t.isCap() {
+				return "c23.CapUnary('~', " + g.rv(e.x) + ")"
 			}
 			return wrapBits("(^"+g.rv(e.x)+")", e.t)
 		}
@@ -645,6 +657,9 @@ func (g *gen) binary(e *binary) string {
 	}
 	if is128(e.t) {
 		return arith128(e.op, x, y)
+	}
+	if e.t.isCap() {
+		return capArith(e.op, x, y, e.t)
 	}
 	if s, ok := g.fenvOf(e); ok {
 		if code := fenvArith(e.op, x, y, e.t, s); code != "" {
@@ -749,6 +764,12 @@ func (g *gen) castCode(e *cast) string {
 var constConv = regexp.MustCompile(`^(u?int(8|16|32|64))\((-?[0-9]+)\)$`)
 
 func convertCode(x string, from, to *ctype) string {
+	if is128(to) && from.isCap() {
+		x, from = fmt.Sprintf("%s(c23.Addr(%s))", goType(capInt(from)), x), capInt(from)
+	}
+	if is128(from) && to.isCap() {
+		return convertCode(convertCode(x, from, capInt(to)), capInt(to), to)
+	}
 	if is128(to) || is128(from) {
 		if m := constConv.FindStringSubmatch(x); m != nil && is128(to) {
 			return constLitStr(to, m[3])
@@ -767,13 +788,22 @@ func convertCode(x string, from, to *ctype) string {
 			return constLit(to, int64(v))
 		}
 	}
-	fromPtr := from.isPtr() || from.kind == kNullptr || from.kind == kVaList
+	fromPtr := from.isPtr() || from.kind == kNullptr || from.kind == kVaList || from.isCap()
 	switch {
 	case to.kind == kBool:
 		if fromPtr {
 			return fmt.Sprintf("c23.B2U8(c23.Addr(%s) != 0)", x)
 		}
 		return fmt.Sprintf("c23.B2U8(%s != 0)", x)
+	case to.isCap():
+		// A pointer's or an intcap's capability stays; an integer has none.
+		switch {
+		case fromPtr:
+			return x
+		case from.isUnsigned() || from.isFloat() && to.kind == kUIntCap:
+			return fmt.Sprintf("c23.UintToCap(uint64(%s))", x)
+		}
+		return fmt.Sprintf("c23.IntToCap(int64(%s))", x)
 	case to.isInteger():
 		if fromPtr {
 			return wrapBits(fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x), to)
@@ -789,6 +819,12 @@ func convertCode(x string, from, to *ctype) string {
 		}
 		return fmt.Sprintf("%s(%s)", goType(to), x)
 	case to.isFloat():
+		if from.kind == kIntCap {
+			return fmt.Sprintf("%s(int(c23.Addr(%s)))", goType(to), x)
+		}
+		if from.kind == kUIntCap {
+			return fmt.Sprintf("%s(c23.Addr(%s))", goType(to), x)
+		}
 		if goType(from) == goType(to) {
 			return x
 		}
@@ -825,6 +861,9 @@ func (g *gen) assign(e *assign, value bool) string {
 				return g.ptrAdd(cur, t, &goVal{node{e.y.ty(), e.p}, y}, op == "-")
 			}
 			x := convertCode(cur, t.unqual(), e.ct)
+			if e.ct.isCap() {
+				return convertCode(capArith(op, x, y, e.ct), e.ct, t.unqual())
+			}
 			return convertCode(fmt.Sprintf("(%s %s %s)", x, op, y), e.ct, t.unqual())
 		})
 		return new
@@ -854,6 +893,8 @@ func (g *gen) assign(e *assign, value bool) string {
 			switch r := fenvArith(op, x, y, e.ct, s); {
 			case is128(e.ct):
 				v = convertCode(arith128(op, x, y), e.ct, t.unqual())
+			case e.ct.isCap():
+				v = convertCode(capArith(op, x, y, e.ct), e.ct, t.unqual())
 			case fe && r != "":
 				v = convertUnder(r, e.ct, t.unqual(), s)
 			case fe:
@@ -910,6 +951,8 @@ func (g *gen) incDec(e *incDec, value bool) string {
 					n = -n
 				}
 				return fmt.Sprintf("c23.Add(%s, %d)", cur, addrOff(n))
+			case t.isCap():
+				return fmt.Sprintf("c23.Add(%s, %s1)", cur, map[bool]string{true: "-"}[e.op == "--"])
 			case t.kind == kBool:
 				if e.op == "++" {
 					return "uint8(1)"
@@ -925,7 +968,7 @@ func (g *gen) incDec(e *incDec, value bool) string {
 	}
 	s, fe := g.fenvOf(e)
 	fe = fe && t.isFloat() && s.runtime()
-	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) && !fe {
+	if !value && l.goVar != "" && t.isArith() && t.kind != kBool && !t.isBitInt() && !is128(t) && !fe && !t.isCap() {
 		g.p("%s%s", l.goVar, e.op)
 		return ""
 	}
@@ -941,6 +984,8 @@ func (g *gen) incDec(e *incDec, value bool) string {
 	switch {
 	case t.isPtr():
 		nv = g.ptrAdd(old, t, &intConst{node{tLong, e.p}, 1}, e.op == "--")
+	case t.isCap():
+		nv = fmt.Sprintf("c23.Add(%s, %s1)", old, map[bool]string{true: "-"}[e.op == "--"])
 	case t.kind == kBool:
 		if e.op == "++" {
 			nv = "uint8(1)"
@@ -1375,7 +1420,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 // hasPointers reports whether a value of t holds a pointer.
 func hasPointers(t *ctype) bool {
 	switch t.kind {
-	case kPtr, kVaList, kNullptr:
+	case kPtr, kVaList, kNullptr, kIntCap, kUIntCap:
 		return true
 	case kArray:
 		return hasPointers(t.elem)
@@ -1398,7 +1443,7 @@ func directScalar(t *ctype) bool {
 	}
 	switch {
 	case t.isInteger():
-		return !is128(t)
+		return !is128(t) && !t.isCap() // an intcap's memory is an Intcap
 	case t.kind == kFloat || t.kind == kDouble:
 		return true
 	}
@@ -1454,4 +1499,14 @@ func (g *gen) directElem(e *deref) (lval, bool) {
 		addr = g.ptrAdd(al.addr, pt, &goVal{node{idx.ty(), e.p}, i}, false)
 	}
 	return lval{addr: addr, t: e.t, direct: fmt.Sprintf("%s[%s]", al.direct, i)}, true
+}
+
+// capArith is x op y in intcap type t: on the addresses, keeping a
+// capability (internal/c23's intcap.go).
+func capArith(op, x, y string, t *ctype) string {
+	signed := t.kind == kIntCap
+	if op == "<<" || op == ">>" {
+		return fmt.Sprintf("c23.CapShift('%c', %s, uint64(%s), %t)", op[0], x, y, signed)
+	}
+	return fmt.Sprintf("c23.CapArith('%s', %s, %s, %t)", op, x, y, signed)
 }
