@@ -105,8 +105,12 @@ func infoOf(t reflect.Type) *tinfo {
 	}
 	ti.recip = ^uint64(0)/uint64(ti.size) + 1
 	ti.scalarOnly, ti.storesFree = true, true
+	allSplit := true
 	ti.fewWords = len(ti.kinds) <= 64
 	for i, k := range ti.kinds {
+		if k != wSplit {
+			allSplit = false
+		}
 		if k == wRO {
 			ti.hasRO = true
 		}
@@ -127,9 +131,12 @@ func infoOf(t reflect.Type) *tinfo {
 	}
 	tab := append(append([]*tinfo(nil), *tinfoTab.Load()...), ti)
 	ti.id = len(tab) - 1
-	ti.ref = uintptr(ti.id) << 2
+	ti.ref = uintptr(ti.id) << refShift
 	if ti.storesFree {
-		ti.ref |= 2
+		ti.ref |= refStoresFree
+	}
+	if allSplit {
+		ti.ref |= refSplit
 	}
 	tinfoTab.Store(&tab)
 	if ti.id < len(tinfoFast) {

@@ -61,27 +61,34 @@ type Ptr struct {
 	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object; bit 1: scalars only
 }
 
-// A Ptr holds its *tinfo as an index into tinfoTab (and bits saying the
-// memory is C's object, and holds no pointers, which checks read without
-// the table; "scalars only" meaning no word a scalar store may not
-// write): escape analysis, which sees a Ptr as one value,
+// A Ptr holds its *tinfo as an index into tinfoTab, with bits saying
+// what checks read without the table (refC, refStoresFree, refSplit):
+// escape analysis, which sees a Ptr as one value,
 // would otherwise take every use of the type as a use of the memory and
 // move what the memory points to off the stack; and an index, unlike a
 // pointer made of an integer, is the same on every target.
 func tref(ti *tinfo) uintptr { return ti.ref }
 
+// The bits of a Ptr's ti (and a header's ref) below the tinfo's index.
+const (
+	refC          = 1 << 0 // the memory is C's object, with a header
+	refStoresFree = 1 << 1 // no word a scalar store may not write
+	refSplit      = 1 << 2 // every word is split (malloc's memory; unions): a pointer's capability is its slot's
+	refShift      = 3
+)
+
 func (p Ptr) info() *tinfo {
-	if i := p.ti >> 2; i < uintptr(len(tinfoFast)) {
+	if i := p.ti >> refShift; i < uintptr(len(tinfoFast)) {
 		return tinfoFast[i].Load()
 	}
-	return (*tinfoTab.Load())[p.ti>>2]
+	return (*tinfoTab.Load())[p.ti>>refShift]
 }
 
 // cref is tref for a capability of C's object, which has a header.
-func cref(ti *tinfo) uintptr { return tref(ti) | 1 }
+func cref(ti *tinfo) uintptr { return tref(ti) | refC }
 
 func (p Ptr) header() *header {
-	if p.ti&1 == 0 {
+	if p.ti&refC == 0 {
 		return nil
 	}
 	return (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
@@ -111,7 +118,7 @@ func (b boundsFault) fault() *Fault {
 	if b.obj == 0 {
 		return &Fault{"access through a pointer with no capability", addr}
 	}
-	ti := (*tinfoTab.Load())[b.ti>>2]
+	ti := (*tinfoTab.Load())[b.ti>>refShift]
 	return &Fault{fmt.Sprintf("access of %d bytes out of bounds of %s", b.n, capString(true, ti, b.size, b.off)), addr}
 }
 
@@ -144,16 +151,17 @@ func capString(ok bool, ti *tinfo, size uintptr, off int) string {
 	return fmt.Sprintf("{%s, size %d, off %d}", typeName(ti), size, off)
 }
 
-// The header of C's allocations.
+// The header of C's allocations. Its first word is its Ptrs' ti, odd
+// (refC), where a capRec's is even: a slot, which points to either, says
+// which, and gives the capability's type, with one load. cobject trusts
+// a header in memory only if ti is a registered *tinfo, which safe Go code
+// cannot make, and ref is its.
 type header struct {
-	magic uintptr
-	ti    *tinfo
-	size  uintptr
-	aux   unsafe.Pointer // the slots of its pointer words: [size/wordSize]unsafe.Pointer, made when first needed
+	ref  uintptr // ti.ref | refC
+	ti   *tinfo
+	size uintptr
+	aux  unsafe.Pointer // the slots of its pointer words: [size/wordSize]unsafe.Pointer, made when first needed
 }
-
-// magic marks the header of an allocation of C: what of it a word holds.
-const magic = 0xC0FFEE_CAB_C0DE & (1<<(8*wordSize) - 1)
 
 const hdrSize = unsafe.Sizeof(header{})
 
@@ -179,8 +187,8 @@ func TypeOf[T any]() *Type { return tinfoOf[T]() }
 
 // LocalT is Local, of a T whose Type is t.
 func LocalT[T any](o *Obj[T], t *Type) Ptr {
-	o.h = header{magic: magic, ti: t, size: unsafe.Sizeof(o.V)}
-	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: t.ref | 1}
+	o.h = header{ref: t.ref | refC, ti: t, size: unsafe.Sizeof(o.V)}
+	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: t.ref | refC}
 }
 
 // New allocates a T for C in the heap.
@@ -221,10 +229,10 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 		base = unsafe.Add(base, off-hdrSize)
 	}
 	h := (*header)(base)
-	if h.magic != magic || h.ti == nil {
+	if h.ref&refC == 0 || h.ti == nil {
 		return Ptr{}, false
 	}
-	if _, ok := registered.Load(h.ti); !ok {
+	if _, ok := registered.Load(h.ti); !ok || h.ref != h.ti.ref|refC {
 		return Ptr{}, false
 	}
 	data := unsafe.Add(base, hdrSize)
@@ -232,7 +240,7 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	if off < 0 || uintptr(off) > h.size {
 		return Ptr{}, false
 	}
-	return Ptr{obj: data, size: h.size, off: off, ti: cref(h.ti)}, true
+	return Ptr{obj: data, size: h.size, off: off, ti: h.ref}, true
 }
 
 // derive returns the capability of the untagged word w, which points to a
@@ -350,32 +358,29 @@ func (t *auxTable) get(key uintptr) (auxEntry, bool) {
 }
 
 // A capRec is a capability of memory that is not C's object, as a slot
-// holds it: laid out as a header is, its magic says which it is.
+// holds it: its first word, the capability's Ptr.ti, is even (no refC),
+// where a header's is odd.
 type capRec struct {
-	magic uintptr // recMagic
-	ti    uintptr // the capability's Ptr.ti
-	size  uintptr
-	obj   unsafe.Pointer
+	ti   uintptr
+	obj  unsafe.Pointer
+	size uintptr
 }
-
-const recMagic = 0xCAB_5107_CAB & (1<<(8*wordSize) - 1)
 
 // capOf returns what a slot holds for v's capability.
 func capOf(v Ptr) unsafe.Pointer {
 	if v.obj == nil {
 		return nil
 	}
-	if v.ti&1 != 0 {
+	if v.ti&refC != 0 {
 		return unsafe.Add(v.obj, -int(hdrSize))
 	}
-	return unsafe.Pointer(&capRec{recMagic, v.ti, v.size, v.obj})
+	return unsafe.Pointer(&capRec{v.ti, v.obj, v.size})
 }
 
 // fromCap returns the capability a slot holds, at offset 0.
 func fromCap(c unsafe.Pointer) Ptr {
-	if *(*uintptr)(c) == magic {
-		h := (*header)(c)
-		return Ptr{obj: unsafe.Add(c, hdrSize), size: h.size, ti: h.ti.ref | 1}
+	if h := (*header)(c); h.ref&refC != 0 {
+		return Ptr{obj: unsafe.Add(c, hdrSize), size: h.size, ti: h.ref}
 	}
 	r := (*capRec)(c)
 	return Ptr{obj: r.obj, size: r.size, ti: r.ti}
@@ -496,18 +501,29 @@ func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
 // word is still in.
 func LoadPtr(p Ptr) Ptr {
 	// C's object (whose base is aligned), an aligned word in bounds.
-	if off := uintptr(p.off); p.ti&1 != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
+	if off := uintptr(p.off); p.ti&refC != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
 		// A slot is only set by a pointer store, which checked the word
 		// may hold one.
-		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
-		if t := atomic.LoadPointer(&h.aux); t != nil {
-			c := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, off)))
-			if c != nil && *(*uintptr)(c) == magic {
-				ch := (*header)(c)
-				obj := unsafe.Add(c, hdrSize)
-				if o := *(*uintptr)(unsafe.Add(p.obj, off)) - uintptr(obj); o <= ch.size {
-					return Ptr{obj: obj, size: ch.size, off: int(o), ti: ch.ti.ref | 1}
-				}
+		w := *(*uintptr)(unsafe.Add(p.obj, off))
+		var c *header
+		if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize)))).aux); t != nil {
+			c = (*header)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, off))))
+		}
+		if c == nil {
+			if w == 0 {
+				// NULL, no capability kept (a NULL stored clears the
+				// slot): as loadPtr finds it, for any kind of word.
+				return Ptr{}
+			}
+		} else if c.ref&refC != 0 {
+			// The slot's C object's header (a capRec's first word is
+			// even): its capability, and its type, at once.
+			obj := unsafe.Add(unsafe.Pointer(c), hdrSize)
+			// A split word's capability is its slot's, whatever the
+			// bytes hold (Fil-C's); another word's, only while it is in
+			// it (Go may have written the word since).
+			if o := w - uintptr(obj); p.ti&refSplit != 0 || o <= c.size {
+				return Ptr{obj: obj, size: c.size, off: int(o), ti: c.ref}
 			}
 		}
 	}
@@ -561,11 +577,12 @@ func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 // inlines, is C's pointer into C's object stored in a split word of C's
 // object (a union's, say).
 func StorePtr(p, v Ptr) {
-	if off := uintptr(p.off); p.ti&v.ti&1 != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
+	if off := uintptr(p.off); p.ti&v.ti&refC != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
 		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
-		// A split word, found by a mask: C's arrays' elements are mostly
-		// of a size that is a power of two (malloc's bytes, one).
-		if t := atomic.LoadPointer(&h.aux); t != nil && (h.ti.mask != 0 || h.ti.size == 1) && h.ti.kinds[(off&h.ti.mask)/wordSize] == wSplit {
+		// A split word: of memory that is all split (malloc's, refSplit),
+		// or found by a mask: C's arrays' elements are mostly of a size
+		// that is a power of two.
+		if t := atomic.LoadPointer(&h.aux); t != nil && (p.ti&refSplit != 0 || h.ti.mask != 0 && h.ti.kinds[(off&h.ti.mask)/wordSize] == wSplit) {
 			// The capability first, so that what it points to stays
 			// alive; a plain store, with the write barrier: a load
 			// racing with it sees the old capability or the new one, as
@@ -656,7 +673,7 @@ func Memmove(dst, src Ptr, n uintptr) {
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
-	if dst.ti == src.ti && dst.ti&1 != 0 && n%wordSize == 0 {
+	if dst.ti == src.ti && dst.ti&refC != 0 && n%wordSize == 0 {
 		if ti := dst.info(); ti.size%wordSize == 0 && !ti.hasRO && ti.mod(uintptr(dst.off)) == ti.mod(uintptr(src.off)) {
 			moveSame(dst, src, n, d, s, ti)
 			return
@@ -780,11 +797,47 @@ func overlaps(a, b Ptr, n uintptr) bool {
 	return x < y+n && y < x+n
 }
 
+// MoveWord is Memmove of one word, which cmd/cc makes of the assignment
+// of a union or struct of a word (Lua's TValue's value).
+func MoveWord(dst, src Ptr) {
+	if moveSplit(dst, src) {
+		return
+	}
+	Memmove(dst, src, wordSize)
+}
+
+// moveSplit copies the word at src to dst if both are words of C's objects
+// whose memory is all split (malloc's): the slot, then the bytes, as Fil-C
+// copies a word with its auxiliary word, and as Memmove does with them: the
+// capability goes with the bytes, whatever they are. It reports false,
+// having done nothing, if not.
+func moveSplit(dst, src Ptr) bool {
+	do, so := uintptr(dst.off), uintptr(src.off)
+	if dst.ti&src.ti&(refC|refSplit) != refC|refSplit || (do|so)%wordSize != 0 ||
+		do >= dst.size || dst.size-do < wordSize || so >= src.size || src.size-so < wordSize {
+		return false
+	}
+	var c unsafe.Pointer
+	if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(src.obj, -int(hdrSize)))).aux); t != nil {
+		c = atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, so)))
+	}
+	t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(dst.obj, -int(hdrSize)))).aux)
+	if t == nil {
+		if c != nil {
+			return false // the destination has no slots yet
+		}
+	} else {
+		*(*unsafe.Pointer)(unsafe.Add(t, do)) = c // with the write barrier
+	}
+	*(*uintptr)(unsafe.Add(dst.obj, do)) = *(*uintptr)(unsafe.Add(src.obj, so))
+	return true
+}
+
 // moveWord copies the word at src to dst, as Memmove does.
 func moveWord(dst, src Ptr) {
 	sk := src.info().kindAt(uintptr(src.off))
 	dk := dst.info().kindAt(uintptr(dst.off))
-	if sk == wSplit && dk == wSplit && dst.ti&src.ti&1 != 0 {
+	if sk == wSplit && dk == wSplit && dst.ti&src.ti&refC != 0 {
 		// Split words of C's objects (a union copied): the bytes, and
 		// the slot's capability, whatever the bytes are.
 		a, b := checkPtrWord(dst), checkPtrWord(src)

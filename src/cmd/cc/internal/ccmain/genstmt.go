@@ -371,7 +371,7 @@ func (g *gen) stmt(s stmt) {
 			}
 		case s.x.ty().kind == kStruct:
 			v := g.rv(s.x)
-			g.p("c23.Memmove(sret, %s, %d)", v, s.x.ty().sizeof())
+			g.p("%s", moveCode("sret", v, s.x.ty()))
 			g.ret("")
 		default:
 			g.ret(g.rv(s.x))

@@ -173,7 +173,7 @@ func newOf(ti *tinfo, n uintptr) Ptr {
 	}
 	base := newObj(ti.arrayObj(count))
 	h := (*header)(base)
-	*h = header{magic: magic, ti: ti, size: count * sz}
+	*h = header{ref: ti.ref | refC, ti: ti, size: count * sz}
 	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
 }
 

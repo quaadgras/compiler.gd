@@ -265,7 +265,7 @@ func (g *gen) store(addr string, t *ctype, v string, c expr) {
 	case kPtr, kNullptr, kVaList:
 		g.p("c23.StorePtr(%s, %s)", addr, v)
 	case kStruct, kArray:
-		g.p("c23.Memmove(%s, %s, %d)", addr, v, t.sizeof())
+		g.p("%s", moveCode(addr, v, t))
 	case kInt128:
 		g.p("c23.StoreI128(%s, %s)", addr, v)
 	case kUInt128:
@@ -783,7 +783,7 @@ func (g *gen) assign(e *assign, value bool) string {
 		l := g.lv(e.x)
 		g.bind(&l)
 		src := g.rv(e.y)
-		g.p("c23.Memmove(%s, %s, %d)", l.addr, src, t.sizeof())
+		g.p("%s", moveCode(l.addr, src, t))
 		return l.addr
 	}
 	l := g.lv(e.x)
@@ -849,6 +849,16 @@ func (g *gen) assign(e *assign, value bool) string {
 		return g.bitLoad(l.addr, l.f)
 	}
 	return tv
+}
+
+// moveCode copies a struct (or array) of type t from src to dst: one word
+// with c23.MoveWord (a union of C's, Lua's TValue's value), whose fast path
+// cmd/compile inlines.
+func moveCode(dst, src string, t *ctype) string {
+	if t.sizeof() == target.ptrSize {
+		return fmt.Sprintf("c23.MoveWord(%s, %s)", dst, src)
+	}
+	return fmt.Sprintf("c23.Memmove(%s, %s, %d)", dst, src, t.sizeof())
 }
 
 func (g *gen) incDec(e *incDec, value bool) string {

@@ -68,7 +68,7 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 		}
 		*(*[2]uintptr)(base) = [2]uintptr{alignMagic, off}
 		h := (*header)(unsafe.Add(base, off-hdrSize))
-		*h = header{magic: magic, ti: ti, size: size}
+		*h = header{ref: ti.ref | refC, ti: ti, size: size}
 		return Ptr{obj: unsafe.Add(base, off), size: size, ti: cref(ti)}
 	}
 }
