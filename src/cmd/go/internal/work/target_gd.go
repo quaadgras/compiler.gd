@@ -9,6 +9,7 @@ import (
 	"cmd/internal/sys"
 	"internal/buildcfg"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -30,8 +31,16 @@ import (
 // select files of std. They differ from the build's for a tool built for
 // the host ("GOARCH=wasm go tool pprof", cfg.ForceHost) and for a target
 // from a GOENV file, whose GOOS and GOARCH this process's environment
-// does not have when it starts.
+// does not have when it starts. Only those are replaced: cmd/go adds
+// tags of its own before (instrumentInit's race, msan or asan).
 func setToolTarget() {
+	stale := make(map[string]bool)
+	for _, tag := range buildcfg.ToolTags {
+		if !strings.HasPrefix(tag, "goexperiment.") {
+			stale[tag] = true
+		}
+	}
+
 	env := make(map[string]string)
 	for _, kv := range cfgChangedEnv {
 		if k, v, ok := strings.Cut(kv, "="); ok {
@@ -50,12 +59,12 @@ func setToolTarget() {
 
 	var tags []string
 	for _, tag := range cfg.BuildContext.ToolTags {
-		if strings.HasPrefix(tag, "goexperiment.") {
+		if !stale[tag] {
 			tags = append(tags, tag)
 		}
 	}
 	for _, tag := range buildcfg.ToolTags {
-		if !strings.HasPrefix(tag, "goexperiment.") {
+		if !strings.HasPrefix(tag, "goexperiment.") && !slices.Contains(tags, tag) {
 			tags = append(tags, tag)
 		}
 	}
