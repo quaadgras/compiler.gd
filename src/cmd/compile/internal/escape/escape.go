@@ -96,6 +96,11 @@ type batch struct {
 	closures        []closure
 	reassignOracles map[*ir.Func]*ir.ReassignOracle
 
+	// candidateAddrOnly caches, per function, the locals whose
+	// address is only ever taken as a direct argument of a dynamic
+	// call (see candidateAddrOnlyNames).
+	candidateAddrOnly map[*ir.Func]map[*ir.Name]bool
+
 	heapLoc      location
 	mutatorLoc   location
 	calleeLoc    location
@@ -360,6 +365,92 @@ func isCandidateLoc(n ir.Node) bool {
 	return false
 }
 
+// addrOnlyAtDynamicCalls reports whether every address of name taken
+// in fn is a direct `&name` argument of a dynamic call, and no
+// closure captures name.
+//
+// The wrap re-homes a candidate by copying it to the heap and
+// pointing its box at the copy, which is only sound when no other
+// pointer to the old storage is live across the call: such a pointer
+// would keep reading and writing the stale stack copy (q := &x;
+// f(&x); q.a = 1), and if it reaches the callee without going through
+// the wrap (p := &x; f(p), f(unsafe.Pointer(&x)), an inlined
+// forwarder) the callee is left holding a pointer into a dead frame.
+// Every &name that walk rewrites through the box is a direct argument
+// of a dynamic call; any other address-of, including &name.f,
+// name[:], an implicit &name for a pointer-receiver method, or a
+// by-reference closure capture, disqualifies name.
+func (b *batch) addrOnlyAtDynamicCalls(fn *ir.Func, name *ir.Name) bool {
+	if fn == nil {
+		return false
+	}
+	if b.candidateAddrOnly == nil {
+		b.candidateAddrOnly = make(map[*ir.Func]map[*ir.Name]bool)
+	}
+	ok, cached := b.candidateAddrOnly[fn]
+	if !cached {
+		ok = candidateAddrOnlyNames(fn)
+		b.candidateAddrOnly[fn] = ok
+	}
+	return ok[name]
+}
+
+// candidateAddrOnlyNames returns the PAUTO locals of fn that satisfy
+// addrOnlyAtDynamicCalls.
+func candidateAddrOnlyNames(fn *ir.Func) map[*ir.Name]bool {
+	allowed := make(map[*ir.AddrExpr]bool)
+	ir.VisitList(fn.Body, func(n ir.Node) {
+		call, ok := n.(*ir.CallExpr)
+		if !ok {
+			return
+		}
+		switch call.Op() {
+		case ir.OCALLFUNC:
+			if ir.StaticCalleeName(call.Fun) != nil {
+				return
+			}
+		case ir.OCALLINTER:
+		default:
+			return
+		}
+		for _, arg := range call.Args {
+			if ae, ok := arg.(*ir.AddrExpr); ok {
+				if _, ok := ae.X.(*ir.Name); ok {
+					allowed[ae] = true
+				}
+			}
+		}
+	})
+
+	good := make(map[*ir.Name]bool)
+	bad := make(map[*ir.Name]bool)
+	ir.VisitList(fn.Body, func(n ir.Node) {
+		switch n := n.(type) {
+		case *ir.AddrExpr:
+			root := ir.OuterValue(n.X)
+			name, ok := root.(*ir.Name)
+			if !ok || name.Class != ir.PAUTO {
+				return
+			}
+			if allowed[n] && n.X == ir.Node(name) {
+				good[name] = true
+			} else {
+				bad[name] = true
+			}
+		case *ir.ClosureExpr:
+			for _, cv := range n.Func.ClosureVars {
+				if cv.Outer != nil {
+					bad[cv.Outer] = true
+				}
+			}
+		}
+	})
+	for name := range bad {
+		delete(good, name)
+	}
+	return good
+}
+
 // shouldEnableEscapeCandidate is the activation gate for the gd
 // escape-bits Phase D optimization. Now that tagHole only routes
 // candidate-eligible (pointer-shaped) args through candidateHole,
@@ -473,6 +564,7 @@ func (b *batch) finish(fns []*ir.Func) {
 			// attrEscapes at finalize time.
 			if !b.gd.Flag.CompilingRuntime &&
 				isCandidateLoc(n) &&
+				b.addrOnlyAtDynamicCalls(loc.curfn, n.(*ir.Name)) &&
 				shouldEnableEscapeCandidate(loc.curfn) {
 				n.SetEsc(ir.EscHeap)
 				n.SetEscCandidate(true)

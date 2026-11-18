@@ -30,6 +30,18 @@ pointers inside composite literals were being over-eagerly stack-
 promoted. The current rule captures the bread-and-butter win
 (`&localvar` to a dynamic callee) without the aliasing hazards.
 
+It is further restricted by `addrOnlyAtDynamicCalls`: every address
+of the local taken in the function must be a direct `&x` argument of
+a dynamic call, and no closure may capture it. Re-homing copies x and
+repoints its box, so any other pointer to x that is live across the
+call is wrong afterwards. Before this filter (fixed 2026-11-18,
+`escape_bits_alias_test.go`) the fork miscompiled `q := &x; f(&x);
+q.a = 1` (q kept writing the stale stack copy), `&x.f`, `x[:]`,
+pointer-receiver method calls on x and by-reference captures, and
+`p := &x; f(p)`, `f(unsafe.Pointer(&x))` and inlined forwarders
+passed the callee a pointer into a dead frame, since the wrap only
+recognises a literal `&x` argument.
+
 **2. `candidateEligibleParamType` gates `tagHole`.** Dynamic callees
 only route pointer-shaped args (*T, unsafe.Pointer, chan) through
 `candidateHole`. Struct-by-value, slice, map, interface, and func
@@ -328,6 +340,9 @@ TMAP/TCHAN/TINTER to a real pointer.
   `TestEscapeBits*` alloc tests and 6 `BenchmarkEscapeBits*`
   benchmarks demonstrating −71% geomean speedup and 100% alloc
   reduction on the canonical patterns.
+- `src/cmd/compile/internal/test/escape_bits_alias_test.go` —
+  soundness stress tests: aliases, interior pointers, method values,
+  captures and pointers that reach the callee without a direct `&x`.
 - `src/cmd/compile/internal/test/escape_bits_dynmask_test.go` — 3
   Phase F dynamic-mask tests (forced escape override, call
   integrity, heapMask-driven relational decisions).
@@ -544,6 +559,13 @@ that could happen:
    the indirect call. Those transfers are escape edges in the existing
    analyzer, and they force `EscHeap`, not `EscCandidate`. Safe by
    construction.
+
+> **Correction (2026-11-18):** both points assume the only pointer to
+> the object is the one passed at the call. A pointer taken earlier
+> (`q := &x`, `&x.f`, a by-reference closure capture) is neither the
+> caller's "stack copy" nor an escape edge, and keeps the old storage
+> after the wrap re-homes x. See `addrOnlyAtDynamicCalls` in Landed
+> state.
 
 The runtime helper is `go:nosplit` because call-site insertion
 happens in argument evaluation: an inopportune stack grow would
