@@ -104,12 +104,6 @@ func Main(archInit func(*ssagen.ArchInfo), gd *base.Invocation, args []string) {
 	defer handlePanic(gd)
 
 	gd.Ctxt = obj.Linknew(ssagen.Arch.LinkArch)
-	// Publish this invocation's Ctxt so the captured-once HashDebug
-	// globals (ConvertHash, FmaHash, etc.) use the right PosTable
-	// for hash-position lookups. host.Run's runMu serialises
-	// invocations, so the published value is stable for the
-	// duration of this compile.
-	base.SetCurrentCtxt(gd.Ctxt)
 	gd.Ctxt.DiagFunc = gd.Errorf
 	gd.Ctxt.DiagFlush = gd.FlushErrors
 	gd.Ctxt.Bso = bufio.NewWriter(gd.StdoutWriter())

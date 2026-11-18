@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 type hashAndMask struct {
@@ -55,31 +54,6 @@ func (d *HashDebug) SetInlineSuffixOnly(b bool) *HashDebug {
 
 // The default compiler-debugging HashDebug, for "-d=gossahash=..."
 var hashDebug *HashDebug
-
-// hashGlobalsOnce gates Convert/Fma/PGO/etc hash-debug global init
-// against concurrent in-process compile invocations.
-var hashGlobalsOnce sync.Once
-
-// currentCtxt is the *obj.Link of the currently-executing in-process
-// gd.Main invocation. Set by SetCurrentCtxt at the start of each
-// gd.Main under host.Run's runMu, read by HashDebug.matchPos so the
-// captured-once HashDebug uses the right PosTable for current
-// xpos values. Without this, ConvertHash etc. (created against
-// invocation 1's gd) panic on xpos lookups in invocation 2's
-// PosTable.
-var currentCtxt atomic.Pointer[obj.Link]
-
-// SetCurrentCtxt is called by gd.Main at startup to publish the
-// active Ctxt for hash-debug position lookups.
-func SetCurrentCtxt(ctxt *obj.Link) { currentCtxt.Store(ctxt) }
-
-var ConvertHash *HashDebug      // for debugging float-to-[u]int conversion changes
-var FmaHash *HashDebug          // for debugging fused-multiply-add floating point changes
-var LoopVarHash *HashDebug      // for debugging shared/private loop variable changes
-var PGOHash *HashDebug          // for debugging PGO optimization decisions
-var LiteralAllocHash *HashDebug // for debugging literal allocation optimizations
-var MergeLocalsHash *HashDebug  // for debugging local stack slot merging changes
-var VariableMakeHash *HashDebug // for debugging variable-sized make optimizations
 
 // DebugHashMatchPkgFunc reports whether debug variable Gossahash
 //
@@ -298,9 +272,7 @@ func (d *HashDebug) MatchPos(pos src.XPos, desc func() string) bool {
 }
 
 // MatchPosCtxt is like MatchPos but takes an explicit Ctxt for the
-// PosTable. Used by SSA rewrite rules and other callers under
-// concurrent in-process compile invocations, where the global
-// currentCtxt atomic is non-deterministic across invocations.
+// PosTable.
 func (d *HashDebug) MatchPosCtxt(ctxt *obj.Link, pos src.XPos, desc func() string) bool {
 	if d == nil {
 		return true
@@ -350,15 +322,9 @@ func (d *HashDebug) MatchPosWithInfo(pos src.XPos, info any, desc func() string)
 	return d.matchPosWithInfo(d.currentCtxt(), pos, info, desc)
 }
 
-// currentCtxt returns the active Ctxt for position lookups: the
-// process-global currentCtxt published by gd.Main at start of each
-// invocation, falling back to d.gd.Ctxt if none is set (e.g. tests
-// that exercise HashDebug outside a gd.Main flow). With host.Run's
-// runMu, currentCtxt is stable for the duration of a single compile.
+// currentCtxt returns the Ctxt of the invocation that made d, whose
+// PosTable resolves the positions it is asked about.
 func (d *HashDebug) currentCtxt() *obj.Link {
-	if c := currentCtxt.Load(); c != nil {
-		return c
-	}
 	if d.gd != nil {
 		return d.gd.Ctxt
 	}

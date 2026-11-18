@@ -203,7 +203,7 @@ func maybeDevirtualizeInterfaceCall(gd *base.Invocation, p *pgoir.Profile, fn *i
 		return nil, nil, 0
 	}
 	// Bail if de-selected by PGO Hash.
-	if !base.PGOHash.MatchPosWithInfoCtxt(gd.Ctxt, call.Pos(), "devirt", nil) {
+	if !gd.PGOHash.MatchPosWithInfoCtxt(gd.Ctxt, call.Pos(), "devirt", nil) {
 		return nil, nil, 0
 	}
 
@@ -288,7 +288,7 @@ func maybeDevirtualizeFunctionCall(gd *base.Invocation, p *pgoir.Profile, fn *ir
 		return nil, nil, 0
 	}
 	// Bail if de-selected by PGO Hash.
-	if !base.PGOHash.MatchPosWithInfoCtxt(gd.Ctxt, call.Pos(), "devirt", nil) {
+	if !gd.PGOHash.MatchPosWithInfoCtxt(gd.Ctxt, call.Pos(), "devirt", nil) {
 		return nil, nil, 0
 	}
 

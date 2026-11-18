@@ -52,6 +52,16 @@ type Invocation struct {
 
 	Timer Timings
 
+	// Hash-debug gates set from -d flags by ParseFlags. They are
+	// per-invocation because in-process compiles share the process.
+	ConvertHash      *HashDebug // for debugging float-to-[u]int conversion changes
+	FmaHash          *HashDebug // for debugging fused-multiply-add floating point changes
+	LoopVarHash      *HashDebug // for debugging shared/private loop variable changes
+	PGOHash          *HashDebug // for debugging PGO optimization decisions
+	LiteralAllocHash *HashDebug // for debugging literal allocation optimizations
+	MergeLocalsHash  *HashDebug // for debugging local stack slot merging changes
+	VariableMakeHash *HashDebug // for debugging variable-sized make optimizations
+
 	// Debug holds the parsed debugging configuration values.
 	Debug DebugFlags
 

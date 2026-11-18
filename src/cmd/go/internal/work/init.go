@@ -62,6 +62,7 @@ func BuildInit(ld *modload.Loader) {
 	buildModeInit()
 	initCompilerConcurrencyPool()
 	cfgChangedEnv = makeCfgChangedEnv()
+	setToolTarget()
 
 	if err := fsys.Init(); err != nil {
 		base.Fatal(err)

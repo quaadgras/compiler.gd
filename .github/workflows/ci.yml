@@ -1,0 +1,150 @@
+# Build the toolchain, test it on amd64, arm64 and js/wasm, build the
+# go command for js/wasm and the site (doc/gd/site), and the go command
+# for each platform; when release passes, upload the go commands and
+# the playground's files to the R2 bucket compiler-gd (download.compiler.gd,
+# replacing the previous ones) and deploy the site to Cloudflare Pages
+# (compiler.gd).
+#
+# Deploying needs two repository secrets: CLOUDFLARE_API_TOKEN (a token
+# with the permissions "Cloudflare Pages: Edit" and "Workers R2 Storage:
+# Edit") and CLOUDFLARE_ACCOUNT_ID. Without them the deploy job says so
+# and does nothing.
+name: ci
+
+on:
+  push:
+    branches: [release]
+  pull_request:
+    branches: [release]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  GOTELEMETRY: "off"
+
+jobs:
+  amd64:
+    name: test (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: run.bash (what all.bash tests)
+        run: cd src && PATH=$GITHUB_WORKSPACE/bin:$PATH ./run.bash --no-rebuild
+
+  arm64:
+    name: test (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: std and the language tests
+        run: |
+          export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
+          go test -short std cmd/internal/testdir
+
+  wasm:
+    name: test (js/wasm, against the recorded status)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: std under node (doc/gd/bench/wasmgc/std/survey.py)
+        run: |
+          export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$GITHUB_WORKSPACE/lib/wasm:$PATH
+          export GOOS=js GOARCH=wasm GOWASM=gc,split
+          python3 doc/gd/bench/wasmgc/std/survey.py -j 4 -t 600
+      - name: same as status-js-split.txt
+        run: |
+          if ! git diff --exit-code -- doc/gd/bench/wasmgc/std/status-js-split.txt; then
+            echo "::error::js/wasm results differ from doc/gd/bench/wasmgc/std/status-js-split.txt (a regression, or a fix to record there)"
+            exit 1
+          fi
+
+  site:
+    name: build go.wasm, the site and the go commands
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: doc/gd/site/build.sh
+        run: GOROOT=$GITHUB_WORKSPACE doc/gd/site/build.sh
+      - name: doc/gd/site/binaries.sh
+        run: GOROOT=$GITHUB_WORKSPACE doc/gd/site/binaries.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: |
+            doc/gd/site/dist
+            doc/gd/site/r2
+          retention-days: 7
+
+  deploy:
+    name: deploy compiler.gd
+    needs: [amd64, arm64, wasm, site]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: site
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: upload to download.compiler.gd, then deploy compiler.gd
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set: not deploying"
+            exit 0
+          fi
+          npm install --no-save --silent wrangler@4
+          put() { npx wrangler r2 object put "compiler-gd/$1" --remote --file "$2" --content-type "$3" --cache-control "$4"; }
+          # The playground's files first: the pages that name them come after.
+          # (Their URLs carry a hash, so they can be kept.)
+          for f in go.wasm.gz goroot.tar.gz cache.tar.gz; do
+            put "playground/$f" "site/r2/playground/$f" application/gzip "public, max-age=31536000, immutable"
+          done
+          for f in site/r2/gd-*; do
+            case $f in *.zip) type=application/zip ;; *) type=application/gzip ;; esac
+            put "$(basename "$f")" "$f" "$type" "public, max-age=300"
+          done
+          cd site/dist && npx wrangler pages deploy . --project-name compiler-gd --branch main --commit-hash "$GITHUB_SHA"

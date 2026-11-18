@@ -77,6 +77,11 @@ func phaseGReturnRewrite(gd *base.Invocation, fn *ir.Func) {
 			continue
 		}
 		resultIdx++
+		if r.Type.Elem().Size() == 0 {
+			// new of a zero-size type is &runtime.zerobase; there is
+			// nothing to place in the caller's buffer.
+			continue
+		}
 		retExpr := ret.Results[i]
 		// If the return expression is just an autotmp Name, look for the
 		// immediately-preceding `autotmp = <alloc>` and fold it.

@@ -55,11 +55,18 @@
   <p>The language and standard library test suites pass on <code>amd64</code>, <code>arm64</code> and <code>js/wasm</code>.</p>
 
   <h2>Try it</h2>
-  <p>In your browser: the <a href="/playground">playground</a>. Or build it:</p>
+  <p>In your browser: the <a href="/playground">playground</a>. Or download the <code>go</code> command, which is the whole toolchain (it carries the standard library and cross-compiles in-process):</p>
+  <ul class="downloads">
+    <li><b>Linux</b> <a href="https://download.compiler.gd/gd-linux-amd64.tar.gz">amd64</a> <a href="https://download.compiler.gd/gd-linux-arm64.tar.gz">arm64</a></li>
+    <li><b>macOS</b> <a href="https://download.compiler.gd/gd-darwin-arm64.tar.gz">arm64</a> <a href="https://download.compiler.gd/gd-darwin-amd64.tar.gz">amd64</a></li>
+    <li><b>Windows</b> <a href="https://download.compiler.gd/gd-windows-amd64.zip">amd64</a> <a href="https://download.compiler.gd/gd-windows-arm64.zip">arm64</a></li>
+  </ul>
+<pre><code>tar -xzf gd-linux-amd64.tar.gz
+./go version</code></pre>
+  <p class="note">Built from <code>release</code> on every change. On macOS the binary isn't signed: <code>xattr -d com.apple.quarantine go</code>. The ABI differs from stock Go (wider interfaces and strings), so assembly and <code>unsafe</code> code that relies on their layout needs care.</p>
+  <p>Or build it:</p>
 <pre><code>git clone https://github.com/quaadgras/compiler.gd
-cd compiler.gd/src &amp;&amp; ./make.bash
-export PATH=$PWD/../bin:$PATH</code></pre>
-  <p class="note">The ABI differs from stock Go (wider interfaces and strings), so assembly and <code>unsafe</code> code that relies on their layout needs care.</p>
+cd compiler.gd/src &amp;&amp; ./make.bash</code></pre>
 
   <h2>How? Why?</h2>
   <p><a href="https://github.com/Splizard">@Splizard</a>, the project's director, developed an interest (after 10 years of Go) in exploring what an alternative Go compiler could look like. Recent technology has made an endeavour of this scale far more accessible. The compiler is intended to support <a href="https://graphics.gd">graphics.gd</a>.</p>

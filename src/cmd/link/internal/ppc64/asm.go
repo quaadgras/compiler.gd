@@ -46,7 +46,7 @@ import (
 )
 
 // The build configuration supports PC-relative instructions and relocations (limited to tested targets).
-var hasPCrel = buildcfg.GOPPC64 >= 10 && buildcfg.GOOS == "linux"
+func hasPCrel() bool { return buildcfg.GOPPC64 >= 10 && buildcfg.GOOS == "linux" }
 
 const (
 	// For genstub, the type of stub required by the caller.
@@ -224,7 +224,7 @@ func genpltstub(ctxt *ld.Link, ldr *loader.Loader, r loader.Reloc, ri int, s loa
 	// For dynamic calls made from a Go caller, a TOC relative stub is
 	// always needed when a TOC pointer is maintained (specifically, if
 	// the Go caller is PIC, and cannot use PCrel instructions).
-	if (r.Type() == objabi.ElfRelocOffset+objabi.RelocType(elf.R_PPC64_REL24)) || (!ldr.AttrExternal(s) && ldr.AttrShared(s) && !hasPCrel) {
+	if (r.Type() == objabi.ElfRelocOffset+objabi.RelocType(elf.R_PPC64_REL24)) || (!ldr.AttrExternal(s) && ldr.AttrShared(s) && !hasPCrel()) {
 		stubTypeStr = "_tocrel"
 		stubType = 1
 	} else {
@@ -321,7 +321,7 @@ func genstubs(ctxt *ld.Link, ldr *loader.Loader) {
 
 				case rt.IsText():
 					targ := r.Sym()
-					if (ldr.AttrExternal(targ) && ldr.SymLocalentry(targ) <= 1) || (!ldr.AttrExternal(targ) && (!ldr.AttrShared(targ) || hasPCrel)) {
+					if (ldr.AttrExternal(targ) && ldr.SymLocalentry(targ) <= 1) || (!ldr.AttrExternal(targ) && (!ldr.AttrShared(targ) || hasPCrel())) {
 						// This is NOTOC to NOTOC call (st_other is 0 or 1). No call stub is needed.
 					} else {
 						// This is a NOTOC to TOC function. Generate a calling stub.
@@ -390,7 +390,7 @@ func genaddmoduledata(ctxt *ld.Link, ldr *loader.Loader) {
 	//	runtime.addmoduledata(local.moduledata)
 	// }
 
-	if !hasPCrel {
+	if !hasPCrel() {
 		// Regenerate TOC from R12 (the address of this function).
 		sz := initfunc.AddSymRef(ctxt.Arch, ctxt.DotTOC[0], 0, objabi.R_ADDRPOWER_PCREL, 8)
 		initfunc.SetUint32(ctxt.Arch, sz-8, 0x3c4c0000) // addis r2, r12, .TOC.-func@ha
@@ -411,7 +411,7 @@ func genaddmoduledata(ctxt *ld.Link, ldr *loader.Loader) {
 		tgt = ldr.LookupOrCreateSym("runtime.firstmoduledata", 0)
 	}
 
-	if !hasPCrel {
+	if !hasPCrel() {
 		sz := initfunc.AddSymRef(ctxt.Arch, tgt, 0, objabi.R_ADDRPOWER_GOT, 8)
 		initfunc.SetUint32(ctxt.Arch, sz-8, 0x3c620000) // addis r3, r2, local.moduledata@got@ha
 		initfunc.SetUint32(ctxt.Arch, sz-4, 0xe8630000) // ld r3, local.moduledata@got@l(r3)
@@ -982,7 +982,7 @@ func elfreloc1(ctxt *ld.Link, out *ld.OutBuf, ldr *loader.Loader, s loader.Sym, 
 		if r.Size != 4 {
 			return false
 		}
-		if !hasPCrel {
+		if !hasPCrel() {
 			writeElfReloc(elf.R_PPC64_REL24, sectoff, elfsym, r.Xadd)
 		} else {
 			// TOC is not used in PCrel compiled Go code.
@@ -1265,7 +1265,7 @@ func gentramp(ctxt *ld.Link, ldr *loader.Loader, tramp *loader.SymbolBuilder, ta
 		r.SetOff(0)
 		r.SetSiz(8) // generates 2 relocations: HA + LO
 		r.SetSym(toctramp.Sym())
-	} else if hasPCrel {
+	} else if hasPCrel() {
 		// pla r12, addr (PCrel). This works for static or PIC, with or without a valid TOC pointer.
 		o1 = uint32(OP_PLA_PFX)
 		o2 = uint32(OP_PLA_SFX_R12) // pla r12, addr
@@ -1432,7 +1432,7 @@ func archreloc(ctxt *ld.Link, target *ld.Target, ldr *loader.Loader, syms *ld.Ar
 		// If we are linking PIE or shared code, non-PCrel golang generated object files have an extra 2 instruction prologue
 		// to regenerate the TOC pointer from R12.  The exception are two special case functions tested below.  Note,
 		// local call offsets for externally generated objects are accounted for when converting into golang relocs.
-		if !hasPCrel && !ldr.AttrExternal(rs) && ldr.AttrShared(rs) && tgtName != "runtime.duffzero" && tgtName != "runtime.duffcopy" {
+		if !hasPCrel() && !ldr.AttrExternal(rs) && ldr.AttrShared(rs) && tgtName != "runtime.duffzero" && tgtName != "runtime.duffcopy" {
 			// Furthermore, only apply the offset if the target looks like the start of a function call.
 			if r.Add() == 0 && ldr.SymType(rs).IsText() {
 				t += 8

@@ -38,6 +38,7 @@ import (
 	"log"
 	"math"
 	"slices"
+	"sync"
 )
 
 // ctxt5 holds state while assembling a single function.
@@ -1225,7 +1226,15 @@ func opset(a, b0 obj.As) {
 	oprange[a&obj.AMask] = oprange[b0]
 }
 
+// buildopMu makes buildop whole for each of the compiles that run
+// at once in one process (the go command runs them in-process): each
+// returns only once the tables are complete, not as soon as another
+// has begun them.
+var buildopMu sync.Mutex
+
 func buildop(ctxt *obj.Link) {
+	buildopMu.Lock()
+	defer buildopMu.Unlock()
 	if oprange[AAND&obj.AMask] != nil {
 		// Already initialized; stop now.
 		// This happens in the cmd/asm tests,

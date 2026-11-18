@@ -49,8 +49,12 @@ func Check() {
 	}
 }
 
+// getenv is where the configuration comes from: the process's
+// environment, unless SetTarget gave another.
+var getenv = os.Getenv
+
 func envOr(key, value string) string {
-	if x := os.Getenv(key); x != "" {
+	if x := getenv(key); x != "" {
 		return x
 	}
 	return value
@@ -569,4 +573,30 @@ func gogoarchTags() []string {
 		return list
 	}
 	return nil
+}
+
+// SetTarget recomputes the build configuration (GOOS, GOARCH, their
+// variants, the experiments...) from env, as the package computes it
+// from the environment when the process starts (gd fork). The go
+// command runs compile, asm and link in its own process: it sets the
+// configuration to that of the build first, so that they build for
+// another GOOS and GOARCH than its own. GOROOT and Version are kept.
+func SetTarget(env func(string) string) {
+	getenv = env
+	Error = nil
+	GOARCH = envOr("GOARCH", defaultGOARCH)
+	GOOS = envOr("GOOS", defaultGOOS)
+	GO386 = envOr("GO386", DefaultGO386)
+	GOAMD64 = goamd64()
+	GOARM = goarm()
+	GOARM64 = goarm64()
+	GOMIPS = gomips()
+	GOMIPS64 = gomips64()
+	GOPPC64 = goppc64()
+	GORISCV64 = goriscv64()
+	GOWASM = gowasm()
+	GOFIPS140 = gofips140()
+	Experiment = experiment() // (before toolTags, which has its tags)
+	ToolTags = toolTags()
+	FramePointerEnabled = GOARCH == "amd64" || GOARCH == "arm64"
 }

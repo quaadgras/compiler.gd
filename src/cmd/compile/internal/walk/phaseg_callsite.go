@@ -36,7 +36,7 @@ import (
 // (or whose result escapes) keep their nil outBuf and fall through
 // to the heap path inside maybeInPlace — same cost as stock.
 func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
-	if !types.PhaseGActive {
+	if !types.PhaseGActive() {
 		return
 	}
 	// Skip nosplit functions: adding stack autotmps here blows the
