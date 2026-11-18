@@ -873,6 +873,7 @@ void *alloca(size_t size);
 `,
 	"limits.h": `#ifndef __CC_LIMITS_H
 #define __CC_LIMITS_H
+#define __STDC_VERSION_LIMITS_H__ 202311L
 #define CHAR_BIT 8
 #define BOOL_WIDTH 1
 #define CHAR_WIDTH 8

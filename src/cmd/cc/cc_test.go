@@ -83,6 +83,27 @@ func TestBasic(t *testing.T) {
 	}
 }
 
+// TestC23 compares the output of C23 that gcc also compiles with gcc's.
+func TestC23(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/c23.c", true)
+	bin := filepath.Join(t.TempDir(), "c23")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, "testdata/c23.c").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestLibc compares the output of C's library, which internal/c23
 // implements, with gcc's and its C library's.
 func TestLibc(t *testing.T) {
