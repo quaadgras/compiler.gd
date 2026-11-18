@@ -5,6 +5,8 @@
 package work
 
 import (
+	"cmd/go/internal/cfg"
+	"cmd/internal/sys"
 	"internal/buildcfg"
 	"os"
 	"strings"
@@ -19,6 +21,16 @@ import (
 // The tools keep some state for the life of the process (types of the
 // universe, caches of the target's layouts...): every build that runs
 // them in-process has the target set here, before its first action.
+//
+// The target's tool tags are set here too. go/build took them from this
+// process's environment when it started, as buildcfg did, and
+// cfg.BuildContext keeps them but for the goexperiment ones, which
+// cmd/go sets from cfg.Experiment: GOARCH's variants (386.sse2,
+// amd64.v1...) and the fork's wasm.gc, wasm.split and wasm.ptr32, which
+// select files of std. They differ from the build's for a tool built for
+// the host ("GOARCH=wasm go tool pprof", cfg.ForceHost) and for a target
+// from a GOENV file, whose GOOS and GOARCH this process's environment
+// does not have when it starts.
 func setToolTarget() {
 	env := make(map[string]string)
 	for _, kv := range cfgChangedEnv {
@@ -32,4 +44,20 @@ func setToolTarget() {
 		}
 		return os.Getenv(key)
 	})
+	// cmd/internal/sys took wasm's word size from GOWASM when the
+	// process started.
+	sys.ArchWasm.PtrSize = buildcfg.GOWASM.PtrSize()
+
+	var tags []string
+	for _, tag := range cfg.BuildContext.ToolTags {
+		if strings.HasPrefix(tag, "goexperiment.") {
+			tags = append(tags, tag)
+		}
+	}
+	for _, tag := range buildcfg.ToolTags {
+		if !strings.HasPrefix(tag, "goexperiment.") {
+			tags = append(tags, tag)
+		}
+	}
+	cfg.BuildContext.ToolTags = tags
 }
