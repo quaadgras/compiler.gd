@@ -3886,6 +3886,9 @@ func (g *gcGen) value(v *ssa.Value) {
 		g.zeroValue(v, v.Aux.(*types.Type))
 
 	case ssa.OpMove:
+		// (As the lowering rules of the other ports log a large
+		// copy: GOWASM=gc has none for Move.)
+		ssa.LogLargeCopy(g.s.GD(), v.Block.Func.Name, v.Pos, v.AuxInt)
 		if gcSplit() {
 			g.splitMove(v, v.Aux.(*types.Type))
 			return
