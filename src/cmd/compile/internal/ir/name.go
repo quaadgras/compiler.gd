@@ -68,8 +68,8 @@ type Name struct {
 	// gd Phase G's return-outBuf rewrite. 0 means "unbound"; K means
 	// "when allocating this local's heap backing, route through
 	// runtime.maybeInPlace(outBuf_{K-1}, T) so the caller's stack
-	// buffer (or heap, when outBuf is nil) is reused". Set by the
-	// walk recognizer; consumed by ssagen.newHeapaddr.
+	// buffer (or heap, when outBuf is nil) is reused". Set by escape
+	// analysis (phaseg.go); consumed by ssagen.newHeapaddr.
 	OutBufResultIdx uint8
 }
 

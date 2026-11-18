@@ -43,13 +43,6 @@ func Walk(gd *base.Invocation, fn *ir.Func) {
 	// walkStmtList so SSA gen sees Heapaddr wired up.
 	promoteEscapeCandidates(gd, fn)
 
-	// gd Phase G: recognize return-of-allocation shapes and
-	// retag the underlying local with an outBuf result index so
-	// ssagen routes its heap allocation through runtime.maybeInPlace.
-	// Must run before walkStmtList lowers ONEW/OPTRLIT and before
-	// the body is otherwise transformed.
-	phaseGReturnRewrite(gd, fn)
-
 	// gd Phase G: at each call site to a Phase-G-extended callee,
 	// replace trailing nil outBuf args with the address of a fresh
 	// stack-allocated buffer when (a) the corresponding result's

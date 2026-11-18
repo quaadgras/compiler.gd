@@ -383,6 +383,10 @@ func shouldEnableEscapeCandidate(fn *ir.Func) bool {
 }
 
 func (b *batch) finish(fns []*ir.Func) {
+	// gd Phase G: the allocations to place in a caller's buffer for
+	// a result (phaseg.go), decided while locations are still bound.
+	phaseG := b.phaseGTags(fns)
+
 	// Record parameter tags for package export data.
 	for _, fn := range fns {
 		fn.SetEsc(escFuncTagged)
@@ -472,16 +476,25 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 			}
 			n.SetEsc(ir.EscHeap)
-			// gd Phase G chain-fold: if the heap-escaping loc
-			// belongs to a Phase-G spill on a call expression and
-			// its only non-heap escape is a flow into one of the
-			// current function's own results, record that result
-			// index on the call. Walk's call-site rewrite then
-			// forwards the parent function's outBuf for that result
-			// instead of nil, chaining stack reuse across factory
-			// wrappers.
-			if call, ok := n.(*ir.CallExpr); ok && (call.Op() == ir.OCALLFUNC || call.Op() == ir.OCALLINTER) {
-				call.GdForwardOutBufResult = phaseGSingleResultLeak(loc)
+			// gd Phase G: an allocation phaseGTags placed in the
+			// caller's buffer for a result: a local's storage
+			// (ssagen's newHeapaddr), new or &T{} (walk), or a
+			// call's result, made in the buffer the function was
+			// passed (chain-fold: walk's forwardParentOutBuf).
+			if ord, ok := phaseG[loc]; ok {
+				switch n := n.(type) {
+				case *ir.Name:
+					n.OutBufResultIdx = uint8(ord + 1)
+				case *ir.CallExpr:
+					n.GdForwardOutBufResult = uint8(ord + 1)
+				default:
+					allocs, _ := b.gd.PhaseGOutBufAllocs.(map[ir.Node]uint8)
+					if allocs == nil {
+						allocs = make(map[ir.Node]uint8)
+						b.gd.PhaseGOutBufAllocs = allocs
+					}
+					allocs[n] = uint8(ord + 1)
+				}
 			}
 		} else {
 			if b.gd.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
@@ -883,34 +896,4 @@ func (b *batch) reassignOracle(fn *ir.Func) *ir.ReassignOracle {
 		b.reassignOracles[f] = ro
 	}
 	return ro
-}
-
-// phaseGSingleResultLeak inspects loc.paramEsc and returns 1+k when
-// loc's value flows to exactly the k-th result of its enclosing
-// function (and to no other non-heap sink). Returns 0 otherwise —
-// no result-leak, or multiple results, or the loc has untracked
-// flows we can't safely chain-fold across.
-//
-// Used by Phase G to decide whether a call-site rewrite should
-// forward the parent's outBuf parameter (chain-fold) versus pass
-// nil (true heap escape).
-func phaseGSingleResultLeak(loc *location) uint8 {
-	if loc == nil {
-		return 0
-	}
-	chosen := -1
-	for k := 0; k < numEscResults; k++ {
-		if loc.paramEsc.Result(k) >= 0 {
-			if chosen >= 0 {
-				// Flows to two different results — we'd need to
-				// pick one outBuf, conservatively bail.
-				return 0
-			}
-			chosen = k
-		}
-	}
-	if chosen < 0 {
-		return 0
-	}
-	return uint8(chosen + 1)
 }

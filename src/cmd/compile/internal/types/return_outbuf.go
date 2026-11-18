@@ -227,6 +227,19 @@ func (t *Type) NumOutBufs() int {
 	return countPointerResults(t.Results())
 }
 
+// OutBufOrdinal returns the index among t's outBuf params of the one
+// for result ri, or -1 if result ri has none.
+func OutBufOrdinal(t *Type, ri int) int {
+	if t == nil || t.Kind() != TFUNC || !t.GdReturnOutBuf() {
+		return -1
+	}
+	results := t.Results()
+	if ri < 0 || ri >= len(results) || results[ri].Type == nil || !results[ri].Type.IsPtr() {
+		return -1
+	}
+	return countPointerResults(results[:ri])
+}
+
 // NumUserParams returns the param count excluding synthesised
 // outBufs, i.e. the count the user source sees.
 func (t *Type) NumUserParams() int {

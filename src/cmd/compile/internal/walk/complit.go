@@ -506,6 +506,9 @@ func anylit(gd *base.Invocation, n ir.Node, var_ ir.Node, init *ir.Nodes) {
 		if n.Prealloc != nil {
 			// n.Prealloc is stack temporary used as backing store.
 			r = initStackTemp(gd, init, n.Prealloc, nil)
+		} else if a := phaseGOutBufAlloc(gd, n, n.X.Type(), init); a != nil {
+			// gd Phase G: made in the caller's buffer.
+			r = a
 		} else {
 			r = ir.NewUnaryExpr(gd, gd.Pos, ir.ONEW, ir.TypeNode(gd, n.X.Type()))
 			r.SetEsc(n.Esc())

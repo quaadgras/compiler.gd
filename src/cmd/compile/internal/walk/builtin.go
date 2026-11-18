@@ -662,6 +662,9 @@ func walkNew(gd *base.Invocation, n *ir.UnaryExpr, init *ir.Nodes) ir.Node {
 		return stackTempAddr(gd, init, t)
 	}
 	types.CalcSize(gd, t)
+	if a := phaseGOutBufAlloc(gd, n, t, init); a != nil {
+		return a
+	}
 	n.MarkNonNil()
 	return n
 }

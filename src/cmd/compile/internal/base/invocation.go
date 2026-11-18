@@ -218,6 +218,7 @@ type Invocation struct {
 	ReflectdataPendingItabMasks  any  // []reflectdata.pendingItabMask
 	ReflectdataItabMasksDone     bool // gd: FinalizeItabMasks has run; later masks are written as they are made
 	ReflectdataForwarderWrappers any  // gd: map[*obj.LSym]*ir.Func, reflectdata.forwarderWrappers
+	PhaseGOutBufAllocs           any  // gd: map[ir.Node]uint8, the new and &T{} escape analysis puts in a caller's buffer (1+outBuf ordinal)
 
 	// reflectdata runtime-type-descriptor work queues. signatmu/gcsymmu
 	// guard concurrent access from the parallel SSA backend; signatset

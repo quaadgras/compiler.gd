@@ -310,9 +310,42 @@ Symmetric to materializeToHeap on the return side. A hand-
 transformed demo (`src/cmd/compile/internal/test/
 escape_bits_outbuf_test.go`) shows −85% time and −100% allocs
 against stock `return new(T)`; the nil-fallback path is within noise
-of stock. Compile-time rewrite to automate the signature extension +
-callee body rewrite + caller-side stack buffer is pending — see
-`memory/project_escape_bits_phase_g_roadmap.md`.
+of stock.
+
+#### Which allocations go in the buffer (escape/phaseg.go)
+
+The caller (walk's `phaseGCallSiteRewrite`) passes a fresh, zeroed
+buffer for result k only when the result doesn't outlive its frame and
+the callee takes no pointers, so the buffer holds nothing live and no
+input points into it. The callee then decides, in escape analysis,
+which of its allocations to make there: one whose address reaches
+result k and nothing else that outlives the call (the heap, a dynamic
+call's candidate location, another result of any function in the
+batch, a local declared outside its loop), of exactly the result's
+element type, and that is the only location whose address reaches
+result k, or every such location is the operand of a return statement
+(`if c { return g() }; return &T{}`: each ends the function as soon as
+it is made). An allocation is `new(T)`, `&T{...}`, a local whose
+address is taken, or a call to a function with an outBuf for its
+result, which is passed the callee's own buffer (chain-fold, walk's
+`forwardParentOutBuf`).
+
+Counting every location whose address reaches result k, of any kind,
+also covers an object stored inside another returned object
+(`return &T{next: mk()}`): the container is a second user, so neither
+goes in the buffer. The walks (`addrReach`) don't skip locations that
+escape, as the solver's do, so they see every root.
+
+Tagged allocations are made by `runtime.maybeInPlace(outBuf_k, T)`:
+locals by ssagen's `newHeapaddr` (`Name.OutBufResultIdx`), new and
+&T{} by walk (`phaseGOutBufAlloc`), calls by passing the buffer.
+
+Until 2026-11-18 the callee side was syntactic, a final `return new(T)`
+or `return &T{...}`, and chain-fold forwarded the buffer to every call
+whose result flowed to result k (`phaseGSingleResultLeak`), so two
+calls whose results were both live (`x, y := mk(1), mk(2); if x.a >
+y.a { return x }; return y`) were built in the same buffer. It also
+recorded a result index where walk read an outBuf ordinal.
 
 #### Builtin/runtime sig parity
 
