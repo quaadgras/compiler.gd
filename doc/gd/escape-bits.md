@@ -350,6 +350,18 @@ Tagged allocations are made by `runtime.maybeInPlace(outBuf_k, T)`:
 locals by ssagen's `newHeapaddr` (`Name.OutBufResultIdx`), new and
 &T{} by walk (`phaseGOutBufAlloc`), calls by passing the buffer.
 
+A function that tags nothing for result k never uses outBuf_k, and
+says so in that param's escape note, which export data carries:
+`esc:` (flows nowhere) when unused, a mutator leak when used, so the
+escape mask is unchanged (`escape.finish`). A static call of such a
+function (a getter, `return nil`, `return p.next`, a forwarder of one,
+an assembly function) gets no buffer (`ir.CalleeOutBufUnused`), and
+its result doesn't count as a user in its caller's own tagging, so
+forwarders of it don't use their buffers either. A function of the
+batch being analysed has no note yet and counts as using its buffer.
+Whether a caller passes a buffer never affects soundness: without
+one, the callee allocates as stock.
+
 Until 2026-11-18 the callee side was syntactic, a final `return new(T)`
 or `return &T{...}`, and chain-fold forwarded the buffer to every call
 whose result flowed to result k (`phaseGSingleResultLeak`), so two

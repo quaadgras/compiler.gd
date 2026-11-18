@@ -123,9 +123,9 @@ func Defer() {
 func spillSlotReuse() {
 	// The return values of getp1 and getp2 need to be
 	// spilled around the calls to nopInt. Make sure that
-	// spill slot gets reused. (The calls' result buffers,
-	// gd Phase G, are autotmps too: the slot's number
-	// depends on how many there are, its offset does not.)
+	// spill slot gets reused. (Calls' result buffers, gd
+	// Phase G, are autotmps too: the slot's number depends
+	// on how many there are, its offset does not.)
 
 	//arm64:`.*autotmp_[0-9]+-8\(SP\)`
 	getp1()[nopInt()] = 0
@@ -169,6 +169,20 @@ func getp1() *[4]int {
 //go:noinline
 func getp2() *[4]int {
 	return nil
+}
+
+var bigG [64]int
+
+//go:noinline
+func getBig() *[64]int {
+	return &bigG
+}
+
+// gd Phase G: getBig never puts its result in the buffer a caller may
+// pass, so its caller makes none.
+// amd64:"TEXT .*, [$][0-9]{1,2}-"
+func useGetBig() int {
+	return getBig()[0]
 }
 
 // Store to an argument without read can be removed.
