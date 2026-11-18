@@ -193,6 +193,7 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).Memmove = typecheck.LookupRuntimeFunc(gd, "memmove")
 	ir.Syms(gd).Memequal = typecheck.LookupRuntimeFunc(gd, "memequal")
 	ir.Syms(gd).Streqfast = typecheck.LookupRuntimeFunc(gd, "streqfast")
+	ir.Syms(gd).Streqmixed = typecheck.LookupRuntimeFunc(gd, "streqmixed")
 	ir.Syms(gd).SliceInlineString = typecheck.LookupRuntimeFunc(gd, "sliceinlinestring")
 	ir.Syms(gd).Msanread = typecheck.LookupRuntimeFunc(gd, "msanread")
 	ir.Syms(gd).Msanwrite = typecheck.LookupRuntimeFunc(gd, "msanwrite")
@@ -1785,6 +1786,15 @@ func (s *state) stringIndex(str, i *ssa.Value) *ssa.Value {
 	return result
 }
 
+// constLenPastInline reports whether hi-lo is a constant longer than
+// an inline string can be (64-bit gd strings).
+func (s *state) constLenPastInline(lo, hi *ssa.Value) bool {
+	if types.StringWasm32() || types.StringInlineCap == 0 || lo.Op != ssa.OpConst64 || hi.Op != ssa.OpConst64 {
+		return false
+	}
+	return hi.AuxInt-lo.AuxInt > int64(types.StringInlineCap)
+}
+
 // stringSlice returns s[lo:hi] as a fresh string value without ever
 // exposing an interior pointer into inline-rep source storage.
 //
@@ -1822,8 +1832,12 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 	mask := s.newValue1(ssa.OpSlicemask, intT, newLen)
 	delta := s.newValue2(ssa.OpAnd64, intT, lo, mask)
 
-	// 32-bit: no inline rep, always heap path (but wasm32's).
-	if s.config.PtrSize < 8 && !types.StringWasm32() {
+	// 32-bit: no inline rep, always heap path (but wasm32's). Nor can
+	// a substring of a constant length past what a header holds come
+	// from an inline string, which is no longer than that (its bounds
+	// were checked against it): it is heap rep too, with a length known
+	// to the compiler.
+	if s.config.PtrSize < 8 && !types.StringWasm32() || s.constLenPastInline(lo, hi) {
 		ptr := s.newValue1(ssa.OpStringPtr, ptrT, v)
 		newPtr := s.newValue2(ssa.OpAddPtr, ptrT, ptr, delta)
 		return s.sMake(strT, newPtr, newLen)
@@ -1934,6 +1948,13 @@ func (s *state) stringEqFast(l, r *ssa.Value) *ssa.Value {
 		// is a heap length <= 15. Anything else is unequal: two
 		// unsigned compares, and the rare rest goes out of line.
 		s.stringEqMaybeMixed(e, lw2, rw2, func() {
+			if Arch.LinkArch.Family == sys.ARM64 {
+				// (A call that writes no memory: see OpStrEqFast.)
+				v := s.curBlock.NewValue0(s.peekPos(), ssa.OpStrEqFast, boolT)
+				v.AddArgs(lw0, lw1, lw2, rw0, rw1, rw2, s.mem())
+				e.result(v)
+				return
+			}
 			e.result(s.rtcall(ir.Syms(s.gd).Streqfast, true, []*types.Type{boolT}, l, r)[0])
 		})
 	} else {
@@ -1980,6 +2001,14 @@ func (s *state) stringEqConst(l, r *ssa.Value, c string) *ssa.Value {
 	e.result(s.constBool(false))
 	s.startBlock(ok)
 	rw0 := s.newValue1(ssa.OpStringPtr, ptrT, r)
+	if Arch.LinkArch.Family == sys.ARM64 {
+		// memequal against a constant is loads and compares in line
+		// here (OpMemEq's rules), cheaper than checking the pointer
+		// and the hashes first, and straight-line, so that the same
+		// comparison twice is done once.
+		e.result(s.memEqual(lw0, rw0, n))
+		return e.finish()
+	}
 	rw1 := s.constInt64(uT, ssa.StringConstHash(c))
 	s.stringEqHeapSameLen(e, lw0, rw0, lw1, rw1, lw2)
 	return e.finish()
@@ -1989,6 +2018,13 @@ func (s *state) stringEqConst(l, r *ssa.Value, c string) *ssa.Value {
 // (their length) is equal: same pointer, sealed hashes that differ, or
 // memequal.
 func (s *state) stringEqHeapSameLen(e *strEq, lw0, rw0, lw1, rw1, n *ssa.Value) {
+	if Arch.LinkArch.Family == sys.ARM64 {
+		// OpMemEq writes no memory, checks the pointers itself (in
+		// memequal), and is in line for a constant length: straight-
+		// line, so that the same comparison twice is done once.
+		e.result(s.memEqual(lw0, rw0, n))
+		return
+	}
 	boolT := types.Types[types.TBOOL]
 	uT := s.f.Config.Types.Uintptr
 	same, other := e.branch(s.newValue2(ssa.OpEqPtr, boolT, lw0, rw0), ssa.BranchUnknown)
@@ -2005,7 +2041,19 @@ func (s *state) stringEqHeapSameLen(e *strEq, lw0, rw0, lw1, rw1, n *ssa.Value) 
 	s.startBlock(no)
 	e.result(s.constBool(false))
 	s.startBlock(mem)
-	e.result(s.rtcall(ir.Syms(s.gd).Memequal, true, []*types.Type{boolT}, lw0, rw0, s.newValue1(ssa.OpCopy, uT, n))[0])
+	e.result(s.memEqual(lw0, rw0, n))
+}
+
+// memEqual is memequal(p, q, n). Where the target lowers OpMemEq
+// (arm64) it is that op, which writes no memory, so loads around it are
+// not done again, and the generic rules compare a constant length in
+// line; elsewhere, a call of runtime.memequal.
+func (s *state) memEqual(p, q, n *ssa.Value) *ssa.Value {
+	boolT := types.Types[types.TBOOL]
+	if Arch.LinkArch.Family == sys.ARM64 {
+		return s.newValue4(ssa.OpMemEq, boolT, p, q, n, s.mem())
+	}
+	return s.rtcall(ir.Syms(s.gd).Memequal, true, []*types.Type{boolT}, p, q, s.newValue1(ssa.OpCopy, s.f.Config.Types.Uintptr, n))[0]
 }
 
 // stringEqMaybeMixed ends the current block, whose operands have

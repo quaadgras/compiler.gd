@@ -1427,3 +1427,72 @@ TEXT runtime·panicBounds<ABIInternal>(SB),NOSPLIT,$144-0
 TEXT ·getfp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	MOVD R29, R0
 	RET
+
+// func streqmixed(s, t string) bool
+//
+// gd: s in R0..R2, t in R3..R5 (each {ptr, hash, word 2}); the result
+// in R0. A leaf with no frame, so that the compiler can call it as an
+// op (OpStrEqFast). An inline string's length is its tag (word 2's top
+// nibble) and its bytes are word 1 then word 2's low 7 bytes; a heap
+// string's length is word 2 and its bytes are at its pointer. The bytes
+// are compared one at a time: the compiler calls this only when one
+// string is inline, so there are at most 15.
+TEXT runtime·streqmixed<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-49
+	LSR	$60, R2, R6		// s's tag
+	LSR	$60, R5, R7		// t's tag
+	AND	$0x0fffffffffffffff, R2, R8
+	CMP	$0, R6
+	CSEL	NE, R6, R8, R8		// R8 = len(s)
+	AND	$0x0fffffffffffffff, R5, R9
+	CMP	$0, R7
+	CSEL	NE, R7, R9, R9		// R9 = len(t)
+	CMP	R8, R9
+	BNE	streqmixed_ne
+	MOVD	ZR, R10			// i
+	CBZ	R8, streqmixed_eq
+streqmixed_loop:
+	// R11 = s[i]
+	CBNZ	R6, streqmixed_sinl
+	MOVBU	(R0)(R10), R11
+	B	streqmixed_t
+streqmixed_sinl:
+	CMP	$8, R10
+	BHS	streqmixed_shi
+	LSL	$3, R10, R12
+	LSR	R12, R1, R11
+	B	streqmixed_smask
+streqmixed_shi:
+	SUB	$8, R10, R12
+	LSL	$3, R12, R12
+	LSR	R12, R2, R11
+streqmixed_smask:
+	AND	$0xff, R11, R11
+streqmixed_t:
+	// R13 = t[i]
+	CBNZ	R7, streqmixed_tinl
+	MOVBU	(R3)(R10), R13
+	B	streqmixed_cmp
+streqmixed_tinl:
+	CMP	$8, R10
+	BHS	streqmixed_thi
+	LSL	$3, R10, R12
+	LSR	R12, R4, R13
+	B	streqmixed_tmask
+streqmixed_thi:
+	SUB	$8, R10, R12
+	LSL	$3, R12, R12
+	LSR	R12, R5, R13
+streqmixed_tmask:
+	AND	$0xff, R13, R13
+streqmixed_cmp:
+	CMP	R11, R13
+	BNE	streqmixed_ne
+	ADD	$1, R10, R10
+	CMP	R8, R10
+	BLO	streqmixed_loop
+streqmixed_eq:
+	MOVD	$1, R0
+	RET
+streqmixed_ne:
+	MOVD	ZR, R0
+	RET

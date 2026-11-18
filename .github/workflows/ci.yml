@@ -1,4 +1,5 @@
-# Build the toolchain, test it on amd64, arm64 and js/wasm, build the
+# Build the toolchain, test it on linux/amd64, linux/arm64, darwin/arm64,
+# windows/amd64 and js/wasm, build the
 # go command for js/wasm and the site (doc/gd/site), and the go command
 # for each platform; when release passes, upload the go commands and
 # the playground's files to the R2 bucket compiler-gd (download.compiler.gd,
@@ -59,6 +60,49 @@ jobs:
           export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
           go test -short std cmd/internal/testdir
 
+  darwin:
+    name: test (darwin/arm64)
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: std and the language tests
+        run: |
+          export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
+          go test -short std cmd/internal/testdir
+
+  # Not yet one the deploy waits for: the port to Windows is new.
+  windows:
+    name: test (windows/amd64)
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bat
+        shell: pwsh
+        run: |
+          $env:GOROOT_BOOTSTRAP = (go env GOROOT)
+          cd src
+          .\make.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: std and the language tests
+        shell: pwsh
+        run: |
+          $env:GOROOT = $env:GITHUB_WORKSPACE
+          $env:PATH = "$env:GITHUB_WORKSPACE\bin;$env:PATH"
+          go test -short std cmd/internal/testdir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   wasm:
     name: test (js/wasm, against the recorded status)
     runs-on: ubuntu-latest
@@ -78,7 +122,7 @@ jobs:
         run: |
           export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$GITHUB_WORKSPACE/lib/wasm:$PATH
           export GOOS=js GOARCH=wasm GOWASM=gc,split
-          python3 doc/gd/bench/wasmgc/std/survey.py -j 4 -t 600
+          python3 doc/gd/bench/wasmgc/std/survey.py -j 4 -t 900 -gotimeout 600s
       - name: same as status-js-split.txt
         run: |
           if ! git diff --exit-code -- doc/gd/bench/wasmgc/std/status-js-split.txt; then
@@ -115,7 +159,7 @@ jobs:
 
   deploy:
     name: deploy compiler.gd
-    needs: [amd64, arm64, wasm, site]
+    needs: [amd64, arm64, darwin, wasm, site]
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     runs-on: ubuntu-latest
     timeout-minutes: 15
