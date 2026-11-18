@@ -1207,11 +1207,17 @@ func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
 }
 
 // UncheckedPkg reports whether the package with the given path is
-// compiled without -d=checkptr: the runtime's packages, and the runtime of
-// C (internal/c23), which keeps pointers that the checks would not allow
-// (one past the end of an object, tagged) and has checks of its own.
+// compiled without -d=checkptr: the runtime's packages; the runtime of C
+// (internal/c23), which keeps pointers that the checks would not allow
+// (one past the end of an object, tagged) and has checks of its own; and
+// reflect, whose pointers are to values of the types it says they are,
+// by construction but for NewAt, which checks.
 func UncheckedPkg(path string) bool {
-	return objabi.LookupPkgSpecial(path).Runtime || path == "internal/c23"
+	switch path {
+	case "internal/c23", "reflect", "internal/reflectlite":
+		return true
+	}
+	return objabi.LookupPkgSpecial(path).Runtime
 }
 
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for

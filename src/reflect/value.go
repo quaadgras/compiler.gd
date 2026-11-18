@@ -2958,7 +2958,7 @@ func (v Value) Slice(i, j int) Value {
 				panic("reflect.Value.Slice: string slice index out of bounds")
 			}
 			t := src[i:j]
-			fl := v.flag &^ (flagSpread | flagInline) | flagIndir
+			fl := v.flag&^(flagSpread|flagInline) | flagIndir
 			return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: fl}
 		}
 		s := (*unsafeheader.String)(v.dataPtr())
@@ -3881,8 +3881,18 @@ func New(typ Type) Value {
 func NewAt(typ Type, p unsafe.Pointer) Value {
 	fl := flag(Pointer)
 	t := typ.(*rtype)
+	// gd: this is (*typ)(p), and is checked as that conversion is. The
+	// rest of the package, whose pointers are to values of the types it
+	// says, is compiled without the checks.
+	checkptr(p, &t.t)
 	return Value{typ_: t.ptrTo(), ptr: p, flag: fl}
 }
+
+// checkptr checks that a value of type t may be at p, as the compiler has
+// the runtime check a conversion of p to *t.
+//
+//go:linkname checkptr
+func checkptr(p unsafe.Pointer, t *abi.Type)
 
 // assignTo returns a value v that can be assigned directly to dst.
 // It panics if v is not assignable to dst.

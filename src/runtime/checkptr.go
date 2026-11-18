@@ -43,6 +43,12 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 		return
 	}
 
+	// Not in the heap, and neither is its end: a global, or memory that
+	// is not Go's, which have no bounds here.
+	if size > 0 && uintptr(p)+size-1 >= uintptr(p) && spanOfHeap(uintptr(p)+size-1) == nil {
+		return
+	}
+
 	// Check that (*[n]elem)(p) doesn't straddle multiple heap objects.
 	// TODO(mdempsky): Fix #46938 so we don't need to worry about overflow here.
 	if checkptrStraddles(p, size) {
@@ -206,4 +212,14 @@ func checkptrBase(p unsafe.Pointer) uintptr {
 	}
 
 	return 0
+}
+
+// reflect_checkptr is the check of the conversion (*t)(p) for
+// reflect.NewAt.
+//
+//go:linkname reflect_checkptr reflect.checkptr
+func reflect_checkptr(p unsafe.Pointer, t *_type) {
+	if sharingEnabled { // not wasm: see cmd/compile/internal/base/flag.go
+		checkptrAlignment(p, t, 1)
+	}
 }

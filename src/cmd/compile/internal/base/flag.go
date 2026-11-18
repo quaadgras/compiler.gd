@@ -380,7 +380,12 @@ func (gd *Invocation) ParseFlags(args []string) {
 		// doc/gd/unsafe.md. (Not yet with GOARCH=wasm, whose runtimes
 		// do not all have the checks.)
 		gd.Debug.Checkptr = 0
-		if gd.Ctxt.Arch.Family != sys.Wasm && gd.Ctxt.Pkgpath != "internal/c23" {
+		unchecked := false
+		switch gd.Ctxt.Pkgpath {
+		case "internal/c23", "reflect", "internal/reflectlite":
+			unchecked = true // see ir.UncheckedPkg
+		}
+		if gd.Ctxt.Arch.Family != sys.Wasm && !unchecked {
 			gd.Debug.Checkptr = 1
 		}
 	}

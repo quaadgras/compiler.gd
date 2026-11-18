@@ -43,8 +43,16 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   than not being inlined, as it was with `-d=checkptr`: `abi.TypeOf` and
   `stringslite.HasSuffix` inline as before. The same for a function
   marked `//go:nocheckptr`.
-- The compiler's own conversions (a result built in the caller's buffer,
-  the equality and hash functions it writes).
+- Package reflect is compiled without the checks too: its pointers are
+  to values of the types it says they are, by construction, but for
+  `reflect.NewAt`, which is `(*T)(p)` and is checked as that
+  (`reflect.checkptr`). Its functions inline in checked code as the
+  runtime's do.
+- The compiler's own conversions: a result built in the caller's buffer,
+  the element pointer of a range loop, the key and element of a map's
+  iterator (anything made with `typecheck.ConvNop`), the equality and
+  hash functions it writes. These were checked on every iteration with
+  `-d=checkptr`, which nobody ran in production.
 - A function marked `//go:uintptrescapes` or `//go:uintptrkeepalive` is
   given pointers as integers, which its callers keep alive for it: the
   pointers it makes of integers are not checked.
@@ -68,10 +76,13 @@ cannot give it back (an integer, a pointer out of bounds).
 
 ## What it costs
 
-The checks are calls, and reflection converts often: `encoding/json`'s
-decoder benchmark is about a quarter slower, with the conversions of the
-stack and of one heap object found without looking for the allocation of
-each end.
+The checks are calls. With reflect and the compiler's own conversions
+out of them, `encoding/json`'s encoder and decoder and `fmt` cost what
+they do without the checks; `net/http`'s header writer, which makes
+strings of bytes with `unsafe.String`, is a fifth slower. The usual
+cases are found without looking for the allocation of each end: the
+goroutine's stack, one object of the heap, a pointer converted back to
+the type its object was allocated with, and memory outside the heap.
 
 ## Tests
 

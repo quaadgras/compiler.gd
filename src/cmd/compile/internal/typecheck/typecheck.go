@@ -1274,5 +1274,11 @@ func ConvNop(gd *base.Invocation, n ir.Node, t *types.Type) ir.Node {
 	n = ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, nil, n)
 	n.SetType(t)
 	n = Expr(gd, n)
+	if conv, ok := n.(*ir.ConvExpr); ok && t.IsPtr() && conv.X.Type() != nil && conv.X.Type().IsUnsafePtr() {
+		// gd: the compiler's own conversion of an unsafe.Pointer it
+		// made (the key and the element of a map's iterator, say):
+		// not one that -d=checkptr, which is in every build, checks.
+		conv.SetCheckPtr(true)
+	}
 	return n
 }

@@ -225,6 +225,7 @@ func walkRange(gd *base.Invocation, nrange *ir.RangeStmt) ir.Node {
 		hpVal := ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], hu)
 		hpVal.SetCheckPtr(true) // disable checkptr on this conversion
 		hpVal = ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, elem.PtrTo(), hpVal)
+		hpVal.SetCheckPtr(true) // gd: nor on this one, the compiler's own, with the checks in every build
 		hp := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), elem.PtrTo())
 		body = append(body, ir.NewAssignStmt(gd, gd.Pos, hp, hpVal))
 
