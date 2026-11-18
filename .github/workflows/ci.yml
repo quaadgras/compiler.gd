@@ -1,0 +1,131 @@
+# Build the toolchain, test it on amd64, arm64 and js/wasm, build the
+# go command for js/wasm and the site (doc/gd/site), and deploy the site
+# to Cloudflare Pages (compiler.gd) when release passes.
+#
+# Deploying needs two repository secrets: CLOUDFLARE_API_TOKEN (a token
+# with the "Cloudflare Pages: Edit" permission) and CLOUDFLARE_ACCOUNT_ID.
+# Without them the deploy job says so and does nothing.
+name: ci
+
+on:
+  push:
+    branches: [release]
+  pull_request:
+    branches: [release]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  GOTELEMETRY: "off"
+
+jobs:
+  amd64:
+    name: test (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: run.bash (what all.bash tests)
+        run: cd src && PATH=$GITHUB_WORKSPACE/bin:$PATH ./run.bash --no-rebuild
+
+  arm64:
+    name: test (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: std and the language tests
+        run: |
+          export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
+          go test -short std cmd/internal/testdir
+
+  wasm:
+    name: test (js/wasm, against the recorded status)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: std under node (doc/gd/bench/wasmgc/std/survey.py)
+        run: |
+          export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$GITHUB_WORKSPACE/lib/wasm:$PATH
+          export GOOS=js GOARCH=wasm GOWASM=gc,split
+          python3 doc/gd/bench/wasmgc/std/survey.py -j 4
+      - name: same as status-js-split.txt
+        run: |
+          if ! git diff --exit-code -- doc/gd/bench/wasmgc/std/status-js-split.txt; then
+            echo "::error::js/wasm results differ from doc/gd/bench/wasmgc/std/status-js-split.txt (a regression, or a fix to record there)"
+            exit 1
+          fi
+
+  site:
+    name: build go.wasm and the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: make.bash
+        run: cd src && GOROOT_BOOTSTRAP=$(go env GOROOT) ./make.bash
+      - name: doc/gd/site/build.sh
+        run: GOROOT=$GITHUB_WORKSPACE doc/gd/site/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: doc/gd/site/dist
+          retention-days: 14
+
+  deploy:
+    name: deploy compiler.gd
+    needs: [amd64, arm64, wasm, site]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: wrangler pages deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID is not set: not deploying"
+            exit 0
+          fi
+          cd dist && npx --yes wrangler@4 pages deploy . --project-name compiler-gd --branch main --commit-hash "$GITHUB_SHA"
