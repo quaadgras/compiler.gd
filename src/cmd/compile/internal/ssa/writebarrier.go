@@ -613,12 +613,13 @@ func (f *Func) computeZeroMap(select1 []*Value) map[ID]ZeroRegion {
 				// While compiling package runtime itself, we might see user
 				// calls to newobject, which will have result type
 				// unsafe.Pointer instead. We can't easily infer how large the
-				// allocated memory is, so just skip it.
-				if types.LocalPkg(f.Config.gd).Path == "runtime" && v.Type.IsUnsafePtr() {
+				// allocated memory is, so just skip it (newObjectSize).
+				size, ok := newObjectSize(v, mem.Args[0])
+				if !ok {
 					continue
 				}
 
-				nptr := min(64, v.Type.Elem().Size()/ptrSize)
+				nptr := min(64, size/ptrSize)
 				zeroes[mem.ID] = ZeroRegion{base: v, mask: 1<<uint(nptr) - 1}
 			}
 		}
@@ -804,6 +805,38 @@ func IsReadOnlyGlobalAddr(v *Value) bool {
 	return false
 }
 
+// newObjectSize returns the size of the object v points to, which
+// IsNewObject found call made: that of v's element type, or for
+// runtime.maybeInPlace's unsafe.Pointer (walk converts it to *T only
+// after the call, see walk's phaseGOutBufAlloc), that of the type whose
+// descriptor's address the call takes, when its arguments are in
+// registers. ok is false for an unsafe.Pointer whose size is unknown.
+func newObjectSize(v, call *Value) (size int64, ok bool) {
+	if !v.Type.IsUnsafePtr() {
+		return v.Type.Elem().Size(), true
+	}
+	if !isMaybeInPlace(call.Aux) || len(call.Args) != 3 {
+		return 0, false
+	}
+	typ := call.Args[1] // maybeInPlace(outBuf, typ), then the memory
+	if typ.Op != OpAddr {
+		return 0, false
+	}
+	lsym, ok := typ.Aux.(*obj.LSym)
+	if !ok || lsym.Extra == nil {
+		return 0, false
+	}
+	ti, ok := (*lsym.Extra).(*obj.TypeInfo)
+	if !ok {
+		return 0, false
+	}
+	t, ok := ti.Type.(*types.Type)
+	if !ok {
+		return 0, false
+	}
+	return t.Size(), true
+}
+
 // IsNewObject reports whether v is a pointer to a freshly allocated & zeroed object,
 // if so, also returns the memory state mem at which v is zero.
 func IsNewObject(v *Value, select1 []*Value) (mem *Value, ok bool) {
@@ -842,6 +875,12 @@ func IsNewObject(v *Value, select1 []*Value) (mem *Value, ok bool) {
 		numParameters = 1
 	case isSpecializedMalloc(call.Aux) && !v.Type.IsUnsafePtr():
 		numParameters = 3
+	case isMaybeInPlace(call.Aux):
+		// gd Phase G: runtime.maybeInPlace(outBuf, typ) returns the
+		// caller's buffer zeroed, or a new object: zeroed memory
+		// either way, which a store that needs no write barrier for
+		// a new object's needs none for (the buffer is on a stack).
+		numParameters = 2
 	default:
 		return nil, false
 	}
