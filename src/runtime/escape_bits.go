@@ -255,8 +255,8 @@ func isOnHeap(p unsafe.Pointer) bool {
 //  2. Loads the iface header at carrier+fieldOffset (a 2-word
 //     {itab, data} pair).
 //  3. Reads the inner itab's per-method mask slot for methodIdx.
-//  4. Forwards to resolveMask with the inner itab as the new
-//     carrier and the same heapMask.
+//  4. Forwards to resolveMask with the inner receiver (the iface's
+//     data word) as the new carrier and the same heapMask.
 //
 // On any nil itab we return conservativeAllEscapeMask — the
 // forwarder will materialize all candidate args, matching what a
@@ -273,7 +273,10 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 	}
 	// iface header: matches abi.EmptyInterface / iface in
 	// internal/abi/iface.go: itab pointer first, then data
-	// pointer. We only need the itab.
+	// pointer. The itab holds the inner method's mask; the data
+	// pointer is the inner receiver, which is the carrier an inner
+	// compute fn (another forwarder) reads its own field through,
+	// just as at an interface call site.
 	type ifaceHdr struct {
 		itab *itab
 		data unsafe.Pointer
@@ -289,6 +292,6 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 	// Pass depth (not depth-1): resolveMask/Slow decrement
 	// internally before calling the inner compute fn (if any).
 	// Subtracting here would double-count.
-	return resolveMask(raw, unsafe.Pointer(tab), heapMask, depth)
+	return resolveMask(raw, inner.data, heapMask, depth)
 }
 

@@ -65,6 +65,7 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 	impl := &makeFuncImpl{
 		makeFuncCtxt: makeFuncCtxt{
 			fn:      code,
+			escMask: allEscapeMask,
 			stack:   abid.stackPtrs,
 			argLen:  abid.stackCallArgsSize,
 			regPtrs: abid.inRegPtrs,
@@ -124,6 +125,7 @@ func makeMethodValue(op string, v Value) Value {
 	fv := &methodValue{
 		makeFuncCtxt: makeFuncCtxt{
 			fn:      code,
+			escMask: allEscapeMask,
 			stack:   abid.stackPtrs,
 			argLen:  abid.stackCallArgsSize,
 			regPtrs: abid.inRegPtrs,
@@ -151,10 +153,19 @@ func methodValueCallCodePtr() uintptr {
 // word in the passed-in argument frame.
 func methodValueCall()
 
+// allEscapeMask is the escape-bits mask in which every argument
+// escapes; bit 0 is clear since it marks a mask compute fn.
+const allEscapeMask = ^uint64(1)
+
 // This structure must be kept in sync with runtime.reflectMethodValue.
 // Any changes should be reflected in all both.
 type makeFuncCtxt struct {
-	fn      uintptr
+	fn uintptr
+	// escMask is the gd escape-bits mask (doc/gd/escape-bits.md),
+	// which indirect calls read from the word after the code
+	// pointer of every func value. fn's args reach a []Value the
+	// user function may keep, so every argument escapes.
+	escMask uint64
 	stack   *bitVector // ptrmap for both stack args and results
 	argLen  uintptr    // just args
 	regPtrs abi.IntArgRegBitmap

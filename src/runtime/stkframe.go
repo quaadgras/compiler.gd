@@ -63,9 +63,10 @@ type stkframe struct {
 // reflectMethodValue is a partial duplicate of reflect.makeFuncImpl
 // and reflect.methodValue.
 type reflectMethodValue struct {
-	fn     uintptr
-	stack  *bitvector // ptrmap for both args and results
-	argLen uintptr    // just args
+	fn      uintptr
+	escMask uint64     // gd escape-bits mask
+	stack   *bitvector // ptrmap for both args and results
+	argLen  uintptr    // just args
 }
 
 // argBytes returns the argument frame size for a call to frame.fn.

@@ -238,8 +238,11 @@ The runtime helper:
 - Reinterprets `carrier` as `*WrapperType` and loads the iface
   header at `carrier + FieldOffset`.
 - Reads the inner itab's per-method mask slot for `MethodIdx`.
-- Tail-calls `resolveMask` with the inner itab as the new
-  carrier and the same heapMask.
+- Tail-calls `resolveMask` with the inner receiver (the iface's
+  data word) as the new carrier and the same heapMask, as at an
+  interface call site. (Until 2026-11-18 it passed the inner itab,
+  so a forwarder wrapping another forwarder read its field through
+  the itab and crashed or read a garbage mask.)
 
 Synthesis adds the cfn to `typecheck.Target.Funcs` (via
 `typecheck.DeclFunc`'s implicit append) so walk compiles it

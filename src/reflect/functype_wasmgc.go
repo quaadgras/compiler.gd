@@ -151,7 +151,7 @@ func makeFuncWasmGC(t *abi.Type, ftyp *funcType, fn func([]Value) []Value) Value
 			code = gcmakefunc(rep)
 		}
 	}
-	impl := &makeFuncImpl{makeFuncCtxt: makeFuncCtxt{fn: code}, ftyp: ftyp, fn: fn}
+	impl := &makeFuncImpl{makeFuncCtxt: makeFuncCtxt{fn: code, escMask: allEscapeMask}, ftyp: ftyp, fn: fn}
 	if code == 0 {
 		// No stub has the registers of the type, which the program
 		// does not have: only reflect can call such a function (Go
