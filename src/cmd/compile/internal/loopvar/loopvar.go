@@ -31,14 +31,14 @@ type VarAndLoop struct {
 // variables, in case it causes allocation/performance problems).
 //
 // The decision to transform loops is normally encoded in the For/Range loop node
-// field DistinctVars but is also dependent on base.LoopVarHash, and some values
+// field DistinctVars but is also dependent on gd.LoopVarHash, and some values
 // of base.Debug.LoopVar (which is set per-package).  Decisions encoded in DistinctVars
 // are preserved across inlining, so if package a calls b.F and loops in b.F are
 // transformed, then they are always transformed, whether b.F is inlined or not.
 //
 // Per-package, the debug flag settings that affect this transformer:
 //
-// base.LoopVarHash != nil => use hash setting to govern transformation.
+// gd.LoopVarHash != nil => use hash setting to govern transformation.
 // note that LoopVarHash != nil sets base.Debug.LoopVar to 1 (unless it is >= 11, for testing/debugging).
 //
 // base.Debug.LoopVar == 11 => transform ALL loops ignoring syntactic/potential escape. Do not log, can be in addition to GOEXPERIMENT.
@@ -104,7 +104,7 @@ func ForCapture(gd *base.Invocation, fn *ir.Func) []VarAndLoop {
 				desc := func() string {
 					return describe(n)
 				}
-				if base.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
+				if gd.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
 					// Rename the loop key, prefix body with assignment from loop key
 					transformed = append(transformed, VarAndLoop{n, x, lastPos})
 					tk := typecheck.TempAt(gd, gd.Pos, fn, n.Type())
@@ -215,7 +215,7 @@ func ForCapture(gd *base.Invocation, fn *ir.Func) []VarAndLoop {
 							return describe(n)
 						}
 						// Hash on n.Pos() for most precise failure location.
-						if base.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
+						if gd.LoopVarHash.MatchPosCtxt(gd.Ctxt, n.Pos(), desc) {
 							leaked = append(leaked, n)
 						}
 					}

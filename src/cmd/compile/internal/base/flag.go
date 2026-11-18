@@ -264,39 +264,28 @@ func (gd *Invocation) ParseFlags(args []string) {
 			mostInlineOnly = false
 		}
 		// end of testing trickiness
-		LoopVarHash = gd.NewHashDebug("loopvarhash", gd.Debug.LoopVarHash, nil)
+		gd.LoopVarHash = gd.NewHashDebug("loopvarhash", gd.Debug.LoopVarHash, nil)
 		if gd.Debug.LoopVar < 11 { // >= 11 means all loops are rewrite-eligible
 			gd.Debug.LoopVar = 1 // 1 means those loops that syntactically escape their dcl vars are eligible.
 		}
-		LoopVarHash.SetInlineSuffixOnly(mostInlineOnly)
+		gd.LoopVarHash.SetInlineSuffixOnly(mostInlineOnly)
 	} else if buildcfg.Experiment.LoopVar && gd.Debug.LoopVar == 0 {
 		gd.Debug.LoopVar = 1
 	}
 
-	hashGlobalsOnce.Do(func() {
-		if gd.Debug.Converthash != "" {
-			ConvertHash = gd.NewHashDebug("converthash", gd.Debug.Converthash, nil)
-		} else {
-			// quietly disable the convert hash changes
-			ConvertHash = gd.NewHashDebug("converthash", "qn", nil)
-		}
-		if gd.Debug.Fmahash != "" {
-			FmaHash = gd.NewHashDebug("fmahash", gd.Debug.Fmahash, nil)
-		}
-		if gd.Debug.PGOHash != "" {
-			PGOHash = gd.NewHashDebug("pgohash", gd.Debug.PGOHash, nil)
-		}
-		if gd.Debug.LiteralAllocHash != "" {
-			LiteralAllocHash = gd.NewHashDebug("literalalloc", gd.Debug.LiteralAllocHash, nil)
-		}
-
-		if gd.Debug.MergeLocalsHash != "" {
-			MergeLocalsHash = gd.NewHashDebug("mergelocals", gd.Debug.MergeLocalsHash, nil)
-		}
-		if gd.Debug.VariableMakeHash != "" {
-			VariableMakeHash = gd.NewHashDebug("variablemake", gd.Debug.VariableMakeHash, nil)
-		}
-	})
+	// Per-invocation, not once per process: the in-process compiler
+	// runs many compiles (concurrently) in one process, each with its
+	// own -d flags, and a HashDebug logs through the gd that made it.
+	convert := gd.Debug.Converthash
+	if convert == "" {
+		convert = "qn" // quietly disable the convert hash changes
+	}
+	gd.ConvertHash = gd.NewHashDebug("converthash", convert, nil)
+	gd.FmaHash = gd.NewHashDebug("fmahash", gd.Debug.Fmahash, nil)
+	gd.PGOHash = gd.NewHashDebug("pgohash", gd.Debug.PGOHash, nil)
+	gd.LiteralAllocHash = gd.NewHashDebug("literalalloc", gd.Debug.LiteralAllocHash, nil)
+	gd.MergeLocalsHash = gd.NewHashDebug("mergelocals", gd.Debug.MergeLocalsHash, nil)
+	gd.VariableMakeHash = gd.NewHashDebug("variablemake", gd.Debug.VariableMakeHash, nil)
 
 	if gd.Flag.MSan && !platform.MSanSupported(buildcfg.GOOS, buildcfg.GOARCH) {
 		log.Fatalf("%s/%s does not support -msan", buildcfg.GOOS, buildcfg.GOARCH)

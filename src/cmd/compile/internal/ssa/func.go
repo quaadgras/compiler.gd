@@ -859,10 +859,11 @@ func (f *Func) spSb() (sp, sb *Value) {
 // useFMA allows targeted debugging w/ GOFMAHASH
 // If you have an architecture-dependent FP glitch, this will help you find it.
 func (f *Func) useFMA(v *Value) bool {
-	if base.FmaHash == nil {
+	gd := v.Block.Func.Config.GD()
+	if gd.FmaHash == nil {
 		return true
 	}
-	return base.FmaHash.MatchPosCtxt(v.Block.Func.Config.GD().Ctxt, v.Pos, nil)
+	return gd.FmaHash.MatchPosCtxt(gd.Ctxt, v.Pos, nil)
 }
 
 // NewLocal returns a new anonymous local variable of the given type.
