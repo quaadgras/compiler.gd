@@ -374,7 +374,7 @@ var genericOps = []opData{
 	// Memory operations
 	{name: "Load", argLength: 2},                          // Load from arg0.  arg1=memory
 	{name: "Dereference", argLength: 2},                   // Load from arg0.  arg1=memory.  Helper op for arg/result passing, result is an otherwise not-SSA-able "value".
-	{name: "Store", argLength: 3, typ: "Mem", aux: "Typ"}, // Store arg1 to arg0.  arg2=memory, aux=type.  Returns memory.
+	{name: "Store", argLength: 3, typ: "Mem", aux: "TypSize"}, // Store arg1 to arg0.  arg2=memory, aux=type.  Returns memory. auxint=1 if what is stored needs no publishing (runtime/shared.go).
 
 	// masked memory operations.
 	// TODO add 16 and 8
@@ -404,7 +404,7 @@ var genericOps = []opData{
 
 	// Memory operations with write barriers.
 	// Expand to runtime calls. Write barrier will be removed if write on stack.
-	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "Typ"},    // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
+	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "TypSize"},    // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
 	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
 	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
 	{name: "WBend", argLength: 1, typ: "Mem"},                  // Write barrier code is done, interrupting is now allowed.

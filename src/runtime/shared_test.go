@@ -402,15 +402,17 @@ func (x *tearB) sum() int { return x.a + x.b + x.c + x.d + x.e + x.f }
 
 var tearGlobal tearT
 
+var (
+	tearKeys = map[[3]string]int{{"k"}: 0}
+	tearChan = make(chan string, 64)
+)
+
 // TestSharedTear races goroutines on slices, strings and interfaces of
 // different sizes, with no lock of their own. A reader that got the words
 // of two values would index past an array, or call one type's method on
 // another's value.
 func TestSharedTear(t *testing.T) {
 	skipIfNotSharing(t)
-	if runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
-		t.Skip("values of more than one word are not guarded on " + runtime.GOARCH)
-	}
 	const G = 8
 	N := 200000
 	if testing.Short() {
@@ -458,6 +460,9 @@ func TestSharedTear(t *testing.T) {
 								b string
 							}{make([]byte, 100), 1, shortStr}
 							x.arr = [3]string{longStr, shortStr, longStr}
+							if i%64 == 2 {
+								clear(x.arr[:])
+							}
 							s := x.s
 							x.s = s[:len(s)/2+1]
 						}
@@ -485,6 +490,24 @@ func TestSharedTear(t *testing.T) {
 					if len(st.b) > 0 && st.b[len(st.b)-1] != 0 && st.b[len(st.b)-1] != 'b' {
 						panic(errorString("struct string"))
 					}
+					// The runtime reads these through an address.
+					if a, ok := any(x.arr).([3]string); ok {
+						for _, s := range a {
+							if len(s) > 0 && s[len(s)-1] != 0 && s[len(s)-1] != 'b' {
+								panic(errorString("boxed array string"))
+							}
+						}
+					}
+					if x.arr == [3]string{"x", "y", "z"} {
+						panic(errorString("array equality"))
+					}
+					if tearKeys[x.arr] != 0 || tearKeys[[3]string{x.str}] != 0 {
+						panic(errorString("map key"))
+					}
+					tearChan <- x.str
+					if s := <-tearChan; len(s) > 0 && s[len(s)-1] != 0 && s[len(s)-1] != 'b' {
+						panic(errorString("string sent on a channel"))
+					}
 					arr := x.arr
 					for _, s := range arr {
 						if len(s) > 0 && s[len(s)-1] != 0 && s[len(s)-1] != 'b' {
@@ -508,3 +531,150 @@ func TestSharedTear(t *testing.T) {
 type errorString string
 
 func (e errorString) Error() string { return string(e) }
+
+//go:noinline
+func sharedPublishNext(x *sharedNode) { sharedGlobalPtr = x.next }
+
+// TestSharedStatic checks that what the compiler finds unshared is: a
+// store it makes without publishing, in memory another goroutine can
+// reach, leaves what it stores unshared.
+func TestSharedStatic(t *testing.T) {
+	skipIfNotSharing(t)
+	check := func(what string, x *sharedNode) {
+		t.Helper()
+		wantShared(t, what, x, true)
+	}
+
+	// Two variables with one pointer: a store through one, a load
+	// through the other.
+	{
+		x := &sharedNode{}
+		head := x
+		y := &sharedNode{}
+		head.next = y
+		z := x.next
+		sharedGlobalPtr = z
+		w := &sharedNode{}
+		y.next = w
+		check("stored in a node published by way of an alias", w)
+	}
+	// The address of an element.
+	{
+		cells := make([]sharedNode, 4)
+		c := &cells[1]
+		a := &sharedNode{}
+		c.next = a
+		g := cells[1].next
+		sharedGlobalPtr = g
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node published by way of its slice", b)
+	}
+	// A slice and a slice of it.
+	{
+		s := make([]*sharedNode, 4)
+		u := s[1:3]
+		a := &sharedNode{}
+		u[0] = a
+		sharedGlobalPtr = s[1]
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node published by way of a slice of its slice", b)
+	}
+	// An append, which may or may not move the array.
+	{
+		var s []*sharedNode
+		a := &sharedNode{}
+		for i := 0; i < 5; i++ {
+			s = append(s, a)
+		}
+		u := s
+		sharedGlobalSlice = u
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node of a published appended slice", b)
+		c := &sharedNode{}
+		s[0] = c
+		check("stored in a published appended slice", c)
+	}
+	// A callee that publishes what its argument points to.
+	{
+		x := &sharedNode{}
+		a := &sharedNode{}
+		x.next = a
+		sharedPublishNext(x)
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node a callee published", b)
+	}
+	// A loop: the node published was linked two iterations before.
+	{
+		var head *sharedNode
+		var nodes [8]*sharedNode
+		for i := range nodes {
+			x := &sharedNode{v: i}
+			x.next = head
+			head = x
+			nodes[i] = x
+			if i == 5 {
+				sharedGlobalPtr = head.next.next
+			}
+		}
+		b := &sharedNode{}
+		nodes[1].next = b
+		check("stored in a node published from inside a list", b)
+	}
+	// A goroutine, by way of a closure.
+	{
+		x := &sharedNode{}
+		a := &sharedNode{}
+		x.next = a
+		done := make(chan bool)
+		go func() {
+			_ = x.v
+			done <- true
+		}()
+		<-done
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node a goroutine was given", b)
+	}
+	// An interface and a struct value on the way.
+	{
+		x := &sharedNode{}
+		a := &sharedNode{}
+		x.i = a
+		pair := sharedPair{a: x}
+		sharedGlobalPair = pair
+		b := &sharedNode{}
+		a.next = b
+		check("stored in a node published inside a struct and an interface", b)
+	}
+}
+
+// TestSharedBitsFreed checks that memory that held a shared object is
+// not shared when it is allocated again.
+func TestSharedBitsFreed(t *testing.T) {
+	skipIfNotSharing(t)
+	for round := 0; round < 6; round++ {
+		for i := 0; i < 20000; i++ {
+			runtime.Publish(unsafe.Pointer(runtime.HeapNew[sharedNode]()))
+			runtime.Publish(unsafe.Pointer(runtime.HeapNew[[3]*int]()))
+		}
+		if round%2 == 0 {
+			runtime.GC()
+		}
+		stale := 0
+		for i := 0; i < 40000; i++ {
+			if isShared(runtime.HeapNew[sharedNode]()) {
+				stale++
+			}
+			if isShared(runtime.HeapNew[[3]*int]()) {
+				stale++
+			}
+		}
+		if stale != 0 {
+			t.Fatalf("round %d: %d new objects are shared", round, stale)
+		}
+	}
+}

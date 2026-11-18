@@ -150,6 +150,16 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 
 		if derefs == 0 {
 			newAttrs |= root.attrs & (attrMutates | attrCalls)
+			// What root holds, another goroutine may reach: l
+			// itself if that is l's address, what l points to if
+			// it is l's value.
+			if root.attrs&(attrShares|attrSharesValue) != 0 {
+				if addressOf {
+					newAttrs |= attrShares
+				} else {
+					newAttrs |= attrSharesValue
+				}
+			}
 		}
 
 		// l's value flows to root. If l is a function
@@ -189,10 +199,15 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		}
 
 		for i, edge := range l.edges {
-			if edge.src.hasAttr(attrEscapes) {
-				continue
-			}
 			d := derefs + edge.derefs
+			if edge.src.hasAttr(attrEscapes) {
+				// A location that escapes is a root itself, with
+				// nothing left to learn here but whether another
+				// goroutine may reach it or what it holds.
+				if root.attrs&(attrShares|attrSharesValue) == 0 || edge.src.hasAttr(attrShares) || edge.src.hasAttr(attrSharesValue) && d >= 0 {
+					continue
+				}
+			}
 			if edge.src.walkgen != walkgen || edge.src.derefs > d {
 				edge.src.walkgen = walkgen
 				edge.src.derefs = d

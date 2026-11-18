@@ -56,7 +56,10 @@ func isShared(p unsafe.Pointer) bool {
 	}
 	s := spanOf(uintptr(p))
 	if s == nil {
-		return true
+		// Not the heap's: a global is shared. What else there is
+		// (the runtime's own memory, memory from the system) is not
+		// where Go's pointers are handed over.
+		return isGlobal(uintptr(p))
 	}
 	if s.state.get() != mSpanInUse || uintptr(p) < s.base() || uintptr(p) >= s.limit {
 		// A stack, or memory the runtime allocates for itself.
@@ -75,6 +78,18 @@ func isShared(p unsafe.Pointer) bool {
 	return shared
 }
 
+// isGlobal reports whether p is in the data or bss of a module.
+//
+//go:nosplit
+func isGlobal(p uintptr) bool {
+	for datap := &firstmoduledata; datap != nil; datap = datap.next {
+		if datap.data <= p && p < datap.edata || datap.bss <= p && p < datap.ebss || datap.noptrdata <= p && p < datap.enoptrdata || datap.noptrbss <= p && p < datap.enoptrbss {
+			return true
+		}
+	}
+	return false
+}
+
 // markShared marks the heap object p points into as shared. If it was not,
 // it returns the object's base and span; otherwise, or if p does not point
 // into a heap object, zero.
@@ -86,6 +101,11 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	i := s.objIndex(p)
 	mask := uint8(1) << (i % 8)
 	if bits := s.getSharedBits(); bits != nil && atomic.Load8(bits.bytep(i/8))&mask != 0 {
+		return 0, nil
+	}
+	if s.isFree(i) {
+		// A pointer that outlived its object: whatever is
+		// allocated there next is not shared for it.
 		return 0, nil
 	}
 
@@ -271,7 +291,7 @@ func shareYield(spins int) {
 	switch {
 	case spins < 4:
 		procyield(20)
-	case spins < 16 || getg().m.locks != 0:
+	case spins < 16 || getg().m.locks != 0 || getg() == getg().m.g0:
 		// (A goroutine that may not be descheduled, as one that
 		// sync.Pool pinned, can only give its thread away.)
 		osyield()
@@ -519,4 +539,55 @@ func sharetypedmemmove(typ *_type, dst, src unsafe.Pointer) {
 	}
 	publishStore(typ, dst, src)
 	shareMove(typ, dst, src, 1)
+}
+
+// shareseqload loads a sequence lock, for compiled code on the targets
+// where the compiler has no inline atomic load.
+//
+//go:nosplit
+func shareseqload(seq *uint32) uint32 {
+	return atomic.Load(seq)
+}
+
+// shareClear clears n bytes at ptr, which hold pointers, as
+// memclrHasPointers does. In shared memory the values of more than one
+// word are cleared whole.
+//
+//go:nosplit
+func shareClear(ptr unsafe.Pointer, n uintptr) bool {
+	if !sharingEnabled || n <= goarch.PtrSize || !isShared(ptr) {
+		return false
+	}
+	shareClearLocked(ptr, n)
+	return true
+}
+
+func shareClearLocked(ptr unsafe.Pointer, n uintptr) {
+	mp := acquirem()
+	shareLockRange(uintptr(ptr), n)
+	bulkBarrierPreWrite(uintptr(ptr), 0, n, nil)
+	memclrNoHeapPointers(ptr, n)
+	shareUnlockRange(uintptr(ptr), n)
+	releasem(mp)
+}
+
+// sharecheck is called by code compiled with -d=sharecheck before it
+// stores or loads at p without a lock, because escape analysis found that
+// no other goroutine can reach that memory. If one can, the analysis is
+// wrong.
+func sharecheck(p unsafe.Pointer) {
+	if isShared(p) {
+		s := spanOf(uintptr(p))
+		if s == nil {
+			// Not the heap's: a global the analysis took for a
+			// local, or memory the runtime does not know.
+			throw("sharecheck: memory found unshared at compile time is not in the heap")
+		}
+		if s.spanclass.noscan() {
+			// No pointers: nothing there is locked, and small
+			// objects without pointers share a block and its bit.
+			return
+		}
+		throw("sharecheck: memory found unshared at compile time is shared")
+	}
 }

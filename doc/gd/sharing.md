@@ -7,11 +7,13 @@ value's data. The operations that can go wrong take a lock, but only on
 memory that more than one goroutine can reach, and the runtime knows which
 that is.
 
-> **Status:** the shared bit, its publication, the compiler's store barrier
-> and the map lock are in (step 1), and so are whole loads and stores of
-> slices, strings and interfaces on amd64, arm64 and the other targets with
-> an inline atomic load (step 2). The compiler proves nothing statically
-> beyond "just allocated here"; the plan for that is at the end (step 3).
+> **Status:** in: the shared bit, its publication, the compiler's store
+> barrier and the map lock (step 1); whole loads and stores of slices,
+> strings and interfaces on every target but wasm (step 2); and what the
+> compiler proves unshared from escape analysis, within a function (the
+> first part of step 3). Not yet: the per-parameter "shares" bit in the
+> callee masks, and local and shared memory in separate address ranges
+> (the end of this document).
 
 ## Shared objects
 
@@ -109,22 +111,101 @@ holds one.
   `typedslicecopy`, `growslice`'s copy of the old array, a channel receive
   straight into shared memory.
 
-Not guarded: an object the function has just allocated; a value an
-interface points to (never stored in); functions marked `nosplit` or
-`norace` (syscall's, in the child of a fork); the equality and hash
-functions the compiler writes, which must be the same in every package
-(a struct of strings compared in place while it is stored can still be
-read torn); `clear` and the zeroing loops the runtime does; 386 and arm.
-On arm64 the second read of the lock is an acquire load but there is no
-barrier before it, so a reordered load of the value is not excluded yet.
-`-gcflags=all=-d=notear` turns this off, for measurements.
+Not guarded: memory the compiler knows no other goroutine can reach (an
+object the function has just allocated, and what the next section finds);
+a value an interface points to (never stored in); functions marked
+`nosplit` or `norace` (syscall's, in the child of a fork). The equality
+and hash functions the compiler writes load whole in every package, the
+runtime's included, since all copies of one must be the same. `clear`
+and the runtime's clears (`memclrHasPointers`, `typedmemclr`) take the
+locks in shared memory. Where the runtime reads a value through its
+address (boxing in an interface, a map key, a channel send), walk copies
+the value to the stack first unless it is in a variable of the stack
+(`order.go`'s `addrTemp`). On targets without an inline atomic load (386,
+arm) the lock is read with a call. On arm64 a `DMB ISHLD` follows the
+value's load, so that it is done before the lock is read again.
+`-gcflags=all=-d=notear` turns all this off, for measurements.
 
 The loads are memory operations, so that the value's load stays between
 them. That costs the optimizations that merge two loads of one field:
 `for i := 0; i < len(p.b); i++ { p.b[i] }` checks its bounds again, where
 `s := p.b` before the loop does not.
 
+## What the compiler proves (`cmd/compile/internal/escape/shares.go`)
+
+The solver has two more attributes. `attrShares`: the location's address
+may flow to where another goroutine can reach it, which is the heap (a
+global, memory stored in through an untracked pointer, a channel, a go
+statement, a callee that keeps it) or a location that has the attribute.
+`attrSharesValue`: the value held there may. A returned value flows to
+neither: the caller is the same goroutine. An allocation without
+`attrShares` is reached, while the function that made it runs, by that
+function's goroutine only.
+
+The code generator stores and loads through variables, so the facts it
+needs are about variables (`ir.Name.Unshared`):
+
+- `UnsharedStorage`: the variable's own memory is not shared (it matters
+  for a variable moved to the heap);
+- `UnsharedPointee`: every pointer the variable ever holds is to an
+  unshared allocation of this function, or nil.
+
+The graph knows where an address flows, but not all that a variable may
+be assigned (a call's result, a load from the heap). So only *tracked*
+variables can have `UnsharedPointee`: pointer and slice locals, not
+address-taken, in no closure, whose every assignment, found in the
+syntax, is from `new`, `&T{}`, `make`, a slice literal, `append` to, a
+slice of, or the address of a part of what another tracked variable
+points to, or another tracked variable.
+
+A store through a pointer is, to stock escape analysis, a store in the
+heap, which would make everything a function links together shared. For
+tracked variables the graph has a location for what their allocations
+hold, with `x = &contents`: a store through `x` flows there, a load
+through `x` (or through a copy of `x`, tracked or not) flows from there,
+and the contents are shared exactly when `x`'s value is. Variables that
+may hold the same pointer have one contents location. For escaping, the
+contents are the heap, as before: the escape tests' output is unchanged.
+
+With the fact, `ssagen` generates plain loads and stores (`localExpr`),
+and marks the pointer stores (`Store`'s auxint) so that the write barrier
+pass adds no call to `publishptr`. Filling or appending to a local slice
+of strings, and building a list or a tree of local nodes, cost what they
+did.
+
+**Checking it.** A wrong fact would be silent, so there is a mode that
+checks them: with `-gcflags=all=-d=sharecheck`, every access that relies
+on a fact first calls `runtime.sharecheck`, which throws if the memory is
+shared (the runtime's bit is the witness). `go test -short
+-gcflags=all=-d=sharecheck std` passes; it has found two things so far,
+both in the runtime's bookkeeping and neither in the analysis (a store in
+the runtime's own memory taken for a store in shared memory, which
+published a pointer to a freed object). `TestSharedStatic` has the alias
+cases that reasoning found: a store through one variable loaded through
+another, an element's address, a slice of a slice, an append that moves,
+a callee that publishes what its argument points to.
+`-gcflags=all=-d=nolocal` turns the facts off.
+
+Not proved: anything about a parameter, a result of a call that is not
+inlined, or a pointer loaded from memory. That needs the fact to arrive
+with the pointer: the next step.
+
 ## What it costs (amd64, 8 CPUs)
+
+With the facts (`on`), without them (`-d=nolocal`), and with nothing
+(`-d=noshare`):
+
+| benchmark | nothing | nolocal | on |
+|-----------|---------|---------|----|
+| `strings.Builder`, 64 writes | 355 ns | 654 ns | 365 ns |
+| `strings.Fields`, 256 fields | 4.25 µs | 6.34 µs | 4.30 µs |
+| build and sum a private tree | 726 µs | 779 µs | 696 µs |
+| sort 4096 strings (a parameter) | 257 µs | 565 µs | 580 µs |
+| store a slice in an object from a call | 0.4 ns | 8.1 ns | 8.1 ns |
+| index a slice field of an object from a call, per element | 998 ns | 3661 ns | 3603 ns |
+
+The last three are what the facts do not reach. The tables below are the
+two mechanisms alone, before the facts.
 
 Step 2, against `-d=notear`:
 

@@ -38,39 +38,92 @@ func tearArch(f sys.ArchFamily) bool {
 // tearFunc reports whether fn may call the runtime for the memory it
 // shares. Not the functions that run where the runtime cannot: in the
 // child of a fork (syscall marks them norace), or without a stack check.
-// And not the equality and hash functions the compiler writes, which
-// every package that needs one compiles, the runtime's among them, and
-// which must be the same in all.
 func tearFunc(fn *ir.Func) bool {
-	if fn.Pragma&(ir.Norace|ir.Nosplit) != 0 {
-		return false
-	}
-	name := fn.Sym().Name
-	return !strings.HasPrefix(name, ".eq.") && !strings.HasPrefix(name, ".hash.")
+	return fn.Pragma&(ir.Norace|ir.Nosplit) == 0
 }
 
-// hasTearable reports whether a value of type t holds a value of more
-// than one word that must be read and written whole.
-func hasTearable(t *types.Type) bool {
-	switch {
-	case t.IsSlice(), t.IsString(), t.IsInterface():
-		return true
-	case t.IsArray():
-		return t.NumElem() > 0 && hasTearable(t.Elem())
-	case t.IsStruct():
-		for _, f := range t.Fields() {
-			if hasTearable(f.Type) {
-				return true
-			}
-		}
-	}
-	return false
+// algFunc reports whether fn is an equality or hash function the compiler
+// wrote. Every package that needs one compiles it, the runtime's among
+// them, and all must be the same: they load whole in the runtime too.
+func algFunc(fn *ir.Func) bool {
+	name := fn.Sym().Name
+	return strings.HasPrefix(name, ".eq.") || strings.HasPrefix(name, ".hash.")
 }
 
 // tearGuard reports whether a value of type t at addr is loaded and
 // stored under the sequence locks.
 func (s *state) tearGuard(t *types.Type, addr *ssa.Value) bool {
-	return s.tear && !ssa.IsStackAddr(addr) && hasTearable(t) && !s.unpublished(addr)
+	return s.tear && !s.dstLocal && !ssa.IsStackAddr(addr) && types.HasTearable(t) && !s.unpublished(addr)
+}
+
+// localExpr reports whether n designates memory that escape analysis
+// found no other goroutine can reach while the function runs: a variable
+// whose memory is not shared, or what a variable that only points to such
+// memory points to.
+func (s *state) localExpr(n ir.Node) bool {
+	if s.gd.Debug.NoShare != 0 || s.gd.Debug.NoLocal != 0 {
+		return false
+	}
+	for {
+		switch n.Op() {
+		case ir.ODOT:
+			n = n.(*ir.SelectorExpr).X
+		case ir.OCONVNOP:
+			n = n.(*ir.ConvExpr).X
+		case ir.OPAREN:
+			n = n.(*ir.ParenExpr).X
+		case ir.OINDEX:
+			n := n.(*ir.IndexExpr)
+			if n.X.Type().IsSlice() {
+				return localPointer(n.X)
+			}
+			if !n.X.Type().IsArray() {
+				return false
+			}
+			return s.localExpr(n.X)
+		case ir.ODOTPTR:
+			return localPointer(n.(*ir.SelectorExpr).X)
+		case ir.ODEREF:
+			return localPointer(n.(*ir.StarExpr).X)
+		case ir.ONAME:
+			n := n.(*ir.Name)
+			return n.Class == ir.PAUTO && n.Unshared&ir.UnsharedStorage != 0
+		default:
+			return false
+		}
+	}
+}
+
+// localPointer reports whether the pointer or slice n is a variable that
+// only points to memory no other goroutine can reach.
+func localPointer(n ir.Node) bool {
+	for n.Op() == ir.OCONVNOP {
+		x := n.(*ir.ConvExpr).X
+		if !x.Type().HasPointers() {
+			return false
+		}
+		n = x
+	}
+	name, ok := n.(*ir.Name)
+	return ok && name.Op() == ir.ONAME && name.Class == ir.PAUTO && name.Unshared&ir.UnsharedPointee != 0
+}
+
+// loadFrom is load for the value of the expression n, at src.
+func (s *state) loadFrom(n ir.Node, t *types.Type, src *ssa.Value) *ssa.Value {
+	if s.tear && s.localExpr(n) {
+		s.shareCheck(src)
+		return s.loadWhole(t, src)
+	}
+	return s.load(t, src)
+}
+
+// shareCheck has the runtime check, with -d=sharecheck, that the memory at
+// addr, which escape analysis found no other goroutine can reach, has not
+// been published.
+func (s *state) shareCheck(addr *ssa.Value) {
+	if s.gd.Debug.ShareCheck != 0 && !s.gd.Flag.CompilingRuntime && tearFunc(s.curfn) && !ssa.IsStackAddr(addr) {
+		s.rtcall(ir.Syms(s.gd).ShareCheck, true, nil, addr)
+	}
 }
 
 // unpublished reports whether addr is in an object that the function
@@ -141,9 +194,23 @@ func (s *state) shareSeqAddr(addr *ssa.Value) *ssa.Value {
 // that what is loaded between two of them stays between them.
 func (s *state) shareSeq(seq *ssa.Value) *ssa.Value {
 	u32 := types.Types[types.TUINT32]
+	if !tearArch(s.gd.Ctxt.Arch.Family) {
+		// No inline atomic load: a call, which is one too.
+		return s.rtcall(ir.Syms(s.gd).ShareSeqLoad, true, []*types.Type{u32}, seq)[0]
+	}
 	v := s.newValue2(ssa.OpAtomicLoad32, types.NewTuple(u32, types.TypeMem), seq, s.mem())
 	s.vars[memVar] = s.newValue1(ssa.OpSelect1, types.TypeMem, v)
 	return s.newValue1(ssa.OpSelect0, u32, v)
+}
+
+// shareLoaded is called between the load of a value and the second load
+// of its sequence lock. Where loads may be reordered (arm64), the value's
+// must be done before the lock is read again.
+func (s *state) shareLoaded() {
+	if s.gd.Ctxt.Arch.Family == sys.ARM64 {
+		// DMB ISHLD
+		s.vars[memVar] = s.newValue1I(ssa.OpARM64DMB, types.TypeMem, 0x9, s.mem())
+	}
 }
 
 // shareQuiet reports whether no store happened between the two loads s1
@@ -182,6 +249,7 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 	seq := s.shareSeqAddr(src)
 	s1 := s.shareSeq(seq)
 	v := s.rawLoad(t, src)
+	s.shareLoaded()
 	s2 := s.shareSeq(seq)
 	quiet := s.shareQuiet(s1, s2)
 
@@ -220,6 +288,7 @@ func (s *state) shareLoadMem(t *types.Type, dst, src *ssa.Value) {
 	seq := s.shareSeqAddr(src)
 	s1 := s.shareSeq(seq)
 	s.rawMove(t, dst, src)
+	s.shareLoaded()
 	s2 := s.shareSeq(seq)
 	quiet := s.shareQuiet(s1, s2)
 	if t.Size() > 1 {
@@ -321,7 +390,8 @@ func (s *state) shareZero(t *types.Type, dst *ssa.Value) {
 // shareMove is the move of a value of type t, which holds values of more
 // than one word, when dst or src is not in the stack.
 func (s *state) shareMove(t *types.Type, dst, src *ssa.Value) {
-	srcStack, dstStack := ssa.IsStackAddr(src), ssa.IsStackAddr(dst)
+	// (Memory no other goroutine can reach is as good as the stack.)
+	srcStack, dstStack := ssa.IsStackAddr(src), ssa.IsStackAddr(dst) || s.dstLocal
 	switch {
 	case dstStack:
 		s.shareLoadMem(t, dst, src)

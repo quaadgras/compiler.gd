@@ -230,6 +230,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).ShareLoadIface = typecheck.LookupRuntimeFunc(gd, "shareloadiface")
 	ir.Syms(gd).ShareLoadMem = typecheck.LookupRuntimeFunc(gd, "shareloadmem")
 	ir.Syms(gd).ShareTypedmemmove = typecheck.LookupRuntimeFunc(gd, "sharetypedmemmove")
+	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
+	ir.Syms(gd).ShareSeqLoad = typecheck.LookupRuntimeFunc(gd, "shareseqload")
 	ir.Syms(gd).ShareSeq = typecheck.LookupRuntimeVar(gd, "shareSeq")                         // [1024]uint32
 	ir.Syms(gd).X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")                       // bool
 	ir.Syms(gd).X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")                       // bool
@@ -401,7 +403,8 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 	defer s.popLine()
 
 	s.hasdefer = fn.HasDefer()
-	s.tear = gd.Flag.WB && !gd.Flag.CompilingRuntime && gd.Debug.NoShare == 0 && gd.Debug.NoTear == 0 && tearArch(gd.Ctxt.Arch.Family) && tearFunc(fn)
+	s.tear = gd.Debug.NoShare == 0 && gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
+		(algFunc(fn) || gd.Flag.WB && !gd.Flag.CompilingRuntime && tearFunc(fn))
 	if fn.Pragma&ir.CgoUnsafeArgs != 0 {
 		s.cgoUnsafeArgs = true
 	}
@@ -1205,6 +1208,10 @@ type state struct {
 	// tear is whether values of more than one word are loaded and
 	// stored whole where goroutines may race on them (share.go).
 	tear bool
+
+	// dstLocal is set while the stores being generated are in memory
+	// that no other goroutine can reach (localExpr).
+	dstLocal bool
 	// value representing address of where deferBits autotmp is stored
 	deferBitsAddr *ssa.Value
 	deferBitsTemp *ir.Name
@@ -2685,7 +2692,12 @@ func (s *state) rawLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 }
 
 func (s *state) store(t *types.Type, dst, val *ssa.Value) {
-	s.vars[memVar] = s.newValue3A(ssa.OpStore, types.TypeMem, t, dst, val, s.mem())
+	v := s.newValue3A(ssa.OpStore, types.TypeMem, t, dst, val, s.mem())
+	if s.dstLocal {
+		// Nothing to publish: no other goroutine can reach dst.
+		v.AuxInt = 1
+	}
+	s.vars[memVar] = v
 }
 
 func (s *state) zero(t *types.Type, dst *ssa.Value) {
@@ -2745,7 +2757,7 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		ssa.LogLargeCopy(s.gd, s.f.Name, s.peekPos(), t.Size())
 		return
 	}
-	if s.tear && hasTearable(t) && !(ssa.IsStackAddr(dst) && ssa.IsStackAddr(src)) {
+	if s.tear && types.HasTearable(t) && !(ssa.IsStackAddr(dst) && ssa.IsStackAddr(src)) {
 		s.shareMove(t, dst, src)
 		return
 	}
@@ -4200,10 +4212,10 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		if s.canSSA(n) {
 			return s.variable(n, n.Type())
 		}
-		return s.load(n.Type(), s.addr(n))
+		return s.loadFrom(n, n.Type(), s.addr(n))
 	case ir.OLINKSYMOFFSET:
 		n := n.(*ir.LinksymOffsetExpr)
-		return s.load(n.Type(), s.addr(n))
+		return s.loadFrom(n, n.Type(), s.addr(n))
 	case ir.ONIL:
 		n := n.(*ir.NilExpr)
 		t := n.Type()
@@ -4638,7 +4650,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			return s.spreadExtract(n.Pos(), n.Type(), iface)
 		}
 		p := s.exprPtr(n.X, n.Bounded(), n.Pos())
-		return s.load(n.Type(), p)
+		return s.loadFrom(n, n.Type(), p)
 
 	case ir.ODOT:
 		n := n.(*ir.SelectorExpr)
@@ -4657,7 +4669,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		// instrumentation.
 		if ir.IsAddressable(n) && !s.canSSA(n) {
 			p := s.addr(n)
-			return s.load(n.Type(), p)
+			return s.loadFrom(n, n.Type(), p)
 		}
 		v := s.expr(n.X)
 		return s.newValue1I(ssa.OpStructSelect, n.Type(), int64(fieldIdx(n)), v)
@@ -4666,7 +4678,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		n := n.(*ir.SelectorExpr)
 		p := s.exprPtr(n.X, n.Bounded(), n.Pos())
 		p = s.newValue1I(ssa.OpOffPtr, types.NewPtr(n.Type()), n.Offset(), p)
-		return s.load(n.Type(), p)
+		return s.loadFrom(n, n.Type(), p)
 
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
@@ -4688,7 +4700,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 			return s.stringIndex(a, i)
 		case n.X.Type().IsSlice():
 			p := s.addr(n)
-			return s.load(n.X.Type().Elem(), p)
+			return s.loadFrom(n, n.X.Type().Elem(), p)
 		case n.X.Type().IsArray():
 			if ssa.CanSSA(n.X.Type()) {
 				// SSA can handle arrays of length at most 1.
@@ -4707,7 +4719,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 				return s.newValue1I(ssa.OpArraySelect, n.Type(), 0, a)
 			}
 			p := s.addr(n)
-			return s.load(n.X.Type().Elem(), p)
+			return s.loadFrom(n, n.X.Type().Elem(), p)
 		default:
 			s.Fatalf("bad type for index %v", n.X.Type())
 			return nil
@@ -5097,10 +5109,15 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	var slice, addr *ssa.Value
 	if inplace {
 		addr = s.addr(sn)
-		slice = s.load(n.Type(), addr)
+		slice = s.loadFrom(sn, n.Type(), addr)
 	} else {
 		slice = s.expr(sn)
 	}
+
+	// Whether no other goroutine can reach the slice variable's memory
+	// (if it is appended to in place), and the array.
+	hdrLocal := inplace && s.localExpr(sn)
+	elemLocal := localPointer(sn) && s.gd.Debug.NoShare == 0 && s.gd.Debug.NoLocal == 0
 
 	// Allocate new blocks
 	grow := s.f.NewBlock(ssa.BlockPlain)
@@ -5303,6 +5320,10 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		}
 		// In shared memory the pointer and the capacity are stored
 		// together (with the old length, which the new array has).
+		if hdrLocal {
+			s.shareCheck(addr)
+		}
+		s.dstLocal = hdrLocal
 		guard := s.tearGuard(n.Type(), addr)
 		var locked *ssa.Value
 		if guard {
@@ -5314,6 +5335,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		if guard {
 			s.shareUnlock(locked, addr, n.Type().Size())
 		}
+		s.dstLocal = false
 	}
 
 	b = s.endBlock()
@@ -5329,6 +5351,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		// Update length in place.
 		// We have to wait until here to make sure growslice succeeded.
 		lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
+		s.dstLocal = hdrLocal
 		if s.tearGuard(n.Type(), addr) {
 			// In shared memory another goroutine may have stored
 			// another slice since this one was loaded, and its
@@ -5361,6 +5384,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		} else {
 			s.store(types.Types[types.TINT], lenaddr, l)
 		}
+		s.dstLocal = false
 	}
 
 	// Evaluate args
@@ -5386,9 +5410,16 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	for i, arg := range args {
 		addr := s.newValue2(ssa.OpPtrIndex, pt, p2, s.constInt(types.Types[types.TINT], int64(i)))
 		if arg.store {
+			if elemLocal {
+				s.shareCheck(addr)
+			}
+			s.dstLocal = elemLocal
 			s.storeType(et, addr, arg.v, 0, true)
+			s.dstLocal = false
 		} else {
+			s.dstLocal = elemLocal
 			s.move(et, addr, arg.v)
+			s.dstLocal = false
 		}
 	}
 
@@ -5826,6 +5857,16 @@ func (s *state) assignWhichMayOverlap(left ir.Node, right *ssa.Value, deref bool
 
 	// Left is not ssa-able. Compute its address.
 	addr := s.addr(left)
+	if s.localExpr(left) {
+		// Memory that no other goroutine can reach.
+		if !deref {
+			// (Not a call where a call's results may be waiting
+			// to be copied.)
+			s.shareCheck(addr)
+		}
+		s.dstLocal = true
+		defer func() { s.dstLocal = false }()
+	}
 	if ir.IsReflectHeaderDataField(left) {
 		// Package unsafe's documentation says storing pointers into
 		// reflect.SliceHeader and reflect.StringHeader's Data fields

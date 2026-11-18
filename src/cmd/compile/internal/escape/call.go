@@ -185,8 +185,13 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// it has enough capacity. Alternatively, a new heap
 		// slice might be allocated, and all slice elements
 		// might flow to heap.
+		// (If the appendee is a tracked variable, its elements stay
+		// what its arrays hold, and so are the appended ones and
+		// what the new array holds, below. See shares.go.)
+		elemK := e.storeThrough(args[0])
+		tracked := e.contentsOf(args[0]) != nil
 		appendeeK := e.teeHole(ks[0], e.mutatorHole())
-		if args[0].Type().Elem().HasPointers() {
+		if args[0].Type().Elem().HasPointers() && !tracked {
 			appendeeK = e.teeHole(appendeeK, e.heapHole().deref(e.gd, call, "appendee slice"))
 		}
 		argument(appendeeK, args[0])
@@ -194,12 +199,12 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		if call.IsDDD {
 			appendedK := e.discardHole()
 			if args[1].Type().IsSlice() && args[1].Type().Elem().HasPointers() {
-				appendedK = e.heapHole().deref(e.gd, call, "appended slice...")
+				appendedK = elemK.deref(e.gd, call, "appended slice...")
 			}
 			argument(appendedK, args[1])
 		} else {
 			for i := 1; i < len(args); i++ {
-				argument(e.heapHole(), args[i])
+				argument(elemK, args[i])
 			}
 		}
 		e.discard(call.RType)
@@ -209,6 +214,10 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// Users of escape analysis can look at the escape information for OAPPEND
 		// and use that to decide where to allocate the backing store.
 		backingStore := e.spill(ks[0], call)
+		if c := e.contentsOf(args[0]); c != nil {
+			// The new array holds what the appendee's arrays hold.
+			e.flow(backingStore, c)
+		}
 		// As we have a boolean to prevent reuse, we can treat these allocations as outside any loops.
 		backingStore.dst.loopDepth = 0
 

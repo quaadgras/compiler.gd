@@ -125,6 +125,11 @@ func storePublishes(w *Value, select1 []*Value) (heap, call bool) {
 	case OpStoreWB:
 		val := w.Args[1]
 		heap = val.Op != OpConstNil && mightBeHeapPointer(val)
+		if w.AuxInt == 1 {
+			// The front end knows no other goroutine can reach the
+			// target.
+			return heap, false
+		}
 	case OpMoveWB:
 		heap = !IsGlobalAddr(w.Args[1])
 	}

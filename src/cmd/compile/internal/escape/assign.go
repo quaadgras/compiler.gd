@@ -43,13 +43,16 @@ func (e *escape) addr(n ir.Node) hole {
 			k = e.addr(n.X)
 		} else {
 			e.mutate(n.X)
+			k = e.storeThrough(n.X)
 		}
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
 		e.mutate(n.X)
+		k = e.storeThrough(n.X)
 	case ir.ODOTPTR:
 		n := n.(*ir.SelectorExpr)
 		e.mutate(n.X)
+		k = e.storeThrough(n.X)
 	case ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
 		e.discard(n.X)
@@ -135,4 +138,14 @@ func (e *escape) reassigned(ks []hole, where ir.Node) {
 		}
 		loc.reassigned = true
 	}
+}
+
+// storeThrough returns the hole for a store through the pointer or slice
+// p: what p's allocations hold if p is a tracked variable (shares.go),
+// and the heap otherwise.
+func (e *escape) storeThrough(p ir.Node) hole {
+	if c := e.contentsOf(p); c != nil {
+		return c.asHole()
+	}
+	return e.heapHole()
 }

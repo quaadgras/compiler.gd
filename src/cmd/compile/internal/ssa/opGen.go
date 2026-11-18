@@ -106797,7 +106797,7 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "Store",
-		auxType: auxTyp,
+		auxType: auxTypSize,
 		argLen:  3,
 		generic: true,
 	},
@@ -106859,7 +106859,7 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "StoreWB",
-		auxType: auxTyp,
+		auxType: auxTypSize,
 		argLen:  3,
 		generic: true,
 	},

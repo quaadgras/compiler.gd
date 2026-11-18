@@ -381,6 +381,9 @@ func reflect_typedslicecopy(elemType *_type, dst, src slice) int {
 //
 //go:nosplit
 func typedmemclr(typ *_type, ptr unsafe.Pointer) {
+	if typ.Pointers() && shareClear(ptr, typ.Size_) {
+		return
+	}
 	if writeBarrier.enabled && typ.Pointers() {
 		// This always clears a whole value of type typ, so it's
 		// safe to pass a type here and apply the optimization.
@@ -447,6 +450,9 @@ func reflect_typedarrayclear(typ *_type, ptr unsafe.Pointer, len int) {
 //go:linkname memclrHasPointers
 //go:nosplit
 func memclrHasPointers(ptr unsafe.Pointer, n uintptr) {
+	if shareClear(ptr, n) {
+		return
+	}
 	// Pass nil for the type since we don't have one here anyway.
 	bulkBarrierPreWrite(uintptr(ptr), 0, n, nil)
 	memclrNoHeapPointers(ptr, n)

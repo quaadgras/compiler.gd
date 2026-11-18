@@ -92,7 +92,11 @@ import (
 type batch struct {
 	gd *base.Invocation
 
-	allLocs         []*location
+	allLocs []*location
+
+	// contents and sources are of the tracked variables: shares.go.
+	contents        map[*ir.Name]*location
+	sources         map[*ir.Name][]ir.Node
 	closures        []closure
 	reassignOracles map[*ir.Func]*ir.ReassignOracle
 
@@ -153,7 +157,7 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
 	var b batch
 	b.gd = gd
-	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
+	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
@@ -162,7 +166,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	// EscCandidate rather than EscHeap; walk then inserts the
 	// runtime.maybeEscape* wrap at the indirect call site. See
 	// doc/gd/escape-bits.md.
-	b.candidateLoc.attrs = attrCandidateEscape | attrPersists | attrMutates | attrCalls
+	b.candidateLoc.attrs = attrCandidateEscape | attrPersists | attrMutates | attrCalls | attrShares
 	b.reassignOracles = reassignOracles
 
 	// Construct data-flow graph from syntax trees.
@@ -250,6 +254,8 @@ func (b *batch) initFunc(fn *ir.Func) {
 	for i, f := range fn.Type().Results() {
 		e.oldLoc(f.Nname.(*ir.Name)).resultIndex = 1 + i
 	}
+
+	b.trackPointers(fn)
 }
 
 func (b *batch) walkFunc(fn *ir.Func) {
@@ -393,6 +399,7 @@ type outBufUse struct {
 }
 
 func (b *batch) finish(fns []*ir.Func) {
+	b.markUnshared(fns)
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.
 	phaseG := b.phaseGTags(fns)

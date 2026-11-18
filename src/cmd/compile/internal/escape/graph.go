@@ -146,6 +146,18 @@ const (
 	// honoured when it's the sole escape path. See
 	// doc/gd/escape-bits.md.
 	attrCandidateEscape
+
+	// attrShares indicates that the location's address may flow to
+	// where another goroutine can reach it: the heap (a global, memory
+	// stored in through a pointer, a channel, a go statement, a callee
+	// that keeps it) or a location that does. A returned value does
+	// not: the caller is the same goroutine. See shares.go.
+	attrShares
+
+	// attrSharesValue indicates that the value held at the location
+	// may flow there: what it points to is shared, the location itself
+	// need not be.
+	attrSharesValue
 )
 
 func (l *location) hasAttr(attr locAttr) bool { return l.attrs&attr != 0 }
@@ -268,6 +280,13 @@ func (b *batch) flow(k hole, src *location) {
 		}
 		src.attrs |= attrEscapes | attrPersists | attrMutates | attrCalls
 		src.escapedInGraph = true
+		// The edge is still needed to find, when the graph is solved,
+		// whether another goroutine may reach src: dst may only learn
+		// then that one may reach it (shares.go). For escaping, the
+		// solver does not follow an edge from a location that escapes.
+		if src.n != nil || src.curfn != nil {
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
+		}
 		return
 	}
 

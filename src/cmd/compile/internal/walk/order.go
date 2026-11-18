@@ -18,6 +18,7 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
+	"cmd/internal/sys"
 )
 
 // Rewrite tree to use separate statements to enforce
@@ -275,8 +276,18 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 	// OADDR operation), but at least walkCompare needs to be fixed to
 	// support that (see trybot failures on go.dev/cl/541715, PS1).
 	if ir.IsAddressable(n) {
-		if name, ok := ir.OuterValue(n).(*ir.Name); ok && name.Op() == ir.ONAME {
+		name, ok := ir.OuterValue(n).(*ir.Name)
+		if ok && name.Op() == ir.ONAME {
 			if name.Class == ir.PAUTO && !name.Addrtaken() && ssa.CanSSA(name.Type()) {
+				goto Copy
+			}
+		}
+		// The runtime reads through the address word by word. A value
+		// of more than one word that another goroutine may be storing
+		// is copied whole first (runtime/shared.go): any that is not in
+		// a variable of the stack.
+		if o.gd.Debug.NoShare == 0 && o.gd.Debug.NoTear == 0 && !o.gd.Flag.CompilingRuntime && o.gd.Ctxt.Arch.Family != sys.Wasm && types.HasTearable(n.Type()) {
+			if !ok || name.Op() != ir.ONAME || name.Class == ir.PEXTERN || name.Esc() == ir.EscHeap || name.Heapaddr != nil {
 				goto Copy
 			}
 		}

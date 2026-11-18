@@ -64,6 +64,8 @@ type DebugFlags struct {
 	NoOpenDefer           int    `help:"disable open-coded defers" concurrent:"ok"`
 	NoRefName             int    `help:"do not include referenced symbol names in object file" concurrent:"ok"`
 	NoShare               int    `help:"do not publish the pointers stored in shared memory (unsafe; for measurements)" concurrent:"ok"`
+	NoLocal               int    `help:"do not use what escape analysis knows of the memory no other goroutine can reach (for measurements)" concurrent:"ok"`
+	ShareCheck            int    `help:"check at run time that the memory found unshared at compile time is" concurrent:"ok"`
 	NoTear                int    `help:"do not load and store slices, strings and interfaces whole (unsafe; for measurements)" concurrent:"ok"`
 	PCTab                 string `help:"print named pc-value table\nOne of: pctospadj, pctofile, pctoline, pctoinline, pctopcdata"`
 	Panic                 int    `help:"show all compiler panics"`

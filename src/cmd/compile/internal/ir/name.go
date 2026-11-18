@@ -38,6 +38,10 @@ type Name struct {
 	Class     Class      // uint8
 	pragma    PragmaFlag // int16
 	flags     bitset16
+
+	// Unshared says what of the variable no other goroutine can reach
+	// while its function runs (escape's markUnshared).
+	Unshared  uint8
 	DictIndex uint16 // index of the dictionary entry describing the type of this variable declaration plus 1
 	sym       *types.Sym
 	Func      *Func // TODO(austin): nil for I.M
@@ -423,3 +427,10 @@ type Embed struct {
 	Pos      src.XPos
 	Patterns []string
 }
+
+const (
+	// UnsharedStorage: the variable's own memory.
+	UnsharedStorage = 1 << iota
+	// UnsharedPointee: what every pointer the variable holds points to.
+	UnsharedPointee
+)
