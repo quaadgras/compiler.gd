@@ -237,6 +237,8 @@ var libcLong32 = map[string]string{
 	"strtoul": "Strtoul32",
 	"ldiv":    "Ldiv32",
 	"llogb":   "Llogb32",
+	"wcstol":  "Wcstol32",
+	"wcstoul": "Wcstoul32",
 	"llogbf":  "Llogbf32",
 	"llogbl":  "Llogb32",
 }

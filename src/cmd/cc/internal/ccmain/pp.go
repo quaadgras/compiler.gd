@@ -710,7 +710,10 @@ func (p *pp) directive(hash token) {
 		p.pragma(d, p.line())
 	case "error":
 		p.errorf(d, "#error %s", spell(p.line()))
-	case "warning", "ident", "sccs", "assert", "unassert":
+	case "warning":
+		// C23: a diagnostic, and translation goes on.
+		fmt.Fprintf(os.Stderr, "%s:%d: warning: #warning %s\n", d.file, d.line, spell(p.line()))
+	case "ident", "sccs", "assert", "unassert":
 		p.line()
 	default:
 		p.errorf(d, "invalid preprocessing directive #%s", d.text)
@@ -1486,7 +1489,6 @@ const predefined = `
 #define __STDC_IEC_559__ 1
 #define __STDC_NO_ATOMICS__ 1
 #define __STDC_NO_THREADS__ 1
-#define __STDC_NO_VLA__ 1
 #define __STDC_EMBED_NOT_FOUND__ 0
 #define __STDC_EMBED_FOUND__ 1
 #define __STDC_EMBED_EMPTY__ 2

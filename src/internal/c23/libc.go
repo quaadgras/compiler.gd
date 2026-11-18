@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -1240,7 +1241,11 @@ func formatC(f string, ap *VaList) []byte {
 			}
 		}
 		size := 4 // 1 hh, 2 h, 8 l ll z j t
+		nl := 0   // how many l: %ls and %lc are wide
 		for i < len(f) && strings.IndexByte("hlLqjzt", f[i]) >= 0 {
+			if f[i] == 'l' {
+				nl++
+			}
 			if f[i] == 'h' {
 				if size == 2 {
 					size = 1
@@ -1317,6 +1322,10 @@ func formatC(f string, ap *VaList) []byte {
 				body = append([]byte{'0'}, body...)
 			}
 		case 'c':
+			if nl == 1 {
+				body = utf8.AppendRune(nil, rune(uint32(toInt64(ap.next()))))
+				break
+			}
 			body = []byte{byte(toInt64(ap.next()))}
 		case 's':
 			p, _ := ap.next().(Ptr)
@@ -1324,6 +1333,23 @@ func formatC(f string, ap *VaList) []byte {
 			switch {
 			case Addr(p) == 0:
 				s = "(null)"
+			case nl == 1:
+				// A wide string, as UTF-8: the precision counts bytes,
+				// of whole characters.
+				var b []byte
+				for k := 0; ; k++ {
+					c := Load32(Add(p, 4*k))
+					if c == 0 {
+						break
+					}
+					n := len(b)
+					b = utf8.AppendRune(b, rune(c))
+					if prec >= 0 && len(b) > prec {
+						b = b[:n]
+						break
+					}
+				}
+				s = string(b)
 			case prec >= 0:
 				var b []byte
 				for k := 0; k < prec; k++ {

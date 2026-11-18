@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // The scanf family.
@@ -104,6 +105,38 @@ func (s *scanner) unget(c int32) {
 }
 
 func isSpaceC(c int32) bool { return c == ' ' || c >= '\t' && c <= '\r' }
+
+// getRune reads a character of UTF-8 (a byte of an invalid sequence),
+// and the bytes it was.
+func (s *scanner) getRune() (int32, []byte, bool) {
+	c := s.get()
+	if c < 0 {
+		return 0, nil, false
+	}
+	b := []byte{byte(c)}
+	for !utf8.FullRune(b) {
+		c = s.get()
+		if c < 0 {
+			break
+		}
+		b = append(b, byte(c))
+	}
+	r, n := utf8.DecodeRune(b)
+	if r == utf8.RuneError && n <= 1 {
+		r, n = rune(b[0]), 1
+	}
+	for i := len(b) - 1; i >= n; i-- {
+		s.unget(int32(b[i]))
+	}
+	return r, b[:n], true
+}
+
+// ungetBytes puts back the bytes of a character getRune read.
+func (s *scanner) ungetBytes(b []byte) {
+	for i := len(b) - 1; i >= 0; i-- {
+		s.unget(int32(b[i]))
+	}
+}
 
 // skipSpace reads the white space ahead.
 func (s *scanner) skipSpace() {
@@ -332,7 +365,11 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 			i++
 		}
 		size := 4 // 1 hh, 2 h, 8 l ll j z t, 16 L
+		nl := 0   // how many l: %lc, %ls and %l[ store wide characters
 		for i < len(f) && strings.IndexByte("hlLqjzt", f[i]) >= 0 {
+			if f[i] == 'l' {
+				nl++
+			}
 			switch f[i] {
 			case 'h':
 				if size == 2 {
@@ -413,6 +450,27 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 				}
 			}
 		case 'c':
+			if nl == 1 {
+				// width wide characters, from UTF-8.
+				if width < 0 {
+					width = 1
+				}
+				s.width = -1
+				k := 0
+				for ; k < width; k++ {
+					r, _, ok := s.getRune()
+					if !ok {
+						break
+					}
+					if !suppress {
+						Store32(Add(dst, 4*k), uint32(r))
+					}
+				}
+				if k < width {
+					return result()
+				}
+				break
+			}
 			if width < 0 {
 				s.width = 1
 			}
@@ -451,6 +509,37 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 				}
 				set = expandSet(f[j:k])
 				i = k
+			}
+			if nl == 1 {
+				// Wide characters, from UTF-8, at most width of them.
+				s.width = -1
+				k := 0
+				for ; width < 0 || k < width; k++ {
+					r, raw, ok := s.getRune()
+					if !ok {
+						break
+					}
+					var match bool
+					if conv == 's' {
+						match = !isSpaceC(r)
+					} else {
+						match = strings.ContainsRune(set, r) != negate
+					}
+					if !match {
+						s.ungetBytes(raw)
+						break
+					}
+					if !suppress {
+						Store32(Add(dst, 4*k), uint32(r))
+					}
+				}
+				if k == 0 {
+					return result()
+				}
+				if !suppress {
+					Store32(Add(dst, 4*k), 0)
+				}
+				break
 			}
 			k := 0
 			for {

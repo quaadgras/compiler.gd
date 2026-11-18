@@ -200,6 +200,40 @@ var libc = map[string]string{
 	"strcasecmp": "Strcasecmp", "strncasecmp": "Strncasecmp", "bzero": "Bzero", "bcopy": "Bcopy",
 	"ffs": "Ffs", "ffsl": "Ffsl", "ffsll": "Ffsl", "index": "Strchr", "rindex": "Strrchr",
 
+	// wchar.h, stdlib.h's multibyte functions and C23's, stdio.h's fpos_t
+	"fgetwc": "Fgetwc", "getwc": "Fgetwc", "getwchar": "Getwchar", "fgetws": "Fgetws",
+	"fputwc": "Fputwc", "putwc": "Fputwc", "putwchar": "Putwchar", "fputws": "Fputws",
+	"fwide": "Fwide", "ungetwc": "Ungetwc",
+	"fwprintf": "Fwprintf", "wprintf": "Wprintf", "swprintf": "Swprintf", "vfwprintf": "Vfwprintf",
+	"vwprintf": "Vwprintf", "vswprintf": "Vswprintf", "fwscanf": "Fwscanf", "wscanf": "Wscanf",
+	"swscanf": "Swscanf", "vfwscanf": "Vfwscanf", "vwscanf": "Vwscanf", "vswscanf": "Vswscanf",
+	"wcstod": "Wcstod", "wcstof": "Wcstof", "wcstold": "Wcstod", "wcstol": "Wcstol", "wcstoll": "Wcstol",
+	"wcstoul": "Wcstoul", "wcstoull": "Wcstoul", "wcstoimax": "Wcstol", "wcstoumax": "Wcstoul",
+	"wcsncpy": "Wcsncpy", "wcsncat": "Wcsncat", "wcscoll": "Wcscoll", "wcsxfrm": "Wcsxfrm",
+	"wcscspn": "Wcscspn", "wcsspn": "Wcsspn", "wcspbrk": "Wcspbrk", "wcsrchr": "Wcsrchr",
+	"wcsstr": "Wcsstr", "wcstok": "Wcstok", "wmemchr": "Wmemchr", "wmemcmp": "Wmemcmp",
+	"wmemcpy": "Wmemcpy", "wmemmove": "Wmemmove", "wmemset": "Wmemset", "wcsftime": "Wcsftime",
+	"mbsrtowcs": "Mbsrtowcs", "wcsrtombs": "Wcsrtombs", "mblen": "Mblen", "mbtowc": "Mbtowc",
+	"wctomb": "Wctomb", "mbstowcs": "Mbstowcs", "wcstombs": "Wcstombs",
+	"strfromd": "Strfromd", "strfromf": "Strfromf", "strfroml": "Strfromd",
+	"free_sized": "FreeSized", "free_aligned_sized": "FreeAlignedSized",
+	"memalignment": "Memalignment", "call_once": "CallOnce", "quick_exit": "QuickExit",
+	"at_quick_exit": "AtQuickExit", "strxfrm": "Strxfrm", "fgetpos": "Fgetpos", "fsetpos": "Fsetpos",
+
+	// complex.h's long double functions: double's
+	"creall": "Creal", "cimagl": "Cimag", "conjl": "Conj", "cabsl": "Cabs", "cargl": "Carg", "cprojl": "Cproj", "cexpl": "Cexp", "clogl": "Clog", "csqrtl": "Csqrt", "cpowl": "Cpow", "csinl": "Csin", "ccosl": "Ccos", "ctanl": "Ctan", "casinl": "Casin", "cacosl": "Cacos", "catanl": "Catan", "csinhl": "Csinh", "ccoshl": "Ccosh", "ctanhl": "Ctanh", "casinhl": "Casinh", "cacoshl": "Cacosh", "catanhl": "Catanh",
+
+	// wctype.h, fenv.h
+	"iswalnum": "Iswalnum", "iswalpha": "Iswalpha", "iswblank": "Iswblank", "iswcntrl": "Iswcntrl", "iswdigit": "Iswdigit", "iswgraph": "Iswgraph", "iswlower": "Iswlower", "iswprint": "Iswprint", "iswpunct": "Iswpunct", "iswspace": "Iswspace", "iswupper": "Iswupper", "iswxdigit": "Iswxdigit",
+	"iswctype": "Iswctype", "wctype": "Wctype", "towlower": "Towlower", "towupper": "Towupper",
+	"towctrans": "Towctrans", "wctrans": "Wctrans",
+	"feclearexcept": "Feclearexcept", "fegetexceptflag": "Fegetexceptflag", "feraiseexcept": "Feraiseexcept",
+	"fesetexcept": "Fesetexcept", "fesetexceptflag": "Fesetexceptflag", "fetestexceptflag": "Fetestexceptflag",
+	"fetestexcept": "Fetestexcept", "fegetmode": "Fegetmode", "fegetround": "Fegetround",
+	"fesetmode": "Fesetmode", "fesetround": "Fesetround", "fegetenv": "Fegetenv",
+	"feholdexcept": "Feholdexcept", "fesetenv": "Fesetenv", "feupdateenv": "Feupdateenv",
+	"__cc_fe_dfl": "FeDfl",
+
 	// math.h: C23's
 	"acospi":            "Acospi",
 	"acospif":           "Acospif",

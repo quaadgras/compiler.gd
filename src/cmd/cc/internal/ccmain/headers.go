@@ -84,6 +84,7 @@ int *__cc_errno(void);
 `,
 	"inttypes.h": `#ifndef __CC_INTTYPES_H
 #define __CC_INTTYPES_H
+#include <stddef.h>
 #include <stdint.h>
 #define PRId8 "d"
 #define PRId16 "d"
@@ -227,6 +228,25 @@ int *__cc_errno(void);
 #define SCNx64 "lx"
 #define SCNxMAX "lx"
 #define SCNxPTR "lx"
+#define SCNb8 "hhb"
+#define SCNb16 "hb"
+#define SCNb32 "b"
+#define SCNb64 "lb"
+#define SCNbLEAST8 "hhb"
+#define SCNbLEAST16 "hb"
+#define SCNbLEAST32 "b"
+#define SCNbLEAST64 "lb"
+#define SCNbFAST8 "hhb"
+#define SCNbFAST16 "lb"
+#define SCNbFAST32 "lb"
+#define SCNbFAST64 "lb"
+#define SCNbMAX "lb"
+#define SCNbPTR "lb"
+#ifndef __STDC_VERSION_INTTYPES_H__
+#define __STDC_VERSION_INTTYPES_H__ 202311L
+#endif
+intmax_t wcstoimax(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
+uintmax_t wcstoumax(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
 intmax_t imaxabs(intmax_t j);
 intmax_t strtoimax(const char *restrict nptr, char **restrict endptr, int base);
 uintmax_t strtoumax(const char *restrict nptr, char **restrict endptr, int base);
@@ -709,6 +729,55 @@ int mbsinit(const mbstate_t *ps);
 size_t mbrlen(const char *restrict s, size_t n, mbstate_t *restrict ps);
 size_t mbrtowc(wchar_t *restrict pwc, const char *restrict s, size_t n, mbstate_t *restrict ps);
 size_t wcrtomb(char *restrict s, wchar_t wc, mbstate_t *restrict ps);
+struct tm;
+struct __cc_FILE;
+wint_t fgetwc(struct __cc_FILE *stream);
+wchar_t *fgetws(wchar_t *restrict s, int n, struct __cc_FILE *restrict stream);
+wint_t fputwc(wchar_t c, struct __cc_FILE *stream);
+int fputws(const wchar_t *restrict s, struct __cc_FILE *restrict stream);
+int fwide(struct __cc_FILE *stream, int mode);
+int fwprintf(struct __cc_FILE *restrict stream, const wchar_t *restrict format, ...);
+int fwscanf(struct __cc_FILE *restrict stream, const wchar_t *restrict format, ...);
+wint_t getwc(struct __cc_FILE *stream);
+wint_t getwchar(void);
+wint_t putwc(wchar_t c, struct __cc_FILE *stream);
+wint_t putwchar(wchar_t c);
+int swprintf(wchar_t *restrict s, size_t n, const wchar_t *restrict format, ...);
+int swscanf(const wchar_t *restrict s, const wchar_t *restrict format, ...);
+wint_t ungetwc(wint_t c, struct __cc_FILE *stream);
+int vfwprintf(struct __cc_FILE *restrict stream, const wchar_t *restrict format, __builtin_va_list arg);
+int vfwscanf(struct __cc_FILE *restrict stream, const wchar_t *restrict format, __builtin_va_list arg);
+int vswprintf(wchar_t *restrict s, size_t n, const wchar_t *restrict format, __builtin_va_list arg);
+int vswscanf(const wchar_t *restrict s, const wchar_t *restrict format, __builtin_va_list arg);
+int vwprintf(const wchar_t *restrict format, __builtin_va_list arg);
+int vwscanf(const wchar_t *restrict format, __builtin_va_list arg);
+int wprintf(const wchar_t *restrict format, ...);
+int wscanf(const wchar_t *restrict format, ...);
+double wcstod(const wchar_t *restrict nptr, wchar_t **restrict endptr);
+float wcstof(const wchar_t *restrict nptr, wchar_t **restrict endptr);
+long double wcstold(const wchar_t *restrict nptr, wchar_t **restrict endptr);
+long int wcstol(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
+long long int wcstoll(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
+unsigned long int wcstoul(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
+unsigned long long int wcstoull(const wchar_t *restrict nptr, wchar_t **restrict endptr, int base);
+wchar_t *wcsncpy(wchar_t *restrict s1, const wchar_t *restrict s2, size_t n);
+wchar_t *wmemcpy(wchar_t *restrict s1, const wchar_t *restrict s2, size_t n);
+wchar_t *wmemmove(wchar_t *s1, const wchar_t *s2, size_t n);
+wchar_t *wcsncat(wchar_t *restrict s1, const wchar_t *restrict s2, size_t n);
+int wcscoll(const wchar_t *s1, const wchar_t *s2);
+size_t wcsxfrm(wchar_t *restrict s1, const wchar_t *restrict s2, size_t n);
+int wmemcmp(const wchar_t *s1, const wchar_t *s2, size_t n);
+size_t wcscspn(const wchar_t *s1, const wchar_t *s2);
+wchar_t *wcspbrk(const wchar_t *s1, const wchar_t *s2);
+wchar_t *wcsrchr(const wchar_t *s, wchar_t c);
+size_t wcsspn(const wchar_t *s1, const wchar_t *s2);
+wchar_t *wcsstr(const wchar_t *s1, const wchar_t *s2);
+wchar_t *wcstok(wchar_t *restrict s1, const wchar_t *restrict s2, wchar_t **restrict ptr);
+wchar_t *wmemchr(const wchar_t *s, wchar_t c, size_t n);
+wchar_t *wmemset(wchar_t *s, wchar_t c, size_t n);
+size_t wcsftime(wchar_t *restrict s, size_t maxsize, const wchar_t *restrict format, const struct tm *restrict timeptr);
+size_t mbsrtowcs(wchar_t *restrict dst, const char **restrict src, size_t len, mbstate_t *restrict ps);
+size_t wcsrtombs(char *restrict dst, const wchar_t **restrict src, size_t len, mbstate_t *restrict ps);
 #define __STDC_VERSION_WCHAR_H__ 202311L
 #endif
 `,
@@ -728,9 +797,11 @@ void *alloca(size_t size);
 #ifndef __cplusplus
 #define static_assert _Static_assert
 #endif
+#define __STDC_VERSION_ASSERT_H__ 202311L
 `,
 	"float.h": `#ifndef __CC_FLOAT_H
 #define __CC_FLOAT_H
+#define __STDC_VERSION_FLOAT_H__ 202311L
 #define FLT_RADIX 2
 #define FLT_MANT_DIG 24
 #define DBL_MANT_DIG 53
@@ -974,6 +1045,24 @@ typedef _Atomic size_t atomic_size_t;
 typedef _Atomic ptrdiff_t atomic_ptrdiff_t;
 typedef _Atomic intmax_t atomic_intmax_t;
 typedef _Atomic uintmax_t atomic_uintmax_t;
+typedef _Atomic unsigned char atomic_char8_t;
+typedef _Atomic int_least8_t atomic_int_least8_t;
+typedef _Atomic uint_least8_t atomic_uint_least8_t;
+typedef _Atomic int_least16_t atomic_int_least16_t;
+typedef _Atomic uint_least16_t atomic_uint_least16_t;
+typedef _Atomic int_least32_t atomic_int_least32_t;
+typedef _Atomic uint_least32_t atomic_uint_least32_t;
+typedef _Atomic int_least64_t atomic_int_least64_t;
+typedef _Atomic uint_least64_t atomic_uint_least64_t;
+typedef _Atomic int_fast8_t atomic_int_fast8_t;
+typedef _Atomic uint_fast8_t atomic_uint_fast8_t;
+typedef _Atomic int_fast16_t atomic_int_fast16_t;
+typedef _Atomic uint_fast16_t atomic_uint_fast16_t;
+typedef _Atomic int_fast32_t atomic_int_fast32_t;
+typedef _Atomic uint_fast32_t atomic_uint_fast32_t;
+typedef _Atomic int_fast64_t atomic_int_fast64_t;
+typedef _Atomic uint_fast64_t atomic_uint_fast64_t;
+#define ATOMIC_CHAR8_T_LOCK_FREE 2
 #define __STDC_VERSION_STDATOMIC_H__ 202311L
 #endif
 `,
@@ -1071,6 +1160,178 @@ unsigned long long stdc_bit_ceil_ull(unsigned long long __value);
 #define stdc_bit_ceil(__value) _Generic((__value), unsigned char: stdc_bit_ceil_uc, unsigned short: stdc_bit_ceil_us, unsigned int: stdc_bit_ceil_ui, unsigned long: stdc_bit_ceil_ul, unsigned long long: stdc_bit_ceil_ull)(__value)
 #endif
 `,
+	"wctype.h": `#ifndef __CC_WCTYPE_H
+#define __CC_WCTYPE_H
+typedef unsigned int wint_t;
+typedef unsigned int wctrans_t;
+typedef unsigned int wctype_t;
+#ifndef WEOF
+#define WEOF (0xffffffffu)
+#endif
+int iswalnum(wint_t wc);
+int iswalpha(wint_t wc);
+int iswblank(wint_t wc);
+int iswcntrl(wint_t wc);
+int iswdigit(wint_t wc);
+int iswgraph(wint_t wc);
+int iswlower(wint_t wc);
+int iswprint(wint_t wc);
+int iswpunct(wint_t wc);
+int iswspace(wint_t wc);
+int iswupper(wint_t wc);
+int iswxdigit(wint_t wc);
+int iswctype(wint_t wc, wctype_t desc);
+wctype_t wctype(const char *property);
+wint_t towlower(wint_t wc);
+wint_t towupper(wint_t wc);
+wint_t towctrans(wint_t wc, wctrans_t desc);
+wctrans_t wctrans(const char *property);
+#endif
+`,
+	"fenv.h": `#ifndef __CC_FENV_H
+#define __CC_FENV_H
+typedef struct { int __env; } fenv_t;
+typedef int fexcept_t;
+typedef struct { int __mode; } femode_t;
+/* Go rounds to nearest and keeps no exception flags. */
+#define FE_TONEAREST 0
+#define FE_ALL_EXCEPT 0
+const void *__cc_fe_dfl(void);
+#define FE_DFL_ENV ((const fenv_t *)__cc_fe_dfl())
+#define FE_DFL_MODE ((const femode_t *)__cc_fe_dfl())
+int feclearexcept(int excepts);
+int fegetexceptflag(fexcept_t *flagp, int excepts);
+int feraiseexcept(int excepts);
+int fesetexcept(int excepts);
+int fesetexceptflag(const fexcept_t *flagp, int excepts);
+int fetestexceptflag(const fexcept_t *flagp, int excepts);
+int fetestexcept(int excepts);
+int fegetmode(femode_t *modep);
+int fegetround(void);
+int fesetmode(const femode_t *modep);
+int fesetround(int rnd);
+int fegetenv(fenv_t *envp);
+int feholdexcept(fenv_t *envp);
+int fesetenv(const fenv_t *envp);
+int feupdateenv(const fenv_t *envp);
+#define __STDC_VERSION_FENV_H__ 202311L
+#endif
+`,
+	"tgmath.h": `#ifndef __CC_TGMATH_H
+#define __CC_TGMATH_H
+#include <math.h>
+#include <complex.h>
+#define __STDC_VERSION_TGMATH_H__ 202311L
+/* The type of the generic arguments: an integer is double. */
+#define __TG_T(x) _Generic((x), float: 0.0f, long double: 0.0L, float _Complex: (float _Complex)0, double _Complex: (double _Complex)0, long double _Complex: (long double _Complex)0, default: 0.0)
+#define acos(__x0) _Generic(__TG_T(__x0), float: acosf, long double: acosl, float _Complex: cacosf, double _Complex: cacos, long double _Complex: cacosl, default: acos)(__x0)
+#define asin(__x0) _Generic(__TG_T(__x0), float: asinf, long double: asinl, float _Complex: casinf, double _Complex: casin, long double _Complex: casinl, default: asin)(__x0)
+#define atan(__x0) _Generic(__TG_T(__x0), float: atanf, long double: atanl, float _Complex: catanf, double _Complex: catan, long double _Complex: catanl, default: atan)(__x0)
+#define acosh(__x0) _Generic(__TG_T(__x0), float: acoshf, long double: acoshl, float _Complex: cacoshf, double _Complex: cacosh, long double _Complex: cacoshl, default: acosh)(__x0)
+#define asinh(__x0) _Generic(__TG_T(__x0), float: asinhf, long double: asinhl, float _Complex: casinhf, double _Complex: casinh, long double _Complex: casinhl, default: asinh)(__x0)
+#define atanh(__x0) _Generic(__TG_T(__x0), float: atanhf, long double: atanhl, float _Complex: catanhf, double _Complex: catanh, long double _Complex: catanhl, default: atanh)(__x0)
+#define cos(__x0) _Generic(__TG_T(__x0), float: cosf, long double: cosl, float _Complex: ccosf, double _Complex: ccos, long double _Complex: ccosl, default: cos)(__x0)
+#define sin(__x0) _Generic(__TG_T(__x0), float: sinf, long double: sinl, float _Complex: csinf, double _Complex: csin, long double _Complex: csinl, default: sin)(__x0)
+#define tan(__x0) _Generic(__TG_T(__x0), float: tanf, long double: tanl, float _Complex: ctanf, double _Complex: ctan, long double _Complex: ctanl, default: tan)(__x0)
+#define cosh(__x0) _Generic(__TG_T(__x0), float: coshf, long double: coshl, float _Complex: ccoshf, double _Complex: ccosh, long double _Complex: ccoshl, default: cosh)(__x0)
+#define sinh(__x0) _Generic(__TG_T(__x0), float: sinhf, long double: sinhl, float _Complex: csinhf, double _Complex: csinh, long double _Complex: csinhl, default: sinh)(__x0)
+#define tanh(__x0) _Generic(__TG_T(__x0), float: tanhf, long double: tanhl, float _Complex: ctanhf, double _Complex: ctanh, long double _Complex: ctanhl, default: tanh)(__x0)
+#define exp(__x0) _Generic(__TG_T(__x0), float: expf, long double: expl, float _Complex: cexpf, double _Complex: cexp, long double _Complex: cexpl, default: exp)(__x0)
+#define log(__x0) _Generic(__TG_T(__x0), float: logf, long double: logl, float _Complex: clogf, double _Complex: clog, long double _Complex: clogl, default: log)(__x0)
+#define pow(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: powf, long double: powl, float _Complex: cpowf, double _Complex: cpow, long double _Complex: cpowl, default: pow)(__x0, __x1)
+#define sqrt(__x0) _Generic(__TG_T(__x0), float: sqrtf, long double: sqrtl, float _Complex: csqrtf, double _Complex: csqrt, long double _Complex: csqrtl, default: sqrt)(__x0)
+#define fabs(__x0) _Generic(__TG_T(__x0), float: fabsf, long double: fabsl, float _Complex: cabsf, double _Complex: cabs, long double _Complex: cabsl, default: fabs)(__x0)
+#define atan2(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: atan2f, long double: atan2l, default: atan2)(__x0, __x1)
+#define cbrt(__x0) _Generic(__TG_T(__x0), float: cbrtf, long double: cbrtl, default: cbrt)(__x0)
+#define ceil(__x0) _Generic(__TG_T(__x0), float: ceilf, long double: ceill, default: ceil)(__x0)
+#define copysign(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: copysignf, long double: copysignl, default: copysign)(__x0, __x1)
+#define erf(__x0) _Generic(__TG_T(__x0), float: erff, long double: erfl, default: erf)(__x0)
+#define erfc(__x0) _Generic(__TG_T(__x0), float: erfcf, long double: erfcl, default: erfc)(__x0)
+#define exp2(__x0) _Generic(__TG_T(__x0), float: exp2f, long double: exp2l, default: exp2)(__x0)
+#define expm1(__x0) _Generic(__TG_T(__x0), float: expm1f, long double: expm1l, default: expm1)(__x0)
+#define fdim(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fdimf, long double: fdiml, default: fdim)(__x0, __x1)
+#define floor(__x0) _Generic(__TG_T(__x0), float: floorf, long double: floorl, default: floor)(__x0)
+#define fma(__x0, __x1, __x2) _Generic(__TG_T(__x0) + __TG_T(__x1) + __TG_T(__x2), float: fmaf, long double: fmal, default: fma)(__x0, __x1, __x2)
+#define fmax(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmaxf, long double: fmaxl, default: fmax)(__x0, __x1)
+#define fmin(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fminf, long double: fminl, default: fmin)(__x0, __x1)
+#define fmod(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmodf, long double: fmodl, default: fmod)(__x0, __x1)
+#define frexp(__x0, __x1) _Generic(__TG_T(__x0), float: frexpf, long double: frexpl, default: frexp)(__x0, __x1)
+#define hypot(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: hypotf, long double: hypotl, default: hypot)(__x0, __x1)
+#define ilogb(__x0) _Generic(__TG_T(__x0), float: ilogbf, long double: ilogbl, default: ilogb)(__x0)
+#define ldexp(__x0, __x1) _Generic(__TG_T(__x0), float: ldexpf, long double: ldexpl, default: ldexp)(__x0, __x1)
+#define lgamma(__x0) _Generic(__TG_T(__x0), float: lgammaf, long double: lgammal, default: lgamma)(__x0)
+#define llrint(__x0) _Generic(__TG_T(__x0), float: llrintf, long double: llrintl, default: llrint)(__x0)
+#define llround(__x0) _Generic(__TG_T(__x0), float: llroundf, long double: llroundl, default: llround)(__x0)
+#define log10(__x0) _Generic(__TG_T(__x0), float: log10f, long double: log10l, default: log10)(__x0)
+#define log1p(__x0) _Generic(__TG_T(__x0), float: log1pf, long double: log1pl, default: log1p)(__x0)
+#define log2(__x0) _Generic(__TG_T(__x0), float: log2f, long double: log2l, default: log2)(__x0)
+#define logb(__x0) _Generic(__TG_T(__x0), float: logbf, long double: logbl, default: logb)(__x0)
+#define lrint(__x0) _Generic(__TG_T(__x0), float: lrintf, long double: lrintl, default: lrint)(__x0)
+#define lround(__x0) _Generic(__TG_T(__x0), float: lroundf, long double: lroundl, default: lround)(__x0)
+#define nearbyint(__x0) _Generic(__TG_T(__x0), float: nearbyintf, long double: nearbyintl, default: nearbyint)(__x0)
+#define nextafter(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: nextafterf, long double: nextafterl, default: nextafter)(__x0, __x1)
+#define nexttoward(__x0, __x1) _Generic(__TG_T(__x0), float: nexttowardf, long double: nexttowardl, default: nexttoward)(__x0, __x1)
+#define remainder(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: remainderf, long double: remainderl, default: remainder)(__x0, __x1)
+#define remquo(__x0, __x1, __x2) _Generic(__TG_T(__x0) + __TG_T(__x1), float: remquof, long double: remquol, default: remquo)(__x0, __x1, __x2)
+#define rint(__x0) _Generic(__TG_T(__x0), float: rintf, long double: rintl, default: rint)(__x0)
+#define round(__x0) _Generic(__TG_T(__x0), float: roundf, long double: roundl, default: round)(__x0)
+#define scalbn(__x0, __x1) _Generic(__TG_T(__x0), float: scalbnf, long double: scalbnl, default: scalbn)(__x0, __x1)
+#define scalbln(__x0, __x1) _Generic(__TG_T(__x0), float: scalblnf, long double: scalblnl, default: scalbln)(__x0, __x1)
+#define tgamma(__x0) _Generic(__TG_T(__x0), float: tgammaf, long double: tgammal, default: tgamma)(__x0)
+#define trunc(__x0) _Generic(__TG_T(__x0), float: truncf, long double: truncl, default: trunc)(__x0)
+#define acospi(__x0) _Generic(__TG_T(__x0), float: acospif, long double: acospil, default: acospi)(__x0)
+#define asinpi(__x0) _Generic(__TG_T(__x0), float: asinpif, long double: asinpil, default: asinpi)(__x0)
+#define atan2pi(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: atan2pif, long double: atan2pil, default: atan2pi)(__x0, __x1)
+#define atanpi(__x0) _Generic(__TG_T(__x0), float: atanpif, long double: atanpil, default: atanpi)(__x0)
+#define compoundn(__x0, __x1) _Generic(__TG_T(__x0), float: compoundnf, long double: compoundnl, default: compoundn)(__x0, __x1)
+#define cospi(__x0) _Generic(__TG_T(__x0), float: cospif, long double: cospil, default: cospi)(__x0)
+#define exp10m1(__x0) _Generic(__TG_T(__x0), float: exp10m1f, long double: exp10m1l, default: exp10m1)(__x0)
+#define exp10(__x0) _Generic(__TG_T(__x0), float: exp10f, long double: exp10l, default: exp10)(__x0)
+#define exp2m1(__x0) _Generic(__TG_T(__x0), float: exp2m1f, long double: exp2m1l, default: exp2m1)(__x0)
+#define fmaximum(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmaximumf, long double: fmaximuml, default: fmaximum)(__x0, __x1)
+#define fmaximum_mag(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmaximum_magf, long double: fmaximum_magl, default: fmaximum_mag)(__x0, __x1)
+#define fmaximum_num(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmaximum_numf, long double: fmaximum_numl, default: fmaximum_num)(__x0, __x1)
+#define fmaximum_mag_num(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fmaximum_mag_numf, long double: fmaximum_mag_numl, default: fmaximum_mag_num)(__x0, __x1)
+#define fminimum(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fminimumf, long double: fminimuml, default: fminimum)(__x0, __x1)
+#define fminimum_mag(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fminimum_magf, long double: fminimum_magl, default: fminimum_mag)(__x0, __x1)
+#define fminimum_num(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fminimum_numf, long double: fminimum_numl, default: fminimum_num)(__x0, __x1)
+#define fminimum_mag_num(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: fminimum_mag_numf, long double: fminimum_mag_numl, default: fminimum_mag_num)(__x0, __x1)
+#define fromfp(__x0, __x1, __x2) _Generic(__TG_T(__x0), float: fromfpf, long double: fromfpl, default: fromfp)(__x0, __x1, __x2)
+#define fromfpx(__x0, __x1, __x2) _Generic(__TG_T(__x0), float: fromfpxf, long double: fromfpxl, default: fromfpx)(__x0, __x1, __x2)
+#define llogb(__x0) _Generic(__TG_T(__x0), float: llogbf, long double: llogbl, default: llogb)(__x0)
+#define log10p1(__x0) _Generic(__TG_T(__x0), float: log10p1f, long double: log10p1l, default: log10p1)(__x0)
+#define log2p1(__x0) _Generic(__TG_T(__x0), float: log2p1f, long double: log2p1l, default: log2p1)(__x0)
+#define logp1(__x0) _Generic(__TG_T(__x0), float: logp1f, long double: logp1l, default: logp1)(__x0)
+#define nextdown(__x0) _Generic(__TG_T(__x0), float: nextdownf, long double: nextdownl, default: nextdown)(__x0)
+#define nextup(__x0) _Generic(__TG_T(__x0), float: nextupf, long double: nextupl, default: nextup)(__x0)
+#define pown(__x0, __x1) _Generic(__TG_T(__x0), float: pownf, long double: pownl, default: pown)(__x0, __x1)
+#define powr(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), float: powrf, long double: powrl, default: powr)(__x0, __x1)
+#define rootn(__x0, __x1) _Generic(__TG_T(__x0), float: rootnf, long double: rootnl, default: rootn)(__x0, __x1)
+#define roundeven(__x0) _Generic(__TG_T(__x0), float: roundevenf, long double: roundevenl, default: roundeven)(__x0)
+#define rsqrt(__x0) _Generic(__TG_T(__x0), float: rsqrtf, long double: rsqrtl, default: rsqrt)(__x0)
+#define sinpi(__x0) _Generic(__TG_T(__x0), float: sinpif, long double: sinpil, default: sinpi)(__x0)
+#define tanpi(__x0) _Generic(__TG_T(__x0), float: tanpif, long double: tanpil, default: tanpi)(__x0)
+#define ufromfp(__x0, __x1, __x2) _Generic(__TG_T(__x0), float: ufromfpf, long double: ufromfpl, default: ufromfp)(__x0, __x1, __x2)
+#define ufromfpx(__x0, __x1, __x2) _Generic(__TG_T(__x0), float: ufromfpxf, long double: ufromfpxl, default: ufromfpx)(__x0, __x1, __x2)
+#define carg(__x0) _Generic(__TG_T(__x0), float _Complex: cargf, long double _Complex: cargl, float: cargf, long double: cargl, default: carg)(__x0)
+#define cimag(__x0) _Generic(__TG_T(__x0), float _Complex: cimagf, long double _Complex: cimagl, float: cimagf, long double: cimagl, default: cimag)(__x0)
+#define conj(__x0) _Generic(__TG_T(__x0), float _Complex: conjf, long double _Complex: conjl, float: conjf, long double: conjl, default: conj)(__x0)
+#define cproj(__x0) _Generic(__TG_T(__x0), float _Complex: cprojf, long double _Complex: cprojl, float: cprojf, long double: cprojl, default: cproj)(__x0)
+#define creal(__x0) _Generic(__TG_T(__x0), float _Complex: crealf, long double _Complex: creall, float: crealf, long double: creall, default: creal)(__x0)
+#define fadd(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), long double: faddl, default: fadd)(__x0, __x1)
+#define dadd(__x0, __x1) daddl(__x0, __x1)
+#define fsub(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), long double: fsubl, default: fsub)(__x0, __x1)
+#define dsub(__x0, __x1) dsubl(__x0, __x1)
+#define fmul(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), long double: fmull, default: fmul)(__x0, __x1)
+#define dmul(__x0, __x1) dmull(__x0, __x1)
+#define fdiv(__x0, __x1) _Generic(__TG_T(__x0) + __TG_T(__x1), long double: fdivl, default: fdiv)(__x0, __x1)
+#define ddiv(__x0, __x1) ddivl(__x0, __x1)
+#define ffma(__x0, __x1, __x2) _Generic(__TG_T(__x0) + __TG_T(__x1) + __TG_T(__x2), long double: ffmal, default: ffma)(__x0, __x1, __x2)
+#define dfma(__x0, __x1, __x2) dfmal(__x0, __x1, __x2)
+#define fsqrt(__x0) _Generic(__TG_T(__x0), long double: fsqrtl, default: fsqrt)(__x0)
+#define dsqrt(__x0) dsqrtl(__x0)
+#endif
+`,
 	"stdckdint.h": `#ifndef __CC_STDCKDINT_H
 #define __CC_STDCKDINT_H
 #define ckd_add(result, a, b) __builtin_add_overflow(a, b, result)
@@ -1081,6 +1342,7 @@ unsigned long long stdc_bit_ceil_ull(unsigned long long __value);
 `,
 	"complex.h": `#ifndef __CC_COMPLEX_H
 #define __CC_COMPLEX_H
+#define __STDC_VERSION_COMPLEX_H__ 202311L
 #define complex _Complex
 #define _Complex_I (__extension__ 1.0iF)
 #define I _Complex_I
@@ -1120,15 +1382,28 @@ float complex csqrtf(float complex z);
 float complex cpowf(float complex x, float complex y);
 float complex csinf(float complex z);
 float complex ccosf(float complex z);
-#define creall(z) creal(z)
-#define cimagl(z) cimag(z)
-#define conjl(z) conj(z)
-#define cabsl(z) cabs(z)
-#define cargl(z) carg(z)
-#define cexpl(z) cexp(z)
-#define clogl(z) clog(z)
-#define csqrtl(z) csqrt(z)
-#define cpowl(x, y) cpow(x, y)
+long double creall(long double complex z);
+long double cimagl(long double complex z);
+long double complex conjl(long double complex z);
+long double cabsl(long double complex z);
+long double cargl(long double complex z);
+long double complex cprojl(long double complex z);
+long double complex cexpl(long double complex z);
+long double complex clogl(long double complex z);
+long double complex csqrtl(long double complex z);
+long double complex cpowl(long double complex x, long double complex y);
+long double complex csinl(long double complex z);
+long double complex ccosl(long double complex z);
+long double complex ctanl(long double complex z);
+long double complex casinl(long double complex z);
+long double complex cacosl(long double complex z);
+long double complex catanl(long double complex z);
+long double complex csinhl(long double complex z);
+long double complex ccoshl(long double complex z);
+long double complex ctanhl(long double complex z);
+long double complex casinhl(long double complex z);
+long double complex cacoshl(long double complex z);
+long double complex catanhl(long double complex z);
 #endif
 `,
 	"dlfcn.h": `#ifndef __CC_DLFCN_H
@@ -1368,6 +1643,10 @@ int vscanf(const char *restrict format, va_list arg);
 int vfscanf(FILE *restrict stream, const char *restrict format, va_list arg);
 int vsscanf(const char *restrict s, const char *restrict format, va_list arg);
 #define __STDC_VERSION_STDIO_H__ 202311L
+#define _PRINTF_NAN_LEN_MAX 4
+typedef struct { long long __pos; } fpos_t;
+int fgetpos(FILE *restrict stream, fpos_t *restrict pos);
+int fsetpos(FILE *stream, const fpos_t *pos);
 #endif
 `,
 	"stdlib.h": `#ifndef __CC_STDLIB_H
@@ -1401,6 +1680,22 @@ int rand(void);
 void srand(unsigned int seed);
 char *getenv(const char *name);
 int atexit(void (*func)(void));
+int at_quick_exit(void (*func)(void));
+_Noreturn void quick_exit(int status);
+typedef int once_flag;
+#define ONCE_FLAG_INIT 0
+void call_once(once_flag *flag, void (*func)(void));
+int strfromd(char *restrict s, size_t n, const char *restrict format, double fp);
+int strfromf(char *restrict s, size_t n, const char *restrict format, float fp);
+int strfroml(char *restrict s, size_t n, const char *restrict format, long double fp);
+void free_sized(void *ptr, size_t size);
+void free_aligned_sized(void *ptr, size_t alignment, size_t size);
+size_t memalignment(const void *p);
+int mblen(const char *s, size_t n);
+int mbtowc(wchar_t *restrict pwc, const char *restrict s, size_t n);
+int wctomb(char *s, wchar_t wc);
+size_t mbstowcs(wchar_t *restrict pwcs, const char *restrict s, size_t n);
+size_t wcstombs(char *restrict s, const wchar_t *restrict pwcs, size_t n);
 void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *));
 int system(const char *string);
@@ -1515,6 +1810,7 @@ char *stpncpy(char *restrict s1, const char *restrict s2, size_t n);
 size_t strlcpy(char *restrict s1, const char *restrict s2, size_t n);
 size_t strlcat(char *restrict s1, const char *restrict s2, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
+size_t strxfrm(char *restrict s1, const char *restrict s2, size_t n);
 #endif
 `,
 	"sys/types.h": `#ifndef __CC_SYS_TYPES_H
