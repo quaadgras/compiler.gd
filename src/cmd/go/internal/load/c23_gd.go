@@ -57,8 +57,9 @@ func importsC23AsGenerated(importer *Package) bool {
 // "C" files and its files with a cgo build constraint are in, and those
 // with !cgo out, as with cgo. It can if, loaded so, every preamble and C
 // file uses no #cgo directive and includes only headers cmd/cc provides
-// or the package's own, and it has no C++, Objective-C, Fortran or
-// assembly for a C compiler.
+// or the package's own, every name the Go uses as C.name is one cmd/cc
+// defines (internal/testpty's posix_openpt is not), and it has no C++,
+// Objective-C, Fortran or assembly for a C compiler.
 func ccContext(bp *build.Package, err error) (build.Context, bool) {
 	ctx := cfg.BuildContext
 	var noGo *build.NoGoError
@@ -71,7 +72,7 @@ func ccContext(bp *build.Package, err error) (build.Context, bool) {
 		return ctx, false
 	}
 	ctx.CgoEnabled = true
-	cgoFile := false
+	var cgoFiles []string
 	for _, f := range bp.IgnoredGoFiles {
 		if ok, _ := ctx.MatchFile(bp.Dir, f); !ok {
 			continue
@@ -83,9 +84,9 @@ func ccContext(bp *build.Package, err error) (build.Context, bool) {
 		if !ccSource(pre) {
 			return ctx, false
 		}
-		cgoFile = true
+		cgoFiles = append(cgoFiles, f)
 	}
-	if !cgoFile {
+	if len(cgoFiles) == 0 {
 		return ctx, false
 	}
 	for _, f := range append(bp.CXXFiles, append(bp.MFiles, append(bp.FFiles, bp.SFiles...)...)...) {
@@ -98,6 +99,10 @@ func ccContext(bp *build.Package, err error) (build.Context, bool) {
 		if err != nil || !ccSource(string(b)) {
 			return ctx, false
 		}
+	}
+	// An error is cmd/cc's to report when it builds the package.
+	if missing, err := cchost.Undefined(bp.Dir, cgoFiles); err == nil && len(missing) > 0 {
+		return ctx, false
 	}
 	return ctx, true
 }

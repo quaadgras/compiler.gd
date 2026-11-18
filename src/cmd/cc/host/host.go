@@ -40,6 +40,13 @@ func Package(dir, pkg string, goFiles, cFiles []string) ([]File, error) {
 	return ccmain.Package(dir, pkg, goFiles, cFiles)
 }
 
+// Undefined returns the names that goFiles, in dir, use as C.name and
+// Package would not define: a package that uses one is built with cgo
+// off.
+func Undefined(dir string, goFiles []string) ([]string, error) {
+	return ccmain.Undefined(dir, goFiles)
+}
+
 // Headers returns the names of the standard headers cmd/cc provides,
 // which C that it compiles may include with <...>.
 func Headers() []string {
