@@ -404,6 +404,11 @@ type workType struct {
 		//
 		// Protected by STW.
 		enabled bool
+		// collect is set with enabled if the goroutines found blocked
+		// forever in this cycle are collected, and not reported.
+		collect bool
+		// collected counts the goroutines collected so far.
+		collected atomic.Uint64
 		// Once set, it indicates that the GC has performed goroutine leak detection during
 		// the current GC cycle; it is set during gcMarkDone, right after goroutine leak detection,
 		// and unset during gcMarkTermination;
@@ -873,7 +878,13 @@ func gcStart(trigger gcTrigger) {
 	}
 
 	// If goroutine leak detection is pending, enable it for this GC cycle.
-	if work.goroutineLeak.pending.Load() {
+	if !work.goroutineLeak.pending.Load() && collectGoroutines() && (work.userForced || work.cycles.Load()%collectGoroutinesEvery == 0) {
+		// Find the goroutines blocked forever, as below, and
+		// collect them.
+		work.goroutineLeak.enabled = true
+		work.goroutineLeak.collect = true
+		setSyncObjectsUntraceable()
+	} else if work.goroutineLeak.pending.Load() {
 		work.goroutineLeak.enabled = true
 		work.goroutineLeak.pending.Store(false)
 		// Set all sync objects of blocked goroutines as untraceable
@@ -1165,6 +1176,11 @@ func (gp *g) isMaybeRunnable() bool {
 		// If the goroutine is not waiting, then clearly it is maybe runnable.
 		return true
 	}
+	if work.goroutineLeak.collect && !gp.collectable() {
+		// A goroutine that stays is a root, as one that can run is:
+		// what it holds stays too.
+		return true
+	}
 
 	switch gp.waitreason {
 	case waitReasonSelectNoCases,
@@ -1290,6 +1306,20 @@ func findGoroutineLeaks() bool {
 	if findMaybeRunnableGoroutines() {
 		// We found more work, so we need to resume the marking phase.
 		return false
+	}
+
+	if work.goroutineLeak.collect {
+		// The remaining goroutines are blocked on what no goroutine
+		// that can run reaches: they are collected, with all that
+		// only they held, which is not marked.
+		systemstack(func() {
+			for i := work.nMaybeRunnableStackRoots; i < work.nStackRoots; i++ {
+				gcCollectGoroutine(work.stackRoots[i])
+			}
+		})
+		work.goroutineLeak.collected.Add(int64(work.nStackRoots - work.nMaybeRunnableStackRoots))
+		work.nMaybeRunnableStackRoots = work.nStackRoots
+		return true
 	}
 
 	// For the remaining goroutines, mark them as unreachable and leaked.
@@ -1516,6 +1546,7 @@ func gcMarkTermination(stw worldStop) {
 	systemstack(func() {
 		// Pull the GC out of goroutine leak detection mode.
 		work.goroutineLeak.enabled = false
+		work.goroutineLeak.collect = false
 		goroutineLeakDone = work.goroutineLeak.done
 		work.goroutineLeak.done = false
 
@@ -2346,4 +2377,96 @@ func gcTestPointerClass(p unsafe.Pointer) string {
 	}
 	KeepAlive(p)
 	return "other"
+}
+
+// Goroutine collection.
+//
+// A goroutine that waits on a channel, a select, a mutex, a wait group or
+// a condition variable that no goroutine that can run reaches will wait
+// forever: nothing can wake it. The collector finds such goroutines as the
+// goroutine leak profile does (findGoroutineLeaks), in the cycles a program
+// forces with runtime.GC and in one automatic cycle in
+// collectGoroutinesEvery, and frees them, with their stacks and whatever
+// only they kept alive: the finalizers and cleanups of that run. Their
+// deferred functions do not run, as they would not have.
+//
+// The main goroutine is never collected (if every other goroutine is, the
+// program ends with "all goroutines are asleep"), and neither is one that
+// is locked to a thread, in a synctest bubble, or the runtime's own. A
+// goroutine that is not collected is a root: what it holds stays, the
+// goroutines blocked on that included.
+//
+// GODEBUG=collectgoroutines=0 turns this off.
+
+const collectGoroutinesEvery = 4
+
+func collectGoroutines() bool {
+	return debug.collectgoroutines != 0 && GOARCH != "wasm" && !raceenabled && !msanenabled && !asanenabled && !valgrindenabled && !traceEnabled()
+}
+
+// collectable reports whether gp, which waits on something that may turn
+// out to be unreachable, can be collected if it does.
+func (gp *g) collectable() bool {
+	return gp.goid != 1 && gp.lockedm == 0 && gp.m == nil && gp.bubble == nil && gp._panic == nil &&
+		gp.syscallsp == 0 && gp.coroarg == nil && !isSystemGoroutine(gp, false)
+}
+
+// gcCollectGoroutine frees gp, which is blocked forever. The world is
+// stopped.
+//
+//go:systemstack
+func gcCollectGoroutine(gp *g) {
+	// A goroutine that waits for a semaphore (a mutex, a wait group) is
+	// in the table of semaphores, which outlives it: it leaves it, with
+	// every other goroutine that waits for the same one, all of them
+	// collected in this cycle.
+	if sg := gp.waiting; sg != nil && gp.waitreason.isSyncWait() && gp.waitreason != waitReasonSyncCondWait {
+		addr := (*uint32)(unsafe.Pointer(sg.elem.uintptr()))
+		root := semtable.rootFor(addr)
+		lock(&root.lock)
+		for {
+			s, _, _ := root.dequeue(addr)
+			if s == nil {
+				break
+			}
+			root.nwait.Add(-1)
+		}
+		unlock(&root.lock)
+	}
+	// Its other sudogs are in the queues of channels, or of a condition
+	// variable, that are unreachable as they are: garbage together.
+	for sg := gp.waiting; sg != nil; {
+		next := sg.waitlink
+		sg.waitlink = nil
+		sg.g = nil
+		sg = next
+	}
+	gp.waiting = nil
+
+	pp := getg().m.p.ptr()
+	casgstatus(gp, _Gwaiting, _Gdead)
+	gcController.addScannableStack(pp, -int64(gp.stack.hi-gp.stack.lo))
+	gp.preemptStop = false
+	gp.paniconfault = false
+	gp._defer = nil
+	gp._panic = nil
+	gp.writebuf = nil
+	gp.waitreason = waitReasonZero
+	gp.param = nil
+	gp.labels = nil
+	gp.timer = nil
+	gp.c23 = nil
+	gp.bubble = nil
+	gp.fipsOnlyBypass = false
+	gp.secret = 0
+	gp.activeStackChans = false
+	gp.parkingOnChan.Store(false)
+	if gp.gcAssistBytes > 0 {
+		assistWorkPerByte := gcController.assistWorkPerByte.Load()
+		gcController.bgScanCredit.Add(int64(assistWorkPerByte * float64(gp.gcAssistBytes)))
+		gp.gcAssistBytes = 0
+	}
+	// Nothing of it is scanned.
+	gp.gcscandone = true
+	gfput(pp, gp)
 }

@@ -2194,3 +2194,7 @@ func HeapNew[T any]() *T {
 	var zero T
 	return (*T)(mallocgc(unsafe.Sizeof(zero), abi.TypeFor[T](), true))
 }
+
+// GoroutinesCollected returns the number of goroutines the collector
+// found blocked forever and freed.
+func GoroutinesCollected() uint64 { return work.goroutineLeak.collected.Load() }

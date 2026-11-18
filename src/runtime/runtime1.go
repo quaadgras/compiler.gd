@@ -324,6 +324,7 @@ var debug struct {
 	asyncpreemptoff          int32
 	harddecommit             int32
 	adaptivestackstart       int32
+	collectgoroutines        int32
 	tracefpunwindoff         int32
 	traceadvanceperiod       int32
 	traceCheckStackOwnership int32
@@ -356,6 +357,7 @@ var debug struct {
 
 var dbgvars = []*dbgVar{
 	{name: "adaptivestackstart", value: &debug.adaptivestackstart},
+	{name: "collectgoroutines", value: &debug.collectgoroutines},
 	{name: "asyncpreemptoff", value: &debug.asyncpreemptoff},
 	{name: "cgocheck", value: &debug.cgocheck},
 	{name: "clobberfree", value: &debug.clobberfree},
@@ -395,6 +397,7 @@ func parseRuntimeDebugVars(godebug string) {
 	debug.cgocheck = 1
 	debug.invalidptr = 1
 	debug.adaptivestackstart = 1 // set this to 0 to turn larger initial goroutine stacks off
+	debug.collectgoroutines = 1  // set this to 0 to keep the goroutines that are blocked forever
 	if GOOS == "linux" {
 		// On Linux, MADV_FREE is faster than MADV_DONTNEED,
 		// but doesn't affect many of the statistics that
