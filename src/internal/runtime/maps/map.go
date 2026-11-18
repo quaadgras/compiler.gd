@@ -261,6 +261,10 @@ type Map struct {
 	// contains a tombstone.
 	tombstonePossible bool
 
+	// lock is taken by the operations on a map that other goroutines can
+	// reach (shared.go), by any number of readers or by one writer.
+	lock uint32
+
 	// clearSeq is a sequence counter of calls to Clear. It is used to
 	// detect map clears during iteration.
 	clearSeq uint64
@@ -389,6 +393,7 @@ func (m *Map) installTableSplit(old, left, right *table) {
 		// No room for another level in the directory. Grow the
 		// directory.
 		newDir := make([]*table, m.dirLen*2)
+		shareAlloc(unsafe.Pointer(&newDir[0]))
 		for i := range m.dirLen {
 			t := m.directoryAt(uintptr(i))
 			newDir[2*i] = t
@@ -659,6 +664,7 @@ func (m *Map) growToTable(typ *abi.MapType) *table {
 	}
 
 	directory := make([]*table, 1)
+	shareAlloc(unsafe.Pointer(&directory[0]))
 
 	directory[0] = tab
 
@@ -671,6 +677,17 @@ func (m *Map) growToTable(typ *abi.MapType) *table {
 }
 
 func (m *Map) Delete(typ *abi.MapType, key unsafe.Pointer) {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		typ.Hasher(key, m.seed) // may panic: not with the lock held
+		m.wlock()
+		m.delete(typ, key)
+		m.wunlock()
+		return
+	}
+	m.delete(typ, key)
+}
+
+func (m *Map) delete(typ *abi.MapType, key unsafe.Pointer) {
 	if m == nil || m.Used() == 0 {
 		if err := mapKeyError(typ, key); err != nil {
 			panic(err) // see issue 23734
@@ -759,6 +776,16 @@ func (m *Map) deleteSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) {
 
 // Clear deletes all entries from the map resulting in an empty map.
 func (m *Map) Clear(typ *abi.MapType) {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		m.wlock()
+		m.clear(typ)
+		m.wunlock()
+		return
+	}
+	m.clear(typ)
+}
+
+func (m *Map) clear(typ *abi.MapType) {
 	if m == nil || m.Used() == 0 && !m.tombstonePossible {
 		return
 	}
@@ -808,6 +835,16 @@ func (m *Map) clearSmall(typ *abi.MapType) {
 }
 
 func (m *Map) Clone(typ *abi.MapType) *Map {
+	if isShared(unsafe.Pointer(m)) {
+		m.rlock()
+		m2 := m.clone(typ)
+		m.runlock()
+		return m2
+	}
+	return m.clone(typ)
+}
+
+func (m *Map) clone(typ *abi.MapType) *Map {
 	// Note: this should never be called with a nil map.
 	if m.writing != 0 {
 		fatal("concurrent map clone and map write")
@@ -817,6 +854,7 @@ func (m *Map) Clone(typ *abi.MapType) *Map {
 	m2 := new(Map)
 	*m2 = *m
 	m = m2
+	m.lock = 0
 
 	// We need to just deep copy the dirPtr field.
 	if m.dirPtr == nil {

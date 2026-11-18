@@ -392,6 +392,10 @@ type timeTimer struct {
 //
 //go:linkname newTimer time.newTimer
 func newTimer(when, period int64, f func(arg any, seq uintptr, delay int64), arg any, c *hchan) *timeTimer {
+	// The timer calls f(arg) on another goroutine.
+	publish(*(*unsafe.Pointer)(unsafe.Pointer(&f)))
+	publish(efaceOf(&arg).data)
+	publish(unsafe.Pointer(c))
 	t := new(timeTimer)
 	t.timer.init(nil, nil)
 	t.trace("new")

@@ -195,7 +195,7 @@ func MapType(gd *base.Invocation) *types.Type {
 		//
 		//     writing uint8
 		//     tombstonePossible bool
-		//     // N.B Padding
+		//     lock uint32
 		//
 		//     clearSeq uint64
 		// }
@@ -209,6 +209,7 @@ func MapType(gd *base.Invocation) *types.Type {
 			makefield("globalShift", types.Types[types.TUINT8]),
 			makefield("writing", types.Types[types.TUINT8]),
 			makefield("tombstonePossible", types.Types[types.TBOOL]),
+			makefield("lock", types.Types[types.TUINT32]),
 			makefield("clearSeq", types.Types[types.TUINT64]),
 		}
 
@@ -220,9 +221,13 @@ func MapType(gd *base.Invocation) *types.Type {
 		m.SetUnderlying(types.NewStruct(fields))
 		types.CalcSize(gd, m)
 
-		// The size of Map should be 48 bytes on 64 bit
-		// and 32 bytes on 32 bit platforms.
-		if size := int64(2*8 + 4*types.PtrSize /* one extra for globalDepth/globalShift/writing + padding */); m.Size() != size {
+		// The size of Map should be 48 bytes on 64 bit platforms, and 36 or
+		// 40 on 32 bit ones (the lock is in the padding of the first).
+		size := int64(48)
+		if types.PtrSize == 4 {
+			size = types.RoundUp(28, int64(types.Types[types.TUINT64].Alignment())) + 8
+		}
+		if m.Size() != size {
 			gd.Fatalf("internal/runtime/maps.Map size not correct: got %d, want %d", m.Size(), size)
 		}
 

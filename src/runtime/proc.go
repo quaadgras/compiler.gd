@@ -5369,6 +5369,8 @@ func malg(stacksize int32) *g {
 // Put it on the queue of g's waiting to run.
 // The compiler turns a go statement into a call to this.
 func newproc(fn *funcval) {
+	// The new goroutine shares what fn captures with this one.
+	publish(unsafe.Pointer(fn))
 	gp := getg()
 	pc := sys.GetCallerPC()
 	systemstack(func() {

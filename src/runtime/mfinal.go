@@ -431,6 +431,9 @@ func blockUntilEmptyFinalizerQueue(timeout int64) bool {
 // to avoid read-write races.
 func SetFinalizer(obj any, finalizer any) {
 	e := efaceOf(&obj)
+	// The finalizer runs on another goroutine.
+	publish(e.data)
+	publish(efaceOf(&finalizer).data)
 	etyp := e._type
 	if etyp == nil {
 		throw("runtime.SetFinalizer: first argument is nil")

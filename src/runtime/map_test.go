@@ -1151,8 +1151,15 @@ func TestMapIterDeleteReplace(t *testing.T) {
 func TestHmapSize(t *testing.T) {
 	// The structure of Map is defined in internal/runtime/maps/map.go
 	// and in cmd/compile/internal/reflectdata/map.go and must be in sync.
-	// The size of Map should be 48 bytes on 64 bit and 32 bytes on 32 bit platforms.
-	wantSize := uintptr(2*8 + 4*goarch.PtrSize)
+	// The size of Map should be 48 bytes on 64 bit platforms, and 36 or 40
+	// on 32 bit ones (the lock is in the padding of the first).
+	wantSize := uintptr(48)
+	if goarch.PtrSize == 4 {
+		wantSize = 28 + 8
+		if unsafe.Alignof(uint64(0)) == 8 {
+			wantSize = 40
+		}
+	}
 	gotSize := unsafe.Sizeof(maps.Map{})
 	if gotSize != wantSize {
 		t.Errorf("sizeof(maps.Map{})==%d, want %d", gotSize, wantSize)

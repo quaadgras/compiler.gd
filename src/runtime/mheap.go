@@ -490,6 +490,7 @@ type mspan struct {
 	allocBits  *gcBits
 	gcmarkBits *gcBits
 	pinnerBits *gcBits // bitmap for pinned objects; accessed atomically
+	sharedBits *gcBits // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -1826,6 +1827,7 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.allocBits = nil
 	span.gcmarkBits = nil
 	span.pinnerBits = nil
+	span.sharedBits = nil
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)
 }
@@ -2399,6 +2401,9 @@ type specialWeakHandle struct {
 
 //go:linkname internal_weak_runtime_registerWeakPointer weak.runtime_registerWeakPointer
 func internal_weak_runtime_registerWeakPointer(p unsafe.Pointer) unsafe.Pointer {
+	// Whoever holds the weak pointer can make a strong one, on any
+	// goroutine, and only the owner of p may publish it: it does now.
+	publish(p)
 	return unsafe.Pointer(getOrAddWeakHandle(p))
 }
 

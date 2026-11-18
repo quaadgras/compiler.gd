@@ -83,6 +83,9 @@ func sync_atomic_StoreUintptr(ptr *uintptr, new uintptr)
 //go:linkname sync_atomic_StorePointer sync/atomic.StorePointer
 //go:nosplit
 func sync_atomic_StorePointer(ptr *unsafe.Pointer, new unsafe.Pointer) {
+	if isShared(unsafe.Pointer(ptr)) {
+		publish(new)
+	}
 	if writeBarrier.enabled {
 		atomicwb(ptr, new)
 	}
@@ -98,6 +101,9 @@ func sync_atomic_SwapUintptr(ptr *uintptr, new uintptr) uintptr
 //go:linkname sync_atomic_SwapPointer sync/atomic.SwapPointer
 //go:nosplit
 func sync_atomic_SwapPointer(ptr *unsafe.Pointer, new unsafe.Pointer) unsafe.Pointer {
+	if isShared(unsafe.Pointer(ptr)) {
+		publish(new)
+	}
 	if writeBarrier.enabled {
 		atomicwb(ptr, new)
 	}
@@ -114,6 +120,9 @@ func sync_atomic_CompareAndSwapUintptr(ptr *uintptr, old, new uintptr) bool
 //go:linkname sync_atomic_CompareAndSwapPointer sync/atomic.CompareAndSwapPointer
 //go:nosplit
 func sync_atomic_CompareAndSwapPointer(ptr *unsafe.Pointer, old, new unsafe.Pointer) bool {
+	if isShared(unsafe.Pointer(ptr)) {
+		publish(new)
+	}
 	if writeBarrier.enabled {
 		atomicwb(ptr, new)
 	}

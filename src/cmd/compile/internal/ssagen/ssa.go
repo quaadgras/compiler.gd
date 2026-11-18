@@ -221,6 +221,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).TypeAssert = typecheck.LookupRuntimeFunc(gd, "typeAssert")
 	ir.Syms(gd).WBZero = typecheck.LookupRuntimeFunc(gd, "wbZero")
 	ir.Syms(gd).WBMove = typecheck.LookupRuntimeFunc(gd, "wbMove")
+	ir.Syms(gd).PublishPtr = typecheck.LookupRuntimeFunc(gd, "publishptr")
+	ir.Syms(gd).PublishMove = typecheck.LookupRuntimeFunc(gd, "publishmove")
 	ir.Syms(gd).X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")                       // bool
 	ir.Syms(gd).X86HasFMA = typecheck.LookupRuntimeVar(gd, "x86HasFMA")                       // bool
 	ir.Syms(gd).X86HasPOPCNT = typecheck.LookupRuntimeVar(gd, "x86HasPOPCNT")                 // bool
@@ -9593,6 +9595,13 @@ func (e *ssafn) UseWriteBarrier() bool {
 	return e.gd.Flag.WB
 }
 
+// UseShareBarrier reports whether stores of pointers publish what they
+// store in shared memory (runtime/shared.go). The runtime's packages do
+// it by hand, where they hand a pointer to another goroutine.
+func (e *ssafn) UseShareBarrier() bool {
+	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm
+}
+
 func (e *ssafn) Syslook(name string) *obj.LSym {
 	switch name {
 	case "goschedguarded":
@@ -9603,6 +9612,10 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).WBZero
 	case "wbMove":
 		return ir.Syms(e.gd).WBMove
+	case "publishptr":
+		return ir.Syms(e.gd).PublishPtr
+	case "publishmove":
+		return ir.Syms(e.gd).PublishMove
 	case "cgoCheckMemmove":
 		return ir.Syms(e.gd).CgoCheckMemmove
 	case "cgoCheckPtrWrite":

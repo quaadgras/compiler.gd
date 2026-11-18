@@ -1,4 +1,4 @@
-// errorcheck -0 -live -l
+// errorcheck -0 -live -d=noshare -l
 
 //go:build !goexperiment.cgocheck2
 

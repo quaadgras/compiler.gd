@@ -117,6 +117,58 @@ func needwb(v *Value, zeroes map[ID]ZeroRegion) bool {
 	return true
 }
 
+// storePublishes reports whether the store w may store a pointer to the
+// heap, and whether it must publish it first: it need not if it is a store
+// in an object that no other goroutine can reach yet.
+func storePublishes(w *Value, select1 []*Value) (heap, call bool) {
+	switch w.Op {
+	case OpStoreWB:
+		val := w.Args[1]
+		heap = val.Op != OpConstNil && mightBeHeapPointer(val)
+	case OpMoveWB:
+		heap = !IsGlobalAddr(w.Args[1])
+	}
+	return heap, heap && !isUnpublished(w.Args[0], w.MemoryArg(), select1)
+}
+
+// isUnpublished reports whether dst, the target of a store with memory
+// state mem, is in an object this function allocated and has, since, only
+// initialized: no other goroutine can reach it yet.
+func isUnpublished(dst, mem *Value, select1 []*Value) bool {
+	base := dst
+	for base.Op == OpOffPtr {
+		base = base.Args[0]
+	}
+	alloc, ok := IsNewObject(base, select1)
+	if !ok {
+		return false
+	}
+	// From the store back to the allocation there are only stores in the
+	// object itself and in the stack.
+	for n := 0; mem != alloc; n++ {
+		if n == 100 {
+			return false
+		}
+		switch mem.Op {
+		case OpStore, OpZero, OpMove, OpStoreWB, OpZeroWB, OpMoveWB:
+			p := mem.Args[0]
+			if !IsStackAddr(p) {
+				for p.Op == OpOffPtr {
+					p = p.Args[0]
+				}
+				if p != base {
+					return false
+				}
+			}
+		case OpVarDef, OpVarLive:
+		default:
+			return false
+		}
+		mem = mem.MemoryArg()
+	}
+	return true
+}
+
 // needWBsrc reports whether GC needs to see v when it is the source of a store.
 func needWBsrc(v *Value) bool {
 	return !IsGlobalAddr(v)
@@ -174,6 +226,8 @@ func writebarrier(f *Func) {
 	var sb, sp, wbaddr, const0 *Value
 	var cgoCheckPtrWrite, cgoCheckMemmove *obj.LSym
 	var wbZero, wbMove *obj.LSym
+	var publishptr, publishmove *obj.LSym
+	share := f.fe.UseShareBarrier()
 	var stores, after []*Value
 	var sset, sset2 *sparseSet
 	var storeNumber []int32
@@ -227,6 +281,10 @@ func writebarrier(f *Func) {
 			wbaddr = f.Entry.NewValue1A(initpos, OpAddr, f.Config.Types.UInt32Ptr, wbsym, sb)
 			wbZero = f.fe.Syslook("wbZero")
 			wbMove = f.fe.Syslook("wbMove")
+			if share {
+				publishptr = f.fe.Syslook("publishptr")
+				publishmove = f.fe.Syslook("publishmove")
+			}
 			if buildcfg.Experiment.CgoCheck2 {
 				cgoCheckPtrWrite = f.fe.Syslook("cgoCheckPtrWrite")
 				cgoCheckMemmove = f.fe.Syslook("cgoCheckMemmove")
@@ -253,11 +311,23 @@ func writebarrier(f *Func) {
 		var nonPtrStores int
 		values := b.Values
 		hasMove := false
+		seqPublishes := false
 	FindSeq:
 		for i := len(values) - 1; i >= 0; i-- {
 			w := values[i]
 			switch w.Op {
 			case OpStoreWB, OpMoveWB, OpZeroWB:
+				if share {
+					// The sequence publishes before it stores, and
+					// what a store publishes depends on the pointers
+					// stored before it (x.f = y; global = x): none
+					// may be in its sequence.
+					heap, call := storePublishes(w, select1)
+					if heap && seqPublishes {
+						break FindSeq
+					}
+					seqPublishes = seqPublishes || call
+				}
 				start = i
 				if last == nil {
 					last = w
@@ -327,7 +397,7 @@ func writebarrier(f *Func) {
 		}
 		var volatiles []volatileCopy
 
-		if !(f.ABIDefault == f.ABI1 && len(f.Config.intParamRegs) >= 3) {
+		if share || !(f.ABIDefault == f.ABI1 && len(f.Config.intParamRegs) >= 3) {
 			// We don't need to do this if the calls we're going to do take
 			// all their arguments in registers.
 			// 3 is the magic number because it covers wbZero, wbMove, cgoCheckMemmove.
@@ -351,6 +421,40 @@ func writebarrier(f *Func) {
 						mem.Aux = t
 						volatiles = append(volatiles, volatileCopy{val, tmpaddr})
 					}
+				}
+			}
+		}
+
+		// A store in memory that other goroutines can reach publishes
+		// what it stores: before the store, and before the write barrier's
+		// test, which no safe point may separate from the store.
+		if share {
+			for _, w := range stores {
+				if _, call := storePublishes(w, select1); !call {
+					continue
+				}
+				// The store checks dst for nil, as it did: a nil dst
+				// is not shared.
+				dst := w.Args[0]
+				if dst == nilcheck {
+					dst = nilcheck.Args[0]
+				}
+				switch w.Op {
+				case OpStoreWB:
+					mem = wbcall(w.Pos, b, publishptr, sp, mem, dst, w.Args[1])
+				case OpMoveWB:
+					src := w.Args[1]
+					if isVolatile(src) {
+						for _, c := range volatiles {
+							if src == c.src {
+								src = c.tmp
+								break
+							}
+						}
+					}
+					typ := reflectdata.TypeLinksym(f.Config.gd, w.Aux.(*types.Type))
+					taddr := b.NewValue1A(w.Pos, OpAddr, b.Func.Config.Types.Uintptr, typ, sb)
+					mem = wbcall(w.Pos, b, publishmove, sp, mem, taddr, dst, src)
 				}
 			}
 		}

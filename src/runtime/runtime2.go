@@ -570,6 +570,7 @@ type g struct {
 	fipsOnlyBypass  bool
 	ditWanted       bool // set if g wants to be executed with DIT enabled
 	syncSafePoint   bool // set if g is stopped at a synchronous safe point.
+	shareAllocs     bool // what g allocates for a map is shared: it is writing a shared map (shared.go)
 	runningCleanups atomic.Bool
 	sig             uint32
 	secret          int32 // current nesting of runtime/secret.Do calls.

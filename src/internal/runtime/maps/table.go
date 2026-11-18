@@ -82,6 +82,7 @@ func newTable(typ *abi.MapType, capacity uint64, index int, localDepth uint8) *t
 		index:      index,
 		localDepth: localDepth,
 	}
+	shareAlloc(unsafe.Pointer(t))
 
 	if capacity > maxTableCapacity {
 		panic("initial table capacity too large")
@@ -741,6 +742,16 @@ type Iter struct {
 
 // Init initializes Iter for iteration.
 func (it *Iter) Init(typ *abi.MapType, m *Map) {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		m.rlock()
+		it.init(typ, m)
+		m.runlock()
+		return
+	}
+	it.init(typ, m)
+}
+
+func (it *Iter) init(typ *abi.MapType, m *Map) {
 	it.typ = typ
 
 	if m == nil || m.used == 0 {
@@ -873,6 +884,16 @@ func (it *Iter) grownKeyElem(key unsafe.Pointer, slotIdx uintptr) (unsafe.Pointe
 //
 // Init must be called prior to Next.
 func (it *Iter) Next() {
+	if m := it.m; m != nil && isShared(unsafe.Pointer(m)) {
+		m.rlock()
+		it.next()
+		m.runlock()
+		return
+	}
+	it.next()
+}
+
+func (it *Iter) next() {
 	if it.m == nil {
 		// Map was empty at Iter.Init.
 		it.key = nil

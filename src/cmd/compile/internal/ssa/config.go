@@ -195,6 +195,10 @@ type Frontend interface {
 	// UseWriteBarrier reports whether write barrier is enabled
 	UseWriteBarrier() bool
 
+	// UseShareBarrier reports whether a store of a pointer publishes it
+	// if it is a store in memory other goroutines can reach.
+	UseShareBarrier() bool
+
 	// Func returns the ir.Func of the function being compiled.
 	Func() *ir.Func
 }

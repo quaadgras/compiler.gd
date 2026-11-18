@@ -115,6 +115,9 @@ func runtime_mapaccess1_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poi
 
 //go:linkname runtime_mapaccess2_faststr runtime.mapaccess2_faststr
 func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Pointer, bool) {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		return sharedGet(typ, m, abi.NoEscape(unsafe.Pointer(&key)))
+	}
 	if race.Enabled && m != nil {
 		callerpc := sys.GetCallerPC()
 		pc := abi.FuncPCABIInternal(runtime_mapaccess2_faststr)
@@ -255,6 +258,9 @@ func (t *table) uncheckedPutSlotForAssignFastStr(typ *abi.MapType, hash uintptr,
 
 //go:linkname runtime_mapassign_faststr runtime.mapassign_faststr
 func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Pointer {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		return sharedPutSlot(typ, m, abi.NoEscape(unsafe.Pointer(&key)))
+	}
 	if m == nil {
 		panic(errNilAssign)
 	}

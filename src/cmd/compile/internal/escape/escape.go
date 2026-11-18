@@ -382,10 +382,17 @@ func shouldEnableEscapeCandidate(fn *ir.Func) bool {
 	return true
 }
 
+// outBufUse is a function's outBuf, by ordinal.
+type outBufUse struct {
+	fn  *ir.Func
+	ord int
+}
+
 func (b *batch) finish(fns []*ir.Func) {
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.
 	phaseG := b.phaseGTags(fns)
+	usedOutBufs := make(map[outBufUse]bool)
 
 	// Record parameter tags for package export data.
 	for _, fn := range fns {
@@ -482,6 +489,7 @@ func (b *batch) finish(fns []*ir.Func) {
 			// call's result, made in the buffer the function was
 			// passed (chain-fold: walk's forwardParentOutBuf).
 			if ord, ok := phaseG[loc]; ok {
+				usedOutBufs[outBufUse{loc.curfn, ord}] = true
 				switch n := n.(type) {
 				case *ir.Name:
 					n.OutBufResultIdx = uint8(ord + 1)
@@ -529,6 +537,29 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 				n.SetOp(ir.OSTR2BYTESTMP)
 			}
+		}
+	}
+
+	// gd Phase G: an outBuf param says whether the function places
+	// anything in that buffer; callers that know it doesn't pass none
+	// (ir.CalleeOutBufUnused). Nothing flows from the param during
+	// escape analysis (walk makes the uses), so this replaces its tag;
+	// "mutated" leaves the escape mask alone. Passing a buffer, or not,
+	// is always sound: without one, the function allocates as stock.
+	var used leaks
+	used.AddMutator(b.gd, 0)
+	for _, fn := range fns {
+		k := 0
+		for _, p := range fn.Type().Params() {
+			if !p.IsOutBufParam() {
+				continue
+			}
+			if usedOutBufs[outBufUse{fn, k}] {
+				p.Note = used.Encode()
+			} else {
+				p.Note = ir.OutBufUnusedNote
+			}
+			k++
 		}
 	}
 

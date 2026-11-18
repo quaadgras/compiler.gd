@@ -63,6 +63,7 @@ type DebugFlags struct {
 	NoDeadLocals          int    `help:"disable deadlocals pass" concurrent:"ok"`
 	NoOpenDefer           int    `help:"disable open-coded defers" concurrent:"ok"`
 	NoRefName             int    `help:"do not include referenced symbol names in object file" concurrent:"ok"`
+	NoShare               int    `help:"do not publish the pointers stored in shared memory (unsafe; for measurements)" concurrent:"ok"`
 	PCTab                 string `help:"print named pc-value table\nOne of: pctospadj, pctofile, pctoline, pctoinline, pctopcdata"`
 	Panic                 int    `help:"show all compiler panics"`
 	Reshape               int    `help:"print information about expression reshaping"`

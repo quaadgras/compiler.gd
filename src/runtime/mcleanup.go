@@ -126,6 +126,11 @@ func AddCleanup[T, S any](ptr *T, cleanup func(S), arg S) Cleanup {
 	}
 	*argv = arg
 
+	// The cleanup runs on another goroutine.
+	publish(unsafe.Pointer(ptr))
+	publish(unsafe.Pointer(argv))
+	publish(*(*unsafe.Pointer)(unsafe.Pointer(&cleanup)))
+
 	// Find the containing object.
 	base, span, _ := findObject(usptr, 0, 0)
 	if base == 0 {

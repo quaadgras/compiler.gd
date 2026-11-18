@@ -2143,7 +2143,9 @@ func newobject(typ *_type) unsafe.Pointer {
 
 //go:linkname maps_newobject internal/runtime/maps.newobject
 func maps_newobject(typ *_type) unsafe.Pointer {
-	return newobject(typ)
+	p := newobject(typ)
+	maps_shareAlloc(p)
+	return p
 }
 
 // reflect_unsafe_New is meant for package reflect,
@@ -2212,7 +2214,9 @@ func reflect_unsafe_NewArray(typ *_type, n int) unsafe.Pointer {
 
 //go:linkname maps_newarray internal/runtime/maps.newarray
 func maps_newarray(typ *_type, n int) unsafe.Pointer {
-	return newarray(typ, n)
+	p := newarray(typ, n)
+	maps_shareAlloc(p)
+	return p
 }
 
 // profilealloc resets the current mcache's nextSample counter and

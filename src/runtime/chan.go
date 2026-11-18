@@ -203,6 +203,13 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 		fatal("send on synctest channel from outside bubble")
 	}
 
+	// What goes into a channel other goroutines can reach is shared.
+	// (A channel only this goroutine can reach shares what it holds
+	// when it is itself published.)
+	if sharingEnabled && c.elemtype.Pointers() && isShared(unsafe.Pointer(c)) {
+		publishValue(c.elemtype, ep)
+	}
+
 	// Fast path: check for failed non-blocking operation without acquiring the lock.
 	//
 	// After observing that the channel is not closed, we observe that the channel is
@@ -536,6 +543,19 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 
 	if debugChan {
 		print("chanrecv: chan=", c, "\n")
+	}
+
+	// What a shared channel holds is shared, but a value received from a
+	// channel only this goroutine can reach may not be: if it is received
+	// straight into shared memory, it goes by way of a temporary.
+	if sharingEnabled && c != nil && ep != nil && c.elemtype.Pointers() && isShared(ep) && !isShared(unsafe.Pointer(c)) {
+		tmp := newobject(c.elemtype)
+		selected, received = chanrecv(c, tmp, block)
+		if selected {
+			publishValue(c.elemtype, tmp)
+			typedmemmove(c.elemtype, ep, tmp)
+		}
+		return
 	}
 
 	if c == nil {

@@ -63,6 +63,9 @@ func runtime_mapaccess1(typ *abi.MapType, m *Map, key unsafe.Pointer) unsafe.Poi
 
 //go:linkname runtime_mapaccess2 runtime.mapaccess2
 func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Pointer, bool) {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		return sharedGet(typ, m, key)
+	}
 	if race.Enabled && m != nil {
 		callerpc := sys.GetCallerPC()
 		pc := abi.FuncPCABIInternal(runtime_mapaccess2)
@@ -143,6 +146,9 @@ func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Po
 
 //go:linkname runtime_mapassign runtime.mapassign
 func runtime_mapassign(typ *abi.MapType, m *Map, key unsafe.Pointer) unsafe.Pointer {
+	if m != nil && isShared(unsafe.Pointer(m)) {
+		return sharedPutSlot(typ, m, key)
+	}
 	if m == nil {
 		panic(errNilAssign)
 	}

@@ -223,6 +223,7 @@ func reflect_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 		asanwrite(dst, typ.Size_)
 		asanread(src, typ.Size_)
 	}
+	publishStore(typ, dst, src)
 	typedmemmove(typ, dst, src)
 }
 
@@ -233,6 +234,7 @@ func reflectlite_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 
 //go:linkname maps_typedmemmove internal/runtime/maps.typedmemmove
 func maps_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
+	publishStore(typ, dst, src)
 	typedmemmove(typ, dst, src)
 }
 
@@ -314,6 +316,11 @@ func typedslicecopy(typ *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe
 	// and growslice and reflect_typedslicecopy check for pointers
 	// before calling typedslicecopy.
 	size := uintptr(n) * typ.Size_
+	if sharingEnabled && isShared(dstPtr) {
+		for i := 0; i < n; i++ {
+			publishValue(typ, add(srcPtr, uintptr(i)*typ.Size_))
+		}
+	}
 	if writeBarrier.enabled {
 		// This always copies one or more full values of type typ so
 		// it's safe to pass typ along as an optimization. See the comment on

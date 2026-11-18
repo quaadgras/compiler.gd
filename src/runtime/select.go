@@ -203,6 +203,17 @@ func selectgo(cas0 *scase, order0 *uint16, pc0 *uintptr, nsends, nrecvs int, blo
 		waitReason = waitReasonSynctestSelect
 	}
 
+	// What is sent on a channel other goroutines can reach is shared,
+	// whether or not this select ends up sending it.
+	if sharingEnabled {
+		for i := range scases[:nsends] {
+			cas := &scases[i]
+			if cas.c != nil && cas.c.elemtype.Pointers() && isShared(unsafe.Pointer(cas.c)) {
+				publishValue(cas.c.elemtype, cas.elem)
+			}
+		}
+	}
+
 	// sort the cases by Hchan address to get the locking order.
 	// simple heap sort, to guarantee n log n time and constant stack footprint.
 	for i := range lockorder {

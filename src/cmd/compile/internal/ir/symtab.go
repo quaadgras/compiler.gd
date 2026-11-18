@@ -88,6 +88,8 @@ type SymsStruct struct {
 	TypeAssert                *obj.LSym
 	WBZero                    *obj.LSym
 	WBMove                    *obj.LSym
+	PublishPtr                *obj.LSym
+	PublishMove               *obj.LSym
 	// Wasm
 	SigPanic             *obj.LSym
 	Staticuint64s        *obj.LSym

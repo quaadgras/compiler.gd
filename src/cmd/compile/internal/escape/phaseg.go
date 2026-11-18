@@ -39,6 +39,9 @@ import (
 // The solver's own walks skip locations that already escape, so which
 // roots it records leaks for depends on the order it walks them in;
 // these walks don't skip.
+//
+// A function that tags nothing for a result says so in its export
+// data (escape.finish), and its callers pass it no buffer.
 
 // phaseGTags returns, for each location to place in its function's
 // caller's buffer, the 0-based index of that buffer (outBuf ordinal).
@@ -154,13 +157,21 @@ func (b *batch) phaseGFunc(fn *ir.Func, heap, cand map[*location]bool, results m
 		if elem.Size() == 0 {
 			continue
 		}
-		users := results[root]
+		// A call of a function that never uses its buffer makes its
+		// result elsewhere: it is never in this one.
+		var users []*location
+		for u := range results[root] {
+			if call, ok := u.n.(*ir.CallExpr); ok && u.curfn == fn && ir.CalleeOutBufUnused(call, 0) {
+				continue
+			}
+			users = append(users, u)
+		}
 		if len(users) == 0 {
 			continue
 		}
 		ok := true
 		allTerminal := true
-		for u := range users {
+		for _, u := range users {
 			if !phaseGTaggable(u, fn, elem) || heap[u] || cand[u] {
 				ok = false
 				break
@@ -186,7 +197,7 @@ func (b *batch) phaseGFunc(fn *ir.Func, heap, cand map[*location]bool, results m
 		if ord < 0 {
 			continue
 		}
-		for u := range users {
+		for _, u := range users {
 			tags[u] = ord
 		}
 	}

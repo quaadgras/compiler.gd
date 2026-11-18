@@ -57,6 +57,10 @@ func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
 	// escape (escape analysis: a variable outside the loop outlives
 	// it).
 	//
+	// A call of a function that never places anything in the buffer
+	// (it returns a pointer it was passed, or found, or nil) gets
+	// none: ir.CalleeOutBufUnused.
+	//
 	// A call whose result flows only to one of fn's own results,
 	// and that escape analysis put in the buffer fn was passed for it
 	// (escape/phaseg.go), is passed that buffer instead (chain-fold).
@@ -90,6 +94,9 @@ func giveOutBuf(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr) ir.Node {
 	}
 	sig := call.Fun.Type()
 	if sig.NumOutBufs() != 1 || len(sig.Results()) != 1 {
+		return nil
+	}
+	if ir.CalleeOutBufUnused(call, 0) {
 		return nil
 	}
 	ptrT := sig.Results()[0].Type

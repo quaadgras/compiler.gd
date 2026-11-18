@@ -101,6 +101,10 @@ func (d TestFrontend) SplitSlot(parent *LocalSlot, suffix string, offset int64, 
 func (d TestFrontend) Syslook(s string) *obj.LSym {
 	return d.ctxt.Lookup(s)
 }
+func (TestFrontend) UseShareBarrier() bool {
+	return false
+}
+
 func (TestFrontend) UseWriteBarrier() bool {
 	return true // only writebarrier_test cares
 }

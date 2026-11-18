@@ -2181,3 +2181,16 @@ func MallocGC(size uintptr, typ *abi.Type, needzero bool) unsafe.Pointer {
 func FuncNamePiecesForPrint(name string) (string, string, string, string, string) {
 	return funcNamePiecesForPrint(name)
 }
+
+// IsShared reports whether another goroutine may reach what p points to.
+func IsShared(p unsafe.Pointer) bool { return isShared(p) }
+
+// Publish shares what p points to, and all that is reachable from it.
+func Publish(p unsafe.Pointer) { publish(p) }
+
+// HeapNew allocates a T in the heap, whatever escape analysis makes of
+// the caller.
+func HeapNew[T any]() *T {
+	var zero T
+	return (*T)(mallocgc(unsafe.Sizeof(zero), abi.TypeFor[T](), true))
+}
