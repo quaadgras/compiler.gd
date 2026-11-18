@@ -500,7 +500,7 @@ func SetFinalizer(obj any, finalizer any) {
 	if ft.IsVariadic() {
 		throw("runtime.SetFinalizer: cannot pass " + toRType(etyp).string() + " to finalizer " + toRType(ftyp).string() + " because dotdotdot")
 	}
-	if ft.InCount != 1 {
+	if ft.NumUserIn() != 1 { // not counting what the compiler added for results (gd Phase G)
 		throw("runtime.SetFinalizer: cannot pass " + toRType(etyp).string() + " to finalizer " + toRType(ftyp).string())
 	}
 	fint := ft.InSlice()[0]
