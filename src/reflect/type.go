@@ -2498,8 +2498,9 @@ func StructOf(fields []StructField) Type {
 	}
 
 	// gd: like the compiler's types.IsInlineIface, small pointer-free
-	// structs are stored inline in interfaces.
-	inlineIface := noPtrs && typalign <= 8 && align(size, uintptr(typalign)) > 0 && align(size, uintptr(typalign)) <= 16
+	// structs are stored inline in interfaces, if aligned to no more
+	// than the inline payload (a register, as an int64 is).
+	inlineIface := noPtrs && uintptr(typalign) <= goarch.Int64Align && align(size, uintptr(typalign)) > 0 && align(size, uintptr(typalign)) <= 16
 	if !inlineIface {
 		// The struct is boxed, so an embedded inline type's adapter,
 		// which rebuilds its receiver from the inline payload, cannot

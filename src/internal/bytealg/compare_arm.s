@@ -13,12 +13,14 @@ TEXT ·Compare(SB),NOSPLIT|NOFRAME,$0-28
 	ADD	$28, R13, R7
 	B	cmpbody<>(SB)
 
-TEXT runtime·cmpstring(SB),NOSPLIT|NOFRAME,$0-20
+// gd: a string is {ptr, hash, len} (doc/gd/sso-string.md; with 4-byte
+// words it has no inline form), so a string argument is 12 bytes.
+TEXT runtime·cmpstring(SB),NOSPLIT|NOFRAME,$0-28
 	MOVW	a_base+0(FP), R2
-	MOVW	a_len+4(FP), R0
-	MOVW	b_base+8(FP), R3
-	MOVW	b_len+12(FP), R1
-	ADD	$20, R13, R7
+	MOVW	a_len+8(FP), R0
+	MOVW	b_base+12(FP), R3
+	MOVW	b_len+20(FP), R1
+	ADD	$28, R13, R7
 	B	cmpbody<>(SB)
 
 // On entry:

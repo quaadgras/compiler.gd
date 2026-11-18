@@ -168,6 +168,14 @@ func walkCompare(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.Node 
 		inline = t.NumElem() <= 1 || (types.IsSimple[t.Elem().Kind()] && (t.NumElem() <= 4 || t.Elem().Size()*t.NumElem() <= maxcmpsize))
 	case types.TSTRUCT:
 		inline = compare.EqStructCost(gd, t) <= 4
+		// A struct whose one field is an interface (or holds only one) has
+		// that field's algorithm, and no equality function of its own
+		// (reflectdata.EqFor): compare the field. (gd: an interface of 24
+		// bytes, on 32-bit targets but wasm32, costs 6.)
+		switch types.AlgType(gd, t) {
+		case types.AINTER, types.ANILINTER:
+			inline = true
+		}
 	}
 
 	cmpl := n.X

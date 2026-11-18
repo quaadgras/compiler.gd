@@ -703,6 +703,14 @@ static-mask fast path is unchanged.
 is reserved. Phase A's static encoding must left-shift bits by 1
 (or equivalent) so Phase F can drop in without re-plumbing carriers.
 
+With 4-byte pointers the slot is still a `uint64`, aligned as one
+is (to a register: 4 bytes on 386, arm and mips, so a function
+value's `M` is at offset 4 there, 8 on wasm32), and a pointer in it
+is its low half: its first word, or its second on a big-endian
+target (`objw.EscMask` and `objw.EscMaskFunc` write them). An itab's
+masks start after `Fun` rounded up to 8 (`abi.ITabEscMaskOff`),
+which the runtime's itabs follow too (`abi.ITabSize`).
+
 Alternative representations we considered and rejected:
 - **Two slots** (`static_mask uint64, dynamic_fn uintptr`): +16 B
   per closure, doubles itab method slot to 3 words. Too expensive

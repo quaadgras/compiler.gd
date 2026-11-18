@@ -345,10 +345,10 @@ func WriteFuncSyms(gd *base.Invocation) {
 		switch {
 		case gd.Debug.GdForwarderDisable == 0 && nam.Func != nil && nam.Func.GdForwarder != nil && nam.Func.GdForwarder.SyntheticComputeFn != nil && hasPointerBearingFuncsymArg(nam.Type()):
 			cfFuncsym := FuncLinksym(gd, nam.Func.GdForwarder.SyntheticComputeFn.Nname)
-			objw.SymPtr(gd, sf, int(types.FuncMaskOffset), cfFuncsym, 1)
+			objw.EscMaskFunc(gd, sf, int(types.FuncMaskOffset), cfFuncsym)
 		default:
 			mask := computeFuncsymEscMask(nam.Type())
-			objw.UintN(gd, sf, int(types.FuncMaskOffset), mask, 8)
+			objw.EscMask(gd, sf, int(types.FuncMaskOffset), mask)
 		}
 		objw.Global(gd, sf, int32(types.ClosureVarsOffset), obj.DUPOK|obj.RODATA)
 	}

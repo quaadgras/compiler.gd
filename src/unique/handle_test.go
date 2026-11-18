@@ -200,6 +200,15 @@ var (
 	pairHandle   Handle[[2]string]
 )
 
+// stringToAnyAllocs is how many allocations converting a heap string to
+// an interface makes (see "string to any" in TestMakeAllocs).
+var stringToAnyAllocs = func() int {
+	if unsafe.Sizeof(uintptr(0)) == 4 && runtime.GOARCH != "wasm" {
+		return 1
+	}
+	return 0
+}()
+
 func TestMakeAllocs(t *testing.T) {
 	errorf := t.Errorf
 	if race.Enabled || msan.Enabled || asan.Enabled || testenv.OptimizationOff() {
@@ -245,10 +254,12 @@ func TestMakeAllocs(t *testing.T) {
 			stringHandle = Make(string(heapBytes[:40]))
 		}},
 
-		{name: "string to any", allocs: 0, f: func() {
+		{name: "string to any", allocs: stringToAnyAllocs, f: func() {
 			// gd Phase D: string→any uses the spread-iface layout
 			// (word 0 in eface.Data, hash+len in eface.Inline), so
-			// no heap box is needed. Stock Go allocates 1 here.
+			// no heap box is needed. Stock Go allocates 1 here, as the
+			// fork does with 4-byte words but on wasm32, which spread
+			// no string (cmd/compile/internal/types.SpreadIfaces).
 			anyHandle = Make[any](heapString)
 		}},
 

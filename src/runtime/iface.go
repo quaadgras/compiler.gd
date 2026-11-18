@@ -74,9 +74,10 @@ func getitab(inter *interfacetype, typ *_type, canfail bool) *itab {
 	}
 
 	// Entry doesn't exist yet. Make a new entry & add it.
-	// Size: base itab (header + Fun[1]) + (nmethods-1)*PtrSize for
-	// the rest of Fun + nmethods*8 for the gd escape-bit mask tail.
-	m = (*itab)(persistentalloc(unsafe.Sizeof(itab{})+uintptr(len(inter.Methods)-1)*goarch.PtrSize+uintptr(len(inter.Methods))*8, 0, &memstats.other_sys))
+	// Size: the header, Fun and the gd escape-bit mask tail (one uint64
+	// per method, after Fun aligned to 8), as the compiler lays out a
+	// static itab.
+	m = (*itab)(persistentalloc(uintptr(abi.ITabSize(goarch.PtrSize, len(inter.Methods))), 0, &memstats.other_sys))
 	m.Inter = inter
 	m.Type = typ
 	// The hash is used in type switches. However, compiler statically generates itab's
@@ -279,7 +280,8 @@ imethods:
 }
 
 // itabEscMaskPtr returns a pointer to the k-th entry of the per-method
-// escape-bit mask tail that sits immediately after itab.Fun.
+// escape-bit mask tail that follows itab.Fun, aligned to 8
+// (abi.ITabEscMaskOff, which matters with 4-byte pointers).
 // getitab's persistentalloc (and the compiler's static emission in
 // reflectdata.writeITab) reserve nmethods*8 bytes for these masks and
 // leave them zeroed.
@@ -290,10 +292,7 @@ imethods:
 //
 //go:nosplit
 func itabEscMaskPtr(m *itab, k int) *uint64 {
-	ni := len(m.Inter.Methods)
-	// &m.Fun[ni] — the address right after the Fun array.
-	maskBase := add(unsafe.Pointer(&m.Fun[0]), uintptr(ni)*goarch.PtrSize)
-	return (*uint64)(add(maskBase, uintptr(k)*8))
+	return (*uint64)(add(unsafe.Pointer(m), uintptr(abi.ITabEscMaskOff(goarch.PtrSize, len(m.Inter.Methods), k))))
 }
 
 func itabsinit() {

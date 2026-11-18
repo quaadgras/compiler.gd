@@ -354,8 +354,10 @@ by more than that): no difference shown beyond the noise, and none looked
 into.
 
 
-**Not done**: native 32-bit targets (386, arm) keep LP64, which neither
-cc nor c23 works with (no bit 55); `long double` is a double's value, not
+**Not done**: native 32-bit targets (386, arm, mips) keep LP64, which
+neither cc nor c23 works with (no bit 55), so cmd/go builds no C with cc
+there (`load.ccContext`; internal/c23 compiles there with bit 31 as its
+tag, `tag_32.go`, which nothing makes fault); `long double` is a double's value, not
 clang's fp128; a pointer made of an integer with bit 31 set loses it in
 pointer memory with split (the tag), whatever the word size.
 

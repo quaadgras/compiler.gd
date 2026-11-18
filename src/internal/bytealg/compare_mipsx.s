@@ -39,11 +39,13 @@ cmp_ret:
 	MOVW	R8, ret+24(FP)
 	RET
 
-TEXT runtime·cmpstring(SB),NOSPLIT,$0-20
+// gd: a string is {ptr, hash, len} (doc/gd/sso-string.md; with 4-byte
+// words it has no inline form), so a string argument is 12 bytes.
+TEXT runtime·cmpstring(SB),NOSPLIT,$0-28
 	MOVW	a_base+0(FP), R3
-	MOVW	a_len+4(FP), R1
-	MOVW	b_base+8(FP), R4
-	MOVW	b_len+12(FP), R2
+	MOVW	a_len+8(FP), R1
+	MOVW	b_base+12(FP), R4
+	MOVW	b_len+20(FP), R2
 	BEQ	R3, R4, samebytes
 	SGTU	R1, R2, R7
 	MOVW	R1, R8
@@ -68,5 +70,5 @@ samebytes:
 	SGTU	R2, R1, R7
 	SUBU	R7, R6, R8
 cmp_ret:
-	MOVW	R8, ret+16(FP)
+	MOVW	R8, ret+24(FP)
 	RET

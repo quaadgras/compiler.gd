@@ -70,6 +70,13 @@ func ccContext(bp *build.Package, err error) (build.Context, bool) {
 	if slices.Contains(ctx.ToolTags, "wasm.gc") && !slices.Contains(ctx.ToolTags, "wasm.split") {
 		return ctx, false
 	}
+	// cmd/cc lays C out for 8-byte pointers and for wasm32
+	// (ccmain/target.go), not for the other 32-bit targets, where
+	// internal/c23 has no tag that faults either (tag_32.go).
+	switch ctx.GOARCH {
+	case "386", "arm", "mips", "mipsle":
+		return ctx, false
+	}
 	ctx.CgoEnabled = true
 	cgoFile := false
 	for _, f := range bp.IgnoredGoFiles {
