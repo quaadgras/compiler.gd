@@ -298,17 +298,15 @@ const (
 
 	// heapSplit says that the heap has two ranges of addresses: the
 	// memory that only the goroutine that allocated it reaches is in
-	// [localHeapBase, localHeapEnd), below the first hint of the rest
-	// (shared.go). Whether an address is local is then one compare.
-	// The local range is 64 GiB; what does not fit is allocated with
-	// the rest.
-	heapSplit = localHeapEnd != 0 &&
+	// the localHeapSize bytes from localHeapBase, which is the first
+	// hint of the heap; the rest is above (shared.go). Whether an
+	// address is local is then one compare. What does not fit in the
+	// local range is allocated with the rest.
+	heapSplit = (goarch.IsAmd64|goarch.IsArm64 == 1) &&
 		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows == 1) &&
-		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled && !randomizeHeapBase
+		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled
 
 	localHeapSize = 1 << 36 * (goarch.IsAmd64 | goarch.IsArm64)
-	localHeapEnd  = 0x00c0<<32*goarch.IsAmd64 + 0x0040<<32*goarch.IsArm64
-	localHeapBase = localHeapEnd - localHeapSize
 
 	// arenaBaseOffset is the pointer value that corresponds to
 	// index 0 in the heap arena map.
@@ -732,11 +730,16 @@ func mallocinit() {
 		userArenaHint.addr = p
 		userArenaHint.next, mheap_.userArena.arenaHints = mheap_.userArena.arenaHints, userArenaHint
 	}
-	if heapSplit {
+	if heapSplit && mheap_.arenaHints != nil {
+		// The local range is at the first hint, and the rest of
+		// the heap begins after it.
+		first := mheap_.arenaHints
+		localHeapBase = first.addr
+		first.addr += localHeapSize
 		hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
 		hint.addr = localHeapBase
 		mheap_.localHints = hint
-		mheap_.pages.split = localHeapEnd
+		mheap_.pages.split = localHeapBase + localHeapSize
 	}
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.
@@ -783,8 +786,12 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		if hint.down {
 			p -= n
 		}
-		if hintList == &h.localHints && p+n > localHeapEnd {
+		if hintList == &h.localHints && p+n > localHeapBase+localHeapSize {
 			// The local range is full.
+			v = nil
+		} else if hintList != &h.localHints && p < h.pages.split {
+			// Below the local range: the page allocator looks
+			// there for local memory only.
 			v = nil
 		} else if p+n < p {
 			// We can't use this, so don't ask.
@@ -833,13 +840,13 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		// (sufficiently aligned) address the kernel will give
 		// us.
 		v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
-		for try := 0; heapSplit && v != nil && uintptr(v) < localHeapEnd && try < 4; try++ {
+		for try := 0; v != nil && uintptr(v) < h.pages.split && try < 4; try++ {
 			// Not below the end of the local range: the page
 			// allocator looks there for local memory only. The
 			// reservation stays, so that the kernel gives another.
 			v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
 		}
-		if v == nil || heapSplit && uintptr(v) < localHeapEnd {
+		if v == nil || uintptr(v) < h.pages.split {
 			return nil, 0
 		}
 

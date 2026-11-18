@@ -19,6 +19,9 @@ func (e *escape) stmt(n ir.Node) {
 	prevStmt := e.curStmt // gd escape-bits: see noteAddrTaken
 	e.nextStmt++
 	e.curStmt = e.nextStmt
+	if n.Op() == ir.OAS {
+		e.noteSimpleStmt()
+	}
 	defer func() {
 		e.gd.Pos = lno
 		e.curStmt = prevStmt
@@ -222,5 +225,6 @@ func (e *escape) dcl(n *ir.Name) hole {
 	}
 	loc := e.oldLoc(n)
 	loc.loopDepth = e.loopDepth
+	loc.stmt = e.curStmt
 	return loc.asHole()
 }

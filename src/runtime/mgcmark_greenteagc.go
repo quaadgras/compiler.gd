@@ -67,7 +67,7 @@ type spanInlineMarkBits struct {
 	scans [63]uint8         // scanned bits.
 	owned spanScanOwnership // see the comment on spanScanOwnership.
 	marks [63]uint8         // mark bits.
-	class spanClass
+	class uint8             // the spanClass, without what says that the span is local.
 }
 
 // spanScanOwnership indicates whether some thread has acquired
@@ -138,7 +138,7 @@ func (imb *spanInlineMarkBits) init(class spanClass, needzero bool) {
 		// has no idea that imb is aligned to 128 bytes.
 		memclrNoHeapPointers(unsafe.Pointer(imb), unsafe.Sizeof(spanInlineMarkBits{}))
 	}
-	imb.class = class
+	imb.class = uint8(class.base())
 }
 
 // tryAcquire attempts to acquire the span for scanning. On success, the caller
@@ -280,7 +280,7 @@ func tryDeferToSpanScan(p uintptr, gcw *gcWork) bool {
 	// Find the object's index from the span class info stored in the inline mark bits.
 	base := alignDown(p, gc.PageSize)
 	q := spanInlineMarkBitsFromBase(base)
-	objIndex := uint16((uint64(p-base) * uint64(gc.SizeClassToDivMagic[q.class.sizeclass()])) >> 32)
+	objIndex := uint16((uint64(p-base) * uint64(gc.SizeClassToDivMagic[spanClass(q.class).sizeclass()])) >> 32)
 
 	// Set mark bit.
 	idx, mask := objIndex/8, uint8(1)<<(objIndex%8)
@@ -290,8 +290,8 @@ func tryDeferToSpanScan(p uintptr, gcw *gcWork) bool {
 	atomic.Or8(&q.marks[idx], mask)
 
 	// Fast-track noscan objects.
-	if q.class.noscan() {
-		gcw.bytesMarked += uint64(gc.SizeClassToSize[q.class.sizeclass()])
+	if spanClass(q.class).noscan() {
+		gcw.bytesMarked += uint64(gc.SizeClassToSize[spanClass(q.class).sizeclass()])
 		return true
 	}
 
@@ -844,7 +844,7 @@ func (p objptr) objIndex() uint16 {
 func scanSpan(p objptr, gcw *gcWork) {
 	spanBase := p.spanBase()
 	imb := spanInlineMarkBitsFromBase(spanBase)
-	spanclass := imb.class
+	spanclass := spanClass(imb.class)
 	if spanclass.noscan() {
 		throw("noscan object in scanSpan")
 	}

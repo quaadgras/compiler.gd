@@ -219,6 +219,11 @@ type Invocation struct {
 	ReflectdataItabMasksDone     bool // gd: FinalizeItabMasks has run; later masks are written as they are made
 	ReflectdataForwarderWrappers any  // gd: map[*obj.LSym]*ir.Func, reflectdata.forwarderWrappers
 	PhaseGOutBufAllocs           any  // gd: map[ir.Node]uint8, the new and &T{} escape analysis puts in a caller's buffer (1+outBuf ordinal)
+	// LocalTags is, for an allocation whose object is local if the
+	// containers it is stored in are, the expression of the tag of its
+	// type (ir.Node to ir.Node; see ir.LocalTag). Walk adds to it while
+	// other functions are compiled.
+	LocalTags sync.Map
 
 	// reflectdata runtime-type-descriptor work queues. signatmu/gcsymmu
 	// guard concurrent access from the parallel SSA backend; signatset

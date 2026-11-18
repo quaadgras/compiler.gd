@@ -21,6 +21,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		e.expr(k.note(e.gd, call, "call parameter"), arg)
 	}
 
+	if call.Op() != ir.OAPPEND {
+		e.noteStmtCall()
+	}
 	switch call.Op() {
 	default:
 		ir.Dump("esc", call)

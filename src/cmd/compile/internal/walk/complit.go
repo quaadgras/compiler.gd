@@ -317,6 +317,7 @@ func slicelit(gd *base.Invocation, n *ir.CompLitExpr, var_ ir.Node, init *ir.Nod
 	} else {
 		a = ir.NewUnaryExpr(gd, gd.Pos, ir.ONEW, ir.TypeNode(gd, t))
 		a.(*ir.UnaryExpr).SetLocalAlloc(n.LocalAlloc())
+		ir.SetLocalTag(gd, a, ir.LocalTag(gd, n))
 	}
 	appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, vauto, a))
 
@@ -514,6 +515,7 @@ func anylit(gd *base.Invocation, n ir.Node, var_ ir.Node, init *ir.Nodes) {
 			r = ir.NewUnaryExpr(gd, gd.Pos, ir.ONEW, ir.TypeNode(gd, n.X.Type()))
 			r.SetEsc(n.Esc())
 			r.(*ir.UnaryExpr).SetLocalAlloc(n.LocalAlloc())
+			ir.SetLocalTag(gd, r, ir.LocalTag(gd, n))
 		}
 		appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, var_, r))
 

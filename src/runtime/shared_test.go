@@ -688,7 +688,7 @@ func TestLocalRange(t *testing.T) {
 	}
 	var onStack int
 	if !runtime.IsLocal(unsafe.Pointer(&onStack)) {
-		t.Errorf("the stack at %p is not in the local range", &onStack)
+		t.Errorf("the stack is not in the local range")
 	}
 	if runtime.IsLocal(unsafe.Pointer(&sharedSink)) || runtime.IsLocal(nil) {
 		t.Errorf("a global or nil is in the local range")

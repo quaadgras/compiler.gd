@@ -792,8 +792,8 @@ func (p *pageAlloc) scavengeOne(ci chunkIdx, searchIdx uint, max uintptr) uintpt
 			// Relock the heap, because now we need to make these pages
 			// available allocation. Free them back to the page allocator.
 			lock(p.mheapLock)
-			if b := (offAddr{addr}); b.lessThan(p.searchAddr) {
-				p.searchAddr = b
+			if search := p.searchFor(addr); (offAddr{addr}).lessThan(*search) {
+				*search = offAddr{addr}
 			}
 			p.chunkOf(ci).free(base, npages)
 			p.update(addr, uintptr(npages), true, false)

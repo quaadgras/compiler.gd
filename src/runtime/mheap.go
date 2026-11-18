@@ -611,6 +611,16 @@ func (sc spanClass) local() bool {
 	return sc >= localSpanClasses
 }
 
+// base returns sc's class outside of the local range.
+//
+//go:nosplit
+func (sc spanClass) base() spanClass {
+	if sc >= localSpanClasses {
+		return sc - localSpanClasses
+	}
+	return sc
+}
+
 // in returns sc's class in the local range, if local is set.
 //
 //go:nosplit
@@ -1615,7 +1625,7 @@ func (h *mheap) grow(npage uintptr, local bool) (uintptr, bool) {
 		hints = &h.localHints
 	}
 
-	firstGrow := curArena.base == 0
+	firstGrow := curArena.base == 0 && !local
 
 	// We must grow the heap in whole palloc chunks.
 	// We call sysMap below but note that because we

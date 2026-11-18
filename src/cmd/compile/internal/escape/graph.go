@@ -78,6 +78,10 @@ type location struct {
 	paramEsc leaks
 
 	captured   bool        // has a closure captured this variable?
+	stmt       int32       // the statement the location was made in, or a variable declared in (shares.go)
+	dynRoot    *dynRoot    // the location is a container known at run time (shares.go)
+	isDynRoot  bool        // the location was made as one, even if it is not one any more
+	dyn        []*location // the dynamic roots that the location, or what it leads to, flows to
 	owners     []*location // for the contents of tracked variables: those variables (shares.go)
 	reassigned bool        // has this variable been reassigned?
 	addrtaken  bool        // has this variable's address been taken?
@@ -170,6 +174,14 @@ const (
 	// reached from it, may flow to a result of a function: what the
 	// caller does with it is not known here.
 	attrReturned
+
+	// attrDynShares and attrDynSharesValue are attrShares and
+	// attrSharesValue for the containers that are only known at run
+	// time (dynamic roots, shares.go): the location's address, or its
+	// value, may flow to one. For what is decided when compiling
+	// (markUnshared) such a container is shared.
+	attrDynShares
+	attrDynSharesValue
 )
 
 func (l *location) hasAttr(attr locAttr) bool { return l.attrs&attr != 0 }
@@ -408,6 +420,7 @@ func (e *escape) newLoc(n ir.Node, persists bool) *location {
 	if persists {
 		loc.attrs |= attrPersists
 	}
+	loc.stmt = e.curStmt
 	e.allLocs = append(e.allLocs, loc)
 	if n != nil {
 		if n.Op() == ir.ONAME {

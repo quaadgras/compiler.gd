@@ -6,8 +6,14 @@ package escape
 
 import (
 	"fmt"
+	"go/constant"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
+	"cmd/compile/internal/typecheck"
+	"cmd/compile/internal/types"
+	"cmd/internal/objabi"
+	"cmd/internal/sys"
 )
 
 // Goroutine sharing, statically (doc/gd/sharing.md, runtime/shared.go).
@@ -294,6 +300,13 @@ func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func
 	}
 }
 
+// mayShare reports whether the location's address may flow to where
+// another goroutine reaches it, as far as is known when compiling: a
+// container that is only known at run time may be shared.
+func (l *location) mayShare() bool {
+	return l.hasAttr(attrShares | attrDynShares)
+}
+
 // markUnshared records on fns' variables what the solved graph says no
 // other goroutine can reach.
 func (b *batch) markUnshared(fns []*ir.Func) {
@@ -309,7 +322,7 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 			continue
 		}
 		alloc[loc.n] = true
-		if loc.hasAttr(attrShares) {
+		if loc.mayShare() {
 			shared[loc.n] = true
 		}
 	}
@@ -322,11 +335,11 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 				continue
 			}
 			loc, ok := n.Opt.(*location)
-			if !ok || loc == nil || loc.hasAttr(attrShares) {
+			if !ok || loc == nil || loc.mayShare() {
 				continue
 			}
 			n.Unshared |= ir.UnsharedStorage
-			if b.contents[n] != nil && !loc.captured && !loc.addrtaken && !b.contents[n].hasAttr(attrShares) {
+			if b.contents[n] != nil && !loc.captured && !loc.addrtaken && !b.contents[n].mayShare() {
 				cand[n] = true
 			}
 		}
@@ -338,7 +351,7 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 			for _, n := range fn.Dcl {
 				if n.Class == ir.PAUTO && n.Type().HasPointers() {
 					loc, _ := n.Opt.(*location)
-					fmt.Printf("%s: %v unshared=%d shares=%v tracked=%v\n", b.gd.FmtPos(n.Pos()), n, n.Unshared, loc != nil && loc.hasAttr(attrShares), b.contents[n] != nil)
+					fmt.Printf("%s: %v unshared=%d shares=%v tracked=%v\n", b.gd.FmtPos(n.Pos()), n, n.Unshared, loc != nil && loc.mayShare(), b.contents[n] != nil)
 				}
 			}
 		}
@@ -375,6 +388,20 @@ func (b *batch) markLocal(loc *location) {
 	if fn := loc.curfn; fn == nil || fn.Sym() == nil || fn.Sym().Pkg == nil || ir.UncheckedPkg(fn.Sym().Pkg.Path) {
 		return
 	}
+	if len(loc.dyn) != 0 {
+		tag := b.localTag(loc)
+		if tag == nil {
+			if b.gd.Flag.LowerM >= 2 && loc.n != nil {
+				fmt.Printf("%s: %v is not local, stored where it cannot tell\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
+			}
+			return
+		}
+		ir.SetLocalTag(b.gd, loc.n, tag)
+		if b.gd.Flag.LowerM >= 2 {
+			fmt.Printf("%s: %v is local if %v\n", b.gd.FmtPos(loc.n.Pos()), loc.n, tag)
+		}
+		return
+	}
 	switch n := loc.n.(type) {
 	case *ir.Name:
 		n.Unshared |= ir.LocalObject
@@ -386,4 +413,288 @@ func (b *batch) markLocal(loc *location) {
 	if b.gd.Flag.LowerM >= 2 {
 		fmt.Printf("%s: %v is local\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
 	}
+}
+
+// Dynamic roots.
+//
+// A store through a pointer that is not a tracked variable is a store
+// in a container that is only known when the program runs. If the
+// pointer is a pure path P from a local variable (p, p.f, *p.f: no call,
+// no index), the store has a location of its own, the dynamic root of P
+// in that statement, that is the heap for escaping but that no other
+// goroutine reaches by itself: it is local if what P points to is, which
+// is a compare of P (runtime.isLocal). The solver records on every
+// location the roots that it, or something reached from it, flows to
+// (location.dyn).
+//
+// An allocation that only flows to dynamic roots is local if all of them
+// are, provided each can be evaluated where the object is allocated and
+// has the value there that it has at the store:
+//
+//   - the root's statement is the allocation's, a plain assignment, and
+//     P is a variable or the statement has no call: nothing between the
+//     allocation and the store changes P;
+//   - or P is a parameter that is never assigned. (A variable that is
+//     assigned once and in scope at the allocation would do as well;
+//     the graph has no scopes yet.)
+//
+// markLocal then gives the allocation the expression of its tag.
+
+type dynKey struct {
+	stmt int32
+	path string
+}
+
+type dynRoot struct {
+	path  ir.Node   // P
+	name  *ir.Name  // the variable P starts from
+	plain bool      // P is name
+	loc   *location // name's
+	stmt  int32
+}
+
+// maxDyn is the number of dynamic roots of a location over which it
+// counts as shared.
+const maxDyn = 8
+
+func (e *escape) noteSimpleStmt() {
+	if e.simpleStmts == nil {
+		e.simpleStmts = make(map[int32]bool)
+	}
+	e.simpleStmts[e.curStmt] = true
+}
+
+func (e *escape) noteStmtCall() {
+	if e.stmtCalls == nil {
+		e.stmtCalls = make(map[int32]bool)
+	}
+	e.stmtCalls[e.curStmt] = true
+}
+
+// splitHeap reports whether the target has the two ranges of addresses
+// (runtime.heapSplit), and returns the logarithm of the size of the
+// local one.
+func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
+	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
+		return 0, false
+	}
+	switch gd.Ctxt.Headtype {
+	case objabi.Hlinux, objabi.Hdarwin, objabi.Hfreebsd, objabi.Hwindows:
+	default:
+		return 0, false
+	}
+	switch gd.Ctxt.Arch.Family {
+	case sys.AMD64, sys.ARM64:
+		return 36, true
+	}
+	return 0, false
+}
+
+// purePath returns the variable that the path n starts from, and
+// whether n is a path: a local variable, or a field of or what is
+// pointed to by a path.
+func (e *escape) purePath(n ir.Node) (name *ir.Name, plain bool) {
+	plain = true
+	for {
+		switch x := n.(type) {
+		case *ir.ParenExpr:
+			n = x.X
+			continue
+		case *ir.SelectorExpr:
+			if x.Op() == ir.ODOT || x.Op() == ir.ODOTPTR {
+				n, plain = x.X, false
+				continue
+			}
+		case *ir.StarExpr:
+			n, plain = x.X, false
+			continue
+		case *ir.Name:
+			if x.Op() == ir.ONAME && (x.Class == ir.PAUTO || x.Class == ir.PPARAM) && x.Curfn == e.curfn && !x.IsClosureVar() && x.Canonical() == x {
+				return x, plain
+			}
+		}
+		return nil, false
+	}
+}
+
+// dynRootOf returns the dynamic root of a store through the pointer or
+// slice p in the current statement, or nil if p is not a path.
+func (e *escape) dynRootOf(p ir.Node) *location {
+	if e.gd.Debug.NoShare != 0 || e.gd.Debug.NoLocal != 0 || e.gd.Debug.NoLocalAlloc != 0 || e.gd.Debug.NoLocalDyn != 0 {
+		return nil
+	}
+	if _, ok := splitHeap(e.gd); !ok {
+		return nil
+	}
+	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+		return nil
+	}
+	name, plain := e.purePath(p)
+	if name == nil {
+		return nil
+	}
+	key := dynKey{e.curStmt, fmt.Sprintf("%p %v", name, p)}
+	if plain && name.Class == ir.PPARAM {
+		key.stmt = 0
+	}
+	if r := e.dynRoots[key]; r != nil {
+		return r
+	}
+	r := &location{
+		curfn:     e.curfn,
+		loopDepth: 1,
+		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
+		dynRoot:   &dynRoot{path: p, name: name, plain: plain, stmt: key.stmt},
+		isDynRoot: true,
+	}
+	e.allLocs = append(e.allLocs, r)
+	if e.dynRoots == nil {
+		e.dynRoots = make(map[dynKey]*location)
+	}
+	e.dynRoots[key] = r
+	return r
+}
+
+// settleDynRoots makes the heap of the dynamic roots whose variable
+// something else than the function's own statements may change. It is
+// called when the graph is built.
+func (b *batch) settleDynRoots() {
+	for _, r := range b.dynRoots {
+		loc, _ := r.dynRoot.name.Opt.(*location)
+		if loc == nil || loc.captured || loc.addrtaken {
+			r.dynRoot = nil
+			r.attrs |= attrShares
+			continue
+		}
+		r.dynRoot.loc = loc
+	}
+}
+
+// dynOf returns the dynamic roots that what flows to root flows to.
+func dynOf(root *location) (self *location, more []*location) {
+	if root.dynRoot != nil {
+		self = root
+	}
+	return self, root.dyn
+}
+
+// wantsDyn reports whether l would learn of a dynamic root from root.
+func (b *batch) wantsDyn(l, root *location) bool {
+	if l.hasAttr(attrSharesDeep) {
+		return false
+	}
+	self, more := dynOf(root)
+	if self != nil && !hasDyn(l, self) {
+		return true
+	}
+	for _, r := range more {
+		if !hasDyn(l, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDyn(l, r *location) bool {
+	for _, x := range l.dyn {
+		if x == r {
+			return true
+		}
+	}
+	return false
+}
+
+// addDyn records on l, which flows to root, the dynamic roots of root,
+// and reports whether l changed.
+func (b *batch) addDyn(l, root *location) bool {
+	if l == root || l.hasAttr(attrSharesDeep) {
+		return false
+	}
+	self, more := dynOf(root)
+	changed := false
+	add := func(r *location) {
+		if r != nil && r != l && !hasDyn(l, r) {
+			l.dyn = append(l.dyn, r)
+			changed = true
+		}
+	}
+	add(self)
+	for _, r := range more {
+		add(r)
+	}
+	if len(l.dyn) > maxDyn {
+		l.dyn = nil
+		l.attrs |= attrSharesDeep
+	}
+	return changed
+}
+
+// localTag returns the expression of the tag of the allocation of loc,
+// which only flows to dynamic roots, or nil if one of them cannot be
+// evaluated there.
+func (b *batch) localTag(loc *location) ir.Node {
+	shift, ok := splitHeap(b.gd)
+	if !ok || loc.n == nil {
+		return nil
+	}
+	pos := loc.n.Pos()
+	uintptrType := types.Types[types.TUINTPTR]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	// The first address of the local range.
+	base := func() ir.Node {
+		return ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "localHeapBase"), uintptrType)
+	}
+	var tag ir.Node
+	seen := make(map[string]bool)
+	for _, r := range loc.dyn {
+		d := r.dynRoot
+		if d == nil {
+			return nil
+		}
+		v := d.loc
+		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
+			return nil
+		}
+		switch {
+		case d.plain && !v.reassigned && v.param:
+		case d.stmt != 0 && d.stmt == loc.stmt && b.simpleStmts[d.stmt] && (d.plain || !b.stmtCalls[d.stmt]):
+		default:
+			return nil
+		}
+		key := fmt.Sprint(d.path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		// (((uintptr(P) - base) >> shift) - 1) >> 63: 1 if P is in
+		// the local range, 0 if not.
+		var p ir.Node = ir.DeepCopy(pos, d.path)
+		if p.Type().IsSlice() {
+			sp := ir.NewUnaryExpr(b.gd, pos, ir.OSPTR, p)
+			sp.SetType(types.NewPtr(p.Type().Elem()))
+			sp.SetTypecheck(1)
+			p = sp
+		}
+		up := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], p)
+		up.SetTypecheck(1)
+		u := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, up)
+		u.SetTypecheck(1)
+		u.SetCheckPtr(true) // not kept: see walkConv
+		one := binary(ir.ORSH, binary(ir.OSUB, binary(ir.ORSH, binary(ir.OSUB, u, base()), lit(shift)), lit(1)), lit(63))
+		if tag == nil {
+			tag = one
+		} else {
+			tag = binary(ir.OAND, tag, one)
+		}
+	}
+	return tag
 }

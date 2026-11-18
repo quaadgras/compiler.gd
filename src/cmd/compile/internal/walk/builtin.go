@@ -589,7 +589,7 @@ func walkMakeSlice(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node 
 		argtype = types.Types[types.TINT]
 	}
 	fn := typecheck.LookupRuntime(gd, fnname)
-	ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, localRType(gd, reflectdata.MakeSliceElemRType(gd, gd.Pos, n), n.LocalAlloc()), typecheck.Conv(gd, len, argtype), typecheck.Conv(gd, cap, argtype))
+	ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, localRType(gd, reflectdata.MakeSliceElemRType(gd, gd.Pos, n), n), typecheck.Conv(gd, len, argtype), typecheck.Conv(gd, cap, argtype))
 	ptr.MarkNonNil()
 	len = typecheck.Conv(gd, len, types.Types[types.TINT])
 	cap = typecheck.Conv(gd, cap, types.Types[types.TINT])
@@ -625,7 +625,7 @@ func walkMakeSliceCopy(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.N
 
 		// instantiate mallocgc(size uintptr, typ *byte, needszero bool) unsafe.Pointer
 		fn := typecheck.LookupRuntime(gd, "mallocgc")
-		ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, size, localRType(gd, typecheck.NodNil(gd), n.LocalAlloc()), ir.NewBool(gd, gd.Pos, false))
+		ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, size, localRType(gd, typecheck.NodNil(gd), n), ir.NewBool(gd, gd.Pos, false))
 		ptr.MarkNonNil()
 		sh := ir.NewSliceHeaderExpr(gd, gd.Pos, t, ptr, length, length)
 
@@ -644,29 +644,34 @@ func walkMakeSliceCopy(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.N
 	// Replace make+copy with runtime.makeslicecopy.
 	// instantiate makeslicecopy(typ *byte, tolen int, fromlen int, from unsafe.Pointer) unsafe.Pointer
 	fn := typecheck.LookupRuntime(gd, "makeslicecopy")
-	ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, localRType(gd, reflectdata.MakeSliceElemRType(gd, gd.Pos, n), n.LocalAlloc()), length, copylen, typecheck.Conv(gd, copyptr, types.Types[types.TUNSAFEPTR]))
+	ptr := mkcall1(gd, fn, types.Types[types.TUNSAFEPTR], init, localRType(gd, reflectdata.MakeSliceElemRType(gd, gd.Pos, n), n), length, copylen, typecheck.Conv(gd, copyptr, types.Types[types.TUNSAFEPTR]))
 	ptr.MarkNonNil()
 	sh := ir.NewSliceHeaderExpr(gd, gd.Pos, t, ptr, length, length)
 	return walkExpr(gd, typecheck.Expr(gd, sh), init)
 }
 
-// localRType returns the type descriptor rtype tagged, if local is set,
-// for the runtime's allocation functions: the object is local
-// (runtime.allocType).
-func localRType(gd *base.Invocation, rtype ir.Node, local bool) ir.Node {
-	if !local || gd.Ctxt.Arch.Family == sys.Wasm {
+// localRType returns the type descriptor rtype tagged for the runtime's
+// allocation functions, if the object that n allocates is local, or
+// may be (runtime.allocType).
+func localRType(gd *base.Invocation, rtype ir.Node, n *ir.MakeExpr) ir.Node {
+	if gd.Ctxt.Arch.Family == sys.Wasm {
 		return rtype
 	}
+	var tag ir.Node
+	if n.LocalAlloc() {
+		tag = ir.NewBasicLit(gd, rtype.Pos(), types.Types[types.TUINTPTR], constant.MakeInt64(1))
+	} else if tag = ir.LocalTag(gd, n); tag == nil {
+		return rtype
+	}
+	t := types.NewPtr(types.Types[types.TUINT8])
 	if ir.IsNil(rtype) {
 		// No type: the object has no pointers.
-		one := typecheck.ConvNop(gd, ir.NewBasicLit(gd, rtype.Pos(), types.Types[types.TUINTPTR], constant.MakeInt64(1)), types.Types[types.TUNSAFEPTR])
-		return typecheck.ConvNop(gd, one, types.NewPtr(types.Types[types.TUINT8]))
+		return typecheck.ConvNop(gd, typecheck.ConvNop(gd, tag, types.Types[types.TUNSAFEPTR]), t)
 	}
-	t := rtype.Type()
-	add := ir.NewBinaryExpr(gd, rtype.Pos(), ir.OUNSAFEADD, typecheck.ConvNop(gd, rtype, types.Types[types.TUNSAFEPTR]), ir.NewBasicLit(gd, rtype.Pos(), types.Types[types.TUINTPTR], constant.MakeInt64(1)))
+	add := ir.NewBinaryExpr(gd, rtype.Pos(), ir.OUNSAFEADD, typecheck.ConvNop(gd, rtype, types.Types[types.TUNSAFEPTR]), tag)
 	add.SetType(types.Types[types.TUNSAFEPTR])
 	add.SetTypecheck(1)
-	return typecheck.ConvNop(gd, add, t)
+	return typecheck.ConvNop(gd, add, rtype.Type())
 }
 
 // walkNew walks an ONEW node.

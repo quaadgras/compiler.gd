@@ -405,12 +405,8 @@ func (p *pageAlloc) grow(base, size uintptr) {
 	// A grow operation is a lot like a free operation, so if our
 	// chunk ends up below p.searchAddr, update p.searchAddr to the
 	// new address, just like in free.
-	if p.split != 0 && base < p.split {
-		if b := (offAddr{base}); b.lessThan(p.localSearch) {
-			p.localSearch = b
-		}
-	} else if b := (offAddr{base}); b.lessThan(p.searchAddr) {
-		p.searchAddr = b
+	if search := p.searchFor(base); (offAddr{base}).lessThan(*search) {
+		*search = offAddr{base}
 	}
 
 	// Add entries into chunks, which is sparse, if needed. Then,
@@ -672,6 +668,15 @@ func (p *pageAlloc) find(npages uintptr) (uintptr, offAddr) {
 		return 0, searchAddr
 	}
 	return addr, searchAddr
+}
+
+// searchFor returns the search address of the range that base is in.
+func (p *pageAlloc) searchFor(base uintptr) *offAddr {
+	// Between enterLocal and leaveLocal the two are swapped.
+	if p.split != 0 && (base < p.split) != (p.limit != 0) {
+		return &p.localSearch
+	}
+	return &p.searchAddr
 }
 
 // enterLocal makes find and alloc search the local range, until
@@ -983,12 +988,8 @@ func (p *pageAlloc) free(base, npages uintptr) {
 	assertLockHeld(p.mheapLock)
 
 	// If we're freeing pages below the p.searchAddr, update searchAddr.
-	if p.split != 0 && base < p.split {
-		if b := (offAddr{base}); b.lessThan(p.localSearch) {
-			p.localSearch = b
-		}
-	} else if b := (offAddr{base}); b.lessThan(p.searchAddr) {
-		p.searchAddr = b
+	if search := p.searchFor(base); (offAddr{base}).lessThan(*search) {
+		*search = offAddr{base}
 	}
 	limit := base + npages*pageSize - 1
 	if npages == 1 {

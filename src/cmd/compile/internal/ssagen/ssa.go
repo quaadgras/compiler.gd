@@ -809,8 +809,8 @@ func (s *state) newHeapaddr(n *ir.Name) {
 		// Fall through: tagged but no outBuf found. Heap-alloc.
 	}
 	size := allocSize(n.Type())
-	if n.Unshared&ir.LocalObject != 0 && !s.f.Config.WasmGC && size != 0 {
-		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil))
+	if tag := s.localTag(n, n.Unshared&ir.LocalObject != 0); tag != nil && size != 0 {
+		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil, tag))
 		return
 	}
 	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC {
@@ -1026,20 +1026,36 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 // newObjectLocal returns an SSA value denoting new(typ), for an object
 // that is local: no other goroutine will reach it (escape's markLocal).
 // The runtime allocates it in the range of addresses of local memory.
-func (s *state) newObjectLocal(typ *types.Type, rtype *ssa.Value) *ssa.Value {
+func (s *state) newObjectLocal(typ *types.Type, rtype, tag *ssa.Value) *ssa.Value {
 	if typ.Size() == 0 {
 		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
 	}
 	if rtype == nil {
 		rtype = s.reflectType(typ)
 	}
-	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, s.localType(rtype))[0]
+	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, s.localType(rtype, tag))[0]
 }
 
-// localType returns the type descriptor rtype tagged for the runtime's
-// allocation functions: the object is local (runtime.allocType).
-func (s *state) localType(rtype *ssa.Value) *ssa.Value {
-	return s.newValue1I(ssa.OpOffPtr, rtype.Type, 1, rtype)
+// localTag returns the tag of the type of the object that n allocates:
+// 1 if it is local, as static says or as n's LocalTag is when the
+// program runs, and nil if it is not local.
+func (s *state) localTag(n ir.Node, static bool) *ssa.Value {
+	if s.f.Config.WasmGC {
+		return nil
+	}
+	if static {
+		return s.constInt(types.Types[types.TUINTPTR], 1)
+	}
+	if tag := ir.LocalTag(s.gd, n); tag != nil {
+		return s.expr(tag)
+	}
+	return nil
+}
+
+// localType returns the type descriptor rtype with the tag added, for
+// the runtime's allocation functions (runtime.allocType).
+func (s *state) localType(rtype, tag *ssa.Value) *ssa.Value {
+	return s.newValue2(ssa.OpAddPtr, rtype.Type, rtype, tag)
 }
 
 // newObjectNonSpecialized returns an SSA value denoting new(typ). It does
@@ -4976,13 +4992,13 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 	case ir.ONEW:
 		n := n.(*ir.UnaryExpr)
 		if x, ok := n.X.(*ir.DynamicType); ok && x.Op() == ir.ODYNAMICTYPE {
-			if n.LocalAlloc() && !s.f.Config.WasmGC {
-				return s.newObjectLocal(n.Type().Elem(), s.expr(x.RType))
+			if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
+				return s.newObjectLocal(n.Type().Elem(), s.expr(x.RType), tag)
 			}
 			return s.newObjectNonSpecialized(n.Type().Elem(), s.expr(x.RType))
 		}
-		if n.LocalAlloc() && !s.f.Config.WasmGC {
-			return s.newObjectLocal(n.Type().Elem(), nil)
+		if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
+			return s.newObjectLocal(n.Type().Elem(), nil, tag)
 		}
 		return s.newObject(n.Type().Elem())
 
@@ -5296,8 +5312,8 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// Call growslice
 	s.startBlock(grow)
 	taddr := s.expr(n.Fun)
-	if n.LocalAlloc() && !s.f.Config.WasmGC {
-		taddr = s.localType(taddr)
+	if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
+		taddr = s.localType(taddr, tag)
 	}
 	var r []*ssa.Value
 	if info != nil && n.UseBuf {

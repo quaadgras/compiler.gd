@@ -112,7 +112,13 @@ type batch struct {
 	// escape-candidate-shaped location and statement, how the
 	// statement takes the location's address; see noteAddrTaken.
 	curStmt, nextStmt int32
-	addrStmts         map[addrStmtKey]uint8
+
+	// Dynamic roots (shares.go): by statement and path, the statements
+	// that are one plain assignment, and those with a call.
+	dynRoots    map[dynKey]*location
+	simpleStmts map[int32]bool
+	stmtCalls   map[int32]bool
+	addrStmts   map[addrStmtKey]uint8
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,

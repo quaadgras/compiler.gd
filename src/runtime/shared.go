@@ -31,6 +31,7 @@ import (
 	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
+	"internal/runtime/sys"
 	"unsafe"
 )
 
@@ -676,11 +677,16 @@ func sharecheck(p unsafe.Pointer) {
 // in the local range of addresses (heapSplit), with the stacks. So the
 // address of a word says whether another goroutine may read or write it.
 
+// localHeapBase is the first address of the local range. Until there is
+// one it is an address that nothing has, so that nothing is local. The
+// compiler reads it for the tags it computes (escape's localTag).
+var localHeapBase uintptr = ^uintptr(0) >> 1
+
 // isLocal reports whether p is in the local range.
 //
 //go:nosplit
 func isLocal(p unsafe.Pointer) bool {
-	return heapSplit && uintptr(p)-localHeapBase < localHeapSize
+	return uintptr(p)-localHeapBase < localHeapSize
 }
 
 // localType returns typ tagged for the allocation functions that take
@@ -723,7 +729,12 @@ func shareStatsAlloc(size uintptr, local bool) {
 func localPublished(base uintptr) {
 	if n := shareStats.published.Add(1); debug.sharestats >= 2 && n <= 20 {
 		print("runtime: local object ", hex(base), " is published\n")
-		traceback(^uintptr(0), ^uintptr(0), 0, getg())
+		if gp := getg(); gp == gp.m.curg {
+			pc, sp := sys.GetCallerPC(), sys.GetCallerSP()
+			systemstack(func() {
+				traceback(pc, sp, 0, gp)
+			})
+		}
 	}
 	if debug.sharestats >= 3 {
 		throw("local object published")

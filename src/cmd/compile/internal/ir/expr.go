@@ -54,6 +54,40 @@ func (n *miniExpr) Bounded() bool         { return n.flags.load()&miniExprBounde
 func (n *miniExpr) SetBounded(b bool)     { n.flags.set(miniExprBounded, b) }
 func (n *miniExpr) Init() Nodes           { return n.init }
 
+// LocalTag returns, for the allocation n, the expression of type uintptr
+// that is 1 if the object is local and 0 if not, when that is only
+// known at run time (escape's markLocal), and nil otherwise. The runtime
+// takes it added to the type descriptor.
+func LocalTag(gd *base.Invocation, n Node) Node {
+	if dbg := gd.Debug.LocalDbg; dbg != 0 {
+		bit := 16
+		switch n.Op() {
+		case ONEW:
+			bit = 1
+		case OAPPEND:
+			bit = 2
+		case OMAKESLICE:
+			bit = 4
+		case ONAME:
+			bit = 8
+		}
+		if dbg&bit == 0 {
+			return nil
+		}
+	}
+	if tag, ok := gd.LocalTags.Load(n); ok {
+		return tag.(Node)
+	}
+	return nil
+}
+
+// SetLocalTag sets n's LocalTag.
+func SetLocalTag(gd *base.Invocation, n, tag Node) {
+	if tag != nil {
+		gd.LocalTags.Store(n, tag)
+	}
+}
+
 // LocalAlloc reports whether the object that n allocates is local: no
 // other goroutine will reach it, or what it will lead to (escape's
 // markLocal).

@@ -100,8 +100,8 @@ func (c *pageCache) flush(p *pageAlloc) {
 
 	// Since this is a lot like a free, we need to make sure
 	// we update the searchAddr just like free does.
-	if b := (offAddr{c.base}); b.lessThan(p.searchAddr) {
-		p.searchAddr = b
+	if search := p.searchFor(c.base); (offAddr{c.base}).lessThan(*search) {
+		*search = offAddr{c.base}
 	}
 	p.update(c.base, pageCachePages, false, false)
 	*c = pageCache{}

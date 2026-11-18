@@ -284,13 +284,14 @@ because the callee is unknown.
 
 - **Allocator** (`runtime`: `heapSplit`, `malloc.go`, `mheap.go`,
   `mpagealloc.go`). amd64 and arm64 on linux, darwin, freebsd, windows:
-  local objects and the stacks are in the 64 GiB below the first arena
-  hint (`[localHeapBase, localHeapEnd)`); everything else is above. Each
-  size class has a second span class (`spanClass.local`), the page
-  allocator has a second search address and a limit (`enterLocal`). If
-  the range is full or the kernel does not give it, local objects are
-  allocated with the rest, where they count as shared (safe). `isLocal(p)`
-  is `uintptr(p)-localHeapBase < localHeapSize`. The size-specialized
+  local objects and the stacks are in the 64 GiB at the first arena hint
+  (`localHeapBase`, a variable: the base of the heap is random); the
+  rest of the heap begins after it. Each size class has a second span
+  class (`spanClass.local`), the page allocator has a second search
+  address and a limit (`enterLocal`, `searchFor`). If the range is full
+  or the kernel does not give it, local objects are allocated with the
+  rest, where they count as shared (safe). `isLocal(p)` is
+  `uintptr(p)-localHeapBase < localHeapSize`. The size-specialized
   mallocs, the tiny allocator and the page cache are for shared objects
   only for now (a local allocation takes the general path).
 - **Entry points**. A type descriptor passed to `newobject`, `mallocgc`,
@@ -311,11 +312,57 @@ because the callee is unknown.
   objects of each range and the local ones that were published all the
   same, each of which is a wrong decision; `=2` traces them, `=3` throws.
 
-The static decision alone finds almost nothing (0.05% of the objects of
-the go command): what is in the heap is there because it is stored in
-something or returned. The vectors below are what makes it useful.
+- **Dynamic roots** (`escape/shares.go`: `dynRootOf`, `localTag`). A
+  store through a pure path from a local variable (`p.f = x`, `*p = x`,
+  `p[i] = x`, the elements of `append(p.f, x)`) is a store in a container
+  known at run time. An allocation that only flows to such containers
+  gets a tag computed where it is allocated: 1 if all of them are in the
+  local range. Allowed containers: the one of the allocation's own
+  statement (a plain assignment; without a call if the path loads), and a
+  parameter that is never assigned. `ir.LocalTag` holds the expression
+  (`(((uintptr(P)-localHeapBase)>>36)-1)>>63`), which the code generator
+  adds to the type descriptor. `-d=nolocaldyn` turns it off. For Phase G
+  these containers are the heap (`isDynRoot`).
 
-### Next: the dynamic vectors
+What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`:
+
+- A program that builds trees through methods (`n.kids = append(n.kids,
+  &node{})`): 87% of the objects local, none published.
+- `encoding/json`'s wrapper package: of 140 allocation sites 4 are local
+  (dynamically), 80 are not only because they are returned, 56 are
+  shared for a static reason (errors, panics, interface calls).
+- **Unsound today**: a callee that stores in a container on its caller's
+  stack sees a local address, and the caller then returns or shares what
+  was stored (regexp's compiler, reached from a package initializer:
+  44 of 110 local objects of json's tests are published). The guards do
+  not use the ranges yet, so nothing depends on it. See below.
+
+### Next
+
+1. **Stacks in a sub-range of their own**, so that a tag can say "a
+   local heap object" and not "a stack": a container on a stack is then
+   unknown, hence shared, unless the caller says otherwise (3).
+2. **Results**: a field of g that a caller sets right before it calls a
+   function known to read and clear it on entry (a property exported
+   with the function; never for an indirect call, so that it cannot be
+   left set). Bit 0: the results stay local. The callee's allocations
+   that are only returned take it as their tag; `return f(x)` forwards
+   it. The caller decides from a location for "what the call returns"
+   (as Phase G has for pointer results).
+3. **Stack containers**: more bits of the same field, one per pointer
+   argument that is the address of a stack variable whose contents stay
+   local.
+4. A variable that is assigned once and in scope at the allocation as a
+   whole-function container (needs scopes in the graph); parameters that
+   flow to another parameter's object without leaking to the heap (a
+   "shares" slot in the tags, so that `p.items = append(p.items, x)`
+   does not make `p`'s object shared in the caller).
+5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
+   closures.
+
+### The dynamic vectors as first planned
+
+
 
 A location in the escape graph that is a **dynamic root** stands for a
 container that is only known at run time. It has no `attrShares`; the

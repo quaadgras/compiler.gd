@@ -147,5 +147,8 @@ func (e *escape) storeThrough(p ir.Node) hole {
 	if c := e.contentsOf(p); c != nil {
 		return c.asHole()
 	}
+	if r := e.dynRootOf(p); r != nil {
+		return r.asHole()
+	}
 	return e.heapHole()
 }

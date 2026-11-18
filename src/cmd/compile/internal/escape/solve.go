@@ -42,6 +42,7 @@ func (b *batch) walkAll() {
 		}
 	}
 
+	b.settleDynRoots()
 	for _, loc := range b.allLocs {
 		todo.pushFront(loc)
 		// TODO(thepudds): clean up setting queuedWalkAll.
@@ -162,6 +163,13 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					newAttrs |= attrSharesValue
 				}
 			}
+			if root.attrs&(attrDynShares|attrDynSharesValue) != 0 {
+				if addressOf {
+					newAttrs |= attrDynShares
+				} else {
+					newAttrs |= attrDynSharesValue
+				}
+			}
 		}
 
 		// Whatever of l flows to root, and however deep, something
@@ -203,6 +211,15 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 		}
 
+		if b.addDyn(l, root) {
+			enqueue(l)
+			for _, o := range l.owners {
+				if b.addDyn(o, l) {
+					enqueue(o)
+				}
+			}
+		}
+
 		if newAttrs&^l.attrs != 0 {
 			l.attrs |= newAttrs
 			enqueue(l)
@@ -241,7 +258,14 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				if root.paramOut || root.hasAttr(attrReturned) {
 					want |= attrReturned
 				}
-				if want&^edge.src.attrs == 0 {
+				if root.attrs&(attrDynShares|attrDynSharesValue) != 0 {
+					if d < 0 {
+						want |= attrDynShares
+					} else if d == 0 {
+						want |= attrDynSharesValue
+					}
+				}
+				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) {
 					continue
 				}
 			}
