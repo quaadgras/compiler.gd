@@ -1,5 +1,6 @@
 # The slimcc tests that cmd/cc passes (go test cmd/cc -run Slimcc -update).
 agg_eval
+alignas2
 alignof2
 arith
 assign

@@ -583,3 +583,50 @@ func AtomicFetchP(p Ptr, op byte, n int, v Ptr) Ptr {
 // Fence is atomic_thread_fence: every atomic here is sequentially
 // consistent already.
 func Fence() {}
+
+// Atomic operations on objects other than scalars (an _Atomic struct):
+// under a lock, one of those striped by the object's address.
+var aggLocks [64]sync.Mutex
+
+func aggLock(p Ptr) *sync.Mutex { return &aggLocks[(Addr(p)>>4)%uintptr(len(aggLocks))] }
+
+// AtomicLoadAgg copies the n bytes of the atomic object at src to dst.
+func AtomicLoadAgg(dst, src Ptr, n uintptr) {
+	m := aggLock(src)
+	m.Lock()
+	Memmove(dst, src, n)
+	m.Unlock()
+}
+
+// AtomicStoreAgg copies n bytes at src to the atomic object at dst.
+func AtomicStoreAgg(dst, src Ptr, n uintptr) {
+	m := aggLock(dst)
+	m.Lock()
+	Memmove(dst, src, n)
+	m.Unlock()
+}
+
+// AtomicSwapAgg replaces the atomic object at p with v's n bytes, and
+// copies what it was to old.
+func AtomicSwapAgg(p, old, v Ptr, n uintptr) {
+	m := aggLock(p)
+	m.Lock()
+	Memmove(old, p, n)
+	Memmove(p, v, n)
+	m.Unlock()
+}
+
+// AtomicCmpXchgAgg is atomic_compare_exchange of the n bytes at p: if
+// they are those at exp, they become those at des; if not, exp's become
+// p's.
+func AtomicCmpXchgAgg(p, exp, des Ptr, n uintptr) bool {
+	m := aggLock(p)
+	m.Lock()
+	defer m.Unlock()
+	if Memcmp(p, exp, uint64(n)) == 0 {
+		Memmove(p, des, n)
+		return true
+	}
+	Memmove(exp, p, n)
+	return false
+}

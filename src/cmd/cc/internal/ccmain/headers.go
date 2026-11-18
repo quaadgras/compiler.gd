@@ -995,7 +995,7 @@ typedef enum memory_order {
 #define ATOMIC_LLONG_LOCK_FREE 2
 #define ATOMIC_POINTER_LOCK_FREE 2
 #define atomic_init(obj, value) __cc_atomic_store(obj, value)
-#define atomic_is_lock_free(obj) 1
+#define atomic_is_lock_free(obj) (sizeof(*(obj)) <= 8)
 #define atomic_thread_fence(order) __cc_atomic_fence()
 #define atomic_signal_fence(order) __cc_atomic_fence()
 #define atomic_store(obj, desired) __cc_atomic_store(obj, desired)

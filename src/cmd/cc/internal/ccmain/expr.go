@@ -1913,7 +1913,7 @@ func (p *parser) atomicBuiltin(op string, as []expr, at pos) expr {
 		p.errorAt(at, "%s takes %d arguments", op, n)
 	}
 	ptr := p.rvalue(as[0])
-	if !ptr.ty().isPtr() || !ptr.ty().elem.isScalar() {
+	if !ptr.ty().isPtr() || !ptr.ty().elem.isScalar() && ptr.ty().elem.kind != kStruct {
 		p.errorAt(at, "%s of a %s", op, ptr.ty())
 	}
 	et := ptr.ty().elem.unqual()
@@ -1927,6 +1927,9 @@ func (p *parser) atomicBuiltin(op string, as []expr, at pos) expr {
 		code, ok := p.foldInt(as[1])
 		if !ok {
 			p.errorAt(at, "atomic operation not constant")
+		}
+		if et.kind == kStruct && code != '=' {
+			p.errorAt(at, "atomic arithmetic on a %s", et)
 		}
 		var v expr
 		if et.isPtr() && code != '=' {

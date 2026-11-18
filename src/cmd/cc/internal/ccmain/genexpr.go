@@ -161,7 +161,19 @@ func (g *gen) load(l lval) string {
 	if isAtomic(l) {
 		return atomicLoad(l.addr, l.t)
 	}
+	if isAtomicAgg(l) {
+		// An _Atomic struct: copied whole, under its lock.
+		t := g.cellTmp(l.t.unqual())
+		g.p("c23.AtomicLoadAgg(%s, %s, %d)", t, l.addr, l.t.sizeof())
+		return t
+	}
 	return loadCode(l.addr, l.t)
+}
+
+// isAtomicAgg reports whether l is an _Atomic struct in memory, which
+// internal/c23 copies under a lock.
+func isAtomicAgg(l lval) bool {
+	return l.t.q&qAtomic != 0 && l.goVar == "" && l.f == nil && l.t.kind == kStruct
 }
 
 // isAtomic reports whether l is an _Atomic object in memory.
@@ -295,6 +307,8 @@ func (g *gen) storeL(l lval, v string, c expr) {
 		g.p("%s = %s", l.direct, v)
 	case l.f != nil:
 		g.bitStore(l.addr, l.f, v, c)
+	case isAtomicAgg(l):
+		g.p("c23.AtomicStoreAgg(%s, %s, %d)", l.addr, v, l.t.sizeof())
 	case isAtomic(l):
 		if goType(l.t) == "c23.Ptr" {
 			g.p("c23.AtomicStoreP(%s, %s)", l.addr, v)
@@ -1269,6 +1283,9 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		}
 		return fmt.Sprintf("c23.B2U8(%s)", over)
 	case "atomic_load":
+		if e.t.kind == kStruct {
+			return g.load(lval{addr: g.rv(e.args[0]), t: e.t.qualified(qAtomic)})
+		}
 		return atomicLoad(g.rv(e.args[0]), e.t)
 	case "atomic_store":
 		p, v := g.rv(e.args[0]), g.rv(e.args[1])
@@ -1279,6 +1296,11 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		op := e.args[1].(*intConst).v
 		v := g.rv(e.args[2])
 		et := e.args[0].ty().elem
+		if et.kind == kStruct {
+			old := g.cellTmp(et.unqual())
+			g.p("c23.AtomicSwapAgg(%s, %s, %s, %d)", p, old, v, et.sizeof())
+			return old
+		}
 		if goType(et) == "c23.Ptr" {
 			if op == '=' {
 				return fmt.Sprintf("c23.AtomicFetchP(%s, '=', 0, %s)", p, v)
@@ -1293,6 +1315,9 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "atomic_cmpxchg":
 		p, ex, d := g.rv(e.args[0]), g.rv(e.args[1]), g.rv(e.args[2])
 		et := e.args[0].ty().elem
+		if et.kind == kStruct {
+			return fmt.Sprintf("c23.B2U8(c23.AtomicCmpXchgAgg(%s, %s, %s, %d))", p, ex, d, et.sizeof())
+		}
 		if goType(et) == "c23.Ptr" {
 			return fmt.Sprintf("uint8(c23.AtomicCmpXchgP(%s, %s, %s))", p, ex, d)
 		}

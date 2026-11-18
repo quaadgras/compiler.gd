@@ -613,6 +613,11 @@ func (g *gen) localInit(s *symbol) {
 	switch localKindOf(s) {
 	case lkHeap:
 		size := g.vlaSize(s.t)
+		if a := s.t.alignof(); a > 8 {
+			// _Alignas
+			g.p("%s = c23.NewArrayAlignedT(%s, uintptr(%s), %d)", n, g.typeDesc(g.mirror(baseElem(s.t))), size, a)
+			return
+		}
 		g.p("%s = c23.NewArrayT(%s, uintptr(%s))", n, g.typeDesc(g.mirror(baseElem(s.t))), size)
 		return
 	case lkVar:

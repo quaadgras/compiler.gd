@@ -23,6 +23,16 @@ func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(tinfoOf[T](), ali
 // NewAlignedT is NewAligned, of the type whose Type is t.
 func NewAlignedT(t *Type, align uintptr) Ptr { return newAligned(t, t.t, align) }
 
+// NewArrayAlignedT is NewArrayT aligned to align bytes: a variable
+// length array declared with _Alignas.
+func NewArrayAlignedT(t *Type, n, align uintptr) Ptr {
+	sz := t.t.Size()
+	if align <= wordSize || sz == 0 {
+		return newOf(t, n)
+	}
+	return newAligned(t, reflect.ArrayOf(int((n+sz-1)/sz), t.t), align)
+}
+
 // mallocAligned is Malloc of n bytes aligned to align bytes.
 func mallocAligned(align, n uintptr) Ptr {
 	return newAligned(rawInfo, reflect.ArrayOf(int(n), rawInfo.t), align)
