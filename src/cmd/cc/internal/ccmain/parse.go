@@ -711,12 +711,13 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 		}
 		for {
 			f := &field{bits: -1}
+			var fa attrs // the member's, as GNU and C23 have it
 			if p.is(":") {
 				f.t = s.t
 			} else {
-				f.name, f.t, _ = p.declarator(s.t)
+				f.name, f.t, fa = p.declarator(s.t)
 			}
-			fa := p.attributes()
+			fa.merge(p.attributes())
 			if p.accept(":") {
 				f.bits = int(p.constInt(p.conditional()))
 				if !f.t.isInteger() {
