@@ -72,7 +72,7 @@ func (h *debugCallHandler) debugCallReturn(ctxt *sigctxt) {
 // case 2
 func (h *debugCallHandler) debugCallPanicOut(ctxt *sigctxt) {
 	sp := ctxt.sp()
-	memmove(unsafe.Pointer(&h.panic), unsafe.Pointer(uintptr(sp)+8), 2*goarch.PtrSize)
+	memmove(unsafe.Pointer(&h.panic), unsafe.Pointer(uintptr(sp)+8), unsafe.Sizeof(h.panic))
 	ctxt.set_pc(ctxt.pc() + 4)
 }
 

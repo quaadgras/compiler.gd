@@ -316,6 +316,10 @@ func (b *Builder) buildActionID(a *Action) cache.ActionID {
 	}
 	if len(p.CgoFiles)+len(p.SwigFiles)+len(p.SwigCXXFiles) > 0 {
 		fmt.Fprintf(h, "cgo %q\n", b.toolID("cgo"))
+		if len(p.SwigFiles)+len(p.SwigCXXFiles) > 0 {
+			// gd: what swig makes is rewritten (swigForGd).
+			fmt.Fprintf(h, "swig gd %s\n", swigForGdVersion)
+		}
 		cppflags, cflags, cxxflags, fflags, ldflags, _ := b.CFlags(p)
 
 		ccExe := b.ccExe()
@@ -3618,6 +3622,11 @@ func (b *Builder) swigOne(a *Action, file, objdir string, pcCFLAGS []string, cxx
 	if !cfg.BuildN {
 		if err := os.Rename(goFile, newGoFile); err != nil {
 			return err
+		}
+		if !gccgo {
+			if err := swigForGd(newGoFile, outC); err != nil {
+				return err
+			}
 		}
 	}
 

@@ -1,7 +1,13 @@
 env CGO_ENABLED=0
 
+# With cgo off, a package whose import "C" files need cgo (here, a #cgo
+# directive) is excluded, as with Go.
 ! go install cgotest
 stderr 'build constraints exclude all Go files'
+
+# gd: one that needs only what cmd/cc provides is built by cc instead.
+cd ../cctest
+go install cctest
 
 -- go.mod --
 module cgotest
@@ -9,6 +15,17 @@ module cgotest
 go 1.16
 -- m.go --
 package cgotest
+
+// #cgo CFLAGS: -DX
+import "C"
+
+var _ C.int
+-- ../cctest/go.mod --
+module cctest
+
+go 1.16
+-- ../cctest/m.go --
+package cctest
 
 import "C"
 

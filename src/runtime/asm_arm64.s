@@ -1207,7 +1207,7 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 //
 // To inject a function call, a debugger should:
 // 1. Check that the goroutine is in state _Grunning and that
-//    there are at least 288 bytes free on the stack.
+//    there are at least 304 bytes free on the stack.
 // 2. Set SP as SP-16.
 // 3. Store the current LR in (SP) (using the SP after step 2).
 // 4. Store the current PC in the LR register.
@@ -1240,28 +1240,32 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 // This is ABIInternal because Go code injects its PC directly into new
 // goroutine stacks.
 TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
-	STP	(R29, R30), -280(RSP)
-	SUB	$272, RSP, RSP
+	STP	(R29, R30), -296(RSP)
+	SUB	$288, RSP, RSP
 	SUB	$8, RSP, R29
 	// Save all registers that may contain pointers so they can be
 	// conservatively scanned.
 	//
+	// gd: they are saved from 48(RSP) up, above debugCallCheck's
+	// stack frame: its pc argument at 8(RSP) and its 3-word string
+	// result at 16(RSP)..39(RSP) would otherwise overwrite R0 and R1.
+	//
 	// We can't do anything that might clobber any of these
 	// registers before this.
-	STP	(R27, g), (30*8)(RSP)
-	STP	(R25, R26), (28*8)(RSP)
-	STP	(R23, R24), (26*8)(RSP)
-	STP	(R21, R22), (24*8)(RSP)
-	STP	(R19, R20), (22*8)(RSP)
-	STP	(R16, R17), (20*8)(RSP)
-	STP	(R14, R15), (18*8)(RSP)
-	STP	(R12, R13), (16*8)(RSP)
-	STP	(R10, R11), (14*8)(RSP)
-	STP	(R8, R9), (12*8)(RSP)
-	STP	(R6, R7), (10*8)(RSP)
-	STP	(R4, R5), (8*8)(RSP)
-	STP	(R2, R3), (6*8)(RSP)
-	STP	(R0, R1), (4*8)(RSP)
+	STP	(R27, g), (30*8+16)(RSP)
+	STP	(R25, R26), (28*8+16)(RSP)
+	STP	(R23, R24), (26*8+16)(RSP)
+	STP	(R21, R22), (24*8+16)(RSP)
+	STP	(R19, R20), (22*8+16)(RSP)
+	STP	(R16, R17), (20*8+16)(RSP)
+	STP	(R14, R15), (18*8+16)(RSP)
+	STP	(R12, R13), (16*8+16)(RSP)
+	STP	(R10, R11), (14*8+16)(RSP)
+	STP	(R8, R9), (12*8+16)(RSP)
+	STP	(R6, R7), (10*8+16)(RSP)
+	STP	(R4, R5), (8*8+16)(RSP)
+	STP	(R2, R3), (6*8+16)(RSP)
+	STP	(R0, R1), (4*8+16)(RSP)
 
 	// Perform a safe-point check.
 	MOVD	R30, 8(RSP) // Caller's PC
@@ -1269,11 +1273,13 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
 	MOVD	16(RSP), R0
 	CBZ	R0, good
 
-	// The safety check failed. Put the reason string at the top
-	// of the stack.
+	// The safety check failed. Put the reason string, 3 words
+	// {ptr, hash, len} under gd, at the top of the stack.
 	MOVD	R0, 8(RSP)
 	MOVD	24(RSP), R0
 	MOVD	R0, 16(RSP)
+	MOVD	32(RSP), R0
+	MOVD	R0, 24(RSP)
 
 	// Set R20 to 8 and invoke BRK. The debugger should get the
 	// reason a call can't be injected from SP+8 and resume execution.
@@ -1308,7 +1314,7 @@ good:
 	CALL	runtime·debugCallWrap(SB);	\
 	JMP	restore
 
-	MOVD	256(RSP), R0 // the argument frame size
+	MOVD	272(RSP), R0 // the argument frame size
 	DEBUG_CALL_DISPATCH(debugCall32<>, 32)
 	DEBUG_CALL_DISPATCH(debugCall64<>, 64)
 	DEBUG_CALL_DISPATCH(debugCall128<>, 128)
@@ -1324,8 +1330,9 @@ good:
 	// The frame size is too large. Report the error.
 	MOVD	$debugCallFrameTooLarge<>(SB), R0
 	MOVD	R0, 8(RSP)
+	MOVD	ZR, 16(RSP) // no cached hash
 	MOVD	$20, R0
-	MOVD	R0, 16(RSP) // length of debugCallFrameTooLarge string
+	MOVD	R0, 24(RSP) // length of debugCallFrameTooLarge string
 	MOVD	$8, R20
 	BREAK
 	JMP	restore
@@ -1341,23 +1348,23 @@ restore:
 
 	// Restore pointer-containing registers, which may have been
 	// modified from the debugger's copy by stack copying.
-	LDP	(30*8)(RSP), (R27, g)
-	LDP	(28*8)(RSP), (R25, R26)
-	LDP	(26*8)(RSP), (R23, R24)
-	LDP	(24*8)(RSP), (R21, R22)
-	LDP	(22*8)(RSP), (R19, R20)
-	LDP	(20*8)(RSP), (R16, R17)
-	LDP	(18*8)(RSP), (R14, R15)
-	LDP	(16*8)(RSP), (R12, R13)
-	LDP	(14*8)(RSP), (R10, R11)
-	LDP	(12*8)(RSP), (R8, R9)
-	LDP	(10*8)(RSP), (R6, R7)
-	LDP	(8*8)(RSP), (R4, R5)
-	LDP	(6*8)(RSP), (R2, R3)
-	LDP	(4*8)(RSP), (R0, R1)
+	LDP	(30*8+16)(RSP), (R27, g)
+	LDP	(28*8+16)(RSP), (R25, R26)
+	LDP	(26*8+16)(RSP), (R23, R24)
+	LDP	(24*8+16)(RSP), (R21, R22)
+	LDP	(22*8+16)(RSP), (R19, R20)
+	LDP	(20*8+16)(RSP), (R16, R17)
+	LDP	(18*8+16)(RSP), (R14, R15)
+	LDP	(16*8+16)(RSP), (R12, R13)
+	LDP	(14*8+16)(RSP), (R10, R11)
+	LDP	(12*8+16)(RSP), (R8, R9)
+	LDP	(10*8+16)(RSP), (R6, R7)
+	LDP	(8*8+16)(RSP), (R4, R5)
+	LDP	(6*8+16)(RSP), (R2, R3)
+	LDP	(4*8+16)(RSP), (R0, R1)
 
 	LDP	-8(RSP), (R29, R27)
-	ADD	$288, RSP, RSP // Add 16 more bytes, see saveSigContext
+	ADD	$304, RSP, RSP // Add 16 more bytes, see saveSigContext
 	MOVD	-16(RSP), R30 // restore old lr
 	JMP	(R27)
 
@@ -1386,12 +1393,16 @@ DEBUG_CALL_FN(debugCall65536<>, 65536)
 
 // func debugCallPanicked(val interface{})
 // gd fat-interface: iface is 32 bytes (2 words + 16-byte inline payload).
-TEXT runtime·debugCallPanicked(SB),NOSPLIT,$16-32
-	// Copy the panic value to the top of stack at SP+8.
+TEXT runtime·debugCallPanicked(SB),NOSPLIT,$32-32
+	// Copy the whole 32 B panic value to the top of stack at SP+8.
 	MOVD	val_type+0(FP), R0
 	MOVD	R0, 8(RSP)
 	MOVD	val_data+8(FP), R0
 	MOVD	R0, 16(RSP)
+	MOVD	val_inline_real+16(FP), R0
+	MOVD	R0, 24(RSP)
+	MOVD	val_inline_imag+24(FP), R0
+	MOVD	R0, 32(RSP)
 	MOVD	$2, R20
 	BREAK
 	RET
