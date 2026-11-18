@@ -82,6 +82,21 @@ type location struct {
 	addrtaken  bool // has this variable's address been taken?
 	param      bool // is this variable a parameter (ONAME of class ir.PPARAM)?
 	paramOut   bool // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+
+	// gd escape-bits: addrHeld reports whether this location's
+	// address flows into a location that holds it (see holdsAddr):
+	// a variable, a closure, a range temporary, not just a callee's
+	// parameter; or may be held in a temporary of a statement that
+	// also passes it as a candidate argument (see noteAddrTaken).
+	// Walk's wrap can only re-home an escape candidate whose address
+	// the function keeps nowhere but in its box: a pointer to the
+	// stack copy kept elsewhere would go stale when the wrap moves
+	// the variable to the heap.
+	addrHeld bool
+
+	// transient marks the temporaries of teeHole, which forward a
+	// value to other holes instead of holding it.
+	transient bool
 }
 
 type locAttr uint8
@@ -215,6 +230,7 @@ func (k hole) dotType(gd *base.Invocation, t *types.Type, where ir.Node, why str
 func (b *batch) flow(k hole, src *location) {
 	if k.addrtaken {
 		src.addrtaken = true
+		b.noteAddrTaken(src, k.dst == &b.candidateLoc)
 	}
 
 	dst := k.dst
@@ -243,6 +259,61 @@ func (b *batch) flow(k hole, src *location) {
 
 	// TODO(mdempsky): Deduplicate edges?
 	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
+}
+
+// holdsAddr reports whether root, whose walk found that l's address
+// flows into it, keeps a pointer to l beyond a statement of l's
+// function (see location.addrHeld): any location of that function
+// but the pseudo-locations standing for the heap and for callees and
+// teeHole's temporaries, which only forward values.
+func (b *batch) holdsAddr(root, l *location) bool {
+	switch root {
+	case &b.heapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc:
+		return false
+	}
+	// Locations of other functions in the batch, the parameters
+	// and locals of a callee, only hold it for the call: what
+	// outlives the call flows out through its results to the
+	// caller's holes.
+	return root.curfn == l.curfn && !root.transient
+}
+
+// An addrStmtKey identifies a location and a statement taking its
+// address.
+type addrStmtKey struct {
+	loc  *location
+	stmt int32
+}
+
+// noteAddrTaken records that the statement being analyzed takes
+// src's address, as an argument of a dynamic call that routes it to
+// the candidate location (see dynamicArgHole) or otherwise.
+//
+// gd escape-bits: order and walk evaluate parts of a statement into
+// temporaries ahead of others, so a pointer to src computed elsewhere
+// in the statement than a candidate argument &src can sit in a
+// temporary while the wrap at the candidate argument's call moves src
+// to the heap: use(src[:], f(&src)), use(id(&src), f(&src)). Such a
+// src isn't a candidate (addrHeld). Pointers kept beyond a statement
+// are in locations, which walkOne checks.
+func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
+	if src.addrHeld || !isCandidateLoc(src.n) {
+		return
+	}
+	bit := uint8(2)
+	if asCandidateArg {
+		bit = 1
+	}
+	key := addrStmtKey{src, b.curStmt}
+	bits := b.addrStmts[key] | bit
+	if bits == 3 {
+		src.addrHeld = true
+		return
+	}
+	if b.addrStmts == nil {
+		b.addrStmts = make(map[addrStmtKey]uint8)
+	}
+	b.addrStmts[key] = bits
 }
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
@@ -319,6 +390,7 @@ func (e *escape) teeHole(ks ...hole) hole {
 	// new temporary location ltmp, wire it into place, and return
 	// a hole for "ltmp = _".
 	loc := e.newLoc(nil, false)
+	loc.transient = true
 	for _, k := range ks {
 		// N.B., "p = &q" and "p = &tmp; tmp = q" are not
 		// semantically equivalent. To combine holes like "l1

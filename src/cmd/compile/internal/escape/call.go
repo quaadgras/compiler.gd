@@ -123,11 +123,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		} else {
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
-				argument(e.mergedTagHole(ks, fns, -1, fntype), recvArg)
+				argument(e.mergedTagHole(ks, fns, -1, fntype, recvArg), recvArg)
 			}
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
-				argument(e.mergedTagHole(ks, fns, i, fntype), args[i])
+				argument(e.mergedTagHole(ks, fns, i, fntype, args[i]), args[i])
 			}
 		}
 
@@ -398,59 +398,34 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 	return tmp
 }
 
-// candidateEligibleParamType reports whether an argument of type t
-// passed to a dynamic callee is a shape the call-site wrap can
-// safely materialise via runtime.materializeToHeap. Only pointer-
-// shaped values qualify: *T, unsafe.Pointer, and chan (pointer-
-// under-the-hood). Struct-by-value, slice, map, interface, and func
-// args let the callee reach storage the wrap can't see — we must
-// fall back to stock heap-escape decisions for those so a candidate
-// pointer stored inside them isn't accidentally stack-kept. See
-// doc/gd/escape-bits.md §4.
-func candidateEligibleParamType(t *types.Type) bool {
-	if t == nil {
-		return false
+// dynamicArgHole returns the hole for arg, an argument (or the
+// receiver) of a call whose callee is not statically known.
+//
+// gd escape-bits: walk's wrap (wrapEscapeCandidateArgs) re-homes one
+// shape of argument, &x for a local x that isCandidateLoc admits: when
+// the callee's escape mask says the parameter escapes, it copies x to
+// the heap, points x's box at the copy and passes that instead. So
+// only such an argument goes to the candidate location. Any other one
+// reaches the callee as it is: the address of a field or element
+// (&x.f, &a[i]), a pointer variable, a conversion (unsafe.Pointer(&x)),
+// a struct, slice or interface holding pointers, an interface
+// receiver. Those flow to the heap, as every argument to an unknown
+// callee does in stock Go. See doc/gd/escape-bits.md.
+func (e *escape) dynamicArgHole(arg ir.Node) hole {
+	if arg.Op() == ir.OADDR && isCandidateLoc(arg.(*ir.AddrExpr).X) {
+		return e.candidateHole()
 	}
-	switch t.Kind() {
-	case types.TPTR:
-		// Interface-method receivers are synthesized by the
-		// compiler as `*struct{}` — an opaque pointer to the
-		// iface's data word, never a user-facing pointer arg.
-		// Routing these through candidateHole pulls the
-		// containing receiver chain (TextHandler → commonHandler
-		// → &buf) into candidate propagation even though
-		// there's no real wrap opportunity. Treat them as
-		// non-candidate so stock heap decisions apply to the
-		// iface receiver while real `*T` args still qualify.
-		elem := t.Elem()
-		if elem == nil {
-			return false
-		}
-		if elem.Kind() == types.TSTRUCT && elem.NumFields() == 0 {
-			return false
-		}
-		return true
-	case types.TUNSAFEPTR, types.TCHAN:
-		return true
-	}
-	return false
+	return e.heapHole()
 }
 
-// mergedTagHole returns the hole for the argument at paramIdx (-1 for
-// the receiver) of a call whose statically-known callees are fns. With
-// no known callee it defers to tagHole(ks, nil, param) so the gd
-// escape-bits candidate path (candidateEligibleParamType) still
-// applies to dynamic calls; fntype is the call's signature.
-func (e *escape) mergedTagHole(ks []hole, fns []*ir.Name, paramIdx int, fntype *types.Type) hole {
+// mergedTagHole returns the hole for arg, the argument at paramIdx (-1
+// for the receiver) of a call whose statically-known callees are fns.
+// With no known callee it defers to dynamicArgHole, the gd escape-bits
+// candidate path; fntype is the call's signature.
+func (e *escape) mergedTagHole(ks []hole, fns []*ir.Name, paramIdx int, fntype *types.Type, arg ir.Node) hole {
 	nParams := len(fntype.Params())
 	if len(fns) == 0 {
-		var p *types.Field
-		if paramIdx >= 0 {
-			p = fntype.Params()[paramIdx]
-		} else {
-			p = fntype.Recv()
-		}
-		return e.tagHole(ks, nil, p)
+		return e.dynamicArgHole(arg)
 	}
 	holes := make([]hole, 0, len(fns))
 	for _, f := range fns {
@@ -472,22 +447,10 @@ func (e *escape) mergedTagHole(ks []hole, fns []*ir.Name, paramIdx int, fntype *
 // callee's results flows. fn is the statically-known callee function,
 // if any.
 func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
-	// gd escape-bits: dynamic callees go through a candidate-only
-	// location IF the arg type is one our call-site wrap can handle
-	// at runtime — i.e. a pointer-shaped value the wrap can re-home
-	// via materializeToHeap. For struct-by-value, map, slice, chan,
-	// or interface args we fall back to the stock heapHole: the
-	// wrap can't decode arbitrary struct fields to find nested
-	// candidate pointers, so the conservative escape decision is
-	// correct (and matches stock Go's behaviour exactly for those
-	// argument shapes). This restriction fixes the TestGenericEscape
-	// failure where &x stored inside a struct field was being marked
-	// candidate-only and stack-allocated despite the struct's method
-	// actually escaping the field. See doc/gd/escape-bits.md.
+	// If this is a dynamic call, we can't rely on param.Note. (A
+	// call's arguments to an unknown callee go through
+	// dynamicArgHole instead.)
 	if fn == nil {
-		if candidateEligibleParamType(param.Type) {
-			return e.candidateHole()
-		}
 		return e.heapHole()
 	}
 

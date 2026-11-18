@@ -101,6 +101,13 @@ type batch struct {
 	calleeLoc    location
 	blankLoc     location
 	candidateLoc location
+
+	// gd escape-bits: curStmt identifies the statement being
+	// analyzed (nextStmt numbers them), and addrStmts records, per
+	// escape-candidate-shaped location and statement, how the
+	// statement takes the location's address; see noteAddrTaken.
+	curStmt, nextStmt int32
+	addrStmts         map[addrStmtKey]uint8
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,
@@ -310,22 +317,19 @@ func (b *batch) flowClosure(k hole, clo *ir.ClosureExpr) {
 }
 
 // isCandidateLoc reports whether n is a node whose storage may safely
-// be re-homed by the runtime escape-bits wrap.
+// be re-homed by the runtime escape-bits wrap: a local PAUTO name
+// whose address is taken. Walk gives such a variable a box, a pointer
+// to its storage (a stack slot at first) that every use of the
+// variable goes through, so when the wrap at a dynamic call moves the
+// variable to the heap, later uses agree with the callee's view.
 //
-// Three categories:
-//  1. Fresh-allocation expressions (ONEW) where the caller never
-//     observes the allocated object except through a single value.
-//     The wrap can freely substitute a heap copy for the allocation.
-//  2. Pre-existing local PAUTO names whose address is taken and
-//     passed to a dynamic callee. These get promoted to PAUTOHEAP
-//     by walk so the var's backing storage lives behind an
-//     updatable pointer (stack backing initially, heap after the
-//     wrap migrates). Post-call reads through the pointer agree
-//     with the callee's view — no divergent stack copy.
+// The wrap only handles the variable's address passed as an argument,
+// &x (see dynamicArgHole), and only when no other pointer to the stack
+// slot is kept anywhere (see location.addrHeld); finish checks that.
 //
-// Composite literals, closures, maps, and iface conversions are
-// excluded: their lifetimes interact with consumer patterns the
-// wrap can't safely preserve (e.g. capturing references).
+// Fresh allocations, composite literals, closures, maps, and iface
+// conversions are excluded: their lifetimes interact with consumer
+// patterns the wrap can't safely preserve (e.g. capturing references).
 func isCandidateLoc(n ir.Node) bool {
 	if n == nil {
 		return false
@@ -361,12 +365,12 @@ func isCandidateLoc(n ir.Node) bool {
 }
 
 // shouldEnableEscapeCandidate is the activation gate for the gd
-// escape-bits Phase D optimization. Now that tagHole only routes
-// candidate-eligible (pointer-shaped) args through candidateHole,
-// and isCandidateLoc is restricted to ONAME-with-Addrtaken, the
-// remaining known-unsafe shapes are all funnelled back to stock
-// heapLoc. The gate can therefore open fork-wide; it stays as a
-// kill switch in case a new failure mode surfaces.
+// escape-bits Phase D optimization. Now that dynamicArgHole only
+// routes &x arguments through candidateHole, and isCandidateLoc is
+// restricted to ONAME-with-Addrtaken, the remaining known-unsafe
+// shapes are all funnelled back to stock heapLoc. The gate can
+// therefore open fork-wide; it stays as a kill switch in case a new
+// failure mode surfaces.
 func shouldEnableEscapeCandidate(fn *ir.Func) bool {
 	if fn == nil || fn.Nname == nil {
 		return false
@@ -423,7 +427,30 @@ func (b *batch) finish(fns []*ir.Func) {
 		// communicate whether the result escapes.
 		phaseGCallSpill := n.Op() == ir.OCALLFUNC || n.Op() == ir.OCALLINTER || n.Op() == ir.OCALLMETH
 
-		if loc.hasAttr(attrEscapes) {
+		// gd escape-bits: a loc whose address reaches the heap only
+		// as an argument of dynamic calls (attrCandidateEscape: the
+		// solver routed its escape through candidateHole) becomes an
+		// escape candidate if walk's wrap can re-home it: it stays on
+		// the stack, behind a box, and the wrap at each such call
+		// moves it to the heap when the callee's escape mask says the
+		// argument escapes. Any other such loc escapes, as it would
+		// in stock Go.
+		escapes := loc.hasAttr(attrEscapes)
+		candidate := false
+		if !escapes && loc.hasAttr(attrCandidateEscape) {
+			if !b.gd.Flag.CompilingRuntime &&
+				isCandidateLoc(n) && !loc.addrHeld &&
+				shouldEnableEscapeCandidate(loc.curfn) {
+				candidate = true
+			} else {
+				escapes = true
+			}
+		}
+
+		if candidate {
+			n.SetEsc(ir.EscHeap)
+			n.SetEscCandidate(true)
+		} else if escapes {
 			if n.Op() == ir.ONAME {
 				if b.gd.Flag.CompilingRuntime {
 					b.gd.ErrorfAt(n.Pos(), 0, "%v escapes to heap, not allowed in runtime", n)
@@ -455,36 +482,6 @@ func (b *batch) finish(fns []*ir.Func) {
 			// wrappers.
 			if call, ok := n.(*ir.CallExpr); ok && (call.Op() == ir.OCALLFUNC || call.Op() == ir.OCALLINTER) {
 				call.GdForwardOutBufResult = phaseGSingleResultLeak(loc)
-			}
-		} else if loc.hasAttr(attrCandidateEscape) {
-			// gd escape-bits: the solver routed this loc's
-			// escape edge through a dynamic callee (candidateHole).
-			//
-			// When the per-function activation gate is open and
-			// the loc is one of the shapes the wrap safely
-			// handles (see isCandidateLoc), tag as candidate so
-			// walk can insert the mask-check wrap and update
-			// the caller's pointer via Heapaddr indirection.
-			//
-			// Otherwise fall back to a normal heap allocation:
-			// this preserves correctness for every loc that
-			// would have been EscHeap under stock Go by
-			// treating attrCandidateEscape as equivalent to
-			// attrEscapes at finalize time.
-			if !b.gd.Flag.CompilingRuntime &&
-				isCandidateLoc(n) &&
-				shouldEnableEscapeCandidate(loc.curfn) {
-				n.SetEsc(ir.EscHeap)
-				n.SetEscCandidate(true)
-			} else {
-				if b.gd.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
-					if n.Op() == ir.OAPPEND {
-						b.gd.WarnfAt(n.Pos(), "append escapes to heap")
-					} else {
-						b.gd.WarnfAt(n.Pos(), "%v escapes to heap", n)
-					}
-				}
-				n.SetEsc(ir.EscHeap)
 			}
 		} else {
 			if b.gd.Flag.LowerM != 0 && n.Op() != ir.ONAME && !goDeferWrapper && !phaseGCallSpill {
