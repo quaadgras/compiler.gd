@@ -621,6 +621,15 @@ func (g *gen) localInit(s *symbol) {
 				g.errorf(s.p, "internal error: %s has an aggregate initializer", s.name)
 			}
 			g.p("%s = %s", n, g.rv(s.init.scalar))
+		} else if !s.global {
+			// Without an initializer, its value becomes indeterminate
+			// each time the declaration is reached (C11 6.2.4): zero.
+			// The Go variable is the function's, declared at its top; set
+			// here, it does not carry a value from one pass of a loop to
+			// the next, which Go's compiler would otherwise keep live
+			// around the loop (and in registers at its head): Lua's
+			// interpreter loop reloaded 15 such floats each instruction.
+			g.p("%s = %s", n, zeroOf(s.t))
 		}
 		return
 	}
