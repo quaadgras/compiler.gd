@@ -118,6 +118,12 @@ func (g *gen) cName(line int, name string) string {
 	if s := g.u.scope[name]; s != nil {
 		switch s.kind {
 		case symTypedef:
+			if s.t.kind == kUIntCap {
+				return "uintptr"
+			}
+			if s.t.kind == kIntCap {
+				return "int"
+			}
 			return g.mirror(s.t)
 		case symEnumConst:
 			return fmt.Sprintf("(%d)", s.val)
@@ -177,9 +183,17 @@ func (g *gen) rewriteCall(b *edit.Buffer, off func(gotoken.Pos) int, line int, c
 	case ft.ret.kind == kBool:
 		b.Insert(off(call.Pos()), "(")
 		b.Insert(off(call.End()), " != 0)")
+	case ft.ret.isCap():
+		b.Insert(off(call.Pos()), map[bool]string{true: "uintptr", false: "int"}[ft.ret.kind == kUIntCap]+"(_c23.Addr(")
+		b.Insert(off(call.End()), "))")
 	}
 	b.Replace(off(call.Fun.Pos()), off(call.Fun.End()), g.names[s])
 	for i, a := range call.Args {
+		if ft.params[i].isCap() {
+			b.Insert(off(a.Pos()), "_c23.FromInt(uintptr(")
+			b.Insert(off(a.End()), "))")
+			continue
+		}
 		if !ft.params[i].isPtr() {
 			continue
 		}

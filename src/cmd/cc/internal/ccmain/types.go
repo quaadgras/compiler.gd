@@ -34,6 +34,8 @@ const (
 	kUInt128 // unsigned __int128
 	kBitInt  // _BitInt(n)
 	kUBitInt // unsigned _BitInt(n)
+	kIntCap  // __intcap: intptr_t, an integer that carries a capability (CHERI C's)
+	kUIntCap // unsigned __intcap: uintptr_t
 	kFloat
 	kDouble
 	kLDouble
@@ -140,6 +142,8 @@ var (
 	tUInt    = &ctype{kind: kUInt}
 	tLong    = &ctype{kind: kLong}
 	tULong   = &ctype{kind: kULong}
+	tIntCap  = &ctype{kind: kIntCap}
+	tUIntCap = &ctype{kind: kUIntCap}
 	tLLong   = &ctype{kind: kLLong}
 	tULLong  = &ctype{kind: kULLong}
 	tFloat   = &ctype{kind: kFloat}
@@ -157,8 +161,20 @@ func funcOf(ret *ctype, params ...*ctype) *ctype {
 	return &ctype{kind: kFunc, fn: &funcType{ret: ret, params: params, proto: true}}
 }
 
-func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kUBitInt }
-func (t *ctype) isBitInt() bool  { return t.kind == kBitInt || t.kind == kUBitInt }
+func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kUIntCap }
+
+// isCap reports whether t is an intcap (intcap.go in internal/c23): an
+// integer whose value is a c23.Ptr, keeping a pointer's capability.
+func (t *ctype) isCap() bool { return t.kind == kIntCap || t.kind == kUIntCap }
+
+// capInt is the integer type of an intcap's address.
+func capInt(t *ctype) *ctype {
+	if t.kind == kUIntCap {
+		return tULong
+	}
+	return tLong
+}
+func (t *ctype) isBitInt() bool { return t.kind == kBitInt || t.kind == kUBitInt }
 
 // width is an integer type's width in bits.
 func (t *ctype) width() int64 {
@@ -215,7 +231,7 @@ func (t *ctype) isVM() bool {
 
 func (t *ctype) isUnsigned() bool {
 	switch t.kind {
-	case kBool, kUChar, kUShort, kUInt, kULong, kULLong, kUBitInt, kUInt128:
+	case kBool, kUChar, kUShort, kUInt, kULong, kULLong, kUBitInt, kUInt128, kUIntCap:
 		return true
 	}
 	return false
@@ -247,7 +263,7 @@ func (t *ctype) rank() int {
 		return 160
 	case kInt, kUInt:
 		return 320
-	case kLong, kULong:
+	case kLong, kULong, kIntCap, kUIntCap:
 		return 640
 	case kLLong, kULLong:
 		return 641
@@ -269,7 +285,7 @@ func (t *ctype) sizeof() int64 {
 		return 4
 	case kLong, kULong:
 		return target.longSize
-	case kPtr, kNullptr, kVaList:
+	case kPtr, kNullptr, kVaList, kIntCap, kUIntCap:
 		return target.ptrSize
 	case kLLong, kULLong, kDouble:
 		return 8
@@ -357,6 +373,8 @@ func (t *ctype) unsignedOf() *ctype {
 		return tULong
 	case kLLong, kULLong:
 		return tULLong
+	case kIntCap, kUIntCap:
+		return tUIntCap
 	}
 	return t
 }
@@ -401,6 +419,26 @@ func usual(a, b *ctype) *ctype {
 		return tFloat
 	}
 	a, b = promote(a), promote(b)
+	if c, o := a, b; c.isCap() || o.isCap() {
+		// An intcap operand makes the result one, keeping its capability
+		// (CHERI C's rule), unsigned as C's rules would make it; unless
+		// the other is wider.
+		if !c.isCap() {
+			c, o = o, c
+		}
+		if o.width() <= c.width() {
+			if c.kind == kUIntCap || o.kind == kUIntCap || o.isUnsigned() && o.width() == c.width() {
+				return tUIntCap
+			}
+			return tIntCap
+		}
+		if a.isCap() {
+			a = capInt(a)
+		}
+		if b.isCap() {
+			b = capInt(b)
+		}
+	}
 	if a.kind == b.kind && a.width() == b.width() {
 		return a
 	}
@@ -645,6 +683,7 @@ var kindNames = [...]string{
 	kLong: "long", kULong: "unsigned long", kLLong: "long long", kULLong: "unsigned long long",
 	kFloat: "float", kDouble: "double", kLDouble: "long double", kNullptr: "nullptr_t",
 	kVaList: "__builtin_va_list", kInt128: "__int128", kUInt128: "unsigned __int128",
+	kIntCap: "__intcap", kUIntCap: "unsigned __intcap",
 }
 
 // wrap truncates v to t's width and signedness (the bits, for 64-bit

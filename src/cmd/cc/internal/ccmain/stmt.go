@@ -276,6 +276,9 @@ func (p *parser) statement() stmt {
 				p.errorAt(at, "switch quantity not an integer")
 			}
 			x = p.convert(x, promote(x.ty()))
+			if x.ty().isCap() {
+				x = p.convert(x, capInt(x.ty()))
+			}
 			p.expect(")")
 			sw := &switchStmt{x: x}
 			save := p.sw

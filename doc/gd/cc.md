@@ -118,7 +118,12 @@ only, so no check races with another thread:
   address only if the target holds a whole value of the pointee type
   (the same type, or for a type without pointers, bytes without any);
 - a pointer made of an integer has no capability: it can be passed around
-  and compared, not dereferenced.
+  and compared, not dereferenced. `intptr_t` and `uintptr_t` are the
+  exception: they are integers that carry a pointer's capability, as CHERI
+  C's `__intcap` types are (internal/c23's `intcap.go`), so a pointer
+  converted to one and back is the pointer, checked as ever. Arithmetic is
+  on the address and keeps the capability; in memory one is a split word,
+  the address in its bytes and the capability in the side table.
 
 **Types, not the heap, answer every check**, so C's objects and Go's may
 be on the stack. Each C local is a Go variable of type `c23.Obj[T]`;
@@ -255,7 +260,8 @@ layout of the 11 that Go can declare):
 | `char`, `short`, `int`, `float` | 1, 2, 4, 4 | the same |
 | `long`, `unsigned long` | 8 (Go `int64`) | **4 (Go `int32`, `uint32`)** |
 | pointers, `nullptr_t`, `va_list` | 8 | **4** |
-| `size_t`, `ptrdiff_t`, `intptr_t`, `uintptr_t` | `long`: 8 | `long`: **4** |
+| `size_t`, `ptrdiff_t` | `long`: 8 | `long`: **4** |
+| `intptr_t`, `uintptr_t` | `__intcap`: a pointer's, 8 | **4** |
 | `long long`, `double` | 8, aligned 8 | 8, aligned 8 (as Go's `int64`) |
 | `int64_t`, `intmax_t`, `int_least64_t`, `int_fast64_t` | `long` | `long long` |
 | `int_fast16_t`, `int_fast32_t` | `long` | `int` (musl's, wasi-libc's) |
@@ -391,7 +397,8 @@ pointer memory with split (the tag), whatever the word size.
   than a double's precision, local arrays aligned to 16 as on x86-64 (only
   `_Alignas` objects are over-aligned, in the heap). Go cannot call a
   variadic C function. A pointer made from an integer has no capability,
-  by design (`(int *)(long)&x` cannot be used).
+  by design (`(int *)(long)&x` cannot be used), but for one kept in an
+  `intptr_t` or a `uintptr_t`.
 - **Thread-local objects with GOWASM=gc,split** are shared by all
   goroutines (the runtime keeps one side-table slot there).
 

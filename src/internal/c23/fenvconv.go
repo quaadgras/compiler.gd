@@ -6,14 +6,15 @@ package c23
 
 import (
 	"math"
-	"math/big"
 	"strconv"
 	"strings"
 )
 
 // Conversions between binary and decimal honor the thread's rounding
 // direction (C23 F.5): strconv's round to nearest; in the others, the exact
-// value is rounded here.
+// value is rounded here. Exact digits come from strconv too (a double has
+// at most 767 significant decimal digits, 1074 after the point), so the
+// library needs no math/big.
 
 // fmtFloat is strconv.FormatFloat(v, fmt, prec, 64), for fmt 'e', 'f' or
 // 'x', rounded in the thread's direction: as a negative number's if
@@ -38,15 +39,12 @@ func fmtFloat(v float64, fmt byte, prec int, negated bool) string {
 		}
 		return strconv.FormatFloat(v, 'x', prec, 64)
 	}
-	// v's exact digits: it has at most 1074 after the point, 767
-	// significant.
-	b := new(big.Float).SetFloat64(math.Abs(v))
 	sign := ""
 	if math.Signbit(v) {
 		sign = "-"
 	}
 	if fmt == 'f' {
-		s := b.Text('f', 1100)
+		s := strconv.FormatFloat(math.Abs(v), 'f', 1100, 64) // exact
 		dot := strings.IndexByte(s, '.')
 		ds, carry := roundDigits(s[:dot]+s[dot+1:], dot+prec, up)
 		if carry {
@@ -57,7 +55,7 @@ func fmtFloat(v float64, fmt byte, prec int, negated bool) string {
 		}
 		return sign + ds[:dot] + "." + ds[dot:]
 	}
-	s := b.Text('e', 800)
+	s := strconv.FormatFloat(math.Abs(v), 'e', 800, 64) // exact
 	i := strings.IndexByte(s, 'e')
 	exp, _ := strconv.Atoi(s[i+1:])
 	ds, carry := roundDigits(s[:1]+s[2:i], 1+prec, up)
@@ -97,45 +95,118 @@ func roundDigits(ds string, n int, up bool) (string, bool) {
 }
 
 // parseFloat is strconv.ParseFloat(s, bits) rounded in the thread's
-// direction.
+// direction: strconv's result, rounded to nearest, or the number next to
+// it on the side of s's exact value.
 func parseFloat(s string, bits int) (float64, error) {
 	f, err := strconv.ParseFloat(s, bits)
-	if err != nil && err.(*strconv.NumError).Err != strconv.ErrRange || math.IsNaN(f) {
+	overflow := err != nil && err.(*strconv.NumError).Err == strconv.ErrRange
+	if err != nil && !overflow || math.IsNaN(f) {
 		return f, err
 	}
 	d := curRound()
-	if d == FeToNearest {
-		return f, err
+	if d == FeToNearest || math.IsInf(f, 0) && !overflow {
+		return f, err // an infinity spelled out is exact
 	}
-	x, ok := new(big.Rat).SetString(s)
-	if !ok {
-		return f, err // "inf"
-	}
-	return roundTo(f, x, bits, d), err
-}
-
-// roundTo is x rounded in direction d to a float of bits bits, given f,
-// which is x rounded to nearest: the number before or after f, or f.
-func roundTo(f float64, x *big.Rat, bits int, d int32) float64 {
 	next := func(toward float64) float64 {
 		if bits == 32 {
 			return float64(math.Nextafter32(float32(f), float32(toward)))
 		}
 		return math.Nextafter(f, toward)
 	}
-	neg := x.Sign() < 0
-	if math.IsInf(f, 0) {
-		// x is beyond the largest finite: toward zero, the largest.
+	neg := strings.HasPrefix(s, "-")
+	if overflow {
+		// Beyond the largest finite: toward zero, the largest.
 		if d == FeTowardZero || d == FeDownward && !neg || d == FeUpward && neg {
-			return next(0)
+			return next(0), err
 		}
-		return f
+		return f, err
 	}
-	switch c := new(big.Rat).SetFloat64(f).Cmp(x); {
-	case c < 0 && (d == FeUpward || d == FeTowardZero && neg):
-		return next(math.Inf(1))
-	case c > 0 && (d == FeDownward || d == FeTowardZero && !neg):
-		return next(math.Inf(-1))
+	switch c := cmpExact(s, f); {
+	case c > 0 && (d == FeUpward || d == FeTowardZero && neg):
+		return next(math.Inf(1)), err
+	case c < 0 && (d == FeDownward || d == FeTowardZero && !neg):
+		return next(math.Inf(-1)), err
 	}
-	return f
+	return f, err
+}
+
+// cmpExact compares the number s spells, decimal or hexadecimal as
+// strconv.ParseFloat takes it, with f, which has its sign: -1, 0 or +1 as
+// it is less than f, the same, or greater.
+func cmpExact(s string, f float64) int {
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimLeft(s, "+-")
+	var c int
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		// In binary: f's 53 bits against s's.
+		m, e := math.Frexp(math.Abs(f))
+		fd := strconv.FormatUint(uint64(math.Ldexp(m, 53)), 2)
+		sd, se := digitsOf(s[2:], 16, 'p')
+		c = cmpDigits(sd, se, fd, e)
+	} else {
+		sd, se := digitsOf(s, 10, 'e')
+		ed := strconv.FormatFloat(math.Abs(f), 'e', 800, 64) // exact
+		i := strings.IndexByte(ed, 'e')
+		fe, _ := strconv.Atoi(ed[i+1:])
+		c = cmpDigits(sd, se, ed[:1]+ed[2:i], fe+1)
+	}
+	if neg {
+		return -c
+	}
+	return c
+}
+
+// digitsOf reads the mantissa and exponent of a number in base 10 or 16
+// (whose exponent, after expChar, is of 2), as digits of 0.ddd... (base 10)
+// or bits of 0.bbb... (base 16) times base to the power exp.
+func digitsOf(s string, base int, expChar byte) (digits string, exp int) {
+	mant := s
+	if i := strings.IndexAny(s, string(expChar)+strings.ToUpper(string(expChar))); i >= 0 {
+		mant = s[:i]
+		exp, _ = strconv.Atoi(s[i+1:])
+	}
+	var b strings.Builder
+	point := -1
+	for i := 0; i < len(mant); i++ {
+		c := mant[i]
+		if c == '.' {
+			point = b.Len()
+			continue
+		}
+		if base == 16 {
+			v, _ := strconv.ParseUint(string(c), 16, 8)
+			b.WriteString(strconv.FormatUint(v|16, 2)[1:]) // four bits
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	ds := b.String()
+	if point < 0 {
+		point = len(ds)
+	}
+	// 0.ddd... times base**(point): the point is before the first digit.
+	exp += point
+	t := strings.TrimLeft(ds, "0")
+	exp -= len(ds) - len(t)
+	return strings.TrimRight(t, "0"), exp
+}
+
+// cmpDigits compares 0.a × B^ae with 0.b × B^be, a and b digits (or bits)
+// with no zeros leading or trailing.
+func cmpDigits(a string, ae int, b string, be int) int {
+	b = strings.TrimRight(strings.TrimLeft(b, "0"), "0")
+	switch {
+	case a == "" && b == "":
+		return 0
+	case a == "":
+		return -1
+	case b == "":
+		return 1
+	case ae != be:
+		if ae > be {
+			return 1
+		}
+		return -1
+	}
+	return strings.Compare(a, b) // the same length's prefix first, then longer
 }

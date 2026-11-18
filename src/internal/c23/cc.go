@@ -259,6 +259,10 @@ func VaArg[T any](ap Ptr) T {
 			return any(FromInt(uintptr(n))).(T)
 		}
 	}
+	if p, ok := a.(Ptr); ok {
+		// An intcap (or a pointer) passed for an integer: its address.
+		a = uint64(Addr(p))
+	}
 	rv := reflect.ValueOf(&r).Elem()
 	av := reflect.ValueOf(a)
 	switch {

@@ -105,6 +105,29 @@ func TestC23(t *testing.T) {
 	}
 }
 
+// TestIntcap compares C that converts pointers to intptr_t and uintptr_t
+// and back, which keep the capability (internal/c23's intcap.go), with
+// gcc's output.
+func TestIntcap(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/intcap.c", true)
+	bin := filepath.Join(t.TempDir(), "intcap")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, "testdata/intcap.c").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.
