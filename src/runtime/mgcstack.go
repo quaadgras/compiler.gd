@@ -149,6 +149,7 @@ type stackObject struct {
 	_     sys.NotInHeap
 	off   uint32             // offset above stack.lo
 	size  uint32             // size of object
+	spOff uint32             // its frame's SP, as an offset above stack.lo (GODEBUG=stackptrcheck)
 	r     *stackObjectRecord // info of the object (for ptr/nonptr bits). nil if object has been scanned.
 	left  *stackObject       // objects with lower addresses
 	right *stackObject       // objects with higher addresses
@@ -168,6 +169,13 @@ func (obj *stackObject) setRecord(r *stackObjectRecord) {
 type stackScanState struct {
 	// stack limits
 	stack stack
+
+	// frameSP is the SP of the frame whose pointers are being
+	// scanned, or of the frame of the stack object being scanned;
+	// 0 if unknown. A pointer into the stack below it is a pointer
+	// into a frame that has returned, or will before this one:
+	// GODEBUG=stackptrcheck=1 checks that there is none.
+	frameSP uintptr
 
 	// conservative indicates that the next frame must be scanned conservatively.
 	// This applies only to the innermost frame at an async safe-point.
@@ -291,6 +299,7 @@ func (s *stackScanState) addObject(addr uintptr, r *stackObjectRecord) {
 	x.nobj++
 	obj.off = uint32(addr - s.stack.lo)
 	obj.size = uint32(r.size)
+	obj.spOff = uint32(s.frameSP - s.stack.lo)
 	obj.setRecord(r)
 	// obj.left and obj.right will be initialized by buildIndex before use.
 	s.nobjs++

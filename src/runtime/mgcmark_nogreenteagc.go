@@ -224,6 +224,8 @@ func scanObject(b uintptr, gcw *gcWork) {
 			if !tryDeferToSpanScan(obj, gcw) {
 				if obj, span, objIndex := findObject(obj, b, addr-b); obj != 0 {
 					greyobject(obj, b, addr-b, span, gcw, objIndex)
+				} else if debug.stackptrcheck != 0 {
+					checkStackPtr(obj, b, addr-b)
 				}
 			}
 		}

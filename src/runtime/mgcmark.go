@@ -982,6 +982,7 @@ func scanstack(gp *g, gcw *gcWork) int64 {
 	// Currently this includes defers and panics. See also function copystack.
 
 	// Find and trace other pointers in defer records.
+	state.frameSP = 0 // what follows is in no frame
 	for d := gp._defer; d != nil; d = d.link {
 		if d.fn != nil {
 			// Scan the func value, which could be a stack allocated closure.
@@ -1037,6 +1038,7 @@ func scanstack(gp *g, gcw *gcWork) int64 {
 		}
 		ptrBytes, gcData := r.gcdata()
 		b := state.stack.lo + uintptr(obj.off)
+		state.frameSP = state.stack.lo + uintptr(obj.spOff)
 		if conservative {
 			scanConservative(b, ptrBytes, gcData, gcw, &state)
 		} else {
@@ -1130,6 +1132,7 @@ func scanframeworker(frame *stkframe, state *stackScanState, gcw *gcWork) {
 	}
 
 	locals, args, objs := frame.getStackMap(false)
+	state.frameSP = frame.sp
 
 	// Scan local variables if stack frame has been allocated.
 	if locals.n > 0 {
@@ -1510,11 +1513,16 @@ func scanblock(b0, n0 uintptr, ptrmask *uint8, gcw *gcWork, stk *stackScanState)
 				p := *(*uintptr)(unsafe.Pointer(b + i))
 				if p != 0 {
 					if stk != nil && p >= stk.stack.lo && p < stk.stack.hi {
+						if debug.stackptrcheck != 0 && p < stk.frameSP {
+							badStackPtr(p, b+i, stk.frameSP)
+						}
 						stk.putPtr(p, false)
 					} else {
 						if !tryDeferToSpanScan(p, gcw) {
 							if obj, span, objIndex := findObject(p, b, i); obj != 0 {
 								greyobject(obj, b, i, span, gcw, objIndex)
+							} else if debug.stackptrcheck != 0 {
+								checkStackPtr(p, b, i)
 							}
 						}
 					}

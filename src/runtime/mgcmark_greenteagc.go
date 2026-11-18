@@ -923,6 +923,8 @@ func scanSpan(p objptr, gcw *gcWork) {
 		if !tryDeferToSpanScan(p, gcw) {
 			if obj, span, objIndex := findObject(p, 0, 0); obj != 0 {
 				greyobject(obj, 0, 0, span, gcw, objIndex)
+			} else if debug.stackptrcheck != 0 {
+				checkStackPtr(p, spanBase, ^uintptr(0))
 			}
 		}
 	}
@@ -1007,6 +1009,8 @@ func scanObjectSmall(spanBase, b, objSize uintptr, gcw *gcWork) {
 		if !tryDeferToSpanScan(p, gcw) {
 			if obj, span, objIndex := findObject(p, 0, 0); obj != 0 {
 				greyobject(obj, 0, 0, span, gcw, objIndex)
+			} else if debug.stackptrcheck != 0 {
+				checkStackPtr(p, spanBase, ^uintptr(0))
 			}
 		}
 	}
@@ -1055,6 +1059,8 @@ func scanObjectsSmall(base, objSize uintptr, elems uint16, gcw *gcWork, scans *g
 		if !tryDeferToSpanScan(p, gcw) {
 			if obj, span, objIndex := findObject(p, 0, 0); obj != 0 {
 				greyobject(obj, 0, 0, span, gcw, objIndex)
+			} else if debug.stackptrcheck != 0 {
+				checkStackPtr(p, base, ^uintptr(0))
 			}
 		}
 	}
@@ -1268,6 +1274,8 @@ func scanObject(b uintptr, gcw *gcWork) {
 			if !tryDeferToSpanScan(obj, gcw) {
 				if obj, span, objIndex := findObject(obj, b, addr-b); obj != 0 {
 					greyobject(obj, b, addr-b, span, gcw, objIndex)
+				} else if debug.stackptrcheck != 0 {
+					checkStackPtr(obj, b, addr-b)
 				}
 			}
 		}

@@ -206,6 +206,13 @@ It is a comma-separated list of name=val pairs setting these named variables:
 	schedtrace: setting schedtrace=X causes the scheduler to emit a single line to standard
 	error every X milliseconds, summarizing the scheduler state.
 
+	stackptrcheck: setting stackptrcheck=1 causes the garbage collector, and every
+	copy of a stack, to crash the program on a pointer into a function's frame that
+	has returned: one found in the heap, in a global or in another goroutine's stack
+	that points below the stack pointer of a goroutine that is not running, or one
+	in a frame that points into the same stack below that frame. The compiler's
+	escape analysis guarantees that there is none.
+
 	tracebackancestors: setting tracebackancestors=N extends tracebacks with the stacks at
 	which goroutines were created, where N limits the number of ancestor goroutines to
 	report. This also extends the information returned by runtime.Stack.

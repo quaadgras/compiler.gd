@@ -603,6 +603,10 @@ type adjustinfo struct {
 
 	// sghi is the highest sudog.elem on the stack.
 	sghi uintptr
+
+	// frameSP is the SP, in the new stack, of the frame being
+	// adjusted (GODEBUG=stackptrcheck).
+	frameSP uintptr
 }
 
 // adjustpointer checks whether *vpp is in the old stack described by adjinfo.
@@ -684,6 +688,10 @@ func adjustpointers(scanp unsafe.Pointer, bv *bitvector, adjinfo *adjustinfo, f 
 				if stackDebug >= 3 {
 					print("adjust ptr ", hex(p), " ", funcname(f), "\n")
 				}
+				if debug.stackptrcheck != 0 && p+delta < adjinfo.frameSP {
+					print("runtime: in frame of ", funcname(f), "\n")
+					badStackPtr(p, uintptr(unsafe.Pointer(pp))-delta, adjinfo.frameSP-delta)
+				}
 				if useCAS {
 					ppu := (*unsafe.Pointer)(unsafe.Pointer(pp))
 					if !atomic.Casp1(ppu, unsafe.Pointer(p), unsafe.Pointer(p+delta)) {
@@ -699,6 +707,7 @@ func adjustpointers(scanp unsafe.Pointer, bv *bitvector, adjinfo *adjustinfo, f 
 
 // Note: the argument/return area is adjusted by the callee.
 func adjustframe(frame *stkframe, adjinfo *adjustinfo) {
+	adjinfo.frameSP = frame.sp
 	// Adjust saved frame pointer if there is one.
 	if (goarch.ArchFamily == goarch.AMD64 || goarch.ArchFamily == goarch.ARM64) && frame.argp-frame.varp == 2*goarch.PtrSize {
 		if stackDebug >= 3 {
