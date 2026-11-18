@@ -5,11 +5,28 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #pragma STDC FENV_ACCESS ON
 
 static const int modes[] = {FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO};
 static const char *names[] = {"nearest", "down", "up", "zero"};
+static const int rounds[] = {1, 3, 2, 0}; // FLT_ROUNDS in each
+
+// FLT_ROUNDS follows fesetround, but gcc's is 1 always before gcc 14.
+#ifdef __GD_FENV__
+#define ROUNDS_OK(i) (FLT_ROUNDS == rounds[i])
+#else
+#define ROUNDS_OK(i) (FLT_ROUNDS == rounds[i] || FLT_ROUNDS == 1)
+#endif
+
+// bits returns d's representation: %a's first digit for a subnormal is
+// unspecified (glibc prints 0x0.0000000000001p-1022, musl 0x1p-1074).
+static unsigned long long bits(double d) {
+	unsigned long long u;
+	memcpy(&u, &d, sizeof u);
+	return u;
+}
 
 static void flags(const char *what) {
 	int f = fetestexcept(FE_ALL_EXCEPT);
@@ -27,7 +44,8 @@ int main(void) {
 	for (int i = 0; i < 4; i++) {
 		fesetround(modes[i]);
 		feclearexcept(FE_ALL_EXCEPT);
-		printf("%s: FLT_ROUNDS %d, fegetround %s\n", names[i], FLT_ROUNDS, fegetround() == modes[i] ? "ok" : "wrong");
+		printf("%s: FLT_ROUNDS %s, fegetround %s\n", names[i], ROUNDS_OK(i) ? "ok" : "wrong",
+			fegetround() == modes[i] ? "ok" : "wrong");
 		printf("  1/3 %a, -1/3 %a\n", one / three, -one / three);
 		flags("div");
 		printf("  1f/3f %a\n", (double)(onef / threef));
@@ -41,7 +59,7 @@ int main(void) {
 		flags("const");
 		printf("  big*10 %a\n", big * 10);
 		flags("overflow");
-		printf("  tiny/2 %a\n", tiny / 2);
+		printf("  tiny/2 %#llx\n", bits(tiny / 2));
 		flags("underflow");
 		printf("  1/0 %a\n", one / zero);
 		flags("divbyzero");
@@ -87,7 +105,7 @@ int main(void) {
 	flags("pow");
 	printf("  nextafter %a\n", nextafter(DBL_MAX * one, INFINITY));
 	flags("nextafter");
-	printf("  nextafter %a\n", nextafter(0x1p-1022 * one, 0));
+	printf("  nextafter %#llx\n", bits(nextafter(0x1p-1022 * one, 0)));
 	flags("nextafter");
 	fenv_t env;
 	feholdexcept(&env);
