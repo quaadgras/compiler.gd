@@ -78,7 +78,7 @@ jobs:
         run: |
           export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$GITHUB_WORKSPACE/lib/wasm:$PATH
           export GOOS=js GOARCH=wasm GOWASM=gc,split
-          python3 doc/gd/bench/wasmgc/std/survey.py -j 4 -t 600
+          python3 doc/gd/bench/wasmgc/std/survey.py -j 4 -t 900 -gotimeout 600s
       - name: same as status-js-split.txt
         run: |
           if ! git diff --exit-code -- doc/gd/bench/wasmgc/std/status-js-split.txt; then
