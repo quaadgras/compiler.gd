@@ -167,6 +167,12 @@ type edge struct {
 	src    *location
 	derefs int // >= -1
 	notes  *note
+
+	// share is set for an edge that is in the graph only to find what
+	// other goroutines may reach (shares.go): one that the graph did
+	// not have before, because its source escapes anyway. Only the
+	// solver follows it.
+	share bool
 }
 
 func (l *location) asHole() hole {
@@ -285,7 +291,7 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true})
 		}
 		return
 	}

@@ -895,7 +895,7 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 	// Type checking guarantees that TIDEAL len/cap are positive and fit in an int.
 	// The case of len or cap overflow when converting TUINT or TUINTPTR to TINT
 	// will be handled by the negative range checks in unsafeslice during runtime.
-	if ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
+	if !n.CheckPtr() && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
 		fnname := "unsafeslicecheckptr"
 		fn := typecheck.LookupRuntime(gd, fnname)
 		init.Append(mkcall1(gd, fn, nil, init, reflectdata.UnsafeSliceElemRType(gd, gd.Pos, n), unsafePtr, typecheck.Conv(gd, len, lenType)))
@@ -1010,7 +1010,7 @@ func walkUnsafeString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.
 	// If checkptr enabled, call runtime.unsafestringcheckptr to check ptr and len.
 	// for simplicity, unsafestringcheckptr always uses int64.
 	// Type checking guarantees that TIDEAL len are positive and fit in an int.
-	if ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
+	if !n.CheckPtr() && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
 		fnname := "unsafestringcheckptr"
 		fn := typecheck.LookupRuntime(gd, fnname)
 		init.Append(mkcall1(gd, fn, nil, init, unsafePtr, typecheck.Conv(gd, len, lenType)))

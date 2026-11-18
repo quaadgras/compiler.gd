@@ -1,4 +1,4 @@
-// errorcheckwithauto -0 -l -live -wb=0 -d=ssa/insert_resched_checks/off,notear
+// errorcheckwithauto -0 -l -live -wb=0 -d=ssa/insert_resched_checks/off,notear,checkptr=0
 
 //go:build (amd64 && goexperiment.regabiargs) || (arm64 && goexperiment.regabiargs)
 

@@ -42,6 +42,9 @@ func TestCheckPtr(t *testing.T) {
 		{"CheckPtrSliceFail", "fatal error: checkptr: unsafe.Slice result straddles multiple allocations\n"},
 		{"CheckPtrStringOK", ""},
 		{"CheckPtrStringFail", "fatal error: checkptr: unsafe.String result straddles multiple allocations\n"},
+		{"CheckPtrPointersNoscan", "fatal error: checkptr: converted pointer type has a pointer where the memory has an integer\n"},
+		{"CheckPtrPointersScalar", "fatal error: checkptr: converted pointer type has a pointer where the memory has an integer\n"},
+		{"CheckPtrPointersOK", ""},
 	}
 
 	for _, tc := range testCases {

@@ -555,6 +555,13 @@ func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes)
 		return n
 	}
 
+	// gd: a function with go:uintptrescapes or go:uintptrkeepalive is
+	// given pointers as integers, which its callers keep alive for it:
+	// the pointers it makes of integers are those.
+	if fn := ir.CurFunc(gd); fn != nil && fn.Pragma&(ir.UintptrEscapes|ir.UintptrKeepAlive) != 0 {
+		return n
+	}
+
 	// Find original unsafe.Pointer operands involved in this
 	// arithmetic expression.
 	//

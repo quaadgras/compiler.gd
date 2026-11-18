@@ -100,9 +100,10 @@ holds one.
 - **A store** there calls `runtime.sharestore`, which takes the locks of
   the pages it writes if the memory is shared (and only then), and
   `shareunlock` after. The goroutine is not preempted in between. A store
-  of some of the words only (`s = s[:n]`, an append in place) stores them
-  all when the memory is shared: another goroutine may have stored the
-  others since they were loaded.
+  of the length only (`s = s[:n]`, an append in place) is, in shared
+  memory, still that if the length fits the capacity that is there now,
+  and a store of the whole slice otherwise: another goroutine may have
+  stored a shorter one since this one was loaded.
 - **A copy** of a struct or array that holds such values is a load, a
   store, or (between two places that are not the stack) a call to
   `sharetypedmemmove`.

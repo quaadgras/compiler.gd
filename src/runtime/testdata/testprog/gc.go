@@ -276,6 +276,11 @@ func escape(x any) { sink2 = x; sink2 = nil }
 var sink2 any
 
 // Test zombie object detection and reporting.
+//
+// (The pointers it makes of integers are what the checks of unsafe.Pointer
+// conversions are there to stop, before the collector finds the zombies.)
+//
+//go:nocheckptr
 func GCZombie() {
 	// Allocate several objects of unusual size (so free slots are
 	// unlikely to all be re-allocated by the runtime).

@@ -22,6 +22,9 @@ var always = true
 // We arrange things very carefully to have to/from
 // conversions on either side of the call which cannot be
 // combined with any other conversions.
+// (Its pointer is an integer for a while, on purpose.)
+//
+//go:nocheckptr
 func f_ssa() *[8]uint {
 	// Make x a uintptr pointing to where a points.
 	var x uintptr
@@ -58,6 +61,9 @@ func f_ssa() *[8]uint {
 
 // g_ssa is the same as f_ssa, but with a bit of pointer
 // arithmetic for added insanity.
+// (Its pointer is an integer for a while, on purpose.)
+//
+//go:nocheckptr
 func g_ssa() *[7]uint {
 	// Make x a uintptr pointing to where a points.
 	var x uintptr

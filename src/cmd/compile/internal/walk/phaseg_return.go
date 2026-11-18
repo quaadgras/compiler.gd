@@ -32,5 +32,7 @@ func phaseGOutBufAlloc(gd *base.Invocation, n ir.Node, t *types.Type, init *ir.N
 	conv := ir.NewConvExpr(gd, pos, ir.OCONVNOP, types.NewPtr(t), call)
 	conv.SetTypecheck(1)
 	conv.MarkNonNil()
+	// The compiler's own conversion, of memory it just made.
+	conv.SetCheckPtr(true)
 	return typecheck.Expr(gd, conv)
 }

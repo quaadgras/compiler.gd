@@ -123,3 +123,73 @@ func CheckPtrAlignmentNested() {
 	n := 9
 	_ = ((*[10]int8)(unsafe.Pointer((*[10]int64)(unsafe.Pointer(&p)))))[:n:n]
 }
+
+func init() {
+	register("CheckPtrPointersNoscan", CheckPtrPointersNoscan)
+	register("CheckPtrPointersScalar", CheckPtrPointersScalar)
+	register("CheckPtrPointersOK", CheckPtrPointersOK)
+}
+
+type checkptrPair struct {
+	p *int
+	n uintptr
+}
+
+type checkptrRiap struct {
+	n uintptr
+	p *int
+}
+
+var checkptrSink any
+
+// A pointer type over memory that holds no pointers.
+func CheckPtrPointersNoscan() {
+	b := make([]byte, 64)
+	checkptrSink = b
+	// Bytes that are the address of something in the heap.
+	*(*uintptr)(unsafe.Pointer(&b[8])) = uintptr(unsafe.Pointer(checkptrHeap()))
+	pp := (**int)(unsafe.Pointer(&b[8]))
+	sink2 = pp
+}
+
+// A pointer where the object has an integer.
+func CheckPtrPointersScalar() {
+	x := new([4]checkptrPair)
+	checkptrSink = x
+	// An integer that is the address of something in the heap.
+	x[1].n = uintptr(unsafe.Pointer(checkptrHeap()))
+	y := (*checkptrRiap)(unsafe.Pointer(&x[1]))
+	sink2 = y
+}
+
+// The same layout under another name, integers over pointers, and a part
+// of an array.
+func CheckPtrPointersOK() {
+	x := new([4]checkptrPair)
+	checkptrSink = x
+	type pair2 struct {
+		q *int
+		m uintptr
+	}
+	sink2 = (*pair2)(unsafe.Pointer(&x[2]))
+	sink2 = (*[2]pair2)(unsafe.Pointer(&x[2]))
+	sink2 = (*[2]uintptr)(unsafe.Pointer(&x[3]))
+	sink2 = (**int)(unsafe.Pointer(&x[3].p))
+	s := []string{"a", "b"}
+	checkptrSink = s
+	sink2 = (*[]byte)(unsafe.Pointer(&s[1]))
+	// A pointer over an integer that is not an address in the heap,
+	// as the first word of an interface is.
+	x[0].n = 12345
+	sink2 = (*checkptrRiap)(unsafe.Pointer(&x[0]))
+	var e any = x
+	checkptrSink = &e
+	sink2 = *(*unsafe.Pointer)(unsafe.Pointer(&e))
+}
+
+//go:noinline
+func checkptrHeap() *int {
+	p := new(int)
+	checkptrSink = p
+	return p
+}

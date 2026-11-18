@@ -421,11 +421,9 @@ func InlineImpossible(gd *base.Invocation, fn *ir.Func) string {
 		return reason
 	}
 
-	// If marked "go:nocheckptr" and -d checkptr compilation, don't inline.
-	if gd.Debug.Checkptr != 0 && fn.Pragma&ir.NoCheckPtr != 0 {
-		reason = "marked go:nocheckptr"
-		return reason
-	}
+	// gd: a function marked go:nocheckptr is inlined all the same in
+	// a -d=checkptr compilation, which is every compilation: mkinlcall
+	// marks its conversions not to be checked.
 
 	// If marked "go:cgo_unsafe_args", don't inline, since the function
 	// makes assumptions about its argument frame layout.
@@ -1181,14 +1179,10 @@ func canInlineCallExpr(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, c
 		return false, 0, false
 	}
 
-	if gd.Debug.Checkptr != 0 && types.IsRuntimePkg(callee.Sym().Pkg) {
-		// We don't instrument runtime packages for checkptr (see base/flag.go).
-		if log && logopt.Enabled() {
-			logopt.LogOpt(gd, n.Pos(), "cannotInlineCall", "inline", ir.FuncName(callerfn),
-				fmt.Sprintf(`call to into runtime package function %s in -d=checkptr build`, ir.PkgFuncName(callee)))
-		}
-		return false, 0, false
-	}
+	// gd: -d=checkptr is the default, so a function of the runtime's
+	// packages, which are compiled without it, is not kept from being
+	// inlined in one that has it, as it was: its conversions are marked
+	// not to be checked when it is (mkinlcall).
 
 	// Check if we've already inlined this function at this particular
 	// call site, in order to stop inlining when we reach the beginning
@@ -1309,6 +1303,10 @@ func mkinlcall(gd *base.Invocation, callerfn *ir.Func, n *ir.CallExpr, fn *ir.Fu
 
 	if res == nil {
 		gd.FatalfAt(n.Pos(), "inlining call to %v failed", fn.Nname.DiagName())
+	}
+	if gd.Debug.Checkptr != 0 && (ir.UncheckedPkg(fn.Sym().Pkg.Path) || fn.Pragma&ir.NoCheckPtr != 0) {
+		ir.NoCheckPtrIn(res.Body)
+		ir.NoCheckPtrIn(res.ReturnVars)
 	}
 
 	if gd.Flag.LowerM > 2 {

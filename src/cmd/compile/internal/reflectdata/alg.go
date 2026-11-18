@@ -231,6 +231,9 @@ func hashFunc(gd *base.Invocation, sig string) *ir.Func {
 	typecheck.FinishFuncBody(gd)
 
 	fn.SetDupok(true)
+	// (The same in every package, the runtime's included, which has
+	// no -d=checkptr.)
+	fn.Pragma |= ir.NoCheckPtr
 
 	ir.WithFunc(gd, fn, func() {
 		typecheck.Stmts(gd, fn.Body)
@@ -611,6 +614,9 @@ func eqFunc(gd *base.Invocation, sig string) *ir.Func {
 	typecheck.FinishFuncBody(gd)
 
 	fn.SetDupok(true)
+	// (The same in every package, the runtime's included, which has
+	// no -d=checkptr.)
+	fn.Pragma |= ir.NoCheckPtr
 
 	ir.WithFunc(gd, fn, func() {
 		typecheck.Stmts(gd, fn.Body)

@@ -4319,7 +4319,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 
 		// unsafe.Pointer <--> *T
 		if to.IsUnsafePtr() && from.IsPtrShaped() || from.IsUnsafePtr() && to.IsPtrShaped() {
-			if s.checkPtrEnabled && checkPtrOK && to.IsPtr() && from.IsUnsafePtr() {
+			if s.checkPtrEnabled && checkPtrOK && !n.CheckPtr() && to.IsPtr() && from.IsUnsafePtr() {
 				s.checkPtrAlignment(n, v, nil)
 			}
 			return v
@@ -5358,26 +5358,43 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			// capacity may be less than this length: the slice is
 			// stored whole.
 			locked := s.shareLock(addr, n.Type().Size())
+			bLocked := s.f.NewBlock(ssa.BlockPlain)
 			bAll := s.f.NewBlock(ssa.BlockPlain)
 			bLen := s.f.NewBlock(ssa.BlockPlain)
+			bUnlock := s.f.NewBlock(ssa.BlockPlain)
 			bDone := s.f.NewBlock(ssa.BlockPlain)
 			b := s.endBlock()
 			b.Kind = ssa.BlockIf
 			b.SetControl(locked)
 			b.Likely = ssa.BranchUnlikely
-			b.AddEdgeTo(bAll)
+			b.AddEdgeTo(bLocked)
 			b.AddEdgeTo(bLen)
 
-			s.startBlock(bAll)
+			// With the locks: the length alone if it fits the
+			// capacity that is there.
+			s.startBlock(bLocked)
 			capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
+			capNow := s.rawLoad(types.Types[types.TINT], capaddr)
+			fits := s.newValue2(s.ssaOp(ir.OLE, types.Types[types.TUINT]), types.Types[types.TBOOL], l, capNow)
+			b = s.endBlock()
+			b.Kind = ssa.BlockIf
+			b.SetControl(fits)
+			b.Likely = ssa.BranchLikely
+			b.AddEdgeTo(bLen)
+			b.AddEdgeTo(bAll)
+
+			s.startBlock(bAll)
 			s.store(types.Types[types.TINT], lenaddr, l)
 			s.store(types.Types[types.TINT], capaddr, c)
 			s.store(pt, addr, p)
-			s.rtcall(ir.Syms(s.gd).ShareUnlock, true, nil, addr, s.constInt(types.Types[types.TUINTPTR], n.Type().Size()))
-			s.endBlock().AddEdgeTo(bDone)
+			s.endBlock().AddEdgeTo(bUnlock)
 
 			s.startBlock(bLen)
 			s.store(types.Types[types.TINT], lenaddr, l)
+			s.endBlock().AddEdgeTo(bUnlock)
+
+			s.startBlock(bUnlock)
+			s.shareUnlock(locked, addr, n.Type().Size())
 			s.endBlock().AddEdgeTo(bDone)
 
 			s.startBlock(bDone)

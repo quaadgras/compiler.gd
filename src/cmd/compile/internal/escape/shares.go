@@ -96,7 +96,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 		b.sources[name] = srcs[name]
 		// name = &contents
 		x := b.oldLoc(name)
-		x.edges = append(x.edges, edge{src: c, derefs: -1})
+		x.edges = append(x.edges, edge{src: c, derefs: -1, share: true})
 	}
 }
 

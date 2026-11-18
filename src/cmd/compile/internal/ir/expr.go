@@ -9,6 +9,7 @@ import (
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/types"
 	"cmd/internal/obj"
+	"cmd/internal/objabi"
 	"cmd/internal/src"
 	"fmt"
 	"go/constant"
@@ -323,6 +324,31 @@ func (n *ConvExpr) Implicit() bool     { return n.flags.load()&miniExprImplicit 
 func (n *ConvExpr) SetImplicit(b bool) { n.flags.set(miniExprImplicit, b) }
 func (n *ConvExpr) CheckPtr() bool     { return n.flags.load()&miniExprCheckPtr != 0 }
 func (n *ConvExpr) SetCheckPtr(b bool) { n.flags.set(miniExprCheckPtr, b) }
+
+// gd: the same for unsafe.Add, unsafe.Slice and unsafe.String, which are
+// BinaryExprs: set, the operation is not checked (see NoCheckPtrIn).
+func (n *BinaryExpr) CheckPtr() bool     { return n.flags.load()&miniExprCheckPtr != 0 }
+func (n *BinaryExpr) SetCheckPtr(b bool) { n.flags.set(miniExprCheckPtr, b) }
+
+// NoCheckPtrIn marks the conversions and unsafe operations of nodes as
+// not to be checked. The inliner does it to the body of a function of the
+// runtime's packages, whose code is written to be compiled without the
+// checks, when it puts it in a function that has them.
+func NoCheckPtrIn(nodes Nodes) {
+	VisitList(nodes, func(n Node) {
+		switch n := n.(type) {
+		case *ConvExpr:
+			if n.Op() == OCONVNOP {
+				n.SetCheckPtr(true)
+			}
+		case *BinaryExpr:
+			switch n.Op() {
+			case OUNSAFEADD, OUNSAFESLICE, OUNSAFESTRING:
+				n.SetCheckPtr(true)
+			}
+		}
+	})
+}
 
 func (n *ConvExpr) SetOp(op Op) {
 	switch op {
@@ -1167,7 +1193,25 @@ func SameSafeExpr(l Node, r Node) bool {
 // function fn at a given level. See debugHelpFooter for defined
 // levels.
 func ShouldCheckPtr(gd *base.Invocation, fn *Func, level int) bool {
-	return gd.Debug.Checkptr >= level && fn.Pragma&NoCheckPtr == 0
+	if gd.Debug.Checkptr < level || fn.Pragma&NoCheckPtr != 0 {
+		return false
+	}
+	// gd: the checks are on by default. A generic function of one of
+	// the runtime's packages is compiled where it is instantiated, and
+	// in the runtime too, where there are none: all its copies must be
+	// the same.
+	if sym := fn.Sym(); sym != nil && sym.Pkg != nil && UncheckedPkg(sym.Pkg.Path) {
+		return false
+	}
+	return true
+}
+
+// UncheckedPkg reports whether the package with the given path is
+// compiled without -d=checkptr: the runtime's packages, and the runtime of
+// C (internal/c23), which keeps pointers that the checks would not allow
+// (one past the end of an object, tagged) and has checks of its own.
+func UncheckedPkg(path string) bool {
+	return objabi.LookupPkgSpecial(path).Runtime || path == "internal/c23"
 }
 
 // ShouldAsanCheckPtr reports whether pointer checking should be enabled for

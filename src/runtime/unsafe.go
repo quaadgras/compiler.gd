@@ -81,7 +81,23 @@ func unsafeslice64(et *_type, ptr unsafe.Pointer, len64 int64) {
 }
 
 func unsafeslicecheckptr(et *_type, ptr unsafe.Pointer, len64 int64) {
-	unsafeslice64(et, ptr, len64)
+	// As unsafeslice64 and unsafeslice, with the pc of the code that
+	// called unsafe.Slice: the panics are that code's, not the
+	// runtime's.
+	pc := sys.GetCallerPC()
+	len := int(len64)
+	if int64(len) != len64 || len < 0 {
+		panicunsafeslicelen1(pc)
+	}
+	if et.Size_ == 0 && ptr == nil && len > 0 {
+		panicunsafeslicenilptr1(pc)
+	}
+	if mem, overflow := math.MulUintptr(et.Size_, uintptr(len)); overflow || mem > -uintptr(ptr) {
+		if ptr == nil {
+			panicunsafeslicenilptr1(pc)
+		}
+		panicunsafeslicelen1(pc)
+	}
 
 	// Check that underlying array doesn't straddle multiple heap objects.
 	// unsafeslice64 has already checked for overflow.

@@ -348,9 +348,10 @@ func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 }
 
 // shareStoreType is storeType for a value tearGuard says to guard. A
-// store of only some of its words (s = s[:n] stores a length) is a store
-// of all of them in shared memory, where another goroutine may have
-// stored the others since they were loaded.
+// store of only some of the words of a slice (s = s[:n] stores a length)
+// is, in shared memory, still that if what it stores fits the slice that
+// is there now, and a store of the whole slice otherwise: another
+// goroutine may have stored a shorter one since this one was loaded.
 func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 	locked := s.shareLock(left, t.Size())
 	if skip == 0 {
@@ -358,26 +359,60 @@ func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipM
 		s.shareUnlock(locked, left, t.Size())
 		return
 	}
+	bLocked := s.f.NewBlock(ssa.BlockPlain)
 	bAll := s.f.NewBlock(ssa.BlockPlain)
 	bSome := s.f.NewBlock(ssa.BlockPlain)
+	bUnlock := s.f.NewBlock(ssa.BlockPlain)
 	bDone := s.f.NewBlock(ssa.BlockPlain)
 	b := s.endBlock()
 	b.Kind = ssa.BlockIf
 	b.SetControl(locked)
 	b.Likely = ssa.BranchUnlikely
-	b.AddEdgeTo(bAll)
+	b.AddEdgeTo(bLocked)
 	b.AddEdgeTo(bSome)
+
+	// With the locks: does it fit?
+	s.startBlock(bLocked)
+	fits := s.constBool(false)
+	if t.IsSlice() {
+		fits = s.shareFits(left, right, skip)
+	}
+	b = s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(fits)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bSome)
+	b.AddEdgeTo(bAll)
 
 	s.startBlock(bAll)
 	s.rawStoreType(t, left, right, 0, leftIsStmt)
-	s.rtcall(ir.Syms(s.gd).ShareUnlock, true, nil, left, s.constInt(types.Types[types.TUINTPTR], t.Size()))
-	s.endBlock().AddEdgeTo(bDone)
+	s.endBlock().AddEdgeTo(bUnlock)
 
 	s.startBlock(bSome)
 	s.rawStoreType(t, left, right, skip, leftIsStmt)
+	s.endBlock().AddEdgeTo(bUnlock)
+
+	s.startBlock(bUnlock)
+	s.shareUnlock(locked, left, t.Size())
 	s.endBlock().AddEdgeTo(bDone)
 
 	s.startBlock(bDone)
+}
+
+// shareFits reports whether the words of the slice right that a store
+// with skip stores at left make a valid slice with the words that are
+// there: the largest of the length and capacity stored is at most the
+// capacity that stays, and the pointer stays.
+func (s *state) shareFits(left, right *ssa.Value, skip skipMask) *ssa.Value {
+	if skip&skipPtr == 0 || skip&skipCap == 0 {
+		// A new pointer goes with its own length and capacity; a
+		// new capacity is one of the array that was loaded.
+		return s.constBool(false)
+	}
+	intT := types.Types[types.TINT]
+	capNow := s.rawLoad(intT, s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, left))
+	n := s.newValue1(ssa.OpSliceLen, intT, right)
+	return s.newValue2(s.ssaOp(ir.OLE, types.Types[types.TUINT]), types.Types[types.TBOOL], n, capNow)
 }
 
 // shareZero is zero for a value tearGuard says to guard.

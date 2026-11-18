@@ -375,7 +375,14 @@ func (gd *Invocation) ParseFlags(args []string) {
 	}
 
 	if gd.Debug.Checkptr == -1 { // if not set explicitly
+		// gd: conversions that involve unsafe.Pointer are checked,
+		// not only under the race detector and the sanitizers: see
+		// doc/gd/unsafe.md. (Not yet with GOARCH=wasm, whose runtimes
+		// do not all have the checks.)
 		gd.Debug.Checkptr = 0
+		if gd.Ctxt.Arch.Family != sys.Wasm && gd.Ctxt.Pkgpath != "internal/c23" {
+			gd.Debug.Checkptr = 1
+		}
 	}
 
 	// set via a -d flag

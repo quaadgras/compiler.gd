@@ -4,7 +4,10 @@
 
 package runtime
 
-import "unsafe"
+import (
+	"internal/goarch"
+	"unsafe"
+)
 
 func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 	// nil pointer is always suitably aligned (#47430).
@@ -20,10 +23,74 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 		throw("checkptr: misaligned pointer conversion")
 	}
 
+	// gd: these checks are on in every build (doc/gd/unsafe.md), so the
+	// two usual cases are found without looking for the allocation of
+	// each end: the goroutine's stack, and one object of the heap.
+	size := n * elem.Size_
+	if gp := getg(); gp.stack.lo <= uintptr(p) && uintptr(p)+size <= gp.stack.hi && uintptr(p)+size >= uintptr(p) {
+		return
+	}
+	if s := spanOfHeap(uintptr(p)); s != nil && !s.isUserArenaChunk {
+		base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+		if end := uintptr(p) + size; end > base+s.elemsize || end < uintptr(p) {
+			throw("checkptr: converted pointer straddles multiple allocations")
+		}
+		if elem.Pointers() {
+			checkptrPointers(s, uintptr(p), elem, n)
+		}
+		return
+	}
+
 	// Check that (*[n]elem)(p) doesn't straddle multiple heap objects.
 	// TODO(mdempsky): Fix #46938 so we don't need to worry about overflow here.
-	if checkptrStraddles(p, n*elem.Size_) {
+	if checkptrStraddles(p, size) {
 		throw("checkptr: converted pointer straddles multiple allocations")
+	}
+}
+
+// checkptrPointers checks that (*[n]elem)(p), which is in one object of
+// the span s, has pointers only where the object has, or where the object
+// has a word that does not hold the address of anything in the heap now:
+// a pointer read from a word that holds an integer is whatever the
+// integer is.
+//
+// What it cannot see: a pointer stored later through the converted
+// pointer in a word the collector does not look at, and an integer stored
+// where the object has a pointer. A conversion cannot tell what will be
+// stored.
+func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr) {
+	limit := p + n*elem.Size_
+	var tp typePointers
+	var slot uintptr // the next word of the object that holds a pointer
+	if !s.spanclass.noscan() {
+		tp = s.typePointersOf(p, limit-p)
+		tp, slot = tp.next(limit)
+	}
+	mask := getGCMask(elem)
+	words := elem.PtrBytes / goarch.PtrSize
+	for i := uintptr(0); i < n; i++ {
+		for w := uintptr(0); w < words; w++ {
+			if *addb(mask, w/8)>>(w%8)&1 == 0 {
+				continue
+			}
+			a := p + i*elem.Size_ + w*goarch.PtrSize
+			for slot != 0 && slot < a {
+				tp, slot = tp.next(limit)
+			}
+			if slot != a {
+				// The first word of an interface is one that the
+				// collector does not look at, and is a pointer all
+				// the same, to a type or a method table, which are
+				// not in the heap: package reflect and others read
+				// it as one. So is a pointer to a type that is
+				// never in the heap. So a word that holds no
+				// pointer may be seen as a pointer while what it
+				// holds is not one into the heap.
+				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && spanOfHeap(v) != nil {
+					throw("checkptr: converted pointer type has a pointer where the memory has an integer")
+				}
+			}
+		}
 	}
 }
 

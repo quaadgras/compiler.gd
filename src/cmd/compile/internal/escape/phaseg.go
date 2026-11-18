@@ -266,6 +266,9 @@ func (b *batch) addrReach(roots ...*location) map[*location]bool {
 			derefs = 0
 		}
 		for _, e := range l.edges {
+			if e.share {
+				continue
+			}
 			d := derefs + e.derefs
 			if old, seen := best[e.src]; !seen || d < old {
 				best[e.src] = d
