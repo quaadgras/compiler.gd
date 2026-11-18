@@ -9761,7 +9761,7 @@ func (e *ssafn) UseWriteBarrier() bool {
 // store in shared memory (runtime/shared.go). The runtime's packages do
 // it by hand, where they hand a pointer to another goroutine.
 func (e *ssafn) UseShareBarrier() bool {
-	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm && tearFunc(e.curfn)
+	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm && e.curfn.Pragma&(ir.Norace|ir.Nosplit) == 0
 }
 
 func (e *ssafn) Syslook(name string) *obj.LSym {

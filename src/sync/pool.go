@@ -96,7 +96,14 @@ func poolRaceAddr(x any) unsafe.Pointer {
 	return unsafe.Pointer(&poolRaceHash[h%uint32(len(poolRaceHash))])
 }
 
+// The pool's functions that load and store what it holds are marked
+// go:notear: a P's private value is its own, and the queues have their
+// own exclusion, so the interfaces there need no lock to be loaded and
+// stored whole (runtime/shared.go).
+
 // Put adds x to the pool.
+//
+//go:notear
 func (p *Pool) Put(x any) {
 	if x == nil {
 		return
@@ -129,6 +136,8 @@ func (p *Pool) Put(x any) {
 //
 // If Get would otherwise return nil and p.New is non-nil, Get returns
 // the result of calling p.New.
+//
+//go:notear
 func (p *Pool) Get() any {
 	if race.Enabled {
 		race.Disable()
@@ -158,6 +167,7 @@ func (p *Pool) Get() any {
 	return x
 }
 
+//go:notear
 func (p *Pool) getSlow(pid int) any {
 	// See the comment in pin regarding ordering of the loads.
 	size := rtatomic.LoadAcquintptr(&p.localSize) // load-acquire
@@ -298,6 +308,12 @@ func init() {
 	runtime_registerPoolCleanup(poolCleanup)
 }
 
+// indexLocal returns the i'th poolLocal of the array at l.
+//
+// (Not checked: the checks would read the array's first words, which the
+// first P writes all the time.)
+//
+//go:nocheckptr
 func indexLocal(l unsafe.Pointer, i int) *poolLocal {
 	lp := unsafe.Pointer(uintptr(l) + uintptr(i)*unsafe.Sizeof(poolLocal{}))
 	return (*poolLocal)(lp)

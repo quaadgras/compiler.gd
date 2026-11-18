@@ -6,6 +6,8 @@ package runtime
 
 import (
 	"internal/goarch"
+	"internal/runtime/atomic"
+	"internal/runtime/gc"
 	"unsafe"
 )
 
@@ -35,7 +37,7 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 		if end := uintptr(p) + size; end > base+s.elemsize || end < uintptr(p) {
 			throw("checkptr: converted pointer straddles multiple allocations")
 		}
-		if elem.Pointers() {
+		if elem.Pointers() && !checkptrSameType(s, base, uintptr(p), elem) {
 			checkptrPointers(s, uintptr(p), elem, n)
 		}
 		return
@@ -46,6 +48,27 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 	if checkptrStraddles(p, size) {
 		throw("checkptr: converted pointer straddles multiple allocations")
 	}
+}
+
+// checkptrSameType reports whether p, in the object at base of the span s,
+// is known to point to a value of type elem, or to one of an array of them,
+// without looking at where the object's pointers are: the object was
+// allocated as elems and p is at one. It is what a pointer converted to
+// unsafe.Pointer and back points to.
+func checkptrSameType(s *mspan, base, p uintptr, elem *_type) bool {
+	if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
+		// No pointers, or no type: the object has only a bitmap.
+		return false
+	}
+	var typ *_type
+	if s.spanclass.sizeclass() != 0 {
+		// The object begins with its type.
+		typ = *(**_type)(unsafe.Pointer(base))
+		base += gc.MallocHeaderSize
+	} else {
+		typ = (*_type)(atomic.Loadp(unsafe.Pointer(&s.largeType)))
+	}
+	return typ == elem && p >= base && (p-base)%elem.Size_ == 0
 }
 
 // checkptrPointers checks that (*[n]elem)(p), which is in one object of

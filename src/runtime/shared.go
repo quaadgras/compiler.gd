@@ -306,8 +306,8 @@ func shareYield(spins int) {
 // that loads one while another stores it may get the words of two values:
 // a pointer with another array's length. So the stores of such a value in
 // shared memory, and its loads from memory that may be shared, are made
-// atomic with sequence locks: a store takes the locks of the pages it
-// writes, and a load checks that the lock of the page it reads from did
+// atomic with sequence locks: a store takes the locks of the blocks it
+// writes, and a load checks that the lock of the block it reads from did
 // not move and was not held meanwhile, and starts again if it did.
 //
 // The compiler does the loads inline (cmd/compile/internal/ssagen's
@@ -317,19 +317,27 @@ func shareYield(spins int) {
 // shareunlock.
 //
 // A lock is found from the address of a value's first byte, and a store
-// takes the lock of every page it touches, so a load of a value inside a
+// takes the lock of every block it touches, so a load of a value inside a
 // larger one that is being stored sees the lock held.
 
 const (
-	sharePageShift = 12
-	shareStripes   = 1 << 10 // must match ssagen's shareLoad
+	shareBlockShift = 6       // a lock for every 64 bytes
+	shareStripes    = 1 << 14 // both must match ssagen's shareSeqAddr
 )
 
 // shareSeq are the sequence locks: odd while a store holds one.
-var shareSeq [shareStripes]uint32
+//
+// Each has a cache line to itself, at the address of its block modulo the
+// table's size: two goroutines that store in blocks next to each other
+// (two Ps' halves of a sync.Pool) do not write the same line, and the
+// compiler finds the lock of an address with one mask.
+var shareSeq [shareStripes]struct {
+	seq uint32
+	_   [1<<shareBlockShift - 4]byte
+}
 
 func shareLockStripe(i uintptr) {
-	l := &shareSeq[i]
+	l := &shareSeq[i].seq
 	for spins := 0; ; spins++ {
 		if v := atomic.Load(l); v&1 == 0 && atomic.Cas(l, v, v+1) {
 			return
@@ -338,10 +346,10 @@ func shareLockStripe(i uintptr) {
 	}
 }
 
-// shareStripeRange calls f for the locks of the pages of [p, p+size), in
+// shareStripeRange calls f for the locks of the blocks of [p, p+size), in
 // the order in which every goroutine takes them: by index.
 func shareStripeRange(p, size uintptr, f func(i uintptr)) {
-	first, last := p>>sharePageShift, (p+size-1)>>sharePageShift
+	first, last := p>>shareBlockShift, (p+size-1)>>shareBlockShift
 	if last-first >= shareStripes-1 {
 		for i := uintptr(0); i < shareStripes; i++ {
 			f(i)
@@ -368,7 +376,7 @@ func shareLockRange(p, size uintptr) {
 }
 
 func shareUnlockRange(p, size uintptr) {
-	shareStripeRange(p, size, func(i uintptr) { atomic.Xadd(&shareSeq[i], 1) })
+	shareStripeRange(p, size, func(i uintptr) { atomic.Xadd(&shareSeq[i].seq, 1) })
 }
 
 // sharestore is called by compiled code before it stores size bytes that
@@ -395,7 +403,7 @@ func shareunlock(dst unsafe.Pointer, size uintptr) {
 // shareRead copies the size bytes at src to dst, which only this goroutine
 // can reach, as no store in progress left them.
 func shareRead(dst, src unsafe.Pointer, size uintptr) {
-	first, last := uintptr(src)>>sharePageShift, (uintptr(src)+size-1)>>sharePageShift
+	first, last := uintptr(src)>>shareBlockShift, (uintptr(src)+size-1)>>shareBlockShift
 	if last-first >= 4 {
 		// Many locks to watch: with them held there is no store in
 		// progress.
@@ -407,18 +415,18 @@ func shareRead(dst, src unsafe.Pointer, size uintptr) {
 		return
 	}
 	// As the inline load does, without taking the locks: a reader that
-	// took them would send the other readers of the page here.
+	// took them would send the other readers of the block here.
 	var seq [4]uint32
 	for spins := 0; ; spins++ {
 		quiet := true
 		for i := uintptr(0); i <= last-first; i++ {
-			seq[i] = atomic.Load(&shareSeq[(first+i)&(shareStripes-1)])
+			seq[i] = atomic.Load(&shareSeq[(first+i)&(shareStripes-1)].seq)
 			quiet = quiet && seq[i]&1 == 0
 		}
 		if quiet {
 			memmove(dst, src, size)
 			for i := uintptr(0); i <= last-first; i++ {
-				quiet = quiet && seq[i] == atomic.Load(&shareSeq[(first+i)&(shareStripes-1)])
+				quiet = quiet && seq[i] == atomic.Load(&shareSeq[(first+i)&(shareStripes-1)].seq)
 			}
 			if quiet {
 				return

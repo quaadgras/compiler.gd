@@ -88,8 +88,10 @@ A slice, a string and an interface are several words. A goroutine that
 loads one while another stores it can get the words of two values, and
 then index past an array or call one type's method on another's value.
 Loads and stores of such a value are made atomic with sequence locks
-(`runtime/shared.go`, `cmd/compile/internal/ssagen/share.go`): 1024 of
-them, found from the page of the value's first byte, odd while a store
+(`runtime/shared.go`, `cmd/compile/internal/ssagen/share.go`): one for
+every 64 bytes, in a table of 16384 that an address indexes modulo its
+megabyte, each with a cache line to itself so that goroutines that store
+in neighbouring blocks do not write the same line; odd while a store
 holds one.
 
 - **A load** from memory that is not the stack reads the lock, loads the
@@ -104,6 +106,12 @@ holds one.
   memory, still that if the length fits the capacity that is there now,
   and a store of the whole slice otherwise: another goroutine may have
   stored a shorter one since this one was loaded.
+- **A function with its own exclusion** for what it loads and stores is
+  marked `//go:notear` and has none of this (its pointer stores still
+  publish): `sync.Pool`'s, where a P's private value is its own and the
+  queues hand values over with atomics. Without it, and with the locks
+  found from pages, every `sync.Pool` operation of every P took the same
+  lock: 151 ns instead of 1.3; it is 1.9 now.
 - **A copy** of a struct or array that holds such values is a load, a
   store, or (between two places that are not the stack) a call to
   `sharetypedmemmove`.

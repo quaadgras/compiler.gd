@@ -450,6 +450,7 @@ const (
 	CgoUnsafeArgs               // treat a pointer to one arg as a pointer to them all
 	UintptrKeepAlive            // pointers converted to uintptr must be kept alive
 	UintptrEscapes              // pointers converted to uintptr escape
+	NoTear                      // gd: func has its own exclusion for the slices, strings and interfaces it loads and stores in shared memory (runtime/shared.go)
 
 	// Runtime-only func pragmas.
 	// See ../../../../runtime/HACKING.md for detailed descriptions.

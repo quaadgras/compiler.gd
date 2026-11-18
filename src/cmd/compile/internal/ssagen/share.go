@@ -16,13 +16,13 @@ import (
 // Values of more than one word (a slice, a string, an interface) are
 // loaded and stored whole where another goroutine may be storing or
 // loading them: see runtime/shared.go. A load from memory that is not the
-// stack checks the sequence lock of its page before and after, inline; a
+// stack checks the sequence lock of its 64-byte block before and after, inline; a
 // store there calls the runtime, which takes the locks if the memory is
 // shared.
 
 const (
-	sharePageShift = 12
-	shareStripes   = 1 << 10 // must match runtime.shareStripes
+	shareBlockShift = 6       // a lock for every 64 bytes, 64 bytes apart
+	shareStripes    = 1 << 14 // both must match runtime's
 )
 
 // tearArch reports whether the target has the inline atomic load the
@@ -39,7 +39,7 @@ func tearArch(f sys.ArchFamily) bool {
 // shares. Not the functions that run where the runtime cannot: in the
 // child of a fork (syscall marks them norace), or without a stack check.
 func tearFunc(fn *ir.Func) bool {
-	return fn.Pragma&(ir.Norace|ir.Nosplit) == 0
+	return fn.Pragma&(ir.Norace|ir.Nosplit|ir.NoTear) == 0
 }
 
 // algFunc reports whether fn is an equality or hash function the compiler
@@ -172,19 +172,18 @@ func (s *state) unpublished(addr *ssa.Value) bool {
 	return false
 }
 
-// shareSeqAddr returns the address of the sequence lock of addr's page.
+// shareSeqAddr returns the address of the sequence lock of addr's block.
 func (s *state) shareSeqAddr(addr *ssa.Value) *ssa.Value {
 	uptr := types.Types[types.TUINTPTR]
 	u32p := types.NewPtr(types.Types[types.TUINT32])
 	p := s.newValue2(ssa.OpConvert, uptr, addr, s.mem())
-	// The offset of the lock: its index times 4.
+	// The offset of the lock in the table is the address modulo the
+	// table's size, at the start of its block.
 	var off *ssa.Value
 	if s.config.PtrSize == 8 {
-		off = s.newValue2(ssa.OpRsh64Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift-2))
-		off = s.newValue2(ssa.OpAnd64, uptr, off, s.constInt64(uptr, (shareStripes-1)<<2))
+		off = s.newValue2(ssa.OpAnd64, uptr, p, s.constInt64(uptr, (shareStripes-1)<<shareBlockShift))
 	} else {
-		off = s.newValue2(ssa.OpRsh32Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift-2))
-		off = s.newValue2(ssa.OpAnd32, uptr, off, s.constInt32(uptr, (shareStripes-1)<<2))
+		off = s.newValue2(ssa.OpAnd32, uptr, p, s.constInt32(uptr, (shareStripes-1)<<shareBlockShift))
 	}
 	base := s.entryNewValue1A(ssa.OpAddr, u32p, ir.Syms(s.gd).ShareSeq, s.sb)
 	return s.newValue2(ssa.OpAddPtr, u32p, base, off)
@@ -292,16 +291,16 @@ func (s *state) shareLoadMem(t *types.Type, dst, src *ssa.Value) {
 	s2 := s.shareSeq(seq)
 	quiet := s.shareQuiet(s1, s2)
 	if t.Size() > 1 {
-		// One lock was checked: the value must be in one page.
+		// One lock was checked: the value must be in one block.
 		p := s.newValue2(ssa.OpConvert, uptr, src, s.mem())
 		var onePage *ssa.Value
 		if s.config.PtrSize == 8 {
 			last := s.newValue2(ssa.OpAdd64, uptr, p, s.constInt64(uptr, t.Size()-1))
-			x := s.newValue2(ssa.OpRsh64Ux64, uptr, s.newValue2(ssa.OpXor64, uptr, p, last), s.constInt64(types.Types[types.TUINT64], sharePageShift))
+			x := s.newValue2(ssa.OpRsh64Ux64, uptr, s.newValue2(ssa.OpXor64, uptr, p, last), s.constInt64(types.Types[types.TUINT64], shareBlockShift))
 			onePage = s.newValue2(ssa.OpEq64, types.Types[types.TBOOL], x, s.constInt64(uptr, 0))
 		} else {
 			last := s.newValue2(ssa.OpAdd32, uptr, p, s.constInt32(uptr, int32(t.Size()-1)))
-			x := s.newValue2(ssa.OpRsh32Ux64, uptr, s.newValue2(ssa.OpXor32, uptr, p, last), s.constInt64(types.Types[types.TUINT64], sharePageShift))
+			x := s.newValue2(ssa.OpRsh32Ux64, uptr, s.newValue2(ssa.OpXor32, uptr, p, last), s.constInt64(types.Types[types.TUINT64], shareBlockShift))
 			onePage = s.newValue2(ssa.OpEq32, types.Types[types.TBOOL], x, s.constInt32(uptr, 0))
 		}
 		quiet = s.newValue2(ssa.OpAndB, types.Types[types.TBOOL], quiet, onePage)

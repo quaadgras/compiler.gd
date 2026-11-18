@@ -74,6 +74,8 @@ func (d *poolDequeue) pack(head, tail uint32) uint64 {
 
 // pushHead adds val at the head of the queue. It returns false if the
 // queue is full. It must only be called by a single producer.
+//
+//go:notear
 func (d *poolDequeue) pushHead(val any) bool {
 	ptrs := d.headTail.Load()
 	head, tail := d.unpack(ptrs)
@@ -106,6 +108,8 @@ func (d *poolDequeue) pushHead(val any) bool {
 // popHead removes and returns the element at the head of the queue.
 // It returns false if the queue is empty. It must only be called by a
 // single producer.
+//
+//go:notear
 func (d *poolDequeue) popHead() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {
@@ -141,6 +145,8 @@ func (d *poolDequeue) popHead() (any, bool) {
 // popTail removes and returns the element at the tail of the queue.
 // It returns false if the queue is empty. It may be called by any
 // number of consumers.
+//
+//go:notear
 func (d *poolDequeue) popTail() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {
