@@ -42,6 +42,9 @@ func (p *Package) writeDefs() {
 		fc = f
 	}
 	fm := creat("_cgo_main.c")
+	// (Closed here, not by exiting: the go command runs cgo in its own
+	// process, and Windows cannot remove a file that is still open.)
+	defer fm.Close()
 
 	var gccgoInit strings.Builder
 
