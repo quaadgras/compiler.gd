@@ -102,6 +102,7 @@ type batch struct {
 
 	heapLoc      location
 	mutatorLoc   location
+	ownHeapLoc   location // the heap, in an object that no other goroutine reaches by itself (callbits.go)
 	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
 	calleeLoc    location
 	blankLoc     location
@@ -118,6 +119,9 @@ type batch struct {
 	dynRoots    map[dynKey]*location
 	simpleStmts map[int32]bool
 	stmtCalls   map[int32]bool
+	calls       []*callSite // callbits.go
+	retTags     map[*ir.Func]ir.Node
+	callArgs    []ir.Node // the arguments of the direct call whose tags are read (callbits.go)
 	addrStmts   map[addrStmtKey]uint8
 }
 
@@ -167,6 +171,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
 	b.shareLoc.attrs = attrShares
+	b.ownHeapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
 	// dynamic-callee edges, but with attrCandidateEscape in place of
@@ -408,6 +413,7 @@ type outBufUse struct {
 
 func (b *batch) finish(fns []*ir.Func) {
 	b.markUnshared(fns)
+	b.markReturnedOther()
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.
 	phaseG := b.phaseGTags(fns)
@@ -426,6 +432,7 @@ func (b *batch) finish(fns []*ir.Func) {
 		// carriers) check bit k+1 to decide whether to materialize
 		// arg k before an indirect call. Bit 0 is reserved.
 		fn.EscMask = computeEscMask(b.gd, fn.Type())
+		b.paramShares(fn)
 	}
 
 	for _, loc := range b.allLocs {
@@ -502,6 +509,7 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 			}
 			n.SetEsc(ir.EscHeap)
+			loc.heap = true
 			b.markLocal(loc)
 			// gd Phase G: an allocation phaseGTags placed in the
 			// caller's buffer for a result: a local's storage
@@ -559,6 +567,8 @@ func (b *batch) finish(fns []*ir.Func) {
 			}
 		}
 	}
+
+	b.callBits()
 
 	// gd Phase G: an outBuf param says whether the function places
 	// anything in that buffer; callers that know it doesn't pass none

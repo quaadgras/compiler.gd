@@ -324,41 +324,83 @@ because the callee is unknown.
   adds to the type descriptor. `-d=nolocaldyn` turns it off. For Phase G
   these containers are the heap (`isDynRoot`).
 
-What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`:
+- **Stacks apart.** The local range has two halves: objects in the
+  first, stacks in the second (page allocator regions 0, 1, 2). A tag
+  tests the first half (`isLocalObject`, shift 35): a container on a
+  stack is not known to be local from its address, since the function
+  that has it may return or share what a callee stored in it.
+- **The bits of a call** (`runtime/shared.go`, `escape/callbits.go`,
+  `ssagen`: `takeLocalBits`, `setLocalBits`). What the address cannot
+  say, the caller says, in `g.localBits`, right before a direct call:
+  - bit 0: nothing reached from the results of this call will be
+    shared. The caller knows from a location that each result flows
+    through. An allocation that the callee only returns has the bit as
+    its tag.
+  - bit k+1: nothing stored through argument k (the receiver first)
+    will be shared: the argument is `&x`, or a tracked variable, whose
+    allocations and contents nothing shared is reached from. In the
+    callee, a store through a parameter that is never assigned is in a
+    local container if the bit is set or if the parameter points to a
+    local object.
+  - A caller that returns the results, or passes on a parameter, says
+    what it was told (`return f(x)`, `g(p)`).
 
-- A program that builds trees through methods (`n.kids = append(n.kids,
-  &node{})`): 87% of the objects local, none published.
-- `encoding/json`'s wrapper package: of 140 allocation sites 4 are local
-  (dynamically), 80 are not only because they are returned, 56 are
-  shared for a static reason (errors, panics, interface calls).
-- **Unsound today**: a callee that stores in a container on its caller's
-  stack sees a local address, and the caller then returns or shares what
-  was stored (regexp's compiler, reached from a package initializer:
-  44 of 110 local objects of json's tests are published). The guards do
-  not use the ranges yet, so nothing depends on it. See below.
+  The word holds the bits in its 16 high bits and the address of the
+  function they are for in the others. A function that uses them takes
+  the word when it starts, leaves zero, and has the bits only if the
+  address is its own (`ir.Func.LocalBitsVar`, a local variable). So a
+  word that was not taken says nothing to another function, a function
+  that is called indirectly or by code that knows nothing has zero, and
+  the caller need not know whether the callee takes them
+  (`TakesLocalBits`, exported, only saves the store). A panic clears the
+  word before the deferred calls. `-d=nolocalbits` turns it off.
+- **Where parameters go** (`ir.ParamShare`, exported with the function).
+  The escape tag of a parameter says "the heap", which was "shared" for
+  the caller: a method that stores in its receiver made the receiver's
+  object shared. Each parameter now also says the least number of
+  dereferences that give what another goroutine may reach, the
+  parameters through which it is stored (`p.f = x` with `p` never
+  assigned: for the caller, a store through its argument), and the
+  results it reaches through an object in the heap. The caller's
+  argument flows to a heap that nobody reaches by itself
+  (`ownHeapLoc`), so that escaping is as before. The elements of an
+  appended slice flow there too: the new array is where the result goes.
+- Variables that are moved to the heap with the same tag are still
+  allocated together.
+
+What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
+(2026-11-19):
+
+- A program that builds trees through methods (`root := new(node)`,
+  `root.add(...)` with `n.kids = append(n.kids, &node{})`): 88% of the
+  objects local, none published.
+- Allocation sites that can be local (statically or by a tag), before
+  and after the bits: `encoding/json` 4 → 84 of 140, `strings` 72 of
+  129, `regexp/syntax` 139 of 262, `go/parser` 52 of 598 (the rest are
+  stored in interfaces or passed to unknown callees).
+- No local object was published in the tests of `encoding/json`,
+  `regexp`, `text/template`, `go/parser`, `strconv`, `net/http`,
+  `go/types`. Few objects are local there (1% in `go/types` and
+  `net/http`): tests are called through function values and hand their
+  results to `reflect.DeepEqual` and `fmt`.
 
 ### Next
 
-1. **Stacks in a sub-range of their own**, so that a tag can say "a
-   local heap object" and not "a stack": a container on a stack is then
-   unknown, hence shared, unless the caller says otherwise (3).
-2. **Results**: a field of g that a caller sets right before it calls a
-   function known to read and clear it on entry (a property exported
-   with the function; never for an indirect call, so that it cannot be
-   left set). Bit 0: the results stay local. The callee's allocations
-   that are only returned take it as their tag; `return f(x)` forwards
-   it. The caller decides from a location for "what the call returns"
-   (as Phase G has for pointer results).
-3. **Stack containers**: more bits of the same field, one per pointer
-   argument that is the address of a stack variable whose contents stay
-   local.
+1. **Indirect calls.** The word names the function, so a caller can
+   set it for a closure or an interface method as well (the code
+   pointer it calls); wrappers lose the bits, safely. Then the bits of
+   a call can also carry what the escape masks carry now.
+2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
+   when the buffer is nil: pass the tag.
+3. `P.s = append(P.s, x)`: x is tested against the old array, nil the
+   first time. A nil array could take the tag of `P`.
 4. A variable that is assigned once and in scope at the allocation as a
-   whole-function container (needs scopes in the graph); parameters that
-   flow to another parameter's object without leaking to the heap (a
-   "shares" slot in the tags, so that `p.items = append(p.items, x)`
-   does not make `p`'s object shared in the caller).
+   whole-function container (needs scopes in the graph).
 5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
    closures.
+6. A callee that keeps a parameter as an integer (`shareLoc`) does not
+   tell its caller in the escape tag: `ParamShare.Share` does now, but
+   only where the function has a body that was analysed.
 
 ### The dynamic vectors as first planned
 

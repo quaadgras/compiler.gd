@@ -898,6 +898,10 @@ func gopanic(e any) {
 func (p *_panic) start(pc uintptr, sp unsafe.Pointer) {
 	gp := getg()
 
+	// The bits of a call that the panic came before are no one's
+	// (g.localBits): the deferred functions are called next.
+	gp.localBits = 0
+
 	// Record the caller's PC and SP, so recovery can identify panics
 	// that have been recovered. Also, so that if p is from Goexit, we
 	// can restart its defer processing loop if a recovered panic tries

@@ -666,7 +666,12 @@ func localRType(gd *base.Invocation, rtype ir.Node, n *ir.MakeExpr) ir.Node {
 	t := types.NewPtr(types.Types[types.TUINT8])
 	if ir.IsNil(rtype) {
 		// No type: the object has no pointers.
-		return typecheck.ConvNop(gd, typecheck.ConvNop(gd, tag, types.Types[types.TUNSAFEPTR]), t)
+		// (An integer made a pointer, that checkptr is not to
+		// look at: see walkCheckPtrArithmetic.)
+		up := ir.NewConvExpr(gd, rtype.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], tag)
+		up.SetTypecheck(1)
+		up.SetCheckPtr(true)
+		return typecheck.ConvNop(gd, up, t)
 	}
 	add := ir.NewBinaryExpr(gd, rtype.Pos(), ir.OUNSAFEADD, typecheck.ConvNop(gd, rtype, types.Types[types.TUNSAFEPTR]), tag)
 	add.SetType(types.Types[types.TUNSAFEPTR])

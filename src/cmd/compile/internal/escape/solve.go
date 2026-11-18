@@ -52,6 +52,7 @@ func (b *batch) walkAll() {
 	todo.pushFront(&b.shareLoc)
 	todo.pushFront(&b.calleeLoc)
 	todo.pushFront(&b.candidateLoc)
+	todo.pushFront(&b.ownHeapLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
@@ -59,6 +60,7 @@ func (b *batch) walkAll() {
 	b.calleeLoc.queuedWalkAll = true
 	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
+	b.ownHeapLoc.queuedWalkAll = true
 
 	var walkgen uint32
 	for todo.len() > 0 {
@@ -203,6 +205,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				}
 				l.leakTo(b.gd, root, derefs)
 			}
+			b.noteParamShare(l, root, derefs)
 			if root.hasAttr(attrMutates) {
 				l.paramEsc.AddMutator(b.gd, derefs)
 			}
@@ -363,7 +366,7 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 }
 
 func (b *batch) explainLoc(l *location) string {
-	if l == &b.heapLoc {
+	if l == &b.heapLoc || l == &b.ownHeapLoc {
 		return "{heap}"
 	}
 	if l.n == nil {

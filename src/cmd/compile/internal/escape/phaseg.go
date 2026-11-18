@@ -61,7 +61,7 @@ func (b *batch) phaseGTags(fns []*ir.Func) map[*location]int {
 	// What reaches the heap: what the heap's edges lead to, and the
 	// locations flow marked as escaping without an edge, and what
 	// leads to them.
-	heapRoots := []*location{&b.heapLoc}
+	heapRoots := []*location{&b.heapLoc, &b.ownHeapLoc}
 	for _, l := range b.allLocs {
 		if l.escapedInGraph || l.isDynRoot {
 			// (A store through a pointer is a store in the heap

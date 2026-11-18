@@ -504,9 +504,17 @@ type g struct {
 	stackguard0 uintptr // offset known to cmd/internal/obj/*
 	stackguard1 uintptr // offset known to cmd/internal/obj/*
 
-	_panic    *_panic // innermost panic
-	_defer    *_defer // innermost defer
-	m         *m      // current m
+	_panic *_panic // innermost panic
+	_defer *_defer // innermost defer
+	m      *m      // current m
+
+	// localBits is what the caller of a function says of the call,
+	// for where the function allocates (shared.go): the bits in the
+	// 16 high bits, the address of the function they are for in the
+	// others. A function that uses them takes them when it starts,
+	// and leaves zero. Offset known to cmd/compile (ssagen).
+	localBits uintptr
+
 	sched     gobuf
 	syscallsp uintptr // if status==Gsyscall, syscallsp = sched.sp to use during gc
 	syscallpc uintptr // if status==Gsyscall, syscallpc = sched.pc to use during gc

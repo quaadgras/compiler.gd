@@ -243,6 +243,10 @@ type CallExpr struct {
 	// whether it's a runtime.KeepAlive call the compiler generates to
 	// keep a variable alive. See #73137.
 	IsCompilerVarLive bool
+	// LocalBits is, if not nil, the expression of type uintptr of
+	// what the caller says of this call to the function it calls:
+	// see runtime.localBitsCount and escape/callbits.go.
+	LocalBits Node `mknode:"-"`
 	// gd Phase G: 1-based index into the current function's pointer
 	// results, asserting that this call's result flows to that
 	// result and nothing else. Walk's call-site rewrite forwards

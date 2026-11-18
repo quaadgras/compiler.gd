@@ -42,12 +42,14 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		// generated eq/hash functions) don't have it set. Investigate
 		// whether that's a concern.
 		var fns []*ir.Name
+		direct := false // fns is the function that the call is of
 		switch call.Op() {
 		case ir.OCALLFUNC:
 			ro := e.reassignOracle(e.curfn)
 			v := ro.StaticValue(call.Fun)
 			if fn := ir.StaticCalleeName(v); fn != nil {
 				fns = []*ir.Name{fn}
+				direct = true
 			} else if name, ok := v.(*ir.Name); ok {
 				fns = resolveAssignedCallees(ro.FuncAssignments(name.Canonical()))
 			}
@@ -56,6 +58,13 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		fntype := call.Fun.Type()
 		if len(fns) == 1 {
 			fntype = fns[0].Type()
+		}
+
+		// What the caller says to a function it calls directly
+		// (callbits.go).
+		var cs *callSite
+		if direct {
+			cs, ks = e.noteCall(ks, call, fns[0])
 		}
 
 		// Wire result flows for in-batch callees.
@@ -124,13 +133,35 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				argument(k, arg)
 			}
 		} else {
+			// The arguments of a direct call, the receiver first:
+			// what the function stores through one is where that
+			// one points (sharedTagHoles).
+			var all []ir.Node
+			first := 0
+			if recvArg != nil {
+				first = 1
+			}
+			if direct {
+				if recvArg != nil {
+					all = append(all, recvArg)
+				}
+				all = append(all, args[:len(fntype.Params())]...)
+			}
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
-				argument(e.mergedTagHole(ks, fns, -1, fntype, recvArg), recvArg)
+				e.noteCallArg(cs, 0, recvArg)
+				e.callArgs = all
+				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
+				e.callArgs = nil
+				argument(k, recvArg)
 			}
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
-				argument(e.mergedTagHole(ks, fns, i, fntype, args[i]), args[i])
+				e.noteCallArg(cs, first+i, args[i])
+				e.callArgs = all
+				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
+				e.callArgs = nil
+				argument(k, args[i])
 			}
 		}
 
@@ -195,7 +226,10 @@ func (e *escape) call(ks []hole, call ir.Node) {
 		tracked := e.contentsOf(args[0]) != nil
 		appendeeK := e.teeHole(ks[0], e.mutatorHole())
 		if args[0].Type().Elem().HasPointers() && !tracked {
-			appendeeK = e.teeHole(appendeeK, e.heapHole().deref(e.gd, call, "appendee slice"))
+			// (The new array is in the heap, and where the
+			// result goes: no other goroutine reaches it by
+			// itself.)
+			appendeeK = e.teeHole(appendeeK, e.appendHeapHole().deref(e.gd, call, "appendee slice"))
 		}
 		argument(appendeeK, args[0])
 
@@ -485,7 +519,7 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	esc := parseLeaks(e.gd, param.Note)
 
 	if x := esc.Heap(); x >= 0 {
-		tagKs = append(tagKs, e.heapHole().shift(e.gd, x))
+		tagKs = append(tagKs, e.sharedTagHoles(ks, fn, param, esc, x)...)
 	}
 	if x := esc.Mutator(); x >= 0 {
 		tagKs = append(tagKs, e.mutatorHole().shift(e.gd, x))

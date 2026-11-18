@@ -844,7 +844,7 @@ func preprocess(ctxt *obj.Link, s *obj.LSym, newprog obj.ProgAlloc) {
 			p = appendp(p, AEnd) // end of try_table
 			p = appendp(p, AEnd) // end of the block the catch clause targets
 
-			schedSP := int64(ctxt.Arch.PtrSize) * 7 // g.sched.sp, see runtime.g
+			schedSP := int64(ctxt.Arch.PtrSize) * 8 // g.sched.sp, see runtime.g (after g.localBits)
 
 			// if g.stack.hi - g.sched.sp != DEFERBASE { throw again }
 			p = appendp(p, AGet, regAddr(REGG))

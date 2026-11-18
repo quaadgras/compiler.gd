@@ -26,7 +26,7 @@ func TestSizeof(t *testing.T) {
 		// That adds 8 bytes (3 bytes pad before the uint32 + 4 bytes
 		// data + 1 byte pad after esc) on every Node — accounted for
 		// in the +8 across all four sizes below.
-		{Func{}, 220, 376},
+		{Func{}, 240, 416},
 		{Name{}, 160, 248},
 		{miniExpr{}, 48, 72},
 		{miniNode{}, 28, 32},

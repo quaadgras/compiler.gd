@@ -186,6 +186,20 @@ type Func struct {
 	// WasmExport is used by the //go:wasmexport directive to store info about
 	// a WebAssembly function export.
 	WasmExport *WasmExport
+	// LocalBitsVar is, if not nil, the variable that has the bits of
+	// the call that the function was called by (runtime.localBitsCount):
+	// the function takes them when it starts. TakesLocalBits says the
+	// same of a function of another package, where a caller may then
+	// set them: a caller that sets them for a function that does not
+	// take them wastes its time, no more.
+	LocalBitsVar   *Name
+	TakesLocalBits bool
+
+	// ParamShares says, for each of the receiver and the parameters,
+	// where another goroutine may reach what the function is passed:
+	// the escape tags only say that it is in the heap. Nil if it is
+	// not known. See escape/callbits.go.
+	ParamShares []ParamShare
 }
 
 // WasmImport stores metadata associated with the //go:wasmimport pragma.
@@ -798,4 +812,21 @@ func ContainsClosure(f, c *Func) bool {
 		}
 	}
 	return false
+}
+
+// A ParamShare is what a function does with a parameter, for which
+// goroutines reach what it points to (Func.ParamShares). The numbers of
+// dereferences are as in the escape tags, plus one: zero is none.
+type ParamShare struct {
+	// Share is the least number of dereferences of the parameter that
+	// give what flows to where another goroutine may reach it.
+	Share uint8
+	// Via has bit k set if the parameter, dereferenced ViaDerefs-1
+	// times or more, is stored in what the function's k'th parameter
+	// (the receiver first) points to: it is then where that is.
+	Via       uint16
+	ViaDerefs uint8
+	// Results has bit i set if the parameter flows to the function's
+	// i'th result, when the escape tag may not say it.
+	Results uint8
 }

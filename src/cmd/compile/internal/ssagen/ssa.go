@@ -642,6 +642,8 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 		}
 	}
 
+	s.takeLocalBits(fn)
+
 	// Convert the AST-based IR to the SSA-based IR
 	if s.instrumentEnterExit {
 		s.rtcall(ir.Syms(gd).Racefuncenter, true, nil, s.newValue0(ssa.OpGetCallerPC, types.Types[types.TUINTPTR]))
@@ -809,11 +811,23 @@ func (s *state) newHeapaddr(n *ir.Name) {
 		// Fall through: tagged but no outBuf found. Heap-alloc.
 	}
 	size := allocSize(n.Type())
-	if tag := s.localTag(n, n.Unshared&ir.LocalObject != 0); tag != nil && size != 0 {
-		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil, tag))
+	// The variables that are allocated together are local together:
+	// those with the same tag (runtime.allocType).
+	var tagKey any
+	if n.Unshared&ir.LocalObject != 0 {
+		tagKey = true
+	} else if tag := ir.LocalTag(s.gd, n); tag != nil {
+		tagKey = tag
+	}
+	if s.f.Config.WasmGC {
+		tagKey = nil
+	}
+	aggregate := !(n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC)
+	if tagKey != nil && size != 0 && !aggregate {
+		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil, s.localTag(n, tagKey == true)))
 		return
 	}
-	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC {
+	if !aggregate {
 		// (With GOWASM=gc every variable is an object of its own.)
 		s.setHeapaddr(n.Pos(), n, s.newObject(n.Type()))
 		return
@@ -825,7 +839,7 @@ func (s *state) newHeapaddr(n *ir.Name) {
 	for _, v := range s.pendingHeapAllocations {
 		used += allocSize(v.Type.Elem())
 	}
-	if used+size > maxAggregatedHeapAllocation {
+	if used+size > maxAggregatedHeapAllocation || tagKey != s.pendingHeapTagKey {
 		s.flushPendingHeapAllocations()
 	}
 
@@ -834,7 +848,13 @@ func (s *state) newHeapaddr(n *ir.Name) {
 		// Make an allocation, but the type being allocated is just
 		// the first pending object. We will come back and update it
 		// later if needed.
-		allocCall = s.newObjectNonSpecialized(n.Type(), nil)
+		s.pendingHeapTagKey, s.pendingHeapTag = tagKey, nil
+		if tagKey != nil {
+			s.pendingHeapTag = s.localTag(n, tagKey == true)
+			allocCall = s.newObjectLocal(n.Type(), nil, s.pendingHeapTag)
+		} else {
+			allocCall = s.newObjectNonSpecialized(n.Type(), nil)
+		}
 	} else {
 		allocCall = s.pendingHeapAllocations[0].Args[0]
 	}
@@ -854,8 +874,10 @@ func (s *state) flushPendingHeapAllocations() {
 		return // nothing to do
 	}
 	s.pendingHeapAllocations = nil // reset state
-	ptr := pending[0].Args[0]      // The SelectN [0] op
-	call := ptr.Args[0]            // The runtime.newobject call
+	tag := s.pendingHeapTag
+	s.pendingHeapTagKey, s.pendingHeapTag = nil, nil
+	ptr := pending[0].Args[0] // The SelectN [0] op
+	call := ptr.Args[0]       // The runtime.newobject call
 
 	if len(pending) == 1 {
 		// Just a single object, do a standard allocation.
@@ -891,7 +913,11 @@ func (s *state) flushPendingHeapAllocations() {
 	argTypes := []*types.Type{argSize.Type, argType.Type, argZero.Type}
 
 	mallocSym := ir.Syms(s.gd).MallocGC
-	if specialMallocSym := s.specializedMallocSym(size, false); specialMallocSym != nil {
+	if tag != nil {
+		// No type, with the tag: the size-specialized forms do
+		// not take one.
+		argType = call.Block.NewValue2(call.Pos, ssa.OpAddPtr, argType.Type, argType, tag)
+	} else if specialMallocSym := s.specializedMallocSym(size, false); specialMallocSym != nil {
 		mallocSym = specialMallocSym
 	}
 	call.Aux = ssa.StaticAuxCall(mallocSym, s.f.ABIDefault.ABIAnalyzeTypes(
@@ -1050,6 +1076,50 @@ func (s *state) localTag(n ir.Node, static bool) *ssa.Value {
 		return s.expr(tag)
 	}
 	return nil
+}
+
+// The bits of a call (runtime.localBitsCount, escape/callbits.go).
+const (
+	localBitsCount = 16
+	gLocalBits     = 7 // g.localBits, in pointers
+)
+
+// localBitsAddr returns the address of g.localBits.
+func (s *state) localBitsAddr() *ssa.Value {
+	t := types.Types[types.TUINTPTR]
+	g := s.newValue1(ssa.OpGetG, types.NewPtr(t), s.mem())
+	return s.newValue1I(ssa.OpOffPtr, types.NewPtr(t), gLocalBits*int64(types.PtrSize), g)
+}
+
+// takeLocalBits sets fn's LocalBitsVar, when the function starts, to the
+// bits of the call: those of the word that the caller left, if the
+// address in it is the function's. It leaves zero.
+func (s *state) takeLocalBits(fn *ir.Func) {
+	v := fn.LocalBitsVar
+	if v == nil {
+		return
+	}
+	t := types.Types[types.TUINTPTR]
+	addr := s.localBitsAddr()
+	w := s.rawLoad(t, addr)
+	s.store(t, addr, s.constInt(t, 0))
+	shift := s.constInt(t, 8*int64(types.PtrSize)-localBitsCount)
+	x := s.newValue2(ssa.OpXor64, t, w, s.newValue1A(ssa.OpAddr, t, fn.LSym, s.sb))
+	// All ones if the address is the function's.
+	low := s.newValue2(ssa.OpRsh64Ux64, t, s.newValue2(ssa.OpLsh64x64, t, x, s.constInt(t, localBitsCount)), s.constInt(t, localBitsCount))
+	mask := s.newValue2(ssa.OpRsh64x64, t, s.newValue2(ssa.OpSub64, t, low, s.constInt(t, 1)), s.constInt(t, 63))
+	bits := s.newValue2(ssa.OpAnd64, t, s.newValue2(ssa.OpRsh64Ux64, t, x, shift), mask)
+	s.assign(v, bits, false, 0)
+}
+
+// setLocalBits says the bits of the call that follows, of the function
+// at callee, to that function.
+func (s *state) setLocalBits(bits ir.Node, callee *obj.LSym) {
+	t := types.Types[types.TUINTPTR]
+	b := s.expr(bits)
+	shift := s.constInt(t, 8*int64(types.PtrSize)-localBitsCount)
+	w := s.newValue2(ssa.OpOr64, t, s.newValue2(ssa.OpLsh64x64, t, b, shift), s.newValue1A(ssa.OpAddr, t, callee, s.sb))
+	s.store(t, s.localBitsAddr(), w)
 }
 
 // localType returns the type descriptor rtype with the tag added, for
@@ -1291,6 +1361,8 @@ type state struct {
 	// They are all (OffPtr (Select0 (runtime call))) and have the correct types,
 	// but the offsets are not set yet, and the type of the runtime call is also not final.
 	pendingHeapAllocations []*ssa.Value
+	pendingHeapTagKey      any        // what says that they are local: true, the expression of their tag, or nil
+	pendingHeapTag         *ssa.Value // their tag, or nil
 
 	// First argument of append calls that could be stack allocated.
 	appendTargets map[ir.Node]bool
@@ -6495,6 +6567,14 @@ func (s *state) call(n *ir.CallExpr, k callKind, returnResultAddr bool, deferExt
 		// expressions would be attributed to the caller instead.
 		if k == callTail && s.instrumentEnterExit {
 			s.rtcall(ir.Syms(s.gd).Racefuncexit, true, nil)
+		}
+
+		// (Not for unique.Make of a string: a rule takes away the
+		// copy of string(b) in its argument if the call follows the
+		// conversion, and what it returns is shared anyway.)
+		if n.LocalBits != nil && calleeLSym != nil && k == callNormal && closure == nil && codeptr == nil &&
+			calleeLSym.Name != "unique.Make[go.shape.string]" {
+			s.setLocalBits(n.LocalBits, calleeLSym)
 		}
 
 		callArgs = append(callArgs, s.mem())

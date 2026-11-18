@@ -759,3 +759,26 @@ func printShareStats() {
 	print("sharestats: local ", shareStats.local.Load(), " objects ", shareStats.localBytes.Load(), " bytes, shared ",
 		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(), "\n")
 }
+
+// The bits of a call.
+//
+// A function cannot tell, from an address, whether what it stores in a
+// variable of its caller's stack stays with the goroutine, nor whether
+// what it returns does: the caller knows. So a caller says it, in
+// g.localBits, right before the call: bit 0 if nothing that is reached
+// from the results will be shared, bit k+1 if nothing that is stored
+// through argument k (the receiver first) will be. The bits are in the
+// high localBitsCount bits of the word, and the low ones are the address
+// of the function that is called: a function that uses the bits takes
+// the word when it starts, leaves zero, and has the bits if the address
+// is its own. So a word that a function did not take says nothing to the
+// next one, and no bit is one that the caller did not set for this call:
+// bits that are lost only make shared what could have been local.
+const (
+	localBitsCount = 16
+	localBitsShift = 8*goarch.PtrSize - localBitsCount
+)
+
+// The compiler knows where g.localBits is.
+const _ = uint(unsafe.Offsetof(g{}.localBits) - 7*goarch.PtrSize)
+const _ = uint(7*goarch.PtrSize - unsafe.Offsetof(g{}.localBits))

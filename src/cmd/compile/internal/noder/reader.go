@@ -1281,6 +1281,17 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		for _, f := range name.Type().RecvParams() {
 			f.Note = r.String()
 		}
+		fn.TakesLocalBits = r.Bool()
+		if n := r.Len(); n != 0 {
+			fn.ParamShares = make([]ir.ParamShare, n)
+			for i := range fn.ParamShares {
+				ps := &fn.ParamShares[i]
+				ps.Share = uint8(r.Len())
+				ps.Via = uint16(r.Len())
+				ps.ViaDerefs = uint8(r.Len())
+				ps.Results = uint8(r.Len())
+			}
+		}
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

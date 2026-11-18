@@ -297,6 +297,14 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	for _, f := range name.Type().RecvParams() {
 		w.String(f.Note)
 	}
+	w.Bool(name.Func.TakesLocalBits) // gd: see escape/callbits.go
+	w.Len(len(name.Func.ParamShares))
+	for _, ps := range name.Func.ParamShares {
+		w.Len(int(ps.Share))
+		w.Len(int(ps.Via))
+		w.Len(int(ps.ViaDerefs))
+		w.Len(int(ps.Results))
+	}
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
 		w.Len(int(inl.Cost))

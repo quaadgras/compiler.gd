@@ -77,16 +77,19 @@ type location struct {
 	// paramEsc records the represented parameter's leak set.
 	paramEsc leaks
 
-	captured   bool        // has a closure captured this variable?
-	stmt       int32       // the statement the location was made in, or a variable declared in (shares.go)
-	dynRoot    *dynRoot    // the location is a container known at run time (shares.go)
-	isDynRoot  bool        // the location was made as one, even if it is not one any more
-	dyn        []*location // the dynamic roots that the location, or what it leads to, flows to
-	owners     []*location // for the contents of tracked variables: those variables (shares.go)
-	reassigned bool        // has this variable been reassigned?
-	addrtaken  bool        // has this variable's address been taken?
-	param      bool        // is this variable a parameter (ONAME of class ir.PPARAM)?
-	paramOut   bool        // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+	heap       bool          // finish: the location is in the heap
+	local      uint8         // finish: how its object is local (localStatic, localTagged), if it is
+	shares     ir.ParamShare // for a parameter: see ir.Func.ParamShares
+	captured   bool          // has a closure captured this variable?
+	stmt       int32         // the statement the location was made in, or a variable declared in (shares.go)
+	dynRoot    *dynRoot      // the location is a container known at run time (shares.go)
+	isDynRoot  bool          // the location was made as one, even if it is not one any more
+	dyn        []*location   // the dynamic roots that the location, or what it leads to, flows to
+	owners     []*location   // for the contents of tracked variables: those variables (shares.go)
+	reassigned bool          // has this variable been reassigned?
+	addrtaken  bool          // has this variable's address been taken?
+	param      bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
+	paramOut   bool          // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
 	// gd Phase G: assignedInBody reports whether this result
 	// variable is assigned other than by a return statement (p =
@@ -182,6 +185,11 @@ const (
 	// (markUnshared) such a container is shared.
 	attrDynShares
 	attrDynSharesValue
+
+	// attrReturnedOther indicates that the location, or something
+	// that is reached from it, flows to a result of another function
+	// than its own (callbits.go).
+	attrReturnedOther
 )
 
 func (l *location) hasAttr(attr locAttr) bool { return l.attrs&attr != 0 }
@@ -331,7 +339,7 @@ func (b *batch) flow(k hole, src *location) {
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
 	switch root {
-	case &b.heapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
 		return false
 	}
 	// Locations of other functions in the batch, the parameters
@@ -381,6 +389,7 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
 func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
+func (b *batch) ownHeapHole() hole   { return b.ownHeapLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }

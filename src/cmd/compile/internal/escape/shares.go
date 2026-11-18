@@ -13,6 +13,7 @@ import (
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 	"cmd/internal/objabi"
+	"cmd/internal/src"
 	"cmd/internal/sys"
 )
 
@@ -371,13 +372,17 @@ func (b *batch) markLocal(loc *location) {
 	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
 		return
 	}
-	if loc.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturned) {
+	ret := loc.hasAttr(attrReturned)
+	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
 			for i, name := range []string{"shares", "holds what is shared", "leads to what is shared", "is returned"} {
 				if loc.attrs&(attrShares<<i) != 0 {
 					why += ", " + name
 				}
+			}
+			if loc.hasAttr(attrReturnedOther) {
+				why += ", by another function"
 			}
 			fmt.Printf("%s: %v is not local%s\n", b.gd.FmtPos(loc.n.Pos()), loc.n, why)
 		}
@@ -388,15 +393,19 @@ func (b *batch) markLocal(loc *location) {
 	if fn := loc.curfn; fn == nil || fn.Sym() == nil || fn.Sym().Pkg == nil || ir.UncheckedPkg(fn.Sym().Pkg.Path) {
 		return
 	}
-	if len(loc.dyn) != 0 {
-		tag := b.localTag(loc)
+	if ret || len(loc.dyn) != 0 {
+		if loc.n == nil {
+			return
+		}
+		tag := b.localTag(loc, loc.n.Pos(), ret, false)
 		if tag == nil {
-			if b.gd.Flag.LowerM >= 2 && loc.n != nil {
+			if b.gd.Flag.LowerM >= 2 {
 				fmt.Printf("%s: %v is not local, stored where it cannot tell\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
 			}
 			return
 		}
 		ir.SetLocalTag(b.gd, loc.n, tag)
+		loc.local = localTagged
 		if b.gd.Flag.LowerM >= 2 {
 			fmt.Printf("%s: %v is local if %v\n", b.gd.FmtPos(loc.n.Pos()), loc.n, tag)
 		}
@@ -410,10 +419,17 @@ func (b *batch) markLocal(loc *location) {
 	default:
 		return
 	}
+	loc.local = localStatic
 	if b.gd.Flag.LowerM >= 2 {
 		fmt.Printf("%s: %v is local\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
 	}
 }
+
+// How an object in the heap is local (location.local).
+const (
+	localStatic = 1 + iota // always
+	localTagged            // if its tag says so, when it is allocated
+)
 
 // Dynamic roots.
 //
@@ -633,15 +649,16 @@ func (b *batch) addDyn(l, root *location) bool {
 	return changed
 }
 
-// localTag returns the expression of the tag of the allocation of loc,
-// which only flows to dynamic roots, or nil if one of them cannot be
-// evaluated there.
-func (b *batch) localTag(loc *location) ir.Node {
+// localTag returns the expression of the tag of loc at pos: 1 if all
+// the dynamic roots that loc flows to are local and, if ret, the
+// results of loc's function stay local, as its caller said. It returns
+// nil if one of the roots cannot be evaluated there; with params, only
+// the parameters that are never assigned can.
+func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node {
 	shift, ok := splitHeap(b.gd)
-	if !ok || loc.n == nil {
+	if !ok {
 		return nil
 	}
-	pos := loc.n.Pos()
 	uintptrType := types.Types[types.TUINTPTR]
 	lit := func(v int64) ir.Node {
 		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
@@ -656,7 +673,25 @@ func (b *batch) localTag(loc *location) ir.Node {
 	base := func() ir.Node {
 		return ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "localHeapBase"), uintptrType)
 	}
+	bits := b.callBitsOn()
 	var tag ir.Node
+	if ret {
+		if !bits {
+			return nil
+		}
+		if len(loc.dyn) == 0 {
+			// One expression for all of the function, so that
+			// what has it can be allocated together (ssagen).
+			if t := b.retTags[loc.curfn]; t != nil {
+				return t
+			}
+			if b.retTags == nil {
+				b.retTags = make(map[*ir.Func]ir.Node)
+			}
+			defer func() { b.retTags[loc.curfn] = tag }()
+		}
+		tag = binary(ir.OAND, b.bitsVar(loc.curfn), lit(1))
+	}
 	seen := make(map[string]bool)
 	for _, r := range loc.dyn {
 		d := r.dynRoot
@@ -667,9 +702,10 @@ func (b *batch) localTag(loc *location) ir.Node {
 		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
 			return nil
 		}
+		param := d.plain && !v.reassigned && v.param
 		switch {
-		case d.plain && !v.reassigned && v.param:
-		case d.stmt != 0 && d.stmt == loc.stmt && b.simpleStmts[d.stmt] && (d.plain || !b.stmtCalls[d.stmt]):
+		case param:
+		case !params && d.stmt != 0 && d.stmt == loc.stmt && b.simpleStmts[d.stmt] && (d.plain || !b.stmtCalls[d.stmt]):
 		default:
 			return nil
 		}
@@ -694,6 +730,13 @@ func (b *batch) localTag(loc *location) ir.Node {
 		u.SetTypecheck(1)
 		u.SetCheckPtr(true) // not kept: see walkConv
 		one := binary(ir.ORSH, binary(ir.OSUB, binary(ir.ORSH, binary(ir.OSUB, u, base()), lit(shift)), lit(1)), lit(63))
+		if param && bits {
+			// Or the caller said that what is stored through the
+			// parameter stays local (callbits.go).
+			if k := paramBit(loc.curfn, d.name); k != 0 {
+				one = binary(ir.OOR, one, binary(ir.OAND, binary(ir.ORSH, b.bitsVar(loc.curfn), lit(int64(k))), lit(1)))
+			}
+		}
 		if tag == nil {
 			tag = one
 		} else {
