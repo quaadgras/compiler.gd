@@ -1153,6 +1153,40 @@ func Perror(s Ptr) {
 }
 
 // formatC formats as C's printf.
+// widthModifier parses C23's length modifiers wN and wfN (intN_t,
+// int_fastN_t) at the start of f: the size of the integer, in bytes, and
+// how long the modifier is.
+func widthModifier(f string) (size, n int, ok bool) {
+	if len(f) < 2 || f[0] != 'w' {
+		return 0, 0, false
+	}
+	k := 1
+	fast := f[k] == 'f'
+	if fast {
+		k++
+	}
+	j := k
+	for j < len(f) && f[j] >= '0' && f[j] <= '9' {
+		j++
+	}
+	switch f[k:j] {
+	case "8":
+		size = 1
+	case "16":
+		size = 2
+	case "32":
+		size = 4
+	case "64":
+		size = 8
+	default:
+		return 0, 0, false
+	}
+	if fast && (size == 2 || size == 4) {
+		size = int(longSize) // int_fast16_t and int_fast32_t are long (int where long has 32 bits)
+	}
+	return size, j, true
+}
+
 func formatC(f string, ap *VaList) []byte {
 	var out []byte
 	for i := 0; i < len(f); i++ {
@@ -1220,6 +1254,9 @@ func formatC(f string, ap *VaList) []byte {
 				}
 			}
 			i++
+		}
+		if n, k, ok := widthModifier(f[i:]); ok {
+			size, i = n, i+k
 		}
 		if i >= len(f) {
 			break

@@ -162,6 +162,14 @@ var ilp32Headers = map[string][]string{
 		"#define INT64_MIN (-9223372036854775807L-1)", "#define INT64_MIN (-9223372036854775807LL-1)",
 		"#define INT64_MAX 9223372036854775807L", "#define INT64_MAX 9223372036854775807LL",
 		"#define UINT64_MAX 18446744073709551615UL", "#define UINT64_MAX 18446744073709551615ULL",
+		"#define INT_FAST16_WIDTH 64", "#define INT_FAST16_WIDTH 32",
+		"#define INT_FAST32_WIDTH 64", "#define INT_FAST32_WIDTH 32",
+		"#define UINT_FAST16_WIDTH 64", "#define UINT_FAST16_WIDTH 32",
+		"#define UINT_FAST32_WIDTH 64", "#define UINT_FAST32_WIDTH 32",
+		"#define INTPTR_WIDTH 64", "#define INTPTR_WIDTH 32",
+		"#define UINTPTR_WIDTH 64", "#define UINTPTR_WIDTH 32",
+		"#define PTRDIFF_WIDTH 64", "#define PTRDIFF_WIDTH 32",
+		"#define SIZE_WIDTH 64", "#define SIZE_WIDTH 32",
 		"#define INT_FAST16_MIN INT64_MIN", "#define INT_FAST16_MIN INT32_MIN",
 		"#define INT_FAST32_MIN INT64_MIN", "#define INT_FAST32_MIN INT32_MIN",
 		"#define INT_FAST16_MAX INT64_MAX", "#define INT_FAST16_MAX INT32_MAX",
@@ -228,6 +236,9 @@ var libcLong32 = map[string]string{
 	"strtol":  "Strtol32",
 	"strtoul": "Strtoul32",
 	"ldiv":    "Ldiv32",
+	"llogb":   "Llogb32",
+	"llogbf":  "Llogbf32",
+	"llogbl":  "Llogb32",
 }
 
 // libcConv converts v, a value of the C type t, to (in) or from (!in)

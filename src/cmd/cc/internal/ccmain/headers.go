@@ -241,8 +241,12 @@ typedef double double_t;
 #define HUGE_VAL 1e10000
 #define HUGE_VALF 1e10000f
 #define HUGE_VALL 1e10000L
+#ifndef INFINITY
 #define INFINITY 1e10000f
+#endif
+#ifndef NAN
 #define NAN (0.0f/0.0f)
+#endif
 #define FP_NAN 0
 #define FP_INFINITE 1
 #define FP_ZERO 2
@@ -447,6 +451,164 @@ long double frexpl(long double value, int *exp);
 long double modfl(long double value, long double *iptr);
 long double nanl(const char *tagp);
 #define __STDC_VERSION_MATH_H__ 202311L
+#define FP_INT_UPWARD 0
+#define FP_INT_DOWNWARD 1
+#define FP_INT_TOWARDZERO 2
+#define FP_INT_TONEARESTFROMZERO 3
+#define FP_INT_TONEAREST 4
+#define FP_LLOGB0 (-__LONG_MAX__-1)
+#define FP_LLOGBNAN (-__LONG_MAX__-1)
+#define iszero(x) (fpclassify(x) == FP_ZERO)
+#define issubnormal(x) (fpclassify(x) == FP_SUBNORMAL)
+#define iscanonical(x) ((void)(x), 1)
+#define issignaling(x) _Generic((x), float: __cc_issignalingf, default: __cc_issignaling)(x)
+#define __STDC_VERSION_MATH_H__ 202311L
+double acospi(double);
+float acospif(float);
+long double acospil(long double);
+double asinpi(double);
+float asinpif(float);
+long double asinpil(long double);
+double atanpi(double);
+float atanpif(float);
+long double atanpil(long double);
+double atan2pi(double, double);
+float atan2pif(float, float);
+long double atan2pil(long double, long double);
+double cospi(double);
+float cospif(float);
+long double cospil(long double);
+double sinpi(double);
+float sinpif(float);
+long double sinpil(long double);
+double tanpi(double);
+float tanpif(float);
+long double tanpil(long double);
+double exp10(double);
+float exp10f(float);
+long double exp10l(long double);
+double exp10m1(double);
+float exp10m1f(float);
+long double exp10m1l(long double);
+double exp2m1(double);
+float exp2m1f(float);
+long double exp2m1l(long double);
+double log10p1(double);
+float log10p1f(float);
+long double log10p1l(long double);
+double logp1(double);
+float logp1f(float);
+long double logp1l(long double);
+double log2p1(double);
+float log2p1f(float);
+long double log2p1l(long double);
+long llogb(double);
+long llogbf(float);
+long llogbl(long double);
+double compoundn(double, long long);
+float compoundnf(float, long long);
+long double compoundnl(long double, long long);
+double pown(double, long long);
+float pownf(float, long long);
+long double pownl(long double, long long);
+double powr(double, double);
+float powrf(float, float);
+long double powrl(long double, long double);
+double rootn(double, long long);
+float rootnf(float, long long);
+long double rootnl(long double, long long);
+double rsqrt(double);
+float rsqrtf(float);
+long double rsqrtl(long double);
+double roundeven(double);
+float roundevenf(float);
+long double roundevenl(long double);
+double fromfp(double, int, unsigned int);
+float fromfpf(float, int, unsigned int);
+long double fromfpl(long double, int, unsigned int);
+double ufromfp(double, int, unsigned int);
+float ufromfpf(float, int, unsigned int);
+long double ufromfpl(long double, int, unsigned int);
+double fromfpx(double, int, unsigned int);
+float fromfpxf(float, int, unsigned int);
+long double fromfpxl(long double, int, unsigned int);
+double ufromfpx(double, int, unsigned int);
+float ufromfpxf(float, int, unsigned int);
+long double ufromfpxl(long double, int, unsigned int);
+double remquo(double, double, int *);
+float remquof(float, float, int *);
+long double remquol(long double, long double, int *);
+double nexttoward(double, long double);
+float nexttowardf(float, long double);
+long double nexttowardl(long double, long double);
+double nextup(double);
+float nextupf(float);
+long double nextupl(long double);
+double nextdown(double);
+float nextdownf(float);
+long double nextdownl(long double);
+int canonicalize(double *, const double *);
+int canonicalizef(float *, const float *);
+int canonicalizel(long double *, const long double *);
+double fmaximum(double, double);
+float fmaximumf(float, float);
+long double fmaximuml(long double, long double);
+double fminimum(double, double);
+float fminimumf(float, float);
+long double fminimuml(long double, long double);
+double fmaximum_mag(double, double);
+float fmaximum_magf(float, float);
+long double fmaximum_magl(long double, long double);
+double fminimum_mag(double, double);
+float fminimum_magf(float, float);
+long double fminimum_magl(long double, long double);
+double fmaximum_num(double, double);
+float fmaximum_numf(float, float);
+long double fmaximum_numl(long double, long double);
+double fminimum_num(double, double);
+float fminimum_numf(float, float);
+long double fminimum_numl(long double, long double);
+double fmaximum_mag_num(double, double);
+float fmaximum_mag_numf(float, float);
+long double fmaximum_mag_numl(long double, long double);
+double fminimum_mag_num(double, double);
+float fminimum_mag_numf(float, float);
+long double fminimum_mag_numl(long double, long double);
+double getpayload(const double *);
+float getpayloadf(const float *);
+long double getpayloadl(const long double *);
+int setpayload(double *, double);
+int setpayloadf(float *, float);
+int setpayloadl(long double *, long double);
+int setpayloadsig(double *, double);
+int setpayloadsigf(float *, float);
+int setpayloadsigl(long double *, long double);
+int totalorder(const double *, const double *);
+int totalorderf(const float *, const float *);
+int totalorderl(const long double *, const long double *);
+int totalordermag(const double *, const double *);
+int totalordermagf(const float *, const float *);
+int totalordermagl(const long double *, const long double *);
+float fadd(double x, double y);
+float faddl(long double x, long double y);
+double daddl(long double x, long double y);
+float fsub(double x, double y);
+float fsubl(long double x, long double y);
+double dsubl(long double x, long double y);
+float fmul(double x, double y);
+float fmull(long double x, long double y);
+double dmull(long double x, long double y);
+float fdiv(double x, double y);
+float fdivl(long double x, long double y);
+double ddivl(long double x, long double y);
+float ffma(double x, double y, double z);
+float ffmal(long double x, long double y, long double z);
+double dfmal(long double x, long double y, long double z);
+float fsqrt(double x);
+float fsqrtl(long double x);
+double dsqrtl(long double x);
+int __cc_issignaling(double x);
+int __cc_issignalingf(float x);
 #endif
 `,
 	"time.h": `#ifndef __CC_TIME_H
@@ -609,6 +771,18 @@ void *alloca(size_t size);
 #define DBL_TRUE_MIN 0x1p-1074
 #define LDBL_TRUE_MIN 0x1p-1074L
 #define FLT_ROUNDS 1
+#define FLT_IS_IEC_60559 1
+#define DBL_IS_IEC_60559 1
+#define LDBL_IS_IEC_60559 1
+#define FLT_NORM_MAX FLT_MAX
+#define DBL_NORM_MAX DBL_MAX
+#define LDBL_NORM_MAX LDBL_MAX
+#ifndef INFINITY
+#define INFINITY 1e10000f
+#endif
+#ifndef NAN
+#define NAN (0.0f/0.0f)
+#endif
 #endif
 `,
 	"iso646.h": `#ifndef __CC_ISO646_H
@@ -803,6 +977,100 @@ typedef _Atomic uintmax_t atomic_uintmax_t;
 #define __STDC_VERSION_STDATOMIC_H__ 202311L
 #endif
 `,
+	"stdbit.h": `#ifndef __CC_STDBIT_H
+#define __CC_STDBIT_H
+#include <stddef.h>
+#include <stdint.h>
+#define __STDC_VERSION_STDBIT_H__ 202311L
+#define __STDC_ENDIAN_LITTLE__ 1234
+#define __STDC_ENDIAN_BIG__ 4321
+#define __STDC_ENDIAN_NATIVE__ __STDC_ENDIAN_LITTLE__
+unsigned int stdc_leading_zeros_uc(unsigned char __value);
+unsigned int stdc_leading_zeros_us(unsigned short __value);
+unsigned int stdc_leading_zeros_ui(unsigned int __value);
+unsigned int stdc_leading_zeros_ul(unsigned long __value);
+unsigned int stdc_leading_zeros_ull(unsigned long long __value);
+#define stdc_leading_zeros(__value) _Generic((__value), unsigned char: stdc_leading_zeros_uc, unsigned short: stdc_leading_zeros_us, unsigned int: stdc_leading_zeros_ui, unsigned long: stdc_leading_zeros_ul, unsigned long long: stdc_leading_zeros_ull)(__value)
+unsigned int stdc_leading_ones_uc(unsigned char __value);
+unsigned int stdc_leading_ones_us(unsigned short __value);
+unsigned int stdc_leading_ones_ui(unsigned int __value);
+unsigned int stdc_leading_ones_ul(unsigned long __value);
+unsigned int stdc_leading_ones_ull(unsigned long long __value);
+#define stdc_leading_ones(__value) _Generic((__value), unsigned char: stdc_leading_ones_uc, unsigned short: stdc_leading_ones_us, unsigned int: stdc_leading_ones_ui, unsigned long: stdc_leading_ones_ul, unsigned long long: stdc_leading_ones_ull)(__value)
+unsigned int stdc_trailing_zeros_uc(unsigned char __value);
+unsigned int stdc_trailing_zeros_us(unsigned short __value);
+unsigned int stdc_trailing_zeros_ui(unsigned int __value);
+unsigned int stdc_trailing_zeros_ul(unsigned long __value);
+unsigned int stdc_trailing_zeros_ull(unsigned long long __value);
+#define stdc_trailing_zeros(__value) _Generic((__value), unsigned char: stdc_trailing_zeros_uc, unsigned short: stdc_trailing_zeros_us, unsigned int: stdc_trailing_zeros_ui, unsigned long: stdc_trailing_zeros_ul, unsigned long long: stdc_trailing_zeros_ull)(__value)
+unsigned int stdc_trailing_ones_uc(unsigned char __value);
+unsigned int stdc_trailing_ones_us(unsigned short __value);
+unsigned int stdc_trailing_ones_ui(unsigned int __value);
+unsigned int stdc_trailing_ones_ul(unsigned long __value);
+unsigned int stdc_trailing_ones_ull(unsigned long long __value);
+#define stdc_trailing_ones(__value) _Generic((__value), unsigned char: stdc_trailing_ones_uc, unsigned short: stdc_trailing_ones_us, unsigned int: stdc_trailing_ones_ui, unsigned long: stdc_trailing_ones_ul, unsigned long long: stdc_trailing_ones_ull)(__value)
+unsigned int stdc_first_leading_zero_uc(unsigned char __value);
+unsigned int stdc_first_leading_zero_us(unsigned short __value);
+unsigned int stdc_first_leading_zero_ui(unsigned int __value);
+unsigned int stdc_first_leading_zero_ul(unsigned long __value);
+unsigned int stdc_first_leading_zero_ull(unsigned long long __value);
+#define stdc_first_leading_zero(__value) _Generic((__value), unsigned char: stdc_first_leading_zero_uc, unsigned short: stdc_first_leading_zero_us, unsigned int: stdc_first_leading_zero_ui, unsigned long: stdc_first_leading_zero_ul, unsigned long long: stdc_first_leading_zero_ull)(__value)
+unsigned int stdc_first_leading_one_uc(unsigned char __value);
+unsigned int stdc_first_leading_one_us(unsigned short __value);
+unsigned int stdc_first_leading_one_ui(unsigned int __value);
+unsigned int stdc_first_leading_one_ul(unsigned long __value);
+unsigned int stdc_first_leading_one_ull(unsigned long long __value);
+#define stdc_first_leading_one(__value) _Generic((__value), unsigned char: stdc_first_leading_one_uc, unsigned short: stdc_first_leading_one_us, unsigned int: stdc_first_leading_one_ui, unsigned long: stdc_first_leading_one_ul, unsigned long long: stdc_first_leading_one_ull)(__value)
+unsigned int stdc_first_trailing_zero_uc(unsigned char __value);
+unsigned int stdc_first_trailing_zero_us(unsigned short __value);
+unsigned int stdc_first_trailing_zero_ui(unsigned int __value);
+unsigned int stdc_first_trailing_zero_ul(unsigned long __value);
+unsigned int stdc_first_trailing_zero_ull(unsigned long long __value);
+#define stdc_first_trailing_zero(__value) _Generic((__value), unsigned char: stdc_first_trailing_zero_uc, unsigned short: stdc_first_trailing_zero_us, unsigned int: stdc_first_trailing_zero_ui, unsigned long: stdc_first_trailing_zero_ul, unsigned long long: stdc_first_trailing_zero_ull)(__value)
+unsigned int stdc_first_trailing_one_uc(unsigned char __value);
+unsigned int stdc_first_trailing_one_us(unsigned short __value);
+unsigned int stdc_first_trailing_one_ui(unsigned int __value);
+unsigned int stdc_first_trailing_one_ul(unsigned long __value);
+unsigned int stdc_first_trailing_one_ull(unsigned long long __value);
+#define stdc_first_trailing_one(__value) _Generic((__value), unsigned char: stdc_first_trailing_one_uc, unsigned short: stdc_first_trailing_one_us, unsigned int: stdc_first_trailing_one_ui, unsigned long: stdc_first_trailing_one_ul, unsigned long long: stdc_first_trailing_one_ull)(__value)
+unsigned int stdc_count_zeros_uc(unsigned char __value);
+unsigned int stdc_count_zeros_us(unsigned short __value);
+unsigned int stdc_count_zeros_ui(unsigned int __value);
+unsigned int stdc_count_zeros_ul(unsigned long __value);
+unsigned int stdc_count_zeros_ull(unsigned long long __value);
+#define stdc_count_zeros(__value) _Generic((__value), unsigned char: stdc_count_zeros_uc, unsigned short: stdc_count_zeros_us, unsigned int: stdc_count_zeros_ui, unsigned long: stdc_count_zeros_ul, unsigned long long: stdc_count_zeros_ull)(__value)
+unsigned int stdc_count_ones_uc(unsigned char __value);
+unsigned int stdc_count_ones_us(unsigned short __value);
+unsigned int stdc_count_ones_ui(unsigned int __value);
+unsigned int stdc_count_ones_ul(unsigned long __value);
+unsigned int stdc_count_ones_ull(unsigned long long __value);
+#define stdc_count_ones(__value) _Generic((__value), unsigned char: stdc_count_ones_uc, unsigned short: stdc_count_ones_us, unsigned int: stdc_count_ones_ui, unsigned long: stdc_count_ones_ul, unsigned long long: stdc_count_ones_ull)(__value)
+bool stdc_has_single_bit_uc(unsigned char __value);
+bool stdc_has_single_bit_us(unsigned short __value);
+bool stdc_has_single_bit_ui(unsigned int __value);
+bool stdc_has_single_bit_ul(unsigned long __value);
+bool stdc_has_single_bit_ull(unsigned long long __value);
+#define stdc_has_single_bit(__value) _Generic((__value), unsigned char: stdc_has_single_bit_uc, unsigned short: stdc_has_single_bit_us, unsigned int: stdc_has_single_bit_ui, unsigned long: stdc_has_single_bit_ul, unsigned long long: stdc_has_single_bit_ull)(__value)
+unsigned int stdc_bit_width_uc(unsigned char __value);
+unsigned int stdc_bit_width_us(unsigned short __value);
+unsigned int stdc_bit_width_ui(unsigned int __value);
+unsigned int stdc_bit_width_ul(unsigned long __value);
+unsigned int stdc_bit_width_ull(unsigned long long __value);
+#define stdc_bit_width(__value) _Generic((__value), unsigned char: stdc_bit_width_uc, unsigned short: stdc_bit_width_us, unsigned int: stdc_bit_width_ui, unsigned long: stdc_bit_width_ul, unsigned long long: stdc_bit_width_ull)(__value)
+unsigned char stdc_bit_floor_uc(unsigned char __value);
+unsigned short stdc_bit_floor_us(unsigned short __value);
+unsigned int stdc_bit_floor_ui(unsigned int __value);
+unsigned long stdc_bit_floor_ul(unsigned long __value);
+unsigned long long stdc_bit_floor_ull(unsigned long long __value);
+#define stdc_bit_floor(__value) _Generic((__value), unsigned char: stdc_bit_floor_uc, unsigned short: stdc_bit_floor_us, unsigned int: stdc_bit_floor_ui, unsigned long: stdc_bit_floor_ul, unsigned long long: stdc_bit_floor_ull)(__value)
+unsigned char stdc_bit_ceil_uc(unsigned char __value);
+unsigned short stdc_bit_ceil_us(unsigned short __value);
+unsigned int stdc_bit_ceil_ui(unsigned int __value);
+unsigned long stdc_bit_ceil_ul(unsigned long __value);
+unsigned long long stdc_bit_ceil_ull(unsigned long long __value);
+#define stdc_bit_ceil(__value) _Generic((__value), unsigned char: stdc_bit_ceil_uc, unsigned short: stdc_bit_ceil_us, unsigned int: stdc_bit_ceil_ui, unsigned long: stdc_bit_ceil_ul, unsigned long long: stdc_bit_ceil_ull)(__value)
+#endif
+`,
 	"stdckdint.h": `#ifndef __CC_STDCKDINT_H
 #define __CC_STDCKDINT_H
 #define ckd_add(result, a, b) __builtin_add_overflow(a, b, result)
@@ -938,6 +1206,39 @@ typedef unsigned long uintmax_t;
 #define INT16_WIDTH 16
 #define INT32_WIDTH 32
 #define INT64_WIDTH 64
+#define UINT8_WIDTH 8
+#define UINT16_WIDTH 16
+#define UINT32_WIDTH 32
+#define UINT64_WIDTH 64
+#define INT_LEAST8_WIDTH 8
+#define INT_LEAST16_WIDTH 16
+#define INT_LEAST32_WIDTH 32
+#define INT_LEAST64_WIDTH 64
+#define UINT_LEAST8_WIDTH 8
+#define UINT_LEAST16_WIDTH 16
+#define UINT_LEAST32_WIDTH 32
+#define UINT_LEAST64_WIDTH 64
+#define INT_FAST8_WIDTH 8
+#define INT_FAST16_WIDTH 64
+#define INT_FAST32_WIDTH 64
+#define INT_FAST64_WIDTH 64
+#define UINT_FAST8_WIDTH 8
+#define UINT_FAST16_WIDTH 64
+#define UINT_FAST32_WIDTH 64
+#define UINT_FAST64_WIDTH 64
+#define INTPTR_WIDTH 64
+#define UINTPTR_WIDTH 64
+#define INTMAX_WIDTH 64
+#define UINTMAX_WIDTH 64
+#define PTRDIFF_WIDTH 64
+#define SIZE_WIDTH 64
+#define SIG_ATOMIC_WIDTH 32
+#define SIG_ATOMIC_MIN INT32_MIN
+#define SIG_ATOMIC_MAX INT32_MAX
+#define WCHAR_WIDTH 32
+#define WINT_WIDTH 32
+#define WINT_MIN 0U
+#define WINT_MAX UINT32_MAX
 #define INT8_MIN (-128)
 #define INT16_MIN (-32768)
 #define INT32_MIN (-2147483647-1)

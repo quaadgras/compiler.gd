@@ -134,20 +134,30 @@ func (s *scanner) scanInt(base int) (string, bool) {
 	b, _ := s.accept(nil, "+-")
 	var digits string
 	switch base {
-	case 0, 16:
+	case 0, 2, 16:
 		var zero bool
 		if b, zero = s.accept(b, "0"); zero {
 			var x bool
-			if b, x = s.accept(b, "xX"); x {
-				base = 16
-			} else if base == 0 {
-				base = 8
+			if base != 2 {
+				if b, x = s.accept(b, "xX"); x {
+					base = 16
+				}
+			}
+			if !x && base != 16 {
+				// C23's binary prefix.
+				if b, x = s.accept(b, "bB"); x {
+					base = 2
+				} else if base == 0 {
+					base = 8
+				}
 			}
 		} else if base == 0 {
 			base = 10
 		}
 	}
 	switch base {
+	case 2:
+		digits = "01"
 	case 8:
 		digits = "01234567"
 	case 10:
@@ -341,6 +351,9 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 		if k := i - 1; size == 8 && strings.IndexByte("lzt", f[k]) >= 0 && f[k-1] != 'l' {
 			isize = int(longSize) // long, size_t, ptrdiff_t; long long is "ll"
 		}
+		if n, k, ok := widthModifier(f[i:]); ok {
+			isize, i = n, i+k
+		}
 		if i >= len(f) {
 			return result()
 		}
@@ -360,7 +373,7 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 				storeInt(p, isize, uint64(s.n))
 			}
 			continue
-		case 'd', 'i', 'u', 'x', 'X', 'o', 'p':
+		case 'd', 'i', 'u', 'x', 'X', 'o', 'p', 'b':
 			base := 16
 			switch conv {
 			case 'd', 'u':
@@ -369,6 +382,8 @@ func scanC(src scanSrc, f string, ap *VaList) int32 {
 				base = 0
 			case 'o':
 				base = 8
+			case 'b':
+				base = 2
 			}
 			t, ok := s.scanInt(base)
 			if !ok {
