@@ -172,7 +172,7 @@ internal/bisect SKIP no test files
 internal/buildcfg ok
 internal/bytealg SKIP no test files
 internal/byteorder SKIP no test files
-internal/c23 FAIL --- FAIL: TestNewAligned | align_test.go:14: NewAligned[int32](64) = 0x17d2a0
+internal/c23 ok
 internal/cfg SKIP no test files
 internal/chacha8rand ok
 internal/copyright ok

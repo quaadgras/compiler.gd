@@ -31,6 +31,9 @@ func mallocAligned(align, n uintptr) Ptr {
 // newAligned allocates a vt, an array of ti's type, aligned to align
 // bytes.
 func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
+	if splitModel {
+		return newAlignedSplit(ti, vt, align)
+	}
 	const page = 8192
 	align = min(max(align, 8), page)
 	size := vt.Size()
@@ -71,4 +74,22 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 		*h = header{ref: ti.ref | refC, ti: ti, size: size}
 		return Ptr{obj: unsafe.Add(base, off), size: size, ti: cref(ti)}
 	}
+}
+
+// newAlignedSplit is newAligned with GOWASM=gc,split, whose allocator
+// places blocks where its free lists have them, not at a multiple of
+// their size. A block's array of references there has an element for
+// every word, whatever its type: the header and the value can be put
+// anywhere in a block of words, once its address is known. The marker
+// at its start is newAligned's, which cobject reads.
+func newAlignedSplit(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
+	align = max(align, wordSize)
+	size := vt.Size()
+	n := (2*wordSize + hdrSize + align + size + wordSize - 1) / wordSize
+	base := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, n)))
+	off := (uintptr(base)+2*wordSize+hdrSize+align-1)&^(align-1) - uintptr(base)
+	*(*[2]uintptr)(base) = [2]uintptr{alignMagic, off}
+	h := (*header)(unsafe.Add(base, off-hdrSize))
+	*h = header{ref: ti.ref | refC, ti: ti, size: size}
+	return Ptr{obj: unsafe.Add(base, off), size: size, ti: cref(ti)}
 }

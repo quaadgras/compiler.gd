@@ -11,3 +11,6 @@ package c23
 // (on wasm, where addresses are 32 bits, the compiler's nil checks catch
 // it), and the collector does not take it for a pointer.
 const Tag = 1 << 55
+
+// splitModel: GOWASM=gc,split (tag_split.go).
+const splitModel = false

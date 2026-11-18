@@ -11,3 +11,7 @@ package c23
 // (runtime's linLimit), so a tagged one is past the end of linear memory,
 // and Go's access through it traps.
 const Tag = 1 << 31
+
+// splitModel: GOWASM=gc,split, where a block's array of references has an
+// element for every word, whatever is in it (runtime's split.go).
+const splitModel = true
