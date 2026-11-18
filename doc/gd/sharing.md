@@ -207,57 +207,38 @@ with the pointer: the next step.
 
 ## What it costs (amd64, 8 CPUs)
 
-With the facts (`on`), without them (`-d=nolocal`), and with nothing
-(`-d=noshare`):
+Everything on against everything off (`-d=noshare,checkptr=0`), the best
+of three runs, 2026-11-19, after the changes above:
 
-| benchmark | nothing | nolocal | on |
-|-----------|---------|---------|----|
-| `strings.Builder`, 64 writes | 355 ns | 654 ns | 365 ns |
-| `strings.Fields`, 256 fields | 4.25 µs | 6.34 µs | 4.30 µs |
-| build and sum a private tree | 726 µs | 779 µs | 696 µs |
-| sort 4096 strings (a parameter) | 257 µs | 565 µs | 580 µs |
-| store a slice in an object from a call | 0.4 ns | 8.1 ns | 8.1 ns |
-| index a slice field of an object from a call, per element | 998 ns | 3661 ns | 3603 ns |
+| benchmark | off | on | |
+|-----------|-----|----|-|
+| `sync` Mutex, uncontended | 0.45 ns | 0.44 ns | 1.0 |
+| `sort` 1000 ints | 8.1 µs | 8.2 µs | 1.0 |
+| `strconv` Quote | 206 ns | 218 ns | 1.1 |
+| `net/http` ReadRequest | 2.84 µs | 3.17 µs | 1.1 |
+| `go/parser` Parse | 1.48 ms | 1.66 ms | 1.1 |
+| `bufio` Writer flush | 9.1 ns | 11.2 ns | 1.2 |
+| `fmt` Sprintf of a string | 9.7 ns | 13.5 ns | 1.4 |
+| `regexp` one-pass | 249 ns | 349 ns | 1.4 |
+| `sync` Pool | 1.2 ns | 1.9 ns | 1.5 |
+| `sort` 1000 strings | 35 µs | 60 µs | 1.7 |
+| `fmt` Sprintf of an int | 7.3 ns | 14.1 ns | 1.9 |
+| `encoding/json` decoder | 2.25 ms | 4.70 ms | 2.1 |
+| `sort` stable, 1000 strings | 80 µs | 169 µs | 2.1 |
+| `fmt` Fprint of an int | 39 ns | 107 ns | 2.7 |
+| `net/http` header write | 326 ns | 939 ns | 2.9 |
+| `encoding/json` encoder | 0.64 ms | 1.88 ms | 2.9 |
 
-The last three are what the facts do not reach. The tables below are the
-two mechanisms alone, before the facts.
+Before the lock table was by 64 bytes and `sync.Pool` had its pragma the
+last ones were 6 to 35 times, and Pool itself 119.
 
-Step 2, against `-d=notear`:
-
-| benchmark | off | on |
-|-----------|-----|----|
-| index a slice loaded once, 4096 elements | 949 ns | 946 ns |
-| index a slice field loaded per element | 1767 ns | 3604 ns |
-| load a string field | 1.2 ns | 2.6 ns |
-| call a method of an interface field | 1.5 ns | 1.9 ns |
-| store a slice in a private object | 3.9 ns | 7.8 ns |
-| store a slice in a shared object | 7.8 ns | 19.1 ns |
-| append in place to a private slice field | 4.1 ns | 8.4 ns |
-| `strings.Builder`, 64 writes | 341 ns | 627 ns |
-| `strings.Fields`, 256 fields | 5.0 µs | 6.3 µs |
-| sort 4096 strings | 375 µs | 576 µs |
-
-Step 1, against `-d=noshare`:
-
-Against the same toolchain with `-d=noshare`:
-
-| benchmark | off | on |
-|-----------|-----|----|
-| lookup in a private map | 9.9 ns | 10.0 ns |
-| assignment in a private map | 10.1 ns | 9.7 ns |
-| lookup in a shared map | 11.6 ns | 20.6 ns |
-| assignment in a shared map | 11.6 ns | 23.6 ns |
-| lookups in a shared map, 8 goroutines | 1.5 ns | 107 ns (`sync.RWMutex` around a map: 124 ns) |
-| build and sum a private tree of 32767 nodes | 655 µs | 734 µs |
-| sort 4096 strings (stores in a private array) | 251 µs | 383 µs |
-| link 4096 private list cells | 8.6 µs | 24.3 µs (3.8 ns a store) |
-| link 4096 shared list cells | 9.3 µs | 59.7 µs (12 ns a store) |
-
-The private map costs nothing measurable. The two costs to work on are the
-call the barrier makes for every pointer store it cannot rule out (step 3:
-prove the target unshared, or test the bit inline), and the readers of a
-shared map that no goroutine writes, who now bounce the lock word between
-them as `sync.RWMutex`'s readers do.
+What is left is of two kinds. Strings and slices sorted or copied in
+place through a parameter, which the compiler knows nothing about: two
+lock reads around each load, and a call for each store that the byte of
+the page does not excuse. And objects that come from a `sync.Pool`, which
+are shared for good once they have been in it: every store of a slice, a
+string or an interface in one takes a lock (a buffer's `buf = append(buf,
+...)`), and every pointer stored is looked up. Both want the next step.
 
 ## Not covered
 
