@@ -32,6 +32,12 @@ func TestPreprocessGCC(t *testing.T) {
 			var want []string
 			in := true
 			for _, l := range strings.Split(string(out), "\n") {
+				if f := strings.Fields(l); len(f) > 1 && f[0] == "#" && f[1] == "embed" || strings.HasPrefix(l, "#embed") {
+					// This gcc leaves #embed to its compiler proper
+					// (gcc 15 writes the bytes as base64 there; gcc 13
+					// does not know it): nothing to compare with.
+					t.Skipf("gcc keeps #embed as a directive: %.60s", l)
+				}
 				if strings.HasPrefix(l, "# ") {
 					f := strings.Fields(l)
 					in = len(f) > 2 && f[2] == `"`+file+`"`
