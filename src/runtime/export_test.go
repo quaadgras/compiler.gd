@@ -2198,3 +2198,18 @@ func HeapNew[T any]() *T {
 // GoroutinesCollected returns the number of goroutines the collector
 // found blocked forever and freed.
 func GoroutinesCollected() uint64 { return work.goroutineLeak.collected.Load() }
+
+const HeapSplit = heapSplit
+
+// NewLocal allocates in the local range of addresses an object of n
+// words without pointers, or of one pointer.
+func NewLocal(words int, pointers bool) unsafe.Pointer {
+	var typ *_type
+	if pointers {
+		var p unsafe.Pointer
+		typ = (*_type)(unsafe.Pointer(abi.TypeOf(p)))
+	}
+	return mallocgcl(uintptr(words)*goarch.PtrSize, typ, true, true)
+}
+
+func IsLocal(p unsafe.Pointer) bool { return isLocal(p) }

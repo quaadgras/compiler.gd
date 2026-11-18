@@ -296,6 +296,20 @@ const (
 	// the L2 arena map.
 	arenaBits = arenaL1Bits + arenaL2Bits
 
+	// heapSplit says that the heap has two ranges of addresses: the
+	// memory that only the goroutine that allocated it reaches is in
+	// [localHeapBase, localHeapEnd), below the first hint of the rest
+	// (shared.go). Whether an address is local is then one compare.
+	// The local range is 64 GiB; what does not fit is allocated with
+	// the rest.
+	heapSplit = localHeapEnd != 0 &&
+		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows == 1) &&
+		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled && !randomizeHeapBase
+
+	localHeapSize = 1 << 36 * (goarch.IsAmd64 | goarch.IsArm64)
+	localHeapEnd  = 0x00c0<<32*goarch.IsAmd64 + 0x0040<<32*goarch.IsArm64
+	localHeapBase = localHeapEnd - localHeapSize
+
 	// arenaBaseOffset is the pointer value that corresponds to
 	// index 0 in the heap arena map.
 	//
@@ -718,6 +732,12 @@ func mallocinit() {
 		userArenaHint.addr = p
 		userArenaHint.next, mheap_.userArena.arenaHints = mheap_.userArena.arenaHints, userArenaHint
 	}
+	if heapSplit {
+		hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
+		hint.addr = localHeapBase
+		mheap_.localHints = hint
+		mheap_.pages.split = localHeapEnd
+	}
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.
 	gcController.memoryLimit.Store(math.MaxInt64)
@@ -763,7 +783,10 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		if hint.down {
 			p -= n
 		}
-		if p+n < p {
+		if hintList == &h.localHints && p+n > localHeapEnd {
+			// The local range is full.
+			v = nil
+		} else if p+n < p {
 			// We can't use this, so don't ask.
 			v = nil
 		} else if arenaIndex(p+n-1) >= 1<<arenaBits {
@@ -794,6 +817,9 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		h.arenaHintAlloc.free(unsafe.Pointer(hint))
 	}
 
+	if size == 0 && hintList == &h.localHints {
+		return nil, 0
+	}
 	if size == 0 {
 		if raceenabled {
 			// The race detector assumes the heap lives in
@@ -807,7 +833,13 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		// (sufficiently aligned) address the kernel will give
 		// us.
 		v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
-		if v == nil {
+		for try := 0; heapSplit && v != nil && uintptr(v) < localHeapEnd && try < 4; try++ {
+			// Not below the end of the local range: the page
+			// allocator looks there for local memory only. The
+			// reservation stays, so that the kernel gives another.
+			v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
+		}
+		if v == nil || heapSplit && uintptr(v) < localHeapEnd {
 			return nil, 0
 		}
 
@@ -1065,6 +1097,15 @@ const runtimeFreegcEnabled = goexperiment.RuntimeFreegc && !asanenabled && !msan
 //
 //go:linkname mallocgc
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
+	return mallocgcl(size, typ, needzero, false)
+}
+
+// mallocgcl is mallocgc that allocates, if local is set, in the range
+// of addresses of the memory that only the goroutine that allocates
+// reaches (shared.go). The caller knows that no other goroutine will
+// reach the object, or anything that it will point to, as long as it
+// lives.
+func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Pointer {
 	if doubleCheckMalloc {
 		if gcphase == _GCmarktermination {
 			throw("mallocgc called with gcphase == _GCmarktermination")
@@ -1076,7 +1117,7 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 		return unsafe.Pointer(&zerobase)
 	}
 
-	if sizeSpecializedMallocEnabled && size < uintptr(len(mallocNoScanTable)) {
+	if sizeSpecializedMallocEnabled && !local && size < uintptr(len(mallocNoScanTable)) {
 		if typ == nil || !typ.Pointers() {
 			if size >= maxTinySize {
 				return mallocNoScanTable[size](size, typ, needzero)
@@ -1122,19 +1163,19 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	if sizeSpecializedMallocEnabled {
 		if size <= maxSmallSize-gc.MallocHeaderSize {
 			if typ == nil || !typ.Pointers() {
-				x, elemsize = mallocgcSmallNoscan(size, typ, needzero)
+				x, elemsize = mallocgcSmallNoscan(size, typ, needzero, local)
 			} else {
 				if !needzero {
 					throw("objects with pointers must be zeroed")
 				}
 				if heapBitsInSpan(size) {
-					x, elemsize = mallocgcSmallScanNoHeader(size, typ)
+					x, elemsize = mallocgcSmallScanNoHeader(size, typ, local)
 				} else {
-					x, elemsize = mallocgcSmallScanHeader(size, typ)
+					x, elemsize = mallocgcSmallScanHeader(size, typ, local)
 				}
 			}
 		} else {
-			x, elemsize = mallocgcLarge(size, typ, needzero)
+			x, elemsize = mallocgcLarge(size, typ, needzero, local)
 		}
 	} else {
 		if size <= maxSmallSize-gc.MallocHeaderSize {
@@ -1146,20 +1187,20 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 				if size < maxTinySize && gp.secret == 0 {
 					x, elemsize = mallocgcTiny(size, typ)
 				} else {
-					x, elemsize = mallocgcSmallNoscan(size, typ, needzero)
+					x, elemsize = mallocgcSmallNoscan(size, typ, needzero, local)
 				}
 			} else {
 				if !needzero {
 					throw("objects with pointers must be zeroed")
 				}
 				if heapBitsInSpan(size) {
-					x, elemsize = mallocgcSmallScanNoHeader(size, typ)
+					x, elemsize = mallocgcSmallScanNoHeader(size, typ, local)
 				} else {
-					x, elemsize = mallocgcSmallScanHeader(size, typ)
+					x, elemsize = mallocgcSmallScanHeader(size, typ, local)
 				}
 			}
 		} else {
-			x, elemsize = mallocgcLarge(size, typ, needzero)
+			x, elemsize = mallocgcLarge(size, typ, needzero, local)
 		}
 	}
 
@@ -1361,7 +1402,7 @@ func mallocgcTiny(size uintptr, typ *_type) (unsafe.Pointer, uintptr) {
 	return x, span.elemsize
 }
 
-func mallocgcSmallNoscan(size uintptr, typ *_type, needzero bool) (unsafe.Pointer, uintptr) {
+func mallocgcSmallNoscan(size uintptr, typ *_type, needzero bool, local bool) (unsafe.Pointer, uintptr) {
 	// Set mp.mallocing to keep from being preempted by GC.
 	mp := acquirem()
 	if doubleCheckMalloc {
@@ -1386,7 +1427,7 @@ func mallocgcSmallNoscan(size uintptr, typ *_type, needzero bool) (unsafe.Pointe
 		sizeclass = gc.SizeToSizeClass128[divRoundUp(size-gc.SmallSizeMax, gc.LargeSizeDiv)]
 	}
 	size = uintptr(gc.SizeClassToSize[sizeclass])
-	spc := makeSpanClass(sizeclass, true)
+	spc := makeSpanClass(sizeclass, true).in(local)
 	span := c.alloc[spc]
 
 	// First, check for a reusable object.
@@ -1506,7 +1547,7 @@ func mallocgcSmallNoscanReuse(c *mcache, span *mspan, spc spanClass, size uintpt
 	return x
 }
 
-func mallocgcSmallScanNoHeader(size uintptr, typ *_type) (unsafe.Pointer, uintptr) {
+func mallocgcSmallScanNoHeader(size uintptr, typ *_type, local bool) (unsafe.Pointer, uintptr) {
 	// Set mp.mallocing to keep from being preempted by GC.
 	mp := acquirem()
 	if doubleCheckMalloc {
@@ -1528,7 +1569,7 @@ func mallocgcSmallScanNoHeader(size uintptr, typ *_type) (unsafe.Pointer, uintpt
 	checkGCTrigger := false
 	c := getMCache(mp)
 	sizeclass := gc.SizeToSizeClass8[divRoundUp(size, gc.SmallSizeDiv)]
-	spc := makeSpanClass(sizeclass, false)
+	spc := makeSpanClass(sizeclass, false).in(local)
 	span := c.alloc[spc]
 	v := nextFreeFast(span)
 	if v == 0 {
@@ -1597,7 +1638,7 @@ func mallocgcSmallScanNoHeader(size uintptr, typ *_type) (unsafe.Pointer, uintpt
 	return x, size
 }
 
-func mallocgcSmallScanHeader(size uintptr, typ *_type) (unsafe.Pointer, uintptr) {
+func mallocgcSmallScanHeader(size uintptr, typ *_type, local bool) (unsafe.Pointer, uintptr) {
 	// Set mp.mallocing to keep from being preempted by GC.
 	mp := acquirem()
 	if doubleCheckMalloc {
@@ -1626,7 +1667,7 @@ func mallocgcSmallScanHeader(size uintptr, typ *_type) (unsafe.Pointer, uintptr)
 		sizeclass = gc.SizeToSizeClass128[divRoundUp(size-gc.SmallSizeMax, gc.LargeSizeDiv)]
 	}
 	size = uintptr(gc.SizeClassToSize[sizeclass])
-	spc := makeSpanClass(sizeclass, false)
+	spc := makeSpanClass(sizeclass, false).in(local)
 	span := c.alloc[spc]
 	v := nextFreeFast(span)
 	if v == 0 {
@@ -1690,7 +1731,7 @@ func mallocgcSmallScanHeader(size uintptr, typ *_type) (unsafe.Pointer, uintptr)
 	return x, size
 }
 
-func mallocgcLarge(size uintptr, typ *_type, needzero bool) (unsafe.Pointer, uintptr) {
+func mallocgcLarge(size uintptr, typ *_type, needzero bool, local bool) (unsafe.Pointer, uintptr) {
 	// Set mp.mallocing to keep from being preempted by GC.
 	mp := acquirem()
 	if doubleCheckMalloc {
@@ -1706,7 +1747,7 @@ func mallocgcLarge(size uintptr, typ *_type, needzero bool) (unsafe.Pointer, uin
 	c := getMCache(mp)
 	// For large allocations, keep track of zeroed state so that
 	// bulk zeroing can be happen later in a preemptible context.
-	span := c.allocLarge(size, typ == nil || !typ.Pointers())
+	span := c.allocLarge(size, typ == nil || !typ.Pointers(), local)
 	span.freeindex = 1
 	span.allocCount = 1
 	span.largeType = nil // Tell the GC not to look at this yet.

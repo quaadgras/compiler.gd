@@ -663,3 +663,36 @@ func sharecheck(p unsafe.Pointer) {
 		throw("sharecheck: memory found unshared at compile time is shared")
 	}
 }
+
+// Where an object is allocated (doc/gd/sharing.md).
+//
+// Whether another goroutine may come to reach an object is decided when
+// it is allocated, from everything that is known then about where its
+// address goes; what is not known counts as shared. An object that only
+// the goroutine that allocates it reaches is local, and it is allocated
+// in the local range of addresses (heapSplit), with the stacks. So the
+// address of a word says whether another goroutine may read or write it.
+
+// isLocal reports whether p is in the local range.
+//
+//go:nosplit
+func isLocal(p unsafe.Pointer) bool {
+	return heapSplit && uintptr(p)-localHeapBase < localHeapSize
+}
+
+// localType returns typ tagged for the allocation functions that take
+// a type: the object is local.
+func localType(typ *_type) *_type {
+	return (*_type)(add(unsafe.Pointer(typ), 1))
+}
+
+// allocType returns the type that typ is, and whether typ was tagged as
+// the type of a local object.
+//
+//go:nosplit
+func allocType(typ *_type) (*_type, bool) {
+	if uintptr(unsafe.Pointer(typ))&1 != 0 {
+		return (*_type)(add(unsafe.Pointer(typ), ^uintptr(0))), true
+	}
+	return typ, false
+}

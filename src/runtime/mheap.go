@@ -199,9 +199,18 @@ type mheap struct {
 
 	// curArena is the arena that the heap is currently growing
 	// into. This should always be physPageSize-aligned.
-	curArena struct {
+	//
+	// There are two: the second one is in the range of addresses of
+	// local memory (heapSplit).
+	curArenas [2]struct {
 		base, end uintptr
 	}
+
+	// localHints is where the local range grows, and localFull says
+	// that it cannot grow: what is local is then allocated with the
+	// rest.
+	localHints *arenaHint
+	localFull  bool
 
 	// central free lists for small size classes.
 	// the padding makes sure that the mcentrals are
@@ -572,20 +581,44 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 // noscan spanClass contains only noscan objects, which do not contain
 // pointers and thus do not need to be scanned by the garbage
 // collector.
-type spanClass uint8
+//
+// Each of those has a second spanClass, whose spans are in the range of
+// addresses of the memory that only one goroutine reaches (shared.go).
+type spanClass uint16
 
 const (
-	numSpanClasses = gc.NumSizeClasses << 1
-	tinySpanClass  = spanClass(tinySizeClass<<1 | 1)
+	numSpanClasses   = gc.NumSizeClasses << 2
+	localSpanClasses = spanClass(gc.NumSizeClasses << 1) // the first of the second ones
+	tinySpanClass    = spanClass(tinySizeClass<<1 | 1)
 )
 
 func makeSpanClass(sizeclass uint8, noscan bool) spanClass {
-	return spanClass(sizeclass<<1) | spanClass(bool2int(noscan))
+	return spanClass(sizeclass)<<1 | spanClass(bool2int(noscan))
 }
 
 //go:nosplit
 func (sc spanClass) sizeclass() int8 {
+	if sc >= localSpanClasses {
+		sc -= localSpanClasses
+	}
 	return int8(sc >> 1)
+}
+
+// local reports whether the spans of sc are in the local range.
+//
+//go:nosplit
+func (sc spanClass) local() bool {
+	return sc >= localSpanClasses
+}
+
+// in returns sc's class in the local range, if local is set.
+//
+//go:nosplit
+func (sc spanClass) in(local bool) spanClass {
+	if local && heapSplit {
+		return sc + localSpanClasses
+	}
+	return sc
 }
 
 //go:nosplit
@@ -1228,8 +1261,11 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// If the allocation is small enough, try the page cache!
 	// The page cache does not support aligned allocations, so we cannot use
 	// it if we need to provide a physical page aligned stack allocation.
+	// What is local, and the stacks, are in the local range.
+	local := heapSplit && (spanclass.local() || typ == spanAllocStack) && !h.localFull
+
 	pp := gp.m.p.ptr()
-	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
+	if !local && !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
 		c := &pp.pcache
 
 		// If the cache is empty, refill it.
@@ -1255,6 +1291,11 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// whole job done without the heap lock.
 	lock(&h.lock)
 
+retry:
+	if local {
+		h.pages.enterLocal()
+	}
+
 	if needPhysPageAlign {
 		// Overallocate by a physical page to allow for later alignment.
 		extraPages := physPageSize / pageSize
@@ -1270,7 +1311,16 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 		base, _ = h.pages.find(npages + extraPages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages + extraPages)
+			growth, ok = h.grow(npages+extraPages, local)
+			if !ok && local {
+				// The local range cannot grow. Local memory is
+				// from now on allocated with the rest, where it
+				// counts as shared.
+				h.pages.leaveLocal()
+				h.localFull = true
+				local = false
+				goto retry
+			}
 			if !ok {
 				unlock(&h.lock)
 				return nil
@@ -1289,7 +1339,16 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 		base, scav = h.pages.alloc(npages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages)
+			growth, ok = h.grow(npages, local)
+			if !ok && local {
+				// The local range cannot grow. Local memory is
+				// from now on allocated with the rest, where it
+				// counts as shared.
+				h.pages.leaveLocal()
+				h.localFull = true
+				local = false
+				goto retry
+			}
 			if !ok {
 				unlock(&h.lock)
 				return nil
@@ -1299,6 +1358,9 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 				throw("grew heap, but no adequate free space found")
 			}
 		}
+	}
+	if local {
+		h.pages.leaveLocal()
 	}
 	if s == nil {
 		// We failed to get an mspan earlier, so grab
@@ -1543,10 +1605,17 @@ func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base,
 // returning how much the heap grew by and whether it worked.
 //
 // h.lock must be held.
-func (h *mheap) grow(npage uintptr) (uintptr, bool) {
+func (h *mheap) grow(npage uintptr, local bool) (uintptr, bool) {
 	assertLockHeld(&h.lock)
 
-	firstGrow := h.curArena.base == 0
+	curArena := &h.curArenas[0]
+	hints := &h.arenaHints
+	if local {
+		curArena = &h.curArenas[1]
+		hints = &h.localHints
+	}
+
+	firstGrow := curArena.base == 0
 
 	// We must grow the heap in whole palloc chunks.
 	// We call sysMap below but note that because we
@@ -1557,67 +1626,70 @@ func (h *mheap) grow(npage uintptr) (uintptr, bool) {
 
 	totalGrowth := uintptr(0)
 	// This may overflow because ask could be very large
-	// and is otherwise unrelated to h.curArena.base.
-	end := h.curArena.base + ask
+	// and is otherwise unrelated to curArena.base.
+	end := curArena.base + ask
 	nBase := alignUp(end, physPageSize)
-	if nBase > h.curArena.end || /* overflow */ end < h.curArena.base {
+	if nBase > curArena.end || /* overflow */ end < curArena.base {
 		// Not enough room in the current arena. Allocate more
 		// arena space. This may not be contiguous with the
 		// current arena, so we have to request the full ask.
-		av, asize := h.sysAlloc(ask, &h.arenaHints, &h.heapArenas)
+		av, asize := h.sysAlloc(ask, hints, &h.heapArenas)
+		if av == nil && local {
+			return 0, false
+		}
 		if av == nil {
 			inUse := gcController.heapFree.load() + gcController.heapReleased.load() + gcController.heapInUse.load()
 			print("runtime: out of memory: cannot allocate ", ask, "-byte block (", inUse, " in use)\n")
 			return 0, false
 		}
 
-		if uintptr(av) == h.curArena.end {
+		if uintptr(av) == curArena.end {
 			// The new space is contiguous with the old
 			// space, so just extend the current space.
-			h.curArena.end = uintptr(av) + asize
+			curArena.end = uintptr(av) + asize
 		} else {
 			// The new space is discontiguous. Track what
 			// remains of the current space and switch to
 			// the new space. This should be rare.
-			if size := h.curArena.end - h.curArena.base; size != 0 {
+			if size := curArena.end - curArena.base; size != 0 {
 				// Transition this space from Reserved to Prepared and mark it
 				// as released since we'll be able to start using it after updating
 				// the page allocator and releasing the lock at any time.
-				sysMap(unsafe.Pointer(h.curArena.base), size, &gcController.heapReleased, "heap")
+				sysMap(unsafe.Pointer(curArena.base), size, &gcController.heapReleased, "heap")
 				// Update stats.
 				stats := memstats.heapStats.acquire()
 				atomic.Xaddint64(&stats.released, int64(size))
 				memstats.heapStats.release()
 				// Update the page allocator's structures to make this
 				// space ready for allocation.
-				h.pages.grow(h.curArena.base, size)
+				h.pages.grow(curArena.base, size)
 				totalGrowth += size
 			}
 			// Switch to the new space.
-			h.curArena.base = uintptr(av)
-			h.curArena.end = uintptr(av) + asize
+			curArena.base = uintptr(av)
+			curArena.end = uintptr(av) + asize
 
 			if firstGrow && randomizeHeapBase {
 				// The top heapAddrBits-logHeapArenaBytes are randomized, we now
 				// want to randomize the next
 				// logHeapArenaBytes-log2(pallocChunkBytes) bits, making sure
-				// h.curArena.base is aligned to pallocChunkBytes.
+				// curArena.base is aligned to pallocChunkBytes.
 				bits := logHeapArenaBytes - logPallocChunkBytes
 				offset := nextHeapRandBits(bits)
-				h.curArena.base = alignDown(h.curArena.base|(offset<<logPallocChunkBytes), pallocChunkBytes)
+				curArena.base = alignDown(curArena.base|(offset<<logPallocChunkBytes), pallocChunkBytes)
 			}
 		}
 
 		// Recalculate nBase.
 		// We know this won't overflow, because sysAlloc returned
-		// a valid region starting at h.curArena.base which is at
+		// a valid region starting at curArena.base which is at
 		// least ask bytes in size.
-		nBase = alignUp(h.curArena.base+ask, physPageSize)
+		nBase = alignUp(curArena.base+ask, physPageSize)
 	}
 
 	// Grow into the current arena.
-	v := h.curArena.base
-	h.curArena.base = nBase
+	v := curArena.base
+	curArena.base = nBase
 
 	// Transition the space we're going to use from Reserved to Prepared.
 	//

@@ -255,6 +255,15 @@ type pageAlloc struct {
 	// are allocated and not worth searching.
 	searchAddr offAddr
 
+	// split, if not zero, is the end of the range of addresses of
+	// local memory (heapSplit), which is below every other address of
+	// the heap. searchAddr is then not below split, and localSearch is
+	// the searchAddr of the local range. enterLocal swaps the two and
+	// sets limit, the address that an allocation must end by.
+	split       uintptr
+	limit       uintptr
+	localSearch offAddr
+
 	// start and end represent the chunk indices
 	// which pageAlloc knows about. It assumes
 	// chunks in the range [start, end) are
@@ -328,6 +337,7 @@ func (p *pageAlloc) init(mheapLock *mutex, sysStat *sysMemStat, test bool) {
 
 	// Start with the searchAddr in a state indicating there's no free memory.
 	p.searchAddr = maxSearchAddr()
+	p.localSearch = maxSearchAddr()
 
 	// Set the mheapLock.
 	p.mheapLock = mheapLock
@@ -395,7 +405,11 @@ func (p *pageAlloc) grow(base, size uintptr) {
 	// A grow operation is a lot like a free operation, so if our
 	// chunk ends up below p.searchAddr, update p.searchAddr to the
 	// new address, just like in free.
-	if b := (offAddr{base}); b.lessThan(p.searchAddr) {
+	if p.split != 0 && base < p.split {
+		if b := (offAddr{base}); b.lessThan(p.localSearch) {
+			p.localSearch = b
+		}
+	} else if b := (offAddr{base}); b.lessThan(p.searchAddr) {
 		p.searchAddr = b
 	}
 
@@ -652,6 +666,31 @@ func (p *pageAlloc) findMappedAddr(addr offAddr) offAddr {
 //
 // p.mheapLock must be held.
 func (p *pageAlloc) find(npages uintptr) (uintptr, offAddr) {
+	addr, searchAddr := p.findAny(npages)
+	if p.limit != 0 && addr != 0 && addr+npages*pageSize > p.limit {
+		// Free, but not in the local range.
+		return 0, searchAddr
+	}
+	return addr, searchAddr
+}
+
+// enterLocal makes find and alloc search the local range, until
+// leaveLocal.
+//
+// p.mheapLock must be held.
+func (p *pageAlloc) enterLocal() {
+	assertLockHeld(p.mheapLock)
+	p.searchAddr, p.localSearch = p.localSearch, p.searchAddr
+	p.limit = p.split
+}
+
+func (p *pageAlloc) leaveLocal() {
+	assertLockHeld(p.mheapLock)
+	p.searchAddr, p.localSearch = p.localSearch, p.searchAddr
+	p.limit = 0
+}
+
+func (p *pageAlloc) findAny(npages uintptr) (uintptr, offAddr) {
 	assertLockHeld(p.mheapLock)
 
 	// Search algorithm.
@@ -899,6 +938,9 @@ func (p *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 				throw("bad summary data")
 			}
 			addr = chunkBase(i) + uintptr(j)*pageSize
+			if p.limit != 0 && addr+npages*pageSize > p.limit {
+				return 0, 0
+			}
 			searchAddr = offAddr{chunkBase(i) + uintptr(searchIdx)*pageSize}
 			goto Found
 		}
@@ -907,7 +949,7 @@ func (p *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 	// the slow path.
 	addr, searchAddr = p.find(npages)
 	if addr == 0 {
-		if npages == 1 {
+		if npages == 1 && p.limit == 0 {
 			// We failed to find a single free page, the smallest unit
 			// of allocation. This means we know the heap is completely
 			// exhausted. Otherwise, the heap still might have free
@@ -941,7 +983,11 @@ func (p *pageAlloc) free(base, npages uintptr) {
 	assertLockHeld(p.mheapLock)
 
 	// If we're freeing pages below the p.searchAddr, update searchAddr.
-	if b := (offAddr{base}); b.lessThan(p.searchAddr) {
+	if p.split != 0 && base < p.split {
+		if b := (offAddr{base}); b.lessThan(p.localSearch) {
+			p.localSearch = b
+		}
+	} else if b := (offAddr{base}); b.lessThan(p.searchAddr) {
 		p.searchAddr = b
 	}
 	limit := base + npages*pageSize - 1

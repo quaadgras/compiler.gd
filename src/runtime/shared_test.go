@@ -678,3 +678,61 @@ func TestSharedBitsFreed(t *testing.T) {
 		}
 	}
 }
+
+// What is allocated as local is in the local range of addresses, what
+// is not is outside of it, the collector frees and reuses both, and the
+// stacks are local.
+func TestLocalRange(t *testing.T) {
+	if !runtime.HeapSplit {
+		t.Skip("one range of addresses")
+	}
+	var onStack int
+	if !runtime.IsLocal(unsafe.Pointer(&onStack)) {
+		t.Errorf("the stack at %p is not in the local range", &onStack)
+	}
+	if runtime.IsLocal(unsafe.Pointer(&sharedSink)) || runtime.IsLocal(nil) {
+		t.Errorf("a global or nil is in the local range")
+	}
+	type node struct {
+		next *node
+		pad  [6]uintptr
+	}
+	for round := 0; round < 4; round++ {
+		var keep []unsafe.Pointer
+		var list *node
+		for _, words := range []int{1, 2, 3, 8, 100, 1000, 5000, 100000} {
+			for i := 0; i < 200; i++ {
+				for _, pointers := range []bool{false, true} {
+					if pointers && words != 1 {
+						continue
+					}
+					p := runtime.NewLocal(words, pointers)
+					if !runtime.IsLocal(p) {
+						t.Fatalf("local object of %d words at %p", words, p)
+					}
+					if i%16 == 0 {
+						keep = append(keep, p)
+						*(*uintptr)(p) = uintptr(words)
+					}
+				}
+				n := &node{next: list}
+				sharedSink = n
+				if runtime.IsLocal(unsafe.Pointer(n)) {
+					t.Fatalf("object at %p is in the local range", n)
+				}
+				if i%8 == 0 {
+					list = n
+				}
+			}
+		}
+		runtime.GC()
+		for _, p := range keep {
+			if w := *(*uintptr)(p); w != 1 && w != 2 && w != 3 && w != 8 && w != 100 && w != 1000 && w != 5000 && w != 100000 {
+				t.Fatalf("kept local object at %p holds %#x", p, w)
+			}
+		}
+		runtime.KeepAlive(list)
+	}
+}
+
+var sharedSink any
