@@ -74,10 +74,10 @@ func Tanpi(x float64) float64 {
 	case 1, -1: // an odd one
 		return math.Copysign(0, -x)
 	case 0.5, -1.5: // poles: an even integer and ½
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Inf(1)
 	case -0.5, 1.5:
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Inf(-1)
 	}
 	return math.Tan(math.Pi * r)
@@ -99,7 +99,7 @@ func Asinpi(x float64) float64 {
 
 func Atanpi(x float64) float64        { return math.Atan(x) / math.Pi }
 func Atan2pi(y, x float64) float64    { return math.Atan2(y, x) / math.Pi }
-func Exp10(x float64) float64         { return ranged(math.Pow(10, x), x) }
+func Exp10(x float64) float64         { return rangedTo0(math.Pow(10, x), x) }
 func Exp2m1(x float64) float64        { return ranged(math.Expm1(x*math.Ln2), x) }
 func Exp10m1(x float64) float64       { return ranged(math.Expm1(x*math.Ln10), x) }
 func Logp1(x float64) float64         { return Log1p(x) }
@@ -129,7 +129,7 @@ func Rsqrt(x float64) float64 {
 	case x < 0:
 		return domain()
 	case x == 0:
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Copysign(math.Inf(1), x)
 	}
 	return 1 / math.Sqrt(x)
@@ -138,7 +138,7 @@ func Rsqrt(x float64) float64 {
 // Pown is pown: x to the integer power n.
 func Pown(x float64, n int64) float64 {
 	if x == 0 && n < 0 {
-		SetErrno(ERANGE) // a pole
+		poleErr()
 		if n%2 != 0 {
 			return math.Copysign(math.Inf(1), x)
 		}
@@ -157,7 +157,7 @@ func Powr(x, y float64) float64 {
 	case x == 0 && y == 0, math.IsInf(x, 1) && y == 0, x == 1 && math.IsInf(y, 0):
 		return domain()
 	case x == 0 && y < 0:
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Inf(1)
 	}
 	return ranged(math.Pow(x, y), x, y)
@@ -169,7 +169,7 @@ func Rootn(x float64, n int64) float64 {
 	case n == 0 || x < 0 && n%2 == 0:
 		return domain()
 	case x == 0 && n < 0:
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Copysign(math.Inf(1), x)
 	case n == 1:
 		return x
@@ -190,7 +190,7 @@ func Compoundn(x float64, n int64) float64 {
 	case x < -1:
 		return domain()
 	case x == -1 && n < 0:
-		SetErrno(ERANGE)
+		poleErr()
 		return math.Inf(1)
 	case n == 0:
 		return 1
@@ -319,17 +319,91 @@ func FminimumMagNumf(x, y float32) float32 { return float32(FminimumMagNum(float
 
 // The narrowing operations: float results of double operations (and
 // double of long double's, which is double).
-func Fadd(x, y float64) float32     { return rangedf(x+y, float32(x), float32(y)) }
-func Fsub(x, y float64) float32     { return rangedf(x-y, float32(x), float32(y)) }
-func Fmul(x, y float64) float32     { return rangedf(x*y, float32(x), float32(y)) }
-func Fdiv(x, y float64) float32     { return rangedf(x/y, float32(x), float32(y)) }
-func Ffma(x, y, z float64) float32  { return float32(math.FMA(x, y, z)) }
-func Fsqrt(x float64) float32       { return float32(Sqrt(x)) }
-func Daddl(x, y float64) float64    { return x + y }
-func Dsubl(x, y float64) float64    { return x - y }
-func Dmull(x, y float64) float64    { return x * y }
-func Ddivl(x, y float64) float64    { return x / y }
-func Dfmal(x, y, z float64) float64 { return math.FMA(x, y, z) }
+func Fadd(x, y float64) float32 {
+	if !fpHardware {
+		return rangedf(x+y, float32(x), float32(y))
+	}
+	return narrowOdd(fpAdd64(fpControl(FeTowardZero), x, y))
+}
+
+func Fsub(x, y float64) float32 {
+	if !fpHardware {
+		return rangedf(x-y, float32(x), float32(y))
+	}
+	return narrowOdd(fpSub64(fpControl(FeTowardZero), x, y))
+}
+
+func Fmul(x, y float64) float32 {
+	if !fpHardware {
+		return rangedf(x*y, float32(x), float32(y))
+	}
+	return narrowOdd(fpMul64(fpControl(FeTowardZero), x, y))
+}
+
+func Fdiv(x, y float64) float32 {
+	if !fpHardware {
+		return rangedf(x/y, float32(x), float32(y))
+	}
+	return narrowOdd(fpDiv64(fpControl(FeTowardZero), x, y))
+}
+
+func Ffma(x, y, z float64) float32 {
+	if !fpHasFMA {
+		return float32(math.FMA(x, y, z))
+	}
+	return narrowOdd(fpFma64(fpControl(FeTowardZero), x, y, z))
+}
+
+func Fsqrt(x float64) float32 {
+	if !fpHardware || x < 0 {
+		return float32(Sqrt(x))
+	}
+	return narrowOdd(fpSqrt64(fpControl(FeTowardZero), x))
+}
+
+// narrowOdd rounds r, a double computed toward zero with MXCSR or FPSR
+// st after, to float in the thread's direction, once: r with its last bit
+// set if it was inexact ("round to odd") has 29 bits more than float,
+// which then round as the exact value's would. The exceptions are the
+// operation's, but for inexact, overflow and underflow, which the
+// narrowing raises.
+func narrowOdd(r float64, st uint64) float32 {
+	ex := fpExcepts(st)
+	if ex&FeInexact != 0 {
+		r = math.Float64frombits(math.Float64bits(r) | 1)
+	}
+	f, nst := fpNarrow(fpControl(curRound()), r)
+	ex = ex&^(FeInexact|FeOverflow|FeUnderflow) | fpExcepts(nst)
+	if ex&FeOverflow != 0 {
+		SetErrno(ERANGE)
+	}
+	raiseUsed(ex)
+	return f
+}
+
+// C23's narrowing operations from long double to double: long double is
+// double, and these are its operations.
+func Daddl(x, y float64) float64 { return dop('+', x, y) }
+func Dsubl(x, y float64) float64 { return dop('-', x, y) }
+func Dmull(x, y float64) float64 { return dop('*', x, y) }
+func Ddivl(x, y float64) float64 { return dop('/', x, y) }
+
+func dop(op byte, x, y float64) float64 {
+	if fenvUsed.Load() {
+		return Arith(op, x, y, FeDynamic)
+	}
+	switch op {
+	case '+':
+		return x + y
+	case '-':
+		return x - y
+	case '*':
+		return x * y
+	}
+	return x / y
+}
+
+func Dfmal(x, y, z float64) float64 { return Fma(x, y, z) }
 func Dsqrtl(x float64) float64      { return Sqrt(x) }
 
 // Canonicalize is canonicalize: every encoding is canonical.

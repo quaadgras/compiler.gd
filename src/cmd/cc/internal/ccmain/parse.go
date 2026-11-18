@@ -43,6 +43,9 @@ type parser struct {
 	typeTLS     bool
 	typeConstx  bool
 	pendingVLA  []stmt // declarations of VLA lengths, before the next declaration
+
+	fe              fenvPragmas // the floating-point pragmas in effect (fenv.go)
+	translationTime int         // in an initializer computed as if at translation time
 }
 
 type parseError struct{ msg string }
@@ -71,7 +74,7 @@ func parse(file string, toks []token) (u *unit, err error) {
 			err = fmt.Errorf("%s", pe.msg)
 		}
 	}()
-	p := &parser{file: file, toks: toks}
+	p := &parser{file: file, toks: toks, fe: defaultPragmas}
 	p.u = &unit{file: file, tags: map[string]*ctype{}}
 	p.push()
 	p.u.scope = p.sc.vars
@@ -1369,6 +1372,10 @@ func (p *parser) topLevel() {
 	if p.accept(";") {
 		return
 	}
+	if p.peek().kind == tkPragma {
+		p.stdcPragma(p.next())
+		return
+	}
 	if p.is("_Static_assert") || p.is("static_assert") {
 		p.staticAssert()
 		return
@@ -1528,7 +1535,13 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		}
 		if s.auto && s.t == nil {
 			// C23 auto: the initializer's type, after lvalue conversion.
+			if s.constx {
+				p.translationTime++
+			}
 			e := p.rvalue(p.initExpr())
+			if s.constx {
+				p.translationTime--
+			}
 			sym.t = e.ty().unqual().qualified(s.q)
 			if s.constx {
 				sym.t = constexprType(sym.t)
@@ -1538,7 +1551,13 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			if sym.global {
 				p.staticInit++
 			}
+			if sym.global || s.constx {
+				p.translationTime++
+			}
 			sym.init = p.initializer(sym)
+			if sym.global || s.constx {
+				p.translationTime--
+			}
 			if sym.global {
 				p.staticInit--
 			}

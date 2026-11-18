@@ -20,6 +20,7 @@ const (
 	tkChar
 	tkString
 	tkPunct
+	tkPragma // #pragma STDC FENV_ACCESS, FENV_ROUND or FP_CONTRACT: text the name, str the value
 
 	// Preprocessing tokens, which the preprocessor turns into the above.
 	tkPPNum     // a preprocessing number

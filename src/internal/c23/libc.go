@@ -563,7 +563,7 @@ func strtod(s, end Ptr, bits int) float64 {
 			// C's hexadecimal floats need no exponent; Go's do.
 			t += "p0"
 		}
-		f, err := strconv.ParseFloat(t, bits)
+		f, err := parseFloat(t, bits)
 		if err == nil || err.(*strconv.NumError).Err == strconv.ErrRange {
 			if err != nil {
 				SetErrno(ERANGE)
@@ -1386,7 +1386,7 @@ func formatC(f string, ap *VaList) []byte {
 			} else if space {
 				sign = " "
 			}
-			body = formatFloat(v, conv, prec, alt)
+			body = formatFloat(v, conv, prec, alt, sign == "-")
 			if math.IsInf(v, 0) || math.IsNaN(v) {
 				zero = false
 			}
@@ -1480,7 +1480,9 @@ func precDigits(b []byte, prec int) []byte {
 }
 
 // formatFloat formats v, not negative, as C's %f, %e, %g or %a do.
-func formatFloat(v float64, conv byte, prec int, alt bool) []byte {
+// formatFloat formats v, whose sign is neg's (printf writes the sign: v is
+// its magnitude), as printf's conversion conv does.
+func formatFloat(v float64, conv byte, prec int, alt, neg bool) []byte {
 	upper := conv >= 'A' && conv <= 'Z'
 	var s string
 	switch {
@@ -1494,12 +1496,12 @@ func formatFloat(v float64, conv byte, prec int, alt bool) []byte {
 		}
 		switch conv | 0x20 {
 		case 'f':
-			s = strconv.FormatFloat(v, 'f', prec, 64)
+			s = fmtFloat(v, 'f', prec, neg)
 			if alt && prec == 0 {
 				s += "."
 			}
 		case 'e':
-			s = cExp(strconv.FormatFloat(v, 'e', prec, 64))
+			s = cExp(fmtFloat(v, 'e', prec, neg))
 			if alt && prec == 0 {
 				s = strings.Replace(s, "e", ".e", 1)
 			}
@@ -1510,13 +1512,13 @@ func formatFloat(v float64, conv byte, prec int, alt bool) []byte {
 			}
 			x := 0
 			if v != 0 {
-				e := strconv.FormatFloat(v, 'e', p-1, 64)
+				e := fmtFloat(v, 'e', p-1, neg)
 				x, _ = strconv.Atoi(e[strings.IndexByte(e, 'e')+1:])
 			}
 			if p > x && x >= -4 {
-				s = strconv.FormatFloat(v, 'f', p-1-x, 64)
+				s = fmtFloat(v, 'f', p-1-x, neg)
 			} else {
-				s = cExp(strconv.FormatFloat(v, 'e', p-1, 64))
+				s = cExp(fmtFloat(v, 'e', p-1, neg))
 			}
 			if !alt {
 				mant, exp := s, ""
@@ -1529,7 +1531,7 @@ func formatFloat(v float64, conv byte, prec int, alt bool) []byte {
 				s = mant + exp
 			}
 		case 'a':
-			s = strconv.FormatFloat(v, 'x', prec, 64)
+			s = fmtFloat(v, 'x', prec, neg)
 			// Go writes p+01; C writes p+1.
 			if i := strings.IndexByte(s, 'p'); i >= 0 {
 				e, _ := strconv.Atoi(s[i+1:])

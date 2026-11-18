@@ -127,10 +127,14 @@ const ilp32Macros = `
 
 // predefinedMacros are the macros cmd/cc predefines for the target.
 func predefinedMacros() string {
+	m := predefined
 	if target.ilp32() {
-		return predefined + ilp32Macros
+		m += ilp32Macros
 	}
-	return predefined
+	if fenvHardware() {
+		m += fenvMacros
+	}
+	return m
 }
 
 // ilp32Headers are the edits, pairs of old and new text, that make the

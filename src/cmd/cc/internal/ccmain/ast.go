@@ -327,7 +327,8 @@ type unit struct {
 	records []*ctype  // the struct and union types, in order of completion
 	statics []*symbol // block-scope statics, and compound literals at file scope
 	tags    map[string]*ctype
-	scope   map[string]*symbol // file scope: for cgo's names
+	scope   map[string]*symbol   // file scope: for cgo's names
+	fenv    map[expr]fenvPragmas // operations under floating-point pragmas (fenv.go)
 }
 
 // goName is a label's Go name, without its L_.

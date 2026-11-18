@@ -81,7 +81,7 @@ func (p *parser) makeAssign(at pos, op string, x, y expr) expr {
 		}
 		y = p.convert(y, ct)
 	}
-	return &assign{node{xt.unqual(), at}, op, x, y, ct}
+	return p.fenvMark(&assign{node{xt.unqual(), at}, op, x, y, ct})
 }
 
 func (p *parser) checkModifiable(x expr, at pos) {
@@ -376,7 +376,7 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 	case "==", "!=", "<", ">", "<=", ">=":
 		rt = tInt
 	}
-	return p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)})
+	return p.fenvMark(p.fold(&binary{node{rt, at}, op, p.convert(x, t), p.convert(y, t)}))
 }
 
 // constexprLoad is the value of a scalar in a constexpr object at a
@@ -1012,7 +1012,7 @@ func (p *parser) incDecOf(x expr, op string, post bool, at pos) expr {
 	if t.isPtr() {
 		p.checkPtrArith(t, at)
 	}
-	return &incDec{node{t.unqual(), at}, op, post, x}
+	return p.fenvMark(&incDec{node{t.unqual(), at}, op, post, x})
 }
 
 func (p *parser) postfix(x expr) expr {
@@ -1116,7 +1116,7 @@ func (p *parser) callOf(x expr, at pos) expr {
 	if p.fn != nil && f.ret.kind == kStruct {
 		// The result lives in a temporary.
 	}
-	return &call{node{f.ret.unqual(), at}, fx, f, args}
+	return p.fenvMark(&call{node{f.ret.unqual(), at}, fx, f, args})
 }
 
 func (p *parser) intc(v int64, t *ctype, at pos) expr {
@@ -1387,7 +1387,7 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 		if c, ok := e.(*intConst); ok && (c.t.isInteger() || c.t.kind == kNullptr || t.isPtr() && c.t.isPtr() || t.isInteger() && c.t.isPtr()) {
 			return &intConst{node{t, at}, wrap(t, c.v)}
 		}
-		if c, ok := e.(*floatConst); ok && t.isInteger() {
+		if c, ok := e.(*floatConst); ok && t.isInteger() && !(p.foldsAtRuntime() && !floatFits(c.v, t)) {
 			return &intConst{node{t, at}, wrap(t, floatToInt(c.v, t))}
 		}
 	}
@@ -1400,14 +1400,17 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 			if t.kind == kFloat {
 				v = float64(float32(v))
 			}
-			return &floatConst{node{t, at}, v}
-		}
-		if c, ok := e.(*floatConst); ok {
+			if !p.foldsAtRuntime() || exactInt(v, c.v, c.t.isUnsigned() && c.t.sizeof() == 8) {
+				return &floatConst{node{t, at}, v}
+			}
+		} else if c, ok := e.(*floatConst); ok {
 			v := c.v
 			if t.kind == kFloat {
 				v = float64(float32(v))
 			}
-			return &floatConst{node{t, at}, v}
+			if !p.foldsAtRuntime() || v == c.v || v != v {
+				return &floatConst{node{t, at}, v}
+			}
 		}
 	}
 	if t.isPtr() && et.isPtr() {
@@ -1415,7 +1418,7 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 			return &intConst{node{t, at}, c.v}
 		}
 	}
-	return &cast{node{t, at}, e}
+	return p.fenvMark(&cast{node{t, at}, e})
 }
 
 func floatToInt(f float64, t *ctype) int64 {
@@ -1582,11 +1585,14 @@ func (p *parser) fold(e expr) expr {
 		fy, fyok := e.y.(*floatConst)
 		if fxok && fyok {
 			if v, isBool, ok := foldFloatOp(e.op, fx.v, fy.v); ok {
+				if !isBool && e.t.kind == kFloat {
+					v = float64(float32(v))
+				}
+				if p.foldsAtRuntime() && !exactOp(e.op, fx.v, fy.v, v) {
+					return e // run, in the direction then, raising its exceptions
+				}
 				if isBool {
 					return &intConst{node{e.t, e.p}, int64(v)}
-				}
-				if e.t.kind == kFloat {
-					v = float64(float32(v))
 				}
 				return &floatConst{node{e.t, e.p}, v}
 			}

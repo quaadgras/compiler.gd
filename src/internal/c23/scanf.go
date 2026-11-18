@@ -299,7 +299,7 @@ func (s *scanner) scanFloat() (float64, bool) {
 	if hex && !e {
 		t += "p0"
 	}
-	f, err := strconv.ParseFloat(t, 64)
+	f, err := parseFloat(t, 64)
 	if err != nil && err.(*strconv.NumError).Err != strconv.ErrRange {
 		return 0, false
 	}
