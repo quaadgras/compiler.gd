@@ -146,10 +146,14 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 			args = "int32(len(os.Args)), c23.Args()"
 		}
 		ret := fmt.Sprintf("%s(%s)", pg.names[m], args)
+		// C's streams are flushed if main panics (a fault): what it
+		// printed before is not lost. c23.Exit flushes them, and ends in
+		// os.Exit, which runs no deferred call: this one runs only then.
+		const flush = "\n\tdefer c23.Fflush(c23.Ptr{}) // if main panics"
 		if m.t.fn.ret.kind == kVoid {
-			fmt.Fprintf(&b, "\nfunc main() {\n\t%s\n\tc23.Exit(0)\n}\n", ret)
+			fmt.Fprintf(&b, "\nfunc main() {%s\n\t%s\n\tc23.Exit(0)\n}\n", flush, ret)
 		} else {
-			fmt.Fprintf(&b, "\nfunc main() {\n\tc23.Exit(int32(%s))\n}\n", ret)
+			fmt.Fprintf(&b, "\nfunc main() {%s\n\tc23.Exit(int32(%s))\n}\n", flush, ret)
 		}
 	}
 	out, ferr := format.Source([]byte(b.String()))
