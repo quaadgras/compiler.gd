@@ -6,7 +6,9 @@ package ccmain
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // The parser: C23 and the GNU extensions cmd/cc supports, checked and
@@ -39,6 +41,7 @@ type parser struct {
 	staticInit  int        // in the initializer of an object of static duration
 	typeStorage storage    // the storage class in the last type name
 	typeTLS     bool
+	typeConstx  bool
 	pendingVLA  []stmt // declarations of VLA lengths, before the next declaration
 }
 
@@ -162,6 +165,7 @@ type attrs struct {
 	vector   int64
 	unused   bool
 	weak     bool
+	mode     int64 // GCC's mode: the size it gives an integer or floating type
 }
 
 func (a *attrs) merge(b attrs) {
@@ -175,6 +179,60 @@ func (a *attrs) merge(b attrs) {
 	if b.vector != 0 {
 		a.vector = b.vector
 	}
+	if b.mode != 0 {
+		a.mode = b.mode
+	}
+}
+
+// withMode is t of GCC's mode: an integer or floating type of that size.
+func withMode(t *ctype, mode int64) *ctype {
+	var m *ctype
+	switch {
+	case mode == 0 || t.enum != nil:
+		return t
+	case t.isInteger():
+		u := t.isUnsigned()
+		switch mode {
+		case 1:
+			m = tSChar
+			if u {
+				m = tUChar
+			}
+		case 2:
+			m = tShort
+			if u {
+				m = tUShort
+			}
+		case 4:
+			m = tInt
+			if u {
+				m = tUInt
+			}
+		case 8:
+			m = tLong
+			if u {
+				m = tULong
+			}
+		case 16:
+			m = &ctype{kind: kInt128}
+			if u {
+				m = &ctype{kind: kUInt128}
+			}
+		}
+	case t.isFloat():
+		switch mode {
+		case 4:
+			m = tFloat
+		case 8:
+			m = tDouble
+		case 16:
+			m = tLDouble
+		}
+	}
+	if m == nil {
+		return t
+	}
+	return m.qualified(t.q)
 }
 
 // attributes parses attribute specifiers and the like, which cmd/cc
@@ -250,6 +308,22 @@ func (p *parser) attr(a *attrs, name string) {
 	case "vector_size":
 		p.expect("(")
 		a.vector = p.constInt(p.conditional())
+		p.expect(")")
+		return
+	case "mode":
+		p.expect("(")
+		switch strings.Trim(p.ident(), "_") {
+		case "QI", "byte":
+			a.mode = 1
+		case "HI":
+			a.mode = 2
+		case "SI", "SF":
+			a.mode = 4
+		case "DI", "DF", "word", "pointer":
+			a.mode = 8
+		case "TI", "TF", "XF":
+			a.mode = 16
+		}
 		p.expect(")")
 		return
 	case "unused", "maybe_unused":
@@ -362,8 +436,7 @@ func (p *parser) declSpecs() specs {
 		case "_Noreturn":
 			s.noreturn = true
 		case "constexpr":
-			s.constx = true
-			q |= qConst
+			s.constx = true // the object const (constexprType)
 		case "const", "__const", "__const__":
 			q |= qConst
 		case "volatile", "__volatile", "__volatile__":
@@ -445,11 +518,17 @@ func (p *parser) declSpecs() specs {
 			if p.isTypeStart(0) {
 				ty = p.typeName()
 			} else {
-				ty = p.expr().ty()
+				e := p.expr()
+				ty = e.ty()
+				if ty.isVM() && p.fn != nil || p.paramVLA != nil {
+					// A variably modified operand is evaluated
+					// (C23 6.7.3.6), where the declaration is.
+					p.evalVLA(e)
+				}
 			}
 			p.expect(")")
 			if w == "typeof_unqual" || w == "__typeof_unqual__" {
-				ty = ty.unqual()
+				ty = unqualDeep(ty)
 			}
 			s.t = ty
 			seen = true
@@ -550,7 +629,8 @@ done:
 		}
 	}
 	if s.t != nil {
-		s.t = s.t.qualified(q)
+		// An array type's qualifiers are its elements' (C23 6.7.4).
+		s.t = qualifyDeep(s.t, q)
 	} else if q != 0 {
 		s.auto = true
 	}
@@ -647,6 +727,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 				}
 			}
 			fa.merge(p.attributes())
+			f.t = withMode(f.t, max(fa.mode, s.attrs.mode))
 			al := max(s.align, fa.aligned, s.attrs.aligned)
 			if al > 0 {
 				c := *f.t
@@ -717,13 +798,14 @@ func (p *parser) enumSpec() *ctype {
 		if tag == "" {
 			p.errorf("expected an enum body")
 		}
-		if t, _ := p.lookupTag(tag); t != nil {
+		if t, _ := p.lookupTag(tag); t != nil && (fixed == nil || p.sc.tags[tag] == t) {
 			return t
 		}
+		// enum E : T; declares a new type in this scope (C23 6.7.2.3).
 		// A forward reference: int, until the body says.
 		t := &ctype{kind: kUInt, enum: &enumType{tag: tag}}
 		if fixed != nil {
-			t = &ctype{kind: fixed.kind, enum: &enumType{tag: tag, complete: true, fixed: true}}
+			t = &ctype{kind: fixed.kind, n: fixed.n, enum: &enumType{tag: tag, complete: true, fixed: true}}
 		}
 		p.sc.tags[tag] = t
 		return t
@@ -731,9 +813,15 @@ func (p *parser) enumSpec() *ctype {
 	p.next()
 	var t *ctype
 	if tag != "" {
-		if old, ok := p.sc.tags[tag]; ok && !old.enum.complete {
-			t = old
+		if old, ok := p.sc.tags[tag]; ok && old.enum != nil && old.enum.consts == nil {
+			t = old // declared before, enum E : T; or not
 		}
+	}
+	// A complete enum of the same tag in this scope: C23 lets it be
+	// defined again, the same (6.7.2.3).
+	var prev *ctype
+	if old, ok := p.sc.tags[tag]; ok && tag != "" && t == nil && old.enum != nil {
+		prev = old
 	}
 	if t == nil {
 		t = &ctype{kind: kInt, enum: &enumType{tag: tag}}
@@ -758,8 +846,10 @@ func (p *parser) enumSpec() *ctype {
 			nextUnsigned = e.ty().isUnsigned() && e.ty().sizeof() == 8
 			if fixed != nil {
 				ct = fixed
-			} else if e.ty().isInteger() && promote(e.ty()).sizeof() > 4 {
-				ct = promote(e.ty())
+			} else if v > 0x7fffffff || v < -0x80000000 || nextUnsigned && v < 0 {
+				// C23 6.7.2.2: the expression's type, if int can't
+				// hold the value.
+				ct = e.ty().unqual()
 			}
 		} else if fixed == nil && (next > 0x7fffffff || next < -0x80000000) {
 			ct = tLong
@@ -789,7 +879,11 @@ func (p *parser) enumSpec() *ctype {
 			ct = long64(ct)
 		}
 		sym := &symbol{name: name, kind: symEnumConst, t: ct, val: v, p: at}
-		p.declare(sym, at)
+		if old, ok := p.sc.vars[name]; ok && prev != nil && old.kind == symEnumConst && old.val == v && slices.Contains(prev.enum.consts, old) {
+			// The same constant of the same enum, again.
+		} else {
+			p.declare(sym, at)
+		}
 		consts = append(consts, sym)
 		next = v + 1
 		if !p.accept(",") {
@@ -824,8 +918,18 @@ func (p *parser) enumSpec() *ctype {
 		kind = long64(&ctype{kind: kind}).kind
 	}
 	t.kind = kind
+	if fixed != nil {
+		t.n = fixed.n // _BitInt(N)'s N
+	}
 	t.enum.complete = true
 	t.enum.fixed = fixed != nil
+	t.enum.consts = consts
+	if prev != nil {
+		if prev.kind != t.kind || !sameEnum(prev.enum, t.enum) {
+			p.errorf("redefinition of enum %q", tag)
+		}
+		return prev
+	}
 	// C23: after the body, the constants have the enum's type if int
 	// can't hold them all.
 	fitInt := true
@@ -992,16 +1096,32 @@ func (p *parser) suffixes(t *ctype) *ctype {
 	switch {
 	case p.is("["):
 		p.next()
-		for p.is("static") || p.is("const") || p.is("restrict") || p.is("volatile") || p.is("__restrict") {
-			p.next()
+		// A parameter's qualifiers, of the pointer it becomes (C23 6.7.6.3).
+		var q qual
+		for p.is("static") || p.is("const") || p.is("restrict") || p.is("volatile") || p.is("__restrict") || p.is("_Atomic") {
+			switch p.next().text {
+			case "const":
+				q |= qConst
+			case "volatile":
+				q |= qVolatile
+			case "restrict", "__restrict":
+				q |= qRestrict
+			case "_Atomic":
+				q |= qAtomic
+			}
 		}
 		n := int64(-1)
 		var vla expr
-		if p.accept("*") {
-			// [*]: a VLA of unspecified size, in a prototype.
+		if p.is("*") && p.isAt(1, "]") {
+			p.next()
+			// [*]: a VLA of unspecified size, in a prototype: its size
+			// is never needed (sizeof *p in a later parameter's).
 			p.expect("]")
 			inner := p.suffixes(t)
-			return arrayOf(inner, -1)
+			at := arrayOf(inner, -1)
+			at.q = q
+			at.vla = &intConst{node{tULong, p.here()}, 0}
+			return at
 		}
 		if !p.is("]") {
 			e := p.assignment()
@@ -1024,6 +1144,7 @@ func (p *parser) suffixes(t *ctype) *ctype {
 			p.errorf("declaration of an array of functions")
 		}
 		at := arrayOf(inner, n)
+		at.q = q
 		if n > 0 && inner.sizeof() > 0 && n > (1<<47)/inner.sizeof() {
 			p.errorf("size of array is too large")
 		}
@@ -1038,7 +1159,7 @@ func (p *parser) suffixes(t *ctype) *ctype {
 		if ret.kind == kFunc || ret.kind == kArray {
 			p.errorf("function returning an array or function")
 		}
-		ft.ret = ret
+		ft.ret = ret.unqual() // C23 6.7.6.3: the unqualified version
 		return &ctype{kind: kFunc, fn: ft}
 	}
 	return t
@@ -1063,6 +1184,22 @@ func (p *parser) vlaLength(e expr, elem *ctype) expr {
 	sym.init = &initializer{scalar: p.convert(e, tULong)}
 	p.pendingVLA = append(p.pendingVLA, &declStmt{syms: []*symbol{sym}})
 	return &varRef{node{tULong, e.at()}, sym}
+}
+
+// evalVLA evaluates e where the declaration being parsed is, with its
+// variable length arrays' lengths.
+func (p *parser) evalVLA(e expr) {
+	if !e.ty().isVM() {
+		return
+	}
+	if p.paramVLA != nil {
+		p.symN++
+		sym := &symbol{name: fmt.Sprintf("vla.%d", p.symN), kind: symVar, t: e.ty().unqual(), p: e.at()}
+		sym.init = &initializer{scalar: p.rvalue(e)}
+		*p.paramVLA = append(*p.paramVLA, sym)
+		return
+	}
+	p.pendingVLA = append(p.pendingVLA, &exprStmt{p.rvalueVoid(e)})
 }
 
 // newLocal makes an unnamed local of the current function.
@@ -1131,6 +1268,7 @@ func (p *parser) params() *funcType {
 			break
 		}
 	}
+	ft.tags = p.sc.tags
 	p.pop()
 	p.expect(")")
 	if len(ft.params) == 0 && !ft.variadic {
@@ -1166,6 +1304,10 @@ func (p *parser) typeName() *ctype {
 	// For a compound literal: C23's storage classes.
 	p.typeStorage = s.storage
 	p.typeTLS = s.tls
+	p.typeConstx = s.constx
+	if s.constx {
+		t = constexprType(t)
+	}
 	if s.align > 0 {
 		c := *t
 		c.align = s.align
@@ -1271,6 +1413,7 @@ func (p *parser) isKRDecls(t *ctype) bool {
 // declarator2 declares name, of type t, at file or block scope, and
 // parses its initializer.
 func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *symbol {
+	t = withMode(t, a.mode)
 	if s.storage == sTypedef {
 		if s.align > 0 || a.aligned > 0 {
 			c := *t
@@ -1295,6 +1438,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		return sym
 	}
 	global := p.fn == nil || s.storage == sStatic || s.storage == sExtern
+	if s.constx {
+		t = constexprType(t)
+	}
 	sym := &symbol{name: name, kind: symVar, t: t, storage: s.storage, global: global, tls: s.tls, p: at, constx: s.constx}
 	if p.fn == nil {
 		sym.linkage = 'e'
@@ -1365,6 +1511,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			// C23 auto: the initializer's type, after lvalue conversion.
 			e := p.rvalue(p.initExpr())
 			sym.t = e.ty().unqual().qualified(s.q)
+			if s.constx {
+				sym.t = constexprType(sym.t)
+			}
 			sym.init = p.initFor(sym.t, e)
 		} else {
 			if sym.global {
@@ -1481,7 +1630,7 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	f := &funcDecl{sym: sym, labels: map[string]*label{}, inline: s.inline}
 	sym.fn = f
 	p.fn = f
-	p.push()
+	p.pushParams(ft)
 	for i, pt := range ft.params {
 		pn := ""
 		if i < len(ft.names) {
@@ -1508,7 +1657,7 @@ func (p *parser) funcDef(name string, t *ctype, s specs, a attrs, at pos) {
 	p.sc.vars["__FUNCTION__"] = fs
 	p.u.statics = append(p.u.statics, fs)
 	f.locals = append(f.locals, ft.vlas...)
-	f.body = p.blockBody()
+	f.body = p.funcBody()
 	if len(ft.vlas) > 0 {
 		// The parameters' VLA lengths, on entry, in order.
 		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)
@@ -1579,12 +1728,43 @@ func (p *parser) constexprValue(sym *symbol, at pos) {
 	}
 }
 
+// constInit reports whether in is all constants, as a constexpr
+// object's must be (constexprValue says what is not).
+func (p *parser) constInit(in *initializer) bool {
+	if in == nil {
+		return false
+	}
+	isConst := func(x expr) bool {
+		if _, ok := p.foldInt(x); ok {
+			return true
+		}
+		_, ok := p.foldFloat(x)
+		return ok
+	}
+	if in.scalar != nil {
+		return in.scalar.ty().isPtr() || in.scalar.ty().kind == kNullptr || isConst(in.scalar)
+	}
+	for _, it := range in.items {
+		if _, ok := it.x.(*strLit); it.x == nil || ok || isConstexprObj(it.x) || isConst(it.x) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// constexprType is the type of a constexpr object declared t: const
+// (C23 6.7.1), an array's elements.
+func constexprType(t *ctype) *ctype { return qualifyDeep(t, qConst) }
 
 // isConstexprObj reports whether e is (a member of) a constexpr object.
 func isConstexprObj(e expr) bool {
 	switch e := e.(type) {
 	case *varRef:
+		return e.sym.constx
+	case *compoundLit:
 		return e.sym.constx
 	case *member:
 		return isConstexprObj(e.x)

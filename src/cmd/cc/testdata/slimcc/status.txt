@@ -20,6 +20,7 @@ cond_decl
 cond_decl_ext
 const
 constexpr
+constexpr_var_ext
 control
 control2
 countof
@@ -54,6 +55,7 @@ plat_typedef
 pointer
 postfix_inc_dec
 pragma_pack
+qualifiers
 scope
 setjmp
 sizeof
@@ -61,6 +63,7 @@ stmtexpr2
 string
 string2
 struct
+tag_compat
 tls
 tls2
 typedef
@@ -74,4 +77,5 @@ usualconv
 varargs
 variable
 vla
+xxxof_vmtype
 zero_sized

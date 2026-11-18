@@ -16,7 +16,7 @@ func (p *parser) expr() expr {
 		at := p.here()
 		p.next()
 		y := p.rvalueVoid(p.assignment())
-		e = &binary{node{y.ty(), at}, ",", p.rvalueVoid(e), y}
+		e = &binary{node{y.ty().unqual(), at}, ",", p.rvalueVoid(e), y}
 	}
 	return e
 }
@@ -158,11 +158,52 @@ func (p *parser) conditional() expr {
 		}
 		return p.convert(y, t)
 	}
-	t := p.condType(x, y, at)
+	t := p.condType(x, y, at).unqual()
+	if t.isPtr() && x.ty().isPtr() && y.ty().isPtr() && noEffects(c) {
+		t = vlaChoice(t, x.ty(), y.ty(), c, at)
+	}
 	if t.kind != kVoid && t.kind != kStruct {
 		x, y = p.convert(x, t), p.convert(y, t)
 	}
 	return &cond{node{t, at}, c, x, y}
+}
+
+// vlaChoice is t, the composite type of a and b, with each length both
+// give as variable that of the operand c chooses (as GCC does):
+// c ? (char(*)[m])p : (char(*)[n])q points to a char[c ? m : n].
+func vlaChoice(t, a, b *ctype, c expr, at pos) *ctype {
+	if t.kind != a.kind || t.kind != b.kind || t.kind != kPtr && t.kind != kArray {
+		return t
+	}
+	e := vlaChoice(t.elem, a.elem, b.elem, c, at)
+	vla := t.vla
+	if t.kind == kArray && t.n < 0 && a.vla != nil && b.vla != nil && a.vla != b.vla {
+		vla = &cond{node{tULong, at}, c, a.vla, b.vla}
+	}
+	if e == t.elem && vla == t.vla {
+		return t
+	}
+	n := *t
+	n.elem, n.vla = e, vla
+	return &n
+}
+
+// noEffects reports whether evaluating e has no side effects (a simple
+// expression, which can be evaluated again).
+func noEffects(e expr) bool {
+	switch e := e.(type) {
+	case *intConst, *floatConst, *varRef:
+		return true
+	case *unary:
+		return noEffects(e.x)
+	case *cast:
+		return noEffects(e.x)
+	case *binary:
+		return e.op != "," && noEffects(e.x) && noEffects(e.y)
+	case *member:
+		return noEffects(e.x)
+	}
+	return false
 }
 
 func isConstExpr(e expr) bool {
@@ -198,8 +239,8 @@ func (p *parser) condType(x, y expr, at pos) *ctype {
 			return ptrTo(yt.elem.qualified(q))
 		}
 		if !compatible(xt.elem.unqual(), yt.elem.unqual()) {
-			// GCC warns; the first.
-			return xt
+			// GCC warns: void *.
+			return ptrTo(tVoid.qualified(q))
 		}
 		return ptrTo(composite(xt.elem, yt.elem).qualified(q))
 	case xt.isPtr() && yt.isInteger():
@@ -272,7 +313,7 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 			if c, ok := p.ptrConstAdd(x, y, false); ok {
 				return c
 			}
-			return &binary{node{xt, at}, "+", x, y}
+			return &binary{node{xt.unqual(), at}, "+", x, y}
 		}
 	case "-":
 		if xt.isPtr() && yt.isInteger() {
@@ -281,7 +322,7 @@ func (p *parser) binop(at pos, op string, x, y expr) expr {
 			if c, ok := p.ptrConstAdd(x, y, true); ok {
 				return c
 			}
-			return &binary{node{xt, at}, "-", x, y}
+			return &binary{node{xt.unqual(), at}, "-", x, y}
 		}
 		if xt.isPtr() && yt.isPtr() {
 			if !compatible(xt.elem.unqual(), yt.elem.unqual()) {
@@ -351,6 +392,9 @@ func (p *parser) constexprLoad(e expr) (expr, bool) {
 	bf := bitField(e)
 	for i := len(sym.init.items) - 1; i >= 0; i-- {
 		it := sym.init.items[i]
+		if it.zero && off >= it.off && off < it.off+it.t.sizeof() {
+			break // zeroed after what came before
+		}
 		if it.x == nil {
 			continue
 		}
@@ -361,6 +405,9 @@ func (p *parser) constexprLoad(e expr) (expr, bool) {
 			continue
 		}
 		if it.off == off && it.t.isScalar() && isConstExpr(it.x) {
+			if c, ok := punConst(it.x, e.ty().unqual()); ok {
+				return c, true
+			}
 			return p.convert(it.x, e.ty().unqual()), true
 		}
 		if s, ok := it.x.(*strLit); ok && off >= it.off && off < it.off+it.t.sizeof() && e.ty().sizeof() == 1 {
@@ -375,6 +422,33 @@ func (p *parser) constexprLoad(e expr) (expr, bool) {
 	// Not initialized: zero.
 	if off >= 0 && off < sym.t.sizeof() {
 		return p.convert(p.intc(0, tInt, e.at()), e.ty().unqual()), true
+	}
+	return nil, false
+}
+
+// punConst is constant x's bytes read as t, an integer as a floating
+// type or the other way, of the same size (another member of a
+// constexpr union).
+func punConst(x expr, t *ctype) (expr, bool) {
+	xt := x.ty()
+	if xt.sizeof() != t.sizeof() || xt.isFloat() == t.isFloat() || !xt.isArith() || !t.isArith() || xt.kind == kComplex || t.kind == kComplex {
+		return nil, false
+	}
+	switch c := x.(type) {
+	case *intConst:
+		switch {
+		case t.kind == kFloat:
+			return &floatConst{node{t, c.p}, float64(math.Float32frombits(uint32(c.v)))}, true
+		case t.kind == kDouble || t.kind == kLDouble && t.sizeof() == 8:
+			return &floatConst{node{t, c.p}, math.Float64frombits(uint64(c.v))}, true
+		}
+	case *floatConst:
+		switch {
+		case xt.kind == kFloat:
+			return &intConst{node{t, c.p}, wrap(t, int64(math.Float32bits(float32(c.v))))}, true
+		case xt.kind == kDouble:
+			return &intConst{node{t, c.p}, wrap(t, int64(math.Float64bits(c.v)))}, true
+		}
 	}
 	return nil, false
 }
@@ -394,26 +468,43 @@ func constexprPlace(e expr) (*symbol, int64, bool) {
 		if e.sym.constx && !e.sym.t.isScalar() {
 			return e.sym, 0, true
 		}
+	case *compoundLit:
+		if e.sym.constx && !e.sym.t.isScalar() {
+			return e.sym, 0, true
+		}
 	case *member:
 		if s, off, ok := constexprPlace(e.x); ok {
 			return s, off + e.f.off, true
 		}
 	case *deref:
-		if b, ok := e.x.(*binary); ok && (b.op == "+" || b.op == "-") {
-			if d, ok := b.x.(*decay); ok {
-				if c, ok := b.y.(*intConst); ok {
-					if s, off, ok := constexprPlace(d.x); ok {
-						n := c.v
-						if b.op == "-" {
-							n = -n
-						}
-						return s, off + n*elemSizeOf(b.t), true
-					}
+		return constexprAddr(e.x)
+	}
+	return nil, 0, false
+}
+
+// constexprAddr finds the constexpr object pointer e points into, and
+// the offset: an array's elements, (arr3[0] + 1)[0].
+func constexprAddr(e expr) (*symbol, int64, bool) {
+	switch e := e.(type) {
+	case *decay:
+		return constexprPlace(e.x)
+	case *binary:
+		if c, ok := e.y.(*intConst); ok && (e.op == "+" || e.op == "-") && e.t.isPtr() {
+			if s, off, ok := constexprAddr(e.x); ok {
+				n := c.v
+				if e.op == "-" {
+					n = -n
 				}
+				return s, off + n*elemSizeOf(e.t), true
 			}
 		}
-		if d, ok := e.x.(*decay); ok {
-			return constexprPlace(d.x)
+	case *cond:
+		// (c ? arr : arr2)[i], c constant.
+		if c, ok := e.c.(*intConst); ok {
+			if c.v != 0 {
+				return constexprAddr(e.x)
+			}
+			return constexprAddr(e.y)
 		}
 	}
 	return nil, 0, false
@@ -428,6 +519,24 @@ func qualifyDeep(t *ctype, q qual) *ctype {
 		return &c
 	}
 	return t.qualified(q)
+}
+
+// unqualDeep is typeof_unqual's type: t unqualified, or an array of
+// elements without const, volatile and restrict (as GCC does).
+func unqualDeep(t *ctype) *ctype {
+	if t.kind != kArray {
+		return t.unqual()
+	}
+	c := *t
+	c.q = 0
+	if c.elem.kind == kArray {
+		c.elem = unqualDeep(c.elem)
+	} else if c.elem.q&^qAtomic != 0 {
+		e := *c.elem
+		e.q &= qAtomic
+		c.elem = &e
+	}
+	return &c
 }
 
 func elemSizeOf(t *ctype) int64 {
@@ -534,6 +643,9 @@ func isNullConst(e expr) bool {
 		if !ok || !(c.t.isPtr() && c.t.elem.kind == kVoid && c.t.elem.q == 0) {
 			break
 		}
+		if c.x.ty().isPtr() {
+			return false // a pointer cast to void *
+		}
 		e = c.x
 	}
 	if c, ok := e.(*intConst); ok && c.v == 0 && (c.t.isInteger() || c.t.isPtr() && c.t.elem.kind == kVoid) {
@@ -555,23 +667,32 @@ func (p *parser) castExpr() expr {
 		t := p.typeName()
 		p.expect(")")
 		if p.is("{") {
-			// A compound literal.
+			// A compound literal: its type parsed again, which
+			// evaluates its lengths first.
 			p.pendingVLA = p.pendingVLA[:n]
 			p.pos = save
-			return p.postfix(p.unaryExpr())
+			e := p.unaryExpr()
+			if len(p.pendingVLA) > n && p.fn != nil {
+				e = &seqExpr{node{e.ty(), e.at()}, append([]stmt(nil), p.pendingVLA[n:]...), e}
+				p.pendingVLA = p.pendingVLA[:n]
+			}
+			return p.postfix(e)
 		}
-		// The type's lengths are evaluated after the operand.
+		// The type's lengths are evaluated before the operand (as GCC
+		// and clang do), not with the declaration this is in.
 		typeVLA := append([]stmt(nil), p.pendingVLA[n:]...)
 		p.pendingVLA = p.pendingVLA[:n]
 		x := p.rvalue(p.castExpr())
+		if len(p.pendingVLA) > n {
+			// The operand's own.
+			x = &seqExpr{node{x.ty(), x.at()}, append([]stmt(nil), p.pendingVLA[n:]...), x}
+			p.pendingVLA = p.pendingVLA[:n]
+		}
 		if len(typeVLA) > 0 && p.fn != nil {
 			if t.kind == kVoid {
-				return &seqExpr{node{tVoid, at}, append([]stmt{&exprStmt{x}}, typeVLA...), &cast{node{tVoid, at}, p.intc(0, tInt, at)}}
+				return &seqExpr{node{tVoid, at}, typeVLA, &cast{node{tVoid, at}, x}}
 			}
-			tmp := p.newLocal("cast", x.ty().unqual(), at)
-			tmp.init = &initializer{scalar: x}
-			pre := append([]stmt{&declStmt{syms: []*symbol{tmp}}}, typeVLA...)
-			x = &seqExpr{node{x.ty().unqual(), at}, pre, &varRef{node{tmp.t, at}, tmp}}
+			x = &seqExpr{node{x.ty().unqual(), at}, typeVLA, x}
 		}
 		if t.kind == kVoid {
 			return &cast{node{tVoid, at}, x}
@@ -588,7 +709,12 @@ func (p *parser) castExpr() expr {
 		if t.isFloat() && x.ty().isPtr() || t.isPtr() && x.ty().isFloat() {
 			p.errorAt(at, "cannot convert between pointer and floating types")
 		}
-		return p.withVLA(p.convertAt(x, t.unqual(), at))
+		if c, ok := x.(*intConst); ok && c.v == 0 && c.t.isPtr() && t.isPtr() && t.elem.kind == kVoid {
+			// (void *)(void *)0 is a null pointer, but not a null
+			// pointer constant (C23 6.3.2.3): not folded.
+			return &cast{node{t.unqual(), at}, x}
+		}
+		return p.convertAt(x, t.unqual(), at)
 	}
 	return p.unaryExpr()
 }
@@ -650,6 +776,7 @@ func (p *parser) unaryExpr() expr {
 		switch t.text {
 		case "sizeof":
 			p.next()
+			n := len(p.pendingVLA)
 			if p.is("(") && p.isTypeStart(1) {
 				p.next()
 				ty := p.typeName()
@@ -660,15 +787,15 @@ func (p *parser) unaryExpr() expr {
 					cl := p.compoundLiteral(ty, at)
 					return p.sizeofType(p.postfix(cl).ty(), at)
 				}
-				return p.withVLA(p.sizeofType(ty, at))
+				return p.withVLA(n, p.sizeofType(ty, at))
 			}
 			x := p.unaryExpr()
 			if x.ty().isVLA() {
 				// The operand of a variable length array type is
 				// evaluated.
-				return p.withVLA(&seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, p.sizeofType(x.ty(), at)})
+				return p.withVLA(n, &seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, p.sizeofType(x.ty(), at)})
 			}
-			return p.withVLA(p.sizeofType(x.ty(), at))
+			return p.withVLA(n, p.sizeofType(x.ty(), at))
 		case "_Alignof", "alignof", "__alignof__", "__alignof":
 			p.next()
 			if p.is("(") && p.isTypeStart(1) {
@@ -709,14 +836,14 @@ func (p *parser) unaryExpr() expr {
 				x := p.unaryExpr()
 				ty = x.ty()
 				if ty.kind == kArray && ty.vla != nil {
-					return p.withVLA(&seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, ty.vla})
+					return p.withVLA(n, &seqExpr{node{tULong, at}, []stmt{&exprStmt{p.vlaOperand(x)}}, ty.vla})
 				}
 			}
 			if ty.kind != kArray {
 				p.errorAt(at, "_Countof of a %s", ty)
 			}
 			if ty.vla != nil {
-				return p.withVLA(ty.vla)
+				return p.withVLA(n, ty.vla)
 			}
 			p.pendingVLA = p.pendingVLA[:n] // not evaluated
 			return p.intc(ty.n, tULong, at)
@@ -756,13 +883,13 @@ func (p *parser) unaryExpr() expr {
 }
 
 // withVLA makes e evaluate the lengths of the variable length array
-// types parsed since the last declaration first.
-func (p *parser) withVLA(e expr) expr {
-	if len(p.pendingVLA) == 0 {
+// types parsed since there were n pending first.
+func (p *parser) withVLA(n int, e expr) expr {
+	if len(p.pendingVLA) <= n {
 		return e
 	}
-	pre := p.pendingVLA
-	p.pendingVLA = nil
+	pre := append([]stmt(nil), p.pendingVLA[n:]...)
+	p.pendingVLA = p.pendingVLA[:n]
 	return &seqExpr{node{e.ty(), e.at()}, pre, e}
 }
 
@@ -1089,8 +1216,8 @@ func (p *parser) primary() expr {
 func (p *parser) compoundLiteral(t *ctype, at pos) expr {
 	var sym *symbol
 	static := p.typeStorage == sStatic
-	tls := p.typeTLS
-	p.typeStorage, p.typeTLS = sAuto, false
+	tls, constx := p.typeTLS, p.typeConstx
+	p.typeStorage, p.typeTLS, p.typeConstx = sAuto, false, false
 	if p.fn == nil || p.staticInit > 0 || static {
 		p.symN++
 		sym = &symbol{name: "complit." + itoa(int64(p.symN)), kind: symVar, t: t, global: true, storage: sStatic, p: at, defined: true, tls: tls}
@@ -1105,6 +1232,11 @@ func (p *parser) compoundLiteral(t *ctype, at pos) expr {
 		defer func() { p.staticInit-- }()
 	}
 	sym.init = p.initializer(sym)
+	if constx && p.constInit(sym.init) {
+		// (constexpr T){...}: a compound literal constant (C23 6.6).
+		sym.constx = true
+		p.constexprValue(sym, at)
+	}
 	return &compoundLit{node{sym.t, at}, sym}
 }
 
@@ -1122,7 +1254,7 @@ func (p *parser) stmtExprOf(at pos) expr {
 		if es, ok := b.list[n-1].(*exprStmt); ok {
 			e.last = p.rvalueVoid(es.x)
 			b.list = b.list[:n-1]
-			e.t = e.last.ty()
+			e.t = e.last.ty().unqual()
 		}
 	}
 	return e
@@ -1130,6 +1262,9 @@ func (p *parser) stmtExprOf(at pos) expr {
 
 func (p *parser) generic(at pos) expr {
 	p.expect("(")
+	// Neither the controlling operand nor the types are evaluated.
+	n := len(p.pendingVLA)
+	defer func() { p.pendingVLA = p.pendingVLA[:n] }()
 	var ct *ctype
 	if p.isTypeStart(0) {
 		// C2y: _Generic(type-name, ...).
@@ -1188,16 +1323,23 @@ func (p *parser) rvalue(e expr) expr {
 	if c, ok := p.constexprLoad(e); ok {
 		return c
 	}
-	if f := bitField(e); f != nil && t.isInteger() && !t.isBitInt() && f.bits < 32 {
+	if f := bitField(e); f != nil && t.isInteger() && !t.isBitInt() && f.bits < 32 && t.enum == nil {
 		// A bit-field narrower than int is an int (C23 6.3.1.1; GCC's
 		// rule for its wider base types too).
 		return &cast{node{tInt, e.at()}, e}
 	}
-	if v, ok := e.(*varRef); ok && v.sym.constx && v.sym.cval != nil {
-		if c, ok := v.sym.cval.(*intConst); ok {
+	var sym *symbol
+	switch e := e.(type) {
+	case *varRef:
+		sym = e.sym
+	case *compoundLit:
+		sym = e.sym
+	}
+	if sym != nil && sym.constx && sym.cval != nil {
+		if c, ok := sym.cval.(*intConst); ok {
 			return &intConst{node{t.unqual(), e.at()}, c.v}
 		}
-		if c, ok := v.sym.cval.(*floatConst); ok {
+		if c, ok := sym.cval.(*floatConst); ok {
 			return &floatConst{node{t.unqual(), e.at()}, c.v}
 		}
 	}
@@ -1218,6 +1360,11 @@ func (p *parser) convertAt(e expr, t *ctype, at pos) expr {
 		if c, ok := e.(*intConst); ok {
 			// The same value, with the (composite) type.
 			return &intConst{node{t, at}, c.v}
+		}
+		if et.enum != t.enum {
+			// An enumeration and its underlying type: the same
+			// value, typed as t (typeof, _Generic).
+			return &cast{node{t, at}, e}
 		}
 		return e
 	}
@@ -1330,6 +1477,7 @@ func whatVerb(what string) string {
 
 // foldInt evaluates an integer constant expression.
 func (p *parser) foldInt(e expr) (int64, bool) {
+	e = p.namedConst(e)
 	switch e := e.(type) {
 	case *intConst:
 		if e.t.isInteger() || e.t.kind == kNullptr {
@@ -1349,6 +1497,7 @@ func (p *parser) foldInt(e expr) (int64, bool) {
 }
 
 func (p *parser) foldFloat(e expr) (float64, bool) {
+	e = p.namedConst(e)
 	switch e := e.(type) {
 	case *floatConst:
 		return e.v, true
@@ -1359,6 +1508,27 @@ func (p *parser) foldFloat(e expr) (float64, bool) {
 		return float64(e.v), true
 	}
 	return 0, false
+}
+
+// namedConst is the value of e if it names a scalar of a constexpr
+// object (a named constant, C23 6.6), still an lvalue where it appears
+// (an array's length, a case label); e otherwise.
+func (p *parser) namedConst(e expr) expr {
+	switch e.(type) {
+	case *varRef, *member, *deref:
+		if e.ty().isScalar() && isConstexprObj(e) || constexprIn(e) {
+			if c := p.rvalue(e); isConstExpr(c) {
+				return c
+			}
+		}
+	}
+	return e
+}
+
+// constexprIn reports whether e is an element of a constexpr array.
+func constexprIn(e expr) bool {
+	_, _, ok := constexprPlace(e)
+	return ok && e.ty().isScalar()
 }
 
 func (p *parser) constInt(e expr) int64 {
@@ -1646,7 +1816,12 @@ func (p *parser) builtin(name string, at pos) expr {
 		if len(as) < 2 {
 			p.errorAt(at, "too few arguments to %s", name)
 		}
-		return p.convert(p.rvalue(as[0]), tLong)
+		x := p.convert(p.rvalue(as[0]), tLong)
+		if !noEffects(as[1]) {
+			// The expected value is evaluated too.
+			return &seqExpr{node{tLong, at}, []stmt{&exprStmt{p.rvalueVoid(as[1])}}, x}
+		}
+		return x
 	case "__builtin_unreachable", "__builtin_trap", "__builtin_abort":
 		args(0)
 		return &builtinCall{node{tVoid, at}, "trap", nil}

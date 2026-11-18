@@ -1747,6 +1747,13 @@ func convertNumber(t token) (token, error) {
 	}
 	if target.ilp32() {
 		t.ty = ilp32IntLit(t.ty, v, suffix, base == 10)
+	} else if strings.Contains(suffix, "ll") {
+		// long long: long's size, another type.
+		if t.ty == tLong {
+			t.ty = tLLong
+		} else {
+			t.ty = tULLong
+		}
 	}
 	t.kind, t.ival = tkInt, int64(v)
 	return t, nil

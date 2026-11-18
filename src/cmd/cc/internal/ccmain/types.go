@@ -102,14 +102,30 @@ type funcType struct {
 	variadic bool
 	proto    bool // has a prototype (not int f())
 	noreturn bool
-	psyms    []*symbol // the parameters, as parsed: a definition's
-	vlas     []*symbol // the lengths of VLA types in the parameters
+	psyms    []*symbol         // the parameters, as parsed: a definition's
+	vlas     []*symbol         // the lengths of VLA types in the parameters
+	tags     map[string]*ctype // the tags the parameters declare: a definition's body's too (C23 6.2.1)
 }
 
 type enumType struct {
 	tag      string
 	complete bool
-	fixed    bool // C23's enum E : type
+	fixed    bool      // C23's enum E : type
+	consts   []*symbol // the constants, once complete
+}
+
+// sameEnum reports whether two enumerated types with the same tag and
+// constants are compatible, as C23 lets them be (6.2.7).
+func sameEnum(a, b *enumType) bool {
+	if a.tag == "" || a.tag != b.tag || !a.complete || !b.complete || a.fixed != b.fixed || len(a.consts) != len(b.consts) {
+		return false
+	}
+	for i, c := range a.consts {
+		if d := b.consts[i]; c.name != d.name || c.val != d.val {
+			return false
+		}
+	}
+	return true
 }
 
 var (
@@ -179,6 +195,17 @@ func (t *ctype) isFuncPtr() bool {
 }
 func (t *ctype) isVLA() bool {
 	for ; t.kind == kArray; t = t.elem {
+		if t.vla != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isVM reports whether t is variably modified: a variable length array,
+// or derived from one (a pointer to one).
+func (t *ctype) isVM() bool {
+	for ; t.kind == kArray || t.kind == kPtr; t = t.elem {
 		if t.vla != nil {
 			return true
 		}
@@ -339,6 +366,13 @@ func promote(t *ctype) *ctype {
 	if t.isInteger() && !t.isBitInt() && t.rank() < 320 {
 		return tInt
 	}
+	if t.enum != nil {
+		// An enumeration promotes to its underlying type, no longer
+		// the enumerated type.
+		c := *t
+		c.enum, c.q = nil, 0
+		return &c
+	}
 	if t.isInteger() || t.isFloat() {
 		return t.unqual()
 	}
@@ -402,7 +436,7 @@ func compat(a, b *ctype, seen map[[2]*record]bool) bool {
 	if a.q != b.q {
 		return false
 	}
-	if a.enum != nil && b.enum != nil && a.enum != b.enum {
+	if a.enum != nil && b.enum != nil && a.enum != b.enum && !sameEnum(a.enum, b.enum) {
 		return false
 	}
 	if a.kind != b.kind {

@@ -4,14 +4,26 @@
 
 package ccmain
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // Statements (C23 6.8).
 
 // blockBody parses a compound statement, from its "{".
 func (p *parser) blockBody() *block {
-	p.expect("{")
 	p.push()
+	b := p.funcBody()
+	p.pop()
+	return b
+}
+
+// funcBody parses a compound statement, from its "{", in the current
+// scope: a function's body is in its parameters' (C23 6.2.1).
+func (p *parser) funcBody() *block {
+	p.expect("{")
 	b := &block{}
 	for !p.accept("}") {
 		if p.peek().kind == tkEOF {
@@ -19,8 +31,16 @@ func (p *parser) blockBody() *block {
 		}
 		b.list = append(b.list, p.blockItem()...)
 	}
-	p.pop()
 	return b
+}
+
+// pushParams opens a function definition's scope, with the tags its
+// parameters declared.
+func (p *parser) pushParams(ft *funcType) {
+	p.push()
+	if ft.tags != nil {
+		p.sc.tags = ft.tags
+	}
 }
 
 // blockItem parses a declaration or a statement.
@@ -82,7 +102,10 @@ func (p *parser) declaration() []stmt {
 	at := p.here()
 	s := p.declSpecs()
 	if p.accept(";") {
-		return nil
+		// typeof(i++, vla); evaluates its operand.
+		out := p.pendingVLA
+		p.pendingVLA = nil
+		return out
 	}
 	var syms []*symbol
 	var out []stmt
@@ -361,7 +384,7 @@ func (p *parser) statement() stmt {
 			p.fn.hasGoto = true
 			return &gotoStmt{l: p.label(name)}
 		case "asm", "__asm__", "__asm":
-			p.errorAt(at, "inline assembly is not supported")
+			return p.asmStmt(at)
 		}
 		if p.isAt(1, ":") && !p.isAt(2, ":") {
 			// A label.
@@ -378,7 +401,14 @@ func (p *parser) statement() stmt {
 	}
 	x := p.expr()
 	p.expect(";")
-	return &exprStmt{p.rvalueVoid(x)}
+	x = p.rvalueVoid(x)
+	if len(p.pendingVLA) > 0 {
+		// Variable length array lengths in the expression's types.
+		pre := p.pendingVLA
+		p.pendingVLA = nil
+		x = &seqExpr{node{x.ty(), x.at()}, pre, x}
+	}
+	return &exprStmt{x}
 }
 
 // labeledBody parses what follows a label: a statement, or (C23) a
@@ -482,6 +512,118 @@ again:
 
 func (p *parser) one() expr { return p.intc(1, tInt, p.here()) }
 
+// asmStmt parses GNU's asm statement. One with an empty template, a
+// barrier to the optimizer, is what it does to C: its inputs evaluated,
+// and each output tied to an input ("=r"(x) : "0"(y)) assigned it;
+// other outputs keep their values. Any other assembly is not supported.
+func (p *parser) asmStmt(at pos) stmt {
+	p.next()
+	for p.is("volatile") || p.is("__volatile__") || p.is("__volatile") || p.is("inline") || p.is("__inline__") || p.is("__inline") || p.is("goto") {
+		p.next()
+	}
+	p.expect("(")
+	tmpl := ""
+	for p.peek().kind == tkString {
+		tmpl += p.next().str
+	}
+	if strings.TrimSpace(tmpl) != "" {
+		p.errorAt(at, "inline assembly is not supported")
+	}
+	colons := 0 // a "::" token's second colon
+	section := func() bool {
+		switch {
+		case colons > 0:
+			colons--
+		case p.accept(":"):
+		case p.accept("::"):
+			colons = 1
+		default:
+			return false
+		}
+		return true
+	}
+	type operand struct {
+		constraint string
+		x          expr
+	}
+	operands := func() []operand {
+		var ops []operand
+		for colons == 0 && (p.peek().kind == tkString || p.is("[")) {
+			if p.accept("[") {
+				p.ident()
+				p.expect("]")
+			}
+			c := p.next().str
+			p.expect("(")
+			x := p.expr()
+			p.expect(")")
+			ops = append(ops, operand{c, x})
+			if !p.accept(",") {
+				break
+			}
+		}
+		return ops
+	}
+	var outs, ins []operand
+	if section() {
+		outs = operands()
+		if section() {
+			ins = operands()
+			if section() {
+				for colons == 0 && p.peek().kind == tkString {
+					p.next() // a clobber
+					if !p.accept(",") {
+						break
+					}
+				}
+				if section() {
+					for p.peek().kind == tkIdent {
+						p.label(p.ident()) // asm goto's: never taken
+						if !p.accept(",") {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	p.expect(")")
+	p.expect(";")
+	b := &block{}
+	// The outputs, each evaluated once: "+r"(*f()).
+	lvals := make([]expr, len(outs))
+	for i, out := range outs {
+		x := out.x
+		if !isLvalue(x) {
+			p.errorAt(at, "invalid lvalue in asm output")
+		}
+		if !noEffects(x) {
+			pt := ptrTo(x.ty())
+			tmp := p.newLocal("asm", pt, at)
+			tmp.init = &initializer{scalar: p.addressOf(x, at)}
+			b.list = append(b.list, &declStmt{syms: []*symbol{tmp}})
+			x = p.derefOf(&varRef{node{pt, at}, tmp}, at)
+		}
+		lvals[i] = x
+	}
+	var ties []stmt
+	for _, in := range ins {
+		k, err := strconv.Atoi(in.constraint)
+		if err != nil || k < 0 || k >= len(outs) {
+			b.list = append(b.list, &exprStmt{p.rvalueVoid(in.x)})
+			continue
+		}
+		out := lvals[k]
+		p.checkModifiable(out, at)
+		tmp := p.newLocal("asm", out.ty().unqual(), at)
+		tmp.init = &initializer{scalar: p.convert(p.rvalue(in.x), tmp.t)}
+		b.list = append(b.list, &declStmt{syms: []*symbol{tmp}})
+		ties = append(ties, &exprStmt{p.makeAssign(at, "=", out, &varRef{node{tmp.t, at}, tmp})})
+	}
+	b.list = append(b.list, ties...)
+	return b
+}
+
 // declLoopBody is a loop's body when its condition declares: each time
 // round, the declarations, then the test, then the body, in a block
 // whose end runs their cleanups.
@@ -522,8 +664,8 @@ func (p *parser) nestedFuncDef(name string, t *ctype, at pos) stmt {
 	f := &funcDecl{sym: sym, labels: map[string]*label{}}
 	sym.fn = f
 	p.fn = f
-	p.push()
 	ft := t.fn
+	p.pushParams(ft)
 	for i, pt := range ft.params {
 		pn := ""
 		if i < len(ft.names) {
@@ -542,7 +684,7 @@ func (p *parser) nestedFuncDef(name string, t *ctype, at pos) stmt {
 		f.params = append(f.params, ps)
 	}
 	f.locals = append(f.locals, ft.vlas...)
-	f.body = p.blockBody()
+	f.body = p.funcBody()
 	if len(ft.vlas) > 0 {
 		f.body.list = append([]stmt{&declStmt{syms: ft.vlas}}, f.body.list...)
 	}

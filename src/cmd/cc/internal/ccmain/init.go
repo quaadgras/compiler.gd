@@ -82,6 +82,22 @@ type initParser struct {
 	unions  map[int64]*field // the member each union is initialized as
 }
 
+// reset zeroes the subobject t at off, if an earlier initializer
+// initialized any of it: a braced initializer initializes all of it
+// (C23 6.7.11), {1, 2, 3, [0] = {4}}.
+func (ip *initParser) reset(t *ctype, off int64) {
+	size := t.sizeof()
+	if t.kind == kArray && t.n < 0 || size <= 0 {
+		return
+	}
+	for _, it := range ip.items {
+		if it.off < off+size && off < it.off+it.t.sizeof() {
+			ip.items = append(ip.items, initItem{off: off, t: t, zero: true})
+			return
+		}
+	}
+}
+
 func (ip *initParser) add(it initItem) {
 	ip.items = append(ip.items, it)
 	end := it.off + it.t.sizeof()
@@ -427,6 +443,7 @@ func (ip *initParser) element(t *ctype, off int64, f *field, afterDesignator boo
 			// A flexible array member: as long as its initializer.
 			t = arrayOf(t.elem, -1)
 		}
+		ip.reset(t, off)
 		ip.braced(t, off)
 		return
 	}

@@ -294,7 +294,16 @@ func (g *gen) globalVar(s *symbol) {
 		return
 	}
 	if s.allocSize > s.t.sizeof() {
-		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, g.mirror(s.t), s.allocSize)
+		m := g.mirror(s.t)
+		if s.t.sizeof() == 0 {
+			// No members but a flexible array: an array of its elements.
+			for _, f := range s.t.rec.fields {
+				if f.t.kind == kArray && f.t.n == 0 {
+					m = g.mirror(f.t.elem)
+				}
+			}
+		}
+		fmt.Fprintf(&g.vars, "var %s = c23.NewArray[%s](%d)\n", name, m, s.allocSize)
 	} else if a := s.t.alignof(); a > 8 {
 		fmt.Fprintf(&g.vars, "var %s = c23.NewAligned[%s](%d)\n", name, g.objMirror(s.t), a)
 	} else {
