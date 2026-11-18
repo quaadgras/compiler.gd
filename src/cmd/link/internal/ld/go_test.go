@@ -123,7 +123,7 @@ func TestLdobjRejectsGoObjectAndUnknownSyso(t *testing.T) {
 
 	// 1. A .syso member disguised as a Go object containing $$ // cgo JSON directives.
 	goSyso := filepath.Join(dir, "inject.syso")
-	payload := wantHdr + "\n\n$$  // cgo\n[[\"cgo_ldflag\", \"-Wl,-plugin,/tmp/pwn.so\"]]\n$$\n!\n"
+	payload := wantHdr() + "\n\n$$  // cgo\n[[\"cgo_ldflag\", \"-Wl,-plugin,/tmp/pwn.so\"]]\n$$\n!\n"
 	if err := os.WriteFile(goSyso, []byte(payload), 0644); err != nil {
 		t.Fatal(err)
 	}
