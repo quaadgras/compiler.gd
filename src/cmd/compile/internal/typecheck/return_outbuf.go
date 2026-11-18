@@ -13,7 +13,7 @@ import (
 // PhaseGActive aliases types.PhaseGActive so consumers in this
 // package keep their familiar reference point without importing
 // state across the types/typecheck boundary.
-var PhaseGActive = types.PhaseGActive
+func PhaseGActive() bool { return types.PhaseGActive() }
 
 // FillOutBufArgs ensures n.Args has a trailing nil for each
 // synthesised outBuf param of the callee's signature. Called from
@@ -29,7 +29,7 @@ var PhaseGActive = types.PhaseGActive
 // locality; non-candidate sites stay nil and the callee falls
 // through to heap alloc in runtime.maybeInPlace.
 func FillOutBufArgs(gd *base.Invocation, n *ir.CallExpr, callee *types.Type) {
-	if !PhaseGActive {
+	if !PhaseGActive() {
 		return
 	}
 	if callee == nil || callee.Kind() != types.TFUNC {

@@ -63,15 +63,19 @@ func ValidToolName(toolName string) bool {
 var toolStatCache par.Cache[string, error]
 
 // LinkedTool reports whether the go command runs the tool toolName
-// only as the copy that is linked into it: in WebAssembly (GOOS js or
-// wasip1), which cannot start another program, compile, asm and link.
+// only as the copy that is linked into it (compile, asm, link and cgo
+// run in-process, for any GOOS and GOARCH): in WebAssembly (GOOS js or
+// wasip1), which cannot start another program, and wherever the tool
+// is not in the tool directory, as when the go binary is on its own.
 func LinkedTool(toolName string) bool {
-	if runtime.GOOS != "js" && runtime.GOOS != "wasip1" {
+	switch toolName {
+	case "compile", "asm", "link", "cgo":
+	default:
 		return false
 	}
-	switch toolName {
-	case "compile", "asm", "link":
+	if runtime.GOOS == "js" || runtime.GOOS == "wasip1" {
 		return true
 	}
-	return false
+	_, err := ToolPath(toolName)
+	return err != nil
 }

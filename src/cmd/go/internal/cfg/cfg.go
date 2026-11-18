@@ -230,6 +230,21 @@ func init() {
 		_ = stdembed.Materialize(filepath.Join(GDPATH, "std"))
 	}
 	initGDROOT()
+	// A gd go binary on its own (no source tree where it was built,
+	// or one built with -trimpath) has the standard library it
+	// carries, unpacked in $GDPATH/std: that is its GOROOT.
+	if IsGdRuntime() && Getenv("GOROOT") == "" && !hasRuntimeSrc(GOROOT) && hasRuntimeSrc(GDROOT) {
+		SetGOROOT(GDROOT, false)
+	}
+}
+
+// hasRuntimeSrc reports whether root has the runtime's source.
+func hasRuntimeSrc(root string) bool {
+	if root == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(root, "src", "runtime"))
+	return err == nil && fi.IsDir()
 }
 
 // initGDROOT resolves GDROOT for the gd toolchain. It checks $GDROOT,

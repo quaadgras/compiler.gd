@@ -28,14 +28,16 @@ type ExperimentFlags struct {
 // Experiment.baseline specifies the experiment flags that are enabled by
 // default in the current toolchain. This is, in effect, the "control"
 // configuration and any variation from this is an experiment.
-var Experiment ExperimentFlags = func() ExperimentFlags {
+var Experiment ExperimentFlags = experiment()
+
+func experiment() ExperimentFlags {
 	flags, err := ParseGOEXPERIMENT(GOOS, GOARCH, envOr("GOEXPERIMENT", defaultGOEXPERIMENT))
 	if err != nil {
 		Error = err
 		return ExperimentFlags{}
 	}
 	return *flags
-}()
+}
 
 // DefaultGOEXPERIMENT is the embedded default GOEXPERIMENT string.
 // It is not guaranteed to be canonical.

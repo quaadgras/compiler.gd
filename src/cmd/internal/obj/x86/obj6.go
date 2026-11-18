@@ -43,7 +43,7 @@ import (
 )
 
 func CanUse1InsnTLS(ctxt *obj.Link) bool {
-	if isAndroid {
+	if isAndroid() {
 		// Android uses a global variable for the tls offset.
 		return false
 	}
@@ -163,7 +163,7 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	//	MOVQ TLS, BX
 	// to
 	//	MOVQ runtime.tls_g(SB), BX
-	if (isAndroid || ctxt.Headtype == objabi.Hwindows) &&
+	if (isAndroid() || ctxt.Headtype == objabi.Hwindows) &&
 		(p.As == AMOVQ || p.As == AMOVL) && p.From.Type == obj.TYPE_REG && p.From.Reg == REG_TLS && p.To.Type == obj.TYPE_REG && REG_AX <= p.To.Reg && p.To.Reg <= REG_R15 {
 		p.From.Type = obj.TYPE_MEM
 		p.From.Name = obj.NAME_EXTERN

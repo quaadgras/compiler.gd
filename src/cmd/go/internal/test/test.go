@@ -718,7 +718,13 @@ func runTest(ctx context.Context, cmd *base.Command, args []string) {
 	work.BuildInit(moduleLoader)
 	work.VetFlags = testVet.flags
 	work.VetExplicit = testVet.explicit
-	work.VetTool = base.Tool("vet")
+	if _, err := base.ToolPath("vet"); err != nil && !testVet.explicit {
+		// A go binary on its own has no vet: test without it, as
+		// -vet=off does, unless vet was asked for.
+		testVet.off = true
+	} else {
+		work.VetTool = base.Tool("vet")
+	}
 
 	pkgOpts := load.PackageOpts{ModResolveTests: true}
 	pkgs = load.PackagesAndErrors(moduleLoader, ctx, pkgOpts, pkgArgs)

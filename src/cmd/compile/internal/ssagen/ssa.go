@@ -6908,7 +6908,7 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	// rtcall bypasses that layer and builds its own aux directly —
 	// so append matching nil outBufs here to keep caller/callee in
 	// sync. If PhaseGActive is off this is a no-op.
-	if name, ok := strings.CutPrefix(fn.Name, "runtime."); types.PhaseGActive && !(ok && types.RuntimeResultUnextended(name)) {
+	if name, ok := strings.CutPrefix(fn.Name, "runtime."); types.PhaseGActive() && !(ok && types.RuntimeResultUnextended(name)) {
 		for _, r := range results {
 			if r != nil && r.IsPtr() {
 				args = append(args, s.constNil(r))

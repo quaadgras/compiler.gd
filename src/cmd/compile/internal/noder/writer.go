@@ -744,7 +744,7 @@ func (w *writer) signature(sig *types2.Signature) {
 // slot, but this avoids an ABI mismatch at the closure boundary
 // between the shape body and the concrete-typed function value.
 func phaseGAppliesTo(sig *types2.Signature) bool {
-	if !typecheck.PhaseGActive {
+	if !typecheck.PhaseGActive() {
 		return false
 	}
 	results := sig.Results()

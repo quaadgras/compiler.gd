@@ -2504,7 +2504,7 @@ func instinitImpl(ctxt *obj.Link) {
 	}
 }
 
-var isAndroid = buildcfg.GOOS == "android"
+func isAndroid() bool { return buildcfg.GOOS == "android" }
 
 func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 	if a.Reg < REG_CS && a.Index < REG_CS { // fast path
@@ -2537,7 +2537,7 @@ func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 			if ctxt.Arch.Family == sys.I386 {
 				switch ctxt.Headtype {
 				default:
-					if isAndroid {
+					if isAndroid() {
 						return 0x65 // GS
 					}
 					log.Fatalf("unknown TLS base register for %v", ctxt.Headtype)
@@ -2556,7 +2556,7 @@ func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 				log.Fatalf("unknown TLS base register for %v", ctxt.Headtype)
 
 			case objabi.Hlinux:
-				if isAndroid {
+				if isAndroid() {
 					return 0x64 // FS
 				}
 
@@ -3561,7 +3561,7 @@ func vaddr(ctxt *obj.Link, p *obj.Prog, a *obj.Addr, r *obj.Reloc) int64 {
 			log.Fatalf("reloc")
 		}
 
-		if !ctxt.Flag_shared || isAndroid || ctxt.Headtype == objabi.Hdarwin {
+		if !ctxt.Flag_shared || isAndroid() || ctxt.Headtype == objabi.Hdarwin {
 			r.Type = objabi.R_TLS_LE
 			r.Siz = 4
 			r.Off = -1 // caller must fill in
@@ -3742,7 +3742,7 @@ func (ab *AsmBuf) asmandsz(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, a *obj
 	}
 
 	if REG_AX <= base && base <= REG_R15 {
-		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid &&
+		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid() &&
 			ctxt.Headtype != objabi.Hwindows {
 			rel = obj.Reloc{}
 			rel.Type = objabi.R_TLS_LE

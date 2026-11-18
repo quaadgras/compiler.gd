@@ -50,7 +50,7 @@ import (
 // With GOWASM=gc it is off: there is no stack in linear memory that a
 // result with pointers could be written to, and a WebAssembly function
 // cannot be called with an argument it does not declare.
-var PhaseGActive = !buildcfg.GOWASM.GC
+func PhaseGActive() bool { return !buildcfg.GOWASM.GC }
 
 // OutBufNamePrefix is the Sym.Name prefix every gd Phase G
 // synthesised outBufK param carries. Used as a marker — consumers
@@ -71,7 +71,7 @@ const OutBufNamePrefix = ".outBuf"
 // shape mismatch that plagued the per-package approach. Asm and
 // cgo sources have been updated in tandem to accept the extra arg.
 func PhaseGApplies(params, results []*Field) bool {
-	if !PhaseGActive {
+	if !PhaseGActive() {
 		return false
 	}
 	_ = params // reserved; variadic handled by positioning, not skip.
