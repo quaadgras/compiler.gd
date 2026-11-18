@@ -2088,6 +2088,9 @@ func rewriteValueARM64(v *Value) bool {
 		return true
 	case OpStore:
 		return rewriteValueARM64_OpStore(v)
+	case OpStrEqFast:
+		v.Op = OpARM64LoweredStrEqFast
+		return true
 	case OpSub16:
 		v.Op = OpARM64SUB
 		return true

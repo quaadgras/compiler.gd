@@ -456,6 +456,7 @@
 (GetCallerSP   ...) => (LoweredGetCallerSP   ...)
 (GetCallerPC   ...) => (LoweredGetCallerPC   ...)
 (MemEq ...) => (LoweredMemEq ...)
+(StrEqFast ...) => (LoweredStrEqFast ...)
 
 // Absorb pseudo-ops into blocks.
 (If (Equal         cc) yes no) => (EQ cc yes no)

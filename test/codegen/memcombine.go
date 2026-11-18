@@ -1018,7 +1018,9 @@ func dwloadArg(a [2]int64) int64 {
 }
 
 func dwloadResult1(p *string) string {
-	// arm64:"LDP \\(R0\\), \\(R0, R1\\)"
+	// gd: a string is 3 words {ptr, hash, len}: the first two are
+	// loaded as a pair, and the result's ptr is moved to R0.
+	// arm64:"LDP \\(R0\\), \\(R[0-9]+, R1\\)"
 	return *p
 }
 

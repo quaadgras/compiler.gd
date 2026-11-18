@@ -62,6 +62,7 @@ type SymsStruct struct {
 	Memmove                   *obj.LSym
 	Memequal                  *obj.LSym
 	Streqfast                 *obj.LSym
+	Streqmixed                *obj.LSym // gd: arm64 leaf for OpStrEqFast
 	SliceInlineString         *obj.LSym
 	Msanread                  *obj.LSym
 	Msanwrite                 *obj.LSym

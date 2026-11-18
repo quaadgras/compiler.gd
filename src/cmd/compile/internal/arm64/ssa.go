@@ -1750,6 +1750,14 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Name = obj.NAME_EXTERN
 		p.To.Sym = ir.Syms(gd).Memequal
 
+	case ssa.OpARM64LoweredStrEqFast:
+		// (runtime.streqmixed, a leaf with no frame, as memequal is:
+		// streqfast is Go, which an op cannot call.)
+		p := s.Prog(obj.ACALL)
+		p.To.Type = obj.TYPE_MEM
+		p.To.Name = obj.NAME_EXTERN
+		p.To.Sym = ir.Syms(gd).Streqmixed
+
 	case ssa.OpARM64LoweredPanicBoundsRR, ssa.OpARM64LoweredPanicBoundsRC, ssa.OpARM64LoweredPanicBoundsCR, ssa.OpARM64LoweredPanicBoundsCC:
 		// Compute the constant we put in the PCData entry for this call.
 		code, signed := ssa.BoundsKind(v.AuxInt).Code(gd)
