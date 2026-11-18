@@ -635,7 +635,7 @@ func f38(b bool) {
 	// and therefore no output.
 	if b {
 		select { // ERROR "live at call to selectgo:( .autotmp_[0-9]+)+$" "stack object .autotmp_[0-9]+ \[4\]runtime.scase$"
-		case <-fc38():
+		case <-fc38(): // ERROR "live at call to fc38:( .autotmp_[0-9]+)+$"
 			printnl()
 		case fc38() <- *fi38(1): // ERROR "live at call to fc38:( .autotmp_[0-9]+)+$" "live at call to fi38:( .autotmp_[0-9]+)+$" "stack object .autotmp_[0-9]+ string$"
 			printnl()
