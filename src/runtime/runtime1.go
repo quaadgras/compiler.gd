@@ -325,6 +325,7 @@ var debug struct {
 	harddecommit             int32
 	adaptivestackstart       int32
 	collectgoroutines        int32
+	sharestats               int32
 	tracefpunwindoff         int32
 	traceadvanceperiod       int32
 	traceCheckStackOwnership int32
@@ -358,6 +359,7 @@ var debug struct {
 var dbgvars = []*dbgVar{
 	{name: "adaptivestackstart", value: &debug.adaptivestackstart},
 	{name: "collectgoroutines", value: &debug.collectgoroutines},
+	{name: "sharestats", value: &debug.sharestats},
 	{name: "asyncpreemptoff", value: &debug.asyncpreemptoff},
 	{name: "cgocheck", value: &debug.cgocheck},
 	{name: "clobberfree", value: &debug.clobberfree},

@@ -26,7 +26,7 @@ func (b *batch) walkAll() {
 
 	// Queue of locations to walk. Has enough room for b.allLocs
 	// plus b.heapLoc, b.mutatorLoc, b.calleeLoc, and b.candidateLoc.
-	todo := newQueue(len(b.allLocs) + 4)
+	todo := newQueue(len(b.allLocs) + 5)
 
 	enqueue := func(loc *location) {
 		if !loc.queuedWalkAll {
@@ -48,11 +48,13 @@ func (b *batch) walkAll() {
 		loc.queuedWalkAll = true
 	}
 	todo.pushFront(&b.mutatorLoc)
+	todo.pushFront(&b.shareLoc)
 	todo.pushFront(&b.calleeLoc)
 	todo.pushFront(&b.candidateLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
+	b.shareLoc.queuedWalkAll = true
 	b.calleeLoc.queuedWalkAll = true
 	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
@@ -162,6 +164,17 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 		}
 
+		// Whatever of l flows to root, and however deep, something
+		// that is reached from l is where root is: an object is
+		// local only if nothing that it leads to is shared, since
+		// what is stored in it is allocated as it is (shares.go).
+		if root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+			newAttrs |= attrSharesDeep
+		}
+		if root.paramOut || root.hasAttr(attrReturned) {
+			newAttrs |= attrReturned
+		}
+
 		// l's value flows to root. If l is a function
 		// parameter and root is the heap or a
 		// corresponding result parameter, then record
@@ -193,6 +206,16 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		if newAttrs&^l.attrs != 0 {
 			l.attrs |= newAttrs
 			enqueue(l)
+			// What is loaded from the contents of a tracked
+			// variable's objects is reached from those objects.
+			if deep := l.attrs & (attrSharesDeep | attrReturned); deep != 0 {
+				for _, o := range l.owners {
+					if deep&^o.attrs != 0 {
+						o.attrs |= deep
+						enqueue(o)
+					}
+				}
+			}
 			if l.attrs&attrEscapes != 0 {
 				continue
 			}
@@ -204,7 +227,21 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				// A location that escapes is a root itself, with
 				// nothing left to learn here but whether another
 				// goroutine may reach it or what it holds.
-				if root.attrs&(attrShares|attrSharesValue) == 0 || edge.src.hasAttr(attrShares) || edge.src.hasAttr(attrSharesValue) && d >= 0 {
+				var want locAttr
+				if root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+					want |= attrSharesDeep
+				}
+				if root.attrs&(attrShares|attrSharesValue) != 0 {
+					if d < 0 {
+						want |= attrShares
+					} else if d == 0 {
+						want |= attrSharesValue
+					}
+				}
+				if root.paramOut || root.hasAttr(attrReturned) {
+					want |= attrReturned
+				}
+				if want&^edge.src.attrs == 0 {
 					continue
 				}
 			}
@@ -332,7 +369,7 @@ func (b *batch) outlives(l, other *location) bool {
 	}
 
 	// Pseudo-locations that don't really exist.
-	if l == &b.mutatorLoc || l == &b.calleeLoc {
+	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc {
 		return false
 	}
 

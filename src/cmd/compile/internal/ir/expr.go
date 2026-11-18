@@ -39,6 +39,7 @@ const (
 	miniExprBounded
 	miniExprImplicit // for use by implementations; not supported by every Expr
 	miniExprCheckPtr
+	miniExprLocalAlloc
 )
 
 func (*miniExpr) isExpr() {}
@@ -52,8 +53,14 @@ func (n *miniExpr) SetTransient(b bool)   { n.flags.set(miniExprTransient, b) }
 func (n *miniExpr) Bounded() bool         { return n.flags.load()&miniExprBounded != 0 }
 func (n *miniExpr) SetBounded(b bool)     { n.flags.set(miniExprBounded, b) }
 func (n *miniExpr) Init() Nodes           { return n.init }
-func (n *miniExpr) PtrInit() *Nodes       { return &n.init }
-func (n *miniExpr) SetInit(x Nodes)       { n.init = x }
+
+// LocalAlloc reports whether the object that n allocates is local: no
+// other goroutine will reach it, or what it will lead to (escape's
+// markLocal).
+func (n *miniExpr) LocalAlloc() bool     { return n.flags.load()&miniExprLocalAlloc != 0 }
+func (n *miniExpr) SetLocalAlloc(b bool) { n.flags.set(miniExprLocalAlloc, b) }
+func (n *miniExpr) PtrInit() *Nodes      { return &n.init }
+func (n *miniExpr) SetInit(x Nodes)      { n.init = x }
 
 // An AddStringExpr is a string concatenation List[0] + List[1] + ... + List[len(List)-1].
 type AddStringExpr struct {

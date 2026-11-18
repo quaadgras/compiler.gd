@@ -433,4 +433,7 @@ const (
 	UnsharedStorage = 1 << iota
 	// UnsharedPointee: what every pointer the variable holds points to.
 	UnsharedPointee
+	// LocalObject: the variable is moved to the heap, to an object that
+	// is local (miniExpr.LocalAlloc).
+	LocalObject
 )

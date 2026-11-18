@@ -162,6 +162,9 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	}
 	unlock(&s.speciallock)
 	releasem(mp)
+	if fresh && s.spanclass.local() {
+		localPublished(s.base() + i*s.elemsize)
+	}
 	if !fresh {
 		return 0, nil
 	}
@@ -695,4 +698,42 @@ func allocType(typ *_type) (*_type, bool) {
 		return (*_type)(add(unsafe.Pointer(typ), ^uintptr(0))), true
 	}
 	return typ, false
+}
+
+// shareStats counts, with GODEBUG=sharestats=1, the objects allocated
+// in each range, and the local ones that another goroutine came to
+// reach all the same: each of those is a decision at an allocation
+// that was wrong. With sharestats=2 the first ones are traced.
+var shareStats struct {
+	local, localBytes   atomic.Uint64
+	shared, sharedBytes atomic.Uint64
+	published           atomic.Uint64
+}
+
+func shareStatsAlloc(size uintptr, local bool) {
+	if local {
+		shareStats.local.Add(1)
+		shareStats.localBytes.Add(int64(size))
+	} else {
+		shareStats.shared.Add(1)
+		shareStats.sharedBytes.Add(int64(size))
+	}
+}
+
+func localPublished(base uintptr) {
+	if n := shareStats.published.Add(1); debug.sharestats >= 2 && n <= 20 {
+		print("runtime: local object ", hex(base), " is published\n")
+		traceback(^uintptr(0), ^uintptr(0), 0, getg())
+	}
+	if debug.sharestats >= 3 {
+		throw("local object published")
+	}
+}
+
+func printShareStats() {
+	if debug.sharestats == 0 {
+		return
+	}
+	print("sharestats: local ", shareStats.local.Load(), " objects ", shareStats.localBytes.Load(), " bytes, shared ",
+		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(), "\n")
 }

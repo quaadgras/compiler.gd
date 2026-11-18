@@ -338,6 +338,7 @@ func main() {
 		racefini() // does not return
 	}
 
+	printShareStats()
 	exit(0)
 	for {
 		var x *int32
@@ -350,6 +351,7 @@ func main() {
 //go:linkname os_beforeExit os.runtime_beforeExit
 func os_beforeExit(exitCode int) {
 	runExitHooks(exitCode)
+	printShareStats()
 	if exitCode == 0 && raceenabled {
 		racefini()
 	}

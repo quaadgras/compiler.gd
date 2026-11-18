@@ -37,6 +37,7 @@ func panicmakeslicecap() {
 // makeslicecopy allocates a slice of "tolen" elements of type "et",
 // then copies "fromlen" elements of type "et" into that new allocation from "from".
 func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsafe.Pointer {
+	et, local := allocType(et)
 	var tomem, copymem uintptr
 	if uintptr(tolen) > uintptr(fromlen) {
 		var overflow bool
@@ -55,13 +56,13 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 
 	var to unsafe.Pointer
 	if !et.Pointers() {
-		to = mallocgc(tomem, nil, false)
+		to = mallocgcl(tomem, nil, false, local)
 		if copymem < tomem {
 			memclrNoHeapPointers(add(to, copymem), tomem-copymem)
 		}
 	} else {
 		// Note: can't use rawmem (which avoids zeroing of memory), because then GC can scan uninitialized memory.
-		to = mallocgc(tomem, et, true)
+		to = mallocgcl(tomem, et, true, local)
 		if copymem > 0 && writeBarrier.enabled {
 			// Only shade the pointers in old.array since we know the destination slice to
 			// only contains nil pointers because it has been cleared during alloc.
@@ -100,6 +101,7 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 //
 //go:linkname makeslice
 func makeslice(et *_type, len, cap int) unsafe.Pointer {
+	et, local := allocType(et)
 	mem, overflow := math.MulUintptr(et.Size_, uintptr(cap))
 	if overflow || mem > maxAlloc || len < 0 || len > cap {
 		// NOTE: Produce a 'len out of range' error instead of a
@@ -114,7 +116,7 @@ func makeslice(et *_type, len, cap int) unsafe.Pointer {
 		panicmakeslicecap()
 	}
 
-	return mallocgc(mem, et, true)
+	return mallocgcl(mem, et, true, local)
 }
 
 func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
@@ -176,6 +178,13 @@ func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
 //
 //go:linkname growslice
 func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
+	et, local := allocType(et)
+	return growslicel(oldPtr, newLen, oldCap, num, et, local)
+}
+
+// growslicel is growslice for a type that is not tagged. The new array
+// is allocated as local if local is set (allocType).
+func growslicel(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, local bool) slice {
 	oldLen := newLen - num
 	if raceenabled {
 		callerpc := sys.GetCallerPC()
@@ -262,7 +271,7 @@ func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice 
 
 	var p unsafe.Pointer
 	if !et.Pointers() {
-		p = mallocgc(capmem, nil, false)
+		p = mallocgcl(capmem, nil, false, local)
 		// The append() that calls growslice is going to overwrite from oldLen to newLen.
 		// Only clear the part that will not be overwritten.
 		// The reflect_growslice() that calls growslice will manually clear
@@ -270,7 +279,7 @@ func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice 
 		memclrNoHeapPointers(add(p, newlenmem), capmem-newlenmem)
 	} else {
 		// Note: can't use rawmem (which avoids zeroing of memory), because then GC can scan uninitialized memory.
-		p = mallocgc(capmem, et, true)
+		p = mallocgcl(capmem, et, true, local)
 		if lenmem > 0 && writeBarrier.enabled {
 			// Only shade the pointers in oldPtr since we know the destination slice p
 			// only contains nil pointers because it has been cleared during alloc.
@@ -310,7 +319,8 @@ func growslice(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice 
 //
 // See freegc for details.
 func growsliceNoAlias(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type) slice {
-	s := growslice(oldPtr, newLen, oldCap, num, et)
+	et, local := allocType(et)
+	s := growslicel(oldPtr, newLen, oldCap, num, et, local)
 	if goexperiment.RuntimeFreegc && oldPtr != nil && oldPtr != s.array {
 		if gp := getg(); uintptr(oldPtr) < gp.stack.lo || gp.stack.hi <= uintptr(oldPtr) {
 			// oldPtr does not point into the current stack, and it is not
@@ -517,9 +527,10 @@ func moveSliceNoCapNoScan(elemSize uintptr, old unsafe.Pointer, len int) (unsafe
 // growsliceBuf is like growslice, but we can use the given buffer
 // as a backing store if we want. bufPtr must be on the stack.
 func growsliceBuf(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, bufPtr unsafe.Pointer, bufLen int) slice {
+	et, local := allocType(et)
 	if newLen > bufLen {
 		// Doesn't fit, process like a normal growslice.
-		return growslice(oldPtr, newLen, oldCap, num, et)
+		return growslicel(oldPtr, newLen, oldCap, num, et, local)
 	}
 	oldLen := newLen - num
 	if oldPtr != bufPtr && oldLen != 0 {
@@ -555,6 +566,7 @@ func growsliceBuf(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, buf
 // bufPtr must be on the stack.
 func growsliceBufNoAlias(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, bufPtr unsafe.Pointer, bufLen int) slice {
 	s := growsliceBuf(oldPtr, newLen, oldCap, num, et, bufPtr, bufLen)
+	et, _ = allocType(et)
 	if goexperiment.RuntimeFreegc && oldPtr != bufPtr && oldPtr != nil && oldPtr != s.array {
 		// oldPtr is not bufPtr (the stack buffer) and it is not
 		// the data pointer for s after the grow, so attempt to free it.

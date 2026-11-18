@@ -77,11 +77,12 @@ type location struct {
 	// paramEsc records the represented parameter's leak set.
 	paramEsc leaks
 
-	captured   bool // has a closure captured this variable?
-	reassigned bool // has this variable been reassigned?
-	addrtaken  bool // has this variable's address been taken?
-	param      bool // is this variable a parameter (ONAME of class ir.PPARAM)?
-	paramOut   bool // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+	captured   bool        // has a closure captured this variable?
+	owners     []*location // for the contents of tracked variables: those variables (shares.go)
+	reassigned bool        // has this variable been reassigned?
+	addrtaken  bool        // has this variable's address been taken?
+	param      bool        // is this variable a parameter (ONAME of class ir.PPARAM)?
+	paramOut   bool        // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
 	// gd Phase G: assignedInBody reports whether this result
 	// variable is assigned other than by a return statement (p =
@@ -112,7 +113,7 @@ type location struct {
 	escapedInGraph bool
 }
 
-type locAttr uint8
+type locAttr uint16
 
 const (
 	// attrEscapes indicates whether the represented variable's address
@@ -158,6 +159,17 @@ const (
 	// may flow there: what it points to is shared, the location itself
 	// need not be.
 	attrSharesValue
+
+	// attrSharesDeep indicates that something that is reached from
+	// the location may flow there, however far it is: the location's
+	// value, what that points to, and so on. An object that is local
+	// has none of the three marks (shares.go).
+	attrSharesDeep
+
+	// attrReturned indicates that the location, or something that is
+	// reached from it, may flow to a result of a function: what the
+	// caller does with it is not known here.
+	attrReturned
 )
 
 func (l *location) hasAttr(attr locAttr) bool { return l.attrs&attr != 0 }
@@ -307,7 +319,7 @@ func (b *batch) flow(k hole, src *location) {
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
 	switch root {
-	case &b.heapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc:
+	case &b.heapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
 		return false
 	}
 	// Locations of other functions in the batch, the parameters
@@ -356,6 +368,7 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 }
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
+func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }

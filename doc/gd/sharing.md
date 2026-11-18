@@ -255,16 +255,114 @@ string or an interface in one takes a lock (a buffer's `buf = append(buf,
   instructions, so nothing is marked (`sharingEnabled`).
 - User arenas are treated as shared and not walked.
 
-## Next: local and shared memory in separate address ranges (step 3)
+## Local and shared memory in separate address ranges (step 3)
 
-Agreed with the user on 2026-11-19. "Shares this argument" becomes a
-per-parameter fact beside "escapes", computed by escape analysis and
-carried by the callee masks for closures and interface methods
-(`escape-bits.md`). An allocation that may reach a sharing sink is made in
-the shared heap from the start; the others in the goroutine-local heap;
-the two are separate address ranges, so "is it shared" is a compare of the
-pointer, and one unsigned compare answers "non-nil and local". The store
-barrier and `sharestore` become that compare inline, and call the runtime
-only for a store of a local pointer in shared memory, which the analysis
-should have excluded: the bitmap and the walk stay as the answer for the
-flows it cannot see (reflect, unsafe, assembly).
+Decided with the user on 2026-11-19: whether an object is shared is
+decided **when it is allocated**, by OR-ing every vector through which
+its address, or anything reached from it, could get to another goroutine.
+A vector that cannot be evaluated at the allocation counts as shared.
+Nothing becomes shared later, so the address of a word says whether
+another goroutine may read or write it. The user also wants the collector
+to use it: when a goroutine exits or is collected, the local memory it
+allocated is free.
+
+### The invariant
+
+A **local** object (and a stack) is reached only by the goroutine that
+allocated it, and so is everything that is reached from it: nothing that a
+local object leads to is ever shared, however deep. A shared object only
+points to shared objects. A local object may point to shared ones.
+
+It follows that code that only has a pointer `p` knows what to allocate
+for a store through it: `p.f = new(T)` allocates as `p` is. Whoever shares
+something loaded from `p`'s object makes `p`'s object shared, and that
+is visible to whoever allocated it: in its own function, or through the
+parameter tags (a callee that leaks what its parameter points to), or
+because the callee is unknown.
+
+### Done
+
+- **Allocator** (`runtime`: `heapSplit`, `malloc.go`, `mheap.go`,
+  `mpagealloc.go`). amd64 and arm64 on linux, darwin, freebsd, windows:
+  local objects and the stacks are in the 64 GiB below the first arena
+  hint (`[localHeapBase, localHeapEnd)`); everything else is above. Each
+  size class has a second span class (`spanClass.local`), the page
+  allocator has a second search address and a limit (`enterLocal`). If
+  the range is full or the kernel does not give it, local objects are
+  allocated with the rest, where they count as shared (safe). `isLocal(p)`
+  is `uintptr(p)-localHeapBase < localHeapSize`. The size-specialized
+  mallocs, the tiny allocator and the page cache are for shared objects
+  only for now (a local allocation takes the general path).
+- **Entry points**. A type descriptor passed to `newobject`, `mallocgc`,
+  `makeslice*`, `growslice*` may be tagged (bit 0, `allocType`): the object
+  is local. Untagged, as everything not compiled for it is (reflect,
+  assembly, linkname), is shared.
+- **Static decision** (`escape`: `attrSharesDeep`, `attrReturned`,
+  `markLocal`). An allocation is local if it is in the heap and nothing
+  reached from it flows, at any depth, to where another goroutine reaches
+  or to a result (the caller is not known). What is loaded from the
+  contents of a tracked variable's objects counts for those objects
+  (`location.owners`). An address kept as an integer is shared
+  (`shareLoc`). Not in the runtime's packages or reflect.
+  `ir.miniExpr.LocalAlloc`, `ir.LocalObject` on a moved variable.
+  `-d=nolocalalloc` turns it off, `-m=2` prints the decision and why not.
+- **Oracle**. The store barrier, the publish walk and the per-object bit
+  still run and still decide the guards. `GODEBUG=sharestats=1` counts the
+  objects of each range and the local ones that were published all the
+  same, each of which is a wrong decision; `=2` traces them, `=3` throws.
+
+The static decision alone finds almost nothing (0.05% of the objects of
+the go command): what is in the heap is there because it is stored in
+something or returned. The vectors below are what makes it useful.
+
+### Next: the dynamic vectors
+
+A location in the escape graph that is a **dynamic root** stands for a
+container that is only known at run time. It has no `attrShares`; the
+solver records, on every location that flows to it at any depth, that it
+does (a small set per location). At the end an allocation with a static
+mark is shared; one with only dynamic roots that can be evaluated where
+it is allocated is local if all of them say so (the tag is computed);
+any other root makes it shared.
+
+1. **The container of a store** in the statement that allocates:
+   `p.f = &T{}`, `*p = new(T)`, `s[i] = make(...)`, `m[k] = v`,
+   `p.f = append(p.f, x)`. The root is `isLocal(P)` for the pure path `P`
+   (names, fields, derefs, no calls) that the store goes through. It can
+   be evaluated at an allocation that is in the right-hand side of that
+   statement, since nothing between the allocation and the store changes
+   `P` (calls are hoisted before by order). For any other value that
+   flows there the root is shared.
+2. **Elements appended**: the container is the array. Local if the old
+   array is (`isLocal(oldptr)`: then everything the slice flows to is
+   local, so the new array is too); for a nil slice, as the append itself
+   is decided.
+3. **A parameter that is never assigned** is a root for every allocation
+   of the function, not only in the statement: `isLocal(q)`.
+4. **Results**. What is only returned is the caller's to decide. The
+   caller says so with the `outBuf` that Phase G already passes for a
+   pointer result (a sentinel: "in the heap, but local"); other results
+   (strings, slices, structs) need a bit that every function with such a
+   result reads or clears on entry (a field of g set right before the
+   call), forwarded by `return f(x)` and the wrappers.
+5. Maps: tag `makemap`; the tables are allocated as the map header is.
+   Strings (`concatstrings`, `slicebytetostring`: the buf argument can
+   carry the tag), `convT*`, closures.
+
+A stack variable whose contents get shared must then be in the shared
+heap ("moved to heap" for a new reason), since a callee storing in it
+only sees a stack address. This is the cost of the design for
+`var b strings.Builder; ...; ch <- b.String()`.
+
+### Then
+
+- Guards become `isLocal(addr)` inline: local, no lock; else the runtime
+  (which still says "not shared" for other threads' stacks and C memory).
+  `sharePages`, the store barrier, the publish walk and the per-object
+  bit stay only under `-d=sharecheck` as the witness.
+- Fast paths for local allocation (size-specialized, tiny, page cache).
+- Exposed addresses: `exposeptr` of a local object must be refused or the
+  conversion made a static sink everywhere (now only in escape analysis).
+- Freeing a goroutine's local memory when it exits or is collected:
+  needs to know the goroutine of a local span (spans owned per
+  goroutine, or a list per goroutine).

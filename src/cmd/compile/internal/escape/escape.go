@@ -102,6 +102,7 @@ type batch struct {
 
 	heapLoc      location
 	mutatorLoc   location
+	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
 	calleeLoc    location
 	blankLoc     location
 	candidateLoc location
@@ -159,6 +160,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	b.gd = gd
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
+	b.shareLoc.attrs = attrShares
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
 	// dynamic-callee edges, but with attrCandidateEscape in place of
@@ -494,6 +496,7 @@ func (b *batch) finish(fns []*ir.Func) {
 				}
 			}
 			n.SetEsc(ir.EscHeap)
+			b.markLocal(loc)
 			// gd Phase G: an allocation phaseGTags placed in the
 			// caller's buffer for a result: a local's storage
 			// (ssagen's newHeapaddr), new or &T{} (walk), or a

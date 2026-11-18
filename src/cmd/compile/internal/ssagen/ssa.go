@@ -809,6 +809,10 @@ func (s *state) newHeapaddr(n *ir.Name) {
 		// Fall through: tagged but no outBuf found. Heap-alloc.
 	}
 	size := allocSize(n.Type())
+	if n.Unshared&ir.LocalObject != 0 && !s.f.Config.WasmGC && size != 0 {
+		s.setHeapaddr(n.Pos(), n, s.newObjectLocal(n.Type(), nil))
+		return
+	}
 	if n.Type().HasPointers() || size >= maxAggregatedHeapAllocation || size == 0 || s.f.Config.WasmGC {
 		// (With GOWASM=gc every variable is an object of its own.)
 		s.setHeapaddr(n.Pos(), n, s.newObject(n.Type()))
@@ -1017,6 +1021,25 @@ func (s *state) newObject(typ *types.Type) *ssa.Value {
 		)[0]
 	}
 	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, rtype)[0]
+}
+
+// newObjectLocal returns an SSA value denoting new(typ), for an object
+// that is local: no other goroutine will reach it (escape's markLocal).
+// The runtime allocates it in the range of addresses of local memory.
+func (s *state) newObjectLocal(typ *types.Type, rtype *ssa.Value) *ssa.Value {
+	if typ.Size() == 0 {
+		return s.newValue1A(ssa.OpAddr, types.NewPtr(typ), ir.Syms(s.gd).Zerobase, s.sb)
+	}
+	if rtype == nil {
+		rtype = s.reflectType(typ)
+	}
+	return s.rtcall(ir.Syms(s.gd).Newobject, true, []*types.Type{types.NewPtr(typ)}, s.localType(rtype))[0]
+}
+
+// localType returns the type descriptor rtype tagged for the runtime's
+// allocation functions: the object is local (runtime.allocType).
+func (s *state) localType(rtype *ssa.Value) *ssa.Value {
+	return s.newValue1I(ssa.OpOffPtr, rtype.Type, 1, rtype)
 }
 
 // newObjectNonSpecialized returns an SSA value denoting new(typ). It does
@@ -4953,7 +4976,13 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 	case ir.ONEW:
 		n := n.(*ir.UnaryExpr)
 		if x, ok := n.X.(*ir.DynamicType); ok && x.Op() == ir.ODYNAMICTYPE {
+			if n.LocalAlloc() && !s.f.Config.WasmGC {
+				return s.newObjectLocal(n.Type().Elem(), s.expr(x.RType))
+			}
 			return s.newObjectNonSpecialized(n.Type().Elem(), s.expr(x.RType))
+		}
+		if n.LocalAlloc() && !s.f.Config.WasmGC {
+			return s.newObjectLocal(n.Type().Elem(), nil)
 		}
 		return s.newObject(n.Type().Elem())
 
@@ -5267,6 +5296,9 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// Call growslice
 	s.startBlock(grow)
 	taddr := s.expr(n.Fun)
+	if n.LocalAlloc() && !s.f.Config.WasmGC {
+		taddr = s.localType(taddr)
+	}
 	var r []*ssa.Value
 	if info != nil && n.UseBuf {
 		// Use stack-allocated buffer as backing store, if we can.

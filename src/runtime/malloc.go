@@ -1097,7 +1097,8 @@ const runtimeFreegcEnabled = goexperiment.RuntimeFreegc && !asanenabled && !msan
 //
 //go:linkname mallocgc
 func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
-	return mallocgcl(size, typ, needzero, false)
+	typ, local := allocType(typ)
+	return mallocgcl(size, typ, needzero, local)
 }
 
 // mallocgcl is mallocgc that allocates, if local is set, in the range
@@ -1115,6 +1116,10 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 	// Short-circuit zero-sized allocation requests.
 	if size == 0 {
 		return unsafe.Pointer(&zerobase)
+	}
+
+	if debug.sharestats != 0 {
+		shareStatsAlloc(size, local)
 	}
 
 	if sizeSpecializedMallocEnabled && !local && size < uintptr(len(mallocNoScanTable)) {
@@ -2178,8 +2183,11 @@ func memclrNoHeapPointersChunked(size uintptr, x unsafe.Pointer) {
 // implementation of new builtin
 // compiler (both frontend and SSA backend) knows the signature
 // of this function.
+//
+// typ may be tagged: the object is then local (allocType).
 func newobject(typ *_type) unsafe.Pointer {
-	return mallocgc(typ.Size_, typ, true)
+	typ, local := allocType(typ)
+	return mallocgcl(typ.Size_, typ, true, local)
 }
 
 //go:linkname maps_newobject internal/runtime/maps.newobject

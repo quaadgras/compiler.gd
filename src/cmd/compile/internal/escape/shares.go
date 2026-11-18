@@ -97,6 +97,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 		// name = &contents
 		x := b.oldLoc(name)
 		x.edges = append(x.edges, edge{src: c, derefs: -1, share: true})
+		c.owners = append(c.owners, x)
 	}
 }
 
@@ -341,5 +342,48 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 				}
 			}
 		}
+	}
+}
+
+// markLocal records on the expression or the variable of loc, which is
+// allocated in the heap, that the object is local: no other goroutine
+// will reach it, or anything that it will lead to, as long as it lives.
+// The object is then allocated in the range of addresses of local
+// memory, and what is stored in it later, by code that only has its
+// address, is allocated as it is (runtime/shared.go).
+//
+// Nothing that is reached from a local object may be shared, however
+// deep, and not by the caller either: no part of it is returned.
+func (b *batch) markLocal(loc *location) {
+	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
+		return
+	}
+	if loc.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturned) {
+		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
+			why := ""
+			for i, name := range []string{"shares", "holds what is shared", "leads to what is shared", "is returned"} {
+				if loc.attrs&(attrShares<<i) != 0 {
+					why += ", " + name
+				}
+			}
+			fmt.Printf("%s: %v is not local%s\n", b.gd.FmtPos(loc.n.Pos()), loc.n, why)
+		}
+		return
+	}
+	// The runtime's packages and reflect keep pointers as integers
+	// and make them of memory, where the graph does not follow.
+	if fn := loc.curfn; fn == nil || fn.Sym() == nil || fn.Sym().Pkg == nil || ir.UncheckedPkg(fn.Sym().Pkg.Path) {
+		return
+	}
+	switch n := loc.n.(type) {
+	case *ir.Name:
+		n.Unshared |= ir.LocalObject
+	case interface{ SetLocalAlloc(bool) }:
+		n.SetLocalAlloc(true)
+	default:
+		return
+	}
+	if b.gd.Flag.LowerM >= 2 {
+		fmt.Printf("%s: %v is local\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
 	}
 }

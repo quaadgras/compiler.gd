@@ -111,6 +111,10 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 			e.assignHeap(n.X, "conversion to unsafe.Pointer", n)
 		} else if n.Type().IsUnsafePtr() && n.X.Type().IsUintptr() {
 			e.unsafeValue(k, n.X)
+		} else if n.Type().IsUintptr() && n.X.Type().IsUnsafePtr() {
+			// An address that is kept as an integer is a pointer
+			// again wherever the integer goes (runtime.exposeptr).
+			e.expr(e.shareHole(), n.X)
 		} else {
 			e.expr(k, n.X)
 		}
