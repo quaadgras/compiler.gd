@@ -172,7 +172,14 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 // to a bitmap of the next cycle. The sweeper calls it once allocBits are
 // the marks of the cycle that ended.
 func (s *mspan) refreshSharedBits() {
-	old := s.getSharedBits()
+	s.refreshObjectBits(&s.sharedBits)
+}
+
+// refreshObjectBits moves the bits, in the bitmap at *field of s, of the
+// objects that are still allocated to a bitmap of the next cycle, or
+// leaves none if there is none of them.
+func (s *mspan) refreshObjectBits(field **gcBits) {
+	old := (*gcBits)(atomic.Loadp(unsafe.Pointer(field)))
 	if old == nil {
 		return
 	}
@@ -184,7 +191,7 @@ func (s *mspan) refreshSharedBits() {
 		any |= src[i] & live[i]
 	}
 	if any == 0 {
-		atomic.StorepNoWB(unsafe.Pointer(&s.sharedBits), nil)
+		atomic.StorepNoWB(unsafe.Pointer(field), nil)
 		return
 	}
 	bits := newMarkBits(uintptr(s.nelems))
@@ -192,7 +199,7 @@ func (s *mspan) refreshSharedBits() {
 	for i := range src {
 		dst[i] = src[i] & live[i]
 	}
-	atomic.StorepNoWB(unsafe.Pointer(&s.sharedBits), unsafe.Pointer(bits))
+	atomic.StorepNoWB(unsafe.Pointer(field), unsafe.Pointer(bits))
 }
 
 // publish marks the object p points into, and every object reachable from

@@ -1,4 +1,4 @@
-// errorcheck -0 -m -live -std
+// errorcheck -0 -m -live -std -d=checkptr=0
 
 //go:build !windows && !js && !wasip1
 

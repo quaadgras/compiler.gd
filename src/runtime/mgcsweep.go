@@ -700,6 +700,9 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	if s.sharedBits != nil {
 		s.refreshSharedBits()
 	}
+	if s.exposedBits != nil {
+		s.refreshObjectBits(&s.exposedBits)
+	}
 
 	// refresh pinnerBits if they exists
 	if s.pinnerBits != nil {

@@ -34,7 +34,11 @@ func TestCheckPtr(t *testing.T) {
 		{"CheckPtrAlignmentNoPtr", ""},
 		{"CheckPtrAlignmentNilPtr", ""},
 		{"CheckPtrArithmetic", "fatal error: checkptr: pointer arithmetic result points to invalid allocation\n"},
-		{"CheckPtrArithmetic2", "fatal error: checkptr: pointer arithmetic result points to invalid allocation\n"},
+		{"CheckPtrExposedOK", ""},
+		{"CheckPtrNotExposed", "fatal error: checkptr: pointer arithmetic result points to invalid allocation\n"},
+		// gd: the integer is in an object whose address was taken as an
+		// integer and kept, which makes it a pointer to that object.
+		{"CheckPtrArithmetic2", ""},
 		{"CheckPtrArithmeticUnsafeAdd", "fatal error: checkptr: pointer arithmetic result points to invalid allocation\n"},
 		{"CheckPtrSize", "fatal error: checkptr: converted pointer straddles multiple allocations\n"},
 		{"CheckPtrSmall", "fatal error: checkptr: pointer arithmetic computed bad pointer value\n"},

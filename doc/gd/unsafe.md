@@ -4,12 +4,13 @@ Goal: a program that misuses `unsafe.Pointer` stops, instead of reading
 or writing memory that is not its own. The rules are Go's (package
 unsafe's six patterns); the fork checks them in every build.
 
-> **Status:** step 1 is in: the checks Go has under the race detector
+> **Status:** in: the checks Go has under the race detector
 > (`-d=checkptr`) are the default, made cheaper for the usual cases, and
-> extended with a check of where the pointers are. Not yet: capabilities
-> for integers (`uintptr` kept in memory and made a pointer again, which
-> C-style APIs do), bounds of stack objects and globals, and exact sizes
-> in the heap (an object's bound is its size class).
+> extended with a check of where the pointers are; and an integer that
+> was kept (a `uintptr` field, an argument of a callback, which C-style
+> APIs have) is a pointer again if its object is exposed. Not yet: the
+> integer keeping its object alive, bounds of stack objects and globals,
+> and exact sizes in the heap (an object's bound is its size class).
 
 ## What is checked
 
@@ -27,8 +28,19 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   and reflect reads it as a pointer: that stays allowed.)
 - **`unsafe.Pointer(u)`**, `u` a `uintptr` (`checkptrArithmetic`): if the
   result is in a heap object, one of the pointers the expression was
-  computed from is in the same object. An integer that was stored and
-  comes back is not a pointer to the heap.
+  computed from is in the same object, or the object is *exposed*.
+
+  An object is exposed when the program makes an integer of its address
+  and keeps it: compiled code calls `runtime.exposeptr` where it converts
+  a pointer to a `uintptr`, unless the integer only lives in an
+  expression that makes a pointer of it again, or the pointer is plainly
+  to a variable of the stack. The mark is a bit for the object, kept as
+  the shared bit is. So `h := uintptr(unsafe.Pointer(p))` kept in a field
+  and `(*T)(unsafe.Pointer(h))` later work, and `(*T)(unsafe.Pointer(h +
+  64))` does if it is still in `p`'s object, and not if it is in the
+  next one, which never gave its address away. This is what C calls an
+  exposed address (PNVI-ae). The integer does not keep the object alive:
+  once it is freed the integer is the address of nothing exposed.
 - **`unsafe.Add`**: as the arithmetic.
 - **`unsafe.Slice`, `unsafe.String`**: the result is inside one
   allocation. (What the language says panics still panics, and is not a
@@ -69,10 +81,14 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   to the next object.
 - The stack is one allocation, and so is each of data and bss.
 
+- An integer that outlives its object and is then the address of
+  another exposed object is a pointer to that one.
+
 These need the capability to travel with the pointer, as it does for C
 (`cc.md`): the plan is the thin representation agreed on 2026-11-18, the
 address in the word and the capability beside it only for a word that
-cannot give it back (an integer, a pointer out of bounds).
+cannot give it back (an integer, a pointer out of bounds). Exposure is
+the part of it that needs no side table.
 
 ## What it costs
 

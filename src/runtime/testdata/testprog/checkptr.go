@@ -193,3 +193,35 @@ func checkptrHeap() *int {
 	checkptrSink = p
 	return p
 }
+
+func init() {
+	register("CheckPtrExposedOK", CheckPtrExposedOK)
+	register("CheckPtrNotExposed", CheckPtrNotExposed)
+}
+
+var checkptrHandle uintptr
+
+// An integer that was kept is a pointer again, to its object.
+func CheckPtrExposedOK() {
+	x := new([4]int64)
+	checkptrSink = x
+	checkptrHandle = uintptr(unsafe.Pointer(x))
+	runtime.GC()
+	p := (*[4]int64)(unsafe.Pointer(checkptrHandle))
+	p[3] = 7
+	q := (*int64)(unsafe.Pointer(checkptrHandle + 24))
+	if *q != 7 || x[3] != 7 {
+		panic("exposed object not reached")
+	}
+}
+
+// But not to an object that never gave its address away.
+func CheckPtrNotExposed() {
+	objs := make([]*[4]int64, 64)
+	for i := range objs {
+		objs[i] = new([4]int64)
+	}
+	checkptrSink = objs
+	checkptrHandle = uintptr(unsafe.Pointer(objs[20]))
+	sink2 = (*int64)(unsafe.Pointer(checkptrHandle + 32))
+}

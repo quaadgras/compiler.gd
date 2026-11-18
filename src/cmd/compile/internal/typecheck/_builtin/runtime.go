@@ -296,6 +296,7 @@ func asanwrite(addr, size uintptr)
 
 func checkptrAlignment(unsafe.Pointer, *byte, uintptr)
 func checkptrArithmetic(unsafe.Pointer, []unsafe.Pointer)
+func exposeptr(unsafe.Pointer)
 
 func libfuzzerTraceCmp1(uint8, uint8, uint)
 func libfuzzerTraceCmp2(uint16, uint16, uint)

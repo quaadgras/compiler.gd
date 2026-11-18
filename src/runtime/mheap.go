@@ -487,10 +487,11 @@ type mspan struct {
 	// The sweep will free the old allocBits and set allocBits to the
 	// gcmarkBits. The gcmarkBits are replaced with a fresh zeroed
 	// out memory.
-	allocBits  *gcBits
-	gcmarkBits *gcBits
-	pinnerBits *gcBits // bitmap for pinned objects; accessed atomically
-	sharedBits *gcBits // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
+	allocBits   *gcBits
+	gcmarkBits  *gcBits
+	pinnerBits  *gcBits // bitmap for pinned objects; accessed atomically
+	sharedBits  *gcBits // bitmap of the objects other goroutines may reach (shared.go); accessed atomically
+	exposedBits *gcBits // bitmap of the objects whose address a program has as an integer (checkptr.go); accessed atomically
 
 	// sweep generation:
 	// if sweepgen == h->sweepgen - 2, the span needs sweeping
@@ -1828,6 +1829,7 @@ func (span *mspan) init(base uintptr, npages uintptr) {
 	span.gcmarkBits = nil
 	span.pinnerBits = nil
 	span.sharedBits = nil
+	span.exposedBits = nil
 	span.state.set(mSpanDead)
 	lockInit(&span.speciallock, lockRankMspanSpecial)
 }

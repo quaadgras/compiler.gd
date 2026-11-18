@@ -33,13 +33,28 @@ func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 			return walkExpr(gd, typecheck.Call(gd, n.Pos(), m, nil, false), init)
 		}
 	}
+	checked := n.Op() == ir.OCONVNOP && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1)
+	if checked && n.Type().IsUnsafePtr() && n.X.Type().IsUintptr() {
+		// gd: the pointers this one is computed from, in the same
+		// expression, are not kept as integers: they are not exposed
+		// (below).
+		markArithmeticOriginals(n.X)
+	}
 	n.X = walkExpr(gd, n.X, init)
 	if n.Op() == ir.OCONVNOP && n.Type() == n.X.Type() {
 		return n.X
 	}
-	if n.Op() == ir.OCONVNOP && ir.ShouldCheckPtr(gd, ir.CurFunc(gd), 1) {
+	if checked {
 		if n.Type().IsUnsafePtr() && n.X.Type().IsUintptr() { // uintptr to unsafe.Pointer
 			return walkCheckPtrArithmetic(gd, n, init)
+		}
+		if n.Type().IsUintptr() && n.X.Type().IsUnsafePtr() && !n.CheckPtr() && !isStackAddr(n.X) {
+			// gd: unsafe.Pointer to uintptr, an integer that may
+			// be kept and made a pointer again: its object is
+			// exposed (runtime.exposeptr).
+			n.X = cheapExpr(gd, n.X, init)
+			init.Append(mkcall(gd, "exposeptr", nil, init, n.X))
+			return n
 		}
 	}
 	param, result := rtconvfn(n.X.Type(), n.Type())
@@ -532,6 +547,26 @@ func byteindex(gd *base.Invocation, n ir.Node) ir.Node {
 	return n
 }
 
+// markArithmeticOriginals marks the conversions of pointers to integers in
+// the arithmetic expression n, which is converted to a pointer, as not
+// exposing their objects: see walkCheckPtrArithmetic, which finds the same
+// conversions.
+func markArithmeticOriginals(n ir.Node) {
+	switch n.Op() {
+	case ir.OADD:
+		n := n.(*ir.BinaryExpr)
+		markArithmeticOriginals(n.X)
+		markArithmeticOriginals(n.Y)
+	case ir.OSUB, ir.OANDNOT:
+		markArithmeticOriginals(n.(*ir.BinaryExpr).X)
+	case ir.OCONVNOP:
+		n := n.(*ir.ConvExpr)
+		if n.X.Type().IsUnsafePtr() {
+			n.SetCheckPtr(true)
+		}
+	}
+}
+
 func walkCheckPtrArithmetic(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 	// Calling cheapExpr(gd, n, init) below leads to a recursive call to
 	// walkExpr, which leads us back here again. Use n.Checkptr to
@@ -617,4 +652,18 @@ func walkSliceToArray(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.No
 	deref.SetBounded(true)
 
 	return walkExpr(gd, deref, init)
+}
+
+// isStackAddr reports whether the pointer n is plainly the address of a
+// variable of the stack, or of a part of one: not of an object of the
+// heap, which is all that runtime.exposeptr marks.
+func isStackAddr(n ir.Node) bool {
+	for n.Op() == ir.OCONVNOP {
+		n = n.(*ir.ConvExpr).X
+	}
+	if n.Op() != ir.OADDR {
+		return false
+	}
+	name, ok := ir.OuterValue(n.(*ir.AddrExpr).X).(*ir.Name)
+	return ok && name.Op() == ir.ONAME && name.Class != ir.PEXTERN && name.Esc() != ir.EscHeap && name.Heapaddr == nil
 }

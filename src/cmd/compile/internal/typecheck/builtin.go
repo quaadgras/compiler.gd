@@ -242,17 +242,18 @@ var runtimeDecls = [...]struct {
 	{"asanwrite", funcTag, 161},
 	{"checkptrAlignment", funcTag, 163},
 	{"checkptrArithmetic", funcTag, 165},
-	{"libfuzzerTraceCmp1", funcTag, 166},
-	{"libfuzzerTraceCmp2", funcTag, 167},
-	{"libfuzzerTraceCmp4", funcTag, 168},
-	{"libfuzzerTraceCmp8", funcTag, 169},
-	{"libfuzzerTraceConstCmp1", funcTag, 166},
-	{"libfuzzerTraceConstCmp2", funcTag, 167},
-	{"libfuzzerTraceConstCmp4", funcTag, 168},
-	{"libfuzzerTraceConstCmp8", funcTag, 169},
-	{"libfuzzerHookStrCmp", funcTag, 170},
-	{"libfuzzerHookEqualFold", funcTag, 170},
-	{"addCovMeta", funcTag, 172},
+	{"exposeptr", funcTag, 166},
+	{"libfuzzerTraceCmp1", funcTag, 167},
+	{"libfuzzerTraceCmp2", funcTag, 168},
+	{"libfuzzerTraceCmp4", funcTag, 169},
+	{"libfuzzerTraceCmp8", funcTag, 170},
+	{"libfuzzerTraceConstCmp1", funcTag, 167},
+	{"libfuzzerTraceConstCmp2", funcTag, 168},
+	{"libfuzzerTraceConstCmp4", funcTag, 169},
+	{"libfuzzerTraceConstCmp8", funcTag, 170},
+	{"libfuzzerHookStrCmp", funcTag, 171},
+	{"libfuzzerHookEqualFold", funcTag, 171},
+	{"addCovMeta", funcTag, 173},
 	{"x86HasAVX", varTag, 6},
 	{"x86HasFMA", varTag, 6},
 	{"x86HasPOPCNT", varTag, 6},
@@ -269,7 +270,7 @@ var runtimeDecls = [...]struct {
 }
 
 func runtimeTypes(gd *base.Invocation) []*types.Type {
-	var typs [173]*types.Type
+	var typs [174]*types.Type
 	typs[0] = types.ByteType
 	typs[1] = types.NewPtr(typs[0])
 	typs[2] = types.Types[types.TANY]
@@ -436,13 +437,14 @@ func runtimeTypes(gd *base.Invocation) []*types.Type {
 	typs[163] = newSig(gd, params(typs[7], typs[1], typs[5]), nil)
 	typs[164] = types.NewSlice(typs[7])
 	typs[165] = newSig(gd, params(typs[7], typs[164]), nil)
-	typs[166] = newSig(gd, params(typs[79], typs[79], typs[15]), nil)
-	typs[167] = newSig(gd, params(typs[73], typs[73], typs[15]), nil)
-	typs[168] = newSig(gd, params(typs[75], typs[75], typs[15]), nil)
-	typs[169] = newSig(gd, params(typs[24], typs[24], typs[15]), nil)
-	typs[170] = newSig(gd, params(typs[30], typs[30], typs[15]), nil)
-	typs[171] = types.NewArray(typs[0], 16)
-	typs[172] = newSig(gd, params(typs[7], typs[75], typs[171], typs[30], typs[13], typs[79], typs[79]), params(typs[75]))
+	typs[166] = newSig(gd, params(typs[7]), nil)
+	typs[167] = newSig(gd, params(typs[79], typs[79], typs[15]), nil)
+	typs[168] = newSig(gd, params(typs[73], typs[73], typs[15]), nil)
+	typs[169] = newSig(gd, params(typs[75], typs[75], typs[15]), nil)
+	typs[170] = newSig(gd, params(typs[24], typs[24], typs[15]), nil)
+	typs[171] = newSig(gd, params(typs[30], typs[30], typs[15]), nil)
+	typs[172] = types.NewArray(typs[0], 16)
+	typs[173] = newSig(gd, params(typs[7], typs[75], typs[172], typs[30], typs[13], typs[79], typs[79]), params(typs[75]))
 	return typs[:]
 }
 

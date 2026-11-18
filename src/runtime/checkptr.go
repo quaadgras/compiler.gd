@@ -162,7 +162,76 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 		}
 	}
 
+	// gd: an integer that was kept is a pointer again if it is in an
+	// object of the heap whose address the program took as an integer:
+	// see exposeptr.
+	if checkptrExposed(uintptr(p)) {
+		return
+	}
+
 	throw("checkptr: pointer arithmetic result points to invalid allocation")
+}
+
+// Exposed objects.
+//
+// Go's rules for unsafe.Pointer let an integer become a pointer only in
+// the expression that made it of one. Code written as C is keeps
+// addresses in integers: a handle in a uintptr field, an argument of a
+// callback. So a pointer may also be made of an integer that is the
+// address of something in an object of the heap that is exposed: one whose
+// address the program made an integer of, and kept. Compiled code calls
+// exposeptr where it converts a pointer to a uintptr that outlives the
+// expression. The object is no more alive for it: when it is freed the
+// integer is the address of nothing, and of nothing exposed if the memory
+// is used again.
+//
+// This is what C calls an exposed address (PNVI-ae): an integer gives no
+// access to an object that never gave its address away.
+
+// exposeptr marks the object of the heap that p points into as exposed.
+func exposeptr(p unsafe.Pointer) {
+	if p == nil {
+		return
+	}
+	s := spanOfHeap(uintptr(p))
+	if s == nil || s.isUserArenaChunk {
+		return
+	}
+	i := s.objIndex(uintptr(p))
+	mask := uint8(1) << (i % 8)
+	if bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits))); bits != nil && atomic.Load8(bits.bytep(i/8))&mask != 0 {
+		return
+	}
+	// The sweeper replaces the bitmap, so the span must be swept and
+	// stay so: as for the bits of shared.go.
+	mp := acquirem()
+	s.ensureSwept()
+	lock(&s.speciallock)
+	bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits)))
+	if bits == nil {
+		bits = newMarkBits(uintptr(s.nelems))
+		atomic.StorepNoWB(unsafe.Pointer(&s.exposedBits), unsafe.Pointer(bits))
+	}
+	if !s.isFree(i) {
+		atomic.Or8(bits.bytep(i/8), mask)
+	}
+	unlock(&s.speciallock)
+	releasem(mp)
+	KeepAlive(p)
+}
+
+// checkptrExposed reports whether p is in an exposed object of the heap.
+func checkptrExposed(p uintptr) bool {
+	s := spanOfHeap(p)
+	if s == nil || s.isUserArenaChunk {
+		return false
+	}
+	bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits)))
+	if bits == nil {
+		return false
+	}
+	i := s.objIndex(p)
+	return !s.isFree(i) && atomic.Load8(bits.bytep(i/8))&(1<<(i%8)) != 0
 }
 
 // checkptrBase returns the base address for the allocation containing
