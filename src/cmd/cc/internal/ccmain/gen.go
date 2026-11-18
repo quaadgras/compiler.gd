@@ -589,7 +589,9 @@ func (g *gen) str(s *strLit) string {
 	n := fmt.Sprintf("%ss_%d", g.o.prefix, len(g.strs))
 	g.strs[key] = n
 	esz := s.t.elem.sizeof()
-	fmt.Fprintf(&g.vars, "var %s = c23.String[%s](%s)\n", n, g.mirror(s.t.elem), strconv.Quote(s.data+strings.Repeat("\x00", int(esz))))
+	data := s.data + strings.Repeat("\x00", int(esz))
+	el := g.mirror(s.t.elem)
+	fmt.Fprintf(&g.vars, "var %s = c23.StringOf[%s, [%d]%s](%s)\n", n, el, int64(len(data))/esz, el, strconv.Quote(data))
 	return n
 }
 

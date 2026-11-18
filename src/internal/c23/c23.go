@@ -536,7 +536,7 @@ func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
 		case wPtr:
 			fault("scalar store over a pointer word", uintptr(a))
 		case wRO:
-			fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", typeName(p.info())), uintptr(a))
+			fault("store into a word of a Go value with invariants ("+typeName(p.info())+")", uintptr(a))
 		}
 	}
 	return a
@@ -666,7 +666,7 @@ func storePtr(p, v Ptr, a unsafe.Pointer) {
 	case wScalar:
 		fault("pointer store into a word the collector does not scan", uintptr(a))
 	case wRO:
-		fault(fmt.Sprintf("store into a word of a Go value with invariants (%s)", typeName(p.info())), uintptr(a))
+		fault("store into a word of a Go value with invariants ("+typeName(p.info())+")", uintptr(a))
 	}
 	if h := p.header(); h != nil {
 		// The capability first, so that what it points to stays alive.

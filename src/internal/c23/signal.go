@@ -43,13 +43,24 @@ func osSignal(sig int32) os.Signal {
 	case SIGINT:
 		return os.Interrupt
 	case SIGTERM:
-		return sigterm
+		return sigterm()
 	}
 	return nil
 }
 
-// sigterm is syscall.SIGTERM, where the system has one.
-var sigterm = func() os.Signal {
+// sigterm is syscall.SIGTERM, where the system has one: found when first
+// needed, so that a program without signals links no reflection for it.
+var (
+	sigtermOnce sync.Once
+	sigtermSig  os.Signal
+)
+
+func sigterm() os.Signal {
+	sigtermOnce.Do(func() { sigtermSig = sigtermOf() })
+	return sigtermSig
+}
+
+func sigtermOf() os.Signal {
 	// Package syscall names SIGTERM on every system os/signal supports;
 	// os has only Interrupt and Kill.
 	v := reflect.ValueOf(os.Interrupt)
@@ -59,7 +70,7 @@ var sigterm = func() os.Signal {
 	}
 	s.SetInt(SIGTERM)
 	return s.Interface().(os.Signal)
-}()
+}
 
 // Signal is signal: it sets sig's handler and returns the previous one.
 //

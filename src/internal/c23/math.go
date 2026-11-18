@@ -433,14 +433,6 @@ func Signbit(x float64) int32 { return B2I(math.Signbit(x)) }
 
 // float variants
 
-func f32(f func(float64) float64) func(float32) float32 {
-	return func(x float32) float32 { return float32(f(float64(x))) }
-}
-
-func f32f32(f func(float64, float64) float64) func(float32, float32) float32 {
-	return func(x, y float32) float32 { return float32(f(float64(x), float64(y))) }
-}
-
 // rangedf sets errno to ERANGE if v, rounded to float, overflowed, raising
 // overflow; underflow if it is subnormal, or 0 from a nonzero v.
 func rangedf(v float64, xs ...float32) float32 {
@@ -460,39 +452,38 @@ func rangedf(v float64, xs ...float32) float32 {
 	return r
 }
 
-var (
-	sinf       = f32(Sin)
-	cosf       = f32(Cos)
-	tanf       = f32(Tan)
-	asinf      = f32(Asin)
-	acosf      = f32(Acos)
-	atanf      = f32(Atan)
-	atan2f     = f32f32(Atan2)
-	tanhf      = f32(Tanh)
-	asinhf     = f32(Asinh)
-	acoshf     = f32(Acosh)
-	atanhf     = f32(Atanh)
-	logf       = f32(Log)
-	log2f      = f32(Log2)
-	log10f     = f32(Log10)
-	log1pf     = f32(Log1p)
-	logbf      = f32(Logb)
-	sqrtf      = f32(Sqrt)
-	cbrtf      = f32(Cbrt)
-	fabsf      = f32(Fabs)
-	floorf     = f32(Floor)
-	ceilf      = f32(Ceil)
-	roundf     = f32(Round)
-	truncf     = f32(Trunc)
-	rintf      = f32(Rint)
-	copysignf  = f32f32(Copysign)
-	fmodf      = f32f32(Fmod)
-	remainderf = f32f32(Remainder)
-	fmaxf      = f32f32(Fmax)
-	fminf      = f32f32(Fmin)
-	erff       = f32(Erf)
-	erfcf      = f32(Erfc)
-)
+// The float versions of functions that only round the double result.
+func sinf(x float32) float32          { return float32(Sin(float64(x))) }
+func cosf(x float32) float32          { return float32(Cos(float64(x))) }
+func tanf(x float32) float32          { return float32(Tan(float64(x))) }
+func asinf(x float32) float32         { return float32(Asin(float64(x))) }
+func acosf(x float32) float32         { return float32(Acos(float64(x))) }
+func atanf(x float32) float32         { return float32(Atan(float64(x))) }
+func atan2f(x, y float32) float32     { return float32(Atan2(float64(x), float64(y))) }
+func tanhf(x float32) float32         { return float32(Tanh(float64(x))) }
+func asinhf(x float32) float32        { return float32(Asinh(float64(x))) }
+func acoshf(x float32) float32        { return float32(Acosh(float64(x))) }
+func atanhf(x float32) float32        { return float32(Atanh(float64(x))) }
+func logf(x float32) float32          { return float32(Log(float64(x))) }
+func log2f(x float32) float32         { return float32(Log2(float64(x))) }
+func log10f(x float32) float32        { return float32(Log10(float64(x))) }
+func log1pf(x float32) float32        { return float32(Log1p(float64(x))) }
+func logbf(x float32) float32         { return float32(Logb(float64(x))) }
+func sqrtf(x float32) float32         { return float32(Sqrt(float64(x))) }
+func cbrtf(x float32) float32         { return float32(Cbrt(float64(x))) }
+func fabsf(x float32) float32         { return float32(Fabs(float64(x))) }
+func floorf(x float32) float32        { return float32(Floor(float64(x))) }
+func ceilf(x float32) float32         { return float32(Ceil(float64(x))) }
+func roundf(x float32) float32        { return float32(Round(float64(x))) }
+func truncf(x float32) float32        { return float32(Trunc(float64(x))) }
+func rintf(x float32) float32         { return float32(Rint(float64(x))) }
+func copysignf(x, y float32) float32  { return float32(Copysign(float64(x), float64(y))) }
+func fmodf(x, y float32) float32      { return float32(Fmod(float64(x), float64(y))) }
+func remainderf(x, y float32) float32 { return float32(Remainder(float64(x), float64(y))) }
+func fmaxf(x, y float32) float32      { return float32(Fmax(float64(x), float64(y))) }
+func fminf(x, y float32) float32      { return float32(Fmin(float64(x), float64(y))) }
+func erff(x float32) float32          { return float32(Erf(float64(x))) }
+func erfcf(x float32) float32         { return float32(Erfc(float64(x))) }
 
 func Sinf(x float32) float32         { return sinf(x) }
 func Cosf(x float32) float32         { return cosf(x) }

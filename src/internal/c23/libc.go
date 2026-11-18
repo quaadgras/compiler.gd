@@ -398,14 +398,14 @@ func Bsearch(key, base Ptr, n, size uint64, cmp Ptr) Ptr {
 
 var (
 	atexitMu sync.Mutex
-	atexitFn []Ptr
+	atexitFn []func() // adapted when registered: calling them needs no reflection
 )
 
 // Atexit is atexit: Exit calls f, after the functions registered later.
 func Atexit(f Ptr) int32 {
-	FuncOf[func()](f)
+	fn := FuncOf[func()](f)
 	atexitMu.Lock()
-	atexitFn = append(atexitFn, f)
+	atexitFn = append(atexitFn, fn)
 	atexitMu.Unlock()
 	return 0
 }
@@ -421,7 +421,7 @@ func runAtexit() {
 		f := atexitFn[len(atexitFn)-1]
 		atexitFn = atexitFn[:len(atexitFn)-1]
 		atexitMu.Unlock()
-		FuncOf[func()](f)()
+		f()
 	}
 }
 

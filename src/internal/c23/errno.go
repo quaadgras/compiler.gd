@@ -149,12 +149,13 @@ func (e errnoErr) Error() string { return strerror(int32(e)) }
 // setErrnoOf sets errno to err's: its system error number (a
 // syscall.Errno) if it has one.
 func setErrnoOf(err error) {
-	var en errnoErr
-	if errors.As(err, &en) {
-		SetErrno(int32(en))
-		return
-	}
+	// One walk of the chain, without errors.As and errors.Is, which
+	// would link internal/reflectlite into every program that writes.
 	for e := err; e != nil; e = errors.Unwrap(e) {
+		if en, ok := e.(errnoErr); ok {
+			SetErrno(int32(en))
+			return
+		}
 		t := reflect.TypeOf(e)
 		if t.PkgPath() == "syscall" && t.Name() == "Errno" && t.Kind() == reflect.Uintptr {
 			SetErrno(int32(reflect.ValueOf(e).Uint()))
@@ -162,15 +163,28 @@ func setErrnoOf(err error) {
 		}
 	}
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case isErr(err, fs.ErrNotExist):
 		SetErrno(ENOENT)
-	case errors.Is(err, fs.ErrExist):
+	case isErr(err, fs.ErrExist):
 		SetErrno(EEXIST)
-	case errors.Is(err, fs.ErrPermission):
+	case isErr(err, fs.ErrPermission):
 		SetErrno(EACCES)
-	case errors.Is(err, fs.ErrInvalid):
+	case isErr(err, fs.ErrInvalid):
 		SetErrno(EINVAL)
 	default:
 		SetErrno(EIO)
 	}
+}
+
+// isErr is errors.Is for a target that is comparable, as fs's are.
+func isErr(err, target error) bool {
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if e == target {
+			return true
+		}
+		if x, ok := e.(interface{ Is(error) bool }); ok && x.Is(target) {
+			return true
+		}
+	}
+	return false
 }

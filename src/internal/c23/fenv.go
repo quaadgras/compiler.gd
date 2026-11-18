@@ -6,6 +6,7 @@ package c23
 
 import (
 	"math"
+	"sync"
 	"sync/atomic"
 )
 
@@ -358,9 +359,17 @@ func Fesetmode(modep Ptr) int32 {
 
 // feDfl is what FE_DFL_ENV and FE_DFL_MODE point to: round to nearest,
 // no exceptions.
-var feDfl = Malloc(8)
+// It is made when first asked for, so that a program that does not ask
+// does not link what allocating it takes.
+var (
+	feDflOnce sync.Once
+	feDfl     Ptr
+)
 
-func FeDfl() Ptr { return feDfl }
+func FeDfl() Ptr {
+	feDflOnce.Do(func() { feDfl = Malloc(8) })
+	return feDfl
+}
 
 // FltRounds is FLT_ROUNDS: the thread's direction, as float.h numbers
 // them.

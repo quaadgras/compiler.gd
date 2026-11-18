@@ -225,10 +225,11 @@ type Dir struct {
 	closed bool
 }
 
-var dirInfo = tinfoOf[Dir]()
-
+// dirOf looks Dir's type up when called, not in a package variable:
+// made at init, it would link what Dir's fields reach (fs.DirEntry's
+// FileInfo, its time.Time, time's formatting) into every program.
 func dirOf(p Ptr) *Dir {
-	if p.obj == nil || p.info() != dirInfo || p.off != 0 {
+	if p.obj == nil || p.info() != tinfoOf[Dir]() || p.off != 0 {
 		fault("not a DIR", Addr(p))
 	}
 	d := (*Dir)(p.obj)

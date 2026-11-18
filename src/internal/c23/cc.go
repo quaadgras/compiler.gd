@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 	"unsafe"
 )
 
@@ -152,6 +153,14 @@ func convertible(a, b reflect.Type) bool {
 // bytes, the null element included.
 func String[T any](s string) Ptr {
 	p := NewArray[T](uintptr(len(s)))
+	copy(unsafe.Slice((*byte)(p.obj), len(s)), s)
+	return p
+}
+
+// StringOf is String for a literal whose array, A ([N]T), cmd/cc knows:
+// the same object, of a type the compiler makes rather than reflect.
+func StringOf[T, A any](s string) Ptr {
+	p := LocalT(new(Obj[A]), tinfoOf[T]())
 	copy(unsafe.Slice((*byte)(p.obj), len(s)), s)
 	return p
 }
@@ -327,6 +336,12 @@ func Dlopen(path Ptr, flags int32) Ptr { return Ptr{} }
 func Dlsym(h, name Ptr) Ptr            { return Ptr{} }
 func Dlclose(h Ptr) int32              { return 0 }
 
-var dlMsg = CString("dynamic loading is not supported by cmd/cc")
+var (
+	dlMsgOnce sync.Once
+	dlMsg     Ptr
+)
 
-func Dlerror() Ptr { return dlMsg }
+func Dlerror() Ptr {
+	dlMsgOnce.Do(func() { dlMsg = CString("dynamic loading is not supported by cmd/cc") })
+	return dlMsg
+}
