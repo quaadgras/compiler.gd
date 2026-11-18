@@ -54,6 +54,10 @@ func isShared(p unsafe.Pointer) bool {
 	if !sharingEnabled || p == nil {
 		return false
 	}
+	if sharePages[uintptr(p)>>sharePageShift&uintptr(len(sharePages)-1)] == 0 {
+		// Nothing shared was ever in a page like this one.
+		return false
+	}
 	s := spanOf(uintptr(p))
 	if s == nil {
 		// Not the heap's: a global is shared. What else there is
@@ -76,6 +80,38 @@ func isShared(p unsafe.Pointer) bool {
 	shared := atomic.Load8(bits.bytep(i/8))&(1<<(i%8)) != 0
 	KeepAlive(p)
 	return shared
+}
+
+// sharePages has a byte for each page of memory, found from the page's
+// address modulo the table's size, that is not zero if something in a page
+// with that byte is shared, or was: an object of the heap, or a module's
+// globals. Most of what a program stores in is in pages where nothing is,
+// and one load says so, in the runtime and in compiled code before it
+// calls the runtime at all (ssagen's shareLock). The bytes are only ever
+// set.
+var sharePages [1 << 20]uint8
+
+const sharePageShift = 13 // must match ssagen's
+
+// sharePagesSet sets the bytes of the pages of [p, p+size).
+func sharePagesSet(p, size uintptr) {
+	for a := p >> sharePageShift; a <= (p+size-1)>>sharePageShift; a++ {
+		if b := &sharePages[a&uintptr(len(sharePages)-1)]; *b == 0 {
+			*b = 1
+		}
+	}
+}
+
+// shareModule is called when a module is loaded: its globals are shared.
+func shareModule(datap *moduledata) {
+	if !sharingEnabled {
+		return
+	}
+	for _, r := range [...][2]uintptr{{datap.data, datap.edata}, {datap.bss, datap.ebss}, {datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss}} {
+		if r[1] > r[0] {
+			sharePagesSet(r[0], r[1]-r[0])
+		}
+	}
 }
 
 // isGlobal reports whether p is in the data or bss of a module.
@@ -121,6 +157,7 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	b := bits.bytep(i / 8)
 	fresh := atomic.Load8(b)&mask == 0
 	if fresh {
+		sharePagesSet(s.base()+i*s.elemsize, s.elemsize)
 		atomic.Or8(b, mask)
 	}
 	unlock(&s.speciallock)

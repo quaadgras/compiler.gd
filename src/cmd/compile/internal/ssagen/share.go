@@ -23,6 +23,8 @@ import (
 const (
 	shareBlockShift = 6       // a lock for every 64 bytes, 64 bytes apart
 	shareStripes    = 1 << 14 // both must match runtime's
+	sharePageShift  = 13      // as runtime.sharePageShift
+	sharePagesLen   = 1 << 20 // len(runtime.sharePages)
 )
 
 // tearArch reports whether the target has the inline atomic load the
@@ -325,8 +327,44 @@ func (s *state) shareLoadMem(t *types.Type, dst, src *ssa.Value) {
 // shareLock is called before the store of size bytes at dst, which is not
 // in the stack. It returns whether the runtime took the locks, which
 // shareUnlock gives back.
+// It first loads the byte that says whether anything in a page like dst's
+// was ever shared (runtime.sharePages), and does not call the runtime if
+// nothing was.
 func (s *state) shareLock(dst *ssa.Value, size int64) *ssa.Value {
-	return s.rtcall(ir.Syms(s.gd).ShareStore, true, []*types.Type{types.Types[types.TBOOL]}, dst, s.constInt(types.Types[types.TUINTPTR], size))[0]
+	uptr := types.Types[types.TUINTPTR]
+	u8 := types.Types[types.TUINT8]
+	p := s.newValue2(ssa.OpConvert, uptr, dst, s.mem())
+	var idx *ssa.Value
+	if s.config.PtrSize == 8 {
+		idx = s.newValue2(ssa.OpRsh64Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift))
+		idx = s.newValue2(ssa.OpAnd64, uptr, idx, s.constInt64(uptr, sharePagesLen-1))
+	} else {
+		idx = s.newValue2(ssa.OpRsh32Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift))
+		idx = s.newValue2(ssa.OpAnd32, uptr, idx, s.constInt32(uptr, sharePagesLen-1))
+	}
+	base := s.entryNewValue1A(ssa.OpAddr, types.NewPtr(u8), ir.Syms(s.gd).SharePages, s.sb)
+	any := s.rawLoad(u8, s.newValue2(ssa.OpAddPtr, types.NewPtr(u8), base, idx))
+	cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], any, s.constInt8(u8, 0))
+
+	lockedVar := ssaMarker("locked")
+	bCall := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+	s.vars[lockedVar] = s.constBool(false)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bCall)
+	b.AddEdgeTo(bDone)
+
+	s.startBlock(bCall)
+	s.vars[lockedVar] = s.rtcall(ir.Syms(s.gd).ShareStore, true, []*types.Type{types.Types[types.TBOOL]}, dst, s.constInt(uptr, size))[0]
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	locked := s.variable(lockedVar, types.Types[types.TBOOL])
+	delete(s.vars, lockedVar)
+	return locked
 }
 
 func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
@@ -354,8 +392,32 @@ func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 	locked := s.shareLock(left, t.Size())
 	if skip == 0 {
+		// Two copies of the store: if the memory is not shared,
+		// which the runtime has just found, what is stored there
+		// needs no publishing either, and the pointer stores of
+		// that copy say so to the write barrier pass.
+		bShared := s.f.NewBlock(ssa.BlockPlain)
+		bLocal := s.f.NewBlock(ssa.BlockPlain)
+		bDone := s.f.NewBlock(ssa.BlockPlain)
+		b := s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(locked)
+		b.Likely = ssa.BranchUnlikely
+		b.AddEdgeTo(bShared)
+		b.AddEdgeTo(bLocal)
+
+		s.startBlock(bShared)
 		s.rawStoreType(t, left, right, 0, leftIsStmt)
-		s.shareUnlock(locked, left, t.Size())
+		s.rtcall(ir.Syms(s.gd).ShareUnlock, true, nil, left, s.constInt(types.Types[types.TUINTPTR], t.Size()))
+		s.endBlock().AddEdgeTo(bDone)
+
+		s.startBlock(bLocal)
+		s.dstLocal = true
+		s.rawStoreType(t, left, right, 0, leftIsStmt)
+		s.dstLocal = false
+		s.endBlock().AddEdgeTo(bDone)
+
+		s.startBlock(bDone)
 		return
 	}
 	bLocked := s.f.NewBlock(ssa.BlockPlain)

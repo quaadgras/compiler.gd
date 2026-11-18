@@ -106,6 +106,12 @@ holds one.
   memory, still that if the length fits the capacity that is there now,
   and a store of the whole slice otherwise: another goroutine may have
   stored a shorter one since this one was loaded.
+- **Before it calls** `sharestore`, compiled code loads one byte
+  (`runtime.sharePages`, a byte for each 8 KiB page of memory, found from
+  the address) that is zero unless something in a page like that one was
+  ever shared; if it is zero there is no call. And if the runtime says
+  the memory is not shared, the store that follows has no publishing
+  calls either: there are two copies of the store.
 - **A function with its own exclusion** for what it loads and stores is
   marked `//go:notear` and has none of this (its pointer stores still
   publish): `sync.Pool`'s, where a P's private value is its own and the

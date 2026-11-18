@@ -99,6 +99,7 @@ type SymsStruct struct {
 	ShareTypedmemmove         *obj.LSym
 	ShareSeq                  *obj.LSym
 	ShareSeqLoad              *obj.LSym
+	SharePages                *obj.LSym
 	ShareCheck                *obj.LSym
 	// Wasm
 	SigPanic             *obj.LSym

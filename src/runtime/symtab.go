@@ -621,6 +621,7 @@ const debugPcln = false
 //
 //go:linkname moduledataverify1
 func moduledataverify1(datap *moduledata) {
+	shareModule(datap)
 	// Check that the pclntab's format is valid.
 	hdr := datap.pcHeader
 	if hdr.magic != abi.CurrentPCLnTabMagic || hdr.pad1 != 0 || hdr.pad2 != 0 ||

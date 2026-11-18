@@ -231,6 +231,7 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).ShareLoadMem = typecheck.LookupRuntimeFunc(gd, "shareloadmem")
 	ir.Syms(gd).ShareTypedmemmove = typecheck.LookupRuntimeFunc(gd, "sharetypedmemmove")
 	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
+	ir.Syms(gd).SharePages = typecheck.LookupRuntimeVar(gd, "sharePages") // [1 << 20]uint8
 	ir.Syms(gd).ShareSeqLoad = typecheck.LookupRuntimeFunc(gd, "shareseqload")
 	ir.Syms(gd).ShareSeq = typecheck.LookupRuntimeVar(gd, "shareSeq")                         // [1024]uint32
 	ir.Syms(gd).X86HasAVX = typecheck.LookupRuntimeVar(gd, "x86HasAVX")                       // bool
