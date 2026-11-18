@@ -1,16 +1,20 @@
 #!/bin/bash
 # build.sh [dir]: make the site in dir (default dist/), with the
-# playground (playground.html, playground/): the go command for GOOS=js (go.wasm,
-# stripped and gzipped: under Pages' 25 MiB a file), what it reads of GOROOT,
-# and a build cache of common packages (made by playground/prebuild.mjs, as the
-# page's go command makes it), so that a first build is quick.
+# playground (playground.html, playground/), and the playground's large
+# files in r2/playground/, which download.compiler.gd (the R2 bucket
+# compiler-gd) serves: the go command for GOOS=js (go.wasm, stripped and
+# gzipped), what it reads of GOROOT, and a build cache of common packages
+# (made by playground/prebuild.mjs, as the page's go command makes it),
+# so that a first build is quick. The names are fixed (the bucket keeps
+# only the latest); the manifest adds a hash of each to its URL.
 # Needs bin/go built (src/make.bash) and node 24.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../.." && pwd)
 out=${1:-$here/dist}
-rm -rf "$out"
-mkdir -p "$out/playground"
+r2=$here/r2/playground
+rm -rf "$out" "$r2"
+mkdir -p "$out/playground" "$r2"
 cp "$here"/playground/*.mjs "$out/playground/"
 cp "$root"/lib/wasm/{wasm_gc.js,wasm_gc_js.js,wasm_gc_fs.js,wasm_gc_browser.js} "$out/playground/"
 tmp=$(mktemp -d)
@@ -36,19 +40,9 @@ NODE_OPTIONS= node --stack-size=4000 "$out/playground/prebuild.mjs" "$tmp/go.was
 	slices sort strconv strings sync sync/atomic text/tabwriter time unicode unicode/utf8 unique internal/c23
 gzip -9n "$tmp/cache.tar"
 
-# Names with a hash of the contents, so the files can be cached forever.
-name() { echo "$1.$(sha256sum "$2" | cut -c1-12)$3"; }
-gzip -9n -c "$tmp/go.wasm" > "$tmp/go.wasm.gz"
-wasm=$(name go "$tmp/go.wasm.gz" .wasm.gz)
-if [ "$(stat -c %s "$tmp/go.wasm.gz")" -ge $((25 << 20)) ]; then
-	echo "go.wasm.gz is over 25 MiB, the limit of a file on Pages" >&2
-	exit 1
-fi
-cp "$tmp/go.wasm.gz" "$out/playground/$wasm"
-goroot=$(name goroot "$tmp/goroot.tar.gz" .tar.gz)
-cache=$(name cache "$tmp/cache.tar.gz" .tar.gz)
-cp "$tmp/goroot.tar.gz" "$out/playground/$goroot"
-cp "$tmp/cache.tar.gz" "$out/playground/$cache"
+gzip -9n -c "$tmp/go.wasm" > "$r2/go.wasm.gz"
+cp "$tmp/goroot.tar.gz" "$r2/goroot.tar.gz"
+cp "$tmp/cache.tar.gz" "$r2/cache.tar.gz"
 rm "$out"/playground/*.mjs "$out"/playground/*.js
 "$here/pages.sh" "$out"
 ls -l "$out" "$out/playground" >&2
