@@ -86,7 +86,9 @@ func TestAtomicAlignment(t *testing.T) {
 	// Call go/types to analyze the runtime package.
 	var info types.Info
 	info.Types = map[ast.Expr]types.TypeAndValue{}
-	conf := types.Config{Importer: importer.Default()}
+	// The target's sizes (gd: the runtime asserts that iface's are the
+	// fat interface's, 2*goarch.PtrSize + 16).
+	conf := types.Config{Importer: importer.Default(), Sizes: types.SizesFor("gc", runtime.GOARCH)}
 	_, err = conf.Check("runtime", fset, files, &info)
 	if err != nil {
 		t.Fatalf("typechecking runtime failed: %v", err)

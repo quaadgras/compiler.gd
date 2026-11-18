@@ -33,7 +33,7 @@ Files known to assume 2-word iface that need gd variants:
 - `src/cmd/compile/internal/types/size.go` TINTER case (w, intRegs, align,
   ptrBytes). Keep `ptrBytes = 2*PtrSize` (only data is in the ptr prefix).
 
-## 1. Layout (32 B on 64-bit, 24 B on 32-bit; 8-byte aligned)
+## 1. Layout (32 B on 64-bit, 24 B on 32-bit; aligned to a register)
 
 ```
 offset  0: tab  *itab       (iface)   OR   _type *_type   (eface)   [never scanned — rodata]
@@ -45,8 +45,14 @@ offset 24: inline[1] uint64                                          [never scan
 The inline field is `[2]uint64`, not `[2]uintptr`, so the inline slot is a
 fixed 16 bytes regardless of pointer size. On 32-bit `uintptr` would
 collapse the slot to 8 bytes and kill the optimization; `uint64` preserves
-it and forces 8-byte struct alignment (which the tab+data prefix satisfies
-naturally: 4+4 on 32-bit, 8+8 on 64-bit).
+it. (As built, the field is a `complex128`.) The header is aligned as that
+field is, to a register: 8 bytes on 64-bit targets and on wasm32, 4 on 386,
+arm and mips, where a `uint64` is aligned to 4 and so are stacks, so a
+header aligned to 8 could not be on one (escape analysis would move every
+interface variable to the heap). The tab+data prefix keeps the payload at
+offset 8 there. Only a type aligned to no more than the header is stored
+inline (`types.IsInlineIface`), which on those targets leaves out the
+8-aligned types of the 64-bit atomics.
 
 - **Inline rep:** `data == nil`, payload lives at bytes 16..31.
 - **Boxed rep:** `data` is a heap pointer (today's behavior), inline slot ignored.

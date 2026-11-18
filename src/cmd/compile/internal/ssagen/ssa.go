@@ -1828,9 +1828,9 @@ func (s *state) stringSlice(v, lo, hi *ssa.Value, bounded bool) *ssa.Value {
 
 	// Compute newLen and a zero-when-empty mask to prevent the heap-rep
 	// result from carrying a past-end pointer for s[len:].
-	newLen := s.newValue2(ssa.OpSub64, intT, hi, lo)
+	newLen := s.newValue2(s.ssaOp(ir.OSUB, intT), intT, hi, lo)
 	mask := s.newValue1(ssa.OpSlicemask, intT, newLen)
-	delta := s.newValue2(ssa.OpAnd64, intT, lo, mask)
+	delta := s.newValue2(s.ssaOp(ir.OAND, intT), intT, lo, mask)
 
 	// 32-bit: no inline rep, always heap path (but wasm32's). Nor can
 	// a substring of a constant length past what a header holds come
@@ -2314,6 +2314,13 @@ func (s *state) iMakeInlineFromValue(ifaceT *types.Type, tab *ssa.Value, valNode
 			widened = src
 		default:
 			s.gd.Fatalf("iMakeInlineFromValue: unexpected integer size %d for %v", valT.Size(), valT)
+		}
+		if s.config.BigEndian && valT.Size() < 8 {
+			// The value's bytes start the payload, where everything
+			// that reads it (inlineExtract, the runtime, reflect) and
+			// the static data (staticinit) have them: on a big-endian
+			// target, the top of the uint64.
+			widened = s.newValue2(ssa.OpLsh64x64, u64, widened, s.constInt64(u64, 64-8*valT.Size()))
 		}
 		tmp := typecheck.TempAt(s.gd, valNode.Pos(), s.curfn, u64)
 		tmp.SetAddrtaken(true)

@@ -61,9 +61,10 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 		assert(!isTypeParam(T))
 		if _, ok := t.(*Interface); ok && s.WordSize < 8 {
 			// gd: an interface ends in a complex128 (its inline
-			// payload), aligned to 8 even with 4-byte words, as
-			// cmd/compile/internal/types aligns it.
-			return 8
+			// payload), and is aligned as that is, as
+			// cmd/compile/internal/types aligns it: to 8 on wasm32
+			// with its 4-byte words, to 4 on the other 32-bit targets.
+			return min(8, s.MaxAlign)
 		}
 		return s.WordSize
 	case *Basic:

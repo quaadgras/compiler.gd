@@ -6,7 +6,6 @@ package runtime
 
 import (
 	"internal/abi"
-	"internal/goarch"
 	"unsafe"
 )
 
@@ -283,9 +282,7 @@ func resolveForwardedRecvFieldMask(carrier unsafe.Pointer, fieldOffset uintptr, 
 		return conservativeAllEscapeMask
 	}
 	tab := inner.itab
-	ni := len(tab.Inter.Methods)
-	maskBase := unsafe.Add(unsafe.Pointer(&tab.Fun[0]), uintptr(ni)*goarch.PtrSize)
-	raw := *(*uint64)(unsafe.Add(maskBase, uintptr(methodIdx)*8))
+	raw := *itabEscMaskPtr(tab, methodIdx)
 	// Pass depth (not depth-1): resolveMask/Slow decrement
 	// internally before calling the inner compute fn (if any).
 	// Subtracting here would double-count.

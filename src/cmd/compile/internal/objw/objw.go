@@ -56,6 +56,35 @@ func UintN(gd *base.Invocation, s *obj.LSym, off int, v uint64, wid int) int {
 	return off + wid
 }
 
+// EscMask writes the escape mask v of a function value or an itab
+// method (doc/gd/escape-bits.md) into s at offset off, and returns the
+// next unused offset. A mask is a uint64, which is aligned to a
+// register (types.RegSize): on the 32-bit targets but wasm32 that is 4
+// bytes, so off need not be a multiple of 8.
+func EscMask(gd *base.Invocation, s *obj.LSym, off int, v uint64) int {
+	if off%types.RegSize != 0 {
+		gd.Fatalf("EscMask: misaligned: v=%d off=%d", v, off)
+	}
+	s.WriteInt(gd.Ctxt, int64(off), 8, int64(v))
+	return off + 8
+}
+
+// EscMaskFunc writes a dynamic escape mask into s at offset off: the
+// address of the function x that computes the mask, plus 1 (bit 0 tells
+// it from a static mask). With 4-byte pointers the address is the low
+// half of the uint64, which on a big-endian target is its second word.
+func EscMaskFunc(gd *base.Invocation, s *obj.LSym, off int, x *obj.LSym) int {
+	if off%types.RegSize != 0 {
+		gd.Fatalf("EscMaskFunc: misaligned: off=%d", off)
+	}
+	addr := off
+	if gd.Ctxt.Arch.ByteOrder == binary.BigEndian {
+		addr += 8 - types.PtrSize
+	}
+	s.WriteAddr(gd.Ctxt, int64(addr), types.PtrSize, x, 1)
+	return off + 8
+}
+
 func SymPtr(gd *base.Invocation, s *obj.LSym, off int, x *obj.LSym, xoff int) int {
 	off = int(types.RoundUp(int64(off), int64(types.PtrSize)))
 	s.WriteAddr(gd.Ctxt, int64(off), types.PtrSize, x, int64(xoff))

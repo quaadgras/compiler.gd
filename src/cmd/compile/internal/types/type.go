@@ -1975,8 +1975,10 @@ func IsDirectIface(t *Type) bool {
 
 // IsInlineIface reports whether t is eligible for inline storage in the
 // 16-byte inline slot of an iface/eface header (gd fat-interface layout).
-// Eligibility: pointer-free, 0 < size <= 16, alignment <= 8, and not
-// pointer-shaped. Zero-sized types are excluded so they keep the stock
+// Eligibility: pointer-free, 0 < size <= 16, aligned to no more than
+// the slot (to a register: 4 bytes on the 32-bit targets but wasm32,
+// where only the types the 64-bit atomics mark align64 need 8), and
+// not pointer-shaped. Zero-sized types are excluded so they keep the stock
 // representation (Data points to runtime.zerobase) — nothing to store
 // inline anyway, and callers like reflect.Value.InterfaceData() observe
 // the Data word directly. Pointer-shaped types are excluded even when
@@ -1985,7 +1987,7 @@ func IsDirectIface(t *Type) bool {
 // (see (*pollDesc).makeArg) so assertions must read from Data, and the
 // user-level any(p) path must agree with that layout.
 func IsInlineIface(t *Type) bool {
-	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(nil, t) == 0 && t.Alignment() <= 8 && !t.IsPtrShaped()
+	return t.Size() > 0 && t.Size() <= 16 && PtrDataSize(nil, t) == 0 && t.Alignment() <= int64(RegSize) && !t.IsPtrShaped()
 }
 
 // IsSpreadIface reports whether t is eligible for spread storage in an

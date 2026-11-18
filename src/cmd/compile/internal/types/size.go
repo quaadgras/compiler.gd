@@ -545,8 +545,11 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 
 	case TINTER:
 		// gd fat-interface layout: { tab/_type, data, inline complex128 }.
-		// Size is 2*PtrSize + 16: 32 on 64-bit, 24 on 32-bit. The complex128
-		// inline field forces 8-byte alignment even on 32-bit.
+		// Size is 2*PtrSize + 16: 32 on 64-bit, 24 on 32-bit. It is
+		// aligned as the complex128 is, to a register: to 8 on wasm32
+		// too, to 4 on the other 32-bit targets, whose stacks are aligned
+		// to no more (escape.HeapAllocReason would put every interface
+		// variable in the heap).
 		// ptrBytes stays at 2*PtrSize: only the tab and data words live
 		// in the pointer-bitmap prefix (typebits.set marks data only;
 		// the inline payload is pointer-free by construction under the
@@ -554,11 +557,7 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		// complex128 in two float registers, so TINTER needs 2 int +
 		// 2 float regs — matches synthIface.
 		w = 2*int64(PtrSize) + 16
-		if PtrSize >= 8 {
-			t.align = uint8(PtrSize)
-		} else {
-			t.align = 8
-		}
+		t.align = uint8(RegSize)
 		t.intRegs = 2
 		t.floatRegs = 2
 		expandiface(gd, t)

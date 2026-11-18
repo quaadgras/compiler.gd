@@ -348,11 +348,11 @@ func stringStructOf(sp *string) *stringStruct {
 
 // length returns the logical string length regardless of representation.
 func (s *stringStruct) length() int {
-	tag := s.len >> abi.StringTagShift
+	tag := uint64(s.len) >> abi.StringTagShift
 	if tag != 0 {
 		return int(tag)
 	}
-	return int(s.len & abi.StringLenMask)
+	return int(uint64(s.len) & abi.StringLenMask)
 }
 
 // isInline reports whether the string is inline-rep.
@@ -362,7 +362,7 @@ func (s *stringStruct) length() int {
 // the literal's bytes in rodata (see doc/gd/sso-string.md, "literal
 // provenance"), so word 0 being non-nil does not imply heap rep.
 func (s *stringStruct) isInline() bool {
-	return s.len>>abi.StringTagShift != 0
+	return uint64(s.len)>>abi.StringTagShift != 0
 }
 
 // bytes returns a pointer to the first data byte. For heap rep it
@@ -495,7 +495,7 @@ func sealStringHash(s string) string {
 	if sh.str == nil || sh.hash != 0 || sh.isInline() {
 		return s
 	}
-	n := int(sh.len & abi.StringLenMask)
+	n := int(uint64(sh.len) & abi.StringLenMask)
 	if n == 0 {
 		return s
 	}

@@ -41,6 +41,10 @@ import (
 //     a few instructions; readers tolerate the writer being preempted
 //     by spinning on the odd-seq check.
 type Value struct {
+	// seq is accessed with 64-bit atomics, so it is aligned to 8 also
+	// where a uint64 (and an interface) is aligned to 4.
+	_ align64
+
 	// seq is the seqlock counter. Bit 0 is the writer-in-flight flag.
 	// Bit 1 selects the active slot. seq increments by 1 to enter the
 	// write window, by 1 again to publish (so by 2 per Store overall).
@@ -174,13 +178,13 @@ func (v *Value) Store(val any) {
 	v.publish(cur, np)
 }
 
-// ifaceEq reports whether two 32-byte iface headers are bytewise
-// identical. Reads them as 4×uint64 so the compiler turns this into
-// four cmp+jne pairs with no branches in the equal case.
+// ifaceEq reports whether two iface headers (32 bytes, 24 with 4-byte
+// words) are bytewise identical. Reads them as uint64s so the compiler
+// turns this into a few cmp+jne pairs with no branches in the equal
+// case.
 func ifaceEq(x, y abi.EmptyInterface) bool {
-	xp := (*[4]uint64)(unsafe.Pointer(&x))
-	yp := (*[4]uint64)(unsafe.Pointer(&y))
-	return xp[0] == yp[0] && xp[1] == yp[1] && xp[2] == yp[2] && xp[3] == yp[3]
+	const n = unsafe.Sizeof(abi.EmptyInterface{}) / 8
+	return *(*[n]uint64)(unsafe.Pointer(&x)) == *(*[n]uint64)(unsafe.Pointer(&y))
 }
 
 // Swap stores new into Value and returns the previous value. It returns nil if

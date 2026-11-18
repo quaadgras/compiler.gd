@@ -155,7 +155,7 @@ func FinalizeItabMasks(gd *base.Invocation) {
 		if gd.Debug.GdForwarderDisable == 0 && p.fn != nil && p.fn.GdForwarder != nil && p.fn.GdForwarder.SyntheticComputeFn != nil {
 			if hasPointerBearingArg(p.fn) {
 				cfSym := staticdata.FuncLinksym(gd, p.fn.GdForwarder.SyntheticComputeFn.Nname)
-				objw.SymPtr(gd, p.lsym, p.offset, cfSym, 1)
+				objw.EscMaskFunc(gd, p.lsym, p.offset, cfSym)
 				continue
 			}
 		}
@@ -171,7 +171,7 @@ func FinalizeItabMasks(gd *base.Invocation) {
 		case p.origType != nil:
 			mask = computeMethodEscMask(p.origType)
 		}
-		objw.UintN(gd, p.lsym, p.offset, mask, 8)
+		objw.EscMask(gd, p.lsym, p.offset, mask)
 	}
 	gd.ReflectdataPendingItabMasks = nil
 }
@@ -1389,7 +1389,7 @@ func writeITab(gd *base.Invocation, lsym *obj.LSym, typ, iface *types.Type, allo
 		// by FinalizeItabMasks after escape analysis runs. writeITab
 		// is called during noder for statically-constructible itabs,
 		// well before ir.Func.EscMask has been populated.
-		objw.UintN(gd, lsym, int(maskOffset)+i*8, 0, 8)
+		objw.EscMask(gd, lsym, int(maskOffset)+i*8, 0)
 		if completeItab && i < len(entrySigs) {
 			sig := entrySigs[i]
 			gd.ReflectdataPendingItabMasks = append(pendingItabMasks(gd), pendingItabMask{

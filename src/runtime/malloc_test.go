@@ -153,9 +153,15 @@ func TestStringConcatenationAllocs(t *testing.T) {
 	// Under the gd small-string optimization the 13-byte result rides
 	// in an inline string header, so string(b) no longer copies the
 	// slice onto the heap. Escape analysis then leaves b on the
-	// stack, and the whole block runs allocation-free.
-	if n != 0 {
-		t.Fatalf("want 0 allocations, got %v", n)
+	// stack, and the whole block runs allocation-free. With 4-byte
+	// words a string has no inline form but on wasm32, and the result
+	// is on the heap, as in stock Go.
+	want := 0.0
+	if goarch.PtrSize == 4 && runtime.GOARCH != "wasm" {
+		want = 1
+	}
+	if n != want {
+		t.Fatalf("want %v allocations, got %v", want, n)
 	}
 }
 
