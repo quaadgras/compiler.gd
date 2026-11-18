@@ -314,10 +314,16 @@ of stock.
 
 #### Which allocations go in the buffer (escape/phaseg.go)
 
-The caller (walk's `phaseGCallSiteRewrite`) passes a fresh, zeroed
-buffer for result k only when the result doesn't outlive its frame and
-the callee takes no pointers, so the buffer holds nothing live and no
-input points into it. The callee then decides, in escape analysis,
+The caller (walk's `phaseGCallSiteRewrite`) passes a buffer of its
+own to every call with one pointer result whose result doesn't
+outlive its frame (the call's spill location, escape/call.go),
+wherever the call is: `p := f()`, `f().x`, `use(f())`, a loop
+condition. The buffer holds nothing live when the call starts, and
+no input points into it: only an earlier result of the same call
+could, and one still live across iterations makes the result escape
+(a variable outside the loop outlives it). Until 2026-11-18 the
+caller also required the callee to take no pointers, and only
+recognised `p := f()`. The callee then decides, in escape analysis,
 which of its allocations to make there: one whose address reaches
 result k and nothing else that outlives the call (the heap, a dynamic
 call's candidate location, another result of any function in the
@@ -334,7 +340,11 @@ Counting every location whose address reaches result k, of any kind,
 also covers an object stored inside another returned object
 (`return &T{next: mk()}`): the container is a second user, so neither
 goes in the buffer. The walks (`addrReach`) don't skip locations that
-escape, as the solver's do, so they see every root.
+escape, as the solver's do, so they see every root. One flow has no
+edge to walk: an address stored where something already escapes
+(`m[k] = &o`, the heap) is marked escaping as the graph is built
+(`location.escapedInGraph`); the heap's walk starts from those
+locations too.
 
 Tagged allocations are made by `runtime.maybeInPlace(outBuf_k, T)`:
 locals by ssagen's `newHeapaddr` (`Name.OutBufResultIdx`), new and

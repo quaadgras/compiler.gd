@@ -92,14 +92,15 @@ func consumePayload(p *escBitsPayload) {
 	escBitsPayloadScalarSink = p.A + p.B + p.C + p.D
 }
 
-// TestOutBufStockMakeAllocates: the stock shape allocates exactly
-// once per call, regardless of caller context. Locks in the
-// baseline we're trying to beat.
+// TestOutBufStockMakeAllocates: the stock shape, whose result the
+// caller passes straight to a call that doesn't keep it, gets the
+// caller's buffer from Phase G (escape/phaseg.go) and doesn't
+// allocate. (Stock Go allocates once.)
 func TestOutBufStockMakeAllocates(t *testing.T) {
 	f := func() { consumePayload(escBitsMakeStock()) }
 	n := testing.AllocsPerRun(100, f)
-	if n != 1 {
-		t.Errorf("stock make: got %v allocs/run, want exactly 1", n)
+	if n != 0 {
+		t.Errorf("stock make: got %v allocs/run, want 0", n)
 	}
 }
 
@@ -119,13 +120,14 @@ func TestOutBufStackBufferZeroAllocs(t *testing.T) {
 }
 
 // TestOutBufNilFallsBackToHeap: when the caller passes nil the
-// callee must allocate on the heap — same cost as the stock
-// shape, proving nil is a correct fallback.
+// hand-written callee falls back to new, which is the only object
+// its result can be, so Phase G puts that in the buffer the caller
+// passes implicitly: no allocation either way.
 func TestOutBufNilFallsBackToHeap(t *testing.T) {
 	f := func() { consumePayload(escBitsMakeOutBuf(nil)) }
 	n := testing.AllocsPerRun(100, f)
-	if n != 1 {
-		t.Errorf("outbuf nil: got %v allocs/run, want exactly 1", n)
+	if n != 0 {
+		t.Errorf("outbuf nil: got %v allocs/run, want 0", n)
 	}
 }
 

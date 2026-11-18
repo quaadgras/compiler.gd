@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"cmd/compile/internal/base"
-	"cmd/compile/internal/escape"
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -19,22 +18,15 @@ import (
 // address of a fresh stack-allocated buffer when the call's
 // corresponding result is provably non-escaping in the caller.
 //
-// For now, two assignment shapes are recognised:
+// A call with one pointer result gets a buffer wherever it is, when
+// escape analysis says the result doesn't outlive the frame (the
+// call's Esc, from its spill location in escape/call.go), and fn's own
+// buffer when escape analysis put the result in it (chain-fold).
+// (A call with several results has no spill location, so none of its
+// results gets a buffer.)
 //
-//  1. autotmp_X = callee(args...)               — single-result OAS
-//  2. autotmp_A, autotmp_B = callee(args...)    — multi-result OAS2
-//
-// In each case, when the lhs name's escape verdict is EscNone, the
-// matching outBuf nil arg is replaced with unsafe.Pointer(&tmp_k),
-// where tmp_k is a freshly declared T_k autotmp. A zeroing
-// assignment `tmp_k = T_k{}` is spliced into the enclosing block
-// *before* the call's assignment statement — liveness requires an
-// explicit write before any address-take of a pointer-bearing
-// stack local.
-//
-// Sites whose result doesn't fit one of the recognised shapes
-// (or whose result escapes) keep their nil outBuf and fall through
-// to the heap path inside maybeInPlace — same cost as stock.
+// Other sites keep their nil outBuf and fall through to the heap path
+// inside maybeInPlace — same cost as stock.
 func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
 	if !types.PhaseGActive() {
 		return
@@ -55,7 +47,102 @@ func phaseGCallSiteRewrite(gd *base.Invocation, fn *ir.Func) {
 		pkg == "syscall" {
 		return
 	}
-	rewriteStmts(gd, fn, &fn.Body)
+	// Every call whose result doesn't outlive this frame gets a
+	// buffer, wherever it is: f().x, use(f()), a loop condition. Its
+	// zeroing goes first in the body, which dominates every use (the
+	// callee zeroes the buffer again when it uses it, so what an
+	// earlier iteration left there doesn't matter). An argument can't
+	// point into the buffer: only an earlier result of the same call
+	// could, and one still live across iterations makes the result
+	// escape (escape analysis: a variable outside the loop outlives
+	// it).
+	//
+	// A call whose result flows only to one of fn's own results,
+	// and that escape analysis put in the buffer fn was passed for it
+	// (escape/phaseg.go), is passed that buffer instead (chain-fold).
+	var zero []ir.Node
+	ir.VisitList(fn.Body, func(n ir.Node) {
+		call, ok := n.(*ir.CallExpr)
+		if !ok || !calleeIsExtended(call) {
+			return
+		}
+		switch {
+		case call.GdForwardOutBufResult > 0:
+			forwardParentOutBuf(fn, call, int(call.GdForwardOutBufResult)-1)
+		case call.Esc() == ir.EscNone:
+			if z := giveOutBuf(gd, fn, call); z != nil {
+				zero = append(zero, z)
+			}
+		}
+	})
+	if len(zero) > 0 {
+		fn.Body = append(ir.Nodes(zero), fn.Body...)
+	}
+}
+
+// giveOutBuf replaces the nil outBuf argument of call, a call of a
+// function with one result, a pointer, with the address of a new stack
+// buffer of the result's element type, and returns the statement that
+// zeroes the buffer. It returns nil if call has no such argument.
+func giveOutBuf(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr) ir.Node {
+	if !calleeIsExtended(call) {
+		return nil
+	}
+	sig := call.Fun.Type()
+	if sig.NumOutBufs() != 1 || len(sig.Results()) != 1 {
+		return nil
+	}
+	ptrT := sig.Results()[0].Type
+	if ptrT == nil || !ptrT.IsPtr() || ptrT.Elem() == nil || ptrT.Elem().Size() == 0 {
+		return nil
+	}
+	for i, p := range sig.Params() {
+		if !p.IsOutBufParam() {
+			continue
+		}
+		if i >= len(call.Args) || call.Args[i].Op() != ir.ONIL {
+			return nil
+		}
+		buf, zero := newOutBuf(gd, fn, call, ptrT.Elem())
+		call.Args[i] = buf
+		return zero
+	}
+	return nil
+}
+
+// newOutBuf returns unsafe.Pointer(&buf) for a new stack buffer buf of
+// type t for call's result, and the statement that zeroes it.
+func newOutBuf(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr, t *types.Type) (ir.Node, ir.Node) {
+	// A fresh PAUTO of type T. Mark Addrtaken so downstream passes
+	// (liveness/stack map) see it as a pointer-containing stack
+	// slot if T has pointers.
+	bufName := typecheck.TempAt(gd, call.Pos(), fn, t)
+	bufName.SetEsc(ir.EscNone)
+	bufName.SetAddrtaken(true)
+	// CRITICAL: the returned pointer aliases this buffer, so its
+	// lifetime extends past the call. The compiler's AllocFrame
+	// pass can't see that aliasing (the pointer flows through
+	// runtime.maybeInPlace and back), so it would happily reuse
+	// this slot for a later autotmp — which would zero-overwrite
+	// the callee's fill. Mark non-mergeable to pin the slot for
+	// the full remainder of the function frame.
+	bufName.SetNonMergeable(true)
+	if t.HasPointers() {
+		bufName.SetNeedzero(true)
+	}
+
+	// The zero-init as a plain OAS with a nil RHS — the internal
+	// form of "var x T". Liveness requires an explicit write before
+	// any address-take of a pointer-bearing stack local.
+	zeroAs := ir.NewAssignStmt(gd, call.Pos(), bufName, nil)
+	zeroAs.SetTypecheck(1)
+
+	addr := typecheck.NodAddrAt(gd, call.Pos(), bufName)
+	addr.SetType(types.NewPtr(t))
+	addr.SetTypecheck(1)
+	conv := ir.NewConvExpr(gd, call.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], addr)
+	conv.SetTypecheck(1)
+	return conv, zeroAs
 }
 
 // phaseGOwnerPkg returns the path of the package whose code fn is,
@@ -74,132 +161,6 @@ func phaseGOwnerPkg(gd *base.Invocation, fn *ir.Func) string {
 		}
 	}
 	return gd.Ctxt.Pkgpath
-}
-
-// rewriteStmts walks stmts in place, rewriting recognised call
-// sites and splicing zero-init statements before each rewritten
-// assignment. Recurses into block-bearing children so calls
-// inside if/for bodies get the same treatment.
-func rewriteStmts(gd *base.Invocation, fn *ir.Func, stmts *ir.Nodes) {
-	var rebuilt ir.Nodes
-	changed := false
-	for _, s := range *stmts {
-		var pre []ir.Node
-		switch s := s.(type) {
-		case *ir.AssignStmt:
-			pre = tryRewriteSingleAssign(gd, fn, s)
-		case *ir.AssignListStmt:
-			pre = tryRewriteListAssign(gd, fn, s)
-		}
-		// Recurse into control-flow children AFTER handling this
-		// statement so the containing-block rewrite is already in
-		// place before descending.
-		recurseIntoBlocks(gd, fn, s)
-		if len(pre) > 0 {
-			changed = true
-			rebuilt = append(rebuilt, pre...)
-		}
-		rebuilt = append(rebuilt, s)
-	}
-	if changed {
-		*stmts = rebuilt
-	}
-}
-
-// recurseIntoBlocks finds block-bearing children of n and
-// recursively rewrites each block's statement list.
-func recurseIntoBlocks(gd *base.Invocation, fn *ir.Func, n ir.Node) {
-	switch n := n.(type) {
-	case *ir.IfStmt:
-		rewriteStmts(gd, fn, &n.Body)
-		rewriteStmts(gd, fn, &n.Else)
-	case *ir.ForStmt:
-		rewriteStmts(gd, fn, &n.Body)
-	case *ir.RangeStmt:
-		rewriteStmts(gd, fn, &n.Body)
-	case *ir.SwitchStmt:
-		for _, cc := range n.Cases {
-			rewriteStmts(gd, fn, &cc.Body)
-		}
-	case *ir.SelectStmt:
-		for _, cc := range n.Cases {
-			rewriteStmts(gd, fn, &cc.Body)
-		}
-	case *ir.BlockStmt:
-		rewriteStmts(gd, fn, &n.List)
-	}
-}
-
-// tryRewriteSingleAssign handles `autotmp = callee(args...)`.
-// Returns the pre-statements (zero-init) to splice into the
-// enclosing block ahead of as.
-func tryRewriteSingleAssign(gd *base.Invocation, fn *ir.Func, as *ir.AssignStmt) []ir.Node {
-	call, ok := as.Y.(*ir.CallExpr)
-	if !ok {
-		return nil
-	}
-	if !calleeIsExtended(call) {
-		return nil
-	}
-	lhs, ok := as.X.(*ir.Name)
-	if !ok {
-		return nil
-	}
-	// CRITICAL safety check: lhs.Esc() only encodes whether lhs's
-	// STORAGE needs heap (e.g. if &lhs is taken and the address
-	// escapes). For a `*T` local receiving a factory's result,
-	// lhs.Esc() is EscNone even when the VALUE (the pointer bits)
-	// later flows to a heap sink via `return lhs`, `global = lhs`,
-	// etc. Stack-buffering under such uses would produce a heap
-	// pointer into our soon-to-die stack frame.
-	//
-	// Instead, we consult the CALL expression's Esc(), populated by
-	// escape analysis's Phase-G hook (see escape/call.go). The hook
-	// creates a synthetic spill location at the call site that
-	// stands in for the allocation the callee would normally
-	// perform; attrEscapes on that loc after solve means the
-	// allocation needs heap. Only a call that escape analysis has
-	// explicitly confirmed non-escaping (Esc==EscNone) is safe to
-	// stack-buffer — the default (EscUnknown) is treated as escape.
-	if call.Esc() == ir.EscNone {
-		return rewriteOutBufNils(gd, fn, call, []*ir.Name{lhs})
-	}
-	// Chain-fold: result escapes only via fn's own k-th return.
-	// Forward fn's outBuf_k as the call's outBuf — the caller's
-	// stack buffer (or nil) propagates through.
-	if call.GdForwardOutBufResult > 0 {
-		return forwardParentOutBuf(fn, call, int(call.GdForwardOutBufResult)-1)
-	}
-	return nil
-}
-
-// tryRewriteListAssign handles `a, b = callee(args...)`.
-func tryRewriteListAssign(gd *base.Invocation, fn *ir.Func, as *ir.AssignListStmt) []ir.Node {
-	if len(as.Rhs) != 1 {
-		return nil
-	}
-	call, ok := as.Rhs[0].(*ir.CallExpr)
-	if !ok {
-		return nil
-	}
-	if !calleeIsExtended(call) {
-		return nil
-	}
-	lhsNames := make([]*ir.Name, len(as.Lhs))
-	for i, l := range as.Lhs {
-		n, ok := l.(*ir.Name)
-		if !ok {
-			return nil
-		}
-		lhsNames[i] = n
-	}
-	if call.Esc() == ir.EscNone {
-		return rewriteOutBufNils(gd, fn, call, lhsNames)
-	}
-	if call.GdForwardOutBufResult > 0 {
-		return forwardParentOutBuf(fn, call, int(call.GdForwardOutBufResult)-1)
-	}
-	return nil
 }
 
 // forwardParentOutBuf rewrites the call's nil outBuf arg (for the
@@ -272,32 +233,6 @@ func findOutBufParamName(fn *ir.Func, k int) *ir.Name {
 	return nil
 }
 
-// sigHasPointerInputs reports whether any param or receiver of
-// sig carries pointer state into the callee — pointer, slice,
-// map, chan, interface, func, string, or a struct/array that
-// transitively contains one. Scalar-only inputs (int, float,
-// bool, …) can't alias any pointer-typed result.
-func sigHasPointerInputs(sig *types.Type) bool {
-	if sig == nil || sig.Kind() != types.TFUNC {
-		return false
-	}
-	if r := sig.Recv(); r != nil && r.Type != nil && r.Type.HasPointers() {
-		return true
-	}
-	for _, p := range sig.Params() {
-		if p == nil || p.Type == nil {
-			continue
-		}
-		if p.IsOutBufParam() {
-			continue
-		}
-		if p.Type.HasPointers() {
-			return true
-		}
-	}
-	return false
-}
-
 // calleeIsExtended reports whether call's callee has Phase G's
 // extended ABI (i.e., trailing outBuf params).
 func calleeIsExtended(call *ir.CallExpr) bool {
@@ -309,129 +244,4 @@ func calleeIsExtended(call *ir.CallExpr) bool {
 		return false
 	}
 	return t.GdReturnOutBuf() && t.NumOutBufs() > 0
-}
-
-// rewriteOutBufNils walks the call's args, locates trailing
-// outBuf nils, and replaces each with unsafe.Pointer(&tmp_k)
-// when the corresponding lhs (lhs[k] for the k-th pointer result)
-// is non-escaping. Returns a list of zero-init statements that
-// must be spliced into the enclosing block before the call's
-// assignment — liveness requires an explicit write before any
-// address-take of a pointer-bearing stack local.
-func rewriteOutBufNils(gd *base.Invocation, fn *ir.Func, call *ir.CallExpr, lhs []*ir.Name) []ir.Node {
-	sig := call.Fun.Type()
-	params := sig.Params()
-	results := sig.Results()
-	// Map result index → lhs index. With Phase G the K-th outBuf
-	// corresponds to the K-th pointer-typed result.
-	resultToLhs := make(map[int]*ir.Name, len(lhs))
-	for ri, r := range results {
-		if ri >= len(lhs) {
-			break
-		}
-		if r != nil && r.Type != nil && r.Type.IsPtr() {
-			resultToLhs[ri] = lhs[ri]
-		}
-	}
-	outBufToResult := make(map[int]int, sig.NumOutBufs())
-	{
-		k := 0
-		for ri, r := range results {
-			if r != nil && r.Type != nil && r.Type.IsPtr() {
-				outBufToResult[k] = ri
-				k++
-			}
-		}
-	}
-
-	var pre []ir.Node
-	outBufK := 0
-	for i, p := range params {
-		if !p.IsOutBufParam() {
-			continue
-		}
-		if i >= len(call.Args) {
-			break
-		}
-		arg := call.Args[i]
-		if arg.Op() != ir.ONIL {
-			outBufK++
-			continue
-		}
-		ri, ok := outBufToResult[outBufK]
-		outBufK++
-		if !ok {
-			continue
-		}
-		dst, ok := resultToLhs[ri]
-		if !ok || dst == nil {
-			continue
-		}
-		if !ir.StackAllocatable(dst.Esc()) {
-			continue
-		}
-		// Second-side check: the callee's result k must be a fresh
-		// allocation, i.e. no parameter (or receiver) of sig is
-		// tagged "leaks to result k" in escape analysis. Otherwise
-		// the callee may return an existing input pointer whose
-		// lifetime isn't tied to our stack frame, and stack-
-		// buffering would either be wasted (buf unused) or unsafe
-		// if the callee filled buf and *also* aliased an input.
-		if escape.ResultAliasesParam(gd, sig, ri) {
-			continue
-		}
-		// Extra strictness (first cut): require that NO param/recv
-		// of sig is pointer-containing. This rules out every form
-		// of input→result aliasing by construction, even across
-		// escape-tag limitations (tag rounding, Optimize(), cross-
-		// package info loss). Factory patterns that take only
-		// scalar args (size, flags) are still in scope — which is
-		// the `func New() *T` / `func NewN(n int) *T` family.
-		if sigHasPointerInputs(sig) {
-			continue
-		}
-		ptrT := results[ri].Type
-		if ptrT == nil || !ptrT.IsPtr() {
-			continue
-		}
-		underlying := ptrT.Elem()
-		if underlying == nil {
-			continue
-		}
-
-		// Build the stack buffer: a fresh PAUTO of type T. Mark
-		// Addrtaken so downstream passes (liveness/stack map) see
-		// it as a pointer-containing stack slot if T has pointers.
-		bufName := typecheck.TempAt(gd, call.Pos(), fn, underlying)
-		bufName.SetEsc(ir.EscNone)
-		bufName.SetAddrtaken(true)
-		// CRITICAL: the returned pointer aliases this buffer, so its
-		// lifetime extends past the call. The compiler's AllocFrame
-		// pass can't see that aliasing (the pointer flows through
-		// runtime.maybeInPlace and back), so it would happily reuse
-		// this slot for a later autotmp — which would zero-overwrite
-		// the callee's fill. Mark non-mergeable to pin the slot for
-		// the full remainder of the function frame.
-		bufName.SetNonMergeable(true)
-		if underlying.HasPointers() {
-			bufName.SetNeedzero(true)
-		}
-
-		// Emit the zero-init as a plain OAS with a nil RHS — that's
-		// the internal form of "var x T" / "x = <zero>". It doesn't
-		// need recursive walking; walkStmtList will lower it
-		// naturally when it reaches this position.
-		zeroAs := ir.NewAssignStmt(gd, call.Pos(), bufName, nil)
-		zeroAs.SetTypecheck(1)
-		pre = append(pre, zeroAs)
-
-		// Replace the nil outBuf arg with unsafe.Pointer(&bufName).
-		addr := typecheck.NodAddrAt(gd, call.Pos(), bufName)
-		addr.SetType(types.NewPtr(underlying))
-		addr.SetTypecheck(1)
-		conv := ir.NewConvExpr(gd, call.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], addr)
-		conv.SetTypecheck(1)
-		call.Args[i] = conv
-	}
-	return pre
 }

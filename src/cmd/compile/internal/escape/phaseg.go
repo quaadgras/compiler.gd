@@ -53,7 +53,19 @@ func (b *batch) phaseGTags(fns []*ir.Func) map[*location]int {
 		return nil
 	}
 
-	heap := b.addrReach(&b.heapLoc)
+	// What reaches the heap: what the heap's edges lead to, and the
+	// locations flow marked as escaping without an edge, and what
+	// leads to them.
+	heapRoots := []*location{&b.heapLoc}
+	for _, l := range b.allLocs {
+		if l.escapedInGraph {
+			heapRoots = append(heapRoots, l)
+		}
+	}
+	heap := b.addrReach(heapRoots...)
+	for _, l := range heapRoots[1:] {
+		heap[l] = true
+	}
 	cand := b.addrReach(&b.candidateLoc)
 	results := make(map[*location]map[*location]bool)
 	for _, l := range b.allLocs {
@@ -210,13 +222,19 @@ func phaseGTaggable(u *location, fn *ir.Func, elem *types.Type) bool {
 	return false
 }
 
-// addrReach returns the locations whose address flows to root: those
-// the solver's walkOne from root reaches with derefs < 0. Unlike
-// walkOne it doesn't stop at locations that escape.
-func (b *batch) addrReach(root *location) map[*location]bool {
-	best := map[*location]int{root: 0}
+// addrReach returns the locations whose address flows to one of
+// roots: those the solver's walkOne from it reaches with derefs < 0.
+// Unlike walkOne it doesn't stop at locations that escape. It doesn't
+// see flows to the heap that flow recorded no edge for
+// (escapedInGraph).
+func (b *batch) addrReach(roots ...*location) map[*location]bool {
+	best := make(map[*location]int)
 	addr := make(map[*location]bool)
-	todo := []*location{root}
+	var todo []*location
+	for _, r := range roots {
+		best[r] = 0
+		todo = append(todo, r)
+	}
 	for len(todo) > 0 {
 		l := todo[len(todo)-1]
 		todo = todo[:len(todo)-1]
@@ -236,6 +254,8 @@ func (b *batch) addrReach(root *location) map[*location]bool {
 			}
 		}
 	}
-	delete(addr, root)
+	for _, r := range roots {
+		delete(addr, r)
+	}
 	return addr
 }

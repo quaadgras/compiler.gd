@@ -97,6 +97,12 @@ type location struct {
 	// transient marks the temporaries of teeHole, which forward a
 	// value to other holes instead of holding it.
 	transient bool
+
+	// escapedInGraph is set when src's address flowed to a location
+	// that already escaped (the heap) while the graph was built: flow
+	// marks src as escaping and records no edge. gd Phase G's walks
+	// (phaseg.go), which can't see that flow, start from it.
+	escapedInGraph bool
 }
 
 type locAttr uint8
@@ -254,6 +260,7 @@ func (b *batch) flow(k hole, src *location) {
 
 		}
 		src.attrs |= attrEscapes | attrPersists | attrMutates | attrCalls
+		src.escapedInGraph = true
 		return
 	}
 

@@ -259,3 +259,108 @@ func TestEscapeBitsOutBufOtherShapes(t *testing.T) {
 		t.Errorf("same pointer twice: %p %p", x, y)
 	}
 }
+
+// The caller passes a buffer for any call whose result doesn't outlive
+// its frame, wherever the call is, also to callees that take pointers:
+// an argument can only point into the buffer if an earlier result of
+// the same call is still live, which makes the result escape.
+
+//go:noinline
+func ebrLink(p *ebgT) *ebgT { return &ebgT{a: p.a + 1, next: p} }
+
+//go:noinline
+func ebrReadAfter(p *ebgT) *ebgT {
+	n := &ebgT{}
+	n.a = p.a + 1
+	return n
+}
+
+//go:noinline
+func ebrUse(p *ebgT) int { return p.a }
+
+func TestEscapeBitsOutBufCallerShapes(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		f    func() int
+		want int
+	}{
+		{"field of a result", func() int { return ebgMk(3).a }, 3},
+		{"result as an argument", func() int { return ebrUse(ebgMk(4)) }, 4},
+		{"callee with a pointer input", func() int { v := ebgT{a: 1}; return ebgSucc(&v).a }, 2},
+		{"input read after the result is made", func() int { v := ebgT{a: 1}; return ebrReadAfter(&v).a }, 2},
+		{"nested calls", func() int { return ebgSucc(ebgSucc(ebgMk(1))).a }, 3},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.f(); got != c.want {
+				t.Fatalf("got %d, want %d", got, c.want)
+			}
+			f := c.f
+			if n := testing.AllocsPerRun(100, func() { ebgSink += f() }); n != 0 {
+				t.Errorf("%v allocs, want 0", n)
+			}
+		})
+	}
+}
+
+func TestEscapeBitsOutBufInputsFromSameCall(t *testing.T) {
+	x := ebgMk(1)
+	for range 5 {
+		x = ebrReadAfter(x)
+	}
+	if x.a != 6 {
+		t.Errorf("x = readAfter(x): a=%d, want 6", x.a)
+	}
+	l := ebgMk(0)
+	for range 4 {
+		l = ebrLink(l)
+	}
+	ebaSmash(10)
+	runtime.GC()
+	n := 0
+	for c := l; c != nil && n < 10; c = c.next {
+		if c.a != 4-n {
+			t.Fatalf("node %d has a=%d, want %d", n, c.a, 4-n)
+		}
+		n++
+	}
+	if n != 5 {
+		t.Fatalf("%d nodes, want 5", n)
+	}
+	c := ebgMk(0)
+	for c = ebgSucc(c); c.a < 5; c = ebgSucc(c) {
+	}
+	if c.a != 5 {
+		t.Errorf("loop header: a=%d, want 5", c.a)
+	}
+}
+
+type ebrOp func() int
+
+var ebrOpCache = map[int]ebrOp{}
+
+// ebrOpFor stores &o in a map before returning it (encoding/gob's
+// decIgnoreOpFor): a flow to the heap that escape analysis records
+// without an edge, so o must not go in the caller's buffer.
+//
+//go:noinline
+func ebrOpFor(id int, inProgress map[int]*ebrOp) *ebrOp {
+	if p := inProgress[id]; p != nil {
+		return p
+	}
+	o, ok := ebrOpCache[id]
+	if !ok {
+		inProgress[id] = &o
+		o = func() int { return id }
+	}
+	return &o
+}
+
+func TestEscapeBitsOutBufAlsoInMap(t *testing.T) {
+	in := map[int]*ebrOp{}
+	func() { p := ebrOpFor(1, in); ebgSink += (*p)() }()
+	ebaSmash(10)
+	runtime.GC()
+	if got := (*in[1])(); got != 1 {
+		t.Fatalf("op kept in the map returns %d, want 1", got)
+	}
+}
