@@ -39,6 +39,7 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+	"sync"
 )
 
 // ctxt9 holds state while assembling a single function.
@@ -1252,7 +1253,15 @@ func NeedTOCpointer(ctxt *obj.Link) bool {
 }
 
 // Build the opcode table
+// buildopMu makes buildop whole for each of the compiles that run
+// at once in one process (the go command runs them in-process): each
+// returns only once the tables are complete, not as soon as another
+// has begun them.
+var buildopMu sync.Mutex
+
 func buildop(ctxt *obj.Link) {
+	buildopMu.Lock()
+	defer buildopMu.Unlock()
 	// Limit PC-relative prefix instruction usage to supported and tested targets.
 	pfxEnabled = buildcfg.GOPPC64 >= 10 && buildcfg.GOOS == "linux"
 	cfg := fmt.Sprintf("power%d/%s/%s", buildcfg.GOPPC64, buildcfg.GOARCH, buildcfg.GOOS)
