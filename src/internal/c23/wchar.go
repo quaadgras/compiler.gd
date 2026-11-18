@@ -589,8 +589,10 @@ func Strfromf(s Ptr, n uint64, format Ptr, fp float32) int32 {
 	return Snprintf(s, n, format, float64(fp))
 }
 
-func FreeSized(p Ptr, n uint64)               {}
-func FreeAlignedSized(p Ptr, align, n uint64) {}
+// FreeSized and FreeAlignedSized are free_sized and free_aligned_sized:
+// free, which does not check the size or alignment.
+func FreeSized(p Ptr, n uint64)               { Free(p) }
+func FreeAlignedSized(p Ptr, align, n uint64) { Free(p) }
 
 // Memalignment is memalignment: the greatest power of two p's address is
 // a multiple of.

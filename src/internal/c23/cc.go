@@ -295,11 +295,13 @@ func VaArgPtr(ap Ptr) Ptr {
 }
 
 // ReallocOf is realloc whose result is a T*: n bytes as an array of T,
-// with what p's object holds from p on.
+// with what p's object holds. p is NULL or what malloc returned
+// (checkRealloc).
 func ReallocOf[T any](p Ptr, n uintptr) Ptr {
+	checkRealloc(p)
 	q := NewArray[T](n)
 	if p.obj != nil {
-		Memmove(q, p, min(n, p.size-uintptr(p.off)))
+		Memmove(q, p, min(n, p.size))
 	}
 	return q
 }

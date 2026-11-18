@@ -294,6 +294,15 @@ func testInterop(t *testing.T, env []string, split bool, word int) {
 		"C writes the length of a Go slice            trapped: c23: store into a word of a Go value with invariants (main.goThing)",
 		fmt.Sprintf("C writes past a Go value                     trapped: c23: access of %d bytes out of bounds of {main.goThing, size %d, off %d}", word, thing, thing),
 		"Go's value after: 7 2\n",
+		"C frees what malloc and the like returned    ok",
+		"C frees a pointer into its object            trapped: c23: free of a pointer into an object, not to its start: {c23.Raw, size 16, off 1}",
+		"C frees a local                              trapped: c23: free of an object that is not an allocation of its own: {int32, size 4, off 0}",
+		"C frees a pointer that went through a long   ok",
+		"C reallocs a pointer gone through a long     trapped: c23: realloc of a pointer with no capability",
+		"C reallocs a pointer into its object         trapped: c23: realloc of a pointer into an object, not to its start: {c23.Raw, size 16, off 8}",
+		"C frees Go's slice                           trapped: c23: free of Go's memory: {int32, size 12, off 0}",
+		"Go frees C's string                          ok",
+		"Go frees its own slice                       trapped: c23: free of Go's memory",
 	} {
 		if split {
 			// No panic to recover from (deref_split.go).

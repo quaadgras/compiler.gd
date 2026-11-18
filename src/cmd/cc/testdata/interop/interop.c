@@ -1,5 +1,6 @@
 // C that shares its memory with Go (demo/interop/main.go).
 #include <stdlib.h>
+#include <string.h>
 
 #include "interop.h"
 
@@ -158,3 +159,39 @@ struct node *pool_root;
 void make_pool(void) { pool_root = in_pool(); }
 
 long pool_sum(void) { return sum_list(pool_root); }
+
+// free and realloc take what malloc returned, and NULL.
+int free_mallocd(void) {
+	char *raw = malloc(16), *none = malloc(0), *s = strdup("x");
+	int *typed = malloc(4 * sizeof *typed);
+	double *aligned = aligned_alloc(64, 64);
+	struct node *n = calloc(1, sizeof *n);
+	raw = realloc(raw, 32);
+	typed = realloc(typed, 8 * sizeof *typed);
+	free(raw), free(none), free(s), free(typed), free(aligned), free(n), free(NULL);
+	free_sized(malloc(8), 8);
+	return realloc(NULL, 8) != NULL;
+}
+
+void free_interior(void) {
+	char *p = malloc(16);
+	free(p + 1);
+}
+
+void free_local(void) {
+	int x = 0;
+	free(&x);
+}
+
+// A pointer that went through a long has no capability: free cannot tell
+// it from malloc's, and realloc cannot copy its object.
+void free_lost(void) { free((void *)(long)malloc(8)); }
+
+void realloc_lost(void) { realloc((void *)(long)malloc(8), 16); }
+
+void realloc_interior(void) {
+	char *p = malloc(16);
+	realloc(p + 8, 32);
+}
+
+void free_go(int *p) { free(p); }

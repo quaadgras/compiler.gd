@@ -209,9 +209,66 @@ var rawInfo = tinfoOf[Raw]()
 // pointers.
 func Malloc(n uint64) Ptr { return newOf(rawInfo, uintptr(n)) }
 
-// Free is C's free, which does nothing: the collector frees what is not
-// reachable.
-func Free(p Ptr) {}
+// Free is C's free. The collector frees what is no longer reachable, so
+// free frees nothing: the object's capabilities stay valid, and a use
+// after free sees the object as it was, never memory reused for another.
+// It faults for a pointer malloc cannot have returned: one into an object
+// rather than to its start, one to Go's memory, or one to an object that
+// is not an allocation of its own (a local on the stack). A pointer with
+// no capability may be malloc's result that went through an integer:
+// free lets it be.
+func Free(p Ptr) {
+	if p.obj != nil && !mallocd(p) {
+		badFree("free", p)
+	}
+}
+
+// mallocd reports whether p, a capability, may be what malloc returned:
+// the start of C's object that is a heap object of its own, or, over
+// aligned, whose heap object's marker says it is there (newAligned). C's
+// locals and globals that Go puts in the heap pass too.
+func mallocd(p Ptr) bool {
+	if p.off != 0 || p.ti&refC == 0 {
+		return false
+	}
+	hdr := uintptr(p.obj) - hdrSize
+	base, size := object(p.obj)
+	if base == nil {
+		return false // on a stack, or a global
+	}
+	if uintptr(base) == hdr {
+		return true
+	}
+	return size >= 2*wordSize && *(*uintptr)(base) == alignMagic &&
+		uintptr(base)+*(*uintptr)(unsafe.Add(base, wordSize))-hdrSize == hdr
+}
+
+// badFree faults for a pointer that malloc cannot have returned, given to
+// fn (free or realloc).
+//
+//go:noinline
+func badFree(fn string, p Ptr) {
+	what := "an object that is not an allocation of its own"
+	switch {
+	case p.off != 0:
+		what = "a pointer into an object, not to its start"
+	case p.ti&refC == 0:
+		what = "Go's memory"
+	}
+	fault(fmt.Sprintf("%s of %s: %s", fn, what, capString(true, p.info(), p.size, p.off)), Addr(p))
+}
+
+// checkRealloc faults for a pointer realloc may not be given: one free
+// faults for, and one with no capability, whose object it cannot copy.
+func checkRealloc(p Ptr) {
+	if p.obj == nil {
+		if p.off != 0 {
+			fault("realloc of a pointer with no capability", Addr(p))
+		}
+	} else if !mallocd(p) {
+		badFree("realloc", p)
+	}
+}
 
 // cobject returns the capability of C's allocation that contains w, if it
 // is one.

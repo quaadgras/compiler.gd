@@ -60,8 +60,17 @@ func CStringGo(s string) *int8 { return ToGo[int8](CString(s)) }
 // GoStringGo is C.GoString.
 func GoStringGo[P any](p P) string { return GoString(Arg(p)) }
 
-// FreeGo is C.free: nothing to do.
-func FreeGo[P any](p P) {}
+// FreeGo is C.free: Free, for which Go's heap is never what malloc
+// returned, though an unsafe.Pointer into it has no capability.
+func FreeGo[P any](p P) {
+	q := Arg(p)
+	if q.obj == nil && reflect.TypeFor[P]().Kind() == reflect.UnsafePointer {
+		if base, _ := object(*(*unsafe.Pointer)(unsafe.Pointer(&p))); base != nil {
+			fault("free of Go's memory", Addr(q))
+		}
+	}
+	Free(q)
+}
 
 // MallocGo is C.malloc.
 func MallocGo[N ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64 | ~uintptr](n N) unsafe.Pointer {

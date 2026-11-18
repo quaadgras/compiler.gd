@@ -132,6 +132,19 @@ escape analysis keeps it on the stack unless C stores its address
 Go caller's stack variables passed to C stay on the stack too: the demo
 measures no allocations for either.
 
+**`free` frees nothing.** The collector frees what is no longer
+reachable, and a capability keeps its object reachable, so no capability
+is ever revoked: a use after free sees the object as it was, never
+memory reused for another (CHERI needs quarantine and revocation sweeps
+for that guarantee). Revoking on free would need the bounds in the
+object, read by every access, as Fil-C keeps them; ours travel in the
+`Ptr`. `free` and `realloc` fault for a pointer `malloc` cannot have
+returned: one into an object rather than to its start, one to Go's
+memory, or one to an object that is not an allocation of its own (a
+local on the stack). A pointer with no capability may be `malloc`'s
+result that went through a `long`: `free` lets it be, and `realloc`,
+which cannot copy its object, faults.
+
 ## Unions and untyped memory
 
 Go sees a union as its bytes, as cgo makes it (`type union_value struct
@@ -401,6 +414,15 @@ pointer memory with split (the tag), whatever the word size.
   `intptr_t` or a `uintptr_t`.
 - **Thread-local objects with GOWASM=gc,split** are shared by all
   goroutines (the runtime keeps one side-table slot there).
+- **`free` returns no memory, and finds no use after free or double
+  free.** A pointer still kept in live memory after its object is freed
+  keeps the object, and what it points to, alive: 256 freed 1 MiB buffers
+  whose pointers stay in a global keep 259 MiB resident, where musl's
+  `free` gives them back. Fil-C's collector repoints such pointers at a
+  freed singleton, keeping their address, so the memory comes back at the
+  next collection; here the collector would tag the stale words in C's
+  objects as it marks, and keep each freed object one more cycle (Go scans
+  each stack only once).
 
 ## C23, and how much of it
 

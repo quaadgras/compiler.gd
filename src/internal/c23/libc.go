@@ -279,11 +279,13 @@ func Memchr(s Ptr, c int32, n uint64) Ptr {
 
 func Calloc(n, size uint64) Ptr { return Malloc(n * size) }
 
-// Realloc is realloc: untyped memory, with what p's object holds from p on.
+// Realloc is realloc: untyped memory, with what p's object holds. p is
+// NULL or what malloc returned (checkRealloc).
 func Realloc(p Ptr, n uint64) Ptr {
+	checkRealloc(p)
 	q := Malloc(n)
 	if p.obj != nil {
-		Memmove(q, p, min(uintptr(n), p.size-uintptr(p.off)))
+		Memmove(q, p, min(uintptr(n), p.size))
 	}
 	return q
 }

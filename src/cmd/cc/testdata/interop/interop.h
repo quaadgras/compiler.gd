@@ -49,5 +49,12 @@ long variant_misread(struct variant *v);
 struct node *in_pool(void);
 void make_pool(void);
 long pool_sum(void);
+int free_mallocd(void);
+void free_interior(void);
+void free_local(void);
+void free_lost(void);
+void realloc_lost(void);
+void realloc_interior(void);
+void free_go(int *p);
 
 #endif

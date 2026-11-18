@@ -3,6 +3,7 @@
 // TestInterop).
 package main
 
+// #include <stdlib.h>
 // #include "interop.h"
 import "C"
 
@@ -128,6 +129,18 @@ func main() {
 	try("C writes the length of a Go slice", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Offsetof(g.data)/word+1), 1000) })
 	try("C writes past a Go value", func() { C.poke(unsafe.Pointer(g), C.int(unsafe.Sizeof(*g)/word), 1) })
 	fmt.Println("Go's value after:", g.n, len(g.data))
+
+	// free and realloc: only what malloc returned. free lets a pointer
+	// with no capability be; realloc cannot copy its object.
+	try("C frees what malloc and the like returned", func() { C.free_mallocd() })
+	try("C frees a pointer into its object", func() { C.free_interior() })
+	try("C frees a local", func() { C.free_local() })
+	try("C frees a pointer that went through a long", func() { C.free_lost() })
+	try("C reallocs a pointer gone through a long", func() { C.realloc_lost() })
+	try("C reallocs a pointer into its object", func() { C.realloc_interior() })
+	try("C frees Go's slice", func() { C.free_go(&arr[0]) })
+	try("Go frees C's string", func() { C.free(unsafe.Pointer(C.CString("x"))) })
+	try("Go frees its own slice", func() { C.free(unsafe.Pointer(&arr[0])) })
 }
 
 //go:noinline

@@ -115,7 +115,12 @@ func (g *gen) cName(line int, name string) string {
 			}
 		}
 	}
-	if s := g.u.scope[name]; s != nil {
+	s := g.u.scope[name]
+	if s != nil && s.kind == symFunc && !s.defined && cgoHelpers[name] {
+		// <stdlib.h>'s free or malloc: cgo's, on unsafe.Pointer.
+		s = nil
+	}
+	if s != nil {
 		switch s.kind {
 		case symTypedef:
 			if s.t.kind == kUIntCap {
