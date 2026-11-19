@@ -173,6 +173,15 @@ func Lstat(path, buf Ptr) int32 {
 }
 
 func Fstat(fd int32, buf Ptr) int32 {
+	if of := fdFile(fd); of != nil && of.sp != nil {
+		Memset(buf, 0, 144)
+		Store64(Add(buf, 16), 1)
+		Store32(Add(buf, 24), of.sp.Mode())
+		Store32(Add(buf, 28), uint32(os.Getuid()))
+		Store32(Add(buf, 32), uint32(os.Getgid()))
+		storeLong(Add(buf, 56), 4096)
+		return 0
+	}
 	f := fdOS(fd)
 	if f == nil {
 		return -1

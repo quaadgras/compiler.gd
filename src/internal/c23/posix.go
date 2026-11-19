@@ -49,6 +49,8 @@ const (
 // An ofile is an open file: what the descriptors dup makes share.
 type ofile struct {
 	f     *os.File
+	sp    Special    // what it is if not an os.File (f is nil)
+	ra    *ReadAhead // f read ahead, once poll or O_NONBLOCK needs it (special.go)
 	refs  int
 	flags int32 // as F_GETFL returns them
 }
@@ -136,9 +138,14 @@ func fdFile(fd int32) *ofile {
 	return nil
 }
 
-// fdOS returns fd's os.File, or nil and sets errno to EBADF.
+// fdOS returns fd's os.File, or nil and sets errno to EBADF (or ESPIPE
+// for a socket).
 func fdOS(fd int32) *os.File {
 	if of := fdFile(fd); of != nil {
+		if of.sp != nil {
+			SetErrno(ESPIPE)
+			return nil
+		}
 		return of.f
 	}
 	SetErrno(EBADF)
@@ -151,6 +158,9 @@ func (of *ofile) release() error {
 	of.refs--
 	if of.refs > 0 || of.f == os.Stdin || of.f == os.Stdout || of.f == os.Stderr {
 		return nil
+	}
+	if of.sp != nil {
+		return of.sp.Close()
 	}
 	return of.f.Close()
 }
@@ -176,7 +186,7 @@ func (d fdIO) Write(b []byte) (int, error) {
 	if of == nil {
 		return 0, errnoErr(EBADF)
 	}
-	return of.f.Write(b)
+	return of.write(b)
 }
 
 func (d fdIO) Read(b []byte) (int, error) {
@@ -184,7 +194,7 @@ func (d fdIO) Read(b []byte) (int, error) {
 	if of == nil {
 		return 0, errnoErr(EBADF)
 	}
-	return of.f.Read(b)
+	return of.read(b)
 }
 
 // osFile returns the stream's os.File, or nil.
@@ -235,11 +245,12 @@ func Fdopen(fd int32, mode Ptr) Ptr {
 // unistd.h
 
 func Read(fd int32, buf Ptr, n uint64) int64 {
-	f := fdOS(fd)
+	f := fdFile(fd)
 	if f == nil {
+		SetErrno(EBADF)
 		return -1
 	}
-	k, err := f.Read(bytesAt(buf, uintptr(n)))
+	k, err := f.read(bytesAt(buf, uintptr(n)))
 	if err != nil && err != io.EOF {
 		setErrnoOf(err)
 		return -1
@@ -248,11 +259,12 @@ func Read(fd int32, buf Ptr, n uint64) int64 {
 }
 
 func Write(fd int32, buf Ptr, n uint64) int64 {
-	f := fdOS(fd)
+	f := fdFile(fd)
 	if f == nil {
+		SetErrno(EBADF)
 		return -1
 	}
-	k, err := f.Write(bytesAt(buf, uintptr(n)))
+	k, err := f.write(bytesAt(buf, uintptr(n)))
 	if err != nil && k == 0 {
 		setErrnoOf(err)
 		return -1
@@ -347,6 +359,9 @@ func Getegid() uint32 { return uint32(os.Getegid()) }
 func Isatty(fd int32) int32 {
 	f := fdOS(fd)
 	if f == nil {
+		if Errno() == ESPIPE {
+			SetErrno(ENOTTY)
+		}
 		return 0
 	}
 	if !isatty(f) {

@@ -456,6 +456,24 @@ defined); a `_Thread_local` object is each goroutine's, made on first use; `_Ato
 objects and `stdatomic.h` use `sync/atomic`, or a lock for small objects
 and pointers.
 
+Sockets (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `netdb.h`,
+`sys/un.h`) are `net`'s listeners and connections, in a package of their
+own, internal/c23/sock, which the generated Go imports only if it calls
+one of its functions (cmd/go adds the import when the package's C
+includes one of those headers), so that C without sockets does not link
+`net`. They are descriptors of internal/c23's table, as files are, so
+`read`, `write`, `close`, `dup`, `fdopen` and `fcntl`'s `O_NONBLOCK` work
+on them. Go has no readiness, so `poll` and `select` have one of their
+own: a descriptor whose reads may block (a socket's connection, a pipe, a
+terminal) is read ahead by a goroutine into a buffer of up to 64 KiB, and
+is readable when that has data or an end; a listener accepts into a
+queue, a datagram socket receives into one. Non-blocking `connect` dials
+in the background (`EINPROGRESS`, then `POLLOUT` and `SO_ERROR`). Writes
+block until Go has written. Names resolve with Go's resolver;
+`getnameinfo` gives a port's number, not its name. Not there: ancillary
+data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
+cannot set (kept for `getsockopt`, otherwise ignored).
+
 C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
 `uchar.go`, `time.go`, `errno.go`, `thread.go`, `threads.go`), with C prototypes in the
 headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.

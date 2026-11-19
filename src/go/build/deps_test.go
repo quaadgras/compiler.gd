@@ -449,6 +449,11 @@ var depsRules = `
 	fmt, unicode !< net;
 	math/rand !< net; # net uses runtime instead
 
+	# C's sockets, for cmd/cc (gd fork): apart from internal/c23, so
+	# that only C that uses them links net.
+	internal/c23, net
+	< internal/c23/sock;
+
 	# NET is net plus net-helper packages.
 	FMT, net
 	< net/textproto;

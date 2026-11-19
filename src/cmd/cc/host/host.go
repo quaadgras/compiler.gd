@@ -52,3 +52,8 @@ func Undefined(dir string, goFiles []string) ([]string, error) {
 func Headers() []string {
 	return ccmain.Headers()
 }
+
+// SockHeaders are the headers whose functions are internal/c23/sock's:
+// Go generated from C that includes one may import that package as well
+// as internal/c23.
+func SockHeaders() []string { return ccmain.SockHeaders() }

@@ -150,6 +150,34 @@ func TestThreads(t *testing.T) {
 	}
 }
 
+// TestSock compares sockets, name resolution, poll and select
+// (testdata/sock.c) with gcc's.
+func TestSock(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/sock.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "sock")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // it makes a socket file
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.
@@ -370,7 +398,7 @@ func TestBuildTag(t *testing.T) {
 #include "add.h"`, "cgo: 5\n"},
 		{"ldflags", `#cgo LDFLAGS: -lm
 #include "add.h"`, "no cgo\n"},
-		{"system header", `#include <sys/socket.h>
+		{"system header", `#include <termios.h>
 #include "add.h"`, "no cgo\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

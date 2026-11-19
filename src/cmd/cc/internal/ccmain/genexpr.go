@@ -1119,6 +1119,10 @@ func (g *gen) funcName(s *symbol, at pos) string {
 	}
 	if !def.defined {
 		if n, ok := libc[s.name]; ok {
+			if strings.HasPrefix(n, sockPrefix) {
+				g.usesSock = true
+				return n
+			}
 			return "c23." + n
 		}
 		if s.weak || def.weak {

@@ -79,7 +79,47 @@ int *__cc_errno(void);
 #define ECONNRESET 104
 #define ETIMEDOUT 110
 #define ECONNREFUSED 111
+#define ENOMSG 42
+#define EIDRM 43
+#define ENOSTR 60
+#define ENODATA 61
+#define ETIME 62
+#define ENOSR 63
+#define ENOLINK 67
+#define EPROTO 71
+#define EMULTIHOP 72
+#define EBADMSG 74
+#define EUSERS 87
+#define EDESTADDRREQ 89
+#define EMSGSIZE 90
+#define EPROTOTYPE 91
+#define ENOPROTOOPT 92
+#define EPROTONOSUPPORT 93
+#define ESOCKTNOSUPPORT 94
+#define EPFNOSUPPORT 96
+#define EAFNOSUPPORT 97
+#define EADDRNOTAVAIL 99
+#define ENETDOWN 100
+#define ENETUNREACH 101
+#define ENETRESET 102
+#define ECONNABORTED 103
+#define ENOBUFS 105
+#define EISCONN 106
+#define ENOTCONN 107
+#define ESHUTDOWN 108
+#define ETOOMANYREFS 109
+#define EHOSTDOWN 112
+#define EHOSTUNREACH 113
+#define EALREADY 114
+#define EINPROGRESS 115
+#define ESTALE 116
+#define EDQUOT 122
+#define ECANCELED 125
+#define EOWNERDEAD 130
+#define ENOTRECOVERABLE 131
 #define ENOTSUP EOPNOTSUPP
+#define EWOULDBLOCK EAGAIN
+#define EDEADLOCK EDEADLK
 #endif
 `,
 	"inttypes.h": `#ifndef __CC_INTTYPES_H
@@ -2165,6 +2205,7 @@ int utimes(const char *path, const struct timeval times[2]);
 #define timercmp(a, b, CMP) ((a)->tv_sec == (b)->tv_sec ? (a)->tv_usec CMP (b)->tv_usec : (a)->tv_sec CMP (b)->tv_sec)
 #define timeradd(a, b, r) do { (r)->tv_sec = (a)->tv_sec + (b)->tv_sec; (r)->tv_usec = (a)->tv_usec + (b)->tv_usec; if ((r)->tv_usec >= 1000000) { (r)->tv_sec++; (r)->tv_usec -= 1000000; } } while (0)
 #define timersub(a, b, r) do { (r)->tv_sec = (a)->tv_sec - (b)->tv_sec; (r)->tv_usec = (a)->tv_usec - (b)->tv_usec; if ((r)->tv_usec < 0) { (r)->tv_sec--; (r)->tv_usec += 1000000; } } while (0)
+#include <sys/select.h>
 #endif
 `,
 	"sys/ioctl.h": `#ifndef __CC_SYS_IOCTL_H
