@@ -82,17 +82,12 @@ type location struct {
 	shares     ir.ParamShare // for a parameter: see ir.Func.ParamShares
 	captured   bool          // has a closure captured this variable?
 	stmt       int32         // the statement the location was made in, or a variable declared in (shares.go)
+	rawgen     uint32        // walkOne: the walk that reached the location on a path with no read-only edge
+	rawDerefs  int           // walkOne: the least dereferences of such a path
 	dynRoot    *dynRoot      // the location is a container known at run time (shares.go)
 	isDynRoot  bool          // the location was made as one, even if it is not one any more
 	dyn        []*location   // the dynamic roots that the location, or what it leads to, flows to
 	owners     []*location   // for the contents of tracked variables: those variables (shares.go)
-	recv       *recvRoot     // the location is the receiver of an interface call (recv.go)
-	recvs      []*location   // the receiver roots that the location, or what it leads to, reaches on a raw path
-	recvOver   bool          // too many to list: what flows here is shared
-	conv       *types.Type   // the location is a conversion of a pointer of this type to an interface
-	assert     bool          // the location is what an interface was asserted to hold, of a type that is not an interface
-	rawgen     uint32        // walkOne: the walk that reached the location on a raw path
-	rawDerefs  int           // walkOne: the least dereferences of such a path
 	reassigned bool          // has this variable been reassigned?
 	addrtaken  bool          // has this variable's address been taken?
 	param      bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
@@ -207,6 +202,13 @@ type edge struct {
 	derefs int // >= -1
 	notes  *note
 
+	// ro is set for an edge that only a string flows along: what a
+	// string points to is never written, so who reaches the string
+	// says nothing of who may write what it was loaded from (shares.go:
+	// a value that is only read is not shared). The edge counts for
+	// escaping and not for sharing.
+	ro bool
+
 	// share is set for an edge that is in the graph only to find what
 	// other goroutines may reach (shares.go): one that the graph did
 	// not have before, because its source escapes anyway. Only the
@@ -252,6 +254,10 @@ type hole struct {
 	// the expression, independent of whether the address will actually
 	// be stored into a variable.
 	addrtaken bool
+
+	// ro says that the expression is, or is a part of what gives, a
+	// string: see edge.ro.
+	ro bool
 }
 
 type note struct {
@@ -330,13 +336,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address

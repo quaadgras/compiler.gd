@@ -1291,7 +1291,6 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.ViaDerefs = uint8(r.Len())
 				ps.Results = uint8(r.Len())
 				ps.Heap = uint8(r.Len())
-				ps.Recv = r.Bool()
 			}
 		}
 

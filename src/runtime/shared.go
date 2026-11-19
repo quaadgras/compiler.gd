@@ -753,9 +753,48 @@ func shareStatsAlloc(size uintptr, local bool) {
 	}
 }
 
+// shareSites remembers, with sharestats=2, where the local objects were
+// allocated, by address (the last one of those with the same place in the
+// table), for localPublished to say.
+var shareSites struct {
+	lock mutex
+	tab  [1 << 16]struct {
+		addr uintptr
+		pcs  [5]uintptr
+	}
+}
+
+func shareStatsSite(x unsafe.Pointer) {
+	var pcs [5]uintptr
+	callers(3, pcs[:])
+	lock(&shareSites.lock)
+	e := &shareSites.tab[uintptr(x)>>3%uintptr(len(shareSites.tab))]
+	e.addr = uintptr(x)
+	e.pcs = pcs
+	unlock(&shareSites.lock)
+}
+
+func printShareSite(base uintptr) {
+	lock(&shareSites.lock)
+	e := shareSites.tab[base>>3%uintptr(len(shareSites.tab))]
+	unlock(&shareSites.lock)
+	if e.addr != base {
+		print("\t(allocation not recorded)\n")
+		return
+	}
+	print("\tallocated by:\n")
+	for _, pc := range e.pcs {
+		if f := findfunc(pc); f.valid() {
+			file, line := funcline(f, pc-1)
+			print("\t\t", funcname(f), " ", file, ":", line, "\n")
+		}
+	}
+}
+
 func localPublished(base uintptr) {
 	if n := shareStats.published.Add(1); debug.sharestats >= 2 && n <= 20 {
 		print("runtime: local object ", hex(base), " is published\n")
+		printShareSite(base)
 		if gp := getg(); gp == gp.m.curg {
 			pc, sp := sys.GetCallerPC(), sys.GetCallerSP()
 			systemstack(func() {

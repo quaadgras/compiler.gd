@@ -324,7 +324,8 @@ because the callee is unknown.
 - **Oracle**. The store barrier, the publish walk and the per-object bit
   still run and still decide the guards. `GODEBUG=sharestats=1` counts the
   objects of each range and the local ones that were published all the
-  same, each of which is a wrong decision; `=2` traces them, `=3` throws.
+  same, each of which is a wrong decision; `=2` traces them, with where
+  the object was allocated, `=3` throws.
 
 - **Dynamic roots** (`escape/shares.go`: `dynRootOf`, `localTag`). A
   store through a pure path from a local variable (`p.f = x`, `*p = x`,
@@ -425,42 +426,56 @@ because the callee is unknown.
     for objects allocated before the call's statement;
     `r.list = append(r.list, p)` in the callee (deeper than the
     receiver: shared).
-- **Receivers of interface calls** (`escape/recv.go`). The method is
-  only known when the program runs, but the object is allocated with a
-  type, and the type says what the methods are: this is the rule above
-  with the callee known from the type. The receiver of `i.M()` flows to
-  a *receiver root* (the heap for escaping, with the interface type and
-  `M`), and a conversion of a pointer to an interface type has a
-  location that the pointer flows through, with the pointer's type.
-  - A conversion that reaches a receiver root by a path with no other
-    conversion on it (a *raw* path: the solver keeps, for the walks from
-    these roots, the least dereferences of such paths apart) is checked:
-    the method `M` of its type must not let another goroutine reach its
-    receiver or what the receiver leads to, nor return it, nor store it
-    through another parameter (the method's `ParamShare`; a method that
-    is not analysed yet, or is not Go, fails). If one fails, what was
-    converted is shared, as before. If all pass, the root says nothing
-    of what was converted: `use(&Sq{})` with `func use(s Shape)` leaves
-    the object local, and what `(*Sq).Grow` stores through its receiver
-    is local by the receiver's address.
-  - A parameter of an interface type that is itself the receiver, of
-    methods of its own type, says so (`ParamShare.Recv`, exported), and
-    a caller's argument flows to a receiver root for any method of that
-    type. The parameter is shared in the escape masks: a caller that
-    does not know the function cannot check.
-  - Everything else that reaches a receiver root on a raw path holds or
-    leads to an interface of a type that is not known here: an
-    allocation the receiver is loaded from, the result of a call (the
-    bit for results is clear), a parameter that is not the receiver
-    (shared at that depth). A value that an interface was asserted to
-    hold (`i.(*T)`, a case of a type switch) has a location too: what is
-    reached from it is reached from the interface without its methods,
-    so if a raw path gets there, the interface's object is shared.
-  - `-d=nolocalrecv` turns it off. Not yet: a receiver that the method
-    returns (`func (b *B) Self() I`); methods that are analysed after
-    the function that converts (interface calls are not edges of the
-    order in which functions are analysed); values that are not
-    pointers (the box that `convT` makes is not tagged).
+- **Interfaces** (`escape/recv.go`). The method that an interface call
+  runs is only known when the program runs, but an interface value is
+  made by a conversion, of a value whose type says what the methods are.
+  The rule is on the conversion, once for all the calls there will be:
+  - A value of type `T` converted to the interface type `I` is shared
+    unless every method of `I`, as `T` has it, keeps its receiver to
+    the goroutine: it does not let another goroutine reach it or what it
+    leads to, nor store it through another parameter (`convOK`, from
+    the methods' `ParamShare`; a method that is not analysed yet, or is
+    not Go, fails). Functions are analysed methods first, so that a
+    conversion finds its methods done unless one of them needs the
+    function that converts.
+  - A call `i.M()` then says nothing about which goroutines reach its
+    receiver: whatever `i` holds answered for `M` where it was
+    converted. The receiver is in the heap, as before, and what the
+    call returns may be the receiver or what it leads to, as for a
+    function that returns a field of its argument.
+  - An interface asserted to hold a value of another interface type
+    (`i.(J)`, a case of a type switch) may have methods called that its
+    conversion did not answer for: unless `i`'s own type has all of
+    `J`'s methods, what it holds is shared.
+  - A value that is not a pointer is in a box that is only read: the
+    box needs no place in this, and is not allocated with the local
+    objects.
+
+  The first version (2026-11-19, a few hours earlier) had the receiver
+  of each call as a root and checked the conversions that reached it;
+  it could not say anything of an interface loaded from a container,
+  which is where `go/types` and `go/ast` keep theirs. `-d=nolocalrecv`
+  turns the rule off.
+- **What is only read is not shared** (the user, 2026-11-19; `edge.ro`,
+  `escape`'s `readOnlyOn`). What a string points to is never written, so
+  who reaches a string says nothing of who may write what it was loaded
+  from: `ch <- obj.name` does not make `obj` shared. Every flow of a
+  value of type string is a read-only edge, which counts for escaping
+  and not for sharing: the solver keeps, for each walk, the least
+  dereferences of the paths without such an edge, and the marks for
+  sharing, the containers known at run time, the results and the
+  parameters' `ParamShare` follow those paths only.
+  - The bytes of a string are not allocated with the local objects
+    (they would be reached by other goroutines, which is harmless for
+    the locks and not for freeing a goroutine's memory when it exits).
+  - A string made of memory that was not allocated for one
+    (`unsafe.String`, a load through a pointer converted from another
+    type) makes that memory shared from then on (`aliasHole`): a
+    `strings.Builder`'s buffer, once `String` is called.
+  - The address of a string variable is not a string.
+  - `-d=nolocalro` turns it off. Only strings so far: an object that is
+    never written after it is built would count as well, which needs
+    to know that nothing writes it.
 - **Maps** (`escape`'s `mapsOn`, `runtime.makemap`,
   `internal/runtime/maps`). A map is a container as an object is: what
   `m[k] = v` stores (the key too) is where the map is, the heap for
@@ -497,9 +512,15 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
 
 ### Next
 
-1. Callees that are parameters, consulted where the object is
-   allocated. Receivers: results that are the receiver, and methods
-   analysed before the functions that convert to their interfaces.
+1. Callees that are parameters: `each(head, func(it *item) {...})`
+   makes what `head` leads to shared, since `each` passes it to a
+   function it does not know. `each` could say "what `head` leads to
+   is argument 0 of `f`" (as `ParamShare.Via` says "stored through"),
+   and a caller that passes a function literal or a named function
+   would follow it into that function, which is in its own batch.
+   Also for closures: an allocation in a closure that flows to a result
+   of the function around it needs that function's bits (now "returned
+   by another function": not local).
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the
