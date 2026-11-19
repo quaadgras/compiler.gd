@@ -14,14 +14,14 @@ import (
 
 // Stat returns the [FileInfo] structure describing file.
 // If there is an error, it will be of type [*PathError].
-func (f *File) Freebsd_Stat() (FileInfo, error) {
+func (f *Freebsd_File) Stat() (FileInfo, error) {
 	if f == nil {
 		return nil, ErrInvalid
 	}
 	var fs freebsd_fileStat
-	err := f.pfd.Freebsd_Fstat(&fs.sys)
+	err := f.pfd.Fstat(&fs.sys)
 	if err != nil {
-		return nil, f.freebsd_wrapErr("stat", err)
+		return nil, f.wrapErr("stat", err)
 	}
 	freebsd_fillFileStatFromSys(&fs, f.name)
 	return &fs, nil
@@ -30,7 +30,7 @@ func (f *File) Freebsd_Stat() (FileInfo, error) {
 // statNolog stats a file with no test logging.
 func freebsd_statNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	err := ignoringEINTR(func() error {
+	err := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Stat(name, &fs.sys)
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func freebsd_statNolog(name string) (FileInfo, error) {
 // lstatNolog lstats a file with no test logging.
 func freebsd_lstatNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	err := ignoringEINTR(func() error {
+	err := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Lstat(name, &fs.sys)
 	})
 	if err != nil {

@@ -19,7 +19,7 @@ import (
 // Wrapper around the socket system call that marks the returned file
 // descriptor as nonblocking and close-on-exec.
 func linux_sysSocket(family, sotype, proto int) (int, error) {
-	s, err := socketFunc(family, sotype|syscall.Linux_SOCK_NONBLOCK|syscall.Linux_SOCK_CLOEXEC, proto)
+	s, err := linux_socketFunc(family, sotype|syscall.Linux_SOCK_NONBLOCK|syscall.Linux_SOCK_CLOEXEC, proto)
 	if err != nil {
 		return -1, os.NewSyscallError("socket", err)
 	}

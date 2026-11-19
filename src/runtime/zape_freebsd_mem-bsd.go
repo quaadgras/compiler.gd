@@ -17,7 +17,7 @@ import (
 //
 //go:nosplit
 func freebsd_sysAllocOS(n uintptr, _ string) unsafe.Pointer {
-	v, err := mmap(nil, n, freebsd__PROT_READ|freebsd__PROT_WRITE, freebsd__MAP_ANON|freebsd__MAP_PRIVATE, -1, 0)
+	v, err := freebsd_mmap(nil, n, freebsd__PROT_READ|freebsd__PROT_WRITE, freebsd__MAP_ANON|freebsd__MAP_PRIVATE, -1, 0)
 	if err != 0 {
 		return nil
 	}
@@ -26,9 +26,9 @@ func freebsd_sysAllocOS(n uintptr, _ string) unsafe.Pointer {
 
 func freebsd_sysUnusedOS(v unsafe.Pointer, n uintptr) {
 	if debug.madvdontneed != 0 {
-		madvise(v, n, freebsd__MADV_DONTNEED)
+		freebsd_madvise(v, n, freebsd__MADV_DONTNEED)
 	} else {
-		madvise(v, n, freebsd__MADV_FREE)
+		freebsd_madvise(v, n, freebsd__MADV_FREE)
 	}
 }
 
@@ -49,11 +49,11 @@ func freebsd_sysHugePageCollapseOS(v unsafe.Pointer, n uintptr) {
 //
 //go:nosplit
 func freebsd_sysFreeOS(v unsafe.Pointer, n uintptr) {
-	munmap(v, n)
+	freebsd_munmap(v, n)
 }
 
 func freebsd_sysFaultOS(v unsafe.Pointer, n uintptr) {
-	mmap(v, n, freebsd__PROT_NONE, freebsd__MAP_ANON|freebsd__MAP_PRIVATE|freebsd__MAP_FIXED, -1, 0)
+	freebsd_mmap(v, n, freebsd__PROT_NONE, freebsd__MAP_ANON|freebsd__MAP_PRIVATE|freebsd__MAP_FIXED, -1, 0)
 }
 
 // Indicates not to reserve swap space for the mapping.
@@ -67,7 +67,7 @@ func freebsd_sysReserveOS(v unsafe.Pointer, n uintptr, _ string) unsafe.Pointer 
 		// wherein large mappings can cause fork to fail.
 		flags |= freebsd__sunosMAP_NORESERVE
 	}
-	p, err := mmap(v, n, freebsd__PROT_NONE, flags, -1, 0)
+	p, err := freebsd_mmap(v, n, freebsd__PROT_NONE, flags, -1, 0)
 	if err != 0 {
 		return nil
 	}
@@ -78,7 +78,7 @@ const freebsd__sunosEAGAIN = 11
 const freebsd__ENOMEM = 12
 
 func freebsd_sysMapOS(v unsafe.Pointer, n uintptr, _ string) {
-	p, err := mmap(v, n, freebsd__PROT_READ|freebsd__PROT_WRITE, freebsd__MAP_ANON|freebsd__MAP_FIXED|freebsd__MAP_PRIVATE, -1, 0)
+	p, err := freebsd_mmap(v, n, freebsd__PROT_READ|freebsd__PROT_WRITE, freebsd__MAP_ANON|freebsd__MAP_FIXED|freebsd__MAP_PRIVATE, -1, 0)
 	if err == freebsd__ENOMEM || (("freebsd" == "solaris" || "freebsd" == "illumos") && err == freebsd__sunosEAGAIN) {
 		throw("runtime: out of memory")
 	}

@@ -37,9 +37,9 @@ type linkState struct {
 	elfverneed    int    // count of .gnu.version_r entries
 
 	// elf header state (was in elf.go's var block)
-	Nelfsym    int     // initialised to 1 by linknew
+	Nelfsym    int // initialised to 1 by linknew
 	elf64      bool
-	elfRelType string  // ".rel" or ".rela"
+	elfRelType string // ".rel" or ".rela"
 	ehdr       ElfEhdr
 	phdr       []*ElfPhdr // initialised in linknew
 	shdr       []*ElfShdr // initialised in linknew
@@ -102,6 +102,8 @@ type linkState struct {
 	flagTmpdir          string
 	flagExtar           string
 	flagCaptureHostObjs string
+	flagAPEFormat       string // -apeformat: elf or pe for GOOS=ape
+	apePE               bool   // writing a GOOS=ape program as a PE executable
 	flagA               bool
 	FlagC               bool
 	FlagD               bool
@@ -150,9 +152,9 @@ type linkState struct {
 
 	// xcoff.go state (windows-only/AIX-only but always allocated)
 	xfile          xcoffFile
-	currDwscnoff   map[string]uint64    // initialised in linknew
+	currDwscnoff   map[string]uint64 // initialised in linknew
 	currSymSrcFile xcoffSymSrcFile
-	outerSymSize   map[string]int64     // initialised in linknew
+	outerSymSize   map[string]int64 // initialised in linknew
 
 	// segments (was in lib.go)
 	Segtext      sym.Segment
@@ -160,8 +162,8 @@ type linkState struct {
 	Segrelrodata sym.Segment
 	Segdata      sym.Segment
 	Segdwarf     sym.Segment
-	Segpdata     sym.Segment // windows-only
-	Segxdata     sym.Segment // windows-only
+	Segpdata     sym.Segment    // windows-only
+	Segxdata     sym.Segment    // windows-only
 	Segments     []*sym.Segment // initialised in linknew with pointers to the above
 
 	// lib.go scalars
@@ -179,15 +181,15 @@ type linkState struct {
 	lcSize          int32
 	spSize          int32
 	symSize         int32
-	abiInternalVer  int    // sym.SymVerABIInternal in linknew
+	abiInternalVer  int // sym.SymVerABIInternal in linknew
 	rpath           Rpath
 
 	// misc state migrated from various files
-	pkglistfornote   []byte    // was in main.go
-	windowsgui       bool      // was in main.go
-	ownTmpDir        bool      // was in main.go
-	fipsinfo         loader.Sym // was in fips140.go
-	fipsSyms         []fipsSym  // initialised in linknew via newFipsSyms
+	pkglistfornote   []byte          // was in main.go
+	windowsgui       bool            // was in main.go
+	ownTmpDir        bool            // was in main.go
+	fipsinfo         loader.Sym      // was in fips140.go
+	fipsSyms         []fipsSym       // initialised in linknew via newFipsSyms
 	seenlib          map[string]bool // was in go.go
 	sehp             sehTables       // was sehp anon struct in seh.go
 	theline          string          // was in lib.go

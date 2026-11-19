@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !ape && !apegen
+
 // Package testenv provides information about what functionality
 // is available in different testing environments run by the Go team.
 //

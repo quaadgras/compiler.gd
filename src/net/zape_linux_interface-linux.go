@@ -200,19 +200,19 @@ func linux_interfaceMulticastAddrTable(ifi *Interface) ([]Addr, error) {
 }
 
 func linux_parseProcNetIGMP(path string, ifi *Interface) []Addr {
-	fd, err := open(path)
+	fd, err := linux_open(path)
 	if err != nil {
 		return nil
 	}
-	defer fd.close()
+	defer fd.linux_close()
 	var (
 		ifmat []Addr
 		name  string
 	)
-	fd.readLine() // skip first line
+	fd.linux_readLine() // skip first line
 	b := make([]byte, IPv4len)
-	for l, ok := fd.readLine(); ok; l, ok = fd.readLine() {
-		f := splitAtBytes(l, " :\r\t\n")
+	for l, ok := fd.linux_readLine(); ok; l, ok = fd.linux_readLine() {
+		f := linux_splitAtBytes(l, " :\r\t\n")
 		if len(f) < 4 {
 			continue
 		}
@@ -225,7 +225,7 @@ func linux_parseProcNetIGMP(path string, ifi *Interface) []Addr {
 				// address in /proc/net/igmp in native
 				// endianness.
 				for i := 0; i+1 < len(f[0]); i += 2 {
-					b[i/2], _ = xtoi2(f[0][i:i+2], 0)
+					b[i/2], _ = linux_xtoi2(f[0][i:i+2], 0)
 				}
 				i := *(*uint32)(unsafe.Pointer(&b[:4][0]))
 				ifma := &IPAddr{IP: IPv4(byte(i>>24), byte(i>>16), byte(i>>8), byte(i))}
@@ -237,21 +237,21 @@ func linux_parseProcNetIGMP(path string, ifi *Interface) []Addr {
 }
 
 func linux_parseProcNetIGMP6(path string, ifi *Interface) []Addr {
-	fd, err := open(path)
+	fd, err := linux_open(path)
 	if err != nil {
 		return nil
 	}
-	defer fd.close()
+	defer fd.linux_close()
 	var ifmat []Addr
 	b := make([]byte, IPv6len)
-	for l, ok := fd.readLine(); ok; l, ok = fd.readLine() {
-		f := splitAtBytes(l, " \r\t\n")
+	for l, ok := fd.linux_readLine(); ok; l, ok = fd.linux_readLine() {
+		f := linux_splitAtBytes(l, " \r\t\n")
 		if len(f) < 6 {
 			continue
 		}
 		if ifi == nil || f[1] == ifi.Name {
 			for i := 0; i+1 < len(f[2]); i += 2 {
-				b[i/2], _ = xtoi2(f[2][i:i+2], 0)
+				b[i/2], _ = linux_xtoi2(f[2][i:i+2], 0)
 			}
 			ifma := &IPAddr{IP: IP{b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]}}
 			ifmat = append(ifmat, ifma)

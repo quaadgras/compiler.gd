@@ -19,7 +19,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func init() {
+func freebsd_init0() {
 	sysStat = freebsd_statUnix
 }
 

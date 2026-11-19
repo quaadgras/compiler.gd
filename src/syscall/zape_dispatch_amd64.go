@@ -17,14 +17,8 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
-
-type Credential struct {
-	Uid         uint32
-	Gid         uint32
-	Groups      []uint32
-	NoSetGroups bool
-}
 
 type Errno uintptr
 
@@ -35,25 +29,9 @@ type IPMreq struct {
 	Interface [4]byte
 }
 
-type IPMreqn struct {
-	Multiaddr [4]byte
-	Address   [4]byte
-	Ifindex   int32
-}
-
 type IPv6Mreq struct {
 	Multiaddr [16]byte
 	Interface uint32
-}
-
-type Inet6Pktinfo struct {
-	Addr    [16]byte
-	Ifindex uint32
-}
-
-type Iovec struct {
-	Base *byte
-	Len  uint64
 }
 
 type Linger struct {
@@ -61,91 +39,18 @@ type Linger struct {
 	Linger int32
 }
 
-type Rusage struct {
-	Utime    Timeval
-	Stime    Timeval
-	Maxrss   int64
-	Ixrss    int64
-	Idrss    int64
-	Isrss    int64
-	Minflt   int64
-	Majflt   int64
-	Nswap    int64
-	Inblock  int64
-	Oublock  int64
-	Msgsnd   int64
-	Msgrcv   int64
-	Nsignals int64
-	Nvcsw    int64
-	Nivcsw   int64
-}
-
 type Signal int
 
-type Sockaddr interface {
-	sockaddr() (ptr unsafe.Pointer, len _Socklen, err error)
-}
-
 var SocketDisableIPv6 bool
-
-var Stderr int = 2
-
-var Stdin int = 0
-
-var Stdout int = 1
 
 type Timespec struct {
 	Sec  int64
 	Nsec int64
 }
 
-type Timeval struct {
-	Sec  int64
-	Usec int64
-}
-
-type WaitStatus uint32
-
-type _C_int int32
-
-type _C_long int64
-
-type _C_long_long int64
-
-type _C_short int16
-
-type _Gid_t uint32
-
-type _Socklen uint32
-
-var execveLibc func(path *byte, argv **byte, envp **byte) error
+var _zero uintptr
 
 var ioSync int64
-
-type mmapper struct {
-	sync.Mutex
-	active map[*byte][]byte
-	mmap   func(addr uintptr, length uintptr, prot int, flags int, fd int, offset int64) (uintptr, error)
-	munmap func(addr uintptr, length uintptr) error
-}
-
-// AF_APPLETALK differs between hosts.
-var AF_APPLETALK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_APPLETALK)
-	}
-	return int(Freebsd_AF_APPLETALK)
-}()
-
-// AF_BLUETOOTH differs between hosts.
-var AF_BLUETOOTH int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_BLUETOOTH)
-	}
-	return int(Freebsd_AF_BLUETOOTH)
-}()
-
-const AF_DECnet = 12
 
 const AF_INET = 2
 
@@ -154,391 +59,47 @@ var AF_INET6 int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_AF_INET6)
 	}
-	return int(Freebsd_AF_INET6)
-}()
-
-// AF_IPX differs between hosts.
-var AF_IPX int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_IPX)
+	if apehost == apeFreebsd {
+		return int(Freebsd_AF_INET6)
 	}
-	return int(Freebsd_AF_IPX)
-}()
-
-// AF_ISDN differs between hosts.
-var AF_ISDN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_ISDN)
-	}
-	return int(Freebsd_AF_ISDN)
-}()
-
-const AF_LOCAL = 1
-
-// AF_MAX differs between hosts.
-var AF_MAX int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_MAX)
-	}
-	return int(Freebsd_AF_MAX)
-}()
-
-// AF_ROUTE differs between hosts.
-var AF_ROUTE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_ROUTE)
-	}
-	return int(Freebsd_AF_ROUTE)
-}()
-
-// AF_SNA differs between hosts.
-var AF_SNA int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_SNA)
-	}
-	return int(Freebsd_AF_SNA)
+	return int(Windows_AF_INET6)
 }()
 
 const AF_UNIX = 1
 
 const AF_UNSPEC = 0
 
-const B0 = 0
-
-// B110 differs between hosts.
-var B110 int = func() int {
+// E2BIG differs between hosts.
+var E2BIG Errno = func() Errno {
 	if apehost == apeLinux {
-		return int(Linux_B110)
+		return Linux_E2BIG
 	}
-	return int(Freebsd_B110)
+	if apehost == apeFreebsd {
+		return Freebsd_E2BIG
+	}
+	return Windows_E2BIG
 }()
 
-// B115200 differs between hosts.
-var B115200 int = func() int {
+// EACCES differs between hosts.
+var EACCES Errno = func() Errno {
 	if apehost == apeLinux {
-		return int(Linux_B115200)
+		return Linux_EACCES
 	}
-	return int(Freebsd_B115200)
-}()
-
-// B1200 differs between hosts.
-var B1200 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B1200)
+	if apehost == apeFreebsd {
+		return Freebsd_EACCES
 	}
-	return int(Freebsd_B1200)
+	return Windows_EACCES
 }()
-
-// B134 differs between hosts.
-var B134 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B134)
-	}
-	return int(Freebsd_B134)
-}()
-
-// B150 differs between hosts.
-var B150 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B150)
-	}
-	return int(Freebsd_B150)
-}()
-
-// B1800 differs between hosts.
-var B1800 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B1800)
-	}
-	return int(Freebsd_B1800)
-}()
-
-// B19200 differs between hosts.
-var B19200 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B19200)
-	}
-	return int(Freebsd_B19200)
-}()
-
-// B200 differs between hosts.
-var B200 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B200)
-	}
-	return int(Freebsd_B200)
-}()
-
-// B230400 differs between hosts.
-var B230400 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B230400)
-	}
-	return int(Freebsd_B230400)
-}()
-
-// B2400 differs between hosts.
-var B2400 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B2400)
-	}
-	return int(Freebsd_B2400)
-}()
-
-// B300 differs between hosts.
-var B300 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B300)
-	}
-	return int(Freebsd_B300)
-}()
-
-// B38400 differs between hosts.
-var B38400 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B38400)
-	}
-	return int(Freebsd_B38400)
-}()
-
-// B460800 differs between hosts.
-var B460800 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B460800)
-	}
-	return int(Freebsd_B460800)
-}()
-
-// B4800 differs between hosts.
-var B4800 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B4800)
-	}
-	return int(Freebsd_B4800)
-}()
-
-// B50 differs between hosts.
-var B50 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B50)
-	}
-	return int(Freebsd_B50)
-}()
-
-// B57600 differs between hosts.
-var B57600 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B57600)
-	}
-	return int(Freebsd_B57600)
-}()
-
-// B600 differs between hosts.
-var B600 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B600)
-	}
-	return int(Freebsd_B600)
-}()
-
-// B75 differs between hosts.
-var B75 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B75)
-	}
-	return int(Freebsd_B75)
-}()
-
-// B921600 differs between hosts.
-var B921600 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B921600)
-	}
-	return int(Freebsd_B921600)
-}()
-
-// B9600 differs between hosts.
-var B9600 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_B9600)
-	}
-	return int(Freebsd_B9600)
-}()
-
-const BPF_A = 16
-
-const BPF_ABS = 32
-
-const BPF_ADD = 0
-
-const BPF_ALU = 4
-
-const BPF_AND = 80
-
-const BPF_B = 16
-
-const BPF_DIV = 48
-
-const BPF_H = 8
-
-const BPF_IMM = 0
-
-const BPF_IND = 64
-
-const BPF_JA = 0
-
-const BPF_JEQ = 16
-
-const BPF_JGE = 48
-
-const BPF_JGT = 32
-
-const BPF_JMP = 5
-
-const BPF_JSET = 64
-
-const BPF_K = 0
-
-const BPF_LD = 0
-
-const BPF_LDX = 1
-
-const BPF_LEN = 128
-
-const BPF_LSH = 96
-
-const BPF_MAJOR_VERSION = 1
-
-// BPF_MAXINSNS differs between hosts.
-var BPF_MAXINSNS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_BPF_MAXINSNS)
-	}
-	return int(Freebsd_BPF_MAXINSNS)
-}()
-
-const BPF_MEM = 96
-
-const BPF_MEMWORDS = 16
-
-const BPF_MINOR_VERSION = 1
-
-const BPF_MISC = 7
-
-const BPF_MSH = 160
-
-const BPF_MUL = 32
-
-const BPF_NEG = 128
-
-const BPF_OR = 64
-
-const BPF_RET = 6
-
-const BPF_RSH = 112
-
-const BPF_ST = 2
-
-const BPF_STX = 3
-
-const BPF_SUB = 16
-
-const BPF_TAX = 0
-
-const BPF_TXA = 128
-
-const BPF_W = 0
-
-const BPF_X = 8
-
-const BRKINT = 2
-
-// CLOCAL differs between hosts.
-var CLOCAL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CLOCAL)
-	}
-	return int(Freebsd_CLOCAL)
-}()
-
-// CREAD differs between hosts.
-var CREAD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CREAD)
-	}
-	return int(Freebsd_CREAD)
-}()
-
-const CS5 = 0
-
-// CS6 differs between hosts.
-var CS6 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CS6)
-	}
-	return int(Freebsd_CS6)
-}()
-
-// CS7 differs between hosts.
-var CS7 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CS7)
-	}
-	return int(Freebsd_CS7)
-}()
-
-// CS8 differs between hosts.
-var CS8 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CS8)
-	}
-	return int(Freebsd_CS8)
-}()
-
-// CSIZE differs between hosts.
-var CSIZE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CSIZE)
-	}
-	return int(Freebsd_CSIZE)
-}()
-
-// CSTOPB differs between hosts.
-var CSTOPB int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_CSTOPB)
-	}
-	return int(Freebsd_CSTOPB)
-}()
-
-const DT_BLK = 6
-
-const DT_CHR = 2
-
-const DT_DIR = 4
-
-const DT_FIFO = 1
-
-const DT_LNK = 10
-
-const DT_REG = 8
-
-const DT_SOCK = 12
-
-const DT_UNKNOWN = 0
-
-const DT_WHT = 14
-
-const E2BIG Errno = 7
-
-const EACCES Errno = 13
 
 // EADDRINUSE differs between hosts.
 var EADDRINUSE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EADDRINUSE
 	}
-	return Freebsd_EADDRINUSE
+	if apehost == apeFreebsd {
+		return Freebsd_EADDRINUSE
+	}
+	return Windows_EADDRINUSE
 }()
 
 // EADDRNOTAVAIL differs between hosts.
@@ -546,7 +107,10 @@ var EADDRNOTAVAIL Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EADDRNOTAVAIL
 	}
-	return Freebsd_EADDRNOTAVAIL
+	if apehost == apeFreebsd {
+		return Freebsd_EADDRNOTAVAIL
+	}
+	return Windows_EADDRNOTAVAIL
 }()
 
 // EAFNOSUPPORT differs between hosts.
@@ -554,7 +118,10 @@ var EAFNOSUPPORT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EAFNOSUPPORT
 	}
-	return Freebsd_EAFNOSUPPORT
+	if apehost == apeFreebsd {
+		return Freebsd_EAFNOSUPPORT
+	}
+	return Windows_EAFNOSUPPORT
 }()
 
 // EAGAIN differs between hosts.
@@ -562,7 +129,10 @@ var EAGAIN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EAGAIN
 	}
-	return Freebsd_EAGAIN
+	if apehost == apeFreebsd {
+		return Freebsd_EAGAIN
+	}
+	return Windows_EAGAIN
 }()
 
 // EALREADY differs between hosts.
@@ -570,79 +140,65 @@ var EALREADY Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EALREADY
 	}
-	return Freebsd_EALREADY
+	if apehost == apeFreebsd {
+		return Freebsd_EALREADY
+	}
+	return Windows_EALREADY
 }()
 
-const EBADF Errno = 9
+// EBADF differs between hosts.
+var EBADF Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EBADF
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EBADF
+	}
+	return Windows_EBADF
+}()
 
 // EBADMSG differs between hosts.
 var EBADMSG Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EBADMSG
 	}
-	return Freebsd_EBADMSG
+	if apehost == apeFreebsd {
+		return Freebsd_EBADMSG
+	}
+	return Windows_EBADMSG
 }()
 
-const EBUSY Errno = 16
+// EBUSY differs between hosts.
+var EBUSY Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EBUSY
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EBUSY
+	}
+	return Windows_EBUSY
+}()
 
 // ECANCELED differs between hosts.
 var ECANCELED Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ECANCELED
 	}
-	return Freebsd_ECANCELED
+	if apehost == apeFreebsd {
+		return Freebsd_ECANCELED
+	}
+	return Windows_ECANCELED
 }()
 
-const ECHILD Errno = 10
-
-const ECHO = 8
-
-// ECHOCTL differs between hosts.
-var ECHOCTL int = func() int {
+// ECHILD differs between hosts.
+var ECHILD Errno = func() Errno {
 	if apehost == apeLinux {
-		return int(Linux_ECHOCTL)
+		return Linux_ECHILD
 	}
-	return int(Freebsd_ECHOCTL)
-}()
-
-// ECHOE differs between hosts.
-var ECHOE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ECHOE)
+	if apehost == apeFreebsd {
+		return Freebsd_ECHILD
 	}
-	return int(Freebsd_ECHOE)
-}()
-
-// ECHOK differs between hosts.
-var ECHOK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ECHOK)
-	}
-	return int(Freebsd_ECHOK)
-}()
-
-// ECHOKE differs between hosts.
-var ECHOKE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ECHOKE)
-	}
-	return int(Freebsd_ECHOKE)
-}()
-
-// ECHONL differs between hosts.
-var ECHONL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ECHONL)
-	}
-	return int(Freebsd_ECHONL)
-}()
-
-// ECHOPRT differs between hosts.
-var ECHOPRT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ECHOPRT)
-	}
-	return int(Freebsd_ECHOPRT)
+	return Windows_ECHILD
 }()
 
 // ECONNABORTED differs between hosts.
@@ -650,7 +206,10 @@ var ECONNABORTED Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ECONNABORTED
 	}
-	return Freebsd_ECONNABORTED
+	if apehost == apeFreebsd {
+		return Freebsd_ECONNABORTED
+	}
+	return Windows_ECONNABORTED
 }()
 
 // ECONNREFUSED differs between hosts.
@@ -658,7 +217,10 @@ var ECONNREFUSED Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ECONNREFUSED
 	}
-	return Freebsd_ECONNREFUSED
+	if apehost == apeFreebsd {
+		return Freebsd_ECONNREFUSED
+	}
+	return Windows_ECONNREFUSED
 }()
 
 // ECONNRESET differs between hosts.
@@ -666,7 +228,10 @@ var ECONNRESET Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ECONNRESET
 	}
-	return Freebsd_ECONNRESET
+	if apehost == apeFreebsd {
+		return Freebsd_ECONNRESET
+	}
+	return Windows_ECONNRESET
 }()
 
 // EDEADLK differs between hosts.
@@ -674,7 +239,10 @@ var EDEADLK Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EDEADLK
 	}
-	return Freebsd_EDEADLK
+	if apehost == apeFreebsd {
+		return Freebsd_EDEADLK
+	}
+	return Windows_EDEADLK
 }()
 
 // EDESTADDRREQ differs between hosts.
@@ -682,31 +250,76 @@ var EDESTADDRREQ Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EDESTADDRREQ
 	}
-	return Freebsd_EDESTADDRREQ
+	if apehost == apeFreebsd {
+		return Freebsd_EDESTADDRREQ
+	}
+	return Windows_EDESTADDRREQ
 }()
 
-const EDOM Errno = 33
+// EDOM differs between hosts.
+var EDOM Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EDOM
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EDOM
+	}
+	return Windows_EDOM
+}()
 
 // EDQUOT differs between hosts.
 var EDQUOT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EDQUOT
 	}
-	return Freebsd_EDQUOT
+	if apehost == apeFreebsd {
+		return Freebsd_EDQUOT
+	}
+	return Windows_EDQUOT
 }()
 
-const EEXIST Errno = 17
+// EEXIST differs between hosts.
+var EEXIST Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EEXIST
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EEXIST
+	}
+	return Windows_EEXIST
+}()
 
-const EFAULT Errno = 14
+// EFAULT differs between hosts.
+var EFAULT Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EFAULT
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EFAULT
+	}
+	return Windows_EFAULT
+}()
 
-const EFBIG Errno = 27
+// EFBIG differs between hosts.
+var EFBIG Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EFBIG
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EFBIG
+	}
+	return Windows_EFBIG
+}()
 
 // EHOSTDOWN differs between hosts.
 var EHOSTDOWN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EHOSTDOWN
 	}
-	return Freebsd_EHOSTDOWN
+	if apehost == apeFreebsd {
+		return Freebsd_EHOSTDOWN
+	}
+	return Windows_EHOSTDOWN
 }()
 
 // EHOSTUNREACH differs between hosts.
@@ -714,7 +327,10 @@ var EHOSTUNREACH Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EHOSTUNREACH
 	}
-	return Freebsd_EHOSTUNREACH
+	if apehost == apeFreebsd {
+		return Freebsd_EHOSTUNREACH
+	}
+	return Windows_EHOSTUNREACH
 }()
 
 // EIDRM differs between hosts.
@@ -722,7 +338,10 @@ var EIDRM Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EIDRM
 	}
-	return Freebsd_EIDRM
+	if apehost == apeFreebsd {
+		return Freebsd_EIDRM
+	}
+	return Windows_EIDRM
 }()
 
 // EILSEQ differs between hosts.
@@ -730,7 +349,10 @@ var EILSEQ Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EILSEQ
 	}
-	return Freebsd_EILSEQ
+	if apehost == apeFreebsd {
+		return Freebsd_EILSEQ
+	}
+	return Windows_EILSEQ
 }()
 
 // EINPROGRESS differs between hosts.
@@ -738,43 +360,109 @@ var EINPROGRESS Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EINPROGRESS
 	}
-	return Freebsd_EINPROGRESS
+	if apehost == apeFreebsd {
+		return Freebsd_EINPROGRESS
+	}
+	return Windows_EINPROGRESS
 }()
 
-const EINTR Errno = 4
+// EINTR differs between hosts.
+var EINTR Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EINTR
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EINTR
+	}
+	return Windows_EINTR
+}()
 
-const EINVAL Errno = 22
+// EINVAL differs between hosts.
+var EINVAL Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EINVAL
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EINVAL
+	}
+	return Windows_EINVAL
+}()
 
-const EIO Errno = 5
+// EIO differs between hosts.
+var EIO Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EIO
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EIO
+	}
+	return Windows_EIO
+}()
 
 // EISCONN differs between hosts.
 var EISCONN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EISCONN
 	}
-	return Freebsd_EISCONN
+	if apehost == apeFreebsd {
+		return Freebsd_EISCONN
+	}
+	return Windows_EISCONN
 }()
 
-const EISDIR Errno = 21
+// EISDIR differs between hosts.
+var EISDIR Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EISDIR
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EISDIR
+	}
+	return Windows_EISDIR
+}()
 
 // ELOOP differs between hosts.
 var ELOOP Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ELOOP
 	}
-	return Freebsd_ELOOP
+	if apehost == apeFreebsd {
+		return Freebsd_ELOOP
+	}
+	return Windows_ELOOP
 }()
 
-const EMFILE Errno = 24
+// EMFILE differs between hosts.
+var EMFILE Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EMFILE
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EMFILE
+	}
+	return Windows_EMFILE
+}()
 
-const EMLINK Errno = 31
+// EMLINK differs between hosts.
+var EMLINK Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EMLINK
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EMLINK
+	}
+	return Windows_EMLINK
+}()
 
 // EMSGSIZE differs between hosts.
 var EMSGSIZE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EMSGSIZE
 	}
-	return Freebsd_EMSGSIZE
+	if apehost == apeFreebsd {
+		return Freebsd_EMSGSIZE
+	}
+	return Windows_EMSGSIZE
 }()
 
 // EMULTIHOP differs between hosts.
@@ -782,7 +470,10 @@ var EMULTIHOP Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EMULTIHOP
 	}
-	return Freebsd_EMULTIHOP
+	if apehost == apeFreebsd {
+		return Freebsd_EMULTIHOP
+	}
+	return Windows_EMULTIHOP
 }()
 
 // ENAMETOOLONG differs between hosts.
@@ -790,7 +481,10 @@ var ENAMETOOLONG Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENAMETOOLONG
 	}
-	return Freebsd_ENAMETOOLONG
+	if apehost == apeFreebsd {
+		return Freebsd_ENAMETOOLONG
+	}
+	return Windows_ENAMETOOLONG
 }()
 
 // ENETDOWN differs between hosts.
@@ -798,7 +492,10 @@ var ENETDOWN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENETDOWN
 	}
-	return Freebsd_ENETDOWN
+	if apehost == apeFreebsd {
+		return Freebsd_ENETDOWN
+	}
+	return Windows_ENETDOWN
 }()
 
 // ENETRESET differs between hosts.
@@ -806,7 +503,10 @@ var ENETRESET Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENETRESET
 	}
-	return Freebsd_ENETRESET
+	if apehost == apeFreebsd {
+		return Freebsd_ENETRESET
+	}
+	return Windows_ENETRESET
 }()
 
 // ENETUNREACH differs between hosts.
@@ -814,31 +514,67 @@ var ENETUNREACH Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENETUNREACH
 	}
-	return Freebsd_ENETUNREACH
+	if apehost == apeFreebsd {
+		return Freebsd_ENETUNREACH
+	}
+	return Windows_ENETUNREACH
 }()
 
-const ENFILE Errno = 23
+// ENFILE differs between hosts.
+var ENFILE Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENFILE
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENFILE
+	}
+	return Windows_ENFILE
+}()
 
 // ENOBUFS differs between hosts.
 var ENOBUFS Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOBUFS
 	}
-	return Freebsd_ENOBUFS
+	if apehost == apeFreebsd {
+		return Freebsd_ENOBUFS
+	}
+	return Windows_ENOBUFS
 }()
 
-const ENODEV Errno = 19
+// ENODEV differs between hosts.
+var ENODEV Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENODEV
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENODEV
+	}
+	return Windows_ENODEV
+}()
 
 const ENOENT Errno = 2
 
-const ENOEXEC Errno = 8
+// ENOEXEC differs between hosts.
+var ENOEXEC Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOEXEC
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOEXEC
+	}
+	return Windows_ENOEXEC
+}()
 
 // ENOLCK differs between hosts.
 var ENOLCK Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOLCK
 	}
-	return Freebsd_ENOLCK
+	if apehost == apeFreebsd {
+		return Freebsd_ENOLCK
+	}
+	return Windows_ENOLCK
 }()
 
 // ENOLINK differs between hosts.
@@ -846,17 +582,32 @@ var ENOLINK Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOLINK
 	}
-	return Freebsd_ENOLINK
+	if apehost == apeFreebsd {
+		return Freebsd_ENOLINK
+	}
+	return Windows_ENOLINK
 }()
 
-const ENOMEM Errno = 12
+// ENOMEM differs between hosts.
+var ENOMEM Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOMEM
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOMEM
+	}
+	return Windows_ENOMEM
+}()
 
 // ENOMSG differs between hosts.
 var ENOMSG Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOMSG
 	}
-	return Freebsd_ENOMSG
+	if apehost == apeFreebsd {
+		return Freebsd_ENOMSG
+	}
+	return Windows_ENOMSG
 }()
 
 // ENOPROTOOPT differs between hosts.
@@ -864,37 +615,76 @@ var ENOPROTOOPT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOPROTOOPT
 	}
-	return Freebsd_ENOPROTOOPT
+	if apehost == apeFreebsd {
+		return Freebsd_ENOPROTOOPT
+	}
+	return Windows_ENOPROTOOPT
 }()
 
-const ENOSPC Errno = 28
+// ENOSPC differs between hosts.
+var ENOSPC Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOSPC
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOSPC
+	}
+	return Windows_ENOSPC
+}()
 
 // ENOSYS differs between hosts.
 var ENOSYS Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOSYS
 	}
-	return Freebsd_ENOSYS
+	if apehost == apeFreebsd {
+		return Freebsd_ENOSYS
+	}
+	return Windows_ENOSYS
 }()
 
-const ENOTBLK Errno = 15
+// ENOTBLK differs between hosts.
+var ENOTBLK Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOTBLK
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTBLK
+	}
+	return Windows_ENOTBLK
+}()
 
 // ENOTCONN differs between hosts.
 var ENOTCONN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOTCONN
 	}
-	return Freebsd_ENOTCONN
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTCONN
+	}
+	return Windows_ENOTCONN
 }()
 
-const ENOTDIR Errno = 20
+// ENOTDIR differs between hosts.
+var ENOTDIR Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOTDIR
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTDIR
+	}
+	return Windows_ENOTDIR
+}()
 
 // ENOTEMPTY differs between hosts.
 var ENOTEMPTY Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOTEMPTY
 	}
-	return Freebsd_ENOTEMPTY
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTEMPTY
+	}
+	return Windows_ENOTEMPTY
 }()
 
 // ENOTRECOVERABLE differs between hosts.
@@ -902,7 +692,10 @@ var ENOTRECOVERABLE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOTRECOVERABLE
 	}
-	return Freebsd_ENOTRECOVERABLE
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTRECOVERABLE
+	}
+	return Windows_ENOTRECOVERABLE
 }()
 
 // ENOTSOCK differs between hosts.
@@ -910,7 +703,10 @@ var ENOTSOCK Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOTSOCK
 	}
-	return Freebsd_ENOTSOCK
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTSOCK
+	}
+	return Windows_ENOTSOCK
 }()
 
 // ENOTSUP differs between hosts.
@@ -918,19 +714,43 @@ var ENOTSUP Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ENOTSUP
 	}
-	return Freebsd_ENOTSUP
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTSUP
+	}
+	return Windows_ENOTSUP
 }()
 
-const ENOTTY Errno = 25
+// ENOTTY differs between hosts.
+var ENOTTY Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENOTTY
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENOTTY
+	}
+	return Windows_ENOTTY
+}()
 
-const ENXIO Errno = 6
+// ENXIO differs between hosts.
+var ENXIO Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ENXIO
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ENXIO
+	}
+	return Windows_ENXIO
+}()
 
 // EOPNOTSUPP differs between hosts.
 var EOPNOTSUPP Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EOPNOTSUPP
 	}
-	return Freebsd_EOPNOTSUPP
+	if apehost == apeFreebsd {
+		return Freebsd_EOPNOTSUPP
+	}
+	return Windows_EOPNOTSUPP
 }()
 
 // EOVERFLOW differs between hosts.
@@ -938,7 +758,10 @@ var EOVERFLOW Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EOVERFLOW
 	}
-	return Freebsd_EOVERFLOW
+	if apehost == apeFreebsd {
+		return Freebsd_EOVERFLOW
+	}
+	return Windows_EOVERFLOW
 }()
 
 // EOWNERDEAD differs between hosts.
@@ -946,27 +769,54 @@ var EOWNERDEAD Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EOWNERDEAD
 	}
-	return Freebsd_EOWNERDEAD
+	if apehost == apeFreebsd {
+		return Freebsd_EOWNERDEAD
+	}
+	return Windows_EOWNERDEAD
 }()
 
-const EPERM Errno = 1
+// EPERM differs between hosts.
+var EPERM Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EPERM
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EPERM
+	}
+	return Windows_EPERM
+}()
 
 // EPFNOSUPPORT differs between hosts.
 var EPFNOSUPPORT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EPFNOSUPPORT
 	}
-	return Freebsd_EPFNOSUPPORT
+	if apehost == apeFreebsd {
+		return Freebsd_EPFNOSUPPORT
+	}
+	return Windows_EPFNOSUPPORT
 }()
 
-const EPIPE Errno = 32
+// EPIPE differs between hosts.
+var EPIPE Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EPIPE
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EPIPE
+	}
+	return Windows_EPIPE
+}()
 
 // EPROTO differs between hosts.
 var EPROTO Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EPROTO
 	}
-	return Freebsd_EPROTO
+	if apehost == apeFreebsd {
+		return Freebsd_EPROTO
+	}
+	return Windows_EPROTO
 }()
 
 // EPROTONOSUPPORT differs between hosts.
@@ -974,7 +824,10 @@ var EPROTONOSUPPORT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EPROTONOSUPPORT
 	}
-	return Freebsd_EPROTONOSUPPORT
+	if apehost == apeFreebsd {
+		return Freebsd_EPROTONOSUPPORT
+	}
+	return Windows_EPROTONOSUPPORT
 }()
 
 // EPROTOTYPE differs between hosts.
@@ -982,27 +835,54 @@ var EPROTOTYPE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EPROTOTYPE
 	}
-	return Freebsd_EPROTOTYPE
+	if apehost == apeFreebsd {
+		return Freebsd_EPROTOTYPE
+	}
+	return Windows_EPROTOTYPE
 }()
 
-const ERANGE Errno = 34
+// ERANGE differs between hosts.
+var ERANGE Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ERANGE
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ERANGE
+	}
+	return Windows_ERANGE
+}()
 
 // EREMOTE differs between hosts.
 var EREMOTE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EREMOTE
 	}
-	return Freebsd_EREMOTE
+	if apehost == apeFreebsd {
+		return Freebsd_EREMOTE
+	}
+	return Windows_EREMOTE
 }()
 
-const EROFS Errno = 30
+// EROFS differs between hosts.
+var EROFS Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_EROFS
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_EROFS
+	}
+	return Windows_EROFS
+}()
 
 // ESHUTDOWN differs between hosts.
 var ESHUTDOWN Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ESHUTDOWN
 	}
-	return Freebsd_ESHUTDOWN
+	if apehost == apeFreebsd {
+		return Freebsd_ESHUTDOWN
+	}
+	return Windows_ESHUTDOWN
 }()
 
 // ESOCKTNOSUPPORT differs between hosts.
@@ -1010,19 +890,43 @@ var ESOCKTNOSUPPORT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ESOCKTNOSUPPORT
 	}
-	return Freebsd_ESOCKTNOSUPPORT
+	if apehost == apeFreebsd {
+		return Freebsd_ESOCKTNOSUPPORT
+	}
+	return Windows_ESOCKTNOSUPPORT
 }()
 
-const ESPIPE Errno = 29
+// ESPIPE differs between hosts.
+var ESPIPE Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ESPIPE
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ESPIPE
+	}
+	return Windows_ESPIPE
+}()
 
-const ESRCH Errno = 3
+// ESRCH differs between hosts.
+var ESRCH Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ESRCH
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ESRCH
+	}
+	return Windows_ESRCH
+}()
 
 // ESTALE differs between hosts.
 var ESTALE Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ESTALE
 	}
-	return Freebsd_ESTALE
+	if apehost == apeFreebsd {
+		return Freebsd_ESTALE
+	}
+	return Windows_ESTALE
 }()
 
 // ETIMEDOUT differs between hosts.
@@ -1030,7 +934,10 @@ var ETIMEDOUT Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ETIMEDOUT
 	}
-	return Freebsd_ETIMEDOUT
+	if apehost == apeFreebsd {
+		return Freebsd_ETIMEDOUT
+	}
+	return Windows_ETIMEDOUT
 }()
 
 // ETOOMANYREFS differs between hosts.
@@ -1038,17 +945,32 @@ var ETOOMANYREFS Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_ETOOMANYREFS
 	}
-	return Freebsd_ETOOMANYREFS
+	if apehost == apeFreebsd {
+		return Freebsd_ETOOMANYREFS
+	}
+	return Windows_ETOOMANYREFS
 }()
 
-const ETXTBSY Errno = 26
+// ETXTBSY differs between hosts.
+var ETXTBSY Errno = func() Errno {
+	if apehost == apeLinux {
+		return Linux_ETXTBSY
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ETXTBSY
+	}
+	return Windows_ETXTBSY
+}()
 
 // EUSERS differs between hosts.
 var EUSERS Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EUSERS
 	}
-	return Freebsd_EUSERS
+	if apehost == apeFreebsd {
+		return Freebsd_EUSERS
+	}
+	return Windows_EUSERS
 }()
 
 // EWOULDBLOCK differs between hosts.
@@ -1056,289 +978,66 @@ var EWOULDBLOCK Errno = func() Errno {
 	if apehost == apeLinux {
 		return Linux_EWOULDBLOCK
 	}
-	return Freebsd_EWOULDBLOCK
-}()
-
-const EXDEV Errno = 18
-
-const FD_CLOEXEC = 1
-
-const FD_SETSIZE = 1024
-
-// FLUSHO differs between hosts.
-var FLUSHO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_FLUSHO)
+	if apehost == apeFreebsd {
+		return Freebsd_EWOULDBLOCK
 	}
-	return int(Freebsd_FLUSHO)
+	return Windows_EWOULDBLOCK
 }()
 
-const F_DUPFD = 0
-
-// F_DUPFD_CLOEXEC differs between hosts.
-var F_DUPFD_CLOEXEC int = func() int {
+// EXDEV differs between hosts.
+var EXDEV Errno = func() Errno {
 	if apehost == apeLinux {
-		return int(Linux_F_DUPFD_CLOEXEC)
+		return Linux_EXDEV
 	}
-	return int(Freebsd_F_DUPFD_CLOEXEC)
-}()
-
-const F_GETFD = 1
-
-const F_GETFL = 3
-
-// F_GETLK differs between hosts.
-var F_GETLK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_GETLK)
+	if apehost == apeFreebsd {
+		return Freebsd_EXDEV
 	}
-	return int(Freebsd_F_GETLK)
+	return Windows_EXDEV
 }()
-
-// F_GETOWN differs between hosts.
-var F_GETOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_GETOWN)
-	}
-	return int(Freebsd_F_GETOWN)
-}()
-
-const F_OK = 0
-
-// F_RDLCK differs between hosts.
-var F_RDLCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_RDLCK)
-	}
-	return int(Freebsd_F_RDLCK)
-}()
-
-const F_SETFD = 2
-
-const F_SETFL = 4
-
-// F_SETLK differs between hosts.
-var F_SETLK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_SETLK)
-	}
-	return int(Freebsd_F_SETLK)
-}()
-
-// F_SETLKW differs between hosts.
-var F_SETLKW int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_SETLKW)
-	}
-	return int(Freebsd_F_SETLKW)
-}()
-
-// F_SETOWN differs between hosts.
-var F_SETOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_SETOWN)
-	}
-	return int(Freebsd_F_SETOWN)
-}()
-
-const F_UNLCK = 2
-
-// F_WRLCK differs between hosts.
-var F_WRLCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_F_WRLCK)
-	}
-	return int(Freebsd_F_WRLCK)
-}()
-
-// HUPCL differs between hosts.
-var HUPCL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_HUPCL)
-	}
-	return int(Freebsd_HUPCL)
-}()
-
-// ICANON differs between hosts.
-var ICANON int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ICANON)
-	}
-	return int(Freebsd_ICANON)
-}()
-
-const ICRNL = 256
-
-// IEXTEN differs between hosts.
-var IEXTEN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IEXTEN)
-	}
-	return int(Freebsd_IEXTEN)
-}()
-
-const IFF_ALLMULTI = 512
 
 const IFF_BROADCAST = 2
 
-const IFF_DEBUG = 4
-
-const IFF_LOOPBACK = 8
+// IFF_LOOPBACK differs between hosts.
+var IFF_LOOPBACK int = func() int {
+	if apehost == apeLinux {
+		return int(Linux_IFF_LOOPBACK)
+	}
+	if apehost == apeFreebsd {
+		return int(Freebsd_IFF_LOOPBACK)
+	}
+	return int(Windows_IFF_LOOPBACK)
+}()
 
 // IFF_MULTICAST differs between hosts.
 var IFF_MULTICAST int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IFF_MULTICAST)
 	}
-	return int(Freebsd_IFF_MULTICAST)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IFF_MULTICAST)
+	}
+	return int(Windows_IFF_MULTICAST)
 }()
-
-const IFF_NOARP = 128
-
-const IFF_POINTOPOINT = 16
-
-const IFF_PROMISC = 256
-
-const IFF_RUNNING = 64
 
 const IFF_UP = 1
 
-const IFNAMSIZ = 16
-
-const IGNBRK = 1
-
-const IGNCR = 128
-
-const IGNPAR = 4
-
-const IMAXBEL = 8192
-
-const INLCR = 64
-
-const INPCK = 16
-
-const IN_CLASSA_HOST = 16777215
-
-const IN_CLASSA_MAX = 128
-
-const IN_CLASSA_NET = 4278190080
-
-const IN_CLASSA_NSHIFT = 24
-
-const IN_CLASSB_HOST = 65535
-
-const IN_CLASSB_MAX = 65536
-
-const IN_CLASSB_NET = 4294901760
-
-const IN_CLASSB_NSHIFT = 16
-
-const IN_CLASSC_HOST = 255
-
-const IN_CLASSC_NET = 4294967040
-
-const IN_CLASSC_NSHIFT = 8
-
-const IN_LOOPBACKNET = 127
-
-const IPPROTO_AH = 51
-
-const IPPROTO_DSTOPTS = 60
-
-const IPPROTO_EGP = 8
-
-const IPPROTO_ENCAP = 98
-
-const IPPROTO_ESP = 50
-
-const IPPROTO_FRAGMENT = 44
-
-const IPPROTO_GRE = 47
-
-const IPPROTO_HOPOPTS = 0
-
-const IPPROTO_ICMP = 1
-
-const IPPROTO_ICMPV6 = 58
-
-const IPPROTO_IDP = 22
-
-const IPPROTO_IGMP = 2
-
 const IPPROTO_IP = 0
-
-const IPPROTO_IPIP = 4
 
 const IPPROTO_IPV6 = 41
 
-const IPPROTO_MTP = 92
-
-const IPPROTO_NONE = 59
-
-const IPPROTO_PIM = 103
-
-const IPPROTO_PUP = 12
-
-const IPPROTO_RAW = 255
-
-const IPPROTO_ROUTING = 43
-
-const IPPROTO_RSVP = 46
-
-const IPPROTO_SCTP = 132
-
 const IPPROTO_TCP = 6
 
-const IPPROTO_TP = 29
-
 const IPPROTO_UDP = 17
-
-// IPV6_CHECKSUM differs between hosts.
-var IPV6_CHECKSUM int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_CHECKSUM)
-	}
-	return int(Freebsd_IPV6_CHECKSUM)
-}()
-
-// IPV6_DSTOPTS differs between hosts.
-var IPV6_DSTOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_DSTOPTS)
-	}
-	return int(Freebsd_IPV6_DSTOPTS)
-}()
-
-// IPV6_HOPLIMIT differs between hosts.
-var IPV6_HOPLIMIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_HOPLIMIT)
-	}
-	return int(Freebsd_IPV6_HOPLIMIT)
-}()
-
-// IPV6_HOPOPTS differs between hosts.
-var IPV6_HOPOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_HOPOPTS)
-	}
-	return int(Freebsd_IPV6_HOPOPTS)
-}()
-
-// IPV6_IPSEC_POLICY differs between hosts.
-var IPV6_IPSEC_POLICY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_IPSEC_POLICY)
-	}
-	return int(Freebsd_IPV6_IPSEC_POLICY)
-}()
 
 // IPV6_JOIN_GROUP differs between hosts.
 var IPV6_JOIN_GROUP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_JOIN_GROUP)
 	}
-	return int(Freebsd_IPV6_JOIN_GROUP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_JOIN_GROUP)
+	}
+	return int(Windows_IPV6_JOIN_GROUP)
 }()
 
 // IPV6_LEAVE_GROUP differs between hosts.
@@ -1346,7 +1045,10 @@ var IPV6_LEAVE_GROUP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_LEAVE_GROUP)
 	}
-	return int(Freebsd_IPV6_LEAVE_GROUP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_LEAVE_GROUP)
+	}
+	return int(Windows_IPV6_LEAVE_GROUP)
 }()
 
 // IPV6_MULTICAST_HOPS differs between hosts.
@@ -1354,7 +1056,10 @@ var IPV6_MULTICAST_HOPS int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_MULTICAST_HOPS)
 	}
-	return int(Freebsd_IPV6_MULTICAST_HOPS)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_MULTICAST_HOPS)
+	}
+	return int(Windows_IPV6_MULTICAST_HOPS)
 }()
 
 // IPV6_MULTICAST_IF differs between hosts.
@@ -1362,7 +1067,10 @@ var IPV6_MULTICAST_IF int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_MULTICAST_IF)
 	}
-	return int(Freebsd_IPV6_MULTICAST_IF)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_MULTICAST_IF)
+	}
+	return int(Windows_IPV6_MULTICAST_IF)
 }()
 
 // IPV6_MULTICAST_LOOP differs between hosts.
@@ -1370,101 +1078,10 @@ var IPV6_MULTICAST_LOOP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_MULTICAST_LOOP)
 	}
-	return int(Freebsd_IPV6_MULTICAST_LOOP)
-}()
-
-// IPV6_NEXTHOP differs between hosts.
-var IPV6_NEXTHOP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_NEXTHOP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_MULTICAST_LOOP)
 	}
-	return int(Freebsd_IPV6_NEXTHOP)
-}()
-
-// IPV6_PKTINFO differs between hosts.
-var IPV6_PKTINFO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_PKTINFO)
-	}
-	return int(Freebsd_IPV6_PKTINFO)
-}()
-
-// IPV6_RECVDSTOPTS differs between hosts.
-var IPV6_RECVDSTOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVDSTOPTS)
-	}
-	return int(Freebsd_IPV6_RECVDSTOPTS)
-}()
-
-// IPV6_RECVHOPLIMIT differs between hosts.
-var IPV6_RECVHOPLIMIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVHOPLIMIT)
-	}
-	return int(Freebsd_IPV6_RECVHOPLIMIT)
-}()
-
-// IPV6_RECVHOPOPTS differs between hosts.
-var IPV6_RECVHOPOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVHOPOPTS)
-	}
-	return int(Freebsd_IPV6_RECVHOPOPTS)
-}()
-
-// IPV6_RECVPKTINFO differs between hosts.
-var IPV6_RECVPKTINFO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVPKTINFO)
-	}
-	return int(Freebsd_IPV6_RECVPKTINFO)
-}()
-
-// IPV6_RECVRTHDR differs between hosts.
-var IPV6_RECVRTHDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVRTHDR)
-	}
-	return int(Freebsd_IPV6_RECVRTHDR)
-}()
-
-// IPV6_RECVTCLASS differs between hosts.
-var IPV6_RECVTCLASS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RECVTCLASS)
-	}
-	return int(Freebsd_IPV6_RECVTCLASS)
-}()
-
-// IPV6_RTHDR differs between hosts.
-var IPV6_RTHDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RTHDR)
-	}
-	return int(Freebsd_IPV6_RTHDR)
-}()
-
-// IPV6_RTHDRDSTOPTS differs between hosts.
-var IPV6_RTHDRDSTOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_RTHDRDSTOPTS)
-	}
-	return int(Freebsd_IPV6_RTHDRDSTOPTS)
-}()
-
-const IPV6_RTHDR_LOOSE = 0
-
-const IPV6_RTHDR_STRICT = 1
-
-const IPV6_RTHDR_TYPE_0 = 0
-
-// IPV6_TCLASS differs between hosts.
-var IPV6_TCLASS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_TCLASS)
-	}
-	return int(Freebsd_IPV6_TCLASS)
+	return int(Windows_IPV6_MULTICAST_LOOP)
 }()
 
 // IPV6_UNICAST_HOPS differs between hosts.
@@ -1472,7 +1089,10 @@ var IPV6_UNICAST_HOPS int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_UNICAST_HOPS)
 	}
-	return int(Freebsd_IPV6_UNICAST_HOPS)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_UNICAST_HOPS)
+	}
+	return int(Windows_IPV6_UNICAST_HOPS)
 }()
 
 // IPV6_V6ONLY differs between hosts.
@@ -1480,7 +1100,10 @@ var IPV6_V6ONLY int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IPV6_V6ONLY)
 	}
-	return int(Freebsd_IPV6_V6ONLY)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IPV6_V6ONLY)
+	}
+	return int(Windows_IPV6_V6ONLY)
 }()
 
 // IP_ADD_MEMBERSHIP differs between hosts.
@@ -1488,99 +1111,32 @@ var IP_ADD_MEMBERSHIP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_ADD_MEMBERSHIP)
 	}
-	return int(Freebsd_IP_ADD_MEMBERSHIP)
-}()
-
-// IP_ADD_SOURCE_MEMBERSHIP differs between hosts.
-var IP_ADD_SOURCE_MEMBERSHIP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_ADD_SOURCE_MEMBERSHIP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_ADD_MEMBERSHIP)
 	}
-	return int(Freebsd_IP_ADD_SOURCE_MEMBERSHIP)
+	return int(Windows_IP_ADD_MEMBERSHIP)
 }()
-
-// IP_BLOCK_SOURCE differs between hosts.
-var IP_BLOCK_SOURCE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_BLOCK_SOURCE)
-	}
-	return int(Freebsd_IP_BLOCK_SOURCE)
-}()
-
-const IP_DEFAULT_MULTICAST_LOOP = 1
-
-const IP_DEFAULT_MULTICAST_TTL = 1
-
-const IP_DF = 16384
 
 // IP_DROP_MEMBERSHIP differs between hosts.
 var IP_DROP_MEMBERSHIP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_DROP_MEMBERSHIP)
 	}
-	return int(Freebsd_IP_DROP_MEMBERSHIP)
-}()
-
-// IP_DROP_SOURCE_MEMBERSHIP differs between hosts.
-var IP_DROP_SOURCE_MEMBERSHIP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_DROP_SOURCE_MEMBERSHIP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_DROP_MEMBERSHIP)
 	}
-	return int(Freebsd_IP_DROP_SOURCE_MEMBERSHIP)
+	return int(Windows_IP_DROP_MEMBERSHIP)
 }()
-
-// IP_HDRINCL differs between hosts.
-var IP_HDRINCL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_HDRINCL)
-	}
-	return int(Freebsd_IP_HDRINCL)
-}()
-
-// IP_IPSEC_POLICY differs between hosts.
-var IP_IPSEC_POLICY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_IPSEC_POLICY)
-	}
-	return int(Freebsd_IP_IPSEC_POLICY)
-}()
-
-const IP_MAXPACKET = 65535
-
-// IP_MAX_MEMBERSHIPS differs between hosts.
-var IP_MAX_MEMBERSHIPS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MAX_MEMBERSHIPS)
-	}
-	return int(Freebsd_IP_MAX_MEMBERSHIPS)
-}()
-
-const IP_MF = 8192
-
-// IP_MINTTL differs between hosts.
-var IP_MINTTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MINTTL)
-	}
-	return int(Freebsd_IP_MINTTL)
-}()
-
-// IP_MSFILTER differs between hosts.
-var IP_MSFILTER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MSFILTER)
-	}
-	return int(Freebsd_IP_MSFILTER)
-}()
-
-const IP_MSS = 576
 
 // IP_MULTICAST_IF differs between hosts.
 var IP_MULTICAST_IF int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_MULTICAST_IF)
 	}
-	return int(Freebsd_IP_MULTICAST_IF)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_MULTICAST_IF)
+	}
+	return int(Windows_IP_MULTICAST_IF)
 }()
 
 // IP_MULTICAST_LOOP differs between hosts.
@@ -1588,7 +1144,10 @@ var IP_MULTICAST_LOOP int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_MULTICAST_LOOP)
 	}
-	return int(Freebsd_IP_MULTICAST_LOOP)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_MULTICAST_LOOP)
+	}
+	return int(Windows_IP_MULTICAST_LOOP)
 }()
 
 // IP_MULTICAST_TTL differs between hosts.
@@ -1596,67 +1155,21 @@ var IP_MULTICAST_TTL int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_MULTICAST_TTL)
 	}
-	return int(Freebsd_IP_MULTICAST_TTL)
-}()
-
-const IP_OFFMASK = 8191
-
-// IP_OPTIONS differs between hosts.
-var IP_OPTIONS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_OPTIONS)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_MULTICAST_TTL)
 	}
-	return int(Freebsd_IP_OPTIONS)
+	return int(Windows_IP_MULTICAST_TTL)
 }()
-
-// IP_RECVOPTS differs between hosts.
-var IP_RECVOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_RECVOPTS)
-	}
-	return int(Freebsd_IP_RECVOPTS)
-}()
-
-// IP_RECVRETOPTS differs between hosts.
-var IP_RECVRETOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_RECVRETOPTS)
-	}
-	return int(Freebsd_IP_RECVRETOPTS)
-}()
-
-// IP_RECVTOS differs between hosts.
-var IP_RECVTOS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_RECVTOS)
-	}
-	return int(Freebsd_IP_RECVTOS)
-}()
-
-// IP_RECVTTL differs between hosts.
-var IP_RECVTTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_RECVTTL)
-	}
-	return int(Freebsd_IP_RECVTTL)
-}()
-
-// IP_RETOPTS differs between hosts.
-var IP_RETOPTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_RETOPTS)
-	}
-	return int(Freebsd_IP_RETOPTS)
-}()
-
-const IP_RF = 32768
 
 // IP_TOS differs between hosts.
 var IP_TOS int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_TOS)
 	}
-	return int(Freebsd_IP_TOS)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_TOS)
+	}
+	return int(Windows_IP_TOS)
 }()
 
 // IP_TTL differs between hosts.
@@ -1664,243 +1177,23 @@ var IP_TTL int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_IP_TTL)
 	}
-	return int(Freebsd_IP_TTL)
-}()
-
-// IP_UNBLOCK_SOURCE differs between hosts.
-var IP_UNBLOCK_SOURCE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_UNBLOCK_SOURCE)
+	if apehost == apeFreebsd {
+		return int(Freebsd_IP_TTL)
 	}
-	return int(Freebsd_IP_UNBLOCK_SOURCE)
-}()
-
-// ISIG differs between hosts.
-var ISIG int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ISIG)
-	}
-	return int(Freebsd_ISIG)
-}()
-
-const ISTRIP = 32
-
-const IXANY = 2048
-
-// IXOFF differs between hosts.
-var IXOFF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IXOFF)
-	}
-	return int(Freebsd_IXOFF)
-}()
-
-// IXON differs between hosts.
-var IXON int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IXON)
-	}
-	return int(Freebsd_IXON)
+	return int(Windows_IP_TTL)
 }()
 
 const ImplementsGetwd = true
-
-const LOCK_EX = 2
-
-const LOCK_NB = 4
-
-const LOCK_SH = 1
-
-const LOCK_UN = 8
-
-const MADV_DONTNEED = 4
-
-const MADV_NORMAL = 0
-
-const MADV_RANDOM = 1
-
-const MADV_SEQUENTIAL = 2
-
-const MADV_WILLNEED = 3
-
-// MAP_32BIT differs between hosts.
-var MAP_32BIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MAP_32BIT)
-	}
-	return int(Freebsd_MAP_32BIT)
-}()
-
-// MAP_ANON differs between hosts.
-var MAP_ANON int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MAP_ANON)
-	}
-	return int(Freebsd_MAP_ANON)
-}()
-
-// MAP_ANONYMOUS differs between hosts.
-var MAP_ANONYMOUS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MAP_ANONYMOUS)
-	}
-	return int(Freebsd_MAP_ANONYMOUS)
-}()
-
-const MAP_FILE = 0
-
-const MAP_FIXED = 16
-
-// MAP_NORESERVE differs between hosts.
-var MAP_NORESERVE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MAP_NORESERVE)
-	}
-	return int(Freebsd_MAP_NORESERVE)
-}()
-
-const MAP_PRIVATE = 2
-
-const MAP_SHARED = 1
-
-// MAP_STACK differs between hosts.
-var MAP_STACK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MAP_STACK)
-	}
-	return int(Freebsd_MAP_STACK)
-}()
-
-const MCL_CURRENT = 1
-
-const MCL_FUTURE = 2
-
-// MSG_CMSG_CLOEXEC differs between hosts.
-var MSG_CMSG_CLOEXEC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_CMSG_CLOEXEC)
-	}
-	return int(Freebsd_MSG_CMSG_CLOEXEC)
-}()
-
-// MSG_CTRUNC differs between hosts.
-var MSG_CTRUNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_CTRUNC)
-	}
-	return int(Freebsd_MSG_CTRUNC)
-}()
-
-const MSG_DONTROUTE = 4
-
-// MSG_DONTWAIT differs between hosts.
-var MSG_DONTWAIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_DONTWAIT)
-	}
-	return int(Freebsd_MSG_DONTWAIT)
-}()
-
-// MSG_EOR differs between hosts.
-var MSG_EOR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_EOR)
-	}
-	return int(Freebsd_MSG_EOR)
-}()
-
-// MSG_NOSIGNAL differs between hosts.
-var MSG_NOSIGNAL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_NOSIGNAL)
-	}
-	return int(Freebsd_MSG_NOSIGNAL)
-}()
-
-const MSG_OOB = 1
-
-const MSG_PEEK = 2
-
-// MSG_TRUNC differs between hosts.
-var MSG_TRUNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_TRUNC)
-	}
-	return int(Freebsd_MSG_TRUNC)
-}()
-
-// MSG_WAITALL differs between hosts.
-var MSG_WAITALL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MSG_WAITALL)
-	}
-	return int(Freebsd_MSG_WAITALL)
-}()
-
-const MS_ASYNC = 1
-
-const MS_INVALIDATE = 2
-
-// MS_SYNC differs between hosts.
-var MS_SYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_MS_SYNC)
-	}
-	return int(Freebsd_MS_SYNC)
-}()
-
-const NAME_MAX = 255
-
-// NOFLSH differs between hosts.
-var NOFLSH int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_NOFLSH)
-	}
-	return int(Freebsd_NOFLSH)
-}()
-
-// OCRNL differs between hosts.
-var OCRNL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_OCRNL)
-	}
-	return int(Freebsd_OCRNL)
-}()
-
-// ONLCR differs between hosts.
-var ONLCR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ONLCR)
-	}
-	return int(Freebsd_ONLCR)
-}()
-
-// ONLRET differs between hosts.
-var ONLRET int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ONLRET)
-	}
-	return int(Freebsd_ONLRET)
-}()
-
-// ONOCR differs between hosts.
-var ONOCR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_ONOCR)
-	}
-	return int(Freebsd_ONOCR)
-}()
-
-const OPOST = 1
-
-const O_ACCMODE = 3
 
 // O_APPEND differs between hosts.
 var O_APPEND int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_APPEND)
 	}
-	return int(Freebsd_O_APPEND)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_APPEND)
+	}
+	return int(Windows_O_APPEND)
 }()
 
 // O_ASYNC differs between hosts.
@@ -1908,7 +1201,10 @@ var O_ASYNC int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_ASYNC)
 	}
-	return int(Freebsd_O_ASYNC)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_ASYNC)
+	}
+	return int(Windows_O_ASYNC)
 }()
 
 // O_CLOEXEC differs between hosts.
@@ -1916,7 +1212,10 @@ var O_CLOEXEC int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_CLOEXEC)
 	}
-	return int(Freebsd_O_CLOEXEC)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_CLOEXEC)
+	}
+	return int(Windows_O_CLOEXEC)
 }()
 
 // O_CREAT differs between hosts.
@@ -1924,23 +1223,10 @@ var O_CREAT int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_CREAT)
 	}
-	return int(Freebsd_O_CREAT)
-}()
-
-// O_DIRECT differs between hosts.
-var O_DIRECT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_DIRECT)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_CREAT)
 	}
-	return int(Freebsd_O_DIRECT)
-}()
-
-// O_DIRECTORY differs between hosts.
-var O_DIRECTORY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_DIRECTORY)
-	}
-	return int(Freebsd_O_DIRECTORY)
+	return int(Windows_O_CREAT)
 }()
 
 // O_EXCL differs between hosts.
@@ -1948,23 +1234,10 @@ var O_EXCL int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_EXCL)
 	}
-	return int(Freebsd_O_EXCL)
-}()
-
-// O_FSYNC differs between hosts.
-var O_FSYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_FSYNC)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_EXCL)
 	}
-	return int(Freebsd_O_FSYNC)
-}()
-
-// O_NDELAY differs between hosts.
-var O_NDELAY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_NDELAY)
-	}
-	return int(Freebsd_O_NDELAY)
+	return int(Windows_O_EXCL)
 }()
 
 // O_NOCTTY differs between hosts.
@@ -1972,15 +1245,10 @@ var O_NOCTTY int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_NOCTTY)
 	}
-	return int(Freebsd_O_NOCTTY)
-}()
-
-// O_NOFOLLOW differs between hosts.
-var O_NOFOLLOW int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_NOFOLLOW)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_NOCTTY)
 	}
-	return int(Freebsd_O_NOFOLLOW)
+	return int(Windows_O_NOCTTY)
 }()
 
 // O_NONBLOCK differs between hosts.
@@ -1988,7 +1256,10 @@ var O_NONBLOCK int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_NONBLOCK)
 	}
-	return int(Freebsd_O_NONBLOCK)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_NONBLOCK)
+	}
+	return int(Windows_O_NONBLOCK)
 }()
 
 const O_RDONLY = 0
@@ -2000,7 +1271,10 @@ var O_SYNC int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_SYNC)
 	}
-	return int(Freebsd_O_SYNC)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_SYNC)
+	}
+	return int(Windows_O_SYNC)
 }()
 
 // O_TRUNC differs between hosts.
@@ -2008,198 +1282,13 @@ var O_TRUNC int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_O_TRUNC)
 	}
-	return int(Freebsd_O_TRUNC)
+	if apehost == apeFreebsd {
+		return int(Freebsd_O_TRUNC)
+	}
+	return int(Windows_O_TRUNC)
 }()
 
 const O_WRONLY = 1
-
-// PARENB differs between hosts.
-var PARENB int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_PARENB)
-	}
-	return int(Freebsd_PARENB)
-}()
-
-const PARMRK = 8
-
-// PARODD differs between hosts.
-var PARODD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_PARODD)
-	}
-	return int(Freebsd_PARODD)
-}()
-
-// PENDIN differs between hosts.
-var PENDIN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_PENDIN)
-	}
-	return int(Freebsd_PENDIN)
-}()
-
-const PRIO_PGRP = 1
-
-const PRIO_PROCESS = 0
-
-const PRIO_USER = 2
-
-const PROT_EXEC = 4
-
-const PROT_NONE = 0
-
-const PROT_READ = 1
-
-const PROT_WRITE = 2
-
-const PTRACE_CONT = 7
-
-const PTRACE_KILL = 8
-
-const PTRACE_TRACEME = 0
-
-// RLIMIT_AS differs between hosts.
-var RLIMIT_AS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RLIMIT_AS)
-	}
-	return int(Freebsd_RLIMIT_AS)
-}()
-
-const RLIMIT_CORE = 4
-
-const RLIMIT_CPU = 0
-
-const RLIMIT_DATA = 2
-
-const RLIMIT_FSIZE = 1
-
-// RLIMIT_NOFILE differs between hosts.
-var RLIMIT_NOFILE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RLIMIT_NOFILE)
-	}
-	return int(Freebsd_RLIMIT_NOFILE)
-}()
-
-const RLIMIT_STACK = 3
-
-// RLIM_INFINITY differs between hosts.
-var RLIM_INFINITY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RLIM_INFINITY)
-	}
-	return int(Freebsd_RLIM_INFINITY)
-}()
-
-// RTAX_MAX differs between hosts.
-var RTAX_MAX int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTAX_MAX)
-	}
-	return int(Freebsd_RTAX_MAX)
-}()
-
-const RTA_DST = 1
-
-// RTA_GATEWAY differs between hosts.
-var RTA_GATEWAY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTA_GATEWAY)
-	}
-	return int(Freebsd_RTA_GATEWAY)
-}()
-
-// RTF_BROADCAST differs between hosts.
-var RTF_BROADCAST int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_BROADCAST)
-	}
-	return int(Freebsd_RTF_BROADCAST)
-}()
-
-const RTF_DYNAMIC = 16
-
-const RTF_GATEWAY = 2
-
-const RTF_HOST = 4
-
-// RTF_LOCAL differs between hosts.
-var RTF_LOCAL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_LOCAL)
-	}
-	return int(Freebsd_RTF_LOCAL)
-}()
-
-const RTF_MODIFIED = 32
-
-// RTF_MULTICAST differs between hosts.
-var RTF_MULTICAST int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_MULTICAST)
-	}
-	return int(Freebsd_RTF_MULTICAST)
-}()
-
-// RTF_REJECT differs between hosts.
-var RTF_REJECT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_REJECT)
-	}
-	return int(Freebsd_RTF_REJECT)
-}()
-
-// RTF_STATIC differs between hosts.
-var RTF_STATIC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_STATIC)
-	}
-	return int(Freebsd_RTF_STATIC)
-}()
-
-const RTF_UP = 1
-
-// RTF_XRESOLVE differs between hosts.
-var RTF_XRESOLVE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTF_XRESOLVE)
-	}
-	return int(Freebsd_RTF_XRESOLVE)
-}()
-
-// RTM_DELADDR differs between hosts.
-var RTM_DELADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTM_DELADDR)
-	}
-	return int(Freebsd_RTM_DELADDR)
-}()
-
-// RTM_NEWADDR differs between hosts.
-var RTM_NEWADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_RTM_NEWADDR)
-	}
-	return int(Freebsd_RTM_NEWADDR)
-}()
-
-const RUSAGE_CHILDREN = -1
-
-const RUSAGE_SELF = 0
-
-const RUSAGE_THREAD = 1
-
-const SCM_RIGHTS = 1
-
-// SCM_TIMESTAMP differs between hosts.
-var SCM_TIMESTAMP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SCM_TIMESTAMP)
-	}
-	return int(Freebsd_SCM_TIMESTAMP)
-}()
 
 const SHUT_RD = 0
 
@@ -2216,23 +1305,10 @@ var SIGBUS Signal = func() Signal {
 	if apehost == apeLinux {
 		return Linux_SIGBUS
 	}
-	return Freebsd_SIGBUS
-}()
-
-// SIGCHLD differs between hosts.
-var SIGCHLD Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGCHLD
+	if apehost == apeFreebsd {
+		return Freebsd_SIGBUS
 	}
-	return Freebsd_SIGCHLD
-}()
-
-// SIGCONT differs between hosts.
-var SIGCONT Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGCONT
-	}
-	return Freebsd_SIGCONT
+	return Windows_SIGBUS
 }()
 
 const SIGFPE Signal = 8
@@ -2243,311 +1319,21 @@ const SIGILL Signal = 4
 
 const SIGINT Signal = 2
 
-// SIGIO differs between hosts.
-var SIGIO Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGIO
-	}
-	return Freebsd_SIGIO
-}()
-
-const SIGIOT Signal = 6
-
 const SIGKILL Signal = 9
 
 const SIGPIPE Signal = 13
-
-const SIGPROF Signal = 27
 
 const SIGQUIT Signal = 3
 
 const SIGSEGV Signal = 11
 
-// SIGSTOP differs between hosts.
-var SIGSTOP Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGSTOP
-	}
-	return Freebsd_SIGSTOP
-}()
-
-// SIGSYS differs between hosts.
-var SIGSYS Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGSYS
-	}
-	return Freebsd_SIGSYS
-}()
-
 const SIGTERM Signal = 15
 
 const SIGTRAP Signal = 5
 
-// SIGTSTP differs between hosts.
-var SIGTSTP Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGTSTP
-	}
-	return Freebsd_SIGTSTP
-}()
-
-const SIGTTIN Signal = 21
-
-const SIGTTOU Signal = 22
-
-// SIGURG differs between hosts.
-var SIGURG Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGURG
-	}
-	return Freebsd_SIGURG
-}()
-
-// SIGUSR1 differs between hosts.
-var SIGUSR1 Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGUSR1
-	}
-	return Freebsd_SIGUSR1
-}()
-
-// SIGUSR2 differs between hosts.
-var SIGUSR2 Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGUSR2
-	}
-	return Freebsd_SIGUSR2
-}()
-
-const SIGVTALRM Signal = 26
-
-const SIGWINCH Signal = 28
-
-const SIGXCPU Signal = 24
-
-const SIGXFSZ Signal = 25
-
-// SIOCADDMULTI differs between hosts.
-var SIOCADDMULTI int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCADDMULTI)
-	}
-	return int(Freebsd_SIOCADDMULTI)
-}()
-
-// SIOCADDRT differs between hosts.
-var SIOCADDRT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCADDRT)
-	}
-	return int(Freebsd_SIOCADDRT)
-}()
-
-// SIOCATMARK differs between hosts.
-var SIOCATMARK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCATMARK)
-	}
-	return int(Freebsd_SIOCATMARK)
-}()
-
-// SIOCDELMULTI differs between hosts.
-var SIOCDELMULTI int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCDELMULTI)
-	}
-	return int(Freebsd_SIOCDELMULTI)
-}()
-
-// SIOCDELRT differs between hosts.
-var SIOCDELRT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCDELRT)
-	}
-	return int(Freebsd_SIOCDELRT)
-}()
-
-// SIOCDIFADDR differs between hosts.
-var SIOCDIFADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCDIFADDR)
-	}
-	return int(Freebsd_SIOCDIFADDR)
-}()
-
-// SIOCGIFADDR differs between hosts.
-var SIOCGIFADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFADDR)
-	}
-	return int(Freebsd_SIOCGIFADDR)
-}()
-
-// SIOCGIFBRDADDR differs between hosts.
-var SIOCGIFBRDADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFBRDADDR)
-	}
-	return int(Freebsd_SIOCGIFBRDADDR)
-}()
-
-// SIOCGIFCONF differs between hosts.
-var SIOCGIFCONF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFCONF)
-	}
-	return int(Freebsd_SIOCGIFCONF)
-}()
-
-// SIOCGIFDSTADDR differs between hosts.
-var SIOCGIFDSTADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFDSTADDR)
-	}
-	return int(Freebsd_SIOCGIFDSTADDR)
-}()
-
-// SIOCGIFFLAGS differs between hosts.
-var SIOCGIFFLAGS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFFLAGS)
-	}
-	return int(Freebsd_SIOCGIFFLAGS)
-}()
-
-// SIOCGIFINDEX differs between hosts.
-var SIOCGIFINDEX int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFINDEX)
-	}
-	return int(Freebsd_SIOCGIFINDEX)
-}()
-
-// SIOCGIFMETRIC differs between hosts.
-var SIOCGIFMETRIC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFMETRIC)
-	}
-	return int(Freebsd_SIOCGIFMETRIC)
-}()
-
-// SIOCGIFMTU differs between hosts.
-var SIOCGIFMTU int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFMTU)
-	}
-	return int(Freebsd_SIOCGIFMTU)
-}()
-
-// SIOCGIFNETMASK differs between hosts.
-var SIOCGIFNETMASK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGIFNETMASK)
-	}
-	return int(Freebsd_SIOCGIFNETMASK)
-}()
-
-// SIOCGPGRP differs between hosts.
-var SIOCGPGRP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCGPGRP)
-	}
-	return int(Freebsd_SIOCGPGRP)
-}()
-
-// SIOCSIFADDR differs between hosts.
-var SIOCSIFADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFADDR)
-	}
-	return int(Freebsd_SIOCSIFADDR)
-}()
-
-// SIOCSIFBRDADDR differs between hosts.
-var SIOCSIFBRDADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFBRDADDR)
-	}
-	return int(Freebsd_SIOCSIFBRDADDR)
-}()
-
-// SIOCSIFDSTADDR differs between hosts.
-var SIOCSIFDSTADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFDSTADDR)
-	}
-	return int(Freebsd_SIOCSIFDSTADDR)
-}()
-
-// SIOCSIFFLAGS differs between hosts.
-var SIOCSIFFLAGS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFFLAGS)
-	}
-	return int(Freebsd_SIOCSIFFLAGS)
-}()
-
-// SIOCSIFMETRIC differs between hosts.
-var SIOCSIFMETRIC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFMETRIC)
-	}
-	return int(Freebsd_SIOCSIFMETRIC)
-}()
-
-// SIOCSIFMTU differs between hosts.
-var SIOCSIFMTU int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFMTU)
-	}
-	return int(Freebsd_SIOCSIFMTU)
-}()
-
-// SIOCSIFNAME differs between hosts.
-var SIOCSIFNAME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFNAME)
-	}
-	return int(Freebsd_SIOCSIFNAME)
-}()
-
-// SIOCSIFNETMASK differs between hosts.
-var SIOCSIFNETMASK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSIFNETMASK)
-	}
-	return int(Freebsd_SIOCSIFNETMASK)
-}()
-
-// SIOCSPGRP differs between hosts.
-var SIOCSPGRP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SIOCSPGRP)
-	}
-	return int(Freebsd_SIOCSPGRP)
-}()
-
-// SOCK_CLOEXEC differs between hosts.
-var SOCK_CLOEXEC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SOCK_CLOEXEC)
-	}
-	return int(Freebsd_SOCK_CLOEXEC)
-}()
-
 const SOCK_DGRAM = 2
 
-// SOCK_NONBLOCK differs between hosts.
-var SOCK_NONBLOCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SOCK_NONBLOCK)
-	}
-	return int(Freebsd_SOCK_NONBLOCK)
-}()
-
 const SOCK_RAW = 3
-
-const SOCK_RDM = 4
 
 const SOCK_SEQPACKET = 5
 
@@ -2558,17 +1344,21 @@ var SOL_SOCKET int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SOL_SOCKET)
 	}
-	return int(Freebsd_SOL_SOCKET)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SOL_SOCKET)
+	}
+	return int(Windows_SOL_SOCKET)
 }()
 
-const SOMAXCONN = 128
-
-// SO_ACCEPTCONN differs between hosts.
-var SO_ACCEPTCONN int = func() int {
+// SOMAXCONN differs between hosts.
+var SOMAXCONN int = func() int {
 	if apehost == apeLinux {
-		return int(Linux_SO_ACCEPTCONN)
+		return int(Linux_SOMAXCONN)
 	}
-	return int(Freebsd_SO_ACCEPTCONN)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SOMAXCONN)
+	}
+	return int(Windows_SOMAXCONN)
 }()
 
 // SO_BROADCAST differs between hosts.
@@ -2576,25 +1366,21 @@ var SO_BROADCAST int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_BROADCAST)
 	}
-	return int(Freebsd_SO_BROADCAST)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_BROADCAST)
+	}
+	return int(Windows_SO_BROADCAST)
 }()
-
-const SO_DEBUG = 1
 
 // SO_DONTROUTE differs between hosts.
 var SO_DONTROUTE int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_DONTROUTE)
 	}
-	return int(Freebsd_SO_DONTROUTE)
-}()
-
-// SO_ERROR differs between hosts.
-var SO_ERROR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_ERROR)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_DONTROUTE)
 	}
-	return int(Freebsd_SO_ERROR)
+	return int(Windows_SO_DONTROUTE)
 }()
 
 // SO_KEEPALIVE differs between hosts.
@@ -2602,7 +1388,10 @@ var SO_KEEPALIVE int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_KEEPALIVE)
 	}
-	return int(Freebsd_SO_KEEPALIVE)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_KEEPALIVE)
+	}
+	return int(Windows_SO_KEEPALIVE)
 }()
 
 // SO_LINGER differs between hosts.
@@ -2610,23 +1399,10 @@ var SO_LINGER int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_LINGER)
 	}
-	return int(Freebsd_SO_LINGER)
-}()
-
-// SO_OOBINLINE differs between hosts.
-var SO_OOBINLINE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_OOBINLINE)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_LINGER)
 	}
-	return int(Freebsd_SO_OOBINLINE)
-}()
-
-// SO_PROTOCOL differs between hosts.
-var SO_PROTOCOL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_PROTOCOL)
-	}
-	return int(Freebsd_SO_PROTOCOL)
+	return int(Windows_SO_LINGER)
 }()
 
 // SO_RCVBUF differs between hosts.
@@ -2634,23 +1410,10 @@ var SO_RCVBUF int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_RCVBUF)
 	}
-	return int(Freebsd_SO_RCVBUF)
-}()
-
-// SO_RCVLOWAT differs between hosts.
-var SO_RCVLOWAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_RCVLOWAT)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_RCVBUF)
 	}
-	return int(Freebsd_SO_RCVLOWAT)
-}()
-
-// SO_RCVTIMEO differs between hosts.
-var SO_RCVTIMEO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_RCVTIMEO)
-	}
-	return int(Freebsd_SO_RCVTIMEO)
+	return int(Windows_SO_RCVBUF)
 }()
 
 // SO_REUSEADDR differs between hosts.
@@ -2658,7 +1421,10 @@ var SO_REUSEADDR int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_REUSEADDR)
 	}
-	return int(Freebsd_SO_REUSEADDR)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_REUSEADDR)
+	}
+	return int(Windows_SO_REUSEADDR)
 }()
 
 // SO_SNDBUF differs between hosts.
@@ -2666,1161 +1432,10 @@ var SO_SNDBUF int = func() int {
 	if apehost == apeLinux {
 		return int(Linux_SO_SNDBUF)
 	}
-	return int(Freebsd_SO_SNDBUF)
-}()
-
-// SO_SNDLOWAT differs between hosts.
-var SO_SNDLOWAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_SNDLOWAT)
+	if apehost == apeFreebsd {
+		return int(Freebsd_SO_SNDBUF)
 	}
-	return int(Freebsd_SO_SNDLOWAT)
-}()
-
-// SO_SNDTIMEO differs between hosts.
-var SO_SNDTIMEO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_SNDTIMEO)
-	}
-	return int(Freebsd_SO_SNDTIMEO)
-}()
-
-// SO_TIMESTAMP differs between hosts.
-var SO_TIMESTAMP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_TIMESTAMP)
-	}
-	return int(Freebsd_SO_TIMESTAMP)
-}()
-
-// SO_TYPE differs between hosts.
-var SO_TYPE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_TYPE)
-	}
-	return int(Freebsd_SO_TYPE)
-}()
-
-// SYS_ACCEPT differs between hosts.
-var SYS_ACCEPT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_ACCEPT)
-	}
-	return int(Freebsd_SYS_ACCEPT)
-}()
-
-// SYS_ACCEPT4 differs between hosts.
-var SYS_ACCEPT4 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_ACCEPT4)
-	}
-	return int(Freebsd_SYS_ACCEPT4)
-}()
-
-// SYS_ACCESS differs between hosts.
-var SYS_ACCESS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_ACCESS)
-	}
-	return int(Freebsd_SYS_ACCESS)
-}()
-
-// SYS_ACCT differs between hosts.
-var SYS_ACCT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_ACCT)
-	}
-	return int(Freebsd_SYS_ACCT)
-}()
-
-// SYS_BIND differs between hosts.
-var SYS_BIND int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_BIND)
-	}
-	return int(Freebsd_SYS_BIND)
-}()
-
-// SYS_CHDIR differs between hosts.
-var SYS_CHDIR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CHDIR)
-	}
-	return int(Freebsd_SYS_CHDIR)
-}()
-
-// SYS_CHMOD differs between hosts.
-var SYS_CHMOD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CHMOD)
-	}
-	return int(Freebsd_SYS_CHMOD)
-}()
-
-// SYS_CHOWN differs between hosts.
-var SYS_CHOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CHOWN)
-	}
-	return int(Freebsd_SYS_CHOWN)
-}()
-
-// SYS_CHROOT differs between hosts.
-var SYS_CHROOT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CHROOT)
-	}
-	return int(Freebsd_SYS_CHROOT)
-}()
-
-// SYS_CLOCK_GETRES differs between hosts.
-var SYS_CLOCK_GETRES int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CLOCK_GETRES)
-	}
-	return int(Freebsd_SYS_CLOCK_GETRES)
-}()
-
-// SYS_CLOCK_GETTIME differs between hosts.
-var SYS_CLOCK_GETTIME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CLOCK_GETTIME)
-	}
-	return int(Freebsd_SYS_CLOCK_GETTIME)
-}()
-
-// SYS_CLOCK_SETTIME differs between hosts.
-var SYS_CLOCK_SETTIME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CLOCK_SETTIME)
-	}
-	return int(Freebsd_SYS_CLOCK_SETTIME)
-}()
-
-// SYS_CLOSE differs between hosts.
-var SYS_CLOSE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CLOSE)
-	}
-	return int(Freebsd_SYS_CLOSE)
-}()
-
-// SYS_CONNECT differs between hosts.
-var SYS_CONNECT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_CONNECT)
-	}
-	return int(Freebsd_SYS_CONNECT)
-}()
-
-// SYS_DUP differs between hosts.
-var SYS_DUP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_DUP)
-	}
-	return int(Freebsd_SYS_DUP)
-}()
-
-// SYS_DUP2 differs between hosts.
-var SYS_DUP2 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_DUP2)
-	}
-	return int(Freebsd_SYS_DUP2)
-}()
-
-const SYS_EXECVE = 59
-
-// SYS_EXIT differs between hosts.
-var SYS_EXIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_EXIT)
-	}
-	return int(Freebsd_SYS_EXIT)
-}()
-
-// SYS_FACCESSAT differs between hosts.
-var SYS_FACCESSAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FACCESSAT)
-	}
-	return int(Freebsd_SYS_FACCESSAT)
-}()
-
-// SYS_FCHDIR differs between hosts.
-var SYS_FCHDIR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCHDIR)
-	}
-	return int(Freebsd_SYS_FCHDIR)
-}()
-
-// SYS_FCHMOD differs between hosts.
-var SYS_FCHMOD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCHMOD)
-	}
-	return int(Freebsd_SYS_FCHMOD)
-}()
-
-// SYS_FCHMODAT differs between hosts.
-var SYS_FCHMODAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCHMODAT)
-	}
-	return int(Freebsd_SYS_FCHMODAT)
-}()
-
-// SYS_FCHOWN differs between hosts.
-var SYS_FCHOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCHOWN)
-	}
-	return int(Freebsd_SYS_FCHOWN)
-}()
-
-// SYS_FCHOWNAT differs between hosts.
-var SYS_FCHOWNAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCHOWNAT)
-	}
-	return int(Freebsd_SYS_FCHOWNAT)
-}()
-
-// SYS_FCNTL differs between hosts.
-var SYS_FCNTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FCNTL)
-	}
-	return int(Freebsd_SYS_FCNTL)
-}()
-
-// SYS_FLOCK differs between hosts.
-var SYS_FLOCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FLOCK)
-	}
-	return int(Freebsd_SYS_FLOCK)
-}()
-
-// SYS_FORK differs between hosts.
-var SYS_FORK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FORK)
-	}
-	return int(Freebsd_SYS_FORK)
-}()
-
-// SYS_FSTAT differs between hosts.
-var SYS_FSTAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FSTAT)
-	}
-	return int(Freebsd_SYS_FSTAT)
-}()
-
-// SYS_FSTATFS differs between hosts.
-var SYS_FSTATFS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FSTATFS)
-	}
-	return int(Freebsd_SYS_FSTATFS)
-}()
-
-// SYS_FSYNC differs between hosts.
-var SYS_FSYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FSYNC)
-	}
-	return int(Freebsd_SYS_FSYNC)
-}()
-
-// SYS_FTRUNCATE differs between hosts.
-var SYS_FTRUNCATE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FTRUNCATE)
-	}
-	return int(Freebsd_SYS_FTRUNCATE)
-}()
-
-// SYS_FUTIMESAT differs between hosts.
-var SYS_FUTIMESAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_FUTIMESAT)
-	}
-	return int(Freebsd_SYS_FUTIMESAT)
-}()
-
-// SYS_GETDENTS differs between hosts.
-var SYS_GETDENTS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETDENTS)
-	}
-	return int(Freebsd_SYS_GETDENTS)
-}()
-
-// SYS_GETEGID differs between hosts.
-var SYS_GETEGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETEGID)
-	}
-	return int(Freebsd_SYS_GETEGID)
-}()
-
-// SYS_GETEUID differs between hosts.
-var SYS_GETEUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETEUID)
-	}
-	return int(Freebsd_SYS_GETEUID)
-}()
-
-// SYS_GETGID differs between hosts.
-var SYS_GETGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETGID)
-	}
-	return int(Freebsd_SYS_GETGID)
-}()
-
-// SYS_GETGROUPS differs between hosts.
-var SYS_GETGROUPS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETGROUPS)
-	}
-	return int(Freebsd_SYS_GETGROUPS)
-}()
-
-// SYS_GETITIMER differs between hosts.
-var SYS_GETITIMER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETITIMER)
-	}
-	return int(Freebsd_SYS_GETITIMER)
-}()
-
-// SYS_GETPEERNAME differs between hosts.
-var SYS_GETPEERNAME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPEERNAME)
-	}
-	return int(Freebsd_SYS_GETPEERNAME)
-}()
-
-// SYS_GETPGID differs between hosts.
-var SYS_GETPGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPGID)
-	}
-	return int(Freebsd_SYS_GETPGID)
-}()
-
-// SYS_GETPGRP differs between hosts.
-var SYS_GETPGRP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPGRP)
-	}
-	return int(Freebsd_SYS_GETPGRP)
-}()
-
-// SYS_GETPID differs between hosts.
-var SYS_GETPID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPID)
-	}
-	return int(Freebsd_SYS_GETPID)
-}()
-
-// SYS_GETPPID differs between hosts.
-var SYS_GETPPID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPPID)
-	}
-	return int(Freebsd_SYS_GETPPID)
-}()
-
-// SYS_GETPRIORITY differs between hosts.
-var SYS_GETPRIORITY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETPRIORITY)
-	}
-	return int(Freebsd_SYS_GETPRIORITY)
-}()
-
-// SYS_GETRESGID differs between hosts.
-var SYS_GETRESGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETRESGID)
-	}
-	return int(Freebsd_SYS_GETRESGID)
-}()
-
-// SYS_GETRESUID differs between hosts.
-var SYS_GETRESUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETRESUID)
-	}
-	return int(Freebsd_SYS_GETRESUID)
-}()
-
-// SYS_GETRLIMIT differs between hosts.
-var SYS_GETRLIMIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETRLIMIT)
-	}
-	return int(Freebsd_SYS_GETRLIMIT)
-}()
-
-// SYS_GETRUSAGE differs between hosts.
-var SYS_GETRUSAGE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETRUSAGE)
-	}
-	return int(Freebsd_SYS_GETRUSAGE)
-}()
-
-// SYS_GETSID differs between hosts.
-var SYS_GETSID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETSID)
-	}
-	return int(Freebsd_SYS_GETSID)
-}()
-
-// SYS_GETSOCKNAME differs between hosts.
-var SYS_GETSOCKNAME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETSOCKNAME)
-	}
-	return int(Freebsd_SYS_GETSOCKNAME)
-}()
-
-// SYS_GETSOCKOPT differs between hosts.
-var SYS_GETSOCKOPT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETSOCKOPT)
-	}
-	return int(Freebsd_SYS_GETSOCKOPT)
-}()
-
-// SYS_GETTIMEOFDAY differs between hosts.
-var SYS_GETTIMEOFDAY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETTIMEOFDAY)
-	}
-	return int(Freebsd_SYS_GETTIMEOFDAY)
-}()
-
-// SYS_GETUID differs between hosts.
-var SYS_GETUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_GETUID)
-	}
-	return int(Freebsd_SYS_GETUID)
-}()
-
-// SYS_IOCTL differs between hosts.
-var SYS_IOCTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_IOCTL)
-	}
-	return int(Freebsd_SYS_IOCTL)
-}()
-
-// SYS_KILL differs between hosts.
-var SYS_KILL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_KILL)
-	}
-	return int(Freebsd_SYS_KILL)
-}()
-
-// SYS_LCHOWN differs between hosts.
-var SYS_LCHOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_LCHOWN)
-	}
-	return int(Freebsd_SYS_LCHOWN)
-}()
-
-// SYS_LINK differs between hosts.
-var SYS_LINK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_LINK)
-	}
-	return int(Freebsd_SYS_LINK)
-}()
-
-// SYS_LINKAT differs between hosts.
-var SYS_LINKAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_LINKAT)
-	}
-	return int(Freebsd_SYS_LINKAT)
-}()
-
-// SYS_LISTEN differs between hosts.
-var SYS_LISTEN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_LISTEN)
-	}
-	return int(Freebsd_SYS_LISTEN)
-}()
-
-// SYS_LSEEK differs between hosts.
-var SYS_LSEEK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_LSEEK)
-	}
-	return int(Freebsd_SYS_LSEEK)
-}()
-
-// SYS_MADVISE differs between hosts.
-var SYS_MADVISE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MADVISE)
-	}
-	return int(Freebsd_SYS_MADVISE)
-}()
-
-// SYS_MINCORE differs between hosts.
-var SYS_MINCORE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MINCORE)
-	}
-	return int(Freebsd_SYS_MINCORE)
-}()
-
-// SYS_MKDIR differs between hosts.
-var SYS_MKDIR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MKDIR)
-	}
-	return int(Freebsd_SYS_MKDIR)
-}()
-
-// SYS_MKDIRAT differs between hosts.
-var SYS_MKDIRAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MKDIRAT)
-	}
-	return int(Freebsd_SYS_MKDIRAT)
-}()
-
-// SYS_MKNOD differs between hosts.
-var SYS_MKNOD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MKNOD)
-	}
-	return int(Freebsd_SYS_MKNOD)
-}()
-
-// SYS_MKNODAT differs between hosts.
-var SYS_MKNODAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MKNODAT)
-	}
-	return int(Freebsd_SYS_MKNODAT)
-}()
-
-// SYS_MLOCK differs between hosts.
-var SYS_MLOCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MLOCK)
-	}
-	return int(Freebsd_SYS_MLOCK)
-}()
-
-// SYS_MLOCKALL differs between hosts.
-var SYS_MLOCKALL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MLOCKALL)
-	}
-	return int(Freebsd_SYS_MLOCKALL)
-}()
-
-// SYS_MMAP differs between hosts.
-var SYS_MMAP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MMAP)
-	}
-	return int(Freebsd_SYS_MMAP)
-}()
-
-// SYS_MOUNT differs between hosts.
-var SYS_MOUNT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MOUNT)
-	}
-	return int(Freebsd_SYS_MOUNT)
-}()
-
-// SYS_MPROTECT differs between hosts.
-var SYS_MPROTECT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MPROTECT)
-	}
-	return int(Freebsd_SYS_MPROTECT)
-}()
-
-// SYS_MSYNC differs between hosts.
-var SYS_MSYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MSYNC)
-	}
-	return int(Freebsd_SYS_MSYNC)
-}()
-
-// SYS_MUNLOCK differs between hosts.
-var SYS_MUNLOCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MUNLOCK)
-	}
-	return int(Freebsd_SYS_MUNLOCK)
-}()
-
-// SYS_MUNLOCKALL differs between hosts.
-var SYS_MUNLOCKALL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MUNLOCKALL)
-	}
-	return int(Freebsd_SYS_MUNLOCKALL)
-}()
-
-// SYS_MUNMAP differs between hosts.
-var SYS_MUNMAP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_MUNMAP)
-	}
-	return int(Freebsd_SYS_MUNMAP)
-}()
-
-// SYS_NANOSLEEP differs between hosts.
-var SYS_NANOSLEEP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_NANOSLEEP)
-	}
-	return int(Freebsd_SYS_NANOSLEEP)
-}()
-
-// SYS_OPEN differs between hosts.
-var SYS_OPEN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_OPEN)
-	}
-	return int(Freebsd_SYS_OPEN)
-}()
-
-// SYS_OPENAT differs between hosts.
-var SYS_OPENAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_OPENAT)
-	}
-	return int(Freebsd_SYS_OPENAT)
-}()
-
-// SYS_PIPE differs between hosts.
-var SYS_PIPE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_PIPE)
-	}
-	return int(Freebsd_SYS_PIPE)
-}()
-
-// SYS_PIPE2 differs between hosts.
-var SYS_PIPE2 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_PIPE2)
-	}
-	return int(Freebsd_SYS_PIPE2)
-}()
-
-// SYS_POLL differs between hosts.
-var SYS_POLL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_POLL)
-	}
-	return int(Freebsd_SYS_POLL)
-}()
-
-// SYS_PREADV differs between hosts.
-var SYS_PREADV int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_PREADV)
-	}
-	return int(Freebsd_SYS_PREADV)
-}()
-
-// SYS_PTRACE differs between hosts.
-var SYS_PTRACE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_PTRACE)
-	}
-	return int(Freebsd_SYS_PTRACE)
-}()
-
-// SYS_PWRITEV differs between hosts.
-var SYS_PWRITEV int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_PWRITEV)
-	}
-	return int(Freebsd_SYS_PWRITEV)
-}()
-
-// SYS_QUOTACTL differs between hosts.
-var SYS_QUOTACTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_QUOTACTL)
-	}
-	return int(Freebsd_SYS_QUOTACTL)
-}()
-
-// SYS_READ differs between hosts.
-var SYS_READ int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_READ)
-	}
-	return int(Freebsd_SYS_READ)
-}()
-
-// SYS_READLINK differs between hosts.
-var SYS_READLINK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_READLINK)
-	}
-	return int(Freebsd_SYS_READLINK)
-}()
-
-// SYS_READLINKAT differs between hosts.
-var SYS_READLINKAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_READLINKAT)
-	}
-	return int(Freebsd_SYS_READLINKAT)
-}()
-
-// SYS_READV differs between hosts.
-var SYS_READV int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_READV)
-	}
-	return int(Freebsd_SYS_READV)
-}()
-
-// SYS_REBOOT differs between hosts.
-var SYS_REBOOT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_REBOOT)
-	}
-	return int(Freebsd_SYS_REBOOT)
-}()
-
-// SYS_RECVFROM differs between hosts.
-var SYS_RECVFROM int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_RECVFROM)
-	}
-	return int(Freebsd_SYS_RECVFROM)
-}()
-
-// SYS_RECVMSG differs between hosts.
-var SYS_RECVMSG int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_RECVMSG)
-	}
-	return int(Freebsd_SYS_RECVMSG)
-}()
-
-// SYS_RENAME differs between hosts.
-var SYS_RENAME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_RENAME)
-	}
-	return int(Freebsd_SYS_RENAME)
-}()
-
-// SYS_RENAMEAT differs between hosts.
-var SYS_RENAMEAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_RENAMEAT)
-	}
-	return int(Freebsd_SYS_RENAMEAT)
-}()
-
-// SYS_RMDIR differs between hosts.
-var SYS_RMDIR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_RMDIR)
-	}
-	return int(Freebsd_SYS_RMDIR)
-}()
-
-// SYS_SCHED_GETPARAM differs between hosts.
-var SYS_SCHED_GETPARAM int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_GETPARAM)
-	}
-	return int(Freebsd_SYS_SCHED_GETPARAM)
-}()
-
-// SYS_SCHED_GETSCHEDULER differs between hosts.
-var SYS_SCHED_GETSCHEDULER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_GETSCHEDULER)
-	}
-	return int(Freebsd_SYS_SCHED_GETSCHEDULER)
-}()
-
-// SYS_SCHED_GET_PRIORITY_MAX differs between hosts.
-var SYS_SCHED_GET_PRIORITY_MAX int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_GET_PRIORITY_MAX)
-	}
-	return int(Freebsd_SYS_SCHED_GET_PRIORITY_MAX)
-}()
-
-// SYS_SCHED_GET_PRIORITY_MIN differs between hosts.
-var SYS_SCHED_GET_PRIORITY_MIN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_GET_PRIORITY_MIN)
-	}
-	return int(Freebsd_SYS_SCHED_GET_PRIORITY_MIN)
-}()
-
-// SYS_SCHED_RR_GET_INTERVAL differs between hosts.
-var SYS_SCHED_RR_GET_INTERVAL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_RR_GET_INTERVAL)
-	}
-	return int(Freebsd_SYS_SCHED_RR_GET_INTERVAL)
-}()
-
-// SYS_SCHED_SETPARAM differs between hosts.
-var SYS_SCHED_SETPARAM int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_SETPARAM)
-	}
-	return int(Freebsd_SYS_SCHED_SETPARAM)
-}()
-
-// SYS_SCHED_SETSCHEDULER differs between hosts.
-var SYS_SCHED_SETSCHEDULER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_SETSCHEDULER)
-	}
-	return int(Freebsd_SYS_SCHED_SETSCHEDULER)
-}()
-
-// SYS_SCHED_YIELD differs between hosts.
-var SYS_SCHED_YIELD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SCHED_YIELD)
-	}
-	return int(Freebsd_SYS_SCHED_YIELD)
-}()
-
-// SYS_SELECT differs between hosts.
-var SYS_SELECT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SELECT)
-	}
-	return int(Freebsd_SYS_SELECT)
-}()
-
-// SYS_SENDFILE differs between hosts.
-var SYS_SENDFILE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SENDFILE)
-	}
-	return int(Freebsd_SYS_SENDFILE)
-}()
-
-// SYS_SENDMSG differs between hosts.
-var SYS_SENDMSG int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SENDMSG)
-	}
-	return int(Freebsd_SYS_SENDMSG)
-}()
-
-// SYS_SENDTO differs between hosts.
-var SYS_SENDTO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SENDTO)
-	}
-	return int(Freebsd_SYS_SENDTO)
-}()
-
-// SYS_SETGID differs between hosts.
-var SYS_SETGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETGID)
-	}
-	return int(Freebsd_SYS_SETGID)
-}()
-
-// SYS_SETGROUPS differs between hosts.
-var SYS_SETGROUPS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETGROUPS)
-	}
-	return int(Freebsd_SYS_SETGROUPS)
-}()
-
-// SYS_SETITIMER differs between hosts.
-var SYS_SETITIMER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETITIMER)
-	}
-	return int(Freebsd_SYS_SETITIMER)
-}()
-
-// SYS_SETPGID differs between hosts.
-var SYS_SETPGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETPGID)
-	}
-	return int(Freebsd_SYS_SETPGID)
-}()
-
-// SYS_SETPRIORITY differs between hosts.
-var SYS_SETPRIORITY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETPRIORITY)
-	}
-	return int(Freebsd_SYS_SETPRIORITY)
-}()
-
-// SYS_SETREGID differs between hosts.
-var SYS_SETREGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETREGID)
-	}
-	return int(Freebsd_SYS_SETREGID)
-}()
-
-// SYS_SETRESGID differs between hosts.
-var SYS_SETRESGID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETRESGID)
-	}
-	return int(Freebsd_SYS_SETRESGID)
-}()
-
-// SYS_SETRESUID differs between hosts.
-var SYS_SETRESUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETRESUID)
-	}
-	return int(Freebsd_SYS_SETRESUID)
-}()
-
-// SYS_SETREUID differs between hosts.
-var SYS_SETREUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETREUID)
-	}
-	return int(Freebsd_SYS_SETREUID)
-}()
-
-// SYS_SETRLIMIT differs between hosts.
-var SYS_SETRLIMIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETRLIMIT)
-	}
-	return int(Freebsd_SYS_SETRLIMIT)
-}()
-
-// SYS_SETSID differs between hosts.
-var SYS_SETSID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETSID)
-	}
-	return int(Freebsd_SYS_SETSID)
-}()
-
-// SYS_SETSOCKOPT differs between hosts.
-var SYS_SETSOCKOPT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETSOCKOPT)
-	}
-	return int(Freebsd_SYS_SETSOCKOPT)
-}()
-
-// SYS_SETTIMEOFDAY differs between hosts.
-var SYS_SETTIMEOFDAY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETTIMEOFDAY)
-	}
-	return int(Freebsd_SYS_SETTIMEOFDAY)
-}()
-
-// SYS_SETUID differs between hosts.
-var SYS_SETUID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SETUID)
-	}
-	return int(Freebsd_SYS_SETUID)
-}()
-
-// SYS_SHUTDOWN differs between hosts.
-var SYS_SHUTDOWN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SHUTDOWN)
-	}
-	return int(Freebsd_SYS_SHUTDOWN)
-}()
-
-// SYS_SIGALTSTACK differs between hosts.
-var SYS_SIGALTSTACK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SIGALTSTACK)
-	}
-	return int(Freebsd_SYS_SIGALTSTACK)
-}()
-
-// SYS_SOCKET differs between hosts.
-var SYS_SOCKET int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SOCKET)
-	}
-	return int(Freebsd_SYS_SOCKET)
-}()
-
-// SYS_SOCKETPAIR differs between hosts.
-var SYS_SOCKETPAIR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SOCKETPAIR)
-	}
-	return int(Freebsd_SYS_SOCKETPAIR)
-}()
-
-// SYS_STATFS differs between hosts.
-var SYS_STATFS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_STATFS)
-	}
-	return int(Freebsd_SYS_STATFS)
-}()
-
-// SYS_SWAPOFF differs between hosts.
-var SYS_SWAPOFF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SWAPOFF)
-	}
-	return int(Freebsd_SYS_SWAPOFF)
-}()
-
-// SYS_SWAPON differs between hosts.
-var SYS_SWAPON int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SWAPON)
-	}
-	return int(Freebsd_SYS_SWAPON)
-}()
-
-// SYS_SYMLINK differs between hosts.
-var SYS_SYMLINK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SYMLINK)
-	}
-	return int(Freebsd_SYS_SYMLINK)
-}()
-
-// SYS_SYMLINKAT differs between hosts.
-var SYS_SYMLINKAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SYMLINKAT)
-	}
-	return int(Freebsd_SYS_SYMLINKAT)
-}()
-
-// SYS_SYNC differs between hosts.
-var SYS_SYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_SYNC)
-	}
-	return int(Freebsd_SYS_SYNC)
-}()
-
-// SYS_TRUNCATE differs between hosts.
-var SYS_TRUNCATE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_TRUNCATE)
-	}
-	return int(Freebsd_SYS_TRUNCATE)
-}()
-
-// SYS_UMASK differs between hosts.
-var SYS_UMASK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_UMASK)
-	}
-	return int(Freebsd_SYS_UMASK)
-}()
-
-// SYS_UNLINK differs between hosts.
-var SYS_UNLINK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_UNLINK)
-	}
-	return int(Freebsd_SYS_UNLINK)
-}()
-
-// SYS_UNLINKAT differs between hosts.
-var SYS_UNLINKAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_UNLINKAT)
-	}
-	return int(Freebsd_SYS_UNLINKAT)
-}()
-
-// SYS_UTIMENSAT differs between hosts.
-var SYS_UTIMENSAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_UTIMENSAT)
-	}
-	return int(Freebsd_SYS_UTIMENSAT)
-}()
-
-// SYS_UTIMES differs between hosts.
-var SYS_UTIMES int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_UTIMES)
-	}
-	return int(Freebsd_SYS_UTIMES)
-}()
-
-// SYS_VFORK differs between hosts.
-var SYS_VFORK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_VFORK)
-	}
-	return int(Freebsd_SYS_VFORK)
-}()
-
-// SYS_WAIT4 differs between hosts.
-var SYS_WAIT4 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_WAIT4)
-	}
-	return int(Freebsd_SYS_WAIT4)
-}()
-
-// SYS_WRITE differs between hosts.
-var SYS_WRITE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_WRITE)
-	}
-	return int(Freebsd_SYS_WRITE)
-}()
-
-// SYS_WRITEV differs between hosts.
-var SYS_WRITEV int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SYS_WRITEV)
-	}
-	return int(Freebsd_SYS_WRITEV)
+	return int(Windows_SO_SNDBUF)
 }()
 
 const S_IFBLK = 24576
@@ -3833,17 +1448,22 @@ const S_IFIFO = 4096
 
 const S_IFLNK = 40960
 
-const S_IFMT = 61440
+// S_IFMT differs between hosts.
+var S_IFMT int = func() int {
+	if apehost == apeLinux {
+		return int(Linux_S_IFMT)
+	}
+	if apehost == apeFreebsd {
+		return int(Freebsd_S_IFMT)
+	}
+	return int(Windows_S_IFMT)
+}()
 
 const S_IFREG = 32768
 
 const S_IFSOCK = 49152
 
 const S_IRUSR = 256
-
-const S_IRWXG = 56
-
-const S_IRWXO = 7
 
 const S_ISGID = 1024
 
@@ -3855,562 +1475,32 @@ const S_IWUSR = 128
 
 const S_IXUSR = 64
 
-// SizeofCmsghdr differs between hosts.
-var SizeofCmsghdr int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SizeofCmsghdr)
-	}
-	return int(Freebsd_SizeofCmsghdr)
-}()
-
-const SizeofICMPv6Filter = 32
-
-const SizeofIPMreq = 8
-
-const SizeofIPMreqn = 12
-
-const SizeofIPv6MTUInfo = 32
-
-const SizeofIPv6Mreq = 20
-
-const SizeofInet6Pktinfo = 20
-
-const SizeofLinger = 8
-
-// SizeofMsghdr differs between hosts.
-var SizeofMsghdr int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SizeofMsghdr)
-	}
-	return int(Freebsd_SizeofMsghdr)
-}()
-
-// SizeofSockaddrAny differs between hosts.
-var SizeofSockaddrAny int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SizeofSockaddrAny)
-	}
-	return int(Freebsd_SizeofSockaddrAny)
-}()
-
-const SizeofSockaddrInet4 = 16
-
-const SizeofSockaddrInet6 = 28
-
-// SizeofSockaddrUnix differs between hosts.
-var SizeofSockaddrUnix int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SizeofSockaddrUnix)
-	}
-	return int(Freebsd_SizeofSockaddrUnix)
-}()
-
-// TCIFLUSH differs between hosts.
-var TCIFLUSH int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCIFLUSH)
-	}
-	return int(Freebsd_TCIFLUSH)
-}()
-
-// TCIOFLUSH differs between hosts.
-var TCIOFLUSH int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCIOFLUSH)
-	}
-	return int(Freebsd_TCIOFLUSH)
-}()
-
-// TCOFLUSH differs between hosts.
-var TCOFLUSH int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCOFLUSH)
-	}
-	return int(Freebsd_TCOFLUSH)
-}()
-
-// TCP_CONGESTION differs between hosts.
-var TCP_CONGESTION int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_CONGESTION)
-	}
-	return int(Freebsd_TCP_CONGESTION)
-}()
-
-// TCP_INFO differs between hosts.
-var TCP_INFO int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_INFO)
-	}
-	return int(Freebsd_TCP_INFO)
-}()
-
-// TCP_KEEPCNT differs between hosts.
-var TCP_KEEPCNT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_KEEPCNT)
-	}
-	return int(Freebsd_TCP_KEEPCNT)
-}()
-
-// TCP_KEEPIDLE differs between hosts.
-var TCP_KEEPIDLE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_KEEPIDLE)
-	}
-	return int(Freebsd_TCP_KEEPIDLE)
-}()
-
-// TCP_KEEPINTVL differs between hosts.
-var TCP_KEEPINTVL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_KEEPINTVL)
-	}
-	return int(Freebsd_TCP_KEEPINTVL)
-}()
-
-const TCP_MAXSEG = 2
-
-const TCP_MAXWIN = 65535
-
-const TCP_MAX_WINSHIFT = 14
-
-// TCP_MD5SIG differs between hosts.
-var TCP_MD5SIG int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_MD5SIG)
-	}
-	return int(Freebsd_TCP_MD5SIG)
-}()
-
-// TCP_MSS differs between hosts.
-var TCP_MSS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TCP_MSS)
-	}
-	return int(Freebsd_TCP_MSS)
-}()
-
 const TCP_NODELAY = 1
 
-// TIOCCBRK differs between hosts.
-var TIOCCBRK int = func() int {
+func BytePtrFromString(a0 string) (*byte, error) {
 	if apehost == apeLinux {
-		return int(Linux_TIOCCBRK)
+		x0, x1 := Linux_BytePtrFromString(a0)
+		return x0, x1
 	}
-	return int(Freebsd_TIOCCBRK)
-}()
-
-// TIOCCONS differs between hosts.
-var TIOCCONS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCCONS)
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_BytePtrFromString(a0)
+		return x0, x1
 	}
-	return int(Freebsd_TIOCCONS)
-}()
-
-// TIOCEXCL differs between hosts.
-var TIOCEXCL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCEXCL)
-	}
-	return int(Freebsd_TIOCEXCL)
-}()
-
-// TIOCGETD differs between hosts.
-var TIOCGETD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCGETD)
-	}
-	return int(Freebsd_TIOCGETD)
-}()
-
-// TIOCGPGRP differs between hosts.
-var TIOCGPGRP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCGPGRP)
-	}
-	return int(Freebsd_TIOCGPGRP)
-}()
-
-// TIOCGPTN differs between hosts.
-var TIOCGPTN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCGPTN)
-	}
-	return int(Freebsd_TIOCGPTN)
-}()
-
-// TIOCGSID differs between hosts.
-var TIOCGSID int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCGSID)
-	}
-	return int(Freebsd_TIOCGSID)
-}()
-
-// TIOCGWINSZ differs between hosts.
-var TIOCGWINSZ int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCGWINSZ)
-	}
-	return int(Freebsd_TIOCGWINSZ)
-}()
-
-// TIOCMBIC differs between hosts.
-var TIOCMBIC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCMBIC)
-	}
-	return int(Freebsd_TIOCMBIC)
-}()
-
-// TIOCMBIS differs between hosts.
-var TIOCMBIS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCMBIS)
-	}
-	return int(Freebsd_TIOCMBIS)
-}()
-
-// TIOCMGET differs between hosts.
-var TIOCMGET int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCMGET)
-	}
-	return int(Freebsd_TIOCMGET)
-}()
-
-// TIOCMSET differs between hosts.
-var TIOCMSET int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCMSET)
-	}
-	return int(Freebsd_TIOCMSET)
-}()
-
-const TIOCM_CAR = 64
-
-const TIOCM_CD = 64
-
-const TIOCM_CTS = 32
-
-const TIOCM_DSR = 256
-
-const TIOCM_DTR = 2
-
-const TIOCM_LE = 1
-
-const TIOCM_RI = 128
-
-const TIOCM_RNG = 128
-
-const TIOCM_RTS = 4
-
-const TIOCM_SR = 16
-
-const TIOCM_ST = 8
-
-// TIOCNOTTY differs between hosts.
-var TIOCNOTTY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCNOTTY)
-	}
-	return int(Freebsd_TIOCNOTTY)
-}()
-
-// TIOCNXCL differs between hosts.
-var TIOCNXCL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCNXCL)
-	}
-	return int(Freebsd_TIOCNXCL)
-}()
-
-// TIOCOUTQ differs between hosts.
-var TIOCOUTQ int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCOUTQ)
-	}
-	return int(Freebsd_TIOCOUTQ)
-}()
-
-// TIOCPKT differs between hosts.
-var TIOCPKT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCPKT)
-	}
-	return int(Freebsd_TIOCPKT)
-}()
-
-const TIOCPKT_DATA = 0
-
-const TIOCPKT_DOSTOP = 32
-
-const TIOCPKT_FLUSHREAD = 1
-
-const TIOCPKT_FLUSHWRITE = 2
-
-const TIOCPKT_IOCTL = 64
-
-const TIOCPKT_NOSTOP = 16
-
-const TIOCPKT_START = 8
-
-const TIOCPKT_STOP = 4
-
-// TIOCSBRK differs between hosts.
-var TIOCSBRK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSBRK)
-	}
-	return int(Freebsd_TIOCSBRK)
-}()
-
-// TIOCSCTTY differs between hosts.
-var TIOCSCTTY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSCTTY)
-	}
-	return int(Freebsd_TIOCSCTTY)
-}()
-
-// TIOCSETD differs between hosts.
-var TIOCSETD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSETD)
-	}
-	return int(Freebsd_TIOCSETD)
-}()
-
-// TIOCSIG differs between hosts.
-var TIOCSIG int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSIG)
-	}
-	return int(Freebsd_TIOCSIG)
-}()
-
-// TIOCSPGRP differs between hosts.
-var TIOCSPGRP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSPGRP)
-	}
-	return int(Freebsd_TIOCSPGRP)
-}()
-
-// TIOCSTI differs between hosts.
-var TIOCSTI int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSTI)
-	}
-	return int(Freebsd_TIOCSTI)
-}()
-
-// TIOCSWINSZ differs between hosts.
-var TIOCSWINSZ int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TIOCSWINSZ)
-	}
-	return int(Freebsd_TIOCSWINSZ)
-}()
-
-// TOSTOP differs between hosts.
-var TOSTOP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_TOSTOP)
-	}
-	return int(Freebsd_TOSTOP)
-}()
-
-// VDISCARD differs between hosts.
-var VDISCARD int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VDISCARD)
-	}
-	return int(Freebsd_VDISCARD)
-}()
-
-// VEOF differs between hosts.
-var VEOF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VEOF)
-	}
-	return int(Freebsd_VEOF)
-}()
-
-// VEOL differs between hosts.
-var VEOL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VEOL)
-	}
-	return int(Freebsd_VEOL)
-}()
-
-// VEOL2 differs between hosts.
-var VEOL2 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VEOL2)
-	}
-	return int(Freebsd_VEOL2)
-}()
-
-// VERASE differs between hosts.
-var VERASE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VERASE)
-	}
-	return int(Freebsd_VERASE)
-}()
-
-// VINTR differs between hosts.
-var VINTR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VINTR)
-	}
-	return int(Freebsd_VINTR)
-}()
-
-// VKILL differs between hosts.
-var VKILL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VKILL)
-	}
-	return int(Freebsd_VKILL)
-}()
-
-// VLNEXT differs between hosts.
-var VLNEXT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VLNEXT)
-	}
-	return int(Freebsd_VLNEXT)
-}()
-
-// VMIN differs between hosts.
-var VMIN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VMIN)
-	}
-	return int(Freebsd_VMIN)
-}()
-
-// VQUIT differs between hosts.
-var VQUIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VQUIT)
-	}
-	return int(Freebsd_VQUIT)
-}()
-
-// VREPRINT differs between hosts.
-var VREPRINT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VREPRINT)
-	}
-	return int(Freebsd_VREPRINT)
-}()
-
-// VSTART differs between hosts.
-var VSTART int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VSTART)
-	}
-	return int(Freebsd_VSTART)
-}()
-
-// VSTOP differs between hosts.
-var VSTOP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VSTOP)
-	}
-	return int(Freebsd_VSTOP)
-}()
-
-const VSUSP = 10
-
-// VTIME differs between hosts.
-var VTIME int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VTIME)
-	}
-	return int(Freebsd_VTIME)
-}()
-
-// VWERASE differs between hosts.
-var VWERASE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_VWERASE)
-	}
-	return int(Freebsd_VWERASE)
-}()
-
-// WCONTINUED differs between hosts.
-var WCONTINUED int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_WCONTINUED)
-	}
-	return int(Freebsd_WCONTINUED)
-}()
-
-// WEXITED differs between hosts.
-var WEXITED int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_WEXITED)
-	}
-	return int(Freebsd_WEXITED)
-}()
-
-const WNOHANG = 1
-
-// WNOWAIT differs between hosts.
-var WNOWAIT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_WNOWAIT)
-	}
-	return int(Freebsd_WNOWAIT)
-}()
-
-const WSTOPPED = 2
-
-const WUNTRACED = 2
-
-const sizeofPtr = 8
-
-func Accept(a0 int) (int, Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_Accept(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_Accept(a0)
-	return x0, x1, x2
+	x0, x1 := Windows_BytePtrFromString(a0)
+	return x0, x1
 }
 
-func Accept4(a0 int, a1 int) (int, Sockaddr, error) {
+func ByteSliceFromString(a0 string) ([]byte, error) {
 	if apehost == apeLinux {
-		x0, x1, x2 := Linux_Accept4(a0, a1)
-		return x0, x1, x2
+		x0, x1 := Linux_ByteSliceFromString(a0)
+		return x0, x1
 	}
-	x0, x1, x2 := Freebsd_Accept4(a0, a1)
-	return x0, x1, x2
-}
-
-func Access(a0 string, a1 uint32) error {
-	if apehost == apeLinux {
-		x0 := Linux_Access(a0, a1)
-		return x0
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ByteSliceFromString(a0)
+		return x0, x1
 	}
-	x0 := Freebsd_Access(a0, a1)
-	return x0
-}
-
-func Bind(a0 int, a1 Sockaddr) error {
-	if apehost == apeLinux {
-		x0 := Linux_Bind(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Bind(a0, a1)
-	return x0
+	x0, x1 := Windows_ByteSliceFromString(a0)
+	return x0, x1
 }
 
 func Chdir(a0 string) error {
@@ -4418,7 +1508,11 @@ func Chdir(a0 string) error {
 		x0 := Linux_Chdir(a0)
 		return x0
 	}
-	x0 := Freebsd_Chdir(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chdir(a0)
+		return x0
+	}
+	x0 := Windows_Chdir(a0)
 	return x0
 }
 
@@ -4427,7 +1521,11 @@ func Chmod(a0 string, a1 uint32) error {
 		x0 := Linux_Chmod(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Chmod(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chmod(a0, a1)
+		return x0
+	}
+	x0 := Windows_Chmod(a0, a1)
 	return x0
 }
 
@@ -4436,78 +1534,36 @@ func Chown(a0 string, a1 int, a2 int) error {
 		x0 := Linux_Chown(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_Chown(a0, a1, a2)
-	return x0
-}
-
-func Chroot(a0 string) error {
-	if apehost == apeLinux {
-		x0 := Linux_Chroot(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chown(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_Chroot(a0)
+	x0 := Windows_Chown(a0, a1, a2)
 	return x0
 }
 
-func Close(a0 int) error {
+func Clearenv() {
 	if apehost == apeLinux {
-		x0 := Linux_Close(a0)
-		return x0
-	}
-	x0 := Freebsd_Close(a0)
-	return x0
-}
-
-func CloseOnExec(a0 int) {
-	if apehost == apeLinux {
-		Linux_CloseOnExec(a0)
+		Linux_Clearenv()
 		return
 	}
-	Freebsd_CloseOnExec(a0)
+	if apehost == apeFreebsd {
+		Freebsd_Clearenv()
+		return
+	}
+	Windows_Clearenv()
 }
 
-func CmsgLen(a0 int) int {
+func Environ() []string {
 	if apehost == apeLinux {
-		x0 := Linux_CmsgLen(a0)
+		x0 := Linux_Environ()
 		return x0
 	}
-	x0 := Freebsd_CmsgLen(a0)
-	return x0
-}
-
-func CmsgSpace(a0 int) int {
-	if apehost == apeLinux {
-		x0 := Linux_CmsgSpace(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Environ()
 		return x0
 	}
-	x0 := Freebsd_CmsgSpace(a0)
-	return x0
-}
-
-func Connect(a0 int, a1 Sockaddr) error {
-	if apehost == apeLinux {
-		x0 := Linux_Connect(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Connect(a0, a1)
-	return x0
-}
-
-func Dup(a0 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Dup(a0)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Dup(a0)
-	return x0, x1
-}
-
-func Dup2(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Dup2(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Dup2(a0, a1)
+	x0 := Windows_Environ()
 	return x0
 }
 
@@ -4516,204 +1572,43 @@ func Exec(a0 string, a1 []string, a2 []string) error {
 		x0 := Linux_Exec(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_Exec(a0, a1, a2)
-	return x0
-}
-
-func Fchdir(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fchdir(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Exec(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_Fchdir(a0)
+	x0 := Windows_Exec(a0, a1, a2)
 	return x0
 }
 
-func Fchmod(a0 int, a1 uint32) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fchmod(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Fchmod(a0, a1)
-	return x0
-}
-
-func Fchown(a0 int, a1 int, a2 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fchown(a0, a1, a2)
-		return x0
-	}
-	x0 := Freebsd_Fchown(a0, a1, a2)
-	return x0
-}
-
-func FcntlFlock(a0 uintptr, a1 int, a2 *Flock_t) error {
-	if apehost == apeLinux {
-		x0 := Linux_FcntlFlock(a0, a1, (*Linux_Flock_t)(unsafe.Pointer(a2)))
-		return x0
-	}
-	var t2 Freebsd_Flock_t
-	var p2 *Freebsd_Flock_t
-	if a2 != nil {
-		t2.Start = (*a2).Start
-		t2.Len = (*a2).Len
-		t2.Pid = (*a2).Pid
-		t2.Type = (*a2).Type
-		t2.Whence = (*a2).Whence
-		p2 = &t2
-	}
-	x0 := Freebsd_FcntlFlock(a0, a1, p2)
-	if a2 != nil {
-		(*a2).Type = t2.Type
-		(*a2).Whence = t2.Whence
-		(*a2).Start = t2.Start
-		(*a2).Len = t2.Len
-		(*a2).Pid = t2.Pid
-	}
-	return x0
-}
-
-func Flock(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Flock(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Flock(a0, a1)
-	return x0
-}
-
-func ForkExec(a0 string, a1 []string, a2 *ProcAttr) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_ForkExec(a0, a1, (*Linux_ProcAttr)(unsafe.Pointer(a2)))
-		return x0, x1
-	}
-	var t2 Freebsd_ProcAttr
-	var p2 *Freebsd_ProcAttr
-	if a2 != nil {
-		t2.Dir = (*a2).Dir
-		t2.Env = (*a2).Env
-		t2.Files = (*a2).Files
-		*(*uintptr)(unsafe.Pointer(&t2.Sys)) = uintptr(unsafe.Pointer((*a2).Sys))
-		p2 = &t2
-	}
-	x0, x1 := Freebsd_ForkExec(a0, a1, p2)
-	if a2 != nil {
-		(*a2).Dir = t2.Dir
-		(*a2).Env = t2.Env
-		(*a2).Files = t2.Files
-		*(*uintptr)(unsafe.Pointer(&(*a2).Sys)) = uintptr(unsafe.Pointer(t2.Sys))
-	}
-	return x0, x1
-}
-
-func Fstat(a0 int, a1 *Stat_t) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fstat(a0, (*Linux_Stat_t)(unsafe.Pointer(a1)))
-		return x0
-	}
-	var t1 Freebsd_Stat_t
-	var p1 *Freebsd_Stat_t
-	if a1 != nil {
-		t1.Dev = (*a1).Dev
-		t1.Ino = (*a1).Ino
-		t1.Nlink = (*a1).Nlink
-		t1.Mode = uint16((*a1).Mode)
-		t1.Uid = (*a1).Uid
-		t1.Gid = (*a1).Gid
-		t1.Rdev = (*a1).Rdev
-		t1.Size = (*a1).Size
-		t1.Blocks = (*a1).Blocks
-		t1.Blksize = int32((*a1).Blksize)
-		p1 = &t1
-	}
-	x0 := Freebsd_Fstat(a0, p1)
-	if a1 != nil {
-		(*a1).Dev = t1.Dev
-		(*a1).Ino = t1.Ino
-		(*a1).Nlink = t1.Nlink
-		(*a1).Mode = uint32(t1.Mode)
-		(*a1).Uid = t1.Uid
-		(*a1).Gid = t1.Gid
-		(*a1).Rdev = t1.Rdev
-		(*a1).Size = t1.Size
-		(*a1).Blksize = int64(t1.Blksize)
-		(*a1).Blocks = t1.Blocks
-	}
-	return x0
-}
-
-func Fstatfs(a0 int, a1 *Statfs_t) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fstatfs(a0, (*Linux_Statfs_t)(unsafe.Pointer(a1)))
-		return x0
-	}
-	var t1 Freebsd_Statfs_t
-	var p1 *Freebsd_Statfs_t
-	if a1 != nil {
-		t1.Type = uint32((*a1).Type)
-		t1.Flags = uint64((*a1).Flags)
-		t1.Bsize = uint64((*a1).Bsize)
-		t1.Blocks = (*a1).Blocks
-		t1.Bfree = (*a1).Bfree
-		t1.Bavail = int64((*a1).Bavail)
-		t1.Files = (*a1).Files
-		t1.Ffree = int64((*a1).Ffree)
-		for i1 := 0; i1 < 4; i1++ {
-			t1.Spare[i1] = uint64((*a1).Spare[i1])
-		}
-		p1 = &t1
-	}
-	x0 := Freebsd_Fstatfs(a0, p1)
-	if a1 != nil {
-		(*a1).Type = int64(t1.Type)
-		(*a1).Bsize = int64(t1.Bsize)
-		(*a1).Blocks = t1.Blocks
-		(*a1).Bfree = t1.Bfree
-		(*a1).Bavail = uint64(t1.Bavail)
-		(*a1).Files = t1.Files
-		(*a1).Ffree = uint64(t1.Ffree)
-		(*a1).Flags = int64(t1.Flags)
-		for i1 := 0; i1 < 4; i1++ {
-			(*a1).Spare[i1] = int64(t1.Spare[i1])
-		}
-	}
-	return x0
-}
-
-func Fsync(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Fsync(a0)
-		return x0
-	}
-	x0 := Freebsd_Fsync(a0)
-	return x0
-}
-
-func Ftruncate(a0 int, a1 int64) error {
-	if apehost == apeLinux {
-		x0 := Linux_Ftruncate(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Ftruncate(a0, a1)
-	return x0
-}
-
-func Futimes(a0 int, a1 []Timeval) error {
-	if apehost == apeLinux {
-		x0 := Linux_Futimes(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Futimes(a0, a1)
-	return x0
-}
+// Exit is pushed by another package.
+//
+//go:linkname Exit
+func Exit(code int)
 
 func Getegid() int {
 	if apehost == apeLinux {
 		x0 := Linux_Getegid()
 		return x0
 	}
-	x0 := Freebsd_Getegid()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getegid()
+		return x0
+	}
+	x0 := Windows_Getegid()
 	return x0
+}
+
+func Getenv(a0 string) (string, bool) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Getenv(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Getenv(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_Getenv(a0)
+	return x0, x1
 }
 
 func Geteuid() int {
@@ -4721,7 +1616,11 @@ func Geteuid() int {
 		x0 := Linux_Geteuid()
 		return x0
 	}
-	x0 := Freebsd_Geteuid()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Geteuid()
+		return x0
+	}
+	x0 := Windows_Geteuid()
 	return x0
 }
 
@@ -4730,7 +1629,11 @@ func Getgid() int {
 		x0 := Linux_Getgid()
 		return x0
 	}
-	x0 := Freebsd_Getgid()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getgid()
+		return x0
+	}
+	x0 := Windows_Getgid()
 	return x0
 }
 
@@ -4739,43 +1642,29 @@ func Getgroups() ([]int, error) {
 		x0, x1 := Linux_Getgroups()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_Getgroups()
-	return x0, x1
-}
-
-func Getpeername(a0 int) (Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Getpeername(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Getgroups()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_Getpeername(a0)
+	x0, x1 := Windows_Getgroups()
 	return x0, x1
 }
 
-func Getpgid(a0 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Getpgid(a0)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Getpgid(a0)
-	return x0, x1
-}
-
-func Getpgrp() int {
-	if apehost == apeLinux {
-		x0 := Linux_Getpgrp()
-		return x0
-	}
-	x0 := Freebsd_Getpgrp()
-	return x0
-}
+// Getpagesize is pushed by another package.
+//
+//go:linkname Getpagesize
+func Getpagesize() int
 
 func Getpid() int {
 	if apehost == apeLinux {
 		x0 := Linux_Getpid()
 		return x0
 	}
-	x0 := Freebsd_Getpid()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getpid()
+		return x0
+	}
+	x0 := Windows_Getpid()
 	return x0
 }
 
@@ -4784,141 +1673,46 @@ func Getppid() int {
 		x0 := Linux_Getppid()
 		return x0
 	}
-	x0 := Freebsd_Getppid()
-	return x0
-}
-
-func Getpriority(a0 int, a1 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Getpriority(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Getpriority(a0, a1)
-	return x0, x1
-}
-
-func Getrlimit(a0 int, a1 *Rlimit) error {
-	if apehost == apeLinux {
-		x0 := Linux_Getrlimit(a0, (*Linux_Rlimit)(unsafe.Pointer(a1)))
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getppid()
 		return x0
 	}
-	var t1 Freebsd_Rlimit
-	var p1 *Freebsd_Rlimit
-	if a1 != nil {
-		t1.Cur = int64((*a1).Cur)
-		t1.Max = int64((*a1).Max)
-		p1 = &t1
-	}
-	x0 := Freebsd_Getrlimit(a0, p1)
-	if a1 != nil {
-		(*a1).Cur = uint64(t1.Cur)
-		(*a1).Max = uint64(t1.Max)
-	}
+	x0 := Windows_Getppid()
 	return x0
-}
-
-func Getrusage(a0 int, a1 *Rusage) error {
-	if apehost == apeLinux {
-		x0 := Linux_Getrusage(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Getrusage(a0, a1)
-	return x0
-}
-
-func Getsockname(a0 int) (Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Getsockname(a0)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Getsockname(a0)
-	return x0, x1
-}
-
-func GetsockoptICMPv6Filter(a0 int, a1 int, a2 int) (*ICMPv6Filter, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptICMPv6Filter(a0, a1, a2)
-		return (*ICMPv6Filter)(unsafe.Pointer(x0)), x1
-	}
-	x0, x1 := Freebsd_GetsockoptICMPv6Filter(a0, a1, a2)
-	var rx0 *ICMPv6Filter
-	if x0 != nil {
-		rx0 = new(ICMPv6Filter)
-
-	}
-	return rx0, x1
-}
-
-func GetsockoptIPMreq(a0 int, a1 int, a2 int) (*IPMreq, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptIPMreq(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_GetsockoptIPMreq(a0, a1, a2)
-	return x0, x1
-}
-
-func GetsockoptIPMreqn(a0 int, a1 int, a2 int) (*IPMreqn, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptIPMreqn(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_GetsockoptIPMreqn(a0, a1, a2)
-	return x0, x1
-}
-
-func GetsockoptIPv6MTUInfo(a0 int, a1 int, a2 int) (*IPv6MTUInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptIPv6MTUInfo(a0, a1, a2)
-		return (*IPv6MTUInfo)(unsafe.Pointer(x0)), x1
-	}
-	x0, x1 := Freebsd_GetsockoptIPv6MTUInfo(a0, a1, a2)
-	var rx0 *IPv6MTUInfo
-	if x0 != nil {
-		rx0 = new(IPv6MTUInfo)
-		(*rx0).Addr.Family = uint16((*x0).Addr.Family)
-		(*rx0).Addr.Port = (*x0).Addr.Port
-		(*rx0).Addr.Flowinfo = (*x0).Addr.Flowinfo
-		(*rx0).Addr.Addr = (*x0).Addr.Addr
-		(*rx0).Addr.Scope_id = (*x0).Addr.Scope_id
-		(*rx0).Mtu = (*x0).Mtu
-	}
-	return rx0, x1
-}
-
-func GetsockoptIPv6Mreq(a0 int, a1 int, a2 int) (*IPv6Mreq, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptIPv6Mreq(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_GetsockoptIPv6Mreq(a0, a1, a2)
-	return x0, x1
-}
-
-func GetsockoptInet4Addr(a0 int, a1 int, a2 int) ([4]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptInet4Addr(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_GetsockoptInet4Addr(a0, a1, a2)
-	return x0, x1
-}
-
-func GetsockoptInt(a0 int, a1 int, a2 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_GetsockoptInt(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_GetsockoptInt(a0, a1, a2)
-	return x0, x1
 }
 
 func Gettimeofday(a0 *Timeval) error {
 	if apehost == apeLinux {
-		x0 := Linux_Gettimeofday(a0)
+		x0 := Linux_Gettimeofday((*Linux_Timeval)(unsafe.Pointer(a0)))
 		return x0
 	}
-	x0 := Freebsd_Gettimeofday(a0)
+	if apehost == apeFreebsd {
+		var t0 Freebsd_Timeval
+		var p0 *Freebsd_Timeval
+		if a0 != nil {
+			t0.Sec = (*a0).Sec
+			t0.Usec = (*a0).Usec
+			p0 = &t0
+		}
+		x0 := Freebsd_Gettimeofday(p0)
+		if a0 != nil {
+			(*a0).Sec = t0.Sec
+			(*a0).Usec = t0.Usec
+		}
+		return x0
+	}
+	var t0 Windows_Timeval
+	var p0 *Windows_Timeval
+	if a0 != nil {
+		t0.Sec = int32((*a0).Sec)
+		t0.Usec = int32((*a0).Usec)
+		p0 = &t0
+	}
+	x0 := Windows_Gettimeofday(p0)
+	if a0 != nil {
+		(*a0).Sec = int64(t0.Sec)
+		(*a0).Usec = int64(t0.Usec)
+	}
 	return x0
 }
 
@@ -4927,7 +1721,11 @@ func Getuid() int {
 		x0 := Linux_Getuid()
 		return x0
 	}
-	x0 := Freebsd_Getuid()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getuid()
+		return x0
+	}
+	x0 := Windows_Getuid()
 	return x0
 }
 
@@ -4936,17 +1734,12 @@ func Getwd() (string, error) {
 		x0, x1 := Linux_Getwd()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_Getwd()
-	return x0, x1
-}
-
-func Kill(a0 int, a1 Signal) error {
-	if apehost == apeLinux {
-		x0 := Linux_Kill(a0, a1)
-		return x0
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Getwd()
+		return x0, x1
 	}
-	x0 := Freebsd_Kill(a0, a1)
-	return x0
+	x0, x1 := Windows_Getwd()
+	return x0, x1
 }
 
 func Lchown(a0 string, a1 int, a2 int) error {
@@ -4954,7 +1747,11 @@ func Lchown(a0 string, a1 int, a2 int) error {
 		x0 := Linux_Lchown(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_Lchown(a0, a1, a2)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Lchown(a0, a1, a2)
+		return x0
+	}
+	x0 := Windows_Lchown(a0, a1, a2)
 	return x0
 }
 
@@ -4963,52 +1760,11 @@ func Link(a0 string, a1 string) error {
 		x0 := Linux_Link(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Link(a0, a1)
-	return x0
-}
-
-func Listen(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Listen(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Link(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Listen(a0, a1)
-	return x0
-}
-
-func Lstat(a0 string, a1 *Stat_t) error {
-	if apehost == apeLinux {
-		x0 := Linux_Lstat(a0, (*Linux_Stat_t)(unsafe.Pointer(a1)))
-		return x0
-	}
-	var t1 Freebsd_Stat_t
-	var p1 *Freebsd_Stat_t
-	if a1 != nil {
-		t1.Dev = (*a1).Dev
-		t1.Ino = (*a1).Ino
-		t1.Nlink = (*a1).Nlink
-		t1.Mode = uint16((*a1).Mode)
-		t1.Uid = (*a1).Uid
-		t1.Gid = (*a1).Gid
-		t1.Rdev = (*a1).Rdev
-		t1.Size = (*a1).Size
-		t1.Blocks = (*a1).Blocks
-		t1.Blksize = int32((*a1).Blksize)
-		p1 = &t1
-	}
-	x0 := Freebsd_Lstat(a0, p1)
-	if a1 != nil {
-		(*a1).Dev = t1.Dev
-		(*a1).Ino = t1.Ino
-		(*a1).Nlink = t1.Nlink
-		(*a1).Mode = uint32(t1.Mode)
-		(*a1).Uid = t1.Uid
-		(*a1).Gid = t1.Gid
-		(*a1).Rdev = t1.Rdev
-		(*a1).Size = t1.Size
-		(*a1).Blksize = int64(t1.Blksize)
-		(*a1).Blocks = t1.Blocks
-	}
+	x0 := Windows_Link(a0, a1)
 	return x0
 }
 
@@ -5017,182 +1773,44 @@ func Mkdir(a0 string, a1 uint32) error {
 		x0 := Linux_Mkdir(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Mkdir(a0, a1)
-	return x0
-}
-
-func Mkfifo(a0 string, a1 uint32) error {
-	if apehost == apeLinux {
-		x0 := Linux_Mkfifo(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Mkdir(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Mkfifo(a0, a1)
+	x0 := Windows_Mkdir(a0, a1)
 	return x0
 }
 
-func Mmap(a0 int, a1 int64, a2 int, a3 int, a4 int) ([]byte, error) {
+func NsecToTimespec(a0 int64) Timespec {
 	if apehost == apeLinux {
-		x0, x1 := Linux_Mmap(a0, a1, a2, a3, a4)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Mmap(a0, a1, a2, a3, a4)
-	return x0, x1
-}
-
-func Munmap(a0 []byte) error {
-	if apehost == apeLinux {
-		x0 := Linux_Munmap(a0)
+		x0 := Linux_NsecToTimespec(a0)
 		return x0
 	}
-	x0 := Freebsd_Munmap(a0)
-	return x0
-}
-
-func Nanosleep(a0 *Timespec, a1 *Timespec) error {
-	if apehost == apeLinux {
-		x0 := Linux_Nanosleep(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_NsecToTimespec(a0)
 		return x0
 	}
-	x0 := Freebsd_Nanosleep(a0, a1)
+	x0 := Windows_NsecToTimespec(a0)
 	return x0
 }
 
-func Open(a0 string, a1 int, a2 uint32) (int, error) {
+func NsecToTimeval(a0 int64) Timeval {
 	if apehost == apeLinux {
-		x0, x1 := Linux_Open(a0, a1, a2)
-		return x0, x1
+		x0 := Linux_NsecToTimeval(a0)
+		return *(*Timeval)(unsafe.Pointer(&x0))
 	}
-	x0, x1 := Freebsd_Open(a0, a1, a2)
-	return x0, x1
-}
-
-func ParseDirent(a0 []byte, a1 int, a2 []string) (int, int, []string) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_ParseDirent(a0, a1, a2)
-		return x0, x1, x2
+	if apehost == apeFreebsd {
+		x0 := Freebsd_NsecToTimeval(a0)
+		var rx0 Timeval
+		rx0.Sec = x0.Sec
+		rx0.Usec = x0.Usec
+		return rx0
 	}
-	x0, x1, x2 := Freebsd_ParseDirent(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func ParseSocketControlMessage(a0 []byte) ([]SocketControlMessage, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_ParseSocketControlMessage(a0)
-		return *(*[]SocketControlMessage)(unsafe.Pointer(&x0)), x1
-	}
-	x0, x1 := Freebsd_ParseSocketControlMessage(a0)
-	rx0 := make([]SocketControlMessage, len(x0))
-	for i := range x0 {
-		rx0[i].Header.Len = uint64(x0[i].Header.Len)
-		rx0[i].Header.Level = x0[i].Header.Level
-		rx0[i].Header.Type = x0[i].Header.Type
-		rx0[i].Data = x0[i].Data
-	}
-	return rx0, x1
-}
-
-func ParseUnixRights(a0 *SocketControlMessage) ([]int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_ParseUnixRights((*Linux_SocketControlMessage)(unsafe.Pointer(a0)))
-		return x0, x1
-	}
-	var t0 Freebsd_SocketControlMessage
-	var p0 *Freebsd_SocketControlMessage
-	if a0 != nil {
-		t0.Header.Len = uint32((*a0).Header.Len)
-		t0.Header.Level = (*a0).Header.Level
-		t0.Header.Type = (*a0).Header.Type
-		t0.Data = (*a0).Data
-		p0 = &t0
-	}
-	x0, x1 := Freebsd_ParseUnixRights(p0)
-	if a0 != nil {
-		(*a0).Header.Len = uint64(t0.Header.Len)
-		(*a0).Header.Level = t0.Header.Level
-		(*a0).Header.Type = t0.Header.Type
-		(*a0).Data = t0.Data
-	}
-	return x0, x1
-}
-
-func Pipe(a0 []int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Pipe(a0)
-		return x0
-	}
-	x0 := Freebsd_Pipe(a0)
-	return x0
-}
-
-func Pipe2(a0 []int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Pipe2(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Pipe2(a0, a1)
-	return x0
-}
-
-func Pread(a0 int, a1 []byte, a2 int64) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Pread(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Pread(a0, a1, a2)
-	return x0, x1
-}
-
-func Pwrite(a0 int, a1 []byte, a2 int64) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Pwrite(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Pwrite(a0, a1, a2)
-	return x0, x1
-}
-
-//go:linkname RawSyscall
-//go:uintptrkeepalive
-//go:nosplit
-//go:norace
-func RawSyscall(a0 uintptr, a1 uintptr, a2 uintptr, a3 uintptr) (uintptr, uintptr, Errno) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_RawSyscall(a0, a1, a2, a3)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_RawSyscall(a0, a1, a2, a3)
-	return x0, x1, x2
-}
-
-//go:linkname RawSyscall6
-//go:uintptrkeepalive
-//go:nosplit
-//go:norace
-func RawSyscall6(a0 uintptr, a1 uintptr, a2 uintptr, a3 uintptr, a4 uintptr, a5 uintptr, a6 uintptr) (uintptr, uintptr, Errno) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_RawSyscall6(a0, a1, a2, a3, a4, a5, a6)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_RawSyscall6(a0, a1, a2, a3, a4, a5, a6)
-	return x0, x1, x2
-}
-
-func Read(a0 int, a1 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Read(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Read(a0, a1)
-	return x0, x1
-}
-
-func ReadDirent(a0 int, a1 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_ReadDirent(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_ReadDirent(a0, a1)
-	return x0, x1
+	x0 := Windows_NsecToTimeval(a0)
+	var rx0 Timeval
+	rx0.Sec = int64(x0.Sec)
+	rx0.Usec = int64(x0.Usec)
+	return rx0
 }
 
 func Readlink(a0 string, a1 []byte) (int, error) {
@@ -5200,26 +1818,12 @@ func Readlink(a0 string, a1 []byte) (int, error) {
 		x0, x1 := Linux_Readlink(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := Freebsd_Readlink(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Readlink(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_Readlink(a0, a1)
 	return x0, x1
-}
-
-func Recvfrom(a0 int, a1 []byte, a2 int) (int, Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_Recvfrom(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_Recvfrom(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func Recvmsg(a0 int, a1 []byte, a2 []byte, a3 int) (int, int, int, Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := Linux_Recvmsg(a0, a1, a2, a3)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := Freebsd_Recvmsg(a0, a1, a2, a3)
-	return x0, x1, x2, x3, x4
 }
 
 func Rename(a0 string, a1 string) error {
@@ -5227,7 +1831,11 @@ func Rename(a0 string, a1 string) error {
 		x0 := Linux_Rename(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Rename(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Rename(a0, a1)
+		return x0
+	}
+	x0 := Windows_Rename(a0, a1)
 	return x0
 }
 
@@ -5236,316 +1844,25 @@ func Rmdir(a0 string) error {
 		x0 := Linux_Rmdir(a0)
 		return x0
 	}
-	x0 := Freebsd_Rmdir(a0)
-	return x0
-}
-
-func Seek(a0 int, a1 int64, a2 int) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Seek(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Seek(a0, a1, a2)
-	return x0, x1
-}
-
-func Sendfile(a0 int, a1 int, a2 *int64, a3 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Sendfile(a0, a1, a2, a3)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Sendfile(a0, a1, a2, a3)
-	return x0, x1
-}
-
-func Sendmsg(a0 int, a1 []byte, a2 []byte, a3 Sockaddr, a4 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Sendmsg(a0, a1, a2, a3, a4)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Rmdir(a0)
 		return x0
 	}
-	x0 := Freebsd_Sendmsg(a0, a1, a2, a3, a4)
+	x0 := Windows_Rmdir(a0)
 	return x0
 }
 
-func SendmsgN(a0 int, a1 []byte, a2 []byte, a3 Sockaddr, a4 int) (int, error) {
+func Setenv(a0 string, a1 string) error {
 	if apehost == apeLinux {
-		x0, x1 := Linux_SendmsgN(a0, a1, a2, a3, a4)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_SendmsgN(a0, a1, a2, a3, a4)
-	return x0, x1
-}
-
-func Sendto(a0 int, a1 []byte, a2 int, a3 Sockaddr) error {
-	if apehost == apeLinux {
-		x0 := Linux_Sendto(a0, a1, a2, a3)
+		x0 := Linux_Setenv(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Sendto(a0, a1, a2, a3)
-	return x0
-}
-
-func SetNonblock(a0 int, a1 bool) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetNonblock(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Setenv(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_SetNonblock(a0, a1)
+	x0 := Windows_Setenv(a0, a1)
 	return x0
-}
-
-func Setegid(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setegid(a0)
-		return x0
-	}
-	x0 := Freebsd_Setegid(a0)
-	return x0
-}
-
-func Seteuid(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Seteuid(a0)
-		return x0
-	}
-	x0 := Freebsd_Seteuid(a0)
-	return x0
-}
-
-func Setgid(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setgid(a0)
-		return x0
-	}
-	x0 := Freebsd_Setgid(a0)
-	return x0
-}
-
-func Setgroups(a0 []int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setgroups(a0)
-		return x0
-	}
-	x0 := Freebsd_Setgroups(a0)
-	return x0
-}
-
-func Setpgid(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setpgid(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Setpgid(a0, a1)
-	return x0
-}
-
-func Setpriority(a0 int, a1 int, a2 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setpriority(a0, a1, a2)
-		return x0
-	}
-	x0 := Freebsd_Setpriority(a0, a1, a2)
-	return x0
-}
-
-func Setregid(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setregid(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Setregid(a0, a1)
-	return x0
-}
-
-func Setreuid(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setreuid(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Setreuid(a0, a1)
-	return x0
-}
-
-func Setrlimit(a0 int, a1 *Rlimit) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setrlimit(a0, (*Linux_Rlimit)(unsafe.Pointer(a1)))
-		return x0
-	}
-	var t1 Freebsd_Rlimit
-	var p1 *Freebsd_Rlimit
-	if a1 != nil {
-		t1.Cur = int64((*a1).Cur)
-		t1.Max = int64((*a1).Max)
-		p1 = &t1
-	}
-	x0 := Freebsd_Setrlimit(a0, p1)
-	if a1 != nil {
-		(*a1).Cur = uint64(t1.Cur)
-		(*a1).Max = uint64(t1.Max)
-	}
-	return x0
-}
-
-func Setsid() (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Setsid()
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Setsid()
-	return x0, x1
-}
-
-func SetsockoptByte(a0 int, a1 int, a2 int, a3 byte) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptByte(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptByte(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptICMPv6Filter(a0 int, a1 int, a2 int, a3 *ICMPv6Filter) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptICMPv6Filter(a0, a1, a2, (*Linux_ICMPv6Filter)(unsafe.Pointer(a3)))
-		return x0
-	}
-	var t3 Freebsd_ICMPv6Filter
-	var p3 *Freebsd_ICMPv6Filter
-	if a3 != nil {
-
-		p3 = &t3
-	}
-	x0 := Freebsd_SetsockoptICMPv6Filter(a0, a1, a2, p3)
-	if a3 != nil {
-
-	}
-	return x0
-}
-
-func SetsockoptIPMreq(a0 int, a1 int, a2 int, a3 *IPMreq) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptIPMreq(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptIPMreq(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptIPMreqn(a0 int, a1 int, a2 int, a3 *IPMreqn) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptIPMreqn(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptIPMreqn(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptIPv6Mreq(a0 int, a1 int, a2 int, a3 *IPv6Mreq) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptIPv6Mreq(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptIPv6Mreq(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptInet4Addr(a0 int, a1 int, a2 int, a3 [4]byte) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptInet4Addr(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptInet4Addr(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptInt(a0 int, a1 int, a2 int, a3 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptInt(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptInt(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptLinger(a0 int, a1 int, a2 int, a3 *Linger) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptLinger(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptLinger(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptString(a0 int, a1 int, a2 int, a3 string) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptString(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptString(a0, a1, a2, a3)
-	return x0
-}
-
-func SetsockoptTimeval(a0 int, a1 int, a2 int, a3 *Timeval) error {
-	if apehost == apeLinux {
-		x0 := Linux_SetsockoptTimeval(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := Freebsd_SetsockoptTimeval(a0, a1, a2, a3)
-	return x0
-}
-
-func Settimeofday(a0 *Timeval) error {
-	if apehost == apeLinux {
-		x0 := Linux_Settimeofday(a0)
-		return x0
-	}
-	x0 := Freebsd_Settimeofday(a0)
-	return x0
-}
-
-func Setuid(a0 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Setuid(a0)
-		return x0
-	}
-	x0 := Freebsd_Setuid(a0)
-	return x0
-}
-
-func Shutdown(a0 int, a1 int) error {
-	if apehost == apeLinux {
-		x0 := Linux_Shutdown(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Shutdown(a0, a1)
-	return x0
-}
-
-func SlicePtrFromStrings(a0 []string) ([]*byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_SlicePtrFromStrings(a0)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_SlicePtrFromStrings(a0)
-	return x0, x1
-}
-
-func Socket(a0 int, a1 int, a2 int) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Socket(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Socket(a0, a1, a2)
-	return x0, x1
-}
-
-func Socketpair(a0 int, a1 int, a2 int) ([2]int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Socketpair(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Socketpair(a0, a1, a2)
-	return x0, x1
 }
 
 func StartProcess(a0 string, a1 []string, a2 *ProcAttr) (int, uintptr, error) {
@@ -5553,105 +1870,67 @@ func StartProcess(a0 string, a1 []string, a2 *ProcAttr) (int, uintptr, error) {
 		x0, x1, x2 := Linux_StartProcess(a0, a1, (*Linux_ProcAttr)(unsafe.Pointer(a2)))
 		return x0, x1, x2
 	}
-	var t2 Freebsd_ProcAttr
-	var p2 *Freebsd_ProcAttr
+	if apehost == apeFreebsd {
+		var t2 Freebsd_ProcAttr
+		var p2 *Freebsd_ProcAttr
+		if a2 != nil {
+			t2.Dir = (*a2).Dir
+			t2.Env = (*a2).Env
+			t2.Files = (*a2).Files
+			t2.Sys = (*Freebsd_SysProcAttr)(unsafe.Pointer((*a2).Sys))
+			p2 = &t2
+		}
+		x0, x1, x2 := Freebsd_StartProcess(a0, a1, p2)
+		if a2 != nil {
+			(*a2).Dir = t2.Dir
+			(*a2).Env = t2.Env
+			(*a2).Files = t2.Files
+			(*a2).Sys = (*SysProcAttr)(unsafe.Pointer(t2.Sys))
+		}
+		return x0, x1, x2
+	}
+	var t2 Windows_ProcAttr
+	var p2 *Windows_ProcAttr
 	if a2 != nil {
 		t2.Dir = (*a2).Dir
 		t2.Env = (*a2).Env
 		t2.Files = (*a2).Files
-		*(*uintptr)(unsafe.Pointer(&t2.Sys)) = uintptr(unsafe.Pointer((*a2).Sys))
+		t2.Sys = (*Windows_SysProcAttr)(unsafe.Pointer((*a2).Sys))
 		p2 = &t2
 	}
-	x0, x1, x2 := Freebsd_StartProcess(a0, a1, p2)
+	x0, x1, x2 := Windows_StartProcess(a0, a1, p2)
 	if a2 != nil {
 		(*a2).Dir = t2.Dir
 		(*a2).Env = t2.Env
 		(*a2).Files = t2.Files
-		*(*uintptr)(unsafe.Pointer(&(*a2).Sys)) = uintptr(unsafe.Pointer(t2.Sys))
+		(*a2).Sys = (*SysProcAttr)(unsafe.Pointer(t2.Sys))
 	}
 	return x0, x1, x2
 }
 
-func Stat(a0 string, a1 *Stat_t) error {
+func StringBytePtr(a0 string) *byte {
 	if apehost == apeLinux {
-		x0 := Linux_Stat(a0, (*Linux_Stat_t)(unsafe.Pointer(a1)))
+		x0 := Linux_StringBytePtr(a0)
 		return x0
 	}
-	var t1 Freebsd_Stat_t
-	var p1 *Freebsd_Stat_t
-	if a1 != nil {
-		t1.Dev = (*a1).Dev
-		t1.Ino = (*a1).Ino
-		t1.Nlink = (*a1).Nlink
-		t1.Mode = uint16((*a1).Mode)
-		t1.Uid = (*a1).Uid
-		t1.Gid = (*a1).Gid
-		t1.Rdev = (*a1).Rdev
-		t1.Size = (*a1).Size
-		t1.Blocks = (*a1).Blocks
-		t1.Blksize = int32((*a1).Blksize)
-		p1 = &t1
+	if apehost == apeFreebsd {
+		x0 := Freebsd_StringBytePtr(a0)
+		return x0
 	}
-	x0 := Freebsd_Stat(a0, p1)
-	if a1 != nil {
-		(*a1).Dev = t1.Dev
-		(*a1).Ino = t1.Ino
-		(*a1).Nlink = t1.Nlink
-		(*a1).Mode = uint32(t1.Mode)
-		(*a1).Uid = t1.Uid
-		(*a1).Gid = t1.Gid
-		(*a1).Rdev = t1.Rdev
-		(*a1).Size = t1.Size
-		(*a1).Blksize = int64(t1.Blksize)
-		(*a1).Blocks = t1.Blocks
-	}
+	x0 := Windows_StringBytePtr(a0)
 	return x0
 }
 
-func Statfs(a0 string, a1 *Statfs_t) error {
+func StringByteSlice(a0 string) []byte {
 	if apehost == apeLinux {
-		x0 := Linux_Statfs(a0, (*Linux_Statfs_t)(unsafe.Pointer(a1)))
+		x0 := Linux_StringByteSlice(a0)
 		return x0
 	}
-	var t1 Freebsd_Statfs_t
-	var p1 *Freebsd_Statfs_t
-	if a1 != nil {
-		t1.Type = uint32((*a1).Type)
-		t1.Flags = uint64((*a1).Flags)
-		t1.Bsize = uint64((*a1).Bsize)
-		t1.Blocks = (*a1).Blocks
-		t1.Bfree = (*a1).Bfree
-		t1.Bavail = int64((*a1).Bavail)
-		t1.Files = (*a1).Files
-		t1.Ffree = int64((*a1).Ffree)
-		for i1 := 0; i1 < 4; i1++ {
-			t1.Spare[i1] = uint64((*a1).Spare[i1])
-		}
-		p1 = &t1
-	}
-	x0 := Freebsd_Statfs(a0, p1)
-	if a1 != nil {
-		(*a1).Type = int64(t1.Type)
-		(*a1).Bsize = int64(t1.Bsize)
-		(*a1).Blocks = t1.Blocks
-		(*a1).Bfree = t1.Bfree
-		(*a1).Bavail = uint64(t1.Bavail)
-		(*a1).Files = t1.Files
-		(*a1).Ffree = uint64(t1.Ffree)
-		(*a1).Flags = int64(t1.Flags)
-		for i1 := 0; i1 < 4; i1++ {
-			(*a1).Spare[i1] = int64(t1.Spare[i1])
-		}
-	}
-	return x0
-}
-
-func StringSlicePtr(a0 []string) []*byte {
-	if apehost == apeLinux {
-		x0 := Linux_StringSlicePtr(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_StringByteSlice(a0)
 		return x0
 	}
-	x0 := Freebsd_StringSlicePtr(a0)
+	x0 := Windows_StringByteSlice(a0)
 	return x0
 }
 
@@ -5660,58 +1939,24 @@ func Symlink(a0 string, a1 string) error {
 		x0 := Linux_Symlink(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Symlink(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Symlink(a0, a1)
+		return x0
+	}
+	x0 := Windows_Symlink(a0, a1)
 	return x0
 }
 
-//go:linkname Syscall
-//go:uintptrkeepalive
-//go:nosplit
-func Syscall(a0 uintptr, a1 uintptr, a2 uintptr, a3 uintptr) (uintptr, uintptr, Errno) {
+func TimespecToNsec(a0 Timespec) int64 {
 	if apehost == apeLinux {
-		x0, x1, x2 := Linux_Syscall(a0, a1, a2, a3)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_Syscall(a0, a1, a2, a3)
-	return x0, x1, x2
-}
-
-//go:linkname Syscall6
-//go:uintptrkeepalive
-//go:nosplit
-func Syscall6(a0 uintptr, a1 uintptr, a2 uintptr, a3 uintptr, a4 uintptr, a5 uintptr, a6 uintptr) (uintptr, uintptr, Errno) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_Syscall6(a0, a1, a2, a3, a4, a5, a6)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_Syscall6(a0, a1, a2, a3, a4, a5, a6)
-	return x0, x1, x2
-}
-
-func Truncate(a0 string, a1 int64) error {
-	if apehost == apeLinux {
-		x0 := Linux_Truncate(a0, a1)
+		x0 := Linux_TimespecToNsec(a0)
 		return x0
 	}
-	x0 := Freebsd_Truncate(a0, a1)
-	return x0
-}
-
-func Umask(a0 int) int {
-	if apehost == apeLinux {
-		x0 := Linux_Umask(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_TimespecToNsec(a0)
 		return x0
 	}
-	x0 := Freebsd_Umask(a0)
-	return x0
-}
-
-func UnixRights(a0 ...int) []byte {
-	if apehost == apeLinux {
-		x0 := Linux_UnixRights(a0...)
-		return x0
-	}
-	x0 := Freebsd_UnixRights(a0...)
+	x0 := Windows_TimespecToNsec(a0)
 	return x0
 }
 
@@ -5720,25 +1965,55 @@ func Unlink(a0 string) error {
 		x0 := Linux_Unlink(a0)
 		return x0
 	}
-	x0 := Freebsd_Unlink(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Unlink(a0)
+		return x0
+	}
+	x0 := Windows_Unlink(a0)
 	return x0
 }
 
-func Unmount(a0 string, a1 int) error {
+func Unsetenv(a0 string) error {
 	if apehost == apeLinux {
-		x0 := Linux_Unmount(a0, a1)
+		x0 := Linux_Unsetenv(a0)
 		return x0
 	}
-	x0 := Freebsd_Unmount(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Unsetenv(a0)
+		return x0
+	}
+	x0 := Windows_Unsetenv(a0)
 	return x0
 }
 
 func Utimes(a0 string, a1 []Timeval) error {
 	if apehost == apeLinux {
-		x0 := Linux_Utimes(a0, a1)
+		x0 := Linux_Utimes(a0, *(*[]Linux_Timeval)(unsafe.Pointer(&a1)))
 		return x0
 	}
-	x0 := Freebsd_Utimes(a0, a1)
+	if apehost == apeFreebsd {
+		t1 := make([]Freebsd_Timeval, len(a1))
+		for i := range a1 {
+			t1[i].Sec = a1[i].Sec
+			t1[i].Usec = a1[i].Usec
+		}
+		x0 := Freebsd_Utimes(a0, t1)
+		for i := range a1 {
+			a1[i].Sec = t1[i].Sec
+			a1[i].Usec = t1[i].Usec
+		}
+		return x0
+	}
+	t1 := make([]Windows_Timeval, len(a1))
+	for i := range a1 {
+		t1[i].Sec = int32(a1[i].Sec)
+		t1[i].Usec = int32(a1[i].Usec)
+	}
+	x0 := Windows_Utimes(a0, t1)
+	for i := range a1 {
+		a1[i].Sec = int64(t1[i].Sec)
+		a1[i].Usec = int64(t1[i].Usec)
+	}
 	return x0
 }
 
@@ -5747,86 +2022,11 @@ func UtimesNano(a0 string, a1 []Timespec) error {
 		x0 := Linux_UtimesNano(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_UtimesNano(a0, a1)
-	return x0
-}
-
-func Wait4(a0 int, a1 *WaitStatus, a2 int, a3 *Rusage) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Wait4(a0, a1, a2, a3)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Wait4(a0, a1, a2, a3)
-	return x0, x1
-}
-
-func Write(a0 int, a1 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Write(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Write(a0, a1)
-	return x0, x1
-}
-
-func setTimespec(a0 int64, a1 int64) Timespec {
-	if apehost == apeLinux {
-		x0 := linux_setTimespec(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_UtimesNano(a0, a1)
 		return x0
 	}
-	x0 := freebsd_setTimespec(a0, a1)
-	return x0
-}
-
-func setTimeval(a0 int64, a1 int64) Timeval {
-	if apehost == apeLinux {
-		x0 := linux_setTimeval(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setTimeval(a0, a1)
-	return x0
-}
-
-func (r *Cmsghdr) SetLen(a0 int) {
-	if apehost == apeLinux {
-		((*Linux_Cmsghdr)(unsafe.Pointer(r))).SetLen(a0)
-		return
-	}
-	var tr Freebsd_Cmsghdr
-	var pr *Freebsd_Cmsghdr
-	if r != nil {
-		tr.Len = uint32((*r).Len)
-		tr.Level = (*r).Level
-		tr.Type = (*r).Type
-		pr = &tr
-	}
-	(pr).SetLen(a0)
-	if r != nil {
-		(*r).Len = uint64(tr.Len)
-		(*r).Level = tr.Level
-		(*r).Type = tr.Type
-	}
-}
-
-func (r *Cmsghdr) data(a0 uintptr) unsafe.Pointer {
-	if apehost == apeLinux {
-		x0 := ((*Linux_Cmsghdr)(unsafe.Pointer(r))).data(a0)
-		return x0
-	}
-	var tr Freebsd_Cmsghdr
-	var pr *Freebsd_Cmsghdr
-	if r != nil {
-		tr.Len = uint32((*r).Len)
-		tr.Level = (*r).Level
-		tr.Type = (*r).Type
-		pr = &tr
-	}
-	x0 := (pr).data(a0)
-	if r != nil {
-		(*r).Len = uint64(tr.Len)
-		(*r).Level = tr.Level
-		(*r).Type = tr.Type
-	}
+	x0 := Windows_UtimesNano(a0, a1)
 	return x0
 }
 
@@ -5835,7 +2035,11 @@ func (r Errno) Error() string {
 		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.Freebsd_Error()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -5844,7 +2048,11 @@ func (r Errno) Is(a0 error) bool {
 		x0 := r.Linux_Is(a0)
 		return x0
 	}
-	x0 := r.Freebsd_Is(a0)
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Is(a0)
+		return x0
+	}
+	x0 := r.Windows_Is(a0)
 	return x0
 }
 
@@ -5853,7 +2061,11 @@ func (r Errno) Temporary() bool {
 		x0 := r.Linux_Temporary()
 		return x0
 	}
-	x0 := r.Freebsd_Temporary()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
 	return x0
 }
 
@@ -5862,45 +2074,12 @@ func (r Errno) Timeout() bool {
 		x0 := r.Linux_Timeout()
 		return x0
 	}
-	x0 := r.Freebsd_Timeout()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
 	return x0
-}
-
-func (r *Iovec) SetLen(a0 int) {
-	if apehost == apeLinux {
-		r.Linux_SetLen(a0)
-		return
-	}
-	r.Freebsd_SetLen(a0)
-}
-
-func (r *Msghdr) SetControllen(a0 int) {
-	if apehost == apeLinux {
-		((*Linux_Msghdr)(unsafe.Pointer(r))).SetControllen(a0)
-		return
-	}
-	var tr Freebsd_Msghdr
-	var pr *Freebsd_Msghdr
-	if r != nil {
-		*(*uintptr)(unsafe.Pointer(&tr.Name)) = uintptr(unsafe.Pointer((*r).Name))
-		tr.Namelen = (*r).Namelen
-		*(*uintptr)(unsafe.Pointer(&tr.Iov)) = uintptr(unsafe.Pointer((*r).Iov))
-		tr.Iovlen = int32((*r).Iovlen)
-		*(*uintptr)(unsafe.Pointer(&tr.Control)) = uintptr(unsafe.Pointer((*r).Control))
-		tr.Controllen = uint32((*r).Controllen)
-		tr.Flags = (*r).Flags
-		pr = &tr
-	}
-	(pr).SetControllen(a0)
-	if r != nil {
-		*(*uintptr)(unsafe.Pointer(&(*r).Name)) = uintptr(unsafe.Pointer(tr.Name))
-		(*r).Namelen = tr.Namelen
-		*(*uintptr)(unsafe.Pointer(&(*r).Iov)) = uintptr(unsafe.Pointer(tr.Iov))
-		(*r).Iovlen = uint64(tr.Iovlen)
-		*(*uintptr)(unsafe.Pointer(&(*r).Control)) = uintptr(unsafe.Pointer(tr.Control))
-		(*r).Controllen = uint64(tr.Controllen)
-		(*r).Flags = tr.Flags
-	}
 }
 
 func (r Signal) Signal() {
@@ -5908,7 +2087,11 @@ func (r Signal) Signal() {
 		r.Linux_Signal()
 		return
 	}
-	r.Freebsd_Signal()
+	if apehost == apeFreebsd {
+		r.Freebsd_Signal()
+		return
+	}
+	r.Windows_Signal()
 }
 
 func (r Signal) String() string {
@@ -5916,223 +2099,126 @@ func (r Signal) String() string {
 		x0 := r.Linux_String()
 		return x0
 	}
-	x0 := r.Freebsd_String()
-	return x0
-}
-
-func (r *SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := ((*Linux_SockaddrInet4)(unsafe.Pointer(r))).sockaddr()
-		return x0, x1, x2
-	}
-	var tr Freebsd_SockaddrInet4
-	var pr *Freebsd_SockaddrInet4
-	if r != nil {
-		tr.Port = (*r).Port
-		tr.Addr = (*r).Addr
-		tr.raw.Family = uint8((*r).raw.Family)
-		tr.raw.Port = (*r).raw.Port
-		tr.raw.Addr = (*r).raw.Addr
-		for i2 := 0; i2 < 8; i2++ {
-			tr.raw.Zero[i2] = int8((*r).raw.Zero[i2])
-		}
-		pr = &tr
-	}
-	x0, x1, x2 := (pr).sockaddr()
-	if r != nil {
-		(*r).Port = tr.Port
-		(*r).Addr = tr.Addr
-		(*r).raw.Family = uint16(tr.raw.Family)
-		(*r).raw.Port = tr.raw.Port
-		(*r).raw.Addr = tr.raw.Addr
-		for i2 := 0; i2 < 8; i2++ {
-			(*r).raw.Zero[i2] = uint8(tr.raw.Zero[i2])
-		}
-	}
-	return x0, x1, x2
-}
-
-func (r *SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := ((*Linux_SockaddrInet6)(unsafe.Pointer(r))).sockaddr()
-		return x0, x1, x2
-	}
-	var tr Freebsd_SockaddrInet6
-	var pr *Freebsd_SockaddrInet6
-	if r != nil {
-		tr.Port = (*r).Port
-		tr.ZoneId = (*r).ZoneId
-		tr.Addr = (*r).Addr
-		tr.raw.Family = uint8((*r).raw.Family)
-		tr.raw.Port = (*r).raw.Port
-		tr.raw.Flowinfo = (*r).raw.Flowinfo
-		tr.raw.Addr = (*r).raw.Addr
-		tr.raw.Scope_id = (*r).raw.Scope_id
-		pr = &tr
-	}
-	x0, x1, x2 := (pr).sockaddr()
-	if r != nil {
-		(*r).Port = tr.Port
-		(*r).ZoneId = tr.ZoneId
-		(*r).Addr = tr.Addr
-		(*r).raw.Family = uint16(tr.raw.Family)
-		(*r).raw.Port = tr.raw.Port
-		(*r).raw.Flowinfo = tr.raw.Flowinfo
-		(*r).raw.Addr = tr.raw.Addr
-		(*r).raw.Scope_id = tr.raw.Scope_id
-	}
-	return x0, x1, x2
-}
-
-func (r *SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := ((*Linux_SockaddrUnix)(unsafe.Pointer(r))).sockaddr()
-		return x0, x1, x2
-	}
-	var tr Freebsd_SockaddrUnix
-	var pr *Freebsd_SockaddrUnix
-	if r != nil {
-		tr.Name = (*r).Name
-		tr.raw.Family = uint8((*r).raw.Family)
-		copy(tr.raw.Path[:], (*r).raw.Path[:])
-		pr = &tr
-	}
-	x0, x1, x2 := (pr).sockaddr()
-	if r != nil {
-		(*r).Name = tr.Name
-		(*r).raw.Family = uint16(tr.raw.Family)
-		copy((*r).raw.Path[:], tr.raw.Path[:])
-	}
-	return x0, x1, x2
-}
-
-func (r WaitStatus) Continued() bool {
-	if apehost == apeLinux {
-		x0 := r.Linux_Continued()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
 		return x0
 	}
-	x0 := r.Freebsd_Continued()
+	x0 := r.Windows_String()
 	return x0
 }
 
-func (r WaitStatus) CoreDump() bool {
+func (r *Timespec) Nano() int64 {
 	if apehost == apeLinux {
-		x0 := r.Linux_CoreDump()
+		x0 := r.Linux_Nano()
 		return x0
 	}
-	x0 := r.Freebsd_CoreDump()
-	return x0
-}
-
-func (r WaitStatus) ExitStatus() int {
-	if apehost == apeLinux {
-		x0 := r.Linux_ExitStatus()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Nano()
 		return x0
 	}
-	x0 := r.Freebsd_ExitStatus()
+	x0 := r.Windows_Nano()
 	return x0
 }
 
-func (r WaitStatus) Exited() bool {
+func (r *Timespec) Unix() (int64, int64) {
 	if apehost == apeLinux {
-		x0 := r.Linux_Exited()
-		return x0
-	}
-	x0 := r.Freebsd_Exited()
-	return x0
-}
-
-func (r WaitStatus) Signal() Signal {
-	if apehost == apeLinux {
-		x0 := r.Linux_Signal()
-		return x0
-	}
-	x0 := r.Freebsd_Signal()
-	return x0
-}
-
-func (r WaitStatus) Signaled() bool {
-	if apehost == apeLinux {
-		x0 := r.Linux_Signaled()
-		return x0
-	}
-	x0 := r.Freebsd_Signaled()
-	return x0
-}
-
-func (r WaitStatus) StopSignal() Signal {
-	if apehost == apeLinux {
-		x0 := r.Linux_StopSignal()
-		return x0
-	}
-	x0 := r.Freebsd_StopSignal()
-	return x0
-}
-
-func (r WaitStatus) Stopped() bool {
-	if apehost == apeLinux {
-		x0 := r.Linux_Stopped()
-		return x0
-	}
-	x0 := r.Freebsd_Stopped()
-	return x0
-}
-
-func (r WaitStatus) TrapCause() int {
-	if apehost == apeLinux {
-		x0 := r.Linux_TrapCause()
-		return x0
-	}
-	x0 := r.Freebsd_TrapCause()
-	return x0
-}
-
-func (r *mmapper) Mmap(a0 int, a1 int64, a2 int, a3 int, a4 int) ([]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Mmap(a0, a1, a2, a3, a4)
+		x0, x1 := r.Linux_Unix()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Mmap(a0, a1, a2, a3, a4)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Unix()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Unix()
 	return x0, x1
 }
 
-func (r *mmapper) Munmap(a0 []byte) error {
+func (r *Timeval) Nano() int64 {
 	if apehost == apeLinux {
-		x0 := r.Linux_Munmap(a0)
+		x0 := ((*Linux_Timeval)(unsafe.Pointer(r))).Nano()
 		return x0
 	}
-	x0 := r.Freebsd_Munmap(a0)
+	if apehost == apeFreebsd {
+		var tr Freebsd_Timeval
+		var pr *Freebsd_Timeval
+		if r != nil {
+			tr.Sec = (*r).Sec
+			tr.Usec = (*r).Usec
+			pr = &tr
+		}
+		x0 := (pr).Nano()
+		if r != nil {
+			(*r).Sec = tr.Sec
+			(*r).Usec = tr.Usec
+		}
+		return x0
+	}
+	var tr Windows_Timeval
+	var pr *Windows_Timeval
+	if r != nil {
+		tr.Sec = int32((*r).Sec)
+		tr.Usec = int32((*r).Usec)
+		pr = &tr
+	}
+	x0 := (pr).Nano()
+	if r != nil {
+		(*r).Sec = int64(tr.Sec)
+		(*r).Usec = int64(tr.Usec)
+	}
 	return x0
 }
 
-// Cmsghdr is linux's. Functions convert other hosts' field by field.
+func (r *Timeval) Unix() (int64, int64) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Timeval)(unsafe.Pointer(r))).Unix()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		var tr Freebsd_Timeval
+		var pr *Freebsd_Timeval
+		if r != nil {
+			tr.Sec = (*r).Sec
+			tr.Usec = (*r).Usec
+			pr = &tr
+		}
+		x0, x1 := (pr).Unix()
+		if r != nil {
+			(*r).Sec = tr.Sec
+			(*r).Usec = tr.Usec
+		}
+		return x0, x1
+	}
+	var tr Windows_Timeval
+	var pr *Windows_Timeval
+	if r != nil {
+		tr.Sec = int32((*r).Sec)
+		tr.Usec = int32((*r).Usec)
+		pr = &tr
+	}
+	x0, x1 := (pr).Unix()
+	if r != nil {
+		(*r).Sec = int64(tr.Sec)
+		(*r).Usec = int64(tr.Usec)
+	}
+	return x0, x1
+}
+
+// Cmsghdr is linux's.
 type Cmsghdr struct {
 	Len   uint64
 	Level int32
 	Type  int32
 }
 
-// Linux_FromAPE_Cmsghdr returns the host's copy of p.
-func Linux_FromAPE_Cmsghdr(p *Cmsghdr) *Linux_Cmsghdr {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Cmsghdr)(unsafe.Pointer(p))
+// Credential is linux's.
+type Credential struct {
+	Uid         uint32
+	Gid         uint32
+	Groups      []uint32
+	NoSetGroups bool
 }
 
-// Freebsd_FromAPE_Cmsghdr returns the host's copy of p.
-func Freebsd_FromAPE_Cmsghdr(p *Cmsghdr) *Freebsd_Cmsghdr {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Cmsghdr
-	t.Len = uint32((*p).Len)
-	t.Level = (*p).Level
-	t.Type = (*p).Type
-	return &t
-}
-
-// Dirent is linux's. Functions convert other hosts' field by field.
+// Dirent is linux's.
 type Dirent struct {
 	Ino       uint64
 	Off       int64
@@ -6142,27 +2228,6 @@ type Dirent struct {
 	Pad_cgo_0 [5]byte
 }
 
-// Linux_FromAPE_Dirent returns the host's copy of p.
-func Linux_FromAPE_Dirent(p *Dirent) *Linux_Dirent {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Dirent)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Dirent returns the host's copy of p.
-func Freebsd_FromAPE_Dirent(p *Dirent) *Freebsd_Dirent {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Dirent
-	t.Off = (*p).Off
-	t.Reclen = (*p).Reclen
-	t.Type = (*p).Type
-	t.Name = (*p).Name
-	return &t
-}
-
 // EpollEvent is linux's.
 type EpollEvent struct {
 	Events uint32
@@ -6170,28 +2235,10 @@ type EpollEvent struct {
 	Pad    int32
 }
 
-// FdSet is linux's. Functions convert other hosts' field by field.
+// FdSet is linux's.
 type FdSet struct{ Bits [16]int64 }
 
-// Linux_FromAPE_FdSet returns the host's copy of p.
-func Linux_FromAPE_FdSet(p *FdSet) *Linux_FdSet {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_FdSet)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_FdSet returns the host's copy of p.
-func Freebsd_FromAPE_FdSet(p *FdSet) *Freebsd_FdSet {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_FdSet
-
-	return &t
-}
-
-// Flock_t is linux's. Functions convert other hosts' field by field.
+// Flock_t is linux's.
 type Flock_t struct {
 	Type      int16
 	Whence    int16
@@ -6202,97 +2249,23 @@ type Flock_t struct {
 	Pad_cgo_1 [4]byte
 }
 
-// Linux_FromAPE_Flock_t returns the host's copy of p.
-func Linux_FromAPE_Flock_t(p *Flock_t) *Linux_Flock_t {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Flock_t)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Flock_t returns the host's copy of p.
-func Freebsd_FromAPE_Flock_t(p *Flock_t) *Freebsd_Flock_t {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Flock_t
-	t.Start = (*p).Start
-	t.Len = (*p).Len
-	t.Pid = (*p).Pid
-	t.Type = (*p).Type
-	t.Whence = (*p).Whence
-	return &t
-}
-
-// Fsid is linux's. Functions convert other hosts' field by field.
+// Fsid is linux's.
 type Fsid struct{ X__val [2]int32 }
 
-// Linux_FromAPE_Fsid returns the host's copy of p.
-func Linux_FromAPE_Fsid(p *Fsid) *Linux_Fsid {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Fsid)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Fsid returns the host's copy of p.
-func Freebsd_FromAPE_Fsid(p *Fsid) *Freebsd_Fsid {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Fsid
-
-	return &t
-}
-
-// ICMPv6Filter is linux's. Functions convert other hosts' field by field.
+// ICMPv6Filter is linux's.
 type ICMPv6Filter struct{ Data [8]uint32 }
 
-// Linux_FromAPE_ICMPv6Filter returns the host's copy of p.
-func Linux_FromAPE_ICMPv6Filter(p *ICMPv6Filter) *Linux_ICMPv6Filter {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_ICMPv6Filter)(unsafe.Pointer(p))
+// IPMreqn is linux's.
+type IPMreqn struct {
+	Multiaddr [4]byte
+	Address   [4]byte
+	Ifindex   int32
 }
 
-// Freebsd_FromAPE_ICMPv6Filter returns the host's copy of p.
-func Freebsd_FromAPE_ICMPv6Filter(p *ICMPv6Filter) *Freebsd_ICMPv6Filter {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_ICMPv6Filter
-
-	return &t
-}
-
-// IPv6MTUInfo is linux's. Functions convert other hosts' field by field.
+// IPv6MTUInfo is linux's.
 type IPv6MTUInfo struct {
 	Addr RawSockaddrInet6
 	Mtu  uint32
-}
-
-// Linux_FromAPE_IPv6MTUInfo returns the host's copy of p.
-func Linux_FromAPE_IPv6MTUInfo(p *IPv6MTUInfo) *Linux_IPv6MTUInfo {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_IPv6MTUInfo)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_IPv6MTUInfo returns the host's copy of p.
-func Freebsd_FromAPE_IPv6MTUInfo(p *IPv6MTUInfo) *Freebsd_IPv6MTUInfo {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_IPv6MTUInfo
-	t.Addr.Family = uint8((*p).Addr.Family)
-	t.Addr.Port = (*p).Addr.Port
-	t.Addr.Flowinfo = (*p).Addr.Flowinfo
-	t.Addr.Addr = (*p).Addr.Addr
-	t.Addr.Scope_id = (*p).Addr.Scope_id
-	t.Mtu = (*p).Mtu
-	return &t
 }
 
 // IfAddrmsg is linux's.
@@ -6321,6 +2294,12 @@ type Inet4Pktinfo struct {
 	Addr     [4]byte
 }
 
+// Inet6Pktinfo is linux's.
+type Inet6Pktinfo struct {
+	Addr    [16]byte
+	Ifindex uint32
+}
+
 // InotifyEvent is linux's.
 type InotifyEvent struct {
 	Wd     int32
@@ -6330,7 +2309,13 @@ type InotifyEvent struct {
 	Name   [0]uint8
 }
 
-// Msghdr is linux's. Functions convert other hosts' field by field.
+// Iovec is linux's.
+type Iovec struct {
+	Base *byte
+	Len  uint64
+}
+
+// Msghdr is linux's.
 type Msghdr struct {
 	Name       *byte
 	Namelen    uint32
@@ -6341,30 +2326,6 @@ type Msghdr struct {
 	Controllen uint64
 	Flags      int32
 	Pad_cgo_1  [4]byte
-}
-
-// Linux_FromAPE_Msghdr returns the host's copy of p.
-func Linux_FromAPE_Msghdr(p *Msghdr) *Linux_Msghdr {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Msghdr)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Msghdr returns the host's copy of p.
-func Freebsd_FromAPE_Msghdr(p *Msghdr) *Freebsd_Msghdr {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Msghdr
-	*(*uintptr)(unsafe.Pointer(&t.Name)) = uintptr(unsafe.Pointer((*p).Name))
-	t.Namelen = (*p).Namelen
-	*(*uintptr)(unsafe.Pointer(&t.Iov)) = uintptr(unsafe.Pointer((*p).Iov))
-	t.Iovlen = int32((*p).Iovlen)
-	*(*uintptr)(unsafe.Pointer(&t.Control)) = uintptr(unsafe.Pointer((*p).Control))
-	t.Controllen = uint32((*p).Controllen)
-	t.Flags = (*p).Flags
-	return &t
 }
 
 // NetlinkMessage is linux's.
@@ -6431,7 +2392,20 @@ func Freebsd_FromAPE_ProcAttr(p *ProcAttr) *Freebsd_ProcAttr {
 	t.Dir = (*p).Dir
 	t.Env = (*p).Env
 	t.Files = (*p).Files
-	*(*uintptr)(unsafe.Pointer(&t.Sys)) = uintptr(unsafe.Pointer((*p).Sys))
+	t.Sys = (*Freebsd_SysProcAttr)(unsafe.Pointer((*p).Sys))
+	return &t
+}
+
+// Windows_FromAPE_ProcAttr returns the host's copy of p.
+func Windows_FromAPE_ProcAttr(p *ProcAttr) *Windows_ProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t Windows_ProcAttr
+	t.Dir = (*p).Dir
+	t.Env = (*p).Env
+	t.Files = (*p).Files
+	t.Sys = (*Windows_SysProcAttr)(unsafe.Pointer((*p).Sys))
 	return &t
 }
 
@@ -6491,6 +2465,17 @@ func Freebsd_FromAPE_RawSockaddr(p *RawSockaddr) *Freebsd_RawSockaddr {
 	return &t
 }
 
+// Windows_FromAPE_RawSockaddr returns the host's copy of p.
+func Windows_FromAPE_RawSockaddr(p *RawSockaddr) *Windows_RawSockaddr {
+	if p == nil {
+		return nil
+	}
+	var t Windows_RawSockaddr
+	t.Family = (*p).Family
+	t.Data = (*p).Data
+	return &t
+}
+
 // RawSockaddrAny is linux's. Functions convert other hosts' field by field.
 type RawSockaddrAny struct {
 	Addr RawSockaddr
@@ -6512,6 +2497,18 @@ func Freebsd_FromAPE_RawSockaddrAny(p *RawSockaddrAny) *Freebsd_RawSockaddrAny {
 	}
 	var t Freebsd_RawSockaddrAny
 	t.Addr.Family = uint8((*p).Addr.Family)
+	t.Addr.Data = (*p).Addr.Data
+	copy(t.Pad[:], (*p).Pad[:])
+	return &t
+}
+
+// Windows_FromAPE_RawSockaddrAny returns the host's copy of p.
+func Windows_FromAPE_RawSockaddrAny(p *RawSockaddrAny) *Windows_RawSockaddrAny {
+	if p == nil {
+		return nil
+	}
+	var t Windows_RawSockaddrAny
+	t.Addr.Family = (*p).Addr.Family
 	t.Addr.Data = (*p).Addr.Data
 	copy(t.Pad[:], (*p).Pad[:])
 	return &t
@@ -6548,6 +2545,19 @@ func Freebsd_FromAPE_RawSockaddrInet4(p *RawSockaddrInet4) *Freebsd_RawSockaddrI
 	return &t
 }
 
+// Windows_FromAPE_RawSockaddrInet4 returns the host's copy of p.
+func Windows_FromAPE_RawSockaddrInet4(p *RawSockaddrInet4) *Windows_RawSockaddrInet4 {
+	if p == nil {
+		return nil
+	}
+	var t Windows_RawSockaddrInet4
+	t.Family = (*p).Family
+	t.Port = (*p).Port
+	t.Addr = (*p).Addr
+	t.Zero = (*p).Zero
+	return &t
+}
+
 // RawSockaddrInet6 is linux's. Functions convert other hosts' field by field.
 type RawSockaddrInet6 struct {
 	Family   uint16
@@ -6572,6 +2582,20 @@ func Freebsd_FromAPE_RawSockaddrInet6(p *RawSockaddrInet6) *Freebsd_RawSockaddrI
 	}
 	var t Freebsd_RawSockaddrInet6
 	t.Family = uint8((*p).Family)
+	t.Port = (*p).Port
+	t.Flowinfo = (*p).Flowinfo
+	t.Addr = (*p).Addr
+	t.Scope_id = (*p).Scope_id
+	return &t
+}
+
+// Windows_FromAPE_RawSockaddrInet6 returns the host's copy of p.
+func Windows_FromAPE_RawSockaddrInet6(p *RawSockaddrInet6) *Windows_RawSockaddrInet6 {
+	if p == nil {
+		return nil
+	}
+	var t Windows_RawSockaddrInet6
+	t.Family = (*p).Family
 	t.Port = (*p).Port
 	t.Flowinfo = (*p).Flowinfo
 	t.Addr = (*p).Addr
@@ -6623,29 +2647,21 @@ func Freebsd_FromAPE_RawSockaddrUnix(p *RawSockaddrUnix) *Freebsd_RawSockaddrUni
 	return &t
 }
 
-// Rlimit is linux's. Functions convert other hosts' field by field.
+// Windows_FromAPE_RawSockaddrUnix returns the host's copy of p.
+func Windows_FromAPE_RawSockaddrUnix(p *RawSockaddrUnix) *Windows_RawSockaddrUnix {
+	if p == nil {
+		return nil
+	}
+	var t Windows_RawSockaddrUnix
+	t.Family = (*p).Family
+	t.Path = (*p).Path
+	return &t
+}
+
+// Rlimit is linux's.
 type Rlimit struct {
 	Cur uint64
 	Max uint64
-}
-
-// Linux_FromAPE_Rlimit returns the host's copy of p.
-func Linux_FromAPE_Rlimit(p *Rlimit) *Linux_Rlimit {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Rlimit)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Rlimit returns the host's copy of p.
-func Freebsd_FromAPE_Rlimit(p *Rlimit) *Freebsd_Rlimit {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Rlimit
-	t.Cur = int64((*p).Cur)
-	t.Max = int64((*p).Max)
-	return &t
 }
 
 // RtAttr is linux's.
@@ -6678,6 +2694,71 @@ type RtNexthop struct {
 	Ifindex int32
 }
 
+// Rusage is linux's. Functions convert other hosts' field by field.
+type Rusage struct {
+	Utime    Timeval
+	Stime    Timeval
+	Maxrss   int64
+	Ixrss    int64
+	Idrss    int64
+	Isrss    int64
+	Minflt   int64
+	Majflt   int64
+	Nswap    int64
+	Inblock  int64
+	Oublock  int64
+	Msgsnd   int64
+	Msgrcv   int64
+	Nsignals int64
+	Nvcsw    int64
+	Nivcsw   int64
+}
+
+// Linux_FromAPE_Rusage returns the host's copy of p.
+func Linux_FromAPE_Rusage(p *Rusage) *Linux_Rusage {
+	if p == nil {
+		return nil
+	}
+	return (*Linux_Rusage)(unsafe.Pointer(p))
+}
+
+// Freebsd_FromAPE_Rusage returns the host's copy of p.
+func Freebsd_FromAPE_Rusage(p *Rusage) *Freebsd_Rusage {
+	if p == nil {
+		return nil
+	}
+	var t Freebsd_Rusage
+	t.Utime.Sec = (*p).Utime.Sec
+	t.Utime.Usec = (*p).Utime.Usec
+	t.Stime.Sec = (*p).Stime.Sec
+	t.Stime.Usec = (*p).Stime.Usec
+	t.Maxrss = (*p).Maxrss
+	t.Ixrss = (*p).Ixrss
+	t.Idrss = (*p).Idrss
+	t.Isrss = (*p).Isrss
+	t.Minflt = (*p).Minflt
+	t.Majflt = (*p).Majflt
+	t.Nswap = (*p).Nswap
+	t.Inblock = (*p).Inblock
+	t.Oublock = (*p).Oublock
+	t.Msgsnd = (*p).Msgsnd
+	t.Msgrcv = (*p).Msgrcv
+	t.Nsignals = (*p).Nsignals
+	t.Nvcsw = (*p).Nvcsw
+	t.Nivcsw = (*p).Nivcsw
+	return &t
+}
+
+// Windows_FromAPE_Rusage returns the host's copy of p.
+func Windows_FromAPE_Rusage(p *Rusage) *Windows_Rusage {
+	if p == nil {
+		return nil
+	}
+	var t Windows_Rusage
+
+	return &t
+}
+
 // SockFilter is linux's.
 type SockFilter struct {
 	Code uint16
@@ -6693,145 +2774,29 @@ type SockFprog struct {
 	Filter    *SockFilter
 }
 
-// SockaddrInet4 is linux's. Functions convert other hosts' field by field.
-type SockaddrInet4 struct {
-	Port int
-	Addr [4]byte
-	raw  RawSockaddrInet4
+// Sockaddr differs between hosts and holds pointers: it holds each host's.
+type Sockaddr struct {
+	linux   Linux_Sockaddr
+	freebsd Freebsd_Sockaddr
+	windows Windows_Sockaddr
 }
 
-// Linux_FromAPE_SockaddrInet4 returns the host's copy of p.
-func Linux_FromAPE_SockaddrInet4(p *SockaddrInet4) *Linux_SockaddrInet4 {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_SockaddrInet4)(unsafe.Pointer(p))
-}
+// SockaddrInet4 differs between hosts: functions convert it by pointer.
+type SockaddrInet4 struct{ _ [4]uint64 }
 
-// Freebsd_FromAPE_SockaddrInet4 returns the host's copy of p.
-func Freebsd_FromAPE_SockaddrInet4(p *SockaddrInet4) *Freebsd_SockaddrInet4 {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_SockaddrInet4
-	t.Port = (*p).Port
-	t.Addr = (*p).Addr
-	t.raw.Family = uint8((*p).raw.Family)
-	t.raw.Port = (*p).raw.Port
-	t.raw.Addr = (*p).raw.Addr
-	for i2 := 0; i2 < 8; i2++ {
-		t.raw.Zero[i2] = int8((*p).raw.Zero[i2])
-	}
-	return &t
-}
+// SockaddrInet6 differs between hosts: functions convert it by pointer.
+type SockaddrInet6 struct{ _ [7]uint64 }
 
-// SockaddrInet6 is linux's. Functions convert other hosts' field by field.
-type SockaddrInet6 struct {
-	Port   int
-	ZoneId uint32
-	Addr   [16]byte
-	raw    RawSockaddrInet6
-}
+// SockaddrUnix differs between hosts: functions convert it by pointer.
+type SockaddrUnix struct{ _ [17]uint64 }
 
-// Linux_FromAPE_SockaddrInet6 returns the host's copy of p.
-func Linux_FromAPE_SockaddrInet6(p *SockaddrInet6) *Linux_SockaddrInet6 {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_SockaddrInet6)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_SockaddrInet6 returns the host's copy of p.
-func Freebsd_FromAPE_SockaddrInet6(p *SockaddrInet6) *Freebsd_SockaddrInet6 {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_SockaddrInet6
-	t.Port = (*p).Port
-	t.ZoneId = (*p).ZoneId
-	t.Addr = (*p).Addr
-	t.raw.Family = uint8((*p).raw.Family)
-	t.raw.Port = (*p).raw.Port
-	t.raw.Flowinfo = (*p).raw.Flowinfo
-	t.raw.Addr = (*p).raw.Addr
-	t.raw.Scope_id = (*p).raw.Scope_id
-	return &t
-}
-
-// SockaddrLinklayer is linux's.
-type SockaddrLinklayer struct {
-	Protocol uint16
-	Ifindex  int
-	Hatype   uint16
-	Pkttype  uint8
-	Halen    uint8
-	Addr     [8]byte
-	raw      RawSockaddrLinklayer
-}
-
-// SockaddrNetlink is linux's.
-type SockaddrNetlink struct {
-	Family uint16
-	Pad    uint16
-	Pid    uint32
-	Groups uint32
-	raw    RawSockaddrNetlink
-}
-
-// SockaddrUnix is linux's. Functions convert other hosts' field by field.
-type SockaddrUnix struct {
-	Name string
-	raw  RawSockaddrUnix
-}
-
-// Linux_FromAPE_SockaddrUnix returns the host's copy of p.
-func Linux_FromAPE_SockaddrUnix(p *SockaddrUnix) *Linux_SockaddrUnix {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_SockaddrUnix)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_SockaddrUnix returns the host's copy of p.
-func Freebsd_FromAPE_SockaddrUnix(p *SockaddrUnix) *Freebsd_SockaddrUnix {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_SockaddrUnix
-	t.Name = (*p).Name
-	t.raw.Family = uint8((*p).raw.Family)
-	copy(t.raw.Path[:], (*p).raw.Path[:])
-	return &t
-}
-
-// SocketControlMessage is linux's. Functions convert other hosts' field by field.
+// SocketControlMessage is linux's.
 type SocketControlMessage struct {
 	Header Cmsghdr
 	Data   []byte
 }
 
-// Linux_FromAPE_SocketControlMessage returns the host's copy of p.
-func Linux_FromAPE_SocketControlMessage(p *SocketControlMessage) *Linux_SocketControlMessage {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_SocketControlMessage)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_SocketControlMessage returns the host's copy of p.
-func Freebsd_FromAPE_SocketControlMessage(p *SocketControlMessage) *Freebsd_SocketControlMessage {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_SocketControlMessage
-	t.Header.Len = uint32((*p).Header.Len)
-	t.Header.Level = (*p).Header.Level
-	t.Header.Type = (*p).Header.Type
-	t.Data = (*p).Data
-	return &t
-}
-
-// Stat_t is linux's. Functions convert other hosts' field by field.
+// Stat_t is linux's.
 type Stat_t struct {
 	Dev       uint64
 	Ino       uint64
@@ -6850,34 +2815,7 @@ type Stat_t struct {
 	X__unused [3]int64
 }
 
-// Linux_FromAPE_Stat_t returns the host's copy of p.
-func Linux_FromAPE_Stat_t(p *Stat_t) *Linux_Stat_t {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Stat_t)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Stat_t returns the host's copy of p.
-func Freebsd_FromAPE_Stat_t(p *Stat_t) *Freebsd_Stat_t {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Stat_t
-	t.Dev = (*p).Dev
-	t.Ino = (*p).Ino
-	t.Nlink = (*p).Nlink
-	t.Mode = uint16((*p).Mode)
-	t.Uid = (*p).Uid
-	t.Gid = (*p).Gid
-	t.Rdev = (*p).Rdev
-	t.Size = (*p).Size
-	t.Blocks = (*p).Blocks
-	t.Blksize = int32((*p).Blksize)
-	return &t
-}
-
-// Statfs_t is linux's. Functions convert other hosts' field by field.
+// Statfs_t is linux's.
 type Statfs_t struct {
 	Type    int64
 	Bsize   int64
@@ -6891,34 +2829,6 @@ type Statfs_t struct {
 	Frsize  int64
 	Flags   int64
 	Spare   [4]int64
-}
-
-// Linux_FromAPE_Statfs_t returns the host's copy of p.
-func Linux_FromAPE_Statfs_t(p *Statfs_t) *Linux_Statfs_t {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Statfs_t)(unsafe.Pointer(p))
-}
-
-// Freebsd_FromAPE_Statfs_t returns the host's copy of p.
-func Freebsd_FromAPE_Statfs_t(p *Statfs_t) *Freebsd_Statfs_t {
-	if p == nil {
-		return nil
-	}
-	var t Freebsd_Statfs_t
-	t.Type = uint32((*p).Type)
-	t.Flags = uint64((*p).Flags)
-	t.Bsize = uint64((*p).Bsize)
-	t.Blocks = (*p).Blocks
-	t.Bfree = (*p).Bfree
-	t.Bavail = int64((*p).Bavail)
-	t.Files = (*p).Files
-	t.Ffree = int64((*p).Ffree)
-	for i1 := 0; i1 < 4; i1++ {
-		t.Spare[i1] = uint64((*p).Spare[i1])
-	}
-	return &t
 }
 
 // SysProcAttr is linux's. Functions convert other hosts' field by field.
@@ -6960,7 +2870,7 @@ func Freebsd_FromAPE_SysProcAttr(p *SysProcAttr) *Freebsd_SysProcAttr {
 	}
 	var t Freebsd_SysProcAttr
 	t.Chroot = (*p).Chroot
-	*(*uintptr)(unsafe.Pointer(&t.Credential)) = uintptr(unsafe.Pointer((*p).Credential))
+	t.Credential = (*Freebsd_Credential)(unsafe.Pointer((*p).Credential))
 	t.Ptrace = (*p).Ptrace
 	t.Setsid = (*p).Setsid
 	t.Setpgid = (*p).Setpgid
@@ -6970,6 +2880,16 @@ func Freebsd_FromAPE_SysProcAttr(p *SysProcAttr) *Freebsd_SysProcAttr {
 	t.Foreground = (*p).Foreground
 	t.Pgid = (*p).Pgid
 	t.Pdeathsig = Signal((*p).Pdeathsig)
+	return &t
+}
+
+// Windows_FromAPE_SysProcAttr returns the host's copy of p.
+func Windows_FromAPE_SysProcAttr(p *SysProcAttr) *Windows_SysProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t Windows_SysProcAttr
+
 	return &t
 }
 
@@ -7035,7 +2955,7 @@ type TCPInfo struct {
 	Total_retrans  uint32
 }
 
-// Termios is linux's. Functions convert other hosts' field by field.
+// Termios is linux's.
 type Termios struct {
 	Iflag     uint32
 	Oflag     uint32
@@ -7048,27 +2968,39 @@ type Termios struct {
 	Ospeed    uint32
 }
 
-// Linux_FromAPE_Termios returns the host's copy of p.
-func Linux_FromAPE_Termios(p *Termios) *Linux_Termios {
-	if p == nil {
-		return nil
-	}
-	return (*Linux_Termios)(unsafe.Pointer(p))
+// Timeval is linux's. Functions convert other hosts' field by field.
+type Timeval struct {
+	Sec  int64
+	Usec int64
 }
 
-// Freebsd_FromAPE_Termios returns the host's copy of p.
-func Freebsd_FromAPE_Termios(p *Termios) *Freebsd_Termios {
+// Linux_FromAPE_Timeval returns the host's copy of p.
+func Linux_FromAPE_Timeval(p *Timeval) *Linux_Timeval {
 	if p == nil {
 		return nil
 	}
-	var t Freebsd_Termios
-	t.Iflag = (*p).Iflag
-	t.Oflag = (*p).Oflag
-	t.Cflag = (*p).Cflag
-	t.Lflag = (*p).Lflag
-	copy(t.Cc[:], (*p).Cc[:])
-	t.Ispeed = (*p).Ispeed
-	t.Ospeed = (*p).Ospeed
+	return (*Linux_Timeval)(unsafe.Pointer(p))
+}
+
+// Freebsd_FromAPE_Timeval returns the host's copy of p.
+func Freebsd_FromAPE_Timeval(p *Timeval) *Freebsd_Timeval {
+	if p == nil {
+		return nil
+	}
+	var t Freebsd_Timeval
+	t.Sec = (*p).Sec
+	t.Usec = (*p).Usec
+	return &t
+}
+
+// Windows_FromAPE_Timeval returns the host's copy of p.
+func Windows_FromAPE_Timeval(p *Timeval) *Windows_Timeval {
+	if p == nil {
+		return nil
+	}
+	var t Windows_Timeval
+	t.Sec = int32((*p).Sec)
+	t.Usec = int32((*p).Usec)
 	return &t
 }
 
@@ -7139,4 +3071,17 @@ type Utsname struct {
 	Version    [65]int8
 	Machine    [65]int8
 	Domainname [65]int8
+}
+
+// WaitStatus is linux's. Functions convert other hosts' field by field.
+type WaitStatus uint32
+
+func init() {
+	if apehost == apeLinux {
+		linux_init0()
+	}
+	if apehost == apeFreebsd {
+		freebsd_init0()
+		freebsd_init1()
+	}
 }

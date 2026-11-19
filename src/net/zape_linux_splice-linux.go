@@ -20,7 +20,7 @@ var linux_pollSplice = poll.Linux_Splice
 // Currently, spliceFrom is only enabled if r is a TCP or a stream-oriented Unix connection.
 //
 // If spliceFrom returns handled == false, it has performed no work.
-func linux_spliceFrom(c *netFD, r io.Reader) (written int64, err error, handled bool) {
+func linux_spliceFrom(c *linux_netFD, r io.Reader) (written int64, err error, handled bool) {
 	var remain int64 = 1<<63 - 1 // by default, copy until EOF
 	lr, ok := r.(*io.LimitedReader)
 	if ok {
@@ -30,13 +30,13 @@ func linux_spliceFrom(c *netFD, r io.Reader) (written int64, err error, handled 
 		}
 	}
 
-	var s *netFD
+	var s *linux_netFD
 	switch v := r.(type) {
-	case *TCPConn:
+	case *Linux_TCPConn:
 		s = v.fd
-	case tcpConnWithoutWriteTo:
+	case linux_tcpConnWithoutWriteTo:
 		s = v.fd
-	case *UnixConn:
+	case *Linux_UnixConn:
 		if v.fd.net != "unix" {
 			return 0, nil, false
 		}
@@ -57,8 +57,8 @@ func linux_spliceFrom(c *netFD, r io.Reader) (written int64, err error, handled 
 // Currently, spliceTo is only enabled if w is a stream-oriented Unix connection.
 //
 // If spliceTo returns handled == false, it has performed no work.
-func linux_spliceTo(w io.Writer, c *netFD) (written int64, err error, handled bool) {
-	uc, ok := w.(*UnixConn)
+func linux_spliceTo(w io.Writer, c *linux_netFD) (written int64, err error, handled bool) {
+	uc, ok := w.(*Linux_UnixConn)
 	if !ok || uc.fd.net != "unix" {
 		return
 	}

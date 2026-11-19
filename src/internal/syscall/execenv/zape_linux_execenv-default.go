@@ -17,5 +17,5 @@ import "syscall"
 // Defaults to syscall.Environ() on all platforms
 // other than Windows.
 func Linux_Default(sys *syscall.Linux_SysProcAttr) ([]string, error) {
-	return syscall.Environ(), nil
+	return syscall.Linux_Environ(), nil
 }

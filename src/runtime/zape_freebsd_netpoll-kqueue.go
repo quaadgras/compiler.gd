@@ -26,7 +26,7 @@ func freebsd_netpollinit() {
 		println("runtime: kqueue failed with", -freebsd_kq)
 		throw("runtime: netpollinit failed")
 	}
-	closeonexec(freebsd_kq)
+	freebsd_closeonexec(freebsd_kq)
 	freebsd_addWakeupEvent(freebsd_kq)
 }
 
@@ -92,14 +92,14 @@ func freebsd_netpoll(delay int64) (gList, int32) {
 	if freebsd_kq == -1 {
 		return gList{}, 0
 	}
-	var tp *timespec
-	var ts timespec
+	var tp *freebsd_timespec
+	var ts freebsd_timespec
 	if delay < 0 {
 		tp = nil
 	} else if delay == 0 {
 		tp = &ts
 	} else {
-		ts.freebsd_setNsec(delay)
+		ts.setNsec(delay)
 		if ts.tv_sec > 1e6 {
 			// Darwin returns EINVAL if the sleep time is too long.
 			ts.tv_sec = 1e6

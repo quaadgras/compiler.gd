@@ -24,7 +24,7 @@ var _ = runtime.GOARCH
 // It does not actually call p.Wait.
 func (p *Process) linux_blockUntilWaitable() (bool, error) {
 	var info unix.Linux_SiginfoChild
-	err := ignoringEINTR(func() error {
+	err := linux_ignoringEINTR(func() error {
 		return unix.Linux_Waitid(unix.Linux_P_PID, p.Pid, &info, syscall.Linux_WEXITED|syscall.Linux_WNOWAIT, nil)
 	})
 	runtime.KeepAlive(p)

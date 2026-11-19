@@ -20,13 +20,13 @@ import (
 // Network interface for platforms using sendmsg/recvmsg with cmsgs.
 
 type linux_netUDPConn struct {
-	c         *net.UDPConn
+	c         *net.Linux_UDPConn
 	localAddr netip.AddrPort
 }
 
-func linux_newNetUDPConn(uc *net.UDPConn) (*linux_netUDPConn, error) {
+func linux_newNetUDPConn(uc *net.Linux_UDPConn) (*linux_netUDPConn, error) {
 	a, _ := uc.LocalAddr().(*net.UDPAddr)
-	localAddr := a.AddrPort()
+	localAddr := a.Linux_AddrPort()
 	if localAddr.Addr().IsUnspecified() {
 		// If the conn is not bound to a specified (non-wildcard) address,
 		// then set localAddr.Addr to an invalid netip.Addr.
@@ -63,7 +63,7 @@ func (c *linux_netUDPConn) Close() error { return c.c.Close() }
 
 func (c *linux_netUDPConn) LocalAddr() netip.AddrPort {
 	a, _ := c.c.LocalAddr().(*net.UDPAddr)
-	return a.AddrPort()
+	return a.Linux_AddrPort()
 }
 
 func (c *linux_netUDPConn) Read(f func(*datagram)) {

@@ -10,10 +10,10 @@ package net
 
 import "io"
 
-func freebsd_spliceFrom(_ *netFD, _ io.Reader) (int64, error, bool) {
+func freebsd_spliceFrom(_ *freebsd_netFD, _ io.Reader) (int64, error, bool) {
 	return 0, nil, false
 }
 
-func freebsd_spliceTo(_ io.Writer, _ *netFD) (int64, error, bool) {
+func freebsd_spliceTo(_ io.Writer, _ *freebsd_netFD) (int64, error, bool) {
 	return 0, nil, false
 }

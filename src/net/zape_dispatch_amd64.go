@@ -6,10 +6,15 @@ package net
 
 import (
 	"context"
+	"errors"
+	"golang.org/x/net/dns/dnsmessage"
+	"internal/godebug"
 	"internal/poll"
 	"io"
 	"net/netip"
 	"os"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -23,7 +28,3769 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
+
+type Addr interface {
+	Network() string
+	String() string
+}
+
+type AddrError struct {
+	Err  string
+	Addr string
+}
+
+type Buffers [][]byte
+
+type Conn interface {
+	Close() error
+	LocalAddr() Addr
+	Read(b []byte) (n int, err error)
+	RemoteAddr() Addr
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+	Write(b []byte) (n int, err error)
+}
+
+type DNSConfigError struct{ Err error }
+
+type DNSError struct {
+	UnwrapErr   error
+	Err         string
+	Name        string
+	Server      string
+	IsTimeout   bool
+	IsTemporary bool
+	IsNotFound  bool
+}
+
+type Dialer struct {
+	Timeout         time.Duration
+	Deadline        time.Time
+	LocalAddr       Addr
+	DualStack       bool
+	FallbackDelay   time.Duration
+	KeepAlive       time.Duration
+	KeepAliveConfig KeepAliveConfig
+	Resolver        *Resolver
+	Cancel          <-chan struct{}
+	Control         func(network string, address string, c syscall.RawConn) error
+	ControlContext  func(ctx context.Context, network string, address string, c syscall.RawConn) error
+	mptcpStatus     mptcpStatusDial
+}
+
+var ErrWriteToConnected error = errors.New("use of WriteTo with pre-connected connection")
+
+type Error interface {
+	Temporary() bool
+	Timeout() bool
+	error
+}
+
+type IPAddr struct {
+	IP   IP
+	Zone string
+}
+
+type InvalidAddrError string
+
+type KeepAliveConfig struct {
+	Enable   bool
+	Idle     time.Duration
+	Interval time.Duration
+	Count    int
+}
+
+type ListenConfig struct {
+	Control         func(network string, address string, c syscall.RawConn) error
+	KeepAlive       time.Duration
+	KeepAliveConfig KeepAliveConfig
+	mptcpStatus     mptcpStatusListen
+}
+
+type Listener interface {
+	Accept() (Conn, error)
+	Addr() Addr
+	Close() error
+}
+
+type OpError struct {
+	Op     string
+	Net    string
+	Source Addr
+	Addr   Addr
+	Err    error
+}
+
+type PacketConn interface {
+	Close() error
+	LocalAddr() Addr
+	ReadFrom(p []byte) (n int, addr Addr, err error)
+	SetDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
+	SetWriteDeadline(t time.Time) error
+	WriteTo(p []byte, addr Addr) (n int, err error)
+}
+
+type ParseError struct {
+	Type string
+	Text string
+}
+
+type TCPAddr struct {
+	IP   IP
+	Port int
+	Zone string
+}
+
+type UDPAddr struct {
+	IP   IP
+	Port int
+	Zone string
+}
+
+type UnixAddr struct {
+	Name string
+	Net  string
+}
+
+type UnknownNetworkError string
+
+var aLongTimeAgo time.Time = time.Unix(1, 0)
+
+type addrPortUDPAddr struct{ netip.AddrPort }
+
+type buffersWriter interface{ writeBuffers(*Buffers) (int64, error) }
+
+type byName struct {
+	addrs         []string
+	canonicalName string
+}
+
+type canceledError struct{}
+
+var errCanceled canceledError = canceledError{}
+
+var errCannotMarshalDNSMessage error = errors.New("cannot marshal DNS message")
+
+var errCannotUnmarshalDNSMessage error = errors.New("cannot unmarshal DNS message")
+
+var errClosed poll.errNetClosing = poll.ErrNetClosing
+
+var errInvalidDNSResponse error = errors.New("invalid DNS response")
+
+var errLameReferral error = errors.New("lame referral")
+
+var errMissingAddress error = errors.New("missing address")
+
+var errNoAnswerFromDNSServer error = errors.New("no answer from DNS server")
+
+var errNoSuchHost *notFoundError = &notFoundError{"no such host"}
+
+var errNoSuitableAddress error = errors.New("no suitable address found")
+
+var errServerMisbehaving error = errors.New("server misbehaving")
+
+var errServerTemporarilyMisbehaving *temporaryError = &temporaryError{"server misbehaving"}
+
+var errTimeout error = &timeoutError{}
+
+var errUnknownPort *notFoundError = &notFoundError{"unknown port"}
+
+type file struct {
+	file  *os.File
+	data  []byte
+	atEOF bool
+}
+
+type fileAddr string
+
+type hostLookupOrder int
+
+var hosts struct {
+	sync.Mutex
+	byName map[string]byName
+	byAddr map[string][]string
+	expire time.Time
+	path   string
+	mtime  time.Time
+	size   int64
+}
+
+var listenerBacklogCache struct {
+	sync.Once
+	val int
+}
+
+type mptcpStatusDial uint8
+
+type mptcpStatusListen uint8
+
+var multipathtcp *godebug.Setting = godebug.New("multipathtcp")
+
+var netedns0 *godebug.Setting = godebug.New("netedns0")
+
+var noCancel chan struct{} = (chan struct{})(nil)
+
+var noDeadline time.Time = time.Time{}
+
+type noReadFrom struct{}
+
+type noWriteTo struct{}
+
+type notFoundError struct{ s string }
+
+var resolvConf resolverConfig
+
+type resolverConfig struct {
+	initOnce    sync.Once
+	ch          chan struct{}
+	lastChecked time.Time
+	dnsConfig   atomic.Pointer[dnsConfig]
+}
+
+type sockaddr interface {
+	family() int
+	isWildcard() bool
+	sockaddr(family int) (syscall.Sockaddr, error)
+	toLocal(net string) sockaddr
+	Addr
+}
+
+type sysListener struct {
+	ListenConfig
+	network string
+	address string
+}
+
+type temporary interface{ Temporary() bool }
+
+type temporaryError struct{ s string }
+
+var testHookSupportsSendfile func() bool
+
+var threadLimit chan struct{}
+
+var threadOnce sync.Once
+
+type timeout interface{ Timeout() bool }
+
+type timeoutError struct{}
+
+// cgoAvailable differs between hosts.
+var cgoAvailable bool = func() bool {
+	if apehost == apeLinux {
+		return bool(linux_cgoAvailable)
+	}
+	if apehost == apeFreebsd {
+		return bool(freebsd_cgoAvailable)
+	}
+	return bool(windows_cgoAvailable)
+}()
+
+const hostLookupCgo hostLookupOrder = 0
+
+const hostLookupDNS hostLookupOrder = 4
+
+const hostLookupDNSFiles hostLookupOrder = 2
+
+const hostLookupFiles hostLookupOrder = 3
+
+const hostLookupFilesDNS hostLookupOrder = 1
+
+func Dial(a0 string, a1 string) (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Dial(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Dial(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_Dial(a0, a1)
+	return x0, x1
+}
+
+func DialIP(a0 string, a1 *IPAddr, a2 *IPAddr) (*IPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_DialIP(a0, a1, a2)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_DialIP(a0, a1, a2)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_DialIP(a0, a1, a2)
+	return (*IPConn)(unsafe.Pointer(x0)), x1
+}
+
+func DialTCP(a0 string, a1 *TCPAddr, a2 *TCPAddr) (*TCPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_DialTCP(a0, a1, a2)
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_DialTCP(a0, a1, a2)
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_DialTCP(a0, a1, a2)
+	return (*TCPConn)(unsafe.Pointer(x0)), x1
+}
+
+func DialTimeout(a0 string, a1 string, a2 time.Duration) (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_DialTimeout(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_DialTimeout(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := Windows_DialTimeout(a0, a1, a2)
+	return x0, x1
+}
+
+func DialUDP(a0 string, a1 *UDPAddr, a2 *UDPAddr) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_DialUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_DialUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_DialUDP(a0, a1, a2)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func DialUnix(a0 string, a1 *UnixAddr, a2 *UnixAddr) (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_DialUnix(a0, a1, a2)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_DialUnix(a0, a1, a2)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_DialUnix(a0, a1, a2)
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func Listen(a0 string, a1 string) (Listener, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Listen(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Listen(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_Listen(a0, a1)
+	return x0, x1
+}
+
+func ListenIP(a0 string, a1 *IPAddr) (*IPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenIP(a0, a1)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenIP(a0, a1)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenIP(a0, a1)
+	return (*IPConn)(unsafe.Pointer(x0)), x1
+}
+
+func ListenMulticastUDP(a0 string, a1 *Interface, a2 *UDPAddr) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenMulticastUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenMulticastUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenMulticastUDP(a0, a1, a2)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func ListenPacket(a0 string, a1 string) (PacketConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenPacket(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenPacket(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_ListenPacket(a0, a1)
+	return x0, x1
+}
+
+func ListenTCP(a0 string, a1 *TCPAddr) (*TCPListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenTCP(a0, a1)
+	return (*TCPListener)(unsafe.Pointer(x0)), x1
+}
+
+func ListenUDP(a0 string, a1 *UDPAddr) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenUDP(a0, a1)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenUDP(a0, a1)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenUDP(a0, a1)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func ListenUnix(a0 string, a1 *UnixAddr) (*UnixListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenUnix(a0, a1)
+		return (*UnixListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenUnix(a0, a1)
+		return (*UnixListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenUnix(a0, a1)
+	return (*UnixListener)(unsafe.Pointer(x0)), x1
+}
+
+func ListenUnixgram(a0 string, a1 *UnixAddr) (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ListenUnixgram(a0, a1)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ListenUnixgram(a0, a1)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_ListenUnixgram(a0, a1)
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func ResolveIPAddr(a0 string, a1 string) (*IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ResolveIPAddr(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ResolveIPAddr(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_ResolveIPAddr(a0, a1)
+	return x0, x1
+}
+
+func ResolveTCPAddr(a0 string, a1 string) (*TCPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ResolveTCPAddr(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ResolveTCPAddr(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_ResolveTCPAddr(a0, a1)
+	return x0, x1
+}
+
+func ResolveUDPAddr(a0 string, a1 string) (*UDPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ResolveUDPAddr(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ResolveUDPAddr(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_ResolveUDPAddr(a0, a1)
+	return x0, x1
+}
+
+func ResolveUnixAddr(a0 string, a1 string) (*UnixAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ResolveUnixAddr(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ResolveUnixAddr(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_ResolveUnixAddr(a0, a1)
+	return x0, x1
+}
+
+func TCPAddrFromAddrPort(a0 netip.AddrPort) *TCPAddr {
+	if apehost == apeLinux {
+		x0 := Linux_TCPAddrFromAddrPort(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_TCPAddrFromAddrPort(a0)
+		return x0
+	}
+	x0 := Windows_TCPAddrFromAddrPort(a0)
+	return x0
+}
+
+func UDPAddrFromAddrPort(a0 netip.AddrPort) *UDPAddr {
+	if apehost == apeLinux {
+		x0 := Linux_UDPAddrFromAddrPort(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_UDPAddrFromAddrPort(a0)
+		return x0
+	}
+	x0 := Windows_UDPAddrFromAddrPort(a0)
+	return x0
+}
+
+func dtoi(a0 string) (int, int, bool) {
+	if apehost == apeLinux {
+		x0, x1, x2 := linux_dtoi(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := freebsd_dtoi(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := windows_dtoi(a0)
+	return x0, x1, x2
+}
+
+func foreachField(a0 string, a1 func(field string) error) error {
+	if apehost == apeLinux {
+		x0 := linux_foreachField(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_foreachField(a0, a1)
+		return x0
+	}
+	x0 := windows_foreachField(a0, a1)
+	return x0
+}
+
+func getSystemDNSConfig() *dnsConfig {
+	if apehost == apeLinux {
+		x0 := linux_getSystemDNSConfig()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_getSystemDNSConfig()
+		return x0
+	}
+	x0 := windows_getSystemDNSConfig()
+	return x0
+}
+
+func hasUpperCase(a0 string) bool {
+	if apehost == apeLinux {
+		x0 := linux_hasUpperCase(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_hasUpperCase(a0)
+		return x0
+	}
+	x0 := windows_hasUpperCase(a0)
+	return x0
+}
+
+func interfaceAddrTable(a0 *Interface) ([]Addr, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_interfaceAddrTable(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_interfaceAddrTable(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_interfaceAddrTable(a0)
+	return x0, x1
+}
+
+func interfaceMulticastAddrTable(a0 *Interface) ([]Addr, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_interfaceMulticastAddrTable(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_interfaceMulticastAddrTable(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_interfaceMulticastAddrTable(a0)
+	return x0, x1
+}
+
+func interfaceTable(a0 int) ([]Interface, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_interfaceTable(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_interfaceTable(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_interfaceTable(a0)
+	return x0, x1
+}
+
+func lowerASCIIBytes(a0 []byte) {
+	if apehost == apeLinux {
+		linux_lowerASCIIBytes(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		freebsd_lowerASCIIBytes(a0)
+		return
+	}
+	windows_lowerASCIIBytes(a0)
+}
+
+func mapErr(a0 error) error {
+	if apehost == apeLinux {
+		x0 := linux_mapErr(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_mapErr(a0)
+		return x0
+	}
+	x0 := windows_mapErr(a0)
+	return x0
+}
+
+func newDNSError(a0 error, a1 string, a2 string) *DNSError {
+	if apehost == apeLinux {
+		x0 := linux_newDNSError(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_newDNSError(a0, a1, a2)
+		return x0
+	}
+	x0 := windows_newDNSError(a0, a1, a2)
+	return x0
+}
+
+func open(a0 string) (*file, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_open(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_open(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_open(a0)
+	return x0, x1
+}
+
+func parseNetwork(a0 context.Context, a1 string, a2 bool) (string, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := linux_parseNetwork(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := freebsd_parseNetwork(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := windows_parseNetwork(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func removeComment(a0 string) string {
+	if apehost == apeLinux {
+		x0 := linux_removeComment(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_removeComment(a0)
+		return x0
+	}
+	x0 := windows_removeComment(a0)
+	return x0
+}
+
+func stringsEqualFold(a0 string, a1 string) bool {
+	if apehost == apeLinux {
+		x0 := linux_stringsEqualFold(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_stringsEqualFold(a0, a1)
+		return x0
+	}
+	x0 := windows_stringsEqualFold(a0, a1)
+	return x0
+}
+
+func stringsHasSuffixFold(a0 string, a1 string) bool {
+	if apehost == apeLinux {
+		x0 := linux_stringsHasSuffixFold(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_stringsHasSuffixFold(a0, a1)
+		return x0
+	}
+	x0 := windows_stringsHasSuffixFold(a0, a1)
+	return x0
+}
+
+func trimSpace(a0 string) string {
+	if apehost == apeLinux {
+		x0 := linux_trimSpace(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_trimSpace(a0)
+		return x0
+	}
+	x0 := windows_trimSpace(a0)
+	return x0
+}
+
+func xtoi2(a0 string, a1 byte) (byte, bool) {
+	if apehost == apeLinux {
+		x0, x1 := linux_xtoi2(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_xtoi2(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := windows_xtoi2(a0, a1)
+	return x0, x1
+}
+
+func (r *AddrError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *AddrError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *AddrError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *Buffers) Read(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_Read(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Read(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Read(a0)
+	return x0, x1
+}
+
+func (r *Buffers) WriteTo(a0 io.Writer) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_WriteTo(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_WriteTo(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_WriteTo(a0)
+	return x0, x1
+}
+
+func (r *Buffers) consume(a0 int64) {
+	if apehost == apeLinux {
+		r.linux_consume(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_consume(a0)
+		return
+	}
+	r.windows_consume(a0)
+}
+
+func (r *DNSConfigError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *DNSConfigError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *DNSConfigError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *DNSConfigError) Unwrap() error {
+	if apehost == apeLinux {
+		x0 := r.Linux_Unwrap()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
+	return x0
+}
+
+func (r *DNSError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *DNSError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *DNSError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *DNSError) Unwrap() error {
+	if apehost == apeLinux {
+		x0 := r.Linux_Unwrap()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
+	return x0
+}
+
+func (r *Dialer) Dial(a0 string, a1 string) (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_Dial(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Dial(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Dial(a0, a1)
+	return x0, x1
+}
+
+func (r *Dialer) DialContext(a0 context.Context, a1 string, a2 string) (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_DialContext(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_DialContext(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_DialContext(a0, a1, a2)
+	return x0, x1
+}
+
+func (r *Dialer) DialIP(a0 context.Context, a1 string, a2 netip.Addr, a3 netip.Addr) (*IPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_DialIP(a0, a1, a2, a3)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_DialIP(a0, a1, a2, a3)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.Windows_DialIP(a0, a1, a2, a3)
+	return (*IPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Dialer) DialTCP(a0 context.Context, a1 string, a2 netip.AddrPort, a3 netip.AddrPort) (*TCPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_DialTCP(a0, a1, a2, a3)
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_DialTCP(a0, a1, a2, a3)
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.Windows_DialTCP(a0, a1, a2, a3)
+	return (*TCPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Dialer) DialUDP(a0 context.Context, a1 string, a2 netip.AddrPort, a3 netip.AddrPort) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_DialUDP(a0, a1, a2, a3)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_DialUDP(a0, a1, a2, a3)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.Windows_DialUDP(a0, a1, a2, a3)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Dialer) DialUnix(a0 context.Context, a1 string, a2 *UnixAddr, a3 *UnixAddr) (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_DialUnix(a0, a1, a2, a3)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_DialUnix(a0, a1, a2, a3)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.Windows_DialUnix(a0, a1, a2, a3)
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Dialer) MultipathTCP() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_MultipathTCP()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_MultipathTCP()
+		return x0
+	}
+	x0 := r.Windows_MultipathTCP()
+	return x0
+}
+
+func (r *Dialer) SetMultipathTCP(a0 bool) {
+	if apehost == apeLinux {
+		r.Linux_SetMultipathTCP(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.Freebsd_SetMultipathTCP(a0)
+		return
+	}
+	r.Windows_SetMultipathTCP(a0)
+}
+
+func (r *Dialer) deadline(a0 context.Context, a1 time.Time) time.Time {
+	if apehost == apeLinux {
+		x0 := r.linux_deadline(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_deadline(a0, a1)
+		return x0
+	}
+	x0 := r.windows_deadline(a0, a1)
+	return x0
+}
+
+func (r *Dialer) dialCtx(a0 context.Context) (context.Context, context.CancelFunc) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_dialCtx(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_dialCtx(a0)
+		return x0, x1
+	}
+	x0, x1 := r.windows_dialCtx(a0)
+	return x0, x1
+}
+
+func (r *Dialer) dualStack() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_dualStack()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_dualStack()
+		return x0
+	}
+	x0 := r.windows_dualStack()
+	return x0
+}
+
+func (r *Dialer) fallbackDelay() time.Duration {
+	if apehost == apeLinux {
+		x0 := r.linux_fallbackDelay()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_fallbackDelay()
+		return x0
+	}
+	x0 := r.windows_fallbackDelay()
+	return x0
+}
+
+func (r *Dialer) resolver() *Resolver {
+	if apehost == apeLinux {
+		x0 := r.linux_resolver()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_resolver()
+		return x0
+	}
+	x0 := r.windows_resolver()
+	return x0
+}
+
+func (r *IPAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r *IPAddr) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r *IPAddr) family() int {
+	if apehost == apeLinux {
+		x0 := r.linux_family()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_family()
+		return x0
+	}
+	x0 := r.windows_family()
+	return x0
+}
+
+func (r *IPAddr) isWildcard() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_isWildcard()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_isWildcard()
+		return x0
+	}
+	x0 := r.windows_isWildcard()
+	return x0
+}
+
+func (r *IPAddr) opAddr() Addr {
+	if apehost == apeLinux {
+		x0 := r.linux_opAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_opAddr()
+		return x0
+	}
+	x0 := r.windows_opAddr()
+	return x0
+}
+
+func (r *IPAddr) toLocal(a0 string) sockaddr {
+	if apehost == apeLinux {
+		x0 := r.linux_toLocal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_toLocal(a0)
+		return x0
+	}
+	x0 := r.windows_toLocal(a0)
+	return x0
+}
+
+func (r *IPConn) ReadFrom(a0 []byte) (int, Addr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_IPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_IPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+	return x0, x1, x2
+}
+
+func (r *IPConn) ReadFromIP(a0 []byte) (int, *IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_IPConn)(unsafe.Pointer(r))).ReadFromIP(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).ReadFromIP(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_IPConn)(unsafe.Pointer(r))).ReadFromIP(a0)
+	return x0, x1, x2
+}
+
+func (r *IPConn) ReadMsgIP(a0 []byte, a1 []byte) (int, int, int, *IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_IPConn)(unsafe.Pointer(r))).ReadMsgIP(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).ReadMsgIP(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_IPConn)(unsafe.Pointer(r))).ReadMsgIP(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *IPConn) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_IPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_IPConn)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *IPConn) WriteMsgIP(a0 []byte, a1 []byte, a2 *IPAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_IPConn)(unsafe.Pointer(r))).WriteMsgIP(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).WriteMsgIP(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_IPConn)(unsafe.Pointer(r))).WriteMsgIP(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *IPConn) WriteTo(a0 []byte, a1 Addr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_IPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_IPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+	return x0, x1
+}
+
+func (r *IPConn) WriteToIP(a0 []byte, a1 *IPAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_IPConn)(unsafe.Pointer(r))).WriteToIP(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).WriteToIP(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_IPConn)(unsafe.Pointer(r))).WriteToIP(a0, a1)
+	return x0, x1
+}
+
+func (r *IPConn) readFrom(a0 []byte) (int, *IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_IPConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_IPConn)(unsafe.Pointer(r))).readFrom(a0)
+	return x0, x1, x2
+}
+
+func (r *IPConn) readMsg(a0 []byte, a1 []byte) (int, int, int, *IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_IPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_IPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *IPConn) writeMsg(a0 []byte, a1 []byte, a2 *IPAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_IPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_IPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *IPConn) writeTo(a0 []byte, a1 *IPAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_IPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_IPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_IPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+	return x0, x1
+}
+
+func (r InvalidAddrError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r InvalidAddrError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r InvalidAddrError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *ListenConfig) Listen(a0 context.Context, a1 string, a2 string) (Listener, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_Listen(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Listen(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Listen(a0, a1, a2)
+	return x0, x1
+}
+
+func (r *ListenConfig) ListenPacket(a0 context.Context, a1 string, a2 string) (PacketConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_ListenPacket(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ListenPacket(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ListenPacket(a0, a1, a2)
+	return x0, x1
+}
+
+func (r *ListenConfig) MultipathTCP() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_MultipathTCP()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_MultipathTCP()
+		return x0
+	}
+	x0 := r.Windows_MultipathTCP()
+	return x0
+}
+
+func (r *ListenConfig) SetMultipathTCP(a0 bool) {
+	if apehost == apeLinux {
+		r.Linux_SetMultipathTCP(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.Freebsd_SetMultipathTCP(a0)
+		return
+	}
+	r.Windows_SetMultipathTCP(a0)
+}
+
+func (r *OpError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *OpError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *OpError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *OpError) Unwrap() error {
+	if apehost == apeLinux {
+		x0 := r.Linux_Unwrap()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
+	return x0
+}
+
+func (r *ParseError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *ParseError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *ParseError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *Resolver) exchange(a0 context.Context, a1 string, a2 dnsmessage.Question, a3 time.Duration, a4 bool, a5 bool) (dnsmessage.Parser, dnsmessage.Header, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_exchange(a0, a1, a2, a3, a4, a5)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_exchange(a0, a1, a2, a3, a4, a5)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_exchange(a0, a1, a2, a3, a4, a5)
+	return x0, x1, x2
+}
+
+func (r *Resolver) goLookupCNAME(a0 context.Context, a1 string, a2 hostLookupOrder, a3 *dnsConfig) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_goLookupCNAME(a0, a1, a2, a3)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_goLookupCNAME(a0, a1, a2, a3)
+		return x0, x1
+	}
+	x0, x1 := r.windows_goLookupCNAME(a0, a1, a2, a3)
+	return x0, x1
+}
+
+func (r *Resolver) goLookupHostOrder(a0 context.Context, a1 string, a2 hostLookupOrder, a3 *dnsConfig) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_goLookupHostOrder(a0, a1, a2, a3)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_goLookupHostOrder(a0, a1, a2, a3)
+		return x0, x1
+	}
+	x0, x1 := r.windows_goLookupHostOrder(a0, a1, a2, a3)
+	return x0, x1
+}
+
+func (r *Resolver) goLookupIP(a0 context.Context, a1 string, a2 string, a3 hostLookupOrder, a4 *dnsConfig) ([]IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_goLookupIP(a0, a1, a2, a3, a4)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_goLookupIP(a0, a1, a2, a3, a4)
+		return x0, x1
+	}
+	x0, x1 := r.windows_goLookupIP(a0, a1, a2, a3, a4)
+	return x0, x1
+}
+
+func (r *Resolver) goLookupIPCNAMEOrder(a0 context.Context, a1 string, a2 string, a3 hostLookupOrder, a4 *dnsConfig) ([]IPAddr, dnsmessage.Name, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_goLookupIPCNAMEOrder(a0, a1, a2, a3, a4)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_goLookupIPCNAMEOrder(a0, a1, a2, a3, a4)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_goLookupIPCNAMEOrder(a0, a1, a2, a3, a4)
+	return x0, x1, x2
+}
+
+func (r *Resolver) goLookupPTR(a0 context.Context, a1 string, a2 hostLookupOrder, a3 *dnsConfig) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_goLookupPTR(a0, a1, a2, a3)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_goLookupPTR(a0, a1, a2, a3)
+		return x0, x1
+	}
+	x0, x1 := r.windows_goLookupPTR(a0, a1, a2, a3)
+	return x0, x1
+}
+
+func (r *Resolver) lookup(a0 context.Context, a1 string, a2 dnsmessage.Type, a3 *dnsConfig) (dnsmessage.Parser, string, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_lookup(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_lookup(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_lookup(a0, a1, a2, a3)
+	return x0, x1, x2
+}
+
+func (r *Resolver) lookupAddr(a0 context.Context, a1 string) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupAddr(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupAddr(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupAddr(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) lookupCNAME(a0 context.Context, a1 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupCNAME(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupCNAME(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupCNAME(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) lookupHost(a0 context.Context, a1 string) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupHost(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupHost(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupHost(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) lookupIP(a0 context.Context, a1 string, a2 string) ([]IPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupIP(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupIP(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupIP(a0, a1, a2)
+	return x0, x1
+}
+
+func (r *Resolver) lookupMX(a0 context.Context, a1 string) ([]*MX, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupMX(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupMX(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupMX(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) lookupNS(a0 context.Context, a1 string) ([]*NS, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupNS(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupNS(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupNS(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) lookupPort(a0 context.Context, a1 string, a2 string) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupPort(a0, a1, a2)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupPort(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupPort(a0, a1, a2)
+	return x0, x1
+}
+
+func (r *Resolver) lookupSRV(a0 context.Context, a1 string, a2 string, a3 string) (string, []*SRV, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_lookupSRV(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_lookupSRV(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_lookupSRV(a0, a1, a2, a3)
+	return x0, x1, x2
+}
+
+func (r *Resolver) lookupTXT(a0 context.Context, a1 string) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_lookupTXT(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_lookupTXT(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := r.windows_lookupTXT(a0, a1)
+	return x0, x1
+}
+
+func (r *Resolver) resolveAddrList(a0 context.Context, a1 string, a2 string, a3 string, a4 Addr) (addrList, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_resolveAddrList(a0, a1, a2, a3, a4)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_resolveAddrList(a0, a1, a2, a3, a4)
+		return x0, x1
+	}
+	x0, x1 := r.windows_resolveAddrList(a0, a1, a2, a3, a4)
+	return x0, x1
+}
+
+func (r *Resolver) tryOneName(a0 context.Context, a1 *dnsConfig, a2 string, a3 dnsmessage.Type) (dnsmessage.Parser, string, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_tryOneName(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_tryOneName(a0, a1, a2, a3)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_tryOneName(a0, a1, a2, a3)
+	return x0, x1, x2
+}
+
+func (r *TCPAddr) AddrPort() netip.AddrPort {
+	if apehost == apeLinux {
+		x0 := r.Linux_AddrPort()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_AddrPort()
+		return x0
+	}
+	x0 := r.Windows_AddrPort()
+	return x0
+}
+
+func (r *TCPAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r *TCPAddr) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r *TCPAddr) family() int {
+	if apehost == apeLinux {
+		x0 := r.linux_family()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_family()
+		return x0
+	}
+	x0 := r.windows_family()
+	return x0
+}
+
+func (r *TCPAddr) isWildcard() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_isWildcard()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_isWildcard()
+		return x0
+	}
+	x0 := r.windows_isWildcard()
+	return x0
+}
+
+func (r *TCPAddr) opAddr() Addr {
+	if apehost == apeLinux {
+		x0 := r.linux_opAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_opAddr()
+		return x0
+	}
+	x0 := r.windows_opAddr()
+	return x0
+}
+
+func (r *TCPAddr) toLocal(a0 string) sockaddr {
+	if apehost == apeLinux {
+		x0 := r.linux_toLocal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_toLocal(a0)
+		return x0
+	}
+	x0 := r.windows_toLocal(a0)
+	return x0
+}
+
+func (r *TCPConn) CloseRead() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).CloseRead()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).CloseRead()
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).CloseRead()
+	return x0
+}
+
+func (r *TCPConn) CloseWrite() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).CloseWrite()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).CloseWrite()
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).CloseWrite()
+	return x0
+}
+
+func (r *TCPConn) MultipathTCP() (bool, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).MultipathTCP()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).MultipathTCP()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).MultipathTCP()
+	return x0, x1
+}
+
+func (r *TCPConn) ReadFrom(a0 io.Reader) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+	return x0, x1
+}
+
+func (r *TCPConn) SetKeepAlive(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SetKeepAlive(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SetKeepAlive(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SetKeepAlive(a0)
+	return x0
+}
+
+func (r *TCPConn) SetKeepAliveConfig(a0 KeepAliveConfig) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SetKeepAliveConfig(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SetKeepAliveConfig(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SetKeepAliveConfig(a0)
+	return x0
+}
+
+func (r *TCPConn) SetKeepAlivePeriod(a0 time.Duration) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SetKeepAlivePeriod(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SetKeepAlivePeriod(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SetKeepAlivePeriod(a0)
+	return x0
+}
+
+func (r *TCPConn) SetLinger(a0 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SetLinger(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SetLinger(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SetLinger(a0)
+	return x0
+}
+
+func (r *TCPConn) SetNoDelay(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SetNoDelay(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SetNoDelay(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SetNoDelay(a0)
+	return x0
+}
+
+func (r *TCPConn) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *TCPConn) WriteTo(a0 io.Writer) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).WriteTo(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).WriteTo(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).WriteTo(a0)
+	return x0, x1
+}
+
+func (r *TCPConn) readFrom(a0 io.Reader) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).readFrom(a0)
+	return x0, x1
+}
+
+func (r *TCPConn) writeTo(a0 io.Writer) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPConn)(unsafe.Pointer(r))).writeTo(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPConn)(unsafe.Pointer(r))).writeTo(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPConn)(unsafe.Pointer(r))).writeTo(a0)
+	return x0, x1
+}
+
+func (r *TCPListener) Accept() (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPListener)(unsafe.Pointer(r))).Accept()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).Accept()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPListener)(unsafe.Pointer(r))).Accept()
+	return x0, x1
+}
+
+func (r *TCPListener) AcceptTCP() (*TCPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPListener)(unsafe.Pointer(r))).AcceptTCP()
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).AcceptTCP()
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_TCPListener)(unsafe.Pointer(r))).AcceptTCP()
+	return (*TCPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *TCPListener) Addr() Addr {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPListener)(unsafe.Pointer(r))).Addr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).Addr()
+		return x0
+	}
+	x0 := ((*Windows_TCPListener)(unsafe.Pointer(r))).Addr()
+	return x0
+}
+
+func (r *TCPListener) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPListener)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*Windows_TCPListener)(unsafe.Pointer(r))).Close()
+	return x0
+}
+
+func (r *TCPListener) SetDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPListener)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_TCPListener)(unsafe.Pointer(r))).SetDeadline(a0)
+	return x0
+}
+
+func (r *TCPListener) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPListener)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_TCPListener)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *TCPListener) accept() (*TCPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_TCPListener)(unsafe.Pointer(r))).accept()
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).accept()
+		return (*TCPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_TCPListener)(unsafe.Pointer(r))).accept()
+	return (*TCPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *TCPListener) close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPListener)(unsafe.Pointer(r))).close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).close()
+		return x0
+	}
+	x0 := ((*Windows_TCPListener)(unsafe.Pointer(r))).close()
+	return x0
+}
+
+func (r *TCPListener) ok() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_TCPListener)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_TCPListener)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	x0 := ((*Windows_TCPListener)(unsafe.Pointer(r))).ok()
+	return x0
+}
+
+func (r *UDPAddr) AddrPort() netip.AddrPort {
+	if apehost == apeLinux {
+		x0 := r.Linux_AddrPort()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_AddrPort()
+		return x0
+	}
+	x0 := r.Windows_AddrPort()
+	return x0
+}
+
+func (r *UDPAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r *UDPAddr) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r *UDPAddr) family() int {
+	if apehost == apeLinux {
+		x0 := r.linux_family()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_family()
+		return x0
+	}
+	x0 := r.windows_family()
+	return x0
+}
+
+func (r *UDPAddr) isWildcard() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_isWildcard()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_isWildcard()
+		return x0
+	}
+	x0 := r.windows_isWildcard()
+	return x0
+}
+
+func (r *UDPAddr) opAddr() Addr {
+	if apehost == apeLinux {
+		x0 := r.linux_opAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_opAddr()
+		return x0
+	}
+	x0 := r.windows_opAddr()
+	return x0
+}
+
+func (r *UDPAddr) toLocal(a0 string) sockaddr {
+	if apehost == apeLinux {
+		x0 := r.linux_toLocal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_toLocal(a0)
+		return x0
+	}
+	x0 := r.windows_toLocal(a0)
+	return x0
+}
+
+func (r *UDPConn) ReadFrom(a0 []byte) (int, Addr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).ReadFrom(a0)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) ReadFromUDP(a0 []byte) (int, *UDPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).ReadFromUDP(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).ReadFromUDP(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).ReadFromUDP(a0)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) ReadFromUDPAddrPort(a0 []byte) (int, netip.AddrPort, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).ReadFromUDPAddrPort(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).ReadFromUDPAddrPort(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).ReadFromUDPAddrPort(a0)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) ReadMsgUDP(a0 []byte, a1 []byte) (int, int, int, *UDPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_UDPConn)(unsafe.Pointer(r))).ReadMsgUDP(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).ReadMsgUDP(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_UDPConn)(unsafe.Pointer(r))).ReadMsgUDP(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *UDPConn) ReadMsgUDPAddrPort(a0 []byte, a1 []byte) (int, int, int, netip.AddrPort, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_UDPConn)(unsafe.Pointer(r))).ReadMsgUDPAddrPort(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).ReadMsgUDPAddrPort(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_UDPConn)(unsafe.Pointer(r))).ReadMsgUDPAddrPort(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *UDPConn) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *UDPConn) WriteMsgUDP(a0 []byte, a1 []byte, a2 *UDPAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).WriteMsgUDP(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).WriteMsgUDP(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).WriteMsgUDP(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) WriteMsgUDPAddrPort(a0 []byte, a1 []byte, a2 netip.AddrPort) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).WriteMsgUDPAddrPort(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).WriteMsgUDPAddrPort(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).WriteMsgUDPAddrPort(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) WriteTo(a0 []byte, a1 Addr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+	return x0, x1
+}
+
+func (r *UDPConn) WriteToUDP(a0 []byte, a1 *UDPAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).WriteToUDP(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).WriteToUDP(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).WriteToUDP(a0, a1)
+	return x0, x1
+}
+
+func (r *UDPConn) WriteToUDPAddrPort(a0 []byte, a1 netip.AddrPort) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).WriteToUDPAddrPort(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).WriteToUDPAddrPort(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).WriteToUDPAddrPort(a0, a1)
+	return x0, x1
+}
+
+func (r *UDPConn) readFrom(a0 []byte, a1 *UDPAddr) (int, *UDPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).readFrom(a0, a1)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).readFrom(a0, a1)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).readFrom(a0, a1)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) readFromAddrPort(a0 []byte) (int, netip.AddrPort, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).readFromAddrPort(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).readFromAddrPort(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).readFromAddrPort(a0)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) readFromUDP(a0 []byte, a1 *UDPAddr) (int, *UDPAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).readFromUDP(a0, a1)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).readFromUDP(a0, a1)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).readFromUDP(a0, a1)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) readMsg(a0 []byte, a1 []byte) (int, int, int, netip.AddrPort, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_UDPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_UDPConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *UDPConn) writeMsg(a0 []byte, a1 []byte, a2 *UDPAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) writeMsgAddrPort(a0 []byte, a1 []byte, a2 netip.AddrPort) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UDPConn)(unsafe.Pointer(r))).writeMsgAddrPort(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).writeMsgAddrPort(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UDPConn)(unsafe.Pointer(r))).writeMsgAddrPort(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UDPConn) writeTo(a0 []byte, a1 *UDPAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+	return x0, x1
+}
+
+func (r *UDPConn) writeToAddrPort(a0 []byte, a1 netip.AddrPort) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UDPConn)(unsafe.Pointer(r))).writeToAddrPort(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UDPConn)(unsafe.Pointer(r))).writeToAddrPort(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UDPConn)(unsafe.Pointer(r))).writeToAddrPort(a0, a1)
+	return x0, x1
+}
+
+func (r *UnixAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r *UnixAddr) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r *UnixAddr) family() int {
+	if apehost == apeLinux {
+		x0 := r.linux_family()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_family()
+		return x0
+	}
+	x0 := r.windows_family()
+	return x0
+}
+
+func (r *UnixAddr) isWildcard() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_isWildcard()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_isWildcard()
+		return x0
+	}
+	x0 := r.windows_isWildcard()
+	return x0
+}
+
+func (r *UnixAddr) opAddr() Addr {
+	if apehost == apeLinux {
+		x0 := r.linux_opAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_opAddr()
+		return x0
+	}
+	x0 := r.windows_opAddr()
+	return x0
+}
+
+func (r *UnixAddr) toLocal(a0 string) sockaddr {
+	if apehost == apeLinux {
+		x0 := r.linux_toLocal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_toLocal(a0)
+		return x0
+	}
+	x0 := r.windows_toLocal(a0)
+	return x0
+}
+
+func (r *UnixConn) CloseRead() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixConn)(unsafe.Pointer(r))).CloseRead()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).CloseRead()
+		return x0
+	}
+	x0 := ((*Windows_UnixConn)(unsafe.Pointer(r))).CloseRead()
+	return x0
+}
+
+func (r *UnixConn) CloseWrite() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixConn)(unsafe.Pointer(r))).CloseWrite()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).CloseWrite()
+		return x0
+	}
+	x0 := ((*Windows_UnixConn)(unsafe.Pointer(r))).CloseWrite()
+	return x0
+}
+
+func (r *UnixConn) ReadFrom(a0 []byte) (int, Addr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UnixConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UnixConn)(unsafe.Pointer(r))).ReadFrom(a0)
+	return x0, x1, x2
+}
+
+func (r *UnixConn) ReadFromUnix(a0 []byte) (int, *UnixAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UnixConn)(unsafe.Pointer(r))).ReadFromUnix(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).ReadFromUnix(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UnixConn)(unsafe.Pointer(r))).ReadFromUnix(a0)
+	return x0, x1, x2
+}
+
+func (r *UnixConn) ReadMsgUnix(a0 []byte, a1 []byte) (int, int, int, *UnixAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_UnixConn)(unsafe.Pointer(r))).ReadMsgUnix(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).ReadMsgUnix(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_UnixConn)(unsafe.Pointer(r))).ReadMsgUnix(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *UnixConn) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixConn)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *UnixConn) WriteMsgUnix(a0 []byte, a1 []byte, a2 *UnixAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UnixConn)(unsafe.Pointer(r))).WriteMsgUnix(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).WriteMsgUnix(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UnixConn)(unsafe.Pointer(r))).WriteMsgUnix(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UnixConn) WriteTo(a0 []byte, a1 Addr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixConn)(unsafe.Pointer(r))).WriteTo(a0, a1)
+	return x0, x1
+}
+
+func (r *UnixConn) WriteToUnix(a0 []byte, a1 *UnixAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixConn)(unsafe.Pointer(r))).WriteToUnix(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).WriteToUnix(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixConn)(unsafe.Pointer(r))).WriteToUnix(a0, a1)
+	return x0, x1
+}
+
+func (r *UnixConn) readFrom(a0 []byte) (int, *UnixAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UnixConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UnixConn)(unsafe.Pointer(r))).readFrom(a0)
+	return x0, x1, x2
+}
+
+func (r *UnixConn) readMsg(a0 []byte, a1 []byte) (int, int, int, *UnixAddr, error) {
+	if apehost == apeLinux {
+		x0, x1, x2, x3, x4 := ((*Linux_UnixConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3, x4 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+		return x0, x1, x2, x3, x4
+	}
+	x0, x1, x2, x3, x4 := ((*Windows_UnixConn)(unsafe.Pointer(r))).readMsg(a0, a1)
+	return x0, x1, x2, x3, x4
+}
+
+func (r *UnixConn) writeMsg(a0 []byte, a1 []byte, a2 *UnixAddr) (int, int, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_UnixConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_UnixConn)(unsafe.Pointer(r))).writeMsg(a0, a1, a2)
+	return x0, x1, x2
+}
+
+func (r *UnixConn) writeTo(a0 []byte, a1 *UnixAddr) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixConn)(unsafe.Pointer(r))).writeTo(a0, a1)
+	return x0, x1
+}
+
+func (r *UnixListener) Accept() (Conn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixListener)(unsafe.Pointer(r))).Accept()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).Accept()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixListener)(unsafe.Pointer(r))).Accept()
+	return x0, x1
+}
+
+func (r *UnixListener) AcceptUnix() (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixListener)(unsafe.Pointer(r))).AcceptUnix()
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).AcceptUnix()
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_UnixListener)(unsafe.Pointer(r))).AcceptUnix()
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *UnixListener) Addr() Addr {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixListener)(unsafe.Pointer(r))).Addr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).Addr()
+		return x0
+	}
+	x0 := ((*Windows_UnixListener)(unsafe.Pointer(r))).Addr()
+	return x0
+}
+
+func (r *UnixListener) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixListener)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*Windows_UnixListener)(unsafe.Pointer(r))).Close()
+	return x0
+}
+
+func (r *UnixListener) SetDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixListener)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_UnixListener)(unsafe.Pointer(r))).SetDeadline(a0)
+	return x0
+}
+
+func (r *UnixListener) SetUnlinkOnClose(a0 bool) {
+	if apehost == apeLinux {
+		((*Linux_UnixListener)(unsafe.Pointer(r))).SetUnlinkOnClose(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_UnixListener)(unsafe.Pointer(r))).SetUnlinkOnClose(a0)
+		return
+	}
+	((*Windows_UnixListener)(unsafe.Pointer(r))).SetUnlinkOnClose(a0)
+}
+
+func (r *UnixListener) SyscallConn() (syscall.RawConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixListener)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_UnixListener)(unsafe.Pointer(r))).SyscallConn()
+	return x0, x1
+}
+
+func (r *UnixListener) accept() (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_UnixListener)(unsafe.Pointer(r))).accept()
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).accept()
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_UnixListener)(unsafe.Pointer(r))).accept()
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *UnixListener) close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixListener)(unsafe.Pointer(r))).close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).close()
+		return x0
+	}
+	x0 := ((*Windows_UnixListener)(unsafe.Pointer(r))).close()
+	return x0
+}
+
+func (r *UnixListener) ok() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_UnixListener)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_UnixListener)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	x0 := ((*Windows_UnixListener)(unsafe.Pointer(r))).ok()
+	return x0
+}
+
+func (r UnknownNetworkError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r UnknownNetworkError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r UnknownNetworkError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r addrPortUDPAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r canceledError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r canceledError) Is(a0 error) bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Is(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Is(a0)
+		return x0
+	}
+	x0 := r.Windows_Is(a0)
+	return x0
+}
+
+func (r *conn) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).Close()
+	return x0
+}
+
+func (r *conn) LocalAddr() Addr {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).LocalAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).LocalAddr()
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).LocalAddr()
+	return x0
+}
+
+func (r *conn) Read(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_conn)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_conn)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_conn)(unsafe.Pointer(r))).Read(a0)
+	return x0, x1
+}
+
+func (r *conn) RemoteAddr() Addr {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).RemoteAddr()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).RemoteAddr()
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).RemoteAddr()
+	return x0
+}
+
+func (r *conn) SetDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).SetDeadline(a0)
+	return x0
+}
+
+func (r *conn) SetReadBuffer(a0 int) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).SetReadBuffer(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).SetReadBuffer(a0)
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).SetReadBuffer(a0)
+	return x0
+}
+
+func (r *conn) SetReadDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).SetReadDeadline(a0)
+	return x0
+}
+
+func (r *conn) SetWriteBuffer(a0 int) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).SetWriteBuffer(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).SetWriteBuffer(a0)
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).SetWriteBuffer(a0)
+	return x0
+}
+
+func (r *conn) SetWriteDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+	return x0
+}
+
+func (r *conn) Write(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_conn)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_conn)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_conn)(unsafe.Pointer(r))).Write(a0)
+	return x0, x1
+}
+
+func (r *conn) ok() bool {
+	if apehost == apeLinux {
+		x0 := ((*linux_conn)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_conn)(unsafe.Pointer(r))).ok()
+		return x0
+	}
+	x0 := ((*windows_conn)(unsafe.Pointer(r))).ok()
+	return x0
+}
+
+func (r *conn) writeBuffers(a0 *Buffers) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_conn)(unsafe.Pointer(r))).writeBuffers(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_conn)(unsafe.Pointer(r))).writeBuffers(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_conn)(unsafe.Pointer(r))).writeBuffers(a0)
+	return x0, x1
+}
+
+func (r *dnsConfig) nameList(a0 string) []string {
+	if apehost == apeLinux {
+		x0 := r.linux_nameList(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_nameList(a0)
+		return x0
+	}
+	x0 := r.windows_nameList(a0)
+	return x0
+}
+
+func (r *file) close() {
+	if apehost == apeLinux {
+		r.linux_close()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_close()
+		return
+	}
+	r.windows_close()
+}
+
+func (r *file) getLineFromData() (string, bool) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_getLineFromData()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_getLineFromData()
+		return x0, x1
+	}
+	x0, x1 := r.windows_getLineFromData()
+	return x0, x1
+}
+
+func (r *file) readLine() (string, bool) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_readLine()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_readLine()
+		return x0, x1
+	}
+	x0, x1 := r.windows_readLine()
+	return x0, x1
+}
+
+func (r *file) stat() (time.Time, int64, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := r.linux_stat()
+		return x0, x1, x2
+	}
+	if apehost == apeFreebsd {
+		x0, x1, x2 := r.freebsd_stat()
+		return x0, x1, x2
+	}
+	x0, x1, x2 := r.windows_stat()
+	return x0, x1, x2
+}
+
+func (r fileAddr) Network() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Network()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Network()
+		return x0
+	}
+	x0 := r.Windows_Network()
+	return x0
+}
+
+func (r fileAddr) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r hostLookupOrder) String() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_String()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
+	return x0
+}
+
+func (r *ipStackCapabilities) probe() {
+	if apehost == apeLinux {
+		r.linux_probe()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_probe()
+		return
+	}
+	r.windows_probe()
+}
+
+func (r *mptcpStatusDial) get() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_get()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_get()
+		return x0
+	}
+	x0 := r.windows_get()
+	return x0
+}
+
+func (r *mptcpStatusDial) set(a0 bool) {
+	if apehost == apeLinux {
+		r.linux_set(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_set(a0)
+		return
+	}
+	r.windows_set(a0)
+}
+
+func (r *mptcpStatusListen) get() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_get()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_get()
+		return x0
+	}
+	x0 := r.windows_get()
+	return x0
+}
+
+func (r *mptcpStatusListen) set(a0 bool) {
+	if apehost == apeLinux {
+		r.linux_set(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_set(a0)
+		return
+	}
+	r.windows_set(a0)
+}
+
+func (r *netFD) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).Close()
+	return x0
+}
+
+func (r *netFD) Read(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_netFD)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_netFD)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_netFD)(unsafe.Pointer(r))).Read(a0)
+	return x0, x1
+}
+
+func (r *netFD) SetDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).SetDeadline(a0)
+	return x0
+}
+
+func (r *netFD) SetReadDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).SetReadDeadline(a0)
+	return x0
+}
+
+func (r *netFD) SetWriteDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+	return x0
+}
+
+func (r *netFD) Write(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_netFD)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_netFD)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_netFD)(unsafe.Pointer(r))).Write(a0)
+	return x0, x1
+}
+
+func (r *netFD) accept() (*netFD, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_netFD)(unsafe.Pointer(r))).accept()
+		return (*netFD)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_netFD)(unsafe.Pointer(r))).accept()
+		return (*netFD)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*windows_netFD)(unsafe.Pointer(r))).accept()
+	return (*netFD)(unsafe.Pointer(x0)), x1
+}
+
+func (r *netFD) closeRead() error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).closeRead()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).closeRead()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).closeRead()
+	return x0
+}
+
+func (r *netFD) closeWrite() error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).closeWrite()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).closeWrite()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).closeWrite()
+	return x0
+}
+
+func (r *netFD) ctrlNetwork() string {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).ctrlNetwork()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).ctrlNetwork()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).ctrlNetwork()
+	return x0
+}
+
+func (r *netFD) dial(a0 context.Context, a1 sockaddr, a2 sockaddr, a3 func(context.Context, string, string, syscall.RawConn) error) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).dial(a0, a1, a2, a3)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).dial(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).dial(a0, a1, a2, a3)
+	return x0
+}
+
+func (r *netFD) init() error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).init()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).init()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).init()
+	return x0
+}
+
+func (r *netFD) listenDatagram(a0 context.Context, a1 sockaddr, a2 func(context.Context, string, string, syscall.RawConn) error) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).listenDatagram(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).listenDatagram(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).listenDatagram(a0, a1, a2)
+	return x0
+}
+
+func (r *netFD) listenStream(a0 context.Context, a1 sockaddr, a2 int, a3 func(context.Context, string, string, syscall.RawConn) error) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).listenStream(a0, a1, a2, a3)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).listenStream(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).listenStream(a0, a1, a2, a3)
+	return x0
+}
+
+func (r *netFD) name() string {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).name()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).name()
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).name()
+	return x0
+}
+
+func (r *netFD) setAddr(a0 Addr, a1 Addr) {
+	if apehost == apeLinux {
+		((*linux_netFD)(unsafe.Pointer(r))).setAddr(a0, a1)
+		return
+	}
+	if apehost == apeFreebsd {
+		((*freebsd_netFD)(unsafe.Pointer(r))).setAddr(a0, a1)
+		return
+	}
+	((*windows_netFD)(unsafe.Pointer(r))).setAddr(a0, a1)
+}
+
+func (r *netFD) shutdown(a0 int) error {
+	if apehost == apeLinux {
+		x0 := ((*linux_netFD)(unsafe.Pointer(r))).shutdown(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*freebsd_netFD)(unsafe.Pointer(r))).shutdown(a0)
+		return x0
+	}
+	x0 := ((*windows_netFD)(unsafe.Pointer(r))).shutdown(a0)
+	return x0
+}
+
+func (r *netFD) writeBuffers(a0 *Buffers) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*linux_netFD)(unsafe.Pointer(r))).writeBuffers(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*freebsd_netFD)(unsafe.Pointer(r))).writeBuffers(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*windows_netFD)(unsafe.Pointer(r))).writeBuffers(a0)
+	return x0, x1
+}
+
+func (r noReadFrom) ReadFrom(a0 io.Reader) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_ReadFrom(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ReadFrom(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ReadFrom(a0)
+	return x0, x1
+}
+
+func (r noWriteTo) WriteTo(a0 io.Writer) (int64, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_WriteTo(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_WriteTo(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_WriteTo(a0)
+	return x0, x1
+}
+
+func (r *notFoundError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *resolverConfig) init() {
+	if apehost == apeLinux {
+		r.linux_init()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_init()
+		return
+	}
+	r.windows_init()
+}
+
+func (r *resolverConfig) releaseSema() {
+	if apehost == apeLinux {
+		r.linux_releaseSema()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_releaseSema()
+		return
+	}
+	r.windows_releaseSema()
+}
+
+func (r *resolverConfig) tryAcquireSema() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_tryAcquireSema()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_tryAcquireSema()
+		return x0
+	}
+	x0 := r.windows_tryAcquireSema()
+	return x0
+}
+
+func (r *resolverConfig) tryUpdate(a0 string) {
+	if apehost == apeLinux {
+		r.linux_tryUpdate(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_tryUpdate(a0)
+		return
+	}
+	r.windows_tryUpdate(a0)
+}
+
+func (r *sysListener) listenIP(a0 context.Context, a1 *IPAddr) (*IPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenIP(a0, a1)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenIP(a0, a1)
+		return (*IPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenIP(a0, a1)
+	return (*IPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenMPTCP(a0 context.Context, a1 *TCPAddr) (*TCPListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenMPTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenMPTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenMPTCP(a0, a1)
+	return (*TCPListener)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenMulticastUDP(a0 context.Context, a1 *Interface, a2 *UDPAddr) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenMulticastUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenMulticastUDP(a0, a1, a2)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenMulticastUDP(a0, a1, a2)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenTCP(a0 context.Context, a1 *TCPAddr) (*TCPListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenTCP(a0, a1)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenTCP(a0, a1)
+	return (*TCPListener)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenTCPProto(a0 context.Context, a1 *TCPAddr, a2 int) (*TCPListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenTCPProto(a0, a1, a2)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenTCPProto(a0, a1, a2)
+		return (*TCPListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenTCPProto(a0, a1, a2)
+	return (*TCPListener)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenUDP(a0 context.Context, a1 *UDPAddr) (*UDPConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenUDP(a0, a1)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenUDP(a0, a1)
+		return (*UDPConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenUDP(a0, a1)
+	return (*UDPConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenUnix(a0 context.Context, a1 *UnixAddr) (*UnixListener, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenUnix(a0, a1)
+		return (*UnixListener)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenUnix(a0, a1)
+		return (*UnixListener)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenUnix(a0, a1)
+	return (*UnixListener)(unsafe.Pointer(x0)), x1
+}
+
+func (r *sysListener) listenUnixgram(a0 context.Context, a1 *UnixAddr) (*UnixConn, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_listenUnixgram(a0, a1)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_listenUnixgram(a0, a1)
+		return (*UnixConn)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_listenUnixgram(a0, a1)
+	return (*UnixConn)(unsafe.Pointer(x0)), x1
+}
+
+func (r *temporaryError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *temporaryError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *temporaryError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+func (r *timeoutError) Error() string {
+	if apehost == apeLinux {
+		x0 := r.Linux_Error()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
+	return x0
+}
+
+func (r *timeoutError) Is(a0 error) bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Is(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Is(a0)
+		return x0
+	}
+	x0 := r.Windows_Is(a0)
+	return x0
+}
+
+func (r *timeoutError) Temporary() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Temporary()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Temporary()
+		return x0
+	}
+	x0 := r.Windows_Temporary()
+	return x0
+}
+
+func (r *timeoutError) Timeout() bool {
+	if apehost == apeLinux {
+		x0 := r.Linux_Timeout()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Timeout()
+		return x0
+	}
+	x0 := r.Windows_Timeout()
+	return x0
+}
+
+// IPConn differs between hosts: functions convert it by pointer.
+type IPConn struct{ _ [1]uint64 }
+
+// TCPConn differs between hosts: functions convert it by pointer.
+type TCPConn struct{ _ [1]uint64 }
+
+// TCPListener differs between hosts: functions convert it by pointer.
+type TCPListener struct{ _ [8]uint64 }
+
+// UDPConn differs between hosts: functions convert it by pointer.
+type UDPConn struct{ _ [1]uint64 }
+
+// UnixConn differs between hosts: functions convert it by pointer.
+type UnixConn struct{ _ [1]uint64 }
+
+// UnixListener differs between hosts: functions convert it by pointer.
+type UnixListener struct{ _ [6]uint64 }
+
+// conn differs between hosts: functions convert it by pointer.
+type conn struct{ _ [1]uint64 }
 
 type netFD struct {
 	pfd         poll.FD
@@ -35,862 +3802,30 @@ type netFD struct {
 	raddr       Addr
 }
 
-type sockaddr interface {
-	family() int
-	isWildcard() bool
-	sockaddr(family int) (syscall.Sockaddr, error)
-	toLocal(net string) sockaddr
-	Addr
-}
-
-func boolint(a0 bool) int {
-	if apehost == apeLinux {
-		x0 := linux_boolint(a0)
-		return x0
-	}
-	x0 := freebsd_boolint(a0)
-	return x0
-}
-
-func concurrentThreadsLimit() int {
-	if apehost == apeLinux {
-		x0 := linux_concurrentThreadsLimit()
-		return x0
-	}
-	x0 := freebsd_concurrentThreadsLimit()
-	return x0
-}
-
-func fileConn(a0 *os.File) (Conn, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_fileConn(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_fileConn(a0)
-	return x0, x1
-}
-
-func fileListener(a0 *os.File) (Listener, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_fileListener(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_fileListener(a0)
-	return x0, x1
-}
-
-func filePacketConn(a0 *os.File) (PacketConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_filePacketConn(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_filePacketConn(a0)
-	return x0, x1
-}
-
-func interfaceAddrTable(a0 *Interface) ([]Addr, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_interfaceAddrTable(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_interfaceAddrTable(a0)
-	return x0, x1
-}
-
-func interfaceMulticastAddrTable(a0 *Interface) ([]Addr, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_interfaceMulticastAddrTable(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_interfaceMulticastAddrTable(a0)
-	return x0, x1
-}
-
-func interfaceTable(a0 int) ([]Interface, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_interfaceTable(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_interfaceTable(a0)
-	return x0, x1
-}
-
-func isUsingMultipathTCP(a0 *netFD) bool {
-	if apehost == apeLinux {
-		x0 := linux_isUsingMultipathTCP(a0)
-		return x0
-	}
-	x0 := freebsd_isUsingMultipathTCP(a0)
-	return x0
-}
-
-func maxListenerBacklog() int {
-	if apehost == apeLinux {
-		x0 := linux_maxListenerBacklog()
-		return x0
-	}
-	x0 := freebsd_maxListenerBacklog()
-	return x0
-}
-
-func setKeepAlive(a0 *netFD, a1 bool) error {
-	if apehost == apeLinux {
-		x0 := linux_setKeepAlive(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setKeepAlive(a0, a1)
-	return x0
-}
-
-func setKeepAliveCount(a0 *netFD, a1 int) error {
-	if apehost == apeLinux {
-		x0 := linux_setKeepAliveCount(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setKeepAliveCount(a0, a1)
-	return x0
-}
-
-func setKeepAliveIdle(a0 *netFD, a1 time.Duration) error {
-	if apehost == apeLinux {
-		x0 := linux_setKeepAliveIdle(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setKeepAliveIdle(a0, a1)
-	return x0
-}
-
-func setKeepAliveInterval(a0 *netFD, a1 time.Duration) error {
-	if apehost == apeLinux {
-		x0 := linux_setKeepAliveInterval(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setKeepAliveInterval(a0, a1)
-	return x0
-}
-
-func setLinger(a0 *netFD, a1 int) error {
-	if apehost == apeLinux {
-		x0 := linux_setLinger(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setLinger(a0, a1)
-	return x0
-}
-
-func setReadBuffer(a0 *netFD, a1 int) error {
-	if apehost == apeLinux {
-		x0 := linux_setReadBuffer(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setReadBuffer(a0, a1)
-	return x0
-}
-
-func setWriteBuffer(a0 *netFD, a1 int) error {
-	if apehost == apeLinux {
-		x0 := linux_setWriteBuffer(a0, a1)
-		return x0
-	}
-	x0 := freebsd_setWriteBuffer(a0, a1)
-	return x0
-}
-
-func spuriousENOTAVAIL(a0 error) bool {
-	if apehost == apeLinux {
-		x0 := linux_spuriousENOTAVAIL(a0)
-		return x0
-	}
-	x0 := freebsd_spuriousENOTAVAIL(a0)
-	return x0
-}
-
-func (r *IPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	x0 := r.freebsd_family()
-	return x0
-}
-
-func (r *IPAddr) sockaddr(a0 int) (syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_sockaddr(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_sockaddr(a0)
-	return x0, x1
-}
-
-func (r *IPAddr) toLocal(a0 string) sockaddr {
-	if apehost == apeLinux {
-		x0 := r.linux_toLocal(a0)
-		return x0
-	}
-	x0 := r.freebsd_toLocal(a0)
-	return x0
-}
-
-func (r *IPConn) readFrom(a0 []byte) (int, *IPAddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFrom(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_readFrom(a0)
-	return x0, x1, x2
-}
-
-func (r *IPConn) readMsg(a0 []byte, a1 []byte) (int, int, int, *IPAddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := r.linux_readMsg(a0, a1)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := r.freebsd_readMsg(a0, a1)
-	return x0, x1, x2, x3, x4
-}
-
-func (r *IPConn) writeMsg(a0 []byte, a1 []byte, a2 *IPAddr) (int, int, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeMsg(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_writeMsg(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *IPConn) writeTo(a0 []byte, a1 *IPAddr) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeTo(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeTo(a0, a1)
-	return x0, x1
-}
-
-func (r *TCPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	x0 := r.freebsd_family()
-	return x0
-}
-
-func (r *TCPAddr) sockaddr(a0 int) (syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_sockaddr(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_sockaddr(a0)
-	return x0, x1
-}
-
-func (r *TCPAddr) toLocal(a0 string) sockaddr {
-	if apehost == apeLinux {
-		x0 := r.linux_toLocal(a0)
-		return x0
-	}
-	x0 := r.freebsd_toLocal(a0)
-	return x0
-}
-
-func (r *TCPConn) readFrom(a0 io.Reader) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_readFrom(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_readFrom(a0)
-	return x0, x1
-}
-
-func (r *TCPConn) writeTo(a0 io.Writer) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeTo(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeTo(a0)
-	return x0, x1
-}
-
-func (r *TCPListener) accept() (*TCPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_accept()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_accept()
-	return x0, x1
-}
-
-func (r *TCPListener) close() error {
-	if apehost == apeLinux {
-		x0 := r.linux_close()
-		return x0
-	}
-	x0 := r.freebsd_close()
-	return x0
-}
-
-func (r *TCPListener) file() (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_file()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_file()
-	return x0, x1
-}
-
-func (r *TCPListener) ok() bool {
-	if apehost == apeLinux {
-		x0 := r.linux_ok()
-		return x0
-	}
-	x0 := r.freebsd_ok()
-	return x0
-}
-
-func (r *UDPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	x0 := r.freebsd_family()
-	return x0
-}
-
-func (r *UDPAddr) sockaddr(a0 int) (syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_sockaddr(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_sockaddr(a0)
-	return x0, x1
-}
-
-func (r *UDPAddr) toLocal(a0 string) sockaddr {
-	if apehost == apeLinux {
-		x0 := r.linux_toLocal(a0)
-		return x0
-	}
-	x0 := r.freebsd_toLocal(a0)
-	return x0
-}
-
-func (r *UDPConn) readFrom(a0 []byte, a1 *UDPAddr) (int, *UDPAddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFrom(a0, a1)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_readFrom(a0, a1)
-	return x0, x1, x2
-}
-
-func (r *UDPConn) readFromAddrPort(a0 []byte) (int, netip.AddrPort, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFromAddrPort(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_readFromAddrPort(a0)
-	return x0, x1, x2
-}
-
-func (r *UDPConn) readMsg(a0 []byte, a1 []byte) (int, int, int, netip.AddrPort, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := r.linux_readMsg(a0, a1)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := r.freebsd_readMsg(a0, a1)
-	return x0, x1, x2, x3, x4
-}
-
-func (r *UDPConn) writeMsg(a0 []byte, a1 []byte, a2 *UDPAddr) (int, int, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeMsg(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_writeMsg(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *UDPConn) writeMsgAddrPort(a0 []byte, a1 []byte, a2 netip.AddrPort) (int, int, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeMsgAddrPort(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_writeMsgAddrPort(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *UDPConn) writeTo(a0 []byte, a1 *UDPAddr) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeTo(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeTo(a0, a1)
-	return x0, x1
-}
-
-func (r *UDPConn) writeToAddrPort(a0 []byte, a1 netip.AddrPort) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeToAddrPort(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeToAddrPort(a0, a1)
-	return x0, x1
-}
-
-func (r *UnixAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	x0 := r.freebsd_family()
-	return x0
-}
-
-func (r *UnixAddr) sockaddr(a0 int) (syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_sockaddr(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_sockaddr(a0)
-	return x0, x1
-}
-
-func (r *UnixAddr) toLocal(a0 string) sockaddr {
-	if apehost == apeLinux {
-		x0 := r.linux_toLocal(a0)
-		return x0
-	}
-	x0 := r.freebsd_toLocal(a0)
-	return x0
-}
-
-func (r *UnixConn) readFrom(a0 []byte) (int, *UnixAddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFrom(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_readFrom(a0)
-	return x0, x1, x2
-}
-
-func (r *UnixConn) readMsg(a0 []byte, a1 []byte) (int, int, int, *UnixAddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := r.linux_readMsg(a0, a1)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := r.freebsd_readMsg(a0, a1)
-	return x0, x1, x2, x3, x4
-}
-
-func (r *UnixConn) writeMsg(a0 []byte, a1 []byte, a2 *UnixAddr) (int, int, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeMsg(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_writeMsg(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *UnixConn) writeTo(a0 []byte, a1 *UnixAddr) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeTo(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeTo(a0, a1)
-	return x0, x1
-}
-
-func (r *UnixListener) SetUnlinkOnClose(a0 bool) {
-	if apehost == apeLinux {
-		r.Linux_SetUnlinkOnClose(a0)
-		return
-	}
-	r.Freebsd_SetUnlinkOnClose(a0)
-}
-
-func (r *UnixListener) accept() (*UnixConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_accept()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_accept()
-	return x0, x1
-}
-
-func (r *UnixListener) close() error {
-	if apehost == apeLinux {
-		x0 := r.linux_close()
-		return x0
-	}
-	x0 := r.freebsd_close()
-	return x0
-}
-
-func (r *UnixListener) file() (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_file()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_file()
-	return x0, x1
-}
-
-func (r *ipStackCapabilities) probe() {
-	if apehost == apeLinux {
-		r.linux_probe()
-		return
-	}
-	r.freebsd_probe()
-}
-
-func (r *netFD) Close() error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Close()
-		return x0
-	}
-	x0 := r.Freebsd_Close()
-	return x0
-}
-
-func (r *netFD) Read(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Read(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Read(a0)
-	return x0, x1
-}
-
-func (r *netFD) SetDeadline(a0 time.Time) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_SetDeadline(a0)
-		return x0
-	}
-	x0 := r.Freebsd_SetDeadline(a0)
-	return x0
-}
-
-func (r *netFD) SetReadDeadline(a0 time.Time) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_SetReadDeadline(a0)
-		return x0
-	}
-	x0 := r.Freebsd_SetReadDeadline(a0)
-	return x0
-}
-
-func (r *netFD) SetWriteDeadline(a0 time.Time) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_SetWriteDeadline(a0)
-		return x0
-	}
-	x0 := r.Freebsd_SetWriteDeadline(a0)
-	return x0
-}
-
-func (r *netFD) Write(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Write(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Write(a0)
-	return x0, x1
-}
-
-func (r *netFD) accept() (*netFD, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_accept()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_accept()
-	return x0, x1
-}
-
-func (r *netFD) addrFunc() func(syscall.Sockaddr) Addr {
-	if apehost == apeLinux {
-		x0 := r.linux_addrFunc()
-		return x0
-	}
-	x0 := r.freebsd_addrFunc()
-	return x0
-}
-
-func (r *netFD) closeRead() error {
-	if apehost == apeLinux {
-		x0 := r.linux_closeRead()
-		return x0
-	}
-	x0 := r.freebsd_closeRead()
-	return x0
-}
-
-func (r *netFD) closeWrite() error {
-	if apehost == apeLinux {
-		x0 := r.linux_closeWrite()
-		return x0
-	}
-	x0 := r.freebsd_closeWrite()
-	return x0
-}
-
-func (r *netFD) connect(a0 context.Context, a1 syscall.Sockaddr, a2 syscall.Sockaddr) (syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_connect(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_connect(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *netFD) ctrlNetwork() string {
-	if apehost == apeLinux {
-		x0 := r.linux_ctrlNetwork()
-		return x0
-	}
-	x0 := r.freebsd_ctrlNetwork()
-	return x0
-}
-
-func (r *netFD) dial(a0 context.Context, a1 sockaddr, a2 sockaddr, a3 func(context.Context, string, string, syscall.RawConn) error) error {
-	if apehost == apeLinux {
-		x0 := r.linux_dial(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := r.freebsd_dial(a0, a1, a2, a3)
-	return x0
-}
-
-func (r *netFD) dup() (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_dup()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_dup()
-	return x0, x1
-}
-
-func (r *netFD) init() error {
-	if apehost == apeLinux {
-		x0 := r.linux_init()
-		return x0
-	}
-	x0 := r.freebsd_init()
-	return x0
-}
-
-func (r *netFD) listenDatagram(a0 context.Context, a1 sockaddr, a2 func(context.Context, string, string, syscall.RawConn) error) error {
-	if apehost == apeLinux {
-		x0 := r.linux_listenDatagram(a0, a1, a2)
-		return x0
-	}
-	x0 := r.freebsd_listenDatagram(a0, a1, a2)
-	return x0
-}
-
-func (r *netFD) listenStream(a0 context.Context, a1 sockaddr, a2 int, a3 func(context.Context, string, string, syscall.RawConn) error) error {
-	if apehost == apeLinux {
-		x0 := r.linux_listenStream(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := r.freebsd_listenStream(a0, a1, a2, a3)
-	return x0
-}
-
-func (r *netFD) name() string {
-	if apehost == apeLinux {
-		x0 := r.linux_name()
-		return x0
-	}
-	x0 := r.freebsd_name()
-	return x0
-}
-
-func (r *netFD) readFrom(a0 []byte) (int, syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFrom(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_readFrom(a0)
-	return x0, x1, x2
-}
-
-func (r *netFD) readMsg(a0 []byte, a1 []byte, a2 int) (int, int, int, syscall.Sockaddr, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := r.linux_readMsg(a0, a1, a2)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := r.freebsd_readMsg(a0, a1, a2)
-	return x0, x1, x2, x3, x4
-}
-
-func (r *netFD) setAddr(a0 Addr, a1 Addr) {
-	if apehost == apeLinux {
-		r.linux_setAddr(a0, a1)
-		return
-	}
-	r.freebsd_setAddr(a0, a1)
-}
-
-func (r *netFD) shutdown(a0 int) error {
-	if apehost == apeLinux {
-		x0 := r.linux_shutdown(a0)
-		return x0
-	}
-	x0 := r.freebsd_shutdown(a0)
-	return x0
-}
-
-func (r *netFD) writeMsg(a0 []byte, a1 []byte, a2 syscall.Sockaddr) (int, int, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeMsg(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.freebsd_writeMsg(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *netFD) writeTo(a0 []byte, a1 syscall.Sockaddr) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writeTo(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_writeTo(a0, a1)
-	return x0, x1
-}
-
-func (r *sysDialer) dialIP(a0 context.Context, a1 *IPAddr, a2 *IPAddr) (*IPConn, error) {
+// ape_ErrClosed is the host's.
+var ape_ErrClosed = func() *error {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_dialIP(a0, a1, a2)
-		return x0, x1
+		return &Linux_ErrClosed
 	}
-	x0, x1 := r.freebsd_dialIP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) dialMPTCP(a0 context.Context, a1 *TCPAddr, a2 *TCPAddr) (*TCPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_dialMPTCP(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_dialMPTCP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) dialTCP(a0 context.Context, a1 *TCPAddr, a2 *TCPAddr) (*TCPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_dialTCP(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_dialTCP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) dialUDP(a0 context.Context, a1 *UDPAddr, a2 *UDPAddr) (*UDPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_dialUDP(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_dialUDP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) dialUnix(a0 context.Context, a1 *UnixAddr, a2 *UnixAddr) (*UnixConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_dialUnix(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_dialUnix(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) doDialTCP(a0 context.Context, a1 *TCPAddr, a2 *TCPAddr) (*TCPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_doDialTCP(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_doDialTCP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysDialer) doDialTCPProto(a0 context.Context, a1 *TCPAddr, a2 *TCPAddr, a3 int) (*TCPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_doDialTCPProto(a0, a1, a2, a3)
-		return x0, x1
+	if apehost == apeFreebsd {
+		return &Freebsd_ErrClosed
 	}
-	x0, x1 := r.freebsd_doDialTCPProto(a0, a1, a2, a3)
-	return x0, x1
-}
+	return &Windows_ErrClosed
+}()
 
-func (r *sysListener) listenIP(a0 context.Context, a1 *IPAddr) (*IPConn, error) {
+// ErrClosed is the host's at startup.
+var ErrClosed error = func() error {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_listenIP(a0, a1)
-		return x0, x1
+		return Linux_ErrClosed
 	}
-	x0, x1 := r.freebsd_listenIP(a0, a1)
-	return x0, x1
-}
-
-func (r *sysListener) listenMPTCP(a0 context.Context, a1 *TCPAddr) (*TCPListener, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenMPTCP(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_listenMPTCP(a0, a1)
-	return x0, x1
-}
-
-func (r *sysListener) listenMulticastUDP(a0 context.Context, a1 *Interface, a2 *UDPAddr) (*UDPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenMulticastUDP(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_listenMulticastUDP(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysListener) listenTCP(a0 context.Context, a1 *TCPAddr) (*TCPListener, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenTCP(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_listenTCP(a0, a1)
-	return x0, x1
-}
-
-func (r *sysListener) listenTCPProto(a0 context.Context, a1 *TCPAddr, a2 int) (*TCPListener, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenTCPProto(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_listenTCPProto(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *sysListener) listenUDP(a0 context.Context, a1 *UDPAddr) (*UDPConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenUDP(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_listenUDP(a0, a1)
-	return x0, x1
-}
-
-func (r *sysListener) listenUnix(a0 context.Context, a1 *UnixAddr) (*UnixListener, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenUnix(a0, a1)
-		return x0, x1
+	if apehost == apeFreebsd {
+		return Freebsd_ErrClosed
 	}
-	x0, x1 := r.freebsd_listenUnix(a0, a1)
-	return x0, x1
-}
+	return Windows_ErrClosed
+}()
 
-func (r *sysListener) listenUnixgram(a0 context.Context, a1 *UnixAddr) (*UnixConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_listenUnixgram(a0, a1)
-		return x0, x1
+func init() {
+	if apehost == apeWindows {
+		windows_init0()
 	}
-	x0, x1 := r.freebsd_listenUnixgram(a0, a1)
-	return x0, x1
 }

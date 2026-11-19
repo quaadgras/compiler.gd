@@ -15,9 +15,9 @@ import (
 )
 
 func linux_fillFileStatFromSys(fs *linux_fileStat, name string) {
-	fs.name = filepathlite.Base(name)
+	fs.name = filepathlite.Linux_Base(name)
 	fs.size = fs.sys.Size
-	fs.modTime = time.Unix(fs.sys.Mtim.Unix())
+	fs.modTime = time.Linux_Unix(fs.sys.Mtim.Linux_Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)
 	switch fs.sys.Mode & syscall.Linux_S_IFMT {
 	case syscall.Linux_S_IFBLK:
@@ -48,5 +48,5 @@ func linux_fillFileStatFromSys(fs *linux_fileStat, name string) {
 
 // For testing.
 func linux_atime(fi FileInfo) time.Time {
-	return time.Unix(fi.Sys().(*syscall.Linux_Stat_t).Atim.Unix())
+	return time.Linux_Unix(fi.Sys().(*syscall.Linux_Stat_t).Atim.Linux_Unix())
 }

@@ -26,10 +26,10 @@ const (
 )
 
 type freebsd_netUDPConn struct {
-	c *net.UDPConn
+	c *net.Freebsd_UDPConn
 }
 
-func freebsd_newNetUDPConn(uc *net.UDPConn) (*freebsd_netUDPConn, error) {
+func freebsd_newNetUDPConn(uc *net.Freebsd_UDPConn) (*freebsd_netUDPConn, error) {
 	return &freebsd_netUDPConn{
 		c: uc,
 	}, nil
@@ -39,7 +39,7 @@ func (c *freebsd_netUDPConn) Close() error { return c.c.Close() }
 
 func (c *freebsd_netUDPConn) LocalAddr() netip.AddrPort {
 	a, _ := c.c.LocalAddr().(*net.UDPAddr)
-	return a.AddrPort()
+	return a.Freebsd_AddrPort()
 }
 
 func (c *freebsd_netUDPConn) Read(f func(*datagram)) {

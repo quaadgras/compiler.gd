@@ -15,28 +15,28 @@ import (
 
 var _ = runtime.GOARCH
 
-func linux_joinIPv4Group(fd *netFD, ifi *Interface, ip IP) error {
-	mreq := &syscall.IPMreqn{Multiaddr: [4]byte{ip[0], ip[1], ip[2], ip[3]}}
+func linux_joinIPv4Group(fd *linux_netFD, ifi *Interface, ip IP) error {
+	mreq := &syscall.Linux_IPMreqn{Multiaddr: [4]byte{ip[0], ip[1], ip[2], ip[3]}}
 	if ifi != nil {
 		mreq.Ifindex = int32(ifi.Index)
 	}
-	err := fd.pfd.Linux_SetsockoptIPMreqn(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_ADD_MEMBERSHIP, mreq)
+	err := fd.pfd.SetsockoptIPMreqn(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_ADD_MEMBERSHIP, mreq)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setIPv4MulticastInterface(fd *netFD, ifi *Interface) error {
+func linux_setIPv4MulticastInterface(fd *linux_netFD, ifi *Interface) error {
 	var v int32
 	if ifi != nil {
 		v = int32(ifi.Index)
 	}
-	mreq := &syscall.IPMreqn{Ifindex: v}
-	err := fd.pfd.Linux_SetsockoptIPMreqn(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_MULTICAST_IF, mreq)
+	mreq := &syscall.Linux_IPMreqn{Ifindex: v}
+	err := fd.pfd.SetsockoptIPMreqn(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_MULTICAST_IF, mreq)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setIPv4MulticastLoopback(fd *netFD, v bool) error {
+func linux_setIPv4MulticastLoopback(fd *linux_netFD, v bool) error {
 	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_MULTICAST_LOOP, linux_boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)

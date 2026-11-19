@@ -15,14 +15,16 @@ import (
 
 // isatty reports whether f is a terminal: a character device, which most
 // are (but /dev/null too).
-func freebsd_isatty(f *os.File) bool {
-	fi, err := f.Freebsd_Stat()
+func freebsd_isatty(f *os.Freebsd_File) bool {
+	fi, err := f.Stat()
 	return err == nil && fi.Mode()&fs.ModeCharDevice != 0
 }
 
 // ioctlInRead is FIONREAD of what is not a regular file, which the system
 // does not give.
-func freebsd_ioctlInRead(f *os.File) (int64, error) { return 0, errnoErr(ENOTTY) }
+func freebsd_ioctlInRead(f *os.Freebsd_File) (int64, error) { return 0, errnoErr(ENOTTY) }
 
 // ioctlWinsize is TIOCGWINSZ, which the system does not give.
-func freebsd_ioctlWinsize(f *os.File) ([4]uint16, error) { return [4]uint16{}, errnoErr(ENOTTY) }
+func freebsd_ioctlWinsize(f *os.Freebsd_File) ([4]uint16, error) {
+	return [4]uint16{}, errnoErr(ENOTTY)
+}

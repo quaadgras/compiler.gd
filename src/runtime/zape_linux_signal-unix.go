@@ -16,6 +16,16 @@ import (
 	"unsafe"
 )
 
+// sigTabT is the type of an entry in the global sigtable array.
+// sigtable is inherently system dependent, and appears in OS-specific files,
+// but sigTabT is the same for all Unixy systems.
+// The sigtable array is indexed by a system signal number to get the flags
+// and printable name of each signal.
+type linux_sigTabT struct {
+	flags int32
+	name  string
+}
+
 // (apegen: zape_dispatch pushes os.sigpipe)
 func linux_os_sigpipe() {
 	systemstack(linux_sigpipe)
@@ -80,7 +90,15 @@ var linux_fwdSig [linux__NSIG]uintptr
 // This is uint32 rather than bool so that we can use atomic instructions.
 var linux_handlingSig [linux__NSIG]uint32
 
-func init() {
+// channels for synchronizing signal mask updates with the signal mask
+// thread
+var (
+	linux_disableSigChan  chan uint32
+	linux_enableSigChan   chan uint32
+	linux_maskUpdatedChan chan struct{}
+)
+
+func linux_init0() {
 	// _NSIG is the number of signals on this operating system.
 	// sigtable should describe what to do for all the possible signals.
 	if len(linux_sigtable) != linux__NSIG {
@@ -88,6 +106,8 @@ func init() {
 		throw("bad sigtable len")
 	}
 }
+
+var linux_signalsOK bool
 
 // Initialize signals.
 // Called by libpreinit so runtime may not be initialized.
@@ -97,7 +117,7 @@ func init() {
 func linux_initsig(preinit bool) {
 	if !preinit {
 		// It's now OK for signal handlers to run.
-		signalsOK = true
+		linux_signalsOK = true
 	}
 
 	// For c-archive/c-shared this is called by libpreinit with
@@ -182,8 +202,8 @@ func linux_sigenable(sig uint32) {
 	t := &linux_sigtable[sig]
 	if t.flags&_SigNotify != 0 {
 		linux_ensureSigM()
-		enableSigChan <- sig
-		<-maskUpdatedChan
+		linux_enableSigChan <- sig
+		<-linux_maskUpdatedChan
 		if atomic.Cas(&linux_handlingSig[sig], 0, 1) {
 			atomic.Storeuintptr(&linux_fwdSig[sig], linux_getsig(sig))
 			linux_setsig(sig, abi.FuncPCABIInternal(linux_sighandler))
@@ -207,8 +227,8 @@ func linux_sigdisable(sig uint32) {
 	t := &linux_sigtable[sig]
 	if t.flags&_SigNotify != 0 {
 		linux_ensureSigM()
-		disableSigChan <- sig
-		<-maskUpdatedChan
+		linux_disableSigChan <- sig
+		<-linux_maskUpdatedChan
 
 		// If initsig does not install a signal handler for a
 		// signal, then to go back to the state before Notify
@@ -284,13 +304,13 @@ func linux_setProcessCPUProfilerTimer(hz int32) {
 			linux_setsig(linux__SIGPROF, abi.FuncPCABIInternal(linux_sighandler))
 		}
 
-		var it itimerval
+		var it linux_itimerval
 		it.it_interval.tv_sec = 0
-		it.it_interval.linux_set_usec(1000000 / hz)
+		it.it_interval.set_usec(1000000 / hz)
 		it.it_value = it.it_interval
 		linux_setitimer(linux__ITIMER_PROF, &it, nil)
 	} else {
-		linux_setitimer(linux__ITIMER_PROF, &itimerval{}, nil)
+		linux_setitimer(linux__ITIMER_PROF, &linux_itimerval{}, nil)
 
 		// If the Go signal handler should be disabled by default,
 		// switch back to the signal handler that was installed
@@ -459,7 +479,7 @@ func linux_sigtrampgo(sig uint32, info *linux_siginfo, ctx unsafe.Pointer) {
 	setg(gp.m.gsignal)
 
 	// If some non-Go code called sigaltstack, adjust.
-	var gsignalStack gsignalStack
+	var gsignalStack linux_gsignalStack
 	setStack := linux_adjustSignalStack(sig, gp.m, &gsignalStack)
 	if setStack {
 		gp.m.gsignal.stktopsp = sys.GetCallerSP()
@@ -482,6 +502,12 @@ func linux_sigtrampgo(sig uint32, info *linux_siginfo, ctx unsafe.Pointer) {
 	}
 }
 
+// If the signal handler receives a SIGPROF signal on a non-Go thread,
+// it tries to collect a traceback into sigprofCallers.
+// sigprofCallersUse is set to non-zero while sigprofCallers holds a traceback.
+var linux_sigprofCallers cgoCallers
+var linux_sigprofCallersUse uint32
+
 // sigprofNonGo is called if we receive a SIGPROF signal on a non-Go thread,
 // and the signal handler collected a stack trace in sigprofCallers.
 // When this is called, sigprofCallersUse will be non-zero.
@@ -501,14 +527,14 @@ func linux_sigprofNonGo(sig uint32, info *linux_siginfo, ctx unsafe.Pointer) {
 		// combination with the process-wide timer. Avoid double-counting.
 		if linux_validSIGPROF(nil, c) {
 			n := 0
-			for n < len(sigprofCallers) && sigprofCallers[n] != 0 {
+			for n < len(linux_sigprofCallers) && linux_sigprofCallers[n] != 0 {
 				n++
 			}
-			cpuprof.addNonGo(sigprofCallers[:n])
+			cpuprof.addNonGo(linux_sigprofCallers[:n])
 		}
 	}
 
-	atomic.Store(&sigprofCallersUse, 0)
+	atomic.Store(&linux_sigprofCallersUse, 0)
 }
 
 // sigprofNonGoPC is called when a profiling signal arrived on a
@@ -534,7 +560,7 @@ func linux_sigprofNonGoPC(pc uintptr) {
 // signal stack in *gsigstack.
 //
 //go:nosplit
-func linux_adjustSignalStack(sig uint32, mp *m, gsigStack *gsignalStack) bool {
+func linux_adjustSignalStack(sig uint32, mp *m, gsigStack *linux_gsignalStack) bool {
 	sp := uintptr(unsafe.Pointer(&sig))
 	if sp >= mp.gsignal.stack.lo && sp < mp.gsignal.stack.hi {
 		return false
@@ -585,19 +611,27 @@ func linux_adjustSignalStack2(sig uint32, sp uintptr, mp *m, ssDisable bool) {
 	dropm()
 }
 
+// crashing is the number of m's we have waited for when implementing
+// GOTRACEBACK=crash when a signal is received.
+var linux_crashing atomic.Int32
+
 // testSigtrap and testSigusr1 are used by the runtime tests. If
 // non-nil, it is called on SIGTRAP/SIGUSR1. If it returns true, the
 // normal behavior on this signal is suppressed.
 var linux_testSigtrap func(info *linux_siginfo, ctxt *linux_sigctxt, gp *g) bool
+var linux_testSigusr1 func(gp *g) bool
+
+// sigsysIgnored is non-zero if we are currently ignoring SIGSYS. See issue #69065.
+var linux_sigsysIgnored uint32
 
 // (apegen: zape_dispatch pushes os.ignoreSIGSYS)
 func linux_ignoreSIGSYS() {
-	atomic.Store(&sigsysIgnored, 1)
+	atomic.Store(&linux_sigsysIgnored, 1)
 }
 
 // (apegen: zape_dispatch pushes os.restoreSIGSYS)
 func linux_restoreSIGSYS() {
-	atomic.Store(&sigsysIgnored, 0)
+	atomic.Store(&linux_sigsysIgnored, 0)
 }
 
 // sighandler is invoked when a signal occurs. The global g will be
@@ -643,7 +677,7 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 		return
 	}
 
-	if sig == linux__SIGUSR1 && testSigusr1 != nil && testSigusr1(gp) {
+	if sig == linux__SIGUSR1 && linux_testSigusr1 != nil && linux_testSigusr1(gp) {
 		return
 	}
 
@@ -710,7 +744,7 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 		return
 	}
 
-	if sig == linux__SIGSYS && c.sigFromSeccomp() && atomic.Load(&sigsysIgnored) != 0 {
+	if sig == linux__SIGSYS && c.sigFromSeccomp() && atomic.Load(&linux_sigsysIgnored) != 0 {
 		return
 	}
 
@@ -729,7 +763,7 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 	mp.throwing = throwTypeRuntime
 	mp.caughtsig.set(gp)
 
-	if crashing.Load() == 0 {
+	if linux_crashing.Load() == 0 {
 		startpanic_m()
 	}
 
@@ -739,11 +773,11 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 	if level > 0 {
 		goroutineheader(gp)
 		tracebacktrap(c.sigpc(), c.sigsp(), c.siglr(), gp)
-		if crashing.Load() > 0 && gp != mp.curg && mp.curg != nil && readgstatus(mp.curg)&^_Gscan == _Grunning {
+		if linux_crashing.Load() > 0 && gp != mp.curg && mp.curg != nil && readgstatus(mp.curg)&^_Gscan == _Grunning {
 			// tracebackothers on original m skipped this one; trace it now.
 			goroutineheader(mp.curg)
 			traceback(^uintptr(0), ^uintptr(0), 0, mp.curg)
-		} else if crashing.Load() == 0 {
+		} else if linux_crashing.Load() == 0 {
 			tracebackothers(gp)
 			print("\n")
 		}
@@ -755,12 +789,12 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 		var watchdogTimeoutMicros uint32 = 2000 * crashSleepMicros
 
 		isCrashThread := false
-		if crashing.CompareAndSwap(0, 1) {
+		if linux_crashing.CompareAndSwap(0, 1) {
 			isCrashThread = true
 		} else {
-			crashing.Add(1)
+			linux_crashing.Add(1)
 		}
-		if crashing.Load() < mcount()-int32(extraMLength.Load()) {
+		if linux_crashing.Load() < mcount()-int32(extraMLength.Load()) {
 			// There are other m's that need to dump their stacks.
 			// Relay SIGQUIT to the next m by sending it to the current process.
 			// All m's that have already received SIGQUIT have signal masks blocking
@@ -781,12 +815,12 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 			// Reset the timer whenever we see more ms received SIGQUIT
 			// to make it have enough time to crash (see issue #64752).
 			timeout := watchdogTimeoutMicros
-			maxCrashing := crashing.Load()
-			for timeout > 0 && (crashing.Load() < mcount()-int32(extraMLength.Load())) {
-				usleep(crashSleepMicros)
+			maxCrashing := linux_crashing.Load()
+			for timeout > 0 && (linux_crashing.Load() < mcount()-int32(extraMLength.Load())) {
+				linux_usleep(crashSleepMicros)
 				timeout -= crashSleepMicros
 
-				if c := crashing.Load(); c > maxCrashing {
+				if c := linux_crashing.Load(); c > maxCrashing {
 					// We make progress, so reset the watchdog timeout
 					maxCrashing = c
 					timeout = watchdogTimeoutMicros
@@ -794,11 +828,11 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 			}
 		} else {
 			maxCrashing := int32(0)
-			c := crashing.Load()
+			c := linux_crashing.Load()
 			for c > maxCrashing {
 				maxCrashing = c
-				usleep(watchdogTimeoutMicros)
-				c = crashing.Load()
+				linux_usleep(watchdogTimeoutMicros)
+				c = linux_crashing.Load()
 			}
 		}
 		printDebugLog()
@@ -807,7 +841,7 @@ func linux_sighandler(sig uint32, info *linux_siginfo, ctxt unsafe.Pointer, gp *
 
 	printDebugLog()
 
-	exit(2)
+	linux_exit(2)
 }
 
 func linux_fatalsignal(sig uint32, c *linux_sigctxt, gp *g, mp *m) *g {
@@ -818,7 +852,7 @@ func linux_fatalsignal(sig uint32, c *linux_sigctxt, gp *g, mp *m) *g {
 	}
 
 	if linux_isSecureMode() {
-		exit(2)
+		linux_exit(2)
 	}
 
 	print("PC=", hex(c.sigpc()), " m=", mp.id, " sigcode=", c.sigcode())
@@ -960,7 +994,7 @@ func linux_dieFromSignal(sig uint32) {
 	// If we are still somehow running, this probably means we're PID 1
 	// immune to signals with default-terminate. Use a shell convention
 	// of exit(128+sig) to mimic the "terminated by signal".
-	exit(128 + int32(sig))
+	linux_exit(128 + int32(sig))
 }
 
 // raisebadsignal is called when a signal is received on a non-Go
@@ -1016,7 +1050,7 @@ func linux_raisebadsignal(sig uint32, c *linux_sigctxt) {
 	// Give the signal a chance to be delivered.
 	// In almost all real cases the program is about to crash,
 	// so sleeping here is not a waste of time.
-	usleep(1000)
+	linux_usleep(1000)
 
 	// If the signal didn't cause the program to exit, restore the
 	// Go signal handler and carry on.
@@ -1035,12 +1069,12 @@ func linux_crash() {
 // ensureSigM starts one global, sleeping thread to make sure at least one thread
 // is available to catch signals enabled for os/signal.
 func linux_ensureSigM() {
-	if maskUpdatedChan != nil {
+	if linux_maskUpdatedChan != nil {
 		return
 	}
-	maskUpdatedChan = make(chan struct{})
-	disableSigChan = make(chan uint32)
-	enableSigChan = make(chan uint32)
+	linux_maskUpdatedChan = make(chan struct{})
+	linux_disableSigChan = make(chan uint32)
+	linux_enableSigChan = make(chan uint32)
 	go func() {
 		// Signal masks are per-thread, so make sure this goroutine stays on one
 		// thread.
@@ -1059,17 +1093,17 @@ func linux_ensureSigM() {
 		linux_sigprocmask(linux__SIG_SETMASK, &sigBlocked, nil)
 		for {
 			select {
-			case sig := <-enableSigChan:
+			case sig := <-linux_enableSigChan:
 				if sig > 0 {
 					linux_sigdelset(&sigBlocked, int(sig))
 				}
-			case sig := <-disableSigChan:
+			case sig := <-linux_disableSigChan:
 				if sig > 0 && linux_blockableSig(sig) {
 					linux_sigaddset(&sigBlocked, int(sig))
 				}
 			}
 			linux_sigprocmask(linux__SIG_SETMASK, &sigBlocked, nil)
-			maskUpdatedChan <- struct{}{}
+			linux_maskUpdatedChan <- struct{}{}
 		}
 	}()
 }
@@ -1113,7 +1147,7 @@ func linux_badsignal(sig uintptr, c *linux_sigctxt) {
 		// an M. Instead of hanging, just crash.
 		// Cannot call split-stack function as there is no G.
 		writeErrStr("fatal: bad g in signal handler\n")
-		exit(2)
+		linux_exit(2)
 		*(*uintptr)(unsafe.Pointer(uintptr(123))) = 2
 	}
 	needm(true)
@@ -1143,7 +1177,7 @@ func linux_sigfwdgo(sig uint32, info *linux_siginfo, ctx unsafe.Pointer) bool {
 	flags := linux_sigtable[sig].flags
 
 	// If we aren't handling the signal, forward it.
-	if atomic.Load(&linux_handlingSig[sig]) == 0 || !signalsOK {
+	if atomic.Load(&linux_handlingSig[sig]) == 0 || !linux_signalsOK {
 		// If the signal is ignored, doing nothing is the same as forwarding.
 		if fwdFn == linux__SIG_IGN || (fwdFn == linux__SIG_DFL && flags&_SigIgn != 0) {
 			return true
@@ -1225,31 +1259,36 @@ func linux_msigrestore(sigmask linux_sigset) {
 // sigsetAllExiting is used by sigblock(true) when a thread is
 // exiting.
 var linux_sigsetAllExiting = func() linux_sigset {
-	res := linux_sigset_all
-
-	// Apply GOOS-specific overrides here, rather than in osinit,
-	// because osinit may be called before sigsetAllExiting is
-	// initialized (#51913).
-	if "linux" == "linux" && iscgo {
-		// #42494 glibc and musl reserve some signals for
-		// internal use and require they not be blocked by
-		// the rest of a normal C runtime. When the go runtime
-		// blocks...unblocks signals, temporarily, the blocked
-		// interval of time is generally very short. As such,
-		// these expectations of *libc code are mostly met by
-		// the combined go+cgo system of threads. However,
-		// when go causes a thread to exit, via a return from
-		// mstart(), the combined runtime can deadlock if
-		// these signals are blocked. Thus, don't block these
-		// signals when exiting threads.
-		// - glibc: SIGCANCEL (32), SIGSETXID (33)
-		// - musl: SIGTIMER (32), SIGCANCEL (33), SIGSYNCCALL (34)
-		linux_sigdelset(&res, 32)
-		linux_sigdelset(&res, 33)
-		linux_sigdelset(&res, 34)
+	if apehost != apeLinux {
+		return *new(linux_sigset)
 	}
+	return func() linux_sigset {
+		res := linux_sigset_all
 
-	return res
+		// Apply GOOS-specific overrides here, rather than in osinit,
+		// because osinit may be called before sigsetAllExiting is
+		// initialized (#51913).
+		if "linux" == "linux" && iscgo {
+			// #42494 glibc and musl reserve some signals for
+			// internal use and require they not be blocked by
+			// the rest of a normal C runtime. When the go runtime
+			// blocks...unblocks signals, temporarily, the blocked
+			// interval of time is generally very short. As such,
+			// these expectations of *libc code are mostly met by
+			// the combined go+cgo system of threads. However,
+			// when go causes a thread to exit, via a return from
+			// mstart(), the combined runtime can deadlock if
+			// these signals are blocked. Thus, don't block these
+			// signals when exiting threads.
+			// - glibc: SIGCANCEL (32), SIGSETXID (33)
+			// - musl: SIGTIMER (32), SIGCANCEL (33), SIGSYNCCALL (34)
+			linux_sigdelset(&res, 32)
+			linux_sigdelset(&res, 33)
+			linux_sigdelset(&res, 34)
+		}
+
+		return res
+	}()
 }()
 
 // sigblock blocks signals in the current thread's signal mask.
@@ -1308,7 +1347,7 @@ func linux_minitSignalStack() {
 		linux_signalstack(&mp.gsignal.stack)
 		mp.newSigstack = true
 	} else {
-		linux_setGsignalStack(&st, &mp.goSigStack)
+		linux_setGsignalStack(&st, &(*(*linux_gsignalStack)(unsafe.Pointer(&mp.goSigStack))))
 		mp.newSigstack = false
 	}
 }
@@ -1346,7 +1385,7 @@ func linux_unminitSignals() {
 		// Android, libc allocates a signal stack for all
 		// threads, so it's important to restore the Go stack
 		// even on Go-created threads so we can free it.
-		linux_restoreGsignalStack(&getg().m.goSigStack)
+		linux_restoreGsignalStack(&(*(*linux_gsignalStack)(unsafe.Pointer(&getg().m.goSigStack))))
 	}
 }
 
@@ -1373,6 +1412,15 @@ func linux_blockableSig(sig uint32) bool {
 	return flags&(_SigKill|_SigThrow) == 0
 }
 
+// gsignalStack saves the fields of the gsignal stack changed by
+// setGsignalStack.
+type linux_gsignalStack struct {
+	stack       stack
+	stackguard0 uintptr
+	stackguard1 uintptr
+	stktopsp    uintptr
+}
+
 // setGsignalStack sets the gsignal stack of the current m to an
 // alternate signal stack returned from the sigaltstack system call.
 // It saves the old values in *old for use by restoreGsignalStack.
@@ -1381,7 +1429,7 @@ func linux_blockableSig(sig uint32) bool {
 //
 //go:nosplit
 //go:nowritebarrierrec
-func linux_setGsignalStack(st *linux_stackt, old *gsignalStack) {
+func linux_setGsignalStack(st *linux_stackt, old *linux_gsignalStack) {
 	gp := getg()
 	if old != nil {
 		old.stack = gp.m.gsignal.stack
@@ -1401,7 +1449,7 @@ func linux_setGsignalStack(st *linux_stackt, old *gsignalStack) {
 //
 //go:nosplit
 //go:nowritebarrierrec
-func linux_restoreGsignalStack(st *gsignalStack) {
+func linux_restoreGsignalStack(st *linux_gsignalStack) {
 	gp := getg().m.gsignal
 	gp.stack = st.stack
 	gp.stackguard0 = st.stackguard0

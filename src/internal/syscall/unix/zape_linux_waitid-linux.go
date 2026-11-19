@@ -18,7 +18,7 @@ const (
 	Linux_P_PIDFD = 3
 )
 
-func Linux_Waitid(idType int, id int, info *Linux_SiginfoChild, options int, rusage *syscall.Rusage) error {
+func Linux_Waitid(idType int, id int, info *Linux_SiginfoChild, options int, rusage *syscall.Linux_Rusage) error {
 	_, _, errno := syscall.Linux_Syscall6(syscall.Linux_SYS_WAITID, uintptr(idType), uintptr(id), uintptr(unsafe.Pointer(info)), uintptr(options), uintptr(unsafe.Pointer(rusage)), 0)
 	if errno != 0 {
 		return errno

@@ -17,17 +17,17 @@ import (
 // CmsgLen returns the value to store in the Len field of the [Cmsghdr]
 // structure, taking into account any necessary alignment.
 func Linux_CmsgLen(datalen int) int {
-	return cmsgAlignOf(Linux_SizeofCmsghdr) + datalen
+	return linux_cmsgAlignOf(Linux_SizeofCmsghdr) + datalen
 }
 
 // CmsgSpace returns the number of bytes an ancillary element with
 // payload of the passed data length occupies.
 func Linux_CmsgSpace(datalen int) int {
-	return cmsgAlignOf(Linux_SizeofCmsghdr) + cmsgAlignOf(datalen)
+	return linux_cmsgAlignOf(Linux_SizeofCmsghdr) + linux_cmsgAlignOf(datalen)
 }
 
 func (h *Linux_Cmsghdr) data(offset uintptr) unsafe.Pointer {
-	return unsafe.Pointer(uintptr(unsafe.Pointer(h)) + uintptr(cmsgAlignOf(Linux_SizeofCmsghdr)) + offset)
+	return unsafe.Pointer(uintptr(unsafe.Pointer(h)) + uintptr(linux_cmsgAlignOf(Linux_SizeofCmsghdr)) + offset)
 }
 
 // SocketControlMessage represents a socket control message.
@@ -48,7 +48,7 @@ func Linux_ParseSocketControlMessage(b []byte) ([]Linux_SocketControlMessage, er
 		}
 		m := Linux_SocketControlMessage{Header: *h, Data: dbuf}
 		msgs = append(msgs, m)
-		i += cmsgAlignOf(int(h.Len))
+		i += linux_cmsgAlignOf(int(h.Len))
 	}
 	return msgs, nil
 }
@@ -58,7 +58,7 @@ func linux_socketControlMessageHeaderAndData(b []byte) (*Linux_Cmsghdr, []byte, 
 	if h.Len < Linux_SizeofCmsghdr || uint64(h.Len) > uint64(len(b)) {
 		return nil, nil, Linux_EINVAL
 	}
-	return h, b[cmsgAlignOf(Linux_SizeofCmsghdr):h.Len], nil
+	return h, b[linux_cmsgAlignOf(Linux_SizeofCmsghdr):h.Len], nil
 }
 
 // UnixRights encodes a set of open file descriptors into a socket

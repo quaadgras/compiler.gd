@@ -51,16 +51,16 @@ const (
 
 // WaitStatus converts SiginfoChild, as filled in by the waitid syscall,
 // to syscall.WaitStatus.
-func (s *Linux_SiginfoChild) WaitStatus() (ws syscall.WaitStatus) {
+func (s *Linux_SiginfoChild) WaitStatus() (ws syscall.Linux_WaitStatus) {
 	switch s.Code {
 	case linux__CLD_EXITED:
-		ws = syscall.WaitStatus(s.Status << 8)
+		ws = syscall.Linux_WaitStatus(s.Status << 8)
 	case linux__CLD_DUMPED:
-		ws = syscall.WaitStatus(s.Status) | linux_core
+		ws = syscall.Linux_WaitStatus(s.Status) | linux_core
 	case linux__CLD_KILLED:
-		ws = syscall.WaitStatus(s.Status)
+		ws = syscall.Linux_WaitStatus(s.Status)
 	case linux__CLD_TRAPPED, linux__CLD_STOPPED:
-		ws = syscall.WaitStatus(s.Status<<8) | linux_stopped
+		ws = syscall.Linux_WaitStatus(s.Status<<8) | linux_stopped
 	case linux__CLD_CONTINUED:
 		ws = linux_continued
 	}

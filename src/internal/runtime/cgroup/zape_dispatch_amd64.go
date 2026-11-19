@@ -16,11 +16,5 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
-
-// CPU is linux's.
-type CPU struct {
-	version  Version
-	quotaFD  int
-	periodFD int
-}

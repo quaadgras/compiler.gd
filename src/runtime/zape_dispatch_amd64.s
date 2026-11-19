@@ -5,272 +5,407 @@
 #include "textflag.h"
 #include "go_asm.h"
 
-TEXT ·callCgoMmap(SB),NOSPLIT|NOFRAME,$0
+TEXT ·checkTimeouts<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_callCgoMmap(SB)
-	JMP	·freebsd_callCgoMmap(SB)
+	JMP	·linux_checkTimeouts<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_checkTimeouts<ABIInternal>(SB)
+	JMP	·windows_checkTimeouts<ABIInternal>(SB)
 
-TEXT ·callCgoMunmap(SB),NOSPLIT|NOFRAME,$0
+TEXT ·checkfds<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_callCgoMunmap(SB)
-	JMP	·freebsd_callCgoMunmap(SB)
+	JMP	·linux_checkfds<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_checkfds<ABIInternal>(SB)
+	JMP	·windows_checkfds<ABIInternal>(SB)
 
 TEXT ·clearSignalHandlers<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_clearSignalHandlers<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_clearSignalHandlers<ABIInternal>(SB)
+	JMP	·windows_clearSignalHandlers<ABIInternal>(SB)
 
-TEXT ·closefd(SB),NOSPLIT|NOFRAME,$0
+TEXT ·closefd<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_closefd(SB)
-	JMP	·freebsd_closefd(SB)
+	JMP	·linux_closefd<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_closefd<ABIInternal>(SB)
+	JMP	·windows_closefd<ABIInternal>(SB)
 
 TEXT ·crash<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_crash<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_crash<ABIInternal>(SB)
+	JMP	·windows_crash<ABIInternal>(SB)
 
 TEXT ·defaultGOMAXPROCS<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_defaultGOMAXPROCS<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_defaultGOMAXPROCS<ABIInternal>(SB)
+	JMP	·windows_defaultGOMAXPROCS<ABIInternal>(SB)
 
 TEXT ·defaultGOMAXPROCSInit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_defaultGOMAXPROCSInit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_defaultGOMAXPROCSInit<ABIInternal>(SB)
+	JMP	·windows_defaultGOMAXPROCSInit<ABIInternal>(SB)
 
 TEXT ·defaultGOMAXPROCSUpdateGODEBUG<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_defaultGOMAXPROCSUpdateGODEBUG<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_defaultGOMAXPROCSUpdateGODEBUG<ABIInternal>(SB)
+	JMP	·windows_defaultGOMAXPROCSUpdateGODEBUG<ABIInternal>(SB)
+
+TEXT ·enableWER<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_enableWER<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_enableWER<ABIInternal>(SB)
+	JMP	·windows_enableWER<ABIInternal>(SB)
 
 TEXT ·eraseSecretsSignalStk<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_eraseSecretsSignalStk<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_eraseSecretsSignalStk<ABIInternal>(SB)
+	JMP	·windows_eraseSecretsSignalStk<ABIInternal>(SB)
 
-TEXT ·exit(SB),NOSPLIT|NOFRAME,$0
+TEXT ·exit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_exit(SB)
-	JMP	·freebsd_exit(SB)
+	JMP	·linux_exit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_exit<ABIInternal>(SB)
+	JMP	·windows_exit<ABIInternal>(SB)
 
-TEXT ·exitThread(SB),NOSPLIT|NOFRAME,$0
+TEXT ·exitThread<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_exitThread(SB)
-	JMP	·freebsd_exitThread(SB)
+	JMP	·linux_exitThread<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_exitThread<ABIInternal>(SB)
+	JMP	·windows_exitThread<ABIInternal>(SB)
 
 TEXT ·goenvs<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_goenvs<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_goenvs<ABIInternal>(SB)
+	JMP	·windows_goenvs<ABIInternal>(SB)
 
 TEXT ·inVDSOPage<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_inVDSOPage<ABIInternal>(SB)
-	JMP	·freebsd_inVDSOPage<ABIInternal>(SB)
-
-TEXT ·initSecureMode<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
 	JNE	2(PC)
-	JMP	·linux_initSecureMode<ABIInternal>(SB)
-	JMP	·freebsd_initSecureMode<ABIInternal>(SB)
+	JMP	·freebsd_inVDSOPage<ABIInternal>(SB)
+	JMP	·windows_inVDSOPage<ABIInternal>(SB)
 
 TEXT ·initsig<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_initsig<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_initsig<ABIInternal>(SB)
+	JMP	·windows_initsig<ABIInternal>(SB)
 
 TEXT ·isSecureMode<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_isSecureMode<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_isSecureMode<ABIInternal>(SB)
+	JMP	·windows_isSecureMode<ABIInternal>(SB)
 
 TEXT ·libpreinit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_libpreinit<ABIInternal>(SB)
-	JMP	·freebsd_libpreinit<ABIInternal>(SB)
-
-TEXT ·madvise(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
 	JNE	2(PC)
-	JMP	·linux_madvise(SB)
-	JMP	·freebsd_madvise(SB)
+	JMP	·freebsd_libpreinit<ABIInternal>(SB)
+	JMP	·windows_libpreinit<ABIInternal>(SB)
 
 TEXT ·minit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_minit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_minit<ABIInternal>(SB)
+	JMP	·windows_minit<ABIInternal>(SB)
+
+TEXT ·nanotime1<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_nanotime1<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_nanotime1<ABIInternal>(SB)
+	JMP	·windows_nanotime1<ABIInternal>(SB)
 
 TEXT ·needZeroAfterSysUnusedOS<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_needZeroAfterSysUnusedOS<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_needZeroAfterSysUnusedOS<ABIInternal>(SB)
+	JMP	·windows_needZeroAfterSysUnusedOS<ABIInternal>(SB)
 
 TEXT ·netpoll<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_netpoll<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_netpoll<ABIInternal>(SB)
+	JMP	·windows_netpoll<ABIInternal>(SB)
 
 TEXT ·netpollBreak<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_netpollBreak<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_netpollBreak<ABIInternal>(SB)
+	JMP	·windows_netpollBreak<ABIInternal>(SB)
 
 TEXT ·netpollIsPollDescriptor<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_netpollIsPollDescriptor<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_netpollIsPollDescriptor<ABIInternal>(SB)
+	JMP	·windows_netpollIsPollDescriptor<ABIInternal>(SB)
 
 TEXT ·netpollclose<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_netpollclose<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_netpollclose<ABIInternal>(SB)
+	JMP	·windows_netpollclose<ABIInternal>(SB)
 
 TEXT ·netpollinit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_netpollinit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_netpollinit<ABIInternal>(SB)
+	JMP	·windows_netpollinit<ABIInternal>(SB)
 
-TEXT ·open(SB),NOSPLIT|NOFRAME,$0
+TEXT ·open<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_open(SB)
-	JMP	·freebsd_open(SB)
+	JMP	·linux_open<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_open<ABIInternal>(SB)
+	JMP	·windows_open<ABIInternal>(SB)
+
+TEXT ·osRelax<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_osRelax<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_osRelax<ABIInternal>(SB)
+	JMP	·windows_osRelax<ABIInternal>(SB)
 
 TEXT ·osinit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_osinit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_osinit<ABIInternal>(SB)
+	JMP	·windows_osinit<ABIInternal>(SB)
 
-TEXT ·osyield(SB),NOSPLIT|NOFRAME,$0
+TEXT ·osyield<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_osyield(SB)
-	JMP	·freebsd_osyield(SB)
+	JMP	·linux_osyield<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_osyield<ABIInternal>(SB)
+	JMP	·windows_osyield<ABIInternal>(SB)
 
 TEXT ·osyield_no_g<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_osyield_no_g<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_osyield_no_g<ABIInternal>(SB)
+	JMP	·windows_osyield_no_g<ABIInternal>(SB)
 
-TEXT ·pipe2(SB),NOSPLIT|NOFRAME,$0
+TEXT ·sbrk0<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_pipe2(SB)
-	JMP	·freebsd_pipe2(SB)
+	JMP	·linux_sbrk0<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_sbrk0<ABIInternal>(SB)
+	JMP	·windows_sbrk0<ABIInternal>(SB)
 
-TEXT ·read(SB),NOSPLIT|NOFRAME,$0
+TEXT ·secure<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_read(SB)
-	JMP	·freebsd_read(SB)
+	JMP	·linux_secure<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_secure<ABIInternal>(SB)
+	JMP	·windows_secure<ABIInternal>(SB)
+
+TEXT ·semasleep<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_semasleep<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_semasleep<ABIInternal>(SB)
+	JMP	·windows_semasleep<ABIInternal>(SB)
 
 TEXT ·setProcessCPUProfiler<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_setProcessCPUProfiler<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_setProcessCPUProfiler<ABIInternal>(SB)
+	JMP	·windows_setProcessCPUProfiler<ABIInternal>(SB)
 
 TEXT ·setThreadCPUProfiler<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_setThreadCPUProfiler<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_setThreadCPUProfiler<ABIInternal>(SB)
+	JMP	·windows_setThreadCPUProfiler<ABIInternal>(SB)
 
 TEXT ·setVMANameSupported<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_setVMANameSupported<ABIInternal>(SB)
-	JMP	·freebsd_setVMANameSupported<ABIInternal>(SB)
-
-TEXT ·settls(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
 	JNE	2(PC)
-	JMP	·linux_settls(SB)
-	JMP	·freebsd_settls(SB)
+	JMP	·freebsd_setVMANameSupported<ABIInternal>(SB)
+	JMP	·windows_setVMANameSupported<ABIInternal>(SB)
 
 TEXT ·sigblock<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_sigblock<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_sigblock<ABIInternal>(SB)
+	JMP	·windows_sigblock<ABIInternal>(SB)
 
 TEXT ·sigdisable<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_sigdisable<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_sigdisable<ABIInternal>(SB)
+	JMP	·windows_sigdisable<ABIInternal>(SB)
 
 TEXT ·sigenable<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_sigenable<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_sigenable<ABIInternal>(SB)
+	JMP	·windows_sigenable<ABIInternal>(SB)
 
 TEXT ·sigignore<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_sigignore<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_sigignore<ABIInternal>(SB)
+	JMP	·windows_sigignore<ABIInternal>(SB)
 
 TEXT ·sigpanic<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_sigpanic<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_sigpanic<ABIInternal>(SB)
-
-TEXT ·sysMmap(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
-	JNE	2(PC)
-	JMP	·linux_sysMmap(SB)
-	JMP	·freebsd_sysMmap(SB)
-
-TEXT ·sysMunmap(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
-	JNE	2(PC)
-	JMP	·linux_sysMunmap(SB)
-	JMP	·freebsd_sysMunmap(SB)
+	JMP	·windows_sigpanic<ABIInternal>(SB)
 
 TEXT ·unminit<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
 	JMP	·linux_unminit<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
 	JMP	·freebsd_unminit<ABIInternal>(SB)
+	JMP	·windows_unminit<ABIInternal>(SB)
 
-TEXT ·usleep(SB),NOSPLIT|NOFRAME,$0
+TEXT ·usleep<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_usleep(SB)
-	JMP	·freebsd_usleep(SB)
+	JMP	·linux_usleep<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_usleep<ABIInternal>(SB)
+	JMP	·windows_usleep<ABIInternal>(SB)
 
-TEXT ·write1(SB),NOSPLIT|NOFRAME,$0
+TEXT ·usleep_no_g<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)
-	JMP	·linux_write1(SB)
-	JMP	·freebsd_write1(SB)
+	JMP	·linux_usleep_no_g<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_usleep_no_g<ABIInternal>(SB)
+	JMP	·windows_usleep_no_g<ABIInternal>(SB)
+
+TEXT ·write1<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_write1<ABIInternal>(SB)
+	CMPB	runtime·apehost(SB), $const_apeFreebsd
+	JNE	2(PC)
+	JMP	·freebsd_write1<ABIInternal>(SB)
+	JMP	·windows_write1<ABIInternal>(SB)

@@ -12,14 +12,14 @@ import (
 	"context"
 )
 
-func (sd *sysDialer) freebsd_dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
-	return sd.freebsd_dialTCP(ctx, laddr, raddr)
+func (sd *freebsd_sysDialer) dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Freebsd_TCPConn, error) {
+	return sd.dialTCP(ctx, laddr, raddr)
 }
 
-func (sl *sysListener) freebsd_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
+func (sl *sysListener) freebsd_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*Freebsd_TCPListener, error) {
 	return sl.freebsd_listenTCP(ctx, laddr)
 }
 
-func freebsd_isUsingMultipathTCP(fd *netFD) bool {
+func freebsd_isUsingMultipathTCP(fd *freebsd_netFD) bool {
 	return false
 }

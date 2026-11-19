@@ -15,7 +15,7 @@ import (
 	"syscall"
 )
 
-func freebsd_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*netFD, error) {
+func freebsd_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*freebsd_netFD, error) {
 	var sotype int
 	switch net {
 	case "unix":
@@ -51,21 +51,21 @@ func freebsd_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, 
 	return fd, nil
 }
 
-func freebsd_sockaddrToUnix(sa syscall.Sockaddr) Addr {
+func freebsd_sockaddrToUnix(sa syscall.Freebsd_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Freebsd_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unix"}
 	}
 	return nil
 }
 
-func freebsd_sockaddrToUnixgram(sa syscall.Sockaddr) Addr {
+func freebsd_sockaddrToUnixgram(sa syscall.Freebsd_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Freebsd_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unixgram"}
 	}
 	return nil
 }
 
-func freebsd_sockaddrToUnixpacket(sa syscall.Sockaddr) Addr {
+func freebsd_sockaddrToUnixpacket(sa syscall.Freebsd_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Freebsd_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
@@ -89,7 +89,7 @@ func (a *UnixAddr) freebsd_family() int {
 	return syscall.Freebsd_AF_UNIX
 }
 
-func (a *UnixAddr) freebsd_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *UnixAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -100,9 +100,9 @@ func (a *UnixAddr) freebsd_toLocal(net string) sockaddr {
 	return a
 }
 
-func (c *UnixConn) freebsd_readFrom(b []byte) (int, *UnixAddr, error) {
+func (c *Freebsd_UnixConn) readFrom(b []byte) (int, *UnixAddr, error) {
 	var addr *UnixAddr
-	n, sa, err := c.fd.freebsd_readFrom(b)
+	n, sa, err := c.fd.readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Freebsd_SockaddrUnix:
 		if sa.Name != "" {
@@ -112,9 +112,9 @@ func (c *UnixConn) freebsd_readFrom(b []byte) (int, *UnixAddr, error) {
 	return n, addr, err
 }
 
-func (c *UnixConn) freebsd_readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
-	var sa syscall.Sockaddr
-	n, oobn, flags, sa, err = c.fd.freebsd_readMsg(b, oob, freebsd_readMsgFlags)
+func (c *Freebsd_UnixConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
+	var sa syscall.Freebsd_Sockaddr
+	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, freebsd_readMsgFlags)
 	if freebsd_readMsgFlags == 0 && err == nil && oobn > 0 {
 		freebsd_setReadMsgCloseOnExec(oob[:oobn])
 	}
@@ -128,7 +128,7 @@ func (c *UnixConn) freebsd_readMsg(b, oob []byte) (n, oobn, flags int, addr *Uni
 	return
 }
 
-func (c *UnixConn) freebsd_writeTo(b []byte, addr *UnixAddr) (int, error) {
+func (c *Freebsd_UnixConn) writeTo(b []byte, addr *UnixAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -139,24 +139,24 @@ func (c *UnixConn) freebsd_writeTo(b []byte, addr *UnixAddr) (int, error) {
 		return 0, syscall.Freebsd_EAFNOSUPPORT
 	}
 	sa := &syscall.Freebsd_SockaddrUnix{Name: addr.Name}
-	return c.fd.freebsd_writeTo(b, sa)
+	return c.fd.writeTo(b, sa)
 }
 
-func (c *UnixConn) freebsd_writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
+func (c *Freebsd_UnixConn) writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
 	if c.fd.sotype == syscall.Freebsd_SOCK_DGRAM && c.fd.isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
-	var sa syscall.Sockaddr
+	var sa syscall.Freebsd_Sockaddr
 	if addr != nil {
 		if addr.Net != freebsd_sotypeToNet(c.fd.sotype) {
 			return 0, 0, syscall.Freebsd_EAFNOSUPPORT
 		}
 		sa = &syscall.Freebsd_SockaddrUnix{Name: addr.Name}
 	}
-	return c.fd.freebsd_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (sd *sysDialer) freebsd_dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*UnixConn, error) {
+func (sd *freebsd_sysDialer) dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*Freebsd_UnixConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -167,18 +167,18 @@ func (sd *sysDialer) freebsd_dialUnix(ctx context.Context, laddr, raddr *UnixAdd
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return freebsd_newUnixConn(fd), nil
 }
 
-func (ln *UnixListener) freebsd_accept() (*UnixConn, error) {
-	fd, err := ln.fd.freebsd_accept()
+func (ln *Freebsd_UnixListener) accept() (*Freebsd_UnixConn, error) {
+	fd, err := ln.fd.accept()
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return freebsd_newUnixConn(fd), nil
 }
 
-func (ln *UnixListener) freebsd_close() error {
+func (ln *Freebsd_UnixListener) close() error {
 	// The operating system doesn't clean up
 	// the file that announcing created, so
 	// we have to clean it up ourselves.
@@ -195,11 +195,11 @@ func (ln *UnixListener) freebsd_close() error {
 			syscall.Freebsd_Unlink(ln.path)
 		}
 	})
-	return ln.fd.Freebsd_Close()
+	return ln.fd.Close()
 }
 
-func (ln *UnixListener) freebsd_file() (*os.File, error) {
-	f, err := ln.fd.freebsd_dup()
+func (ln *Freebsd_UnixListener) file() (*os.Freebsd_File, error) {
+	f, err := ln.fd.dup()
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +214,11 @@ func (ln *UnixListener) freebsd_file() (*os.File, error) {
 // Listen or ListenUnix, then by default closing the listener will remove the socket file.
 // but if the listener was created by a call to FileListener to use an already existing
 // socket file, then by default closing the listener will not remove the socket file.
-func (l *UnixListener) Freebsd_SetUnlinkOnClose(unlink bool) {
+func (l *Freebsd_UnixListener) SetUnlinkOnClose(unlink bool) {
 	l.unlink = unlink
 }
 
-func (sl *sysListener) freebsd_listenUnix(ctx context.Context, laddr *UnixAddr) (*UnixListener, error) {
+func (sl *sysListener) freebsd_listenUnix(ctx context.Context, laddr *UnixAddr) (*Freebsd_UnixListener, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -229,10 +229,10 @@ func (sl *sysListener) freebsd_listenUnix(ctx context.Context, laddr *UnixAddr) 
 	if err != nil {
 		return nil, err
 	}
-	return &UnixListener{fd: fd, path: fd.laddr.String(), unlink: true}, nil
+	return &Freebsd_UnixListener{fd: fd, path: fd.laddr.String(), unlink: true}, nil
 }
 
-func (sl *sysListener) freebsd_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*UnixConn, error) {
+func (sl *sysListener) freebsd_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*Freebsd_UnixConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -243,5 +243,5 @@ func (sl *sysListener) freebsd_listenUnixgram(ctx context.Context, laddr *UnixAd
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return freebsd_newUnixConn(fd), nil
 }

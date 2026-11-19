@@ -19,16 +19,14 @@ const (
 var linux_vdsoLinuxVersion = linux_vdsoVersionKey{"LINUX_2.6", 0x3ae75f6}
 
 var linux_vdsoSymbolKeys = []linux_vdsoSymbolKey{
-	{"__vdso_gettimeofday", 0x315ca59, 0xb01bca00, &linux_vdsoGettimeofdaySym},
+	{"__vdso_gettimeofday", 0x315ca59, 0xb01bca00, &vdsoGettimeofdaySym},
 	{"__vdso_clock_gettime", 0xd35ec75, 0x6e43a318, &linux_vdsoClockgettimeSym},
 	{"__vdso_getrandom", 0x25425d, 0x84a559bf, &linux_vdsoGetrandomSym},
 }
 
 var (
-	linux_vdsoGettimeofdaySym uintptr
 	linux_vdsoClockgettimeSym uintptr
 	linux_vdsoGetrandomSym    uintptr
 )
 
 // vdsoGettimeofdaySym is accessed from the syscall package.
-//go:linkname linux_vdsoGettimeofdaySym

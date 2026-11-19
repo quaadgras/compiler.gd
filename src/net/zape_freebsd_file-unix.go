@@ -16,8 +16,8 @@ import (
 
 const freebsd__SO_TYPE = syscall.Freebsd_SO_TYPE
 
-func freebsd_dupFileSocket(f *os.File) (int, error) {
-	s, call, err := poll.Freebsd_DupCloseOnExec(int(f.Freebsd_Fd()))
+func freebsd_dupFileSocket(f *os.Freebsd_File) (int, error) {
+	s, call, err := poll.Freebsd_DupCloseOnExec(int(f.Fd()))
 	if err != nil {
 		if call != "" {
 			err = os.NewSyscallError(call, err)
@@ -25,7 +25,7 @@ func freebsd_dupFileSocket(f *os.File) (int, error) {
 		return -1, err
 	}
 	if err := syscall.Freebsd_SetNonblock(s, true); err != nil {
-		poll.CloseFunc(s)
+		poll.Freebsd_CloseFunc(s)
 		return -1, os.NewSyscallError("setnonblock", err)
 	}
 	return s, nil

@@ -15,7 +15,7 @@ import (
 	"syscall"
 )
 
-func linux_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*netFD, error) {
+func linux_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*linux_netFD, error) {
 	var sotype int
 	switch net {
 	case "unix":
@@ -51,21 +51,21 @@ func linux_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mo
 	return fd, nil
 }
 
-func linux_sockaddrToUnix(sa syscall.Sockaddr) Addr {
+func linux_sockaddrToUnix(sa syscall.Linux_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Linux_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unix"}
 	}
 	return nil
 }
 
-func linux_sockaddrToUnixgram(sa syscall.Sockaddr) Addr {
+func linux_sockaddrToUnixgram(sa syscall.Linux_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Linux_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unixgram"}
 	}
 	return nil
 }
 
-func linux_sockaddrToUnixpacket(sa syscall.Sockaddr) Addr {
+func linux_sockaddrToUnixpacket(sa syscall.Linux_Sockaddr) Addr {
 	if s, ok := sa.(*syscall.Linux_SockaddrUnix); ok {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
@@ -89,7 +89,7 @@ func (a *UnixAddr) linux_family() int {
 	return syscall.Linux_AF_UNIX
 }
 
-func (a *UnixAddr) linux_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *UnixAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -100,9 +100,9 @@ func (a *UnixAddr) linux_toLocal(net string) sockaddr {
 	return a
 }
 
-func (c *UnixConn) linux_readFrom(b []byte) (int, *UnixAddr, error) {
+func (c *Linux_UnixConn) readFrom(b []byte) (int, *UnixAddr, error) {
 	var addr *UnixAddr
-	n, sa, err := c.fd.linux_readFrom(b)
+	n, sa, err := c.fd.readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrUnix:
 		if sa.Name != "" {
@@ -112,9 +112,9 @@ func (c *UnixConn) linux_readFrom(b []byte) (int, *UnixAddr, error) {
 	return n, addr, err
 }
 
-func (c *UnixConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
-	var sa syscall.Sockaddr
-	n, oobn, flags, sa, err = c.fd.linux_readMsg(b, oob, linux_readMsgFlags)
+func (c *Linux_UnixConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
+	var sa syscall.Linux_Sockaddr
+	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, linux_readMsgFlags)
 	if linux_readMsgFlags == 0 && err == nil && oobn > 0 {
 		linux_setReadMsgCloseOnExec(oob[:oobn])
 	}
@@ -128,7 +128,7 @@ func (c *UnixConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixA
 	return
 }
 
-func (c *UnixConn) linux_writeTo(b []byte, addr *UnixAddr) (int, error) {
+func (c *Linux_UnixConn) writeTo(b []byte, addr *UnixAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -139,24 +139,24 @@ func (c *UnixConn) linux_writeTo(b []byte, addr *UnixAddr) (int, error) {
 		return 0, syscall.Linux_EAFNOSUPPORT
 	}
 	sa := &syscall.Linux_SockaddrUnix{Name: addr.Name}
-	return c.fd.linux_writeTo(b, sa)
+	return c.fd.writeTo(b, sa)
 }
 
-func (c *UnixConn) linux_writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
+func (c *Linux_UnixConn) writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
 	if c.fd.sotype == syscall.Linux_SOCK_DGRAM && c.fd.isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
-	var sa syscall.Sockaddr
+	var sa syscall.Linux_Sockaddr
 	if addr != nil {
 		if addr.Net != linux_sotypeToNet(c.fd.sotype) {
 			return 0, 0, syscall.Linux_EAFNOSUPPORT
 		}
 		sa = &syscall.Linux_SockaddrUnix{Name: addr.Name}
 	}
-	return c.fd.linux_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (sd *sysDialer) linux_dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*UnixConn, error) {
+func (sd *linux_sysDialer) dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*Linux_UnixConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -167,18 +167,18 @@ func (sd *sysDialer) linux_dialUnix(ctx context.Context, laddr, raddr *UnixAddr)
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return linux_newUnixConn(fd), nil
 }
 
-func (ln *UnixListener) linux_accept() (*UnixConn, error) {
-	fd, err := ln.fd.linux_accept()
+func (ln *Linux_UnixListener) accept() (*Linux_UnixConn, error) {
+	fd, err := ln.fd.accept()
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return linux_newUnixConn(fd), nil
 }
 
-func (ln *UnixListener) linux_close() error {
+func (ln *Linux_UnixListener) close() error {
 	// The operating system doesn't clean up
 	// the file that announcing created, so
 	// we have to clean it up ourselves.
@@ -195,11 +195,11 @@ func (ln *UnixListener) linux_close() error {
 			syscall.Linux_Unlink(ln.path)
 		}
 	})
-	return ln.fd.Linux_Close()
+	return ln.fd.Close()
 }
 
-func (ln *UnixListener) linux_file() (*os.File, error) {
-	f, err := ln.fd.linux_dup()
+func (ln *Linux_UnixListener) file() (*os.Linux_File, error) {
+	f, err := ln.fd.dup()
 	if err != nil {
 		return nil, err
 	}
@@ -214,11 +214,11 @@ func (ln *UnixListener) linux_file() (*os.File, error) {
 // Listen or ListenUnix, then by default closing the listener will remove the socket file.
 // but if the listener was created by a call to FileListener to use an already existing
 // socket file, then by default closing the listener will not remove the socket file.
-func (l *UnixListener) Linux_SetUnlinkOnClose(unlink bool) {
+func (l *Linux_UnixListener) SetUnlinkOnClose(unlink bool) {
 	l.unlink = unlink
 }
 
-func (sl *sysListener) linux_listenUnix(ctx context.Context, laddr *UnixAddr) (*UnixListener, error) {
+func (sl *sysListener) linux_listenUnix(ctx context.Context, laddr *UnixAddr) (*Linux_UnixListener, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -229,10 +229,10 @@ func (sl *sysListener) linux_listenUnix(ctx context.Context, laddr *UnixAddr) (*
 	if err != nil {
 		return nil, err
 	}
-	return &UnixListener{fd: fd, path: fd.laddr.String(), unlink: true}, nil
+	return &Linux_UnixListener{fd: fd, path: fd.laddr.String(), unlink: true}, nil
 }
 
-func (sl *sysListener) linux_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*UnixConn, error) {
+func (sl *sysListener) linux_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*Linux_UnixConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -243,5 +243,5 @@ func (sl *sysListener) linux_listenUnixgram(ctx context.Context, laddr *UnixAddr
 	if err != nil {
 		return nil, err
 	}
-	return newUnixConn(fd), nil
+	return linux_newUnixConn(fd), nil
 }

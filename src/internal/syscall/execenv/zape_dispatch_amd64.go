@@ -16,4 +16,5 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )

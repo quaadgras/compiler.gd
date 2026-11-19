@@ -43,7 +43,7 @@ func (p *ipStackCapabilities) linux_probe() {
 	switch err {
 	case syscall.Linux_EAFNOSUPPORT, syscall.Linux_EPROTONOSUPPORT:
 	case nil:
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		p.ipv4Enabled = true
 	}
 	var probes = []struct {
@@ -67,7 +67,7 @@ func (p *ipStackCapabilities) linux_probe() {
 		if err != nil {
 			continue
 		}
-		defer poll.CloseFunc(s)
+		defer poll.Linux_CloseFunc(s)
 		syscall.Linux_SetsockoptInt(s, syscall.Linux_IPPROTO_IPV6, syscall.Linux_IPV6_V6ONLY, probes[i].value)
 		sa, err := probes[i].laddr.linux_sockaddr(syscall.Linux_AF_INET6)
 		if err != nil {
@@ -166,7 +166,7 @@ func linux_favoriteAddrFamily(network string, laddr, raddr sockaddr, mode string
 	return syscall.Linux_AF_INET6, false
 }
 
-func linux_internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *netFD, err error) {
+func linux_internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
 	switch "linux" {
 	case "aix", "freebsd", "windows", "openbsd", "js", "wasip1":
 		if mode == "dial" && raddr.isWildcard() {
@@ -226,7 +226,7 @@ func linux_ipToSockaddrInet6(ip IP, port int, zone string) (syscall.Linux_Sockad
 // See go.dev/issue/67401.
 //
 //go:linkname linux_ipToSockaddr
-func linux_ipToSockaddr(family int, ip IP, port int, zone string) (syscall.Sockaddr, error) {
+func linux_ipToSockaddr(family int, ip IP, port int, zone string) (syscall.Linux_Sockaddr, error) {
 	switch family {
 	case syscall.Linux_AF_INET:
 		sa, err := linux_ipToSockaddrInet4(ip, port)

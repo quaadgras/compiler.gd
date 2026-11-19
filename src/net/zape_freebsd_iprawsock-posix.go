@@ -13,7 +13,7 @@ import (
 	"syscall"
 )
 
-func freebsd_sockaddrToIP(sa syscall.Sockaddr) Addr {
+func freebsd_sockaddrToIP(sa syscall.Freebsd_Sockaddr) Addr {
 	switch sa := sa.(type) {
 	case *syscall.Freebsd_SockaddrInet4:
 		return &IPAddr{IP: sa.Addr[0:]}
@@ -33,7 +33,7 @@ func (a *IPAddr) freebsd_family() int {
 	return syscall.Freebsd_AF_INET6
 }
 
-func (a *IPAddr) freebsd_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *IPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -44,11 +44,11 @@ func (a *IPAddr) freebsd_toLocal(net string) sockaddr {
 	return &IPAddr{loopbackIP(net), a.Zone}
 }
 
-func (c *IPConn) freebsd_readFrom(b []byte) (int, *IPAddr, error) {
+func (c *Freebsd_IPConn) readFrom(b []byte) (int, *IPAddr, error) {
 	// TODO(cw,rsc): consider using readv if we know the family
 	// type to avoid the header trim/copy
 	var addr *IPAddr
-	n, sa, err := c.fd.freebsd_readFrom(b)
+	n, sa, err := c.fd.readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Freebsd_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
@@ -74,9 +74,9 @@ func freebsd_stripIPv4Header(n int, b []byte) int {
 	return n - l
 }
 
-func (c *IPConn) freebsd_readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
-	var sa syscall.Sockaddr
-	n, oobn, flags, sa, err = c.fd.freebsd_readMsg(b, oob, 0)
+func (c *Freebsd_IPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
+	var sa syscall.Freebsd_Sockaddr
+	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, 0)
 	switch sa := sa.(type) {
 	case *syscall.Freebsd_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
@@ -86,7 +86,7 @@ func (c *IPConn) freebsd_readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAdd
 	return
 }
 
-func (c *IPConn) freebsd_writeTo(b []byte, addr *IPAddr) (int, error) {
+func (c *Freebsd_IPConn) writeTo(b []byte, addr *IPAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -97,10 +97,10 @@ func (c *IPConn) freebsd_writeTo(b []byte, addr *IPAddr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return c.fd.freebsd_writeTo(b, sa)
+	return c.fd.writeTo(b, sa)
 }
 
-func (c *IPConn) freebsd_writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
+func (c *Freebsd_IPConn) writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
 	if c.fd.isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -111,11 +111,11 @@ func (c *IPConn) freebsd_writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err
 	if err != nil {
 		return 0, 0, err
 	}
-	return c.fd.freebsd_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (sd *sysDialer) freebsd_dialIP(ctx context.Context, laddr, raddr *IPAddr) (*IPConn, error) {
-	network, proto, err := parseNetwork(ctx, sd.network, true)
+func (sd *freebsd_sysDialer) dialIP(ctx context.Context, laddr, raddr *IPAddr) (*Freebsd_IPConn, error) {
+	network, proto, err := freebsd_parseNetwork(ctx, sd.network, true)
 	if err != nil {
 		return nil, err
 	}
@@ -134,11 +134,11 @@ func (sd *sysDialer) freebsd_dialIP(ctx context.Context, laddr, raddr *IPAddr) (
 	if err != nil {
 		return nil, err
 	}
-	return newIPConn(fd), nil
+	return freebsd_newIPConn(fd), nil
 }
 
-func (sl *sysListener) freebsd_listenIP(ctx context.Context, laddr *IPAddr) (*IPConn, error) {
-	network, proto, err := parseNetwork(ctx, sl.network, true)
+func (sl *sysListener) freebsd_listenIP(ctx context.Context, laddr *IPAddr) (*Freebsd_IPConn, error) {
+	network, proto, err := freebsd_parseNetwork(ctx, sl.network, true)
 	if err != nil {
 		return nil, err
 	}
@@ -157,5 +157,5 @@ func (sl *sysListener) freebsd_listenIP(ctx context.Context, laddr *IPAddr) (*IP
 	if err != nil {
 		return nil, err
 	}
-	return newIPConn(fd), nil
+	return freebsd_newIPConn(fd), nil
 }

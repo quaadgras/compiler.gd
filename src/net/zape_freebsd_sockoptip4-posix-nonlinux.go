@@ -16,7 +16,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func freebsd_joinIPv4Group(fd *netFD, ifi *Interface, ip IP) error {
+func freebsd_joinIPv4Group(fd *freebsd_netFD, ifi *Interface, ip IP) error {
 	mreq := &syscall.IPMreq{Multiaddr: [4]byte{ip[0], ip[1], ip[2], ip[3]}}
 	if err := freebsd_setIPv4MreqToInterface(mreq, ifi); err != nil {
 		return err

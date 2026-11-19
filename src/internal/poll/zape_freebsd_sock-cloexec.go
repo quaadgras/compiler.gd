@@ -15,8 +15,8 @@ import "syscall"
 
 // Wrapper around the accept system call that marks the returned file
 // descriptor as nonblocking and close-on-exec.
-func freebsd_accept(s int) (int, syscall.Sockaddr, string, error) {
-	ns, sa, err := Accept4Func(s, syscall.Freebsd_SOCK_NONBLOCK|syscall.Freebsd_SOCK_CLOEXEC)
+func freebsd_accept(s int) (int, syscall.Freebsd_Sockaddr, string, error) {
+	ns, sa, err := Freebsd_Accept4Func(s, syscall.Freebsd_SOCK_NONBLOCK|syscall.Freebsd_SOCK_CLOEXEC)
 	if err != nil {
 		return -1, nil, "accept4", err
 	}

@@ -29,9 +29,9 @@ const (
 	linux_writeMsgSyscallName = "sendmsg"
 )
 
-func linux_newFD(sysfd, family, sotype int, net string) *netFD {
-	return &netFD{
-		pfd: poll.FD{
+func linux_newFD(sysfd, family, sotype int, net string) *linux_netFD {
+	return &linux_netFD{
+		pfd: poll.Linux_FD{
 			Sysfd:         sysfd,
 			IsStream:      sotype == syscall.Linux_SOCK_STREAM,
 			ZeroReadIsEOF: sotype != syscall.Linux_SOCK_DGRAM && sotype != syscall.Linux_SOCK_RAW,
@@ -42,23 +42,23 @@ func linux_newFD(sysfd, family, sotype int, net string) *netFD {
 	}
 }
 
-func (fd *netFD) linux_init() error {
-	return fd.pfd.Linux_Init(fd.net, true)
+func (fd *linux_netFD) init() error {
+	return fd.pfd.Init(fd.net, true)
 }
 
-func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa syscall.Sockaddr, ret error) {
+func (fd *linux_netFD) connect(ctx context.Context, la, ra syscall.Linux_Sockaddr) (rsa syscall.Linux_Sockaddr, ret error) {
 	// Do not need to call fd.writeLock here,
 	// because fd is not yet accessible to user,
 	// so no concurrent operations are possible.
-	switch err := connectFunc(fd.pfd.Sysfd, ra); err {
+	switch err := linux_connectFunc(fd.pfd.Sysfd, ra); err {
 	case syscall.Linux_EINPROGRESS, syscall.Linux_EALREADY, syscall.Linux_EINTR:
 	case nil, syscall.Linux_EISCONN:
 		select {
 		case <-ctx.Done():
-			return nil, mapErr(ctx.Err())
+			return nil, linux_mapErr(ctx.Err())
 		default:
 		}
-		if err := fd.pfd.Linux_Init(fd.net, true); err != nil {
+		if err := fd.pfd.Init(fd.net, true); err != nil {
 			return nil, err
 		}
 		runtime.KeepAlive(fd)
@@ -76,7 +76,7 @@ func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rs
 	default:
 		return nil, os.NewSyscallError("connect", err)
 	}
-	if err := fd.pfd.Linux_Init(fd.net, true); err != nil {
+	if err := fd.pfd.Init(fd.net, true); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +89,7 @@ func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rs
 
 		// Load the hook function synchronously to prevent a race
 		// with test code that restores the old value.
-		testHookCanceledDial := testHookCanceledDial
+		testHookCanceledDial := linux_testHookCanceledDial
 		stop := context.AfterFunc(ctx, func() {
 			// Force the runtime's poller to immediately give up
 			// waiting for writability, unblocking waitWrite
@@ -105,7 +105,7 @@ func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rs
 				// connect (ret == nil). Because we've now poisoned the
 				// connection by making it unwritable, don't return a
 				// successful dial. This was issue 16523.
-				ret = mapErr(ctx.Err())
+				ret = linux_mapErr(ctx.Err())
 				// The caller closes fd on error, so there's no need to
 				// wait for the SetWriteDeadline call to return.
 			}
@@ -121,15 +121,15 @@ func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rs
 		// SO_ERROR socket option to see if the connection
 		// succeeded or failed. See issue 7474 for further
 		// details.
-		if err := fd.pfd.Linux_WaitWrite(); err != nil {
+		if err := fd.pfd.WaitWrite(); err != nil {
 			select {
 			case <-ctxDone:
-				return nil, mapErr(ctx.Err())
+				return nil, linux_mapErr(ctx.Err())
 			default:
 			}
 			return nil, err
 		}
-		nerr, err := getsockoptIntFunc(fd.pfd.Sysfd, syscall.Linux_SOL_SOCKET, syscall.Linux_SO_ERROR)
+		nerr, err := linux_getsockoptIntFunc(fd.pfd.Sysfd, syscall.Linux_SOL_SOCKET, syscall.Linux_SO_ERROR)
 		if err != nil {
 			return nil, os.NewSyscallError("getsockopt", err)
 		}
@@ -151,8 +151,8 @@ func (fd *netFD) linux_connect(ctx context.Context, la, ra syscall.Sockaddr) (rs
 	}
 }
 
-func (fd *netFD) linux_accept() (netfd *netFD, err error) {
-	d, rsa, errcall, err := fd.pfd.Linux_Accept()
+func (fd *linux_netFD) accept() (netfd *linux_netFD, err error) {
+	d, rsa, errcall, err := fd.pfd.Accept()
 	if err != nil {
 		if errcall != "" {
 			err = wrapSyscallError(errcall, err)
@@ -161,22 +161,22 @@ func (fd *netFD) linux_accept() (netfd *netFD, err error) {
 	}
 
 	netfd = linux_newFD(d, fd.family, fd.sotype, fd.net)
-	if err = netfd.linux_init(); err != nil {
-		netfd.Linux_Close()
+	if err = netfd.init(); err != nil {
+		netfd.Close()
 		return nil, err
 	}
 	lsa, _ := syscall.Linux_Getsockname(netfd.pfd.Sysfd)
-	netfd.linux_setAddr(netfd.linux_addrFunc()(lsa), netfd.linux_addrFunc()(rsa))
+	netfd.setAddr(netfd.addrFunc()(lsa), netfd.addrFunc()(rsa))
 	return netfd, nil
 }
 
 // Defined in os package.
 //
 //go:linkname linux_newUnixFile net.newUnixFile
-func linux_newUnixFile(fd int, name string) *os.File
+func linux_newUnixFile(fd int, name string) *os.Linux_File
 
-func (fd *netFD) linux_dup() (f *os.File, err error) {
-	ns, call, err := fd.pfd.Linux_Dup()
+func (fd *linux_netFD) dup() (f *os.Linux_File, err error) {
+	ns, call, err := fd.pfd.Dup()
 	if err != nil {
 		if call != "" {
 			err = os.NewSyscallError(call, err)
@@ -184,5 +184,5 @@ func (fd *netFD) linux_dup() (f *os.File, err error) {
 		return nil, err
 	}
 
-	return linux_newUnixFile(ns, fd.linux_name()), nil
+	return linux_newUnixFile(ns, fd.name()), nil
 }

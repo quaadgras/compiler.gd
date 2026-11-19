@@ -69,8 +69,8 @@ type Linux_SysProcIDMap struct {
 }
 
 type Linux_SysProcAttr struct {
-	Chroot     string      // Chroot.
-	Credential *Credential // Credential.
+	Chroot     string            // Chroot.
+	Credential *Linux_Credential // Credential.
 	// Ptrace tells the child to call ptrace(PTRACE_TRACEME).
 	// Call runtime.LockOSThread before starting a process with this set,
 	// and don't call UnlockOSThread until done with PtraceSyscall calls.
@@ -260,7 +260,7 @@ func linux_forkAndExecInChild1(argv0 *byte, argv, envv []*byte, chroot, dir *byt
 		clone3                    *linux_cloneArgs
 		pgrp                      int32
 		dirfd                     int
-		cred                      *Credential
+		cred                      *Linux_Credential
 		ngroups, groups           uintptr
 		c                         uintptr
 		rlim                      *Linux_Rlimit
@@ -308,7 +308,7 @@ func linux_forkAndExecInChild1(argv0 *byte, argv, envv []*byte, chroot, dir *byt
 	// Allocate another pipe for parent to child communication for
 	// synchronizing writing of User ID/Group ID mappings.
 	if sys.UidMappings != nil || sys.GidMappings != nil {
-		if err := forkExecPipe(mapPipe[:]); err != nil {
+		if err := linux_forkExecPipe(mapPipe[:]); err != nil {
 			err1 = err.(Errno)
 			return
 		}
@@ -781,7 +781,7 @@ func linux_forkAndExecFailureCleanup(attr *Linux_ProcAttr, sys *Linux_SysProcAtt
 // checkClonePidfd verifies that clone(CLONE_PIDFD) works by actually doing a
 // clone.
 //
-//go:linkname linux_os_checkClonePidfd os.linux_checkClonePidfd
+//go:linkname linux_os_checkClonePidfd os.checkClonePidfd
 func linux_os_checkClonePidfd() error {
 	pidfd := int32(-1)
 	pid, errno := linux_doCheckClonePidfd(&pidfd)
@@ -795,7 +795,7 @@ func linux_os_checkClonePidfd() error {
 
 		var err error
 		for {
-			var status WaitStatus
+			var status Linux_WaitStatus
 			// WCLONE is an untyped constant that sets bit 31, so
 			// it cannot convert directly to int on 32-bit
 			// GOARCHes. We must convert through another type

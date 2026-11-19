@@ -8,7 +8,7 @@
 
 package runtime
 
-var freebsd_sigtable = [...]sigTabT{
+var freebsd_sigtable = [...]freebsd_sigTabT{
 	/* 0 */ {0, "SIGNONE: no trap"},
 	/* 1 */ {_SigNotify + _SigKill, "SIGHUP: terminal line hangup"},
 	/* 2 */ {_SigNotify + _SigKill, "SIGINT: interrupt"},

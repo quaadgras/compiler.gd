@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-func freebsd_newFileFD(f *os.File) (*netFD, error) {
+func freebsd_newFileFD(f *os.Freebsd_File) (*freebsd_netFD, error) {
 	s, err := freebsd_dupFileSocket(f)
 	if err != nil {
 		return nil, err
@@ -22,12 +22,12 @@ func freebsd_newFileFD(f *os.File) (*netFD, error) {
 	family := syscall.Freebsd_AF_UNSPEC
 	sotype, err := syscall.Freebsd_GetsockoptInt(s, syscall.Freebsd_SOL_SOCKET, freebsd__SO_TYPE)
 	if err != nil {
-		poll.CloseFunc(s)
+		poll.Freebsd_CloseFunc(s)
 		return nil, os.NewSyscallError("getsockopt", err)
 	}
 	lsa, err := syscall.Freebsd_Getsockname(s)
 	if err != nil {
-		poll.CloseFunc(s)
+		poll.Freebsd_CloseFunc(s)
 		return nil, os.NewSyscallError("getsockname", err)
 	}
 	rsa, _ := syscall.Freebsd_Getpeername(s)
@@ -39,68 +39,68 @@ func freebsd_newFileFD(f *os.File) (*netFD, error) {
 	case *syscall.Freebsd_SockaddrUnix:
 		family = syscall.Freebsd_AF_UNIX
 	default:
-		poll.CloseFunc(s)
+		poll.Freebsd_CloseFunc(s)
 		return nil, syscall.Freebsd_EPROTONOSUPPORT
 	}
 	fd := freebsd_newFD(s, family, sotype, "")
-	laddr := fd.freebsd_addrFunc()(lsa)
-	raddr := fd.freebsd_addrFunc()(rsa)
+	laddr := fd.addrFunc()(lsa)
+	raddr := fd.addrFunc()(rsa)
 	fd.net = laddr.Network()
-	if err := fd.freebsd_init(); err != nil {
-		fd.Freebsd_Close()
+	if err := fd.init(); err != nil {
+		fd.Close()
 		return nil, err
 	}
-	fd.freebsd_setAddr(laddr, raddr)
+	fd.setAddr(laddr, raddr)
 	return fd, nil
 }
 
-func freebsd_fileConn(f *os.File) (Conn, error) {
+func freebsd_fileConn(f *os.Freebsd_File) (Conn, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *TCPAddr:
-		return newTCPConn(fd, defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+		return freebsd_newTCPConn(fd, freebsd_defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 	case *UDPAddr:
-		return newUDPConn(fd), nil
+		return freebsd_newUDPConn(fd), nil
 	case *IPAddr:
-		return newIPConn(fd), nil
+		return freebsd_newIPConn(fd), nil
 	case *UnixAddr:
-		return newUnixConn(fd), nil
+		return freebsd_newUnixConn(fd), nil
 	}
-	fd.Freebsd_Close()
+	fd.Close()
 	return nil, syscall.Freebsd_EINVAL
 }
 
-func freebsd_fileListener(f *os.File) (Listener, error) {
+func freebsd_fileListener(f *os.Freebsd_File) (Listener, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch laddr := fd.laddr.(type) {
 	case *TCPAddr:
-		return &TCPListener{fd: fd}, nil
+		return &Freebsd_TCPListener{fd: fd}, nil
 	case *UnixAddr:
-		return &UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
+		return &Freebsd_UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
 	}
-	fd.Freebsd_Close()
+	fd.Close()
 	return nil, syscall.Freebsd_EINVAL
 }
 
-func freebsd_filePacketConn(f *os.File) (PacketConn, error) {
+func freebsd_filePacketConn(f *os.Freebsd_File) (PacketConn, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *UDPAddr:
-		return newUDPConn(fd), nil
+		return freebsd_newUDPConn(fd), nil
 	case *IPAddr:
-		return newIPConn(fd), nil
+		return freebsd_newIPConn(fd), nil
 	case *UnixAddr:
-		return newUnixConn(fd), nil
+		return freebsd_newUnixConn(fd), nil
 	}
-	fd.Freebsd_Close()
+	fd.Close()
 	return nil, syscall.Freebsd_EINVAL
 }

@@ -15,8 +15,8 @@ import "syscall"
 
 // Wrapper around the accept system call that marks the returned file
 // descriptor as nonblocking and close-on-exec.
-func linux_accept(s int) (int, syscall.Sockaddr, string, error) {
-	ns, sa, err := Accept4Func(s, syscall.Linux_SOCK_NONBLOCK|syscall.Linux_SOCK_CLOEXEC)
+func linux_accept(s int) (int, syscall.Linux_Sockaddr, string, error) {
+	ns, sa, err := Linux_Accept4Func(s, syscall.Linux_SOCK_NONBLOCK|syscall.Linux_SOCK_CLOEXEC)
 	if err != nil {
 		return -1, nil, "accept4", err
 	}

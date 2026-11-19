@@ -17,10 +17,30 @@ import (
 )
 
 var (
-	freebsd_errMessageMismatch = errors.New("message mismatch")
-	freebsd_errMessageTooShort = errors.New("message too short")
-	freebsd_errInvalidMessage  = errors.New("invalid message")
-	freebsd_errInvalidAddr     = errors.New("invalid address")
+	freebsd_errMessageMismatch = func() error {
+		if apehost != apeFreebsd {
+			return *new(error)
+		}
+		return errors.New("message mismatch")
+	}()
+	freebsd_errMessageTooShort = func() error {
+		if apehost != apeFreebsd {
+			return *new(error)
+		}
+		return errors.New("message too short")
+	}()
+	freebsd_errInvalidMessage = func() error {
+		if apehost != apeFreebsd {
+			return *new(error)
+		}
+		return errors.New("invalid message")
+	}()
+	freebsd_errInvalidAddr = func() error {
+		if apehost != apeFreebsd {
+			return *new(error)
+		}
+		return errors.New("invalid address")
+	}()
 )
 
 // fetchRIB fetches a routing information base from the operating

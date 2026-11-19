@@ -23,10 +23,11 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
 // apeGOOSNames are the hosts' names, by apehost.
-var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd"}
+var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd", apeWindows: "windows"}
 
 // apeGOOS is GOOS: the compiler compiles every use of GOOS (and of a
 // constant computed from it) as a call of apeGOOS.

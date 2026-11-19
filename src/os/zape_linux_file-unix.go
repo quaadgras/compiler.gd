@@ -13,7 +13,7 @@ import (
 	"internal/syscall/unix"
 	"io/fs"
 	"runtime"
-
+	"sync/atomic"
 	"syscall"
 	_ "unsafe" // for go:linkname
 )
@@ -47,7 +47,7 @@ func linux_rename(oldname, newname string) error {
 			return &LinkError{"rename", oldname, newname, syscall.Linux_EEXIST}
 		}
 	}
-	err = ignoringEINTR(func() error {
+	err = linux_ignoringEINTR(func() error {
 		return syscall.Linux_Rename(oldname, newname)
 	})
 	if err != nil {
@@ -56,8 +56,23 @@ func linux_rename(oldname, newname string) error {
 	return nil
 }
 
+// file is the real representation of *File.
+// The extra level of indirection ensures that no clients of os
+// can overwrite this data, which could cause the finalizer
+// to close the wrong file descriptor.
+type linux_file struct {
+	pfd         poll.Linux_FD
+	name        string
+	dirinfo     atomic.Pointer[linux_dirInfo] // nil unless directory being read
+	nonblock    bool                          // whether we set nonblocking mode
+	stdoutOrErr bool                          // whether this is stdout or stderr
+	appendMode  bool                          // whether file is opened for appending
+	inRoot      bool                          // whether file is opened in a Root
+	cleanup     runtime.Cleanup               // closes the descriptor, if noFinalizers
+}
+
 // fd is the Unix implementation of Fd.
-func (f *File) linux_fd() uintptr {
+func (f *Linux_File) fd() uintptr {
 	if f == nil {
 		return ^(uintptr(0))
 	}
@@ -68,14 +83,14 @@ func (f *File) linux_fd() uintptr {
 	// opened in blocking mode. The File will continue to work,
 	// but any blocking operation will tie up a thread.
 	if f.nonblock {
-		f.pfd.Linux_SetBlocking()
+		f.pfd.SetBlocking()
 	}
 
 	return uintptr(f.pfd.Sysfd)
 }
 
 // newFileFromNewFile is called by [NewFile].
-func linux_newFileFromNewFile(fd uintptr, name string) *File {
+func linux_newFileFromNewFile(fd uintptr, name string) *Linux_File {
 	fdi := int(fd)
 	if fdi < 0 {
 		return nil
@@ -100,7 +115,7 @@ func linux_newFileFromNewFile(fd uintptr, name string) *File {
 // retain that behavior because existing code expects it and depends on it.
 //
 // (apegen: zape_dispatch pushes net.newUnixFile)
-func linux_net_newUnixFile(fd int, name string) *File {
+func linux_net_newUnixFile(fd int, name string) *Linux_File {
 	if fd < 0 {
 		panic("invalid FD")
 	}
@@ -128,9 +143,9 @@ const (
 // newFile is like NewFile, but if called from OpenFile or Pipe
 // (as passed in the kind parameter) it tries to add the file to
 // the runtime poller.
-func linux_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *File {
-	f := &File{&file{
-		pfd: poll.FD{
+func linux_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *Linux_File {
+	f := &Linux_File{&linux_file{
+		pfd: poll.Linux_FD{
 			Sysfd:         fd,
 			IsStream:      true,
 			ZeroReadIsEOF: true,
@@ -153,7 +168,7 @@ func linux_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *Fil
 		switch "linux" {
 		case "darwin", "ios", "dragonfly", "freebsd", "netbsd", "openbsd":
 			var st syscall.Linux_Stat_t
-			err := ignoringEINTR(func() error {
+			err := linux_ignoringEINTR(func() error {
 				return syscall.Linux_Fstat(fd, &st)
 			})
 			typ := st.Mode & syscall.Linux_S_IFMT
@@ -203,7 +218,7 @@ func linux_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *Fil
 	// Linux systems. We assume that any real error
 	// will show up in later I/O.
 	// We do restore the blocking behavior if it was set by us.
-	if pollErr := f.pfd.Linux_Init("file", pollable); pollErr != nil && clearNonBlock {
+	if pollErr := f.pfd.Init("file", pollable); pollErr != nil && clearNonBlock {
 		if err := syscall.Linux_SetNonblock(fd, false); err == nil {
 			f.nonblock = false
 		}
@@ -212,9 +227,9 @@ func linux_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *Fil
 	if noFinalizers {
 		// Without finalizers, a cleanup closes the descriptor. (There is
 		// no poller to tell, and the directory buffer goes with the file.)
-		f.cleanup = runtime.AddCleanup(f.file, linux_closeFD, fd)
+		f.cleanup = runtime.AddCleanup(f.linux_file, linux_closeFD, fd)
 	} else {
-		runtime.SetFinalizer(f.file, (*file).linux_close)
+		runtime.SetFinalizer(f.linux_file, (*linux_file).close)
 	}
 	return f
 }
@@ -229,7 +244,7 @@ func linux_sigpipe() // implemented in package runtime
 // epipecheck raises SIGPIPE if we get an EPIPE error on standard
 // output or standard error. See the SIGPIPE docs in os/signal, and
 // issue 11845.
-func linux_epipecheck(file *File, e error) {
+func linux_epipecheck(file *Linux_File, e error) {
 	if e == syscall.Linux_EPIPE && file.stdoutOrErr {
 		linux_sigpipe()
 	}
@@ -241,7 +256,7 @@ const Linux_DevNull = "/dev/null"
 
 // openFileNolog is the Unix implementation of OpenFile.
 // Changes here should be reflected in openDirAt and openDirNolog, if relevant.
-func linux_openFileNolog(name string, flag int, perm FileMode) (*File, error) {
+func linux_openFileNolog(name string, flag int, perm FileMode) (*Linux_File, error) {
 	setSticky := false
 	if !linux_supportsCreateWithStickyBit && flag&Linux_O_CREATE != 0 && perm&Linux_ModeSticky != 0 {
 		if _, err := Stat(name); IsNotExist(err) {
@@ -251,12 +266,12 @@ func linux_openFileNolog(name string, flag int, perm FileMode) (*File, error) {
 
 	var (
 		r int
-		s poll.SysFile
+		s poll.Linux_SysFile
 		e error
 	)
 	// We have to check EINTR here, per issues 11180 and 39237.
-	ignoringEINTR(func() error {
-		r, s, e = open(name, flag|syscall.Linux_O_CLOEXEC, syscallMode(perm))
+	linux_ignoringEINTR(func() error {
+		r, s, e = linux_open(name, flag|syscall.Linux_O_CLOEXEC, linux_syscallMode(perm))
 		return e
 	})
 	if e != nil {
@@ -270,47 +285,47 @@ func linux_openFileNolog(name string, flag int, perm FileMode) (*File, error) {
 
 	// There's a race here with fork/exec, which we are
 	// content to live with. See ../syscall/exec_unix.go.
-	if !supportsCloseOnExec {
+	if !linux_supportsCloseOnExec {
 		syscall.Linux_CloseOnExec(r)
 	}
 
 	f := linux_newFile(r, name, linux_kindOpenFile, unix.Linux_HasNonblockFlag(flag))
-	f.pfd.SysFile = s
+	f.pfd.Linux_SysFile = s
 	return f, nil
 }
 
-func linux_openDirNolog(name string) (*File, error) {
+func linux_openDirNolog(name string) (*Linux_File, error) {
 	var (
 		r int
-		s poll.SysFile
+		s poll.Linux_SysFile
 		e error
 	)
-	ignoringEINTR(func() error {
-		r, s, e = open(name, Linux_O_RDONLY|syscall.Linux_O_CLOEXEC|syscall.Linux_O_DIRECTORY, 0)
+	linux_ignoringEINTR(func() error {
+		r, s, e = linux_open(name, Linux_O_RDONLY|syscall.Linux_O_CLOEXEC|syscall.Linux_O_DIRECTORY, 0)
 		return e
 	})
 	if e != nil {
 		return nil, &PathError{Op: "open", Path: name, Err: e}
 	}
 
-	if !supportsCloseOnExec {
+	if !linux_supportsCloseOnExec {
 		syscall.Linux_CloseOnExec(r)
 	}
 
 	f := linux_newFile(r, name, linux_kindNoPoll, false)
-	f.pfd.SysFile = s
+	f.pfd.Linux_SysFile = s
 	return f, nil
 }
 
-func (file *file) linux_close() error {
+func (file *linux_file) close() error {
 	if file == nil {
 		return syscall.Linux_EINVAL
 	}
 	if info := file.dirinfo.Swap(nil); info != nil {
-		info.linux_close()
+		info.close()
 	}
 	var err error
-	if e := file.pfd.Linux_Close(); e != nil {
+	if e := file.pfd.Close(); e != nil {
 		if e == poll.ErrFileClosing {
 			e = ErrClosed
 		}
@@ -327,11 +342,11 @@ func (file *file) linux_close() error {
 // according to whence: 0 means relative to the origin of the file, 1 means
 // relative to the current offset, and 2 means relative to the end.
 // It returns the new offset and an error, if any.
-func (f *File) linux_seek(offset int64, whence int) (ret int64, err error) {
+func (f *Linux_File) seek(offset int64, whence int) (ret int64, err error) {
 	if info := f.dirinfo.Swap(nil); info != nil {
 		// Free cached dirinfo, so we allocate a new one if we
 		// access this file as a directory again. See #35767 and #37161.
-		info.linux_close()
+		info.close()
 	}
 	ret, err = f.pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
@@ -342,7 +357,7 @@ func (f *File) linux_seek(offset int64, whence int) (ret int64, err error) {
 // If the file is a symbolic link, it changes the size of the link's target.
 // If there is an error, it will be of type [*PathError].
 func Linux_Truncate(name string, size int64) error {
-	e := ignoringEINTR(func() error {
+	e := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Truncate(name, size)
 	})
 	if e != nil {
@@ -358,13 +373,13 @@ func Linux_Remove(name string) error {
 	// whether name is a file or directory.
 	// Try both: it is cheaper on average than
 	// doing a Stat plus the right one.
-	e := ignoringEINTR(func() error {
+	e := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Unlink(name)
 	})
 	if e == nil {
 		return nil
 	}
-	e1 := ignoringEINTR(func() error {
+	e1 := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Rmdir(name)
 	})
 	if e1 == nil {
@@ -401,7 +416,7 @@ func linux_tempDir() string {
 // Link creates newname as a hard link to the oldname file.
 // If there is an error, it will be of type *LinkError.
 func Linux_Link(oldname, newname string) error {
-	e := ignoringEINTR(func() error {
+	e := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Link(oldname, newname)
 	})
 	if e != nil {
@@ -415,7 +430,7 @@ func Linux_Link(oldname, newname string) error {
 // if oldname is later created as a directory the symlink will not work.
 // If there is an error, it will be of type *LinkError.
 func Linux_Symlink(oldname, newname string) error {
-	e := ignoringEINTR(func() error {
+	e := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Symlink(oldname, newname)
 	})
 	if e != nil {
@@ -427,7 +442,7 @@ func Linux_Symlink(oldname, newname string) error {
 func linux_readlink(name string) (string, error) {
 	for len := 128; ; len *= 2 {
 		b := make([]byte, len)
-		n, err := ignoringEINTR2(func() (int, error) {
+		n, err := linux_ignoringEINTR2(func() (int, error) {
 			return linux_fixCount(syscall.Linux_Readlink(name, b))
 		})
 		// buffer too small
@@ -443,23 +458,30 @@ func linux_readlink(name string) (string, error) {
 	}
 }
 
-func (d *unixDirent) Linux_Name() string   { return d.name }
-func (d *unixDirent) Linux_IsDir() bool    { return d.typ.IsDir() }
-func (d *unixDirent) Linux_Type() FileMode { return d.typ }
+type linux_unixDirent struct {
+	parent string
+	name   string
+	typ    FileMode
+	info   FileInfo
+}
 
-func (d *unixDirent) Linux_Info() (FileInfo, error) {
+func (d *linux_unixDirent) Name() string   { return d.name }
+func (d *linux_unixDirent) IsDir() bool    { return d.typ.IsDir() }
+func (d *linux_unixDirent) Type() FileMode { return d.typ }
+
+func (d *linux_unixDirent) Info() (FileInfo, error) {
 	if d.info != nil {
 		return d.info, nil
 	}
 	return Lstat(d.parent + "/" + d.name)
 }
 
-func (d *unixDirent) Linux_String() string {
+func (d *linux_unixDirent) String() string {
 	return fs.FormatDirEntry(d)
 }
 
-func linux_newUnixDirent(parent *File, name string, typ FileMode) (DirEntry, error) {
-	ude := &unixDirent{
+func linux_newUnixDirent(parent *Linux_File, name string, typ FileMode) (DirEntry, error) {
+	ude := &linux_unixDirent{
 		parent: parent.name,
 		name:   name,
 		typ:    typ,

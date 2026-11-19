@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-func (fd *netFD) freebsd_addrFunc() func(syscall.Sockaddr) Addr {
+func (fd *freebsd_netFD) addrFunc() func(syscall.Freebsd_Sockaddr) Addr {
 	switch fd.family {
 	case syscall.Freebsd_AF_INET, syscall.Freebsd_AF_INET6:
 		switch fd.sotype {
@@ -33,5 +33,5 @@ func (fd *netFD) freebsd_addrFunc() func(syscall.Sockaddr) Addr {
 			return freebsd_sockaddrToUnixpacket
 		}
 	}
-	return func(syscall.Sockaddr) Addr { return nil }
+	return func(syscall.Freebsd_Sockaddr) Addr { return nil }
 }

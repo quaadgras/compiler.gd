@@ -121,6 +121,10 @@ func (g *pkgGen) findUnion() {
 			}
 			if st, ok := tn.Type().Underlying().(*types.Struct); ok {
 				for f := range st.Fields() {
+					// (Embedded by pointer, it is a handle.)
+					if _, isPtr := types.Unalias(f.Type()).(*types.Pointer); isPtr {
+						continue
+					}
 					if en := g.hostNamed(hp, f.Type()); f.Embedded() && en != nil {
 						g.union[en.Obj().Name()] = true
 					}
@@ -280,8 +284,10 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 	}
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
-			if fs := strings.Fields(c.Text); len(fs) >= 2 && fs[0] == "//go:linkname" {
-				if o, ok := hp.decls[fs[1]]; ok && !g.dedup[o.Name()] {
+			if fs := strings.Fields(c.Text); len(fs) >= 2 && (fs[0] == "//go:linkname" || fs[0] == "//go:linknamestd") {
+				// (A one-argument linkname of a host name marks the
+				// dispatch function, which has the name.)
+				if o, ok := hp.decls[fs[1]]; ok && !g.dedup[o.Name()] && len(fs) == 3 {
 					return "linkname of " + fs[1]
 				}
 				// A pull of another generated package's host name.
@@ -401,8 +407,8 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				if o.Parent() != o.Pkg().Scope() {
 					break
 				}
-				if local && hp.inOnly(o.Pos()) && !g.sameConst(o.Name()) && !g.isMax(o.Name()) && inConstContext(stack) {
-					why = "constant " + o.Name() + " where Go needs a constant"
+				if local && hp.inOnly(o.Pos()) && !g.sameConst(o.Name()) && !g.isMax(o.Name()) && (inConstContext(stack) || g.multiTyped(o.Name())) {
+					why = "constant " + o.Name() + " where Go needs a constant (or of several types)"
 				}
 				// Another package's constant that differs is a variable
 				// of one type, whatever the use.
@@ -414,6 +420,11 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 					}
 				}
 			case *types.Func:
+				// A generic host function is not dispatched.
+				if local && hp.inOnly(o.Pos()) && o.Signature().TypeParams().Len() > 0 {
+					why = "generic " + o.Name()
+					break
+				}
 				// Another package's function of host values is not
 				// dispatched.
 				if local || o.Signature().Recv() != nil || !g.u.generate[o.Pkg().Path()] {
@@ -431,6 +442,36 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 		return true
 	})
 	return why
+}
+
+// multiTyped reports whether shared code uses the untyped constant
+// name, which differs between hosts, as values of more than one type:
+// no one variable can stand for it.
+func (g *pkgGen) multiTyped(name string) bool {
+	if g.multi == nil {
+		g.multi = map[string]bool{}
+		used := map[string]map[string]bool{}
+		hp := g.first()
+		for id, obj := range hp.info.Uses {
+			c, ok := obj.(*types.Const)
+			if !ok || c.Pkg() != hp.pkg || !hp.inOnly(c.Pos()) || !g.shared[filepath.Base(fset.Position(id.Pos()).Filename)] {
+				continue
+			}
+			if b, ok := c.Type().(*types.Basic); !ok || b.Info()&types.IsUntyped == 0 {
+				continue
+			}
+			if t := hp.useType(id); t != nil {
+				if used[c.Name()] == nil {
+					used[c.Name()] = map[string]bool{}
+				}
+				used[c.Name()][types.TypeString(t, nil)] = true
+			}
+		}
+		for n, ts := range used {
+			g.multi[n] = len(ts) > 1
+		}
+	}
+	return g.multi[name]
 }
 
 // isMax reports whether the constant is the largest host's.

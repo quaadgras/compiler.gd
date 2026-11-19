@@ -13,7 +13,7 @@ import (
 	"unsafe"
 )
 
-func linux_writev(fd int, iovecs []syscall.Iovec) (uintptr, error) {
+func linux_writev(fd int, iovecs []syscall.Linux_Iovec) (uintptr, error) {
 	var (
 		r uintptr
 		e syscall.Errno

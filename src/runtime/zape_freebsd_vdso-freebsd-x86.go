@@ -62,20 +62,20 @@ func freebsd_initHPETTimecounter(idx int) {
 	copy(devPath[:], freebsd_hpetDevPath)
 	devPath[9] = digits[idx]
 
-	fd := open(&devPath[0], 0 /* O_RDONLY */ |freebsd__O_CLOEXEC, 0)
+	fd := freebsd_open(&devPath[0], 0 /* O_RDONLY */ |freebsd__O_CLOEXEC, 0)
 	if fd < 0 {
 		atomic.Casuintptr(&freebsd_hpetDevMap[idx], 0, ^uintptr(0))
 		return
 	}
 
-	addr, mmapErr := mmap(nil, physPageSize, freebsd__PROT_READ, freebsd__MAP_SHARED, fd, 0)
-	closefd(fd)
+	addr, mmapErr := freebsd_mmap(nil, physPageSize, freebsd__PROT_READ, freebsd__MAP_SHARED, fd, 0)
+	freebsd_closefd(fd)
 	newP := uintptr(addr)
 	if mmapErr != 0 {
 		newP = ^uintptr(0)
 	}
 	if !atomic.Casuintptr(&freebsd_hpetDevMap[idx], 0, newP) && mmapErr == 0 {
-		munmap(addr, physPageSize)
+		freebsd_munmap(addr, physPageSize)
 	}
 }
 

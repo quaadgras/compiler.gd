@@ -2,7 +2,6 @@
 
 //go:build ape && amd64
 
-#undef GOOS_ape
 #define GOOS_linux
 // Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
@@ -460,7 +459,7 @@ sigtrampnog:
 	// Lock sigprofCallersUse.
 	MOVL	$0, AX
 	MOVL	$1, CX
-	MOVQ	$runtime·sigprofCallersUse(SB), R11
+	MOVQ	$runtime·linux_sigprofCallersUse(SB), R11
 	LOCK
 	CMPXCHGL	CX, 0(R11)
 	JNZ	sigtramp  // Skip stack trace if already locked.
@@ -470,7 +469,7 @@ sigtrampnog:
 	// the arguments to the Go calling convention.
 	// First three arguments to traceback function are in registers already.
 	MOVQ	runtime·cgoTraceback(SB), CX
-	MOVQ	$runtime·sigprofCallers(SB), R8
+	MOVQ	$runtime·linux_sigprofCallers(SB), R8
 	MOVQ	$runtime·linux_sigprofNonGoWrapper<>(SB), R9
 	MOVQ	_cgo_callers(SB), AX
 	JMP	AX
@@ -629,6 +628,13 @@ nog1:
 	MOVL	$SYS_gettid, AX
 	SYSCALL
 	MOVQ	AX, m_procid(R13)
+
+#ifdef GOOS_ape
+	// A GOOS=ape program finds g through GS, whose base the child
+	// shares with its parent until it sets its own (CLONE_SETTLS sets FS).
+	LEAQ	m_tls(R13), DI
+	CALL	runtime·settls(SB)
+#endif
 
 	// In child, set up new stack
 	get_tls(CX)

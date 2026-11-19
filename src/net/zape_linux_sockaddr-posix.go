@@ -12,7 +12,7 @@ import (
 	"syscall"
 )
 
-func (fd *netFD) linux_addrFunc() func(syscall.Sockaddr) Addr {
+func (fd *linux_netFD) addrFunc() func(syscall.Linux_Sockaddr) Addr {
 	switch fd.family {
 	case syscall.Linux_AF_INET, syscall.Linux_AF_INET6:
 		switch fd.sotype {
@@ -33,5 +33,5 @@ func (fd *netFD) linux_addrFunc() func(syscall.Sockaddr) Addr {
 			return linux_sockaddrToUnixpacket
 		}
 	}
-	return func(syscall.Sockaddr) Addr { return nil }
+	return func(syscall.Linux_Sockaddr) Addr { return nil }
 }

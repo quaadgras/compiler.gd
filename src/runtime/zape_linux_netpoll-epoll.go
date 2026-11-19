@@ -166,7 +166,7 @@ retry:
 				// Since EFD_SEMAPHORE was not specified,
 				// the eventfd counter will be reset to 0.
 				var one uint64
-				read(int32(linux_netpollEventFd), noescape(unsafe.Pointer(&one)), int32(unsafe.Sizeof(one)))
+				linux_read(int32(linux_netpollEventFd), noescape(unsafe.Pointer(&one)), int32(unsafe.Sizeof(one)))
 				netpollWakeSig.Store(0)
 			}
 			continue

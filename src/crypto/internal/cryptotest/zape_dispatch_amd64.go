@@ -5,6 +5,8 @@
 package cryptotest
 
 import (
+	"crypto/cipher"
+	"hash"
 	"testing"
 	"unsafe"
 )
@@ -17,21 +19,45 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
-func BoundarySlices(a0 *testing.T, a1 int) ([]byte, []byte) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_BoundarySlices(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_BoundarySlices(a0, a1)
-	return x0, x1
-}
+type MakeAEAD func() (cipher.AEAD, error)
 
-func TestAllImplementations(a0 *testing.T, a1 string, a2 func(t *testing.T)) {
+type MakeBlock func(key []byte) (cipher.Block, error)
+
+type MakeBlockMode func(b cipher.Block, iv []byte) cipher.BlockMode
+
+type MakeHash func() hash.Hash
+
+type MakeStream func() cipher.Stream
+
+var bufCap int = 10000
+
+var bufLens []int = []int{0, 1, 3, 4, 8, 10, 15, 16, 20, 32, 50, 4096, 5000}
+
+var lengths []int = []int{0, 156, 8192, 8193, 8208}
+
+func MustMinimumFIPS140ModuleVersion(a0 testing.TB, a1 string) {
 	if apehost == apeLinux {
-		Linux_TestAllImplementations(a0, a1, a2)
+		Linux_MustMinimumFIPS140ModuleVersion(a0, a1)
 		return
 	}
-	Freebsd_TestAllImplementations(a0, a1, a2)
+	if apehost == apeFreebsd {
+		Freebsd_MustMinimumFIPS140ModuleVersion(a0, a1)
+		return
+	}
+	Windows_MustMinimumFIPS140ModuleVersion(a0, a1)
+}
+
+func MustSupportFIPS140(a0 testing.TB) {
+	if apehost == apeLinux {
+		Linux_MustSupportFIPS140(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		Freebsd_MustSupportFIPS140(a0)
+		return
+	}
+	Windows_MustSupportFIPS140(a0)
 }

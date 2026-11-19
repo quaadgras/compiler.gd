@@ -15,5 +15,5 @@ func linux_initSecureMode() {
 }
 
 func linux_isSecureMode() bool {
-	return secureMode
+	return linux_secureMode
 }

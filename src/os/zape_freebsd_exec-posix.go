@@ -17,11 +17,11 @@ import (
 
 var _ = runtime.GOARCH
 
-func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Process, err error) {
+func freebsd_startProcess(name string, argv []string, attr *Freebsd_ProcAttr) (p *Process, err error) {
 	// If there is no SysProcAttr (ie. no Chroot or changed
 	// UID/GID), double-check existence of the directory we want
 	// to chdir into. We can make the error clearer this way.
-	if attr != nil && syscall.Freebsd_FromAPE_SysProcAttr(attr.Sys) == nil && attr.Dir != "" {
+	if attr != nil && attr.Sys == nil && attr.Dir != "" {
 		if _, err := Stat(attr.Dir); err != nil {
 			pe := err.(*PathError)
 			pe.Op = "chdir"
@@ -29,7 +29,7 @@ func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Proces
 		}
 	}
 
-	attrSys, shouldDupPidfd := freebsd_ensurePidfd(syscall.Freebsd_FromAPE_SysProcAttr(attr.Sys))
+	attrSys, shouldDupPidfd := freebsd_ensurePidfd(attr.Sys)
 	sysattr := &syscall.Freebsd_ProcAttr{
 		Dir: attr.Dir,
 		Env: attr.Env,
@@ -43,7 +43,7 @@ func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Proces
 	}
 	sysattr.Files = make([]uintptr, 0, len(attr.Files))
 	for _, f := range attr.Files {
-		sysattr.Files = append(sysattr.Files, f.Freebsd_Fd())
+		sysattr.Files = append(sysattr.Files, f.Fd())
 	}
 
 	pid, h, e := syscall.Freebsd_StartProcess(name, argv, sysattr)
@@ -60,80 +60,87 @@ func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Proces
 		var ok bool
 		h, ok = freebsd_getPidfd(sysattr.Sys, shouldDupPidfd)
 		if !ok {
-			return newPIDProcess(pid), nil
+			return freebsd_newPIDProcess(pid), nil
 		}
 	}
 
-	return newHandleProcess(pid, h), nil
+	return freebsd_newHandleProcess(pid, h), nil
 }
 
 func (p *Process) freebsd_kill() error {
-	return p.Signal(Kill)
+	return p.Freebsd_Signal(Kill)
 }
 
 func (p *Process) freebsd_withHandle(f func(handle uintptr)) error {
 	if p.handle == nil {
 		return ErrNoHandle
 	}
-	handle, status := p.handleTransientAcquire()
+	handle, status := p.freebsd_handleTransientAcquire()
 	switch status {
-	case statusDone:
+	case freebsd_statusDone:
 		return ErrProcessDone
-	case statusReleased:
+	case freebsd_statusReleased:
 		return errProcessReleased
 	}
-	defer p.handleTransientRelease()
+	defer p.freebsd_handleTransientRelease()
 	f(handle)
 
 	return nil
 }
 
+// ProcessState stores information about a process, as reported by Wait.
+type Freebsd_ProcessState struct {
+	pid    int                        // The process's id.
+	status syscall.Freebsd_WaitStatus // System-dependent status info.
+	rusage *syscall.Freebsd_Rusage
+}
+
 // Pid returns the process id of the exited process.
-func (p *ProcessState) Freebsd_Pid() int {
+func (p *Freebsd_ProcessState) Pid() int {
 	return p.pid
 }
 
-func (p *ProcessState) freebsd_exited() bool {
-	return p.status.Freebsd_Exited()
+func (p *Freebsd_ProcessState) exited() bool {
+	return p.status.Exited()
 }
 
-func (p *ProcessState) freebsd_success() bool {
-	return p.status.Freebsd_ExitStatus() == 0
+func (p *Freebsd_ProcessState) success() bool {
+	return p.status.ExitStatus() == 0
 }
 
-func (p *ProcessState) freebsd_sys() any {
+func (p *Freebsd_ProcessState) sys() any {
 	return p.status
 }
 
-func (p *ProcessState) freebsd_sysUsage() any {
+func (p *Freebsd_ProcessState) sysUsage() any {
 	return p.rusage
 }
 
-func (p *ProcessState) Freebsd_String() string {
+func (p *Freebsd_ProcessState) String() string {
 	if p == nil {
 		return "<nil>"
 	}
-	status := p.Sys().(syscall.WaitStatus)
+	status := p.Sys().(syscall.Freebsd_WaitStatus)
 	res := ""
 	switch {
-	case status.Freebsd_Exited():
-		code := status.Freebsd_ExitStatus()
+	case status.Exited():
+		code := status.ExitStatus()
 		if "freebsd" == "windows" && uint(code) >= 1<<16 { // windows uses large hex numbers
 			res = "exit status 0x" + strconv.FormatUint(uint64(code), 16)
 		} else { // unix systems use small decimal integers
 			res = "exit status " + strconv.Itoa(code) // unix
 		}
-	case status.Freebsd_Signaled():
-		res = "signal: " + status.Freebsd_Signal().Freebsd_String()
-	case status.Freebsd_Stopped():
-		res = "stop signal: " + status.Freebsd_StopSignal().Freebsd_String()
-		if status.Freebsd_StopSignal() == syscall.Freebsd_SIGTRAP && status.Freebsd_TrapCause() != 0 {
-			res += " (trap " + strconv.Itoa(status.Freebsd_TrapCause()) + ")"
+	case status.Signaled():
+		res = "signal: " + status.Signal().Freebsd_String()
+	case status.Stopped():
+		res = "stop signal: " + status.StopSignal().Freebsd_String()
+		if status.StopSignal() == syscall.Freebsd_SIGTRAP && status.TrapCause() != 0 {
+			res += " (trap " + strconv.Itoa(status.TrapCause()) + ")"
 		}
-	case status.Freebsd_Continued():
+	case status.Continued():
 		res = "continued"
 	}
-	if status.Freebsd_CoreDump() {
+	if status.CoreDump() {
 		res += " (core dumped)"
 	}
 	return res
@@ -141,10 +148,10 @@ func (p *ProcessState) Freebsd_String() string {
 
 // ExitCode returns the exit code of the exited process, or -1
 // if the process hasn't exited or was terminated by a signal.
-func (p *ProcessState) Freebsd_ExitCode() int {
+func (p *Freebsd_ProcessState) ExitCode() int {
 	// return -1 if the process hasn't started.
 	if p == nil {
 		return -1
 	}
-	return p.status.Freebsd_ExitStatus()
+	return p.status.ExitStatus()
 }

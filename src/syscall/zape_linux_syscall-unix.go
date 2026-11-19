@@ -17,11 +17,17 @@ import (
 	"internal/race"
 	"internal/strconv"
 	"runtime"
-
+	"sync"
 	"unsafe"
 )
 
 var _ = runtime.GOARCH
+
+var (
+	Linux_Stdin  = 0
+	Linux_Stdout = 1
+	Linux_Stderr = 2
+)
 
 const (
 	linux_darwin64Bit = ("linux" == "darwin" || "linux" == "ios") && linux_sizeofPtr == 8
@@ -38,7 +44,14 @@ func linux_clen(n []byte) int {
 
 // Mmap manager, for use by operating system-specific implementations.
 
-func (m *mmapper) Linux_Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
+type linux_mmapper struct {
+	sync.Mutex
+	active map[*byte][]byte // active mappings; key is last byte in mapping
+	mmap   func(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error)
+	munmap func(addr uintptr, length uintptr) error
+}
+
+func (m *linux_mmapper) Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
 	if length <= 0 {
 		return nil, Linux_EINVAL
 	}
@@ -60,7 +73,7 @@ func (m *mmapper) Linux_Mmap(fd int, offset int64, length int, prot int, flags i
 	return b, nil
 }
 
-func (m *mmapper) Linux_Munmap(data []byte) (err error) {
+func (m *linux_mmapper) Munmap(data []byte) (err error) {
 	if len(data) == 0 || len(data) != cap(data) {
 		return Linux_EINVAL
 	}
@@ -229,6 +242,10 @@ func Linux_Pwrite(fd int, p []byte, offset int64) (n int, err error) {
 	return
 }
 
+type Linux_Sockaddr interface {
+	sockaddr() (ptr unsafe.Pointer, len linux__Socklen, err error) // lowercase; only we can define Sockaddrs
+}
+
 type Linux_SockaddrInet4 struct {
 	Port int
 	Addr [4]byte
@@ -247,7 +264,7 @@ type Linux_SockaddrUnix struct {
 	raw  Linux_RawSockaddrUnix
 }
 
-func Linux_Bind(fd int, sa Sockaddr) (err error) {
+func Linux_Bind(fd int, sa Linux_Sockaddr) (err error) {
 	ptr, n, err := sa.sockaddr()
 	if err != nil {
 		return err
@@ -255,7 +272,7 @@ func Linux_Bind(fd int, sa Sockaddr) (err error) {
 	return linux_bind(fd, ptr, n)
 }
 
-func Linux_Connect(fd int, sa Sockaddr) (err error) {
+func Linux_Connect(fd int, sa Linux_Sockaddr) (err error) {
 	ptr, n, err := sa.sockaddr()
 	if err != nil {
 		return err
@@ -263,9 +280,9 @@ func Linux_Connect(fd int, sa Sockaddr) (err error) {
 	return linux_connect(fd, ptr, n)
 }
 
-func Linux_Getpeername(fd int) (sa Sockaddr, err error) {
+func Linux_Getpeername(fd int) (sa Linux_Sockaddr, err error) {
 	var rsa Linux_RawSockaddrAny
-	var len _Socklen = Linux_SizeofSockaddrAny
+	var len linux__Socklen = Linux_SizeofSockaddrAny
 	if err = linux_getpeername(fd, &rsa, &len); err != nil {
 		return
 	}
@@ -274,14 +291,14 @@ func Linux_Getpeername(fd int) (sa Sockaddr, err error) {
 
 func Linux_GetsockoptInt(fd, level, opt int) (value int, err error) {
 	var n int32
-	vallen := _Socklen(4)
+	vallen := linux__Socklen(4)
 	err = linux_getsockopt(fd, level, opt, unsafe.Pointer(&n), &vallen)
 	return int(n), err
 }
 
-func Linux_Recvfrom(fd int, p []byte, flags int) (n int, from Sockaddr, err error) {
+func Linux_Recvfrom(fd int, p []byte, flags int) (n int, from Linux_Sockaddr, err error) {
 	var rsa Linux_RawSockaddrAny
-	var len _Socklen = Linux_SizeofSockaddrAny
+	var len linux__Socklen = Linux_SizeofSockaddrAny
 	if n, err = linux_recvfrom(fd, p, flags, &rsa, &len); err != nil {
 		return
 	}
@@ -293,7 +310,7 @@ func Linux_Recvfrom(fd int, p []byte, flags int) (n int, from Sockaddr, err erro
 
 func linux_recvfromInet4(fd int, p []byte, flags int, from *Linux_SockaddrInet4) (n int, err error) {
 	var rsa Linux_RawSockaddrAny
-	var socklen _Socklen = Linux_SizeofSockaddrAny
+	var socklen linux__Socklen = Linux_SizeofSockaddrAny
 	if n, err = linux_recvfrom(fd, p, flags, &rsa, &socklen); err != nil {
 		return
 	}
@@ -306,7 +323,7 @@ func linux_recvfromInet4(fd int, p []byte, flags int, from *Linux_SockaddrInet4)
 
 func linux_recvfromInet6(fd int, p []byte, flags int, from *Linux_SockaddrInet6) (n int, err error) {
 	var rsa Linux_RawSockaddrAny
-	var socklen _Socklen = Linux_SizeofSockaddrAny
+	var socklen linux__Socklen = Linux_SizeofSockaddrAny
 	if n, err = linux_recvfrom(fd, p, flags, &rsa, &socklen); err != nil {
 		return
 	}
@@ -345,7 +362,7 @@ func linux_recvmsgInet6(fd int, p, oob []byte, flags int, from *Linux_SockaddrIn
 	return
 }
 
-func Linux_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from Sockaddr, err error) {
+func Linux_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from Linux_Sockaddr, err error) {
 	var rsa Linux_RawSockaddrAny
 	n, oobn, recvflags, err = linux_recvmsgRaw(fd, p, oob, flags, &rsa)
 	if err != nil {
@@ -358,14 +375,14 @@ func Linux_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int
 	return
 }
 
-func Linux_Sendmsg(fd int, p, oob []byte, to Sockaddr, flags int) (err error) {
+func Linux_Sendmsg(fd int, p, oob []byte, to Linux_Sockaddr, flags int) (err error) {
 	_, err = Linux_SendmsgN(fd, p, oob, to, flags)
 	return
 }
 
-func Linux_SendmsgN(fd int, p, oob []byte, to Sockaddr, flags int) (n int, err error) {
+func Linux_SendmsgN(fd int, p, oob []byte, to Linux_Sockaddr, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen linux__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -377,7 +394,7 @@ func Linux_SendmsgN(fd int, p, oob []byte, to Sockaddr, flags int) (n int, err e
 
 func linux_sendmsgNInet4(fd int, p, oob []byte, to *Linux_SockaddrInet4, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen linux__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -389,7 +406,7 @@ func linux_sendmsgNInet4(fd int, p, oob []byte, to *Linux_SockaddrInet4, flags i
 
 func linux_sendmsgNInet6(fd int, p, oob []byte, to *Linux_SockaddrInet6, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen linux__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -415,10 +432,10 @@ func linux_sendtoInet6(fd int, p []byte, flags int, to *Linux_SockaddrInet6) (er
 	return linux_sendto(fd, p, flags, ptr, n)
 }
 
-func Linux_Sendto(fd int, p []byte, flags int, to Sockaddr) (err error) {
+func Linux_Sendto(fd int, p []byte, flags int, to Linux_Sockaddr) (err error) {
 	var (
 		ptr   unsafe.Pointer
-		salen _Socklen
+		salen linux__Socklen
 	)
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
@@ -466,7 +483,7 @@ func Linux_SetsockoptString(fd, level, opt int, s string) (err error) {
 	return linux_setsockopt(fd, level, opt, p, uintptr(len(s)))
 }
 
-func Linux_SetsockoptTimeval(fd, level, opt int, tv *Timeval) (err error) {
+func Linux_SetsockoptTimeval(fd, level, opt int, tv *Linux_Timeval) (err error) {
 	return linux_setsockopt(fd, level, opt, unsafe.Pointer(tv), unsafe.Sizeof(*tv))
 }
 

@@ -5,6 +5,7 @@
 package filepathlite
 
 import (
+	"errors"
 	"unsafe"
 )
 
@@ -16,4 +17,256 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
+
+var errInvalidPath error = errors.New("invalid path")
+
+type lazybuf struct {
+	path       string
+	buf        []byte
+	w          int
+	volAndPath string
+	volLen     int
+}
+
+// ListSeparator differs between hosts.
+var ListSeparator rune = func() rune {
+	if apehost == apeLinux {
+		return rune(Linux_ListSeparator)
+	}
+	if apehost == apeFreebsd {
+		return rune(Freebsd_ListSeparator)
+	}
+	return rune(Windows_ListSeparator)
+}()
+
+// Separator differs between hosts.
+var Separator rune = func() rune {
+	if apehost == apeLinux {
+		return rune(Linux_Separator)
+	}
+	if apehost == apeFreebsd {
+		return rune(Freebsd_Separator)
+	}
+	return rune(Windows_Separator)
+}()
+
+func Base(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_Base(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Base(a0)
+		return x0
+	}
+	x0 := Windows_Base(a0)
+	return x0
+}
+
+func Clean(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_Clean(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Clean(a0)
+		return x0
+	}
+	x0 := Windows_Clean(a0)
+	return x0
+}
+
+func Dir(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_Dir(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Dir(a0)
+		return x0
+	}
+	x0 := Windows_Dir(a0)
+	return x0
+}
+
+func Ext(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_Ext(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Ext(a0)
+		return x0
+	}
+	x0 := Windows_Ext(a0)
+	return x0
+}
+
+func FromSlash(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_FromSlash(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_FromSlash(a0)
+		return x0
+	}
+	x0 := Windows_FromSlash(a0)
+	return x0
+}
+
+func IsAbs(a0 string) bool {
+	if apehost == apeLinux {
+		x0 := Linux_IsAbs(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_IsAbs(a0)
+		return x0
+	}
+	x0 := Windows_IsAbs(a0)
+	return x0
+}
+
+func IsLocal(a0 string) bool {
+	if apehost == apeLinux {
+		x0 := Linux_IsLocal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_IsLocal(a0)
+		return x0
+	}
+	x0 := Windows_IsLocal(a0)
+	return x0
+}
+
+func IsPathSeparator(a0 uint8) bool {
+	if apehost == apeLinux {
+		x0 := Linux_IsPathSeparator(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_IsPathSeparator(a0)
+		return x0
+	}
+	x0 := Windows_IsPathSeparator(a0)
+	return x0
+}
+
+func Localize(a0 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Localize(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Localize(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_Localize(a0)
+	return x0, x1
+}
+
+func Split(a0 string) (string, string) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Split(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Split(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_Split(a0)
+	return x0, x1
+}
+
+func ToSlash(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_ToSlash(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_ToSlash(a0)
+		return x0
+	}
+	x0 := Windows_ToSlash(a0)
+	return x0
+}
+
+func VolumeName(a0 string) string {
+	if apehost == apeLinux {
+		x0 := Linux_VolumeName(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_VolumeName(a0)
+		return x0
+	}
+	x0 := Windows_VolumeName(a0)
+	return x0
+}
+
+func VolumeNameLen(a0 string) int {
+	if apehost == apeLinux {
+		x0 := Linux_VolumeNameLen(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_VolumeNameLen(a0)
+		return x0
+	}
+	x0 := Windows_VolumeNameLen(a0)
+	return x0
+}
+
+func (r *lazybuf) append(a0 byte) {
+	if apehost == apeLinux {
+		r.linux_append(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_append(a0)
+		return
+	}
+	r.windows_append(a0)
+}
+
+func (r *lazybuf) index(a0 int) byte {
+	if apehost == apeLinux {
+		x0 := r.linux_index(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_index(a0)
+		return x0
+	}
+	x0 := r.windows_index(a0)
+	return x0
+}
+
+func (r *lazybuf) prepend(a0 ...byte) {
+	if apehost == apeLinux {
+		r.linux_prepend(a0...)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_prepend(a0...)
+		return
+	}
+	r.windows_prepend(a0...)
+}
+
+func (r *lazybuf) string() string {
+	if apehost == apeLinux {
+		x0 := r.linux_string()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_string()
+		return x0
+	}
+	x0 := r.windows_string()
+	return x0
+}

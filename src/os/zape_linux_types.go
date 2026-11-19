@@ -14,7 +14,14 @@ import (
 )
 
 // Getpagesize returns the underlying system's memory page size.
-func Linux_Getpagesize() int { return syscall.Getpagesize() }
+func Linux_Getpagesize() int { return syscall.Linux_Getpagesize() }
+
+// File represents an open file descriptor.
+//
+// The methods of File are safe for concurrent use.
+type Linux_File struct {
+	*linux_file // os specific
+}
 
 // The defined file mode bits are the most significant bits of the [FileMode].
 // The nine least-significant bits are the standard Unix rwxrwxrwx permissions.

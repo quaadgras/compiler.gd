@@ -9,6 +9,7 @@
 package net
 
 import (
+	"internal/poll"
 	"runtime"
 	"syscall"
 	"time"
@@ -16,7 +17,20 @@ import (
 
 var _ = runtime.GOARCH
 
-func (fd *netFD) linux_name() string {
+// Network file descriptor.
+type linux_netFD struct {
+	pfd poll.Linux_FD
+
+	// immutable until Close
+	family      int
+	sotype      int
+	isConnected bool // handshake completed or use of association with peer
+	net         string
+	laddr       Addr
+	raddr       Addr
+}
+
+func (fd *linux_netFD) name() string {
 	var ls, rs string
 	if fd.laddr != nil {
 		ls = fd.laddr.String()
@@ -27,124 +41,124 @@ func (fd *netFD) linux_name() string {
 	return fd.net + ":" + ls + "->" + rs
 }
 
-func (fd *netFD) linux_setAddr(laddr, raddr Addr) {
+func (fd *linux_netFD) setAddr(laddr, raddr Addr) {
 	fd.laddr = laddr
 	fd.raddr = raddr
 	// TODO Replace with runtime.AddCleanup.
-	runtime.SetFinalizer(fd, (*netFD).Linux_Close)
+	runtime.SetFinalizer(fd, (*linux_netFD).Close)
 }
 
-func (fd *netFD) Linux_Close() error {
+func (fd *linux_netFD) Close() error {
 	// TODO Replace with runtime.AddCleanup.
 	runtime.SetFinalizer(fd, nil)
-	return fd.pfd.Linux_Close()
+	return fd.pfd.Close()
 }
 
-func (fd *netFD) linux_shutdown(how int) error {
+func (fd *linux_netFD) shutdown(how int) error {
 	err := fd.pfd.Shutdown(how)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("shutdown", err)
 }
 
-func (fd *netFD) linux_closeRead() error {
-	return fd.linux_shutdown(syscall.Linux_SHUT_RD)
+func (fd *linux_netFD) closeRead() error {
+	return fd.shutdown(syscall.Linux_SHUT_RD)
 }
 
-func (fd *netFD) linux_closeWrite() error {
-	return fd.linux_shutdown(syscall.Linux_SHUT_WR)
+func (fd *linux_netFD) closeWrite() error {
+	return fd.shutdown(syscall.Linux_SHUT_WR)
 }
 
-func (fd *netFD) Linux_Read(p []byte) (n int, err error) {
-	n, err = fd.pfd.Linux_Read(p)
+func (fd *linux_netFD) Read(p []byte) (n int, err error) {
+	n, err = fd.pfd.Read(p)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_readSyscallName, err)
 }
 
-func (fd *netFD) linux_readFrom(p []byte) (n int, sa syscall.Sockaddr, err error) {
-	n, sa, err = fd.pfd.Linux_ReadFrom(p)
+func (fd *linux_netFD) readFrom(p []byte) (n int, sa syscall.Linux_Sockaddr, err error) {
+	n, sa, err = fd.pfd.ReadFrom(p)
 	runtime.KeepAlive(fd)
 	return n, sa, wrapSyscallError(linux_readFromSyscallName, err)
 }
-func (fd *netFD) linux_readFromInet4(p []byte, from *syscall.Linux_SockaddrInet4) (n int, err error) {
-	n, err = fd.pfd.Linux_ReadFromInet4(p, from)
+func (fd *linux_netFD) readFromInet4(p []byte, from *syscall.Linux_SockaddrInet4) (n int, err error) {
+	n, err = fd.pfd.ReadFromInet4(p, from)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_readFromSyscallName, err)
 }
 
-func (fd *netFD) linux_readFromInet6(p []byte, from *syscall.Linux_SockaddrInet6) (n int, err error) {
-	n, err = fd.pfd.Linux_ReadFromInet6(p, from)
+func (fd *linux_netFD) readFromInet6(p []byte, from *syscall.Linux_SockaddrInet6) (n int, err error) {
+	n, err = fd.pfd.ReadFromInet6(p, from)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_readFromSyscallName, err)
 }
 
-func (fd *netFD) linux_readMsg(p []byte, oob []byte, flags int) (n, oobn, retflags int, sa syscall.Sockaddr, err error) {
-	n, oobn, retflags, sa, err = fd.pfd.Linux_ReadMsg(p, oob, flags)
+func (fd *linux_netFD) readMsg(p []byte, oob []byte, flags int) (n, oobn, retflags int, sa syscall.Linux_Sockaddr, err error) {
+	n, oobn, retflags, sa, err = fd.pfd.ReadMsg(p, oob, flags)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, sa, wrapSyscallError(linux_readMsgSyscallName, err)
 }
 
-func (fd *netFD) linux_readMsgInet4(p []byte, oob []byte, flags int, sa *syscall.Linux_SockaddrInet4) (n, oobn, retflags int, err error) {
-	n, oobn, retflags, err = fd.pfd.Linux_ReadMsgInet4(p, oob, flags, sa)
+func (fd *linux_netFD) readMsgInet4(p []byte, oob []byte, flags int, sa *syscall.Linux_SockaddrInet4) (n, oobn, retflags int, err error) {
+	n, oobn, retflags, err = fd.pfd.ReadMsgInet4(p, oob, flags, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, wrapSyscallError(linux_readMsgSyscallName, err)
 }
 
-func (fd *netFD) linux_readMsgInet6(p []byte, oob []byte, flags int, sa *syscall.Linux_SockaddrInet6) (n, oobn, retflags int, err error) {
-	n, oobn, retflags, err = fd.pfd.Linux_ReadMsgInet6(p, oob, flags, sa)
+func (fd *linux_netFD) readMsgInet6(p []byte, oob []byte, flags int, sa *syscall.Linux_SockaddrInet6) (n, oobn, retflags int, err error) {
+	n, oobn, retflags, err = fd.pfd.ReadMsgInet6(p, oob, flags, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, wrapSyscallError(linux_readMsgSyscallName, err)
 }
 
-func (fd *netFD) Linux_Write(p []byte) (nn int, err error) {
-	nn, err = fd.pfd.Linux_Write(p)
+func (fd *linux_netFD) Write(p []byte) (nn int, err error) {
+	nn, err = fd.pfd.Write(p)
 	runtime.KeepAlive(fd)
 	return nn, wrapSyscallError(linux_writeSyscallName, err)
 }
 
-func (fd *netFD) linux_writeTo(p []byte, sa syscall.Sockaddr) (n int, err error) {
-	n, err = fd.pfd.Linux_WriteTo(p, sa)
+func (fd *linux_netFD) writeTo(p []byte, sa syscall.Linux_Sockaddr) (n int, err error) {
+	n, err = fd.pfd.WriteTo(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_writeToSyscallName, err)
 }
 
-func (fd *netFD) linux_writeToInet4(p []byte, sa *syscall.Linux_SockaddrInet4) (n int, err error) {
-	n, err = fd.pfd.Linux_WriteToInet4(p, sa)
+func (fd *linux_netFD) writeToInet4(p []byte, sa *syscall.Linux_SockaddrInet4) (n int, err error) {
+	n, err = fd.pfd.WriteToInet4(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_writeToSyscallName, err)
 }
 
-func (fd *netFD) linux_writeToInet6(p []byte, sa *syscall.Linux_SockaddrInet6) (n int, err error) {
-	n, err = fd.pfd.Linux_WriteToInet6(p, sa)
+func (fd *linux_netFD) writeToInet6(p []byte, sa *syscall.Linux_SockaddrInet6) (n int, err error) {
+	n, err = fd.pfd.WriteToInet6(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(linux_writeToSyscallName, err)
 }
 
-func (fd *netFD) linux_writeMsg(p []byte, oob []byte, sa syscall.Sockaddr) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Linux_WriteMsg(p, oob, sa)
+func (fd *linux_netFD) writeMsg(p []byte, oob []byte, sa syscall.Linux_Sockaddr) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsg(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(linux_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) linux_writeMsgInet4(p []byte, oob []byte, sa *syscall.Linux_SockaddrInet4) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Linux_WriteMsgInet4(p, oob, sa)
+func (fd *linux_netFD) writeMsgInet4(p []byte, oob []byte, sa *syscall.Linux_SockaddrInet4) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsgInet4(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(linux_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) linux_writeMsgInet6(p []byte, oob []byte, sa *syscall.Linux_SockaddrInet6) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Linux_WriteMsgInet6(p, oob, sa)
+func (fd *linux_netFD) writeMsgInet6(p []byte, oob []byte, sa *syscall.Linux_SockaddrInet6) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsgInet6(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(linux_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) Linux_SetDeadline(t time.Time) error {
+func (fd *linux_netFD) SetDeadline(t time.Time) error {
 	return fd.pfd.SetDeadline(t)
 }
 
-func (fd *netFD) Linux_SetReadDeadline(t time.Time) error {
+func (fd *linux_netFD) SetReadDeadline(t time.Time) error {
 	return fd.pfd.SetReadDeadline(t)
 }
 
-func (fd *netFD) Linux_SetWriteDeadline(t time.Time) error {
+func (fd *linux_netFD) SetWriteDeadline(t time.Time) error {
 	return fd.pfd.SetWriteDeadline(t)
 }

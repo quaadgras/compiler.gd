@@ -624,6 +624,13 @@ nog1:
 	SYSCALL
 	MOVQ	AX, m_procid(R13)
 
+#ifdef GOOS_ape
+	// A GOOS=ape program finds g through GS, whose base the child
+	// shares with its parent until it sets its own (CLONE_SETTLS sets FS).
+	LEAQ	m_tls(R13), DI
+	CALL	runtime·settls(SB)
+#endif
+
 	// In child, set up new stack
 	get_tls(CX)
 	MOVQ	R13, g_m(R9)

@@ -12,7 +12,7 @@ import "syscall"
 
 // Pipe returns a connected pair of Files; reads from r return bytes written to w.
 // It returns the files and an error, if any.
-func Freebsd_Pipe() (r *File, w *File, err error) {
+func Freebsd_Pipe() (r *Freebsd_File, w *Freebsd_File, err error) {
 	var p [2]int
 
 	e := syscall.Freebsd_Pipe2(p[0:], syscall.Freebsd_O_CLOEXEC)

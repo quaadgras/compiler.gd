@@ -17,11 +17,17 @@ import (
 	"internal/race"
 	"internal/strconv"
 	"runtime"
-
+	"sync"
 	"unsafe"
 )
 
 var _ = runtime.GOARCH
+
+var (
+	Freebsd_Stdin  = 0
+	Freebsd_Stdout = 1
+	Freebsd_Stderr = 2
+)
 
 const (
 	freebsd_darwin64Bit = ("freebsd" == "darwin" || "freebsd" == "ios") && freebsd_sizeofPtr == 8
@@ -38,7 +44,14 @@ func freebsd_clen(n []byte) int {
 
 // Mmap manager, for use by operating system-specific implementations.
 
-func (m *mmapper) Freebsd_Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
+type freebsd_mmapper struct {
+	sync.Mutex
+	active map[*byte][]byte // active mappings; key is last byte in mapping
+	mmap   func(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error)
+	munmap func(addr uintptr, length uintptr) error
+}
+
+func (m *freebsd_mmapper) Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
 	if length <= 0 {
 		return nil, Freebsd_EINVAL
 	}
@@ -60,7 +73,7 @@ func (m *mmapper) Freebsd_Mmap(fd int, offset int64, length int, prot int, flags
 	return b, nil
 }
 
-func (m *mmapper) Freebsd_Munmap(data []byte) (err error) {
+func (m *freebsd_mmapper) Munmap(data []byte) (err error) {
 	if len(data) == 0 || len(data) != cap(data) {
 		return Freebsd_EINVAL
 	}
@@ -229,6 +242,10 @@ func Freebsd_Pwrite(fd int, p []byte, offset int64) (n int, err error) {
 	return
 }
 
+type Freebsd_Sockaddr interface {
+	sockaddr() (ptr unsafe.Pointer, len freebsd__Socklen, err error) // lowercase; only we can define Sockaddrs
+}
+
 type Freebsd_SockaddrInet4 struct {
 	Port int
 	Addr [4]byte
@@ -247,7 +264,7 @@ type Freebsd_SockaddrUnix struct {
 	raw  Freebsd_RawSockaddrUnix
 }
 
-func Freebsd_Bind(fd int, sa Sockaddr) (err error) {
+func Freebsd_Bind(fd int, sa Freebsd_Sockaddr) (err error) {
 	ptr, n, err := sa.sockaddr()
 	if err != nil {
 		return err
@@ -255,7 +272,7 @@ func Freebsd_Bind(fd int, sa Sockaddr) (err error) {
 	return freebsd_bind(fd, ptr, n)
 }
 
-func Freebsd_Connect(fd int, sa Sockaddr) (err error) {
+func Freebsd_Connect(fd int, sa Freebsd_Sockaddr) (err error) {
 	ptr, n, err := sa.sockaddr()
 	if err != nil {
 		return err
@@ -263,9 +280,9 @@ func Freebsd_Connect(fd int, sa Sockaddr) (err error) {
 	return freebsd_connect(fd, ptr, n)
 }
 
-func Freebsd_Getpeername(fd int) (sa Sockaddr, err error) {
+func Freebsd_Getpeername(fd int) (sa Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var len _Socklen = Freebsd_SizeofSockaddrAny
+	var len freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	if err = freebsd_getpeername(fd, &rsa, &len); err != nil {
 		return
 	}
@@ -274,14 +291,14 @@ func Freebsd_Getpeername(fd int) (sa Sockaddr, err error) {
 
 func Freebsd_GetsockoptInt(fd, level, opt int) (value int, err error) {
 	var n int32
-	vallen := _Socklen(4)
+	vallen := freebsd__Socklen(4)
 	err = freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&n), &vallen)
 	return int(n), err
 }
 
-func Freebsd_Recvfrom(fd int, p []byte, flags int) (n int, from Sockaddr, err error) {
+func Freebsd_Recvfrom(fd int, p []byte, flags int) (n int, from Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var len _Socklen = Freebsd_SizeofSockaddrAny
+	var len freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	if n, err = freebsd_recvfrom(fd, p, flags, &rsa, &len); err != nil {
 		return
 	}
@@ -293,7 +310,7 @@ func Freebsd_Recvfrom(fd int, p []byte, flags int) (n int, from Sockaddr, err er
 
 func freebsd_recvfromInet4(fd int, p []byte, flags int, from *Freebsd_SockaddrInet4) (n int, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var socklen _Socklen = Freebsd_SizeofSockaddrAny
+	var socklen freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	if n, err = freebsd_recvfrom(fd, p, flags, &rsa, &socklen); err != nil {
 		return
 	}
@@ -306,7 +323,7 @@ func freebsd_recvfromInet4(fd int, p []byte, flags int, from *Freebsd_SockaddrIn
 
 func freebsd_recvfromInet6(fd int, p []byte, flags int, from *Freebsd_SockaddrInet6) (n int, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var socklen _Socklen = Freebsd_SizeofSockaddrAny
+	var socklen freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	if n, err = freebsd_recvfrom(fd, p, flags, &rsa, &socklen); err != nil {
 		return
 	}
@@ -345,7 +362,7 @@ func freebsd_recvmsgInet6(fd int, p, oob []byte, flags int, from *Freebsd_Sockad
 	return
 }
 
-func Freebsd_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from Sockaddr, err error) {
+func Freebsd_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags int, from Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
 	n, oobn, recvflags, err = freebsd_recvmsgRaw(fd, p, oob, flags, &rsa)
 	if err != nil {
@@ -358,14 +375,14 @@ func Freebsd_Recvmsg(fd int, p, oob []byte, flags int) (n, oobn int, recvflags i
 	return
 }
 
-func Freebsd_Sendmsg(fd int, p, oob []byte, to Sockaddr, flags int) (err error) {
+func Freebsd_Sendmsg(fd int, p, oob []byte, to Freebsd_Sockaddr, flags int) (err error) {
 	_, err = Freebsd_SendmsgN(fd, p, oob, to, flags)
 	return
 }
 
-func Freebsd_SendmsgN(fd int, p, oob []byte, to Sockaddr, flags int) (n int, err error) {
+func Freebsd_SendmsgN(fd int, p, oob []byte, to Freebsd_Sockaddr, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen freebsd__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -377,7 +394,7 @@ func Freebsd_SendmsgN(fd int, p, oob []byte, to Sockaddr, flags int) (n int, err
 
 func freebsd_sendmsgNInet4(fd int, p, oob []byte, to *Freebsd_SockaddrInet4, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen freebsd__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -389,7 +406,7 @@ func freebsd_sendmsgNInet4(fd int, p, oob []byte, to *Freebsd_SockaddrInet4, fla
 
 func freebsd_sendmsgNInet6(fd int, p, oob []byte, to *Freebsd_SockaddrInet6, flags int) (n int, err error) {
 	var ptr unsafe.Pointer
-	var salen _Socklen
+	var salen freebsd__Socklen
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
 		if err != nil {
@@ -415,10 +432,10 @@ func freebsd_sendtoInet6(fd int, p []byte, flags int, to *Freebsd_SockaddrInet6)
 	return freebsd_sendto(fd, p, flags, ptr, n)
 }
 
-func Freebsd_Sendto(fd int, p []byte, flags int, to Sockaddr) (err error) {
+func Freebsd_Sendto(fd int, p []byte, flags int, to Freebsd_Sockaddr) (err error) {
 	var (
 		ptr   unsafe.Pointer
-		salen _Socklen
+		salen freebsd__Socklen
 	)
 	if to != nil {
 		ptr, salen, err = to.sockaddr()
@@ -466,7 +483,7 @@ func Freebsd_SetsockoptString(fd, level, opt int, s string) (err error) {
 	return freebsd_setsockopt(fd, level, opt, p, uintptr(len(s)))
 }
 
-func Freebsd_SetsockoptTimeval(fd, level, opt int, tv *Timeval) (err error) {
+func Freebsd_SetsockoptTimeval(fd, level, opt int, tv *Freebsd_Timeval) (err error) {
 	return freebsd_setsockopt(fd, level, opt, unsafe.Pointer(tv), unsafe.Sizeof(*tv))
 }
 

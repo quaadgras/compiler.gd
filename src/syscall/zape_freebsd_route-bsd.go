@@ -17,7 +17,12 @@ var _ = runtime.GOARCH
 
 var (
 	freebsd_freebsdConfArch       string // "machine $arch" line in kern.conftxt on freebsd
-	freebsd_minRoutingSockaddrLen = freebsd_rsaAlignOf(0)
+	freebsd_minRoutingSockaddrLen = func() int {
+		if apehost != apeFreebsd {
+			return *new(int)
+		}
+		return freebsd_rsaAlignOf(0)
+	}()
 )
 
 // Round the length of a raw sockaddr up to align it properly.
@@ -97,7 +102,7 @@ func freebsd_parseLinkLayerAddr(b []byte) (*Freebsd_SockaddrDatalink, int, error
 }
 
 // parseSockaddrInet parses b as an internet socket address.
-func freebsd_parseSockaddrInet(b []byte, family byte) (Sockaddr, error) {
+func freebsd_parseSockaddrInet(b []byte, family byte) (Freebsd_Sockaddr, error) {
 	switch family {
 	case Freebsd_AF_INET:
 		if len(b) < Freebsd_SizeofSockaddrInet4 {
@@ -123,7 +128,7 @@ const (
 
 // parseNetworkLayerAddr parses b as an internet socket address in
 // conventional BSD kernel form.
-func freebsd_parseNetworkLayerAddr(b []byte, family byte) (Sockaddr, error) {
+func freebsd_parseNetworkLayerAddr(b []byte, family byte) (Freebsd_Sockaddr, error) {
 	// The encoding looks similar to the NLRI encoding.
 	// +----------------------------+
 	// | Length           (1 octet) |
@@ -183,7 +188,7 @@ func freebsd_parseNetworkLayerAddr(b []byte, family byte) (Sockaddr, error) {
 //
 // Deprecated: Use golang.org/x/net/route instead.
 func Freebsd_RouteRIB(facility, param int) ([]byte, error) {
-	mib := []_C_int{Freebsd_CTL_NET, Freebsd_AF_ROUTE, 0, 0, _C_int(facility), _C_int(param)}
+	mib := []freebsd__C_int{Freebsd_CTL_NET, Freebsd_AF_ROUTE, 0, 0, freebsd__C_int(facility), freebsd__C_int(param)}
 	// Find size.
 	n := uintptr(0)
 	if err := freebsd_sysctl(mib, nil, &n, nil, 0); err != nil {
@@ -203,7 +208,7 @@ func Freebsd_RouteRIB(facility, param int) ([]byte, error) {
 //
 // Deprecated: Use golang.org/x/net/route instead.
 type Freebsd_RoutingMessage interface {
-	sockaddr() ([]Sockaddr, error)
+	sockaddr() ([]Freebsd_Sockaddr, error)
 }
 
 const freebsd_anyMessageLen = int(unsafe.Sizeof(freebsd_anyMessage{}))
@@ -223,8 +228,8 @@ type Freebsd_RouteMessage struct {
 	Data   []byte
 }
 
-func (m *Freebsd_RouteMessage) sockaddr() ([]Sockaddr, error) {
-	var sas [Freebsd_RTAX_MAX]Sockaddr
+func (m *Freebsd_RouteMessage) sockaddr() ([]Freebsd_Sockaddr, error) {
+	var sas [Freebsd_RTAX_MAX]Freebsd_Sockaddr
 	b := m.Data[:]
 	family := uint8(Freebsd_AF_UNSPEC)
 	for i := uint(0); i < Freebsd_RTAX_MAX && len(b) >= freebsd_minRoutingSockaddrLen; i++ {
@@ -269,8 +274,8 @@ type Freebsd_InterfaceMessage struct {
 	Data   []byte
 }
 
-func (m *Freebsd_InterfaceMessage) sockaddr() ([]Sockaddr, error) {
-	var sas [Freebsd_RTAX_MAX]Sockaddr
+func (m *Freebsd_InterfaceMessage) sockaddr() ([]Freebsd_Sockaddr, error) {
+	var sas [Freebsd_RTAX_MAX]Freebsd_Sockaddr
 	if m.Header.Addrs&Freebsd_RTA_IFP == 0 {
 		return nil, nil
 	}
@@ -291,8 +296,8 @@ type Freebsd_InterfaceAddrMessage struct {
 	Data   []byte
 }
 
-func (m *Freebsd_InterfaceAddrMessage) sockaddr() ([]Sockaddr, error) {
-	var sas [Freebsd_RTAX_MAX]Sockaddr
+func (m *Freebsd_InterfaceAddrMessage) sockaddr() ([]Freebsd_Sockaddr, error) {
+	var sas [Freebsd_RTAX_MAX]Freebsd_Sockaddr
 	b := m.Data[:]
 	family := uint8(Freebsd_AF_UNSPEC)
 	for i := uint(0); i < Freebsd_RTAX_MAX && len(b) >= freebsd_minRoutingSockaddrLen; i++ {
@@ -359,7 +364,7 @@ func Freebsd_ParseRoutingMessage(b []byte) (msgs []Freebsd_RoutingMessage, err e
 // returns the slice containing the [Sockaddr] interfaces.
 //
 // Deprecated: Use golang.org/x/net/route instead.
-func Freebsd_ParseRoutingSockaddr(msg Freebsd_RoutingMessage) ([]Sockaddr, error) {
+func Freebsd_ParseRoutingSockaddr(msg Freebsd_RoutingMessage) ([]Freebsd_Sockaddr, error) {
 	sas, err := msg.sockaddr()
 	if err != nil {
 		return nil, err

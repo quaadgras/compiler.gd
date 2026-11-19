@@ -16,6 +16,18 @@ const (
 	Linux_PathMax        = 0x1000
 )
 
+type (
+	linux__C_short     int16
+	linux__C_int       int32
+	linux__C_long      int64
+	linux__C_long_long int64
+)
+
+type Linux_Timeval struct {
+	Sec  int64
+	Usec int64
+}
+
 type Linux_Timex struct {
 	Modes     uint32
 	Pad_cgo_0 [4]byte
@@ -28,7 +40,7 @@ type Linux_Timex struct {
 	Constant  int64
 	Precision int64
 	Tolerance int64
-	Time      Timeval
+	Time      Linux_Timeval
 	Tick      int64
 	Ppsfreq   int64
 	Jitter    int64
@@ -57,10 +69,31 @@ type Linux_Utimbuf struct {
 	Modtime int64
 }
 
+type Linux_Rusage struct {
+	Utime    Linux_Timeval
+	Stime    Linux_Timeval
+	Maxrss   int64
+	Ixrss    int64
+	Idrss    int64
+	Isrss    int64
+	Minflt   int64
+	Majflt   int64
+	Nswap    int64
+	Inblock  int64
+	Oublock  int64
+	Msgsnd   int64
+	Msgrcv   int64
+	Nsignals int64
+	Nvcsw    int64
+	Nivcsw   int64
+}
+
 type Linux_Rlimit struct {
 	Cur uint64
 	Max uint64
 }
+
+type linux__Gid_t uint32
 
 type Linux_Stat_t struct {
 	Dev       uint64
@@ -165,11 +198,24 @@ type Linux_RawSockaddrAny struct {
 	Pad  [96]int8
 }
 
+type linux__Socklen uint32
+
+type Linux_Iovec struct {
+	Base *byte
+	Len  uint64
+}
+
+type Linux_IPMreqn struct {
+	Multiaddr [4]byte /* in_addr */
+	Address   [4]byte /* in_addr */
+	Ifindex   int32
+}
+
 type Linux_Msghdr struct {
 	Name       *byte
 	Namelen    uint32
 	Pad_cgo_0  [4]byte
-	Iov        *Iovec
+	Iov        *Linux_Iovec
 	Iovlen     uint64
 	Control    *byte
 	Controllen uint64
@@ -187,6 +233,11 @@ type Linux_Inet4Pktinfo struct {
 	Ifindex  int32
 	Spec_dst [4]byte /* in_addr */
 	Addr     [4]byte /* in_addr */
+}
+
+type Linux_Inet6Pktinfo struct {
+	Addr    [16]byte /* in6_addr */
+	Ifindex uint32
 }
 
 type Linux_IPv6MTUInfo struct {

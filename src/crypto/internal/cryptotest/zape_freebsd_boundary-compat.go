@@ -13,6 +13,6 @@ import "testing"
 // BoundarySlices allocates a pair of slices of the given size.
 //
 // On this platform, the slices are not special.
-func Freebsd_BoundarySlices(t *testing.T, size int) (start, end []byte) {
+func Freebsd_BoundarySlices(t *testing.Freebsd_T, size int) (start, end []byte) {
 	return make([]byte, size), make([]byte, size)
 }

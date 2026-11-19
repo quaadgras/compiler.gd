@@ -46,25 +46,25 @@ func linux_interfaceToIPv4Addr(ifi *Interface) (IP, error) {
 	return nil, errNoSuchInterface
 }
 
-func linux_setReadBuffer(fd *netFD, bytes int) error {
+func linux_setReadBuffer(fd *linux_netFD, bytes int) error {
 	err := fd.pfd.SetsockoptInt(syscall.Linux_SOL_SOCKET, syscall.Linux_SO_RCVBUF, bytes)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setWriteBuffer(fd *netFD, bytes int) error {
+func linux_setWriteBuffer(fd *linux_netFD, bytes int) error {
 	err := fd.pfd.SetsockoptInt(syscall.Linux_SOL_SOCKET, syscall.Linux_SO_SNDBUF, bytes)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setKeepAlive(fd *netFD, keepalive bool) error {
+func linux_setKeepAlive(fd *linux_netFD, keepalive bool) error {
 	err := fd.pfd.SetsockoptInt(syscall.Linux_SOL_SOCKET, syscall.Linux_SO_KEEPALIVE, linux_boolint(keepalive))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setLinger(fd *netFD, sec int) error {
+func linux_setLinger(fd *linux_netFD, sec int) error {
 	var l syscall.Linger
 	if sec >= 0 {
 		l.Onoff = 1

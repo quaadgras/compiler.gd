@@ -2591,7 +2591,7 @@ func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 		return 0x26
 
 	case REG_TLS:
-		if ctxt.Flag_shared && ctxt.Headtype != objabi.Hwindows {
+		if ctxt.Flag_shared && ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hape {
 			// When building for inclusion into a shared library, an instruction of the form
 			//     MOV off(CX)(TLS*1), AX
 			// becomes
@@ -3744,7 +3744,7 @@ func (ab *AsmBuf) asmandsz(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, a *obj
 
 	if REG_AX <= base && base <= REG_R15 {
 		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid() &&
-			ctxt.Headtype != objabi.Hwindows {
+			ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hape {
 			rel = obj.Reloc{}
 			rel.Type = objabi.R_TLS_LE
 			rel.Siz = 4

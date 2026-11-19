@@ -2,7 +2,6 @@
 
 //go:build ape && amd64
 
-#undef GOOS_ape
 #define GOOS_linux
 // Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
@@ -59,7 +58,7 @@ TEXT ·linux_gettimeofday(SB),NOSPLIT,$0-16
 	// the registers uncleared
 	MOVQ	tv+0(FP), DI
 	MOVQ	$0, SI
-	MOVQ	runtime·linux_vdsoGettimeofdaySym(SB), AX
+	MOVQ	runtime·vdsoGettimeofdaySym(SB), AX
 	TESTQ   AX, AX
 	JZ fallback
 	CALL	AX

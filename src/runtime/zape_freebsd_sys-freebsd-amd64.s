@@ -2,7 +2,6 @@
 
 //go:build ape && amd64
 
-#undef GOOS_ape
 #define GOOS_freebsd
 // Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
@@ -80,7 +79,7 @@ TEXT runtime·freebsd_thr_start(SB),NOSPLIT,$0
 
 	// set up FS to point at m->tls
 	LEAQ	m_tls(R13), DI
-	CALL	runtime·freebsd_settls(SB)	// smashes DI
+	CALL	runtime·settls(SB)	// smashes DI
 
 	// set up m, g
 	get_tls(CX)
@@ -373,7 +372,7 @@ sigtrampnog:
 	// Lock sigprofCallersUse.
 	MOVL	$0, AX
 	MOVL	$1, CX
-	MOVQ	$runtime·sigprofCallersUse(SB), R11
+	MOVQ	$runtime·freebsd_sigprofCallersUse(SB), R11
 	LOCK
 	CMPXCHGL	CX, 0(R11)
 	JNZ	sigtramp  // Skip stack trace if already locked.
@@ -383,7 +382,7 @@ sigtrampnog:
 	// the arguments to the Go calling convention.
 	// First three arguments to traceback function are in registers already.
 	MOVQ	runtime·cgoTraceback(SB), CX
-	MOVQ	$runtime·sigprofCallers(SB), R8
+	MOVQ	$runtime·freebsd_sigprofCallers(SB), R8
 	MOVQ	$runtime·freebsd_sigprofNonGoWrapper<>(SB), R9
 	MOVQ	_cgo_callers(SB), AX
 	JMP	AX

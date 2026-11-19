@@ -8,7 +8,7 @@
 
 package runtime
 
-var linux_sigtable = [...]sigTabT{
+var linux_sigtable = [...]linux_sigTabT{
 	/* 0 */ {0, "SIGNONE: no trap"},
 	/* 1 */ {_SigNotify + _SigKill, "SIGHUP: terminal line hangup"},
 	/* 2 */ {_SigNotify + _SigKill, "SIGINT: interrupt"},

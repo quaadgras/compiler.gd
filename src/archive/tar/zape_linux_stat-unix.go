@@ -19,7 +19,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func init() {
+func linux_init0() {
 	sysStat = linux_statUnix
 }
 

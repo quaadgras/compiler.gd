@@ -9,6 +9,7 @@
 package unix
 
 import (
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
@@ -17,8 +18,13 @@ import (
 //go:noescape
 func linux_vgetrandom(p []byte, flags uint32) (ret int, supported bool)
 
+var linux_getrandomUnsupported atomic.Bool
+
+// GetRandomFlag is a flag supported by the getrandom system call.
+type Linux_GetRandomFlag uintptr
+
 // GetRandom calls the getrandom system call.
-func Linux_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
+func Linux_GetRandom(p []byte, flags Linux_GetRandomFlag) (n int, err error) {
 	ret, supported := linux_vgetrandom(p, uint32(flags))
 	if supported {
 		if ret < 0 {
@@ -26,7 +32,7 @@ func Linux_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
 		}
 		return ret, nil
 	}
-	if getrandomUnsupported.Load() {
+	if linux_getrandomUnsupported.Load() {
 		return 0, syscall.Linux_ENOSYS
 	}
 	r1, _, errno := syscall.Linux_Syscall(linux_getrandomTrap,
@@ -35,7 +41,7 @@ func Linux_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
 		uintptr(flags))
 	if errno != 0 {
 		if errno == syscall.Linux_ENOSYS {
-			getrandomUnsupported.Store(true)
+			linux_getrandomUnsupported.Store(true)
 		}
 		return 0, errno
 	}

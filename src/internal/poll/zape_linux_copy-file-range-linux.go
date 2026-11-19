@@ -14,12 +14,17 @@ import (
 	"syscall"
 )
 
-var linux_supportCopyFileRange = sync.OnceValue(func() bool {
-	// copy_file_range(2) is broken in various ways on kernels older than 5.3,
-	// see https://go.dev/issue/42400 and
-	// https://man7.org/linux/man-pages/man2/copy_file_range.2.html#VERSIONS
-	return unix.KernelVersionGE(5, 3)
-})
+var linux_supportCopyFileRange = func() func() bool {
+	if apehost != apeLinux {
+		return *new(func() bool)
+	}
+	return sync.OnceValue(func() bool {
+		// copy_file_range(2) is broken in various ways on kernels older than 5.3,
+		// see https://go.dev/issue/42400 and
+		// https://man7.org/linux/man-pages/man2/copy_file_range.2.html#VERSIONS
+		return unix.KernelVersionGE(5, 3)
+	})
+}()
 
 // For best performance, call copy_file_range() with the largest len value
 // possible. Linux sets up a limitation of data transfer for most of its I/O

@@ -10,7 +10,7 @@ package syscall
 
 import "unsafe"
 
-func init() {
+func freebsd_init1() {
 	conf, _ := Freebsd_Sysctl("kern.conftxt")
 	for i, j := 0, 0; j < len(conf); j++ {
 		if conf[j] != '\n' {
@@ -59,7 +59,7 @@ type Freebsd_InterfaceAnnounceMessage struct {
 	Header Freebsd_IfAnnounceMsghdr
 }
 
-func (m *Freebsd_InterfaceAnnounceMessage) sockaddr() ([]Sockaddr, error) { return nil, nil }
+func (m *Freebsd_InterfaceAnnounceMessage) sockaddr() ([]Freebsd_Sockaddr, error) { return nil, nil }
 
 // InterfaceMulticastAddrMessage represents a routing message
 // containing network interface address entries.
@@ -70,8 +70,8 @@ type Freebsd_InterfaceMulticastAddrMessage struct {
 	Data   []byte
 }
 
-func (m *Freebsd_InterfaceMulticastAddrMessage) sockaddr() ([]Sockaddr, error) {
-	var sas [Freebsd_RTAX_MAX]Sockaddr
+func (m *Freebsd_InterfaceMulticastAddrMessage) sockaddr() ([]Freebsd_Sockaddr, error) {
+	var sas [Freebsd_RTAX_MAX]Freebsd_Sockaddr
 	b := m.Data[:]
 	for i := uint(0); i < Freebsd_RTAX_MAX && len(b) >= freebsd_minRoutingSockaddrLen; i++ {
 		if m.Header.Addrs&(1<<i) == 0 {

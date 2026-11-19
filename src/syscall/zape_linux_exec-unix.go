@@ -28,7 +28,7 @@ var _ = runtime.GOARCH
 func Linux_StringSlicePtr(ss []string) []*byte {
 	bb := make([]*byte, len(ss)+1)
 	for i := 0; i < len(ss); i++ {
-		bb[i] = StringBytePtr(ss[i])
+		bb[i] = Linux_StringBytePtr(ss[i])
 	}
 	bb[len(ss)] = nil
 	return bb
@@ -75,6 +75,15 @@ func Linux_SetNonblock(fd int, nonblocking bool) (err error) {
 	return err
 }
 
+// Credential holds user and group identities to be assumed
+// by a child process started by [StartProcess].
+type Linux_Credential struct {
+	Uid         uint32   // User ID.
+	Gid         uint32   // Group ID.
+	Groups      []uint32 // Supplementary group IDs.
+	NoSetGroups bool     // If true, don't set supplementary groups
+}
+
 // ProcAttr holds attributes that will be applied to a new process started
 // by [StartProcess].
 type Linux_ProcAttr struct {
@@ -91,7 +100,7 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 	var p [2]int
 	var n int
 	var err1 Errno
-	var wstatus WaitStatus
+	var wstatus Linux_WaitStatus
 
 	if attr == nil {
 		attr = &linux_zeroProcAttr
@@ -102,7 +111,7 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 	}
 
 	// Convert args to C form.
-	argv0p, err := BytePtrFromString(argv0)
+	argv0p, err := Linux_BytePtrFromString(argv0)
 	if err != nil {
 		return 0, err
 	}
@@ -121,14 +130,14 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 
 	var chroot *byte
 	if sys.Chroot != "" {
-		chroot, err = BytePtrFromString(sys.Chroot)
+		chroot, err = Linux_BytePtrFromString(sys.Chroot)
 		if err != nil {
 			return 0, err
 		}
 	}
 	var dir *byte
 	if attr.Dir != "" {
-		dir, err = BytePtrFromString(attr.Dir)
+		dir, err = Linux_BytePtrFromString(attr.Dir)
 		if err != nil {
 			return 0, err
 		}
@@ -143,11 +152,11 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 		return 0, errorspkg.New("Setctty set but Ctty not valid in child")
 	}
 
-	acquireForkLock()
+	linux_acquireForkLock()
 
 	// Allocate child status pipe close on exec.
-	if err = forkExecPipe(p[:]); err != nil {
-		releaseForkLock()
+	if err = linux_forkExecPipe(p[:]); err != nil {
+		linux_releaseForkLock()
 		return 0, err
 	}
 
@@ -156,10 +165,10 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 	if err1 != 0 {
 		Linux_Close(p[0])
 		Linux_Close(p[1])
-		releaseForkLock()
+		linux_releaseForkLock()
 		return 0, Errno(err1)
 	}
-	releaseForkLock()
+	linux_releaseForkLock()
 
 	// Read child error status from pipe.
 	Linux_Close(p[1])
@@ -214,9 +223,13 @@ func linux_runtime_BeforeExec()
 //go:linkname linux_runtime_AfterExec syscall.runtime_AfterExec
 func linux_runtime_AfterExec()
 
+// execveLibc is non-nil on OS using libc syscall, set to execve in exec_libc.go; this
+// avoids a build dependency for other platforms.
+var linux_execveLibc func(path *byte, argv **byte, envp **byte) error
+
 // Exec invokes the execve(2) system call.
 func Linux_Exec(argv0 string, argv []string, envv []string) (err error) {
-	argv0p, err := BytePtrFromString(argv0)
+	argv0p, err := Linux_BytePtrFromString(argv0)
 	if err != nil {
 		return err
 	}
@@ -239,7 +252,7 @@ func Linux_Exec(argv0 string, argv []string, envv []string) (err error) {
 	switch "linux" {
 	case "aix", "darwin", "illumos", "ios", "openbsd", "solaris":
 		// RawSyscall should never be used on these platforms.
-		err1 = execveLibc(argv0p, &argvp[0], &envvp[0])
+		err1 = linux_execveLibc(argv0p, &argvp[0], &envvp[0])
 
 	default:
 		_, _, err1 = Linux_RawSyscall(Linux_SYS_EXECVE,

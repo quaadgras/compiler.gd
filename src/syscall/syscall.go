@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !ape && !apegen
+
 // Package syscall contains an interface to the low-level operating system
 // primitives. The details vary depending on the underlying system, and
 // by default, godoc will display the syscall documentation for the current

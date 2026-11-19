@@ -302,7 +302,7 @@ func Linux_Pipe2(p []int, flags int) error {
 	if len(p) != 2 {
 		return Linux_EINVAL
 	}
-	var pp [2]_C_int
+	var pp [2]linux__C_int
 	err := linux_pipe2(&pp, flags)
 	if err == nil {
 		p[0] = int(pp[0])
@@ -341,11 +341,11 @@ func Linux_Unlinkat(dirfd int, path string) error {
 	return linux_unlinkat(dirfd, path, 0)
 }
 
-func Linux_Utimes(path string, tv []Timeval) (err error) {
+func Linux_Utimes(path string, tv []Linux_Timeval) (err error) {
 	if len(tv) != 2 {
 		return Linux_EINVAL
 	}
-	return linux_utimes(path, (*[2]Timeval)(unsafe.Pointer(&tv[0])))
+	return linux_utimes(path, (*[2]Linux_Timeval)(unsafe.Pointer(&tv[0])))
 }
 
 //sys	utimensat(dirfd int, path string, times *[2]Timespec, flag int) (err error)
@@ -357,14 +357,14 @@ func Linux_UtimesNano(path string, ts []Timespec) (err error) {
 	return linux_utimensat(linux__AT_FDCWD, path, (*[2]Timespec)(unsafe.Pointer(&ts[0])), 0)
 }
 
-func Linux_Futimesat(dirfd int, path string, tv []Timeval) (err error) {
+func Linux_Futimesat(dirfd int, path string, tv []Linux_Timeval) (err error) {
 	if len(tv) != 2 {
 		return Linux_EINVAL
 	}
-	return linux_futimesat(dirfd, path, (*[2]Timeval)(unsafe.Pointer(&tv[0])))
+	return linux_futimesat(dirfd, path, (*[2]Linux_Timeval)(unsafe.Pointer(&tv[0])))
 }
 
-func Linux_Futimes(fd int, tv []Timeval) (err error) {
+func Linux_Futimes(fd int, tv []Linux_Timeval) (err error) {
 	// Believe it or not, this is the best we can do on Linux
 	// (and is what glibc does).
 	return Linux_Utimes("/proc/self/fd/"+strconv.Itoa(fd), tv)
@@ -408,7 +408,7 @@ func Linux_Getgroups() (gids []int, err error) {
 		return nil, Linux_EINVAL
 	}
 
-	a := make([]_Gid_t, n)
+	a := make([]linux__Gid_t, n)
 	n, err = linux_getgroups(n, &a[0])
 	if err != nil {
 		return nil, err
@@ -437,9 +437,9 @@ func Linux_Setgroups(gids []int) (err error) {
 		return
 	}
 
-	a := make([]_Gid_t, len(gids))
+	a := make([]linux__Gid_t, len(gids))
 	for i, v := range gids {
-		a[i] = _Gid_t(v)
+		a[i] = linux__Gid_t(v)
 	}
 	if linux_cgo_libc_setgroups == nil {
 		if _, _, e1 := Linux_AllThreadsSyscall(linux__SYS_setgroups, n, uintptr(unsafe.Pointer(&a[0])), 0); e1 != 0 {
@@ -452,6 +452,8 @@ func Linux_Setgroups(gids []int) (err error) {
 	}
 	return
 }
+
+type Linux_WaitStatus uint32
 
 // Wait status is 7 bits at bottom, either 0 (exited),
 // 0x7F (stopped), or a signal number that caused an exit.
@@ -470,41 +472,41 @@ const (
 	linux_shift   = 8
 )
 
-func (w WaitStatus) Linux_Exited() bool { return w&linux_mask == linux_exited }
+func (w Linux_WaitStatus) Exited() bool { return w&linux_mask == linux_exited }
 
-func (w WaitStatus) Linux_Signaled() bool {
+func (w Linux_WaitStatus) Signaled() bool {
 	return w&linux_mask != linux_stopped && w&linux_mask != linux_exited
 }
 
-func (w WaitStatus) Linux_Stopped() bool { return w&0xFF == linux_stopped }
+func (w Linux_WaitStatus) Stopped() bool { return w&0xFF == linux_stopped }
 
-func (w WaitStatus) Linux_Continued() bool { return w == 0xFFFF }
+func (w Linux_WaitStatus) Continued() bool { return w == 0xFFFF }
 
-func (w WaitStatus) Linux_CoreDump() bool { return w.Linux_Signaled() && w&linux_core != 0 }
+func (w Linux_WaitStatus) CoreDump() bool { return w.Signaled() && w&linux_core != 0 }
 
-func (w WaitStatus) Linux_ExitStatus() int {
-	if !w.Linux_Exited() {
+func (w Linux_WaitStatus) ExitStatus() int {
+	if !w.Exited() {
 		return -1
 	}
 	return int(w>>linux_shift) & 0xFF
 }
 
-func (w WaitStatus) Linux_Signal() Signal {
-	if !w.Linux_Signaled() {
+func (w Linux_WaitStatus) Signal() Signal {
+	if !w.Signaled() {
 		return -1
 	}
 	return Signal(w & linux_mask)
 }
 
-func (w WaitStatus) Linux_StopSignal() Signal {
-	if !w.Linux_Stopped() {
+func (w Linux_WaitStatus) StopSignal() Signal {
+	if !w.Stopped() {
 		return -1
 	}
 	return Signal(w>>linux_shift) & 0xFF
 }
 
-func (w WaitStatus) Linux_TrapCause() int {
-	if w.Linux_StopSignal() != Linux_SIGTRAP {
+func (w Linux_WaitStatus) TrapCause() int {
+	if w.StopSignal() != Linux_SIGTRAP {
 		return -1
 	}
 	return int(w>>linux_shift) >> 8
@@ -512,11 +514,11 @@ func (w WaitStatus) Linux_TrapCause() int {
 
 //sys	wait4(pid int, wstatus *_C_int, options int, rusage *Rusage) (wpid int, err error)
 
-func Linux_Wait4(pid int, wstatus *WaitStatus, options int, rusage *Rusage) (wpid int, err error) {
-	var status _C_int
+func Linux_Wait4(pid int, wstatus *Linux_WaitStatus, options int, rusage *Linux_Rusage) (wpid int, err error) {
+	var status linux__C_int
 	wpid, err = linux_wait4(pid, &status, options, rusage)
 	if wstatus != nil {
-		*wstatus = WaitStatus(status)
+		*wstatus = Linux_WaitStatus(status)
 	}
 	return
 }
@@ -525,7 +527,7 @@ func Linux_Mkfifo(path string, mode uint32) (err error) {
 	return Linux_Mknod(path, mode|Linux_S_IFIFO, 0)
 }
 
-func (sa *Linux_SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Linux_SockaddrInet4) sockaddr() (unsafe.Pointer, linux__Socklen, error) {
 	if sa.Port < 0 || sa.Port > 0xFFFF {
 		return nil, 0, Linux_EINVAL
 	}
@@ -537,7 +539,7 @@ func (sa *Linux_SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	return unsafe.Pointer(&sa.raw), Linux_SizeofSockaddrInet4, nil
 }
 
-func (sa *Linux_SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Linux_SockaddrInet6) sockaddr() (unsafe.Pointer, linux__Socklen, error) {
 	if sa.Port < 0 || sa.Port > 0xFFFF {
 		return nil, 0, Linux_EINVAL
 	}
@@ -550,7 +552,7 @@ func (sa *Linux_SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	return unsafe.Pointer(&sa.raw), Linux_SizeofSockaddrInet6, nil
 }
 
-func (sa *Linux_SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Linux_SockaddrUnix) sockaddr() (unsafe.Pointer, linux__Socklen, error) {
 	name := sa.Name
 	n := len(name)
 	if n > len(sa.raw.Path) {
@@ -571,7 +573,7 @@ func (sa *Linux_SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	}
 	// Length is family + name (+ NUL if non-abstract).
 	// Family is of type uint16 (2 bytes).
-	sl := _Socklen(2 + n)
+	sl := linux__Socklen(2 + n)
 	if isAbstract {
 		// Abstract addresses are not NUL terminated.
 		// We rewrite '@' prefix to NUL here.
@@ -594,7 +596,7 @@ type Linux_SockaddrLinklayer struct {
 	raw      Linux_RawSockaddrLinklayer
 }
 
-func (sa *Linux_SockaddrLinklayer) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Linux_SockaddrLinklayer) sockaddr() (unsafe.Pointer, linux__Socklen, error) {
 	if sa.Ifindex < 0 || sa.Ifindex > 0x7fffffff {
 		return nil, 0, Linux_EINVAL
 	}
@@ -616,7 +618,7 @@ type Linux_SockaddrNetlink struct {
 	raw    Linux_RawSockaddrNetlink
 }
 
-func (sa *Linux_SockaddrNetlink) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Linux_SockaddrNetlink) sockaddr() (unsafe.Pointer, linux__Socklen, error) {
 	sa.raw.Family = Linux_AF_NETLINK
 	sa.raw.Pad = sa.Pad
 	sa.raw.Pid = sa.Pid
@@ -624,7 +626,7 @@ func (sa *Linux_SockaddrNetlink) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	return unsafe.Pointer(&sa.raw), Linux_SizeofSockaddrNetlink, nil
 }
 
-func linux_anyToSockaddr(rsa *Linux_RawSockaddrAny) (Sockaddr, error) {
+func linux_anyToSockaddr(rsa *Linux_RawSockaddrAny) (Linux_Sockaddr, error) {
 	switch rsa.Addr.Family {
 	case Linux_AF_NETLINK:
 		pp := (*Linux_RawSockaddrNetlink)(unsafe.Pointer(rsa))
@@ -690,13 +692,13 @@ func linux_anyToSockaddr(rsa *Linux_RawSockaddrAny) (Sockaddr, error) {
 	return nil, Linux_EAFNOSUPPORT
 }
 
-func Linux_Accept(fd int) (nfd int, sa Sockaddr, err error) {
+func Linux_Accept(fd int) (nfd int, sa Linux_Sockaddr, err error) {
 	return Linux_Accept4(fd, 0)
 }
 
-func Linux_Accept4(fd int, flags int) (nfd int, sa Sockaddr, err error) {
+func Linux_Accept4(fd int, flags int) (nfd int, sa Linux_Sockaddr, err error) {
 	var rsa Linux_RawSockaddrAny
-	var len _Socklen = Linux_SizeofSockaddrAny
+	var len linux__Socklen = Linux_SizeofSockaddrAny
 	nfd, err = linux_accept4(fd, &rsa, &len, flags)
 	if err != nil {
 		return
@@ -712,9 +714,9 @@ func Linux_Accept4(fd int, flags int) (nfd int, sa Sockaddr, err error) {
 	return
 }
 
-func Linux_Getsockname(fd int) (sa Sockaddr, err error) {
+func Linux_Getsockname(fd int) (sa Linux_Sockaddr, err error) {
 	var rsa Linux_RawSockaddrAny
-	var len _Socklen = Linux_SizeofSockaddrAny
+	var len linux__Socklen = Linux_SizeofSockaddrAny
 	if err = linux_getsockname(fd, &rsa, &len); err != nil {
 		return
 	}
@@ -722,54 +724,54 @@ func Linux_Getsockname(fd int) (sa Sockaddr, err error) {
 }
 
 func Linux_GetsockoptInet4Addr(fd, level, opt int) (value [4]byte, err error) {
-	vallen := _Socklen(4)
+	vallen := linux__Socklen(4)
 	err = linux_getsockopt(fd, level, opt, unsafe.Pointer(&value[0]), &vallen)
 	return value, err
 }
 
 func Linux_GetsockoptIPMreq(fd, level, opt int) (*IPMreq, error) {
 	var value IPMreq
-	vallen := _Socklen(Linux_SizeofIPMreq)
+	vallen := linux__Socklen(Linux_SizeofIPMreq)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
-func Linux_GetsockoptIPMreqn(fd, level, opt int) (*IPMreqn, error) {
-	var value IPMreqn
-	vallen := _Socklen(Linux_SizeofIPMreqn)
+func Linux_GetsockoptIPMreqn(fd, level, opt int) (*Linux_IPMreqn, error) {
+	var value Linux_IPMreqn
+	vallen := linux__Socklen(Linux_SizeofIPMreqn)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Linux_GetsockoptIPv6Mreq(fd, level, opt int) (*IPv6Mreq, error) {
 	var value IPv6Mreq
-	vallen := _Socklen(Linux_SizeofIPv6Mreq)
+	vallen := linux__Socklen(Linux_SizeofIPv6Mreq)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Linux_GetsockoptIPv6MTUInfo(fd, level, opt int) (*Linux_IPv6MTUInfo, error) {
 	var value Linux_IPv6MTUInfo
-	vallen := _Socklen(Linux_SizeofIPv6MTUInfo)
+	vallen := linux__Socklen(Linux_SizeofIPv6MTUInfo)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Linux_GetsockoptICMPv6Filter(fd, level, opt int) (*Linux_ICMPv6Filter, error) {
 	var value Linux_ICMPv6Filter
-	vallen := _Socklen(Linux_SizeofICMPv6Filter)
+	vallen := linux__Socklen(Linux_SizeofICMPv6Filter)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Linux_GetsockoptUcred(fd, level, opt int) (*Linux_Ucred, error) {
 	var value Linux_Ucred
-	vallen := _Socklen(Linux_SizeofUcred)
+	vallen := linux__Socklen(Linux_SizeofUcred)
 	err := linux_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
-func Linux_SetsockoptIPMreqn(fd, level, opt int, mreq *IPMreqn) (err error) {
+func Linux_SetsockoptIPMreqn(fd, level, opt int, mreq *Linux_IPMreqn) (err error) {
 	return linux_setsockopt(fd, level, opt, unsafe.Pointer(mreq), unsafe.Sizeof(*mreq))
 }
 
@@ -777,10 +779,10 @@ func linux_recvmsgRaw(fd int, p, oob []byte, flags int, rsa *Linux_RawSockaddrAn
 	var msg Linux_Msghdr
 	msg.Name = (*byte)(unsafe.Pointer(rsa))
 	msg.Namelen = uint32(Linux_SizeofSockaddrAny)
-	var iov Iovec
+	var iov Linux_Iovec
 	if len(p) > 0 {
 		iov.Base = &p[0]
-		iov.Linux_SetLen(len(p))
+		iov.SetLen(len(p))
 	}
 	var dummy byte
 	if len(oob) > 0 {
@@ -793,7 +795,7 @@ func linux_recvmsgRaw(fd int, p, oob []byte, flags int, rsa *Linux_RawSockaddrAn
 			// receive at least one normal byte
 			if sockType != Linux_SOCK_DGRAM {
 				iov.Base = &dummy
-				iov.Linux_SetLen(1)
+				iov.SetLen(1)
 			}
 		}
 		msg.Control = &oob[0]
@@ -809,14 +811,14 @@ func linux_recvmsgRaw(fd int, p, oob []byte, flags int, rsa *Linux_RawSockaddrAn
 	return
 }
 
-func linux_sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen _Socklen, flags int) (n int, err error) {
+func linux_sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen linux__Socklen, flags int) (n int, err error) {
 	var msg Linux_Msghdr
 	msg.Name = (*byte)(ptr)
 	msg.Namelen = uint32(salen)
-	var iov Iovec
+	var iov Linux_Iovec
 	if len(p) > 0 {
 		iov.Base = &p[0]
-		iov.Linux_SetLen(len(p))
+		iov.SetLen(len(p))
 	}
 	var dummy byte
 	if len(oob) > 0 {
@@ -829,7 +831,7 @@ func linux_sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen _Socklen, f
 			// send at least one normal byte
 			if sockType != Linux_SOCK_DGRAM {
 				iov.Base = &dummy
-				iov.Linux_SetLen(1)
+				iov.SetLen(1)
 			}
 		}
 		msg.Control = &oob[0]
@@ -966,16 +968,16 @@ const (
 )
 
 func Linux_PtraceGetRegs(pid int, regsout *Linux_PtraceRegs) (err error) {
-	var iov Iovec
+	var iov Linux_Iovec
 	iov.Base = (*byte)(unsafe.Pointer(regsout))
-	iov.Linux_SetLen(int(unsafe.Sizeof(*regsout)))
+	iov.SetLen(int(unsafe.Sizeof(*regsout)))
 	return linux_ptracePtr(Linux_PTRACE_GETREGSET, pid, uintptr(linux__NT_PRSTATUS), unsafe.Pointer(&iov))
 }
 
 func Linux_PtraceSetRegs(pid int, regs *Linux_PtraceRegs) (err error) {
-	var iov Iovec
+	var iov Linux_Iovec
 	iov.Base = (*byte)(unsafe.Pointer(regs))
-	iov.Linux_SetLen(int(unsafe.Sizeof(*regs)))
+	iov.SetLen(int(unsafe.Sizeof(*regs)))
 	return linux_ptracePtr(Linux_PTRACE_SETREGSET, pid, uintptr(linux__NT_PRSTATUS), unsafe.Pointer(&iov))
 }
 
@@ -984,7 +986,7 @@ func Linux_PtraceSetOptions(pid int, options int) (err error) {
 }
 
 func Linux_PtraceGetEventMsg(pid int) (msg uint, err error) {
-	var data _C_long
+	var data linux__C_long
 	err = linux_ptracePtr(Linux_PTRACE_GETEVENTMSG, pid, 0, unsafe.Pointer(&data))
 	msg = uint(data)
 	return
@@ -1040,7 +1042,7 @@ func Linux_Mount(source string, target string, fstype string, flags uintptr, dat
 	if data == "" {
 		return linux_mount(source, target, fstype, flags, nil)
 	}
-	datap, err := BytePtrFromString(data)
+	datap, err := Linux_BytePtrFromString(data)
 	if err != nil {
 		return err
 	}
@@ -1279,18 +1281,18 @@ func Linux_Setuid(uid int) (err error) {
 // mmap varies by architecture; see syscall_linux_*.go.
 //sys	munmap(addr uintptr, length uintptr) (err error)
 
-var linux_mapper = &mmapper{
+var linux_mapper = &linux_mmapper{
 	active: make(map[*byte][]byte),
 	mmap:   linux_mmap,
 	munmap: linux_munmap,
 }
 
 func Linux_Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
-	return linux_mapper.Linux_Mmap(fd, offset, length, prot, flags)
+	return linux_mapper.Mmap(fd, offset, length, prot, flags)
 }
 
 func Linux_Munmap(b []byte) (err error) {
-	return linux_mapper.Linux_Munmap(b)
+	return linux_mapper.Munmap(b)
 }
 
 //sys	Madvise(b []byte, advice int) (err error)

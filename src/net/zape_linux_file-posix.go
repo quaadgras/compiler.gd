@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-func linux_newFileFD(f *os.File) (*netFD, error) {
+func linux_newFileFD(f *os.Linux_File) (*linux_netFD, error) {
 	s, err := linux_dupFileSocket(f)
 	if err != nil {
 		return nil, err
@@ -22,12 +22,12 @@ func linux_newFileFD(f *os.File) (*netFD, error) {
 	family := syscall.Linux_AF_UNSPEC
 	sotype, err := syscall.Linux_GetsockoptInt(s, syscall.Linux_SOL_SOCKET, linux__SO_TYPE)
 	if err != nil {
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		return nil, os.NewSyscallError("getsockopt", err)
 	}
 	lsa, err := syscall.Linux_Getsockname(s)
 	if err != nil {
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		return nil, os.NewSyscallError("getsockname", err)
 	}
 	rsa, _ := syscall.Linux_Getpeername(s)
@@ -39,68 +39,68 @@ func linux_newFileFD(f *os.File) (*netFD, error) {
 	case *syscall.Linux_SockaddrUnix:
 		family = syscall.Linux_AF_UNIX
 	default:
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		return nil, syscall.Linux_EPROTONOSUPPORT
 	}
 	fd := linux_newFD(s, family, sotype, "")
-	laddr := fd.linux_addrFunc()(lsa)
-	raddr := fd.linux_addrFunc()(rsa)
+	laddr := fd.addrFunc()(lsa)
+	raddr := fd.addrFunc()(rsa)
 	fd.net = laddr.Network()
-	if err := fd.linux_init(); err != nil {
-		fd.Linux_Close()
+	if err := fd.init(); err != nil {
+		fd.Close()
 		return nil, err
 	}
-	fd.linux_setAddr(laddr, raddr)
+	fd.setAddr(laddr, raddr)
 	return fd, nil
 }
 
-func linux_fileConn(f *os.File) (Conn, error) {
+func linux_fileConn(f *os.Linux_File) (Conn, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *TCPAddr:
-		return newTCPConn(fd, defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+		return linux_newTCPConn(fd, linux_defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 	case *UDPAddr:
-		return newUDPConn(fd), nil
+		return linux_newUDPConn(fd), nil
 	case *IPAddr:
-		return newIPConn(fd), nil
+		return linux_newIPConn(fd), nil
 	case *UnixAddr:
-		return newUnixConn(fd), nil
+		return linux_newUnixConn(fd), nil
 	}
-	fd.Linux_Close()
+	fd.Close()
 	return nil, syscall.Linux_EINVAL
 }
 
-func linux_fileListener(f *os.File) (Listener, error) {
+func linux_fileListener(f *os.Linux_File) (Listener, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch laddr := fd.laddr.(type) {
 	case *TCPAddr:
-		return &TCPListener{fd: fd}, nil
+		return &Linux_TCPListener{fd: fd}, nil
 	case *UnixAddr:
-		return &UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
+		return &Linux_UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
 	}
-	fd.Linux_Close()
+	fd.Close()
 	return nil, syscall.Linux_EINVAL
 }
 
-func linux_filePacketConn(f *os.File) (PacketConn, error) {
+func linux_filePacketConn(f *os.Linux_File) (PacketConn, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *UDPAddr:
-		return newUDPConn(fd), nil
+		return linux_newUDPConn(fd), nil
 	case *IPAddr:
-		return newIPConn(fd), nil
+		return linux_newIPConn(fd), nil
 	case *UnixAddr:
-		return newUnixConn(fd), nil
+		return linux_newUnixConn(fd), nil
 	}
-	fd.Linux_Close()
+	fd.Close()
 	return nil, syscall.Linux_EINVAL
 }

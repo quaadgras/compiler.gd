@@ -66,7 +66,34 @@ var _ = runtime.GOARCH
 // Name returns the name of the file as presented to Open.
 //
 // It is safe to call Name after [Close].
-func (f *File) Linux_Name() string { return f.name }
+func (f *Linux_File) Name() string { return f.name }
+
+// Stdin, Stdout, and Stderr are open Files pointing to the standard input,
+// standard output, and standard error file descriptors.
+//
+// Note that the Go runtime writes to standard error for panics and crashes;
+// closing Stderr may cause those messages to go elsewhere, perhaps
+// to a file opened later.
+var (
+	Linux_Stdin = func() *Linux_File {
+		if apehost != apeLinux {
+			return *new(*Linux_File)
+		}
+		return Linux_NewFile(uintptr(syscall.Linux_Stdin), "/dev/stdin")
+	}()
+	Linux_Stdout = func() *Linux_File {
+		if apehost != apeLinux {
+			return *new(*Linux_File)
+		}
+		return Linux_NewFile(uintptr(syscall.Linux_Stdout), "/dev/stdout")
+	}()
+	Linux_Stderr = func() *Linux_File {
+		if apehost != apeLinux {
+			return *new(*Linux_File)
+		}
+		return Linux_NewFile(uintptr(syscall.Linux_Stderr), "/dev/stderr")
+	}()
+)
 
 // Flags to OpenFile wrapping those of the underlying system. Not all
 // flags may be implemented on a given system.
@@ -115,26 +142,26 @@ func (e *LinkError) Linux_Unwrap() error {
 //
 // After passing it to NewFile, fd may become invalid under the same conditions described
 // in the comments of [File.Fd], and the same constraints apply.
-func Linux_NewFile(fd uintptr, name string) *File {
+func Linux_NewFile(fd uintptr, name string) *Linux_File {
 	return linux_newFileFromNewFile(fd, name)
 }
 
 // Read reads up to len(b) bytes from the File and stores them in b.
 // It returns the number of bytes read and any error encountered.
 // At end of file, Read returns 0, io.EOF.
-func (f *File) Linux_Read(b []byte) (n int, err error) {
+func (f *Linux_File) Read(b []byte) (n int, err error) {
 	if err := f.checkValid("read"); err != nil {
 		return 0, err
 	}
 	n, e := f.read(b)
-	return n, f.linux_wrapErr("read", e)
+	return n, f.wrapErr("read", e)
 }
 
 // ReadAt reads len(b) bytes from the File starting at byte offset off.
 // It returns the number of bytes read and the error, if any.
 // ReadAt always returns a non-nil error when n < len(b).
 // At end of file, that error is io.EOF.
-func (f *File) Linux_ReadAt(b []byte, off int64) (n int, err error) {
+func (f *Linux_File) ReadAt(b []byte, off int64) (n int, err error) {
 	if err := f.checkValid("read"); err != nil {
 		return 0, err
 	}
@@ -146,7 +173,7 @@ func (f *File) Linux_ReadAt(b []byte, off int64) (n int, err error) {
 	for len(b) > 0 {
 		m, e := f.pread(b, off)
 		if e != nil {
-			err = f.linux_wrapErr("read", e)
+			err = f.wrapErr("read", e)
 			break
 		}
 		n += m
@@ -157,15 +184,15 @@ func (f *File) Linux_ReadAt(b []byte, off int64) (n int, err error) {
 }
 
 // ReadFrom implements io.ReaderFrom.
-func (f *File) Linux_ReadFrom(r io.Reader) (n int64, err error) {
+func (f *Linux_File) ReadFrom(r io.Reader) (n int64, err error) {
 	if err := f.checkValid("write"); err != nil {
 		return 0, err
 	}
-	n, handled, e := f.linux_readFrom(r)
+	n, handled, e := f.readFrom(r)
 	if !handled {
 		return linux_genericReadFrom(f, r) // without wrapping
 	}
-	return n, f.linux_wrapErr("write", e)
+	return n, f.wrapErr("write", e)
 }
 
 // ReadFrom hides another ReadFrom method.
@@ -174,14 +201,22 @@ func (noReadFrom) Linux_ReadFrom(io.Reader) (int64, error) {
 	panic("can't happen")
 }
 
-func linux_genericReadFrom(f *File, r io.Reader) (int64, error) {
-	return io.Copy(fileWithoutReadFrom{File: f}, r)
+// fileWithoutReadFrom implements all the methods of *File other
+// than ReadFrom. This is used to permit ReadFrom to call io.Copy
+// without leading to a recursive call to ReadFrom.
+type linux_fileWithoutReadFrom struct {
+	noReadFrom
+	*Linux_File
+}
+
+func linux_genericReadFrom(f *Linux_File, r io.Reader) (int64, error) {
+	return io.Copy(linux_fileWithoutReadFrom{Linux_File: f}, r)
 }
 
 // Write writes len(b) bytes from b to the File.
 // It returns the number of bytes written and an error, if any.
 // Write returns a non-nil error when n != len(b).
-func (f *File) Linux_Write(b []byte) (n int, err error) {
+func (f *Linux_File) Write(b []byte) (n int, err error) {
 	if err := f.checkValid("write"); err != nil {
 		return 0, err
 	}
@@ -196,7 +231,7 @@ func (f *File) Linux_Write(b []byte) (n int, err error) {
 	linux_epipecheck(f, e)
 
 	if e != nil {
-		err = f.linux_wrapErr("write", e)
+		err = f.wrapErr("write", e)
 	}
 
 	return n, err
@@ -207,7 +242,7 @@ func (f *File) Linux_Write(b []byte) (n int, err error) {
 // WriteAt returns a non-nil error when n != len(b).
 //
 // If file was opened with the [O_APPEND] flag, WriteAt returns an error.
-func (f *File) Linux_WriteAt(b []byte, off int64) (n int, err error) {
+func (f *Linux_File) WriteAt(b []byte, off int64) (n int, err error) {
 	if err := f.checkValid("write"); err != nil {
 		return 0, err
 	}
@@ -222,7 +257,7 @@ func (f *File) Linux_WriteAt(b []byte, off int64) (n int, err error) {
 	for len(b) > 0 {
 		m, e := f.pwrite(b, off)
 		if e != nil {
-			err = f.linux_wrapErr("write", e)
+			err = f.wrapErr("write", e)
 			break
 		}
 		n += m
@@ -233,13 +268,13 @@ func (f *File) Linux_WriteAt(b []byte, off int64) (n int, err error) {
 }
 
 // WriteTo implements io.WriterTo.
-func (f *File) Linux_WriteTo(w io.Writer) (n int64, err error) {
+func (f *Linux_File) WriteTo(w io.Writer) (n int64, err error) {
 	if err := f.checkValid("read"); err != nil {
 		return 0, err
 	}
-	n, handled, e := f.linux_writeTo(w)
+	n, handled, e := f.writeTo(w)
 	if handled {
-		return n, f.linux_wrapErr("read", e)
+		return n, f.wrapErr("read", e)
 	}
 	return linux_genericWriteTo(f, w) // without wrapping
 }
@@ -250,8 +285,16 @@ func (noWriteTo) Linux_WriteTo(io.Writer) (int64, error) {
 	panic("can't happen")
 }
 
-func linux_genericWriteTo(f *File, w io.Writer) (int64, error) {
-	return io.Copy(w, fileWithoutWriteTo{File: f})
+// fileWithoutWriteTo implements all the methods of *File other
+// than WriteTo. This is used to permit WriteTo to call io.Copy
+// without leading to a recursive call to WriteTo.
+type linux_fileWithoutWriteTo struct {
+	noWriteTo
+	*Linux_File
+}
+
+func linux_genericWriteTo(f *Linux_File, w io.Writer) (int64, error) {
+	return io.Copy(w, linux_fileWithoutWriteTo{Linux_File: f})
 }
 
 // Seek sets the offset for the next Read or Write on file to offset, interpreted
@@ -259,25 +302,25 @@ func linux_genericWriteTo(f *File, w io.Writer) (int64, error) {
 // relative to the current offset, and 2 means relative to the end.
 // It returns the new offset and an error, if any.
 // The behavior of Seek on a file opened with [O_APPEND] is not specified.
-func (f *File) Linux_Seek(offset int64, whence int) (ret int64, err error) {
+func (f *Linux_File) Seek(offset int64, whence int) (ret int64, err error) {
 	if err := f.checkValid("seek"); err != nil {
 		return 0, err
 	}
-	r, e := f.linux_seek(offset, whence)
+	r, e := f.seek(offset, whence)
 	if e == nil && f.dirinfo.Load() != nil && r != 0 {
 		e = syscall.Linux_EISDIR
 	}
 	if e != nil {
-		return 0, f.linux_wrapErr("seek", e)
+		return 0, f.wrapErr("seek", e)
 	}
 	return r, nil
 }
 
 // WriteString is like Write, but writes the contents of string s rather than
 // a slice of bytes.
-func (f *File) Linux_WriteString(s string) (n int, err error) {
+func (f *Linux_File) WriteString(s string) (n int, err error) {
 	b := unsafe.Slice(unsafe.StringData(s), len(s))
-	return f.Linux_Write(b)
+	return f.Write(b)
 }
 
 // Mkdir creates a new directory with the specified name and permission
@@ -285,8 +328,8 @@ func (f *File) Linux_WriteString(s string) (n int, err error) {
 // If there is an error, it will be of type [*PathError].
 func Linux_Mkdir(name string, perm FileMode) error {
 	longName := linux_fixLongPath(name)
-	e := ignoringEINTR(func() error {
-		return syscall.Linux_Mkdir(longName, syscallMode(perm))
+	e := linux_ignoringEINTR(func() error {
+		return syscall.Linux_Mkdir(longName, linux_syscallMode(perm))
 	})
 
 	if e != nil {
@@ -323,7 +366,7 @@ func Linux_Chdir(dir string) error {
 		return &PathError{Op: "chdir", Path: dir, Err: e}
 	}
 	if "linux" == "windows" {
-		abs := filepathlite.IsAbs(dir)
+		abs := filepathlite.Linux_IsAbs(dir)
 		getwdCache.Lock()
 		if abs {
 			getwdCache.dir = dir
@@ -333,7 +376,7 @@ func Linux_Chdir(dir string) error {
 		getwdCache.Unlock()
 	}
 	if log := testlog.Logger(); log != nil {
-		wd, err := Getwd()
+		wd, err := Linux_Getwd()
 		if err == nil {
 			log.Chdir(wd)
 		}
@@ -345,7 +388,7 @@ func Linux_Chdir(dir string) error {
 // the returned file can be used for reading; the associated file
 // descriptor has mode [O_RDONLY].
 // If there is an error, it will be of type [*PathError].
-func Linux_Open(name string) (*File, error) {
+func Linux_Open(name string) (*Linux_File, error) {
 	return Linux_OpenFile(name, Linux_O_RDONLY, 0)
 }
 
@@ -355,7 +398,7 @@ func Linux_Open(name string) (*File, error) {
 // be used for I/O; the associated file descriptor has mode [O_RDWR].
 // The directory containing the file must already exist.
 // If there is an error, it will be of type [*PathError].
-func Linux_Create(name string) (*File, error) {
+func Linux_Create(name string) (*Linux_File, error) {
 	return Linux_OpenFile(name, Linux_O_RDWR|Linux_O_CREATE|Linux_O_TRUNC, 0666)
 }
 
@@ -366,7 +409,7 @@ func Linux_Create(name string) (*File, error) {
 // the containing directory must exist. If successful,
 // methods on the returned File can be used for I/O.
 // If there is an error, it will be of type [*PathError].
-func Linux_OpenFile(name string, flag int, perm FileMode) (*File, error) {
+func Linux_OpenFile(name string, flag int, perm FileMode) (*Linux_File, error) {
 	testlog.Open(name)
 	f, err := linux_openFileNolog(name, flag, perm)
 	if err != nil {
@@ -380,7 +423,7 @@ func Linux_OpenFile(name string, flag int, perm FileMode) (*File, error) {
 // openDir opens a file which is assumed to be a directory. As such, it skips
 // the syscalls that make the file descriptor non-blocking as these take time
 // and will fail on file descriptors for directories.
-func linux_openDir(name string) (*File, error) {
+func linux_openDir(name string) (*Linux_File, error) {
 	testlog.Open(name)
 	return linux_openDirNolog(name)
 }
@@ -416,7 +459,7 @@ func linux_fixCount(n int, err error) (int, error) {
 // wrapErr wraps an error that occurred during an operation on an open file.
 // It passes io.EOF through unchanged, otherwise converts
 // poll.ErrFileClosing to ErrClosed and wraps the error in a PathError.
-func (f *File) linux_wrapErr(op string, err error) error {
+func (f *Linux_File) wrapErr(op string, err error) error {
 	if err == nil || err == io.EOF {
 		return err
 	}
@@ -486,7 +529,7 @@ func Linux_UserCacheDir() (string, error) {
 				return "", errors.New("neither $XDG_CACHE_HOME nor $HOME are defined")
 			}
 			dir += "/.cache"
-		} else if !filepathlite.IsAbs(dir) {
+		} else if !filepathlite.Linux_IsAbs(dir) {
 			return "", errors.New("path in $XDG_CACHE_HOME is relative")
 		}
 	}
@@ -539,7 +582,7 @@ func Linux_UserConfigDir() (string, error) {
 				return "", errors.New("neither $XDG_CONFIG_HOME nor $HOME are defined")
 			}
 			dir += "/.config"
-		} else if !filepathlite.IsAbs(dir) {
+		} else if !filepathlite.Linux_IsAbs(dir) {
 			return "", errors.New("path in $XDG_CONFIG_HOME is relative")
 		}
 	}
@@ -594,11 +637,11 @@ func Linux_UserHomeDir() (string, error) {
 //
 // On Plan 9, the mode's permission bits, [ModeAppend], [ModeExclusive],
 // and [ModeTemporary] are used.
-func Linux_Chmod(name string, mode FileMode) error { return chmod(name, mode) }
+func Linux_Chmod(name string, mode FileMode) error { return linux_chmod(name, mode) }
 
 // Chmod changes the mode of the file to mode.
 // If there is an error, it will be of type [*PathError].
-func (f *File) Linux_Chmod(mode FileMode) error { return f.chmod(mode) }
+func (f *Linux_File) Chmod(mode FileMode) error { return f.chmod(mode) }
 
 // SetDeadline sets the read and write deadlines for a File.
 // It is equivalent to calling both SetReadDeadline and SetWriteDeadline.
@@ -624,7 +667,7 @@ func (f *File) Linux_Chmod(mode FileMode) error { return f.chmod(mode) }
 // the deadline after successful Read or Write calls.
 //
 // A zero value for t means I/O operations will not time out.
-func (f *File) Linux_SetDeadline(t time.Time) error {
+func (f *Linux_File) SetDeadline(t time.Time) error {
 	return f.setDeadline(t)
 }
 
@@ -632,7 +675,7 @@ func (f *File) Linux_SetDeadline(t time.Time) error {
 // currently-blocked Read call.
 // A zero value for t means Read will not time out.
 // Not all files support setting deadlines; see SetDeadline.
-func (f *File) Linux_SetReadDeadline(t time.Time) error {
+func (f *Linux_File) SetReadDeadline(t time.Time) error {
 	return f.setReadDeadline(t)
 }
 
@@ -642,17 +685,17 @@ func (f *File) Linux_SetReadDeadline(t time.Time) error {
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
 // Not all files support setting deadlines; see SetDeadline.
-func (f *File) Linux_SetWriteDeadline(t time.Time) error {
+func (f *Linux_File) SetWriteDeadline(t time.Time) error {
 	return f.setWriteDeadline(t)
 }
 
 // SyscallConn returns a raw file.
 // This implements the syscall.Conn interface.
-func (f *File) Linux_SyscallConn() (syscall.RawConn, error) {
+func (f *Linux_File) SyscallConn() (syscall.RawConn, error) {
 	if err := f.checkValid("SyscallConn"); err != nil {
 		return nil, err
 	}
-	return newRawConn(f)
+	return linux_newRawConn(f)
 }
 
 // Fd returns the system file descriptor or handle referencing the open file.
@@ -672,8 +715,8 @@ func (f *File) Linux_SyscallConn() (syscall.RawConn, error) {
 //     operations on the file.
 //
 // For most uses prefer the f.SyscallConn method.
-func (f *File) Linux_Fd() uintptr {
-	return f.linux_fd()
+func (f *Linux_File) Fd() uintptr {
+	return f.fd()
 }
 
 // DirFS returns a file system (an fs.FS) for the tree of files rooted at the directory dir.
@@ -746,7 +789,7 @@ func (dir dirFS) Linux_ReadDir(name string) ([]DirEntry, error) {
 	if err != nil {
 		return nil, &PathError{Op: "readdir", Path: name, Err: err}
 	}
-	entries, err := ReadDir(fullname)
+	entries, err := Linux_ReadDir(fullname)
 	if err != nil {
 		if e, ok := err.(*PathError); ok {
 			// See comment in dirFS.Open.
@@ -804,14 +847,14 @@ func (dir dirFS) linux_join(name string) (string, error) {
 	if dir == "" {
 		return "", errors.New("os: DirFS with empty root")
 	}
-	name, err := filepathlite.Localize(name)
+	name, err := filepathlite.Linux_Localize(name)
 	if err != nil {
 		return "", ErrInvalid
 	}
-	if IsPathSeparator(dir[len(dir)-1]) {
+	if Linux_IsPathSeparator(dir[len(dir)-1]) {
 		return string(dir) + name, nil
 	}
-	return string(dir) + string(PathSeparator) + name, nil
+	return string(dir) + string(Linux_PathSeparator) + name, nil
 }
 
 // ReadFile reads the named file and returns the contents.
@@ -826,11 +869,11 @@ func Linux_ReadFile(name string) ([]byte, error) {
 	}
 	defer f.Close()
 
-	return linux_readFileContents(linux_statOrZero(f), f.Linux_Read)
+	return linux_readFileContents(linux_statOrZero(f), f.Read)
 }
 
-func linux_statOrZero(f *File) int64 {
-	if fi, err := f.Linux_Stat(); err == nil {
+func linux_statOrZero(f *Linux_File) int64 {
+	if fi, err := f.Stat(); err == nil {
 		return fi.Size()
 	}
 	return 0
@@ -892,7 +935,7 @@ func Linux_WriteFile(name string, data []byte, perm FileMode) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.Linux_Write(data)
+	_, err = f.Write(data)
 	if err1 := f.Close(); err1 != nil && err == nil {
 		err = err1
 	}

@@ -20,7 +20,7 @@ var (
 	freebsd_wireFormats  map[int]*freebsd_wireFormat
 )
 
-func init() {
+func freebsd_init0() {
 	i := uint32(1)
 	b := (*[4]byte)(unsafe.Pointer(&i))
 	if b[0] == 1 {

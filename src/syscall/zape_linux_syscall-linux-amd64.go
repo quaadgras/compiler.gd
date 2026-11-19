@@ -81,9 +81,9 @@ func Linux_Lstat(path string, stat *Linux_Stat_t) (err error) {
 //
 //go:noescape
 //go:linkname linux_gettimeofday
-func linux_gettimeofday(tv *Timeval) (err Errno)
+func linux_gettimeofday(tv *Linux_Timeval) (err Errno)
 
-func Linux_Gettimeofday(tv *Timeval) (err error) {
+func Linux_Gettimeofday(tv *Linux_Timeval) (err error) {
 	errno := linux_gettimeofday(tv)
 	if errno != 0 {
 		return errno
@@ -92,7 +92,7 @@ func Linux_Gettimeofday(tv *Timeval) (err error) {
 }
 
 func Linux_Time(t *Linux_Time_t) (tt Linux_Time_t, err error) {
-	var tv Timeval
+	var tv Linux_Timeval
 	errno := linux_gettimeofday(&tv)
 	if errno != 0 {
 		return 0, errno
@@ -110,15 +110,15 @@ func linux_setTimespec(sec, nsec int64) Timespec {
 	return Timespec{Sec: sec, Nsec: nsec}
 }
 
-func linux_setTimeval(sec, usec int64) Timeval {
-	return Timeval{Sec: sec, Usec: usec}
+func linux_setTimeval(sec, usec int64) Linux_Timeval {
+	return Linux_Timeval{Sec: sec, Usec: usec}
 }
 
 func (r *Linux_PtraceRegs) PC() uint64 { return r.Rip }
 
 func (r *Linux_PtraceRegs) SetPC(pc uint64) { r.Rip = pc }
 
-func (iov *Iovec) Linux_SetLen(length int) {
+func (iov *Linux_Iovec) SetLen(length int) {
 	iov.Len = uint64(length)
 }
 

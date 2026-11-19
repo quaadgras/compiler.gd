@@ -114,6 +114,15 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				}
 			}
 			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal {
+				// Another generated package's embedded host type: the
+				// field is named for the host's type.
+				if f := sel.Obj().(*types.Var); f.Embedded() && f.Pkg() != nil && f.Pkg() != hp.pkg {
+					if et, ok := derefNamed(f.Type()); ok && et.Obj().Name() == f.Name() && g.u.hostOnly(et.Obj().Pkg().Path(), hp.host, f.Name()) {
+						edits = append(edits, edit{off(n.Sel.Pos()), off(n.Sel.End()), hostName(hp.host, f.Name())})
+					}
+				}
+			}
+			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal {
 				// A shared struct's field of another package's public
 				// type: the host's, converted.
 				if conv := g.fromAPE(hp, sel); conv != "" && !hp.isLHS(n) && !g.toShared(hp, n) {
@@ -159,12 +168,44 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				edits = append(edits, edit{off(n.Sel.Pos()), off(n.Sel.End()), hostName(hp.host, n.Sel.Name)})
 			}
 			return false
+		case *ast.ValueSpec:
+			// A package-level variable's value that calls code is
+			// computed on its host only: every host copy's
+			// initialization runs on every host.
+			if gd := hp.parentGenDecl(n); gd == nil || gd.Tok != token.VAR || len(n.Values) == 0 || hp.info.Defs[n.Names[0]] == nil || hp.info.Defs[n.Names[0]].Parent() != hp.pkg.Scope() {
+				break
+			}
+			if !hp.callsCode(n.Values...) {
+				break
+			}
+			var ts, zeros []string
+			for _, id := range n.Names {
+				t := g.hostTypeString(hp, hp.info.Defs[id].Type())
+				ts = append(ts, t)
+				zeros = append(zeros, "*new("+t+")")
+			}
+			first, last := n.Values[0], n.Values[len(n.Values)-1]
+			res := strings.Join(ts, ", ")
+			if len(ts) > 1 {
+				res = "(" + res + ")"
+			}
+			edits = append(edits, edit{off(first.Pos()), off(first.Pos()), fmt.Sprintf("func() %s {\nif apehost != ape%s {\nreturn %s\n}\nreturn ", res, title(hp.host), strings.Join(zeros, ", "))})
+			edits = append(edits, edit{off(last.End()), off(last.End()), "\n}()"})
 		case *ast.FuncDecl:
+			// The host's init functions: the package's init calls them
+			// on the host.
+			if n.Recv == nil && n.Name.Name == "init" && n.Body != nil {
+				name := fmt.Sprintf("%s_init%d", hp.host, len(hp.inits))
+				hp.inits = append(hp.inits, name)
+				edits = append(edits, edit{off(n.Name.Pos()), off(n.Name.End()), name})
+				break
+			}
 			// A renamed function without a body (that the host's
 			// assembly does not define) still links to its name, which
 			// another package pushes.
 			fn, ok := hp.info.Defs[n.Name].(*types.Func)
 			if !ok || n.Body != nil || n.Recv != nil || hp.rename[fn] == "" || hp.linkname(fn) != "" || g.asmDefinesFunc(hp, fn.Name()) {
+				// (A one-argument linkname is rewritten below.)
 				break
 			}
 			needUnsafe = true
@@ -176,8 +217,18 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if !ok {
 				break
 			}
-			fn, ok := hp.info.Uses[id].(*types.Func)
-			if !ok || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) {
+			// (Or a shared variable of a function type: a test hook.)
+			fn := hp.info.Uses[id]
+			switch fn.(type) {
+			case *types.Func:
+			case *types.Var:
+				if _, ok := fn.Type().Underlying().(*types.Signature); !ok || fn.Parent() != hp.pkg.Scope() {
+					fn = nil
+				}
+			default:
+				fn = nil
+			}
+			if fn == nil || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) {
 				break
 			}
 			for _, arg := range n.Args {
@@ -285,7 +336,18 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 	}
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
-			if !strings.HasPrefix(c.Text, "//go:linkname ") {
+			// //go:cgo_import_dynamic pkg.local remote "lib": the host's
+			// local name.
+			if fs := strings.Fields(c.Text); len(fs) >= 2 && fs[0] == "//go:cgo_import_dynamic" {
+				if pkg, name, ok := cutLast(fs[1], "."); ok && pkg == g.path {
+					if n, ok := byName[name]; ok {
+						fs[1] = pkg + "." + n
+						edits = append(edits, edit{off(c.Pos()), off(c.End()), strings.Join(fs, " ")})
+					}
+				}
+				continue
+			}
+			if !strings.HasPrefix(c.Text, "//go:linkname ") && !strings.HasPrefix(c.Text, "//go:linknamestd ") {
 				continue
 			}
 			fs := strings.Fields(c.Text)
@@ -295,6 +357,11 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				continue
 			}
 			if newName, ok := byName[fs[1]]; ok {
+				// A renamed function without a body that another
+				// package pushes keeps its name.
+				if fn, ok := hp.pkg.Scope().Lookup(fs[1]).(*types.Func); ok && len(fs) == 2 && !hp.hasBody(fn) && !g.asmDefinesFunc(hp, fn.Name()) {
+					fs = append(fs, g.path+"."+fs[1])
+				}
 				fs[1] = newName
 			}
 			if len(fs) == 3 && g.pushes[fs[2]] != nil {
@@ -304,7 +371,9 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if len(fs) == 3 {
 				// A pull of another generated package's host name is
 				// of its host copy.
-				if pkg, sym, ok := cutLast(fs[2], "."); ok && pkg != g.path && g.u.hostOnly(pkg, hp.host, sym) {
+				// (A function there without a body keeps its name: that
+				// is what is pushed.)
+				if pkg, sym, ok := cutLast(fs[2], "."); ok && pkg != g.path && g.u.hostOnly(pkg, hp.host, sym) && g.u.hostHasBody(pkg, hp.host, sym) {
 					fs[2] = pkg + "." + hostName(hp.host, sym)
 				}
 			}
@@ -322,6 +391,35 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		g.reportf("%s: %v", outName(hp.host, name), err)
 	}
 	g.outputs[outName(hp.host, name)] = out
+}
+
+// hostHasBody reports whether the host copy of package path declares
+// name with a body (or as a variable): one other packages link to by
+// its host name.
+func (u *universe) hostHasBody(path, host, name string) bool {
+	q := u.load(path)
+	q.prepare()
+	for _, hp := range q.hs {
+		if hp.host != host {
+			continue
+		}
+		fn, ok := hp.decls[name].(*types.Func)
+		if !ok {
+			return true
+		}
+		return hp.hasBody(fn) || q.asmDefinesFunc(hp, name)
+	}
+	return false
+}
+
+// derefNamed returns the named type t is or points to.
+func derefNamed(t types.Type) (*types.Named, bool) {
+	t = types.Unalias(t)
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(p.Elem())
+	}
+	n, ok := t.(*types.Named)
+	return n, ok && n.Obj().Pkg() != nil
 }
 
 // hostMethod reports whether m, a method of generated package path, is
@@ -429,6 +527,36 @@ func (hp *hostPkg) isLHS(e ast.Expr) bool {
 	return false
 }
 
+// parentGenDecl returns the declaration a value spec is in.
+func (hp *hostPkg) parentGenDecl(n *ast.ValueSpec) *ast.GenDecl {
+	hp.useType(nil) // builds parents
+	gd, _ := hp.parents[n].(*ast.GenDecl)
+	return gd
+}
+
+// callsCode reports whether the expressions call a function (not a
+// conversion or a builtin): a value computed at run time.
+func (hp *hostPkg) callsCode(es ...ast.Expr) bool {
+	found := false
+	for _, e := range es {
+		ast.Inspect(e, func(n ast.Node) bool {
+			if _, ok := n.(*ast.FuncLit); ok {
+				return false // only called if something calls it
+			}
+			c, ok := n.(*ast.CallExpr)
+			if !ok || found {
+				return !found
+			}
+			if tv, ok := hp.info.Types[c.Fun]; ok && (tv.IsType() || tv.IsBuiltin()) {
+				return true
+			}
+			found = true
+			return false
+		})
+	}
+	return found
+}
+
 // deleteNode deletes n with its comments.
 func deleteNode(off func(token.Pos) int, n ast.Node, doc, comment *ast.CommentGroup) edit {
 	start := off(n.Pos())
@@ -484,7 +612,9 @@ func (g *pkgGen) writeAsm(hp *hostPkg, name string) {
 	}
 	// Functions only assembly declares are the host's too, and so are
 	// the bodies of functions shared files declare: an assembly
-	// function dispatches to them.
+	// function dispatches to them. (Calls of those still call the
+	// dispatch function: runtime·settls is the ape package's own.)
+	dispatched := map[string]bool{}
 	for _, m := range asmTextABI.FindAllSubmatch(src, -1) {
 		s := string(m[1])
 		if _, ok := funcs[s]; ok {
@@ -495,6 +625,7 @@ func (g *pkgGen) writeAsm(hp *hostPkg, name string) {
 			funcs[s] = hostName(hp.host, s)
 		} else if !hp.inOnly(obj.Pos()) {
 			funcs[s] = hostName(hp.host, s)
+			dispatched[s] = true
 			if g.asmDispatch[s] == nil {
 				g.asmDispatch[s] = map[string]string{}
 			}
@@ -522,6 +653,19 @@ func (g *pkgGen) writeAsm(hp *hostPkg, name string) {
 		}
 		return b
 	})
+	// Undo that for calls of dispatched functions: only their TEXT is
+	// the host's.
+	for s := range dispatched {
+		n := hostName(hp.host, s)
+		lines := strings.Split(string(out), "\n")
+		for i, l := range lines {
+			if !strings.Contains(l, "·"+n) || strings.HasPrefix(strings.TrimSpace(l), "TEXT") {
+				continue
+			}
+			lines[i] = strings.ReplaceAll(l, "·"+n, "·"+s)
+		}
+		out = []byte(strings.Join(lines, "\n"))
+	}
 	// go_asm.h names: T__field, T__size, const_NAME.
 	out = asmIdent.ReplaceAllFunc(out, func(b []byte) []byte {
 		s := string(b)
@@ -530,15 +674,20 @@ func (g *pkgGen) writeAsm(hp *hostPkg, name string) {
 				return []byte("const_" + n)
 			}
 		}
-		if t, rest, ok := strings.Cut(s, "__"); ok {
-			if n, ok := typeNames[t]; ok {
-				return []byte(n + "__" + rest)
+		// T_field and T__size.
+		for i := 0; i < len(s); i++ {
+			if s[i] == '_' {
+				if n, ok := typeNames[s[:i]]; ok {
+					return []byte(n + s[i:])
+				}
 			}
 		}
 		return b
 	})
 	out = buildLine.ReplaceAll(out, nil)
-	out = append([]byte(fmt.Sprintf(header, name, *arch)+"#undef GOOS_ape\n#define GOOS_"+hp.host+"\n"), out...)
+	// (GOOS_ape stays defined: the host's assembly may do what only
+	// a GOOS=ape program needs.)
+	out = append([]byte(fmt.Sprintf(header, name, *arch)+"#define GOOS_"+hp.host+"\n"), out...)
 	g.outputs[outName(hp.host, name)] = out
 }
 
@@ -601,6 +750,14 @@ func (hp *hostPkg) useType(e ast.Expr) types.Type {
 
 // writeAll writes the package's generated files and removes old ones.
 func (g *pkgGen) writeAll() error {
+	// A package no host builds has nothing to generate.
+	none := true
+	for _, hp := range g.hs {
+		none = none && hp.pkg.Name() == ""
+	}
+	if none {
+		return nil
+	}
 	if !*write {
 		var names []string
 		for n := range g.outputs {

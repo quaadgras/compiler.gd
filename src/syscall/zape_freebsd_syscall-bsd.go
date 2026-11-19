@@ -57,7 +57,7 @@ func Freebsd_Getgroups() (gids []int, err error) {
 		return nil, Freebsd_EINVAL
 	}
 
-	a := make([]_Gid_t, n)
+	a := make([]freebsd__Gid_t, n)
 	n, err = freebsd_getgroups(n, &a[0])
 	if err != nil {
 		return nil, err
@@ -74,9 +74,9 @@ func Freebsd_Setgroups(gids []int) (err error) {
 		return freebsd_setgroups(0, nil)
 	}
 
-	a := make([]_Gid_t, len(gids))
+	a := make([]freebsd__Gid_t, len(gids))
 	for i, v := range gids {
-		a[i] = _Gid_t(v)
+		a[i] = freebsd__Gid_t(v)
 	}
 	return freebsd_setgroups(len(a), &a[0])
 }
@@ -96,6 +96,8 @@ func Freebsd_ReadDirent(fd int, buf []byte) (n int, err error) {
 // An extra number (exit code, signal causing a stop)
 // is in the high bits.
 
+type Freebsd_WaitStatus uint32
+
 const (
 	freebsd_mask  = 0x7F
 	freebsd_core  = 0x80
@@ -105,20 +107,20 @@ const (
 	freebsd_stopped = 0x7F
 )
 
-func (w WaitStatus) Freebsd_Exited() bool { return w&freebsd_mask == freebsd_exited }
+func (w Freebsd_WaitStatus) Exited() bool { return w&freebsd_mask == freebsd_exited }
 
-func (w WaitStatus) Freebsd_ExitStatus() int {
+func (w Freebsd_WaitStatus) ExitStatus() int {
 	if w&freebsd_mask != freebsd_exited {
 		return -1
 	}
 	return int(w >> freebsd_shift)
 }
 
-func (w WaitStatus) Freebsd_Signaled() bool {
+func (w Freebsd_WaitStatus) Signaled() bool {
 	return w&freebsd_mask != freebsd_stopped && w&freebsd_mask != 0
 }
 
-func (w WaitStatus) Freebsd_Signal() Signal {
+func (w Freebsd_WaitStatus) Signal() Signal {
 	sig := Signal(w & freebsd_mask)
 	if sig == freebsd_stopped || sig == 0 {
 		return -1
@@ -126,32 +128,32 @@ func (w WaitStatus) Freebsd_Signal() Signal {
 	return sig
 }
 
-func (w WaitStatus) Freebsd_CoreDump() bool { return w.Freebsd_Signaled() && w&freebsd_core != 0 }
+func (w Freebsd_WaitStatus) CoreDump() bool { return w.Signaled() && w&freebsd_core != 0 }
 
-func (w WaitStatus) Freebsd_Stopped() bool {
+func (w Freebsd_WaitStatus) Stopped() bool {
 	return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) != Freebsd_SIGSTOP
 }
 
-func (w WaitStatus) Freebsd_Continued() bool {
+func (w Freebsd_WaitStatus) Continued() bool {
 	return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) == Freebsd_SIGSTOP
 }
 
-func (w WaitStatus) Freebsd_StopSignal() Signal {
-	if !w.Freebsd_Stopped() {
+func (w Freebsd_WaitStatus) StopSignal() Signal {
+	if !w.Stopped() {
 		return -1
 	}
 	return Signal(w>>freebsd_shift) & 0xFF
 }
 
-func (w WaitStatus) Freebsd_TrapCause() int { return -1 }
+func (w Freebsd_WaitStatus) TrapCause() int { return -1 }
 
 //sys	wait4(pid int, wstatus *_C_int, options int, rusage *Rusage) (wpid int, err error)
 
-func Freebsd_Wait4(pid int, wstatus *WaitStatus, options int, rusage *Rusage) (wpid int, err error) {
-	var status _C_int
+func Freebsd_Wait4(pid int, wstatus *Freebsd_WaitStatus, options int, rusage *Freebsd_Rusage) (wpid int, err error) {
+	var status freebsd__C_int
 	wpid, err = freebsd_wait4(pid, &status, options, rusage)
 	if wstatus != nil {
-		*wstatus = WaitStatus(status)
+		*wstatus = Freebsd_WaitStatus(status)
 	}
 	return
 }
@@ -166,7 +168,7 @@ func Freebsd_Wait4(pid int, wstatus *WaitStatus, options int, rusage *Rusage) (w
 //sysnb	getsockname(fd int, rsa *RawSockaddrAny, addrlen *_Socklen) (err error)
 //sys	Shutdown(s int, how int) (err error)
 
-func (sa *Freebsd_SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Freebsd_SockaddrInet4) sockaddr() (unsafe.Pointer, freebsd__Socklen, error) {
 	if sa.Port < 0 || sa.Port > 0xFFFF {
 		return nil, 0, Freebsd_EINVAL
 	}
@@ -176,10 +178,10 @@ func (sa *Freebsd_SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	p[0] = byte(sa.Port >> 8)
 	p[1] = byte(sa.Port)
 	sa.raw.Addr = sa.Addr
-	return unsafe.Pointer(&sa.raw), _Socklen(sa.raw.Len), nil
+	return unsafe.Pointer(&sa.raw), freebsd__Socklen(sa.raw.Len), nil
 }
 
-func (sa *Freebsd_SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Freebsd_SockaddrInet6) sockaddr() (unsafe.Pointer, freebsd__Socklen, error) {
 	if sa.Port < 0 || sa.Port > 0xFFFF {
 		return nil, 0, Freebsd_EINVAL
 	}
@@ -190,10 +192,10 @@ func (sa *Freebsd_SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	p[1] = byte(sa.Port)
 	sa.raw.Scope_id = sa.ZoneId
 	sa.raw.Addr = sa.Addr
-	return unsafe.Pointer(&sa.raw), _Socklen(sa.raw.Len), nil
+	return unsafe.Pointer(&sa.raw), freebsd__Socklen(sa.raw.Len), nil
 }
 
-func (sa *Freebsd_SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Freebsd_SockaddrUnix) sockaddr() (unsafe.Pointer, freebsd__Socklen, error) {
 	name := sa.Name
 	n := len(name)
 	if n >= len(sa.raw.Path) || n == 0 {
@@ -204,10 +206,10 @@ func (sa *Freebsd_SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
 	for i := 0; i < n; i++ {
 		sa.raw.Path[i] = int8(name[i])
 	}
-	return unsafe.Pointer(&sa.raw), _Socklen(sa.raw.Len), nil
+	return unsafe.Pointer(&sa.raw), freebsd__Socklen(sa.raw.Len), nil
 }
 
-func (sa *Freebsd_SockaddrDatalink) sockaddr() (unsafe.Pointer, _Socklen, error) {
+func (sa *Freebsd_SockaddrDatalink) sockaddr() (unsafe.Pointer, freebsd__Socklen, error) {
 	if sa.Index == 0 {
 		return nil, 0, Freebsd_EINVAL
 	}
@@ -222,7 +224,7 @@ func (sa *Freebsd_SockaddrDatalink) sockaddr() (unsafe.Pointer, _Socklen, error)
 	return unsafe.Pointer(&sa.raw), Freebsd_SizeofSockaddrDatalink, nil
 }
 
-func freebsd_anyToSockaddr(rsa *Freebsd_RawSockaddrAny) (Sockaddr, error) {
+func freebsd_anyToSockaddr(rsa *Freebsd_RawSockaddrAny) (Freebsd_Sockaddr, error) {
 	switch rsa.Addr.Family {
 	case Freebsd_AF_LINK:
 		pp := (*Freebsd_RawSockaddrDatalink)(unsafe.Pointer(rsa))
@@ -280,9 +282,9 @@ func freebsd_anyToSockaddr(rsa *Freebsd_RawSockaddrAny) (Sockaddr, error) {
 	return nil, Freebsd_EAFNOSUPPORT
 }
 
-func Freebsd_Accept(fd int) (nfd int, sa Sockaddr, err error) {
+func Freebsd_Accept(fd int) (nfd int, sa Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var len _Socklen = Freebsd_SizeofSockaddrAny
+	var len freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	nfd, err = freebsd_accept(fd, &rsa, &len)
 	if err != nil {
 		return
@@ -303,9 +305,9 @@ func Freebsd_Accept(fd int) (nfd int, sa Sockaddr, err error) {
 	return
 }
 
-func Freebsd_Getsockname(fd int) (sa Sockaddr, err error) {
+func Freebsd_Getsockname(fd int) (sa Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var len _Socklen = Freebsd_SizeofSockaddrAny
+	var len freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	if err = freebsd_getsockname(fd, &rsa, &len); err != nil {
 		return
 	}
@@ -322,41 +324,41 @@ func Freebsd_Getsockname(fd int) (sa Sockaddr, err error) {
 
 func Freebsd_GetsockoptByte(fd, level, opt int) (value byte, err error) {
 	var n byte
-	vallen := _Socklen(1)
+	vallen := freebsd__Socklen(1)
 	err = freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&n), &vallen)
 	return n, err
 }
 
 func Freebsd_GetsockoptInet4Addr(fd, level, opt int) (value [4]byte, err error) {
-	vallen := _Socklen(4)
+	vallen := freebsd__Socklen(4)
 	err = freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value[0]), &vallen)
 	return value, err
 }
 
 func Freebsd_GetsockoptIPMreq(fd, level, opt int) (*IPMreq, error) {
 	var value IPMreq
-	vallen := _Socklen(Freebsd_SizeofIPMreq)
+	vallen := freebsd__Socklen(Freebsd_SizeofIPMreq)
 	err := freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Freebsd_GetsockoptIPv6Mreq(fd, level, opt int) (*IPv6Mreq, error) {
 	var value IPv6Mreq
-	vallen := _Socklen(Freebsd_SizeofIPv6Mreq)
+	vallen := freebsd__Socklen(Freebsd_SizeofIPv6Mreq)
 	err := freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Freebsd_GetsockoptIPv6MTUInfo(fd, level, opt int) (*Freebsd_IPv6MTUInfo, error) {
 	var value Freebsd_IPv6MTUInfo
-	vallen := _Socklen(Freebsd_SizeofIPv6MTUInfo)
+	vallen := freebsd__Socklen(Freebsd_SizeofIPv6MTUInfo)
 	err := freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
 
 func Freebsd_GetsockoptICMPv6Filter(fd, level, opt int) (*Freebsd_ICMPv6Filter, error) {
 	var value Freebsd_ICMPv6Filter
-	vallen := _Socklen(Freebsd_SizeofICMPv6Filter)
+	vallen := freebsd__Socklen(Freebsd_SizeofICMPv6Filter)
 	err := freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, err
 }
@@ -369,17 +371,17 @@ func freebsd_recvmsgRaw(fd int, p, oob []byte, flags int, rsa *Freebsd_RawSockad
 	var msg Freebsd_Msghdr
 	msg.Name = (*byte)(unsafe.Pointer(rsa))
 	msg.Namelen = uint32(Freebsd_SizeofSockaddrAny)
-	var iov Iovec
+	var iov Freebsd_Iovec
 	if len(p) > 0 {
 		iov.Base = &p[0]
-		iov.Freebsd_SetLen(len(p))
+		iov.SetLen(len(p))
 	}
 	var dummy byte
 	if len(oob) > 0 {
 		// receive at least one normal byte
 		if len(p) == 0 {
 			iov.Base = &dummy
-			iov.Freebsd_SetLen(1)
+			iov.SetLen(1)
 		}
 		msg.Control = &oob[0]
 		msg.SetControllen(len(oob))
@@ -396,21 +398,21 @@ func freebsd_recvmsgRaw(fd int, p, oob []byte, flags int, rsa *Freebsd_RawSockad
 
 //sys	sendmsg(s int, msg *Msghdr, flags int) (n int, err error)
 
-func freebsd_sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen _Socklen, flags int) (n int, err error) {
+func freebsd_sendmsgN(fd int, p, oob []byte, ptr unsafe.Pointer, salen freebsd__Socklen, flags int) (n int, err error) {
 	var msg Freebsd_Msghdr
 	msg.Name = (*byte)(ptr)
 	msg.Namelen = uint32(salen)
-	var iov Iovec
+	var iov Freebsd_Iovec
 	if len(p) > 0 {
 		iov.Base = &p[0]
-		iov.Freebsd_SetLen(len(p))
+		iov.SetLen(len(p))
 	}
 	var dummy byte
 	if len(oob) > 0 {
 		// send at least one normal byte
 		if len(p) == 0 {
 			iov.Base = &dummy
-			iov.Freebsd_SetLen(1)
+			iov.SetLen(1)
 		}
 		msg.Control = &oob[0]
 		msg.SetControllen(len(oob))
@@ -489,11 +491,11 @@ func Freebsd_SysctlUint32(name string) (value uint32, err error) {
 
 //sys	utimes(path string, timeval *[2]Timeval) (err error)
 
-func Freebsd_Utimes(path string, tv []Timeval) (err error) {
+func Freebsd_Utimes(path string, tv []Freebsd_Timeval) (err error) {
 	if len(tv) != 2 {
 		return Freebsd_EINVAL
 	}
-	return freebsd_utimes(path, (*[2]Timeval)(unsafe.Pointer(&tv[0])))
+	return freebsd_utimes(path, (*[2]Freebsd_Timeval)(unsafe.Pointer(&tv[0])))
 }
 
 func Freebsd_UtimesNano(path string, ts []Timespec) error {
@@ -506,20 +508,20 @@ func Freebsd_UtimesNano(path string, ts []Timespec) error {
 	}
 	// Not as efficient as it could be because Timespec and
 	// Timeval have different types in the different OSes
-	tv := [2]Timeval{
-		NsecToTimeval(TimespecToNsec(ts[0])),
-		NsecToTimeval(TimespecToNsec(ts[1])),
+	tv := [2]Freebsd_Timeval{
+		Freebsd_NsecToTimeval(Freebsd_TimespecToNsec(ts[0])),
+		Freebsd_NsecToTimeval(Freebsd_TimespecToNsec(ts[1])),
 	}
-	return freebsd_utimes(path, (*[2]Timeval)(unsafe.Pointer(&tv[0])))
+	return freebsd_utimes(path, (*[2]Freebsd_Timeval)(unsafe.Pointer(&tv[0])))
 }
 
 //sys	futimes(fd int, timeval *[2]Timeval) (err error)
 
-func Freebsd_Futimes(fd int, tv []Timeval) (err error) {
+func Freebsd_Futimes(fd int, tv []Freebsd_Timeval) (err error) {
 	if len(tv) != 2 {
 		return Freebsd_EINVAL
 	}
-	return freebsd_futimes(fd, (*[2]Timeval)(unsafe.Pointer(&tv[0])))
+	return freebsd_futimes(fd, (*[2]Freebsd_Timeval)(unsafe.Pointer(&tv[0])))
 }
 
 //sys	fcntl(fd int, cmd int, arg int) (val int, err error)
@@ -527,16 +529,16 @@ func Freebsd_Futimes(fd int, tv []Timeval) (err error) {
 //sysnb ioctl(fd int, req int, arg int) (err error)
 //sysnb ioctlPtr(fd int, req uint, arg unsafe.Pointer) (err error) = SYS_IOCTL
 
-var freebsd_mapper = &mmapper{
+var freebsd_mapper = &freebsd_mmapper{
 	active: make(map[*byte][]byte),
 	mmap:   freebsd_mmap,
 	munmap: freebsd_munmap,
 }
 
 func Freebsd_Mmap(fd int, offset int64, length int, prot int, flags int) (data []byte, err error) {
-	return freebsd_mapper.Freebsd_Mmap(fd, offset, length, prot, flags)
+	return freebsd_mapper.Mmap(fd, offset, length, prot, flags)
 }
 
 func Freebsd_Munmap(b []byte) (err error) {
-	return freebsd_mapper.Freebsd_Munmap(b)
+	return freebsd_mapper.Munmap(b)
 }

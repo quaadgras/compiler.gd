@@ -40,6 +40,8 @@ type linux_mOS struct {
 	// This is a pointer to a chunk of memory allocated with a special
 	// mmap invocation in vgetrandomGetState().
 	linux_vgetrandomState uintptr
+
+	linux_waitsema uint32 // semaphore for parking on locks
 }
 
 // Linux futex.
@@ -76,8 +78,8 @@ func linux_futexsleep(addr *uint32, val uint32, ns int64) {
 		return
 	}
 
-	var ts timespec
-	ts.linux_setNsec(ns)
+	var ts linux_timespec
+	ts.setNsec(ns)
 	linux_futex(unsafe.Pointer(addr), linux__FUTEX_WAIT_PRIVATE, val, &ts, nil, 0)
 }
 
@@ -182,7 +184,7 @@ func linux_newosproc(mp *m) {
 	// with signals disabled. It will enable them in minit.
 	var oset linux_sigset
 	linux_sigprocmask(linux__SIG_SETMASK, &linux_sigset_all, &oset)
-	ret := retryOnEAGAIN(func() int32 {
+	ret := linux_retryOnEAGAIN(func() int32 {
 		r := linux_clone(linux_cloneFlags, stk, unsafe.Pointer(mp), unsafe.Pointer(mp.g0), unsafe.Pointer(abi.FuncPCABI0(mstart)))
 		// clone returns positive TID, negative errno.
 		// We don't care about the TID.
@@ -209,12 +211,12 @@ func linux_newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	stack := sysAlloc(stacksize, &memstats.stacks_sys, "OS thread stack")
 	if stack == nil {
 		writeErrStr(failallocatestack)
-		exit(1)
+		linux_exit(1)
 	}
 	ret := linux_clone(linux_cloneFlags, unsafe.Pointer(uintptr(stack)+stacksize), nil, nil, fn)
 	if ret < 0 {
 		writeErrStr(failthreadcreate)
-		exit(1)
+		linux_exit(1)
 	}
 }
 
@@ -257,13 +259,13 @@ func linux_sysargs(argc int32, argv **byte) {
 	// In some situations we don't get a loader-provided
 	// auxv, such as when loaded as a library on Android.
 	// Fall back to /proc/self/auxv.
-	fd := open(&linux_procAuxv[0], 0 /* O_RDONLY */, 0)
+	fd := linux_open(&linux_procAuxv[0], 0 /* O_RDONLY */, 0)
 	if fd < 0 {
 		// On Android, /proc/self/auxv might be unreadable (issue 9229), so we fallback to
 		// try using mincore to detect the physical page size.
 		// mincore should return EINVAL when address is not a multiple of system page size.
 		const size = 256 << 10 // size of memory region to allocate
-		p, err := mmap(nil, size, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
+		p, err := linux_mmap(nil, size, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
 		if err != 0 {
 			return
 		}
@@ -278,12 +280,12 @@ func linux_sysargs(argc int32, argv **byte) {
 		if physPageSize == 0 {
 			physPageSize = size
 		}
-		munmap(p, size)
+		linux_munmap(p, size)
 		return
 	}
 
-	n = read(fd, noescape(unsafe.Pointer(&linux_auxvreadbuf[0])), int32(unsafe.Sizeof(linux_auxvreadbuf)))
-	closefd(fd)
+	n = linux_read(fd, noescape(unsafe.Pointer(&linux_auxvreadbuf[0])), int32(unsafe.Sizeof(linux_auxvreadbuf)))
+	linux_closefd(fd)
 	if n < 0 {
 		return
 	}
@@ -293,6 +295,9 @@ func linux_sysargs(argc int32, argv **byte) {
 	pairs := linux_sysauxv(linux_auxvreadbuf[:])
 	auxv = linux_auxvreadbuf[: pairs*2 : pairs*2]
 }
+
+// secureMode holds the value of AT_SECURE passed in the auxiliary vector.
+var linux_secureMode bool
 
 func linux_sysauxv(auxv []uintptr) (pairs int) {
 	// Process the auxiliary vector entries provided by the kernel when the
@@ -314,7 +319,7 @@ func linux_sysauxv(auxv []uintptr) (pairs int) {
 			physPageSize = val
 
 		case linux__AT_SECURE:
-			secureMode = val == 1
+			linux_secureMode = val == 1
 		}
 
 		linux_archauxv(tag, val)
@@ -327,13 +332,13 @@ var linux_sysTHPSizePath = []byte("/sys/kernel/mm/transparent_hugepage/hpage_pmd
 
 func linux_getHugePageSize() uintptr {
 	var numbuf [20]byte
-	fd := open(&linux_sysTHPSizePath[0], 0 /* O_RDONLY */, 0)
+	fd := linux_open(&linux_sysTHPSizePath[0], 0 /* O_RDONLY */, 0)
 	if fd < 0 {
 		return 0
 	}
 	ptr := noescape(unsafe.Pointer(&numbuf[0]))
-	n := read(fd, ptr, int32(len(numbuf)))
-	closefd(fd)
+	n := linux_read(fd, ptr, int32(len(numbuf)))
+	linux_closefd(fd)
 	if n <= 0 {
 		return 0
 	}
@@ -356,12 +361,14 @@ func linux_osinit() {
 	linux_configure64bitsTimeOn32BitsArchitectures()
 }
 
+var linux_urandom_dev = []byte("/dev/urandom\x00")
+
 func linux_readRandom(r []byte) int {
 	// Note that all supported Linux kernels should provide AT_RANDOM which
 	// populates startupRand, so this fallback should be unreachable.
-	fd := open(&urandom_dev[0], 0 /* O_RDONLY */, 0)
-	n := read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
-	closefd(fd)
+	fd := linux_open(&linux_urandom_dev[0], 0 /* O_RDONLY */, 0)
+	n := linux_read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
+	linux_closefd(fd)
 	return int(n)
 }
 
@@ -428,7 +435,7 @@ func linux_cgoSigtramp()
 func linux_sigaltstack(new, old *linux_stackt)
 
 //go:noescape
-func linux_setitimer(mode int32, new, old *itimerval)
+func linux_setitimer(mode int32, new, old *linux_itimerval)
 
 //go:noescape
 func linux_timer_create(clockid int32, sevp *linux_sigevent, timerid *int32) int32
@@ -674,8 +681,8 @@ func linux_setThreadCPUProfiler(hz int32) {
 	// activates may do a couple milliseconds of GC-related work and nothing
 	// else in the few seconds that the profiler observes.
 	spec := new(linux_itimerspec)
-	spec.it_value.linux_setNsec(1 + int64(cheaprandn(uint32(1e9/hz))))
-	spec.it_interval.linux_setNsec(1e9 / int64(hz))
+	spec.it_value.setNsec(1 + int64(cheaprandn(uint32(1e9/hz))))
+	spec.it_interval.setNsec(1e9 / int64(hz))
 
 	var timerid int32
 	var sevp linux_sigevent
@@ -729,7 +736,7 @@ var linux_perThreadSyscall linux_perThreadSyscallArgs
 // The system call is expected to succeed and return the same value on every
 // thread. If any threads do not match, the runtime throws.
 //
-//go:linkname linux_syscall_runtime_doAllThreadsSyscall syscall.linux_runtime_doAllThreadsSyscall
+//go:linkname linux_syscall_runtime_doAllThreadsSyscall syscall.runtime_doAllThreadsSyscall
 //go:uintptrescapes
 func linux_syscall_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr) {
 	if iscgo {

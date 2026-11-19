@@ -29,7 +29,7 @@ var linux_origRlimitNofile atomic.Pointer[Linux_Rlimit]
 // and then leave old software to set the limit back as needed.
 // Code that really wants Go to leave the limit alone can set the hard limit,
 // which Go of course has no choice but to respect.
-func init() {
+func linux_init0() {
 	var lim Linux_Rlimit
 	if err := Linux_Getrlimit(Linux_RLIMIT_NOFILE, &lim); err == nil && lim.Max > 0 && lim.Cur < lim.Max-1 {
 		linux_origRlimitNofile.Store(&lim)

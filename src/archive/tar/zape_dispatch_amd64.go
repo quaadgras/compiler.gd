@@ -16,4 +16,14 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
+
+func init() {
+	if apehost == apeLinux {
+		linux_init0()
+	}
+	if apehost == apeFreebsd {
+		freebsd_init0()
+	}
+}

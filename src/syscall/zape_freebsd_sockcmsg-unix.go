@@ -17,17 +17,17 @@ import (
 // CmsgLen returns the value to store in the Len field of the [Cmsghdr]
 // structure, taking into account any necessary alignment.
 func Freebsd_CmsgLen(datalen int) int {
-	return cmsgAlignOf(Freebsd_SizeofCmsghdr) + datalen
+	return freebsd_cmsgAlignOf(Freebsd_SizeofCmsghdr) + datalen
 }
 
 // CmsgSpace returns the number of bytes an ancillary element with
 // payload of the passed data length occupies.
 func Freebsd_CmsgSpace(datalen int) int {
-	return cmsgAlignOf(Freebsd_SizeofCmsghdr) + cmsgAlignOf(datalen)
+	return freebsd_cmsgAlignOf(Freebsd_SizeofCmsghdr) + freebsd_cmsgAlignOf(datalen)
 }
 
 func (h *Freebsd_Cmsghdr) data(offset uintptr) unsafe.Pointer {
-	return unsafe.Pointer(uintptr(unsafe.Pointer(h)) + uintptr(cmsgAlignOf(Freebsd_SizeofCmsghdr)) + offset)
+	return unsafe.Pointer(uintptr(unsafe.Pointer(h)) + uintptr(freebsd_cmsgAlignOf(Freebsd_SizeofCmsghdr)) + offset)
 }
 
 // SocketControlMessage represents a socket control message.
@@ -48,7 +48,7 @@ func Freebsd_ParseSocketControlMessage(b []byte) ([]Freebsd_SocketControlMessage
 		}
 		m := Freebsd_SocketControlMessage{Header: *h, Data: dbuf}
 		msgs = append(msgs, m)
-		i += cmsgAlignOf(int(h.Len))
+		i += freebsd_cmsgAlignOf(int(h.Len))
 	}
 	return msgs, nil
 }
@@ -58,7 +58,7 @@ func freebsd_socketControlMessageHeaderAndData(b []byte) (*Freebsd_Cmsghdr, []by
 	if h.Len < Freebsd_SizeofCmsghdr || uint64(h.Len) > uint64(len(b)) {
 		return nil, nil, Freebsd_EINVAL
 	}
-	return h, b[cmsgAlignOf(Freebsd_SizeofCmsghdr):h.Len], nil
+	return h, b[freebsd_cmsgAlignOf(Freebsd_SizeofCmsghdr):h.Len], nil
 }
 
 // UnixRights encodes a set of open file descriptors into a socket

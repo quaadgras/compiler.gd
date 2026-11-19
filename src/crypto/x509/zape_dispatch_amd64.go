@@ -18,6 +18,7 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
 var fallbacksSet bool
@@ -42,7 +43,11 @@ func SetFallbackRoots(a0 *CertPool) {
 		Linux_SetFallbackRoots(a0)
 		return
 	}
-	Freebsd_SetFallbackRoots(a0)
+	if apehost == apeFreebsd {
+		Freebsd_SetFallbackRoots(a0)
+		return
+	}
+	Windows_SetFallbackRoots(a0)
 }
 
 func loadSystemRoots() (*CertPool, error) {
@@ -50,7 +55,11 @@ func loadSystemRoots() (*CertPool, error) {
 		x0, x1 := linux_loadSystemRoots()
 		return x0, x1
 	}
-	x0, x1 := freebsd_loadSystemRoots()
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_loadSystemRoots()
+		return x0, x1
+	}
+	x0, x1 := windows_loadSystemRoots()
 	return x0, x1
 }
 
@@ -59,6 +68,32 @@ func systemRootsPool() *CertPool {
 		x0 := linux_systemRootsPool()
 		return x0
 	}
-	x0 := freebsd_systemRootsPool()
+	if apehost == apeFreebsd {
+		x0 := freebsd_systemRootsPool()
+		return x0
+	}
+	x0 := windows_systemRootsPool()
 	return x0
+}
+
+func (r *Certificate) systemVerify(a0 *VerifyOptions) ([][]*Certificate, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_systemVerify(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_systemVerify(a0)
+		return x0, x1
+	}
+	x0, x1 := r.windows_systemVerify(a0)
+	return x0, x1
+}
+
+func init() {
+	if apehost == apeLinux {
+		linux_init0()
+	}
+	if apehost == apeWindows {
+		windows_init0()
+	}
 }

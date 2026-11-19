@@ -16,37 +16,37 @@ import (
 
 var _ = runtime.GOARCH
 
-func linux_setKeepAliveIdle(fd *netFD, d time.Duration) error {
+func linux_setKeepAliveIdle(fd *linux_netFD, d time.Duration) error {
 	if d == 0 {
-		d = defaultTCPKeepAliveIdle
+		d = linux_defaultTCPKeepAliveIdle
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(roundDurationUp(d, time.Second))
+	secs := int(linux_roundDurationUp(d, time.Linux_Second))
 	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_TCP, syscall.Linux_TCP_KEEPIDLE, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setKeepAliveInterval(fd *netFD, d time.Duration) error {
+func linux_setKeepAliveInterval(fd *linux_netFD, d time.Duration) error {
 	if d == 0 {
-		d = defaultTCPKeepAliveInterval
+		d = linux_defaultTCPKeepAliveInterval
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(roundDurationUp(d, time.Second))
+	secs := int(linux_roundDurationUp(d, time.Linux_Second))
 	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_TCP, syscall.Linux_TCP_KEEPINTVL, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setKeepAliveCount(fd *netFD, n int) error {
+func linux_setKeepAliveCount(fd *linux_netFD, n int) error {
 	if n == 0 {
-		n = defaultTCPKeepAliveCount
+		n = linux_defaultTCPKeepAliveCount
 	} else if n < 0 {
 		return nil
 	}

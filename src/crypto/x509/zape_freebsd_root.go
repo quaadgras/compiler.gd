@@ -160,7 +160,7 @@ func freebsd_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error
 		// See:
 		//  * https://golang.org/issue/35325
 		//  * https://docs.openssl.org/4.0/man1/openssl-rehash/#environment
-		dirs = filepath.SplitList(certDirPath)
+		dirs = filepath.Freebsd_SplitList(certDirPath)
 	}
 
 	for _, directory := range dirs {
@@ -172,7 +172,7 @@ func freebsd_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error
 			continue
 		}
 		for _, fi := range fis {
-			data, err := os.Freebsd_ReadFile(filepath.Join(directory, fi.Name()))
+			data, err := os.Freebsd_ReadFile(filepath.Freebsd_Join(directory, fi.Name()))
 			if err == nil {
 				roots.AppendCertsFromPEM(data)
 			}
@@ -189,7 +189,7 @@ func freebsd_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error
 // readUniqueDirectoryEntries is like os.ReadDir but omits
 // symlinks that point within the directory.
 func freebsd_readUniqueDirectoryEntries(dir string) ([]fs.DirEntry, error) {
-	files, err := os.ReadDir(dir)
+	files, err := os.Freebsd_ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -208,6 +208,6 @@ func freebsd_isSameDirSymlink(f fs.DirEntry, dir string) bool {
 	if f.Type()&fs.ModeSymlink == 0 {
 		return false
 	}
-	target, err := os.Freebsd_Readlink(filepath.Join(dir, f.Name()))
-	return err == nil && !strings.ContainsRune(target, filepath.Separator)
+	target, err := os.Freebsd_Readlink(filepath.Freebsd_Join(dir, f.Name()))
+	return err == nil && !strings.ContainsRune(target, filepath.Freebsd_Separator)
 }

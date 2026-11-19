@@ -176,14 +176,14 @@ func Freebsd_Command(name string, arg ...string) *Cmd {
 		}
 
 		runtime.SetFinalizer(cmd, func(c *Cmd) {
-			if c.Process != nil && c.ProcessState == nil {
+			if c.Process != nil && os.Freebsd_FromAPE_ProcessState(c.ProcessState) == nil {
 				debugHint := ""
 				if c.createdByStack == nil {
 					debugHint = " (set GODEBUG=execwait=2 to capture stacks for debugging)"
 				} else {
-					os.Stderr.Freebsd_WriteString("GODEBUG=execwait=2 detected a leaked exec.Cmd created by:\n")
-					os.Stderr.Freebsd_Write(c.createdByStack)
-					os.Stderr.Freebsd_WriteString("\n")
+					os.Freebsd_Stderr.WriteString("GODEBUG=execwait=2 detected a leaked exec.Cmd created by:\n")
+					os.Freebsd_Stderr.Write(c.createdByStack)
+					os.Freebsd_Stderr.WriteString("\n")
 					debugHint = ""
 				}
 				panic("exec: Cmd started a Process but leaked without a call to Wait" + debugHint)
@@ -191,7 +191,7 @@ func Freebsd_Command(name string, arg ...string) *Cmd {
 		})
 	}
 
-	if filepath.Base(name) == name {
+	if filepath.Freebsd_Base(name) == name {
 		lp, err := LookPath(name)
 		if lp != "" {
 			// Update cmd.Path even if err is non-nil.
@@ -202,7 +202,7 @@ func Freebsd_Command(name string, arg ...string) *Cmd {
 		if err != nil {
 			cmd.Err = err
 		}
-	} else if "freebsd" == "windows" && filepath.IsAbs(name) {
+	} else if "freebsd" == "windows" && filepath.Freebsd_IsAbs(name) {
 		// We may need to add a filename extension from PATHEXT
 		// or verify an extension that is already present.
 		// Since the path is absolute, its extension should be unambiguous
@@ -211,7 +211,7 @@ func Freebsd_Command(name string, arg ...string) *Cmd {
 		// Note that we don't cache anything here for relative paths, because
 		// cmd.Dir may be set after we return from this function and that may
 		// cause the command to resolve to a different extension.
-		if lp, err := lookExtensions(name, ""); err == nil {
+		if lp, err := freebsd_lookExtensions(name, ""); err == nil {
 			cmd.cachedLookExtensions.in, cmd.cachedLookExtensions.out = name, lp
 		} else {
 			cmd.Err = err
@@ -236,7 +236,7 @@ func Freebsd_CommandContext(ctx context.Context, name string, arg ...string) *Cm
 	cmd := Freebsd_Command(name, arg...)
 	cmd.ctx = ctx
 	cmd.Cancel = func() error {
-		return cmd.Process.Kill()
+		return cmd.Process.Freebsd_Kill()
 	}
 	return cmd
 }
@@ -276,7 +276,7 @@ func (c *Cmd) freebsd_argv() []string {
 	return []string{c.Path}
 }
 
-func (c *Cmd) freebsd_childStdin() (*os.File, error) {
+func (c *Cmd) freebsd_childStdin() (*os.Freebsd_File, error) {
 	if c.Stdin == nil {
 		f, err := os.Freebsd_Open(os.Freebsd_DevNull)
 		if err != nil {
@@ -286,7 +286,7 @@ func (c *Cmd) freebsd_childStdin() (*os.File, error) {
 		return f, nil
 	}
 
-	if f, ok := c.Stdin.(*os.File); ok {
+	if f, ok := c.Stdin.(*os.Freebsd_File); ok {
 		return f, nil
 	}
 
@@ -299,7 +299,7 @@ func (c *Cmd) freebsd_childStdin() (*os.File, error) {
 	c.parentIOPipes = append(c.parentIOPipes, pw)
 	c.goroutine = append(c.goroutine, func() error {
 		_, err := io.Copy(pw, c.Stdin)
-		if skipStdinCopyError(err) {
+		if freebsd_skipStdinCopyError(err) {
 			err = nil
 		}
 		if err1 := pw.Close(); err == nil {
@@ -310,11 +310,11 @@ func (c *Cmd) freebsd_childStdin() (*os.File, error) {
 	return pr, nil
 }
 
-func (c *Cmd) freebsd_childStdout() (*os.File, error) {
+func (c *Cmd) freebsd_childStdout() (*os.Freebsd_File, error) {
 	return c.freebsd_writerDescriptor(c.Stdout)
 }
 
-func (c *Cmd) freebsd_childStderr(childStdout *os.File) (*os.File, error) {
+func (c *Cmd) freebsd_childStderr(childStdout *os.Freebsd_File) (*os.Freebsd_File, error) {
 	if c.Stderr != nil && freebsd_interfaceEqual(c.Stderr, c.Stdout) {
 		return childStdout, nil
 	}
@@ -325,7 +325,7 @@ func (c *Cmd) freebsd_childStderr(childStdout *os.File) (*os.File, error) {
 // can write to send data to w.
 //
 // If w is nil, writerDescriptor returns a File that writes to os.DevNull.
-func (c *Cmd) freebsd_writerDescriptor(w io.Writer) (*os.File, error) {
+func (c *Cmd) freebsd_writerDescriptor(w io.Writer) (*os.Freebsd_File, error) {
 	if w == nil {
 		f, err := os.Freebsd_OpenFile(os.Freebsd_DevNull, os.Freebsd_O_WRONLY, 0)
 		if err != nil {
@@ -335,7 +335,7 @@ func (c *Cmd) freebsd_writerDescriptor(w io.Writer) (*os.File, error) {
 		return f, nil
 	}
 
-	if f, ok := w.(*os.File); ok {
+	if f, ok := w.(*os.Freebsd_File); ok {
 		return f, nil
 	}
 
@@ -438,7 +438,7 @@ func (c *Cmd) Freebsd_Start() error {
 			// than triggering a surprising data race, and if the user really cares
 			// about that bit of logging they can always use LookPath to resolve it.
 			var err error
-			lp, err = lookExtensions(c.Path, c.Dir)
+			lp, err = freebsd_lookExtensions(c.Path, c.Dir)
 			if err != nil {
 				return err
 			}
@@ -455,7 +455,7 @@ func (c *Cmd) Freebsd_Start() error {
 		}
 	}
 
-	childFiles := make([]*os.File, 0, 3+len(c.ExtraFiles))
+	childFiles := make([]*os.Freebsd_File, 0, 3+len(c.ExtraFiles))
 	stdin, err := c.freebsd_childStdin()
 	if err != nil {
 		return err
@@ -478,11 +478,11 @@ func (c *Cmd) Freebsd_Start() error {
 		return err
 	}
 
-	c.Process, err = os.StartProcess(lp, c.freebsd_argv(), &os.ProcAttr{
+	c.Process, err = os.Freebsd_StartProcess(lp, c.freebsd_argv(), &os.Freebsd_ProcAttr{
 		Dir:   c.Dir,
 		Files: childFiles,
 		Env:   env,
-		Sys:   c.SysProcAttr,
+		Sys:   syscall.Freebsd_FromAPE_SysProcAttr(c.SysProcAttr),
 	})
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func (c *Cmd) freebsd_watchCtx(resultc chan<- ctxResult) {
 	}
 
 	killed := false
-	if killErr := c.Process.Kill(); killErr == nil {
+	if killErr := c.Process.Freebsd_Kill(); killErr == nil {
 		// We appear to have killed the process. c.Process.Wait should return a
 		// non-nil error to c.Wait unless the Kill signal races with a successful
 		// exit, and if that does happen we shouldn't report a spurious error,
@@ -630,7 +630,7 @@ func (c *Cmd) freebsd_watchCtx(resultc chan<- ctxResult) {
 }
 
 func (e *ExitError) Freebsd_Error() string {
-	return e.ProcessState.Freebsd_String()
+	return os.Freebsd_FromAPE_ProcessState(e.ProcessState).String()
 }
 
 // Wait waits for the command to exit and waits for any copying to
@@ -657,11 +657,11 @@ func (c *Cmd) Freebsd_Wait() error {
 	if c.Process == nil {
 		return errors.New("exec: not started")
 	}
-	if c.ProcessState != nil {
+	if os.Freebsd_FromAPE_ProcessState(c.ProcessState) != nil {
 		return errors.New("exec: Wait was already called")
 	}
 
-	state, err := c.Process.Wait()
+	state, err := c.Process.Freebsd_Wait()
 	if err == nil && !state.Success() {
 		err = &ExitError{ProcessState: state}
 	}
@@ -936,7 +936,7 @@ func (c *Cmd) freebsd_environ() ([]string, error) {
 				// https://go.dev/issue/50599) to avoid unintended collateral damage we
 				// only implicitly update PWD when Env is nil. That way, we're much
 				// less likely to override an intentional change to the variable.
-				if pwd, absErr := filepath.Abs(c.Dir); absErr == nil {
+				if pwd, absErr := filepath.Freebsd_Abs(c.Dir); absErr == nil {
 					env = append(env, "PWD="+pwd)
 				} else if err == nil {
 					err = absErr
@@ -1050,7 +1050,7 @@ func freebsd_addCriticalEnv(env []string) []string {
 func freebsd_validateLookPath(s string) error {
 	switch s {
 	case "", ".", "..":
-		return ErrNotFound
+		return Freebsd_ErrNotFound
 	}
 	return nil
 }

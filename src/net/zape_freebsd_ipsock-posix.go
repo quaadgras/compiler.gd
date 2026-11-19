@@ -43,7 +43,7 @@ func (p *ipStackCapabilities) freebsd_probe() {
 	switch err {
 	case syscall.Freebsd_EAFNOSUPPORT, syscall.Freebsd_EPROTONOSUPPORT:
 	case nil:
-		poll.CloseFunc(s)
+		poll.Freebsd_CloseFunc(s)
 		p.ipv4Enabled = true
 	}
 	var probes = []struct {
@@ -67,7 +67,7 @@ func (p *ipStackCapabilities) freebsd_probe() {
 		if err != nil {
 			continue
 		}
-		defer poll.CloseFunc(s)
+		defer poll.Freebsd_CloseFunc(s)
 		syscall.Freebsd_SetsockoptInt(s, syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_V6ONLY, probes[i].value)
 		sa, err := probes[i].laddr.freebsd_sockaddr(syscall.Freebsd_AF_INET6)
 		if err != nil {
@@ -166,7 +166,7 @@ func freebsd_favoriteAddrFamily(network string, laddr, raddr sockaddr, mode stri
 	return syscall.Freebsd_AF_INET6, false
 }
 
-func freebsd_internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *netFD, err error) {
+func freebsd_internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *freebsd_netFD, err error) {
 	switch "freebsd" {
 	case "aix", "freebsd", "windows", "openbsd", "js", "wasip1":
 		if mode == "dial" && raddr.isWildcard() {
@@ -226,7 +226,7 @@ func freebsd_ipToSockaddrInet6(ip IP, port int, zone string) (syscall.Freebsd_So
 // See go.dev/issue/67401.
 //
 //go:linkname freebsd_ipToSockaddr
-func freebsd_ipToSockaddr(family int, ip IP, port int, zone string) (syscall.Sockaddr, error) {
+func freebsd_ipToSockaddr(family int, ip IP, port int, zone string) (syscall.Freebsd_Sockaddr, error) {
 	switch family {
 	case syscall.Freebsd_AF_INET:
 		sa, err := freebsd_ipToSockaddrInet4(ip, port)

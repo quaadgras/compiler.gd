@@ -12,12 +12,12 @@ import (
 	"internal/syscall/unix"
 )
 
-func (f *File) linux_lstatatNolog(name string) (FileInfo, error) {
+func (f *Linux_File) lstatatNolog(name string) (FileInfo, error) {
 	var fs linux_fileStat
-	if err := f.pfd.Linux_Fstatat(name, &fs.sys, unix.Linux_AT_SYMLINK_NOFOLLOW); err != nil {
-		err = f.linux_wrapErr("fstatat", err)
+	if err := f.pfd.Fstatat(name, &fs.sys, unix.Linux_AT_SYMLINK_NOFOLLOW); err != nil {
+		err = f.wrapErr("fstatat", err)
 		if pe, ok := err.(*PathError); ok {
-			pe.Path = pe.Path + string(PathSeparator) + name
+			pe.Path = pe.Path + string(Linux_PathSeparator) + name
 		}
 		return nil, err
 	}

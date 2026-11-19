@@ -104,6 +104,7 @@ func setupFlags(ctxt *Link) {
 	fs.BoolVar(&ctxt.flagA, "a", false, "no-op (deprecated)")
 	fs.BoolVar(&ctxt.FlagC, "c", false, "dump call graph")
 	fs.BoolVar(&ctxt.FlagD, "d", false, "disable dynamic executable")
+	fs.StringVar(&ctxt.flagAPEFormat, "apeformat", "", "for GOOS=ape, write an `elf` or a `pe` executable")
 	fs.BoolVar(&ctxt.flagF, "f", false, "ignore version mismatch")
 	fs.BoolVar(&ctxt.flagG, "g", false, "disable go package data checks")
 	fs.BoolVar(&ctxt.flagH, "h", false, "halt on error")
@@ -320,6 +321,22 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	}
 	if ctxt.HeadType == objabi.Hunknown {
 		ctxt.HeadType.Set(buildcfg.GOOS)
+	}
+	// A GOOS=ape program written as a PE executable is a Windows
+	// executable: its Windows host's imports are its import table.
+	switch ctxt.flagAPEFormat {
+	case "", "elf":
+	case "pe":
+		if ctxt.HeadType != objabi.Hape {
+			Errorf("-apeformat is for GOOS=ape")
+		}
+		ctxt.HeadType = objabi.Hwindows
+		ctxt.apePE = true
+		if ctxt.flagEntrySymbol == "" {
+			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_ape_windows"
+		}
+	default:
+		Errorf("-apeformat must be elf or pe")
 	}
 
 	if !ctxt.flagAslr && ctxt.BuildMode != BuildModeCShared {

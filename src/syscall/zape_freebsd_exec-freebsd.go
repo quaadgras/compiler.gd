@@ -16,10 +16,10 @@ import (
 var _ = runtime.GOARCH
 
 type Freebsd_SysProcAttr struct {
-	Chroot     string      // Chroot.
-	Credential *Credential // Credential.
-	Ptrace     bool        // Enable tracing.
-	Setsid     bool        // Create session.
+	Chroot     string              // Chroot.
+	Credential *Freebsd_Credential // Credential.
+	Ptrace     bool                // Enable tracing.
+	Setsid     bool                // Create session.
 	// Setpgid sets the process group ID of the child to Pgid,
 	// or, if Pgid == 0, to the new child's process ID.
 	Setpgid bool
@@ -78,8 +78,8 @@ func freebsd_forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *by
 		err1            Errno
 		nextfd          int
 		i               int
-		pgrp            _C_int
-		cred            *Credential
+		pgrp            freebsd__C_int
+		cred            *Freebsd_Credential
 		ngroups, groups uintptr
 		upid, ppid      uintptr
 	)
@@ -158,14 +158,14 @@ func freebsd_forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *by
 	if sys.Foreground {
 		// This should really be pid_t, however _C_int (aka int32) is
 		// generally equivalent.
-		pgrp = _C_int(sys.Pgid)
+		pgrp = freebsd__C_int(sys.Pgid)
 		if pgrp == 0 {
 			r1, _, err1 = Freebsd_RawSyscall(Freebsd_SYS_GETPID, 0, 0, 0)
 			if err1 != 0 {
 				goto childerror
 			}
 
-			pgrp = _C_int(r1)
+			pgrp = freebsd__C_int(r1)
 		}
 
 		// Place process group in foreground.

@@ -13,12 +13,12 @@ import (
 	"syscall"
 )
 
-func (fd *FD) Linux_Fstatat(name string, s *syscall.Linux_Stat_t, flags int) error {
+func (fd *Linux_FD) Fstatat(name string, s *syscall.Linux_Stat_t, flags int) error {
 	if err := fd.incref(); err != nil {
 		return err
 	}
 	defer fd.decref()
-	return ignoringEINTR(func() error {
+	return linux_ignoringEINTR(func() error {
 		return unix.Linux_Fstatat(fd.Sysfd, name, s, flags)
 	})
 }

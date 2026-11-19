@@ -26,7 +26,7 @@ func Linux_Fchmodat(dirfd int, path string, mode uint32, flags int) error {
 	// Instead, use the same workaround as GNU libc and musl, which is to open the file
 	// and then fchmodat the FD in /proc/self/fd.
 	// See: https://lwn.net/Articles/939217/
-	fd, err := Openat(dirfd, path, Linux_O_PATH|syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC, 0)
+	fd, err := Linux_Openat(dirfd, path, Linux_O_PATH|syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC, 0)
 	if err != nil {
 		return err
 	}

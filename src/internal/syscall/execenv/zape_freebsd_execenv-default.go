@@ -17,5 +17,5 @@ import "syscall"
 // Defaults to syscall.Environ() on all platforms
 // other than Windows.
 func Freebsd_Default(sys *syscall.Freebsd_SysProcAttr) ([]string, error) {
-	return syscall.Environ(), nil
+	return syscall.Freebsd_Environ(), nil
 }

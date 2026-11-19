@@ -12,7 +12,7 @@ import "syscall"
 
 // Pipe returns a connected pair of Files; reads from r return bytes written to w.
 // It returns the files and an error, if any.
-func Linux_Pipe() (r *File, w *File, err error) {
+func Linux_Pipe() (r *Linux_File, w *Linux_File, err error) {
 	var p [2]int
 
 	e := syscall.Linux_Pipe2(p[0:], syscall.Linux_O_CLOEXEC)

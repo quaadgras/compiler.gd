@@ -17,13 +17,13 @@ import (
 
 // socket returns a network file descriptor that is ready for
 // asynchronous I/O using the network poller.
-func linux_socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *netFD, err error) {
+func linux_socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
 	s, err := linux_sysSocket(family, sotype, proto)
 	if err != nil {
 		return nil, err
 	}
 	if err = linux_setDefaultSockopts(s, family, sotype, ipv6only); err != nil {
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		return nil, err
 	}
 	fd = linux_newFD(s, family, sotype, net)
@@ -53,27 +53,27 @@ func linux_socket(ctx context.Context, net string, family, sotype, proto int, ip
 	if laddr != nil && raddr == nil {
 		switch sotype {
 		case syscall.Linux_SOCK_STREAM, syscall.Linux_SOCK_SEQPACKET:
-			if err := fd.linux_listenStream(ctx, laddr, listenerBacklog(), ctrlCtxFn); err != nil {
-				fd.Linux_Close()
+			if err := fd.listenStream(ctx, laddr, linux_listenerBacklog(), ctrlCtxFn); err != nil {
+				fd.Close()
 				return nil, err
 			}
 			return fd, nil
 		case syscall.Linux_SOCK_DGRAM:
-			if err := fd.linux_listenDatagram(ctx, laddr, ctrlCtxFn); err != nil {
-				fd.Linux_Close()
+			if err := fd.listenDatagram(ctx, laddr, ctrlCtxFn); err != nil {
+				fd.Close()
 				return nil, err
 			}
 			return fd, nil
 		}
 	}
-	if err := fd.linux_dial(ctx, laddr, raddr, ctrlCtxFn); err != nil {
-		fd.Linux_Close()
+	if err := fd.dial(ctx, laddr, raddr, ctrlCtxFn); err != nil {
+		fd.Close()
 		return nil, err
 	}
 	return fd, nil
 }
 
-func (fd *netFD) linux_ctrlNetwork() string {
+func (fd *linux_netFD) ctrlNetwork() string {
 	switch fd.net {
 	case "unix", "unixgram", "unixpacket":
 		return fd.net
@@ -88,22 +88,22 @@ func (fd *netFD) linux_ctrlNetwork() string {
 	return fd.net + "6"
 }
 
-func (fd *netFD) linux_dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
-	var c *rawConn
+func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+	var c *linux_rawConn
 	if ctrlCtxFn != nil {
-		c = newRawConn(fd)
+		c = linux_newRawConn(fd)
 		var ctrlAddr string
 		if raddr != nil {
 			ctrlAddr = raddr.String()
 		} else if laddr != nil {
 			ctrlAddr = laddr.String()
 		}
-		if err := ctrlCtxFn(ctx, fd.linux_ctrlNetwork(), ctrlAddr, c); err != nil {
+		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), ctrlAddr, c); err != nil {
 			return err
 		}
 	}
 
-	var lsa syscall.Sockaddr
+	var lsa syscall.Linux_Sockaddr
 	var err error
 	if laddr != nil {
 		if lsa, err = laddr.sockaddr(fd.family); err != nil {
@@ -114,18 +114,18 @@ func (fd *netFD) linux_dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxF
 			}
 		}
 	}
-	var rsa syscall.Sockaddr  // remote address from the user
-	var crsa syscall.Sockaddr // remote address we actually connected to
+	var rsa syscall.Linux_Sockaddr  // remote address from the user
+	var crsa syscall.Linux_Sockaddr // remote address we actually connected to
 	if raddr != nil {
 		if rsa, err = raddr.sockaddr(fd.family); err != nil {
 			return err
 		}
-		if crsa, err = fd.linux_connect(ctx, lsa, rsa); err != nil {
+		if crsa, err = fd.connect(ctx, lsa, rsa); err != nil {
 			return err
 		}
 		fd.isConnected = true
 	} else {
-		if err := fd.linux_init(); err != nil {
+		if err := fd.init(); err != nil {
 			return err
 		}
 	}
@@ -137,28 +137,28 @@ func (fd *netFD) linux_dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxF
 	// 3) the one passed to us as the raddr parameter.
 	lsa, _ = syscall.Linux_Getsockname(fd.pfd.Sysfd)
 	if crsa != nil {
-		fd.linux_setAddr(fd.linux_addrFunc()(lsa), fd.linux_addrFunc()(crsa))
+		fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(crsa))
 	} else if rsa, _ = syscall.Linux_Getpeername(fd.pfd.Sysfd); rsa != nil {
-		fd.linux_setAddr(fd.linux_addrFunc()(lsa), fd.linux_addrFunc()(rsa))
+		fd.setAddr(fd.addrFunc()(lsa), fd.addrFunc()(rsa))
 	} else {
-		fd.linux_setAddr(fd.linux_addrFunc()(lsa), raddr)
+		fd.setAddr(fd.addrFunc()(lsa), raddr)
 	}
 	return nil
 }
 
-func (fd *netFD) linux_listenStream(ctx context.Context, laddr sockaddr, backlog int, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *linux_netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
 	var err error
 	if err = linux_setDefaultListenerSockopts(fd.pfd.Sysfd); err != nil {
 		return err
 	}
-	var lsa syscall.Sockaddr
+	var lsa syscall.Linux_Sockaddr
 	if lsa, err = laddr.sockaddr(fd.family); err != nil {
 		return err
 	}
 
 	if ctrlCtxFn != nil {
-		c := newRawConn(fd)
-		if err := ctrlCtxFn(ctx, fd.linux_ctrlNetwork(), laddr.String(), c); err != nil {
+		c := linux_newRawConn(fd)
+		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), laddr.String(), c); err != nil {
 			return err
 		}
 	}
@@ -166,18 +166,18 @@ func (fd *netFD) linux_listenStream(ctx context.Context, laddr sockaddr, backlog
 	if err = syscall.Linux_Bind(fd.pfd.Sysfd, lsa); err != nil {
 		return os.NewSyscallError("bind", err)
 	}
-	if err = listenFunc(fd.pfd.Sysfd, backlog); err != nil {
+	if err = linux_listenFunc(fd.pfd.Sysfd, backlog); err != nil {
 		return os.NewSyscallError("listen", err)
 	}
-	if err = fd.linux_init(); err != nil {
+	if err = fd.init(); err != nil {
 		return err
 	}
 	lsa, _ = syscall.Linux_Getsockname(fd.pfd.Sysfd)
-	fd.linux_setAddr(fd.linux_addrFunc()(lsa), nil)
+	fd.setAddr(fd.addrFunc()(lsa), nil)
 	return nil
 }
 
-func (fd *netFD) linux_listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *linux_netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
 	switch addr := laddr.(type) {
 	case *UDPAddr:
 		// We provide a socket that listens to a wildcard
@@ -202,24 +202,24 @@ func (fd *netFD) linux_listenDatagram(ctx context.Context, laddr sockaddr, ctrlC
 		}
 	}
 	var err error
-	var lsa syscall.Sockaddr
+	var lsa syscall.Linux_Sockaddr
 	if lsa, err = laddr.sockaddr(fd.family); err != nil {
 		return err
 	}
 
 	if ctrlCtxFn != nil {
-		c := newRawConn(fd)
-		if err := ctrlCtxFn(ctx, fd.linux_ctrlNetwork(), laddr.String(), c); err != nil {
+		c := linux_newRawConn(fd)
+		if err := ctrlCtxFn(ctx, fd.ctrlNetwork(), laddr.String(), c); err != nil {
 			return err
 		}
 	}
 	if err = syscall.Linux_Bind(fd.pfd.Sysfd, lsa); err != nil {
 		return os.NewSyscallError("bind", err)
 	}
-	if err = fd.linux_init(); err != nil {
+	if err = fd.init(); err != nil {
 		return err
 	}
 	lsa, _ = syscall.Linux_Getsockname(fd.pfd.Sysfd)
-	fd.linux_setAddr(fd.linux_addrFunc()(lsa), nil)
+	fd.setAddr(fd.addrFunc()(lsa), nil)
 	return nil
 }

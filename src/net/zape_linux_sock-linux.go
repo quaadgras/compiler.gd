@@ -35,17 +35,17 @@ func linux_maxAckBacklog(n int) int {
 }
 
 func linux_maxListenerBacklog() int {
-	fd, err := open("/proc/sys/net/core/somaxconn")
+	fd, err := linux_open("/proc/sys/net/core/somaxconn")
 	if err != nil {
 		return syscall.Linux_SOMAXCONN
 	}
-	defer fd.close()
-	l, ok := fd.readLine()
+	defer fd.linux_close()
+	l, ok := fd.linux_readLine()
 	if !ok {
 		return syscall.Linux_SOMAXCONN
 	}
-	f := getFields(l)
-	n, _, ok := dtoi(f[0])
+	f := linux_getFields(l)
+	n, _, ok := linux_dtoi(f[0])
 	if n == 0 || !ok {
 		return syscall.Linux_SOMAXCONN
 	}

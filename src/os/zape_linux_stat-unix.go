@@ -14,14 +14,14 @@ import (
 
 // Stat returns the [FileInfo] structure describing file.
 // If there is an error, it will be of type [*PathError].
-func (f *File) Linux_Stat() (FileInfo, error) {
+func (f *Linux_File) Stat() (FileInfo, error) {
 	if f == nil {
 		return nil, ErrInvalid
 	}
 	var fs linux_fileStat
-	err := f.pfd.Linux_Fstat(&fs.sys)
+	err := f.pfd.Fstat(&fs.sys)
 	if err != nil {
-		return nil, f.linux_wrapErr("stat", err)
+		return nil, f.wrapErr("stat", err)
 	}
 	linux_fillFileStatFromSys(&fs, f.name)
 	return &fs, nil
@@ -30,7 +30,7 @@ func (f *File) Linux_Stat() (FileInfo, error) {
 // statNolog stats a file with no test logging.
 func linux_statNolog(name string) (FileInfo, error) {
 	var fs linux_fileStat
-	err := ignoringEINTR(func() error {
+	err := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Stat(name, &fs.sys)
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func linux_statNolog(name string) (FileInfo, error) {
 // lstatNolog lstats a file with no test logging.
 func linux_lstatNolog(name string) (FileInfo, error) {
 	var fs linux_fileStat
-	err := ignoringEINTR(func() error {
+	err := linux_ignoringEINTR(func() error {
 		return syscall.Linux_Lstat(name, &fs.sys)
 	})
 	if err != nil {

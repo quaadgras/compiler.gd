@@ -176,14 +176,14 @@ func Linux_Command(name string, arg ...string) *Cmd {
 		}
 
 		runtime.SetFinalizer(cmd, func(c *Cmd) {
-			if c.Process != nil && c.ProcessState == nil {
+			if c.Process != nil && os.Linux_FromAPE_ProcessState(c.ProcessState) == nil {
 				debugHint := ""
 				if c.createdByStack == nil {
 					debugHint = " (set GODEBUG=execwait=2 to capture stacks for debugging)"
 				} else {
-					os.Stderr.Linux_WriteString("GODEBUG=execwait=2 detected a leaked exec.Cmd created by:\n")
-					os.Stderr.Linux_Write(c.createdByStack)
-					os.Stderr.Linux_WriteString("\n")
+					os.Linux_Stderr.WriteString("GODEBUG=execwait=2 detected a leaked exec.Cmd created by:\n")
+					os.Linux_Stderr.Write(c.createdByStack)
+					os.Linux_Stderr.WriteString("\n")
 					debugHint = ""
 				}
 				panic("exec: Cmd started a Process but leaked without a call to Wait" + debugHint)
@@ -191,7 +191,7 @@ func Linux_Command(name string, arg ...string) *Cmd {
 		})
 	}
 
-	if filepath.Base(name) == name {
+	if filepath.Linux_Base(name) == name {
 		lp, err := LookPath(name)
 		if lp != "" {
 			// Update cmd.Path even if err is non-nil.
@@ -202,7 +202,7 @@ func Linux_Command(name string, arg ...string) *Cmd {
 		if err != nil {
 			cmd.Err = err
 		}
-	} else if "linux" == "windows" && filepath.IsAbs(name) {
+	} else if "linux" == "windows" && filepath.Linux_IsAbs(name) {
 		// We may need to add a filename extension from PATHEXT
 		// or verify an extension that is already present.
 		// Since the path is absolute, its extension should be unambiguous
@@ -211,7 +211,7 @@ func Linux_Command(name string, arg ...string) *Cmd {
 		// Note that we don't cache anything here for relative paths, because
 		// cmd.Dir may be set after we return from this function and that may
 		// cause the command to resolve to a different extension.
-		if lp, err := lookExtensions(name, ""); err == nil {
+		if lp, err := linux_lookExtensions(name, ""); err == nil {
 			cmd.cachedLookExtensions.in, cmd.cachedLookExtensions.out = name, lp
 		} else {
 			cmd.Err = err
@@ -236,7 +236,7 @@ func Linux_CommandContext(ctx context.Context, name string, arg ...string) *Cmd 
 	cmd := Linux_Command(name, arg...)
 	cmd.ctx = ctx
 	cmd.Cancel = func() error {
-		return cmd.Process.Kill()
+		return cmd.Process.Linux_Kill()
 	}
 	return cmd
 }
@@ -276,7 +276,7 @@ func (c *Cmd) linux_argv() []string {
 	return []string{c.Path}
 }
 
-func (c *Cmd) linux_childStdin() (*os.File, error) {
+func (c *Cmd) linux_childStdin() (*os.Linux_File, error) {
 	if c.Stdin == nil {
 		f, err := os.Linux_Open(os.Linux_DevNull)
 		if err != nil {
@@ -286,7 +286,7 @@ func (c *Cmd) linux_childStdin() (*os.File, error) {
 		return f, nil
 	}
 
-	if f, ok := c.Stdin.(*os.File); ok {
+	if f, ok := c.Stdin.(*os.Linux_File); ok {
 		return f, nil
 	}
 
@@ -299,7 +299,7 @@ func (c *Cmd) linux_childStdin() (*os.File, error) {
 	c.parentIOPipes = append(c.parentIOPipes, pw)
 	c.goroutine = append(c.goroutine, func() error {
 		_, err := io.Copy(pw, c.Stdin)
-		if skipStdinCopyError(err) {
+		if linux_skipStdinCopyError(err) {
 			err = nil
 		}
 		if err1 := pw.Close(); err == nil {
@@ -310,11 +310,11 @@ func (c *Cmd) linux_childStdin() (*os.File, error) {
 	return pr, nil
 }
 
-func (c *Cmd) linux_childStdout() (*os.File, error) {
+func (c *Cmd) linux_childStdout() (*os.Linux_File, error) {
 	return c.linux_writerDescriptor(c.Stdout)
 }
 
-func (c *Cmd) linux_childStderr(childStdout *os.File) (*os.File, error) {
+func (c *Cmd) linux_childStderr(childStdout *os.Linux_File) (*os.Linux_File, error) {
 	if c.Stderr != nil && linux_interfaceEqual(c.Stderr, c.Stdout) {
 		return childStdout, nil
 	}
@@ -325,7 +325,7 @@ func (c *Cmd) linux_childStderr(childStdout *os.File) (*os.File, error) {
 // can write to send data to w.
 //
 // If w is nil, writerDescriptor returns a File that writes to os.DevNull.
-func (c *Cmd) linux_writerDescriptor(w io.Writer) (*os.File, error) {
+func (c *Cmd) linux_writerDescriptor(w io.Writer) (*os.Linux_File, error) {
 	if w == nil {
 		f, err := os.Linux_OpenFile(os.Linux_DevNull, os.Linux_O_WRONLY, 0)
 		if err != nil {
@@ -335,7 +335,7 @@ func (c *Cmd) linux_writerDescriptor(w io.Writer) (*os.File, error) {
 		return f, nil
 	}
 
-	if f, ok := w.(*os.File); ok {
+	if f, ok := w.(*os.Linux_File); ok {
 		return f, nil
 	}
 
@@ -438,7 +438,7 @@ func (c *Cmd) Linux_Start() error {
 			// than triggering a surprising data race, and if the user really cares
 			// about that bit of logging they can always use LookPath to resolve it.
 			var err error
-			lp, err = lookExtensions(c.Path, c.Dir)
+			lp, err = linux_lookExtensions(c.Path, c.Dir)
 			if err != nil {
 				return err
 			}
@@ -455,7 +455,7 @@ func (c *Cmd) Linux_Start() error {
 		}
 	}
 
-	childFiles := make([]*os.File, 0, 3+len(c.ExtraFiles))
+	childFiles := make([]*os.Linux_File, 0, 3+len(c.ExtraFiles))
 	stdin, err := c.linux_childStdin()
 	if err != nil {
 		return err
@@ -478,11 +478,11 @@ func (c *Cmd) Linux_Start() error {
 		return err
 	}
 
-	c.Process, err = os.StartProcess(lp, c.linux_argv(), &os.ProcAttr{
+	c.Process, err = os.Linux_StartProcess(lp, c.linux_argv(), &os.Linux_ProcAttr{
 		Dir:   c.Dir,
 		Files: childFiles,
 		Env:   env,
-		Sys:   c.SysProcAttr,
+		Sys:   syscall.Linux_FromAPE_SysProcAttr(c.SysProcAttr),
 	})
 	if err != nil {
 		return err
@@ -581,7 +581,7 @@ func (c *Cmd) linux_watchCtx(resultc chan<- ctxResult) {
 	}
 
 	killed := false
-	if killErr := c.Process.Kill(); killErr == nil {
+	if killErr := c.Process.Linux_Kill(); killErr == nil {
 		// We appear to have killed the process. c.Process.Wait should return a
 		// non-nil error to c.Wait unless the Kill signal races with a successful
 		// exit, and if that does happen we shouldn't report a spurious error,
@@ -630,7 +630,7 @@ func (c *Cmd) linux_watchCtx(resultc chan<- ctxResult) {
 }
 
 func (e *ExitError) Linux_Error() string {
-	return e.ProcessState.Linux_String()
+	return os.Linux_FromAPE_ProcessState(e.ProcessState).String()
 }
 
 // Wait waits for the command to exit and waits for any copying to
@@ -657,11 +657,11 @@ func (c *Cmd) Linux_Wait() error {
 	if c.Process == nil {
 		return errors.New("exec: not started")
 	}
-	if c.ProcessState != nil {
+	if os.Linux_FromAPE_ProcessState(c.ProcessState) != nil {
 		return errors.New("exec: Wait was already called")
 	}
 
-	state, err := c.Process.Wait()
+	state, err := c.Process.Linux_Wait()
 	if err == nil && !state.Success() {
 		err = &ExitError{ProcessState: state}
 	}
@@ -936,7 +936,7 @@ func (c *Cmd) linux_environ() ([]string, error) {
 				// https://go.dev/issue/50599) to avoid unintended collateral damage we
 				// only implicitly update PWD when Env is nil. That way, we're much
 				// less likely to override an intentional change to the variable.
-				if pwd, absErr := filepath.Abs(c.Dir); absErr == nil {
+				if pwd, absErr := filepath.Linux_Abs(c.Dir); absErr == nil {
 					env = append(env, "PWD="+pwd)
 				} else if err == nil {
 					err = absErr
@@ -1050,7 +1050,7 @@ func linux_addCriticalEnv(env []string) []string {
 func linux_validateLookPath(s string) error {
 	switch s {
 	case "", ".", "..":
-		return ErrNotFound
+		return Linux_ErrNotFound
 	}
 	return nil
 }

@@ -15,7 +15,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func linux_setIPv6MulticastInterface(fd *netFD, ifi *Interface) error {
+func linux_setIPv6MulticastInterface(fd *linux_netFD, ifi *Interface) error {
 	var v int
 	if ifi != nil {
 		v = ifi.Index
@@ -25,13 +25,13 @@ func linux_setIPv6MulticastInterface(fd *netFD, ifi *Interface) error {
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_setIPv6MulticastLoopback(fd *netFD, v bool) error {
+func linux_setIPv6MulticastLoopback(fd *linux_netFD, v bool) error {
 	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_IPV6, syscall.Linux_IPV6_MULTICAST_LOOP, linux_boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func linux_joinIPv6Group(fd *netFD, ifi *Interface, ip IP) error {
+func linux_joinIPv6Group(fd *linux_netFD, ifi *Interface, ip IP) error {
 	mreq := &syscall.IPv6Mreq{}
 	copy(mreq.Multiaddr[:], ip)
 	if ifi != nil {

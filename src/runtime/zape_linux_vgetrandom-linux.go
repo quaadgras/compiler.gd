@@ -53,7 +53,7 @@ func linux_vgetrandomGetState() uintptr {
 		stateSizeCacheAligned := (linux_vgetrandomAlloc.stateSize + cpu.CacheLineSize - 1) &^ (cpu.CacheLineSize - 1)
 		allocSize := (num*stateSizeCacheAligned + physPageSize - 1) &^ (physPageSize - 1)
 		num = (physPageSize / stateSizeCacheAligned) * (allocSize / physPageSize)
-		p, err := mmap(nil, allocSize, linux_vgetrandomAlloc.mmapProt, linux_vgetrandomAlloc.mmapFlags, -1, 0)
+		p, err := linux_mmap(nil, allocSize, linux_vgetrandomAlloc.mmapProt, linux_vgetrandomAlloc.mmapFlags, -1, 0)
 		if err != 0 {
 			unlock(&linux_vgetrandomAlloc.statesLock)
 			return 0

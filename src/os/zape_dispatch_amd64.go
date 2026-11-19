@@ -6,7 +6,6 @@ package os
 
 import (
 	"errors"
-	"internal/poll"
 	"io"
 	"io/fs"
 	"runtime"
@@ -25,9 +24,14 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
-type File struct{ *file }
+type DirEntry = fs.DirEntry
+
+var ErrNoHandle error = errors.New("os: process handle unavailable")
+
+var ErrProcessDone error = errors.New("os: process already finished")
 
 type FileInfo = fs.FileInfo
 
@@ -44,52 +48,36 @@ type LinkError struct {
 	Err error
 }
 
-type ProcessState struct {
-	pid    int
-	status syscall.WaitStatus
-	rusage *syscall.Rusage
+type Process struct {
+	Pid     int
+	state   atomic.Uint32
+	sigMu   sync.RWMutex
+	handle  *processHandle
+	cleanup runtime.Cleanup
 }
 
-var Stderr *File = NewFile(uintptr(syscall.Stderr), "/dev/stderr")
-
-var Stdin *File = NewFile(uintptr(syscall.Stdin), "/dev/stdin")
-
-var Stdout *File = NewFile(uintptr(syscall.Stdout), "/dev/stdout")
+type Signal interface {
+	Signal()
+	String() string
+}
 
 var checkWrapErr bool = false
 
 type dirFS string
 
-type dirInfo struct {
-	mu   sync.Mutex
-	buf  *[]byte
-	nbuf int
-	bufp int
-}
-
 var errPathEscapes error = errors.New("path escapes from parent")
+
+var errPatternHasSeparator error = errors.New("pattern contains path separator")
+
+var errProcessReleased error = errors.New("os: process already released")
+
+type errSymlink string
 
 var errWriteAtInAppendMode error = errors.New("os: invalid use of WriteAt on file opened with O_APPEND")
 
-type file struct {
-	pfd         poll.FD
-	name        string
-	dirinfo     atomic.Pointer[dirInfo]
-	nonblock    bool
-	stdoutOrErr bool
-	appendMode  bool
-	inRoot      bool
-	cleanup     runtime.Cleanup
-}
-
-type fileWithoutReadFrom struct {
-	noReadFrom
-	*File
-}
-
-type fileWithoutWriteTo struct {
-	noWriteTo
-	*File
+var getwdCache struct {
+	sync.Mutex
+	dir string
 }
 
 type newFileKind int
@@ -98,20 +86,27 @@ type noReadFrom struct{}
 
 type noWriteTo struct{}
 
-var pollCopyFileRange func(dst *poll.FD, src *poll.FD, remain int64) (written int64, handled bool, err error) = poll.CopyFileRange
+type processHandle struct {
+	handle uintptr
+	refs   atomic.Int32
+}
+
+type processStatus uint32
+
+type readdirMode int
 
 type syscallErrorType = syscall.Errno
 
-type sysfdType = int
-
-type unixDirent struct {
-	parent string
-	name   string
-	typ    FileMode
-	info   FileInfo
-}
-
-const DevNull = "/dev/null"
+// DevNull differs between hosts.
+var DevNull string = func() string {
+	if apehost == apeLinux {
+		return string(Linux_DevNull)
+	}
+	if apehost == apeFreebsd {
+		return string(Freebsd_DevNull)
+	}
+	return string(Windows_DevNull)
+}()
 
 const ModeAppend fs.FileMode = 1073741824
 
@@ -148,7 +143,10 @@ var O_APPEND int = func() int {
 	if apehost == apeLinux {
 		return Linux_O_APPEND
 	}
-	return Freebsd_O_APPEND
+	if apehost == apeFreebsd {
+		return Freebsd_O_APPEND
+	}
+	return Windows_O_APPEND
 }()
 
 // O_CREATE differs between hosts.
@@ -156,7 +154,10 @@ var O_CREATE int = func() int {
 	if apehost == apeLinux {
 		return Linux_O_CREATE
 	}
-	return Freebsd_O_CREATE
+	if apehost == apeFreebsd {
+		return Freebsd_O_CREATE
+	}
+	return Windows_O_CREATE
 }()
 
 // O_EXCL differs between hosts.
@@ -164,7 +165,10 @@ var O_EXCL int = func() int {
 	if apehost == apeLinux {
 		return Linux_O_EXCL
 	}
-	return Freebsd_O_EXCL
+	if apehost == apeFreebsd {
+		return Freebsd_O_EXCL
+	}
+	return Windows_O_EXCL
 }()
 
 const O_RDONLY int = 0
@@ -176,7 +180,10 @@ var O_SYNC int = func() int {
 	if apehost == apeLinux {
 		return Linux_O_SYNC
 	}
-	return Freebsd_O_SYNC
+	if apehost == apeFreebsd {
+		return Freebsd_O_SYNC
+	}
+	return Windows_O_SYNC
 }()
 
 // O_TRUNC differs between hosts.
@@ -184,10 +191,35 @@ var O_TRUNC int = func() int {
 	if apehost == apeLinux {
 		return Linux_O_TRUNC
 	}
-	return Freebsd_O_TRUNC
+	if apehost == apeFreebsd {
+		return Freebsd_O_TRUNC
+	}
+	return Windows_O_TRUNC
 }()
 
 const O_WRONLY int = 1
+
+// PathListSeparator differs between hosts.
+var PathListSeparator rune = func() rune {
+	if apehost == apeLinux {
+		return rune(Linux_PathListSeparator)
+	}
+	if apehost == apeFreebsd {
+		return rune(Freebsd_PathListSeparator)
+	}
+	return rune(Windows_PathListSeparator)
+}()
+
+// PathSeparator differs between hosts.
+var PathSeparator rune = func() rune {
+	if apehost == apeLinux {
+		return rune(Linux_PathSeparator)
+	}
+	if apehost == apeFreebsd {
+		return rune(Freebsd_PathSeparator)
+	}
+	return rune(Windows_PathSeparator)
+}()
 
 const SEEK_CUR int = 1
 
@@ -195,34 +227,16 @@ const SEEK_END int = 2
 
 const SEEK_SET int = 0
 
-// _UTIME_OMIT differs between hosts.
-var _UTIME_OMIT int64 = func() int64 {
-	if apehost == apeLinux {
-		return int64(linux__UTIME_OMIT)
-	}
-	return int64(freebsd__UTIME_OMIT)
-}()
-
-const errENOMEM syscall.Errno = 12
-
-// errENOSYS differs between hosts.
-var errENOSYS syscall.Errno = func() syscall.Errno {
-	if apehost == apeLinux {
-		return linux_errENOSYS
-	}
-	return freebsd_errENOSYS
-}()
-
-const errERANGE syscall.Errno = 34
-
-const kindNoPoll newFileKind = 4
-
 func Chdir(a0 string) error {
 	if apehost == apeLinux {
 		x0 := Linux_Chdir(a0)
 		return x0
 	}
-	x0 := Freebsd_Chdir(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chdir(a0)
+		return x0
+	}
+	x0 := Windows_Chdir(a0)
 	return x0
 }
 
@@ -231,17 +245,77 @@ func Chmod(a0 string, a1 FileMode) error {
 		x0 := Linux_Chmod(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Chmod(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chmod(a0, a1)
+		return x0
+	}
+	x0 := Windows_Chmod(a0, a1)
+	return x0
+}
+
+func Chown(a0 string, a1 int, a2 int) error {
+	if apehost == apeLinux {
+		x0 := Linux_Chown(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chown(a0, a1, a2)
+		return x0
+	}
+	x0 := Windows_Chown(a0, a1, a2)
+	return x0
+}
+
+func Chtimes(a0 string, a1 time.Time, a2 time.Time) error {
+	if apehost == apeLinux {
+		x0 := Linux_Chtimes(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Chtimes(a0, a1, a2)
+		return x0
+	}
+	x0 := Windows_Chtimes(a0, a1, a2)
+	return x0
+}
+
+func CopyFS(a0 string, a1 fs.FS) error {
+	if apehost == apeLinux {
+		x0 := Linux_CopyFS(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_CopyFS(a0, a1)
+		return x0
+	}
+	x0 := Windows_CopyFS(a0, a1)
 	return x0
 }
 
 func Create(a0 string) (*File, error) {
 	if apehost == apeLinux {
 		x0, x1 := Linux_Create(a0)
-		return x0, x1
+		return (*File)(unsafe.Pointer(x0)), x1
 	}
-	x0, x1 := Freebsd_Create(a0)
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Create(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_Create(a0)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func CreateTemp(a0 string, a1 string) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_CreateTemp(a0, a1)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_CreateTemp(a0, a1)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_CreateTemp(a0, a1)
+	return (*File)(unsafe.Pointer(x0)), x1
 }
 
 func DirFS(a0 string) fs.FS {
@@ -249,8 +323,25 @@ func DirFS(a0 string) fs.FS {
 		x0 := Linux_DirFS(a0)
 		return x0
 	}
-	x0 := Freebsd_DirFS(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_DirFS(a0)
+		return x0
+	}
+	x0 := Windows_DirFS(a0)
 	return x0
+}
+
+func FindProcess(a0 int) (*Process, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_FindProcess(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_FindProcess(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_FindProcess(a0)
+	return x0, x1
 }
 
 func Getpagesize() int {
@@ -258,7 +349,76 @@ func Getpagesize() int {
 		x0 := Linux_Getpagesize()
 		return x0
 	}
-	x0 := Freebsd_Getpagesize()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getpagesize()
+		return x0
+	}
+	x0 := Windows_Getpagesize()
+	return x0
+}
+
+func Getpid() int {
+	if apehost == apeLinux {
+		x0 := Linux_Getpid()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getpid()
+		return x0
+	}
+	x0 := Windows_Getpid()
+	return x0
+}
+
+func Getppid() int {
+	if apehost == apeLinux {
+		x0 := Linux_Getppid()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Getppid()
+		return x0
+	}
+	x0 := Windows_Getppid()
+	return x0
+}
+
+func Getwd() (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Getwd()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Getwd()
+		return x0, x1
+	}
+	x0, x1 := Windows_Getwd()
+	return x0, x1
+}
+
+func IsPathSeparator(a0 uint8) bool {
+	if apehost == apeLinux {
+		x0 := Linux_IsPathSeparator(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_IsPathSeparator(a0)
+		return x0
+	}
+	x0 := Windows_IsPathSeparator(a0)
+	return x0
+}
+
+func Lchown(a0 string, a1 int, a2 int) error {
+	if apehost == apeLinux {
+		x0 := Linux_Lchown(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Lchown(a0, a1, a2)
+		return x0
+	}
+	x0 := Windows_Lchown(a0, a1, a2)
 	return x0
 }
 
@@ -267,7 +427,11 @@ func Link(a0 string, a1 string) error {
 		x0 := Linux_Link(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Link(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Link(a0, a1)
+		return x0
+	}
+	x0 := Windows_Link(a0, a1)
 	return x0
 }
 
@@ -276,44 +440,116 @@ func Mkdir(a0 string, a1 FileMode) error {
 		x0 := Linux_Mkdir(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Mkdir(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Mkdir(a0, a1)
+		return x0
+	}
+	x0 := Windows_Mkdir(a0, a1)
 	return x0
+}
+
+func MkdirTemp(a0 string, a1 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_MkdirTemp(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_MkdirTemp(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := Windows_MkdirTemp(a0, a1)
+	return x0, x1
 }
 
 func NewFile(a0 uintptr, a1 string) *File {
 	if apehost == apeLinux {
 		x0 := Linux_NewFile(a0, a1)
-		return x0
+		return (*File)(unsafe.Pointer(x0))
 	}
-	x0 := Freebsd_NewFile(a0, a1)
-	return x0
+	if apehost == apeFreebsd {
+		x0 := Freebsd_NewFile(a0, a1)
+		return (*File)(unsafe.Pointer(x0))
+	}
+	x0 := Windows_NewFile(a0, a1)
+	return (*File)(unsafe.Pointer(x0))
 }
 
 func Open(a0 string) (*File, error) {
 	if apehost == apeLinux {
 		x0, x1 := Linux_Open(a0)
-		return x0, x1
+		return (*File)(unsafe.Pointer(x0)), x1
 	}
-	x0, x1 := Freebsd_Open(a0)
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Open(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_Open(a0)
+	return (*File)(unsafe.Pointer(x0)), x1
 }
 
 func OpenFile(a0 string, a1 int, a2 FileMode) (*File, error) {
 	if apehost == apeLinux {
 		x0, x1 := Linux_OpenFile(a0, a1, a2)
-		return x0, x1
+		return (*File)(unsafe.Pointer(x0)), x1
 	}
-	x0, x1 := Freebsd_OpenFile(a0, a1, a2)
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_OpenFile(a0, a1, a2)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_OpenFile(a0, a1, a2)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func OpenInRoot(a0 string, a1 string) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_OpenInRoot(a0, a1)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_OpenInRoot(a0, a1)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_OpenInRoot(a0, a1)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func OpenRoot(a0 string) (*Root, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_OpenRoot(a0)
+		return (*Root)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_OpenRoot(a0)
+		return (*Root)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := Windows_OpenRoot(a0)
+	return (*Root)(unsafe.Pointer(x0)), x1
 }
 
 func Pipe() (*File, *File, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_Pipe()
-		return x0, x1, x2
+		return (*File)(unsafe.Pointer(x0)), (*File)(unsafe.Pointer(x1)), x2
 	}
-	x0, x1, x2 := Freebsd_Pipe()
-	return x0, x1, x2
+	if apehost == apeFreebsd {
+		x0, x1, x2 := Freebsd_Pipe()
+		return (*File)(unsafe.Pointer(x0)), (*File)(unsafe.Pointer(x1)), x2
+	}
+	x0, x1, x2 := Windows_Pipe()
+	return (*File)(unsafe.Pointer(x0)), (*File)(unsafe.Pointer(x1)), x2
+}
+
+func ReadDir(a0 string) ([]DirEntry, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_ReadDir(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ReadDir(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_ReadDir(a0)
+	return x0, x1
 }
 
 func ReadFile(a0 string) ([]byte, error) {
@@ -321,7 +557,11 @@ func ReadFile(a0 string) ([]byte, error) {
 		x0, x1 := Linux_ReadFile(a0)
 		return x0, x1
 	}
-	x0, x1 := Freebsd_ReadFile(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_ReadFile(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_ReadFile(a0)
 	return x0, x1
 }
 
@@ -330,7 +570,11 @@ func Readlink(a0 string) (string, error) {
 		x0, x1 := Linux_Readlink(a0)
 		return x0, x1
 	}
-	x0, x1 := Freebsd_Readlink(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_Readlink(a0)
+		return x0, x1
+	}
+	x0, x1 := Windows_Readlink(a0)
 	return x0, x1
 }
 
@@ -339,7 +583,11 @@ func Remove(a0 string) error {
 		x0 := Linux_Remove(a0)
 		return x0
 	}
-	x0 := Freebsd_Remove(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Remove(a0)
+		return x0
+	}
+	x0 := Windows_Remove(a0)
 	return x0
 }
 
@@ -348,7 +596,11 @@ func Rename(a0 string, a1 string) error {
 		x0 := Linux_Rename(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Rename(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Rename(a0, a1)
+		return x0
+	}
+	x0 := Windows_Rename(a0, a1)
 	return x0
 }
 
@@ -357,8 +609,75 @@ func SameFile(a0 FileInfo, a1 FileInfo) bool {
 		x0 := Linux_SameFile(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_SameFile(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_SameFile(a0, a1)
+		return x0
+	}
+	x0 := Windows_SameFile(a0, a1)
 	return x0
+}
+
+func StartProcess(a0 string, a1 []string, a2 *ProcAttr) (*Process, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_StartProcess(a0, a1, (*Linux_ProcAttr)(unsafe.Pointer(a2)))
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		var t2 Freebsd_ProcAttr
+		var p2 *Freebsd_ProcAttr
+		if a2 != nil {
+			t2.Dir = (*a2).Dir
+			t2.Env = (*a2).Env
+			if (*a2).Files != nil {
+				t2.Files = make([]*Freebsd_File, len((*a2).Files))
+				for i1 := range (*a2).Files {
+					t2.Files[i1] = (*Freebsd_File)(unsafe.Pointer((*a2).Files[i1]))
+				}
+			}
+			*(*uintptr)(unsafe.Pointer(&t2.Sys)) = uintptr(unsafe.Pointer((*a2).Sys))
+			p2 = &t2
+		}
+		x0, x1 := Freebsd_StartProcess(a0, a1, p2)
+		if a2 != nil {
+			(*a2).Dir = t2.Dir
+			(*a2).Env = t2.Env
+			if t2.Files != nil {
+				(*a2).Files = make([]*File, len(t2.Files))
+				for i1 := range t2.Files {
+					(*a2).Files[i1] = (*File)(unsafe.Pointer(t2.Files[i1]))
+				}
+			}
+			*(*uintptr)(unsafe.Pointer(&(*a2).Sys)) = uintptr(unsafe.Pointer(t2.Sys))
+		}
+		return x0, x1
+	}
+	var t2 Windows_ProcAttr
+	var p2 *Windows_ProcAttr
+	if a2 != nil {
+		t2.Dir = (*a2).Dir
+		t2.Env = (*a2).Env
+		if (*a2).Files != nil {
+			t2.Files = make([]*Windows_File, len((*a2).Files))
+			for i1 := range (*a2).Files {
+				t2.Files[i1] = (*Windows_File)(unsafe.Pointer((*a2).Files[i1]))
+			}
+		}
+		*(*uintptr)(unsafe.Pointer(&t2.Sys)) = uintptr(unsafe.Pointer((*a2).Sys))
+		p2 = &t2
+	}
+	x0, x1 := Windows_StartProcess(a0, a1, p2)
+	if a2 != nil {
+		(*a2).Dir = t2.Dir
+		(*a2).Env = t2.Env
+		if t2.Files != nil {
+			(*a2).Files = make([]*File, len(t2.Files))
+			for i1 := range t2.Files {
+				(*a2).Files[i1] = (*File)(unsafe.Pointer(t2.Files[i1]))
+			}
+		}
+		*(*uintptr)(unsafe.Pointer(&(*a2).Sys)) = uintptr(unsafe.Pointer(t2.Sys))
+	}
+	return x0, x1
 }
 
 func Symlink(a0 string, a1 string) error {
@@ -366,7 +685,11 @@ func Symlink(a0 string, a1 string) error {
 		x0 := Linux_Symlink(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Symlink(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Symlink(a0, a1)
+		return x0
+	}
+	x0 := Windows_Symlink(a0, a1)
 	return x0
 }
 
@@ -375,7 +698,11 @@ func TempDir() string {
 		x0 := Linux_TempDir()
 		return x0
 	}
-	x0 := Freebsd_TempDir()
+	if apehost == apeFreebsd {
+		x0 := Freebsd_TempDir()
+		return x0
+	}
+	x0 := Windows_TempDir()
 	return x0
 }
 
@@ -384,7 +711,11 @@ func Truncate(a0 string, a1 int64) error {
 		x0 := Linux_Truncate(a0, a1)
 		return x0
 	}
-	x0 := Freebsd_Truncate(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Truncate(a0, a1)
+		return x0
+	}
+	x0 := Windows_Truncate(a0, a1)
 	return x0
 }
 
@@ -393,7 +724,11 @@ func UserCacheDir() (string, error) {
 		x0, x1 := Linux_UserCacheDir()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_UserCacheDir()
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_UserCacheDir()
+		return x0, x1
+	}
+	x0, x1 := Windows_UserCacheDir()
 	return x0, x1
 }
 
@@ -402,7 +737,11 @@ func UserConfigDir() (string, error) {
 		x0, x1 := Linux_UserConfigDir()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_UserConfigDir()
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_UserConfigDir()
+		return x0, x1
+	}
+	x0, x1 := Windows_UserConfigDir()
 	return x0, x1
 }
 
@@ -411,7 +750,11 @@ func UserHomeDir() (string, error) {
 		x0, x1 := Linux_UserHomeDir()
 		return x0, x1
 	}
-	x0, x1 := Freebsd_UserHomeDir()
+	if apehost == apeFreebsd {
+		x0, x1 := Freebsd_UserHomeDir()
+		return x0, x1
+	}
+	x0, x1 := Windows_UserHomeDir()
 	return x0, x1
 }
 
@@ -420,52 +763,11 @@ func WriteFile(a0 string, a1 []byte, a2 FileMode) error {
 		x0 := Linux_WriteFile(a0, a1, a2)
 		return x0
 	}
-	x0 := Freebsd_WriteFile(a0, a1, a2)
-	return x0
-}
-
-func atime(a0 FileInfo) time.Time {
-	if apehost == apeLinux {
-		x0 := linux_atime(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_WriteFile(a0, a1, a2)
 		return x0
 	}
-	x0 := freebsd_atime(a0)
-	return x0
-}
-
-func checkSymlink(a0 int, a1 string, a2 error) error {
-	if apehost == apeLinux {
-		x0 := linux_checkSymlink(a0, a1, a2)
-		return x0
-	}
-	x0 := freebsd_checkSymlink(a0, a1, a2)
-	return x0
-}
-
-func chmodat(a0 int, a1 string, a2 FileMode) error {
-	if apehost == apeLinux {
-		x0 := linux_chmodat(a0, a1, a2)
-		return x0
-	}
-	x0 := freebsd_chmodat(a0, a1, a2)
-	return x0
-}
-
-func chownat(a0 int, a1 string, a2 int, a3 int) error {
-	if apehost == apeLinux {
-		x0 := linux_chownat(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := freebsd_chownat(a0, a1, a2, a3)
-	return x0
-}
-
-func chtimesat(a0 int, a1 string, a2 time.Time, a3 time.Time) error {
-	if apehost == apeLinux {
-		x0 := linux_chtimesat(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := freebsd_chtimesat(a0, a1, a2, a3)
+	x0 := Windows_WriteFile(a0, a1, a2)
 	return x0
 }
 
@@ -474,17 +776,12 @@ func executable() (string, error) {
 		x0, x1 := linux_executable()
 		return x0, x1
 	}
-	x0, x1 := freebsd_executable()
-	return x0, x1
-}
-
-func fixLongPath(a0 string) string {
-	if apehost == apeLinux {
-		x0 := linux_fixLongPath(a0)
-		return x0
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_executable()
+		return x0, x1
 	}
-	x0 := freebsd_fixLongPath(a0)
-	return x0
+	x0, x1 := windows_executable()
+	return x0, x1
 }
 
 func hostname() (string, error) {
@@ -492,44 +789,12 @@ func hostname() (string, error) {
 		x0, x1 := linux_hostname()
 		return x0, x1
 	}
-	x0, x1 := freebsd_hostname()
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_hostname()
+		return x0, x1
+	}
+	x0, x1 := windows_hostname()
 	return x0, x1
-}
-
-func isDirectoryLink(a0 FileInfo) bool {
-	if apehost == apeLinux {
-		x0 := linux_isDirectoryLink(a0)
-		return x0
-	}
-	x0 := freebsd_isDirectoryLink(a0)
-	return x0
-}
-
-func isLink(a0 FileInfo) bool {
-	if apehost == apeLinux {
-		x0 := linux_isLink(a0)
-		return x0
-	}
-	x0 := freebsd_isLink(a0)
-	return x0
-}
-
-func lchownat(a0 int, a1 string, a2 int, a3 int) error {
-	if apehost == apeLinux {
-		x0 := linux_lchownat(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := freebsd_lchownat(a0, a1, a2, a3)
-	return x0
-}
-
-func linkat(a0 int, a1 string, a2 int, a3 string) error {
-	if apehost == apeLinux {
-		x0 := linux_linkat(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := freebsd_linkat(a0, a1, a2, a3)
-	return x0
 }
 
 func lstatNolog(a0 string) (FileInfo, error) {
@@ -537,179 +802,25 @@ func lstatNolog(a0 string) (FileInfo, error) {
 		x0, x1 := linux_lstatNolog(a0)
 		return x0, x1
 	}
-	x0, x1 := freebsd_lstatNolog(a0)
-	return x0, x1
-}
-
-func lstatat(a0 int, a1 string) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_lstatat(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_lstatNolog(a0)
 		return x0, x1
 	}
-	x0, x1 := freebsd_lstatat(a0, a1)
+	x0, x1 := windows_lstatNolog(a0)
 	return x0, x1
 }
 
-func mkdirat(a0 int, a1 string, a2 FileMode) error {
+func removeAll(a0 string) error {
 	if apehost == apeLinux {
-		x0 := linux_mkdirat(a0, a1, a2)
+		x0 := linux_removeAll(a0)
 		return x0
 	}
-	x0 := freebsd_mkdirat(a0, a1, a2)
-	return x0
-}
-
-func newFile(a0 int, a1 string, a2 newFileKind, a3 bool) *File {
-	if apehost == apeLinux {
-		x0 := linux_newFile(a0, a1, a2, a3)
+	if apehost == apeFreebsd {
+		x0 := freebsd_removeAll(a0)
 		return x0
 	}
-	x0 := freebsd_newFile(a0, a1, a2, a3)
+	x0 := windows_removeAll(a0)
 	return x0
-}
-
-func openDir(a0 string) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_openDir(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_openDir(a0)
-	return x0, x1
-}
-
-func openDirNolog(a0 string) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_openDirNolog(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_openDirNolog(a0)
-	return x0, x1
-}
-
-func openRootInRoot(a0 *Root, a1 string) (*Root, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_openRootInRoot(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := freebsd_openRootInRoot(a0, a1)
-	return x0, x1
-}
-
-func openRootNolog(a0 string) (*Root, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_openRootNolog(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_openRootNolog(a0)
-	return x0, x1
-}
-
-func pidfdFind(a0 int) (uintptr, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_pidfdFind(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_pidfdFind(a0)
-	return x0, x1
-}
-
-func readFileContents(a0 int64, a1 func([]byte) (int, error)) ([]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_readFileContents(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := freebsd_readFileContents(a0, a1)
-	return x0, x1
-}
-
-func readlinkat(a0 int, a1 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_readlinkat(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := freebsd_readlinkat(a0, a1)
-	return x0, x1
-}
-
-func removeat(a0 int, a1 string) error {
-	if apehost == apeLinux {
-		x0 := linux_removeat(a0, a1)
-		return x0
-	}
-	x0 := freebsd_removeat(a0, a1)
-	return x0
-}
-
-func removedirat(a0 int, a1 string) error {
-	if apehost == apeLinux {
-		x0 := linux_removedirat(a0, a1)
-		return x0
-	}
-	x0 := freebsd_removedirat(a0, a1)
-	return x0
-}
-
-func removefileat(a0 int, a1 string) error {
-	if apehost == apeLinux {
-		x0 := linux_removefileat(a0, a1)
-		return x0
-	}
-	x0 := freebsd_removefileat(a0, a1)
-	return x0
-}
-
-func renameat(a0 int, a1 string, a2 int, a3 string) error {
-	if apehost == apeLinux {
-		x0 := linux_renameat(a0, a1, a2, a3)
-		return x0
-	}
-	x0 := freebsd_renameat(a0, a1, a2, a3)
-	return x0
-}
-
-func rootOpenDir(a0 int, a1 string) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_rootOpenDir(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := freebsd_rootOpenDir(a0, a1)
-	return x0, x1
-}
-
-func rootOpenFileNolog(a0 *Root, a1 string, a2 int, a3 FileMode) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_rootOpenFileNolog(a0, a1, a2, a3)
-		return x0, x1
-	}
-	x0, x1 := freebsd_rootOpenFileNolog(a0, a1, a2, a3)
-	return x0, x1
-}
-
-func rootStat(a0 *Root, a1 string, a2 bool) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_rootStat(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := freebsd_rootStat(a0, a1, a2)
-	return x0, x1
-}
-
-func rootSymlink(a0 *Root, a1 string, a2 string) error {
-	if apehost == apeLinux {
-		x0 := linux_rootSymlink(a0, a1, a2)
-		return x0
-	}
-	x0 := freebsd_rootSymlink(a0, a1, a2)
-	return x0
-}
-
-func startProcess(a0 string, a1 []string, a2 *ProcAttr) (*Process, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_startProcess(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := freebsd_startProcess(a0, a1, a2)
-	return x0, x1
 }
 
 func statNolog(a0 string) (FileInfo, error) {
@@ -717,223 +828,518 @@ func statNolog(a0 string) (FileInfo, error) {
 		x0, x1 := linux_statNolog(a0)
 		return x0, x1
 	}
-	x0, x1 := freebsd_statNolog(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_statNolog(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_statNolog(a0)
 	return x0, x1
 }
 
-func statOrZero(a0 *File) int64 {
+func (r *File) Chdir() error {
 	if apehost == apeLinux {
-		x0 := linux_statOrZero(a0)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Chdir()
 		return x0
 	}
-	x0 := freebsd_statOrZero(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Chdir()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Chdir()
 	return x0
 }
 
 func (r *File) Chmod(a0 FileMode) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_Chmod(a0)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Chmod(a0)
 		return x0
 	}
-	x0 := r.Freebsd_Chmod(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Chmod(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Chmod(a0)
+	return x0
+}
+
+func (r *File) Chown(a0 int, a1 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Chown(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Chown(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Chown(a0, a1)
+	return x0
+}
+
+func (r *File) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Close()
 	return x0
 }
 
 func (r *File) Fd() uintptr {
 	if apehost == apeLinux {
-		x0 := r.Linux_Fd()
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Fd()
 		return x0
 	}
-	x0 := r.Freebsd_Fd()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Fd()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Fd()
 	return x0
 }
 
 func (r *File) Name() string {
 	if apehost == apeLinux {
-		x0 := r.Linux_Name()
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Name()
 		return x0
 	}
-	x0 := r.Freebsd_Name()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Name()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Name()
 	return x0
 }
 
 func (r *File) Read(a0 []byte) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Read(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Read(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Read(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Read(a0)
 	return x0, x1
 }
 
 func (r *File) ReadAt(a0 []byte, a1 int64) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadAt(a0, a1)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).ReadAt(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadAt(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).ReadAt(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).ReadAt(a0, a1)
+	return x0, x1
+}
+
+func (r *File) ReadDir(a0 int) ([]DirEntry, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).ReadDir(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).ReadDir(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).ReadDir(a0)
 	return x0, x1
 }
 
 func (r *File) ReadFrom(a0 io.Reader) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadFrom(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).ReadFrom(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadFrom(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).ReadFrom(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).ReadFrom(a0)
+	return x0, x1
+}
+
+func (r *File) Readdir(a0 int) ([]FileInfo, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Readdir(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Readdir(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Readdir(a0)
+	return x0, x1
+}
+
+func (r *File) Readdirnames(a0 int) ([]string, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Readdirnames(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Readdirnames(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Readdirnames(a0)
 	return x0, x1
 }
 
 func (r *File) Seek(a0 int64, a1 int) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Seek(a0, a1)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Seek(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Seek(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Seek(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Seek(a0, a1)
 	return x0, x1
 }
 
 func (r *File) SetDeadline(a0 time.Time) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_SetDeadline(a0)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).SetDeadline(a0)
 		return x0
 	}
-	x0 := r.Freebsd_SetDeadline(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).SetDeadline(a0)
 	return x0
 }
 
 func (r *File) SetReadDeadline(a0 time.Time) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_SetReadDeadline(a0)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).SetReadDeadline(a0)
 		return x0
 	}
-	x0 := r.Freebsd_SetReadDeadline(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).SetReadDeadline(a0)
 	return x0
 }
 
 func (r *File) SetWriteDeadline(a0 time.Time) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_SetWriteDeadline(a0)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).SetWriteDeadline(a0)
 		return x0
 	}
-	x0 := r.Freebsd_SetWriteDeadline(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).SetWriteDeadline(a0)
 	return x0
 }
 
 func (r *File) Stat() (FileInfo, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Stat()
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Stat()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Stat()
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Stat()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Stat()
 	return x0, x1
+}
+
+func (r *File) Sync() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Sync()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Sync()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Sync()
+	return x0
 }
 
 func (r *File) SyscallConn() (syscall.RawConn, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_SyscallConn()
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).SyscallConn()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_SyscallConn()
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).SyscallConn()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).SyscallConn()
 	return x0, x1
+}
+
+func (r *File) Truncate(a0 int64) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).Truncate(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).Truncate(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).Truncate(a0)
+	return x0
 }
 
 func (r *File) Write(a0 []byte) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Write(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).Write(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Write(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).Write(a0)
 	return x0, x1
 }
 
 func (r *File) WriteAt(a0 []byte, a1 int64) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_WriteAt(a0, a1)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).WriteAt(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_WriteAt(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).WriteAt(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).WriteAt(a0, a1)
 	return x0, x1
 }
 
 func (r *File) WriteString(a0 string) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_WriteString(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).WriteString(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_WriteString(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).WriteString(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).WriteString(a0)
 	return x0, x1
 }
 
 func (r *File) WriteTo(a0 io.Writer) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_WriteTo(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).WriteTo(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_WriteTo(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).WriteTo(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).WriteTo(a0)
 	return x0, x1
+}
+
+func (r *File) checkValid(a0 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).checkValid(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).checkValid(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).checkValid(a0)
+	return x0
+}
+
+func (r *File) chmod(a0 FileMode) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).chmod(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).chmod(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).chmod(a0)
+	return x0
 }
 
 func (r *File) fd() uintptr {
 	if apehost == apeLinux {
-		x0 := r.linux_fd()
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).fd()
 		return x0
 	}
-	x0 := r.freebsd_fd()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).fd()
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).fd()
 	return x0
 }
 
-func (r *File) lstatatNolog(a0 string) (FileInfo, error) {
+func (r *File) pread(a0 []byte, a1 int64) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_lstatatNolog(a0)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).pread(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.freebsd_lstatatNolog(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).pread(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).pread(a0, a1)
+	return x0, x1
+}
+
+func (r *File) pwrite(a0 []byte, a1 int64) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).pwrite(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).pwrite(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).pwrite(a0, a1)
+	return x0, x1
+}
+
+func (r *File) read(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).read(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).read(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).read(a0)
 	return x0, x1
 }
 
 func (r *File) readFrom(a0 io.Reader) (int64, bool, error) {
 	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_readFrom(a0)
+		x0, x1, x2 := ((*Linux_File)(unsafe.Pointer(r))).readFrom(a0)
 		return x0, x1, x2
 	}
-	x0, x1, x2 := r.freebsd_readFrom(a0)
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_File)(unsafe.Pointer(r))).readFrom(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_File)(unsafe.Pointer(r))).readFrom(a0)
 	return x0, x1, x2
 }
 
 func (r *File) readdir(a0 int, a1 readdirMode) ([]string, []DirEntry, []FileInfo, error) {
 	if apehost == apeLinux {
-		x0, x1, x2, x3 := r.linux_readdir(a0, a1)
+		x0, x1, x2, x3 := ((*Linux_File)(unsafe.Pointer(r))).readdir(a0, a1)
 		return x0, x1, x2, x3
 	}
-	x0, x1, x2, x3 := r.freebsd_readdir(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1, x2, x3 := ((*Freebsd_File)(unsafe.Pointer(r))).readdir(a0, a1)
+		return x0, x1, x2, x3
+	}
+	x0, x1, x2, x3 := ((*Windows_File)(unsafe.Pointer(r))).readdir(a0, a1)
 	return x0, x1, x2, x3
 }
 
 func (r *File) seek(a0 int64, a1 int) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_seek(a0, a1)
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).seek(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.freebsd_seek(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).seek(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).seek(a0, a1)
 	return x0, x1
+}
+
+func (r *File) setDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).setDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).setDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).setDeadline(a0)
+	return x0
+}
+
+func (r *File) setReadDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).setReadDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).setReadDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).setReadDeadline(a0)
+	return x0
+}
+
+func (r *File) setWriteDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).setWriteDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).setWriteDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).setWriteDeadline(a0)
+	return x0
 }
 
 func (r *File) wrapErr(a0 string, a1 error) error {
 	if apehost == apeLinux {
-		x0 := r.linux_wrapErr(a0, a1)
+		x0 := ((*Linux_File)(unsafe.Pointer(r))).wrapErr(a0, a1)
 		return x0
 	}
-	x0 := r.freebsd_wrapErr(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_File)(unsafe.Pointer(r))).wrapErr(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_File)(unsafe.Pointer(r))).wrapErr(a0, a1)
 	return x0
+}
+
+func (r *File) write(a0 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_File)(unsafe.Pointer(r))).write(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_File)(unsafe.Pointer(r))).write(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_File)(unsafe.Pointer(r))).write(a0)
+	return x0, x1
 }
 
 func (r *File) writeTo(a0 io.Writer) (int64, bool, error) {
 	if apehost == apeLinux {
-		x0, x1, x2 := r.linux_writeTo(a0)
+		x0, x1, x2 := ((*Linux_File)(unsafe.Pointer(r))).writeTo(a0)
 		return x0, x1, x2
 	}
-	x0, x1, x2 := r.freebsd_writeTo(a0)
+	if apehost == apeFreebsd {
+		x0, x1, x2 := ((*Freebsd_File)(unsafe.Pointer(r))).writeTo(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := ((*Windows_File)(unsafe.Pointer(r))).writeTo(a0)
 	return x0, x1, x2
 }
 
@@ -942,7 +1348,11 @@ func (r *LinkError) Error() string {
 		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.Freebsd_Error()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -951,17 +1361,115 @@ func (r *LinkError) Unwrap() error {
 		x0 := r.Linux_Unwrap()
 		return x0
 	}
-	x0 := r.Freebsd_Unwrap()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
 	return x0
 }
 
-func (r *Process) blockUntilWaitable() (bool, error) {
+func (r *Process) Kill() error {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_blockUntilWaitable()
+		x0 := r.Linux_Kill()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Kill()
+		return x0
+	}
+	x0 := r.Windows_Kill()
+	return x0
+}
+
+func (r *Process) Release() error {
+	if apehost == apeLinux {
+		x0 := r.Linux_Release()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Release()
+		return x0
+	}
+	x0 := r.Windows_Release()
+	return x0
+}
+
+func (r *Process) Signal(a0 Signal) error {
+	if apehost == apeLinux {
+		x0 := r.Linux_Signal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Signal(a0)
+		return x0
+	}
+	x0 := r.Windows_Signal(a0)
+	return x0
+}
+
+func (r *Process) Wait() (*ProcessState, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.Linux_Wait()
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Wait()
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.Windows_Wait()
+	return (*ProcessState)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Process) WithHandle(a0 func(handle uintptr)) error {
+	if apehost == apeLinux {
+		x0 := r.Linux_WithHandle(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_WithHandle(a0)
+		return x0
+	}
+	x0 := r.Windows_WithHandle(a0)
+	return x0
+}
+
+func (r *Process) doRelease(a0 processStatus) processStatus {
+	if apehost == apeLinux {
+		x0 := r.linux_doRelease(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_doRelease(a0)
+		return x0
+	}
+	x0 := r.windows_doRelease(a0)
+	return x0
+}
+
+func (r *Process) handleTransientAcquire() (uintptr, processStatus) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_handleTransientAcquire()
 		return x0, x1
 	}
-	x0, x1 := r.freebsd_blockUntilWaitable()
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_handleTransientAcquire()
+		return x0, x1
+	}
+	x0, x1 := r.windows_handleTransientAcquire()
 	return x0, x1
+}
+
+func (r *Process) handleTransientRelease() {
+	if apehost == apeLinux {
+		r.linux_handleTransientRelease()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_handleTransientRelease()
+		return
+	}
+	r.windows_handleTransientRelease()
 }
 
 func (r *Process) kill() error {
@@ -969,7 +1477,24 @@ func (r *Process) kill() error {
 		x0 := r.linux_kill()
 		return x0
 	}
-	x0 := r.freebsd_kill()
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_kill()
+		return x0
+	}
+	x0 := r.windows_kill()
+	return x0
+}
+
+func (r *Process) pidStatus() processStatus {
+	if apehost == apeLinux {
+		x0 := r.linux_pidStatus()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_pidStatus()
+		return x0
+	}
+	x0 := r.windows_pidStatus()
 	return x0
 }
 
@@ -978,17 +1503,51 @@ func (r *Process) pidfdSendSignal(a0 syscall.Signal) error {
 		x0 := r.linux_pidfdSendSignal(a0)
 		return x0
 	}
-	x0 := r.freebsd_pidfdSendSignal(a0)
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_pidfdSendSignal(a0)
+		return x0
+	}
+	x0 := r.windows_pidfdSendSignal(a0)
 	return x0
 }
 
 func (r *Process) pidfdWait() (*ProcessState, error) {
 	if apehost == apeLinux {
 		x0, x1 := r.linux_pidfdWait()
-		return x0, x1
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
 	}
-	x0, x1 := r.freebsd_pidfdWait()
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_pidfdWait()
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_pidfdWait()
+	return (*ProcessState)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Process) signal(a0 Signal) error {
+	if apehost == apeLinux {
+		x0 := r.linux_signal(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_signal(a0)
+		return x0
+	}
+	x0 := r.windows_signal(a0)
+	return x0
+}
+
+func (r *Process) wait() (*ProcessState, error) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_wait()
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_wait()
+		return (*ProcessState)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := r.windows_wait()
+	return (*ProcessState)(unsafe.Pointer(x0)), x1
 }
 
 func (r *Process) withHandle(a0 func(handle uintptr)) error {
@@ -996,71 +1555,530 @@ func (r *Process) withHandle(a0 func(handle uintptr)) error {
 		x0 := r.linux_withHandle(a0)
 		return x0
 	}
-	x0 := r.freebsd_withHandle(a0)
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_withHandle(a0)
+		return x0
+	}
+	x0 := r.windows_withHandle(a0)
 	return x0
 }
 
 func (r *ProcessState) ExitCode() int {
 	if apehost == apeLinux {
-		x0 := r.Linux_ExitCode()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).ExitCode()
 		return x0
 	}
-	x0 := r.Freebsd_ExitCode()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).ExitCode()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).ExitCode()
+	return x0
+}
+
+func (r *ProcessState) Exited() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).Exited()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).Exited()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).Exited()
 	return x0
 }
 
 func (r *ProcessState) Pid() int {
 	if apehost == apeLinux {
-		x0 := r.Linux_Pid()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).Pid()
 		return x0
 	}
-	x0 := r.Freebsd_Pid()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).Pid()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).Pid()
 	return x0
 }
 
 func (r *ProcessState) String() string {
 	if apehost == apeLinux {
-		x0 := r.Linux_String()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).String()
 		return x0
 	}
-	x0 := r.Freebsd_String()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).String()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).String()
+	return x0
+}
+
+func (r *ProcessState) Success() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).Success()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).Success()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).Success()
+	return x0
+}
+
+func (r *ProcessState) Sys() any {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).Sys()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).Sys()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).Sys()
+	return x0
+}
+
+func (r *ProcessState) SysUsage() any {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).SysUsage()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).SysUsage()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).SysUsage()
+	return x0
+}
+
+func (r *ProcessState) SystemTime() time.Duration {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).SystemTime()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).SystemTime()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).SystemTime()
+	return x0
+}
+
+func (r *ProcessState) UserTime() time.Duration {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).UserTime()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).UserTime()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).UserTime()
 	return x0
 }
 
 func (r *ProcessState) exited() bool {
 	if apehost == apeLinux {
-		x0 := r.linux_exited()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).exited()
 		return x0
 	}
-	x0 := r.freebsd_exited()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).exited()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).exited()
 	return x0
 }
 
 func (r *ProcessState) success() bool {
 	if apehost == apeLinux {
-		x0 := r.linux_success()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).success()
 		return x0
 	}
-	x0 := r.freebsd_success()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).success()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).success()
 	return x0
 }
 
 func (r *ProcessState) sys() any {
 	if apehost == apeLinux {
-		x0 := r.linux_sys()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).sys()
 		return x0
 	}
-	x0 := r.freebsd_sys()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).sys()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).sys()
 	return x0
 }
 
 func (r *ProcessState) sysUsage() any {
 	if apehost == apeLinux {
-		x0 := r.linux_sysUsage()
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).sysUsage()
 		return x0
 	}
-	x0 := r.freebsd_sysUsage()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).sysUsage()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).sysUsage()
 	return x0
+}
+
+func (r *ProcessState) systemTime() time.Duration {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).systemTime()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).systemTime()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).systemTime()
+	return x0
+}
+
+func (r *ProcessState) userTime() time.Duration {
+	if apehost == apeLinux {
+		x0 := ((*Linux_ProcessState)(unsafe.Pointer(r))).userTime()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_ProcessState)(unsafe.Pointer(r))).userTime()
+		return x0
+	}
+	x0 := ((*Windows_ProcessState)(unsafe.Pointer(r))).userTime()
+	return x0
+}
+
+func (r *Root) Chmod(a0 string, a1 FileMode) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Chmod(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Chmod(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Chmod(a0, a1)
+	return x0
+}
+
+func (r *Root) Chown(a0 string, a1 int, a2 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Chown(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Chown(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Chown(a0, a1, a2)
+	return x0
+}
+
+func (r *Root) Chtimes(a0 string, a1 time.Time, a2 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Chtimes(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Chtimes(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Chtimes(a0, a1, a2)
+	return x0
+}
+
+func (r *Root) Close() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Close()
+	return x0
+}
+
+func (r *Root) Create(a0 string) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).Create(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).Create(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).Create(a0)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Root) FS() fs.FS {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).FS()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).FS()
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).FS()
+	return x0
+}
+
+func (r *Root) Lchown(a0 string, a1 int, a2 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Lchown(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Lchown(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Lchown(a0, a1, a2)
+	return x0
+}
+
+func (r *Root) Link(a0 string, a1 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Link(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Link(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Link(a0, a1)
+	return x0
+}
+
+func (r *Root) Lstat(a0 string) (FileInfo, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).Lstat(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).Lstat(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).Lstat(a0)
+	return x0, x1
+}
+
+func (r *Root) Mkdir(a0 string, a1 FileMode) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Mkdir(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Mkdir(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Mkdir(a0, a1)
+	return x0
+}
+
+func (r *Root) MkdirAll(a0 string, a1 FileMode) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).MkdirAll(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).MkdirAll(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).MkdirAll(a0, a1)
+	return x0
+}
+
+func (r *Root) Name() string {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Name()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Name()
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Name()
+	return x0
+}
+
+func (r *Root) Open(a0 string) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).Open(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).Open(a0)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).Open(a0)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Root) OpenFile(a0 string, a1 int, a2 FileMode) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).OpenFile(a0, a1, a2)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).OpenFile(a0, a1, a2)
+		return (*File)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).OpenFile(a0, a1, a2)
+	return (*File)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Root) OpenRoot(a0 string) (*Root, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).OpenRoot(a0)
+		return (*Root)(unsafe.Pointer(x0)), x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).OpenRoot(a0)
+		return (*Root)(unsafe.Pointer(x0)), x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).OpenRoot(a0)
+	return (*Root)(unsafe.Pointer(x0)), x1
+}
+
+func (r *Root) ReadFile(a0 string) ([]byte, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).ReadFile(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).ReadFile(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).ReadFile(a0)
+	return x0, x1
+}
+
+func (r *Root) Readlink(a0 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).Readlink(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).Readlink(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).Readlink(a0)
+	return x0, x1
+}
+
+func (r *Root) Remove(a0 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Remove(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Remove(a0)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Remove(a0)
+	return x0
+}
+
+func (r *Root) RemoveAll(a0 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).RemoveAll(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).RemoveAll(a0)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).RemoveAll(a0)
+	return x0
+}
+
+func (r *Root) Rename(a0 string, a1 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Rename(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Rename(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Rename(a0, a1)
+	return x0
+}
+
+func (r *Root) Stat(a0 string) (FileInfo, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_Root)(unsafe.Pointer(r))).Stat(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_Root)(unsafe.Pointer(r))).Stat(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_Root)(unsafe.Pointer(r))).Stat(a0)
+	return x0, x1
+}
+
+func (r *Root) Symlink(a0 string, a1 string) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).Symlink(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).Symlink(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).Symlink(a0, a1)
+	return x0
+}
+
+func (r *Root) WriteFile(a0 string, a1 []byte, a2 FileMode) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Root)(unsafe.Pointer(r))).WriteFile(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_Root)(unsafe.Pointer(r))).WriteFile(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_Root)(unsafe.Pointer(r))).WriteFile(a0, a1, a2)
+	return x0
+}
+
+func (r *Root) logOpen(a0 string) {
+	if apehost == apeLinux {
+		((*Linux_Root)(unsafe.Pointer(r))).logOpen(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_Root)(unsafe.Pointer(r))).logOpen(a0)
+		return
+	}
+	((*Windows_Root)(unsafe.Pointer(r))).logOpen(a0)
+}
+
+func (r *Root) logStat(a0 string) {
+	if apehost == apeLinux {
+		((*Linux_Root)(unsafe.Pointer(r))).logStat(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_Root)(unsafe.Pointer(r))).logStat(a0)
+		return
+	}
+	((*Windows_Root)(unsafe.Pointer(r))).logStat(a0)
 }
 
 func (r dirFS) Lstat(a0 string) (fs.FileInfo, error) {
@@ -1068,7 +2086,11 @@ func (r dirFS) Lstat(a0 string) (fs.FileInfo, error) {
 		x0, x1 := r.Linux_Lstat(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Lstat(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Lstat(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Lstat(a0)
 	return x0, x1
 }
 
@@ -1077,7 +2099,11 @@ func (r dirFS) Open(a0 string) (fs.File, error) {
 		x0, x1 := r.Linux_Open(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Open(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Open(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Open(a0)
 	return x0, x1
 }
 
@@ -1086,7 +2112,11 @@ func (r dirFS) ReadDir(a0 string) ([]DirEntry, error) {
 		x0, x1 := r.Linux_ReadDir(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadDir(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ReadDir(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ReadDir(a0)
 	return x0, x1
 }
 
@@ -1095,7 +2125,11 @@ func (r dirFS) ReadFile(a0 string) ([]byte, error) {
 		x0, x1 := r.Linux_ReadFile(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadFile(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ReadFile(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ReadFile(a0)
 	return x0, x1
 }
 
@@ -1104,7 +2138,11 @@ func (r dirFS) ReadLink(a0 string) (string, error) {
 		x0, x1 := r.Linux_ReadLink(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadLink(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ReadLink(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ReadLink(a0)
 	return x0, x1
 }
 
@@ -1113,7 +2151,11 @@ func (r dirFS) Stat(a0 string) (fs.FileInfo, error) {
 		x0, x1 := r.Linux_Stat(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Stat(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Stat(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Stat(a0)
 	return x0, x1
 }
 
@@ -1122,24 +2164,24 @@ func (r dirFS) join(a0 string) (string, error) {
 		x0, x1 := r.linux_join(a0)
 		return x0, x1
 	}
-	x0, x1 := r.freebsd_join(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_join(a0)
+		return x0, x1
+	}
+	x0, x1 := r.windows_join(a0)
 	return x0, x1
 }
 
-func (r *dirInfo) close() {
+func (r errSymlink) Error() string {
 	if apehost == apeLinux {
-		r.linux_close()
-		return
-	}
-	r.freebsd_close()
-}
-
-func (r *file) close() error {
-	if apehost == apeLinux {
-		x0 := r.linux_close()
+		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.freebsd_close()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -1148,7 +2190,11 @@ func (r noReadFrom) ReadFrom(a0 io.Reader) (int64, error) {
 		x0, x1 := r.Linux_ReadFrom(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_ReadFrom(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_ReadFrom(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_ReadFrom(a0)
 	return x0, x1
 }
 
@@ -1157,7 +2203,24 @@ func (r noWriteTo) WriteTo(a0 io.Writer) (int64, error) {
 		x0, x1 := r.Linux_WriteTo(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_WriteTo(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_WriteTo(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_WriteTo(a0)
+	return x0, x1
+}
+
+func (r *processHandle) acquire() (uintptr, bool) {
+	if apehost == apeLinux {
+		x0, x1 := r.linux_acquire()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_acquire()
+		return x0, x1
+	}
+	x0, x1 := r.windows_acquire()
 	return x0, x1
 }
 
@@ -1166,60 +2229,101 @@ func (r *processHandle) closeHandle() {
 		r.linux_closeHandle()
 		return
 	}
-	r.freebsd_closeHandle()
+	if apehost == apeFreebsd {
+		r.freebsd_closeHandle()
+		return
+	}
+	r.windows_closeHandle()
 }
 
-func (r *unixDirent) Info() (FileInfo, error) {
+func (r *processHandle) release() {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Info()
-		return x0, x1
+		r.linux_release()
+		return
 	}
-	x0, x1 := r.Freebsd_Info()
-	return x0, x1
+	if apehost == apeFreebsd {
+		r.freebsd_release()
+		return
+	}
+	r.windows_release()
 }
 
-func (r *unixDirent) IsDir() bool {
-	if apehost == apeLinux {
-		x0 := r.Linux_IsDir()
-		return x0
-	}
-	x0 := r.Freebsd_IsDir()
-	return x0
+// File differs between hosts: functions convert it by pointer.
+type File struct{ _ [1]uint64 }
+
+// ProcAttr is linux's. Functions convert other hosts' field by field.
+type ProcAttr struct {
+	Dir   string
+	Env   []string
+	Files []*File
+	Sys   *syscall.SysProcAttr
 }
 
-func (r *unixDirent) Name() string {
-	if apehost == apeLinux {
-		x0 := r.Linux_Name()
-		return x0
+// Linux_FromAPE_ProcAttr returns the host's copy of p.
+func Linux_FromAPE_ProcAttr(p *ProcAttr) *Linux_ProcAttr {
+	if p == nil {
+		return nil
 	}
-	x0 := r.Freebsd_Name()
-	return x0
+	return (*Linux_ProcAttr)(unsafe.Pointer(p))
 }
 
-func (r *unixDirent) String() string {
-	if apehost == apeLinux {
-		x0 := r.Linux_String()
-		return x0
+// Freebsd_FromAPE_ProcAttr returns the host's copy of p.
+func Freebsd_FromAPE_ProcAttr(p *ProcAttr) *Freebsd_ProcAttr {
+	if p == nil {
+		return nil
 	}
-	x0 := r.Freebsd_String()
-	return x0
+	var t Freebsd_ProcAttr
+	t.Dir = (*p).Dir
+	t.Env = (*p).Env
+	if (*p).Files != nil {
+		t.Files = make([]*Freebsd_File, len((*p).Files))
+		for i1 := range (*p).Files {
+			t.Files[i1] = (*Freebsd_File)(unsafe.Pointer((*p).Files[i1]))
+		}
+	}
+	*(*uintptr)(unsafe.Pointer(&t.Sys)) = uintptr(unsafe.Pointer((*p).Sys))
+	return &t
 }
 
-func (r *unixDirent) Type() FileMode {
-	if apehost == apeLinux {
-		x0 := r.Linux_Type()
-		return x0
+// Windows_FromAPE_ProcAttr returns the host's copy of p.
+func Windows_FromAPE_ProcAttr(p *ProcAttr) *Windows_ProcAttr {
+	if p == nil {
+		return nil
 	}
-	x0 := r.Freebsd_Type()
-	return x0
+	var t Windows_ProcAttr
+	t.Dir = (*p).Dir
+	t.Env = (*p).Env
+	if (*p).Files != nil {
+		t.Files = make([]*Windows_File, len((*p).Files))
+		for i1 := range (*p).Files {
+			t.Files[i1] = (*Windows_File)(unsafe.Pointer((*p).Files[i1]))
+		}
+	}
+	*(*uintptr)(unsafe.Pointer(&t.Sys)) = uintptr(unsafe.Pointer((*p).Sys))
+	return &t
 }
+
+type ProcessState struct {
+	pid    int
+	status syscall.WaitStatus
+	rusage *syscall.Rusage
+}
+
+// Root differs between hosts: functions convert it by pointer.
+type Root struct{ _ [1]uint64 }
 
 //go:linkname ape_net_newUnixFile net.newUnixFile
 func ape_net_newUnixFile(a0 int, a1 string) *File {
 	if apehost == apeLinux {
 		x0 := linux_net_newUnixFile(a0, a1)
-		return x0
+		return (*File)(unsafe.Pointer(x0))
 	}
 	x0 := freebsd_net_newUnixFile(a0, a1)
-	return x0
+	return (*File)(unsafe.Pointer(x0))
+}
+
+func init() {
+	if apehost == apeWindows {
+		windows_init0()
+	}
 }

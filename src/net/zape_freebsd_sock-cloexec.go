@@ -19,7 +19,7 @@ import (
 // Wrapper around the socket system call that marks the returned file
 // descriptor as nonblocking and close-on-exec.
 func freebsd_sysSocket(family, sotype, proto int) (int, error) {
-	s, err := socketFunc(family, sotype|syscall.Freebsd_SOCK_NONBLOCK|syscall.Freebsd_SOCK_CLOEXEC, proto)
+	s, err := freebsd_socketFunc(family, sotype|syscall.Freebsd_SOCK_NONBLOCK|syscall.Freebsd_SOCK_CLOEXEC, proto)
 	if err != nil {
 		return -1, os.NewSyscallError("socket", err)
 	}

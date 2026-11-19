@@ -16,6 +16,7 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
 func osCPUInfoName() string {
@@ -23,6 +24,10 @@ func osCPUInfoName() string {
 		x0 := linux_osCPUInfoName()
 		return x0
 	}
-	x0 := freebsd_osCPUInfoName()
+	if apehost == apeFreebsd {
+		x0 := freebsd_osCPUInfoName()
+		return x0
+	}
+	x0 := windows_osCPUInfoName()
 	return x0
 }

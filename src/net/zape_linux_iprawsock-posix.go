@@ -13,7 +13,7 @@ import (
 	"syscall"
 )
 
-func linux_sockaddrToIP(sa syscall.Sockaddr) Addr {
+func linux_sockaddrToIP(sa syscall.Linux_Sockaddr) Addr {
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		return &IPAddr{IP: sa.Addr[0:]}
@@ -33,7 +33,7 @@ func (a *IPAddr) linux_family() int {
 	return syscall.Linux_AF_INET6
 }
 
-func (a *IPAddr) linux_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *IPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -44,11 +44,11 @@ func (a *IPAddr) linux_toLocal(net string) sockaddr {
 	return &IPAddr{loopbackIP(net), a.Zone}
 }
 
-func (c *IPConn) linux_readFrom(b []byte) (int, *IPAddr, error) {
+func (c *Linux_IPConn) readFrom(b []byte) (int, *IPAddr, error) {
 	// TODO(cw,rsc): consider using readv if we know the family
 	// type to avoid the header trim/copy
 	var addr *IPAddr
-	n, sa, err := c.fd.linux_readFrom(b)
+	n, sa, err := c.fd.readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
@@ -74,9 +74,9 @@ func linux_stripIPv4Header(n int, b []byte) int {
 	return n - l
 }
 
-func (c *IPConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
-	var sa syscall.Sockaddr
-	n, oobn, flags, sa, err = c.fd.linux_readMsg(b, oob, 0)
+func (c *Linux_IPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
+	var sa syscall.Linux_Sockaddr
+	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, 0)
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
@@ -86,7 +86,7 @@ func (c *IPConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr,
 	return
 }
 
-func (c *IPConn) linux_writeTo(b []byte, addr *IPAddr) (int, error) {
+func (c *Linux_IPConn) writeTo(b []byte, addr *IPAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -97,10 +97,10 @@ func (c *IPConn) linux_writeTo(b []byte, addr *IPAddr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return c.fd.linux_writeTo(b, sa)
+	return c.fd.writeTo(b, sa)
 }
 
-func (c *IPConn) linux_writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
+func (c *Linux_IPConn) writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
 	if c.fd.isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -111,11 +111,11 @@ func (c *IPConn) linux_writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err e
 	if err != nil {
 		return 0, 0, err
 	}
-	return c.fd.linux_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (sd *sysDialer) linux_dialIP(ctx context.Context, laddr, raddr *IPAddr) (*IPConn, error) {
-	network, proto, err := parseNetwork(ctx, sd.network, true)
+func (sd *linux_sysDialer) dialIP(ctx context.Context, laddr, raddr *IPAddr) (*Linux_IPConn, error) {
+	network, proto, err := linux_parseNetwork(ctx, sd.network, true)
 	if err != nil {
 		return nil, err
 	}
@@ -134,11 +134,11 @@ func (sd *sysDialer) linux_dialIP(ctx context.Context, laddr, raddr *IPAddr) (*I
 	if err != nil {
 		return nil, err
 	}
-	return newIPConn(fd), nil
+	return linux_newIPConn(fd), nil
 }
 
-func (sl *sysListener) linux_listenIP(ctx context.Context, laddr *IPAddr) (*IPConn, error) {
-	network, proto, err := parseNetwork(ctx, sl.network, true)
+func (sl *sysListener) linux_listenIP(ctx context.Context, laddr *IPAddr) (*Linux_IPConn, error) {
+	network, proto, err := linux_parseNetwork(ctx, sl.network, true)
 	if err != nil {
 		return nil, err
 	}
@@ -157,5 +157,5 @@ func (sl *sysListener) linux_listenIP(ctx context.Context, laddr *IPAddr) (*IPCo
 	if err != nil {
 		return nil, err
 	}
-	return newIPConn(fd), nil
+	return linux_newIPConn(fd), nil
 }

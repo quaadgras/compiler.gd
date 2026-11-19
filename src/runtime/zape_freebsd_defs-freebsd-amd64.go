@@ -217,18 +217,33 @@ type freebsd_ucontext struct {
 	pad_cgo_0   [12]byte
 }
 
+type freebsd_timespec struct {
+	tv_sec  int64
+	tv_nsec int64
+}
+
 //go:nosplit
-func (ts *timespec) freebsd_setNsec(ns int64) {
+func (ts *freebsd_timespec) setNsec(ns int64) {
 	ts.tv_sec = ns / 1e9
 	ts.tv_nsec = ns % 1e9
 }
 
-func (tv *timeval) freebsd_set_usec(x int32) {
+type freebsd_timeval struct {
+	tv_sec  int64
+	tv_usec int64
+}
+
+func (tv *freebsd_timeval) set_usec(x int32) {
 	tv.tv_usec = int64(x)
 }
 
+type freebsd_itimerval struct {
+	it_interval freebsd_timeval
+	it_value    freebsd_timeval
+}
+
 type freebsd_umtx_time struct {
-	_timeout timespec
+	_timeout freebsd_timespec
 	_flags   uint32
 	_clockid uint32
 }

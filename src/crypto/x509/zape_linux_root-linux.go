@@ -28,7 +28,7 @@ var linux_certDirectories = []string{
 	"/etc/pki/tls/certs", // Fedora/RHEL
 }
 
-func init() {
+func linux_init0() {
 	if 0 == 1 {
 		linux_certDirectories = append(linux_certDirectories,
 			"/system/etc/security/cacerts",    // Android system roots

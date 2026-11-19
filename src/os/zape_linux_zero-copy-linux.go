@@ -15,23 +15,24 @@ import (
 )
 
 var (
-	linux_pollSplice = poll.Linux_Splice
+	linux_pollCopyFileRange = poll.Linux_CopyFileRange
+	linux_pollSplice        = poll.Linux_Splice
 )
 
-func (f *File) linux_writeTo(w io.Writer) (written int64, handled bool, err error) {
+func (f *Linux_File) writeTo(w io.Writer) (written int64, handled bool, err error) {
 	pfd, network := linux_getPollFDAndNetwork(w)
 	// TODO(panjf2000): same as File.spliceToFile.
 	if pfd == nil || !pfd.IsStream || !linux_isUnixOrTCP(string(network)) {
 		return
 	}
 
-	sc, err := f.Linux_SyscallConn()
+	sc, err := f.SyscallConn()
 	if err != nil {
 		return
 	}
 
 	rerr := sc.Read(func(fd uintptr) (done bool) {
-		written, err, handled = poll.SendFile(pfd, fd, 0)
+		written, err, handled = poll.Linux_SendFile(pfd, fd, 0)
 		return true
 	})
 
@@ -42,7 +43,7 @@ func (f *File) linux_writeTo(w io.Writer) (written int64, handled bool, err erro
 	return written, handled, wrapSyscallError("sendfile", err)
 }
 
-func (f *File) linux_readFrom(r io.Reader) (written int64, handled bool, err error) {
+func (f *Linux_File) readFrom(r io.Reader) (written int64, handled bool, err error) {
 	// Neither copy_file_range(2) nor splice(2) supports destinations opened with
 	// O_APPEND, so don't bother to try zero-copy with these system calls.
 	//
@@ -52,14 +53,14 @@ func (f *File) linux_readFrom(r io.Reader) (written int64, handled bool, err err
 		return 0, false, nil
 	}
 
-	written, handled, err = f.linux_copyFileRange(r)
+	written, handled, err = f.copyFileRange(r)
 	if handled {
 		return
 	}
-	return f.linux_spliceToFile(r)
+	return f.spliceToFile(r)
 }
 
-func (f *File) linux_spliceToFile(r io.Reader) (written int64, handled bool, err error) {
+func (f *Linux_File) spliceToFile(r io.Reader) (written int64, handled bool, err error) {
 	var (
 		remain int64
 		lr     *io.LimitedReader
@@ -89,7 +90,7 @@ func (f *File) linux_spliceToFile(r io.Reader) (written int64, handled bool, err
 	return written, handled, wrapSyscallError("splice", err)
 }
 
-func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, err error) {
+func (f *Linux_File) copyFileRange(r io.Reader) (written int64, handled bool, err error) {
 	var (
 		remain int64
 		lr     *io.LimitedReader
@@ -98,12 +99,12 @@ func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, er
 		return 0, true, nil
 	}
 
-	var src *File
+	var src *Linux_File
 	switch v := r.(type) {
-	case *File:
+	case *Linux_File:
 		src = v
-	case fileWithoutWriteTo:
-		src = v.File
+	case linux_fileWithoutWriteTo:
+		src = v.Linux_File
 	default:
 		return 0, false, nil
 	}
@@ -114,7 +115,7 @@ func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, er
 		return 0, false, nil
 	}
 
-	written, handled, err = pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = linux_pollCopyFileRange(&f.pfd, &src.pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}
@@ -124,7 +125,7 @@ func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, er
 // getPollFDAndNetwork tries to get the poll.FD and network type from the given interface
 // by expecting the underlying type of i to be the implementation of syscall.Conn
 // that contains a *net.rawConn.
-func linux_getPollFDAndNetwork(i any) (*poll.FD, poll.String) {
+func linux_getPollFDAndNetwork(i any) (*poll.Linux_FD, poll.String) {
 	sc, ok := i.(syscall.Conn)
 	if !ok {
 		return nil, ""
@@ -134,7 +135,7 @@ func linux_getPollFDAndNetwork(i any) (*poll.FD, poll.String) {
 		return nil, ""
 	}
 	irc, ok := rc.(interface {
-		PollFD() *poll.FD
+		PollFD() *poll.Linux_FD
 		Network() poll.String
 	})
 	if !ok {

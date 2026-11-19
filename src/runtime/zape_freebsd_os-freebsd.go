@@ -15,6 +15,7 @@ import (
 )
 
 type freebsd_mOS struct {
+	freebsd_waitsema uint32 // semaphore for parking on locks
 }
 
 //go:noescape
@@ -27,7 +28,7 @@ func freebsd_sigaltstack(new, old *freebsd_stackt)
 func freebsd_sigprocmask(how int32, new, old *freebsd_sigset)
 
 //go:noescape
-func freebsd_setitimer(mode int32, new, old *itimerval)
+func freebsd_setitimer(mode int32, new, old *freebsd_itimerval)
 
 //go:noescape
 func freebsd_sysctl(mib *uint32, miblen uint32, out *byte, size *uintptr, dst *byte, ndst uintptr) int32
@@ -50,7 +51,7 @@ func freebsd_osyield_no_g() {
 func freebsd_kqueue() int32
 
 //go:noescape
-func freebsd_kevent(kq int32, ch *freebsd_keventt, nch int32, ev *freebsd_keventt, nev int32, ts *timespec) int32
+func freebsd_kevent(kq int32, ch *freebsd_keventt, nch int32, ev *freebsd_keventt, nev int32, ts *freebsd_timespec) int32
 
 func freebsd_pipe2(flags int32) (r, w int32, errno int32)
 func freebsd_fcntl(fd, cmd, arg int32) (ret int32, errno int32)
@@ -173,7 +174,7 @@ func freebsd_futexsleep1(addr *uint32, val uint32, ns int64) {
 	if ns >= 0 {
 		var ut freebsd_umtx_time
 		ut._clockid = freebsd__CLOCK_MONOTONIC
-		ut._timeout.freebsd_setNsec(ns)
+		ut._timeout.setNsec(ns)
 		utp = &ut
 	}
 	ret := freebsd_sys_umtx_op(addr, freebsd__UMTX_OP_WAIT_UINT_PRIVATE, val, unsafe.Sizeof(*utp), utp)
@@ -220,7 +221,7 @@ func freebsd_newosproc(mp *m) {
 
 	var oset freebsd_sigset
 	freebsd_sigprocmask(freebsd__SIG_SETMASK, &freebsd_sigset_all, &oset)
-	ret := retryOnEAGAIN(func() int32 {
+	ret := freebsd_retryOnEAGAIN(func() int32 {
 		errno := freebsd_thr_new(&param, int32(unsafe.Sizeof(param)))
 		// thr_new returns negative errno
 		return -errno
@@ -239,7 +240,7 @@ func freebsd_newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	stack := sysAlloc(stacksize, &memstats.stacks_sys, "OS thread stack")
 	if stack == nil {
 		writeErrStr(failallocatestack)
-		exit(1)
+		freebsd_exit(1)
 	}
 	// This code "knows" it's being called once from the library
 	// initialization code, and so it's using the static m0 for the
@@ -264,7 +265,7 @@ func freebsd_newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 	freebsd_sigprocmask(freebsd__SIG_SETMASK, &oset, nil)
 	if ret < 0 {
 		writeErrStr(failthreadcreate)
-		exit(1)
+		freebsd_exit(1)
 	}
 }
 
@@ -285,11 +286,13 @@ func freebsd_osinit() {
 	}
 }
 
+var freebsd_urandom_dev = []byte("/dev/urandom\x00")
+
 //go:nosplit
 func freebsd_readRandom(r []byte) int {
-	fd := open(&urandom_dev[0], 0 /* O_RDONLY */, 0)
-	n := read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
-	closefd(fd)
+	fd := freebsd_open(&freebsd_urandom_dev[0], 0 /* O_RDONLY */, 0)
+	n := freebsd_read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
+	freebsd_closefd(fd)
 	return int(n)
 }
 

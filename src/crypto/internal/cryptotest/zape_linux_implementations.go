@@ -23,7 +23,7 @@ var _ = goos.GOOS
 // TestAllImplementations runs the provided test function with each available
 // implementation of the package registered with crypto/internal/impl. If there
 // are no alternative implementations for pkg, f is invoked directly once.
-func Linux_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.T)) {
+func Linux_TestAllImplementations(t *testing.Linux_T, pkg string, f func(t *testing.Linux_T)) {
 	// BoringCrypto bypasses the multiple Go implementations.
 	if boring.Enabled {
 		f(t)
@@ -42,7 +42,7 @@ func Linux_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.T)
 		if available := impl.Select(pkg, name); available {
 			t.Run(name, f)
 		} else {
-			t.Run(name, func(t *testing.T) {
+			t.Run(name, func(t *testing.Linux_T) {
 				// Report an error if we're on the most capable builder for the
 				// architecture and the builder can't test this implementation.
 				if linux_flagshipBuilder() {
@@ -60,7 +60,7 @@ func Linux_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.T)
 }
 
 func linux_flagshipBuilder() bool {
-	builder := testenv.Builder()
+	builder := testenv.Linux_Builder()
 	if builder == "" {
 		return false
 	}

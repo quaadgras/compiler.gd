@@ -79,14 +79,14 @@ func linux_pidfdFind(pid int) (uintptr, error) {
 
 	h, err := unix.Linux_PidFDOpen(pid, 0)
 	if err != nil {
-		return 0, convertESRCH(err)
+		return 0, linux_convertESRCH(err)
 	}
 	return h, nil
 }
 
 // pidfdWait waits for the process to complete,
 // and updates the process status to done.
-func (p *Process) linux_pidfdWait() (*ProcessState, error) {
+func (p *Process) linux_pidfdWait() (*Linux_ProcessState, error) {
 	// When pidfd is used, there is no wait/kill race (described in CL 23967)
 	// because the PID recycle issue doesn't exist (IOW, pidfd, unlike PID,
 	// is guaranteed to refer to one particular process). Thus, there is no
@@ -94,23 +94,23 @@ func (p *Process) linux_pidfdWait() (*ProcessState, error) {
 	//
 	// We _do_ need to be careful about reuse of the pidfd FD number when
 	// closing the pidfd. See handle for more details.
-	handle, status := p.handleTransientAcquire()
+	handle, status := p.linux_handleTransientAcquire()
 	switch status {
-	case statusDone:
+	case linux_statusDone:
 		// Process already completed Wait, or was not found by
 		// pidfdFind. Return ECHILD for consistency with what the wait
 		// syscall would return.
 		return nil, NewSyscallError("wait", syscall.Linux_ECHILD)
-	case statusReleased:
+	case linux_statusReleased:
 		return nil, syscall.Linux_EINVAL
 	}
-	defer p.handleTransientRelease()
+	defer p.linux_handleTransientRelease()
 
 	var (
 		info   unix.Linux_SiginfoChild
-		rusage syscall.Rusage
+		rusage syscall.Linux_Rusage
 	)
-	err := ignoringEINTR(func() error {
+	err := linux_ignoringEINTR(func() error {
 		return unix.Linux_Waitid(unix.Linux_P_PIDFD, int(handle), &info, syscall.Linux_WEXITED, &rusage)
 	})
 	if err != nil {
@@ -119,9 +119,9 @@ func (p *Process) linux_pidfdWait() (*ProcessState, error) {
 
 	// Update the Process status to statusDone.
 	// This also releases a reference to the handle.
-	p.doRelease(statusDone)
+	p.linux_doRelease(linux_statusDone)
 
-	return &ProcessState{
+	return &Linux_ProcessState{
 		pid:    int(info.Pid),
 		status: info.WaitStatus(),
 		rusage: &rusage,
@@ -130,16 +130,16 @@ func (p *Process) linux_pidfdWait() (*ProcessState, error) {
 
 // pidfdSendSignal sends a signal to the process.
 func (p *Process) linux_pidfdSendSignal(s syscall.Signal) error {
-	handle, status := p.handleTransientAcquire()
+	handle, status := p.linux_handleTransientAcquire()
 	switch status {
-	case statusDone:
+	case linux_statusDone:
 		return ErrProcessDone
-	case statusReleased:
+	case linux_statusReleased:
 		return errProcessReleased
 	}
-	defer p.handleTransientRelease()
+	defer p.linux_handleTransientRelease()
 
-	return convertESRCH(unix.Linux_PidFDSendSignal(handle, s))
+	return linux_convertESRCH(unix.Linux_PidFDSendSignal(handle, s))
 }
 
 // pidfdWorks returns whether we can use pidfd on this system.
@@ -148,7 +148,12 @@ func linux_pidfdWorks() bool {
 }
 
 // checkPidfdOnce is used to only check whether pidfd works once.
-var linux_checkPidfdOnce = sync.OnceValue(linux_checkPidfd)
+var linux_checkPidfdOnce = func() func() error {
+	if apehost != apeLinux {
+		return *new(func() error)
+	}
+	return sync.OnceValue(linux_checkPidfd)
+}()
 
 // checkPidfd checks whether all required pidfd-related syscalls work. This
 // consists of pidfd_open and pidfd_send_signal syscalls, waitid syscall with
@@ -174,7 +179,7 @@ func linux_checkPidfd() error {
 	defer syscall.Linux_Close(int(fd))
 
 	// Check waitid(P_PIDFD) works.
-	err = ignoringEINTR(func() error {
+	err = linux_ignoringEINTR(func() error {
 		var info unix.Linux_SiginfoChild
 		// We don't actually care about the info, but passing a nil pointer
 		// makes valgrind complain because 0x0 is unaddressable.
@@ -204,13 +209,13 @@ func linux_checkPidfd() error {
 
 // Provided by syscall.
 //
-//go:linkname linux_checkClonePidfd
+//go:linkname linux_checkClonePidfd os.checkClonePidfd
 func linux_checkClonePidfd() error
 
 // Provided by runtime.
 //
-//go:linkname linux_ignoreSIGSYS
+//go:linkname linux_ignoreSIGSYS os.ignoreSIGSYS
 func linux_ignoreSIGSYS()
 
-//go:linkname linux_restoreSIGSYS
+//go:linkname linux_restoreSIGSYS os.restoreSIGSYS
 func linux_restoreSIGSYS()

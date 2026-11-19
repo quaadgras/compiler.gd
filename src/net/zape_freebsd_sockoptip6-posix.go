@@ -15,7 +15,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func freebsd_setIPv6MulticastInterface(fd *netFD, ifi *Interface) error {
+func freebsd_setIPv6MulticastInterface(fd *freebsd_netFD, ifi *Interface) error {
 	var v int
 	if ifi != nil {
 		v = ifi.Index
@@ -25,13 +25,13 @@ func freebsd_setIPv6MulticastInterface(fd *netFD, ifi *Interface) error {
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setIPv6MulticastLoopback(fd *netFD, v bool) error {
+func freebsd_setIPv6MulticastLoopback(fd *freebsd_netFD, v bool) error {
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_MULTICAST_LOOP, freebsd_boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_joinIPv6Group(fd *netFD, ifi *Interface, ip IP) error {
+func freebsd_joinIPv6Group(fd *freebsd_netFD, ifi *Interface, ip IP) error {
 	mreq := &syscall.IPv6Mreq{}
 	copy(mreq.Multiaddr[:], ip)
 	if ifi != nil {

@@ -23,7 +23,7 @@ var _ = goos.GOOS
 // TestAllImplementations runs the provided test function with each available
 // implementation of the package registered with crypto/internal/impl. If there
 // are no alternative implementations for pkg, f is invoked directly once.
-func Freebsd_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.T)) {
+func Freebsd_TestAllImplementations(t *testing.Freebsd_T, pkg string, f func(t *testing.Freebsd_T)) {
 	// BoringCrypto bypasses the multiple Go implementations.
 	if boring.Enabled {
 		f(t)
@@ -42,7 +42,7 @@ func Freebsd_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.
 		if available := impl.Select(pkg, name); available {
 			t.Run(name, f)
 		} else {
-			t.Run(name, func(t *testing.T) {
+			t.Run(name, func(t *testing.Freebsd_T) {
 				// Report an error if we're on the most capable builder for the
 				// architecture and the builder can't test this implementation.
 				if freebsd_flagshipBuilder() {
@@ -60,7 +60,7 @@ func Freebsd_TestAllImplementations(t *testing.T, pkg string, f func(t *testing.
 }
 
 func freebsd_flagshipBuilder() bool {
-	builder := testenv.Builder()
+	builder := testenv.Freebsd_Builder()
 	if builder == "" {
 		return false
 	}

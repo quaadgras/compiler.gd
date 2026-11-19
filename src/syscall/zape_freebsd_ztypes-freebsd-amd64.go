@@ -15,10 +15,43 @@ const (
 	freebsd_sizeofLongLong = 0x8
 )
 
+type (
+	freebsd__C_short     int16
+	freebsd__C_int       int32
+	freebsd__C_long      int64
+	freebsd__C_long_long int64
+)
+
+type Freebsd_Timeval struct {
+	Sec  int64
+	Usec int64
+}
+
+type Freebsd_Rusage struct {
+	Utime    Freebsd_Timeval
+	Stime    Freebsd_Timeval
+	Maxrss   int64
+	Ixrss    int64
+	Idrss    int64
+	Isrss    int64
+	Minflt   int64
+	Majflt   int64
+	Nswap    int64
+	Inblock  int64
+	Oublock  int64
+	Msgsnd   int64
+	Msgrcv   int64
+	Nsignals int64
+	Nvcsw    int64
+	Nivcsw   int64
+}
+
 type Freebsd_Rlimit struct {
 	Cur int64
 	Max int64
 }
+
+type freebsd__Gid_t uint32
 
 const (
 	Freebsd_S_IFMT   = 0xf000
@@ -165,11 +198,24 @@ type Freebsd_RawSockaddrAny struct {
 	Pad  [92]int8
 }
 
+type freebsd__Socklen uint32
+
+type Freebsd_Iovec struct {
+	Base *byte
+	Len  uint64
+}
+
+type Freebsd_IPMreqn struct {
+	Multiaddr [4]byte /* in_addr */
+	Address   [4]byte /* in_addr */
+	Ifindex   int32
+}
+
 type Freebsd_Msghdr struct {
 	Name       *byte
 	Namelen    uint32
 	Pad_cgo_0  [4]byte
-	Iov        *Iovec
+	Iov        *Freebsd_Iovec
 	Iovlen     int32
 	Pad_cgo_1  [4]byte
 	Control    *byte
@@ -181,6 +227,11 @@ type Freebsd_Cmsghdr struct {
 	Len   uint32
 	Level int32
 	Type  int32
+}
+
+type Freebsd_Inet6Pktinfo struct {
+	Addr    [16]byte /* in6_addr */
+	Ifindex uint32
 }
 
 type Freebsd_IPv6MTUInfo struct {
@@ -287,7 +338,7 @@ type freebsd_ifData struct {
 	Noproto     uint64
 	Hwassist    uint64
 	Epoch       int64
-	Lastchange  Timeval
+	Lastchange  Freebsd_Timeval
 }
 
 type Freebsd_IfData struct {
@@ -315,7 +366,7 @@ type Freebsd_IfData struct {
 	Noproto     uint64
 	Hwassist    uint64
 	Epoch       int64
-	Lastchange  Timeval
+	Lastchange  Freebsd_Timeval
 }
 
 type Freebsd_IfaMsghdr struct {
@@ -419,7 +470,7 @@ type Freebsd_BpfInsn struct {
 }
 
 type Freebsd_BpfHdr struct {
-	Tstamp    Timeval
+	Tstamp    Freebsd_Timeval
 	Caplen    uint32
 	Datalen   uint32
 	Hdrlen    uint16

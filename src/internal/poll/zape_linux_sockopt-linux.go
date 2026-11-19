@@ -11,7 +11,7 @@ package poll
 import "syscall"
 
 // SetsockoptIPMreqn wraps the setsockopt network call with an IPMreqn argument.
-func (fd *FD) Linux_SetsockoptIPMreqn(level, name int, mreq *syscall.IPMreqn) error {
+func (fd *Linux_FD) SetsockoptIPMreqn(level, name int, mreq *syscall.Linux_IPMreqn) error {
 	if err := fd.incref(); err != nil {
 		return err
 	}

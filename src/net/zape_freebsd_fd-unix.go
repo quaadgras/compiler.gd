@@ -29,9 +29,9 @@ const (
 	freebsd_writeMsgSyscallName = "sendmsg"
 )
 
-func freebsd_newFD(sysfd, family, sotype int, net string) *netFD {
-	return &netFD{
-		pfd: poll.FD{
+func freebsd_newFD(sysfd, family, sotype int, net string) *freebsd_netFD {
+	return &freebsd_netFD{
+		pfd: poll.Freebsd_FD{
 			Sysfd:         sysfd,
 			IsStream:      sotype == syscall.Freebsd_SOCK_STREAM,
 			ZeroReadIsEOF: sotype != syscall.Freebsd_SOCK_DGRAM && sotype != syscall.Freebsd_SOCK_RAW,
@@ -42,23 +42,23 @@ func freebsd_newFD(sysfd, family, sotype int, net string) *netFD {
 	}
 }
 
-func (fd *netFD) freebsd_init() error {
-	return fd.pfd.Freebsd_Init(fd.net, true)
+func (fd *freebsd_netFD) init() error {
+	return fd.pfd.Init(fd.net, true)
 }
 
-func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (rsa syscall.Sockaddr, ret error) {
+func (fd *freebsd_netFD) connect(ctx context.Context, la, ra syscall.Freebsd_Sockaddr) (rsa syscall.Freebsd_Sockaddr, ret error) {
 	// Do not need to call fd.writeLock here,
 	// because fd is not yet accessible to user,
 	// so no concurrent operations are possible.
-	switch err := connectFunc(fd.pfd.Sysfd, ra); err {
+	switch err := freebsd_connectFunc(fd.pfd.Sysfd, ra); err {
 	case syscall.Freebsd_EINPROGRESS, syscall.Freebsd_EALREADY, syscall.Freebsd_EINTR:
 	case nil, syscall.Freebsd_EISCONN:
 		select {
 		case <-ctx.Done():
-			return nil, mapErr(ctx.Err())
+			return nil, freebsd_mapErr(ctx.Err())
 		default:
 		}
-		if err := fd.pfd.Freebsd_Init(fd.net, true); err != nil {
+		if err := fd.pfd.Init(fd.net, true); err != nil {
 			return nil, err
 		}
 		runtime.KeepAlive(fd)
@@ -76,7 +76,7 @@ func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (
 	default:
 		return nil, os.NewSyscallError("connect", err)
 	}
-	if err := fd.pfd.Freebsd_Init(fd.net, true); err != nil {
+	if err := fd.pfd.Init(fd.net, true); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +89,7 @@ func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (
 
 		// Load the hook function synchronously to prevent a race
 		// with test code that restores the old value.
-		testHookCanceledDial := testHookCanceledDial
+		testHookCanceledDial := freebsd_testHookCanceledDial
 		stop := context.AfterFunc(ctx, func() {
 			// Force the runtime's poller to immediately give up
 			// waiting for writability, unblocking waitWrite
@@ -105,7 +105,7 @@ func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (
 				// connect (ret == nil). Because we've now poisoned the
 				// connection by making it unwritable, don't return a
 				// successful dial. This was issue 16523.
-				ret = mapErr(ctx.Err())
+				ret = freebsd_mapErr(ctx.Err())
 				// The caller closes fd on error, so there's no need to
 				// wait for the SetWriteDeadline call to return.
 			}
@@ -121,15 +121,15 @@ func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (
 		// SO_ERROR socket option to see if the connection
 		// succeeded or failed. See issue 7474 for further
 		// details.
-		if err := fd.pfd.Freebsd_WaitWrite(); err != nil {
+		if err := fd.pfd.WaitWrite(); err != nil {
 			select {
 			case <-ctxDone:
-				return nil, mapErr(ctx.Err())
+				return nil, freebsd_mapErr(ctx.Err())
 			default:
 			}
 			return nil, err
 		}
-		nerr, err := getsockoptIntFunc(fd.pfd.Sysfd, syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_ERROR)
+		nerr, err := freebsd_getsockoptIntFunc(fd.pfd.Sysfd, syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_ERROR)
 		if err != nil {
 			return nil, os.NewSyscallError("getsockopt", err)
 		}
@@ -151,8 +151,8 @@ func (fd *netFD) freebsd_connect(ctx context.Context, la, ra syscall.Sockaddr) (
 	}
 }
 
-func (fd *netFD) freebsd_accept() (netfd *netFD, err error) {
-	d, rsa, errcall, err := fd.pfd.Freebsd_Accept()
+func (fd *freebsd_netFD) accept() (netfd *freebsd_netFD, err error) {
+	d, rsa, errcall, err := fd.pfd.Accept()
 	if err != nil {
 		if errcall != "" {
 			err = wrapSyscallError(errcall, err)
@@ -161,22 +161,22 @@ func (fd *netFD) freebsd_accept() (netfd *netFD, err error) {
 	}
 
 	netfd = freebsd_newFD(d, fd.family, fd.sotype, fd.net)
-	if err = netfd.freebsd_init(); err != nil {
-		netfd.Freebsd_Close()
+	if err = netfd.init(); err != nil {
+		netfd.Close()
 		return nil, err
 	}
 	lsa, _ := syscall.Freebsd_Getsockname(netfd.pfd.Sysfd)
-	netfd.freebsd_setAddr(netfd.freebsd_addrFunc()(lsa), netfd.freebsd_addrFunc()(rsa))
+	netfd.setAddr(netfd.addrFunc()(lsa), netfd.addrFunc()(rsa))
 	return netfd, nil
 }
 
 // Defined in os package.
 //
 //go:linkname freebsd_newUnixFile net.newUnixFile
-func freebsd_newUnixFile(fd int, name string) *os.File
+func freebsd_newUnixFile(fd int, name string) *os.Freebsd_File
 
-func (fd *netFD) freebsd_dup() (f *os.File, err error) {
-	ns, call, err := fd.pfd.Freebsd_Dup()
+func (fd *freebsd_netFD) dup() (f *os.Freebsd_File, err error) {
+	ns, call, err := fd.pfd.Dup()
 	if err != nil {
 		if call != "" {
 			err = os.NewSyscallError(call, err)
@@ -184,5 +184,5 @@ func (fd *netFD) freebsd_dup() (f *os.File, err error) {
 		return nil, err
 	}
 
-	return freebsd_newUnixFile(ns, fd.freebsd_name()), nil
+	return freebsd_newUnixFile(ns, fd.name()), nil
 }

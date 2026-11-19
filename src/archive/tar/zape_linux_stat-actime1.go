@@ -14,9 +14,9 @@ import (
 )
 
 func linux_statAtime(st *syscall.Linux_Stat_t) time.Time {
-	return time.Unix(st.Atim.Unix())
+	return time.Linux_Unix(st.Atim.Linux_Unix())
 }
 
 func linux_statCtime(st *syscall.Linux_Stat_t) time.Time {
-	return time.Unix(st.Ctim.Unix())
+	return time.Linux_Unix(st.Ctim.Linux_Unix())
 }

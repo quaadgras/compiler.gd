@@ -107,8 +107,8 @@ func Freebsd_SetBpfInterface(fd int, name string) error {
 }
 
 // Deprecated: Use golang.org/x/net/bpf instead.
-func Freebsd_BpfTimeout(fd int) (*Timeval, error) {
-	var tv Timeval
+func Freebsd_BpfTimeout(fd int) (*Freebsd_Timeval, error) {
+	var tv Freebsd_Timeval
 	err := freebsd_ioctlPtr(fd, Freebsd_BIOCGRTIMEOUT, unsafe.Pointer(&tv))
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func Freebsd_BpfTimeout(fd int) (*Timeval, error) {
 }
 
 // Deprecated: Use golang.org/x/net/bpf instead.
-func Freebsd_SetBpfTimeout(fd int, tv *Timeval) error {
+func Freebsd_SetBpfTimeout(fd int, tv *Freebsd_Timeval) error {
 	err := freebsd_ioctlPtr(fd, Freebsd_BIOCSRTIMEOUT, unsafe.Pointer(tv))
 	if err != nil {
 		return err

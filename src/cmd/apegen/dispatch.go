@@ -12,6 +12,7 @@ import (
 	"go/format"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -41,6 +42,15 @@ func (g *pkgGen) hostTypeString(hp *hostPkg, t types.Type) string {
 	for _, n := range refs {
 		if g.hostNamed(hp, n) != nil {
 			s = replaceIdent(s, n.Obj().Name(), hostName(hp.host, n.Obj().Name()))
+		}
+	}
+	// Another generated package's host types.
+	var all []*types.Named
+	refsOf(t, map[types.Type]bool{}, &all)
+	for _, n := range all {
+		p := n.Obj().Pkg()
+		if p != nil && p != hp.pkg && g.u.hostOnly(p.Path(), hp.host, n.Obj().Name()) {
+			s = replaceIdent(s, p.Name()+"."+n.Obj().Name(), p.Name()+"."+hostName(hp.host, n.Obj().Name()))
 		}
 	}
 	return s
@@ -124,8 +134,24 @@ func (g *pkgGen) convStmts(hp *hostPkg, dst string, dt types.Type, src string, s
 		return []string{fmt.Sprintf("%s = uintptr(unsafe.Pointer(%s))", dst, src)}, true
 	case sok && sb.Kind() == types.Uintptr && dptr:
 		return []string{fmt.Sprintf("*(*uintptr)(unsafe.Pointer(&%s)) = %s", dst, src)}, true
-	case dptr && sptr:
+	case dptr && sptr && g.isRuntime():
+		// (Signal handlers convert: no write barrier.)
 		return []string{fmt.Sprintf("*(*uintptr)(unsafe.Pointer(&%s)) = uintptr(unsafe.Pointer(%s))", dst, src)}, true
+	case dptr && sptr:
+		// A handle: the host's object.
+		return []string{fmt.Sprintf("%s = (%s)(unsafe.Pointer(%s))", dst, tname(), src)}, true
+	}
+	if ds, ok := dt.Underlying().(*types.Slice); ok {
+		ss, ok := st.Underlying().(*types.Slice)
+		if !ok {
+			return nil, false
+		}
+		i := fmt.Sprintf("i%d", depth)
+		body, ok := g.convStmts(hp, dst+"["+i+"]", ds.Elem(), src+"["+i+"]", ss.Elem(), toHost, depth+1)
+		if !ok {
+			return nil, false
+		}
+		return []string{fmt.Sprintf("if %s != nil {\n%s = make(%s, len(%s))\nfor %s := range %s {\n%s\n}\n}", src, dst, tname(), src, i, src, strings.Join(body, "\n"))}, true
 	}
 	if ds, ok := dt.Underlying().(*types.Struct); ok {
 		ss, ok := st.Underlying().(*types.Struct)
@@ -219,6 +245,14 @@ func (g *pkgGen) arg(hp *hostPkg, t types.Type, a string, j int) (pre []string, 
 	}
 	hostT := hostName(hp.host, n.Obj().Name())
 	_, isPtr := types.Unalias(t).(*types.Pointer)
+	if g.sideBySide(n.Obj().Name()) {
+		// The host's value is the ape value's field.
+		if !isPtr {
+			return nil, a + "." + hp.host, nil, true
+		}
+		p := fmt.Sprintf("p%d", j)
+		return []string{fmt.Sprintf("var %s *%s\nif %s != nil {\n%s = &%s.%s\n}", p, hostT, a, p, a, hp.host)}, p, nil, true
+	}
 	if !g.canon[n.Obj().Name()] || hp == g.first() {
 		// Opaque, or the same layout: reinterpret.
 		if isPtr {
@@ -276,6 +310,12 @@ func (g *pkgGen) result(hp *hostPkg, t types.Type, x string, r string) (stmts []
 		return nil, x, true
 	}
 	_, isPtr := types.Unalias(t).(*types.Pointer)
+	if g.sideBySide(n.Obj().Name()) {
+		if isPtr {
+			return nil, "", false
+		}
+		return nil, fmt.Sprintf("%s{%s: %s}", n.Obj().Name(), hp.host, x), true
+	}
 	if !g.canon[n.Obj().Name()] || hp == g.first() {
 		if isPtr {
 			return nil, fmt.Sprintf("(*%s)(unsafe.Pointer(%s))", n.Obj().Name(), x), true
@@ -324,7 +364,10 @@ func (g *pkgGen) pragmas(hp *hostPkg, obj types.Object) []string {
 	// A one-argument linkname anywhere makes the name visible to other
 	// packages: so it does the dispatch function's.
 	if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() == nil {
-		for _, f := range hp.files {
+		for name, f := range hp.files {
+			if !hp.only[name] {
+				continue // a shared file's directive marks the dispatch function itself
+			}
 			for _, cg := range f.Comments {
 				for _, c := range cg.List {
 					if fs := strings.Fields(c.Text); len(fs) == 2 && fs[0] == "//go:linkname" && fs[1] == obj.Name() && !slices.Contains(out, c.Text) {
@@ -357,7 +400,21 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 	sig, ok := g.sameAll(ic, func(hp *hostPkg, obj types.Object) string {
 		return g.sigKey(hp, obj.Type().(*types.Signature), true)
 	})
+	// Hosts whose functions return what others' do not: shared code
+	// calls it as a statement.
+	dropResults := false
 	if !ok {
+		if _, same := g.sameAll(ic, func(hp *hostPkg, obj types.Object) string {
+			return g.sigKey(hp, types.NewSignatureType(nil, nil, nil, obj.Type().(*types.Signature).Params(), nil, false), false)
+		}); same {
+			for _, hp := range g.hs {
+				if hp.obj(ic).Type().(*types.Signature).Results().Len() == 0 {
+					dropResults = true
+				}
+			}
+		}
+	}
+	if !ok && !dropResults {
 		if len(ic.uses) > 0 || g.path == "runtime" {
 			g.reportf("%s %s: signatures differ: %s", ic.kind, ic.name, sig)
 		}
@@ -366,6 +423,9 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 	hp0 := g.first()
 	fn := hp0.obj(ic).(*types.Func)
 	s := fn.Signature()
+	if dropResults {
+		s = types.NewSignatureType(s.Recv(), nil, nil, s.Params(), nil, s.Variadic())
+	}
 	// Another package's host types: only host copies can call it.
 	for _, hp := range g.hs {
 		var refs []*types.Named
@@ -389,7 +449,7 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 	// too: no frame of the dispatch shows in tracebacks or to
 	// getcallerpc, and sigpanic is the frame the signal handler made.
 	// (A Go declaration without a body would make pointers escape.)
-	if ic.kind == "func" && g.isRuntime() && g.tailJumpable(ic) {
+	if ic.kind == "func" && g.isRuntime() && !g.asmOnly(ic) && g.tailJumpable(ic) {
 		fmt.Fprintf(&g.decls, "\n// %s is the host's, by a tail jump.\n", fn.Name())
 		for _, p := range g.pragmas(hp0, fn) {
 			if strings.HasPrefix(p, "//go:linkname") {
@@ -403,13 +463,37 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 		for v := range s.Results().Variables() {
 			rs = append(rs, v.Name()+" "+g.typeString(hp0, v.Type()))
 		}
-		fmt.Fprintf(&g.decls, "func %s(%s) (%s)\n", fn.Name(), strings.Join(ps, ", "), strings.Join(rs, ", "))
+		fmt.Fprintf(&g.decls, "//go:noescape\nfunc %s(%s) (%s)\n", fn.Name(), strings.Join(ps, ", "), strings.Join(rs, ", "))
 		if g.asmDispatch[fn.Name()] == nil {
 			g.asmDispatch[fn.Name()] = map[string]string{}
 		}
 		for _, hp := range g.hs {
+			// (An assembly body is reached through its ABI wrapper.)
 			g.asmDispatch[fn.Name()][hp.host] = "<ABIInternal>"
 		}
+		return
+	}
+
+	// A function no host has a body for is another package's (pushed by
+	// linkname): declare it, once.
+	if ic.kind == "func" && g.pushedHere(ic) {
+		fmt.Fprintf(&g.decls, "\n// %s is pushed by another package.\n", fn.Name())
+		for _, p := range g.pragmas(hp0, fn) {
+			if strings.HasPrefix(p, "//go:linkname") || p == "//go:noescape" {
+				fmt.Fprintln(&g.decls, p)
+			}
+		}
+		if hp0.linkname(fn) == "" {
+			fmt.Fprintf(&g.decls, "//go:linkname %s\n", fn.Name())
+		}
+		var ps, rs []string
+		for v := range s.Params().Variables() {
+			ps = append(ps, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		for v := range s.Results().Variables() {
+			rs = append(rs, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		fmt.Fprintf(&g.decls, "func %s(%s) (%s)\n", fn.Name(), strings.Join(ps, ", "), strings.Join(rs, ", "))
 		return
 	}
 
@@ -562,14 +646,33 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 
 func (g *pkgGen) isRuntime() bool { return g.path == "runtime" }
 
-// tailJumpable reports whether every host has a Go body for the
-// function, whose parameters and results hold no pointers and are the
-// same for every host.
+// sideBySide reports whether the ape type of the host type name holds
+// every host's value side by side: a type with state (not converted
+// field by field) whose values hold pointers, which an opaque array
+// would hide from the garbage collector.
+func (g *pkgGen) sideBySide(name string) bool {
+	if g.canon[name] || g.union[name] || !g.byValue[name] {
+		// (One only pointers reach is a handle: the host's object.)
+		return false
+	}
+	for _, hp := range g.hs {
+		if o, ok := hp.decls[name].(*types.TypeName); ok && hasPointers(o.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+// tailJumpable reports whether the function's dispatch may be a tail
+// jump: its parameters and results are the same for every host, and hold
+// no pointers or some host declares it //go:noescape (a declaration
+// without a body would otherwise make them escape).
 func (g *pkgGen) tailJumpable(ic *iface) bool {
+	pointers, noescape := false, false
 	for _, hp := range g.hs {
 		fn := hp.obj(ic).(*types.Func)
 		// (A one-argument linkname only makes the name visible.)
-		if !hp.hasBody(fn) || len(strings.Fields(hp.linkname(fn))) == 3 {
+		if len(strings.Fields(hp.linkname(fn))) == 3 {
 			return false
 		}
 		s := fn.Signature()
@@ -577,12 +680,14 @@ func (g *pkgGen) tailJumpable(ic *iface) bool {
 			return false
 		}
 		for _, t := range sigTypes(s) {
-			if hasPointers(t) || g.hostNamed(hp, t) != nil {
+			if g.hostNamed(hp, t) != nil {
 				return false
 			}
+			pointers = pointers || hasPointers(t)
 		}
+		noescape = noescape || hp.hasPragma(fn, "//go:noescape")
 	}
-	return true
+	return !pointers || noescape
 }
 
 // hasPointers reports whether a value of type t holds pointers.
@@ -599,6 +704,18 @@ func hasPointers(t types.Type) bool {
 			}
 		}
 		return false
+	}
+	return true
+}
+
+// pushedHere reports whether no host has a body for the function, in Go
+// or in assembly: another package pushes it.
+func (g *pkgGen) pushedHere(ic *iface) bool {
+	for _, hp := range g.hs {
+		fn := hp.obj(ic).(*types.Func)
+		if hp.hasBody(fn) || g.asmDefinesFunc(hp, fn.Name()) || len(strings.Fields(hp.linkname(fn))) == 3 {
+			return false
+		}
 	}
 	return true
 }
@@ -737,6 +854,16 @@ func (g *pkgGen) declType(ic *iface) {
 	under, same := g.sameAll(ic, func(hp *hostPkg, obj types.Object) string {
 		return g.typeString(hp, obj.Type().Underlying())
 	})
+	// Written the same way, but of host types: not the same.
+	for _, hp := range g.hs {
+		var refs []*types.Named
+		hp.namedRefs(hp.obj(ic).Type().Underlying(), map[types.Type]bool{}, &refs)
+		for _, n := range refs {
+			if g.hostNamed(hp, n) != nil {
+				same = false
+			}
+		}
+	}
 	if same && g.canon[ic.name] {
 		// The same layout written the same way, but of host types:
 		// the first host's.
@@ -751,6 +878,14 @@ func (g *pkgGen) declType(ic *iface) {
 		if _, ok := g.first().obj(ic).Type().Underlying().(*types.Struct); ok && token.IsExported(ic.name) && !g.isRuntime() {
 			g.fromAPEFuncs(ic)
 		}
+		return
+	}
+	if g.sideBySide(ic.name) {
+		fmt.Fprintf(&g.decls, "\n// %s differs between hosts and holds pointers: it holds each host's.\ntype %s struct {\n", ic.name, ic.name)
+		for _, hp := range g.hs {
+			fmt.Fprintf(&g.decls, "\t%s %s\n", hp.host, hostName(hp.host, ic.name))
+		}
+		fmt.Fprintf(&g.decls, "}\n")
 		return
 	}
 	var size, align int64
@@ -890,6 +1025,25 @@ func (g *pkgGen) writeDispatch() {
 		b.WriteString(")\n")
 	}
 	b.Write(g.decls.Bytes())
+	// The hosts' init functions run on their host.
+	any := false
+	for _, hp := range g.hs {
+		any = any || len(hp.inits) > 0
+	}
+	if any {
+		b.WriteString("\nfunc init() {\n")
+		for _, hp := range g.hs {
+			if len(hp.inits) == 0 {
+				continue
+			}
+			fmt.Fprintf(&b, "if apehost == ape%s {\n", title(hp.host))
+			for _, f := range hp.inits {
+				fmt.Fprintf(&b, "%s()\n", f)
+			}
+			b.WriteString("}\n")
+		}
+		b.WriteString("}\n")
+	}
 	if g.isRuntime() {
 		fmt.Fprintf(&b, "\n// apeinitHost sets what differs between hosts. It runs first.\nfunc apeinitHost() {\n%s}\n", g.init.Bytes())
 	}
@@ -905,8 +1059,19 @@ func (g *pkgGen) writeDispatch() {
 // writeAsmDispatch writes the assembly functions that jump to the
 // host's body of a function a shared file declares.
 func (g *pkgGen) writeAsmDispatch() {
+	// Functions the package's own ape assembly dispatches (runtime.settls).
+	handwritten := map[string]bool{}
+	for _, f := range g.apeAsmFiles() {
+		src, _ := os.ReadFile(f)
+		for _, m := range asmTextABI.FindAllSubmatch(src, -1) {
+			handwritten[string(m[1])] = true
+		}
+	}
 	var names []string
 	for n, by := range g.asmDispatch {
+		if handwritten[n] {
+			continue
+		}
 		if len(by) != len(g.hs) {
 			g.reportf("asm %s: implemented by only some hosts", n)
 			continue
@@ -1044,4 +1209,30 @@ func sigTypes(s *types.Signature) []types.Type {
 		ts = append(ts, v.Type())
 	}
 	return ts
+}
+
+// apeAsmFiles returns the package's hand-written ape assembly files.
+func (g *pkgGen) apeAsmFiles() []string {
+	all, _ := filepath.Glob(filepath.Join(g.dir, "*_ape_"+*arch+".s"))
+	return all
+}
+
+// hasPragma reports whether fn's declaration has the directive.
+func (hp *hostPkg) hasPragma(fn *types.Func, directive string) bool {
+	f := hp.files[filepath.Base(fset.Position(fn.Pos()).Filename)]
+	if f == nil {
+		return false
+	}
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Name.Pos() != fn.Pos() || fd.Doc == nil {
+			continue
+		}
+		for _, c := range fd.Doc.List {
+			if strings.HasPrefix(c.Text, directive) {
+				return true
+			}
+		}
+	}
+	return false
 }

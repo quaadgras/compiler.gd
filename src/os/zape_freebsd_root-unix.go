@@ -18,12 +18,17 @@ import (
 
 var _ = runtime.GOARCH
 
+// sysfdType is the native type of a file handle
+// (int on Unix, syscall.Handle on Windows),
+// permitting helper functions to be written portably.
+type freebsd_sysfdType = int
+
 // openRootNolog is OpenRoot.
-func freebsd_openRootNolog(name string) (*Root, error) {
+func freebsd_openRootNolog(name string) (*Freebsd_Root, error) {
 	var fd int
-	err := ignoringEINTR(func() error {
+	err := freebsd_ignoringEINTR(func() error {
 		var err error
-		fd, _, err = open(name, syscall.Freebsd_O_CLOEXEC, 0)
+		fd, _, err = freebsd_open(name, syscall.Freebsd_O_CLOEXEC, 0)
 		return err
 	})
 	if err != nil {
@@ -34,9 +39,9 @@ func freebsd_openRootNolog(name string) (*Root, error) {
 
 // newRoot returns a new Root.
 // If fd is not a directory, it closes it and returns an error.
-func freebsd_newRoot(fd int, name string) (*Root, error) {
+func freebsd_newRoot(fd int, name string) (*Freebsd_Root, error) {
 	var fs freebsd_fileStat
-	err := ignoringEINTR(func() error {
+	err := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Fstat(fd, &fs.sys)
 	})
 	freebsd_fillFileStatFromSys(&fs, name)
@@ -47,28 +52,28 @@ func freebsd_newRoot(fd int, name string) (*Root, error) {
 
 	// There's a race here with fork/exec, which we are
 	// content to live with. See ../syscall/exec_unix.go.
-	if !supportsCloseOnExec {
+	if !freebsd_supportsCloseOnExec {
 		syscall.Freebsd_CloseOnExec(fd)
 	}
 
-	r := &Root{&root{
+	r := &Freebsd_Root{&freebsd_root{
 		fd:   fd,
 		name: name,
 	}}
 	if noFinalizers {
 		r.root.cleanup = runtime.AddCleanup(r.root, freebsd_closeFD, fd)
 	} else {
-		runtime.SetFinalizer(r.root, (*root).Close)
+		runtime.SetFinalizer(r.root, (*freebsd_root).Close)
 	}
 	return r, nil
 }
 
 // openRootInRoot is Root.OpenRoot.
-func freebsd_openRootInRoot(r *Root, name string) (*Root, error) {
-	fd, err := doInRoot(r, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
-		ignoringEINTR(func() error {
-			fd, err = unix.Openat(parent, name, syscall.Freebsd_O_NOFOLLOW|syscall.Freebsd_O_CLOEXEC, 0)
-			if isNoFollowErr(err) {
+func freebsd_openRootInRoot(r *Freebsd_Root, name string) (*Freebsd_Root, error) {
+	fd, err := freebsd_doInRoot(r, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
+		freebsd_ignoringEINTR(func() error {
+			fd, err = unix.Freebsd_Openat(parent, name, syscall.Freebsd_O_NOFOLLOW|syscall.Freebsd_O_CLOEXEC, 0)
+			if freebsd_isNoFollowErr(err) {
 				err = freebsd_checkSymlink(parent, name, err)
 			}
 			return err
@@ -78,20 +83,20 @@ func freebsd_openRootInRoot(r *Root, name string) (*Root, error) {
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	return freebsd_newRoot(fd, joinPath(r.Name(), name))
+	return freebsd_newRoot(fd, freebsd_joinPath(r.Name(), name))
 }
 
 // rootOpenFileNolog is Root.OpenFile.
-func freebsd_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
-	fd, err := doInRoot(root, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
-		ignoringEINTR(func() error {
+func freebsd_rootOpenFileNolog(root *Freebsd_Root, name string, flag int, perm FileMode) (*Freebsd_File, error) {
+	fd, err := freebsd_doInRoot(root, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
+		freebsd_ignoringEINTR(func() error {
 			openFlag := syscall.Freebsd_O_NOFOLLOW | syscall.Freebsd_O_CLOEXEC | flag
-			fd, err = unix.Openat(parent, name, openFlag, uint32(perm))
+			fd, err = unix.Freebsd_Openat(parent, name, openFlag, uint32(perm))
 			if err != nil {
 				// Never follow symlinks when O_CREATE|O_EXCL, no matter
 				// what error the OS returns.
 				isCreateExcl := flag&(Freebsd_O_CREATE|Freebsd_O_EXCL) == (Freebsd_O_CREATE | Freebsd_O_EXCL)
-				if !isCreateExcl && (isNoFollowErr(err) || err == syscall.Freebsd_ENOTDIR) {
+				if !isCreateExcl && (freebsd_isNoFollowErr(err) || err == syscall.Freebsd_ENOTDIR) {
 					err = freebsd_checkSymlink(parent, name, err)
 				}
 				// AIX returns ELOOP instead of EEXIST for a dangling symlink.
@@ -107,7 +112,7 @@ func freebsd_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode)
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	f := freebsd_newFile(fd, joinPath(root.Name(), name), freebsd_kindOpenFile, unix.Freebsd_HasNonblockFlag(flag))
+	f := freebsd_newFile(fd, freebsd_joinPath(root.Name(), name), freebsd_kindOpenFile, unix.Freebsd_HasNonblockFlag(flag))
 	f.inRoot = true
 	return f, nil
 }
@@ -117,9 +122,9 @@ func freebsd_rootOpenDir(parent int, name string) (int, error) {
 		fd  int
 		err error
 	)
-	ignoringEINTR(func() error {
-		fd, err = unix.Openat(parent, name, syscall.Freebsd_O_NOFOLLOW|syscall.Freebsd_O_CLOEXEC|syscall.Freebsd_O_DIRECTORY, 0)
-		if isNoFollowErr(err) || err == syscall.Freebsd_ENOTDIR {
+	freebsd_ignoringEINTR(func() error {
+		fd, err = unix.Freebsd_Openat(parent, name, syscall.Freebsd_O_NOFOLLOW|syscall.Freebsd_O_CLOEXEC|syscall.Freebsd_O_DIRECTORY, 0)
+		if freebsd_isNoFollowErr(err) || err == syscall.Freebsd_ENOTDIR {
 			err = freebsd_checkSymlink(parent, name, err)
 		} else if err == syscall.Freebsd_ENOTSUP || err == syscall.Freebsd_EOPNOTSUPP {
 			// ENOTSUP and EOPNOTSUPP are often, but not always, the same errno.
@@ -132,8 +137,8 @@ func freebsd_rootOpenDir(parent int, name string) (int, error) {
 	return fd, err
 }
 
-func freebsd_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
-	fi, err := doInRoot(r, name, 0, nil, func(parent sysfdType, n string, endsInSlash bool) (FileInfo, error) {
+func freebsd_rootStat(r *Freebsd_Root, name string, lstat bool) (FileInfo, error) {
+	fi, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, n string, endsInSlash bool) (FileInfo, error) {
 		fi, err := freebsd_lstatatWithName(parent, name, n)
 		if err != nil {
 			return nil, err
@@ -149,8 +154,8 @@ func freebsd_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
 	return fi, nil
 }
 
-func freebsd_rootSymlink(r *Root, oldname, newname string) error {
-	_, err := doInRoot(r, newname, 0, nil, func(parent sysfdType, name string, endsInSlash bool) (struct{}, error) {
+func freebsd_rootSymlink(r *Freebsd_Root, oldname, newname string) error {
+	_, err := freebsd_doInRoot(r, newname, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_symlinkat(oldname, parent, name)
 	})
 	if err != nil {
@@ -179,52 +184,52 @@ func freebsd_afterResolvingSymlink(parent int, name string, f func() error) erro
 
 func freebsd_chmodat(parent int, name string, mode FileMode) error {
 	return freebsd_afterResolvingSymlink(parent, name, func() error {
-		return ignoringEINTR(func() error {
-			return unix.Freebsd_Fchmodat(parent, name, syscallMode(mode), unix.Freebsd_AT_SYMLINK_NOFOLLOW)
+		return freebsd_ignoringEINTR(func() error {
+			return unix.Freebsd_Fchmodat(parent, name, freebsd_syscallMode(mode), unix.Freebsd_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func freebsd_chownat(parent int, name string, uid, gid int) error {
 	return freebsd_afterResolvingSymlink(parent, name, func() error {
-		return ignoringEINTR(func() error {
-			return unix.Fchownat(parent, name, uid, gid, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
+		return freebsd_ignoringEINTR(func() error {
+			return unix.Freebsd_Fchownat(parent, name, uid, gid, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func freebsd_lchownat(parent int, name string, uid, gid int) error {
-	return ignoringEINTR(func() error {
-		return unix.Fchownat(parent, name, uid, gid, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
+	return freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Fchownat(parent, name, uid, gid, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
 	})
 }
 
 func freebsd_chtimesat(parent int, name string, atime time.Time, mtime time.Time) error {
 	return freebsd_afterResolvingSymlink(parent, name, func() error {
-		return ignoringEINTR(func() error {
-			utimes := chtimesUtimes(atime, mtime)
+		return freebsd_ignoringEINTR(func() error {
+			utimes := freebsd_chtimesUtimes(atime, mtime)
 			return unix.Freebsd_Utimensat(parent, name, &utimes, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func freebsd_mkdirat(fd int, name string, perm FileMode) error {
-	return ignoringEINTR(func() error {
-		return unix.Mkdirat(fd, name, syscallMode(perm))
+	return freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Mkdirat(fd, name, freebsd_syscallMode(perm))
 	})
 }
 
 func freebsd_removeat(fd int, name string) error {
 	// The system call interface forces us to know whether
 	// we are removing a file or directory. Try both.
-	e := ignoringEINTR(func() error {
-		return unix.Unlinkat(fd, name, 0)
+	e := freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Unlinkat(fd, name, 0)
 	})
 	if e == nil {
 		return nil
 	}
-	e1 := ignoringEINTR(func() error {
-		return unix.Unlinkat(fd, name, unix.Freebsd_AT_REMOVEDIR)
+	e1 := freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Unlinkat(fd, name, unix.Freebsd_AT_REMOVEDIR)
 	})
 	if e1 == nil {
 		return nil
@@ -237,27 +242,27 @@ func freebsd_removeat(fd int, name string) error {
 }
 
 func freebsd_removefileat(fd int, name string) error {
-	return ignoringEINTR(func() error {
-		return unix.Unlinkat(fd, name, 0)
+	return freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Unlinkat(fd, name, 0)
 	})
 }
 
 func freebsd_removedirat(fd int, name string) error {
-	return ignoringEINTR(func() error {
-		return unix.Unlinkat(fd, name, unix.Freebsd_AT_REMOVEDIR)
+	return freebsd_ignoringEINTR(func() error {
+		return unix.Freebsd_Unlinkat(fd, name, unix.Freebsd_AT_REMOVEDIR)
 	})
 }
 
 func freebsd_renameat(oldfd int, oldname string, newfd int, newname string) error {
-	return unix.Renameat(oldfd, oldname, newfd, newname)
+	return unix.Freebsd_Renameat(oldfd, oldname, newfd, newname)
 }
 
 func freebsd_linkat(oldfd int, oldname string, newfd int, newname string) error {
-	return unix.Linkat(oldfd, oldname, newfd, newname, 0)
+	return unix.Freebsd_Linkat(oldfd, oldname, newfd, newname, 0)
 }
 
 func freebsd_symlinkat(oldname string, newfd int, newname string) error {
-	return unix.Symlinkat(oldname, newfd, newname)
+	return unix.Freebsd_Symlinkat(oldname, newfd, newname)
 }
 
 func freebsd_lstatat(parent int, name string) (FileInfo, error) {
@@ -292,8 +297,8 @@ func freebsd_readlinkat(fd int, name string) (string, error) {
 			n int
 			e error
 		)
-		ignoringEINTR(func() error {
-			n, e = unix.Readlinkat(fd, name, b)
+		freebsd_ignoringEINTR(func() error {
+			n, e = unix.Freebsd_Readlinkat(fd, name, b)
 			return e
 		})
 		if e == syscall.Freebsd_ERANGE {

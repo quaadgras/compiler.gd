@@ -22,7 +22,7 @@ func freebsd_pidfdFind(_ int) (uintptr, error) {
 	return 0, syscall.Freebsd_ENOSYS
 }
 
-func (_ *Process) freebsd_pidfdWait() (*ProcessState, error) {
+func (_ *Process) freebsd_pidfdWait() (*Freebsd_ProcessState, error) {
 	panic("unreachable")
 }
 

@@ -13,7 +13,7 @@ import (
 	"internal/syscall/unix"
 	"io/fs"
 	"runtime"
-
+	"sync/atomic"
 	"syscall"
 	_ "unsafe" // for go:linkname
 )
@@ -47,7 +47,7 @@ func freebsd_rename(oldname, newname string) error {
 			return &LinkError{"rename", oldname, newname, syscall.Freebsd_EEXIST}
 		}
 	}
-	err = ignoringEINTR(func() error {
+	err = freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Rename(oldname, newname)
 	})
 	if err != nil {
@@ -56,8 +56,23 @@ func freebsd_rename(oldname, newname string) error {
 	return nil
 }
 
+// file is the real representation of *File.
+// The extra level of indirection ensures that no clients of os
+// can overwrite this data, which could cause the finalizer
+// to close the wrong file descriptor.
+type freebsd_file struct {
+	pfd         poll.Freebsd_FD
+	name        string
+	dirinfo     atomic.Pointer[freebsd_dirInfo] // nil unless directory being read
+	nonblock    bool                            // whether we set nonblocking mode
+	stdoutOrErr bool                            // whether this is stdout or stderr
+	appendMode  bool                            // whether file is opened for appending
+	inRoot      bool                            // whether file is opened in a Root
+	cleanup     runtime.Cleanup                 // closes the descriptor, if noFinalizers
+}
+
 // fd is the Unix implementation of Fd.
-func (f *File) freebsd_fd() uintptr {
+func (f *Freebsd_File) fd() uintptr {
 	if f == nil {
 		return ^(uintptr(0))
 	}
@@ -68,14 +83,14 @@ func (f *File) freebsd_fd() uintptr {
 	// opened in blocking mode. The File will continue to work,
 	// but any blocking operation will tie up a thread.
 	if f.nonblock {
-		f.pfd.Freebsd_SetBlocking()
+		f.pfd.SetBlocking()
 	}
 
 	return uintptr(f.pfd.Sysfd)
 }
 
 // newFileFromNewFile is called by [NewFile].
-func freebsd_newFileFromNewFile(fd uintptr, name string) *File {
+func freebsd_newFileFromNewFile(fd uintptr, name string) *Freebsd_File {
 	fdi := int(fd)
 	if fdi < 0 {
 		return nil
@@ -100,7 +115,7 @@ func freebsd_newFileFromNewFile(fd uintptr, name string) *File {
 // retain that behavior because existing code expects it and depends on it.
 //
 // (apegen: zape_dispatch pushes net.newUnixFile)
-func freebsd_net_newUnixFile(fd int, name string) *File {
+func freebsd_net_newUnixFile(fd int, name string) *Freebsd_File {
 	if fd < 0 {
 		panic("invalid FD")
 	}
@@ -128,9 +143,9 @@ const (
 // newFile is like NewFile, but if called from OpenFile or Pipe
 // (as passed in the kind parameter) it tries to add the file to
 // the runtime poller.
-func freebsd_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *File {
-	f := &File{&file{
-		pfd: poll.FD{
+func freebsd_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *Freebsd_File {
+	f := &Freebsd_File{&freebsd_file{
+		pfd: poll.Freebsd_FD{
 			Sysfd:         fd,
 			IsStream:      true,
 			ZeroReadIsEOF: true,
@@ -153,7 +168,7 @@ func freebsd_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *F
 		switch "freebsd" {
 		case "darwin", "ios", "dragonfly", "freebsd", "netbsd", "openbsd":
 			var st syscall.Freebsd_Stat_t
-			err := ignoringEINTR(func() error {
+			err := freebsd_ignoringEINTR(func() error {
 				return syscall.Freebsd_Fstat(fd, &st)
 			})
 			typ := st.Mode & syscall.Freebsd_S_IFMT
@@ -203,7 +218,7 @@ func freebsd_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *F
 	// Linux systems. We assume that any real error
 	// will show up in later I/O.
 	// We do restore the blocking behavior if it was set by us.
-	if pollErr := f.pfd.Freebsd_Init("file", pollable); pollErr != nil && clearNonBlock {
+	if pollErr := f.pfd.Init("file", pollable); pollErr != nil && clearNonBlock {
 		if err := syscall.Freebsd_SetNonblock(fd, false); err == nil {
 			f.nonblock = false
 		}
@@ -212,9 +227,9 @@ func freebsd_newFile(fd int, name string, kind newFileKind, nonBlocking bool) *F
 	if noFinalizers {
 		// Without finalizers, a cleanup closes the descriptor. (There is
 		// no poller to tell, and the directory buffer goes with the file.)
-		f.cleanup = runtime.AddCleanup(f.file, freebsd_closeFD, fd)
+		f.cleanup = runtime.AddCleanup(f.freebsd_file, freebsd_closeFD, fd)
 	} else {
-		runtime.SetFinalizer(f.file, (*file).freebsd_close)
+		runtime.SetFinalizer(f.freebsd_file, (*freebsd_file).close)
 	}
 	return f
 }
@@ -229,7 +244,7 @@ func freebsd_sigpipe() // implemented in package runtime
 // epipecheck raises SIGPIPE if we get an EPIPE error on standard
 // output or standard error. See the SIGPIPE docs in os/signal, and
 // issue 11845.
-func freebsd_epipecheck(file *File, e error) {
+func freebsd_epipecheck(file *Freebsd_File, e error) {
 	if e == syscall.Freebsd_EPIPE && file.stdoutOrErr {
 		freebsd_sigpipe()
 	}
@@ -241,7 +256,7 @@ const Freebsd_DevNull = "/dev/null"
 
 // openFileNolog is the Unix implementation of OpenFile.
 // Changes here should be reflected in openDirAt and openDirNolog, if relevant.
-func freebsd_openFileNolog(name string, flag int, perm FileMode) (*File, error) {
+func freebsd_openFileNolog(name string, flag int, perm FileMode) (*Freebsd_File, error) {
 	setSticky := false
 	if !freebsd_supportsCreateWithStickyBit && flag&Freebsd_O_CREATE != 0 && perm&Freebsd_ModeSticky != 0 {
 		if _, err := Stat(name); IsNotExist(err) {
@@ -251,12 +266,12 @@ func freebsd_openFileNolog(name string, flag int, perm FileMode) (*File, error) 
 
 	var (
 		r int
-		s poll.SysFile
+		s poll.Freebsd_SysFile
 		e error
 	)
 	// We have to check EINTR here, per issues 11180 and 39237.
-	ignoringEINTR(func() error {
-		r, s, e = open(name, flag|syscall.Freebsd_O_CLOEXEC, syscallMode(perm))
+	freebsd_ignoringEINTR(func() error {
+		r, s, e = freebsd_open(name, flag|syscall.Freebsd_O_CLOEXEC, freebsd_syscallMode(perm))
 		return e
 	})
 	if e != nil {
@@ -270,47 +285,47 @@ func freebsd_openFileNolog(name string, flag int, perm FileMode) (*File, error) 
 
 	// There's a race here with fork/exec, which we are
 	// content to live with. See ../syscall/exec_unix.go.
-	if !supportsCloseOnExec {
+	if !freebsd_supportsCloseOnExec {
 		syscall.Freebsd_CloseOnExec(r)
 	}
 
 	f := freebsd_newFile(r, name, freebsd_kindOpenFile, unix.Freebsd_HasNonblockFlag(flag))
-	f.pfd.SysFile = s
+	f.pfd.Freebsd_SysFile = s
 	return f, nil
 }
 
-func freebsd_openDirNolog(name string) (*File, error) {
+func freebsd_openDirNolog(name string) (*Freebsd_File, error) {
 	var (
 		r int
-		s poll.SysFile
+		s poll.Freebsd_SysFile
 		e error
 	)
-	ignoringEINTR(func() error {
-		r, s, e = open(name, Freebsd_O_RDONLY|syscall.Freebsd_O_CLOEXEC|syscall.Freebsd_O_DIRECTORY, 0)
+	freebsd_ignoringEINTR(func() error {
+		r, s, e = freebsd_open(name, Freebsd_O_RDONLY|syscall.Freebsd_O_CLOEXEC|syscall.Freebsd_O_DIRECTORY, 0)
 		return e
 	})
 	if e != nil {
 		return nil, &PathError{Op: "open", Path: name, Err: e}
 	}
 
-	if !supportsCloseOnExec {
+	if !freebsd_supportsCloseOnExec {
 		syscall.Freebsd_CloseOnExec(r)
 	}
 
 	f := freebsd_newFile(r, name, freebsd_kindNoPoll, false)
-	f.pfd.SysFile = s
+	f.pfd.Freebsd_SysFile = s
 	return f, nil
 }
 
-func (file *file) freebsd_close() error {
+func (file *freebsd_file) close() error {
 	if file == nil {
 		return syscall.Freebsd_EINVAL
 	}
 	if info := file.dirinfo.Swap(nil); info != nil {
-		info.freebsd_close()
+		info.close()
 	}
 	var err error
-	if e := file.pfd.Freebsd_Close(); e != nil {
+	if e := file.pfd.Close(); e != nil {
 		if e == poll.ErrFileClosing {
 			e = ErrClosed
 		}
@@ -327,11 +342,11 @@ func (file *file) freebsd_close() error {
 // according to whence: 0 means relative to the origin of the file, 1 means
 // relative to the current offset, and 2 means relative to the end.
 // It returns the new offset and an error, if any.
-func (f *File) freebsd_seek(offset int64, whence int) (ret int64, err error) {
+func (f *Freebsd_File) seek(offset int64, whence int) (ret int64, err error) {
 	if info := f.dirinfo.Swap(nil); info != nil {
 		// Free cached dirinfo, so we allocate a new one if we
 		// access this file as a directory again. See #35767 and #37161.
-		info.freebsd_close()
+		info.close()
 	}
 	ret, err = f.pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
@@ -342,7 +357,7 @@ func (f *File) freebsd_seek(offset int64, whence int) (ret int64, err error) {
 // If the file is a symbolic link, it changes the size of the link's target.
 // If there is an error, it will be of type [*PathError].
 func Freebsd_Truncate(name string, size int64) error {
-	e := ignoringEINTR(func() error {
+	e := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Truncate(name, size)
 	})
 	if e != nil {
@@ -358,13 +373,13 @@ func Freebsd_Remove(name string) error {
 	// whether name is a file or directory.
 	// Try both: it is cheaper on average than
 	// doing a Stat plus the right one.
-	e := ignoringEINTR(func() error {
+	e := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Unlink(name)
 	})
 	if e == nil {
 		return nil
 	}
-	e1 := ignoringEINTR(func() error {
+	e1 := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Rmdir(name)
 	})
 	if e1 == nil {
@@ -401,7 +416,7 @@ func freebsd_tempDir() string {
 // Link creates newname as a hard link to the oldname file.
 // If there is an error, it will be of type *LinkError.
 func Freebsd_Link(oldname, newname string) error {
-	e := ignoringEINTR(func() error {
+	e := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Link(oldname, newname)
 	})
 	if e != nil {
@@ -415,7 +430,7 @@ func Freebsd_Link(oldname, newname string) error {
 // if oldname is later created as a directory the symlink will not work.
 // If there is an error, it will be of type *LinkError.
 func Freebsd_Symlink(oldname, newname string) error {
-	e := ignoringEINTR(func() error {
+	e := freebsd_ignoringEINTR(func() error {
 		return syscall.Freebsd_Symlink(oldname, newname)
 	})
 	if e != nil {
@@ -427,7 +442,7 @@ func Freebsd_Symlink(oldname, newname string) error {
 func freebsd_readlink(name string) (string, error) {
 	for len := 128; ; len *= 2 {
 		b := make([]byte, len)
-		n, err := ignoringEINTR2(func() (int, error) {
+		n, err := freebsd_ignoringEINTR2(func() (int, error) {
 			return freebsd_fixCount(syscall.Freebsd_Readlink(name, b))
 		})
 		// buffer too small
@@ -443,23 +458,30 @@ func freebsd_readlink(name string) (string, error) {
 	}
 }
 
-func (d *unixDirent) Freebsd_Name() string   { return d.name }
-func (d *unixDirent) Freebsd_IsDir() bool    { return d.typ.IsDir() }
-func (d *unixDirent) Freebsd_Type() FileMode { return d.typ }
+type freebsd_unixDirent struct {
+	parent string
+	name   string
+	typ    FileMode
+	info   FileInfo
+}
 
-func (d *unixDirent) Freebsd_Info() (FileInfo, error) {
+func (d *freebsd_unixDirent) Name() string   { return d.name }
+func (d *freebsd_unixDirent) IsDir() bool    { return d.typ.IsDir() }
+func (d *freebsd_unixDirent) Type() FileMode { return d.typ }
+
+func (d *freebsd_unixDirent) Info() (FileInfo, error) {
 	if d.info != nil {
 		return d.info, nil
 	}
 	return Lstat(d.parent + "/" + d.name)
 }
 
-func (d *unixDirent) Freebsd_String() string {
+func (d *freebsd_unixDirent) String() string {
 	return fs.FormatDirEntry(d)
 }
 
-func freebsd_newUnixDirent(parent *File, name string, typ FileMode) (DirEntry, error) {
-	ude := &unixDirent{
+func freebsd_newUnixDirent(parent *Freebsd_File, name string, typ FileMode) (DirEntry, error) {
+	ude := &freebsd_unixDirent{
 		parent: parent.name,
 		name:   name,
 		typ:    typ,

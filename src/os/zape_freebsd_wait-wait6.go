@@ -19,7 +19,7 @@ var _ = runtime.GOARCH
 // succeed immediately, and reports whether it has done so.
 // It does not actually call p.Wait.
 func (p *Process) freebsd_blockUntilWaitable() (bool, error) {
-	err := ignoringEINTR(func() error {
+	err := freebsd_ignoringEINTR(func() error {
 		_, errno := freebsd_wait6(freebsd__P_PID, p.Pid, syscall.Freebsd_WEXITED|syscall.Freebsd_WNOWAIT)
 		if errno != 0 {
 			return errno

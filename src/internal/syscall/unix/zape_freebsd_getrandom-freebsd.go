@@ -13,8 +13,8 @@ const freebsd_getrandomTrap uintptr = 563
 
 const (
 	// GRND_NONBLOCK means return EAGAIN rather than blocking.
-	Freebsd_GRND_NONBLOCK GetRandomFlag = 0x0001
+	Freebsd_GRND_NONBLOCK Freebsd_GetRandomFlag = 0x0001
 
 	// GRND_RANDOM is only set for portability purpose, no-op on FreeBSD.
-	Freebsd_GRND_RANDOM GetRandomFlag = 0x0002
+	Freebsd_GRND_RANDOM Freebsd_GetRandomFlag = 0x0002
 )

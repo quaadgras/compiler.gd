@@ -9,14 +9,17 @@
 package os
 
 import (
+	"internal/poll"
 	"io"
 )
 
-func (f *File) freebsd_writeTo(w io.Writer) (written int64, handled bool, err error) {
+var freebsd_pollCopyFileRange = poll.Freebsd_CopyFileRange
+
+func (f *Freebsd_File) writeTo(w io.Writer) (written int64, handled bool, err error) {
 	return 0, false, nil
 }
 
-func (f *File) freebsd_readFrom(r io.Reader) (written int64, handled bool, err error) {
+func (f *Freebsd_File) readFrom(r io.Reader) (written int64, handled bool, err error) {
 	// copy_file_range(2) doesn't support destinations opened with
 	// O_APPEND, so don't bother to try zero-copy with these system calls.
 	//
@@ -33,12 +36,12 @@ func (f *File) freebsd_readFrom(r io.Reader) (written int64, handled bool, err e
 		return 0, true, nil
 	}
 
-	var src *File
+	var src *Freebsd_File
 	switch v := r.(type) {
-	case *File:
+	case *Freebsd_File:
 		src = v
-	case fileWithoutWriteTo:
-		src = v.File
+	case freebsd_fileWithoutWriteTo:
+		src = v.Freebsd_File
 	default:
 		return 0, false, nil
 	}
@@ -49,7 +52,7 @@ func (f *File) freebsd_readFrom(r io.Reader) (written int64, handled bool, err e
 		return 0, false, nil
 	}
 
-	written, handled, err = pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = freebsd_pollCopyFileRange(&f.pfd, &src.pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}

@@ -16,8 +16,8 @@ import (
 
 const linux__SO_TYPE = syscall.Linux_SO_TYPE
 
-func linux_dupFileSocket(f *os.File) (int, error) {
-	s, call, err := poll.Linux_DupCloseOnExec(int(f.Linux_Fd()))
+func linux_dupFileSocket(f *os.Linux_File) (int, error) {
+	s, call, err := poll.Linux_DupCloseOnExec(int(f.Fd()))
 	if err != nil {
 		if call != "" {
 			err = os.NewSyscallError(call, err)
@@ -25,7 +25,7 @@ func linux_dupFileSocket(f *os.File) (int, error) {
 		return -1, err
 	}
 	if err := syscall.Linux_SetNonblock(s, true); err != nil {
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		return -1, os.NewSyscallError("setnonblock", err)
 	}
 	return s, nil

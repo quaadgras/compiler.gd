@@ -12,7 +12,7 @@ import "internal/syscall/unix"
 
 // CopyFileRange copies at most remain bytes of data from src to dst, using
 // the copy_file_range system call. dst and src must refer to regular files.
-func Linux_CopyFileRange(dst, src *FD, remain int64) (written int64, handled bool, err error) {
+func Linux_CopyFileRange(dst, src *Linux_FD, remain int64) (written int64, handled bool, err error) {
 	if !linux_supportCopyFileRange() {
 		return 0, false, nil
 	}
@@ -34,7 +34,7 @@ func Linux_CopyFileRange(dst, src *FD, remain int64) (written int64, handled boo
 }
 
 // copyFileRange performs one round of copy_file_range(2).
-func linux_copyFileRange(dst, src *FD, max int) (written int64, err error) {
+func linux_copyFileRange(dst, src *Linux_FD, max int) (written int64, err error) {
 	// For Linux, the signature of copy_file_range(2) is:
 	//
 	// ssize_t copy_file_range(int fd_in, loff_t *off_in,
@@ -62,8 +62,8 @@ func linux_copyFileRange(dst, src *FD, max int) (written int64, err error) {
 		return 0, err
 	}
 	defer src.readUnlock()
-	return ignoringEINTR2(func() (int64, error) {
-		n, err := unix.CopyFileRange(src.Sysfd, nil, dst.Sysfd, nil, max, 0)
+	return linux_ignoringEINTR2(func() (int64, error) {
+		n, err := unix.Linux_CopyFileRange(src.Sysfd, nil, dst.Sysfd, nil, max, 0)
 		return int64(n), err
 	})
 }

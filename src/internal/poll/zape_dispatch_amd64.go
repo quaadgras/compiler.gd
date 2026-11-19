@@ -5,8 +5,9 @@
 package poll
 
 import (
-	"sync/atomic"
+	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -18,225 +19,756 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
-type FD struct {
-	fdmu  fdMutex
-	Sysfd int
-	SysFile
-	pd            pollDesc
-	csema         uint32
-	isBlocking    uint32
-	IsStream      bool
-	ZeroReadIsEOF bool
-	isFile        bool
+type fdMutex struct {
+	state uint64
+	rsema uint32
+	wsema uint32
 }
 
-var dupCloexecUnsupported atomic.Bool
+type pollDesc struct{ runtimeCtx uintptr }
 
-func CopyFileRange(a0 *FD, a1 *FD, a2 int64) (int64, bool, error) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_CopyFileRange(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_CopyFileRange(a0, a1, a2)
-	return x0, x1, x2
-}
+var serverInit sync.Once
+
+const waitLock = true
 
 func DupCloseOnExec(a0 int) (int, string, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_DupCloseOnExec(a0)
 		return x0, x1, x2
 	}
-	x0, x1, x2 := Freebsd_DupCloseOnExec(a0)
+	if apehost == apeFreebsd {
+		x0, x1, x2 := Freebsd_DupCloseOnExec(a0)
+		return x0, x1, x2
+	}
+	x0, x1, x2 := Windows_DupCloseOnExec(a0)
 	return x0, x1, x2
 }
 
-func ignoringEINTRIO(a0 func(fd int, p []byte) (int, error), a1 int, a2 []byte) (int, error) {
+//go:linkname IsPollDescriptor
+func IsPollDescriptor(a0 uintptr) bool {
 	if apehost == apeLinux {
-		x0, x1 := linux_ignoringEINTRIO(a0, a1, a2)
-		return x0, x1
+		x0 := Linux_IsPollDescriptor(a0)
+		return x0
 	}
-	x0, x1 := freebsd_ignoringEINTRIO(a0, a1, a2)
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0 := Freebsd_IsPollDescriptor(a0)
+		return x0
+	}
+	x0 := Windows_IsPollDescriptor(a0)
+	return x0
 }
 
-func writev(a0 int, a1 []syscall.Iovec) (uintptr, error) {
+func SendFile(a0 *FD, a1 uintptr, a2 int64) (int64, error, bool) {
 	if apehost == apeLinux {
-		x0, x1 := linux_writev(a0, a1)
-		return x0, x1
+		x0, x1, x2 := Linux_SendFile((*Linux_FD)(unsafe.Pointer(a0)), a1, a2)
+		return x0, x1, x2
 	}
-	x0, x1 := freebsd_writev(a0, a1)
-	return x0, x1
-}
-
-func (r *FD) Accept() (int, syscall.Sockaddr, string, error) {
-	if apehost == apeLinux {
-		x0, x1, x2, x3 := r.Linux_Accept()
-		return x0, x1, x2, x3
+	if apehost == apeFreebsd {
+		x0, x1, x2 := Freebsd_SendFile((*Freebsd_FD)(unsafe.Pointer(a0)), a1, a2)
+		return x0, x1, x2
 	}
-	x0, x1, x2, x3 := r.Freebsd_Accept()
-	return x0, x1, x2, x3
+	x0, x1, x2 := Windows_SendFile((*Windows_FD)(unsafe.Pointer(a0)), a1, a2)
+	return x0, x1, x2
 }
 
 func (r *FD) Close() error {
 	if apehost == apeLinux {
-		x0 := r.Linux_Close()
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Close()
 		return x0
 	}
-	x0 := r.Freebsd_Close()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Close()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Close()
 	return x0
 }
 
-func (r *FD) Dup() (int, string, error) {
+func (r *FD) Fchdir() error {
 	if apehost == apeLinux {
-		x0, x1, x2 := r.Linux_Dup()
-		return x0, x1, x2
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Fchdir()
+		return x0
 	}
-	x0, x1, x2 := r.Freebsd_Dup()
-	return x0, x1, x2
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Fchdir()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Fchdir()
+	return x0
 }
 
 func (r *FD) Fchmod(a0 uint32) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_Fchmod(a0)
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Fchmod(a0)
 		return x0
 	}
-	x0 := r.Freebsd_Fchmod(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Fchmod(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Fchmod(a0)
 	return x0
+}
+
+func (r *FD) Fchown(a0 int, a1 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Fchown(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Fchown(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Fchown(a0, a1)
+	return x0
+}
+
+func (r *FD) Fsync() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Fsync()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Fsync()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Fsync()
+	return x0
+}
+
+func (r *FD) Ftruncate(a0 int64) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Ftruncate(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Ftruncate(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Ftruncate(a0)
+	return x0
+}
+
+func (r *FD) GetsockoptInt(a0 int, a1 int) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).GetsockoptInt(a0, a1)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).GetsockoptInt(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).GetsockoptInt(a0, a1)
+	return x0, x1
 }
 
 func (r *FD) Init(a0 string, a1 bool) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_Init(a0, a1)
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Init(a0, a1)
 		return x0
 	}
-	x0 := r.Freebsd_Init(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Init(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Init(a0, a1)
 	return x0
 }
 
 func (r *FD) Pread(a0 []byte, a1 int64) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Pread(a0, a1)
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Pread(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Pread(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Pread(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Pread(a0, a1)
 	return x0, x1
 }
 
 func (r *FD) Pwrite(a0 []byte, a1 int64) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Pwrite(a0, a1)
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Pwrite(a0, a1)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Pwrite(a0, a1)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Pwrite(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Pwrite(a0, a1)
 	return x0, x1
+}
+
+func (r *FD) RawControl(a0 func(uintptr)) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).RawControl(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).RawControl(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).RawControl(a0)
+	return x0
 }
 
 func (r *FD) RawRead(a0 func(uintptr) bool) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_RawRead(a0)
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).RawRead(a0)
 		return x0
 	}
-	x0 := r.Freebsd_RawRead(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).RawRead(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).RawRead(a0)
 	return x0
 }
 
 func (r *FD) RawWrite(a0 func(uintptr) bool) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_RawWrite(a0)
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).RawWrite(a0)
 		return x0
 	}
-	x0 := r.Freebsd_RawWrite(a0)
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).RawWrite(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).RawWrite(a0)
 	return x0
 }
 
 func (r *FD) Read(a0 []byte) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Read(a0)
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Read(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Read(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Read(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Read(a0)
 	return x0, x1
 }
 
-func (r *FD) ReadFrom(a0 []byte) (int, syscall.Sockaddr, error) {
+func (r *FD) Seek(a0 int64, a1 int) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1, x2 := r.Linux_ReadFrom(a0)
-		return x0, x1, x2
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Seek(a0, a1)
+		return x0, x1
 	}
-	x0, x1, x2 := r.Freebsd_ReadFrom(a0)
-	return x0, x1, x2
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Seek(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Seek(a0, a1)
+	return x0, x1
 }
 
-func (r *FD) ReadMsg(a0 []byte, a1 []byte, a2 int) (int, int, int, syscall.Sockaddr, error) {
+func (r *FD) SetDeadline(a0 time.Time) error {
 	if apehost == apeLinux {
-		x0, x1, x2, x3, x4 := r.Linux_ReadMsg(a0, a1, a2)
-		return x0, x1, x2, x3, x4
-	}
-	x0, x1, x2, x3, x4 := r.Freebsd_ReadMsg(a0, a1, a2)
-	return x0, x1, x2, x3, x4
-}
-
-func (r *FD) SetBlocking() error {
-	if apehost == apeLinux {
-		x0 := r.Linux_SetBlocking()
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetDeadline(a0)
 		return x0
 	}
-	x0 := r.Freebsd_SetBlocking()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetDeadline(a0)
 	return x0
 }
 
-func (r *FD) WaitWrite() error {
+func (r *FD) SetReadDeadline(a0 time.Time) error {
 	if apehost == apeLinux {
-		x0 := r.Linux_WaitWrite()
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetReadDeadline(a0)
 		return x0
 	}
-	x0 := r.Freebsd_WaitWrite()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetReadDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetReadDeadline(a0)
+	return x0
+}
+
+func (r *FD) SetWriteDeadline(a0 time.Time) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetWriteDeadline(a0)
+	return x0
+}
+
+func (r *FD) SetsockoptIPMreq(a0 int, a1 int, a2 *syscall.IPMreq) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetsockoptIPMreq(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetsockoptIPMreq(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetsockoptIPMreq(a0, a1, a2)
+	return x0
+}
+
+func (r *FD) SetsockoptIPv6Mreq(a0 int, a1 int, a2 *syscall.IPv6Mreq) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetsockoptIPv6Mreq(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetsockoptIPv6Mreq(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetsockoptIPv6Mreq(a0, a1, a2)
+	return x0
+}
+
+func (r *FD) SetsockoptInet4Addr(a0 int, a1 int, a2 [4]byte) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetsockoptInet4Addr(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetsockoptInet4Addr(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetsockoptInet4Addr(a0, a1, a2)
+	return x0
+}
+
+func (r *FD) SetsockoptInt(a0 int, a1 int, a2 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetsockoptInt(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetsockoptInt(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetsockoptInt(a0, a1, a2)
+	return x0
+}
+
+func (r *FD) SetsockoptLinger(a0 int, a1 int, a2 *syscall.Linger) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).SetsockoptLinger(a0, a1, a2)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).SetsockoptLinger(a0, a1, a2)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).SetsockoptLinger(a0, a1, a2)
+	return x0
+}
+
+func (r *FD) Shutdown(a0 int) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).Shutdown(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).Shutdown(a0)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).Shutdown(a0)
 	return x0
 }
 
 func (r *FD) Write(a0 []byte) (int, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Write(a0)
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Write(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Write(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Write(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Write(a0)
 	return x0, x1
 }
 
-func (r *FD) WriteMsg(a0 []byte, a1 []byte, a2 syscall.Sockaddr) (int, int, error) {
+func (r *FD) Writev(a0 *[][]byte) (int64, error) {
 	if apehost == apeLinux {
-		x0, x1, x2 := r.Linux_WriteMsg(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := r.Freebsd_WriteMsg(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func (r *FD) WriteOnce(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_WriteOnce(a0)
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).Writev(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_WriteOnce(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).Writev(a0)
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).Writev(a0)
 	return x0, x1
 }
 
-func (r *FD) WriteTo(a0 []byte, a1 syscall.Sockaddr) (int, error) {
+func (r *FD) closing() bool {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_WriteTo(a0, a1)
-		return x0, x1
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).closing()
+		return x0
 	}
-	x0, x1 := r.Freebsd_WriteTo(a0, a1)
-	return x0, x1
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).closing()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).closing()
+	return x0
+}
+
+func (r *FD) decref() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).decref()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).decref()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).decref()
+	return x0
 }
 
 func (r *FD) destroy() error {
 	if apehost == apeLinux {
-		x0 := r.linux_destroy()
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).destroy()
 		return x0
 	}
-	x0 := r.freebsd_destroy()
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).destroy()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).destroy()
 	return x0
 }
+
+func (r *FD) eofError(a0 int, a1 error) error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).eofError(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).eofError(a0, a1)
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).eofError(a0, a1)
+	return x0
+}
+
+func (r *FD) incref() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).incref()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).incref()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).incref()
+	return x0
+}
+
+func (r *FD) readLock() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).readLock()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).readLock()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).readLock()
+	return x0
+}
+
+func (r *FD) readUnlock() {
+	if apehost == apeLinux {
+		((*Linux_FD)(unsafe.Pointer(r))).readUnlock()
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_FD)(unsafe.Pointer(r))).readUnlock()
+		return
+	}
+	((*Windows_FD)(unsafe.Pointer(r))).readUnlock()
+}
+
+func (r *FD) readWriteLock() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).readWriteLock()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).readWriteLock()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).readWriteLock()
+	return x0
+}
+
+func (r *FD) readWriteUnlock() {
+	if apehost == apeLinux {
+		((*Linux_FD)(unsafe.Pointer(r))).readWriteUnlock()
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_FD)(unsafe.Pointer(r))).readWriteUnlock()
+		return
+	}
+	((*Windows_FD)(unsafe.Pointer(r))).readWriteUnlock()
+}
+
+func (r *FD) tryReadWriteLock() (bool, error) {
+	if apehost == apeLinux {
+		x0, x1 := ((*Linux_FD)(unsafe.Pointer(r))).tryReadWriteLock()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := ((*Freebsd_FD)(unsafe.Pointer(r))).tryReadWriteLock()
+		return x0, x1
+	}
+	x0, x1 := ((*Windows_FD)(unsafe.Pointer(r))).tryReadWriteLock()
+	return x0, x1
+}
+
+func (r *FD) writeLock() error {
+	if apehost == apeLinux {
+		x0 := ((*Linux_FD)(unsafe.Pointer(r))).writeLock()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_FD)(unsafe.Pointer(r))).writeLock()
+		return x0
+	}
+	x0 := ((*Windows_FD)(unsafe.Pointer(r))).writeLock()
+	return x0
+}
+
+func (r *FD) writeUnlock() {
+	if apehost == apeLinux {
+		((*Linux_FD)(unsafe.Pointer(r))).writeUnlock()
+		return
+	}
+	if apehost == apeFreebsd {
+		((*Freebsd_FD)(unsafe.Pointer(r))).writeUnlock()
+		return
+	}
+	((*Windows_FD)(unsafe.Pointer(r))).writeUnlock()
+}
+
+func (r *fdMutex) decref() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_decref()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_decref()
+		return x0
+	}
+	x0 := r.windows_decref()
+	return x0
+}
+
+func (r *fdMutex) incref() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_incref()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_incref()
+		return x0
+	}
+	x0 := r.windows_incref()
+	return x0
+}
+
+func (r *fdMutex) increfAndClose() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_increfAndClose()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_increfAndClose()
+		return x0
+	}
+	x0 := r.windows_increfAndClose()
+	return x0
+}
+
+func (r *fdMutex) rwlock(a0 bool, a1 bool) bool {
+	if apehost == apeLinux {
+		x0 := r.linux_rwlock(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_rwlock(a0, a1)
+		return x0
+	}
+	x0 := r.windows_rwlock(a0, a1)
+	return x0
+}
+
+func (r *fdMutex) rwunlock(a0 bool) bool {
+	if apehost == apeLinux {
+		x0 := r.linux_rwunlock(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_rwunlock(a0)
+		return x0
+	}
+	x0 := r.windows_rwunlock(a0)
+	return x0
+}
+
+func (r *pollDesc) close() {
+	if apehost == apeLinux {
+		r.linux_close()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_close()
+		return
+	}
+	r.windows_close()
+}
+
+func (r *pollDesc) evict() {
+	if apehost == apeLinux {
+		r.linux_evict()
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_evict()
+		return
+	}
+	r.windows_evict()
+}
+
+func (r *pollDesc) init(a0 *FD) error {
+	if apehost == apeLinux {
+		x0 := r.linux_init((*Linux_FD)(unsafe.Pointer(a0)))
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_init((*Freebsd_FD)(unsafe.Pointer(a0)))
+		return x0
+	}
+	x0 := r.windows_init((*Windows_FD)(unsafe.Pointer(a0)))
+	return x0
+}
+
+func (r *pollDesc) pollable() bool {
+	if apehost == apeLinux {
+		x0 := r.linux_pollable()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_pollable()
+		return x0
+	}
+	x0 := r.windows_pollable()
+	return x0
+}
+
+func (r *pollDesc) prepare(a0 int, a1 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_prepare(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_prepare(a0, a1)
+		return x0
+	}
+	x0 := r.windows_prepare(a0, a1)
+	return x0
+}
+
+func (r *pollDesc) prepareRead(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_prepareRead(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_prepareRead(a0)
+		return x0
+	}
+	x0 := r.windows_prepareRead(a0)
+	return x0
+}
+
+func (r *pollDesc) prepareWrite(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_prepareWrite(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_prepareWrite(a0)
+		return x0
+	}
+	x0 := r.windows_prepareWrite(a0)
+	return x0
+}
+
+func (r *pollDesc) wait(a0 int, a1 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_wait(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_wait(a0, a1)
+		return x0
+	}
+	x0 := r.windows_wait(a0, a1)
+	return x0
+}
+
+func (r *pollDesc) waitCanceled(a0 int) {
+	if apehost == apeLinux {
+		r.linux_waitCanceled(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		r.freebsd_waitCanceled(a0)
+		return
+	}
+	r.windows_waitCanceled(a0)
+}
+
+func (r *pollDesc) waitRead(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_waitRead(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_waitRead(a0)
+		return x0
+	}
+	x0 := r.windows_waitRead(a0)
+	return x0
+}
+
+func (r *pollDesc) waitWrite(a0 bool) error {
+	if apehost == apeLinux {
+		x0 := r.linux_waitWrite(a0)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_waitWrite(a0)
+		return x0
+	}
+	x0 := r.windows_waitWrite(a0)
+	return x0
+}
+
+// FD differs between hosts: functions convert it by pointer.
+type FD struct{ _ [19]uint64 }

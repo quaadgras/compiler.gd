@@ -23,15 +23,15 @@ const (
 //
 //go:nosplit
 func linux_sysAllocOS(n uintptr, vmaName string) unsafe.Pointer {
-	p, err := mmap(nil, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
+	p, err := linux_mmap(nil, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
 	if err != 0 {
 		if err == linux__EACCES {
 			print("runtime: mmap: access denied\n")
-			exit(2)
+			linux_exit(2)
 		}
 		if err == linux__EAGAIN {
 			print("runtime: mmap: too much locked memory (check 'ulimit -l').\n")
-			exit(2)
+			linux_exit(2)
 		}
 		return nil
 	}
@@ -57,7 +57,7 @@ func linux_sysUnusedOS(v unsafe.Pointer, n uintptr) {
 	}
 	switch advise {
 	case linux__MADV_FREE:
-		if madvise(v, n, linux__MADV_FREE) == 0 {
+		if linux_madvise(v, n, linux__MADV_FREE) == 0 {
 			break
 		}
 		atomic.Store(&linux_adviseUnused, linux__MADV_DONTNEED)
@@ -65,7 +65,7 @@ func linux_sysUnusedOS(v unsafe.Pointer, n uintptr) {
 	case linux__MADV_DONTNEED:
 		// MADV_FREE was added in Linux 4.5. Fall back on MADV_DONTNEED if it's
 		// not supported.
-		if madvise(v, n, linux__MADV_DONTNEED) == 0 {
+		if linux_madvise(v, n, linux__MADV_DONTNEED) == 0 {
 			break
 		}
 		atomic.Store(&linux_adviseUnused, linux_madviseUnsupported)
@@ -75,14 +75,14 @@ func linux_sysUnusedOS(v unsafe.Pointer, n uintptr) {
 		// Fall back on mmap if it's not supported.
 		// _MAP_ANON|_MAP_FIXED|_MAP_PRIVATE will unmap all the
 		// pages in the old mapping, and remap the memory region.
-		p, err := mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
+		p, err := linux_mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
 		if err == 0 && p != nil {
 			linux_setVMAName(p, n, "unused")
 		}
 	}
 
 	if debug.harddecommit > 0 {
-		p, err := mmap(v, n, linux__PROT_NONE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
+		p, err := linux_mmap(v, n, linux__PROT_NONE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
 		if p != v || err != 0 {
 			throw("runtime: cannot disable permissions in address space")
 		}
@@ -92,7 +92,7 @@ func linux_sysUnusedOS(v unsafe.Pointer, n uintptr) {
 
 func linux_sysUsedOS(v unsafe.Pointer, n uintptr) {
 	if debug.harddecommit > 0 {
-		p, err := mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
+		p, err := linux_mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
 		if err == linux__ENOMEM {
 			throw("runtime: out of memory")
 		}
@@ -112,7 +112,7 @@ func linux_sysHugePageOS(v unsafe.Pointer, n uintptr) {
 		end := alignDown(uintptr(v)+n, physHugePageSize)
 
 		if beg < end {
-			madvise(unsafe.Pointer(beg), end-beg, linux__MADV_HUGEPAGE)
+			linux_madvise(unsafe.Pointer(beg), end-beg, linux__MADV_HUGEPAGE)
 		}
 	}
 }
@@ -123,7 +123,7 @@ func linux_sysNoHugePageOS(v unsafe.Pointer, n uintptr) {
 		// addr be page-aligned, and allows length to be zero.
 		throw("unaligned sysNoHugePageOS")
 	}
-	madvise(v, n, linux__MADV_NOHUGEPAGE)
+	linux_madvise(v, n, linux__MADV_NOHUGEPAGE)
 }
 
 func linux_sysHugePageCollapseOS(v unsafe.Pointer, n uintptr) {
@@ -148,7 +148,7 @@ func linux_sysHugePageCollapseOS(v unsafe.Pointer, n uintptr) {
 	//
 	// Anyway, that's why this call just doesn't bother checking
 	// any errors.
-	madvise(v, n, linux__MADV_COLLAPSE)
+	linux_madvise(v, n, linux__MADV_COLLAPSE)
 }
 
 // Don't split the stack as this function may be invoked without a valid G,
@@ -156,16 +156,16 @@ func linux_sysHugePageCollapseOS(v unsafe.Pointer, n uintptr) {
 //
 //go:nosplit
 func linux_sysFreeOS(v unsafe.Pointer, n uintptr) {
-	munmap(v, n)
+	linux_munmap(v, n)
 }
 
 func linux_sysFaultOS(v unsafe.Pointer, n uintptr) {
 	linux_mprotect(v, n, linux__PROT_NONE)
-	madvise(v, n, linux__MADV_DONTNEED)
+	linux_madvise(v, n, linux__MADV_DONTNEED)
 }
 
 func linux_sysReserveOS(v unsafe.Pointer, n uintptr, vmaName string) unsafe.Pointer {
-	p, err := mmap(v, n, linux__PROT_NONE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
+	p, err := linux_mmap(v, n, linux__PROT_NONE, linux__MAP_ANON|linux__MAP_PRIVATE, -1, 0)
 	if err != 0 {
 		return nil
 	}
@@ -174,7 +174,7 @@ func linux_sysReserveOS(v unsafe.Pointer, n uintptr, vmaName string) unsafe.Poin
 }
 
 func linux_sysMapOS(v unsafe.Pointer, n uintptr, vmaName string) {
-	p, err := mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
+	p, err := linux_mmap(v, n, linux__PROT_READ|linux__PROT_WRITE, linux__MAP_ANON|linux__MAP_FIXED|linux__MAP_PRIVATE, -1, 0)
 	if err == linux__ENOMEM {
 		throw("runtime: out of memory")
 	}

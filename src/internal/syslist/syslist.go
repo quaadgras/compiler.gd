@@ -40,7 +40,7 @@ var KnownOS = map[string]bool{
 // for ape if it builds for every one of them (with the "ape" tag set);
 // the files only some of them build are copied per host by cmd/apegen.
 // This list also appears in cmd/dist/build.go.
-var APEHosts = []string{"linux", "freebsd"}
+var APEHosts = []string{"linux", "freebsd", "windows"}
 
 // UnixOS is the set of GOOS values matched by the "unix" build tag.
 // This is not used for filename matching.

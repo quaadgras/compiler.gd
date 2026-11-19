@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-func freebsd_sockaddrToUDP(sa syscall.Sockaddr) Addr {
+func freebsd_sockaddrToUDP(sa syscall.Freebsd_Sockaddr) Addr {
 	switch sa := sa.(type) {
 	case *syscall.Freebsd_SockaddrInet4:
 		return &UDPAddr{IP: sa.Addr[0:], Port: sa.Port}
@@ -34,7 +34,7 @@ func (a *UDPAddr) freebsd_family() int {
 	return syscall.Freebsd_AF_INET6
 }
 
-func (a *UDPAddr) freebsd_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *UDPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -45,20 +45,20 @@ func (a *UDPAddr) freebsd_toLocal(net string) sockaddr {
 	return &UDPAddr{loopbackIP(net), a.Port, a.Zone}
 }
 
-func (c *UDPConn) freebsd_readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
+func (c *Freebsd_UDPConn) readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
 	var n int
 	var err error
 	switch c.fd.family {
 	case syscall.Freebsd_AF_INET:
 		var from syscall.Freebsd_SockaddrInet4
-		n, err = c.fd.freebsd_readFromInet4(b, &from)
+		n, err = c.fd.readFromInet4(b, &from)
 		if err == nil {
 			ip := from.Addr // copy from.Addr; ip escapes, so this line allocates 4 bytes
 			*addr = UDPAddr{IP: ip[:], Port: from.Port}
 		}
 	case syscall.Freebsd_AF_INET6:
 		var from syscall.Freebsd_SockaddrInet6
-		n, err = c.fd.freebsd_readFromInet6(b, &from)
+		n, err = c.fd.readFromInet6(b, &from)
 		if err == nil {
 			ip := from.Addr // copy from.Addr; ip escapes, so this line allocates 16 bytes
 			*addr = UDPAddr{IP: ip[:], Port: from.Port, Zone: zoneCache.name(int(from.ZoneId))}
@@ -71,20 +71,20 @@ func (c *UDPConn) freebsd_readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, erro
 	return n, addr, err
 }
 
-func (c *UDPConn) freebsd_readFromAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
+func (c *Freebsd_UDPConn) readFromAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	var ip netip.Addr
 	var port int
 	switch c.fd.family {
 	case syscall.Freebsd_AF_INET:
 		var from syscall.Freebsd_SockaddrInet4
-		n, err = c.fd.freebsd_readFromInet4(b, &from)
+		n, err = c.fd.readFromInet4(b, &from)
 		if err == nil {
 			ip = netip.AddrFrom4(from.Addr)
 			port = from.Port
 		}
 	case syscall.Freebsd_AF_INET6:
 		var from syscall.Freebsd_SockaddrInet6
-		n, err = c.fd.freebsd_readFromInet6(b, &from)
+		n, err = c.fd.readFromInet6(b, &from)
 		if err == nil {
 			ip = netip.AddrFrom16(from.Addr).WithZone(zoneCache.name(int(from.ZoneId)))
 			port = from.Port
@@ -96,23 +96,23 @@ func (c *UDPConn) freebsd_readFromAddrPort(b []byte) (n int, addr netip.AddrPort
 	return n, addr, err
 }
 
-func (c *UDPConn) freebsd_readMsg(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
+func (c *Freebsd_UDPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
 	switch c.fd.family {
 	case syscall.Freebsd_AF_INET:
 		var sa syscall.Freebsd_SockaddrInet4
-		n, oobn, flags, err = c.fd.freebsd_readMsgInet4(b, oob, 0, &sa)
+		n, oobn, flags, err = c.fd.readMsgInet4(b, oob, 0, &sa)
 		ip := netip.AddrFrom4(sa.Addr)
 		addr = netip.AddrPortFrom(ip, uint16(sa.Port))
 	case syscall.Freebsd_AF_INET6:
 		var sa syscall.Freebsd_SockaddrInet6
-		n, oobn, flags, err = c.fd.freebsd_readMsgInet6(b, oob, 0, &sa)
+		n, oobn, flags, err = c.fd.readMsgInet6(b, oob, 0, &sa)
 		ip := netip.AddrFrom16(sa.Addr).WithZone(zoneCache.name(int(sa.ZoneId)))
 		addr = netip.AddrPortFrom(ip, uint16(sa.Port))
 	}
 	return
 }
 
-func (c *UDPConn) freebsd_writeTo(b []byte, addr *UDPAddr) (int, error) {
+func (c *Freebsd_UDPConn) writeTo(b []byte, addr *UDPAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -126,19 +126,19 @@ func (c *UDPConn) freebsd_writeTo(b []byte, addr *UDPAddr) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.freebsd_writeToInet4(b, &sa)
+		return c.fd.writeToInet4(b, &sa)
 	case syscall.Freebsd_AF_INET6:
 		sa, err := freebsd_ipToSockaddrInet6(addr.IP, addr.Port, addr.Zone)
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.freebsd_writeToInet6(b, &sa)
+		return c.fd.writeToInet6(b, &sa)
 	default:
 		return 0, &AddrError{Err: "invalid address family", Addr: addr.IP.String()}
 	}
 }
 
-func (c *UDPConn) freebsd_writeToAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+func (c *Freebsd_UDPConn) writeToAddrPort(b []byte, addr netip.AddrPort) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -152,19 +152,19 @@ func (c *UDPConn) freebsd_writeToAddrPort(b []byte, addr netip.AddrPort) (int, e
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.freebsd_writeToInet4(b, &sa)
+		return c.fd.writeToInet4(b, &sa)
 	case syscall.Freebsd_AF_INET6:
 		sa, err := freebsd_addrPortToSockaddrInet6(addr)
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.freebsd_writeToInet6(b, &sa)
+		return c.fd.writeToInet6(b, &sa)
 	default:
 		return 0, &AddrError{Err: "invalid address family", Addr: addr.Addr().String()}
 	}
 }
 
-func (c *UDPConn) freebsd_writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
+func (c *Freebsd_UDPConn) writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
 	if c.fd.isConnected && addr != nil {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -175,10 +175,10 @@ func (c *UDPConn) freebsd_writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, e
 	if err != nil {
 		return 0, 0, err
 	}
-	return c.fd.freebsd_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (c *UDPConn) freebsd_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
+func (c *Freebsd_UDPConn) writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
 	if c.fd.isConnected && addr.IsValid() {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -196,7 +196,7 @@ func (c *UDPConn) freebsd_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (
 			}
 			sap = &sa
 		}
-		return c.fd.freebsd_writeMsgInet4(b, oob, sap)
+		return c.fd.writeMsgInet4(b, oob, sap)
 	case syscall.Freebsd_AF_INET6:
 		var sap *syscall.Freebsd_SockaddrInet6
 		if addr.IsValid() {
@@ -206,13 +206,13 @@ func (c *UDPConn) freebsd_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (
 			}
 			sap = &sa
 		}
-		return c.fd.freebsd_writeMsgInet6(b, oob, sap)
+		return c.fd.writeMsgInet6(b, oob, sap)
 	default:
 		return 0, 0, &AddrError{Err: "invalid address family", Addr: addr.Addr().String()}
 	}
 }
 
-func (sd *sysDialer) freebsd_dialUDP(ctx context.Context, laddr, raddr *UDPAddr) (*UDPConn, error) {
+func (sd *freebsd_sysDialer) dialUDP(ctx context.Context, laddr, raddr *UDPAddr) (*Freebsd_UDPConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -223,10 +223,10 @@ func (sd *sysDialer) freebsd_dialUDP(ctx context.Context, laddr, raddr *UDPAddr)
 	if err != nil {
 		return nil, err
 	}
-	return newUDPConn(fd), nil
+	return freebsd_newUDPConn(fd), nil
 }
 
-func (sl *sysListener) freebsd_listenUDP(ctx context.Context, laddr *UDPAddr) (*UDPConn, error) {
+func (sl *sysListener) freebsd_listenUDP(ctx context.Context, laddr *UDPAddr) (*Freebsd_UDPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -237,10 +237,10 @@ func (sl *sysListener) freebsd_listenUDP(ctx context.Context, laddr *UDPAddr) (*
 	if err != nil {
 		return nil, err
 	}
-	return newUDPConn(fd), nil
+	return freebsd_newUDPConn(fd), nil
 }
 
-func (sl *sysListener) freebsd_listenMulticastUDP(ctx context.Context, ifi *Interface, gaddr *UDPAddr) (*UDPConn, error) {
+func (sl *sysListener) freebsd_listenMulticastUDP(ctx context.Context, ifi *Interface, gaddr *UDPAddr) (*Freebsd_UDPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -251,7 +251,7 @@ func (sl *sysListener) freebsd_listenMulticastUDP(ctx context.Context, ifi *Inte
 	if err != nil {
 		return nil, err
 	}
-	c := newUDPConn(fd)
+	c := freebsd_newUDPConn(fd)
 	if ip4 := gaddr.IP.To4(); ip4 != nil {
 		if err := freebsd_listenIPv4MulticastUDP(c, ifi, ip4); err != nil {
 			c.Close()
@@ -266,7 +266,7 @@ func (sl *sysListener) freebsd_listenMulticastUDP(ctx context.Context, ifi *Inte
 	return c, nil
 }
 
-func freebsd_listenIPv4MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
+func freebsd_listenIPv4MulticastUDP(c *Freebsd_UDPConn, ifi *Interface, ip IP) error {
 	if ifi != nil {
 		if err := freebsd_setIPv4MulticastInterface(c.fd, ifi); err != nil {
 			return err
@@ -281,7 +281,7 @@ func freebsd_listenIPv4MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
 	return nil
 }
 
-func freebsd_listenIPv6MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
+func freebsd_listenIPv6MulticastUDP(c *Freebsd_UDPConn, ifi *Interface, ip IP) error {
 	if ifi != nil {
 		if err := freebsd_setIPv6MulticastInterface(c.fd, ifi); err != nil {
 			return err

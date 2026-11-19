@@ -50,7 +50,7 @@ func linux_initMPTCPavailable() {
 	case errors.Is(err, syscall.Linux_EINVAL): // Not supported: < v5.6
 		return
 	case err == nil: // Supported and no error
-		poll.CloseFunc(s)
+		poll.Linux_CloseFunc(s)
 		fallthrough
 	default:
 		// another error: MPTCP was not available but it might be later
@@ -61,9 +61,9 @@ func linux_initMPTCPavailable() {
 	linux_hasSOLMPTCP = unix.KernelVersionGE(5, 16)
 }
 
-func (sd *sysDialer) linux_dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
+func (sd *linux_sysDialer) dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Linux_TCPConn, error) {
 	if linux_supportsMultipathTCP() {
-		if conn, err := sd.linux_doDialTCPProto(ctx, laddr, raddr, linux__IPPROTO_MPTCP); err == nil {
+		if conn, err := sd.doDialTCPProto(ctx, laddr, raddr, linux__IPPROTO_MPTCP); err == nil {
 			return conn, nil
 		}
 	}
@@ -74,10 +74,10 @@ func (sd *sysDialer) linux_dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr)
 	// Possible MPTCP specific error: ENOPROTOOPT (sysctl net.mptcp.enabled=0)
 	// But just in case MPTCP is blocked differently (SELinux, etc.), just
 	// retry with "plain" TCP.
-	return sd.linux_dialTCP(ctx, laddr, raddr)
+	return sd.dialTCP(ctx, laddr, raddr)
 }
 
-func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
+func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*Linux_TCPListener, error) {
 	if linux_supportsMultipathTCP() {
 		if dial, err := sl.linux_listenTCPProto(ctx, laddr, linux__IPPROTO_MPTCP); err == nil {
 			return dial, nil
@@ -104,7 +104,7 @@ func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*
 //
 // Kernel >= 5.16 returns EOPNOTSUPP/ENOPROTOOPT in case of fallback.
 // Older kernels will always return them even if MPTCP is used: not usable.
-func linux_hasFallenBack(fd *netFD) bool {
+func linux_hasFallenBack(fd *linux_netFD) bool {
 	_, err := fd.pfd.GetsockoptInt(linux__SOL_MPTCP, linux__MPTCP_INFO)
 
 	// 2 expected errors in case of fallback depending on the address family
@@ -118,7 +118,7 @@ func linux_hasFallenBack(fd *netFD) bool {
 // Compared to hasFallenBack method, here only the socket protocol being used is
 // checked: it can be MPTCP but it doesn't mean MPTCP is used on the wire, maybe
 // a fallback to TCP has been done.
-func linux_isUsingMPTCPProto(fd *netFD) bool {
+func linux_isUsingMPTCPProto(fd *linux_netFD) bool {
 	proto, _ := fd.pfd.GetsockoptInt(syscall.Linux_SOL_SOCKET, syscall.Linux_SO_PROTOCOL)
 
 	return proto == linux__IPPROTO_MPTCP
@@ -128,7 +128,7 @@ func linux_isUsingMPTCPProto(fd *netFD) bool {
 //
 // Please look at the description of hasFallenBack (kernel >=5.16) and
 // isUsingMPTCPProto methods for more details about what is being checked here.
-func linux_isUsingMultipathTCP(fd *netFD) bool {
+func linux_isUsingMultipathTCP(fd *linux_netFD) bool {
 	if !linux_supportsMultipathTCP() {
 		return false
 	}

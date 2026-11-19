@@ -14,7 +14,14 @@ import (
 )
 
 // Getpagesize returns the underlying system's memory page size.
-func Freebsd_Getpagesize() int { return syscall.Getpagesize() }
+func Freebsd_Getpagesize() int { return syscall.Freebsd_Getpagesize() }
+
+// File represents an open file descriptor.
+//
+// The methods of File are safe for concurrent use.
+type Freebsd_File struct {
+	*freebsd_file // os specific
+}
 
 // The defined file mode bits are the most significant bits of the [FileMode].
 // The nine least-significant bits are the standard Unix rwxrwxrwx permissions.

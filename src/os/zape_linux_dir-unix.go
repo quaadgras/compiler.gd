@@ -20,6 +20,14 @@ import (
 
 var _ = runtime.GOARCH
 
+// Auxiliary information if the File describes a directory
+type linux_dirInfo struct {
+	mu   sync.Mutex
+	buf  *[]byte // buffer for directory I/O
+	nbuf int     // length of buf; return value from Getdirentries
+	bufp int     // location of next record in buf.
+}
+
 const (
 	// More than 5760 to work around https://golang.org/issue/24015.
 	linux_blockSize = 8192
@@ -33,22 +41,22 @@ var linux_dirBufPool = sync.Pool{
 	},
 }
 
-func (d *dirInfo) linux_close() {
+func (d *linux_dirInfo) close() {
 	if d.buf != nil {
 		linux_dirBufPool.Put(d.buf)
 		d.buf = nil
 	}
 }
 
-func (f *File) linux_readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
+func (f *Linux_File) readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
 	// If this file has no dirInfo, create one.
-	var d *dirInfo
+	var d *linux_dirInfo
 	for {
 		d = f.dirinfo.Load()
 		if d != nil {
 			break
 		}
-		newD := new(dirInfo)
+		newD := new(linux_dirInfo)
 		if f.dirinfo.CompareAndSwap(nil, newD) {
 			d = newD
 			break
@@ -131,9 +139,9 @@ func (f *File) linux_readdir(n int, mode readdirMode) (names []string, dirents [
 		if n > 0 { // see 'n == 0' comment above
 			n--
 		}
-		if mode == readdirName {
+		if mode == linux_readdirName {
 			names = append(names, string(name))
-		} else if mode == readdirDirEntry {
+		} else if mode == linux_readdirDirEntry {
 			de, err := linux_newUnixDirent(f, string(name), linux_direntType(rec))
 			if IsNotExist(err) {
 				// File disappeared between readdir and stat.

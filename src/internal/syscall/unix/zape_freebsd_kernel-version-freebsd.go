@@ -44,11 +44,16 @@ func Freebsd_KernelVersion() (major, minor int) {
 
 // SupportCopyFileRange reports whether the kernel supports the copy_file_range(2).
 // This function will examine both the kernel version and the availability of the system call.
-var Freebsd_SupportCopyFileRange = sync.OnceValue(func() bool {
-	// The copy_file_range() function first appeared in FreeBSD 13.0.
-	if !KernelVersionGE(13, 0) {
-		return false
+var Freebsd_SupportCopyFileRange = func() func() bool {
+	if apehost != apeFreebsd {
+		return *new(func() bool)
 	}
-	_, err := CopyFileRange(0, nil, 0, nil, 0, 0)
-	return err != syscall.Freebsd_ENOSYS
-})
+	return sync.OnceValue(func() bool {
+		// The copy_file_range() function first appeared in FreeBSD 13.0.
+		if !KernelVersionGE(13, 0) {
+			return false
+		}
+		_, err := Freebsd_CopyFileRange(0, nil, 0, nil, 0, 0)
+		return err != syscall.Freebsd_ENOSYS
+	})
+}()

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !ape && !apegen
+
 // Package testing provides support for automated testing of Go packages.
 // It is intended to be used in concert with the "go test" command, which automates
 // execution of any function of the form

@@ -123,6 +123,11 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				return
 			}
 
+			if ctxt.HeadType == objabi.Hape {
+				// The Windows host's imports: on the other hosts
+				// they are words of zero no code reads.
+				continue
+			}
 			if ctxt.FlagD {
 				fmt.Fprintf(os.Stderr, "%s: %s: cannot use dynamic imports with -d flag\n", os.Args[0], file)
 				ctxt.nerrors++

@@ -47,7 +47,7 @@ func linux_hostname() (name string, err error) {
 	}
 	defer f.Close()
 
-	n, err := f.Linux_Read(buf[:])
+	n, err := f.Read(buf[:])
 	if err != nil {
 		return "", err
 	}

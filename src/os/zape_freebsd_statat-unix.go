@@ -12,12 +12,12 @@ import (
 	"internal/syscall/unix"
 )
 
-func (f *File) freebsd_lstatatNolog(name string) (FileInfo, error) {
+func (f *Freebsd_File) lstatatNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	if err := f.pfd.Freebsd_Fstatat(name, &fs.sys, unix.Freebsd_AT_SYMLINK_NOFOLLOW); err != nil {
-		err = f.freebsd_wrapErr("fstatat", err)
+	if err := f.pfd.Fstatat(name, &fs.sys, unix.Freebsd_AT_SYMLINK_NOFOLLOW); err != nil {
+		err = f.wrapErr("fstatat", err)
 		if pe, ok := err.(*PathError); ok {
-			pe.Path = pe.Path + string(PathSeparator) + name
+			pe.Path = pe.Path + string(Freebsd_PathSeparator) + name
 		}
 		return nil, err
 	}

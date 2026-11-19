@@ -14,7 +14,7 @@ import (
 )
 
 func freebsd_faccessat(dirfd int, path string, mode uint32, flags int) error {
-	p, err := syscall.BytePtrFromString(path)
+	p, err := syscall.Freebsd_BytePtrFromString(path)
 	if err != nil {
 		return err
 	}

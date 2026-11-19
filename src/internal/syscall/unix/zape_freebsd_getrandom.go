@@ -9,6 +9,7 @@
 package unix
 
 import (
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 )
@@ -17,8 +18,13 @@ import (
 //go:noescape
 func freebsd_vgetrandom(p []byte, flags uint32) (ret int, supported bool)
 
+var freebsd_getrandomUnsupported atomic.Bool
+
+// GetRandomFlag is a flag supported by the getrandom system call.
+type Freebsd_GetRandomFlag uintptr
+
 // GetRandom calls the getrandom system call.
-func Freebsd_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
+func Freebsd_GetRandom(p []byte, flags Freebsd_GetRandomFlag) (n int, err error) {
 	ret, supported := freebsd_vgetrandom(p, uint32(flags))
 	if supported {
 		if ret < 0 {
@@ -26,7 +32,7 @@ func Freebsd_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
 		}
 		return ret, nil
 	}
-	if getrandomUnsupported.Load() {
+	if freebsd_getrandomUnsupported.Load() {
 		return 0, syscall.Freebsd_ENOSYS
 	}
 	r1, _, errno := syscall.Freebsd_Syscall(freebsd_getrandomTrap,
@@ -35,7 +41,7 @@ func Freebsd_GetRandom(p []byte, flags GetRandomFlag) (n int, err error) {
 		uintptr(flags))
 	if errno != 0 {
 		if errno == syscall.Freebsd_ENOSYS {
-			getrandomUnsupported.Store(true)
+			freebsd_getrandomUnsupported.Store(true)
 		}
 		return 0, errno
 	}

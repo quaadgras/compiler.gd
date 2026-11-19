@@ -15,9 +15,9 @@ import (
 )
 
 func freebsd_fillFileStatFromSys(fs *freebsd_fileStat, name string) {
-	fs.name = filepathlite.Base(name)
+	fs.name = filepathlite.Freebsd_Base(name)
 	fs.size = fs.sys.Size
-	fs.modTime = time.Unix(fs.sys.Mtimespec.Unix())
+	fs.modTime = time.Freebsd_Unix(fs.sys.Mtimespec.Freebsd_Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)
 	switch fs.sys.Mode & syscall.Freebsd_S_IFMT {
 	case syscall.Freebsd_S_IFBLK:
@@ -48,5 +48,5 @@ func freebsd_fillFileStatFromSys(fs *freebsd_fileStat, name string) {
 
 // For testing.
 func freebsd_atime(fi FileInfo) time.Time {
-	return time.Unix(fi.Sys().(*syscall.Freebsd_Stat_t).Atimespec.Unix())
+	return time.Freebsd_Unix(fi.Sys().(*syscall.Freebsd_Stat_t).Atimespec.Freebsd_Unix())
 }

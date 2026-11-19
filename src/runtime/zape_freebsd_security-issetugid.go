@@ -8,10 +8,14 @@
 
 package runtime
 
+// secureMode is only ever mutated in schedinit, so we don't need to worry about
+// synchronization primitives.
+var freebsd_secureMode bool
+
 func freebsd_initSecureMode() {
-	secureMode = freebsd_issetugid() == 1
+	freebsd_secureMode = freebsd_issetugid() == 1
 }
 
 func freebsd_isSecureMode() bool {
-	return secureMode
+	return freebsd_secureMode
 }

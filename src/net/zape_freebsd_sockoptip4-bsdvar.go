@@ -15,7 +15,7 @@ import (
 
 var _ = runtime.GOARCH
 
-func freebsd_setIPv4MulticastInterface(fd *netFD, ifi *Interface) error {
+func freebsd_setIPv4MulticastInterface(fd *freebsd_netFD, ifi *Interface) error {
 	ip, err := freebsd_interfaceToIPv4Addr(ifi)
 	if err != nil {
 		return wrapSyscallError("setsockopt", err)
@@ -27,7 +27,7 @@ func freebsd_setIPv4MulticastInterface(fd *netFD, ifi *Interface) error {
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setIPv4MulticastLoopback(fd *netFD, v bool) error {
+func freebsd_setIPv4MulticastLoopback(fd *freebsd_netFD, v bool) error {
 	err := fd.pfd.SetsockoptByte(syscall.Freebsd_IPPROTO_IP, syscall.Freebsd_IP_MULTICAST_LOOP, byte(freebsd_boolint(v)))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)

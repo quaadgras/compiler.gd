@@ -23,6 +23,7 @@ var apehost uint8
 const (
 	apeLinux = 1 + iota
 	apeFreebsd
+	apeWindows
 )
 
 type Cmd struct {
@@ -96,7 +97,11 @@ func Command(a0 string, a1 ...string) *Cmd {
 		x0 := Linux_Command(a0, a1...)
 		return x0
 	}
-	x0 := Freebsd_Command(a0, a1...)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_Command(a0, a1...)
+		return x0
+	}
+	x0 := Windows_Command(a0, a1...)
 	return x0
 }
 
@@ -105,26 +110,25 @@ func CommandContext(a0 context.Context, a1 string, a2 ...string) *Cmd {
 		x0 := Linux_CommandContext(a0, a1, a2...)
 		return x0
 	}
-	x0 := Freebsd_CommandContext(a0, a1, a2...)
-	return x0
-}
-
-func dedupEnvCase(a0 bool, a1 bool, a2 []string) ([]string, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_dedupEnvCase(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := freebsd_dedupEnvCase(a0, a1, a2)
-	return x0, x1
-}
-
-func validateLookPath(a0 string) error {
-	if apehost == apeLinux {
-		x0 := linux_validateLookPath(a0)
+	if apehost == apeFreebsd {
+		x0 := Freebsd_CommandContext(a0, a1, a2...)
 		return x0
 	}
-	x0 := freebsd_validateLookPath(a0)
+	x0 := Windows_CommandContext(a0, a1, a2...)
 	return x0
+}
+
+func lookPath(a0 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_lookPath(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_lookPath(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_lookPath(a0)
+	return x0, x1
 }
 
 func (r *Cmd) CombinedOutput() ([]byte, error) {
@@ -132,7 +136,11 @@ func (r *Cmd) CombinedOutput() ([]byte, error) {
 		x0, x1 := r.Linux_CombinedOutput()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_CombinedOutput()
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_CombinedOutput()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_CombinedOutput()
 	return x0, x1
 }
 
@@ -141,7 +149,11 @@ func (r *Cmd) Environ() []string {
 		x0 := r.Linux_Environ()
 		return x0
 	}
-	x0 := r.Freebsd_Environ()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Environ()
+		return x0
+	}
+	x0 := r.Windows_Environ()
 	return x0
 }
 
@@ -150,7 +162,11 @@ func (r *Cmd) Output() ([]byte, error) {
 		x0, x1 := r.Linux_Output()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Output()
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Output()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Output()
 	return x0, x1
 }
 
@@ -159,7 +175,11 @@ func (r *Cmd) Run() error {
 		x0 := r.Linux_Run()
 		return x0
 	}
-	x0 := r.Freebsd_Run()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Run()
+		return x0
+	}
+	x0 := r.Windows_Run()
 	return x0
 }
 
@@ -168,7 +188,11 @@ func (r *Cmd) Start() error {
 		x0 := r.Linux_Start()
 		return x0
 	}
-	x0 := r.Freebsd_Start()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Start()
+		return x0
+	}
+	x0 := r.Windows_Start()
 	return x0
 }
 
@@ -177,7 +201,11 @@ func (r *Cmd) StderrPipe() (io.ReadCloser, error) {
 		x0, x1 := r.Linux_StderrPipe()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_StderrPipe()
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_StderrPipe()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_StderrPipe()
 	return x0, x1
 }
 
@@ -186,7 +214,11 @@ func (r *Cmd) StdinPipe() (io.WriteCloser, error) {
 		x0, x1 := r.Linux_StdinPipe()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_StdinPipe()
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_StdinPipe()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_StdinPipe()
 	return x0, x1
 }
 
@@ -195,7 +227,11 @@ func (r *Cmd) StdoutPipe() (io.ReadCloser, error) {
 		x0, x1 := r.Linux_StdoutPipe()
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_StdoutPipe()
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_StdoutPipe()
+		return x0, x1
+	}
+	x0, x1 := r.Windows_StdoutPipe()
 	return x0, x1
 }
 
@@ -204,7 +240,11 @@ func (r *Cmd) String() string {
 		x0 := r.Linux_String()
 		return x0
 	}
-	x0 := r.Freebsd_String()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_String()
+		return x0
+	}
+	x0 := r.Windows_String()
 	return x0
 }
 
@@ -213,7 +253,11 @@ func (r *Cmd) Wait() error {
 		x0 := r.Linux_Wait()
 		return x0
 	}
-	x0 := r.Freebsd_Wait()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Wait()
+		return x0
+	}
+	x0 := r.Windows_Wait()
 	return x0
 }
 
@@ -222,7 +266,11 @@ func (r *Cmd) argv() []string {
 		x0 := r.linux_argv()
 		return x0
 	}
-	x0 := r.freebsd_argv()
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_argv()
+		return x0
+	}
+	x0 := r.windows_argv()
 	return x0
 }
 
@@ -231,35 +279,12 @@ func (r *Cmd) awaitGoroutines(a0 *time.Timer) error {
 		x0 := r.linux_awaitGoroutines(a0)
 		return x0
 	}
-	x0 := r.freebsd_awaitGoroutines(a0)
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_awaitGoroutines(a0)
+		return x0
+	}
+	x0 := r.windows_awaitGoroutines(a0)
 	return x0
-}
-
-func (r *Cmd) childStderr(a0 *os.File) (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_childStderr(a0)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_childStderr(a0)
-	return x0, x1
-}
-
-func (r *Cmd) childStdin() (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_childStdin()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_childStdin()
-	return x0, x1
-}
-
-func (r *Cmd) childStdout() (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_childStdout()
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_childStdout()
-	return x0, x1
 }
 
 func (r *Cmd) environ() ([]string, error) {
@@ -267,7 +292,11 @@ func (r *Cmd) environ() ([]string, error) {
 		x0, x1 := r.linux_environ()
 		return x0, x1
 	}
-	x0, x1 := r.freebsd_environ()
+	if apehost == apeFreebsd {
+		x0, x1 := r.freebsd_environ()
+		return x0, x1
+	}
+	x0, x1 := r.windows_environ()
 	return x0, x1
 }
 
@@ -276,16 +305,11 @@ func (r *Cmd) watchCtx(a0 chan<- ctxResult) {
 		r.linux_watchCtx(a0)
 		return
 	}
-	r.freebsd_watchCtx(a0)
-}
-
-func (r *Cmd) writerDescriptor(a0 io.Writer) (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writerDescriptor(a0)
-		return x0, x1
+	if apehost == apeFreebsd {
+		r.freebsd_watchCtx(a0)
+		return
 	}
-	x0, x1 := r.freebsd_writerDescriptor(a0)
-	return x0, x1
+	r.windows_watchCtx(a0)
 }
 
 func (r *Error) Error() string {
@@ -293,7 +317,11 @@ func (r *Error) Error() string {
 		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.Freebsd_Error()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -302,7 +330,11 @@ func (r *Error) Unwrap() error {
 		x0 := r.Linux_Unwrap()
 		return x0
 	}
-	x0 := r.Freebsd_Unwrap()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
 	return x0
 }
 
@@ -311,7 +343,11 @@ func (r *ExitError) Error() string {
 		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.Freebsd_Error()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -320,7 +356,11 @@ func (r *prefixSuffixSaver) Bytes() []byte {
 		x0 := r.Linux_Bytes()
 		return x0
 	}
-	x0 := r.Freebsd_Bytes()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Bytes()
+		return x0
+	}
+	x0 := r.Windows_Bytes()
 	return x0
 }
 
@@ -329,7 +369,11 @@ func (r *prefixSuffixSaver) Write(a0 []byte) (int, error) {
 		x0, x1 := r.Linux_Write(a0)
 		return x0, x1
 	}
-	x0, x1 := r.Freebsd_Write(a0)
+	if apehost == apeFreebsd {
+		x0, x1 := r.Freebsd_Write(a0)
+		return x0, x1
+	}
+	x0, x1 := r.Windows_Write(a0)
 	return x0, x1
 }
 
@@ -338,7 +382,11 @@ func (r *prefixSuffixSaver) fill(a0 *[]byte, a1 []byte) []byte {
 		x0 := r.linux_fill(a0, a1)
 		return x0
 	}
-	x0 := r.freebsd_fill(a0, a1)
+	if apehost == apeFreebsd {
+		x0 := r.freebsd_fill(a0, a1)
+		return x0
+	}
+	x0 := r.windows_fill(a0, a1)
 	return x0
 }
 
@@ -347,7 +395,11 @@ func (r wrappedError) Error() string {
 		x0 := r.Linux_Error()
 		return x0
 	}
-	x0 := r.Freebsd_Error()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Error()
+		return x0
+	}
+	x0 := r.Windows_Error()
 	return x0
 }
 
@@ -356,6 +408,32 @@ func (r wrappedError) Unwrap() error {
 		x0 := r.Linux_Unwrap()
 		return x0
 	}
-	x0 := r.Freebsd_Unwrap()
+	if apehost == apeFreebsd {
+		x0 := r.Freebsd_Unwrap()
+		return x0
+	}
+	x0 := r.Windows_Unwrap()
 	return x0
 }
+
+// ape_ErrNotFound is the host's.
+var ape_ErrNotFound = func() *error {
+	if apehost == apeLinux {
+		return &Linux_ErrNotFound
+	}
+	if apehost == apeFreebsd {
+		return &Freebsd_ErrNotFound
+	}
+	return &Windows_ErrNotFound
+}()
+
+// ErrNotFound is the host's at startup.
+var ErrNotFound error = func() error {
+	if apehost == apeLinux {
+		return Linux_ErrNotFound
+	}
+	if apehost == apeFreebsd {
+		return Freebsd_ErrNotFound
+	}
+	return Windows_ErrNotFound
+}()

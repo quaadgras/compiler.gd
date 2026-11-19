@@ -9,6 +9,7 @@
 package net
 
 import (
+	"internal/poll"
 	"runtime"
 	"syscall"
 	"time"
@@ -16,7 +17,20 @@ import (
 
 var _ = runtime.GOARCH
 
-func (fd *netFD) freebsd_name() string {
+// Network file descriptor.
+type freebsd_netFD struct {
+	pfd poll.Freebsd_FD
+
+	// immutable until Close
+	family      int
+	sotype      int
+	isConnected bool // handshake completed or use of association with peer
+	net         string
+	laddr       Addr
+	raddr       Addr
+}
+
+func (fd *freebsd_netFD) name() string {
 	var ls, rs string
 	if fd.laddr != nil {
 		ls = fd.laddr.String()
@@ -27,124 +41,124 @@ func (fd *netFD) freebsd_name() string {
 	return fd.net + ":" + ls + "->" + rs
 }
 
-func (fd *netFD) freebsd_setAddr(laddr, raddr Addr) {
+func (fd *freebsd_netFD) setAddr(laddr, raddr Addr) {
 	fd.laddr = laddr
 	fd.raddr = raddr
 	// TODO Replace with runtime.AddCleanup.
-	runtime.SetFinalizer(fd, (*netFD).Freebsd_Close)
+	runtime.SetFinalizer(fd, (*freebsd_netFD).Close)
 }
 
-func (fd *netFD) Freebsd_Close() error {
+func (fd *freebsd_netFD) Close() error {
 	// TODO Replace with runtime.AddCleanup.
 	runtime.SetFinalizer(fd, nil)
-	return fd.pfd.Freebsd_Close()
+	return fd.pfd.Close()
 }
 
-func (fd *netFD) freebsd_shutdown(how int) error {
+func (fd *freebsd_netFD) shutdown(how int) error {
 	err := fd.pfd.Shutdown(how)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("shutdown", err)
 }
 
-func (fd *netFD) freebsd_closeRead() error {
-	return fd.freebsd_shutdown(syscall.Freebsd_SHUT_RD)
+func (fd *freebsd_netFD) closeRead() error {
+	return fd.shutdown(syscall.Freebsd_SHUT_RD)
 }
 
-func (fd *netFD) freebsd_closeWrite() error {
-	return fd.freebsd_shutdown(syscall.Freebsd_SHUT_WR)
+func (fd *freebsd_netFD) closeWrite() error {
+	return fd.shutdown(syscall.Freebsd_SHUT_WR)
 }
 
-func (fd *netFD) Freebsd_Read(p []byte) (n int, err error) {
-	n, err = fd.pfd.Freebsd_Read(p)
+func (fd *freebsd_netFD) Read(p []byte) (n int, err error) {
+	n, err = fd.pfd.Read(p)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_readSyscallName, err)
 }
 
-func (fd *netFD) freebsd_readFrom(p []byte) (n int, sa syscall.Sockaddr, err error) {
-	n, sa, err = fd.pfd.Freebsd_ReadFrom(p)
+func (fd *freebsd_netFD) readFrom(p []byte) (n int, sa syscall.Freebsd_Sockaddr, err error) {
+	n, sa, err = fd.pfd.ReadFrom(p)
 	runtime.KeepAlive(fd)
 	return n, sa, wrapSyscallError(freebsd_readFromSyscallName, err)
 }
-func (fd *netFD) freebsd_readFromInet4(p []byte, from *syscall.Freebsd_SockaddrInet4) (n int, err error) {
-	n, err = fd.pfd.Freebsd_ReadFromInet4(p, from)
+func (fd *freebsd_netFD) readFromInet4(p []byte, from *syscall.Freebsd_SockaddrInet4) (n int, err error) {
+	n, err = fd.pfd.ReadFromInet4(p, from)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_readFromSyscallName, err)
 }
 
-func (fd *netFD) freebsd_readFromInet6(p []byte, from *syscall.Freebsd_SockaddrInet6) (n int, err error) {
-	n, err = fd.pfd.Freebsd_ReadFromInet6(p, from)
+func (fd *freebsd_netFD) readFromInet6(p []byte, from *syscall.Freebsd_SockaddrInet6) (n int, err error) {
+	n, err = fd.pfd.ReadFromInet6(p, from)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_readFromSyscallName, err)
 }
 
-func (fd *netFD) freebsd_readMsg(p []byte, oob []byte, flags int) (n, oobn, retflags int, sa syscall.Sockaddr, err error) {
-	n, oobn, retflags, sa, err = fd.pfd.Freebsd_ReadMsg(p, oob, flags)
+func (fd *freebsd_netFD) readMsg(p []byte, oob []byte, flags int) (n, oobn, retflags int, sa syscall.Freebsd_Sockaddr, err error) {
+	n, oobn, retflags, sa, err = fd.pfd.ReadMsg(p, oob, flags)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, sa, wrapSyscallError(freebsd_readMsgSyscallName, err)
 }
 
-func (fd *netFD) freebsd_readMsgInet4(p []byte, oob []byte, flags int, sa *syscall.Freebsd_SockaddrInet4) (n, oobn, retflags int, err error) {
-	n, oobn, retflags, err = fd.pfd.Freebsd_ReadMsgInet4(p, oob, flags, sa)
+func (fd *freebsd_netFD) readMsgInet4(p []byte, oob []byte, flags int, sa *syscall.Freebsd_SockaddrInet4) (n, oobn, retflags int, err error) {
+	n, oobn, retflags, err = fd.pfd.ReadMsgInet4(p, oob, flags, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, wrapSyscallError(freebsd_readMsgSyscallName, err)
 }
 
-func (fd *netFD) freebsd_readMsgInet6(p []byte, oob []byte, flags int, sa *syscall.Freebsd_SockaddrInet6) (n, oobn, retflags int, err error) {
-	n, oobn, retflags, err = fd.pfd.Freebsd_ReadMsgInet6(p, oob, flags, sa)
+func (fd *freebsd_netFD) readMsgInet6(p []byte, oob []byte, flags int, sa *syscall.Freebsd_SockaddrInet6) (n, oobn, retflags int, err error) {
+	n, oobn, retflags, err = fd.pfd.ReadMsgInet6(p, oob, flags, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, retflags, wrapSyscallError(freebsd_readMsgSyscallName, err)
 }
 
-func (fd *netFD) Freebsd_Write(p []byte) (nn int, err error) {
-	nn, err = fd.pfd.Freebsd_Write(p)
+func (fd *freebsd_netFD) Write(p []byte) (nn int, err error) {
+	nn, err = fd.pfd.Write(p)
 	runtime.KeepAlive(fd)
 	return nn, wrapSyscallError(freebsd_writeSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeTo(p []byte, sa syscall.Sockaddr) (n int, err error) {
-	n, err = fd.pfd.Freebsd_WriteTo(p, sa)
+func (fd *freebsd_netFD) writeTo(p []byte, sa syscall.Freebsd_Sockaddr) (n int, err error) {
+	n, err = fd.pfd.WriteTo(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_writeToSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeToInet4(p []byte, sa *syscall.Freebsd_SockaddrInet4) (n int, err error) {
-	n, err = fd.pfd.Freebsd_WriteToInet4(p, sa)
+func (fd *freebsd_netFD) writeToInet4(p []byte, sa *syscall.Freebsd_SockaddrInet4) (n int, err error) {
+	n, err = fd.pfd.WriteToInet4(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_writeToSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeToInet6(p []byte, sa *syscall.Freebsd_SockaddrInet6) (n int, err error) {
-	n, err = fd.pfd.Freebsd_WriteToInet6(p, sa)
+func (fd *freebsd_netFD) writeToInet6(p []byte, sa *syscall.Freebsd_SockaddrInet6) (n int, err error) {
+	n, err = fd.pfd.WriteToInet6(p, sa)
 	runtime.KeepAlive(fd)
 	return n, wrapSyscallError(freebsd_writeToSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeMsg(p []byte, oob []byte, sa syscall.Sockaddr) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Freebsd_WriteMsg(p, oob, sa)
+func (fd *freebsd_netFD) writeMsg(p []byte, oob []byte, sa syscall.Freebsd_Sockaddr) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsg(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(freebsd_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeMsgInet4(p []byte, oob []byte, sa *syscall.Freebsd_SockaddrInet4) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Freebsd_WriteMsgInet4(p, oob, sa)
+func (fd *freebsd_netFD) writeMsgInet4(p []byte, oob []byte, sa *syscall.Freebsd_SockaddrInet4) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsgInet4(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(freebsd_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) freebsd_writeMsgInet6(p []byte, oob []byte, sa *syscall.Freebsd_SockaddrInet6) (n int, oobn int, err error) {
-	n, oobn, err = fd.pfd.Freebsd_WriteMsgInet6(p, oob, sa)
+func (fd *freebsd_netFD) writeMsgInet6(p []byte, oob []byte, sa *syscall.Freebsd_SockaddrInet6) (n int, oobn int, err error) {
+	n, oobn, err = fd.pfd.WriteMsgInet6(p, oob, sa)
 	runtime.KeepAlive(fd)
 	return n, oobn, wrapSyscallError(freebsd_writeMsgSyscallName, err)
 }
 
-func (fd *netFD) Freebsd_SetDeadline(t time.Time) error {
+func (fd *freebsd_netFD) SetDeadline(t time.Time) error {
 	return fd.pfd.SetDeadline(t)
 }
 
-func (fd *netFD) Freebsd_SetReadDeadline(t time.Time) error {
+func (fd *freebsd_netFD) SetReadDeadline(t time.Time) error {
 	return fd.pfd.SetReadDeadline(t)
 }
 
-func (fd *netFD) Freebsd_SetWriteDeadline(t time.Time) error {
+func (fd *freebsd_netFD) SetWriteDeadline(t time.Time) error {
 	return fd.pfd.SetWriteDeadline(t)
 }

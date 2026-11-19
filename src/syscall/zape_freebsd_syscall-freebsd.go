@@ -36,7 +36,7 @@ type Freebsd_SockaddrDatalink struct {
 }
 
 // Translate "kern.hostname" to []_C_int{0,1,2,3}.
-func freebsd_nametomib(name string) (mib []_C_int, err error) {
+func freebsd_nametomib(name string) (mib []freebsd__C_int, err error) {
 	const siz = unsafe.Sizeof(mib[0])
 
 	// NOTE(rsc): It seems strange to set the buffer to have
@@ -46,18 +46,18 @@ func freebsd_nametomib(name string) (mib []_C_int, err error) {
 	// I am scared that if we don't include the +2 here, the kernel
 	// will silently write 2 words farther than we specify
 	// and we'll get memory corruption.
-	var buf [Freebsd_CTL_MAXNAME + 2]_C_int
+	var buf [Freebsd_CTL_MAXNAME + 2]freebsd__C_int
 	n := uintptr(Freebsd_CTL_MAXNAME) * siz
 
 	p := (*byte)(unsafe.Pointer(&buf[0]))
-	bytes, err := ByteSliceFromString(name)
+	bytes, err := Freebsd_ByteSliceFromString(name)
 	if err != nil {
 		return nil, err
 	}
 
 	// Magic sysctl: "setting" 0.3 to a string name
 	// lets you read back the array of integers form.
-	if err = freebsd_sysctl([]_C_int{0, 3}, p, &n, &bytes[0], uintptr(len(name))); err != nil {
+	if err = freebsd_sysctl([]freebsd__C_int{0, 3}, p, &n, &bytes[0], uintptr(len(name))); err != nil {
 		return nil, err
 	}
 	return buf[0 : n/siz], nil
@@ -85,7 +85,7 @@ func Freebsd_Pipe2(p []int, flags int) error {
 	if len(p) != 2 {
 		return Freebsd_EINVAL
 	}
-	var pp [2]_C_int
+	var pp [2]freebsd__C_int
 	err := freebsd_pipe2(&pp, flags)
 	if err == nil {
 		p[0] = int(pp[0])
@@ -94,20 +94,20 @@ func Freebsd_Pipe2(p []int, flags int) error {
 	return err
 }
 
-func Freebsd_GetsockoptIPMreqn(fd, level, opt int) (*IPMreqn, error) {
-	var value IPMreqn
-	vallen := _Socklen(Freebsd_SizeofIPMreqn)
+func Freebsd_GetsockoptIPMreqn(fd, level, opt int) (*Freebsd_IPMreqn, error) {
+	var value Freebsd_IPMreqn
+	vallen := freebsd__Socklen(Freebsd_SizeofIPMreqn)
 	errno := freebsd_getsockopt(fd, level, opt, unsafe.Pointer(&value), &vallen)
 	return &value, errno
 }
 
-func Freebsd_SetsockoptIPMreqn(fd, level, opt int, mreq *IPMreqn) (err error) {
+func Freebsd_SetsockoptIPMreqn(fd, level, opt int, mreq *Freebsd_IPMreqn) (err error) {
 	return freebsd_setsockopt(fd, level, opt, unsafe.Pointer(mreq), unsafe.Sizeof(*mreq))
 }
 
-func Freebsd_Accept4(fd, flags int) (nfd int, sa Sockaddr, err error) {
+func Freebsd_Accept4(fd, flags int) (nfd int, sa Freebsd_Sockaddr, err error) {
 	var rsa Freebsd_RawSockaddrAny
-	var len _Socklen = Freebsd_SizeofSockaddrAny
+	var len freebsd__Socklen = Freebsd_SizeofSockaddrAny
 	nfd, err = freebsd_accept4(fd, &rsa, &len, flags)
 	if err != nil {
 		return

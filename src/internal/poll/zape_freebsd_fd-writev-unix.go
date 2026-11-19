@@ -13,7 +13,7 @@ import (
 	"unsafe"
 )
 
-func freebsd_writev(fd int, iovecs []syscall.Iovec) (uintptr, error) {
+func freebsd_writev(fd int, iovecs []syscall.Freebsd_Iovec) (uintptr, error) {
 	var (
 		r uintptr
 		e syscall.Errno

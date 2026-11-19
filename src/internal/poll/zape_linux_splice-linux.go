@@ -36,7 +36,7 @@ const (
 //
 // Splice gets a pipe buffer from the pool or creates a new one if needed, to serve as a buffer for the data transfer.
 // src and dst must both be stream-oriented sockets.
-func Linux_Splice(dst, src *FD, remain int64) (written int64, handled bool, err error) {
+func Linux_Splice(dst, src *Linux_FD, remain int64) (written int64, handled bool, err error) {
 	p, err := linux_getPipe()
 	if err != nil {
 		return 0, false, err
@@ -89,12 +89,12 @@ func Linux_Splice(dst, src *FD, remain int64) (written int64, handled bool, err 
 // ready for reading.
 //
 // If spliceDrain returns (0, nil), src is at EOF.
-func linux_spliceDrain(pipefd int, sock *FD, max int) (int, error) {
+func linux_spliceDrain(pipefd int, sock *Linux_FD, max int) (int, error) {
 	if err := sock.readLock(); err != nil {
 		return 0, err
 	}
 	defer sock.readUnlock()
-	if err := sock.pd.prepareRead(sock.isFile); err != nil {
+	if err := sock.pd.linux_prepareRead(sock.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -109,8 +109,8 @@ func linux_spliceDrain(pipefd int, sock *FD, max int) (int, error) {
 		if err != syscall.Linux_EAGAIN {
 			return n, err
 		}
-		if sock.pd.pollable() {
-			if err := sock.pd.waitRead(sock.isFile); err != nil {
+		if sock.pd.linux_pollable() {
+			if err := sock.pd.linux_waitRead(sock.isFile); err != nil {
 				return n, err
 			}
 		}
@@ -130,12 +130,12 @@ func linux_spliceDrain(pipefd int, sock *FD, max int) (int, error) {
 // splice(2), it loops over the buffered data until it has written
 // all of it to the socket. This behavior is similar to the Write
 // step of an io.Copy in userspace.
-func linux_splicePump(sock *FD, pipefd int, inPipe int) (int, error) {
+func linux_splicePump(sock *Linux_FD, pipefd int, inPipe int) (int, error) {
 	if err := sock.writeLock(); err != nil {
 		return 0, err
 	}
 	defer sock.writeUnlock()
-	if err := sock.pd.prepareWrite(sock.isFile); err != nil {
+	if err := sock.pd.linux_prepareWrite(sock.isFile); err != nil {
 		return 0, err
 	}
 	written := 0
@@ -158,8 +158,8 @@ func linux_splicePump(sock *FD, pipefd int, inPipe int) (int, error) {
 		if err != syscall.Linux_EAGAIN {
 			return written, err
 		}
-		if sock.pd.pollable() {
-			if err := sock.pd.waitWrite(sock.isFile); err != nil {
+		if sock.pd.linux_pollable() {
+			if err := sock.pd.linux_waitWrite(sock.isFile); err != nil {
 				return written, err
 			}
 		}
@@ -245,6 +245,6 @@ func linux_newPipe() *linux_splicePipe {
 
 // destroyPipe destroys a pipe.
 func linux_destroyPipe(p *linux_splicePipe) {
-	CloseFunc(p.rfd)
-	CloseFunc(p.wfd)
+	Linux_CloseFunc(p.rfd)
+	Linux_CloseFunc(p.wfd)
 }

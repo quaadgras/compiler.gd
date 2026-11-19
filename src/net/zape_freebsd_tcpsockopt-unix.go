@@ -16,37 +16,37 @@ import (
 
 var _ = runtime.GOARCH
 
-func freebsd_setKeepAliveIdle(fd *netFD, d time.Duration) error {
+func freebsd_setKeepAliveIdle(fd *freebsd_netFD, d time.Duration) error {
 	if d == 0 {
-		d = defaultTCPKeepAliveIdle
+		d = freebsd_defaultTCPKeepAliveIdle
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(roundDurationUp(d, time.Second))
+	secs := int(freebsd_roundDurationUp(d, time.Freebsd_Second))
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_KEEPIDLE, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setKeepAliveInterval(fd *netFD, d time.Duration) error {
+func freebsd_setKeepAliveInterval(fd *freebsd_netFD, d time.Duration) error {
 	if d == 0 {
-		d = defaultTCPKeepAliveInterval
+		d = freebsd_defaultTCPKeepAliveInterval
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(roundDurationUp(d, time.Second))
+	secs := int(freebsd_roundDurationUp(d, time.Freebsd_Second))
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_KEEPINTVL, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setKeepAliveCount(fd *netFD, n int) error {
+func freebsd_setKeepAliveCount(fd *freebsd_netFD, n int) error {
 	if n == 0 {
-		n = defaultTCPKeepAliveCount
+		n = freebsd_defaultTCPKeepAliveCount
 	} else if n < 0 {
 		return nil
 	}

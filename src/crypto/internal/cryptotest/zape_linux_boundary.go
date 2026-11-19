@@ -16,8 +16,8 @@ import (
 // BoundarySlices allocates a pair of slices of the given size one at the start
 // of a page, another at the end. Any access beyond or before the slice
 // boundaries should cause a fault.
-func Linux_BoundarySlices(t *testing.T, size int) (start, end []byte) {
-	pageSize := syscall.Getpagesize()
+func Linux_BoundarySlices(t *testing.Linux_T, size int) (start, end []byte) {
+	pageSize := syscall.Linux_Getpagesize()
 	needPages := 2 + (2*size+pageSize-1)/pageSize
 	b, err := syscall.Linux_Mmap(0, 0, needPages*pageSize, syscall.Linux_PROT_READ|syscall.Linux_PROT_WRITE,
 		syscall.Linux_MAP_ANON|syscall.Linux_MAP_PRIVATE)

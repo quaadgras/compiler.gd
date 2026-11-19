@@ -15,7 +15,7 @@ import (
 
 func Linux_Fstatat(dirfd int, path string, stat *syscall.Linux_Stat_t, flags int) error {
 	var p *byte
-	p, err := syscall.BytePtrFromString(path)
+	p, err := syscall.Linux_BytePtrFromString(path)
 	if err != nil {
 		return err
 	}

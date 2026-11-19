@@ -20,6 +20,14 @@ import (
 
 var _ = runtime.GOARCH
 
+// Auxiliary information if the File describes a directory
+type freebsd_dirInfo struct {
+	mu   sync.Mutex
+	buf  *[]byte // buffer for directory I/O
+	nbuf int     // length of buf; return value from Getdirentries
+	bufp int     // location of next record in buf.
+}
+
 const (
 	// More than 5760 to work around https://golang.org/issue/24015.
 	freebsd_blockSize = 8192
@@ -33,22 +41,22 @@ var freebsd_dirBufPool = sync.Pool{
 	},
 }
 
-func (d *dirInfo) freebsd_close() {
+func (d *freebsd_dirInfo) close() {
 	if d.buf != nil {
 		freebsd_dirBufPool.Put(d.buf)
 		d.buf = nil
 	}
 }
 
-func (f *File) freebsd_readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
+func (f *Freebsd_File) readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
 	// If this file has no dirInfo, create one.
-	var d *dirInfo
+	var d *freebsd_dirInfo
 	for {
 		d = f.dirinfo.Load()
 		if d != nil {
 			break
 		}
-		newD := new(dirInfo)
+		newD := new(freebsd_dirInfo)
 		if f.dirinfo.CompareAndSwap(nil, newD) {
 			d = newD
 			break
@@ -131,9 +139,9 @@ func (f *File) freebsd_readdir(n int, mode readdirMode) (names []string, dirents
 		if n > 0 { // see 'n == 0' comment above
 			n--
 		}
-		if mode == readdirName {
+		if mode == freebsd_readdirName {
 			names = append(names, string(name))
-		} else if mode == readdirDirEntry {
+		} else if mode == freebsd_readdirDirEntry {
 			de, err := freebsd_newUnixDirent(f, string(name), freebsd_direntType(rec))
 			if IsNotExist(err) {
 				// File disappeared between readdir and stat.

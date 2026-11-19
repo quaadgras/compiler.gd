@@ -14,9 +14,9 @@ import (
 )
 
 func freebsd_statAtime(st *syscall.Freebsd_Stat_t) time.Time {
-	return time.Unix(st.Atimespec.Unix())
+	return time.Freebsd_Unix(st.Atimespec.Freebsd_Unix())
 }
 
 func freebsd_statCtime(st *syscall.Freebsd_Stat_t) time.Time {
-	return time.Unix(st.Ctimespec.Unix())
+	return time.Freebsd_Unix(st.Ctimespec.Freebsd_Unix())
 }

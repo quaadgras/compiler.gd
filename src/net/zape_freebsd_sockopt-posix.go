@@ -46,25 +46,25 @@ func freebsd_interfaceToIPv4Addr(ifi *Interface) (IP, error) {
 	return nil, errNoSuchInterface
 }
 
-func freebsd_setReadBuffer(fd *netFD, bytes int) error {
+func freebsd_setReadBuffer(fd *freebsd_netFD, bytes int) error {
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_RCVBUF, bytes)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setWriteBuffer(fd *netFD, bytes int) error {
+func freebsd_setWriteBuffer(fd *freebsd_netFD, bytes int) error {
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_SNDBUF, bytes)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setKeepAlive(fd *netFD, keepalive bool) error {
+func freebsd_setKeepAlive(fd *freebsd_netFD, keepalive bool) error {
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_KEEPALIVE, freebsd_boolint(keepalive))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
 
-func freebsd_setLinger(fd *netFD, sec int) error {
+func freebsd_setLinger(fd *freebsd_netFD, sec int) error {
 	var l syscall.Linger
 	if sec >= 0 {
 		l.Onoff = 1

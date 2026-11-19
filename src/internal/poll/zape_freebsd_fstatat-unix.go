@@ -13,12 +13,12 @@ import (
 	"syscall"
 )
 
-func (fd *FD) Freebsd_Fstatat(name string, s *syscall.Freebsd_Stat_t, flags int) error {
+func (fd *Freebsd_FD) Fstatat(name string, s *syscall.Freebsd_Stat_t, flags int) error {
 	if err := fd.incref(); err != nil {
 		return err
 	}
 	defer fd.decref()
-	return ignoringEINTR(func() error {
+	return freebsd_ignoringEINTR(func() error {
 		return unix.Freebsd_Fstatat(fd.Sysfd, name, s, flags)
 	})
 }

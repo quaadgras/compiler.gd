@@ -55,7 +55,7 @@ func linux_newNetlinkRouteRequest(proto, seq, family int) []byte {
 }
 
 var linux_pageBufPool = &sync.Pool{New: func() any {
-	b := make([]byte, Getpagesize())
+	b := make([]byte, Linux_Getpagesize())
 	return &b
 }}
 

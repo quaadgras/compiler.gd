@@ -14,7 +14,7 @@ import (
 	"syscall"
 )
 
-func linux_sockaddrToUDP(sa syscall.Sockaddr) Addr {
+func linux_sockaddrToUDP(sa syscall.Linux_Sockaddr) Addr {
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		return &UDPAddr{IP: sa.Addr[0:], Port: sa.Port}
@@ -34,7 +34,7 @@ func (a *UDPAddr) linux_family() int {
 	return syscall.Linux_AF_INET6
 }
 
-func (a *UDPAddr) linux_sockaddr(family int) (syscall.Sockaddr, error) {
+func (a *UDPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {
 		return nil, nil
 	}
@@ -45,20 +45,20 @@ func (a *UDPAddr) linux_toLocal(net string) sockaddr {
 	return &UDPAddr{loopbackIP(net), a.Port, a.Zone}
 }
 
-func (c *UDPConn) linux_readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
+func (c *Linux_UDPConn) readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
 	var n int
 	var err error
 	switch c.fd.family {
 	case syscall.Linux_AF_INET:
 		var from syscall.Linux_SockaddrInet4
-		n, err = c.fd.linux_readFromInet4(b, &from)
+		n, err = c.fd.readFromInet4(b, &from)
 		if err == nil {
 			ip := from.Addr // copy from.Addr; ip escapes, so this line allocates 4 bytes
 			*addr = UDPAddr{IP: ip[:], Port: from.Port}
 		}
 	case syscall.Linux_AF_INET6:
 		var from syscall.Linux_SockaddrInet6
-		n, err = c.fd.linux_readFromInet6(b, &from)
+		n, err = c.fd.readFromInet6(b, &from)
 		if err == nil {
 			ip := from.Addr // copy from.Addr; ip escapes, so this line allocates 16 bytes
 			*addr = UDPAddr{IP: ip[:], Port: from.Port, Zone: zoneCache.name(int(from.ZoneId))}
@@ -71,20 +71,20 @@ func (c *UDPConn) linux_readFrom(b []byte, addr *UDPAddr) (int, *UDPAddr, error)
 	return n, addr, err
 }
 
-func (c *UDPConn) linux_readFromAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
+func (c *Linux_UDPConn) readFromAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	var ip netip.Addr
 	var port int
 	switch c.fd.family {
 	case syscall.Linux_AF_INET:
 		var from syscall.Linux_SockaddrInet4
-		n, err = c.fd.linux_readFromInet4(b, &from)
+		n, err = c.fd.readFromInet4(b, &from)
 		if err == nil {
 			ip = netip.AddrFrom4(from.Addr)
 			port = from.Port
 		}
 	case syscall.Linux_AF_INET6:
 		var from syscall.Linux_SockaddrInet6
-		n, err = c.fd.linux_readFromInet6(b, &from)
+		n, err = c.fd.readFromInet6(b, &from)
 		if err == nil {
 			ip = netip.AddrFrom16(from.Addr).WithZone(zoneCache.name(int(from.ZoneId)))
 			port = from.Port
@@ -96,23 +96,23 @@ func (c *UDPConn) linux_readFromAddrPort(b []byte) (n int, addr netip.AddrPort, 
 	return n, addr, err
 }
 
-func (c *UDPConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
+func (c *Linux_UDPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
 	switch c.fd.family {
 	case syscall.Linux_AF_INET:
 		var sa syscall.Linux_SockaddrInet4
-		n, oobn, flags, err = c.fd.linux_readMsgInet4(b, oob, 0, &sa)
+		n, oobn, flags, err = c.fd.readMsgInet4(b, oob, 0, &sa)
 		ip := netip.AddrFrom4(sa.Addr)
 		addr = netip.AddrPortFrom(ip, uint16(sa.Port))
 	case syscall.Linux_AF_INET6:
 		var sa syscall.Linux_SockaddrInet6
-		n, oobn, flags, err = c.fd.linux_readMsgInet6(b, oob, 0, &sa)
+		n, oobn, flags, err = c.fd.readMsgInet6(b, oob, 0, &sa)
 		ip := netip.AddrFrom16(sa.Addr).WithZone(zoneCache.name(int(sa.ZoneId)))
 		addr = netip.AddrPortFrom(ip, uint16(sa.Port))
 	}
 	return
 }
 
-func (c *UDPConn) linux_writeTo(b []byte, addr *UDPAddr) (int, error) {
+func (c *Linux_UDPConn) writeTo(b []byte, addr *UDPAddr) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -126,19 +126,19 @@ func (c *UDPConn) linux_writeTo(b []byte, addr *UDPAddr) (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.linux_writeToInet4(b, &sa)
+		return c.fd.writeToInet4(b, &sa)
 	case syscall.Linux_AF_INET6:
 		sa, err := linux_ipToSockaddrInet6(addr.IP, addr.Port, addr.Zone)
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.linux_writeToInet6(b, &sa)
+		return c.fd.writeToInet6(b, &sa)
 	default:
 		return 0, &AddrError{Err: "invalid address family", Addr: addr.IP.String()}
 	}
 }
 
-func (c *UDPConn) linux_writeToAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+func (c *Linux_UDPConn) writeToAddrPort(b []byte, addr netip.AddrPort) (int, error) {
 	if c.fd.isConnected {
 		return 0, ErrWriteToConnected
 	}
@@ -152,19 +152,19 @@ func (c *UDPConn) linux_writeToAddrPort(b []byte, addr netip.AddrPort) (int, err
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.linux_writeToInet4(b, &sa)
+		return c.fd.writeToInet4(b, &sa)
 	case syscall.Linux_AF_INET6:
 		sa, err := linux_addrPortToSockaddrInet6(addr)
 		if err != nil {
 			return 0, err
 		}
-		return c.fd.linux_writeToInet6(b, &sa)
+		return c.fd.writeToInet6(b, &sa)
 	default:
 		return 0, &AddrError{Err: "invalid address family", Addr: addr.Addr().String()}
 	}
 }
 
-func (c *UDPConn) linux_writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
+func (c *Linux_UDPConn) writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
 	if c.fd.isConnected && addr != nil {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -175,10 +175,10 @@ func (c *UDPConn) linux_writeMsg(b, oob []byte, addr *UDPAddr) (n, oobn int, err
 	if err != nil {
 		return 0, 0, err
 	}
-	return c.fd.linux_writeMsg(b, oob, sa)
+	return c.fd.writeMsg(b, oob, sa)
 }
 
-func (c *UDPConn) linux_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
+func (c *Linux_UDPConn) writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
 	if c.fd.isConnected && addr.IsValid() {
 		return 0, 0, ErrWriteToConnected
 	}
@@ -196,7 +196,7 @@ func (c *UDPConn) linux_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n,
 			}
 			sap = &sa
 		}
-		return c.fd.linux_writeMsgInet4(b, oob, sap)
+		return c.fd.writeMsgInet4(b, oob, sap)
 	case syscall.Linux_AF_INET6:
 		var sap *syscall.Linux_SockaddrInet6
 		if addr.IsValid() {
@@ -206,13 +206,13 @@ func (c *UDPConn) linux_writeMsgAddrPort(b, oob []byte, addr netip.AddrPort) (n,
 			}
 			sap = &sa
 		}
-		return c.fd.linux_writeMsgInet6(b, oob, sap)
+		return c.fd.writeMsgInet6(b, oob, sap)
 	default:
 		return 0, 0, &AddrError{Err: "invalid address family", Addr: addr.Addr().String()}
 	}
 }
 
-func (sd *sysDialer) linux_dialUDP(ctx context.Context, laddr, raddr *UDPAddr) (*UDPConn, error) {
+func (sd *linux_sysDialer) dialUDP(ctx context.Context, laddr, raddr *UDPAddr) (*Linux_UDPConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -223,10 +223,10 @@ func (sd *sysDialer) linux_dialUDP(ctx context.Context, laddr, raddr *UDPAddr) (
 	if err != nil {
 		return nil, err
 	}
-	return newUDPConn(fd), nil
+	return linux_newUDPConn(fd), nil
 }
 
-func (sl *sysListener) linux_listenUDP(ctx context.Context, laddr *UDPAddr) (*UDPConn, error) {
+func (sl *sysListener) linux_listenUDP(ctx context.Context, laddr *UDPAddr) (*Linux_UDPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -237,10 +237,10 @@ func (sl *sysListener) linux_listenUDP(ctx context.Context, laddr *UDPAddr) (*UD
 	if err != nil {
 		return nil, err
 	}
-	return newUDPConn(fd), nil
+	return linux_newUDPConn(fd), nil
 }
 
-func (sl *sysListener) linux_listenMulticastUDP(ctx context.Context, ifi *Interface, gaddr *UDPAddr) (*UDPConn, error) {
+func (sl *sysListener) linux_listenMulticastUDP(ctx context.Context, ifi *Interface, gaddr *UDPAddr) (*Linux_UDPConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -251,7 +251,7 @@ func (sl *sysListener) linux_listenMulticastUDP(ctx context.Context, ifi *Interf
 	if err != nil {
 		return nil, err
 	}
-	c := newUDPConn(fd)
+	c := linux_newUDPConn(fd)
 	if ip4 := gaddr.IP.To4(); ip4 != nil {
 		if err := linux_listenIPv4MulticastUDP(c, ifi, ip4); err != nil {
 			c.Close()
@@ -266,7 +266,7 @@ func (sl *sysListener) linux_listenMulticastUDP(ctx context.Context, ifi *Interf
 	return c, nil
 }
 
-func linux_listenIPv4MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
+func linux_listenIPv4MulticastUDP(c *Linux_UDPConn, ifi *Interface, ip IP) error {
 	if ifi != nil {
 		if err := linux_setIPv4MulticastInterface(c.fd, ifi); err != nil {
 			return err
@@ -281,7 +281,7 @@ func linux_listenIPv4MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
 	return nil
 }
 
-func linux_listenIPv6MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
+func linux_listenIPv6MulticastUDP(c *Linux_UDPConn, ifi *Interface, ip IP) error {
 	if ifi != nil {
 		if err := linux_setIPv6MulticastInterface(c.fd, ifi); err != nil {
 			return err

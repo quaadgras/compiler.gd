@@ -14,8 +14,8 @@ func freebsd_setTimespec(sec, nsec int64) Timespec {
 	return Timespec{Sec: sec, Nsec: nsec}
 }
 
-func freebsd_setTimeval(sec, usec int64) Timeval {
-	return Timeval{Sec: sec, Usec: usec}
+func freebsd_setTimeval(sec, usec int64) Freebsd_Timeval {
+	return Freebsd_Timeval{Sec: sec, Usec: usec}
 }
 
 func Freebsd_SetKevent(k *Freebsd_Kevent_t, fd, mode, flags int) {
@@ -24,7 +24,7 @@ func Freebsd_SetKevent(k *Freebsd_Kevent_t, fd, mode, flags int) {
 	k.Flags = uint16(flags)
 }
 
-func (iov *Iovec) Freebsd_SetLen(length int) {
+func (iov *Freebsd_Iovec) SetLen(length int) {
 	iov.Len = uint64(length)
 }
 

@@ -28,7 +28,7 @@ var _ = runtime.GOARCH
 func Freebsd_StringSlicePtr(ss []string) []*byte {
 	bb := make([]*byte, len(ss)+1)
 	for i := 0; i < len(ss); i++ {
-		bb[i] = StringBytePtr(ss[i])
+		bb[i] = Freebsd_StringBytePtr(ss[i])
 	}
 	bb[len(ss)] = nil
 	return bb
@@ -75,6 +75,15 @@ func Freebsd_SetNonblock(fd int, nonblocking bool) (err error) {
 	return err
 }
 
+// Credential holds user and group identities to be assumed
+// by a child process started by [StartProcess].
+type Freebsd_Credential struct {
+	Uid         uint32   // User ID.
+	Gid         uint32   // Group ID.
+	Groups      []uint32 // Supplementary group IDs.
+	NoSetGroups bool     // If true, don't set supplementary groups
+}
+
 // ProcAttr holds attributes that will be applied to a new process started
 // by [StartProcess].
 type Freebsd_ProcAttr struct {
@@ -91,7 +100,7 @@ func freebsd_forkExec(argv0 string, argv []string, attr *Freebsd_ProcAttr) (pid 
 	var p [2]int
 	var n int
 	var err1 Errno
-	var wstatus WaitStatus
+	var wstatus Freebsd_WaitStatus
 
 	if attr == nil {
 		attr = &freebsd_zeroProcAttr
@@ -102,7 +111,7 @@ func freebsd_forkExec(argv0 string, argv []string, attr *Freebsd_ProcAttr) (pid 
 	}
 
 	// Convert args to C form.
-	argv0p, err := BytePtrFromString(argv0)
+	argv0p, err := Freebsd_BytePtrFromString(argv0)
 	if err != nil {
 		return 0, err
 	}
@@ -121,14 +130,14 @@ func freebsd_forkExec(argv0 string, argv []string, attr *Freebsd_ProcAttr) (pid 
 
 	var chroot *byte
 	if sys.Chroot != "" {
-		chroot, err = BytePtrFromString(sys.Chroot)
+		chroot, err = Freebsd_BytePtrFromString(sys.Chroot)
 		if err != nil {
 			return 0, err
 		}
 	}
 	var dir *byte
 	if attr.Dir != "" {
-		dir, err = BytePtrFromString(attr.Dir)
+		dir, err = Freebsd_BytePtrFromString(attr.Dir)
 		if err != nil {
 			return 0, err
 		}
@@ -143,11 +152,11 @@ func freebsd_forkExec(argv0 string, argv []string, attr *Freebsd_ProcAttr) (pid 
 		return 0, errorspkg.New("Setctty set but Ctty not valid in child")
 	}
 
-	acquireForkLock()
+	freebsd_acquireForkLock()
 
 	// Allocate child status pipe close on exec.
-	if err = forkExecPipe(p[:]); err != nil {
-		releaseForkLock()
+	if err = freebsd_forkExecPipe(p[:]); err != nil {
+		freebsd_releaseForkLock()
 		return 0, err
 	}
 
@@ -156,10 +165,10 @@ func freebsd_forkExec(argv0 string, argv []string, attr *Freebsd_ProcAttr) (pid 
 	if err1 != 0 {
 		Freebsd_Close(p[0])
 		Freebsd_Close(p[1])
-		releaseForkLock()
+		freebsd_releaseForkLock()
 		return 0, Errno(err1)
 	}
-	releaseForkLock()
+	freebsd_releaseForkLock()
 
 	// Read child error status from pipe.
 	Freebsd_Close(p[1])
@@ -214,9 +223,13 @@ func freebsd_runtime_BeforeExec()
 //go:linkname freebsd_runtime_AfterExec syscall.runtime_AfterExec
 func freebsd_runtime_AfterExec()
 
+// execveLibc is non-nil on OS using libc syscall, set to execve in exec_libc.go; this
+// avoids a build dependency for other platforms.
+var freebsd_execveLibc func(path *byte, argv **byte, envp **byte) error
+
 // Exec invokes the execve(2) system call.
 func Freebsd_Exec(argv0 string, argv []string, envv []string) (err error) {
-	argv0p, err := BytePtrFromString(argv0)
+	argv0p, err := Freebsd_BytePtrFromString(argv0)
 	if err != nil {
 		return err
 	}
@@ -239,7 +252,7 @@ func Freebsd_Exec(argv0 string, argv []string, envv []string) (err error) {
 	switch "freebsd" {
 	case "aix", "darwin", "illumos", "ios", "openbsd", "solaris":
 		// RawSyscall should never be used on these platforms.
-		err1 = execveLibc(argv0p, &argvp[0], &envvp[0])
+		err1 = freebsd_execveLibc(argv0p, &argvp[0], &envvp[0])
 
 	default:
 		_, _, err1 = Freebsd_RawSyscall(Freebsd_SYS_EXECVE,
