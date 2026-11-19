@@ -108,12 +108,17 @@ func sysTime(sys reflect.Value, names ...string) (sec, nsec int64, ok bool) {
 //	dev_t st_rdev; off_t st_size;			// 40, 48
 //	blksize_t st_blksize; blkcnt_t st_blocks;	// 56, 64
 //	struct timespec st_atim, st_mtim, st_ctim;	// 72, 88, 104
-//	long __unused[3];				// 120 (144 bytes)
+//	long __unused[3];				// 120 (144 bytes; 136 on ILP32)
 //
 // What the system's stat structure does not have is made up: one link,
 // 4096-byte blocks, and the modification time for the others.
+// statSize is the size of struct stat: the fields are where they are
+// on LP64 with 4-byte longs too (st_blocks and the timespecs are 8-byte
+// aligned), but for the three longs at the end.
+const statSize = uint64((120 + 3*longSize + 7) &^ 7)
+
 func fillStat(buf Ptr, fi fs.FileInfo) {
-	Memset(buf, 0, 144)
+	Memset(buf, 0, statSize)
 	sys := reflect.Indirect(reflect.ValueOf(fi.Sys()))
 	if sys.IsValid() && sys.Kind() != reflect.Struct {
 		sys = reflect.Value{}
@@ -174,7 +179,7 @@ func Lstat(path, buf Ptr) int32 {
 
 func Fstat(fd int32, buf Ptr) int32 {
 	if of := fdFile(fd); of != nil && of.sp != nil {
-		Memset(buf, 0, 144)
+		Memset(buf, 0, statSize)
 		Store64(Add(buf, 16), 1)
 		Store32(Add(buf, 24), of.sp.Mode())
 		Store32(Add(buf, 28), uint32(os.Getuid()))
