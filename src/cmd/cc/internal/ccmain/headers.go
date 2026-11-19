@@ -296,6 +296,7 @@ int __cc_signbit(double x);
 #define islessequal(x, y) ((x) <= (y))
 #define islessgreater(x, y) ((x) < (y) || (x) > (y))
 #define isunordered(x, y) (isnan(x) || isnan(y))
+#define iseqsig(x, y) __cc_iseqsig((x), (y))
 #define M_E 2.7182818284590452354
 #define M_LOG2E 1.4426950408889634074
 #define M_LOG10E 0.43429448190325182765
@@ -632,6 +633,7 @@ float fsqrt(double x);
 float fsqrtl(long double x);
 double dsqrtl(long double x);
 int __cc_issignaling(double x);
+int __cc_iseqsig(double x, double y);
 int __cc_issignalingf(float x);
 #endif
 `,
@@ -935,6 +937,7 @@ typedef jmp_buf sigjmp_buf;
 	"pthread.h": `#ifndef __CC_PTHREAD_H
 #define __CC_PTHREAD_H
 #include <stddef.h>
+#include <time.h>
 typedef unsigned long pthread_t;
 typedef struct { int __a; } pthread_attr_t;
 typedef struct { long __m[5]; } pthread_mutex_t;
@@ -970,6 +973,8 @@ int pthread_mutexattr_gettype(const pthread_mutexattr_t *restrict attr, int *res
 int pthread_cond_init(pthread_cond_t *restrict cond, const pthread_condattr_t *restrict attr);
 int pthread_cond_destroy(pthread_cond_t *cond);
 int pthread_cond_wait(pthread_cond_t *restrict cond, pthread_mutex_t *restrict mutex);
+int pthread_cond_timedwait(pthread_cond_t *restrict cond, pthread_mutex_t *restrict mutex, const struct timespec *restrict abstime);
+int pthread_mutex_timedlock(pthread_mutex_t *restrict mutex, const struct timespec *restrict abstime);
 int pthread_cond_signal(pthread_cond_t *cond);
 int pthread_cond_broadcast(pthread_cond_t *cond);
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
@@ -978,6 +983,47 @@ int pthread_key_delete(pthread_key_t key);
 void *pthread_getspecific(pthread_key_t key);
 int pthread_setspecific(pthread_key_t key, const void *value);
 int sched_yield(void);
+#endif
+`,
+	"threads.h": `#ifndef __CC_THREADS_H
+#define __CC_THREADS_H
+#include <time.h>
+typedef unsigned long thrd_t;
+typedef int (*thrd_start_t)(void *);
+typedef struct { long __m[5]; } mtx_t;
+typedef struct { long __c[6]; } cnd_t;
+typedef unsigned int tss_t;
+typedef void (*tss_dtor_t)(void *);
+typedef int once_flag;
+#define ONCE_FLAG_INIT 0
+#define TSS_DTOR_ITERATIONS 4
+enum { thrd_success = 0, thrd_busy = 1, thrd_error = 2, thrd_nomem = 3, thrd_timedout = 4 };
+enum { mtx_plain = 0, mtx_recursive = 1, mtx_timed = 2 };
+void call_once(once_flag *flag, void (*func)(void));
+int cnd_broadcast(cnd_t *cond);
+void cnd_destroy(cnd_t *cond);
+int cnd_init(cnd_t *cond);
+int cnd_signal(cnd_t *cond);
+int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timespec *restrict ts);
+int cnd_wait(cnd_t *cond, mtx_t *mtx);
+void mtx_destroy(mtx_t *mtx);
+int mtx_init(mtx_t *mtx, int type);
+int mtx_lock(mtx_t *mtx);
+int mtx_timedlock(mtx_t *restrict mtx, const struct timespec *restrict ts);
+int mtx_trylock(mtx_t *mtx);
+int mtx_unlock(mtx_t *mtx);
+int thrd_create(thrd_t *thr, thrd_start_t func, void *arg);
+thrd_t thrd_current(void);
+int thrd_detach(thrd_t thr);
+int thrd_equal(thrd_t thr0, thrd_t thr1);
+[[noreturn]] void thrd_exit(int res);
+int thrd_join(thrd_t thr, int *res);
+int thrd_sleep(const struct timespec *duration, struct timespec *remaining);
+void thrd_yield(void);
+int tss_create(tss_t *key, tss_dtor_t dtor);
+void tss_delete(tss_t key);
+void *tss_get(tss_t key);
+int tss_set(tss_t key, void *val);
 #endif
 `,
 	"stdatomic.h": `#ifndef __CC_STDATOMIC_H
@@ -1002,6 +1048,8 @@ typedef enum memory_order {
 #define ATOMIC_POINTER_LOCK_FREE 2
 #define atomic_init(obj, value) __cc_atomic_store(obj, value)
 #define atomic_is_lock_free(obj) (sizeof(*(obj)) <= 8)
+void atomic_thread_fence(memory_order order);
+void atomic_signal_fence(memory_order order);
 #define atomic_thread_fence(order) __cc_atomic_fence()
 #define atomic_signal_fence(order) __cc_atomic_fence()
 #define atomic_store(obj, desired) __cc_atomic_store(obj, desired)
@@ -1026,6 +1074,10 @@ typedef enum memory_order {
 #define atomic_fetch_and_explicit(obj, arg, order) __cc_atomic_fetch(obj, '&', arg)
 typedef struct atomic_flag { _Atomic _Bool __v; } atomic_flag;
 #define ATOMIC_FLAG_INIT {0}
+bool atomic_flag_test_and_set(volatile atomic_flag *object);
+bool atomic_flag_test_and_set_explicit(volatile atomic_flag *object, memory_order order);
+void atomic_flag_clear(volatile atomic_flag *object);
+void atomic_flag_clear_explicit(volatile atomic_flag *object, memory_order order);
 #define atomic_flag_test_and_set(obj) __cc_atomic_fetch(&(obj)->__v, '=', 1)
 #define atomic_flag_test_and_set_explicit(obj, order) __cc_atomic_fetch(&(obj)->__v, '=', 1)
 #define atomic_flag_clear(obj) __cc_atomic_store(&(obj)->__v, 0)
@@ -1401,6 +1453,17 @@ float complex csqrtf(float complex z);
 float complex cpowf(float complex x, float complex y);
 float complex csinf(float complex z);
 float complex ccosf(float complex z);
+float complex ctanf(float complex z);
+float complex casinf(float complex z);
+float complex cacosf(float complex z);
+float complex catanf(float complex z);
+float complex csinhf(float complex z);
+float complex ccoshf(float complex z);
+float complex ctanhf(float complex z);
+float complex casinhf(float complex z);
+float complex cacoshf(float complex z);
+float complex catanhf(float complex z);
+float complex cprojf(float complex z);
 long double creall(long double complex z);
 long double cimagl(long double complex z);
 long double complex conjl(long double complex z);

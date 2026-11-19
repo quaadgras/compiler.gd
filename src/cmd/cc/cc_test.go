@@ -128,6 +128,28 @@ func TestIntcap(t *testing.T) {
 	}
 }
 
+// TestThreads compares <threads.h> and the C23 library functions of
+// testdata/threads.c with gcc's (and its C library's).
+func TestThreads(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	dir := module(t, "testdata/threads.c", true)
+	bin := filepath.Join(t.TempDir(), "threads")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, "testdata/threads.c", "-lm", "-latomic").CombinedOutput(); err != nil {
+		t.Skipf("gcc: %v\n%s", err, out) // no C11 threads or libatomic
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.

@@ -6,7 +6,7 @@
 
 package runtime
 
-import _ "unsafe" // for go:linkname
+import "unsafe"
 
 //go:linkname main_main main.main
 func main_main()
@@ -56,7 +56,8 @@ type g struct {
 	waiting    string  // why it is not running, for the deadlock report
 	deferRec   uintptr // its innermost function that defers (lindefer), while it is parked
 
-	fipsIndicator uint8 // crypto/internal/fips140's service indicator, per goroutine
+	fipsIndicator uint8          // crypto/internal/fips140's service indicator, per goroutine
+	c23           unsafe.Pointer // internal/c23's table of the goroutine (c23.go)
 
 	bubble  *synctestBubble // its synctest bubble (synctest.go)
 	durable bool            // parked, durably blocked in its bubble
@@ -300,6 +301,7 @@ const hostStackSize = 64 << 10
 func gdone(gp *g) {
 	gp.dead = true
 	gp.fn = nil
+	gp.c23 = nil
 	ngoroutine--
 	// Its stack is the engine's to give again.
 	nstacks--

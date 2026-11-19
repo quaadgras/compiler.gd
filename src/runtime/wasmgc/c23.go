@@ -32,10 +32,11 @@ func c23Object(p unsafe.Pointer) (unsafe.Pointer, uintptr) {
 //go:linkname c23Stack
 func c23Stack() (lo, hi uintptr) { return 0, 0 }
 
-var c23Unused unsafe.Pointer
-
+// c23GTable returns the goroutine's slot for internal/c23's table of
+// it (_Thread_local objects, errno, pthread keys, thread id).
+//
 //go:linkname c23GTable
-func c23GTable() *unsafe.Pointer { return &c23Unused }
+func c23GTable() *unsafe.Pointer { return &curg.c23 }
 
 //go:linkname c23SetStackMove
 func c23SetStackMove(f func(t unsafe.Pointer, lo, hi, delta uintptr)) {}

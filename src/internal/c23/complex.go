@@ -81,3 +81,14 @@ func Csqrtf(z complex64) complex64   { return complex64(cmplx.Sqrt(complex128(z)
 func Cpowf(z, w complex64) complex64 { return complex64(cmplx.Pow(complex128(z), complex128(w))) }
 func Csinf(z complex64) complex64    { return complex64(cmplx.Sin(complex128(z))) }
 func Ccosf(z complex64) complex64    { return complex64(cmplx.Cos(complex128(z))) }
+func Ctanf(z complex64) complex64    { return complex64(Ctan(complex128(z))) }
+func Casinf(z complex64) complex64   { return complex64(Casin(complex128(z))) }
+func Cacosf(z complex64) complex64   { return complex64(Cacos(complex128(z))) }
+func Catanf(z complex64) complex64   { return complex64(Catan(complex128(z))) }
+func Csinhf(z complex64) complex64   { return complex64(Csinh(complex128(z))) }
+func Ccoshf(z complex64) complex64   { return complex64(Ccosh(complex128(z))) }
+func Ctanhf(z complex64) complex64   { return complex64(Ctanh(complex128(z))) }
+func Casinhf(z complex64) complex64  { return complex64(Casinh(complex128(z))) }
+func Cacoshf(z complex64) complex64  { return complex64(Cacosh(complex128(z))) }
+func Catanhf(z complex64) complex64  { return complex64(Catanh(complex128(z))) }
+func Cprojf(z complex64) complex64   { return complex64(Cproj(complex128(z))) }

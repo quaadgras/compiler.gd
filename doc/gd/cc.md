@@ -343,7 +343,8 @@ What fails on wasm32 and not natively: slimcc's tests that assume
 LP64 (12: `sizeof(long) == 8`, `sizeof(void *) == 8`, `(long)1 << 62`,
 a union with a pointer of 8 bytes), and 4 that fail with 8-byte words
 too (`_Alignas(1024)` objects are not so aligned with split, and
-`_Thread_local` is shared there, above); c-testsuite's 00040 and three
+`_Thread_local` was shared there, counted before each goroutine had its
+own); c-testsuite's 00040 and three
 torture tests (`pr43220`, `20040811-1`, `vla-dealloc-1`) run 30 to 40
 seconds under node, past the suites' 20 (they pass alone, with either
 word); `loop-2e` makes a pointer of `INT_MAX & -32` and stores it, and
@@ -412,8 +413,6 @@ pointer memory with split (the tag), whatever the word size.
   variadic C function. A pointer made from an integer has no capability,
   by design (`(int *)(long)&x` cannot be used), but for one kept in an
   `intptr_t` or a `uintptr_t`.
-- **Thread-local objects with GOWASM=gc,split** are shared by all
-  goroutines (the runtime keeps one side-table slot there).
 - **`free` returns no memory, and finds no use after free or double
   free.** A pointer still kept in live memory after its object is freed
   keeps the object, and what it points to, alive: 256 freed 1 MiB buffers
@@ -451,13 +450,14 @@ are written where the caller says). Function pointers point to
 `setjmp` and `longjmp` work as in Fil-C: `longjmp` may only return to a
 function still running, which is checked. A function that calls `setjmp`
 runs its body in a closure that recovers `longjmp`'s panic and jumps back
-to the `setjmp`'s site. A C thread is a goroutine (`pthread.h`); a
-`_Thread_local` object is each goroutine's, made on first use; `_Atomic`
+to the `setjmp`'s site. A C thread is a goroutine (`pthread.h`, and
+`threads.h` on the same machinery, so `__STDC_NO_THREADS__` is not
+defined); a `_Thread_local` object is each goroutine's, made on first use; `_Atomic`
 objects and `stdatomic.h` use `sync/atomic`, or a lock for small objects
 and pointers.
 
 C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
-`uchar.go`, `time.go`, `errno.go`, `thread.go`), with C prototypes in the
+`uchar.go`, `time.go`, `errno.go`, `thread.go`, `threads.go`), with C prototypes in the
 headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
 
 `go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);

@@ -515,6 +515,18 @@ func Issignaling(x float64) int32 {
 	return B2I(math.IsNaN(x) && b&(1<<51) == 0)
 }
 
+// Iseqsig is iseqsig: x == y, but a NaN is a domain error (errno EDOM
+// and invalid), as in glibc. float and long double arguments are
+// converted to double exactly.
+func Iseqsig(x, y float64) int32 {
+	if x != x || y != y {
+		SetErrno(EDOM)
+		raiseUsed(FeInvalid)
+		return 0
+	}
+	return B2I(x == y)
+}
+
 func Issignalingf(x float32) int32 {
 	b := math.Float32bits(x)
 	return B2I(x != x && b&(1<<22) == 0)

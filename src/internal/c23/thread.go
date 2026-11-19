@@ -6,8 +6,10 @@ package c23
 
 import (
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -53,7 +55,8 @@ func (t *TLS) Get() Ptr {
 
 type thread struct {
 	done chan struct{}
-	ret  Ptr
+	ret  Ptr   // pthread_exit's value, or the start routine's
+	res  int32 // thrd_exit's, or a <threads.h> start routine's
 }
 
 var (
@@ -66,6 +69,13 @@ var (
 // PthreadCreate is pthread_create.
 func PthreadCreate(thr, attr, start, arg Ptr) int32 {
 	f := FuncOf[func(Ptr) Ptr](start)
+	spawn(thr, func(t *thread) { t.ret = f(arg) })
+	return 0
+}
+
+// spawn starts a goroutine that is a thread, whose id it stores at thr
+// (a pthread_t or thrd_t, each an unsigned long), and runs run in it.
+func spawn(thr Ptr, run func(t *thread)) {
 	id := threadN.Add(1)
 	t := &thread{done: make(chan struct{})}
 	threadsMu.Lock()
@@ -81,36 +91,47 @@ func PthreadCreate(thr, attr, start, arg Ptr) int32 {
 		defer func() {
 			if r := recover(); r != nil {
 				if e, ok := r.(threadExit); ok {
-					t.ret = e.ret
+					t.ret, t.res = e.ret, e.res
 					return
 				}
 				panic(r)
 			}
 		}()
-		t.ret = f(arg)
+		run(t)
 	}()
-	return 0
 }
 
-type threadExit struct{ ret Ptr }
+type threadExit struct {
+	ret Ptr
+	res int32
+}
 
 // PthreadExit is pthread_exit.
-func PthreadExit(ret Ptr) { panic(threadExit{ret}) }
+func PthreadExit(ret Ptr) { panic(threadExit{ret: ret}) }
 
 // PthreadJoin is pthread_join.
 func PthreadJoin(id uint64, ret Ptr) int32 {
-	threadsMu.Lock()
-	t := threads[id]
-	delete(threads, id)
-	threadsMu.Unlock()
+	t := join(id)
 	if t == nil {
 		return 3 // ESRCH
 	}
-	<-t.done
 	if Addr(ret) != 0 {
 		StorePtr(ret, t.ret)
 	}
 	return 0
+}
+
+// join waits for thread id to end, and forgets it: nil if there is no
+// such thread to join.
+func join(id uint64) *thread {
+	threadsMu.Lock()
+	t := threads[id]
+	delete(threads, id)
+	threadsMu.Unlock()
+	if t != nil {
+		<-t.done
+	}
+	return t
 }
 
 func PthreadDetach(id uint64) int32 {
@@ -146,7 +167,7 @@ type mutex struct {
 
 var (
 	mutexes sync.Map // uintptr -> *mutex
-	conds   sync.Map // uintptr -> *sync.Cond
+	conds   sync.Map // uintptr -> *cond
 )
 
 func mutexOf(p Ptr) *mutex {
@@ -178,18 +199,30 @@ func PthreadMutexDestroy(m Ptr) int32 {
 	return 0
 }
 
-func PthreadMutexLock(m Ptr) int32 { return mutexOf(m).lock(false) }
+func PthreadMutexLock(m Ptr) int32 { return mutexOf(m).lock(lockWait, time.Time{}) }
 
-func PthreadMutexTrylock(m Ptr) int32 { return mutexOf(m).lock(true) }
+func PthreadMutexTrylock(m Ptr) int32 { return mutexOf(m).lock(lockTry, time.Time{}) }
 
-func (m *mutex) lock(try bool) int32 {
+// PthreadMutexTimedlock is pthread_mutex_timedlock, which gives up at
+// the CLOCK_REALTIME time at ts.
+func PthreadMutexTimedlock(m, ts Ptr) int32 {
+	d, ok := loadDeadline(ts)
+	if !ok {
+		return EINVAL
+	}
+	return mutexOf(m).lock(lockUntil, d)
+}
+
+// How lock waits for a mutex another thread holds.
+const (
+	lockWait  = iota // until it is free
+	lockTry          // not at all: EBUSY
+	lockUntil        // until a deadline: ETIMEDOUT
+)
+
+func (m *mutex) lock(how int, deadline time.Time) int32 {
 	if m.kind == PTHREAD_MUTEX_NORMAL {
-		if try && !m.mu.TryLock() {
-			return EBUSY
-		} else if !try {
-			m.mu.Lock()
-		}
-		return 0
+		return m.acquire(how, deadline)
 	}
 	self := gSelf()
 	if m.owner.Load() == self {
@@ -197,16 +230,44 @@ func (m *mutex) lock(try bool) int32 {
 			m.count++
 			return 0
 		}
-		return If[int32](try, EBUSY, EDEADLK)
+		return If[int32](how == lockTry, EBUSY, EDEADLK)
 	}
-	if try && !m.mu.TryLock() {
-		return EBUSY
-	} else if !try {
-		m.mu.Lock()
+	if e := m.acquire(how, deadline); e != 0 {
+		return e
 	}
 	m.owner.Store(self)
 	m.count = 1
 	return 0
+}
+
+// acquire locks m.mu. sync.Mutex has no timed lock, so a deadline is
+// waited for by trying, at intervals from 50µs that grow to 10ms.
+func (m *mutex) acquire(how int, deadline time.Time) int32 {
+	switch how {
+	case lockWait:
+		m.mu.Lock()
+		return 0
+	case lockTry:
+		return If[int32](m.mu.TryLock(), 0, EBUSY)
+	}
+	for wait := 50 * time.Microsecond; !m.mu.TryLock(); wait = min(2*wait, 10*time.Millisecond) {
+		left := time.Until(deadline)
+		if left <= 0 {
+			return ETIMEDOUT
+		}
+		time.Sleep(min(wait, left))
+	}
+	return 0
+}
+
+// loadDeadline reads the struct timespec at ts, a CLOCK_REALTIME
+// (TIME_UTC) time; false if it is not one.
+func loadDeadline(ts Ptr) (time.Time, bool) {
+	sec, nsec := int64(Load64(ts)), loadLong(Add(ts, 8))
+	if nsec < 0 || nsec >= 1e9 {
+		return time.Time{}, false
+	}
+	return time.Unix(sec, nsec), true
 }
 
 func PthreadMutexUnlock(m Ptr) int32 {
@@ -243,47 +304,117 @@ func PthreadMutexattrGettype(attr, kind Ptr) int32 {
 	return 0
 }
 
-func condOf(c, m Ptr) *sync.Cond {
+// A cond is a pthread_cond_t or cnd_t: the channels of the threads
+// waiting for it, which a signal closes (sync.Cond has no timed wait).
+type cond struct {
+	mu      sync.Mutex
+	waiters []chan struct{}
+}
+
+func condOf(c Ptr) *cond {
+	check(c, 4)
 	a := Addr(c)
 	if v, ok := conds.Load(a); ok {
-		return v.(*sync.Cond)
+		return v.(*cond)
 	}
-	v, _ := conds.LoadOrStore(a, sync.NewCond(&mutexOf(m).mu))
-	return v.(*sync.Cond)
+	v, _ := conds.LoadOrStore(a, new(cond))
+	return v.(*cond)
 }
 
 func PthreadCondInit(c, attr Ptr) int32 { return 0 }
-func PthreadCondDestroy(c Ptr) int32    { return 0 }
 
-// PthreadCondWait is pthread_cond_wait, which unlocks a recursive mutex
-// however many times its owner locked it, and locks it as many again.
-func PthreadCondWait(c, m Ptr) int32 {
-	mu := mutexOf(m)
-	if mu.kind == PTHREAD_MUTEX_NORMAL {
-		condOf(c, m).Wait()
-		return 0
+func PthreadCondDestroy(c Ptr) int32 {
+	if v, ok := conds.Load(Addr(c)); ok {
+		cv := v.(*cond)
+		cv.mu.Lock()
+		if len(cv.waiters) == 0 {
+			conds.Delete(Addr(c))
+		}
+		cv.mu.Unlock()
 	}
+	return 0
+}
+
+// PthreadCondWait is pthread_cond_wait.
+func PthreadCondWait(c, m Ptr) int32 { return condOf(c).wait(mutexOf(m), time.Time{}) }
+
+// PthreadCondTimedwait is pthread_cond_timedwait, which gives up at the
+// CLOCK_REALTIME time at ts.
+func PthreadCondTimedwait(c, m, ts Ptr) int32 {
+	d, ok := loadDeadline(ts)
+	if !ok {
+		return EINVAL
+	}
+	return condOf(c).wait(mutexOf(m), d)
+}
+
+// wait unlocks mu, waits for a signal (or the deadline, if it is not
+// zero: ETIMEDOUT) and locks mu again. A recursive mutex is unlocked
+// however many times its owner locked it, and locked as many again.
+func (cv *cond) wait(mu *mutex, deadline time.Time) int32 {
 	self := gSelf()
-	if mu.owner.Load() != self {
+	if mu.kind != PTHREAD_MUTEX_NORMAL && mu.owner.Load() != self {
 		return EPERM
 	}
+	ch := make(chan struct{})
+	cv.mu.Lock()
+	cv.waiters = append(cv.waiters, ch)
+	cv.mu.Unlock()
+
 	n := mu.count
-	mu.owner.Store(nil)
-	condOf(c, m).Wait()
-	mu.owner.Store(self)
-	mu.count = n
-	return 0
+	if mu.kind != PTHREAD_MUTEX_NORMAL {
+		mu.owner.Store(nil)
+	}
+	mu.mu.Unlock()
+	var e int32
+	if deadline.IsZero() {
+		<-ch
+	} else {
+		t := time.NewTimer(time.Until(deadline))
+		select {
+		case <-ch:
+		case <-t.C:
+			// Timed out, unless a signal took ch from the waiters
+			// meanwhile: then it is that signal's wakeup.
+			cv.mu.Lock()
+			if i := slices.Index(cv.waiters, ch); i >= 0 {
+				cv.waiters = slices.Delete(cv.waiters, i, i+1)
+				e = ETIMEDOUT
+			}
+			cv.mu.Unlock()
+		}
+		t.Stop()
+	}
+	mu.mu.Lock()
+	if mu.kind != PTHREAD_MUTEX_NORMAL {
+		mu.owner.Store(self)
+		mu.count = n
+	}
+	return e
 }
 
 func PthreadCondSignal(c Ptr) int32 {
 	if v, ok := conds.Load(Addr(c)); ok {
-		v.(*sync.Cond).Signal()
+		cv := v.(*cond)
+		cv.mu.Lock()
+		if len(cv.waiters) > 0 {
+			close(cv.waiters[0])
+			cv.waiters = cv.waiters[1:]
+		}
+		cv.mu.Unlock()
 	}
 	return 0
 }
+
 func PthreadCondBroadcast(c Ptr) int32 {
 	if v, ok := conds.Load(Addr(c)); ok {
-		v.(*sync.Cond).Broadcast()
+		cv := v.(*cond)
+		cv.mu.Lock()
+		for _, ch := range cv.waiters {
+			close(ch)
+		}
+		cv.waiters = nil
+		cv.mu.Unlock()
 	}
 	return 0
 }
@@ -585,6 +716,18 @@ func AtomicFetchP(p Ptr, op byte, n int, v Ptr) Ptr {
 // Fence is atomic_thread_fence: every atomic here is sequentially
 // consistent already.
 func Fence() {}
+
+// stdatomic.h's functions, for C that takes their addresses (calls are
+// the macros'). An atomic_flag is an _Atomic _Bool.
+func AtomicThreadFence(order uint32) {}
+
+func AtomicFlagTestAndSet(p Ptr) uint8 { return AtomicFetch[uint8](p, '=', 1) }
+
+func AtomicFlagTestAndSetExplicit(p Ptr, order uint32) uint8 { return AtomicFlagTestAndSet(p) }
+
+func AtomicFlagClear(p Ptr) { AtomicStore[uint8](p, 0) }
+
+func AtomicFlagClearExplicit(p Ptr, order uint32) { AtomicFlagClear(p) }
 
 // Atomic operations on objects other than scalars (an _Atomic struct):
 // under a lock, one of those striped by the object's address.
