@@ -110,6 +110,10 @@ func (e *escape) stmt(n ir.Node) {
 		} else {
 			e.flow(ks[1].deref(e.gd, n, "range-deref"), tmp)
 		}
+		if n.X.Type().IsMap() && e.mapsOn() {
+			// The keys are loaded from the map as the values are.
+			e.flow(ks[0].deref(e.gd, n, "range-deref"), tmp)
+		}
 		e.reassigned(ks, n)
 
 		e.block(n.Body)

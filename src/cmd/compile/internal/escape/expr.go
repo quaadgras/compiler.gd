@@ -88,7 +88,12 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.discard(n.Index)
 	case ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
-		e.discard(n.X)
+		if e.mapsOn() {
+			// What is loaded from a map is reached from it.
+			e.expr(k.deref(e.gd, n, "map index"), n.X)
+		} else {
+			e.discard(n.X)
+		}
 		// Keys used in map lookups do not need to escape.
 		// See "Hashing Pointers" doc in internal/runtime/maps/map.go.
 		e.discard(n.Index)
@@ -237,11 +242,19 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 
 	case ir.OMAPLIT:
 		n := n.(*ir.CompLitExpr)
-		e.spill(k, n)
+		mk := e.spill(k, n)
 
 		// Map keys and values are always stored in the heap.
 		for _, elt := range n.List {
 			elt := elt.(*ir.KeyExpr)
+			if e.mapsOn() {
+				// In the heap that is where the map is: what
+				// the map holds, as the elements of a slice.
+				hk := e.teeHole(mk.note(e.gd, n, "map literal element"), e.ownHeapHole())
+				e.expr(hk, elt.Key)
+				e.expr(hk, elt.Value)
+				continue
+			}
 			e.assignHeap(elt.Key, "map literal key", n)
 			e.assignHeap(elt.Value, "map literal value", n)
 		}

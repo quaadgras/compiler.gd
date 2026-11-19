@@ -139,7 +139,7 @@ func (e *escape) noteCallArg(cs *callSite, bit int, arg ir.Node) {
 	if cs == nil || bit+1 >= maxCallBits {
 		return
 	}
-	if t := arg.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := arg.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return
 	}
 	for {
@@ -298,7 +298,7 @@ func (b *batch) staysPointee(name *ir.Name, locOf map[ir.Node]*location, seen ma
 			case *ir.ParenExpr:
 				return fresh(n.X)
 			}
-		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT:
+		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT, ir.OMAKEMAP, ir.OMAPLIT:
 			return alloc(n)
 		case ir.OADDR:
 			if p := addrThrough(n.(*ir.AddrExpr)); p != nil {
@@ -694,7 +694,7 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 		}
 		break
 	}
-	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return e.heapHole()
 	}
 	return e.storeThrough(p)

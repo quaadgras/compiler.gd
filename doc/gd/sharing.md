@@ -461,6 +461,21 @@ because the callee is unknown.
     the function that converts (interface calls are not edges of the
     order in which functions are analysed); values that are not
     pointers (the box that `convT` makes is not tagged).
+- **Maps** (`escape`'s `mapsOn`, `runtime.makemap`,
+  `internal/runtime/maps`). A map is a container as an object is: what
+  `m[k] = v` stores (the key too) is where the map is, the heap for
+  escaping, and what `m[k]` or a range loads is reached from the map. So
+  a map is a tracked variable or a container known at run time like a
+  pointer, `make(map...)` and a map literal are allocations that can be
+  local (the type passed to `makemap` is tagged; a small map that is
+  local is made by `makemap`, not `makemap_small`, which has no type),
+  and a value stored in a map that is a local object is local. The
+  runtime allocates what a map needs as its header is: the directory,
+  the tables, the groups and the keys and elements that are kept apart
+  (`Map.local`, `table.local`). A clone is not local. A parameter that
+  a map element is returned from leaks at one dereference now
+  (`leaking param: m to result ~r0 level=1`): escaping is as before,
+  since what a map holds is in the heap. `-d=nolocalmap` turns it off.
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -491,8 +506,7 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
    first time. A nil array could take the tag of `P`.
 4. A variable that is assigned once and in scope at the allocation as a
    whole-function container (needs scopes in the graph).
-5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
-   closures.
+5. Strings, `convT*`, closures.
 6. `unique.Make` of a string gets no bits (an SSA rule needs the call to
    follow the conversion of its argument).
 
@@ -544,6 +558,14 @@ only sees a stack address. This is the cost of the design for
   memory).
   `sharePages`, the store barrier, the publish walk and the per-object
   bit stay only under `-d=sharecheck` as the witness.
+  Not before most objects are local: with the page test alone, every
+  store of a slice, string or interface in an object that is not local
+  takes a lock, and today the publish machinery spares the ones that
+  were never handed over. In the tests of `go/types` and `net/http`
+  1 to 2% of the objects were local on 2026-11-19 (the constructors'
+  results end in maps, interfaces and closures), so the order is: more
+  objects local first (maps are in; boxes of `convT`, closures, callees
+  that are parameters), then the guards.
 - Fast paths for local allocation (size-specialized, tiny).
 - Exposed addresses: `exposeptr` of a local object must be refused or the
   conversion made a static sink everywhere (now only in escape analysis).

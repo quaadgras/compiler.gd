@@ -186,7 +186,7 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 		if n.Class != ir.PAUTO || n.IsClosureVar() || n.Addrtaken() || !n.Type().HasPointers() {
 			continue
 		}
-		if !n.Type().IsPtr() && !n.Type().IsSlice() && !n.Type().IsUnsafePtr() {
+		if !n.Type().IsPtr() && !n.Type().IsSlice() && !n.Type().IsUnsafePtr() && !(n.Type().IsMap() && b.mapsOn()) {
 			continue
 		}
 		switch n.Defn.(type) {
@@ -260,7 +260,7 @@ func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func
 			case *ir.ParenExpr:
 				return fresh(n.X)
 			}
-		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT:
+		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT, ir.OMAKEMAP, ir.OMAPLIT:
 			return alloc(n)
 		case ir.OADDR:
 			n := n.(*ir.AddrExpr)
@@ -566,6 +566,17 @@ func (b *batch) localTest(pos src.XPos, u ir.Node) ir.Node {
 	return binary(ir.ORSH, binary(ir.OSUB, n, lit(1)), lit(63))
 }
 
+// mapsOn reports whether a map is a container as an object is: what is
+// stored in it is where the map is, and what is loaded from it is reached
+// from it. The map is then a local object if nothing that it holds is
+// shared, and what it allocates is local with it (runtime.makemap).
+func (b *batch) mapsOn() bool {
+	if b.gd.Debug.NoLocalMap != 0 || !b.callBitsOn() {
+		return false
+	}
+	return true
+}
+
 // purePath returns the variable that the path n starts from, and
 // whether n is a path: a local variable, or a field of or what is
 // pointed to by a path.
@@ -602,7 +613,7 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 	if _, ok := splitHeap(e.gd); !ok {
 		return nil
 	}
-	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return nil
 	}
 	name, plain := e.purePath(p)

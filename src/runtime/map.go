@@ -30,7 +30,7 @@ func makemap64(t *abi.MapType, hint int64, m *maps.Map) unsafe.Pointer {
 	if int64(int(hint)) != hint {
 		hint = 0
 	}
-	return makemap(t, int(hint), m)
+	return makemap(t, int(hint), m) // (t may be tagged)
 }
 
 // makemap_small implements Go map creation for make(map[k]v) and
@@ -65,9 +65,18 @@ func makemap_small() unsafe.Pointer {
 // See go.dev/issue/67401.
 //
 //go:linkname makemap
+//
+// t may be tagged: the map is then a local object (allocType), and so is
+// what it allocates as long as it lives.
 func makemap(t *abi.MapType, hint int, m *maps.Map) unsafe.Pointer {
 	if hint < 0 {
 		hint = 0
+	}
+	if typ, local := allocType((*_type)(unsafe.Pointer(t))); local {
+		t = (*abi.MapType)(unsafe.Pointer(typ))
+		if m == nil {
+			m = (*maps.Map)(mallocgcl(unsafe.Sizeof(maps.Map{}), (*_type)(unsafe.Pointer(abi.TypeFor[maps.Map]())), true, true))
+		}
 	}
 
 	return unsafe.Pointer(maps.NewMap(t, uintptr(hint), m, maxAlloc))

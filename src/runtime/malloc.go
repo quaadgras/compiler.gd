@@ -2253,6 +2253,34 @@ func reflect_unsafe_NewArray(typ *_type, n int) unsafe.Pointer {
 	return newarray(typ, n)
 }
 
+//go:linkname maps_newobjectIn internal/runtime/maps.newobjectIn
+func maps_newobjectIn(typ *_type, local bool) unsafe.Pointer {
+	if local {
+		typ = localType(typ)
+	}
+	return maps_newobject(typ)
+}
+
+//go:linkname maps_newarrayIn internal/runtime/maps.newarrayIn
+func maps_newarrayIn(typ *_type, n int, local bool) unsafe.Pointer {
+	if !local {
+		return maps_newarray(typ, n)
+	}
+	mem, overflow := math.MulUintptr(typ.Size_, uintptr(n))
+	if overflow || mem > maxAlloc || n < 0 {
+		panic(plainError("runtime: allocation size out of range"))
+	}
+	p := mallocgcl(mem, typ, true, true)
+	maps_shareAlloc(p)
+	return p
+}
+
+//go:linkname maps_isLocal internal/runtime/maps.isLocal
+//go:nosplit
+func maps_isLocal(p unsafe.Pointer) bool {
+	return isLocalObject(p)
+}
+
 //go:linkname maps_newarray internal/runtime/maps.newarray
 func maps_newarray(typ *_type, n int) unsafe.Pointer {
 	p := newarray(typ, n)

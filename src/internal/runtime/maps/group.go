@@ -326,10 +326,10 @@ type groupsReference struct {
 // newGroups allocates a new array of length groups.
 //
 // Length must be a power of two.
-func newGroups(typ *abi.MapType, length uint64) groupsReference {
+func newGroups(typ *abi.MapType, length uint64, local bool) groupsReference {
 	return groupsReference{
 		// TODO: make the length type the same throughout.
-		data:       newarray(typ.Group, int(length)),
+		data:       newarrayIn(typ.Group, int(length), local),
 		lengthMask: length - 1,
 	}
 }
@@ -345,7 +345,7 @@ func (g *groupsReference) group(typ *abi.MapType, i uint64) groupReference {
 	}
 }
 
-func cloneGroup(typ *abi.MapType, newGroup, oldGroup groupReference) {
+func cloneGroup(typ *abi.MapType, newGroup, oldGroup groupReference, local bool) {
 	typedmemmove(typ.Group, newGroup.data, oldGroup.data)
 	if typ.IndirectKey() {
 		// Deep copy keys if indirect.
@@ -354,7 +354,7 @@ func cloneGroup(typ *abi.MapType, newGroup, oldGroup groupReference) {
 			if oldKey == nil {
 				continue
 			}
-			newKey := newobject(typ.Key)
+			newKey := newobjectIn(typ.Key, local)
 			typedmemmove(typ.Key, newKey, oldKey)
 			*(*unsafe.Pointer)(newGroup.key(typ, i)) = newKey
 		}
@@ -366,7 +366,7 @@ func cloneGroup(typ *abi.MapType, newGroup, oldGroup groupReference) {
 			if oldElem == nil {
 				continue
 			}
-			newElem := newobject(typ.Elem)
+			newElem := newobjectIn(typ.Elem, local)
 			typedmemmove(typ.Elem, newElem, oldElem)
 			*(*unsafe.Pointer)(newGroup.elem(typ, i)) = newElem
 		}

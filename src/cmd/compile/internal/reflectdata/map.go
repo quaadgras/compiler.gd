@@ -133,7 +133,7 @@ func mapTableType(gd *base.Invocation) *types.Type {
 		//     capacity   uint16
 		//     growthLeft uint16
 		//     localDepth uint8
-		//     // N.B Padding
+		//     local      bool
 		//
 		//     index int
 		//
@@ -147,6 +147,7 @@ func mapTableType(gd *base.Invocation) *types.Type {
 			makefield("capacity", types.Types[types.TUINT16]),
 			makefield("growthLeft", types.Types[types.TUINT16]),
 			makefield("localDepth", types.Types[types.TUINT8]),
+			makefield("local", types.Types[types.TBOOL]),
 			makefield("index", types.Types[types.TINT]),
 			makefield("groups_data", types.Types[types.TUNSAFEPTR]),
 			makefield("groups_lengthMask", types.Types[types.TUINT64]),
