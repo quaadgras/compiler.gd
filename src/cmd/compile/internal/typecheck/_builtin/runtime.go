@@ -147,6 +147,9 @@ func panicrangestate(state int)
 // defer in range over func
 func deferrangefunc() interface{}
 
+// the host system of a GOOS=ape program: runtime.GOOS
+func apeGOOS() string
+
 func rand() uint64
 func rand32() uint32
 

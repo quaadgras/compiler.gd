@@ -746,7 +746,7 @@ func (dir dirFS) Linux_ReadDir(name string) ([]DirEntry, error) {
 	if err != nil {
 		return nil, &PathError{Op: "readdir", Path: name, Err: err}
 	}
-	entries, err := Linux_ReadDir(fullname)
+	entries, err := ReadDir(fullname)
 	if err != nil {
 		if e, ok := err.(*PathError); ok {
 			// See comment in dirFS.Open.

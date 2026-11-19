@@ -85,7 +85,7 @@ func (g *pkgGen) usesHostTests(hp *hostPkg, f *ast.File) string {
 			return why == ""
 		}
 		o := hp.info.Uses[id]
-		if o == nil || o.Pkg() != hp.pkg || o.Parent() != hp.pkg.Scope() {
+		if o == nil || o.Pkg() != hp.pkg {
 			return true
 		}
 		file := filepath.Base(fset.Position(o.Pos()).Filename)
@@ -306,6 +306,20 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 		stack = append(stack, n)
 		switch n := n.(type) {
 		case *ast.SelectorExpr:
+			// Code that asks internal/goos which system it runs on:
+			// under ape the answer is the host's, which a host copy
+			// knows.
+			if x, ok := n.X.(*ast.Ident); ok && !g.isRuntime() && !strings.HasSuffix(fset.Position(n.Pos()).Filename, "_test.go") {
+				if pn, ok := hp.info.Uses[x].(*types.PkgName); ok {
+					p := pn.Imported().Path()
+					// (runtime.GOOS is the host's: the compiler makes
+					// it a run-time value under ape.)
+					if p == "internal/goos" && n.Sel.Name != "IsUnix" {
+						why = p + "." + n.Sel.Name
+						return false
+					}
+				}
+			}
 			sel := hp.info.Selections[n]
 			if sel == nil || sel.Kind() != types.FieldVal {
 				break

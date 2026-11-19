@@ -59,7 +59,7 @@ TEXT ·linux_gettimeofday(SB),NOSPLIT,$0-16
 	// the registers uncleared
 	MOVQ	tv+0(FP), DI
 	MOVQ	$0, SI
-	MOVQ	runtime·vdsoGettimeofdaySym(SB), AX
+	MOVQ	runtime·linux_vdsoGettimeofdaySym(SB), AX
 	TESTQ   AX, AX
 	JZ fallback
 	CALL	AX

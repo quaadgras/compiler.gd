@@ -301,7 +301,7 @@ const (
 	// second classes of spans. What a store goes through is then local
 	// or not by its page (otherPages).
 	localSpans = (goarch.IsAmd64|goarch.IsArm64 == 1) &&
-		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows == 1) &&
+		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows|goos.IsApe == 1) &&
 		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled
 
 	// otherPagesLen is the size of the table that says which pages
@@ -309,7 +309,7 @@ const (
 	// which two pages have the same place in it. Nothing where there
 	// are no spans of local objects. The compiler has the number too
 	// (escape's otherPagesLen).
-	otherPagesOn  = (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows)
+	otherPagesOn  = (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows | goos.IsApe)
 	otherPagesLen = 1 << 23 * otherPagesOn
 
 	// otherPagesMod is otherPagesLen, a power of two, or one where the

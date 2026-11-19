@@ -510,6 +510,13 @@ func (g *pkgGen) writeAsm(hp *hostPkg, name string) {
 	}
 	out := asmSym.ReplaceAllFunc(src, func(b []byte) []byte {
 		m := asmSym.FindSubmatch(b)
+		if len(m[1]) > 0 && g.path != "runtime" {
+			// The runtime's host names.
+			if g.u.hostOnly("runtime", hp.host, string(m[2])) {
+				return []byte("runtime·" + hostName(hp.host, string(m[2])))
+			}
+			return b
+		}
 		if n, ok := funcs[string(m[2])]; ok {
 			return []byte(string(m[1]) + "·" + n)
 		}

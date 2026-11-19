@@ -189,7 +189,7 @@ func linux_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error) 
 // readUniqueDirectoryEntries is like os.ReadDir but omits
 // symlinks that point within the directory.
 func linux_readUniqueDirectoryEntries(dir string) ([]fs.DirEntry, error) {
-	files, err := os.Linux_ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}

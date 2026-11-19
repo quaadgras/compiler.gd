@@ -385,6 +385,34 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 		g.reportf("%s %s: generic", ic.kind, ic.name)
 		return
 	}
+	// The runtime's Go functions of no pointers dispatch by a tail jump
+	// too: no frame of the dispatch shows in tracebacks or to
+	// getcallerpc, and sigpanic is the frame the signal handler made.
+	// (A Go declaration without a body would make pointers escape.)
+	if ic.kind == "func" && g.isRuntime() && g.tailJumpable(ic) {
+		fmt.Fprintf(&g.decls, "\n// %s is the host's, by a tail jump.\n", fn.Name())
+		for _, p := range g.pragmas(hp0, fn) {
+			if strings.HasPrefix(p, "//go:linkname") {
+				fmt.Fprintln(&g.decls, p)
+			}
+		}
+		var ps, rs []string
+		for v := range s.Params().Variables() {
+			ps = append(ps, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		for v := range s.Results().Variables() {
+			rs = append(rs, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		fmt.Fprintf(&g.decls, "func %s(%s) (%s)\n", fn.Name(), strings.Join(ps, ", "), strings.Join(rs, ", "))
+		if g.asmDispatch[fn.Name()] == nil {
+			g.asmDispatch[fn.Name()] = map[string]string{}
+		}
+		for _, hp := range g.hs {
+			g.asmDispatch[fn.Name()][hp.host] = "<ABIInternal>"
+		}
+		return
+	}
+
 	// Assembly functions dispatch in assembly: no Go frame.
 	if ic.kind == "func" && g.asmOnly(ic) {
 		fmt.Fprintf(&g.decls, "\n// %s is the host's, in assembly.\n", fn.Name())
@@ -533,6 +561,47 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 }
 
 func (g *pkgGen) isRuntime() bool { return g.path == "runtime" }
+
+// tailJumpable reports whether every host has a Go body for the
+// function, whose parameters and results hold no pointers and are the
+// same for every host.
+func (g *pkgGen) tailJumpable(ic *iface) bool {
+	for _, hp := range g.hs {
+		fn := hp.obj(ic).(*types.Func)
+		// (A one-argument linkname only makes the name visible.)
+		if !hp.hasBody(fn) || len(strings.Fields(hp.linkname(fn))) == 3 {
+			return false
+		}
+		s := fn.Signature()
+		if s.TypeParams().Len() > 0 || s.Variadic() {
+			return false
+		}
+		for _, t := range sigTypes(s) {
+			if hasPointers(t) || g.hostNamed(hp, t) != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// hasPointers reports whether a value of type t holds pointers.
+func hasPointers(t types.Type) bool {
+	switch t := t.Underlying().(type) {
+	case *types.Basic:
+		return t.Kind() == types.String || t.Kind() == types.UnsafePointer || t.Kind() == types.UntypedNil
+	case *types.Array:
+		return t.Len() > 0 && hasPointers(t.Elem())
+	case *types.Struct:
+		for f := range t.Fields() {
+			if hasPointers(f.Type()) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
 
 // asmOnly reports whether every host implements the function in its own
 // assembly, with no conversions: it dispatches by jumping.
@@ -805,7 +874,7 @@ func (g *pkgGen) writeDispatch() {
 	b.WriteString("import (\n")
 	for _, p := range paths {
 		if p == "unsafe" || regexp.MustCompile(`\b`+regexp.QuoteMeta(imports[p])+`\.`).Match(g.decls.Bytes()) {
-			fmt.Fprintf(&b, "\t%q\n", p)
+			fmt.Fprintf(&b, "\t%q\n", strings.TrimPrefix(p, "vendor/"))
 		}
 	}
 	b.WriteString(")\n\nvar _ unsafe.Pointer\n")
@@ -869,6 +938,36 @@ func (g *pkgGen) writeAsmDispatch() {
 		}
 	}
 	g.outputs["zape_dispatch_"+*arch+".s"] = b.Bytes()
+
+	// Declare the hosts' bodies the jumps reach that no host copy
+	// declares (the shared file declares the function), for vet.
+	var decls bytes.Buffer
+	for _, n := range names {
+		fn, ok := g.first().pkg.Scope().Lookup(n).(*types.Func)
+		if !ok || g.first().inOnly(fn.Pos()) {
+			continue
+		}
+		s := fn.Signature()
+		var ps, rs []string
+		for v := range s.Params().Variables() {
+			ps = append(ps, v.Name()+" "+g.typeString(g.first(), v.Type()))
+		}
+		for v := range s.Results().Variables() {
+			rs = append(rs, v.Name()+" "+g.typeString(g.first(), v.Type()))
+		}
+		for _, hp := range g.hs {
+			fmt.Fprintf(&decls, "\n//go:noescape\nfunc %s(%s) (%s)\n", hostName(hp.host, n), strings.Join(ps, ", "), strings.Join(rs, ", "))
+		}
+	}
+	if decls.Len() > 0 {
+		f := g.outputs["zape_dispatch_"+*arch+".go"]
+		out, err := format.Source(append(f, decls.Bytes()...))
+		if err != nil {
+			g.reportf("dispatch: %v", err)
+			out = append(f, decls.Bytes()...)
+		}
+		g.outputs["zape_dispatch_"+*arch+".go"] = out
+	}
 }
 
 // auditShared reports shared code that asks which system it runs on:
@@ -933,4 +1032,16 @@ func (g *pkgGen) fromAPEFuncs(ic *iface) {
 		}
 		fmt.Fprintf(&g.decls, "var t %s\n%s\nreturn &t\n}\n", hostT, strings.Join(stmts, "\n"))
 	}
+}
+
+// sigTypes returns the types of a signature's parameters and results.
+func sigTypes(s *types.Signature) []types.Type {
+	var ts []types.Type
+	for v := range s.Params().Variables() {
+		ts = append(ts, v.Type())
+	}
+	for v := range s.Results().Variables() {
+		ts = append(ts, v.Type())
+	}
+	return ts
 }

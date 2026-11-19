@@ -189,7 +189,7 @@ func freebsd_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error
 // readUniqueDirectoryEntries is like os.ReadDir but omits
 // symlinks that point within the directory.
 func freebsd_readUniqueDirectoryEntries(dir string) ([]fs.DirEntry, error) {
-	files, err := os.Freebsd_ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}

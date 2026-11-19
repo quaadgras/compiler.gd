@@ -118,12 +118,6 @@ type _Gid_t uint32
 
 type _Socklen uint32
 
-var errEAGAIN error = EAGAIN
-
-var errEINVAL error = EINVAL
-
-var errENOENT error = ENOENT
-
 var execveLibc func(path *byte, argv **byte, envp **byte) error
 
 var ioSync int64

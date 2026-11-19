@@ -34,12 +34,6 @@ type FD struct {
 
 var dupCloexecUnsupported atomic.Bool
 
-var errEAGAIN error = syscall.EAGAIN
-
-var errEINVAL error = syscall.EINVAL
-
-var errENOENT error = syscall.ENOENT
-
 func CopyFileRange(a0 *FD, a1 *FD, a2 int64) (int64, bool, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_CopyFileRange(a0, a1, a2)
@@ -56,24 +50,6 @@ func DupCloseOnExec(a0 int) (int, string, error) {
 	}
 	x0, x1, x2 := Freebsd_DupCloseOnExec(a0)
 	return x0, x1, x2
-}
-
-func SendFile(a0 *FD, a1 uintptr, a2 int64) (int64, error, bool) {
-	if apehost == apeLinux {
-		x0, x1, x2 := Linux_SendFile(a0, a1, a2)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := Freebsd_SendFile(a0, a1, a2)
-	return x0, x1, x2
-}
-
-func errnoErr(a0 syscall.Errno) error {
-	if apehost == apeLinux {
-		x0 := linux_errnoErr(a0)
-		return x0
-	}
-	x0 := freebsd_errnoErr(a0)
-	return x0
 }
 
 func ignoringEINTRIO(a0 func(fd int, p []byte) (int, error), a1 int, a2 []byte) (int, error) {

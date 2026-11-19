@@ -58,17 +58,17 @@ func linux_newRoot(fd int, name string) (*Root, error) {
 	if noFinalizers {
 		r.root.cleanup = runtime.AddCleanup(r.root, linux_closeFD, fd)
 	} else {
-		runtime.SetFinalizer(r.root, (*root).Linux_Close)
+		runtime.SetFinalizer(r.root, (*root).Close)
 	}
 	return r, nil
 }
 
 // openRootInRoot is Root.OpenRoot.
 func linux_openRootInRoot(r *Root, name string) (*Root, error) {
-	fd, err := linux_doInRoot(r, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
+	fd, err := doInRoot(r, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
 		ignoringEINTR(func() error {
 			fd, err = unix.Openat(parent, name, syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC, 0)
-			if linux_isNoFollowErr(err) {
+			if isNoFollowErr(err) {
 				err = linux_checkSymlink(parent, name, err)
 			}
 			return err
@@ -83,7 +83,7 @@ func linux_openRootInRoot(r *Root, name string) (*Root, error) {
 
 // rootOpenFileNolog is Root.OpenFile.
 func linux_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
-	fd, err := linux_doInRoot(root, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
+	fd, err := doInRoot(root, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
 		ignoringEINTR(func() error {
 			openFlag := syscall.Linux_O_NOFOLLOW | syscall.Linux_O_CLOEXEC | flag
 			fd, err = unix.Openat(parent, name, openFlag, uint32(perm))
@@ -91,7 +91,7 @@ func linux_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (
 				// Never follow symlinks when O_CREATE|O_EXCL, no matter
 				// what error the OS returns.
 				isCreateExcl := flag&(Linux_O_CREATE|Linux_O_EXCL) == (Linux_O_CREATE | Linux_O_EXCL)
-				if !isCreateExcl && (linux_isNoFollowErr(err) || err == syscall.Linux_ENOTDIR) {
+				if !isCreateExcl && (isNoFollowErr(err) || err == syscall.Linux_ENOTDIR) {
 					err = linux_checkSymlink(parent, name, err)
 				}
 				// AIX returns ELOOP instead of EEXIST for a dangling symlink.
@@ -119,7 +119,7 @@ func linux_rootOpenDir(parent int, name string) (int, error) {
 	)
 	ignoringEINTR(func() error {
 		fd, err = unix.Openat(parent, name, syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC|syscall.Linux_O_DIRECTORY, 0)
-		if linux_isNoFollowErr(err) || err == syscall.Linux_ENOTDIR {
+		if isNoFollowErr(err) || err == syscall.Linux_ENOTDIR {
 			err = linux_checkSymlink(parent, name, err)
 		} else if err == syscall.Linux_ENOTSUP || err == syscall.Linux_EOPNOTSUPP {
 			// ENOTSUP and EOPNOTSUPP are often, but not always, the same errno.
@@ -133,7 +133,7 @@ func linux_rootOpenDir(parent int, name string) (int, error) {
 }
 
 func linux_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
-	fi, err := linux_doInRoot(r, name, 0, nil, func(parent sysfdType, n string, endsInSlash bool) (FileInfo, error) {
+	fi, err := doInRoot(r, name, 0, nil, func(parent sysfdType, n string, endsInSlash bool) (FileInfo, error) {
 		fi, err := linux_lstatatWithName(parent, name, n)
 		if err != nil {
 			return nil, err
@@ -150,7 +150,7 @@ func linux_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
 }
 
 func linux_rootSymlink(r *Root, oldname, newname string) error {
-	_, err := linux_doInRoot(r, newname, 0, nil, func(parent sysfdType, name string, endsInSlash bool) (struct{}, error) {
+	_, err := doInRoot(r, newname, 0, nil, func(parent sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_symlinkat(oldname, parent, name)
 	})
 	if err != nil {

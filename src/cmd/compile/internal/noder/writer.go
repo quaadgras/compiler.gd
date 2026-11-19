@@ -98,6 +98,12 @@ type pkgWriter struct {
 
 	apeAsmDefs map[string]bool // symbols a GOOS=ape variant's assembly defines
 
+	// Under GOOS=ape: the package's files, and its constants computed
+	// from runtime.GOOS (1 yes, 2 no, 3 being decided) and their values.
+	files      []*syntax.File
+	hostConsts map[*types2.Const]int8
+	constInits map[*types2.Const]syntax.Expr
+
 	// cgoPragmas accumulates any //go:cgo_* pragmas that need to be
 	// passed through to cmd/link.
 	cgoPragmas [][]string
@@ -168,6 +174,11 @@ func (pw *pkgWriter) maybeTypeAndValue(x syntax.Expr) (syntax.TypeAndValue, bool
 		}
 	}
 
+	if tv.Value != nil && pw.hostDependent(x) {
+		// Under GOOS=ape, runtime.GOOS is the host's, known only at
+		// run time, and so is any constant computed from it.
+		tv.Value = nil
+	}
 	return tv, tv.Type != nil
 }
 
@@ -2005,6 +2016,11 @@ func (w *writer) expr(expr syntax.Expr) {
 		}
 	}
 
+	if c, ok := obj.(*types2.Const); ok && w.p.hostConst(c) {
+		w.hostConstExpr(expr, c)
+		return
+	}
+
 	if obj != nil {
 		if len(targs) != 0 {
 			obj := obj.(*types2.Func)
@@ -2967,6 +2983,7 @@ func (c *declCollector) Visit(n syntax.Node) syntax.Visitor {
 func (pw *pkgWriter) collectDecls(noders []*noder) {
 	var typegen int
 	for _, p := range noders {
+		pw.files = append(pw.files, p.file)
 		var file fileImports
 
 		syntax.Walk(p.file, &declCollector{

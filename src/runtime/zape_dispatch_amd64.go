@@ -95,58 +95,23 @@ func addSecret(a0 unsafe.Pointer, a1 uintptr) {
 	freebsd_addSecret(a0, a1)
 }
 
-//go:nosplit
-//go:nowritebarrierrec
-func clearSignalHandlers() {
-	if apehost == apeLinux {
-		linux_clearSignalHandlers()
-		return
-	}
-	freebsd_clearSignalHandlers()
-}
+// clearSignalHandlers is the host's, by a tail jump.
+func clearSignalHandlers()
 
-//go:nosplit
-func crash() {
-	if apehost == apeLinux {
-		linux_crash()
-		return
-	}
-	freebsd_crash()
-}
+// crash is the host's, by a tail jump.
+func crash()
 
-func defaultGOMAXPROCS(a0 int32) int32 {
-	if apehost == apeLinux {
-		x0 := linux_defaultGOMAXPROCS(a0)
-		return x0
-	}
-	x0 := freebsd_defaultGOMAXPROCS(a0)
-	return x0
-}
+// defaultGOMAXPROCS is the host's, by a tail jump.
+func defaultGOMAXPROCS(ncpu int32) int32
 
-func defaultGOMAXPROCSInit() {
-	if apehost == apeLinux {
-		linux_defaultGOMAXPROCSInit()
-		return
-	}
-	freebsd_defaultGOMAXPROCSInit()
-}
+// defaultGOMAXPROCSInit is the host's, by a tail jump.
+func defaultGOMAXPROCSInit()
 
-func defaultGOMAXPROCSUpdateGODEBUG() {
-	if apehost == apeLinux {
-		linux_defaultGOMAXPROCSUpdateGODEBUG()
-		return
-	}
-	freebsd_defaultGOMAXPROCSUpdateGODEBUG()
-}
+// defaultGOMAXPROCSUpdateGODEBUG is the host's, by a tail jump.
+func defaultGOMAXPROCSUpdateGODEBUG()
 
-//go:nosplit
-func eraseSecretsSignalStk() {
-	if apehost == apeLinux {
-		linux_eraseSecretsSignalStk()
-		return
-	}
-	freebsd_eraseSecretsSignalStk()
-}
+// eraseSecretsSignalStk is the host's, by a tail jump.
+func eraseSecretsSignalStk()
 
 //go:linkname fcntl
 //go:nosplit
@@ -177,60 +142,23 @@ func futexwakeup(a0 *uint32, a1 uint32) {
 	freebsd_futexwakeup(a0, a1)
 }
 
-func goenvs() {
-	if apehost == apeLinux {
-		linux_goenvs()
-		return
-	}
-	freebsd_goenvs()
-}
+// goenvs is the host's, by a tail jump.
+func goenvs()
 
-//go:nosplit
-func inVDSOPage(a0 uintptr) bool {
-	if apehost == apeLinux {
-		x0 := linux_inVDSOPage(a0)
-		return x0
-	}
-	x0 := freebsd_inVDSOPage(a0)
-	return x0
-}
+// inVDSOPage is the host's, by a tail jump.
+func inVDSOPage(pc uintptr) bool
 
-func initSecureMode() {
-	if apehost == apeLinux {
-		linux_initSecureMode()
-		return
-	}
-	freebsd_initSecureMode()
-}
+// initSecureMode is the host's, by a tail jump.
+func initSecureMode()
 
-//go:nosplit
-//go:nowritebarrierrec
-func initsig(a0 bool) {
-	if apehost == apeLinux {
-		linux_initsig(a0)
-		return
-	}
-	freebsd_initsig(a0)
-}
+// initsig is the host's, by a tail jump.
+func initsig(preinit bool)
 
-func isSecureMode() bool {
-	if apehost == apeLinux {
-		x0 := linux_isSecureMode()
-		return x0
-	}
-	x0 := freebsd_isSecureMode()
-	return x0
-}
+// isSecureMode is the host's, by a tail jump.
+func isSecureMode() bool
 
-//go:nosplit
-//go:nowritebarrierrec
-func libpreinit() {
-	if apehost == apeLinux {
-		linux_libpreinit()
-		return
-	}
-	freebsd_libpreinit()
-}
+// libpreinit is the host's, by a tail jump.
+func libpreinit()
 
 //go:nowritebarrierrec
 func mdestroy(a0 *m) {
@@ -241,13 +169,8 @@ func mdestroy(a0 *m) {
 	freebsd_mdestroy(a0)
 }
 
-func minit() {
-	if apehost == apeLinux {
-		linux_minit()
-		return
-	}
-	freebsd_minit()
-}
+// minit is the host's, by a tail jump.
+func minit()
 
 func mpreinit(a0 *m) {
 	if apehost == apeLinux {
@@ -278,40 +201,17 @@ func nanotime1() int64 {
 	return x0
 }
 
-func needZeroAfterSysUnusedOS() bool {
-	if apehost == apeLinux {
-		x0 := linux_needZeroAfterSysUnusedOS()
-		return x0
-	}
-	x0 := freebsd_needZeroAfterSysUnusedOS()
-	return x0
-}
+// needZeroAfterSysUnusedOS is the host's, by a tail jump.
+func needZeroAfterSysUnusedOS() bool
 
-func netpoll(a0 int64) (gList, int32) {
-	if apehost == apeLinux {
-		x0, x1 := linux_netpoll(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_netpoll(a0)
-	return x0, x1
-}
+// netpoll is the host's, by a tail jump.
+func netpoll(delay int64) (gList, int32)
 
-func netpollBreak() {
-	if apehost == apeLinux {
-		linux_netpollBreak()
-		return
-	}
-	freebsd_netpollBreak()
-}
+// netpollBreak is the host's, by a tail jump.
+func netpollBreak()
 
-func netpollIsPollDescriptor(a0 uintptr) bool {
-	if apehost == apeLinux {
-		x0 := linux_netpollIsPollDescriptor(a0)
-		return x0
-	}
-	x0 := freebsd_netpollIsPollDescriptor(a0)
-	return x0
-}
+// netpollIsPollDescriptor is the host's, by a tail jump.
+func netpollIsPollDescriptor(fd uintptr) bool
 
 func netpollarm(a0 *pollDesc, a1 int) {
 	if apehost == apeLinux {
@@ -321,22 +221,11 @@ func netpollarm(a0 *pollDesc, a1 int) {
 	freebsd_netpollarm(a0, a1)
 }
 
-func netpollclose(a0 uintptr) uintptr {
-	if apehost == apeLinux {
-		x0 := linux_netpollclose(a0)
-		return x0
-	}
-	x0 := freebsd_netpollclose(a0)
-	return uintptr(x0)
-}
+// netpollclose is the host's, by a tail jump.
+func netpollclose(fd uintptr) uintptr
 
-func netpollinit() {
-	if apehost == apeLinux {
-		linux_netpollinit()
-		return
-	}
-	freebsd_netpollinit()
-}
+// netpollinit is the host's, by a tail jump.
+func netpollinit()
 
 func netpollopen(a0 uintptr, a1 *pollDesc) uintptr {
 	if apehost == apeLinux {
@@ -365,27 +254,16 @@ func newosproc0(a0 uintptr, a1 unsafe.Pointer) {
 	freebsd_newosproc0(a0, a1)
 }
 
-func osinit() {
-	if apehost == apeLinux {
-		linux_osinit()
-		return
-	}
-	freebsd_osinit()
-}
+// osinit is the host's, by a tail jump.
+func osinit()
 
 // osyield is the host's, in assembly.
 //
 //go:noescape
 func osyield()
 
-//go:nosplit
-func osyield_no_g() {
-	if apehost == apeLinux {
-		linux_osyield_no_g()
-		return
-	}
-	freebsd_osyield_no_g()
-}
+// osyield_no_g is the host's, by a tail jump.
+func osyield_no_g()
 
 // pipe2 is the host's, in assembly.
 //
@@ -419,64 +297,26 @@ func sbrk0() uintptr {
 	return x0
 }
 
-func setProcessCPUProfiler(a0 int32) {
-	if apehost == apeLinux {
-		linux_setProcessCPUProfiler(a0)
-		return
-	}
-	freebsd_setProcessCPUProfiler(a0)
-}
+// setProcessCPUProfiler is the host's, by a tail jump.
+func setProcessCPUProfiler(hz int32)
 
-func setThreadCPUProfiler(a0 int32) {
-	if apehost == apeLinux {
-		linux_setThreadCPUProfiler(a0)
-		return
-	}
-	freebsd_setThreadCPUProfiler(a0)
-}
+// setThreadCPUProfiler is the host's, by a tail jump.
+func setThreadCPUProfiler(hz int32)
 
-func setVMANameSupported() bool {
-	if apehost == apeLinux {
-		x0 := linux_setVMANameSupported()
-		return x0
-	}
-	x0 := freebsd_setVMANameSupported()
-	return x0
-}
+// setVMANameSupported is the host's, by a tail jump.
+func setVMANameSupported() bool
 
-//go:nosplit
-//go:nowritebarrierrec
-func sigblock(a0 bool) {
-	if apehost == apeLinux {
-		linux_sigblock(a0)
-		return
-	}
-	freebsd_sigblock(a0)
-}
+// sigblock is the host's, by a tail jump.
+func sigblock(exiting bool)
 
-func sigdisable(a0 uint32) {
-	if apehost == apeLinux {
-		linux_sigdisable(a0)
-		return
-	}
-	freebsd_sigdisable(a0)
-}
+// sigdisable is the host's, by a tail jump.
+func sigdisable(sig uint32)
 
-func sigenable(a0 uint32) {
-	if apehost == apeLinux {
-		linux_sigenable(a0)
-		return
-	}
-	freebsd_sigenable(a0)
-}
+// sigenable is the host's, by a tail jump.
+func sigenable(sig uint32)
 
-func sigignore(a0 uint32) {
-	if apehost == apeLinux {
-		linux_sigignore(a0)
-		return
-	}
-	freebsd_sigignore(a0)
-}
+// sigignore is the host's, by a tail jump.
+func sigignore(sig uint32)
 
 func signame(a0 uint32) string {
 	if apehost == apeLinux {
@@ -487,14 +327,10 @@ func signame(a0 uint32) string {
 	return x0
 }
 
+// sigpanic is the host's, by a tail jump.
+//
 //go:linkname sigpanic
-func sigpanic() {
-	if apehost == apeLinux {
-		linux_sigpanic()
-		return
-	}
-	freebsd_sigpanic()
-}
+func sigpanic()
 
 //go:nosplit
 //go:nowritebarrierrec
@@ -607,14 +443,8 @@ func time_now() (int64, int32, int64) {
 	return x0, x1, x2
 }
 
-//go:nosplit
-func unminit() {
-	if apehost == apeLinux {
-		linux_unminit()
-		return
-	}
-	freebsd_unminit()
-}
+// unminit is the host's, by a tail jump.
+func unminit()
 
 func vgetrandomDestroy(a0 *m) {
 	if apehost == apeLinux {
@@ -755,3 +585,81 @@ func apeinitHost() {
 		_O_TRUNC = int32(freebsd__O_TRUNC)
 	}
 }
+
+//go:noescape
+func linux_callCgoMmap(addr unsafe.Pointer, n uintptr, prot int32, flags int32, fd int32, off uint32) uintptr
+
+//go:noescape
+func freebsd_callCgoMmap(addr unsafe.Pointer, n uintptr, prot int32, flags int32, fd int32, off uint32) uintptr
+
+//go:noescape
+func linux_callCgoMunmap(addr unsafe.Pointer, n uintptr)
+
+//go:noescape
+func freebsd_callCgoMunmap(addr unsafe.Pointer, n uintptr)
+
+//go:noescape
+func linux_closefd(fd int32) int32
+
+//go:noescape
+func freebsd_closefd(fd int32) int32
+
+//go:noescape
+func linux_exit(code int32)
+
+//go:noescape
+func freebsd_exit(code int32)
+
+//go:noescape
+func linux_exitThread(wait *atomic.Uint32)
+
+//go:noescape
+func freebsd_exitThread(wait *atomic.Uint32)
+
+//go:noescape
+func linux_madvise(addr unsafe.Pointer, n uintptr, flags int32) int32
+
+//go:noescape
+func freebsd_madvise(addr unsafe.Pointer, n uintptr, flags int32) int32
+
+//go:noescape
+func linux_open(name *byte, mode int32, perm int32) int32
+
+//go:noescape
+func freebsd_open(name *byte, mode int32, perm int32) int32
+
+//go:noescape
+func linux_read(fd int32, p unsafe.Pointer, n int32) int32
+
+//go:noescape
+func freebsd_read(fd int32, p unsafe.Pointer, n int32) int32
+
+//go:noescape
+func linux_settls()
+
+//go:noescape
+func freebsd_settls()
+
+//go:noescape
+func linux_sysMmap(addr unsafe.Pointer, n uintptr, prot int32, flags int32, fd int32, off uint32) (p unsafe.Pointer, err int)
+
+//go:noescape
+func freebsd_sysMmap(addr unsafe.Pointer, n uintptr, prot int32, flags int32, fd int32, off uint32) (p unsafe.Pointer, err int)
+
+//go:noescape
+func linux_sysMunmap(addr unsafe.Pointer, n uintptr)
+
+//go:noescape
+func freebsd_sysMunmap(addr unsafe.Pointer, n uintptr)
+
+//go:noescape
+func linux_usleep(usec uint32)
+
+//go:noescape
+func freebsd_usleep(usec uint32)
+
+//go:noescape
+func linux_write1(fd uintptr, p unsafe.Pointer, n int32) int32
+
+//go:noescape
+func freebsd_write1(fd uintptr, p unsafe.Pointer, n int32) int32

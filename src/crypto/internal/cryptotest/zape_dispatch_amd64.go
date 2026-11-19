@@ -27,3 +27,11 @@ func BoundarySlices(a0 *testing.T, a1 int) ([]byte, []byte) {
 	x0, x1 := Freebsd_BoundarySlices(a0, a1)
 	return x0, x1
 }
+
+func TestAllImplementations(a0 *testing.T, a1 string, a2 func(t *testing.T)) {
+	if apehost == apeLinux {
+		Linux_TestAllImplementations(a0, a1, a2)
+		return
+	}
+	Freebsd_TestAllImplementations(a0, a1, a2)
+}

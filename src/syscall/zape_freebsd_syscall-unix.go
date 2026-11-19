@@ -114,6 +114,14 @@ func (e Errno) Freebsd_Timeout() bool {
 	return e == Freebsd_EAGAIN || e == Freebsd_EWOULDBLOCK || e == Freebsd_ETIMEDOUT
 }
 
+// Do the interface allocations only once for common
+// Errno values.
+var (
+	freebsd_errEAGAIN error = Freebsd_EAGAIN
+	freebsd_errEINVAL error = Freebsd_EINVAL
+	freebsd_errENOENT error = Freebsd_ENOENT
+)
+
 // errnoErr returns common boxed Errno values, to prevent
 // allocations at runtime.
 func freebsd_errnoErr(e Errno) error {
@@ -121,11 +129,11 @@ func freebsd_errnoErr(e Errno) error {
 	case 0:
 		return nil
 	case Freebsd_EAGAIN:
-		return errEAGAIN
+		return freebsd_errEAGAIN
 	case Freebsd_EINVAL:
-		return errEINVAL
+		return freebsd_errEINVAL
 	case Freebsd_ENOENT:
-		return errENOENT
+		return freebsd_errENOENT
 	}
 	return e
 }

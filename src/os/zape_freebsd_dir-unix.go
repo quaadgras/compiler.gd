@@ -131,9 +131,9 @@ func (f *File) freebsd_readdir(n int, mode readdirMode) (names []string, dirents
 		if n > 0 { // see 'n == 0' comment above
 			n--
 		}
-		if mode == freebsd_readdirName {
+		if mode == readdirName {
 			names = append(names, string(name))
-		} else if mode == freebsd_readdirDirEntry {
+		} else if mode == readdirDirEntry {
 			de, err := freebsd_newUnixDirent(f, string(name), freebsd_direntType(rec))
 			if IsNotExist(err) {
 				// File disappeared between readdir and stat.

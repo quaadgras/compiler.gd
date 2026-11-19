@@ -25,6 +25,17 @@ const (
 	apeFreebsd
 )
 
+// apeGOOSNames are the hosts' names, by apehost.
+var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd"}
+
+// apeGOOS is GOOS: the compiler compiles every use of GOOS (and of a
+// constant computed from it) as a call of apeGOOS.
+//
+//go:nosplit
+func apeGOOS() string {
+	return apeGOOSNames[apehost]
+}
+
 // apeinit sets what differs between hosts. args calls it first.
 //
 //go:nosplit

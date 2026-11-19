@@ -26,23 +26,58 @@ func (g *pkgGen) xtestOff() map[string]bool {
 			count[name]++
 		}
 	}
+	shared := map[string]bool{}
 	for name, n := range count {
-		if n != len(g.hs) {
-			continue
+		if n == len(g.hs) {
+			shared[name] = true
+			off[name] = false
 		}
-		off[name] = false
-		for _, hp := range g.hs {
-			why := g.xtestDepends(hp, hp.xfiles[name])
-			if why != "" {
-				if *verbose {
-					g.reportf("external test left out: %s (%s)", name, why)
+	}
+	for changed := true; changed; {
+		changed = false
+		for name := range shared {
+			if off[name] {
+				continue
+			}
+			for _, hp := range g.hs {
+				why := g.xtestDepends(hp, hp.xfiles[name])
+				if why == "" {
+					why = xtestUsesOff(hp, hp.xfiles[name], shared, off)
 				}
-				off[name] = true
-				break
+				if why != "" {
+					if *verbose {
+						g.reportf("external test left out: %s (%s)", name, why)
+					}
+					off[name] = true
+					changed = true
+					break
+				}
 			}
 		}
 	}
 	return off
+}
+
+// xtestUsesOff says why f uses what an external test file that does not
+// build for ape declares, or "".
+func xtestUsesOff(hp *hostPkg, f *ast.File, shared, off map[string]bool) string {
+	why := ""
+	ast.Inspect(f, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok || why != "" {
+			return why == ""
+		}
+		o := hp.xinfo.Uses[id]
+		if o == nil || o.Pkg() == nil || o.Pkg().Path() != hp.bp.ImportPath+"_test" {
+			return true
+		}
+		file := filepath.Base(filepathOf(o))
+		if !shared[file] || off[file] {
+			why = o.Name() + " of " + file
+		}
+		return true
+	})
+	return why
 }
 
 func (g *pkgGen) xtestDepends(hp *hostPkg, f *ast.File) string {

@@ -6,19 +6,20 @@ package objabi
 
 import (
 	"internal/abi"
+	"internal/syslist"
 	"strings"
 )
 
 var funcIDs = map[string]abi.FuncID{
-	"abort":              abi.FuncID_abort,
-	"asmcgocall":         abi.FuncID_asmcgocall,
-	"asyncPreempt":       abi.FuncID_asyncPreempt,
-	"cgocallback":        abi.FuncID_cgocallback,
+	"abort":        abi.FuncID_abort,
+	"asmcgocall":   abi.FuncID_asmcgocall,
+	"asyncPreempt": abi.FuncID_asyncPreempt,
+	"cgocallback":  abi.FuncID_cgocallback,
 	// fastcbentry (the fastcb direct C-ABI virtual-call entry) arranges its
 	// goroutine-stack frame exactly like cgocallback — fake return PC on top
 	// of a fixed-size frame matching the tracked pcsp delta — so it shares
 	// cgocallback's funcID to get the same SPWrite exemption in the unwinder.
-	"fastcbentry": abi.FuncID_cgocallback,
+	"fastcbentry":        abi.FuncID_cgocallback,
 	"corostart":          abi.FuncID_corostart,
 	"debugCallV2":        abi.FuncID_debugCallV2,
 	"gcBgMarkWorker":     abi.FuncID_gcBgMarkWorker,
@@ -49,9 +50,47 @@ func GetFuncID(name string, isWrapper bool) abi.FuncID {
 		return abi.FuncIDWrapper
 	}
 	if strings.HasPrefix(name, "runtime.") {
-		if id, ok := funcIDs[name[len("runtime."):]]; ok {
+		if id, ok := funcIDs[APEUnprefixed(name[len("runtime."):])]; ok {
 			return id
 		}
 	}
 	return abi.FuncIDNormal
+}
+
+// APEUnprefixed returns the name a GOOS=ape host copy's name
+// (linux_sigpanic, Linux_Stat) was made from, or name.
+func APEUnprefixed(name string) string {
+	for _, h := range syslist.APEHosts {
+		for _, p := range [...]string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
+			if rest, ok := strings.CutPrefix(name, p); ok && rest != "" {
+				return rest
+			}
+		}
+	}
+	return name
+}
+
+// APEDisplayName returns the symbol name of a GOOS=ape host copy's
+// function as people know it: runtime.linux_sigpanic is
+// runtime.sigpanic, syscall.(*Linux_Stat_t).f is syscall.(*Stat_t).f.
+func APEDisplayName(name string) string {
+	start := strings.LastIndexByte(name, '/') + 1
+	parts := strings.Split(name[start:], ".")
+	changed := false
+	for i := 1; i < len(parts); i++ {
+		p := parts[i]
+		lead := ""
+		for strings.HasPrefix(p, "(") || strings.HasPrefix(p, "*") {
+			lead += p[:1]
+			p = p[1:]
+		}
+		if u := APEUnprefixed(p); u != p {
+			parts[i] = lead + u
+			changed = true
+		}
+	}
+	if !changed {
+		return name
+	}
+	return name[:start] + strings.Join(parts, ".")
 }

@@ -122,139 +122,140 @@ var runtimeDecls = [...]struct {
 	{"efaceeq", funcTag, 87},
 	{"panicrangestate", funcTag, 88},
 	{"deferrangefunc", funcTag, 12},
-	{"rand", funcTag, 89},
-	{"rand32", funcTag, 90},
-	{"makemap64", funcTag, 92},
-	{"makemap", funcTag, 93},
-	{"makemap_small", funcTag, 94},
-	{"mapaccess1", funcTag, 95},
-	{"mapaccess1_fast32", funcTag, 96},
-	{"mapaccess1_fast64", funcTag, 97},
-	{"mapaccess1_faststr", funcTag, 98},
-	{"mapaccess1_fat", funcTag, 99},
-	{"mapaccess2", funcTag, 100},
-	{"mapaccess2_fast32", funcTag, 101},
-	{"mapaccess2_fast64", funcTag, 102},
-	{"mapaccess2_faststr", funcTag, 103},
-	{"mapaccess2_fat", funcTag, 104},
-	{"mapassign", funcTag, 95},
-	{"mapassign_fast32", funcTag, 96},
-	{"mapassign_fast32ptr", funcTag, 105},
-	{"mapassign_fast64", funcTag, 97},
-	{"mapassign_fast64ptr", funcTag, 105},
-	{"mapassign_faststr", funcTag, 98},
-	{"mapIterStart", funcTag, 106},
-	{"mapdelete", funcTag, 106},
-	{"mapdelete_fast32", funcTag, 107},
-	{"mapdelete_fast64", funcTag, 108},
-	{"mapdelete_faststr", funcTag, 109},
-	{"mapIterNext", funcTag, 110},
-	{"mapclear", funcTag, 111},
-	{"makechan64", funcTag, 113},
-	{"makechan", funcTag, 114},
-	{"chanrecv1", funcTag, 116},
-	{"chanrecv2", funcTag, 117},
-	{"chansend1", funcTag, 119},
-	{"closechan", funcTag, 120},
-	{"chanlen", funcTag, 121},
-	{"chancap", funcTag, 121},
-	{"writeBarrier", varTag, 123},
-	{"typedmemmove", funcTag, 124},
-	{"typedmemclr", funcTag, 125},
-	{"typedslicecopy", funcTag, 126},
-	{"selectnbsend", funcTag, 127},
-	{"selectnbrecv", funcTag, 128},
-	{"selectsetpc", funcTag, 129},
-	{"selectgo", funcTag, 130},
+	{"apeGOOS", funcTag, 89},
+	{"rand", funcTag, 90},
+	{"rand32", funcTag, 91},
+	{"makemap64", funcTag, 93},
+	{"makemap", funcTag, 94},
+	{"makemap_small", funcTag, 95},
+	{"mapaccess1", funcTag, 96},
+	{"mapaccess1_fast32", funcTag, 97},
+	{"mapaccess1_fast64", funcTag, 98},
+	{"mapaccess1_faststr", funcTag, 99},
+	{"mapaccess1_fat", funcTag, 100},
+	{"mapaccess2", funcTag, 101},
+	{"mapaccess2_fast32", funcTag, 102},
+	{"mapaccess2_fast64", funcTag, 103},
+	{"mapaccess2_faststr", funcTag, 104},
+	{"mapaccess2_fat", funcTag, 105},
+	{"mapassign", funcTag, 96},
+	{"mapassign_fast32", funcTag, 97},
+	{"mapassign_fast32ptr", funcTag, 106},
+	{"mapassign_fast64", funcTag, 98},
+	{"mapassign_fast64ptr", funcTag, 106},
+	{"mapassign_faststr", funcTag, 99},
+	{"mapIterStart", funcTag, 107},
+	{"mapdelete", funcTag, 107},
+	{"mapdelete_fast32", funcTag, 108},
+	{"mapdelete_fast64", funcTag, 109},
+	{"mapdelete_faststr", funcTag, 110},
+	{"mapIterNext", funcTag, 111},
+	{"mapclear", funcTag, 112},
+	{"makechan64", funcTag, 114},
+	{"makechan", funcTag, 115},
+	{"chanrecv1", funcTag, 117},
+	{"chanrecv2", funcTag, 118},
+	{"chansend1", funcTag, 120},
+	{"closechan", funcTag, 121},
+	{"chanlen", funcTag, 122},
+	{"chancap", funcTag, 122},
+	{"writeBarrier", varTag, 124},
+	{"typedmemmove", funcTag, 125},
+	{"typedmemclr", funcTag, 126},
+	{"typedslicecopy", funcTag, 127},
+	{"selectnbsend", funcTag, 128},
+	{"selectnbrecv", funcTag, 129},
+	{"selectsetpc", funcTag, 130},
+	{"selectgo", funcTag, 131},
 	{"block", funcTag, 9},
-	{"makeslice", funcTag, 131},
-	{"makeslice64", funcTag, 132},
-	{"makeslicecopy", funcTag, 133},
-	{"growslice", funcTag, 135},
-	{"growsliceBuf", funcTag, 136},
-	{"growsliceBufNoAlias", funcTag, 136},
-	{"growsliceNoAlias", funcTag, 135},
-	{"unsafeslicecheckptr", funcTag, 137},
+	{"makeslice", funcTag, 132},
+	{"makeslice64", funcTag, 133},
+	{"makeslicecopy", funcTag, 134},
+	{"growslice", funcTag, 136},
+	{"growsliceBuf", funcTag, 137},
+	{"growsliceBufNoAlias", funcTag, 137},
+	{"growsliceNoAlias", funcTag, 136},
+	{"unsafeslicecheckptr", funcTag, 138},
 	{"panicunsafeslicelen", funcTag, 9},
 	{"panicunsafeslicenilptr", funcTag, 9},
-	{"unsafestringcheckptr", funcTag, 138},
+	{"unsafestringcheckptr", funcTag, 139},
 	{"panicunsafestringlen", funcTag, 9},
 	{"panicunsafestringnilptr", funcTag, 9},
-	{"moveSlice", funcTag, 139},
-	{"moveSliceNoScan", funcTag, 140},
-	{"moveSliceNoCap", funcTag, 141},
-	{"moveSliceNoCapNoScan", funcTag, 142},
-	{"memmove", funcTag, 143},
-	{"memclrNoHeapPointers", funcTag, 144},
-	{"memclrHasPointers", funcTag, 144},
-	{"memequal", funcTag, 145},
-	{"memequal0", funcTag, 146},
-	{"memequal8", funcTag, 146},
-	{"memequal16", funcTag, 146},
-	{"memequal32", funcTag, 146},
-	{"memequal64", funcTag, 146},
-	{"memequal128", funcTag, 146},
-	{"f32equal", funcTag, 146},
-	{"f64equal", funcTag, 146},
-	{"c64equal", funcTag, 146},
-	{"c128equal", funcTag, 146},
-	{"strequal", funcTag, 146},
-	{"streqfast", funcTag, 147},
-	{"interequal", funcTag, 146},
-	{"nilinterequal", funcTag, 146},
-	{"memhash", funcTag, 148},
-	{"memhash0", funcTag, 149},
-	{"memhash8", funcTag, 149},
-	{"memhash16", funcTag, 149},
-	{"memhash32", funcTag, 149},
-	{"memhash64", funcTag, 149},
-	{"memhash128", funcTag, 149},
-	{"f32hash", funcTag, 149},
-	{"f64hash", funcTag, 149},
-	{"c64hash", funcTag, 149},
-	{"c128hash", funcTag, 149},
-	{"strhash", funcTag, 149},
-	{"strhashSeq", funcTag, 149},
-	{"interhash", funcTag, 149},
-	{"nilinterhash", funcTag, 149},
-	{"int64div", funcTag, 150},
-	{"uint64div", funcTag, 151},
-	{"int64mod", funcTag, 150},
-	{"uint64mod", funcTag, 151},
-	{"float64toint64", funcTag, 152},
-	{"float64touint64", funcTag, 153},
-	{"float64touint32", funcTag, 154},
-	{"int64tofloat64", funcTag, 155},
-	{"int64tofloat32", funcTag, 156},
-	{"uint64tofloat64", funcTag, 157},
-	{"uint64tofloat32", funcTag, 158},
-	{"uint32tofloat64", funcTag, 159},
-	{"complex128div", funcTag, 160},
+	{"moveSlice", funcTag, 140},
+	{"moveSliceNoScan", funcTag, 141},
+	{"moveSliceNoCap", funcTag, 142},
+	{"moveSliceNoCapNoScan", funcTag, 143},
+	{"memmove", funcTag, 144},
+	{"memclrNoHeapPointers", funcTag, 145},
+	{"memclrHasPointers", funcTag, 145},
+	{"memequal", funcTag, 146},
+	{"memequal0", funcTag, 147},
+	{"memequal8", funcTag, 147},
+	{"memequal16", funcTag, 147},
+	{"memequal32", funcTag, 147},
+	{"memequal64", funcTag, 147},
+	{"memequal128", funcTag, 147},
+	{"f32equal", funcTag, 147},
+	{"f64equal", funcTag, 147},
+	{"c64equal", funcTag, 147},
+	{"c128equal", funcTag, 147},
+	{"strequal", funcTag, 147},
+	{"streqfast", funcTag, 148},
+	{"interequal", funcTag, 147},
+	{"nilinterequal", funcTag, 147},
+	{"memhash", funcTag, 149},
+	{"memhash0", funcTag, 150},
+	{"memhash8", funcTag, 150},
+	{"memhash16", funcTag, 150},
+	{"memhash32", funcTag, 150},
+	{"memhash64", funcTag, 150},
+	{"memhash128", funcTag, 150},
+	{"f32hash", funcTag, 150},
+	{"f64hash", funcTag, 150},
+	{"c64hash", funcTag, 150},
+	{"c128hash", funcTag, 150},
+	{"strhash", funcTag, 150},
+	{"strhashSeq", funcTag, 150},
+	{"interhash", funcTag, 150},
+	{"nilinterhash", funcTag, 150},
+	{"int64div", funcTag, 151},
+	{"uint64div", funcTag, 152},
+	{"int64mod", funcTag, 151},
+	{"uint64mod", funcTag, 152},
+	{"float64toint64", funcTag, 153},
+	{"float64touint64", funcTag, 154},
+	{"float64touint32", funcTag, 155},
+	{"int64tofloat64", funcTag, 156},
+	{"int64tofloat32", funcTag, 157},
+	{"uint64tofloat64", funcTag, 158},
+	{"uint64tofloat32", funcTag, 159},
+	{"uint32tofloat64", funcTag, 160},
+	{"complex128div", funcTag, 161},
 	{"racefuncenter", funcTag, 33},
 	{"racefuncexit", funcTag, 9},
 	{"raceread", funcTag, 33},
 	{"racewrite", funcTag, 33},
-	{"racereadrange", funcTag, 161},
-	{"racewriterange", funcTag, 161},
-	{"msanread", funcTag, 161},
-	{"msanwrite", funcTag, 161},
-	{"msanmove", funcTag, 162},
-	{"asanread", funcTag, 161},
-	{"asanwrite", funcTag, 161},
-	{"checkptrAlignment", funcTag, 163},
-	{"checkptrArithmetic", funcTag, 165},
-	{"exposeptr", funcTag, 166},
-	{"libfuzzerTraceCmp1", funcTag, 167},
-	{"libfuzzerTraceCmp2", funcTag, 168},
-	{"libfuzzerTraceCmp4", funcTag, 169},
-	{"libfuzzerTraceCmp8", funcTag, 170},
-	{"libfuzzerTraceConstCmp1", funcTag, 167},
-	{"libfuzzerTraceConstCmp2", funcTag, 168},
-	{"libfuzzerTraceConstCmp4", funcTag, 169},
-	{"libfuzzerTraceConstCmp8", funcTag, 170},
-	{"libfuzzerHookStrCmp", funcTag, 171},
-	{"libfuzzerHookEqualFold", funcTag, 171},
-	{"addCovMeta", funcTag, 173},
+	{"racereadrange", funcTag, 162},
+	{"racewriterange", funcTag, 162},
+	{"msanread", funcTag, 162},
+	{"msanwrite", funcTag, 162},
+	{"msanmove", funcTag, 163},
+	{"asanread", funcTag, 162},
+	{"asanwrite", funcTag, 162},
+	{"checkptrAlignment", funcTag, 164},
+	{"checkptrArithmetic", funcTag, 166},
+	{"exposeptr", funcTag, 167},
+	{"libfuzzerTraceCmp1", funcTag, 168},
+	{"libfuzzerTraceCmp2", funcTag, 169},
+	{"libfuzzerTraceCmp4", funcTag, 170},
+	{"libfuzzerTraceCmp8", funcTag, 171},
+	{"libfuzzerTraceConstCmp1", funcTag, 168},
+	{"libfuzzerTraceConstCmp2", funcTag, 169},
+	{"libfuzzerTraceConstCmp4", funcTag, 170},
+	{"libfuzzerTraceConstCmp8", funcTag, 171},
+	{"libfuzzerHookStrCmp", funcTag, 172},
+	{"libfuzzerHookEqualFold", funcTag, 172},
+	{"addCovMeta", funcTag, 174},
 	{"x86HasAVX", varTag, 6},
 	{"x86HasFMA", varTag, 6},
 	{"x86HasPOPCNT", varTag, 6},
@@ -266,12 +267,12 @@ var runtimeDecls = [...]struct {
 	{"loong64HasDBAR_HINTS", varTag, 6},
 	{"loong64HasLSX", varTag, 6},
 	{"riscv64HasZbb", varTag, 6},
-	{"asanregisterglobals", funcTag, 144},
+	{"asanregisterglobals", funcTag, 145},
 	{"KeepAlive", funcTag, 11},
 }
 
 func runtimeTypes(gd *base.Invocation) []*types.Type {
-	var typs [174]*types.Type
+	var typs [175]*types.Type
 	typs[0] = types.ByteType
 	typs[1] = types.NewPtr(typs[0])
 	typs[2] = types.Types[types.TANY]
@@ -361,91 +362,92 @@ func runtimeTypes(gd *base.Invocation) []*types.Type {
 	typs[86] = types.NewPtr(typs[5])
 	typs[87] = newSig(gd, params(typs[86], typs[7], typs[7]), params(typs[6]))
 	typs[88] = newSig(gd, params(typs[13]), nil)
-	typs[89] = newSig(gd, nil, params(typs[24]))
-	typs[90] = newSig(gd, nil, params(typs[75]))
-	typs[91] = types.NewMap(typs[2], typs[2])
-	typs[92] = newSig(gd, params(typs[1], typs[22], typs[3]), params(typs[91]))
-	typs[93] = newSig(gd, params(typs[1], typs[13], typs[3]), params(typs[91]))
-	typs[94] = newSig(gd, nil, params(typs[91]))
-	typs[95] = newSig(gd, params(typs[1], typs[91], typs[3]), params(typs[3]))
-	typs[96] = newSig(gd, params(typs[1], typs[91], typs[75]), params(typs[3]))
-	typs[97] = newSig(gd, params(typs[1], typs[91], typs[24]), params(typs[3]))
-	typs[98] = newSig(gd, params(typs[1], typs[91], typs[30]), params(typs[3]))
-	typs[99] = newSig(gd, params(typs[1], typs[91], typs[3], typs[1]), params(typs[3]))
-	typs[100] = newSig(gd, params(typs[1], typs[91], typs[3]), params(typs[3], typs[6]))
-	typs[101] = newSig(gd, params(typs[1], typs[91], typs[75]), params(typs[3], typs[6]))
-	typs[102] = newSig(gd, params(typs[1], typs[91], typs[24]), params(typs[3], typs[6]))
-	typs[103] = newSig(gd, params(typs[1], typs[91], typs[30]), params(typs[3], typs[6]))
-	typs[104] = newSig(gd, params(typs[1], typs[91], typs[3], typs[1]), params(typs[3], typs[6]))
-	typs[105] = newSig(gd, params(typs[1], typs[91], typs[7]), params(typs[3]))
-	typs[106] = newSig(gd, params(typs[1], typs[91], typs[3]), nil)
-	typs[107] = newSig(gd, params(typs[1], typs[91], typs[75]), nil)
-	typs[108] = newSig(gd, params(typs[1], typs[91], typs[24]), nil)
-	typs[109] = newSig(gd, params(typs[1], typs[91], typs[30]), nil)
-	typs[110] = newSig(gd, params(typs[3]), nil)
-	typs[111] = newSig(gd, params(typs[1], typs[91]), nil)
-	typs[112] = types.NewChan(typs[2], types.Cboth)
-	typs[113] = newSig(gd, params(typs[1], typs[22]), params(typs[112]))
-	typs[114] = newSig(gd, params(typs[1], typs[13]), params(typs[112]))
-	typs[115] = types.NewChan(typs[2], types.Crecv)
-	typs[116] = newSig(gd, params(typs[115], typs[3]), nil)
-	typs[117] = newSig(gd, params(typs[115], typs[3]), params(typs[6]))
-	typs[118] = types.NewChan(typs[2], types.Csend)
-	typs[119] = newSig(gd, params(typs[118], typs[3]), nil)
-	typs[120] = newSig(gd, params(typs[118]), nil)
-	typs[121] = newSig(gd, params(typs[2]), params(typs[13]))
-	typs[122] = types.NewArray(typs[0], 3)
-	typs[123] = types.NewStruct([]*types.Field{types.NewField(src.NoXPos, Lookup(gd, "enabled"), typs[6]), types.NewField(src.NoXPos, Lookup(gd, "pad"), typs[122]), types.NewField(src.NoXPos, Lookup(gd, "cgo"), typs[6]), types.NewField(src.NoXPos, Lookup(gd, "alignme"), typs[24])})
-	typs[124] = newSig(gd, params(typs[1], typs[3], typs[3]), nil)
-	typs[125] = newSig(gd, params(typs[1], typs[3]), nil)
-	typs[126] = newSig(gd, params(typs[1], typs[3], typs[13], typs[3], typs[13]), params(typs[13]))
-	typs[127] = newSig(gd, params(typs[118], typs[3]), params(typs[6]))
-	typs[128] = newSig(gd, params(typs[3], typs[115]), params(typs[6], typs[6]))
-	typs[129] = newSig(gd, params(typs[86]), nil)
-	typs[130] = newSig(gd, params(typs[1], typs[1], typs[86], typs[13], typs[13], typs[6]), params(typs[13], typs[6]))
-	typs[131] = newSig(gd, params(typs[1], typs[13], typs[13]), params(typs[7]))
-	typs[132] = newSig(gd, params(typs[1], typs[22], typs[22]), params(typs[7]))
-	typs[133] = newSig(gd, params(typs[1], typs[13], typs[13], typs[7]), params(typs[7]))
-	typs[134] = types.NewSlice(typs[2])
-	typs[135] = newSig(gd, params(typs[3], typs[13], typs[13], typs[13], typs[1]), params(typs[134]))
-	typs[136] = newSig(gd, params(typs[3], typs[13], typs[13], typs[13], typs[1], typs[3], typs[13]), params(typs[134]))
-	typs[137] = newSig(gd, params(typs[1], typs[7], typs[22]), nil)
-	typs[138] = newSig(gd, params(typs[7], typs[22]), nil)
-	typs[139] = newSig(gd, params(typs[1], typs[1], typs[13], typs[13]), params(typs[1], typs[13], typs[13]))
-	typs[140] = newSig(gd, params(typs[5], typs[1], typs[13], typs[13]), params(typs[1], typs[13], typs[13]))
-	typs[141] = newSig(gd, params(typs[1], typs[1], typs[13]), params(typs[1], typs[13], typs[13]))
-	typs[142] = newSig(gd, params(typs[5], typs[1], typs[13]), params(typs[1], typs[13], typs[13]))
-	typs[143] = newSig(gd, params(typs[3], typs[3], typs[5]), nil)
-	typs[144] = newSig(gd, params(typs[7], typs[5]), nil)
-	typs[145] = newSig(gd, params(typs[7], typs[7], typs[5]), params(typs[6]))
-	typs[146] = newSig(gd, params(typs[7], typs[7]), params(typs[6]))
-	typs[147] = newSig(gd, params(typs[30], typs[30]), params(typs[6]))
-	typs[148] = newSig(gd, params(typs[7], typs[5], typs[5]), params(typs[5]))
-	typs[149] = newSig(gd, params(typs[7], typs[5]), params(typs[5]))
-	typs[150] = newSig(gd, params(typs[22], typs[22]), params(typs[22]))
-	typs[151] = newSig(gd, params(typs[24], typs[24]), params(typs[24]))
-	typs[152] = newSig(gd, params(typs[18]), params(typs[22]))
-	typs[153] = newSig(gd, params(typs[18]), params(typs[24]))
-	typs[154] = newSig(gd, params(typs[18]), params(typs[75]))
-	typs[155] = newSig(gd, params(typs[22]), params(typs[18]))
-	typs[156] = newSig(gd, params(typs[22]), params(typs[20]))
-	typs[157] = newSig(gd, params(typs[24]), params(typs[18]))
-	typs[158] = newSig(gd, params(typs[24]), params(typs[20]))
-	typs[159] = newSig(gd, params(typs[75]), params(typs[18]))
-	typs[160] = newSig(gd, params(typs[26], typs[26]), params(typs[26]))
-	typs[161] = newSig(gd, params(typs[5], typs[5]), nil)
-	typs[162] = newSig(gd, params(typs[5], typs[5], typs[5]), nil)
-	typs[163] = newSig(gd, params(typs[7], typs[1], typs[5]), nil)
-	typs[164] = types.NewSlice(typs[7])
-	typs[165] = newSig(gd, params(typs[7], typs[164]), nil)
-	typs[166] = newSig(gd, params(typs[7]), nil)
-	typs[167] = newSig(gd, params(typs[79], typs[79], typs[15]), nil)
-	typs[168] = newSig(gd, params(typs[73], typs[73], typs[15]), nil)
-	typs[169] = newSig(gd, params(typs[75], typs[75], typs[15]), nil)
-	typs[170] = newSig(gd, params(typs[24], typs[24], typs[15]), nil)
-	typs[171] = newSig(gd, params(typs[30], typs[30], typs[15]), nil)
-	typs[172] = types.NewArray(typs[0], 16)
-	typs[173] = newSig(gd, params(typs[7], typs[75], typs[172], typs[30], typs[13], typs[79], typs[79]), params(typs[75]))
+	typs[89] = newSig(gd, nil, params(typs[30]))
+	typs[90] = newSig(gd, nil, params(typs[24]))
+	typs[91] = newSig(gd, nil, params(typs[75]))
+	typs[92] = types.NewMap(typs[2], typs[2])
+	typs[93] = newSig(gd, params(typs[1], typs[22], typs[3]), params(typs[92]))
+	typs[94] = newSig(gd, params(typs[1], typs[13], typs[3]), params(typs[92]))
+	typs[95] = newSig(gd, nil, params(typs[92]))
+	typs[96] = newSig(gd, params(typs[1], typs[92], typs[3]), params(typs[3]))
+	typs[97] = newSig(gd, params(typs[1], typs[92], typs[75]), params(typs[3]))
+	typs[98] = newSig(gd, params(typs[1], typs[92], typs[24]), params(typs[3]))
+	typs[99] = newSig(gd, params(typs[1], typs[92], typs[30]), params(typs[3]))
+	typs[100] = newSig(gd, params(typs[1], typs[92], typs[3], typs[1]), params(typs[3]))
+	typs[101] = newSig(gd, params(typs[1], typs[92], typs[3]), params(typs[3], typs[6]))
+	typs[102] = newSig(gd, params(typs[1], typs[92], typs[75]), params(typs[3], typs[6]))
+	typs[103] = newSig(gd, params(typs[1], typs[92], typs[24]), params(typs[3], typs[6]))
+	typs[104] = newSig(gd, params(typs[1], typs[92], typs[30]), params(typs[3], typs[6]))
+	typs[105] = newSig(gd, params(typs[1], typs[92], typs[3], typs[1]), params(typs[3], typs[6]))
+	typs[106] = newSig(gd, params(typs[1], typs[92], typs[7]), params(typs[3]))
+	typs[107] = newSig(gd, params(typs[1], typs[92], typs[3]), nil)
+	typs[108] = newSig(gd, params(typs[1], typs[92], typs[75]), nil)
+	typs[109] = newSig(gd, params(typs[1], typs[92], typs[24]), nil)
+	typs[110] = newSig(gd, params(typs[1], typs[92], typs[30]), nil)
+	typs[111] = newSig(gd, params(typs[3]), nil)
+	typs[112] = newSig(gd, params(typs[1], typs[92]), nil)
+	typs[113] = types.NewChan(typs[2], types.Cboth)
+	typs[114] = newSig(gd, params(typs[1], typs[22]), params(typs[113]))
+	typs[115] = newSig(gd, params(typs[1], typs[13]), params(typs[113]))
+	typs[116] = types.NewChan(typs[2], types.Crecv)
+	typs[117] = newSig(gd, params(typs[116], typs[3]), nil)
+	typs[118] = newSig(gd, params(typs[116], typs[3]), params(typs[6]))
+	typs[119] = types.NewChan(typs[2], types.Csend)
+	typs[120] = newSig(gd, params(typs[119], typs[3]), nil)
+	typs[121] = newSig(gd, params(typs[119]), nil)
+	typs[122] = newSig(gd, params(typs[2]), params(typs[13]))
+	typs[123] = types.NewArray(typs[0], 3)
+	typs[124] = types.NewStruct([]*types.Field{types.NewField(src.NoXPos, Lookup(gd, "enabled"), typs[6]), types.NewField(src.NoXPos, Lookup(gd, "pad"), typs[123]), types.NewField(src.NoXPos, Lookup(gd, "cgo"), typs[6]), types.NewField(src.NoXPos, Lookup(gd, "alignme"), typs[24])})
+	typs[125] = newSig(gd, params(typs[1], typs[3], typs[3]), nil)
+	typs[126] = newSig(gd, params(typs[1], typs[3]), nil)
+	typs[127] = newSig(gd, params(typs[1], typs[3], typs[13], typs[3], typs[13]), params(typs[13]))
+	typs[128] = newSig(gd, params(typs[119], typs[3]), params(typs[6]))
+	typs[129] = newSig(gd, params(typs[3], typs[116]), params(typs[6], typs[6]))
+	typs[130] = newSig(gd, params(typs[86]), nil)
+	typs[131] = newSig(gd, params(typs[1], typs[1], typs[86], typs[13], typs[13], typs[6]), params(typs[13], typs[6]))
+	typs[132] = newSig(gd, params(typs[1], typs[13], typs[13]), params(typs[7]))
+	typs[133] = newSig(gd, params(typs[1], typs[22], typs[22]), params(typs[7]))
+	typs[134] = newSig(gd, params(typs[1], typs[13], typs[13], typs[7]), params(typs[7]))
+	typs[135] = types.NewSlice(typs[2])
+	typs[136] = newSig(gd, params(typs[3], typs[13], typs[13], typs[13], typs[1]), params(typs[135]))
+	typs[137] = newSig(gd, params(typs[3], typs[13], typs[13], typs[13], typs[1], typs[3], typs[13]), params(typs[135]))
+	typs[138] = newSig(gd, params(typs[1], typs[7], typs[22]), nil)
+	typs[139] = newSig(gd, params(typs[7], typs[22]), nil)
+	typs[140] = newSig(gd, params(typs[1], typs[1], typs[13], typs[13]), params(typs[1], typs[13], typs[13]))
+	typs[141] = newSig(gd, params(typs[5], typs[1], typs[13], typs[13]), params(typs[1], typs[13], typs[13]))
+	typs[142] = newSig(gd, params(typs[1], typs[1], typs[13]), params(typs[1], typs[13], typs[13]))
+	typs[143] = newSig(gd, params(typs[5], typs[1], typs[13]), params(typs[1], typs[13], typs[13]))
+	typs[144] = newSig(gd, params(typs[3], typs[3], typs[5]), nil)
+	typs[145] = newSig(gd, params(typs[7], typs[5]), nil)
+	typs[146] = newSig(gd, params(typs[7], typs[7], typs[5]), params(typs[6]))
+	typs[147] = newSig(gd, params(typs[7], typs[7]), params(typs[6]))
+	typs[148] = newSig(gd, params(typs[30], typs[30]), params(typs[6]))
+	typs[149] = newSig(gd, params(typs[7], typs[5], typs[5]), params(typs[5]))
+	typs[150] = newSig(gd, params(typs[7], typs[5]), params(typs[5]))
+	typs[151] = newSig(gd, params(typs[22], typs[22]), params(typs[22]))
+	typs[152] = newSig(gd, params(typs[24], typs[24]), params(typs[24]))
+	typs[153] = newSig(gd, params(typs[18]), params(typs[22]))
+	typs[154] = newSig(gd, params(typs[18]), params(typs[24]))
+	typs[155] = newSig(gd, params(typs[18]), params(typs[75]))
+	typs[156] = newSig(gd, params(typs[22]), params(typs[18]))
+	typs[157] = newSig(gd, params(typs[22]), params(typs[20]))
+	typs[158] = newSig(gd, params(typs[24]), params(typs[18]))
+	typs[159] = newSig(gd, params(typs[24]), params(typs[20]))
+	typs[160] = newSig(gd, params(typs[75]), params(typs[18]))
+	typs[161] = newSig(gd, params(typs[26], typs[26]), params(typs[26]))
+	typs[162] = newSig(gd, params(typs[5], typs[5]), nil)
+	typs[163] = newSig(gd, params(typs[5], typs[5], typs[5]), nil)
+	typs[164] = newSig(gd, params(typs[7], typs[1], typs[5]), nil)
+	typs[165] = types.NewSlice(typs[7])
+	typs[166] = newSig(gd, params(typs[7], typs[165]), nil)
+	typs[167] = newSig(gd, params(typs[7]), nil)
+	typs[168] = newSig(gd, params(typs[79], typs[79], typs[15]), nil)
+	typs[169] = newSig(gd, params(typs[73], typs[73], typs[15]), nil)
+	typs[170] = newSig(gd, params(typs[75], typs[75], typs[15]), nil)
+	typs[171] = newSig(gd, params(typs[24], typs[24], typs[15]), nil)
+	typs[172] = newSig(gd, params(typs[30], typs[30], typs[15]), nil)
+	typs[173] = types.NewArray(typs[0], 16)
+	typs[174] = newSig(gd, params(typs[7], typs[75], typs[173], typs[30], typs[13], typs[79], typs[79]), params(typs[75]))
 	return typs[:]
 }
 

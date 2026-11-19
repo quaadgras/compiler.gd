@@ -2742,6 +2742,16 @@ func (r *reader) expr() (res ir.Node) {
 	case exprRuntimeBuiltin:
 		builtin := typecheck.LookupRuntime(r.gd, r.String())
 		return builtin
+
+	case exprAPEGOOS:
+		pos := r.pos()
+		typ := r.typ()
+		fn := typecheck.LookupRuntime(r.gd, "apeGOOS")
+		call := typecheck.Call(r.gd, pos, fn, nil, false)
+		if !types.Identical(typ, types.Types[types.TSTRING]) {
+			return typecheck.Expr(r.gd, ir.NewConvExpr(r.gd, pos, ir.OCONV, typ, call))
+		}
+		return call
 	}
 }
 

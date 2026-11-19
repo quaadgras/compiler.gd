@@ -840,6 +840,14 @@ func (g *pkgGen) callsHostOnly(hp *hostPkg, e ast.Expr) bool {
 				if o.Pkg() == hp.pkg && hp.inOnly(o.Pos()) && !o.IsField() {
 					found = true
 				}
+			case *types.Const:
+				if o.Pkg() == hp.pkg && hp.inOnly(o.Pos()) {
+					found = true // renamed in host copies
+				}
+			case *types.TypeName:
+				if o.Pkg() == hp.pkg && hp.inOnly(o.Pos()) && !g.dedup[o.Name()] {
+					found = true
+				}
 			}
 		}
 		return true

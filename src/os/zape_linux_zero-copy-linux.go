@@ -31,7 +31,7 @@ func (f *File) linux_writeTo(w io.Writer) (written int64, handled bool, err erro
 	}
 
 	rerr := sc.Read(func(fd uintptr) (done bool) {
-		written, err, handled = poll.Linux_SendFile(pfd, fd, 0)
+		written, err, handled = poll.SendFile(pfd, fd, 0)
 		return true
 	})
 
