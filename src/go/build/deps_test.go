@@ -310,6 +310,7 @@ var depsRules = `
 	  internal/c23/ulimit,
 	  internal/c23/unistd,
 	  internal/c23/utime,
+	  internal/c23/utmpx,
 	  internal/c23/wctype,
 	  internal/c23/wordexp
 	< internal/c23/ftw, internal/c23/libgen, internal/c23/stdlib, internal/c23/threads

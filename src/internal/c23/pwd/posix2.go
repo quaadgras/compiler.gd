@@ -74,16 +74,7 @@ func pwResult(e pwEntry, ok bool) c23.Ptr {
 	if pwBuf.Obj == nil {
 		pwBuf = c23.New[passwd]()
 	}
-	uid, _ := strconv.ParseUint(e[2], 10, 32)
-	gid, _ := strconv.ParseUint(e[3], 10, 32)
-	var pw passwd
-	c23.StorePtr(pwBuf, c23.CString(e[0]))
-	c23.StorePtr(c23.Add(pwBuf, int(unsafe.Offsetof(pw.passwd))), c23.CString(e[1]))
-	c23.Store32(c23.Add(pwBuf, int(unsafe.Offsetof(pw.uid))), uint32(uid))
-	c23.Store32(c23.Add(pwBuf, int(unsafe.Offsetof(pw.gid))), uint32(gid))
-	c23.StorePtr(c23.Add(pwBuf, int(unsafe.Offsetof(pw.gecos))), c23.CString(e[4]))
-	c23.StorePtr(c23.Add(pwBuf, int(unsafe.Offsetof(pw.dir))), c23.CString(e[5]))
-	c23.StorePtr(c23.Add(pwBuf, int(unsafe.Offsetof(pw.shell))), c23.CString(e[6]))
+	storePasswd(pwBuf, e, c23.CString)
 	return pwBuf
 }
 

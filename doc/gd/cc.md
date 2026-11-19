@@ -487,6 +487,43 @@ what Go and `/proc` know; `libintl.h` has no catalogs (messages are
 their own translations) and `catopen` none either; `res_query` cannot
 give raw DNS messages (Go's resolver has none).
 
+The rest of POSIX's files and system interfaces (musl's headers in POSIX
+mode; `TestPxFiles`): the `*at` functions resolve a name relative to a
+directory descriptor against that directory's name (made absolute when
+it was opened, so `fchdir` does not move it), not with `os.Root`, which
+would keep names inside the directory; a directory renamed after it was
+opened is not followed, and `futimens` and `fexecve` use the name a
+file was opened by. `AT_SYMLINK_NOFOLLOW` sets a link's own times only
+on Linux, `AT_EACCESS` checks the effective ids only on Linux, and
+`mkfifo` and `mknod` are the system's where package syscall has them
+(`ENOSYS` elsewhere). `fdopendir`'s `DIR` reads by name too, and
+`posix_getdents` returns readdir's entries (sorted, read at its first
+call; `lseek` does not rewind it). `pipe2`'s `O_NONBLOCK` pipe is read
+ahead, as a pipe that `poll` watches: what the program writes to it may
+not be readable at once. `pathconf` gives Linux's limits whatever the
+file system (glibc's `_PC_LINK_MAX` of 127 for all), `confstr` only
+`_CS_PATH` and the width-restricted environments; `getlogin` is
+`$LOGNAME` (musl's), `gethostid` `/etc/hostid` or 0; `ttyname` reads
+`/proc/self/fd` on Linux, else searches `/dev`. The ids, `nice` and
+priorities, `getrlimit` and `setrlimit` are the system's on Linux, macOS
+and the BSDs (Go raises `RLIMIT_NOFILE` at start, so that one is not
+what the program started with); elsewhere ids may only be set to what
+they are, there are no limits, and `setrlimit` fails with `EPERM`.
+`flockfile` is a recursive lock per `FILE` that the streams' functions
+do not take, so the `_unlocked` ones are theirs. `mlock` and its kin
+succeed and do nothing; `shm_open` opens a file of `/dev/shm` (the
+temporary directory elsewhere), whose `MAP_SHARED` mappings the process
+shares with itself only. `getpwent` and `getgrent` read `/etc/passwd` and
+`/etc/group`; `utmpx.h` reads glibc's x86-64 records of `/var/run/utmp`
+(none elsewhere) and cannot write (`pututxline` fails with `EPERM`).
+netdb.h's databases are `/etc/hosts`, `/etc/networks`, `/etc/protocols`
+(else getprotobyname's table) and `/etc/services` (else the few services
+Go's net package knows without one); `if_nameindex` is
+`net.Interfaces`. Pseudo-terminals (`posix_openpt`, `grantpt`,
+`unlockpt`, `ptsname`) are the system's on Linux and macOS (`ENOSYS`
+elsewhere), as are `tcgetwinsize` and `tcsetwinsize`; `_Fork` fails as
+`fork` does.
+
 `regex.h` is a matcher of its own (internal/c23/regex), not Go's
 `regexp`: POSIX's basic and extended syntax with glibc's GNU operators
 and error codes, back-references in both, and the leftmost-longest match

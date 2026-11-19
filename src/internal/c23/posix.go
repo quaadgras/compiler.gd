@@ -6,6 +6,7 @@ package c23
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -42,6 +43,10 @@ type Ofile struct {
 	ra    *ReadAhead // f read ahead, once poll or O_NONBLOCK needs it (special.go)
 	Refs  int
 	Flags int32 // as F_GETFL returns them
+	// Dir is the absolute name of a directory opened by a relative one,
+	// which the *at functions resolve names against (at.go): the name
+	// it had when opened, whatever the working directory is later.
+	Dir string
 }
 
 type FdEntry struct {
@@ -262,9 +267,17 @@ func Open(name string, flags int32, mode uint32) int32 {
 		}
 	}
 	kept := flags &^ (O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC | O_CLOEXEC)
+	of := &Ofile{F: f, Refs: 1, Flags: kept | O_LARGEFILE}
+	if flags&O_ACCMODE == O_RDONLY && !filepath.IsAbs(name) {
+		if fi, err := f.Stat(); err == nil && fi.IsDir() {
+			if abs, err := filepath.Abs(name); err == nil {
+				of.Dir = abs
+			}
+		}
+	}
 	FdMu.Lock()
 	defer FdMu.Unlock()
-	return fdInstall(&FdEntry{Of: &Ofile{F: f, Refs: 1, Flags: kept | O_LARGEFILE}, Cloexec: flags&O_CLOEXEC != 0}, 0)
+	return fdInstall(&FdEntry{Of: of, Cloexec: flags&O_CLOEXEC != 0}, 0)
 }
 
 // goMode is the os.FileMode of C's permission bits.

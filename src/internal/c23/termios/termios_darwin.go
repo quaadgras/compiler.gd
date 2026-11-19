@@ -206,3 +206,13 @@ func getsid(f *os.File) (int32, error) {
 	sid, err := syscall.Getsid(int(pgrp))
 	return int32(sid), err
 }
+
+func getwinsize(f *os.File) ([4]uint16, error) {
+	var ws [4]uint16
+	err := ioctl(f, syscall.TIOCGWINSZ, uintptr(unsafe.Pointer(&ws)))
+	return ws, err
+}
+
+func setwinsize(f *os.File, ws *[4]uint16) error {
+	return ioctl(f, syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(ws)))
+}

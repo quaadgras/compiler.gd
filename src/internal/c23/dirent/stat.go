@@ -36,6 +36,7 @@ type Dir struct {
 	i      int
 	ent    c23.Ptr // the struct dirent readdir returns
 	closed bool
+	fd     int32 // dirfd's descriptor, or -1 before dirfd makes one
 }
 
 // dirOf looks Dir's type up when called, not in a package variable:
@@ -88,6 +89,7 @@ func Opendir(path c23.Ptr) c23.Ptr {
 	p := c23.New[Dir]()
 	d := (*Dir)(p.Obj)
 	d.path = name
+	d.fd = -1
 	if err == nil {
 		err = d.read()
 	}
@@ -106,46 +108,72 @@ func Opendir(path c23.Ptr) c23.Ptr {
 //	unsigned char d_type; char d_name[256];		// 18, 19 (280 bytes)
 func Readdir(p c23.Ptr) c23.Ptr {
 	d := dirOf(p)
-	if d.i >= len(d.ents) {
+	if !d.next(d.ent) {
 		return c23.Ptr{}
+	}
+	return d.ent
+}
+
+// next stores the next entry at ent, a struct dirent, if there is one.
+func (d *Dir) next(ent c23.Ptr) bool {
+	if d.i >= len(d.ents) {
+		return false
 	}
 	e := d.ents[d.i]
 	d.i++
+	storeEnt(ent, e, uint64(d.i), 255)
+	return true
+}
+
+// storeEnt stores e as a struct dirent at ent, whose d_off is off and
+// whose name has at most max bytes; the result is its d_reclen.
+func storeEnt(ent c23.Ptr, e fs.DirEntry, off uint64, max int) int {
 	var ino uint64
 	if fi, err := e.Info(); err == nil {
 		ino, _ = c23.SysField(reflect.Indirect(reflect.ValueOf(fi.Sys())), "Ino")
 	}
-	typ := uint8(DT_UNKNOWN)
-	switch t := e.Type(); {
-	case t.IsDir():
-		typ = DT_DIR
-	case t&fs.ModeSymlink != 0:
-		typ = DT_LNK
-	case t&fs.ModeNamedPipe != 0:
-		typ = DT_FIFO
-	case t&fs.ModeSocket != 0:
-		typ = DT_SOCK
-	case t&fs.ModeCharDevice != 0:
-		typ = DT_CHR
-	case t&fs.ModeDevice != 0:
-		typ = DT_BLK
-	case t.IsRegular():
-		typ = DT_REG
-	}
 	name := e.Name()
-	if len(name) > 255 {
-		name = name[:255]
+	if len(name) > max {
+		name = name[:max]
 	}
-	c23.Store64(d.ent, ino)
-	c23.Store64(c23.Add(d.ent, 8), uint64(d.i))
-	c23.Store16(c23.Add(d.ent, 16), uint16((19+len(name)+1+7)&^7))
-	c23.Store8(c23.Add(d.ent, 18), typ)
-	copy(c23.BytesAt(c23.Add(d.ent, 19), uintptr(len(name)+1)), name+"\x00")
-	return d.ent
+	reclen := (19 + len(name) + 1 + 7) &^ 7
+	c23.Store64(ent, ino)
+	c23.Store64(c23.Add(ent, 8), off)
+	c23.Store16(c23.Add(ent, 16), uint16(reclen))
+	c23.Store8(c23.Add(ent, 18), dtype(e.Type()))
+	copy(c23.BytesAt(c23.Add(ent, 19), uintptr(len(name)+1)), name+"\x00")
+	return reclen
 }
 
+// dtype is d_type of a file of mode t.
+func dtype(t fs.FileMode) uint8 {
+	switch {
+	case t.IsDir():
+		return DT_DIR
+	case t&fs.ModeSymlink != 0:
+		return DT_LNK
+	case t&fs.ModeNamedPipe != 0:
+		return DT_FIFO
+	case t&fs.ModeSocket != 0:
+		return DT_SOCK
+	case t&fs.ModeCharDevice != 0:
+		return DT_CHR
+	case t&fs.ModeDevice != 0:
+		return DT_BLK
+	case t.IsRegular():
+		return DT_REG
+	}
+	return DT_UNKNOWN
+}
+
+// Closedir is closedir, which closes the descriptor of the directory
+// (dirfd's, or fdopendir's).
 func Closedir(p c23.Ptr) int32 {
-	dirOf(p).closed = true
+	d := dirOf(p)
+	d.closed = true
+	if d.fd >= 0 {
+		return c23.ErrRet(c23.FdClose(d.fd))
+	}
 	return 0
 }
 
