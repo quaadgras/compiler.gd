@@ -119,9 +119,8 @@ type batch struct {
 	dynRoots    map[dynKey]*location
 	simpleStmts map[int32]bool
 	stmtCalls   map[int32]bool
-	calls       []*callSite           // callbits.go
-	recvRoots   map[recvKey]*location // recv.go
-	convOKs     map[convKey]bool
+	calls       []*callSite      // callbits.go
+	convOKs     map[convKey]bool // recv.go
 	retTags     map[*ir.Func]ir.Node
 	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
 	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
@@ -162,6 +161,27 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 	// to use that field elsewhere, like in walk. See discussion in https://go.dev/cl/688075.
 	reassignOracles := make(map[*ir.Func]*ir.ReassignOracle)
 
+	// A conversion to an interface type answers for the methods of
+	// the type that is converted (recv.go), which it can only do for
+	// those that are analysed: the methods first, then, and the
+	// functions that they call, so that only a function that a method
+	// needs is analysed before the methods it converts for. (Not as
+	// callees of the function that converts: the batches would be
+	// larger, and escaping in a batch is less exact.)
+	if gd.Debug.NoLocalRecv == 0 && gd.Debug.NoShare == 0 && gd.Debug.NoLocal == 0 {
+		ordered := make([]*ir.Func, 0, len(all))
+		for _, fn := range all {
+			if fn.Type().Recv() != nil {
+				ordered = append(ordered, fn)
+			}
+		}
+		for _, fn := range all {
+			if fn.Type().Recv() == nil {
+				ordered = append(ordered, fn)
+			}
+		}
+		all = ordered
+	}
 	ir.VisitFuncsBottomUp(all, func(list []*ir.Func, recursive bool) {
 		Batch(gd, list, reassignOracles)
 	})

@@ -129,7 +129,7 @@ func (e *escape) stmt(n ir.Node) {
 					cv := cas.Var
 					k := e.dcl(cv) // type switch variables have no ODCL.
 					if cv.Type().HasPointers() {
-						ks = append(ks, e.assertHole(k, cv.Type()).dotType(e.gd, cv.Type(), cas, "switch case"))
+						ks = append(ks, e.assertHole(k, cv.Type(), guard.X.Type()).dotType(e.gd, cv.Type(), cas, "switch case"))
 					}
 				}
 			}

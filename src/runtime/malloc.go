@@ -1236,6 +1236,10 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 		}
 	}
 
+	if local && debug.sharestats >= 2 {
+		shareStatsSite(x)
+	}
+
 	// Post-malloc debug hooks.
 	if debug.malloc {
 		postMallocgcDebug(x, elemsize, typ)

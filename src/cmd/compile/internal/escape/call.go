@@ -171,7 +171,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 					// The receiver of a method that is only known
 					// when the program runs (recv.go).
 					if sel, ok := call.Fun.(*ir.SelectorExpr); ok && sel.Op() == ir.ODOTINTER {
-						k = e.recvHole(sel.X.Type(), sel.Sel)
+						k = e.recvHole(ks, call)
 					}
 				}
 				argument(k, recvArg)
@@ -330,7 +330,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 
 	case ir.OUNSAFEADD, ir.OUNSAFESLICE, ir.OUNSAFESTRING:
 		call := call.(*ir.BinaryExpr)
-		argument(ks[0], call.X)
+		k := ks[0]
+		if call.Op() == ir.OUNSAFESTRING {
+			k = e.aliasHole(k)
+		}
+		argument(k, call.X)
 		e.discard(call.Y)
 		e.discard(call.RType)
 	}

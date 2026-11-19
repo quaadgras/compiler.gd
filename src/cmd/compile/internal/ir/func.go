@@ -834,8 +834,4 @@ type ParamShare struct {
 	// through a parameter (Via): what is only stored through one
 	// lives as long as what that one points to.
 	Heap uint8
-	// Recv says that the parameter, of an interface type, is the
-	// receiver of calls of methods of that type: what it holds is
-	// where the methods of its dynamic type put their receiver.
-	Recv bool
 }

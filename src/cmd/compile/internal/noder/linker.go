@@ -305,7 +305,6 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 		w.Len(int(ps.ViaDerefs))
 		w.Len(int(ps.Results))
 		w.Len(int(ps.Heap))
-		w.Bool(ps.Recv)
 	}
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {

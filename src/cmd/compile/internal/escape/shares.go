@@ -372,14 +372,14 @@ func (b *batch) markLocal(loc *location) {
 	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
 		return
 	}
-	ret := loc.hasAttr(attrReturned)
-	if loc.hasRecv() {
-		// It leads to the receiver of a method that is not known.
-		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
-			fmt.Printf("%s: %v is not local, a method is called on what it holds\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
-		}
+	if n := loc.n; n != nil && n.Op() != ir.ONAME && n.Type() != nil && n.Type().IsString() && b.readOnlyOn() {
+		// The bytes of a string: never written, so no goroutine that
+		// reaches them matters, and the flows of strings are not
+		// followed for that (edge.ro). They are not allocated with
+		// the local objects, which only one goroutine reaches.
 		return
 	}
+	ret := loc.hasAttr(attrReturned)
 	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
@@ -575,6 +575,12 @@ func (b *batch) mapsOn() bool {
 		return false
 	}
 	return true
+}
+
+// readOnlyOn reports whether a value that is only ever read counts as
+// not shared: today, what a string points to.
+func (b *batch) readOnlyOn() bool {
+	return b.gd.Debug.NoLocalRO == 0 && b.callBitsOn()
 }
 
 // purePath returns the variable that the path n starts from, and
