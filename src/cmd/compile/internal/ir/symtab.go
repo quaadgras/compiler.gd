@@ -92,6 +92,8 @@ type SymsStruct struct {
 	PublishMove               *obj.LSym
 	ShareStore                *obj.LSym
 	ShareUnlock               *obj.LSym
+	ShareStore2               *obj.LSym
+	ShareUnlock2              *obj.LSym
 	ShareLoadSlice            *obj.LSym
 	ShareLoadString           *obj.LSym
 	ShareLoadIface            *obj.LSym

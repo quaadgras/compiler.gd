@@ -74,6 +74,7 @@ type DebugFlags struct {
 	NoLocalAlloc          int    `help:"do not allocate as local the objects no other goroutine will reach (for measurements)" concurrent:"ok"`
 	NoLocal               int    `help:"do not use what escape analysis knows of the memory no other goroutine can reach (for measurements)" concurrent:"ok"`
 	ShareCheck            int    `help:"check at run time that the memory found unshared at compile time is" concurrent:"ok"`
+	NoGroup               int    `help:"take the locks of shared memory for each store of a statement (for measurements)" concurrent:"ok"`
 	NoTear                int    `help:"do not load and store slices, strings and interfaces whole (unsafe; for measurements)" concurrent:"ok"`
 	PCTab                 string `help:"print named pc-value table\nOne of: pctospadj, pctofile, pctoline, pctoinline, pctopcdata"`
 	Panic                 int    `help:"show all compiler panics"`

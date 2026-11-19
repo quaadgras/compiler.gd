@@ -467,6 +467,61 @@ func shareunlock(dst unsafe.Pointer, size uintptr) {
 	releasem(getg().m)
 }
 
+// shareStripes2 calls f for the locks of the blocks of [a, a+asize) and
+// [b, b+bsize), each once, in the order in which every goroutine takes
+// them: by index.
+func shareStripes2(a, asize, b, bsize uintptr, f func(i uintptr)) {
+	var idx [16]uintptr
+	n := 0
+	for _, r := range [2][2]uintptr{{a, asize}, {b, bsize}} {
+		first, last := r[0]>>shareBlockShift, (r[0]+r[1]-1)>>shareBlockShift
+		if last-first >= uintptr(len(idx)/2) {
+			// Too many to sort here: all of them.
+			for i := uintptr(0); i < shareStripes; i++ {
+				f(i)
+			}
+			return
+		}
+		for i := first; i <= last; i++ {
+			// Insert in order, unless it is there.
+			x := i & (shareStripes - 1)
+			j := n
+			for j > 0 && idx[j-1] > x {
+				j--
+			}
+			if j > 0 && idx[j-1] == x {
+				continue
+			}
+			copy(idx[j+1:n+1], idx[j:n])
+			idx[j] = x
+			n++
+		}
+	}
+	for _, i := range idx[:n] {
+		f(i)
+	}
+}
+
+// sharestore2 is sharestore for the stores of one statement in two
+// places, asize bytes at a and bsize bytes at b (a slice and the elements
+// appended to it): between two synchronisations no goroutine can tell
+// stores made under one lock from stores made each under its own. It
+// takes the locks of both if either is shared, and the caller then calls
+// shareunlock2 after the stores.
+func sharestore2(a unsafe.Pointer, asize uintptr, b unsafe.Pointer, bsize uintptr) bool {
+	if !isShared(a) && !isShared(b) {
+		return false
+	}
+	acquirem()
+	shareStripes2(uintptr(a), asize, uintptr(b), bsize, shareLockStripe)
+	return true
+}
+
+func shareunlock2(a unsafe.Pointer, asize uintptr, b unsafe.Pointer, bsize uintptr) {
+	shareStripes2(uintptr(a), asize, uintptr(b), bsize, func(i uintptr) { atomic.Xadd(&shareSeq[i].seq, 1) })
+	releasem(getg().m)
+}
+
 // shareRead copies the size bytes at src to dst, which only this goroutine
 // can reach, as no store in progress left them.
 func shareRead(dst, src unsafe.Pointer, size uintptr) {

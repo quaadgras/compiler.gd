@@ -241,6 +241,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).PublishMove = typecheck.LookupRuntimeFunc(gd, "publishmove")
 	ir.Syms(gd).ShareStore = typecheck.LookupRuntimeFunc(gd, "sharestore")
 	ir.Syms(gd).ShareUnlock = typecheck.LookupRuntimeFunc(gd, "shareunlock")
+	ir.Syms(gd).ShareStore2 = typecheck.LookupRuntimeFunc(gd, "sharestore2")
+	ir.Syms(gd).ShareUnlock2 = typecheck.LookupRuntimeFunc(gd, "shareunlock2")
 	ir.Syms(gd).ShareLoadSlice = typecheck.LookupRuntimeFunc(gd, "shareloadslice")
 	ir.Syms(gd).ShareLoadString = typecheck.LookupRuntimeFunc(gd, "shareloadstring")
 	ir.Syms(gd).ShareLoadIface = typecheck.LookupRuntimeFunc(gd, "shareloadiface")
@@ -5252,6 +5254,19 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	hdrLocal := inplace && s.localExpr(sn)
 	elemLocal := localPointer(sn) && s.gd.Debug.NoShare == 0 && s.gd.Debug.NoLocal == 0
 
+	// In shared memory, the slice and the elements are stored under one
+	// lock where each store would have its own: see appendGrouped.
+	grouped := false
+	if inplace && s.tear && s.gd.Debug.NoGroup == 0 && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
+		len(n.Args) > 1 && int64(len(n.Args)-1)*et.Size() <= 256 && !ssa.IsStackAddr(addr) && !s.unpublished(addr) {
+		grouped = true
+		for _, a := range n.Args[1:] {
+			if !ssa.CanSSA(a.Type()) {
+				grouped = false
+			}
+		}
+	}
+
 	// Allocate new blocks
 	grow := s.f.NewBlock(ssa.BlockPlain)
 	assign := s.f.NewBlock(ssa.BlockPlain)
@@ -5455,23 +5470,33 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			}
 		}
 		// In shared memory the pointer and the capacity are stored
-		// together (with the old length, which the new array has).
+		// together, and the length with them: the length that is
+		// there may be that of a slice another goroutine has stored
+		// since this one was loaded, which the new array may not
+		// have. (Its new elements are zero until they are stored.)
 		if hdrLocal {
 			s.shareCheck(addr)
 		}
-		s.dstLocal = hdrLocal
-		guard := s.tearGuard(n.Type(), addr)
-		var locked *ssa.Value
-		if guard {
-			locked = s.shareLock(addr, n.Type().Size())
+		// (If grouped, with the length and the elements.)
+		if !grouped {
+			s.dstLocal = hdrLocal
+			guard := s.tearGuard(n.Type(), addr)
+			var locked *ssa.Value
+			if guard {
+				locked = s.shareLock(addr, n.Type().Size())
+			}
+			capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
+			if guard {
+				lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
+				s.store(types.Types[types.TINT], lenaddr, l)
+			}
+			s.store(types.Types[types.TINT], capaddr, c)
+			s.store(pt, addr, p)
+			if guard {
+				s.shareUnlock(locked, addr, n.Type().Size())
+			}
+			s.dstLocal = false
 		}
-		capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
-		s.store(types.Types[types.TINT], capaddr, c)
-		s.store(pt, addr, p)
-		if guard {
-			s.shareUnlock(locked, addr, n.Type().Size())
-		}
-		s.dstLocal = false
 	}
 
 	b = s.endBlock()
@@ -5482,6 +5507,13 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	p = s.variable(ptrVar, pt)                      // generates phi for ptr
 	l = s.variable(lenVar, types.Types[types.TINT]) // generates phi for len
 	c = s.variable(capVar, types.Types[types.TINT]) // generates phi for cap
+
+	if grouped {
+		s.appendGrouped(n, addr, p, l, c, nargs)
+		delete(s.vars, ptrVar)
+		delete(s.vars, lenVar)
+		return nil
+	}
 
 	if inplace {
 		// Update length in place.

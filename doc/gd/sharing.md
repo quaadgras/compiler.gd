@@ -112,6 +112,21 @@ holds one.
   ever shared; if it is zero there is no call. And if the runtime says
   the memory is not shared, the store that follows has no publishing
   calls either: there are two copies of the store.
+- **The stores of one statement share their locks** where no
+  synchronisation separates them: between two synchronisations no
+  goroutine can tell stores made under one lock from stores made each
+  under its own, and a program in which one could has no say in how they
+  interleave (the Go memory model). An append in place to a slice of
+  strings, slices or interfaces (`p.f = append(p.f, x)`) stores the
+  slice and its new elements under one call of `runtime.sharestore2`,
+  which takes the locks of both places in the order every goroutine
+  takes locks in, and one of `shareunlock2`: one test and one copy of
+  the stores where each had its own. Nothing between the two calls can
+  fault, call or wait for another lock: the operands are evaluated
+  before. An append that grew stores the pointer, the capacity and the
+  length together: the length that is there may be another goroutine's,
+  of a slice the new array is too short for. (`-d=nogroup` gives each
+  store its locks back, for measurements.)
 - **A function with its own exclusion** for what it loads and stores is
   marked `//go:notear` and has none of this (its pointer stores still
   publish): `sync.Pool`'s, where a P's private value is its own and the

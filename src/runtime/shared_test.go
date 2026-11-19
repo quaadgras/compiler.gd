@@ -743,3 +743,66 @@ func TestLocalRange(t *testing.T) {
 }
 
 var sharedSink any
+
+type sharedAppendBox struct {
+	pad   [3]int
+	names []string
+	trace []any
+}
+
+// TestSharedAppend appends in place to slices in shared memory that other
+// goroutines replace and load: every slice loaded is one of its arrays
+// with a length that array has, and every element is whole. (An append
+// that grew once stored the new array before the length, with the locks
+// given back in between: a longer slice stored there meanwhile left its
+// length with the new, shorter array.)
+func TestSharedAppend(t *testing.T) {
+	strs := []string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
+	check := func(x string) {
+		if len(x) > 19 || (len(x) > 0 && x[0] < 'a') {
+			panic("torn string")
+		}
+	}
+	n := 200000
+	if testing.Short() {
+		n = 40000
+	}
+	b := &sharedAppendBox{}
+	done := make(chan bool)
+	for g := 0; g < 8; g++ {
+		go func() {
+			defer func() { done <- true }()
+			for i := 0; i < n; i++ {
+				switch i % 6 {
+				case 0:
+					b.names = nil
+					b.trace = nil
+				case 1:
+					b.names = append(b.names, strs[i%4])
+				case 2:
+					b.trace = append(b.trace, strs[i%4], i)
+				case 3:
+					b.names = append(b.names, strs[i%4], strs[(i+1)%4], strs[(i+2)%4])
+				case 4:
+					if s := b.names; len(s) > 0 {
+						check(s[len(s)-1])
+						check(s[0])
+					}
+				case 5:
+					for _, x := range b.trace {
+						switch v := x.(type) {
+						case string:
+							check(v)
+						case int, nil:
+						default:
+							panic("torn interface")
+						}
+					}
+				}
+			}
+		}()
+	}
+	for g := 0; g < 8; g++ {
+		<-done
+	}
+}
