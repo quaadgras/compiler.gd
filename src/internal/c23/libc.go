@@ -624,7 +624,8 @@ type File struct {
 	err    bool
 	unbuf  bool
 	closed bool
-	rd, wr bool // the mode allows reading, writing
+	rd, wr bool     // the mode allows reading, writing
+	mem    *memFile // fmemopen's and open_memstream's memory, which it reads and writes in place of fd's file
 }
 
 var (
@@ -676,9 +677,7 @@ func (f *File) unread() {
 		return
 	}
 	if n := f.r.Buffered() + len(f.unget); n > 0 {
-		if of := f.osFile(); of != nil {
-			of.Seek(int64(-n), io.SeekCurrent)
-		}
+		f.seek(int64(-n), io.SeekCurrent)
 	}
 	f.r, f.unget = nil, nil
 }
@@ -968,6 +967,11 @@ func Fopen(name, mode Ptr) Ptr {
 // The stream is closed if that fails.
 func Freopen(name, mode, p Ptr) Ptr {
 	f := fileOf(p)
+	if f.mem != nil { // a memory stream has no file to reopen
+		Fclose(p)
+		SetErrno(EBADF)
+		return Ptr{}
+	}
 	f.flush()
 	flag, rd, wr, ok := openMode(GoString(mode))
 	var path string
@@ -1049,6 +1053,11 @@ func Tmpnam(s Ptr) Ptr {
 func Fclose(p Ptr) int32 {
 	f := fileOf(p)
 	r := f.flush()
+	if f.mem != nil {
+		f.mem.close()
+		f.close()
+		return r
+	}
 	if err := fdClose(f.fd); err != nil {
 		setErrnoOf(err)
 		r = -1

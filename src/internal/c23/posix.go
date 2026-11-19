@@ -182,6 +182,9 @@ func fdClose(fd int32) error {
 type fdIO struct{ f *File }
 
 func (d fdIO) Write(b []byte) (int, error) {
+	if d.f.mem != nil {
+		return d.f.mem.write(b)
+	}
 	of := fdFile(d.f.fd)
 	if of == nil {
 		return 0, errnoErr(EBADF)
@@ -190,6 +193,9 @@ func (d fdIO) Write(b []byte) (int, error) {
 }
 
 func (d fdIO) Read(b []byte) (int, error) {
+	if d.f.mem != nil {
+		return d.f.mem.read(b)
+	}
 	of := fdFile(d.f.fd)
 	if of == nil {
 		return 0, errnoErr(EBADF)
@@ -199,6 +205,9 @@ func (d fdIO) Read(b []byte) (int, error) {
 
 // osFile returns the stream's os.File, or nil.
 func (f *File) osFile() *os.File {
+	if f.mem != nil {
+		return nil
+	}
 	if of := fdFile(f.fd); of != nil {
 		return of.f
 	}
@@ -206,6 +215,9 @@ func (f *File) osFile() *os.File {
 }
 
 func (f *File) seek(off int64, whence int) (int64, error) {
+	if f.mem != nil {
+		return f.mem.seek(off, whence)
+	}
 	of := f.osFile()
 	if of == nil {
 		return 0, errnoErr(EBADF)

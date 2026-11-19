@@ -6,6 +6,7 @@ package c23
 
 import (
 	"os"
+	"strings"
 	"sync"
 	"unsafe"
 )
@@ -31,7 +32,7 @@ func OpterrLoc() Ptr { return opterrObj }
 func OptoptLoc() Ptr { return optoptObj }
 
 // getopt's state between calls, as glibc's.
-var getoptState struct {
+type getoptStateT struct {
 	sync.Mutex
 	init        bool
 	nextchar    Ptr // the rest of the current argument's options
@@ -39,6 +40,8 @@ var getoptState struct {
 	firstNonopt int32
 	lastNonopt  int32
 }
+
+var getoptState getoptStateT
 
 const (
 	requireOrder  = iota // stop at the first non-option (+, POSIXLY_CORRECT)
@@ -51,10 +54,15 @@ const (
 // it returns each non-option as the option 1, in optarg. Setting optind to
 // 0 starts over.
 func Getopt(argc int32, argv, optstring Ptr) int32 {
+	return getopt(argc, argv, optstring, Ptr{}, Ptr{}, false)
+}
+
+// getopt is getopt, getopt_long (longopts not null) and getopt_long_only.
+func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) int32 {
 	st := &getoptState
 	st.Lock()
 	defer st.Unlock()
-	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*8)) }
+	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*int(wordSize))) }
 	optind := int32(Load32(optindObj))
 	setOptind := func(i int32) { optind = i; Store32(optindObj, uint32(i)) }
 	StorePtr(optargObj, Ptr{})
@@ -96,7 +104,7 @@ func Getopt(argc int32, argv, optstring Ptr) int32 {
 	exchange := func() {
 		bottom, middle, top := st.firstNonopt, st.lastNonopt, optind
 		swap := func(i, j int32) {
-			pi, pj := Add(argv, int(i)*8), Add(argv, int(j)*8)
+			pi, pj := Add(argv, int(i)*int(wordSize)), Add(argv, int(j)*int(wordSize))
 			a, b := LoadPtr(pi), LoadPtr(pj)
 			StorePtr(pi, b)
 			StorePtr(pj, a)
@@ -158,6 +166,19 @@ func Getopt(argc int32, argv, optstring Ptr) int32 {
 			setOptind(optind + 1)
 			return 1
 		}
+		if Addr(longopts) != 0 {
+			a := arg(optind)
+			if Load8(Add(a, 1)) == '-' {
+				st.nextchar = Add(a, 2)
+				return st.longOption(argc, arg, opts, longopts, longind, longOnly, printErrors, "--", optind, setOptind)
+			}
+			if longOnly && (Load8(Add(a, 2)) != 0 || strings.IndexByte(opts, Load8(Add(a, 1))) < 0) {
+				st.nextchar = Add(a, 1)
+				if c := st.longOption(argc, arg, opts, longopts, longind, longOnly, printErrors, "-", optind, setOptind); c != -1 {
+					return c
+				}
+			}
+		}
 		st.nextchar = Add(arg(optind), 1)
 	}
 
@@ -211,4 +232,135 @@ func Getopt(argc int32, argv, optstring Ptr) int32 {
 // getoptError writes getopt's message, as glibc words it, on stderr.
 func getoptError(msg string, prog Ptr, c byte) {
 	fileOf(Stdio(2)).write([]byte(GoString(prog) + ": " + msg + " -- '" + string([]byte{c}) + "'\n"))
+}
+
+// option is C's struct option.
+type option struct {
+	name   unsafe.Pointer
+	hasArg int32
+	flag   unsafe.Pointer
+	val    int32
+}
+
+// longOption is glibc's process_long_option: the long option at
+// st.nextchar, which prefix ("--" or "-") came before, in argv[optind].
+// It returns -1 if getopt_long_only should take it as short options.
+func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string, longopts, longind Ptr, longOnly, printErrors bool, prefix string, optind int32, setOptind func(int32)) int32 {
+	var o option
+	osize := int(unsafe.Sizeof(o))
+	offHas, offFlag, offVal := int(unsafe.Offsetof(o.hasArg)), int(unsafe.Offsetof(o.flag)), int(unsafe.Offsetof(o.val))
+	rest := GoString(st.nextchar)
+	name, _, hasValue := strings.Cut(rest, "=")
+	type opt struct {
+		name        string
+		hasArg, val int32
+		flag        Ptr
+		idx         int
+	}
+	var all []opt
+	for i := 0; ; i++ {
+		e := Add(longopts, i*osize)
+		np := LoadPtr(e)
+		if Addr(np) == 0 {
+			break
+		}
+		all = append(all, opt{GoString(np), int32(Load32(Add(e, offHas))), int32(Load32(Add(e, offVal))), LoadPtr(Add(e, offFlag)), i})
+	}
+	var found *opt
+	for i := range all {
+		if all[i].name == name {
+			found = &all[i]
+			break
+		}
+	}
+	if found == nil {
+		ambig := false
+		for i := range all {
+			p := &all[i]
+			if !strings.HasPrefix(p.name, name) {
+				continue
+			}
+			if found == nil {
+				found = p
+			} else if longOnly || found.hasArg != p.hasArg || Addr(found.flag) != Addr(p.flag) || found.val != p.val {
+				ambig = true
+			}
+		}
+		if ambig {
+			if printErrors {
+				msg := GoString(arg(0)) + ": option '" + prefix + rest + "' is ambiguous; possibilities:"
+				for _, p := range all {
+					if strings.HasPrefix(p.name, name) {
+						msg += " '" + prefix + p.name + "'"
+					}
+				}
+				fileOf(Stdio(2)).write([]byte(msg + "\n"))
+			}
+			st.nextchar = Ptr{}
+			setOptind(optind + 1)
+			Store32(optoptObj, 0)
+			return '?'
+		}
+	}
+	if found == nil {
+		if !longOnly || Load8(Add(arg(optind), 1)) == '-' || strings.IndexByte(opts, Load8(st.nextchar)) < 0 {
+			if printErrors {
+				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": unrecognized option '" + prefix + rest + "'\n"))
+			}
+			st.nextchar = Ptr{}
+			setOptind(optind + 1)
+			Store32(optoptObj, 0)
+			return '?'
+		}
+		return -1
+	}
+	optind++
+	setOptind(optind)
+	st.nextchar = Ptr{}
+	if hasValue {
+		if found.hasArg != 0 {
+			StorePtr(optargObj, Add(arg(optind-1), len(prefix)+len(name)+1))
+		} else {
+			if printErrors {
+				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' doesn't allow an argument\n"))
+			}
+			Store32(optoptObj, uint32(found.val))
+			return '?'
+		}
+	} else if found.hasArg == 1 {
+		if optind < argc {
+			StorePtr(optargObj, arg(optind))
+			setOptind(optind + 1)
+		} else {
+			if printErrors {
+				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' requires an argument\n"))
+			}
+			Store32(optoptObj, uint32(found.val))
+			if len(opts) > 0 && opts[0] == ':' {
+				return ':'
+			}
+			return '?'
+		}
+	}
+	if Addr(longind) != 0 {
+		Store32(longind, uint32(found.idx))
+	}
+	if Addr(found.flag) != 0 {
+		Store32(found.flag, uint32(found.val))
+		return 0
+	}
+	return found.val
+}
+
+// GetoptLong is getopt_long: getopt, and the long options --name,
+// --name=value and --name value (or abbreviations of name that are not
+// ambiguous) of longopts.
+func GetoptLong(argc int32, argv, optstring, longopts, longind Ptr) int32 {
+	return getopt(argc, argv, optstring, longopts, longind, false)
+}
+
+// GetoptLongOnly is getopt_long_only: getopt_long, where -name is a long
+// option too, unless it is a short option of optstring.
+func GetoptLongOnly(argc int32, argv, optstring, longopts, longind Ptr) int32 {
+	return getopt(argc, argv, optstring, longopts, longind, true)
 }
