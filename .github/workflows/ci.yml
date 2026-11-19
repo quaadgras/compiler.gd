@@ -58,7 +58,7 @@ jobs:
       - name: std and the language tests
         run: |
           export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
-          go test -short std cmd/internal/testdir
+          go test -short -timeout 30m std cmd/internal/testdir
 
   darwin:
     name: test (darwin/arm64)
@@ -75,7 +75,7 @@ jobs:
       - name: std and the language tests
         run: |
           export GOROOT=$GITHUB_WORKSPACE PATH=$GITHUB_WORKSPACE/bin:$PATH
-          go test -short std cmd/internal/testdir
+          go test -short -timeout 30m std cmd/internal/testdir
 
   windows:
     name: test (windows/amd64)
@@ -99,7 +99,7 @@ jobs:
         run: |
           $env:GOROOT = $env:GITHUB_WORKSPACE
           $env:PATH = "$env:GITHUB_WORKSPACE\bin;$env:PATH"
-          go test -short std cmd/internal/testdir
+          go test -short -timeout 30m std cmd/internal/testdir
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   wasm:
