@@ -362,8 +362,8 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 // markLocal records on the expression or the variable of loc, which is
 // allocated in the heap, that the object is local: no other goroutine
 // will reach it, or anything that it will lead to, as long as it lives.
-// The object is then allocated in the range of addresses of local
-// memory, and what is stored in it later, by code that only has its
+// The object is then allocated in a span of local objects, and what is
+// stored in it later, by code that only has its
 // address, is allocated as it is (runtime/shared.go).
 //
 // Nothing that is reached from a local object may be shared, however
@@ -446,7 +446,7 @@ const (
 // no index), the store has a location of its own, the dynamic root of P
 // in that statement, that is the heap for escaping but that no other
 // goroutine reaches by itself: it is local if what P points to is a
-// local object, which is a compare of P (runtime.isLocalObject). A
+// local object, which the page of P says (runtime.isLocalObject). A
 // variable on a stack is not one: the function that has it may return
 // or share what a callee stored in it, and the callee cannot tell. The solver records on every
 // location the roots that it, or something reached from it, flows to
@@ -502,9 +502,8 @@ func (e *escape) noteStmtCall() {
 	e.stmtCalls[e.curStmt] = true
 }
 
-// splitHeap reports whether the target has the two ranges of addresses
-// (runtime.heapSplit), and returns the logarithm of the size of the part
-// of the local one where the objects are.
+// splitHeap reports whether the target has spans of local objects
+// (runtime.localSpans).
 func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
 		return 0, false
@@ -516,11 +515,55 @@ func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 	}
 	switch gd.Ctxt.Arch.Family {
 	case sys.AMD64, sys.ARM64:
-		// The first half, where the objects are: the stacks are
-		// in the second (runtime.isLocalObject).
-		return 35, true
+		return 0, true
 	}
 	return 0, false
+}
+
+// The runtime's table of the pages that hold something else than local
+// objects (runtime.otherPages): its size and the shift of a page.
+const (
+	otherPagesLen   = 1 << 20
+	otherPagesShift = 13
+)
+
+// localTest returns the expression that is 1 if the address u, an
+// integer, is known to be in a local object, and 0 if not: the number of
+// its page in runtime.otherPages is zero. An address in a stack never is.
+func (b *batch) localTest(pos src.XPos, u ir.Node) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+	u32 := types.Types[types.TUINT32]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	tab := ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "otherPages"), u32)
+	tp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, unsafePtr, typecheck.NodAddr(b.gd, tab))
+	tp.SetTypecheck(1)
+	base := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, tp)
+	base.SetTypecheck(1)
+	base.SetCheckPtr(true)
+	idx := binary(ir.OAND, binary(ir.ORSH, u, lit(otherPagesShift)), lit(otherPagesLen-1))
+	addr := binary(ir.OADD, base, binary(ir.OLSH, idx, lit(2)))
+	ap := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, unsafePtr, addr)
+	ap.SetTypecheck(1)
+	ap.SetCheckPtr(true)
+	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(u32), ap)
+	wp.SetTypecheck(1)
+	word := ir.NewStarExpr(b.gd, pos, wp)
+	word.SetType(u32)
+	word.SetTypecheck(1)
+	word.SetBounded(true)
+	n := ir.NewConvExpr(b.gd, pos, ir.OCONV, uintptrType, word)
+	n.SetTypecheck(1)
+	// (n - 1) >> 63: 1 if n is zero.
+	return binary(ir.ORSH, binary(ir.OSUB, n, lit(1)), lit(63))
 }
 
 // purePath returns the variable that the path n starts from, and
@@ -668,7 +711,7 @@ func (b *batch) addDyn(l, root *location) bool {
 // nil if one of the roots cannot be evaluated there; with params, only
 // the parameters that are never assigned can.
 func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node {
-	shift, ok := splitHeap(b.gd)
+	_, ok := splitHeap(b.gd)
 	if !ok {
 		return nil
 	}
@@ -681,10 +724,6 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		n.SetType(uintptrType)
 		n.SetTypecheck(1)
 		return n
-	}
-	// The first address of the local range.
-	base := func() ir.Node {
-		return ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "localHeapBase"), uintptrType)
 	}
 	bits := b.callBitsOn()
 	var tag ir.Node
@@ -727,7 +766,7 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 				continue
 			}
 			seen[key] = true
-			one := b.callArgTag(pos, d, shift)
+			one := b.callArgTag(pos, d)
 			if tag == nil {
 				tag = one
 			} else {
@@ -747,8 +786,7 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		}
 		seen[key] = true
 
-		// (((uintptr(P) - base) >> shift) - 1) >> 63: 1 if P is in
-		// the local range, 0 if not.
+		// 1 if P points to a local object, 0 if not.
 		var p ir.Node = ir.DeepCopy(pos, d.path)
 		if p.Type().IsSlice() {
 			sp := ir.NewUnaryExpr(b.gd, pos, ir.OSPTR, p)
@@ -761,7 +799,7 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		u := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, up)
 		u.SetTypecheck(1)
 		u.SetCheckPtr(true) // not kept: see walkConv
-		one := binary(ir.ORSH, binary(ir.OSUB, binary(ir.ORSH, binary(ir.OSUB, u, base()), lit(shift)), lit(1)), lit(63))
+		one := b.localTest(pos, u)
 		if param && bits {
 			// Or the caller said that what is stored through the
 			// parameter stays local (callbits.go).

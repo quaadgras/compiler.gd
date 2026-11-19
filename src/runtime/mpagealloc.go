@@ -255,21 +255,6 @@ type pageAlloc struct {
 	// are allocated and not worth searching.
 	searchAddr offAddr
 
-	// split, if not zero, is the end of the range of addresses of
-	// local memory (heapSplit), which is below every other address of
-	// the heap, and mid is where the stacks begin in it: the local
-	// objects are below mid. So there are three regions, each with a
-	// searchAddr of its own, none of which is below the region:
-	// region 0 is the rest of the heap, 1 the local objects, 2 the
-	// stacks. searchAddr is the one of the region that find and alloc
-	// search (region; 0 but between enterLocal and leaveLocal), the
-	// others are in searchAddrs. limit is the address that an
-	// allocation must end by, if not zero.
-	split, mid  uintptr
-	limit       uintptr
-	region      int
-	searchAddrs [3]offAddr
-
 	// start and end represent the chunk indices
 	// which pageAlloc knows about. It assumes
 	// chunks in the range [start, end) are
@@ -343,7 +328,6 @@ func (p *pageAlloc) init(mheapLock *mutex, sysStat *sysMemStat, test bool) {
 
 	// Start with the searchAddr in a state indicating there's no free memory.
 	p.searchAddr = maxSearchAddr()
-	p.searchAddrs = [3]offAddr{maxSearchAddr(), maxSearchAddr(), maxSearchAddr()}
 
 	// Set the mheapLock.
 	p.mheapLock = mheapLock
@@ -411,8 +395,8 @@ func (p *pageAlloc) grow(base, size uintptr) {
 	// A grow operation is a lot like a free operation, so if our
 	// chunk ends up below p.searchAddr, update p.searchAddr to the
 	// new address, just like in free.
-	if search := p.searchFor(base); (offAddr{base}).lessThan(*search) {
-		*search = offAddr{base}
+	if b := (offAddr{base}); b.lessThan(p.searchAddr) {
+		p.searchAddr = b
 	}
 
 	// Add entries into chunks, which is sparse, if needed. Then,
@@ -668,52 +652,6 @@ func (p *pageAlloc) findMappedAddr(addr offAddr) offAddr {
 //
 // p.mheapLock must be held.
 func (p *pageAlloc) find(npages uintptr) (uintptr, offAddr) {
-	addr, searchAddr := p.findAny(npages)
-	if p.limit != 0 && addr != 0 && addr+npages*pageSize > p.limit {
-		// Free, but not in the local range.
-		return 0, searchAddr
-	}
-	return addr, searchAddr
-}
-
-// searchFor returns the search address of the range that base is in.
-func (p *pageAlloc) searchFor(base uintptr) *offAddr {
-	region := 0
-	if base < p.mid {
-		region = 1
-	} else if base < p.split {
-		region = 2
-	}
-	if region == p.region {
-		return &p.searchAddr
-	}
-	return &p.searchAddrs[region]
-}
-
-// enterLocal makes find and alloc search a region of the local range
-// (1 or 2), until leaveLocal.
-//
-// p.mheapLock must be held.
-func (p *pageAlloc) enterLocal(region int) {
-	assertLockHeld(p.mheapLock)
-	p.searchAddrs[0] = p.searchAddr
-	p.searchAddr = p.searchAddrs[region]
-	p.region = region
-	p.limit = p.mid
-	if region == 2 {
-		p.limit = p.split
-	}
-}
-
-func (p *pageAlloc) leaveLocal() {
-	assertLockHeld(p.mheapLock)
-	p.searchAddrs[p.region] = p.searchAddr
-	p.searchAddr = p.searchAddrs[0]
-	p.region = 0
-	p.limit = 0
-}
-
-func (p *pageAlloc) findAny(npages uintptr) (uintptr, offAddr) {
 	assertLockHeld(p.mheapLock)
 
 	// Search algorithm.
@@ -961,9 +899,6 @@ func (p *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 				throw("bad summary data")
 			}
 			addr = chunkBase(i) + uintptr(j)*pageSize
-			if p.limit != 0 && addr+npages*pageSize > p.limit {
-				return 0, 0
-			}
 			searchAddr = offAddr{chunkBase(i) + uintptr(searchIdx)*pageSize}
 			goto Found
 		}
@@ -972,7 +907,7 @@ func (p *pageAlloc) alloc(npages uintptr) (addr uintptr, scav uintptr) {
 	// the slow path.
 	addr, searchAddr = p.find(npages)
 	if addr == 0 {
-		if npages == 1 && p.limit == 0 {
+		if npages == 1 {
 			// We failed to find a single free page, the smallest unit
 			// of allocation. This means we know the heap is completely
 			// exhausted. Otherwise, the heap still might have free
@@ -1006,8 +941,8 @@ func (p *pageAlloc) free(base, npages uintptr) {
 	assertLockHeld(p.mheapLock)
 
 	// If we're freeing pages below the p.searchAddr, update searchAddr.
-	if search := p.searchFor(base); (offAddr{base}).lessThan(*search) {
-		*search = offAddr{base}
+	if b := (offAddr{base}); b.lessThan(p.searchAddr) {
+		p.searchAddr = b
 	}
 	limit := base + npages*pageSize - 1
 	if npages == 1 {

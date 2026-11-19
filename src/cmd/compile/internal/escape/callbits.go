@@ -796,7 +796,7 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 // callArgTag returns the expression of the tag of an object that is
 // allocated in the argument d.arg of the call d.call: 1 if the function
 // that is called keeps it local.
-func (b *batch) callArgTag(pos src.XPos, d *dynRoot, shift int64) ir.Node {
+func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	unsafePtr := types.Types[types.TUNSAFEPTR]
 	lit := func(v int64) ir.Node {
@@ -873,9 +873,7 @@ func (b *batch) callArgTag(pos src.XPos, d *dynRoot, shift int64) ir.Node {
 	// points to a local object.
 	stays := not(bit(ir.EscMaskViaRecv + d.arg))
 	if recv != nil {
-		base := ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "localHeapBase"), uintptrType)
-		local := binary(ir.ORSH, binary(ir.OSUB, binary(ir.ORSH, binary(ir.OSUB, recv, base), lit(shift)), lit(1)), lit(63))
-		stays = binary(ir.OOR, stays, local)
+		stays = binary(ir.OOR, stays, b.localTest(pos, recv))
 	}
 	stays = binary(ir.OAND, not(bit(ir.EscMaskShared+d.arg)), stays)
 	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+d.arg)), stays))

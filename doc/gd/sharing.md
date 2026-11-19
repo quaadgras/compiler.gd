@@ -12,8 +12,8 @@ that is.
 > strings and interfaces on every target but wasm (step 2); and what the
 > compiler proves unshared from escape analysis, within a function (the
 > first part of step 3). Not yet: the per-parameter "shares" bit in the
-> callee masks, and local and shared memory in separate address ranges
-> (the end of this document).
+> callee masks, and local and shared objects in spans of their own (the
+> end of this document).
 
 ## Shared objects
 
@@ -255,16 +255,25 @@ string or an interface in one takes a lock (a buffer's `buf = append(buf,
   instructions, so nothing is marked (`sharingEnabled`).
 - User arenas are treated as shared and not walked.
 
-## Local and shared memory in separate address ranges (step 3)
+## Local objects in spans of their own (step 3)
 
 Decided with the user on 2026-11-19: whether an object is shared is
 decided **when it is allocated**, by OR-ing every vector through which
 its address, or anything reached from it, could get to another goroutine.
 A vector that cannot be evaluated at the allocation counts as shared.
-Nothing becomes shared later, so the address of a word says whether
+Nothing becomes shared later, so the page of a word says whether
 another goroutine may read or write it. The user also wants the collector
 to use it: when a goroutine exits or is collected, the local memory it
 allocated is free.
+
+Local memory was first a range of addresses of its own (64 GiB at the
+first arena hint, with the stacks in its second half), so that the test
+was one compare. The user dropped that on 2026-11-19: the decision is in
+the bits that callers and callees pass, the address was only read for
+what is stored through a pointer, and the range cost a second region in
+the page allocator and rules for where the rest of the heap may be that
+windows and macOS did not meet. Local objects are now in spans of their
+own, anywhere in the heap.
 
 ### The invariant
 
@@ -282,18 +291,19 @@ because the callee is unknown.
 
 ### Done
 
-- **Allocator** (`runtime`: `heapSplit`, `malloc.go`, `mheap.go`,
-  `mpagealloc.go`). amd64 and arm64 on linux, darwin, freebsd, windows:
-  local objects and the stacks are in the 64 GiB at the first arena hint
-  (`localHeapBase`, a variable: the base of the heap is random); the
-  rest of the heap begins after it. Each size class has a second span
-  class (`spanClass.local`), the page allocator has a second search
-  address and a limit (`enterLocal`, `searchFor`). If the range is full
-  or the kernel does not give it, local objects are allocated with the
-  rest, where they count as shared (safe). `isLocal(p)` is
-  `uintptr(p)-localHeapBase < localHeapSize`. The size-specialized
-  mallocs, the tiny allocator and the page cache are for shared objects
-  only for now (a local allocation takes the general path).
+- **Allocator** (`runtime`: `localSpans`, `spanClass.local`,
+  `otherPages`). amd64 and arm64 on linux, darwin, freebsd, windows.
+  Each size class has a second span class, for local objects, so a page
+  of the heap has local objects or other ones, never both. A table
+  (`otherPages`, 2^20 numbers, indexed by the page's address modulo its
+  size) counts, for each place, the pages there that hold something else
+  than local objects: the spans of the other classes, the stacks, the
+  globals, and the first page (nil). A pointer whose page has zero points
+  to a local object: one load in compiled code. Two pages 8 GiB apart
+  have the same place, so in a heap that is spread wider some local
+  objects are not known to be (and what is stored in them is then
+  shared, which is safe). The size-specialized mallocs and the tiny
+  allocator are for the other objects only for now.
 - **Entry points**. A type descriptor passed to `newobject`, `mallocgc`,
   `makeslice*`, `growslice*` may be tagged (bit 0, `allocType`): the object
   is local. Untagged, as everything not compiled for it is (reflect,
@@ -316,19 +326,19 @@ because the callee is unknown.
   store through a pure path from a local variable (`p.f = x`, `*p = x`,
   `p[i] = x`, the elements of `append(p.f, x)`) is a store in a container
   known at run time. An allocation that only flows to such containers
-  gets a tag computed where it is allocated: 1 if all of them are in the
-  local range. Allowed containers: the one of the allocation's own
+  gets a tag computed where it is allocated: 1 if all of them are local
+  objects. Allowed containers: the one of the allocation's own
   statement (a plain assignment; without a call if the path loads), and a
   parameter that is never assigned. `ir.LocalTag` holds the expression
-  (`(((uintptr(P)-localHeapBase)>>36)-1)>>63`), which the code generator
+  (`(otherPages[uintptr(P)>>13 & (1<<20-1)] - 1) >> 63`, `escape`'s
+  `localTest`), which the code generator
   adds to the type descriptor. `-d=nolocaldyn` turns it off. For Phase G
   these containers are the heap (`isDynRoot`).
 
-- **Stacks apart.** The local range has two halves: objects in the
-  first, stacks in the second (page allocator regions 0, 1, 2). A tag
-  tests the first half (`isLocalObject`, shift 35): a container on a
-  stack is not known to be local from its address, since the function
-  that has it may return or share what a callee stored in it.
+- **Stacks are not local objects.** A container on a stack is not
+  known to be local from where it is, since the function that has it may
+  return or share what a callee stored in it: the pages of the stacks
+  count in the table.
 - **The bits of a call** (`runtime/shared.go`, `escape/callbits.go`,
   `ssagen`: `takeLocalBits`, `setLocalBits`). What the address cannot
   say, the caller says, in `g.localBits`, right before a direct call:
@@ -496,18 +506,18 @@ any other root makes it shared.
 
 1. **The container of a store** in the statement that allocates:
    `p.f = &T{}`, `*p = new(T)`, `s[i] = make(...)`, `m[k] = v`,
-   `p.f = append(p.f, x)`. The root is `isLocal(P)` for the pure path `P`
+   `p.f = append(p.f, x)`. The root is "`P` points to a local object" for the pure path `P`
    (names, fields, derefs, no calls) that the store goes through. It can
    be evaluated at an allocation that is in the right-hand side of that
    statement, since nothing between the allocation and the store changes
    `P` (calls are hoisted before by order). For any other value that
    flows there the root is shared.
 2. **Elements appended**: the container is the array. Local if the old
-   array is (`isLocal(oldptr)`: then everything the slice flows to is
+   array is (the old pointer's page: then everything the slice flows to is
    local, so the new array is too); for a nil slice, as the append itself
    is decided.
 3. **A parameter that is never assigned** is a root for every allocation
-   of the function, not only in the statement: `isLocal(q)`.
+   of the function, not only in the statement.
 4. **Results**. What is only returned is the caller's to decide. The
    caller says so with the `outBuf` that Phase G already passes for a
    pointer result (a sentinel: "in the heap, but local"); other results
@@ -525,11 +535,12 @@ only sees a stack address. This is the cost of the design for
 
 ### Then
 
-- Guards become `isLocal(addr)` inline: local, no lock; else the runtime
-  (which still says "not shared" for other threads' stacks and C memory).
+- Guards become the test of the page inline: a local object, no lock;
+  else the runtime (which still says "not shared" for stacks and C
+  memory).
   `sharePages`, the store barrier, the publish walk and the per-object
   bit stay only under `-d=sharecheck` as the witness.
-- Fast paths for local allocation (size-specialized, tiny, page cache).
+- Fast paths for local allocation (size-specialized, tiny).
 - Exposed addresses: `exposeptr` of a local object must be refused or the
   conversion made a static sink everywhere (now only in escape analysis).
 - Freeing a goroutine's local memory when it exits or is collected:

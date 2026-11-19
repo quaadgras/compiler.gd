@@ -199,21 +199,9 @@ type mheap struct {
 
 	// curArena is the arena that the heap is currently growing
 	// into. This should always be physPageSize-aligned.
-	//
-	// There are two: the second one is in the range of addresses of
-	// local memory (heapSplit).
-	curArenas [3]struct {
+	curArena struct {
 		base, end uintptr
 	}
-
-	// localHints is where the local range grows, and localFull says
-	// that it cannot grow: what is local is then allocated with the
-	// rest.
-	//
-	// They are indexed by the region of the page allocator: 1 for the
-	// local objects, 2 for the stacks.
-	localHints [3]*arenaHint
-	localFull  [3]bool
 
 	// central free lists for small size classes.
 	// the padding makes sure that the mcentrals are
@@ -585,8 +573,8 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 // pointers and thus do not need to be scanned by the garbage
 // collector.
 //
-// Each of those has a second spanClass, whose spans are in the range of
-// addresses of the memory that only one goroutine reaches (shared.go).
+// Each of those has a second spanClass, whose spans have the objects
+// that only one goroutine reaches (shared.go).
 type spanClass uint16
 
 const (
@@ -607,14 +595,14 @@ func (sc spanClass) sizeclass() int8 {
 	return int8(sc >> 1)
 }
 
-// local reports whether the spans of sc are in the local range.
+// local reports whether the spans of sc have local objects.
 //
 //go:nosplit
 func (sc spanClass) local() bool {
 	return sc >= localSpanClasses
 }
 
-// base returns sc's class outside of the local range.
+// base returns sc's class for objects that are not local.
 //
 //go:nosplit
 func (sc spanClass) base() spanClass {
@@ -624,11 +612,11 @@ func (sc spanClass) base() spanClass {
 	return sc
 }
 
-// in returns sc's class in the local range, if local is set.
+// in returns sc's class for local objects, if local is set.
 //
 //go:nosplit
 func (sc spanClass) in(local bool) spanClass {
-	if local && heapSplit {
+	if local && localSpans {
 		return sc + localSpanClasses
 	}
 	return sc
@@ -1274,22 +1262,8 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// If the allocation is small enough, try the page cache!
 	// The page cache does not support aligned allocations, so we cannot use
 	// it if we need to provide a physical page aligned stack allocation.
-	// What is local, and the stacks, are in the local range.
-	region := 0
-	if heapSplit {
-		if typ == spanAllocStack {
-			region = 2
-		} else if spanclass.local() {
-			region = 1
-		}
-		if h.localFull[region] {
-			region = 0
-		}
-	}
-	local := region != 0
-
 	pp := gp.m.p.ptr()
-	if !local && !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
+	if !needPhysPageAlign && pp != nil && npages < pageCachePages/4 {
 		c := &pp.pcache
 
 		// If the cache is empty, refill it.
@@ -1315,11 +1289,6 @@ func (h *mheap) allocSpan(npages uintptr, typ spanAllocType, spanclass spanClass
 	// whole job done without the heap lock.
 	lock(&h.lock)
 
-retry:
-	if local {
-		h.pages.enterLocal(region)
-	}
-
 	if needPhysPageAlign {
 		// Overallocate by a physical page to allow for later alignment.
 		extraPages := physPageSize / pageSize
@@ -1335,16 +1304,7 @@ retry:
 		base, _ = h.pages.find(npages + extraPages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages+extraPages, region)
-			if !ok && local {
-				// The local range cannot grow. Local memory is
-				// from now on allocated with the rest, where it
-				// counts as shared.
-				h.pages.leaveLocal()
-				h.localFull[region] = true
-				region, local = 0, false
-				goto retry
-			}
+			growth, ok = h.grow(npages + extraPages)
 			if !ok {
 				unlock(&h.lock)
 				return nil
@@ -1363,16 +1323,7 @@ retry:
 		base, scav = h.pages.alloc(npages)
 		if base == 0 {
 			var ok bool
-			growth, ok = h.grow(npages, region)
-			if !ok && local {
-				// The local range cannot grow. Local memory is
-				// from now on allocated with the rest, where it
-				// counts as shared.
-				h.pages.leaveLocal()
-				h.localFull[region] = true
-				region, local = 0, false
-				goto retry
-			}
+			growth, ok = h.grow(npages)
 			if !ok {
 				unlock(&h.lock)
 				return nil
@@ -1382,9 +1333,6 @@ retry:
 				throw("grew heap, but no adequate free space found")
 			}
 		}
-	}
-	if local {
-		h.pages.leaveLocal()
 	}
 	if s == nil {
 		// We failed to get an mspan earlier, so grab
@@ -1516,6 +1464,10 @@ HaveSpan:
 // initSpan initializes a blank span s which will represent the range
 // [base, base+npages*pageSize). typ is the type of span being allocated.
 func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base, npages, scav uintptr) {
+	if typ != spanAllocHeap || !spanclass.local() {
+		// Not a span of local objects (shared.go).
+		otherPagesAdd(base, npages, 1)
+	}
 	// At this point, both s != nil and base != 0, and the heap
 	// lock is no longer held. Initialize the span.
 	s.init(base, npages)
@@ -1629,17 +1581,11 @@ func (h *mheap) initSpan(s *mspan, typ spanAllocType, spanclass spanClass, base,
 // returning how much the heap grew by and whether it worked.
 //
 // h.lock must be held.
-func (h *mheap) grow(npage uintptr, region int) (uintptr, bool) {
+func (h *mheap) grow(npage uintptr) (uintptr, bool) {
 	assertLockHeld(&h.lock)
 
-	local := region != 0
-	curArena := &h.curArenas[region]
-	hints := &h.arenaHints
-	if local {
-		hints = &h.localHints[region]
-	}
-
-	firstGrow := curArena.base == 0 && !local
+	curArena := &h.curArena
+	firstGrow := curArena.base == 0
 
 	// We must grow the heap in whole palloc chunks.
 	// We call sysMap below but note that because we
@@ -1657,10 +1603,7 @@ func (h *mheap) grow(npage uintptr, region int) (uintptr, bool) {
 		// Not enough room in the current arena. Allocate more
 		// arena space. This may not be contiguous with the
 		// current arena, so we have to request the full ask.
-		av, asize := h.sysAlloc(ask, hints, &h.heapArenas)
-		if av == nil && local {
-			return 0, false
-		}
+		av, asize := h.sysAlloc(ask, &h.arenaHints, &h.heapArenas)
 		if av == nil {
 			inUse := gcController.heapFree.load() + gcController.heapReleased.load() + gcController.heapInUse.load()
 			print("runtime: out of memory: cannot allocate ", ask, "-byte block (", inUse, " in use)\n")
@@ -1844,6 +1787,9 @@ func (h *mheap) freeSpanLocked(s *mspan, typ spanAllocType) {
 		}
 	default:
 		throw("mheap.freeSpanLocked - invalid span state")
+	}
+	if s.state.get() != mSpanInUse || !s.spanclass.local() {
+		otherPagesAdd(s.base(), s.npages, -1)
 	}
 
 	// Update stats.
