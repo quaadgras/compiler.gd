@@ -10,7 +10,11 @@ import (
 )
 
 // newMemFile returns a stream of m.
-func newMemFile(m *MemFile, rd, wr bool) c23.Ptr {
+func newMemFile(m *MemFile, rd, wr bool) c23.Ptr { return NewMemStream(m, rd, wr) }
+
+// NewMemStream returns a stream of m, which it reads and writes as a
+// file.
+func NewMemStream(m c23.MemStream, rd, wr bool) c23.Ptr {
 	p := c23.New[c23.File]()
 	fl := (*c23.File)(p.Obj)
 	fl.Fd = -1

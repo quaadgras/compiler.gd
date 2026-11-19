@@ -655,6 +655,10 @@ var depsRules = `
 	CRYPTO
 	< golang.org/x/crypto/hkdf;
 
+	# crypt.h's crypt, of C's library (gd fork).
+	CRYPTO, internal/c23
+	< internal/c23/crypt;
+
 	CGO, fmt, net !< CRYPTO;
 
 	# CRYPTO-MATH is crypto that exposes math/big APIs - no cgo, net; fmt now ok.

@@ -62,3 +62,7 @@ func langinfo(item int32) string {
 	}
 	return ""
 }
+
+// NlLanginfoL is nl_langinfo_l, which is nl_langinfo: the library's
+// locales have the same information (internal/c23/locale).
+func NlLanginfoL(item int32, _ c23.Ptr) c23.Ptr { return NlLanginfo(item) }
