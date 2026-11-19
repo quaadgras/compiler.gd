@@ -222,16 +222,24 @@ func Sigsuspend(mask c23.Ptr) int32 {
 	return -1
 }
 
-// Sigwait is sigwait: it waits for a signal of set to be pending (the
-// caller blocks them), takes it and stores its number at sig.
+// Sigwait is sigwait, a cancellation point: it waits for a signal of set
+// to be pending (the caller blocks them), takes it and stores its number
+// at sig.
 func Sigwait(set, sig c23.Ptr) int32 {
 	w := c23.LoadSigset(set) &^ c23.SigUnblockable
 	if w == 0 {
 		return c23.EINVAL
 	}
+	c23.TestCancel()
 	t := c23.SigSelf()
 	c23.SigMu.Lock()
 	for {
+		if c23.CancelPending() {
+			t.Waiting = 0
+			delete(c23.SigWaiters, t)
+			c23.SigMu.Unlock()
+			c23.TestCancel()
+		}
 		if r := t.Pending & w; r != 0 {
 			n := int32(bits.TrailingZeros64(r)) + 1
 			t.Pending &^= c23.SigBit(n)

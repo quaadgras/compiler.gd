@@ -287,6 +287,37 @@ func TestPxLocale(t *testing.T) {
 	}
 }
 
+// TestPxThreads compares POSIX's threads, timers and signals
+// (testdata/pxthreads.c: attributes, read-write locks, barriers, spin
+// locks, cancellation, robust mutexes, timer_create, clock_nanosleep,
+// killpg, sigset and sigsetjmp) with the host's C library, on Linux.
+func TestPxThreads(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the test compares with Linux's C library")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxthreads.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "pxthreads")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.
