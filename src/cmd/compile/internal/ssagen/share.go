@@ -116,6 +116,10 @@ func (s *state) loadFrom(n ir.Node, t *types.Type, src *ssa.Value) *ssa.Value {
 		s.shareCheck(src)
 		return s.loadWhole(t, src)
 	}
+	if name, ok := n.(*ir.Name); ok && name.Op() == ir.ONAME && name.Class == ir.PEXTERN && name.Readonly() {
+		// Nothing stores in a read-only variable: it loads whole.
+		return s.loadWhole(t, src)
+	}
 	return s.load(t, src)
 }
 

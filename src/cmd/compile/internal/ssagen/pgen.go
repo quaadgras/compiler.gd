@@ -328,6 +328,19 @@ func Compile(gd *base.Invocation, fn *ir.Func, w *Worker, profile *pgoir.Profile
 
 	pp.Flush(gd) // assemble, fill in boilerplate, etc.
 
+	// The function is assembled and its tables are written. What they
+	// were made from points to its instructions: without it, those that
+	// did not come from the worker's array (a large function's) can go
+	// now, instead of staying until the end of the compilation.
+	if d, ok := fn.DebugInfo.(*ssa.FuncDebug); ok {
+		d.GetPC = nil
+	}
+	fi := fn.LSym.Func()
+	fi.InlMarks = nil
+	for i := range fi.JumpTables {
+		clear(fi.JumpTables[i].Targets) // their number still sizes the table
+	}
+
 	// If we're compiling the package init function, search for any
 	// relocations that target global map init outline functions and
 	// turn them into weak relocs.

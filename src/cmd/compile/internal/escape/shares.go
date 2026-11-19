@@ -556,6 +556,7 @@ func (b *batch) localTest(pos src.XPos, u ir.Node) ir.Node {
 	ap.SetCheckPtr(true)
 	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(u32), ap)
 	wp.SetTypecheck(1)
+	wp.SetCheckPtr(true) // a word of the table, as aligned as the table
 	word := ir.NewStarExpr(b.gd, pos, wp)
 	word.SetType(u32)
 	word.SetTypecheck(1)
