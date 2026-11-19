@@ -294,10 +294,10 @@ func Realloc(p Ptr, n uint64) Ptr {
 // the program.
 func Abort() {
 	sigMu.Lock()
-	h := sigHandler[SIGABRT]
+	h := sigActs[SIGABRT].handler
 	sigMu.Unlock()
 	if a := Addr(h); a != sigDfl && a != sigIgn {
-		FuncOf[func(int32)](h)(SIGABRT)
+		sigSelf().run(SIGABRT, sigInfo{code: SI_TKILL})
 	}
 	abort()
 }
