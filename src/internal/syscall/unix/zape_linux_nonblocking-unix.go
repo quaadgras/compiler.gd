@@ -11,7 +11,7 @@ package unix
 import "syscall"
 
 func Linux_IsNonblock(fd int) (nonblocking bool, err error) {
-	flag, e1 := Fcntl(fd, syscall.Linux_F_GETFL, 0)
+	flag, e1 := Linux_Fcntl(fd, syscall.Linux_F_GETFL, 0)
 	if e1 != nil {
 		return false, e1
 	}

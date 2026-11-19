@@ -17,38 +17,3 @@ const (
 	apeLinux = 1 + iota
 	apeFreebsd
 )
-
-func closefd(a0 uintptr) {
-	if apehost == apeLinux {
-		linux_closefd(a0)
-		return
-	}
-	freebsd_closefd(a0)
-}
-
-func open(a0 string) (uintptr, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_open(a0)
-		return x0, x1
-	}
-	x0, x1 := freebsd_open(a0)
-	return x0, x1
-}
-
-func preadn(a0 uintptr, a1 []byte, a2 int) error {
-	if apehost == apeLinux {
-		x0 := linux_preadn(a0, a1, a2)
-		return x0
-	}
-	x0 := freebsd_preadn(a0, a1, a2)
-	return x0
-}
-
-func read(a0 uintptr, a1 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_read(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := freebsd_read(a0, a1)
-	return x0, x1
-}

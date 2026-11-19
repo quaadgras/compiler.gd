@@ -115,15 +115,6 @@ func interfaceTable(a0 int) ([]Interface, error) {
 	return x0, x1
 }
 
-func isConnError(a0 error) bool {
-	if apehost == apeLinux {
-		x0 := linux_isConnError(a0)
-		return x0
-	}
-	x0 := freebsd_isConnError(a0)
-	return x0
-}
-
 func isUsingMultipathTCP(a0 *netFD) bool {
 	if apehost == apeLinux {
 		x0 := linux_isUsingMultipathTCP(a0)
@@ -202,6 +193,15 @@ func setWriteBuffer(a0 *netFD, a1 int) error {
 		return x0
 	}
 	x0 := freebsd_setWriteBuffer(a0, a1)
+	return x0
+}
+
+func spuriousENOTAVAIL(a0 error) bool {
+	if apehost == apeLinux {
+		x0 := linux_spuriousENOTAVAIL(a0)
+		return x0
+	}
+	x0 := freebsd_spuriousENOTAVAIL(a0)
 	return x0
 }
 

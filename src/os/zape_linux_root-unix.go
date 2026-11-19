@@ -203,7 +203,7 @@ func linux_chtimesat(parent int, name string, atime time.Time, mtime time.Time) 
 	return linux_afterResolvingSymlink(parent, name, func() error {
 		return ignoringEINTR(func() error {
 			utimes := chtimesUtimes(atime, mtime)
-			return unix.Utimensat(parent, name, &utimes, unix.Linux_AT_SYMLINK_NOFOLLOW)
+			return unix.Linux_Utimensat(parent, name, &utimes, unix.Linux_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }

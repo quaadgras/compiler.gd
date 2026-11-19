@@ -238,7 +238,7 @@ func linux_newPipe() *linux_splicePipe {
 	// Set the pipe buffer size to maxSpliceSize to optimize that.
 	// Ignore errors here, as a smaller buffer size will work,
 	// although it will require more system calls.
-	unix.Fcntl(fds[0], syscall.Linux_F_SETPIPE_SZ, linux_maxSpliceSize)
+	unix.Linux_Fcntl(fds[0], syscall.Linux_F_SETPIPE_SZ, linux_maxSpliceSize)
 
 	return &linux_splicePipe{rfd: fds[0], wfd: fds[1]}
 }

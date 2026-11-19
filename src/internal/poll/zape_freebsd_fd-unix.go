@@ -22,7 +22,7 @@ import (
 // or "file".
 // Set pollable to true if fd should be managed by runtime netpoll.
 func (fd *FD) Freebsd_Init(net string, pollable bool) error {
-	fd.SysFile.freebsd_init()
+	fd.SysFile.init()
 
 	// We don't actually care about the various network types.
 	if net == "file" {
@@ -48,7 +48,7 @@ func (fd *FD) freebsd_destroy() error {
 	// so this must be executed before CloseFunc.
 	fd.pd.close()
 
-	err := fd.SysFile.freebsd_destroy(fd.Sysfd)
+	err := fd.SysFile.destroy(fd.Sysfd)
 
 	fd.Sysfd = -1
 	runtime_Semrelease(&fd.csema)
@@ -623,7 +623,7 @@ func (fd *FD) Freebsd_Fstat(s *syscall.Freebsd_Stat_t) error {
 // DupCloseOnExec dups fd and marks it close-on-exec.
 func Freebsd_DupCloseOnExec(fd int) (int, string, error) {
 	if syscall.Freebsd_F_DUPFD_CLOEXEC != 0 && !dupCloexecUnsupported.Load() {
-		r0, err := unix.Fcntl(fd, syscall.Freebsd_F_DUPFD_CLOEXEC, 0)
+		r0, err := unix.Freebsd_Fcntl(fd, syscall.Freebsd_F_DUPFD_CLOEXEC, 0)
 		if err == nil {
 			return r0, "", nil
 		}
@@ -637,7 +637,7 @@ func Freebsd_DupCloseOnExec(fd int) (int, string, error) {
 			return -1, "fcntl", err
 		}
 	}
-	return freebsd_dupCloseOnExecOld(fd)
+	return dupCloseOnExecOld(fd)
 }
 
 // Dup duplicates the file descriptor.

@@ -11,7 +11,7 @@ package unix
 import "syscall"
 
 func Freebsd_IsNonblock(fd int) (nonblocking bool, err error) {
-	flag, e1 := Fcntl(fd, syscall.Freebsd_F_GETFL, 0)
+	flag, e1 := Freebsd_Fcntl(fd, syscall.Freebsd_F_GETFL, 0)
 	if e1 != nil {
 		return false, e1
 	}

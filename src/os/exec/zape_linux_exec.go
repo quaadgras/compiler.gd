@@ -211,7 +211,7 @@ func Linux_Command(name string, arg ...string) *Cmd {
 		// Note that we don't cache anything here for relative paths, because
 		// cmd.Dir may be set after we return from this function and that may
 		// cause the command to resolve to a different extension.
-		if lp, err := linux_lookExtensions(name, ""); err == nil {
+		if lp, err := lookExtensions(name, ""); err == nil {
 			cmd.cachedLookExtensions.in, cmd.cachedLookExtensions.out = name, lp
 		} else {
 			cmd.Err = err
@@ -438,7 +438,7 @@ func (c *Cmd) Linux_Start() error {
 			// than triggering a surprising data race, and if the user really cares
 			// about that bit of logging they can always use LookPath to resolve it.
 			var err error
-			lp, err = linux_lookExtensions(c.Path, c.Dir)
+			lp, err = lookExtensions(c.Path, c.Dir)
 			if err != nil {
 				return err
 			}

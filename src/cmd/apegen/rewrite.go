@@ -617,6 +617,16 @@ func (g *pkgGen) writeAll() error {
 			}
 		}
 	}
+	for name := range g.sharedTests {
+		if err := setNotAPE(filepath.Join(g.dir, name), g.testOff[name]); err != nil {
+			return err
+		}
+	}
+	for name, off := range g.xoff {
+		if err := setNotAPE(filepath.Join(g.dir, name), off); err != nil {
+			return err
+		}
+	}
 	old, _ := filepath.Glob(filepath.Join(g.dir, "zape_*"))
 	for _, f := range old {
 		if err := os.Remove(f); err != nil {

@@ -10,12 +10,6 @@ package poll
 
 import "syscall"
 
-// Do the interface allocations only once for common
-// Errno values.
-var (
-	freebsd_errEAGAIN error = syscall.Freebsd_EAGAIN
-)
-
 // errnoErr returns common boxed Errno values, to prevent
 // allocations at runtime.
 func freebsd_errnoErr(e syscall.Errno) error {
@@ -23,7 +17,7 @@ func freebsd_errnoErr(e syscall.Errno) error {
 	case 0:
 		return nil
 	case syscall.Freebsd_EAGAIN:
-		return freebsd_errEAGAIN
+		return errEAGAIN
 	case syscall.Freebsd_EINVAL:
 		return errEINVAL
 	case syscall.Freebsd_ENOENT:

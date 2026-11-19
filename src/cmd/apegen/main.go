@@ -60,6 +60,7 @@ var (
 	hostsFlag  = flag.String("hosts", strings.Join(syslist.APEHosts, ","), "host systems")
 	arch       = flag.String("arch", "amd64", "architecture")
 	constTypes = flag.String("types", "runtime._SIGURG=uint32", "types of constants that differ between hosts and that shared code does not use")
+	tests      = flag.Bool("tests", true, "dispatch what the package's own tests use, and leave out of ape the tests that depend on the host")
 	verbose    = flag.Bool("v", false, "report the shared files copied per host and why")
 	maxConsts  = flag.String("max", "runtime._NSIG", "constants that are the largest host's value")
 )

@@ -203,7 +203,7 @@ func freebsd_chtimesat(parent int, name string, atime time.Time, mtime time.Time
 	return freebsd_afterResolvingSymlink(parent, name, func() error {
 		return ignoringEINTR(func() error {
 			utimes := chtimesUtimes(atime, mtime)
-			return unix.Utimensat(parent, name, &utimes, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
+			return unix.Freebsd_Utimensat(parent, name, &utimes, unix.Freebsd_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }

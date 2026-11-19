@@ -385,6 +385,30 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 		g.reportf("%s %s: generic", ic.kind, ic.name)
 		return
 	}
+	// Assembly functions dispatch in assembly: no Go frame.
+	if ic.kind == "func" && g.asmOnly(ic) {
+		fmt.Fprintf(&g.decls, "\n// %s is the host's, in assembly.\n", fn.Name())
+		for _, p := range g.pragmas(hp0, fn) {
+			if strings.HasPrefix(p, "//go:linkname") {
+				fmt.Fprintln(&g.decls, p)
+			}
+		}
+		var ps, rs []string
+		for v := range s.Params().Variables() {
+			ps = append(ps, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		for v := range s.Results().Variables() {
+			rs = append(rs, v.Name()+" "+g.typeString(hp0, v.Type()))
+		}
+		fmt.Fprintf(&g.decls, "//go:noescape\nfunc %s(%s) (%s)\n", fn.Name(), strings.Join(ps, ", "), strings.Join(rs, ", "))
+		if g.asmDispatch[fn.Name()] == nil {
+			g.asmDispatch[fn.Name()] = map[string]string{}
+		}
+		for _, hp := range g.hs {
+			g.asmDispatch[fn.Name()][hp.host] = ""
+		}
+		return
+	}
 	var pragmas []string
 	seen := map[string]bool{}
 	for _, hp := range g.hs {
@@ -509,6 +533,25 @@ func (g *pkgGen) dispatchFunc(ic *iface) {
 }
 
 func (g *pkgGen) isRuntime() bool { return g.path == "runtime" }
+
+// asmOnly reports whether every host implements the function in its own
+// assembly, with no conversions: it dispatches by jumping.
+func (g *pkgGen) asmOnly(ic *iface) bool {
+	for _, hp := range g.hs {
+		fn := hp.obj(ic).(*types.Func)
+		if hp.hasBody(fn) || hp.linkname(fn) != "" || !g.asmDefinesFunc(hp, fn.Name()) {
+			return false
+		}
+		var refs []*types.Named
+		refsOf(fn.Signature(), map[types.Type]bool{}, &refs)
+		for _, r := range refs {
+			if g.hostNamed(hp, r) != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func flagHas(flagValue, pkg, name string) (string, bool) {
 	for _, kv := range strings.Split(flagValue, ",") {

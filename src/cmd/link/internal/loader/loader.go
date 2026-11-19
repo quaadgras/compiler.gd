@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"internal/abi"
 	"internal/buildcfg"
+	"internal/syslist"
 	"io"
 	"iter"
 	"log"
@@ -2633,6 +2634,24 @@ func (l *Loader) checkLinkname(refpkg *oReader, name string, s Sym) {
 		log.Fatalf("%s: invalid reference to %s", refpkg.unit.Lib.Pkg, name)
 	}
 	pkgs, ok := blockedLinknames[name]
+	if !ok && refpkg.Std() {
+		// The standard library's GOOS=ape host copies pull each other's
+		// host names (syscall.linux_utimensat), which cmd/apegen made
+		// from names they may pull.
+		if p, sym, found := strings.Cut(name, "."); found {
+			for _, h := range syslist.APEHosts {
+				for _, prefix := range []string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
+					if rest, cut := strings.CutPrefix(sym, prefix); cut {
+						if pk, found := blockedLinknames[p+"."+rest]; found {
+							pkgs, ok = pk, true
+						} else {
+							return
+						}
+					}
+				}
+			}
+		}
+	}
 	if ok {
 		for _, p := range pkgs {
 			if pkg == p {

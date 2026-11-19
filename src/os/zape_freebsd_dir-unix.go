@@ -79,7 +79,7 @@ func (f *File) freebsd_readdir(n int, mode readdirMode) (names []string, dirents
 		if d.bufp >= d.nbuf {
 			d.bufp = 0
 			var errno error
-			d.nbuf, errno = f.pfd.Freebsd_ReadDirent(*d.buf)
+			d.nbuf, errno = f.pfd.ReadDirent(*d.buf)
 			runtime.KeepAlive(f)
 			if errno != nil {
 				return names, dirents, infos, &PathError{Op: "readdirent", Path: f.name, Err: errno}

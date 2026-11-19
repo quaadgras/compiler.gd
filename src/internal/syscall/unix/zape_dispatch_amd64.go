@@ -166,6 +166,15 @@ func Fchmodat(a0 int, a1 string, a2 uint32, a3 int) error {
 	return x0
 }
 
+func Fcntl(a0 int, a1 int, a2 int) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := Linux_Fcntl(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := Freebsd_Fcntl(a0, a1, a2)
+	return x0, x1
+}
+
 func GetRandom(a0 []byte, a1 GetRandomFlag) (int, error) {
 	if apehost == apeLinux {
 		x0, x1 := Linux_GetRandom(a0, a1)
@@ -208,6 +217,15 @@ func Tcsetpgrp(a0 int, a1 int32) error {
 		return x0
 	}
 	x0 := Freebsd_Tcsetpgrp(a0, a1)
+	return x0
+}
+
+func Utimensat(a0 int, a1 string, a2 *[2]syscall.Timespec, a3 int) error {
+	if apehost == apeLinux {
+		x0 := Linux_Utimensat(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := Freebsd_Utimensat(a0, a1, a2, a3)
 	return x0
 }
 

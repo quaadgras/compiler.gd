@@ -47,6 +47,18 @@ TEXT ·open(SB),NOSPLIT|NOFRAME,$0
 	JMP	·linux_open(SB)
 	JMP	·freebsd_open(SB)
 
+TEXT ·osyield(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_osyield(SB)
+	JMP	·freebsd_osyield(SB)
+
+TEXT ·pipe2(SB),NOSPLIT|NOFRAME,$0
+	CMPB	runtime·apehost(SB), $const_apeLinux
+	JNE	2(PC)
+	JMP	·linux_pipe2(SB)
+	JMP	·freebsd_pipe2(SB)
+
 TEXT ·read(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
 	JNE	2(PC)

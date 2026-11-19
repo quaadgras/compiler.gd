@@ -40,32 +40,11 @@ var atexitMu sync.Mutex
 
 var errnoObj Ptr = New[int32]()
 
-type fdEntry struct {
-	of      *ofile
-	cloexec bool
-}
-
-type fdIO struct{ f *File }
-
-var fdMu sync.Mutex
-
-var fdTab []*fdEntry = []*fdEntry{
-	{of: &ofile{f: os.Stdin, refs: 1, flags: O_RDONLY}},
-	{of: &ofile{f: os.Stdout, refs: 1, flags: O_WRONLY}},
-	{of: &ofile{f: os.Stderr, refs: 1, flags: O_WRONLY}},
-}
-
 var fileInfo *tinfo = tinfoOf[File]()
 
 var files []*File
 
 var filesMu sync.Mutex
-
-type ofile struct {
-	f     *os.File
-	refs  int
-	flags int32
-}
 
 type qsorter struct {
 	base Ptr
@@ -88,60 +67,6 @@ var tmpnamMu sync.Mutex
 
 var tmpnamN uint64
 
-const FD_CLOEXEC = 1
-
-const F_DUPFD = 0
-
-const F_DUPFD_CLOEXEC = 1030
-
-const F_GETFD = 1
-
-const F_GETFL = 3
-
-const F_OK = 0
-
-const F_SETFD = 2
-
-const F_SETFL = 4
-
-const O_ACCMODE = 3
-
-const O_APPEND = 1024
-
-const O_CLOEXEC = 524288
-
-const O_CREAT = 64
-
-const O_DIRECTORY = 65536
-
-const O_DSYNC = 4096
-
-const O_EXCL = 128
-
-const O_LARGEFILE = 32768
-
-const O_NOCTTY = 256
-
-const O_NOFOLLOW = 131072
-
-const O_NONBLOCK = 2048
-
-const O_RDONLY = 0
-
-const O_RDWR = 2
-
-const O_SYNC = 1052672
-
-const O_TRUNC = 512
-
-const O_WRONLY = 1
-
-const R_OK = 4
-
-const W_OK = 2
-
-const X_OK = 1
-
 func Abort() {
 	if apehost == apeLinux {
 		Linux_Abort()
@@ -156,15 +81,6 @@ func Abs(a0 int32) int32 {
 		return x0
 	}
 	x0 := Freebsd_Abs(a0)
-	return x0
-}
-
-func Access(a0 Ptr, a1 int32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Access(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Access(a0, a1)
 	return x0
 }
 
@@ -231,15 +147,6 @@ func Calloc(a0 uint64, a1 uint64) Ptr {
 	return x0
 }
 
-func Chdir(a0 Ptr) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Chdir(a0)
-		return x0
-	}
-	x0 := Freebsd_Chdir(a0)
-	return x0
-}
-
 func Clearerr(a0 Ptr) {
 	if apehost == apeLinux {
 		Linux_Clearerr(a0)
@@ -248,48 +155,12 @@ func Clearerr(a0 Ptr) {
 	Freebsd_Clearerr(a0)
 }
 
-func Close(a0 int32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Close(a0)
-		return x0
-	}
-	x0 := Freebsd_Close(a0)
-	return x0
-}
-
-func Creat(a0 Ptr, a1 uint32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Creat(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Creat(a0, a1)
-	return x0
-}
-
 func Div(a0 Ptr, a1 int32, a2 int32) {
 	if apehost == apeLinux {
 		Linux_Div(a0, a1, a2)
 		return
 	}
 	Freebsd_Div(a0, a1, a2)
-}
-
-func Dup(a0 int32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Dup(a0)
-		return x0
-	}
-	x0 := Freebsd_Dup(a0)
-	return x0
-}
-
-func Dup2(a0 int32, a1 int32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Dup2(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Dup2(a0, a1)
-	return x0
 }
 
 func Errno() int32 {
@@ -326,38 +197,12 @@ func ExitNow(a0 int32) {
 	Freebsd_ExitNow(a0)
 }
 
-func ExitRaw(a0 int32) {
-	if apehost == apeLinux {
-		Linux_ExitRaw(a0)
-		return
-	}
-	Freebsd_ExitRaw(a0)
-}
-
 func Fclose(a0 Ptr) int32 {
 	if apehost == apeLinux {
 		x0 := Linux_Fclose(a0)
 		return x0
 	}
 	x0 := Freebsd_Fclose(a0)
-	return x0
-}
-
-func Fcntl(a0 int32, a1 int32, a2 ...any) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Fcntl(a0, a1, a2...)
-		return x0
-	}
-	x0 := Freebsd_Fcntl(a0, a1, a2...)
-	return x0
-}
-
-func Fdopen(a0 int32, a1 Ptr) Ptr {
-	if apehost == apeLinux {
-		x0 := Linux_Fdopen(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Fdopen(a0, a1)
 	return x0
 }
 
@@ -403,15 +248,6 @@ func Fgets(a0 Ptr, a1 int32, a2 Ptr) Ptr {
 		return x0
 	}
 	x0 := Freebsd_Fgets(a0, a1, a2)
-	return x0
-}
-
-func Fileno(a0 Ptr) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Fileno(a0)
-		return x0
-	}
-	x0 := Freebsd_Fileno(a0)
 	return x0
 }
 
@@ -505,24 +341,6 @@ func Getchar() int32 {
 	return x0
 }
 
-func Getcwd(a0 Ptr, a1 uint64) Ptr {
-	if apehost == apeLinux {
-		x0 := Linux_Getcwd(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Getcwd(a0, a1)
-	return x0
-}
-
-func Getegid() uint32 {
-	if apehost == apeLinux {
-		x0 := Linux_Getegid()
-		return x0
-	}
-	x0 := Freebsd_Getegid()
-	return x0
-}
-
 func Getenv(a0 Ptr) Ptr {
 	if apehost == apeLinux {
 		x0 := Linux_Getenv(a0)
@@ -532,75 +350,12 @@ func Getenv(a0 Ptr) Ptr {
 	return x0
 }
 
-func Geteuid() uint32 {
-	if apehost == apeLinux {
-		x0 := Linux_Geteuid()
-		return x0
-	}
-	x0 := Freebsd_Geteuid()
-	return x0
-}
-
-func Getgid() uint32 {
-	if apehost == apeLinux {
-		x0 := Linux_Getgid()
-		return x0
-	}
-	x0 := Freebsd_Getgid()
-	return x0
-}
-
-func Gethostname(a0 Ptr, a1 uint64) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Gethostname(a0, a1)
-		return x0
-	}
-	x0 := Freebsd_Gethostname(a0, a1)
-	return x0
-}
-
-func Getpid() int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Getpid()
-		return x0
-	}
-	x0 := Freebsd_Getpid()
-	return x0
-}
-
-func Getppid() int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Getppid()
-		return x0
-	}
-	x0 := Freebsd_Getppid()
-	return x0
-}
-
-func Getuid() uint32 {
-	if apehost == apeLinux {
-		x0 := Linux_Getuid()
-		return x0
-	}
-	x0 := Freebsd_Getuid()
-	return x0
-}
-
 func GoString(a0 Ptr) string {
 	if apehost == apeLinux {
 		x0 := Linux_GoString(a0)
 		return x0
 	}
 	x0 := Freebsd_GoString(a0)
-	return x0
-}
-
-func Isatty(a0 int32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Isatty(a0)
-		return x0
-	}
-	x0 := Freebsd_Isatty(a0)
 	return x0
 }
 
@@ -619,15 +374,6 @@ func Ldiv(a0 Ptr, a1 int64, a2 int64) {
 		return
 	}
 	Freebsd_Ldiv(a0, a1, a2)
-}
-
-func Lseek(a0 int32, a1 int64, a2 int32) int64 {
-	if apehost == apeLinux {
-		x0 := Linux_Lseek(a0, a1, a2)
-		return x0
-	}
-	x0 := Freebsd_Lseek(a0, a1, a2)
-	return x0
 }
 
 func Memccpy(a0 Ptr, a1 Ptr, a2 int32, a3 uint64) Ptr {
@@ -675,30 +421,12 @@ func MemsetExplicit(a0 Ptr, a1 int32, a2 uint64) Ptr {
 	return x0
 }
 
-func Open(a0 Ptr, a1 int32, a2 ...any) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Open(a0, a1, a2...)
-		return x0
-	}
-	x0 := Freebsd_Open(a0, a1, a2...)
-	return x0
-}
-
 func Perror(a0 Ptr) {
 	if apehost == apeLinux {
 		Linux_Perror(a0)
 		return
 	}
 	Freebsd_Perror(a0)
-}
-
-func Pipe(a0 Ptr) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Pipe(a0)
-		return x0
-	}
-	x0 := Freebsd_Pipe(a0)
-	return x0
 }
 
 func Printf(a0 Ptr, a1 ...any) int32 {
@@ -745,15 +473,6 @@ func Rand() int32 {
 	return x0
 }
 
-func Read(a0 int32, a1 Ptr, a2 uint64) int64 {
-	if apehost == apeLinux {
-		x0 := Linux_Read(a0, a1, a2)
-		return x0
-	}
-	x0 := Freebsd_Read(a0, a1, a2)
-	return x0
-}
-
 func Realloc(a0 Ptr, a1 uint64) Ptr {
 	if apehost == apeLinux {
 		x0 := Linux_Realloc(a0, a1)
@@ -789,15 +508,6 @@ func Rewind(a0 Ptr) {
 	Freebsd_Rewind(a0)
 }
 
-func Rmdir(a0 Ptr) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Rmdir(a0)
-		return x0
-	}
-	x0 := Freebsd_Rmdir(a0)
-	return x0
-}
-
 func SetErrno(a0 int32) {
 	if apehost == apeLinux {
 		Linux_SetErrno(a0)
@@ -820,15 +530,6 @@ func Setvbuf(a0 Ptr, a1 Ptr, a2 int32, a3 uint64) int32 {
 		return x0
 	}
 	x0 := Freebsd_Setvbuf(a0, a1, a2, a3)
-	return x0
-}
-
-func Sleep(a0 uint32) uint32 {
-	if apehost == apeLinux {
-		x0 := Linux_Sleep(a0)
-		return x0
-	}
-	x0 := Freebsd_Sleep(a0)
 	return x0
 }
 
@@ -1083,15 +784,6 @@ func Strtoul(a0 Ptr, a1 Ptr, a2 int32) uint64 {
 	return x0
 }
 
-func Sysconf(a0 int32) int64 {
-	if apehost == apeLinux {
-		x0 := Linux_Sysconf(a0)
-		return x0
-	}
-	x0 := Freebsd_Sysconf(a0)
-	return x0
-}
-
 func Tmpfile() Ptr {
 	if apehost == apeLinux {
 		x0 := Linux_Tmpfile()
@@ -1116,24 +808,6 @@ func Ungetc(a0 int32, a1 Ptr) int32 {
 		return x0
 	}
 	x0 := Freebsd_Ungetc(a0, a1)
-	return x0
-}
-
-func Unlink(a0 Ptr) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Unlink(a0)
-		return x0
-	}
-	x0 := Freebsd_Unlink(a0)
-	return x0
-}
-
-func Usleep(a0 uint32) int32 {
-	if apehost == apeLinux {
-		x0 := Linux_Usleep(a0)
-		return x0
-	}
-	x0 := Freebsd_Usleep(a0)
 	return x0
 }
 
@@ -1173,15 +847,6 @@ func Vsprintf(a0 Ptr, a1 Ptr, a2 Ptr) int32 {
 	return x0
 }
 
-func Write(a0 int32, a1 Ptr, a2 uint64) int64 {
-	if apehost == apeLinux {
-		x0 := Linux_Write(a0, a1, a2)
-		return x0
-	}
-	x0 := Freebsd_Write(a0, a1, a2)
-	return x0
-}
-
 func abort() {
 	if apehost == apeLinux {
 		linux_abort()
@@ -1196,51 +861,6 @@ func bytesAt(a0 Ptr, a1 uintptr) []byte {
 		return x0
 	}
 	x0 := freebsd_bytesAt(a0, a1)
-	return x0
-}
-
-func errRet(a0 error) int32 {
-	if apehost == apeLinux {
-		x0 := linux_errRet(a0)
-		return x0
-	}
-	x0 := freebsd_errRet(a0)
-	return x0
-}
-
-func fdEnt(a0 int32) *fdEntry {
-	if apehost == apeLinux {
-		x0 := linux_fdEnt(a0)
-		return x0
-	}
-	x0 := freebsd_fdEnt(a0)
-	return x0
-}
-
-func fdFile(a0 int32) *ofile {
-	if apehost == apeLinux {
-		x0 := linux_fdFile(a0)
-		return x0
-	}
-	x0 := freebsd_fdFile(a0)
-	return x0
-}
-
-func fdNew(a0 *os.File, a1 int32) int32 {
-	if apehost == apeLinux {
-		x0 := linux_fdNew(a0, a1)
-		return x0
-	}
-	x0 := freebsd_fdNew(a0, a1)
-	return x0
-}
-
-func fdOS(a0 int32) *os.File {
-	if apehost == apeLinux {
-		x0 := linux_fdOS(a0)
-		return x0
-	}
-	x0 := freebsd_fdOS(a0)
 	return x0
 }
 
@@ -1262,15 +882,6 @@ func formatC(a0 string, a1 *VaList) []byte {
 	return x0
 }
 
-func goMode(a0 uint32) os.FileMode {
-	if apehost == apeLinux {
-		x0 := linux_goMode(a0)
-		return x0
-	}
-	x0 := freebsd_goMode(a0)
-	return x0
-}
-
 func ioctlInRead(a0 *os.File) (int64, error) {
 	if apehost == apeLinux {
 		x0, x1 := linux_ioctlInRead(a0)
@@ -1287,6 +898,15 @@ func ioctlWinsize(a0 *os.File) ([4]uint16, error) {
 	}
 	x0, x1 := freebsd_ioctlWinsize(a0)
 	return x0, x1
+}
+
+func isatty(a0 *os.File) bool {
+	if apehost == apeLinux {
+		x0 := linux_isatty(a0)
+		return x0
+	}
+	x0 := freebsd_isatty(a0)
+	return x0
 }
 
 func lockFile(a0 *os.File, a1 int32, a2 *flock) error {
@@ -1307,13 +927,13 @@ func newFile(a0 int32, a1 bool, a2 bool) Ptr {
 	return x0
 }
 
-func open(a0 string, a1 int32, a2 uint32) int32 {
+func openMode(a0 string) (int, bool, bool, bool) {
 	if apehost == apeLinux {
-		x0 := linux_open(a0, a1, a2)
-		return x0
+		x0, x1, x2, x3 := linux_openMode(a0)
+		return x0, x1, x2, x3
 	}
-	x0 := freebsd_open(a0, a1, a2)
-	return x0
+	x0, x1, x2, x3 := freebsd_openMode(a0)
+	return x0, x1, x2, x3
 }
 
 func rusage(a0 int32) ([18]int64, error) {
@@ -1340,6 +960,15 @@ func strtoParse(a0 string, a1 int) (uint64, bool, bool, int) {
 	}
 	x0, x1, x2, x3 := freebsd_strtoParse(a0, a1)
 	return x0, x1, x2, x3
+}
+
+func toInt64(a0 any) int64 {
+	if apehost == apeLinux {
+		x0 := linux_toInt64(a0)
+		return x0
+	}
+	x0 := freebsd_toInt64(a0)
+	return x0
 }
 
 func widthModifier(a0 string) (int, int, bool) {
@@ -1393,15 +1022,6 @@ func (r *File) getc() int32 {
 	return x0
 }
 
-func (r *File) osFile() *os.File {
-	if apehost == apeLinux {
-		x0 := r.linux_osFile()
-		return x0
-	}
-	x0 := r.freebsd_osFile()
-	return x0
-}
-
 func (r *File) readErr(a0 error) {
 	if apehost == apeLinux {
 		r.linux_readErr(a0)
@@ -1428,15 +1048,6 @@ func (r *File) reader() *bufio.Reader {
 	return x0
 }
 
-func (r *File) seek(a0 int64, a1 int) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_seek(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.freebsd_seek(a0, a1)
-	return x0, x1
-}
-
 func (r *File) unread() {
 	if apehost == apeLinux {
 		r.linux_unread()
@@ -1451,33 +1062,6 @@ func (r *File) write(a0 []byte) bool {
 		return x0
 	}
 	x0 := r.freebsd_write(a0)
-	return x0
-}
-
-func (r fdIO) Read(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Read(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Read(a0)
-	return x0, x1
-}
-
-func (r fdIO) Write(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Write(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Write(a0)
-	return x0, x1
-}
-
-func (r *ofile) release() error {
-	if apehost == apeLinux {
-		x0 := r.linux_release()
-		return x0
-	}
-	x0 := r.freebsd_release()
 	return x0
 }
 

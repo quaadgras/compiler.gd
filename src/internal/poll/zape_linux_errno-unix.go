@@ -10,12 +10,6 @@ package poll
 
 import "syscall"
 
-// Do the interface allocations only once for common
-// Errno values.
-var (
-	linux_errEAGAIN error = syscall.Linux_EAGAIN
-)
-
 // errnoErr returns common boxed Errno values, to prevent
 // allocations at runtime.
 func linux_errnoErr(e syscall.Errno) error {
@@ -23,7 +17,7 @@ func linux_errnoErr(e syscall.Errno) error {
 	case 0:
 		return nil
 	case syscall.Linux_EAGAIN:
-		return linux_errEAGAIN
+		return errEAGAIN
 	case syscall.Linux_EINVAL:
 		return errEINVAL
 	case syscall.Linux_ENOENT:

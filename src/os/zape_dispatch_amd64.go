@@ -96,11 +96,6 @@ type fileWithoutWriteTo struct {
 	*File
 }
 
-var getwdCache struct {
-	sync.Mutex
-	dir string
-}
-
 type newFileKind int
 
 type noReadFrom struct{}
@@ -223,6 +218,18 @@ var _UTIME_OMIT int64 = func() int64 {
 	return int64(freebsd__UTIME_OMIT)
 }()
 
+const errENOMEM syscall.Errno = 12
+
+// errENOSYS differs between hosts.
+var errENOSYS syscall.Errno = func() syscall.Errno {
+	if apehost == apeLinux {
+		return linux_errENOSYS
+	}
+	return freebsd_errENOSYS
+}()
+
+const errERANGE syscall.Errno = 34
+
 const kindNoPoll newFileKind = 4
 
 func Chdir(a0 string) error {
@@ -277,15 +284,6 @@ func Getpagesize() int {
 	}
 	x0 := Freebsd_Getpagesize()
 	return x0
-}
-
-func Getwd() (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Getwd()
-		return x0, x1
-	}
-	x0, x1 := Freebsd_Getwd()
-	return x0, x1
 }
 
 func Link(a0 string, a1 string) error {
@@ -459,6 +457,15 @@ func WriteFile(a0 string, a1 []byte, a2 FileMode) error {
 	return x0
 }
 
+func atime(a0 FileInfo) time.Time {
+	if apehost == apeLinux {
+		x0 := linux_atime(a0)
+		return x0
+	}
+	x0 := freebsd_atime(a0)
+	return x0
+}
+
 func executable() (string, error) {
 	if apehost == apeLinux {
 		x0, x1 := linux_executable()
@@ -502,6 +509,15 @@ func newFile(a0 int, a1 string, a2 newFileKind, a3 bool) *File {
 	}
 	x0 := freebsd_newFile(a0, a1, a2, a3)
 	return x0
+}
+
+func openDirNolog(a0 string) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_openDirNolog(a0)
+		return x0, x1
+	}
+	x0, x1 := freebsd_openDirNolog(a0)
+	return x0, x1
 }
 
 func openRootInRoot(a0 *Root, a1 string) (*Root, error) {

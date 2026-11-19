@@ -26,14 +26,21 @@ var fset = token.NewFileSet()
 
 // A hostPkg is a package as one host builds it.
 type hostPkg struct {
-	host   string
-	ctxt   build.Context
-	bp     *build.Package
-	files  map[string]*ast.File // all Go files
-	pkg    *types.Package
-	info   *types.Info
-	only   map[string]bool // Go files only some hosts build
-	sfiles []string        // assembly files only some hosts build
+	host  string
+	ctxt  build.Context
+	bp    *build.Package
+	files map[string]*ast.File // all Go files
+	pkg   *types.Package
+	info  *types.Info
+	only  map[string]bool // Go files only some hosts build
+	tests bool            // files include the package's own tests
+
+	// The external tests (package p_test), type-checked against the
+	// package with its own tests.
+	xfiles map[string]*ast.File
+	xinfo  *types.Info
+	imp    types.ImporterFrom // the importer the package was checked with
+	sfiles []string           // assembly files only some hosts build
 
 	// decls are the package-level objects the host files declare.
 	decls map[string]types.Object
@@ -54,9 +61,14 @@ type pkgGen struct {
 	dir    string
 	hs     []*hostPkg
 	shared map[string]bool // file names every host builds
-	report []string
+	// sharedTests is the package's own test files every host builds.
+	sharedTests map[string]bool
+	report      []string
 
 	prepared, preparing bool
+
+	testOff map[string]bool // shared tests that do not build for ape
+	xoff    map[string]bool // external tests: whether each does not
 
 	dedup map[string]bool // types and variables every host declares the same way
 	union map[string]bool // host types shared structs embed
@@ -132,14 +144,92 @@ func newPkgGen(u *universe, path string) *pkgGen {
 		}
 		hp.check(g.dir)
 	}
+	for _, hp := range g.hs {
+		if hp.tests {
+			hp.checkXTests(g.dir)
+		}
+	}
+	g.sharedTests = map[string]bool{}
+	tcount := map[string]int{}
+	for _, hp := range g.hs {
+		if hp.tests {
+			for _, f := range hp.bp.TestGoFiles {
+				tcount[f]++
+			}
+		}
+	}
+	for f, n := range tcount {
+		if n == len(g.hs) {
+			g.sharedTests[f] = true
+		}
+	}
 	return g
 }
 
 // check type-checks the package as the host builds it.
 func (hp *hostPkg) check(dir string) {
+	if *tests && hp.checkFiles(dir, slices.Concat(hp.bp.GoFiles, hp.bp.TestGoFiles), true) {
+		hp.tests = true
+		return
+	}
+	hp.checkFiles(dir, hp.bp.GoFiles, false)
+}
+
+// checkXTests type-checks the package's external tests, if they do.
+func (hp *hostPkg) checkXTests(dir string) {
+	if len(hp.bp.XTestGoFiles) == 0 {
+		return
+	}
+	files := map[string]*ast.File{}
+	var list []*ast.File
+	for _, name := range hp.bp.XTestGoFiles {
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			return
+		}
+		files[name] = f
+		list = append(list, f)
+	}
+	saved := build.Default
+	build.Default = hp.ctxt
+	defer func() { build.Default = saved }()
+	src := hp.imp
+	conf := types.Config{
+		Importer: importerFunc(func(path, dir string, mode types.ImportMode) (*types.Package, error) {
+			if path == hp.bp.ImportPath {
+				return hp.pkg, nil
+			}
+			return src.ImportFrom(path, dir, mode)
+		}),
+		Sizes: types.SizesFor("gc", hp.ctxt.GOARCH),
+		Error: func(err error) {},
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	// Type errors are expected: other packages the tests import import
+	// the package again, without its tests. What the tests use is still
+	// known.
+	conf.Check(hp.bp.ImportPath+"_test", fset, list, info)
+	hp.xfiles, hp.xinfo = files, info
+}
+
+type importerFunc func(path, dir string, mode types.ImportMode) (*types.Package, error)
+
+func (f importerFunc) Import(path string) (*types.Package, error) { return f(path, "", 0) }
+func (f importerFunc) ImportFrom(path, dir string, mode types.ImportMode) (*types.Package, error) {
+	return f(path, dir, mode)
+}
+
+// checkFiles type-checks the files; with mayFail, it reports whether
+// they type-check.
+func (hp *hostPkg) checkFiles(dir string, names []string, mayFail bool) bool {
 	hp.files = map[string]*ast.File{}
 	var files []*ast.File
-	for _, name := range hp.bp.GoFiles {
+	for _, name := range names {
 		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil {
 			log.Fatal(err)
@@ -151,8 +241,9 @@ func (hp *hostPkg) check(dir string) {
 	build.Default = hp.ctxt
 	defer func() { build.Default = saved }()
 	var errs []error
+	hp.imp = importer.ForCompiler(fset, "source", nil).(types.ImporterFrom)
 	conf := types.Config{
-		Importer: importer.ForCompiler(fset, "source", nil).(types.ImporterFrom),
+		Importer: hp.imp,
 		Sizes:    types.SizesFor("gc", hp.ctxt.GOARCH),
 		Error:    func(err error) { errs = append(errs, err) },
 	}
@@ -163,12 +254,23 @@ func (hp *hostPkg) check(dir string) {
 		Selections: map[*ast.SelectorExpr]*types.Selection{},
 	}
 	hp.pkg, _ = conf.Check(hp.bp.ImportPath, fset, files, hp.info)
+	if len(errs) > 0 && mayFail {
+		return false
+	}
 	if len(errs) > 0 {
 		for _, e := range errs[:min(len(errs), 10)] {
 			log.Printf("%s: %v", hp.host, e)
 		}
 		log.Fatalf("%s: %d type errors", hp.host, len(errs))
 	}
+	return true
+}
+
+// sharedUse reports whether pos is in a file every host builds that is
+// not copied per host: a shared file or a shared test that builds for ape.
+func (g *pkgGen) sharedUse(pos token.Pos) bool {
+	name := filepath.Base(fset.Position(pos).Filename)
+	return g.shared[name] || g.sharedTests[name] && !g.testOff[name]
 }
 
 func (hp *hostPkg) inOnly(pos token.Pos) bool {
@@ -274,6 +376,7 @@ func (hp *hostPkg) namedRefs(t types.Type, seen map[types.Type]bool, out *[]*typ
 }
 
 func (g *pkgGen) run() {
+	g.asmDispatch = map[string]map[string]string{}
 	g.prepare()
 	for _, hp := range g.hs {
 		hp.rename = map[types.Object]string{}
@@ -324,10 +427,10 @@ func (g *pkgGen) run() {
 		}
 	}
 	g.canon = map[string]bool{}
-	// What the shared files use.
+	// What the shared files (and shared tests) use.
 	for _, hp := range g.hs {
 		for id, obj := range hp.info.Uses {
-			if hp.inOnly(id.Pos()) || obj.Pkg() != hp.pkg {
+			if !g.sharedUse(id.Pos()) || obj.Pkg() != hp.pkg {
 				continue
 			}
 			switch o := obj.(type) {
@@ -551,7 +654,6 @@ func (g *pkgGen) run() {
 	}
 
 	g.findPushes()
-	g.asmDispatch = map[string]map[string]string{}
 	for _, hp := range g.hs {
 		var names []string
 		for f := range hp.only {
@@ -567,6 +669,7 @@ func (g *pkgGen) run() {
 	}
 	g.writeDispatch()
 	g.writeAsmDispatch()
+	g.xoff = g.xtestOff()
 	g.auditShared()
 }
 
@@ -844,7 +947,7 @@ func (g *pkgGen) hoistFields() {
 	for _, hp := range g.hs {
 		for id, obj := range hp.info.Uses {
 			v, ok := obj.(*types.Var)
-			if !ok || !v.IsField() || hp.inOnly(id.Pos()) {
+			if !ok || !v.IsField() || !g.sharedUse(id.Pos()) {
 				continue
 			}
 			if ut := hp.fieldOwner(v); ut != "" && g.union[ut] {
@@ -855,6 +958,9 @@ func (g *pkgGen) hoistFields() {
 	for _, hp := range g.hs {
 		for name := range g.union {
 			tn := hp.pkg.Scope().Lookup(name)
+			if tn == nil {
+				continue
+			}
 			for f := range tn.Type().Underlying().(*types.Struct).Fields() {
 				if names[name+"."+f.Name()] {
 					hp.hoist[f] = true

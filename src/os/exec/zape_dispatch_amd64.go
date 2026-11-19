@@ -57,8 +57,6 @@ type Cmd struct {
 
 var ErrDot error = errors.New("cannot run executable found relative to current directory")
 
-var ErrNotFound error = errors.New("executable file not found in $PATH")
-
 var ErrWaitDelay error = errors.New("exec: WaitDelay expired before I/O complete")
 
 type Error struct {
@@ -111,13 +109,22 @@ func CommandContext(a0 context.Context, a1 string, a2 ...string) *Cmd {
 	return x0
 }
 
-func lookPath(a0 string) (string, error) {
+func dedupEnvCase(a0 bool, a1 bool, a2 []string) ([]string, error) {
 	if apehost == apeLinux {
-		x0, x1 := linux_lookPath(a0)
+		x0, x1 := linux_dedupEnvCase(a0, a1, a2)
 		return x0, x1
 	}
-	x0, x1 := freebsd_lookPath(a0)
+	x0, x1 := freebsd_dedupEnvCase(a0, a1, a2)
 	return x0, x1
+}
+
+func validateLookPath(a0 string) error {
+	if apehost == apeLinux {
+		x0 := linux_validateLookPath(a0)
+		return x0
+	}
+	x0 := freebsd_validateLookPath(a0)
+	return x0
 }
 
 func (r *Cmd) CombinedOutput() ([]byte, error) {

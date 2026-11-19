@@ -634,7 +634,7 @@ func (f *File) linux_unread() {
 		return
 	}
 	if n := f.r.Buffered() + len(f.unget); n > 0 {
-		if of := f.linux_osFile(); of != nil {
+		if of := f.osFile(); of != nil {
 			of.Linux_Seek(int64(-n), io.SeekCurrent)
 		}
 	}
@@ -918,7 +918,7 @@ func Linux_Fopen(name, mode Ptr) Ptr {
 		setErrnoOf(err)
 		return Ptr{}
 	}
-	return linux_newFile(linux_fdNew(f, linux_cflags(flag)), rd, wr)
+	return linux_newFile(fdNew(f, cflags(flag)), rd, wr)
 }
 
 // Freopen is freopen: it closes the stream's file and opens name in its
@@ -931,10 +931,10 @@ func Linux_Freopen(name, mode, p Ptr) Ptr {
 	var path string
 	if Addr(name) != 0 {
 		path = Linux_GoString(name)
-	} else if of := f.linux_osFile(); of != nil {
+	} else if of := f.osFile(); of != nil {
 		path = of.Linux_Name()
 	}
-	linux_fdClose(f.fd)
+	fdClose(f.fd)
 	if !ok {
 		Linux_SetErrno(EINVAL)
 		f.linux_close()
@@ -946,7 +946,7 @@ func Linux_Freopen(name, mode, p Ptr) Ptr {
 		f.linux_close()
 		return Ptr{}
 	}
-	linux_fdSet(f.fd, nf, linux_cflags(flag))
+	fdSet(f.fd, nf, cflags(flag))
 	f.w.Reset(fdIO{f})
 	f.r, f.unget = nil, nil
 	f.eof, f.err = false, false
@@ -1000,7 +1000,7 @@ func Linux_Tmpnam(s Ptr) Ptr {
 func Linux_Fclose(p Ptr) int32 {
 	f := linux_fileOf(p)
 	r := f.linux_flush()
-	if err := linux_fdClose(f.fd); err != nil {
+	if err := fdClose(f.fd); err != nil {
 		setErrnoOf(err)
 		r = -1
 	}
@@ -1017,7 +1017,7 @@ func Linux_Tmpfile() Ptr {
 		return Ptr{}
 	}
 	os.Linux_Remove(f.Linux_Name())
-	return linux_newFile(linux_fdNew(f, Linux_O_RDWR), true, true)
+	return linux_newFile(fdNew(f, O_RDWR), true, true)
 }
 
 func Linux_Fseek(p Ptr, off int64, whence int32) int32 {
@@ -1033,7 +1033,7 @@ func Linux_Fseek(p Ptr, off int64, whence int32) int32 {
 		off -= int64(f.r.Buffered() + len(f.unget))
 	}
 	f.r, f.unget = nil, nil
-	if _, err := f.linux_seek(off, int(whence)); err != nil {
+	if _, err := f.seek(off, int(whence)); err != nil {
 		setErrnoOf(err)
 		return -1
 	}
@@ -1043,7 +1043,7 @@ func Linux_Fseek(p Ptr, off int64, whence int32) int32 {
 
 func Linux_Ftell(p Ptr) int64 {
 	f := linux_fileOf(p)
-	pos, err := f.linux_seek(0, io.SeekCurrent)
+	pos, err := f.seek(0, io.SeekCurrent)
 	if err != nil {
 		setErrnoOf(err)
 		return -1

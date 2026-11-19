@@ -62,7 +62,7 @@ func linux_getPidfd(sysAttr *syscall.Linux_SysProcAttr, needDup bool) (uintptr, 
 
 	h := *sysAttr.PidFD
 	if needDup {
-		dupH, e := unix.Fcntl(h, syscall.Linux_F_DUPFD_CLOEXEC, 0)
+		dupH, e := unix.Linux_Fcntl(h, syscall.Linux_F_DUPFD_CLOEXEC, 0)
 		if e != nil {
 			return 0, false
 		}

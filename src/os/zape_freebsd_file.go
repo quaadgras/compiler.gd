@@ -333,7 +333,7 @@ func Freebsd_Chdir(dir string) error {
 		getwdCache.Unlock()
 	}
 	if log := testlog.Logger(); log != nil {
-		wd, err := Freebsd_Getwd()
+		wd, err := Getwd()
 		if err == nil {
 			log.Chdir(wd)
 		}

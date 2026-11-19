@@ -32,9 +32,9 @@ type FD struct {
 	isFile        bool
 }
 
-type SysFile struct{ iovecs *[]syscall.Iovec }
-
 var dupCloexecUnsupported atomic.Bool
+
+var errEAGAIN error = syscall.EAGAIN
 
 var errEINVAL error = syscall.EINVAL
 
@@ -76,6 +76,24 @@ func errnoErr(a0 syscall.Errno) error {
 	return x0
 }
 
+func ignoringEINTRIO(a0 func(fd int, p []byte) (int, error), a1 int, a2 []byte) (int, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_ignoringEINTRIO(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := freebsd_ignoringEINTRIO(a0, a1, a2)
+	return x0, x1
+}
+
+func writev(a0 int, a1 []syscall.Iovec) (uintptr, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_writev(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := freebsd_writev(a0, a1)
+	return x0, x1
+}
+
 func (r *FD) Accept() (int, syscall.Sockaddr, string, error) {
 	if apehost == apeLinux {
 		x0, x1, x2, x3 := r.Linux_Accept()
@@ -101,15 +119,6 @@ func (r *FD) Dup() (int, string, error) {
 	}
 	x0, x1, x2 := r.Freebsd_Dup()
 	return x0, x1, x2
-}
-
-func (r *FD) Fchdir() error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Fchdir()
-		return x0
-	}
-	x0 := r.Freebsd_Fchdir()
-	return x0
 }
 
 func (r *FD) Fchmod(a0 uint32) error {
@@ -175,15 +184,6 @@ func (r *FD) Read(a0 []byte) (int, error) {
 	return x0, x1
 }
 
-func (r *FD) ReadDirent(a0 []byte) (int, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadDirent(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_ReadDirent(a0)
-	return x0, x1
-}
-
 func (r *FD) ReadFrom(a0 []byte) (int, syscall.Sockaddr, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := r.Linux_ReadFrom(a0)
@@ -200,15 +200,6 @@ func (r *FD) ReadMsg(a0 []byte, a1 []byte, a2 int) (int, int, int, syscall.Socka
 	}
 	x0, x1, x2, x3, x4 := r.Freebsd_ReadMsg(a0, a1, a2)
 	return x0, x1, x2, x3, x4
-}
-
-func (r *FD) Seek(a0 int64, a1 int) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Seek(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Seek(a0, a1)
-	return x0, x1
 }
 
 func (r *FD) SetBlocking() error {
@@ -265,15 +256,6 @@ func (r *FD) WriteTo(a0 []byte, a1 syscall.Sockaddr) (int, error) {
 	return x0, x1
 }
 
-func (r *FD) Writev(a0 *[][]byte) (int64, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Writev(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Writev(a0)
-	return x0, x1
-}
-
 func (r *FD) destroy() error {
 	if apehost == apeLinux {
 		x0 := r.linux_destroy()
@@ -281,21 +263,4 @@ func (r *FD) destroy() error {
 	}
 	x0 := r.freebsd_destroy()
 	return x0
-}
-
-func (r *SysFile) destroy(a0 int) error {
-	if apehost == apeLinux {
-		x0 := r.linux_destroy(a0)
-		return x0
-	}
-	x0 := r.freebsd_destroy(a0)
-	return x0
-}
-
-func (r *SysFile) init() {
-	if apehost == apeLinux {
-		r.linux_init()
-		return
-	}
-	r.freebsd_init()
 }

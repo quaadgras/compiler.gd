@@ -634,7 +634,7 @@ func (f *File) freebsd_unread() {
 		return
 	}
 	if n := f.r.Buffered() + len(f.unget); n > 0 {
-		if of := f.freebsd_osFile(); of != nil {
+		if of := f.osFile(); of != nil {
 			of.Freebsd_Seek(int64(-n), io.SeekCurrent)
 		}
 	}
@@ -918,7 +918,7 @@ func Freebsd_Fopen(name, mode Ptr) Ptr {
 		setErrnoOf(err)
 		return Ptr{}
 	}
-	return freebsd_newFile(freebsd_fdNew(f, freebsd_cflags(flag)), rd, wr)
+	return freebsd_newFile(fdNew(f, cflags(flag)), rd, wr)
 }
 
 // Freopen is freopen: it closes the stream's file and opens name in its
@@ -931,10 +931,10 @@ func Freebsd_Freopen(name, mode, p Ptr) Ptr {
 	var path string
 	if Addr(name) != 0 {
 		path = Freebsd_GoString(name)
-	} else if of := f.freebsd_osFile(); of != nil {
+	} else if of := f.osFile(); of != nil {
 		path = of.Freebsd_Name()
 	}
-	freebsd_fdClose(f.fd)
+	fdClose(f.fd)
 	if !ok {
 		Freebsd_SetErrno(EINVAL)
 		f.freebsd_close()
@@ -946,7 +946,7 @@ func Freebsd_Freopen(name, mode, p Ptr) Ptr {
 		f.freebsd_close()
 		return Ptr{}
 	}
-	freebsd_fdSet(f.fd, nf, freebsd_cflags(flag))
+	fdSet(f.fd, nf, cflags(flag))
 	f.w.Reset(fdIO{f})
 	f.r, f.unget = nil, nil
 	f.eof, f.err = false, false
@@ -1000,7 +1000,7 @@ func Freebsd_Tmpnam(s Ptr) Ptr {
 func Freebsd_Fclose(p Ptr) int32 {
 	f := freebsd_fileOf(p)
 	r := f.freebsd_flush()
-	if err := freebsd_fdClose(f.fd); err != nil {
+	if err := fdClose(f.fd); err != nil {
 		setErrnoOf(err)
 		r = -1
 	}
@@ -1017,7 +1017,7 @@ func Freebsd_Tmpfile() Ptr {
 		return Ptr{}
 	}
 	os.Freebsd_Remove(f.Freebsd_Name())
-	return freebsd_newFile(freebsd_fdNew(f, Freebsd_O_RDWR), true, true)
+	return freebsd_newFile(fdNew(f, O_RDWR), true, true)
 }
 
 func Freebsd_Fseek(p Ptr, off int64, whence int32) int32 {
@@ -1033,7 +1033,7 @@ func Freebsd_Fseek(p Ptr, off int64, whence int32) int32 {
 		off -= int64(f.r.Buffered() + len(f.unget))
 	}
 	f.r, f.unget = nil, nil
-	if _, err := f.freebsd_seek(off, int(whence)); err != nil {
+	if _, err := f.seek(off, int(whence)); err != nil {
 		setErrnoOf(err)
 		return -1
 	}
@@ -1043,7 +1043,7 @@ func Freebsd_Fseek(p Ptr, off int64, whence int32) int32 {
 
 func Freebsd_Ftell(p Ptr) int64 {
 	f := freebsd_fileOf(p)
-	pos, err := f.freebsd_seek(0, io.SeekCurrent)
+	pos, err := f.seek(0, io.SeekCurrent)
 	if err != nil {
 		setErrnoOf(err)
 		return -1

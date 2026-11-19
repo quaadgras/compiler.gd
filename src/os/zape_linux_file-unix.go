@@ -81,7 +81,7 @@ func linux_newFileFromNewFile(fd uintptr, name string) *File {
 		return nil
 	}
 
-	flags, err := unix.Fcntl(fdi, syscall.Linux_F_GETFL, 0)
+	flags, err := unix.Linux_Fcntl(fdi, syscall.Linux_F_GETFL, 0)
 	if err != nil {
 		flags = 0
 	}
@@ -333,7 +333,7 @@ func (f *File) linux_seek(offset int64, whence int) (ret int64, err error) {
 		// access this file as a directory again. See #35767 and #37161.
 		info.linux_close()
 	}
-	ret, err = f.pfd.Linux_Seek(offset, whence)
+	ret, err = f.pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
 	return ret, err
 }

@@ -373,13 +373,10 @@ func osinit() {
 	freebsd_osinit()
 }
 
-func osyield() {
-	if apehost == apeLinux {
-		linux_osyield()
-		return
-	}
-	freebsd_osyield()
-}
+// osyield is the host's, in assembly.
+//
+//go:noescape
+func osyield()
 
 //go:nosplit
 func osyield_no_g() {
@@ -390,14 +387,10 @@ func osyield_no_g() {
 	freebsd_osyield_no_g()
 }
 
-func pipe2(a0 int32) (int32, int32, int32) {
-	if apehost == apeLinux {
-		x0, x1, x2 := linux_pipe2(a0)
-		return x0, x1, x2
-	}
-	x0, x1, x2 := freebsd_pipe2(a0)
-	return x0, x1, x2
-}
+// pipe2 is the host's, in assembly.
+//
+//go:noescape
+func pipe2(flags int32) (r int32, w int32, errno int32)
 
 func preemptM(a0 *m) {
 	if apehost == apeLinux {
@@ -440,6 +433,15 @@ func setThreadCPUProfiler(a0 int32) {
 		return
 	}
 	freebsd_setThreadCPUProfiler(a0)
+}
+
+func setVMANameSupported() bool {
+	if apehost == apeLinux {
+		x0 := linux_setVMANameSupported()
+		return x0
+	}
+	x0 := freebsd_setVMANameSupported()
+	return x0
 }
 
 //go:nosplit

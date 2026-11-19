@@ -38,6 +38,63 @@ func (g *pkgGen) prepare() {
 			break
 		}
 	}
+	// The package's own tests are not copied per host: those that
+	// depend on the host do not build for ape.
+	g.testOff = map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for name := range g.sharedTests {
+			if g.testOff[name] {
+				continue
+			}
+			if g.testDepends(name) {
+				changed = true
+			}
+		}
+	}
+}
+
+// testDepends leaves out the shared test file name if it depends on the
+// host or on a test left out, and reports whether it did.
+func (g *pkgGen) testDepends(name string) bool {
+	{
+		for _, hp := range g.hs {
+			why := g.dependsOnHost(hp, hp.files[name])
+			if why == "" {
+				why = g.usesHostTests(hp, hp.files[name])
+			}
+			if why != "" {
+				if *verbose {
+					g.reportf("test left out: %s (%s)", name, why)
+				}
+				g.testOff[name] = true
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// usesHostTests says why f uses what only some hosts' tests declare,
+// or "".
+func (g *pkgGen) usesHostTests(hp *hostPkg, f *ast.File) string {
+	why := ""
+	ast.Inspect(f, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok || why != "" {
+			return why == ""
+		}
+		o := hp.info.Uses[id]
+		if o == nil || o.Pkg() != hp.pkg || o.Parent() != hp.pkg.Scope() {
+			return true
+		}
+		file := filepath.Base(fset.Position(o.Pos()).Filename)
+		if strings.HasSuffix(file, "_test.go") && (!g.sharedTests[file] || g.testOff[file]) {
+			why = o.Name() + " of " + file
+		}
+		return true
+	})
+	return why
 }
 
 func (g *pkgGen) findDecls() {
@@ -59,7 +116,7 @@ func (g *pkgGen) findUnion() {
 		scope := hp.pkg.Scope()
 		for _, name := range scope.Names() {
 			tn, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || hp.inOnly(tn.Pos()) {
+			if !ok || !g.shared[filepath.Base(fset.Position(tn.Pos()).Filename)] {
 				continue
 			}
 			if st, ok := tn.Type().Underlying().(*types.Struct); ok {
@@ -227,6 +284,13 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				if o, ok := hp.decls[fs[1]]; ok && !g.dedup[o.Name()] {
 					return "linkname of " + fs[1]
 				}
+				// A pull of another generated package's host name.
+				fn, isFunc := hp.pkg.Scope().Lookup(fs[1]).(*types.Func)
+				if len(fs) == 3 && (!isFunc || !hp.hasBody(fn)) {
+					if pkg, sym, ok := cutLast(fs[2], "."); ok && pkg != g.path && g.u.hostOnly(pkg, hp.host, sym) {
+						return "linkname to " + fs[2]
+					}
+				}
 			}
 		}
 	}
@@ -328,8 +392,12 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				}
 				// Another package's constant that differs is a variable
 				// of one type, whatever the use.
+				// A typed one is a variable of its type; an untyped one
+				// a variable of one type, whatever the use.
 				if !local && g.u.hostDiffers(o.Pkg().Path(), hp.host, o) {
-					why = "constant " + o.Pkg().Name() + "." + o.Name()
+					if b, ok := o.Type().(*types.Basic); ok && b.Info()&types.IsUntyped != 0 || inConstContext(stack) {
+						why = "constant " + o.Pkg().Name() + "." + o.Name()
+					}
 				}
 			case *types.Func:
 				// Another package's function of host values is not
@@ -358,7 +426,8 @@ func (g *pkgGen) isMax(name string) bool {
 }
 
 // inConstContext reports whether the innermost node of stack is in a
-// constant declaration, an array length or a case of a switch.
+// constant declaration or an array length. (A case of a switch may be a
+// variable.)
 func inConstContext(stack []ast.Node) bool {
 	for i := len(stack) - 1; i > 0; i-- {
 		switch p := stack[i-1].(type) {
@@ -366,8 +435,6 @@ func inConstContext(stack []ast.Node) bool {
 			return p.Tok == token.CONST
 		case *ast.ArrayType:
 			return p.Len == stack[i]
-		case *ast.CaseClause:
-			return true
 		case *ast.FuncDecl, *ast.FuncLit:
 			return false
 		}

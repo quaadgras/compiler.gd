@@ -81,7 +81,7 @@ func freebsd_newFileFromNewFile(fd uintptr, name string) *File {
 		return nil
 	}
 
-	flags, err := unix.Fcntl(fdi, syscall.Freebsd_F_GETFL, 0)
+	flags, err := unix.Freebsd_Fcntl(fdi, syscall.Freebsd_F_GETFL, 0)
 	if err != nil {
 		flags = 0
 	}
@@ -333,7 +333,7 @@ func (f *File) freebsd_seek(offset int64, whence int) (ret int64, err error) {
 		// access this file as a directory again. See #35767 and #37161.
 		info.freebsd_close()
 	}
-	ret, err = f.pfd.Freebsd_Seek(offset, whence)
+	ret, err = f.pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
 	return ret, err
 }
