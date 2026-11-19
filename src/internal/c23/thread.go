@@ -83,9 +83,12 @@ func spawn(thr Ptr, run func(t *thread)) {
 	threadsMu.Unlock()
 	storeLong(thr, int64(id)) // pthread_t is unsigned long
 	fe := inheritFenv()
+	sig := sigInherit()
 	go func() {
 		Store64(threadID.Get(), id)
 		gSelf().fe = fe
+		gSelf().sig = sig
+		defer sigExit(sig)
 		defer close(t.done)
 		defer runKeyDestructors()
 		defer func() {

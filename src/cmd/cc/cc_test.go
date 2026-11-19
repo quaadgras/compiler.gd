@@ -291,6 +291,38 @@ func TestUtil(t *testing.T) {
 	}
 }
 
+// TestProc compares processes, signals, scheduling and semaphores
+// (sys/wait.h, spawn.h, the exec family, sigaction, sched.h,
+// semaphore.h) with the host's C library.
+func TestProc(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/proc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "proc")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).

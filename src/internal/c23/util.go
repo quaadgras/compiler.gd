@@ -130,47 +130,6 @@ func Strsep(stringp, delim Ptr) Ptr {
 	}
 }
 
-// signalText are the signals' descriptions, glibc's (Linux's numbers).
-var signalText = [...]string{
-	1: "Hangup", 2: "Interrupt", 3: "Quit", 4: "Illegal instruction",
-	5: "Trace/breakpoint trap", 6: "Aborted", 7: "Bus error",
-	8: "Floating point exception", 9: "Killed", 10: "User defined signal 1",
-	11: "Segmentation fault", 12: "User defined signal 2", 13: "Broken pipe",
-	14: "Alarm clock", 15: "Terminated", 16: "Stack fault", 17: "Child exited",
-	18: "Continued", 19: "Stopped (signal)", 20: "Stopped", 21: "Stopped (tty input)",
-	22: "Stopped (tty output)", 23: "Urgent I/O condition", 24: "CPU time limit exceeded",
-	25: "File size limit exceeded", 26: "Virtual timer expired",
-	27: "Profiling timer expired", 28: "Window changed", 29: "I/O possible",
-	30: "Power failure", 31: "Bad system call",
-}
-
-var (
-	strsignalMu  sync.Mutex
-	strsignalMsg = map[int32]Ptr{}
-)
-
-// Strsignal is strsignal: sig's description, as glibc words it, in an
-// array C must not modify.
-func Strsignal(sig int32) Ptr {
-	var s string
-	switch {
-	case sig > 0 && int(sig) < len(signalText):
-		s = signalText[sig]
-	case sig >= 34 && sig < nsig:
-		s = "Real-time signal " + strconv.Itoa(int(sig-34))
-	default:
-		s = "Unknown signal " + strconv.Itoa(int(sig))
-	}
-	strsignalMu.Lock()
-	defer strsignalMu.Unlock()
-	p, ok := strsignalMsg[sig]
-	if !ok {
-		p = CString(s)
-		strsignalMsg[sig] = p
-	}
-	return p
-}
-
 // stdlib.h
 
 // Reallocarray is reallocarray: realloc of nmemb*size bytes, or null

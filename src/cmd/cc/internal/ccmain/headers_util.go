@@ -396,7 +396,7 @@ int iconv_close(iconv_t cd);
 		"dprintf": "Dprintf", "vdprintf": "Vdprintf",
 		"fmemopen": "Fmemopen", "open_memstream": "OpenMemstream",
 		// string.h
-		"strsep": "Strsep", "strsignal": "Strsignal",
+		"strsep": "Strsep",
 		// stdlib.h
 		"reallocarray": "Reallocarray", "qsort_r": "QsortR", "mkdtemp": "Mkdtemp",
 	} {

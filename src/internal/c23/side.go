@@ -31,6 +31,7 @@ type gTable struct {
 	tls  map[*TLS]Ptr   // the goroutine's _Thread_local objects (thread.go)
 	keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
 	fe   fenvState      // its floating-point environment (fenv.go)
+	sig  *sigThread     // its signal state (sigaction.go)
 }
 
 type gEntry struct {

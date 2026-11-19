@@ -31,129 +31,105 @@ const (
 
 var (
 	sigMu      sync.Mutex
-	sigHandler [nsig]Ptr
 	sigNotify  [nsig]chan os.Signal
 	sigTouched [nsig]bool // the program set the signal's handler
 )
 
-// osSignal is the signal of the host that C's signal sig is, or nil:
-// only SIGINT and SIGTERM come from outside the program.
+// osSignal is the signal of the host that C's signal sig is, or nil: the
+// signals that other processes send (a child's SIGCHLD and alarm's
+// SIGALRM are the program's own).
 func osSignal(sig int32) os.Signal {
 	switch sig {
 	case SIGINT:
 		return os.Interrupt
-	case SIGTERM:
-		return sigterm()
+	case SIGHUP, SIGQUIT, SIGUSR1, SIGUSR2, SIGPIPE, SIGTERM, SIGWINCH:
+		return sysSignal(sig)
 	}
 	return nil
 }
 
-// sigterm is syscall.SIGTERM, where the system has one: found when first
-// needed, so that a program without signals links no reflection for it.
-var (
-	sigtermOnce sync.Once
-	sigtermSig  os.Signal
-)
-
-func sigterm() os.Signal {
-	sigtermOnce.Do(func() { sigtermSig = sigtermOf() })
-	return sigtermSig
-}
-
-func sigtermOf() os.Signal {
-	// Package syscall names SIGTERM on every system os/signal supports;
-	// os has only Interrupt and Kill.
+// sysSignalOf makes syscall.Signal(sig), where the system has the type
+// (package syscall names the signals on every system os/signal
+// supports; os has only Interrupt and Kill): found by reflection, so
+// that a program without signals links none for it.
+func sysSignalOf(sig int32) os.Signal {
 	v := reflect.ValueOf(os.Interrupt)
 	s := reflect.New(v.Type()).Elem()
 	if !s.CanInt() {
 		return nil
 	}
-	s.SetInt(SIGTERM)
+	s.SetInt(int64(sig))
 	return s.Interface().(os.Signal)
 }
 
 // Signal is signal: it sets sig's handler and returns the previous one.
+// The handler stays (as glibc's BSD semantics), and it is sigaction's
+// with SA_RESTART and an empty mask.
 //
-// The handler of SIGINT or SIGTERM is also called when the program
-// receives that signal, through os/signal: on a goroutine of its own, not
-// on an interrupted thread, so it may do more than a handler may in C (it
-// runs as another thread would). SIG_IGN ignores the signal and SIG_DFL
-// restores its default action (as raise takes it, once the program set
-// another handler). raise calls the handlers of any signal.
+// The handler of a signal other processes send (osSignal) is also
+// called when the program receives it, through os/signal: on a
+// goroutine of its own, not on an interrupted thread, so it may do more
+// than a handler may in C (it runs as another thread would). SIG_IGN
+// ignores the signal and SIG_DFL restores its default action (as raise
+// takes it, once the program set another handler). raise calls the
+// handlers of any signal.
 func Signal(sig int32, handler Ptr) Ptr {
-	if sig <= 0 || sig >= nsig {
+	if sig <= 0 || sig >= nsig || sig == SIGKILL || sig == SIGSTOP {
 		SetErrno(EINVAL)
 		return FromInt(^uintptr(0))
 	}
 	if h := Addr(handler); h != sigDfl && h != sigIgn {
 		FuncOf[func(int32)](handler)
 	}
-	sigMu.Lock()
-	defer sigMu.Unlock()
-	old := sigHandler[sig]
-	sigHandler[sig] = handler
-	if s := osSignal(sig); s != nil {
-		switch Addr(handler) {
-		case sigIgn:
-			sigTouched[sig] = true
-			signal.Ignore(s)
-		case sigDfl:
-			if !sigTouched[sig] {
-				break // the runtime's default action
-			}
-			// signal.Reset would keep an ignored signal ignored:
-			// deliver takes the default action instead.
-			fallthrough
-		default:
-			sigTouched[sig] = true
-			if sigNotify[sig] == nil {
-				c := make(chan os.Signal, 1)
-				sigNotify[sig] = c
-				go func() {
-					for range c {
-						deliver(sig)
-					}
-				}()
-			}
-			signal.Notify(sigNotify[sig], s)
-		}
-	}
-	return old
+	return sigSet(sig, sigAction{handler: handler, flags: SA_RESTART}, true).handler
 }
 
-// deliver calls sig's handler, received from the system.
-func deliver(sig int32) {
-	sigMu.Lock()
-	h := sigHandler[sig]
-	sigMu.Unlock()
-	switch Addr(h) {
+// sigWire makes os/signal deliver sig to handler, if other processes
+// send it. sigMu is held.
+func sigWire(sig int32, handler Ptr) {
+	s := osSignal(sig)
+	if s == nil {
+		return
+	}
+	switch Addr(handler) {
 	case sigIgn:
+		sigTouched[sig] = true
+		signal.Ignore(s)
 	case sigDfl:
-		defaultAction(sig)
+		if !sigTouched[sig] {
+			break // the runtime's default action
+		}
+		// signal.Reset would keep an ignored signal ignored: the
+		// program takes the default action instead.
+		fallthrough
 	default:
-		FuncOf[func(int32)](h)(sig)
+		sigTouched[sig] = true
+		if sigNotify[sig] == nil {
+			c := make(chan os.Signal, 1)
+			sigNotify[sig] = c
+			go func() {
+				for range c {
+					sigSendProcess(sig, sigInfo{code: SI_USER}, nil)
+				}
+			}()
+		}
+		signal.Notify(sigNotify[sig], s)
 	}
 }
 
-// Raise is raise: it calls sig's handler, or takes its default action:
-// abort for SIGABRT and, for any other signal, the end of the program
-// with the status 128+sig (as a shell reports a signal's), without
-// flushing C's streams.
+// Raise is raise: it sends sig to the calling thread, which runs its
+// handler at once unless it blocks sig, or takes its default action:
+// abort for SIGABRT, nothing for those whose default is to ignore them
+// and, for any other signal, the end of the program with the status
+// 128+sig (as a shell reports a signal's), without flushing C's streams.
 func Raise(sig int32) int32 {
-	if sig <= 0 || sig >= nsig {
-		SetErrno(EINVAL)
+	if !sigValid(sig) {
 		return -1
 	}
-	sigMu.Lock()
-	h := sigHandler[sig]
-	sigMu.Unlock()
-	switch Addr(h) {
-	case sigIgn:
-	case sigDfl:
-		defaultAction(sig)
-	default:
-		FuncOf[func(int32)](h)(sig)
+	if sig == SIGKILL || sig == SIGSTOP {
+		return killSelf(sig)
 	}
+	sigSendThread(sigSelf(), sig, sigInfo{code: SI_TKILL, pid: int32(os.Getpid()), uid: int32(os.Getuid())})
 	return 0
 }
 
