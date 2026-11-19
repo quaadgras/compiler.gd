@@ -67,6 +67,7 @@ func BuildInit(ld *modload.Loader) {
 	if err := fsys.Init(); err != nil {
 		base.Fatal(err)
 	}
+	apeOverlay()
 	if from, replaced := fsys.DirContainsReplacement(cfg.GOMODCACHE); replaced {
 		base.Fatalf("go: overlay contains a replacement for %s. Files beneath GOMODCACHE (%s) must not be replaced.", from, cfg.GOMODCACHE)
 	}

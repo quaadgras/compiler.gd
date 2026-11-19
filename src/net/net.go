@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !ape && !apegen
-
 /*
 Package net provides a portable interface for network I/O, including
 TCP/IP, UDP, domain name resolution, and Unix domain sockets.

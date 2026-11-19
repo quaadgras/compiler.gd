@@ -2,188 +2,87 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Apegen writes the host files of standard packages for GOOS=ape.
-//
-// A GOOS=ape program runs on several host systems
-// (internal/syslist.APEHosts). A file of a package that builds for every
-// host is shared: it is built once, as it is, except for the
-// declarations in it that depend on the host, which are copied per host
-// (zape_ape_FILE is the rest of it). A file that builds only for some
-// hosts is copied once per host, with every package-level name
-// it declares prefixed by the host ("newosproc" becomes
-// "linux_newosproc", "Stat" becomes "Linux_Stat"), and the generated
-// zape_dispatch_$GOARCH.go gives the package what the hosts have in
-// common:
-//
-//   - a type every host declares the same way is declared once, and
-//     the hosts' copies use it;
-//   - a function every host declares becomes a function that calls the
-//     copy of the host the program runs on (apehost, set at startup),
-//     if the shared files use it or it is exported; so does a method a
-//     host file declares on a shared type;
-//   - a constant with the same value everywhere stays a constant; one
-//     that differs becomes a variable holding the host's value;
-//   - a type that differs becomes the first host's type if shared code
-//     uses its fields or it is exported (functions convert the other
-//     hosts' field by field), a struct of every host's type if a shared
-//     struct embeds it (the runtime's mOS, with the fields shared code
-//     uses hoisted out of the hosts' types), and otherwise an opaque type
-//     converted by pointer (as large as the largest host's if held by
-//     value, of no size if only ever behind a pointer);
-//   - a variable of the same type everywhere is one variable, set from
-//     the host's, which the hosts' copies use too; another becomes a
-//     variable set from the host's.
-//
-// Generated files have line directives: positions in them are the
-// original file's.
-//
-// What a host copy uses of another generated package is that host's:
-// os's Linux copy calls syscall.Linux_Stat with a syscall.Linux_Stat_t.
-// A host file that imports a package some host does not build (such as
-// internal/syscall/windows) imports the host's variant of it,
-// ape/HOST/PATH, which cmd/go builds as the host builds it.
-//
-// What it cannot do is reported, for the package's hand-written ape files.
+// Apegen shows what cmd/go builds of the standard packages for GOOS=ape
+// in place of their files (see cmd/internal/apegen).
 //
 // Usage:
 //
-//	go run cmd/apegen [-w] [-hosts linux,freebsd] [-arch amd64] pkg...
+//	go run cmd/apegen [-v] [-o dir] [-arch amd64] [pkg...]
+//
+// With no packages, it does the packages whose files differ between the
+// hosts, as cmd/go does. It prints what it could not do (with -v, also
+// what it copied per host and why), and with -o writes the files it
+// makes into dir, by their names relative to GOROOT/src; a file that
+// does not build for ape is listed.
 package main
 
 import (
 	"flag"
 	"fmt"
-	"go/build"
-	"internal/syslist"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
-	"sort"
 	"strings"
+
+	"cmd/internal/apegen"
 )
 
 var (
-	write      = flag.Bool("w", false, "write the files (and remove old ones)")
-	hostsFlag  = flag.String("hosts", strings.Join(syslist.APEHosts, ","), "host systems")
-	arch       = flag.String("arch", "amd64", "architecture")
-	constTypes = flag.String("types", "runtime._SIGURG=uint32", "types of constants that differ between hosts and that shared code does not use")
-	tests      = flag.Bool("tests", true, "dispatch what the package's own tests use, and leave out of ape the tests that depend on the host")
-	verbose    = flag.Bool("v", false, "report the shared declarations copied per host and why")
-	maxConsts  = flag.String("max", "runtime._NSIG", "constants that are the largest host's value")
+	verbose = flag.Bool("v", false, "report the shared declarations copied per host and why")
+	outDir  = flag.String("o", "", "write the files to `dir`")
+	arch    = flag.String("arch", "amd64", "architecture")
+	list    = flag.Bool("l", false, "list the packages whose files differ between the hosts")
 )
 
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("apegen: ")
 	flag.Parse()
-	if flag.NArg() == 0 {
-		log.Fatal("usage: apegen [-w] [-hosts h1,h2] [-arch a] pkg...")
-	}
-	hosts := strings.Split(*hostsFlag, ",")
-	u := &universe{hosts: hosts, pkgs: map[string]*pkgGen{}, generate: map[string]bool{}}
-	for _, path := range flag.Args() {
-		u.generate[path] = true
-	}
-	var paths []string
-	for _, path := range flag.Args() {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	failed := false
-	for _, path := range paths {
-		g := u.load(path)
-		g.run()
-		for _, r := range g.report {
-			fmt.Printf("%s: %s\n", path, r)
+	cfg := apegen.DefaultConfig(runtime.GOROOT(), *arch)
+	cfg.Verbose = *verbose
+	paths := flag.Args()
+	if len(paths) == 0 || *list {
+		var err error
+		if paths, err = apegen.Candidates(cfg); err != nil {
+			log.Fatal(err)
 		}
-		if err := g.writeAll(); err != nil {
-			log.Print(err)
-			failed = true
+		if *list {
+			fmt.Println(strings.Join(paths, "\n"))
+			return
 		}
 	}
-	if failed {
-		os.Exit(1)
+	res, err := apegen.Generate(cfg, paths)
+	if err != nil {
+		log.Fatal(err)
 	}
-}
-
-// A universe is the packages of one run.
-type universe struct {
-	hosts       []string
-	pkgs        map[string]*pkgGen
-	generate    map[string]bool            // packages this run generates
-	builds      map[string]bool            // package path -> builds for every host
-	fileDiffers map[string]bool            // "host path" -> files differ from ape's
-	fromAPE     map[string]map[string]bool // package path -> types other packages convert
-}
-
-func (u *universe) load(path string) *pkgGen {
-	if g := u.pkgs[path]; g != nil {
-		return g
+	for _, r := range res.Reports {
+		fmt.Println(r)
 	}
-	g := newPkgGen(u, path)
-	u.pkgs[path] = g
-	return g
-}
-
-// buildsForAll reports whether the standard package path builds for
-// every host.
-func (u *universe) buildsForAll(path string) bool {
-	if u.builds == nil {
-		u.builds = map[string]bool{}
+	if *outDir == "" {
+		return
 	}
-	if v, ok := u.builds[path]; ok {
-		return v
-	}
-	ok := true
-	for _, h := range u.hosts {
-		ctxt := build.Default
-		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
-		if _, err := ctxt.Import(path, "", 0); err != nil {
-			ok = false
+	src := filepath.Join(cfg.GOROOT, "src")
+	for _, name := range slices.Sorted(func(yield func(string) bool) {
+		for n := range res.Files {
+			if !yield(n) {
+				return
+			}
+		}
+	}) {
+		rel, _ := filepath.Rel(src, name)
+		b := res.Files[name]
+		if b == nil {
+			fmt.Printf("not for ape: %s\n", rel)
+			continue
+		}
+		dst := filepath.Join(*outDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o777); err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(dst, b, 0o666); err != nil {
+			log.Fatal(err)
 		}
 	}
-	u.builds[path] = ok
-	return ok
-}
-
-// variant reports whether a host copy imports the host's variant of the
-// standard package path: one this run does not generate whose files
-// differ between the host and ape.
-func (u *universe) variant(path, host string) bool {
-	if u.generate[path] || path == "internal/goos" || path == "runtime" {
-		return false
-	}
-	key := host + " " + path
-	if v, ok := u.fileDiffers[key]; ok {
-		return v
-	}
-	hctx := build.Default
-	hctx.GOOS, hctx.GOARCH, hctx.CgoEnabled = host, *arch, false
-	actx := hctx
-	actx.GOOS = "ape"
-	hp, herr := hctx.Import(path, "", 0)
-	ap, aerr := actx.Import(path, "", 0)
-	v := (herr == nil) != (aerr == nil) || herr == nil && !slices.Equal(hp.GoFiles, ap.GoFiles)
-	if u.fileDiffers == nil {
-		u.fileDiffers = map[string]bool{}
-	}
-	u.fileDiffers[key] = v
-	return v
-}
-
-// needFromAPE notes that another package converts path's public type
-// name from the ape type to a host's.
-func (u *universe) needFromAPE(path, name string) {
-	if u.fromAPE == nil {
-		u.fromAPE = map[string]map[string]bool{}
-	}
-	if u.fromAPE[path] == nil {
-		u.fromAPE[path] = map[string]bool{}
-	}
-	u.fromAPE[path][name] = true
-}
-
-func goroot(path string) string {
-	return filepath.Join(build.Default.GOROOT, "src", filepath.FromSlash(path))
 }

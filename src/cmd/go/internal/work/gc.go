@@ -306,7 +306,7 @@ func (a *Action) trimpath() string {
 	// package directory here.
 	var overlayNonGoRewrites string // rewrites for non-go files
 	hasCgoOverlay := false
-	if fsys.OverlayFile != "" {
+	if fsys.OverlayFile != "" || cfg.Goos == "ape" { // (GOOS=ape: apegen's overlay)
 		for _, filename := range a.Package.AllFiles() {
 			path := filename
 			if !filepath.IsAbs(path) {
@@ -345,6 +345,11 @@ func asmArgs(a *Action, p *load.Package) []any {
 	inc := filepath.Join(cfg.GOROOT, "pkg", "include")
 	pkgpath := pkgPath(a)
 	args := []any{cfg.BuildToolexec, base.Tool("asm"), "-p", pkgpath, "-trimpath", a.trimpath(), "-I", a.Objdir, "-I", inc, "-D", "GOOS_" + cfg.Goos, "-D", "GOARCH_" + cfg.Goarch, forcedAsmflags, p.Internal.Asmflags}
+	if cfg.Goos == "ape" {
+		// The host copies of assembly files are apegen's, elsewhere: they
+		// include the package's headers.
+		args = append(args, "-I", p.Dir)
+	}
 	if p.ImportPath == "runtime" && cfg.Goarch == "386" {
 		for _, arg := range forcedAsmflags {
 			if arg == "-dynlink" {

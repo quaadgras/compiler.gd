@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !ape && !apegen
-
 // Package filepath implements utility routines for manipulating filename paths
 // in a way compatible with the target operating system-defined file paths.
 //

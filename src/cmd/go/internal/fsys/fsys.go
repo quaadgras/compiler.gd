@@ -401,6 +401,28 @@ func initFromJSON(js []byte) error {
 	return nil
 }
 
+// AddReplacements adds to the overlay: each file named by a key of m
+// appears to be the file its value names, or deleted if that is "".
+// It must be called after Init and before the files are used.
+func AddReplacements(m map[string]string) error {
+	ojs := overlayJSON{Replace: map[string]string{}}
+	for _, r := range overlay {
+		ojs.Replace[r.from] = r.to
+	}
+	for from, to := range m {
+		if _, ok := ojs.Replace[abs(from)]; ok {
+			continue // the -overlay flag's wins
+		}
+		ojs.Replace[from] = to
+	}
+	js, err := json.Marshal(ojs)
+	if err != nil {
+		return err
+	}
+	overlay = nil
+	return initFromJSON(js)
+}
+
 // IsDir returns true if path is a directory on disk or in the
 // overlay.
 func IsDir(path string) (bool, error) {
