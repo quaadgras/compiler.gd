@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line build.go:6:1*/
 package build
 
 import (
@@ -177,7 +178,7 @@ func (ctxt *Context) hasSubdir(root, dir string) (rel string, ok bool) {
 		return
 	}
 	return hasSubdir(rootSym, dirSym)
-}/*line build.go:191:2*/
+}/*line build.go:193:2*/
 
 // readDir calls ctxt.ReadDir (if not nil) or else os.ReadDir.
 func (ctxt *Context) readDir(path string) ([]fs.DirEntry, error) {

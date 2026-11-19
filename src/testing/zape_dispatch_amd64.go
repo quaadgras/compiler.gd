@@ -72,32 +72,6 @@ func runningList() []string {
 	return x0
 }
 
-func toOutputDir(a0 string) string {
-	if apehost == apeLinux {
-		x0 := linux_toOutputDir(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := freebsd_toOutputDir(a0)
-		return x0
-	}
-	x0 := windows_toOutputDir(a0)
-	return x0
-}
-
-func (r *common) makeTempDir() (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_makeTempDir()
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.freebsd_makeTempDir()
-		return x0, x1
-	}
-	x0, x1 := r.windows_makeTempDir()
-	return x0, x1
-}
-
 // highPrecisionTime differs between hosts and holds pointers: it holds each host's.
 type highPrecisionTime struct {
 	linux   linux_highPrecisionTime

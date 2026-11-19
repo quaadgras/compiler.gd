@@ -116,7 +116,7 @@ func windows_statHandle(name string, h syscall.Windows_Handle) (FileInfo, error)
 	}
 	switch ft {
 	case syscall.Windows_FILE_TYPE_PIPE, syscall.Windows_FILE_TYPE_CHAR:
-		return &windows_fileStat{name: filepathlite.Windows_Base(name), filetype: ft}, nil
+		return &windows_fileStat{name: filepathlite.Base(name), filetype: ft}, nil
 	}
 	fs, err := windows_newFileStatFromGetFileInformationByHandle(name, h)
 	if err != nil {

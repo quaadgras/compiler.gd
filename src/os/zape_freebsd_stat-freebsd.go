@@ -15,7 +15,7 @@ import (
 )
 
 func freebsd_fillFileStatFromSys(fs *freebsd_fileStat, name string) {
-	fs.name = filepathlite.Freebsd_Base(name)
+	fs.name = filepathlite.Base(name)
 	fs.size = fs.sys.Size
 	fs.modTime = time.Unix(fs.sys.Mtimespec.Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)

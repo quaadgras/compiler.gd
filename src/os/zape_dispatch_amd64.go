@@ -24,154 +24,50 @@ const (
 
 type newFileKind int
 
-// DevNull differs between hosts.
-var DevNull string = func() string {
-	if apehost == apeLinux {
-		return string(Linux_DevNull)
-	}
-	if apehost == apeFreebsd {
-		return string(Freebsd_DevNull)
-	}
-	return string(Windows_DevNull)
-}()
+// DevNull differs between hosts: uses are the host's.
+const DevNull = "/dev/null"
 
-// O_APPEND differs between hosts.
-var O_APPEND int = func() int {
-	if apehost == apeLinux {
-		return Linux_O_APPEND
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_O_APPEND
-	}
-	return Windows_O_APPEND
-}()
+// O_APPEND differs between hosts: uses are the host's.
+const O_APPEND int = 1024
 
-// O_CREATE differs between hosts.
-var O_CREATE int = func() int {
-	if apehost == apeLinux {
-		return Linux_O_CREATE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_O_CREATE
-	}
-	return Windows_O_CREATE
-}()
+// O_CREATE differs between hosts: uses are the host's.
+const O_CREATE int = 64
 
-// O_EXCL differs between hosts.
-var O_EXCL int = func() int {
-	if apehost == apeLinux {
-		return Linux_O_EXCL
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_O_EXCL
-	}
-	return Windows_O_EXCL
-}()
+// O_EXCL differs between hosts: uses are the host's.
+const O_EXCL int = 128
 
 const O_RDONLY int = 0
 
 const O_RDWR int = 2
 
-// O_SYNC differs between hosts.
-var O_SYNC int = func() int {
-	if apehost == apeLinux {
-		return Linux_O_SYNC
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_O_SYNC
-	}
-	return Windows_O_SYNC
-}()
+// O_SYNC differs between hosts: uses are the host's.
+const O_SYNC int = 1052672
 
-// O_TRUNC differs between hosts.
-var O_TRUNC int = func() int {
-	if apehost == apeLinux {
-		return Linux_O_TRUNC
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_O_TRUNC
-	}
-	return Windows_O_TRUNC
-}()
+// O_TRUNC differs between hosts: uses are the host's.
+const O_TRUNC int = 512
 
 const O_WRONLY int = 1
 
-// PathListSeparator differs between hosts.
-var PathListSeparator rune = func() rune {
-	if apehost == apeLinux {
-		return rune(Linux_PathListSeparator)
-	}
-	if apehost == apeFreebsd {
-		return rune(Freebsd_PathListSeparator)
-	}
-	return rune(Windows_PathListSeparator)
-}()
+// PathListSeparator differs between hosts: uses are the host's.
+const PathListSeparator = ':'
 
-// PathSeparator differs between hosts.
-var PathSeparator string = func() string {
-	if apehost == apeLinux {
-		return string(Linux_PathSeparator)
-	}
-	if apehost == apeFreebsd {
-		return string(Freebsd_PathSeparator)
-	}
-	return string(Windows_PathSeparator)
-}()
+// PathSeparator differs between hosts: uses are the host's.
+const PathSeparator = '/'
 
-// _UTIME_OMIT differs between hosts.
-var _UTIME_OMIT int64 = func() int64 {
-	if apehost == apeLinux {
-		return int64(linux__UTIME_OMIT)
-	}
-	if apehost == apeFreebsd {
-		return int64(freebsd__UTIME_OMIT)
-	}
-	return int64(windows__UTIME_OMIT)
-}()
+// _UTIME_OMIT differs between hosts: uses are the host's.
+const _UTIME_OMIT = 1073741822
 
-// errENOMEM differs between hosts.
-var errENOMEM syscall.Errno = func() syscall.Errno {
-	if apehost == apeLinux {
-		return linux_errENOMEM
-	}
-	if apehost == apeFreebsd {
-		return freebsd_errENOMEM
-	}
-	return windows_errENOMEM
-}()
+// errENOMEM differs between hosts: uses are the host's.
+const errENOMEM syscall.Errno = 12
 
-// errENOSYS differs between hosts.
-var errENOSYS syscall.Errno = func() syscall.Errno {
-	if apehost == apeLinux {
-		return linux_errENOSYS
-	}
-	if apehost == apeFreebsd {
-		return freebsd_errENOSYS
-	}
-	return windows_errENOSYS
-}()
+// errENOSYS differs between hosts: uses are the host's.
+const errENOSYS syscall.Errno = 38
 
-// errERANGE differs between hosts.
-var errERANGE syscall.Errno = func() syscall.Errno {
-	if apehost == apeLinux {
-		return linux_errERANGE
-	}
-	if apehost == apeFreebsd {
-		return freebsd_errERANGE
-	}
-	return windows_errERANGE
-}()
+// errERANGE differs between hosts: uses are the host's.
+const errERANGE syscall.Errno = 34
 
-// supportsCreateWithStickyBit differs between hosts.
-var supportsCreateWithStickyBit bool = func() bool {
-	if apehost == apeLinux {
-		return bool(linux_supportsCreateWithStickyBit)
-	}
-	if apehost == apeFreebsd {
-		return bool(freebsd_supportsCreateWithStickyBit)
-	}
-	return bool(windows_supportsCreateWithStickyBit)
-}()
+// supportsCreateWithStickyBit differs between hosts: uses are the host's.
+const supportsCreateWithStickyBit = true
 
 func IsPathSeparator(a0 uint8) bool {
 	if apehost == apeLinux {

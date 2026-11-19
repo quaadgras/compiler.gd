@@ -25,17 +25,7 @@ func linux_sockaddrToUDP(sa syscall.Linux_Sockaddr) Addr {
 		return &UDPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *UDPAddr) linux_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Linux_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Linux_AF_INET
-	}
-	return syscall.Linux_AF_INET6
-}
+}/*line udpsock_posix.go:33:2*/
 
 func (a *UDPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {

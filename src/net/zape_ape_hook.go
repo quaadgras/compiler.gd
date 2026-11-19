@@ -6,8 +6,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line hook.go:6:1*/
 package net
 
 import (
 	
-)/*line hook.go:31:2*/
+)/*line hook.go:33:2*/

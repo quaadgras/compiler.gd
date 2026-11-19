@@ -472,17 +472,22 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				if o.Parent() != o.Pkg().Scope() {
 					break
 				}
-				if local && hp.inOnly(o.Pos()) && !g.sameConst(o.Name()) && !g.isMax(o.Name()) && (inConstContext(stack) || g.multiTyped(o.Name())) {
-					why = "constant " + o.Name() + " where Go needs a constant (or of several types)"
+				// (Elsewhere the compiler compiles it as the host's, but
+				// a constant computed from it must have a copy for each
+				// host too, and an array's length is the type checker's.)
+				// (A test's constant computed from it is the compiler's
+				// to compile as the host's: no package imports a test.)
+				isTest := strings.HasSuffix(fset.Position(n.Pos()).Filename, "_test.go")
+				needConst := inConstContext(stack) && (!isTest || inArrayLen(stack))
+				if local && hp.inOnly(o.Pos()) && !g.sameConst(o.Name()) && !g.isMax(o.Name()) && (needConst || g.isRuntime() && g.multiTyped(o.Name())) {
+					why = "constant " + o.Name() + " where Go needs a constant"
 				}
 				// Another package's constant that differs is a variable
 				// of one type, whatever the use.
 				// A typed one is a variable of its type; an untyped one
 				// a variable of one type, whatever the use.
-				if !local && g.u.hostDiffers(o.Pkg().Path(), hp.host, o) {
-					if b, ok := o.Type().(*types.Basic); ok && b.Info()&types.IsUntyped != 0 || inConstContext(stack) {
-						why = "constant " + o.Pkg().Name() + "." + o.Name()
-					}
+				if !local && g.u.hostDiffers(o.Pkg().Path(), hp.host, o) && (needConst || o.Pkg().Path() == "runtime") {
+					why = "constant " + o.Pkg().Name() + "." + o.Name()
 				}
 			case *types.TypeName:
 				// A host alias has no ape type.
@@ -877,6 +882,22 @@ func holdsLock(t types.Type, depth int) bool {
 		}
 	case *types.Array:
 		return holdsLock(u.Elem(), depth+1)
+	}
+	return false
+}
+
+// inArrayLen reports whether the innermost node of stack is in an array
+// type's length.
+func inArrayLen(stack []ast.Node) bool {
+	for i := len(stack) - 1; i > 0; i-- {
+		switch p := stack[i-1].(type) {
+		case *ast.ArrayType:
+			if p.Len == stack[i] {
+				return true
+			}
+		case *ast.FuncDecl, *ast.FuncLit:
+			return false
+		}
 	}
 	return false
 }

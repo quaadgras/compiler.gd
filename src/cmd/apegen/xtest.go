@@ -128,23 +128,10 @@ func (g *pkgGen) xtestDepends(hp *hostPkg, f *ast.File) string {
 		}
 		// A constant that differs between hosts is a variable.
 		if c, ok := hp.xinfo.Uses[id].(*types.Const); ok && c.Pkg() != nil && c.Parent() == c.Pkg().Scope() && g.u.hostDiffers(c.Pkg().Path(), hp.host, c) {
-			// (A variable of its default type: fine where Go needs no
-			// constant and the use is of that type.)
-			if inConstContext(stack) {
+			// (The compiler compiles it as the host's wherever Go
+			// does not need a constant.)
+			if inArrayLen(stack) || c.Pkg().Path() == "runtime" {
 				why = "constant " + c.Name()
-			} else if b, ok := c.Type().(*types.Basic); ok && b.Info()&types.IsUntyped != 0 {
-				ut := hp.xinfo.Types[id].Type
-				if len(stack) >= 2 {
-					if sel, ok := stack[len(stack)-2].(*ast.SelectorExpr); ok && sel.Sel == id {
-						ut = hp.xinfo.Types[sel].Type // pkg.C
-					}
-				}
-				if ub, ok := ut.(*types.Basic); ok && ub.Info()&types.IsUntyped != 0 {
-					ut = types.Default(ut) // as in string(PathSeparator)
-				}
-				if ut == nil || !types.Identical(ut, types.Default(c.Type())) {
-					why = "constant " + c.Name()
-				}
 			}
 		}
 		o := hp.xinfo.Uses[id]

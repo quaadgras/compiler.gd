@@ -19,66 +19,11 @@ const (
 	apeWindows
 )
 
-// ListSeparator differs between hosts.
-var ListSeparator rune = func() rune {
-	if apehost == apeLinux {
-		return rune(Linux_ListSeparator)
-	}
-	if apehost == apeFreebsd {
-		return rune(Freebsd_ListSeparator)
-	}
-	return rune(Windows_ListSeparator)
-}()
+// ListSeparator differs between hosts: uses are the host's.
+const ListSeparator = ':'
 
-// Separator differs between hosts.
-var Separator rune = func() rune {
-	if apehost == apeLinux {
-		return rune(Linux_Separator)
-	}
-	if apehost == apeFreebsd {
-		return rune(Freebsd_Separator)
-	}
-	return rune(Windows_Separator)
-}()
-
-func Base(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Base(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Base(a0)
-		return x0
-	}
-	x0 := Windows_Base(a0)
-	return x0
-}
-
-func Clean(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Clean(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Clean(a0)
-		return x0
-	}
-	x0 := Windows_Clean(a0)
-	return x0
-}
-
-func FromSlash(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_FromSlash(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_FromSlash(a0)
-		return x0
-	}
-	x0 := Windows_FromSlash(a0)
-	return x0
-}
+// Separator differs between hosts: uses are the host's.
+const Separator = '/'
 
 func IsAbs(a0 string) bool {
 	if apehost == apeLinux {
@@ -106,19 +51,6 @@ func IsPathSeparator(a0 uint8) bool {
 	return x0
 }
 
-func ToSlash(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_ToSlash(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_ToSlash(a0)
-		return x0
-	}
-	x0 := Windows_ToSlash(a0)
-	return x0
-}
-
 func isLocal(a0 string) bool {
 	if apehost == apeLinux {
 		x0 := linux_isLocal(a0)
@@ -143,6 +75,18 @@ func localize(a0 string) (string, error) {
 	}
 	x0, x1 := windows_localize(a0)
 	return x0, x1
+}
+
+func postClean(a0 *lazybuf) {
+	if apehost == apeLinux {
+		linux_postClean(a0)
+		return
+	}
+	if apehost == apeFreebsd {
+		freebsd_postClean(a0)
+		return
+	}
+	windows_postClean(a0)
 }
 
 func volumeNameLen(a0 string) int {

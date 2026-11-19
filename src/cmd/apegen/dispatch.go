@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -762,9 +763,9 @@ func (g *pkgGen) declConst(ic *iface) {
 	tstr := g.typeString(g.first(), c.Type())
 	if same {
 		if untyped {
-			fmt.Fprintf(&g.decls, "\nconst %s = %s\n", ic.name, c.Val().ExactString())
+			fmt.Fprintf(&g.decls, "\nconst %s = %s\n", ic.name, constLit(c))
 		} else {
-			fmt.Fprintf(&g.decls, "\nconst %s %s = %s\n", ic.name, tstr, c.Val().ExactString())
+			fmt.Fprintf(&g.decls, "\nconst %s %s = %s\n", ic.name, tstr, constLit(c))
 		}
 		return
 	}
@@ -776,7 +777,18 @@ func (g *pkgGen) declConst(ic *iface) {
 				best = o
 			}
 		}
-		fmt.Fprintf(&g.decls, "\n// %s is the largest host's.\nconst %s = %s\n", ic.name, ic.name, best.Val().ExactString())
+		fmt.Fprintf(&g.decls, "\n// %s is the largest host's.\nconst %s = %s\n", ic.name, ic.name, constLit(best))
+		return
+	}
+	// A constant the compiler compiles as the host's (see
+	// cmd/compile/internal/noder/ape.go): to the type checker the first
+	// host's.
+	if !g.isRuntime() && (untyped || g.hostNamed(g.first(), c.Type()) == nil) && !g.anyOtherHost(c.Type()) {
+		if untyped {
+			fmt.Fprintf(&g.decls, "\n// %s differs between hosts: uses are the host's.\nconst %s = %s\n", ic.name, ic.name, constLit(c))
+		} else {
+			fmt.Fprintf(&g.decls, "\n// %s differs between hosts: uses are the host's.\nconst %s %s = %s\n", ic.name, ic.name, tstr, constLit(c))
+		}
 		return
 	}
 	// A variable, of the type shared code uses it as.
@@ -1285,4 +1297,32 @@ func (hp *hostPkg) hasPragma(fn *types.Func, directive string) bool {
 		}
 	}
 	return false
+}
+
+// anyOtherHost reports whether t is another generated package's type that
+// differs between hosts.
+func (g *pkgGen) anyOtherHost(t types.Type) bool {
+	return g.otherHostRef(g.first(), t) != nil
+}
+
+// constLit writes c's value as a literal of its kind: a rune constant as
+// a rune literal, so that it stays one.
+func constLit(c *types.Const) string {
+	v := c.Val()
+	b, _ := c.Type().Underlying().(*types.Basic)
+	if b != nil && b.Kind() == types.UntypedRune {
+		if r, ok := constant.Int64Val(v); ok {
+			return strconv.QuoteRune(rune(r))
+		}
+	}
+	if v.Kind() == constant.Float {
+		if s := v.ExactString(); !strings.Contains(s, "/") {
+			if b != nil && b.Kind() == types.UntypedFloat && !strings.ContainsAny(s, ".eE") {
+				return s + ".0"
+			}
+			return s
+		}
+		return v.String()
+	}
+	return v.ExactString()
 }

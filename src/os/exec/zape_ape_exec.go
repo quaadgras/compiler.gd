@@ -542,7 +542,41 @@ func (c *Cmd) argv() []string {
 		return c.Args
 	}
 	return []string{c.Path}
-}/*line exec.go:576:2*/
+}
+
+func (c *Cmd) childStdin() (*os.File, error) {
+	if c.Stdin == nil {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			return nil, err
+		}
+		c.childIOFiles = append(c.childIOFiles, f)
+		return f, nil
+	}
+
+	if f, ok := c.Stdin.(*os.File); ok {
+		return f, nil
+	}
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+
+	c.childIOFiles = append(c.childIOFiles, pr)
+	c.parentIOPipes = append(c.parentIOPipes, pw)
+	c.goroutine = append(c.goroutine, func() error {
+		_, err := io.Copy(pw, c.Stdin)
+		if skipStdinCopyError(err) {
+			err = nil
+		}
+		if err1 := pw.Close(); err == nil {
+			err = err1
+		}
+		return err
+	})
+	return pr, nil
+}
 
 func (c *Cmd) childStdout() (*os.File, error) {
 	return c.writerDescriptor(c.Stdout)
@@ -553,7 +587,40 @@ func (c *Cmd) childStderr(childStdout *os.File) (*os.File, error) {
 		return childStdout, nil
 	}
 	return c.writerDescriptor(c.Stderr)
-}/*line exec.go:620:2*/
+}
+
+// writerDescriptor returns an os.File to which the child process
+// can write to send data to w.
+//
+// If w is nil, writerDescriptor returns a File that writes to os.DevNull.
+func (c *Cmd) writerDescriptor(w io.Writer) (*os.File, error) {
+	if w == nil {
+		f, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err != nil {
+			return nil, err
+		}
+		c.childIOFiles = append(c.childIOFiles, f)
+		return f, nil
+	}
+
+	if f, ok := w.(*os.File); ok {
+		return f, nil
+	}
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+
+	c.childIOFiles = append(c.childIOFiles, pw)
+	c.parentIOPipes = append(c.parentIOPipes, pr)
+	c.goroutine = append(c.goroutine, func() error {
+		_, err := io.Copy(w, pr)
+		pr.Close() // in case io.Copy stopped due to write error
+		return err
+	})
+	return pw, nil
+}
 
 func closeDescriptors(closers []io.Closer) {
 	for _, fd := range closers {

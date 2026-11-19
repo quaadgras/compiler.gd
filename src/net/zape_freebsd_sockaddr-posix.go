@@ -20,7 +20,7 @@ type freebsd_sockaddr interface {
 
 	// family returns the platform-dependent address family
 	// identifier.
-	freebsd_family() int
+	family() int
 
 	// isWildcard reports whether the address is a wildcard
 	// address.

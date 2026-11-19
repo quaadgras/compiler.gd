@@ -10,5 +10,5 @@
 package filepath
 
 func linux_evalSymlinks(path string) (string, error) {
-	return linux_walkSymlinks(path)
+	return walkSymlinks(path)
 }

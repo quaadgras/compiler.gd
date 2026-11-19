@@ -110,7 +110,7 @@ func windows_toNorm(path string, normBase func(string) (string, error)) (string,
 }
 
 func windows_evalSymlinks(path string) (string, error) {
-	newpath, err := windows_walkSymlinks(path)
+	newpath, err := walkSymlinks(path)
 	if err != nil {
 		return "", err
 	}

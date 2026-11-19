@@ -24,17 +24,7 @@ func linux_sockaddrToIP(sa syscall.Linux_Sockaddr) Addr {
 		return &IPAddr{IP: sa.Addr[0:], Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *IPAddr) linux_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Linux_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Linux_AF_INET
-	}
-	return syscall.Linux_AF_INET6
-}
+}/*line iprawsock_posix.go:32:2*/
 
 func (a *IPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {

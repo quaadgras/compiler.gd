@@ -11,8 +11,18 @@ package net
 
 import (
 	
-	
-)/*line iprawsock_posix.go:22:2*//*line iprawsock_posix.go:32:2*//*line iprawsock_posix.go:39:2*//*line iprawsock_posix.go:43:2*//*line iprawsock_posix.go:58:2*/
+	"syscall"
+)/*line iprawsock_posix.go:22:2*/
+
+func (a *IPAddr) family() int {
+	if a == nil || len(a.IP) <= IPv4len {
+		return syscall.AF_INET
+	}
+	if a.IP.To4() != nil {
+		return syscall.AF_INET
+	}
+	return syscall.AF_INET6
+}/*line iprawsock_posix.go:39:2*//*line iprawsock_posix.go:43:2*//*line iprawsock_posix.go:58:2*/
 
 func stripIPv4Header(n int, b []byte) int {
 	if len(b) < 20 {

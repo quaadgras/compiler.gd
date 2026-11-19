@@ -10,5 +10,5 @@
 package filepath
 
 func freebsd_evalSymlinks(path string) (string, error) {
-	return freebsd_walkSymlinks(path)
+	return walkSymlinks(path)
 }

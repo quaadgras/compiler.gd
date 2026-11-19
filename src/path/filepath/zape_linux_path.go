@@ -17,9 +17,9 @@
 package filepath
 
 import (
-	"errors"
-	"internal/bytealg"
-	"internal/filepathlite"
+	
+	
+	
 	
 	"os"
 	
@@ -28,85 +28,4 @@ import (
 const (
 	Linux_Separator     = os.Linux_PathSeparator
 	Linux_ListSeparator = os.Linux_PathListSeparator
-)/*line path.go:59:2*//*line path.go:77:2*//*line path.go:89:2*//*line path.go:96:2*//*line path.go:106:2*//*line path.go:114:2*//*line path.go:123:2*//*line path.go:134:2*//*line path.go:142:2*//*line path.go:151:2*//*line path.go:156:2*//*line path.go:165:2*//*line path.go:176:2*/
-
-// Rel returns a relative path that is lexically equivalent to targPath when
-// joined to basePath with an intervening separator. That is,
-// [Join](basePath, Rel(basePath, targPath)) is equivalent to targPath itself.
-//
-// The returned path will always be relative to basePath, even if basePath and
-// targPath share no elements. Rel calls [Clean] on the result.
-//
-// An error is returned if targPath can't be made relative to basePath
-// or if knowing the current working directory would be necessary to compute it.
-func Linux_Rel(basePath, targPath string) (string, error) {
-	baseVol := VolumeName(basePath)
-	targVol := VolumeName(targPath)
-	base := Clean(basePath)
-	targ := Clean(targPath)
-	if linux_sameWord(targ, base) {
-		return ".", nil
-	}
-	base = base[len(baseVol):]
-	targ = targ[len(targVol):]
-	if base == "." {
-		base = ""
-	} else if base == "" && filepathlite.VolumeNameLen(baseVol) > 2 /* isUNC */ {
-		// Treat any targetpath matching `\\host\share` basePath as absolute path.
-		base = string(Linux_Separator)
-	}
-
-	// Can't use IsAbs - `\a` and `a` are both relative in Windows.
-	baseSlashed := len(base) > 0 && base[0] == Linux_Separator
-	targSlashed := len(targ) > 0 && targ[0] == Linux_Separator
-	if baseSlashed != targSlashed || !linux_sameWord(baseVol, targVol) {
-		return "", errors.New("Rel: can't make " + targPath + " relative to " + basePath)
-	}
-	// Position base[b0:bi] and targ[t0:ti] at the first differing elements.
-	bl := len(base)
-	tl := len(targ)
-	var b0, bi, t0, ti int
-	for {
-		for bi < bl && base[bi] != Linux_Separator {
-			bi++
-		}
-		for ti < tl && targ[ti] != Linux_Separator {
-			ti++
-		}
-		if !linux_sameWord(targ[t0:ti], base[b0:bi]) {
-			break
-		}
-		if bi < bl {
-			bi++
-		}
-		if ti < tl {
-			ti++
-		}
-		b0 = bi
-		t0 = ti
-	}
-	if base[b0:bi] == ".." {
-		return "", errors.New("Rel: can't make " + targPath + " relative to " + basePath)
-	}
-	if b0 != bl {
-		// Base elements left. Must go up before going down.
-		seps := bytealg.CountString(base[b0:bl], Linux_Separator)
-		size := 2 + seps*3
-		if tl != t0 {
-			size += 1 + tl - t0
-		}
-		buf := make([]byte, size)
-		n := copy(buf, "..")
-		for i := 0; i < seps; i++ {
-			buf[n] = Linux_Separator
-			copy(buf[n+1:], "..")
-			n += 3
-		}
-		if t0 != tl {
-			buf[n] = Linux_Separator
-			copy(buf[n+1:], targ[t0:])
-		}
-		return Clean(string(buf)), nil
-	}
-	return targ[t0:], nil
-}/*line path.go:262:31*//*line path.go:267:31*//*line path.go:307:67*//*line path.go:309:21*//*line path.go:343:2*//*line path.go:381:2*//*line path.go:409:2*//*line path.go:436:2*//*line path.go:452:2*//*line path.go:460:2*//*line path.go:474:2*//*line path.go:482:2*/
+)/*line path.go:59:2*//*line path.go:77:2*//*line path.go:89:2*//*line path.go:96:2*//*line path.go:106:2*//*line path.go:114:2*//*line path.go:123:2*//*line path.go:134:2*//*line path.go:142:2*//*line path.go:151:2*//*line path.go:156:2*//*line path.go:165:2*//*line path.go:176:2*//*line path.go:257:2*//*line path.go:262:31*//*line path.go:267:31*//*line path.go:307:67*//*line path.go:309:21*//*line path.go:343:2*//*line path.go:381:2*//*line path.go:409:2*//*line path.go:436:2*//*line path.go:452:2*//*line path.go:460:2*//*line path.go:474:2*//*line path.go:482:2*/

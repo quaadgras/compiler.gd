@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sendfile.go:6:1*/
 package poll
 
 var Windows_TestHookDidSendFile = func(dstFD *Windows_FD, src uintptr, written int64, err error, handled bool) {}

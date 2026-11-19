@@ -19,27 +19,11 @@ const (
 	apeWindows
 )
 
-// ListSeparator differs between hosts.
-var ListSeparator rune = func() rune {
-	if apehost == apeLinux {
-		return rune(Linux_ListSeparator)
-	}
-	if apehost == apeFreebsd {
-		return rune(Freebsd_ListSeparator)
-	}
-	return rune(Windows_ListSeparator)
-}()
+// ListSeparator differs between hosts: uses are the host's.
+const ListSeparator = ':'
 
-// Separator differs between hosts.
-var Separator rune = func() rune {
-	if apehost == apeLinux {
-		return rune(Linux_Separator)
-	}
-	if apehost == apeFreebsd {
-		return rune(Freebsd_Separator)
-	}
-	return rune(Windows_Separator)
-}()
+// Separator differs between hosts: uses are the host's.
+const Separator = '/'
 
 func HasPrefix(a0 string, a1 string) bool {
 	if apehost == apeLinux {
@@ -54,32 +38,6 @@ func HasPrefix(a0 string, a1 string) bool {
 	return x0
 }
 
-func Match(a0 string, a1 string) (bool, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Match(a0, a1)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Match(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Windows_Match(a0, a1)
-	return x0, x1
-}
-
-func Rel(a0 string, a1 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Rel(a0, a1)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Rel(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Windows_Rel(a0, a1)
-	return x0, x1
-}
-
 func abs(a0 string) (string, error) {
 	if apehost == apeLinux {
 		x0, x1 := linux_abs(a0)
@@ -91,19 +49,6 @@ func abs(a0 string) (string, error) {
 	}
 	x0, x1 := windows_abs(a0)
 	return x0, x1
-}
-
-func cleanGlobPath(a0 string) string {
-	if apehost == apeLinux {
-		x0 := linux_cleanGlobPath(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := freebsd_cleanGlobPath(a0)
-		return x0
-	}
-	x0 := windows_cleanGlobPath(a0)
-	return x0
 }
 
 func evalSymlinks(a0 string) (string, error) {
@@ -129,6 +74,19 @@ func join(a0 []string) string {
 		return x0
 	}
 	x0 := windows_join(a0)
+	return x0
+}
+
+func sameWord(a0 string, a1 string) bool {
+	if apehost == apeLinux {
+		x0 := linux_sameWord(a0, a1)
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_sameWord(a0, a1)
+		return x0
+	}
+	x0 := windows_sameWord(a0, a1)
 	return x0
 }
 

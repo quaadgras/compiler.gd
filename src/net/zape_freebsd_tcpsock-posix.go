@@ -26,17 +26,7 @@ func freebsd_sockaddrToTCP(sa syscall.Freebsd_Sockaddr) Addr {
 		return &TCPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *TCPAddr) freebsd_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Freebsd_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Freebsd_AF_INET
-	}
-	return syscall.Freebsd_AF_INET6
-}
+}/*line tcpsock_posix.go:34:2*/
 
 func (a *TCPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {

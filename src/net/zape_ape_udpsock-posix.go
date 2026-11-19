@@ -12,8 +12,18 @@ package net
 import (
 	
 	
-	
-)/*line udpsock_posix.go:23:2*//*line udpsock_posix.go:33:2*//*line udpsock_posix.go:40:2*//*line udpsock_posix.go:44:2*//*line udpsock_posix.go:70:2*//*line udpsock_posix.go:95:2*//*line udpsock_posix.go:111:2*//*line udpsock_posix.go:137:2*//*line udpsock_posix.go:163:2*//*line udpsock_posix.go:177:2*//*line udpsock_posix.go:211:2*//*line udpsock_posix.go:225:2*//*line udpsock_posix.go:239:2*//*line udpsock_posix.go:265:2*/
+	"syscall"
+)/*line udpsock_posix.go:23:2*/
+
+func (a *UDPAddr) family() int {
+	if a == nil || len(a.IP) <= IPv4len {
+		return syscall.AF_INET
+	}
+	if a.IP.To4() != nil {
+		return syscall.AF_INET
+	}
+	return syscall.AF_INET6
+}/*line udpsock_posix.go:40:2*//*line udpsock_posix.go:44:2*//*line udpsock_posix.go:70:2*//*line udpsock_posix.go:95:2*//*line udpsock_posix.go:111:2*//*line udpsock_posix.go:137:2*//*line udpsock_posix.go:163:2*//*line udpsock_posix.go:177:2*//*line udpsock_posix.go:211:2*//*line udpsock_posix.go:225:2*//*line udpsock_posix.go:239:2*//*line udpsock_posix.go:265:2*/
 
 func listenIPv4MulticastUDP(c *UDPConn, ifi *Interface, ip IP) error {
 	if ifi != nil {

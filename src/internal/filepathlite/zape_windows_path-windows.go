@@ -49,7 +49,7 @@ func windows_isLocal(path string) bool {
 		}
 	}
 	if hasDots {
-		path = Windows_Clean(path)
+		path = Clean(path)
 	}
 	if path == ".." || stringslite.HasPrefix(path, `..\`) {
 		return false

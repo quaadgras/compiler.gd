@@ -412,7 +412,7 @@ import (
 	
 	
 	
-	"os"
+	
 	
 	
 	"runtime"
@@ -428,89 +428,7 @@ import (
 	_ "unsafe" // for linkname
 )
 
-var _ = runtime.GOARCH/*line testing.go:426:2*//*line testing.go:428:17*//*line testing.go:433:2*//*line testing.go:487:2*//*line testing.go:527:2*//*line testing.go:532:2*//*line testing.go:534:53*//*line testing.go:548:2*//*line testing.go:558:2*//*line testing.go:565:2*//*line testing.go:572:2*//*line testing.go:579:2*//*line testing.go:586:2*//*line testing.go:590:2*//*line testing.go:601:2*//*line testing.go:616:2*//*line testing.go:632:2*//*line testing.go:637:2*//*line testing.go:642:2*//*line testing.go:646:2*//*line testing.go:676:2*//*line testing.go:686:2*//*line testing.go:690:23*//*line testing.go:745:2*//*line testing.go:758:2*//*line testing.go:767:21*//*line testing.go:774:2*//*line testing.go:781:2*//*line testing.go:790:2*//*line testing.go:796:2*//*line testing.go:897:2*//*line testing.go:938:2*//*line testing.go:942:2*//*line testing.go:944:22*//*line testing.go:967:2*//*line testing.go:972:2*//*line testing.go:1004:2*//*line testing.go:1009:2*//*line testing.go:1024:2*//*line testing.go:1026:30*//*line testing.go:1035:2*//*line testing.go:1044:2*//*line testing.go:1058:2*//*line testing.go:1072:2*//*line testing.go:1109:2*//*line testing.go:1136:2*//*line testing.go:1155:2*//*line testing.go:1179:2*//*line testing.go:1192:2*//*line testing.go:1207:2*//*line testing.go:1212:2*//*line testing.go:1218:2*//*line testing.go:1224:2*//*line testing.go:1254:2*//*line testing.go:1294:2*//*line testing.go:1317:2*//*line testing.go:1327:2*//*line testing.go:1337:2*//*line testing.go:1348:2*//*line testing.go:1355:2*//*line testing.go:1362:2*//*line testing.go:1369:2*//*line testing.go:1376:2*//*line testing.go:1383:2*//*line testing.go:1390:2*//*line testing.go:1407:2*//*line testing.go:1414:2*//*line testing.go:1438:2*//*line testing.go:1470:2*//*line testing.go:1489:2*//*line testing.go:1498:2*//*line testing.go:1525:2*//*line testing.go:1558:2*//*line testing.go:1570:2*//*line testing.go:1586:2*/
-
-func (c *common) linux_makeTempDir() (string, error) {
-	// Use a single parent directory for all the temporary directories
-	// created by a test, each numbered sequentially.
-	c.tempDirMu.Lock()
-	var nonExistent bool
-	if c.tempDir == "" { // Usually the case with js/wasm
-		nonExistent = true
-	} else {
-		_, err := os.Stat(c.tempDir)
-		nonExistent = os.IsNotExist(err)
-		if err != nil && !nonExistent {
-			return "", err
-		}
-	}
-
-	if nonExistent {
-		c.Helper()
-
-		pattern := c.Name()
-		// Limit length of file names on disk.
-		// Invalid runes from slicing are dropped by strings.Map below.
-		pattern = pattern[:min(len(pattern), 64)]
-
-		// Drop unusual characters (such as path separators or
-		// characters interacting with globs) from the directory name to
-		// avoid surprising os.MkdirTemp behavior.
-		const allowed = "!#$%&()+,-.=@^_{}~ "
-		pattern = removeSymbolsExcept(pattern, allowed)
-
-		c.tempDir, c.tempDirErr = os.MkdirTemp(os.Getenv("GOTMPDIR"), pattern)
-		if c.tempDirErr == nil {
-			c.Cleanup(func() {
-				if err := removeAll(c.tempDir); err != nil {
-					c.Errorf("TempDir RemoveAll cleanup: %v", err)
-				}
-			})
-		}
-	}
-
-	if c.tempDirErr == nil {
-		c.tempDirSeq++
-	}
-	seq := c.tempDirSeq
-	c.tempDirMu.Unlock()
-
-	if c.tempDirErr != nil {
-		return "", c.tempDirErr
-	}
-
-	dir := fmt.Sprintf("%s%c%03d", c.tempDir, os.Linux_PathSeparator, seq)
-	if err := os.Mkdir(dir, 0o777); err != nil {
-		return "", err
-	}
-	return dir, nil
-}/*line testing.go:1672:2*//*line testing.go:1697:2*//*line testing.go:1739:2*//*line testing.go:1749:2*//*line testing.go:1774:2*//*line testing.go:1777:23*//*line testing.go:1782:2*//*line testing.go:1826:2*//*line testing.go:1839:2*//*line testing.go:1889:2*//*line testing.go:1900:2*//*line testing.go:1907:2*//*line testing.go:1909:119*//*line testing.go:1979:2*//*line testing.go:1986:2*//*line testing.go:2001:2*//*line testing.go:2012:2*//*line testing.go:2023:2*//*line testing.go:2030:2*//*line testing.go:2032:83*//*line testing.go:2203:2*//*line testing.go:2280:2*//*line testing.go:2318:2*//*line testing.go:2333:2*//*line testing.go:2361:2*//*line testing.go:2370:2*//*line testing.go:2382:2*//*line testing.go:2394:2*//*line testing.go:2398:65*//*line testing.go:2400:57*//*line testing.go:2402:93*//*line testing.go:2403:89*//*line testing.go:2404:73*//*line testing.go:2405:89*//*line testing.go:2406:84*//*line testing.go:2407:84*//*line testing.go:2408:73*//*line testing.go:2409:89*//*line testing.go:2410:73*//*line testing.go:2413:2*//*line testing.go:2414:89*//*line testing.go:2417:2*//*line testing.go:2418:81*//*line testing.go:2419:69*//*line testing.go:2420:69*//*line testing.go:2424:2*//*line testing.go:2434:2*//*line testing.go:2452:2*//*line testing.go:2475:2*//*line testing.go:2490:2*//*line testing.go:2495:2*//*line testing.go:2648:2*//*line testing.go:2668:2*//*line testing.go:2696:2*//*line testing.go:2710:2*//*line testing.go:2759:2*//*line testing.go:2841:2*//*line testing.go:2855:2*//*line testing.go:2914:2*/
-
-// toOutputDir returns the file name relocated, if required, to outputDir.
-// Simple implementation to avoid pulling in path/filepath.
-func linux_toOutputDir(path string) string {
-	if *outputDir == "" || path == "" {
-		return path
-	}
-	// On Windows, it's clumsy, but we can be almost always correct
-	// by just looking for a drive letter and a colon.
-	// Absolute paths always have a drive letter (ignoring UNC).
-	// Problem: if path == "C:A" and outputdir == "C:\Go" it's unclear
-	// what to do, but even then path/filepath doesn't help.
-	// TODO: Worth doing better? Probably not, because we're here only
-	// under the management of go test.
-	if "linux" == "windows" && len(path) >= 2 {
-		letter, colon := path[0], path[1]
-		if ('a' <= letter && letter <= 'z' || 'A' <= letter && letter <= 'Z') && colon == ':' {
-			// If path starts with a drive letter we're stuck with it regardless.
-			return path
-		}
-	}
-	if os.Linux_IsPathSeparator(path[0]) {
-		return path
-	}
-	return fmt.Sprintf("%s%c%s", *outputDir, os.Linux_PathSeparator, path)
-}/*line testing.go:2966:2*/
+var _ = runtime.GOARCH/*line testing.go:426:2*//*line testing.go:428:17*//*line testing.go:433:2*//*line testing.go:487:2*//*line testing.go:527:2*//*line testing.go:532:2*//*line testing.go:534:53*//*line testing.go:548:2*//*line testing.go:558:2*//*line testing.go:565:2*//*line testing.go:572:2*//*line testing.go:579:2*//*line testing.go:586:2*//*line testing.go:590:2*//*line testing.go:601:2*//*line testing.go:616:2*//*line testing.go:632:2*//*line testing.go:637:2*//*line testing.go:642:2*//*line testing.go:646:2*//*line testing.go:676:2*//*line testing.go:686:2*//*line testing.go:690:23*//*line testing.go:745:2*//*line testing.go:758:2*//*line testing.go:767:21*//*line testing.go:774:2*//*line testing.go:781:2*//*line testing.go:790:2*//*line testing.go:796:2*//*line testing.go:897:2*//*line testing.go:938:2*//*line testing.go:942:2*//*line testing.go:944:22*//*line testing.go:967:2*//*line testing.go:972:2*//*line testing.go:1004:2*//*line testing.go:1009:2*//*line testing.go:1024:2*//*line testing.go:1026:30*//*line testing.go:1035:2*//*line testing.go:1044:2*//*line testing.go:1058:2*//*line testing.go:1072:2*//*line testing.go:1109:2*//*line testing.go:1136:2*//*line testing.go:1155:2*//*line testing.go:1179:2*//*line testing.go:1192:2*//*line testing.go:1207:2*//*line testing.go:1212:2*//*line testing.go:1218:2*//*line testing.go:1224:2*//*line testing.go:1254:2*//*line testing.go:1294:2*//*line testing.go:1317:2*//*line testing.go:1327:2*//*line testing.go:1337:2*//*line testing.go:1348:2*//*line testing.go:1355:2*//*line testing.go:1362:2*//*line testing.go:1369:2*//*line testing.go:1376:2*//*line testing.go:1383:2*//*line testing.go:1390:2*//*line testing.go:1407:2*//*line testing.go:1414:2*//*line testing.go:1438:2*//*line testing.go:1470:2*//*line testing.go:1489:2*//*line testing.go:1498:2*//*line testing.go:1525:2*//*line testing.go:1558:2*//*line testing.go:1570:2*//*line testing.go:1586:2*//*line testing.go:1642:2*//*line testing.go:1672:2*//*line testing.go:1697:2*//*line testing.go:1739:2*//*line testing.go:1749:2*//*line testing.go:1774:2*//*line testing.go:1777:23*//*line testing.go:1782:2*//*line testing.go:1826:2*//*line testing.go:1839:2*//*line testing.go:1889:2*//*line testing.go:1900:2*//*line testing.go:1907:2*//*line testing.go:1909:119*//*line testing.go:1979:2*//*line testing.go:1986:2*//*line testing.go:2001:2*//*line testing.go:2012:2*//*line testing.go:2023:2*//*line testing.go:2030:2*//*line testing.go:2032:83*//*line testing.go:2203:2*//*line testing.go:2280:2*//*line testing.go:2318:2*//*line testing.go:2333:2*//*line testing.go:2361:2*//*line testing.go:2370:2*//*line testing.go:2382:2*//*line testing.go:2394:2*//*line testing.go:2398:65*//*line testing.go:2400:57*//*line testing.go:2402:93*//*line testing.go:2403:89*//*line testing.go:2404:73*//*line testing.go:2405:89*//*line testing.go:2406:84*//*line testing.go:2407:84*//*line testing.go:2408:73*//*line testing.go:2409:89*//*line testing.go:2410:73*//*line testing.go:2413:2*//*line testing.go:2414:89*//*line testing.go:2417:2*//*line testing.go:2418:81*//*line testing.go:2419:69*//*line testing.go:2420:69*//*line testing.go:2424:2*//*line testing.go:2434:2*//*line testing.go:2452:2*//*line testing.go:2475:2*//*line testing.go:2490:2*//*line testing.go:2495:2*//*line testing.go:2648:2*//*line testing.go:2668:2*//*line testing.go:2696:2*//*line testing.go:2710:2*//*line testing.go:2759:2*//*line testing.go:2841:2*//*line testing.go:2855:2*//*line testing.go:2914:2*//*line testing.go:2940:2*//*line testing.go:2966:2*/
 
 // runningList returns the list of running tests.
 func linux_runningList() []string {

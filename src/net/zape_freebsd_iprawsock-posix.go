@@ -24,17 +24,7 @@ func freebsd_sockaddrToIP(sa syscall.Freebsd_Sockaddr) Addr {
 		return &IPAddr{IP: sa.Addr[0:], Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *IPAddr) freebsd_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Freebsd_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Freebsd_AF_INET
-	}
-	return syscall.Freebsd_AF_INET6
-}
+}/*line iprawsock_posix.go:32:2*/
 
 func (a *IPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {

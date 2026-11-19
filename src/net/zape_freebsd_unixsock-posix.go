@@ -73,11 +73,7 @@ func freebsd_sockaddrToUnixpacket(sa syscall.Freebsd_Sockaddr) Addr {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
 	return nil
-}/*line unixsock_posix.go:84:2*/
-
-func (a *UnixAddr) freebsd_family() int {
-	return syscall.Freebsd_AF_UNIX
-}
+}/*line unixsock_posix.go:84:2*//*line unixsock_posix.go:88:2*/
 
 func (a *UnixAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {

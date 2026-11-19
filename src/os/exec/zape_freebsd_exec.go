@@ -101,7 +101,7 @@ import (
 	
 	
 	"internal/syscall/execenv"
-	"io"
+	
 	"os"
 	"path/filepath"
 	"runtime"
@@ -112,74 +112,7 @@ import (
 	
 )
 
-var _ = runtime.GOARCH/*line exec.go:110:2*//*line exec.go:119:2*//*line exec.go:123:2*//*line exec.go:125:48*//*line exec.go:130:77*//*line exec.go:136:2*//*line exec.go:140:2*//*line exec.go:144:2*//*line exec.go:376:2*//*line exec.go:390:2*//*line exec.go:392:40*//*line exec.go:393:43*//*line exec.go:486:2*//*line exec.go:507:2*//*line exec.go:526:2*//*line exec.go:535:2*//*line exec.go:542:2*/
-
-func (c *Cmd) freebsd_childStdin() (*os.File, error) {
-	if c.Stdin == nil {
-		f, err := os.Open(os.Freebsd_DevNull)
-		if err != nil {
-			return nil, err
-		}
-		c.childIOFiles = append(c.childIOFiles, f)
-		return f, nil
-	}
-
-	if f, ok := c.Stdin.(*os.File); ok {
-		return f, nil
-	}
-
-	pr, pw, err := os.Freebsd_Pipe()
-	if err != nil {
-		return nil, err
-	}
-
-	c.childIOFiles = append(c.childIOFiles, pr)
-	c.parentIOPipes = append(c.parentIOPipes, pw)
-	c.goroutine = append(c.goroutine, func() error {
-		_, err := io.Copy(pw, c.Stdin)
-		if freebsd_skipStdinCopyError(err) {
-			err = nil
-		}
-		if err1 := pw.Close(); err == nil {
-			err = err1
-		}
-		return err
-	})
-	return pr, nil
-}/*line exec.go:580:2*//*line exec.go:587:2*/
-
-// writerDescriptor returns an os.File to which the child process
-// can write to send data to w.
-//
-// If w is nil, writerDescriptor returns a File that writes to os.DevNull.
-func (c *Cmd) freebsd_writerDescriptor(w io.Writer) (*os.File, error) {
-	if w == nil {
-		f, err := os.Freebsd_OpenFile(os.Freebsd_DevNull, os.Freebsd_O_WRONLY, 0)
-		if err != nil {
-			return nil, err
-		}
-		c.childIOFiles = append(c.childIOFiles, f)
-		return f, nil
-	}
-
-	if f, ok := w.(*os.File); ok {
-		return f, nil
-	}
-
-	pr, pw, err := os.Freebsd_Pipe()
-	if err != nil {
-		return nil, err
-	}
-
-	c.childIOFiles = append(c.childIOFiles, pw)
-	c.parentIOPipes = append(c.parentIOPipes, pr)
-	c.goroutine = append(c.goroutine, func() error {
-		_, err := io.Copy(w, pr)
-		pr.Close() // in case io.Copy stopped due to write error
-		return err
-	})
-	return pw, nil
-}/*line exec.go:626:2*//*line exec.go:646:2*//*line exec.go:800:2*//*line exec.go:895:2*//*line exec.go:912:2*//*line exec.go:916:2*//*line exec.go:974:2*//*line exec.go:1023:2*//*line exec.go:1049:2*//*line exec.go:1065:2*//*line exec.go:1088:2*//*line exec.go:1113:2*//*line exec.go:1138:2*//*line exec.go:1155:2*//*line exec.go:1179:2*//*line exec.go:1190:2*//*line exec.go:1208:2*/
+var _ = runtime.GOARCH/*line exec.go:110:2*//*line exec.go:119:2*//*line exec.go:123:2*//*line exec.go:125:48*//*line exec.go:130:77*//*line exec.go:136:2*//*line exec.go:140:2*//*line exec.go:144:2*//*line exec.go:376:2*//*line exec.go:390:2*//*line exec.go:392:40*//*line exec.go:393:43*//*line exec.go:486:2*//*line exec.go:507:2*//*line exec.go:526:2*//*line exec.go:535:2*//*line exec.go:542:2*//*line exec.go:576:2*//*line exec.go:580:2*//*line exec.go:587:2*//*line exec.go:620:2*//*line exec.go:626:2*//*line exec.go:646:2*//*line exec.go:800:2*//*line exec.go:895:2*//*line exec.go:912:2*//*line exec.go:916:2*//*line exec.go:974:2*//*line exec.go:1023:2*//*line exec.go:1049:2*//*line exec.go:1065:2*//*line exec.go:1088:2*//*line exec.go:1113:2*//*line exec.go:1138:2*//*line exec.go:1155:2*//*line exec.go:1179:2*//*line exec.go:1190:2*//*line exec.go:1208:2*/
 
 // environ returns a best-effort copy of the environment in which the command
 // would be run as it is currently configured. If an error occurs in computing

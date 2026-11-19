@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lookup.go:6:1*/
 package net
 
 import (
@@ -302,7 +303,7 @@ func (ovc *onlyValuesCtx) Value(key any) any {
 // See Issue 28600.
 func withUnexpiredValuesPreserved(lookupCtx context.Context) context.Context {
 	return &onlyValuesCtx{Context: context.Background(), lookupValues: lookupCtx}
-}/*line lookup.go:378:2*/
+}/*line lookup.go:380:2*/
 
 // lookupIPReturn turns the return values from singleflight.Do into
 // the return values from LookupIP.

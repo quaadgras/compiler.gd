@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line build.go:6:1*/
 package build
 
 import (
@@ -37,7 +38,7 @@ import (
 	_ "unsafe" // for linkname
 )
 
-var _ = runtime.GOARCH/*line build.go:34:2*//*line build.go:116:2*//*line build.go:124:2*//*line build.go:132:2*//*line build.go:140:2*//*line build.go:149:2*//*line build.go:176:2*/
+var _ = runtime.GOARCH/*line build.go:36:2*//*line build.go:118:2*//*line build.go:126:2*//*line build.go:134:2*//*line build.go:142:2*//*line build.go:151:2*//*line build.go:178:2*/
 
 // hasSubdir reports if dir is within root by performing lexical analysis only.
 func linux_hasSubdir(root, dir string) (rel string, ok bool) {
@@ -52,4 +53,4 @@ func linux_hasSubdir(root, dir string) (rel string, ok bool) {
 		return "", false
 	}
 	return filepath.ToSlash(after), true
-}/*line build.go:208:2*//*line build.go:221:2*//*line build.go:233:2*//*line build.go:264:2*//*line build.go:284:2*//*line build.go:289:39*//*line build.go:309:2*//*line build.go:320:29*//*line build.go:331:32*//*line build.go:379:2*//*line build.go:387:2*//*line build.go:390:21*//*line build.go:434:2*//*line build.go:506:2*//*line build.go:512:2*//*line build.go:519:2*//*line build.go:525:2*//*line build.go:532:2*//*line build.go:536:2*//*line build.go:544:2*//*line build.go:549:2*//*line build.go:557:2*//*line build.go:559:49*//*line build.go:1097:2*//*line build.go:1121:2*//*line build.go:1137:2*//*line build.go:1139:51*//*line build.go:1294:2*//*line build.go:1308:2*//*line build.go:1351:2*//*line build.go:1358:2*//*line build.go:1389:2*//*line build.go:1414:2*//*line build.go:1425:2*//*line build.go:1427:21*//*line build.go:1439:2*//*line build.go:1445:2*//*line build.go:1450:2*//*line build.go:1524:2*//*line build.go:1533:2*//*line build.go:1538:2*//*line build.go:1543:2*//*line build.go:1551:2*//*line build.go:1560:2*//*line build.go:1565:59*//*line build.go:1630:2*//*line build.go:1706:2*//*line build.go:1790:2*//*line build.go:1811:2*//*line build.go:1842:2*//*line build.go:1851:99*//*line build.go:1863:2*//*line build.go:1923:2*//*line build.go:1941:2*//*line build.go:1954:2*//*line build.go:1967:2*//*line build.go:2014:2*//*line build.go:2063:2*//*line build.go:2066:27*//*line build.go:2073:2*//*line build.go:2082:2*//*line build.go:2088:2*/
+}/*line build.go:210:2*//*line build.go:223:2*//*line build.go:235:2*//*line build.go:266:2*//*line build.go:286:2*//*line build.go:291:39*//*line build.go:311:2*//*line build.go:322:29*//*line build.go:333:32*//*line build.go:381:2*//*line build.go:389:2*//*line build.go:392:21*//*line build.go:436:2*//*line build.go:508:2*//*line build.go:514:2*//*line build.go:521:2*//*line build.go:527:2*//*line build.go:534:2*//*line build.go:538:2*//*line build.go:546:2*//*line build.go:551:2*//*line build.go:559:2*//*line build.go:561:49*//*line build.go:1099:2*//*line build.go:1123:2*//*line build.go:1139:2*//*line build.go:1141:51*//*line build.go:1296:2*//*line build.go:1310:2*//*line build.go:1353:2*//*line build.go:1360:2*//*line build.go:1391:2*//*line build.go:1416:2*//*line build.go:1427:2*//*line build.go:1429:21*//*line build.go:1441:2*//*line build.go:1447:2*//*line build.go:1452:2*//*line build.go:1526:2*//*line build.go:1535:2*//*line build.go:1540:2*//*line build.go:1545:2*//*line build.go:1553:2*//*line build.go:1562:2*//*line build.go:1567:59*//*line build.go:1632:2*//*line build.go:1708:2*//*line build.go:1792:2*//*line build.go:1813:2*//*line build.go:1844:2*//*line build.go:1853:99*//*line build.go:1865:2*//*line build.go:1925:2*//*line build.go:1943:2*//*line build.go:1956:2*//*line build.go:1969:2*//*line build.go:2016:2*//*line build.go:2065:2*//*line build.go:2068:27*//*line build.go:2075:2*//*line build.go:2084:2*//*line build.go:2090:2*/

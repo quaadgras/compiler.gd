@@ -6,4 +6,5 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package poll/*line sendfile.go:7:98*/
+/*line sendfile.go:6:1*/
+package poll/*line sendfile.go:9:98*/

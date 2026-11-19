@@ -73,11 +73,7 @@ func windows_sockaddrToUnixpacket(sa syscall.Windows_Sockaddr) Addr {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
 	return nil
-}/*line unixsock_posix.go:84:2*/
-
-func (a *UnixAddr) windows_family() int {
-	return syscall.Windows_AF_UNIX
-}
+}/*line unixsock_posix.go:84:2*//*line unixsock_posix.go:88:2*/
 
 func (a *UnixAddr) windows_sockaddr(family int) (syscall.Windows_Sockaddr, error) {
 	if a == nil {

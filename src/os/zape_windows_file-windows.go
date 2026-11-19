@@ -341,7 +341,7 @@ func Windows_Link(oldname, newname string) error {
 // If there is an error, it will be of type *LinkError.
 func Windows_Symlink(oldname, newname string) error {
 	// '/' does not work in link's content
-	oldname = filepathlite.Windows_FromSlash(oldname)
+	oldname = filepathlite.FromSlash(oldname)
 
 	// need the exact location of the oldname when it's relative to determine if it's a directory
 	destpath := oldname

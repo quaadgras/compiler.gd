@@ -5,7 +5,11 @@
 package noder
 
 import (
+	"go/constant"
 	"internal/buildcfg"
+	"internal/syslist"
+	"unicode"
+	"unicode/utf8"
 	"os"
 	"strings"
 
@@ -75,13 +79,47 @@ func (pw *pkgWriter) hostDependent(x syntax.Expr) bool {
 	return found
 }
 
-// hostConst reports whether c is runtime.GOOS or a constant of this
-// package computed from it.
+// So is a constant whose value differs between the hosts: one whose
+// package declares, for each host, a constant of the host's name for it
+// (cmd/apegen's host copies: PathSeparator has Linux_PathSeparator,
+// Freebsd_PathSeparator and Windows_PathSeparator). The type checker
+// sees the value the package gives it; a use of it is compiled as the
+// element runtime.apeHost() of the hosts' values.
+
+// hostValues returns the constants that are c on each host, or nil.
+func hostValues(c *types2.Const) []*types2.Const {
+	if buildcfg.GOOS != "ape" || c.Pkg() == nil || c.Parent() != c.Pkg().Scope() {
+		return nil
+	}
+	var out []*types2.Const
+	for _, h := range syslist.APEHosts {
+		hc, ok := c.Pkg().Scope().Lookup(apeHostName(h, c.Name())).(*types2.Const)
+		if !ok || hc == c {
+			return nil
+		}
+		out = append(out, hc)
+	}
+	return out
+}
+
+// apeHostName is cmd/apegen's name of a host's copy of name.
+func apeHostName(host, name string) string {
+	if r, _ := utf8.DecodeRuneInString(name); unicode.IsUpper(r) {
+		return strings.ToUpper(host[:1]) + host[1:] + "_" + name
+	}
+	return host + "_" + name
+}
+
+// hostConst reports whether c is runtime.GOOS, differs between hosts,
+// or is a constant of this package computed from one that does.
 func (pw *pkgWriter) hostConst(c *types2.Const) bool {
 	if buildcfg.GOOS != "ape" || c.Pkg() == nil {
 		return false
 	}
 	if c.Pkg().Path() == "runtime" && c.Name() == "GOOS" && c.Parent() == c.Pkg().Scope() {
+		return true
+	}
+	if hostValues(c) != nil {
 		return true
 	}
 	if c.Pkg() != pw.curpkg {
@@ -144,10 +182,38 @@ func (w *writer) hostConstExpr(expr syntax.Expr, c *types2.Const) {
 		w.typ(typ)
 		return
 	}
+	if hs := hostValues(c); hs != nil {
+		w.Code(exprAPEConst)
+		w.pos(expr)
+		w.typ(typ)
+		w.Len(len(hs))
+		for _, h := range hs {
+			w.Value(convertConst(h.Val(), typ))
+		}
+		return
+	}
 	init := w.p.constInits[c]
 	if types2.Identical(typ, idealType(w.gd, w.p.typeAndValue(init))) {
 		w.expr(init)
 		return
 	}
 	w.convertExpr(typ, init, false)
+}
+
+// convertConst returns v as a value of typ (an integer constant used as
+// a float, say).
+func convertConst(v constant.Value, typ types2.Type) constant.Value {
+	b, ok := typ.Underlying().(*types2.Basic)
+	if !ok {
+		return v
+	}
+	switch {
+	case b.Info()&types2.IsInteger != 0:
+		return constant.ToInt(v)
+	case b.Info()&types2.IsFloat != 0:
+		return constant.ToFloat(v)
+	case b.Info()&types2.IsComplex != 0:
+		return constant.ToComplex(v)
+	}
+	return v
 }

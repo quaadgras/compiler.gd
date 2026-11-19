@@ -15,7 +15,7 @@ import (
 )
 
 func linux_fillFileStatFromSys(fs *linux_fileStat, name string) {
-	fs.name = filepathlite.Linux_Base(name)
+	fs.name = filepathlite.Base(name)
 	fs.size = fs.sys.Size
 	fs.modTime = time.Unix(fs.sys.Mtim.Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)

@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lookup.go:6:1*/
 package net
 
 import (
@@ -18,7 +19,7 @@ import (
 	
 
 	
-)/*line lookup.go:32:2*//*line lookup.go:60:2*//*line lookup.go:64:32*//*line lookup.go:66:51*//*line lookup.go:77:2*//*line lookup.go:84:51*//*line lookup.go:99:2*//*line lookup.go:112:2*//*line lookup.go:125:2*//*line lookup.go:129:34*//*line lookup.go:170:2*//*line lookup.go:172:73*//*line lookup.go:173:77*//*line lookup.go:180:2*//*line lookup.go:189:2*//*line lookup.go:202:2*//*line lookup.go:216:2*//*line lookup.go:222:2*//*line lookup.go:252:2*//*line lookup.go:274:2*//*line lookup.go:281:2*//*line lookup.go:283:46*//*line lookup.go:293:2*//*line lookup.go:301:2*/
+)/*line lookup.go:34:2*//*line lookup.go:62:2*//*line lookup.go:66:32*//*line lookup.go:68:51*//*line lookup.go:79:2*//*line lookup.go:86:51*//*line lookup.go:101:2*//*line lookup.go:114:2*//*line lookup.go:127:2*//*line lookup.go:131:34*//*line lookup.go:172:2*//*line lookup.go:174:73*//*line lookup.go:175:77*//*line lookup.go:182:2*//*line lookup.go:191:2*//*line lookup.go:204:2*//*line lookup.go:218:2*//*line lookup.go:224:2*//*line lookup.go:254:2*//*line lookup.go:276:2*//*line lookup.go:283:2*//*line lookup.go:285:46*//*line lookup.go:295:2*//*line lookup.go:303:2*/
 
 // lookupIPAddr looks up host using the local resolver and particular network.
 // It returns a slice of that host's IPv4 and IPv6 addresses.
@@ -95,4 +96,4 @@ func (r *Resolver) windows_lookupIPAddr(ctx context.Context, network, host strin
 		}
 		return lookupIPReturn(r.Val, err, r.Shared)
 	}
-}/*line lookup.go:393:2*//*line lookup.go:402:2*//*line lookup.go:410:2*//*line lookup.go:434:2*//*line lookup.go:454:2*//*line lookup.go:478:2*//*line lookup.go:501:2*//*line lookup.go:544:2*//*line lookup.go:557:2*//*line lookup.go:589:2*//*line lookup.go:602:2*//*line lookup.go:629:2*//*line lookup.go:640:2*//*line lookup.go:648:2*//*line lookup.go:664:2*//*line lookup.go:687:2*//*line lookup.go:692:96*//*line lookup.go:715:2*//*line lookup.go:774:2*//*line lookup.go:818:2*//*line lookup.go:860:2*//*line lookup.go:916:2*//*line lookup.go:927:2*/
+}/*line lookup.go:395:2*//*line lookup.go:404:2*//*line lookup.go:412:2*//*line lookup.go:436:2*//*line lookup.go:456:2*//*line lookup.go:480:2*//*line lookup.go:503:2*//*line lookup.go:546:2*//*line lookup.go:559:2*//*line lookup.go:591:2*//*line lookup.go:604:2*//*line lookup.go:631:2*//*line lookup.go:642:2*//*line lookup.go:650:2*//*line lookup.go:666:2*//*line lookup.go:689:2*//*line lookup.go:694:96*//*line lookup.go:717:2*//*line lookup.go:776:2*//*line lookup.go:820:2*//*line lookup.go:862:2*//*line lookup.go:918:2*//*line lookup.go:929:2*/

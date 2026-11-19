@@ -255,7 +255,7 @@ func windows_rootSymlink(r *Root, oldname, newname string) error {
 
 	// Windows treats / and \ as equivalent almost everywhere, but not in symlink targets.
 	// Match os.Symlink behavior and convert / to \.
-	oldname = filepathlite.Windows_FromSlash(oldname)
+	oldname = filepathlite.FromSlash(oldname)
 
 	// CreateSymbolicLinkW converts volume-relative paths into absolute ones.
 	// Do the same.

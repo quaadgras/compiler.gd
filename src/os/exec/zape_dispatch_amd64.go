@@ -5,8 +5,6 @@
 package exec
 
 import (
-	"io"
-	"os"
 	"unsafe"
 )
 
@@ -47,17 +45,17 @@ func lookPath(a0 string) (string, error) {
 	return x0, x1
 }
 
-func (r *Cmd) childStdin() (*os.File, error) {
+func skipStdinCopyError(a0 error) bool {
 	if apehost == apeLinux {
-		x0, x1 := r.linux_childStdin()
-		return x0, x1
+		x0 := linux_skipStdinCopyError(a0)
+		return x0
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := r.freebsd_childStdin()
-		return x0, x1
+		x0 := freebsd_skipStdinCopyError(a0)
+		return x0
 	}
-	x0, x1 := r.windows_childStdin()
-	return x0, x1
+	x0 := windows_skipStdinCopyError(a0)
+	return x0
 }
 
 func (r *Cmd) environ() ([]string, error) {
@@ -70,19 +68,6 @@ func (r *Cmd) environ() ([]string, error) {
 		return x0, x1
 	}
 	x0, x1 := r.windows_environ()
-	return x0, x1
-}
-
-func (r *Cmd) writerDescriptor(a0 io.Writer) (*os.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_writerDescriptor(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.freebsd_writerDescriptor(a0)
-		return x0, x1
-	}
-	x0, x1 := r.windows_writerDescriptor(a0)
 	return x0, x1
 }
 

@@ -6,6 +6,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line hook.go:6:1*/
 package net
 
 import (
@@ -13,7 +14,7 @@ import (
 )
 
 var (
-	/*line hook.go:13:96*/
+	/*line hook.go:15:96*/
 
 	freebsd_testHookLookupIP = func(
 		ctx context.Context,
@@ -26,5 +27,5 @@ var (
 	freebsd_testPreHookSetKeepAlive = func(*freebsd_netFD) {}
 	
 
-	/*line hook.go:30:30*/
+	/*line hook.go:32:30*/
 )

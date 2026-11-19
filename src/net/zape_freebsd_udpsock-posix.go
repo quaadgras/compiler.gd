@@ -25,17 +25,7 @@ func freebsd_sockaddrToUDP(sa syscall.Freebsd_Sockaddr) Addr {
 		return &UDPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *UDPAddr) freebsd_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Freebsd_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Freebsd_AF_INET
-	}
-	return syscall.Freebsd_AF_INET6
-}
+}/*line udpsock_posix.go:33:2*/
 
 func (a *UDPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error) {
 	if a == nil {

@@ -19,19 +19,6 @@ const (
 	apeWindows
 )
 
-func familyString(a0 int) string {
-	if apehost == apeLinux {
-		x0 := linux_familyString(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := freebsd_familyString(a0)
-		return x0
-	}
-	x0 := windows_familyString(a0)
-	return x0
-}
-
 func (r *Switch) Sockets() Sockets {
 	if apehost == apeLinux {
 		x0 := r.Linux_Sockets()

@@ -64,6 +64,7 @@ const (
 	exprReshape
 	exprRuntimeBuiltin // a reference to a runtime function from transformed syntax. Followed by string name, e.g., "panicrangeexit"
 	exprAPEGOOS        // runtime.GOOS under GOOS=ape: the host's, at run time. Followed by the type.
+	exprAPEConst       // a constant that differs between GOOS=ape hosts. Followed by the type, then each host's value.
 )
 
 type codeAssign int

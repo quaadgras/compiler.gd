@@ -157,11 +157,11 @@ func linux_favoriteAddrFamily(network string, laddr, raddr linux_sockaddr, mode 
 		if laddr == nil {
 			return syscall.Linux_AF_INET, false
 		}
-		return laddr.linux_family(), false
+		return laddr.family(), false
 	}
 
-	if (laddr == nil || laddr.linux_family() == syscall.Linux_AF_INET) &&
-		(raddr == nil || raddr.linux_family() == syscall.Linux_AF_INET) {
+	if (laddr == nil || laddr.family() == syscall.Linux_AF_INET) &&
+		(raddr == nil || raddr.family() == syscall.Linux_AF_INET) {
 		return syscall.Linux_AF_INET, false
 	}
 	return syscall.Linux_AF_INET6, false

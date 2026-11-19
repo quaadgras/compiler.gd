@@ -26,17 +26,7 @@ func linux_sockaddrToTCP(sa syscall.Linux_Sockaddr) Addr {
 		return &TCPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *TCPAddr) linux_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Linux_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Linux_AF_INET
-	}
-	return syscall.Linux_AF_INET6
-}
+}/*line tcpsock_posix.go:34:2*/
 
 func (a *TCPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {

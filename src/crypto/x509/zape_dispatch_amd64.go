@@ -5,7 +5,6 @@
 package x509
 
 import (
-	"io/fs"
 	"unsafe"
 )
 
@@ -19,19 +18,6 @@ const (
 	apeFreebsd
 	apeWindows
 )
-
-func isSameDirSymlink(a0 fs.DirEntry, a1 string) bool {
-	if apehost == apeLinux {
-		x0 := linux_isSameDirSymlink(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := freebsd_isSameDirSymlink(a0, a1)
-		return x0
-	}
-	x0 := windows_isSameDirSymlink(a0, a1)
-	return x0
-}
 
 func (r *Certificate) systemVerify(a0 *VerifyOptions) ([][]*Certificate, error) {
 	if apehost == apeLinux {

@@ -17,8 +17,8 @@
 package filepath
 
 import (
-	
-	
+	"errors"
+	"internal/bytealg"
 	"internal/filepathlite"
 	"io/fs"
 	"os"
@@ -171,7 +171,88 @@ func unixAbs(path string) (string, error) {
 		return "", err
 	}
 	return Join(wd, path), nil
-}/*line path.go:257:2*/
+}
+
+// Rel returns a relative path that is lexically equivalent to targPath when
+// joined to basePath with an intervening separator. That is,
+// [Join](basePath, Rel(basePath, targPath)) is equivalent to targPath itself.
+//
+// The returned path will always be relative to basePath, even if basePath and
+// targPath share no elements. Rel calls [Clean] on the result.
+//
+// An error is returned if targPath can't be made relative to basePath
+// or if knowing the current working directory would be necessary to compute it.
+func Rel(basePath, targPath string) (string, error) {
+	baseVol := VolumeName(basePath)
+	targVol := VolumeName(targPath)
+	base := Clean(basePath)
+	targ := Clean(targPath)
+	if sameWord(targ, base) {
+		return ".", nil
+	}
+	base = base[len(baseVol):]
+	targ = targ[len(targVol):]
+	if base == "." {
+		base = ""
+	} else if base == "" && filepathlite.VolumeNameLen(baseVol) > 2 /* isUNC */ {
+		// Treat any targetpath matching `\\host\share` basePath as absolute path.
+		base = string(Separator)
+	}
+
+	// Can't use IsAbs - `\a` and `a` are both relative in Windows.
+	baseSlashed := len(base) > 0 && base[0] == Separator
+	targSlashed := len(targ) > 0 && targ[0] == Separator
+	if baseSlashed != targSlashed || !sameWord(baseVol, targVol) {
+		return "", errors.New("Rel: can't make " + targPath + " relative to " + basePath)
+	}
+	// Position base[b0:bi] and targ[t0:ti] at the first differing elements.
+	bl := len(base)
+	tl := len(targ)
+	var b0, bi, t0, ti int
+	for {
+		for bi < bl && base[bi] != Separator {
+			bi++
+		}
+		for ti < tl && targ[ti] != Separator {
+			ti++
+		}
+		if !sameWord(targ[t0:ti], base[b0:bi]) {
+			break
+		}
+		if bi < bl {
+			bi++
+		}
+		if ti < tl {
+			ti++
+		}
+		b0 = bi
+		t0 = ti
+	}
+	if base[b0:bi] == ".." {
+		return "", errors.New("Rel: can't make " + targPath + " relative to " + basePath)
+	}
+	if b0 != bl {
+		// Base elements left. Must go up before going down.
+		seps := bytealg.CountString(base[b0:bl], Separator)
+		size := 2 + seps*3
+		if tl != t0 {
+			size += 1 + tl - t0
+		}
+		buf := make([]byte, size)
+		n := copy(buf, "..")
+		for i := 0; i < seps; i++ {
+			buf[n] = Separator
+			copy(buf[n+1:], "..")
+			n += 3
+		}
+		if t0 != tl {
+			buf[n] = Separator
+			copy(buf[n+1:], targ[t0:])
+		}
+		return Clean(string(buf)), nil
+	}
+	return targ[t0:], nil
+}
 
 // SkipDir is used as a return value from [WalkFunc] to indicate that
 // the directory named in the call is to be skipped. It is not returned

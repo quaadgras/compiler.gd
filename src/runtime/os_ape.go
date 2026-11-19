@@ -37,6 +37,15 @@ func apeGOOS() string {
 	return apeGOOSNames[apehost]
 }
 
+// apeHost is the index of the host in internal/syslist.APEHosts: the
+// compiler compiles a use of a constant that differs between hosts as
+// the element apeHost of its hosts' values.
+//
+//go:nosplit
+func apeHost() int {
+	return int(apehost) - 1
+}
+
 // apeinit sets what differs between hosts. args calls it first.
 //
 //go:nosplit

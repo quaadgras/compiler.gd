@@ -73,11 +73,7 @@ func linux_sockaddrToUnixpacket(sa syscall.Linux_Sockaddr) Addr {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
 	return nil
-}/*line unixsock_posix.go:84:2*/
-
-func (a *UnixAddr) linux_family() int {
-	return syscall.Linux_AF_UNIX
-}
+}/*line unixsock_posix.go:84:2*//*line unixsock_posix.go:88:2*/
 
 func (a *UnixAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	if a == nil {

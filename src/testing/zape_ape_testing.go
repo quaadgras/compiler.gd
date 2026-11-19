@@ -1586,7 +1586,63 @@ func (c *common) TempDir() string {
 		c.Fatalf("TempDir: %v", err)
 	}
 	return dir
-}/*line testing.go:1642:2*/
+}
+
+func (c *common) makeTempDir() (string, error) {
+	// Use a single parent directory for all the temporary directories
+	// created by a test, each numbered sequentially.
+	c.tempDirMu.Lock()
+	var nonExistent bool
+	if c.tempDir == "" { // Usually the case with js/wasm
+		nonExistent = true
+	} else {
+		_, err := os.Stat(c.tempDir)
+		nonExistent = os.IsNotExist(err)
+		if err != nil && !nonExistent {
+			return "", err
+		}
+	}
+
+	if nonExistent {
+		c.Helper()
+
+		pattern := c.Name()
+		// Limit length of file names on disk.
+		// Invalid runes from slicing are dropped by strings.Map below.
+		pattern = pattern[:min(len(pattern), 64)]
+
+		// Drop unusual characters (such as path separators or
+		// characters interacting with globs) from the directory name to
+		// avoid surprising os.MkdirTemp behavior.
+		const allowed = "!#$%&()+,-.=@^_{}~ "
+		pattern = removeSymbolsExcept(pattern, allowed)
+
+		c.tempDir, c.tempDirErr = os.MkdirTemp(os.Getenv("GOTMPDIR"), pattern)
+		if c.tempDirErr == nil {
+			c.Cleanup(func() {
+				if err := removeAll(c.tempDir); err != nil {
+					c.Errorf("TempDir RemoveAll cleanup: %v", err)
+				}
+			})
+		}
+	}
+
+	if c.tempDirErr == nil {
+		c.tempDirSeq++
+	}
+	seq := c.tempDirSeq
+	c.tempDirMu.Unlock()
+
+	if c.tempDirErr != nil {
+		return "", c.tempDirErr
+	}
+
+	dir := fmt.Sprintf("%s%c%03d", c.tempDir, os.PathSeparator, seq)
+	if err := os.Mkdir(dir, 0o777); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
 
 // removeAll is like os.RemoveAll, but retries Windows "Access is denied."
 // errors up to an arbitrary timeout.
@@ -2858,7 +2914,33 @@ func (m *M) writeProfiles() {
 	if CoverMode() != "" {
 		coverReport()
 	}
-}/*line testing.go:2940:2*/
+}
+
+// toOutputDir returns the file name relocated, if required, to outputDir.
+// Simple implementation to avoid pulling in path/filepath.
+func toOutputDir(path string) string {
+	if *outputDir == "" || path == "" {
+		return path
+	}
+	// On Windows, it's clumsy, but we can be almost always correct
+	// by just looking for a drive letter and a colon.
+	// Absolute paths always have a drive letter (ignoring UNC).
+	// Problem: if path == "C:A" and outputdir == "C:\Go" it's unclear
+	// what to do, but even then path/filepath doesn't help.
+	// TODO: Worth doing better? Probably not, because we're here only
+	// under the management of go test.
+	if runtime.GOOS == "windows" && len(path) >= 2 {
+		letter, colon := path[0], path[1]
+		if ('a' <= letter && letter <= 'z' || 'A' <= letter && letter <= 'Z') && colon == ':' {
+			// If path starts with a drive letter we're stuck with it regardless.
+			return path
+		}
+	}
+	if os.IsPathSeparator(path[0]) {
+		return path
+	}
+	return fmt.Sprintf("%s%c%s", *outputDir, os.PathSeparator, path)
+}
 
 // startAlarm starts an alarm if requested.
 func (m *M) startAlarm() time.Time {

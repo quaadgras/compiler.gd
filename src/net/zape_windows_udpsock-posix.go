@@ -25,17 +25,7 @@ func windows_sockaddrToUDP(sa syscall.Windows_Sockaddr) Addr {
 		return &UDPAddr{IP: sa.Addr[0:], Port: sa.Port, Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return nil
-}
-
-func (a *UDPAddr) windows_family() int {
-	if a == nil || len(a.IP) <= IPv4len {
-		return syscall.Windows_AF_INET
-	}
-	if a.IP.To4() != nil {
-		return syscall.Windows_AF_INET
-	}
-	return syscall.Windows_AF_INET6
-}
+}/*line udpsock_posix.go:33:2*/
 
 func (a *UDPAddr) windows_sockaddr(family int) (syscall.Windows_Sockaddr, error) {
 	if a == nil {

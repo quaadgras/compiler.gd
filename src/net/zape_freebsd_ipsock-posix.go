@@ -157,11 +157,11 @@ func freebsd_favoriteAddrFamily(network string, laddr, raddr freebsd_sockaddr, m
 		if laddr == nil {
 			return syscall.Freebsd_AF_INET, false
 		}
-		return laddr.freebsd_family(), false
+		return laddr.family(), false
 	}
 
-	if (laddr == nil || laddr.freebsd_family() == syscall.Freebsd_AF_INET) &&
-		(raddr == nil || raddr.freebsd_family() == syscall.Freebsd_AF_INET) {
+	if (laddr == nil || laddr.family() == syscall.Freebsd_AF_INET) &&
+		(raddr == nil || raddr.family() == syscall.Freebsd_AF_INET) {
 		return syscall.Freebsd_AF_INET, false
 	}
 	return syscall.Freebsd_AF_INET6, false

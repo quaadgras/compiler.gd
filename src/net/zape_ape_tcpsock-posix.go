@@ -14,7 +14,17 @@ import (
 	"io"
 	"os"
 	"syscall"
-)/*line tcpsock_posix.go:24:2*//*line tcpsock_posix.go:34:2*//*line tcpsock_posix.go:41:2*//*line tcpsock_posix.go:45:2*/
+)/*line tcpsock_posix.go:24:2*/
+
+func (a *TCPAddr) family() int {
+	if a == nil || len(a.IP) <= IPv4len {
+		return syscall.AF_INET
+	}
+	if a.IP.To4() != nil {
+		return syscall.AF_INET
+	}
+	return syscall.AF_INET6
+}/*line tcpsock_posix.go:41:2*//*line tcpsock_posix.go:45:2*/
 
 func (c *TCPConn) readFrom(r io.Reader) (int64, error) {
 	if n, err, handled := spliceFrom(c.fd, r); handled {

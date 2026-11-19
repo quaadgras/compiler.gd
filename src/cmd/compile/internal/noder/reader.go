@@ -2743,6 +2743,20 @@ func (r *reader) expr() (res ir.Node) {
 		builtin := typecheck.LookupRuntime(r.gd, r.String())
 		return builtin
 
+	case exprAPEConst:
+		// [N]T{v0, v1, ...}[runtime.apeHost()]
+		pos := r.pos()
+		typ := r.typ()
+		n := r.Len()
+		elems := make([]ir.Node, n)
+		for i := range elems {
+			elems[i] = ir.NewBasicLit(r.gd, pos, typ, FixValue(r.gd, typ, r.Value()))
+		}
+		lit := ir.NewCompLitExpr(r.gd, pos, ir.OCOMPLIT, types.NewArray(typ, int64(n)), elems)
+		fn := typecheck.LookupRuntime(r.gd, "apeHost")
+		idx := typecheck.Call(r.gd, pos, fn, nil, false)
+		return typecheck.Expr(r.gd, ir.NewIndexExpr(r.gd, pos, lit, idx))
+
 	case exprAPEGOOS:
 		pos := r.pos()
 		typ := r.typ()

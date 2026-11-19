@@ -157,11 +157,11 @@ func windows_favoriteAddrFamily(network string, laddr, raddr windows_sockaddr, m
 		if laddr == nil {
 			return syscall.Windows_AF_INET, false
 		}
-		return laddr.windows_family(), false
+		return laddr.family(), false
 	}
 
-	if (laddr == nil || laddr.windows_family() == syscall.Windows_AF_INET) &&
-		(raddr == nil || raddr.windows_family() == syscall.Windows_AF_INET) {
+	if (laddr == nil || laddr.family() == syscall.Windows_AF_INET) &&
+		(raddr == nil || raddr.family() == syscall.Windows_AF_INET) {
 		return syscall.Windows_AF_INET, false
 	}
 	return syscall.Windows_AF_INET6, false

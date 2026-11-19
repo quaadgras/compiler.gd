@@ -27,7 +27,11 @@ func sotypeToNet(sotype int) string {
 	default:
 		panic("sotypeToNet unknown socket type")
 	}
-}/*line unixsock_posix.go:88:2*//*line unixsock_posix.go:95:2*//*line unixsock_posix.go:99:2*//*line unixsock_posix.go:111:2*//*line unixsock_posix.go:127:2*//*line unixsock_posix.go:141:2*//*line unixsock_posix.go:155:2*//*line unixsock_posix.go:169:2*/
+}
+
+func (a *UnixAddr) family() int {
+	return syscall.AF_UNIX
+}/*line unixsock_posix.go:95:2*//*line unixsock_posix.go:99:2*//*line unixsock_posix.go:111:2*//*line unixsock_posix.go:127:2*//*line unixsock_posix.go:141:2*//*line unixsock_posix.go:155:2*//*line unixsock_posix.go:169:2*/
 
 func (ln *UnixListener) accept() (*UnixConn, error) {
 	fd, err := ln.fd.accept()

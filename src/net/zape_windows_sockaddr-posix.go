@@ -20,7 +20,7 @@ type windows_sockaddr interface {
 
 	// family returns the platform-dependent address family
 	// identifier.
-	windows_family() int
+	family() int
 
 	// isWildcard reports whether the address is a wildcard
 	// address.

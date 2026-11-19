@@ -32,16 +32,8 @@ var testHookSetKeepAlive func(KeepAliveConfig) = func(KeepAliveConfig) {}
 
 var testHookStepTime func() = func() {}
 
-// cgoAvailable differs between hosts.
-var cgoAvailable bool = func() bool {
-	if apehost == apeLinux {
-		return bool(linux_cgoAvailable)
-	}
-	if apehost == apeFreebsd {
-		return bool(freebsd_cgoAvailable)
-	}
-	return bool(windows_cgoAvailable)
-}()
+// cgoAvailable differs between hosts: uses are the host's.
+const cgoAvailable = false
 
 func concurrentThreadsLimit() int {
 	if apehost == apeLinux {
@@ -355,19 +347,6 @@ func spliceTo(a0 io.Writer, a1 *netFD) (int64, error, bool) {
 	return x0, x1, x2
 }
 
-func (r *IPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_family()
-		return x0
-	}
-	x0 := r.windows_family()
-	return x0
-}
-
 func (r *IPAddr) toLocal(a0 string) sockaddr {
 	if apehost == apeLinux {
 		x0 := r.linux_toLocal(a0)
@@ -641,19 +620,6 @@ func (r *Resolver) lookupTXT(a0 context.Context, a1 string) ([]string, error) {
 	return x0, x1
 }
 
-func (r *TCPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_family()
-		return x0
-	}
-	x0 := r.windows_family()
-	return x0
-}
-
 func (r *TCPAddr) toLocal(a0 string) sockaddr {
 	if apehost == apeLinux {
 		x0 := r.linux_toLocal(a0)
@@ -862,19 +828,6 @@ func (r *TCPListener) accept() (*TCPConn, error) {
 	return x0, x1
 }
 
-func (r *UDPAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_family()
-		return x0
-	}
-	x0 := r.windows_family()
-	return x0
-}
-
 func (r *UDPAddr) toLocal(a0 string) sockaddr {
 	if apehost == apeLinux {
 		x0 := r.linux_toLocal(a0)
@@ -1081,19 +1034,6 @@ func (r *UDPConn) writeToAddrPort(a0 []byte, a1 netip.AddrPort) (int, error) {
 	}
 	x0, x1 := r.windows_writeToAddrPort(a0, a1)
 	return x0, x1
-}
-
-func (r *UnixAddr) family() int {
-	if apehost == apeLinux {
-		x0 := r.linux_family()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_family()
-		return x0
-	}
-	x0 := r.windows_family()
-	return x0
 }
 
 func (r *UnixAddr) toLocal(a0 string) sockaddr {

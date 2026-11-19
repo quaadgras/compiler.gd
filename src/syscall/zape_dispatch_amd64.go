@@ -52,970 +52,274 @@ var ioSync int64
 
 const AF_INET = 2
 
-// AF_INET6 differs between hosts.
-var AF_INET6 int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_AF_INET6)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_AF_INET6)
-	}
-	return int(Windows_AF_INET6)
-}()
+// AF_INET6 differs between hosts: uses are the host's.
+const AF_INET6 = 10
 
 const AF_UNIX = 1
 
 const AF_UNSPEC = 0
 
-// E2BIG differs between hosts.
-var E2BIG Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_E2BIG
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_E2BIG
-	}
-	return Windows_E2BIG
-}()
+// E2BIG differs between hosts: uses are the host's.
+const E2BIG Errno = 7
 
-// EACCES differs between hosts.
-var EACCES Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EACCES
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EACCES
-	}
-	return Windows_EACCES
-}()
+// EACCES differs between hosts: uses are the host's.
+const EACCES Errno = 13
 
-// EADDRINUSE differs between hosts.
-var EADDRINUSE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EADDRINUSE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EADDRINUSE
-	}
-	return Windows_EADDRINUSE
-}()
+// EADDRINUSE differs between hosts: uses are the host's.
+const EADDRINUSE Errno = 98
 
-// EADDRNOTAVAIL differs between hosts.
-var EADDRNOTAVAIL Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EADDRNOTAVAIL
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EADDRNOTAVAIL
-	}
-	return Windows_EADDRNOTAVAIL
-}()
+// EADDRNOTAVAIL differs between hosts: uses are the host's.
+const EADDRNOTAVAIL Errno = 99
 
-// EAFNOSUPPORT differs between hosts.
-var EAFNOSUPPORT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EAFNOSUPPORT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EAFNOSUPPORT
-	}
-	return Windows_EAFNOSUPPORT
-}()
+// EAFNOSUPPORT differs between hosts: uses are the host's.
+const EAFNOSUPPORT Errno = 97
 
-// EAGAIN differs between hosts.
-var EAGAIN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EAGAIN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EAGAIN
-	}
-	return Windows_EAGAIN
-}()
+// EAGAIN differs between hosts: uses are the host's.
+const EAGAIN Errno = 11
 
-// EALREADY differs between hosts.
-var EALREADY Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EALREADY
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EALREADY
-	}
-	return Windows_EALREADY
-}()
+// EALREADY differs between hosts: uses are the host's.
+const EALREADY Errno = 114
 
-// EBADF differs between hosts.
-var EBADF Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EBADF
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EBADF
-	}
-	return Windows_EBADF
-}()
+// EBADF differs between hosts: uses are the host's.
+const EBADF Errno = 9
 
-// EBADMSG differs between hosts.
-var EBADMSG Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EBADMSG
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EBADMSG
-	}
-	return Windows_EBADMSG
-}()
+// EBADMSG differs between hosts: uses are the host's.
+const EBADMSG Errno = 74
 
-// EBUSY differs between hosts.
-var EBUSY Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EBUSY
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EBUSY
-	}
-	return Windows_EBUSY
-}()
+// EBUSY differs between hosts: uses are the host's.
+const EBUSY Errno = 16
 
-// ECANCELED differs between hosts.
-var ECANCELED Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ECANCELED
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ECANCELED
-	}
-	return Windows_ECANCELED
-}()
+// ECANCELED differs between hosts: uses are the host's.
+const ECANCELED Errno = 125
 
-// ECHILD differs between hosts.
-var ECHILD Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ECHILD
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ECHILD
-	}
-	return Windows_ECHILD
-}()
+// ECHILD differs between hosts: uses are the host's.
+const ECHILD Errno = 10
 
-// ECONNABORTED differs between hosts.
-var ECONNABORTED Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ECONNABORTED
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ECONNABORTED
-	}
-	return Windows_ECONNABORTED
-}()
+// ECONNABORTED differs between hosts: uses are the host's.
+const ECONNABORTED Errno = 103
 
-// ECONNREFUSED differs between hosts.
-var ECONNREFUSED Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ECONNREFUSED
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ECONNREFUSED
-	}
-	return Windows_ECONNREFUSED
-}()
+// ECONNREFUSED differs between hosts: uses are the host's.
+const ECONNREFUSED Errno = 111
 
-// ECONNRESET differs between hosts.
-var ECONNRESET Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ECONNRESET
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ECONNRESET
-	}
-	return Windows_ECONNRESET
-}()
+// ECONNRESET differs between hosts: uses are the host's.
+const ECONNRESET Errno = 104
 
-// EDEADLK differs between hosts.
-var EDEADLK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EDEADLK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EDEADLK
-	}
-	return Windows_EDEADLK
-}()
+// EDEADLK differs between hosts: uses are the host's.
+const EDEADLK Errno = 35
 
-// EDESTADDRREQ differs between hosts.
-var EDESTADDRREQ Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EDESTADDRREQ
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EDESTADDRREQ
-	}
-	return Windows_EDESTADDRREQ
-}()
+// EDESTADDRREQ differs between hosts: uses are the host's.
+const EDESTADDRREQ Errno = 89
 
-// EDOM differs between hosts.
-var EDOM Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EDOM
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EDOM
-	}
-	return Windows_EDOM
-}()
+// EDOM differs between hosts: uses are the host's.
+const EDOM Errno = 33
 
-// EDQUOT differs between hosts.
-var EDQUOT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EDQUOT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EDQUOT
-	}
-	return Windows_EDQUOT
-}()
+// EDQUOT differs between hosts: uses are the host's.
+const EDQUOT Errno = 122
 
-// EEXIST differs between hosts.
-var EEXIST Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EEXIST
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EEXIST
-	}
-	return Windows_EEXIST
-}()
+// EEXIST differs between hosts: uses are the host's.
+const EEXIST Errno = 17
 
-// EFAULT differs between hosts.
-var EFAULT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EFAULT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EFAULT
-	}
-	return Windows_EFAULT
-}()
+// EFAULT differs between hosts: uses are the host's.
+const EFAULT Errno = 14
 
-// EFBIG differs between hosts.
-var EFBIG Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EFBIG
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EFBIG
-	}
-	return Windows_EFBIG
-}()
+// EFBIG differs between hosts: uses are the host's.
+const EFBIG Errno = 27
 
-// EHOSTDOWN differs between hosts.
-var EHOSTDOWN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EHOSTDOWN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EHOSTDOWN
-	}
-	return Windows_EHOSTDOWN
-}()
+// EHOSTDOWN differs between hosts: uses are the host's.
+const EHOSTDOWN Errno = 112
 
-// EHOSTUNREACH differs between hosts.
-var EHOSTUNREACH Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EHOSTUNREACH
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EHOSTUNREACH
-	}
-	return Windows_EHOSTUNREACH
-}()
+// EHOSTUNREACH differs between hosts: uses are the host's.
+const EHOSTUNREACH Errno = 113
 
-// EIDRM differs between hosts.
-var EIDRM Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EIDRM
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EIDRM
-	}
-	return Windows_EIDRM
-}()
+// EIDRM differs between hosts: uses are the host's.
+const EIDRM Errno = 43
 
-// EILSEQ differs between hosts.
-var EILSEQ Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EILSEQ
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EILSEQ
-	}
-	return Windows_EILSEQ
-}()
+// EILSEQ differs between hosts: uses are the host's.
+const EILSEQ Errno = 84
 
-// EINPROGRESS differs between hosts.
-var EINPROGRESS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EINPROGRESS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EINPROGRESS
-	}
-	return Windows_EINPROGRESS
-}()
+// EINPROGRESS differs between hosts: uses are the host's.
+const EINPROGRESS Errno = 115
 
-// EINTR differs between hosts.
-var EINTR Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EINTR
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EINTR
-	}
-	return Windows_EINTR
-}()
+// EINTR differs between hosts: uses are the host's.
+const EINTR Errno = 4
 
-// EINVAL differs between hosts.
-var EINVAL Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EINVAL
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EINVAL
-	}
-	return Windows_EINVAL
-}()
+// EINVAL differs between hosts: uses are the host's.
+const EINVAL Errno = 22
 
-// EIO differs between hosts.
-var EIO Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EIO
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EIO
-	}
-	return Windows_EIO
-}()
+// EIO differs between hosts: uses are the host's.
+const EIO Errno = 5
 
-// EISCONN differs between hosts.
-var EISCONN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EISCONN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EISCONN
-	}
-	return Windows_EISCONN
-}()
+// EISCONN differs between hosts: uses are the host's.
+const EISCONN Errno = 106
 
-// EISDIR differs between hosts.
-var EISDIR Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EISDIR
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EISDIR
-	}
-	return Windows_EISDIR
-}()
+// EISDIR differs between hosts: uses are the host's.
+const EISDIR Errno = 21
 
-// ELOOP differs between hosts.
-var ELOOP Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ELOOP
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ELOOP
-	}
-	return Windows_ELOOP
-}()
+// ELOOP differs between hosts: uses are the host's.
+const ELOOP Errno = 40
 
-// EMFILE differs between hosts.
-var EMFILE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EMFILE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EMFILE
-	}
-	return Windows_EMFILE
-}()
+// EMFILE differs between hosts: uses are the host's.
+const EMFILE Errno = 24
 
-// EMLINK differs between hosts.
-var EMLINK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EMLINK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EMLINK
-	}
-	return Windows_EMLINK
-}()
+// EMLINK differs between hosts: uses are the host's.
+const EMLINK Errno = 31
 
-// EMSGSIZE differs between hosts.
-var EMSGSIZE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EMSGSIZE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EMSGSIZE
-	}
-	return Windows_EMSGSIZE
-}()
+// EMSGSIZE differs between hosts: uses are the host's.
+const EMSGSIZE Errno = 90
 
-// EMULTIHOP differs between hosts.
-var EMULTIHOP Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EMULTIHOP
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EMULTIHOP
-	}
-	return Windows_EMULTIHOP
-}()
+// EMULTIHOP differs between hosts: uses are the host's.
+const EMULTIHOP Errno = 72
 
-// ENAMETOOLONG differs between hosts.
-var ENAMETOOLONG Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENAMETOOLONG
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENAMETOOLONG
-	}
-	return Windows_ENAMETOOLONG
-}()
+// ENAMETOOLONG differs between hosts: uses are the host's.
+const ENAMETOOLONG Errno = 36
 
-// ENETDOWN differs between hosts.
-var ENETDOWN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENETDOWN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENETDOWN
-	}
-	return Windows_ENETDOWN
-}()
+// ENETDOWN differs between hosts: uses are the host's.
+const ENETDOWN Errno = 100
 
-// ENETRESET differs between hosts.
-var ENETRESET Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENETRESET
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENETRESET
-	}
-	return Windows_ENETRESET
-}()
+// ENETRESET differs between hosts: uses are the host's.
+const ENETRESET Errno = 102
 
-// ENETUNREACH differs between hosts.
-var ENETUNREACH Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENETUNREACH
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENETUNREACH
-	}
-	return Windows_ENETUNREACH
-}()
+// ENETUNREACH differs between hosts: uses are the host's.
+const ENETUNREACH Errno = 101
 
-// ENFILE differs between hosts.
-var ENFILE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENFILE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENFILE
-	}
-	return Windows_ENFILE
-}()
+// ENFILE differs between hosts: uses are the host's.
+const ENFILE Errno = 23
 
-// ENOBUFS differs between hosts.
-var ENOBUFS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOBUFS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOBUFS
-	}
-	return Windows_ENOBUFS
-}()
+// ENOBUFS differs between hosts: uses are the host's.
+const ENOBUFS Errno = 105
 
-// ENODEV differs between hosts.
-var ENODEV Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENODEV
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENODEV
-	}
-	return Windows_ENODEV
-}()
+// ENODEV differs between hosts: uses are the host's.
+const ENODEV Errno = 19
 
 const ENOENT Errno = 2
 
-// ENOEXEC differs between hosts.
-var ENOEXEC Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOEXEC
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOEXEC
-	}
-	return Windows_ENOEXEC
-}()
+// ENOEXEC differs between hosts: uses are the host's.
+const ENOEXEC Errno = 8
 
-// ENOLCK differs between hosts.
-var ENOLCK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOLCK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOLCK
-	}
-	return Windows_ENOLCK
-}()
+// ENOLCK differs between hosts: uses are the host's.
+const ENOLCK Errno = 37
 
-// ENOLINK differs between hosts.
-var ENOLINK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOLINK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOLINK
-	}
-	return Windows_ENOLINK
-}()
+// ENOLINK differs between hosts: uses are the host's.
+const ENOLINK Errno = 67
 
-// ENOMEM differs between hosts.
-var ENOMEM Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOMEM
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOMEM
-	}
-	return Windows_ENOMEM
-}()
+// ENOMEM differs between hosts: uses are the host's.
+const ENOMEM Errno = 12
 
-// ENOMSG differs between hosts.
-var ENOMSG Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOMSG
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOMSG
-	}
-	return Windows_ENOMSG
-}()
+// ENOMSG differs between hosts: uses are the host's.
+const ENOMSG Errno = 42
 
-// ENOPROTOOPT differs between hosts.
-var ENOPROTOOPT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOPROTOOPT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOPROTOOPT
-	}
-	return Windows_ENOPROTOOPT
-}()
+// ENOPROTOOPT differs between hosts: uses are the host's.
+const ENOPROTOOPT Errno = 92
 
-// ENOSPC differs between hosts.
-var ENOSPC Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOSPC
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOSPC
-	}
-	return Windows_ENOSPC
-}()
+// ENOSPC differs between hosts: uses are the host's.
+const ENOSPC Errno = 28
 
-// ENOSYS differs between hosts.
-var ENOSYS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOSYS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOSYS
-	}
-	return Windows_ENOSYS
-}()
+// ENOSYS differs between hosts: uses are the host's.
+const ENOSYS Errno = 38
 
-// ENOTBLK differs between hosts.
-var ENOTBLK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTBLK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTBLK
-	}
-	return Windows_ENOTBLK
-}()
+// ENOTBLK differs between hosts: uses are the host's.
+const ENOTBLK Errno = 15
 
-// ENOTCONN differs between hosts.
-var ENOTCONN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTCONN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTCONN
-	}
-	return Windows_ENOTCONN
-}()
+// ENOTCONN differs between hosts: uses are the host's.
+const ENOTCONN Errno = 107
 
-// ENOTDIR differs between hosts.
-var ENOTDIR Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTDIR
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTDIR
-	}
-	return Windows_ENOTDIR
-}()
+// ENOTDIR differs between hosts: uses are the host's.
+const ENOTDIR Errno = 20
 
-// ENOTEMPTY differs between hosts.
-var ENOTEMPTY Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTEMPTY
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTEMPTY
-	}
-	return Windows_ENOTEMPTY
-}()
+// ENOTEMPTY differs between hosts: uses are the host's.
+const ENOTEMPTY Errno = 39
 
-// ENOTRECOVERABLE differs between hosts.
-var ENOTRECOVERABLE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTRECOVERABLE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTRECOVERABLE
-	}
-	return Windows_ENOTRECOVERABLE
-}()
+// ENOTRECOVERABLE differs between hosts: uses are the host's.
+const ENOTRECOVERABLE Errno = 131
 
-// ENOTSOCK differs between hosts.
-var ENOTSOCK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTSOCK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTSOCK
-	}
-	return Windows_ENOTSOCK
-}()
+// ENOTSOCK differs between hosts: uses are the host's.
+const ENOTSOCK Errno = 88
 
-// ENOTSUP differs between hosts.
-var ENOTSUP Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTSUP
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTSUP
-	}
-	return Windows_ENOTSUP
-}()
+// ENOTSUP differs between hosts: uses are the host's.
+const ENOTSUP Errno = 95
 
-// ENOTTY differs between hosts.
-var ENOTTY Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENOTTY
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENOTTY
-	}
-	return Windows_ENOTTY
-}()
+// ENOTTY differs between hosts: uses are the host's.
+const ENOTTY Errno = 25
 
-// ENXIO differs between hosts.
-var ENXIO Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ENXIO
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ENXIO
-	}
-	return Windows_ENXIO
-}()
+// ENXIO differs between hosts: uses are the host's.
+const ENXIO Errno = 6
 
-// EOPNOTSUPP differs between hosts.
-var EOPNOTSUPP Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EOPNOTSUPP
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EOPNOTSUPP
-	}
-	return Windows_EOPNOTSUPP
-}()
+// EOPNOTSUPP differs between hosts: uses are the host's.
+const EOPNOTSUPP Errno = 95
 
-// EOVERFLOW differs between hosts.
-var EOVERFLOW Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EOVERFLOW
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EOVERFLOW
-	}
-	return Windows_EOVERFLOW
-}()
+// EOVERFLOW differs between hosts: uses are the host's.
+const EOVERFLOW Errno = 75
 
-// EOWNERDEAD differs between hosts.
-var EOWNERDEAD Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EOWNERDEAD
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EOWNERDEAD
-	}
-	return Windows_EOWNERDEAD
-}()
+// EOWNERDEAD differs between hosts: uses are the host's.
+const EOWNERDEAD Errno = 130
 
-// EPERM differs between hosts.
-var EPERM Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPERM
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPERM
-	}
-	return Windows_EPERM
-}()
+// EPERM differs between hosts: uses are the host's.
+const EPERM Errno = 1
 
-// EPFNOSUPPORT differs between hosts.
-var EPFNOSUPPORT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPFNOSUPPORT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPFNOSUPPORT
-	}
-	return Windows_EPFNOSUPPORT
-}()
+// EPFNOSUPPORT differs between hosts: uses are the host's.
+const EPFNOSUPPORT Errno = 96
 
-// EPIPE differs between hosts.
-var EPIPE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPIPE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPIPE
-	}
-	return Windows_EPIPE
-}()
+// EPIPE differs between hosts: uses are the host's.
+const EPIPE Errno = 32
 
-// EPROTO differs between hosts.
-var EPROTO Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPROTO
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPROTO
-	}
-	return Windows_EPROTO
-}()
+// EPROTO differs between hosts: uses are the host's.
+const EPROTO Errno = 71
 
-// EPROTONOSUPPORT differs between hosts.
-var EPROTONOSUPPORT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPROTONOSUPPORT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPROTONOSUPPORT
-	}
-	return Windows_EPROTONOSUPPORT
-}()
+// EPROTONOSUPPORT differs between hosts: uses are the host's.
+const EPROTONOSUPPORT Errno = 93
 
-// EPROTOTYPE differs between hosts.
-var EPROTOTYPE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EPROTOTYPE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EPROTOTYPE
-	}
-	return Windows_EPROTOTYPE
-}()
+// EPROTOTYPE differs between hosts: uses are the host's.
+const EPROTOTYPE Errno = 91
 
-// ERANGE differs between hosts.
-var ERANGE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ERANGE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ERANGE
-	}
-	return Windows_ERANGE
-}()
+// ERANGE differs between hosts: uses are the host's.
+const ERANGE Errno = 34
 
-// EREMOTE differs between hosts.
-var EREMOTE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EREMOTE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EREMOTE
-	}
-	return Windows_EREMOTE
-}()
+// EREMOTE differs between hosts: uses are the host's.
+const EREMOTE Errno = 66
 
-// EROFS differs between hosts.
-var EROFS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EROFS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EROFS
-	}
-	return Windows_EROFS
-}()
+// EROFS differs between hosts: uses are the host's.
+const EROFS Errno = 30
 
-// ESHUTDOWN differs between hosts.
-var ESHUTDOWN Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ESHUTDOWN
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ESHUTDOWN
-	}
-	return Windows_ESHUTDOWN
-}()
+// ESHUTDOWN differs between hosts: uses are the host's.
+const ESHUTDOWN Errno = 108
 
-// ESOCKTNOSUPPORT differs between hosts.
-var ESOCKTNOSUPPORT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ESOCKTNOSUPPORT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ESOCKTNOSUPPORT
-	}
-	return Windows_ESOCKTNOSUPPORT
-}()
+// ESOCKTNOSUPPORT differs between hosts: uses are the host's.
+const ESOCKTNOSUPPORT Errno = 94
 
-// ESPIPE differs between hosts.
-var ESPIPE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ESPIPE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ESPIPE
-	}
-	return Windows_ESPIPE
-}()
+// ESPIPE differs between hosts: uses are the host's.
+const ESPIPE Errno = 29
 
-// ESRCH differs between hosts.
-var ESRCH Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ESRCH
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ESRCH
-	}
-	return Windows_ESRCH
-}()
+// ESRCH differs between hosts: uses are the host's.
+const ESRCH Errno = 3
 
-// ESTALE differs between hosts.
-var ESTALE Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ESTALE
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ESTALE
-	}
-	return Windows_ESTALE
-}()
+// ESTALE differs between hosts: uses are the host's.
+const ESTALE Errno = 116
 
-// ETIMEDOUT differs between hosts.
-var ETIMEDOUT Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ETIMEDOUT
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ETIMEDOUT
-	}
-	return Windows_ETIMEDOUT
-}()
+// ETIMEDOUT differs between hosts: uses are the host's.
+const ETIMEDOUT Errno = 110
 
-// ETOOMANYREFS differs between hosts.
-var ETOOMANYREFS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ETOOMANYREFS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ETOOMANYREFS
-	}
-	return Windows_ETOOMANYREFS
-}()
+// ETOOMANYREFS differs between hosts: uses are the host's.
+const ETOOMANYREFS Errno = 109
 
-// ETXTBSY differs between hosts.
-var ETXTBSY Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_ETXTBSY
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_ETXTBSY
-	}
-	return Windows_ETXTBSY
-}()
+// ETXTBSY differs between hosts: uses are the host's.
+const ETXTBSY Errno = 26
 
-// EUSERS differs between hosts.
-var EUSERS Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EUSERS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EUSERS
-	}
-	return Windows_EUSERS
-}()
+// EUSERS differs between hosts: uses are the host's.
+const EUSERS Errno = 87
 
-// EWOULDBLOCK differs between hosts.
-var EWOULDBLOCK Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EWOULDBLOCK
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EWOULDBLOCK
-	}
-	return Windows_EWOULDBLOCK
-}()
+// EWOULDBLOCK differs between hosts: uses are the host's.
+const EWOULDBLOCK Errno = 11
 
-// EXDEV differs between hosts.
-var EXDEV Errno = func() Errno {
-	if apehost == apeLinux {
-		return Linux_EXDEV
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_EXDEV
-	}
-	return Windows_EXDEV
-}()
+// EXDEV differs between hosts: uses are the host's.
+const EXDEV Errno = 18
 
 const IFF_BROADCAST = 2
 
-// IFF_LOOPBACK differs between hosts.
-var IFF_LOOPBACK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IFF_LOOPBACK)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IFF_LOOPBACK)
-	}
-	return int(Windows_IFF_LOOPBACK)
-}()
+// IFF_LOOPBACK differs between hosts: uses are the host's.
+const IFF_LOOPBACK = 8
 
-// IFF_MULTICAST differs between hosts.
-var IFF_MULTICAST int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IFF_MULTICAST)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IFF_MULTICAST)
-	}
-	return int(Windows_IFF_MULTICAST)
-}()
+// IFF_MULTICAST differs between hosts: uses are the host's.
+const IFF_MULTICAST = 4096
 
 const IFF_UP = 1
 
@@ -1027,264 +331,80 @@ const IPPROTO_TCP = 6
 
 const IPPROTO_UDP = 17
 
-// IPV6_JOIN_GROUP differs between hosts.
-var IPV6_JOIN_GROUP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_JOIN_GROUP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_JOIN_GROUP)
-	}
-	return int(Windows_IPV6_JOIN_GROUP)
-}()
+// IPV6_JOIN_GROUP differs between hosts: uses are the host's.
+const IPV6_JOIN_GROUP = 20
 
-// IPV6_LEAVE_GROUP differs between hosts.
-var IPV6_LEAVE_GROUP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_LEAVE_GROUP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_LEAVE_GROUP)
-	}
-	return int(Windows_IPV6_LEAVE_GROUP)
-}()
+// IPV6_LEAVE_GROUP differs between hosts: uses are the host's.
+const IPV6_LEAVE_GROUP = 21
 
-// IPV6_MULTICAST_HOPS differs between hosts.
-var IPV6_MULTICAST_HOPS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_MULTICAST_HOPS)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_MULTICAST_HOPS)
-	}
-	return int(Windows_IPV6_MULTICAST_HOPS)
-}()
+// IPV6_MULTICAST_HOPS differs between hosts: uses are the host's.
+const IPV6_MULTICAST_HOPS = 18
 
-// IPV6_MULTICAST_IF differs between hosts.
-var IPV6_MULTICAST_IF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_MULTICAST_IF)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_MULTICAST_IF)
-	}
-	return int(Windows_IPV6_MULTICAST_IF)
-}()
+// IPV6_MULTICAST_IF differs between hosts: uses are the host's.
+const IPV6_MULTICAST_IF = 17
 
-// IPV6_MULTICAST_LOOP differs between hosts.
-var IPV6_MULTICAST_LOOP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_MULTICAST_LOOP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_MULTICAST_LOOP)
-	}
-	return int(Windows_IPV6_MULTICAST_LOOP)
-}()
+// IPV6_MULTICAST_LOOP differs between hosts: uses are the host's.
+const IPV6_MULTICAST_LOOP = 19
 
-// IPV6_UNICAST_HOPS differs between hosts.
-var IPV6_UNICAST_HOPS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_UNICAST_HOPS)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_UNICAST_HOPS)
-	}
-	return int(Windows_IPV6_UNICAST_HOPS)
-}()
+// IPV6_UNICAST_HOPS differs between hosts: uses are the host's.
+const IPV6_UNICAST_HOPS = 16
 
-// IPV6_V6ONLY differs between hosts.
-var IPV6_V6ONLY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IPV6_V6ONLY)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IPV6_V6ONLY)
-	}
-	return int(Windows_IPV6_V6ONLY)
-}()
+// IPV6_V6ONLY differs between hosts: uses are the host's.
+const IPV6_V6ONLY = 26
 
-// IP_ADD_MEMBERSHIP differs between hosts.
-var IP_ADD_MEMBERSHIP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_ADD_MEMBERSHIP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_ADD_MEMBERSHIP)
-	}
-	return int(Windows_IP_ADD_MEMBERSHIP)
-}()
+// IP_ADD_MEMBERSHIP differs between hosts: uses are the host's.
+const IP_ADD_MEMBERSHIP = 35
 
-// IP_DROP_MEMBERSHIP differs between hosts.
-var IP_DROP_MEMBERSHIP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_DROP_MEMBERSHIP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_DROP_MEMBERSHIP)
-	}
-	return int(Windows_IP_DROP_MEMBERSHIP)
-}()
+// IP_DROP_MEMBERSHIP differs between hosts: uses are the host's.
+const IP_DROP_MEMBERSHIP = 36
 
-// IP_MULTICAST_IF differs between hosts.
-var IP_MULTICAST_IF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MULTICAST_IF)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_MULTICAST_IF)
-	}
-	return int(Windows_IP_MULTICAST_IF)
-}()
+// IP_MULTICAST_IF differs between hosts: uses are the host's.
+const IP_MULTICAST_IF = 32
 
-// IP_MULTICAST_LOOP differs between hosts.
-var IP_MULTICAST_LOOP int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MULTICAST_LOOP)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_MULTICAST_LOOP)
-	}
-	return int(Windows_IP_MULTICAST_LOOP)
-}()
+// IP_MULTICAST_LOOP differs between hosts: uses are the host's.
+const IP_MULTICAST_LOOP = 34
 
-// IP_MULTICAST_TTL differs between hosts.
-var IP_MULTICAST_TTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_MULTICAST_TTL)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_MULTICAST_TTL)
-	}
-	return int(Windows_IP_MULTICAST_TTL)
-}()
+// IP_MULTICAST_TTL differs between hosts: uses are the host's.
+const IP_MULTICAST_TTL = 33
 
-// IP_TOS differs between hosts.
-var IP_TOS int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_TOS)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_TOS)
-	}
-	return int(Windows_IP_TOS)
-}()
+// IP_TOS differs between hosts: uses are the host's.
+const IP_TOS = 1
 
-// IP_TTL differs between hosts.
-var IP_TTL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_IP_TTL)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_IP_TTL)
-	}
-	return int(Windows_IP_TTL)
-}()
+// IP_TTL differs between hosts: uses are the host's.
+const IP_TTL = 2
 
 const ImplementsGetwd = true
 
-// O_APPEND differs between hosts.
-var O_APPEND int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_APPEND)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_APPEND)
-	}
-	return int(Windows_O_APPEND)
-}()
+// O_APPEND differs between hosts: uses are the host's.
+const O_APPEND = 1024
 
-// O_ASYNC differs between hosts.
-var O_ASYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_ASYNC)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_ASYNC)
-	}
-	return int(Windows_O_ASYNC)
-}()
+// O_ASYNC differs between hosts: uses are the host's.
+const O_ASYNC = 8192
 
-// O_CLOEXEC differs between hosts.
-var O_CLOEXEC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_CLOEXEC)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_CLOEXEC)
-	}
-	return int(Windows_O_CLOEXEC)
-}()
+// O_CLOEXEC differs between hosts: uses are the host's.
+const O_CLOEXEC = 524288
 
-// O_CREAT differs between hosts.
-var O_CREAT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_CREAT)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_CREAT)
-	}
-	return int(Windows_O_CREAT)
-}()
+// O_CREAT differs between hosts: uses are the host's.
+const O_CREAT = 64
 
-// O_EXCL differs between hosts.
-var O_EXCL int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_EXCL)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_EXCL)
-	}
-	return int(Windows_O_EXCL)
-}()
+// O_EXCL differs between hosts: uses are the host's.
+const O_EXCL = 128
 
-// O_NOCTTY differs between hosts.
-var O_NOCTTY int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_NOCTTY)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_NOCTTY)
-	}
-	return int(Windows_O_NOCTTY)
-}()
+// O_NOCTTY differs between hosts: uses are the host's.
+const O_NOCTTY = 256
 
-// O_NONBLOCK differs between hosts.
-var O_NONBLOCK int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_NONBLOCK)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_NONBLOCK)
-	}
-	return int(Windows_O_NONBLOCK)
-}()
+// O_NONBLOCK differs between hosts: uses are the host's.
+const O_NONBLOCK = 2048
 
 const O_RDONLY = 0
 
 const O_RDWR = 2
 
-// O_SYNC differs between hosts.
-var O_SYNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_SYNC)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_SYNC)
-	}
-	return int(Windows_O_SYNC)
-}()
+// O_SYNC differs between hosts: uses are the host's.
+const O_SYNC = 1052672
 
-// O_TRUNC differs between hosts.
-var O_TRUNC int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_O_TRUNC)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_O_TRUNC)
-	}
-	return int(Windows_O_TRUNC)
-}()
+// O_TRUNC differs between hosts: uses are the host's.
+const O_TRUNC = 512
 
 const O_WRONLY = 1
 
@@ -1298,16 +418,8 @@ const SIGABRT Signal = 6
 
 const SIGALRM Signal = 14
 
-// SIGBUS differs between hosts.
-var SIGBUS Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_SIGBUS
-	}
-	if apehost == apeFreebsd {
-		return Freebsd_SIGBUS
-	}
-	return Windows_SIGBUS
-}()
+// SIGBUS differs between hosts: uses are the host's.
+const SIGBUS Signal = 7
 
 const SIGFPE Signal = 8
 
@@ -1337,104 +449,32 @@ const SOCK_SEQPACKET = 5
 
 const SOCK_STREAM = 1
 
-// SOL_SOCKET differs between hosts.
-var SOL_SOCKET int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SOL_SOCKET)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SOL_SOCKET)
-	}
-	return int(Windows_SOL_SOCKET)
-}()
+// SOL_SOCKET differs between hosts: uses are the host's.
+const SOL_SOCKET = 1
 
-// SOMAXCONN differs between hosts.
-var SOMAXCONN int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SOMAXCONN)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SOMAXCONN)
-	}
-	return int(Windows_SOMAXCONN)
-}()
+// SOMAXCONN differs between hosts: uses are the host's.
+const SOMAXCONN = 128
 
-// SO_BROADCAST differs between hosts.
-var SO_BROADCAST int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_BROADCAST)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_BROADCAST)
-	}
-	return int(Windows_SO_BROADCAST)
-}()
+// SO_BROADCAST differs between hosts: uses are the host's.
+const SO_BROADCAST = 6
 
-// SO_DONTROUTE differs between hosts.
-var SO_DONTROUTE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_DONTROUTE)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_DONTROUTE)
-	}
-	return int(Windows_SO_DONTROUTE)
-}()
+// SO_DONTROUTE differs between hosts: uses are the host's.
+const SO_DONTROUTE = 5
 
-// SO_KEEPALIVE differs between hosts.
-var SO_KEEPALIVE int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_KEEPALIVE)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_KEEPALIVE)
-	}
-	return int(Windows_SO_KEEPALIVE)
-}()
+// SO_KEEPALIVE differs between hosts: uses are the host's.
+const SO_KEEPALIVE = 9
 
-// SO_LINGER differs between hosts.
-var SO_LINGER int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_LINGER)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_LINGER)
-	}
-	return int(Windows_SO_LINGER)
-}()
+// SO_LINGER differs between hosts: uses are the host's.
+const SO_LINGER = 13
 
-// SO_RCVBUF differs between hosts.
-var SO_RCVBUF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_RCVBUF)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_RCVBUF)
-	}
-	return int(Windows_SO_RCVBUF)
-}()
+// SO_RCVBUF differs between hosts: uses are the host's.
+const SO_RCVBUF = 8
 
-// SO_REUSEADDR differs between hosts.
-var SO_REUSEADDR int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_REUSEADDR)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_REUSEADDR)
-	}
-	return int(Windows_SO_REUSEADDR)
-}()
+// SO_REUSEADDR differs between hosts: uses are the host's.
+const SO_REUSEADDR = 2
 
-// SO_SNDBUF differs between hosts.
-var SO_SNDBUF int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_SO_SNDBUF)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_SO_SNDBUF)
-	}
-	return int(Windows_SO_SNDBUF)
-}()
+// SO_SNDBUF differs between hosts: uses are the host's.
+const SO_SNDBUF = 7
 
 const S_IFBLK = 24576
 
@@ -1446,16 +486,8 @@ const S_IFIFO = 4096
 
 const S_IFLNK = 40960
 
-// S_IFMT differs between hosts.
-var S_IFMT int = func() int {
-	if apehost == apeLinux {
-		return int(Linux_S_IFMT)
-	}
-	if apehost == apeFreebsd {
-		return int(Freebsd_S_IFMT)
-	}
-	return int(Windows_S_IFMT)
-}()
+// S_IFMT differs between hosts: uses are the host's.
+const S_IFMT = 61440
 
 const S_IFREG = 32768
 
