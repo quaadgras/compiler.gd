@@ -71,6 +71,11 @@ func strhash(p unsafe.Pointer, seed uintptr) uintptr {
 	return uintptr(mix(h, 0))
 }
 
+// strhashSeq is strhash for a string that is a part of a larger key
+// (runtime/alg.go): the hash of a string depends on the seed here, so it
+// is the same.
+func strhashSeq(p unsafe.Pointer, seed uintptr) uintptr { return strhash(p, seed) }
+
 func f32hash(p unsafe.Pointer, h uintptr) uintptr {
 	f := *(*float32)(p)
 	if f == 0 {

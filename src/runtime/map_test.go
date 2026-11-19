@@ -1213,3 +1213,31 @@ func TestMapIterOrder(t *testing.T) {
 		}
 	}
 }
+
+// A key hashed part by part must not have the hash of its last string
+// alone (gd: a string's hash does not depend on the seed).
+func TestMapKeyEndsInString(t *testing.T) {
+	type key struct {
+		a string
+		n int
+		b string
+	}
+	m := make(map[key]int)
+	im := make(map[[2]any]int)
+	const n = 20000
+	for i := 0; i < n; i++ {
+		m[key{a: strconv.Itoa(i), n: i, b: "same"}] = i
+		im[[2]any{strconv.Itoa(i), "same"}] = i
+	}
+	if len(m) != n || len(im) != n {
+		t.Fatalf("len = %d, %d, want %d", len(m), len(im), n)
+	}
+	for i := 0; i < n; i++ {
+		if v := m[key{a: strconv.Itoa(i), n: i, b: "same"}]; v != i {
+			t.Fatalf("m[%d] = %d", i, v)
+		}
+		if v := im[[2]any{strconv.Itoa(i), "same"}]; v != i {
+			t.Fatalf("im[%d] = %d", i, v)
+		}
+	}
+}

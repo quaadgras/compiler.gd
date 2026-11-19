@@ -258,6 +258,7 @@ func f64hash(p unsafe.Pointer, h uintptr) uintptr
 func c64hash(p unsafe.Pointer, h uintptr) uintptr
 func c128hash(p unsafe.Pointer, h uintptr) uintptr
 func strhash(a unsafe.Pointer, h uintptr) uintptr
+func strhashSeq(a unsafe.Pointer, h uintptr) uintptr
 func interhash(p unsafe.Pointer, h uintptr) uintptr
 func nilinterhash(p unsafe.Pointer, h uintptr) uintptr
 

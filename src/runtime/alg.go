@@ -127,6 +127,19 @@ func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
 	return uintptr(strhashPort(unsafe.String((*byte)(x.bytes()), n)))
 }
 
+// strhashSeq hashes the string at p as a part of a larger key: a field
+// of a struct, an element of an array, what an interface holds. The hash
+// of a string does not depend on the seed, since the string carries it
+// (strhashFallback), so a key hashed part by part, each with the hash of
+// those before it as its seed, would have the hash of its last string and
+// what follows alone: all the keys that only differ before it would
+// collide, which a map cannot get out of by growing. So the string's hash
+// is hashed with the seed.
+func strhashSeq(p unsafe.Pointer, h uintptr) uintptr {
+	s := strhash(p, h)
+	return memhash(noescape(unsafe.Pointer(&s)), h, goarch.PtrSize)
+}
+
 // NOTE: Because NaN != NaN, a map can contain any
 // number of (mostly useless) entries keyed with NaNs.
 // To avoid long hash chains, we assign a random number
@@ -281,7 +294,7 @@ func typehash(t *_type, p unsafe.Pointer, h uintptr) uintptr {
 	case abi.Complex128:
 		return c128hash(p, h)
 	case abi.String:
-		return strhash(p, h)
+		return strhashSeq(p, h)
 	case abi.Interface:
 		i := (*interfacetype)(unsafe.Pointer(t))
 		if len(i.Methods) == 0 {

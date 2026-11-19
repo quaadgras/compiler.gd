@@ -188,7 +188,9 @@ func hashFunc(gd *base.Invocation, sig string) *ir.Func {
 		case sigFloat64:
 			hash("f64hash", 8)
 		case sigString:
-			hash("strhash", stringSize())
+			// (Not strhash, which has no use for the seed: the
+			// key would have the hash of its last string.)
+			hash("strhashSeq", stringSize())
 		case sigEface:
 			hash("nilinterhash", ifaceSize())
 		case sigIface:

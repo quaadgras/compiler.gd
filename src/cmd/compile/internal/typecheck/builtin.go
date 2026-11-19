@@ -214,6 +214,7 @@ var runtimeDecls = [...]struct {
 	{"c64hash", funcTag, 149},
 	{"c128hash", funcTag, 149},
 	{"strhash", funcTag, 149},
+	{"strhashSeq", funcTag, 149},
 	{"interhash", funcTag, 149},
 	{"nilinterhash", funcTag, 149},
 	{"int64div", funcTag, 150},
