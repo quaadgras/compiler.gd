@@ -178,6 +178,32 @@ func TestSock(t *testing.T) {
 	}
 }
 
+// TestRegex compares regex.h's matching (and termios.h's, without a
+// terminal) of testdata/regex.c with gcc's C library's.
+func TestRegex(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/regex.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "regex")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	want, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.
@@ -473,7 +499,7 @@ func TestBuildTag(t *testing.T) {
 #include "add.h"`, "cgo: 5\n"},
 		{"ldflags", `#cgo LDFLAGS: -lm
 #include "add.h"`, "no cgo\n"},
-		{"system header", `#include <termios.h>
+		{"system header", `#include <X11/Xlib.h>
 #include "add.h"`, "no cgo\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
