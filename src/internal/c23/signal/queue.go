@@ -31,18 +31,19 @@ func takeWait(w uint64, deadline time.Time) (int32, c23.SigInfo) {
 		})
 		defer tm.Stop()
 	}
+	c23.TestCancel()
 	c23.SigMu.Lock()
-	defer c23.SigMu.Unlock()
 	for {
-		if sig, info := t.Take(w); sig != 0 {
+		sig, info := t.Take(w)
+		canceled := c23.CancelPending()
+		if sig != 0 || expired || canceled {
 			t.Waiting = 0
 			delete(c23.SigWaiters, t)
+			c23.SigMu.Unlock()
+			if sig == 0 && canceled {
+				c23.TestCancel()
+			}
 			return sig, info
-		}
-		if expired {
-			t.Waiting = 0
-			delete(c23.SigWaiters, t)
-			return 0, c23.SigInfo{}
 		}
 		t.Waiting = w
 		c23.SigWaiters[t] = true

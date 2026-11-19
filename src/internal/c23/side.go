@@ -32,6 +32,10 @@ type gTable struct {
 	Keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
 	fe   fenvState      // its floating-point environment (fenv.go)
 	Sig  *SigThread     // its signal state (sigaction.go)
+
+	th      *Thread             // the thread it is, if it is one (cancel.go)
+	cleanup []cleanupHandler    // pthread_cleanup_push's handlers (cancel.go)
+	robust  map[*Mutex]struct{} // the robust mutexes it holds (cancel.go)
 }
 
 type gEntry struct {

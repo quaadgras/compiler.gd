@@ -72,7 +72,11 @@ func (s *sem) wait(try bool, deadline time.Time) int32 {
 		c := s.posted
 		s.mu.Unlock()
 		if deadline.IsZero() {
-			<-c
+			select {
+			case <-c:
+			case <-c23.CancelChan():
+				c23.TestCancel()
+			}
 		} else {
 			d := time.Until(deadline)
 			if d <= 0 {
@@ -83,6 +87,9 @@ func (s *sem) wait(try bool, deadline time.Time) int32 {
 			case <-c:
 				t.Stop()
 			case <-t.C:
+			case <-c23.CancelChan():
+				t.Stop()
+				c23.TestCancel()
 			}
 		}
 		s.mu.Lock()
@@ -100,13 +107,18 @@ func semRet(e int32) int32 {
 	return 0
 }
 
-func SemWait(p c23.Ptr) int32 { return semRet(semOf(p).wait(false, time.Time{})) }
+// SemWait is sem_wait, a cancellation point.
+func SemWait(p c23.Ptr) int32 {
+	c23.TestCancel()
+	return semRet(semOf(p).wait(false, time.Time{}))
+}
 
 func SemTrywait(p c23.Ptr) int32 { return semRet(semOf(p).wait(true, time.Time{})) }
 
 // SemTimedwait is sem_timedwait, which gives up at the CLOCK_REALTIME
 // time at ts.
 func SemTimedwait(p, ts c23.Ptr) int32 {
+	c23.TestCancel()
 	s := semOf(p)
 	if e := s.wait(true, time.Time{}); e == 0 {
 		return 0

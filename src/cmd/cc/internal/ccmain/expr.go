@@ -1842,17 +1842,30 @@ func (p *parser) builtin(name string, at pos) expr {
 			return x
 		}
 		return y
-	case "__builtin_setjmp":
-		as := args(1)
+	case "__builtin_setjmp", "__builtin_sigsetjmp":
+		// __builtin_sigsetjmp(env, save) also saves the signal mask
+		// if save is not 0.
+		n := 1
+		if name == "__builtin_sigsetjmp" {
+			n = 2
+		}
+		as := args(n)
 		if p.fn == nil {
 			p.errorAt(at, "setjmp outside a function")
+		}
+		if len(as) != n {
+			return p.intc(0, tInt, at)
 		}
 		env := p.rvalue(as[0])
 		if !env.ty().isPtr() {
 			p.errorAt(at, "setjmp of a %s", env.ty())
 		}
 		p.fn.setjmps++
-		return &builtinCall{node{tInt, at}, "setjmp", []expr{env, p.intc(int64(p.fn.setjmps), tInt, at)}}
+		bargs := []expr{env, p.intc(int64(p.fn.setjmps), tInt, at)}
+		if n == 2 {
+			bargs = append(bargs, p.convertAt(p.rvalue(as[1]), tInt, at))
+		}
+		return &builtinCall{node{tInt, at}, "setjmp", bargs}
 	case "__cc_atomic_load", "__cc_atomic_store", "__cc_atomic_fetch", "__cc_atomic_cmpxchg", "__cc_atomic_fence":
 		return p.atomicBuiltin(name[len("__cc_"):], args(-1), at)
 	case "__builtin_alloca", "__builtin_alloca_with_align":

@@ -1400,7 +1400,11 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "setjmp":
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")
-		g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+		if len(e.args) == 3 {
+			g.p("%s = c23.Sigsetjmp(%s, jf, %d, %s)", t, g.rv(e.args[0]), k, g.rv(e.args[2]))
+		} else {
+			g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+		}
 		// longjmp comes back here.
 		g.p("J%d:", k)
 		g.p("if jsite == %d {", k)

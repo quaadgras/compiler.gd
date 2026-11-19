@@ -59,13 +59,7 @@ func ThrdJoin(id uint64, res c23.Ptr) int32 {
 	return thrdSuccess
 }
 
-func ThrdDetach(id uint64) int32 {
-	c23.ThreadsMu.Lock()
-	_, ok := c23.Threads[id]
-	delete(c23.Threads, id)
-	c23.ThreadsMu.Unlock()
-	return c23.If[int32](ok, thrdSuccess, thrdError)
-}
+func ThrdDetach(id uint64) int32 { return thrdResult(c23.Detach(id)) }
 
 // ThrdSleep is thrd_sleep, which is not interrupted: 0, or -2 for a
 // duration that is not one.

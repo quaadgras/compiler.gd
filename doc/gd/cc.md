@@ -511,6 +511,52 @@ once). `pthread_kill` of another thread that does not block the signal
 runs the handler on a goroutine of its own, as the program's other
 signals; `sigaltstack` and `siginterrupt` are kept and change nothing.
 
+POSIX's threads are complete (internal/c23/pthread, and internal/c23's
+`cancel.go`): attributes (`pthread_create` honors the detach state and
+an explicit scheduling; the stack's size and address, the guard and the
+scope are kept for the getters, as a goroutine's stack grows),
+read-write locks (readers preferred, as glibc's default), barriers, spin
+locks (an `int`, spinning then yielding), robust mutexes (a thread that
+ends holding one gives `EOWNERDEAD` to the next to lock it, and an
+unlock without `pthread_mutex_consistent` makes it `ENOTRECOVERABLE`),
+condition variables on `CLOCK_MONOTONIC`, and cancellation with musl's
+`pthread_cleanup_push` (a `struct __ptcb` per block; the handlers are
+the thread's, in Go). A canceled thread acts at the cancellation points
+that wait (`pthread_join`, `pthread_cond_wait` and `timedwait`,
+`sleep`, `usleep`, `nanosleep`, `clock_nanosleep`, `sem_wait`,
+`sigwait` and its kin, `sigsuspend`, `pause`, `poll`, `select`,
+`epoll_wait`), at `pthread_testcancel`, and when `read` or `write` is
+called (not while it waits): it runs its cleanup handlers, the last
+pushed first, then its keys' destructors, and ends with
+`PTHREAD_CANCELED` (which is not `(void *)-1` but -1 without bits 31
+and 55: a pointer without a capability stored in Go's memory loses the
+tag, so -1 would not compare equal once stored). Asynchronous cancellation acts at the same points
+(and when it is chosen): a goroutine cannot be interrupted. Cancellation
+and `pthread_exit` of the main thread wait for the other threads, then
+exit with status 0. Scheduling changes nothing: policies and priorities
+are kept, as for a user without privileges (a real-time policy is
+`EPERM`; `sched_setscheduler` and `sched_setparam` behave as glibc's,
+not musl's `ENOSYS`), and `sched_rr_get_interval` is 100 ms;
+`pthread_setconcurrency` keeps its level (musl's is `EAGAIN` above 0);
+`pthread_atfork` keeps its handlers and never calls them. The CPU-time
+clocks (`CLOCK_PROCESS_CPUTIME_ID`, `CLOCK_THREAD_CPUTIME_ID`,
+`clock_getcpuclockid`'s and `pthread_getcpuclockid`'s, encoded as
+Linux's) count the time since the process or the thread started: Go
+cannot know a goroutine's processor time. `timer_create`'s timers are
+`time.Timer`s on Go's monotonic clock, for every clock (an absolute
+`CLOCK_REALTIME` time is converted when the timer is set); a
+`SIGEV_SIGNAL` expiry is a process signal with `SI_TIMER` and the
+`sigev_value`, and an expiry while it is pending is an overrun (signals
+are not queued, so two timers of one signal share it); `SIGEV_THREAD`
+calls the function on a new detached thread; `struct sigevent` is
+glibc's. `clock_settime` is `EPERM`
+and `clock_getcpuclockid` of another process `EPERM`. `killpg` signals
+the program's children in the group (their group is the system's where
+package syscall has `Getpgid`) and the program itself if the group is
+its own. `psiginfo` writes glibc's text, `sigpause` is XSI's, and
+`sigsetjmp(env, 1)` saves the mask in `env`, which `siglongjmp` (and
+`longjmp`, as in glibc and musl) restores.
+
 C's library is Go: internal/c23, the run-time support of the generated
 Go (memory and capabilities, errno, descriptors, threads' storage, the
 floating-point environment), and a package for each header with

@@ -52,10 +52,21 @@ func (t *TLS) Get() Ptr {
 // Threads: pthread_t is an id.
 
 type Thread struct {
-	done chan struct{}
-	Ret  Ptr   // pthread_exit's value, or the start routine's
-	Res  int32 // thrd_exit's, or a <threads.h> start routine's
-	Sig  *SigThread
+	done  chan struct{}
+	Ret   Ptr   // pthread_exit's value, or the start routine's
+	Res   int32 // thrd_exit's, or a <threads.h> start routine's
+	Sig   *SigThread
+	Start time.Time // when it started: its CPU-time clock counts from then
+
+	// Under ThreadsMu.
+	detached bool // pthread_detach'ed: it forgets itself as it ends
+	joining  bool // a thread waits in pthread_join for it
+
+	cancel Cancel
+
+	// Its scheduling policy and priority (pthread_setschedparam), which
+	// change nothing. Under ThreadsMu.
+	Policy, Priority int32
 }
 
 var (
@@ -67,22 +78,44 @@ var (
 
 // spawn starts a goroutine that is a thread, whose id it stores at thr
 // (a pthread_t or thrd_t, each an unsigned long), and runs run in it.
-func Spawn(thr Ptr, run func(t *Thread)) {
+func Spawn(thr Ptr, run func(t *Thread)) { SpawnThread(thr, false, run) }
+
+// SpawnThread is Spawn of a thread that is detached from the start if
+// detached. The new thread has its creator's scheduling policy and
+// priority.
+func SpawnThread(thr Ptr, detached bool, run func(t *Thread)) *Thread {
 	id := threadN.Add(1)
-	t := &Thread{done: make(chan struct{})}
+	t := newThread()
+	self := Self()
 	ThreadsMu.Lock()
+	t.detached = detached
+	if self != nil {
+		t.Policy, t.Priority = self.Policy, self.Priority
+	}
 	Threads[id] = t
 	ThreadsMu.Unlock()
 	StoreLong(thr, int64(id)) // pthread_t is unsigned long
 	fe := inheritFenv()
 	sig := sigInherit()
 	t.Sig = sig
+	liveAdd(1)
 	go func() {
 		Store64(ThreadID.Get(), id)
-		GSelf().fe = fe
-		GSelf().Sig = sig
+		tb := GSelf()
+		tb.fe = fe
+		tb.Sig = sig
+		tb.th = t
+		defer liveAdd(-1)
 		defer sigExit(sig)
+		defer func() {
+			ThreadsMu.Lock()
+			if t.detached {
+				delete(Threads, id)
+			}
+			ThreadsMu.Unlock()
+		}()
 		defer close(t.done)
+		defer releaseRobust()
 		defer runKeyDestructors()
 		defer func() {
 			if r := recover(); r != nil {
@@ -95,6 +128,11 @@ func Spawn(thr Ptr, run func(t *Thread)) {
 		}()
 		run(t)
 	}()
+	return t
+}
+
+func newThread() *Thread {
+	return &Thread{done: make(chan struct{}), Start: time.Now(), cancel: Cancel{ch: make(chan struct{})}}
 }
 
 type ThreadExit struct {
@@ -105,14 +143,91 @@ type ThreadExit struct {
 // join waits for thread id to end, and forgets it: nil if there is no
 // such thread to join.
 func Join(id uint64) *Thread {
+	t, _ := JoinErr(id)
+	return t
+}
+
+// JoinErr is pthread_join's join: it waits for thread id to end, and
+// forgets it, or returns pthread_join's error: ESRCH if there is no such
+// thread, EINVAL if it is detached or another thread joins it, EDEADLK
+// if it is the calling thread. It is a cancellation point: a canceled
+// thread stops waiting, and the thread it waited for stays joinable.
+func JoinErr(id uint64) (*Thread, int32) {
+	TestCancel()
+	self := Self()
 	ThreadsMu.Lock()
 	t := Threads[id]
+	switch {
+	case t == nil:
+		ThreadsMu.Unlock()
+		return nil, ESRCH
+	case t.detached || t.joining:
+		ThreadsMu.Unlock()
+		return nil, EINVAL
+	case t == self:
+		ThreadsMu.Unlock()
+		return nil, EDEADLK
+	}
+	t.joining = true
+	ThreadsMu.Unlock()
+	select {
+	case <-t.done:
+	case <-CancelChan():
+		select {
+		case <-t.done:
+		default:
+			ThreadsMu.Lock()
+			t.joining = false
+			ThreadsMu.Unlock()
+			TestCancel() // acts: it does not return
+		}
+	}
+	ThreadsMu.Lock()
 	delete(Threads, id)
 	ThreadsMu.Unlock()
-	if t != nil {
-		<-t.done
+	return t, 0
+}
+
+// Detach is pthread_detach: ESRCH if there is no thread id, EINVAL if it
+// is detached already.
+func Detach(id uint64) int32 {
+	ThreadsMu.Lock()
+	defer ThreadsMu.Unlock()
+	t := Threads[id]
+	switch {
+	case t == nil:
+		return ESRCH
+	case t.detached:
+		return EINVAL
 	}
-	return t
+	select {
+	case <-t.done:
+		delete(Threads, id)
+	default:
+		t.detached = true
+	}
+	return 0
+}
+
+// ThreadOf returns thread id (0 is the main thread), or nil if there is
+// no such thread, or it ended and was joined or detached.
+func ThreadOf(id uint64) *Thread {
+	if id == 0 {
+		return MainThread
+	}
+	ThreadsMu.Lock()
+	defer ThreadsMu.Unlock()
+	return Threads[id]
+}
+
+// Done reports whether t has ended.
+func (t *Thread) Done() bool {
+	select {
+	case <-t.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // Mutexes and condition variables: kept by the address of the C object,
@@ -125,12 +240,26 @@ const (
 )
 
 // A mutex is a pthread_mutex_t. One of type PTHREAD_MUTEX_RECURSIVE or
-// PTHREAD_MUTEX_ERRORCHECK knows its owner, the goroutine that locked it.
+// PTHREAD_MUTEX_ERRORCHECK, or a robust one, knows its owner, the
+// goroutine that locked it.
 type Mutex struct {
-	Mu    sync.Mutex
-	Kind  int32
-	Owner atomic.Pointer[gTable]
-	Count int // the owner's locks of a recursive mutex
+	Mu     sync.Mutex
+	Kind   int32
+	Owner  atomic.Pointer[gTable]
+	Count  int  // the owner's locks of a recursive mutex
+	Robust bool // PTHREAD_MUTEX_ROBUST
+
+	// pthread_mutexattr_setprotocol's protocol and the priority ceiling,
+	// kept for pthread_mutex_getprioceiling.
+	Protocol, Ceiling int32
+
+	// A robust mutex's state, under Mu: its owner ended holding it (the
+	// next to lock it gets EOWNERDEAD), its state is inconsistent (until
+	// pthread_mutex_consistent), or it cannot be used any more
+	// (ENOTRECOVERABLE).
+	ownerDied      bool
+	inconsistent   bool
+	notRecoverable atomic.Bool
 }
 
 var (
@@ -145,8 +274,11 @@ const (
 	LockUntil        // until a deadline: ETIMEDOUT
 )
 
+// owned reports whether m keeps its owner.
+func (m *Mutex) owned() bool { return m.Kind != PTHREAD_MUTEX_NORMAL || m.Robust }
+
 func (m *Mutex) Lock(how int, deadline time.Time) int32 {
-	if m.Kind == PTHREAD_MUTEX_NORMAL {
+	if !m.owned() {
 		return m.acquire(how, deadline)
 	}
 	self := GSelf()
@@ -157,12 +289,121 @@ func (m *Mutex) Lock(how int, deadline time.Time) int32 {
 		}
 		return If[int32](how == LockTry, EBUSY, EDEADLK)
 	}
+	if m.notRecoverable.Load() {
+		return ENOTRECOVERABLE
+	}
 	if e := m.acquire(how, deadline); e != 0 {
 		return e
 	}
+	return m.took(self, 1)
+}
+
+// took makes self, which has just locked m.Mu, m's owner: its count of
+// locks is n. It returns EOWNERDEAD for a robust mutex whose previous
+// owner ended holding it, and ENOTRECOVERABLE (unlocking it) for one
+// that cannot be used.
+func (m *Mutex) took(self *gTable, n int) int32 {
+	if m.notRecoverable.Load() {
+		m.Mu.Unlock()
+		return ENOTRECOVERABLE
+	}
 	m.Owner.Store(self)
-	m.Count = 1
+	m.Count = n
+	if !m.Robust {
+		return 0
+	}
+	if self.robust == nil {
+		self.robust = map[*Mutex]struct{}{}
+	}
+	self.robust[m] = struct{}{}
+	if m.ownerDied {
+		m.ownerDied = false
+		m.inconsistent = true
+		return EOWNERDEAD
+	}
 	return 0
+}
+
+// Unlock is pthread_mutex_unlock: EPERM if the mutex keeps its owner and
+// the calling thread is not it. A robust mutex unlocked in an
+// inconsistent state cannot be used any more.
+func (m *Mutex) Unlock() int32 {
+	if !m.owned() {
+		m.Mu.Unlock()
+		return 0
+	}
+	self := GSelf()
+	if m.Owner.Load() != self {
+		return EPERM
+	}
+	if m.Count--; m.Count > 0 {
+		return 0
+	}
+	if m.Robust {
+		delete(self.robust, m)
+		if m.inconsistent {
+			m.inconsistent = false
+			m.notRecoverable.Store(true)
+		}
+	}
+	m.Owner.Store(nil)
+	m.Mu.Unlock()
+	return 0
+}
+
+// Release unlocks m for pthread_cond_wait, however many times its owner
+// locked it: Reacquire locks it again as many times. EPERM if m keeps
+// its owner and the calling thread is not it.
+func (m *Mutex) Release() (n int, e int32) {
+	if !m.owned() {
+		m.Mu.Unlock()
+		return 1, 0
+	}
+	self := GSelf()
+	if m.Owner.Load() != self {
+		return 0, EPERM
+	}
+	n = m.Count
+	if m.Robust {
+		delete(self.robust, m)
+	}
+	m.Owner.Store(nil)
+	m.Mu.Unlock()
+	return n, 0
+}
+
+// Reacquire locks m again after Release: EOWNERDEAD if it is robust and
+// its owner meanwhile ended holding it (ENOTRECOVERABLE, not locking it,
+// if it cannot be used).
+func (m *Mutex) Reacquire(n int) int32 {
+	m.Mu.Lock()
+	if !m.owned() {
+		return 0
+	}
+	return m.took(GSelf(), n)
+}
+
+// Consistent is pthread_mutex_consistent: EINVAL unless m is robust, the
+// calling thread holds it and its state is inconsistent.
+func (m *Mutex) Consistent() int32 {
+	if !m.Robust || !m.inconsistent || m.Owner.Load() != GSelf() {
+		return EINVAL
+	}
+	m.inconsistent = false
+	return 0
+}
+
+// releaseRobust unlocks, as a thread ends, the robust mutexes it holds:
+// the next thread to lock each gets EOWNERDEAD.
+func releaseRobust() {
+	tb := GSelf()
+	for m := range tb.robust {
+		m.ownerDied = true
+		m.Owner.Store(nil)
+		m.Count = 0
+		m.Mu.Unlock()
+	}
+	tb.robust = nil
 }
 
 // acquire locks m.mu. sync.Mutex has no timed lock, so a deadline is

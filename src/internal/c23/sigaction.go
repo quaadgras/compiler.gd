@@ -72,7 +72,8 @@ type SigAction struct {
 // A sigInfo is what siginfo_t tells of a signal.
 type SigInfo struct {
 	Code, Pid, Uid, Status int32
-	Value                  Ptr // si_value, of sigqueue
+	Value                  Ptr     // si_value, of sigqueue or a timer
+	Timer                  uintptr // the timer whose expiry it is (time.h's timer_create)
 }
 
 // A sigThread is a thread's signal state.
@@ -141,6 +142,23 @@ func SigIgnored(sig int32) bool {
 		return true
 	case SigDfl:
 		return sigDefaultIgnores(sig)
+	}
+	return false
+}
+
+// SigPendingFrom reports whether sig is pending, for the process or a
+// thread, with what siginfo_t tells of it satisfying from.
+func SigPendingFrom(sig int32, from func(SigInfo) bool) bool {
+	b := SigBit(sig)
+	SigMu.Lock()
+	defer SigMu.Unlock()
+	if SigPending&b != 0 && from(sigInfos[sig]) {
+		return true
+	}
+	for t := range SigLive {
+		if t.Pending&b != 0 && from(t.info[sig]) {
+			return true
+		}
 	}
 	return false
 }
@@ -326,7 +344,10 @@ func StoreSigset(p Ptr, m uint64) {
 // sa_sigaction); sigset_t sa_mask; int sa_flags; void (*sa_restorer)(void);}.
 const ()
 
+// Suspend is sigsuspend and pause, a cancellation point: it waits with
+// the mask mask for a signal to deliver.
 func Suspend(mask uint64) {
+	TestCancel()
 	t := SigSelf()
 	SigMu.Lock()
 	old := t.Mask
@@ -334,6 +355,13 @@ func Suspend(mask uint64) {
 	t.suspended = true
 	SigWaiters[t] = true
 	for (t.Pending|SigPending)&^t.Mask == 0 {
+		if CancelPending() {
+			t.suspended = false
+			delete(SigWaiters, t)
+			t.Mask = old
+			SigMu.Unlock()
+			TestCancel()
+		}
 		SigCond.Wait()
 	}
 	t.suspended = false

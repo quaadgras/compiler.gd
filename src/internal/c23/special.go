@@ -291,23 +291,28 @@ func (of *Ofile) Ready() int16 {
 }
 
 // waitUntil waits for ch to be closed or the deadline (if not zero),
-// and reports which: false for the deadline.
+// and reports which: false for the deadline. It is a cancellation point
+// (poll's, select's, epoll_wait's).
 func WaitUntil(ch <-chan struct{}, deadline time.Time) bool {
-	if deadline.IsZero() {
-		<-ch
-		return true
+	TestCancel()
+	var tc <-chan time.Time
+	if !deadline.IsZero() {
+		d := time.Until(deadline)
+		if d <= 0 {
+			return false
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		tc = t.C
 	}
-	d := time.Until(deadline)
-	if d <= 0 {
-		return false
-	}
-	t := time.NewTimer(d)
-	defer t.Stop()
 	select {
 	case <-ch:
 		return true
-	case <-t.C:
+	case <-tc:
 		return false
+	case <-CancelChan():
+		TestCancel()
+		return true
 	}
 }
 

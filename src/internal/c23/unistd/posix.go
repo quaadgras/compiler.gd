@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
+// Read is read, a cancellation point when it is called (not while it
+// waits).
 func Read(fd int32, buf c23.Ptr, n uint64) int64 {
+	c23.TestCancel()
 	f := c23.FdFile(fd)
 	if f == nil {
 		c23.SetErrno(c23.EBADF)
@@ -26,7 +29,10 @@ func Read(fd int32, buf c23.Ptr, n uint64) int64 {
 	return int64(k)
 }
 
+// Write is write, a cancellation point when it is called (not while it
+// waits).
 func Write(fd int32, buf c23.Ptr, n uint64) int64 {
+	c23.TestCancel()
 	f := c23.FdFile(fd)
 	if f == nil {
 		c23.SetErrno(c23.EBADF)
@@ -158,13 +164,15 @@ func Getcwd(buf c23.Ptr, size uint64) c23.Ptr {
 
 func Chdir(path c23.Ptr) int32 { return c23.ErrRet(os.Chdir(c23.GoString(path))) }
 
+// Sleep is sleep, a cancellation point.
 func Sleep(s uint32) uint32 {
-	time.Sleep(time.Duration(s) * time.Second)
+	c23.CancelSleep(time.Duration(s) * time.Second)
 	return 0
 }
 
+// Usleep is usleep, a cancellation point.
 func Usleep(us uint32) int32 {
-	time.Sleep(time.Duration(us) * time.Microsecond)
+	c23.CancelSleep(time.Duration(us) * time.Microsecond)
 	return 0
 }
 
