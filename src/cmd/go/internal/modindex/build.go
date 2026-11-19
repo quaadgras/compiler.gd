@@ -653,7 +653,29 @@ func (ctxt *Context) matchAuto(text string, allTags map[string]bool) bool {
 }
 
 func (ctxt *Context) eval(x constraint.Expr, allTags map[string]bool) bool {
+	if ctxt.GOOS == "ape" {
+		// A file builds for ape if it builds for every host ape runs on.
+		for _, host := range syslist.APEHosts {
+			if !x.Eval(func(tag string) bool { return ctxt.matchAPETag(tag, host, allTags) }) {
+				return false
+			}
+		}
+		return true
+	}
 	return x.Eval(func(tag string) bool { return ctxt.matchTag(tag, allTags) })
+}
+
+// matchAPETag reports whether tag matches when building for ape on host.
+func (ctxt *Context) matchAPETag(tag, host string, allTags map[string]bool) bool {
+	if tag == "ape" {
+		if allTags != nil {
+			allTags[tag] = true
+		}
+		return true
+	}
+	c := *ctxt
+	c.GOOS = host
+	return c.matchTag(tag, allTags)
 }
 
 // matchTag reports whether the name is one of:

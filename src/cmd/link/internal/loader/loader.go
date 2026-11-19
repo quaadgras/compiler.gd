@@ -2626,9 +2626,11 @@ func (l *Loader) checkLinkname(refpkg *oReader, name string, s Sym) {
 		return
 	}
 
-	pkg := refpkg.unit.Lib.Pkg
+	// A GOOS=ape host variant of a package (ape/linux/syscall) may
+	// reference what its package (syscall) may.
+	pkg := objabi.APEVariantOf(refpkg.unit.Lib.Pkg)
 	error := func() {
-		log.Fatalf("%s: invalid reference to %s", pkg, name)
+		log.Fatalf("%s: invalid reference to %s", refpkg.unit.Lib.Pkg, name)
 	}
 	pkgs, ok := blockedLinknames[name]
 	if ok {

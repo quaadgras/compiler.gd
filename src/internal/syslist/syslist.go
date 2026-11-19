@@ -17,6 +17,7 @@ package syslist
 var KnownOS = map[string]bool{
 	"aix":       true,
 	"android":   true,
+	"ape":       true,
 	"darwin":    true,
 	"dragonfly": true,
 	"freebsd":   true,
@@ -34,6 +35,12 @@ var KnownOS = map[string]bool{
 	"windows":   true,
 	"zos":       true,
 }
+
+// APEHosts lists the systems a GOOS=ape program runs on. A file builds
+// for ape if it builds for every one of them (with the "ape" tag set);
+// the files only some of them build are copied per host by cmd/apegen.
+// This list also appears in cmd/dist/build.go.
+var APEHosts = []string{"linux", "freebsd"}
 
 // UnixOS is the set of GOOS values matched by the "unix" build tag.
 // This is not used for filename matching.

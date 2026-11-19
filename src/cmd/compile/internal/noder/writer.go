@@ -96,6 +96,8 @@ type pkgWriter struct {
 		std    bool
 	}
 
+	apeAsmDefs map[string]bool // symbols a GOOS=ape variant's assembly defines
+
 	// cgoPragmas accumulates any //go:cgo_* pragmas that need to be
 	// passed through to cmd/link.
 	cgoPragmas [][]string
@@ -1252,6 +1254,10 @@ func (w *writer) funcExt(obj *types2.Func) {
 				w.p.errorf(decl, "missing function body")
 			}
 		}
+	}
+
+	if decl.Body == nil {
+		w.p.apeVariantLinkname(obj)
 	}
 
 	sig, block := obj.Type().(*types2.Signature), decl.Body

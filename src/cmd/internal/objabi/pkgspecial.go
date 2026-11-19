@@ -4,7 +4,10 @@
 
 package objabi
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // PkgSpecial indicates special build properties of a given runtime-related
 // package.
@@ -104,7 +107,19 @@ var allowAsmABIPkgs = []string{
 
 // LookupPkgSpecial returns special build properties for the given package path.
 func LookupPkgSpecial(pkgPath string) PkgSpecial {
-	return pkgSpecialsOnce()[pkgPath]
+	return pkgSpecialsOnce()[APEVariantOf(pkgPath)]
+}
+
+// APEVariantOf returns the path of the package that pkgPath is a GOOS=ape
+// host variant of (ape/HOST/PATH is PATH built as HOST builds it), or
+// pkgPath itself.
+func APEVariantOf(pkgPath string) string {
+	if rest, ok := strings.CutPrefix(pkgPath, "ape/"); ok {
+		if _, p, ok := strings.Cut(rest, "/"); ok {
+			return p
+		}
+	}
+	return pkgPath
 }
 
 var pkgSpecialsOnce = sync.OnceValue(func() map[string]PkgSpecial {

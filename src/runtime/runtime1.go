@@ -67,6 +67,7 @@ func argv_index(argv **byte, i int32) *byte {
 }
 
 func args(c int32, v **byte) {
+	apeinit()
 	argc = c
 	argv = v
 	sysargs(c, v)

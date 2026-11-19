@@ -908,6 +908,9 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		if newPath, dir, ok := fips140.ResolveImport(path); ok {
 			r.path = newPath
 			r.dir = dir
+		} else if newPath, dir, ok := apeResolveImport(path, parentPath); ok {
+			r.path = newPath
+			r.dir = dir
 		} else if cfg.ModulesEnabled {
 			r.dir, r.path, r.err = modload.Lookup(ld, parentPath, parentIsStd, path)
 		} else if build.IsLocalImport(path) {
@@ -942,6 +945,9 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		if r.dir != "" {
 			var buildMode build.ImportMode
 			buildContext := cfg.BuildContext
+			if ctx, ok := apeContext(r.path); ok {
+				buildContext = ctx
+			}
 			if !cfg.ModulesEnabled {
 				buildMode = build.ImportComment
 			} else {
@@ -957,7 +963,11 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 			}
 			if modroot != "" {
 				if rp, err := modindex.GetPackage(modroot, r.dir); err == nil {
-					data.p, data.err = rp.Import(cfg.BuildContext, buildMode)
+					ictx := cfg.BuildContext
+					if ctx, ok := apeContext(r.path); ok {
+						ictx = ctx
+					}
+					data.p, data.err = rp.Import(ictx, buildMode)
 					if ctx, ok := ccContext(data.p, data.err); ok {
 						data.p, data.err = rp.Import(ctx, buildMode)
 					}
@@ -1530,6 +1540,12 @@ func disallowInternal(ld *modload.Loader, ctx context.Context, srcDir string, im
 	// the path rewriting causes the normal internal checks to fail.
 	// Instead, just ignore the internal rules during bootstrap.
 	if p.Standard && strings.HasPrefix(importerPath, "bootstrap/") {
+		return nil
+	}
+
+	// The runtime and other standard packages import variants of standard
+	// packages for the hosts of GOOS=ape.
+	if _, _, ok := apeVariantPath(p.ImportPath); ok && p.Standard {
 		return nil
 	}
 

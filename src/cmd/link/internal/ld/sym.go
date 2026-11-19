@@ -96,6 +96,7 @@ func (ctxt *Link) computeTLSOffset() {
 		break
 
 	case objabi.Hlinux,
+		objabi.Hape,
 		objabi.Hfreebsd,
 		objabi.Hnetbsd,
 		objabi.Hopenbsd,
