@@ -204,6 +204,43 @@ func TestRegex(t *testing.T) {
 	}
 }
 
+// TestPxMisc checks ndbm.h, devctl.h, ppoll, sig2str and str2sig
+// (testdata/pxmisc.c) against what POSIX says: the host's musl has no
+// ndbm.h, devctl.h or sig2str to compare with.
+func TestPxMisc(t *testing.T) {
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxmisc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	const want = `open 1
+store 0 0 0
+insert again 1, replace 0
+fetch a ay
+fetch zz 1
+delete b 0, again -1
+reopened: a=ay c=see
+readonly store -1 error 1 cleared 0
+missing 1
+ppoll timeout 0
+ppoll ready 1 1
+devctl 0 3 0
+devctl tcgets 1
+1 HUP 1
+15 TERM 15
+17 CHLD 17
+34 RTMIN 34
+40 RTMIN+6 40
+60 RTMAX-4 60
+64 RTMAX 64
+str2sig 9 0 9, bad -1, SIGINT -1
+`
+	if got := goRun(t, dir); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.

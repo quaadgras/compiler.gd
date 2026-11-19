@@ -394,6 +394,9 @@ typedef unsigned long nfds_t;
 #define POLLWRNORM POLLOUT
 #define POLLWRBAND 0x200
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
+#include <signal.h>
+#include <time.h>
+int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask);
 #endif
 `,
 	"sys/poll.h": `#include <poll.h>

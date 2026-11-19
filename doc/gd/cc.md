@@ -472,6 +472,12 @@ block until Go has written. Names resolve with Go's resolver;
 data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
 cannot set (kept for `getsockopt`, otherwise ignored).
 
+`ndbm.h`'s databases are file.pag, a log of stores and deletes that
+`dbm_open` reads and `dbm_close` rewrites compactly (and file.dir,
+empty), their keys in sorted order: a format of cmd/cc's own, which
+POSIX leaves to the library. `posix_devctl` is `ioctl` returning the
+error number; `ppoll` does not change the signal mask while it waits.
+
 Files and the system: `statvfs` and `statfs` are the system's where
 package syscall has them (Linux, macOS, the BSDs; `ENOSYS` elsewhere,
 Windows and wasm included); `nftw` walks with `os.ReadDir` (names in

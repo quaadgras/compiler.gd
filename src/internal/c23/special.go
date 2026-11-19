@@ -339,3 +339,19 @@ func DropHeld(of *Ofile) {
 	defer FdMu.Unlock()
 	of.Release()
 }
+
+// Buffered returns how many bytes the open file has read ahead of C (a
+// Special's own count, if it keeps one), and whether that is all a read
+// can return now (true for a Special, whose bytes are all read ahead).
+func (of *Ofile) Buffered() (int, bool) {
+	if of.Sp != nil {
+		if b, ok := of.Sp.(interface{ Buffered() int }); ok {
+			return b.Buffered(), true
+		}
+		return 0, true
+	}
+	if of.ra != nil {
+		return of.ra.Buffered(), false
+	}
+	return 0, false
+}

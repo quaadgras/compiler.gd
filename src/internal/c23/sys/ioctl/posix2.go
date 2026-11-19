@@ -36,7 +36,10 @@ func Ioctl(fd int32, req uint64, va ...any) int32 {
 	switch req {
 	case FIONREAD:
 		var n int64
-		if fi, err := of.F.Stat(); err == nil && fi.Mode().IsRegular() {
+		ahead, all := of.Buffered()
+		if all {
+			n = int64(ahead)
+		} else if fi, err := of.F.Stat(); err == nil && fi.Mode().IsRegular() {
 			pos, err := of.F.Seek(0, io.SeekCurrent)
 			if err != nil {
 				c23.SetErrnoOf(err)
@@ -49,6 +52,7 @@ func Ioctl(fd int32, req uint64, va ...any) int32 {
 				c23.SetErrnoOf(err)
 				return -1
 			}
+			n += int64(ahead) // what was read ahead of C, for poll
 		}
 		c23.Store32(arg, uint32(n))
 		return 0

@@ -624,6 +624,23 @@ func (s *socket) Close() error {
 
 func (s *socket) Mode() uint32 { return sIFSOCK | 0o777 }
 
+// Buffered is FIONREAD's: the bytes a read takes now (a datagram's, the
+// next one's).
+func (s *socket) Buffered() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.typ == SOCK_DGRAM {
+		if len(s.dq) > 0 {
+			return len(s.dq[0].b)
+		}
+		return 0
+	}
+	if s.ra != nil {
+		return s.ra.Buffered()
+	}
+	return 0
+}
+
 // Arrivals counts the reads ahead of a stream, for epoll's edge trigger.
 func (s *socket) Arrivals() uint64 {
 	s.mu.Lock()

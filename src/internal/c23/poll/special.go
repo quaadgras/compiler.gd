@@ -18,6 +18,30 @@ func Poll(fds c23.Ptr, n uint64, timeout int32) int32 {
 	if timeout > 0 {
 		deadline = time.Now().Add(time.Duration(timeout) * time.Millisecond)
 	}
+	return pollUntil(fds, n, deadline, timeout == 0)
+}
+
+// Ppoll is ppoll: timeout is a struct timespec, or null for none. The
+// signal mask is not changed while it waits.
+func Ppoll(fds c23.Ptr, n uint64, ts, sigmask c23.Ptr) int32 {
+	var deadline time.Time
+	now := false
+	if c23.Addr(ts) != 0 {
+		sec, nsec := int64(c23.Load64(ts)), c23.LoadLong(c23.Add(ts, 8))
+		if sec < 0 || nsec < 0 || nsec >= 1e9 {
+			c23.SetErrno(c23.EINVAL)
+			return -1
+		}
+		d := time.Duration(sec)*time.Second + time.Duration(nsec)
+		now = d == 0
+		deadline = time.Now().Add(d)
+	}
+	return pollUntil(fds, n, deadline, now)
+}
+
+// pollUntil polls until a descriptor is ready, the deadline (if not
+// zero) passes, or at once if now.
+func pollUntil(fds c23.Ptr, n uint64, deadline time.Time, now bool) int32 {
 	for {
 		ch := c23.PollWait()
 		count := int32(0)
@@ -38,7 +62,7 @@ func Poll(fds c23.Ptr, n uint64, timeout int32) int32 {
 				count++
 			}
 		}
-		if count > 0 || timeout == 0 {
+		if count > 0 || now {
 			return count
 		}
 		if !c23.WaitUntil(ch, deadline) {

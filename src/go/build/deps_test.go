@@ -309,6 +309,12 @@ var depsRules = `
 	< internal/c23/ftw, internal/c23/libgen, internal/c23/stdlib, internal/c23/threads
 	< internal/c23/wchar;
 
+	internal/c23, internal/c23/sys/ioctl
+	< internal/c23/devctl;
+
+	internal/c23, maps
+	< internal/c23/ndbm;
+
 	# Misc packages needing only FMT.
 	FMT
 	< html,
