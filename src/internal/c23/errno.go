@@ -224,32 +224,33 @@ func (e ErrnoErr) Error() string { return ErrnoString(int32(e)) }
 
 // setErrnoOf sets errno to err's: its system error number (a
 // syscall.Errno) if it has one.
-func SetErrnoOf(err error) {
+func SetErrnoOf(err error) { SetErrno(ErrnoOf(err)) }
+
+// ErrnoOf is the errno value of err, which SetErrnoOf sets errno to;
+// it leaves errno alone.
+func ErrnoOf(err error) int32 {
 	// One walk of the chain, without errors.As and errors.Is, which
 	// would link internal/reflectlite into every program that writes.
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if en, ok := e.(ErrnoErr); ok {
-			SetErrno(int32(en))
-			return
+			return int32(en)
 		}
 		t := reflect.TypeOf(e)
 		if t.PkgPath() == "syscall" && t.Name() == "Errno" && t.Kind() == reflect.Uintptr {
-			SetErrno(int32(reflect.ValueOf(e).Uint()))
-			return
+			return int32(reflect.ValueOf(e).Uint())
 		}
 	}
 	switch {
 	case IsErr(err, fs.ErrNotExist):
-		SetErrno(ENOENT)
+		return ENOENT
 	case IsErr(err, fs.ErrExist):
-		SetErrno(EEXIST)
+		return EEXIST
 	case IsErr(err, fs.ErrPermission):
-		SetErrno(EACCES)
+		return EACCES
 	case IsErr(err, fs.ErrInvalid):
-		SetErrno(EINVAL)
-	default:
-		SetErrno(EIO)
+		return EINVAL
 	}
+	return EIO
 }
 
 // isErr is errors.Is for a target that is comparable, as fs's are.

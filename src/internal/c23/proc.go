@@ -75,15 +75,6 @@ const (
 	POSIX_SPAWN_USEVFORK      = 0x40
 )
 
-// errnoOf is the errno value of err.
-func ErrnoOf(err error) int32 {
-	old := Errno()
-	SetErrnoOf(err)
-	e := Errno()
-	SetErrno(old)
-	return e
-}
-
 // command makes the exec.Cmd of a child that runs path (found in PATH if
 // search) with args and the environment envp, whose descriptors are the
 // program's after acts. owned are the files the actions opened, which

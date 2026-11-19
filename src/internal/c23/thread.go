@@ -67,7 +67,13 @@ var (
 
 // spawn starts a goroutine that is a thread, whose id it stores at thr
 // (a pthread_t or thrd_t, each an unsigned long), and runs run in it.
-func Spawn(thr Ptr, run func(t *Thread)) {
+func Spawn(thr Ptr, run func(t *Thread)) { spawn(thr, false, run) }
+
+// SpawnBlocked is Spawn of a thread that blocks every signal it may, as
+// glibc's and musl's threads of SIGEV_THREAD notifications do.
+func SpawnBlocked(thr Ptr, run func(t *Thread)) { spawn(thr, true, run) }
+
+func spawn(thr Ptr, blocked bool, run func(t *Thread)) {
 	id := threadN.Add(1)
 	t := &Thread{done: make(chan struct{})}
 	ThreadsMu.Lock()
@@ -75,7 +81,7 @@ func Spawn(thr Ptr, run func(t *Thread)) {
 	ThreadsMu.Unlock()
 	StoreLong(thr, int64(id)) // pthread_t is unsigned long
 	fe := inheritFenv()
-	sig := sigInherit()
+	sig := sigInherit(blocked)
 	t.Sig = sig
 	go func() {
 		Store64(ThreadID.Get(), id)

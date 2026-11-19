@@ -428,6 +428,50 @@ func TestEvents(t *testing.T) {
 	}
 }
 
+// TestPxIPC compares message queues (mqueue.h), XSI IPC (sys/msg.h,
+// sys/sem.h, sys/shm.h) and aio.h (testdata/pxipc.c) with the host's C
+// library, on Linux: within one process, with threads as the other
+// parties.
+func TestPxIPC(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the host's message queues are Linux's")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxipc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "pxipc")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	cmd = testenv.Command(t, testenv.GoToolPath(t), "build", "-o", filepath.Join(dir, "pxipc"), ".")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(filepath.Join(dir, "pxipc"))
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).
