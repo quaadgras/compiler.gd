@@ -254,7 +254,7 @@ const attrNotLocal = attrShares | attrSharesValue | attrSharesDeep | attrReturne
 // allocation of l is shared: always (ok), or if the results of l's
 // function are not (ret).
 func (b *batch) stays(l *location) (ok, ret bool) {
-	if l == nil || l.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue|attrCandidateEscape) || len(l.dyn) != 0 {
+	if l == nil || l.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue|attrCandidateEscape) || len(l.dyn) != 0 || l.hasRecv() {
 		return false, false
 	}
 	ret = l.hasAttr(attrReturned)
@@ -277,7 +277,7 @@ func (b *batch) staysPointee(name *ir.Name, locOf map[ir.Node]*location, seen ma
 	}
 	seen[name] = true
 	c := b.contents[name]
-	if c == nil || c.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue) || len(c.dyn) != 0 {
+	if c == nil || c.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue) || len(c.dyn) != 0 || c.hasRecv() {
 		return false, false
 	}
 	ret = c.hasAttr(attrReturned)
@@ -380,7 +380,7 @@ func (b *batch) callBits() {
 		ok, ret := true, false
 		var tag ir.Node
 		for _, r := range cs.res {
-			if r.hasAttr(attrNotLocal) {
+			if r.hasAttr(attrNotLocal) || r.hasRecv() {
 				ok = false
 				break
 			}
@@ -545,6 +545,9 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 		b.noteParamRoot(l.curfn, ps, root, derefs)
 	case root.hasAttr(attrShares):
 		setMinDerefs(&ps.Share, derefs)
+	case (root.conv != nil || root.assert || root.recvOver) && root.hasAttr(attrSharesValue):
+		// What flows there is shared (recv.go).
+		setMinDerefs(&ps.Share, derefs)
 	case root.paramOut && root.curfn == l.curfn && !root.hasAttr(attrEscapes):
 		if ri := root.resultIndex - 1; ri < numEscResults && ri < 8 {
 			ps.Results |= 1 << ri
@@ -640,6 +643,10 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	if ps.Share != 0 {
 		tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
 	}
+	if ps.Recv {
+		// The receiver of any method of the parameter's type.
+		tagKs = append(tagKs, e.recvHole(param.Type, nil))
+	}
 	if ps.Via != 0 {
 		d := int(ps.ViaDerefs) - 1
 		for k := 0; k < 16; k++ {
@@ -703,7 +710,12 @@ func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
 		return note
 	}
 	ps := fn.ParamShares[i]
-	via := ps.Via
+	if ps.Recv {
+		// A method that is not known may share it.
+		return note
+	}
+	// (What is stored through the parameter itself is where it is.)
+	via := ps.Via &^ (1 << i)
 	fl := byte(ir.EscNoteStays)
 	if fn.Type().Recv() != nil && i != 0 && via&1 != 0 {
 		via &^= 1

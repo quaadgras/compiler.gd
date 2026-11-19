@@ -72,10 +72,10 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.expr(k.deref(e.gd, n, "dot of pointer"), n.X) // "dot of pointer"
 	case ir.ODOTTYPE, ir.ODOTTYPE2:
 		n := n.(*ir.TypeAssertExpr)
-		e.expr(k.dotType(e.gd, n.Type(), n, "dot"), n.X)
+		e.expr(e.assertHole(k, n.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
 	case ir.ODYNAMICDOTTYPE, ir.ODYNAMICDOTTYPE2:
 		n := n.(*ir.DynamicTypeAssertExpr)
-		e.expr(k.dotType(e.gd, n.Type(), n, "dot"), n.X)
+		e.expr(e.assertHole(k, n.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
 		// n.T doesn't need to be tracked; it always points to read-only storage.
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
@@ -122,6 +122,9 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		n := n.(*ir.ConvExpr)
 		if !n.X.Type().IsInterface() && !types.IsDirectIface(n.X.Type()) {
 			k = e.spill(k, n)
+		}
+		if !n.X.Type().IsInterface() {
+			k = e.convHole(k, n.X.Type())
 		}
 		e.expr(k.note(e.gd, n, "interface-converted"), n.X)
 	case ir.OMAKEFACE:

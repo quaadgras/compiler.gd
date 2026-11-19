@@ -86,6 +86,13 @@ type location struct {
 	isDynRoot  bool          // the location was made as one, even if it is not one any more
 	dyn        []*location   // the dynamic roots that the location, or what it leads to, flows to
 	owners     []*location   // for the contents of tracked variables: those variables (shares.go)
+	recv       *recvRoot     // the location is the receiver of an interface call (recv.go)
+	recvs      []*location   // the receiver roots that the location, or what it leads to, reaches on a raw path
+	recvOver   bool          // too many to list: what flows here is shared
+	conv       *types.Type   // the location is a conversion of a pointer of this type to an interface
+	assert     bool          // the location is what an interface was asserted to hold, of a type that is not an interface
+	rawgen     uint32        // walkOne: the walk that reached the location on a raw path
+	rawDerefs  int           // walkOne: the least dereferences of such a path
 	reassigned bool          // has this variable been reassigned?
 	addrtaken  bool          // has this variable's address been taken?
 	param      bool          // is this variable a parameter (ONAME of class ir.PPARAM)?

@@ -167,6 +167,13 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.dynCall, e.dynArg = dyn, dynFirst-1
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
 				e.callArgs, e.dynCall = nil, nil
+				if call.Op() == ir.OCALLINTER {
+					// The receiver of a method that is only known
+					// when the program runs (recv.go).
+					if sel, ok := call.Fun.(*ir.SelectorExpr); ok && sel.Op() == ir.ODOTINTER {
+						k = e.recvHole(sel.X.Type(), sel.Sel)
+					}
+				}
 				argument(k, recvArg)
 			}
 			for i := range fntype.Params() {

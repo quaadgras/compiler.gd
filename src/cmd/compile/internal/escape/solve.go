@@ -83,6 +83,14 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	root.derefs = 0
 	root.dst = nil
 
+	// The paths to a receiver of an interface call that go through
+	// no conversion to an interface (recv.go).
+	trackRaw := tracksRecv(root)
+	if trackRaw {
+		root.rawgen = walkgen
+		root.rawDerefs = 0
+	}
+
 	if root.hasAttr(attrCalls) {
 		if clo, ok := root.n.(*ir.ClosureExpr); ok {
 			if fn := clo.Func; b.inMutualBatch(fn.Nname) && !fn.ClosureResultsLost() {
@@ -224,6 +232,36 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 		}
 
+		lraw := trackRaw && l.rawgen == walkgen
+		rawDerefs := max(l.rawDerefs, 0)
+		if lraw && l != root {
+			if l.param {
+				b.noteParamRecvs(l, root, rawDerefs)
+			}
+			if b.addRecv(l, root) {
+				enqueue(l)
+				for _, o := range l.owners {
+					if b.addRecv(o, l) {
+						enqueue(o)
+					}
+				}
+				// A conversion whose type has a method that may
+				// share its receiver, and a location with more
+				// roots than it lists: what flows there is shared.
+				if l.recvOver || l.conv != nil && !b.convOK(l) {
+					newAttrs |= attrSharesValue | attrSharesDeep
+				}
+			}
+			if l.assert {
+				// Reached from an interface otherwise than by
+				// its methods.
+				newAttrs |= attrSharesValue | attrSharesDeep
+			}
+		}
+		// What flows into a conversion is the conversion's to answer
+		// for, and what flows into an assertion is shared.
+		srcRaw := lraw && l.conv == nil && !l.assert
+
 		if newAttrs&^l.attrs != 0 {
 			l.attrs |= newAttrs
 			enqueue(l)
@@ -269,15 +307,25 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 						want |= attrDynSharesValue
 					}
 				}
-				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) {
+				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) && !(srcRaw && b.wantsRecv(edge.src, root)) {
 					continue
 				}
 			}
-			if edge.src.walkgen != walkgen || edge.src.derefs > d {
+			closer := edge.src.walkgen != walkgen || edge.src.derefs > d
+			if closer {
 				edge.src.walkgen = walkgen
 				edge.src.derefs = d
 				edge.src.dst = l
 				edge.src.dstEdgeIdx = i
+			}
+			if srcRaw {
+				if rd := rawDerefs + edge.derefs; edge.src.rawgen != walkgen || edge.src.rawDerefs > rd {
+					edge.src.rawgen = walkgen
+					edge.src.rawDerefs = rd
+					closer = true
+				}
+			}
+			if closer {
 				// Check if already queued in todo.
 				if edge.src.queuedWalkOne != walkgen {
 					edge.src.queuedWalkOne = walkgen // Mark queued for this walkgen.

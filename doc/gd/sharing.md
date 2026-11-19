@@ -408,11 +408,45 @@ because the callee is unknown.
     function reads a mask that says "shared" (the call panics after the
     arguments are evaluated, as before).
   - Not yet: a callee that is a parameter of the allocating function,
-    for objects allocated before the call's statement; receivers of
-    interface calls (they flow to the heap, so a receiver is never a
-    local object today and "through the receiver" never applies);
+    for objects allocated before the call's statement;
     `r.list = append(r.list, p)` in the callee (deeper than the
     receiver: shared).
+- **Receivers of interface calls** (`escape/recv.go`). The method is
+  only known when the program runs, but the object is allocated with a
+  type, and the type says what the methods are: this is the rule above
+  with the callee known from the type. The receiver of `i.M()` flows to
+  a *receiver root* (the heap for escaping, with the interface type and
+  `M`), and a conversion of a pointer to an interface type has a
+  location that the pointer flows through, with the pointer's type.
+  - A conversion that reaches a receiver root by a path with no other
+    conversion on it (a *raw* path: the solver keeps, for the walks from
+    these roots, the least dereferences of such paths apart) is checked:
+    the method `M` of its type must not let another goroutine reach its
+    receiver or what the receiver leads to, nor return it, nor store it
+    through another parameter (the method's `ParamShare`; a method that
+    is not analysed yet, or is not Go, fails). If one fails, what was
+    converted is shared, as before. If all pass, the root says nothing
+    of what was converted: `use(&Sq{})` with `func use(s Shape)` leaves
+    the object local, and what `(*Sq).Grow` stores through its receiver
+    is local by the receiver's address.
+  - A parameter of an interface type that is itself the receiver, of
+    methods of its own type, says so (`ParamShare.Recv`, exported), and
+    a caller's argument flows to a receiver root for any method of that
+    type. The parameter is shared in the escape masks: a caller that
+    does not know the function cannot check.
+  - Everything else that reaches a receiver root on a raw path holds or
+    leads to an interface of a type that is not known here: an
+    allocation the receiver is loaded from, the result of a call (the
+    bit for results is clear), a parameter that is not the receiver
+    (shared at that depth). A value that an interface was asserted to
+    hold (`i.(*T)`, a case of a type switch) has a location too: what is
+    reached from it is reached from the interface without its methods,
+    so if a raw path gets there, the interface's object is shared.
+  - `-d=nolocalrecv` turns it off. Not yet: a receiver that the method
+    returns (`func (b *B) Self() I`); methods that are analysed after
+    the function that converts (interface calls are not edges of the
+    order in which functions are analysed); values that are not
+    pointers (the box that `convT` makes is not tagged).
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -434,11 +468,9 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
 
 ### Next
 
-1. **Receivers of interface calls** as containers: the object behind
-   an interface that is only called, never stored, could stay local,
-   which is what makes "stored through the receiver" useful. Then
-   callees that are parameters, consulted where the object is
-   allocated.
+1. Callees that are parameters, consulted where the object is
+   allocated. Receivers: results that are the receiver, and methods
+   analysed before the functions that convert to their interfaces.
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the

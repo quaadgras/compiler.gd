@@ -373,6 +373,13 @@ func (b *batch) markLocal(loc *location) {
 		return
 	}
 	ret := loc.hasAttr(attrReturned)
+	if loc.hasRecv() {
+		// It leads to the receiver of a method that is not known.
+		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
+			fmt.Printf("%s: %v is not local, a method is called on what it holds\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
+		}
+		return
+	}
 	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
