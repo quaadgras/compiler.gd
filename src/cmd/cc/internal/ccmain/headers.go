@@ -1730,6 +1730,14 @@ int vsscanf(const char *restrict s, const char *restrict format, va_list arg);
 typedef struct { long long __pos; } fpos_t;
 int fgetpos(FILE *restrict stream, fpos_t *restrict pos);
 int fsetpos(FILE *stream, const fpos_t *pos);
+long getline(char **restrict lineptr, size_t *restrict n, FILE *restrict stream);
+long getdelim(char **restrict lineptr, size_t *restrict n, int delim, FILE *restrict stream);
+int asprintf(char **restrict strp, const char *restrict fmt, ...);
+int vasprintf(char **restrict strp, const char *restrict fmt, va_list ap);
+int dprintf(int fd, const char *restrict format, ...);
+int vdprintf(int fd, const char *restrict format, va_list ap);
+FILE *fmemopen(void *restrict buf, size_t size, const char *restrict mode);
+FILE *open_memstream(char **bufp, size_t *sizep);
 #endif
 `,
 	"stdlib.h": `#ifndef __CC_STDLIB_H
@@ -1795,6 +1803,9 @@ int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
 int mkstemp(char *template);
 char *realpath(const char *restrict path, char *restrict resolved);
+void *reallocarray(void *ptr, size_t nmemb, size_t size);
+void qsort_r(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *, void *), void *arg);
+char *mkdtemp(char *template);
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,
@@ -1894,6 +1905,8 @@ size_t strlcpy(char *restrict s1, const char *restrict s2, size_t n);
 size_t strlcat(char *restrict s1, const char *restrict s2, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
 size_t strxfrm(char *restrict s1, const char *restrict s2, size_t n);
+char *strsep(char **restrict stringp, const char *restrict delim);
+char *strsignal(int sig);
 #endif
 `,
 	"sys/types.h": `#ifndef __CC_SYS_TYPES_H

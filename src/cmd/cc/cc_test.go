@@ -220,6 +220,49 @@ func TestLibc(t *testing.T) {
 	}
 }
 
+// TestUtil compares the common extensions of glibc and musl (getopt_long,
+// err.h, glob.h, search.h, iconv.h, getline, fmemopen and others) of
+// testdata/util.c with gcc's (and its C library's). Both programs run in
+// a directory of their own, where they write files, and only their
+// standard output is compared.
+func TestUtil(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/util.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "util")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir()
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ccbin := filepath.Join(t.TempDir(), "util")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).
