@@ -283,3 +283,32 @@ func WaitUntil(ch <-chan struct{}, deadline time.Time) bool {
 		return false
 	}
 }
+
+// FdHold returns fd's open file, holding a reference to it (as a
+// descriptor does), or nil if fd is not one: what SCM_RIGHTS sends.
+func FdHold(fd int32) *Ofile {
+	FdMu.Lock()
+	defer FdMu.Unlock()
+	e := FdEnt(fd)
+	if e == nil {
+		return nil
+	}
+	e.Of.Refs++
+	return e.Of
+}
+
+// FdInstallHeld makes a new descriptor of of, which FdHold held: what
+// SCM_RIGHTS receives.
+func FdInstallHeld(of *Ofile, cloexec bool) int32 {
+	FdMu.Lock()
+	defer FdMu.Unlock()
+	return fdInstall(&FdEntry{Of: of, Cloexec: cloexec}, 0)
+}
+
+// DropHeld drops a reference FdHold held, closing the file if it was
+// the last: SCM_RIGHTS's descriptors that no one received.
+func DropHeld(of *Ofile) {
+	FdMu.Lock()
+	defer FdMu.Unlock()
+	of.Release()
+}

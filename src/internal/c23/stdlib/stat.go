@@ -22,7 +22,9 @@ func Setenv(name, value c23.Ptr, overwrite int32) int32 {
 	if _, ok := os.LookupEnv(n); ok && overwrite == 0 {
 		return 0
 	}
-	return c23.ErrRet(os.Setenv(n, c23.GoString(value)))
+	err := os.Setenv(n, c23.GoString(value))
+	envChanged()
+	return c23.ErrRet(err)
 }
 
 func Unsetenv(name c23.Ptr) int32 {
@@ -30,7 +32,9 @@ func Unsetenv(name c23.Ptr) int32 {
 	if !envName(n) {
 		return -1
 	}
-	return c23.ErrRet(os.Unsetenv(n))
+	err := os.Unsetenv(n)
+	envChanged()
+	return c23.ErrRet(err)
 }
 
 // envName reports whether n may name an environment variable: not empty

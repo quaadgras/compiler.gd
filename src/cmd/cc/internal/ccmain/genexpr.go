@@ -103,7 +103,7 @@ func (g *gen) globalName(s *symbol) string {
 	if s.kind == symVar && !s.t.isComplete() {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
-	if s.kind == symVar && s.storage == sExtern && !s.defined {
+	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
 	return n

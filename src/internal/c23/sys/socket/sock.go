@@ -94,8 +94,16 @@ const (
 )
 
 type dgram struct {
-	b    []byte
-	from net.Addr
+	b      []byte
+	from   net.Addr
+	rights []*c23.Ofile // SCM_RIGHTS's, from the other end of a socketpair
+}
+
+// A rightsAt is what SCM_RIGHTS sent on a stream socketpair with the
+// byte at off: the receiver gets them with the read that takes it.
+type rightsAt struct {
+	off int64
+	ofs []*c23.Ofile
 }
 
 // A socket is a descriptor's c23.Special.
@@ -122,6 +130,14 @@ type socket struct {
 	dqErr error
 
 	soError int32 // SO_ERROR, of a connect in progress
+
+	// A socketpair's: the other end, to which datagrams and SCM_RIGHTS
+	// go directly; a stream's bytes read and written, and the rights
+	// that came with bytes not yet read.
+	mate         *socket
+	rdOff, wrOff int64
+	rightsIn     []rightsAt
+	dialed       bool // an AF_UNIX datagram socket that connect dialed
 
 	// Options.
 	reuseaddr, reuseport, keepalive, nodelay, broadcast int32
@@ -168,8 +184,8 @@ func Socket(family, typ, proto int32) int32 {
 	}
 	switch {
 	case typ == SOCK_STREAM && (proto == 0 || proto == IPPROTO_TCP && family != AF_UNIX):
-	case typ == SOCK_DGRAM && family != AF_UNIX && (proto == 0 || proto == IPPROTO_UDP):
-	case typ == SOCK_STREAM || typ == SOCK_DGRAM && family != AF_UNIX:
+	case typ == SOCK_DGRAM && (proto == 0 || proto == IPPROTO_UDP && family != AF_UNIX):
+	case typ == SOCK_STREAM || typ == SOCK_DGRAM:
 		return errno(c23.EPROTONOSUPPORT)
 	default:
 		return errno(c23.ESOCKTNOSUPPORT)
@@ -185,20 +201,27 @@ func install(s *socket, flags int32) int32 {
 	return c23.FdNewSpecial(s, fl, flags&SOCK_CLOEXEC != 0)
 }
 
-// Socketpair is socketpair: AF_UNIX stream sockets, connected in memory.
+// Socketpair is socketpair: AF_UNIX stream or datagram sockets,
+// connected in memory, which can send each other descriptors.
 func Socketpair(family, typ, proto int32, sv Ptr) int32 {
 	flags := typ & (SOCK_NONBLOCK | SOCK_CLOEXEC)
 	typ &^= flags
 	if family != AF_UNIX {
 		return errno(c23.EAFNOSUPPORT)
 	}
-	if typ != SOCK_STREAM {
+	if typ != SOCK_STREAM && typ != SOCK_DGRAM {
 		return errno(c23.EOPNOTSUPP)
 	}
-	a, b := newPair()
 	sa, sb := newSocket(family, typ, proto), newSocket(family, typ, proto)
-	sa.connected(a)
-	sb.connected(b)
+	sa.mate, sb.mate = sb, sa
+	if typ == SOCK_STREAM {
+		a, b := newPair()
+		sa.connected(a)
+		sb.connected(b)
+	} else {
+		sa.state, sb.state = stConnected, stConnected
+		sa.peer, sb.peer = &net.UnixAddr{Net: "unixgram"}, &net.UnixAddr{Net: "unixgram"}
+	}
 	c23.Store32(sv, uint32(install(sa, flags)))
 	c23.Store32(c23.Add(sv, 4), uint32(install(sb, flags)))
 	return 0
@@ -220,6 +243,8 @@ func (s *socket) connected(c net.Conn) {
 // network is net's name of the socket's kind.
 func (s *socket) network() string {
 	switch {
+	case s.family == AF_UNIX && s.typ == SOCK_DGRAM:
+		return "unixgram"
 	case s.family == AF_UNIX:
 		return "unix"
 	case s.typ == SOCK_DGRAM && s.family == AF_INET:
@@ -297,9 +322,9 @@ func (s *socket) packet(pc net.PacketConn) {
 				c23.PollNotify()
 				return
 			}
-			if s.peer == nil || sameAddr(from, s.peer) {
+			if s.peer == nil || s.dialed || sameAddr(from, s.peer) {
 				if len(s.dq) < 256 {
-					s.dq = append(s.dq, dgram{append([]byte(nil), buf[:n]...), from})
+					s.dq = append(s.dq, dgram{append([]byte(nil), buf[:n]...), from, nil})
 				}
 			}
 			s.cond.Broadcast()
@@ -310,6 +335,9 @@ func (s *socket) packet(pc net.PacketConn) {
 }
 
 func sameAddr(a, b net.Addr) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
 	ua, ok1 := a.(*net.UDPAddr)
 	ub, ok2 := b.(*net.UDPAddr)
 	if ok1 && ok2 {
@@ -425,7 +453,18 @@ func Connect(fd int32, addr Ptr, n uint32) int32 {
 	s.mu.Lock()
 	if s.typ == SOCK_DGRAM {
 		defer s.mu.Unlock()
-		if s.pc == nil {
+		if s.mate != nil {
+			return errno(c23.EISCONN)
+		}
+		if s.pc == nil && s.family == AF_UNIX {
+			// Unbound: connected, with no name of its own.
+			c, err := net.DialUnix("unixgram", nil, a.(*net.UnixAddr))
+			if err != nil {
+				return fail(err)
+			}
+			s.packet(c)
+			s.dialed = true
+		} else if s.pc == nil {
 			pc, err := net.ListenPacket(s.network(), wildcard(s.family))
 			if err != nil {
 				return fail(err)
@@ -528,18 +567,43 @@ func Shutdown(fd, how int32) int32 {
 // The c23.Special methods.
 
 func (s *socket) Read(b []byte, nonblock bool) (int, error) {
-	n, _, err := s.recv(b, nonblock, false, false)
+	n, _, rights, err := s.recv(b, nonblock, false, false)
+	drop(rights)
 	return n, err
 }
 
 func (s *socket) Write(b []byte, nonblock bool) (int, error) {
-	return s.send(b, nil)
+	return s.send(b, nil, nil)
 }
 
 func (s *socket) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.state = stClosed
+	// Descriptors sent here that no one received (Close runs with the
+	// descriptor table locked: Release, not DropHeld).
+	for _, d := range s.dq {
+		for _, of := range d.rights {
+			of.Release()
+		}
+	}
+	s.dq = nil
+	for _, r := range s.rightsIn {
+		for _, of := range r.ofs {
+			of.Release()
+		}
+	}
+	s.rightsIn = nil
+	if m := s.mate; m != nil && s.typ == SOCK_DGRAM {
+		go func() { // not under s.mu: the mate may be sending to s
+			m.mu.Lock()
+			m.dqErr = io.EOF
+			m.mate = nil
+			m.cond.Broadcast()
+			m.mu.Unlock()
+			c23.PollNotify()
+		}()
+	}
 	var err error
 	if s.conn != nil {
 		err = s.conn.Close()
@@ -597,13 +661,13 @@ func (s *socket) Ready() int16 {
 
 // recv receives into b: from the connection, or a datagram (from is its
 // sender).
-func (s *socket) recv(b []byte, nonblock, peek, waitall bool) (int, net.Addr, error) {
+func (s *socket) recv(b []byte, nonblock, peek, waitall bool) (int, net.Addr, []*c23.Ofile, error) {
 	s.mu.Lock()
 	if s.typ == SOCK_DGRAM {
 		defer s.mu.Unlock()
-		if s.pc == nil {
+		if s.pc == nil && s.mate == nil && s.dqErr == nil {
 			if nonblock {
-				return 0, nil, c23.ErrnoError(c23.EAGAIN)
+				return 0, nil, nil, c23.ErrnoError(c23.EAGAIN)
 			}
 			for s.pc == nil && s.state != stClosed {
 				s.cond.Wait()
@@ -621,26 +685,27 @@ func (s *socket) recv(b []byte, nonblock, peek, waitall bool) (int, net.Addr, er
 		}
 		for len(s.dq) == 0 && s.dqErr == nil {
 			if nonblock || expired {
-				return 0, nil, c23.ErrnoError(c23.EAGAIN)
+				return 0, nil, nil, c23.ErrnoError(c23.EAGAIN)
 			}
 			s.cond.Wait()
 		}
 		if len(s.dq) == 0 {
-			return 0, nil, s.dqErr
+			return 0, nil, nil, s.dqErr
 		}
 		d := s.dq[0]
-		if !peek {
-			s.dq = s.dq[1:]
+		if peek {
+			return copy(b, d.b), d.from, nil, nil
 		}
-		return copy(b, d.b), d.from, nil
+		s.dq = s.dq[1:]
+		return copy(b, d.b), d.from, d.rights, nil
 	}
 	if s.conn == nil {
 		s.mu.Unlock()
-		return 0, nil, c23.ErrnoError(c23.ENOTCONN)
+		return 0, nil, nil, c23.ErrnoError(c23.ENOTCONN)
 	}
 	if s.shutRd {
 		s.mu.Unlock()
-		return 0, nil, io.EOF
+		return 0, nil, nil, io.EOF
 	}
 	ra, peer := s.ra, s.conn.RemoteAddr()
 	var deadline time.Time
@@ -657,13 +722,63 @@ func (s *socket) recv(b []byte, nonblock, peek, waitall bool) (int, net.Addr, er
 	if n > 0 {
 		err = nil
 	}
-	return n, peer, err
+	// The rights that came with the bytes read.
+	var rights []*c23.Ofile
+	if !peek && n > 0 {
+		s.mu.Lock()
+		s.rdOff += int64(n)
+		for len(s.rightsIn) > 0 && s.rightsIn[0].off < s.rdOff {
+			rights = append(rights, s.rightsIn[0].ofs...)
+			s.rightsIn = s.rightsIn[1:]
+		}
+		s.mu.Unlock()
+	}
+	return n, peer, rights, err
+}
+
+// drop releases rights that a read without a msghdr cannot receive.
+func drop(rights []*c23.Ofile) {
+	for _, of := range rights {
+		c23.DropHeld(of)
+	}
 }
 
 // send sends b: on the connection, or as a datagram to to (or the
 // connected peer).
-func (s *socket) send(b []byte, to net.Addr) (int, error) {
+func (s *socket) send(b []byte, to net.Addr, rights []*c23.Ofile) (int, error) {
 	s.mu.Lock()
+	if m := s.mate; m != nil {
+		s.mu.Unlock()
+		return s.sendMate(m, b, rights)
+	}
+	if len(rights) > 0 {
+		// Only a socketpair's ends, both this program's, can pass
+		// descriptors.
+		s.mu.Unlock()
+		drop(rights)
+		return 0, c23.ErrnoError(c23.EOPNOTSUPP)
+	}
+	if s.typ == SOCK_DGRAM && s.dialed {
+		pc := s.pc
+		s.mu.Unlock()
+		if to != nil {
+			return 0, c23.ErrnoError(c23.EISCONN)
+		}
+		return pc.(net.Conn).Write(b)
+	}
+	if s.typ == SOCK_DGRAM && s.family == AF_UNIX && s.pc == nil {
+		// Unbound and unconnected: a datagram with no sender's name.
+		s.mu.Unlock()
+		if to == nil {
+			return 0, c23.ErrnoError(c23.EDESTADDRREQ)
+		}
+		c, err := net.DialUnix("unixgram", nil, to.(*net.UnixAddr))
+		if err != nil {
+			return 0, err
+		}
+		defer c.Close()
+		return c.Write(b)
+	}
 	if s.typ == SOCK_DGRAM {
 		if to == nil {
 			to = s.peer
@@ -706,6 +821,44 @@ func (s *socket) send(b []byte, to net.Addr) (int, error) {
 	return n, err
 }
 
+// sendMate sends on a socketpair: a datagram goes into the other end's
+// queue, with its rights; a stream's rights wait there for the byte they
+// came with.
+func (s *socket) sendMate(m *socket, b []byte, rights []*c23.Ofile) (int, error) {
+	if s.typ == SOCK_DGRAM {
+		m.mu.Lock()
+		if m.state == stClosed {
+			m.mu.Unlock()
+			drop(rights)
+			return 0, c23.ErrnoError(c23.ECONNREFUSED)
+		}
+		m.dq = append(m.dq, dgram{append([]byte(nil), b...), &net.UnixAddr{Net: "unixgram"}, rights})
+		m.cond.Broadcast()
+		m.mu.Unlock()
+		c23.PollNotify()
+		return len(b), nil
+	}
+	s.mu.Lock()
+	c, shut, off := s.conn, s.shutWr, s.wrOff
+	s.mu.Unlock()
+	if shut {
+		drop(rights)
+		return 0, c23.ErrnoError(c23.EPIPE)
+	}
+	if len(rights) > 0 && len(b) > 0 {
+		m.mu.Lock()
+		m.rightsIn = append(m.rightsIn, rightsAt{off, rights})
+		m.mu.Unlock()
+	} else {
+		drop(rights)
+	}
+	n, err := c.Write(b)
+	s.mu.Lock()
+	s.wrOff += int64(n)
+	s.mu.Unlock()
+	return n, err
+}
+
 // Send is send.
 func Send(fd int32, buf Ptr, n uint64, flags int32) int64 {
 	return Sendto(fd, buf, n, flags, Ptr{}, 0)
@@ -725,7 +878,7 @@ func Sendto(fd int32, buf Ptr, n uint64, flags int32, addr Ptr, alen uint32) int
 		}
 		to = a
 	}
-	k, err := s.send(c23.BytesAt(buf, uintptr(n)), to)
+	k, err := s.send(c23.BytesAt(buf, uintptr(n)), to, nil)
 	if err != nil && k == 0 {
 		return int64(fail(err))
 	}
@@ -743,7 +896,8 @@ func Recvfrom(fd int32, buf Ptr, n uint64, flags int32, addr, alen Ptr) int64 {
 	if s == nil {
 		return -1
 	}
-	k, from, err := s.recv(c23.BytesAt(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
+	k, from, rights, err := s.recv(c23.BytesAt(buf, uintptr(n)), nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
+	drop(rights)
 	if err != nil && err != io.EOF {
 		return int64(fail(err))
 	}
@@ -800,11 +954,59 @@ func Sendmsg(fd int32, msg Ptr, flags int32) int64 {
 		}
 		to = a
 	}
-	k, err := s.send(b, to)
+	rights, e := controlRights(msg)
+	if e != 0 {
+		return int64(errno(e))
+	}
+	k, err := s.send(b, to, rights)
 	if err != nil && k == 0 {
 		return int64(fail(err))
 	}
 	return int64(k)
+}
+
+// Ancillary data: struct cmsghdr {size_t cmsg_len; int cmsg_level; int
+// cmsg_type;}, its data from CMSG_ALIGN(sizeof(struct cmsghdr)). Only
+// SCM_RIGHTS's descriptors are sent; other messages are ignored.
+const (
+	SCM_RIGHTS       = 1
+	MSG_CTRUNC       = 0x8
+	MSG_CMSG_CLOEXEC = 0x40000000
+)
+
+var cmsgHdr = (ws + 8 + ws - 1) / ws * ws
+
+func cmsgAlign(n int) int { return (n + ws - 1) / ws * ws }
+
+// controlRights holds the descriptors of msg's SCM_RIGHTS messages.
+func controlRights(msg Ptr) ([]*c23.Ofile, int32) {
+	ctl := c23.LoadPtr(c23.Add(msg, mCtl))
+	n := int(c23.LoadLong(c23.Add(msg, mCtlLen)))
+	if Addr(ctl) == 0 {
+		return nil, 0
+	}
+	var rights []*c23.Ofile
+	for off := 0; off+cmsgHdr <= n; {
+		c := c23.Add(ctl, off)
+		l := int(c23.LoadLong(c))
+		if l < cmsgHdr || off+l > n {
+			drop(rights)
+			return nil, c23.EINVAL
+		}
+		if int32(c23.Load32(c23.Add(c, ws))) == SOL_SOCKET && int32(c23.Load32(c23.Add(c, ws+4))) == SCM_RIGHTS {
+			for i := 0; cmsgHdr+4*i+4 <= l; i++ {
+				fd := int32(c23.Load32(c23.Add(c, cmsgHdr+4*i)))
+				of := c23.FdHold(fd)
+				if of == nil {
+					drop(rights)
+					return nil, c23.EBADF
+				}
+				rights = append(rights, of)
+			}
+		}
+		off += cmsgAlign(l)
+	}
+	return rights, 0
 }
 
 // Recvmsg is recvmsg.
@@ -819,8 +1021,9 @@ func Recvmsg(fd int32, msg Ptr, flags int32) int64 {
 		total += len(v)
 	}
 	b := make([]byte, total)
-	k, from, err := s.recv(b, nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
+	k, from, rights, err := s.recv(b, nonblock || flags&MSG_DONTWAIT != 0, flags&MSG_PEEK != 0, flags&MSG_WAITALL != 0)
 	if err != nil && err != io.EOF {
+		drop(rights)
 		return int64(fail(err))
 	}
 	rest := b[:k]
@@ -837,8 +1040,34 @@ func Recvmsg(fd int32, msg Ptr, flags int32) int64 {
 			c23.Store32(c23.Add(msg, mNameLen), 0)
 		}
 	}
-	c23.StoreLong(c23.Add(msg, mCtlLen), 0)
-	c23.Store32(c23.Add(msg, mFlags), 0)
+	// The descriptors received, as many as msg_control has room for;
+	// the rest are closed (MSG_CTRUNC).
+	var mflags int32
+	ctl := c23.LoadPtr(c23.Add(msg, mCtl))
+	room := int(c23.LoadLong(c23.Add(msg, mCtlLen)))
+	used := 0
+	if len(rights) > 0 {
+		fit := 0
+		if Addr(ctl) != 0 && room >= cmsgHdr {
+			fit = min(len(rights), (room-cmsgHdr)/4)
+		}
+		if fit < len(rights) {
+			mflags |= MSG_CTRUNC
+			drop(rights[fit:])
+		}
+		if fit > 0 {
+			c23.StoreLong(ctl, int64(cmsgHdr+4*fit))
+			c23.Store32(c23.Add(ctl, ws), SOL_SOCKET)
+			c23.Store32(c23.Add(ctl, ws+4), SCM_RIGHTS)
+			for i, of := range rights[:fit] {
+				fd := c23.FdInstallHeld(of, flags&MSG_CMSG_CLOEXEC != 0)
+				c23.Store32(c23.Add(ctl, cmsgHdr+4*i), uint32(fd))
+			}
+			used = cmsgAlign(cmsgHdr + 4*fit)
+		}
+	}
+	c23.StoreLong(c23.Add(msg, mCtlLen), int64(used))
+	c23.Store32(c23.Add(msg, mFlags), uint32(mflags))
 	return int64(k)
 }
 
@@ -1183,6 +1412,9 @@ func Decode(family, typ int32, p Ptr, n uint32) (net.Addr, int32) {
 		if len(b) == 0 {
 			return nil, c23.EINVAL
 		}
+		if typ == SOCK_DGRAM {
+			return &net.UnixAddr{Name: string(b), Net: "unixgram"}, 0
+		}
 		return &net.UnixAddr{Name: string(b), Net: "unix"}, 0
 	}
 	return nil, c23.EAFNOSUPPORT
@@ -1200,7 +1432,7 @@ func Encode(a net.Addr, family int32) []byte {
 	case *net.UnixAddr:
 		b := make([]byte, 2, 110)
 		b[0] = AF_UNIX
-		if a.Name != "" && a.Name != "@" {
+		if a != nil && a.Name != "" && a.Name != "@" {
 			b = append(append(b, a.Name...), 0)
 		}
 		return b

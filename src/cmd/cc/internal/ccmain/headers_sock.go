@@ -77,7 +77,8 @@ struct cmsghdr {
 	int cmsg_type;
 };
 #define CMSG_FIRSTHDR(m) ((size_t)(m)->msg_controllen >= sizeof(struct cmsghdr) ? (struct cmsghdr *)(m)->msg_control : (struct cmsghdr *)0)
-#define CMSG_NXTHDR(m, c) ((struct cmsghdr *)0)
+#define CMSG_NXTHDR(m, c) ((size_t)((unsigned char *)(c) + CMSG_ALIGN((c)->cmsg_len) - (unsigned char *)(m)->msg_control) + sizeof(struct cmsghdr) <= (size_t)(m)->msg_controllen ? (struct cmsghdr *)((unsigned char *)(c) + CMSG_ALIGN((c)->cmsg_len)) : (struct cmsghdr *)0)
+#define SCM_RIGHTS 1
 #define CMSG_ALIGN(n) (((n) + sizeof(size_t) - 1) & ~(sizeof(size_t) - 1))
 #define CMSG_DATA(c) ((unsigned char *)((struct cmsghdr *)(c) + 1))
 #define CMSG_SPACE(n) (CMSG_ALIGN(n) + CMSG_ALIGN(sizeof(struct cmsghdr)))
@@ -132,6 +133,7 @@ struct linger {
 #define MSG_EOR 0x80
 #define MSG_WAITALL 0x100
 #define MSG_NOSIGNAL 0x4000
+#define MSG_CMSG_CLOEXEC 0x40000000
 #define SHUT_RD 0
 #define SHUT_WR 1
 #define SHUT_RDWR 2

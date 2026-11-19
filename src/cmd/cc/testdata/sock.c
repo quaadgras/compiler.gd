@@ -332,6 +332,124 @@ static void pipes(void) {
 	printf("select closed %d %s\n", r, errno == EBADF ? "EBADF" : "?");
 }
 
+static void unix_dgram(void) {
+	unlink("dgram.srv");
+	unlink("dgram.cli");
+	int srv = socket(AF_UNIX, SOCK_DGRAM, 0);
+	struct sockaddr_un sa = {.sun_family = AF_UNIX};
+	strcpy(sa.sun_path, "dgram.srv");
+	int r = bind(srv, (struct sockaddr *)&sa, sizeof sa);
+	printf("dgram bind %d\n", r);
+	int cli = socket(AF_UNIX, SOCK_DGRAM, 0);
+	struct sockaddr_un ca = {.sun_family = AF_UNIX};
+	strcpy(ca.sun_path, "dgram.cli");
+	bind(cli, (struct sockaddr *)&ca, sizeof ca);
+	ssize_t k = sendto(cli, "one", 3, 0, (struct sockaddr *)&sa, sizeof sa);
+	sendto(cli, "two!", 4, 0, (struct sockaddr *)&sa, sizeof sa);
+	char buf[16];
+	struct sockaddr_un from;
+	socklen_t fl = sizeof from;
+	k = recvfrom(srv, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl);
+	printf("dgram recv %zd %.*s from %s\n", k, (int)k, buf, from.sun_path);
+	k = recv(srv, buf, 2, 0);
+	printf("dgram truncated %zd %.2s\n", k, buf);
+	sendto(srv, "back", 4, 0, (struct sockaddr *)&from, fl);
+	k = recv(cli, buf, sizeof buf, 0);
+	printf("dgram reply %zd %.*s\n", k, (int)k, buf);
+	int un = socket(AF_UNIX, SOCK_DGRAM, 0);
+	r = connect(un, (struct sockaddr *)&sa, sizeof sa);
+	k = send(un, "anon", 4, 0);
+	printf("dgram connected %d %zd\n", r, k);
+	k = recv(srv, buf, sizeof buf, 0);
+	printf("dgram anon %zd %.*s\n", k, (int)k, buf);
+	close(un);
+	close(cli);
+	close(srv);
+	unlink("dgram.srv");
+	unlink("dgram.cli");
+
+	int sv[2];
+	r = socketpair(AF_UNIX, SOCK_DGRAM, 0, sv);
+	send(sv[0], "abc", 3, 0);
+	send(sv[0], "de", 2, 0);
+	k = recv(sv[1], buf, sizeof buf, 0);
+	ssize_t k2 = recv(sv[1], buf + 8, sizeof buf - 8, 0);
+	printf("dgram pair %d %zd %zd\n", r, k, k2);
+	close(sv[0]);
+	close(sv[1]);
+}
+
+// sendfd sends fd over s with SCM_RIGHTS, and a byte.
+static ssize_t sendfd(int s, int fd) {
+	char c = 'x';
+	struct iovec iov = {&c, 1};
+	union {
+		struct cmsghdr h;
+		char buf[CMSG_SPACE(sizeof(int))];
+	} u;
+	memset(&u, 0, sizeof u);
+	struct msghdr m = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = sizeof u.buf};
+	struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+	h->cmsg_level = SOL_SOCKET;
+	h->cmsg_type = SCM_RIGHTS;
+	h->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(h), &fd, sizeof fd);
+	return sendmsg(s, &m, 0);
+}
+
+// recvfd receives a descriptor sent with a byte, or -1; room is the
+// control buffer's size.
+static int recvfd(int s, size_t room, int *flags) {
+	char c;
+	struct iovec iov = {&c, 1};
+	union {
+		struct cmsghdr h;
+		char buf[64];
+	} u;
+	struct msghdr m = {.msg_iov = &iov, .msg_iovlen = 1, .msg_control = u.buf, .msg_controllen = room};
+	if (recvmsg(s, &m, 0) != 1)
+		return -2;
+	*flags = m.msg_flags;
+	struct cmsghdr *h = CMSG_FIRSTHDR(&m);
+	if (h == NULL || h->cmsg_type != SCM_RIGHTS)
+		return -1;
+	int fd;
+	memcpy(&fd, CMSG_DATA(h), sizeof fd);
+	return fd;
+}
+
+static void rights(void) {
+	for (int type = SOCK_STREAM; type <= SOCK_DGRAM; type++) {
+		int sv[2], p[2];
+		socketpair(AF_UNIX, type, 0, sv);
+		pipe(p);
+		ssize_t k = sendfd(sv[0], p[1]);
+		close(p[1]);
+		int flags = 0;
+		int fd = recvfd(sv[1], 64, &flags);
+		printf("rights %s sent %zd got %d flags %d", type == SOCK_STREAM ? "stream" : "dgram", k, fd >= 0, flags);
+		write(fd, "via fd", 6);
+		close(fd);
+		char buf[16];
+		k = read(p[0], buf, sizeof buf);
+		printf(", pipe read %zd %.*s", k, (int)k, buf);
+		k = read(p[0], buf, sizeof buf);
+		printf(", then %zd\n", k);
+		close(p[0]);
+
+		// No room for the descriptor: it is closed, MSG_CTRUNC.
+		pipe(p);
+		sendfd(sv[0], p[1]);
+		close(p[1]);
+		fd = recvfd(sv[1], 0, &flags);
+		k = read(p[0], buf, sizeof buf);
+		printf("rights truncated %d ctrunc %d, writer gone %zd\n", fd, (flags & MSG_CTRUNC) != 0, k);
+		close(p[0]);
+		close(sv[0]);
+		close(sv[1]);
+	}
+}
+
 int main(void) {
 	setvbuf(stdout, NULL, _IONBF, 0);
 	tcp();
@@ -342,5 +460,7 @@ int main(void) {
 	resolve();
 	addresses();
 	pipes();
+	unix_dgram();
+	rights();
 	return 0;
 }

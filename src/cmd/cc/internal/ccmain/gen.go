@@ -286,6 +286,11 @@ func (g *gen) unit() {
 }
 
 func (g *gen) globalVar(s *symbol) {
+	if v, ok := libcVars[s.name]; ok && s.storage == sExtern && !s.defined {
+		// The library's object (headers_env.go).
+		fmt.Fprintf(&g.vars, "var %s = %s()\n", g.names[s], g.libcFunc(v))
+		return
+	}
 	if s.t.kind == kArray && s.t.n < 0 {
 		g.errorf(s.p, "array %q has no length", s.name)
 	}
