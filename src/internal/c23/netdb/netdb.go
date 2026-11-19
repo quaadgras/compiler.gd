@@ -340,7 +340,8 @@ var (
 // HErrnoLocation is where h_errno is.
 func HErrnoLocation() Ptr { return hErrno.Get() }
 
-func setHErrno(e int32) { c23.Store32(hErrno.Get(), uint32(e)) }
+// SetHErrno sets h_errno (resolv.h's functions' too).
+func SetHErrno(e int32) { c23.Store32(hErrno.Get(), uint32(e)) }
 
 // Gethostbyname is gethostbyname: IPv4 addresses.
 func Gethostbyname(name Ptr) Ptr { return Gethostbyname2(name, AF_INET) }
@@ -357,9 +358,9 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 		addrs, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
 		if err != nil {
 			if gaiErr(err) == EAI_AGAIN {
-				setHErrno(TRY_AGAIN)
+				SetHErrno(TRY_AGAIN)
 			} else {
-				setHErrno(HOST_NOT_FOUND)
+				SetHErrno(HOST_NOT_FOUND)
 			}
 			return Ptr{}
 		}
@@ -377,7 +378,7 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 		}
 	}
 	if len(bs) == 0 {
-		setHErrno(NO_DATA)
+		SetHErrno(NO_DATA)
 		return Ptr{}
 	}
 	return newHostent(host, family, bs)
@@ -392,12 +393,12 @@ func Gethostbyaddr(addr Ptr, n uint32, family int32) Ptr {
 	case family == AF_INET6 && n == 16:
 		ip = netip.AddrFrom16([16]byte(c23.BytesAt(addr, 16)))
 	default:
-		setHErrno(NO_RECOVERY)
+		SetHErrno(NO_RECOVERY)
 		return Ptr{}
 	}
 	names, err := net.LookupAddr(ip.String())
 	if err != nil || len(names) == 0 {
-		setHErrno(HOST_NOT_FOUND)
+		SetHErrno(HOST_NOT_FOUND)
 		return Ptr{}
 	}
 	return newHostent(strings.TrimSuffix(names[0], "."), family, [][]byte{c23.BytesAt(addr, uintptr(n))})
