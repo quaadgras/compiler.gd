@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line copy_file_range_unix.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line copy_file_range_unix.go:6:1*/
 package poll
 
 import "internal/syscall/unix"
@@ -62,7 +63,7 @@ func freebsd_copyFileRange(dst, src *Freebsd_FD, max int) (written int64, err er
 		return 0, err
 	}
 	defer src.readUnlock()
-	return freebsd_ignoringEINTR2(func() (int64, error) {
+	return ignoringEINTR2(func() (int64, error) {
 		n, err := unix.Freebsd_CopyFileRange(src.Sysfd, nil, dst.Sysfd, nil, max, 0)
 		return int64(n), err
 	})

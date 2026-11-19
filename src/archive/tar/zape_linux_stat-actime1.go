@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line stat_actime1.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line stat_actime1.go:6:1*/
 package tar
 
 import (
@@ -14,9 +15,9 @@ import (
 )
 
 func linux_statAtime(st *syscall.Linux_Stat_t) time.Time {
-	return time.Linux_Unix(st.Atim.Linux_Unix())
+	return time.Unix(st.Atim.Unix())
 }
 
 func linux_statCtime(st *syscall.Linux_Stat_t) time.Time {
-	return time.Linux_Unix(st.Ctim.Linux_Unix())
+	return time.Unix(st.Ctim.Unix())
 }

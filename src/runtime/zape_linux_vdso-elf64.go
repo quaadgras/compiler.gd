@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line vdso_elf64.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line vdso_elf64.go:6:1*/
 package runtime
 
 // ELF64 structure definitions for use by the vDSO loader
@@ -31,19 +32,19 @@ type linux_elfVerdef struct {
 
 type linux_elfEhdr struct {
 	e_ident     [linux__EI_NIDENT]byte /* Magic number and other info */
-	e_type      uint16                 /* Object file type */
-	e_machine   uint16                 /* Architecture */
-	e_version   uint32                 /* Object file version */
-	e_entry     uint64                 /* Entry point virtual address */
-	e_phoff     uint64                 /* Program header table file offset */
-	e_shoff     uint64                 /* Section header table file offset */
-	e_flags     uint32                 /* Processor-specific flags */
-	e_ehsize    uint16                 /* ELF header size in bytes */
-	e_phentsize uint16                 /* Program header table entry size */
-	e_phnum     uint16                 /* Program header table entry count */
-	e_shentsize uint16                 /* Section header table entry size */
-	e_shnum     uint16                 /* Section header table entry count */
-	e_shstrndx  uint16                 /* Section header string table index */
+	e_type      uint16           /* Object file type */
+	e_machine   uint16           /* Architecture */
+	e_version   uint32           /* Object file version */
+	e_entry     uint64           /* Entry point virtual address */
+	e_phoff     uint64           /* Program header table file offset */
+	e_shoff     uint64           /* Section header table file offset */
+	e_flags     uint32           /* Processor-specific flags */
+	e_ehsize    uint16           /* ELF header size in bytes */
+	e_phentsize uint16           /* Program header table entry size */
+	e_phnum     uint16           /* Program header table entry count */
+	e_shentsize uint16           /* Section header table entry size */
+	e_shnum     uint16           /* Section header table entry count */
+	e_shstrndx  uint16           /* Section header string table index */
 }
 
 type linux_elfPhdr struct {

@@ -2,144 +2,30 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line fd_poll_runtime.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_poll_runtime.go:6:1*/
 package poll
 
 import (
-	"errors"
-
+	
+	
 	"syscall"
 	"time"
 	_ "unsafe" // for go:linkname
-)
-
-// runtimeNano returns the current value of the runtime clock in nanoseconds.
-//
-//go:linkname freebsd_runtimeNano runtime.nanotime
-func freebsd_runtimeNano() int64
-
-//go:linkname freebsd_runtime_pollServerInit internal/poll.runtime_pollServerInit
-func freebsd_runtime_pollServerInit()
-
-//go:linkname freebsd_runtime_pollOpen internal/poll.runtime_pollOpen
-func freebsd_runtime_pollOpen(fd uintptr) (uintptr, int)
-
-//go:linkname freebsd_runtime_pollClose internal/poll.runtime_pollClose
-func freebsd_runtime_pollClose(ctx uintptr)
-
-//go:linkname freebsd_runtime_pollWait internal/poll.runtime_pollWait
-func freebsd_runtime_pollWait(ctx uintptr, mode int) int
-
-//go:linkname freebsd_runtime_pollWaitCanceled internal/poll.runtime_pollWaitCanceled
-func freebsd_runtime_pollWaitCanceled(ctx uintptr, mode int)
-
-//go:linkname freebsd_runtime_pollReset internal/poll.runtime_pollReset
-func freebsd_runtime_pollReset(ctx uintptr, mode int) int
-
-//go:linkname freebsd_runtime_pollSetDeadline internal/poll.runtime_pollSetDeadline
-func freebsd_runtime_pollSetDeadline(ctx uintptr, d int64, mode int)
-
-//go:linkname freebsd_runtime_pollUnblock internal/poll.runtime_pollUnblock
-func freebsd_runtime_pollUnblock(ctx uintptr)
-
-//go:linkname freebsd_runtime_isPollServerDescriptor internal/poll.runtime_isPollServerDescriptor
-func freebsd_runtime_isPollServerDescriptor(fd uintptr) bool
+)/*line fd_poll_runtime.go:20:25*//*line fd_poll_runtime.go:22:30*//*line fd_poll_runtime.go:23:49*//*line fd_poll_runtime.go:24:36*//*line fd_poll_runtime.go:25:49*//*line fd_poll_runtime.go:26:53*//*line fd_poll_runtime.go:27:50*//*line fd_poll_runtime.go:28:61*//*line fd_poll_runtime.go:29:38*//*line fd_poll_runtime.go:30:53*//*line fd_poll_runtime.go:34:2*//*line fd_poll_runtime.go:36:25*/
 
 func (pd *pollDesc) freebsd_init(fd *Freebsd_FD) error {
-	serverInit.Do(freebsd_runtime_pollServerInit)
-	ctx, errno := freebsd_runtime_pollOpen(uintptr(fd.Sysfd))
+	serverInit.Do(runtime_pollServerInit)
+	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))
 	if errno != 0 {
 		return freebsd_errnoErr(syscall.Errno(errno))
 	}
 	pd.runtimeCtx = ctx
 	return nil
-}
-
-func (pd *pollDesc) freebsd_close() {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	freebsd_runtime_pollClose(pd.runtimeCtx)
-	pd.runtimeCtx = 0
-}
-
-// Evict evicts fd from the pending list, unblocking any I/O running on fd.
-func (pd *pollDesc) freebsd_evict() {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	freebsd_runtime_pollUnblock(pd.runtimeCtx)
-}
-
-func (pd *pollDesc) freebsd_prepare(mode int, isFile bool) error {
-	if pd.runtimeCtx == 0 {
-		return nil
-	}
-	res := freebsd_runtime_pollReset(pd.runtimeCtx, mode)
-	return freebsd_convertErr(res, isFile)
-}
-
-func (pd *pollDesc) freebsd_prepareRead(isFile bool) error {
-	return pd.freebsd_prepare('r', isFile)
-}
-
-func (pd *pollDesc) freebsd_prepareWrite(isFile bool) error {
-	return pd.freebsd_prepare('w', isFile)
-}
-
-func (pd *pollDesc) freebsd_wait(mode int, isFile bool) error {
-	if pd.runtimeCtx == 0 {
-		return errors.New("waiting for unsupported file type")
-	}
-	res := freebsd_runtime_pollWait(pd.runtimeCtx, mode)
-	return freebsd_convertErr(res, isFile)
-}
-
-func (pd *pollDesc) freebsd_waitRead(isFile bool) error {
-	return pd.freebsd_wait('r', isFile)
-}
-
-func (pd *pollDesc) freebsd_waitWrite(isFile bool) error {
-	return pd.freebsd_wait('w', isFile)
-}
-
-func (pd *pollDesc) freebsd_waitCanceled(mode int) {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	freebsd_runtime_pollWaitCanceled(pd.runtimeCtx, mode)
-}
-
-func (pd *pollDesc) freebsd_pollable() bool {
-	return pd.runtimeCtx != 0
-}
-
-// Error values returned by runtime_pollReset and runtime_pollWait.
-// These must match the values in runtime/netpoll.go.
-const (
-	freebsd_pollNoError        = 0
-	freebsd_pollErrClosing     = 1
-	freebsd_pollErrTimeout     = 2
-	freebsd_pollErrNotPollable = 3
-)
-
-func freebsd_convertErr(res int, isFile bool) error {
-	switch res {
-	case freebsd_pollNoError:
-		return nil
-	case freebsd_pollErrClosing:
-		return errClosing(isFile)
-	case freebsd_pollErrTimeout:
-		return ErrDeadlineExceeded
-	case freebsd_pollErrNotPollable:
-		return ErrNotPollable
-	}
-	println("unreachable: ", res)
-	panic("unreachable")
-}
+}/*line fd_poll_runtime.go:54:2*//*line fd_poll_runtime.go:62:2*//*line fd_poll_runtime.go:70:2*//*line fd_poll_runtime.go:74:2*//*line fd_poll_runtime.go:78:2*//*line fd_poll_runtime.go:86:2*//*line fd_poll_runtime.go:90:2*//*line fd_poll_runtime.go:94:2*//*line fd_poll_runtime.go:101:2*//*line fd_poll_runtime.go:105:2*//*line fd_poll_runtime.go:114:2*//*line fd_poll_runtime.go:129:2*/
 
 // SetDeadline sets the read and write deadlines associated with fd.
 func (fd *Freebsd_FD) SetDeadline(t time.Time) error {
@@ -158,8 +44,8 @@ func (fd *Freebsd_FD) SetWriteDeadline(t time.Time) error {
 
 func freebsd_setDeadlineImpl(fd *Freebsd_FD, t time.Time, mode int) error {
 	var d int64
-	if !t.Freebsd_IsZero() {
-		d = int64(time.Freebsd_Until(t))
+	if !t.IsZero() {
+		d = int64(time.Until(t))
 		if d == 0 {
 			d = -1 // don't confuse deadline right now with no deadline
 		}
@@ -172,22 +58,6 @@ func freebsd_setDeadlineImpl(fd *Freebsd_FD, t time.Time, mode int) error {
 	if fd.pd.runtimeCtx == 0 {
 		return ErrNoDeadline
 	}
-	freebsd_runtime_pollSetDeadline(fd.pd.runtimeCtx, d, mode)
+	runtime_pollSetDeadline(fd.pd.runtimeCtx, d, mode)
 	return nil
-}
-
-// IsPollDescriptor reports whether fd is the descriptor being used by the poller.
-// This is only used for testing.
-//
-// IsPollDescriptor should be an internal detail,
-// but widely used packages access it using linkname.
-// Notable members of the hall of shame include:
-//   - github.com/opencontainers/runc
-//
-// Do not remove or change the type signature.
-// See go.dev/issue/67401.
-//
-//go:linkname Freebsd_IsPollDescriptor
-func Freebsd_IsPollDescriptor(fd uintptr) bool {
-	return freebsd_runtime_isPollServerDescriptor(fd)
-}
+}/*line fd_poll_runtime.go:180:2*/

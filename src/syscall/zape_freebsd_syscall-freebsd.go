@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009,2010 The Go Authors. All rights reserved.
+/*line syscall_freebsd.go:1:1*/// Copyright 2009,2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -50,7 +50,7 @@ func freebsd_nametomib(name string) (mib []freebsd__C_int, err error) {
 	n := uintptr(Freebsd_CTL_MAXNAME) * siz
 
 	p := (*byte)(unsafe.Pointer(&buf[0]))
-	bytes, err := Freebsd_ByteSliceFromString(name)
+	bytes, err := ByteSliceFromString(name)
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockoptip4_linux.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -13,7 +13,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockoptip4_linux.go:10:2*/
 
 func linux_joinIPv4Group(fd *linux_netFD, ifi *Interface, ip IP) error {
 	mreq := &syscall.Linux_IPMreqn{Multiaddr: [4]byte{ip[0], ip[1], ip[2], ip[3]}}
@@ -37,7 +37,7 @@ func linux_setIPv4MulticastInterface(fd *linux_netFD, ifi *Interface) error {
 }
 
 func linux_setIPv4MulticastLoopback(fd *linux_netFD, v bool) error {
-	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_MULTICAST_LOOP, linux_boolint(v))
+	err := fd.pfd.SetsockoptInt(syscall.Linux_IPPROTO_IP, syscall.Linux_IP_MULTICAST_LOOP, boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line signal_unix.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line signal_unix.go:6:1*/
 package runtime
 
 import (
@@ -1259,37 +1260,37 @@ func linux_msigrestore(sigmask linux_sigset) {
 // sigsetAllExiting is used by sigblock(true) when a thread is
 // exiting.
 var linux_sigsetAllExiting = func() linux_sigset {
-	if apehost != apeLinux {
-		return *new(linux_sigset)
+if apehost != apeLinux {
+return *new(linux_sigset)
+}
+return /*line signal_unix.go:1259:24*/func() linux_sigset {
+	res := linux_sigset_all
+
+	// Apply GOOS-specific overrides here, rather than in osinit,
+	// because osinit may be called before sigsetAllExiting is
+	// initialized (#51913).
+	if "linux" == "linux" && iscgo {
+		// #42494 glibc and musl reserve some signals for
+		// internal use and require they not be blocked by
+		// the rest of a normal C runtime. When the go runtime
+		// blocks...unblocks signals, temporarily, the blocked
+		// interval of time is generally very short. As such,
+		// these expectations of *libc code are mostly met by
+		// the combined go+cgo system of threads. However,
+		// when go causes a thread to exit, via a return from
+		// mstart(), the combined runtime can deadlock if
+		// these signals are blocked. Thus, don't block these
+		// signals when exiting threads.
+		// - glibc: SIGCANCEL (32), SIGSETXID (33)
+		// - musl: SIGTIMER (32), SIGCANCEL (33), SIGSYNCCALL (34)
+		linux_sigdelset(&res, 32)
+		linux_sigdelset(&res, 33)
+		linux_sigdelset(&res, 34)
 	}
-	return func() linux_sigset {
-		res := linux_sigset_all
 
-		// Apply GOOS-specific overrides here, rather than in osinit,
-		// because osinit may be called before sigsetAllExiting is
-		// initialized (#51913).
-		if "linux" == "linux" && iscgo {
-			// #42494 glibc and musl reserve some signals for
-			// internal use and require they not be blocked by
-			// the rest of a normal C runtime. When the go runtime
-			// blocks...unblocks signals, temporarily, the blocked
-			// interval of time is generally very short. As such,
-			// these expectations of *libc code are mostly met by
-			// the combined go+cgo system of threads. However,
-			// when go causes a thread to exit, via a return from
-			// mstart(), the combined runtime can deadlock if
-			// these signals are blocked. Thus, don't block these
-			// signals when exiting threads.
-			// - glibc: SIGCANCEL (32), SIGSETXID (33)
-			// - musl: SIGTIMER (32), SIGCANCEL (33), SIGSYNCCALL (34)
-			linux_sigdelset(&res, 32)
-			linux_sigdelset(&res, 33)
-			linux_sigdelset(&res, 34)
-		}
-
-		return res
-	}()
+	return res
 }()
+}()/*line signal_unix.go:1285:4*/
 
 // sigblock blocks signals in the current thread's signal mask.
 // This is used to block signals while setting up and tearing down g

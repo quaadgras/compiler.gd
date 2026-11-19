@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line fd_unix.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_unix.go:6:1*/
 package poll
 
 import (
@@ -79,19 +80,19 @@ func (fd *Freebsd_FD) Init(net string, pollable bool) error {
 func (fd *Freebsd_FD) destroy() error {
 	// Poller may want to unregister fd in readiness notification mechanism,
 	// so this must be executed before CloseFunc.
-	fd.pd.freebsd_close()
+	fd.pd.close()
 
 	err := fd.Freebsd_SysFile.destroy(fd.Sysfd)
 
 	fd.Sysfd = -1
-	freebsd_runtime_Semrelease(&fd.csema)
+	runtime_Semrelease(&fd.csema)
 	return err
 }
 
 // Close closes the FD. The underlying file descriptor is closed by the
 // destroy method when there are no remaining references.
 func (fd *Freebsd_FD) Close() error {
-	if !fd.fdmu.freebsd_increfAndClose() {
+	if !fd.fdmu.increfAndClose() {
 		return errClosing(fd.isFile)
 	}
 
@@ -100,7 +101,7 @@ func (fd *Freebsd_FD) Close() error {
 	// the final decref will close fd.sysfd. This should happen
 	// fairly quickly, since all the I/O is non-blocking, and any
 	// attempts to block in the pollDesc will return errClosing(fd.isFile).
-	fd.pd.freebsd_evict()
+	fd.pd.evict()
 
 	// The call to decref will call destroy if there are no other
 	// references.
@@ -113,7 +114,7 @@ func (fd *Freebsd_FD) Close() error {
 	// No need for an atomic read of isBlocking, increfAndClose means
 	// we have exclusive access to fd.
 	if fd.isBlocking == 0 {
-		freebsd_runtime_Semacquire(&fd.csema)
+		runtime_Semacquire(&fd.csema)
 	}
 
 	return err
@@ -158,7 +159,7 @@ func (fd *Freebsd_FD) Read(p []byte) (int, error) {
 		// that is already buffered. See go.dev/issue/15735.
 		return 0, nil
 	}
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, err
 	}
 	if fd.IsStream && len(p) > freebsd_maxRW {
@@ -168,8 +169,8 @@ func (fd *Freebsd_FD) Read(p []byte) (int, error) {
 		n, err := freebsd_ignoringEINTRIO(syscall.Freebsd_Read, fd.Sysfd, p)
 		if err != nil {
 			n = 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -190,7 +191,7 @@ func (fd *Freebsd_FD) Pread(p []byte, off int64) (int, error) {
 	if fd.IsStream && len(p) > freebsd_maxRW {
 		p = p[:freebsd_maxRW]
 	}
-	n, err := freebsd_ignoringEINTR2(func() (int, error) {
+	n, err := ignoringEINTR2(func() (int, error) {
 		return syscall.Freebsd_Pread(fd.Sysfd, p, off)
 	})
 	if err != nil {
@@ -207,7 +208,7 @@ func (fd *Freebsd_FD) ReadFrom(p []byte) (int, syscall.Freebsd_Sockaddr, error) 
 		return 0, nil, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, nil, err
 	}
 	for {
@@ -217,8 +218,8 @@ func (fd *Freebsd_FD) ReadFrom(p []byte) (int, syscall.Freebsd_Sockaddr, error) 
 				continue
 			}
 			n = 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -234,7 +235,7 @@ func (fd *Freebsd_FD) ReadFromInet4(p []byte, from *syscall.Freebsd_SockaddrInet
 		return 0, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -244,8 +245,8 @@ func (fd *Freebsd_FD) ReadFromInet4(p []byte, from *syscall.Freebsd_SockaddrInet
 				continue
 			}
 			n = 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -261,7 +262,7 @@ func (fd *Freebsd_FD) ReadFromInet6(p []byte, from *syscall.Freebsd_SockaddrInet
 		return 0, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -271,8 +272,8 @@ func (fd *Freebsd_FD) ReadFromInet6(p []byte, from *syscall.Freebsd_SockaddrInet
 				continue
 			}
 			n = 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -288,7 +289,7 @@ func (fd *Freebsd_FD) ReadMsg(p []byte, oob []byte, flags int) (int, int, int, s
 		return 0, 0, 0, nil, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, 0, 0, nil, err
 	}
 	for {
@@ -298,8 +299,8 @@ func (fd *Freebsd_FD) ReadMsg(p []byte, oob []byte, flags int) (int, int, int, s
 				continue
 			}
 			// TODO(dfc) should n and oobn be set to 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -315,7 +316,7 @@ func (fd *Freebsd_FD) ReadMsgInet4(p []byte, oob []byte, flags int, sa4 *syscall
 		return 0, 0, 0, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, 0, 0, err
 	}
 	for {
@@ -325,8 +326,8 @@ func (fd *Freebsd_FD) ReadMsgInet4(p []byte, oob []byte, flags int, sa4 *syscall
 				continue
 			}
 			// TODO(dfc) should n and oobn be set to 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -342,7 +343,7 @@ func (fd *Freebsd_FD) ReadMsgInet6(p []byte, oob []byte, flags int, sa6 *syscall
 		return 0, 0, 0, err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return 0, 0, 0, err
 	}
 	for {
@@ -352,8 +353,8 @@ func (fd *Freebsd_FD) ReadMsgInet6(p []byte, oob []byte, flags int, sa6 *syscall
 				continue
 			}
 			// TODO(dfc) should n and oobn be set to 0
-			if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -369,7 +370,7 @@ func (fd *Freebsd_FD) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, err
 	}
 	var nn int
@@ -393,8 +394,8 @@ func (fd *Freebsd_FD) Write(p []byte) (int, error) {
 		if nn == len(p) {
 			return nn, err
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -447,7 +448,7 @@ func (fd *Freebsd_FD) WriteToInet4(p []byte, sa *syscall.Freebsd_SockaddrInet4) 
 		return 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -455,8 +456,8 @@ func (fd *Freebsd_FD) WriteToInet4(p []byte, sa *syscall.Freebsd_SockaddrInet4) 
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -473,7 +474,7 @@ func (fd *Freebsd_FD) WriteToInet6(p []byte, sa *syscall.Freebsd_SockaddrInet6) 
 		return 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -481,8 +482,8 @@ func (fd *Freebsd_FD) WriteToInet6(p []byte, sa *syscall.Freebsd_SockaddrInet6) 
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -499,7 +500,7 @@ func (fd *Freebsd_FD) WriteTo(p []byte, sa syscall.Freebsd_Sockaddr) (int, error
 		return 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -507,8 +508,8 @@ func (fd *Freebsd_FD) WriteTo(p []byte, sa syscall.Freebsd_Sockaddr) (int, error
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -525,7 +526,7 @@ func (fd *Freebsd_FD) WriteMsg(p []byte, oob []byte, sa syscall.Freebsd_Sockaddr
 		return 0, 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, 0, err
 	}
 	for {
@@ -533,8 +534,8 @@ func (fd *Freebsd_FD) WriteMsg(p []byte, oob []byte, sa syscall.Freebsd_Sockaddr
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -551,7 +552,7 @@ func (fd *Freebsd_FD) WriteMsgInet4(p []byte, oob []byte, sa *syscall.Freebsd_So
 		return 0, 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, 0, err
 	}
 	for {
@@ -559,8 +560,8 @@ func (fd *Freebsd_FD) WriteMsgInet4(p []byte, oob []byte, sa *syscall.Freebsd_So
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -577,7 +578,7 @@ func (fd *Freebsd_FD) WriteMsgInet6(p []byte, oob []byte, sa *syscall.Freebsd_So
 		return 0, 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, 0, err
 	}
 	for {
@@ -585,8 +586,8 @@ func (fd *Freebsd_FD) WriteMsgInet6(p []byte, oob []byte, sa *syscall.Freebsd_So
 		if err == syscall.Freebsd_EINTR {
 			continue
 		}
-		if err == syscall.Freebsd_EAGAIN && fd.pd.freebsd_pollable() {
-			if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+		if err == syscall.Freebsd_EAGAIN && fd.pd.pollable() {
+			if err = fd.pd.waitWrite(fd.isFile); err == nil {
 				continue
 			}
 		}
@@ -604,7 +605,7 @@ func (fd *Freebsd_FD) Accept() (int, syscall.Freebsd_Sockaddr, string, error) {
 	}
 	defer fd.readUnlock()
 
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return -1, nil, "", err
 	}
 	for {
@@ -616,8 +617,8 @@ func (fd *Freebsd_FD) Accept() (int, syscall.Freebsd_Sockaddr, string, error) {
 		case syscall.Freebsd_EINTR:
 			continue
 		case syscall.Freebsd_EAGAIN:
-			if fd.pd.freebsd_pollable() {
-				if err = fd.pd.freebsd_waitRead(fd.isFile); err == nil {
+			if fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}
@@ -637,7 +638,7 @@ func (fd *Freebsd_FD) Fchmod(mode uint32) error {
 		return err
 	}
 	defer fd.decref()
-	return freebsd_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return syscall.Freebsd_Fchmod(fd.Sysfd, mode)
 	})
 }
@@ -648,7 +649,7 @@ func (fd *Freebsd_FD) Fstat(s *syscall.Freebsd_Stat_t) error {
 		return err
 	}
 	defer fd.decref()
-	return freebsd_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return syscall.Freebsd_Fstat(fd.Sysfd, s)
 	})
 }
@@ -689,7 +690,7 @@ func (fd *Freebsd_FD) Dup() (int, string, error) {
 
 // WaitWrite waits until data can be written to fd.
 func (fd *Freebsd_FD) WaitWrite() error {
-	return fd.pd.freebsd_waitWrite(fd.isFile)
+	return fd.pd.waitWrite(fd.isFile)
 }
 
 // WriteOnce is for testing only. It makes a single write call.
@@ -707,14 +708,14 @@ func (fd *Freebsd_FD) RawRead(f func(uintptr) bool) error {
 		return err
 	}
 	defer fd.readUnlock()
-	if err := fd.pd.freebsd_prepareRead(fd.isFile); err != nil {
+	if err := fd.pd.prepareRead(fd.isFile); err != nil {
 		return err
 	}
 	for {
 		if f(uintptr(fd.Sysfd)) {
 			return nil
 		}
-		if err := fd.pd.freebsd_waitRead(fd.isFile); err != nil {
+		if err := fd.pd.waitRead(fd.isFile); err != nil {
 			return err
 		}
 	}
@@ -726,14 +727,14 @@ func (fd *Freebsd_FD) RawWrite(f func(uintptr) bool) error {
 		return err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return err
 	}
 	for {
 		if f(uintptr(fd.Sysfd)) {
 			return nil
 		}
-		if err := fd.pd.freebsd_waitWrite(fd.isFile); err != nil {
+		if err := fd.pd.waitWrite(fd.isFile); err != nil {
 			return err
 		}
 	}

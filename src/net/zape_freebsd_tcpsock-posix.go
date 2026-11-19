@@ -2,16 +2,19 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line tcpsock_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tcpsock_posix.go:6:1*/
 package net
+
+import "unsafe"/*line tcpsock_posix.go:7:12*/
 
 import (
 	"context"
-	"io"
-	"os"
+	
+	
 	"syscall"
 )
 
@@ -42,28 +45,11 @@ func (a *TCPAddr) freebsd_sockaddr(family int) (syscall.Freebsd_Sockaddr, error)
 	return freebsd_ipToSockaddr(family, a.IP, a.Port, a.Zone)
 }
 
-func (a *TCPAddr) freebsd_toLocal(net string) sockaddr {
+func (a *TCPAddr) freebsd_toLocal(net string) freebsd_sockaddr {
 	return &TCPAddr{loopbackIP(net), a.Port, a.Zone}
-}
+}/*line tcpsock_posix.go:55:2*//*line tcpsock_posix.go:62:2*/
 
-func (c *Freebsd_TCPConn) readFrom(r io.Reader) (int64, error) {
-	if n, err, handled := freebsd_spliceFrom(c.fd, r); handled {
-		return n, err
-	}
-	if n, err, handled := freebsd_sendFile(c.fd, r); handled {
-		return n, err
-	}
-	return freebsd_genericReadFrom(c, r)
-}
-
-func (c *Freebsd_TCPConn) writeTo(w io.Writer) (int64, error) {
-	if n, err, handled := freebsd_spliceTo(w, c.fd); handled {
-		return n, err
-	}
-	return freebsd_genericWriteTo(c, w)
-}
-
-func (sd *freebsd_sysDialer) dialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Freebsd_TCPConn, error) {
+func (sd *sysDialer) freebsd_dialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
 	if h := sd.testHookDialTCP; h != nil {
 		return h(ctx, sd.network, laddr, raddr)
 	}
@@ -71,13 +57,9 @@ func (sd *freebsd_sysDialer) dialTCP(ctx context.Context, laddr, raddr *TCPAddr)
 		return h(ctx, sd.network, laddr, raddr)
 	}
 	return sd.doDialTCP(ctx, laddr, raddr)
-}
+}/*line tcpsock_posix.go:76:2*/
 
-func (sd *freebsd_sysDialer) doDialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Freebsd_TCPConn, error) {
-	return sd.doDialTCPProto(ctx, laddr, raddr, 0)
-}
-
-func (sd *freebsd_sysDialer) doDialTCPProto(ctx context.Context, laddr, raddr *TCPAddr, proto int) (*Freebsd_TCPConn, error) {
+func (sd *sysDialer) freebsd_doDialTCPProto(ctx context.Context, laddr, raddr *TCPAddr, proto int) (*TCPConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -110,7 +92,7 @@ func (sd *freebsd_sysDialer) doDialTCPProto(ctx context.Context, laddr, raddr *T
 	// a different reason.
 	//
 	// The kernel socket code is no doubt enjoying watching us squirm.
-	for i := 0; i < 2 && (laddr == nil || laddr.Port == 0) && (freebsd_selfConnect(fd, err) || freebsd_spuriousENOTAVAIL(err)); i++ {
+	for i := 0; i < 2 && (laddr == nil || laddr.Port == 0) && (freebsd_selfConnect(fd, err) || spuriousENOTAVAIL(err)); i++ {
 		if err == nil {
 			fd.Close()
 		}
@@ -120,7 +102,7 @@ func (sd *freebsd_sysDialer) doDialTCPProto(ctx context.Context, laddr, raddr *T
 	if err != nil {
 		return nil, err
 	}
-	return freebsd_newTCPConn(fd, sd.Dialer.KeepAlive, sd.Dialer.KeepAliveConfig, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+	return freebsd_newTCPConn(fd, sd.Dialer.KeepAlive, sd.Dialer.KeepAliveConfig, freebsd_testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 }
 
 func freebsd_selfConnect(fd *freebsd_netFD, err error) bool {
@@ -143,45 +125,17 @@ func freebsd_selfConnect(fd *freebsd_netFD, err error) bool {
 	l := fd.laddr.(*TCPAddr)
 	r := fd.raddr.(*TCPAddr)
 	return l.Port == r.Port && l.IP.Equal(r.IP)
-}
+}/*line tcpsock_posix.go:154:2*//*line tcpsock_posix.go:156:70*/
 
-func freebsd_spuriousENOTAVAIL(err error) bool {
-	if op, ok := err.(*OpError); ok {
-		err = op.Err
-	}
-	if sys, ok := err.(*os.SyscallError); ok {
-		err = sys.Err
-	}
-	return err == syscall.Freebsd_EADDRNOTAVAIL
-}
-
-func (ln *Freebsd_TCPListener) ok() bool { return ln != nil && ln.fd != nil }
-
-func (ln *Freebsd_TCPListener) accept() (*Freebsd_TCPConn, error) {
-	fd, err := ln.fd.accept()
+func (ln *TCPListener) freebsd_accept() (*TCPConn, error) {
+	fd, err := (*(**freebsd_netFD)(unsafe.Pointer(&ln.fd))).accept()
 	if err != nil {
 		return nil, err
 	}
-	return freebsd_newTCPConn(fd, ln.lc.KeepAlive, ln.lc.KeepAliveConfig, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
-}
+	return freebsd_newTCPConn(fd, ln.lc.KeepAlive, ln.lc.KeepAliveConfig, freebsd_testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+}/*line tcpsock_posix.go:168:2*//*line tcpsock_posix.go:176:2*//*line tcpsock_posix.go:180:2*/
 
-func (ln *Freebsd_TCPListener) close() error {
-	return ln.fd.Close()
-}
-
-func (ln *Freebsd_TCPListener) file() (*os.Freebsd_File, error) {
-	f, err := ln.fd.dup()
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
-}
-
-func (sl *sysListener) freebsd_listenTCP(ctx context.Context, laddr *TCPAddr) (*Freebsd_TCPListener, error) {
-	return sl.freebsd_listenTCPProto(ctx, laddr, 0)
-}
-
-func (sl *sysListener) freebsd_listenTCPProto(ctx context.Context, laddr *TCPAddr, proto int) (*Freebsd_TCPListener, error) {
+func (sl *sysListener) freebsd_listenTCPProto(ctx context.Context, laddr *TCPAddr, proto int) (*TCPListener, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -192,5 +146,5 @@ func (sl *sysListener) freebsd_listenTCPProto(ctx context.Context, laddr *TCPAdd
 	if err != nil {
 		return nil, err
 	}
-	return &Freebsd_TCPListener{fd: fd, lc: sl.ListenConfig}, nil
+	return &TCPListener{fd: (*netFD)(unsafe.Pointer(fd)), lc: sl.ListenConfig}, nil
 }

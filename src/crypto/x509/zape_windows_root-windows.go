@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line root_windows.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -239,8 +239,8 @@ func (c *Certificate) windows_systemVerify(opts *VerifyOptions) (chains [][]*Cer
 	}
 
 	var verifyTime *syscall.Windows_Filetime
-	if opts != nil && !opts.CurrentTime.Windows_IsZero() {
-		ft := syscall.Windows_NsecToFiletime(opts.CurrentTime.Windows_UnixNano())
+	if opts != nil && !opts.CurrentTime.IsZero() {
+		ft := syscall.Windows_NsecToFiletime(opts.CurrentTime.UnixNano())
 		verifyTime = &ft
 	}
 

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line dirent.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line dirent.go:6:1*/
 package syscall
 
 import (
@@ -15,7 +16,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line dirent.go:14:2*/
 
 // readInt returns the size-bytes unsigned integer in native byte order at offset off.
 func linux_readInt(b []byte, off, size uintptr) (u uint64, ok bool) {

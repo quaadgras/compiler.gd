@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line stat_unix.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line stat_unix.go:6:1*/
 package tar
 
 import (
@@ -17,7 +18,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line stat_unix.go:16:2*/
 
 func linux_init0() {
 	sysStat = linux_statUnix

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line security_issetugid.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line security_issetugid.go:6:1*/
 package runtime
 
 // secureMode is only ever mutated in schedinit, so we don't need to worry about

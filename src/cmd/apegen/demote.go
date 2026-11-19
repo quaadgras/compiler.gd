@@ -17,13 +17,14 @@ import (
 // host, the host files' declarations, and the types and variables every
 // host declares the same way.
 //
-// A file every host builds is shared only if what it means does not
-// depend on the host: it may call host functions (through dispatch) and
-// hold host values whose layout it does not look at, but a file that
-// looks into a host type (a field, a composite literal, its size), uses
-// a host variable, or uses a constant whose value differs between hosts
-// where Go needs a constant is copied per host like the host files are.
-// Copying a file can make more of what it declares differ between
+// A declaration of a file every host builds is shared only if what it
+// means does not depend on the host: it may call host functions
+// (through dispatch) and hold host values whose layout it does not look
+// at, but a declaration that looks into a host type (a field, a
+// composite literal, its size), uses a host variable, or uses a constant
+// whose value differs between hosts where Go needs a constant is copied
+// per host like the host files are (see split.go). Copying a
+// declaration can make more of what the package declares differ between
 // hosts, so this repeats until nothing changes.
 func (g *pkgGen) prepare() {
 	if g.prepared {
@@ -33,6 +34,7 @@ func (g *pkgGen) prepare() {
 	for {
 		g.findDecls()
 		g.findDedup()
+		g.findSharedVars()
 		g.findUnion()
 		if !g.demote() {
 			break
@@ -88,7 +90,7 @@ func (g *pkgGen) usesHostTests(hp *hostPkg, f *ast.File) string {
 		if o == nil || o.Pkg() != hp.pkg {
 			return true
 		}
-		file := filepath.Base(fset.Position(o.Pos()).Filename)
+		file := fileName(o.Pos())
 		if strings.HasSuffix(file, "_test.go") && (!g.sharedTests[file] || g.testOff[file]) {
 			why = o.Name() + " of " + file
 		}
@@ -116,7 +118,7 @@ func (g *pkgGen) findUnion() {
 		scope := hp.pkg.Scope()
 		for _, name := range scope.Names() {
 			tn, ok := scope.Lookup(name).(*types.TypeName)
-			if !ok || !g.shared[filepath.Base(fset.Position(tn.Pos()).Filename)] {
+			if !ok || !g.shared[fileName(tn.Pos())] {
 				continue
 			}
 			if st, ok := tn.Type().Underlying().(*types.Struct); ok {
@@ -134,8 +136,8 @@ func (g *pkgGen) findUnion() {
 	}
 }
 
-// demote moves the shared Go files that depend on the host to the host
-// files. It reports whether it moved any.
+// demote moves the declarations of shared Go files that depend on the
+// host to the files' host parts. It reports whether it moved any.
 func (g *pkgGen) demote() bool {
 	var names []string
 	for name := range g.shared {
@@ -161,7 +163,7 @@ func (g *pkgGen) demote() bool {
 				if !ok || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) {
 					return true
 				}
-				file := filepath.Base(fset.Position(fn.Pos()).Filename)
+				file := fileName(fn.Pos())
 				if !g.shared[file] {
 					return true
 				}
@@ -170,14 +172,12 @@ func (g *pkgGen) demote() bool {
 					refsOf(hp.info.Types[a].Type, map[types.Type]bool{}, &refs)
 					for _, r := range refs {
 						if g.differsType(hp, r) && token.IsExported(r.Obj().Name()) {
-							if *verbose {
-								g.reportf("copied per host: %s (%s passes a %s to %s)", file, hp.host, r.Obj().Name(), fn.Name())
+							if g.demoteDeclAt(file, fn.Pos()) {
+								if *verbose {
+									g.reportf("copied per host: %s: %s (%s passes a %s)", file, fn.Name(), hp.host, r.Obj().Name())
+								}
+								moved = true
 							}
-							delete(g.shared, file)
-							for _, hp := range g.hs {
-								hp.only[file] = true
-							}
-							moved = true
 							return false
 						}
 					}
@@ -186,23 +186,37 @@ func (g *pkgGen) demote() bool {
 			})
 		}
 	}
+	// (Copying is for good, so a pass may copy all it finds.)
 	for _, name := range names {
 		if !g.shared[name] {
 			continue
 		}
-		for _, hp := range g.hs {
-			if why := g.dependsOnHost(hp, hp.files[name]); why != "" {
-				if *verbose {
-					g.reportf("copied per host: %s (%s)", name, why)
+		f0 := g.first().files[name]
+		if g.moved[name] != nil {
+			f0 = g.first().orig[name]
+		}
+		for i, r := range declRanges(f0) {
+			if r[0] < 0 || g.moved[name][i] {
+				continue
+			}
+			for _, hp := range g.hs {
+				f := hp.files[name]
+				if g.moved[name] != nil {
+					f = hp.orig[name]
 				}
-				delete(g.shared, name)
-				for _, hp := range g.hs {
-					hp.only[name] = true
+				if why := g.dependsOnHost(hp, declPart(f, i)); why != "" {
+					if *verbose {
+						g.reportf("copied per host: %s: %s (%s)", name, declName(f.Decls[i]), why)
+					}
+					g.splitDecl(name, i)
+					moved = true
+					break
 				}
-				// What it declares may now differ: look again.
-				return true
 			}
 		}
+	}
+	if g.sharedMethodsOfHostIfaces(names) {
+		moved = true
 	}
 	return moved
 }
@@ -249,7 +263,7 @@ func (u *universe) hostDiffers(path, host string, obj types.Object) bool {
 	case *types.TypeName:
 		return !q.dedup[o.Name()] && !q.union[o.Name()]
 	case *types.Var:
-		return !q.dedup[o.Name()]
+		return !q.dedup[o.Name()] && !q.sharedVar[o.Name()]
 	case *types.Const:
 		return !q.sameConst(o.Name())
 	}
@@ -372,11 +386,62 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 					}
 				}
 			}
+		case *ast.TypeAssertExpr:
+			// A type assertion to a host type: a host's value is never
+			// the ape type's.
+			if n.Type != nil {
+				if t, ok := types.Unalias(hp.info.Types[n.Type].Type).(*types.Pointer); ok {
+					if nt, ok := types.Unalias(t.Elem()).(*types.Named); ok && g.differsType(hp, nt) {
+						why = "type assertion to *" + nt.Obj().Name()
+					}
+				} else if nt, ok := types.Unalias(hp.info.Types[n.Type].Type).(*types.Named); ok && g.differsType(hp, nt) {
+					why = "type assertion to " + nt.Obj().Name()
+				}
+			}
+		case *ast.CaseClause:
+			// So is a type switch's case.
+			if len(stack) >= 3 {
+				if _, ok := stack[len(stack)-3].(*ast.TypeSwitchStmt); ok {
+					for _, e := range n.List {
+						t := types.Unalias(hp.info.Types[e].Type)
+						if p, ok := t.(*types.Pointer); ok {
+							t = types.Unalias(p.Elem())
+						}
+						if nt, ok := t.(*types.Named); ok && g.differsType(hp, nt) {
+							why = "type switch case " + nt.Obj().Name()
+						}
+					}
+				}
+			}
+		case *ast.TypeSpec:
+			// A type that holds another package's host values: the ape
+			// package cannot.
+			// (A pointer to a handle is the ape type's.)
+			if tn, ok := hp.info.Defs[n.Name].(*types.TypeName); ok && !tn.IsAlias() {
+				if r := g.otherHostHeld(hp, tn.Type().Underlying()); r != nil {
+					why = tn.Name() + " holds a " + r.Obj().Pkg().Name() + "." + r.Obj().Name()
+				}
+			}
+		case *ast.ValueSpec:
+			// A variable of functions of host values.
+			for _, name := range n.Names {
+				if v, ok := hp.info.Defs[name].(*types.Var); ok && v.Parent() == hp.pkg.Scope() && g.funcOfHost(hp, v.Type()) {
+					why = "variable " + v.Name() + " of functions of host values"
+				}
+			}
 		case *ast.CompositeLit:
 			if t, ok := types.Unalias(hp.info.Types[n].Type).(*types.Named); ok && g.differsType(hp, t) {
 				why = "composite literal of " + t.Obj().Name()
 			}
 		case *ast.CallExpr:
+			// make or new of a host type.
+			if id, ok := ast.Unparen(n.Fun).(*ast.Ident); ok && len(n.Args) > 0 {
+				if b, ok := hp.info.Uses[id].(*types.Builtin); ok && (b.Name() == "make" || b.Name() == "new") {
+					if t, ok := types.Unalias(hp.info.Types[n.Args[0]].Type).(*types.Named); ok && g.differsType(hp, t) {
+						why = b.Name() + " of " + t.Obj().Name()
+					}
+				}
+			}
 			if id, ok := ast.Unparen(n.Fun).(*ast.SelectorExpr); ok {
 				x, _ := id.X.(*ast.Ident)
 				if pn, ok := hp.info.Uses[x].(*types.PkgName); ok && x != nil && pn.Imported().Path() == "unsafe" && id.Sel.Name != "Pointer" && len(n.Args) == 1 {
@@ -400,7 +465,7 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				if o.IsField() || o.Parent() != o.Pkg().Scope() {
 					break
 				}
-				if local && hp.inOnly(o.Pos()) && !g.dedup[o.Name()] || !local && g.u.hostDiffers(o.Pkg().Path(), hp.host, o) {
+				if local && hp.inOnly(o.Pos()) && !g.dedup[o.Name()] && !g.sharedVar[o.Name()] || !local && g.u.hostDiffers(o.Pkg().Path(), hp.host, o) {
 					why = "variable " + o.Name()
 				}
 			case *types.Const:
@@ -419,10 +484,29 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 						why = "constant " + o.Pkg().Name() + "." + o.Name()
 					}
 				}
+			case *types.TypeName:
+				// A host alias has no ape type.
+				if local && o.IsAlias() && hp.inOnly(o.Pos()) && !g.dedup[o.Name()] {
+					why = "alias " + o.Name()
+				}
+				// Nor a host interface.
+				if _, ok := o.Type().Underlying().(*types.Interface); ok && local && !o.IsAlias() && hp.inOnly(o.Pos()) && !g.dedup[o.Name()] {
+					why = "interface " + o.Name()
+				}
 			case *types.Func:
 				// A generic host function is not dispatched.
 				if local && hp.inOnly(o.Pos()) && o.Signature().TypeParams().Len() > 0 {
 					why = "generic " + o.Name()
+					break
+				}
+				// A host function or method of another package's host
+				// values is not dispatched.
+				if local && hp.inOnly(o.Pos()) {
+					if r := g.otherHostRef(hp, o.Signature()); r != nil {
+						why = o.Name() + " takes a " + r.Obj().Pkg().Name() + "." + r.Obj().Name()
+					} else if r := g.hostIfaceRef(hp, o.Signature()); r != nil {
+						why = o.Name() + " takes a " + r.Obj().Name() + ", a host interface"
+					}
 					break
 				}
 				// Another package's function of host values is not
@@ -454,7 +538,7 @@ func (g *pkgGen) multiTyped(name string) bool {
 		hp := g.first()
 		for id, obj := range hp.info.Uses {
 			c, ok := obj.(*types.Const)
-			if !ok || c.Pkg() != hp.pkg || !hp.inOnly(c.Pos()) || !g.shared[filepath.Base(fset.Position(id.Pos()).Filename)] {
+			if !ok || c.Pkg() != hp.pkg || !hp.inOnly(c.Pos()) || !g.shared[fileName(id.Pos())] {
 				continue
 			}
 			if b, ok := c.Type().(*types.Basic); !ok || b.Info()&types.IsUntyped == 0 {
@@ -550,5 +634,249 @@ func refsOf(t types.Type, seen map[types.Type]bool, out *[]*types.Named) {
 	case *types.Signature:
 		refsOf(t.Params(), seen, out)
 		refsOf(t.Results(), seen, out)
+	case *types.Interface:
+		for m := range t.ExplicitMethods() {
+			refsOf(m.Type(), seen, out)
+		}
+	case *types.Chan:
+		refsOf(t.Elem(), seen, out)
 	}
+}
+
+// otherHostRef returns a type of another generated package that differs
+// between hosts which t refers to, or nil.
+func (g *pkgGen) otherHostRef(hp *hostPkg, t types.Type) *types.Named {
+	var refs []*types.Named
+	refsOf(t, map[types.Type]bool{}, &refs)
+	for _, r := range refs {
+		if r.Obj().Pkg() != nil && r.Obj().Pkg() != hp.pkg && g.u.hostDiffers(r.Obj().Pkg().Path(), hp.host, r.Obj()) {
+			return r
+		}
+	}
+	return nil
+}
+
+// declName names a declaration for reports.
+func declName(d ast.Decl) string {
+	switch d := d.(type) {
+	case *ast.FuncDecl:
+		if d.Recv != nil && len(d.Recv.List) == 1 {
+			return recvName0(d.Recv.List[0].Type) + "." + d.Name.Name
+		}
+		return d.Name.Name
+	case *ast.GenDecl:
+		for _, sp := range d.Specs {
+			switch sp := sp.(type) {
+			case *ast.TypeSpec:
+				return sp.Name.Name
+			case *ast.ValueSpec:
+				return sp.Names[0].Name
+			}
+		}
+	}
+	return "?"
+}
+
+func recvName0(e ast.Expr) string {
+	switch e := e.(type) {
+	case *ast.StarExpr:
+		return recvName0(e.X)
+	case *ast.IndexExpr:
+		return recvName0(e.X)
+	case *ast.IndexListExpr:
+		return recvName0(e.X)
+	case *ast.Ident:
+		return e.Name
+	}
+	return "?"
+}
+
+// hostIfaceRef returns a host interface of the package that t refers to,
+// or nil.
+func (g *pkgGen) hostIfaceRef(hp *hostPkg, t types.Type) *types.Named {
+	var refs []*types.Named
+	refsOf(t, map[types.Type]bool{}, &refs)
+	for _, r := range refs {
+		if _, ok := r.Underlying().(*types.Interface); ok && g.hostNamed(hp, r) != nil {
+			return r
+		}
+	}
+	return nil
+}
+
+// otherHostHeld returns a type of another generated package that differs
+// between hosts which t holds by value, or nil. (Through a pointer it is
+// the ape type's, which host code converts.)
+func (g *pkgGen) otherHostHeld(hp *hostPkg, t types.Type) *types.Named {
+	// (An interface's methods are what it is.)
+	if _, ok := t.Underlying().(*types.Interface); ok {
+		return g.otherHostRef(hp, t)
+	}
+	var refs []*types.Named
+	refsByValue(t, map[types.Type]bool{}, &refs)
+	for _, r := range refs {
+		if r.Obj().Pkg() != nil && r.Obj().Pkg() != hp.pkg && g.u.hostDiffers(r.Obj().Pkg().Path(), hp.host, r.Obj()) {
+			return r
+		}
+	}
+	return nil
+}
+
+// isHandle reports whether the ape package path has the type name as a
+// handle to each host's, not as the first host's data.
+func (u *universe) isHandle(path, name string) bool {
+	q := u.load(path)
+	q.prepare()
+	return !q.dataStructForAll(name)
+}
+
+// funcOfHost reports whether t has functions whose signatures have host
+// types.
+func (g *pkgGen) funcOfHost(hp *hostPkg, t types.Type) bool {
+	found := false
+	var walk func(t types.Type, depth int)
+	walk = func(t types.Type, depth int) {
+		if depth > 6 || found {
+			return
+		}
+		switch t := types.Unalias(t).(type) {
+		case *types.Signature:
+			var refs []*types.Named
+			refsOf(t, map[types.Type]bool{}, &refs)
+			for _, r := range refs {
+				if g.differsType(hp, r) {
+					found = true
+				}
+			}
+		case *types.Pointer:
+			walk(t.Elem(), depth+1)
+		case *types.Slice:
+			walk(t.Elem(), depth+1)
+		case *types.Map:
+			walk(t.Elem(), depth+1)
+		case *types.Chan:
+			walk(t.Elem(), depth+1)
+		}
+	}
+	walk(t, 0)
+	return found
+}
+
+// sharedMethodsOfHostIfaces copies per host the shared files' methods
+// that a host interface's method, renamed in host copies, stands for.
+func (g *pkgGen) sharedMethodsOfHostIfaces(names []string) bool {
+	hp := g.first()
+	ifaceMethods := map[string]bool{}
+	for name, obj := range hp.decls {
+		tn, ok := obj.(*types.TypeName)
+		if !ok || g.dedup[name] {
+			continue
+		}
+		if it, ok := tn.Type().Underlying().(*types.Interface); ok {
+			for m := range it.ExplicitMethods() {
+				ifaceMethods[m.Name()] = true
+			}
+		}
+	}
+	// Names of host methods on shared types.
+	hostMethods := map[string]bool{}
+	for _, name := range hp.pkg.Scope().Names() {
+		tn, ok := hp.pkg.Scope().Lookup(name).(*types.TypeName)
+		if !ok || hp.inOnly(tn.Pos()) && !g.dedup[name] {
+			continue
+		}
+		if nt, ok := tn.Type().(*types.Named); ok {
+			for m := range nt.Methods() {
+				if hp.inOnly(m.Pos()) && ifaceMethods[m.Name()] {
+					hostMethods[m.Name()] = true
+				}
+			}
+		}
+	}
+	moved := false
+	for _, name := range names {
+		if !g.shared[name] {
+			continue
+		}
+		for _, d := range hp.files[name].Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || !hostMethods[fd.Name.Name] {
+				continue
+			}
+			if g.demoteDeclAt(name, fd.Pos()) {
+				if *verbose {
+					g.reportf("copied per host: %s: %s (a host interface's method)", name, declName(fd))
+				}
+				moved = true
+			}
+		}
+	}
+	return moved
+}
+
+// findSharedVars finds the variables every host declares, of
+// the same type but initialized differently: the ape package has one,
+// initialized from the host's, which host copies use too.
+func (g *pkgGen) findSharedVars() {
+	g.sharedVar = map[string]bool{}
+	if g.isRuntime() {
+		return
+	}
+	for name, obj := range g.first().decls {
+		if g.dedup[name] {
+			continue
+		}
+		if _, ok := obj.(*types.Var); !ok {
+			continue
+		}
+		same := true
+		var t string
+		for i, hp := range g.hs {
+			o, ok := hp.decls[name].(*types.Var)
+			if !ok || hp.linkname(o) != "" || holdsLock(o.Type(), 0) {
+				// (One the ape package would initialize by copying a
+				// lock is not.)
+				same = false
+				break
+			}
+			var refs []*types.Named
+			refsOf(o.Type(), map[types.Type]bool{}, &refs)
+			for _, r := range refs {
+				if g.differsType(hp, r) {
+					same = false
+				}
+			}
+			s := types.TypeString(o.Type(), func(p *types.Package) string { return p.Path() })
+			if i == 0 {
+				t = s
+			} else if s != t {
+				same = false
+			}
+		}
+		if same {
+			g.sharedVar[name] = true
+		}
+	}
+}
+
+// holdsLock reports whether a value of t holds a lock: something not to
+// be copied.
+func holdsLock(t types.Type, depth int) bool {
+	if depth > 8 {
+		return false
+	}
+	switch u := types.Unalias(t).Underlying().(type) {
+	case *types.Struct:
+		if ms := types.NewMethodSet(types.NewPointer(t)); ms.Lookup(nil, "Lock") != nil && ms.Lookup(nil, "Unlock") != nil {
+			return true
+		}
+		for f := range u.Fields() {
+			if holdsLock(f.Type(), depth+1) {
+				return true
+			}
+		}
+	case *types.Array:
+		return holdsLock(u.Elem(), depth+1)
+	}
+	return false
 }

@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line rawconn.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line rawconn.go:6:1*/
 package net
+
+import "unsafe"/*line rawconn.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,55 +17,40 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line rawconn.go:13:2*//*line rawconn.go:26:2*//*line rawconn.go:28:63*/
 
-// BUG(tmm1): On Windows, the Write method of syscall.RawConn
-// does not integrate with the runtime's network poller. It cannot
-// wait for the connection to become writeable, and does not respect
-// deadlines. If the user-provided callback returns false, the Write
-// method will fail immediately.
-
-// BUG(mikio): On JS and Plan 9, the Control, Read and Write
-// methods of syscall.RawConn are not implemented.
-
-type windows_rawConn struct {
-	fd *windows_netFD
-}
-
-func (c *windows_rawConn) ok() bool { return c != nil && c.fd != nil }
-
-func (c *windows_rawConn) Control(f func(uintptr)) error {
+func (c *rawConn) Windows_Control(f func(uintptr)) error {
 	if !c.ok() {
 		return syscall.Windows_EINVAL
 	}
-	err := c.fd.pfd.RawControl(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**windows_netFD)(unsafe.Pointer(&c.fd))).pfd.RawControl(f)
+	runtime.KeepAlive((*(**windows_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-control", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+		err = &OpError{Op: "raw-control", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return err
 }
 
-func (c *windows_rawConn) Read(f func(uintptr) bool) error {
+func (c *rawConn) Windows_Read(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Windows_EINVAL
 	}
-	err := c.fd.pfd.RawRead(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**windows_netFD)(unsafe.Pointer(&c.fd))).pfd.RawRead(f)
+	runtime.KeepAlive((*(**windows_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-read", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
 
-func (c *windows_rawConn) Write(f func(uintptr) bool) error {
+func (c *rawConn) Windows_Write(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Windows_EINVAL
 	}
-	err := c.fd.pfd.RawWrite(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**windows_netFD)(unsafe.Pointer(&c.fd))).pfd.RawWrite(f)
+	runtime.KeepAlive((*(**windows_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-write", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
@@ -74,15 +62,15 @@ func (c *windows_rawConn) Write(f func(uintptr) bool) error {
 // they can pass the *poll.FD to functions like poll.Splice.
 //
 // PollFD is not intended for use outside the standard library.
-func (c *windows_rawConn) PollFD() *poll.Windows_FD {
+func (c *rawConn) Windows_PollFD() *poll.Windows_FD {
 	if !c.ok() {
 		return nil
 	}
-	return &c.fd.pfd
+	return &(*(**windows_netFD)(unsafe.Pointer(&c.fd))).pfd
 }
 
-func windows_newRawConn(fd *windows_netFD) *windows_rawConn {
-	return &windows_rawConn{fd: fd}
+func windows_newRawConn(fd *windows_netFD) *rawConn {
+	return &rawConn{fd: (*netFD)(unsafe.Pointer(fd))}
 }
 
 // Network returns the network type of the underlying connection.
@@ -92,22 +80,10 @@ func windows_newRawConn(fd *windows_netFD) *windows_rawConn {
 // extension method so that they can distinguish different socket types.
 //
 // Network is not intended for use outside the standard library.
-func (c *windows_rawConn) Network() poll.String {
-	return poll.String(c.fd.net)
-}
+func (c *rawConn) Windows_Network() poll.String {
+	return poll.String((*(**windows_netFD)(unsafe.Pointer(&c.fd))).net)
+}/*line rawconn.go:97:2*//*line rawconn.go:101:2*//*line rawconn.go:105:2*/
 
-type windows_rawListener struct {
-	windows_rawConn
-}
-
-func (l *windows_rawListener) Read(func(uintptr) bool) error {
-	return syscall.Windows_EINVAL
-}
-
-func (l *windows_rawListener) Write(func(uintptr) bool) error {
-	return syscall.Windows_EINVAL
-}
-
-func windows_newRawListener(fd *windows_netFD) *windows_rawListener {
-	return &windows_rawListener{windows_rawConn{fd: fd}}
+func windows_newRawListener(fd *windows_netFD) *rawListener {
+	return &rawListener{rawConn{fd: (*netFD)(unsafe.Pointer(fd))}}
 }

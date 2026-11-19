@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line boundary_compat.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line boundary_compat.go:6:1*/
 package cryptotest
 
 import "testing"
@@ -13,6 +14,6 @@ import "testing"
 // BoundarySlices allocates a pair of slices of the given size.
 //
 // On this platform, the slices are not special.
-func Freebsd_BoundarySlices(t *testing.Freebsd_T, size int) (start, end []byte) {
+func Freebsd_BoundarySlices(t *testing.T, size int) (start, end []byte) {
 	return make([]byte, size), make([]byte, size)
 }

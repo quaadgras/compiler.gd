@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line version_windows.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -58,14 +58,14 @@ func Windows_Version() (major, minor, build uint32) {
 // https://learn.microsoft.com/en-us/windows/win32/api/mswsock/nf-mswsock-transmitfile
 // https://golang.org/issue/73746
 var Windows_SupportUnlimitedTransmitFile = func() func() bool {
-	if apehost != apeWindows {
-		return *new(func() bool)
-	}
-	return sync.OnceValue(func() bool {
-		info := windows_getVersionInfo()
-		return info.productType != Windows_VER_NT_WORKSTATION
-	})
-}()
+if apehost != apeWindows {
+return *new(func() bool)
+}
+return /*line version_windows.go:56:36*/sync.OnceValue(func() bool {
+	info := windows_getVersionInfo()
+	return info.productType != Windows_VER_NT_WORKSTATION
+})
+}()/*line version_windows.go:59:3*/
 
 var (
 	windows_supportTCPKeepAliveIdle     bool
@@ -74,29 +74,29 @@ var (
 )
 
 var windows_initTCPKeepAlive = func() func() {
-	if apehost != apeWindows {
-		return *new(func())
+if apehost != apeWindows {
+return *new(func())
+}
+return /*line version_windows.go:67:24*/sync.OnceFunc(func() {
+	s, err := Windows_WSASocket(syscall.Windows_AF_INET, syscall.Windows_SOCK_STREAM, syscall.Windows_IPPROTO_TCP, nil, 0, Windows_WSA_FLAG_NO_HANDLE_INHERIT)
+	if err != nil {
+		// Fallback to checking the Windows version.
+		major, _, build := Windows_Version()
+		windows_supportTCPKeepAliveIdle = major >= 10 && build >= 16299
+		windows_supportTCPKeepAliveInterval = major >= 10 && build >= 16299
+		windows_supportTCPKeepAliveCount = major >= 10 && build >= 15063
+		return
 	}
-	return sync.OnceFunc(func() {
-		s, err := Windows_WSASocket(syscall.Windows_AF_INET, syscall.Windows_SOCK_STREAM, syscall.Windows_IPPROTO_TCP, nil, 0, Windows_WSA_FLAG_NO_HANDLE_INHERIT)
-		if err != nil {
-			// Fallback to checking the Windows version.
-			major, _, build := Windows_Version()
-			windows_supportTCPKeepAliveIdle = major >= 10 && build >= 16299
-			windows_supportTCPKeepAliveInterval = major >= 10 && build >= 16299
-			windows_supportTCPKeepAliveCount = major >= 10 && build >= 15063
-			return
-		}
-		defer syscall.Windows_Closesocket(s)
-		var optSupported = func(opt int) bool {
-			err := syscall.Windows_SetsockoptInt(s, syscall.Windows_IPPROTO_TCP, opt, 1)
-			return !errors.Is(err, syscall.Windows_WSAENOPROTOOPT)
-		}
-		windows_supportTCPKeepAliveIdle = optSupported(Windows_TCP_KEEPIDLE)
-		windows_supportTCPKeepAliveInterval = optSupported(Windows_TCP_KEEPINTVL)
-		windows_supportTCPKeepAliveCount = optSupported(Windows_TCP_KEEPCNT)
-	})
-}()
+	defer syscall.Windows_Closesocket(s)
+	var optSupported = func(opt int) bool {
+		err := syscall.Windows_SetsockoptInt(s, syscall.Windows_IPPROTO_TCP, opt, 1)
+		return !errors.Is(err, syscall.Windows_WSAENOPROTOOPT)
+	}
+	windows_supportTCPKeepAliveIdle = optSupported(Windows_TCP_KEEPIDLE)
+	windows_supportTCPKeepAliveInterval = optSupported(Windows_TCP_KEEPINTVL)
+	windows_supportTCPKeepAliveCount = optSupported(Windows_TCP_KEEPCNT)
+})
+}()/*line version_windows.go:85:3*/
 
 // SupportTCPKeepAliveIdle indicates whether TCP_KEEPIDLE is supported.
 // The minimal requirement is Windows 10.0.16299.
@@ -124,39 +124,39 @@ func Windows_SupportTCPKeepAliveCount() bool {
 // Windows version supports the TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS.
 // The minimal requirement is Windows 10.0.16299.
 var Windows_SupportTCPInitialRTONoSYNRetransmissions = func() func() bool {
-	if apehost != apeWindows {
-		return *new(func() bool)
-	}
-	return sync.OnceValue(func() bool {
-		major, _, build := Windows_Version()
-		return major >= 10 && build >= 16299
-	})
-}()
+if apehost != apeWindows {
+return *new(func() bool)
+}
+return /*line version_windows.go:112:48*/sync.OnceValue(func() bool {
+	major, _, build := Windows_Version()
+	return major >= 10 && build >= 16299
+})
+}()/*line version_windows.go:115:3*/
 
 // SupportUnixSocket indicates whether the current Windows version supports
 // Unix Domain Sockets.
 // The minimal requirement is Windows 10.0.17063.
 var Windows_SupportUnixSocket = func() func() bool {
-	if apehost != apeWindows {
-		return *new(func() bool)
-	}
-	return sync.OnceValue(func() bool {
-		var size uint32
-		// First call to get the required buffer size in bytes.
-		// Ignore the error, it will always fail.
-		_, _ = syscall.Windows_WSAEnumProtocols(nil, nil, &size)
-		n := int32(size) / int32(unsafe.Sizeof(syscall.Windows_WSAProtocolInfo{}))
-		// Second call to get the actual protocols.
-		buf := make([]syscall.Windows_WSAProtocolInfo, n)
-		n, err := syscall.Windows_WSAEnumProtocols(nil, &buf[0], &size)
-		if err != nil {
-			return false
-		}
-		for i := int32(0); i < n; i++ {
-			if buf[i].AddressFamily == syscall.Windows_AF_UNIX {
-				return true
-			}
-		}
+if apehost != apeWindows {
+return *new(func() bool)
+}
+return /*line version_windows.go:120:25*/sync.OnceValue(func() bool {
+	var size uint32
+	// First call to get the required buffer size in bytes.
+	// Ignore the error, it will always fail.
+	_, _ = syscall.Windows_WSAEnumProtocols(nil, nil, &size)
+	n := int32(size) / int32(unsafe.Sizeof(syscall.Windows_WSAProtocolInfo{}))
+	// Second call to get the actual protocols.
+	buf := make([]syscall.Windows_WSAProtocolInfo, n)
+	n, err := syscall.Windows_WSAEnumProtocols(nil, &buf[0], &size)
+	if err != nil {
 		return false
-	})
-}()
+	}
+	for i := int32(0); i < n; i++ {
+		if buf[i].AddressFamily == syscall.Windows_AF_UNIX {
+			return true
+		}
+	}
+	return false
+})
+}()/*line version_windows.go:138:3*/

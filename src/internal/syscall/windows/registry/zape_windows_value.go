@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line value.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line value.go:6:1*/
 package registry
 
 import (
@@ -40,11 +41,11 @@ var (
 
 	// ErrUnexpectedType is returned by Get*Value when the value's type was unexpected.
 	Windows_ErrUnexpectedType = func() error {
-		if apehost != apeWindows {
-			return *new(error)
-		}
-		return errors.New("unexpected key value type")
-	}()
+if apehost != apeWindows {
+return *new(error)
+}
+return /*line value.go:40:22*/errors.New("unexpected key value type")
+}()/*line value.go:40:61*/
 )
 
 // GetValue retrieves the type and data for the specified value associated

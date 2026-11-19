@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line removeall_at.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line removeall_at.go:6:1*/
 package os
 
 import (
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line removeall_at.go:13:2*/
 
 func freebsd_removeAll(path string) error {
 	if path == "" {
@@ -176,7 +177,7 @@ func freebsd_removeAllFrom(parentFd freebsd_sysfdType, base string) error {
 // This acts like openFileNolog rather than OpenFile because
 // we are going to (try to) remove the file.
 // The contents of this file are not relevant for test caching.
-func freebsd_openDirAt(dirfd freebsd_sysfdType, name string) (*Freebsd_File, error) {
+func freebsd_openDirAt(dirfd freebsd_sysfdType, name string) (*File, error) {
 	fd, err := freebsd_rootOpenDir(dirfd, name)
 	if err != nil {
 		return nil, err

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_unix.go:6:1*/
 // Fork, exec, wait, etc.
 
 package syscall
@@ -14,11 +15,13 @@ import (
 	errorspkg "errors"
 	"internal/bytealg"
 	"runtime"
-
+	
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_unix.go:17:2*/
+
+/*line exec_unix.go:65:26*/
 
 // StringSlicePtr converts a slice of strings to a slice of pointers
 // to NUL-terminated byte arrays. If any string contains a NUL byte
@@ -28,7 +31,7 @@ var _ = runtime.GOARCH
 func Linux_StringSlicePtr(ss []string) []*byte {
 	bb := make([]*byte, len(ss)+1)
 	for i := 0; i < len(ss); i++ {
-		bb[i] = Linux_StringBytePtr(ss[i])
+		bb[i] = StringBytePtr(ss[i])
 	}
 	bb[len(ss)] = nil
 	return bb
@@ -111,7 +114,7 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 	}
 
 	// Convert args to C form.
-	argv0p, err := Linux_BytePtrFromString(argv0)
+	argv0p, err := BytePtrFromString(argv0)
 	if err != nil {
 		return 0, err
 	}
@@ -130,14 +133,14 @@ func linux_forkExec(argv0 string, argv []string, attr *Linux_ProcAttr) (pid int,
 
 	var chroot *byte
 	if sys.Chroot != "" {
-		chroot, err = Linux_BytePtrFromString(sys.Chroot)
+		chroot, err = BytePtrFromString(sys.Chroot)
 		if err != nil {
 			return 0, err
 		}
 	}
 	var dir *byte
 	if attr.Dir != "" {
-		dir, err = Linux_BytePtrFromString(attr.Dir)
+		dir, err = BytePtrFromString(attr.Dir)
 		if err != nil {
 			return 0, err
 		}
@@ -216,12 +219,10 @@ func Linux_StartProcess(argv0 string, argv []string, attr *Linux_ProcAttr) (pid 
 }
 
 // Implemented in runtime package.
-//
 //go:linkname linux_runtime_BeforeExec syscall.runtime_BeforeExec
-func linux_runtime_BeforeExec()
-
+/*line exec_unix.go:263:1*/func linux_runtime_BeforeExec()
 //go:linkname linux_runtime_AfterExec syscall.runtime_AfterExec
-func linux_runtime_AfterExec()
+/*line exec_unix.go:264:1*/func linux_runtime_AfterExec()
 
 // execveLibc is non-nil on OS using libc syscall, set to execve in exec_libc.go; this
 // avoids a build dependency for other platforms.
@@ -229,7 +230,7 @@ var linux_execveLibc func(path *byte, argv **byte, envp **byte) error
 
 // Exec invokes the execve(2) system call.
 func Linux_Exec(argv0 string, argv []string, envv []string) (err error) {
-	argv0p, err := Linux_BytePtrFromString(argv0)
+	argv0p, err := BytePtrFromString(argv0)
 	if err != nil {
 		return err
 	}

@@ -5,7 +5,6 @@
 package pprof
 
 import (
-	"errors"
 	"io"
 	"unsafe"
 )
@@ -21,10 +20,6 @@ const (
 	apeWindows
 )
 
-var errBadELF error = errors.New("malformed ELF binary")
-
-var errNoBuildID error = errors.New("no NT_GNU_BUILD_ID found in ELF binary")
-
 func addMaxRSS(a0 io.Writer) {
 	if apehost == apeLinux {
 		linux_addMaxRSS(a0)
@@ -37,17 +32,17 @@ func addMaxRSS(a0 io.Writer) {
 	windows_addMaxRSS(a0)
 }
 
-func elfBuildID(a0 string) (string, error) {
+func readMainModuleMapping() (uint64, uint64, string, string, error) {
 	if apehost == apeLinux {
-		x0, x1 := linux_elfBuildID(a0)
-		return x0, x1
+		x0, x1, x2, x3, x4 := linux_readMainModuleMapping()
+		return x0, x1, x2, x3, x4
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := freebsd_elfBuildID(a0)
-		return x0, x1
+		x0, x1, x2, x3, x4 := freebsd_readMainModuleMapping()
+		return x0, x1, x2, x3, x4
 	}
-	x0, x1 := windows_elfBuildID(a0)
-	return x0, x1
+	x0, x1, x2, x3, x4 := windows_readMainModuleMapping()
+	return x0, x1, x2, x3, x4
 }
 
 func (r *profileBuilder) readMapping() {

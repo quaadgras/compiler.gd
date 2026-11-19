@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line path_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line path_unix.go:6:1*/
 package filepath
 
 import (
@@ -28,14 +29,14 @@ func linux_splitList(path string) []string {
 }
 
 func linux_abs(path string) (string, error) {
-	return linux_unixAbs(path)
+	return unixAbs(path)
 }
 
 func linux_join(elem []string) string {
 	// If there's a bug here, fix the logic in ./path_plan9.go too.
 	for i, e := range elem {
 		if e != "" {
-			return Linux_Clean(strings.Join(elem[i:], string(Linux_Separator)))
+			return Clean(strings.Join(elem[i:], string(Linux_Separator)))
 		}
 	}
 	return ""

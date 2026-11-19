@@ -2,22 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line mptcpsock_stub.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line mptcpsock_stub.go:6:1*/
 package net
 
 import (
 	"context"
 )
 
-func (sd *windows_sysDialer) dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Windows_TCPConn, error) {
-	return sd.dialTCP(ctx, laddr, raddr)
+func (sd *sysDialer) windows_dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
+	return sd.windows_dialTCP(ctx, laddr, raddr)
 }
 
-func (sl *sysListener) windows_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*Windows_TCPListener, error) {
-	return sl.windows_listenTCP(ctx, laddr)
+func (sl *sysListener) windows_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
+	return sl.listenTCP(ctx, laddr)
 }
 
 func windows_isUsingMultipathTCP(fd *windows_netFD) bool {

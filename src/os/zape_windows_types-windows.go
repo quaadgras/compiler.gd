@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line types_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -165,11 +165,11 @@ func (fs *windows_fileStat) Size() int64 {
 }
 
 var windows_winsymlink = func() *godebug.Setting {
-	if apehost != apeWindows {
-		return *new(*godebug.Setting)
-	}
-	return godebug.New("winsymlink")
-}()
+if apehost != apeWindows {
+return *new(*godebug.Setting)
+}
+return /*line types_windows.go:163:18*/godebug.New("winsymlink")
+}()/*line types_windows.go:163:43*/
 
 func (fs *windows_fileStat) Mode() FileMode {
 	m := fs.mode()
@@ -201,23 +201,23 @@ func (fs *windows_fileStat) mode() (m FileMode) {
 	// loops, so it is not safe to walk them without special handling.
 	if !fs.isReparseTagNameSurrogate() {
 		if fs.FileAttributes&syscall.Windows_FILE_ATTRIBUTE_DIRECTORY != 0 {
-			m |= Windows_ModeDir | 0111
+			m |= ModeDir | 0111
 		}
 
 		switch fs.filetype {
 		case syscall.Windows_FILE_TYPE_PIPE:
-			m |= Windows_ModeNamedPipe
+			m |= ModeNamedPipe
 		case syscall.Windows_FILE_TYPE_CHAR:
-			m |= Windows_ModeDevice | Windows_ModeCharDevice
+			m |= ModeDevice | ModeCharDevice
 		}
 	}
 
 	if fs.FileAttributes&syscall.Windows_FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		switch fs.ReparseTag {
 		case syscall.Windows_IO_REPARSE_TAG_SYMLINK:
-			m |= Windows_ModeSymlink
+			m |= ModeSymlink
 		case windows.Windows_IO_REPARSE_TAG_AF_UNIX:
-			m |= Windows_ModeSocket
+			m |= ModeSocket
 		case windows.Windows_IO_REPARSE_TAG_DEDUP:
 			// If the Data Deduplication service is enabled on Windows Server, its
 			// Optimization job may convert regular files to IO_REPARSE_TAG_DEDUP
@@ -233,7 +233,7 @@ func (fs *windows_fileStat) mode() (m FileMode) {
 			// to avoid files changing unpredictably from regular to irregular we will
 			// consider DEDUP files to be close enough to regular to treat as such.
 		default:
-			m |= Windows_ModeIrregular
+			m |= ModeIrregular
 		}
 	}
 	return
@@ -251,26 +251,26 @@ func (fs *windows_fileStat) modePreGo1_23() (m FileMode) {
 	}
 	if fs.ReparseTag == syscall.Windows_IO_REPARSE_TAG_SYMLINK ||
 		fs.ReparseTag == windows.Windows_IO_REPARSE_TAG_MOUNT_POINT {
-		return m | Windows_ModeSymlink
+		return m | ModeSymlink
 	}
 	if fs.FileAttributes&syscall.Windows_FILE_ATTRIBUTE_DIRECTORY != 0 {
-		m |= Windows_ModeDir | 0111
+		m |= ModeDir | 0111
 	}
 	switch fs.filetype {
 	case syscall.Windows_FILE_TYPE_PIPE:
-		m |= Windows_ModeNamedPipe
+		m |= ModeNamedPipe
 	case syscall.Windows_FILE_TYPE_CHAR:
-		m |= Windows_ModeDevice | Windows_ModeCharDevice
+		m |= ModeDevice | ModeCharDevice
 	}
 	if fs.FileAttributes&syscall.Windows_FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		if fs.ReparseTag == windows.Windows_IO_REPARSE_TAG_AF_UNIX {
-			m |= Windows_ModeSocket
+			m |= ModeSocket
 		}
-		if m&Windows_ModeType == 0 {
+		if m&ModeType == 0 {
 			if fs.ReparseTag == windows.Windows_IO_REPARSE_TAG_DEDUP {
 				// See comment in fs.Mode.
 			} else {
-				m |= Windows_ModeIrregular
+				m |= ModeIrregular
 			}
 		}
 	}
@@ -278,7 +278,7 @@ func (fs *windows_fileStat) modePreGo1_23() (m FileMode) {
 }
 
 func (fs *windows_fileStat) ModTime() time.Time {
-	return time.Windows_Unix(0, fs.LastWriteTime.Nanoseconds())
+	return time.Unix(0, fs.LastWriteTime.Nanoseconds())
 }
 
 // Sys returns syscall.Win32FileAttributeData for file fs.
@@ -373,5 +373,5 @@ func windows_sameFile(fs1, fs2 *windows_fileStat) bool {
 
 // For testing.
 func windows_atime(fi FileInfo) time.Time {
-	return time.Windows_Unix(0, fi.Sys().(*syscall.Windows_Win32FileAttributeData).LastAccessTime.Nanoseconds())
+	return time.Unix(0, fi.Sys().(*syscall.Windows_Win32FileAttributeData).LastAccessTime.Nanoseconds())
 }

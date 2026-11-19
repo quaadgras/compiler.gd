@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line key.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line key.go:6:1*/
 // Package registry provides access to the Windows registry.
 //
 // Here is a simple example, opening a registry key and reading a string value from it.
@@ -31,7 +32,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line key.go:30:2*/
 
 const (
 	// Registry key security and access rights.

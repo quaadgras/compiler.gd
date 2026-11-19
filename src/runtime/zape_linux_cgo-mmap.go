@@ -2,15 +2,20 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line cgo_mmap.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 // Support for memory sanitizer. See runtime/cgo/mmap.go.
 
+/*line cgo_mmap.go:8:1*/
 package runtime
 
 import "unsafe"
+
+/*line cgo_mmap.go:17:29*/
+
+/*line cgo_mmap.go:23:31*/
 
 // mmap is used to route the mmap system call through C code when using cgo, to
 // support sanitizer interceptors. Don't allow stack splits, since this function

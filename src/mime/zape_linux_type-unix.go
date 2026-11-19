@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line type_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line type_unix.go:6:1*/
 package mime
 
 import (
@@ -34,7 +35,7 @@ var linux_typeFiles = []string{
 }
 
 func linux_loadMimeGlobsFile(filename string) error {
-	f, err := os.Linux_Open(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return err
 	}
@@ -79,7 +80,7 @@ func linux_loadMimeGlobsFile(filename string) error {
 }
 
 func linux_loadMimeFile(filename string) {
-	f, err := os.Linux_Open(filename)
+	f, err := os.Open(filename)
 	if err != nil {
 		return
 	}

@@ -2,19 +2,20 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line interface.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line interface.go:6:1*/
 package routebsd
 
 // An InterfaceMessage represents an interface message.
 type Freebsd_InterfaceMessage struct {
-	Version int            // message version
-	Type    int            // message type
-	Flags   int            // interface flags
-	Index   int            // interface index
-	Name    string         // interface name
+	Version int    // message version
+	Type    int    // message type
+	Flags   int    // interface flags
+	Index   int    // interface index
+	Name    string // interface name
 	Addrs   []Freebsd_Addr // addresses
 
 	extOff int    // offset of header extension
@@ -23,10 +24,10 @@ type Freebsd_InterfaceMessage struct {
 
 // An InterfaceAddrMessage represents an interface address message.
 type Freebsd_InterfaceAddrMessage struct {
-	Version int            // message version
-	Type    int            // message type
-	Flags   int            // interface flags
-	Index   int            // interface index
+	Version int    // message version
+	Type    int    // message type
+	Flags   int    // interface flags
+	Index   int    // interface index
 	Addrs   []Freebsd_Addr // addresses
 
 	raw []byte // raw message
@@ -35,10 +36,10 @@ type Freebsd_InterfaceAddrMessage struct {
 // An InterfaceMulticastAddrMessage represents an interface multicast
 // address message.
 type Freebsd_InterfaceMulticastAddrMessage struct {
-	Version int            // message version
-	Type    int            // message type
-	Flags   int            // interface flags
-	Index   int            // interface index
+	Version int    // message version
+	Type    int    // message type
+	Flags   int    // interface flags
+	Index   int    // interface index
 	Addrs   []Freebsd_Addr // addresses
 
 	raw []byte // raw message

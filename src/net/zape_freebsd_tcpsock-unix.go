@@ -2,31 +2,34 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line tcpsock_unix.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tcpsock_unix.go:6:1*/
 package net
+
+import "unsafe"/*line tcpsock_unix.go:7:12*/
 
 import "syscall"
 
 // SetKeepAliveConfig configures keep-alive messages sent by the operating system.
-func (c *Freebsd_TCPConn) SetKeepAliveConfig(config KeepAliveConfig) error {
+func (c *TCPConn) Freebsd_SetKeepAliveConfig(config KeepAliveConfig) error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
 
-	if err := freebsd_setKeepAlive(c.fd, config.Enable); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := freebsd_setKeepAlive((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))), config.Enable); err != nil {
+		return &OpError{Op: "set", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
-	if err := freebsd_setKeepAliveIdle(c.fd, config.Idle); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := freebsd_setKeepAliveIdle((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))), config.Idle); err != nil {
+		return &OpError{Op: "set", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
-	if err := freebsd_setKeepAliveInterval(c.fd, config.Interval); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := freebsd_setKeepAliveInterval((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))), config.Interval); err != nil {
+		return &OpError{Op: "set", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
-	if err := freebsd_setKeepAliveCount(c.fd, config.Count); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := freebsd_setKeepAliveCount((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))), config.Count); err != nil {
+		return &OpError{Op: "set", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 
 	return nil

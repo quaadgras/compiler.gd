@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_openat.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_openat.go:6:1*/
 package os
+
+import "unsafe"/*line root_openat.go:7:11*/
 
 import (
 	"io/fs"
@@ -17,7 +20,7 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line root_openat.go:16:2*/
 
 // root implementation for platforms with a function to open a file
 // relative to a directory.
@@ -73,7 +76,7 @@ func (r *freebsd_root) Name() string {
 	return r.name
 }
 
-func freebsd_rootChmod(r *Freebsd_Root, name string, mode FileMode) error {
+func freebsd_rootChmod(r *Root, name string, mode FileMode) error {
 	_, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_chmodat(parent, name, mode)
 	})
@@ -83,7 +86,7 @@ func freebsd_rootChmod(r *Freebsd_Root, name string, mode FileMode) error {
 	return nil
 }
 
-func freebsd_rootChown(r *Freebsd_Root, name string, uid, gid int) error {
+func freebsd_rootChown(r *Root, name string, uid, gid int) error {
 	_, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_chownat(parent, name, uid, gid)
 	})
@@ -93,7 +96,7 @@ func freebsd_rootChown(r *Freebsd_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func freebsd_rootLchown(r *Freebsd_Root, name string, uid, gid int) error {
+func freebsd_rootLchown(r *Root, name string, uid, gid int) error {
 	_, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_lchownat(parent, name, uid, gid)
 	})
@@ -103,7 +106,7 @@ func freebsd_rootLchown(r *Freebsd_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func freebsd_rootChtimes(r *Freebsd_Root, name string, atime time.Time, mtime time.Time) error {
+func freebsd_rootChtimes(r *Root, name string, atime time.Time, mtime time.Time) error {
 	_, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_chtimesat(parent, name, atime, mtime)
 	})
@@ -113,15 +116,15 @@ func freebsd_rootChtimes(r *Freebsd_Root, name string, atime time.Time, mtime ti
 	return nil
 }
 
-func freebsd_rootMkdir(r *Freebsd_Root, name string, perm FileMode) error {
-	flags := uint(freebsd_doInRootCreatingDirectory)
+func freebsd_rootMkdir(r *Root, name string, perm FileMode) error {
+	flags := uint(doInRootCreatingDirectory)
 	switch "freebsd" {
 	case "linux", "windows", "openbsd":
 		// These platforms do not follow "symlink" on "mkdir symlink/".
 		// (POSIX.1-2024 4.16 says that the trailing slash should cause
 		// resolution to follow the symlink, but we're trying to match
 		// platform semantics, not implement POSIX.)
-		flags |= freebsd_doInRootNoHandleTerminalSlash
+		flags |= doInRootNoHandleTerminalSlash
 	}
 	_, err := freebsd_doInRoot(r, name, flags, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_mkdirat(parent, name, perm)
@@ -132,7 +135,7 @@ func freebsd_rootMkdir(r *Freebsd_Root, name string, perm FileMode) error {
 	return nil
 }
 
-func freebsd_rootMkdirAll(r *Freebsd_Root, fullname string, perm FileMode) error {
+func freebsd_rootMkdirAll(r *Root, fullname string, perm FileMode) error {
 	// doInRoot opens each path element in turn.
 	//
 	// openDirFunc opens all but the last path component.
@@ -190,10 +193,10 @@ func freebsd_rootMkdirAll(r *Freebsd_Root, fullname string, perm FileMode) error
 		}
 		return struct{}{}, &PathError{Op: "mkdirat", Err: err}
 	}
-	flags := uint(freebsd_doInRootCreatingDirectory)
+	flags := uint(doInRootCreatingDirectory)
 	switch "freebsd" {
 	case "linux", "windows", "openbsd":
-		flags |= freebsd_doInRootNoHandleTerminalSlash // see rootMkdir
+		flags |= doInRootNoHandleTerminalSlash // see rootMkdir
 	}
 	_, err := freebsd_doInRoot(r, fullname, flags, openDirFunc, openLastComponentFunc)
 	if err != nil {
@@ -204,7 +207,7 @@ func freebsd_rootMkdirAll(r *Freebsd_Root, fullname string, perm FileMode) error
 	return err
 }
 
-func freebsd_rootReadlink(r *Freebsd_Root, name string) (string, error) {
+func freebsd_rootReadlink(r *Root, name string) (string, error) {
 	target, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (string, error) {
 		return freebsd_readlinkat(parent, name)
 	})
@@ -214,7 +217,7 @@ func freebsd_rootReadlink(r *Freebsd_Root, name string) (string, error) {
 	return target, nil
 }
 
-func freebsd_rootRemove(r *Freebsd_Root, name string) error {
+func freebsd_rootRemove(r *Root, name string) error {
 	_, err := freebsd_doInRoot(r, name, 0, nil, func(parent freebsd_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, freebsd_removeat(parent, name)
 	})
@@ -224,7 +227,7 @@ func freebsd_rootRemove(r *Freebsd_Root, name string) error {
 	return nil
 }
 
-func freebsd_rootRemoveAll(r *Freebsd_Root, name string) error {
+func freebsd_rootRemoveAll(r *Root, name string) error {
 	// Consistency with os.RemoveAll: Strip trailing /s from the name,
 	// so RemoveAll("not_a_directory/") succeeds.
 	for len(name) > 0 && Freebsd_IsPathSeparator(name[len(name)-1]) {
@@ -246,11 +249,11 @@ func freebsd_rootRemoveAll(r *Freebsd_Root, name string) error {
 	return err
 }
 
-func freebsd_rootRename(r *Freebsd_Root, oldname, newname string) error {
+func freebsd_rootRename(r *Root, oldname, newname string) error {
 	_, err := freebsd_doInRoot(r, oldname, 0, nil, func(oldparent freebsd_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
-		flags := uint(freebsd_doInRootCreatingDirectory)
+		flags := uint(doInRootCreatingDirectory)
 		if "freebsd" == "windows" {
-			flags |= freebsd_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := freebsd_doInRoot(r, newname, flags, nil, func(newparent freebsd_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			if "freebsd" != "windows" && newEndsInSlash {
@@ -281,12 +284,12 @@ func freebsd_rootRename(r *Freebsd_Root, oldname, newname string) error {
 	return err
 }
 
-func freebsd_rootLink(r *Freebsd_Root, oldname, newname string) error {
+func freebsd_rootLink(r *Root, oldname, newname string) error {
 	_, err := freebsd_doInRoot(r, oldname, 0, nil, func(oldparent freebsd_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
 		flags := uint(0)
 		if "freebsd" == "windows" {
 			// Windows doesn't pay attention to trailing slashes in the link target.
-			flags |= freebsd_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := freebsd_doInRoot(r, newname, flags, nil, func(newparent freebsd_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			return struct{}{}, freebsd_linkat(oldparent, oldname, newparent, newname)
@@ -297,27 +300,7 @@ func freebsd_rootLink(r *Freebsd_Root, oldname, newname string) error {
 		return &LinkError{"linkat", oldname, newname, err}
 	}
 	return err
-}
-
-// Flags for doInRoot.
-const (
-	// doInRootNoHandleTerminalSlash prevents doInRoot from applying special handling
-	// for paths which end in one or more slashes.
-	freebsd_doInRootNoHandleTerminalSlash = 1 << iota
-
-	// doInRootCreatingDirectory indicates that the operation is creating a directory.
-	// When a path ends in /, the last path component may name a file which does not exist.
-	freebsd_doInRootCreatingDirectory
-
-	// doInRootAlwaysResolveTerminalSlash causes doInRoot to resolve symlinks in the last
-	// path component when a path ends in /, even on Windows. For example, this causes
-	// doInRoot to resolve "symlink/" as the link target of "symlink".
-	//
-	// POSIX path operations resolve symlinks in this case.
-	// Most Windows operations do not.
-	// This flag enforces the POSIX behavior.
-	freebsd_doInRootAlwaysResolveTerminalSlash
-)
+}/*line root_openat.go:316:2*/
 
 // doInRoot performs an operation on a path in a Root.
 //
@@ -344,13 +327,13 @@ const (
 //
 // If f or openDirFunc return a *PathError, doInRoot will set PathError.Path to the
 // full path which caused the error.
-func freebsd_doInRoot[T any](r *Freebsd_Root, name string, flags uint, openDirFunc func(parent freebsd_sysfdType, name string) (freebsd_sysfdType, error), f func(parent freebsd_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
-	if err := r.root.incref(); err != nil {
+func freebsd_doInRoot[T any](r *Root, name string, flags uint, openDirFunc func(parent freebsd_sysfdType, name string) (freebsd_sysfdType, error), f func(parent freebsd_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
+	if err := (*(**freebsd_root)(unsafe.Pointer(&r.root))).incref(); err != nil {
 		return ret, err
 	}
-	defer r.root.decref()
+	defer (*(**freebsd_root)(unsafe.Pointer(&r.root))).decref()
 
-	parts, endsInSlash, err := freebsd_splitPathInRoot(name, nil, nil)
+	parts, endsInSlash, err := splitPathInRoot(name, nil, nil)
 	if err != nil {
 		return ret, err
 	}
@@ -358,7 +341,7 @@ func freebsd_doInRoot[T any](r *Freebsd_Root, name string, flags uint, openDirFu
 		openDirFunc = freebsd_rootOpenDir
 	}
 
-	rootfd := r.root.fd
+	rootfd := (*(**freebsd_root)(unsafe.Pointer(&r.root))).fd
 	dirfd := rootfd
 	defer func() {
 		if dirfd != rootfd {
@@ -415,11 +398,11 @@ Loop:
 
 		if i == len(parts)-1 {
 			err = nil
-			if endsInSlash && flags&freebsd_doInRootNoHandleTerminalSlash == 0 {
+			if endsInSlash && flags&doInRootNoHandleTerminalSlash == 0 {
 				var fi FileInfo
 				fi, err = freebsd_lstatat(dirfd, parts[i])
 				switch {
-				case IsNotExist(err) && flags&freebsd_doInRootCreatingDirectory != 0:
+				case IsNotExist(err) && flags&doInRootCreatingDirectory != 0:
 					// The path ends in a slash, the last path component
 					// does not exist, and we creating a directory.
 					// This is fine.
@@ -428,7 +411,7 @@ Loop:
 					return
 				case fi.Mode().Type() == fs.ModeDir:
 				case freebsd_isLink(fi):
-					if "freebsd" != "windows" || flags&freebsd_doInRootAlwaysResolveTerminalSlash != 0 {
+					if "freebsd" != "windows" || flags&doInRootAlwaysResolveTerminalSlash != 0 {
 						err = freebsd_checkSymlink(dirfd, parts[i], syscall.Freebsd_ENOTDIR)
 					} else {
 						if !freebsd_isDirectoryLink(fi) {
@@ -467,11 +450,11 @@ Loop:
 		case nil:
 		case errSymlink:
 			symlinks++
-			if symlinks > freebsd_rootMaxSymlinks {
+			if symlinks > rootMaxSymlinks {
 				return ret, syscall.Freebsd_ELOOP
 			}
 			lastPart := i == len(parts)-1
-			newparts, newEndsInSlash, err := freebsd_splitPathInRoot(string(e), parts[:i], parts[i+1:])
+			newparts, newEndsInSlash, err := splitPathInRoot(string(e), parts[:i], parts[i+1:])
 			if err != nil {
 				return ret, err
 			}
@@ -512,6 +495,4 @@ func freebsd_modeAt(parent freebsd_sysfdType, name string) (FileMode, error) {
 		return 0, err
 	}
 	return fi.Mode(), nil
-}
-
-func (errSymlink) Freebsd_Error() string { panic("errSymlink is not user-visible") }
+}/*line root_openat.go:515:23*//*line root_openat.go:517:77*/

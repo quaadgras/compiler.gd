@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -16,20 +16,20 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_windows.go:13:2*/
 
 // Note that Process.handle is never nil because Windows always requires
 // a handle. A manually-created Process literal is not valid.
 
 func (p *Process) windows_wait() (ps *Windows_ProcessState, err error) {
-	handle, status := p.windows_handleTransientAcquire()
+	handle, status := p.handleTransientAcquire()
 	switch status {
-	case windows_statusDone:
+	case statusDone:
 		return nil, ErrProcessDone
-	case windows_statusReleased:
+	case statusReleased:
 		return nil, syscall.Windows_EINVAL
 	}
-	defer p.windows_handleTransientRelease()
+	defer p.handleTransientRelease()
 
 	s, e := syscall.Windows_WaitForSingleObject(syscall.Windows_Handle(handle), syscall.Windows_INFINITE)
 	switch s {
@@ -53,20 +53,20 @@ func (p *Process) windows_wait() (ps *Windows_ProcessState, err error) {
 
 	// For compatibility we use statusReleased here rather
 	// than statusDone.
-	p.windows_doRelease(windows_statusReleased)
+	p.doRelease(statusReleased)
 
 	return &Windows_ProcessState{p.Pid, syscall.Windows_WaitStatus{ExitCode: ec}, &u}, nil
 }
 
 func (p *Process) windows_signal(sig Signal) error {
-	handle, status := p.windows_handleTransientAcquire()
+	handle, status := p.handleTransientAcquire()
 	switch status {
-	case windows_statusDone:
+	case statusDone:
 		return ErrProcessDone
-	case windows_statusReleased:
+	case statusReleased:
 		return syscall.Windows_EINVAL
 	}
-	defer p.windows_handleTransientRelease()
+	defer p.handleTransientRelease()
 
 	if sig == Kill {
 		var terminationHandle syscall.Windows_Handle
@@ -94,7 +94,7 @@ func windows_findProcess(pid int) (p *Process, err error) {
 	if e != nil {
 		return nil, NewSyscallError("OpenProcess", e)
 	}
-	return windows_newHandleProcess(pid, uintptr(h)), nil
+	return newHandleProcess(pid, uintptr(h)), nil
 }
 
 func windows_init0() {
@@ -174,7 +174,7 @@ func windows_commandLineToArgv(cmd string) []string {
 
 func windows_ftToDuration(ft *syscall.Windows_Filetime) time.Duration {
 	n := int64(ft.HighDateTime)<<32 + int64(ft.LowDateTime) // in 100-nanosecond intervals
-	return time.Duration(n*100) * time.Windows_Nanosecond
+	return time.Duration(n*100) * time.Nanosecond
 }
 
 func (p *Windows_ProcessState) userTime() time.Duration {

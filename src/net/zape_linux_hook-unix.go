@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line hook_unix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line hook_unix.go:6:1*/
 package net
 
 import "syscall"
@@ -16,8 +17,8 @@ var (
 	linux_hostsFilePath = "/etc/hosts"
 
 	// Placeholders for socket system calls.
-	linux_socketFunc        func(int, int, int) (int, error)        = syscall.Linux_Socket
+	linux_socketFunc        func(int, int, int) (int, error)  = syscall.Linux_Socket
 	linux_connectFunc       func(int, syscall.Linux_Sockaddr) error = syscall.Linux_Connect
-	linux_listenFunc        func(int, int) error                    = syscall.Linux_Listen
-	linux_getsockoptIntFunc func(int, int, int) (int, error)        = syscall.Linux_GetsockoptInt
+	linux_listenFunc        func(int, int) error              = syscall.Linux_Listen
+	linux_getsockoptIntFunc func(int, int, int) (int, error)  = syscall.Linux_GetsockoptInt
 )

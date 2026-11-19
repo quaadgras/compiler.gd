@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line stat_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,11 +18,11 @@ import (
 
 // Stat returns the [FileInfo] structure describing file.
 // If there is an error, it will be of type [*PathError].
-func (file *Windows_File) Stat() (FileInfo, error) {
+func (file *File) Windows_Stat() (FileInfo, error) {
 	if file == nil {
 		return nil, ErrInvalid
 	}
-	return windows_statHandle(file.name, file.pfd.Sysfd)
+	return windows_statHandle((*windows_file)(unsafe.Pointer(file.file)).name, (*windows_file)(unsafe.Pointer(file.file)).pfd.Sysfd)
 }
 
 // stat implements both Stat and Lstat of a file.

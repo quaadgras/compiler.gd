@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line zoneinfo_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line zoneinfo_unix.go:6:1*/
 // Parse "zoneinfo" time zone file.
 // This is a fairly standard file format used on OS X, Linux, BSD, Sun, and others.
 // See tzfile(5), https://en.wikipedia.org/wiki/Zoneinfo,
@@ -59,7 +60,7 @@ func freebsd_initLocal() {
 				return
 			}
 		} else if tz != "" && tz != "UTC" {
-			if z, err := loadLocation(tz, freebsd_platformZoneSources); err == nil {
+			if z, err := loadLocation(tz, platformZoneSources); err == nil {
 				localLoc = *z
 				return
 			}

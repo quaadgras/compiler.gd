@@ -2,18 +2,19 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line zero_copy_stub.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line zero_copy_stub.go:6:1*/
 package os
 
 import "io"
 
-func (f *Windows_File) writeTo(w io.Writer) (written int64, handled bool, err error) {
+func (f *File) windows_writeTo(w io.Writer) (written int64, handled bool, err error) {
 	return 0, false, nil
 }
 
-func (f *Windows_File) readFrom(r io.Reader) (n int64, handled bool, err error) {
+func (f *File) windows_readFrom(r io.Reader) (n int64, handled bool, err error) {
 	return 0, false, nil
 }

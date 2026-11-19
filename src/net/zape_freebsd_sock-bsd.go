@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line sock_bsd.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sock_bsd.go:6:1*/
 package net
 
 import (
@@ -13,7 +14,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sock_bsd.go:12:2*/
 
 func freebsd_maxListenerBacklog() int {
 	var (

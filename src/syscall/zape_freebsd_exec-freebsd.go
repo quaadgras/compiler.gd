@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2021 The Go Authors. All rights reserved.
+/*line exec_freebsd.go:1:1*/// Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -13,13 +13,13 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_freebsd.go:10:2*/
 
 type Freebsd_SysProcAttr struct {
-	Chroot     string              // Chroot.
+	Chroot     string      // Chroot.
 	Credential *Freebsd_Credential // Credential.
-	Ptrace     bool                // Enable tracing.
-	Setsid     bool                // Create session.
+	Ptrace     bool        // Enable tracing.
+	Setsid     bool        // Create session.
 	// Setpgid sets the process group ID of the child to Pgid,
 	// or, if Pgid == 0, to the new child's process ID.
 	Setpgid bool
@@ -48,15 +48,12 @@ const (
 )
 
 // Implemented in runtime package.
-//
 //go:linkname freebsd_runtime_BeforeFork syscall.runtime_BeforeFork
-func freebsd_runtime_BeforeFork()
-
+/*line exec_freebsd.go:45:1*/func freebsd_runtime_BeforeFork()
 //go:linkname freebsd_runtime_AfterFork syscall.runtime_AfterFork
-func freebsd_runtime_AfterFork()
-
+/*line exec_freebsd.go:46:1*/func freebsd_runtime_AfterFork()
 //go:linkname freebsd_runtime_AfterForkInChild syscall.runtime_AfterForkInChild
-func freebsd_runtime_AfterForkInChild()
+/*line exec_freebsd.go:47:1*/func freebsd_runtime_AfterForkInChild()
 
 // Fork, dup fd onto 0..len(fd), and exec(argv0, argvv, envv) in child.
 // If a dup or exec fails, write the errno error to pipe.

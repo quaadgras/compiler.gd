@@ -2,236 +2,98 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line udpsock.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line udpsock.go:6:1*/
 package net
 
+import "unsafe"/*line udpsock.go:7:12*/
+
 import (
-	"context"
-	"internal/strconv"
+	
+	
 	"net/netip"
 	"syscall"
-)
-
-// BUG(mikio): On Plan 9, the ReadMsgUDP and
-// WriteMsgUDP methods of UDPConn are not implemented.
-
-// BUG(mikio): On JS, methods and functions related to UDPConn are not
-// implemented.
-
-// AddrPort returns the [UDPAddr] a as a [netip.AddrPort].
-//
-// If a.Port does not fit in a uint16, it's silently truncated.
-//
-// If a is nil, a zero value is returned.
-func (a *UDPAddr) Freebsd_AddrPort() netip.AddrPort {
-	if a == nil {
-		return netip.AddrPort{}
-	}
-	na, _ := netip.AddrFromSlice(a.IP)
-	na = na.WithZone(a.Zone)
-	return netip.AddrPortFrom(na, uint16(a.Port))
-}
-
-// Network returns the address's network name, "udp".
-func (a *UDPAddr) Freebsd_Network() string { return "udp" }
-
-func (a *UDPAddr) Freebsd_String() string {
-	if a == nil {
-		return "<nil>"
-	}
-	ip := ipEmptyString(a.IP)
-	if a.Zone != "" {
-		return JoinHostPort(ip+"%"+a.Zone, strconv.Itoa(a.Port))
-	}
-	return JoinHostPort(ip, strconv.Itoa(a.Port))
-}
-
-func (a *UDPAddr) freebsd_isWildcard() bool {
-	if a == nil || a.IP == nil {
-		return true
-	}
-	return a.IP.IsUnspecified()
-}
-
-func (a *UDPAddr) freebsd_opAddr() Addr {
-	if a == nil {
-		return nil
-	}
-	return a
-}
-
-// ResolveUDPAddr returns an address of UDP end point.
-//
-// The network must be a UDP network name.
-//
-// If the host in the address parameter is not a literal IP address or
-// the port is not a literal port number, ResolveUDPAddr resolves the
-// address to an address of UDP end point.
-// Otherwise, it parses the address as a pair of literal IP address
-// and port number.
-// The address parameter can use a host name, but this is not
-// recommended, because it will return at most one of the host name's
-// IP addresses.
-//
-// See func [Dial] for a description of the network and address
-// parameters.
-func Freebsd_ResolveUDPAddr(network, address string) (*UDPAddr, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-	case "": // a hint wildcard for Go 1.0 undocumented behavior
-		network = "udp"
-	default:
-		return nil, UnknownNetworkError(network)
-	}
-	addrs, err := DefaultResolver.internetAddrList(context.Background(), network, address)
-	if err != nil {
-		return nil, err
-	}
-	return addrs.forResolve(network, address).(*UDPAddr), nil
-}
-
-// UDPAddrFromAddrPort returns addr as a [UDPAddr]. If addr.IsValid() is false,
-// then the returned UDPAddr will contain a nil IP field, indicating an
-// address family-agnostic unspecified address.
-func Freebsd_UDPAddrFromAddrPort(addr netip.AddrPort) *UDPAddr {
-	return &UDPAddr{
-		IP:   addr.Addr().AsSlice(),
-		Zone: addr.Addr().Zone(),
-		Port: int(addr.Port()),
-	}
-}
-
-func (addrPortUDPAddr) Freebsd_Network() string { return "udp" }
-
-// UDPConn is the implementation of the [Conn] and [PacketConn] interfaces
-// for UDP network connections.
-type Freebsd_UDPConn struct {
-	freebsd_conn
-}
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-func (c *Freebsd_UDPConn) SyscallConn() (syscall.RawConn, error) {
-	if !c.ok() {
-		return nil, syscall.Freebsd_EINVAL
-	}
-	return freebsd_newRawConn(c.fd), nil
-}
-
-// ReadFromUDP acts like [UDPConn.ReadFrom] but returns a UDPAddr.
-func (c *Freebsd_UDPConn) ReadFromUDP(b []byte) (n int, addr *UDPAddr, err error) {
-	// This function is designed to allow the caller to control the lifetime
-	// of the returned *UDPAddr and thereby prevent an allocation.
-	// See https://blog.filippo.io/efficient-go-apis-with-the-inliner/.
-	// The real work is done by readFromUDP, below.
-	return c.readFromUDP(b, &UDPAddr{})
-}
+)/*line udpsock.go:27:2*//*line udpsock.go:41:2*//*line udpsock.go:44:52*//*line udpsock.go:55:2*//*line udpsock.go:62:2*//*line udpsock.go:69:2*//*line udpsock.go:99:2*//*line udpsock.go:110:2*//*line udpsock.go:115:2*//*line udpsock.go:117:57*//*line udpsock.go:123:2*//*line udpsock.go:132:2*//*line udpsock.go:141:2*/
 
 // readFromUDP implements ReadFromUDP.
-func (c *Freebsd_UDPConn) readFromUDP(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
+func (c *UDPConn) freebsd_readFromUDP(b []byte, addr *UDPAddr) (int, *UDPAddr, error) {
 	if !c.ok() {
 		return 0, nil, syscall.Freebsd_EINVAL
 	}
-	n, addr, err := c.readFrom(b, addr)
+	n, addr, err := c.freebsd_readFrom(b, addr)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, addr, err
-}
-
-// ReadFrom implements the [PacketConn] ReadFrom method.
-func (c *Freebsd_UDPConn) ReadFrom(b []byte) (int, Addr, error) {
-	n, addr, err := c.readFromUDP(b, &UDPAddr{})
-	if addr == nil {
-		// Return Addr(nil), not Addr(*UDPConn(nil)).
-		return n, nil, err
-	}
-	return n, addr, err
-}
+}/*line udpsock.go:163:2*/
 
 // ReadFromUDPAddrPort acts like ReadFrom but returns a [netip.AddrPort].
 //
 // If c is bound to an unspecified address, the returned
 // netip.AddrPort's address might be an IPv4-mapped IPv6 address.
 // Use [netip.Addr.Unmap] to get the address without the IPv6 prefix.
-func (c *Freebsd_UDPConn) ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
+func (c *UDPConn) Freebsd_ReadFromUDPAddrPort(b []byte) (n int, addr netip.AddrPort, err error) {
 	if !c.ok() {
 		return 0, netip.AddrPort{}, syscall.Freebsd_EINVAL
 	}
-	n, addr, err = c.readFromAddrPort(b)
+	n, addr, err = c.freebsd_readFromAddrPort(b)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, addr, err
-}
-
-// ReadMsgUDP reads a message from c, copying the payload into b and
-// the associated out-of-band data into oob. It returns the number of
-// bytes copied into b, the number of bytes copied into oob, the flags
-// that were set on the message and the source address of the message.
-//
-// The packages [golang.org/x/net/ipv4] and [golang.org/x/net/ipv6] can be
-// used to manipulate IP-level socket options in oob.
-func (c *Freebsd_UDPConn) ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *UDPAddr, err error) {
-	var ap netip.AddrPort
-	n, oobn, flags, ap, err = c.ReadMsgUDPAddrPort(b, oob)
-	if ap.IsValid() {
-		addr = Freebsd_UDPAddrFromAddrPort(ap)
-	}
-	return
-}
+}/*line udpsock.go:195:2*/
 
 // ReadMsgUDPAddrPort is like [UDPConn.ReadMsgUDP] but returns an [netip.AddrPort] instead of a [UDPAddr].
-func (c *Freebsd_UDPConn) ReadMsgUDPAddrPort(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
+func (c *UDPConn) Freebsd_ReadMsgUDPAddrPort(b, oob []byte) (n, oobn, flags int, addr netip.AddrPort, err error) {
 	if !c.ok() {
 		return 0, 0, 0, netip.AddrPort{}, syscall.Freebsd_EINVAL
 	}
-	n, oobn, flags, addr, err = c.readMsg(b, oob)
+	n, oobn, flags, addr, err = c.freebsd_readMsg(b, oob)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return
 }
 
 // WriteToUDP acts like [UDPConn.WriteTo] but takes a [UDPAddr].
-func (c *Freebsd_UDPConn) WriteToUDP(b []byte, addr *UDPAddr) (int, error) {
+func (c *UDPConn) Freebsd_WriteToUDP(b []byte, addr *UDPAddr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
-	n, err := c.writeTo(b, addr)
+	n, err := c.freebsd_writeTo(b, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return n, err
 }
 
 // WriteToUDPAddrPort acts like [UDPConn.WriteTo] but takes a [netip.AddrPort].
-func (c *Freebsd_UDPConn) WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error) {
+func (c *UDPConn) Freebsd_WriteToUDPAddrPort(b []byte, addr netip.AddrPort) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
-	n, err := c.writeToAddrPort(b, addr)
+	n, err := c.freebsd_writeToAddrPort(b, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addrPortUDPAddr{addr}, Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addrPortUDPAddr{addr}, Err: err}
 	}
 	return n, err
 }
 
 // WriteTo implements the [PacketConn] WriteTo method.
-func (c *Freebsd_UDPConn) WriteTo(b []byte, addr Addr) (int, error) {
+func (c *UDPConn) Freebsd_WriteTo(b []byte, addr Addr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
 	a, ok := addr.(*UDPAddr)
 	if !ok {
-		return 0, &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr, Err: syscall.Freebsd_EINVAL}
+		return 0, &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr, Err: syscall.Freebsd_EINVAL}
 	}
-	n, err := c.writeTo(b, a)
+	n, err := c.freebsd_writeTo(b, a)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: a.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: a.opAddr(), Err: err}
 	}
 	return n, err
 }
@@ -244,123 +106,27 @@ func (c *Freebsd_UDPConn) WriteTo(b []byte, addr Addr) (int, error) {
 //
 // The packages [golang.org/x/net/ipv4] and [golang.org/x/net/ipv6] can be
 // used to manipulate IP-level socket options in oob.
-func (c *Freebsd_UDPConn) WriteMsgUDP(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
+func (c *UDPConn) Freebsd_WriteMsgUDP(b, oob []byte, addr *UDPAddr) (n, oobn int, err error) {
 	if !c.ok() {
 		return 0, 0, syscall.Freebsd_EINVAL
 	}
-	n, oobn, err = c.writeMsg(b, oob, addr)
+	n, oobn, err = c.freebsd_writeMsg(b, oob, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return
 }
 
 // WriteMsgUDPAddrPort is like [UDPConn.WriteMsgUDP] but takes a [netip.AddrPort] instead of a [UDPAddr].
-func (c *Freebsd_UDPConn) WriteMsgUDPAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
+func (c *UDPConn) Freebsd_WriteMsgUDPAddrPort(b, oob []byte, addr netip.AddrPort) (n, oobn int, err error) {
 	if !c.ok() {
 		return 0, 0, syscall.Freebsd_EINVAL
 	}
-	n, oobn, err = c.writeMsgAddrPort(b, oob, addr)
+	n, oobn, err = c.freebsd_writeMsgAddrPort(b, oob, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addrPortUDPAddr{addr}, Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addrPortUDPAddr{addr}, Err: err}
 	}
 	return
 }
 
-func freebsd_newUDPConn(fd *freebsd_netFD) *Freebsd_UDPConn {
-	return &Freebsd_UDPConn{freebsd_conn{fd}}
-}
-
-// DialUDP acts like [Dial] for UDP networks.
-//
-// The network must be a UDP network name; see func [Dial] for details.
-//
-// If laddr is nil, a local address is automatically chosen.
-// If the IP field of raddr is nil or an unspecified IP address, the
-// local system is assumed.
-func Freebsd_DialUDP(network string, laddr, raddr *UDPAddr) (*Freebsd_UDPConn, error) {
-	return freebsd_dialUDP(context.Background(), nil, network, laddr, raddr)
-}
-
-func freebsd_dialUDP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *UDPAddr) (*Freebsd_UDPConn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-	default:
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.freebsd_opAddr(), Addr: raddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if raddr == nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.freebsd_opAddr(), Addr: nil, Err: errMissingAddress}
-	}
-	sd := &freebsd_sysDialer{network: network, address: raddr.Freebsd_String()}
-	if dialer != nil {
-		sd.Dialer = *dialer
-	}
-	c, err := sd.dialUDP(ctx, laddr, raddr)
-	if err != nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.freebsd_opAddr(), Addr: raddr.freebsd_opAddr(), Err: err}
-	}
-	return c, nil
-}
-
-// ListenUDP acts like [ListenPacket] for UDP networks.
-//
-// The network must be a UDP network name; see func [Dial] for details.
-//
-// If the IP field of laddr is nil or an unspecified IP address,
-// ListenUDP listens on all available IP addresses of the local system
-// except multicast IP addresses.
-// If the Port field of laddr is 0, a port number is automatically
-// chosen.
-func Freebsd_ListenUDP(network string, laddr *UDPAddr) (*Freebsd_UDPConn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if laddr == nil {
-		laddr = &UDPAddr{}
-	}
-	sl := &sysListener{network: network, address: laddr.Freebsd_String()}
-	c, err := sl.freebsd_listenUDP(context.Background(), laddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: err}
-	}
-	return c, nil
-}
-
-// ListenMulticastUDP acts like [ListenPacket] for UDP networks but
-// takes a group address on a specific network interface.
-//
-// The network must be a UDP network name; see func [Dial] for details.
-//
-// ListenMulticastUDP listens on all available IP addresses of the
-// local system including the group, multicast IP address.
-// If ifi is nil, ListenMulticastUDP uses the system-assigned
-// multicast interface, although this is not recommended because the
-// assignment depends on platforms and sometimes it might require
-// routing configuration.
-// If the Port field of gaddr is 0, a port number is automatically
-// chosen.
-//
-// ListenMulticastUDP is just for convenience of simple, small
-// applications. There are [golang.org/x/net/ipv4] and
-// [golang.org/x/net/ipv6] packages for general purpose uses.
-//
-// Note that ListenMulticastUDP will set the IP_MULTICAST_LOOP socket option
-// to 0 under IPPROTO_IP, to disable loopback of multicast packets.
-func Freebsd_ListenMulticastUDP(network string, ifi *Interface, gaddr *UDPAddr) (*Freebsd_UDPConn, error) {
-	switch network {
-	case "udp", "udp4", "udp6":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: gaddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if gaddr == nil || gaddr.IP == nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: gaddr.freebsd_opAddr(), Err: errMissingAddress}
-	}
-	sl := &sysListener{network: network, address: gaddr.Freebsd_String()}
-	c, err := sl.freebsd_listenMulticastUDP(context.Background(), ifi, gaddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: gaddr.freebsd_opAddr(), Err: err}
-	}
-	return c, nil
-}
+func freebsd_newUDPConn(fd *freebsd_netFD) *UDPConn { return &UDPConn{conn{(*netFD)(unsafe.Pointer(fd))}} }/*line udpsock.go:291:2*//*line udpsock.go:311:2*//*line udpsock.go:337:2*//*line udpsock.go:374:2*/

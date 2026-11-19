@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line address.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line address.go:6:1*/
 package routebsd
 
 import (
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line address.go:13:2*/
 
 // An Addr represents an address associated with packet routing.
 type Freebsd_Addr interface {

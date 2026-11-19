@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syscall_linux.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -23,7 +23,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line syscall_linux.go:20:2*/
 
 // Pull in entersyscall/exitsyscall for Syscall/Syscall6.
 //
@@ -474,9 +474,7 @@ const (
 
 func (w Linux_WaitStatus) Exited() bool { return w&linux_mask == linux_exited }
 
-func (w Linux_WaitStatus) Signaled() bool {
-	return w&linux_mask != linux_stopped && w&linux_mask != linux_exited
-}
+func (w Linux_WaitStatus) Signaled() bool { return w&linux_mask != linux_stopped && w&linux_mask != linux_exited }
 
 func (w Linux_WaitStatus) Stopped() bool { return w&0xFF == linux_stopped }
 
@@ -1000,9 +998,7 @@ func Linux_PtraceSyscall(pid int, signal int) (err error) {
 	return linux_ptrace(Linux_PTRACE_SYSCALL, pid, 0, uintptr(signal))
 }
 
-func Linux_PtraceSingleStep(pid int) (err error) {
-	return linux_ptrace(Linux_PTRACE_SINGLESTEP, pid, 0, 0)
-}
+func Linux_PtraceSingleStep(pid int) (err error) { return linux_ptrace(Linux_PTRACE_SINGLESTEP, pid, 0, 0) }
 
 func Linux_PtraceAttach(pid int) (err error) { return linux_ptrace(Linux_PTRACE_ATTACH, pid, 0, 0) }
 
@@ -1042,7 +1038,7 @@ func Linux_Mount(source string, target string, fstype string, flags uintptr, dat
 	if data == "" {
 		return linux_mount(source, target, fstype, flags, nil)
 	}
-	datap, err := Linux_BytePtrFromString(data)
+	datap, err := BytePtrFromString(data)
 	if err != nil {
 		return err
 	}
@@ -1112,7 +1108,7 @@ func Linux_Getpgrp() (pid int) {
 //
 //go:uintptrescapes
 //go:linkname linux_runtime_doAllThreadsSyscall syscall.runtime_doAllThreadsSyscall
-func linux_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr)
+/*line syscall_linux.go:1104:1*/func linux_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr)
 
 // AllThreadsSyscall performs a syscall on each OS thread of the Go
 // runtime. It first invokes the syscall on one thread. Should that
@@ -1155,7 +1151,7 @@ func Linux_AllThreadsSyscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uint
 //
 //go:uintptrescapes
 //go:linkname linux_cgocaller syscall.cgocaller
-func linux_cgocaller(unsafe.Pointer, ...uintptr) uintptr
+/*line syscall_linux.go:1146:1*/func linux_cgocaller(unsafe.Pointer, ...uintptr) uintptr
 
 var linux_cgo_libc_setegid unsafe.Pointer // non-nil if cgo linked.
 

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line dir_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line dir_unix.go:6:1*/
 package os
 
 import (
@@ -18,7 +19,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line dir_unix.go:17:2*/
 
 // Auxiliary information if the File describes a directory
 type linux_dirInfo struct {
@@ -48,16 +49,16 @@ func (d *linux_dirInfo) close() {
 	}
 }
 
-func (f *Linux_File) readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
+func (f *File) linux_readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
 	// If this file has no dirInfo, create one.
 	var d *linux_dirInfo
 	for {
-		d = f.dirinfo.Load()
+		d = (*linux_file)(unsafe.Pointer(f.file)).dirinfo.Load()
 		if d != nil {
 			break
 		}
 		newD := new(linux_dirInfo)
-		if f.dirinfo.CompareAndSwap(nil, newD) {
+		if (*linux_file)(unsafe.Pointer(f.file)).dirinfo.CompareAndSwap(nil, newD) {
 			d = newD
 			break
 		}
@@ -87,10 +88,10 @@ func (f *Linux_File) readdir(n int, mode readdirMode) (names []string, dirents [
 		if d.bufp >= d.nbuf {
 			d.bufp = 0
 			var errno error
-			d.nbuf, errno = f.pfd.ReadDirent(*d.buf)
+			d.nbuf, errno = (*linux_file)(unsafe.Pointer(f.file)).pfd.ReadDirent(*d.buf)
 			runtime.KeepAlive(f)
 			if errno != nil {
-				return names, dirents, infos, &PathError{Op: "readdirent", Path: f.name, Err: errno}
+				return names, dirents, infos, &PathError{Op: "readdirent", Path: (*linux_file)(unsafe.Pointer(f.file)).name, Err: errno}
 			}
 			if d.nbuf <= 0 {
 				// Optimization: we can return the buffer to the pool, there is nothing else to read.
@@ -139,9 +140,9 @@ func (f *Linux_File) readdir(n int, mode readdirMode) (names []string, dirents [
 		if n > 0 { // see 'n == 0' comment above
 			n--
 		}
-		if mode == linux_readdirName {
+		if mode == readdirName {
 			names = append(names, string(name))
-		} else if mode == linux_readdirDirEntry {
+		} else if mode == readdirDirEntry {
 			de, err := linux_newUnixDirent(f, string(name), linux_direntType(rec))
 			if IsNotExist(err) {
 				// File disappeared between readdir and stat.
@@ -153,7 +154,7 @@ func (f *Linux_File) readdir(n int, mode readdirMode) (names []string, dirents [
 			}
 			dirents = append(dirents, de)
 		} else {
-			info, err := f.lstatat(string(name))
+			info, err := f.linux_lstatat(string(name))
 			if IsNotExist(err) {
 				// File disappeared between readdir + stat.
 				// Treat as if it didn't exist.

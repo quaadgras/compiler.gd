@@ -2,13 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line fd_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_unix.go:6:1*/
 package net
 
-import _ "unsafe"
+import _ "unsafe"/*line fd_unix.go:7:12*/
 
 import (
 	"context"
@@ -18,7 +19,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line fd_unix.go:15:2*/
 
 const (
 	linux_readSyscallName     = "read"
@@ -55,7 +56,7 @@ func (fd *linux_netFD) connect(ctx context.Context, la, ra syscall.Linux_Sockadd
 	case nil, syscall.Linux_EISCONN:
 		select {
 		case <-ctx.Done():
-			return nil, linux_mapErr(ctx.Err())
+			return nil, mapErr(ctx.Err())
 		default:
 		}
 		if err := fd.pfd.Init(fd.net, true); err != nil {
@@ -105,7 +106,7 @@ func (fd *linux_netFD) connect(ctx context.Context, la, ra syscall.Linux_Sockadd
 				// connect (ret == nil). Because we've now poisoned the
 				// connection by making it unwritable, don't return a
 				// successful dial. This was issue 16523.
-				ret = linux_mapErr(ctx.Err())
+				ret = mapErr(ctx.Err())
 				// The caller closes fd on error, so there's no need to
 				// wait for the SetWriteDeadline call to return.
 			}
@@ -124,7 +125,7 @@ func (fd *linux_netFD) connect(ctx context.Context, la, ra syscall.Linux_Sockadd
 		if err := fd.pfd.WaitWrite(); err != nil {
 			select {
 			case <-ctxDone:
-				return nil, linux_mapErr(ctx.Err())
+				return nil, mapErr(ctx.Err())
 			default:
 			}
 			return nil, err
@@ -171,11 +172,10 @@ func (fd *linux_netFD) accept() (netfd *linux_netFD, err error) {
 }
 
 // Defined in os package.
-//
 //go:linkname linux_newUnixFile net.newUnixFile
-func linux_newUnixFile(fd int, name string) *os.Linux_File
+/*line fd_unix.go:168:1*/func linux_newUnixFile(fd int, name string) *os.File
 
-func (fd *linux_netFD) dup() (f *os.Linux_File, err error) {
+func (fd *linux_netFD) dup() (f *os.File, err error) {
 	ns, call, err := fd.pfd.Dup()
 	if err != nil {
 		if call != "" {

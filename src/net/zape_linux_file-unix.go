@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line file_unix.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line file_unix.go:6:1*/
 package net
 
 import (
@@ -16,7 +17,7 @@ import (
 
 const linux__SO_TYPE = syscall.Linux_SO_TYPE
 
-func linux_dupFileSocket(f *os.Linux_File) (int, error) {
+func linux_dupFileSocket(f *os.File) (int, error) {
 	s, call, err := poll.Linux_DupCloseOnExec(int(f.Fd()))
 	if err != nil {
 		if call != "" {

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2022 The Go Authors. All rights reserved.
+/*line kernel_version_other.go:1:1*/// Copyright 2022 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line kernel_version_other.go:6:1*/
 package unix
 
 func Windows_KernelVersion() (major int, minor int) {

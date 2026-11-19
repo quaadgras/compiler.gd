@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_posix.go:6:1*/
 package os
 
 import (
@@ -15,13 +16,13 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_posix.go:14:2*//*line exec_posix.go:24:2*/
 
-func freebsd_startProcess(name string, argv []string, attr *Freebsd_ProcAttr) (p *Process, err error) {
+func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Process, err error) {
 	// If there is no SysProcAttr (ie. no Chroot or changed
 	// UID/GID), double-check existence of the directory we want
 	// to chdir into. We can make the error clearer this way.
-	if attr != nil && attr.Sys == nil && attr.Dir != "" {
+	if attr != nil && syscall.Freebsd_FromAPE_SysProcAttr(attr.Sys) == nil && attr.Dir != "" {
 		if _, err := Stat(attr.Dir); err != nil {
 			pe := err.(*PathError)
 			pe.Op = "chdir"
@@ -29,7 +30,7 @@ func freebsd_startProcess(name string, argv []string, attr *Freebsd_ProcAttr) (p
 		}
 	}
 
-	attrSys, shouldDupPidfd := freebsd_ensurePidfd(attr.Sys)
+	attrSys, shouldDupPidfd := freebsd_ensurePidfd(syscall.Freebsd_FromAPE_SysProcAttr(attr.Sys))
 	sysattr := &syscall.Freebsd_ProcAttr{
 		Dir: attr.Dir,
 		Env: attr.Env,
@@ -60,37 +61,16 @@ func freebsd_startProcess(name string, argv []string, attr *Freebsd_ProcAttr) (p
 		var ok bool
 		h, ok = freebsd_getPidfd(sysattr.Sys, shouldDupPidfd)
 		if !ok {
-			return freebsd_newPIDProcess(pid), nil
+			return newPIDProcess(pid), nil
 		}
 	}
 
-	return freebsd_newHandleProcess(pid, h), nil
-}
-
-func (p *Process) freebsd_kill() error {
-	return p.Freebsd_Signal(Kill)
-}
-
-func (p *Process) freebsd_withHandle(f func(handle uintptr)) error {
-	if p.handle == nil {
-		return ErrNoHandle
-	}
-	handle, status := p.freebsd_handleTransientAcquire()
-	switch status {
-	case freebsd_statusDone:
-		return ErrProcessDone
-	case freebsd_statusReleased:
-		return errProcessReleased
-	}
-	defer p.freebsd_handleTransientRelease()
-	f(handle)
-
-	return nil
-}
+	return newHandleProcess(pid, h), nil
+}/*line exec_posix.go:78:2*//*line exec_posix.go:95:2*/
 
 // ProcessState stores information about a process, as reported by Wait.
 type Freebsd_ProcessState struct {
-	pid    int                        // The process's id.
+	pid    int                // The process's id.
 	status syscall.Freebsd_WaitStatus // System-dependent status info.
 	rusage *syscall.Freebsd_Rusage
 }

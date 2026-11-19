@@ -377,7 +377,7 @@ func (g *pkgGen) pragmas(hp *hostPkg, obj types.Object) []string {
 			}
 		}
 	}
-	f := hp.files[filepath.Base(fset.Position(obj.Pos()).Filename)]
+	f := hp.files[fileName(obj.Pos())]
 	if f == nil {
 		return nil
 	}
@@ -854,7 +854,16 @@ func (g *pkgGen) declType(ic *iface) {
 	under, same := g.sameAll(ic, func(hp *hostPkg, obj types.Object) string {
 		return g.typeString(hp, obj.Type().Underlying())
 	})
-	// Written the same way, but of host types: not the same.
+	// Written the same way, but of host types or local aliases that
+	// differ: not the same.
+	for _, hp := range g.hs {
+		if tn, ok := hp.obj(ic).(*types.TypeName); ok && g.shape(hp, tn) != g.shape(g.first(), g.first().obj(ic).(*types.TypeName)) {
+			same = false
+		}
+		if g.otherHostHeld(hp, hp.obj(ic).Type().Underlying()) != nil {
+			same = false
+		}
+	}
 	for _, hp := range g.hs {
 		var refs []*types.Named
 		hp.namedRefs(hp.obj(ic).Type().Underlying(), map[types.Type]bool{}, &refs)
@@ -886,6 +895,7 @@ func (g *pkgGen) declType(ic *iface) {
 			fmt.Fprintf(&g.decls, "\t%s %s\n", hp.host, hostName(hp.host, ic.name))
 		}
 		fmt.Fprintf(&g.decls, "}\n")
+		g.fromAPEHandle(ic, func(hp *hostPkg) string { return "&p." + hp.host })
 		return
 	}
 	var size, align int64
@@ -896,7 +906,28 @@ func (g *pkgGen) declType(ic *iface) {
 		align = max(align, sz.Alignof(t))
 	}
 	elem := map[int64]string{1: "uint8", 2: "uint16", 4: "uint32", 8: "uint64"}[align]
-	fmt.Fprintf(&g.decls, "\n// %s differs between hosts: functions convert it by pointer.\ntype %s struct{ _ [%d]%s }\n", ic.name, ic.name, (size+align-1)/align, elem)
+	n := (size + align - 1) / align
+	if !g.byValue[ic.name] {
+		// Only ever behind a pointer, to a host's: of no size, so that
+		// it fits in every host's (for checkptr).
+		n = 0
+	}
+	fmt.Fprintf(&g.decls, "\n// %s differs between hosts: functions convert it by pointer.\ntype %s struct{ _ [%d]%s }\n", ic.name, ic.name, n, elem)
+	g.fromAPEHandle(ic, func(hp *hostPkg) string { return "(*" + hostName(hp.host, ic.name) + ")(unsafe.Pointer(p))" })
+}
+
+// fromAPEHandle writes, for an exported type the ape package holds each
+// host's of, the functions that return the host's (see fromAPEFuncs).
+func (g *pkgGen) fromAPEHandle(ic *iface, conv func(*hostPkg) string) {
+	if !token.IsExported(ic.name) || g.isRuntime() {
+		return
+	}
+	for _, hp := range g.hs {
+		fn := hostName(hp.host, "FromAPE_"+ic.name)
+		fmt.Fprintf(&g.decls, "\n// %s returns the host's p.\nfunc %s(p *%s) *%s { return %s }\n", fn, fn, ic.name, hostName(hp.host, ic.name), conv(hp))
+		fn = hostName(hp.host, "ToAPE_"+ic.name)
+		fmt.Fprintf(&g.decls, "\n// %s returns p as the ape type.\nfunc %s(p *%s) *%s { return (*%s)(unsafe.Pointer(p)) }\n", fn, fn, hostName(hp.host, ic.name), ic.name, ic.name)
+	}
 }
 
 func (g *pkgGen) declUnion(ic *iface) {
@@ -1013,6 +1044,9 @@ func (g *pkgGen) writeDispatch() {
 		}
 	}
 	b.WriteString(")\n\nvar _ unsafe.Pointer\n")
+	if g.needApeValue {
+		b.WriteString("\n// apeValue returns the host's value h as the ape type T, which is at\n// least as large.\nfunc apeValue[T, H any](h H) (t T) {\n*(*H)(unsafe.Pointer(&t)) = h\nreturn t\n}\n")
+	}
 	if !g.isRuntime() {
 		b.WriteString("\n//go:linkname apehost runtime.apehost\nvar apehost uint8\n\nconst (\n")
 		for i, h := range g.u.hosts {
@@ -1197,6 +1231,22 @@ func (g *pkgGen) fromAPEFuncs(ic *iface) {
 		}
 		fmt.Fprintf(&g.decls, "var t %s\n%s\nreturn &t\n}\n", hostT, strings.Join(stmts, "\n"))
 	}
+	// And back: a copy of a host's as the ape type.
+	for _, hp := range g.hs {
+		hostT := hostName(hp.host, ic.name)
+		fn := hostName(hp.host, "ToAPE_"+ic.name)
+		fmt.Fprintf(&g.decls, "\n// %s returns p as the ape type.\nfunc %s(p *%s) *%s {\nif p == nil {\nreturn nil\n}\n", fn, fn, hostT, ic.name)
+		if hp == g.first() {
+			fmt.Fprintf(&g.decls, "return (*%s)(unsafe.Pointer(p))\n}\n", ic.name)
+			continue
+		}
+		stmts, ok := g.convStmts(hp, "t", g.first().obj(ic).Type(), "(*p)", hp.obj(ic).Type(), false, 0)
+		if !ok {
+			fmt.Fprintf(&g.decls, "panic(\"cannot convert %s\")\n}\n", ic.name)
+			continue
+		}
+		fmt.Fprintf(&g.decls, "var t %s\n%s\nreturn &t\n}\n", ic.name, strings.Join(stmts, "\n"))
+	}
 }
 
 // sigTypes returns the types of a signature's parameters and results.
@@ -1219,7 +1269,7 @@ func (g *pkgGen) apeAsmFiles() []string {
 
 // hasPragma reports whether fn's declaration has the directive.
 func (hp *hostPkg) hasPragma(fn *types.Func, directive string) bool {
-	f := hp.files[filepath.Base(fset.Position(fn.Pos()).Filename)]
+	f := hp.files[fileName(fn.Pos())]
 	if f == nil {
 		return false
 	}

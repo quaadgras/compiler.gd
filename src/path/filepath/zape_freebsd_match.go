@@ -2,22 +2,24 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line match.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line match.go:6:1*/
 package filepath
 
 import (
-	"internal/filepathlite"
-	"os"
+	
+	
+	
 	"runtime"
-	"slices"
+	
 	"strings"
 	"unicode/utf8"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line match.go:17:2*//*line match.go:20:58*/
 
 // Match reports whether name matches the shell file name pattern.
 // The pattern syntax is:
@@ -50,7 +52,7 @@ Pattern:
 	for len(pattern) > 0 {
 		var star bool
 		var chunk string
-		star, chunk, pattern = freebsd_scanChunk(pattern)
+		star, chunk, pattern = scanChunk(pattern)
 		if star && chunk == "" {
 			// Trailing * matches rest of string unless it has a /.
 			return !strings.Contains(name, string(Freebsd_Separator)), nil
@@ -88,35 +90,7 @@ Pattern:
 		return false, nil
 	}
 	return len(name) == 0, nil
-}
-
-// scanChunk gets the next segment of pattern, which is a non-star string
-// possibly preceded by a star.
-func freebsd_scanChunk(pattern string) (star bool, chunk, rest string) {
-	for len(pattern) > 0 && pattern[0] == '*' {
-		pattern = pattern[1:]
-		star = true
-	}
-	inrange := false
-	for i := 0; i < len(pattern); i++ {
-		switch pattern[i] {
-		case '\\':
-			// error check handled in matchChunk: bad pattern.
-			if "freebsd" != "windows" && i+1 < len(pattern) {
-				i++
-			}
-		case '[':
-			inrange = true
-		case ']':
-			inrange = false
-		case '*':
-			if !inrange {
-				return star, pattern[:i], pattern[i:]
-			}
-		}
-	}
-	return star, pattern, ""
-}
+}/*line match.go:119:2*/
 
 // matchChunk checks whether chunk matches the beginning of s.
 // If so, it returns the remainder of s (after the match).
@@ -153,12 +127,12 @@ func freebsd_matchChunk(chunk, s string) (rest string, ok bool, err error) {
 					break
 				}
 				var lo, hi rune
-				if lo, chunk, err = freebsd_getEsc(chunk); err != nil {
+				if lo, chunk, err = getEsc(chunk); err != nil {
 					return "", false, err
 				}
 				hi = lo
 				if chunk[0] == '-' {
-					if hi, chunk, err = freebsd_getEsc(chunk[1:]); err != nil {
+					if hi, chunk, err = getEsc(chunk[1:]); err != nil {
 						return "", false, err
 					}
 				}
@@ -196,92 +170,7 @@ func freebsd_matchChunk(chunk, s string) (rest string, ok bool, err error) {
 		return "", false, nil
 	}
 	return s, true, nil
-}
-
-// getEsc gets a possibly-escaped character from chunk, for a character class.
-func freebsd_getEsc(chunk string) (r rune, nchunk string, err error) {
-	if len(chunk) == 0 || chunk[0] == '-' || chunk[0] == ']' {
-		err = ErrBadPattern
-		return
-	}
-	if chunk[0] == '\\' && "freebsd" != "windows" {
-		chunk = chunk[1:]
-		if len(chunk) == 0 {
-			err = ErrBadPattern
-			return
-		}
-	}
-	r, n := utf8.DecodeRuneInString(chunk)
-	if r == utf8.RuneError && n == 1 {
-		err = ErrBadPattern
-	}
-	nchunk = chunk[n:]
-	if len(nchunk) == 0 {
-		err = ErrBadPattern
-	}
-	return
-}
-
-// Glob returns the names of all files matching pattern or nil
-// if there is no matching file. The syntax of patterns is the same
-// as in [Match]. The pattern may describe hierarchical names such as
-// /usr/*/bin/ed (assuming the [Separator] is '/').
-//
-// Glob ignores file system errors such as I/O errors reading directories.
-// The only possible returned error is [ErrBadPattern], when pattern
-// is malformed.
-func Freebsd_Glob(pattern string) (matches []string, err error) {
-	return freebsd_globWithLimit(pattern, 0)
-}
-
-func freebsd_globWithLimit(pattern string, depth int) (matches []string, err error) {
-	// This limit is used prevent stack exhaustion issues. See CVE-2022-30632.
-	const pathSeparatorsLimit = 10000
-	if depth == pathSeparatorsLimit {
-		return nil, ErrBadPattern
-	}
-
-	// Check pattern is well-formed.
-	if _, err := Freebsd_Match(pattern, ""); err != nil {
-		return nil, err
-	}
-	if !freebsd_hasMeta(pattern) {
-		if _, err = os.Lstat(pattern); err != nil {
-			return nil, nil
-		}
-		return []string{pattern}, nil
-	}
-
-	dir, file := Freebsd_Split(pattern)
-	volumeLen := 0
-	if "freebsd" == "windows" {
-		volumeLen, dir = freebsd_cleanGlobPathWindows(dir)
-	} else {
-		dir = freebsd_cleanGlobPath(dir)
-	}
-
-	if !freebsd_hasMeta(dir[volumeLen:]) {
-		return freebsd_glob(dir, file, nil)
-	}
-
-	// Prevent infinite recursion. See issue 15879.
-	if dir == pattern {
-		return nil, ErrBadPattern
-	}
-
-	var m []string
-	m, err = freebsd_globWithLimit(dir, depth+1)
-	if err != nil {
-		return
-	}
-	for _, d := range m {
-		matches, err = freebsd_glob(d, file, matches)
-		if err != nil {
-			return
-		}
-	}
-	return
-}
+}/*line match.go:223:2*//*line match.go:235:2*//*line match.go:284:2*/
 
 // cleanGlobPath prepares path for glob matching.
 func freebsd_cleanGlobPath(path string) string {
@@ -294,67 +183,4 @@ func freebsd_cleanGlobPath(path string) string {
 	default:
 		return path[0 : len(path)-1] // chop off trailing separator
 	}
-}
-
-// cleanGlobPathWindows is windows version of cleanGlobPath.
-func freebsd_cleanGlobPathWindows(path string) (prefixLen int, cleaned string) {
-	vollen := filepathlite.Freebsd_VolumeNameLen(path)
-	switch {
-	case path == "":
-		return 0, "."
-	case vollen+1 == len(path) && os.Freebsd_IsPathSeparator(path[len(path)-1]): // /, \, C:\ and C:/
-		// do nothing to the path
-		return vollen + 1, path
-	case vollen == len(path) && len(path) == 2: // C:
-		return vollen, path + "." // convert C: into C:.
-	default:
-		if vollen >= len(path) {
-			vollen = len(path) - 1
-		}
-		return vollen, path[0 : len(path)-1] // chop off trailing separator
-	}
-}
-
-// glob searches for files matching pattern in the directory dir
-// and appends them to matches. If the directory cannot be
-// opened, it returns the existing matches. New matches are
-// added in lexicographical order.
-func freebsd_glob(dir, pattern string, matches []string) (m []string, e error) {
-	m = matches
-	fi, err := os.Stat(dir)
-	if err != nil {
-		return // ignore I/O error
-	}
-	if !fi.IsDir() {
-		return // ignore I/O error
-	}
-	d, err := os.Freebsd_Open(dir)
-	if err != nil {
-		return // ignore I/O error
-	}
-	defer d.Close()
-
-	names, _ := d.Readdirnames(-1)
-	slices.Sort(names)
-
-	for _, n := range names {
-		matched, err := Freebsd_Match(pattern, n)
-		if err != nil {
-			return m, err
-		}
-		if matched {
-			m = append(m, Freebsd_Join(dir, n))
-		}
-	}
-	return
-}
-
-// hasMeta reports whether path contains any of the magic characters
-// recognized by Match.
-func freebsd_hasMeta(path string) bool {
-	magicChars := `*?[`
-	if "freebsd" != "windows" {
-		magicChars = `*?[\`
-	}
-	return strings.ContainsAny(path, magicChars)
-}
+}/*line match.go:316:2*//*line match.go:350:2*//*line match.go:360:2*/

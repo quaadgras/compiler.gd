@@ -5,9 +5,6 @@
 package sysrand
 
 import (
-	"os"
-	"sync"
-	"sync/atomic"
 	"unsafe"
 )
 
@@ -22,24 +19,15 @@ const (
 	apeWindows
 )
 
-var firstUse atomic.Bool
-
-var testingOnlyFailRead bool
-
-var urandomErr error
-
-var urandomFile *os.File
-
-var urandomOnce sync.Once
-
-func Read(a0 []byte) {
+func read(a0 []byte) error {
 	if apehost == apeLinux {
-		Linux_Read(a0)
-		return
+		x0 := linux_read(a0)
+		return x0
 	}
 	if apehost == apeFreebsd {
-		Freebsd_Read(a0)
-		return
+		x0 := freebsd_read(a0)
+		return x0
 	}
-	Windows_Read(a0)
+	x0 := windows_read(a0)
+	return x0
 }

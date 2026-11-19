@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line executable_procfs.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line executable_procfs.go:6:1*/
 package os
 
 import (
@@ -14,7 +15,7 @@ import (
 	"runtime"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line executable_procfs.go:13:2*/
 
 func linux_executable() (string, error) {
 	var procfn string
@@ -24,7 +25,7 @@ func linux_executable() (string, error) {
 	case "linux", "android":
 		procfn = "/proc/self/exe"
 	}
-	path, err := Linux_Readlink(procfn)
+	path, err := Readlink(procfn)
 
 	// When the executable has been deleted then Readlink returns a
 	// path appended with " (deleted)".

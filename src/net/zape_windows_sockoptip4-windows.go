@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockoptip4_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -14,10 +14,10 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockoptip4_windows.go:11:2*/
 
 func windows_setIPv4MulticastInterface(fd *windows_netFD, ifi *Interface) error {
-	ip, err := windows_interfaceToIPv4Addr(ifi)
+	ip, err := interfaceToIPv4Addr(ifi)
 	if err != nil {
 		return os.NewSyscallError("setsockopt", err)
 	}
@@ -29,7 +29,7 @@ func windows_setIPv4MulticastInterface(fd *windows_netFD, ifi *Interface) error 
 }
 
 func windows_setIPv4MulticastLoopback(fd *windows_netFD, v bool) error {
-	err := fd.pfd.SetsockoptInt(syscall.Windows_IPPROTO_IP, syscall.Windows_IP_MULTICAST_LOOP, windows_boolint(v))
+	err := fd.pfd.SetsockoptInt(syscall.Windows_IPPROTO_IP, syscall.Windows_IP_MULTICAST_LOOP, boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }

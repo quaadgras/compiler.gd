@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line sys_posix.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sys_posix.go:6:1*/
 package fuzz
 
 import (
@@ -17,7 +18,7 @@ import (
 
 type freebsd_sharedMemSys struct{}
 
-func freebsd_sharedMemMapFile(f *os.Freebsd_File, size int, removeOnClose bool) (*freebsd_sharedMem, error) {
+func freebsd_sharedMemMapFile(f *os.File, size int, removeOnClose bool) (*sharedMem, error) {
 	prot := syscall.Freebsd_PROT_READ | syscall.Freebsd_PROT_WRITE
 	flags := syscall.Freebsd_MAP_FILE | syscall.Freebsd_MAP_SHARED
 	region, err := syscall.Freebsd_Mmap(int(f.Fd()), 0, size, prot, flags)
@@ -25,12 +26,12 @@ func freebsd_sharedMemMapFile(f *os.Freebsd_File, size int, removeOnClose bool) 
 		return nil, err
 	}
 
-	return &freebsd_sharedMem{f: f, region: region, removeOnClose: removeOnClose}, nil
+	return &sharedMem{f: f, region: region, removeOnClose: removeOnClose}, nil
 }
 
 // Close unmaps the shared memory and closes the temporary file. If this
 // sharedMem was created with sharedMemTempFile, Close also removes the file.
-func (m *freebsd_sharedMem) Close() error {
+func (m *sharedMem) Freebsd_Close() error {
 	// Attempt all operations, even if we get an error for an earlier operation.
 	// os.File.Close may fail due to I/O errors, but we still want to delete
 	// the temporary file.
@@ -51,34 +52,34 @@ func (m *freebsd_sharedMem) Close() error {
 
 // setWorkerComm configures communication channels on the cmd that will
 // run a worker process.
-func freebsd_setWorkerComm(cmd *exec.Cmd, comm freebsd_workerComm) {
+func freebsd_setWorkerComm(cmd *exec.Cmd, comm workerComm) {
 	mem := <-comm.memMu
 	memFile := mem.f
 	comm.memMu <- mem
-	cmd.ExtraFiles = []*os.Freebsd_File{comm.fuzzIn, comm.fuzzOut, memFile}
+	cmd.ExtraFiles = []*os.File{comm.fuzzIn, comm.fuzzOut, memFile}
 }
 
 // getWorkerComm returns communication channels in the worker process.
-func freebsd_getWorkerComm() (comm freebsd_workerComm, err error) {
-	fuzzIn := os.Freebsd_NewFile(3, "fuzz_in")
-	fuzzOut := os.Freebsd_NewFile(4, "fuzz_out")
-	memFile := os.Freebsd_NewFile(5, "fuzz_mem")
-	fi, err := memFile.Stat()
+func freebsd_getWorkerComm() (comm workerComm, err error) {
+	fuzzIn := os.NewFile(3, "fuzz_in")
+	fuzzOut := os.NewFile(4, "fuzz_out")
+	memFile := os.NewFile(5, "fuzz_mem")
+	fi, err := memFile.Freebsd_Stat()
 	if err != nil {
-		return freebsd_workerComm{}, err
+		return workerComm{}, err
 	}
 	size := int(fi.Size())
 	if int64(size) != fi.Size() {
-		return freebsd_workerComm{}, fmt.Errorf("fuzz temp file exceeds maximum size")
+		return workerComm{}, fmt.Errorf("fuzz temp file exceeds maximum size")
 	}
 	removeOnClose := false
 	mem, err := freebsd_sharedMemMapFile(memFile, size, removeOnClose)
 	if err != nil {
-		return freebsd_workerComm{}, err
+		return workerComm{}, err
 	}
-	memMu := make(chan *freebsd_sharedMem, 1)
+	memMu := make(chan *sharedMem, 1)
 	memMu <- mem
-	return freebsd_workerComm{fuzzIn: fuzzIn, fuzzOut: fuzzOut, memMu: memMu}, nil
+	return workerComm{fuzzIn: fuzzIn, fuzzOut: fuzzOut, memMu: memMu}, nil
 }
 
 // isInterruptError returns whether an error was returned by a process that

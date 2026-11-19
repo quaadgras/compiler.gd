@@ -2,142 +2,41 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line iprawsock.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line iprawsock.go:6:1*/
 package net
 
+import "unsafe"/*line iprawsock.go:7:12*/
+
 import (
-	"context"
-	"net/netip"
+	
+	
 	"syscall"
-)
-
-// BUG(mikio): On every POSIX platform, reads from the "ip4" network
-// using the ReadFrom or ReadFromIP method might not return a complete
-// IPv4 packet, including its header, even if there is space
-// available. This can occur even in cases where Read or ReadMsgIP
-// could return a complete packet. For this reason, it is recommended
-// that you do not use these methods if it is important to receive a
-// full packet.
-//
-// The Go 1 compatibility guidelines make it impossible for us to
-// change the behavior of these methods; use Read or ReadMsgIP
-// instead.
-
-// BUG(mikio): On JS and Plan 9, methods and functions related
-// to IPConn are not implemented.
-
-// BUG: On Windows, raw IP sockets are restricted by the operating system.
-// Sending TCP data, sending UDP data with invalid source addresses,
-// and calling bind with TCP protocol don't work.
-//
-// See Winsock reference for details.
-
-func windows_ipAddrFromAddr(addr netip.Addr) *IPAddr {
-	return &IPAddr{
-		IP:   addr.AsSlice(),
-		Zone: addr.Zone(),
-	}
-}
-
-// Network returns the address's network name, "ip".
-func (a *IPAddr) Windows_Network() string { return "ip" }
-
-func (a *IPAddr) Windows_String() string {
-	if a == nil {
-		return "<nil>"
-	}
-	ip := ipEmptyString(a.IP)
-	if a.Zone != "" {
-		return ip + "%" + a.Zone
-	}
-	return ip
-}
-
-func (a *IPAddr) windows_isWildcard() bool {
-	if a == nil || a.IP == nil {
-		return true
-	}
-	return a.IP.IsUnspecified()
-}
-
-func (a *IPAddr) windows_opAddr() Addr {
-	if a == nil {
-		return nil
-	}
-	return a
-}
-
-// ResolveIPAddr returns an address of IP end point.
-//
-// The network must be an IP network name.
-//
-// If the host in the address parameter is not a literal IP address,
-// ResolveIPAddr resolves the address to an address of IP end point.
-// Otherwise, it parses the address as a literal IP address.
-// The address parameter can use a host name, but this is not
-// recommended, because it will return at most one of the host name's
-// IP addresses.
-//
-// See func [Dial] for a description of the network and address
-// parameters.
-func Windows_ResolveIPAddr(network, address string) (*IPAddr, error) {
-	if network == "" { // a hint wildcard for Go 1.0 undocumented behavior
-		network = "ip"
-	}
-	afnet, _, err := windows_parseNetwork(context.Background(), network, false)
-	if err != nil {
-		return nil, err
-	}
-	switch afnet {
-	case "ip", "ip4", "ip6":
-	default:
-		return nil, UnknownNetworkError(network)
-	}
-	addrs, err := DefaultResolver.internetAddrList(context.Background(), afnet, address)
-	if err != nil {
-		return nil, err
-	}
-	return addrs.forResolve(network, address).(*IPAddr), nil
-}
-
-// IPConn is the implementation of the [Conn] and [PacketConn] interfaces
-// for IP network connections.
-type Windows_IPConn struct {
-	windows_conn
-}
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-func (c *Windows_IPConn) SyscallConn() (syscall.RawConn, error) {
-	if !c.ok() {
-		return nil, syscall.Windows_EINVAL
-	}
-	return windows_newRawConn(c.fd), nil
-}
+)/*line iprawsock.go:41:2*//*line iprawsock.go:47:2*//*line iprawsock.go:50:50*//*line iprawsock.go:61:2*//*line iprawsock.go:68:2*//*line iprawsock.go:75:2*//*line iprawsock.go:108:2*//*line iprawsock.go:114:2*//*line iprawsock.go:123:2*/
 
 // ReadFromIP acts like ReadFrom but returns an IPAddr.
-func (c *Windows_IPConn) ReadFromIP(b []byte) (int, *IPAddr, error) {
+func (c *IPConn) Windows_ReadFromIP(b []byte) (int, *IPAddr, error) {
 	if !c.ok() {
 		return 0, nil, syscall.Windows_EINVAL
 	}
-	n, addr, err := c.readFrom(b)
+	n, addr, err := c.windows_readFrom(b)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, addr, err
 }
 
 // ReadFrom implements the [PacketConn] ReadFrom method.
-func (c *Windows_IPConn) ReadFrom(b []byte) (int, Addr, error) {
+func (c *IPConn) Windows_ReadFrom(b []byte) (int, Addr, error) {
 	if !c.ok() {
 		return 0, nil, syscall.Windows_EINVAL
 	}
-	n, addr, err := c.readFrom(b)
+	n, addr, err := c.windows_readFrom(b)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	if addr == nil {
 		return n, nil, err
@@ -152,41 +51,41 @@ func (c *Windows_IPConn) ReadFrom(b []byte) (int, Addr, error) {
 //
 // The packages golang.org/x/net/ipv4 and golang.org/x/net/ipv6 can be
 // used to manipulate IP-level socket options in oob.
-func (c *Windows_IPConn) ReadMsgIP(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
+func (c *IPConn) Windows_ReadMsgIP(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
 	if !c.ok() {
 		return 0, 0, 0, nil, syscall.Windows_EINVAL
 	}
-	n, oobn, flags, addr, err = c.readMsg(b, oob)
+	n, oobn, flags, addr, err = c.windows_readMsg(b, oob)
 	if err != nil {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return
 }
 
 // WriteToIP acts like [IPConn.WriteTo] but takes an [IPAddr].
-func (c *Windows_IPConn) WriteToIP(b []byte, addr *IPAddr) (int, error) {
+func (c *IPConn) Windows_WriteToIP(b []byte, addr *IPAddr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Windows_EINVAL
 	}
-	n, err := c.writeTo(b, addr)
+	n, err := c.windows_writeTo(b, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.windows_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return n, err
 }
 
 // WriteTo implements the [PacketConn] WriteTo method.
-func (c *Windows_IPConn) WriteTo(b []byte, addr Addr) (int, error) {
+func (c *IPConn) Windows_WriteTo(b []byte, addr Addr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Windows_EINVAL
 	}
 	a, ok := addr.(*IPAddr)
 	if !ok {
-		return 0, &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr, Err: syscall.Windows_EINVAL}
+		return 0, &OpError{Op: "write", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr, Err: syscall.Windows_EINVAL}
 	}
-	n, err := c.writeTo(b, a)
+	n, err := c.windows_writeTo(b, a)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: a.windows_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: a.opAddr(), Err: err}
 	}
 	return n, err
 }
@@ -197,60 +96,15 @@ func (c *Windows_IPConn) WriteTo(b []byte, addr Addr) (int, error) {
 //
 // The packages golang.org/x/net/ipv4 and golang.org/x/net/ipv6 can be
 // used to manipulate IP-level socket options in oob.
-func (c *Windows_IPConn) WriteMsgIP(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
+func (c *IPConn) Windows_WriteMsgIP(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
 	if !c.ok() {
 		return 0, 0, syscall.Windows_EINVAL
 	}
-	n, oobn, err = c.writeMsg(b, oob, addr)
+	n, oobn, err = c.windows_writeMsg(b, oob, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.windows_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return
 }
 
-func windows_newIPConn(fd *windows_netFD) *Windows_IPConn { return &Windows_IPConn{windows_conn{fd}} }
-
-// DialIP acts like [Dial] for IP networks.
-//
-// The network must be an IP network name; see func Dial for details.
-//
-// If laddr is nil, a local address is automatically chosen.
-// If the IP field of raddr is nil or an unspecified IP address, the
-// local system is assumed.
-func Windows_DialIP(network string, laddr, raddr *IPAddr) (*Windows_IPConn, error) {
-	return windows_dialIP(context.Background(), nil, network, laddr, raddr)
-}
-
-func windows_dialIP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *IPAddr) (*Windows_IPConn, error) {
-	if raddr == nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.windows_opAddr(), Addr: nil, Err: errMissingAddress}
-	}
-	sd := &windows_sysDialer{network: network, address: raddr.Windows_String()}
-	if dialer != nil {
-		sd.Dialer = *dialer
-	}
-	c, err := sd.dialIP(ctx, laddr, raddr)
-	if err != nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.windows_opAddr(), Addr: raddr.windows_opAddr(), Err: err}
-	}
-	return c, nil
-}
-
-// ListenIP acts like [ListenPacket] for IP networks.
-//
-// The network must be an IP network name; see func Dial for details.
-//
-// If the IP field of laddr is nil or an unspecified IP address,
-// ListenIP listens on all available IP addresses of the local system
-// except multicast IP addresses.
-func Windows_ListenIP(network string, laddr *IPAddr) (*Windows_IPConn, error) {
-	if laddr == nil {
-		laddr = &IPAddr{}
-	}
-	sl := &sysListener{network: network, address: laddr.Windows_String()}
-	c, err := sl.windows_listenIP(context.Background(), laddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.windows_opAddr(), Err: err}
-	}
-	return c, nil
-}
+func windows_newIPConn(fd *windows_netFD) *IPConn { return &IPConn{conn{(*netFD)(unsafe.Pointer(fd))}} }/*line iprawsock.go:226:2*//*line iprawsock.go:241:2*//*line iprawsock.go:260:2*/

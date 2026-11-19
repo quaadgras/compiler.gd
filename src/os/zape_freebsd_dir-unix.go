@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line dir_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line dir_unix.go:6:1*/
 package os
 
 import (
@@ -18,7 +19,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line dir_unix.go:17:2*/
 
 // Auxiliary information if the File describes a directory
 type freebsd_dirInfo struct {
@@ -48,16 +49,16 @@ func (d *freebsd_dirInfo) close() {
 	}
 }
 
-func (f *Freebsd_File) readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
+func (f *File) freebsd_readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
 	// If this file has no dirInfo, create one.
 	var d *freebsd_dirInfo
 	for {
-		d = f.dirinfo.Load()
+		d = (*freebsd_file)(unsafe.Pointer(f.file)).dirinfo.Load()
 		if d != nil {
 			break
 		}
 		newD := new(freebsd_dirInfo)
-		if f.dirinfo.CompareAndSwap(nil, newD) {
+		if (*freebsd_file)(unsafe.Pointer(f.file)).dirinfo.CompareAndSwap(nil, newD) {
 			d = newD
 			break
 		}
@@ -87,10 +88,10 @@ func (f *Freebsd_File) readdir(n int, mode readdirMode) (names []string, dirents
 		if d.bufp >= d.nbuf {
 			d.bufp = 0
 			var errno error
-			d.nbuf, errno = f.pfd.ReadDirent(*d.buf)
+			d.nbuf, errno = (*freebsd_file)(unsafe.Pointer(f.file)).pfd.ReadDirent(*d.buf)
 			runtime.KeepAlive(f)
 			if errno != nil {
-				return names, dirents, infos, &PathError{Op: "readdirent", Path: f.name, Err: errno}
+				return names, dirents, infos, &PathError{Op: "readdirent", Path: (*freebsd_file)(unsafe.Pointer(f.file)).name, Err: errno}
 			}
 			if d.nbuf <= 0 {
 				// Optimization: we can return the buffer to the pool, there is nothing else to read.
@@ -139,9 +140,9 @@ func (f *Freebsd_File) readdir(n int, mode readdirMode) (names []string, dirents
 		if n > 0 { // see 'n == 0' comment above
 			n--
 		}
-		if mode == freebsd_readdirName {
+		if mode == readdirName {
 			names = append(names, string(name))
-		} else if mode == freebsd_readdirDirEntry {
+		} else if mode == readdirDirEntry {
 			de, err := freebsd_newUnixDirent(f, string(name), freebsd_direntType(rec))
 			if IsNotExist(err) {
 				// File disappeared between readdir and stat.
@@ -153,7 +154,7 @@ func (f *Freebsd_File) readdir(n int, mode readdirMode) (names []string, dirents
 			}
 			dirents = append(dirents, de)
 		} else {
-			info, err := f.lstatat(string(name))
+			info, err := f.freebsd_lstatat(string(name))
 			if IsNotExist(err) {
 				// File disappeared between readdir + stat.
 				// Treat as if it didn't exist.

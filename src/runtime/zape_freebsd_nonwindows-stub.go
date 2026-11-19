@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line nonwindows_stub.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line nonwindows_stub.go:6:1*/
 package runtime
 
 // osRelaxMinNS is the number of nanoseconds of idleness to tolerate

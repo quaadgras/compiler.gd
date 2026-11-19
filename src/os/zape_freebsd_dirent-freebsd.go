@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line dirent_freebsd.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -33,19 +33,19 @@ func freebsd_direntType(buf []byte) FileMode {
 	typ := buf[off]
 	switch typ {
 	case syscall.Freebsd_DT_BLK:
-		return Freebsd_ModeDevice
+		return ModeDevice
 	case syscall.Freebsd_DT_CHR:
-		return Freebsd_ModeDevice | Freebsd_ModeCharDevice
+		return ModeDevice | ModeCharDevice
 	case syscall.Freebsd_DT_DIR:
-		return Freebsd_ModeDir
+		return ModeDir
 	case syscall.Freebsd_DT_FIFO:
-		return Freebsd_ModeNamedPipe
+		return ModeNamedPipe
 	case syscall.Freebsd_DT_LNK:
-		return Freebsd_ModeSymlink
+		return ModeSymlink
 	case syscall.Freebsd_DT_REG:
 		return 0
 	case syscall.Freebsd_DT_SOCK:
-		return Freebsd_ModeSocket
+		return ModeSocket
 	}
 	return ^FileMode(0) // unknown
 }

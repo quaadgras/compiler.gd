@@ -2,65 +2,27 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line implementations.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line implementations.go:6:1*/
 package cryptotest
 
 import (
-	"crypto/internal/boring"
-	"crypto/internal/impl"
+	
+	
 	"internal/goarch"
 	"internal/goos"
 	"internal/testenv"
 	"strings"
-	"testing"
+	
 )
 
-var _ = goos.GOOS
-
-// TestAllImplementations runs the provided test function with each available
-// implementation of the package registered with crypto/internal/impl. If there
-// are no alternative implementations for pkg, f is invoked directly once.
-func Linux_TestAllImplementations(t *testing.Linux_T, pkg string, f func(t *testing.Linux_T)) {
-	// BoringCrypto bypasses the multiple Go implementations.
-	if boring.Enabled {
-		f(t)
-		return
-	}
-
-	impls := impl.List(pkg)
-	if len(impls) == 0 {
-		f(t)
-		return
-	}
-
-	t.Cleanup(func() { impl.Reset(pkg) })
-
-	for _, name := range impls {
-		if available := impl.Select(pkg, name); available {
-			t.Run(name, f)
-		} else {
-			t.Run(name, func(t *testing.Linux_T) {
-				// Report an error if we're on the most capable builder for the
-				// architecture and the builder can't test this implementation.
-				if linux_flagshipBuilder() {
-					t.Error("builder doesn't support CPU features needed to test this implementation")
-				} else {
-					t.Skip("implementation not supported")
-				}
-			})
-		}
-	}
-
-	// Test the generic implementation.
-	impl.Select(pkg, "")
-	t.Run("Base", f)
-}
+var _ = goos.GOOS/*line implementations.go:17:2*//*line implementations.go:56:2*/
 
 func linux_flagshipBuilder() bool {
-	builder := testenv.Linux_Builder()
+	builder := testenv.Builder()
 	if builder == "" {
 		return false
 	}

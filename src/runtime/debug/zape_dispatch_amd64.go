@@ -18,30 +18,3 @@ const (
 	apeFreebsd
 	apeWindows
 )
-
-type CrashOptions struct{}
-
-func PrintStack() {
-	if apehost == apeLinux {
-		Linux_PrintStack()
-		return
-	}
-	if apehost == apeFreebsd {
-		Freebsd_PrintStack()
-		return
-	}
-	Windows_PrintStack()
-}
-
-func Stack() []byte {
-	if apehost == apeLinux {
-		x0 := Linux_Stack()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Stack()
-		return x0
-	}
-	x0 := Windows_Stack()
-	return x0
-}

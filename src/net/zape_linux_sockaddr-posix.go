@@ -2,15 +2,39 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line sockaddr_posix.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockaddr_posix.go:6:1*/
 package net
 
 import (
 	"syscall"
 )
+
+// A sockaddr represents a TCP, UDP, IP or Unix network endpoint
+// address that can be converted into a syscall.Sockaddr.
+type linux_sockaddr interface {
+	Addr
+
+	// family returns the platform-dependent address family
+	// identifier.
+	linux_family() int
+
+	// isWildcard reports whether the address is a wildcard
+	// address.
+	isWildcard() bool
+
+	// sockaddr returns the address converted into a syscall
+	// sockaddr type that implements syscall.Sockaddr
+	// interface. It returns a nil interface when the address is
+	// nil.
+	linux_sockaddr(family int) (syscall.Linux_Sockaddr, error)
+
+	// toLocal maps the zero address to a local system address (127.0.0.1 or ::1)
+	linux_toLocal(net string) linux_sockaddr
+}
 
 func (fd *linux_netFD) addrFunc() func(syscall.Linux_Sockaddr) Addr {
 	switch fd.family {

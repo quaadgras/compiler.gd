@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line dll_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -107,7 +107,7 @@ func Windows_SyscallN(p uintptr, args ...uintptr) (r1, r2 uintptr, err Errno) {
 //
 //go:noescape
 //go:linkname windows_syscalln syscall.syscalln
-func windows_syscalln(fn, n uintptr, args ...uintptr) (r1, r2 uintptr, err Errno)
+/*line dll_windows.go:105:1*/func windows_syscalln(fn, n uintptr, args ...uintptr) (r1, r2 uintptr, err Errno)
 
 // N.B. For the loadlibrary, loadlibrary, and getprocaddress functions below:
 //
@@ -194,7 +194,7 @@ func Windows_MustLoadDLL(name string) *Windows_DLL {
 // FindProc searches [DLL] d for procedure named name and returns [*Proc]
 // if found. It returns an error if search fails.
 func (d *Windows_DLL) FindProc(name string) (proc *Windows_Proc, err error) {
-	namep, err := Windows_BytePtrFromString(name)
+	namep, err := BytePtrFromString(name)
 	if err != nil {
 		return nil, err
 	}

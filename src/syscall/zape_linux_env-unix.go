@@ -2,22 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line env_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line env_unix.go:6:1*/
 // Unix environment variables.
 
 package syscall
 
-import _ "unsafe"
+import _ "unsafe"/*line env_unix.go:9:16*/
 
 import (
 	"runtime"
 	"sync"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line env_unix.go:14:2*/
 
 var (
 	// envLock guards env and envs.
@@ -30,41 +31,41 @@ var (
 	// be of the form "key=value". An empty string means deleted
 	// (or a duplicate to be ignored).
 	linux_envs []string = func() []string {
-		if apehost != apeLinux {
-			return *new([]string)
-		}
-		return linux_runtime_envs()
-	}()
+if apehost != apeLinux {
+return *new([]string)
+}
+return /*line env_unix.go:26:18*/linux_runtime_envs()
+}()/*line env_unix.go:26:32*/
 )
 
 //go:linkname linux_runtime_envs syscall.runtime_envs
-func linux_runtime_envs() []string // in package runtime
+/*line env_unix.go:29:1*/func linux_runtime_envs() []string // in package runtime
 
 var linux_copyenv = func() func() {
-	if apehost != apeLinux {
-		return *new(func())
-	}
-	return sync.OnceFunc(func() {
-		linux_env = make(map[string]int)
-		for i, s := range linux_envs {
-			for j := 0; j < len(s); j++ {
-				if s[j] == '=' {
-					key := s[:j]
-					if _, ok := linux_env[key]; !ok {
-						linux_env[key] = i // first mention of key
-					} else {
-						// Clear duplicate keys. This permits Unsetenv to
-						// safely delete only the first item without
-						// worrying about unshadowing a later one,
-						// which might be a security problem.
-						linux_envs[i] = ""
-					}
-					break
+if apehost != apeLinux {
+return *new(func())
+}
+return /*line env_unix.go:31:15*/sync.OnceFunc(func() {
+	linux_env = make(map[string]int)
+	for i, s := range linux_envs {
+		for j := 0; j < len(s); j++ {
+			if s[j] == '=' {
+				key := s[:j]
+				if _, ok := linux_env[key]; !ok {
+					linux_env[key] = i // first mention of key
+				} else {
+					// Clear duplicate keys. This permits Unsetenv to
+					// safely delete only the first item without
+					// worrying about unshadowing a later one,
+					// which might be a security problem.
+					linux_envs[i] = ""
 				}
+				break
 			}
 		}
-	})
-}()
+	}
+})
+}()/*line env_unix.go:50:3*/
 
 func Linux_Unsetenv(key string) error {
 	linux_copyenv()
@@ -76,7 +77,7 @@ func Linux_Unsetenv(key string) error {
 		linux_envs[i] = ""
 		delete(linux_env, key)
 	}
-	linux_runtimeUnsetenv(key)
+	runtimeUnsetenv(key)
 	return nil
 }
 
@@ -133,7 +134,7 @@ func Linux_Setenv(key, value string) error {
 		linux_envs = append(linux_envs, kv)
 	}
 	linux_env[key] = i
-	linux_runtimeSetenv(key, value)
+	runtimeSetenv(key, value)
 	return nil
 }
 
@@ -143,7 +144,7 @@ func Linux_Clearenv() {
 	linux_envLock.Lock()
 	defer linux_envLock.Unlock()
 
-	linux_runtimeClearenv(linux_env)
+	runtimeClearenv(linux_env)
 
 	linux_env = make(map[string]int)
 	linux_envs = []string{}

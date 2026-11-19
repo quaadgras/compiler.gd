@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line lookup_stubs.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lookup_stubs.go:6:1*/
 package user
 
 import (
@@ -15,7 +16,9 @@ import (
 	"strconv"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line lookup_stubs.go:14:2*/
+
+/*line lookup_stubs.go:21:2*/
 
 func linux_current() (*User, error) {
 	uid := linux_currentUID()
@@ -26,7 +29,7 @@ func linux_current() (*User, error) {
 		return u, nil
 	}
 
-	homeDir, _ := os.Linux_UserHomeDir()
+	homeDir, _ := os.UserHomeDir()
 	u = &User{
 		Uid:      uid,
 		Gid:      linux_currentGID(),

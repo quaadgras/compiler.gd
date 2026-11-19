@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syscall_bsd.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line syscall_bsd.go:6:1*/
 // BSD system call wrappers shared by *BSD based systems
 // including OS X (Darwin) and FreeBSD.  Like the other
 // syscall_*.go files it is compiled as Go code but also
@@ -19,7 +20,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line syscall_bsd.go:18:2*/
 
 const Freebsd_ImplementsGetwd = true
 
@@ -116,9 +117,7 @@ func (w Freebsd_WaitStatus) ExitStatus() int {
 	return int(w >> freebsd_shift)
 }
 
-func (w Freebsd_WaitStatus) Signaled() bool {
-	return w&freebsd_mask != freebsd_stopped && w&freebsd_mask != 0
-}
+func (w Freebsd_WaitStatus) Signaled() bool { return w&freebsd_mask != freebsd_stopped && w&freebsd_mask != 0 }
 
 func (w Freebsd_WaitStatus) Signal() Signal {
 	sig := Signal(w & freebsd_mask)
@@ -130,13 +129,9 @@ func (w Freebsd_WaitStatus) Signal() Signal {
 
 func (w Freebsd_WaitStatus) CoreDump() bool { return w.Signaled() && w&freebsd_core != 0 }
 
-func (w Freebsd_WaitStatus) Stopped() bool {
-	return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) != Freebsd_SIGSTOP
-}
+func (w Freebsd_WaitStatus) Stopped() bool { return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) != Freebsd_SIGSTOP }
 
-func (w Freebsd_WaitStatus) Continued() bool {
-	return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) == Freebsd_SIGSTOP
-}
+func (w Freebsd_WaitStatus) Continued() bool { return w&freebsd_mask == freebsd_stopped && Signal(w>>freebsd_shift) == Freebsd_SIGSTOP }
 
 func (w Freebsd_WaitStatus) StopSignal() Signal {
 	if !w.Stopped() {

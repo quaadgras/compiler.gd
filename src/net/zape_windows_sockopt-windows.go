@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockopt_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ func windows_setDefaultSockopts(s syscall.Windows_Handle, family, sotype int, ip
 		// Allow both IP versions even if the OS default
 		// is otherwise. Note that some operating systems
 		// never admit this option.
-		syscall.Windows_SetsockoptInt(s, syscall.Windows_IPPROTO_IPV6, syscall.Windows_IPV6_V6ONLY, windows_boolint(ipv6only))
+		syscall.Windows_SetsockoptInt(s, syscall.Windows_IPPROTO_IPV6, syscall.Windows_IPV6_V6ONLY, boolint(ipv6only))
 	}
 	if (sotype == syscall.Windows_SOCK_DGRAM || sotype == syscall.Windows_SOCK_RAW) && family != syscall.Windows_AF_UNIX && family != syscall.Windows_AF_INET6 {
 		// Allow broadcast.

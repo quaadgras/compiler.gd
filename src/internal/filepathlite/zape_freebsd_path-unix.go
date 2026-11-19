@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line path_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line path_unix.go:6:1*/
 package filepathlite
 
 import (
@@ -23,7 +24,7 @@ func Freebsd_IsPathSeparator(c uint8) bool {
 }
 
 func freebsd_isLocal(path string) bool {
-	return freebsd_unixIsLocal(path)
+	return unixIsLocal(path)
 }
 
 func freebsd_localize(path string) (string, error) {

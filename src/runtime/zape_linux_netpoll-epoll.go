@@ -2,21 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line netpoll_epoll.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line netpoll_epoll.go:6:1*/
 package runtime
 
 import (
+	
 	"internal/runtime/syscall/linux"
 	"unsafe"
 )
 
 var (
-	linux_epfd           int32   = -1 // epoll descriptor
-	linux_netpollEventFd uintptr      // eventfd for netpollBreak
-
+	linux_epfd           int32         = -1 // epoll descriptor
+	linux_netpollEventFd uintptr            // eventfd for netpollBreak
+	
 )
 
 // netpollPackData stores pd and its fdseq in the epoll data field of ev as

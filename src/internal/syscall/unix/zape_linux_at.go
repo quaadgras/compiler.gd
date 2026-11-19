@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line at.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line at.go:6:1*/
 package unix
 
 import (
@@ -14,7 +15,7 @@ import (
 )
 
 func Linux_Unlinkat(dirfd int, path string, flags int) error {
-	p, err := syscall.Linux_BytePtrFromString(path)
+	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
 	}
@@ -28,7 +29,7 @@ func Linux_Unlinkat(dirfd int, path string, flags int) error {
 }
 
 func Linux_Openat(dirfd int, path string, flags int, perm uint32) (int, error) {
-	p, err := syscall.Linux_BytePtrFromString(path)
+	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return 0, err
 	}
@@ -42,7 +43,7 @@ func Linux_Openat(dirfd int, path string, flags int, perm uint32) (int, error) {
 }
 
 func Linux_Readlinkat(dirfd int, path string, buf []byte) (int, error) {
-	p0, err := syscall.Linux_BytePtrFromString(path)
+	p0, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +67,7 @@ func Linux_Readlinkat(dirfd int, path string, buf []byte) (int, error) {
 }
 
 func Linux_Mkdirat(dirfd int, path string, mode uint32) error {
-	p, err := syscall.Linux_BytePtrFromString(path)
+	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
 	}
@@ -83,7 +84,7 @@ func Linux_Mkdirat(dirfd int, path string, mode uint32) error {
 }
 
 func Linux_Fchownat(dirfd int, path string, uid, gid int, flags int) error {
-	p, err := syscall.Linux_BytePtrFromString(path)
+	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
 	}
@@ -101,11 +102,11 @@ func Linux_Fchownat(dirfd int, path string, uid, gid int, flags int) error {
 }
 
 func Linux_Renameat(olddirfd int, oldpath string, newdirfd int, newpath string) error {
-	oldp, err := syscall.Linux_BytePtrFromString(oldpath)
+	oldp, err := syscall.BytePtrFromString(oldpath)
 	if err != nil {
 		return err
 	}
-	newp, err := syscall.Linux_BytePtrFromString(newpath)
+	newp, err := syscall.BytePtrFromString(newpath)
 	if err != nil {
 		return err
 	}
@@ -123,11 +124,11 @@ func Linux_Renameat(olddirfd int, oldpath string, newdirfd int, newpath string) 
 }
 
 func Linux_Linkat(olddirfd int, oldpath string, newdirfd int, newpath string, flag int) error {
-	oldp, err := syscall.Linux_BytePtrFromString(oldpath)
+	oldp, err := syscall.BytePtrFromString(oldpath)
 	if err != nil {
 		return err
 	}
-	newp, err := syscall.Linux_BytePtrFromString(newpath)
+	newp, err := syscall.BytePtrFromString(newpath)
 	if err != nil {
 		return err
 	}
@@ -145,11 +146,11 @@ func Linux_Linkat(olddirfd int, oldpath string, newdirfd int, newpath string, fl
 }
 
 func Linux_Symlinkat(oldpath string, newdirfd int, newpath string) error {
-	oldp, err := syscall.Linux_BytePtrFromString(oldpath)
+	oldp, err := syscall.BytePtrFromString(oldpath)
 	if err != nil {
 		return err
 	}
-	newp, err := syscall.Linux_BytePtrFromString(newpath)
+	newp, err := syscall.BytePtrFromString(newpath)
 	if err != nil {
 		return err
 	}

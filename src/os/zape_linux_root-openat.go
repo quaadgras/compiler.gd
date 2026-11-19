@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_openat.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_openat.go:6:1*/
 package os
+
+import "unsafe"/*line root_openat.go:7:11*/
 
 import (
 	"io/fs"
@@ -17,7 +20,7 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line root_openat.go:16:2*/
 
 // root implementation for platforms with a function to open a file
 // relative to a directory.
@@ -73,7 +76,7 @@ func (r *linux_root) Name() string {
 	return r.name
 }
 
-func linux_rootChmod(r *Linux_Root, name string, mode FileMode) error {
+func linux_rootChmod(r *Root, name string, mode FileMode) error {
 	_, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_chmodat(parent, name, mode)
 	})
@@ -83,7 +86,7 @@ func linux_rootChmod(r *Linux_Root, name string, mode FileMode) error {
 	return nil
 }
 
-func linux_rootChown(r *Linux_Root, name string, uid, gid int) error {
+func linux_rootChown(r *Root, name string, uid, gid int) error {
 	_, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_chownat(parent, name, uid, gid)
 	})
@@ -93,7 +96,7 @@ func linux_rootChown(r *Linux_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func linux_rootLchown(r *Linux_Root, name string, uid, gid int) error {
+func linux_rootLchown(r *Root, name string, uid, gid int) error {
 	_, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_lchownat(parent, name, uid, gid)
 	})
@@ -103,7 +106,7 @@ func linux_rootLchown(r *Linux_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func linux_rootChtimes(r *Linux_Root, name string, atime time.Time, mtime time.Time) error {
+func linux_rootChtimes(r *Root, name string, atime time.Time, mtime time.Time) error {
 	_, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_chtimesat(parent, name, atime, mtime)
 	})
@@ -113,15 +116,15 @@ func linux_rootChtimes(r *Linux_Root, name string, atime time.Time, mtime time.T
 	return nil
 }
 
-func linux_rootMkdir(r *Linux_Root, name string, perm FileMode) error {
-	flags := uint(linux_doInRootCreatingDirectory)
+func linux_rootMkdir(r *Root, name string, perm FileMode) error {
+	flags := uint(doInRootCreatingDirectory)
 	switch "linux" {
 	case "linux", "windows", "openbsd":
 		// These platforms do not follow "symlink" on "mkdir symlink/".
 		// (POSIX.1-2024 4.16 says that the trailing slash should cause
 		// resolution to follow the symlink, but we're trying to match
 		// platform semantics, not implement POSIX.)
-		flags |= linux_doInRootNoHandleTerminalSlash
+		flags |= doInRootNoHandleTerminalSlash
 	}
 	_, err := linux_doInRoot(r, name, flags, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_mkdirat(parent, name, perm)
@@ -132,7 +135,7 @@ func linux_rootMkdir(r *Linux_Root, name string, perm FileMode) error {
 	return nil
 }
 
-func linux_rootMkdirAll(r *Linux_Root, fullname string, perm FileMode) error {
+func linux_rootMkdirAll(r *Root, fullname string, perm FileMode) error {
 	// doInRoot opens each path element in turn.
 	//
 	// openDirFunc opens all but the last path component.
@@ -190,10 +193,10 @@ func linux_rootMkdirAll(r *Linux_Root, fullname string, perm FileMode) error {
 		}
 		return struct{}{}, &PathError{Op: "mkdirat", Err: err}
 	}
-	flags := uint(linux_doInRootCreatingDirectory)
+	flags := uint(doInRootCreatingDirectory)
 	switch "linux" {
 	case "linux", "windows", "openbsd":
-		flags |= linux_doInRootNoHandleTerminalSlash // see rootMkdir
+		flags |= doInRootNoHandleTerminalSlash // see rootMkdir
 	}
 	_, err := linux_doInRoot(r, fullname, flags, openDirFunc, openLastComponentFunc)
 	if err != nil {
@@ -204,7 +207,7 @@ func linux_rootMkdirAll(r *Linux_Root, fullname string, perm FileMode) error {
 	return err
 }
 
-func linux_rootReadlink(r *Linux_Root, name string) (string, error) {
+func linux_rootReadlink(r *Root, name string) (string, error) {
 	target, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (string, error) {
 		return linux_readlinkat(parent, name)
 	})
@@ -214,7 +217,7 @@ func linux_rootReadlink(r *Linux_Root, name string) (string, error) {
 	return target, nil
 }
 
-func linux_rootRemove(r *Linux_Root, name string) error {
+func linux_rootRemove(r *Root, name string) error {
 	_, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_removeat(parent, name)
 	})
@@ -224,7 +227,7 @@ func linux_rootRemove(r *Linux_Root, name string) error {
 	return nil
 }
 
-func linux_rootRemoveAll(r *Linux_Root, name string) error {
+func linux_rootRemoveAll(r *Root, name string) error {
 	// Consistency with os.RemoveAll: Strip trailing /s from the name,
 	// so RemoveAll("not_a_directory/") succeeds.
 	for len(name) > 0 && Linux_IsPathSeparator(name[len(name)-1]) {
@@ -246,11 +249,11 @@ func linux_rootRemoveAll(r *Linux_Root, name string) error {
 	return err
 }
 
-func linux_rootRename(r *Linux_Root, oldname, newname string) error {
+func linux_rootRename(r *Root, oldname, newname string) error {
 	_, err := linux_doInRoot(r, oldname, 0, nil, func(oldparent linux_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
-		flags := uint(linux_doInRootCreatingDirectory)
+		flags := uint(doInRootCreatingDirectory)
 		if "linux" == "windows" {
-			flags |= linux_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := linux_doInRoot(r, newname, flags, nil, func(newparent linux_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			if "linux" != "windows" && newEndsInSlash {
@@ -281,12 +284,12 @@ func linux_rootRename(r *Linux_Root, oldname, newname string) error {
 	return err
 }
 
-func linux_rootLink(r *Linux_Root, oldname, newname string) error {
+func linux_rootLink(r *Root, oldname, newname string) error {
 	_, err := linux_doInRoot(r, oldname, 0, nil, func(oldparent linux_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
 		flags := uint(0)
 		if "linux" == "windows" {
 			// Windows doesn't pay attention to trailing slashes in the link target.
-			flags |= linux_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := linux_doInRoot(r, newname, flags, nil, func(newparent linux_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			return struct{}{}, linux_linkat(oldparent, oldname, newparent, newname)
@@ -297,27 +300,7 @@ func linux_rootLink(r *Linux_Root, oldname, newname string) error {
 		return &LinkError{"linkat", oldname, newname, err}
 	}
 	return err
-}
-
-// Flags for doInRoot.
-const (
-	// doInRootNoHandleTerminalSlash prevents doInRoot from applying special handling
-	// for paths which end in one or more slashes.
-	linux_doInRootNoHandleTerminalSlash = 1 << iota
-
-	// doInRootCreatingDirectory indicates that the operation is creating a directory.
-	// When a path ends in /, the last path component may name a file which does not exist.
-	linux_doInRootCreatingDirectory
-
-	// doInRootAlwaysResolveTerminalSlash causes doInRoot to resolve symlinks in the last
-	// path component when a path ends in /, even on Windows. For example, this causes
-	// doInRoot to resolve "symlink/" as the link target of "symlink".
-	//
-	// POSIX path operations resolve symlinks in this case.
-	// Most Windows operations do not.
-	// This flag enforces the POSIX behavior.
-	linux_doInRootAlwaysResolveTerminalSlash
-)
+}/*line root_openat.go:316:2*/
 
 // doInRoot performs an operation on a path in a Root.
 //
@@ -344,13 +327,13 @@ const (
 //
 // If f or openDirFunc return a *PathError, doInRoot will set PathError.Path to the
 // full path which caused the error.
-func linux_doInRoot[T any](r *Linux_Root, name string, flags uint, openDirFunc func(parent linux_sysfdType, name string) (linux_sysfdType, error), f func(parent linux_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
-	if err := r.root.incref(); err != nil {
+func linux_doInRoot[T any](r *Root, name string, flags uint, openDirFunc func(parent linux_sysfdType, name string) (linux_sysfdType, error), f func(parent linux_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
+	if err := (*(**linux_root)(unsafe.Pointer(&r.root))).incref(); err != nil {
 		return ret, err
 	}
-	defer r.root.decref()
+	defer (*(**linux_root)(unsafe.Pointer(&r.root))).decref()
 
-	parts, endsInSlash, err := linux_splitPathInRoot(name, nil, nil)
+	parts, endsInSlash, err := splitPathInRoot(name, nil, nil)
 	if err != nil {
 		return ret, err
 	}
@@ -358,7 +341,7 @@ func linux_doInRoot[T any](r *Linux_Root, name string, flags uint, openDirFunc f
 		openDirFunc = linux_rootOpenDir
 	}
 
-	rootfd := r.root.fd
+	rootfd := (*(**linux_root)(unsafe.Pointer(&r.root))).fd
 	dirfd := rootfd
 	defer func() {
 		if dirfd != rootfd {
@@ -415,11 +398,11 @@ Loop:
 
 		if i == len(parts)-1 {
 			err = nil
-			if endsInSlash && flags&linux_doInRootNoHandleTerminalSlash == 0 {
+			if endsInSlash && flags&doInRootNoHandleTerminalSlash == 0 {
 				var fi FileInfo
 				fi, err = linux_lstatat(dirfd, parts[i])
 				switch {
-				case IsNotExist(err) && flags&linux_doInRootCreatingDirectory != 0:
+				case IsNotExist(err) && flags&doInRootCreatingDirectory != 0:
 					// The path ends in a slash, the last path component
 					// does not exist, and we creating a directory.
 					// This is fine.
@@ -428,7 +411,7 @@ Loop:
 					return
 				case fi.Mode().Type() == fs.ModeDir:
 				case linux_isLink(fi):
-					if "linux" != "windows" || flags&linux_doInRootAlwaysResolveTerminalSlash != 0 {
+					if "linux" != "windows" || flags&doInRootAlwaysResolveTerminalSlash != 0 {
 						err = linux_checkSymlink(dirfd, parts[i], syscall.Linux_ENOTDIR)
 					} else {
 						if !linux_isDirectoryLink(fi) {
@@ -467,11 +450,11 @@ Loop:
 		case nil:
 		case errSymlink:
 			symlinks++
-			if symlinks > linux_rootMaxSymlinks {
+			if symlinks > rootMaxSymlinks {
 				return ret, syscall.Linux_ELOOP
 			}
 			lastPart := i == len(parts)-1
-			newparts, newEndsInSlash, err := linux_splitPathInRoot(string(e), parts[:i], parts[i+1:])
+			newparts, newEndsInSlash, err := splitPathInRoot(string(e), parts[:i], parts[i+1:])
 			if err != nil {
 				return ret, err
 			}
@@ -512,6 +495,4 @@ func linux_modeAt(parent linux_sysfdType, name string) (FileMode, error) {
 		return 0, err
 	}
 	return fi.Mode(), nil
-}
-
-func (errSymlink) Linux_Error() string { panic("errSymlink is not user-visible") }
+}/*line root_openat.go:515:23*//*line root_openat.go:517:77*/

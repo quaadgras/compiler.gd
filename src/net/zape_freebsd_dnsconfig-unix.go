@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line dnsconfig_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line dnsconfig_unix.go:6:1*/
 // Read system DNS config from /etc/resolv.conf
 
 package net
@@ -21,18 +22,18 @@ import (
 func freebsd_dnsReadConfig(filename string) *dnsConfig {
 	conf := &dnsConfig{
 		ndots:    1,
-		timeout:  5 * time.Freebsd_Second,
+		timeout:  5 * time.Second,
 		attempts: 2,
 	}
-	file, err := freebsd_open(filename)
+	file, err := open(filename)
 	if err != nil {
 		conf.servers = defaultNS
 		conf.search = freebsd_dnsDefaultSearch()
 		conf.err = err
 		return conf
 	}
-	defer file.freebsd_close()
-	if fi, err := os.Freebsd_FromAPE_File(file.file).Stat(); err == nil {
+	defer file.close()
+	if fi, err := file.file.Freebsd_Stat(); err == nil {
 		conf.mtime = fi.ModTime()
 	} else {
 		conf.servers = defaultNS
@@ -40,12 +41,12 @@ func freebsd_dnsReadConfig(filename string) *dnsConfig {
 		conf.err = err
 		return conf
 	}
-	for line, ok := file.freebsd_readLine(); ok; line, ok = file.freebsd_readLine() {
+	for line, ok := file.readLine(); ok; line, ok = file.readLine() {
 		if len(line) > 0 && (line[0] == ';' || line[0] == '#') {
 			// comment.
 			continue
 		}
-		f := freebsd_getFields(line)
+		f := getFields(line)
 		if len(f) < 1 {
 			continue
 		}
@@ -79,7 +80,7 @@ func freebsd_dnsReadConfig(filename string) *dnsConfig {
 			for _, s := range f[1:] {
 				switch {
 				case stringslite.HasPrefix(s, "ndots:"):
-					n, _, _ := freebsd_dtoi(s[6:])
+					n, _, _ := dtoi(s[6:])
 					if n < 0 {
 						n = 0
 					} else if n > 15 {
@@ -87,13 +88,13 @@ func freebsd_dnsReadConfig(filename string) *dnsConfig {
 					}
 					conf.ndots = n
 				case stringslite.HasPrefix(s, "timeout:"):
-					n, _, _ := freebsd_dtoi(s[8:])
+					n, _, _ := dtoi(s[8:])
 					if n < 1 {
 						n = 1
 					}
-					conf.timeout = time.Duration(n) * time.Freebsd_Second
+					conf.timeout = time.Duration(n) * time.Second
 				case stringslite.HasPrefix(s, "attempts:"):
-					n, _, _ := freebsd_dtoi(s[9:])
+					n, _, _ := dtoi(s[9:])
 					if n < 1 {
 						n = 1
 					}

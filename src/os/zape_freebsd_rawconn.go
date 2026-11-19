@@ -2,50 +2,44 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line rawconn.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line rawconn.go:6:1*/
 package os
+
+import "unsafe"/*line rawconn.go:7:11*/
 
 import (
 	"runtime"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line rawconn.go:11:2*//*line rawconn.go:16:2*/
 
-// rawConn implements syscall.RawConn.
-type freebsd_rawConn struct {
-	file *Freebsd_File
-}
-
-func (c *freebsd_rawConn) Control(f func(uintptr)) error {
+func (c *rawConn) Freebsd_Control(f func(uintptr)) error {
 	if err := c.file.checkValid("SyscallConn.Control"); err != nil {
 		return err
 	}
-	err := c.file.pfd.RawControl(f)
+	err := (*freebsd_file)(unsafe.Pointer(c.file.file)).pfd.RawControl(f)
 	runtime.KeepAlive(c.file)
 	return err
 }
 
-func (c *freebsd_rawConn) Read(f func(uintptr) bool) error {
+func (c *rawConn) Freebsd_Read(f func(uintptr) bool) error {
 	if err := c.file.checkValid("SyscallConn.Read"); err != nil {
 		return err
 	}
-	err := c.file.pfd.RawRead(f)
+	err := (*freebsd_file)(unsafe.Pointer(c.file.file)).pfd.RawRead(f)
 	runtime.KeepAlive(c.file)
 	return err
 }
 
-func (c *freebsd_rawConn) Write(f func(uintptr) bool) error {
+func (c *rawConn) Freebsd_Write(f func(uintptr) bool) error {
 	if err := c.file.checkValid("SyscallConn.Write"); err != nil {
 		return err
 	}
-	err := c.file.pfd.RawWrite(f)
+	err := (*freebsd_file)(unsafe.Pointer(c.file.file)).pfd.RawWrite(f)
 	runtime.KeepAlive(c.file)
 	return err
-}
-
-func freebsd_newRawConn(file *Freebsd_File) (*freebsd_rawConn, error) {
-	return &freebsd_rawConn{file: file}, nil
-}
+}/*line rawconn.go:47:2*/

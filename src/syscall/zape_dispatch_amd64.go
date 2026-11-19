@@ -48,8 +48,6 @@ type Timespec struct {
 	Nsec int64
 }
 
-var _zero uintptr
-
 var ioSync int64
 
 const AF_INET = 2
@@ -1477,32 +1475,6 @@ const S_IXUSR = 64
 
 const TCP_NODELAY = 1
 
-func BytePtrFromString(a0 string) (*byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_BytePtrFromString(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_BytePtrFromString(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_BytePtrFromString(a0)
-	return x0, x1
-}
-
-func ByteSliceFromString(a0 string) ([]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_ByteSliceFromString(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_ByteSliceFromString(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_ByteSliceFromString(a0)
-	return x0, x1
-}
-
 func Chdir(a0 string) error {
 	if apehost == apeLinux {
 		x0 := Linux_Chdir(a0)
@@ -1580,11 +1552,6 @@ func Exec(a0 string, a1 []string, a2 []string) error {
 	return x0
 }
 
-// Exit is pushed by another package.
-//
-//go:linkname Exit
-func Exit(code int)
-
 func Getegid() int {
 	if apehost == apeLinux {
 		x0 := Linux_Getegid()
@@ -1649,11 +1616,6 @@ func Getgroups() ([]int, error) {
 	x0, x1 := Windows_Getgroups()
 	return x0, x1
 }
-
-// Getpagesize is pushed by another package.
-//
-//go:linkname Getpagesize
-func Getpagesize() int
 
 func Getpid() int {
 	if apehost == apeLinux {
@@ -1908,32 +1870,6 @@ func StartProcess(a0 string, a1 []string, a2 *ProcAttr) (int, uintptr, error) {
 	return x0, x1, x2
 }
 
-func StringBytePtr(a0 string) *byte {
-	if apehost == apeLinux {
-		x0 := Linux_StringBytePtr(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_StringBytePtr(a0)
-		return x0
-	}
-	x0 := Windows_StringBytePtr(a0)
-	return x0
-}
-
-func StringByteSlice(a0 string) []byte {
-	if apehost == apeLinux {
-		x0 := Linux_StringByteSlice(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_StringByteSlice(a0)
-		return x0
-	}
-	x0 := Windows_StringByteSlice(a0)
-	return x0
-}
-
 func Symlink(a0 string, a1 string) error {
 	if apehost == apeLinux {
 		x0 := Linux_Symlink(a0, a1)
@@ -2107,32 +2043,6 @@ func (r Signal) String() string {
 	return x0
 }
 
-func (r *Timespec) Nano() int64 {
-	if apehost == apeLinux {
-		x0 := r.Linux_Nano()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.Freebsd_Nano()
-		return x0
-	}
-	x0 := r.Windows_Nano()
-	return x0
-}
-
-func (r *Timespec) Unix() (int64, int64) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Unix()
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.Freebsd_Unix()
-		return x0, x1
-	}
-	x0, x1 := r.Windows_Unix()
-	return x0, x1
-}
-
 func (r *Timeval) Nano() int64 {
 	if apehost == apeLinux {
 		x0 := ((*Linux_Timeval)(unsafe.Pointer(r))).Nano()
@@ -2201,6 +2111,123 @@ func (r *Timeval) Unix() (int64, int64) {
 		(*r).Usec = int64(tr.Usec)
 	}
 	return x0, x1
+}
+
+func (r WaitStatus) Continued() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).Continued()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).Continued()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).Continued()
+	return x0
+}
+
+func (r WaitStatus) CoreDump() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).CoreDump()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).CoreDump()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).CoreDump()
+	return x0
+}
+
+func (r WaitStatus) ExitStatus() int {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).ExitStatus()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).ExitStatus()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).ExitStatus()
+	return x0
+}
+
+func (r WaitStatus) Exited() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).Exited()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).Exited()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).Exited()
+	return x0
+}
+
+func (r WaitStatus) Signal() Signal {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).Signal()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).Signal()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).Signal()
+	return x0
+}
+
+func (r WaitStatus) Signaled() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).Signaled()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).Signaled()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).Signaled()
+	return x0
+}
+
+func (r WaitStatus) StopSignal() Signal {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).StopSignal()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).StopSignal()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).StopSignal()
+	return x0
+}
+
+func (r WaitStatus) Stopped() bool {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).Stopped()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).Stopped()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).Stopped()
+	return x0
+}
+
+func (r WaitStatus) TrapCause() int {
+	if apehost == apeLinux {
+		x0 := ((*Linux_WaitStatus)(unsafe.Pointer(&r))).TrapCause()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := ((*Freebsd_WaitStatus)(unsafe.Pointer(&r))).TrapCause()
+		return x0
+	}
+	x0 := ((*Windows_WaitStatus)(unsafe.Pointer(&r))).TrapCause()
+	return x0
 }
 
 // Cmsghdr is linux's.
@@ -2409,6 +2436,40 @@ func Windows_FromAPE_ProcAttr(p *ProcAttr) *Windows_ProcAttr {
 	return &t
 }
 
+// Linux_ToAPE_ProcAttr returns p as the ape type.
+func Linux_ToAPE_ProcAttr(p *Linux_ProcAttr) *ProcAttr {
+	if p == nil {
+		return nil
+	}
+	return (*ProcAttr)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_ProcAttr returns p as the ape type.
+func Freebsd_ToAPE_ProcAttr(p *Freebsd_ProcAttr) *ProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t ProcAttr
+	t.Dir = (*p).Dir
+	t.Env = (*p).Env
+	t.Files = (*p).Files
+	t.Sys = (*SysProcAttr)(unsafe.Pointer((*p).Sys))
+	return &t
+}
+
+// Windows_ToAPE_ProcAttr returns p as the ape type.
+func Windows_ToAPE_ProcAttr(p *Windows_ProcAttr) *ProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t ProcAttr
+	t.Dir = (*p).Dir
+	t.Env = (*p).Env
+	t.Files = (*p).Files
+	t.Sys = (*SysProcAttr)(unsafe.Pointer((*p).Sys))
+	return &t
+}
+
 // PtraceRegs is linux's.
 type PtraceRegs struct {
 	R15      uint64
@@ -2476,6 +2537,36 @@ func Windows_FromAPE_RawSockaddr(p *RawSockaddr) *Windows_RawSockaddr {
 	return &t
 }
 
+// Linux_ToAPE_RawSockaddr returns p as the ape type.
+func Linux_ToAPE_RawSockaddr(p *Linux_RawSockaddr) *RawSockaddr {
+	if p == nil {
+		return nil
+	}
+	return (*RawSockaddr)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_RawSockaddr returns p as the ape type.
+func Freebsd_ToAPE_RawSockaddr(p *Freebsd_RawSockaddr) *RawSockaddr {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddr
+	t.Family = uint16((*p).Family)
+	t.Data = (*p).Data
+	return &t
+}
+
+// Windows_ToAPE_RawSockaddr returns p as the ape type.
+func Windows_ToAPE_RawSockaddr(p *Windows_RawSockaddr) *RawSockaddr {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddr
+	t.Family = (*p).Family
+	t.Data = (*p).Data
+	return &t
+}
+
 // RawSockaddrAny is linux's. Functions convert other hosts' field by field.
 type RawSockaddrAny struct {
 	Addr RawSockaddr
@@ -2508,6 +2599,38 @@ func Windows_FromAPE_RawSockaddrAny(p *RawSockaddrAny) *Windows_RawSockaddrAny {
 		return nil
 	}
 	var t Windows_RawSockaddrAny
+	t.Addr.Family = (*p).Addr.Family
+	t.Addr.Data = (*p).Addr.Data
+	copy(t.Pad[:], (*p).Pad[:])
+	return &t
+}
+
+// Linux_ToAPE_RawSockaddrAny returns p as the ape type.
+func Linux_ToAPE_RawSockaddrAny(p *Linux_RawSockaddrAny) *RawSockaddrAny {
+	if p == nil {
+		return nil
+	}
+	return (*RawSockaddrAny)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_RawSockaddrAny returns p as the ape type.
+func Freebsd_ToAPE_RawSockaddrAny(p *Freebsd_RawSockaddrAny) *RawSockaddrAny {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrAny
+	t.Addr.Family = uint16((*p).Addr.Family)
+	t.Addr.Data = (*p).Addr.Data
+	copy(t.Pad[:], (*p).Pad[:])
+	return &t
+}
+
+// Windows_ToAPE_RawSockaddrAny returns p as the ape type.
+func Windows_ToAPE_RawSockaddrAny(p *Windows_RawSockaddrAny) *RawSockaddrAny {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrAny
 	t.Addr.Family = (*p).Addr.Family
 	t.Addr.Data = (*p).Addr.Data
 	copy(t.Pad[:], (*p).Pad[:])
@@ -2558,6 +2681,42 @@ func Windows_FromAPE_RawSockaddrInet4(p *RawSockaddrInet4) *Windows_RawSockaddrI
 	return &t
 }
 
+// Linux_ToAPE_RawSockaddrInet4 returns p as the ape type.
+func Linux_ToAPE_RawSockaddrInet4(p *Linux_RawSockaddrInet4) *RawSockaddrInet4 {
+	if p == nil {
+		return nil
+	}
+	return (*RawSockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_RawSockaddrInet4 returns p as the ape type.
+func Freebsd_ToAPE_RawSockaddrInet4(p *Freebsd_RawSockaddrInet4) *RawSockaddrInet4 {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrInet4
+	t.Family = uint16((*p).Family)
+	t.Port = (*p).Port
+	t.Addr = (*p).Addr
+	for i1 := 0; i1 < 8; i1++ {
+		t.Zero[i1] = uint8((*p).Zero[i1])
+	}
+	return &t
+}
+
+// Windows_ToAPE_RawSockaddrInet4 returns p as the ape type.
+func Windows_ToAPE_RawSockaddrInet4(p *Windows_RawSockaddrInet4) *RawSockaddrInet4 {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrInet4
+	t.Family = (*p).Family
+	t.Port = (*p).Port
+	t.Addr = (*p).Addr
+	t.Zero = (*p).Zero
+	return &t
+}
+
 // RawSockaddrInet6 is linux's. Functions convert other hosts' field by field.
 type RawSockaddrInet6 struct {
 	Family   uint16
@@ -2595,6 +2754,42 @@ func Windows_FromAPE_RawSockaddrInet6(p *RawSockaddrInet6) *Windows_RawSockaddrI
 		return nil
 	}
 	var t Windows_RawSockaddrInet6
+	t.Family = (*p).Family
+	t.Port = (*p).Port
+	t.Flowinfo = (*p).Flowinfo
+	t.Addr = (*p).Addr
+	t.Scope_id = (*p).Scope_id
+	return &t
+}
+
+// Linux_ToAPE_RawSockaddrInet6 returns p as the ape type.
+func Linux_ToAPE_RawSockaddrInet6(p *Linux_RawSockaddrInet6) *RawSockaddrInet6 {
+	if p == nil {
+		return nil
+	}
+	return (*RawSockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_RawSockaddrInet6 returns p as the ape type.
+func Freebsd_ToAPE_RawSockaddrInet6(p *Freebsd_RawSockaddrInet6) *RawSockaddrInet6 {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrInet6
+	t.Family = uint16((*p).Family)
+	t.Port = (*p).Port
+	t.Flowinfo = (*p).Flowinfo
+	t.Addr = (*p).Addr
+	t.Scope_id = (*p).Scope_id
+	return &t
+}
+
+// Windows_ToAPE_RawSockaddrInet6 returns p as the ape type.
+func Windows_ToAPE_RawSockaddrInet6(p *Windows_RawSockaddrInet6) *RawSockaddrInet6 {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrInet6
 	t.Family = (*p).Family
 	t.Port = (*p).Port
 	t.Flowinfo = (*p).Flowinfo
@@ -2653,6 +2848,36 @@ func Windows_FromAPE_RawSockaddrUnix(p *RawSockaddrUnix) *Windows_RawSockaddrUni
 		return nil
 	}
 	var t Windows_RawSockaddrUnix
+	t.Family = (*p).Family
+	t.Path = (*p).Path
+	return &t
+}
+
+// Linux_ToAPE_RawSockaddrUnix returns p as the ape type.
+func Linux_ToAPE_RawSockaddrUnix(p *Linux_RawSockaddrUnix) *RawSockaddrUnix {
+	if p == nil {
+		return nil
+	}
+	return (*RawSockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_RawSockaddrUnix returns p as the ape type.
+func Freebsd_ToAPE_RawSockaddrUnix(p *Freebsd_RawSockaddrUnix) *RawSockaddrUnix {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrUnix
+	t.Family = uint16((*p).Family)
+	copy(t.Path[:], (*p).Path[:])
+	return &t
+}
+
+// Windows_ToAPE_RawSockaddrUnix returns p as the ape type.
+func Windows_ToAPE_RawSockaddrUnix(p *Windows_RawSockaddrUnix) *RawSockaddrUnix {
+	if p == nil {
+		return nil
+	}
+	var t RawSockaddrUnix
 	t.Family = (*p).Family
 	t.Path = (*p).Path
 	return &t
@@ -2759,6 +2984,51 @@ func Windows_FromAPE_Rusage(p *Rusage) *Windows_Rusage {
 	return &t
 }
 
+// Linux_ToAPE_Rusage returns p as the ape type.
+func Linux_ToAPE_Rusage(p *Linux_Rusage) *Rusage {
+	if p == nil {
+		return nil
+	}
+	return (*Rusage)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_Rusage returns p as the ape type.
+func Freebsd_ToAPE_Rusage(p *Freebsd_Rusage) *Rusage {
+	if p == nil {
+		return nil
+	}
+	var t Rusage
+	t.Utime.Sec = (*p).Utime.Sec
+	t.Utime.Usec = (*p).Utime.Usec
+	t.Stime.Sec = (*p).Stime.Sec
+	t.Stime.Usec = (*p).Stime.Usec
+	t.Maxrss = (*p).Maxrss
+	t.Ixrss = (*p).Ixrss
+	t.Idrss = (*p).Idrss
+	t.Isrss = (*p).Isrss
+	t.Minflt = (*p).Minflt
+	t.Majflt = (*p).Majflt
+	t.Nswap = (*p).Nswap
+	t.Inblock = (*p).Inblock
+	t.Oublock = (*p).Oublock
+	t.Msgsnd = (*p).Msgsnd
+	t.Msgrcv = (*p).Msgrcv
+	t.Nsignals = (*p).Nsignals
+	t.Nvcsw = (*p).Nvcsw
+	t.Nivcsw = (*p).Nivcsw
+	return &t
+}
+
+// Windows_ToAPE_Rusage returns p as the ape type.
+func Windows_ToAPE_Rusage(p *Windows_Rusage) *Rusage {
+	if p == nil {
+		return nil
+	}
+	var t Rusage
+
+	return &t
+}
+
 // SockFilter is linux's.
 type SockFilter struct {
 	Code uint16
@@ -2781,14 +3051,122 @@ type Sockaddr struct {
 	windows Windows_Sockaddr
 }
 
+// Linux_FromAPE_Sockaddr returns the host's p.
+func Linux_FromAPE_Sockaddr(p *Sockaddr) *Linux_Sockaddr { return &p.linux }
+
+// Linux_ToAPE_Sockaddr returns p as the ape type.
+func Linux_ToAPE_Sockaddr(p *Linux_Sockaddr) *Sockaddr { return (*Sockaddr)(unsafe.Pointer(p)) }
+
+// Freebsd_FromAPE_Sockaddr returns the host's p.
+func Freebsd_FromAPE_Sockaddr(p *Sockaddr) *Freebsd_Sockaddr { return &p.freebsd }
+
+// Freebsd_ToAPE_Sockaddr returns p as the ape type.
+func Freebsd_ToAPE_Sockaddr(p *Freebsd_Sockaddr) *Sockaddr { return (*Sockaddr)(unsafe.Pointer(p)) }
+
+// Windows_FromAPE_Sockaddr returns the host's p.
+func Windows_FromAPE_Sockaddr(p *Sockaddr) *Windows_Sockaddr { return &p.windows }
+
+// Windows_ToAPE_Sockaddr returns p as the ape type.
+func Windows_ToAPE_Sockaddr(p *Windows_Sockaddr) *Sockaddr { return (*Sockaddr)(unsafe.Pointer(p)) }
+
 // SockaddrInet4 differs between hosts: functions convert it by pointer.
-type SockaddrInet4 struct{ _ [4]uint64 }
+type SockaddrInet4 struct{ _ [0]uint64 }
+
+// Linux_FromAPE_SockaddrInet4 returns the host's p.
+func Linux_FromAPE_SockaddrInet4(p *SockaddrInet4) *Linux_SockaddrInet4 {
+	return (*Linux_SockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Linux_ToAPE_SockaddrInet4 returns p as the ape type.
+func Linux_ToAPE_SockaddrInet4(p *Linux_SockaddrInet4) *SockaddrInet4 {
+	return (*SockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Freebsd_FromAPE_SockaddrInet4 returns the host's p.
+func Freebsd_FromAPE_SockaddrInet4(p *SockaddrInet4) *Freebsd_SockaddrInet4 {
+	return (*Freebsd_SockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_SockaddrInet4 returns p as the ape type.
+func Freebsd_ToAPE_SockaddrInet4(p *Freebsd_SockaddrInet4) *SockaddrInet4 {
+	return (*SockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Windows_FromAPE_SockaddrInet4 returns the host's p.
+func Windows_FromAPE_SockaddrInet4(p *SockaddrInet4) *Windows_SockaddrInet4 {
+	return (*Windows_SockaddrInet4)(unsafe.Pointer(p))
+}
+
+// Windows_ToAPE_SockaddrInet4 returns p as the ape type.
+func Windows_ToAPE_SockaddrInet4(p *Windows_SockaddrInet4) *SockaddrInet4 {
+	return (*SockaddrInet4)(unsafe.Pointer(p))
+}
 
 // SockaddrInet6 differs between hosts: functions convert it by pointer.
-type SockaddrInet6 struct{ _ [7]uint64 }
+type SockaddrInet6 struct{ _ [0]uint64 }
+
+// Linux_FromAPE_SockaddrInet6 returns the host's p.
+func Linux_FromAPE_SockaddrInet6(p *SockaddrInet6) *Linux_SockaddrInet6 {
+	return (*Linux_SockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Linux_ToAPE_SockaddrInet6 returns p as the ape type.
+func Linux_ToAPE_SockaddrInet6(p *Linux_SockaddrInet6) *SockaddrInet6 {
+	return (*SockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Freebsd_FromAPE_SockaddrInet6 returns the host's p.
+func Freebsd_FromAPE_SockaddrInet6(p *SockaddrInet6) *Freebsd_SockaddrInet6 {
+	return (*Freebsd_SockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_SockaddrInet6 returns p as the ape type.
+func Freebsd_ToAPE_SockaddrInet6(p *Freebsd_SockaddrInet6) *SockaddrInet6 {
+	return (*SockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Windows_FromAPE_SockaddrInet6 returns the host's p.
+func Windows_FromAPE_SockaddrInet6(p *SockaddrInet6) *Windows_SockaddrInet6 {
+	return (*Windows_SockaddrInet6)(unsafe.Pointer(p))
+}
+
+// Windows_ToAPE_SockaddrInet6 returns p as the ape type.
+func Windows_ToAPE_SockaddrInet6(p *Windows_SockaddrInet6) *SockaddrInet6 {
+	return (*SockaddrInet6)(unsafe.Pointer(p))
+}
 
 // SockaddrUnix differs between hosts: functions convert it by pointer.
-type SockaddrUnix struct{ _ [17]uint64 }
+type SockaddrUnix struct{ _ [0]uint64 }
+
+// Linux_FromAPE_SockaddrUnix returns the host's p.
+func Linux_FromAPE_SockaddrUnix(p *SockaddrUnix) *Linux_SockaddrUnix {
+	return (*Linux_SockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Linux_ToAPE_SockaddrUnix returns p as the ape type.
+func Linux_ToAPE_SockaddrUnix(p *Linux_SockaddrUnix) *SockaddrUnix {
+	return (*SockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Freebsd_FromAPE_SockaddrUnix returns the host's p.
+func Freebsd_FromAPE_SockaddrUnix(p *SockaddrUnix) *Freebsd_SockaddrUnix {
+	return (*Freebsd_SockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_SockaddrUnix returns p as the ape type.
+func Freebsd_ToAPE_SockaddrUnix(p *Freebsd_SockaddrUnix) *SockaddrUnix {
+	return (*SockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Windows_FromAPE_SockaddrUnix returns the host's p.
+func Windows_FromAPE_SockaddrUnix(p *SockaddrUnix) *Windows_SockaddrUnix {
+	return (*Windows_SockaddrUnix)(unsafe.Pointer(p))
+}
+
+// Windows_ToAPE_SockaddrUnix returns p as the ape type.
+func Windows_ToAPE_SockaddrUnix(p *Windows_SockaddrUnix) *SockaddrUnix {
+	return (*SockaddrUnix)(unsafe.Pointer(p))
+}
 
 // SocketControlMessage is linux's.
 type SocketControlMessage struct {
@@ -2889,6 +3267,44 @@ func Windows_FromAPE_SysProcAttr(p *SysProcAttr) *Windows_SysProcAttr {
 		return nil
 	}
 	var t Windows_SysProcAttr
+
+	return &t
+}
+
+// Linux_ToAPE_SysProcAttr returns p as the ape type.
+func Linux_ToAPE_SysProcAttr(p *Linux_SysProcAttr) *SysProcAttr {
+	if p == nil {
+		return nil
+	}
+	return (*SysProcAttr)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_SysProcAttr returns p as the ape type.
+func Freebsd_ToAPE_SysProcAttr(p *Freebsd_SysProcAttr) *SysProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t SysProcAttr
+	t.Chroot = (*p).Chroot
+	t.Credential = (*Credential)(unsafe.Pointer((*p).Credential))
+	t.Ptrace = (*p).Ptrace
+	t.Setsid = (*p).Setsid
+	t.Setpgid = (*p).Setpgid
+	t.Setctty = (*p).Setctty
+	t.Noctty = (*p).Noctty
+	t.Ctty = (*p).Ctty
+	t.Foreground = (*p).Foreground
+	t.Pgid = (*p).Pgid
+	t.Pdeathsig = (*p).Pdeathsig
+	return &t
+}
+
+// Windows_ToAPE_SysProcAttr returns p as the ape type.
+func Windows_ToAPE_SysProcAttr(p *Windows_SysProcAttr) *SysProcAttr {
+	if p == nil {
+		return nil
+	}
+	var t SysProcAttr
 
 	return &t
 }
@@ -3004,6 +3420,36 @@ func Windows_FromAPE_Timeval(p *Timeval) *Windows_Timeval {
 	return &t
 }
 
+// Linux_ToAPE_Timeval returns p as the ape type.
+func Linux_ToAPE_Timeval(p *Linux_Timeval) *Timeval {
+	if p == nil {
+		return nil
+	}
+	return (*Timeval)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_Timeval returns p as the ape type.
+func Freebsd_ToAPE_Timeval(p *Freebsd_Timeval) *Timeval {
+	if p == nil {
+		return nil
+	}
+	var t Timeval
+	t.Sec = (*p).Sec
+	t.Usec = (*p).Usec
+	return &t
+}
+
+// Windows_ToAPE_Timeval returns p as the ape type.
+func Windows_ToAPE_Timeval(p *Windows_Timeval) *Timeval {
+	if p == nil {
+		return nil
+	}
+	var t Timeval
+	t.Sec = int64((*p).Sec)
+	t.Usec = int64((*p).Usec)
+	return &t
+}
+
 // Timex is linux's.
 type Timex struct {
 	Modes     uint32
@@ -3073,8 +3519,36 @@ type Utsname struct {
 	Domainname [65]int8
 }
 
-// WaitStatus is linux's. Functions convert other hosts' field by field.
-type WaitStatus uint32
+// WaitStatus differs between hosts: functions convert it by pointer.
+type WaitStatus struct{ _ [0]uint32 }
+
+// Linux_FromAPE_WaitStatus returns the host's p.
+func Linux_FromAPE_WaitStatus(p *WaitStatus) *Linux_WaitStatus {
+	return (*Linux_WaitStatus)(unsafe.Pointer(p))
+}
+
+// Linux_ToAPE_WaitStatus returns p as the ape type.
+func Linux_ToAPE_WaitStatus(p *Linux_WaitStatus) *WaitStatus { return (*WaitStatus)(unsafe.Pointer(p)) }
+
+// Freebsd_FromAPE_WaitStatus returns the host's p.
+func Freebsd_FromAPE_WaitStatus(p *WaitStatus) *Freebsd_WaitStatus {
+	return (*Freebsd_WaitStatus)(unsafe.Pointer(p))
+}
+
+// Freebsd_ToAPE_WaitStatus returns p as the ape type.
+func Freebsd_ToAPE_WaitStatus(p *Freebsd_WaitStatus) *WaitStatus {
+	return (*WaitStatus)(unsafe.Pointer(p))
+}
+
+// Windows_FromAPE_WaitStatus returns the host's p.
+func Windows_FromAPE_WaitStatus(p *WaitStatus) *Windows_WaitStatus {
+	return (*Windows_WaitStatus)(unsafe.Pointer(p))
+}
+
+// Windows_ToAPE_WaitStatus returns p as the ape type.
+func Windows_ToAPE_WaitStatus(p *Windows_WaitStatus) *WaitStatus {
+	return (*WaitStatus)(unsafe.Pointer(p))
+}
 
 func init() {
 	if apehost == apeLinux {

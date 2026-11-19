@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line netpoll_kqueue_event.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line netpoll_kqueue_event.go:6:1*/
 package runtime
 
 // Magic number of identifier used for EVFILT_USER.

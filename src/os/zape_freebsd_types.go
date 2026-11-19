@@ -2,54 +2,17 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line types.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line types.go:6:1*/
 package os
 
 import (
-	"io/fs"
-	"syscall"
-)
-
-// Getpagesize returns the underlying system's memory page size.
-func Freebsd_Getpagesize() int { return syscall.Freebsd_Getpagesize() }
-
-// File represents an open file descriptor.
-//
-// The methods of File are safe for concurrent use.
-type Freebsd_File struct {
-	*freebsd_file // os specific
-}
-
-// The defined file mode bits are the most significant bits of the [FileMode].
-// The nine least-significant bits are the standard Unix rwxrwxrwx permissions.
-// The values of these bits should be considered part of the public API and
-// may be used in wire protocols or disk representations: they must not be
-// changed, although new bits might be added.
-const (
-	// The single letters are the abbreviations
-	// used by the String method's formatting.
-	Freebsd_ModeDir        = fs.ModeDir        // d: is a directory
-	Freebsd_ModeAppend     = fs.ModeAppend     // a: append-only
-	Freebsd_ModeExclusive  = fs.ModeExclusive  // l: exclusive use
-	Freebsd_ModeTemporary  = fs.ModeTemporary  // T: temporary file; Plan 9 only
-	Freebsd_ModeSymlink    = fs.ModeSymlink    // L: symbolic link
-	Freebsd_ModeDevice     = fs.ModeDevice     // D: device file
-	Freebsd_ModeNamedPipe  = fs.ModeNamedPipe  // p: named pipe (FIFO)
-	Freebsd_ModeSocket     = fs.ModeSocket     // S: Unix domain socket
-	Freebsd_ModeSetuid     = fs.ModeSetuid     // u: setuid
-	Freebsd_ModeSetgid     = fs.ModeSetgid     // g: setgid
-	Freebsd_ModeCharDevice = fs.ModeCharDevice // c: Unix character device, when ModeDevice is set
-	Freebsd_ModeSticky     = fs.ModeSticky     // t: sticky
-	Freebsd_ModeIrregular  = fs.ModeIrregular  // ?: non-regular file; nothing else is known about this file
-
-	// Mask for the type bits. For regular files, none will be set.
-	Freebsd_ModeType = fs.ModeType
-
-	Freebsd_ModePerm = fs.ModePerm // Unix permission bits, 0o777
-)
+	
+	
+)/*line types.go:15:56*//*line types.go:22:2*//*line types.go:25:28*//*line types.go:32:28*//*line types.go:60:2*/
 
 func (fs *freebsd_fileStat) Name() string { return fs.name }
 func (fs *freebsd_fileStat) IsDir() bool  { return fs.Mode().IsDir() }

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line root_linux.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ package x509
 
 import "internal/goos"
 
-var _ = goos.GOOS
+var _ = goos.GOOS/*line root_linux.go:7:23*/
 
 // Possible certificate files; stop after finding one.
 var linux_certFiles = []string{
@@ -30,7 +30,7 @@ var linux_certDirectories = []string{
 
 func linux_init0() {
 	if 0 == 1 {
-		linux_certDirectories = append(linux_certDirectories,
+		certDirectories = append(certDirectories,
 			"/system/etc/security/cacerts",    // Android system roots
 			"/data/misc/keychain/certs-added", // User trusted CA folder
 		)

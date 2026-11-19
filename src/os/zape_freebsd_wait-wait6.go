@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line wait_wait6.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line wait_wait6.go:6:1*/
 package os
 
 import (
@@ -13,13 +14,13 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line wait_wait6.go:12:2*/
 
 // blockUntilWaitable attempts to block until a call to p.Wait will
 // succeed immediately, and reports whether it has done so.
 // It does not actually call p.Wait.
 func (p *Process) freebsd_blockUntilWaitable() (bool, error) {
-	err := freebsd_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		_, errno := freebsd_wait6(freebsd__P_PID, p.Pid, syscall.Freebsd_WEXITED|syscall.Freebsd_WNOWAIT)
 		if errno != 0 {
 			return errno

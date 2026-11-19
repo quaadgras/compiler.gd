@@ -2,11 +2,13 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line zero_copy_freebsd.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package os
+
+import "unsafe"/*line zero_copy_freebsd.go:5:11*/
 
 import (
 	"internal/poll"
@@ -15,16 +17,16 @@ import (
 
 var freebsd_pollCopyFileRange = poll.Freebsd_CopyFileRange
 
-func (f *Freebsd_File) writeTo(w io.Writer) (written int64, handled bool, err error) {
+func (f *File) freebsd_writeTo(w io.Writer) (written int64, handled bool, err error) {
 	return 0, false, nil
 }
 
-func (f *Freebsd_File) readFrom(r io.Reader) (written int64, handled bool, err error) {
+func (f *File) freebsd_readFrom(r io.Reader) (written int64, handled bool, err error) {
 	// copy_file_range(2) doesn't support destinations opened with
 	// O_APPEND, so don't bother to try zero-copy with these system calls.
 	//
 	// Visit https://man.freebsd.org/cgi/man.cgi?copy_file_range(2)#ERRORS for details.
-	if f.appendMode {
+	if (*freebsd_file)(unsafe.Pointer(f.file)).appendMode {
 		return 0, false, nil
 	}
 
@@ -36,12 +38,12 @@ func (f *Freebsd_File) readFrom(r io.Reader) (written int64, handled bool, err e
 		return 0, true, nil
 	}
 
-	var src *Freebsd_File
+	var src *File
 	switch v := r.(type) {
-	case *Freebsd_File:
+	case *File:
 		src = v
-	case freebsd_fileWithoutWriteTo:
-		src = v.Freebsd_File
+	case fileWithoutWriteTo:
+		src = v.File
 	default:
 		return 0, false, nil
 	}
@@ -52,7 +54,7 @@ func (f *Freebsd_File) readFrom(r io.Reader) (written int64, handled bool, err e
 		return 0, false, nil
 	}
 
-	written, handled, err = freebsd_pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = freebsd_pollCopyFileRange(&(*freebsd_file)(unsafe.Pointer(f.file)).pfd, &(*freebsd_file)(unsafe.Pointer(src.file)).pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}

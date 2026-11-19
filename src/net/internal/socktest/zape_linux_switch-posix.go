@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line switch_posix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line switch_posix.go:6:1*/
 package socktest
 
 import (
@@ -24,37 +25,4 @@ func linux_familyString(family int) string {
 	default:
 		return fmt.Sprintf("%d", family)
 	}
-}
-
-func linux_typeString(sotype int) string {
-	var s string
-	switch sotype & 0xff {
-	case syscall.Linux_SOCK_STREAM:
-		s = "stream"
-	case syscall.Linux_SOCK_DGRAM:
-		s = "datagram"
-	case syscall.Linux_SOCK_RAW:
-		s = "raw"
-	case syscall.Linux_SOCK_SEQPACKET:
-		s = "seqpacket"
-	default:
-		s = fmt.Sprintf("%d", sotype&0xff)
-	}
-	if flags := uint(sotype) & ^uint(0xff); flags != 0 {
-		s += fmt.Sprintf("|%#x", flags)
-	}
-	return s
-}
-
-func linux_protocolString(proto int) string {
-	switch proto {
-	case 0:
-		return "default"
-	case syscall.Linux_IPPROTO_TCP:
-		return "tcp"
-	case syscall.Linux_IPPROTO_UDP:
-		return "udp"
-	default:
-		return fmt.Sprintf("%d", proto)
-	}
-}
+}/*line switch_posix.go:45:2*//*line switch_posix.go:58:2*/

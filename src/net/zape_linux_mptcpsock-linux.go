@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line mptcpsock_linux.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -61,9 +61,9 @@ func linux_initMPTCPavailable() {
 	linux_hasSOLMPTCP = unix.KernelVersionGE(5, 16)
 }
 
-func (sd *linux_sysDialer) dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*Linux_TCPConn, error) {
+func (sd *sysDialer) linux_dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConn, error) {
 	if linux_supportsMultipathTCP() {
-		if conn, err := sd.doDialTCPProto(ctx, laddr, raddr, linux__IPPROTO_MPTCP); err == nil {
+		if conn, err := sd.linux_doDialTCPProto(ctx, laddr, raddr, linux__IPPROTO_MPTCP); err == nil {
 			return conn, nil
 		}
 	}
@@ -74,10 +74,10 @@ func (sd *linux_sysDialer) dialMPTCP(ctx context.Context, laddr, raddr *TCPAddr)
 	// Possible MPTCP specific error: ENOPROTOOPT (sysctl net.mptcp.enabled=0)
 	// But just in case MPTCP is blocked differently (SELinux, etc.), just
 	// retry with "plain" TCP.
-	return sd.dialTCP(ctx, laddr, raddr)
+	return sd.linux_dialTCP(ctx, laddr, raddr)
 }
 
-func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*Linux_TCPListener, error) {
+func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*TCPListener, error) {
 	if linux_supportsMultipathTCP() {
 		if dial, err := sl.linux_listenTCPProto(ctx, laddr, linux__IPPROTO_MPTCP); err == nil {
 			return dial, nil
@@ -90,7 +90,7 @@ func (sl *sysListener) linux_listenMPTCP(ctx context.Context, laddr *TCPAddr) (*
 	// Possible MPTCP specific error: ENOPROTOOPT (sysctl net.mptcp.enabled=0)
 	// But just in case MPTCP is blocked differently (SELinux, etc.), just
 	// retry with "plain" TCP.
-	return sl.linux_listenTCP(ctx, laddr)
+	return sl.listenTCP(ctx, laddr)
 }
 
 // hasFallenBack reports whether the MPTCP connection has fallen back to "plain"

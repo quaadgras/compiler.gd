@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line at_fstatat.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line at_fstatat.go:6:1*/
 package unix
 
 import (
@@ -15,7 +16,7 @@ import (
 
 func Linux_Fstatat(dirfd int, path string, stat *syscall.Linux_Stat_t, flags int) error {
 	var p *byte
-	p, err := syscall.Linux_BytePtrFromString(path)
+	p, err := syscall.BytePtrFromString(path)
 	if err != nil {
 		return err
 	}

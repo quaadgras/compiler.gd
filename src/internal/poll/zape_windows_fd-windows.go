@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line fd_windows.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -21,7 +21,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line fd_windows.go:18:2*/
 
 var (
 	windows_initErr error
@@ -31,25 +31,25 @@ var (
 // ifsHandlesOnly returns true if the system only has IFS handles for TCP sockets.
 // See https://support.microsoft.com/kb/2568167 for details.
 var windows_ifsHandlesOnly = func() func() bool {
-	if apehost != apeWindows {
-		return *new(func() bool)
+if apehost != apeWindows {
+return *new(func() bool)
+}
+return /*line fd_windows.go:27:22*/sync.OnceValue(func() bool {
+	protos := [2]int32{syscall.Windows_IPPROTO_TCP, 0}
+	var buf [32]syscall.Windows_WSAProtocolInfo
+	len := uint32(unsafe.Sizeof(buf))
+	n, err := syscall.Windows_WSAEnumProtocols(&protos[0], &buf[0], &len)
+	if err != nil {
+		return false
 	}
-	return sync.OnceValue(func() bool {
-		protos := [2]int32{syscall.Windows_IPPROTO_TCP, 0}
-		var buf [32]syscall.Windows_WSAProtocolInfo
-		len := uint32(unsafe.Sizeof(buf))
-		n, err := syscall.Windows_WSAEnumProtocols(&protos[0], &buf[0], &len)
-		if err != nil {
+	for i := range n {
+		if buf[i].ServiceFlags1&syscall.Windows_XP1_IFS_HANDLES == 0 {
 			return false
 		}
-		for i := range n {
-			if buf[i].ServiceFlags1&syscall.Windows_XP1_IFS_HANDLES == 0 {
-				return false
-			}
-		}
-		return true
-	})
-}()
+	}
+	return true
+})
+}()/*line fd_windows.go:41:3*/
 
 // canSkipCompletionPortOnSuccess returns true if we use FILE_SKIP_COMPLETION_PORT_ON_SUCCESS for the given handle.
 // See https://support.microsoft.com/kb/2568167 for details.
@@ -74,17 +74,17 @@ func windows_canSkipCompletionPortOnSuccess(h syscall.Windows_Handle, isSocket b
 // It is called from the net package at init time to avoid
 // loading ws2_32.dll when net is not used.
 var Windows_InitWSA = func() func() {
-	if apehost != apeWindows {
-		return *new(func())
+if apehost != apeWindows {
+return *new(func())
+}
+return /*line fd_windows.go:65:15*/sync.OnceFunc(func() {
+	var d syscall.Windows_WSAData
+	e := syscall.Windows_WSAStartup(uint32(0x202), &d)
+	if e != nil {
+		windows_initErr = e
 	}
-	return sync.OnceFunc(func() {
-		var d syscall.Windows_WSAData
-		e := syscall.Windows_WSAStartup(uint32(0x202), &d)
-		if e != nil {
-			windows_initErr = e
-		}
-	})
-}()
+})
+}()/*line fd_windows.go:71:3*/
 
 // operation contains superset of data necessary to perform all async IO.
 type windows_operation struct {
@@ -246,7 +246,7 @@ func (fd *Windows_FD) waitIO(o *windows_operation) error {
 		return err
 	}
 	// Wait for our request to complete.
-	err := fd.pd.windows_wait(int(o.mode), fd.isFile)
+	err := fd.pd.wait(int(o.mode), fd.isFile)
 	switch err {
 	case nil:
 		// IO completed successfully.
@@ -258,7 +258,7 @@ func (fd *Windows_FD) waitIO(o *windows_operation) error {
 			// TODO(brainman): maybe do something else, but panic.
 			panic(err)
 		}
-		fd.pd.windows_waitCanceled(int(o.mode))
+		fd.pd.waitCanceled(int(o.mode))
 	default:
 		// No other error is expected.
 		panic("unexpected runtime.netpoll error: " + err.Error())
@@ -276,7 +276,7 @@ func (fd *Windows_FD) execIO(
 	pinPtrs ...any,
 ) (int, error) {
 	// Notify runtime netpoll about starting IO.
-	err := fd.pd.windows_prepare(mode, fd.isFile)
+	err := fd.pd.prepare(mode, fd.isFile)
 	if err != nil {
 		return 0, err
 	}
@@ -562,7 +562,7 @@ func (fd *Windows_FD) destroy() error {
 	}
 	// Poller may want to unregister fd in readiness notification mechanism,
 	// so this must be executed before fd.CloseFunc.
-	fd.pd.windows_close()
+	fd.pd.close()
 	var err error
 	switch fd.kind {
 	case windows_kindNet:
@@ -572,14 +572,14 @@ func (fd *Windows_FD) destroy() error {
 		err = syscall.Windows_CloseHandle(fd.Sysfd)
 	}
 	fd.Sysfd = syscall.Windows_InvalidHandle
-	windows_runtime_Semrelease(&fd.csema)
+	runtime_Semrelease(&fd.csema)
 	return err
 }
 
 // Close closes the FD. The underlying file descriptor is closed by
 // the destroy method when there are no remaining references.
 func (fd *Windows_FD) Close() error {
-	if !fd.fdmu.windows_increfAndClose() {
+	if !fd.fdmu.increfAndClose() {
 		return errClosing(fd.isFile)
 	}
 
@@ -587,11 +587,11 @@ func (fd *Windows_FD) Close() error {
 		syscall.Windows_CancelIoEx(fd.Sysfd, nil)
 	}
 	// unblock pending reader and writer
-	fd.pd.windows_evict()
+	fd.pd.evict()
 	err := fd.decref()
 	// Wait until the descriptor is closed. If this was the only
 	// reference, it is already closed.
-	windows_runtime_Semacquire(&fd.csema)
+	runtime_Semacquire(&fd.csema)
 	return err
 }
 

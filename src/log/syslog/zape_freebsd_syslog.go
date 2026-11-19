@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syslog.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line syslog.go:6:1*/
 package syslog
 
 import (
@@ -161,14 +162,14 @@ func (w *Freebsd_Writer) connect() (err error) {
 		}
 	} else {
 		var c net.Conn
-		c, err = net.Freebsd_Dial(w.network, w.raddr)
+		c, err = net.Dial(w.network, w.raddr)
 		if err == nil {
 			w.conn = &freebsd_netConn{
 				conn:  c,
 				local: w.network == "unixgram" || w.network == "unix",
 			}
 			if w.hostname == "" {
-				w.hostname = c.Freebsd_LocalAddr().Freebsd_String()
+				w.hostname = c.LocalAddr().String()
 			}
 		}
 	}
@@ -290,21 +291,21 @@ func (n *freebsd_netConn) writeString(p Freebsd_Priority, hostname, tag, msg, nl
 		// Compared to the network form below, the changes are:
 		//	1. Use time.Stamp instead of time.RFC3339.
 		//	2. Drop the hostname field from the Fprintf.
-		timestamp := time.Freebsd_Now().Freebsd_Format(time.Freebsd_Stamp)
+		timestamp := time.Now().Format(time.Stamp)
 		_, err := fmt.Fprintf(n.conn, "<%d>%s %s[%d]: %s%s",
 			p, timestamp,
-			tag, os.Freebsd_Getpid(), msg, nl)
+			tag, os.Getpid(), msg, nl)
 		return err
 	}
-	timestamp := time.Freebsd_Now().Freebsd_Format(time.Freebsd_RFC3339)
+	timestamp := time.Now().Format(time.RFC3339)
 	_, err := fmt.Fprintf(n.conn, "<%d>%s %s %s[%d]: %s%s",
 		p, timestamp, hostname,
-		tag, os.Freebsd_Getpid(), msg, nl)
+		tag, os.Getpid(), msg, nl)
 	return err
 }
 
 func (n *freebsd_netConn) close() error {
-	return n.conn.Freebsd_Close()
+	return n.conn.Close()
 }
 
 // NewLogger creates a [log.Logger] whose output is written to the

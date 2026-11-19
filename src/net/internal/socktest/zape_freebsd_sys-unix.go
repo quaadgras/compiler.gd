@@ -2,29 +2,32 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line sys_unix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sys_unix.go:6:1*/
 package socktest
+
+import "unsafe"/*line sys_unix.go:7:17*/
 
 import "syscall"
 
 // Socket wraps [syscall.Socket].
-func (sw *Freebsd_Switch) Socket(family, sotype, proto int) (s int, err error) {
-	sw.once.Do(sw.init)
+func (sw *Switch) Freebsd_Socket(family, sotype, proto int) (s int, err error) {
+	sw.once.Do(sw.freebsd_init)
 
-	so := &Status{Cookie: freebsd_cookie(family, sotype, proto)}
+	so := &Status{Cookie: cookie(family, sotype, proto)}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterSocket]
+	f := sw.fltab[FilterSocket]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, err
 	}
 	s, so.Err = syscall.Freebsd_Socket(family, sotype, proto)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Freebsd_Close(s)
 		}
@@ -34,118 +37,118 @@ func (sw *Freebsd_Switch) Socket(family, sotype, proto int) (s int, err error) {
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.freebsd_getLocked(so.Cookie).OpenFailed++
+		sw.stats.getLocked(so.Cookie).OpenFailed++
 		return -1, so.Err
 	}
-	nso := sw.addLocked(s, family, sotype, proto)
-	sw.stats.freebsd_getLocked(nso.Cookie).Opened++
+	nso := sw.freebsd_addLocked(s, family, sotype, proto)
+	sw.stats.getLocked(nso.Cookie).Opened++
 	return s, nil
 }
 
 // Close wraps syscall.Close.
-func (sw *Freebsd_Switch) Close(s int) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Freebsd_Close(s int) (err error) {
+	so := sw.freebsd_sockso(s)
 	if so == nil {
 		return syscall.Freebsd_Close(s)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterClose]
+	f := sw.fltab[FilterClose]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Freebsd_Close(s)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.freebsd_getLocked(so.Cookie).CloseFailed++
+		sw.stats.getLocked(so.Cookie).CloseFailed++
 		return so.Err
 	}
-	delete(sw.sotab, s)
-	sw.stats.freebsd_getLocked(so.Cookie).Closed++
+	delete((*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab))), s)
+	sw.stats.getLocked(so.Cookie).Closed++
 	return nil
 }
 
 // Connect wraps syscall.Connect.
-func (sw *Freebsd_Switch) Connect(s int, sa syscall.Freebsd_Sockaddr) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Freebsd_Connect(s int, sa syscall.Freebsd_Sockaddr) (err error) {
+	so := sw.freebsd_sockso(s)
 	if so == nil {
 		return syscall.Freebsd_Connect(s, sa)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterConnect]
+	f := sw.fltab[FilterConnect]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Freebsd_Connect(s, sa)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.freebsd_getLocked(so.Cookie).ConnectFailed++
+		sw.stats.getLocked(so.Cookie).ConnectFailed++
 		return so.Err
 	}
-	sw.stats.freebsd_getLocked(so.Cookie).Connected++
+	sw.stats.getLocked(so.Cookie).Connected++
 	return nil
 }
 
 // Listen wraps syscall.Listen.
-func (sw *Freebsd_Switch) Listen(s, backlog int) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Freebsd_Listen(s, backlog int) (err error) {
+	so := sw.freebsd_sockso(s)
 	if so == nil {
 		return syscall.Freebsd_Listen(s, backlog)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterListen]
+	f := sw.fltab[FilterListen]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Freebsd_Listen(s, backlog)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.freebsd_getLocked(so.Cookie).ListenFailed++
+		sw.stats.getLocked(so.Cookie).ListenFailed++
 		return so.Err
 	}
-	sw.stats.freebsd_getLocked(so.Cookie).Listened++
+	sw.stats.getLocked(so.Cookie).Listened++
 	return nil
 }
 
 // Accept wraps syscall.Accept.
-func (sw *Freebsd_Switch) Accept(s int) (ns int, sa syscall.Freebsd_Sockaddr, err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Freebsd_Accept(s int) (ns int, sa syscall.Freebsd_Sockaddr, err error) {
+	so := sw.freebsd_sockso(s)
 	if so == nil {
 		return syscall.Freebsd_Accept(s)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterAccept]
+	f := sw.fltab[FilterAccept]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, nil, err
 	}
 	ns, sa, so.Err = syscall.Freebsd_Accept(s)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Freebsd_Close(ns)
 		}
@@ -155,31 +158,31 @@ func (sw *Freebsd_Switch) Accept(s int) (ns int, sa syscall.Freebsd_Sockaddr, er
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.freebsd_getLocked(so.Cookie).AcceptFailed++
+		sw.stats.getLocked(so.Cookie).AcceptFailed++
 		return -1, nil, so.Err
 	}
-	nso := sw.addLocked(ns, so.Cookie.Freebsd_Family(), so.Cookie.Freebsd_Type(), so.Cookie.Freebsd_Protocol())
-	sw.stats.freebsd_getLocked(nso.Cookie).Accepted++
+	nso := sw.freebsd_addLocked(ns, so.Cookie.Family(), so.Cookie.Type(), so.Cookie.Protocol())
+	sw.stats.getLocked(nso.Cookie).Accepted++
 	return ns, sa, nil
 }
 
 // GetsockoptInt wraps syscall.GetsockoptInt.
-func (sw *Freebsd_Switch) GetsockoptInt(s, level, opt int) (soerr int, err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Freebsd_GetsockoptInt(s, level, opt int) (soerr int, err error) {
+	so := sw.freebsd_sockso(s)
 	if so == nil {
 		return syscall.Freebsd_GetsockoptInt(s, level, opt)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Freebsd_FilterGetsockoptInt]
+	f := sw.fltab[FilterGetsockoptInt]
 	sw.fmu.RUnlock()
 
-	af, err := f.freebsd_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, err
 	}
 	soerr, so.Err = syscall.Freebsd_GetsockoptInt(s, level, opt)
 	so.SocketErr = syscall.Errno(soerr)
-	if err = af.freebsd_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return -1, err
 	}
 
@@ -188,7 +191,7 @@ func (sw *Freebsd_Switch) GetsockoptInt(s, level, opt int) (soerr int, err error
 	}
 	if opt == syscall.Freebsd_SO_ERROR && (so.SocketErr == syscall.Errno(0) || so.SocketErr == syscall.Freebsd_EISCONN) {
 		sw.smu.Lock()
-		sw.stats.freebsd_getLocked(so.Cookie).Connected++
+		sw.stats.getLocked(so.Cookie).Connected++
 		sw.smu.Unlock()
 	}
 	return soerr, nil

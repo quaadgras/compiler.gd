@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockoptip4_posix_nonlinux.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockoptip4_posix_nonlinux.go:6:1*/
 package net
 
 import (
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockoptip4_posix_nonlinux.go:13:2*/
 
 func freebsd_joinIPv4Group(fd *freebsd_netFD, ifi *Interface, ip IP) error {
 	mreq := &syscall.IPMreq{Multiaddr: [4]byte{ip[0], ip[1], ip[2], ip[3]}}

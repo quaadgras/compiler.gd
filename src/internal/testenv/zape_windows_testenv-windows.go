@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line testenv_windows.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,25 +17,25 @@ import (
 )
 
 var windows_hasSymlink = func() func() (bool, string) {
-	if apehost != apeWindows {
-		return *new(func() (bool, string))
+if apehost != apeWindows {
+return *new(func() (bool, string))
+}
+return /*line testenv_windows.go:15:18*/sync.OnceValues(func() (bool, string) {
+	tmpdir, err := os.MkdirTemp("", "symtest")
+	if err != nil {
+		panic("failed to create temp directory: " + err.Error())
 	}
-	return sync.OnceValues(func() (bool, string) {
-		tmpdir, err := os.Windows_MkdirTemp("", "symtest")
-		if err != nil {
-			panic("failed to create temp directory: " + err.Error())
-		}
-		defer os.RemoveAll(tmpdir)
+	defer os.RemoveAll(tmpdir)
 
-		err = os.Windows_Symlink("target", filepath.Windows_Join(tmpdir, "symlink"))
-		switch {
-		case err == nil:
-			return true, ""
-		case errors.Is(err, syscall.Windows_EWINDOWS):
-			return false, ": symlinks are not supported on your version of Windows"
-		case errors.Is(err, syscall.Windows_ERROR_PRIVILEGE_NOT_HELD):
-			return false, ": you don't have enough privileges to create symlinks"
-		}
-		return false, ""
-	})
-}()
+	err = os.Windows_Symlink("target", filepath.Join(tmpdir, "symlink"))
+	switch {
+	case err == nil:
+		return true, ""
+	case errors.Is(err, syscall.Windows_EWINDOWS):
+		return false, ": symlinks are not supported on your version of Windows"
+	case errors.Is(err, syscall.Windows_ERROR_PRIVILEGE_NOT_HELD):
+		return false, ": you don't have enough privileges to create symlinks"
+	}
+	return false, ""
+})
+}()/*line testenv_windows.go:32:3*/

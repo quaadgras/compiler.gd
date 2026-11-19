@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_windows.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_windows.go:6:1*/
 package os
 
 import (
@@ -19,7 +20,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line root_windows.go:18:2*/
 
 // rootCleanPath uses GetFullPathName to perform lexical path cleaning.
 //
@@ -74,7 +75,7 @@ func windows_rootCleanPath(s string, prefix, suffix []string) (string, error) {
 		s = "."
 	}
 
-	if !filepathlite.Windows_IsLocal(s) {
+	if !filepathlite.IsLocal(s) {
 		return "", errPathEscapes
 	}
 
@@ -87,7 +88,7 @@ func windows_rootCleanPath(s string, prefix, suffix []string) (string, error) {
 type windows_sysfdType = syscall.Windows_Handle
 
 // openRootNolog is OpenRoot.
-func windows_openRootNolog(name string) (*Windows_Root, error) {
+func windows_openRootNolog(name string) (*Root, error) {
 	if name == "" {
 		return nil, &PathError{Op: "open", Path: name, Err: syscall.Windows_ENOENT}
 	}
@@ -101,7 +102,7 @@ func windows_openRootNolog(name string) (*Windows_Root, error) {
 
 // newRoot returns a new Root.
 // If fd is not a directory, it closes it and returns an error.
-func windows_newRoot(fd syscall.Windows_Handle, name string) (*Windows_Root, error) {
+func windows_newRoot(fd syscall.Windows_Handle, name string) (*Root, error) {
 	// Check that this is a directory.
 	//
 	// If we get any errors here, ignore them; worst case we create a Root
@@ -113,28 +114,28 @@ func windows_newRoot(fd syscall.Windows_Handle, name string) (*Windows_Root, err
 		return nil, &PathError{Op: "open", Path: name, Err: errors.New("not a directory")}
 	}
 
-	r := &Windows_Root{&windows_root{
+	r := &Root{(*root)(unsafe.Pointer(&windows_root{
 		fd:   fd,
 		name: name,
-	}}
-	runtime.SetFinalizer(r.root, (*windows_root).Close)
+	}))}
+	runtime.SetFinalizer((*(**windows_root)(unsafe.Pointer(&r.root))), (*windows_root).Close)
 	return r, nil
 }
 
 // openRootInRoot is Root.OpenRoot.
-func windows_openRootInRoot(r *Windows_Root, name string) (*Windows_Root, error) {
+func windows_openRootInRoot(r *Root, name string) (*Root, error) {
 	fd, err := windows_doInRoot(r, name, 0, nil, func(parent syscall.Windows_Handle, name string, endsInSlash bool) (syscall.Windows_Handle, error) {
 		return windows_rootOpenDir(parent, name)
 	})
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	return windows_newRoot(fd, windows_joinPath(r.Name(), name))
+	return windows_newRoot(fd, joinPath(r.Name(), name))
 }
 
 // rootOpenFileNolog is Root.OpenFile.
-func windows_rootOpenFileNolog(root *Windows_Root, name string, flag int, perm FileMode) (*Windows_File, error) {
-	fd, err := windows_doInRoot(root, name, windows_doInRootNoHandleTerminalSlash, nil, func(parent syscall.Windows_Handle, name string, endsInSlash bool) (syscall.Windows_Handle, error) {
+func windows_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
+	fd, err := windows_doInRoot(root, name, doInRootNoHandleTerminalSlash, nil, func(parent syscall.Windows_Handle, name string, endsInSlash bool) (syscall.Windows_Handle, error) {
 		if endsInSlash {
 			flag |= windows.Windows_O_DIRECTORY
 		}
@@ -144,11 +145,11 @@ func windows_rootOpenFileNolog(root *Windows_Root, name string, flag int, perm F
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
 	nonblocking := flag&windows.Windows_O_FILE_FLAG_OVERLAPPED != 0
-	return windows_newFile(fd, windows_joinPath(root.Name(), name), windows_kindOpenFile, nonblocking), nil
+	return windows_newFile(fd, joinPath(root.Name(), name), windows_kindOpenFile, nonblocking), nil
 }
 
 func windows_openat(dirfd syscall.Windows_Handle, name string, flag uint64, perm FileMode) (syscall.Windows_Handle, error) {
-	h, err := windows.Windows_Openat(dirfd, name, flag|syscall.Windows_O_CLOEXEC|windows.Windows_O_NOFOLLOW_ANY, windows_syscallMode(perm))
+	h, err := windows.Windows_Openat(dirfd, name, flag|syscall.Windows_O_CLOEXEC|windows.Windows_O_NOFOLLOW_ANY, syscallMode(perm))
 	if err == syscall.Windows_ELOOP || err == syscall.Windows_ENOTDIR {
 		if link, err := windows_readReparseLinkAt(dirfd, name); err == nil {
 			return syscall.Windows_InvalidHandle, errSymlink(link)
@@ -212,7 +213,7 @@ func windows_rootOpenDir(parent syscall.Windows_Handle, name string) (syscall.Wi
 	return h, err
 }
 
-func windows_rootStat(r *Windows_Root, name string, lstat bool) (FileInfo, error) {
+func windows_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
 	var flags uint
 	if lstat {
 		// Follow symlinks in the last path component when the path
@@ -220,7 +221,7 @@ func windows_rootStat(r *Windows_Root, name string, lstat bool) (FileInfo, error
 		//
 		// This is not the usual behavior for Windows path resolution,
 		// but empirically os.Lstat behaves this way.
-		flags = windows_doInRootAlwaysResolveTerminalSlash
+		flags = doInRootAlwaysResolveTerminalSlash
 	}
 	fi, err := windows_doInRoot(r, name, flags, nil, func(parent syscall.Windows_Handle, n string, endsInSlash bool) (FileInfo, error) {
 		fd, err := windows_openat(parent, n, windows.Windows_O_FILE_FLAG_OPEN_REPARSE_POINT, 0)
@@ -247,7 +248,7 @@ func windows_rootStat(r *Windows_Root, name string, lstat bool) (FileInfo, error
 	return fi, nil
 }
 
-func windows_rootSymlink(r *Windows_Root, oldname, newname string) error {
+func windows_rootSymlink(r *Root, oldname, newname string) error {
 	if oldname == "" {
 		return syscall.Windows_EINVAL
 	}
@@ -258,7 +259,7 @@ func windows_rootSymlink(r *Windows_Root, oldname, newname string) error {
 
 	// CreateSymbolicLinkW converts volume-relative paths into absolute ones.
 	// Do the same.
-	if filepathlite.Windows_VolumeNameLen(oldname) > 0 && !filepathlite.Windows_IsAbs(oldname) {
+	if filepathlite.VolumeNameLen(oldname) > 0 && !filepathlite.Windows_IsAbs(oldname) {
 		p, err := syscall.Windows_FullPath(oldname)
 		if err == nil {
 			oldname = p
@@ -268,7 +269,7 @@ func windows_rootSymlink(r *Windows_Root, oldname, newname string) error {
 	// If oldname can be resolved to a directory in the root, create a directory link.
 	// Otherwise, create a file link.
 	var flags windows.Windows_SymlinkatFlags
-	if filepathlite.Windows_VolumeNameLen(oldname) == 0 && !Windows_IsPathSeparator(oldname[0]) {
+	if filepathlite.VolumeNameLen(oldname) == 0 && !Windows_IsPathSeparator(oldname[0]) {
 		// oldname is a path relative to the directory containing newname.
 		// Prepend newname's directory to it to make a path relative to the root.
 		// For example, if oldname=old and newname=a\new, destPath=a\old.
@@ -284,7 +285,7 @@ func windows_rootSymlink(r *Windows_Root, oldname, newname string) error {
 
 	// Empirically, CreateSymbolicLinkW appears to set the relative flag iff
 	// the target does not contain a volume name.
-	if filepathlite.Windows_VolumeNameLen(oldname) == 0 {
+	if filepathlite.VolumeNameLen(oldname) == 0 {
 		flags |= windows.Windows_SYMLINKAT_RELATIVE
 	}
 
@@ -350,7 +351,7 @@ func windows_lchownat(parent syscall.Windows_Handle, name string, uid, gid int) 
 }
 
 func windows_mkdirat(dirfd syscall.Windows_Handle, name string, perm FileMode) error {
-	return windows.Windows_Mkdirat(dirfd, name, windows_syscallMode(perm))
+	return windows.Windows_Mkdirat(dirfd, name, syscallMode(perm))
 }
 
 func windows_removeat(dirfd syscall.Windows_Handle, name string) error {
@@ -378,11 +379,11 @@ func windows_chtimesat(dirfd syscall.Windows_Handle, name string, atime time.Tim
 	defer syscall.Windows_CloseHandle(h)
 	a := syscall.Windows_Filetime{}
 	w := syscall.Windows_Filetime{}
-	if !atime.Windows_IsZero() {
-		a = syscall.Windows_NsecToFiletime(atime.Windows_UnixNano())
+	if !atime.IsZero() {
+		a = syscall.Windows_NsecToFiletime(atime.UnixNano())
 	}
-	if !mtime.Windows_IsZero() {
-		w = syscall.Windows_NsecToFiletime(mtime.Windows_UnixNano())
+	if !mtime.IsZero() {
+		w = syscall.Windows_NsecToFiletime(mtime.UnixNano())
 	}
 	return syscall.Windows_SetFileTime(h, nil, &a, &w)
 }

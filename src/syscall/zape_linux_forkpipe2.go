@@ -2,13 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line forkpipe2.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line forkpipe2.go:6:1*/
 package syscall
 
-import _ "unsafe"
+import _ "unsafe"/*line forkpipe2.go:7:16*/
 
 import "sync"
 
@@ -29,9 +30,8 @@ var (
 
 // hasWaitingReaders reports whether any goroutine is waiting
 // to acquire a read lock on rw. It is defined in the sync package.
-//
 //go:linkname linux_hasWaitingReaders syscall.hasWaitingReaders
-func linux_hasWaitingReaders(rw *sync.RWMutex) bool
+/*line forkpipe2.go:28:1*/func linux_hasWaitingReaders(rw *sync.RWMutex) bool
 
 // acquireForkLock acquires a write lock on ForkLock.
 // ForkLock is exported and we've promised that during a fork

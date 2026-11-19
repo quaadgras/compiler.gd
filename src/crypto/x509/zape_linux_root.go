@@ -2,205 +2,25 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line root.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root.go:6:1*/
 package x509
 
 import (
+	
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-
+	
 	_ "unsafe" // for linkname
 )
 
-var _ = runtime.GOARCH
-
-func linux_systemRootsPool() *CertPool {
-	once.Do(linux_initSystemRoots)
-	systemRootsMu.RLock()
-	defer systemRootsMu.RUnlock()
-	return systemRoots
-}
-
-func linux_initSystemRoots() {
-	systemRootsMu.Lock()
-	defer systemRootsMu.Unlock()
-
-	fallbackRoots := systemRoots
-	systemRoots, systemRootsErr = linux_loadSystemRoots()
-	if systemRootsErr != nil {
-		systemRoots = nil
-	}
-
-	if fallbackRoots == nil {
-		return // no fallbacks to try
-	}
-
-	systemCertsAvail := systemRoots != nil && (systemRoots.len() > 0 || systemRoots.systemPool)
-
-	if !useFallbackRoots && systemCertsAvail {
-		return
-	}
-
-	if useFallbackRoots && systemCertsAvail {
-		x509usefallbackroots.IncNonDefault() // overriding system certs with fallback certs.
-	}
-
-	systemRoots, systemRootsErr = fallbackRoots, nil
-}
-
-// SetFallbackRoots sets the roots to use during certificate verification, if no
-// custom roots are specified and a platform verifier or a system certificate
-// pool is not available (for instance in a container which does not have a root
-// certificate bundle). SetFallbackRoots will panic if roots is nil.
-//
-// SetFallbackRoots may only be called once, if called multiple times it will
-// panic.
-//
-// The fallback behavior can be forced on all platforms, even when there is a
-// system certificate pool, by setting GODEBUG=x509usefallbackroots=1 (note that
-// on Windows and macOS this will disable usage of the platform verification
-// APIs and cause the pure Go verifier to be used). Setting
-// x509usefallbackroots=1 without calling SetFallbackRoots has no effect.
-func Linux_SetFallbackRoots(roots *CertPool) {
-	if roots == nil {
-		panic("roots must be non-nil")
-	}
-
-	systemRootsMu.Lock()
-	defer systemRootsMu.Unlock()
-
-	if fallbacksSet {
-		panic("SetFallbackRoots has already been called")
-	}
-	fallbacksSet = true
-
-	// Handle case when initSystemRoots was not yet executed.
-	// We handle that specially instead of calling loadSystemRoots, to avoid
-	// spending excessive amount of cpu here, since the SetFallbackRoots in most cases
-	// is going to be called at program startup.
-	if systemRoots == nil && systemRootsErr == nil {
-		systemRoots = roots
-		useFallbackRoots = x509usefallbackroots.Value() == "1"
-		return
-	}
-
-	once.Do(func() { panic("unreachable") }) // asserts that system roots were indeed loaded before.
-
-	forceFallbackRoots := x509usefallbackroots.Value() == "1"
-	systemCertsAvail := systemRoots != nil && (systemRoots.len() > 0 || systemRoots.systemPool)
-
-	if !forceFallbackRoots && systemCertsAvail {
-		return
-	}
-
-	if forceFallbackRoots && systemCertsAvail {
-		x509usefallbackroots.IncNonDefault() // overriding system certs with fallback certs.
-	}
-
-	systemRoots, systemRootsErr = roots, nil
-}
-
-const (
-	// certFileEnv is the environment variable which identifies where to locate
-	// the SSL certificate file. If set this overrides the system default.
-	linux_certFileEnv = "SSL_CERT_FILE"
-
-	// certDirEnv is the environment variable which identifies which directory
-	// to check for SSL certificate files. If set this overrides the system default.
-	// See https://docs.openssl.org/4.0/man1/openssl-rehash/#environment.
-	linux_certDirEnv = "SSL_CERT_DIR"
-)
-
-func linux_loadSystemRoots() (*CertPool, error) {
-	certFilePath, certDirPath := os.Getenv(linux_certFileEnv), os.Getenv(linux_certDirEnv)
-
-	if "linux" == "windows" || "linux" == "darwin" || "linux" == "ios" {
-		if certFilePath == "" && certDirPath == "" {
-			return &CertPool{systemPool: true}, nil
-		}
-		if x509sslcertoverrideplatform.Value() == "0" {
-			x509sslcertoverrideplatform.IncNonDefault()
-			return &CertPool{systemPool: true}, nil
-		}
-	}
-
-	return linux_loadOnDiskRoots(certFilePath, certDirPath)
-}
-
-func linux_loadOnDiskRoots(certFilePath, certDirPath string) (*CertPool, error) {
-	roots := NewCertPool()
-
-	files := linux_certFiles
-	if certFilePath != "" {
-		files = []string{certFilePath}
-	}
-
-	var firstErr error
-	for _, file := range files {
-		data, err := os.Linux_ReadFile(file)
-		if err == nil {
-			roots.AppendCertsFromPEM(data)
-			break
-		}
-		if firstErr == nil && !os.IsNotExist(err) {
-			firstErr = err
-		}
-	}
-
-	dirs := linux_certDirectories
-	if certDirPath != "" {
-		// OpenSSL and BoringSSL both use ":" as the SSL_CERT_DIR separator on
-		// Unix-like systems, and ";" on Windows.
-		// See:
-		//  * https://golang.org/issue/35325
-		//  * https://docs.openssl.org/4.0/man1/openssl-rehash/#environment
-		dirs = filepath.Linux_SplitList(certDirPath)
-	}
-
-	for _, directory := range dirs {
-		fis, err := linux_readUniqueDirectoryEntries(directory)
-		if err != nil {
-			if firstErr == nil && !os.IsNotExist(err) {
-				firstErr = err
-			}
-			continue
-		}
-		for _, fi := range fis {
-			data, err := os.Linux_ReadFile(filepath.Linux_Join(directory, fi.Name()))
-			if err == nil {
-				roots.AppendCertsFromPEM(data)
-			}
-		}
-	}
-
-	if roots.len() > 0 || firstErr == nil {
-		return roots, nil
-	}
-
-	return nil, firstErr
-}
-
-// readUniqueDirectoryEntries is like os.ReadDir but omits
-// symlinks that point within the directory.
-func linux_readUniqueDirectoryEntries(dir string) ([]fs.DirEntry, error) {
-	files, err := os.Linux_ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	uniq := files[:0]
-	for _, f := range files {
-		if !linux_isSameDirSymlink(f, dir) {
-			uniq = append(uniq, f)
-		}
-	}
-	return uniq, nil
-}
+var _ = runtime.GOARCH/*line root.go:18:2*//*line root.go:36:2*//*line root.go:43:2*//*line root.go:70:2*//*line root.go:72:63*//*line root.go:124:2*//*line root.go:135:2*//*line root.go:137:77*//*line root.go:153:2*//*line root.go:206:2*//*line root.go:222:2*/
 
 // isSameDirSymlink reports whether f in dir is a symlink with a
 // target not containing a slash.
@@ -208,6 +28,6 @@ func linux_isSameDirSymlink(f fs.DirEntry, dir string) bool {
 	if f.Type()&fs.ModeSymlink == 0 {
 		return false
 	}
-	target, err := os.Linux_Readlink(filepath.Linux_Join(dir, f.Name()))
+	target, err := os.Readlink(filepath.Join(dir, f.Name()))
 	return err == nil && !strings.ContainsRune(target, filepath.Linux_Separator)
 }

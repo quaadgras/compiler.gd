@@ -2,216 +2,19 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line fd_mutex.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_mutex.go:6:1*/
 package poll
 
-import _ "unsafe"
-
-import "sync/atomic"
-
-// fdMutex.state is organized as follows:
-// 1 bit - whether FD is closed, if set all subsequent lock operations will fail.
-// 1 bit - lock for read operations.
-// 1 bit - lock for write operations.
-// 20 bits - total number of references (read+write+misc).
-// 20 bits - number of outstanding read waiters.
-// 20 bits - number of outstanding write waiters.
-const (
-	windows_mutexClosed  = 1 << 0
-	windows_mutexRLock   = 1 << 1
-	windows_mutexWLock   = 1 << 2
-	windows_mutexRef     = 1 << 3
-	windows_mutexRefMask = (1<<20 - 1) << 3
-	windows_mutexRWait   = 1 << 23
-	windows_mutexRMask   = (1<<20 - 1) << 23
-	windows_mutexWWait   = 1 << 43
-	windows_mutexWMask   = (1<<20 - 1) << 43
-)
-
-const (
-	windows_readlock  = true
-	windows_writeLock = false
-	windows_waitLock  = true
-	windows_tryLock   = false
-)
-
-const windows_overflowMsg = "too many concurrent operations on a single file or socket (max 1048575)"
-
-// Read operations must do rwlock(readlock, waitLock)/rwunlock(readlock).
-//
-// Write operations must do rwlock(writeLock, waitLock)/rwunlock(writeLock).
-//
-// Misc operations must do incref/decref.
-// Misc operations include functions like setsockopt and setDeadline.
-// They need to use incref/decref to ensure that they operate on the
-// correct fd in presence of a concurrent close call (otherwise fd can
-// be closed under their feet).
-//
-// Close operations must do increfAndClose/decref.
-
-// incref adds a reference to mu.
-// It reports whether mu is available for reading or writing.
-func (mu *fdMutex) windows_incref() bool {
-	for {
-		old := atomic.LoadUint64(&mu.state)
-		if old&windows_mutexClosed != 0 {
-			return false
-		}
-		new := old + windows_mutexRef
-		if new&windows_mutexRefMask == 0 {
-			panic(windows_overflowMsg)
-		}
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			return true
-		}
-	}
-}
-
-// increfAndClose sets the state of mu to closed.
-// It returns false if the file was already closed.
-func (mu *fdMutex) windows_increfAndClose() bool {
-	for {
-		old := atomic.LoadUint64(&mu.state)
-		if old&windows_mutexClosed != 0 {
-			return false
-		}
-		// Mark as closed and acquire a reference.
-		new := (old | windows_mutexClosed) + windows_mutexRef
-		if new&windows_mutexRefMask == 0 {
-			panic(windows_overflowMsg)
-		}
-		// Remove all read and write waiters.
-		new &^= windows_mutexRMask | windows_mutexWMask
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			// Wake all read and write waiters,
-			// they will observe closed flag after wakeup.
-			for old&windows_mutexRMask != 0 {
-				old -= windows_mutexRWait
-				windows_runtime_Semrelease(&mu.rsema)
-			}
-			for old&windows_mutexWMask != 0 {
-				old -= windows_mutexWWait
-				windows_runtime_Semrelease(&mu.wsema)
-			}
-			return true
-		}
-	}
-}
-
-// decref removes a reference from mu.
-// It reports whether there is no remaining reference.
-func (mu *fdMutex) windows_decref() bool {
-	for {
-		old := atomic.LoadUint64(&mu.state)
-		if old&windows_mutexRefMask == 0 {
-			panic("inconsistent poll.fdMutex")
-		}
-		new := old - windows_mutexRef
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			return new&(windows_mutexClosed|windows_mutexRefMask) == windows_mutexClosed
-		}
-	}
-}
-
-// lock adds a reference to mu and locks mu.
-// It reports whether mu is available for reading or writing.
-// If wait is false, lock fails immediately if mu is not available.
-func (mu *fdMutex) windows_rwlock(read bool, wait bool) bool {
-	var mutexBit, mutexWait, mutexMask uint64
-	var mutexSema *uint32
-	if read {
-		mutexBit = windows_mutexRLock
-		mutexWait = windows_mutexRWait
-		mutexMask = windows_mutexRMask
-		mutexSema = &mu.rsema
-	} else {
-		mutexBit = windows_mutexWLock
-		mutexWait = windows_mutexWWait
-		mutexMask = windows_mutexWMask
-		mutexSema = &mu.wsema
-	}
-	for {
-		old := atomic.LoadUint64(&mu.state)
-		if old&windows_mutexClosed != 0 {
-			return false
-		}
-		var new uint64
-		if old&mutexBit == 0 {
-			// Lock is free, acquire it.
-			new = (old | mutexBit) + windows_mutexRef
-			if new&windows_mutexRefMask == 0 {
-				panic(windows_overflowMsg)
-			}
-		} else {
-			// Wait for lock.
-			if !wait {
-				return false
-			}
-			new = old + mutexWait
-			if new&mutexMask == 0 {
-				panic(windows_overflowMsg)
-			}
-		}
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			if old&mutexBit == 0 {
-				return true
-			}
-			windows_runtime_Semacquire(mutexSema)
-			// The signaller has subtracted mutexWait.
-		}
-	}
-}
-
-// unlock removes a reference from mu and unlocks mu.
-// It reports whether there is no remaining reference.
-func (mu *fdMutex) windows_rwunlock(read bool) bool {
-	var mutexBit, mutexWait, mutexMask uint64
-	var mutexSema *uint32
-	if read {
-		mutexBit = windows_mutexRLock
-		mutexWait = windows_mutexRWait
-		mutexMask = windows_mutexRMask
-		mutexSema = &mu.rsema
-	} else {
-		mutexBit = windows_mutexWLock
-		mutexWait = windows_mutexWWait
-		mutexMask = windows_mutexWMask
-		mutexSema = &mu.wsema
-	}
-	for {
-		old := atomic.LoadUint64(&mu.state)
-		if old&mutexBit == 0 || old&windows_mutexRefMask == 0 {
-			panic("inconsistent poll.fdMutex")
-		}
-		// Drop lock, drop reference and wake read waiter if present.
-		new := (old &^ mutexBit) - windows_mutexRef
-		if old&mutexMask != 0 {
-			new -= mutexWait
-		}
-		if atomic.CompareAndSwapUint64(&mu.state, old, new) {
-			if old&mutexMask != 0 {
-				windows_runtime_Semrelease(mutexSema)
-			}
-			return new&(windows_mutexClosed|windows_mutexRefMask) == windows_mutexClosed
-		}
-	}
-}
-
-// Implemented in runtime package.
-//
-//go:linkname windows_runtime_Semacquire internal/poll.runtime_Semacquire
-func windows_runtime_Semacquire(sema *uint32)
-
-//go:linkname windows_runtime_Semrelease internal/poll.runtime_Semrelease
-func windows_runtime_Semrelease(sema *uint32)
+import "sync/atomic"/*line fd_mutex.go:18:2*//*line fd_mutex.go:37:2*//*line fd_mutex.go:44:2*//*line fd_mutex.go:46:94*//*line fd_mutex.go:76:2*//*line fd_mutex.go:107:2*//*line fd_mutex.go:122:2*//*line fd_mutex.go:171:2*//*line fd_mutex.go:206:2*//*line fd_mutex.go:209:38*//*line fd_mutex.go:210:38*/
 
 // incref adds a reference to fd.
 // It returns an error when fd cannot be used.
 func (fd *Windows_FD) incref() error {
-	if !fd.fdmu.windows_incref() {
+	if !fd.fdmu.incref() {
 		return errClosing(fd.isFile)
 	}
 	return nil
@@ -221,7 +24,7 @@ func (fd *Windows_FD) incref() error {
 // It also closes fd when the state of fd is set to closed and there
 // is no remaining reference.
 func (fd *Windows_FD) decref() error {
-	if fd.fdmu.windows_decref() {
+	if fd.fdmu.decref() {
 		return fd.destroy()
 	}
 	return nil
@@ -230,7 +33,7 @@ func (fd *Windows_FD) decref() error {
 // readLock adds a reference to fd and locks fd for reading.
 // It returns an error when fd cannot be used for reading.
 func (fd *Windows_FD) readLock() error {
-	if !fd.fdmu.windows_rwlock(windows_readlock, windows_waitLock) {
+	if !fd.fdmu.rwlock(readlock, waitLock) {
 		return errClosing(fd.isFile)
 	}
 	return nil
@@ -240,7 +43,7 @@ func (fd *Windows_FD) readLock() error {
 // It also closes fd when the state of fd is set to closed and there
 // is no remaining reference.
 func (fd *Windows_FD) readUnlock() {
-	if fd.fdmu.windows_rwunlock(windows_readlock) {
+	if fd.fdmu.rwunlock(readlock) {
 		fd.destroy()
 	}
 }
@@ -248,7 +51,7 @@ func (fd *Windows_FD) readUnlock() {
 // writeLock adds a reference to fd and locks fd for writing.
 // It returns an error when fd cannot be used for writing.
 func (fd *Windows_FD) writeLock() error {
-	if !fd.fdmu.windows_rwlock(windows_writeLock, windows_waitLock) {
+	if !fd.fdmu.rwlock(writeLock, waitLock) {
 		return errClosing(fd.isFile)
 	}
 	return nil
@@ -258,7 +61,7 @@ func (fd *Windows_FD) writeLock() error {
 // It also closes fd when the state of fd is set to closed and there
 // is no remaining reference.
 func (fd *Windows_FD) writeUnlock() {
-	if fd.fdmu.windows_rwunlock(windows_writeLock) {
+	if fd.fdmu.rwunlock(writeLock) {
 		fd.destroy()
 	}
 }
@@ -266,11 +69,11 @@ func (fd *Windows_FD) writeUnlock() {
 // readWriteLock adds a reference to fd and locks fd for reading and writing.
 // It returns an error when fd cannot be used for reading and writing.
 func (fd *Windows_FD) readWriteLock() error {
-	if !fd.fdmu.windows_rwlock(windows_readlock, windows_waitLock) {
+	if !fd.fdmu.rwlock(readlock, waitLock) {
 		return errClosing(fd.isFile)
 	}
-	if !fd.fdmu.windows_rwlock(windows_writeLock, windows_waitLock) {
-		if fd.fdmu.windows_rwunlock(windows_readlock) {
+	if !fd.fdmu.rwlock(writeLock, waitLock) {
+		if fd.fdmu.rwunlock(readlock) {
 			fd.destroy()
 		}
 		return errClosing(fd.isFile)
@@ -282,14 +85,14 @@ func (fd *Windows_FD) readWriteLock() error {
 // It returns (false, nil) when fd is not available for reading and writing but is not closing.
 // It returns (false, errClosing) when fd is closing.
 func (fd *Windows_FD) tryReadWriteLock() (bool, error) {
-	if !fd.fdmu.windows_rwlock(windows_readlock, windows_tryLock) {
+	if !fd.fdmu.rwlock(readlock, tryLock) {
 		if fd.closing() {
 			return false, errClosing(fd.isFile)
 		}
 		return false, nil
 	}
-	if !fd.fdmu.windows_rwlock(windows_writeLock, windows_tryLock) {
-		if fd.fdmu.windows_rwunlock(windows_readlock) {
+	if !fd.fdmu.rwlock(writeLock, tryLock) {
+		if fd.fdmu.rwunlock(readlock) {
 			fd.destroy()
 		}
 		if fd.closing() {
@@ -304,13 +107,13 @@ func (fd *Windows_FD) tryReadWriteLock() (bool, error) {
 // It also closes fd when the state of fd is set to closed and there
 // is no remaining reference.
 func (fd *Windows_FD) readWriteUnlock() {
-	fd.fdmu.windows_rwunlock(windows_readlock)
-	if fd.fdmu.windows_rwunlock(windows_writeLock) {
+	fd.fdmu.rwunlock(readlock)
+	if fd.fdmu.rwunlock(writeLock) {
 		fd.destroy()
 	}
 }
 
 // closing returns true if fd is closing.
 func (fd *Windows_FD) closing() bool {
-	return atomic.LoadUint64(&fd.fdmu.state)&windows_mutexClosed != 0
+	return atomic.LoadUint64(&fd.fdmu.state)&mutexClosed != 0
 }

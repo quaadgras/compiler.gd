@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2022 The Go Authors. All rights reserved.
+/*line dnsconfig_windows.go:1:1*/// Copyright 2022 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import (
 func windows_dnsReadConfig(ignoredFilename string) (conf *dnsConfig) {
 	conf = &dnsConfig{
 		ndots:    1,
-		timeout:  5 * time.Windows_Second,
+		timeout:  5 * time.Second,
 		attempts: 2,
 	}
 	defer func() {

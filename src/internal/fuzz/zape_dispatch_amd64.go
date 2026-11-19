@@ -5,14 +5,19 @@
 package fuzz
 
 import (
-	"context"
-	"errors"
-	"io"
-	"time"
+	"os"
+	"os/exec"
 	"unsafe"
 )
 
 var _ unsafe.Pointer
+
+// apeValue returns the host's value h as the ape type T, which is at
+// least as large.
+func apeValue[T, H any](h H) (t T) {
+	*(*H)(unsafe.Pointer(&t)) = h
+	return t
+}
 
 //go:linkname apehost runtime.apehost
 var apehost uint8
@@ -23,74 +28,29 @@ const (
 	apeWindows
 )
 
-type call struct {
-	Ping     *pingArgs
-	Fuzz     *fuzzArgs
-	Minimize *minimizeArgs
-}
-
-type contextReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-var errSharedMemClosed error = errors.New("internal error: shared memory was closed and unmapped")
-
-type fuzzArgs struct {
-	Timeout      time.Duration
-	Limit        int64
-	Warmup       bool
-	CoverageData []byte
-}
-
-type fuzzResponse struct {
-	TotalDuration       time.Duration
-	InterestingDuration time.Duration
-	Count               int64
-	CoverageData        []byte
-	Err                 string
-	InternalErr         string
-}
-
-type minimizeArgs struct {
-	Timeout      time.Duration
-	Limit        int64
-	KeepCoverage []byte
-	Index        int
-}
-
-type minimizeResponse struct {
-	WroteToMem   bool
-	Err          string
-	CoverageData []byte
-	Duration     time.Duration
-	Count        int64
-}
-
-type pingArgs struct{}
-
-type pingResponse struct{}
-
-type sharedMemHeader struct {
-	count     int64
-	valueLen  int
-	randState uint64
-	randInc   uint64
-	rawInMem  bool
-}
-
-const workerFuzzDuration time.Duration = 100000000
-
-func RunFuzzWorker(a0 context.Context, a1 func(CorpusEntry) error) error {
+func getWorkerComm() (workerComm, error) {
 	if apehost == apeLinux {
-		x0 := Linux_RunFuzzWorker(a0, a1)
+		x0, x1 := linux_getWorkerComm()
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_getWorkerComm()
+		return x0, x1
+	}
+	x0, x1 := windows_getWorkerComm()
+	return x0, x1
+}
+
+func isCrashSignal(a0 os.Signal) bool {
+	if apehost == apeLinux {
+		x0 := linux_isCrashSignal(a0)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := Freebsd_RunFuzzWorker(a0, a1)
+		x0 := freebsd_isCrashSignal(a0)
 		return x0
 	}
-	x0 := Windows_RunFuzzWorker(a0, a1)
+	x0 := windows_isCrashSignal(a0)
 	return x0
 }
 
@@ -107,122 +67,56 @@ func isInterruptError(a0 error) bool {
 	return x0
 }
 
-func newWorker(a0 *coordinator, a1 string, a2 string, a3 []string, a4 []string) (*worker, error) {
+func setWorkerComm(a0 *exec.Cmd, a1 workerComm) {
 	if apehost == apeLinux {
-		x0, x1 := linux_newWorker(a0, a1, a2, a3, a4)
-		return (*worker)(unsafe.Pointer(x0)), x1
+		linux_setWorkerComm(a0, a1)
+		return
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := freebsd_newWorker(a0, a1, a2, a3, a4)
-		return (*worker)(unsafe.Pointer(x0)), x1
+		freebsd_setWorkerComm(a0, a1)
+		return
 	}
-	x0, x1 := windows_newWorker(a0, a1, a2, a3, a4)
-	return (*worker)(unsafe.Pointer(x0)), x1
+	windows_setWorkerComm(a0, a1)
 }
 
-func (r *contextReader) Read(a0 []byte) (int, error) {
+func sharedMemMapFile(a0 *os.File, a1 int, a2 bool) (*sharedMem, error) {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Read(a0)
+		x0, x1 := linux_sharedMemMapFile(a0, a1, a2)
 		return x0, x1
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := r.Freebsd_Read(a0)
+		x0, x1 := freebsd_sharedMemMapFile(a0, a1, a2)
 		return x0, x1
 	}
-	x0, x1 := r.Windows_Read(a0)
+	x0, x1 := windows_sharedMemMapFile(a0, a1, a2)
 	return x0, x1
 }
 
-func (r *worker) cleanup() error {
+func terminationSignal(a0 error) (os.Signal, bool) {
 	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).cleanup()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).cleanup()
-		return x0
-	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).cleanup()
-	return x0
-}
-
-func (r *worker) coordinate(a0 context.Context) error {
-	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).coordinate(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).coordinate(a0)
-		return x0
-	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).coordinate(a0)
-	return x0
-}
-
-func (r *worker) isRunning() bool {
-	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).isRunning()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).isRunning()
-		return x0
-	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).isRunning()
-	return x0
-}
-
-func (r *worker) minimize(a0 context.Context, a1 fuzzMinimizeInput) (fuzzResult, error) {
-	if apehost == apeLinux {
-		x0, x1 := ((*linux_worker)(unsafe.Pointer(r))).minimize(a0, a1)
+		x0, x1 := linux_terminationSignal(a0)
 		return x0, x1
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := ((*freebsd_worker)(unsafe.Pointer(r))).minimize(a0, a1)
+		x0, x1 := freebsd_terminationSignal(a0)
 		return x0, x1
 	}
-	x0, x1 := ((*windows_worker)(unsafe.Pointer(r))).minimize(a0, a1)
+	x0, x1 := windows_terminationSignal(a0)
 	return x0, x1
 }
 
-func (r *worker) start() error {
+func (r *sharedMem) Close() error {
 	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).start()
+		x0 := r.Linux_Close()
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).start()
+		x0 := r.Freebsd_Close()
 		return x0
 	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).start()
+	x0 := r.Windows_Close()
 	return x0
 }
 
-func (r *worker) startAndPing(a0 context.Context) error {
-	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).startAndPing(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).startAndPing(a0)
-		return x0
-	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).startAndPing(a0)
-	return x0
-}
-
-func (r *worker) stop() error {
-	if apehost == apeLinux {
-		x0 := ((*linux_worker)(unsafe.Pointer(r))).stop()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := ((*freebsd_worker)(unsafe.Pointer(r))).stop()
-		return x0
-	}
-	x0 := ((*windows_worker)(unsafe.Pointer(r))).stop()
-	return x0
-}
-
-// worker differs between hosts: functions convert it by pointer.
-type worker struct{ _ [22]uint64 }
+// sharedMemSys differs between hosts: functions convert it by pointer.
+type sharedMemSys struct{ _ [1]uint64 }

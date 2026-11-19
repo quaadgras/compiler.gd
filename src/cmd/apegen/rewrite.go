@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -27,7 +26,13 @@ type edit struct {
 }
 
 func applyEdits(src []byte, edits []edit) []byte {
-	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start < edits[j].start })
+	// (At the same place, insertions come before what replaces text.)
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].start != edits[j].start {
+			return edits[i].start < edits[j].start
+		}
+		return edits[i].start == edits[i].end && edits[j].start != edits[j].end
+	})
 	var out bytes.Buffer
 	last := 0
 	for _, e := range edits {
@@ -64,14 +69,14 @@ func (u *universe) hostOnly(path, host, name string) bool {
 	for _, hp := range g.hs {
 		if hp.host == host {
 			_, ok := hp.decls[name]
-			return ok && !g.dedup[name]
+			return ok && !g.dedup[name] && !g.sharedVar[name]
 		}
 	}
 	return false
 }
 
 func (g *pkgGen) writeGo(hp *hostPkg, name string) {
-	src, err := os.ReadFile(filepath.Join(g.dir, name))
+	src, err := os.ReadFile(filepath.Join(g.dir, realName(name)))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,6 +84,10 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 	tf := fset.File(f.Pos())
 	off := func(p token.Pos) int { return tf.Offset(p) }
 	var edits []edit
+	if name != realName(name) {
+		// The host part of a split file: without what stays shared.
+		edits = g.hostPartEdits(realName(name))
+	}
 	needUnsafe := false
 
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -91,9 +100,11 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					obj = u
 				}
 			}
-			if newName, ok := hp.rename[obj]; ok {
+			if v, ok := obj.(*types.Var); ok && hp.info.Defs[n] == nil && v.Parent() == hp.pkg.Scope() && g.sharedVar[v.Name()] {
+				// A use of the one variable the ape package has.
+			} else if newName, ok := hp.rename[obj]; ok {
 				edits = append(edits, edit{off(n.Pos()), off(n.End()), newName})
-			} else if v, ok := obj.(*types.Var); ok && v.IsField() && v.Embedded() {
+			} else if v, ok := obj.(*types.Var); ok && v.IsField() && v.Embedded() && hp.inOnly(v.Pos()) {
 				// An embedded field is named for its type.
 				if et := g.hostNamed(hp, v.Type()); et != nil && v.Name() == et.Obj().Name() {
 					edits = append(edits, edit{off(n.Pos()), off(n.End()), hostName(hp.host, v.Name())})
@@ -103,6 +114,97 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if n.Name == "GOOS" {
 				if c, ok := hp.info.Uses[n].(*types.Const); ok && c.Pkg() == hp.pkg {
 					edits = append(edits, edit{off(n.Pos()), off(n.End()), fmt.Sprintf("%q", hp.host)})
+				}
+			}
+		case *ast.AssignStmt:
+			// A shared struct's field that points to another package's
+			// handle holds the ape type's pointer.
+			if len(n.Lhs) != len(n.Rhs) {
+				break
+			}
+			for i, l := range n.Lhs {
+				sel, ok := l.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				s := hp.info.Selections[sel]
+				if s == nil || s.Kind() != types.FieldVal {
+					continue
+				}
+				// (A host struct's field is the host's.)
+				hostField := s.Obj().Pkg() == hp.pkg && hp.inOnly(s.Obj().Pos())
+				if owner := fieldOwnerOf(s); owner != nil && owner.Obj().Pkg() != nil && owner.Obj().Pkg() != hp.pkg && g.u.hostDiffers(owner.Obj().Pkg().Path(), hp.host, owner.Obj()) {
+					continue
+				}
+				if t := g.otherHandlePtr(hp, s.Obj().Type()); t != "" && hostField {
+					pkg, name, _ := cutLast(t, ".")
+					t = pkg + "." + hostName(hp.host, name)
+					needUnsafe = true
+					v := n.Rhs[i]
+					edits = append(edits, edit{off(v.Pos()), off(v.Pos()), "(*" + t + ")(unsafe.Pointer("})
+					edits = append(edits, edit{off(v.End()), off(v.End()), "))"})
+				} else if open, close := g.toAPEPtr(hp, s.Obj().Type()); open != "" && !hostField {
+					needUnsafe = true
+					v := n.Rhs[i]
+					edits = append(edits, edit{off(v.Pos()), off(v.Pos()), open})
+					edits = append(edits, edit{off(v.End()), off(v.End()), close})
+				}
+			}
+		case *ast.CompositeLit:
+			// A shared struct's field that points to a host type holds
+			// the ape type's pointer.
+			t := types.Unalias(hp.info.Types[n].Type)
+			nt, ok := t.(*types.Named)
+			if !ok || nt.Obj().Pkg() != hp.pkg || g.hostNamed(hp, nt) != nil {
+				break
+			}
+			st, ok := nt.Underlying().(*types.Struct)
+			if !ok {
+				break
+			}
+			for i, e := range n.Elts {
+				var f *types.Var
+				v := e
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					v = kv.Value
+					if id, ok := kv.Key.(*ast.Ident); ok {
+						for fi := range st.Fields() {
+							if fi.Name() == id.Name {
+								f = fi
+							}
+						}
+					}
+				} else if i < st.NumFields() {
+					f = st.Field(i)
+				}
+				if f == nil || hp.inOnly(f.Pos()) {
+					continue
+				}
+				if open, close := g.toAPEPtr(hp, f.Type()); open != "" {
+					needUnsafe = true
+					edits = append(edits, edit{off(v.Pos()), off(v.Pos()), open})
+					edits = append(edits, edit{off(v.End()), off(v.End()), close})
+					continue
+				}
+				// A host value held by value: the ape type's.
+				if hn, ok := types.Unalias(f.Type()).(*types.Named); ok && g.hostNamed(hp, hn) != nil && !g.union[hn.Obj().Name()] && !g.canon[hn.Obj().Name()] {
+					name := hn.Obj().Name()
+					if g.sideBySide(name) {
+						edits = append(edits, edit{off(v.Pos()), off(v.Pos()), name + "{" + hp.host + ": "})
+						edits = append(edits, edit{off(v.End()), off(v.End()), "}"})
+					} else {
+						g.needApeValue = true
+						edits = append(edits, edit{off(v.Pos()), off(v.Pos()), "apeValue[" + name + "]("})
+						edits = append(edits, edit{off(v.End()), off(v.End()), ")"})
+					}
+					continue
+				}
+				if p, ok := types.Unalias(f.Type()).(*types.Pointer); ok {
+					if hn := g.hostNamed(hp, p); hn != nil && !g.union[hn.Obj().Name()] {
+						needUnsafe = true
+						edits = append(edits, edit{off(v.Pos()), off(v.Pos()), "(*" + hn.Obj().Name() + ")(unsafe.Pointer("})
+						edits = append(edits, edit{off(v.End()), off(v.End()), "))"})
+					}
 				}
 			}
 		case *ast.SelectorExpr:
@@ -130,10 +232,24 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					edits = append(edits, edit{off(n.End()), off(n.End()), ")"})
 				}
 			}
+			if sel := hp.info.Selections[n]; sel != nil && (sel.Kind() == types.FieldVal || sel.Kind() == types.MethodVal) && len(sel.Index()) > 1 {
+				// A field or method promoted through a shared struct's
+				// embedded pointer to a host type: through the host's.
+				if path, t := g.viaHostEmbed(hp, sel); t != "" {
+					needUnsafe = true
+					edits = append(edits, edit{off(n.X.Pos()), off(n.X.Pos()), "(*" + t + ")(unsafe.Pointer("})
+					edits = append(edits, edit{off(n.X.End()), off(n.X.End()), path + "))"})
+				}
+			}
 			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal && hp.rename[sel.Obj()] == "" && !hp.hoist[sel.Obj()] && !hp.inOnly(sel.Obj().Pos()) {
 				// A shared struct's field of a host type holds the host's.
 				ft := sel.Obj().Type()
-				if nt := g.hostNamed(hp, ft); nt != nil {
+				if a, ok := ft.(*types.Alias); ok && a.Obj().Pkg() == hp.pkg && hp.inOnly(a.Obj().Pos()) && !g.dedup[a.Obj().Name()] {
+					needUnsafe = true
+					t := hostName(hp.host, a.Obj().Name())
+					edits = append(edits, edit{off(n.Pos()), off(n.Pos()), "(*(*" + t + ")(unsafe.Pointer(&"})
+					edits = append(edits, edit{off(n.End()), off(n.End()), ")))"})
+				} else if nt := g.hostNamed(hp, ft); nt != nil {
 					t := hostName(hp.host, nt.Obj().Name())
 					if _, ok := types.Unalias(ft).(*types.Pointer); ok {
 						t = "*" + t
@@ -287,7 +403,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		return true
 	})
 
-	if needUnsafe && !slices.ContainsFunc(f.Imports, func(s *ast.ImportSpec) bool { return s.Path.Value == `"unsafe"` }) {
+	if needUnsafe && !slices.ContainsFunc(f.Imports, func(s *ast.ImportSpec) bool { return s.Path.Value == `"unsafe"` && (s.Name == nil || s.Name.Name == "unsafe") }) {
 		edits = append(edits, edit{off(f.Name.End()), off(f.Name.End()), "\n\nimport \"unsafe\""})
 	}
 
@@ -381,16 +497,62 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		}
 	}
 
-	out := applyEdits(src, edits)
-	out = buildLine.ReplaceAll(out, nil)
-	out = append([]byte(fmt.Sprintf(header, name, *arch)), out...)
-	out = dropUnusedImports(out)
-	if formatted, err := format.Source(out); err == nil {
-		out = formatted
-	} else {
-		g.reportf("%s: %v", outName(hp.host, name), err)
+	name = realName(name)
+	g.outputs[outName(hp.host, name)] = g.finishGo(src, edits, name, outName(hp.host, name))
+}
+
+// finishGo applies the edits to src, the file name, and returns the
+// generated file: with the generated header in place of the build line,
+// and line directives so that what it compiles to has name's positions.
+func (g *pkgGen) finishGo(src []byte, edits []edit, name, out string) []byte {
+	for _, loc := range buildLine.FindAllIndex(src, -1) {
+		edits = append(edits, edit{loc[0], loc[1], ""})
 	}
-	g.outputs[outName(hp.host, name)] = out
+	b := applyEditsLines(src, edits, name)
+	b = append([]byte(fmt.Sprintf(header, name, *arch)+"/*line "+name+":1:1*/"), b...)
+	b = dropUnusedImports(b)
+	if _, err := parser.ParseFile(token.NewFileSet(), out, b, parser.SkipObjectResolution); err != nil {
+		g.reportf("%s: %v", out, err)
+	}
+	return b
+}
+
+// applyEditsLines is applyEdits, with a line directive after each edit
+// that adds or removes lines, so that what follows keeps its position in
+// the file name.
+func applyEditsLines(src []byte, edits []edit, name string) []byte {
+	sort.SliceStable(edits, func(i, j int) bool {
+		if edits[i].start != edits[j].start {
+			return edits[i].start < edits[j].start
+		}
+		return edits[i].start == edits[i].end && edits[j].start != edits[j].end
+	})
+	var out bytes.Buffer
+	last := 0
+	line, lineStart, counted := 1, 0, 0
+	pos := func(off int) (int, int) {
+		for ; counted < off; counted++ {
+			if src[counted] == '\n' {
+				line++
+				lineStart = counted + 1
+			}
+		}
+		return line, off - lineStart + 1
+	}
+	for _, e := range edits {
+		if e.start < last {
+			continue // inside an earlier edit
+		}
+		out.Write(src[last:e.start])
+		out.WriteString(e.text)
+		last = e.end
+		if strings.Contains(e.text, "\n") || bytes.Contains(src[e.start:e.end], []byte("\n")) {
+			l, c := pos(e.end)
+			fmt.Fprintf(&out, "/*line %s:%d:%d*/", name, l, c)
+		}
+	}
+	out.Write(src[last:])
+	return out.Bytes()
 }
 
 // hostHasBody reports whether the host copy of package path declares
@@ -434,7 +596,7 @@ func (u *universe) hostMethod(path, host string, m *types.Func) bool {
 		if hp.host != host {
 			continue
 		}
-		file := filepath.Base(fset.Position(m.Pos()).Filename)
+		file := fileName(m.Pos())
 		if !hp.only[file] {
 			return false
 		}
@@ -776,7 +938,7 @@ func (g *pkgGen) writeAll() error {
 			if strings.HasPrefix(name, "zape_") {
 				continue
 			}
-			if err := setNotAPE(filepath.Join(g.dir, name), hp.only[name] && g.builtByAll(name)); err != nil {
+			if err := setNotAPE(filepath.Join(g.dir, name), hp.only[name] && g.builtByAll(name) || g.moved[name] != nil); err != nil {
 				return err
 			}
 		}
@@ -878,14 +1040,15 @@ func dropUnusedImports(src []byte) []byte {
 		return src
 	}
 	tf := token.NewFileSet()
-	full, err := parser.ParseFile(tf, "", src, parser.SkipObjectResolution)
+	full, err := parser.ParseFile(tf, "", src, 0)
 	if err != nil {
 		return src
 	}
 	used := map[string]bool{}
 	ast.Inspect(full, func(n ast.Node) bool {
 		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if x, ok := sel.X.(*ast.Ident); ok {
+			// (Not a local variable of the package's name.)
+			if x, ok := sel.X.(*ast.Ident); ok && x.Obj == nil {
 				used[x.Name] = true
 			}
 		}
@@ -894,9 +1057,19 @@ func dropUnusedImports(src []byte) []byte {
 	var edits []edit
 	ff := token.NewFileSet()
 	f, _ = parser.ParseFile(ff, "", src, parser.ParseComments|parser.ImportsOnly)
+	// (An import without parentheses goes whole.)
+	whole := map[*ast.ImportSpec]*ast.GenDecl{}
+	for _, d := range f.Decls {
+		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && !gd.Lparen.IsValid() && len(gd.Specs) == 1 {
+			whole[gd.Specs[0].(*ast.ImportSpec)] = gd
+		}
+	}
 	for _, imp := range f.Imports {
 		path := strings.Trim(imp.Path.Value, `"`)
 		name := filepath.Base(path)
+		if len(name) >= 2 && name[0] == 'v' && strings.Trim(name[1:], "0123456789") == "" && strings.Contains(path, "/") {
+			name = filepath.Base(filepath.Dir(path))
+		}
 		if imp.Name != nil {
 			name = imp.Name.Name
 		}
@@ -907,6 +1080,9 @@ func dropUnusedImports(src []byte) []byte {
 		if path == "unsafe" && bytes.Contains(src, []byte("//go:linkname")) {
 			edits = append(edits, edit{start, end, `_ "unsafe"`})
 			continue
+		}
+		if gd := whole[imp]; gd != nil {
+			start, end = ff.Position(gd.Pos()).Offset, ff.Position(gd.End()).Offset
 		}
 		edits = append(edits, edit{start, end, ""})
 	}
@@ -942,4 +1118,73 @@ func (g *pkgGen) asmDefinesFunc(hp *hostPkg, name string) bool {
 		}
 	}
 	return false
+}
+
+// viaHostEmbed returns, for a selection that goes through a shared
+// struct's embedded pointer to a host type, the explicit path to that
+// field (".file") and the host type's name; or "".
+func (g *pkgGen) viaHostEmbed(hp *hostPkg, sel *types.Selection) (string, string) {
+	cur := sel.Recv()
+	path := ""
+	for _, idx := range sel.Index()[:len(sel.Index())-1] {
+		t := types.Unalias(cur)
+		if p, ok := t.(*types.Pointer); ok {
+			t = types.Unalias(p.Elem())
+		}
+		st, ok := t.Underlying().(*types.Struct)
+		if !ok {
+			return "", ""
+		}
+		f := st.Field(idx)
+		path += "." + f.Name()
+		if !hp.inOnly(f.Pos()) && !hp.hoist[f] {
+			if p, ok := types.Unalias(f.Type()).(*types.Pointer); ok {
+				if nt := g.hostNamed(hp, p); nt != nil {
+					return path, hostName(hp.host, nt.Obj().Name())
+				}
+			}
+		}
+		cur = f.Type()
+	}
+	return "", ""
+}
+
+// otherHandlePtr returns, for a pointer to another generated package's
+// type that the ape package has as a handle to each host's, the ape
+// type's name (pkg.T); or "".
+func (g *pkgGen) otherHandlePtr(hp *hostPkg, t types.Type) string {
+	p, ok := types.Unalias(t).(*types.Pointer)
+	if !ok {
+		return ""
+	}
+	n, ok := types.Unalias(p.Elem()).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil || n.Obj().Pkg() == hp.pkg || !token.IsExported(n.Obj().Name()) {
+		return ""
+	}
+	path := n.Obj().Pkg().Path()
+	if !g.u.hostDiffers(path, hp.host, n.Obj()) || !g.u.isHandle(path, n.Obj().Name()) {
+		return ""
+	}
+	return n.Obj().Pkg().Name() + "." + n.Obj().Name()
+}
+
+// toAPEPtr returns what to wrap a host's value in to store it where the
+// ape type holds a pointer t to another generated package's type that
+// differs between hosts: a cast for a handle, a copy for data.
+func (g *pkgGen) toAPEPtr(hp *hostPkg, t types.Type) (open, close string) {
+	if h := g.otherHandlePtr(hp, t); h != "" {
+		return "(*" + h + ")(unsafe.Pointer(", "))"
+	}
+	p, ok := types.Unalias(t).(*types.Pointer)
+	if !ok {
+		return "", ""
+	}
+	n, ok := types.Unalias(p.Elem()).(*types.Named)
+	if !ok || n.Obj().Pkg() == nil || n.Obj().Pkg() == hp.pkg || !token.IsExported(n.Obj().Name()) {
+		return "", ""
+	}
+	if !g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj()) {
+		return "", ""
+	}
+	return n.Obj().Pkg().Name() + "." + hostName(hp.host, "ToAPE_"+n.Obj().Name()) + "(", ")"
 }

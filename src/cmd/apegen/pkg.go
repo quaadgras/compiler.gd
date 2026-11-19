@@ -53,6 +53,9 @@ type hostPkg struct {
 
 	parents map[ast.Node]ast.Node
 
+	// orig is the shared files that are split, as parsed.
+	orig map[string]*ast.File
+
 	inits []string // the host's init functions, renamed
 }
 
@@ -74,7 +77,13 @@ type pkgGen struct {
 	multi   map[string]bool // differing untyped constants shared code uses as several types
 	xoff    map[string]bool // external tests: whether each does not
 
+	// moved is, for each split file, the declarations its host part has.
+	moved map[string]map[int]bool
+
 	dedup map[string]bool // types and variables every host declares the same way
+	// sharedVar is the variables of the same type that hosts
+	// initialize differently: one variable, which host copies use.
+	sharedVar map[string]bool
 	union map[string]bool // host types shared structs embed
 	canon map[string]bool // types that are the first host's, converted for others
 	api   map[string]*iface
@@ -85,6 +94,8 @@ type pkgGen struct {
 	// asmDispatch maps a function a shared file declares and host
 	// assembly implements to each host's ABI selector.
 	asmDispatch map[string]map[string]string
+
+	needApeValue bool // host copies use apeValue
 
 	decls   bytes.Buffer      // ape declarations
 	init    bytes.Buffer      // body of apeinitHost (runtime)
@@ -273,12 +284,12 @@ func (hp *hostPkg) checkFiles(dir string, names []string, mayFail bool) bool {
 // sharedUse reports whether pos is in a file every host builds that is
 // not copied per host: a shared file or a shared test that builds for ape.
 func (g *pkgGen) sharedUse(pos token.Pos) bool {
-	name := filepath.Base(fset.Position(pos).Filename)
+	name := fileName(pos)
 	return g.shared[name] || g.sharedTests[name] && !g.testOff[name]
 }
 
 func (hp *hostPkg) inOnly(pos token.Pos) bool {
-	return hp.only[filepath.Base(fset.Position(pos).Filename)]
+	return hp.only[fileName(pos)]
 }
 
 // hostName is the name a host copy gives a package-level name.
@@ -415,6 +426,31 @@ func (g *pkgGen) run() {
 			}
 		}
 	}
+	// A host interface's method that host methods on shared types
+	// implement has their name.
+	for _, hp := range g.hs {
+		renamed := map[string]bool{}
+		for obj := range hp.rename {
+			if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil {
+				renamed[fn.Name()] = true
+			}
+		}
+		for name, obj := range hp.decls {
+			tn, ok := obj.(*types.TypeName)
+			if !ok || g.dedup[name] {
+				continue
+			}
+			it, ok := tn.Type().Underlying().(*types.Interface)
+			if !ok {
+				continue
+			}
+			for m := range it.ExplicitMethods() {
+				if renamed[m.Name()] {
+					hp.rename[m] = hostName(hp.host, m.Name())
+				}
+			}
+		}
+	}
 	g.hoistFields()
 
 	g.api = map[string]*iface{}
@@ -514,7 +550,9 @@ func (g *pkgGen) run() {
 				case *types.Func:
 					add(hp, "func", name, o, nil)
 				case *types.Var:
-					if !g.dedup[name] {
+					// (Not one of functions of host values: only host
+					// copies can use it.)
+					if !g.dedup[name] && !g.funcOfHost(hp, o.Type()) {
 						add(hp, "var", name, o, nil)
 					}
 				case *types.Const:
@@ -525,7 +563,7 @@ func (g *pkgGen) run() {
 						// A struct of data (exported fields only) is the
 						// first host's, converted field by field; one with
 						// state is not.
-						if st, ok := o.Type().Underlying().(*types.Struct); ok && allExported(st) {
+						if g.dataStructForAll(name) {
 							g.canon[name] = true
 						}
 					}
@@ -535,7 +573,9 @@ func (g *pkgGen) run() {
 			// interfaces: they are all dispatched.
 			for obj := range hp.rename {
 				if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil {
-					if g.hostNamed(hp, fn.Signature().Recv().Type()) == nil {
+					// (Not one of another package's host values: only
+					// host code can call it.)
+					if g.hostNamed(hp, fn.Signature().Recv().Type()) == nil && g.otherHostRef(hp, fn.Signature()) == nil {
 						add(hp, "method", recvName(fn.Signature().Recv().Type())+"."+fn.Name(), fn, nil)
 					}
 				}
@@ -554,6 +594,12 @@ func (g *pkgGen) run() {
 					}
 				}
 			}
+		}
+	}
+	// The variables host copies share are the ape package's.
+	for name := range g.sharedVar {
+		for _, hp := range g.hs {
+			add(hp, "var", name, hp.decls[name], nil)
 		}
 	}
 	// Functions shared assembly calls.
@@ -708,6 +754,9 @@ func (g *pkgGen) run() {
 			g.writeAsm(hp, f)
 		}
 	}
+	for _, name := range g.splitNames() {
+		g.writeShared(name)
+	}
 	g.writeDispatch()
 	g.writeAsmDispatch()
 	g.xoff = g.xtestOff()
@@ -724,7 +773,7 @@ func (g *pkgGen) findByValue() {
 	scope := hp.pkg.Scope()
 	for _, name := range scope.Names() {
 		o := scope.Lookup(name)
-		file := filepath.Base(fset.Position(o.Pos()).Filename)
+		file := fileName(o.Pos())
 		if !g.shared[file] && !g.dedup[name] {
 			continue
 		}
@@ -801,6 +850,12 @@ func (g *pkgGen) findDedup() {
 			if i == 0 {
 				shape = s
 			} else if s != shape {
+				same = false
+			}
+		}
+		// (Written the same way, but of another package's host types.)
+		for _, hp := range g.hs {
+			if o, ok := hp.decls[name]; ok && g.otherHostRef(hp, o.Type().Underlying()) != nil {
 				same = false
 			}
 		}
@@ -890,7 +945,7 @@ func (g *pkgGen) findDedup() {
 // varSpec returns the declaration of v, if it declares v alone, and
 // its value, if any.
 func (hp *hostPkg) varSpec(v *types.Var) (*ast.ValueSpec, ast.Expr) {
-	f := hp.files[filepath.Base(fset.Position(v.Pos()).Filename)]
+	f := hp.files[fileName(v.Pos())]
 	if f == nil {
 		return nil, nil
 	}
@@ -978,7 +1033,7 @@ func (g *pkgGen) asmDefines(hp *hostPkg, sym string) bool {
 
 // hasBody reports whether the function has a Go body.
 func (hp *hostPkg) hasBody(fn *types.Func) bool {
-	f := hp.files[filepath.Base(fset.Position(fn.Pos()).Filename)]
+	f := hp.files[fileName(fn.Pos())]
 	if f == nil {
 		return false
 	}
@@ -992,7 +1047,7 @@ func (hp *hostPkg) hasBody(fn *types.Func) bool {
 
 // linkname returns the //go:linkname directive naming obj, or "".
 func (hp *hostPkg) linkname(obj types.Object) string {
-	f := hp.files[filepath.Base(fset.Position(obj.Pos()).Filename)]
+	f := hp.files[fileName(obj.Pos())]
 	if f == nil {
 		return ""
 	}
@@ -1017,7 +1072,48 @@ func (g *pkgGen) shape(hp *hostPkg, tn *types.TypeName) string {
 	if tn.IsAlias() {
 		return "= " + types.TypeString(types.Unalias(tn.Type()), q)
 	}
-	return types.TypeString(tn.Type().Underlying(), q)
+	// (A local alias names what it stands for, which may differ.)
+	out := types.TypeString(tn.Type().Underlying(), q)
+	var aliases []string
+	var walk func(t types.Type, depth int)
+	walk = func(t types.Type, depth int) {
+		if depth > 8 {
+			return
+		}
+		switch t := t.(type) {
+		case *types.Alias:
+			if t.Obj().Pkg() == hp.pkg {
+				aliases = append(aliases, t.Obj().Name()+"="+types.TypeString(types.Unalias(t), q))
+			}
+		case *types.Pointer:
+			walk(t.Elem(), depth+1)
+		case *types.Slice:
+			walk(t.Elem(), depth+1)
+		case *types.Array:
+			walk(t.Elem(), depth+1)
+		case *types.Map:
+			walk(t.Key(), depth+1)
+			walk(t.Elem(), depth+1)
+		case *types.Chan:
+			walk(t.Elem(), depth+1)
+		case *types.Struct:
+			for f := range t.Fields() {
+				walk(f.Type(), depth+1)
+			}
+		case *types.Signature:
+			for v := range t.Params().Variables() {
+				walk(v.Type(), depth+1)
+			}
+			for v := range t.Results().Variables() {
+				walk(v.Type(), depth+1)
+			}
+		}
+	}
+	walk(tn.Type().Underlying(), 0)
+	if len(aliases) > 0 {
+		out += " " + strings.Join(aliases, " ")
+	}
+	return out
 }
 
 // declDedup declares the types every host declares the same way.
@@ -1170,4 +1266,21 @@ func cutLast(s, sep string) (before, after string, ok bool) {
 		return s, "", false
 	}
 	return s[:i], s[i+len(sep):], true
+}
+
+// dataStructForAll reports whether every host that declares the type
+// name declares a struct of data: one the ape package can have as the
+// first host's, converted field by field.
+func (g *pkgGen) dataStructForAll(name string) bool {
+	for _, hp := range g.hs {
+		o, ok := hp.decls[name]
+		if !ok {
+			continue
+		}
+		st, ok := o.Type().Underlying().(*types.Struct)
+		if !ok || !allExported(st) {
+			return false
+		}
+	}
+	return true
 }

@@ -2,20 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line unixsock_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line unixsock_posix.go:6:1*/
 package net
+
+import "unsafe"/*line unixsock_posix.go:7:12*/
 
 import (
 	"context"
 	"errors"
-	"os"
+	
 	"syscall"
 )
 
-func windows_unixSocket(ctx context.Context, net string, laddr, raddr sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*windows_netFD, error) {
+func windows_unixSocket(ctx context.Context, net string, laddr, raddr windows_sockaddr, mode string, ctxCtrlFn func(context.Context, string, string, syscall.RawConn) error) (*windows_netFD, error) {
 	var sotype int
 	switch net {
 	case "unix":
@@ -70,20 +73,7 @@ func windows_sockaddrToUnixpacket(sa syscall.Windows_Sockaddr) Addr {
 		return &UnixAddr{Name: s.Name, Net: "unixpacket"}
 	}
 	return nil
-}
-
-func windows_sotypeToNet(sotype int) string {
-	switch sotype {
-	case syscall.Windows_SOCK_STREAM:
-		return "unix"
-	case syscall.Windows_SOCK_DGRAM:
-		return "unixgram"
-	case syscall.Windows_SOCK_SEQPACKET:
-		return "unixpacket"
-	default:
-		panic("sotypeToNet unknown socket type")
-	}
-}
+}/*line unixsock_posix.go:84:2*/
 
 func (a *UnixAddr) windows_family() int {
 	return syscall.Windows_AF_UNIX
@@ -96,25 +86,25 @@ func (a *UnixAddr) windows_sockaddr(family int) (syscall.Windows_Sockaddr, error
 	return &syscall.Windows_SockaddrUnix{Name: a.Name}, nil
 }
 
-func (a *UnixAddr) windows_toLocal(net string) sockaddr {
+func (a *UnixAddr) windows_toLocal(net string) windows_sockaddr {
 	return a
 }
 
-func (c *Windows_UnixConn) readFrom(b []byte) (int, *UnixAddr, error) {
+func (c *UnixConn) windows_readFrom(b []byte) (int, *UnixAddr, error) {
 	var addr *UnixAddr
-	n, sa, err := c.fd.readFrom(b)
+	n, sa, err := (*(**windows_netFD)(unsafe.Pointer(&c.fd))).readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Windows_SockaddrUnix:
 		if sa.Name != "" {
-			addr = &UnixAddr{Name: sa.Name, Net: windows_sotypeToNet(c.fd.sotype)}
+			addr = &UnixAddr{Name: sa.Name, Net: sotypeToNet((*(**windows_netFD)(unsafe.Pointer(&c.fd))).sotype)}
 		}
 	}
 	return n, addr, err
 }
 
-func (c *Windows_UnixConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
+func (c *UnixConn) windows_readMsg(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
 	var sa syscall.Windows_Sockaddr
-	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, windows_readMsgFlags)
+	n, oobn, flags, sa, err = (*(**windows_netFD)(unsafe.Pointer(&c.fd))).readMsg(b, oob, windows_readMsgFlags)
 	if windows_readMsgFlags == 0 && err == nil && oobn > 0 {
 		windows_setReadMsgCloseOnExec(oob[:oobn])
 	}
@@ -122,41 +112,41 @@ func (c *Windows_UnixConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *Uni
 	switch sa := sa.(type) {
 	case *syscall.Windows_SockaddrUnix:
 		if sa.Name != "" {
-			addr = &UnixAddr{Name: sa.Name, Net: windows_sotypeToNet(c.fd.sotype)}
+			addr = &UnixAddr{Name: sa.Name, Net: sotypeToNet((*(**windows_netFD)(unsafe.Pointer(&c.fd))).sotype)}
 		}
 	}
 	return
 }
 
-func (c *Windows_UnixConn) writeTo(b []byte, addr *UnixAddr) (int, error) {
-	if c.fd.isConnected {
+func (c *UnixConn) windows_writeTo(b []byte, addr *UnixAddr) (int, error) {
+	if (*(**windows_netFD)(unsafe.Pointer(&c.fd))).isConnected {
 		return 0, ErrWriteToConnected
 	}
 	if addr == nil {
 		return 0, errMissingAddress
 	}
-	if addr.Net != windows_sotypeToNet(c.fd.sotype) {
+	if addr.Net != sotypeToNet((*(**windows_netFD)(unsafe.Pointer(&c.fd))).sotype) {
 		return 0, syscall.Windows_EAFNOSUPPORT
 	}
 	sa := &syscall.Windows_SockaddrUnix{Name: addr.Name}
-	return c.fd.writeTo(b, sa)
+	return (*(**windows_netFD)(unsafe.Pointer(&c.fd))).writeTo(b, sa)
 }
 
-func (c *Windows_UnixConn) writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
-	if c.fd.sotype == syscall.Windows_SOCK_DGRAM && c.fd.isConnected {
+func (c *UnixConn) windows_writeMsg(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
+	if (*(**windows_netFD)(unsafe.Pointer(&c.fd))).sotype == syscall.Windows_SOCK_DGRAM && (*(**windows_netFD)(unsafe.Pointer(&c.fd))).isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
 	var sa syscall.Windows_Sockaddr
 	if addr != nil {
-		if addr.Net != windows_sotypeToNet(c.fd.sotype) {
+		if addr.Net != sotypeToNet((*(**windows_netFD)(unsafe.Pointer(&c.fd))).sotype) {
 			return 0, 0, syscall.Windows_EAFNOSUPPORT
 		}
 		sa = &syscall.Windows_SockaddrUnix{Name: addr.Name}
 	}
-	return c.fd.writeMsg(b, oob, sa)
+	return (*(**windows_netFD)(unsafe.Pointer(&c.fd))).writeMsg(b, oob, sa)
 }
 
-func (sd *windows_sysDialer) dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*Windows_UnixConn, error) {
+func (sd *sysDialer) windows_dialUnix(ctx context.Context, laddr, raddr *UnixAddr) (*UnixConn, error) {
 	ctrlCtxFn := sd.Dialer.ControlContext
 	if ctrlCtxFn == nil && sd.Dialer.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -168,57 +158,9 @@ func (sd *windows_sysDialer) dialUnix(ctx context.Context, laddr, raddr *UnixAdd
 		return nil, err
 	}
 	return windows_newUnixConn(fd), nil
-}
+}/*line unixsock_posix.go:177:2*//*line unixsock_posix.go:197:2*//*line unixsock_posix.go:205:2*//*line unixsock_posix.go:217:2*/
 
-func (ln *Windows_UnixListener) accept() (*Windows_UnixConn, error) {
-	fd, err := ln.fd.accept()
-	if err != nil {
-		return nil, err
-	}
-	return windows_newUnixConn(fd), nil
-}
-
-func (ln *Windows_UnixListener) close() error {
-	// The operating system doesn't clean up
-	// the file that announcing created, so
-	// we have to clean it up ourselves.
-	// There's a race here--we can't know for
-	// sure whether someone else has come along
-	// and replaced our socket name already--
-	// but this sequence (remove then close)
-	// is at least compatible with the auto-remove
-	// sequence in ListenUnix. It's only non-Go
-	// programs that can mess us up.
-	// Even if there are racy calls to Close, we want to unlink only for the first one.
-	ln.unlinkOnce.Do(func() {
-		if ln.path[0] != '@' && ln.unlink {
-			syscall.Windows_Unlink(ln.path)
-		}
-	})
-	return ln.fd.Close()
-}
-
-func (ln *Windows_UnixListener) file() (*os.Windows_File, error) {
-	f, err := ln.fd.dup()
-	if err != nil {
-		return nil, err
-	}
-	return f, nil
-}
-
-// SetUnlinkOnClose sets whether the underlying socket file should be removed
-// from the file system when the listener is closed.
-//
-// The default behavior is to unlink the socket file only when package net created it.
-// That is, when the listener and the underlying socket file were created by a call to
-// Listen or ListenUnix, then by default closing the listener will remove the socket file.
-// but if the listener was created by a call to FileListener to use an already existing
-// socket file, then by default closing the listener will not remove the socket file.
-func (l *Windows_UnixListener) SetUnlinkOnClose(unlink bool) {
-	l.unlink = unlink
-}
-
-func (sl *sysListener) windows_listenUnix(ctx context.Context, laddr *UnixAddr) (*Windows_UnixListener, error) {
+func (sl *sysListener) windows_listenUnix(ctx context.Context, laddr *UnixAddr) (*UnixListener, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {
@@ -229,10 +171,10 @@ func (sl *sysListener) windows_listenUnix(ctx context.Context, laddr *UnixAddr) 
 	if err != nil {
 		return nil, err
 	}
-	return &Windows_UnixListener{fd: fd, path: fd.laddr.String(), unlink: true}, nil
+	return &UnixListener{fd: (*netFD)(unsafe.Pointer(fd)), path: fd.laddr.String(), unlink: true}, nil
 }
 
-func (sl *sysListener) windows_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*Windows_UnixConn, error) {
+func (sl *sysListener) windows_listenUnixgram(ctx context.Context, laddr *UnixAddr) (*UnixConn, error) {
 	var ctrlCtxFn func(ctx context.Context, network, address string, c syscall.RawConn) error
 	if sl.ListenConfig.Control != nil {
 		ctrlCtxFn = func(ctx context.Context, network, address string, c syscall.RawConn) error {

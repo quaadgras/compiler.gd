@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line path_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -33,7 +33,7 @@ func windows_splitPath(path string) (string, string) {
 
 	// The first prefixlen bytes are part of the parent directory.
 	// The prefix consists of the volume name (if any) and the first \ (if significant).
-	prefixlen := filepathlite.Windows_VolumeNameLen(path)
+	prefixlen := filepathlite.VolumeNameLen(path)
 	if len(path) > prefixlen && Windows_IsPathSeparator(path[prefixlen]) {
 		if prefixlen == 0 {
 			// This is a path relative to the current volume, like \foo.
@@ -76,7 +76,7 @@ func windows_splitPath(path string) (string, string) {
 }
 
 func windows_dirname(path string) string {
-	vol := filepathlite.Windows_VolumeName(path)
+	vol := filepathlite.VolumeName(path)
 	i := len(path) - 1
 	for i >= len(vol) && !Windows_IsPathSeparator(path[i]) {
 		i--

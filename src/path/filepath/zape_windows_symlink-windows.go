@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line symlink_windows.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import (
 // result of EvalSymlinks must be unique, so we have
 // EvalSymlinks(`c:\a`) == EvalSymlinks(`C:\a`).
 func windows_normVolumeName(path string) string {
-	volume := Windows_VolumeName(path)
+	volume := VolumeName(path)
 
 	if len(volume) > 2 { // isUNC
 		return volume

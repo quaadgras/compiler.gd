@@ -5,7 +5,6 @@
 package poll
 
 import (
-	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -22,18 +21,6 @@ const (
 	apeWindows
 )
 
-type fdMutex struct {
-	state uint64
-	rsema uint32
-	wsema uint32
-}
-
-type pollDesc struct{ runtimeCtx uintptr }
-
-var serverInit sync.Once
-
-const waitLock = true
-
 func DupCloseOnExec(a0 int) (int, string, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_DupCloseOnExec(a0)
@@ -45,20 +32,6 @@ func DupCloseOnExec(a0 int) (int, string, error) {
 	}
 	x0, x1, x2 := Windows_DupCloseOnExec(a0)
 	return x0, x1, x2
-}
-
-//go:linkname IsPollDescriptor
-func IsPollDescriptor(a0 uintptr) bool {
-	if apehost == apeLinux {
-		x0 := Linux_IsPollDescriptor(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_IsPollDescriptor(a0)
-		return x0
-	}
-	x0 := Windows_IsPollDescriptor(a0)
-	return x0
 }
 
 func SendFile(a0 *FD, a1 uintptr, a2 int64) (int64, error, bool) {
@@ -565,95 +538,6 @@ func (r *FD) writeUnlock() {
 	((*Windows_FD)(unsafe.Pointer(r))).writeUnlock()
 }
 
-func (r *fdMutex) decref() bool {
-	if apehost == apeLinux {
-		x0 := r.linux_decref()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_decref()
-		return x0
-	}
-	x0 := r.windows_decref()
-	return x0
-}
-
-func (r *fdMutex) incref() bool {
-	if apehost == apeLinux {
-		x0 := r.linux_incref()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_incref()
-		return x0
-	}
-	x0 := r.windows_incref()
-	return x0
-}
-
-func (r *fdMutex) increfAndClose() bool {
-	if apehost == apeLinux {
-		x0 := r.linux_increfAndClose()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_increfAndClose()
-		return x0
-	}
-	x0 := r.windows_increfAndClose()
-	return x0
-}
-
-func (r *fdMutex) rwlock(a0 bool, a1 bool) bool {
-	if apehost == apeLinux {
-		x0 := r.linux_rwlock(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_rwlock(a0, a1)
-		return x0
-	}
-	x0 := r.windows_rwlock(a0, a1)
-	return x0
-}
-
-func (r *fdMutex) rwunlock(a0 bool) bool {
-	if apehost == apeLinux {
-		x0 := r.linux_rwunlock(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_rwunlock(a0)
-		return x0
-	}
-	x0 := r.windows_rwunlock(a0)
-	return x0
-}
-
-func (r *pollDesc) close() {
-	if apehost == apeLinux {
-		r.linux_close()
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_close()
-		return
-	}
-	r.windows_close()
-}
-
-func (r *pollDesc) evict() {
-	if apehost == apeLinux {
-		r.linux_evict()
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_evict()
-		return
-	}
-	r.windows_evict()
-}
-
 func (r *pollDesc) init(a0 *FD) error {
 	if apehost == apeLinux {
 		x0 := r.linux_init((*Linux_FD)(unsafe.Pointer(a0)))
@@ -667,108 +551,23 @@ func (r *pollDesc) init(a0 *FD) error {
 	return x0
 }
 
-func (r *pollDesc) pollable() bool {
-	if apehost == apeLinux {
-		x0 := r.linux_pollable()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_pollable()
-		return x0
-	}
-	x0 := r.windows_pollable()
-	return x0
-}
-
-func (r *pollDesc) prepare(a0 int, a1 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_prepare(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_prepare(a0, a1)
-		return x0
-	}
-	x0 := r.windows_prepare(a0, a1)
-	return x0
-}
-
-func (r *pollDesc) prepareRead(a0 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_prepareRead(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_prepareRead(a0)
-		return x0
-	}
-	x0 := r.windows_prepareRead(a0)
-	return x0
-}
-
-func (r *pollDesc) prepareWrite(a0 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_prepareWrite(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_prepareWrite(a0)
-		return x0
-	}
-	x0 := r.windows_prepareWrite(a0)
-	return x0
-}
-
-func (r *pollDesc) wait(a0 int, a1 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_wait(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_wait(a0, a1)
-		return x0
-	}
-	x0 := r.windows_wait(a0, a1)
-	return x0
-}
-
-func (r *pollDesc) waitCanceled(a0 int) {
-	if apehost == apeLinux {
-		r.linux_waitCanceled(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_waitCanceled(a0)
-		return
-	}
-	r.windows_waitCanceled(a0)
-}
-
-func (r *pollDesc) waitRead(a0 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_waitRead(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_waitRead(a0)
-		return x0
-	}
-	x0 := r.windows_waitRead(a0)
-	return x0
-}
-
-func (r *pollDesc) waitWrite(a0 bool) error {
-	if apehost == apeLinux {
-		x0 := r.linux_waitWrite(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := r.freebsd_waitWrite(a0)
-		return x0
-	}
-	x0 := r.windows_waitWrite(a0)
-	return x0
-}
-
 // FD differs between hosts: functions convert it by pointer.
-type FD struct{ _ [19]uint64 }
+type FD struct{ _ [0]uint64 }
+
+// Linux_FromAPE_FD returns the host's p.
+func Linux_FromAPE_FD(p *FD) *Linux_FD { return (*Linux_FD)(unsafe.Pointer(p)) }
+
+// Linux_ToAPE_FD returns p as the ape type.
+func Linux_ToAPE_FD(p *Linux_FD) *FD { return (*FD)(unsafe.Pointer(p)) }
+
+// Freebsd_FromAPE_FD returns the host's p.
+func Freebsd_FromAPE_FD(p *FD) *Freebsd_FD { return (*Freebsd_FD)(unsafe.Pointer(p)) }
+
+// Freebsd_ToAPE_FD returns p as the ape type.
+func Freebsd_ToAPE_FD(p *Freebsd_FD) *FD { return (*FD)(unsafe.Pointer(p)) }
+
+// Windows_FromAPE_FD returns the host's p.
+func Windows_FromAPE_FD(p *FD) *Windows_FD { return (*Windows_FD)(unsafe.Pointer(p)) }
+
+// Windows_ToAPE_FD returns p as the ape type.
+func Windows_ToAPE_FD(p *Windows_FD) *FD { return (*FD)(unsafe.Pointer(p)) }

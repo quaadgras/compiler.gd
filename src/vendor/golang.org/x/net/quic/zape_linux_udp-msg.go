@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line udp_msg.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line udp_msg.go:6:1*/
 package quic
 
 import (
@@ -20,13 +21,13 @@ import (
 // Network interface for platforms using sendmsg/recvmsg with cmsgs.
 
 type linux_netUDPConn struct {
-	c         *net.Linux_UDPConn
+	c         *net.UDPConn
 	localAddr netip.AddrPort
 }
 
-func linux_newNetUDPConn(uc *net.Linux_UDPConn) (*linux_netUDPConn, error) {
+func linux_newNetUDPConn(uc *net.UDPConn) (*linux_netUDPConn, error) {
 	a, _ := uc.LocalAddr().(*net.UDPAddr)
-	localAddr := a.Linux_AddrPort()
+	localAddr := a.AddrPort()
 	if localAddr.Addr().IsUnspecified() {
 		// If the conn is not bound to a specified (non-wildcard) address,
 		// then set localAddr.Addr to an invalid netip.Addr.
@@ -63,7 +64,7 @@ func (c *linux_netUDPConn) Close() error { return c.c.Close() }
 
 func (c *linux_netUDPConn) LocalAddr() netip.AddrPort {
 	a, _ := c.c.LocalAddr().(*net.UDPAddr)
-	return a.Linux_AddrPort()
+	return a.AddrPort()
 }
 
 func (c *linux_netUDPConn) Read(f func(*datagram)) {

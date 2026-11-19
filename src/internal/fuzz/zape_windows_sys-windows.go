@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line sys_windows.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -20,7 +20,7 @@ type windows_sharedMemSys struct {
 	mapObj syscall.Windows_Handle
 }
 
-func windows_sharedMemMapFile(f *os.Windows_File, size int, removeOnClose bool) (mem *windows_sharedMem, err error) {
+func windows_sharedMemMapFile(f *os.File, size int, removeOnClose bool) (mem *sharedMem, err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("mapping temporary file %s: %w", f.Name(), err)
@@ -30,11 +30,11 @@ func windows_sharedMemMapFile(f *os.Windows_File, size int, removeOnClose bool) 
 	// Create a file mapping object. The object itself is not shared.
 	mapObj, err := syscall.Windows_CreateFileMapping(
 		syscall.Windows_Handle(f.Fd()), // fhandle
-		nil,                            // sa
+		nil,                    // sa
 		syscall.Windows_PAGE_READWRITE, // prot
-		0,                              // maxSizeHigh
-		0,                              // maxSizeLow
-		nil,                            // name
+		0,                      // maxSizeHigh
+		0,                      // maxSizeLow
+		nil,                    // name
 	)
 	if err != nil {
 		return nil, err
@@ -55,24 +55,24 @@ func windows_sharedMemMapFile(f *os.Windows_File, size int, removeOnClose bool) 
 	}
 
 	region := unsafe.Slice((*byte)(unsafe.Pointer(addr)), size)
-	return &windows_sharedMem{
+	return &sharedMem{
 		f:             f,
 		region:        region,
 		removeOnClose: removeOnClose,
-		sys:           windows_sharedMemSys{mapObj: mapObj},
+		sys:           apeValue[sharedMemSys](windows_sharedMemSys{mapObj: mapObj}),
 	}, nil
 }
 
 // Close unmaps the shared memory and closes the temporary file. If this
 // sharedMem was created with sharedMemTempFile, Close also removes the file.
-func (m *windows_sharedMem) Close() error {
+func (m *sharedMem) Windows_Close() error {
 	// Attempt all operations, even if we get an error for an earlier operation.
 	// os.File.Close may fail due to I/O errors, but we still want to delete
 	// the temporary file.
 	var errs []error
 	errs = append(errs,
 		syscall.Windows_UnmapViewOfFile(uintptr(unsafe.Pointer(&m.region[0]))),
-		syscall.Windows_CloseHandle(m.sys.mapObj),
+		syscall.Windows_CloseHandle((*(*windows_sharedMemSys)(unsafe.Pointer(&m.sys))).mapObj),
 		m.f.Close())
 	if m.removeOnClose {
 		errs = append(errs, os.Windows_Remove(m.f.Name()))
@@ -87,7 +87,7 @@ func (m *windows_sharedMem) Close() error {
 
 // setWorkerComm configures communication channels on the cmd that will
 // run a worker process.
-func windows_setWorkerComm(cmd *exec.Cmd, comm windows_workerComm) {
+func windows_setWorkerComm(cmd *exec.Cmd, comm workerComm) {
 	mem := <-comm.memMu
 	memFD := mem.f.Fd()
 	comm.memMu <- mem
@@ -95,40 +95,40 @@ func windows_setWorkerComm(cmd *exec.Cmd, comm windows_workerComm) {
 	syscall.Windows_SetHandleInformation(syscall.Windows_Handle(comm.fuzzOut.Fd()), syscall.Windows_HANDLE_FLAG_INHERIT, 1)
 	syscall.Windows_SetHandleInformation(syscall.Windows_Handle(memFD), syscall.Windows_HANDLE_FLAG_INHERIT, 1)
 	cmd.Env = append(cmd.Env, fmt.Sprintf("GO_TEST_FUZZ_WORKER_HANDLES=%x,%x,%x", comm.fuzzIn.Fd(), comm.fuzzOut.Fd(), memFD))
-	cmd.SysProcAttr = &syscall.Windows_SysProcAttr{AdditionalInheritedHandles: []syscall.Windows_Handle{syscall.Windows_Handle(comm.fuzzIn.Fd()), syscall.Windows_Handle(comm.fuzzOut.Fd()), syscall.Windows_Handle(memFD)}}
+	cmd.SysProcAttr = syscall.Windows_ToAPE_SysProcAttr(&syscall.Windows_SysProcAttr{AdditionalInheritedHandles: []syscall.Windows_Handle{syscall.Windows_Handle(comm.fuzzIn.Fd()), syscall.Windows_Handle(comm.fuzzOut.Fd()), syscall.Windows_Handle(memFD)}})
 }
 
 // getWorkerComm returns communication channels in the worker process.
-func windows_getWorkerComm() (comm windows_workerComm, err error) {
+func windows_getWorkerComm() (comm workerComm, err error) {
 	v := os.Getenv("GO_TEST_FUZZ_WORKER_HANDLES")
 	if v == "" {
-		return windows_workerComm{}, fmt.Errorf("GO_TEST_FUZZ_WORKER_HANDLES not set")
+		return workerComm{}, fmt.Errorf("GO_TEST_FUZZ_WORKER_HANDLES not set")
 	}
 	var fuzzInFD, fuzzOutFD, memFileFD uintptr
 	if _, err := fmt.Sscanf(v, "%x,%x,%x", &fuzzInFD, &fuzzOutFD, &memFileFD); err != nil {
-		return windows_workerComm{}, fmt.Errorf("parsing GO_TEST_FUZZ_WORKER_HANDLES=%s: %v", v, err)
+		return workerComm{}, fmt.Errorf("parsing GO_TEST_FUZZ_WORKER_HANDLES=%s: %v", v, err)
 	}
 
-	fuzzIn := os.Windows_NewFile(fuzzInFD, "fuzz_in")
-	fuzzOut := os.Windows_NewFile(fuzzOutFD, "fuzz_out")
-	memFile := os.Windows_NewFile(memFileFD, "fuzz_mem")
-	fi, err := memFile.Stat()
+	fuzzIn := os.NewFile(fuzzInFD, "fuzz_in")
+	fuzzOut := os.NewFile(fuzzOutFD, "fuzz_out")
+	memFile := os.NewFile(memFileFD, "fuzz_mem")
+	fi, err := memFile.Windows_Stat()
 	if err != nil {
-		return windows_workerComm{}, fmt.Errorf("worker checking temp file size: %w", err)
+		return workerComm{}, fmt.Errorf("worker checking temp file size: %w", err)
 	}
 	size := int(fi.Size())
 	if int64(size) != fi.Size() {
-		return windows_workerComm{}, fmt.Errorf("fuzz temp file exceeds maximum size")
+		return workerComm{}, fmt.Errorf("fuzz temp file exceeds maximum size")
 	}
 	removeOnClose := false
 	mem, err := windows_sharedMemMapFile(memFile, size, removeOnClose)
 	if err != nil {
-		return windows_workerComm{}, err
+		return workerComm{}, err
 	}
-	memMu := make(chan *windows_sharedMem, 1)
+	memMu := make(chan *sharedMem, 1)
 	memMu <- mem
 
-	return windows_workerComm{fuzzIn: fuzzIn, fuzzOut: fuzzOut, memMu: memMu}, nil
+	return workerComm{fuzzIn: fuzzIn, fuzzOut: fuzzOut, memMu: memMu}, nil
 }
 
 func windows_isInterruptError(err error) bool {

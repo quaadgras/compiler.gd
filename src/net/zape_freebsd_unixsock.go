@@ -2,125 +2,68 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line unixsock.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line unixsock.go:6:1*/
 package net
 
+import "unsafe"/*line unixsock.go:7:12*/
+
 import (
-	"context"
+	
 	"io"
 	"os"
-	"sync"
+	
 	"syscall"
-	"time"
-)
-
-// BUG(mikio): On JS, WASIP1 and Plan 9, methods and functions related
-// to UnixConn and UnixListener are not implemented.
-
-// BUG(mikio): On Windows, methods and functions related to UnixConn
-// and UnixListener don't work for "unixgram" and "unixpacket".
-
-// Network returns the address's network name, "unix", "unixgram" or
-// "unixpacket".
-func (a *UnixAddr) Freebsd_Network() string {
-	return a.Net
-}
-
-func (a *UnixAddr) Freebsd_String() string {
-	if a == nil {
-		return "<nil>"
-	}
-	return a.Name
-}
-
-func (a *UnixAddr) freebsd_isWildcard() bool {
-	return a == nil || a.Name == ""
-}
-
-func (a *UnixAddr) freebsd_opAddr() Addr {
-	if a == nil {
-		return nil
-	}
-	return a
-}
-
-// ResolveUnixAddr returns an address of Unix domain socket end point.
-//
-// The network must be a Unix network name.
-//
-// See func [Dial] for a description of the network and address
-// parameters.
-func Freebsd_ResolveUnixAddr(network, address string) (*UnixAddr, error) {
-	switch network {
-	case "unix", "unixgram", "unixpacket":
-		return &UnixAddr{Name: address, Net: network}, nil
-	default:
-		return nil, UnknownNetworkError(network)
-	}
-}
-
-// UnixConn is an implementation of the [Conn] interface for connections
-// to Unix domain sockets.
-type Freebsd_UnixConn struct {
-	freebsd_conn
-}
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-func (c *Freebsd_UnixConn) SyscallConn() (syscall.RawConn, error) {
-	if !c.ok() {
-		return nil, syscall.Freebsd_EINVAL
-	}
-	return freebsd_newRawConn(c.fd), nil
-}
+	
+)/*line unixsock.go:35:2*//*line unixsock.go:41:2*//*line unixsock.go:48:2*//*line unixsock.go:52:2*//*line unixsock.go:59:2*//*line unixsock.go:74:2*//*line unixsock.go:80:2*//*line unixsock.go:89:2*/
 
 // CloseRead shuts down the reading side of the Unix domain connection.
 // Most callers should just use [UnixConn.Close].
-func (c *Freebsd_UnixConn) CloseRead() error {
+func (c *UnixConn) Freebsd_CloseRead() error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
-	if err := c.fd.closeRead(); err != nil {
-		return &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).closeRead(); err != nil {
+		return &OpError{Op: "close", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
 
 // CloseWrite shuts down the writing side of the Unix domain connection.
 // Most callers should just use [UnixConn.Close].
-func (c *Freebsd_UnixConn) CloseWrite() error {
+func (c *UnixConn) Freebsd_CloseWrite() error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
-	if err := c.fd.closeWrite(); err != nil {
-		return &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).closeWrite(); err != nil {
+		return &OpError{Op: "close", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
 
 // ReadFromUnix acts like [UnixConn.ReadFrom] but returns a [UnixAddr].
-func (c *Freebsd_UnixConn) ReadFromUnix(b []byte) (int, *UnixAddr, error) {
+func (c *UnixConn) Freebsd_ReadFromUnix(b []byte) (int, *UnixAddr, error) {
 	if !c.ok() {
 		return 0, nil, syscall.Freebsd_EINVAL
 	}
-	n, addr, err := c.readFrom(b)
+	n, addr, err := c.freebsd_readFrom(b)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, addr, err
 }
 
 // ReadFrom implements the [PacketConn].ReadFrom method.
-func (c *Freebsd_UnixConn) ReadFrom(b []byte) (int, Addr, error) {
+func (c *UnixConn) Freebsd_ReadFrom(b []byte) (int, Addr, error) {
 	if !c.ok() {
 		return 0, nil, syscall.Freebsd_EINVAL
 	}
-	n, addr, err := c.readFrom(b)
+	n, addr, err := c.freebsd_readFrom(b)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	if addr == nil {
 		return n, nil, err
@@ -135,41 +78,41 @@ func (c *Freebsd_UnixConn) ReadFrom(b []byte) (int, Addr, error) {
 //
 // Note that if len(b) == 0 and len(oob) > 0, this function will still
 // read (and discard) 1 byte from the connection.
-func (c *Freebsd_UnixConn) ReadMsgUnix(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
+func (c *UnixConn) Freebsd_ReadMsgUnix(b, oob []byte) (n, oobn, flags int, addr *UnixAddr, err error) {
 	if !c.ok() {
 		return 0, 0, 0, nil, syscall.Freebsd_EINVAL
 	}
-	n, oobn, flags, addr, err = c.readMsg(b, oob)
+	n, oobn, flags, addr, err = c.freebsd_readMsg(b, oob)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return
 }
 
 // WriteToUnix acts like [UnixConn.WriteTo] but takes a [UnixAddr].
-func (c *Freebsd_UnixConn) WriteToUnix(b []byte, addr *UnixAddr) (int, error) {
+func (c *UnixConn) Freebsd_WriteToUnix(b []byte, addr *UnixAddr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
-	n, err := c.writeTo(b, addr)
+	n, err := c.freebsd_writeTo(b, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return n, err
 }
 
 // WriteTo implements the [PacketConn].WriteTo method.
-func (c *Freebsd_UnixConn) WriteTo(b []byte, addr Addr) (int, error) {
+func (c *UnixConn) Freebsd_WriteTo(b []byte, addr Addr) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
 	a, ok := addr.(*UnixAddr)
 	if !ok {
-		return 0, &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr, Err: syscall.Freebsd_EINVAL}
+		return 0, &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr, Err: syscall.Freebsd_EINVAL}
 	}
-	n, err := c.writeTo(b, a)
+	n, err := c.freebsd_writeTo(b, a)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: a.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: a.opAddr(), Err: err}
 	}
 	return n, err
 }
@@ -180,106 +123,53 @@ func (c *Freebsd_UnixConn) WriteTo(b []byte, addr Addr) (int, error) {
 //
 // Note that if len(b) == 0 and len(oob) > 0, this function will still
 // write 1 byte to the connection.
-func (c *Freebsd_UnixConn) WriteMsgUnix(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
+func (c *UnixConn) Freebsd_WriteMsgUnix(b, oob []byte, addr *UnixAddr) (n, oobn int, err error) {
 	if !c.ok() {
 		return 0, 0, syscall.Freebsd_EINVAL
 	}
-	n, oobn, err = c.writeMsg(b, oob, addr)
+	n, oobn, err = c.freebsd_writeMsg(b, oob, addr)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: addr.freebsd_opAddr(), Err: err}
+		err = &OpError{Op: "write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: addr.opAddr(), Err: err}
 	}
 	return
 }
 
-func freebsd_newUnixConn(fd *freebsd_netFD) *Freebsd_UnixConn {
-	return &Freebsd_UnixConn{freebsd_conn{fd}}
-}
-
-// DialUnix acts like [Dial] for Unix networks.
-//
-// The network must be a Unix network name; see func [Dial] for details.
-//
-// If laddr is non-nil, it is used as the local address for the
-// connection.
-func Freebsd_DialUnix(network string, laddr, raddr *UnixAddr) (*Freebsd_UnixConn, error) {
-	return freebsd_dialUnix(context.Background(), nil, network, laddr, raddr)
-}
-
-func freebsd_dialUnix(ctx context.Context, dialer *Dialer, network string, laddr, raddr *UnixAddr) (*Freebsd_UnixConn, error) {
-	switch network {
-	case "unix", "unixgram", "unixpacket":
-	default:
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.freebsd_opAddr(), Addr: raddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	sd := &freebsd_sysDialer{network: network, address: raddr.Freebsd_String()}
-	if dialer != nil {
-		sd.Dialer = *dialer
-	}
-	c, err := sd.dialUnix(ctx, laddr, raddr)
-	if err != nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.freebsd_opAddr(), Addr: raddr.freebsd_opAddr(), Err: err}
-	}
-	return c, nil
-}
-
-// UnixListener is a Unix domain socket listener. Clients should
-// typically use variables of type [Listener] instead of assuming Unix
-// domain sockets.
-type Freebsd_UnixListener struct {
-	fd         *freebsd_netFD
-	path       string
-	unlink     bool
-	unlinkOnce sync.Once
-}
-
-func (ln *Freebsd_UnixListener) ok() bool { return ln != nil && ln.fd != nil }
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-//
-// The returned [syscall.RawConn] only supports calling Control. Read and
-// Write return an error.
-func (l *Freebsd_UnixListener) SyscallConn() (syscall.RawConn, error) {
-	if !l.ok() {
-		return nil, syscall.Freebsd_EINVAL
-	}
-	return freebsd_newRawListener(l.fd), nil
-}
+func freebsd_newUnixConn(fd *freebsd_netFD) *UnixConn { return &UnixConn{conn{(*netFD)(unsafe.Pointer(fd))}} }/*line unixsock.go:215:2*//*line unixsock.go:232:2*//*line unixsock.go:242:2*//*line unixsock.go:244:71*//*line unixsock.go:256:2*/
 
 // AcceptUnix accepts the next incoming call and returns the new
 // connection.
-func (l *Freebsd_UnixListener) AcceptUnix() (*Freebsd_UnixConn, error) {
+func (l *UnixListener) Freebsd_AcceptUnix() (*UnixConn, error) {
 	if !l.ok() {
 		return nil, syscall.Freebsd_EINVAL
 	}
 	c, err := l.accept()
 	if err != nil {
-		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return nil, &OpError{Op: "accept", Net: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return c, nil
 }
 
 // Accept implements the Accept method in the [Listener] interface.
 // Returned connections will be of type [*UnixConn].
-func (l *Freebsd_UnixListener) Accept() (Conn, error) {
+func (l *UnixListener) Freebsd_Accept() (Conn, error) {
 	if !l.ok() {
 		return nil, syscall.Freebsd_EINVAL
 	}
 	c, err := l.accept()
 	if err != nil {
-		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return nil, &OpError{Op: "accept", Net: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return c, nil
 }
 
 // Close stops listening on the Unix address. Already accepted
 // connections are not closed.
-func (l *Freebsd_UnixListener) Close() error {
+func (l *UnixListener) Freebsd_Close() error {
 	if !l.ok() {
 		return syscall.Freebsd_EINVAL
 	}
 	if err := l.close(); err != nil {
-		return &OpError{Op: "close", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return &OpError{Op: "close", Net: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return nil
 }
@@ -287,16 +177,7 @@ func (l *Freebsd_UnixListener) Close() error {
 // Addr returns the listener's network address.
 // The [Addr] returned is shared by all invocations of Addr, so
 // do not modify it.
-func (l *Freebsd_UnixListener) Addr() Addr { return l.fd.laddr }
-
-// SetDeadline sets the deadline associated with the listener.
-// A zero time value disables the deadline.
-func (l *Freebsd_UnixListener) SetDeadline(t time.Time) error {
-	if !l.ok() {
-		return syscall.Freebsd_EINVAL
-	}
-	return l.fd.SetDeadline(t)
-}
+func (l *UnixListener) Freebsd_Addr() Addr { return (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).laddr }/*line unixsock.go:308:2*/
 
 // File returns a copy of the underlying [os.File].
 // It is the caller's responsibility to close f when finished.
@@ -308,53 +189,13 @@ func (l *Freebsd_UnixListener) SetDeadline(t time.Time) error {
 //
 // On Windows, the returned os.File's file descriptor is not
 // usable on other processes.
-func (l *Freebsd_UnixListener) File() (f *os.Freebsd_File, err error) {
+func (l *UnixListener) Freebsd_File() (f *os.File, err error) {
 	if !l.ok() {
 		return nil, syscall.Freebsd_EINVAL
 	}
 	f, err = l.file()
 	if err != nil {
-		err = &OpError{Op: "file", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		err = &OpError{Op: "file", Net: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return
-}
-
-// ListenUnix acts like [Listen] for Unix networks.
-//
-// The network must be "unix" or "unixpacket".
-func Freebsd_ListenUnix(network string, laddr *UnixAddr) (*Freebsd_UnixListener, error) {
-	switch network {
-	case "unix", "unixpacket":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if laddr == nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: errMissingAddress}
-	}
-	sl := &sysListener{network: network, address: laddr.Freebsd_String()}
-	ln, err := sl.freebsd_listenUnix(context.Background(), laddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: err}
-	}
-	return ln, nil
-}
-
-// ListenUnixgram acts like [ListenPacket] for Unix networks.
-//
-// The network must be "unixgram".
-func Freebsd_ListenUnixgram(network string, laddr *UnixAddr) (*Freebsd_UnixConn, error) {
-	switch network {
-	case "unixgram":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if laddr == nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: nil, Err: errMissingAddress}
-	}
-	sl := &sysListener{network: network, address: laddr.Freebsd_String()}
-	c, err := sl.freebsd_listenUnixgram(context.Background(), laddr)
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.freebsd_opAddr(), Err: err}
-	}
-	return c, nil
-}
+}/*line unixsock.go:349:2*//*line unixsock.go:369:2*/

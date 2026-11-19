@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line file_posix.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line file_posix.go:6:1*/
 package net
+
+import "unsafe"/*line file_posix.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,7 +17,7 @@ import (
 	"syscall"
 )
 
-func freebsd_newFileFD(f *os.Freebsd_File) (*freebsd_netFD, error) {
+func freebsd_newFileFD(f *os.File) (*freebsd_netFD, error) {
 	s, err := freebsd_dupFileSocket(f)
 	if err != nil {
 		return nil, err
@@ -54,14 +57,14 @@ func freebsd_newFileFD(f *os.Freebsd_File) (*freebsd_netFD, error) {
 	return fd, nil
 }
 
-func freebsd_fileConn(f *os.Freebsd_File) (Conn, error) {
+func freebsd_fileConn(f *os.File) (Conn, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *TCPAddr:
-		return freebsd_newTCPConn(fd, freebsd_defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+		return freebsd_newTCPConn(fd, defaultTCPKeepAliveIdle, KeepAliveConfig{}, freebsd_testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 	case *UDPAddr:
 		return freebsd_newUDPConn(fd), nil
 	case *IPAddr:
@@ -73,22 +76,22 @@ func freebsd_fileConn(f *os.Freebsd_File) (Conn, error) {
 	return nil, syscall.Freebsd_EINVAL
 }
 
-func freebsd_fileListener(f *os.Freebsd_File) (Listener, error) {
+func freebsd_fileListener(f *os.File) (Listener, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch laddr := fd.laddr.(type) {
 	case *TCPAddr:
-		return &Freebsd_TCPListener{fd: fd}, nil
+		return &TCPListener{fd: (*netFD)(unsafe.Pointer(fd))}, nil
 	case *UnixAddr:
-		return &Freebsd_UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
+		return &UnixListener{fd: (*netFD)(unsafe.Pointer(fd)), path: laddr.Name, unlink: false}, nil
 	}
 	fd.Close()
 	return nil, syscall.Freebsd_EINVAL
 }
 
-func freebsd_filePacketConn(f *os.Freebsd_File) (PacketConn, error) {
+func freebsd_filePacketConn(f *os.File) (PacketConn, error) {
 	fd, err := freebsd_newFileFD(f)
 	if err != nil {
 		return nil, err

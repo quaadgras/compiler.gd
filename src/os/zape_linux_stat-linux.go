@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line stat_linux.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,36 +17,36 @@ import (
 func linux_fillFileStatFromSys(fs *linux_fileStat, name string) {
 	fs.name = filepathlite.Linux_Base(name)
 	fs.size = fs.sys.Size
-	fs.modTime = time.Linux_Unix(fs.sys.Mtim.Linux_Unix())
+	fs.modTime = time.Unix(fs.sys.Mtim.Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)
 	switch fs.sys.Mode & syscall.Linux_S_IFMT {
 	case syscall.Linux_S_IFBLK:
-		fs.mode |= Linux_ModeDevice
+		fs.mode |= ModeDevice
 	case syscall.Linux_S_IFCHR:
-		fs.mode |= Linux_ModeDevice | Linux_ModeCharDevice
+		fs.mode |= ModeDevice | ModeCharDevice
 	case syscall.Linux_S_IFDIR:
-		fs.mode |= Linux_ModeDir
+		fs.mode |= ModeDir
 	case syscall.Linux_S_IFIFO:
-		fs.mode |= Linux_ModeNamedPipe
+		fs.mode |= ModeNamedPipe
 	case syscall.Linux_S_IFLNK:
-		fs.mode |= Linux_ModeSymlink
+		fs.mode |= ModeSymlink
 	case syscall.Linux_S_IFREG:
 		// nothing to do
 	case syscall.Linux_S_IFSOCK:
-		fs.mode |= Linux_ModeSocket
+		fs.mode |= ModeSocket
 	}
 	if fs.sys.Mode&syscall.Linux_S_ISGID != 0 {
-		fs.mode |= Linux_ModeSetgid
+		fs.mode |= ModeSetgid
 	}
 	if fs.sys.Mode&syscall.Linux_S_ISUID != 0 {
-		fs.mode |= Linux_ModeSetuid
+		fs.mode |= ModeSetuid
 	}
 	if fs.sys.Mode&syscall.Linux_S_ISVTX != 0 {
-		fs.mode |= Linux_ModeSticky
+		fs.mode |= ModeSticky
 	}
 }
 
 // For testing.
 func linux_atime(fi FileInfo) time.Time {
-	return time.Linux_Unix(fi.Sys().(*syscall.Linux_Stat_t).Atim.Linux_Unix())
+	return time.Unix(fi.Sys().(*syscall.Linux_Stat_t).Atim.Unix())
 }

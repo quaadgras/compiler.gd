@@ -2,20 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line statat_unix.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line statat_unix.go:6:1*/
 package os
+
+import "unsafe"/*line statat_unix.go:7:11*/
 
 import (
 	"internal/syscall/unix"
 )
 
-func (f *Freebsd_File) lstatatNolog(name string) (FileInfo, error) {
+func (f *File) freebsd_lstatatNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	if err := f.pfd.Fstatat(name, &fs.sys, unix.Freebsd_AT_SYMLINK_NOFOLLOW); err != nil {
-		err = f.wrapErr("fstatat", err)
+	if err := (*freebsd_file)(unsafe.Pointer(f.file)).pfd.Fstatat(name, &fs.sys, unix.Freebsd_AT_SYMLINK_NOFOLLOW); err != nil {
+		err = f.freebsd_wrapErr("fstatat", err)
 		if pe, ok := err.(*PathError); ok {
 			pe.Path = pe.Path + string(Freebsd_PathSeparator) + name
 		}

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line netlink_linux.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -55,7 +55,7 @@ func linux_newNetlinkRouteRequest(proto, seq, family int) []byte {
 }
 
 var linux_pageBufPool = &sync.Pool{New: func() any {
-	b := make([]byte, Linux_Getpagesize())
+	b := make([]byte, Getpagesize())
 	return &b
 }}
 

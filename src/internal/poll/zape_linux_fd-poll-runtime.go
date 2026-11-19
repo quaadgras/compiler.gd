@@ -2,144 +2,30 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line fd_poll_runtime.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_poll_runtime.go:6:1*/
 package poll
 
 import (
-	"errors"
-
+	
+	
 	"syscall"
 	"time"
 	_ "unsafe" // for go:linkname
-)
-
-// runtimeNano returns the current value of the runtime clock in nanoseconds.
-//
-//go:linkname linux_runtimeNano runtime.nanotime
-func linux_runtimeNano() int64
-
-//go:linkname linux_runtime_pollServerInit internal/poll.runtime_pollServerInit
-func linux_runtime_pollServerInit()
-
-//go:linkname linux_runtime_pollOpen internal/poll.runtime_pollOpen
-func linux_runtime_pollOpen(fd uintptr) (uintptr, int)
-
-//go:linkname linux_runtime_pollClose internal/poll.runtime_pollClose
-func linux_runtime_pollClose(ctx uintptr)
-
-//go:linkname linux_runtime_pollWait internal/poll.runtime_pollWait
-func linux_runtime_pollWait(ctx uintptr, mode int) int
-
-//go:linkname linux_runtime_pollWaitCanceled internal/poll.runtime_pollWaitCanceled
-func linux_runtime_pollWaitCanceled(ctx uintptr, mode int)
-
-//go:linkname linux_runtime_pollReset internal/poll.runtime_pollReset
-func linux_runtime_pollReset(ctx uintptr, mode int) int
-
-//go:linkname linux_runtime_pollSetDeadline internal/poll.runtime_pollSetDeadline
-func linux_runtime_pollSetDeadline(ctx uintptr, d int64, mode int)
-
-//go:linkname linux_runtime_pollUnblock internal/poll.runtime_pollUnblock
-func linux_runtime_pollUnblock(ctx uintptr)
-
-//go:linkname linux_runtime_isPollServerDescriptor internal/poll.runtime_isPollServerDescriptor
-func linux_runtime_isPollServerDescriptor(fd uintptr) bool
+)/*line fd_poll_runtime.go:20:25*//*line fd_poll_runtime.go:22:30*//*line fd_poll_runtime.go:23:49*//*line fd_poll_runtime.go:24:36*//*line fd_poll_runtime.go:25:49*//*line fd_poll_runtime.go:26:53*//*line fd_poll_runtime.go:27:50*//*line fd_poll_runtime.go:28:61*//*line fd_poll_runtime.go:29:38*//*line fd_poll_runtime.go:30:53*//*line fd_poll_runtime.go:34:2*//*line fd_poll_runtime.go:36:25*/
 
 func (pd *pollDesc) linux_init(fd *Linux_FD) error {
-	serverInit.Do(linux_runtime_pollServerInit)
-	ctx, errno := linux_runtime_pollOpen(uintptr(fd.Sysfd))
+	serverInit.Do(runtime_pollServerInit)
+	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))
 	if errno != 0 {
 		return linux_errnoErr(syscall.Errno(errno))
 	}
 	pd.runtimeCtx = ctx
 	return nil
-}
-
-func (pd *pollDesc) linux_close() {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	linux_runtime_pollClose(pd.runtimeCtx)
-	pd.runtimeCtx = 0
-}
-
-// Evict evicts fd from the pending list, unblocking any I/O running on fd.
-func (pd *pollDesc) linux_evict() {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	linux_runtime_pollUnblock(pd.runtimeCtx)
-}
-
-func (pd *pollDesc) linux_prepare(mode int, isFile bool) error {
-	if pd.runtimeCtx == 0 {
-		return nil
-	}
-	res := linux_runtime_pollReset(pd.runtimeCtx, mode)
-	return linux_convertErr(res, isFile)
-}
-
-func (pd *pollDesc) linux_prepareRead(isFile bool) error {
-	return pd.linux_prepare('r', isFile)
-}
-
-func (pd *pollDesc) linux_prepareWrite(isFile bool) error {
-	return pd.linux_prepare('w', isFile)
-}
-
-func (pd *pollDesc) linux_wait(mode int, isFile bool) error {
-	if pd.runtimeCtx == 0 {
-		return errors.New("waiting for unsupported file type")
-	}
-	res := linux_runtime_pollWait(pd.runtimeCtx, mode)
-	return linux_convertErr(res, isFile)
-}
-
-func (pd *pollDesc) linux_waitRead(isFile bool) error {
-	return pd.linux_wait('r', isFile)
-}
-
-func (pd *pollDesc) linux_waitWrite(isFile bool) error {
-	return pd.linux_wait('w', isFile)
-}
-
-func (pd *pollDesc) linux_waitCanceled(mode int) {
-	if pd.runtimeCtx == 0 {
-		return
-	}
-	linux_runtime_pollWaitCanceled(pd.runtimeCtx, mode)
-}
-
-func (pd *pollDesc) linux_pollable() bool {
-	return pd.runtimeCtx != 0
-}
-
-// Error values returned by runtime_pollReset and runtime_pollWait.
-// These must match the values in runtime/netpoll.go.
-const (
-	linux_pollNoError        = 0
-	linux_pollErrClosing     = 1
-	linux_pollErrTimeout     = 2
-	linux_pollErrNotPollable = 3
-)
-
-func linux_convertErr(res int, isFile bool) error {
-	switch res {
-	case linux_pollNoError:
-		return nil
-	case linux_pollErrClosing:
-		return errClosing(isFile)
-	case linux_pollErrTimeout:
-		return ErrDeadlineExceeded
-	case linux_pollErrNotPollable:
-		return ErrNotPollable
-	}
-	println("unreachable: ", res)
-	panic("unreachable")
-}
+}/*line fd_poll_runtime.go:54:2*//*line fd_poll_runtime.go:62:2*//*line fd_poll_runtime.go:70:2*//*line fd_poll_runtime.go:74:2*//*line fd_poll_runtime.go:78:2*//*line fd_poll_runtime.go:86:2*//*line fd_poll_runtime.go:90:2*//*line fd_poll_runtime.go:94:2*//*line fd_poll_runtime.go:101:2*//*line fd_poll_runtime.go:105:2*//*line fd_poll_runtime.go:114:2*//*line fd_poll_runtime.go:129:2*/
 
 // SetDeadline sets the read and write deadlines associated with fd.
 func (fd *Linux_FD) SetDeadline(t time.Time) error {
@@ -158,8 +44,8 @@ func (fd *Linux_FD) SetWriteDeadline(t time.Time) error {
 
 func linux_setDeadlineImpl(fd *Linux_FD, t time.Time, mode int) error {
 	var d int64
-	if !t.Linux_IsZero() {
-		d = int64(time.Linux_Until(t))
+	if !t.IsZero() {
+		d = int64(time.Until(t))
 		if d == 0 {
 			d = -1 // don't confuse deadline right now with no deadline
 		}
@@ -172,22 +58,6 @@ func linux_setDeadlineImpl(fd *Linux_FD, t time.Time, mode int) error {
 	if fd.pd.runtimeCtx == 0 {
 		return ErrNoDeadline
 	}
-	linux_runtime_pollSetDeadline(fd.pd.runtimeCtx, d, mode)
+	runtime_pollSetDeadline(fd.pd.runtimeCtx, d, mode)
 	return nil
-}
-
-// IsPollDescriptor reports whether fd is the descriptor being used by the poller.
-// This is only used for testing.
-//
-// IsPollDescriptor should be an internal detail,
-// but widely used packages access it using linkname.
-// Notable members of the hall of shame include:
-//   - github.com/opencontainers/runc
-//
-// Do not remove or change the type signature.
-// See go.dev/issue/67401.
-//
-//go:linkname Linux_IsPollDescriptor
-func Linux_IsPollDescriptor(fd uintptr) bool {
-	return linux_runtime_isPollServerDescriptor(fd)
-}
+}/*line fd_poll_runtime.go:180:2*/

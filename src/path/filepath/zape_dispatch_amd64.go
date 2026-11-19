@@ -5,9 +5,6 @@
 package filepath
 
 import (
-	"errors"
-	"io/fs"
-	"os"
 	"unsafe"
 )
 
@@ -21,16 +18,6 @@ const (
 	apeFreebsd
 	apeWindows
 )
-
-var ErrBadPattern error = errors.New("syntax error in pattern")
-
-var SkipAll error = fs.SkipAll
-
-var SkipDir error = fs.SkipDir
-
-type WalkFunc func(path string, info fs.FileInfo, err error) error
-
-var lstat func(name string) (os.FileInfo, error) = os.Lstat
 
 // ListSeparator differs between hosts.
 var ListSeparator rune = func() rune {
@@ -54,110 +41,6 @@ var Separator rune = func() rune {
 	return rune(Windows_Separator)
 }()
 
-func Abs(a0 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Abs(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Abs(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_Abs(a0)
-	return x0, x1
-}
-
-func Base(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Base(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Base(a0)
-		return x0
-	}
-	x0 := Windows_Base(a0)
-	return x0
-}
-
-func Clean(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Clean(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Clean(a0)
-		return x0
-	}
-	x0 := Windows_Clean(a0)
-	return x0
-}
-
-func Dir(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Dir(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Dir(a0)
-		return x0
-	}
-	x0 := Windows_Dir(a0)
-	return x0
-}
-
-func EvalSymlinks(a0 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_EvalSymlinks(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_EvalSymlinks(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_EvalSymlinks(a0)
-	return x0, x1
-}
-
-func Ext(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Ext(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Ext(a0)
-		return x0
-	}
-	x0 := Windows_Ext(a0)
-	return x0
-}
-
-func FromSlash(a0 string) string {
-	if apehost == apeLinux {
-		x0 := Linux_FromSlash(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_FromSlash(a0)
-		return x0
-	}
-	x0 := Windows_FromSlash(a0)
-	return x0
-}
-
-func Glob(a0 string) ([]string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Glob(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Glob(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_Glob(a0)
-	return x0, x1
-}
-
 func HasPrefix(a0 string, a1 string) bool {
 	if apehost == apeLinux {
 		x0 := Linux_HasPrefix(a0, a1)
@@ -169,58 +52,6 @@ func HasPrefix(a0 string, a1 string) bool {
 	}
 	x0 := Windows_HasPrefix(a0, a1)
 	return x0
-}
-
-func IsAbs(a0 string) bool {
-	if apehost == apeLinux {
-		x0 := Linux_IsAbs(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_IsAbs(a0)
-		return x0
-	}
-	x0 := Windows_IsAbs(a0)
-	return x0
-}
-
-func IsLocal(a0 string) bool {
-	if apehost == apeLinux {
-		x0 := Linux_IsLocal(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_IsLocal(a0)
-		return x0
-	}
-	x0 := Windows_IsLocal(a0)
-	return x0
-}
-
-func Join(a0 ...string) string {
-	if apehost == apeLinux {
-		x0 := Linux_Join(a0...)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Join(a0...)
-		return x0
-	}
-	x0 := Windows_Join(a0...)
-	return x0
-}
-
-func Localize(a0 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_Localize(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Localize(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_Localize(a0)
-	return x0, x1
 }
 
 func Match(a0 string, a1 string) (bool, error) {
@@ -249,80 +80,67 @@ func Rel(a0 string, a1 string) (string, error) {
 	return x0, x1
 }
 
-func Split(a0 string) (string, string) {
+func abs(a0 string) (string, error) {
 	if apehost == apeLinux {
-		x0, x1 := Linux_Split(a0)
+		x0, x1 := linux_abs(a0)
 		return x0, x1
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Split(a0)
+		x0, x1 := freebsd_abs(a0)
 		return x0, x1
 	}
-	x0, x1 := Windows_Split(a0)
+	x0, x1 := windows_abs(a0)
 	return x0, x1
 }
 
-func SplitList(a0 string) []string {
+func cleanGlobPath(a0 string) string {
 	if apehost == apeLinux {
-		x0 := Linux_SplitList(a0)
+		x0 := linux_cleanGlobPath(a0)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := Freebsd_SplitList(a0)
+		x0 := freebsd_cleanGlobPath(a0)
 		return x0
 	}
-	x0 := Windows_SplitList(a0)
+	x0 := windows_cleanGlobPath(a0)
 	return x0
 }
 
-func ToSlash(a0 string) string {
+func evalSymlinks(a0 string) (string, error) {
 	if apehost == apeLinux {
-		x0 := Linux_ToSlash(a0)
+		x0, x1 := linux_evalSymlinks(a0)
+		return x0, x1
+	}
+	if apehost == apeFreebsd {
+		x0, x1 := freebsd_evalSymlinks(a0)
+		return x0, x1
+	}
+	x0, x1 := windows_evalSymlinks(a0)
+	return x0, x1
+}
+
+func join(a0 []string) string {
+	if apehost == apeLinux {
+		x0 := linux_join(a0)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := Freebsd_ToSlash(a0)
+		x0 := freebsd_join(a0)
 		return x0
 	}
-	x0 := Windows_ToSlash(a0)
+	x0 := windows_join(a0)
 	return x0
 }
 
-func VolumeName(a0 string) string {
+func splitList(a0 string) []string {
 	if apehost == apeLinux {
-		x0 := Linux_VolumeName(a0)
+		x0 := linux_splitList(a0)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := Freebsd_VolumeName(a0)
+		x0 := freebsd_splitList(a0)
 		return x0
 	}
-	x0 := Windows_VolumeName(a0)
-	return x0
-}
-
-func Walk(a0 string, a1 WalkFunc) error {
-	if apehost == apeLinux {
-		x0 := Linux_Walk(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_Walk(a0, a1)
-		return x0
-	}
-	x0 := Windows_Walk(a0, a1)
-	return x0
-}
-
-func WalkDir(a0 string, a1 fs.WalkDirFunc) error {
-	if apehost == apeLinux {
-		x0 := Linux_WalkDir(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_WalkDir(a0, a1)
-		return x0
-	}
-	x0 := Windows_WalkDir(a0, a1)
+	x0 := windows_splitList(a0)
 	return x0
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line fd_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_posix.go:6:1*/
 package poll
 
 import (
@@ -37,7 +38,7 @@ func (fd *Freebsd_FD) Fchown(uid, gid int) error {
 		return err
 	}
 	defer fd.decref()
-	return freebsd_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return syscall.Freebsd_Fchown(fd.Sysfd, uid, gid)
 	})
 }
@@ -48,7 +49,7 @@ func (fd *Freebsd_FD) Ftruncate(size int64) error {
 		return err
 	}
 	defer fd.decref()
-	return freebsd_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return syscall.Freebsd_Ftruncate(fd.Sysfd, size)
 	})
 }
@@ -62,30 +63,4 @@ func (fd *Freebsd_FD) RawControl(f func(uintptr)) error {
 	defer fd.decref()
 	f(uintptr(fd.Sysfd))
 	return nil
-}
-
-// ignoringEINTR makes a function call and repeats it if it returns
-// an EINTR error. This appears to be required even though we install all
-// signal handlers with SA_RESTART: see #22838, #38033, #38836, #40846.
-// Also #20400 and #36644 are issues in which a signal handler is
-// installed without setting SA_RESTART. None of these are the common case,
-// but there are enough of them that it seems that we can't avoid
-// an EINTR loop.
-func freebsd_ignoringEINTR(fn func() error) error {
-	for {
-		err := fn()
-		if err != syscall.Freebsd_EINTR {
-			return err
-		}
-	}
-}
-
-// ignoringEINTR2 is ignoringEINTR, but returning an additional value.
-func freebsd_ignoringEINTR2[T any](fn func() (T, error)) (T, error) {
-	for {
-		v, err := fn()
-		if err != syscall.Freebsd_EINTR {
-			return v, err
-		}
-	}
-}
+}/*line fd_posix.go:79:2*//*line fd_posix.go:89:2*/

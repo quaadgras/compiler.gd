@@ -2,29 +2,32 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line sys_unix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sys_unix.go:6:1*/
 package socktest
+
+import "unsafe"/*line sys_unix.go:7:17*/
 
 import "syscall"
 
 // Socket wraps [syscall.Socket].
-func (sw *Linux_Switch) Socket(family, sotype, proto int) (s int, err error) {
-	sw.once.Do(sw.init)
+func (sw *Switch) Linux_Socket(family, sotype, proto int) (s int, err error) {
+	sw.once.Do(sw.linux_init)
 
-	so := &Status{Cookie: linux_cookie(family, sotype, proto)}
+	so := &Status{Cookie: cookie(family, sotype, proto)}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterSocket]
+	f := sw.fltab[FilterSocket]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, err
 	}
 	s, so.Err = syscall.Linux_Socket(family, sotype, proto)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Linux_Close(s)
 		}
@@ -34,118 +37,118 @@ func (sw *Linux_Switch) Socket(family, sotype, proto int) (s int, err error) {
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).OpenFailed++
+		sw.stats.getLocked(so.Cookie).OpenFailed++
 		return -1, so.Err
 	}
-	nso := sw.addLocked(s, family, sotype, proto)
-	sw.stats.linux_getLocked(nso.Cookie).Opened++
+	nso := sw.linux_addLocked(s, family, sotype, proto)
+	sw.stats.getLocked(nso.Cookie).Opened++
 	return s, nil
 }
 
 // Close wraps syscall.Close.
-func (sw *Linux_Switch) Close(s int) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_Close(s int) (err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_Close(s)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterClose]
+	f := sw.fltab[FilterClose]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Linux_Close(s)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).CloseFailed++
+		sw.stats.getLocked(so.Cookie).CloseFailed++
 		return so.Err
 	}
-	delete(sw.sotab, s)
-	sw.stats.linux_getLocked(so.Cookie).Closed++
+	delete((*(*Linux_Sockets)(unsafe.Pointer(&sw.sotab))), s)
+	sw.stats.getLocked(so.Cookie).Closed++
 	return nil
 }
 
 // Connect wraps syscall.Connect.
-func (sw *Linux_Switch) Connect(s int, sa syscall.Linux_Sockaddr) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_Connect(s int, sa syscall.Linux_Sockaddr) (err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_Connect(s, sa)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterConnect]
+	f := sw.fltab[FilterConnect]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Linux_Connect(s, sa)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).ConnectFailed++
+		sw.stats.getLocked(so.Cookie).ConnectFailed++
 		return so.Err
 	}
-	sw.stats.linux_getLocked(so.Cookie).Connected++
+	sw.stats.getLocked(so.Cookie).Connected++
 	return nil
 }
 
 // Listen wraps syscall.Listen.
-func (sw *Linux_Switch) Listen(s, backlog int) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_Listen(s, backlog int) (err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_Listen(s, backlog)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterListen]
+	f := sw.fltab[FilterListen]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Linux_Listen(s, backlog)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).ListenFailed++
+		sw.stats.getLocked(so.Cookie).ListenFailed++
 		return so.Err
 	}
-	sw.stats.linux_getLocked(so.Cookie).Listened++
+	sw.stats.getLocked(so.Cookie).Listened++
 	return nil
 }
 
 // Accept wraps syscall.Accept.
-func (sw *Linux_Switch) Accept(s int) (ns int, sa syscall.Linux_Sockaddr, err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_Accept(s int) (ns int, sa syscall.Linux_Sockaddr, err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_Accept(s)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterAccept]
+	f := sw.fltab[FilterAccept]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, nil, err
 	}
 	ns, sa, so.Err = syscall.Linux_Accept(s)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Linux_Close(ns)
 		}
@@ -155,31 +158,31 @@ func (sw *Linux_Switch) Accept(s int) (ns int, sa syscall.Linux_Sockaddr, err er
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).AcceptFailed++
+		sw.stats.getLocked(so.Cookie).AcceptFailed++
 		return -1, nil, so.Err
 	}
-	nso := sw.addLocked(ns, so.Cookie.Linux_Family(), so.Cookie.Linux_Type(), so.Cookie.Linux_Protocol())
-	sw.stats.linux_getLocked(nso.Cookie).Accepted++
+	nso := sw.linux_addLocked(ns, so.Cookie.Family(), so.Cookie.Type(), so.Cookie.Protocol())
+	sw.stats.getLocked(nso.Cookie).Accepted++
 	return ns, sa, nil
 }
 
 // GetsockoptInt wraps syscall.GetsockoptInt.
-func (sw *Linux_Switch) GetsockoptInt(s, level, opt int) (soerr int, err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_GetsockoptInt(s, level, opt int) (soerr int, err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_GetsockoptInt(s, level, opt)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterGetsockoptInt]
+	f := sw.fltab[FilterGetsockoptInt]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, err
 	}
 	soerr, so.Err = syscall.Linux_GetsockoptInt(s, level, opt)
 	so.SocketErr = syscall.Errno(soerr)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return -1, err
 	}
 
@@ -188,7 +191,7 @@ func (sw *Linux_Switch) GetsockoptInt(s, level, opt int) (soerr int, err error) 
 	}
 	if opt == syscall.Linux_SO_ERROR && (so.SocketErr == syscall.Errno(0) || so.SocketErr == syscall.Linux_EISCONN) {
 		sw.smu.Lock()
-		sw.stats.linux_getLocked(so.Cookie).Connected++
+		sw.stats.getLocked(so.Cookie).Connected++
 		sw.smu.Unlock()
 	}
 	return soerr, nil

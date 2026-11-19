@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockoptip6_posix.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockoptip6_posix.go:6:1*/
 package net
 
 import (
@@ -13,7 +14,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockoptip6_posix.go:12:2*/
 
 func freebsd_setIPv6MulticastInterface(fd *freebsd_netFD, ifi *Interface) error {
 	var v int
@@ -26,7 +27,7 @@ func freebsd_setIPv6MulticastInterface(fd *freebsd_netFD, ifi *Interface) error 
 }
 
 func freebsd_setIPv6MulticastLoopback(fd *freebsd_netFD, v bool) error {
-	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_MULTICAST_LOOP, freebsd_boolint(v))
+	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_MULTICAST_LOOP, boolint(v))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }

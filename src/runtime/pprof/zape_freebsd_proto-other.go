@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2022 The Go Authors. All rights reserved.
+/*line proto_other.go:1:1*/// Copyright 2022 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line proto_other.go:6:1*/
 package pprof
 
 import (
@@ -17,7 +18,7 @@ import (
 // It saves the address ranges of the mappings in b.mem for use
 // when emitting locations.
 func (b *profileBuilder) freebsd_readMapping() {
-	data, _ := os.Freebsd_ReadFile("/proc/self/maps")
+	data, _ := os.ReadFile("/proc/self/maps")
 	parseProcSelfMaps(data, b.addMapping)
 	if len(b.mem) == 0 { // pprof expects a map entry, so fake one.
 		b.addMappingEntry(0, 0, 0, "", "", true)

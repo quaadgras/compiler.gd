@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line lock_unix.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lock_unix.go:6:1*/
 package c23
 
 import (
@@ -19,13 +20,13 @@ func linux_setInt[T ~int16 | ~int32 | ~int64](p *T, v int64) { *p = T(v) }
 
 // lockFile is fcntl's lock command cmd of l on f's descriptor: the
 // system's record locks, which are the process's, as C's are.
-func linux_lockFile(f *os.Linux_File, cmd int32, l *flock) error {
+func linux_lockFile(f *os.File, cmd int32, l *flock) error {
 	var lk syscall.Linux_Flock_t
-	linux_setInt(&lk.Type, int64([...]int16{Linux_F_RDLCK: syscall.Linux_F_RDLCK, Linux_F_WRLCK: syscall.Linux_F_WRLCK, Linux_F_UNLCK: syscall.Linux_F_UNLCK}[l.typ]))
+	linux_setInt(&lk.Type, int64([...]int16{F_RDLCK: syscall.Linux_F_RDLCK, F_WRLCK: syscall.Linux_F_WRLCK, F_UNLCK: syscall.Linux_F_UNLCK}[l.typ]))
 	linux_setInt(&lk.Whence, int64(l.whence))
 	linux_setInt(&lk.Start, l.start)
 	linux_setInt(&lk.Len, l.len)
-	c := map[int32]int{Linux_F_GETLK: syscall.Linux_F_GETLK, Linux_F_SETLK: syscall.Linux_F_SETLK, Linux_F_SETLKW: syscall.Linux_F_SETLKW}[cmd]
+	c := map[int32]int{F_GETLK: syscall.Linux_F_GETLK, F_SETLK: syscall.Linux_F_SETLK, F_SETLKW: syscall.Linux_F_SETLKW}[cmd]
 	rc, err := f.SyscallConn()
 	if err != nil {
 		return err
@@ -47,14 +48,14 @@ func linux_lockFile(f *os.Linux_File, cmd int32, l *flock) error {
 	if lerr != nil {
 		return lerr
 	}
-	if cmd == Linux_F_GETLK {
+	if cmd == F_GETLK {
 		switch int(lk.Type) {
 		case syscall.Linux_F_RDLCK:
-			l.typ = Linux_F_RDLCK
+			l.typ = F_RDLCK
 		case syscall.Linux_F_WRLCK:
-			l.typ = Linux_F_WRLCK
+			l.typ = F_WRLCK
 		default:
-			l.typ = Linux_F_UNLCK
+			l.typ = F_UNLCK
 		}
 		l.whence, l.start, l.len, l.pid = int16(lk.Whence), int64(lk.Start), int64(lk.Len), int32(lk.Pid)
 	}
@@ -64,7 +65,7 @@ func linux_lockFile(f *os.Linux_File, cmd int32, l *flock) error {
 // rusage is getrusage's struct rusage, as longs.
 func linux_rusage(who int32) ([18]int64, error) {
 	w := syscall.Linux_RUSAGE_SELF
-	if who == Linux_RUSAGE_CHILDREN {
+	if who == RUSAGE_CHILDREN {
 		w = syscall.Linux_RUSAGE_CHILDREN
 	}
 	var ru syscall.Linux_Rusage

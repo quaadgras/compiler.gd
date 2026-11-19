@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line path.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line path.go:6:1*/
 // Package filepathlite implements a subset of path/filepath,
 // only using packages which may be imported by "os".
 //
@@ -13,42 +14,11 @@
 package filepathlite
 
 import (
-	"internal/stringslite"
-	"io/fs"
-	"slices"
-)
-
-func (b *lazybuf) linux_index(i int) byte {
-	if b.buf != nil {
-		return b.buf[i]
-	}
-	return b.path[i]
-}
-
-func (b *lazybuf) linux_append(c byte) {
-	if b.buf == nil {
-		if b.w < len(b.path) && b.path[b.w] == c {
-			b.w++
-			return
-		}
-		b.buf = make([]byte, len(b.path))
-		copy(b.buf, b.path[:b.w])
-	}
-	b.buf[b.w] = c
-	b.w++
-}
-
-func (b *lazybuf) linux_prepend(prefix ...byte) {
-	b.buf = slices.Insert(b.buf, 0, prefix...)
-	b.w += len(prefix)
-}
-
-func (b *lazybuf) linux_string() string {
-	if b.buf == nil {
-		return b.volAndPath[:b.volLen+b.w]
-	}
-	return b.volAndPath[:b.volLen] + string(b.buf[:b.w])
-}
+	
+	
+	
+	
+)/*line path.go:20:48*//*line path.go:32:2*//*line path.go:39:2*//*line path.go:52:2*//*line path.go:57:2*//*line path.go:64:2*/
 
 // Clean is filepath.Clean.
 func Linux_Clean(path string) string {
@@ -73,7 +43,7 @@ func Linux_Clean(path string) string {
 	out := lazybuf{path: path, volAndPath: originalPath, volLen: volLen}
 	r, dotdot := 0, 0
 	if rooted {
-		out.linux_append(Linux_Separator)
+		out.append(Linux_Separator)
 		r, dotdot = 1, 1
 	}
 
@@ -92,81 +62,46 @@ func Linux_Clean(path string) string {
 			case out.w > dotdot:
 				// can backtrack
 				out.w--
-				for out.w > dotdot && !Linux_IsPathSeparator(out.linux_index(out.w)) {
+				for out.w > dotdot && !Linux_IsPathSeparator(out.index(out.w)) {
 					out.w--
 				}
 			case !rooted:
 				// cannot backtrack, but not rooted, so append .. element.
 				if out.w > 0 {
-					out.linux_append(Linux_Separator)
+					out.append(Linux_Separator)
 				}
-				out.linux_append('.')
-				out.linux_append('.')
+				out.append('.')
+				out.append('.')
 				dotdot = out.w
 			}
 		default:
 			// real path element.
 			// add slash if needed
 			if rooted && out.w != 1 || !rooted && out.w != 0 {
-				out.linux_append(Linux_Separator)
+				out.append(Linux_Separator)
 			}
 			// copy element
 			for ; r < n && !Linux_IsPathSeparator(path[r]); r++ {
-				out.linux_append(path[r])
+				out.append(path[r])
 			}
 		}
 	}
 
 	// Turn empty string into "."
 	if out.w == 0 {
-		out.linux_append('.')
+		out.append('.')
 	}
 
 	linux_postClean(&out) // avoid creating absolute paths on Windows
-	return Linux_FromSlash(out.linux_string())
-}
-
-// IsLocal is filepath.IsLocal.
-func Linux_IsLocal(path string) bool {
-	return linux_isLocal(path)
-}
-
-func linux_unixIsLocal(path string) bool {
-	if Linux_IsAbs(path) || path == "" {
-		return false
-	}
-	hasDots := false
-	for p := path; p != ""; {
-		var part string
-		part, p, _ = stringslite.Cut(p, "/")
-		if part == "." || part == ".." {
-			hasDots = true
-			break
-		}
-	}
-	if hasDots {
-		path = Linux_Clean(path)
-	}
-	if path == ".." || stringslite.HasPrefix(path, "../") {
-		return false
-	}
-	return true
-}
-
-// Localize is filepath.Localize.
-func Linux_Localize(path string) (string, error) {
-	if !fs.ValidPath(path) {
-		return "", errInvalidPath
-	}
-	return linux_localize(path)
-}
+	return Linux_FromSlash(out.string())
+}/*line path.go:145:2*//*line path.go:167:2*//*line path.go:175:2*/
 
 // ToSlash is filepath.ToSlash.
 func Linux_ToSlash(path string) string {
 	if Linux_Separator == '/' {
 		return path
 	}
-	return linux_replaceStringByte(path, Linux_Separator, '/')
+	return replaceStringByte(path, Linux_Separator, '/')
 }
 
 // FromSlash is filepath.FromSlash.
@@ -174,41 +109,8 @@ func Linux_FromSlash(path string) string {
 	if Linux_Separator == '/' {
 		return path
 	}
-	return linux_replaceStringByte(path, '/', Linux_Separator)
-}
-
-func linux_replaceStringByte(s string, old, new byte) string {
-	if stringslite.IndexByte(s, old) == -1 {
-		return s
-	}
-	n := []byte(s)
-	for i := range n {
-		if n[i] == old {
-			n[i] = new
-		}
-	}
-	return string(n)
-}
-
-// Split is filepath.Split.
-func Linux_Split(path string) (dir, file string) {
-	vol := Linux_VolumeName(path)
-	i := len(path) - 1
-	for i >= len(vol) && !Linux_IsPathSeparator(path[i]) {
-		i--
-	}
-	return path[:i+1], path[i+1:]
-}
-
-// Ext is filepath.Ext.
-func Linux_Ext(path string) string {
-	for i := len(path) - 1; i >= 0 && !Linux_IsPathSeparator(path[i]); i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
-}
+	return replaceStringByte(path, '/', Linux_Separator)
+}/*line path.go:204:2*//*line path.go:214:2*//*line path.go:224:2*/
 
 // Base is filepath.Base.
 func Linux_Base(path string) string {
@@ -220,7 +122,7 @@ func Linux_Base(path string) string {
 		path = path[0 : len(path)-1]
 	}
 	// Throw away volume name
-	path = path[len(Linux_VolumeName(path)):]
+	path = path[len(VolumeName(path)):]
 	// Find the last element
 	i := len(path) - 1
 	for i >= 0 && !Linux_IsPathSeparator(path[i]) {
@@ -234,30 +136,4 @@ func Linux_Base(path string) string {
 		return string(Linux_Separator)
 	}
 	return path
-}
-
-// Dir is filepath.Dir.
-func Linux_Dir(path string) string {
-	vol := Linux_VolumeName(path)
-	i := len(path) - 1
-	for i >= len(vol) && !Linux_IsPathSeparator(path[i]) {
-		i--
-	}
-	dir := Linux_Clean(path[len(vol) : i+1])
-	if dir == "." && len(vol) > 2 {
-		// must be UNC
-		return vol
-	}
-	return vol + dir
-}
-
-// VolumeName is filepath.VolumeName.
-func Linux_VolumeName(path string) string {
-	return Linux_FromSlash(path[:linux_volumeNameLen(path)])
-}
-
-// VolumeNameLen returns the length of the leading volume name on Windows.
-// It returns 0 elsewhere.
-func Linux_VolumeNameLen(path string) int {
-	return linux_volumeNameLen(path)
-}
+}/*line path.go:265:2*//*line path.go:270:2*//*line path.go:276:2*/

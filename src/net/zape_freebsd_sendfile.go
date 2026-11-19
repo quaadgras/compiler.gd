@@ -2,17 +2,18 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sendfile.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sendfile.go:6:1*/
 package net
 
 import (
 	"internal/poll"
 	"io"
 	"syscall"
-)
+)/*line sendfile.go:15:41*/
 
 // sendFile copies the contents of r to c using the sendfile
 // system call to minimize copies.

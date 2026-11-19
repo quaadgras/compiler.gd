@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line sysdll.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sysdll.go:6:1*/
 // Package sysdll is an internal leaf package that records and reports
 // which Windows DLL names are used by Go itself. These DLLs are then
 // only loaded from the System32 directory. See Issue 14959.

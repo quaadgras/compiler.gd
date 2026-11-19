@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line udp_other.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line udp_other.go:6:1*/
 package quic
 
 import (
@@ -26,10 +27,10 @@ const (
 )
 
 type windows_netUDPConn struct {
-	c *net.Windows_UDPConn
+	c *net.UDPConn
 }
 
-func windows_newNetUDPConn(uc *net.Windows_UDPConn) (*windows_netUDPConn, error) {
+func windows_newNetUDPConn(uc *net.UDPConn) (*windows_netUDPConn, error) {
 	return &windows_netUDPConn{
 		c: uc,
 	}, nil
@@ -39,7 +40,7 @@ func (c *windows_netUDPConn) Close() error { return c.c.Close() }
 
 func (c *windows_netUDPConn) LocalAddr() netip.AddrPort {
 	a, _ := c.c.LocalAddr().(*net.UDPAddr)
-	return a.Windows_AddrPort()
+	return a.AddrPort()
 }
 
 func (c *windows_netUDPConn) Read(f func(*datagram)) {

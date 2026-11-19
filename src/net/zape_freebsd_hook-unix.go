@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line hook_unix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line hook_unix.go:6:1*/
 package net
 
 import "syscall"
@@ -16,8 +17,8 @@ var (
 	freebsd_hostsFilePath = "/etc/hosts"
 
 	// Placeholders for socket system calls.
-	freebsd_socketFunc        func(int, int, int) (int, error)          = syscall.Freebsd_Socket
+	freebsd_socketFunc        func(int, int, int) (int, error)  = syscall.Freebsd_Socket
 	freebsd_connectFunc       func(int, syscall.Freebsd_Sockaddr) error = syscall.Freebsd_Connect
-	freebsd_listenFunc        func(int, int) error                      = syscall.Freebsd_Listen
-	freebsd_getsockoptIntFunc func(int, int, int) (int, error)          = syscall.Freebsd_GetsockoptInt
+	freebsd_listenFunc        func(int, int) error              = syscall.Freebsd_Listen
+	freebsd_getsockoptIntFunc func(int, int, int) (int, error)  = syscall.Freebsd_GetsockoptInt
 )

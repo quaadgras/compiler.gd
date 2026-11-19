@@ -2,22 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line env_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line env_unix.go:6:1*/
 // Unix environment variables.
 
 package syscall
 
-import _ "unsafe"
+import _ "unsafe"/*line env_unix.go:9:16*/
 
 import (
 	"runtime"
 	"sync"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line env_unix.go:14:2*/
 
 var (
 	// envLock guards env and envs.
@@ -30,41 +31,41 @@ var (
 	// be of the form "key=value". An empty string means deleted
 	// (or a duplicate to be ignored).
 	freebsd_envs []string = func() []string {
-		if apehost != apeFreebsd {
-			return *new([]string)
-		}
-		return freebsd_runtime_envs()
-	}()
+if apehost != apeFreebsd {
+return *new([]string)
+}
+return /*line env_unix.go:26:18*/freebsd_runtime_envs()
+}()/*line env_unix.go:26:32*/
 )
 
 //go:linkname freebsd_runtime_envs syscall.runtime_envs
-func freebsd_runtime_envs() []string // in package runtime
+/*line env_unix.go:29:1*/func freebsd_runtime_envs() []string // in package runtime
 
 var freebsd_copyenv = func() func() {
-	if apehost != apeFreebsd {
-		return *new(func())
-	}
-	return sync.OnceFunc(func() {
-		freebsd_env = make(map[string]int)
-		for i, s := range freebsd_envs {
-			for j := 0; j < len(s); j++ {
-				if s[j] == '=' {
-					key := s[:j]
-					if _, ok := freebsd_env[key]; !ok {
-						freebsd_env[key] = i // first mention of key
-					} else {
-						// Clear duplicate keys. This permits Unsetenv to
-						// safely delete only the first item without
-						// worrying about unshadowing a later one,
-						// which might be a security problem.
-						freebsd_envs[i] = ""
-					}
-					break
+if apehost != apeFreebsd {
+return *new(func())
+}
+return /*line env_unix.go:31:15*/sync.OnceFunc(func() {
+	freebsd_env = make(map[string]int)
+	for i, s := range freebsd_envs {
+		for j := 0; j < len(s); j++ {
+			if s[j] == '=' {
+				key := s[:j]
+				if _, ok := freebsd_env[key]; !ok {
+					freebsd_env[key] = i // first mention of key
+				} else {
+					// Clear duplicate keys. This permits Unsetenv to
+					// safely delete only the first item without
+					// worrying about unshadowing a later one,
+					// which might be a security problem.
+					freebsd_envs[i] = ""
 				}
+				break
 			}
 		}
-	})
-}()
+	}
+})
+}()/*line env_unix.go:50:3*/
 
 func Freebsd_Unsetenv(key string) error {
 	freebsd_copyenv()
@@ -76,7 +77,7 @@ func Freebsd_Unsetenv(key string) error {
 		freebsd_envs[i] = ""
 		delete(freebsd_env, key)
 	}
-	freebsd_runtimeUnsetenv(key)
+	runtimeUnsetenv(key)
 	return nil
 }
 
@@ -133,7 +134,7 @@ func Freebsd_Setenv(key, value string) error {
 		freebsd_envs = append(freebsd_envs, kv)
 	}
 	freebsd_env[key] = i
-	freebsd_runtimeSetenv(key, value)
+	runtimeSetenv(key, value)
 	return nil
 }
 
@@ -143,7 +144,7 @@ func Freebsd_Clearenv() {
 	freebsd_envLock.Lock()
 	defer freebsd_envLock.Unlock()
 
-	freebsd_runtimeClearenv(freebsd_env)
+	runtimeClearenv(freebsd_env)
 
 	freebsd_env = make(map[string]int)
 	freebsd_envs = []string{}

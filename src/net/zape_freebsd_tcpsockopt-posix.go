@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line tcpsockopt_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tcpsockopt_posix.go:6:1*/
 package net
 
 import (
@@ -13,10 +14,10 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line tcpsockopt_posix.go:12:2*/
 
 func freebsd_setNoDelay(fd *freebsd_netFD, noDelay bool) error {
-	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_NODELAY, freebsd_boolint(noDelay))
+	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_NODELAY, boolint(noDelay))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line eloop_other.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line eloop_other.go:6:1*/
 package os
 
 import (
@@ -13,7 +14,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line eloop_other.go:12:2*/
 
 // isNoFollowErr reports whether err may result from O_NOFOLLOW blocking an open operation.
 func freebsd_isNoFollowErr(err error) bool {

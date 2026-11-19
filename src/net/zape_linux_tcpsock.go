@@ -2,167 +2,69 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line tcpsock.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tcpsock.go:6:1*/
 package net
 
+import "unsafe"/*line tcpsock.go:7:12*/
+
 import (
-	"context"
-	"internal/strconv"
+	
+	
 	"io"
-	"net/netip"
+	
 	"os"
 	"syscall"
 	"time"
-)
-
-// BUG(mikio): On JS, the File method of TCPConn and
-// TCPListener is not implemented.
-
-// AddrPort returns the [TCPAddr] a as a [netip.AddrPort].
-//
-// If a.Port does not fit in a uint16, it's silently truncated.
-//
-// If a is nil, a zero value is returned.
-func (a *TCPAddr) Linux_AddrPort() netip.AddrPort {
-	if a == nil {
-		return netip.AddrPort{}
-	}
-	na, _ := netip.AddrFromSlice(a.IP)
-	na = na.WithZone(a.Zone)
-	return netip.AddrPortFrom(na, uint16(a.Port))
-}
-
-// Network returns the address's network name, "tcp".
-func (a *TCPAddr) Linux_Network() string { return "tcp" }
-
-func (a *TCPAddr) Linux_String() string {
-	if a == nil {
-		return "<nil>"
-	}
-	ip := ipEmptyString(a.IP)
-	if a.Zone != "" {
-		return JoinHostPort(ip+"%"+a.Zone, strconv.Itoa(a.Port))
-	}
-	return JoinHostPort(ip, strconv.Itoa(a.Port))
-}
-
-func (a *TCPAddr) linux_isWildcard() bool {
-	if a == nil || a.IP == nil {
-		return true
-	}
-	return a.IP.IsUnspecified()
-}
-
-func (a *TCPAddr) linux_opAddr() Addr {
-	if a == nil {
-		return nil
-	}
-	return a
-}
-
-// ResolveTCPAddr returns an address of TCP end point.
-//
-// The network must be a TCP network name.
-//
-// If the host in the address parameter is not a literal IP address or
-// the port is not a literal port number, ResolveTCPAddr resolves the
-// address to an address of TCP end point.
-// Otherwise, it parses the address as a pair of literal IP address
-// and port number.
-// The address parameter can use a host name, but this is not
-// recommended, because it will return at most one of the host name's
-// IP addresses.
-//
-// See func [Dial] for a description of the network and address
-// parameters.
-func Linux_ResolveTCPAddr(network, address string) (*TCPAddr, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-	case "": // a hint wildcard for Go 1.0 undocumented behavior
-		network = "tcp"
-	default:
-		return nil, UnknownNetworkError(network)
-	}
-	addrs, err := DefaultResolver.internetAddrList(context.Background(), network, address)
-	if err != nil {
-		return nil, err
-	}
-	return addrs.forResolve(network, address).(*TCPAddr), nil
-}
-
-// TCPAddrFromAddrPort returns addr as a [TCPAddr]. If addr.IsValid() is false,
-// then the returned TCPAddr will contain a nil IP field, indicating an
-// address family-agnostic unspecified address.
-func Linux_TCPAddrFromAddrPort(addr netip.AddrPort) *TCPAddr {
-	return &TCPAddr{
-		IP:   addr.Addr().AsSlice(),
-		Zone: addr.Addr().Zone(),
-		Port: int(addr.Port()),
-	}
-}
-
-// TCPConn is an implementation of the [Conn] interface for TCP network
-// connections.
-type Linux_TCPConn struct {
-	linux_conn
-}
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-func (c *Linux_TCPConn) SyscallConn() (syscall.RawConn, error) {
-	if !c.ok() {
-		return nil, syscall.Linux_EINVAL
-	}
-	return linux_newRawConn(c.fd), nil
-}
+)/*line tcpsock.go:27:2*//*line tcpsock.go:41:2*//*line tcpsock.go:44:52*//*line tcpsock.go:55:2*//*line tcpsock.go:62:2*//*line tcpsock.go:69:2*//*line tcpsock.go:99:2*//*line tcpsock.go:110:2*//*line tcpsock.go:116:2*//*line tcpsock.go:151:2*//*line tcpsock.go:160:2*/
 
 // ReadFrom implements the [io.ReaderFrom] ReadFrom method.
-func (c *Linux_TCPConn) ReadFrom(r io.Reader) (int64, error) {
+func (c *TCPConn) Linux_ReadFrom(r io.Reader) (int64, error) {
 	if !c.ok() {
 		return 0, syscall.Linux_EINVAL
 	}
 	n, err := c.readFrom(r)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "readfrom", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "readfrom", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, err
 }
 
 // WriteTo implements the io.WriterTo WriteTo method.
-func (c *Linux_TCPConn) WriteTo(w io.Writer) (int64, error) {
+func (c *TCPConn) Linux_WriteTo(w io.Writer) (int64, error) {
 	if !c.ok() {
 		return 0, syscall.Linux_EINVAL
 	}
 	n, err := c.writeTo(w)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "writeto", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "writeto", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, err
 }
 
 // CloseRead shuts down the reading side of the TCP connection.
 // Most callers should just use Close.
-func (c *Linux_TCPConn) CloseRead() error {
+func (c *TCPConn) Linux_CloseRead() error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := c.fd.closeRead(); err != nil {
-		return &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).closeRead(); err != nil {
+		return &OpError{Op: "close", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
 
 // CloseWrite shuts down the writing side of the TCP connection.
 // Most callers should just use Close.
-func (c *Linux_TCPConn) CloseWrite() error {
+func (c *TCPConn) Linux_CloseWrite() error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := c.fd.closeWrite(); err != nil {
-		return &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).closeWrite(); err != nil {
+		return &OpError{Op: "close", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
@@ -181,24 +83,24 @@ func (c *Linux_TCPConn) CloseWrite() error {
 // until all data has been sent or discarded.
 // On some operating systems after sec seconds have elapsed any remaining
 // unsent data may be discarded.
-func (c *Linux_TCPConn) SetLinger(sec int) error {
+func (c *TCPConn) Linux_SetLinger(sec int) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setLinger(c.fd, sec); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := linux_setLinger((*(**linux_netFD)(unsafe.Pointer(&c.fd))), sec); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
 
 // SetKeepAlive sets whether the operating system should send
 // keep-alive messages on the connection.
-func (c *Linux_TCPConn) SetKeepAlive(keepalive bool) error {
+func (c *TCPConn) Linux_SetKeepAlive(keepalive bool) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setKeepAlive(c.fd, keepalive); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := linux_setKeepAlive((*(**linux_netFD)(unsafe.Pointer(&c.fd))), keepalive); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
@@ -208,12 +110,12 @@ func (c *Linux_TCPConn) SetKeepAlive(keepalive bool) error {
 //
 // Note that calling this method on Windows prior to Windows 10 version 1709
 // will reset the KeepAliveInterval to the default system value, which is normally 1 second.
-func (c *Linux_TCPConn) SetKeepAlivePeriod(d time.Duration) error {
+func (c *TCPConn) Linux_SetKeepAlivePeriod(d time.Duration) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setKeepAliveIdle(c.fd, d); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := linux_setKeepAliveIdle((*(**linux_netFD)(unsafe.Pointer(&c.fd))), d); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
 }
@@ -222,33 +124,17 @@ func (c *Linux_TCPConn) SetKeepAlivePeriod(d time.Duration) error {
 // packet transmission in hopes of sending fewer packets (Nagle's
 // algorithm).  The default is true (no delay), meaning that data is
 // sent as soon as possible after a Write.
-func (c *Linux_TCPConn) SetNoDelay(noDelay bool) error {
+func (c *TCPConn) Linux_SetNoDelay(noDelay bool) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setNoDelay(c.fd, noDelay); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	if err := linux_setNoDelay((*(**linux_netFD)(unsafe.Pointer(&c.fd))), noDelay); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return nil
-}
+}/*line tcpsock.go:289:2*/
 
-// MultipathTCP reports whether the ongoing connection is using MPTCP.
-//
-// If Multipath TCP is not supported by the host, by the other peer or
-// intentionally / accidentally filtered out by a device in between, a
-// fallback to TCP will be done. This method does its best to check if
-// MPTCP is still being used or not.
-//
-// On Linux, more conditions are verified on kernels >= v5.16, improving
-// the results.
-func (c *Linux_TCPConn) MultipathTCP() (bool, error) {
-	if !c.ok() {
-		return false, syscall.Linux_EINVAL
-	}
-	return linux_isUsingMultipathTCP(c.fd), nil
-}
-
-func linux_newTCPConn(fd *linux_netFD, keepAliveIdle time.Duration, keepAliveCfg KeepAliveConfig, preKeepAliveHook func(*linux_netFD), keepAliveHook func(KeepAliveConfig)) *Linux_TCPConn {
+func linux_newTCPConn(fd *linux_netFD, keepAliveIdle time.Duration, keepAliveCfg KeepAliveConfig, preKeepAliveHook func(*linux_netFD), keepAliveHook func(KeepAliveConfig)) *TCPConn {
 	linux_setNoDelay(fd, true)
 	if !keepAliveCfg.Enable && keepAliveIdle >= 0 {
 		keepAliveCfg = KeepAliveConfig{
@@ -256,111 +142,53 @@ func linux_newTCPConn(fd *linux_netFD, keepAliveIdle time.Duration, keepAliveCfg
 			Idle:   keepAliveIdle,
 		}
 	}
-	c := &Linux_TCPConn{linux_conn{fd}}
+	c := &TCPConn{conn{(*netFD)(unsafe.Pointer(fd))}}
 	if keepAliveCfg.Enable {
 		if preKeepAliveHook != nil {
 			preKeepAliveHook(fd)
 		}
-		c.SetKeepAliveConfig(keepAliveCfg)
+		c.Linux_SetKeepAliveConfig(keepAliveCfg)
 		if keepAliveHook != nil {
 			keepAliveHook(keepAliveCfg)
 		}
 	}
 	return c
-}
-
-// DialTCP acts like [Dial] for TCP networks.
-//
-// The network must be a TCP network name; see func Dial for details.
-//
-// If laddr is nil, a local address is automatically chosen.
-// If the IP field of raddr is nil or an unspecified IP address, the
-// local system is assumed.
-func Linux_DialTCP(network string, laddr, raddr *TCPAddr) (*Linux_TCPConn, error) {
-	return linux_dialTCP(context.Background(), nil, network, laddr, raddr)
-}
-
-func linux_dialTCP(ctx context.Context, dialer *Dialer, network string, laddr, raddr *TCPAddr) (*Linux_TCPConn, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-	default:
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.linux_opAddr(), Addr: raddr.linux_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if raddr == nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.linux_opAddr(), Addr: nil, Err: errMissingAddress}
-	}
-	sd := &linux_sysDialer{network: network, address: raddr.Linux_String()}
-	var (
-		c   *Linux_TCPConn
-		err error
-	)
-	if dialer != nil {
-		sd.Dialer = *dialer
-	}
-	if sd.Linux_MultipathTCP() {
-		c, err = sd.dialMPTCP(ctx, laddr, raddr)
-	} else {
-		c, err = sd.dialTCP(ctx, laddr, raddr)
-	}
-	if err != nil {
-		return nil, &OpError{Op: "dial", Net: network, Source: laddr.linux_opAddr(), Addr: raddr.linux_opAddr(), Err: err}
-	}
-	return c, nil
-}
-
-// TCPListener is a TCP network listener. Clients should typically
-// use variables of type [Listener] instead of assuming TCP.
-type Linux_TCPListener struct {
-	fd *linux_netFD
-	lc ListenConfig
-}
-
-// SyscallConn returns a raw network connection.
-// This implements the [syscall.Conn] interface.
-//
-// The returned RawConn only supports calling Control. Read and
-// Write return an error.
-func (l *Linux_TCPListener) SyscallConn() (syscall.RawConn, error) {
-	if !l.ok() {
-		return nil, syscall.Linux_EINVAL
-	}
-	return linux_newRawListener(l.fd), nil
-}
+}/*line tcpsock.go:321:2*//*line tcpsock.go:349:2*//*line tcpsock.go:356:2*//*line tcpsock.go:368:2*/
 
 // AcceptTCP accepts the next incoming call and returns the new
 // connection.
-func (l *Linux_TCPListener) AcceptTCP() (*Linux_TCPConn, error) {
+func (l *TCPListener) Linux_AcceptTCP() (*TCPConn, error) {
 	if !l.ok() {
 		return nil, syscall.Linux_EINVAL
 	}
-	c, err := l.accept()
+	c, err := l.linux_accept()
 	if err != nil {
-		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return nil, &OpError{Op: "accept", Net: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return c, nil
 }
 
 // Accept implements the Accept method in the [Listener] interface; it
 // waits for the next call and returns a generic [Conn].
-func (l *Linux_TCPListener) Accept() (Conn, error) {
+func (l *TCPListener) Linux_Accept() (Conn, error) {
 	if !l.ok() {
 		return nil, syscall.Linux_EINVAL
 	}
-	c, err := l.accept()
+	c, err := l.linux_accept()
 	if err != nil {
-		return nil, &OpError{Op: "accept", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return nil, &OpError{Op: "accept", Net: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return c, nil
 }
 
 // Close stops listening on the TCP address.
 // Already Accepted connections are not closed.
-func (l *Linux_TCPListener) Close() error {
+func (l *TCPListener) Linux_Close() error {
 	if !l.ok() {
 		return syscall.Linux_EINVAL
 	}
 	if err := l.close(); err != nil {
-		return &OpError{Op: "close", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return &OpError{Op: "close", Net: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return nil
 }
@@ -368,16 +196,7 @@ func (l *Linux_TCPListener) Close() error {
 // Addr returns the listener's network address, a [*TCPAddr].
 // The Addr returned is shared by all invocations of Addr, so
 // do not modify it.
-func (l *Linux_TCPListener) Addr() Addr { return l.fd.laddr }
-
-// SetDeadline sets the deadline associated with the listener.
-// A zero time value disables the deadline.
-func (l *Linux_TCPListener) SetDeadline(t time.Time) error {
-	if !l.ok() {
-		return syscall.Linux_EINVAL
-	}
-	return l.fd.SetDeadline(t)
-}
+func (l *TCPListener) Linux_Addr() Addr { return (*(**linux_netFD)(unsafe.Pointer(&l.fd))).laddr }/*line tcpsock.go:420:2*/
 
 // File returns a copy of the underlying [os.File].
 // It is the caller's responsibility to close f when finished.
@@ -389,52 +208,13 @@ func (l *Linux_TCPListener) SetDeadline(t time.Time) error {
 //
 // On Windows, the returned os.File's file descriptor is not
 // usable on other processes.
-func (l *Linux_TCPListener) File() (f *os.Linux_File, err error) {
+func (l *TCPListener) Linux_File() (f *os.File, err error) {
 	if !l.ok() {
 		return nil, syscall.Linux_EINVAL
 	}
 	f, err = l.file()
 	if err != nil {
-		return nil, &OpError{Op: "file", Net: l.fd.net, Source: nil, Addr: l.fd.laddr, Err: err}
+		return nil, &OpError{Op: "file", Net: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&l.fd))).laddr, Err: err}
 	}
 	return
-}
-
-// ListenTCP acts like [Listen] for TCP networks.
-//
-// The network must be a TCP network name; see func Dial for details.
-//
-// If the IP field of laddr is nil or an unspecified IP address,
-// ListenTCP listens on all available unicast and anycast IP addresses
-// of the local system.
-// If the Port field of laddr is 0, a port number is automatically
-// chosen.
-func Linux_ListenTCP(network string, laddr *TCPAddr) (*Linux_TCPListener, error) {
-	switch network {
-	case "tcp", "tcp4", "tcp6":
-	default:
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.linux_opAddr(), Err: UnknownNetworkError(network)}
-	}
-	if laddr == nil {
-		laddr = &TCPAddr{}
-	}
-	sl := &sysListener{network: network, address: laddr.Linux_String()}
-	var (
-		ln  *Linux_TCPListener
-		err error
-	)
-	if sl.Linux_MultipathTCP() {
-		ln, err = sl.linux_listenMPTCP(context.Background(), laddr)
-	} else {
-		ln, err = sl.linux_listenTCP(context.Background(), laddr)
-	}
-	if err != nil {
-		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: laddr.linux_opAddr(), Err: err}
-	}
-	return ln, nil
-}
-
-// roundDurationUp rounds d to the next multiple of to.
-func linux_roundDurationUp(d time.Duration, to time.Duration) time.Duration {
-	return (d + to - 1) / to
-}
+}/*line tcpsock.go:475:2*//*line tcpsock.go:480:2*/

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line boundary.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line boundary.go:6:1*/
 package cryptotest
 
 import (
@@ -16,8 +17,8 @@ import (
 // BoundarySlices allocates a pair of slices of the given size one at the start
 // of a page, another at the end. Any access beyond or before the slice
 // boundaries should cause a fault.
-func Linux_BoundarySlices(t *testing.Linux_T, size int) (start, end []byte) {
-	pageSize := syscall.Linux_Getpagesize()
+func Linux_BoundarySlices(t *testing.T, size int) (start, end []byte) {
+	pageSize := syscall.Getpagesize()
 	needPages := 2 + (2*size+pageSize-1)/pageSize
 	b, err := syscall.Linux_Mmap(0, 0, needPages*pageSize, syscall.Linux_PROT_READ|syscall.Linux_PROT_WRITE,
 		syscall.Linux_MAP_ANON|syscall.Linux_MAP_PRIVATE)

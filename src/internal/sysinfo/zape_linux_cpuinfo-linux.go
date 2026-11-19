@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line cpuinfo_linux.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import (
 )
 
 func linux_readLinuxProcCPUInfo(buf []byte) error {
-	f, err := os.Linux_Open("/proc/cpuinfo")
+	f, err := os.Open("/proc/cpuinfo")
 	if err != nil {
 		return err
 	}

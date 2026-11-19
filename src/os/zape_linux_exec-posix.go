@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_posix.go:6:1*/
 package os
 
 import (
@@ -15,13 +16,13 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_posix.go:14:2*//*line exec_posix.go:24:2*/
 
-func linux_startProcess(name string, argv []string, attr *Linux_ProcAttr) (p *Process, err error) {
+func linux_startProcess(name string, argv []string, attr *ProcAttr) (p *Process, err error) {
 	// If there is no SysProcAttr (ie. no Chroot or changed
 	// UID/GID), double-check existence of the directory we want
 	// to chdir into. We can make the error clearer this way.
-	if attr != nil && attr.Sys == nil && attr.Dir != "" {
+	if attr != nil && syscall.Linux_FromAPE_SysProcAttr(attr.Sys) == nil && attr.Dir != "" {
 		if _, err := Stat(attr.Dir); err != nil {
 			pe := err.(*PathError)
 			pe.Op = "chdir"
@@ -29,7 +30,7 @@ func linux_startProcess(name string, argv []string, attr *Linux_ProcAttr) (p *Pr
 		}
 	}
 
-	attrSys, shouldDupPidfd := linux_ensurePidfd(attr.Sys)
+	attrSys, shouldDupPidfd := linux_ensurePidfd(syscall.Linux_FromAPE_SysProcAttr(attr.Sys))
 	sysattr := &syscall.Linux_ProcAttr{
 		Dir: attr.Dir,
 		Env: attr.Env,
@@ -60,37 +61,16 @@ func linux_startProcess(name string, argv []string, attr *Linux_ProcAttr) (p *Pr
 		var ok bool
 		h, ok = linux_getPidfd(sysattr.Sys, shouldDupPidfd)
 		if !ok {
-			return linux_newPIDProcess(pid), nil
+			return newPIDProcess(pid), nil
 		}
 	}
 
-	return linux_newHandleProcess(pid, h), nil
-}
-
-func (p *Process) linux_kill() error {
-	return p.Linux_Signal(Kill)
-}
-
-func (p *Process) linux_withHandle(f func(handle uintptr)) error {
-	if p.handle == nil {
-		return ErrNoHandle
-	}
-	handle, status := p.linux_handleTransientAcquire()
-	switch status {
-	case linux_statusDone:
-		return ErrProcessDone
-	case linux_statusReleased:
-		return errProcessReleased
-	}
-	defer p.linux_handleTransientRelease()
-	f(handle)
-
-	return nil
-}
+	return newHandleProcess(pid, h), nil
+}/*line exec_posix.go:78:2*//*line exec_posix.go:95:2*/
 
 // ProcessState stores information about a process, as reported by Wait.
 type Linux_ProcessState struct {
-	pid    int                      // The process's id.
+	pid    int                // The process's id.
 	status syscall.Linux_WaitStatus // System-dependent status info.
 	rusage *syscall.Linux_Rusage
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_nonwindows.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_nonwindows.go:6:1*/
 package os
 
 func linux_rootCleanPath(s string, prefix, suffix []string) (string, error) {

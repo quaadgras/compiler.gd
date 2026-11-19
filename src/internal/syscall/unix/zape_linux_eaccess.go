@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line eaccess.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line eaccess.go:6:1*/
 package unix
 
 import (
@@ -13,7 +14,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line eaccess.go:12:2*/
 
 func Linux_Eaccess(path string, mode uint32) error {
 	if "linux" == "android" {

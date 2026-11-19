@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line fd_posix.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_posix.go:6:1*/
 package net
 
 import (
@@ -15,7 +16,7 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line fd_posix.go:14:2*/
 
 // Network file descriptor.
 type linux_netFD struct {

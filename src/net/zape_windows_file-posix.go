@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line file_posix.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line file_posix.go:6:1*/
 package net
+
+import "unsafe"/*line file_posix.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,7 +17,7 @@ import (
 	"syscall"
 )
 
-func windows_newFileFD(f *os.Windows_File) (*windows_netFD, error) {
+func windows_newFileFD(f *os.File) (*windows_netFD, error) {
 	s, err := windows_dupFileSocket(f)
 	if err != nil {
 		return nil, err
@@ -54,14 +57,14 @@ func windows_newFileFD(f *os.Windows_File) (*windows_netFD, error) {
 	return fd, nil
 }
 
-func windows_fileConn(f *os.Windows_File) (Conn, error) {
+func windows_fileConn(f *os.File) (Conn, error) {
 	fd, err := windows_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *TCPAddr:
-		return windows_newTCPConn(fd, windows_defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+		return windows_newTCPConn(fd, defaultTCPKeepAliveIdle, KeepAliveConfig{}, windows_testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 	case *UDPAddr:
 		return windows_newUDPConn(fd), nil
 	case *IPAddr:
@@ -73,22 +76,22 @@ func windows_fileConn(f *os.Windows_File) (Conn, error) {
 	return nil, syscall.Windows_EINVAL
 }
 
-func windows_fileListener(f *os.Windows_File) (Listener, error) {
+func windows_fileListener(f *os.File) (Listener, error) {
 	fd, err := windows_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch laddr := fd.laddr.(type) {
 	case *TCPAddr:
-		return &Windows_TCPListener{fd: fd}, nil
+		return &TCPListener{fd: (*netFD)(unsafe.Pointer(fd))}, nil
 	case *UnixAddr:
-		return &Windows_UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
+		return &UnixListener{fd: (*netFD)(unsafe.Pointer(fd)), path: laddr.Name, unlink: false}, nil
 	}
 	fd.Close()
 	return nil, syscall.Windows_EINVAL
 }
 
-func windows_filePacketConn(f *os.Windows_File) (PacketConn, error) {
+func windows_filePacketConn(f *os.File) (PacketConn, error) {
 	fd, err := windows_newFileFD(f)
 	if err != nil {
 		return nil, err

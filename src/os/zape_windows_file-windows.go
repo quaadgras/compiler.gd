@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line file_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -21,7 +21,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line file_windows.go:18:2*/
 
 // This matches the value in syscall/syscall_windows.go.
 const windows__UTIME_OMIT = -1
@@ -34,11 +34,11 @@ type windows_file struct {
 	pfd        poll.Windows_FD
 	name       string
 	dirinfo    atomic.Pointer[windows_dirInfo] // nil unless directory being read
-	appendMode bool                            // whether file is opened for appending
+	appendMode bool                    // whether file is opened for appending
 }
 
 // fd is the Windows implementation of Fd.
-func (file *Windows_File) fd() uintptr {
+func (file *File) windows_fd() uintptr {
 	if file == nil {
 		return uintptr(syscall.Windows_InvalidHandle)
 	}
@@ -46,9 +46,11 @@ func (file *Windows_File) fd() uintptr {
 	// File.Fd doesn't return an error, so we don't have a way to
 	// report it. We just ignore it. It's up to the caller to call
 	// it when there are no concurrent IO operations.
-	_ = file.pfd.DisassociateIOCP()
-	return uintptr(file.pfd.Sysfd)
+	_ = (*windows_file)(unsafe.Pointer(file.file)).pfd.DisassociateIOCP()
+	return uintptr((*windows_file)(unsafe.Pointer(file.file)).pfd.Sysfd)
 }
+
+/*line file_windows.go:48:21*/
 
 const (
 	// kindNewFile means that the descriptor was passed to us via NewFile.
@@ -68,7 +70,7 @@ const (
 // newFile returns a new File with the given file handle and name.
 // Unlike NewFile, it does not check that h is syscall.InvalidHandle.
 // If nonBlocking is true, it tries to add the file to the runtime poller.
-func windows_newFile(h syscall.Windows_Handle, name string, kind newFileKind, nonBlocking bool) *Windows_File {
+func windows_newFile(h syscall.Windows_Handle, name string, kind newFileKind, nonBlocking bool) *File {
 	typ := "file"
 	switch kind {
 	case windows_kindNewFile, windows_kindOpenFile:
@@ -106,7 +108,7 @@ func windows_newFile(h syscall.Windows_Handle, name string, kind newFileKind, no
 	// Completion notification modes are shared by all handles to the file
 	// object. Preserve them for handles passed to NewFile, since other users
 	// of the file object may rely on those modes. See go.dev/issue/80979.
-	f := &Windows_File{&windows_file{
+	f := &File{(*file)(unsafe.Pointer(&windows_file{
 		pfd: poll.Windows_FD{
 			Sysfd:                   h,
 			IsStream:                true,
@@ -114,22 +116,22 @@ func windows_newFile(h syscall.Windows_Handle, name string, kind newFileKind, no
 			KeepFileCompletionModes: kind == windows_kindNewFile,
 		},
 		name: name,
-	}}
-	runtime.SetFinalizer(f.windows_file, (*windows_file).close)
+	}))}
+	runtime.SetFinalizer((*(**windows_file)(unsafe.Pointer(&f.file))), (*windows_file).close)
 
 	// Ignore initialization errors.
 	// Assume any problems will show up in later I/O.
-	f.pfd.Init(typ, nonBlocking)
+	(*windows_file)(unsafe.Pointer(f.file)).pfd.Init(typ, nonBlocking)
 	return f
 }
 
 // newConsoleFile creates new File that will be used as console.
-func windows_newConsoleFile(h syscall.Windows_Handle, name string) *Windows_File {
+func windows_newConsoleFile(h syscall.Windows_Handle, name string) *File {
 	return windows_newFile(h, name, windows_kindConsole, false)
 }
 
 // newFileFromNewFile is called by [NewFile].
-func windows_newFileFromNewFile(fd uintptr, name string) *Windows_File {
+func windows_newFileFromNewFile(fd uintptr, name string) *File {
 	h := syscall.Windows_Handle(fd)
 	if h == syscall.Windows_InvalidHandle {
 		return nil
@@ -142,14 +144,14 @@ func windows_newFileFromNewFile(fd uintptr, name string) *Windows_File {
 // instead of [syscall.CloseHandle].
 //
 //go:linkname windows_net_newWindowsFile net.newWindowsFile
-func windows_net_newWindowsFile(h syscall.Windows_Handle, name string) *Windows_File {
+func windows_net_newWindowsFile(h syscall.Windows_Handle, name string) *File {
 	if h == syscall.Windows_InvalidHandle {
 		panic("invalid FD")
 	}
 	return windows_newFile(h, name, windows_kindSock, true)
 }
 
-func windows_epipecheck(file *Windows_File, e error) {
+func windows_epipecheck(file *File, e error) {
 }
 
 // DevNull is the name of the operating system's “null device.”
@@ -157,12 +159,12 @@ func windows_epipecheck(file *Windows_File, e error) {
 const Windows_DevNull = "NUL"
 
 // openFileNolog is the Windows implementation of OpenFile.
-func windows_openFileNolog(name string, flag int, perm FileMode) (*Windows_File, error) {
+func windows_openFileNolog(name string, flag int, perm FileMode) (*File, error) {
 	if name == "" {
 		return nil, &PathError{Op: "open", Path: name, Err: syscall.Windows_ENOENT}
 	}
 	path := windows_fixLongPath(name)
-	r, err := syscall.Windows_Open(path, flag|syscall.Windows_O_CLOEXEC, windows_syscallMode(perm))
+	r, err := syscall.Windows_Open(path, flag|syscall.Windows_O_CLOEXEC, syscallMode(perm))
 	if err != nil {
 		return nil, &PathError{Op: "open", Path: name, Err: err}
 	}
@@ -170,7 +172,7 @@ func windows_openFileNolog(name string, flag int, perm FileMode) (*Windows_File,
 	return windows_newFile(r, name, windows_kindOpenFile, nonblocking), nil
 }
 
-func windows_openDirNolog(name string) (*Windows_File, error) {
+func windows_openDirNolog(name string) (*File, error) {
 	return windows_openFileNolog(name, Windows_O_RDONLY|windows.Windows_O_DIRECTORY, 0)
 }
 
@@ -198,13 +200,13 @@ func (file *windows_file) close() error {
 // according to whence: 0 means relative to the origin of the file, 1 means
 // relative to the current offset, and 2 means relative to the end.
 // It returns the new offset and an error, if any.
-func (f *Windows_File) seek(offset int64, whence int) (ret int64, err error) {
-	if info := f.dirinfo.Swap(nil); info != nil {
+func (f *File) windows_seek(offset int64, whence int) (ret int64, err error) {
+	if info := (*windows_file)(unsafe.Pointer(f.file)).dirinfo.Swap(nil); info != nil {
 		// Free cached dirinfo, so we allocate a new one if we
 		// access this file as a directory again. See #35767 and #37161.
 		info.close()
 	}
-	ret, err = f.pfd.Seek(offset, whence)
+	ret, err = (*windows_file)(unsafe.Pointer(f.file)).pfd.Seek(offset, whence)
 	runtime.KeepAlive(f)
 	return ret, err
 }
@@ -217,7 +219,7 @@ func Windows_Truncate(name string, size int64) error {
 		return e
 	}
 	defer f.Close()
-	e1 := f.Truncate(size)
+	e1 := f.Windows_Truncate(size)
 	if e1 != nil {
 		return e1
 	}
@@ -274,7 +276,7 @@ func windows_rename(oldname, newname string) error {
 // Pipe returns a connected pair of Files; reads from r return bytes written to w.
 // It returns the files and an error, if any. The Windows handles underlying
 // the returned files are marked as inheritable by child processes.
-func Windows_Pipe() (r *Windows_File, w *Windows_File, err error) {
+func Windows_Pipe() (r *File, w *File, err error) {
 	var p [2]syscall.Windows_Handle
 	e := syscall.Windows_Pipe(p[:])
 	if e != nil {
@@ -285,13 +287,13 @@ func Windows_Pipe() (r *Windows_File, w *Windows_File, err error) {
 }
 
 var windows_useGetTempPath2 = func() func() bool {
-	if apehost != apeWindows {
-		return *new(func() bool)
-	}
-	return sync.OnceValue(func() bool {
-		return windows.Windows_ErrorLoadingGetTempPath2() == nil
-	})
-}()
+if apehost != apeWindows {
+return *new(func() bool)
+}
+return /*line file_windows.go:284:23*/sync.OnceValue(func() bool {
+	return windows.Windows_ErrorLoadingGetTempPath2() == nil
+})
+}()/*line file_windows.go:286:3*/
 
 func windows_tempDir() string {
 	getTempPath := syscall.Windows_GetTempPath
@@ -343,10 +345,10 @@ func Windows_Symlink(oldname, newname string) error {
 
 	// need the exact location of the oldname when it's relative to determine if it's a directory
 	destpath := oldname
-	if v := filepathlite.Windows_VolumeName(oldname); v == "" {
+	if v := filepathlite.VolumeName(oldname); v == "" {
 		if len(oldname) > 0 && Windows_IsPathSeparator(oldname[0]) {
 			// oldname is relative to the volume containing newname.
-			if v = filepathlite.Windows_VolumeName(newname); v != "" {
+			if v = filepathlite.VolumeName(newname); v != "" {
 				// Prepend the volume explicitly, because it may be different from the
 				// volume of the current working directory.
 				destpath = v + oldname
@@ -417,11 +419,11 @@ func windows_openSymlink(path string) (syscall.Windows_Handle, error) {
 }
 
 var windows_winreadlinkvolume = func() *godebug.Setting {
-	if apehost != apeWindows {
-		return *new(*godebug.Setting)
-	}
-	return godebug.New("winreadlinkvolume")
-}()
+if apehost != apeWindows {
+return *new(*godebug.Setting)
+}
+return /*line file_windows.go:411:25*/godebug.New("winreadlinkvolume")
+}()/*line file_windows.go:411:57*/
 
 // normaliseLinkPath converts absolute paths returned by
 // DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, ...)

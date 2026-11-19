@@ -2,117 +2,34 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line switch.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line switch.go:6:1*/
 // Package socktest provides utilities for socket testing.
 package socktest
 
+import "unsafe"/*line switch.go:8:17*/
+
 import (
-	"fmt"
-	"sync"
-)
+	
+	
+)/*line switch.go:26:2*/
 
-// A Switch represents a callpath point switch for socket system
-// calls.
-type Freebsd_Switch struct {
-	once sync.Once
-
-	fmu   sync.RWMutex
-	fltab map[FilterType]Filter
-
-	smu   sync.RWMutex
-	sotab Freebsd_Sockets
-	stats stats
-}
-
-func (sw *Freebsd_Switch) init() {
+func (sw *Switch) freebsd_init() {
 	sw.fltab = make(map[FilterType]Filter)
-	sw.sotab = make(Freebsd_Sockets)
+	(*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab))) = make(Freebsd_Sockets)
 	sw.stats = make(stats)
-}
-
-// Stats returns a list of per-cookie socket statistics.
-func (sw *Freebsd_Switch) Stats() []Stat {
-	var st []Stat
-	sw.smu.RLock()
-	for _, s := range sw.stats {
-		ns := *s
-		st = append(st, ns)
-	}
-	sw.smu.RUnlock()
-	return st
-}
+}/*line switch.go:44:2*/
 
 // Sockets returns mappings of socket descriptor to socket status.
-func (sw *Freebsd_Switch) Sockets() Freebsd_Sockets {
+func (sw *Switch) Freebsd_Sockets() Freebsd_Sockets {
 	sw.smu.RLock()
-	tab := make(Freebsd_Sockets, len(sw.sotab))
-	for i, s := range sw.sotab {
+	tab := make(Freebsd_Sockets, len((*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab)))))
+	for i, s := range (*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab))) {
 		tab[i] = s
 	}
 	sw.smu.RUnlock()
 	return tab
-}
-
-// Family returns an address family.
-func (c Cookie) Freebsd_Family() int { return int(c >> 48) }
-
-// Type returns a socket type.
-func (c Cookie) Freebsd_Type() int { return int(c << 16 >> 32) }
-
-// Protocol returns a protocol number.
-func (c Cookie) Freebsd_Protocol() int { return int(c & 0xff) }
-
-func freebsd_cookie(family, sotype, proto int) Cookie {
-	return Cookie(family)<<48 | Cookie(sotype)&0xffffffff<<16 | Cookie(proto)&0xff
-}
-
-func (so Status) Freebsd_String() string {
-	return fmt.Sprintf("(%s, %s, %s): syscallerr=%v socketerr=%v", freebsd_familyString(so.Cookie.Freebsd_Family()), freebsd_typeString(so.Cookie.Freebsd_Type()), freebsd_protocolString(so.Cookie.Freebsd_Protocol()), so.Err, so.SocketErr)
-}
-
-func (st Stat) Freebsd_String() string {
-	return fmt.Sprintf("(%s, %s, %s): opened=%d connected=%d listened=%d accepted=%d closed=%d openfailed=%d connectfailed=%d listenfailed=%d acceptfailed=%d closefailed=%d", freebsd_familyString(st.Family), freebsd_typeString(st.Type), freebsd_protocolString(st.Protocol), st.Opened, st.Connected, st.Listened, st.Accepted, st.Closed, st.OpenFailed, st.ConnectFailed, st.ListenFailed, st.AcceptFailed, st.CloseFailed)
-}
-
-func (st stats) freebsd_getLocked(c Cookie) *Stat {
-	s, ok := st[c]
-	if !ok {
-		s = &Stat{Family: c.Freebsd_Family(), Type: c.Freebsd_Type(), Protocol: c.Freebsd_Protocol()}
-		st[c] = s
-	}
-	return s
-}
-
-const (
-	Freebsd_FilterSocket        FilterType = iota // for Socket
-	Freebsd_FilterConnect                         // for Connect or ConnectEx
-	Freebsd_FilterListen                          // for Listen
-	Freebsd_FilterAccept                          // for Accept, Accept4 or AcceptEx
-	Freebsd_FilterGetsockoptInt                   // for GetsockoptInt
-	Freebsd_FilterClose                           // for Close or Closesocket
-)
-
-func (f Filter) freebsd_apply(st *Status) (AfterFilter, error) {
-	if f == nil {
-		return nil, nil
-	}
-	return f(st)
-}
-
-func (f AfterFilter) freebsd_apply(st *Status) error {
-	if f == nil {
-		return nil
-	}
-	return f(st)
-}
-
-// Set deploys the socket system call filter f for the filter type t.
-func (sw *Freebsd_Switch) Set(t FilterType, f Filter) {
-	sw.once.Do(sw.init)
-	sw.fmu.Lock()
-	sw.fltab[t] = f
-	sw.fmu.Unlock()
-}
+}/*line switch.go:59:19*//*line switch.go:62:53*//*line switch.go:65:57*//*line switch.go:68:56*//*line switch.go:72:2*//*line switch.go:79:2*//*line switch.go:83:2*//*line switch.go:102:2*//*line switch.go:106:2*//*line switch.go:108:28*//*line switch.go:117:2*//*line switch.go:120:20*//*line switch.go:129:2*//*line switch.go:140:47*//*line switch.go:147:2*//*line switch.go:156:37*//*line switch.go:163:2*//*line switch.go:171:2*/

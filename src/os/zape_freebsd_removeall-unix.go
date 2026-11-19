@@ -2,13 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line removeall_unix.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line removeall_unix.go:6:1*/
 package os
 
-func freebsd_newDirFile(fd int, name string) (*Freebsd_File, error) {
+func freebsd_newDirFile(fd int, name string) (*File, error) {
 	// We use kindNoPoll because we know that this is a directory.
 	return freebsd_newFile(fd, name, freebsd_kindNoPoll, false), nil
 }

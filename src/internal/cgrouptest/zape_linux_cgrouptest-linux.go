@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line cgrouptest_linux.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -33,7 +33,7 @@ func (c *Linux_CgroupV2) Path() string {
 
 // Path to cpu.max.
 func (c *Linux_CgroupV2) CPUMaxPath() string {
-	return filepath.Linux_Join(c.path, "cpu.max")
+	return filepath.Join(c.path, "cpu.max")
 }
 
 // Set cpu.max. Pass -1 for quota to disable the limit.
@@ -43,7 +43,7 @@ func (c *Linux_CgroupV2) SetCPUMax(quota, period int64) error {
 		q = strconv.FormatInt(quota, 10)
 	}
 	buf := fmt.Sprintf("%s %d", q, period)
-	return os.Linux_WriteFile(c.CPUMaxPath(), []byte(buf), 0)
+	return os.WriteFile(c.CPUMaxPath(), []byte(buf), 0)
 }
 
 // InCgroupV2 creates a new v2 cgroup, migrates the current process into it,
@@ -53,12 +53,12 @@ func (c *Linux_CgroupV2) SetCPUMax(quota, period int64) error {
 // If a new cgroup cannot be created, the test is skipped.
 //
 // This must not be used in parallel tests, as it affects the entire process.
-func Linux_InCgroupV2(t *testing.Linux_T, fn func(*Linux_CgroupV2)) {
+func Linux_InCgroupV2(t *testing.T, fn func(*Linux_CgroupV2)) {
 	orig := linux_findCurrent(t)
 	parent := linux_findOwnedParent(t, orig)
 
 	// Make sure the parent allows children to control cpu.
-	b, err := os.Linux_ReadFile(filepath.Linux_Join(parent, "cgroup.subtree_control"))
+	b, err := os.ReadFile(filepath.Join(parent, "cgroup.subtree_control"))
 	if err != nil {
 		t.Skipf("unable to read cgroup.subtree_control: %v", err)
 	}
@@ -70,7 +70,7 @@ func Linux_InCgroupV2(t *testing.Linux_T, fn func(*Linux_CgroupV2)) {
 		t.Skipf("Parent cgroup %s does not allow children to control cpu, only %q", parent, string(b))
 	}
 
-	path, err := os.Linux_MkdirTemp(parent, "go-cgrouptest")
+	path, err := os.MkdirTemp(parent, "go-cgrouptest")
 	if err != nil {
 		t.Skipf("unable to create cgroup directory: %v", err)
 	}
@@ -97,7 +97,7 @@ func Linux_InCgroupV2(t *testing.Linux_T, fn func(*Linux_CgroupV2)) {
 }
 
 // Returns the filesystem path to the current cgroup the process is in.
-func linux_findCurrent(t *testing.Linux_T) string {
+func linux_findCurrent(t *testing.T) string {
 	// Find the path to our current CPU cgroup. Currently this package is
 	// only used for CPU cgroup testing, so the distinction of different
 	// controllers doesn't matter.
@@ -114,7 +114,7 @@ func linux_findCurrent(t *testing.Linux_T) string {
 }
 
 // Returns a parent directory in which we can create our own cgroup subdirectory.
-func linux_findOwnedParent(t *testing.Linux_T, orig string) string {
+func linux_findOwnedParent(t *testing.T, orig string) string {
 	// There are many ways cgroups may be set up on a system. We don't try
 	// to cover all of them, just common ones.
 	//
@@ -168,7 +168,7 @@ func linux_findOwnedParent(t *testing.Linux_T, orig string) string {
 
 	uid := os.Getuid()
 	var prev string
-	cur := filepath.Linux_Dir(orig)
+	cur := filepath.Dir(orig)
 	for cur != "/" {
 		var curStat syscall.Linux_Stat_t
 		err = syscall.Linux_Stat(cur, &curStat)
@@ -182,7 +182,7 @@ func linux_findOwnedParent(t *testing.Linux_T, orig string) string {
 		}
 
 		prev = cur
-		cur = filepath.Linux_Dir(cur)
+		cur = filepath.Dir(cur)
 	}
 
 	if prev == "" {
@@ -194,9 +194,9 @@ func linux_findOwnedParent(t *testing.Linux_T, orig string) string {
 }
 
 // Migrate the current process to the cgroup directory dst.
-func linux_migrateTo(t *testing.Linux_T, dst string) {
-	pid := []byte(strconv.FormatInt(int64(os.Linux_Getpid()), 10))
-	if err := os.Linux_WriteFile(filepath.Linux_Join(dst, "cgroup.procs"), pid, 0); err != nil {
+func linux_migrateTo(t *testing.T, dst string) {
+	pid := []byte(strconv.FormatInt(int64(os.Getpid()), 10))
+	if err := os.WriteFile(filepath.Join(dst, "cgroup.procs"), pid, 0); err != nil {
 		t.Skipf("Unable to migrate into %s: %v", dst, err)
 	}
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line stat_actime2.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line stat_actime2.go:6:1*/
 package tar
 
 import (
@@ -14,9 +15,9 @@ import (
 )
 
 func freebsd_statAtime(st *syscall.Freebsd_Stat_t) time.Time {
-	return time.Freebsd_Unix(st.Atimespec.Freebsd_Unix())
+	return time.Unix(st.Atimespec.Unix())
 }
 
 func freebsd_statCtime(st *syscall.Freebsd_Stat_t) time.Time {
-	return time.Freebsd_Unix(st.Ctimespec.Freebsd_Unix())
+	return time.Unix(st.Ctimespec.Unix())
 }

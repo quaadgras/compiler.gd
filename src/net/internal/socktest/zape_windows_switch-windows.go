@@ -2,21 +2,23 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line switch_windows.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package socktest
+
+import "unsafe"/*line switch_windows.go:5:17*/
 
 import "syscall"
 
 // Sockets maps a socket descriptor to the status of socket.
 type Windows_Sockets map[syscall.Windows_Handle]Status
 
-func (sw *Windows_Switch) sockso(s syscall.Windows_Handle) *Status {
+func (sw *Switch) windows_sockso(s syscall.Windows_Handle) *Status {
 	sw.smu.RLock()
 	defer sw.smu.RUnlock()
-	so, ok := sw.sotab[s]
+	so, ok := (*(*Windows_Sockets)(unsafe.Pointer(&sw.sotab)))[s]
 	if !ok {
 		return nil
 	}
@@ -25,9 +27,9 @@ func (sw *Windows_Switch) sockso(s syscall.Windows_Handle) *Status {
 
 // addLocked returns a new Status without locking.
 // sw.smu must be held before call.
-func (sw *Windows_Switch) addLocked(s syscall.Windows_Handle, family, sotype, proto int) *Status {
-	sw.once.Do(sw.init)
-	so := Status{Cookie: windows_cookie(family, sotype, proto)}
-	sw.sotab[s] = so
+func (sw *Switch) windows_addLocked(s syscall.Windows_Handle, family, sotype, proto int) *Status {
+	sw.once.Do(sw.windows_init)
+	so := Status{Cookie: cookie(family, sotype, proto)}
+	(*(*Windows_Sockets)(unsafe.Pointer(&sw.sotab)))[s] = so
 	return &so
 }

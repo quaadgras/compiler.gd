@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syscall_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line syscall_unix.go:6:1*/
 package syscall
 
 import (
@@ -21,7 +22,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line syscall_unix.go:20:2*/
 
 var (
 	Linux_Stdin  = 0
@@ -95,6 +96,8 @@ func (m *linux_mmapper) Munmap(data []byte) (err error) {
 	return nil
 }
 
+/*line syscall_unix.go:108:19*/
+
 func (e Errno) Linux_Error() string {
 	if 0 <= int(e) && int(e) < len(linux_errors) {
 		s := linux_errors[e]
@@ -150,6 +153,8 @@ func linux_errnoErr(e Errno) error {
 	}
 	return e
 }
+
+/*line syscall_unix.go:168:16*/
 
 func (s Signal) Linux_Signal() {}
 
@@ -241,6 +246,8 @@ func Linux_Pwrite(fd int, p []byte, offset int64) (n int, err error) {
 	}
 	return
 }
+
+/*line syscall_unix.go:263:27*/
 
 type Linux_Sockaddr interface {
 	sockaddr() (ptr unsafe.Pointer, len linux__Socklen, err error) // lowercase; only we can define Sockaddrs
@@ -527,3 +534,5 @@ func Linux_Sendfile(outfd int, infd int, offset *int64, count int) (written int,
 	}
 	return linux_sendfile(outfd, infd, offset, count)
 }
+
+

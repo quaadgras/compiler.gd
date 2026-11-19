@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2014 The Go Authors. All rights reserved.
+/*line sticky_bsd.go:1:1*/// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sticky_bsd.go:6:1*/
 package os
 
 // According to sticky(8), neither open(2) nor mkdir(2) will create

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line path_windows.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -330,7 +330,7 @@ func windows_postClean(out *lazybuf) {
 			break
 		}
 		if c == ':' {
-			out.windows_prepend('.', Windows_Separator)
+			out.prepend('.', Windows_Separator)
 			return
 		}
 	}
@@ -338,6 +338,6 @@ func windows_postClean(out *lazybuf) {
 	// to avoid converting paths like \a\..\??\c:\x into \??\c:\x
 	// (equivalent to c:\x).
 	if len(out.buf) >= 3 && Windows_IsPathSeparator(out.buf[0]) && out.buf[1] == '?' && out.buf[2] == '?' {
-		out.windows_prepend(Windows_Separator, '.')
+		out.prepend(Windows_Separator, '.')
 	}
 }

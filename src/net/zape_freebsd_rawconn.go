@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line rawconn.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line rawconn.go:6:1*/
 package net
+
+import "unsafe"/*line rawconn.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,55 +17,40 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line rawconn.go:13:2*//*line rawconn.go:26:2*//*line rawconn.go:28:63*/
 
-// BUG(tmm1): On Windows, the Write method of syscall.RawConn
-// does not integrate with the runtime's network poller. It cannot
-// wait for the connection to become writeable, and does not respect
-// deadlines. If the user-provided callback returns false, the Write
-// method will fail immediately.
-
-// BUG(mikio): On JS and Plan 9, the Control, Read and Write
-// methods of syscall.RawConn are not implemented.
-
-type freebsd_rawConn struct {
-	fd *freebsd_netFD
-}
-
-func (c *freebsd_rawConn) ok() bool { return c != nil && c.fd != nil }
-
-func (c *freebsd_rawConn) Control(f func(uintptr)) error {
+func (c *rawConn) Freebsd_Control(f func(uintptr)) error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
-	err := c.fd.pfd.RawControl(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).pfd.RawControl(f)
+	runtime.KeepAlive((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-control", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+		err = &OpError{Op: "raw-control", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return err
 }
 
-func (c *freebsd_rawConn) Read(f func(uintptr) bool) error {
+func (c *rawConn) Freebsd_Read(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
-	err := c.fd.pfd.RawRead(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).pfd.RawRead(f)
+	runtime.KeepAlive((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-read", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
 
-func (c *freebsd_rawConn) Write(f func(uintptr) bool) error {
+func (c *rawConn) Freebsd_Write(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Freebsd_EINVAL
 	}
-	err := c.fd.pfd.RawWrite(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).pfd.RawWrite(f)
+	runtime.KeepAlive((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-write", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
@@ -74,15 +62,15 @@ func (c *freebsd_rawConn) Write(f func(uintptr) bool) error {
 // they can pass the *poll.FD to functions like poll.Splice.
 //
 // PollFD is not intended for use outside the standard library.
-func (c *freebsd_rawConn) PollFD() *poll.Freebsd_FD {
+func (c *rawConn) Freebsd_PollFD() *poll.Freebsd_FD {
 	if !c.ok() {
 		return nil
 	}
-	return &c.fd.pfd
+	return &(*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).pfd
 }
 
-func freebsd_newRawConn(fd *freebsd_netFD) *freebsd_rawConn {
-	return &freebsd_rawConn{fd: fd}
+func freebsd_newRawConn(fd *freebsd_netFD) *rawConn {
+	return &rawConn{fd: (*netFD)(unsafe.Pointer(fd))}
 }
 
 // Network returns the network type of the underlying connection.
@@ -92,22 +80,10 @@ func freebsd_newRawConn(fd *freebsd_netFD) *freebsd_rawConn {
 // extension method so that they can distinguish different socket types.
 //
 // Network is not intended for use outside the standard library.
-func (c *freebsd_rawConn) Network() poll.String {
-	return poll.String(c.fd.net)
-}
+func (c *rawConn) Freebsd_Network() poll.String {
+	return poll.String((*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net)
+}/*line rawconn.go:97:2*//*line rawconn.go:101:2*//*line rawconn.go:105:2*/
 
-type freebsd_rawListener struct {
-	freebsd_rawConn
-}
-
-func (l *freebsd_rawListener) Read(func(uintptr) bool) error {
-	return syscall.Freebsd_EINVAL
-}
-
-func (l *freebsd_rawListener) Write(func(uintptr) bool) error {
-	return syscall.Freebsd_EINVAL
-}
-
-func freebsd_newRawListener(fd *freebsd_netFD) *freebsd_rawListener {
-	return &freebsd_rawListener{freebsd_rawConn{fd: fd}}
+func freebsd_newRawListener(fd *freebsd_netFD) *rawListener {
+	return &rawListener{rawConn{fd: (*netFD)(unsafe.Pointer(fd))}}
 }

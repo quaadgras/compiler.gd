@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line lp_unix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lp_unix.go:6:1*/
 package exec
 
 import (
@@ -20,11 +21,11 @@ import (
 
 // ErrNotFound is the error resulting if a path search failed to find an executable file.
 var Linux_ErrNotFound = func() error {
-	if apehost != apeLinux {
-		return *new(error)
-	}
-	return errors.New("executable file not found in $PATH")
-}()
+if apehost != apeLinux {
+return *new(error)
+}
+return /*line lp_unix.go:20:19*/errors.New("executable file not found in $PATH")
+}()/*line lp_unix.go:20:67*/
 
 func linux_findExecutable(file string) error {
 	d, err := os.Stat(file)
@@ -53,7 +54,7 @@ func linux_lookPath(file string) (string, error) {
 	// (only bypass the path if file begins with / or ./ or ../)
 	// but that would not match all the Unix shells.
 
-	if err := linux_validateLookPath(file); err != nil {
+	if err := validateLookPath(file); err != nil {
 		return "", &Error{file, err}
 	}
 
@@ -65,14 +66,14 @@ func linux_lookPath(file string) (string, error) {
 		return "", &Error{file, err}
 	}
 	path := os.Getenv("PATH")
-	for _, dir := range filepath.Linux_SplitList(path) {
+	for _, dir := range filepath.SplitList(path) {
 		if dir == "" {
 			// Unix shell semantics: path element "" means "."
 			dir = "."
 		}
-		path := filepath.Linux_Join(dir, file)
+		path := filepath.Join(dir, file)
 		if err := linux_findExecutable(path); err == nil {
-			if !filepath.Linux_IsAbs(path) {
+			if !filepath.IsAbs(path) {
 				if execerrdot.Value() != "0" {
 					return path, &Error{file, ErrDot}
 				}
@@ -81,7 +82,7 @@ func linux_lookPath(file string) (string, error) {
 			return path, nil
 		}
 	}
-	return "", &Error{file, Linux_ErrNotFound}
+	return "", &Error{file, ErrNotFound}
 }
 
 // lookExtensions is a no-op on non-Windows platforms, since

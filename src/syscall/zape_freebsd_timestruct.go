@@ -2,14 +2,15 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line timestruct.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line timestruct.go:6:1*/
 package syscall
 
 // TimespecToNsec returns the time stored in ts as nanoseconds.
-func Freebsd_TimespecToNsec(ts Timespec) int64 { return ts.Freebsd_Nano() }
+func Freebsd_TimespecToNsec(ts Timespec) int64 { return ts.Nano() }
 
 // NsecToTimespec converts a number of nanoseconds into a [Timespec].
 func Freebsd_NsecToTimespec(nsec int64) Timespec {

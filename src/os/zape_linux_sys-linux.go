@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line sys_linux.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -13,7 +13,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sys_linux.go:10:2*/
 
 func linux_hostname() (name string, err error) {
 	// Try uname first, as it's only one system call and reading
@@ -41,7 +41,7 @@ func linux_hostname() (name string, err error) {
 		return "localhost", nil
 	}
 
-	f, err := Linux_Open("/proc/sys/kernel/hostname")
+	f, err := Open("/proc/sys/kernel/hostname")
 	if err != nil {
 		return "", err
 	}

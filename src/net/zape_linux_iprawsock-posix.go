@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line iprawsock_posix.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line iprawsock_posix.go:6:1*/
 package net
+
+import "unsafe"/*line iprawsock_posix.go:7:12*/
 
 import (
 	"context"
@@ -40,43 +43,28 @@ func (a *IPAddr) linux_sockaddr(family int) (syscall.Linux_Sockaddr, error) {
 	return linux_ipToSockaddr(family, a.IP, 0, a.Zone)
 }
 
-func (a *IPAddr) linux_toLocal(net string) sockaddr {
+func (a *IPAddr) linux_toLocal(net string) linux_sockaddr {
 	return &IPAddr{loopbackIP(net), a.Zone}
 }
 
-func (c *Linux_IPConn) readFrom(b []byte) (int, *IPAddr, error) {
+func (c *IPConn) linux_readFrom(b []byte) (int, *IPAddr, error) {
 	// TODO(cw,rsc): consider using readv if we know the family
 	// type to avoid the header trim/copy
 	var addr *IPAddr
-	n, sa, err := c.fd.readFrom(b)
+	n, sa, err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).readFrom(b)
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
-		n = linux_stripIPv4Header(n, b)
+		n = stripIPv4Header(n, b)
 	case *syscall.Linux_SockaddrInet6:
 		addr = &IPAddr{IP: sa.Addr[0:], Zone: zoneCache.name(int(sa.ZoneId))}
 	}
 	return n, addr, err
-}
+}/*line iprawsock_posix.go:73:2*/
 
-func linux_stripIPv4Header(n int, b []byte) int {
-	if len(b) < 20 {
-		return n
-	}
-	l := int(b[0]&0x0f) << 2
-	if 20 > l || l > len(b) {
-		return n
-	}
-	if b[0]>>4 != 4 {
-		return n
-	}
-	copy(b, b[l:])
-	return n - l
-}
-
-func (c *Linux_IPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
+func (c *IPConn) linux_readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr, err error) {
 	var sa syscall.Linux_Sockaddr
-	n, oobn, flags, sa, err = c.fd.readMsg(b, oob, 0)
+	n, oobn, flags, sa, err = (*(**linux_netFD)(unsafe.Pointer(&c.fd))).readMsg(b, oob, 0)
 	switch sa := sa.(type) {
 	case *syscall.Linux_SockaddrInet4:
 		addr = &IPAddr{IP: sa.Addr[0:]}
@@ -86,36 +74,36 @@ func (c *Linux_IPConn) readMsg(b, oob []byte) (n, oobn, flags int, addr *IPAddr,
 	return
 }
 
-func (c *Linux_IPConn) writeTo(b []byte, addr *IPAddr) (int, error) {
-	if c.fd.isConnected {
+func (c *IPConn) linux_writeTo(b []byte, addr *IPAddr) (int, error) {
+	if (*(**linux_netFD)(unsafe.Pointer(&c.fd))).isConnected {
 		return 0, ErrWriteToConnected
 	}
 	if addr == nil {
 		return 0, errMissingAddress
 	}
-	sa, err := addr.linux_sockaddr(c.fd.family)
+	sa, err := addr.linux_sockaddr((*(**linux_netFD)(unsafe.Pointer(&c.fd))).family)
 	if err != nil {
 		return 0, err
 	}
-	return c.fd.writeTo(b, sa)
+	return (*(**linux_netFD)(unsafe.Pointer(&c.fd))).writeTo(b, sa)
 }
 
-func (c *Linux_IPConn) writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
-	if c.fd.isConnected {
+func (c *IPConn) linux_writeMsg(b, oob []byte, addr *IPAddr) (n, oobn int, err error) {
+	if (*(**linux_netFD)(unsafe.Pointer(&c.fd))).isConnected {
 		return 0, 0, ErrWriteToConnected
 	}
 	if addr == nil {
 		return 0, 0, errMissingAddress
 	}
-	sa, err := addr.linux_sockaddr(c.fd.family)
+	sa, err := addr.linux_sockaddr((*(**linux_netFD)(unsafe.Pointer(&c.fd))).family)
 	if err != nil {
 		return 0, 0, err
 	}
-	return c.fd.writeMsg(b, oob, sa)
+	return (*(**linux_netFD)(unsafe.Pointer(&c.fd))).writeMsg(b, oob, sa)
 }
 
-func (sd *linux_sysDialer) dialIP(ctx context.Context, laddr, raddr *IPAddr) (*Linux_IPConn, error) {
-	network, proto, err := linux_parseNetwork(ctx, sd.network, true)
+func (sd *sysDialer) linux_dialIP(ctx context.Context, laddr, raddr *IPAddr) (*IPConn, error) {
+	network, proto, err := parseNetwork(ctx, sd.network, true)
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +125,8 @@ func (sd *linux_sysDialer) dialIP(ctx context.Context, laddr, raddr *IPAddr) (*L
 	return linux_newIPConn(fd), nil
 }
 
-func (sl *sysListener) linux_listenIP(ctx context.Context, laddr *IPAddr) (*Linux_IPConn, error) {
-	network, proto, err := linux_parseNetwork(ctx, sl.network, true)
+func (sl *sysListener) linux_listenIP(ctx context.Context, laddr *IPAddr) (*IPConn, error) {
+	network, proto, err := parseNetwork(ctx, sl.network, true)
 	if err != nil {
 		return nil, err
 	}

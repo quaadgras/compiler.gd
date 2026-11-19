@@ -5,8 +5,7 @@
 package x509
 
 import (
-	"internal/godebug"
-	"sync"
+	"io/fs"
 	"unsafe"
 )
 
@@ -21,58 +20,16 @@ const (
 	apeWindows
 )
 
-var fallbacksSet bool
-
-var once sync.Once
-
-//go:linkname systemRoots
-var systemRoots *CertPool
-
-var systemRootsErr error
-
-var systemRootsMu sync.RWMutex
-
-var useFallbackRoots bool
-
-var x509sslcertoverrideplatform *godebug.Setting = godebug.New("x509sslcertoverrideplatform")
-
-var x509usefallbackroots *godebug.Setting = godebug.New("x509usefallbackroots")
-
-func SetFallbackRoots(a0 *CertPool) {
+func isSameDirSymlink(a0 fs.DirEntry, a1 string) bool {
 	if apehost == apeLinux {
-		Linux_SetFallbackRoots(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		Freebsd_SetFallbackRoots(a0)
-		return
-	}
-	Windows_SetFallbackRoots(a0)
-}
-
-func loadSystemRoots() (*CertPool, error) {
-	if apehost == apeLinux {
-		x0, x1 := linux_loadSystemRoots()
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := freebsd_loadSystemRoots()
-		return x0, x1
-	}
-	x0, x1 := windows_loadSystemRoots()
-	return x0, x1
-}
-
-func systemRootsPool() *CertPool {
-	if apehost == apeLinux {
-		x0 := linux_systemRootsPool()
+		x0 := linux_isSameDirSymlink(a0, a1)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := freebsd_systemRootsPool()
+		x0 := freebsd_isSameDirSymlink(a0, a1)
 		return x0
 	}
-	x0 := windows_systemRootsPool()
+	x0 := windows_isSameDirSymlink(a0, a1)
 	return x0
 }
 
@@ -88,6 +45,50 @@ func (r *Certificate) systemVerify(a0 *VerifyOptions) ([][]*Certificate, error) 
 	x0, x1 := r.windows_systemVerify(a0)
 	return x0, x1
 }
+
+// ape_certDirectories is the host's.
+var ape_certDirectories = func() *[]string {
+	if apehost == apeLinux {
+		return &linux_certDirectories
+	}
+	if apehost == apeFreebsd {
+		return &freebsd_certDirectories
+	}
+	return &windows_certDirectories
+}()
+
+// certDirectories is the host's at startup.
+var certDirectories []string = func() []string {
+	if apehost == apeLinux {
+		return linux_certDirectories
+	}
+	if apehost == apeFreebsd {
+		return freebsd_certDirectories
+	}
+	return windows_certDirectories
+}()
+
+// ape_certFiles is the host's.
+var ape_certFiles = func() *[]string {
+	if apehost == apeLinux {
+		return &linux_certFiles
+	}
+	if apehost == apeFreebsd {
+		return &freebsd_certFiles
+	}
+	return &windows_certFiles
+}()
+
+// certFiles is the host's at startup.
+var certFiles []string = func() []string {
+	if apehost == apeLinux {
+		return linux_certFiles
+	}
+	if apehost == apeFreebsd {
+		return freebsd_certFiles
+	}
+	return windows_certFiles
+}()
 
 func init() {
 	if apehost == apeLinux {

@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line rawconn.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line rawconn.go:6:1*/
 package net
+
+import "unsafe"/*line rawconn.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,55 +17,40 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line rawconn.go:13:2*//*line rawconn.go:26:2*//*line rawconn.go:28:63*/
 
-// BUG(tmm1): On Windows, the Write method of syscall.RawConn
-// does not integrate with the runtime's network poller. It cannot
-// wait for the connection to become writeable, and does not respect
-// deadlines. If the user-provided callback returns false, the Write
-// method will fail immediately.
-
-// BUG(mikio): On JS and Plan 9, the Control, Read and Write
-// methods of syscall.RawConn are not implemented.
-
-type linux_rawConn struct {
-	fd *linux_netFD
-}
-
-func (c *linux_rawConn) ok() bool { return c != nil && c.fd != nil }
-
-func (c *linux_rawConn) Control(f func(uintptr)) error {
+func (c *rawConn) Linux_Control(f func(uintptr)) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	err := c.fd.pfd.RawControl(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).pfd.RawControl(f)
+	runtime.KeepAlive((*(**linux_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-control", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+		err = &OpError{Op: "raw-control", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return err
 }
 
-func (c *linux_rawConn) Read(f func(uintptr) bool) error {
+func (c *rawConn) Linux_Read(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	err := c.fd.pfd.RawRead(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).pfd.RawRead(f)
+	runtime.KeepAlive((*(**linux_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-read", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
 
-func (c *linux_rawConn) Write(f func(uintptr) bool) error {
+func (c *rawConn) Linux_Write(f func(uintptr) bool) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	err := c.fd.pfd.RawWrite(f)
-	runtime.KeepAlive(c.fd)
+	err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).pfd.RawWrite(f)
+	runtime.KeepAlive((*(**linux_netFD)(unsafe.Pointer(&c.fd))))
 	if err != nil {
-		err = &OpError{Op: "raw-write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "raw-write", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
@@ -74,15 +62,15 @@ func (c *linux_rawConn) Write(f func(uintptr) bool) error {
 // they can pass the *poll.FD to functions like poll.Splice.
 //
 // PollFD is not intended for use outside the standard library.
-func (c *linux_rawConn) PollFD() *poll.Linux_FD {
+func (c *rawConn) Linux_PollFD() *poll.Linux_FD {
 	if !c.ok() {
 		return nil
 	}
-	return &c.fd.pfd
+	return &(*(**linux_netFD)(unsafe.Pointer(&c.fd))).pfd
 }
 
-func linux_newRawConn(fd *linux_netFD) *linux_rawConn {
-	return &linux_rawConn{fd: fd}
+func linux_newRawConn(fd *linux_netFD) *rawConn {
+	return &rawConn{fd: (*netFD)(unsafe.Pointer(fd))}
 }
 
 // Network returns the network type of the underlying connection.
@@ -92,22 +80,10 @@ func linux_newRawConn(fd *linux_netFD) *linux_rawConn {
 // extension method so that they can distinguish different socket types.
 //
 // Network is not intended for use outside the standard library.
-func (c *linux_rawConn) Network() poll.String {
-	return poll.String(c.fd.net)
-}
+func (c *rawConn) Linux_Network() poll.String {
+	return poll.String((*(**linux_netFD)(unsafe.Pointer(&c.fd))).net)
+}/*line rawconn.go:97:2*//*line rawconn.go:101:2*//*line rawconn.go:105:2*/
 
-type linux_rawListener struct {
-	linux_rawConn
-}
-
-func (l *linux_rawListener) Read(func(uintptr) bool) error {
-	return syscall.Linux_EINVAL
-}
-
-func (l *linux_rawListener) Write(func(uintptr) bool) error {
-	return syscall.Linux_EINVAL
-}
-
-func linux_newRawListener(fd *linux_netFD) *linux_rawListener {
-	return &linux_rawListener{linux_rawConn{fd: fd}}
+func linux_newRawListener(fd *linux_netFD) *rawListener {
+	return &rawListener{rawConn{fd: (*netFD)(unsafe.Pointer(fd))}}
 }

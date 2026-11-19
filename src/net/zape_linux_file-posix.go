@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line file_posix.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line file_posix.go:6:1*/
 package net
+
+import "unsafe"/*line file_posix.go:7:12*/
 
 import (
 	"internal/poll"
@@ -14,7 +17,7 @@ import (
 	"syscall"
 )
 
-func linux_newFileFD(f *os.Linux_File) (*linux_netFD, error) {
+func linux_newFileFD(f *os.File) (*linux_netFD, error) {
 	s, err := linux_dupFileSocket(f)
 	if err != nil {
 		return nil, err
@@ -54,14 +57,14 @@ func linux_newFileFD(f *os.Linux_File) (*linux_netFD, error) {
 	return fd, nil
 }
 
-func linux_fileConn(f *os.Linux_File) (Conn, error) {
+func linux_fileConn(f *os.File) (Conn, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch fd.laddr.(type) {
 	case *TCPAddr:
-		return linux_newTCPConn(fd, linux_defaultTCPKeepAliveIdle, KeepAliveConfig{}, testPreHookSetKeepAlive, testHookSetKeepAlive), nil
+		return linux_newTCPConn(fd, defaultTCPKeepAliveIdle, KeepAliveConfig{}, linux_testPreHookSetKeepAlive, testHookSetKeepAlive), nil
 	case *UDPAddr:
 		return linux_newUDPConn(fd), nil
 	case *IPAddr:
@@ -73,22 +76,22 @@ func linux_fileConn(f *os.Linux_File) (Conn, error) {
 	return nil, syscall.Linux_EINVAL
 }
 
-func linux_fileListener(f *os.Linux_File) (Listener, error) {
+func linux_fileListener(f *os.File) (Listener, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err
 	}
 	switch laddr := fd.laddr.(type) {
 	case *TCPAddr:
-		return &Linux_TCPListener{fd: fd}, nil
+		return &TCPListener{fd: (*netFD)(unsafe.Pointer(fd))}, nil
 	case *UnixAddr:
-		return &Linux_UnixListener{fd: fd, path: laddr.Name, unlink: false}, nil
+		return &UnixListener{fd: (*netFD)(unsafe.Pointer(fd)), path: laddr.Name, unlink: false}, nil
 	}
 	fd.Close()
 	return nil, syscall.Linux_EINVAL
 }
 
-func linux_filePacketConn(f *os.Linux_File) (PacketConn, error) {
+func linux_filePacketConn(f *os.File) (PacketConn, error) {
 	fd, err := linux_newFileFD(f)
 	if err != nil {
 		return nil, err

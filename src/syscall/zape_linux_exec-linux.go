@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line exec_linux.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_linux.go:6:1*/
 package syscall
 
 import (
@@ -15,7 +16,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_linux.go:14:2*/
 
 // Linux unshare/clone/clone2/clone3 flags, architecture-independent,
 // copied from linux/sched.h.
@@ -69,7 +70,7 @@ type Linux_SysProcIDMap struct {
 }
 
 type Linux_SysProcAttr struct {
-	Chroot     string            // Chroot.
+	Chroot     string      // Chroot.
 	Credential *Linux_Credential // Credential.
 	// Ptrace tells the child to call ptrace(PTRACE_TRACEME).
 	// Call runtime.LockOSThread before starting a process with this set,
@@ -98,8 +99,8 @@ type Linux_SysProcAttr struct {
 	// is sent on thread termination, which may happen before process termination.
 	// There are more details at https://go.dev/issue/27505.
 	Pdeathsig    Signal
-	Cloneflags   uintptr              // Flags for clone calls.
-	Unshareflags uintptr              // Flags for unshare calls.
+	Cloneflags   uintptr        // Flags for clone calls.
+	Unshareflags uintptr        // Flags for unshare calls.
 	UidMappings  []Linux_SysProcIDMap // User ID mappings for user namespaces.
 	GidMappings  []Linux_SysProcIDMap // Group ID mappings for user namespaces.
 	// GidMappingsEnableSetgroups enabling setgroups syscall.
@@ -124,15 +125,12 @@ var (
 )
 
 // Implemented in runtime package.
-//
 //go:linkname linux_runtime_BeforeFork syscall.runtime_BeforeFork
-func linux_runtime_BeforeFork()
-
+/*line exec_linux.go:123:1*/func linux_runtime_BeforeFork()
 //go:linkname linux_runtime_AfterFork syscall.runtime_AfterFork
-func linux_runtime_AfterFork()
-
+/*line exec_linux.go:124:1*/func linux_runtime_AfterFork()
 //go:linkname linux_runtime_AfterForkInChild syscall.runtime_AfterForkInChild
-func linux_runtime_AfterForkInChild()
+/*line exec_linux.go:125:1*/func linux_runtime_AfterForkInChild()
 
 // Fork, dup fd onto 0..len(fd), and exec(argv0, argvv, envv) in child.
 // If a dup or exec fails, write the errno error to pipe.

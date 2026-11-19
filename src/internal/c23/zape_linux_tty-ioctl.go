@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line tty_ioctl.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tty_ioctl.go:6:1*/
 package c23
 
 import (
@@ -16,7 +17,7 @@ import (
 
 // isatty reports whether f is a terminal: whether the system gets its
 // terminal attributes.
-func linux_isatty(f *os.Linux_File) bool {
+func linux_isatty(f *os.File) bool {
 	c, err := f.SyscallConn()
 	if err != nil {
 		return false
@@ -32,7 +33,7 @@ func linux_isatty(f *os.Linux_File) bool {
 
 // ioctlInRead is the system's FIONREAD of f: the bytes a read would
 // return.
-func linux_ioctlInRead(f *os.Linux_File) (int64, error) {
+func linux_ioctlInRead(f *os.File) (int64, error) {
 	var n int32
 	err := linux_ioctlPtr(f, linux_ioctlFIONREAD, unsafe.Pointer(&n))
 	return int64(n), err
@@ -40,13 +41,13 @@ func linux_ioctlInRead(f *os.Linux_File) (int64, error) {
 
 // ioctlWinsize is the system's TIOCGWINSZ of f: the terminal's struct
 // winsize.
-func linux_ioctlWinsize(f *os.Linux_File) ([4]uint16, error) {
+func linux_ioctlWinsize(f *os.File) ([4]uint16, error) {
 	var ws [4]uint16
 	err := linux_ioctlPtr(f, syscall.Linux_TIOCGWINSZ, unsafe.Pointer(&ws))
 	return ws, err
 }
 
-func linux_ioctlPtr(f *os.Linux_File, req uintptr, arg unsafe.Pointer) error {
+func linux_ioctlPtr(f *os.File, req uintptr, arg unsafe.Pointer) error {
 	c, err := f.SyscallConn()
 	if err != nil {
 		return err

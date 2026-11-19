@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line siginfo_linux.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -20,9 +20,9 @@ const linux_is64bit = ^uint(0) >> 63 // 0 for 32-bit hosts, 1 for 64-bit ones.
 //
 // NOTE fields are exported to be used by TestSiginfoChildLayout.
 type Linux_SiginfoChild struct {
-	Signo             int32
-	linux_siErrnoCode                      // Two int32 fields, swapped on MIPS.
-	_                 [linux_is64bit]int32 // Extra padding for 64-bit hosts only.
+	Signo       int32
+	linux_siErrnoCode                // Two int32 fields, swapped on MIPS.
+	_           [linux_is64bit]int32 // Extra padding for 64-bit hosts only.
 
 	// End of common part. Beginning of signal-specific part.
 

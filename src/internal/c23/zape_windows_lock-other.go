@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line lock_other.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lock_other.go:6:1*/
 package c23
 
 import (
@@ -17,9 +18,9 @@ import (
 // record locks C can use: a process's locks never conflict with its own,
 // so with no other process taking them every lock is granted, and F_GETLK
 // finds none.
-func windows_lockFile(f *os.Windows_File, cmd int32, l *flock) error {
-	if cmd == Windows_F_GETLK {
-		l.typ = Windows_F_UNLCK
+func windows_lockFile(f *os.File, cmd int32, l *flock) error {
+	if cmd == F_GETLK {
+		l.typ = F_UNLCK
 	}
 	return nil
 }
@@ -28,9 +29,9 @@ func windows_lockFile(f *os.Windows_File, cmd int32, l *flock) error {
 // program started as its user time.
 func windows_rusage(who int32) ([18]int64, error) {
 	var ru [18]int64
-	if who != Windows_RUSAGE_CHILDREN {
-		d := time.Windows_Since(start)
-		ru[0], ru[1] = int64(d/time.Windows_Second), int64(d%time.Windows_Second/time.Windows_Microsecond)
+	if who != RUSAGE_CHILDREN {
+		d := time.Since(start)
+		ru[0], ru[1] = int64(d/time.Second), int64(d%time.Second/time.Microsecond)
 	}
 	return ru, nil
 }

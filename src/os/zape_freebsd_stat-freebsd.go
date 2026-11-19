@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line stat_freebsd.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,36 +17,36 @@ import (
 func freebsd_fillFileStatFromSys(fs *freebsd_fileStat, name string) {
 	fs.name = filepathlite.Freebsd_Base(name)
 	fs.size = fs.sys.Size
-	fs.modTime = time.Freebsd_Unix(fs.sys.Mtimespec.Freebsd_Unix())
+	fs.modTime = time.Unix(fs.sys.Mtimespec.Unix())
 	fs.mode = FileMode(fs.sys.Mode & 0777)
 	switch fs.sys.Mode & syscall.Freebsd_S_IFMT {
 	case syscall.Freebsd_S_IFBLK:
-		fs.mode |= Freebsd_ModeDevice
+		fs.mode |= ModeDevice
 	case syscall.Freebsd_S_IFCHR:
-		fs.mode |= Freebsd_ModeDevice | Freebsd_ModeCharDevice
+		fs.mode |= ModeDevice | ModeCharDevice
 	case syscall.Freebsd_S_IFDIR:
-		fs.mode |= Freebsd_ModeDir
+		fs.mode |= ModeDir
 	case syscall.Freebsd_S_IFIFO:
-		fs.mode |= Freebsd_ModeNamedPipe
+		fs.mode |= ModeNamedPipe
 	case syscall.Freebsd_S_IFLNK:
-		fs.mode |= Freebsd_ModeSymlink
+		fs.mode |= ModeSymlink
 	case syscall.Freebsd_S_IFREG:
 		// nothing to do
 	case syscall.Freebsd_S_IFSOCK:
-		fs.mode |= Freebsd_ModeSocket
+		fs.mode |= ModeSocket
 	}
 	if fs.sys.Mode&syscall.Freebsd_S_ISGID != 0 {
-		fs.mode |= Freebsd_ModeSetgid
+		fs.mode |= ModeSetgid
 	}
 	if fs.sys.Mode&syscall.Freebsd_S_ISUID != 0 {
-		fs.mode |= Freebsd_ModeSetuid
+		fs.mode |= ModeSetuid
 	}
 	if fs.sys.Mode&syscall.Freebsd_S_ISVTX != 0 {
-		fs.mode |= Freebsd_ModeSticky
+		fs.mode |= ModeSticky
 	}
 }
 
 // For testing.
 func freebsd_atime(fi FileInfo) time.Time {
-	return time.Freebsd_Unix(fi.Sys().(*syscall.Freebsd_Stat_t).Atimespec.Freebsd_Unix())
+	return time.Unix(fi.Sys().(*syscall.Freebsd_Stat_t).Atimespec.Unix())
 }

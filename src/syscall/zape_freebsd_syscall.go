@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syscall.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line syscall.go:6:1*/
 // Package syscall contains an interface to the low-level operating system
 // primitives. The details vary depending on the underlying system, and
 // by default, godoc will display the syscall documentation for the current
@@ -29,93 +30,14 @@
 // See https://golang.org/s/go1.4-syscall for more information.
 package syscall
 
-import _ "unsafe"
-
-import "internal/bytealg"
-
-//go:generate go run ./mksyscall_windows.go -systemdll -output zsyscall_windows.go syscall_windows.go security_windows.go
-
-// StringByteSlice converts a string to a NUL-terminated []byte,
-// If s contains a NUL byte this function panics instead of
-// returning an error.
-//
-// Deprecated: Use ByteSliceFromString instead.
-func Freebsd_StringByteSlice(s string) []byte {
-	a, err := Freebsd_ByteSliceFromString(s)
-	if err != nil {
-		panic("syscall: string with NUL passed to StringByteSlice")
-	}
-	return a
-}
-
-// ByteSliceFromString returns a NUL-terminated slice of bytes
-// containing the text of s. If s contains a NUL byte at any
-// location, it returns (nil, [EINVAL]).
-func Freebsd_ByteSliceFromString(s string) ([]byte, error) {
-	if bytealg.IndexByteString(s, 0) != -1 {
-		return nil, Freebsd_EINVAL
-	}
-	a := make([]byte, len(s)+1)
-	copy(a, s)
-	return a, nil
-}
-
-// StringBytePtr returns a pointer to a NUL-terminated array of bytes.
-// If s contains a NUL byte this function panics instead of returning
-// an error.
-//
-// Deprecated: Use [BytePtrFromString] instead.
-func Freebsd_StringBytePtr(s string) *byte { return &Freebsd_StringByteSlice(s)[0] }
-
-// BytePtrFromString returns a pointer to a NUL-terminated array of
-// bytes containing the text of s. If s contains a NUL byte at any
-// location, it returns (nil, [EINVAL]).
-func Freebsd_BytePtrFromString(s string) (*byte, error) {
-	a, err := Freebsd_ByteSliceFromString(s)
-	if err != nil {
-		return nil, err
-	}
-	return &a[0], nil
-}
-
-// Unix returns the time stored in ts as seconds plus nanoseconds.
-func (ts *Timespec) Freebsd_Unix() (sec int64, nsec int64) {
-	return int64(ts.Sec), int64(ts.Nsec)
-}
+/*line syscall.go:45:2*//*line syscall.go:57:2*//*line syscall.go:64:69*//*line syscall.go:75:2*//*line syscall.go:79:18*//*line syscall.go:84:2*/
 
 // Unix returns the time stored in tv as seconds plus nanoseconds.
 func (tv *Freebsd_Timeval) Unix() (sec int64, nsec int64) {
 	return int64(tv.Sec), int64(tv.Usec) * 1000
-}
-
-// Nano returns the time stored in ts as nanoseconds.
-func (ts *Timespec) Freebsd_Nano() int64 {
-	return int64(ts.Sec)*1e9 + int64(ts.Nsec)
-}
+}/*line syscall.go:94:2*/
 
 // Nano returns the time stored in tv as nanoseconds.
 func (tv *Freebsd_Timeval) Nano() int64 {
 	return int64(tv.Sec)*1e9 + int64(tv.Usec)*1000
-}
-
-// Getpagesize and Exit are provided by the runtime.
-
-//go:linkname Freebsd_Getpagesize syscall.Getpagesize
-func Freebsd_Getpagesize() int
-
-//go:linkname Freebsd_Exit syscall.Exit
-func Freebsd_Exit(code int)
-
-// runtimeSetenv and runtimeUnsetenv are provided by the runtime.
-//
-//go:linkname freebsd_runtimeSetenv syscall.runtimeSetenv
-func freebsd_runtimeSetenv(k, v string)
-
-//go:linkname freebsd_runtimeUnsetenv syscall.runtimeUnsetenv
-func freebsd_runtimeUnsetenv(k string)
-
-// runtimeClearenv is provided by the runtime (on platforms without
-// clearenv(3), it is just a wrapper around runtimeUnsetenv).
-//
-//go:linkname freebsd_runtimeClearenv syscall.runtimeClearenv
-func freebsd_runtimeClearenv(env map[string]int)
+}/*line syscall.go:103:23*//*line syscall.go:104:20*//*line syscall.go:107:32*//*line syscall.go:108:31*//*line syscall.go:112:41*/

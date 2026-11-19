@@ -19,6 +19,19 @@ const (
 	apeWindows
 )
 
+func initMimeForTests() map[string]string {
+	if apehost == apeLinux {
+		x0 := linux_initMimeForTests()
+		return x0
+	}
+	if apehost == apeFreebsd {
+		x0 := freebsd_initMimeForTests()
+		return x0
+	}
+	x0 := windows_initMimeForTests()
+	return x0
+}
+
 func init() {
 	if apehost == apeLinux {
 		linux_init0()

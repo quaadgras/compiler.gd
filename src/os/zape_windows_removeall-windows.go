@@ -2,14 +2,15 @@
 
 //go:build ape && amd64
 
-// Copyright 2025 The Go Authors. All rights reserved.
+/*line removeall_windows.go:1:1*/// Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line removeall_windows.go:6:1*/
 package os
 
 import "syscall"
 
-func windows_newDirFile(fd syscall.Windows_Handle, name string) (*Windows_File, error) {
+func windows_newDirFile(fd syscall.Windows_Handle, name string) (*File, error) {
 	return windows_newFile(fd, name, windows_kindOpenFile, false), nil
 }

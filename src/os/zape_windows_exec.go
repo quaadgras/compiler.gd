@@ -2,281 +2,24 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec.go:6:1*/
 package os
 
 import (
-	"internal/testlog"
+	
+	
 	"runtime"
-
-	"syscall"
+	
+	
+	
 	"time"
 )
 
-var _ = runtime.GOARCH
-
-const (
-	// statusOK means that the Process is ready to use.
-	windows_statusOK processStatus = iota
-
-	// statusDone indicates that the PID/handle should not be used because
-	// the process is done (has been successfully Wait'd on).
-	windows_statusDone
-
-	// statusReleased indicates that the PID/handle should not be used
-	// because the process is released.
-	windows_statusReleased
-)
-
-// acquire adds a reference and returns the handle.
-// The bool result reports whether acquire succeeded;
-// it fails if the handle is already closed.
-// Every successful call to acquire should be paired with a call to release.
-func (ph *processHandle) windows_acquire() (uintptr, bool) {
-	for {
-		refs := ph.refs.Load()
-		if refs < 0 {
-			panic("internal error: negative process handle reference count")
-		}
-		if refs == 0 {
-			return 0, false
-		}
-		if ph.refs.CompareAndSwap(refs, refs+1) {
-			return ph.handle, true
-		}
-	}
-}
-
-// release releases a reference to the handle.
-func (ph *processHandle) windows_release() {
-	for {
-		refs := ph.refs.Load()
-		if refs <= 0 {
-			panic("internal error: too many releases of process handle")
-		}
-		if ph.refs.CompareAndSwap(refs, refs-1) {
-			if refs == 1 {
-				ph.windows_closeHandle()
-			}
-			return
-		}
-	}
-}
-
-// newPIDProcess returns a [Process] for the given PID.
-func windows_newPIDProcess(pid int) *Process {
-	p := &Process{
-		Pid: pid,
-	}
-	return p
-}
-
-// newHandleProcess returns a [Process] with the given PID and handle.
-func windows_newHandleProcess(pid int, handle uintptr) *Process {
-	ph := &processHandle{
-		handle: handle,
-	}
-
-	// Start the reference count as 1,
-	// meaning the reference from the returned Process.
-	ph.refs.Store(1)
-
-	p := &Process{
-		Pid:    pid,
-		handle: ph,
-	}
-
-	p.cleanup = runtime.AddCleanup(p, (*processHandle).windows_release, ph)
-
-	return p
-}
-
-// newDoneProcess returns a [Process] for the given PID
-// that is already marked as done. This is used on Unix systems
-// if the process is known to not exist.
-func windows_newDoneProcess(pid int) *Process {
-	p := &Process{
-		Pid: pid,
-	}
-	p.state.Store(uint32(windows_statusDone)) // No persistent reference, as there is no handle.
-	return p
-}
-
-// handleTransientAcquire returns the process handle or,
-// if the process is not ready, the current status.
-func (p *Process) windows_handleTransientAcquire() (uintptr, processStatus) {
-	if p.handle == nil {
-		panic("handleTransientAcquire called in invalid mode")
-	}
-
-	status := processStatus(p.state.Load())
-	if status != windows_statusOK {
-		return 0, status
-	}
-	h, ok := p.handle.windows_acquire()
-	if ok {
-		return h, windows_statusOK
-	}
-
-	// This case means that the handle has been closed.
-	// We always set the status to non-zero before closing the handle.
-	// If we get here the status must have been set non-zero after
-	// we just checked it above.
-	status = processStatus(p.state.Load())
-	if status == windows_statusOK {
-		panic("inconsistent process status")
-	}
-	return 0, status
-}
-
-// handleTransientRelease releases a handle returned by handleTransientAcquire.
-func (p *Process) windows_handleTransientRelease() {
-	if p.handle == nil {
-		panic("handleTransientRelease called in invalid mode")
-	}
-	p.handle.windows_release()
-}
-
-// pidStatus returns the current process status.
-func (p *Process) windows_pidStatus() processStatus {
-	if p.handle != nil {
-		panic("pidStatus called in invalid mode")
-	}
-
-	return processStatus(p.state.Load())
-}
-
-// ProcAttr holds the attributes that will be applied to a new process
-// started by StartProcess.
-type Windows_ProcAttr struct {
-	// If Dir is non-empty, the child changes into the directory before
-	// creating the process.
-	Dir string
-	// If Env is non-nil, it gives the environment variables for the
-	// new process in the form returned by Environ.
-	// If it is nil, the result of Environ will be used.
-	Env []string
-	// Files specifies the open files inherited by the new process. The
-	// first three entries correspond to standard input, standard output, and
-	// standard error. An implementation may support additional entries,
-	// depending on the underlying operating system. A nil entry corresponds
-	// to that file being closed when the process starts.
-	// On Unix systems, StartProcess will change these File values
-	// to blocking mode, which means that SetDeadline will stop working
-	// and calling Close will not interrupt a Read or Write.
-	Files []*Windows_File
-
-	// Operating system-specific process creation attributes.
-	// Note that setting this field means that your program
-	// may not execute properly or even compile on some
-	// operating systems.
-	Sys *syscall.Windows_SysProcAttr
-}
-
-// Getpid returns the process id of the caller.
-func Windows_Getpid() int { return syscall.Windows_Getpid() }
-
-// Getppid returns the process id of the caller's parent.
-func Windows_Getppid() int { return syscall.Windows_Getppid() }
-
-// FindProcess looks for a running process by its pid.
-//
-// The [Process] it returns can be used to obtain information
-// about the underlying operating system process.
-//
-// On Unix systems, FindProcess always succeeds and returns a Process
-// for the given pid, regardless of whether the process exists. To test whether
-// the process actually exists, see whether p.Signal(syscall.Signal(0)) reports
-// an error.
-func Windows_FindProcess(pid int) (*Process, error) {
-	return windows_findProcess(pid)
-}
-
-// StartProcess starts a new process with the program, arguments and attributes
-// specified by name, argv and attr. The argv slice will become [os.Args] in the
-// new process, so it normally starts with the program name.
-//
-// If the calling goroutine has locked the operating system thread
-// with [runtime.LockOSThread] and modified any inheritable OS-level
-// thread state (for example, Linux or Plan 9 name spaces), the new
-// process will inherit the caller's thread state.
-//
-// StartProcess is a low-level interface. The [os/exec] package provides
-// higher-level interfaces.
-//
-// If there is an error, it will be of type [*PathError].
-func Windows_StartProcess(name string, argv []string, attr *Windows_ProcAttr) (*Process, error) {
-	testlog.Open(name)
-	return windows_startProcess(name, argv, attr)
-}
-
-// Release releases any resources associated with the [Process] p,
-// rendering it unusable in the future.
-// Release only needs to be called if [Process.Wait] is not.
-func (p *Process) Windows_Release() error {
-	// Unfortunately, for historical reasons, on systems other
-	// than Windows, Release sets the Pid field to -1.
-	// This causes the race detector to report a problem
-	// on concurrent calls to Release, but we can't change it now.
-	if "windows" != "windows" {
-		p.Pid = -1
-	}
-
-	oldStatus := p.windows_doRelease(windows_statusReleased)
-
-	// For backward compatibility, on Windows only,
-	// we return EINVAL on a second call to Release.
-	if "windows" == "windows" {
-		if oldStatus == windows_statusReleased {
-			return syscall.Windows_EINVAL
-		}
-	}
-
-	return nil
-}
-
-// doRelease releases a [Process], setting the status to newStatus.
-// If the previous status is not statusOK, this does nothing.
-// It returns the previous status.
-func (p *Process) windows_doRelease(newStatus processStatus) processStatus {
-	for {
-		state := p.state.Load()
-		oldStatus := processStatus(state)
-		if oldStatus != windows_statusOK {
-			return oldStatus
-		}
-
-		if !p.state.CompareAndSwap(state, uint32(newStatus)) {
-			continue
-		}
-
-		// We have successfully released the Process.
-		// If it has a handle, release the reference we
-		// created in newHandleProcess.
-		if p.handle != nil {
-			// No need for more cleanup.
-			// We must stop the cleanup before calling release;
-			// otherwise the cleanup might run concurrently
-			// with the release, which would cause the reference
-			// counts to be invalid, causing a panic.
-			p.cleanup.Stop()
-
-			p.handle.windows_release()
-		}
-
-		return windows_statusOK
-	}
-}
-
-// Kill causes the [Process] to exit immediately. Kill does not wait until
-// the Process has actually exited. This only kills the Process itself,
-// not any other processes it may have started.
-func (p *Process) Windows_Kill() error {
-	return p.windows_kill()
-}
+var _ = runtime.GOARCH/*line exec.go:17:2*//*line exec.go:26:2*//*line exec.go:29:26*//*line exec.go:42:2*//*line exec.go:68:2*//*line exec.go:86:2*//*line exec.go:105:2*//*line exec.go:121:2*//*line exec.go:129:2*//*line exec.go:149:2*//*line exec.go:160:2*//*line exec.go:187:2*//*line exec.go:195:2*//*line exec.go:204:2*//*line exec.go:231:2*//*line exec.go:239:2*//*line exec.go:242:46*//*line exec.go:245:48*//*line exec.go:258:2*//*line exec.go:276:2*//*line exec.go:301:2*//*line exec.go:334:2*//*line exec.go:341:2*/
 
 // Wait waits for the [Process] to exit, and then returns a
 // ProcessState describing its status and an error, if any.
@@ -285,25 +28,7 @@ func (p *Process) Windows_Kill() error {
 // of the current process or an error will be returned.
 func (p *Process) Windows_Wait() (*Windows_ProcessState, error) {
 	return p.windows_wait()
-}
-
-// Signal sends a signal to the [Process].
-// Sending [Interrupt] on Windows is not implemented.
-func (p *Process) Windows_Signal(sig Signal) error {
-	return p.windows_signal(sig)
-}
-
-// WithHandle calls a supplied function f with a valid process handle
-// as an argument. The handle is guaranteed to refer to process p
-// until f returns, even if p terminates. This function cannot be used
-// after [Process.Release] or [Process.Wait].
-//
-// If process handles are not supported or a handle is not available,
-// it returns [ErrNoHandle]. Currently, process handles are supported
-// on Linux 5.4 or later (pidfd) and Windows.
-func (p *Process) Windows_WithHandle(f func(handle uintptr)) error {
-	return p.windows_withHandle(f)
-}
+}/*line exec.go:356:2*//*line exec.go:368:2*/
 
 // UserTime returns the user CPU time of the exited process and its children.
 func (p *Windows_ProcessState) UserTime() time.Duration {

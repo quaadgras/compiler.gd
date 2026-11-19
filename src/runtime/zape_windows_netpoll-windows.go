@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line netpoll_windows.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ package runtime
 
 import (
 	"internal/goarch"
-
+	
 	"internal/runtime/syscall/windows"
 	"unsafe"
 )
@@ -99,6 +99,7 @@ type windows_overlappedEntry struct {
 var (
 	windows_iocphandle uintptr = windows.Windows_INVALID_HANDLE_VALUE // completion port io handle
 
+	
 )
 
 func windows_netpollinit() {

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line splice_linux.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -15,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line splice_linux.go:12:2*/
 
 const (
 	// spliceNonblock doesn't make the splice itself necessarily nonblocking
@@ -94,7 +94,7 @@ func linux_spliceDrain(pipefd int, sock *Linux_FD, max int) (int, error) {
 		return 0, err
 	}
 	defer sock.readUnlock()
-	if err := sock.pd.linux_prepareRead(sock.isFile); err != nil {
+	if err := sock.pd.prepareRead(sock.isFile); err != nil {
 		return 0, err
 	}
 	for {
@@ -109,8 +109,8 @@ func linux_spliceDrain(pipefd int, sock *Linux_FD, max int) (int, error) {
 		if err != syscall.Linux_EAGAIN {
 			return n, err
 		}
-		if sock.pd.linux_pollable() {
-			if err := sock.pd.linux_waitRead(sock.isFile); err != nil {
+		if sock.pd.pollable() {
+			if err := sock.pd.waitRead(sock.isFile); err != nil {
 				return n, err
 			}
 		}
@@ -135,7 +135,7 @@ func linux_splicePump(sock *Linux_FD, pipefd int, inPipe int) (int, error) {
 		return 0, err
 	}
 	defer sock.writeUnlock()
-	if err := sock.pd.linux_prepareWrite(sock.isFile); err != nil {
+	if err := sock.pd.prepareWrite(sock.isFile); err != nil {
 		return 0, err
 	}
 	written := 0
@@ -158,8 +158,8 @@ func linux_splicePump(sock *Linux_FD, pipefd int, inPipe int) (int, error) {
 		if err != syscall.Linux_EAGAIN {
 			return written, err
 		}
-		if sock.pd.linux_pollable() {
-			if err := sock.pd.linux_waitWrite(sock.isFile); err != nil {
+		if sock.pd.pollable() {
+			if err := sock.pd.waitWrite(sock.isFile); err != nil {
 				return written, err
 			}
 		}

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line lookup_windows.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line lookup_windows.go:15:2*/
 
 func windows_isDomainJoined() (bool, error) {
 	var domain *uint16
@@ -246,6 +246,8 @@ func windows_newUser(uid, gid, dir, username, domain string) (*User, error) {
 	}
 	return u, nil
 }
+
+/*line lookup_windows.go:249:2*/
 
 func windows_current() (*User, error) {
 	// Use runAsProcessOwner to ensure that we can access the process token

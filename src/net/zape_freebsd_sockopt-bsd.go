@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockopt_bsd.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockopt_bsd.go:6:1*/
 package net
 
 import (
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockopt_bsd.go:13:2*/
 
 func freebsd_setDefaultSockopts(s, family, sotype int, ipv6only bool) error {
 	if "freebsd" == "dragonfly" && sotype != syscall.Freebsd_SOCK_RAW {
@@ -33,7 +34,7 @@ func freebsd_setDefaultSockopts(s, family, sotype int, ipv6only bool) error {
 		// Allow both IP versions even if the OS default
 		// is otherwise. Note that some operating systems
 		// never admit this option.
-		syscall.Freebsd_SetsockoptInt(s, syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_V6ONLY, freebsd_boolint(ipv6only))
+		syscall.Freebsd_SetsockoptInt(s, syscall.Freebsd_IPPROTO_IPV6, syscall.Freebsd_IPV6_V6ONLY, boolint(ipv6only))
 	}
 	if (sotype == syscall.Freebsd_SOCK_DGRAM || sotype == syscall.Freebsd_SOCK_RAW) && family != syscall.Freebsd_AF_UNIX {
 		// Allow broadcast.

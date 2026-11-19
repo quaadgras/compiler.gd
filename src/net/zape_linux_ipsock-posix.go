@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line ipsock_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line ipsock_posix.go:6:1*/
 package net
 
 import (
@@ -17,7 +18,7 @@ import (
 	_ "unsafe" // for linkname
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line ipsock_posix.go:16:2*/
 
 // probe probes IPv4, IPv6 and IPv4-mapped IPv6 communication
 // capabilities which are controlled by the IPV6_V6ONLY socket option
@@ -141,7 +142,7 @@ func (p *ipStackCapabilities) linux_probe() {
 // See go.dev/issue/67401.
 //
 //go:linkname linux_favoriteAddrFamily
-func linux_favoriteAddrFamily(network string, laddr, raddr sockaddr, mode string) (family int, ipv6only bool) {
+func linux_favoriteAddrFamily(network string, laddr, raddr linux_sockaddr, mode string) (family int, ipv6only bool) {
 	switch network[len(network)-1] {
 	case '4':
 		return syscall.Linux_AF_INET, false
@@ -156,21 +157,21 @@ func linux_favoriteAddrFamily(network string, laddr, raddr sockaddr, mode string
 		if laddr == nil {
 			return syscall.Linux_AF_INET, false
 		}
-		return laddr.family(), false
+		return laddr.linux_family(), false
 	}
 
-	if (laddr == nil || laddr.family() == syscall.Linux_AF_INET) &&
-		(raddr == nil || raddr.family() == syscall.Linux_AF_INET) {
+	if (laddr == nil || laddr.linux_family() == syscall.Linux_AF_INET) &&
+		(raddr == nil || raddr.linux_family() == syscall.Linux_AF_INET) {
 		return syscall.Linux_AF_INET, false
 	}
 	return syscall.Linux_AF_INET6, false
 }
 
-func linux_internetSocket(ctx context.Context, net string, laddr, raddr sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
+func linux_internetSocket(ctx context.Context, net string, laddr, raddr linux_sockaddr, sotype, proto int, mode string, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
 	switch "linux" {
 	case "aix", "freebsd", "windows", "openbsd", "js", "wasip1":
 		if mode == "dial" && raddr.isWildcard() {
-			raddr = raddr.toLocal(net)
+			raddr = raddr.linux_toLocal(net)
 		}
 	}
 	family, ipv6only := linux_favoriteAddrFamily(net, laddr, raddr, mode)

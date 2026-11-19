@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line file_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -25,7 +25,7 @@ func windows_dupSocket(h syscall.Windows_Handle) (syscall.Windows_Handle, error)
 	return windows.Windows_WSASocket(-1, -1, -1, &info, 0, windows.Windows_WSA_FLAG_OVERLAPPED|windows.Windows_WSA_FLAG_NO_HANDLE_INHERIT)
 }
 
-func windows_dupFileSocket(f *os.Windows_File) (syscall.Windows_Handle, error) {
+func windows_dupFileSocket(f *os.File) (syscall.Windows_Handle, error) {
 	// Call Fd to disassociate the IOCP from the handle,
 	// it is not safe to share a duplicated handle
 	// that is associated with IOCP.

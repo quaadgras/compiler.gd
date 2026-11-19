@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syslog_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line syslog_unix.go:6:1*/
 package syslog
 
 import (
@@ -21,7 +22,7 @@ func freebsd_unixSyslog() (conn freebsd_serverConn, err error) {
 	logPaths := []string{"/dev/log", "/var/run/syslog", "/var/run/log"}
 	for _, network := range logTypes {
 		for _, path := range logPaths {
-			conn, err := net.Freebsd_Dial(network, path)
+			conn, err := net.Dial(network, path)
 			if err == nil {
 				return &freebsd_netConn{conn: conn, local: true}, nil
 			}

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_posix.go:6:1*/
 package os
 
 import (
@@ -15,13 +16,13 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_posix.go:14:2*//*line exec_posix.go:24:2*/
 
-func windows_startProcess(name string, argv []string, attr *Windows_ProcAttr) (p *Process, err error) {
+func windows_startProcess(name string, argv []string, attr *ProcAttr) (p *Process, err error) {
 	// If there is no SysProcAttr (ie. no Chroot or changed
 	// UID/GID), double-check existence of the directory we want
 	// to chdir into. We can make the error clearer this way.
-	if attr != nil && attr.Sys == nil && attr.Dir != "" {
+	if attr != nil && syscall.Windows_FromAPE_SysProcAttr(attr.Sys) == nil && attr.Dir != "" {
 		if _, err := Stat(attr.Dir); err != nil {
 			pe := err.(*PathError)
 			pe.Op = "chdir"
@@ -29,7 +30,7 @@ func windows_startProcess(name string, argv []string, attr *Windows_ProcAttr) (p
 		}
 	}
 
-	attrSys, shouldDupPidfd := windows_ensurePidfd(attr.Sys)
+	attrSys, shouldDupPidfd := windows_ensurePidfd(syscall.Windows_FromAPE_SysProcAttr(attr.Sys))
 	sysattr := &syscall.Windows_ProcAttr{
 		Dir: attr.Dir,
 		Env: attr.Env,
@@ -60,37 +61,16 @@ func windows_startProcess(name string, argv []string, attr *Windows_ProcAttr) (p
 		var ok bool
 		h, ok = windows_getPidfd(sysattr.Sys, shouldDupPidfd)
 		if !ok {
-			return windows_newPIDProcess(pid), nil
+			return newPIDProcess(pid), nil
 		}
 	}
 
-	return windows_newHandleProcess(pid, h), nil
-}
-
-func (p *Process) windows_kill() error {
-	return p.Windows_Signal(Kill)
-}
-
-func (p *Process) windows_withHandle(f func(handle uintptr)) error {
-	if p.handle == nil {
-		return ErrNoHandle
-	}
-	handle, status := p.windows_handleTransientAcquire()
-	switch status {
-	case windows_statusDone:
-		return ErrProcessDone
-	case windows_statusReleased:
-		return errProcessReleased
-	}
-	defer p.windows_handleTransientRelease()
-	f(handle)
-
-	return nil
-}
+	return newHandleProcess(pid, h), nil
+}/*line exec_posix.go:78:2*//*line exec_posix.go:95:2*/
 
 // ProcessState stores information about a process, as reported by Wait.
 type Windows_ProcessState struct {
-	pid    int                        // The process's id.
+	pid    int                // The process's id.
 	status syscall.Windows_WaitStatus // System-dependent status info.
 	rusage *syscall.Windows_Rusage
 }

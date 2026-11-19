@@ -2,117 +2,34 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line switch.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line switch.go:6:1*/
 // Package socktest provides utilities for socket testing.
 package socktest
 
+import "unsafe"/*line switch.go:8:17*/
+
 import (
-	"fmt"
-	"sync"
-)
+	
+	
+)/*line switch.go:26:2*/
 
-// A Switch represents a callpath point switch for socket system
-// calls.
-type Linux_Switch struct {
-	once sync.Once
-
-	fmu   sync.RWMutex
-	fltab map[FilterType]Filter
-
-	smu   sync.RWMutex
-	sotab Linux_Sockets
-	stats stats
-}
-
-func (sw *Linux_Switch) init() {
+func (sw *Switch) linux_init() {
 	sw.fltab = make(map[FilterType]Filter)
-	sw.sotab = make(Linux_Sockets)
+	(*(*Linux_Sockets)(unsafe.Pointer(&sw.sotab))) = make(Linux_Sockets)
 	sw.stats = make(stats)
-}
-
-// Stats returns a list of per-cookie socket statistics.
-func (sw *Linux_Switch) Stats() []Stat {
-	var st []Stat
-	sw.smu.RLock()
-	for _, s := range sw.stats {
-		ns := *s
-		st = append(st, ns)
-	}
-	sw.smu.RUnlock()
-	return st
-}
+}/*line switch.go:44:2*/
 
 // Sockets returns mappings of socket descriptor to socket status.
-func (sw *Linux_Switch) Sockets() Linux_Sockets {
+func (sw *Switch) Linux_Sockets() Linux_Sockets {
 	sw.smu.RLock()
-	tab := make(Linux_Sockets, len(sw.sotab))
-	for i, s := range sw.sotab {
+	tab := make(Linux_Sockets, len((*(*Linux_Sockets)(unsafe.Pointer(&sw.sotab)))))
+	for i, s := range (*(*Linux_Sockets)(unsafe.Pointer(&sw.sotab))) {
 		tab[i] = s
 	}
 	sw.smu.RUnlock()
 	return tab
-}
-
-// Family returns an address family.
-func (c Cookie) Linux_Family() int { return int(c >> 48) }
-
-// Type returns a socket type.
-func (c Cookie) Linux_Type() int { return int(c << 16 >> 32) }
-
-// Protocol returns a protocol number.
-func (c Cookie) Linux_Protocol() int { return int(c & 0xff) }
-
-func linux_cookie(family, sotype, proto int) Cookie {
-	return Cookie(family)<<48 | Cookie(sotype)&0xffffffff<<16 | Cookie(proto)&0xff
-}
-
-func (so Status) Linux_String() string {
-	return fmt.Sprintf("(%s, %s, %s): syscallerr=%v socketerr=%v", linux_familyString(so.Cookie.Linux_Family()), linux_typeString(so.Cookie.Linux_Type()), linux_protocolString(so.Cookie.Linux_Protocol()), so.Err, so.SocketErr)
-}
-
-func (st Stat) Linux_String() string {
-	return fmt.Sprintf("(%s, %s, %s): opened=%d connected=%d listened=%d accepted=%d closed=%d openfailed=%d connectfailed=%d listenfailed=%d acceptfailed=%d closefailed=%d", linux_familyString(st.Family), linux_typeString(st.Type), linux_protocolString(st.Protocol), st.Opened, st.Connected, st.Listened, st.Accepted, st.Closed, st.OpenFailed, st.ConnectFailed, st.ListenFailed, st.AcceptFailed, st.CloseFailed)
-}
-
-func (st stats) linux_getLocked(c Cookie) *Stat {
-	s, ok := st[c]
-	if !ok {
-		s = &Stat{Family: c.Linux_Family(), Type: c.Linux_Type(), Protocol: c.Linux_Protocol()}
-		st[c] = s
-	}
-	return s
-}
-
-const (
-	Linux_FilterSocket        FilterType = iota // for Socket
-	Linux_FilterConnect                         // for Connect or ConnectEx
-	Linux_FilterListen                          // for Listen
-	Linux_FilterAccept                          // for Accept, Accept4 or AcceptEx
-	Linux_FilterGetsockoptInt                   // for GetsockoptInt
-	Linux_FilterClose                           // for Close or Closesocket
-)
-
-func (f Filter) linux_apply(st *Status) (AfterFilter, error) {
-	if f == nil {
-		return nil, nil
-	}
-	return f(st)
-}
-
-func (f AfterFilter) linux_apply(st *Status) error {
-	if f == nil {
-		return nil
-	}
-	return f(st)
-}
-
-// Set deploys the socket system call filter f for the filter type t.
-func (sw *Linux_Switch) Set(t FilterType, f Filter) {
-	sw.once.Do(sw.init)
-	sw.fmu.Lock()
-	sw.fltab[t] = f
-	sw.fmu.Unlock()
-}
+}/*line switch.go:59:19*//*line switch.go:62:53*//*line switch.go:65:57*//*line switch.go:68:56*//*line switch.go:72:2*//*line switch.go:79:2*//*line switch.go:83:2*//*line switch.go:102:2*//*line switch.go:106:2*//*line switch.go:108:28*//*line switch.go:117:2*//*line switch.go:120:20*//*line switch.go:129:2*//*line switch.go:140:47*//*line switch.go:147:2*//*line switch.go:156:37*//*line switch.go:163:2*//*line switch.go:171:2*/

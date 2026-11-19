@@ -2,13 +2,12 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line sendfile_unix.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sendfile_unix.go:6:1*/
 package poll
-
-import "unsafe"
 
 import (
 	"io"
@@ -16,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sendfile_unix.go:13:2*/
 
 // SendFile wraps the sendfile system call.
 //
@@ -44,7 +43,7 @@ func Freebsd_SendFile(dstFD *Freebsd_FD, src uintptr, size int64) (n int64, err 
 	// Non-Linux sendfile implementations don't use the current position of the source file,
 	// so we need to look up the position, pass it explicitly, and adjust it after
 	// sendfile returns.
-	start, err := freebsd_ignoringEINTR2(func() (int64, error) {
+	start, err := ignoringEINTR2(func() (int64, error) {
 		return syscall.Freebsd_Seek(int(src), 0, io.SeekCurrent)
 	})
 	if err != nil {
@@ -54,7 +53,7 @@ func Freebsd_SendFile(dstFD *Freebsd_FD, src uintptr, size int64) (n int64, err 
 	pos := start
 	n, err, handled = freebsd_sendFile(dstFD, int(src), &pos, size)
 	if n > 0 {
-		freebsd_ignoringEINTR2(func() (int64, error) {
+		ignoringEINTR2(func() (int64, error) {
 			return syscall.Freebsd_Seek(int(src), start+n, io.SeekStart)
 		})
 	}
@@ -64,14 +63,14 @@ func Freebsd_SendFile(dstFD *Freebsd_FD, src uintptr, size int64) (n int64, err 
 // sendFile wraps the sendfile system call.
 func freebsd_sendFile(dstFD *Freebsd_FD, src int, offset *int64, size int64) (written int64, err error, handled bool) {
 	defer func() {
-		TestHookDidSendFile((*FD)(unsafe.Pointer(dstFD)), uintptr(src), written, err, handled)
+		Freebsd_TestHookDidSendFile(dstFD, uintptr(src), written, err, handled)
 	}()
 	if err := dstFD.writeLock(); err != nil {
 		return 0, err, false
 	}
 	defer dstFD.writeUnlock()
 
-	if err := dstFD.pd.freebsd_prepareWrite(dstFD.isFile); err != nil {
+	if err := dstFD.pd.prepareWrite(dstFD.isFile); err != nil {
 		return 0, err, false
 	}
 
@@ -109,7 +108,7 @@ func freebsd_sendFile(dstFD *Freebsd_FD, src int, offset *int64, size int64) (wr
 			if size > 0 && written >= size {
 				return written, nil, true
 			}
-			if err = dstFD.pd.freebsd_waitWrite(dstFD.isFile); err != nil {
+			if err = dstFD.pd.waitWrite(dstFD.isFile); err != nil {
 				return written, err, true
 			}
 		case syscall.Freebsd_EINTR:

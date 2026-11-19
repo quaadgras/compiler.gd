@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !ape && !apegen
+
 // This file exercises the import parser but also checks that
 // some low-level packages do not have new dependencies added.
 

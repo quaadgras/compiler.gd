@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line route.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line route.go:6:1*/
 // Package routebsd supports reading interface addresses on BSD systems.
 // This is a very stripped down version of x/net/route,
 // for use by the net package in the standard library.
@@ -18,29 +19,29 @@ import (
 
 var (
 	freebsd_errMessageMismatch = func() error {
-		if apehost != apeFreebsd {
-			return *new(error)
-		}
-		return errors.New("message mismatch")
-	}()
+if apehost != apeFreebsd {
+return *new(error)
+}
+return /*line route.go:18:23*/errors.New("message mismatch")
+}()/*line route.go:18:53*/
 	freebsd_errMessageTooShort = func() error {
-		if apehost != apeFreebsd {
-			return *new(error)
-		}
-		return errors.New("message too short")
-	}()
-	freebsd_errInvalidMessage = func() error {
-		if apehost != apeFreebsd {
-			return *new(error)
-		}
-		return errors.New("invalid message")
-	}()
-	freebsd_errInvalidAddr = func() error {
-		if apehost != apeFreebsd {
-			return *new(error)
-		}
-		return errors.New("invalid address")
-	}()
+if apehost != apeFreebsd {
+return *new(error)
+}
+return /*line route.go:19:23*/errors.New("message too short")
+}()/*line route.go:19:54*/
+	freebsd_errInvalidMessage  = func() error {
+if apehost != apeFreebsd {
+return *new(error)
+}
+return /*line route.go:20:23*/errors.New("invalid message")
+}()/*line route.go:20:52*/
+	freebsd_errInvalidAddr     = func() error {
+if apehost != apeFreebsd {
+return *new(error)
+}
+return /*line route.go:21:23*/errors.New("invalid address")
+}()/*line route.go:21:52*/
 )
 
 // fetchRIB fetches a routing information base from the operating

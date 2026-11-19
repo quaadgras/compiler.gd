@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_openat.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_openat.go:6:1*/
 package os
+
+import "unsafe"/*line root_openat.go:7:11*/
 
 import (
 	"io/fs"
@@ -17,7 +20,7 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line root_openat.go:16:2*/
 
 // root implementation for platforms with a function to open a file
 // relative to a directory.
@@ -73,7 +76,7 @@ func (r *windows_root) Name() string {
 	return r.name
 }
 
-func windows_rootChmod(r *Windows_Root, name string, mode FileMode) error {
+func windows_rootChmod(r *Root, name string, mode FileMode) error {
 	_, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_chmodat(parent, name, mode)
 	})
@@ -83,7 +86,7 @@ func windows_rootChmod(r *Windows_Root, name string, mode FileMode) error {
 	return nil
 }
 
-func windows_rootChown(r *Windows_Root, name string, uid, gid int) error {
+func windows_rootChown(r *Root, name string, uid, gid int) error {
 	_, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_chownat(parent, name, uid, gid)
 	})
@@ -93,7 +96,7 @@ func windows_rootChown(r *Windows_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func windows_rootLchown(r *Windows_Root, name string, uid, gid int) error {
+func windows_rootLchown(r *Root, name string, uid, gid int) error {
 	_, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_lchownat(parent, name, uid, gid)
 	})
@@ -103,7 +106,7 @@ func windows_rootLchown(r *Windows_Root, name string, uid, gid int) error {
 	return nil
 }
 
-func windows_rootChtimes(r *Windows_Root, name string, atime time.Time, mtime time.Time) error {
+func windows_rootChtimes(r *Root, name string, atime time.Time, mtime time.Time) error {
 	_, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_chtimesat(parent, name, atime, mtime)
 	})
@@ -113,15 +116,15 @@ func windows_rootChtimes(r *Windows_Root, name string, atime time.Time, mtime ti
 	return nil
 }
 
-func windows_rootMkdir(r *Windows_Root, name string, perm FileMode) error {
-	flags := uint(windows_doInRootCreatingDirectory)
+func windows_rootMkdir(r *Root, name string, perm FileMode) error {
+	flags := uint(doInRootCreatingDirectory)
 	switch "windows" {
 	case "linux", "windows", "openbsd":
 		// These platforms do not follow "symlink" on "mkdir symlink/".
 		// (POSIX.1-2024 4.16 says that the trailing slash should cause
 		// resolution to follow the symlink, but we're trying to match
 		// platform semantics, not implement POSIX.)
-		flags |= windows_doInRootNoHandleTerminalSlash
+		flags |= doInRootNoHandleTerminalSlash
 	}
 	_, err := windows_doInRoot(r, name, flags, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_mkdirat(parent, name, perm)
@@ -132,7 +135,7 @@ func windows_rootMkdir(r *Windows_Root, name string, perm FileMode) error {
 	return nil
 }
 
-func windows_rootMkdirAll(r *Windows_Root, fullname string, perm FileMode) error {
+func windows_rootMkdirAll(r *Root, fullname string, perm FileMode) error {
 	// doInRoot opens each path element in turn.
 	//
 	// openDirFunc opens all but the last path component.
@@ -190,10 +193,10 @@ func windows_rootMkdirAll(r *Windows_Root, fullname string, perm FileMode) error
 		}
 		return struct{}{}, &PathError{Op: "mkdirat", Err: err}
 	}
-	flags := uint(windows_doInRootCreatingDirectory)
+	flags := uint(doInRootCreatingDirectory)
 	switch "windows" {
 	case "linux", "windows", "openbsd":
-		flags |= windows_doInRootNoHandleTerminalSlash // see rootMkdir
+		flags |= doInRootNoHandleTerminalSlash // see rootMkdir
 	}
 	_, err := windows_doInRoot(r, fullname, flags, openDirFunc, openLastComponentFunc)
 	if err != nil {
@@ -204,7 +207,7 @@ func windows_rootMkdirAll(r *Windows_Root, fullname string, perm FileMode) error
 	return err
 }
 
-func windows_rootReadlink(r *Windows_Root, name string) (string, error) {
+func windows_rootReadlink(r *Root, name string) (string, error) {
 	target, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (string, error) {
 		return windows_readlinkat(parent, name)
 	})
@@ -214,7 +217,7 @@ func windows_rootReadlink(r *Windows_Root, name string) (string, error) {
 	return target, nil
 }
 
-func windows_rootRemove(r *Windows_Root, name string) error {
+func windows_rootRemove(r *Root, name string) error {
 	_, err := windows_doInRoot(r, name, 0, nil, func(parent windows_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, windows_removeat(parent, name)
 	})
@@ -224,7 +227,7 @@ func windows_rootRemove(r *Windows_Root, name string) error {
 	return nil
 }
 
-func windows_rootRemoveAll(r *Windows_Root, name string) error {
+func windows_rootRemoveAll(r *Root, name string) error {
 	// Consistency with os.RemoveAll: Strip trailing /s from the name,
 	// so RemoveAll("not_a_directory/") succeeds.
 	for len(name) > 0 && Windows_IsPathSeparator(name[len(name)-1]) {
@@ -246,11 +249,11 @@ func windows_rootRemoveAll(r *Windows_Root, name string) error {
 	return err
 }
 
-func windows_rootRename(r *Windows_Root, oldname, newname string) error {
+func windows_rootRename(r *Root, oldname, newname string) error {
 	_, err := windows_doInRoot(r, oldname, 0, nil, func(oldparent windows_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
-		flags := uint(windows_doInRootCreatingDirectory)
+		flags := uint(doInRootCreatingDirectory)
 		if "windows" == "windows" {
-			flags |= windows_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := windows_doInRoot(r, newname, flags, nil, func(newparent windows_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			if "windows" != "windows" && newEndsInSlash {
@@ -281,12 +284,12 @@ func windows_rootRename(r *Windows_Root, oldname, newname string) error {
 	return err
 }
 
-func windows_rootLink(r *Windows_Root, oldname, newname string) error {
+func windows_rootLink(r *Root, oldname, newname string) error {
 	_, err := windows_doInRoot(r, oldname, 0, nil, func(oldparent windows_sysfdType, oldname string, oldEndsInSlash bool) (struct{}, error) {
 		flags := uint(0)
 		if "windows" == "windows" {
 			// Windows doesn't pay attention to trailing slashes in the link target.
-			flags |= windows_doInRootNoHandleTerminalSlash
+			flags |= doInRootNoHandleTerminalSlash
 		}
 		_, err := windows_doInRoot(r, newname, flags, nil, func(newparent windows_sysfdType, newname string, newEndsInSlash bool) (struct{}, error) {
 			return struct{}{}, windows_linkat(oldparent, oldname, newparent, newname)
@@ -297,27 +300,7 @@ func windows_rootLink(r *Windows_Root, oldname, newname string) error {
 		return &LinkError{"linkat", oldname, newname, err}
 	}
 	return err
-}
-
-// Flags for doInRoot.
-const (
-	// doInRootNoHandleTerminalSlash prevents doInRoot from applying special handling
-	// for paths which end in one or more slashes.
-	windows_doInRootNoHandleTerminalSlash = 1 << iota
-
-	// doInRootCreatingDirectory indicates that the operation is creating a directory.
-	// When a path ends in /, the last path component may name a file which does not exist.
-	windows_doInRootCreatingDirectory
-
-	// doInRootAlwaysResolveTerminalSlash causes doInRoot to resolve symlinks in the last
-	// path component when a path ends in /, even on Windows. For example, this causes
-	// doInRoot to resolve "symlink/" as the link target of "symlink".
-	//
-	// POSIX path operations resolve symlinks in this case.
-	// Most Windows operations do not.
-	// This flag enforces the POSIX behavior.
-	windows_doInRootAlwaysResolveTerminalSlash
-)
+}/*line root_openat.go:316:2*/
 
 // doInRoot performs an operation on a path in a Root.
 //
@@ -344,13 +327,13 @@ const (
 //
 // If f or openDirFunc return a *PathError, doInRoot will set PathError.Path to the
 // full path which caused the error.
-func windows_doInRoot[T any](r *Windows_Root, name string, flags uint, openDirFunc func(parent windows_sysfdType, name string) (windows_sysfdType, error), f func(parent windows_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
-	if err := r.root.incref(); err != nil {
+func windows_doInRoot[T any](r *Root, name string, flags uint, openDirFunc func(parent windows_sysfdType, name string) (windows_sysfdType, error), f func(parent windows_sysfdType, name string, endsInSlash bool) (T, error)) (ret T, err error) {
+	if err := (*(**windows_root)(unsafe.Pointer(&r.root))).incref(); err != nil {
 		return ret, err
 	}
-	defer r.root.decref()
+	defer (*(**windows_root)(unsafe.Pointer(&r.root))).decref()
 
-	parts, endsInSlash, err := windows_splitPathInRoot(name, nil, nil)
+	parts, endsInSlash, err := splitPathInRoot(name, nil, nil)
 	if err != nil {
 		return ret, err
 	}
@@ -358,7 +341,7 @@ func windows_doInRoot[T any](r *Windows_Root, name string, flags uint, openDirFu
 		openDirFunc = windows_rootOpenDir
 	}
 
-	rootfd := r.root.fd
+	rootfd := (*(**windows_root)(unsafe.Pointer(&r.root))).fd
 	dirfd := rootfd
 	defer func() {
 		if dirfd != rootfd {
@@ -415,11 +398,11 @@ Loop:
 
 		if i == len(parts)-1 {
 			err = nil
-			if endsInSlash && flags&windows_doInRootNoHandleTerminalSlash == 0 {
+			if endsInSlash && flags&doInRootNoHandleTerminalSlash == 0 {
 				var fi FileInfo
 				fi, err = windows_lstatat(dirfd, parts[i])
 				switch {
-				case IsNotExist(err) && flags&windows_doInRootCreatingDirectory != 0:
+				case IsNotExist(err) && flags&doInRootCreatingDirectory != 0:
 					// The path ends in a slash, the last path component
 					// does not exist, and we creating a directory.
 					// This is fine.
@@ -428,7 +411,7 @@ Loop:
 					return
 				case fi.Mode().Type() == fs.ModeDir:
 				case windows_isLink(fi):
-					if "windows" != "windows" || flags&windows_doInRootAlwaysResolveTerminalSlash != 0 {
+					if "windows" != "windows" || flags&doInRootAlwaysResolveTerminalSlash != 0 {
 						err = windows_checkSymlink(dirfd, parts[i], syscall.Windows_ENOTDIR)
 					} else {
 						if !windows_isDirectoryLink(fi) {
@@ -467,11 +450,11 @@ Loop:
 		case nil:
 		case errSymlink:
 			symlinks++
-			if symlinks > windows_rootMaxSymlinks {
+			if symlinks > rootMaxSymlinks {
 				return ret, syscall.Windows_ELOOP
 			}
 			lastPart := i == len(parts)-1
-			newparts, newEndsInSlash, err := windows_splitPathInRoot(string(e), parts[:i], parts[i+1:])
+			newparts, newEndsInSlash, err := splitPathInRoot(string(e), parts[:i], parts[i+1:])
 			if err != nil {
 				return ret, err
 			}
@@ -512,6 +495,4 @@ func windows_modeAt(parent windows_sysfdType, name string) (FileMode, error) {
 		return 0, err
 	}
 	return fi.Mode(), nil
-}
-
-func (errSymlink) Windows_Error() string { panic("errSymlink is not user-visible") }
+}/*line root_openat.go:515:23*//*line root_openat.go:517:77*/

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line fd_fsync_posix.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_fsync_posix.go:6:1*/
 package poll
 
 import "syscall"
@@ -16,7 +17,7 @@ func (fd *Linux_FD) Fsync() error {
 		return err
 	}
 	defer fd.decref()
-	return linux_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return syscall.Linux_Fsync(fd.Sysfd)
 	})
 }

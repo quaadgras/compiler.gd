@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line sock_linux.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -35,17 +35,17 @@ func linux_maxAckBacklog(n int) int {
 }
 
 func linux_maxListenerBacklog() int {
-	fd, err := linux_open("/proc/sys/net/core/somaxconn")
+	fd, err := open("/proc/sys/net/core/somaxconn")
 	if err != nil {
 		return syscall.Linux_SOMAXCONN
 	}
-	defer fd.linux_close()
-	l, ok := fd.linux_readLine()
+	defer fd.close()
+	l, ok := fd.readLine()
 	if !ok {
 		return syscall.Linux_SOMAXCONN
 	}
-	f := linux_getFields(l)
-	n, _, ok := linux_dtoi(f[0])
+	f := getFields(l)
+	n, _, ok := dtoi(f[0])
 	if n == 0 || !ok {
 		return syscall.Linux_SOMAXCONN
 	}

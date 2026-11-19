@@ -2,11 +2,13 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line zero_copy_linux.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package os
+
+import "unsafe"/*line zero_copy_linux.go:5:11*/
 
 import (
 	"internal/poll"
@@ -19,7 +21,7 @@ var (
 	linux_pollSplice        = poll.Linux_Splice
 )
 
-func (f *Linux_File) writeTo(w io.Writer) (written int64, handled bool, err error) {
+func (f *File) linux_writeTo(w io.Writer) (written int64, handled bool, err error) {
 	pfd, network := linux_getPollFDAndNetwork(w)
 	// TODO(panjf2000): same as File.spliceToFile.
 	if pfd == nil || !pfd.IsStream || !linux_isUnixOrTCP(string(network)) {
@@ -43,24 +45,24 @@ func (f *Linux_File) writeTo(w io.Writer) (written int64, handled bool, err erro
 	return written, handled, wrapSyscallError("sendfile", err)
 }
 
-func (f *Linux_File) readFrom(r io.Reader) (written int64, handled bool, err error) {
+func (f *File) linux_readFrom(r io.Reader) (written int64, handled bool, err error) {
 	// Neither copy_file_range(2) nor splice(2) supports destinations opened with
 	// O_APPEND, so don't bother to try zero-copy with these system calls.
 	//
 	// Visit https://man7.org/linux/man-pages/man2/copy_file_range.2.html#ERRORS and
 	// https://man7.org/linux/man-pages/man2/splice.2.html#ERRORS for details.
-	if f.appendMode {
+	if (*linux_file)(unsafe.Pointer(f.file)).appendMode {
 		return 0, false, nil
 	}
 
-	written, handled, err = f.copyFileRange(r)
+	written, handled, err = f.linux_copyFileRange(r)
 	if handled {
 		return
 	}
-	return f.spliceToFile(r)
+	return f.linux_spliceToFile(r)
 }
 
-func (f *Linux_File) spliceToFile(r io.Reader) (written int64, handled bool, err error) {
+func (f *File) linux_spliceToFile(r io.Reader) (written int64, handled bool, err error) {
 	var (
 		remain int64
 		lr     *io.LimitedReader
@@ -81,7 +83,7 @@ func (f *Linux_File) spliceToFile(r io.Reader) (written int64, handled bool, err
 		return
 	}
 
-	written, handled, err = linux_pollSplice(&f.pfd, pfd, remain)
+	written, handled, err = linux_pollSplice(&(*linux_file)(unsafe.Pointer(f.file)).pfd, pfd, remain)
 
 	if lr != nil {
 		lr.N = remain - written
@@ -90,7 +92,7 @@ func (f *Linux_File) spliceToFile(r io.Reader) (written int64, handled bool, err
 	return written, handled, wrapSyscallError("splice", err)
 }
 
-func (f *Linux_File) copyFileRange(r io.Reader) (written int64, handled bool, err error) {
+func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, err error) {
 	var (
 		remain int64
 		lr     *io.LimitedReader
@@ -99,12 +101,12 @@ func (f *Linux_File) copyFileRange(r io.Reader) (written int64, handled bool, er
 		return 0, true, nil
 	}
 
-	var src *Linux_File
+	var src *File
 	switch v := r.(type) {
-	case *Linux_File:
+	case *File:
 		src = v
-	case linux_fileWithoutWriteTo:
-		src = v.Linux_File
+	case fileWithoutWriteTo:
+		src = v.File
 	default:
 		return 0, false, nil
 	}
@@ -115,7 +117,7 @@ func (f *Linux_File) copyFileRange(r io.Reader) (written int64, handled bool, er
 		return 0, false, nil
 	}
 
-	written, handled, err = linux_pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = linux_pollCopyFileRange(&(*linux_file)(unsafe.Pointer(f.file)).pfd, &(*linux_file)(unsafe.Pointer(src.file)).pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}

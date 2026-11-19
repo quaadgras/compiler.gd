@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line lookup_unix.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lookup_unix.go:6:1*/
 package net
 
 import (
@@ -17,38 +18,38 @@ import (
 // readProtocolsOnce loads contents of /etc/protocols into protocols map
 // for quick access.
 var linux_readProtocolsOnce = func() func() {
-	if apehost != apeLinux {
-		return *new(func())
+if apehost != apeLinux {
+return *new(func())
+}
+return /*line lookup_unix.go:17:25*/sync.OnceFunc(func() {
+	file, err := open("/etc/protocols")
+	if err != nil {
+		return
 	}
-	return sync.OnceFunc(func() {
-		file, err := linux_open("/etc/protocols")
-		if err != nil {
-			return
-		}
-		defer file.linux_close()
+	defer file.close()
 
-		for line, ok := file.linux_readLine(); ok; line, ok = file.linux_readLine() {
-			// tcp    6   TCP    # transmission control protocol
-			if i := bytealg.IndexByteString(line, '#'); i >= 0 {
-				line = line[0:i]
+	for line, ok := file.readLine(); ok; line, ok = file.readLine() {
+		// tcp    6   TCP    # transmission control protocol
+		if i := bytealg.IndexByteString(line, '#'); i >= 0 {
+			line = line[0:i]
+		}
+		f := getFields(line)
+		if len(f) < 2 {
+			continue
+		}
+		if proto, _, ok := dtoi(f[1]); ok {
+			if _, ok := protocols[f[0]]; !ok {
+				protocols[f[0]] = proto
 			}
-			f := linux_getFields(line)
-			if len(f) < 2 {
-				continue
-			}
-			if proto, _, ok := linux_dtoi(f[1]); ok {
-				if _, ok := protocols[f[0]]; !ok {
-					protocols[f[0]] = proto
-				}
-				for _, alias := range f[2:] {
-					if _, ok := protocols[alias]; !ok {
-						protocols[alias] = proto
-					}
+			for _, alias := range f[2:] {
+				if _, ok := protocols[alias]; !ok {
+					protocols[alias] = proto
 				}
 			}
 		}
-	})
-}()
+	}
+})
+}()/*line lookup_unix.go:44:3*/
 
 // lookupProtocol looks up IP protocol name in /etc/protocols and
 // returns correspondent protocol number.
@@ -59,18 +60,18 @@ func linux_lookupProtocol(_ context.Context, name string) (int, error) {
 
 func (r *Resolver) linux_lookupHost(ctx context.Context, host string) (addrs []string, err error) {
 	order, conf := systemConf().hostLookupOrder(r, host)
-	if order == linux_hostLookupCgo {
+	if order == hostLookupCgo {
 		return linux_cgoLookupHost(ctx, host)
 	}
-	return r.linux_goLookupHostOrder(ctx, host, order, conf)
+	return r.goLookupHostOrder(ctx, host, order, conf)
 }
 
 func (r *Resolver) linux_lookupIP(ctx context.Context, network, host string) (addrs []IPAddr, err error) {
 	order, conf := systemConf().hostLookupOrder(r, host)
-	if order == linux_hostLookupCgo {
+	if order == hostLookupCgo {
 		return linux_cgoLookupIP(ctx, network, host)
 	}
-	ips, _, err := r.linux_goLookupIPCNAMEOrder(ctx, network, host, order, conf)
+	ips, _, err := r.goLookupIPCNAMEOrder(ctx, network, host, order, conf)
 	return ips, err
 }
 
@@ -93,12 +94,12 @@ func (r *Resolver) linux_lookupPort(ctx context.Context, network, service string
 
 func (r *Resolver) linux_lookupCNAME(ctx context.Context, name string) (string, error) {
 	order, conf := systemConf().hostLookupOrder(r, name)
-	if order == linux_hostLookupCgo {
+	if order == hostLookupCgo {
 		if cname, err := linux_cgoLookupCNAME(ctx, name); err == nil {
 			return cname, nil
 		}
 	}
-	return r.linux_goLookupCNAME(ctx, name, order, conf)
+	return r.goLookupCNAME(ctx, name, order, conf)
 }
 
 func (r *Resolver) linux_lookupSRV(ctx context.Context, service, proto, name string) (string, []*SRV, error) {
@@ -119,8 +120,8 @@ func (r *Resolver) linux_lookupTXT(ctx context.Context, name string) ([]string, 
 
 func (r *Resolver) linux_lookupAddr(ctx context.Context, addr string) ([]string, error) {
 	order, conf := systemConf().addrLookupOrder(r, addr)
-	if order == linux_hostLookupCgo {
+	if order == hostLookupCgo {
 		return linux_cgoLookupPTR(ctx, addr)
 	}
-	return r.linux_goLookupPTR(ctx, addr, order, conf)
+	return r.goLookupPTR(ctx, addr, order, conf)
 }

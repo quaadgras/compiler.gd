@@ -5,11 +5,6 @@
 package nettest
 
 import (
-	"errors"
-	"net"
-	"sync"
-	"testing"
-	"time"
 	"unsafe"
 )
 
@@ -24,171 +19,15 @@ const (
 	apeWindows
 )
 
-type MakePipe func() (c1 net.Conn, c2 net.Conn, stop func(), err error)
-
-var aLongTimeAgo time.Time = time.Unix(233431200, 0)
-
-var canListenTCP4OnLoopback bool
-
-var canListenTCP6OnLoopback bool
-
-type connTester func(t *testing.T, c1 net.Conn, c2 net.Conn)
-
-var errNoAvailableAddress error = errors.New("no available address")
-
-var errNoAvailableInterface error = errors.New("no available interface")
-
-var ipv4Enabled bool
-
-var ipv6Enabled bool
-
-var neverTimeout time.Time = time.Time{}
-
-var rawSocketSess bool
-
-var stackOnce sync.Once
-
-var unStrmDgramEnabled bool
-
-func LocalPath() (string, error) {
+func supportsRawSocket() bool {
 	if apehost == apeLinux {
-		x0, x1 := Linux_LocalPath()
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_LocalPath()
-		return x0, x1
-	}
-	x0, x1 := Windows_LocalPath()
-	return x0, x1
-}
-
-func LoopbackInterface() (*net.Interface, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_LoopbackInterface()
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_LoopbackInterface()
-		return x0, x1
-	}
-	x0, x1 := Windows_LoopbackInterface()
-	return x0, x1
-}
-
-func MulticastSource(a0 string, a1 *net.Interface) (net.IP, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_MulticastSource(a0, a1)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_MulticastSource(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Windows_MulticastSource(a0, a1)
-	return x0, x1
-}
-
-func NewLocalListener(a0 string) (net.Listener, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_NewLocalListener(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_NewLocalListener(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_NewLocalListener(a0)
-	return x0, x1
-}
-
-func NewLocalPacketListener(a0 string) (net.PacketConn, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_NewLocalPacketListener(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_NewLocalPacketListener(a0)
-		return x0, x1
-	}
-	x0, x1 := Windows_NewLocalPacketListener(a0)
-	return x0, x1
-}
-
-func RoutedInterface(a0 string, a1 net.Flags) (*net.Interface, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_RoutedInterface(a0, a1)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_RoutedInterface(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Windows_RoutedInterface(a0, a1)
-	return x0, x1
-}
-
-func SupportsIPv4() bool {
-	if apehost == apeLinux {
-		x0 := Linux_SupportsIPv4()
+		x0 := linux_supportsRawSocket()
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := Freebsd_SupportsIPv4()
+		x0 := freebsd_supportsRawSocket()
 		return x0
 	}
-	x0 := Windows_SupportsIPv4()
-	return x0
-}
-
-func SupportsIPv6() bool {
-	if apehost == apeLinux {
-		x0 := Linux_SupportsIPv6()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_SupportsIPv6()
-		return x0
-	}
-	x0 := Windows_SupportsIPv6()
-	return x0
-}
-
-func SupportsRawSocket() bool {
-	if apehost == apeLinux {
-		x0 := Linux_SupportsRawSocket()
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_SupportsRawSocket()
-		return x0
-	}
-	x0 := Windows_SupportsRawSocket()
-	return x0
-}
-
-func TestableAddress(a0 string, a1 string) bool {
-	if apehost == apeLinux {
-		x0 := Linux_TestableAddress(a0, a1)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_TestableAddress(a0, a1)
-		return x0
-	}
-	x0 := Windows_TestableAddress(a0, a1)
-	return x0
-}
-
-func TestableNetwork(a0 string) bool {
-	if apehost == apeLinux {
-		x0 := Linux_TestableNetwork(a0)
-		return x0
-	}
-	if apehost == apeFreebsd {
-		x0 := Freebsd_TestableNetwork(a0)
-		return x0
-	}
-	x0 := Windows_TestableNetwork(a0)
+	x0 := windows_supportsRawSocket()
 	return x0
 }

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// created by cgo -cdefs and then converted to Go
+/*line defs_linux_amd64.go:1:1*/// created by cgo -cdefs and then converted to Go
 // cgo -cdefs defs_linux.go defs1_linux.go
 
 package runtime

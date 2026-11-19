@@ -2,26 +2,29 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line writev_unix.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line writev_unix.go:6:1*/
 package net
+
+import "unsafe"/*line writev_unix.go:7:12*/
 
 import (
 	"runtime"
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line writev_unix.go:12:2*/
 
-func (c *freebsd_conn) writeBuffers(v *Buffers) (int64, error) {
+func (c *conn) freebsd_writeBuffers(v *Buffers) (int64, error) {
 	if !c.ok() {
 		return 0, syscall.Freebsd_EINVAL
 	}
-	n, err := c.fd.writeBuffers(v)
+	n, err := (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).writeBuffers(v)
 	if err != nil {
-		return n, &OpError{Op: "writev", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		return n, &OpError{Op: "writev", Net: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**freebsd_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, nil
 }

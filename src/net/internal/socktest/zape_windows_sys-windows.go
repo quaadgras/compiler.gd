@@ -2,11 +2,13 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line sys_windows.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package socktest
+
+import "unsafe"/*line sys_windows.go:5:17*/
 
 import (
 	"internal/syscall/windows"
@@ -14,20 +16,20 @@ import (
 )
 
 // WSASocket wraps [syscall.WSASocket].
-func (sw *Windows_Switch) WSASocket(family, sotype, proto int32, protinfo *syscall.Windows_WSAProtocolInfo, group uint32, flags uint32) (s syscall.Windows_Handle, err error) {
-	sw.once.Do(sw.init)
+func (sw *Switch) Windows_WSASocket(family, sotype, proto int32, protinfo *syscall.Windows_WSAProtocolInfo, group uint32, flags uint32) (s syscall.Windows_Handle, err error) {
+	sw.once.Do(sw.windows_init)
 
-	so := &Status{Cookie: windows_cookie(int(family), int(sotype), int(proto))}
+	so := &Status{Cookie: cookie(int(family), int(sotype), int(proto))}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterSocket]
+	f, _ := sw.fltab[FilterSocket]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return syscall.Windows_InvalidHandle, err
 	}
 	s, so.Err = windows.Windows_WSASocket(family, sotype, proto, protinfo, group, flags)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Windows_Closesocket(s)
 		}
@@ -37,157 +39,157 @@ func (sw *Windows_Switch) WSASocket(family, sotype, proto int32, protinfo *sysca
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).OpenFailed++
+		sw.stats.getLocked(so.Cookie).OpenFailed++
 		return syscall.Windows_InvalidHandle, so.Err
 	}
-	nso := sw.addLocked(s, int(family), int(sotype), int(proto))
-	sw.stats.windows_getLocked(nso.Cookie).Opened++
+	nso := sw.windows_addLocked(s, int(family), int(sotype), int(proto))
+	sw.stats.getLocked(nso.Cookie).Opened++
 	return s, nil
 }
 
 // Closesocket wraps [syscall.Closesocket].
-func (sw *Windows_Switch) Closesocket(s syscall.Windows_Handle) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Windows_Closesocket(s syscall.Windows_Handle) (err error) {
+	so := sw.windows_sockso(s)
 	if so == nil {
 		return syscall.Windows_Closesocket(s)
 	}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterClose]
+	f, _ := sw.fltab[FilterClose]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Windows_Closesocket(s)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).CloseFailed++
+		sw.stats.getLocked(so.Cookie).CloseFailed++
 		return so.Err
 	}
-	delete(sw.sotab, s)
-	sw.stats.windows_getLocked(so.Cookie).Closed++
+	delete((*(*Windows_Sockets)(unsafe.Pointer(&sw.sotab))), s)
+	sw.stats.getLocked(so.Cookie).Closed++
 	return nil
 }
 
 // Connect wraps [syscall.Connect].
-func (sw *Windows_Switch) Connect(s syscall.Windows_Handle, sa syscall.Windows_Sockaddr) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Windows_Connect(s syscall.Windows_Handle, sa syscall.Windows_Sockaddr) (err error) {
+	so := sw.windows_sockso(s)
 	if so == nil {
 		return syscall.Windows_Connect(s, sa)
 	}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterConnect]
+	f, _ := sw.fltab[FilterConnect]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Windows_Connect(s, sa)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).ConnectFailed++
+		sw.stats.getLocked(so.Cookie).ConnectFailed++
 		return so.Err
 	}
-	sw.stats.windows_getLocked(so.Cookie).Connected++
+	sw.stats.getLocked(so.Cookie).Connected++
 	return nil
 }
 
 // ConnectEx wraps [syscall.ConnectEx].
-func (sw *Windows_Switch) ConnectEx(s syscall.Windows_Handle, sa syscall.Windows_Sockaddr, b *byte, n uint32, nwr *uint32, o *syscall.Windows_Overlapped) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Windows_ConnectEx(s syscall.Windows_Handle, sa syscall.Windows_Sockaddr, b *byte, n uint32, nwr *uint32, o *syscall.Windows_Overlapped) (err error) {
+	so := sw.windows_sockso(s)
 	if so == nil {
 		return syscall.Windows_ConnectEx(s, sa, b, n, nwr, o)
 	}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterConnect]
+	f, _ := sw.fltab[FilterConnect]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Windows_ConnectEx(s, sa, b, n, nwr, o)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).ConnectFailed++
+		sw.stats.getLocked(so.Cookie).ConnectFailed++
 		return so.Err
 	}
-	sw.stats.windows_getLocked(so.Cookie).Connected++
+	sw.stats.getLocked(so.Cookie).Connected++
 	return nil
 }
 
 // Listen wraps [syscall.Listen].
-func (sw *Windows_Switch) Listen(s syscall.Windows_Handle, backlog int) (err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Windows_Listen(s syscall.Windows_Handle, backlog int) (err error) {
+	so := sw.windows_sockso(s)
 	if so == nil {
 		return syscall.Windows_Listen(s, backlog)
 	}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterListen]
+	f, _ := sw.fltab[FilterListen]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Windows_Listen(s, backlog)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).ListenFailed++
+		sw.stats.getLocked(so.Cookie).ListenFailed++
 		return so.Err
 	}
-	sw.stats.windows_getLocked(so.Cookie).Listened++
+	sw.stats.getLocked(so.Cookie).Listened++
 	return nil
 }
 
 // AcceptEx wraps [syscall.AcceptEx].
-func (sw *Windows_Switch) AcceptEx(ls syscall.Windows_Handle, as syscall.Windows_Handle, b *byte, rxdatalen uint32, laddrlen uint32, raddrlen uint32, rcvd *uint32, overlapped *syscall.Windows_Overlapped) error {
-	so := sw.sockso(ls)
+func (sw *Switch) Windows_AcceptEx(ls syscall.Windows_Handle, as syscall.Windows_Handle, b *byte, rxdatalen uint32, laddrlen uint32, raddrlen uint32, rcvd *uint32, overlapped *syscall.Windows_Overlapped) error {
+	so := sw.windows_sockso(ls)
 	if so == nil {
 		return syscall.Windows_AcceptEx(ls, as, b, rxdatalen, laddrlen, raddrlen, rcvd, overlapped)
 	}
 	sw.fmu.RLock()
-	f, _ := sw.fltab[Windows_FilterAccept]
+	f, _ := sw.fltab[FilterAccept]
 	sw.fmu.RUnlock()
 
-	af, err := f.windows_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return err
 	}
 	so.Err = syscall.Windows_AcceptEx(ls, as, b, rxdatalen, laddrlen, raddrlen, rcvd, overlapped)
-	if err = af.windows_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		return err
 	}
 
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.windows_getLocked(so.Cookie).AcceptFailed++
+		sw.stats.getLocked(so.Cookie).AcceptFailed++
 		return so.Err
 	}
-	nso := sw.addLocked(as, so.Cookie.Windows_Family(), so.Cookie.Windows_Type(), so.Cookie.Windows_Protocol())
-	sw.stats.windows_getLocked(nso.Cookie).Accepted++
+	nso := sw.windows_addLocked(as, so.Cookie.Family(), so.Cookie.Type(), so.Cookie.Protocol())
+	sw.stats.getLocked(nso.Cookie).Accepted++
 	return nil
 }

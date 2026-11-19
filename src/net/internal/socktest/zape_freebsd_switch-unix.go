@@ -2,19 +2,22 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line switch_unix.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line switch_unix.go:6:1*/
 package socktest
+
+import "unsafe"/*line switch_unix.go:7:17*/
 
 // Sockets maps a socket descriptor to the status of socket.
 type Freebsd_Sockets map[int]Status
 
-func (sw *Freebsd_Switch) sockso(s int) *Status {
+func (sw *Switch) freebsd_sockso(s int) *Status {
 	sw.smu.RLock()
 	defer sw.smu.RUnlock()
-	so, ok := sw.sotab[s]
+	so, ok := (*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab)))[s]
 	if !ok {
 		return nil
 	}
@@ -23,9 +26,9 @@ func (sw *Freebsd_Switch) sockso(s int) *Status {
 
 // addLocked returns a new Status without locking.
 // sw.smu must be held before call.
-func (sw *Freebsd_Switch) addLocked(s, family, sotype, proto int) *Status {
-	sw.once.Do(sw.init)
-	so := Status{Cookie: freebsd_cookie(family, sotype, proto)}
-	sw.sotab[s] = so
+func (sw *Switch) freebsd_addLocked(s, family, sotype, proto int) *Status {
+	sw.once.Do(sw.freebsd_init)
+	so := Status{Cookie: cookie(family, sotype, proto)}
+	(*(*Freebsd_Sockets)(unsafe.Pointer(&sw.sotab)))[s] = so
 	return &so
 }

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line tcpsockopt_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,13 +17,13 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line tcpsockopt_windows.go:14:2*/
 
 // Default values of KeepAliveTime and KeepAliveInterval on Windows,
 // check out https://learn.microsoft.com/en-us/windows/win32/winsock/sio-keepalive-vals#remarks for details.
 const (
-	windows_defaultKeepAliveIdle     = 2 * time.Windows_Hour
-	windows_defaultKeepAliveInterval = time.Windows_Second
+	windows_defaultKeepAliveIdle     = 2 * time.Hour
+	windows_defaultKeepAliveInterval = time.Second
 )
 
 func windows_setKeepAliveIdle(fd *windows_netFD, d time.Duration) error {
@@ -32,12 +32,12 @@ func windows_setKeepAliveIdle(fd *windows_netFD, d time.Duration) error {
 	}
 
 	if d == 0 {
-		d = windows_defaultTCPKeepAliveIdle
+		d = defaultTCPKeepAliveIdle
 	} else if d < 0 {
 		return nil
 	}
 	// The kernel expects seconds so round to next highest second.
-	secs := int(windows_roundDurationUp(d, time.Windows_Second))
+	secs := int(roundDurationUp(d, time.Second))
 	err := fd.pfd.SetsockoptInt(syscall.Windows_IPPROTO_TCP, windows.Windows_TCP_KEEPIDLE, secs)
 	runtime.KeepAlive(fd)
 	return os.NewSyscallError("setsockopt", err)
@@ -49,12 +49,12 @@ func windows_setKeepAliveInterval(fd *windows_netFD, d time.Duration) error {
 	}
 
 	if d == 0 {
-		d = windows_defaultTCPKeepAliveInterval
+		d = defaultTCPKeepAliveInterval
 	} else if d < 0 {
 		return nil
 	}
 	// The kernel expects seconds so round to next highest second.
-	secs := int(windows_roundDurationUp(d, time.Windows_Second))
+	secs := int(roundDurationUp(d, time.Second))
 	err := fd.pfd.SetsockoptInt(syscall.Windows_IPPROTO_TCP, windows.Windows_TCP_KEEPINTVL, secs)
 	runtime.KeepAlive(fd)
 	return os.NewSyscallError("setsockopt", err)
@@ -62,7 +62,7 @@ func windows_setKeepAliveInterval(fd *windows_netFD, d time.Duration) error {
 
 func windows_setKeepAliveCount(fd *windows_netFD, n int) error {
 	if n == 0 {
-		n = windows_defaultTCPKeepAliveCount
+		n = defaultTCPKeepAliveCount
 	} else if n < 0 {
 		return nil
 	}
@@ -101,16 +101,16 @@ func windows_setKeepAliveIdleAndInterval(fd *windows_netFD, idle, interval time.
 	}
 
 	if idle == 0 {
-		idle = windows_defaultTCPKeepAliveIdle
+		idle = defaultTCPKeepAliveIdle
 	}
 	if interval == 0 {
-		interval = windows_defaultTCPKeepAliveInterval
+		interval = defaultTCPKeepAliveInterval
 	}
 
 	// The kernel expects milliseconds so round to next highest
 	// millisecond.
-	tcpKeepAliveIdle := uint32(windows_roundDurationUp(idle, time.Windows_Millisecond))
-	tcpKeepAliveInterval := uint32(windows_roundDurationUp(interval, time.Windows_Millisecond))
+	tcpKeepAliveIdle := uint32(roundDurationUp(idle, time.Millisecond))
+	tcpKeepAliveInterval := uint32(roundDurationUp(interval, time.Millisecond))
 	ka := syscall.Windows_TCPKeepalive{
 		OnOff:    1,
 		Time:     tcpKeepAliveIdle,

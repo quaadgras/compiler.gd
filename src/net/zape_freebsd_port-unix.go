@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line port_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line port_unix.go:6:1*/
 // Read system port mappings from /etc/services
 
 package net
@@ -18,23 +19,23 @@ import (
 var freebsd_onceReadServices sync.Once
 
 func freebsd_readServices() {
-	file, err := freebsd_open("/etc/services")
+	file, err := open("/etc/services")
 	if err != nil {
 		return
 	}
-	defer file.freebsd_close()
+	defer file.close()
 
-	for line, ok := file.freebsd_readLine(); ok; line, ok = file.freebsd_readLine() {
+	for line, ok := file.readLine(); ok; line, ok = file.readLine() {
 		// "http 80/tcp www www-http # World Wide Web HTTP"
 		if i := bytealg.IndexByteString(line, '#'); i >= 0 {
 			line = line[:i]
 		}
-		f := freebsd_getFields(line)
+		f := getFields(line)
 		if len(f) < 2 {
 			continue
 		}
 		portnet := f[1] // "80/tcp"
-		port, j, ok := freebsd_dtoi(portnet)
+		port, j, ok := dtoi(portnet)
 		if !ok || port <= 0 || j >= len(portnet) || portnet[j] != '/' {
 			continue
 		}

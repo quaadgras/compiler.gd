@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line path.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line path.go:6:1*/
 // Package filepathlite implements a subset of path/filepath,
 // only using packages which may be imported by "os".
 //
@@ -13,42 +14,11 @@
 package filepathlite
 
 import (
-	"internal/stringslite"
-	"io/fs"
-	"slices"
-)
-
-func (b *lazybuf) freebsd_index(i int) byte {
-	if b.buf != nil {
-		return b.buf[i]
-	}
-	return b.path[i]
-}
-
-func (b *lazybuf) freebsd_append(c byte) {
-	if b.buf == nil {
-		if b.w < len(b.path) && b.path[b.w] == c {
-			b.w++
-			return
-		}
-		b.buf = make([]byte, len(b.path))
-		copy(b.buf, b.path[:b.w])
-	}
-	b.buf[b.w] = c
-	b.w++
-}
-
-func (b *lazybuf) freebsd_prepend(prefix ...byte) {
-	b.buf = slices.Insert(b.buf, 0, prefix...)
-	b.w += len(prefix)
-}
-
-func (b *lazybuf) freebsd_string() string {
-	if b.buf == nil {
-		return b.volAndPath[:b.volLen+b.w]
-	}
-	return b.volAndPath[:b.volLen] + string(b.buf[:b.w])
-}
+	
+	
+	
+	
+)/*line path.go:20:48*//*line path.go:32:2*//*line path.go:39:2*//*line path.go:52:2*//*line path.go:57:2*//*line path.go:64:2*/
 
 // Clean is filepath.Clean.
 func Freebsd_Clean(path string) string {
@@ -73,7 +43,7 @@ func Freebsd_Clean(path string) string {
 	out := lazybuf{path: path, volAndPath: originalPath, volLen: volLen}
 	r, dotdot := 0, 0
 	if rooted {
-		out.freebsd_append(Freebsd_Separator)
+		out.append(Freebsd_Separator)
 		r, dotdot = 1, 1
 	}
 
@@ -92,81 +62,46 @@ func Freebsd_Clean(path string) string {
 			case out.w > dotdot:
 				// can backtrack
 				out.w--
-				for out.w > dotdot && !Freebsd_IsPathSeparator(out.freebsd_index(out.w)) {
+				for out.w > dotdot && !Freebsd_IsPathSeparator(out.index(out.w)) {
 					out.w--
 				}
 			case !rooted:
 				// cannot backtrack, but not rooted, so append .. element.
 				if out.w > 0 {
-					out.freebsd_append(Freebsd_Separator)
+					out.append(Freebsd_Separator)
 				}
-				out.freebsd_append('.')
-				out.freebsd_append('.')
+				out.append('.')
+				out.append('.')
 				dotdot = out.w
 			}
 		default:
 			// real path element.
 			// add slash if needed
 			if rooted && out.w != 1 || !rooted && out.w != 0 {
-				out.freebsd_append(Freebsd_Separator)
+				out.append(Freebsd_Separator)
 			}
 			// copy element
 			for ; r < n && !Freebsd_IsPathSeparator(path[r]); r++ {
-				out.freebsd_append(path[r])
+				out.append(path[r])
 			}
 		}
 	}
 
 	// Turn empty string into "."
 	if out.w == 0 {
-		out.freebsd_append('.')
+		out.append('.')
 	}
 
 	freebsd_postClean(&out) // avoid creating absolute paths on Windows
-	return Freebsd_FromSlash(out.freebsd_string())
-}
-
-// IsLocal is filepath.IsLocal.
-func Freebsd_IsLocal(path string) bool {
-	return freebsd_isLocal(path)
-}
-
-func freebsd_unixIsLocal(path string) bool {
-	if Freebsd_IsAbs(path) || path == "" {
-		return false
-	}
-	hasDots := false
-	for p := path; p != ""; {
-		var part string
-		part, p, _ = stringslite.Cut(p, "/")
-		if part == "." || part == ".." {
-			hasDots = true
-			break
-		}
-	}
-	if hasDots {
-		path = Freebsd_Clean(path)
-	}
-	if path == ".." || stringslite.HasPrefix(path, "../") {
-		return false
-	}
-	return true
-}
-
-// Localize is filepath.Localize.
-func Freebsd_Localize(path string) (string, error) {
-	if !fs.ValidPath(path) {
-		return "", errInvalidPath
-	}
-	return freebsd_localize(path)
-}
+	return Freebsd_FromSlash(out.string())
+}/*line path.go:145:2*//*line path.go:167:2*//*line path.go:175:2*/
 
 // ToSlash is filepath.ToSlash.
 func Freebsd_ToSlash(path string) string {
 	if Freebsd_Separator == '/' {
 		return path
 	}
-	return freebsd_replaceStringByte(path, Freebsd_Separator, '/')
+	return replaceStringByte(path, Freebsd_Separator, '/')
 }
 
 // FromSlash is filepath.FromSlash.
@@ -174,41 +109,8 @@ func Freebsd_FromSlash(path string) string {
 	if Freebsd_Separator == '/' {
 		return path
 	}
-	return freebsd_replaceStringByte(path, '/', Freebsd_Separator)
-}
-
-func freebsd_replaceStringByte(s string, old, new byte) string {
-	if stringslite.IndexByte(s, old) == -1 {
-		return s
-	}
-	n := []byte(s)
-	for i := range n {
-		if n[i] == old {
-			n[i] = new
-		}
-	}
-	return string(n)
-}
-
-// Split is filepath.Split.
-func Freebsd_Split(path string) (dir, file string) {
-	vol := Freebsd_VolumeName(path)
-	i := len(path) - 1
-	for i >= len(vol) && !Freebsd_IsPathSeparator(path[i]) {
-		i--
-	}
-	return path[:i+1], path[i+1:]
-}
-
-// Ext is filepath.Ext.
-func Freebsd_Ext(path string) string {
-	for i := len(path) - 1; i >= 0 && !Freebsd_IsPathSeparator(path[i]); i-- {
-		if path[i] == '.' {
-			return path[i:]
-		}
-	}
-	return ""
-}
+	return replaceStringByte(path, '/', Freebsd_Separator)
+}/*line path.go:204:2*//*line path.go:214:2*//*line path.go:224:2*/
 
 // Base is filepath.Base.
 func Freebsd_Base(path string) string {
@@ -220,7 +122,7 @@ func Freebsd_Base(path string) string {
 		path = path[0 : len(path)-1]
 	}
 	// Throw away volume name
-	path = path[len(Freebsd_VolumeName(path)):]
+	path = path[len(VolumeName(path)):]
 	// Find the last element
 	i := len(path) - 1
 	for i >= 0 && !Freebsd_IsPathSeparator(path[i]) {
@@ -234,30 +136,4 @@ func Freebsd_Base(path string) string {
 		return string(Freebsd_Separator)
 	}
 	return path
-}
-
-// Dir is filepath.Dir.
-func Freebsd_Dir(path string) string {
-	vol := Freebsd_VolumeName(path)
-	i := len(path) - 1
-	for i >= len(vol) && !Freebsd_IsPathSeparator(path[i]) {
-		i--
-	}
-	dir := Freebsd_Clean(path[len(vol) : i+1])
-	if dir == "." && len(vol) > 2 {
-		// must be UNC
-		return vol
-	}
-	return vol + dir
-}
-
-// VolumeName is filepath.VolumeName.
-func Freebsd_VolumeName(path string) string {
-	return Freebsd_FromSlash(path[:freebsd_volumeNameLen(path)])
-}
-
-// VolumeNameLen returns the length of the leading volume name on Windows.
-// It returns 0 elsewhere.
-func Freebsd_VolumeNameLen(path string) int {
-	return freebsd_volumeNameLen(path)
-}
+}/*line path.go:265:2*//*line path.go:270:2*//*line path.go:276:2*/

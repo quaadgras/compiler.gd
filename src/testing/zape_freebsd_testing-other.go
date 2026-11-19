@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2021 The Go Authors. All rights reserved.
+/*line testing_other.go:1:1*/// Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line testing_other.go:6:1*/
 package testing
 
 import "time"
@@ -24,10 +25,10 @@ type freebsd_highPrecisionTime struct {
 
 // highPrecisionTimeNow returns high precision time for benchmarking.
 func freebsd_highPrecisionTimeNow() freebsd_highPrecisionTime {
-	return freebsd_highPrecisionTime{now: time.Freebsd_Now()}
+	return freebsd_highPrecisionTime{now: time.Now()}
 }
 
 // highPrecisionTimeSince returns duration since b.
 func freebsd_highPrecisionTimeSince(b freebsd_highPrecisionTime) time.Duration {
-	return time.Freebsd_Since(b.now)
+	return time.Since(b.now)
 }

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line sock_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sock_posix.go:6:1*/
 package net
 
 import (
@@ -17,7 +18,7 @@ import (
 
 // socket returns a network file descriptor that is ready for
 // asynchronous I/O using the network poller.
-func linux_socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
+func linux_socket(ctx context.Context, net string, family, sotype, proto int, ipv6only bool, laddr, raddr linux_sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) (fd *linux_netFD, err error) {
 	s, err := linux_sysSocket(family, sotype, proto)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,7 @@ func linux_socket(ctx context.Context, net string, family, sotype, proto int, ip
 	if laddr != nil && raddr == nil {
 		switch sotype {
 		case syscall.Linux_SOCK_STREAM, syscall.Linux_SOCK_SEQPACKET:
-			if err := fd.listenStream(ctx, laddr, linux_listenerBacklog(), ctrlCtxFn); err != nil {
+			if err := fd.listenStream(ctx, laddr, listenerBacklog(), ctrlCtxFn); err != nil {
 				fd.Close()
 				return nil, err
 			}
@@ -88,8 +89,8 @@ func (fd *linux_netFD) ctrlNetwork() string {
 	return fd.net + "6"
 }
 
-func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
-	var c *linux_rawConn
+func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr linux_sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+	var c *rawConn
 	if ctrlCtxFn != nil {
 		c = linux_newRawConn(fd)
 		var ctrlAddr string
@@ -106,7 +107,7 @@ func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxF
 	var lsa syscall.Linux_Sockaddr
 	var err error
 	if laddr != nil {
-		if lsa, err = laddr.sockaddr(fd.family); err != nil {
+		if lsa, err = laddr.linux_sockaddr(fd.family); err != nil {
 			return err
 		} else if lsa != nil {
 			if err = syscall.Linux_Bind(fd.pfd.Sysfd, lsa); err != nil {
@@ -117,7 +118,7 @@ func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxF
 	var rsa syscall.Linux_Sockaddr  // remote address from the user
 	var crsa syscall.Linux_Sockaddr // remote address we actually connected to
 	if raddr != nil {
-		if rsa, err = raddr.sockaddr(fd.family); err != nil {
+		if rsa, err = raddr.linux_sockaddr(fd.family); err != nil {
 			return err
 		}
 		if crsa, err = fd.connect(ctx, lsa, rsa); err != nil {
@@ -146,13 +147,13 @@ func (fd *linux_netFD) dial(ctx context.Context, laddr, raddr sockaddr, ctrlCtxF
 	return nil
 }
 
-func (fd *linux_netFD) listenStream(ctx context.Context, laddr sockaddr, backlog int, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *linux_netFD) listenStream(ctx context.Context, laddr linux_sockaddr, backlog int, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
 	var err error
 	if err = linux_setDefaultListenerSockopts(fd.pfd.Sysfd); err != nil {
 		return err
 	}
 	var lsa syscall.Linux_Sockaddr
-	if lsa, err = laddr.sockaddr(fd.family); err != nil {
+	if lsa, err = laddr.linux_sockaddr(fd.family); err != nil {
 		return err
 	}
 
@@ -177,7 +178,7 @@ func (fd *linux_netFD) listenStream(ctx context.Context, laddr sockaddr, backlog
 	return nil
 }
 
-func (fd *linux_netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
+func (fd *linux_netFD) listenDatagram(ctx context.Context, laddr linux_sockaddr, ctrlCtxFn func(context.Context, string, string, syscall.RawConn) error) error {
 	switch addr := laddr.(type) {
 	case *UDPAddr:
 		// We provide a socket that listens to a wildcard
@@ -203,7 +204,7 @@ func (fd *linux_netFD) listenDatagram(ctx context.Context, laddr sockaddr, ctrlC
 	}
 	var err error
 	var lsa syscall.Linux_Sockaddr
-	if lsa, err = laddr.sockaddr(fd.family); err != nil {
+	if lsa, err = laddr.linux_sockaddr(fd.family); err != nil {
 		return err
 	}
 

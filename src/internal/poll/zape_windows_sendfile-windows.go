@@ -2,13 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sendfile_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package poll
-
-import "unsafe"
 
 import (
 	"io"
@@ -18,7 +16,7 @@ import (
 // SendFile wraps the TransmitFile call.
 func Windows_SendFile(fd *Windows_FD, src uintptr, size int64) (written int64, err error, handled bool) {
 	defer func() {
-		TestHookDidSendFile((*FD)(unsafe.Pointer(fd)), 0, written, err, written > 0)
+		Windows_TestHookDidSendFile(fd, 0, written, err, written > 0)
 	}()
 	if fd.kind == windows_kindPipe {
 		// TransmitFile does not work with pipes

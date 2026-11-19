@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line root_unix.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line root_unix.go:6:1*/
 package os
+
+import "unsafe"/*line root_unix.go:7:11*/
 
 import (
 	"errors"
@@ -16,7 +19,7 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line root_unix.go:15:2*/
 
 // sysfdType is the native type of a file handle
 // (int on Unix, syscall.Handle on Windows),
@@ -24,9 +27,9 @@ var _ = runtime.GOARCH
 type linux_sysfdType = int
 
 // openRootNolog is OpenRoot.
-func linux_openRootNolog(name string) (*Linux_Root, error) {
+func linux_openRootNolog(name string) (*Root, error) {
 	var fd int
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		var err error
 		fd, _, err = linux_open(name, syscall.Linux_O_CLOEXEC, 0)
 		return err
@@ -39,9 +42,9 @@ func linux_openRootNolog(name string) (*Linux_Root, error) {
 
 // newRoot returns a new Root.
 // If fd is not a directory, it closes it and returns an error.
-func linux_newRoot(fd int, name string) (*Linux_Root, error) {
+func linux_newRoot(fd int, name string) (*Root, error) {
 	var fs linux_fileStat
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return syscall.Linux_Fstat(fd, &fs.sys)
 	})
 	linux_fillFileStatFromSys(&fs, name)
@@ -56,22 +59,22 @@ func linux_newRoot(fd int, name string) (*Linux_Root, error) {
 		syscall.Linux_CloseOnExec(fd)
 	}
 
-	r := &Linux_Root{&linux_root{
+	r := &Root{(*root)(unsafe.Pointer(&linux_root{
 		fd:   fd,
 		name: name,
-	}}
+	}))}
 	if noFinalizers {
-		r.root.cleanup = runtime.AddCleanup(r.root, linux_closeFD, fd)
+		(*(**linux_root)(unsafe.Pointer(&r.root))).cleanup = runtime.AddCleanup((*(**linux_root)(unsafe.Pointer(&r.root))), linux_closeFD, fd)
 	} else {
-		runtime.SetFinalizer(r.root, (*linux_root).Close)
+		runtime.SetFinalizer((*(**linux_root)(unsafe.Pointer(&r.root))), (*linux_root).Close)
 	}
 	return r, nil
 }
 
 // openRootInRoot is Root.OpenRoot.
-func linux_openRootInRoot(r *Linux_Root, name string) (*Linux_Root, error) {
+func linux_openRootInRoot(r *Root, name string) (*Root, error) {
 	fd, err := linux_doInRoot(r, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
-		linux_ignoringEINTR(func() error {
+		ignoringEINTR(func() error {
 			fd, err = unix.Linux_Openat(parent, name, syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC, 0)
 			if linux_isNoFollowErr(err) {
 				err = linux_checkSymlink(parent, name, err)
@@ -83,13 +86,13 @@ func linux_openRootInRoot(r *Linux_Root, name string) (*Linux_Root, error) {
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	return linux_newRoot(fd, linux_joinPath(r.Name(), name))
+	return linux_newRoot(fd, joinPath(r.Name(), name))
 }
 
 // rootOpenFileNolog is Root.OpenFile.
-func linux_rootOpenFileNolog(root *Linux_Root, name string, flag int, perm FileMode) (*Linux_File, error) {
+func linux_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (*File, error) {
 	fd, err := linux_doInRoot(root, name, 0, nil, func(parent int, name string, endsInSlash bool) (fd int, err error) {
-		linux_ignoringEINTR(func() error {
+		ignoringEINTR(func() error {
 			openFlag := syscall.Linux_O_NOFOLLOW | syscall.Linux_O_CLOEXEC | flag
 			fd, err = unix.Linux_Openat(parent, name, openFlag, uint32(perm))
 			if err != nil {
@@ -112,8 +115,8 @@ func linux_rootOpenFileNolog(root *Linux_Root, name string, flag int, perm FileM
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	f := linux_newFile(fd, linux_joinPath(root.Name(), name), linux_kindOpenFile, unix.Linux_HasNonblockFlag(flag))
-	f.inRoot = true
+	f := linux_newFile(fd, joinPath(root.Name(), name), linux_kindOpenFile, unix.Linux_HasNonblockFlag(flag))
+	(*linux_file)(unsafe.Pointer(f.file)).inRoot = true
 	return f, nil
 }
 
@@ -122,7 +125,7 @@ func linux_rootOpenDir(parent int, name string) (int, error) {
 		fd  int
 		err error
 	)
-	linux_ignoringEINTR(func() error {
+	ignoringEINTR(func() error {
 		fd, err = unix.Linux_Openat(parent, name, syscall.Linux_O_NOFOLLOW|syscall.Linux_O_CLOEXEC|syscall.Linux_O_DIRECTORY, 0)
 		if linux_isNoFollowErr(err) || err == syscall.Linux_ENOTDIR {
 			err = linux_checkSymlink(parent, name, err)
@@ -137,13 +140,13 @@ func linux_rootOpenDir(parent int, name string) (int, error) {
 	return fd, err
 }
 
-func linux_rootStat(r *Linux_Root, name string, lstat bool) (FileInfo, error) {
+func linux_rootStat(r *Root, name string, lstat bool) (FileInfo, error) {
 	fi, err := linux_doInRoot(r, name, 0, nil, func(parent linux_sysfdType, n string, endsInSlash bool) (FileInfo, error) {
 		fi, err := linux_lstatatWithName(parent, name, n)
 		if err != nil {
 			return nil, err
 		}
-		if !lstat && fi.Mode()&Linux_ModeSymlink != 0 {
+		if !lstat && fi.Mode()&ModeSymlink != 0 {
 			return nil, linux_checkSymlink(parent, n, syscall.Linux_ELOOP)
 		}
 		return fi, nil
@@ -154,7 +157,7 @@ func linux_rootStat(r *Linux_Root, name string, lstat bool) (FileInfo, error) {
 	return fi, nil
 }
 
-func linux_rootSymlink(r *Linux_Root, oldname, newname string) error {
+func linux_rootSymlink(r *Root, oldname, newname string) error {
 	_, err := linux_doInRoot(r, newname, 0, nil, func(parent linux_sysfdType, name string, endsInSlash bool) (struct{}, error) {
 		return struct{}{}, linux_symlinkat(oldname, parent, name)
 	})
@@ -184,51 +187,51 @@ func linux_afterResolvingSymlink(parent int, name string, f func() error) error 
 
 func linux_chmodat(parent int, name string, mode FileMode) error {
 	return linux_afterResolvingSymlink(parent, name, func() error {
-		return linux_ignoringEINTR(func() error {
-			return unix.Linux_Fchmodat(parent, name, linux_syscallMode(mode), unix.Linux_AT_SYMLINK_NOFOLLOW)
+		return ignoringEINTR(func() error {
+			return unix.Linux_Fchmodat(parent, name, syscallMode(mode), unix.Linux_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func linux_chownat(parent int, name string, uid, gid int) error {
 	return linux_afterResolvingSymlink(parent, name, func() error {
-		return linux_ignoringEINTR(func() error {
+		return ignoringEINTR(func() error {
 			return unix.Linux_Fchownat(parent, name, uid, gid, unix.Linux_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func linux_lchownat(parent int, name string, uid, gid int) error {
-	return linux_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return unix.Linux_Fchownat(parent, name, uid, gid, unix.Linux_AT_SYMLINK_NOFOLLOW)
 	})
 }
 
 func linux_chtimesat(parent int, name string, atime time.Time, mtime time.Time) error {
 	return linux_afterResolvingSymlink(parent, name, func() error {
-		return linux_ignoringEINTR(func() error {
-			utimes := linux_chtimesUtimes(atime, mtime)
+		return ignoringEINTR(func() error {
+			utimes := chtimesUtimes(atime, mtime)
 			return unix.Linux_Utimensat(parent, name, &utimes, unix.Linux_AT_SYMLINK_NOFOLLOW)
 		})
 	})
 }
 
 func linux_mkdirat(fd int, name string, perm FileMode) error {
-	return linux_ignoringEINTR(func() error {
-		return unix.Linux_Mkdirat(fd, name, linux_syscallMode(perm))
+	return ignoringEINTR(func() error {
+		return unix.Linux_Mkdirat(fd, name, syscallMode(perm))
 	})
 }
 
 func linux_removeat(fd int, name string) error {
 	// The system call interface forces us to know whether
 	// we are removing a file or directory. Try both.
-	e := linux_ignoringEINTR(func() error {
+	e := ignoringEINTR(func() error {
 		return unix.Linux_Unlinkat(fd, name, 0)
 	})
 	if e == nil {
 		return nil
 	}
-	e1 := linux_ignoringEINTR(func() error {
+	e1 := ignoringEINTR(func() error {
 		return unix.Linux_Unlinkat(fd, name, unix.Linux_AT_REMOVEDIR)
 	})
 	if e1 == nil {
@@ -242,13 +245,13 @@ func linux_removeat(fd int, name string) error {
 }
 
 func linux_removefileat(fd int, name string) error {
-	return linux_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return unix.Linux_Unlinkat(fd, name, 0)
 	})
 }
 
 func linux_removedirat(fd int, name string) error {
-	return linux_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return unix.Linux_Unlinkat(fd, name, unix.Linux_AT_REMOVEDIR)
 	})
 }
@@ -297,7 +300,7 @@ func linux_readlinkat(fd int, name string) (string, error) {
 			n int
 			e error
 		)
-		linux_ignoringEINTR(func() error {
+		ignoringEINTR(func() error {
 			n, e = unix.Linux_Readlinkat(fd, name, b)
 			return e
 		})
@@ -315,7 +318,7 @@ func linux_readlinkat(fd int, name string) (string, error) {
 }
 
 func linux_isLink(fi FileInfo) bool {
-	return fi.Mode()&Linux_ModeSymlink != 0
+	return fi.Mode()&ModeSymlink != 0
 }
 
 // isDirectoryLink always returns false, because Unix systems don't have separate

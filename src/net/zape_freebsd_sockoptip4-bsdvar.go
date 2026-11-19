@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockoptip4_bsdvar.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockoptip4_bsdvar.go:6:1*/
 package net
 
 import (
@@ -13,10 +14,10 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockoptip4_bsdvar.go:12:2*/
 
 func freebsd_setIPv4MulticastInterface(fd *freebsd_netFD, ifi *Interface) error {
-	ip, err := freebsd_interfaceToIPv4Addr(ifi)
+	ip, err := interfaceToIPv4Addr(ifi)
 	if err != nil {
 		return wrapSyscallError("setsockopt", err)
 	}
@@ -28,7 +29,7 @@ func freebsd_setIPv4MulticastInterface(fd *freebsd_netFD, ifi *Interface) error 
 }
 
 func freebsd_setIPv4MulticastLoopback(fd *freebsd_netFD, v bool) error {
-	err := fd.pfd.SetsockoptByte(syscall.Freebsd_IPPROTO_IP, syscall.Freebsd_IP_MULTICAST_LOOP, byte(freebsd_boolint(v)))
+	err := fd.pfd.SetsockoptByte(syscall.Freebsd_IPPROTO_IP, syscall.Freebsd_IP_MULTICAST_LOOP, byte(boolint(v)))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }

@@ -6,8 +6,10 @@
 //
 // A GOOS=ape program runs on several host systems
 // (internal/syslist.APEHosts). A file of a package that builds for every
-// host is shared: it is built once, as it is. A file that builds only
-// for some hosts is copied once per host, with every package-level name
+// host is shared: it is built once, as it is, except for the
+// declarations in it that depend on the host, which are copied per host
+// (zape_ape_FILE is the rest of it). A file that builds only for some
+// hosts is copied once per host, with every package-level name
 // it declares prefixed by the host ("newosproc" becomes
 // "linux_newosproc", "Stat" becomes "Linux_Stat"), and the generated
 // zape_dispatch_$GOARCH.go gives the package what the hosts have in
@@ -26,8 +28,14 @@
 //     hosts' field by field), a struct of every host's type if a shared
 //     struct embeds it (the runtime's mOS, with the fields shared code
 //     uses hoisted out of the hosts' types), and otherwise an opaque type
-//     as large as the largest host's, converted by pointer;
-//   - a variable becomes a variable set from the host's.
+//     converted by pointer (as large as the largest host's if held by
+//     value, of no size if only ever behind a pointer);
+//   - a variable of the same type everywhere is one variable, set from
+//     the host's, which the hosts' copies use too; another becomes a
+//     variable set from the host's.
+//
+// Generated files have line directives: positions in them are the
+// original file's.
 //
 // What a host copy uses of another generated package is that host's:
 // os's Linux copy calls syscall.Linux_Stat with a syscall.Linux_Stat_t.
@@ -61,7 +69,7 @@ var (
 	arch       = flag.String("arch", "amd64", "architecture")
 	constTypes = flag.String("types", "runtime._SIGURG=uint32", "types of constants that differ between hosts and that shared code does not use")
 	tests      = flag.Bool("tests", true, "dispatch what the package's own tests use, and leave out of ape the tests that depend on the host")
-	verbose    = flag.Bool("v", false, "report the shared files copied per host and why")
+	verbose    = flag.Bool("v", false, "report the shared declarations copied per host and why")
 	maxConsts  = flag.String("max", "runtime._NSIG", "constants that are the largest host's value")
 )
 

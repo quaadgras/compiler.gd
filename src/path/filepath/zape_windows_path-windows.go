@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2024 The Go Authors. All rights reserved.
+/*line path_windows.go:1:1*/// Copyright 2024 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -67,7 +67,7 @@ func windows_abs(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return Windows_Clean(fullPath), nil
+	return Clean(fullPath), nil
 }
 
 func windows_join(elem []string) string {
@@ -114,7 +114,7 @@ func windows_join(elem []string) string {
 	if b.Len() == 0 {
 		return ""
 	}
-	return Windows_Clean(b.String())
+	return Clean(b.String())
 }
 
 func windows_sameWord(a, b string) bool {

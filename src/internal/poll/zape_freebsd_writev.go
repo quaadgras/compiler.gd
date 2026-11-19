@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line writev.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line writev.go:6:1*/
 package poll
 
 import (
@@ -14,7 +15,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line writev.go:13:2*/
 
 // Writev wraps the writev system call.
 func (fd *Freebsd_FD) Writev(v *[][]byte) (int64, error) {
@@ -22,7 +23,7 @@ func (fd *Freebsd_FD) Writev(v *[][]byte) (int64, error) {
 		return 0, err
 	}
 	defer fd.writeUnlock()
-	if err := fd.pd.freebsd_prepareWrite(fd.isFile); err != nil {
+	if err := fd.pd.prepareWrite(fd.isFile); err != nil {
 		return 0, err
 	}
 
@@ -79,7 +80,7 @@ func (fd *Freebsd_FD) Writev(v *[][]byte) (int64, error) {
 				continue
 			}
 			if err == syscall.Freebsd_EAGAIN {
-				if err = fd.pd.freebsd_waitWrite(fd.isFile); err == nil {
+				if err = fd.pd.waitWrite(fd.isFile); err == nil {
 					continue
 				}
 			}

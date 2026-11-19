@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line zoneinfo_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -120,8 +120,8 @@ func windows_pseudoUnix(year int, d *syscall.Windows_Systemtime) int64 {
 	// d.Day is week within the month (1 to 5, where 5 is last week of the month)
 	// d.Hour, d.Minute and d.Second are absolute time
 	day := 1
-	t := Windows_Date(year, Month(d.Month), day, int(d.Hour), int(d.Minute), int(d.Second), 0, Windows_UTC)
-	i := int(d.DayOfWeek) - int(t.Windows_Weekday())
+	t := Date(year, Month(d.Month), day, int(d.Hour), int(d.Minute), int(d.Second), 0, UTC)
+	i := int(d.DayOfWeek) - int(t.Weekday())
 	if i < 0 {
 		i += 7
 	}
@@ -131,11 +131,11 @@ func windows_pseudoUnix(year int, d *syscall.Windows_Systemtime) int64 {
 	} else {
 		// "Last" instance of the day.
 		day += 4 * 7
-		if day > windows_daysIn(Month(d.Month), year) {
+		if day > daysIn(Month(d.Month), year) {
 			day -= 7
 		}
 	}
-	return t.windows_sec() + int64(day-1)*windows_secondsPerDay + windows_internalToUnix
+	return t.sec() + int64(day-1)*secondsPerDay + internalToUnix
 }
 
 func windows_initLocalFromTZI(i *syscall.Windows_Timezoneinformation) {
@@ -156,8 +156,8 @@ func windows_initLocalFromTZI(i *syscall.Windows_Timezoneinformation) {
 	if nzone == 1 {
 		// No daylight savings.
 		std.offset = -int(i.Bias) * 60
-		l.cacheStart = windows_alpha
-		l.cacheEnd = windows_omega
+		l.cacheStart = alpha
+		l.cacheEnd = omega
 		l.cacheZone = std
 		l.tx = make([]zoneTrans, 1)
 		l.tx[0].when = l.cacheStart
@@ -189,8 +189,8 @@ func windows_initLocalFromTZI(i *syscall.Windows_Timezoneinformation) {
 	// 2 tx per year, 100 years on each side of this year
 	l.tx = make([]zoneTrans, 400)
 
-	t := Windows_Now().Windows_UTC()
-	year := t.Windows_Year()
+	t := Now().UTC()
+	year := t.Year()
 	txi := 0
 	for y := year - 100; y < year+100; y++ {
 		tx := &l.tx[txi]

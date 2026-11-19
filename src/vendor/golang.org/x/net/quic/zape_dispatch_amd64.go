@@ -5,12 +5,8 @@
 package quic
 
 import (
-	"context"
 	"net"
 	"net/netip"
-	"sync"
-	"sync/atomic"
-	"time"
 	"unsafe"
 )
 
@@ -25,331 +21,69 @@ const (
 	apeWindows
 )
 
-type Endpoint struct {
-	listenConfig *Config
-	packetConn   packetConn
-	testHooks    endpointTestHooks
-	resetGen     statelessResetTokenGenerator
-	retry        retryState
-	acceptQueue  queue[*Conn]
-	connsMap     connsMap
-	connsMu      sync.Mutex
-	conns        map[*Conn]struct{}
-	closing      bool
-	closec       chan struct{}
-}
-
-type connsMap struct {
-	byConnID     map[string]*Conn
-	byResetToken map[statelessResetToken]*Conn
-	updateMu     sync.Mutex
-	updateNeeded atomic.Bool
-	updates      []func(*connsMap)
-}
-
-type endpointTestHooks interface {
-	newConn(c *Conn, cids newServerConnIDs)
-}
-
-type packetConn interface {
-	Close() error
-	LocalAddr() netip.AddrPort
-	Read(f func(*datagram))
-	Write(datagram) error
-}
-
-func Listen(a0 string, a1 string, a2 *Config) (*Endpoint, error) {
+func newNetUDPConn(a0 *net.UDPConn) (*netUDPConn, error) {
 	if apehost == apeLinux {
-		x0, x1 := Linux_Listen(a0, a1, a2)
-		return x0, x1
+		x0, x1 := linux_newNetUDPConn(a0)
+		return (*netUDPConn)(unsafe.Pointer(x0)), x1
 	}
 	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_Listen(a0, a1, a2)
-		return x0, x1
+		x0, x1 := freebsd_newNetUDPConn(a0)
+		return (*netUDPConn)(unsafe.Pointer(x0)), x1
 	}
-	x0, x1 := Windows_Listen(a0, a1, a2)
-	return x0, x1
+	x0, x1 := windows_newNetUDPConn(a0)
+	return (*netUDPConn)(unsafe.Pointer(x0)), x1
 }
 
-func NewEndpoint(a0 net.PacketConn, a1 *Config) (*Endpoint, error) {
+func (r *netUDPConn) Close() error {
 	if apehost == apeLinux {
-		x0, x1 := Linux_NewEndpoint(a0, a1)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := Freebsd_NewEndpoint(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Windows_NewEndpoint(a0, a1)
-	return x0, x1
-}
-
-func (r *Endpoint) Accept(a0 context.Context) (*Conn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Accept(a0)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.Freebsd_Accept(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Windows_Accept(a0)
-	return x0, x1
-}
-
-func (r *Endpoint) Close(a0 context.Context) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Close(a0)
+		x0 := ((*linux_netUDPConn)(unsafe.Pointer(r))).Close()
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := r.Freebsd_Close(a0)
+		x0 := ((*freebsd_netUDPConn)(unsafe.Pointer(r))).Close()
 		return x0
 	}
-	x0 := r.Windows_Close(a0)
+	x0 := ((*windows_netUDPConn)(unsafe.Pointer(r))).Close()
 	return x0
 }
 
-func (r *Endpoint) Dial(a0 context.Context, a1 string, a2 string, a3 *Config) (*Conn, error) {
+func (r *netUDPConn) LocalAddr() netip.AddrPort {
 	if apehost == apeLinux {
-		x0, x1 := r.Linux_Dial(a0, a1, a2, a3)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.Freebsd_Dial(a0, a1, a2, a3)
-		return x0, x1
-	}
-	x0, x1 := r.Windows_Dial(a0, a1, a2, a3)
-	return x0, x1
-}
-
-func (r *Endpoint) LocalAddr() netip.AddrPort {
-	if apehost == apeLinux {
-		x0 := r.Linux_LocalAddr()
+		x0 := ((*linux_netUDPConn)(unsafe.Pointer(r))).LocalAddr()
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := r.Freebsd_LocalAddr()
+		x0 := ((*freebsd_netUDPConn)(unsafe.Pointer(r))).LocalAddr()
 		return x0
 	}
-	x0 := r.Windows_LocalAddr()
+	x0 := ((*windows_netUDPConn)(unsafe.Pointer(r))).LocalAddr()
 	return x0
 }
 
-func (r *Endpoint) connDrained(a0 *Conn) {
+func (r *netUDPConn) Read(a0 func(*datagram)) {
 	if apehost == apeLinux {
-		r.linux_connDrained(a0)
+		((*linux_netUDPConn)(unsafe.Pointer(r))).Read(a0)
 		return
 	}
 	if apehost == apeFreebsd {
-		r.freebsd_connDrained(a0)
+		((*freebsd_netUDPConn)(unsafe.Pointer(r))).Read(a0)
 		return
 	}
-	r.windows_connDrained(a0)
+	((*windows_netUDPConn)(unsafe.Pointer(r))).Read(a0)
 }
 
-func (r *Endpoint) handleDatagram(a0 *datagram) {
+func (r *netUDPConn) Write(a0 datagram) error {
 	if apehost == apeLinux {
-		r.linux_handleDatagram(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_handleDatagram(a0)
-		return
-	}
-	r.windows_handleDatagram(a0)
-}
-
-func (r *Endpoint) handleUnknownDestinationDatagram(a0 *datagram) {
-	if apehost == apeLinux {
-		r.linux_handleUnknownDestinationDatagram(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_handleUnknownDestinationDatagram(a0)
-		return
-	}
-	r.windows_handleUnknownDestinationDatagram(a0)
-}
-
-func (r *Endpoint) listen() {
-	if apehost == apeLinux {
-		r.linux_listen()
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_listen()
-		return
-	}
-	r.windows_listen()
-}
-
-func (r *Endpoint) maybeSendStatelessReset(a0 []byte, a1 netip.AddrPort) {
-	if apehost == apeLinux {
-		r.linux_maybeSendStatelessReset(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_maybeSendStatelessReset(a0, a1)
-		return
-	}
-	r.windows_maybeSendStatelessReset(a0, a1)
-}
-
-func (r *Endpoint) newConn(a0 time.Time, a1 *Config, a2 connSide, a3 newServerConnIDs, a4 string, a5 netip.AddrPort) (*Conn, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.linux_newConn(a0, a1, a2, a3, a4, a5)
-		return x0, x1
-	}
-	if apehost == apeFreebsd {
-		x0, x1 := r.freebsd_newConn(a0, a1, a2, a3, a4, a5)
-		return x0, x1
-	}
-	x0, x1 := r.windows_newConn(a0, a1, a2, a3, a4, a5)
-	return x0, x1
-}
-
-func (r *Endpoint) sendConnectionClose(a0 genericLongPacket, a1 netip.AddrPort, a2 transportError) {
-	if apehost == apeLinux {
-		r.linux_sendConnectionClose(a0, a1, a2)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_sendConnectionClose(a0, a1, a2)
-		return
-	}
-	r.windows_sendConnectionClose(a0, a1, a2)
-}
-
-func (r *Endpoint) sendDatagram(a0 datagram) error {
-	if apehost == apeLinux {
-		x0 := r.linux_sendDatagram(a0)
+		x0 := ((*linux_netUDPConn)(unsafe.Pointer(r))).Write(a0)
 		return x0
 	}
 	if apehost == apeFreebsd {
-		x0 := r.freebsd_sendDatagram(a0)
+		x0 := ((*freebsd_netUDPConn)(unsafe.Pointer(r))).Write(a0)
 		return x0
 	}
-	x0 := r.windows_sendDatagram(a0)
+	x0 := ((*windows_netUDPConn)(unsafe.Pointer(r))).Write(a0)
 	return x0
 }
 
-func (r *Endpoint) sendVersionNegotiation(a0 genericLongPacket, a1 netip.AddrPort) {
-	if apehost == apeLinux {
-		r.linux_sendVersionNegotiation(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_sendVersionNegotiation(a0, a1)
-		return
-	}
-	r.windows_sendVersionNegotiation(a0, a1)
-}
-
-func (r *Endpoint) serverConnEstablished(a0 *Conn) {
-	if apehost == apeLinux {
-		r.linux_serverConnEstablished(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_serverConnEstablished(a0)
-		return
-	}
-	r.windows_serverConnEstablished(a0)
-}
-
-func (r *connsMap) addConnID(a0 *Conn, a1 []byte) {
-	if apehost == apeLinux {
-		r.linux_addConnID(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_addConnID(a0, a1)
-		return
-	}
-	r.windows_addConnID(a0, a1)
-}
-
-func (r *connsMap) addResetToken(a0 *Conn, a1 statelessResetToken) {
-	if apehost == apeLinux {
-		r.linux_addResetToken(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_addResetToken(a0, a1)
-		return
-	}
-	r.windows_addResetToken(a0, a1)
-}
-
-func (r *connsMap) applyUpdates() {
-	if apehost == apeLinux {
-		r.linux_applyUpdates()
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_applyUpdates()
-		return
-	}
-	r.windows_applyUpdates()
-}
-
-func (r *connsMap) init() {
-	if apehost == apeLinux {
-		r.linux_init()
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_init()
-		return
-	}
-	r.windows_init()
-}
-
-func (r *connsMap) retireConnID(a0 *Conn, a1 []byte) {
-	if apehost == apeLinux {
-		r.linux_retireConnID(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_retireConnID(a0, a1)
-		return
-	}
-	r.windows_retireConnID(a0, a1)
-}
-
-func (r *connsMap) retireResetToken(a0 *Conn, a1 statelessResetToken) {
-	if apehost == apeLinux {
-		r.linux_retireResetToken(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_retireResetToken(a0, a1)
-		return
-	}
-	r.windows_retireResetToken(a0, a1)
-}
-
-func (r *connsMap) updateConnIDs(a0 func(*connsMap)) {
-	if apehost == apeLinux {
-		r.linux_updateConnIDs(a0)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_updateConnIDs(a0)
-		return
-	}
-	r.windows_updateConnIDs(a0)
-}
-
-func (r endpointTestHooks) newConn(a0 *Conn, a1 newServerConnIDs) {
-	if apehost == apeLinux {
-		r.linux_newConn(a0, a1)
-		return
-	}
-	if apehost == apeFreebsd {
-		r.freebsd_newConn(a0, a1)
-		return
-	}
-	r.windows_newConn(a0, a1)
-}
+// netUDPConn differs between hosts: functions convert it by pointer.
+type netUDPConn struct{ _ [0]uint64 }

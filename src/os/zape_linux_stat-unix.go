@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line stat_unix.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line stat_unix.go:6:1*/
 package os
+
+import "unsafe"/*line stat_unix.go:7:11*/
 
 import (
 	"syscall"
@@ -14,23 +17,23 @@ import (
 
 // Stat returns the [FileInfo] structure describing file.
 // If there is an error, it will be of type [*PathError].
-func (f *Linux_File) Stat() (FileInfo, error) {
+func (f *File) Linux_Stat() (FileInfo, error) {
 	if f == nil {
 		return nil, ErrInvalid
 	}
 	var fs linux_fileStat
-	err := f.pfd.Fstat(&fs.sys)
+	err := (*linux_file)(unsafe.Pointer(f.file)).pfd.Fstat(&fs.sys)
 	if err != nil {
-		return nil, f.wrapErr("stat", err)
+		return nil, f.linux_wrapErr("stat", err)
 	}
-	linux_fillFileStatFromSys(&fs, f.name)
+	linux_fillFileStatFromSys(&fs, (*linux_file)(unsafe.Pointer(f.file)).name)
 	return &fs, nil
 }
 
 // statNolog stats a file with no test logging.
 func linux_statNolog(name string) (FileInfo, error) {
 	var fs linux_fileStat
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return syscall.Linux_Stat(name, &fs.sys)
 	})
 	if err != nil {
@@ -43,7 +46,7 @@ func linux_statNolog(name string) (FileInfo, error) {
 // lstatNolog lstats a file with no test logging.
 func linux_lstatNolog(name string) (FileInfo, error) {
 	var fs linux_fileStat
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return syscall.Linux_Lstat(name, &fs.sys)
 	})
 	if err != nil {

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line env_windows.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -45,7 +45,7 @@ func Windows_Setenv(key, value string) error {
 	if e != nil {
 		return e
 	}
-	windows_runtimeSetenv(key, value)
+	runtimeSetenv(key, value)
 	return nil
 }
 
@@ -58,7 +58,7 @@ func Windows_Unsetenv(key string) error {
 	if e != nil {
 		return e
 	}
-	windows_runtimeUnsetenv(key)
+	runtimeUnsetenv(key)
 	return nil
 }
 

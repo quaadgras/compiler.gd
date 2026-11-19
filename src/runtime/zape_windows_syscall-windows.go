@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2014 The Go Authors. All rights reserved.
+/*line syscall_windows.go:1:1*/// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -52,8 +52,8 @@ type windows_abiPartKind int
 
 const (
 	windows_abiPartBad   windows_abiPartKind = iota
-	windows_abiPartStack                     // Move a value from memory to the stack.
-	windows_abiPartReg                       // Move a value from memory to a register.
+	windows_abiPartStack             // Move a value from memory to the stack.
+	windows_abiPartReg               // Move a value from memory to a register.
 )
 
 // abiPart encodes a step in translating between calling ABIs.

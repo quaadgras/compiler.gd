@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2012 The Go Authors. All rights reserved.
+/*line symlink.go:1:1*/// Copyright 2012 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line symlink.go:6:1*/
 package filepath
 
 import (
@@ -17,10 +18,10 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line symlink.go:16:2*/
 
 func linux_walkSymlinks(path string) (string, error) {
-	volLen := filepathlite.Linux_VolumeNameLen(path)
+	volLen := filepathlite.VolumeNameLen(path)
 	pathSeparator := string(os.Linux_PathSeparator)
 
 	if volLen < len(path) && os.Linux_IsPathSeparator(path[volLen]) {
@@ -41,7 +42,7 @@ func linux_walkSymlinks(path string) (string, error) {
 		// On Windows, "." can be a symlink.
 		// We look it up, and use the value if it is absolute.
 		// If not, we just return ".".
-		isWindowsDot := "linux" == "windows" && path[filepathlite.Linux_VolumeNameLen(path):] == "."
+		isWindowsDot := "linux" == "windows" && path[filepathlite.VolumeNameLen(path):] == "."
 
 		// The next path component is in path[start:end].
 		if end == start {
@@ -80,7 +81,7 @@ func linux_walkSymlinks(path string) (string, error) {
 
 		// Ordinary path component. Add it to result.
 
-		if len(dest) > filepathlite.Linux_VolumeNameLen(dest) && !os.Linux_IsPathSeparator(dest[len(dest)-1]) {
+		if len(dest) > filepathlite.VolumeNameLen(dest) && !os.Linux_IsPathSeparator(dest[len(dest)-1]) {
 			dest += pathSeparator
 		}
 
@@ -107,12 +108,12 @@ func linux_walkSymlinks(path string) (string, error) {
 			return "", errors.New("EvalSymlinks: too many links")
 		}
 
-		link, err := os.Linux_Readlink(dest)
+		link, err := os.Readlink(dest)
 		if err != nil {
 			return "", err
 		}
 
-		if isWindowsDot && !Linux_IsAbs(link) {
+		if isWindowsDot && !IsAbs(link) {
 			// On Windows, if "." is a relative symlink,
 			// just return ".".
 			break
@@ -120,7 +121,7 @@ func linux_walkSymlinks(path string) (string, error) {
 
 		path = link + path[end:]
 
-		v := filepathlite.Linux_VolumeNameLen(link)
+		v := filepathlite.VolumeNameLen(link)
 		if v > 0 {
 			// Symlink to drive name is an absolute path.
 			if v < len(link) && os.Linux_IsPathSeparator(link[v]) {
@@ -152,5 +153,5 @@ func linux_walkSymlinks(path string) (string, error) {
 			end = 0
 		}
 	}
-	return Linux_Clean(dest), nil
+	return Clean(dest), nil
 }

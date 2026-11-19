@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line syscall_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -122,6 +122,8 @@ func Windows_UTF16PtrFromString(s string) (*uint16, error) {
 	return &a[0], nil
 }
 
+/*line syscall_windows.go:128:19*/
+
 func windows_langid(pri, sub uint16) uint32 { return uint32(sub)<<10 | uint32(pri) }
 
 // FormatMessage is deprecated (msgsrc should be uintptr, not uint32, but can
@@ -218,9 +220,8 @@ func (e Errno) Windows_Timeout() bool {
 }
 
 // Implemented in runtime/syscall_windows.go.
-//
 //go:linkname windows_compileCallback syscall.compileCallback
-func windows_compileCallback(fn any, cleanstack bool) uintptr
+/*line syscall_windows.go:226:1*/func windows_compileCallback(fn any, cleanstack bool) uintptr
 
 // NewCallback converts a Go function to a function pointer conforming to the stdcall calling convention.
 // This is useful when interoperating with Windows code requiring callbacks.
@@ -537,12 +538,14 @@ func Windows_WriteFile(fd Windows_Handle, p []byte, done *uint32, overlapped *Wi
 	return err
 }
 
+
+
 var windows_procSetFilePointerEx = func() *Windows_LazyProc {
-	if apehost != apeWindows {
-		return *new(*Windows_LazyProc)
-	}
-	return windows_modkernel32.NewProc("SetFilePointerEx")
-}()
+if apehost != apeWindows {
+return *new(*Windows_LazyProc)
+}
+return /*line syscall_windows.go:545:28*/windows_modkernel32.NewProc("SetFilePointerEx")
+}()/*line syscall_windows.go:545:67*/
 
 const windows_ptrSize = unsafe.Sizeof(uintptr(0))
 
@@ -581,24 +584,24 @@ func Windows_Close(fd Windows_Handle) (err error) {
 }
 
 var (
-	Windows_Stdin = func() Windows_Handle {
-		if apehost != apeWindows {
-			return *new(Windows_Handle)
-		}
-		return windows_getStdHandle(Windows_STD_INPUT_HANDLE)
-	}()
+	Windows_Stdin  = func() Windows_Handle {
+if apehost != apeWindows {
+return *new(Windows_Handle)
+}
+return /*line syscall_windows.go:584:11*/windows_getStdHandle(Windows_STD_INPUT_HANDLE)
+}()/*line syscall_windows.go:584:41*/
 	Windows_Stdout = func() Windows_Handle {
-		if apehost != apeWindows {
-			return *new(Windows_Handle)
-		}
-		return windows_getStdHandle(Windows_STD_OUTPUT_HANDLE)
-	}()
+if apehost != apeWindows {
+return *new(Windows_Handle)
+}
+return /*line syscall_windows.go:585:11*/windows_getStdHandle(Windows_STD_OUTPUT_HANDLE)
+}()/*line syscall_windows.go:585:42*/
 	Windows_Stderr = func() Windows_Handle {
-		if apehost != apeWindows {
-			return *new(Windows_Handle)
-		}
-		return windows_getStdHandle(Windows_STD_ERROR_HANDLE)
-	}()
+if apehost != apeWindows {
+return *new(Windows_Handle)
+}
+return /*line syscall_windows.go:586:11*/windows_getStdHandle(Windows_STD_ERROR_HANDLE)
+}()/*line syscall_windows.go:586:41*/
 )
 
 func windows_getStdHandle(h int) (fd Windows_Handle) {
@@ -832,6 +835,8 @@ const windows_socket_error = uintptr(^uint32(0))
 //sys	GetAdaptersInfo(ai *IpAdapterInfo, ol *uint32) (errcode error) = iphlpapi.GetAdaptersInfo
 //sys	SetFileCompletionNotificationModes(handle Handle, flags uint8) (err error) = kernel32.SetFileCompletionNotificationModes
 //sys	WSAEnumProtocols(protocols *int32, protocolBuffer *WSAProtocolInfo, bufferLength *uint32) (n int32, err error) [failretval==-1] = ws2_32.WSAEnumProtocolsW
+
+/*line syscall_windows.go:823:27*/
 
 type Windows_RawSockaddrInet4 struct {
 	Family uint16
@@ -1180,6 +1185,8 @@ func (w Windows_WaitStatus) Signaled() bool { return false }
 
 func (w Windows_WaitStatus) TrapCause() int { return -1 }
 
+/*line syscall_windows.go:1177:2*/
+
 func Windows_TimespecToNsec(ts Timespec) int64 { return int64(ts.Sec)*1e9 + int64(ts.Nsec) }
 
 func Windows_NsecToTimespec(nsec int64) (ts Timespec) {
@@ -1190,18 +1197,12 @@ func Windows_NsecToTimespec(nsec int64) (ts Timespec) {
 
 // TODO(brainman): fix all needed for net
 
-func Windows_Accept(fd Windows_Handle) (nfd Windows_Handle, sa Windows_Sockaddr, err error) {
-	return 0, nil, Windows_EWINDOWS
-}
+func Windows_Accept(fd Windows_Handle) (nfd Windows_Handle, sa Windows_Sockaddr, err error) { return 0, nil, Windows_EWINDOWS }
 func Windows_Recvfrom(fd Windows_Handle, p []byte, flags int) (n int, from Windows_Sockaddr, err error) {
 	return 0, nil, Windows_EWINDOWS
 }
-func Windows_Sendto(fd Windows_Handle, p []byte, flags int, to Windows_Sockaddr) (err error) {
-	return Windows_EWINDOWS
-}
-func Windows_SetsockoptTimeval(fd Windows_Handle, level, opt int, tv *Windows_Timeval) (err error) {
-	return Windows_EWINDOWS
-}
+func Windows_Sendto(fd Windows_Handle, p []byte, flags int, to Windows_Sockaddr) (err error)       { return Windows_EWINDOWS }
+func Windows_SetsockoptTimeval(fd Windows_Handle, level, opt int, tv *Windows_Timeval) (err error) { return Windows_EWINDOWS }
 
 // The Linger struct is wrong but we only noticed after Go 1.
 // sysLinger is the real system call structure.
@@ -1210,10 +1211,16 @@ func Windows_SetsockoptTimeval(fd Windows_Handle, level, opt int, tv *Windows_Ti
 // with Setsockopt and Getsockopt.
 // Use SetsockoptLinger instead.
 
+/*line syscall_windows.go:1206:2*/
+
 type windows_sysLinger struct {
 	Onoff  uint16
 	Linger uint16
 }
+
+/*line syscall_windows.go:1216:2*/
+
+/*line syscall_windows.go:1221:2*/
 
 func Windows_GetsockoptInt(fd Windows_Handle, level, opt int) (int, error) {
 	optval := int32(0)
@@ -1339,16 +1346,18 @@ func Windows_Fchdir(fd Windows_Handle) (err error) {
 func Windows_Link(oldpath, newpath string) (err error) { return Windows_EWINDOWS }
 func Windows_Symlink(path, link string) (err error)    { return Windows_EWINDOWS }
 
-func Windows_Fchmod(fd Windows_Handle, mode uint32) (err error)      { return Windows_EWINDOWS }
-func Windows_Chown(path string, uid int, gid int) (err error)        { return Windows_EWINDOWS }
-func Windows_Lchown(path string, uid int, gid int) (err error)       { return Windows_EWINDOWS }
-func Windows_Fchown(fd Windows_Handle, uid int, gid int) (err error) { return Windows_EWINDOWS }
+func Windows_Fchmod(fd Windows_Handle, mode uint32) (err error)        { return Windows_EWINDOWS }
+func Windows_Chown(path string, uid int, gid int) (err error)  { return Windows_EWINDOWS }
+func Windows_Lchown(path string, uid int, gid int) (err error) { return Windows_EWINDOWS }
+func Windows_Fchown(fd Windows_Handle, uid int, gid int) (err error)   { return Windows_EWINDOWS }
 
 func Windows_Getuid() (uid int)                  { return -1 }
 func Windows_Geteuid() (euid int)                { return -1 }
 func Windows_Getgid() (gid int)                  { return -1 }
 func Windows_Getegid() (egid int)                { return -1 }
 func Windows_Getgroups() (gids []int, err error) { return nil, Windows_EWINDOWS }
+
+
 
 func (s Signal) Windows_Signal() {}
 

@@ -2,27 +2,26 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line statat.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line statat.go:6:1*/
 package os
-
-import "unsafe"
 
 import (
 	"internal/testlog"
 )
 
-func (f *Freebsd_File) lstatat(name string) (FileInfo, error) {
+func (f *File) freebsd_lstatat(name string) (FileInfo, error) {
 	if stathook != nil {
-		fi, err := stathook((*File)(unsafe.Pointer(f)), name)
+		fi, err := stathook(f, name)
 		if fi != nil || err != nil {
 			return fi, err
 		}
 	}
 	if log := testlog.Logger(); log != nil {
-		log.Stat(freebsd_joinPath(f.Name(), name))
+		log.Stat(joinPath(f.Freebsd_Name(), name))
 	}
-	return f.lstatatNolog(name)
+	return f.freebsd_lstatatNolog(name)
 }

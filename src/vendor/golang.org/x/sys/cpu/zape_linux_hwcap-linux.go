@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2019 The Go Authors. All rights reserved.
+/*line hwcap_linux.go:1:1*/// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -43,7 +43,7 @@ func linux_readHWCAP() error {
 		return nil
 	}
 
-	buf, err := os.Linux_ReadFile(linux_procAuxv)
+	buf, err := os.ReadFile(linux_procAuxv)
 	if err != nil {
 		// e.g. on android /proc/self/auxv is not accessible, so silently
 		// ignore the error and leave Initialized = false. On some

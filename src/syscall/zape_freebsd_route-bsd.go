@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line route_bsd.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line route_bsd.go:6:1*/
 package syscall
 
 import (
@@ -13,16 +14,16 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line route_bsd.go:12:2*/
 
 var (
 	freebsd_freebsdConfArch       string // "machine $arch" line in kern.conftxt on freebsd
 	freebsd_minRoutingSockaddrLen = func() int {
-		if apehost != apeFreebsd {
-			return *new(int)
-		}
-		return freebsd_rsaAlignOf(0)
-	}()
+if apehost != apeFreebsd {
+return *new(int)
+}
+return /*line route_bsd.go:16:26*/freebsd_rsaAlignOf(0)
+}()/*line route_bsd.go:16:39*/
 )
 
 // Round the length of a raw sockaddr up to align it properly.

@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line exec_unix.go:6:1*/
 package os
 
 import (
@@ -38,8 +39,8 @@ func (p *Process) linux_pidWait() (*Linux_ProcessState, error) {
 	//
 	// Checking for statusDone here would not be a complete fix, as the PID
 	// could still be waited on and reused prior to blockUntilWaitable.
-	switch p.linux_pidStatus() {
-	case linux_statusReleased:
+	switch p.pidStatus() {
+	case statusReleased:
 		return nil, syscall.Linux_EINVAL
 	}
 
@@ -51,7 +52,7 @@ func (p *Process) linux_pidWait() (*Linux_ProcessState, error) {
 	if ready {
 		// Mark the process done now, before the call to Wait4,
 		// so that Process.pidSignal will not send a signal.
-		p.linux_doRelease(linux_statusDone)
+		p.doRelease(statusDone)
 		// Acquire a write lock on sigMu to wait for any
 		// active call to the signal method to complete.
 		p.sigMu.Lock()
@@ -62,13 +63,13 @@ func (p *Process) linux_pidWait() (*Linux_ProcessState, error) {
 		status syscall.Linux_WaitStatus
 		rusage syscall.Linux_Rusage
 	)
-	pid1, err := linux_ignoringEINTR2(func() (int, error) {
+	pid1, err := ignoringEINTR2(func() (int, error) {
 		return syscall.Linux_Wait4(p.Pid, &status, 0, &rusage)
 	})
 	if err != nil {
 		return nil, NewSyscallError("wait", err)
 	}
-	p.linux_doRelease(linux_statusDone)
+	p.doRelease(statusDone)
 	return &Linux_ProcessState{
 		pid:    pid1,
 		status: status,
@@ -103,10 +104,10 @@ func (p *Process) linux_pidSignal(s syscall.Signal) error {
 	p.sigMu.RLock()
 	defer p.sigMu.RUnlock()
 
-	switch p.linux_pidStatus() {
-	case linux_statusDone:
+	switch p.pidStatus() {
+	case statusDone:
 		return ErrProcessDone
-	case linux_statusReleased:
+	case statusReleased:
 		return errProcessReleased
 	}
 
@@ -126,20 +127,20 @@ func linux_findProcess(pid int) (p *Process, err error) {
 		// We can't return an error here since users are not expecting
 		// it. Instead, return a process with a "done" state already
 		// and let a subsequent Signal or Wait call catch that.
-		return linux_newDoneProcess(pid), nil
+		return newDoneProcess(pid), nil
 	} else if err != nil {
 		// Ignore other errors from pidfdFind, as the callers
 		// do not expect them. Fall back to using the PID.
-		return linux_newPIDProcess(pid), nil
+		return newPIDProcess(pid), nil
 	}
 	// Use the handle.
-	return linux_newHandleProcess(pid, h), nil
+	return newHandleProcess(pid, h), nil
 }
 
 func (p *Linux_ProcessState) userTime() time.Duration {
-	return time.Duration(p.rusage.Utime.Nano()) * time.Linux_Nanosecond
+	return time.Duration(p.rusage.Utime.Nano()) * time.Nanosecond
 }
 
 func (p *Linux_ProcessState) systemTime() time.Duration {
-	return time.Duration(p.rusage.Stime.Nano()) * time.Linux_Nanosecond
+	return time.Duration(p.rusage.Stime.Nano()) * time.Nanosecond
 }

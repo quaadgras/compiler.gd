@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line fd_unixjs.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fd_unixjs.go:6:1*/
 package poll
 
 import "syscall"
@@ -60,8 +61,8 @@ func (fd *Linux_FD) ReadDirent(buf []byte) (int, error) {
 		n, err := linux_ignoringEINTRIO(syscall.Linux_ReadDirent, fd.Sysfd, buf)
 		if err != nil {
 			n = 0
-			if err == syscall.Linux_EAGAIN && fd.pd.linux_pollable() {
-				if err = fd.pd.linux_waitRead(fd.isFile); err == nil {
+			if err == syscall.Linux_EAGAIN && fd.pd.pollable() {
+				if err = fd.pd.waitRead(fd.isFile); err == nil {
 					continue
 				}
 			}

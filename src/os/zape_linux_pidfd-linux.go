@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2023 The Go Authors. All rights reserved.
+/*line pidfd_linux.go:1:1*/// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -27,7 +27,7 @@ import (
 	_ "unsafe" // for linkname
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line pidfd_linux.go:24:2*/
 
 // ensurePidfd initializes the PidFD field in sysAttr if it is not already set.
 // It returns the original or modified SysProcAttr struct and a flag indicating
@@ -94,23 +94,23 @@ func (p *Process) linux_pidfdWait() (*Linux_ProcessState, error) {
 	//
 	// We _do_ need to be careful about reuse of the pidfd FD number when
 	// closing the pidfd. See handle for more details.
-	handle, status := p.linux_handleTransientAcquire()
+	handle, status := p.handleTransientAcquire()
 	switch status {
-	case linux_statusDone:
+	case statusDone:
 		// Process already completed Wait, or was not found by
 		// pidfdFind. Return ECHILD for consistency with what the wait
 		// syscall would return.
 		return nil, NewSyscallError("wait", syscall.Linux_ECHILD)
-	case linux_statusReleased:
+	case statusReleased:
 		return nil, syscall.Linux_EINVAL
 	}
-	defer p.linux_handleTransientRelease()
+	defer p.handleTransientRelease()
 
 	var (
 		info   unix.Linux_SiginfoChild
 		rusage syscall.Linux_Rusage
 	)
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return unix.Linux_Waitid(unix.Linux_P_PIDFD, int(handle), &info, syscall.Linux_WEXITED, &rusage)
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func (p *Process) linux_pidfdWait() (*Linux_ProcessState, error) {
 
 	// Update the Process status to statusDone.
 	// This also releases a reference to the handle.
-	p.linux_doRelease(linux_statusDone)
+	p.doRelease(statusDone)
 
 	return &Linux_ProcessState{
 		pid:    int(info.Pid),
@@ -130,14 +130,14 @@ func (p *Process) linux_pidfdWait() (*Linux_ProcessState, error) {
 
 // pidfdSendSignal sends a signal to the process.
 func (p *Process) linux_pidfdSendSignal(s syscall.Signal) error {
-	handle, status := p.linux_handleTransientAcquire()
+	handle, status := p.handleTransientAcquire()
 	switch status {
-	case linux_statusDone:
+	case statusDone:
 		return ErrProcessDone
-	case linux_statusReleased:
+	case statusReleased:
 		return errProcessReleased
 	}
-	defer p.linux_handleTransientRelease()
+	defer p.handleTransientRelease()
 
 	return linux_convertESRCH(unix.Linux_PidFDSendSignal(handle, s))
 }
@@ -149,11 +149,11 @@ func linux_pidfdWorks() bool {
 
 // checkPidfdOnce is used to only check whether pidfd works once.
 var linux_checkPidfdOnce = func() func() error {
-	if apehost != apeLinux {
-		return *new(func() error)
-	}
-	return sync.OnceValue(linux_checkPidfd)
-}()
+if apehost != apeLinux {
+return *new(func() error)
+}
+return /*line pidfd_linux.go:145:22*/sync.OnceValue(linux_checkPidfd)
+}()/*line pidfd_linux.go:145:48*/
 
 // checkPidfd checks whether all required pidfd-related syscalls work. This
 // consists of pidfd_open and pidfd_send_signal syscalls, waitid syscall with
@@ -179,7 +179,7 @@ func linux_checkPidfd() error {
 	defer syscall.Linux_Close(int(fd))
 
 	// Check waitid(P_PIDFD) works.
-	err = linux_ignoringEINTR(func() error {
+	err = ignoringEINTR(func() error {
 		var info unix.Linux_SiginfoChild
 		// We don't actually care about the info, but passing a nil pointer
 		// makes valgrind complain because 0x0 is unaddressable.

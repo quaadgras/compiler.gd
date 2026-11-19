@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2014 The Go Authors. All rights reserved.
+/*line symlink_unix.go:1:1*/// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line symlink_unix.go:6:1*/
 package filepath
 
 func linux_evalSymlinks(path string) (string, error) {

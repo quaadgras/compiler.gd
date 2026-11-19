@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line signal_windows.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -114,9 +114,8 @@ const (
 // Only implemented on windows/386, which is the only
 // arch that loads TLS when calling getg(). Others
 // use a dedicated register.
-//
 //go:linkname windows_sigFetchGSafe runtime.sigFetchGSafe
-func windows_sigFetchGSafe() *g
+/*line signal_windows.go:113:1*/func windows_sigFetchGSafe() *g
 
 func windows_sigFetchG() *g {
 	if GOARCH == "386" {

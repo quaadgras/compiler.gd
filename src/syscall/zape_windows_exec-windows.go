@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line exec_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -14,12 +14,14 @@ import (
 	"internal/bytealg"
 	"runtime"
 	"slices"
-
+	
 	"unicode/utf16"
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line exec_windows.go:16:2*/
+
+/*line exec_windows.go:19:26*/
 
 // EscapeArg rewrites command line argument s as prescribed
 // in https://msdn.microsoft.com/en-us/library/ms880421.
@@ -299,7 +301,7 @@ type Windows_SysProcAttr struct {
 	Token                      Windows_Token               // if set, runs new process in the security context represented by the token
 	ProcessAttributes          *Windows_SecurityAttributes // if set, applies these security attributes as the descriptor for the new process
 	ThreadAttributes           *Windows_SecurityAttributes // if set, applies these security attributes as the descriptor for the main thread of the new process
-	NoInheritHandles           bool                        // if set, no handles are inherited by the new process, not even the standard handles, contained in ProcAttr.Files, nor the ones contained in AdditionalInheritedHandles
+	NoInheritHandles           bool                // if set, no handles are inherited by the new process, not even the standard handles, contained in ProcAttr.Files, nor the ones contained in AdditionalInheritedHandles
 	AdditionalInheritedHandles []Windows_Handle            // a list of additional handles, already marked as inheritable, that will be inherited by the new process
 	ParentProcess              Windows_Handle              // if non-zero, the new process regards the process given by this handle as its parent process, and AdditionalInheritedHandles, if set, should exist in this parent process
 }

@@ -5,8 +5,6 @@
 package cryptotest
 
 import (
-	"crypto/cipher"
-	"hash"
 	"testing"
 	"unsafe"
 )
@@ -22,42 +20,28 @@ const (
 	apeWindows
 )
 
-type MakeAEAD func() (cipher.AEAD, error)
-
-type MakeBlock func(key []byte) (cipher.Block, error)
-
-type MakeBlockMode func(b cipher.Block, iv []byte) cipher.BlockMode
-
-type MakeHash func() hash.Hash
-
-type MakeStream func() cipher.Stream
-
-var bufCap int = 10000
-
-var bufLens []int = []int{0, 1, 3, 4, 8, 10, 15, 16, 20, 32, 50, 4096, 5000}
-
-var lengths []int = []int{0, 156, 8192, 8193, 8208}
-
-func MustMinimumFIPS140ModuleVersion(a0 testing.TB, a1 string) {
+func BoundarySlices(a0 *testing.T, a1 int) ([]byte, []byte) {
 	if apehost == apeLinux {
-		Linux_MustMinimumFIPS140ModuleVersion(a0, a1)
-		return
+		x0, x1 := Linux_BoundarySlices(a0, a1)
+		return x0, x1
 	}
 	if apehost == apeFreebsd {
-		Freebsd_MustMinimumFIPS140ModuleVersion(a0, a1)
-		return
+		x0, x1 := Freebsd_BoundarySlices(a0, a1)
+		return x0, x1
 	}
-	Windows_MustMinimumFIPS140ModuleVersion(a0, a1)
+	x0, x1 := Windows_BoundarySlices(a0, a1)
+	return x0, x1
 }
 
-func MustSupportFIPS140(a0 testing.TB) {
+func flagshipBuilder() bool {
 	if apehost == apeLinux {
-		Linux_MustSupportFIPS140(a0)
-		return
+		x0 := linux_flagshipBuilder()
+		return x0
 	}
 	if apehost == apeFreebsd {
-		Freebsd_MustSupportFIPS140(a0)
-		return
+		x0 := freebsd_flagshipBuilder()
+		return x0
 	}
-	Windows_MustSupportFIPS140(a0)
+	x0 := windows_flagshipBuilder()
+	return x0
 }

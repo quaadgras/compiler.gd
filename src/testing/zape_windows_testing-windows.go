@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2021 The Go Authors. All rights reserved.
+/*line testing_windows.go:1:1*/// Copyright 2021 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line testing_windows.go:6:1*/
 package testing
 
 import (
@@ -59,7 +60,7 @@ func (a windows_highPrecisionTime) sub(b windows_highPrecisionTime) time.Duratio
 	if windows_queryPerformanceFrequency == 0 {
 		windows_queryPerformanceFrequency = windows.Windows_QueryPerformanceFrequency()
 	}
-	hi, lo := bits.Mul64(uint64(delta), uint64(time.Windows_Second)/uint64(time.Windows_Nanosecond))
+	hi, lo := bits.Mul64(uint64(delta), uint64(time.Second)/uint64(time.Nanosecond))
 	quo, _ := bits.Div64(hi, lo, uint64(windows_queryPerformanceFrequency))
 	return time.Duration(quo)
 }

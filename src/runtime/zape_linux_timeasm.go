@@ -2,12 +2,13 @@
 
 //go:build ape && amd64
 
-// Copyright 2017 The Go Authors. All rights reserved.
+/*line timeasm.go:1:1*/// Copyright 2017 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 // Declarations for operating systems implementing time.now directly in assembly.
 
+/*line timeasm.go:8:1*/
 package runtime
 
 import _ "unsafe"

@@ -2,17 +2,18 @@
 
 //go:build ape && amd64
 
-// Copyright 2019 The Go Authors. All rights reserved.
+/*line sockcmsg_unix_other.go:1:1*/// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockcmsg_unix_other.go:6:1*/
 package syscall
 
 import (
 	"runtime"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line sockcmsg_unix_other.go:11:2*/
 
 // Round the length of a raw sockaddr up to align it properly.
 func linux_cmsgAlignOf(salen int) int {

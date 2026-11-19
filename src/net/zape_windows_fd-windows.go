@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line fd_windows.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line fd_windows.go:15:2*/
 
 const (
 	windows_readSyscallName     = "wsarecv"
@@ -104,7 +104,7 @@ func (fd *windows_netFD) connect(ctx context.Context, la, ra syscall.Windows_Soc
 		if ctx.Err() != nil {
 			fd.pfd.SetWriteDeadline(aLongTimeAgo)
 		} else {
-			if deadline, ok := ctx.Deadline(); ok && !deadline.Windows_IsZero() {
+			if deadline, ok := ctx.Deadline(); ok && !deadline.IsZero() {
 				fd.pfd.SetWriteDeadline(deadline)
 			}
 
@@ -158,7 +158,7 @@ func (fd *windows_netFD) connect(ctx context.Context, la, ra syscall.Windows_Soc
 		// is not reachable, instead of waiting for 2s.
 		params := windows.Windows_TCP_INITIAL_RTO_PARAMETERS{
 			Rtt:                   windows.Windows_TCP_INITIAL_RTO_UNSPECIFIED_RTT, // use the default or overridden by the Administrator
-			MaxSynRetransmissions: 1,                                               // minimum possible value before Windows 10.0.16299
+			MaxSynRetransmissions: 1,                                       // minimum possible value before Windows 10.0.16299
 		}
 		if windows.Windows_SupportTCPInitialRTONoSYNRetransmissions() {
 			// In Windows 10.0.16299 TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS makes ConnectEx() fails instantly.
@@ -174,7 +174,7 @@ func (fd *windows_netFD) connect(ctx context.Context, la, ra syscall.Windows_Soc
 	if err := fd.pfd.ConnectEx(ra); err != nil {
 		select {
 		case <-ctx.Done():
-			return nil, windows_mapErr(ctx.Err())
+			return nil, mapErr(ctx.Err())
 		default:
 			if _, ok := err.(syscall.Errno); ok {
 				err = os.NewSyscallError("connectex", err)
@@ -186,13 +186,13 @@ func (fd *windows_netFD) connect(ctx context.Context, la, ra syscall.Windows_Soc
 	return nil, os.NewSyscallError("setsockopt", syscall.Windows_Setsockopt(fd.pfd.Sysfd, syscall.Windows_SOL_SOCKET, syscall.Windows_SO_UPDATE_CONNECT_CONTEXT, (*byte)(unsafe.Pointer(&fd.pfd.Sysfd)), int32(unsafe.Sizeof(fd.pfd.Sysfd))))
 }
 
-func (c *windows_conn) writeBuffers(v *Buffers) (int64, error) {
+func (c *conn) windows_writeBuffers(v *Buffers) (int64, error) {
 	if !c.ok() {
 		return 0, syscall.Windows_EINVAL
 	}
-	n, err := c.fd.writeBuffers(v)
+	n, err := (*(**windows_netFD)(unsafe.Pointer(&c.fd))).writeBuffers(v)
 	if err != nil {
-		return n, &OpError{Op: "wsasend", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		return n, &OpError{Op: "wsasend", Net: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**windows_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, nil
 }
@@ -235,11 +235,10 @@ func (fd *windows_netFD) accept() (*windows_netFD, error) {
 }
 
 // Defined in os package.
-//
 //go:linkname windows_newWindowsFile net.newWindowsFile
-func windows_newWindowsFile(h syscall.Windows_Handle, name string) *os.Windows_File
+/*line fd_windows.go:232:1*/func windows_newWindowsFile(h syscall.Windows_Handle, name string) *os.File
 
-func (fd *windows_netFD) dup() (*os.Windows_File, error) {
+func (fd *windows_netFD) dup() (*os.File, error) {
 	// Disassociate the IOCP from the socket,
 	// it is not safe to share a duplicated handle
 	// that is associated with IOCP.

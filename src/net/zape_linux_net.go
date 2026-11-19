@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line net.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line net.go:6:1*/
 /*
 Package net provides a portable interface for network I/O, including
 TCP/IP, UDP, domain name resolution, and Unix domain sockets.
@@ -100,58 +101,54 @@ library functions, such as GetAddrInfo and DnsQuery.
 */
 package net
 
-import (
-	"context"
-	"errors"
+import "unsafe"/*line net.go:99:12*/
 
+import (
+	
+	
+	
 	"io"
 	"os"
-
+	
 	"syscall"
 	"time"
 	_ "unsafe" // for linkname
-)
-
-type linux_conn struct {
-	fd *linux_netFD
-}
-
-func (c *linux_conn) ok() bool { return c != nil && c.fd != nil }
+)/*line net.go:121:2*//*line net.go:183:2*//*line net.go:187:2*//*line net.go:189:60*/
 
 // Implementation of the Conn interface.
 
 // Read implements the Conn Read method.
-func (c *linux_conn) Read(b []byte) (int, error) {
+func (c *conn) Linux_Read(b []byte) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Linux_EINVAL
 	}
-	n, err := c.fd.Read(b)
+	n, err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).Read(b)
 	if err != nil && err != io.EOF {
-		err = &OpError{Op: "read", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "read", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, err
 }
 
 // Write implements the Conn Write method.
-func (c *linux_conn) Write(b []byte) (int, error) {
+func (c *conn) Linux_Write(b []byte) (int, error) {
 	if !c.ok() {
 		return 0, syscall.Linux_EINVAL
 	}
-	n, err := c.fd.Write(b)
+	n, err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).Write(b)
 	if err != nil {
-		err = &OpError{Op: "write", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "write", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return n, err
 }
 
 // Close closes the connection.
-func (c *linux_conn) Close() error {
+func (c *conn) Linux_Close() error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	err := c.fd.Close()
+	err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).Close()
 	if err != nil {
-		err = &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "close", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return err
 }
@@ -159,76 +156,76 @@ func (c *linux_conn) Close() error {
 // LocalAddr returns the local network address.
 // The Addr returned is shared by all invocations of LocalAddr, so
 // do not modify it.
-func (c *linux_conn) LocalAddr() Addr {
+func (c *conn) Linux_LocalAddr() Addr {
 	if !c.ok() {
 		return nil
 	}
-	return c.fd.laddr
+	return (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr
 }
 
 // RemoteAddr returns the remote network address.
 // The Addr returned is shared by all invocations of RemoteAddr, so
 // do not modify it.
-func (c *linux_conn) RemoteAddr() Addr {
+func (c *conn) Linux_RemoteAddr() Addr {
 	if !c.ok() {
 		return nil
 	}
-	return c.fd.raddr
+	return (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr
 }
 
 // SetDeadline implements the Conn SetDeadline method.
-func (c *linux_conn) SetDeadline(t time.Time) error {
+func (c *conn) Linux_SetDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := c.fd.SetDeadline(t); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+	if err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).SetDeadline(t); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return nil
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
-func (c *linux_conn) SetReadDeadline(t time.Time) error {
+func (c *conn) Linux_SetReadDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := c.fd.SetReadDeadline(t); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+	if err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).SetReadDeadline(t); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return nil
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
-func (c *linux_conn) SetWriteDeadline(t time.Time) error {
+func (c *conn) Linux_SetWriteDeadline(t time.Time) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := c.fd.SetWriteDeadline(t); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+	if err := (*(**linux_netFD)(unsafe.Pointer(&c.fd))).SetWriteDeadline(t); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return nil
 }
 
 // SetReadBuffer sets the size of the operating system's
 // receive buffer associated with the connection.
-func (c *linux_conn) SetReadBuffer(bytes int) error {
+func (c *conn) Linux_SetReadBuffer(bytes int) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setReadBuffer(c.fd, bytes); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+	if err := linux_setReadBuffer((*(**linux_netFD)(unsafe.Pointer(&c.fd))), bytes); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return nil
 }
 
 // SetWriteBuffer sets the size of the operating system's
 // transmit buffer associated with the connection.
-func (c *linux_conn) SetWriteBuffer(bytes int) error {
+func (c *conn) Linux_SetWriteBuffer(bytes int) error {
 	if !c.ok() {
 		return syscall.Linux_EINVAL
 	}
-	if err := linux_setWriteBuffer(c.fd, bytes); err != nil {
-		return &OpError{Op: "set", Net: c.fd.net, Source: nil, Addr: c.fd.laddr, Err: err}
+	if err := linux_setWriteBuffer((*(**linux_netFD)(unsafe.Pointer(&c.fd))), bytes); err != nil {
+		return &OpError{Op: "set", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: nil, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Err: err}
 	}
 	return nil
 }
@@ -243,328 +240,10 @@ func (c *linux_conn) SetWriteBuffer(bytes int) error {
 //
 // On Windows, the returned os.File's file descriptor is not usable
 // on other processes.
-func (c *linux_conn) File() (f *os.Linux_File, err error) {
-	f, err = c.fd.dup()
+func (c *conn) Linux_File() (f *os.File, err error) {
+	f, err = (*(**linux_netFD)(unsafe.Pointer(&c.fd))).dup()
 	if err != nil {
-		err = &OpError{Op: "file", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+		err = &OpError{Op: "file", Net: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).net, Source: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).laddr, Addr: (*(**linux_netFD)(unsafe.Pointer(&c.fd))).raddr, Err: err}
 	}
 	return
-}
-
-// listenerBacklog is a caching wrapper around maxListenerBacklog.
-//
-// listenerBacklog should be an internal detail,
-// but widely used packages access it using linkname.
-// Notable members of the hall of shame include:
-//   - github.com/database64128/tfo-go/v2
-//   - github.com/metacubex/tfo-go
-//   - github.com/sagernet/tfo-go
-//
-// Do not remove or change the type signature.
-// See go.dev/issue/67401.
-//
-//go:linkname linux_listenerBacklog
-func linux_listenerBacklog() int {
-	listenerBacklogCache.Do(func() { listenerBacklogCache.val = linux_maxListenerBacklog() })
-	return listenerBacklogCache.val
-}
-
-func (canceledError) Linux_Error() string { return "operation was canceled" }
-
-func (canceledError) Linux_Is(err error) bool { return err == context.Canceled }
-
-// mapErr maps from the context errors to the historical internal net
-// error values.
-func linux_mapErr(err error) error {
-	switch err {
-	case context.Canceled:
-		return errCanceled
-	case context.DeadlineExceeded:
-		return errTimeout
-	default:
-		return err
-	}
-}
-
-func (e *OpError) Linux_Unwrap() error { return e.Err }
-
-func (e *OpError) Linux_Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	s := e.Op
-	if e.Net != "" {
-		s += " " + e.Net
-	}
-	if e.Source != nil {
-		s += " " + e.Source.String()
-	}
-	if e.Addr != nil {
-		if e.Source != nil {
-			s += "->"
-		} else {
-			s += " "
-		}
-		s += e.Addr.String()
-	}
-	s += ": " + e.Err.Error()
-	return s
-}
-
-func (e *OpError) Linux_Timeout() bool {
-	if ne, ok := e.Err.(*os.SyscallError); ok {
-		t, ok := ne.Err.(timeout)
-		return ok && t.Timeout()
-	}
-	t, ok := e.Err.(timeout)
-	return ok && t.Timeout()
-}
-
-func (e *OpError) Linux_Temporary() bool {
-	// Treat ECONNRESET and ECONNABORTED as temporary errors when
-	// they come from calling accept. See issue 6163.
-	if e.Op == "accept" && linux_isConnError(e.Err) {
-		return true
-	}
-
-	if ne, ok := e.Err.(*os.SyscallError); ok {
-		t, ok := ne.Err.(temporary)
-		return ok && t.Temporary()
-	}
-	t, ok := e.Err.(temporary)
-	return ok && t.Temporary()
-}
-
-func (e *ParseError) Linux_Error() string { return "invalid " + e.Type + ": " + e.Text }
-
-func (e *ParseError) Linux_Timeout() bool   { return false }
-func (e *ParseError) Linux_Temporary() bool { return false }
-
-func (e *AddrError) Linux_Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	s := e.Err
-	if e.Addr != "" {
-		s = "address " + e.Addr + ": " + s
-	}
-	return s
-}
-
-func (e *AddrError) Linux_Timeout() bool   { return false }
-func (e *AddrError) Linux_Temporary() bool { return false }
-
-func (e UnknownNetworkError) Linux_Error() string   { return "unknown network " + string(e) }
-func (e UnknownNetworkError) Linux_Timeout() bool   { return false }
-func (e UnknownNetworkError) Linux_Temporary() bool { return false }
-
-var _ error = InvalidAddrError("")
-
-func (e InvalidAddrError) Linux_Error() string   { return string(e) }
-func (e InvalidAddrError) Linux_Timeout() bool   { return false }
-func (e InvalidAddrError) Linux_Temporary() bool { return false }
-
-func (e *timeoutError) Linux_Error() string   { return "i/o timeout" }
-func (e *timeoutError) Linux_Timeout() bool   { return true }
-func (e *timeoutError) Linux_Temporary() bool { return true }
-
-func (e *timeoutError) Linux_Is(err error) bool {
-	return err == context.DeadlineExceeded
-}
-
-func (e *DNSConfigError) Linux_Unwrap() error   { return e.Err }
-func (e *DNSConfigError) Linux_Error() string   { return "error reading DNS config: " + e.Err.Error() }
-func (e *DNSConfigError) Linux_Timeout() bool   { return false }
-func (e *DNSConfigError) Linux_Temporary() bool { return false }
-
-func (e *notFoundError) Linux_Error() string { return e.s }
-
-func (e *temporaryError) Linux_Error() string   { return e.s }
-func (e *temporaryError) Linux_Temporary() bool { return true }
-func (e *temporaryError) Linux_Timeout() bool   { return false }
-
-// newDNSError creates a new *DNSError.
-// Based on the err, it sets the UnwrapErr, IsTimeout, IsTemporary, IsNotFound fields.
-func linux_newDNSError(err error, name, server string) *DNSError {
-	var (
-		isTimeout   bool
-		isTemporary bool
-		unwrapErr   error
-	)
-
-	if err, ok := err.(Error); ok {
-		isTimeout = err.Timeout()
-		isTemporary = err.Temporary()
-	}
-
-	// At this time, the only errors we wrap are context errors, to allow
-	// users to check for canceled/timed out requests.
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		unwrapErr = err
-	}
-
-	_, isNotFound := err.(*notFoundError)
-	return &DNSError{
-		UnwrapErr:   unwrapErr,
-		Err:         err.Error(),
-		Name:        name,
-		Server:      server,
-		IsTimeout:   isTimeout,
-		IsTemporary: isTemporary,
-		IsNotFound:  isNotFound,
-	}
-}
-
-// Unwrap returns e.UnwrapErr.
-func (e *DNSError) Linux_Unwrap() error { return e.UnwrapErr }
-
-func (e *DNSError) Linux_Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	s := "lookup " + e.Name
-	if e.Server != "" {
-		s += " on " + e.Server
-	}
-	s += ": " + e.Err
-	return s
-}
-
-// Timeout reports whether the DNS lookup is known to have timed out.
-// This is not always known; a DNS lookup may fail due to a timeout
-// and return a [DNSError] for which Timeout returns false.
-func (e *DNSError) Linux_Timeout() bool { return e.IsTimeout }
-
-// Temporary reports whether the DNS error is known to be temporary.
-// This is not always known; a DNS lookup may fail due to a temporary
-// error and return a [DNSError] for which Temporary returns false.
-func (e *DNSError) Linux_Temporary() bool { return e.IsTimeout || e.IsTemporary }
-
-// ErrClosed is the error returned by an I/O call on a network
-// connection that has already been closed, or that is closed by
-// another goroutine before the I/O is completed. This may be wrapped
-// in another error, and should normally be tested using
-// errors.Is(err, net.ErrClosed).
-var Linux_ErrClosed error = errClosed
-
-// ReadFrom hides another ReadFrom method.
-// It should never be called.
-func (noReadFrom) Linux_ReadFrom(io.Reader) (int64, error) {
-	panic("can't happen")
-}
-
-// tcpConnWithoutReadFrom implements all the methods of *TCPConn other
-// than ReadFrom. This is used to permit ReadFrom to call io.Copy
-// without leading to a recursive call to ReadFrom.
-type linux_tcpConnWithoutReadFrom struct {
-	noReadFrom
-	*Linux_TCPConn
-}
-
-// Fallback implementation of io.ReaderFrom's ReadFrom, when sendfile isn't
-// applicable.
-func linux_genericReadFrom(c *Linux_TCPConn, r io.Reader) (n int64, err error) {
-	// Use wrapper to hide existing r.ReadFrom from io.Copy.
-	return io.Copy(linux_tcpConnWithoutReadFrom{Linux_TCPConn: c}, r)
-}
-
-// WriteTo hides another WriteTo method.
-// It should never be called.
-func (noWriteTo) Linux_WriteTo(io.Writer) (int64, error) {
-	panic("can't happen")
-}
-
-// tcpConnWithoutWriteTo implements all the methods of *TCPConn other
-// than WriteTo. This is used to permit WriteTo to call io.Copy
-// without leading to a recursive call to WriteTo.
-type linux_tcpConnWithoutWriteTo struct {
-	noWriteTo
-	*Linux_TCPConn
-}
-
-// Fallback implementation of io.WriterTo's WriteTo, when zero-copy isn't applicable.
-func linux_genericWriteTo(c *Linux_TCPConn, w io.Writer) (n int64, err error) {
-	// Use wrapper to hide existing w.WriteTo from io.Copy.
-	return io.Copy(w, linux_tcpConnWithoutWriteTo{Linux_TCPConn: c})
-}
-
-// Limit the number of concurrent cgo-using goroutines, because
-// each will block an entire operating system thread. The usual culprit
-// is resolving many DNS names in separate goroutines but the DNS
-// server is not responding. Then the many lookups each use a different
-// thread, and the system or the program runs out of threads.
-
-func linux_acquireThread(ctx context.Context) error {
-	threadOnce.Do(func() {
-		threadLimit = make(chan struct{}, linux_concurrentThreadsLimit())
-	})
-	select {
-	case threadLimit <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func linux_releaseThread() {
-	<-threadLimit
-}
-
-var (
-	_ io.WriterTo = (*Buffers)(nil)
-	_ io.Reader   = (*Buffers)(nil)
-)
-
-// WriteTo writes contents of the buffers to w.
-//
-// WriteTo implements [io.WriterTo] for [Buffers].
-//
-// WriteTo modifies the slice v as well as v[i] for 0 <= i < len(v),
-// but does not modify v[i][j] for any i, j.
-func (v *Buffers) Linux_WriteTo(w io.Writer) (n int64, err error) {
-	if wv, ok := w.(buffersWriter); ok {
-		return wv.writeBuffers(v)
-	}
-	for _, b := range *v {
-		nb, err := w.Write(b)
-		n += int64(nb)
-		if err != nil {
-			v.linux_consume(n)
-			return n, err
-		}
-	}
-	v.linux_consume(n)
-	return n, nil
-}
-
-// Read from the buffers.
-//
-// Read implements [io.Reader] for [Buffers].
-//
-// Read modifies the slice v as well as v[i] for 0 <= i < len(v),
-// but does not modify v[i][j] for any i, j.
-func (v *Buffers) Linux_Read(p []byte) (n int, err error) {
-	for len(p) > 0 && len(*v) > 0 {
-		n0 := copy(p, (*v)[0])
-		v.linux_consume(int64(n0))
-		p = p[n0:]
-		n += n0
-	}
-	if len(*v) == 0 {
-		err = io.EOF
-	}
-	return
-}
-
-func (v *Buffers) linux_consume(n int64) {
-	for len(*v) > 0 {
-		ln0 := int64(len((*v)[0]))
-		if ln0 > n {
-			(*v)[0] = (*v)[0][n:]
-			return
-		}
-		n -= ln0
-		(*v)[0] = nil
-		*v = (*v)[1:]
-	}
-}
+}/*line net.go:386:2*//*line net.go:391:2*//*line net.go:409:2*//*line net.go:424:2*//*line net.go:435:2*//*line net.go:448:2*//*line net.go:452:28*//*line net.go:454:72*//*line net.go:456:75*//*line net.go:469:2*//*line net.go:499:2*//*line net.go:501:50*//*line net.go:524:2*//*line net.go:535:2*//*line net.go:539:2*//*line net.go:548:2*//*line net.go:552:2*//*line net.go:567:2*//*line net.go:577:2*//*line net.go:579:83*//*line net.go:581:55*//*line net.go:582:55*//*line net.go:587:2*//*line net.go:598:2*//*line net.go:600:54*//*line net.go:601:54*//*line net.go:603:32*//*line net.go:605:88*//*line net.go:606:63*//*line net.go:607:63*//*line net.go:609:29*//*line net.go:611:35*//*line net.go:613:64*//*line net.go:614:60*//*line net.go:615:60*//*line net.go:628:39*//*line net.go:630:27*//*line net.go:632:65*//*line net.go:633:56*//*line net.go:634:56*//*line net.go:638:2*//*line net.go:644:2*//*line net.go:646:59*//*line net.go:647:98*//*line net.go:648:59*//*line net.go:649:59*//*line net.go:655:2*//*line net.go:659:38*//*line net.go:661:54*//*line net.go:665:39*//*line net.go:667:57*//*line net.go:668:58*//*line net.go:669:59*//*line net.go:684:2*//*line net.go:716:2*//*line net.go:719:57*//*line net.go:731:2*//*line net.go:736:57*//*line net.go:741:76*//*line net.go:745:35*//*line net.go:752:32*//*line net.go:756:25*//*line net.go:762:2*//*line net.go:770:2*//*line net.go:777:2*//*line net.go:781:24*//*line net.go:787:2*//*line net.go:795:2*//*line net.go:801:2*//*line net.go:809:30*//*line net.go:811:25*//*line net.go:823:2*//*line net.go:827:2*//*line net.go:835:2*//*line net.go:842:22*//*line net.go:847:2*//*line net.go:869:2*//*line net.go:888:2*//*line net.go:901:2*/

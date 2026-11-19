@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2011 The Go Authors. All rights reserved.
+/*line sockopt_linux.go:1:1*/// Copyright 2011 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ func linux_setDefaultSockopts(s, family, sotype int, ipv6only bool) error {
 		// Allow both IP versions even if the OS default
 		// is otherwise. Note that some operating systems
 		// never admit this option.
-		syscall.Linux_SetsockoptInt(s, syscall.Linux_IPPROTO_IPV6, syscall.Linux_IPV6_V6ONLY, linux_boolint(ipv6only))
+		syscall.Linux_SetsockoptInt(s, syscall.Linux_IPPROTO_IPV6, syscall.Linux_IPV6_V6ONLY, boolint(ipv6only))
 	}
 	if (sotype == syscall.Linux_SOCK_DGRAM || sotype == syscall.Linux_SOCK_RAW) && family != syscall.Linux_AF_UNIX {
 		// Allow broadcast.

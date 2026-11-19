@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line tcpsockopt_unix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line tcpsockopt_unix.go:6:1*/
 package net
 
 import (
@@ -14,17 +15,17 @@ import (
 	"time"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line tcpsockopt_unix.go:13:2*/
 
 func freebsd_setKeepAliveIdle(fd *freebsd_netFD, d time.Duration) error {
 	if d == 0 {
-		d = freebsd_defaultTCPKeepAliveIdle
+		d = defaultTCPKeepAliveIdle
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(freebsd_roundDurationUp(d, time.Freebsd_Second))
+	secs := int(roundDurationUp(d, time.Second))
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_KEEPIDLE, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
@@ -32,13 +33,13 @@ func freebsd_setKeepAliveIdle(fd *freebsd_netFD, d time.Duration) error {
 
 func freebsd_setKeepAliveInterval(fd *freebsd_netFD, d time.Duration) error {
 	if d == 0 {
-		d = freebsd_defaultTCPKeepAliveInterval
+		d = defaultTCPKeepAliveInterval
 	} else if d < 0 {
 		return nil
 	}
 
 	// The kernel expects seconds so round to next highest second.
-	secs := int(freebsd_roundDurationUp(d, time.Freebsd_Second))
+	secs := int(roundDurationUp(d, time.Second))
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_IPPROTO_TCP, syscall.Freebsd_TCP_KEEPINTVL, secs)
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
@@ -46,7 +47,7 @@ func freebsd_setKeepAliveInterval(fd *freebsd_netFD, d time.Duration) error {
 
 func freebsd_setKeepAliveCount(fd *freebsd_netFD, n int) error {
 	if n == 0 {
-		n = freebsd_defaultTCPKeepAliveCount
+		n = defaultTCPKeepAliveCount
 	} else if n < 0 {
 		return nil
 	}

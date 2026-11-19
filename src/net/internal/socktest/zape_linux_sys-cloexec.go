@@ -2,30 +2,31 @@
 
 //go:build ape && amd64
 
-// Copyright 2015 The Go Authors. All rights reserved.
+/*line sys_cloexec.go:1:1*/// Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sys_cloexec.go:6:1*/
 package socktest
 
 import "syscall"
 
 // Accept4 wraps syscall.Accept4.
-func (sw *Linux_Switch) Accept4(s, flags int) (ns int, sa syscall.Linux_Sockaddr, err error) {
-	so := sw.sockso(s)
+func (sw *Switch) Linux_Accept4(s, flags int) (ns int, sa syscall.Linux_Sockaddr, err error) {
+	so := sw.linux_sockso(s)
 	if so == nil {
 		return syscall.Linux_Accept4(s, flags)
 	}
 	sw.fmu.RLock()
-	f := sw.fltab[Linux_FilterAccept]
+	f := sw.fltab[FilterAccept]
 	sw.fmu.RUnlock()
 
-	af, err := f.linux_apply(so)
+	af, err := f.apply(so)
 	if err != nil {
 		return -1, nil, err
 	}
 	ns, sa, so.Err = syscall.Linux_Accept4(s, flags)
-	if err = af.linux_apply(so); err != nil {
+	if err = af.apply(so); err != nil {
 		if so.Err == nil {
 			syscall.Linux_Close(ns)
 		}
@@ -35,10 +36,10 @@ func (sw *Linux_Switch) Accept4(s, flags int) (ns int, sa syscall.Linux_Sockaddr
 	sw.smu.Lock()
 	defer sw.smu.Unlock()
 	if so.Err != nil {
-		sw.stats.linux_getLocked(so.Cookie).AcceptFailed++
+		sw.stats.getLocked(so.Cookie).AcceptFailed++
 		return -1, nil, so.Err
 	}
-	nso := sw.addLocked(ns, so.Cookie.Linux_Family(), so.Cookie.Linux_Type(), so.Cookie.Linux_Protocol())
-	sw.stats.linux_getLocked(nso.Cookie).Accepted++
+	nso := sw.linux_addLocked(ns, so.Cookie.Family(), so.Cookie.Type(), so.Cookie.Protocol())
+	sw.stats.getLocked(nso.Cookie).Accepted++
 	return ns, sa, nil
 }

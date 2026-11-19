@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2010 The Go Authors. All rights reserved.
+/*line lp_windows.go:1:1*/// Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,11 +18,11 @@ import (
 
 // ErrNotFound is the error resulting if a path search failed to find an executable file.
 var Windows_ErrNotFound = func() error {
-	if apehost != apeWindows {
-		return *new(error)
-	}
-	return errors.New("executable file not found in %PATH%")
-}()
+if apehost != apeWindows {
+return *new(error)
+}
+return /*line lp_windows.go:16:19*/errors.New("executable file not found in %PATH%")
+}()/*line lp_windows.go:16:68*/
 
 func windows_chkStat(file string) error {
 	d, err := os.Stat(file)
@@ -62,11 +62,11 @@ func windows_findExecutable(file string, exts []string) (string, error) {
 	if windows_hasExt(file) {
 		return "", fs.ErrNotExist
 	}
-	return "", Windows_ErrNotFound
+	return "", ErrNotFound
 }
 
 func windows_lookPath(file string) (string, error) {
-	if err := windows_validateLookPath(file); err != nil {
+	if err := validateLookPath(file); err != nil {
 		return "", &Error{file, err}
 	}
 
@@ -83,15 +83,15 @@ func windows_lookPath(file string) (string, error) {
 // "C:\foo\example.com" would be returned as-is even if the
 // program is actually "C:\foo\example.com.exe".
 func windows_lookExtensions(path, dir string) (string, error) {
-	if err := windows_validateLookPath(path); err != nil {
+	if err := validateLookPath(path); err != nil {
 		return "", &Error{path, err}
 	}
 
-	if filepath.Windows_Base(path) == path {
+	if filepath.Base(path) == path {
 		path = "." + string(filepath.Windows_Separator) + path
 	}
 	exts := windows_pathExt()
-	if ext := filepath.Windows_Ext(path); ext != "" {
+	if ext := filepath.Ext(path); ext != "" {
 		for _, e := range exts {
 			if strings.EqualFold(ext, e) {
 				// Assume that path has already been resolved.
@@ -102,13 +102,13 @@ func windows_lookExtensions(path, dir string) (string, error) {
 	if dir == "" {
 		return windows_lookPathExts(path, exts)
 	}
-	if filepath.Windows_VolumeName(path) != "" {
+	if filepath.VolumeName(path) != "" {
 		return windows_lookPathExts(path, exts)
 	}
 	if len(path) > 1 && os.Windows_IsPathSeparator(path[0]) {
 		return windows_lookPathExts(path, exts)
 	}
-	dirandpath := filepath.Windows_Join(dir, path)
+	dirandpath := filepath.Join(dir, path)
 	// We assume that LookPath will only add file extension.
 	lp, err := windows_lookPathExts(dirandpath, exts)
 	if err != nil {
@@ -161,7 +161,7 @@ func windows_lookPathExts(file string, exts []string) (string, error) {
 		dotErr error
 	)
 	if _, found := os.LookupEnv("NoDefaultCurrentDirectoryInExePath"); !found {
-		if f, err := windows_findExecutable(filepath.Windows_Join(".", file), exts); err == nil {
+		if f, err := windows_findExecutable(filepath.Join(".", file), exts); err == nil {
 			if execerrdot.Value() == "0" {
 				execerrdot.IncNonDefault()
 				return f, nil
@@ -171,14 +171,14 @@ func windows_lookPathExts(file string, exts []string) (string, error) {
 	}
 
 	path := os.Getenv("path")
-	for _, dir := range filepath.Windows_SplitList(path) {
+	for _, dir := range filepath.SplitList(path) {
 		if dir == "" {
 			// Skip empty entries, consistent with what PowerShell does.
 			// (See https://go.dev/issue/61493#issuecomment-1649724826.)
 			continue
 		}
 
-		if f, err := windows_findExecutable(filepath.Windows_Join(dir, file), exts); err == nil {
+		if f, err := windows_findExecutable(filepath.Join(dir, file), exts); err == nil {
 			if dotErr != nil {
 				// https://go.dev/issue/53536: if we resolved a relative path implicitly,
 				// and it is the same executable that would be resolved from the explicit %PATH%,
@@ -194,7 +194,7 @@ func windows_lookPathExts(file string, exts []string) (string, error) {
 				}
 			}
 
-			if !filepath.Windows_IsAbs(f) {
+			if !filepath.IsAbs(f) {
 				if execerrdot.Value() != "0" {
 					// If this is the same relative path that we already found,
 					// dotErr is non-nil and we already checked it above.
@@ -214,5 +214,5 @@ func windows_lookPathExts(file string, exts []string) (string, error) {
 	if dotErr != nil {
 		return dotf, dotErr
 	}
-	return "", &Error{file, Windows_ErrNotFound}
+	return "", &Error{file, ErrNotFound}
 }

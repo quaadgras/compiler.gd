@@ -2,22 +2,24 @@
 
 //go:build ape && amd64
 
-// Copyright 2013 The Go Authors. All rights reserved.
+/*line netpoll_kqueue.go:1:1*/// Copyright 2013 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line netpoll_kqueue.go:6:1*/
 package runtime
 
 // Integrated network poller (kqueue-based implementation).
 
 import (
 	"internal/goarch"
-
+	
 	"unsafe"
 )
 
 var (
-	freebsd_kq int32 = -1
+	freebsd_kq             int32         = -1
+	
 )
 
 func freebsd_netpollinit() {

@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2014 The Go Authors. All rights reserved.
+/*line syscall_windows.go:1:1*/// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"unsafe"
 )
+
+/*line syscall_windows.go:17:25*/
 
 // UTF16PtrToString is like UTF16ToString, but takes *uint16
 // as a parameter instead of []uint16.

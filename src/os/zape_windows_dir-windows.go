@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line dir_windows.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ import (
 	"unsafe"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line dir_windows.go:15:2*/
 
 // Auxiliary information if the File describes a directory
 type windows_dirInfo struct {
@@ -99,17 +99,17 @@ func (d *windows_dirInfo) init(h syscall.Windows_Handle) {
 	}
 }
 
-func (file *Windows_File) readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
+func (file *File) windows_readdir(n int, mode readdirMode) (names []string, dirents []DirEntry, infos []FileInfo, err error) {
 	// If this file has no dirInfo, create one.
 	var d *windows_dirInfo
 	for {
-		d = file.dirinfo.Load()
+		d = (*windows_file)(unsafe.Pointer(file.file)).dirinfo.Load()
 		if d != nil {
 			break
 		}
 		d = new(windows_dirInfo)
-		d.init(file.pfd.Sysfd)
-		if file.dirinfo.CompareAndSwap(nil, d) {
+		d.init((*windows_file)(unsafe.Pointer(file.file)).pfd.Sysfd)
+		if (*windows_file)(unsafe.Pointer(file.file)).dirinfo.CompareAndSwap(nil, d) {
 			break
 		}
 		// We lost the race: try again.
@@ -128,7 +128,7 @@ func (file *Windows_File) readdir(n int, mode readdirMode) (names []string, dire
 	for n != 0 {
 		// Refill the buffer if necessary
 		if d.bufp == 0 {
-			err = windows.Windows_GetFileInformationByHandleEx(file.pfd.Sysfd, d.class, (*byte)(unsafe.Pointer(&(*d.buf)[0])), uint32(len(*d.buf)))
+			err = windows.Windows_GetFileInformationByHandleEx((*windows_file)(unsafe.Pointer(file.file)).pfd.Sysfd, d.class, (*byte)(unsafe.Pointer(&(*d.buf)[0])), uint32(len(*d.buf)))
 			runtime.KeepAlive(file)
 			if err != nil {
 				if err == syscall.Windows_ERROR_NO_MORE_FILES {
@@ -150,10 +150,10 @@ func (file *Windows_File) readdir(n int, mode readdirMode) (names []string, dire
 					// [1] https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/fa8194e0-53ec-413b-8315-e8fa85396fd8
 					break
 				}
-				if s, _ := file.Stat(); s != nil && !s.IsDir() {
-					err = &PathError{Op: "readdir", Path: file.name, Err: syscall.Windows_ENOTDIR}
+				if s, _ := file.Windows_Stat(); s != nil && !s.IsDir() {
+					err = &PathError{Op: "readdir", Path: (*windows_file)(unsafe.Pointer(file.file)).name, Err: syscall.Windows_ENOTDIR}
 				} else {
-					err = &PathError{Op: "GetFileInformationByHandleEx", Path: file.name, Err: err}
+					err = &PathError{Op: "GetFileInformationByHandleEx", Path: (*windows_file)(unsafe.Pointer(file.file)).name, Err: err}
 				}
 				return
 			}
@@ -189,7 +189,7 @@ func (file *Windows_File) readdir(n int, mode readdirMode) (names []string, dire
 				continue
 			}
 			name := syscall.Windows_UTF16ToString(nameslice)
-			if mode == windows_readdirName {
+			if mode == readdirName {
 				names = append(names, name)
 			} else {
 				var f *windows_fileStat
@@ -207,7 +207,7 @@ func (file *Windows_File) readdir(n int, mode readdirMode) (names []string, dire
 				}
 				f.name = name
 				f.vol = d.vol
-				if mode == windows_readdirDirEntry {
+				if mode == readdirDirEntry {
 					dirents = append(dirents, windows_dirEntry{f})
 				} else {
 					infos = append(infos, f)

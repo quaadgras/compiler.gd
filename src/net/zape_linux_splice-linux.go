@@ -2,11 +2,13 @@
 
 //go:build ape && amd64
 
-// Copyright 2018 The Go Authors. All rights reserved.
+/*line splice_linux.go:1:1*/// Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package net
+
+import "unsafe"/*line splice_linux.go:5:12*/
 
 import (
 	"internal/poll"
@@ -32,15 +34,15 @@ func linux_spliceFrom(c *linux_netFD, r io.Reader) (written int64, err error, ha
 
 	var s *linux_netFD
 	switch v := r.(type) {
-	case *Linux_TCPConn:
-		s = v.fd
-	case linux_tcpConnWithoutWriteTo:
-		s = v.fd
-	case *Linux_UnixConn:
-		if v.fd.net != "unix" {
+	case *TCPConn:
+		s = (*(**linux_netFD)(unsafe.Pointer(&v.fd)))
+	case tcpConnWithoutWriteTo:
+		s = (*(**linux_netFD)(unsafe.Pointer(&v.fd)))
+	case *UnixConn:
+		if (*(**linux_netFD)(unsafe.Pointer(&v.fd))).net != "unix" {
 			return 0, nil, false
 		}
-		s = v.fd
+		s = (*(**linux_netFD)(unsafe.Pointer(&v.fd)))
 	default:
 		return 0, nil, false
 	}
@@ -58,11 +60,11 @@ func linux_spliceFrom(c *linux_netFD, r io.Reader) (written int64, err error, ha
 //
 // If spliceTo returns handled == false, it has performed no work.
 func linux_spliceTo(w io.Writer, c *linux_netFD) (written int64, err error, handled bool) {
-	uc, ok := w.(*Linux_UnixConn)
-	if !ok || uc.fd.net != "unix" {
+	uc, ok := w.(*UnixConn)
+	if !ok || (*(**linux_netFD)(unsafe.Pointer(&uc.fd))).net != "unix" {
 		return
 	}
 
-	written, handled, err = linux_pollSplice(&uc.fd.pfd, &c.pfd, 1<<63-1)
+	written, handled, err = linux_pollSplice(&(*(**linux_netFD)(unsafe.Pointer(&uc.fd))).pfd, &c.pfd, 1<<63-1)
 	return written, wrapSyscallError("splice", err), handled
 }

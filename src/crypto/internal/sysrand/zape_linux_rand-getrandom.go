@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2014 The Go Authors. All rights reserved.
+/*line rand_getrandom.go:1:1*/// Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line rand_getrandom.go:6:1*/
 package sysrand
 
 import (
@@ -16,7 +17,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line rand_getrandom.go:15:2*/
 
 func linux_read(b []byte) error {
 	// Linux, DragonFly, and illumos don't have a limit on the buffer size.
@@ -51,7 +52,7 @@ func linux_read(b []byte) error {
 		if errors.Is(err, syscall.Linux_ENOSYS) {
 			// If getrandom(2) is not available, presumably on Linux versions
 			// earlier than 3.17, fall back to reading from /dev/urandom.
-			return linux_urandomRead(b)
+			return urandomRead(b)
 		}
 		if errors.Is(err, syscall.Linux_EINTR) {
 			// If getrandom(2) is blocking, either because it is waiting for the

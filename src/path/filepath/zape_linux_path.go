@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line path.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line path.go:6:1*/
 // Package filepath implements utility routines for manipulating filename paths
 // in a way compatible with the target operating system-defined file paths.
 //
@@ -19,163 +20,15 @@ import (
 	"errors"
 	"internal/bytealg"
 	"internal/filepathlite"
-	"io/fs"
+	
 	"os"
-	"slices"
+	
 )
 
 const (
 	Linux_Separator     = os.Linux_PathSeparator
 	Linux_ListSeparator = os.Linux_PathListSeparator
-)
-
-// Clean returns the shortest path name equivalent to path
-// by purely lexical processing. It applies the following rules
-// iteratively until no further processing can be done:
-//
-//  1. Replace multiple [Separator] elements with a single one.
-//  2. Eliminate each . path name element (the current directory).
-//  3. Eliminate each inner .. path name element (the parent directory)
-//     along with the non-.. element that precedes it.
-//  4. Eliminate .. elements that begin a rooted path:
-//     that is, replace "/.." by "/" at the beginning of a path,
-//     assuming Separator is '/'.
-//
-// The returned path ends in a slash only if it represents a root directory,
-// such as "/" on Unix or `C:\` on Windows.
-//
-// Finally, any occurrences of slash are replaced by Separator.
-//
-// If the result of this process is an empty string, Clean
-// returns the string ".".
-//
-// On Windows, Clean does not modify the volume name other than to replace
-// occurrences of "/" with `\`.
-// For example, Clean("//host/share/../x") returns `\\host\share\x`.
-//
-// See also Rob Pike, “Lexical File Names in Plan 9 or
-// Getting Dot-Dot Right,”
-// https://9p.io/sys/doc/lexnames.html
-func Linux_Clean(path string) string {
-	return filepathlite.Linux_Clean(path)
-}
-
-// IsLocal reports whether path, using lexical analysis only, has all of these properties:
-//
-//   - is within the subtree rooted at the directory in which path is evaluated
-//   - is not an absolute path
-//   - is not empty
-//   - on Windows, is not a reserved name such as "NUL"
-//
-// If IsLocal(path) returns true, then
-// Join(base, path) will always produce a path contained within base and
-// Clean(path) will always produce an unrooted path with no ".." path elements.
-//
-// IsLocal is a purely lexical operation.
-// In particular, it does not account for the effect of any symbolic links
-// that may exist in the filesystem.
-func Linux_IsLocal(path string) bool {
-	return filepathlite.Linux_IsLocal(path)
-}
-
-// Localize converts a slash-separated path into an operating system path.
-// The input path must be a valid path as reported by [io/fs.ValidPath].
-//
-// Localize returns an error if the path cannot be represented by the operating system.
-// For example, the path a\b is rejected on Windows, on which \ is a separator
-// character and cannot be part of a filename.
-//
-// The path returned by Localize will always be local, as reported by IsLocal.
-func Linux_Localize(path string) (string, error) {
-	return filepathlite.Linux_Localize(path)
-}
-
-// ToSlash returns the result of replacing each separator character
-// in path with a slash ('/') character. Multiple separators are
-// replaced by multiple slashes.
-func Linux_ToSlash(path string) string {
-	return filepathlite.Linux_ToSlash(path)
-}
-
-// FromSlash returns the result of replacing each slash ('/') character
-// in path with a separator character. Multiple slashes are replaced
-// by multiple separators.
-//
-// See also the Localize function, which converts a slash-separated path
-// as used by the io/fs package to an operating system path.
-func Linux_FromSlash(path string) string {
-	return filepathlite.Linux_FromSlash(path)
-}
-
-// SplitList splits a list of paths joined by the OS-specific [ListSeparator],
-// usually found in PATH or GOPATH environment variables.
-// Unlike strings.Split, SplitList returns an empty slice when passed an empty
-// string.
-func Linux_SplitList(path string) []string {
-	return linux_splitList(path)
-}
-
-// Split splits path immediately following the final [Separator],
-// separating it into a directory and file name component.
-// If there is no Separator in path, Split returns an empty dir
-// and file set to path.
-// The returned values have the property that path = dir+file.
-func Linux_Split(path string) (dir, file string) {
-	return filepathlite.Linux_Split(path)
-}
-
-// Join joins any number of path elements into a single path,
-// separating them with an OS specific [Separator]. Empty elements
-// are ignored. The result is Cleaned. However, if the argument
-// list is empty or all its elements are empty, Join returns
-// an empty string.
-// On Windows, the result will only be a UNC path if the first
-// non-empty element is a UNC path.
-func Linux_Join(elem ...string) string {
-	return linux_join(elem)
-}
-
-// Ext returns the file name extension used by path.
-// The extension is the suffix beginning at the final dot
-// in the final element of path; it is empty if there is
-// no dot.
-func Linux_Ext(path string) string {
-	return filepathlite.Linux_Ext(path)
-}
-
-// EvalSymlinks returns the path name after the evaluation of any symbolic
-// links.
-// If path is relative the result will be relative to the current directory,
-// unless one of the components is an absolute symbolic link.
-// EvalSymlinks calls [Clean] on the result.
-func Linux_EvalSymlinks(path string) (string, error) {
-	return linux_evalSymlinks(path)
-}
-
-// IsAbs reports whether the path is absolute.
-func Linux_IsAbs(path string) bool {
-	return filepathlite.Linux_IsAbs(path)
-}
-
-// Abs returns an absolute representation of path.
-// If the path is not absolute it will be joined with the current
-// working directory to turn it into an absolute path. The absolute
-// path name for a given file is not guaranteed to be unique.
-// Abs calls [Clean] on the result.
-func Linux_Abs(path string) (string, error) {
-	return linux_abs(path)
-}
-
-func linux_unixAbs(path string) (string, error) {
-	if Linux_IsAbs(path) {
-		return Linux_Clean(path), nil
-	}
-	wd, err := os.Linux_Getwd()
-	if err != nil {
-		return "", err
-	}
-	return Linux_Join(wd, path), nil
-}
+)/*line path.go:59:2*//*line path.go:77:2*//*line path.go:89:2*//*line path.go:96:2*//*line path.go:106:2*//*line path.go:114:2*//*line path.go:123:2*//*line path.go:134:2*//*line path.go:142:2*//*line path.go:151:2*//*line path.go:156:2*//*line path.go:165:2*//*line path.go:176:2*/
 
 // Rel returns a relative path that is lexically equivalent to targPath when
 // joined to basePath with an intervening separator. That is,
@@ -187,10 +40,10 @@ func linux_unixAbs(path string) (string, error) {
 // An error is returned if targPath can't be made relative to basePath
 // or if knowing the current working directory would be necessary to compute it.
 func Linux_Rel(basePath, targPath string) (string, error) {
-	baseVol := Linux_VolumeName(basePath)
-	targVol := Linux_VolumeName(targPath)
-	base := Linux_Clean(basePath)
-	targ := Linux_Clean(targPath)
+	baseVol := VolumeName(basePath)
+	targVol := VolumeName(targPath)
+	base := Clean(basePath)
+	targ := Clean(targPath)
 	if linux_sameWord(targ, base) {
 		return ".", nil
 	}
@@ -198,7 +51,7 @@ func Linux_Rel(basePath, targPath string) (string, error) {
 	targ = targ[len(targVol):]
 	if base == "." {
 		base = ""
-	} else if base == "" && filepathlite.Linux_VolumeNameLen(baseVol) > 2 /* isUNC */ {
+	} else if base == "" && filepathlite.VolumeNameLen(baseVol) > 2 /* isUNC */ {
 		// Treat any targetpath matching `\\host\share` basePath as absolute path.
 		base = string(Linux_Separator)
 	}
@@ -253,182 +106,7 @@ func Linux_Rel(basePath, targPath string) (string, error) {
 			buf[n] = Linux_Separator
 			copy(buf[n+1:], targ[t0:])
 		}
-		return Linux_Clean(string(buf)), nil
+		return Clean(string(buf)), nil
 	}
 	return targ[t0:], nil
-}
-
-// for testing
-
-// walkDir recursively descends path, calling walkDirFn.
-func linux_walkDir(path string, d fs.DirEntry, walkDirFn fs.WalkDirFunc) error {
-	if err := walkDirFn(path, d, nil); err != nil || !d.IsDir() {
-		if err == SkipDir && d.IsDir() {
-			// Successfully skipped directory.
-			err = nil
-		}
-		return err
-	}
-
-	dirs, err := os.Linux_ReadDir(path)
-	if err != nil {
-		// Second call, to report ReadDir error.
-		err = walkDirFn(path, d, err)
-		if err != nil {
-			if err == SkipDir && d.IsDir() {
-				err = nil
-			}
-			return err
-		}
-	}
-
-	for _, d1 := range dirs {
-		path1 := Linux_Join(path, d1.Name())
-		if err := linux_walkDir(path1, d1, walkDirFn); err != nil {
-			if err == SkipDir {
-				break
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// walk recursively descends path, calling walkFn.
-func linux_walk(path string, info fs.FileInfo, walkFn WalkFunc) error {
-	if !info.IsDir() {
-		return walkFn(path, info, nil)
-	}
-
-	names, err := linux_readDirNames(path)
-	err1 := walkFn(path, info, err)
-	// If err != nil, walk can't walk into this directory.
-	// err1 != nil means walkFn want walk to skip this directory or stop walking.
-	// Therefore, if one of err and err1 isn't nil, walk will return.
-	if err != nil || err1 != nil {
-		// The caller's behavior is controlled by the return value, which is decided
-		// by walkFn. walkFn may ignore err and return nil.
-		// If walkFn returns SkipDir or SkipAll, it will be handled by the caller.
-		// So walk should return whatever walkFn returns.
-		return err1
-	}
-
-	for _, name := range names {
-		filename := Linux_Join(path, name)
-		fileInfo, err := lstat(filename)
-		if err != nil {
-			if err := walkFn(filename, fileInfo, err); err != nil && err != SkipDir {
-				return err
-			}
-		} else {
-			err = linux_walk(filename, fileInfo, walkFn)
-			if err != nil {
-				if !fileInfo.IsDir() || err != SkipDir {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// WalkDir walks the file tree rooted at root, calling fn for each file or
-// directory in the tree, including root.
-//
-// All errors that arise visiting files and directories are filtered by fn:
-// see the [fs.WalkDirFunc] documentation for details.
-//
-// The files are walked in lexical order, which makes the output deterministic
-// but requires WalkDir to read an entire directory into memory before proceeding
-// to walk that directory.
-//
-// WalkDir does not follow symbolic links.
-//
-// WalkDir calls fn with paths that use the separator character appropriate
-// for the operating system. This is unlike [io/fs.WalkDir], which always
-// uses slash separated paths.
-func Linux_WalkDir(root string, fn fs.WalkDirFunc) error {
-	info, err := os.Lstat(root)
-	if err != nil {
-		err = fn(root, nil, err)
-	} else {
-		err = linux_walkDir(root, fs.FileInfoToDirEntry(info), fn)
-	}
-	if err == SkipDir || err == SkipAll {
-		return nil
-	}
-	return err
-}
-
-// Walk walks the file tree rooted at root, calling fn for each file or
-// directory in the tree, including root.
-//
-// All errors that arise visiting files and directories are filtered by fn:
-// see the [WalkFunc] documentation for details.
-//
-// The files are walked in lexical order, which makes the output deterministic
-// but requires Walk to read an entire directory into memory before proceeding
-// to walk that directory.
-//
-// Walk does not follow symbolic links.
-//
-// Walk is less efficient than [WalkDir], introduced in Go 1.16,
-// which avoids calling os.Lstat on every visited file or directory.
-func Linux_Walk(root string, fn WalkFunc) error {
-	info, err := os.Lstat(root)
-	if err != nil {
-		err = fn(root, nil, err)
-	} else {
-		err = linux_walk(root, info, fn)
-	}
-	if err == SkipDir || err == SkipAll {
-		return nil
-	}
-	return err
-}
-
-// readDirNames reads the directory named by dirname and returns
-// a sorted list of directory entry names.
-func linux_readDirNames(dirname string) ([]string, error) {
-	f, err := os.Linux_Open(dirname)
-	if err != nil {
-		return nil, err
-	}
-	names, err := f.Readdirnames(-1)
-	f.Close()
-	if err != nil {
-		return nil, err
-	}
-	slices.Sort(names)
-	return names, nil
-}
-
-// Base returns the last element of path.
-// Trailing path separators are removed before extracting the last element.
-// If the path is empty, Base returns ".".
-// If the path consists entirely of separators, Base returns a single separator.
-func Linux_Base(path string) string {
-	return filepathlite.Linux_Base(path)
-}
-
-// Dir returns all but the last element of path, typically the path's directory.
-// After dropping the final element, Dir calls [Clean] on the path and trailing
-// slashes are removed.
-// If the path is empty, Dir returns ".".
-// If the path consists entirely of separators, Dir returns a single separator.
-// The returned path does not end in a separator unless it is the root directory.
-//
-// On Windows, given a volume-only name such as "C:", Dir returns "C:.",
-// the current directory on drive C. To obtain the drive's root "C:\",
-// use [VolumeName] combined with a separator.
-func Linux_Dir(path string) string {
-	return filepathlite.Linux_Dir(path)
-}
-
-// VolumeName returns leading volume name.
-// Given "C:\foo\bar" it returns "C:" on Windows.
-// Given "\\host\share\foo" it returns "\\host\share".
-// On other platforms it returns "".
-func Linux_VolumeName(path string) string {
-	return filepathlite.Linux_VolumeName(path)
-}
+}/*line path.go:262:31*//*line path.go:267:31*//*line path.go:307:67*//*line path.go:309:21*//*line path.go:343:2*//*line path.go:381:2*//*line path.go:409:2*//*line path.go:436:2*//*line path.go:452:2*//*line path.go:460:2*//*line path.go:474:2*//*line path.go:482:2*/

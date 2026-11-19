@@ -2,7 +2,7 @@
 
 //go:build ape && amd64
 
-// Copyright 2020 The Go Authors. All rights reserved.
+/*line copy_file_range_linux.go:1:1*/// Copyright 2020 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -15,16 +15,16 @@ import (
 )
 
 var linux_supportCopyFileRange = func() func() bool {
-	if apehost != apeLinux {
-		return *new(func() bool)
-	}
-	return sync.OnceValue(func() bool {
-		// copy_file_range(2) is broken in various ways on kernels older than 5.3,
-		// see https://go.dev/issue/42400 and
-		// https://man7.org/linux/man-pages/man2/copy_file_range.2.html#VERSIONS
-		return unix.KernelVersionGE(5, 3)
-	})
-}()
+if apehost != apeLinux {
+return *new(func() bool)
+}
+return /*line copy_file_range_linux.go:13:28*/sync.OnceValue(func() bool {
+	// copy_file_range(2) is broken in various ways on kernels older than 5.3,
+	// see https://go.dev/issue/42400 and
+	// https://man7.org/linux/man-pages/man2/copy_file_range.2.html#VERSIONS
+	return unix.KernelVersionGE(5, 3)
+})
+}()/*line copy_file_range_linux.go:18:3*/
 
 // For best performance, call copy_file_range() with the largest len value
 // possible. Linux sets up a limitation of data transfer for most of its I/O

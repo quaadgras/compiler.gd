@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line lookup_unix.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line lookup_unix.go:6:1*/
 package user
 
 import (
@@ -200,7 +201,7 @@ func freebsd_findUsername(name string, r io.Reader) (*User, error) {
 }
 
 func freebsd_lookupGroup(groupname string) (*Group, error) {
-	f, err := os.Freebsd_Open(groupFile)
+	f, err := os.Open(groupFile)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +210,7 @@ func freebsd_lookupGroup(groupname string) (*Group, error) {
 }
 
 func freebsd_lookupGroupId(id string) (*Group, error) {
-	f, err := os.Freebsd_Open(groupFile)
+	f, err := os.Open(groupFile)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +219,7 @@ func freebsd_lookupGroupId(id string) (*Group, error) {
 }
 
 func freebsd_lookupUser(username string) (*User, error) {
-	f, err := os.Freebsd_Open(userFile)
+	f, err := os.Open(userFile)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +228,7 @@ func freebsd_lookupUser(username string) (*User, error) {
 }
 
 func freebsd_lookupUserId(uid string) (*User, error) {
-	f, err := os.Freebsd_Open(userFile)
+	f, err := os.Open(userFile)
 	if err != nil {
 		return nil, err
 	}

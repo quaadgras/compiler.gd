@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2019 The Go Authors. All rights reserved.
+/*line pprof_rusage.go:1:1*/// Copyright 2019 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line pprof_rusage.go:6:1*/
 package pprof
 
 import (
@@ -15,7 +16,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line pprof_rusage.go:14:2*/
 
 // Adds MaxRSS to platforms that are supported.
 func freebsd_addMaxRSS(w io.Writer) {
@@ -26,7 +27,7 @@ func freebsd_addMaxRSS(w io.Writer) {
 	case "darwin", "ios":
 		rssToBytes = 1
 	case "illumos", "solaris":
-		rssToBytes = uintptr(syscall.Freebsd_Getpagesize())
+		rssToBytes = uintptr(syscall.Getpagesize())
 	default:
 		panic("unsupported OS")
 	}

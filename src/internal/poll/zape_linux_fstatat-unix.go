@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2026 The Go Authors. All rights reserved.
+/*line fstatat_unix.go:1:1*/// Copyright 2026 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line fstatat_unix.go:6:1*/
 package poll
 
 import (
@@ -18,7 +19,7 @@ func (fd *Linux_FD) Fstatat(name string, s *syscall.Linux_Stat_t, flags int) err
 		return err
 	}
 	defer fd.decref()
-	return linux_ignoringEINTR(func() error {
+	return ignoringEINTR(func() error {
 		return unix.Linux_Fstatat(fd.Sysfd, name, s, flags)
 	})
 }

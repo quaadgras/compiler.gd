@@ -2,11 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line stat_unix.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line stat_unix.go:6:1*/
 package os
+
+import "unsafe"/*line stat_unix.go:7:11*/
 
 import (
 	"syscall"
@@ -14,23 +17,23 @@ import (
 
 // Stat returns the [FileInfo] structure describing file.
 // If there is an error, it will be of type [*PathError].
-func (f *Freebsd_File) Stat() (FileInfo, error) {
+func (f *File) Freebsd_Stat() (FileInfo, error) {
 	if f == nil {
 		return nil, ErrInvalid
 	}
 	var fs freebsd_fileStat
-	err := f.pfd.Fstat(&fs.sys)
+	err := (*freebsd_file)(unsafe.Pointer(f.file)).pfd.Fstat(&fs.sys)
 	if err != nil {
-		return nil, f.wrapErr("stat", err)
+		return nil, f.freebsd_wrapErr("stat", err)
 	}
-	freebsd_fillFileStatFromSys(&fs, f.name)
+	freebsd_fillFileStatFromSys(&fs, (*freebsd_file)(unsafe.Pointer(f.file)).name)
 	return &fs, nil
 }
 
 // statNolog stats a file with no test logging.
 func freebsd_statNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	err := freebsd_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return syscall.Freebsd_Stat(name, &fs.sys)
 	})
 	if err != nil {
@@ -43,7 +46,7 @@ func freebsd_statNolog(name string) (FileInfo, error) {
 // lstatNolog lstats a file with no test logging.
 func freebsd_lstatNolog(name string) (FileInfo, error) {
 	var fs freebsd_fileStat
-	err := freebsd_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return syscall.Freebsd_Lstat(name, &fs.sys)
 	})
 	if err != nil {

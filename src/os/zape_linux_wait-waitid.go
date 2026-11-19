@@ -2,13 +2,14 @@
 
 //go:build ape && amd64
 
-// Copyright 2016 The Go Authors. All rights reserved.
+/*line wait_waitid.go:1:1*/// Copyright 2016 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 // We used to use this code for Darwin, but according to issue #19314
 // waitid returns if the process is stopped, even when using WEXITED.
 
+/*line wait_waitid.go:9:1*/
 package os
 
 import (
@@ -17,14 +18,14 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
+var _ = runtime.GOARCH/*line wait_waitid.go:16:2*/
 
 // blockUntilWaitable attempts to block until a call to p.Wait will
 // succeed immediately, and reports whether it has done so.
 // It does not actually call p.Wait.
 func (p *Process) linux_blockUntilWaitable() (bool, error) {
 	var info unix.Linux_SiginfoChild
-	err := linux_ignoringEINTR(func() error {
+	err := ignoringEINTR(func() error {
 		return unix.Linux_Waitid(unix.Linux_P_PID, p.Pid, &info, syscall.Linux_WEXITED|syscall.Linux_WNOWAIT, nil)
 	})
 	runtime.KeepAlive(p)

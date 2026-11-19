@@ -2,10 +2,11 @@
 
 //go:build ape && amd64
 
-// Copyright 2009 The Go Authors. All rights reserved.
+/*line sockopt_posix.go:1:1*/// Copyright 2009 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+/*line sockopt_posix.go:6:1*/
 package net
 
 import (
@@ -13,38 +14,7 @@ import (
 	"syscall"
 )
 
-var _ = runtime.GOARCH
-
-// Boolean to int.
-func freebsd_boolint(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func freebsd_interfaceToIPv4Addr(ifi *Interface) (IP, error) {
-	if ifi == nil {
-		return IPv4zero, nil
-	}
-	ifat, err := ifi.Addrs()
-	if err != nil {
-		return nil, err
-	}
-	for _, ifa := range ifat {
-		switch v := ifa.(type) {
-		case *IPAddr:
-			if v.IP.To4() != nil {
-				return v.IP, nil
-			}
-		case *IPNet:
-			if v.IP.To4() != nil {
-				return v.IP, nil
-			}
-		}
-	}
-	return nil, errNoSuchInterface
-}
+var _ = runtime.GOARCH/*line sockopt_posix.go:12:2*//*line sockopt_posix.go:20:2*//*line sockopt_posix.go:43:2*/
 
 func freebsd_setReadBuffer(fd *freebsd_netFD, bytes int) error {
 	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_RCVBUF, bytes)
@@ -59,7 +29,7 @@ func freebsd_setWriteBuffer(fd *freebsd_netFD, bytes int) error {
 }
 
 func freebsd_setKeepAlive(fd *freebsd_netFD, keepalive bool) error {
-	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_KEEPALIVE, freebsd_boolint(keepalive))
+	err := fd.pfd.SetsockoptInt(syscall.Freebsd_SOL_SOCKET, syscall.Freebsd_SO_KEEPALIVE, boolint(keepalive))
 	runtime.KeepAlive(fd)
 	return wrapSyscallError("setsockopt", err)
 }
