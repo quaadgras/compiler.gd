@@ -748,7 +748,7 @@ func loadWindowsHostArchives(ctxt *Link) {
 
 	// Fix up references to DLL import symbols now that we're done
 	// pulling in new objects.
-	if err := loadpe.PostProcessImports(); err != nil {
+	if err := loadpe.PostProcessImports(ctxt.loader); err != nil {
 		Errorf("%v", err)
 	}
 

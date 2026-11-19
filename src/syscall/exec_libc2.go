@@ -53,6 +53,7 @@ func runtime_AfterForkInChild()
 // instrumented (go:norace).
 //
 //go:norace
+//go:nocheckptr
 func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr, pipe int) (pid int, err1 Errno) {
 	// Declare all variables at top in case any
 	// declarations require heap allocation (e.g., err1).

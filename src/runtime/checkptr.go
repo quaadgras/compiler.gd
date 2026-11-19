@@ -77,6 +77,12 @@ func checkptrSameType(s *mspan, base, p uintptr, elem *_type) bool {
 	return typ == elem && p >= base && (p-base)%elem.Size_ == 0
 }
 
+// checkptrSameObject reports whether a, in an object of the span s, and v
+// are addresses in the same object.
+func checkptrSameObject(s *mspan, a, v uintptr) bool {
+	return s.base() <= v && v < s.limit && s.objIndex(a) == s.objIndex(v)
+}
+
 // checkptrPointers checks that (*[n]elem)(p), which is in one object of
 // the span s, has pointers only where the object has, or where the object
 // has a word that does not hold the address of anything in the heap now:
@@ -115,7 +121,13 @@ func checkptrPointers(s *mspan, p uintptr, elem *_type, n uintptr) {
 				// never in the heap. So a word that holds no
 				// pointer may be seen as a pointer while what it
 				// holds is not one into the heap.
-				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && spanOfHeap(v) != nil {
+				//
+				// Nor is it a pointer that the collector has to see
+				// if it points into the object that it is in, which
+				// lives while the word is read: a buffer of bytes
+				// that the system fills with a list whose links are
+				// addresses in the buffer (windows).
+				if v := *(*uintptr)(unsafe.Pointer(a)); v != 0 && spanOfHeap(v) != nil && !checkptrSameObject(s, a, v) {
 					throw("checkptr: converted pointer type has a pointer where the memory has an integer")
 				}
 			}
@@ -266,8 +278,11 @@ func checkptrBase(p unsafe.Pointer) uintptr {
 	}
 
 	// heap (must check after stack because of #35068)
-	if base, _, _ := findObject(uintptr(p), 0, 0); base != 0 {
-		return base
+	// (Not findObject: it throws for a pointer into a span that was
+	// freed, which an integer kept from before may well be; that is
+	// for this check to say, or not, as for any other address.)
+	if s := spanOfHeap(uintptr(p)); s != nil {
+		return s.base() + s.objIndex(uintptr(p))*s.elemsize
 	}
 
 	// data or bss

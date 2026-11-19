@@ -242,6 +242,12 @@ func checkStackForSecret(t *testing.T) {
 	lo, hi := getStack()
 	checkRangeForSecret(t, lo, hi)
 }
+
+// checkRangeForSecret reads memory at addresses that are integers: of
+// the stack, and of objects that are freed. No pointer is to be had of
+// those (gd checks unsafe.Pointer in every build), so it is not checked.
+//
+//go:nocheckptr
 func checkRangeForSecret(t *testing.T, lo, hi uintptr) {
 	t.Helper()
 	found := false

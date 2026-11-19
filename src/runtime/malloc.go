@@ -850,13 +850,29 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		// (sufficiently aligned) address the kernel will give
 		// us.
 		v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
-		for try := 0; v != nil && uintptr(v) < h.pages.split && try < 4; try++ {
+		if v != nil && uintptr(v) < h.pages.split {
 			// Not below the end of the local range: the page
-			// allocator looks there for local memory only. The
-			// reservation stays, so that the kernel gives another.
-			v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
+			// allocator looks there for local memory only. Where
+			// the kernel gives low addresses by itself (windows),
+			// ask for those after the range, one by one.
+			sysUnreserve(v, size)
+			v, size = nil, 0
+			for i := uintptr(1); ; i++ {
+				p := alignUp(h.pages.split, heapArenaBytes) + i<<36
+				if p+n < p || arenaIndex(p+n-1) >= 1<<arenaBits {
+					break
+				}
+				got := sysReserve(unsafe.Pointer(p), n, "heap")
+				if uintptr(got) == p {
+					v, size = got, n
+					break
+				}
+				if got != nil {
+					sysUnreserve(got, n)
+				}
+			}
 		}
-		if v == nil || uintptr(v) < h.pages.split {
+		if v == nil {
 			return nil, 0
 		}
 

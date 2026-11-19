@@ -84,6 +84,7 @@ func execveLibcWrapper(path *byte, argv **byte, envp **byte) error {
 // because it's not safe even for BSD-subsystem calls.
 //
 //go:norace
+//go:nocheckptr
 func forkAndExecInChild(argv0 *byte, argv, envv []*byte, chroot, dir *byte, attr *ProcAttr, sys *SysProcAttr, pipe int) (pid int, err Errno) {
 	// Declare all variables at top in case any
 	// declarations require heap allocation (e.g., err1).

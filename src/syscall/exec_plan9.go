@@ -123,6 +123,7 @@ var dupdev, _ = BytePtrFromString("#d")
 // functions that do not grow the stack.
 //
 //go:norace
+//go:nocheckptr
 func forkAndExecInChild(argv0 *byte, argv []*byte, envv []envItem, dir *byte, attr *ProcAttr, pipe int, rflag int) (pid int, err error) {
 	// Declare all variables at top in case any
 	// declarations require heap allocation (e.g., errbuf).

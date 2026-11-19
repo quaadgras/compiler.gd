@@ -19,6 +19,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -188,16 +189,35 @@ type peImportSymsState struct {
 	arch *sys.Arch
 }
 
-var importSymsState *peImportSymsState
+// linkState is what the host objects of one link have in common. (One
+// per loader, not one for the process: gd links in the go command, and
+// several links may run at once.)
+type linkState struct {
+	imports *peImportSymsState
 
-func createImportSymsState(l *loader.Loader, arch *sys.Arch) {
-	if importSymsState != nil {
-		return
+	// comdats records the names of symbols for which we've
+	// previously seen a definition in COMDAT. Key is symbol name, value
+	// is symbol size (or -1 if we're using the "any" strategy).
+	comdats map[string]int64
+}
+
+var (
+	linkStatesMu sync.Mutex
+	linkStates   = make(map[*loader.Loader]*linkState)
+)
+
+func linkStateOf(l *loader.Loader, arch *sys.Arch) *linkState {
+	linkStatesMu.Lock()
+	defer linkStatesMu.Unlock()
+	st := linkStates[l]
+	if st == nil {
+		st = &linkState{
+			imports: &peImportSymsState{l: l, arch: arch},
+			comdats: make(map[string]int64),
+		}
+		linkStates[l] = st
 	}
-	importSymsState = &peImportSymsState{
-		l:    l,
-		arch: arch,
-	}
+	return st
 }
 
 // peLoaderState holds various bits of useful state information needed
@@ -211,12 +231,8 @@ type peLoaderState struct {
 	comdats         map[uint16]int64 // key is section index, val is size
 	sectdata        map[*pe.Section][]byte
 	localSymVersion int
+	link            *linkState
 }
-
-// comdatDefinitions records the names of symbols for which we've
-// previously seen a definition in COMDAT. Key is symbol name, value
-// is symbol size (or -1 if we're using the "any" strategy).
-var comdatDefinitions map[string]int64
 
 // Symbols contains the symbols that can be loaded from a PE file.
 type Symbols struct {
@@ -237,10 +253,9 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, input *bio.Read
 		localSymVersion: localSymVersion,
 		pn:              pn,
 	}
-	createImportSymsState(state.l, state.arch)
-	if comdatDefinitions == nil {
-		comdatDefinitions = make(map[string]int64)
-	}
+	state.link = linkStateOf(state.l, state.arch)
+	importSymsState := state.link.imports
+	comdatDefinitions := state.link.comdats
 
 	// Some input files are archives containing multiple of
 	// object files, and pe.NewFile seeks to the start of
@@ -637,7 +652,15 @@ func Load(l *loader.Loader, arch *sys.Arch, localSymVersion int, input *bio.Read
 // an SDYNIMPORT symbol XYZ, we also flag the symbol (via PLT setting)
 // to indicated that the reference will need to be redirected to a
 // stub.
-func PostProcessImports() error {
+func PostProcessImports(l *loader.Loader) error {
+	linkStatesMu.Lock()
+	st := linkStates[l]
+	delete(linkStates, l)
+	linkStatesMu.Unlock()
+	if st == nil {
+		return nil
+	}
+	importSymsState := st.imports
 	ldr := importSymsState.l
 	arch := importSymsState.arch
 	keeprelocneeded := make(map[loader.Sym]loader.Sym)
@@ -684,7 +707,6 @@ func PostProcessImports() error {
 		r, _ := sb.AddRel(objabi.R_KEEP)
 		r.SetSym(v)
 	}
-	importSymsState = nil
 	return nil
 }
 
