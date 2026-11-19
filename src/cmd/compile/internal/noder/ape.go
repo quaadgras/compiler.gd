@@ -7,7 +7,6 @@ package noder
 import (
 	"go/constant"
 	"internal/buildcfg"
-	"internal/syslist"
 	"unicode"
 	"unicode/utf8"
 	"os"
@@ -92,7 +91,7 @@ func hostValues(c *types2.Const) []*types2.Const {
 		return nil
 	}
 	var out []*types2.Const
-	for _, h := range syslist.APEHosts {
+	for _, h := range objabi.APEHosts {
 		hc, ok := c.Pkg().Scope().Lookup(apeHostName(h, c.Name())).(*types2.Const)
 		if !ok || hc == c {
 			return nil

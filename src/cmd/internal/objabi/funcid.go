@@ -6,7 +6,6 @@ package objabi
 
 import (
 	"internal/abi"
-	"internal/syslist"
 	"strings"
 )
 
@@ -60,7 +59,7 @@ func GetFuncID(name string, isWrapper bool) abi.FuncID {
 // APEUnprefixed returns the name a GOOS=ape host copy's name
 // (linux_sigpanic, Linux_Stat) was made from, or name.
 func APEUnprefixed(name string) string {
-	for _, h := range syslist.APEHosts {
+	for _, h := range APEHosts {
 		for _, p := range [...]string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
 			if rest, ok := strings.CutPrefix(name, p); ok && rest != "" {
 				return rest
@@ -94,3 +93,8 @@ func APEDisplayName(name string) string {
 	}
 	return name[:start] + strings.Join(parts, ".")
 }
+
+// APEHosts is internal/syslist.APEHosts, which the toolchain cannot
+// import (it is built with the bootstrap toolchain): the systems a
+// GOOS=ape program runs on.
+var APEHosts = []string{"linux", "freebsd", "windows"}
