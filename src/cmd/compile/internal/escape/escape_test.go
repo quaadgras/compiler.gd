@@ -97,7 +97,7 @@ func TestComputeEscMask_SingleHeapEscape(t *testing.T) {
 	got := computeEscMask(testGd, sig)
 	// bit 0 is the discriminator (reserved).
 	// bit 1 is the first argument (p). p escapes → bit 1 set.
-	want := uint64(1 << 1)
+	want := keptBits(0)
 	if got != want {
 		t.Errorf("got mask=0x%x, want 0x%x (bit 1 for escaping p)", got, want)
 	}
@@ -127,7 +127,7 @@ func TestComputeEscMask_Mixed(t *testing.T) {
 
 	got := computeEscMask(testGd, sig)
 	// bits 1 and 3 set (args a and c); bit 2 clear (arg b).
-	want := uint64((1 << 1) | (1 << 3))
+	want := keptBits(0) | keptBits(2)
 	if got != want {
 		t.Errorf("mixed: got mask=0x%x, want 0x%x", got, want)
 	}
@@ -147,7 +147,7 @@ func TestComputeEscMask_Method(t *testing.T) {
 
 	got := computeEscMask(testGd, sig)
 	// With receiver counted as arg 0: bit 1 = recv (escapes), bit 2 = p (no).
-	want := uint64(1 << 1)
+	want := keptBits(0)
 	if got != want {
 		t.Errorf("method recv/p: got mask=0x%x, want 0x%x", got, want)
 	}
@@ -164,7 +164,7 @@ func TestComputeEscMask_ScalarsIgnored(t *testing.T) {
 
 	got := computeEscMask(testGd, sig)
 	// Arg 0 is n (scalar, no bit). Arg 1 is p (escapes → bit 2).
-	want := uint64(1 << 2)
+	want := keptBits(1)
 	if got != want {
 		t.Errorf("scalar+ptr: got mask=0x%x, want 0x%x", got, want)
 	}
@@ -230,4 +230,11 @@ func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
 	if got != want {
 		t.Errorf("overflow: got mask=0x%x, want 0x%x", got, want)
 	}
+}
+
+// keptBits returns the bits of an escape mask for argument k that the
+// function keeps, with nothing said of where: it is shared too
+// (ir.EscMaskShared).
+func keptBits(k int) uint64 {
+	return 1<<uint(k+1) | 1<<uint(ir.EscMaskShared+k) | 1<<uint(ir.EscMaskViaRecv+k)
 }

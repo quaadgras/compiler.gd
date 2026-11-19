@@ -782,3 +782,9 @@ const (
 // The compiler knows where g.localBits is.
 const _ = uint(unsafe.Offsetof(g{}.localBits) - 7*goarch.PtrSize)
 const _ = uint(7*goarch.PtrSize - unsafe.Offsetof(g{}.localBits))
+
+// escMaskAll is an escape mask that says that the function keeps and
+// shares every argument: what the tag of an object that is allocated
+// for an argument reads if there is no function (cmd/compile's
+// escape.callArgTag).
+var escMaskAll uint64 = abi.ITabEscAll

@@ -121,7 +121,9 @@ type batch struct {
 	stmtCalls   map[int32]bool
 	calls       []*callSite // callbits.go
 	retTags     map[*ir.Func]ir.Node
-	callArgs    []ir.Node // the arguments of the direct call whose tags are read (callbits.go)
+	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
+	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
+	dynArg      int          // that argument's place
 	addrStmts   map[addrStmtKey]uint8
 }
 
@@ -423,6 +425,7 @@ func (b *batch) finish(fns []*ir.Func) {
 	for _, fn := range fns {
 		fn.SetEsc(escFuncTagged)
 
+		b.paramShares(fn)
 		for i, param := range fn.Type().RecvParams() {
 			param.Note = b.paramTag(fn, 1+i, param)
 		}
@@ -432,7 +435,6 @@ func (b *batch) finish(fns []*ir.Func) {
 		// carriers) check bit k+1 to decide whether to materialize
 		// arg k before an indirect call. Bit 0 is reserved.
 		fn.EscMask = computeEscMask(b.gd, fn.Type())
-		b.paramShares(fn)
 	}
 
 	for _, loc := range b.allLocs {
@@ -751,7 +753,7 @@ func (b *batch) paramTag(fn *ir.Func, narg int, f *types.Field) string {
 		b.reportLeaks(f.Pos, name(), esc, fn.Type())
 	}
 
-	return esc.Encode()
+	return b.shareNote(fn, narg-1, esc)
 }
 
 func (b *batch) reportLeaks(pos src.XPos, name string, esc leaks, sig *types.Type) {

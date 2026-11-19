@@ -469,6 +469,12 @@ type dynRoot struct {
 	plain bool      // P is name
 	loc   *location // name's
 	stmt  int32
+
+	// For the argument arg of a call of a function that is only
+	// known when the program runs: the call, and path is what is
+	// called (callbits.go).
+	call *ir.CallExpr
+	arg  int
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
@@ -702,7 +708,26 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
 			return nil
 		}
-		param := d.plain && !v.reassigned && v.param
+		param := d.call == nil && d.plain && !v.reassigned && v.param
+		if d.call != nil {
+			// Allocated in the call's statement, when what is
+			// called is known.
+			if params || d.stmt == 0 || d.stmt != loc.stmt {
+				return nil
+			}
+			key := fmt.Sprintf("call %p %d", d.call, d.arg)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			one := b.callArgTag(pos, d, shift)
+			if tag == nil {
+				tag = one
+			} else {
+				tag = binary(ir.OAND, tag, one)
+			}
+			continue
+		}
 		switch {
 		case param:
 		case !params && d.stmt != 0 && d.stmt == loc.stmt && b.simpleStmts[d.stmt] && (d.plain || !b.stmtCalls[d.stmt]):

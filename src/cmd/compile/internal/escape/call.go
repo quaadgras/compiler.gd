@@ -149,20 +149,33 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				}
 				all = append(all, args[:len(fntype.Params())]...)
 			}
+			// For a function that is not known: the call, and the
+			// argument's place among its arguments (an interface's
+			// receiver is not one).
+			var dyn *ir.CallExpr
+			dynFirst := 0
+			if len(fns) == 0 {
+				dyn = call
+				if call.Op() == ir.OCALLFUNC && recvArg != nil {
+					dynFirst = 1
+				}
+			}
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs = all
+				e.dynCall, e.dynArg = dyn, dynFirst-1
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs = nil
+				e.callArgs, e.dynCall = nil, nil
 				argument(k, recvArg)
 			}
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs = all
+				e.dynCall, e.dynArg = dyn, dynFirst+i
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs = nil
+				e.callArgs, e.dynCall = nil, nil
 				argument(k, args[i])
 			}
 		}
@@ -466,6 +479,13 @@ func (e *escape) copyExpr(pos src.XPos, expr ir.Node, init *ir.Nodes) *ir.Name {
 func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	if argIdx < ir.EscMaskArgs && arg.Op() == ir.OADDR && isCandidateLoc(arg.(*ir.AddrExpr).X) {
 		return e.candidateHole()
+	}
+	// The heap, where the function that is called says whether
+	// another goroutine reaches it (callbits.go).
+	if e.dynCall != nil && e.dynArg >= 0 {
+		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
+			return r.asHole()
+		}
 	}
 	return e.heapHole()
 }

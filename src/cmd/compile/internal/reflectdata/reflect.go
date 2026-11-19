@@ -186,12 +186,9 @@ func writeEscMask(gd *base.Invocation, p pendingItabMask) {
 	mask := abi.ITabEscAll
 	switch {
 	case p.fn != nil && p.fn.Esc() >= escFuncTagged:
-		// fn.EscMask carries receiver at bit 1 and args at
-		// bits 2.. — the iface dispatch mask hides the
-		// receiver, so shift right once and clear the newly
-		// exposed low bit (which was "receiver escapes",
-		// meaningless at the dispatch site).
-		mask = (p.fn.EscMask >> 1) & ^uint64(1)
+		// The mask of an interface's method has no bit for the
+		// receiver.
+		mask = computeMethodEscMask(p.fn.Type())
 	case p.origType != nil:
 		mask = computeMethodEscMask(p.origType)
 	}

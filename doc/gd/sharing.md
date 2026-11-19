@@ -383,6 +383,36 @@ because the callee is unknown.
   is not known still flow to the heap and are shared, so only bit 0 is
   ever set there: the escape masks would have to say, per argument,
   what `ParamShare` says.
+- **Arguments of indirect calls** (`escape/callbits.go`: `callArgRoot`,
+  `callArgTag`; `ir.EscMaskShared`). Dependencies between the arguments
+  of a function that is only known at run time are for locality only:
+  on the stack they cannot be honoured (a candidate may be moved to the
+  heap by a later call, and an address does not say how long its
+  variable lives). A local object does not move and may be stored in
+  any local object, but it must be local from birth, so the rule is:
+  **an object is local for an indirect callee only if the callee is
+  known where the object is allocated; otherwise it is shared.**
+  - The escape mask that closures and itabs carry has, after the 21
+    bits "the function keeps argument k", 21 bits "what it keeps may be
+    reached by another goroutine" and 21 bits "it is stored through the
+    receiver". They come from the parameters' escape notes (a ninth
+    byte, from `ParamShare`), so every carrier of a function's mask
+    agrees. A function with nothing known says that all is shared.
+  - An argument of an unknown callee flows to a dynamic root of its
+    own. An object that is allocated in the arguments, in the call's
+    statement, and flows nowhere else, has as its tag what the mask
+    says: local if the callee does not keep the argument; or keeps it
+    where no other goroutine reaches; or stores it through its receiver
+    and the receiver points to a local object. What is called must be a
+    local variable or a method of an interface that is one. A nil
+    function reads a mask that says "shared" (the call panics after the
+    arguments are evaluated, as before).
+  - Not yet: a callee that is a parameter of the allocating function,
+    for objects allocated before the call's statement; receivers of
+    interface calls (they flow to the heap, so a receiver is never a
+    local object today and "through the receiver" never applies);
+    `r.list = append(r.list, p)` in the callee (deeper than the
+    receiver: shared).
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -404,11 +434,11 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
 
 ### Next
 
-1. **Arguments of indirect calls.** The callee's `ParamShare` is not
-   known to the caller: either it travels with the closure or the itab
-   as the escape masks do, or the callee decides alone from the bits
-   (bit k+1 for `&x` whose variable would stay local if the callee does
-   not share it, which needs the escape-candidate wrap to agree).
+1. **Receivers of interface calls** as containers: the object behind
+   an interface that is only called, never stored, could stay local,
+   which is what makes "stored through the receiver" useful. Then
+   callees that are parameters, consulted where the object is
+   allocated.
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the

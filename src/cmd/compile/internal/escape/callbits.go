@@ -7,10 +7,12 @@ package escape
 import (
 	"fmt"
 	"go/constant"
+	"internal/abi"
 
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
+	"cmd/internal/src"
 )
 
 // The bits of a call (runtime/shared.go, doc/gd/sharing.md).
@@ -689,4 +691,180 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 		return e.heapHole()
 	}
 	return e.storeThrough(p)
+}
+
+// shareNote returns the escape note of fn's i'th parameter, whose leaks
+// are esc, with what the parameter's ParamShare says for the escape
+// masks (ir.EscMaskShared): the callers of a function that is only known
+// when the program runs read it there.
+func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
+	note := esc.Encode()
+	if fn.ParamShares == nil || i >= len(fn.ParamShares) || esc.Heap() < 0 && !esc.anyResult() {
+		return note
+	}
+	ps := fn.ParamShares[i]
+	via := ps.Via
+	fl := byte(ir.EscNoteStays)
+	if fn.Type().Recv() != nil && i != 0 && via&1 != 0 {
+		via &^= 1
+		fl |= ir.EscNoteViaRecv
+	}
+	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() {
+		return note
+	}
+	return "esc:" + string(esc[:]) + string([]byte{fl})
+}
+
+func (l leaks) anyResult() bool {
+	for i := range numEscResults {
+		if l.Result(i) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// A call of a function that is only known when the program runs.
+//
+// An argument of such a call flows to the heap, and what it points to
+// is shared: the function may do anything with it. But the function's
+// escape mask, which the closure or the method table has, says what it
+// does (ir.EscMaskShared), and an object that is allocated in the
+// arguments of the call, in the call's statement, is allocated when the
+// function is known: it is local if the function does not keep the
+// argument, or keeps it where no other goroutine reaches, which may be
+// what its receiver points to if that is a local object.
+//
+// So an argument flows to a dynamic root of its own (shares.go), whose
+// tag is read from the mask. What was allocated before, or flows
+// elsewhere, cannot tell and is shared.
+
+// callArgRoot returns the dynamic root of the idx'th argument of call,
+// or nil if the function that is called cannot be read where the
+// arguments are evaluated: it must be a local variable, or the method of
+// an interface that is one.
+func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
+	if !e.callBitsOn() || call.GoDefer || idx >= ir.EscMaskArgs {
+		return nil
+	}
+	fun := call.Fun
+	if call.Op() == ir.OCALLINTER {
+		sel, ok := fun.(*ir.SelectorExpr)
+		if !ok || sel.Op() != ir.ODOTINTER {
+			return nil
+		}
+		fun = sel.X
+		if !fun.Type().IsInterface() {
+			return nil
+		}
+	}
+	name, plain := e.purePath(fun)
+	if name == nil || !plain {
+		return nil
+	}
+	key := dynKey{e.curStmt, fmt.Sprintf("call %p %d", call, idx)}
+	if r := e.dynRoots[key]; r != nil {
+		return r
+	}
+	r := &location{
+		curfn:     e.curfn,
+		loopDepth: 1,
+		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
+		dynRoot:   &dynRoot{path: fun, name: name, stmt: key.stmt, call: call, arg: idx},
+		isDynRoot: true,
+	}
+	e.allLocs = append(e.allLocs, r)
+	if e.dynRoots == nil {
+		e.dynRoots = make(map[dynKey]*location)
+	}
+	e.dynRoots[key] = r
+	return r
+}
+
+// callArgTag returns the expression of the tag of an object that is
+// allocated in the argument d.arg of the call d.call: 1 if the function
+// that is called keeps it local.
+func (b *batch) callArgTag(pos src.XPos, d *dynRoot, shift int64) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	unsafePtr := types.Types[types.TUNSAFEPTR]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	// An integer of a pointer, and back: not for checkptr to look at.
+	toInt := func(p ir.Node) ir.Node {
+		up := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, unsafePtr, p)
+		up.SetTypecheck(1)
+		u := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, up)
+		u.SetTypecheck(1)
+		u.SetCheckPtr(true)
+		return u
+	}
+	unary := func(op ir.Op, x ir.Node) ir.Node {
+		n := ir.NewUnaryExpr(b.gd, pos, op, x)
+		n.SetType(unsafePtr)
+		n.SetTypecheck(1)
+		return n
+	}
+	not := func(x ir.Node) ir.Node { return binary(ir.OXOR, x, lit(1)) }
+
+	// The word that has the mask: in the closure, or in the method
+	// table of the interface.
+	fun := ir.DeepCopy(pos, d.path)
+	var carrier, recv ir.Node
+	var off int64
+	if d.call.Op() == ir.OCALLINTER {
+		sel := d.call.Fun.(*ir.SelectorExpr)
+		t := sel.X.Type()
+		carrier = toInt(unary(ir.OITAB, fun))
+		recv = toInt(unary(ir.OIDATA, ir.DeepCopy(pos, d.path)))
+		off = int64(abi.ITabEscMaskOff(types.PtrSize, len(t.AllMethods()), int(sel.Offset()/int64(types.PtrSize))))
+	} else {
+		carrier = toInt(fun)
+		off = types.FuncMaskOffset
+	}
+	// If there is no function (the call will panic, after the
+	// arguments are evaluated), a word that says that all is shared.
+	all := ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "escMaskAll"), types.Types[types.TUINT64])
+	allAddr := toInt(typecheck.NodAddr(b.gd, all))
+	nz := binary(ir.ORSH, binary(ir.OOR, carrier, binary(ir.OSUB, lit(0), ir.DeepCopy(pos, carrier))), lit(63))
+	addr := binary(ir.OOR,
+		binary(ir.OAND, binary(ir.OADD, ir.DeepCopy(pos, carrier), lit(off)), binary(ir.OSUB, lit(0), nz)),
+		binary(ir.OAND, allAddr, binary(ir.OSUB, ir.DeepCopy(pos, nz), lit(1))))
+	ap := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, unsafePtr, addr)
+	ap.SetTypecheck(1)
+	ap.SetCheckPtr(true)
+	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(types.Types[types.TUINT64]), ap)
+	wp.SetTypecheck(1)
+	word := ir.NewStarExpr(b.gd, pos, wp)
+	word.SetType(types.Types[types.TUINT64])
+	word.SetTypecheck(1)
+	word.SetBounded(true)
+	raw := func() ir.Node {
+		c := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, ir.DeepCopy(pos, word))
+		c.SetTypecheck(1)
+		return c
+	}
+	bit := func(n int) ir.Node {
+		if n == 0 {
+			return binary(ir.OAND, raw(), lit(1))
+		}
+		return binary(ir.OAND, binary(ir.ORSH, raw(), lit(int64(n))), lit(1))
+	}
+	// Not a mask that is computed (bit 0), and: not kept; or not
+	// shared and not stored through the receiver, or the receiver
+	// points to a local object.
+	stays := not(bit(ir.EscMaskViaRecv + d.arg))
+	if recv != nil {
+		base := ir.NewLinksymExpr(b.gd, pos, typecheck.LookupRuntimeVar(b.gd, "localHeapBase"), uintptrType)
+		local := binary(ir.ORSH, binary(ir.OSUB, binary(ir.ORSH, binary(ir.OSUB, recv, base), lit(shift)), lit(1)), lit(63))
+		stays = binary(ir.OOR, stays, local)
+	}
+	stays = binary(ir.OAND, not(bit(ir.EscMaskShared+d.arg)), stays)
+	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+d.arg)), stays))
 }

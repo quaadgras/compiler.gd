@@ -14,7 +14,34 @@ import (
 // escape-bits, doc/gd/escape-bits.md) has a bit for: argument k's is
 // bit k+1, bit 0 being reserved. An argument past them is never an
 // escape candidate (escape's dynamicArgHole).
-const EscMaskArgs = 63
+const EscMaskArgs = 21
+
+// After the bits that say which arguments the function keeps, an escape
+// mask has, for the same arguments, the bits that say whether another
+// goroutine may reach what the function keeps (doc/gd/sharing.md):
+//
+//   - bit EscMaskShared+k: what argument k points to may be reached by
+//     another goroutine, or go where the caller cannot follow: an object
+//     that is local must not be passed.
+//   - bit EscMaskViaRecv+k, if the first is clear: argument k is stored
+//     in what the receiver points to, and is where that object is.
+//
+// With both clear, what the function keeps of the argument stays with
+// the goroutine that calls it. A mask with all bits set (abi.ITabEscAll)
+// says that everything is shared.
+const (
+	EscMaskShared  = 1 + EscMaskArgs
+	EscMaskViaRecv = 1 + 2*EscMaskArgs
+)
+
+// The byte that follows the eight of the leaks in an escape note, if the
+// function says where the parameter goes for sharing: without it, what
+// the function keeps is shared.
+const (
+	EscNoteShareByte = 8
+	EscNoteStays     = 0x81 // what is kept is not reached by another goroutine by itself
+	EscNoteViaRecv   = 0x02 // and it is stored through the receiver
+)
 
 // The bytes of a parameter's escape note after "esc:" (escape's leaks
 // encoding): the flow to the heap, to a mutation, to a callee, and to
@@ -55,6 +82,12 @@ func EscMaskOf(params []*types.Field) uint64 {
 		}
 		if escNoteKeeps(f.Note) {
 			mask |= 1 << uint(i+1)
+			switch fl := escNoteShare(f.Note); {
+			case fl&EscNoteStays != EscNoteStays:
+				mask |= 1<<uint(EscMaskShared+i) | 1<<uint(EscMaskViaRecv+i)
+			case fl&EscNoteViaRecv != 0:
+				mask |= 1 << uint(EscMaskViaRecv+i)
+			}
 		}
 	}
 	return mask
@@ -68,10 +101,22 @@ func escNoteKeeps(note string) bool {
 	if len(b) > escNoteHeap && b[escNoteHeap] != 0 {
 		return true
 	}
-	for i := escNoteResult0; i < len(b); i++ {
+	for i := escNoteResult0; i < len(b) && i < EscNoteShareByte; i++ {
 		if b[i] != 0 {
 			return true
 		}
 	}
 	return false
+}
+
+// escNoteShare returns the byte of an escape note that says where the
+// parameter goes for sharing, or zero.
+func escNoteShare(note string) byte {
+	if !strings.HasPrefix(note, "esc:") {
+		return 0
+	}
+	if b := note[len("esc:"):]; len(b) > EscNoteShareByte {
+		return b[EscNoteShareByte]
+	}
+	return 0
 }
