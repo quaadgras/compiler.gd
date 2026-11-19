@@ -1,0 +1,93 @@
+attr_init 0
+detachstate 0
+set detached 0
+detachstate 1
+set bad detachstate EINVAL
+guardsize 12288
+stacksize 1M 0
+stacksize 1048576
+stacksize 100 EINVAL
+PTHREAD_STACK_MIN ok 1
+setstack 0
+stack 1 65536
+inheritsched 1
+explicit 0
+inheritsched 1
+schedpolicy 1
+priority 0
+setschedparam 0
+scope 1
+scope process ENOTSUP
+scope system 0
+attr_destroy 0
+mutex type 1 robust 1 pshared 1 protocol 1
+bad robust EINVAL
+mutex init 0
+lock 0 lock 0 unlock 0 unlock 0
+cond clock 1
+setclock monotonic 0
+setclock cputime EINVAL
+cond clock 1
+cond pshared 1 clock 1
+rwlock pshared 0 1 bad EINVAL
+barrier pshared 1
+create detached 0
+detached ran 42
+detach 0
+join 0 1
+setschedparam 0 getschedparam 0 policy 1 priority 0 setschedprio 0
+setconcurrency 0 EINVAL getconcurrency 0
+atfork 0
+getcpuclockid 0 gettime 0 process 0 gettime 0
+readers shared the lock
+rdlock 0 tryrdlock 0 trywrlock EBUSY timedwrlock ETIMEDOUT unlock 0 unlock 0
+wrlock 0 tryrdlock EBUSY trywrlock EBUSY unlock 0
+timedrdlock 0 unlock 0
+writers counted 4000
+barrier count 0 EINVAL
+barrier rounds: arrived 20 serial 1 bad 0
+spin lock 0 trylock EBUSY unlock 0 trylock 0 unlock 0
+spinners counted 40000
+testcancel: cancel 0 join 0 canceled 1 trace: popped second first destructor 
+cond_wait: cancel 0 join 0 canceled 1 trace: unlock 
+mutex unlocked by the handler: trylock 0
+sleep: cancel 0 join 0 canceled 1 trace: sleep 
+nanosleep: cancel 0 join 0 canceled 1 trace: nanosleep 
+sem_wait: cancel 0 join 0 canceled 1 trace: sem_wait 
+join: cancel 0 join 0 canceled 1 trace: join 
+still joinable: 0 joinable
+disabled: cancel 0 join 0 canceled 1 trace: was-enabled still-running enabled 
+async: cancel 0 join 0 canceled 1 trace: async 
+exit: ret trace: exit2 exit1 
+setcancelstate bad EINVAL setcanceltype 0 old 0
+robust lock EOWNERDEAD unlock 0 lock ENOTRECOVERABLE trylock ENOTRECOVERABLE
+robust trylock EOWNERDEAD consistent 0 unlock 0 lock 0 unlock 0
+monotonic timedwait ETIMEDOUT waited 1
+past timedwait ETIMEDOUT
+realtime timedwait ETIMEDOUT waited 1
+timer_create 0
+timer_settime 0
+signals >= 3 1 value 42 code SI_TIMER 1
+old interval 0.010000000
+gettime value 1 interval 5
+disarmed 0 0
+timer_delete 0
+abstime settime 0 fired 1 after 1
+sigwaitinfo 1 value 7 code 1 overrun > 5 1
+thread timer 0 calls >= 3 1 value 99
+none: left < 5s 1
+bad notify -1 EINVAL
+bad clock -1 EINVAL
+clock_nanosleep abs 0 reached 1
+clock_nanosleep realtime abs 0 reached 1
+clock_nanosleep rel 0 slept 1
+clock_nanosleep past 0
+clock_nanosleep bad EINVAL
+clock_nanosleep thread clock EINVAL
+killpg 0 handled 1 killpg 0 0 handled 2 negative -1 EINVAL
+sighold 0 blocked 1 sigrelse 0 blocked 0
+sigset old dfl 1 handled 1 hold: old handler 1 blocked 1 handled 1 set: old hold 1 handled 2 blocked 0
+sigignore 0 handled 2 sigignore SIGKILL -1 EINVAL
+before siglongjmp blocked 1 after: blocked 0 jumps 1
+no mask saved: blocked 1
+_longjmp 5

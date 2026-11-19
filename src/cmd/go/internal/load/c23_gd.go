@@ -58,8 +58,8 @@ func importsC23AsGenerated(importer *Package, path string) bool {
 // with !cgo out, as with cgo. It can if, loaded so, every preamble and C
 // file uses no #cgo directive and includes only headers cmd/cc provides
 // or the package's own, every name the Go uses as C.name is one cmd/cc
-// defines (internal/testpty's posix_openpt is not), and it has no C++,
-// Objective-C, Fortran or assembly for a C compiler.
+// defines, and it has no C++, Objective-C, Fortran or assembly for a C
+// compiler.
 func ccContext(bp *build.Package, err error) (build.Context, bool) {
 	ctx := cfg.BuildContext
 	var noGo *build.NoGoError

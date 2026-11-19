@@ -1,0 +1,138 @@
+abc                           0 nsub 0: (1,4) [-1,-1]
+a*                            0 nsub 0: (0,0) [-1,-1]
+a*                            0 nsub 0: (0,3) [-1,-1]
+a.c                           0 nsub 0: (0,3) [-1,-1]
+a\.c                          0 nsub 0: (4,7) [-1,-1]
+*a                            0 nsub 0: (1,3) [-1,-1]
+\(*a\)                        0 nsub 1: (1,3) (1,3) [-1,-1]
+^*                            0 nsub 0: (0,1) [-1,-1]
+a^b                           0 nsub 0: (0,3) [-1,-1]
+a$b                           0 nsub 0: (0,3) [-1,-1]
+^abc$                         0 nsub 0: (0,3) [-1,-1]
+^abc$                         0 nsub 0 regexec 1
+\(ab\)*c                      0 nsub 1: (0,5) (2,4) [-1,-1]
+\(a\|b\)*c                    0 nsub 1: (0,5) (3,4) [-1,-1]
+a\{2,3\}                      0 nsub 0: (0,3) [-1,-1]
+a\{2\}                        0 nsub 0: (0,2) [-1,-1]
+a\{2,\}                       0 nsub 0: (0,5) [-1,-1]
+\(ab*\)\{2\}                  0 nsub 1: (0,5) (3,5) [-1,-1]
+x\{0\}y                       0 nsub 0: (1,2) [-1,-1]
+\(a\)\1                       0 nsub 1: (0,2) (0,1) [-1,-1]
+\(.\)\1                       0 nsub 1: (2,4) (2,3) [-1,-1]
+\(a*\)b\1                     0 nsub 1: (0,5) (0,2) [-1,-1]
+\(a*\)\1                      0 nsub 1: (0,4) (0,2) [-1,-1]
+\([a-c]*\)x\1                 0 nsub 1: (0,7) (0,3) [-1,-1]
+\(a\)\(b\)\(c\)\(d\)\(e\)\(f\)\(g\)\(h\)\(i\)\9\1  0 nsub 9: (0,11) (0,1) (1,2) (2,3) (3,4) (4,5) (5,6) (6,7) (7,8) (8,9) [-1,-1]
+\(\(a\)b\)                    0 nsub 2: (0,2) (0,2) (0,1) [-1,-1]
+a|ab                          1 nsub 0: (0,2) [-1,-1]
+ab|a                          1 nsub 0: (0,2) [-1,-1]
+(a*)(b|abc)                   1 nsub 2: (0,3) (0,0) (0,3) [-1,-1]
+(ab|a)(bc|c)                  1 nsub 2: (0,3) (0,2) (2,3) [-1,-1]
+(wee|week)(knights|night)     1 nsub 2: (0,10) (0,3) (3,10) [-1,-1]
+x(a|ab)(bc|c)?                1 nsub 2: (0,4) (1,3) (3,4) [-1,-1]
+(a|b)*                        1 nsub 1: (0,4) (3,4) [-1,-1]
+(a+|b+)*c                     1 nsub 1: (0,7) (5,6) [-1,-1]
+(a*)+                         1 nsub 1: (0,2) (0,2) [-1,-1]
+(a*)+                         1 nsub 1: (0,0) (0,0) [-1,-1]
+(a)|b                         1 nsub 1: (0,1) (-1,-1) [-1,-1]
+(a)|(b)                       1 nsub 2: (0,1) (-1,-1) (0,1) [-1,-1]
+a+                            1 nsub 0: (1,4) [-1,-1]
+a?b                           1 nsub 0: (0,2) [-1,-1]
+a{2,3}                        1 nsub 0: (0,3) [-1,-1]
+(ab){2}                       1 nsub 1: (0,4) (2,4) [-1,-1]
+(a|b){3,}                     1 nsub 1: (0,4) (3,4) [-1,-1]
+^(a|b)$                       1 nsub 1: (0,1) (0,1) [-1,-1]
+a)                            1 nsub 0: (1,3) [-1,-1]
+a^b                           1 nsub 0 regexec 1
+(^a)                          1 nsub 1: (0,1) (0,1) [-1,-1]
+x|^a                          1 nsub 0 regexec 1
+(foo|foobar)(bar)?            1 nsub 2: (0,6) (0,6) (-1,-1) [-1,-1]
+(a.*)(b.*)                    1 nsub 2: (0,4) (0,3) (3,4) [-1,-1]
+(a|ab)*c                      1 nsub 1: (0,5) (2,4) [-1,-1]
+([[:alpha:]]+)([[:digit:]]+)  1 nsub 2: (0,6) (0,3) (3,6) [-1,-1]
+.*                            1 nsub 0: (0,0) [-1,-1]
+()                            1 nsub 1: (0,0) (0,0) [-1,-1]
+[abc]+                        1 nsub 0: (1,4) [-1,-1]
+[^abc]+                       1 nsub 0: (2,5) [-1,-1]
+[]a]+                         1 nsub 0: (1,4) [-1,-1]
+[^]a]+                        1 nsub 0: (2,4) [-1,-1]
+[a-]+                         1 nsub 0: (1,4) [-1,-1]
+[-a]+                         1 nsub 0: (1,4) [-1,-1]
+[a-c-]+                       1 nsub 0: (1,4) [-1,-1]
+[[:alpha:]]+                  1 nsub 0: (2,5) [-1,-1]
+[[:digit:]]+                  1 nsub 0: (2,5) [-1,-1]
+[[:alnum:]]+                  1 nsub 0: (1,5) [-1,-1]
+[[:upper:]]+                  1 nsub 0: (2,4) [-1,-1]
+[[:lower:]]+                  1 nsub 0: (2,4) [-1,-1]
+[[:space:]]+                  1 nsub 0: (1,4) [-1,-1]
+[[:blank:]]+                  1 nsub 0: (1,3) [-1,-1]
+[[:punct:]]+                  1 nsub 0: (2,5) [-1,-1]
+[[:xdigit:]]+                 1 nsub 0: (3,7) [-1,-1]
+[[:cntrl:]]+                  1 nsub 0: (1,2) [-1,-1]
+[[:print:]]+                  1 nsub 0: (1,3) [-1,-1]
+[[:graph:]]+                  1 nsub 0: (1,3) [-1,-1]
+[^[:alpha:]]                  0 nsub 0: (2,3) [-1,-1]
+[[:alpha:][:digit:]]+         1 nsub 0: (1,5) [-1,-1]
+[\]+                          1 nsub 0: (1,3) [-1,-1]
+[.]                           1 nsub 0: (2,3) [-1,-1]
+[*]                           0 nsub 0: (2,3) [-1,-1]
+ABC                           2 nsub 0: (1,4) [-1,-1]
+abc                           2 nsub 0: (1,4) [-1,-1]
+[a-c]+                        3 nsub 0: (1,4) [-1,-1]
+[^a]+                         3 nsub 0: (2,4) [-1,-1]
+[[:upper:]]+                  3 nsub 0: (0,3) [-1,-1]
+^b                            4 nsub 0: (2,3) [-1,-1]
+^b                            0 nsub 0 regexec 1
+a$                            4 nsub 0: (0,1) [-1,-1]
+a$                            0 nsub 0 regexec 1
+a.b                           4 nsub 0 regexec 1
+a.b                           0 nsub 0: (0,3) [-1,-1]
+a[^x]b                        4 nsub 0 regexec 1
+a[^x]b                        0 nsub 0: (0,3) [-1,-1]
+^b                            4 nsub 0: (2,3) [-1,-1]
+^a                            0 nsub 0 regexec 1
+a$                            0 nsub 0 regexec 1
+^$                            0 nsub 0 regexec 1
+a                             0 nsub 0: (0,1) [-1,-1]
+abc                           0 nsub 0 regexec 1
+a{3}                          1 nsub 0 regexec 1
+(a*)*b                        1 nsub 1 regexec 1
+a\                            0 regcomp 5
+\(a                           0 regcomp 8
+a\)                           0 regcomp 8
+(a                            1 regcomp 8
+[a                            0 regcomp 7
+[[:alpha:]                    0 regcomp 7
+[z-a]                         0 regcomp 11
+[[:foo:]]                     0 regcomp 4
+\1                            0 regcomp 6
+\(a\)\2                       0 regcomp 6
+a\{2,1\}                      0 regcomp 10
+a{2,1}                        1 regcomp 10
+*a                            1 regcomp 13
+a|*b                          1 regcomp 13
+(+a)                          1 regcomp 13
+a**                           1 nsub 0: (0,3) [-1,-1]
+nosub: 0 1 99
+nmatch 0: 0
+word one at 0
+word two at 4
+word three at 9
+regerror: 9 No match
+regerror: 19 Trailing backslash
+regerror: 23 Invalid back reference
+regerror short: 9 "No "
+regerror 0: 9
+sizes: 1 1
+tcgetattr pipe: -1 1
+tcsetattr pipe: -1 1
+tcgetattr bad: -1 1
+tcflush pipe: -1 1
+tcdrain pipe: -1 1
+tcflow pipe: -1 1
+speed: 0 15
+raw: 24000 14004 2275 5020 1 0 3
+cfsetospeed: 0 10002
+cfsetspeed: 0 17 2260
+cfsetospeed bad: -1 1 17
+consts: 32 6 5 4 2 2 10017 20000000000 40000 3

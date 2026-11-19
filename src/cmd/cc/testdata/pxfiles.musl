@@ -1,0 +1,61 @@
+openat 1
+fstatat 0 size 6 reg 1
+mkdirat 0 dir 1
+symlinkat 0 nofollow lnk 1 follow size 6
+readlinkat 1 f
+linkat 0 nlink 2 follow 0 reg 1 nlink 3
+renameat 0 stat 1
+faccessat 0 eaccess 0 missing 1
+fchmodat 0 mode 600
+utimensat 0 atime 1000000000 mtime 1234567890.500 omit 1234567890 now 1
+futimens 0 1
+posix_fadvise 0
+lockf 0 test 0 tlock 0 ulock 0 bad 1
+fchownat 0
+mkfifoat 0 fifo 1 mkfifo 0 fifo 1
+mknodat 0 reg 1 mknod 0 fifo 1
+unlinkat dir 1 removedir 0 notdir 1 file 0
+openat badf 1 notdir 1 abs 1 cwd 1
+fchdir 0 in 1 cwd's 1 dfd's 1 back 0 1
+fdopendir 1 dirfd 1
+entries 4
+seekdir 1
+readdir_r 0 1
+closed fd 1
+scandir 4: f fifo hard lnk
+scandir missing 1
+dirfd 1
+fdopendir file 1 1
+posix_getdents 1 4 end 0
+pipe2 0 cloexec 1 1 nonblock 1 empty 1 read 1 z
+dup3 same 1 cloexec 50 1 plain 51 0 badflags 1
+pipe2 plain 0 cloexec 0 nonblock 0
+posix_close 0 again 1
+fseeko 0 ftello 3 getc 3 end 8
+putc_unlocked 01234567x9
+ok
+flockfile 2000
+ftrylockfile own 0 other 1 free 0
+ctermid /dev/tty /dev/tty
+pathconf 255 4096 4096 255
+confstr 14 /bin:/usr/bin 14 short /bin bad 0 1
+getrlimit 0 sane 1 stack 1 bad 1 set 0 over 1
+getpriority 1 nice 1
+getgroups 1
+setuid 0 0 0 0 0 0
+setuid root 1
+shm_open 1 excl 1 ftruncate 0 mmap 1 shared mlock 0 0 0
+shm_unlink 0 again 1 bad 1
+getpwuid_r 0 1 getpwnam_r 0 1 erange 1 none 0 1
+getpwent root 1
+getgrgid_r 0 1 getgrnam_r 0 1 erange 1
+getgrent root 1
+utmpx 1
+getservbyport 1
+getprotoent tcp 1
+if_nameindex lo 1
+posix_openpt grantpt 0 unlockpt 0 ptsname 1 ptsname_r 0 1 erange 1
+slave 1 isatty 1 ttyname 1 ttyname_r 0 1 erange 1
+tcsetwinsize 0 tcgetwinsize 0 24 80
+ttyname file 1 1 ttyname_r 1 tcgetwinsize 1
+fexecve sh

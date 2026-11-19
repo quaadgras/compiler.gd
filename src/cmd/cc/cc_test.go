@@ -191,14 +191,17 @@ func TestRegex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "regex")
-	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
-		t.Fatalf("gcc: %v\n%s", err, out)
-	}
-	want, err := exec.Command(bin).Output()
-	if err != nil {
-		t.Fatalf("%v\n%s", err, want)
-	}
+	want := hostWant(t, gcc, "regex", func() string {
+		bin := filepath.Join(t.TempDir(), "regex")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		want, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
 	if got := goRun(t, dir); got != string(want) {
 		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -256,27 +259,30 @@ func TestPxLocale(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "pxlocale")
-	// glibc's crypt is libcrypt's, musl's libc's.
-	args := []string{"-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lm"}
-	if out, err := exec.Command(gcc, append(args, "-lcrypt")...).CombinedOutput(); err != nil {
-		if out2, err := exec.Command(gcc, args...).CombinedOutput(); err != nil {
-			t.Fatalf("gcc: %v\n%s%s", err, out, out2)
+	want := hostWant(t, gcc, "pxlocale", func() string {
+		bin := filepath.Join(t.TempDir(), "pxlocale")
+		// glibc's crypt is libcrypt's, musl's libc's.
+		args := []string{"-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lm"}
+		if out, err := exec.Command(gcc, append(args, "-lcrypt")...).CombinedOutput(); err != nil {
+			if out2, err := exec.Command(gcc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("gcc: %v\n%s%s", err, out, out2)
+			}
 		}
-	}
-	cmd := exec.Command(bin)
-	cmd.Dir = t.TempDir() // the program makes files
-	want, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program makes files
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(want)
+	})
 	ccbin := filepath.Join(t.TempDir(), "pxlocale")
 	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
 	build.Dir = dir
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	cmd = exec.Command(ccbin)
+	cmd := exec.Command(ccbin)
 	cmd.Dir = t.TempDir()
 	got, err := cmd.Output()
 	if err != nil {
@@ -305,14 +311,17 @@ func TestPxThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "pxthreads")
-	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
-		t.Fatalf("gcc: %v\n%s", err, out)
-	}
-	want, err := exec.Command(bin).Output()
-	if err != nil {
-		t.Fatalf("%v\n%s", err, want)
-	}
+	want := hostWant(t, gcc, "pxthreads", func() string {
+		bin := filepath.Join(t.TempDir(), "pxthreads")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		want, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
 	if got := goRun(t, dir); got != string(want) {
 		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -448,23 +457,26 @@ func TestFsinfo(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "fsinfo")
-	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
-		t.Fatalf("gcc: %v\n%s", err, out)
-	}
-	cmd := exec.Command(bin)
-	cmd.Dir = t.TempDir() // the program makes files
-	want, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
+	want := hostWant(t, gcc, "fsinfo", func() string {
+		bin := filepath.Join(t.TempDir(), "fsinfo")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program makes files
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(want)
+	})
 	ccbin := filepath.Join(t.TempDir(), "fsinfo")
 	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
 	build.Dir = dir
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	cmd = exec.Command(ccbin)
+	cmd := exec.Command(ccbin)
 	cmd.Dir = t.TempDir()
 	got, err := cmd.Output()
 	if err != nil {
@@ -491,23 +503,26 @@ func TestPxFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "pxfiles")
-	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
-		t.Fatalf("gcc: %v\n%s", err, out)
-	}
-	cmd := exec.Command(bin)
-	cmd.Dir = t.TempDir()
-	want, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("%v\n%s", err, want)
-	}
+	want := hostWant(t, gcc, "pxfiles", func() string {
+		bin := filepath.Join(t.TempDir(), "pxfiles")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir()
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
 	ccbin := filepath.Join(t.TempDir(), "pxfiles")
 	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
 	build.Dir = dir
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	cmd = exec.Command(ccbin)
+	cmd := exec.Command(ccbin)
 	cmd.Dir = t.TempDir()
 	got, err := cmd.Output()
 	if err != nil {
@@ -570,16 +585,19 @@ func TestEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := module(t, src, true)
-	bin := filepath.Join(t.TempDir(), "events")
-	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
-		t.Fatalf("gcc: %v\n%s", err, out)
-	}
-	cmd := exec.Command(bin)
-	cmd.Dir = t.TempDir() // the program writes a file
-	want, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("%v\n%s", err, want)
-	}
+	want := hostWant(t, gcc, "events", func() string {
+		bin := filepath.Join(t.TempDir(), "events")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program writes a file
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
 	if got := goRun(t, dir); got != string(want) {
 		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
 	}
@@ -812,4 +830,33 @@ func TestBuildTag(t *testing.T) {
 			}
 		})
 	}
+}
+
+// hostWant returns the output that a test program of testdata/name.c
+// should have: that of run, which builds it with gcc and runs it, where
+// the host's C library is musl, and otherwise musl's recorded in
+// testdata/name.musl. The programs follow musl where POSIX leaves the
+// behavior to the implementation, and use what POSIX 2024 added, which
+// glibc lacks in part. On musl, the recorded output must be run's: set
+// CC_UPDATE_MUSL=1 to write it.
+func hostWant(t *testing.T, gcc, name string, run func() string) string {
+	t.Helper()
+	file := filepath.Join("testdata", name+".musl")
+	machine, err := exec.Command(gcc, "-dumpmachine").Output()
+	if err != nil || !strings.Contains(string(machine), "musl") {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := run()
+	if os.Getenv("CC_UPDATE_MUSL") != "" {
+		if err := os.WriteFile(file, []byte(want), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	} else if b, err := os.ReadFile(file); err != nil || string(b) != want {
+		t.Errorf("%s differs from musl's output; run with CC_UPDATE_MUSL=1", file)
+	}
+	return want
 }
