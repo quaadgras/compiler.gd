@@ -422,12 +422,13 @@ func Readv(fd int32, iov Ptr, cnt int32) int64 {
 	if !ok {
 		return -1
 	}
-	f := fdOS(fd)
+	f := fdFile(fd)
 	if f == nil {
+		SetErrno(EBADF)
 		return -1
 	}
 	b := make([]byte, total)
-	n, err := f.Read(b)
+	n, err := f.read(b) // the descriptor's: a socket, what is read ahead
 	if err != nil && n == 0 && total > 0 {
 		if err == io.EOF {
 			return 0
@@ -450,15 +451,16 @@ func Writev(fd int32, iov Ptr, cnt int32) int64 {
 	if !ok {
 		return -1
 	}
-	f := fdOS(fd)
+	f := fdFile(fd)
 	if f == nil {
+		SetErrno(EBADF)
 		return -1
 	}
 	b := make([]byte, 0, total)
 	for i, base := range bases {
 		b = append(b, bytesAt(base, uintptr(lens[i]))...)
 	}
-	n, err := f.Write(b)
+	n, err := f.write(b)
 	if err != nil && n == 0 && total > 0 {
 		setErrnoOf(err)
 		return -1
