@@ -2199,9 +2199,9 @@ func HeapNew[T any]() *T {
 // found blocked forever and freed.
 func GoroutinesCollected() uint64 { return work.goroutineLeak.collected.Load() }
 
-const HeapSplit = heapSplit
+const LocalSpans = localSpans
 
-// NewLocal allocates in the local range of addresses an object of n
+// NewLocal allocates as a local object an object of n
 // words without pointers, or of one pointer.
 func NewLocal(words int, pointers bool) unsafe.Pointer {
 	var typ *_type
@@ -2212,4 +2212,4 @@ func NewLocal(words int, pointers bool) unsafe.Pointer {
 	return mallocgcl(uintptr(words)*goarch.PtrSize, typ, true, true)
 }
 
-func IsLocal(p unsafe.Pointer) bool { return isLocal(p) }
+func IsLocal(p unsafe.Pointer) bool { return isLocalObject(p) }

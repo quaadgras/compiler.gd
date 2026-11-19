@@ -439,6 +439,12 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 			appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, ir.NewSelectorExpr(gd, gd.Pos, ir.ODOT, m, seedSym), typecheck.Conv(gd, rand, types.Types[types.TUINTPTR])))
 			return typecheck.ConvNop(gd, m, t)
 		}
+		if n.LocalAlloc() || ir.LocalTag(gd, n) != nil {
+			// A map that is a local object, or may be: makemap
+			// has the type, which says so (localRType).
+			fn := typecheck.LookupRuntime(gd, "makemap", mapType, t.Key(), t.Elem())
+			return mkcall1(gd, fn, n.Type(), init, localRType(gd, reflectdata.MakeMapRType(gd, gd.Pos, n), n), typecheck.Conv(gd, hint, types.Types[types.TINT]), typecheck.NodNil(gd))
+		}
 		// Call runtime.makemap_small to allocate a
 		// map on the heap and initialize the map's seed field.
 		fn := typecheck.LookupRuntime(gd, "makemap_small", t.Key(), t.Elem())
@@ -468,8 +474,12 @@ func walkMakeMap(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 		argtype = types.Types[types.TINT]
 	}
 
+	rtype := reflectdata.MakeMapRType(gd, gd.Pos, n)
+	if n.Esc() != ir.EscNone {
+		rtype = localRType(gd, rtype, n)
+	}
 	fn := typecheck.LookupRuntime(gd, fnname, mapType, t.Key(), t.Elem())
-	return mkcall1(gd, fn, n.Type(), init, reflectdata.MakeMapRType(gd, gd.Pos, n), typecheck.Conv(gd, hint, argtype), m)
+	return mkcall1(gd, fn, n.Type(), init, rtype, typecheck.Conv(gd, hint, argtype), m)
 }
 
 // walkMakeSlice walks an OMAKESLICE node.
@@ -673,10 +683,19 @@ func localRType(gd *base.Invocation, rtype ir.Node, n *ir.MakeExpr) ir.Node {
 		up.SetCheckPtr(true)
 		return typecheck.ConvNop(gd, up, t)
 	}
-	add := ir.NewBinaryExpr(gd, rtype.Pos(), ir.OUNSAFEADD, typecheck.ConvNop(gd, rtype, types.Types[types.TUNSAFEPTR]), tag)
-	add.SetType(types.Types[types.TUNSAFEPTR])
+	// (Integers made of a pointer and a pointer of an integer, that
+	// checkptr is not to look at: a type descriptor is not in the
+	// heap.)
+	u := ir.NewConvExpr(gd, rtype.Pos(), ir.OCONVNOP, types.Types[types.TUINTPTR], typecheck.ConvNop(gd, rtype, types.Types[types.TUNSAFEPTR]))
+	u.SetTypecheck(1)
+	u.SetCheckPtr(true)
+	add := ir.NewBinaryExpr(gd, rtype.Pos(), ir.OADD, u, tag)
+	add.SetType(types.Types[types.TUINTPTR])
 	add.SetTypecheck(1)
-	return typecheck.ConvNop(gd, add, rtype.Type())
+	up := ir.NewConvExpr(gd, rtype.Pos(), ir.OCONVNOP, types.Types[types.TUNSAFEPTR], add)
+	up.SetTypecheck(1)
+	up.SetCheckPtr(true)
+	return typecheck.ConvNop(gd, up, rtype.Type())
 }
 
 // walkNew walks an ONEW node.

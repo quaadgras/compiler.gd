@@ -66,9 +66,9 @@ func (b *batch) phaseGTags(fns []*ir.Func) map[*location]int {
 	// leads to them.
 	heapRoots := []*location{&b.heapLoc, &b.ownHeapLoc}
 	for _, l := range b.allLocs {
-		if l.escapedInGraph || l.isDynRoot {
+		if l.escapedInGraph || l.isDynRoot || l.recv != nil {
 			// (A store through a pointer is a store in the heap
-			// here, whatever range of addresses it is in: see
+			// here, whether its object is local or not: see
 			// dynRootOf.)
 			heapRoots = append(heapRoots, l)
 		}

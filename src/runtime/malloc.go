@@ -296,22 +296,25 @@ const (
 	// the L2 arena map.
 	arenaBits = arenaL1Bits + arenaL2Bits
 
-	// heapSplit says that the heap has two ranges of addresses: the
-	// memory that only the goroutine that allocated it reaches is in
-	// the localHeapSize bytes from localHeapBase, which is the first
-	// hint of the heap; the rest is above (shared.go). Whether an
-	// address is local is then one compare. What does not fit in the
-	// local range is allocated with the rest.
-	heapSplit = (goarch.IsAmd64|goarch.IsArm64 == 1) &&
+	// localSpans says that the objects that only the goroutine that
+	// allocated them reaches are in spans of their own (shared.go): the
+	// second classes of spans. What a store goes through is then local
+	// or not by its page (otherPages).
+	localSpans = (goarch.IsAmd64|goarch.IsArm64 == 1) &&
 		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows == 1) &&
 		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled
 
-	localHeapSize = 1 << 36 * (goarch.IsAmd64 | goarch.IsArm64)
+	// otherPagesLen is the size of the table that says which pages
+	// hold local objects (shared.go): for 64 GiB of addresses, after
+	// which two pages have the same place in it. Nothing where there
+	// are no spans of local objects. The compiler has the number too
+	// (escape's otherPagesLen).
+	otherPagesOn  = (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows)
+	otherPagesLen = 1 << 23 * otherPagesOn
 
-	// The local objects are in the first half of the local range, and
-	// the stacks in the second: a store through a pointer to a stack
-	// does not say what becomes of what is stored (isLocalObject).
-	localObjectsSize = localHeapSize / 2
+	// otherPagesMod is otherPagesLen, a power of two, or one where the
+	// table has no size and is not read.
+	otherPagesMod = otherPagesLen + 1 - otherPagesOn
 
 	// arenaBaseOffset is the pointer value that corresponds to
 	// index 0 in the heap arena map.
@@ -735,20 +738,9 @@ func mallocinit() {
 		userArenaHint.addr = p
 		userArenaHint.next, mheap_.userArena.arenaHints = mheap_.userArena.arenaHints, userArenaHint
 	}
-	if heapSplit && mheap_.arenaHints != nil {
-		// The local range is at the first hint, and the rest of
-		// the heap begins after it.
-		first := mheap_.arenaHints
-		localHeapBase = first.addr
-		first.addr += localHeapSize
-		hint := (*arenaHint)(mheap_.arenaHintAlloc.alloc())
-		hint.addr = localHeapBase
-		mheap_.localHints[1] = hint
-		hint = (*arenaHint)(mheap_.arenaHintAlloc.alloc())
-		hint.addr = localHeapBase + localObjectsSize
-		mheap_.localHints[2] = hint
-		mheap_.pages.mid = localHeapBase + localObjectsSize
-		mheap_.pages.split = localHeapBase + localHeapSize
+	if localSpans {
+		// Nil is not a local object (shared.go).
+		otherPagesAdd(0, 1, 1)
 	}
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.
@@ -774,7 +766,6 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 	assertLockHeld(&h.lock)
 
 	n = alignUp(n, heapArenaBytes)
-	local := hintList == &h.localHints[1] || hintList == &h.localHints[2]
 
 	if hintList == &h.arenaHints {
 		// First, try the arena pre-reservation.
@@ -796,14 +787,7 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		if hint.down {
 			p -= n
 		}
-		if hintList == &h.localHints[1] && p+n > h.pages.mid || hintList == &h.localHints[2] && p+n > h.pages.split {
-			// The region of the local range is full.
-			v = nil
-		} else if !local && p < h.pages.split {
-			// Below the local range: the page allocator looks
-			// there for local memory only.
-			v = nil
-		} else if p+n < p {
+		if p+n < p {
 			// We can't use this, so don't ask.
 			v = nil
 		} else if arenaIndex(p+n-1) >= 1<<arenaBits {
@@ -834,9 +818,6 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		h.arenaHintAlloc.free(unsafe.Pointer(hint))
 	}
 
-	if size == 0 && local {
-		return nil, 0
-	}
 	if size == 0 {
 		if raceenabled {
 			// The race detector assumes the heap lives in
@@ -850,28 +831,6 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		// (sufficiently aligned) address the kernel will give
 		// us.
 		v, size = sysReserveAligned(nil, n, heapArenaBytes, "heap")
-		if v != nil && uintptr(v) < h.pages.split {
-			// Not below the end of the local range: the page
-			// allocator looks there for local memory only. Where
-			// the kernel gives low addresses by itself (windows),
-			// ask for those after the range, one by one.
-			sysUnreserve(v, size)
-			v, size = nil, 0
-			for i := uintptr(1); ; i++ {
-				p := alignUp(h.pages.split, heapArenaBytes) + i<<36
-				if p+n < p || arenaIndex(p+n-1) >= 1<<arenaBits {
-					break
-				}
-				got := sysReserve(unsafe.Pointer(p), n, "heap")
-				if uintptr(got) == p {
-					v, size = got, n
-					break
-				}
-				if got != nil {
-					sysUnreserve(got, n)
-				}
-			}
-		}
 		if v == nil {
 			return nil, 0
 		}
@@ -1134,9 +1093,9 @@ func mallocgc(size uintptr, typ *_type, needzero bool) unsafe.Pointer {
 	return mallocgcl(size, typ, needzero, local)
 }
 
-// mallocgcl is mallocgc that allocates, if local is set, in the range
-// of addresses of the memory that only the goroutine that allocates
-// reaches (shared.go). The caller knows that no other goroutine will
+// mallocgcl is mallocgc that allocates, if local is set, in a span of
+// the objects that only the goroutine that allocates reaches
+// (shared.go). The caller knows that no other goroutine will
 // reach the object, or anything that it will point to, as long as it
 // lives.
 func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Pointer {
@@ -2292,6 +2251,34 @@ func newarray(typ *_type, n int) unsafe.Pointer {
 //go:linkname reflect_unsafe_NewArray reflect.unsafe_NewArray
 func reflect_unsafe_NewArray(typ *_type, n int) unsafe.Pointer {
 	return newarray(typ, n)
+}
+
+//go:linkname maps_newobjectIn internal/runtime/maps.newobjectIn
+func maps_newobjectIn(typ *_type, local bool) unsafe.Pointer {
+	if local {
+		typ = localType(typ)
+	}
+	return maps_newobject(typ)
+}
+
+//go:linkname maps_newarrayIn internal/runtime/maps.newarrayIn
+func maps_newarrayIn(typ *_type, n int, local bool) unsafe.Pointer {
+	if !local {
+		return maps_newarray(typ, n)
+	}
+	mem, overflow := math.MulUintptr(typ.Size_, uintptr(n))
+	if overflow || mem > maxAlloc || n < 0 {
+		panic(plainError("runtime: allocation size out of range"))
+	}
+	p := mallocgcl(mem, typ, true, true)
+	maps_shareAlloc(p)
+	return p
+}
+
+//go:linkname maps_isLocal internal/runtime/maps.isLocal
+//go:nosplit
+func maps_isLocal(p unsafe.Pointer) bool {
+	return isLocalObject(p)
 }
 
 //go:linkname maps_newarray internal/runtime/maps.newarray

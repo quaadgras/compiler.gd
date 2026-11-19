@@ -381,3 +381,11 @@ var zerobase uintptr // the address of every zero-sized object
 //
 //go:linkname compilerGoid
 func compilerGoid() int64 { return int64(curg.id) }
+
+// reflect_checkptr is the check of the conversion (*t)(p) for
+// reflect.NewAt (runtime/checkptr.go). Pointers are not converted from
+// integers here, and the collector is the host's: there is nothing to
+// check.
+//
+//go:linkname reflect_checkptr reflect.checkptr
+func reflect_checkptr(p unsafe.Pointer, t *_type) {}

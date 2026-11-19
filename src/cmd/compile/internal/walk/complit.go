@@ -380,6 +380,8 @@ func maplit(gd *base.Invocation, n *ir.CompLitExpr, m ir.Node, init *ir.Nodes) {
 	a := typecheck.Expr(gd, ir.NewCallExpr(gd, gd.Pos, ir.OMAKE, nil, args)).(*ir.MakeExpr)
 	a.RType = n.RType
 	a.SetEsc(n.Esc())
+	a.SetLocalAlloc(n.LocalAlloc())
+	ir.SetLocalTag(gd, a, ir.LocalTag(gd, n))
 	appendWalkStmt(gd, init, ir.NewAssignStmt(gd, gd.Pos, m, a))
 
 	entries := n.List

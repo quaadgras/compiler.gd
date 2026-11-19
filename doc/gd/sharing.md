@@ -12,8 +12,8 @@ that is.
 > strings and interfaces on every target but wasm (step 2); and what the
 > compiler proves unshared from escape analysis, within a function (the
 > first part of step 3). Not yet: the per-parameter "shares" bit in the
-> callee masks, and local and shared memory in separate address ranges
-> (the end of this document).
+> callee masks, and local and shared objects in spans of their own (the
+> end of this document).
 
 ## Shared objects
 
@@ -255,16 +255,25 @@ string or an interface in one takes a lock (a buffer's `buf = append(buf,
   instructions, so nothing is marked (`sharingEnabled`).
 - User arenas are treated as shared and not walked.
 
-## Local and shared memory in separate address ranges (step 3)
+## Local objects in spans of their own (step 3)
 
 Decided with the user on 2026-11-19: whether an object is shared is
 decided **when it is allocated**, by OR-ing every vector through which
 its address, or anything reached from it, could get to another goroutine.
 A vector that cannot be evaluated at the allocation counts as shared.
-Nothing becomes shared later, so the address of a word says whether
+Nothing becomes shared later, so the page of a word says whether
 another goroutine may read or write it. The user also wants the collector
 to use it: when a goroutine exits or is collected, the local memory it
 allocated is free.
+
+Local memory was first a range of addresses of its own (64 GiB at the
+first arena hint, with the stacks in its second half), so that the test
+was one compare. The user dropped that on 2026-11-19: the decision is in
+the bits that callers and callees pass, the address was only read for
+what is stored through a pointer, and the range cost a second region in
+the page allocator and rules for where the rest of the heap may be that
+windows and macOS did not meet. Local objects are now in spans of their
+own, anywhere in the heap.
 
 ### The invariant
 
@@ -282,18 +291,23 @@ because the callee is unknown.
 
 ### Done
 
-- **Allocator** (`runtime`: `heapSplit`, `malloc.go`, `mheap.go`,
-  `mpagealloc.go`). amd64 and arm64 on linux, darwin, freebsd, windows:
-  local objects and the stacks are in the 64 GiB at the first arena hint
-  (`localHeapBase`, a variable: the base of the heap is random); the
-  rest of the heap begins after it. Each size class has a second span
-  class (`spanClass.local`), the page allocator has a second search
-  address and a limit (`enterLocal`, `searchFor`). If the range is full
-  or the kernel does not give it, local objects are allocated with the
-  rest, where they count as shared (safe). `isLocal(p)` is
-  `uintptr(p)-localHeapBase < localHeapSize`. The size-specialized
-  mallocs, the tiny allocator and the page cache are for shared objects
-  only for now (a local allocation takes the general path).
+- **Allocator** (`runtime`: `localSpans`, `spanClass.local`,
+  `otherPages`). amd64 and arm64 on linux, darwin, freebsd, windows.
+  Each size class has a second span class, for local objects, so a page
+  of the heap has local objects or other ones, never both. A table
+  (`otherPages`, 2^23 numbers, indexed by the page's address modulo its
+  size) counts, for each place, the pages there that hold something else
+  than local objects: the spans of the other classes, the stacks, the
+  globals, and the first page (nil). A pointer whose page has zero points
+  to a local object: one load in compiled code. Two pages 64 GiB apart
+  have the same place, so in a heap that is spread wider some local
+  objects are not known to be (and what is stored in them is then
+  shared, which is safe). The table is 32 MB of zeroes that are only
+  touched for the pages of the heap, four bytes for 8 KiB; it has no
+  size where there are no spans of local objects (wasm). The limit
+  would go with a bit per page in the arenas' own tables, at the price
+  of two or three dependent loads for one. The size-specialized mallocs and the tiny
+  allocator are for the other objects only for now.
 - **Entry points**. A type descriptor passed to `newobject`, `mallocgc`,
   `makeslice*`, `growslice*` may be tagged (bit 0, `allocType`): the object
   is local. Untagged, as everything not compiled for it is (reflect,
@@ -316,19 +330,19 @@ because the callee is unknown.
   store through a pure path from a local variable (`p.f = x`, `*p = x`,
   `p[i] = x`, the elements of `append(p.f, x)`) is a store in a container
   known at run time. An allocation that only flows to such containers
-  gets a tag computed where it is allocated: 1 if all of them are in the
-  local range. Allowed containers: the one of the allocation's own
+  gets a tag computed where it is allocated: 1 if all of them are local
+  objects. Allowed containers: the one of the allocation's own
   statement (a plain assignment; without a call if the path loads), and a
   parameter that is never assigned. `ir.LocalTag` holds the expression
-  (`(((uintptr(P)-localHeapBase)>>36)-1)>>63`), which the code generator
+  (`(otherPages[uintptr(P)>>13 & (1<<23-1)] - 1) >> 63`, `escape`'s
+  `localTest`), which the code generator
   adds to the type descriptor. `-d=nolocaldyn` turns it off. For Phase G
   these containers are the heap (`isDynRoot`).
 
-- **Stacks apart.** The local range has two halves: objects in the
-  first, stacks in the second (page allocator regions 0, 1, 2). A tag
-  tests the first half (`isLocalObject`, shift 35): a container on a
-  stack is not known to be local from its address, since the function
-  that has it may return or share what a callee stored in it.
+- **Stacks are not local objects.** A container on a stack is not
+  known to be local from where it is, since the function that has it may
+  return or share what a callee stored in it: the pages of the stacks
+  count in the table.
 - **The bits of a call** (`runtime/shared.go`, `escape/callbits.go`,
   `ssagen`: `takeLocalBits`, `setLocalBits`). What the address cannot
   say, the caller says, in `g.localBits`, right before a direct call:
@@ -408,11 +422,60 @@ because the callee is unknown.
     function reads a mask that says "shared" (the call panics after the
     arguments are evaluated, as before).
   - Not yet: a callee that is a parameter of the allocating function,
-    for objects allocated before the call's statement; receivers of
-    interface calls (they flow to the heap, so a receiver is never a
-    local object today and "through the receiver" never applies);
+    for objects allocated before the call's statement;
     `r.list = append(r.list, p)` in the callee (deeper than the
     receiver: shared).
+- **Receivers of interface calls** (`escape/recv.go`). The method is
+  only known when the program runs, but the object is allocated with a
+  type, and the type says what the methods are: this is the rule above
+  with the callee known from the type. The receiver of `i.M()` flows to
+  a *receiver root* (the heap for escaping, with the interface type and
+  `M`), and a conversion of a pointer to an interface type has a
+  location that the pointer flows through, with the pointer's type.
+  - A conversion that reaches a receiver root by a path with no other
+    conversion on it (a *raw* path: the solver keeps, for the walks from
+    these roots, the least dereferences of such paths apart) is checked:
+    the method `M` of its type must not let another goroutine reach its
+    receiver or what the receiver leads to, nor return it, nor store it
+    through another parameter (the method's `ParamShare`; a method that
+    is not analysed yet, or is not Go, fails). If one fails, what was
+    converted is shared, as before. If all pass, the root says nothing
+    of what was converted: `use(&Sq{})` with `func use(s Shape)` leaves
+    the object local, and what `(*Sq).Grow` stores through its receiver
+    is local by the receiver's address.
+  - A parameter of an interface type that is itself the receiver, of
+    methods of its own type, says so (`ParamShare.Recv`, exported), and
+    a caller's argument flows to a receiver root for any method of that
+    type. The parameter is shared in the escape masks: a caller that
+    does not know the function cannot check.
+  - Everything else that reaches a receiver root on a raw path holds or
+    leads to an interface of a type that is not known here: an
+    allocation the receiver is loaded from, the result of a call (the
+    bit for results is clear), a parameter that is not the receiver
+    (shared at that depth). A value that an interface was asserted to
+    hold (`i.(*T)`, a case of a type switch) has a location too: what is
+    reached from it is reached from the interface without its methods,
+    so if a raw path gets there, the interface's object is shared.
+  - `-d=nolocalrecv` turns it off. Not yet: a receiver that the method
+    returns (`func (b *B) Self() I`); methods that are analysed after
+    the function that converts (interface calls are not edges of the
+    order in which functions are analysed); values that are not
+    pointers (the box that `convT` makes is not tagged).
+- **Maps** (`escape`'s `mapsOn`, `runtime.makemap`,
+  `internal/runtime/maps`). A map is a container as an object is: what
+  `m[k] = v` stores (the key too) is where the map is, the heap for
+  escaping, and what `m[k]` or a range loads is reached from the map. So
+  a map is a tracked variable or a container known at run time like a
+  pointer, `make(map...)` and a map literal are allocations that can be
+  local (the type passed to `makemap` is tagged; a small map that is
+  local is made by `makemap`, not `makemap_small`, which has no type),
+  and a value stored in a map that is a local object is local. The
+  runtime allocates what a map needs as its header is: the directory,
+  the tables, the groups and the keys and elements that are kept apart
+  (`Map.local`, `table.local`). A clone is not local. A parameter that
+  a map element is returned from leaks at one dereference now
+  (`leaking param: m to result ~r0 level=1`): escaping is as before,
+  since what a map holds is in the heap. `-d=nolocalmap` turns it off.
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -434,19 +497,16 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
 
 ### Next
 
-1. **Receivers of interface calls** as containers: the object behind
-   an interface that is only called, never stored, could stay local,
-   which is what makes "stored through the receiver" useful. Then
-   callees that are parameters, consulted where the object is
-   allocated.
+1. Callees that are parameters, consulted where the object is
+   allocated. Receivers: results that are the receiver, and methods
+   analysed before the functions that convert to their interfaces.
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the
    first time. A nil array could take the tag of `P`.
 4. A variable that is assigned once and in scope at the allocation as a
    whole-function container (needs scopes in the graph).
-5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
-   closures.
+5. Strings, `convT*`, closures.
 6. `unique.Make` of a string gets no bits (an SSA rule needs the call to
    follow the conversion of its argument).
 
@@ -464,18 +524,18 @@ any other root makes it shared.
 
 1. **The container of a store** in the statement that allocates:
    `p.f = &T{}`, `*p = new(T)`, `s[i] = make(...)`, `m[k] = v`,
-   `p.f = append(p.f, x)`. The root is `isLocal(P)` for the pure path `P`
+   `p.f = append(p.f, x)`. The root is "`P` points to a local object" for the pure path `P`
    (names, fields, derefs, no calls) that the store goes through. It can
    be evaluated at an allocation that is in the right-hand side of that
    statement, since nothing between the allocation and the store changes
    `P` (calls are hoisted before by order). For any other value that
    flows there the root is shared.
 2. **Elements appended**: the container is the array. Local if the old
-   array is (`isLocal(oldptr)`: then everything the slice flows to is
+   array is (the old pointer's page: then everything the slice flows to is
    local, so the new array is too); for a nil slice, as the append itself
    is decided.
 3. **A parameter that is never assigned** is a root for every allocation
-   of the function, not only in the statement: `isLocal(q)`.
+   of the function, not only in the statement.
 4. **Results**. What is only returned is the caller's to decide. The
    caller says so with the `outBuf` that Phase G already passes for a
    pointer result (a sentinel: "in the heap, but local"); other results
@@ -493,11 +553,20 @@ only sees a stack address. This is the cost of the design for
 
 ### Then
 
-- Guards become `isLocal(addr)` inline: local, no lock; else the runtime
-  (which still says "not shared" for other threads' stacks and C memory).
+- Guards become the test of the page inline: a local object, no lock;
+  else the runtime (which still says "not shared" for stacks and C
+  memory).
   `sharePages`, the store barrier, the publish walk and the per-object
   bit stay only under `-d=sharecheck` as the witness.
-- Fast paths for local allocation (size-specialized, tiny, page cache).
+  Not before most objects are local: with the page test alone, every
+  store of a slice, string or interface in an object that is not local
+  takes a lock, and today the publish machinery spares the ones that
+  were never handed over. In the tests of `go/types` and `net/http`
+  1 to 2% of the objects were local on 2026-11-19 (the constructors'
+  results end in maps, interfaces and closures), so the order is: more
+  objects local first (maps are in; boxes of `convT`, closures, callees
+  that are parameters), then the guards.
+- Fast paths for local allocation (size-specialized, tiny).
 - Exposed addresses: `exposeptr` of a local object must be refused or the
   conversion made a static sink everywhere (now only in escape analysis).
 - Freeing a goroutine's local memory when it exits or is collected:

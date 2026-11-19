@@ -110,6 +110,10 @@ func (e *escape) stmt(n ir.Node) {
 		} else {
 			e.flow(ks[1].deref(e.gd, n, "range-deref"), tmp)
 		}
+		if n.X.Type().IsMap() && e.mapsOn() {
+			// The keys are loaded from the map as the values are.
+			e.flow(ks[0].deref(e.gd, n, "range-deref"), tmp)
+		}
 		e.reassigned(ks, n)
 
 		e.block(n.Body)
@@ -125,7 +129,7 @@ func (e *escape) stmt(n ir.Node) {
 					cv := cas.Var
 					k := e.dcl(cv) // type switch variables have no ODCL.
 					if cv.Type().HasPointers() {
-						ks = append(ks, k.dotType(e.gd, cv.Type(), cas, "switch case"))
+						ks = append(ks, e.assertHole(k, cv.Type()).dotType(e.gd, cv.Type(), cas, "switch case"))
 					}
 				}
 			}

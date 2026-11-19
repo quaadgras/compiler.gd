@@ -119,7 +119,9 @@ type batch struct {
 	dynRoots    map[dynKey]*location
 	simpleStmts map[int32]bool
 	stmtCalls   map[int32]bool
-	calls       []*callSite // callbits.go
+	calls       []*callSite           // callbits.go
+	recvRoots   map[recvKey]*location // recv.go
+	convOKs     map[convKey]bool
 	retTags     map[*ir.Func]ir.Node
 	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
 	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made

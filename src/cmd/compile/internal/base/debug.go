@@ -66,9 +66,11 @@ type DebugFlags struct {
 	NoRefName             int    `help:"do not include referenced symbol names in object file" concurrent:"ok"`
 	NoShare               int    `help:"do not publish the pointers stored in shared memory (unsafe; for measurements)" concurrent:"ok"`
 	LocalDbg              int    `help:"decide at run time only for the allocations of these kinds (1 new, 2 append, 4 make, 8 variables; for debugging)" concurrent:"ok"`
+	NoLocalMap            int    `help:"do not treat a map as a container that may be a local object (for measurements)" concurrent:"ok"`
+	NoLocalRecv           int    `help:"do not keep local what is only the receiver of interface calls (for measurements)" concurrent:"ok"`
 	NoLocalBits           int    `help:"do not pass to a function what its caller knows of where its results and what it stores go (for measurements)" concurrent:"ok"`
 	NoLocalDyn            int    `help:"do not decide at run time whether an object is local (for measurements)" concurrent:"ok"`
-	NoLocalAlloc          int    `help:"do not allocate in the local range the objects no other goroutine will reach (for measurements)" concurrent:"ok"`
+	NoLocalAlloc          int    `help:"do not allocate as local the objects no other goroutine will reach (for measurements)" concurrent:"ok"`
 	NoLocal               int    `help:"do not use what escape analysis knows of the memory no other goroutine can reach (for measurements)" concurrent:"ok"`
 	ShareCheck            int    `help:"check at run time that the memory found unshared at compile time is" concurrent:"ok"`
 	NoTear                int    `help:"do not load and store slices, strings and interfaces whole (unsafe; for measurements)" concurrent:"ok"`

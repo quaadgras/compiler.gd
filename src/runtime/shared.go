@@ -31,6 +31,7 @@ import (
 	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
+	"internal/runtime/gc"
 	"internal/runtime/sys"
 	"unsafe"
 )
@@ -111,6 +112,7 @@ func shareModule(datap *moduledata) {
 	for _, r := range [...][2]uintptr{{datap.data, datap.edata}, {datap.bss, datap.ebss}, {datap.noptrdata, datap.enoptrdata}, {datap.noptrbss, datap.enoptrbss}} {
 		if r[1] > r[0] {
 			sharePagesSet(r[0], r[1]-r[0])
+			otherPagesAdd(r[0], (r[1]-1)>>gc.PageShift-r[0]>>gc.PageShift+1, 1)
 		}
 	}
 }
@@ -674,30 +676,44 @@ func sharecheck(p unsafe.Pointer) {
 // it is allocated, from everything that is known then about where its
 // address goes; what is not known counts as shared. An object that only
 // the goroutine that allocates it reaches is local, and it is allocated
-// in the local range of addresses (heapSplit), with the stacks. So the
-// address of a word says whether another goroutine may read or write it.
+// in spans of its own (localSpans). So the page of a word says whether
+// another goroutine may read or write it.
 
-// localHeapBase is the first address of the local range. Until there is
-// one it is an address that nothing has, so that nothing is local. The
-// compiler reads it for the tags it computes (escape's localTag).
-var localHeapBase uintptr = ^uintptr(0) >> 1
-
-// isLocal reports whether p is in the local range.
+// otherPages has, for each page of memory, found from the page's address
+// modulo the table's size, the number of pages like it that hold
+// something else than local objects: the pages of every span of the heap
+// that is not of a class of local objects (the stacks among them), and of
+// the globals. A pointer into a page whose number is zero points to a
+// local object, since every object that is not local is in a page that is
+// counted while it lives; the reverse does not hold, where two pages have
+// the same place in the table. The compiler reads the table for the tags
+// it computes (escape's localTest): what is stored in a local object is
+// local, and what is stored in a variable of a caller's stack is what
+// that caller says.
 //
-//go:nosplit
-func isLocal(p unsafe.Pointer) bool {
-	return uintptr(p)-localHeapBase < localHeapSize
+// The numbers change when a span is made and when it is freed, before
+// anything is allocated in it and after everything in it is dead.
+//
+// The first page counts from the start (mallocinit): nil is not a local
+// object, and what is appended to a nil slice is not known to stay.
+var otherPages [otherPagesLen]uint32
+
+// otherPagesAdd adds delta to the numbers of the npages pages from base.
+func otherPagesAdd(base, npages uintptr, delta int32) {
+	if !localSpans {
+		return
+	}
+	for i := uintptr(0); i < npages; i++ {
+		atomic.Xadd(&otherPages[(base>>gc.PageShift+i)%otherPagesMod], delta)
+	}
 }
 
-// isLocalObject reports whether p is in the part of the local range
-// where the objects are: p is not a pointer to a stack. The compiler
-// computes it for the tag of what is stored through p (escape's
-// localTag): what is stored in a local object is local, but what is
-// stored in a variable of a caller's stack is what that caller says.
+// isLocalObject reports whether p is known to point to a local object,
+// as compiled code finds it.
 //
 //go:nosplit
 func isLocalObject(p unsafe.Pointer) bool {
-	return uintptr(p)-localHeapBase < localObjectsSize
+	return localSpans && atomic.Load(&otherPages[uintptr(p)>>gc.PageShift%otherPagesMod]) == 0
 }
 
 // localType returns typ tagged for the allocation functions that take
