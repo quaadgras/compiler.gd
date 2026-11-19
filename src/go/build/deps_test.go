@@ -245,7 +245,8 @@ var depsRules = `
 	# C's library by header (gd fork): internal/c23/<header>, the
 	# packages of the functions of each header cmd/cc provides.
 	internal/c23
-	< internal/c23/complex,
+	< internal/c23/aio,
+	  internal/c23/complex,
 	  internal/c23/ctype,
 	  internal/c23/dirent,
 	  internal/c23/err,
@@ -263,6 +264,7 @@ var depsRules = `
 	  internal/c23/malloc,
 	  internal/c23/math,
 	  internal/c23/monetary,
+	  internal/c23/mqueue,
 	  internal/c23/nl_types,
 	  internal/c23/poll,
 	  internal/c23/pthread,
@@ -283,10 +285,14 @@ var depsRules = `
 	  internal/c23/sys/eventfd,
 	  internal/c23/sys/file,
 	  internal/c23/sys/ioctl,
+	  internal/c23/sys/ipc,
 	  internal/c23/sys/mman,
+	  internal/c23/sys/msg,
 	  internal/c23/sys/random,
 	  internal/c23/sys/resource,
 	  internal/c23/sys/select,
+	  internal/c23/sys/sem,
+	  internal/c23/sys/shm,
 	  internal/c23/sys/signalfd,
 	  internal/c23/sys/stat,
 	  internal/c23/sys/statvfs,

@@ -517,6 +517,27 @@ once). `pthread_kill` of another thread that does not block the signal
 runs the handler on a goroutine of its own, as the program's other
 signals; `sigaltstack` and `siginterrupt` are kept and change nothing.
 
+Interprocess communication is the process's own. C's memory is Go's
+heap, which no other process can map, and the program's other processes
+are programs it spawns, so POSIX message queues (`mqueue.h`,
+internal/c23/mqueue), XSI message queues, semaphore sets and shared
+memory segments (`sys/msg.h`, `sys/sem.h`, `sys/shm.h`) live within the
+process, shared by its threads, by name or key as on Linux (and with
+Linux's structures, limits and errors); a spawned program does not see
+them. A message queue descriptor is a descriptor of the table, which
+`poll`, `select` and `epoll` see (readable when a message waits, writable
+when the queue is not full); `mq_notify` signals with `SI_MESGQ` and the
+registered value, or calls the function on a new thread. `shmat` returns
+a pointer to one C object of the segment's size, the same for every
+attach, and cannot place a segment at an address; `SHM_RDONLY` attaches
+it writable. `SEM_UNDO`'s adjustments are applied by `exit`, after the
+`atexit` functions, where only the threads still running see them.
+`ftok` is glibc's formula. `aio.h` (internal/c23/aio) runs each operation
+on a goroutine, those of one descriptor in order as glibc does, with
+`pread` and `pwrite` (or `read` and `write` where there is no offset),
+and notifies as the `struct sigevent` says (`SI_ASYNCIO`); `aio_cancel`
+cancels only what has not started. `shm_open` is `sys/mman.h`'s.
+
 C's library is Go: internal/c23, the run-time support of the generated
 Go (memory and capabilities, errno, descriptors, threads' storage, the
 floating-point environment), and a package for each header with

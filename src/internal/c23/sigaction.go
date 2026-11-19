@@ -103,10 +103,14 @@ func SigSelf() *SigThread {
 	return tb.Sig
 }
 
-// sigInherit is the signal state of a new thread: its creator's mask,
-// and nothing pending. The thread ends with sigExit.
-func sigInherit() *SigThread {
+// sigInherit is the signal state of a new thread: its creator's mask
+// (or every signal, if blocked), and nothing pending. The thread ends
+// with sigExit.
+func sigInherit(blocked bool) *SigThread {
 	t := &SigThread{Mask: SigSelf().Mask}
+	if blocked {
+		t.Mask = (1<<(Nsig-1) - 1) &^ SigUnblockable
+	}
 	SigMu.Lock()
 	SigLive[t] = true
 	SigMu.Unlock()
