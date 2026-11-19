@@ -2009,6 +2009,8 @@ uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
 int isatty(int fd);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t pgrp);
 char *getcwd(char *buf, size_t size);
 int chdir(const char *path);
 unsigned int sleep(unsigned int seconds);

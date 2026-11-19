@@ -472,6 +472,16 @@ block until Go has written. Names resolve with Go's resolver;
 data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
 cannot set (kept for `getsockopt`, otherwise ignored).
 
+`regex.h` is a matcher of its own (internal/c23/regex), not Go's
+`regexp`: POSIX's basic and extended syntax with glibc's GNU operators
+and error codes, back-references in both, and the leftmost-longest match
+with each subexpression, from the left, the longest it can be. It works
+on sets of positions, so it takes polynomial time where there are no
+back-references (and backtracks where there are). `termios.h` is the
+terminal's on Linux (with the generic termios: not mips, ppc64) and
+macOS (translated to and from its struct and flags), with Linux's
+struct and constants; elsewhere no descriptor is a terminal (`ENOTTY`).
+
 C's library is Go: internal/c23, the run-time support of the generated
 Go (memory and capabilities, errno, descriptors, threads' storage, the
 floating-point environment), and a package for each header with
