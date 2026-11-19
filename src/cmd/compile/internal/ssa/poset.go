@@ -156,6 +156,14 @@ type poset struct {
 	roots   []uint32          // list of root nodes (forest)
 	noneq   map[uint32]bitset // non-equal relations
 	undo    []posetUndo       // undo chain
+
+	// visited[i] == epoch if dfs has visited node i in its current
+	// walk. (Not a set that each walk allocates and clears: findroot
+	// walks from every root, and a function with many unrelated
+	// values has many, so that what a walk costs must not depend on
+	// the number of nodes.)
+	visited []uint32
+	epoch   uint32
 }
 
 func newPoset() *poset {
@@ -377,7 +385,7 @@ func (po *poset) removeroot(r uint32) {
 // a strict walk visits D,E,F.
 // If the visit ends, false is returned.
 func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
-	closed := newBitset(int(po.lastidx + 1))
+	po.newWalk()
 	open := make([]uint32, 1, 64)
 	open[0] = r
 
@@ -395,8 +403,8 @@ func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
 			// across non-strict paths are still visited at least once, so
 			// a non-strict path can never obscure a strict path to the
 			// same node.
-			if !closed.Test(i) {
-				closed.Set(i)
+			if po.visited[i] != po.epoch {
+				po.visited[i] = po.epoch
 
 				l, r := po.children(i)
 				if l != 0 {
@@ -416,18 +424,18 @@ func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
 			}
 		}
 		open = next
-		closed.Reset()
+		po.newWalk()
 	}
 
 	for len(open) > 0 {
 		i := open[len(open)-1]
 		open = open[:len(open)-1]
 
-		if !closed.Test(i) {
+		if po.visited[i] != po.epoch {
 			if f(i) {
 				return true
 			}
-			closed.Set(i)
+			po.visited[i] = po.epoch
 			l, r := po.children(i)
 			if l != 0 {
 				open = append(open, l.Target())
@@ -438,6 +446,19 @@ func (po *poset) dfs(r uint32, strict bool, f func(i uint32) bool) bool {
 		}
 	}
 	return false
+}
+
+// newWalk makes no node visited. The function that dfs calls for each
+// node must not start another walk.
+func (po *poset) newWalk() {
+	if n := int(po.lastidx) + 1; len(po.visited) < n {
+		po.visited = append(po.visited, make([]uint32, n-len(po.visited))...)
+	}
+	po.epoch++
+	if po.epoch == 0 {
+		clear(po.visited)
+		po.epoch = 1
+	}
 }
 
 // Returns true if there is a path from i1 to i2.
