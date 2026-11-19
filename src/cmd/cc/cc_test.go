@@ -291,6 +291,50 @@ func TestUtil(t *testing.T) {
 	}
 }
 
+// TestFsinfo compares file systems' and the system's information, file
+// tree walks, wordexp and the small headers of glibc and musl
+// (testdata/fsinfo.c) with the host's C library.
+func TestFsinfo(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/fsinfo.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "fsinfo")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program makes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ccbin := filepath.Join(t.TempDir(), "fsinfo")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestProc compares processes, signals, scheduling and semaphores
 // (sys/wait.h, spawn.h, the exec family, sigaction, sched.h,
 // semaphore.h) with the host's C library.

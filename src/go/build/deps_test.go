@@ -251,15 +251,19 @@ var depsRules = `
 	  internal/c23/err,
 	  internal/c23/errno,
 	  internal/c23/fcntl,
+	  internal/c23/fmtmsg,
 	  internal/c23/fnmatch,
 	  internal/c23/getopt,
 	  internal/c23/glob,
 	  internal/c23/grp,
 	  internal/c23/iconv,
 	  internal/c23/langinfo,
+	  internal/c23/libintl,
 	  internal/c23/locale,
 	  internal/c23/malloc,
 	  internal/c23/math,
+	  internal/c23/monetary,
+	  internal/c23/nl_types,
 	  internal/c23/poll,
 	  internal/c23/pthread,
 	  internal/c23/pwd,
@@ -271,6 +275,7 @@ var depsRules = `
 	  internal/c23/stdatomic,
 	  internal/c23/stdbit,
 	  internal/c23/stdio,
+	  internal/c23/stdio_ext,
 	  internal/c23/string,
 	  internal/c23/strings,
 	  internal/c23/sys/file,
@@ -280,17 +285,22 @@ var depsRules = `
 	  internal/c23/sys/resource,
 	  internal/c23/sys/select,
 	  internal/c23/sys/stat,
+	  internal/c23/sys/statvfs,
+	  internal/c23/sys/sysinfo,
 	  internal/c23/sys/time,
+	  internal/c23/sys/times,
 	  internal/c23/sys/uio,
 	  internal/c23/sys/utsname,
 	  internal/c23/sys/wait,
 	  internal/c23/syslog,
 	  internal/c23/time,
 	  internal/c23/uchar,
+	  internal/c23/ulimit,
 	  internal/c23/unistd,
 	  internal/c23/utime,
-	  internal/c23/wctype
-	< internal/c23/libgen, internal/c23/stdlib, internal/c23/threads
+	  internal/c23/wctype,
+	  internal/c23/wordexp
+	< internal/c23/ftw, internal/c23/libgen, internal/c23/stdlib, internal/c23/threads
 	< internal/c23/wchar;
 
 	# Misc packages needing only FMT.
@@ -507,7 +517,8 @@ var depsRules = `
 
 	internal/c23, internal/c23/arpa/inet, internal/c23/netinet/in, net
 	< internal/c23/net/if, internal/c23/sys/socket
-	< internal/c23/netdb;
+	< internal/c23/ifaddrs, internal/c23/netdb
+	< internal/c23/resolv;
 
 	# NET is net plus net-helper packages.
 	FMT, net

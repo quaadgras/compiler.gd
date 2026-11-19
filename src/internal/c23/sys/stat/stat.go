@@ -83,7 +83,12 @@ func sysTime(sys reflect.Value, names ...string) (sec, nsec int64, ok bool) {
 	return 0, 0, false
 }
 
-// fillStat stores fi as Linux's struct stat at buf:
+// StatSize is the size of struct stat: the fields are where they are
+// on LP64 with 4-byte longs too (st_blocks and the timespecs are 8-byte
+// aligned), but for the three longs at the end.
+const StatSize = uint64((120 + 3*c23.LongSize + 7) &^ 7)
+
+// FillStat stores fi as Linux's struct stat at buf:
 //
 //	dev_t st_dev; ino_t st_ino; nlink_t st_nlink;	// 0, 8, 16
 //	mode_t st_mode; uid_t st_uid; gid_t st_gid;	// 24, 28, 32
@@ -94,13 +99,11 @@ func sysTime(sys reflect.Value, names ...string) (sec, nsec int64, ok bool) {
 //
 // What the system's stat structure does not have is made up: one link,
 // 4096-byte blocks, and the modification time for the others.
-// statSize is the size of struct stat: the fields are where they are
-// on LP64 with 4-byte longs too (st_blocks and the timespecs are 8-byte
-// aligned), but for the three longs at the end.
-const statSize = uint64((120 + 3*c23.LongSize + 7) &^ 7)
-
-func fillStat(buf c23.Ptr, fi fs.FileInfo) {
-	c23.Memset(buf, 0, statSize)
+//
+// FillStat is exported for the other headers' functions that pass a
+// struct stat (ftw.h's).
+func FillStat(buf c23.Ptr, fi fs.FileInfo) {
+	c23.Memset(buf, 0, StatSize)
 	sys := reflect.Indirect(reflect.ValueOf(fi.Sys()))
 	if sys.IsValid() && sys.Kind() != reflect.Struct {
 		sys = reflect.Value{}
@@ -145,7 +148,7 @@ func statRet(buf c23.Ptr, fi fs.FileInfo, err error) int32 {
 		c23.SetErrnoOf(err)
 		return -1
 	}
-	fillStat(buf, fi)
+	FillStat(buf, fi)
 	return 0
 }
 
@@ -161,7 +164,7 @@ func Lstat(path, buf c23.Ptr) int32 {
 
 func Fstat(fd int32, buf c23.Ptr) int32 {
 	if of := c23.FdFile(fd); of != nil && of.Sp != nil {
-		c23.Memset(buf, 0, statSize)
+		c23.Memset(buf, 0, StatSize)
 		c23.Store64(c23.Add(buf, 16), 1)
 		c23.Store32(c23.Add(buf, 24), of.Sp.Mode())
 		c23.Store32(c23.Add(buf, 28), uint32(os.Getuid()))
