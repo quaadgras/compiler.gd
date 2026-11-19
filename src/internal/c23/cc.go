@@ -52,25 +52,25 @@ type Func struct {
 // NewFunc returns the C pointer to the function f.
 func NewFunc(f any) Ptr {
 	p := New[Func]()
-	(*Func)(p.obj).f = f
+	(*Func)(p.Obj).f = f
 	return p
 }
 
-var funcInfo = tinfoOf[Func]()
+var funcInfo = TinfoOf[Func]()
 
 // FuncOf returns the Go function of type F that p points to, which a
 // call through a C function pointer calls.
 func FuncOf[F any](p Ptr) F {
-	if p.obj == nil || p.off != 0 || p.info() != funcInfo {
-		fault("call through a pointer that is not to a function", Addr(p))
+	if p.Obj == nil || p.Off != 0 || p.Info() != funcInfo {
+		RaiseFault("call through a pointer that is not to a function", Addr(p))
 	}
-	f, ok := (*Func)(p.obj).f.(F)
+	f, ok := (*Func)(p.Obj).f.(F)
 	if !ok {
-		if g, ok := adapt[F]((*Func)(p.obj).f); ok {
+		if g, ok := adapt[F]((*Func)(p.Obj).f); ok {
 			return g
 		}
 		var z F
-		fault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p.obj).f, z), Addr(p))
+		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p.Obj).f, z), Addr(p))
 	}
 	return f
 }
@@ -118,7 +118,7 @@ func adapt[F any](f any) (F, bool) {
 					continue
 				}
 				if !convertible(args[i].Type(), pt) {
-					fault(fmt.Sprintf("call passing a %s for a %s", args[i].Type(), pt), 0)
+					RaiseFault(fmt.Sprintf("call passing a %s for a %s", args[i].Type(), pt), 0)
 				}
 				vals = append(vals, args[i].Convert(pt))
 			}
@@ -153,21 +153,21 @@ func convertible(a, b reflect.Type) bool {
 // bytes, the null element included.
 func String[T any](s string) Ptr {
 	p := NewArray[T](uintptr(len(s)))
-	copy(unsafe.Slice((*byte)(p.obj), len(s)), s)
+	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
 	return p
 }
 
 // StringOf is String for a literal whose array, A ([N]T), cmd/cc knows:
 // the same object, of a type the compiler makes rather than reflect.
 func StringOf[T, A any](s string) Ptr {
-	p := LocalT(new(Obj[A]), tinfoOf[T]())
-	copy(unsafe.Slice((*byte)(p.obj), len(s)), s)
+	p := LocalT(new(Obj[A]), TinfoOf[T]())
+	copy(unsafe.Slice((*byte)(p.Obj), len(s)), s)
 	return p
 }
 
 // Copy returns a copy of the n bytes at p, in a new object of p's type.
 func Copy(p Ptr, n uint64) Ptr {
-	ti := p.info()
+	ti := p.Info()
 	q := newOf(ti, uintptr(n))
 	Memmove(q, p, uintptr(n))
 	return q
@@ -183,14 +183,14 @@ func newOf(ti *tinfo, n uintptr) Ptr {
 	base := newObj(ti.arrayObj(count))
 	h := (*header)(base)
 	*h = header{ref: ti.ref | refC, ti: ti, size: count * sz}
-	return Ptr{obj: unsafe.Add(base, hdrSize), size: count * sz, ti: cref(ti)}
+	return Ptr{Obj: unsafe.Add(base, hdrSize), Size: count * sz, ti: cref(ti)}
 }
 
 // Args returns main's argv.
 func Args() Ptr {
-	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * wordSize)
+	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * WordSize)
 	for i, a := range os.Args {
-		StorePtr(Add(argv, i*int(wordSize)), CString(a))
+		StorePtr(Add(argv, i*int(WordSize)), CString(a))
 	}
 	return argv
 }
@@ -221,33 +221,33 @@ type VaList struct {
 	i    int
 }
 
-var vaInfo = tinfoOf[VaList]()
+var vaInfo = TinfoOf[VaList]()
 
 // VaStart is va_start: a va_list of a function's variable arguments.
 func VaStart(va []any) Ptr {
 	p := New[VaList]()
-	(*VaList)(p.obj).args = va
+	(*VaList)(p.Obj).args = va
 	return p
 }
 
-func vaOf(ap Ptr) *VaList {
-	if ap.obj == nil || ap.off != 0 || ap.info() != vaInfo {
-		fault("va_arg of a va_list not started", Addr(ap))
+func VaOf(ap Ptr) *VaList {
+	if ap.Obj == nil || ap.Off != 0 || ap.Info() != vaInfo {
+		RaiseFault("va_arg of a va_list not started", Addr(ap))
 	}
-	return (*VaList)(ap.obj)
+	return (*VaList)(ap.Obj)
 }
 
 // VaCopy is va_copy.
 func VaCopy(ap Ptr) Ptr {
-	v := vaOf(ap)
+	v := VaOf(ap)
 	p := New[VaList]()
-	*(*VaList)(p.obj) = *v
+	*(*VaList)(p.Obj) = *v
 	return p
 }
 
-func (v *VaList) next() any {
+func (v *VaList) Next() any {
 	if v.i >= len(v.args) {
-		fault("va_arg past the last argument", 0)
+		RaiseFault("va_arg past the last argument", 0)
 	}
 	a := v.args[v.i]
 	v.i++
@@ -257,7 +257,7 @@ func (v *VaList) next() any {
 // VaArg is va_arg(ap, T) of a scalar T. An argument of another type of
 // the same size and class is converted, as C allows for signedness.
 func VaArg[T any](ap Ptr) T {
-	a := vaOf(ap).next()
+	a := VaOf(ap).Next()
 	if v, ok := a.(T); ok {
 		return v
 	}
@@ -288,17 +288,17 @@ func VaArg[T any](ap Ptr) T {
 			rv.SetUint(av.Uint())
 		}
 	default:
-		fault(fmt.Sprintf("va_arg of a %T as a %T", a, r), 0)
+		RaiseFault(fmt.Sprintf("va_arg of a %T as a %T", a, r), 0)
 	}
 	return r
 }
 
 // VaArgPtr is va_arg(ap, T) of a struct T: the c23.Ptr to its copy.
 func VaArgPtr(ap Ptr) Ptr {
-	a := vaOf(ap).next()
+	a := VaOf(ap).Next()
 	p, ok := a.(Ptr)
 	if !ok {
-		fault(fmt.Sprintf("va_arg of a %T as a struct", a), 0)
+		RaiseFault(fmt.Sprintf("va_arg of a %T as a struct", a), 0)
 	}
 	return p
 }
@@ -309,8 +309,8 @@ func VaArgPtr(ap Ptr) Ptr {
 func ReallocOf[T any](p Ptr, n uintptr) Ptr {
 	checkRealloc(p)
 	q := NewArray[T](n)
-	if p.obj != nil {
-		Memmove(q, p, min(n, p.size))
+	if p.Obj != nil {
+		Memmove(q, p, min(n, p.Size))
 	}
 	return q
 }

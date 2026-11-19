@@ -198,7 +198,7 @@ var (
 	strerrorMsg = map[int32]Ptr{}
 )
 
-func strerror(e int32) string {
+func ErrnoString(e int32) string {
 	if s, ok := errnoText[e]; ok {
 		return s
 	}
@@ -211,24 +211,24 @@ func Strerror(e int32) Ptr {
 	defer strerrorMu.Unlock()
 	p, ok := strerrorMsg[e]
 	if !ok {
-		p = CString(strerror(e))
+		p = CString(ErrnoString(e))
 		strerrorMsg[e] = p
 	}
 	return p
 }
 
 // errnoErr is an error of errno's value e, which setErrnoOf sets.
-type errnoErr int32
+type ErrnoErr int32
 
-func (e errnoErr) Error() string { return strerror(int32(e)) }
+func (e ErrnoErr) Error() string { return ErrnoString(int32(e)) }
 
 // setErrnoOf sets errno to err's: its system error number (a
 // syscall.Errno) if it has one.
-func setErrnoOf(err error) {
+func SetErrnoOf(err error) {
 	// One walk of the chain, without errors.As and errors.Is, which
 	// would link internal/reflectlite into every program that writes.
 	for e := err; e != nil; e = errors.Unwrap(e) {
-		if en, ok := e.(errnoErr); ok {
+		if en, ok := e.(ErrnoErr); ok {
 			SetErrno(int32(en))
 			return
 		}
@@ -239,13 +239,13 @@ func setErrnoOf(err error) {
 		}
 	}
 	switch {
-	case isErr(err, fs.ErrNotExist):
+	case IsErr(err, fs.ErrNotExist):
 		SetErrno(ENOENT)
-	case isErr(err, fs.ErrExist):
+	case IsErr(err, fs.ErrExist):
 		SetErrno(EEXIST)
-	case isErr(err, fs.ErrPermission):
+	case IsErr(err, fs.ErrPermission):
 		SetErrno(EACCES)
-	case isErr(err, fs.ErrInvalid):
+	case IsErr(err, fs.ErrInvalid):
 		SetErrno(EINVAL)
 	default:
 		SetErrno(EIO)
@@ -253,7 +253,7 @@ func setErrnoOf(err error) {
 }
 
 // isErr is errors.Is for a target that is comparable, as fs's are.
-func isErr(err, target error) bool {
+func IsErr(err, target error) bool {
 	for e := err; e != nil; e = errors.Unwrap(e) {
 		if e == target {
 			return true

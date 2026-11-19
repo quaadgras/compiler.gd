@@ -16,27 +16,27 @@ const (
 	// wordSize is the size of a pointer word in memory: the unit in which
 	// a tinfo says what memory holds and the side tables keep
 	// capabilities.
-	wordSize = unsafe.Sizeof(uintptr(0))
+	WordSize = unsafe.Sizeof(uintptr(0))
 
 	// longSize is the size of C's long (and size_t, ptrdiff_t), which is
 	// a word in both models cmd/cc has.
-	longSize = unsafe.Sizeof(uintptr(0))
+	LongSize = unsafe.Sizeof(uintptr(0))
 )
 
 // loadWord and storeWord load and store a word as a scalar.
-func loadWord(p Ptr) uintptr     { return *(*uintptr)(check(p, wordSize)) }
-func storeWord(p Ptr, v uintptr) { *(*uintptr)(checkScalar(p, wordSize)) = v }
+func LoadWord(p Ptr) uintptr     { return *(*uintptr)(Check(p, WordSize)) }
+func StoreWord(p Ptr, v uintptr) { *(*uintptr)(checkScalar(p, WordSize)) = v }
 
 // loadLong and storeLong load and store a C long.
-func loadLong(p Ptr) int64 {
-	if longSize == 4 {
+func LoadLong(p Ptr) int64 {
+	if LongSize == 4 {
 		return int64(int32(Load32(p)))
 	}
 	return int64(Load64(p))
 }
 
-func storeLong(p Ptr, v int64) {
-	if longSize == 4 {
+func StoreLong(p Ptr, v int64) {
+	if LongSize == 4 {
 		Store32(p, uint32(v))
 		return
 	}
@@ -46,8 +46,8 @@ func storeLong(p Ptr, v int64) {
 // Strtol32 is strtol where long is 32 bits (cmd/cc's libcLong32): its
 // range is long's.
 func Strtol32(s, end Ptr, base int32) int64 {
-	v, neg, of, n := strtoParse(GoString(s), int(base))
-	setEnd(end, s, n)
+	v, neg, of, n := StrtoParse(GoString(s), int(base))
+	SetEnd(end, s, n)
 	switch {
 	case neg && (of || v > 1<<31):
 		SetErrno(ERANGE)
@@ -63,8 +63,8 @@ func Strtol32(s, end Ptr, base int32) int64 {
 
 // Strtoul32 is strtoul where unsigned long is 32 bits.
 func Strtoul32(s, end Ptr, base int32) uint64 {
-	v, neg, of, n := strtoParse(GoString(s), int(base))
-	setEnd(end, s, n)
+	v, neg, of, n := StrtoParse(GoString(s), int(base))
+	SetEnd(end, s, n)
 	if of || v > math.MaxUint32 {
 		SetErrno(ERANGE)
 		return math.MaxUint32
@@ -78,6 +78,6 @@ func Strtoul32(s, end Ptr, base int32) uint64 {
 // Ldiv32 is ldiv where long is 32 bits: the ldiv_t it writes is two of
 // them.
 func Ldiv32(sret Ptr, n, d int64) {
-	storeLong(sret, n/d)
-	storeLong(Add(sret, int(longSize)), n%d)
+	StoreLong(sret, n/d)
+	StoreLong(Add(sret, int(LongSize)), n%d)
 }

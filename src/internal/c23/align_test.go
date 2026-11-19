@@ -17,7 +17,7 @@ func TestNewAligned(t *testing.T) {
 			if a := Addr(q); a%align != 0 {
 				t.Errorf("NewAligned[[3]*int](%d) = %#x", align, a)
 			}
-			if c, ok := cobject(q.obj); !ok || c.obj != q.obj {
+			if c, ok := cobject(q.Obj); !ok || c.Obj != q.Obj {
 				t.Errorf("cobject of an aligned object: %v %v", c, ok)
 			}
 		}

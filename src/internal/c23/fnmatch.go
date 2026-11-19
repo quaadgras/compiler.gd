@@ -5,10 +5,7 @@
 package c23
 
 import (
-	"os"
-	"slices"
 	"strings"
-	"unsafe"
 )
 
 // fnmatch.h and glob.h.
@@ -19,18 +16,9 @@ const (
 	FNM_PERIOD      = 0x4
 	FNM_LEADING_DIR = 0x8
 	FNM_CASEFOLD    = 0x10
-	FNM_NOMATCH     = 1
 )
 
-// Fnmatch is fnmatch: 0 if string matches pattern, else FNM_NOMATCH.
-func Fnmatch(pattern, str Ptr, flags int32) int32 {
-	if fnmatch(GoString(pattern), GoString(str), flags) {
-		return 0
-	}
-	return FNM_NOMATCH
-}
-
-func lowerByte(c byte) byte { return byte(lowerASCII(c)) }
+func lowerByte(c byte) byte { return byte(LowerASCII(c)) }
 
 func upperASCII(c byte) byte {
 	if 'a' <= c && c <= 'z' {
@@ -43,7 +31,7 @@ func upperASCII(c byte) byte {
 // with \ quoting the next byte unless FNM_NOESCAPE. With FNM_PATHNAME, a /
 // is matched only by a / in p; with FNM_PERIOD, a leading . (at the
 // start, or after a / with FNM_PATHNAME) only by a . in p.
-func fnmatch(p, s string, flags int32) bool {
+func Fnmatch(p, s string, flags int32) bool {
 	pathname := flags&FNM_PATHNAME != 0
 	noescape := flags&FNM_NOESCAPE != 0
 	fold := flags&FNM_CASEFOLD != 0
@@ -238,206 +226,5 @@ func matchBracket(p string, i int, c byte, noescape, fold bool) (int, bool) {
 // glob.h
 
 const (
-	GLOB_ERR      = 0x01
-	GLOB_MARK     = 0x02
-	GLOB_NOSORT   = 0x04
-	GLOB_DOOFFS   = 0x08
-	GLOB_NOCHECK  = 0x10
-	GLOB_APPEND   = 0x20
-	GLOB_NOESCAPE = 0x40
-	GLOB_PERIOD   = 0x80
-
 	GLOB_NOSPACE = 1
-	GLOB_ABORTED = 2
-	GLOB_NOMATCH = 3
 )
-
-// globT is C's glob_t.
-type globT struct {
-	pathc uintptr
-	pathv unsafe.Pointer
-	offs  uintptr
-	flags int32
-	_     [5]unsafe.Pointer
-}
-
-// hasMeta reports whether a pattern's element has *, ? or [ that are not
-// quoted.
-func hasMeta(p string, noescape bool) bool {
-	for i := 0; i < len(p); i++ {
-		switch p[i] {
-		case '\\':
-			if !noescape {
-				i++
-			}
-		case '*', '?', '[':
-			return true
-		}
-	}
-	return false
-}
-
-// unescape removes the quoting backslashes of a pattern's element.
-func unescape(p string, noescape bool) string {
-	if noescape || !strings.Contains(p, "\\") {
-		return p
-	}
-	var b []byte
-	for i := 0; i < len(p); i++ {
-		if p[i] == '\\' && i+1 < len(p) {
-			i++
-		}
-		b = append(b, p[i])
-	}
-	return string(b)
-}
-
-// Glob is glob: the names of the files pattern matches, in *pglob, sorted
-// unless GLOB_NOSORT. A wildcard matches a leading . of a name only with
-// GLOB_PERIOD; errfunc, if not null, is called for a directory that
-// cannot be read, and glob stops if it returns nonzero or with GLOB_ERR.
-func Glob(pattern Ptr, flags int32, errfunc, pglob Ptr) int32 {
-	pat := GoString(pattern)
-	noescape := flags&GLOB_NOESCAPE != 0
-	var errf func(Ptr, int32) int32
-	if Addr(errfunc) != 0 {
-		errf = FuncOf[func(Ptr, int32) int32](errfunc)
-	}
-	fnflags := int32(FNM_PERIOD)
-	if flags&GLOB_PERIOD != 0 {
-		fnflags = 0
-	}
-	if noescape {
-		fnflags |= FNM_NOESCAPE
-	}
-
-	var found []string
-	aborted := false
-	// expand adds the matches of the elements elems in the directory
-	// dir (as written in the pattern: "" is the current directory).
-	var expand func(dir string, elems []string)
-	expand = func(dir string, elems []string) {
-		if aborted {
-			return
-		}
-		if len(elems) == 0 {
-			if dir != "" {
-				if _, err := os.Lstat(dir); err == nil {
-					found = append(found, dir)
-				}
-			}
-			return
-		}
-		e, rest := elems[0], elems[1:]
-		join := func(name string) string {
-			if dir == "" {
-				return name
-			}
-			if strings.HasSuffix(dir, "/") {
-				return dir + name
-			}
-			return dir + "/" + name
-		}
-		if e == "" { // a slash: the root, or one of several, or a trailing one
-			if dir == "" {
-				expand("/", rest)
-			} else if len(rest) == 0 {
-				if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-					found = append(found, dir+"/")
-				}
-			} else {
-				expand(dir+"/", rest)
-			}
-			return
-		}
-		if !hasMeta(e, noescape) {
-			expand(join(unescape(e, noescape)), rest)
-			return
-		}
-		d := dir
-		if d == "" {
-			d = "."
-		}
-		ents, err := os.ReadDir(d)
-		if err != nil {
-			// A directory that does not exist has no matches; one that
-			// cannot be read is an error.
-			if isErr(err, os.ErrNotExist) {
-				return
-			}
-			setErrnoOf(err)
-			if Errno() == ENOTDIR {
-				return
-			}
-			if errf != nil && errf(CString(d), Errno()) != 0 || flags&GLOB_ERR != 0 {
-				aborted = true
-			}
-			return
-		}
-		for _, ent := range ents {
-			if fnmatch(e, ent.Name(), fnflags) {
-				expand(join(ent.Name()), rest)
-			}
-		}
-	}
-	expand("", strings.Split(pat, "/"))
-	if aborted {
-		return GLOB_ABORTED
-	}
-	if flags&GLOB_MARK != 0 {
-		for i, f := range found {
-			if !strings.HasSuffix(f, "/") {
-				if fi, err := os.Stat(f); err == nil && fi.IsDir() {
-					found[i] = f + "/"
-				}
-			}
-		}
-	}
-	if flags&GLOB_NOSORT == 0 {
-		slices.Sort(found)
-	}
-	if len(found) == 0 {
-		if flags&GLOB_NOCHECK == 0 {
-			return GLOB_NOMATCH
-		}
-		found = []string{pat}
-	}
-
-	var g globT
-	offPathv, offOffs := int(unsafe.Offsetof(g.pathv)), int(unsafe.Offsetof(g.offs))
-	offs := 0
-	if flags&GLOB_DOOFFS != 0 {
-		offs = int(loadLong(Add(pglob, offOffs)))
-	}
-	var old []Ptr
-	if flags&GLOB_APPEND != 0 {
-		n := int(loadLong(pglob))
-		if pv := LoadPtr(Add(pglob, offPathv)); Addr(pv) != 0 {
-			for i := range n {
-				old = append(old, LoadPtr(Add(pv, (offs+i)*int(wordSize))))
-			}
-		}
-	}
-	n := len(old) + len(found)
-	pv := NewArray[unsafe.Pointer](uintptr(offs+n+1) * wordSize)
-	for i, p := range old {
-		StorePtr(Add(pv, (offs+i)*int(wordSize)), p)
-	}
-	for i, f := range found {
-		StorePtr(Add(pv, (offs+len(old)+i)*int(wordSize)), CString(f))
-	}
-	storeLong(pglob, int64(n))
-	StorePtr(Add(pglob, offPathv), pv)
-	if flags&GLOB_DOOFFS == 0 {
-		storeLong(Add(pglob, offOffs), 0)
-	}
-	Store32(Add(pglob, int(unsafe.Offsetof(g.flags))), uint32(flags))
-	return 0
-}
-
-// Globfree is globfree: the collector frees what glob allocated.
-func Globfree(pglob Ptr) {
-	var g globT
-	storeLong(pglob, 0)
-	StorePtr(Add(pglob, int(unsafe.Offsetof(g.pathv))), Ptr{})
-}

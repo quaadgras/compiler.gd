@@ -4,10 +4,9 @@
 
 package ccmain
 
-// The headers of sockets and of poll and select. Sockets are
-// internal/c23/sock's (libc names "sock.X"), a package of its own that
-// the generated Go imports only if it calls one, so that only C that uses
-// sockets links net; poll and select are internal/c23's.
+// The headers of sockets and of poll and select: internal/c23/sys/socket,
+// netdb, arpa/inet, netinet/in and net/if, of which only the first two
+// link net (libcpkg.go); poll and select's packages.
 
 func init() {
 	for name, text := range sockHeaders {
@@ -18,36 +17,26 @@ func init() {
 	}
 }
 
-// sockPrefix marks a libc name of internal/c23/sock.
-const sockPrefix = "sock."
-
-// sockIncludes are the headers that make a package's Go import
-// internal/c23/sock (cmd/go adds the import when its C includes one).
-var sockIncludes = []string{"sys/socket.h", "netinet/in.h", "netinet/tcp.h", "arpa/inet.h", "netdb.h", "net/if.h"}
-
-// SockHeaders returns sockIncludes.
-func SockHeaders() []string { return sockIncludes }
-
 var sockLibc = map[string]string{
-	"socket": "sock.Socket", "socketpair": "sock.Socketpair", "bind": "sock.Bind",
-	"listen": "sock.Listen", "accept": "sock.Accept", "accept4": "sock.Accept4",
-	"connect": "sock.Connect", "shutdown": "sock.Shutdown",
-	"send": "sock.Send", "sendto": "sock.Sendto", "sendmsg": "sock.Sendmsg",
-	"recv": "sock.Recv", "recvfrom": "sock.Recvfrom", "recvmsg": "sock.Recvmsg",
-	"getsockname": "sock.Getsockname", "getpeername": "sock.Getpeername",
-	"getsockopt": "sock.Getsockopt", "setsockopt": "sock.Setsockopt",
-	"htons": "sock.Htons", "ntohs": "sock.Ntohs", "htonl": "sock.Htonl", "ntohl": "sock.Ntohl",
-	"inet_aton": "sock.InetAton", "inet_addr": "sock.InetAddr", "__cc_inet_ntoa": "sock.InetNtoa",
-	"inet_pton": "sock.InetPton", "inet_ntop": "sock.InetNtop",
-	"getaddrinfo": "sock.Getaddrinfo", "freeaddrinfo": "sock.Freeaddrinfo",
-	"gai_strerror": "sock.GaiStrerror", "getnameinfo": "sock.Getnameinfo",
-	"gethostbyname": "sock.Gethostbyname", "gethostbyname2": "sock.Gethostbyname2",
-	"gethostbyaddr": "sock.Gethostbyaddr", "hstrerror": "sock.HstrError",
-	"__cc_h_errno":  "sock.HErrnoLocation",
-	"getservbyname": "sock.Getservbyname", "getprotobyname": "sock.Getprotobyname",
-	"getprotobynumber": "sock.Getprotobynumber",
-	"if_nametoindex":   "sock.IfNametoindex", "if_indextoname": "sock.IfIndextoname",
-	"poll": "Poll", "select": "Select", "pselect": "Pselect",
+	"socket": "sys/socket.Socket", "socketpair": "sys/socket.Socketpair", "bind": "sys/socket.Bind",
+	"listen": "sys/socket.Listen", "accept": "sys/socket.Accept", "accept4": "sys/socket.Accept4",
+	"connect": "sys/socket.Connect", "shutdown": "sys/socket.Shutdown",
+	"send": "sys/socket.Send", "sendto": "sys/socket.Sendto", "sendmsg": "sys/socket.Sendmsg",
+	"recv": "sys/socket.Recv", "recvfrom": "sys/socket.Recvfrom", "recvmsg": "sys/socket.Recvmsg",
+	"getsockname": "sys/socket.Getsockname", "getpeername": "sys/socket.Getpeername",
+	"getsockopt": "sys/socket.Getsockopt", "setsockopt": "sys/socket.Setsockopt",
+	"htons": "netinet/in.Htons", "ntohs": "netinet/in.Ntohs", "htonl": "netinet/in.Htonl", "ntohl": "netinet/in.Ntohl",
+	"inet_aton": "arpa/inet.InetAton", "inet_addr": "arpa/inet.InetAddr", "__cc_inet_ntoa": "arpa/inet.InetNtoa",
+	"inet_pton": "arpa/inet.InetPton", "inet_ntop": "arpa/inet.InetNtop",
+	"getaddrinfo": "netdb.Getaddrinfo", "freeaddrinfo": "netdb.Freeaddrinfo",
+	"gai_strerror": "netdb.GaiStrerror", "getnameinfo": "netdb.Getnameinfo",
+	"gethostbyname": "netdb.Gethostbyname", "gethostbyname2": "netdb.Gethostbyname2",
+	"gethostbyaddr": "netdb.Gethostbyaddr", "hstrerror": "netdb.HstrError",
+	"__cc_h_errno":  "netdb.HErrnoLocation",
+	"getservbyname": "netdb.Getservbyname", "getprotobyname": "netdb.Getprotobyname",
+	"getprotobynumber": "netdb.Getprotobynumber",
+	"if_nametoindex":   "net/if.IfNametoindex", "if_indextoname": "net/if.IfIndextoname",
+	"poll": "poll.Poll", "select": "sys/select.Select", "pselect": "sys/select.Pselect",
 }
 
 var sockHeaders = map[string]string{

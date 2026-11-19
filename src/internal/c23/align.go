@@ -9,7 +9,7 @@ import (
 	"unsafe"
 )
 
-const alignMagic = 0xA11_C0DE_CAB_A11 & (1<<(8*wordSize) - 1)
+const alignMagic = 0xA11_C0DE_CAB_A11 & (1<<(8*WordSize) - 1)
 
 // NewAligned allocates a T for C in the heap, aligned to align bytes:
 // more than Go aligns anything to (C's _Alignas). The object is bigger
@@ -18,7 +18,7 @@ const alignMagic = 0xA11_C0DE_CAB_A11 & (1<<(8*wordSize) - 1)
 // object of a power-of-two size class at a multiple of that size within
 // its page-aligned span, and a large object at the start of a page, so
 // the object is made one of those. Alignments beyond a page are a page.
-func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(tinfoOf[T](), align) }
+func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(TinfoOf[T](), align) }
 
 // NewAlignedT is NewAligned, of the type whose Type is t.
 func NewAlignedT(t *Type, align uintptr) Ptr { return newAligned(t, t.t, align) }
@@ -27,14 +27,14 @@ func NewAlignedT(t *Type, align uintptr) Ptr { return newAligned(t, t.t, align) 
 // length array declared with _Alignas.
 func NewArrayAlignedT(t *Type, n, align uintptr) Ptr {
 	sz := t.t.Size()
-	if align <= wordSize || sz == 0 {
+	if align <= WordSize || sz == 0 {
 		return newOf(t, n)
 	}
 	return newAligned(t, reflect.ArrayOf(int((n+sz-1)/sz), t.t), align)
 }
 
 // mallocAligned is Malloc of n bytes aligned to align bytes.
-func mallocAligned(align, n uintptr) Ptr {
+func MallocAligned(align, n uintptr) Ptr {
 	return newAligned(rawInfo, reflect.ArrayOf(int(n), rawInfo.t), align)
 }
 
@@ -82,7 +82,7 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 		*(*[2]uintptr)(base) = [2]uintptr{alignMagic, off}
 		h := (*header)(unsafe.Add(base, off-hdrSize))
 		*h = header{ref: ti.ref | refC, ti: ti, size: size}
-		return Ptr{obj: unsafe.Add(base, off), size: size, ti: cref(ti)}
+		return Ptr{Obj: unsafe.Add(base, off), Size: size, ti: cref(ti)}
 	}
 }
 
@@ -93,13 +93,13 @@ func newAligned(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
 // anywhere in a block of words, once its address is known. The marker
 // at its start is newAligned's, which cobject reads.
 func newAlignedSplit(ti *tinfo, vt reflect.Type, align uintptr) Ptr {
-	align = max(align, wordSize)
+	align = max(align, WordSize)
 	size := vt.Size()
-	n := (2*wordSize + hdrSize + align + size + wordSize - 1) / wordSize
+	n := (2*WordSize + hdrSize + align + size + WordSize - 1) / WordSize
 	base := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, n)))
-	off := (uintptr(base)+2*wordSize+hdrSize+align-1)&^(align-1) - uintptr(base)
+	off := (uintptr(base)+2*WordSize+hdrSize+align-1)&^(align-1) - uintptr(base)
 	*(*[2]uintptr)(base) = [2]uintptr{alignMagic, off}
 	h := (*header)(unsafe.Add(base, off-hdrSize))
 	*h = header{ref: ti.ref | refC, ti: ti, size: size}
-	return Ptr{obj: unsafe.Add(base, off), size: size, ti: cref(ti)}
+	return Ptr{Obj: unsafe.Add(base, off), Size: size, ti: cref(ti)}
 }

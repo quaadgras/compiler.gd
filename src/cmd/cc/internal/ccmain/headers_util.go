@@ -362,43 +362,43 @@ int iconv_close(iconv_t cd);
 `
 	for k, v := range map[string]string{
 		// getopt.h
-		"getopt_long": "GetoptLong", "getopt_long_only": "GetoptLongOnly",
+		"getopt_long": "getopt.GetoptLong", "getopt_long_only": "getopt.GetoptLongOnly",
 		// err.h
-		"warn": "Warn", "vwarn": "Vwarn", "warnx": "Warnx", "vwarnx": "Vwarnx",
-		"err": "Err", "verr": "Verr", "errx": "Errx", "verrx": "Verrx",
+		"warn": "err.Warn", "vwarn": "err.Vwarn", "warnx": "err.Warnx", "vwarnx": "err.Vwarnx",
+		"err": "err.Err", "verr": "err.Verr", "errx": "err.Errx", "verrx": "err.Verrx",
 		// libgen.h
-		"basename": "Basename", "dirname": "Dirname",
+		"basename": "libgen.Basename", "dirname": "libgen.Dirname",
 		// fnmatch.h, glob.h
-		"fnmatch": "Fnmatch", "glob": "Glob", "globfree": "Globfree",
+		"fnmatch": "fnmatch.Fnmatch", "glob": "glob.Glob", "globfree": "glob.Globfree",
 		// search.h
-		"hcreate": "Hcreate", "hdestroy": "Hdestroy", "hsearch": "Hsearch",
-		"tsearch": "Tsearch", "tfind": "Tfind", "tdelete": "Tdelete", "twalk": "Twalk",
-		"tdestroy": "Tdestroy", "lfind": "Lfind", "lsearch": "Lsearch",
-		"insque": "Insque", "remque": "Remque",
+		"hcreate": "search.Hcreate", "hdestroy": "search.Hdestroy", "hsearch": "search.Hsearch",
+		"tsearch": "search.Tsearch", "tfind": "search.Tfind", "tdelete": "search.Tdelete", "twalk": "search.Twalk",
+		"tdestroy": "search.Tdestroy", "lfind": "search.Lfind", "lsearch": "search.Lsearch",
+		"insque": "search.Insque", "remque": "search.Remque",
 		// malloc.h
-		"malloc_usable_size": "MallocUsableSize", "memalign": "Memalign",
-		"valloc": "Valloc", "pvalloc": "Pvalloc",
+		"malloc_usable_size": "malloc.MallocUsableSize", "memalign": "malloc.Memalign",
+		"valloc": "malloc.Valloc", "pvalloc": "malloc.Pvalloc",
 		// sys/random.h
-		"getrandom": "Getrandom", "getentropy": "Getentropy",
+		"getrandom": "sys/random.Getrandom", "getentropy": "sys/random.Getentropy",
 		// sys/uio.h, sys/utsname.h, sys/file.h
-		"readv": "Readv", "writev": "Writev", "uname": "Uname", "flock": "Flock",
+		"readv": "sys/uio.Readv", "writev": "sys/uio.Writev", "uname": "sys/utsname.Uname", "flock": "sys/file.Flock",
 		// grp.h
-		"getgrnam": "Getgrnam", "getgrgid": "Getgrgid",
+		"getgrnam": "grp.Getgrnam", "getgrgid": "grp.Getgrgid",
 		// syslog.h
-		"openlog": "Openlog", "syslog": "Syslog", "vsyslog": "Vsyslog",
-		"closelog": "Closelog", "setlogmask": "Setlogmask",
+		"openlog": "syslog.Openlog", "syslog": "syslog.Syslog", "vsyslog": "syslog.Vsyslog",
+		"closelog": "syslog.Closelog", "setlogmask": "syslog.Setlogmask",
 		// langinfo.h, iconv.h
-		"nl_langinfo": "NlLanginfo",
-		"iconv_open":  "IconvOpen", "iconv": "Iconv", "iconv_close": "IconvClose",
+		"nl_langinfo": "langinfo.NlLanginfo",
+		"iconv_open":  "iconv.IconvOpen", "iconv": "iconv.Iconv", "iconv_close": "iconv.IconvClose",
 		// stdio.h
-		"getline": "Getline", "getdelim": "Getdelim",
-		"asprintf": "Asprintf", "vasprintf": "Vasprintf",
-		"dprintf": "Dprintf", "vdprintf": "Vdprintf",
-		"fmemopen": "Fmemopen", "open_memstream": "OpenMemstream",
+		"getline": "stdio.Getline", "getdelim": "stdio.Getdelim",
+		"asprintf": "stdio.Asprintf", "vasprintf": "stdio.Vasprintf",
+		"dprintf": "stdio.Dprintf", "vdprintf": "stdio.Vdprintf",
+		"fmemopen": "stdio.Fmemopen", "open_memstream": "stdio.OpenMemstream",
 		// string.h
-		"strsep": "Strsep",
+		"strsep": "string.Strsep",
 		// stdlib.h
-		"reallocarray": "Reallocarray", "qsort_r": "QsortR", "mkdtemp": "Mkdtemp",
+		"reallocarray": "stdlib.Reallocarray", "qsort_r": "stdlib.QsortR", "mkdtemp": "stdlib.Mkdtemp",
 	} {
 		libc[k] = v
 	}

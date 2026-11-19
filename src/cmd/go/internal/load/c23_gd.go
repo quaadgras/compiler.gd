@@ -146,26 +146,6 @@ func preamble(file string) (string, bool) {
 	return b.String(), imports
 }
 
-// ccUsesSock reports whether the C of a package that cmd/cc builds
-// includes a header of sockets (cchost.SockHeaders), so that the Go it
-// generates may import internal/c23/sock.
-func ccUsesSock(p *Package) bool {
-	files := append(append(append([]string{}, p.CgoFiles...), p.Internal.CCFiles...), p.CFiles...)
-	files = append(files, p.HFiles...)
-	for _, f := range files {
-		b, err := os.ReadFile(filepath.Join(p.Dir, f))
-		if err != nil {
-			continue
-		}
-		for _, h := range cchost.SockHeaders() {
-			if bytes.Contains(b, []byte("<"+h+">")) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // ccHeaders are the system headers cmd/cc provides.
 var ccHeaders = func() map[string]bool {
 	m := map[string]bool{}
@@ -196,3 +176,7 @@ func ccSource(src string) bool {
 	}
 	return true
 }
+
+// ccLibcPackages are internal/c23's packages of headers, which Go that
+// cmd/cc generates may import besides internal/c23.
+func ccLibcPackages() []string { return cchost.LibcPackages() }

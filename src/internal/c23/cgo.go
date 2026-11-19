@@ -31,7 +31,7 @@ func Arg[P any](p P) Ptr {
 		if c, ok := cobject(w); ok {
 			return c
 		}
-		return Ptr{obj: w, size: t.Elem().Size(), ti: tref(infoOf(t.Elem()))}
+		return Ptr{Obj: w, Size: t.Elem().Size(), ti: tref(infoOf(t.Elem()))}
 	case reflect.UnsafePointer:
 		w := *(*unsafe.Pointer)(unsafe.Pointer(&p))
 		if uintptr(w)&Tag != 0 {
@@ -64,9 +64,9 @@ func GoStringGo[P any](p P) string { return GoString(Arg(p)) }
 // returned, though an unsafe.Pointer into it has no capability.
 func FreeGo[P any](p P) {
 	q := Arg(p)
-	if q.obj == nil && reflect.TypeFor[P]().Kind() == reflect.UnsafePointer {
+	if q.Obj == nil && reflect.TypeFor[P]().Kind() == reflect.UnsafePointer {
 		if base, _ := object(*(*unsafe.Pointer)(unsafe.Pointer(&p))); base != nil {
-			fault("free of Go's memory", Addr(q))
+			RaiseFault("free of Go's memory", Addr(q))
 		}
 	}
 	Free(q)

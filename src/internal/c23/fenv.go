@@ -47,41 +47,41 @@ const (
 )
 
 type fenvState struct {
-	round  int32 // the dynamic rounding direction
-	except int32 // the exceptions raised
+	Round  int32 // the dynamic rounding direction
+	Except int32 // the exceptions raised
 }
 
 // fenvUsed is set when a thread first uses its environment: until then,
 // every thread's is the default, and the library need not look.
-var fenvUsed atomic.Bool
+var FenvUsed atomic.Bool
 
 // fenv returns the calling thread's environment.
-func fenv() *fenvState {
-	if !fenvUsed.Load() {
-		fenvUsed.Store(true)
+func Fenv() *fenvState {
+	if !FenvUsed.Load() {
+		FenvUsed.Store(true)
 	}
-	return &gSelf().fe
+	return &GSelf().fe
 }
 
 // UseFenv is called at start by C that has code under FENV_ACCESS ON: the
 // library raises exceptions for it from the start.
-func UseFenv() { fenvUsed.Store(true) }
+func UseFenv() { FenvUsed.Store(true) }
 
 // curRound is the calling thread's rounding direction.
-func curRound() int32 {
-	if !fenvUsed.Load() {
+func CurRound() int32 {
+	if !FenvUsed.Load() {
 		return FeToNearest
 	}
-	return gSelf().fe.round
+	return GSelf().fe.Round
 }
 
 // raise raises excepts in the calling thread's environment.
-func raise(excepts int32) { fenv().except |= excepts }
+func Raise(excepts int32) { Fenv().Except |= excepts }
 
 // mode is the direction m names: the thread's for FeDynamic.
 func (e *fenvState) mode(m int32) int32 {
 	if m == FeDynamic {
-		return e.round
+		return e.Round
 	}
 	return m
 }
@@ -89,10 +89,10 @@ func (e *fenvState) mode(m int32) int32 {
 // inheritFenv is the environment a new thread starts with: its creator's
 // (C23 7.6).
 func inheritFenv() fenvState {
-	if !fenvUsed.Load() {
+	if !FenvUsed.Load() {
 		return fenvState{}
 	}
-	return gSelf().fe
+	return GSelf().fe
 }
 
 // Operations for C under FENV_ACCESS or FENV_ROUND: each rounds in
@@ -101,28 +101,28 @@ func inheritFenv() fenvState {
 
 // Arith is x op y ('+', '-', '*', '/') on doubles.
 func Arith(op byte, x, y float64, m int32) float64 {
-	e := fenv()
-	ctl := fpControl(e.mode(m))
+	e := Fenv()
+	ctl := FpControl(e.mode(m))
 	var r float64
 	var st uint64
 	switch op {
 	case '+':
-		r, st = fpAdd64(ctl, x, y)
+		r, st = FpAdd64(ctl, x, y)
 	case '-':
-		r, st = fpSub64(ctl, x, y)
+		r, st = FpSub64(ctl, x, y)
 	case '*':
-		r, st = fpMul64(ctl, x, y)
+		r, st = FpMul64(ctl, x, y)
 	default:
-		r, st = fpDiv64(ctl, x, y)
+		r, st = FpDiv64(ctl, x, y)
 	}
-	e.except |= fpExcepts(st)
+	e.Except |= FpExcepts(st)
 	return r
 }
 
 // Arithf is x op y on floats.
 func Arithf(op byte, x, y float32, m int32) float32 {
-	e := fenv()
-	ctl := fpControl(e.mode(m))
+	e := Fenv()
+	ctl := FpControl(e.mode(m))
 	var r float32
 	var st uint64
 	switch op {
@@ -135,7 +135,7 @@ func Arithf(op byte, x, y float32, m int32) float32 {
 	default:
 		r, st = fpDiv32(ctl, x, y)
 	}
-	e.except |= fpExcepts(st)
+	e.Except |= FpExcepts(st)
 	return r
 }
 
@@ -144,7 +144,7 @@ func Arithf(op byte, x, y float32, m int32) float32 {
 // a NaN. (== and != are quiet: Go's.)
 func Cmp(op byte, x, y float64) bool {
 	if x != x || y != y {
-		raise(FeInvalid)
+		Raise(FeInvalid)
 		return false
 	}
 	switch op {
@@ -160,25 +160,25 @@ func Cmp(op byte, x, y float64) bool {
 
 // Narrow converts a double to float.
 func Narrow(x float64, m int32) float32 {
-	e := fenv()
-	r, st := fpNarrow(fpControl(e.mode(m)), x)
-	e.except |= fpExcepts(st)
+	e := Fenv()
+	r, st := FpNarrow(FpControl(e.mode(m)), x)
+	e.Except |= FpExcepts(st)
 	return r
 }
 
 // IntToDouble converts a 64-bit integer to double.
 func IntToDouble(x int64, m int32) float64 {
-	e := fenv()
-	r, st := fpIntTo64(fpControl(e.mode(m)), x)
-	e.except |= fpExcepts(st)
+	e := Fenv()
+	r, st := fpIntTo64(FpControl(e.mode(m)), x)
+	e.Except |= FpExcepts(st)
 	return r
 }
 
 // IntToFloat converts a 64-bit integer to float.
 func IntToFloat(x int64, m int32) float32 {
-	e := fenv()
-	r, st := fpIntTo32(fpControl(e.mode(m)), x)
-	e.except |= fpExcepts(st)
+	e := Fenv()
+	r, st := fpIntTo32(FpControl(e.mode(m)), x)
+	e.Except |= FpExcepts(st)
 	return r
 }
 
@@ -210,17 +210,17 @@ func ToInt(x float64, bits int) int64 {
 	switch {
 	case t >= -lim && t < lim:
 		if t != x {
-			raise(FeInexact)
+			Raise(FeInexact)
 		}
 		return int64(t)
 	case bits <= 32 && t >= -(1<<31) && t < 1<<31:
-		raise(FeInvalid)
+		Raise(FeInvalid)
 		return int64(t)
 	case bits <= 32:
-		raise(FeInvalid)
+		Raise(FeInvalid)
 		return math.MinInt32
 	}
-	raise(FeInvalid)
+	Raise(FeInvalid)
 	return math.MinInt64
 }
 
@@ -229,11 +229,11 @@ func ToUint(x float64, bits int) uint64 {
 	t := math.Trunc(x)
 	if t >= 0 && t < math.Ldexp(1, bits) {
 		if t != x {
-			raise(FeInexact)
+			Raise(FeInexact)
 		}
 		return uint64(t)
 	}
-	raise(FeInvalid)
+	Raise(FeInvalid)
 	if t >= -(1<<63) && t < 1<<63 {
 		return uint64(int64(t))
 	}
@@ -244,10 +244,10 @@ func ToUint(x float64, bits int) uint64 {
 // applies to some library functions as if fesetround had set it (C23
 // 7.6.2).
 func InRound[T any](m int32, f func() T) T {
-	e := fenv()
-	saved := e.round
-	e.round = m
-	defer func() { e.round = saved }()
+	e := Fenv()
+	saved := e.Round
+	e.Round = m
+	defer func() { e.Round = saved }()
 	return f()
 }
 
@@ -257,7 +257,7 @@ func Feclearexcept(excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
-	fenv().except &^= excepts
+	Fenv().Except &^= excepts
 	return 0
 }
 
@@ -265,7 +265,7 @@ func Feraiseexcept(excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
-	raise(excepts)
+	Raise(excepts)
 	return 0
 }
 
@@ -274,10 +274,10 @@ func Feraiseexcept(excepts int32) int32 {
 func Fesetexcept(excepts int32) int32 { return Feraiseexcept(excepts) }
 
 func Fetestexcept(excepts int32) int32 {
-	if !fenvUsed.Load() {
+	if !FenvUsed.Load() {
 		return 0
 	}
-	return gSelf().fe.except & excepts & FeAllExcept
+	return GSelf().fe.Except & excepts & FeAllExcept
 }
 
 // fexcept_t is an int: the flags.
@@ -285,7 +285,7 @@ func Fegetexceptflag(flagp Ptr, excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
-	Store32(flagp, uint32(fenv().except&excepts))
+	Store32(flagp, uint32(Fenv().Except&excepts))
 	return 0
 }
 
@@ -293,8 +293,8 @@ func Fesetexceptflag(flagp Ptr, excepts int32) int32 {
 	if excepts&^FeAllExcept != 0 {
 		return 1
 	}
-	e := fenv()
-	e.except = e.except&^excepts | int32(Load32(flagp))&excepts
+	e := Fenv()
+	e.Except = e.Except&^excepts | int32(Load32(flagp))&excepts
 	return 0
 }
 
@@ -302,58 +302,58 @@ func Fetestexceptflag(flagp Ptr, excepts int32) int32 {
 	return int32(Load32(flagp)) & excepts & FeAllExcept
 }
 
-func Fegetround() int32 { return curRound() }
+func Fegetround() int32 { return CurRound() }
 
 func Fesetround(round int32) int32 {
 	switch round {
 	case FeToNearest:
 	case FeDownward, FeUpward, FeTowardZero:
-		if !fpHardware {
+		if !FpHardware {
 			return 1
 		}
 	default:
 		return 1
 	}
-	fenv().round = round
+	Fenv().Round = round
 	return 0
 }
 
 // fenv_t is an int: the direction and the flags, whose bits differ.
 func Fegetenv(envp Ptr) int32 {
-	e := fenv()
-	Store32(envp, uint32(e.round|e.except))
+	e := Fenv()
+	Store32(envp, uint32(e.Round|e.Except))
 	return 0
 }
 
 func Feholdexcept(envp Ptr) int32 {
 	Fegetenv(envp)
-	fenv().except = 0
+	Fenv().Except = 0
 	return 0
 }
 
 func Fesetenv(envp Ptr) int32 {
 	v := int32(Load32(envp))
-	e := fenv()
-	e.round = v & feRoundMask
-	e.except = v & FeAllExcept
+	e := Fenv()
+	e.Round = v & feRoundMask
+	e.Except = v & FeAllExcept
 	return 0
 }
 
 func Feupdateenv(envp Ptr) int32 {
-	raised := fenv().except
+	raised := Fenv().Except
 	Fesetenv(envp)
-	raise(raised)
+	Raise(raised)
 	return 0
 }
 
 // femode_t is an int: the direction.
 func Fegetmode(modep Ptr) int32 {
-	Store32(modep, uint32(curRound()))
+	Store32(modep, uint32(CurRound()))
 	return 0
 }
 
 func Fesetmode(modep Ptr) int32 {
-	fenv().round = int32(Load32(modep)) & feRoundMask
+	Fenv().Round = int32(Load32(modep)) & feRoundMask
 	return 0
 }
 
@@ -374,7 +374,7 @@ func FeDfl() Ptr {
 // FltRounds is FLT_ROUNDS: the thread's direction, as float.h numbers
 // them.
 func FltRounds() int32 {
-	switch curRound() {
+	switch CurRound() {
 	case FeTowardZero:
 		return 0
 	case FeUpward:

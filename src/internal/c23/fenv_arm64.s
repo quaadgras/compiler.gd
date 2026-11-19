@@ -21,7 +21,7 @@
 	MOVD	R2, st
 
 // func fpAdd64(ctl uint64, x, y float64) (r float64, st uint64)
-TEXT ·fpAdd64(SB), NOSPLIT, $0-40
+TEXT ·FpAdd64(SB), NOSPLIT, $0-40
 	FMOVD	x+8(FP), F0
 	FMOVD	y+16(FP), F1
 	BEGIN
@@ -31,7 +31,7 @@ TEXT ·fpAdd64(SB), NOSPLIT, $0-40
 	RET
 
 // func fpSub64(ctl uint64, x, y float64) (r float64, st uint64)
-TEXT ·fpSub64(SB), NOSPLIT, $0-40
+TEXT ·FpSub64(SB), NOSPLIT, $0-40
 	FMOVD	x+8(FP), F0
 	FMOVD	y+16(FP), F1
 	BEGIN
@@ -41,7 +41,7 @@ TEXT ·fpSub64(SB), NOSPLIT, $0-40
 	RET
 
 // func fpMul64(ctl uint64, x, y float64) (r float64, st uint64)
-TEXT ·fpMul64(SB), NOSPLIT, $0-40
+TEXT ·FpMul64(SB), NOSPLIT, $0-40
 	FMOVD	x+8(FP), F0
 	FMOVD	y+16(FP), F1
 	BEGIN
@@ -51,7 +51,7 @@ TEXT ·fpMul64(SB), NOSPLIT, $0-40
 	RET
 
 // func fpDiv64(ctl uint64, x, y float64) (r float64, st uint64)
-TEXT ·fpDiv64(SB), NOSPLIT, $0-40
+TEXT ·FpDiv64(SB), NOSPLIT, $0-40
 	FMOVD	x+8(FP), F0
 	FMOVD	y+16(FP), F1
 	BEGIN
@@ -101,7 +101,7 @@ TEXT ·fpDiv32(SB), NOSPLIT, $0-32
 	RET
 
 // func fpSqrt64(ctl uint64, x float64) (r float64, st uint64)
-TEXT ·fpSqrt64(SB), NOSPLIT, $0-32
+TEXT ·FpSqrt64(SB), NOSPLIT, $0-32
 	FMOVD	x+8(FP), F1
 	BEGIN
 	FSQRTD	F1, F0
@@ -119,7 +119,7 @@ TEXT ·fpSqrt32(SB), NOSPLIT, $0-32
 	RET
 
 // func fpNarrow(ctl uint64, x float64) (r float32, st uint64)
-TEXT ·fpNarrow(SB), NOSPLIT, $0-32
+TEXT ·FpNarrow(SB), NOSPLIT, $0-32
 	FMOVD	x+8(FP), F1
 	BEGIN
 	FCVTDS	F1, F0
@@ -146,7 +146,7 @@ TEXT ·fpIntTo32(SB), NOSPLIT, $0-32
 	RET
 
 // func fpFma64(ctl uint64, x, y, z float64) (r float64, st uint64)
-TEXT ·fpFma64(SB), NOSPLIT, $0-48
+TEXT ·FpFma64(SB), NOSPLIT, $0-48
 	FMOVD	x+8(FP), F1
 	FMOVD	y+16(FP), F2
 	FMOVD	z+24(FP), F3
@@ -157,7 +157,7 @@ TEXT ·fpFma64(SB), NOSPLIT, $0-48
 	RET
 
 // func fpFma32(ctl uint64, x, y, z float32) (r float32, st uint64)
-TEXT ·fpFma32(SB), NOSPLIT, $0-40
+TEXT ·FpFma32(SB), NOSPLIT, $0-40
 	FMOVS	x+8(FP), F1
 	FMOVS	y+12(FP), F2
 	FMOVS	z+16(FP), F3

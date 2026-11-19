@@ -25,13 +25,13 @@ type jmpBuf struct {
 	site int32
 }
 
-var jmpBufInfo = tinfoOf[jmpBuf]()
+var jmpBufInfo = TinfoOf[jmpBuf]()
 
 // Setjmp is setjmp(env) at site of frame f's function: it saves both in
 // env, a jmp_buf, and returns 0.
 func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
 	p := New[jmpBuf]()
-	*(*jmpBuf)(p.obj) = jmpBuf{f, site}
+	*(*jmpBuf)(p.Obj) = jmpBuf{f, site}
 	StorePtr(env, p)
 	return 0
 }
@@ -44,12 +44,12 @@ type longjmpPanic struct {
 // Longjmp is longjmp.
 func Longjmp(env Ptr, val int32) {
 	p := LoadPtr(env)
-	if p.obj == nil || p.off != 0 || p.info() != jmpBufInfo {
-		fault("longjmp to a jmp_buf setjmp did not set", Addr(p))
+	if p.Obj == nil || p.Off != 0 || p.Info() != jmpBufInfo {
+		RaiseFault("longjmp to a jmp_buf setjmp did not set", Addr(p))
 	}
-	jb := (*jmpBuf)(p.obj)
+	jb := (*jmpBuf)(p.Obj)
 	if !jb.f.live {
-		fault("longjmp to a function that has returned", Addr(p))
+		RaiseFault("longjmp to a function that has returned", Addr(p))
 	}
 	if val == 0 {
 		val = 1

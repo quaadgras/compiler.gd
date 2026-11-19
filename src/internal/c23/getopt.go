@@ -14,10 +14,10 @@ import (
 // getopt's globals, which unistd.h's optarg, optind, opterr and optopt
 // name through the pointers OptargLoc and the others return.
 var (
-	optargObj = New[unsafe.Pointer]()
-	optindObj = newInt32(1)
-	opterrObj = newInt32(1)
-	optoptObj = newInt32('?')
+	OptargObj = New[unsafe.Pointer]()
+	OptindObj = newInt32(1)
+	OpterrObj = newInt32(1)
+	OptoptObj = newInt32('?')
 )
 
 func newInt32(v int32) Ptr {
@@ -25,11 +25,6 @@ func newInt32(v int32) Ptr {
 	Store32(p, uint32(v))
 	return p
 }
-
-func OptargLoc() Ptr { return optargObj }
-func OptindLoc() Ptr { return optindObj }
-func OpterrLoc() Ptr { return opterrObj }
-func OptoptLoc() Ptr { return optoptObj }
 
 // getopt's state between calls, as glibc's.
 type getoptStateT struct {
@@ -49,23 +44,15 @@ const (
 	returnInOrder        // return non-options as the option 1 (-)
 )
 
-// Getopt is glibc's getopt: it permutes argv so that the non-options come
-// last, unless optstring starts with + or POSIXLY_CORRECT is set; with -
-// it returns each non-option as the option 1, in optarg. Setting optind to
-// 0 starts over.
-func Getopt(argc int32, argv, optstring Ptr) int32 {
-	return getopt(argc, argv, optstring, Ptr{}, Ptr{}, false)
-}
-
 // getopt is getopt, getopt_long (longopts not null) and getopt_long_only.
-func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) int32 {
+func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) int32 {
 	st := &getoptState
 	st.Lock()
 	defer st.Unlock()
-	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*int(wordSize))) }
-	optind := int32(Load32(optindObj))
-	setOptind := func(i int32) { optind = i; Store32(optindObj, uint32(i)) }
-	StorePtr(optargObj, Ptr{})
+	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*int(WordSize))) }
+	optind := int32(Load32(OptindObj))
+	setOptind := func(i int32) { optind = i; Store32(OptindObj, uint32(i)) }
+	StorePtr(OptargObj, Ptr{})
 	if argc < 1 {
 		return -1
 	}
@@ -91,7 +78,7 @@ func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 	if len(opts) > 0 && (opts[0] == '-' || opts[0] == '+') {
 		opts = opts[1:]
 	}
-	printErrors := Load32(opterrObj) != 0
+	printErrors := Load32(OpterrObj) != 0
 	if len(opts) > 0 && opts[0] == ':' {
 		printErrors = false
 	}
@@ -104,7 +91,7 @@ func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 	exchange := func() {
 		bottom, middle, top := st.firstNonopt, st.lastNonopt, optind
 		swap := func(i, j int32) {
-			pi, pj := Add(argv, int(i)*int(wordSize)), Add(argv, int(j)*int(wordSize))
+			pi, pj := Add(argv, int(i)*int(WordSize)), Add(argv, int(j)*int(WordSize))
 			a, b := LoadPtr(pi), LoadPtr(pj)
 			StorePtr(pi, b)
 			StorePtr(pj, a)
@@ -162,7 +149,7 @@ func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 			if st.ordering == requireOrder {
 				return -1
 			}
-			StorePtr(optargObj, arg(optind))
+			StorePtr(OptargObj, arg(optind))
 			setOptind(optind + 1)
 			return 1
 		}
@@ -198,30 +185,30 @@ func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 		if printErrors {
 			getoptError("invalid option", arg(0), c)
 		}
-		Store32(optoptObj, uint32(c))
+		Store32(OptoptObj, uint32(c))
 		return '?'
 	}
 	if i+1 < len(opts) && opts[i+1] == ':' {
 		if i+2 < len(opts) && opts[i+2] == ':' {
 			// An optional argument: only in the same argv element.
 			if Load8(st.nextchar) != 0 {
-				StorePtr(optargObj, st.nextchar)
+				StorePtr(OptargObj, st.nextchar)
 				setOptind(optind + 1)
 			}
 		} else if Load8(st.nextchar) != 0 {
-			StorePtr(optargObj, st.nextchar)
+			StorePtr(OptargObj, st.nextchar)
 			setOptind(optind + 1)
 		} else if optind == argc {
 			if printErrors {
 				getoptError("option requires an argument", arg(0), c)
 			}
-			Store32(optoptObj, uint32(c))
+			Store32(OptoptObj, uint32(c))
 			if len(opts) > 0 && opts[0] == ':' {
 				return ':'
 			}
 			return '?'
 		} else {
-			StorePtr(optargObj, arg(optind))
+			StorePtr(OptargObj, arg(optind))
 			setOptind(optind + 1)
 		}
 		st.nextchar = Ptr{}
@@ -231,7 +218,7 @@ func getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 
 // getoptError writes getopt's message, as glibc words it, on stderr.
 func getoptError(msg string, prog Ptr, c byte) {
-	fileOf(Stdio(2)).write([]byte(GoString(prog) + ": " + msg + " -- '" + string([]byte{c}) + "'\n"))
+	FileOf(Stdio(2)).Write([]byte(GoString(prog) + ": " + msg + " -- '" + string([]byte{c}) + "'\n"))
 }
 
 // option is C's struct option.
@@ -294,22 +281,22 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 						msg += " '" + prefix + p.name + "'"
 					}
 				}
-				fileOf(Stdio(2)).write([]byte(msg + "\n"))
+				FileOf(Stdio(2)).Write([]byte(msg + "\n"))
 			}
 			st.nextchar = Ptr{}
 			setOptind(optind + 1)
-			Store32(optoptObj, 0)
+			Store32(OptoptObj, 0)
 			return '?'
 		}
 	}
 	if found == nil {
 		if !longOnly || Load8(Add(arg(optind), 1)) == '-' || strings.IndexByte(opts, Load8(st.nextchar)) < 0 {
 			if printErrors {
-				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": unrecognized option '" + prefix + rest + "'\n"))
+				FileOf(Stdio(2)).Write([]byte(GoString(arg(0)) + ": unrecognized option '" + prefix + rest + "'\n"))
 			}
 			st.nextchar = Ptr{}
 			setOptind(optind + 1)
-			Store32(optoptObj, 0)
+			Store32(OptoptObj, 0)
 			return '?'
 		}
 		return -1
@@ -319,23 +306,23 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 	st.nextchar = Ptr{}
 	if hasValue {
 		if found.hasArg != 0 {
-			StorePtr(optargObj, Add(arg(optind-1), len(prefix)+len(name)+1))
+			StorePtr(OptargObj, Add(arg(optind-1), len(prefix)+len(name)+1))
 		} else {
 			if printErrors {
-				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' doesn't allow an argument\n"))
+				FileOf(Stdio(2)).Write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' doesn't allow an argument\n"))
 			}
-			Store32(optoptObj, uint32(found.val))
+			Store32(OptoptObj, uint32(found.val))
 			return '?'
 		}
 	} else if found.hasArg == 1 {
 		if optind < argc {
-			StorePtr(optargObj, arg(optind))
+			StorePtr(OptargObj, arg(optind))
 			setOptind(optind + 1)
 		} else {
 			if printErrors {
-				fileOf(Stdio(2)).write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' requires an argument\n"))
+				FileOf(Stdio(2)).Write([]byte(GoString(arg(0)) + ": option '" + prefix + found.name + "' requires an argument\n"))
 			}
-			Store32(optoptObj, uint32(found.val))
+			Store32(OptoptObj, uint32(found.val))
 			if len(opts) > 0 && opts[0] == ':' {
 				return ':'
 			}
@@ -350,17 +337,4 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 		return 0
 	}
 	return found.val
-}
-
-// GetoptLong is getopt_long: getopt, and the long options --name,
-// --name=value and --name value (or abbreviations of name that are not
-// ambiguous) of longopts.
-func GetoptLong(argc int32, argv, optstring, longopts, longind Ptr) int32 {
-	return getopt(argc, argv, optstring, longopts, longind, false)
-}
-
-// GetoptLongOnly is getopt_long_only: getopt_long, where -name is a long
-// option too, unless it is a short option of optstring.
-func GetoptLongOnly(argc int32, argv, optstring, longopts, longind Ptr) int32 {
-	return getopt(argc, argv, optstring, longopts, longind, true)
 }

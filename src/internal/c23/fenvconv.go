@@ -20,7 +20,7 @@ import (
 // 'x', rounded in the thread's direction: as a negative number's if
 // negated (printf formats the magnitude).
 func fmtFloat(v float64, fmt byte, prec int, negated bool) string {
-	d := curRound()
+	d := CurRound()
 	if d == FeToNearest || prec < 0 || math.IsInf(v, 0) || math.IsNaN(v) {
 		return strconv.FormatFloat(v, fmt, prec, 64)
 	}
@@ -97,13 +97,13 @@ func roundDigits(ds string, n int, up bool) (string, bool) {
 // parseFloat is strconv.ParseFloat(s, bits) rounded in the thread's
 // direction: strconv's result, rounded to nearest, or the number next to
 // it on the side of s's exact value.
-func parseFloat(s string, bits int) (float64, error) {
+func ParseFloat(s string, bits int) (float64, error) {
 	f, err := strconv.ParseFloat(s, bits)
 	overflow := err != nil && err.(*strconv.NumError).Err == strconv.ErrRange
 	if err != nil && !overflow || math.IsNaN(f) {
 		return f, err
 	}
-	d := curRound()
+	d := CurRound()
 	if d == FeToNearest || math.IsInf(f, 0) && !overflow {
 		return f, err // an infinity spelled out is exact
 	}

@@ -29,9 +29,9 @@ func init() { setStackMove(stackMove) }
 type gTable struct {
 	e    []gEntry
 	tls  map[*TLS]Ptr   // the goroutine's _Thread_local objects (thread.go)
-	keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
+	Keys map[uint32]Ptr // its pthread_setspecific values (thread.go)
 	fe   fenvState      // its floating-point environment (fenv.go)
-	sig  *sigThread     // its signal state (sigaction.go)
+	Sig  *SigThread     // its signal state (sigaction.go)
 }
 
 type gEntry struct {

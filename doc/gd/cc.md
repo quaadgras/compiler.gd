@@ -457,11 +457,9 @@ objects and `stdatomic.h` use `sync/atomic`, or a lock for small objects
 and pointers.
 
 Sockets (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `netdb.h`,
-`sys/un.h`) are `net`'s listeners and connections, in a package of their
-own, internal/c23/sock, which the generated Go imports only if it calls
-one of its functions (cmd/go adds the import when the package's C
-includes one of those headers), so that C without sockets does not link
-`net`. They are descriptors of internal/c23's table, as files are, so
+`sys/un.h`) are `net`'s listeners and connections, in
+internal/c23/sys/socket (and netdb, arpa/inet, netinet/in, net/if; only
+sys/socket, netdb and net/if link `net`). They are descriptors of internal/c23's table, as files are, so
 `read`, `write`, `close`, `dup`, `fdopen` and `fcntl`'s `O_NONBLOCK` work
 on them. Go has no readiness, so `poll` and `select` have one of their
 own: a descriptor whose reads may block (a socket's connection, a pipe, a
@@ -474,9 +472,19 @@ block until Go has written. Names resolve with Go's resolver;
 data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
 cannot set (kept for `getsockopt`, otherwise ignored).
 
-C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
-`uchar.go`, `time.go`, `errno.go`, `thread.go`, `threads.go`), with C prototypes in the
-headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
+C's library is Go: internal/c23, the run-time support of the generated
+Go (memory and capabilities, errno, descriptors, threads' storage, the
+floating-point environment), and a package for each header with
+functions, named after it: internal/c23/stdio, internal/c23/sys/socket
+and so on (a function that more than one header declares is in the
+first's). The generated Go imports internal/c23 and the packages whose
+functions it calls (libcpkg.go), so a program links only the library it
+uses; cmd/go lists them all as the dependencies of a package it builds
+with cmd/cc, and the linker takes only those imported. A header's
+helpers are in its package, those that two need in internal/c23.
+
+The C prototypes are in the headers cmd/cc provides (`headers.go`,
+`headers_*.go`); `TestLibc` and its kin compare the library with gcc's.
 
 `go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);
 `testdata/slimcc/status.txt` lists the 81 of 106 that pass. Given

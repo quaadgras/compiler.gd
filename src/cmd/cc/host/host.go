@@ -53,7 +53,7 @@ func Headers() []string {
 	return ccmain.Headers()
 }
 
-// SockHeaders are the headers whose functions are internal/c23/sock's:
-// Go generated from C that includes one may import that package as well
-// as internal/c23.
-func SockHeaders() []string { return ccmain.SockHeaders() }
+// LibcPackages returns the import paths of internal/c23's packages of
+// headers: the Go cmd/cc generates imports internal/c23 and those whose
+// functions it calls.
+func LibcPackages() []string { return ccmain.LibcPackages() }
