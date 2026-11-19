@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-var start = time.Now()
+var start = c23.MonoStart
 
 // Time is time: the seconds since the epoch, also stored at t if not null.
 func Time(t c23.Ptr) int64 {

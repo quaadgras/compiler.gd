@@ -293,4 +293,5 @@ int sem_unlink(const char *name);
 	} {
 		libc[k] = v
 	}
+	initEvents()
 }

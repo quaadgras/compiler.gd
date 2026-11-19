@@ -6,13 +6,8 @@ package unistd
 
 import (
 	c23 "internal/c23"
-	"sync"
 	"time"
 )
-
-const SIGALRM = 14
-
-const SI_KERNEL = 0x80
 
 // Pause is pause.
 func Pause() int32 {
@@ -21,34 +16,17 @@ func Pause() int32 {
 	return -1
 }
 
-var alarmMu sync.Mutex
-
-var alarmTimer *time.Timer
-
-var alarmAt time.Time
-
-// Alarm is alarm: SIGALRM is sent to the process seconds from now
-// (time.AfterFunc), and the result is the seconds left until the
+// Alarm is alarm: ITIMER_REAL (c23.SetITimer) set to seconds, which
+// sends SIGALRM to the process; the result is the seconds left until the
 // previous alarm, rounded as Linux does.
 func Alarm(seconds uint32) uint32 {
-	alarmMu.Lock()
-	defer alarmMu.Unlock()
-	var left uint32
-	if alarmTimer != nil && alarmTimer.Stop() {
-		d := alarmAt.Sub(time.Now())
-		if d > 0 {
-			left = uint32(d / 1e9)
-			if d%1e9 >= 5e8 || left == 0 {
-				left++
-			}
-		}
+	d, _ := c23.SetITimer(0, time.Duration(seconds)*time.Second, 0)
+	if d <= 0 {
+		return 0
 	}
-	alarmTimer = nil
-	if seconds > 0 {
-		alarmAt = time.Now().Add(time.Duration(seconds) * time.Second)
-		alarmTimer = time.AfterFunc(time.Duration(seconds)*time.Second, func() {
-			c23.SigSendProcess(SIGALRM, c23.SigInfo{Code: SI_KERNEL}, nil)
-		})
+	left := uint32(d / time.Second)
+	if d%time.Second >= time.Second/2 || left == 0 {
+		left++
 	}
 	return left
 }

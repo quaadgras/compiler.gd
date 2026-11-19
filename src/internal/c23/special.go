@@ -19,8 +19,8 @@ import (
 
 // poll's events (poll.h, Linux's values).
 const (
-	POLLIN = 0x1
-
+	POLLIN  = 0x1
+	POLLPRI = 0x2
 	POLLOUT = 0x4
 	POLLERR = 0x8
 	POLLHUP = 0x10
@@ -110,6 +110,7 @@ type ReadAhead struct {
 	buf  []byte
 	err  error // what ended reading, once buf is empty
 	src  io.Reader
+	n    uint64 // the reads that brought data or the end (Arrivals)
 }
 
 const readAheadMax = 64 << 10
@@ -136,6 +137,7 @@ func (ra *ReadAhead) run() {
 		if err != nil {
 			ra.err = err
 		}
+		ra.n++
 		ra.cond.Broadcast()
 		ra.mu.Unlock()
 		PollNotify()
@@ -194,6 +196,31 @@ func (ra *ReadAhead) Readable() (ready, end bool) {
 	ra.mu.Lock()
 	defer ra.mu.Unlock()
 	return len(ra.buf) > 0 || ra.err != nil, len(ra.buf) == 0 && ra.err != nil
+}
+
+// Arrivals counts what arrived: each read ahead that brought data or the
+// end. epoll's edge trigger reports a descriptor again when it changed.
+func (ra *ReadAhead) Arrivals() uint64 {
+	ra.mu.Lock()
+	defer ra.mu.Unlock()
+	return ra.n
+}
+
+// Arrivals counts what arrived at the open file, as its read ahead or its
+// Special (if that has an Arrivals method) counts it, for epoll's edge
+// trigger: a descriptor whose readiness stays the same is reported again
+// when the count changed.
+func (of *Ofile) Arrivals() uint64 {
+	if of.Sp != nil {
+		if a, ok := of.Sp.(interface{ Arrivals() uint64 }); ok {
+			return a.Arrivals()
+		}
+		return 0
+	}
+	if ra := of.readAhead(false); ra != nil {
+		return ra.Arrivals()
+	}
+	return 0
 }
 
 // Buffered returns how many bytes a read may take without waiting.

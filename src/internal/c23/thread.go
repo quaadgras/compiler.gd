@@ -55,6 +55,7 @@ type Thread struct {
 	done chan struct{}
 	Ret  Ptr   // pthread_exit's value, or the start routine's
 	Res  int32 // thrd_exit's, or a <threads.h> start routine's
+	Sig  *SigThread
 }
 
 var (
@@ -75,6 +76,7 @@ func Spawn(thr Ptr, run func(t *Thread)) {
 	StoreLong(thr, int64(id)) // pthread_t is unsigned long
 	fe := inheritFenv()
 	sig := sigInherit()
+	t.Sig = sig
 	go func() {
 		Store64(ThreadID.Get(), id)
 		GSelf().fe = fe
