@@ -361,6 +361,49 @@ func TestFsinfo(t *testing.T) {
 	}
 }
 
+// TestPxFiles compares the rest of POSIX's files and system interfaces
+// (testdata/pxfiles.c: the *at functions, dirent.h's, dup3 and pipe2,
+// stream locks, limits, shared memory objects, the user, group and
+// network databases, pseudo-terminals) with the host's C library. Both
+// programs run in a directory of their own, where they make files.
+func TestPxFiles(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/pxfiles.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "pxfiles")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir()
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	ccbin := filepath.Join(t.TempDir(), "pxfiles")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestProc compares processes, signals, scheduling and semaphores
 // (sys/wait.h, spawn.h, the exec family, sigaction, sched.h,
 // semaphore.h) with the host's C library.

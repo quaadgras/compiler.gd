@@ -33,3 +33,7 @@ func getpgrp(f *os.File) (int32, error) { return 0, errNotTTY }
 func setpgrp(f *os.File, pgrp int32) error { return errNotTTY }
 
 func getsid(f *os.File) (int32, error) { return 0, errNotTTY }
+
+func getwinsize(f *os.File) ([4]uint16, error) { return [4]uint16{}, errNotTTY }
+
+func setwinsize(f *os.File, ws *[4]uint16) error { return errNotTTY }

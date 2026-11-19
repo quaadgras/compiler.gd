@@ -402,4 +402,5 @@ int iconv_close(iconv_t cd);
 	} {
 		libc[k] = v
 	}
+	initPxFiles()
 }
