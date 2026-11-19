@@ -696,7 +696,7 @@ func sharecheck(p unsafe.Pointer) {
 //
 // The first page counts from the start (mallocinit): nil is not a local
 // object, and what is appended to a nil slice is not known to stay.
-var otherPages [1 << 20]uint32
+var otherPages [otherPagesLen]uint32
 
 // otherPagesAdd adds delta to the numbers of the npages pages from base.
 func otherPagesAdd(base, npages uintptr, delta int32) {
@@ -704,7 +704,7 @@ func otherPagesAdd(base, npages uintptr, delta int32) {
 		return
 	}
 	for i := uintptr(0); i < npages; i++ {
-		atomic.Xadd(&otherPages[(base>>gc.PageShift+i)&uintptr(len(otherPages)-1)], delta)
+		atomic.Xadd(&otherPages[(base>>gc.PageShift+i)%otherPagesMod], delta)
 	}
 }
 
@@ -713,7 +713,7 @@ func otherPagesAdd(base, npages uintptr, delta int32) {
 //
 //go:nosplit
 func isLocalObject(p unsafe.Pointer) bool {
-	return localSpans && atomic.Load(&otherPages[uintptr(p)>>gc.PageShift&uintptr(len(otherPages)-1)]) == 0
+	return localSpans && atomic.Load(&otherPages[uintptr(p)>>gc.PageShift%otherPagesMod]) == 0
 }
 
 // localType returns typ tagged for the allocation functions that take

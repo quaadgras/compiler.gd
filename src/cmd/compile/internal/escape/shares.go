@@ -523,7 +523,7 @@ func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 // The runtime's table of the pages that hold something else than local
 // objects (runtime.otherPages): its size and the shift of a page.
 const (
-	otherPagesLen   = 1 << 20
+	otherPagesLen   = 1 << 23
 	otherPagesShift = 13
 )
 

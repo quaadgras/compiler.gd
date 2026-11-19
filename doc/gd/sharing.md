@@ -295,14 +295,18 @@ because the callee is unknown.
   `otherPages`). amd64 and arm64 on linux, darwin, freebsd, windows.
   Each size class has a second span class, for local objects, so a page
   of the heap has local objects or other ones, never both. A table
-  (`otherPages`, 2^20 numbers, indexed by the page's address modulo its
+  (`otherPages`, 2^23 numbers, indexed by the page's address modulo its
   size) counts, for each place, the pages there that hold something else
   than local objects: the spans of the other classes, the stacks, the
   globals, and the first page (nil). A pointer whose page has zero points
-  to a local object: one load in compiled code. Two pages 8 GiB apart
+  to a local object: one load in compiled code. Two pages 64 GiB apart
   have the same place, so in a heap that is spread wider some local
   objects are not known to be (and what is stored in them is then
-  shared, which is safe). The size-specialized mallocs and the tiny
+  shared, which is safe). The table is 32 MB of zeroes that are only
+  touched for the pages of the heap, four bytes for 8 KiB; it has no
+  size where there are no spans of local objects (wasm). The limit
+  would go with a bit per page in the arenas' own tables, at the price
+  of two or three dependent loads for one. The size-specialized mallocs and the tiny
   allocator are for the other objects only for now.
 - **Entry points**. A type descriptor passed to `newobject`, `mallocgc`,
   `makeslice*`, `growslice*` may be tagged (bit 0, `allocType`): the object
@@ -330,7 +334,7 @@ because the callee is unknown.
   objects. Allowed containers: the one of the allocation's own
   statement (a plain assignment; without a call if the path loads), and a
   parameter that is never assigned. `ir.LocalTag` holds the expression
-  (`(otherPages[uintptr(P)>>13 & (1<<20-1)] - 1) >> 63`, `escape`'s
+  (`(otherPages[uintptr(P)>>13 & (1<<23-1)] - 1) >> 63`, `escape`'s
   `localTest`), which the code generator
   adds to the type descriptor. `-d=nolocaldyn` turns it off. For Phase G
   these containers are the heap (`isDynRoot`).

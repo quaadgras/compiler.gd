@@ -304,6 +304,18 @@ const (
 		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows == 1) &&
 		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled
 
+	// otherPagesLen is the size of the table that says which pages
+	// hold local objects (shared.go): for 64 GiB of addresses, after
+	// which two pages have the same place in it. Nothing where there
+	// are no spans of local objects. The compiler has the number too
+	// (escape's otherPagesLen).
+	otherPagesOn  = (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows)
+	otherPagesLen = 1 << 23 * otherPagesOn
+
+	// otherPagesMod is otherPagesLen, a power of two, or one where the
+	// table has no size and is not read.
+	otherPagesMod = otherPagesLen + 1 - otherPagesOn
+
 	// arenaBaseOffset is the pointer value that corresponds to
 	// index 0 in the heap arena map.
 	//
@@ -728,7 +740,7 @@ func mallocinit() {
 	}
 	if localSpans {
 		// Nil is not a local object (shared.go).
-		otherPages[0] = 1
+		otherPagesAdd(0, 1, 1)
 	}
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.
