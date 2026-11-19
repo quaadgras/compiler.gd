@@ -482,6 +482,26 @@ terminal's on Linux (with the generic termios: not mips, ppc64) and
 macOS (translated to and from its struct and flags), with Linux's
 struct and constants; elsewhere no descriptor is a terminal (`ENOTTY`).
 
+Linux's event descriptors are descriptors of the same kind, on every
+target: `epoll` (internal/c23/sys/epoll) finds its interests ready with
+`poll`'s readiness, level-triggered, or with `EPOLLET` when something
+became ready or arrived (data read ahead, an `eventfd` write, a timer's
+expiry) since it last reported them, and `EPOLLONESHOT`; an epoll
+descriptor is itself pollable. `struct epoll_event` is 16 bytes
+everywhere: Linux packs it on x86-64 (12 bytes), where `epoll_data`'s
+pointer would be unaligned, and an unaligned pointer cannot keep its
+capability. `eventfd` is a counter, `timerfd` a `time.Timer` (on Go's
+monotonic clock, also for `CLOCK_REALTIME`), and `signalfd` reads the
+signals of its mask pending for the reading thread or the process, as
+`sigwait` takes them. `setitimer`'s three timers count wall time;
+`ITIMER_REAL` is `alarm`'s. `wait4` gives a child's times (and the rest
+of `struct rusage` where the system has it); `waitid` reports only ends,
+and `P_PGID` is any child. `sigqueue` carries its value only to the
+program's own process, and signals are not queued (one pending is sent
+once). `pthread_kill` of another thread that does not block the signal
+runs the handler on a goroutine of its own, as the program's other
+signals; `sigaltstack` and `siginterrupt` are kept and change nothing.
+
 C's library is Go: internal/c23, the run-time support of the generated
 Go (memory and capabilities, errno, descriptors, threads' storage, the
 floating-point environment), and a package for each header with

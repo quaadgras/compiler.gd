@@ -349,6 +349,41 @@ func TestProc(t *testing.T) {
 	}
 }
 
+// TestEvents compares epoll, eventfd, timerfd, signalfd, waitid and
+// wait4, sigtimedwait and its kin, pthread_kill, sigaltstack and
+// setitimer (testdata/events.c) with the host's C library, on Linux.
+func TestEvents(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the host's C library has epoll only on Linux")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/events.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "events")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes a file
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestInterop checks what Go and C may do with each other's pointers: an
 // ordinary cgo package (testdata/interop), which go build compiles with
 // cmd/cc because cgo is off, natively and on wasm (with node).

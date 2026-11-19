@@ -624,6 +624,17 @@ func (s *socket) Close() error {
 
 func (s *socket) Mode() uint32 { return sIFSOCK | 0o777 }
 
+// Arrivals counts the reads ahead of a stream, for epoll's edge trigger.
+func (s *socket) Arrivals() uint64 {
+	s.mu.Lock()
+	ra := s.ra
+	s.mu.Unlock()
+	if ra == nil {
+		return 0
+	}
+	return ra.Arrivals()
+}
+
 func (s *socket) Ready() int16 {
 	s.mu.Lock()
 	defer s.mu.Unlock()

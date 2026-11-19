@@ -72,6 +72,7 @@ type SigAction struct {
 // A sigInfo is what siginfo_t tells of a signal.
 type SigInfo struct {
 	Code, Pid, Uid, Status int32
+	Value                  Ptr // si_value, of sigqueue
 }
 
 // A sigThread is a thread's signal state.
@@ -193,6 +194,7 @@ func SigSendProcess(sig int32, info SigInfo, self *SigThread) {
 	sigInfos[sig] = info
 	SigCond.Broadcast()
 	SigMu.Unlock()
+	PollNotify() // a signalfd may be readable
 }
 
 // run takes sig's action on t, the calling thread: its handler runs with
@@ -228,6 +230,7 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 		Store32(Add(si, 12), uint32(info.Pid))
 		Store32(Add(si, 16), uint32(info.Uid))
 		Store32(Add(si, 20), uint32(info.Status))
+		StorePtr(Add(si, SigInfoValueOff), info.Value)
 		FuncOf[func(int32, Ptr, Ptr)](act.Handler)(sig, si, Ptr{})
 		Free(si)
 	} else {
@@ -241,6 +244,41 @@ func (t *SigThread) Run(sig int32, info SigInfo) {
 // sizeof(siginfo_t): {int si_signo, si_errno, si_code; pid_t si_pid;
 // uid_t si_uid; int si_status; ...}.
 const sigInfoSize = 128
+
+// SigInfoSize is sizeof(siginfo_t) on the target: 116 bytes on wasm32.
+const SigInfoSize = 24 + 3*WordSize + 80
+
+// SigInfoValueOff is the offset of si_value in siginfo_t, after
+// void *si_addr at 24.
+const SigInfoValueOff = 24 + int(WordSize)
+
+// StoreSigInfo stores sig and info as siginfo_t at si, all of it.
+func StoreSigInfo(si Ptr, sig int32, info SigInfo) {
+	Memset(si, 0, uint64(SigInfoSize))
+	Store32(si, uint32(sig))
+	Store32(Add(si, 8), uint32(info.Code))
+	Store32(Add(si, 12), uint32(info.Pid))
+	Store32(Add(si, 16), uint32(info.Uid))
+	Store32(Add(si, 20), uint32(info.Status))
+	StorePtr(Add(si, SigInfoValueOff), info.Value)
+}
+
+// Take takes the lowest signal of w pending for t or for the process,
+// t's first, and returns it and what siginfo_t tells of it; 0 if none
+// is. SigMu is held.
+func (t *SigThread) Take(w uint64) (int32, SigInfo) {
+	if r := t.Pending & w; r != 0 {
+		sig := int32(bits.TrailingZeros64(r)) + 1
+		t.Pending &^= SigBit(sig)
+		return sig, t.info[sig]
+	}
+	if r := SigPending & w; r != 0 {
+		sig := int32(bits.TrailingZeros64(r)) + 1
+		SigPending &^= SigBit(sig)
+		return sig, sigInfos[sig]
+	}
+	return 0, SigInfo{}
+}
 
 // deliverPending runs the actions of the signals pending for t, the
 // calling thread, or the process that t's mask does not block, the
