@@ -5,12 +5,9 @@
 package types
 
 import (
-	"bytes"
 	"fmt"
 	"math"
-	"runtime"
 	"slices"
-	"strconv"
 	"sync"
 
 	"cmd/compile/internal/base"
@@ -361,29 +358,6 @@ func calcSizeReenter(t *Type) (reenter bool, release func()) {
 			delete(calcSizeInProgress, gid)
 		}
 	}
-}
-
-// calcSizeGoroutineID parses goroutine id out of runtime.Stack output.
-// Slow but only used on the Once-entry path when a Type isn't yet
-// calculated; cached results take the widthCalculated() fast path.
-func calcSizeGoroutineID() int64 {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	b := buf[:n]
-	const prefix = "goroutine "
-	if !bytes.HasPrefix(b, []byte(prefix)) {
-		return 0
-	}
-	b = b[len(prefix):]
-	end := bytes.IndexByte(b, ' ')
-	if end < 0 {
-		return 0
-	}
-	id, err := strconv.ParseInt(string(b[:end]), 10, 64)
-	if err != nil {
-		return 0
-	}
-	return id
 }
 
 // CalcSize calculates and stores the size, alignment, eq/hash algorithm,

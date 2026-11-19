@@ -8216,3 +8216,11 @@ func doInit1(t *initTask) {
 		t.state = 2 // initialization done
 	}
 }
+
+// compilerGoid returns the id of the goroutine, for the compiler, which
+// keeps what a goroutine is in the middle of (cmd/compile/internal/types).
+//
+//go:linkname compilerGoid
+func compilerGoid() int64 {
+	return int64(getg().goid)
+}

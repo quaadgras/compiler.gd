@@ -373,3 +373,9 @@ func unreachableMethod() {
 }
 
 var zerobase uintptr // the address of every zero-sized object
+
+// compilerGoid returns the id of the goroutine, for the compiler
+// (cmd/compile/internal/types).
+//
+//go:linkname compilerGoid
+func compilerGoid() int64 { return int64(curg.id) }
