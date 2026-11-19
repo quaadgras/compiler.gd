@@ -1867,7 +1867,7 @@ func asmbElf(ctxt *Link) {
 		phsh(ph, sh)
 	}
 
-	if ctxt.HeadType == objabi.Hnetbsd || ctxt.HeadType == objabi.Hopenbsd || ctxt.HeadType == objabi.Hfreebsd {
+	if ctxt.HeadType == objabi.Hnetbsd || ctxt.HeadType == objabi.Hopenbsd || ctxt.HeadType == objabi.Hfreebsd || ctxt.HeadType == objabi.Hape {
 		var sh *ElfShdr
 		switch ctxt.HeadType {
 		case objabi.Hnetbsd:
@@ -1878,7 +1878,9 @@ func asmbElf(ctxt *Link) {
 			sh = elfshname(ctxt, ".note.openbsd.ident")
 			resoff -= int64(elfopenbsdsig(sh, uint64(startva), uint64(resoff)))
 
-		case objabi.Hfreebsd:
+		case objabi.Hfreebsd, objabi.Hape:
+			// A GOOS=ape program is a FreeBSD program too; Linux
+			// does not look at the note or the OS ABI.
 			sh = elfshname(ctxt, ".note.tag")
 			resoff -= int64(elffreebsdsig(sh, uint64(startva), uint64(resoff)))
 		}
@@ -2215,7 +2217,7 @@ elfobj:
 
 	var osabi elf.OSABI
 	switch ctxt.HeadType {
-	case objabi.Hfreebsd:
+	case objabi.Hfreebsd, objabi.Hape:
 		osabi = elf.ELFOSABI_FREEBSD
 	case objabi.Hnetbsd:
 		osabi = elf.ELFOSABI_NETBSD
@@ -2281,7 +2283,7 @@ elfobj:
 		if ctxt.HeadType == objabi.Hopenbsd {
 			a += int64(elfwriteopenbsdsig(ctxt, ctxt.Out))
 		}
-		if ctxt.HeadType == objabi.Hfreebsd {
+		if ctxt.HeadType == objabi.Hfreebsd || ctxt.HeadType == objabi.Hape {
 			a += int64(elfwritefreebsdsig(ctxt, ctxt.Out))
 		}
 		if len(ctxt.buildinfoData) > 0 {
