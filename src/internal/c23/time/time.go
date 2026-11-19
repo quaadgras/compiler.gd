@@ -77,11 +77,11 @@ func setTm(p c23.Ptr, t time.Time) bool {
 }
 
 // Mktime is mktime: the time the struct tm at p holds, as local time
-// (Go's time.Local), whose members it normalizes. tm_isdst is not used:
+// (TZ's, local), whose members it normalizes. tm_isdst is not used:
 // a local time that a change of offset makes ambiguous is the one Go's
 // time.Date chooses.
 func Mktime(p c23.Ptr) int64 {
-	t := tmTime(p, time.Local)
+	t := tmTime(p, local())
 	if !setTm(p, t) {
 		return -1
 	}
@@ -127,9 +127,9 @@ func GmtimeR(t, p c23.Ptr) c23.Ptr {
 	return p
 }
 
-// LocaltimeR is localtime_r, in Go's time.Local.
+// LocaltimeR is localtime_r, in TZ's time (local).
 func LocaltimeR(t, p c23.Ptr) c23.Ptr {
-	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).In(time.Local)) {
+	if !setTm(p, time.Unix(int64(c23.Load64(t)), 0).In(local())) {
 		return c23.Ptr{}
 	}
 	return p
@@ -160,17 +160,22 @@ func abbr(s string) string { return s[:min(3, len(s))] }
 // next call of asctime or ctime reuses.
 func Asctime(p c23.Ptr) c23.Ptr {
 	statics()
-	b := append(strftime("%a %b", p), pad(tmGet(p, tmMday), 3, ' ')...)
-	b = append(b, ' ')
-	b = append(b, strftime("%H:%M:%S ", p)...)
-	b = strconv.AppendInt(b, int64(tmGet(p, tmYear))+1900, 10)
-	b = append(b, '\n', 0)
+	b := asctime(p)
 	if len(b) > 32 {
 		c23.SetErrno(c23.EOVERFLOW)
 		return c23.Ptr{}
 	}
 	copy(c23.BytesAt(ascBuf, uintptr(len(b))), b)
 	return ascBuf
+}
+
+// asctime is asctime's string, with its null.
+func asctime(p c23.Ptr) []byte {
+	b := append(strftime("%a %b", p), pad(tmGet(p, tmMday), 3, ' ')...)
+	b = append(b, ' ')
+	b = append(b, strftime("%H:%M:%S ", p)...)
+	b = strconv.AppendInt(b, int64(tmGet(p, tmYear))+1900, 10)
+	return append(b, '\n', 0)
 }
 
 // Ctime is ctime: asctime(localtime(t)).
@@ -183,7 +188,7 @@ func Ctime(t c23.Ptr) c23.Ptr {
 }
 
 // Strftime is strftime, in the C locale: the E and O modifiers have no
-// effect, and %z and %Z are those of Go's time.Local at the time p holds
+// effect, and %z and %Z are those of TZ's zone (local) at the time p holds
 // (none if tm_isdst is negative): struct tm has no zone.
 func Strftime(s c23.Ptr, max uint64, format, p c23.Ptr) uint64 {
 	b := strftime(c23.GoString(format), p)
@@ -333,7 +338,7 @@ func strftime(f string, p c23.Ptr) []byte {
 			b = strconv.AppendInt(b, int64(year), 10)
 		case 'z':
 			if tmGet(p, tmIsdst) >= 0 {
-				_, off := tmTime(p, time.Local).Zone()
+				_, off := tmTime(p, local()).Zone()
 				sign := byte('+')
 				if off < 0 {
 					sign, off = '-', -off
@@ -343,7 +348,7 @@ func strftime(f string, p c23.Ptr) []byte {
 			}
 		case 'Z':
 			if tmGet(p, tmIsdst) >= 0 {
-				name, _ := tmTime(p, time.Local).Zone()
+				name, _ := tmTime(p, local()).Zone()
 				b = append(b, name...)
 			}
 		case '%':

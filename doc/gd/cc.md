@@ -524,6 +524,29 @@ Go's net package knows without one); `if_nameindex` is
 elsewhere), as are `tcgetwinsize` and `tcsetwinsize`; `_Fork` fails as
 `fork` does.
 
+Locales: the library has "C" (or "POSIX") and "C.UTF-8" (or "C.utf8"),
+which behave alike (C's multibyte characters are UTF-8's already);
+`newlocale` fails with `ENOENT` for any other name, as glibc does for a
+locale it has not installed (musl accepts any name), and `""` is the
+environment's, or C's. A `locale_t` says which categories are C.UTF-8's;
+`uselocale` keeps one for each thread. The `_l` functions are the plain
+ones, whatever the locale. `wcwidth` is glibc's in a UTF-8 locale, from
+Unicode 15.1's East Asian widths (a table, as Go's unicode has none) and
+Go's tables of marks and format characters. `random` and `rand_r` are
+glibc's (musl's numbers differ), `a64l` sign-extends as POSIX says,
+`crypt` has MD5-, SHA-256- and SHA-512-crypt and DES (not bcrypt or
+yescrypt), `strptime` is glibc's in the C locale (`%z` and `%Z` are read
+and dropped: `struct tm` has no `tm_gmtoff`), and `inet_network`,
+`inet_lnaof` and `inet_makeaddr` are glibc's (musl's are not in the
+network's byte order). `tzset`, and `localtime` when `TZ` changes, read
+`TZ` as a zone's name (Go's `time.LoadLocation`) or as a POSIX TZ string
+(Go's reading of a zone file's footer); `tzname`, `timezone` and
+`daylight` are this year's. `mbsnrtowcs` leaves a character its limit
+splits for the next call, rather than keeping its bytes in the
+`mbstate_t`, and `open_wmemstream`'s positions count wide characters.
+`strerror_r` is POSIX's, returning a number, unless `_GNU_SOURCE` is
+defined.
+
 `regex.h` is a matcher of its own (internal/c23/regex), not Go's
 `regexp`: POSIX's basic and extended syntax with glibc's GNU operators
 and error codes, back-references in both, and the leftmost-longest match

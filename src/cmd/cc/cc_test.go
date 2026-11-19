@@ -241,6 +241,52 @@ str2sig 9 0 9, bad -1, SIGINT -1
 	}
 }
 
+// TestPxLocale compares locale objects and the _l functions, wide
+// characters' widths, and POSIX's string, random number, crypt, time,
+// Bessel and inet functions (testdata/pxlocale.c) with the host's C
+// library.
+func TestPxLocale(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/pxlocale.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "pxlocale")
+	// glibc's crypt is libcrypt's, musl's libc's.
+	args := []string{"-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lm"}
+	if out, err := exec.Command(gcc, append(args, "-lcrypt")...).CombinedOutput(); err != nil {
+		if out2, err := exec.Command(gcc, args...).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s%s", err, out, out2)
+		}
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program makes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ccbin := filepath.Join(t.TempDir(), "pxlocale")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.

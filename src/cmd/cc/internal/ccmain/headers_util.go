@@ -349,6 +349,7 @@ typedef int nl_item;
 #define YESEXPR 0x50000
 #define NOEXPR 0x50001
 char *nl_langinfo(nl_item item);
+char *nl_langinfo_l(nl_item item, locale_t locale);
 #endif
 `
 	sysHeaders["iconv.h"] = `#ifndef __CC_ICONV_H

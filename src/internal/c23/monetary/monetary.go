@@ -146,3 +146,9 @@ func store(s Ptr, maxsize uint64, format Ptr, va []any) int64 {
 func Strfmon(s Ptr, maxsize uint64, format Ptr, va ...any) int64 {
 	return store(s, maxsize, format, va)
 }
+
+// StrfmonL is strfmon_l, which is strfmon: the library's locales have
+// the same conventions (internal/c23/locale).
+func StrfmonL(s Ptr, maxsize uint64, _ Ptr, format Ptr, va ...any) int64 {
+	return store(s, maxsize, format, va)
+}
