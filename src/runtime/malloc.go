@@ -736,8 +736,37 @@ func mallocinit() {
 		userArenaHint.next, mheap_.userArena.arenaHints = mheap_.userArena.arenaHints, userArenaHint
 	}
 	if heapSplit && mheap_.arenaHints != nil {
-		// The local range is at the first hint, and the rest of
-		// the heap begins after it.
+		// The local range is at a hint, and the rest of the heap
+		// begins after it: at the first hint after whose range the
+		// kernel gives an address. (The hints assume more address
+		// space than some systems give; where a range ends with
+		// it, the rest of the heap would have nowhere to be.)
+		var first *arenaHint
+		for prev, hint := (*arenaHint)(nil), mheap_.arenaHints; hint != nil; prev, hint = hint, hint.next {
+			p := hint.addr + localHeapSize
+			if hint.down || p < hint.addr || arenaIndex(p+heapArenaBytes-1) >= 1<<arenaBits {
+				continue
+			}
+			v := sysReserve(unsafe.Pointer(p), heapArenaBytes, "heap reservation")
+			if v != nil {
+				sysUnreserve(v, heapArenaBytes)
+			}
+			if uintptr(v) != p {
+				continue
+			}
+			if prev != nil {
+				prev.next = hint.next
+				hint.next, mheap_.arenaHints = mheap_.arenaHints, hint
+			}
+			first = hint
+			break
+		}
+		if first == nil {
+			// No local range: everything is allocated together.
+			mheap_.localFull[1], mheap_.localFull[2] = true, true
+		}
+	}
+	if heapSplit && mheap_.arenaHints != nil && !mheap_.localFull[1] {
 		first := mheap_.arenaHints
 		localHeapBase = first.addr
 		first.addr += localHeapSize
@@ -753,6 +782,26 @@ func mallocinit() {
 	// Initialize the memory limit here because the allocator is going to look at it
 	// but we haven't called gcinit yet and we're definitely going to allocate memory before then.
 	gcController.memoryLimit.Store(math.MaxInt64)
+}
+
+// dropLocalRange gives up the local range, which nothing is in yet: no
+// address is local any more, for the allocator and for the code that
+// tests one (localHeapBase).
+//
+// h must be locked.
+func (h *mheap) dropLocalRange() {
+	assertLockHeld(&h.lock)
+	localHeapBase = ^uintptr(0) >> 1
+	h.pages.mid, h.pages.split = 0, 0
+	for region := 1; region <= 2; region++ {
+		for hint := h.localHints[region]; hint != nil; {
+			next := hint.next
+			h.arenaHintAlloc.free(unsafe.Pointer(hint))
+			hint = next
+		}
+		h.localHints[region] = nil
+		h.localFull[region] = true
+	}
 }
 
 // sysAlloc allocates heap arena space for at least n bytes. The
@@ -853,10 +902,9 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 		if v != nil && uintptr(v) < h.pages.split {
 			// Not below the end of the local range: the page
 			// allocator looks there for local memory only. Where
-			// the kernel gives low addresses by itself (windows),
-			// ask for those after the range, one by one.
-			sysUnreserve(v, size)
-			v, size = nil, 0
+			// the kernel gives low addresses by itself (windows,
+			// darwin), ask for those after the range, one by one.
+			var pv unsafe.Pointer
 			for i := uintptr(1); ; i++ {
 				p := alignUp(h.pages.split, heapArenaBytes) + i<<36
 				if p+n < p || arenaIndex(p+n-1) >= 1<<arenaBits {
@@ -864,12 +912,29 @@ func (h *mheap) sysAlloc(n uintptr, hintList **arenaHint, arenaList *[]arenaIdx)
 				}
 				got := sysReserve(unsafe.Pointer(p), n, "heap")
 				if uintptr(got) == p {
-					v, size = got, n
+					pv = got
 					break
 				}
 				if got != nil {
 					sysUnreserve(got, n)
 				}
+			}
+			switch {
+			case pv != nil:
+				sysUnreserve(v, size)
+				v, size = pv, n
+			case h.curArenas[1].base == 0 && h.curArenas[2].base == 0:
+				// There is nothing after the range that the
+				// kernel gives (the range is where the address
+				// space ends, or what can be had of it is less
+				// than its hints assume), and nothing is in the
+				// range yet: do without it. Every object is then
+				// allocated with the rest, where it counts as
+				// shared.
+				h.dropLocalRange()
+			default:
+				sysUnreserve(v, size)
+				v, size = nil, 0
 			}
 		}
 		if v == nil {
