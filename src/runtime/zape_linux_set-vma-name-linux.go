@@ -9,8 +9,8 @@
 package runtime
 
 import (
-	linux "ape/linux/internal/runtime/syscall/linux"
 	"internal/runtime/atomic"
+	"internal/runtime/syscall/linux"
 	"unsafe"
 )
 
@@ -30,7 +30,7 @@ func linux_setVMAName(start unsafe.Pointer, length uintptr, name string) {
 	n := copy(sysName[:], " Go: ")
 	copy(sysName[n:79], name) // leave final byte zero
 
-	_, _, err := linux.Syscall6(linux.SYS_PRCTL, linux.PR_SET_VMA, linux.PR_SET_VMA_ANON_NAME, uintptr(start), length, uintptr(unsafe.Pointer(&sysName[0])), 0)
+	_, _, err := linux.Linux_Syscall6(linux.Linux_SYS_PRCTL, linux.Linux_PR_SET_VMA, linux.Linux_PR_SET_VMA_ANON_NAME, uintptr(start), length, uintptr(unsafe.Pointer(&sysName[0])), 0)
 	if err == linux__EINVAL {
 		linux_prSetVMAUnsupported.Store(true)
 	}

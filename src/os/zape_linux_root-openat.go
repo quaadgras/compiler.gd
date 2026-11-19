@@ -155,7 +155,7 @@ func linux_rootMkdirAll(r *Root, fullname string, perm FileMode) error {
 					// succeed if the link resolves to a directory.
 					// We don't return errSymlink here, because we don't
 					// want to create the link target if it doesn't exist.
-					fi, e := r.Linux_Stat(fullname)
+					fi, e := r.Stat(fullname)
 					if e == nil && fi.Mode().IsDir() {
 						err = nil
 					} else if e == nil {
@@ -334,7 +334,7 @@ func linux_doInRoot[T any](r *Root, name string, flags uint, openDirFunc func(pa
 	}
 	defer r.root.linux_decref()
 
-	parts, endsInSlash, err := linux_splitPathInRoot(name, nil, nil)
+	parts, endsInSlash, err := splitPathInRoot(name, nil, nil)
 	if err != nil {
 		return ret, err
 	}
@@ -383,7 +383,7 @@ Loop:
 			}
 			count := end - i
 			if count > i {
-				return ret, linux_errPathEscapes
+				return ret, errPathEscapes
 			}
 			parts = slices.Delete(parts, i-count, end)
 			if len(parts) == 0 {
@@ -451,11 +451,11 @@ Loop:
 		case nil:
 		case errSymlink:
 			symlinks++
-			if symlinks > linux_rootMaxSymlinks {
+			if symlinks > rootMaxSymlinks {
 				return ret, syscall.Linux_ELOOP
 			}
 			lastPart := i == len(parts)-1
-			newparts, newEndsInSlash, err := linux_splitPathInRoot(string(e), parts[:i], parts[i+1:])
+			newparts, newEndsInSlash, err := splitPathInRoot(string(e), parts[:i], parts[i+1:])
 			if err != nil {
 				return ret, err
 			}

@@ -9,7 +9,7 @@
 package runtime
 
 import (
-	linux "ape/linux/internal/runtime/syscall/linux"
+	"internal/runtime/syscall/linux"
 	"unsafe"
 )
 
@@ -23,34 +23,34 @@ var (
 // a taggedPointer. A nil pd marks the netpollBreak eventfd: netpollopen always
 // registers a non-nil *pollDesc, so netpollUnpackData can tell the two apart
 // by the pointer alone, on any word size or endianness.
-func linux_netpollPackData(ev *linux.EpollEvent, pd *pollDesc, fdseq uintptr) {
+func linux_netpollPackData(ev *linux.Linux_EpollEvent, pd *pollDesc, fdseq uintptr) {
 	*(*taggedPointer)(unsafe.Pointer(&ev.Data)) = taggedPointerPack(unsafe.Pointer(pd), fdseq)
 }
 
 // netpollUnpackData returns the pollDesc and fdseq stored by netpollPackData.
 // pd is nil for the netpollBreak eventfd.
-func linux_netpollUnpackData(ev *linux.EpollEvent) (pd *pollDesc, fdseq uintptr) {
+func linux_netpollUnpackData(ev *linux.Linux_EpollEvent) (pd *pollDesc, fdseq uintptr) {
 	tp := *(*taggedPointer)(unsafe.Pointer(&ev.Data))
 	return (*pollDesc)(tp.pointer()), tp.tag()
 }
 
 func linux_netpollinit() {
 	var errno uintptr
-	linux_epfd, errno = linux.EpollCreate1(linux.EPOLL_CLOEXEC)
+	linux_epfd, errno = linux.Linux_EpollCreate1(linux.Linux_EPOLL_CLOEXEC)
 	if errno != 0 {
 		println("runtime: epollcreate failed with", errno)
 		throw("runtime: netpollinit failed")
 	}
-	efd, errno := linux.Eventfd(0, linux.EFD_CLOEXEC|linux.EFD_NONBLOCK)
+	efd, errno := linux.Linux_Eventfd(0, linux.Linux_EFD_CLOEXEC|linux.Linux_EFD_NONBLOCK)
 	if errno != 0 {
 		println("runtime: eventfd failed with", errno)
 		throw("runtime: eventfd failed")
 	}
-	ev := linux.EpollEvent{
-		Events: linux.EPOLLIN,
+	ev := linux.Linux_EpollEvent{
+		Events: linux.Linux_EPOLLIN,
 	}
 	linux_netpollPackData(&ev, nil, 0)
-	errno = linux.EpollCtl(linux_epfd, linux.EPOLL_CTL_ADD, efd, &ev)
+	errno = linux.Linux_EpollCtl(linux_epfd, linux.Linux_EPOLL_CTL_ADD, efd, &ev)
 	if errno != 0 {
 		println("runtime: epollctl failed with", errno)
 		throw("runtime: epollctl failed")
@@ -63,15 +63,15 @@ func linux_netpollIsPollDescriptor(fd uintptr) bool {
 }
 
 func linux_netpollopen(fd uintptr, pd *pollDesc) uintptr {
-	var ev linux.EpollEvent
-	ev.Events = linux.EPOLLIN | linux.EPOLLOUT | linux.EPOLLRDHUP | linux.EPOLLET
+	var ev linux.Linux_EpollEvent
+	ev.Events = linux.Linux_EPOLLIN | linux.Linux_EPOLLOUT | linux.Linux_EPOLLRDHUP | linux.Linux_EPOLLET
 	linux_netpollPackData(&ev, pd, pd.fdseq.Load())
-	return linux.EpollCtl(linux_epfd, linux.EPOLL_CTL_ADD, int32(fd), &ev)
+	return linux.Linux_EpollCtl(linux_epfd, linux.Linux_EPOLL_CTL_ADD, int32(fd), &ev)
 }
 
 func linux_netpollclose(fd uintptr) uintptr {
-	var ev linux.EpollEvent
-	return linux.EpollCtl(linux_epfd, linux.EPOLL_CTL_DEL, int32(fd), &ev)
+	var ev linux.Linux_EpollEvent
+	return linux.Linux_EpollCtl(linux_epfd, linux.Linux_EPOLL_CTL_DEL, int32(fd), &ev)
 }
 
 func linux_netpollarm(pd *pollDesc, mode int) {
@@ -129,9 +129,9 @@ func linux_netpoll(delay int64) (gList, int32) {
 		// 1e9 ms == ~11.5 days.
 		waitms = 1e9
 	}
-	var events [128]linux.EpollEvent
+	var events [128]linux.Linux_EpollEvent
 retry:
-	n, errno := linux.EpollWait(linux_epfd, events[:], int32(len(events)), waitms)
+	n, errno := linux.Linux_EpollWait(linux_epfd, events[:], int32(len(events)), waitms)
 	if errno != 0 {
 		if errno != linux__EINTR {
 			println("runtime: epollwait on fd", linux_epfd, "failed with", errno)
@@ -155,7 +155,7 @@ retry:
 		pd, tag := linux_netpollUnpackData(&ev)
 		// pd == nil denotes a netpollBreak eventfd.
 		if pd == nil {
-			if ev.Events != linux.EPOLLIN {
+			if ev.Events != linux.Linux_EPOLLIN {
 				println("runtime: netpoll: eventfd ready for", ev.Events)
 				throw("runtime: netpoll: eventfd ready for something unexpected")
 			}
@@ -173,15 +173,15 @@ retry:
 		}
 
 		var mode int32
-		if ev.Events&(linux.EPOLLIN|linux.EPOLLRDHUP|linux.EPOLLHUP|linux.EPOLLERR) != 0 {
+		if ev.Events&(linux.Linux_EPOLLIN|linux.Linux_EPOLLRDHUP|linux.Linux_EPOLLHUP|linux.Linux_EPOLLERR) != 0 {
 			mode += 'r'
 		}
-		if ev.Events&(linux.EPOLLOUT|linux.EPOLLHUP|linux.EPOLLERR) != 0 {
+		if ev.Events&(linux.Linux_EPOLLOUT|linux.Linux_EPOLLHUP|linux.Linux_EPOLLERR) != 0 {
 			mode += 'w'
 		}
 		if mode != 0 {
 			if pd.fdseq.Load() == tag {
-				pd.setEventErr(ev.Events == linux.EPOLLERR, tag)
+				pd.setEventErr(ev.Events == linux.Linux_EPOLLERR, tag)
 				delta += netpollready(&toRun, pd, mode)
 			}
 		}

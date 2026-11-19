@@ -68,18 +68,6 @@ var _ = runtime.GOARCH
 // It is safe to call Name after [Close].
 func (f *File) Linux_Name() string { return f.name }
 
-// Stdin, Stdout, and Stderr are open Files pointing to the standard input,
-// standard output, and standard error file descriptors.
-//
-// Note that the Go runtime writes to standard error for panics and crashes;
-// closing Stderr may cause those messages to go elsewhere, perhaps
-// to a file opened later.
-var (
-	Linux_Stdin  = Linux_NewFile(uintptr(syscall.Linux_Stdin), "/dev/stdin")
-	Linux_Stdout = Linux_NewFile(uintptr(syscall.Linux_Stdout), "/dev/stdout")
-	Linux_Stderr = Linux_NewFile(uintptr(syscall.Linux_Stderr), "/dev/stderr")
-)
-
 // Flags to OpenFile wrapping those of the underlying system. Not all
 // flags may be implemented on a given system.
 const (
@@ -214,8 +202,6 @@ func (f *File) Linux_Write(b []byte) (n int, err error) {
 	return n, err
 }
 
-var linux_errWriteAtInAppendMode = errors.New("os: invalid use of WriteAt on file opened with O_APPEND")
-
 // WriteAt writes len(b) bytes to the File starting at byte offset off.
 // It returns the number of bytes written and an error, if any.
 // WriteAt returns a non-nil error when n != len(b).
@@ -226,7 +212,7 @@ func (f *File) Linux_WriteAt(b []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 	if f.appendMode {
-		return 0, linux_errWriteAtInAppendMode
+		return 0, errWriteAtInAppendMode
 	}
 
 	if off < 0 {
@@ -391,8 +377,6 @@ func Linux_OpenFile(name string, flag int, perm FileMode) (*File, error) {
 	return f, nil
 }
 
-var linux_errPathEscapes = errors.New("path escapes from parent")
-
 // openDir opens a file which is assumed to be a directory. As such, it skips
 // the syscalls that make the file descriptor non-blocking as these take time
 // and will fail on file descriptors for directories.
@@ -429,10 +413,6 @@ func linux_fixCount(n int, err error) (int, error) {
 	return n, err
 }
 
-// checkWrapErr is the test hook to enable checking unexpected wrapped errors of poll.ErrFileClosing.
-// It is set to true in the export_test.go for tests (including fuzz tests).
-var linux_checkWrapErr = false
-
 // wrapErr wraps an error that occurred during an operation on an open file.
 // It passes io.EOF through unchanged, otherwise converts
 // poll.ErrFileClosing to ErrClosed and wraps the error in a PathError.
@@ -442,7 +422,7 @@ func (f *File) linux_wrapErr(op string, err error) error {
 	}
 	if err == poll.ErrFileClosing {
 		err = ErrClosed
-	} else if linux_checkWrapErr && errors.Is(err, poll.ErrFileClosing) {
+	} else if checkWrapErr && errors.Is(err, poll.ErrFileClosing) {
 		panic("unexpected error wrapping poll.ErrFileClosing: " + err.Error())
 	}
 	return &PathError{Op: op, Path: f.name, Err: err}

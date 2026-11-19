@@ -17,16 +17,6 @@ import (
 
 var _ = runtime.GOARCH
 
-// The only signal values guaranteed to be present in the os package on all
-// systems are os.Interrupt (send the process an interrupt) and os.Kill (force
-// the process to exit). On Windows, sending os.Interrupt to a process with
-// os.Process.Signal is not implemented; it will return an error instead of
-// sending a signal.
-var (
-	Freebsd_Interrupt Signal = syscall.Freebsd_SIGINT
-	Freebsd_Kill      Signal = syscall.Freebsd_SIGKILL
-)
-
 func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Process, err error) {
 	// If there is no SysProcAttr (ie. no Chroot or changed
 	// UID/GID), double-check existence of the directory we want
@@ -78,7 +68,7 @@ func freebsd_startProcess(name string, argv []string, attr *ProcAttr) (p *Proces
 }
 
 func (p *Process) freebsd_kill() error {
-	return p.Signal(Freebsd_Kill)
+	return p.Signal(Kill)
 }
 
 func (p *Process) freebsd_withHandle(f func(handle uintptr)) error {

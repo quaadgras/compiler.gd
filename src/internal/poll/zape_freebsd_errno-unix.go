@@ -14,8 +14,6 @@ import "syscall"
 // Errno values.
 var (
 	freebsd_errEAGAIN error = syscall.Freebsd_EAGAIN
-	freebsd_errEINVAL error = syscall.Freebsd_EINVAL
-	freebsd_errENOENT error = syscall.Freebsd_ENOENT
 )
 
 // errnoErr returns common boxed Errno values, to prevent
@@ -27,9 +25,9 @@ func freebsd_errnoErr(e syscall.Errno) error {
 	case syscall.Freebsd_EAGAIN:
 		return freebsd_errEAGAIN
 	case syscall.Freebsd_EINVAL:
-		return freebsd_errEINVAL
+		return errEINVAL
 	case syscall.Freebsd_ENOENT:
-		return freebsd_errENOENT
+		return errENOENT
 	}
 	return e
 }

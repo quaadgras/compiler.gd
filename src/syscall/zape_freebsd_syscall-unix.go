@@ -23,12 +23,6 @@ import (
 
 var _ = runtime.GOARCH
 
-var (
-	Freebsd_Stdin  = 0
-	Freebsd_Stdout = 1
-	Freebsd_Stderr = 2
-)
-
 const (
 	freebsd_darwin64Bit = ("freebsd" == "darwin" || "freebsd" == "ios") && freebsd_sizeofPtr == 8
 	freebsd_netbsd32Bit = "freebsd" == "netbsd" && freebsd_sizeofPtr == 4
@@ -120,14 +114,6 @@ func (e Errno) Freebsd_Timeout() bool {
 	return e == Freebsd_EAGAIN || e == Freebsd_EWOULDBLOCK || e == Freebsd_ETIMEDOUT
 }
 
-// Do the interface allocations only once for common
-// Errno values.
-var (
-	freebsd_errEAGAIN error = Freebsd_EAGAIN
-	freebsd_errEINVAL error = Freebsd_EINVAL
-	freebsd_errENOENT error = Freebsd_ENOENT
-)
-
 // errnoErr returns common boxed Errno values, to prevent
 // allocations at runtime.
 func freebsd_errnoErr(e Errno) error {
@@ -135,11 +121,11 @@ func freebsd_errnoErr(e Errno) error {
 	case 0:
 		return nil
 	case Freebsd_EAGAIN:
-		return freebsd_errEAGAIN
+		return errEAGAIN
 	case Freebsd_EINVAL:
-		return freebsd_errEINVAL
+		return errEINVAL
 	case Freebsd_ENOENT:
-		return freebsd_errENOENT
+		return errENOENT
 	}
 	return e
 }

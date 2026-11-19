@@ -98,7 +98,10 @@ func newPkgGen(u *universe, path string) *pkgGen {
 		ctxt := build.Default
 		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
 		bp, err := ctxt.ImportDir(g.dir, 0)
-		if err != nil {
+		if _, ok := err.(*build.NoGoError); ok {
+			// The host does not build it: it has no files of it.
+			bp = &build.Package{Name: bp.Name, ImportPath: path, Dir: g.dir}
+		} else if err != nil {
 			log.Fatalf("%s: %s: %v", path, h, err)
 		}
 		g.hs = append(g.hs, &hostPkg{host: h, ctxt: ctxt, bp: bp})
@@ -487,6 +490,23 @@ func (g *pkgGen) run() {
 			add(hp, "type", name, hp.pkg.Scope().Lookup(name), nil)
 		}
 	}
+	// The ape type of a host type has the methods every host's has, so
+	// that it satisfies the interfaces shared code uses it as.
+	var typeNames []string
+	for _, ic := range g.api {
+		if ic.kind == "type" && len(ic.objs) == len(g.hs) && !g.union[ic.name] {
+			typeNames = append(typeNames, ic.name)
+		}
+	}
+	for _, name := range typeNames {
+		for _, hp := range g.hs {
+			if nt, ok := hp.decls[name].Type().(*types.Named); ok {
+				for m := range nt.Methods() {
+					add(hp, "method", name+"."+m.Name(), m, nil)
+				}
+			}
+		}
+	}
 	g.declDedup()
 
 	var keys []string
@@ -601,11 +621,16 @@ func (g *pkgGen) findDedup() {
 		var t string
 		for i, hp := range g.hs {
 			o, ok := hp.decls[name].(*types.Var)
-			if !ok || !hp.zeroVar(o) {
+			if !ok {
 				same = false
 				break
 			}
-			s := types.TypeString(o.Type(), func(p *types.Package) string { return p.Path() }) + " " + hp.linkname(o)
+			spec, value := hp.varSpec(o)
+			if spec == nil || value != nil && (g.dependsOnHost(hp, value) != "" || g.callsHostOnly(hp, value)) {
+				same = false
+				break
+			}
+			s := types.TypeString(o.Type(), func(p *types.Package) string { return p.Path() }) + " " + hp.linkname(o) + " = " + hp.text(value)
 			if i == 0 {
 				t = s
 			} else if s != t {
@@ -633,9 +658,11 @@ func (g *pkgGen) findDedup() {
 						changed = true
 					}
 				}
-				// Or another package's that differ.
+				// Or another package's that differ, held by value (a
+				// pointer to one is the ape type, which host copies
+				// convert).
 				var all []*types.Named
-				refsOf(hp.decls[name].Type().Underlying(), map[types.Type]bool{}, &all)
+				refsByValue(hp.decls[name].Type().Underlying(), map[types.Type]bool{}, &all)
 				for _, n := range all {
 					if n.Obj().Pkg() != nil && n.Obj().Pkg() != hp.pkg && g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj()) {
 						if g.dedup[name] {
@@ -649,11 +676,12 @@ func (g *pkgGen) findDedup() {
 	}
 }
 
-// zeroVar reports whether v is declared alone and without a value.
-func (hp *hostPkg) zeroVar(v *types.Var) bool {
+// varSpec returns the declaration of v, if it declares v alone, and
+// its value, if any.
+func (hp *hostPkg) varSpec(v *types.Var) (*ast.ValueSpec, ast.Expr) {
 	f := hp.files[filepath.Base(fset.Position(v.Pos()).Filename)]
 	if f == nil {
-		return false
+		return nil, nil
 	}
 	for _, d := range f.Decls {
 		gd, ok := d.(*ast.GenDecl)
@@ -663,13 +691,57 @@ func (hp *hostPkg) zeroVar(v *types.Var) bool {
 		for _, s := range gd.Specs {
 			vs := s.(*ast.ValueSpec)
 			for _, id := range vs.Names {
-				if hp.info.Defs[id] == v {
-					return len(vs.Names) == 1 && len(vs.Values) == 0
+				if hp.info.Defs[id] != v {
+					continue
 				}
+				switch {
+				case len(vs.Names) != 1:
+					return nil, nil
+				case len(vs.Values) == 1:
+					return vs, vs.Values[0]
+				case len(vs.Values) == 0:
+					return vs, nil
+				}
+				return nil, nil
 			}
 		}
 	}
-	return false
+	return nil, nil
+}
+
+// text returns the source text of n.
+func (hp *hostPkg) text(n ast.Node) string {
+	if n == nil {
+		return ""
+	}
+	p, e := fset.Position(n.Pos()), fset.Position(n.End())
+	src, err := os.ReadFile(p.Filename)
+	if err != nil {
+		return ""
+	}
+	return string(src[p.Offset:e.Offset])
+}
+
+// callsHostOnly reports whether e uses an unexported function or a
+// variable of this package that a host file declares.
+func (g *pkgGen) callsHostOnly(hp *hostPkg, e ast.Expr) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			switch o := hp.info.Uses[id].(type) {
+			case *types.Func:
+				if o.Pkg() == hp.pkg && hp.inOnly(o.Pos()) && !token.IsExported(o.Name()) {
+					found = true
+				}
+			case *types.Var:
+				if o.Pkg() == hp.pkg && hp.inOnly(o.Pos()) && !o.IsField() {
+					found = true
+				}
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // asmDefines reports whether hp's assembly defines the symbol pkg.name.
@@ -741,6 +813,18 @@ func (g *pkgGen) declDedup() {
 		if v, ok := hp.decls[n].(*types.Var); ok {
 			if l := hp.linkname(v); l != "" {
 				fmt.Fprintf(&g.decls, "\n%s", l)
+			}
+			if _, value := hp.varSpec(v); value != nil {
+				ast.Inspect(value, func(n ast.Node) bool {
+					if id, ok := n.(*ast.Ident); ok {
+						if pn, ok := hp.info.Uses[id].(*types.PkgName); ok {
+							g.imports[pn.Imported().Path()] = pn.Name()
+						}
+					}
+					return true
+				})
+				fmt.Fprintf(&g.decls, "\nvar %s %s = %s\n", n, g.typeString(hp, v.Type()), hp.text(value))
+				continue
 			}
 			fmt.Fprintf(&g.decls, "\nvar %s %s\n", n, g.typeString(hp, v.Type()))
 			continue

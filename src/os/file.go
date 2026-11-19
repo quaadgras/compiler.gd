@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !ape
+//go:build !ape && !apegen
 
 // Package os provides a platform-independent interface to operating system
 // functionality. The design is Unix-like, although the error handling is

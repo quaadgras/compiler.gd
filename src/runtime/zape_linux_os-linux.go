@@ -9,10 +9,10 @@
 package runtime
 
 import (
-	linux "ape/linux/internal/runtime/syscall/linux"
 	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
+	"internal/runtime/syscall/linux"
 	"internal/strconv"
 	"unsafe"
 )
@@ -356,12 +356,10 @@ func linux_osinit() {
 	linux_configure64bitsTimeOn32BitsArchitectures()
 }
 
-var linux_urandom_dev = []byte("/dev/urandom\x00")
-
 func linux_readRandom(r []byte) int {
 	// Note that all supported Linux kernels should provide AT_RANDOM which
 	// populates startupRand, so this fallback should be unreachable.
-	fd := open(&linux_urandom_dev[0], 0 /* O_RDONLY */, 0)
+	fd := open(&urandom_dev[0], 0 /* O_RDONLY */, 0)
 	n := read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
 	closefd(fd)
 	return int(n)
@@ -463,7 +461,7 @@ func linux_pipe2(flags int32) (r, w int32, errno int32)
 
 //go:nosplit
 func linux_fcntl(fd, cmd, arg int32) (ret int32, errno int32) {
-	r, _, err := linux.Syscall6(linux.SYS_FCNTL, uintptr(fd), uintptr(cmd), uintptr(arg), 0, 0, 0)
+	r, _, err := linux.Linux_Syscall6(linux.Linux_SYS_FCNTL, uintptr(fd), uintptr(cmd), uintptr(arg), 0, 0, 0)
 	return int32(r), int32(err)
 }
 
@@ -782,7 +780,7 @@ func linux_syscall_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uint
 	// ensuring all threads execute system calls from multiple calls in the
 	// same order.
 
-	r1, r2, errno := linux.Syscall6(trap, a1, a2, a3, a4, a5, a6)
+	r1, r2, errno := linux.Linux_Syscall6(trap, a1, a2, a3, a4, a5, a6)
 	if GOARCH == "ppc64" || GOARCH == "ppc64le" {
 		// TODO(https://go.dev/issue/51192 ): ppc64 doesn't use r2.
 		r2 = 0
@@ -893,7 +891,7 @@ func linux_runPerThreadSyscall() {
 	}
 
 	args := linux_perThreadSyscall
-	r1, r2, errno := linux.Syscall6(args.trap, args.a1, args.a2, args.a3, args.a4, args.a5, args.a6)
+	r1, r2, errno := linux.Linux_Syscall6(args.trap, args.a1, args.a2, args.a3, args.a4, args.a5, args.a6)
 	if GOARCH == "ppc64" || GOARCH == "ppc64le" {
 		// TODO(https://go.dev/issue/51192 ): ppc64 doesn't use r2.
 		r2 = 0
@@ -932,7 +930,7 @@ func (c *linux_sigctxt) sigFromSeccomp() bool {
 
 //go:nosplit
 func linux_mprotect(addr unsafe.Pointer, n uintptr, prot int32) (ret int32, errno int32) {
-	r, _, err := linux.Syscall6(linux.SYS_MPROTECT, uintptr(addr), n, uintptr(prot), 0, 0, 0)
+	r, _, err := linux.Linux_Syscall6(linux.Linux_SYS_MPROTECT, uintptr(addr), n, uintptr(prot), 0, 0, 0)
 	return int32(r), int32(err)
 }
 
@@ -947,8 +945,8 @@ type linux_kernelVersion struct {
 // failing, because this is called during osinit before the runtime
 // is fully initialized and a throw here is unrecoverable.
 func linux_getKernelVersion() (kv linux_kernelVersion, ok bool) {
-	var buf linux.Utsname
-	if e := linux.Uname(&buf); e != 0 {
+	var buf linux.Linux_Utsname
+	if e := linux.Linux_Uname(&buf); e != 0 {
 		return linux_kernelVersion{}, false
 	}
 	rel := gostringnocopy(&buf.Release[0])

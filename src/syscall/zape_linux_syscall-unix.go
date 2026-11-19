@@ -23,12 +23,6 @@ import (
 
 var _ = runtime.GOARCH
 
-var (
-	Linux_Stdin  = 0
-	Linux_Stdout = 1
-	Linux_Stderr = 2
-)
-
 const (
 	linux_darwin64Bit = ("linux" == "darwin" || "linux" == "ios") && linux_sizeofPtr == 8
 	linux_netbsd32Bit = "linux" == "netbsd" && linux_sizeofPtr == 4
@@ -120,14 +114,6 @@ func (e Errno) Linux_Timeout() bool {
 	return e == Linux_EAGAIN || e == Linux_EWOULDBLOCK || e == Linux_ETIMEDOUT
 }
 
-// Do the interface allocations only once for common
-// Errno values.
-var (
-	linux_errEAGAIN error = Linux_EAGAIN
-	linux_errEINVAL error = Linux_EINVAL
-	linux_errENOENT error = Linux_ENOENT
-)
-
 // errnoErr returns common boxed Errno values, to prevent
 // allocations at runtime.
 func linux_errnoErr(e Errno) error {
@@ -135,11 +121,11 @@ func linux_errnoErr(e Errno) error {
 	case 0:
 		return nil
 	case Linux_EAGAIN:
-		return linux_errEAGAIN
+		return errEAGAIN
 	case Linux_EINVAL:
-		return linux_errEINVAL
+		return errEINVAL
 	case Linux_ENOENT:
-		return linux_errENOENT
+		return errENOENT
 	}
 	return e
 }

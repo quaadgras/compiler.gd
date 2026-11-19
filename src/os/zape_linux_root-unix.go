@@ -78,7 +78,7 @@ func linux_openRootInRoot(r *Root, name string) (*Root, error) {
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	return linux_newRoot(fd, joinPath(r.Linux_Name(), name))
+	return linux_newRoot(fd, joinPath(r.Name(), name))
 }
 
 // rootOpenFileNolog is Root.OpenFile.
@@ -107,7 +107,7 @@ func linux_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode) (
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	f := linux_newFile(fd, joinPath(root.Linux_Name(), name), linux_kindOpenFile, unix.Linux_HasNonblockFlag(flag))
+	f := linux_newFile(fd, joinPath(root.Name(), name), linux_kindOpenFile, unix.Linux_HasNonblockFlag(flag))
 	f.inRoot = true
 	return f, nil
 }

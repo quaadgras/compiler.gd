@@ -36,6 +36,10 @@ type SysFile struct{ iovecs *[]syscall.Iovec }
 
 var dupCloexecUnsupported atomic.Bool
 
+var errEINVAL error = syscall.EINVAL
+
+var errENOENT error = syscall.ENOENT
+
 func CopyFileRange(a0 *FD, a1 *FD, a2 int64) (int64, bool, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_CopyFileRange(a0, a1, a2)

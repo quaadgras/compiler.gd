@@ -88,6 +88,12 @@ type Sockaddr interface {
 
 var SocketDisableIPv6 bool
 
+var Stderr int = 2
+
+var Stdin int = 0
+
+var Stdout int = 1
+
 type Timespec struct {
 	Sec  int64
 	Nsec int64
@@ -111,6 +117,12 @@ type _C_short int16
 type _Gid_t uint32
 
 type _Socklen uint32
+
+var errEAGAIN error = EAGAIN
+
+var errEINVAL error = EINVAL
+
+var errENOENT error = ENOENT
 
 var execveLibc func(path *byte, argv **byte, envp **byte) error
 
@@ -5802,6 +5814,28 @@ func (r *Cmsghdr) SetLen(a0 int) {
 	}
 }
 
+func (r *Cmsghdr) data(a0 uintptr) unsafe.Pointer {
+	if apehost == apeLinux {
+		x0 := ((*Linux_Cmsghdr)(unsafe.Pointer(r))).data(a0)
+		return x0
+	}
+	var tr Freebsd_Cmsghdr
+	var pr *Freebsd_Cmsghdr
+	if r != nil {
+		tr.Len = uint32((*r).Len)
+		tr.Level = (*r).Level
+		tr.Type = (*r).Type
+		pr = &tr
+	}
+	x0 := (pr).data(a0)
+	if r != nil {
+		(*r).Len = uint64(tr.Len)
+		(*r).Level = tr.Level
+		(*r).Type = tr.Type
+	}
+	return x0
+}
+
 func (r Errno) Error() string {
 	if apehost == apeLinux {
 		x0 := r.Linux_Error()
@@ -5890,6 +5924,92 @@ func (r Signal) String() string {
 	}
 	x0 := r.Freebsd_String()
 	return x0
+}
+
+func (r *SockaddrInet4) sockaddr() (unsafe.Pointer, _Socklen, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_SockaddrInet4)(unsafe.Pointer(r))).sockaddr()
+		return x0, x1, x2
+	}
+	var tr Freebsd_SockaddrInet4
+	var pr *Freebsd_SockaddrInet4
+	if r != nil {
+		tr.Port = (*r).Port
+		tr.Addr = (*r).Addr
+		tr.raw.Family = uint8((*r).raw.Family)
+		tr.raw.Port = (*r).raw.Port
+		tr.raw.Addr = (*r).raw.Addr
+		for i2 := 0; i2 < 8; i2++ {
+			tr.raw.Zero[i2] = int8((*r).raw.Zero[i2])
+		}
+		pr = &tr
+	}
+	x0, x1, x2 := (pr).sockaddr()
+	if r != nil {
+		(*r).Port = tr.Port
+		(*r).Addr = tr.Addr
+		(*r).raw.Family = uint16(tr.raw.Family)
+		(*r).raw.Port = tr.raw.Port
+		(*r).raw.Addr = tr.raw.Addr
+		for i2 := 0; i2 < 8; i2++ {
+			(*r).raw.Zero[i2] = uint8(tr.raw.Zero[i2])
+		}
+	}
+	return x0, x1, x2
+}
+
+func (r *SockaddrInet6) sockaddr() (unsafe.Pointer, _Socklen, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_SockaddrInet6)(unsafe.Pointer(r))).sockaddr()
+		return x0, x1, x2
+	}
+	var tr Freebsd_SockaddrInet6
+	var pr *Freebsd_SockaddrInet6
+	if r != nil {
+		tr.Port = (*r).Port
+		tr.ZoneId = (*r).ZoneId
+		tr.Addr = (*r).Addr
+		tr.raw.Family = uint8((*r).raw.Family)
+		tr.raw.Port = (*r).raw.Port
+		tr.raw.Flowinfo = (*r).raw.Flowinfo
+		tr.raw.Addr = (*r).raw.Addr
+		tr.raw.Scope_id = (*r).raw.Scope_id
+		pr = &tr
+	}
+	x0, x1, x2 := (pr).sockaddr()
+	if r != nil {
+		(*r).Port = tr.Port
+		(*r).ZoneId = tr.ZoneId
+		(*r).Addr = tr.Addr
+		(*r).raw.Family = uint16(tr.raw.Family)
+		(*r).raw.Port = tr.raw.Port
+		(*r).raw.Flowinfo = tr.raw.Flowinfo
+		(*r).raw.Addr = tr.raw.Addr
+		(*r).raw.Scope_id = tr.raw.Scope_id
+	}
+	return x0, x1, x2
+}
+
+func (r *SockaddrUnix) sockaddr() (unsafe.Pointer, _Socklen, error) {
+	if apehost == apeLinux {
+		x0, x1, x2 := ((*Linux_SockaddrUnix)(unsafe.Pointer(r))).sockaddr()
+		return x0, x1, x2
+	}
+	var tr Freebsd_SockaddrUnix
+	var pr *Freebsd_SockaddrUnix
+	if r != nil {
+		tr.Name = (*r).Name
+		tr.raw.Family = uint8((*r).raw.Family)
+		copy(tr.raw.Path[:], (*r).raw.Path[:])
+		pr = &tr
+	}
+	x0, x1, x2 := (pr).sockaddr()
+	if r != nil {
+		(*r).Name = tr.Name
+		(*r).raw.Family = uint16(tr.raw.Family)
+		copy((*r).raw.Path[:], tr.raw.Path[:])
+	}
+	return x0, x1, x2
 }
 
 func (r WaitStatus) Continued() bool {
@@ -7026,51 +7146,3 @@ type Utsname struct {
 	Machine    [65]int8
 	Domainname [65]int8
 }
-
-// ape_Stderr is the host's.
-var ape_Stderr = func() *int {
-	if apehost == apeLinux {
-		return &Linux_Stderr
-	}
-	return &Freebsd_Stderr
-}()
-
-// Stderr is the host's at startup.
-var Stderr int = func() int {
-	if apehost == apeLinux {
-		return Linux_Stderr
-	}
-	return Freebsd_Stderr
-}()
-
-// ape_Stdin is the host's.
-var ape_Stdin = func() *int {
-	if apehost == apeLinux {
-		return &Linux_Stdin
-	}
-	return &Freebsd_Stdin
-}()
-
-// Stdin is the host's at startup.
-var Stdin int = func() int {
-	if apehost == apeLinux {
-		return Linux_Stdin
-	}
-	return Freebsd_Stdin
-}()
-
-// ape_Stdout is the host's.
-var ape_Stdout = func() *int {
-	if apehost == apeLinux {
-		return &Linux_Stdout
-	}
-	return &Freebsd_Stdout
-}()
-
-// Stdout is the host's at startup.
-var Stdout int = func() int {
-	if apehost == apeLinux {
-		return Linux_Stdout
-	}
-	return Freebsd_Stdout
-}()

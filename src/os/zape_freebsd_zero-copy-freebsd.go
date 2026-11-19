@@ -9,11 +9,8 @@
 package os
 
 import (
-	"internal/poll"
 	"io"
 )
-
-var freebsd_pollCopyFileRange = poll.Freebsd_CopyFileRange
 
 func (f *File) freebsd_writeTo(w io.Writer) (written int64, handled bool, err error) {
 	return 0, false, nil
@@ -52,7 +49,7 @@ func (f *File) freebsd_readFrom(r io.Reader) (written int64, handled bool, err e
 		return 0, false, nil
 	}
 
-	written, handled, err = freebsd_pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = pollCopyFileRange(&f.pfd, &src.pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}

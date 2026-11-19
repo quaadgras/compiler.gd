@@ -5,6 +5,7 @@
 package os
 
 import (
+	"errors"
 	"internal/poll"
 	"io"
 	"io/fs"
@@ -34,6 +35,10 @@ type FileInfo = fs.FileInfo
 
 type FileMode = fs.FileMode
 
+var Interrupt Signal = syscall.SIGINT
+
+var Kill Signal = syscall.SIGKILL
+
 type LinkError struct {
 	Op  string
 	Old string
@@ -47,7 +52,13 @@ type ProcessState struct {
 	rusage *syscall.Rusage
 }
 
-type Root struct{ root *root }
+var Stderr *File = NewFile(uintptr(syscall.Stderr), "/dev/stderr")
+
+var Stdin *File = NewFile(uintptr(syscall.Stdin), "/dev/stdin")
+
+var Stdout *File = NewFile(uintptr(syscall.Stdout), "/dev/stdout")
+
+var checkWrapErr bool = false
 
 type dirFS string
 
@@ -58,7 +69,11 @@ type dirInfo struct {
 	bufp int
 }
 
+var errPathEscapes error = errors.New("path escapes from parent")
+
 type errSymlink string
+
+var errWriteAtInAppendMode error = errors.New("os: invalid use of WriteAt on file opened with O_APPEND")
 
 type file struct {
 	pfd         poll.FD
@@ -92,6 +107,8 @@ type noReadFrom struct{}
 
 type noWriteTo struct{}
 
+var pollCopyFileRange func(dst *poll.FD, src *poll.FD, remain int64) (written int64, handled bool, err error) = poll.CopyFileRange
+
 type readdirMode int
 
 type root struct {
@@ -102,8 +119,6 @@ type root struct {
 	closed  bool
 	cleanup runtime.Cleanup
 }
-
-type rootFS struct{ root *root }
 
 type syscallErrorType = syscall.Errno
 
@@ -318,24 +333,6 @@ func OpenFile(a0 string, a1 int, a2 FileMode) (*File, error) {
 	return x0, x1
 }
 
-func OpenInRoot(a0 string, a1 string) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_OpenInRoot(a0, a1)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_OpenInRoot(a0, a1)
-	return x0, x1
-}
-
-func OpenRoot(a0 string) (*Root, error) {
-	if apehost == apeLinux {
-		x0, x1 := Linux_OpenRoot(a0)
-		return x0, x1
-	}
-	x0, x1 := Freebsd_OpenRoot(a0)
-	return x0, x1
-}
-
 func Pipe() (*File, *File, error) {
 	if apehost == apeLinux {
 		x0, x1, x2 := Linux_Pipe()
@@ -507,12 +504,39 @@ func newFile(a0 int, a1 string, a2 newFileKind, a3 bool) *File {
 	return x0
 }
 
+func openRootInRoot(a0 *Root, a1 string) (*Root, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_openRootInRoot(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := freebsd_openRootInRoot(a0, a1)
+	return x0, x1
+}
+
+func openRootNolog(a0 string) (*Root, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_openRootNolog(a0)
+		return x0, x1
+	}
+	x0, x1 := freebsd_openRootNolog(a0)
+	return x0, x1
+}
+
 func pidfdFind(a0 int) (uintptr, error) {
 	if apehost == apeLinux {
 		x0, x1 := linux_pidfdFind(a0)
 		return x0, x1
 	}
 	x0, x1 := freebsd_pidfdFind(a0)
+	return x0, x1
+}
+
+func readFileContents(a0 int64, a1 func([]byte) (int, error)) ([]byte, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_readFileContents(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := freebsd_readFileContents(a0, a1)
 	return x0, x1
 }
 
@@ -534,6 +558,69 @@ func removefileat(a0 int, a1 string) error {
 	return x0
 }
 
+func rootChmod(a0 *Root, a1 string, a2 FileMode) error {
+	if apehost == apeLinux {
+		x0 := linux_rootChmod(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootChmod(a0, a1, a2)
+	return x0
+}
+
+func rootChown(a0 *Root, a1 string, a2 int, a3 int) error {
+	if apehost == apeLinux {
+		x0 := linux_rootChown(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := freebsd_rootChown(a0, a1, a2, a3)
+	return x0
+}
+
+func rootChtimes(a0 *Root, a1 string, a2 time.Time, a3 time.Time) error {
+	if apehost == apeLinux {
+		x0 := linux_rootChtimes(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := freebsd_rootChtimes(a0, a1, a2, a3)
+	return x0
+}
+
+func rootLchown(a0 *Root, a1 string, a2 int, a3 int) error {
+	if apehost == apeLinux {
+		x0 := linux_rootLchown(a0, a1, a2, a3)
+		return x0
+	}
+	x0 := freebsd_rootLchown(a0, a1, a2, a3)
+	return x0
+}
+
+func rootLink(a0 *Root, a1 string, a2 string) error {
+	if apehost == apeLinux {
+		x0 := linux_rootLink(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootLink(a0, a1, a2)
+	return x0
+}
+
+func rootMkdir(a0 *Root, a1 string, a2 FileMode) error {
+	if apehost == apeLinux {
+		x0 := linux_rootMkdir(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootMkdir(a0, a1, a2)
+	return x0
+}
+
+func rootMkdirAll(a0 *Root, a1 string, a2 FileMode) error {
+	if apehost == apeLinux {
+		x0 := linux_rootMkdirAll(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootMkdirAll(a0, a1, a2)
+	return x0
+}
+
 func rootOpenDir(a0 int, a1 string) (int, error) {
 	if apehost == apeLinux {
 		x0, x1 := linux_rootOpenDir(a0, a1)
@@ -541,6 +628,69 @@ func rootOpenDir(a0 int, a1 string) (int, error) {
 	}
 	x0, x1 := freebsd_rootOpenDir(a0, a1)
 	return x0, x1
+}
+
+func rootOpenFileNolog(a0 *Root, a1 string, a2 int, a3 FileMode) (*File, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_rootOpenFileNolog(a0, a1, a2, a3)
+		return x0, x1
+	}
+	x0, x1 := freebsd_rootOpenFileNolog(a0, a1, a2, a3)
+	return x0, x1
+}
+
+func rootReadlink(a0 *Root, a1 string) (string, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_rootReadlink(a0, a1)
+		return x0, x1
+	}
+	x0, x1 := freebsd_rootReadlink(a0, a1)
+	return x0, x1
+}
+
+func rootRemove(a0 *Root, a1 string) error {
+	if apehost == apeLinux {
+		x0 := linux_rootRemove(a0, a1)
+		return x0
+	}
+	x0 := freebsd_rootRemove(a0, a1)
+	return x0
+}
+
+func rootRemoveAll(a0 *Root, a1 string) error {
+	if apehost == apeLinux {
+		x0 := linux_rootRemoveAll(a0, a1)
+		return x0
+	}
+	x0 := freebsd_rootRemoveAll(a0, a1)
+	return x0
+}
+
+func rootRename(a0 *Root, a1 string, a2 string) error {
+	if apehost == apeLinux {
+		x0 := linux_rootRename(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootRename(a0, a1, a2)
+	return x0
+}
+
+func rootStat(a0 *Root, a1 string, a2 bool) (FileInfo, error) {
+	if apehost == apeLinux {
+		x0, x1 := linux_rootStat(a0, a1, a2)
+		return x0, x1
+	}
+	x0, x1 := freebsd_rootStat(a0, a1, a2)
+	return x0, x1
+}
+
+func rootSymlink(a0 *Root, a1 string, a2 string) error {
+	if apehost == apeLinux {
+		x0 := linux_rootSymlink(a0, a1, a2)
+		return x0
+	}
+	x0 := freebsd_rootSymlink(a0, a1, a2)
+	return x0
 }
 
 func startProcess(a0 string, a1 []string, a2 *ProcAttr) (*Process, error) {
@@ -559,6 +709,15 @@ func statNolog(a0 string) (FileInfo, error) {
 	}
 	x0, x1 := freebsd_statNolog(a0)
 	return x0, x1
+}
+
+func statOrZero(a0 *File) int64 {
+	if apehost == apeLinux {
+		x0 := linux_statOrZero(a0)
+		return x0
+	}
+	x0 := freebsd_statOrZero(a0)
+	return x0
 }
 
 func (r *File) Chmod(a0 FileMode) error {
@@ -921,229 +1080,6 @@ func (r *ProcessState) sysUsage() any {
 	return x0
 }
 
-func (r *Root) Chmod(a0 string, a1 FileMode) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Chmod(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_Chmod(a0, a1)
-	return x0
-}
-
-func (r *Root) Chown(a0 string, a1 int, a2 int) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Chown(a0, a1, a2)
-		return x0
-	}
-	x0 := r.Freebsd_Chown(a0, a1, a2)
-	return x0
-}
-
-func (r *Root) Chtimes(a0 string, a1 time.Time, a2 time.Time) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Chtimes(a0, a1, a2)
-		return x0
-	}
-	x0 := r.Freebsd_Chtimes(a0, a1, a2)
-	return x0
-}
-
-func (r *Root) Close() error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Close()
-		return x0
-	}
-	x0 := r.Freebsd_Close()
-	return x0
-}
-
-func (r *Root) Create(a0 string) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Create(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Create(a0)
-	return x0, x1
-}
-
-func (r *Root) FS() fs.FS {
-	if apehost == apeLinux {
-		x0 := r.Linux_FS()
-		return x0
-	}
-	x0 := r.Freebsd_FS()
-	return x0
-}
-
-func (r *Root) Lchown(a0 string, a1 int, a2 int) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Lchown(a0, a1, a2)
-		return x0
-	}
-	x0 := r.Freebsd_Lchown(a0, a1, a2)
-	return x0
-}
-
-func (r *Root) Link(a0 string, a1 string) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Link(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_Link(a0, a1)
-	return x0
-}
-
-func (r *Root) Lstat(a0 string) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Lstat(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Lstat(a0)
-	return x0, x1
-}
-
-func (r *Root) Mkdir(a0 string, a1 FileMode) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Mkdir(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_Mkdir(a0, a1)
-	return x0
-}
-
-func (r *Root) MkdirAll(a0 string, a1 FileMode) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_MkdirAll(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_MkdirAll(a0, a1)
-	return x0
-}
-
-func (r *Root) Name() string {
-	if apehost == apeLinux {
-		x0 := r.Linux_Name()
-		return x0
-	}
-	x0 := r.Freebsd_Name()
-	return x0
-}
-
-func (r *Root) Open(a0 string) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Open(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Open(a0)
-	return x0, x1
-}
-
-func (r *Root) OpenFile(a0 string, a1 int, a2 FileMode) (*File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_OpenFile(a0, a1, a2)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_OpenFile(a0, a1, a2)
-	return x0, x1
-}
-
-func (r *Root) OpenRoot(a0 string) (*Root, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_OpenRoot(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_OpenRoot(a0)
-	return x0, x1
-}
-
-func (r *Root) ReadFile(a0 string) ([]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadFile(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_ReadFile(a0)
-	return x0, x1
-}
-
-func (r *Root) Readlink(a0 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Readlink(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Readlink(a0)
-	return x0, x1
-}
-
-func (r *Root) Remove(a0 string) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Remove(a0)
-		return x0
-	}
-	x0 := r.Freebsd_Remove(a0)
-	return x0
-}
-
-func (r *Root) RemoveAll(a0 string) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_RemoveAll(a0)
-		return x0
-	}
-	x0 := r.Freebsd_RemoveAll(a0)
-	return x0
-}
-
-func (r *Root) Rename(a0 string, a1 string) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Rename(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_Rename(a0, a1)
-	return x0
-}
-
-func (r *Root) Stat(a0 string) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Stat(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Stat(a0)
-	return x0, x1
-}
-
-func (r *Root) Symlink(a0 string, a1 string) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_Symlink(a0, a1)
-		return x0
-	}
-	x0 := r.Freebsd_Symlink(a0, a1)
-	return x0
-}
-
-func (r *Root) WriteFile(a0 string, a1 []byte, a2 FileMode) error {
-	if apehost == apeLinux {
-		x0 := r.Linux_WriteFile(a0, a1, a2)
-		return x0
-	}
-	x0 := r.Freebsd_WriteFile(a0, a1, a2)
-	return x0
-}
-
-func (r *Root) logOpen(a0 string) {
-	if apehost == apeLinux {
-		r.linux_logOpen(a0)
-		return
-	}
-	r.freebsd_logOpen(a0)
-}
-
-func (r *Root) logStat(a0 string) {
-	if apehost == apeLinux {
-		r.linux_logStat(a0)
-		return
-	}
-	r.freebsd_logStat(a0)
-}
-
 func (r dirFS) Lstat(a0 string) (fs.FileInfo, error) {
 	if apehost == apeLinux {
 		x0, x1 := r.Linux_Lstat(a0)
@@ -1294,60 +1230,6 @@ func (r *root) incref() error {
 	return x0
 }
 
-func (r *rootFS) Lstat(a0 string) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Lstat(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Lstat(a0)
-	return x0, x1
-}
-
-func (r *rootFS) Open(a0 string) (fs.File, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Open(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Open(a0)
-	return x0, x1
-}
-
-func (r *rootFS) ReadDir(a0 string) ([]DirEntry, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadDir(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_ReadDir(a0)
-	return x0, x1
-}
-
-func (r *rootFS) ReadFile(a0 string) ([]byte, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadFile(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_ReadFile(a0)
-	return x0, x1
-}
-
-func (r *rootFS) ReadLink(a0 string) (string, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_ReadLink(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_ReadLink(a0)
-	return x0, x1
-}
-
-func (r *rootFS) Stat(a0 string) (FileInfo, error) {
-	if apehost == apeLinux {
-		x0, x1 := r.Linux_Stat(a0)
-		return x0, x1
-	}
-	x0, x1 := r.Freebsd_Stat(a0)
-	return x0, x1
-}
-
 func (r *unixDirent) Info() (FileInfo, error) {
 	if apehost == apeLinux {
 		x0, x1 := r.Linux_Info()
@@ -1392,86 +1274,6 @@ func (r *unixDirent) Type() FileMode {
 	x0 := r.Freebsd_Type()
 	return x0
 }
-
-// ape_Interrupt is the host's.
-var ape_Interrupt = func() *Signal {
-	if apehost == apeLinux {
-		return &Linux_Interrupt
-	}
-	return &Freebsd_Interrupt
-}()
-
-// Interrupt is the host's at startup.
-var Interrupt Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_Interrupt
-	}
-	return Freebsd_Interrupt
-}()
-
-// ape_Kill is the host's.
-var ape_Kill = func() *Signal {
-	if apehost == apeLinux {
-		return &Linux_Kill
-	}
-	return &Freebsd_Kill
-}()
-
-// Kill is the host's at startup.
-var Kill Signal = func() Signal {
-	if apehost == apeLinux {
-		return Linux_Kill
-	}
-	return Freebsd_Kill
-}()
-
-// ape_Stderr is the host's.
-var ape_Stderr = func() **File {
-	if apehost == apeLinux {
-		return &Linux_Stderr
-	}
-	return &Freebsd_Stderr
-}()
-
-// Stderr is the host's at startup.
-var Stderr *File = func() *File {
-	if apehost == apeLinux {
-		return Linux_Stderr
-	}
-	return Freebsd_Stderr
-}()
-
-// ape_Stdin is the host's.
-var ape_Stdin = func() **File {
-	if apehost == apeLinux {
-		return &Linux_Stdin
-	}
-	return &Freebsd_Stdin
-}()
-
-// Stdin is the host's at startup.
-var Stdin *File = func() *File {
-	if apehost == apeLinux {
-		return Linux_Stdin
-	}
-	return Freebsd_Stdin
-}()
-
-// ape_Stdout is the host's.
-var ape_Stdout = func() **File {
-	if apehost == apeLinux {
-		return &Linux_Stdout
-	}
-	return &Freebsd_Stdout
-}()
-
-// Stdout is the host's at startup.
-var Stdout *File = func() *File {
-	if apehost == apeLinux {
-		return Linux_Stdout
-	}
-	return Freebsd_Stdout
-}()
 
 //go:linkname ape_net_newUnixFile net.newUnixFile
 func ape_net_newUnixFile(a0 int, a1 string) *File {

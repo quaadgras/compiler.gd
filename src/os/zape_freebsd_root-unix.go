@@ -78,7 +78,7 @@ func freebsd_openRootInRoot(r *Root, name string) (*Root, error) {
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	return freebsd_newRoot(fd, joinPath(r.Freebsd_Name(), name))
+	return freebsd_newRoot(fd, joinPath(r.Name(), name))
 }
 
 // rootOpenFileNolog is Root.OpenFile.
@@ -107,7 +107,7 @@ func freebsd_rootOpenFileNolog(root *Root, name string, flag int, perm FileMode)
 	if err != nil {
 		return nil, &PathError{Op: "openat", Path: name, Err: err}
 	}
-	f := freebsd_newFile(fd, joinPath(root.Freebsd_Name(), name), freebsd_kindOpenFile, unix.Freebsd_HasNonblockFlag(flag))
+	f := freebsd_newFile(fd, joinPath(root.Name(), name), freebsd_kindOpenFile, unix.Freebsd_HasNonblockFlag(flag))
 	f.inRoot = true
 	return f, nil
 }

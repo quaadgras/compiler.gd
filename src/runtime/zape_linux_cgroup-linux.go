@@ -9,7 +9,7 @@
 package runtime
 
 import (
-	cgroup "ape/linux/internal/runtime/cgroup"
+	"internal/runtime/cgroup"
 )
 
 // cgroup-aware GOMAXPROCS default
@@ -34,7 +34,7 @@ var (
 	linux_cgroupScratch [cgroup.ScratchSize]byte
 
 	linux_cgroupOK  bool
-	linux_cgroupCPU cgroup.CPU
+	linux_cgroupCPU cgroup.Linux_CPU
 
 	// defaultGOMAXPROCSInit runs before internal/godebug init, so we can't
 	// directly update the GODEBUG counter. Store the result until after
@@ -47,7 +47,7 @@ var (
 //
 // Must run after parsedebugvars.
 func linux_defaultGOMAXPROCSInit() {
-	c, err := cgroup.OpenCPU(linux_cgroupScratch[:])
+	c, err := cgroup.Linux_OpenCPU(linux_cgroupScratch[:])
 	if err != nil {
 		// Likely cgroup.ErrNoCgroup.
 		return
@@ -110,8 +110,8 @@ func linux_defaultGOMAXPROCS(ncpu int32) int32 {
 }
 
 // Lower procs as necessary for the current cgroup CPU limit.
-func linux_adjustCgroupGOMAXPROCS(procs int32, cpu cgroup.CPU) int32 {
-	limit, ok, err := cgroup.ReadCPULimit(cpu)
+func linux_adjustCgroupGOMAXPROCS(procs int32, cpu cgroup.Linux_CPU) int32 {
+	limit, ok, err := cgroup.Linux_ReadCPULimit(cpu)
 	if err == nil && ok {
 		limit = ceil(limit)
 		limit = max(limit, 2)

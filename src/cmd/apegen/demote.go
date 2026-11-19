@@ -215,8 +215,12 @@ func (g *pkgGen) sameConst(name string) bool {
 }
 
 // dependsOnHost says why the shared file f depends on hp, or "".
-func (g *pkgGen) dependsOnHost(hp *hostPkg, f *ast.File) string {
+func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 	why := ""
+	f, _ := node.(*ast.File)
+	if f == nil {
+		f = &ast.File{}
+	}
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
 			if fs := strings.Fields(c.Text); len(fs) >= 2 && fs[0] == "//go:linkname" {
@@ -227,7 +231,7 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, f *ast.File) string {
 		}
 	}
 	var stack []ast.Node
-	ast.Inspect(f, func(n ast.Node) bool {
+	ast.Inspect(node, func(n ast.Node) bool {
 		if why != "" {
 			return false
 		}
@@ -369,6 +373,30 @@ func inConstContext(stack []ast.Node) bool {
 		}
 	}
 	return false
+}
+
+// refsByValue returns the named types t holds other than through a
+// pointer: those of its fields, elements and so on.
+func refsByValue(t types.Type, seen map[types.Type]bool, out *[]*types.Named) {
+	if t == nil || seen[t] {
+		return
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Named:
+		*out = append(*out, t)
+	case *types.Slice:
+		refsByValue(t.Elem(), seen, out)
+	case *types.Array:
+		refsByValue(t.Elem(), seen, out)
+	case *types.Struct:
+		for f := range t.Fields() {
+			refsByValue(f.Type(), seen, out)
+		}
+	case *types.Map:
+		refsByValue(t.Key(), seen, out)
+		refsByValue(t.Elem(), seen, out)
+	}
 }
 
 // refsOf returns the named types t refers to.

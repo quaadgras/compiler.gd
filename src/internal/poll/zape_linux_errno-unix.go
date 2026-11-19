@@ -14,8 +14,6 @@ import "syscall"
 // Errno values.
 var (
 	linux_errEAGAIN error = syscall.Linux_EAGAIN
-	linux_errEINVAL error = syscall.Linux_EINVAL
-	linux_errENOENT error = syscall.Linux_ENOENT
 )
 
 // errnoErr returns common boxed Errno values, to prevent
@@ -27,9 +25,9 @@ func linux_errnoErr(e syscall.Errno) error {
 	case syscall.Linux_EAGAIN:
 		return linux_errEAGAIN
 	case syscall.Linux_EINVAL:
-		return linux_errEINVAL
+		return errEINVAL
 	case syscall.Linux_ENOENT:
-		return linux_errENOENT
+		return errENOENT
 	}
 	return e
 }

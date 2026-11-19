@@ -155,7 +155,7 @@ func freebsd_rootMkdirAll(r *Root, fullname string, perm FileMode) error {
 					// succeed if the link resolves to a directory.
 					// We don't return errSymlink here, because we don't
 					// want to create the link target if it doesn't exist.
-					fi, e := r.Freebsd_Stat(fullname)
+					fi, e := r.Stat(fullname)
 					if e == nil && fi.Mode().IsDir() {
 						err = nil
 					} else if e == nil {
@@ -334,7 +334,7 @@ func freebsd_doInRoot[T any](r *Root, name string, flags uint, openDirFunc func(
 	}
 	defer r.root.freebsd_decref()
 
-	parts, endsInSlash, err := freebsd_splitPathInRoot(name, nil, nil)
+	parts, endsInSlash, err := splitPathInRoot(name, nil, nil)
 	if err != nil {
 		return ret, err
 	}
@@ -383,7 +383,7 @@ Loop:
 			}
 			count := end - i
 			if count > i {
-				return ret, freebsd_errPathEscapes
+				return ret, errPathEscapes
 			}
 			parts = slices.Delete(parts, i-count, end)
 			if len(parts) == 0 {
@@ -451,11 +451,11 @@ Loop:
 		case nil:
 		case errSymlink:
 			symlinks++
-			if symlinks > freebsd_rootMaxSymlinks {
+			if symlinks > rootMaxSymlinks {
 				return ret, syscall.Freebsd_ELOOP
 			}
 			lastPart := i == len(parts)-1
-			newparts, newEndsInSlash, err := freebsd_splitPathInRoot(string(e), parts[:i], parts[i+1:])
+			newparts, newEndsInSlash, err := splitPathInRoot(string(e), parts[:i], parts[i+1:])
 			if err != nil {
 				return ret, err
 			}

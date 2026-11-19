@@ -73,6 +73,16 @@ func apeDiffers(path, host string) bool {
 		return v.(bool)
 	}
 	dir := filepath.Join(cfg.GOROOTsrc, filepath.FromSlash(path))
+	// A package cmd/apegen generates is one package for every host, and
+	// so are internal/goos and the runtime.
+	if path == "runtime" || path == "internal/goos" {
+		apeDiffersCache.Store(key, false)
+		return false
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, "zape_dispatch_*")); len(m) > 0 {
+		apeDiffersCache.Store(key, false)
+		return false
+	}
 	hctx := cfg.BuildContext
 	hctx.GOOS = host
 	hp, herr := hctx.ImportDir(dir, 0)

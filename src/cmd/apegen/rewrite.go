@@ -116,7 +116,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal {
 				// A shared struct's field of another package's public
 				// type: the host's, converted.
-				if conv := g.fromAPE(hp, sel); conv != "" && !hp.isLHS(n) {
+				if conv := g.fromAPE(hp, sel); conv != "" && !hp.isLHS(n) && !g.toShared(hp, n) {
 					edits = append(edits, edit{off(n.Pos()), off(n.Pos()), conv + "("})
 					edits = append(edits, edit{off(n.End()), off(n.End()), ")"})
 				}
@@ -364,7 +364,7 @@ func (u *universe) hostMethod(path, host string, m *types.Func) bool {
 // host's type, or "".
 func (g *pkgGen) fromAPE(hp *hostPkg, sel *types.Selection) string {
 	f := sel.Obj().(*types.Var)
-	if f.Pkg() == hp.pkg && hp.inOnly(f.Pos()) {
+	if owner := fieldOwnerOf(sel); f.Pkg() == hp.pkg && hp.inOnly(f.Pos()) && (owner == nil || !g.dedup[owner.Obj().Name()]) {
 		return "" // a host struct's field is the host's
 	}
 	if owner := fieldOwnerOf(sel); owner != nil && owner.Obj().Pkg() != nil && owner.Obj().Pkg() != hp.pkg && g.u.hostDiffers(owner.Obj().Pkg().Path(), hp.host, owner.Obj()) {
@@ -383,6 +383,32 @@ func (g *pkgGen) fromAPE(hp *hostPkg, sel *types.Selection) string {
 	}
 	g.u.needFromAPE(n.Obj().Pkg().Path(), n.Obj().Name())
 	return n.Obj().Pkg().Name() + "." + hostName(hp.host, "FromAPE_"+n.Obj().Name())
+}
+
+// toShared reports whether e is the value of a field in a composite
+// literal of a type that is not a host's: it stays the ape value.
+func (g *pkgGen) toShared(hp *hostPkg, e ast.Expr) bool {
+	hp.useType(e) // builds parents
+	kv, ok := hp.parents[e].(*ast.KeyValueExpr)
+	if !ok || kv.Value != e {
+		return false
+	}
+	lit, ok := hp.parents[kv].(*ast.CompositeLit)
+	if !ok {
+		return false
+	}
+	t := types.Unalias(hp.info.Types[lit].Type)
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(p.Elem())
+	}
+	n, ok := t.(*types.Named)
+	if !ok || n.Obj().Pkg() == nil {
+		return false
+	}
+	if n.Obj().Pkg() == hp.pkg {
+		return g.hostNamed(hp, n) == nil
+	}
+	return !g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj())
 }
 
 // isLHS reports whether e is assigned to or has its address taken.
@@ -615,7 +641,10 @@ func (g *pkgGen) builtByAll(name string) bool {
 	return true
 }
 
-const notAPE = " && !ape"
+const (
+	notAPE      = " && !ape"
+	notAPEAlone = "!ape && !apegen" // never "!ape", which people write
+)
 
 // setNotAPE adds "&& !ape" to the //go:build line of file, or removes it.
 func setNotAPE(file string, want bool) error {
@@ -632,13 +661,13 @@ func setNotAPE(file string, want bool) error {
 		if i < 0 {
 			return fmt.Errorf("%s: no place for a //go:build line", file)
 		}
-		out = slices.Concat(src[:i+2], []byte("//go:build !ape\n\n"), src[i+2:])
+		out = slices.Concat(src[:i+2], []byte("//go:build "+notAPEAlone+"\n\n"), src[i+2:])
 	case loc == nil:
 		return nil
 	default:
 		line := strings.TrimSpace(string(src[loc[0]:loc[1]]))
 		expr := strings.TrimPrefix(line, "//go:build ")
-		has := strings.HasSuffix(expr, notAPE) || expr == "!ape"
+		has := strings.HasSuffix(expr, notAPE) || expr == notAPEAlone
 		switch {
 		case want == has:
 			return nil
@@ -647,9 +676,13 @@ func setNotAPE(file string, want bool) error {
 				expr = "(" + expr + ")"
 			}
 			expr += notAPE
-		case expr == "!ape":
-			// Written by hand.
-			return nil
+		case expr == notAPEAlone:
+			// Ours alone: remove the line and the blank line after it.
+			end := loc[1]
+			if end < len(src) && src[end] == '\n' {
+				end++
+			}
+			return os.WriteFile(file, slices.Concat(src[:loc[0]], src[end:]), 0o666)
 		default:
 			expr = strings.TrimSuffix(expr, notAPE)
 			if strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") && strings.Contains(expr, "||") {
@@ -693,10 +726,14 @@ func dropUnusedImports(src []byte) []byte {
 		if imp.Name != nil {
 			name = imp.Name.Name
 		}
-		if name == "_" || path == "unsafe" || used[name] {
+		if name == "_" || used[name] {
 			continue
 		}
 		start, end := ff.Position(imp.Pos()).Offset, ff.Position(imp.End()).Offset
+		if path == "unsafe" && bytes.Contains(src, []byte("//go:linkname")) {
+			edits = append(edits, edit{start, end, `_ "unsafe"`})
+			continue
+		}
 		edits = append(edits, edit{start, end, ""})
 	}
 	return applyEdits(src, edits)

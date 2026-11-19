@@ -285,11 +285,9 @@ func freebsd_osinit() {
 	}
 }
 
-var freebsd_urandom_dev = []byte("/dev/urandom\x00")
-
 //go:nosplit
 func freebsd_readRandom(r []byte) int {
-	fd := open(&freebsd_urandom_dev[0], 0 /* O_RDONLY */, 0)
+	fd := open(&urandom_dev[0], 0 /* O_RDONLY */, 0)
 	n := read(fd, unsafe.Pointer(&r[0]), int32(len(r)))
 	closefd(fd)
 	return int(n)

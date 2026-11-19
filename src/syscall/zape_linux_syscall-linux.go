@@ -16,7 +16,7 @@
 package syscall
 
 import (
-	linux "ape/linux/internal/runtime/syscall/linux"
+	"internal/runtime/syscall/linux"
 	"internal/strconv"
 	"runtime"
 	"slices"
@@ -68,7 +68,7 @@ func Linux_RawSyscall(trap, a1, a2, a3 uintptr) (r1, r2 uintptr, err Errno) {
 //go:linkname Linux_RawSyscall6
 func Linux_RawSyscall6(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2 uintptr, err Errno) {
 	var errno uintptr
-	r1, r2, errno = linux.Syscall6(trap, a1, a2, a3, a4, a5, a6)
+	r1, r2, errno = linux.Linux_Syscall6(trap, a1, a2, a3, a4, a5, a6)
 	err = Errno(errno)
 	return
 }

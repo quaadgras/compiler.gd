@@ -15,8 +15,7 @@ import (
 )
 
 var (
-	linux_pollCopyFileRange = poll.Linux_CopyFileRange
-	linux_pollSplice        = poll.Linux_Splice
+	linux_pollSplice = poll.Linux_Splice
 )
 
 func (f *File) linux_writeTo(w io.Writer) (written int64, handled bool, err error) {
@@ -115,7 +114,7 @@ func (f *File) linux_copyFileRange(r io.Reader) (written int64, handled bool, er
 		return 0, false, nil
 	}
 
-	written, handled, err = linux_pollCopyFileRange(&f.pfd, &src.pfd, remain)
+	written, handled, err = pollCopyFileRange(&f.pfd, &src.pfd, remain)
 	if lr != nil {
 		lr.N -= written
 	}

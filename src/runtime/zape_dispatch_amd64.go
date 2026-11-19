@@ -63,6 +63,8 @@ type timeval struct {
 	tv_usec int64
 }
 
+var urandom_dev []byte = []byte("/dev/urandom\x00")
+
 // _EAGAIN differs between hosts.
 var _EAGAIN int32
 
