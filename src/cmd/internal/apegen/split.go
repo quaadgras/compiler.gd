@@ -43,6 +43,22 @@ func fileName(pos token.Pos) string {
 	return name
 }
 
+// splitsByName is splits by the files' names: for positions of another
+// parse of the files (an importer's), whose split is the same.
+var splitsByName = map[string][][2]int{}
+
+// fileNameAnyParse is fileName for a position in any parse of the file.
+func fileNameAnyParse(pos token.Pos) string {
+	p := fset.Position(pos)
+	name := filepath.Base(p.Filename)
+	for _, r := range splitsByName[p.Filename] {
+		if r[0] <= p.Offset && p.Offset < r[1] {
+			return name + hostPart
+		}
+	}
+	return name
+}
+
 func realName(name string) string { return strings.TrimSuffix(name, hostPart) }
 
 // declRanges returns the byte range of each of f's declarations; imports
@@ -104,6 +120,7 @@ func (g *pkgGen) splitDecl(name string, i int) {
 	for _, hp := range g.hs {
 		splits[fset.File(hp.orig[name].Pos())] = moved
 	}
+	splitsByName[fset.Position(f0.Pos()).Filename] = moved
 	for _, hp := range g.hs {
 		f := hp.orig[name]
 		shared := &ast.File{Doc: f.Doc, Package: f.Package, Name: f.Name, Imports: f.Imports, FileStart: f.FileStart, FileEnd: f.FileEnd, GoVersion: f.GoVersion}

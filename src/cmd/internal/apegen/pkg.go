@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/build"
-	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -39,7 +38,9 @@ type hostPkg struct {
 	// package with its own tests.
 	xfiles map[string]*ast.File
 	xinfo  *types.Info
+	xpkg   *types.Package
 	imp    types.ImporterFrom // the importer the package was checked with
+	u      *universe
 	sfiles []string           // assembly files only some hosts build
 
 	// decls are the package-level objects the host files declare.
@@ -97,10 +98,18 @@ type pkgGen struct {
 
 	needApeValue bool // host copies use apeValue
 
+	importNames map[string]string // of the file writeGo writes: path -> name, if named
+
 	decls   bytes.Buffer      // ape declarations
 	init    bytes.Buffer      // body of apeinitHost (runtime)
 	imports map[string]string // of the dispatch file: path -> name
 	outputs map[string][]byte // file name -> contents
+	// testCopy is set while writeTests writes the test host's tests,
+	// into testOut, by name.
+	testCopy bool
+	testOut  map[string][]byte
+	testHost string
+
 	// sharedOut is the shared parts of the split files, by name.
 	sharedOut map[string][]byte
 }
@@ -122,19 +131,22 @@ func (g *pkgGen) first() *hostPkg { return g.hs[0] }
 func (hp *hostPkg) obj(ic *iface) types.Object { return ic.objs[hp.host] }
 
 func newPkgGen(u *universe, path string) *pkgGen {
-	g := &pkgGen{u: u, path: path, dir: goroot(path), imports: map[string]string{}, outputs: map[string][]byte{}, sharedOut: map[string][]byte{}}
+	g := &pkgGen{u: u, path: path, dir: u.dirOf(path), imports: map[string]string{}, outputs: map[string][]byte{}, sharedOut: map[string][]byte{}}
 	for _, h := range u.hosts {
 		ctxt := build.Default
 		ctxt.GOROOT = gorootDir
 		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
 		bp, err := ctxt.ImportDir(g.dir, 0)
+		if bp != nil {
+			bp.ImportPath = path
+		}
 		if _, ok := err.(*build.NoGoError); ok {
 			// The host does not build it: it has no files of it.
 			bp = &build.Package{Name: bp.Name, ImportPath: path, Dir: g.dir}
 		} else if err != nil {
 			fatalf("%s: %s: %v", path, h, err)
 		}
-		g.hs = append(g.hs, &hostPkg{host: h, ctxt: ctxt, bp: bp})
+		g.hs = append(g.hs, &hostPkg{host: h, ctxt: ctxt, bp: bp, u: u})
 	}
 	count := map[string]int{}
 	for _, hp := range g.hs {
@@ -208,9 +220,6 @@ func (hp *hostPkg) checkXTests(dir string) {
 		files[name] = f
 		list = append(list, f)
 	}
-	saved := build.Default
-	build.Default = hp.ctxt
-	defer func() { build.Default = saved }()
 	src := hp.imp
 	conf := types.Config{
 		Importer: importerFunc(func(path, dir string, mode types.ImportMode) (*types.Package, error) {
@@ -231,8 +240,8 @@ func (hp *hostPkg) checkXTests(dir string) {
 	// Type errors are expected: other packages the tests import import
 	// the package again, without its tests. What the tests use is still
 	// known.
-	conf.Check(hp.bp.ImportPath+"_test", fset, list, info)
-	hp.xfiles, hp.xinfo = files, info
+	xpkg, _ := conf.Check(hp.bp.ImportPath+"_test", fset, list, info)
+	hp.xfiles, hp.xinfo, hp.xpkg = files, info, xpkg
 }
 
 type importerFunc func(path, dir string, mode types.ImportMode) (*types.Package, error)
@@ -255,11 +264,8 @@ func (hp *hostPkg) checkFiles(dir string, names []string, mayFail bool) bool {
 		hp.files[name] = f
 		files = append(files, f)
 	}
-	saved := build.Default
-	build.Default = hp.ctxt
-	defer func() { build.Default = saved }()
 	var errs []error
-	hp.imp = importer.ForCompiler(fset, "source", nil).(types.ImporterFrom)
+	hp.imp = hp.u.importer(hp.host)
 	conf := types.Config{
 		Importer: hp.imp,
 		Sizes:    types.SizesFor("gc", hp.ctxt.GOARCH),
@@ -427,6 +433,41 @@ func (g *pkgGen) run() {
 					hp.rename[m] = hostName(hp.host, m.Name())
 				}
 			}
+		}
+	}
+	// A method of an interface written in host code (or a test) whose
+	// signature has host types is, wherever it is implemented, a host
+	// method, which has the host's name.
+	for _, hp := range g.hs {
+		for name, f := range hp.files {
+			if !hp.only[name] && !strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				// (A named one's are a host type's methods, if
+				// another package's: see below for this package's.)
+				if ts, ok := n.(*ast.TypeSpec); ok {
+					if _, ok := ts.Type.(*ast.InterfaceType); ok {
+						return false
+					}
+				}
+				it, ok := n.(*ast.InterfaceType)
+				if !ok {
+					return true
+				}
+				for _, fl := range it.Methods.List {
+					for _, id := range fl.Names {
+						m, ok := hp.info.Defs[id].(*types.Func)
+						if !ok {
+							continue
+						}
+						if g.otherHostRef(hp, m.Signature()) != nil {
+							hp.rename[m] = hostName(hp.host, m.Name())
+						}
+					}
+				}
+				return true
+			})
 		}
 	}
 	// A host interface's method that host methods on shared types
@@ -1286,4 +1327,16 @@ func (g *pkgGen) dataStructForAll(name string) bool {
 		}
 	}
 	return true
+}
+
+// localHostRef reports whether t refers to a host type of the package.
+func (g *pkgGen) localHostRef(hp *hostPkg, t types.Type) bool {
+	var refs []*types.Named
+	refsOf(t, map[types.Type]bool{}, &refs)
+	for _, r := range refs {
+		if g.hostNamed(hp, r) != nil {
+			return true
+		}
+	}
+	return false
 }

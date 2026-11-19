@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"cmd/go/internal/apefiles"
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/search"
 )
@@ -96,4 +97,26 @@ func apeDiffers(path, host string) bool {
 	}
 	apeDiffersCache.Store(key, differs)
 	return differs
+}
+
+var apeUserDone bool
+
+// apeUser puts, once, apegen's files of the packages outside the
+// standard library that pkgs have (with their dependencies and tests'
+// imports) in place, and reports whether there were any.
+func apeUser(pkgs []*Package) bool {
+	if cfg.BuildContext.GOOS != "ape" || apeUserDone {
+		return false
+	}
+	apeUserDone = true
+	var list []apefiles.Pkg
+	seen := map[string]bool{}
+	for _, p := range PackageList(pkgs) {
+		if p.Standard || p.Dir == "" || seen[p.ImportPath] {
+			continue
+		}
+		seen[p.ImportPath] = true
+		list = append(list, apefiles.Pkg{ImportPath: p.ImportPath, Dir: p.Dir})
+	}
+	return len(list) > 0 && apefiles.User(list)
 }

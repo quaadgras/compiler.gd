@@ -68,6 +68,18 @@ type Config struct {
 	// Tests dispatches what the package's own tests use, and leaves out
 	// of ape the tests that depend on the host.
 	Tests bool
+	// Resolve returns, for a package that is not in the standard
+	// library, the package path and directory that the import path
+	// means in a file of the directory fromDir, as host builds it.
+	Resolve func(host, fromDir, path string) (rpath, dir string, ok bool)
+	// Analyze is packages Generate treats as generated (their host
+	// copies are another run's) but does not make files of.
+	Analyze []string
+
+	// TestHost is the host whose tests (in-package and external) the
+	// packages have under GOOS=ape, as host copies; with none, the tests
+	// every host builds that do not depend on the host.
+	TestHost string
 	// Verbose reports the shared declarations copied per host and why.
 	Verbose bool
 	// MaxConsts is the constants that are the largest host's value
@@ -133,11 +145,12 @@ func Generate(cfg Config, paths []string) (res *Result, err error) {
 	}()
 	fset = token.NewFileSet()
 	splits = map[*token.File][][2]int{}
+	splitsByName = map[string][][2]int{}
 	*arch, *tests, *verbose, *maxConsts, *constTypes = cfg.Arch, cfg.Tests, cfg.Verbose, cfg.MaxConsts, cfg.ConstTypes
 	gorootDir = cfg.GOROOT
 
-	u := &universe{hosts: cfg.Hosts, pkgs: map[string]*pkgGen{}, generate: map[string]bool{}}
-	for _, path := range paths {
+	u := &universe{hosts: cfg.Hosts, pkgs: map[string]*pkgGen{}, generate: map[string]bool{}, resolveFunc: cfg.Resolve}
+	for _, path := range slices.Concat(paths, cfg.Analyze) {
 		u.generate[path] = true
 	}
 	paths = slices.Sorted(slices.Values(paths))
@@ -145,12 +158,42 @@ func Generate(cfg Config, paths []string) (res *Result, err error) {
 	for _, path := range paths {
 		g := u.load(path)
 		g.run()
+		for _, hp := range g.hs {
+			if hp.host == cfg.TestHost && *tests {
+				g.testHost = hp.host
+				g.writeTests(hp)
+			}
+		}
 		for _, r := range g.report {
 			res.Reports = append(res.Reports, path+": "+r)
 		}
 		g.collect(res)
 	}
 	return res, nil
+}
+
+// Differs reports whether the files of the package in dir differ
+// between the hosts (its tests' included), and some host builds it.
+func Differs(cfg Config, dir string) bool {
+	var first []string
+	built := false // by some host: not just tests
+	for i, h := range cfg.Hosts {
+		ctxt := build.Default
+		ctxt.GOROOT, ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = cfg.GOROOT, h, cfg.Arch, false
+		files := []string{}
+		if bp, err := ctxt.ImportDir(dir, 0); err == nil {
+			built = built || len(bp.GoFiles) > 0
+			files = slices.Concat(bp.GoFiles, bp.SFiles, []string{"|"}, bp.TestGoFiles, bp.XTestGoFiles)
+		} else if _, ok := err.(*build.NoGoError); !ok {
+			files = []string{"?" + h}
+		}
+		if i == 0 {
+			first = files
+		} else if !slices.Equal(files, first) && built {
+			return true
+		}
+	}
+	return false
 }
 
 // Candidates returns the standard packages whose files differ between
@@ -175,25 +218,8 @@ func Candidates(cfg Config) ([]string, error) {
 			// cgo's, which GOOS=ape does not have.)
 			return nil
 		}
-		var first []string
-		built := false // by some host: not just tests
-		for i, h := range cfg.Hosts {
-			ctxt := build.Default
-			ctxt.GOROOT = gorootDir
-			ctxt.GOROOT, ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = cfg.GOROOT, h, cfg.Arch, false
-			files := []string{}
-			if bp, err := ctxt.ImportDir(dir, 0); err == nil {
-				built = built || len(bp.GoFiles) > 0
-				files = slices.Concat(bp.GoFiles, bp.SFiles, []string{"|"}, bp.TestGoFiles, bp.XTestGoFiles)
-			} else if _, ok := err.(*build.NoGoError); !ok {
-				files = []string{"?" + h}
-			}
-			if i == 0 {
-				first = files
-			} else if !slices.Equal(files, first) && built {
-				out = append(out, rel)
-				break
-			}
+		if Differs(cfg, dir) {
+			out = append(out, rel)
 		}
 		return nil
 	})
@@ -208,6 +234,8 @@ type universe struct {
 	builds      map[string]bool            // package path -> builds for every host
 	fileDiffers map[string]bool            // "host path" -> files differ from ape's
 	fromAPE     map[string]map[string]bool // package path -> types other packages convert
+	imps        map[string]*srcImporter    // by host
+	resolveFunc func(host, fromDir, path string) (string, string, bool)
 }
 
 func (u *universe) load(path string) *pkgGen {
@@ -233,7 +261,7 @@ func (u *universe) buildsForAll(path string) bool {
 		ctxt := build.Default
 		ctxt.GOROOT = gorootDir
 		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
-		if _, err := ctxt.Import(path, "", 0); err != nil {
+		if _, err := u.importOf(ctxt, path); err != nil {
 			ok = false
 		}
 	}
@@ -257,8 +285,8 @@ func (u *universe) variant(path, host string) bool {
 	hctx.GOOS, hctx.GOARCH, hctx.CgoEnabled = host, *arch, false
 	actx := hctx
 	actx.GOOS = "ape"
-	hp, herr := hctx.Import(path, "", 0)
-	ap, aerr := actx.Import(path, "", 0)
+	hp, herr := u.importOf(hctx, path)
+	ap, aerr := u.importOf(actx, path)
 	v := (herr == nil) != (aerr == nil) || herr == nil && !slices.Equal(hp.GoFiles, ap.GoFiles)
 	if u.fileDiffers == nil {
 		u.fileDiffers = map[string]bool{}

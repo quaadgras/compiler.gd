@@ -324,6 +324,12 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 			return true
 		}
 		stack = append(stack, n)
+		// A host value made an interface value: its dynamic type must be
+		// the host's, which host code asserts.
+		if t := g.hostToIface(hp, n, stack); t != "" {
+			why = "a " + t + " as an interface value"
+			return false
+		}
 		switch n := n.(type) {
 		case *ast.SelectorExpr:
 			// Code that asks internal/goos which system it runs on:
@@ -900,4 +906,133 @@ func inArrayLen(stack []ast.Node) bool {
 		}
 	}
 	return false
+}
+
+// hostToIface returns the name of the host type of a value that n makes
+// an interface value (as an argument, assigned, returned, or in a
+// composite literal), or "".
+func (g *pkgGen) hostToIface(hp *hostPkg, n ast.Node, stack []ast.Node) string {
+	check := func(e ast.Expr, target types.Type) string {
+		if e == nil || target == nil {
+			return ""
+		}
+		if _, ok := target.Underlying().(*types.Interface); !ok {
+			return ""
+		}
+		t := hp.info.Types[e].Type
+		if t == nil {
+			return ""
+		}
+		if _, ok := t.Underlying().(*types.Interface); ok {
+			return ""
+		}
+		u := types.Unalias(t)
+		if p, ok := u.(*types.Pointer); ok {
+			u = types.Unalias(p.Elem())
+		}
+		if nt, ok := u.(*types.Named); ok && g.differsType(hp, nt) {
+			return nt.Obj().Name()
+		}
+		return ""
+	}
+	switch n := n.(type) {
+	case *ast.CallExpr:
+		sig, ok := hp.info.Types[n.Fun].Type.(*types.Signature)
+		if !ok {
+			return ""
+		}
+		for i, a := range n.Args {
+			var pt types.Type
+			switch {
+			case sig.Variadic() && i >= sig.Params().Len()-1:
+				pt = sig.Params().At(sig.Params().Len() - 1).Type()
+				if n.Ellipsis == 0 {
+					if sl, ok := pt.(*types.Slice); ok {
+						pt = sl.Elem()
+					}
+				}
+			case i < sig.Params().Len():
+				pt = sig.Params().At(i).Type()
+			}
+			if t := check(a, pt); t != "" {
+				return t
+			}
+		}
+	case *ast.AssignStmt:
+		if len(n.Lhs) == len(n.Rhs) && n.Tok != token.DEFINE {
+			for i, l := range n.Lhs {
+				if t := check(n.Rhs[i], hp.info.Types[l].Type); t != "" {
+					return t
+				}
+			}
+		}
+	case *ast.ReturnStmt:
+		for i := len(stack) - 1; i >= 0; i-- {
+			var sig *types.Signature
+			switch f := stack[i].(type) {
+			case *ast.FuncDecl:
+				if fn, ok := hp.info.Defs[f.Name].(*types.Func); ok {
+					sig = fn.Signature()
+				}
+			case *ast.FuncLit:
+				sig, _ = hp.info.Types[f].Type.(*types.Signature)
+			default:
+				continue
+			}
+			if sig != nil && sig.Results().Len() == len(n.Results) {
+				for j, r := range n.Results {
+					if t := check(r, sig.Results().At(j).Type()); t != "" {
+						return t
+					}
+				}
+			}
+			break
+		}
+	case *ast.CompositeLit:
+		lt := hp.info.Types[n].Type
+		if lt == nil {
+			return ""
+		}
+		switch u := lt.Underlying().(type) {
+		case *types.Slice:
+			for _, e := range n.Elts {
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					e = kv.Value
+				}
+				if t := check(e, u.Elem()); t != "" {
+					return t
+				}
+			}
+		case *types.Map:
+			for _, e := range n.Elts {
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					if t := check(kv.Value, u.Elem()); t != "" {
+						return t
+					}
+				}
+			}
+		case *types.Struct:
+			for i, e := range n.Elts {
+				var f *types.Var
+				if kv, ok := e.(*ast.KeyValueExpr); ok {
+					e = kv.Value
+					if id, ok := kv.Key.(*ast.Ident); ok {
+						f, _ = hp.info.Uses[id].(*types.Var)
+					}
+				} else if i < u.NumFields() {
+					f = u.Field(i)
+				}
+				if f != nil {
+					if t := check(e, f.Type()); t != "" {
+						return t
+					}
+				}
+			}
+		}
+	case *ast.SendStmt:
+		if ct, ok := hp.info.Types[n.Chan].Type.Underlying().(*types.Chan); ok {
+			return check(n.Value, ct.Elem())
+		}
+	}
+	return ""
 }

@@ -34,6 +34,7 @@ var (
 	outDir  = flag.String("o", "", "write the files to `dir`")
 	arch    = flag.String("arch", "amd64", "architecture")
 	list    = flag.Bool("l", false, "list the packages whose files differ between the hosts")
+	tHost   = flag.String("testhost", "linux", "the host whose tests the packages have")
 )
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 	flag.Parse()
 	cfg := apegen.DefaultConfig(runtime.GOROOT(), *arch)
 	cfg.Verbose = *verbose
+	cfg.TestHost = *tHost
 	paths := flag.Args()
 	if len(paths) == 0 || *list {
 		var err error

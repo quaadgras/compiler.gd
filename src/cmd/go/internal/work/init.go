@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/apefiles"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/modload"
 	"cmd/internal/quoted"
@@ -67,7 +68,7 @@ func BuildInit(ld *modload.Loader) {
 	if err := fsys.Init(); err != nil {
 		base.Fatal(err)
 	}
-	apeOverlay()
+	apefiles.Std()
 	if from, replaced := fsys.DirContainsReplacement(cfg.GOMODCACHE); replaced {
 		base.Fatalf("go: overlay contains a replacement for %s. Files beneath GOMODCACHE (%s) must not be replaced.", from, cfg.GOMODCACHE)
 	}

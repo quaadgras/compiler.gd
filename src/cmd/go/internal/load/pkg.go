@@ -3076,6 +3076,15 @@ func PackagesAndErrors(ld *modload.Loader, ctx context.Context, opts PackageOpts
 
 	setPGOProfilePath(pkgs)
 
+	if apeUser(pkgs) {
+		// GOOS=ape: apegen's files of packages outside the standard
+		// library are in place; load them.
+		ClearPackageCache()
+		packageDataCache = par.ErrCache[string, *build.Package]{}
+		resolvedImportCache = par.Cache[importSpec, resolvedImport]{}
+		isDirCache = par.Cache[string, bool]{}
+		return PackagesAndErrors(ld, ctx, opts, patterns)
+	}
 	return pkgs
 }
 

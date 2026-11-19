@@ -80,6 +80,13 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		fatalf("%v", err)
 	}
 	f := hp.files[name]
+	g.importNames = map[string]string{}
+	for _, imp := range f.Imports {
+		p := strings.Trim(imp.Path.Value, `"`)
+		if imp.Name != nil {
+			g.importNames[p] = imp.Name.Name
+		}
+	}
 	tf := fset.File(f.Pos())
 	off := func(p token.Pos) int { return tf.Offset(p) }
 	var edits []edit
@@ -131,7 +138,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					continue
 				}
 				// (A host struct's field is the host's.)
-				hostField := s.Obj().Pkg() == hp.pkg && hp.inOnly(s.Obj().Pos())
+				hostField := s.Obj().Pkg() == hp.pkg && (hp.inOnly(s.Obj().Pos()) || g.inTest(s.Obj().Pos()))
 				if owner := fieldOwnerOf(s); owner != nil && owner.Obj().Pkg() != nil && owner.Obj().Pkg() != hp.pkg && g.u.hostDiffers(owner.Obj().Pkg().Path(), hp.host, owner.Obj()) {
 					continue
 				}
@@ -154,7 +161,16 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			// the ape type's pointer.
 			t := types.Unalias(hp.info.Types[n].Type)
 			nt, ok := t.(*types.Named)
-			if !ok || nt.Obj().Pkg() != hp.pkg || g.hostNamed(hp, nt) != nil {
+			if !ok || nt.Obj().Pkg() == nil {
+				break
+			}
+			// (Or another generated package's shared struct, whose
+			// fields of other packages' host types are the ape types.)
+			other := nt.Obj().Pkg() != hp.pkg
+			if other && (!g.u.generate[nt.Obj().Pkg().Path()] || g.u.hostDiffers(nt.Obj().Pkg().Path(), hp.host, nt.Obj())) {
+				break
+			}
+			if !other && (g.hostNamed(hp, nt) != nil || g.inTest(nt.Obj().Pos())) {
 				break
 			}
 			st, ok := nt.Underlying().(*types.Struct)
@@ -176,13 +192,16 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				} else if i < st.NumFields() {
 					f = st.Field(i)
 				}
-				if f == nil || hp.inOnly(f.Pos()) {
+				if f == nil || !other && hp.inOnly(f.Pos()) {
 					continue
 				}
 				if open, close := g.toAPEPtr(hp, f.Type()); open != "" {
 					needUnsafe = true
 					edits = append(edits, edit{off(v.Pos()), off(v.Pos()), open})
 					edits = append(edits, edit{off(v.End()), off(v.End()), close})
+					continue
+				}
+				if other {
 					continue
 				}
 				// A host value held by value: the ape type's.
@@ -217,7 +236,9 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal {
 				// Another generated package's embedded host type: the
 				// field is named for the host's type.
-				if f := sel.Obj().(*types.Var); f.Embedded() && f.Pkg() != nil && f.Pkg() != hp.pkg {
+				// (A shared struct's embedded field is the ape type's.)
+				owner := fieldOwnerOf(sel)
+				if f := sel.Obj().(*types.Var); f.Embedded() && f.Pkg() != nil && f.Pkg() != hp.pkg && (owner == nil || owner.Obj().Pkg() == nil || g.u.hostDiffers(owner.Obj().Pkg().Path(), hp.host, owner.Obj())) {
 					if et, ok := derefNamed(f.Type()); ok && et.Obj().Name() == f.Name() && g.u.hostOnly(et.Obj().Pkg().Path(), hp.host, f.Name()) {
 						edits = append(edits, edit{off(n.Sel.Pos()), off(n.Sel.End()), hostName(hp.host, f.Name())})
 					}
@@ -240,7 +261,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					edits = append(edits, edit{off(n.X.End()), off(n.X.End()), path + "))"})
 				}
 			}
-			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal && hp.rename[sel.Obj()] == "" && !hp.hoist[sel.Obj()] && !hp.inOnly(sel.Obj().Pos()) {
+			if sel := hp.info.Selections[n]; sel != nil && sel.Kind() == types.FieldVal && hp.rename[sel.Obj()] == "" && !hp.hoist[sel.Obj()] && !hp.inOnly(sel.Obj().Pos()) && !g.inTest(sel.Obj().Pos()) {
 				// A shared struct's field of a host type holds the host's.
 				ft := sel.Obj().Type()
 				if a, ok := ft.(*types.Alias); ok && a.Obj().Pkg() == hp.pkg && hp.inOnly(a.Obj().Pos()) && !g.dedup[a.Obj().Name()] {
@@ -290,8 +311,8 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if gd := hp.parentGenDecl(n); gd == nil || gd.Tok != token.VAR || len(n.Values) == 0 || hp.info.Defs[n.Names[0]] == nil || hp.info.Defs[n.Names[0]].Parent() != hp.pkg.Scope() {
 				break
 			}
-			if !hp.callsCode(n.Values...) {
-				break
+			if !hp.callsCode(n.Values...) || g.testCopy {
+				break // (a test copy is only ever on its host)
 			}
 			var ts, zeros []string
 			for _, id := range n.Names {
@@ -309,7 +330,19 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		case *ast.FuncDecl:
 			// The host's init functions: the package's init calls them
 			// on the host.
-			if n.Recv == nil && n.Name.Name == "init" && n.Body != nil {
+			// An example of what only some hosts declare is, in the
+			// test host's tests, the package's: ape has no such name.
+			if g.testCopy && n.Recv == nil && strings.HasPrefix(n.Name.Name, "Example") {
+				if rest := strings.TrimPrefix(n.Name.Name, "Example"); rest != "" && rest[0] != '_' {
+					ident, _, _ := strings.Cut(rest, "_")
+					if g.someHostsDeclare(ident) {
+						newName := "Example_" + strings.ToLower(rest[:1]) + rest[1:]
+						edits = append(edits, edit{off(n.Name.Pos()), off(n.Name.End()), newName})
+						break
+					}
+				}
+			}
+			if n.Recv == nil && n.Name.Name == "init" && n.Body != nil && !g.testCopy {
 				name := fmt.Sprintf("%s_init%d", hp.host, len(hp.inits))
 				hp.inits = append(hp.inits, name)
 				edits = append(edits, edit{off(n.Name.Pos()), off(n.Name.End()), name})
@@ -343,7 +376,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			default:
 				fn = nil
 			}
-			if fn == nil || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) {
+			if fn == nil || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) || g.inTest(fn.Pos()) {
 				break
 			}
 			for _, arg := range n.Args {
@@ -432,7 +465,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		case "internal/goos":
 			edits = append(edits, edit{end, end, "\n\nvar _ = goos.GOOS"})
 		case "runtime":
-			if imp.Name == nil || imp.Name.Name != "_" {
+			if imp.Name == nil || imp.Name.Name != "_" && imp.Name.Name != "." {
 				name := "runtime"
 				if imp.Name != nil {
 					name = imp.Name.Name
@@ -483,9 +516,10 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				edits = append(edits, edit{off(c.Pos()), off(c.End()), "// (apegen: zape_dispatch pushes " + fs[2] + ")"})
 				continue
 			}
-			if len(fs) == 3 {
+			if len(fs) == 3 && !g.testCopy {
 				// A pull of another generated package's host name is
-				// of its host copy.
+				// of its host copy. (A test's is of the ape package's,
+				// which its package marks.)
 				// (A function there without a body keeps its name: that
 				// is what is pushed.)
 				if pkg, sym, ok := cutLast(fs[2], "."); ok && pkg != g.path && g.u.hostOnly(pkg, hp.host, sym) && g.u.hostHasBody(pkg, hp.host, sym) {
@@ -497,7 +531,41 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 	}
 
 	name = realName(name)
+	if g.testCopy {
+		g.testOut[name] = g.finishGo(src, edits, name, name)
+		return
+	}
 	g.outputs[outName(hp.host, name)] = g.finishGo(src, edits, name, outName(hp.host, name))
+}
+
+// writeTests writes the tests of the test host hp, in-package and
+// external, as host copies: a test binary of a GOOS=ape package has one
+// host's tests (it runs on that host), of the package as ape builds it.
+func (g *pkgGen) writeTests(hp *hostPkg) {
+	if !hp.tests {
+		return // they do not type-check: leave them out as before
+	}
+	g.testCopy = true
+	defer func() { g.testCopy = false }()
+	g.testOut = map[string][]byte{}
+	for _, name := range hp.bp.TestGoFiles {
+		g.writeGo(hp, name)
+	}
+	if hp.xinfo != nil && len(hp.bp.XTestGoFiles) > 0 {
+		info, pkg, files, parents := hp.info, hp.pkg, hp.files, hp.parents
+		hp.info, hp.pkg, hp.files, hp.parents = hp.xinfo, hp.xpkg, hp.xfiles, nil
+		for _, name := range hp.bp.XTestGoFiles {
+			g.writeGo(hp, name)
+		}
+		hp.info, hp.pkg, hp.files, hp.parents = info, pkg, files, parents
+	}
+}
+
+// testName names the test host's copy of a test file only some hosts
+// build: as a test file no _GOOS suffix selects.
+func testName(host, name string) string {
+	base := strings.TrimSuffix(name, "_test.go")
+	return "zape_" + host + "_" + strings.ReplaceAll(base, "_", "-") + "_test.go"
 }
 
 // finishGo applies the edits to src, the file name, and returns the
@@ -596,7 +664,7 @@ func (u *universe) hostMethod(path, host string, m *types.Func) bool {
 		if hp.host != host {
 			continue
 		}
-		file := fileName(m.Pos())
+		file := fileNameAnyParse(m.Pos())
 		if !hp.only[file] {
 			return false
 		}
@@ -624,6 +692,9 @@ func (u *universe) hostMethod(path, host string, m *types.Func) bool {
 // host's type, or "".
 func (g *pkgGen) fromAPE(hp *hostPkg, sel *types.Selection) string {
 	f := sel.Obj().(*types.Var)
+	if g.inTest(f.Pos()) {
+		return "" // a test's struct's field is the test host's
+	}
 	if owner := fieldOwnerOf(sel); f.Pkg() == hp.pkg && hp.inOnly(f.Pos()) && (owner == nil || !g.dedup[owner.Obj().Name()]) {
 		return "" // a host struct's field is the host's
 	}
@@ -642,7 +713,7 @@ func (g *pkgGen) fromAPE(hp *hostPkg, sel *types.Selection) string {
 		return ""
 	}
 	g.u.needFromAPE(n.Obj().Pkg().Path(), n.Obj().Name())
-	return n.Obj().Pkg().Name() + "." + hostName(hp.host, "FromAPE_"+n.Obj().Name())
+	return g.qual(n.Obj().Pkg()) + hostName(hp.host, "FromAPE_"+n.Obj().Name())
 }
 
 // toShared reports whether e is the value of a field in a composite
@@ -928,6 +999,18 @@ func (g *pkgGen) collect(res *Result) {
 	for n, b := range g.sharedOut {
 		res.Files[filepath.Join(g.dir, n)] = b
 	}
+	if g.testOut != nil {
+		// The test host's tests: those every host builds in their
+		// place, the others as new files.
+		for name, b := range g.testOut {
+			if g.allBuildTest(name) {
+				res.Files[filepath.Join(g.dir, name)] = b
+			} else {
+				res.Files[filepath.Join(g.dir, testName(g.testHost, name))] = b
+			}
+		}
+		return
+	}
 	for name, off := range g.testOff {
 		if off {
 			res.Files[filepath.Join(g.dir, name)] = nil
@@ -938,6 +1021,16 @@ func (g *pkgGen) collect(res *Result) {
 			res.Files[filepath.Join(g.dir, name)] = nil
 		}
 	}
+}
+
+// allBuildTest reports whether every host builds the test file name.
+func (g *pkgGen) allBuildTest(name string) bool {
+	for _, hp := range g.hs {
+		if !slices.Contains(hp.bp.TestGoFiles, name) && !slices.Contains(hp.bp.XTestGoFiles, name) {
+			return false
+		}
+	}
+	return true
 }
 
 // builtByAll reports whether every host builds the file.
@@ -1046,7 +1139,7 @@ func dropUnusedImports(src []byte) []byte {
 		if imp.Name != nil {
 			name = imp.Name.Name
 		}
-		if name == "_" || used[name] {
+		if name == "_" || name == "." || used[name] {
 			continue
 		}
 		start, end := ff.Position(imp.Pos()).Offset, ff.Position(imp.End()).Offset
@@ -1110,7 +1203,7 @@ func (g *pkgGen) viaHostEmbed(hp *hostPkg, sel *types.Selection) (string, string
 		}
 		f := st.Field(idx)
 		path += "." + f.Name()
-		if !hp.inOnly(f.Pos()) && !hp.hoist[f] {
+		if !hp.inOnly(f.Pos()) && !g.inTest(f.Pos()) && !hp.hoist[f] {
 			if p, ok := types.Unalias(f.Type()).(*types.Pointer); ok {
 				if nt := g.hostNamed(hp, p); nt != nil {
 					return path, hostName(hp.host, nt.Obj().Name())
@@ -1138,7 +1231,7 @@ func (g *pkgGen) otherHandlePtr(hp *hostPkg, t types.Type) string {
 	if !g.u.hostDiffers(path, hp.host, n.Obj()) || !g.u.isHandle(path, n.Obj().Name()) {
 		return ""
 	}
-	return n.Obj().Pkg().Name() + "." + n.Obj().Name()
+	return g.qual(n.Obj().Pkg()) + n.Obj().Name()
 }
 
 // toAPEPtr returns what to wrap a host's value in to store it where the
@@ -1159,5 +1252,35 @@ func (g *pkgGen) toAPEPtr(hp *hostPkg, t types.Type) (open, close string) {
 	if !g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj()) {
 		return "", ""
 	}
-	return n.Obj().Pkg().Name() + "." + hostName(hp.host, "ToAPE_"+n.Obj().Name()) + "(", ")"
+	return g.qual(n.Obj().Pkg()) + hostName(hp.host, "ToAPE_"+n.Obj().Name()) + "(", ")"
+}
+
+// inTest reports whether, while writing the test host's tests, pos is in
+// a test file: what tests declare is the test host's own.
+func (g *pkgGen) inTest(pos token.Pos) bool {
+	return g.testCopy && strings.HasSuffix(fset.Position(pos).Filename, "_test.go")
+}
+
+// qual is how the file being written qualifies a name of pkg: "pkg." (as
+// it imports it), or nothing for a dot import.
+func (g *pkgGen) qual(pkg *types.Package) string {
+	switch n := g.importNames[pkg.Path()]; n {
+	case ".":
+		return ""
+	case "", "_":
+		return pkg.Name() + "."
+	default:
+		return n + "."
+	}
+}
+
+// someHostsDeclare reports whether only some hosts declare name.
+func (g *pkgGen) someHostsDeclare(name string) bool {
+	n := 0
+	for _, hp := range g.hs {
+		if _, ok := hp.decls[name]; ok {
+			n++
+		}
+	}
+	return n > 0 && n < len(g.hs)
 }
