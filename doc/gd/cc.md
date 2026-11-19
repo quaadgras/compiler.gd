@@ -472,6 +472,15 @@ block until Go has written. Names resolve with Go's resolver;
 data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
 cannot set (kept for `getsockopt`, otherwise ignored).
 
+Files and the system: `statvfs` and `statfs` are the system's where
+package syscall has them (Linux, macOS, the BSDs; `ENOSYS` elsewhere,
+Windows and wasm included); `nftw` walks with `os.ReadDir` (names in
+order); `wordexp` expands in Go as glibc does, running `/bin/sh` only
+for a command substitution; `times`, `sysinfo` and `getifaddrs` give
+what Go and `/proc` know; `libintl.h` has no catalogs (messages are
+their own translations) and `catopen` none either; `res_query` cannot
+give raw DNS messages (Go's resolver has none).
+
 `regex.h` is a matcher of its own (internal/c23/regex), not Go's
 `regexp`: POSIX's basic and extended syntax with glibc's GNU operators
 and error codes, back-references in both, and the leftmost-longest match
