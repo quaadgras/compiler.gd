@@ -10,14 +10,13 @@ package runtime
 
 import (
 	linux "ape/linux/internal/runtime/syscall/linux"
-	"internal/runtime/atomic"
 	"unsafe"
 )
 
 var (
-	linux_epfd           int32         = -1 // epoll descriptor
-	linux_netpollEventFd uintptr            // eventfd for netpollBreak
-	linux_netpollWakeSig atomic.Uint32      // used to avoid duplicate calls of netpollBreak
+	linux_epfd           int32   = -1 // epoll descriptor
+	linux_netpollEventFd uintptr      // eventfd for netpollBreak
+
 )
 
 // netpollPackData stores pd and its fdseq in the epoll data field of ev as
@@ -82,7 +81,7 @@ func linux_netpollarm(pd *pollDesc, mode int) {
 // netpollBreak interrupts an epollwait.
 func linux_netpollBreak() {
 	// Failing to cas indicates there is an in-flight wakeup, so we're done here.
-	if !linux_netpollWakeSig.CompareAndSwap(0, 1) {
+	if !netpollWakeSig.CompareAndSwap(0, 1) {
 		return
 	}
 
@@ -168,7 +167,7 @@ retry:
 				// the eventfd counter will be reset to 0.
 				var one uint64
 				read(int32(linux_netpollEventFd), noescape(unsafe.Pointer(&one)), int32(unsafe.Sizeof(one)))
-				linux_netpollWakeSig.Store(0)
+				netpollWakeSig.Store(0)
 			}
 			continue
 		}

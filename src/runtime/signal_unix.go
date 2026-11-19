@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build unix
+//go:build unix && !ape
 
 package runtime
 
@@ -71,9 +71,7 @@ const (
 // useless), and even if it is, the application has to be ready for
 // spurious SIGURG. SIGIO wouldn't be a bad choice either, but is more
 // likely to be used for real.
-//
-// sigPreempt is declared by sigpreempt.go (a variable under GOOS=ape,
-// where hosts number signals differently).
+const sigPreempt = _SIGURG
 
 // Stores the signal handlers registered before Go installed its own.
 // These signal handlers will be invoked in cases where Go doesn't want to
@@ -385,7 +383,7 @@ func preemptM(mp *m) {
 		// live-lock problem. Apparently this could happen on darwin. See
 		// issue #37741.
 		// Only send a signal if there isn't already one pending.
-		signalM(mp, int(sigPreempt))
+		signalM(mp, sigPreempt)
 	}
 
 	if GOOS == "darwin" || GOOS == "ios" {

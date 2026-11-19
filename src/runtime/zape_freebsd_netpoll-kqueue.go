@@ -12,13 +12,12 @@ package runtime
 
 import (
 	"internal/goarch"
-	"internal/runtime/atomic"
+
 	"unsafe"
 )
 
 var (
-	freebsd_kq             int32         = -1
-	freebsd_netpollWakeSig atomic.Uint32 // used to avoid duplicate calls of netpollBreak
+	freebsd_kq int32 = -1
 )
 
 func freebsd_netpollinit() {
@@ -74,7 +73,7 @@ func freebsd_netpollarm(pd *pollDesc, mode int) {
 // netpollBreak interrupts a kevent.
 func freebsd_netpollBreak() {
 	// Failing to cas indicates there is an in-flight wakeup, so we're done here.
-	if !freebsd_netpollWakeSig.CompareAndSwap(0, 1) {
+	if !netpollWakeSig.CompareAndSwap(0, 1) {
 		return
 	}
 
@@ -93,14 +92,14 @@ func freebsd_netpoll(delay int64) (gList, int32) {
 	if freebsd_kq == -1 {
 		return gList{}, 0
 	}
-	var tp *freebsd_timespec
-	var ts freebsd_timespec
+	var tp *timespec
+	var ts timespec
 	if delay < 0 {
 		tp = nil
 	} else if delay == 0 {
 		tp = &ts
 	} else {
-		ts.setNsec(delay)
+		ts.freebsd_setNsec(delay)
 		if ts.tv_sec > 1e6 {
 			// Darwin returns EINVAL if the sleep time is too long.
 			ts.tv_sec = 1e6
@@ -136,7 +135,7 @@ retry:
 			if isBlocking {
 				// netpollBreak could be picked up by a nonblocking poll.
 				// Only reset the netpollWakeSig if blocking.
-				freebsd_netpollWakeSig.Store(0)
+				netpollWakeSig.Store(0)
 			}
 			continue
 		}

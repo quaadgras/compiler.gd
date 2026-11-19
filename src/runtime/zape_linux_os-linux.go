@@ -76,8 +76,8 @@ func linux_futexsleep(addr *uint32, val uint32, ns int64) {
 		return
 	}
 
-	var ts linux_timespec
-	ts.setNsec(ns)
+	var ts timespec
+	ts.linux_setNsec(ns)
 	linux_futex(unsafe.Pointer(addr), linux__FUTEX_WAIT_PRIVATE, val, &ts, nil, 0)
 }
 
@@ -294,9 +294,6 @@ func linux_sysargs(argc int32, argv **byte) {
 	auxv = linux_auxvreadbuf[: pairs*2 : pairs*2]
 }
 
-// secureMode holds the value of AT_SECURE passed in the auxiliary vector.
-var linux_secureMode bool
-
 func linux_sysauxv(auxv []uintptr) (pairs int) {
 	// Process the auxiliary vector entries provided by the kernel when the
 	// program is executed. See getauxval(3).
@@ -317,7 +314,7 @@ func linux_sysauxv(auxv []uintptr) (pairs int) {
 			physPageSize = val
 
 		case linux__AT_SECURE:
-			linux_secureMode = val == 1
+			secureMode = val == 1
 		}
 
 		linux_archauxv(tag, val)
@@ -381,7 +378,7 @@ func linux_goenvs() {
 //go:nosplit
 //go:nowritebarrierrec
 func linux_libpreinit() {
-	initsig(true)
+	linux_initsig(true)
 }
 
 // Called to initialize a new m (including the bootstrap m).
@@ -396,7 +393,7 @@ func linux_gettid() uint32
 // Called to initialize a new m (including the bootstrap m).
 // Called on the new thread, cannot allocate memory.
 func linux_minit() {
-	minitSignals()
+	linux_minitSignals()
 
 	// Cgo-created threads and the bootstrap m are missing a
 	// procid. We need this for asynchronous preemption and it's
@@ -408,7 +405,7 @@ func linux_minit() {
 //
 //go:nosplit
 func linux_unminit() {
-	unminitSignals()
+	linux_unminitSignals()
 	getg().m.procid = 0
 }
 
@@ -433,7 +430,7 @@ func linux_cgoSigtramp()
 func linux_sigaltstack(new, old *linux_stackt)
 
 //go:noescape
-func linux_setitimer(mode int32, new, old *linux_itimerval)
+func linux_setitimer(mode int32, new, old *itimerval)
 
 //go:noescape
 func linux_timer_create(clockid int32, sevp *linux_sigevent, timerid *int32) int32
@@ -488,7 +485,7 @@ func linux_setsig(i uint32, fn uintptr) {
 	if GOARCH == "386" || GOARCH == "amd64" {
 		sa.sa_restorer = abi.FuncPCABI0(linux_sigreturn__sigaction)
 	}
-	if fn == abi.FuncPCABIInternal(sighandler) { // abi.FuncPCABIInternal(sighandler) matches the callers in signal_unix.go
+	if fn == abi.FuncPCABIInternal(linux_sighandler) { // abi.FuncPCABIInternal(sighandler) matches the callers in signal_unix.go
 		if iscgo {
 			fn = abi.FuncPCABI0(linux_cgoSigtramp)
 		} else {
@@ -496,26 +493,26 @@ func linux_setsig(i uint32, fn uintptr) {
 		}
 	}
 	sa.sa_handler = fn
-	sigaction(i, (*sigactiont)(unsafe.Pointer(&sa)), nil)
+	linux_sigaction(i, &sa, nil)
 }
 
 //go:nosplit
 //go:nowritebarrierrec
 func linux_setsigstack(i uint32) {
 	var sa linux_sigactiont
-	sigaction(i, nil, (*sigactiont)(unsafe.Pointer(&sa)))
+	linux_sigaction(i, nil, &sa)
 	if sa.sa_flags&linux__SA_ONSTACK != 0 {
 		return
 	}
 	sa.sa_flags |= linux__SA_ONSTACK
-	sigaction(i, (*sigactiont)(unsafe.Pointer(&sa)), nil)
+	linux_sigaction(i, &sa, nil)
 }
 
 //go:nosplit
 //go:nowritebarrierrec
 func linux_getsig(i uint32) uintptr {
 	var sa linux_sigactiont
-	sigaction(i, nil, (*sigactiont)(unsafe.Pointer(&sa)))
+	linux_sigaction(i, nil, &sa)
 	return sa.sa_handler
 }
 
@@ -634,7 +631,7 @@ func linux_validSIGPROF(mp *m, c *linux_sigctxt) bool {
 }
 
 func linux_setProcessCPUProfiler(hz int32) {
-	setProcessCPUProfilerTimer(hz)
+	linux_setProcessCPUProfilerTimer(hz)
 }
 
 func linux_setThreadCPUProfiler(hz int32) {
@@ -679,8 +676,8 @@ func linux_setThreadCPUProfiler(hz int32) {
 	// activates may do a couple milliseconds of GC-related work and nothing
 	// else in the few seconds that the profiler observes.
 	spec := new(linux_itimerspec)
-	spec.it_value.setNsec(1 + int64(cheaprandn(uint32(1e9/hz))))
-	spec.it_interval.setNsec(1e9 / int64(hz))
+	spec.it_value.linux_setNsec(1 + int64(cheaprandn(uint32(1e9/hz))))
+	spec.it_interval.linux_setNsec(1e9 / int64(hz))
 
 	var timerid int32
 	var sevp linux_sigevent
@@ -734,7 +731,7 @@ var linux_perThreadSyscall linux_perThreadSyscallArgs
 // The system call is expected to succeed and return the same value on every
 // thread. If any threads do not match, the runtime throws.
 //
-//go:linkname linux_syscall_runtime_doAllThreadsSyscall syscall.runtime_doAllThreadsSyscall
+//go:linkname linux_syscall_runtime_doAllThreadsSyscall syscall.linux_runtime_doAllThreadsSyscall
 //go:uintptrescapes
 func linux_syscall_runtime_doAllThreadsSyscall(trap, a1, a2, a3, a4, a5, a6 uintptr) (r1, r2, err uintptr) {
 	if iscgo {

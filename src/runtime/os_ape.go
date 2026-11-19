@@ -6,6 +6,8 @@
 
 package runtime
 
+import _ "unsafe" // for linkname
+
 // A GOOS=ape program runs on any of several host systems. The files that
 // every host builds are built once; each host's own files are copies,
 // made by cmd/apegen, whose names have the host's prefix
@@ -13,7 +15,9 @@ package runtime
 // by apehost.
 
 // apehost is the system the program runs on. The entry point sets it,
-// before any Go code runs.
+// before any Go code runs. Other packages' dispatch code reads it.
+//
+//go:linkname apehost
 var apehost uint8
 
 const (
@@ -26,5 +30,4 @@ const (
 //go:nosplit
 func apeinit() {
 	apeinitHost()
-	sigPreempt = _SIGURG
 }

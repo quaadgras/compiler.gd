@@ -27,7 +27,7 @@ func freebsd_sigaltstack(new, old *freebsd_stackt)
 func freebsd_sigprocmask(how int32, new, old *freebsd_sigset)
 
 //go:noescape
-func freebsd_setitimer(mode int32, new, old *freebsd_itimerval)
+func freebsd_setitimer(mode int32, new, old *itimerval)
 
 //go:noescape
 func freebsd_sysctl(mib *uint32, miblen uint32, out *byte, size *uintptr, dst *byte, ndst uintptr) int32
@@ -50,7 +50,7 @@ func freebsd_osyield_no_g() {
 func freebsd_kqueue() int32
 
 //go:noescape
-func freebsd_kevent(kq int32, ch *freebsd_keventt, nch int32, ev *freebsd_keventt, nev int32, ts *freebsd_timespec) int32
+func freebsd_kevent(kq int32, ch *freebsd_keventt, nch int32, ev *freebsd_keventt, nev int32, ts *timespec) int32
 
 func freebsd_pipe2(flags int32) (r, w int32, errno int32)
 func freebsd_fcntl(fd, cmd, arg int32) (ret int32, errno int32)
@@ -173,7 +173,7 @@ func freebsd_futexsleep1(addr *uint32, val uint32, ns int64) {
 	if ns >= 0 {
 		var ut freebsd_umtx_time
 		ut._clockid = freebsd__CLOCK_MONOTONIC
-		ut._timeout.setNsec(ns)
+		ut._timeout.freebsd_setNsec(ns)
 		utp = &ut
 	}
 	ret := freebsd_sys_umtx_op(addr, freebsd__UMTX_OP_WAIT_UINT_PRIVATE, val, unsafe.Sizeof(*utp), utp)
@@ -275,7 +275,7 @@ func freebsd_newosproc0(stacksize uintptr, fn unsafe.Pointer) {
 //go:nosplit
 //go:nowritebarrierrec
 func freebsd_libpreinit() {
-	initsig(true)
+	freebsd_initsig(true)
 }
 
 func freebsd_osinit() {
@@ -325,14 +325,14 @@ func freebsd_minit() {
 		freebsd_sigaltstack(&st, nil)
 	}
 
-	minitSignals()
+	freebsd_minitSignals()
 }
 
 // Called from dropm to undo the effect of an minit.
 //
 //go:nosplit
 func freebsd_unminit() {
-	unminitSignals()
+	freebsd_unminitSignals()
 	getg().m.procid = 0
 }
 
@@ -355,19 +355,19 @@ type freebsd_sigactiont struct {
 //go:nowritebarrierrec
 func freebsd_setsigstack(i uint32) {
 	var sa freebsd_sigactiont
-	sigaction(i, nil, (*sigactiont)(unsafe.Pointer(&sa)))
+	freebsd_sigaction(i, nil, &sa)
 	if sa.sa_flags&freebsd__SA_ONSTACK != 0 {
 		return
 	}
 	sa.sa_flags |= freebsd__SA_ONSTACK
-	sigaction(i, (*sigactiont)(unsafe.Pointer(&sa)), nil)
+	freebsd_sigaction(i, &sa, nil)
 }
 
 //go:nosplit
 //go:nowritebarrierrec
 func freebsd_getsig(i uint32) uintptr {
 	var sa freebsd_sigactiont
-	sigaction(i, nil, (*sigactiont)(unsafe.Pointer(&sa)))
+	freebsd_sigaction(i, nil, &sa)
 	return sa.sa_handler
 }
 
@@ -393,11 +393,11 @@ func (c *freebsd_sigctxt) fixsigcode(sig uint32) {
 }
 
 func freebsd_setProcessCPUProfiler(hz int32) {
-	setProcessCPUProfilerTimer(hz)
+	freebsd_setProcessCPUProfilerTimer(hz)
 }
 
 func freebsd_setThreadCPUProfiler(hz int32) {
-	setThreadCPUProfilerHz(hz)
+	freebsd_setThreadCPUProfilerHz(hz)
 }
 
 //go:nosplit

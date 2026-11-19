@@ -1,0 +1,854 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/build"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"log"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strings"
+)
+
+var fset = token.NewFileSet()
+
+// A hostPkg is a package as one host builds it.
+type hostPkg struct {
+	host   string
+	ctxt   build.Context
+	bp     *build.Package
+	files  map[string]*ast.File // all Go files
+	pkg    *types.Package
+	info   *types.Info
+	only   map[string]bool // Go files only some hosts build
+	sfiles []string        // assembly files only some hosts build
+
+	// decls are the package-level objects the host files declare.
+	decls map[string]types.Object
+	// rename gives the host copy's name of an object.
+	rename map[types.Object]string
+	// hoist is the fields moved out of a host type into the ape type.
+	hoist map[types.Object]bool
+	// drop is the declarations the ape file makes once for every host.
+	drop map[types.Object]bool
+
+	parents map[ast.Node]ast.Node
+}
+
+// A pkgGen generates a package's host files.
+type pkgGen struct {
+	u      *universe
+	path   string
+	dir    string
+	hs     []*hostPkg
+	shared map[string]bool // file names every host builds
+	report []string
+
+	prepared, preparing bool
+
+	dedup map[string]bool // types and variables every host declares the same way
+	union map[string]bool // host types shared structs embed
+	canon map[string]bool // types that are the first host's, converted for others
+	api   map[string]*iface
+
+	// pushes maps a linkname target in another package (time.now) to
+	// the function each host pushes to it.
+	pushes map[string]map[string]*types.Func
+	// asmDispatch maps a function a shared file declares and host
+	// assembly implements to each host's ABI selector.
+	asmDispatch map[string]map[string]string
+
+	decls   bytes.Buffer      // ape declarations
+	init    bytes.Buffer      // body of apeinitHost (runtime)
+	imports map[string]string // of the dispatch file: path -> name
+	outputs map[string][]byte // file name -> contents
+}
+
+// iface is something the ape package has for every host.
+type iface struct {
+	kind string // "func", "method", "const", "type", "var"
+	name string // for a method, "T.m"
+	objs map[string]types.Object
+	uses []ast.Expr // in shared files (of the first host)
+}
+
+func (g *pkgGen) reportf(format string, args ...any) {
+	g.report = append(g.report, fmt.Sprintf(format, args...))
+}
+
+func (g *pkgGen) first() *hostPkg { return g.hs[0] }
+
+func (hp *hostPkg) obj(ic *iface) types.Object { return ic.objs[hp.host] }
+
+func newPkgGen(u *universe, path string) *pkgGen {
+	g := &pkgGen{u: u, path: path, dir: goroot(path), imports: map[string]string{}, outputs: map[string][]byte{}}
+	for _, h := range u.hosts {
+		ctxt := build.Default
+		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
+		bp, err := ctxt.ImportDir(g.dir, 0)
+		if err != nil {
+			log.Fatalf("%s: %s: %v", path, h, err)
+		}
+		g.hs = append(g.hs, &hostPkg{host: h, ctxt: ctxt, bp: bp})
+	}
+	count := map[string]int{}
+	for _, hp := range g.hs {
+		for _, f := range slices.Concat(hp.bp.GoFiles, hp.bp.SFiles) {
+			count[f]++
+		}
+	}
+	g.shared = map[string]bool{}
+	for f, n := range count {
+		if n == len(g.hs) {
+			g.shared[f] = true
+		}
+	}
+	for _, hp := range g.hs {
+		hp.only = map[string]bool{}
+		for _, f := range hp.bp.GoFiles {
+			if !g.shared[f] {
+				hp.only[f] = true
+			}
+		}
+		for _, f := range hp.bp.SFiles {
+			if !g.shared[f] {
+				hp.sfiles = append(hp.sfiles, f)
+			}
+		}
+		hp.check(g.dir)
+	}
+	return g
+}
+
+// check type-checks the package as the host builds it.
+func (hp *hostPkg) check(dir string) {
+	hp.files = map[string]*ast.File{}
+	var files []*ast.File
+	for _, name := range hp.bp.GoFiles {
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			log.Fatal(err)
+		}
+		hp.files[name] = f
+		files = append(files, f)
+	}
+	saved := build.Default
+	build.Default = hp.ctxt
+	defer func() { build.Default = saved }()
+	var errs []error
+	conf := types.Config{
+		Importer: importer.ForCompiler(fset, "source", nil).(types.ImporterFrom),
+		Sizes:    types.SizesFor("gc", hp.ctxt.GOARCH),
+		Error:    func(err error) { errs = append(errs, err) },
+	}
+	hp.info = &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	hp.pkg, _ = conf.Check(hp.bp.ImportPath, fset, files, hp.info)
+	if len(errs) > 0 {
+		for _, e := range errs[:min(len(errs), 10)] {
+			log.Printf("%s: %v", hp.host, e)
+		}
+		log.Fatalf("%s: %d type errors", hp.host, len(errs))
+	}
+}
+
+func (hp *hostPkg) inOnly(pos token.Pos) bool {
+	return hp.only[filepath.Base(fset.Position(pos).Filename)]
+}
+
+// hostName is the name a host copy gives a package-level name.
+func hostName(host, name string) string {
+	if token.IsExported(name) {
+		return strings.ToUpper(host[:1]) + host[1:] + "_" + name
+	}
+	return host + "_" + name
+}
+
+func title(s string) string { return strings.ToUpper(s[:1]) + s[1:] }
+
+// hostNamed returns the host type t is or points to, or nil. Types the
+// ape file declares for every host are not host types.
+func (g *pkgGen) hostNamed(hp *hostPkg, t types.Type) *types.Named {
+	t = types.Unalias(t)
+	if p, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(p.Elem())
+	}
+	n, ok := t.(*types.Named)
+	if !ok || n.Obj().Pkg() != hp.pkg || !hp.inOnly(n.Obj().Pos()) || g.dedup[n.Obj().Name()] {
+		return nil
+	}
+	return n
+}
+
+// typeString prints t as the ape file names it: this package's types by
+// their original names.
+func (g *pkgGen) typeString(hp *hostPkg, t types.Type) string {
+	return types.TypeString(t, func(p *types.Package) string {
+		if p == hp.pkg {
+			return ""
+		}
+		g.imports[p.Path()] = p.Name()
+		return p.Name()
+	})
+}
+
+// fieldOwner names the package-level struct type that declares f.
+func (hp *hostPkg) fieldOwner(f *types.Var) string {
+	scope := hp.pkg.Scope()
+	for _, name := range scope.Names() {
+		tn, ok := scope.Lookup(name).(*types.TypeName)
+		if !ok {
+			continue
+		}
+		if st, ok := tn.Type().Underlying().(*types.Struct); ok {
+			for sf := range st.Fields() {
+				if sf == f {
+					return name
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// namedRefs returns the named types of this package that t refers to.
+func (hp *hostPkg) namedRefs(t types.Type, seen map[types.Type]bool, out *[]*types.Named) {
+	if seen[t] {
+		return
+	}
+	seen[t] = true
+	switch t := types.Unalias(t).(type) {
+	case *types.Named:
+		if t.Obj().Pkg() == hp.pkg {
+			*out = append(*out, t)
+		}
+		for a := range t.TypeArgs().Types() {
+			hp.namedRefs(a, seen, out)
+		}
+	case *types.Pointer:
+		hp.namedRefs(t.Elem(), seen, out)
+	case *types.Slice:
+		hp.namedRefs(t.Elem(), seen, out)
+	case *types.Array:
+		hp.namedRefs(t.Elem(), seen, out)
+	case *types.Map:
+		hp.namedRefs(t.Key(), seen, out)
+		hp.namedRefs(t.Elem(), seen, out)
+	case *types.Chan:
+		hp.namedRefs(t.Elem(), seen, out)
+	case *types.Struct:
+		for f := range t.Fields() {
+			hp.namedRefs(f.Type(), seen, out)
+		}
+	case *types.Signature:
+		for v := range t.Params().Variables() {
+			hp.namedRefs(v.Type(), seen, out)
+		}
+		for v := range t.Results().Variables() {
+			hp.namedRefs(v.Type(), seen, out)
+		}
+	case *types.Interface:
+		for m := range t.Methods() {
+			hp.namedRefs(m.Type(), seen, out)
+		}
+	}
+}
+
+func (g *pkgGen) run() {
+	g.prepare()
+	for _, hp := range g.hs {
+		hp.rename = map[types.Object]string{}
+		hp.hoist = map[types.Object]bool{}
+		hp.drop = map[types.Object]bool{}
+	}
+
+	// Names in host copies.
+	for _, hp := range g.hs {
+		for name, obj := range hp.decls {
+			if g.dedup[name] {
+				hp.drop[obj] = true
+				continue
+			}
+			hp.rename[obj] = hostName(hp.host, name)
+		}
+		scope := hp.pkg.Scope()
+		for _, name := range scope.Names() {
+			tn, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok || (hp.inOnly(tn.Pos()) && !g.dedup[name]) {
+				continue
+			}
+			nt, ok := tn.Type().(*types.Named)
+			if !ok {
+				continue
+			}
+			// Methods the host files declare on shared types.
+			for m := range nt.Methods() {
+				if hp.inOnly(m.Pos()) {
+					hp.rename[m] = hostName(hp.host, m.Name())
+				}
+			}
+		}
+	}
+	g.hoistFields()
+
+	g.api = map[string]*iface{}
+	add := func(hp *hostPkg, kind, name string, obj types.Object, use ast.Expr) {
+		key := kind + " " + name
+		ic := g.api[key]
+		if ic == nil {
+			ic = &iface{kind: kind, name: name, objs: map[string]types.Object{}}
+			g.api[key] = ic
+		}
+		ic.objs[hp.host] = obj
+		if use != nil && hp == g.first() {
+			ic.uses = append(ic.uses, use)
+		}
+	}
+	g.canon = map[string]bool{}
+	// What the shared files use.
+	for _, hp := range g.hs {
+		for id, obj := range hp.info.Uses {
+			if hp.inOnly(id.Pos()) || obj.Pkg() != hp.pkg {
+				continue
+			}
+			switch o := obj.(type) {
+			case *types.Func:
+				if recv := o.Signature().Recv(); recv != nil {
+					if !hp.inOnly(o.Pos()) {
+						continue // declared by a shared file
+					}
+					if n := g.hostNamed(hp, recv.Type()); n != nil {
+						add(hp, "method", n.Obj().Name()+"."+o.Name(), o, id)
+					} else {
+						add(hp, "method", recvName(recv.Type())+"."+o.Name(), o, id)
+					}
+					continue
+				}
+				if _, ok := hp.rename[o]; ok {
+					add(hp, "func", o.Name(), o, id)
+				}
+			case *types.Var:
+				if o.IsField() {
+					if owner := hp.fieldOwner(o); owner != "" && hp.inOnly(hp.pkg.Scope().Lookup(owner).Pos()) && !g.union[owner] && !g.dedup[owner] {
+						// The first host's layout is the ape type's; other
+						// hosts' are converted field by field.
+						g.canon[owner] = true
+					}
+					continue
+				}
+				if _, ok := hp.rename[o]; ok {
+					add(hp, "var", o.Name(), o, id)
+				}
+			case *types.Const:
+				if _, ok := hp.rename[o]; ok {
+					add(hp, "const", o.Name(), o, id)
+				}
+			case *types.TypeName:
+				if _, ok := hp.rename[o]; ok {
+					add(hp, "type", o.Name(), o, id)
+				}
+			}
+		}
+	}
+	// What a package other than the runtime exports.
+	if g.path != "runtime" {
+		for _, hp := range g.hs {
+			for name, obj := range hp.decls {
+				if !token.IsExported(name) {
+					continue
+				}
+				switch o := obj.(type) {
+				case *types.Func:
+					add(hp, "func", name, o, nil)
+				case *types.Var:
+					if !g.dedup[name] {
+						add(hp, "var", name, o, nil)
+					}
+				case *types.Const:
+					add(hp, "const", name, o, nil)
+				case *types.TypeName:
+					if !g.dedup[name] {
+						add(hp, "type", name, o, nil)
+						if _, ok := o.Type().Underlying().(*types.Struct); ok {
+							g.canon[name] = true
+						}
+					}
+				}
+			}
+			// Methods host files declare on shared types satisfy shared
+			// interfaces: they are all dispatched.
+			for obj := range hp.rename {
+				if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil {
+					if g.hostNamed(hp, fn.Signature().Recv().Type()) == nil {
+						add(hp, "method", recvName(fn.Signature().Recv().Type())+"."+fn.Name(), fn, nil)
+					}
+				}
+			}
+			// Exported methods of exported host types.
+			for name, obj := range hp.decls {
+				tn, ok := obj.(*types.TypeName)
+				if !ok || !token.IsExported(name) || g.dedup[name] {
+					continue
+				}
+				if nt, ok := tn.Type().(*types.Named); ok {
+					for m := range nt.Methods() {
+						if token.IsExported(m.Name()) {
+							add(hp, "method", name+"."+m.Name(), m, nil)
+						}
+					}
+				}
+			}
+		}
+	}
+	// Functions shared assembly calls.
+	for _, hp := range g.hs {
+		for _, name := range hp.bp.SFiles {
+			if !g.shared[name] {
+				continue
+			}
+			src, err := os.ReadFile(filepath.Join(g.dir, name))
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, m := range asmSym.FindAllSubmatch(src, -1) {
+				if fn, ok := hp.decls[string(m[2])].(*types.Func); ok {
+					add(hp, "func", fn.Name(), fn, nil)
+				}
+			}
+		}
+	}
+	// Canonical types' field types are canonical too.
+	for changed := true; changed; {
+		changed = false
+		for name := range g.canon {
+			hp := g.first()
+			o := hp.decls[name]
+			if o == nil {
+				continue
+			}
+			var refs []*types.Named
+			hp.namedRefs(o.Type().Underlying(), map[types.Type]bool{}, &refs)
+			for _, n := range refs {
+				if g.hostNamed(hp, n) != nil && !g.canon[n.Obj().Name()] {
+					g.canon[n.Obj().Name()] = true
+					changed = true
+				}
+			}
+		}
+	}
+	for name := range g.canon {
+		for _, hp := range g.hs {
+			if o := hp.decls[name]; o != nil {
+				add(hp, "type", name, o, nil)
+			}
+		}
+	}
+	// A type a dispatched signature mentions must be declared too.
+	for _, ic := range g.api {
+		if ic.kind != "func" && ic.kind != "method" {
+			continue
+		}
+		for _, hp := range g.hs {
+			obj := ic.objs[hp.host]
+			if obj == nil {
+				continue
+			}
+			s := obj.Type().(*types.Signature)
+			var refs []*types.Named
+			hp.namedRefs(s, map[types.Type]bool{}, &refs)
+			if s.Recv() != nil {
+				hp.namedRefs(s.Recv().Type(), map[types.Type]bool{}, &refs)
+			}
+			for _, n := range refs {
+				if g.hostNamed(hp, n) != nil {
+					add(hp, "type", n.Obj().Name(), n.Obj(), nil)
+				}
+			}
+		}
+	}
+	for name := range g.union {
+		for _, hp := range g.hs {
+			add(hp, "type", name, hp.pkg.Scope().Lookup(name), nil)
+		}
+	}
+	g.declDedup()
+
+	var keys []string
+	for k := range g.api {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		ic := g.api[k]
+		if ic.kind == "type" && g.canon[ic.name] && ic.objs[g.first().host] != nil && len(ic.objs) != len(g.hs) {
+			// Only some hosts have it, but a type every host has refers
+			// to it: the first host's.
+			g.declType(ic)
+			continue
+		}
+		if len(ic.objs) != len(g.hs) {
+			if len(ic.uses) > 0 {
+				var have []string
+				for h := range ic.objs {
+					have = append(have, h)
+				}
+				sort.Strings(have)
+				g.reportf("%s %s: shared code uses it, but only %v declare it", ic.kind, ic.name, have)
+			}
+			continue
+		}
+		switch ic.kind {
+		case "func", "method":
+			g.dispatchFunc(ic)
+		case "const":
+			g.declConst(ic)
+		case "type":
+			switch {
+			case g.union[ic.name]:
+				g.declUnion(ic)
+			default:
+				g.declType(ic)
+			}
+		case "var":
+			g.declVar(ic)
+		}
+	}
+
+	g.findPushes()
+	g.asmDispatch = map[string]map[string]string{}
+	for _, hp := range g.hs {
+		var names []string
+		for f := range hp.only {
+			names = append(names, f)
+		}
+		sort.Strings(names)
+		for _, f := range names {
+			g.writeGo(hp, f)
+		}
+		for _, f := range hp.sfiles {
+			g.writeAsm(hp, f)
+		}
+	}
+	g.writeDispatch()
+	g.writeAsmDispatch()
+	g.auditShared()
+}
+
+func recvName(t types.Type) string {
+	t = types.Unalias(t)
+	if p, ok := t.(*types.Pointer); ok {
+		t = p.Elem()
+	}
+	if n, ok := types.Unalias(t).(*types.Named); ok {
+		return n.Obj().Name()
+	}
+	return "?"
+}
+
+// findDedup finds the types every host declares the same way.
+func (g *pkgGen) findDedup() {
+	g.dedup = map[string]bool{}
+	hp0 := g.first()
+	for name, obj := range hp0.decls {
+		tn, ok := obj.(*types.TypeName)
+		if !ok {
+			continue
+		}
+		if n, ok := tn.Type().(*types.Named); ok && n.TypeParams().Len() > 0 {
+			continue
+		}
+		same := true
+		var shape string
+		for i, hp := range g.hs {
+			o, ok := hp.decls[name].(*types.TypeName)
+			if !ok || o.IsAlias() != tn.IsAlias() {
+				same = false
+				break
+			}
+			s := g.shape(hp, o)
+			if i == 0 {
+				shape = s
+			} else if s != shape {
+				same = false
+			}
+		}
+		if same {
+			g.dedup[name] = true
+		}
+	}
+	// Variables every host declares with the same type and no value.
+	for name, obj := range hp0.decls {
+		if _, ok := obj.(*types.Var); !ok {
+			continue
+		}
+		same := true
+		var t string
+		for i, hp := range g.hs {
+			o, ok := hp.decls[name].(*types.Var)
+			if !ok || !hp.zeroVar(o) {
+				same = false
+				break
+			}
+			s := types.TypeString(o.Type(), func(p *types.Package) string { return p.Path() }) + " " + hp.linkname(o)
+			if i == 0 {
+				t = s
+			} else if s != t {
+				same = false
+			}
+		}
+		if same {
+			g.dedup[name] = true
+		}
+	}
+	// A type is the same only if the host types it refers to are.
+	for changed := true; changed; {
+		changed = false
+		for name := range g.dedup {
+			for _, hp := range g.hs {
+				var refs []*types.Named
+				hp.namedRefs(hp.decls[name].Type(), map[types.Type]bool{}, &refs)
+				if tn, ok := hp.decls[name].(*types.TypeName); ok {
+					refs = nil
+					hp.namedRefs(tn.Type().Underlying(), map[types.Type]bool{}, &refs)
+				}
+				for _, n := range refs {
+					if hp.inOnly(n.Obj().Pos()) && !g.dedup[n.Obj().Name()] {
+						delete(g.dedup, name)
+						changed = true
+					}
+				}
+				// Or another package's that differ.
+				var all []*types.Named
+				refsOf(hp.decls[name].Type().Underlying(), map[types.Type]bool{}, &all)
+				for _, n := range all {
+					if n.Obj().Pkg() != nil && n.Obj().Pkg() != hp.pkg && g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj()) {
+						if g.dedup[name] {
+							delete(g.dedup, name)
+							changed = true
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// zeroVar reports whether v is declared alone and without a value.
+func (hp *hostPkg) zeroVar(v *types.Var) bool {
+	f := hp.files[filepath.Base(fset.Position(v.Pos()).Filename)]
+	if f == nil {
+		return false
+	}
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.VAR {
+			continue
+		}
+		for _, s := range gd.Specs {
+			vs := s.(*ast.ValueSpec)
+			for _, id := range vs.Names {
+				if hp.info.Defs[id] == v {
+					return len(vs.Names) == 1 && len(vs.Values) == 0
+				}
+			}
+		}
+	}
+	return false
+}
+
+// asmDefines reports whether hp's assembly defines the symbol pkg.name.
+func (g *pkgGen) asmDefines(hp *hostPkg, sym string) bool {
+	pkg, name, _ := cutLast(sym, ".")
+	text := "TEXT " + strings.ReplaceAll(pkg, "/", "∕") + "·" + name
+	for _, f := range hp.sfiles {
+		src, err := os.ReadFile(filepath.Join(g.dir, f))
+		if err == nil && strings.Contains(string(src), text) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasBody reports whether the function has a Go body.
+func (hp *hostPkg) hasBody(fn *types.Func) bool {
+	f := hp.files[filepath.Base(fset.Position(fn.Pos()).Filename)]
+	if f == nil {
+		return false
+	}
+	for _, d := range f.Decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Pos() == fn.Pos() {
+			return fd.Body != nil
+		}
+	}
+	return false
+}
+
+// linkname returns the //go:linkname directive naming obj, or "".
+func (hp *hostPkg) linkname(obj types.Object) string {
+	f := hp.files[filepath.Base(fset.Position(obj.Pos()).Filename)]
+	if f == nil {
+		return ""
+	}
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if fs := strings.Fields(c.Text); len(fs) >= 2 && fs[0] == "//go:linkname" && fs[1] == obj.Name() {
+				return c.Text
+			}
+		}
+	}
+	return ""
+}
+
+// shape prints a host's type declaration for comparison.
+func (g *pkgGen) shape(hp *hostPkg, tn *types.TypeName) string {
+	q := func(p *types.Package) string {
+		if p == hp.pkg {
+			return ""
+		}
+		return p.Path()
+	}
+	if tn.IsAlias() {
+		return "= " + types.TypeString(types.Unalias(tn.Type()), q)
+	}
+	return types.TypeString(tn.Type().Underlying(), q)
+}
+
+// declDedup declares the types every host declares the same way.
+func (g *pkgGen) declDedup() {
+	var names []string
+	for n := range g.dedup {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		hp := g.first()
+		if v, ok := hp.decls[n].(*types.Var); ok {
+			if l := hp.linkname(v); l != "" {
+				fmt.Fprintf(&g.decls, "\n%s", l)
+			}
+			fmt.Fprintf(&g.decls, "\nvar %s %s\n", n, g.typeString(hp, v.Type()))
+			continue
+		}
+		tn := hp.decls[n].(*types.TypeName)
+		if tn.IsAlias() {
+			fmt.Fprintf(&g.decls, "\ntype %s = %s\n", n, g.typeString(hp, types.Unalias(tn.Type())))
+		} else {
+			fmt.Fprintf(&g.decls, "\ntype %s %s\n", n, g.typeString(hp, tn.Type().Underlying()))
+		}
+	}
+}
+
+// hoistFields hoists the fields shared code uses out of union types.
+func (g *pkgGen) hoistFields() {
+	names := map[string]bool{}
+	for _, hp := range g.hs {
+		for id, obj := range hp.info.Uses {
+			v, ok := obj.(*types.Var)
+			if !ok || !v.IsField() || hp.inOnly(id.Pos()) {
+				continue
+			}
+			if ut := hp.fieldOwner(v); ut != "" && g.union[ut] {
+				names[ut+"."+v.Name()] = true
+			}
+		}
+	}
+	for _, hp := range g.hs {
+		for name := range g.union {
+			tn := hp.pkg.Scope().Lookup(name)
+			for f := range tn.Type().Underlying().(*types.Struct).Fields() {
+				if names[name+"."+f.Name()] {
+					hp.hoist[f] = true
+					delete(hp.rename, f)
+				} else {
+					hp.rename[f] = hostName(hp.host, f.Name())
+				}
+			}
+		}
+	}
+}
+
+var linknameRE = regexp.MustCompile(`(?m)^//go:linkname (\S+) (\S+)\s*$`)
+
+// findPushes finds the functions host files push to other packages by
+// linkname, and makes a function that dispatches for each symbol more
+// than one host pushes.
+func (g *pkgGen) findPushes() {
+	g.pushes = map[string]map[string]*types.Func{}
+	for _, hp := range g.hs {
+		for name := range hp.only {
+			for _, cg := range hp.files[name].Comments {
+				for _, c := range cg.List {
+					m := linknameRE.FindStringSubmatch(c.Text)
+					if m == nil {
+						continue
+					}
+					pkg, _, ok := cutLast(m[2], ".")
+					if !ok || pkg == hp.bp.ImportPath {
+						continue
+					}
+					fn, ok := hp.pkg.Scope().Lookup(m[1]).(*types.Func)
+					if !ok || !hp.hasBody(fn) && !g.asmDefines(hp, m[2]) {
+						continue // a pull
+					}
+					if g.pushes[m[2]] == nil {
+						g.pushes[m[2]] = map[string]*types.Func{}
+					}
+					g.pushes[m[2]][hp.host] = fn
+				}
+			}
+		}
+	}
+	var targets []string
+	for t, by := range g.pushes {
+		if len(by) < 2 {
+			delete(g.pushes, t)
+			continue
+		}
+		targets = append(targets, t)
+	}
+	sort.Strings(targets)
+	for _, t := range targets {
+		by := g.pushes[t]
+		if len(by) != len(g.hs) {
+			g.reportf("linkname %s: pushed by only some hosts", t)
+			continue
+		}
+		ic := &iface{kind: "func", name: t, objs: map[string]types.Object{}}
+		for h, fn := range by {
+			ic.objs[h] = fn
+		}
+		fn := by[g.first().host]
+		wrapper := "ape_" + strings.NewReplacer("/", "_", ".", "_").Replace(t)
+		saved := g.decls
+		g.decls = bytes.Buffer{}
+		g.dispatchFunc(ic)
+		out := g.decls.String()
+		g.decls = saved
+		out = strings.Replace(out, "func "+fn.Name()+"(", "//go:linkname "+wrapper+" "+t+"\nfunc "+wrapper+"(", 1)
+		g.decls.WriteString(out)
+	}
+}
+
+func cutLast(s, sep string) (before, after string, ok bool) {
+	i := strings.LastIndex(s, sep)
+	if i < 0 {
+		return s, "", false
+	}
+	return s[:i], s[i+len(sep):], true
+}

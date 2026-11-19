@@ -2,8 +2,8 @@
 
 //go:build ape && amd64
 
-#include "go_asm.h"
 #include "textflag.h"
+#include "go_asm.h"
 
 TEXT ·callCgoMmap(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
@@ -16,12 +16,6 @@ TEXT ·callCgoMunmap(SB),NOSPLIT|NOFRAME,$0
 	JNE	2(PC)
 	JMP	·linux_callCgoMunmap(SB)
 	JMP	·freebsd_callCgoMunmap(SB)
-
-TEXT ·callCgoSigaction(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
-	JNE	2(PC)
-	JMP	·linux_callCgoSigaction(SB)
-	JMP	·freebsd_callCgoSigaction(SB)
 
 TEXT ·closefd(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux
@@ -64,12 +58,6 @@ TEXT ·settls(SB),NOSPLIT|NOFRAME,$0
 	JNE	2(PC)
 	JMP	·linux_settls(SB)
 	JMP	·freebsd_settls(SB)
-
-TEXT ·sigfwd(SB),NOSPLIT|NOFRAME,$0
-	CMPB	runtime·apehost(SB), $const_apeLinux
-	JNE	2(PC)
-	JMP	·linux_sigfwd(SB)
-	JMP	·freebsd_sigfwd(SB)
 
 TEXT ·sysMmap(SB),NOSPLIT|NOFRAME,$0
 	CMPB	runtime·apehost(SB), $const_apeLinux

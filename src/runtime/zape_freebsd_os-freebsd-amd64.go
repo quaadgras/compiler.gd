@@ -8,8 +8,6 @@
 
 package runtime
 
-import "unsafe"
-
 import "internal/abi"
 
 func freebsd_cgoSigtramp()
@@ -20,7 +18,7 @@ func freebsd_setsig(i uint32, fn uintptr) {
 	var sa freebsd_sigactiont
 	sa.sa_flags = freebsd__SA_SIGINFO | freebsd__SA_ONSTACK | freebsd__SA_RESTART
 	sa.sa_mask = freebsd_sigset_all
-	if fn == abi.FuncPCABIInternal(sighandler) { // abi.FuncPCABIInternal(sighandler) matches the callers in signal_unix.go
+	if fn == abi.FuncPCABIInternal(freebsd_sighandler) { // abi.FuncPCABIInternal(sighandler) matches the callers in signal_unix.go
 		if iscgo {
 			fn = abi.FuncPCABI0(freebsd_cgoSigtramp)
 		} else {
@@ -28,5 +26,5 @@ func freebsd_setsig(i uint32, fn uintptr) {
 		}
 	}
 	sa.sa_handler = fn
-	sigaction(i, (*sigactiont)(unsafe.Pointer(&sa)), nil)
+	freebsd_sigaction(i, &sa, nil)
 }

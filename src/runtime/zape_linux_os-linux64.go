@@ -15,7 +15,7 @@ import (
 func linux_configure64bitsTimeOn32BitsArchitectures() {}
 
 //go:noescape
-func linux_futex(addr unsafe.Pointer, op int32, val uint32, ts *linux_timespec, addr2 unsafe.Pointer, val3 uint32) int32
+func linux_futex(addr unsafe.Pointer, op int32, val uint32, ts *timespec, addr2 unsafe.Pointer, val3 uint32) int32
 
 //go:noescape
 func linux_timer_settime(timerid int32, flags int32, new, old *linux_itimerspec) int32

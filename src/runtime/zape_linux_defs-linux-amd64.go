@@ -99,23 +99,13 @@ const (
 	linux__SOCK_DGRAM = 0x2
 )
 
-type linux_timespec struct {
-	tv_sec  int64
-	tv_nsec int64
-}
-
 //go:nosplit
-func (ts *linux_timespec) setNsec(ns int64) {
+func (ts *timespec) linux_setNsec(ns int64) {
 	ts.tv_sec = ns / 1e9
 	ts.tv_nsec = ns % 1e9
 }
 
-type linux_timeval struct {
-	tv_sec  int64
-	tv_usec int64
-}
-
-func (tv *linux_timeval) set_usec(x int32) {
+func (tv *timeval) linux_set_usec(x int32) {
 	tv.tv_usec = int64(x)
 }
 
@@ -142,13 +132,8 @@ type linux_siginfo struct {
 }
 
 type linux_itimerspec struct {
-	it_interval linux_timespec
-	it_value    linux_timespec
-}
-
-type linux_itimerval struct {
-	it_interval linux_timeval
-	it_value    linux_timeval
+	it_interval timespec
+	it_value    timespec
 }
 
 type linux_sigeventFields struct {

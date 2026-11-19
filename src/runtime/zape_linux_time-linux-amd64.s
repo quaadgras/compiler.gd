@@ -16,7 +16,7 @@
 #define SYS_clock_gettime	228
 
 // func now() (sec int64, nsec int32, mono int64)
-TEXT runtime·linux_time_now<ABIInternal>(SB),NOSPLIT,$16-24
+TEXT ·linux_time_now<ABIInternal>(SB),NOSPLIT,$16-24
 #ifdef GOEXPERIMENT_runtimesecret
 	// The kernel might spill our secrets onto g0
 	// erase our registers here.

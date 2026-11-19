@@ -367,7 +367,7 @@ TEXT runtime·linux_sigtramp(SB),NOSPLIT|TOPFRAME|NOFRAME,$0
 	MOVQ	DI, AX	// sig
 	MOVQ	SI, BX	// info
 	MOVQ	DX, CX	// ctx
-	CALL	·sigtrampgo<ABIInternal>(SB)
+	CALL	·linux_sigtrampgo<ABIInternal>(SB)
 
 	ADJSP	$-24
 
@@ -392,7 +392,7 @@ TEXT runtime·linux_sigprofNonGoWrapper<>(SB),NOSPLIT|NOFRAME,$0
 	MOVQ	DI, AX	// sig
 	MOVQ	SI, BX	// info
 	MOVQ	DX, CX	// ctx
-	CALL	·sigprofNonGo<ABIInternal>(SB)
+	CALL	·linux_sigprofNonGo<ABIInternal>(SB)
 
 	ADJSP	$-24
 
