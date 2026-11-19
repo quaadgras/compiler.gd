@@ -1018,7 +1018,7 @@ func walkUnsafeSlice(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.N
 		//     panicunsafeslicelen()
 		// }
 		nif = ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
-		memCond := ir.NewBinaryExpr(gd, gd.Pos, ir.OGT, mem, ir.NewUnaryExpr(gd, gd.Pos, ir.ONEG, typecheck.Conv(gd, unsafePtr, types.Types[types.TUINTPTR])))
+		memCond := ir.NewBinaryExpr(gd, gd.Pos, ir.OGT, mem, ir.NewUnaryExpr(gd, gd.Pos, ir.ONEG, addrInt(gd, unsafePtr)))
 		nif.Cond = ir.NewLogicalExpr(gd, gd.Pos, ir.OOROR, overflow, memCond)
 		nifPtr := ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
 		nifPtr.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OEQ, unsafePtr, typecheck.NodNil(gd))
@@ -1106,7 +1106,7 @@ func walkUnsafeString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir.
 		//    panicunsafeslicelen()
 		// }
 		nifLen := ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
-		nifLen.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OGT, typecheck.Conv(gd, len, types.Types[types.TUINTPTR]), ir.NewUnaryExpr(gd, gd.Pos, ir.ONEG, typecheck.Conv(gd, unsafePtr, types.Types[types.TUINTPTR])))
+		nifLen.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OGT, typecheck.Conv(gd, len, types.Types[types.TUINTPTR]), ir.NewUnaryExpr(gd, gd.Pos, ir.ONEG, addrInt(gd, unsafePtr)))
 		nifPtr := ir.NewIfStmt(gd, gd.Pos, nil, nil, nil)
 		nifPtr.Cond = ir.NewBinaryExpr(gd, gd.Pos, ir.OEQ, unsafePtr, typecheck.NodNil(gd))
 		nifPtr.Body.Append(mkcall(gd, "panicunsafestringnilptr", nil, &nifPtr.Body))

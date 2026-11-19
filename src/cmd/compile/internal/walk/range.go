@@ -218,6 +218,7 @@ func walkRange(gd *base.Invocation, nrange *ir.RangeStmt) ir.Node {
 		ptr.SetBounded(true)
 		huVal := ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], ptr)
 		huVal = ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, types.Types[types.TUINTPTR], huVal)
+		huVal.SetCheckPtr(true) // gd: an integer for the loop only, not an exposed address (walkConv)
 		hu := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TUINTPTR])
 		init = append(init, ir.NewAssignStmt(gd, gd.Pos, hu, huVal))
 
@@ -239,6 +240,7 @@ func walkRange(gd *base.Invocation, nrange *ir.RangeStmt) ir.Node {
 		// This reads from hp and writes to hu.
 		huVal = ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, types.Types[types.TUNSAFEPTR], hp)
 		huVal = ir.NewConvExpr(gd, gd.Pos, ir.OCONVNOP, types.Types[types.TUINTPTR], huVal)
+		huVal.SetCheckPtr(true) // gd: as above
 		as := ir.NewAssignStmt(gd, gd.Pos, hu, ir.NewBinaryExpr(gd, gd.Pos, ir.OADD, huVal, ir.NewInt(gd, gd.Pos, elem.Size())))
 		nfor.Post = ir.NewBlockStmt(gd, gd.Pos, []ir.Node{nfor.Post, as})
 

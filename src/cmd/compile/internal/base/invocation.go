@@ -289,12 +289,11 @@ type Invocation struct {
 	TypesUnsafePkg  any // *types.Pkg
 	TypesBlankSym   any // *types.Sym
 
-	// SsaConfig / SsaCaches — were package-level `ssaConfig` /
-	// `ssaCaches` in ssagen. Per-Invocation so concurrent
-	// host.Run invocations don't race on InitConfig overwriting
-	// the shared values.
+	// SsaConfig — was the package-level `ssaConfig` in ssagen.
+	// Per-Invocation so concurrent host.Run invocations don't race
+	// on InitConfig overwriting the shared value. (The caches that
+	// went with it are each worker's own: ssagen.Worker.)
 	SsaConfig any // *ssa.Config
-	SsaCaches any // []ssa.Cache
 
 	// SiggenSet shadows the per-Sym symSiggen flag for use sites
 	// that may operate on shared types.Sym pointers (BuiltinPkg /
@@ -323,17 +322,6 @@ type Invocation struct {
 	// Invocation so concurrent host.Run calls don't leak each
 	// other's flag state.
 	CalcSizeDisabled bool
-
-	// ProgArray — was the package-level
-	// `var sharedProgArray = new([10000]obj.Prog)` in
-	// cmd/compile/internal/objw. NewProgs slices this array per
-	// worker; concurrent host.Run invocations all using
-	// `sharedProgArray[sz*worker:sz*(worker+1)]` raced on the
-	// same memory. Per-Invocation so each gd has its own
-	// backing array. Type is *[10000]obj.Prog (any to avoid
-	// base→obj import cycle in this struct).
-	ProgArray     any // *[10000]obj.Prog
-	ProgArrayOnce sync.Once
 
 	// IrSyms — was `ir.Syms symsStruct` package-level. Holds
 	// runtime LSyms (Memmove, Newproc, GCWriteBarrier[],

@@ -142,9 +142,14 @@ func genAllocators() {
 	fmt.Fprintln(w, "import (")
 	fmt.Fprintln(w, "\"internal/unsafeheader\"")
 	fmt.Fprintln(w, "\"math/bits\"")
-	fmt.Fprintln(w, "\"sync\"")
 	fmt.Fprintln(w, "\"unsafe\"")
 	fmt.Fprintln(w, ")")
+	fmt.Fprintln(w, "// cacheFree has the free lists of a Cache, by the logarithm of the size.")
+	fmt.Fprintln(w, "type cacheFree struct {")
+	for _, a := range allocators {
+		fmt.Fprintf(w, "%s [%d][]%s\n", a.name, a.maxLog-a.minLog, a.typ)
+	}
+	fmt.Fprintln(w, "}")
 	for _, a := range allocators {
 		genAllocator(w, a)
 	}
@@ -170,24 +175,23 @@ func genAllocators() {
 	}
 }
 func genAllocator(w io.Writer, a allocator) {
-	fmt.Fprintf(w, "var poolFree%s [%d]sync.Pool\n", a.name, a.maxLog-a.minLog)
+	// gd: the free lists are the Cache's own, not sync.Pools. A pool's
+	// objects are memory that goroutines share, for good, and so is
+	// everything that is stored in them: the values of the function
+	// that a worker compiles, and what they lead to, which is all of
+	// it. A worker has its Cache to itself (ssagen.Worker).
 	fmt.Fprintf(w, "func (c *Cache) alloc%s(n int) %s {\n", a.name, a.typ)
 	fmt.Fprintf(w, "var s %s\n", a.typ)
 	fmt.Fprintf(w, "n2 := n\n")
 	fmt.Fprintf(w, "if n2 < %d { n2 = %d }\n", 1<<a.minLog, 1<<a.minLog)
 	fmt.Fprintf(w, "b := bits.Len(uint(n2-1))\n")
-	fmt.Fprintf(w, "v := poolFree%s[b-%d].Get()\n", a.name, a.minLog)
-	fmt.Fprintf(w, "if v == nil {\n")
+	fmt.Fprintf(w, "l := &c.free.%s[b-%d]\n", a.name, a.minLog)
+	fmt.Fprintf(w, "if k := len(*l); k == 0 {\n")
 	fmt.Fprintf(w, "  s = %s\n", fmt.Sprintf(a.mak, "1<<b"))
 	fmt.Fprintf(w, "} else {\n")
-	if a.typ[0] == '*' {
-		fmt.Fprintf(w, "s = v.(%s)\n", a.typ)
-	} else {
-		fmt.Fprintf(w, "sp := v.(*%s)\n", a.typ)
-		fmt.Fprintf(w, "s = *sp\n")
-		fmt.Fprintf(w, "*sp = nil\n")
-		fmt.Fprintf(w, "c.hdr%s = append(c.hdr%s, sp)\n", a.name, a.name)
-	}
+	fmt.Fprintf(w, "  s = (*l)[k-1]\n")
+	fmt.Fprintf(w, "  (*l)[k-1] = nil\n")
+	fmt.Fprintf(w, "  *l = (*l)[:k-1]\n")
 	fmt.Fprintf(w, "}\n")
 	if a.resize != "" {
 		fmt.Fprintf(w, "s = %s\n", fmt.Sprintf(a.resize, "s", "n"))
@@ -197,20 +201,7 @@ func genAllocator(w io.Writer, a allocator) {
 	fmt.Fprintf(w, "func (c *Cache) free%s(s %s) {\n", a.name, a.typ)
 	fmt.Fprintf(w, "%s\n", fmt.Sprintf(a.clear, "s"))
 	fmt.Fprintf(w, "b := bits.Len(uint(%s) - 1)\n", fmt.Sprintf(a.capacity, "s"))
-	if a.typ[0] == '*' {
-		fmt.Fprintf(w, "poolFree%s[b-%d].Put(s)\n", a.name, a.minLog)
-	} else {
-		fmt.Fprintf(w, "var sp *%s\n", a.typ)
-		fmt.Fprintf(w, "if len(c.hdr%s) == 0 {\n", a.name)
-		fmt.Fprintf(w, "  sp = new(%s)\n", a.typ)
-		fmt.Fprintf(w, "} else {\n")
-		fmt.Fprintf(w, "  sp = c.hdr%s[len(c.hdr%s)-1]\n", a.name, a.name)
-		fmt.Fprintf(w, "  c.hdr%s[len(c.hdr%s)-1] = nil\n", a.name, a.name)
-		fmt.Fprintf(w, "  c.hdr%s = c.hdr%s[:len(c.hdr%s)-1]\n", a.name, a.name, a.name)
-		fmt.Fprintf(w, "}\n")
-		fmt.Fprintf(w, "*sp = s\n")
-		fmt.Fprintf(w, "poolFree%s[b-%d].Put(sp)\n", a.name, a.minLog)
-	}
+	fmt.Fprintf(w, "c.free.%s[b-%d] = append(c.free.%s[b-%d], s)\n", a.name, a.minLog, a.name, a.minLog)
 	fmt.Fprintf(w, "}\n")
 }
 func genDerived(w io.Writer, d derived, base allocator) {

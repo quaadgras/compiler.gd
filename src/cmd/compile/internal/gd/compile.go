@@ -179,7 +179,7 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 	var wg sync.WaitGroup
 	mu.Lock()
 
-	for workerId := range gd.Flag.LowerC {
+	for range gd.Flag.LowerC {
 		// TODO: replace with wg.Go when the oldest bootstrap has it.
 		// With the current policy, that'd be go1.27.
 		wg.Add(1)
@@ -198,6 +198,7 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 				}
 			}()
 			var closures []*ir.Func
+			w := ssagen.NewWorker(gd) // this goroutine's own
 			for {
 				mu.Lock()
 				cq = append(cq, closures...)
@@ -210,7 +211,7 @@ func compileFunctions(gd *base.Invocation, profile *pgoir.Profile) {
 				cq = cq[:len(cq)-1]
 				mu.Unlock()
 				cur = fn
-				ssagen.Compile(gd, fn, workerId, profile)
+				ssagen.Compile(gd, fn, w, profile)
 				closures = fn.Closures
 			}
 		}()

@@ -293,7 +293,7 @@ func publishStore(typ *abi.Type, dst, src unsafe.Pointer) {
 //
 //go:nosplit
 func publishptr(dst, val unsafe.Pointer) {
-	if isShared(dst) {
+	if val != nil && isShared(dst) {
 		publish(val)
 	}
 }

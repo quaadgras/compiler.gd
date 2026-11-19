@@ -38,31 +38,17 @@ import (
 	"internal/abi"
 )
 
-// progArrayOf returns gd's per-Invocation [10000]Prog backing array.
-// Was a package-level `sharedProgArray`; concurrent host.Run
-// invocations would have given each invocation's worker N the same
-// slice of memory, racing on Prog field writes during arch
-// emit/assemble.
-//
-// Within ONE invocation, the parallel backend's workers all call
-// NewProgs → progArrayOf concurrently for their respective
-// functions. We sync.Once-protect the array allocation so only
-// the first worker allocates; the rest see the same array.
-func progArrayOf(gd *base.Invocation) *[10000]obj.Prog {
-	gd.ProgArrayOnce.Do(func() {
-		gd.ProgArray = new([10000]obj.Prog)
-	})
-	return gd.ProgArray.(*[10000]obj.Prog)
-}
+// ProgCacheSize is the number of Progs that the backend's workers have
+// between them to reuse from one function to the next.
+const ProgCacheSize = 10000
 
-// NewProgs returns a new Progs for fn.
-// worker indicates which of the backend workers will use the Progs.
-func NewProgs(gd *base.Invocation, fn *ir.Func, worker int) *Progs {
+// NewProgs returns a new Progs for fn. cache is the Progs to use first,
+// which the caller reuses for the next function: its own, that no other
+// goroutine has (ssagen.Worker), or nil.
+func NewProgs(gd *base.Invocation, fn *ir.Func, cache []obj.Prog) *Progs {
 	pp := new(Progs)
 	if gd.Ctxt.CanReuseProgs() {
-		arr := progArrayOf(gd)
-		sz := len(arr) / gd.Flag.LowerC
-		pp.Cache = arr[sz*worker : sz*(worker+1)]
+		pp.Cache = cache
 	}
 	pp.CurFunc = fn
 
