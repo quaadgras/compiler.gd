@@ -577,6 +577,7 @@ type g struct {
 	fipsIndicator   uint8
 	fipsOnlyBypass  bool
 	ditWanted       bool // set if g wants to be executed with DIT enabled
+	leakReported    bool // the goroutine leak profile reported it: it is not collected
 	syncSafePoint   bool // set if g is stopped at a synchronous safe point.
 	shareAllocs     bool // what g allocates for a map is shared: it is writing a shared map (shared.go)
 	runningCleanups atomic.Bool

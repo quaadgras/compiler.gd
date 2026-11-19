@@ -1328,6 +1328,9 @@ func findGoroutineLeaks() bool {
 	for i := work.nMaybeRunnableStackRoots; i < work.nStackRoots; i++ {
 		gp := work.stackRoots[i]
 		casgstatus(gp, _Gwaiting, _Gleaked)
+		// What the profile reported stays for the profiles that
+		// follow: a later cycle does not collect it.
+		gp.leakReported = true
 
 		// Add the primitives causing the goroutine leaks
 		// to the GC work queue, to ensure they are marked.
@@ -2408,7 +2411,7 @@ func collectGoroutines() bool {
 // out to be unreachable, can be collected if it does.
 func (gp *g) collectable() bool {
 	return gp.goid != 1 && gp.lockedm == 0 && gp.m == nil && gp.bubble == nil && gp._panic == nil &&
-		gp.syscallsp == 0 && gp.coroarg == nil && !isSystemGoroutine(gp, false)
+		gp.syscallsp == 0 && gp.coroarg == nil && !gp.leakReported && !isSystemGoroutine(gp, false)
 }
 
 // gcCollectGoroutine frees gp, which is blocked forever. The world is
