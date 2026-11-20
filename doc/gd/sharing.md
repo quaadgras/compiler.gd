@@ -145,12 +145,44 @@ its life.
   where a new one is one allocation. (So is one that an unproven `Put`
   shared, when a proven one puts it next.)
 
-  A mask says "keeps" for any function that calls a method of its
-  parameter, which every real `Format` method does with its
-  `fmt.State`: such a call shares the printer and costs the next
-  `Printf` an allocation. That would take a mask that says "only by
-  the argument's own methods", for the caller to answer by the type it
-  passes.
+  **A method of its own.** A buffer from a pool that is passed to
+  `fmt.Fprintf` or `io.WriteString` is the receiver of a call of an
+  interface's method there, which went to the heap: a holder. But all
+  that such a call can do with the object is what a method of the
+  object's own type does, and the caller knows the type where it
+  converts the pointer to the interface type. So:
+
+  - The receiver of a call of an interface's method flows to
+    `recvHeldLoc`, besides the heap (`recvLoc`). A parameter that
+    nothing keeps but that says so (`ir.Func.KeptByRecv`), and an
+    argument of it flows to `recvHeldLoc` in the caller.
+  - A conversion of a pointer to an interface type marks its edge if
+    no method of the pointer's type that the interface type has keeps
+    its receiver or returns it (`recvKeepsNothing`): the walk from
+    `recvHeldLoc` does not follow that edge, so the object has no
+    holder by it.
+  - An interface that is asserted to have methods that its type does
+    not have flows to `recvAnyLoc` (`ir.Func.KeptByAny`), which an edge
+    is only cut from if no method at all of the type keeps its
+    receiver. A pooled type has, as a rule, a method that puts it back
+    in its pool, which is one that keeps it: so only the methods that
+    can be called count, where that is known.
+  - What a call of an interface's method returns may be its receiver;
+    that edge (`edge.recvRes`) is not one that a holder is found along,
+    since the receiver flows to `recvHeldLoc` anyway, and a method that
+    returns its receiver is one that keeps it for `recvKeepsNothing`.
+
+  With a pooled `bytes.Buffer`, `fmt.Fprintf(buf, "%d", x)` takes 174
+  ns where it took 196 (77 with no sharing at all), and
+  `io.WriteString` 67 where it took 76 (28).
+
+  Not covered: a function that is only known when the program runs
+  still answers by its mask, which says "keeps" for one that calls a
+  method of its parameter, as every real `Format` method does with its
+  `fmt.State` (and the printer has a method that hands it over); a
+  helper that was inlined, whose interface variable is a holder in the
+  caller; and an object of which a callee converts the address of a
+  field to an interface type (regexp's machine and its inputs).
 
   What an object that is handed over points to is shared by the put,
   but for a pointer into the object itself (the printer points to its

@@ -59,7 +59,7 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
 		return e.heapHole()
 	}
-	hs := []hole{e.ownHeapHole()}
+	hs := []hole{e.recvLoc.asHole(), e.recvHeldHole()}
 	results := call.Fun.Type().Results()
 	for i, k := range ks {
 		if i >= len(results) || !results[i].Type.HasPointers() || k.dst == &e.blankLoc {
@@ -68,7 +68,9 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 		if k.derefs < 0 {
 			return e.heapHole()
 		}
-		hs = append(hs, k.note(e.gd, call, "receiver in result"))
+		k = k.note(e.gd, call, "receiver in result")
+		k.recvRes = true
+		hs = append(hs, k)
 	}
 	return e.teeHole(hs...)
 }
@@ -76,19 +78,115 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 // convHole returns the hole for the operand of a conversion of a value
 // of type t to the interface type iface, whose result goes to k.
 func (e *escape) convHole(k hole, t, iface *types.Type) hole {
+	if k.dst != &e.blankLoc && k.derefs >= 0 {
+		k.recvAllOK = e.recvKeepsNothing(t, nil)
+		k.recvOK = k.recvAllOK || e.recvKeepsNothing(t, iface)
+	}
 	if !e.recvOn() || k.dst == &e.blankLoc || k.derefs < 0 || !t.HasPointers() {
 		return k
 	}
 	if e.convOK(t, iface) {
 		return k
 	}
-	return e.teeHole(k, e.convShareHole())
+	k2 := e.teeHole(k, e.convShareHole())
+	k2.recvOK, k2.recvAllOK = k.recvOK, k.recvAllOK
+	return k2
+}
+
+// recvKeepsNothing reports whether t is a pointer type of which no
+// method that the interface type iface has, or no method at all if
+// iface is nil, keeps its receiver beyond the call, as far as is known
+// here: each is analysed, and what it does with the receiver's pointer
+// is at most to pass it to calls that check (ir.Func.KeptChecked),
+// which is also what a call of a method of its own is, the type being
+// this one. The methods of iface are those that can be called of what
+// is converted to it, until it is asserted to have others (assertHole).
+func (b *batch) recvKeepsNothing(t, iface *types.Type) bool {
+	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 || !t.IsPtr() || t.HasShape() {
+		return false
+	}
+	if iface != nil && (!iface.IsInterface() || iface.HasShape()) {
+		return false
+	}
+	key := convKey{t, iface}
+	if v, ok := b.recvNothing[key]; ok {
+		return v
+	}
+	var want map[*types.Sym]bool
+	if iface != nil {
+		want = make(map[*types.Sym]bool)
+		for _, m := range iface.AllMethods() {
+			if m.Sym == nil {
+				return false
+			}
+			want[m.Sym] = true
+		}
+	}
+	v := func() bool {
+		mt := types.ReceiverBaseType(t)
+		if mt == nil || mt.HasShape() {
+			return false
+		}
+		typecheck.CalcMethods(mt)
+		for _, f := range mt.AllMethods() {
+			if want != nil && !want[f.Sym] {
+				continue
+			}
+			if !f.IsMethod() || f.Nointerface() || !types.IsMethodApplicable(t, f) {
+				if want != nil {
+					return false
+				}
+				continue
+			}
+			name, _ := f.Nname.(*ir.Name)
+			if name == nil || name.Func == nil || len(name.Func.ParamShares) == 0 {
+				// Not analysed (yet), or not Go.
+				return false
+			}
+			recv := name.Type().Recv()
+			if recv == nil {
+				return false
+			}
+			if !recv.Type.IsPtr() {
+				// A copy of what the pointer points to.
+				continue
+			}
+			esc := parseLeaks(b.gd, recv.Note)
+			if esc.Heap() == 0 && name.Func.KeptChecked&1 == 0 {
+				return false
+			}
+			// Nor may it return it.
+			for i := range numEscResults {
+				if esc.Result(i) == 0 {
+					return false
+				}
+			}
+		}
+		return true
+	}()
+	if b.recvNothing == nil {
+		b.recvNothing = make(map[convKey]bool)
+	}
+	b.recvNothing[key] = v
+	return v
 }
 
 // assertHole returns the hole for the operand of an assertion that an
 // interface of type from holds a value of type t, whose result goes to
 // k.
 func (e *escape) assertHole(k hole, t, from *types.Type) hole {
+	k = e.assertHole1(k, t, from)
+	if k.dst != &e.blankLoc && t != nil && from != nil && t.IsInterface() && !(from.IsInterface() && !t.HasShape() && !from.HasShape() && hasMethods(from, t)) {
+		// Methods may be called that the interface's type does
+		// not have: any of what it holds (recvKeepsNothing).
+		k2 := e.teeHole(k, e.recvAnyHole())
+		k2.ro = k.ro
+		return k2
+	}
+	return k
+}
+
+func (e *escape) assertHole1(k hole, t, from *types.Type) hole {
 	if !e.recvOn() || k.dst == &e.blankLoc || k.derefs < 0 || t == nil || from == nil {
 		return k
 	}

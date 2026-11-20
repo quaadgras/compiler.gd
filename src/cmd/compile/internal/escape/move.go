@@ -425,9 +425,9 @@ func (b *batch) trackParams(fn *ir.Func) {
 // hold that parameter's pointer.
 func (b *batch) holdsMovedParam(root, l *location) bool {
 	switch root {
-	case l, &b.moveLoc, &b.checkLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
+	case l, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		return false
-	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc, &b.recvHeldLoc, &b.recvAnyLoc:
 		return true
 	}
 	if held, ok := b.heldInHeap(root); ok {
@@ -514,10 +514,10 @@ func markFresh(fn *ir.Func) {
 // objects than those variables.
 func (b *batch) holdsMoved(root, c *location) bool {
 	switch root {
-	case c, &b.moveLoc, &b.checkLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
+	case c, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		// (The object may point to itself.)
 		return false
-	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc, &b.recvHeldLoc, &b.recvAnyLoc:
 		return true
 	}
 	if held, ok := b.heldInHeap(root); ok {
@@ -898,17 +898,60 @@ func (b *batch) heldInHeap(root *location) (held, ok bool) {
 
 // keptChecked reports whether the functions fns, which a call may be
 // of, all keep their i'th parameter, with the receiver, only by calls
-// that check.
-func keptChecked(fns []*ir.Name, i int) bool {
+// that check, and whether one of them may by a method of the
+// parameter's own.
+func keptChecked(fns []*ir.Name, i int) (checked, recv, any bool) {
 	if len(fns) == 0 || i >= 16 {
-		return false
+		return false, false, false
 	}
 	for _, fn := range fns {
 		if fn.Func == nil || fn.Func.KeptChecked&(1<<i) == 0 {
-			return false
+			return false, false, false
+		}
+		if fn.Func.KeptByRecv&(1<<i) != 0 {
+			recv = true
+		}
+		if fn.Func.KeptByAny&(1<<i) != 0 {
+			any = true
 		}
 	}
-	return true
+	return true, recv, any
+}
+
+// checkHoles returns the holes that stand for the heap in the tag of a
+// parameter that is kept only by calls that check: checkLoc, and
+// recvHeldLoc if a method of the argument's own may keep it.
+func (e *escape) checkHoles() []hole {
+	hs := []hole{e.checkHole()}
+	if e.recvArg {
+		hs = append(hs, e.recvHeldHole())
+	}
+	if e.recvAnyArg {
+		hs = append(hs, e.recvAnyHole())
+	}
+	return hs
+}
+
+// keepsParam reports whether root, to which the pointer of the
+// parameter at l flows, keeps it beyond the call of l's function. A
+// variable that does not outlive the call does not, nor does a call
+// that checks; what a method of the parameter's own does, recvHeldLoc
+// says apart.
+func (b *batch) keepsParam(root, l *location) bool {
+	switch root {
+	case l, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
+		return false
+	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.candidateLoc, &b.shareLoc:
+		return true
+	}
+	if held, ok := b.heldInHeap(root); ok {
+		return held
+	}
+	if root.hasAttr(attrEscapes) || root.hasAttr(attrCandidateEscape) {
+		return true
+	}
+	// Returned: the caller has it.
+	return root.paramOut && root.curfn == l.curfn
 }
 
 // markKeptChecks makes the calls test that a proof needs, and records
@@ -941,18 +984,24 @@ func (b *batch) markKeptChecks(fns []*ir.Func) {
 	}
 	for _, fn := range fns {
 		for i, f := range fn.Type().RecvParams() {
-			if i >= 16 || f.Nname == nil || !f.Type.IsPtr() {
+			if i >= 16 || f.Nname == nil || !f.Type.IsPtr() && !f.Type.IsInterface() {
 				continue
 			}
 			name := f.Nname.(*ir.Name)
 			loc, _ := name.Opt.(*location)
-			if loc == nil || loc.kept || loc.paramEsc.Heap() != 0 || loc.captured || loc.addrtaken || loc.reassigned {
+			if loc == nil || loc.kept || loc.hasAttr(attrEscapes) || loc.paramEsc.Heap() != 0 || loc.captured || loc.addrtaken || loc.reassigned {
 				continue
 			}
 			fn.KeptChecked |= 1 << i
+			if loc.keptRecv {
+				fn.KeptByRecv |= 1 << i
+			}
+			if loc.keptAny {
+				fn.KeptByAny |= 1 << i
+			}
 		}
 		if fn.KeptChecked != 0 && b.gd.Flag.LowerM >= 3 {
-			b.gd.WarnfAt(fn.Pos(), "%v keeps its parameters %b only by calls that check", fn, fn.KeptChecked)
+			b.gd.WarnfAt(fn.Pos(), "%v keeps its parameters %b only by calls that check, %b by their own methods, %b by any of those", fn, fn.KeptChecked, fn.KeptByRecv, fn.KeptByAny)
 		}
 	}
 }

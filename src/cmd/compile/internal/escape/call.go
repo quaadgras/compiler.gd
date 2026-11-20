@@ -171,9 +171,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs = all
 				e.dynCall, e.dynArg = dyn, dynFirst-1
-				e.checkedArg = keptChecked(fns, 0)
+				e.checkedArg, e.recvArg, e.recvAnyArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.dynCall, e.checkedArg = nil, nil, false
+				e.callArgs, e.dynCall, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, false, false, false
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -191,9 +191,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs = all
 				e.dynCall, e.dynArg = dyn, dynFirst+i
-				e.checkedArg = keptChecked(fns, first+i)
+				e.checkedArg, e.recvArg, e.recvAnyArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.dynCall, e.checkedArg = nil, nil, false
+				e.callArgs, e.dynCall, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, false, false, false
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
@@ -579,7 +579,12 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	if ks != nil {
 		for i := 0; i < numEscResults; i++ {
 			if x := esc.Result(i); x >= 0 {
-				tagKs = append(tagKs, ks[i].shift(e.gd, x))
+				k := ks[i].shift(e.gd, x)
+				// A function that keeps the parameter only by
+				// calls that check does not return it either,
+				// but as what a method of its own returned.
+				k.recvRes = x == 0 && e.checkedArg
+				tagKs = append(tagKs, k)
 			}
 		}
 	}

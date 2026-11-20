@@ -216,6 +216,16 @@ type Func struct {
 	// the callers that would hand the object over, the function
 	// does not keep it.
 	KeptChecked uint16
+	// KeptByRecv has, of those bits, the ones of the parameters that
+	// are the receiver of a call of a method of an interface, here or
+	// in a function that this one passes them to: a method of the
+	// argument's own type may keep it, which the caller answers for
+	// by that type (escape analysis, recv.go).
+	KeptByRecv uint16
+	// KeptByAny has the ones of the parameters that are asserted to
+	// have other methods than their interface type's: the caller
+	// answers for every method of the argument's type.
+	KeptByAny uint16
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:

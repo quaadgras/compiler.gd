@@ -637,14 +637,14 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	checked := x == 0 && e.checkedArg
 	if ps == nil {
 		if checked {
-			return []hole{e.checkHole()}
+			return e.checkHoles()
 		}
 		return []hole{e.heapHole().shift(e.gd, x)}
 	}
 	// What the heap of the tag stood for.
 	tagKs := []hole{e.mutatorHole().shift(e.gd, x), e.calleeHole().shift(e.gd, x)}
 	if checked {
-		tagKs = append(tagKs, e.checkHole())
+		tagKs = append(tagKs, e.checkHoles()...)
 	} else {
 		if ps.Heap != 0 {
 			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
@@ -672,7 +672,9 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	for i := range ks {
 		all := ps.Results == 0xff
 		if (all || i < 8 && ps.Results&(1<<i) != 0) && (i >= numEscResults || esc.Result(i) < 0) {
-			tagKs = append(tagKs, ks[i].shift(e.gd, x))
+			k := ks[i].shift(e.gd, x)
+			k.recvRes = checked
+			tagKs = append(tagKs, k)
 		}
 	}
 	return tagKs

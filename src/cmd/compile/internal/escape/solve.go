@@ -56,6 +56,9 @@ func (b *batch) walkAll() {
 	todo.pushFront(&b.ownHeapLoc)
 	todo.pushFront(&b.moveLoc)
 	todo.pushFront(&b.checkLoc)
+	todo.pushFront(&b.recvLoc)
+	todo.pushFront(&b.recvHeldLoc)
+	todo.pushFront(&b.recvAnyLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
@@ -67,6 +70,9 @@ func (b *batch) walkAll() {
 	b.ownHeapLoc.queuedWalkAll = true
 	b.moveLoc.queuedWalkAll = true
 	b.checkLoc.queuedWalkAll = true
+	b.recvLoc.queuedWalkAll = true
+	b.recvHeldLoc.queuedWalkAll = true
+	b.recvAnyLoc.queuedWalkAll = true
 
 	var walkgen uint32
 	for todo.len() > 0 {
@@ -92,6 +98,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	// only (edge.ro).
 	root.rawgen = walkgen
 	root.rawDerefs = 0
+	// The paths that have no edge from a receiver to its call's
+	// result: who holds a pointer is found along those (edge.recvRes).
+	root.plaingen = walkgen
+	root.plainDerefs = 0
 
 	if root.hasAttr(attrCalls) {
 		if clo, ok := root.n.(*ir.ClosureExpr); ok {
@@ -117,12 +127,19 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		derefs := l.derefs
 		var newAttrs locAttr
 
-		if l.param && derefs == 0 && !l.kept && (root == &b.moveLoc || b.holdsMovedParam(root, l)) {
+		lplain := l.plaingen == walkgen
+		if l.param && lplain && l.plainDerefs == 0 {
 			// For the callers that would hand it over
 			// (ir.Func.KeptChecked).
-			l.kept = true
+			if root == &b.recvHeldLoc {
+				l.keptRecv = true
+			} else if root == &b.recvAnyLoc {
+				l.keptAny = true
+			} else if !l.kept && b.keepsParam(root, l) {
+				l.kept = true
+			}
 		}
-		if l.param && l.moveCand && derefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
+		if l.param && l.moveCand && lplain && l.plainDerefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
 			// root keeps the pointer of a parameter that the
 			// function would hand over.
 			l.moveHeld = true
@@ -275,8 +292,14 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		}
 
 		for i, edge := range l.edges {
+			if edge.recvOK && root == &b.recvHeldLoc || edge.recvAllOK && root == &b.recvAnyLoc {
+				// No method of what flows here keeps it.
+				continue
+			}
 			d := derefs + edge.derefs
-			if d < 0 && edge.src.moveCand && !edge.src.moveHeld && b.holdsMoved(root, edge.src) {
+			srcPlain := lplain && !edge.recvRes
+			pd := max(l.plainDerefs, 0) + edge.derefs
+			if srcPlain && pd < 0 && edge.src.moveCand && !edge.src.moveHeld && b.holdsMoved(root, edge.src) {
 				// root keeps a pointer to an object that a send
 				// would hand over: it is not handed over.
 				edge.src.moveHeld = true
@@ -328,6 +351,11 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			if srcRaw && (edge.src.rawgen != walkgen || edge.src.rawDerefs > rd) {
 				edge.src.rawgen = walkgen
 				edge.src.rawDerefs = rd
+				closer = true
+			}
+			if srcPlain && (edge.src.plaingen != walkgen || edge.src.plainDerefs > pd) {
+				edge.src.plaingen = walkgen
+				edge.src.plainDerefs = pd
 				closer = true
 			}
 			if closer {
@@ -420,8 +448,11 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 }
 
 func (b *batch) explainLoc(l *location) string {
-	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc || l == &b.checkLoc {
+	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc || l == &b.checkLoc || l == &b.recvLoc {
 		return "{heap}"
+	}
+	if l == &b.recvHeldLoc || l == &b.recvAnyLoc {
+		return "a method of its own"
 	}
 	if l.n == nil {
 		// TODO(mdempsky): Omit entirely.
@@ -450,7 +481,7 @@ func (b *batch) outlives(l, other *location) bool {
 	}
 
 	// Pseudo-locations that don't really exist.
-	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc || l == &b.convShareLoc {
+	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc || l == &b.convShareLoc || l == &b.recvHeldLoc || l == &b.recvAnyLoc {
 		return false
 	}
 

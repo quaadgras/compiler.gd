@@ -1202,3 +1202,146 @@ func TestSharedKeptCheck(t *testing.T) {
 	}
 	runtime.KeepAlive(k)
 }
+
+// A recvSink is written to through an interface by a function that does
+// not know what it is.
+type recvSink interface {
+	put(v int) error
+}
+
+// recvQuiet's methods keep nothing of their receiver.
+type recvQuiet struct {
+	vs []int
+	i  any
+}
+
+func (q *recvQuiet) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+// recvLoud's method keeps its receiver.
+type recvLoud struct {
+	vs []int
+}
+
+var recvLoudKept *recvLoud
+
+func (q *recvLoud) put(v int) error {
+	q.vs = append(q.vs, v)
+	recvLoudKept = q
+	return nil
+}
+
+var (
+	recvQuietPool = sync.Pool{New: func() any { return new(recvQuiet) }}
+	recvLoudPool  = sync.Pool{New: func() any { return new(recvLoud) }}
+)
+
+// recvFill calls a method of s, and returns what that returns.
+//
+//go:noinline
+func recvFill(s recvSink, n int) error {
+	for i := 0; i < n; i++ {
+		if err := s.put(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func recvQuietCycle() (shared bool, err error) {
+	q := recvQuietPool.Get().(*recvQuiet)
+	shared = isShared(q)
+	q.vs = q.vs[:0]
+	q.i = "x"
+	err = recvFill(q, 3)
+	recvQuietPool.Put(q)
+	return
+}
+
+//go:noinline
+func recvLoudCycle() (err error) {
+	q := recvLoudPool.Get().(*recvLoud)
+	q.vs = q.vs[:0]
+	err = recvFill(q, 3)
+	recvLoudPool.Put(q)
+	return
+}
+
+// recvFreer has a method that puts it back in its pool, as pooled types
+// have, besides the one of recvSink, which keeps nothing.
+type recvFreer struct {
+	vs []int
+}
+
+var recvFreerPool = sync.Pool{New: func() any { return new(recvFreer) }}
+
+func (q *recvFreer) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+//go:noinline
+func (q *recvFreer) free() { recvFreerPool.Put(q) }
+
+// recvFillWider calls a method of s, and one that recvSink does not
+// have if what s holds has it.
+//
+//go:noinline
+func recvFillWider(s recvSink, n int) {
+	s.put(n)
+	if f, ok := s.(interface{ free() }); ok && n < 0 {
+		f.free()
+	}
+}
+
+//go:noinline
+func recvFreerWiderCycle() (shared bool) {
+	q := recvFreerPool.Get().(*recvFreer)
+	shared = isShared(q)
+	recvFillWider(q, 3)
+	q.free()
+	return
+}
+
+//go:noinline
+func recvFreerPlainCycle() (shared bool) {
+	q := recvFreerPool.Get().(*recvFreer)
+	shared = isShared(q)
+	recvFill(q, 3)
+	q.free()
+	return
+}
+
+// TestSharedRecvKeptNothing checks that an object which is passed, as an
+// interface, to a function that calls a method of it is handed over to
+// its pool if no method of its type keeps the receiver, and is shared
+// by the put if one does.
+func TestSharedRecvKeptNothing(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	for i := 0; i < 4; i++ {
+		if shared, _ := recvQuietCycle(); shared {
+			t.Errorf("round %d: an object whose methods keep nothing is shared after it was passed as an interface", i)
+		}
+	}
+	recvLoudCycle()
+	wantShared(t, "kept by a method of its own, and put in a pool", recvLoudKept, true)
+
+	// A type with a method that hands it over: only the methods of
+	// the interface type count, until it is asserted to have others.
+	for i := 0; i < 4; i++ {
+		if recvFreerPlainCycle() {
+			t.Errorf("round %d: an object whose interface methods keep nothing is shared", i)
+		}
+	}
+	recvFreerWiderCycle()
+	if !recvFreerWiderCycle() {
+		t.Errorf("an object that a function asserted to have a method that hands it over was handed over")
+	}
+}

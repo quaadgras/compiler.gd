@@ -107,6 +107,10 @@ type batch struct {
 	moveLoc      location // where a pointer that is handed over goes: the heap, and out of its goroutine's hands (move.go)
 	convShareLoc location // shareLoc for what is shared by being converted to an interface type (recv.go): that says how it is treated, and nothing has its pointer by it (move.go)
 	checkLoc     location // the heap, where a function keeps a parameter only by calls that check (ir.Func.KeptChecked, move.go)
+	recvLoc      location // ownHeapLoc for the receiver of a call of an interface's method (recv.go): whether that keeps the pointer, recvHeldLoc says
+	recvHeldLoc  location // where the receiver of such a call goes besides: the method may keep it, unless its type says not (edge.recvOK, move.go)
+	recvAnyLoc   location // where an interface goes that is asserted to have other methods than those of its type: any method of what it holds may be called
+	recvNothing  map[convKey]bool
 	handTypes    map[*types.Type]bool
 	moves        []moveSend
 	paramClass   map[*ir.Name]*ir.Name // the variables that only hold a parameter's pointer, and that parameter (move.go)
@@ -133,6 +137,8 @@ type batch struct {
 	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
 	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
 	dynArg      int          // that argument's place
+	recvArg     bool         // and that a method of its own may keep
+	recvAnyArg  bool         // whichever
 	checkedArg  bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
 	addrStmts   map[addrStmtKey]uint8
 }
@@ -209,6 +215,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	b.ownHeapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.moveLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.checkLoc.attrs = b.heapLoc.attrs
+	b.recvLoc.attrs = b.ownHeapLoc.attrs
 	b.handTypes = handTypes
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
