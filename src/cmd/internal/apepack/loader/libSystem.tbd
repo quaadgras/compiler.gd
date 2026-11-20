@@ -1,0 +1,9 @@
+--- !tapi-tbd
+tbd-version: 4
+targets: [ arm64-macos, x86_64-macos ]
+install-name: '/usr/lib/libSystem.B.dylib'
+exports:
+  - targets: [ arm64-macos, x86_64-macos ]
+    symbols: [ _open, _close, _fcntl, _pread, _write, _mmap, _mprotect,
+               _dlopen, _dlsym, __exit, dyld_stub_binder ]
+...

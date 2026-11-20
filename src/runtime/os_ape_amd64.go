@@ -25,7 +25,3 @@ func apeinitFile(c int32, v **byte) {
 		apeFileAuxv(c, v)
 	}
 }
-
-// apeRemove removes the file or directory name of a host that runs a
-// copy of the program: none here.
-func apeRemove(name *byte, dir bool) {}

@@ -25,17 +25,19 @@
 // Windows loads the PE. A Unix kernel does not know the file, so the
 // shell that asked it to run the file runs it as a script instead; the
 // script finds the image for the system and machine it runs on (uname)
-// and starts it without keeping anything: on an ELF host it writes a
-// loader of a few KB (loader/loader.c, after the images in the file) to
-// a temporary file, which removes itself and maps the image from the
-// program's file; on darwin, which only runs a Mach-O that is a file of
-// its own, it writes the image to a temporary file, which the program
-// removes as it starts.
+// and runs the system's loader for it, which is in the file too, after
+// the images, and maps the image from the program's file. Nothing of the
+// program is copied: on an ELF host the loader is a temporary file of a
+// few KB that removes itself (loader/loader.c); darwin's
+// (loader/loader_darwin.c) is kept, one file for every program.
 package apepack
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strconv"
@@ -185,7 +187,7 @@ func Pack(images []Image) ([]byte, error) {
 		arches[im.GOARCH] = true
 		fmt.Fprintf(&manifest, "#ape %s %d %d %s\n", im.GOARCH, off, len(im.Data), strings.Join(im.Hosts, ","))
 
-		// The hosts that run the image as it is (from a copy of it),
+		// The hosts whose loader maps the image as it is (darwin's),
 		// and those whose loader maps it as an ELF executable.
 		var native, elfHosts []string
 		for _, h := range im.Hosts {
@@ -210,7 +212,19 @@ func Pack(images []Image) ([]byte, error) {
 			}
 		}
 		if native != nil {
-			fmt.Fprintf(&cases, "%s)l=%d n=%d x=;;\n", strings.Join(native, "|"), off, len(im.Data))
+			// The loader is kept, under its hash.
+			ld, ok := loaders["darwin/"+im.GOARCH]
+			if !ok {
+				return nil, fmt.Errorf("apepack: no darwin loader for GOARCH %s", im.GOARCH)
+			}
+			sum := sha256.Sum256([]byte(ld))
+			tail = append(tail, func() {
+				for len(out)%ELFAlign != 0 {
+					out = append(out, 0)
+				}
+				fmt.Fprintf(&cases, "%s)l=%d n=%d s=%d h=%s;;\n", strings.Join(native, "|"), len(out), len(ld), off, hex.EncodeToString(sum[:8]))
+				out = append(out, ld...)
+			})
 		}
 		if elfHosts != nil {
 			ld, ok := loaders[im.GOARCH]
@@ -241,16 +255,23 @@ func Pack(images []Image) ([]byte, error) {
 		}
 	}
 
-	// The script: only POSIX sh, uname, mkdir, dd, head -c, chmod, rm and
-	// rmdir. It copies n bytes at l of the file (a multiple of ELFAlign:
-	// some systems' tail -c is slow) into a new directory
-	// of the user's own: the loader of an ELF host, which is to map the
-	// image at s whose ELF header is at x, or the image of a host that
-	// can only run a file of its own format (x is empty). Either
-	// removes the copy and the directory when it has started
-	// (loader/loader.c, and the runtime's apeinit for $GOAPETEMP), and
-	// is told the file's name, for os.Executable. The #ape lines say
-	// where the images are (see Images).
+	// The script: only POSIX sh, uname, mkdir, dd, head -c, chmod, mv,
+	// rm and rmdir. It copies the host's loader, the n bytes at l of the
+	// file (a multiple of ELFAlign: some systems' tail -c is slow), to a
+	// file and runs it, for the image at s:
+	//
+	// darwin's (h is its hash) is kept, in the user's temporary
+	// directory, for every program and start: darwin checks the
+	// signature of a new executable when it first runs, which takes a
+	// while.
+	//
+	// An ELF host's is written at every start, into a new directory of
+	// the user's own, and removes itself and the directory. x is where
+	// the image's ELF header is.
+	//
+	// The loaders (loader/loader.c, loader/loader_darwin.c) are told the
+	// file's name too, for os.Executable. The #ape lines say where the
+	// images are (see Images).
 	align := strconv.Itoa(ELFAlign)
 	script := "'\n" + manifest.String() +
 		"o=$0\ncase $o in /*)p=$o;;*)p=$PWD/${o#./};;esac\n" +
@@ -259,16 +280,19 @@ func Pack(images []Image) ([]byte, error) {
 		"case $u/$a in\n" + cases.String() +
 		"*)echo \"$o: no executable for $u/$m in this file\" >&2;exit 1;;\n" +
 		"esac\n" +
+		"c(){ dd if=\"$o\" bs=" + align + " skip=$((l/" + align + ")) 2>/dev/null|head -c $n >\"$1\"&&chmod 700 \"$1\";}\n" +
+		"if [ -n \"$h\" ];then\n" +
+		"e=${TMPDIR:-$HOME}/.ape-$h\n" +
+		"[ -x \"$e\" ]||{ c \"$e.$$\"&&mv -f \"$e.$$\" \"$e\"||{ rm -f \"$e.$$\";exit 1;};}\n" +
+		"exec \"$e\" \"$p\" $s \"$o\" \"$@\"\n" +
+		"fi\n" +
 		"i=0\n" +
 		"until t=${TMPDIR:-/tmp}/.ape$$.$i;(umask 077;mkdir \"$t\") 2>/dev/null;do\n" +
 		"i=$((i+1));[ $i -lt 99 ]||{ echo \"$o: cannot make a directory in ${TMPDIR:-/tmp}\" >&2;exit 1;}\n" +
 		"done\n" +
 		"e=$t/${o##*/}\n" +
-		"dd if=\"$o\" bs=" + align + " skip=$((l/" + align + ")) 2>/dev/null|head -c $n >\"$e\"&&chmod 700 \"$e\"||{ rm -f \"$e\";rmdir \"$t\";exit 1;}\n" +
-		"if [ -n \"$x\" ];then exec \"$e\" \"$p\" $s $x \"$o\" \"$@\";fi\n" +
-		"export GOAPEFILE=\"$p\" GOAPETEMP=\"$e\"\n" +
-		"if (exec -a x true) 2>/dev/null;then exec -a \"$o\" \"$e\" \"$@\";fi\n" +
-		"exec \"$e\" \"$@\"\n" +
+		"c \"$e\"||{ rm -f \"$e\";rmdir \"$t\";exit 1;}\n" +
+		"exec \"$e\" \"$p\" $s $x \"$o\" \"$@\"\n" +
 		"exit 1\n"
 	if scriptOff+len(script) > StubSize {
 		return nil, fmt.Errorf("apepack: the script is %d bytes, more than its %d", len(script), StubSize-scriptOff)
@@ -306,3 +330,20 @@ func Images(r io.ReaderAt) ([]Section, bool) {
 	}
 	return secs, true
 }
+
+// loaders are the loaders, by GOARCH (of the ELF hosts) and darwin/GOARCH.
+var loaders = func() map[string]string {
+	m := map[string]string{}
+	for k, gz := range loadersGz {
+		r, err := gzip.NewReader(strings.NewReader(gz))
+		if err != nil {
+			panic(err)
+		}
+		b, err := io.ReadAll(r)
+		if err != nil {
+			panic(err)
+		}
+		m[k] = string(b)
+	}
+	return m
+}()

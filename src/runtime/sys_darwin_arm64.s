@@ -28,16 +28,6 @@ TEXT runtime·open_trampoline(SB),NOSPLIT,$0
 	ADD	$16, RSP
 	RET
 
-TEXT runtime·unlink_trampoline(SB),NOSPLIT,$0
-	MOVD	0(R0), R0	// arg 1 pathname
-	BL	libc_unlink(SB)
-	RET
-
-TEXT runtime·rmdir_trampoline(SB),NOSPLIT,$0
-	MOVD	0(R0), R0	// arg 1 pathname
-	BL	libc_rmdir(SB)
-	RET
-
 TEXT runtime·close_trampoline(SB),NOSPLIT,$0
 	MOVW	0(R0), R0	// arg 1 fd
 	BL	libc_close(SB)
