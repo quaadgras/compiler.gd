@@ -536,6 +536,46 @@ func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 // is there now, and a store of the whole slice otherwise: another
 // goroutine may have stored a shorter one since this one was loaded.
 func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
+	if skip == 0 && s.gd.Debug.NoGroup == 0 && (t.IsString() || t.IsSlice() || t.IsInterface()) {
+		// The whole of a string, a slice or an interface: the
+		// runtime stores it if the memory is shared, and this
+		// function has only the store for memory that is not.
+		fn := ir.Syms(s.gd).ShareStoreSlice
+		switch {
+		case t.IsString():
+			fn = ir.Syms(s.gd).ShareStoreString
+		case t.IsInterface():
+			fn = ir.Syms(s.gd).ShareStoreIface
+		}
+		cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], s.sharePage(left), s.constInt8(types.Types[types.TUINT8], 0))
+		bCall := s.f.NewBlock(ssa.BlockPlain)
+		bLocal := s.f.NewBlock(ssa.BlockPlain)
+		bDone := s.f.NewBlock(ssa.BlockPlain)
+		b := s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(cond)
+		b.Likely = ssa.BranchUnlikely
+		b.AddEdgeTo(bCall)
+		b.AddEdgeTo(bLocal)
+
+		s.startBlock(bCall)
+		stored := s.rtcall(fn, true, []*types.Type{types.Types[types.TBOOL]}, left, right)[0]
+		b = s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(stored)
+		b.Likely = ssa.BranchLikely
+		b.AddEdgeTo(bDone)
+		b.AddEdgeTo(bLocal)
+
+		s.startBlock(bLocal)
+		s.dstLocal = true
+		s.rawStoreType(t, left, right, 0, leftIsStmt)
+		s.dstLocal = false
+		s.endBlock().AddEdgeTo(bDone)
+
+		s.startBlock(bDone)
+		return
+	}
 	locked := s.shareLock(left, t.Size())
 	if skip == 0 {
 		// Two copies of the store: if the memory is not shared,

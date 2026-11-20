@@ -112,6 +112,13 @@ holds one.
   ever shared; if it is zero there is no call. And if the runtime says
   the memory is not shared, the store that follows has no publishing
   calls either: there are two copies of the store.
+- **A store of a whole string, slice or interface** has one copy: after
+  the byte, compiled code calls `runtime.sharestorestring`,
+  `sharestoreslice` or `sharestoreiface` with the value. If the memory is
+  shared the runtime publishes what the value points to and stores it
+  under the locks; if not it says so, and the function stores as it does
+  in memory that is not shared. The shared store is in the runtime once,
+  not in every function that has one.
 - **The stores of one statement share their locks** where no
   synchronisation separates them: between two synchronisations no
   goroutine can tell stores made under one lock from stores made each

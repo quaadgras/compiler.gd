@@ -94,6 +94,9 @@ type SymsStruct struct {
 	ShareUnlock               *obj.LSym
 	ShareStore2               *obj.LSym
 	ShareUnlock2              *obj.LSym
+	ShareStoreSlice           *obj.LSym
+	ShareStoreString          *obj.LSym
+	ShareStoreIface           *obj.LSym
 	ShareLoadSlice            *obj.LSym
 	ShareLoadString           *obj.LSym
 	ShareLoadIface            *obj.LSym

@@ -467,6 +467,52 @@ func shareunlock(dst unsafe.Pointer, size uintptr) {
 	releasem(getg().m)
 }
 
+// sharestorestring, sharestoreslice and sharestoreiface are called by
+// compiled code that stores a whole string, slice or interface at dst, in
+// a page where something was shared once. If dst is shared they publish
+// what v points to, store v under the locks and report true: the store is
+// here and not in every function that has one. If not they report false,
+// and the caller stores, as it does in memory that is not shared.
+func sharestorestring(dst *string, v string) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(*(*unsafe.Pointer)(unsafe.Pointer(&v)))
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
+func sharestoreslice(dst *slice, v slice) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(v.array)
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
+func sharestoreiface(dst *eface, v eface) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(unsafe.Pointer(v._type))
+	publish(v.data)
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
 // shareStripes2 calls f for the locks of the blocks of [a, a+asize) and
 // [b, b+bsize), each once, in the order in which every goroutine takes
 // them: by index.
