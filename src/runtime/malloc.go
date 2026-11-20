@@ -1111,7 +1111,7 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 	}
 
 	if debug.sharestats != 0 {
-		shareStatsAlloc(size, local)
+		shareStatsAlloc(size, local, typ == nil || !typ.Pointers())
 	}
 
 	if sizeSpecializedMallocEnabled && !local && size < uintptr(len(mallocNoScanTable)) {

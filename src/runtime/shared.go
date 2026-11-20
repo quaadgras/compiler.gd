@@ -175,6 +175,10 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	if fresh && s.spanclass.local() {
 		localPublished(s.base() + i*s.elemsize)
 	}
+	if fresh && debug.sharestats != 0 {
+		shareStats.marked.Add(1)
+		shareStats.markedBytes.Add(int64(s.elemsize))
+	}
 	if !fresh {
 		return 0, nil
 	}
@@ -1000,9 +1004,18 @@ var shareStats struct {
 	local, localBytes   atomic.Uint64
 	shared, sharedBytes atomic.Uint64
 	published           atomic.Uint64
+	// Of the shared ones, those without pointers, which are never
+	// marked, and the ones that were marked: stored where another
+	// goroutine reaches. The rest another goroutine never came to.
+	noscan, noscanBytes atomic.Uint64
+	marked, markedBytes atomic.Uint64
 }
 
-func shareStatsAlloc(size uintptr, local bool) {
+func shareStatsAlloc(size uintptr, local, noscan bool) {
+	if !local && noscan {
+		shareStats.noscan.Add(1)
+		shareStats.noscanBytes.Add(int64(size))
+	}
 	if local {
 		shareStats.local.Add(1)
 		shareStats.localBytes.Add(int64(size))
@@ -1071,7 +1084,9 @@ func printShareStats() {
 		return
 	}
 	print("sharestats: local ", shareStats.local.Load(), " objects ", shareStats.localBytes.Load(), " bytes, shared ",
-		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(), "\n")
+		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(),
+		"; of the shared, without pointers ", shareStats.noscan.Load(), " objects ", shareStats.noscanBytes.Load(), " bytes, marked ",
+		shareStats.marked.Load(), " objects ", shareStats.markedBytes.Load(), " bytes\n")
 }
 
 // The bits of a call.
