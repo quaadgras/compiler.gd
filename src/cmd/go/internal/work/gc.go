@@ -732,7 +732,7 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 		return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
 	}
 	if apePacked(root, ldBuildmode, ldflags) {
-		return apeLink(targetPath, ldflags, link)
+		return apeLink(root, targetPath, ldflags, link)
 	}
 	return link(targetPath, ldflags)
 }

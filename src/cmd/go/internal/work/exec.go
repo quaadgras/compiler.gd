@@ -1569,7 +1569,7 @@ func (b *Builder) linkActionID(a *Action) cache.ActionID {
 	fmt.Fprintf(h, "omitdebug %v standard %v local %v prefix %q\n", p.Internal.OmitDebug, p.Standard, p.Internal.Local, p.Internal.LocalPrefix)
 	fmt.Fprintf(h, "defaultgodebug %q\n", p.DefaultGODEBUG)
 	if apePacked(a, ldBuildmode, append(slices.Clip(forcedLdflags), p.Internal.Ldflags...)) {
-		fmt.Fprintf(h, "apepacked %s\n", apePackerID())
+		fmt.Fprintf(h, "apepacked %s\n", apePackedID(a))
 	}
 	if cfg.BuildTrimpath {
 		fmt.Fprintln(h, "trimpath")

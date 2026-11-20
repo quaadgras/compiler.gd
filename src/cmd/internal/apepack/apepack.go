@@ -64,6 +64,11 @@ func stub(script string) []byte {
 	return b
 }
 
+// HasPE reports whether the packed file b is a PE, not only a script.
+func HasPE(b []byte) bool {
+	return len(b) >= StubSize+4 && bytes.HasPrefix(b, []byte(magic)) && string(b[StubSize:StubSize+4]) == "PE\x00\x00"
+}
+
 // An Exe is an executable for some hosts of one GOARCH.
 type Exe struct {
 	GOARCH string
@@ -161,11 +166,13 @@ func Pack(pe []byte, exes []Exe) ([]byte, error) {
 	return out, nil
 }
 
-var exeRE = regexp.MustCompile(`\)s=([0-9]+) n=([0-9]+) h=`)
+var exeRE = regexp.MustCompile(`(?m)^([A-Za-z0-9/|]+)\)s=([0-9]+) n=([0-9]+) h=`)
 
-// A Section is where an executable is in a packed file.
+// A Section is where an executable is in a packed file, and what for.
 type Section struct {
 	Off, Size int64
+	GOARCH    string
+	Hosts     []string
 }
 
 // Exes returns where the executables after the PE are in r, if it is a
@@ -175,14 +182,27 @@ func Exes(r io.ReaderAt) ([]Section, bool) {
 	if _, err := r.ReadAt(b, 0); err != nil || !bytes.HasPrefix(b, []byte(magic)) {
 		return nil, false
 	}
+	goos := map[string]string{}
+	for g, u := range unames {
+		goos[u] = g
+	}
 	var secs []Section
 	for _, m := range exeRE.FindAllSubmatch(b[scriptOff:], -1) {
-		off, err1 := strconv.ParseInt(string(m[1]), 10, 64)
-		size, err2 := strconv.ParseInt(string(m[2]), 10, 64)
+		off, err1 := strconv.ParseInt(string(m[2]), 10, 64)
+		size, err2 := strconv.ParseInt(string(m[3]), 10, 64)
 		if err1 != nil || err2 != nil {
 			return nil, false
 		}
-		secs = append(secs, Section{off, size})
+		sec := Section{Off: off, Size: size}
+		for _, pat := range strings.Split(string(m[1]), "|") {
+			u, arch, ok := strings.Cut(pat, "/")
+			if !ok || goos[u] == "" {
+				return nil, false
+			}
+			sec.GOARCH = arch
+			sec.Hosts = append(sec.Hosts, goos[u])
+		}
+		secs = append(secs, sec)
 	}
 	return secs, true
 }

@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cache"
@@ -292,9 +293,27 @@ func write(dir string, res *apegen.Result) ([]byte, error) {
 	return js, nil
 }
 
+// SourcesKey identifies the sources of a build: the standard library's
+// and those in dirs.
+func SourcesKey(dirs []string) (string, error) {
+	stdK, err := stdKey()
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "std %s\n", stdK)
+	for _, dir := range dirs {
+		fmt.Fprintf(h, "dir %s\n", dir)
+		if err := hashDir(h, dir, false); err != nil {
+			return "", err
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16]), nil
+}
+
 // stdKey identifies the standard library's files: of this go command
 // (whose apegen makes them), for these hosts, of these sources.
-func stdKey() (string, error) {
+var stdKey = sync.OnceValues(func() (string, error) {
 	h := sha256.New()
 	exe, err := os.Executable()
 	if err != nil {
@@ -310,7 +329,7 @@ func stdKey() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)[:16]), nil
-}
+})
 
 // hashDir writes the names, sizes and times of dir's Go, assembly and
 // header files to h; with all, of its subdirectories' too (but cmd's
