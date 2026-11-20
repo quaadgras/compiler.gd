@@ -157,6 +157,7 @@ var runtimeDecls = [...]struct {
 	{"chansend1", funcTag, 119},
 	{"chansendmove1", funcTag, 119},
 	{"poolhandover", funcTag, 120},
+	{"publishkept", funcTag, 120},
 	{"closechan", funcTag, 121},
 	{"chanlen", funcTag, 122},
 	{"chancap", funcTag, 122},

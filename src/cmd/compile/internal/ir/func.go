@@ -208,6 +208,15 @@ type Func struct {
 	Consumes    uint16
 	OwnedResult bool
 
+	// KeptChecked has bit k set if all that keeps the pointer that
+	// is the function's k'th parameter (the receiver first) is a
+	// function that is only known when the program runs, and the
+	// call of that one shares the object if its escape mask says
+	// that it keeps the argument (escape analysis, move.go): for
+	// the callers that would hand the object over, the function
+	// does not keep it.
+	KeptChecked uint16
+
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:
 	// the escape tags only say that it is in the heap. Nil if it is

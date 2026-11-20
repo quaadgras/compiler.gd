@@ -127,6 +127,12 @@ type location struct {
 	// forward a value some time later.
 	later  bool
 	heldBy string
+	// kept marks a parameter whose pointer something keeps that is
+	// not a call that checks (ir.Func.KeptChecked); keptCheck is, for
+	// the dynamic root of a call's argument, the check that the call
+	// can make (move.go).
+	kept      bool
+	keptCheck *keptCheck
 
 	// escapedInGraph is set when src's address flowed to a location
 	// that already escaped (the heap) while the graph was built: flow
@@ -365,7 +371,7 @@ func (b *batch) flow(k hole, src *location) {
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
 	switch root {
-	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.checkLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc, &b.convShareLoc:
 		return false
 	}
 	// Locations of other functions in the batch, the parameters
@@ -415,8 +421,10 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
 func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
+func (b *batch) convShareHole() hole { return b.convShareLoc.asHole() }
 func (b *batch) ownHeapHole() hole   { return b.ownHeapLoc.asHole() }
 func (b *batch) moveHole() hole      { return b.moveLoc.asHole() }
+func (b *batch) checkHole() hole     { return b.checkLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }

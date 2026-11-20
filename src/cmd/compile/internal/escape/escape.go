@@ -105,6 +105,9 @@ type batch struct {
 	ownHeapLoc   location // the heap, in an object that no other goroutine reaches by itself (callbits.go)
 	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
 	moveLoc      location // where a pointer that is handed over goes: the heap, and out of its goroutine's hands (move.go)
+	convShareLoc location // shareLoc for what is shared by being converted to an interface type (recv.go): that says how it is treated, and nothing has its pointer by it (move.go)
+	checkLoc     location // the heap, where a function keeps a parameter only by calls that check (ir.Func.KeptChecked, move.go)
+	handTypes    map[*types.Type]bool
 	moves        []moveSend
 	paramClass   map[*ir.Name]*ir.Name // the variables that only hold a parameter's pointer, and that parameter (move.go)
 	returns      map[*ir.Func]*returned
@@ -130,6 +133,7 @@ type batch struct {
 	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
 	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
 	dynArg      int          // that argument's place
+	checkedArg  bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
 	addrStmts   map[addrStmtKey]uint8
 }
 
@@ -187,21 +191,25 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 		}
 		all = ordered
 	}
+	handTypes := handOverTypes(gd, all)
 	ir.VisitFuncsBottomUp(all, func(list []*ir.Func, recursive bool) {
-		Batch(gd, list, reassignOracles)
+		Batch(gd, list, reassignOracles, handTypes)
 	})
 }
 
 // Batch performs escape analysis on a minimal batch of
 // functions.
-func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
+func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle, handTypes map[*types.Type]bool) {
 	var b batch
 	b.gd = gd
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
 	b.shareLoc.attrs = attrShares
+	b.convShareLoc.attrs = attrShares
 	b.ownHeapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.moveLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
+	b.checkLoc.attrs = b.heapLoc.attrs
+	b.handTypes = handTypes
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
 	// dynamic-callee edges, but with attrCandidateEscape in place of
@@ -446,6 +454,7 @@ type outBufUse struct {
 func (b *batch) finish(fns []*ir.Func) {
 	b.markUnshared(fns)
 	b.markMoves()
+	b.markKeptChecks(fns)
 	b.markReturnedOther()
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.

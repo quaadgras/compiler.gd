@@ -82,7 +82,7 @@ func (e *escape) convHole(k hole, t, iface *types.Type) hole {
 	if e.convOK(t, iface) {
 		return k
 	}
-	return e.teeHole(k, e.shareHole())
+	return e.teeHole(k, e.convShareHole())
 }
 
 // assertHole returns the hole for the operand of an assertion that an
@@ -98,7 +98,7 @@ func (e *escape) assertHole(k hole, t, from *types.Type) hole {
 	if !t.HasShape() && !from.HasShape() && from.IsInterface() && hasMethods(from, t) {
 		return k
 	}
-	return e.teeHole(k, e.shareHole())
+	return e.teeHole(k, e.convShareHole())
 }
 
 // hasMethods reports whether the interface type t has all the methods

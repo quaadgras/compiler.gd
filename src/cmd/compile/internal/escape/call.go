@@ -171,8 +171,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs = all
 				e.dynCall, e.dynArg = dyn, dynFirst-1
+				e.checkedArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.dynCall = nil, nil
+				e.callArgs, e.dynCall, e.checkedArg = nil, nil, false
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -190,8 +191,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs = all
 				e.dynCall, e.dynArg = dyn, dynFirst+i
+				e.checkedArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.dynCall = nil, nil
+				e.callArgs, e.dynCall, e.checkedArg = nil, nil, false
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
@@ -507,6 +509,7 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	// another goroutine reaches it (callbits.go).
 	if e.dynCall != nil && e.dynArg >= 0 {
 		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
+			e.noteKeptCheck(r, e.dynCall, arg)
 			return r.asHole()
 		}
 	}

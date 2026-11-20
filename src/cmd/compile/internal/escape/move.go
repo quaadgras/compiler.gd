@@ -5,7 +5,11 @@
 package escape
 
 import (
+	"go/constant"
+
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
+	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
 )
 
@@ -421,13 +425,19 @@ func (b *batch) trackParams(fn *ir.Func) {
 // hold that parameter's pointer.
 func (b *batch) holdsMovedParam(root, l *location) bool {
 	switch root {
-	case l, &b.moveLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
+	case l, &b.moveLoc, &b.checkLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		return false
 	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc:
 		return true
 	}
-	if root.transient || root.later || root.curfn != l.curfn {
+	if held, ok := b.heldInHeap(root); ok {
+		return held
+	}
+	if root.transient || root.later {
 		return false
+	}
+	if root.curfn != l.curfn {
+		return root.hasAttr(attrEscapes)
 	}
 	if name, ok := root.n.(*ir.Name); ok && name != nil && root.n.Op() == ir.ONAME && l.n != nil && b.paramClass[name] == l.n {
 		return false
@@ -504,16 +514,23 @@ func markFresh(fn *ir.Func) {
 // objects than those variables.
 func (b *batch) holdsMoved(root, c *location) bool {
 	switch root {
-	case c, &b.moveLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
+	case c, &b.moveLoc, &b.checkLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		// (The object may point to itself.)
 		return false
 	case &b.heapLoc, &b.ownHeapLoc, &b.candidateLoc, &b.shareLoc:
 		return true
 	}
-	if root.transient || root.later || root.curfn != c.curfn {
-		// A temporary that forwards; a callee's parameter or
-		// variable, which has it for the call.
+	if held, ok := b.heldInHeap(root); ok {
+		return held
+	}
+	if root.transient || root.later {
+		// A temporary that forwards.
 		return false
+	}
+	if root.curfn != c.curfn {
+		// A callee's parameter or variable, which has it for the
+		// call, unless that is in the heap.
+		return root.hasAttr(attrEscapes)
 	}
 	if name, ok := root.n.(*ir.Name); ok && name != nil && root.n.Op() == ir.ONAME && b.contents[name] == c {
 		return false
@@ -757,4 +774,185 @@ func anyBody(fn *ir.Func, cond func(ir.Node) bool) bool {
 		}
 	}
 	return false
+}
+
+// Kept by a call that checks.
+//
+// A function that is only known when the program runs may keep its
+// argument, so the object of a pointer that is passed to one had another
+// holder and was never handed over: fmt's printer, which every Printf
+// gets from a pool and puts back, is passed to the Format method of an
+// argument that has one, and few have.
+//
+// The function's escape mask says whether it keeps the argument
+// (doc/gd/escape-bits.md), so the call asks: where the argument is a
+// pointer variable, and the function and the other arguments are read
+// with no call between, the mask is tested before the call, and the
+// object is shared if the function keeps it (runtime.publishkept). It is
+// not handed over then, being shared, and the call is no holder of it
+// for the proof.
+//
+// A function whose parameter is kept by such calls only says so
+// (ir.Func.KeptChecked), and an argument of that parameter flows to
+// checkLoc, which is the heap for all but this.
+//
+// The test is only made for a pointer to a type of which this package
+// hands pointers over (handOverTypes): for another, no proof needs it.
+
+// A keptCheck is the test of the escape mask before a call of a
+// function that is only known when the program runs, for the argument
+// that the pointer variable ptr is.
+type keptCheck struct {
+	call   *ir.CallExpr
+	ptr    *ir.Name
+	relied bool // a parameter's or a variable's proof needs it
+}
+
+// handOverTypes returns the types that the functions hand pointers to
+// over: to a sync.Pool, or on a channel.
+func handOverTypes(gd *base.Invocation, fns []*ir.Func) map[*types.Type]bool {
+	if gd.Debug.NoShare != 0 || gd.Debug.NoMove != 0 {
+		return nil
+	}
+	var m map[*types.Type]bool
+	add := func(n ir.Node) {
+		for n.Op() == ir.OCONVIFACE || n.Op() == ir.OCONVNOP || n.Op() == ir.OPAREN {
+			switch v := n.(type) {
+			case *ir.ConvExpr:
+				n = v.X
+			case *ir.ParenExpr:
+				n = v.X
+			}
+		}
+		if t := n.Type(); t != nil && t.IsPtr() {
+			if m == nil {
+				m = make(map[*types.Type]bool)
+			}
+			m[t.Elem()] = true
+		}
+	}
+	for _, fn := range fns {
+		ir.VisitFuncAndClosures(fn, func(n ir.Node) {
+			switch n := n.(type) {
+			case *ir.SendStmt:
+				add(n.Value)
+			case *ir.CallExpr:
+				if n.Op() != ir.OCALLFUNC && n.Op() != ir.OCALLMETH {
+					return
+				}
+				if callee := ir.StaticCalleeName(n.Fun); callee != nil && isPoolMethod(callee, "Put") && len(n.Args) > 0 {
+					add(n.Args[len(n.Args)-1])
+				}
+			}
+		})
+	}
+	return m
+}
+
+// noteKeptCheck notes, for the dynamic root r of the argument arg of
+// call, whether the call can test what the function keeps before it
+// evaluates anything: arg is a pointer variable, and so plainly are the
+// others.
+func (e *escape) noteKeptCheck(r *location, call *ir.CallExpr, arg ir.Node) {
+	if r.keptCheck != nil || e.handTypes == nil || call.GoDefer || len(call.Init()) != 0 {
+		return
+	}
+	strip := func(n ir.Node) ir.Node {
+		for n.Op() == ir.OCONVIFACE || n.Op() == ir.OCONVNOP || n.Op() == ir.OPAREN {
+			switch v := n.(type) {
+			case *ir.ConvExpr:
+				n = v.X
+			case *ir.ParenExpr:
+				n = v.X
+			}
+		}
+		return n
+	}
+	x, ok := strip(arg).(*ir.Name)
+	if !ok || x.Op() != ir.ONAME || x.Curfn != e.curfn || x.IsClosureVar() || x.Addrtaken() || !x.Type().IsPtr() || !e.handTypes[x.Type().Elem()] {
+		return
+	}
+	for _, a := range call.Args {
+		switch strip(a).Op() {
+		case ir.ONAME, ir.OLITERAL, ir.ONIL:
+		default:
+			return
+		}
+	}
+	r.keptCheck = &keptCheck{call: call, ptr: x}
+}
+
+// heldInHeap reports, for a root that is the dynamic root of a call's
+// argument, whether what flows to it has another holder there: not if
+// the call checks.
+func (b *batch) heldInHeap(root *location) (held, ok bool) {
+	if !root.isDynRoot {
+		return false, false
+	}
+	if kc := root.keptCheck; kc != nil && root.dynRoot != nil && root.dynRoot.call == kc.call {
+		kc.relied = true
+		return false, true
+	}
+	return true, true
+}
+
+// keptChecked reports whether the functions fns, which a call may be
+// of, all keep their i'th parameter, with the receiver, only by calls
+// that check.
+func keptChecked(fns []*ir.Name, i int) bool {
+	if len(fns) == 0 || i >= 16 {
+		return false
+	}
+	for _, fn := range fns {
+		if fn.Func == nil || fn.Func.KeptChecked&(1<<i) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// markKeptChecks makes the calls test that a proof needs, and records
+// the parameters of fns that only such calls keep.
+func (b *batch) markKeptChecks(fns []*ir.Func) {
+	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 {
+		return
+	}
+	for _, r := range b.dynRoots {
+		kc := r.keptCheck
+		d := r.dynRoot
+		if kc == nil || !kc.relied || d == nil || d.call != kc.call {
+			continue
+		}
+		pos := kc.call.Pos()
+		// (One if the function does not keep it.)
+		cond := ir.NewBinaryExpr(b.gd, pos, ir.OEQ, b.callArgKept(pos, d), ir.NewBasicLit(b.gd, pos, types.Types[types.TUINTPTR], constant.MakeInt64(0)))
+		cond.SetType(types.Types[types.TBOOL])
+		cond.SetTypecheck(1)
+		p := typecheck.ConvNop(b.gd, kc.ptr, types.Types[types.TUNSAFEPTR])
+		fn := typecheck.LookupRuntime(b.gd, "publishkept")
+		call := typecheck.Call(b.gd, pos, fn, []ir.Node{p}, false)
+		nif := ir.NewIfStmt(b.gd, pos, cond, []ir.Node{call}, nil)
+		nif.Likely = false
+		nif.SetTypecheck(1)
+		kc.call.PtrInit().Prepend(nif)
+		if b.gd.Flag.LowerM >= 3 {
+			b.gd.WarnfAt(pos, "%v is shared if the function called keeps it", kc.ptr)
+		}
+	}
+	for _, fn := range fns {
+		for i, f := range fn.Type().RecvParams() {
+			if i >= 16 || f.Nname == nil || !f.Type.IsPtr() {
+				continue
+			}
+			name := f.Nname.(*ir.Name)
+			loc, _ := name.Opt.(*location)
+			if loc == nil || loc.kept || loc.paramEsc.Heap() != 0 || loc.captured || loc.addrtaken || loc.reassigned {
+				continue
+			}
+			fn.KeptChecked |= 1 << i
+		}
+		if fn.KeptChecked != 0 && b.gd.Flag.LowerM >= 3 {
+			b.gd.WarnfAt(fn.Pos(), "%v keeps its parameters %b only by calls that check", fn, fn.KeptChecked)
+		}
+	}
 }

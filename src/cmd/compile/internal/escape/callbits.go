@@ -631,16 +631,27 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			}
 		}
 	}
+	// A function that keeps the parameter only by calls that check
+	// (ir.Func.KeptChecked) puts it in the heap, where anyone may
+	// reach it, but for an object that is handed over later.
+	checked := x == 0 && e.checkedArg
 	if ps == nil {
+		if checked {
+			return []hole{e.checkHole()}
+		}
 		return []hole{e.heapHole().shift(e.gd, x)}
 	}
 	// What the heap of the tag stood for.
 	tagKs := []hole{e.mutatorHole().shift(e.gd, x), e.calleeHole().shift(e.gd, x)}
-	if ps.Heap != 0 {
-		tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
-	}
-	if ps.Share != 0 {
-		tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
+	if checked {
+		tagKs = append(tagKs, e.checkHole())
+	} else {
+		if ps.Heap != 0 {
+			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
+		}
+		if ps.Share != 0 {
+			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
+		}
 	}
 	if ps.Via != 0 {
 		d := int(ps.ViaDerefs) - 1
@@ -788,6 +799,17 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 // allocated in the argument d.arg of the call d.call: 1 if the function
 // that is called keeps it local.
 func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
+	return b.callArgBits(pos, d, false)
+}
+
+// callArgKept returns the expression that is 1 if the function that
+// d.call calls does not keep its argument d.arg, as far as its escape
+// mask says, and 0 if it may.
+func (b *batch) callArgKept(pos src.XPos, d *dynRoot) ir.Node {
+	return b.callArgBits(pos, d, true)
+}
+
+func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept bool) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	unsafePtr := types.Types[types.TUNSAFEPTR]
 	lit := func(v int64) ir.Node {
@@ -862,6 +884,9 @@ func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
 	// Not a mask that is computed (bit 0), and: not kept; or not
 	// shared and not stored through the receiver, or the receiver
 	// points to a local object.
+	if kept {
+		return binary(ir.OAND, not(bit(0)), not(bit(1+d.arg)))
+	}
 	stays := not(bit(ir.EscMaskViaRecv + d.arg))
 	if recv != nil {
 		stays = binary(ir.OOR, stays, b.localTest(pos, recv))

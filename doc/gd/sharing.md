@@ -123,9 +123,45 @@ its life.
   1.0 µs and takes 0.45 µs (0.07 µs with no sharing at all). `gofmt` of
   `go`, `net` and `cmd/compile`, whose printer comes from a pool and
   took a lock for each of twelve million appends to its output, takes
-  4.0 s of CPU where it took 5.5 (3.0 with no sharing at all). `fmt` is
-  not helped: it passes its printer to the `Format` and `String` methods
-  of what it prints, as a `fmt.State`, and they may keep it.
+  4.0 s of CPU where it took 5.5 (3.0 with no sharing at all).
+
+  **A function that is only known when the program runs.** `fmt` passes
+  its printer, as a `fmt.State`, to the `Format` method of an argument
+  that has one, and that method may keep it: a holder, for the proof,
+  in every `Printf` though few arguments have the method. But the
+  function's escape mask says whether it keeps the argument
+  ([escape-bits.md](escape-bits.md)), so the call asks. Where the
+  argument is a pointer variable, and what is called and the other
+  arguments are read with no call between, the mask is tested before
+  the call and the object is shared if the function keeps it
+  (`runtime.publishkept`); the call is then no holder. A function whose
+  parameter is kept by such calls only says so
+  (`ir.Func.KeptChecked`), for its callers' proofs. The test is made
+  only for pointers to the types that the package hands over.
+
+  An object that was shared this way is not handed over, and `Put`
+  drops it if the pool's `New` only allocates: the pool would give it
+  out again and again, to pay the locks of shared memory each time,
+  where a new one is one allocation. (So is one that an unproven `Put`
+  shared, when a proven one puts it next.)
+
+  A mask says "keeps" for any function that calls a method of its
+  parameter, which every real `Format` method does with its
+  `fmt.State`: such a call shares the printer and costs the next
+  `Printf` an allocation. That would take a mask that says "only by
+  the argument's own methods", for the caller to answer by the type it
+  passes.
+
+  What an object that is handed over points to is shared by the put,
+  but for a pointer into the object itself (the printer points to its
+  own buffer field), which says nothing.
+
+  `Sprintf("%d", x)` takes 100 ns where it took 107 (46 with no sharing
+  at all), with a `String` method 353 where it took 428 (215), a struct
+  1060 where it took 1340 (790). What is left is the walk of the
+  object at each put, and the stores in it: the printer is in a page
+  with shared objects, so each store of a slice or an interface calls
+  the runtime to learn that the printer is not one.
 - A store of a pointer in a global or in a shared object: the compiler's
   barrier, below.
 - The runtime's own stores: `sync/atomic`'s pointer operations, the copies

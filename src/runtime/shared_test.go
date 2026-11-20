@@ -1099,3 +1099,106 @@ func TestSharedPool(t *testing.T) {
 		t.Errorf("an object from a pool whose New calls a function is not shared")
 	}
 }
+
+// A keptNode is what a pool of its own gives out; it points to itself,
+// as fmt's printer does.
+type keptNode struct {
+	self *int
+	v    int
+	id   int
+	s    []*int
+}
+
+var keptPool = sync.Pool{New: func() any { return new(keptNode) }}
+
+var keptIDs int
+
+// A keptUser is passed a node by a function that puts the node back in
+// the pool afterwards.
+type keptUser interface {
+	use(n *keptNode)
+}
+
+type keptReader struct{ sum int }
+
+func (r *keptReader) use(n *keptNode) { r.sum += n.v }
+
+type keptKeeper struct{ n *keptNode }
+
+func (k *keptKeeper) use(n *keptNode) { k.n = n }
+
+//go:noinline
+func keptGet() *keptNode {
+	n := keptPool.Get().(*keptNode)
+	n.self = &n.v
+	if n.id == 0 {
+		keptIDs++
+		n.id = keptIDs
+	}
+	return n
+}
+
+// keptPass passes the node on to u, which is only known when the
+// program runs.
+//
+//go:noinline
+func (n *keptNode) keptPass(u keptUser) {
+	if u != nil {
+		u.use(n)
+	}
+}
+
+// keptCycle gets a node, lets u use it and puts it back. It reports
+// whether the node was shared when the pool gave it, and which node it
+// was.
+//
+//go:noinline
+func keptCycle(u keptUser) (shared bool, id int) {
+	n := keptGet()
+	shared = isShared(n)
+	id = n.id
+	n.v++
+	n.s = append(n.s[:0], nil)
+	n.keptPass(u)
+	keptPool.Put(n)
+	return
+}
+
+// TestSharedKeptCheck checks that an object which is passed to a
+// function that is only known when the program runs is still handed
+// over to its pool if that function does not keep it, though it points
+// to itself; and that it is shared, and not given out by the pool
+// again, if the function keeps it.
+func TestSharedKeptCheck(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	r := new(keptReader)
+	_, first := keptCycle(r)
+	for i := 0; i < 3; i++ {
+		shared, addr := keptCycle(r)
+		if shared {
+			t.Errorf("round %d: an object passed to a function that does not keep it is shared", i)
+		}
+		if addr != first {
+			t.Errorf("round %d: the pool gave another object", i)
+		}
+	}
+	k := new(keptKeeper)
+	if shared, addr := keptCycle(k); shared || addr != first {
+		t.Errorf("before it is kept: shared %v, another object %v", shared, addr != first)
+	}
+	wantShared(t, "kept by a function that is only known when the program runs", k.n, true)
+	for i := 0; i < 3; i++ {
+		shared, addr := keptCycle(r)
+		if shared {
+			t.Errorf("round %d after one was kept: the pool gave a shared object", i)
+		}
+		if addr == first {
+			t.Errorf("round %d after one was kept: the pool gave the object that was kept", i)
+		}
+	}
+	runtime.KeepAlive(k)
+}

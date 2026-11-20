@@ -50,19 +50,23 @@ func (b *batch) walkAll() {
 	}
 	todo.pushFront(&b.mutatorLoc)
 	todo.pushFront(&b.shareLoc)
+	todo.pushFront(&b.convShareLoc)
 	todo.pushFront(&b.calleeLoc)
 	todo.pushFront(&b.candidateLoc)
 	todo.pushFront(&b.ownHeapLoc)
 	todo.pushFront(&b.moveLoc)
+	todo.pushFront(&b.checkLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
 	b.shareLoc.queuedWalkAll = true
+	b.convShareLoc.queuedWalkAll = true
 	b.calleeLoc.queuedWalkAll = true
 	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
 	b.ownHeapLoc.queuedWalkAll = true
 	b.moveLoc.queuedWalkAll = true
+	b.checkLoc.queuedWalkAll = true
 
 	var walkgen uint32
 	for todo.len() > 0 {
@@ -113,6 +117,11 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		derefs := l.derefs
 		var newAttrs locAttr
 
+		if l.param && derefs == 0 && !l.kept && (root == &b.moveLoc || b.holdsMovedParam(root, l)) {
+			// For the callers that would hand it over
+			// (ir.Func.KeptChecked).
+			l.kept = true
+		}
 		if l.param && l.moveCand && derefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
 			// root keeps the pointer of a parameter that the
 			// function would hand over.
@@ -411,7 +420,7 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 }
 
 func (b *batch) explainLoc(l *location) string {
-	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc {
+	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc || l == &b.checkLoc {
 		return "{heap}"
 	}
 	if l.n == nil {
@@ -441,7 +450,7 @@ func (b *batch) outlives(l, other *location) bool {
 	}
 
 	// Pseudo-locations that don't really exist.
-	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc {
+	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc || l == &b.convShareLoc {
 		return false
 	}
 

@@ -228,11 +228,16 @@ func publish(p unsafe.Pointer) {
 // that reaches it (chansendmove1). If it is shared already, so is what it
 // holds.
 func publishContents(p unsafe.Pointer) {
-	if !sharingEnabled || p == nil {
+	if !sharingEnabled || p == nil || isShared(p) {
 		return
 	}
+	publishContentsOf(p)
+}
+
+// publishContentsOf is publishContents for an object that is not shared.
+func publishContentsOf(p unsafe.Pointer) {
 	s := spanOfHeap(uintptr(p))
-	if s == nil || s.isUserArenaChunk || s.spanclass.noscan() || isShared(p) {
+	if s == nil || s.isUserArenaChunk || s.spanclass.noscan() {
 		return
 	}
 	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
@@ -247,7 +252,9 @@ func publishContents(p unsafe.Pointer) {
 		if tp, addr = tp.next(base + s.elemsize); addr == 0 {
 			break
 		}
-		if q := *(*unsafe.Pointer)(unsafe.Pointer(addr)); q != nil {
+		// A pointer into the object itself (a field that points to
+		// another, as fmt's printer has) shares nothing.
+		if q := *(*unsafe.Pointer)(unsafe.Pointer(addr)); q != nil && uintptr(q)-base >= s.elemsize {
 			work = append(work, q)
 		}
 	}
@@ -281,26 +288,46 @@ func poolhandover(p unsafe.Pointer) {
 	getg().ownedPut = p
 }
 
-// poolOwned reports whether the object p points to, which sync.Pool.Put
-// was given, is handed over; it then shares what the object points to.
+// publishkept is called by compiled code before a call of a function
+// that is only known when the program runs, whose escape mask says that
+// it keeps the argument p: an object that its goroutine would hand over
+// later, because nothing else that it does keeps it, is shared instead.
+func publishkept(p unsafe.Pointer) {
+	publish(p)
+}
+
+// poolOwned reports whether the object that x, which sync.Pool.Put was
+// given, points to is handed over; it then shares what the object points to.
+//
+// An object that would be handed over but is shared was shared since Get
+// returned it (publishkept: a function that is only known when the
+// program runs kept it). In a pool whose New returns objects that nobody
+// else has (fresh), it is dropped: the pool would give it out again and
+// again, and whoever got it would take the locks of shared memory, where
+// a new one costs an allocation, once.
 //
 //go:linkname poolOwned sync.runtime_poolOwned
-func poolOwned(p unsafe.Pointer) bool {
+func poolOwned(x any, fresh bool) (handed, drop bool) {
+	p := efaceOf(&x).data
 	gp := getg()
 	owned := gp.ownedPut
 	gp.ownedPut = nil
 	if !sharingEnabled {
-		return false
+		return false, false
 	}
 	if owned == nil || owned != p {
 		// What a pool holds is the next caller of Get's alone, or
 		// shared: also in a pool that only this goroutine has,
 		// whose memory the store would not share it for.
 		publish(p)
-		return false
+		return false, false
 	}
-	publishContents(p)
-	return true
+	if isShared(p) {
+		// (What it points to is shared with it.)
+		return !fresh, fresh
+	}
+	publishContentsOf(p)
+	return true, false
 }
 
 // poolStoreOwned stores x, which is handed over, in a pool: without
@@ -316,18 +343,19 @@ func poolStoreOwned(dst *any, x any) {
 // shared here.
 //
 //go:linkname poolNewFresh sync.runtime_poolNew
-func poolNewFresh(f func() any, x any) {
+func poolNewFresh(f func() any, x any) bool {
 	if !sharingEnabled {
-		return
+		return false
 	}
 	fv := *(**funcval)(unsafe.Pointer(&f))
 	if fv != nil {
 		if fi := findfunc(fv.fn); fi.valid() && fi.flag&abi.FuncFlagFreshResult != 0 {
-			return
+			return true
 		}
 	}
 	e := efaceOf(&x)
 	publish(e.data)
+	return false
 }
 
 // publishObject shares what the newly shared object at base, in s, points
