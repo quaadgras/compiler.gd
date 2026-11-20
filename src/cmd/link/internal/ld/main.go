@@ -32,6 +32,7 @@ package ld
 
 import (
 	"bufio"
+	"cmd/internal/apepack"
 	"cmd/internal/goobj"
 	"cmd/internal/objabi"
 	"cmd/internal/sys"
@@ -448,6 +449,11 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	ctxt.computeTLSOffset()
 	bench.Start("Archinit")
 	ctxt.thearch.Archinit(ctxt)
+	if ctxt.apeMachO {
+		// Room after the Mach-O header for the ELF one (ape_image.go).
+		ctxt.HEADR += apepack.MachOELFRoom
+		ctxt.FlagTextAddr += apepack.MachOELFRoom
+	}
 
 	if ctxt.FlagDataAddr != -1 && ctxt.FlagDataAddr%ctxt.FlagRound != 0 {
 		Exitf("invalid -D value 0x%x: not aligned to rounding quantum 0x%x", ctxt.FlagDataAddr, ctxt.FlagRound)

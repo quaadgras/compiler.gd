@@ -16,11 +16,10 @@ import (
 
 func TestPack(t *testing.T) {
 	pe := append(DOSStub(), []byte("PE\x00\x00rest of the PE")...)
-	elf := []byte("\x7fELF linux and freebsd")
-	macho := []byte("\xcf\xfa\xed\xfe darwin")
-	out, err := Pack(pe, []Exe{
-		{GOARCH: "amd64", Hosts: []string{"linux", "freebsd"}, Data: elf},
-		{GOARCH: "arm64", Hosts: []string{"darwin"}, Data: macho},
+	macho := []byte("\xcf\xfa\xed\xfe linux and darwin")
+	out, err := Pack([]Image{
+		{GOARCH: "amd64", Hosts: []string{"linux", "freebsd", "windows"}, Data: pe},
+		{GOARCH: "arm64", Hosts: []string{"linux", "darwin"}, Data: macho},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -28,23 +27,21 @@ func TestPack(t *testing.T) {
 	if !bytes.HasPrefix(out, []byte("MZ")) || !bytes.Equal(out[StubSize:len(pe)], pe[StubSize:]) {
 		t.Fatalf("the PE is not where it was")
 	}
-	secs, ok := Exes(bytes.NewReader(out))
+	secs, ok := Images(bytes.NewReader(out))
 	if !ok || len(secs) != 2 {
-		t.Fatalf("Exes = %v, %v", secs, ok)
+		t.Fatalf("Images = %v, %v", secs, ok)
 	}
-	for i, want := range [][]byte{elf, macho} {
-		s := secs[i]
-		if s.Off%align != 0 || !bytes.Equal(out[s.Off:s.Off+s.Size], want) {
-			t.Errorf("executable %d at %d is not there", i, s.Off)
-		}
+	if s := secs[0]; s.Off != 0 || s.Size != int64(len(pe)) || s.GOARCH != "amd64" || strings.Join(s.Hosts, ",") != "linux,freebsd,windows" {
+		t.Errorf("PE image: %+v", s)
 	}
-	if Exes, ok := Exes(bytes.NewReader(pe)); ok && len(Exes) != 0 {
-		t.Errorf("a PE alone has executables %v", Exes)
+	if s := secs[1]; s.Off%ELFAlign != 0 || !bytes.Equal(out[s.Off:s.Off+s.Size], macho) || s.GOARCH != "arm64" {
+		t.Errorf("Mach-O image: %+v", s)
 	}
 }
 
-// TestScript runs the script with sh on this machine, for a fake
-// executable that is a shell script.
+// TestScript runs the script with sh on this machine, for a fake image
+// that is a shell script: as it is (as darwin's Mach-O) and with a fake
+// ELF header (64 bytes of a shell script) in place of its first bytes.
 func TestScript(t *testing.T) {
 	if runtime.GOOS != "linux" && runtime.GOOS != "freebsd" && runtime.GOOS != "darwin" {
 		t.Skip("needs a Unix shell")
@@ -52,8 +49,16 @@ func TestScript(t *testing.T) {
 	if _, ok := machines[runtime.GOARCH]; !ok {
 		t.Skip("no uname -m for", runtime.GOARCH)
 	}
-	exe := []byte("#!/bin/sh\necho \"ran $*\"\n")
-	out, err := Pack(nil, []Exe{{GOARCH: runtime.GOARCH, Hosts: []string{runtime.GOOS}, Data: exe}})
+	native := runtime.GOOS == "darwin"
+	head := "\xcf\xfa\xed\xfe\n"
+	if native {
+		head = "#!/bin/sh\n"
+	}
+	img := []byte(head + strings.Repeat("#", 64-len(head)-1) + "\necho \"ran $*\"\nexit 0\n")
+	elf := []byte("#!/bin/sh\n" + strings.Repeat("#", 64-10-1) + "\n")
+	img = append(img, make([]byte, MachOELFOff+len(elf)-len(img))...)
+	copy(img[MachOELFOff:], elf)
+	out, err := Pack([]Image{{GOARCH: runtime.GOARCH, Hosts: []string{runtime.GOOS}, Data: img}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ package ld
 
 import (
 	"bytes"
+	"cmd/internal/apepack"
 	"cmd/internal/codesign"
 	"cmd/internal/hash"
 	imacho "cmd/internal/macho"
@@ -845,6 +846,17 @@ func asmbMacho(ctxt *Link) {
 	a := machowrite(ctxt, ctxt.Arch, ctxt.Out, ctxt.LinkMode)
 	if int32(a) > ctxt.HEADR {
 		Exitf("HEADR too small: %d > %d", a, ctxt.HEADR)
+	}
+	if ctxt.apeMachO {
+		if a > apepack.MachOELFOff {
+			Exitf("GOOS=ape: the Mach-O header is %d bytes, more than %d", a, apepack.MachOELFOff)
+		}
+		h := apeELFHeader(ctxt, apepack.MachOELFOff)
+		if apepack.MachOELFOff+len(h) > int(ctxt.HEADR) {
+			Exitf("GOOS=ape: no room for the ELF header in the Mach-O's")
+		}
+		ctxt.Out.SeekSet(apepack.MachOELFOff)
+		ctxt.Out.Write(h)
 	}
 
 	// Now we have written everything. Compute the code signature (which

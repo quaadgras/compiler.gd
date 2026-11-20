@@ -1241,6 +1241,12 @@ func Peinit(ctxt *Link) {
 		}
 	}
 
+	if ctxt.apePE {
+		// The image is an ELF executable too (see ape_image.go):
+		// its sections' file offsets are aligned as their addresses.
+		ctxt.PEFILEALIGN = apepack.ELFAlign
+		ctxt.PESECTALIGN = apepack.ELFAlign
+	}
 	var sh [16]pe.SectionHeader32
 	var fh pe.FileHeader
 	ctxt.PEFILEHEADR = int32(Rnd(int64(len(ctxt.dosStub())+binary.Size(&fh)+l+binary.Size(&sh)), ctxt.PEFILEALIGN))
@@ -1932,6 +1938,14 @@ func asmbPe(ctxt *Link) {
 	}
 
 	pewrite(ctxt)
+	if ctxt.apePE {
+		h := apeELFHeader(ctxt, apepack.PEELFOff)
+		if int64(apepack.PEELFOff+len(h)) > int64(ctxt.PEFILEHEADR) {
+			Exitf("GOOS=ape: no room for the ELF header in the PE's")
+		}
+		ctxt.Out.SeekSet(apepack.PEELFOff)
+		ctxt.Out.Write(h)
+	}
 }
 
 // peCreateExportFile creates a file with exported symbols for Windows .def files.

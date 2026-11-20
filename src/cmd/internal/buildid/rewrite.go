@@ -112,10 +112,10 @@ func Rewrite(w io.WriterAt, pos []int64, id string) error {
 	if err := resign(w, w.(io.Reader)); err != nil {
 		return err
 	}
-	// Likewise of the Mach-O executables in the one file of a GOOS=ape
+	// Likewise of the Mach-O images in the one file of a GOOS=ape
 	// program.
 	if ra, ok := w.(io.ReaderAt); ok {
-		if secs, ok := apepack.Exes(ra); ok {
+		if secs, ok := apepack.Images(ra); ok {
 			for _, s := range secs {
 				r := io.NewSectionReader(ra, s.Off, s.Size)
 				if err := resign(&offsetWriterAt{w, s.Off}, r); err != nil {

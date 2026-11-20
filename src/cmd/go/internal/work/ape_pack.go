@@ -139,55 +139,43 @@ func apeBuildFlags() []string {
 	return flags
 }
 
-// apeLink links the executables of the hosts of each GOARCH and packs
-// them into target: GOARCH's here, the others' by a go build of each.
+// apeFormat returns the format of the one image of the hosts of arch:
+// a PE if Windows is one (whose image is an ELF executable too), else a
+// Mach-O if darwin is (likewise), else ELF.
+func apeFormat(arch string) string {
+	hosts := syslist.APEHosts[arch]
+	switch {
+	case slices.Contains(hosts, "windows"):
+		return "pe"
+	case slices.Contains(hosts, "darwin"):
+		return "macho"
+	}
+	return "elf"
+}
+
+// apeLink links the image of the hosts of each GOARCH and packs them into
+// target: GOARCH's here, the others' by a go build of each.
 func apeLink(root *Action, target string, ldflags []string, link func(string, []string) error) error {
-	formats := map[string][]string{} // format -> hosts
-	for _, h := range syslist.APEHosts[cfg.Goarch] {
-		switch h {
-		case "windows":
-			formats["pe"] = append(formats["pe"], h)
-		case "darwin":
-			formats["macho"] = append(formats["macho"], h)
-		default:
-			formats["elf"] = append(formats["elf"], h)
-		}
-	}
-	var pe []byte
-	var exes []apepack.Exe
-	for _, f := range []string{"pe", "elf", "macho"} {
-		hosts := formats[f]
-		if hosts == nil {
-			continue
-		}
-		out := target + ".ape-" + f
-		err := link(out, append(slices.Clip(ldflags), "-apeformat="+f))
-		if err != nil {
-			os.Remove(out)
-			return err
-		}
-		data, err := os.ReadFile(out)
+	out := target + ".ape-image"
+	err := link(out, append(slices.Clip(ldflags), "-apeformat="+apeFormat(cfg.Goarch)))
+	if err != nil {
 		os.Remove(out)
-		if err != nil {
-			return err
-		}
-		if f == "pe" {
-			pe = data
-		} else {
-			exes = append(exes, apepack.Exe{GOARCH: cfg.Goarch, Hosts: hosts, Data: data})
-		}
+		return err
 	}
+	data, err := os.ReadFile(out)
+	os.Remove(out)
+	if err != nil {
+		return err
+	}
+	images := []apepack.Image{{GOARCH: cfg.Goarch, Hosts: syslist.APEHosts[cfg.Goarch], Data: data}}
 	for _, arch := range apeArches()[1:] {
-		morePE, more, err := apeBuildArch(root, target, arch)
+		more, err := apeBuildArch(root, target, arch)
 		if err != nil {
 			return err
 		}
-		if pe == nil {
-			pe = morePE
-		}
-		exes = append(exes, more...)
+		images = append(images, more...)
 	}
-	data, err := apepack.Pack(pe, exes)
+	data, err = apepack.Pack(images)
 	if err != nil {
 		return fmt.Errorf("GOOS=ape: %v", err)
 	}
@@ -195,10 +183,10 @@ func apeLink(root *Action, target string, ldflags []string, link func(string, []
 }
 
 // apeBuildArch builds root's program for arch, as one file of its own
-// hosts, and returns its PE (if it has one) and other executables.
-func apeBuildArch(root *Action, target, arch string) (pe []byte, exes []apepack.Exe, err error) {
+// hosts, and returns its images.
+func apeBuildArch(root *Action, target, arch string) ([]apepack.Image, error) {
 	if _, ok := syslist.APEHosts[arch]; !ok {
-		return nil, nil, fmt.Errorf("GOOS=ape: no GOARCH %s in $GOAPEARCHES", arch)
+		return nil, fmt.Errorf("GOOS=ape: no GOARCH %s in $GOAPEARCHES", arch)
 	}
 	p := root.Package
 	var pkgs []string
@@ -214,7 +202,7 @@ func apeBuildArch(root *Action, target, arch string) (pe []byte, exes []apepack.
 	}
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	out := target + ".ape-" + arch
 	defer os.Remove(out)
@@ -228,23 +216,19 @@ func apeBuildArch(root *Action, target, arch string) (pe []byte, exes []apepack.
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr
 	if err := cmd.Run(); err != nil {
-		return nil, nil, fmt.Errorf("GOOS=ape: building for %s: %v\n%s", arch, err, stderr.Bytes())
+		return nil, fmt.Errorf("GOOS=ape: building for %s: %v\n%s", arch, err, stderr.Bytes())
 	}
 	data, err := os.ReadFile(out)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	secs, ok := apepack.Exes(bytes.NewReader(data))
+	secs, ok := apepack.Images(bytes.NewReader(data))
 	if !ok {
-		return nil, nil, fmt.Errorf("GOOS=ape: the %s build wrote no packed file", arch)
+		return nil, fmt.Errorf("GOOS=ape: the %s build wrote no packed file", arch)
 	}
-	end := int64(len(data))
+	var images []apepack.Image
 	for _, s := range secs {
-		end = min(end, s.Off)
-		exes = append(exes, apepack.Exe{GOARCH: s.GOARCH, Hosts: s.Hosts, Data: data[s.Off : s.Off+s.Size]})
+		images = append(images, apepack.Image{GOARCH: s.GOARCH, Hosts: s.Hosts, Data: data[s.Off : s.Off+s.Size]})
 	}
-	if apepack.HasPE(data) {
-		pe = data[:end]
-	}
-	return pe, exes, nil
+	return images, nil
 }
