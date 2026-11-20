@@ -1114,7 +1114,7 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 		shareStatsAlloc(size, local, typ == nil || !typ.Pointers())
 	}
 
-	if sizeSpecializedMallocEnabled && !local && size < uintptr(len(mallocNoScanTable)) {
+	if sizeSpecializedMallocEnabled && !local && debug.sharesites == 0 && size < uintptr(len(mallocNoScanTable)) {
 		if typ == nil || !typ.Pointers() {
 			if size >= maxTinySize {
 				return mallocNoScanTable[size](size, typ, needzero)
@@ -1238,6 +1238,9 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 
 	if local && debug.sharestats >= 2 {
 		shareStatsSite(x)
+	}
+	if !local && debug.sharesites != 0 && typ != nil && typ.Pointers() {
+		shareSiteAlloc(x, size)
 	}
 
 	// Post-malloc debug hooks.

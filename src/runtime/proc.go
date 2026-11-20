@@ -298,6 +298,7 @@ func main() {
 		}
 		return
 	}
+	shareSitesMain = true
 	fn := main_main // make an indirect call, as the linker doesn't know the address of the main package when laying down the runtime
 	fn()
 

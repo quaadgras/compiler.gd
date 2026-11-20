@@ -33,6 +33,7 @@ import (
 	"internal/runtime/atomic"
 	"internal/runtime/gc"
 	"internal/runtime/sys"
+	"internal/stringslite"
 	"unsafe"
 )
 
@@ -178,6 +179,9 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	if fresh && debug.sharestats != 0 {
 		shareStats.marked.Add(1)
 		shareStats.markedBytes.Add(int64(s.elemsize))
+	}
+	if fresh && debug.sharesites != 0 {
+		shareSiteMarked(s.base() + i*s.elemsize)
 	}
 	if !fresh {
 		return 0, nil
@@ -1080,6 +1084,7 @@ func localPublished(base uintptr) {
 }
 
 func printShareStats() {
+	printShareSites()
 	if debug.sharestats == 0 {
 		return
 	}
@@ -1117,3 +1122,180 @@ const _ = uint(7*goarch.PtrSize - unsafe.Offsetof(g{}.localBits))
 // for an argument reads if there is no function (cmd/compile's
 // escape.callArgTag).
 var escMaskAll uint64 = abi.ITabEscAll
+
+// Where the objects that are not local come from.
+//
+// With GODEBUG=sharesites=1, each object with pointers that is not
+// allocated as a local one is counted for the place that allocates it:
+// the first function on the stack that is not the runtime's or
+// reflect's, once the packages are initialized. When an
+// object is first marked as shared, which is when it is stored where
+// another goroutine reaches, that is counted for its place too. At exit
+// the places are printed that allocated the most objects which were
+// never marked: those another goroutine never came to, so that each was
+// a local object if the compiler had known. (Some of them outlived
+// their goroutine all the same: handed over on a channel or to a pool.)
+//
+// The table of objects is by address and forgets: an object whose entry
+// another has taken is counted as unknown when it is marked.
+type shareSite struct {
+	pc                 uintptr
+	stack              [5]uintptr
+	allocs, bytes      uint64
+	marked, markedSize uint64
+	printed            bool
+}
+
+type shareSiteObj struct {
+	addr uintptr
+	site uint32
+	size uint32
+}
+
+const shareSiteObjs = 1 << 22
+
+var shareSiteTab struct {
+	lock    mutex
+	sites   [1 << 15]shareSite
+	nsites  int
+	full    uint64
+	unknown uint64
+	objs    *[shareSiteObjs]shareSiteObj
+}
+
+// shareSitesMain is set when the packages are initialized: what they
+// allocate before is for the variables of the program.
+var shareSitesMain bool
+
+// hasSuffixDir reports whether the directory of file ends in dir.
+func hasSuffixDir(file, dir string) bool {
+	i := len(file)
+	for i > 0 && file[i-1] != '/' {
+		i--
+	}
+	return i >= len(dir) && file[i-len(dir):i] == dir
+}
+
+func shareSiteAlloc(x unsafe.Pointer, size uintptr) {
+	if !shareSitesMain {
+		return
+	}
+	var pcs [12]uintptr
+	n := callers(2, pcs[:])
+	first := 0
+	for i := 0; i < n; i++ {
+		f := findfunc(pcs[i])
+		if !f.valid() {
+			continue
+		}
+		// (The runtime's functions have other names where another
+		// package links to them.)
+		name := funcname(f)
+		if stringslite.HasPrefix(name, "runtime.") || stringslite.HasPrefix(name, "reflect.") || stringslite.HasPrefix(name, "internal/runtime/") {
+			continue
+		}
+		if file, _ := funcline(f, pcs[i]-1); hasSuffixDir(file, "/runtime/") {
+			continue
+		}
+		first = i
+		break
+	}
+	pc := pcs[first]
+	if pc == 0 {
+		return
+	}
+	t := &shareSiteTab
+	lock(&t.lock)
+	if t.objs == nil {
+		t.objs = (*[shareSiteObjs]shareSiteObj)(sysAlloc(unsafe.Sizeof(*t.objs), &memstats.other_sys, "share sites"))
+		if t.objs == nil {
+			unlock(&t.lock)
+			return
+		}
+	}
+	h := uint32(pc*0x9e3779b97f4a7c15>>40) % uint32(len(t.sites))
+	var st *shareSite
+	for probe := 0; probe < 64; probe++ {
+		e := &t.sites[(h+uint32(probe))%uint32(len(t.sites))]
+		if e.pc == pc {
+			st = e
+			break
+		}
+		if e.pc == 0 {
+			e.pc = pc
+			copy(e.stack[:], pcs[first:n])
+			t.nsites++
+			st = e
+			break
+		}
+	}
+	if st == nil {
+		t.full++
+		unlock(&t.lock)
+		return
+	}
+	st.allocs++
+	st.bytes += uint64(size)
+	o := &t.objs[uintptr(x)>>3%shareSiteObjs]
+	o.addr = uintptr(x)
+	o.site = uint32((uintptr(unsafe.Pointer(st)) - uintptr(unsafe.Pointer(&t.sites[0]))) / unsafe.Sizeof(*st))
+	o.size = uint32(min(size, 1<<32-1))
+	unlock(&t.lock)
+}
+
+func shareSiteMarked(base uintptr) {
+	t := &shareSiteTab
+	lock(&t.lock)
+	if t.objs != nil {
+		if o := &t.objs[base>>3%shareSiteObjs]; o.addr == base {
+			st := &t.sites[o.site]
+			st.marked++
+			st.markedSize += uint64(o.size)
+			o.addr = 0
+		} else {
+			t.unknown++
+		}
+	}
+	unlock(&t.lock)
+}
+
+func printShareSites() {
+	if debug.sharesites == 0 {
+		return
+	}
+	t := &shareSiteTab
+	lock(&t.lock)
+	var allocs, marked uint64
+	for i := range t.sites {
+		allocs += t.sites[i].allocs
+		marked += t.sites[i].marked
+	}
+	print("sharesites: ", t.nsites, " places allocated ", allocs, " objects with pointers that are not local; ", marked,
+		" were marked as shared, and ", t.unknown, " more of places unknown; ", t.full, " not counted\n")
+	var sum uint64
+	for n := 0; n < 40; n++ {
+		var best *shareSite
+		for i := range t.sites {
+			e := &t.sites[i]
+			if e.pc == 0 || e.printed || e.allocs <= e.marked {
+				continue
+			}
+			if best == nil || e.allocs-e.marked > best.allocs-best.marked {
+				best = e
+			}
+		}
+		if best == nil {
+			break
+		}
+		best.printed = true
+		sum += best.allocs - best.marked
+		print("sharesites: #", n+1, " never shared ", best.allocs-best.marked, " of ", best.allocs, " objects, ", best.bytes-best.markedSize, " bytes (", sum*100/max(allocs-marked, 1), "% so far)\n")
+		for _, pc := range best.stack {
+			if f := findfunc(pc); f.valid() {
+				file, line := funcline(f, pc-1)
+				print("sharesites:\t", funcname(f), " ", file, ":", line, "\n")
+			}
+		}
+	}
+	unlock(&t.lock)
+}

@@ -539,6 +539,17 @@ because the callee is unknown.
   objects of each range and the local ones that were published all the
   same, each of which is a wrong decision; `=2` traces them, with where
   the object was allocated, `=3` throws.
+  It also counts, of the objects that are not local, those without
+  pointers (never marked) and those that were marked: the rest another
+  goroutine never came to. `GODEBUG=sharesites=1` prints, at exit, the
+  places that allocated the most of those (`shareSiteAlloc`): the first
+  function on the stack that is not the runtime's or reflect's. On
+  2026-11-21, 37 to 93% of the objects with pointers that were not local
+  were never marked in the tests of `encoding/json`, `go/printer`,
+  `go/types` and `net/http`; a program that only parses a file and reads
+  the result has no local object at all, because `ast.Walk` passes every
+  node to `Visitor.Visit`, a function that is not known where the node
+  is allocated.
 
 - **Dynamic roots** (`escape/shares.go`: `dynRootOf`, `localTag`). A
   store through a pure path from a local variable (`p.f = x`, `*p = x`,
