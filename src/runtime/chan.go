@@ -103,6 +103,13 @@ func makechan(t *chantype, size int) unsafe.Pointer {
 	// TODO(dvyukov,rlh): Rethink when collector can move allocated objects.
 	var c *hchan
 	switch {
+	case mem == 0 && elem.Pointers():
+		// No queue, of elements with pointers: whether the channel
+		// is shared says whether what is sent on it is, and an
+		// object is only marked as shared if it has pointers
+		// (markShared).
+		c = new(hchan)
+		c.buf = c.raceaddr()
 	case mem == 0:
 		// Queue or element size is zero.
 		c = (*hchan)(mallocgc(hchanSize, nil, true))

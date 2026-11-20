@@ -132,9 +132,16 @@ func isGlobal(p uintptr) bool {
 // markShared marks the heap object p points into as shared. If it was not,
 // it returns the object's base and span; otherwise, or if p does not point
 // into a heap object, zero.
+//
+// An object without pointers is not marked. Nothing in it is locked: what
+// is stored whole is a string, a slice or an interface, which have
+// pointers, and so do the maps, the channels and the atomic pointers that
+// ask whether they are shared. It leads nowhere, and the small ones share
+// a block, and would share its bit. So a buffer of bytes costs nothing
+// here, and leaves its page's byte clear for isShared.
 func markShared(p uintptr) (base uintptr, s *mspan) {
 	s = spanOf(p)
-	if s == nil || s.state.get() != mSpanInUse || p < s.base() || p >= s.limit || s.isUserArenaChunk {
+	if s == nil || s.state.get() != mSpanInUse || p < s.base() || p >= s.limit || s.isUserArenaChunk || s.spanclass.noscan() {
 		return 0, nil
 	}
 	i := s.objIndex(p)
@@ -241,25 +248,26 @@ func publishContentsOf(p unsafe.Pointer) {
 		return
 	}
 	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
-	// The pointers first: the walk of each may be preempted for a
-	// collection, and the object is the sender's to read until it is
-	// sent.
-	var buf [16]unsafe.Pointer
-	work := buf[:0]
+	limit := base + s.elemsize
+	// The object is the caller's to read until it is handed over, and
+	// p keeps it while what it points to is walked.
 	tp := s.typePointersOfUnchecked(base)
 	for {
 		var addr uintptr
-		if tp, addr = tp.next(base + s.elemsize); addr == 0 {
+		if tp, addr = tp.next(limit); addr == 0 {
 			break
 		}
 		// A pointer into the object itself (a field that points to
 		// another, as fmt's printer has) shares nothing.
-		if q := *(*unsafe.Pointer)(unsafe.Pointer(addr)); q != nil && uintptr(q)-base >= s.elemsize {
-			work = append(work, q)
+		q := *(*uintptr)(unsafe.Pointer(addr))
+		if q == 0 || q-base < s.elemsize {
+			continue
 		}
-	}
-	for _, q := range work {
-		publish(q)
+		// As a rule it is shared already, by the last time the
+		// object was handed over, or has no pointers.
+		if b, qs := markShared(q); b != 0 {
+			publishObject(b, qs)
+		}
 	}
 	KeepAlive(p)
 }

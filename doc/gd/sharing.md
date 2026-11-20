@@ -172,9 +172,9 @@ its life.
     since the receiver flows to `recvHeldLoc` anyway, and a method that
     returns its receiver is one that keeps it for `recvKeepsNothing`.
 
-  With a pooled `bytes.Buffer`, `fmt.Fprintf(buf, "%d", x)` takes 174
+  With a pooled `bytes.Buffer`, `fmt.Fprintf(buf, "%d", x)` takes 148
   ns where it took 196 (77 with no sharing at all), and
-  `io.WriteString` 67 where it took 76 (28).
+  `io.WriteString` 50 where it took 76 (28).
 
   Not covered: a function that is only known when the program runs
   still answers by its mask, which says "keeps" for one that calls a
@@ -188,9 +188,20 @@ its life.
   but for a pointer into the object itself (the printer points to its
   own buffer field), which says nothing.
 
-  `Sprintf("%d", x)` takes 100 ns where it took 107 (46 with no sharing
+  **An object without pointers is not marked as shared**
+  (`markShared`). Nothing in it is locked: what is stored whole is a
+  string, a slice or an interface, which have pointers, and so do the
+  maps and the atomic pointers that ask whether they are shared. It
+  leads nowhere, and small ones share a block and would share its bit.
+  So the buffers of bytes that a pooled object points to cost the walk
+  at each put nothing, and leave their pages' bytes clear. A channel
+  does ask whether it is shared, for what is sent on it: the header of
+  one whose elements have pointers is allocated with pointers, also
+  when it has no queue (`makechan`).
+
+  `Sprintf("%d", x)` takes 93 ns where it took 107 (46 with no sharing
   at all), with a `String` method 353 where it took 428 (215), a struct
-  1060 where it took 1340 (790). What is left is the walk of the
+  1090 where it took 1340 (790). What is left is the walk of the
   object at each put, and the stores in it: the printer is in a page
   with shared objects, so each store of a slice or an interface calls
   the runtime to learn that the printer is not one.
