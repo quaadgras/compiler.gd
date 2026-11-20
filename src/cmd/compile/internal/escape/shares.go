@@ -12,9 +12,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
-	"cmd/internal/objabi"
 	"cmd/internal/src"
-	"cmd/internal/sys"
 )
 
 // Goroutine sharing, statically (doc/gd/sharing.md, runtime/shared.go).
@@ -515,6 +513,12 @@ type dynRoot struct {
 	// called (callbits.go).
 	call *ir.CallExpr
 	arg  int
+
+	// link is the key of the class of functions that the call may be
+	// of, if the linker knows what they do with the argument arg
+	// (callbits.go). A root with no call is a link root: it has no
+	// path, and its tag can be read anywhere.
+	link string
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
@@ -538,19 +542,7 @@ func (e *escape) noteStmtCall() {
 // splitHeap reports whether the target has spans of local objects
 // (runtime.localSpans).
 func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
-	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
-		return 0, false
-	}
-	switch gd.Ctxt.Headtype {
-	case objabi.Hlinux, objabi.Hdarwin, objabi.Hfreebsd, objabi.Hwindows:
-	default:
-		return 0, false
-	}
-	switch gd.Ctxt.Arch.Family {
-	case sys.AMD64, sys.ARM64:
-		return 0, true
-	}
-	return 0, false
+	return 0, ir.LocalSpans(gd)
 }
 
 // The runtime's table of the pages that hold something else than local
@@ -687,8 +679,17 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 // called when the graph is built.
 func (b *batch) settleDynRoots() {
 	for _, r := range b.dynRoots {
+		if r.dynRoot.name == nil {
+			// A link root.
+			continue
+		}
 		loc, _ := r.dynRoot.name.Opt.(*location)
 		if loc == nil || loc.captured || loc.addrtaken {
+			if d := r.dynRoot; d.call != nil && d.link != "" {
+				// What is called cannot be read: the linker knows.
+				r.dynRoot = &dynRoot{link: d.link, arg: d.arg}
+				continue
+			}
 			r.dynRoot = nil
 			r.attrs |= attrShares
 			continue
@@ -801,8 +802,32 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		if d == nil {
 			return nil
 		}
+		// What the linker knows can be read anywhere.
+		linked := func() bool {
+			if d.link == "" {
+				return false
+			}
+			key := fmt.Sprintf("link %d %s", d.arg, d.link)
+			if !seen[key] {
+				seen[key] = true
+				one := b.linkTag(pos, d.link, d.arg)
+				if tag == nil {
+					tag = one
+				} else {
+					tag = binary(ir.OAND, tag, one)
+				}
+			}
+			return true
+		}
+		if d.call == nil && d.link != "" {
+			linked()
+			continue
+		}
 		v := d.loc
 		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
+			if d.call != nil && linked() {
+				continue
+			}
 			return nil
 		}
 		param := d.call == nil && d.plain && !v.reassigned && v.param
@@ -810,6 +835,9 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 			// Allocated in the call's statement, when what is
 			// called is known.
 			if params || d.stmt == 0 || d.stmt != loc.stmt {
+				if linked() {
+					continue
+				}
 				return nil
 			}
 			key := fmt.Sprintf("call %p %d", d.call, d.arg)

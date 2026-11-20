@@ -68,6 +68,7 @@ type DebugFlags struct {
 	LocalDbg              int    `help:"decide at run time only for the allocations of these kinds (1 new, 2 append, 4 make, 8 variables; for debugging)" concurrent:"ok"`
 	NoLocalMap            int    `help:"do not treat a map as a container that may be a local object (for measurements)" concurrent:"ok"`
 	NoLocalRO             int    `help:"count what a string points to as shared where the string goes (for measurements)" concurrent:"ok"`
+	NoLocalLink           int    `help:"count what is passed to a function that is only known when the program runs as shared, whatever the linker knows (for measurements)" concurrent:"ok"`
 	NoLocalRecv           int    `help:"do not keep local what is only the receiver of interface calls (for measurements)" concurrent:"ok"`
 	NoLocalBits           int    `help:"do not pass to a function what its caller knows of where its results and what it stores go (for measurements)" concurrent:"ok"`
 	NoLocalDyn            int    `help:"do not decide at run time whether an object is local (for measurements)" concurrent:"ok"`

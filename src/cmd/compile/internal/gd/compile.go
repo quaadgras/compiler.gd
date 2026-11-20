@@ -17,7 +17,9 @@ import (
 	"cmd/compile/internal/liveness"
 	"cmd/compile/internal/objw"
 	"cmd/compile/internal/pgoir"
+	"cmd/compile/internal/reflectdata"
 	"cmd/compile/internal/ssagen"
+	"cmd/compile/internal/staticdata"
 	"cmd/compile/internal/staticinit"
 	"cmd/compile/internal/types"
 	"cmd/compile/internal/walk"
@@ -80,6 +82,13 @@ func enqueueFunc(gd *base.Invocation, fn *ir.Func, symABIs *ssagen.SymABIs) {
 		} else {
 			// Initialize ABI wrappers if necessary.
 			ir.InitLSym(gd, fn, false)
+			if recv := fn.Type().Recv(); recv != nil {
+				// A method in assembly: the linker is told that it
+				// may do anything, by the type that has it.
+				if rt := types.ReceiverBaseType(recv.Type); rt != nil && !rt.HasShape() {
+					staticdata.ShareRecordUnknown(gd, reflectdata.TypeLinksym(gd, rt), fn)
+				}
+			}
 			types.CalcSize(gd, fn.Type())
 			a := ssagen.AbiForBodylessFuncStackMap(gd, fn)
 			abiInfo := a.ABIAnalyzeFuncType(fn.Type()) // abiInfo has spill/home locations for wrapper
@@ -124,6 +133,10 @@ func prepareFunc(gd *base.Invocation, fn *ir.Func) {
 	// Do this before walk, as walk needs the LSym to set attributes/relocations
 	// (e.g. in MarkTypeUsedInInterface).
 	ir.InitLSym(gd, fn, true)
+
+	// What the linker is to know of the function, if it is called as a
+	// method of an interface or as a function value (ir/sharelink.go).
+	staticdata.ShareRecords(gd, fn)
 
 	// If this function is a compiler-generated outlined global map
 	// initializer function, register its LSym for later processing.

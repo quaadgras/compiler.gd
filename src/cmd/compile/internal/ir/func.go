@@ -866,4 +866,9 @@ type ParamShare struct {
 	// through a parameter (Via): what is only stored through one
 	// lives as long as what that one points to.
 	Heap uint8
+	// Links are the functions that are only known when the program
+	// runs to which the parameter is passed, or what it points to:
+	// another goroutine reaches it if one of them shares its argument,
+	// which the linker knows (sharelink.go).
+	Links []ShareLink
 }

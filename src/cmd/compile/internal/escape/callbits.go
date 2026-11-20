@@ -12,6 +12,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
+	"cmd/internal/obj"
 	"cmd/internal/src"
 )
 
@@ -508,6 +509,28 @@ func setMinDerefs(p *uint8, derefs int) {
 // derefs times, is stored in the dynamic root r: through a parameter,
 // or where another goroutine may reach it.
 func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int) {
+	if d := r.dynRoot; d != nil && d.link != "" {
+		// An argument of a function that is only known when the
+		// program runs: the caller reads what the linker knows.
+		v := derefs + 1
+		if v > 255 {
+			v = 255
+		}
+		for i := range ps.Links {
+			if l := &ps.Links[i]; l.Key == d.link && int(l.Arg) == d.arg {
+				if uint8(v) < l.Derefs {
+					l.Derefs = uint8(v)
+				}
+				return
+			}
+		}
+		if len(ps.Links) < ir.MaxShareLinks {
+			ps.Links = append(ps.Links, ir.ShareLink{Key: d.link, Arg: uint8(d.arg), Derefs: uint8(v)})
+			return
+		}
+		setMinDerefs(&ps.Share, derefs)
+		return
+	}
 	if d := r.dynRoot; d != nil && r.curfn == fn {
 		if v := d.loc; d.plain && v != nil && v.param && !v.reassigned && !v.captured && !v.addrtaken {
 			if k := paramBit(fn, d.name); k != 0 {
@@ -652,6 +675,13 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 		if ps.Share != 0 {
 			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
 		}
+		for _, l := range ps.Links {
+			if r := e.linkRoot(l.Key, int(l.Arg)); r != nil {
+				tagKs = append(tagKs, r.asHole().shift(e.gd, int(l.Derefs)-1))
+			} else {
+				tagKs = append(tagKs, e.shareHole().shift(e.gd, int(l.Derefs)-1))
+			}
+		}
 	}
 	if ps.Via != 0 {
 		d := int(ps.ViaDerefs) - 1
@@ -748,6 +778,12 @@ func (b *batch) shareFlags(fn *ir.Func, i int, esc leaks) byte {
 	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() {
 		return checked
 	}
+	if len(ps.Links) != 0 {
+		// Not by itself, but the functions that it is passed on to
+		// may share it: a mask says that it is shared, and the
+		// linker starts from one that does not (ir.EscMaskBaseOf).
+		return fl&^1 | ir.EscNoteLinked | checked
+	}
 	return fl | checked
 }
 
@@ -806,7 +842,7 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 		curfn:     e.curfn,
 		loopDepth: 1,
 		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
-		dynRoot:   &dynRoot{path: fun, name: name, stmt: key.stmt, call: call, arg: idx},
+		dynRoot:   &dynRoot{path: fun, name: name, stmt: key.stmt, call: call, arg: idx, link: e.dynKey},
 		isDynRoot: true,
 	}
 	e.allLocs = append(e.allLocs, r)
@@ -922,4 +958,108 @@ func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept, own bool) ir.Node {
 	}
 	stays = binary(ir.OAND, not(bit(ir.EscMaskShared+d.arg)), stays)
 	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+d.arg)), stays))
+}
+
+// What the linker knows of the functions that are only known when the
+// program runs (ir/sharelink.go).
+//
+// The argument of a call of such a function flows to a link root: a
+// dynamic root whose tag is read from the word of the class of functions
+// that the call may be of, which the linker fills in. It can be read
+// anywhere, so an object that was allocated long before the call, and in
+// another function, is local if none of those functions shares it: a
+// parameter that flows to a link root says so (ir.ParamShare.Links), and
+// the caller's argument flows to a link root of its own.
+
+func (b *batch) linksOn() bool {
+	return b.gd.Debug.NoLocalLink == 0 && b.callBitsOn()
+}
+
+// linkKey returns the key of the class of functions that call, of a
+// function that is only known when the program runs, may be of, or "".
+func (e *escape) linkKey(call *ir.CallExpr) string {
+	if !e.linksOn() || call.GoDefer {
+		return ""
+	}
+	var key string
+	var wild bool
+	switch call.Op() {
+	case ir.OCALLINTER:
+		sel, ok := call.Fun.(*ir.SelectorExpr)
+		if !ok || sel.Op() != ir.ODOTINTER {
+			return ""
+		}
+		key, wild = ir.ShareKeyMethod(sel.Sel.Name, sel.Type())
+	case ir.OCALLFUNC:
+		if t := call.Fun.Type(); t != nil && t.Recv() == nil {
+			key, wild = ir.ShareKeyFunc(t)
+		}
+	}
+	if wild {
+		return ""
+	}
+	return key
+}
+
+// linkRoot returns the link root of the current function for the
+// argument arg of the functions of the class key, or nil.
+func (e *escape) linkRoot(key string, arg int) *location {
+	if key == "" || arg < 0 || arg >= ir.EscMaskArgs || !e.linksOn() {
+		return nil
+	}
+	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+		return nil
+	}
+	k := dynKey{0, fmt.Sprintf("link %p %d %s", e.curfn, arg, key)}
+	if r := e.dynRoots[k]; r != nil {
+		return r
+	}
+	r := &location{
+		curfn:     e.curfn,
+		loopDepth: 1,
+		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
+		dynRoot:   &dynRoot{link: key, arg: arg},
+		isDynRoot: true,
+	}
+	e.allLocs = append(e.allLocs, r)
+	if e.dynRoots == nil {
+		e.dynRoots = make(map[dynKey]*location)
+	}
+	e.dynRoots[k] = r
+	return r
+}
+
+// linkTag returns the expression that is 1 if no function of the class
+// key shares its argument arg: it does not keep it, or keeps it where
+// no other goroutine reaches, and not in what its receiver points to,
+// which nobody knows here.
+func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	// Until the linker writes it, all is shared. (It is not read-only,
+	// which the compiler would take for a constant.)
+	sym := b.gd.Ctxt.LookupInit(ir.ShareWordPrefix+key, func(s *obj.LSym) {
+		s.WriteInt(b.gd.Ctxt, 0, 8, -1)
+		b.gd.Ctxt.Globl(s, 8, obj.DUPOK|obj.NOPTR)
+	})
+	bit := func(n int) ir.Node {
+		var w ir.Node = ir.NewLinksymExpr(b.gd, pos, sym, types.Types[types.TUINT64])
+		c := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, w)
+		c.SetTypecheck(1)
+		if n == 0 {
+			return binary(ir.OAND, c, lit(1))
+		}
+		return binary(ir.OAND, binary(ir.ORSH, c, lit(int64(n))), lit(1))
+	}
+	not := func(x ir.Node) ir.Node { return binary(ir.OXOR, x, lit(1)) }
+	stays := binary(ir.OAND, not(bit(ir.EscMaskShared+arg)), not(bit(ir.EscMaskViaRecv+arg)))
+	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+arg)), stays))
 }

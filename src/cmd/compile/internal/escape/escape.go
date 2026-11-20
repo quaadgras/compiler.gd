@@ -137,6 +137,7 @@ type batch struct {
 	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
 	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
 	dynArg      int          // that argument's place
+	dynKey      string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
 	recvArg     bool         // and that a method of its own may keep
 	recvAnyArg  bool         // whichever
 	checkedArg  bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)

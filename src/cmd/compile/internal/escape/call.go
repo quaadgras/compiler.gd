@@ -166,14 +166,18 @@ func (e *escape) call(ks []hole, call ir.Node) {
 					dynFirst = 1
 				}
 			}
+			dynKey := ""
+			if dyn != nil && dynFirst == 0 {
+				dynKey = e.linkKey(call)
+			}
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs = all
-				e.dynCall, e.dynArg = dyn, dynFirst-1
+				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst-1, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.dynCall, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, false, false, false
+				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, "", false, false, false
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -190,10 +194,10 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs = all
-				e.dynCall, e.dynArg = dyn, dynFirst+i
+				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst+i, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.dynCall, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, false, false, false
+				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg = nil, nil, "", false, false, false
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
@@ -510,6 +514,11 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	if e.dynCall != nil && e.dynArg >= 0 {
 		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
 			e.noteKeptCheck(r, e.dynCall, arg)
+			return r.asHole()
+		}
+		// Or what the linker knows of all the functions that it may
+		// be (sharelink.go).
+		if r := e.linkRoot(e.dynKey, e.dynArg); r != nil {
 			return r.asHole()
 		}
 	}

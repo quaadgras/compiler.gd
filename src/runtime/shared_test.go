@@ -1459,3 +1459,164 @@ func TestSharedHeldBit(t *testing.T) {
 	runtime.KeepAlive(k)
 	runtime.KeepAlive(hk)
 }
+
+// Objects that are passed to a function that is only known when the
+// program runs, after they are allocated and in another function than
+// the one that allocates them: the linker knows every function that it
+// may be (cmd/link/internal/ld/sharemask.go), and the object is local
+// if none shares it.
+
+type linkObj struct {
+	p    *int
+	next *linkObj
+}
+
+type linkReader interface{ ReadLinkObj(o *linkObj) int }
+
+type linkKeeper interface{ KeepLinkObj(o *linkObj) }
+
+type linkPasser interface{ PassLinkObj(o *linkObj) int }
+
+type linkReads struct{}
+
+func (linkReads) ReadLinkObj(o *linkObj) int { return *o.p }
+
+type linkCounts struct{ n int }
+
+func (c *linkCounts) ReadLinkObj(o *linkObj) int { c.n += *o.p; return c.n }
+
+var linkKept *linkObj
+
+type linkKeeps struct{}
+
+func (linkKeeps) KeepLinkObj(o *linkObj) { linkKept = o }
+
+type linkDrops struct{}
+
+func (linkDrops) KeepLinkObj(o *linkObj) {}
+
+// A method that passes its argument on to another class, and to its own.
+type linkPassesOn struct {
+	r    linkReader
+	k    linkKeeper
+	more linkPasser
+}
+
+func (p *linkPassesOn) PassLinkObj(o *linkObj) int {
+	if p.k != nil {
+		p.k.KeepLinkObj(o)
+	}
+	if p.more != nil {
+		return p.more.PassLinkObj(o)
+	}
+	return p.r.ReadLinkObj(o)
+}
+
+type linkPassesRead struct{ r linkReader }
+
+func (p *linkPassesRead) PassLinkObj(o *linkObj) int { return linkRead(p.r, o) }
+
+//go:noinline
+func linkRead(r linkReader, o *linkObj) int { return r.ReadLinkObj(o) }
+
+//go:noinline
+func linkKeep(k linkKeeper, o *linkObj) { k.KeepLinkObj(o) }
+
+//go:noinline
+func linkCall(f func(*linkObj, bool) int, o *linkObj) int { return f(o, true) }
+
+//go:noinline
+func linkCallKeep(f func(*linkObj), o *linkObj) { f(o) }
+
+//go:noinline
+func linkNew(v int) *linkObj {
+	return &linkObj{p: &v}
+}
+
+// linkLocal reports whether the object that f makes, with linkNew, is
+// local.
+func linkLocal(f func()) bool { return runtime.CountLocalAllocs(f) != 0 }
+
+func TestSharedLink(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+
+	// Read by a method of an interface: no method with that name
+	// shares its argument.
+	for _, r := range []linkReader{linkReads{}, new(linkCounts)} {
+		if !linkLocal(func() { sum += linkRead(r, linkNew(2)) }) {
+			t.Errorf("%T: an object that no method that may be called shares is not local", r)
+		}
+	}
+
+	// One of the methods with that name keeps it where another
+	// goroutine reaches it: none of the objects is local, whichever
+	// is called.
+	for _, k := range []linkKeeper{linkDrops{}, linkKeeps{}} {
+		if linkLocal(func() { linkKeep(k, linkNew(3)) }) {
+			t.Errorf("%T: an object that a method that may be called shares is local", k)
+		}
+	}
+	done := make(chan int)
+	go func() { done <- *linkKept.p }()
+	sum += <-done
+
+	// Function values: read, and kept. (No method has the signature
+	// of the first: reflect makes function values of methods.)
+	if !linkLocal(func() { sum += linkCall(func(o *linkObj, _ bool) int { return *o.p }, linkNew(4)) }) {
+		t.Errorf("an object that no function that may be called shares is not local")
+	}
+	if linkLocal(func() { linkCallKeep(func(o *linkObj) { linkKept = o }, linkNew(5)) }) {
+		t.Errorf("an object that the function that is called shares is local")
+	}
+	if linkLocal(func() { linkCallKeep(func(o *linkObj) { sum += *o.p }, linkNew(6)) }) {
+		t.Errorf("an object that a function that may be called shares is local")
+	}
+
+	// Passed on by a method to the methods of another class: local
+	// only if nothing at the end shares, and a method with that name
+	// passes it on to one that keeps it.
+	if linkLocal(func() { sum += linkPass(&linkPassesRead{r: linkReads{}}, linkNew(7)) }) {
+		t.Errorf("an object that a method passes on to one that shares it is local")
+	}
+	// The same, of a class whose methods only pass it on to readers.
+	if !linkLocal(func() { sum += linkRelay(&linkRelays{r: linkReads{}}, linkNew(8)) }) {
+		t.Errorf("an object that a method passes on to one that only reads it is not local")
+	}
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
+type linkRelayer interface{ RelayLinkObj(o *linkObj) int }
+
+type linkRelays struct {
+	r    linkReader
+	more linkRelayer
+}
+
+func (p *linkRelays) RelayLinkObj(o *linkObj) int {
+	if p.more != nil {
+		return p.more.RelayLinkObj(o)
+	}
+	return p.r.ReadLinkObj(o)
+}
+
+//go:noinline
+func linkRelay(p linkRelayer, o *linkObj) int { return p.RelayLinkObj(o) }
+
+//go:noinline
+func linkPass(p linkPasser, o *linkObj) int { return p.PassLinkObj(o) }
+
+var _ linkPasser = (*linkPassesOn)(nil)
+
+func init() {
+	// The program has a value of each type.
+	var p linkPasser = &linkPassesOn{r: linkReads{}, k: linkDrops{}}
+	if p.PassLinkObj(&linkObj{p: new(int)}) != 0 {
+		panic("PassLinkObj")
+	}
+}

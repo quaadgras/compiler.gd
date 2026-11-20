@@ -232,6 +232,12 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			newAttrs |= attrReturned
 		}
 
+		if b.gd.Flag.LowerM >= 2 && l.n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+			// Why an object is not local.
+			fmt.Printf("%s: %v is shared by %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
+			b.explainPath(root, l)
+		}
+
 		// l's value flows to root. If l is a function
 		// parameter and root is the heap or a
 		// corresponding result parameter, then record

@@ -734,8 +734,85 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
   `net/http`): tests are called through function values and hand their
   results to `reflect.DeepEqual` and `fmt`.
 
+### What the linker knows of the functions that are only known when the program runs
+
+Measured on 2026-11-21 (`GODEBUG=sharesites=1`): the objects that are
+not local and that no other goroutine ever reaches are, first of all,
+the ones that are passed to a function value or to a method of an
+interface some time after they are allocated. Nobody knows there which
+function that will be, so by the rule above they are shared from birth.
+
+The linker knows all the functions that it may be. A **class** is the
+methods with one name and signature, of all the types of the program, or
+the function values with one signature. For each class that compiled
+code asks about, the program has a word that is an escape mask: the
+masks of all the functions of the class, ORed
+(`cmd/compile/internal/ir/sharelink.go`,
+`cmd/link/internal/ld/sharemask.go`).
+
+- **Compiler.** The argument of such a call flows to a *link root*, a
+  dynamic root whose tag is read from the class's word
+  (`escape/callbits.go`: `linkRoot`, `linkTag`). The word can be read
+  anywhere, so the object may have been allocated long before, and in
+  another function: a parameter that flows to a link root says so
+  (`ir.ParamShare.Links`, at most four), the caller's argument flows to
+  a link root of its own, and the bits of a call are computed from the
+  words where a result depends on them. The word of a call whose
+  function is known in the statement that allocates is still read from
+  the closure or the method table, which says more (what is stored
+  through a receiver that is local).
+- **Records.** Every function that may be called so has a record, a
+  symbol that the program has if it has the function: a method by its
+  code, a function with a name by its function value, a closure or a
+  method value by its code; a method in assembly by its type, with a
+  mask that says that it does anything. The record has the class, the
+  mask and the links of the parameters. The mask is the one the linker
+  starts from: a parameter that is only shared if a function that it is
+  passed on to shares it is not shared there (`ir.EscNoteLinked`,
+  `ir.EscMaskBaseOf`), where the masks that are read when the program
+  runs say that it is.
+- **Linker.** After the dead code is found, the records of what is left
+  are read and the words computed until nothing changes: a function
+  shares a parameter if a function of a class that it passes it on to
+  does. So a method that calls a method of the same name on what it
+  holds (a visitor that walks its children) shares nothing if none of
+  them does. The records are then dropped.
+- **Type parameters.** A call in a function with type parameters, of a
+  function whose signature has one, reads no word. A function whose
+  signature has one has a pattern for its class, which stands for every
+  class that it matches: a closure of such a function is called as a
+  function value of each of its instances.
+- **What the linker cannot know.** The compiler writes the words with
+  all bits set, and they stay so in a plugin, a shared library, or a
+  program that can load one. If the program has `reflect.MakeFunc`, the
+  words of the function values stay. Reflect also makes function values
+  of methods (`Value.Method(i).Interface()`), so if the program has that
+  (anything that prints with `fmt` does), the methods are counted with
+  the function values of their signature. A function value made of
+  memory by unsafe code, or defined in assembly without a Go declaration,
+  is not known.
+- `-d=nolocallink` turns it off in the compiler. `-ldflags=-v` prints
+  how many words and records a program has, `-v=2` each word.
+  `-gcflags=-m=2` now also prints, for a value that is shared, where it
+  flows to and how (`is shared by`).
+- **Measured** (local objects in the tests, before → after):
+  `encoding/json` 1519 → 2159, `go/types` 39645 → 55895, `net/http`
+  39693 → 42055, `go/printer` 4841 → 4889; no local object was
+  published. That is little: an object has other ways to be shared, and
+  one is enough. For the nodes that `go/parser` makes, after this:
+  `ast.Walk` converts a node to an interface in a function with a type
+  parameter (`walkList`), where the methods of its type are not known;
+  and it passes the node to `fmt.Sprintf` in a branch that panics, and
+  what `fmt` prints is shared (the printer keeps it while it prints, and
+  calls its methods).
+
 ### Next
 
+0. More of what the linker knows: the receivers (a class's word has no
+   bit for the receiver, so a conversion to an interface still asks
+   whether every method of the type is known to keep its receiver, and
+   in a function with type parameters none is); what `fmt` does with
+   its arguments; reflect's allocations.
 1. Callees that are parameters: `each(head, func(it *item) {...})`
    makes what `head` leads to shared, since `each` passes it to a
    function it does not know. `each` could say "what `head` leads to
