@@ -59,7 +59,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 	if len(cand) == 0 {
 		return
 	}
-	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true })
+	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true }, b.gd.Debug.NoMove == 0)
 	if b.contents == nil {
 		b.contents = make(map[*ir.Name]*location)
 		b.sources = make(map[*ir.Name][]ir.Node)
@@ -87,6 +87,16 @@ func (b *batch) trackPointers(fn *ir.Func) {
 			})
 		}
 	}
+	// The variables that may hold what a pool returned point to what
+	// may be shared.
+	got := make(map[*ir.Name]bool)
+	for name := range cand {
+		for _, src := range srcs[name] {
+			if poolGot(src) {
+				got[find(name)] = true
+			}
+		}
+	}
 	for name := range cand {
 		root := find(name)
 		c := b.contents[root]
@@ -95,6 +105,9 @@ func (b *batch) trackPointers(fn *ir.Func) {
 				curfn:     fn,
 				loopDepth: 1,
 				attrs:     attrEscapes | attrPersists | attrMutates | attrCalls,
+			}
+			if got[root] {
+				c.attrs |= attrShares
 			}
 			b.allLocs = append(b.allLocs, c)
 			b.contents[root] = c
@@ -213,6 +226,14 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 				srcs[name] = append(srcs[name], n.Y)
 			}
 		case *ir.AssignListStmt:
+			if n.Op() == ir.OAS2DOTTYPE && len(n.Lhs) == 2 && len(n.Rhs) == 1 {
+				// x, ok := y.(T)
+				if name, ok := n.Lhs[0].(*ir.Name); ok && cand[name] {
+					srcs[name] = append(srcs[name], n.Rhs[0])
+				}
+				drop(n.Lhs[1])
+				break
+			}
 			if n.Op() == ir.OAS2 && len(n.Lhs) == len(n.Rhs) {
 				for i, l := range n.Lhs {
 					if name, ok := l.(*ir.Name); ok && cand[name] {
@@ -246,12 +267,18 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 // fresh: an allocation that alloc accepts, nil, a variable that stays in
 // cand, or a slice or the address of a part of what one of those points
 // to.
-func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func(n ir.Node) bool) {
+//
+// With got, also what sync.Pool.Get returned (poolGot): a pointer that
+// nobody else has, or to an object that is shared, which is not known
+// here (move.go).
+func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func(n ir.Node) bool, got bool) {
 	var fresh func(n ir.Node) bool
 	fresh = func(n ir.Node) bool {
 		switch n.Op() {
 		case ir.ONIL:
 			return true
+		case ir.ODOTTYPE, ir.ODOTTYPE2:
+			return got && poolGot(n)
 		case ir.OCONVNOP, ir.OPAREN:
 			switch n := n.(type) {
 			case *ir.ConvExpr:
@@ -344,7 +371,7 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 				cand[n] = true
 			}
 		}
-		dropUnfresh(cand, b.sources, unshared)
+		dropUnfresh(cand, b.sources, unshared, false)
 		for name := range cand {
 			name.Unshared |= ir.UnsharedPointee
 		}

@@ -257,6 +257,79 @@ func publishContents(p unsafe.Pointer) {
 	KeepAlive(p)
 }
 
+// Handing an object to a sync.Pool.
+//
+// An object put in a pool was shared from then on, and whoever got it
+// from the pool took a lock for every store of a slice, a string or an
+// interface in it, though it had the object to itself. Where the compiler
+// shows that the goroutine that puts an object has no way left to it
+// (cmd/compile/internal/escape, move.go), the pool hands it over: it is
+// not shared, as a pointer sent on a channel is not (chansendmove1).
+//
+// Compiled code says so with poolhandover(p) right before it calls
+// (*sync.Pool).Put, which asks poolOwned. The proof takes what Get
+// returned for an object that nobody else has, or that is shared, which
+// is what was put (handed over, or shared by poolOwned) and what New
+// returns if New only allocates (poolNewFresh); what another New
+// returns, Get shares.
+
+// poolhandover is called by compiled code before a call of
+// (*sync.Pool).Put that hands over the object p points to.
+//
+//go:nosplit
+func poolhandover(p unsafe.Pointer) {
+	getg().ownedPut = p
+}
+
+// poolOwned reports whether the object p points to, which sync.Pool.Put
+// was given, is handed over; it then shares what the object points to.
+//
+//go:linkname poolOwned sync.runtime_poolOwned
+func poolOwned(p unsafe.Pointer) bool {
+	gp := getg()
+	owned := gp.ownedPut
+	gp.ownedPut = nil
+	if !sharingEnabled {
+		return false
+	}
+	if owned == nil || owned != p {
+		// What a pool holds is the next caller of Get's alone, or
+		// shared: also in a pool that only this goroutine has,
+		// whose memory the store would not share it for.
+		publish(p)
+		return false
+	}
+	publishContents(p)
+	return true
+}
+
+// poolStoreOwned stores x, which is handed over, in a pool: without
+// sharing it, as compiled code would.
+//
+//go:linkname poolStoreOwned sync.runtime_poolStoreOwned
+func poolStoreOwned(dst *any, x any) {
+	*dst = x
+}
+
+// poolNewFresh reports whether what the function f returned to
+// sync.Pool.Get is an object that only its caller has. If not, it is
+// shared here.
+//
+//go:linkname poolNewFresh sync.runtime_poolNew
+func poolNewFresh(f func() any, x any) {
+	if !sharingEnabled {
+		return
+	}
+	fv := *(**funcval)(unsafe.Pointer(&f))
+	if fv != nil {
+		if fi := findfunc(fv.fn); fi.valid() && fi.flag&abi.FuncFlagFreshResult != 0 {
+			return
+		}
+	}
+	e := efaceOf(&x)
+	publish(e.data)
+}
+
 // publishObject shares what the newly shared object at base, in s, points
 // to. The objects still to walk are kept as pointers: the walk allocates,
 // and may be preempted for a collection.

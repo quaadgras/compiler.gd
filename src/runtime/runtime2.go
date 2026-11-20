@@ -595,6 +595,7 @@ type g struct {
 	waiting         *sudog         // sudog structures this g is waiting on (that have a valid elem ptr); in lock order
 	cgoCtxt         []uintptr      // cgo traceback context
 	labels          unsafe.Pointer // profiler labels
+	ownedPut        unsafe.Pointer // the object that the next sync.Pool.Put hands over (shared.go)
 	timer           *timer         // cached timer for time.Sleep
 	sleepWhen       int64          // when to sleep until
 	selectDone      atomic.Uint32  // are we participating in a select and did someone win the race?

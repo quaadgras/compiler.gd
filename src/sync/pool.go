@@ -105,6 +105,10 @@ func poolRaceAddr(x any) unsafe.Pointer {
 //
 //go:notear
 func (p *Pool) Put(x any) {
+	// Whether the caller hands x over, and x is not shared by being
+	// put (runtime/shared.go): asked first, so that what the caller
+	// said is not left for another Put.
+	owned := runtime_poolOwned((*[2]unsafe.Pointer)(unsafe.Pointer(&x))[1])
 	if x == nil {
 		return
 	}
@@ -118,15 +122,24 @@ func (p *Pool) Put(x any) {
 	}
 	l, _ := p.pin()
 	if l.private == nil {
-		l.private = x
+		if owned {
+			runtime_poolStoreOwned(&l.private, x)
+		} else {
+			l.private = x
+		}
 	} else {
-		l.shared.pushHead(x)
+		l.shared.pushHead(x, owned)
 	}
 	runtime_procUnpin()
 	if race.Enabled {
 		race.Enable()
 	}
 }
+
+// Implemented in runtime (shared.go).
+func runtime_poolOwned(p unsafe.Pointer) bool
+func runtime_poolStoreOwned(dst *any, x any)
+func runtime_poolNew(f func() any, x any)
 
 // Get selects an arbitrary item from the [Pool], removes it from the
 // Pool, and returns it to the caller.
@@ -163,6 +176,8 @@ func (p *Pool) Get() any {
 	}
 	if x == nil && p.New != nil {
 		x = p.New()
+		// What Get returns is the caller's alone, or shared.
+		runtime_poolNew(p.New, x)
 	}
 	return x
 }

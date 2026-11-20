@@ -38,20 +38,29 @@ import (
 // until then that the object is not shared, which is so: they are not
 // used after the send.
 
-// A moveSend is a send that hands over the objects whose contents are
-// at c, unless c.moveHeld.
+// A moveSend is a send, or a call of (*sync.Pool).Put, that hands over
+// the objects that x points to, whose contents are at c, unless
+// c.moveHeld.
 type moveSend struct {
-	n *ir.SendStmt
+	n ir.Node
+	x *ir.Name
 	c *location
 }
 
 // moveCandidate returns the contents of the tracked variable that n
 // sends, if n may hand its object over.
 func (e *escape) moveCandidate(n *ir.SendStmt) *location {
+	return e.handOver(n, n.Value, n.Chan)
+}
+
+// handOver returns the contents of the tracked variable that val is, if
+// the statement n, which gives it away, may hand its object over. The
+// statement also evaluates other.
+func (e *escape) handOver(n, val, other ir.Node) *location {
 	if e.gd.Debug.NoShare != 0 || e.gd.Debug.NoMove != 0 || e.contents == nil {
 		return nil
 	}
-	x, ok := n.Value.(*ir.Name)
+	x, ok := val.(*ir.Name)
 	if !ok || x.Op() != ir.ONAME || !x.Type().IsPtr() {
 		return nil
 	}
@@ -68,10 +77,86 @@ func (e *escape) moveCandidate(n *ir.SendStmt) *location {
 			class[name] = true
 		}
 	}
-	if !unusedAfter(e.curfn, n, class) {
+	if refers(other, class) || !unusedAfter(e.curfn, n, class) {
 		return nil
 	}
+	e.moves = append(e.moves, moveSend{n, x, c})
+	c.moveCand = true
 	return c
+}
+
+// poolPut returns the contents of the variable that the call, of fns,
+// puts in a sync.Pool, if the call may hand its object over.
+func (e *escape) poolPut(call *ir.CallExpr, fns []*ir.Name, recv ir.Node, args []ir.Node) *location {
+	if len(fns) != 1 || len(args) != 1 || !isPoolMethod(fns[0], "Put") {
+		return nil
+	}
+	val := args[0]
+	for val.Op() == ir.OCONVIFACE || val.Op() == ir.OCONVNOP || val.Op() == ir.OPAREN {
+		switch v := val.(type) {
+		case *ir.ConvExpr:
+			val = v.X
+		case *ir.ParenExpr:
+			val = v.X
+		}
+	}
+	return e.handOver(call, val, recv)
+}
+
+func isPoolMethod(fn *ir.Name, name string) bool {
+	sym := fn.Sym()
+	return sym != nil && sym.Pkg != nil && sym.Pkg.Path == "sync" && sym.Name == "(*Pool)."+name
+}
+
+// poolGot reports whether n is what a sync.Pool returned, as a pointer:
+// p.Get().(*T).
+func poolGot(n ir.Node) bool {
+	for n.Op() == ir.OCONVNOP || n.Op() == ir.OPAREN {
+		switch v := n.(type) {
+		case *ir.ConvExpr:
+			n = v.X
+		case *ir.ParenExpr:
+			n = v.X
+		}
+	}
+	if n.Op() != ir.ODOTTYPE && n.Op() != ir.ODOTTYPE2 {
+		return false
+	}
+	ta := n.(*ir.TypeAssertExpr)
+	if !ta.Type().IsPtr() {
+		return false
+	}
+	call, ok := ta.X.(*ir.CallExpr)
+	if !ok || call.Op() != ir.OCALLFUNC {
+		return false
+	}
+	fn := ir.StaticCalleeName(call.Fun)
+	return fn != nil && isPoolMethod(fn, "Get")
+}
+
+// markFresh notes whether fn does nothing but return the address of an
+// object that it allocates (ir.Func.FreshResult).
+func markFresh(fn *ir.Func) {
+	if fn.Type().NumResults() != 1 || len(fn.Body) != 1 {
+		return
+	}
+	ret, ok := fn.Body[0].(*ir.ReturnStmt)
+	if !ok || len(ret.Results) != 1 || len(ret.Init()) != 0 {
+		return
+	}
+	n := ret.Results[0]
+	for n.Op() == ir.OCONVIFACE || n.Op() == ir.OCONVNOP || n.Op() == ir.OPAREN {
+		switch v := n.(type) {
+		case *ir.ConvExpr:
+			n = v.X
+		case *ir.ParenExpr:
+			n = v.X
+		}
+	}
+	switch n.Op() {
+	case ir.ONEW, ir.OPTRLIT:
+		fn.FreshResult = true
+	}
 }
 
 // holdsMoved reports whether root, to which the address of the contents
@@ -99,10 +184,19 @@ func (b *batch) holdsMoved(root, c *location) bool {
 // markMoves records the sends that hand over.
 func (b *batch) markMoves() {
 	for _, m := range b.moves {
-		if !m.c.moveHeld {
-			m.n.Move = true
+		if m.c.moveHeld {
+			continue
+		}
+		switch n := m.n.(type) {
+		case *ir.SendStmt:
+			n.Move = true
 			if b.gd.Flag.LowerM != 0 {
-				b.gd.WarnfAt(m.n.Pos(), "%v is handed over by the send", m.n.Value)
+				b.gd.WarnfAt(n.Pos(), "%v is handed over by the send", m.x)
+			}
+		case *ir.CallExpr:
+			n.HandOver = m.x
+			if b.gd.Flag.LowerM != 0 {
+				b.gd.WarnfAt(n.Pos(), "%v is handed over to the pool", m.x)
 			}
 		}
 	}
@@ -122,10 +216,7 @@ func refers(n ir.Node, class map[*ir.Name]bool) bool {
 // unusedAfter reports whether no variable of class is used once the
 // statement send of fn has run, in the syntax: no statement that may
 // follow it, up to a return, mentions one. It is false whenever that is not plain.
-func unusedAfter(fn *ir.Func, send *ir.SendStmt, class map[*ir.Name]bool) bool {
-	if refers(send.Chan, class) {
-		return false
-	}
+func unusedAfter(fn *ir.Func, send ir.Node, class map[*ir.Name]bool) bool {
 	// A jump may lead anywhere, unless it is the return of an inlined
 	// call, to the label that ends it; a deferred call runs after the
 	// send.
@@ -174,7 +265,7 @@ func unusedAfter(fn *ir.Func, send *ir.SendStmt, class map[*ir.Name]bool) bool {
 		if n == nil {
 			return false, true, false
 		}
-		if n == ir.Node(send) {
+		if n == send {
 			return true, true, false
 		}
 		switch n := n.(type) {

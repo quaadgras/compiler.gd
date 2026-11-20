@@ -30,7 +30,7 @@ func NewPoolDequeue(n int) PoolDequeue {
 }
 
 func (d *poolDequeue) PushHead(val any) bool {
-	return d.pushHead(val)
+	return d.pushHead(val, false)
 }
 
 func (d *poolDequeue) PopHead() (any, bool) {
@@ -46,7 +46,7 @@ func NewPoolChain() PoolDequeue {
 }
 
 func (c *poolChain) PushHead(val any) bool {
-	c.pushHead(val)
+	c.pushHead(val, false)
 	return true
 }
 

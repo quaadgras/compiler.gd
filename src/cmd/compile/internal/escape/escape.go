@@ -216,6 +216,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 			ir.Dump(s, fn)
 		}
 		b.initFunc(fn)
+		markFresh(fn)
 	}
 	for _, fn := range fns {
 		if !fn.IsClosure() {

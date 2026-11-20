@@ -118,6 +118,12 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for _, arg := range args {
 				argument(e.discardHole(), arg)
 			}
+		} else if e.poolPut(call, fns, recvArg, args) != nil {
+			// The object goes to the heap, and what it holds to
+			// where another goroutine reaches it: whether it is
+			// handed over is known when the graph is solved.
+			argument(e.discardHole(), recvArg)
+			argument(e.teeHole(e.moveHole().note(e.gd, call, "put (handed over)"), e.shareHole().deref(e.gd, call, "put (contents)")), args[0])
 		} else if isEscapeNonString(fns, fntype) {
 			// internal/abi.EscapeNonString forces its argument to
 			// the heap if it contains a non-string pointer. This is

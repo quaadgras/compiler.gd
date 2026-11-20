@@ -583,6 +583,14 @@ func walkCall(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		reflectdata.MarkUsedIfaceMethod(gd, n)
 	}
 
+	if n.HandOver != nil {
+		// Say that the object is handed over to the pool, right
+		// before Put asks (runtime.poolhandover).
+		p := typecheck.ConvNop(gd, n.HandOver, types.Types[types.TUNSAFEPTR])
+		init.Append(mkcall(gd, "poolhandover", nil, init, p))
+		n.HandOver = nil
+	}
+
 	if n.Op() == ir.OCALLFUNC && n.Fun.Op() == ir.OCLOSURE {
 		directClosureCall(gd, n)
 	}

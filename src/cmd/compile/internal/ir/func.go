@@ -152,6 +152,10 @@ type Func struct {
 	// otherwise gc.prepareFunc → ir.InitLSym fires twice.
 	GdForwarderSynthRegistered bool
 
+	// FreshResult reports that the function only returns the address
+	// of an object that it allocates (abi.FuncFlagFreshResult).
+	FreshResult bool
+
 	flags bitset16
 
 	// ABI is a function's "definition" ABI. This is the ABI that

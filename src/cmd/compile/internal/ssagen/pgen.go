@@ -6,6 +6,7 @@ package ssagen
 
 import (
 	"fmt"
+	"internal/abi"
 	"internal/buildcfg"
 	"os"
 	"slices"
@@ -327,6 +328,9 @@ func Compile(gd *base.Invocation, fn *ir.Func, w *Worker, profile *pgoir.Profile
 	}
 
 	pp.Flush(gd) // assemble, fill in boilerplate, etc.
+	if fn.FreshResult {
+		fn.LSym.Func().FuncFlag |= abi.FuncFlagFreshResult
+	}
 
 	// The function is assembled and its tables are written. What they
 	// were made from points to its instructions: without it, those that

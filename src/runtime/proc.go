@@ -4579,6 +4579,7 @@ func gdestroy(gp *g) {
 	gp.bubble = nil
 	gp.fipsOnlyBypass = false
 	gp.leakReported = false
+	gp.ownedPut = nil
 	gp.secret = 0
 
 	if gcBlackenEnabled != 0 && gp.gcAssistBytes > 0 {

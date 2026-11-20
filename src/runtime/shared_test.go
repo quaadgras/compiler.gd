@@ -7,6 +7,8 @@ package runtime_test
 import (
 	"reflect"
 	"runtime"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -974,5 +976,68 @@ func TestSharedHandOver(t *testing.T) {
 	close(c)
 	if r := <-res; r.root {
 		t.Errorf("nil received from a closed channel is shared")
+	}
+}
+
+var handPool = sync.Pool{New: func() any { return new(sharedNode) }}
+
+//go:noinline
+func handPoolMake() *sharedNode { return new(sharedNode) }
+
+// handPoolOther's New does more than allocate: what Get returns is shared.
+var handPoolOther = sync.Pool{New: func() any { return handPoolMake() }}
+
+// handPoolCycle gets a node, fills it in and puts it back, without
+// keeping a way to it: the put hands it over.
+//
+//go:noinline
+func handPoolCycle(tail *sharedNode) (shared, tailShared bool) {
+	n := handPool.Get().(*sharedNode)
+	shared = isShared(n)
+	tailShared = n.next != nil && isShared(n.next)
+	n.next = tail
+	n.i = "x"
+	n.s = append(n.s[:0], nil)
+	handPool.Put(n)
+	return
+}
+
+// handPoolKeep puts a node back and returns it.
+//
+//go:noinline
+func handPoolKeep() *sharedNode {
+	n := handPool.Get().(*sharedNode)
+	handPool.Put(n)
+	return n
+}
+
+// TestSharedPool checks that an object that is put in a pool by a
+// function that keeps no way to it is not shared when the pool gives it
+// out again, while what it points to is; that it is shared if the
+// function keeps one; and that a pool whose New does not just allocate
+// gives out shared objects.
+func TestSharedPool(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	tail := new(sharedNode)
+	if shared, _ := handPoolCycle(tail); shared {
+		t.Errorf("a new object from a pool whose New only allocates is shared")
+	}
+	wantShared(t, "pointed to by an object handed to a pool", tail, true)
+	for i := 0; i < 3; i++ {
+		if shared, tailShared := handPoolCycle(tail); shared || !tailShared {
+			t.Errorf("round %d: an object handed back to the pool is shared (%v), or what it points to is not (%v)", i, shared, !tailShared)
+		}
+	}
+	kept := handPoolKeep()
+	wantShared(t, "put in a pool and kept", kept, true)
+	if n := handPool.Get().(*sharedNode); n == kept {
+		wantShared(t, "from the pool, after a put that kept it", n, true)
+	}
+	if n := handPoolOther.Get().(*sharedNode); !isShared(n) {
+		t.Errorf("an object from a pool whose New calls a function is not shared")
 	}
 }

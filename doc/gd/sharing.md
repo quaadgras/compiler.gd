@@ -76,7 +76,32 @@ its life.
   and slices the message points to, which are shared, and the tests of
   memory that is not). Not covered yet: a pointer that was itself
   received and is sent on, a value sent that is not a plain pointer, a
-  send in a `select`, `sync.Pool`, and the arguments of a `go` statement.
+  send in a `select`, and the arguments of a `go` statement. (Receiving
+  is not a source yet for a reason: a channel that only its goroutine
+  has may hold a pointer that the goroutine still has elsewhere.)
+- `sync.Pool.Put`: what a pool holds is shared, **unless the put hands
+  it over**, by the same proof as a send: the variable put only ever
+  holds allocations of the function or what `Get` returned
+  (`p.Get().(*T)`), it is not mentioned again, and nothing else holds
+  the object. Compiled code then calls `runtime.poolhandover` right
+  before `Put`, which stores the object without sharing it and shares
+  what it points to.
+
+  The proof takes what `Get` returns for an object that nobody else
+  has, or that is shared. That holds for what was put (handed over, or
+  else shared by `Put`, also in a pool that only one goroutine has) and
+  for what `New` returns if `New` does nothing but return an allocation
+  (`return new(T)`, `return &T{...}`): the compiler marks such a
+  function (`abi.FuncFlagFreshResult`) and `Get` looks the mark up.
+  What any other `New` returns, `Get` shares: it could be kept
+  elsewhere, in an object that is itself handed around.
+
+  A buffer taken from a pool, appended to 64 times and put back took
+  1.0 µs and takes 0.45 µs (0.07 µs with no sharing at all). Only 3 of
+  the standard library's hundred or so calls of `Put` are shown to hand
+  over: most are in a helper that is given the object (`func (p *pp)
+  free()`), or deferred, and get what `Get` returned from another
+  helper. Those need the proof to cross calls.
 - A store of a pointer in a global or in a shared object: the compiler's
   barrier, below.
 - The runtime's own stores: `sync/atomic`'s pointer operations, the copies
