@@ -888,9 +888,9 @@ TEXT ·asmcgocall_no_g(SB),NOSPLIT,$32-16
 // asmcgocall_landingpad calls AX with BX as argument.
 // Must be called on the system stack.
 TEXT ·asmcgocall_landingpad(SB),NOSPLIT,$0-0
-#ifdef GOOS_ape
-	// A GOOS=ape program on Windows calls as on Windows.
-	CMPB	runtime·apehost(SB), $const_apeWindows
+#ifdef GOOS_portable
+	// A GOOS=portable program on Windows calls as on Windows.
+	CMPB	runtime·portablehost(SB), $const_portableWindows
 	JNE	landingpadUnix
 	ADJSP	$32
 	MOVQ	BX, CX
@@ -1017,7 +1017,7 @@ nosave:
 	MOVL	AX, ret+16(FP)
 	RET
 
-#ifdef GOOS_ape
+#ifdef GOOS_portable
 GLOBL zeroTLS<>(SB),RODATA,$const_tlsSize
 #endif
 #ifdef GOOS_windows
@@ -1057,7 +1057,7 @@ loadg:
 	CMPQ	CX, $0
 	JEQ	2(PC)
 #endif
-#ifdef GOOS_ape
+#ifdef GOOS_portable
 	// (On Windows, a thread Go did not make has no TLS pointer.)
 	MOVL	$0, BX
 	CMPQ	CX, $0
@@ -1070,8 +1070,8 @@ loadg:
 	MOVQ	BX, savedm-8(SP)	// saved copy of oldm
 	JMP	havem
 needm:
-#ifdef GOOS_ape
-	CMPB	runtime·apehost(SB), $const_apeWindows
+#ifdef GOOS_portable
+	CMPB	runtime·portablehost(SB), $const_portableWindows
 	JNE	needmUnix
 	MOVQ	$zeroTLS<>(SB), DI
 	CALL	runtime·settls(SB)
@@ -1209,8 +1209,8 @@ havem:
 dropm:
 	MOVQ	$runtime·dropm(SB), AX
 	CALL	AX
-#ifdef GOOS_ape
-	CMPB	runtime·apehost(SB), $const_apeWindows
+#ifdef GOOS_portable
+	CMPB	runtime·portablehost(SB), $const_portableWindows
 	JNE	dropmUnix
 	XORQ	DI, DI
 	CALL	runtime·settls(SB)

@@ -72,8 +72,8 @@ const (
 	// to each stack below the usual guard area for OS-specific
 	// purposes like signal handling. Used on Windows, Plan 9,
 	// and iOS because they do not use a separate stack.
-	// (A GOOS=ape program may run on Windows.)
-	stackSystem = (goos.IsWindows|goos.IsApe)*4096 + goos.IsPlan9*512 + goos.IsIos*goarch.IsArm64*1024
+	// (A GOOS=portable program may run on Windows.)
+	stackSystem = (goos.IsWindows|goos.IsPortable)*4096 + goos.IsPlan9*512 + goos.IsIos*goarch.IsArm64*1024
 
 	// The minimum size of stack used by Go code
 	stackMin = 2048
@@ -92,8 +92,8 @@ const (
 	// stackNosplit is the maximum number of bytes that a chain of NOSPLIT
 	// functions can use.
 	// This arithmetic must match that in cmd/internal/objabi/stack.go:StackNosplit.
-	// (And more under GOOS=ape: see cmd/internal/objabi's StackNosplit.)
-	stackNosplit = abi.StackNosplitBase*sys.StackGuardMultiplier + 128*goos.IsApe
+	// (And more under GOOS=portable: see cmd/internal/objabi's StackNosplit.)
+	stackNosplit = abi.StackNosplitBase*sys.StackGuardMultiplier + 128*goos.IsPortable
 
 	// The stack guard is a pointer this many bytes above the
 	// bottom of the stack.

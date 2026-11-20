@@ -88,7 +88,7 @@ var okgoarch = []string{
 
 // The known operating systems.
 var okgoos = []string{
-	"ape",
+	"portable",
 	"darwin",
 	"dragonfly",
 	"illumos",
@@ -1879,8 +1879,8 @@ var cgoEnabled = map[string]bool{
 	"ios/amd64":       true,
 	"js/wasm":         false,
 	"wasip1/wasm":     false,
-	"ape/amd64":       false,
-	"ape/arm64":       false,
+	"portable/amd64":       false,
+	"portable/arm64":       false,
 	"netbsd/386":      true,
 	"netbsd/amd64":    true,
 	"netbsd/arm":      true,

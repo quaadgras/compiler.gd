@@ -1941,13 +1941,13 @@ func (ctxt *Context) matchAuto(text string, allTags map[string]bool) bool {
 }
 
 func (ctxt *Context) eval(x constraint.Expr, allTags map[string]bool) bool {
-	if ctxt.GOOS == "ape" {
-		// A file builds for ape if it builds for every host ape runs on:
+	if ctxt.GOOS == "portable" {
+		// A file builds for portable if it builds for every host portable runs on:
 		// every one there is, also when the program is for some of
-		// them ($GOAPEHOSTS), so that what is a host's own does not
+		// them ($GOPORTABLEHOSTS), so that what is a host's own does not
 		// depend on which other hosts the program has.
-		for _, host := range buildcfg.APEAllHosts[ctxt.GOARCH] {
-			if !x.Eval(func(tag string) bool { return ctxt.matchAPETag(tag, host, allTags) }) {
+		for _, host := range buildcfg.PortableAllHosts[ctxt.GOARCH] {
+			if !x.Eval(func(tag string) bool { return ctxt.matchPortableTag(tag, host, allTags) }) {
 				return false
 			}
 		}
@@ -1956,9 +1956,9 @@ func (ctxt *Context) eval(x constraint.Expr, allTags map[string]bool) bool {
 	return x.Eval(func(tag string) bool { return ctxt.matchTag(tag, allTags) })
 }
 
-// matchAPETag reports whether tag matches when building for ape on host.
-func (ctxt *Context) matchAPETag(tag, host string, allTags map[string]bool) bool {
-	if tag == "ape" {
+// matchPortableTag reports whether tag matches when building for portable on host.
+func (ctxt *Context) matchPortableTag(tag, host string, allTags map[string]bool) bool {
+	if tag == "portable" {
 		if allTags != nil {
 			allTags[tag] = true
 		}

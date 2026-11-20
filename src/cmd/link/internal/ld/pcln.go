@@ -314,11 +314,11 @@ func walkFuncs(ctxt *Link, funcs []loader.Sym, f func(loader.Sym)) {
 }
 
 // funcName is the name of a function in the function name table: under
-// GOOS=ape, a host copy's is the name it was made from.
+// GOOS=portable, a host copy's is the name it was made from.
 func funcName(ctxt *Link, s loader.Sym) string {
 	name := ctxt.loader.SymName(s)
-	if ctxt.HeadType == objabi.Hape {
-		name = objabi.APEDisplayName(name)
+	if ctxt.HeadType == objabi.Hportable {
+		name = objabi.PortableDisplayName(name)
 	}
 	return name
 }

@@ -12,8 +12,8 @@ import (
 func StackNosplit(race bool) int {
 	// This arithmetic must match that in runtime/stack.go:stackNosplit.
 	n := abi.StackNosplitBase * stackGuardMultiplier(race)
-	if buildcfg.GOOS == "ape" {
-		// A GOOS=ape program's functions that differ between its
+	if buildcfg.GOOS == "portable" {
+		// A GOOS=portable program's functions that differ between its
 		// hosts are called through functions that choose the host's,
 		// which have frames, and the linker counts every host's
 		// function in a chain, whichever host the chain is of.

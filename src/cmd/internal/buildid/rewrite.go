@@ -6,7 +6,7 @@ package buildid
 
 import (
 	"bytes"
-	"cmd/internal/apepack"
+	"cmd/internal/portpack"
 	"cmd/internal/codesign"
 	imacho "cmd/internal/macho"
 	"crypto/sha256"
@@ -112,10 +112,10 @@ func Rewrite(w io.WriterAt, pos []int64, id string) error {
 	if err := resign(w, w.(io.Reader)); err != nil {
 		return err
 	}
-	// Likewise of the Mach-O images in the one file of a GOOS=ape
+	// Likewise of the Mach-O images in the one file of a GOOS=portable
 	// program.
 	if ra, ok := w.(io.ReaderAt); ok {
-		if secs, ok := apepack.Images(ra); ok {
+		if secs, ok := portpack.Images(ra); ok {
 			for _, s := range secs {
 				r := io.NewSectionReader(ra, s.Off, s.Size)
 				if err := resign(&offsetWriterAt{w, s.Off}, r); err != nil {

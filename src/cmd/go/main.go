@@ -104,8 +104,8 @@ func main() {
 	}
 	handleChdirFlag()
 	toolchain.Select()
-	if buildcfg.APEError != nil {
-		fmt.Fprintf(os.Stderr, "go: %v\n", buildcfg.APEError)
+	if buildcfg.PortableError != nil {
+		fmt.Fprintf(os.Stderr, "go: %v\n", buildcfg.PortableError)
 		os.Exit(2)
 	}
 

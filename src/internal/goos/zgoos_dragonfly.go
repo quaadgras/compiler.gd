@@ -8,7 +8,7 @@ const GOOS = `dragonfly`
 
 const IsAix = 0
 const IsAndroid = 0
-const IsApe = 0
+const IsPortable = 0
 const IsDarwin = 0
 const IsDragonfly = 1
 const IsFreebsd = 0

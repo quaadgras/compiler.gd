@@ -60,8 +60,8 @@ func CanUse1InsnTLS(ctxt *obj.Link) bool {
 	}
 
 	switch ctxt.Headtype {
-	case objabi.Hplan9, objabi.Hwindows, objabi.Hape:
-		// GOOS=ape finds g as Windows does, on every host: the word at
+	case objabi.Hplan9, objabi.Hwindows, objabi.Hportable:
+		// GOOS=portable finds g as Windows does, on every host: the word at
 		// GS:runtime.tls_g points at m.tls, which holds g.
 		return false
 	case objabi.Hlinux, objabi.Hfreebsd:
@@ -165,14 +165,14 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	//	MOVQ TLS, BX
 	// to
 	//	MOVQ runtime.tls_g(SB), BX
-	if (isAndroid() || ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hape) &&
+	if (isAndroid() || ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hportable) &&
 		(p.As == AMOVQ || p.As == AMOVL) && p.From.Type == obj.TYPE_REG && p.From.Reg == REG_TLS && p.To.Type == obj.TYPE_REG && REG_AX <= p.To.Reg && p.To.Reg <= REG_R15 {
 		p.From.Type = obj.TYPE_MEM
 		p.From.Name = obj.NAME_EXTERN
 		p.From.Reg = REG_NONE
 		p.From.Sym = ctxt.Lookup("runtime.tls_g")
 		p.From.Index = REG_NONE
-		if ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hape {
+		if ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hportable {
 			// Windows requires an additional indirection
 			// to retrieve the TLS pointer,
 			// as runtime.tls_g contains the TLS offset from GS or FS.
@@ -197,7 +197,7 @@ func progedit(ctxt *obj.Link, p *obj.Prog, newprog obj.ProgAlloc) {
 	}
 
 	// TODO: Remove.
-	if (ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hape) && ctxt.Arch.Family == sys.AMD64 || ctxt.Headtype == objabi.Hplan9 {
+	if (ctxt.Headtype == objabi.Hwindows || ctxt.Headtype == objabi.Hportable) && ctxt.Arch.Family == sys.AMD64 || ctxt.Headtype == objabi.Hplan9 {
 		if p.From.Scale == 1 && p.From.Index == REG_TLS {
 			p.From.Scale = 2
 		}

@@ -123,21 +123,21 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				return
 			}
 
-			if apeDarwinHost(ctxt) && apeDarwinLib(lib) {
+			if portableDarwinHost(ctxt) && portableDarwinLib(lib) {
 				// darwin's loader binds darwin's imports.
 				if before, _, found := strings.Cut(remote, "#"); found {
 					remote = before
 				}
-				apeDarwinImport(ctxt, local, remote, lib)
+				portableDarwinImport(ctxt, local, remote, lib)
 				continue
 			}
-			if ctxt.HeadType == objabi.Hape {
+			if ctxt.HeadType == objabi.Hportable {
 				// Another host's imports, which the program never
 				// uses where it runs as this executable: a Windows
 				// import is a word of zero no code reads; code calls
 				// a darwin one, which is a trap.
-				if apeDarwinLib(lib) {
-					apeTrap(ctxt, local)
+				if portableDarwinLib(lib) {
+					portableTrap(ctxt, local)
 				}
 				continue
 			}
@@ -498,9 +498,9 @@ func (ctxt *Link) addexport() {
 	}
 }
 
-// apeTrap defines the symbol name, if nothing does, as a function that
-// traps: another GOOS=ape host's import, which code of that host calls.
-func apeTrap(ctxt *Link, name string) {
+// portableTrap defines the symbol name, if nothing does, as a function that
+// traps: another GOOS=portable host's import, which code of that host calls.
+func portableTrap(ctxt *Link, name string) {
 	l := ctxt.loader
 	s := l.LookupOrCreateSym(name, 0)
 	if st := l.SymType(s); st != 0 && st != sym.SXREF {

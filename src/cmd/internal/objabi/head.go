@@ -49,15 +49,15 @@ const (
 	Hwasip1
 	Hwindows
 	Haix
-	Hape
+	Hportable
 )
 
 func (h *HeadType) Set(s string) error {
 	switch s {
 	case "aix":
 		*h = Haix
-	case "ape":
-		*h = Hape
+	case "portable":
+		*h = Hportable
 	case "darwin", "ios":
 		*h = Hdarwin
 	case "dragonfly":
@@ -90,8 +90,8 @@ func (h HeadType) String() string {
 	switch h {
 	case Haix:
 		return "aix"
-	case Hape:
-		return "ape"
+	case Hportable:
+		return "portable"
 	case Hdarwin:
 		return "darwin"
 	case Hdragonfly:

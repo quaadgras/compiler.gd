@@ -110,7 +110,7 @@ func asmb2(ctxt *Link) {
 	case objabi.Hdragonfly,
 		objabi.Hfreebsd,
 		objabi.Hlinux,
-		objabi.Hape,
+		objabi.Hportable,
 		objabi.Hnetbsd,
 		objabi.Hopenbsd,
 		objabi.Hsolaris:

@@ -16,7 +16,7 @@ package os
 // The main use case is finding resources located relative to an
 // executable.
 func Executable() (string, error) {
-	if file := apeFile(); file != "" {
+	if file := portableFile(); file != "" {
 		return file, nil
 	}
 	return executable()

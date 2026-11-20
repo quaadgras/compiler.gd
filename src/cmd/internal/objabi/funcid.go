@@ -52,17 +52,17 @@ func GetFuncID(name string, isWrapper bool) abi.FuncID {
 		return abi.FuncIDWrapper
 	}
 	if strings.HasPrefix(name, "runtime.") {
-		if id, ok := funcIDs[APEUnprefixed(name[len("runtime."):])]; ok {
+		if id, ok := funcIDs[PortableUnprefixed(name[len("runtime."):])]; ok {
 			return id
 		}
 	}
 	return abi.FuncIDNormal
 }
 
-// APEUnprefixed returns the name a GOOS=ape host copy's name
+// PortableUnprefixed returns the name a GOOS=portable host copy's name
 // (linux_sigpanic, Linux_Stat) was made from, or name.
-func APEUnprefixed(name string) string {
-	for _, h := range allAPEHosts {
+func PortableUnprefixed(name string) string {
+	for _, h := range allPortableHosts {
 		for _, p := range [...]string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
 			if rest, ok := strings.CutPrefix(name, p); ok && rest != "" {
 				return rest
@@ -72,10 +72,10 @@ func APEUnprefixed(name string) string {
 	return name
 }
 
-// APEDisplayName returns the symbol name of a GOOS=ape host copy's
+// PortableDisplayName returns the symbol name of a GOOS=portable host copy's
 // function as people know it: runtime.linux_sigpanic is
 // runtime.sigpanic, syscall.(*Linux_Stat_t).f is syscall.(*Stat_t).f.
-func APEDisplayName(name string) string {
+func PortableDisplayName(name string) string {
 	start := strings.LastIndexByte(name, '/') + 1
 	parts := strings.Split(name[start:], ".")
 	changed := false
@@ -86,7 +86,7 @@ func APEDisplayName(name string) string {
 			lead += p[:1]
 			p = p[1:]
 		}
-		if u := APEUnprefixed(p); u != p {
+		if u := PortableUnprefixed(p); u != p {
 			parts[i] = lead + u
 			changed = true
 		}
@@ -97,15 +97,15 @@ func APEDisplayName(name string) string {
 	return name[:start] + strings.Join(parts, ".")
 }
 
-// APEHosts is the systems a GOOS=ape program can run on, by GOARCH
-// (buildcfg.APEAllHosts; buildcfg.APEHosts is those of this build).
-var APEHosts = buildcfg.APEAllHosts
+// PortableHosts is the systems a GOOS=portable program can run on, by GOARCH
+// (buildcfg.PortableAllHosts; buildcfg.PortableHosts is those of this build).
+var PortableHosts = buildcfg.PortableAllHosts
 
-// allAPEHosts is every architecture's APEHosts.
-var allAPEHosts = func() []string {
+// allPortableHosts is every architecture's PortableHosts.
+var allPortableHosts = func() []string {
 	var all []string
-	for _, arch := range slices.Sorted(maps.Keys(APEHosts)) {
-		hosts := APEHosts[arch]
+	for _, arch := range slices.Sorted(maps.Keys(PortableHosts)) {
+		hosts := PortableHosts[arch]
 		for _, h := range hosts {
 			if !slices.Contains(all, h) {
 				all = append(all, h)

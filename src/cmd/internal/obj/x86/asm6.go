@@ -2568,7 +2568,7 @@ func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 
 			case objabi.Hdragonfly,
 				objabi.Hfreebsd,
-				objabi.Hape,
+				objabi.Hportable,
 				objabi.Hnetbsd,
 				objabi.Hopenbsd,
 				objabi.Hsolaris:
@@ -2591,7 +2591,7 @@ func prefixof(ctxt *obj.Link, a *obj.Addr) int {
 		return 0x26
 
 	case REG_TLS:
-		if ctxt.Flag_shared && ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hape {
+		if ctxt.Flag_shared && ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hportable {
 			// When building for inclusion into a shared library, an instruction of the form
 			//     MOV off(CX)(TLS*1), AX
 			// becomes
@@ -3744,7 +3744,7 @@ func (ab *AsmBuf) asmandsz(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog, a *obj
 
 	if REG_AX <= base && base <= REG_R15 {
 		if a.Index == REG_TLS && !ctxt.Flag_shared && !isAndroid() &&
-			ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hape {
+			ctxt.Headtype != objabi.Hwindows && ctxt.Headtype != objabi.Hportable {
 			rel = obj.Reloc{}
 			rel.Type = objabi.R_TLS_LE
 			rel.Siz = 4
@@ -5154,7 +5154,7 @@ func (ab *AsmBuf) doasm(ctxt *obj.Link, cursym *obj.LSym, p *obj.Prog) {
 					default:
 						log.Fatalf("unknown TLS base location for %v", ctxt.Headtype)
 
-					case objabi.Hlinux, objabi.Hfreebsd, objabi.Hape:
+					case objabi.Hlinux, objabi.Hfreebsd, objabi.Hportable:
 						if !ctxt.Flag_shared {
 							log.Fatalf("unknown TLS base location for linux/freebsd without -shared")
 						}

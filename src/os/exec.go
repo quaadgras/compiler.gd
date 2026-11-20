@@ -272,7 +272,7 @@ func StartProcess(name string, argv []string, attr *ProcAttr) (*Process, error) 
 	testlog.Open(name)
 	p, err := startProcess(name, argv, attr)
 	if err != nil {
-		if sh, shargv := apeShell(name, argv, attr, err); sh != "" {
+		if sh, shargv := portableShell(name, argv, attr, err); sh != "" {
 			return startProcess(sh, shargv, attr)
 		}
 	}

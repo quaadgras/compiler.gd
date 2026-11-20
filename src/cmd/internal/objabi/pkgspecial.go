@@ -107,14 +107,14 @@ var allowAsmABIPkgs = []string{
 
 // LookupPkgSpecial returns special build properties for the given package path.
 func LookupPkgSpecial(pkgPath string) PkgSpecial {
-	return pkgSpecialsOnce()[APEVariantOf(pkgPath)]
+	return pkgSpecialsOnce()[PortableVariantOf(pkgPath)]
 }
 
-// APEVariantOf returns the path of the package that pkgPath is a GOOS=ape
-// host variant of (ape/HOST/PATH is PATH built as HOST builds it), or
+// PortableVariantOf returns the path of the package that pkgPath is a GOOS=portable
+// host variant of (portable/HOST/PATH is PATH built as HOST builds it), or
 // pkgPath itself.
-func APEVariantOf(pkgPath string) string {
-	if rest, ok := strings.CutPrefix(pkgPath, "ape/"); ok {
+func PortableVariantOf(pkgPath string) string {
+	if rest, ok := strings.CutPrefix(pkgPath, "portable/"); ok {
 		if _, p, ok := strings.Cut(rest, "/"); ok {
 			return p
 		}

@@ -109,11 +109,11 @@ TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0
 	BL	·tlsinit(SB)
 	ADD	$32, RSP
 #endif
-#ifdef TLS_ape
+#ifdef TLS_portable
 	// Initialize TLS on darwin.
-	MOVBU	runtime·apehost(SB), R0
-	CMP	$const_apeDarwin, R0
-	BNE	apeNoTLS
+	MOVBU	runtime·portablehost(SB), R0
+	CMP	$const_portableDarwin, R0
+	BNE	portableNoTLS
 	MOVD	ZR, g
 	SUB	$32, RSP
 	MRS_TPIDR_R0
@@ -123,7 +123,7 @@ TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0
 	MOVD	R2, 8(RSP)              // arg1: &tlsg
 	BL	·darwin_tlsinit(SB)
 	ADD	$32, RSP
-apeNoTLS:
+portableNoTLS:
 #endif
 
 	// create istack out of the given (operating system) stack.

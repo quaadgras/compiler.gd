@@ -777,9 +777,9 @@ type mPadded struct {
 	// bits of muintptr values available for flags, as required by
 	// lock_spinbit.go.
 	//
-	// (A GOOS=ape program's m has every host's mOS, and is in the
+	// (A GOOS=portable program's m has every host's mOS, and is in the
 	// 4096-byte size class.)
-	_ [(1 - goarch.IsWasm) * (2048 + 2048*goos.IsApe - mallocHeaderSize - mRedZoneSize - unsafe.Sizeof(m{}))]byte
+	_ [(1 - goarch.IsWasm) * (2048 + 2048*goos.IsPortable - mallocHeaderSize - mRedZoneSize - unsafe.Sizeof(m{}))]byte
 }
 
 // mWeakPointer is a "weak" pointer to an M. A weak pointer for each M is

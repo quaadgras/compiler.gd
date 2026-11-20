@@ -10,8 +10,8 @@ package platform
 var List = []OSArch{
 	{"aix", "ppc64"},
 	{"android", "386"},
-	{"ape", "amd64"},
-	{"ape", "arm64"},
+	{"portable", "amd64"},
+	{"portable", "arm64"},
 	{"android", "amd64"},
 	{"android", "arm"},
 	{"android", "arm64"},
@@ -64,8 +64,8 @@ var List = []OSArch{
 var distInfo = map[OSArch]osArchInfo{
 	{"aix", "ppc64"}:       {CgoSupported: true},
 	{"android", "386"}:     {CgoSupported: true},
-	{"ape", "amd64"}:       {},
-	{"ape", "arm64"}:       {},
+	{"portable", "amd64"}:       {},
+	{"portable", "arm64"}:       {},
 	{"android", "amd64"}:   {CgoSupported: true},
 	{"android", "arm"}:     {CgoSupported: true},
 	{"android", "arm64"}:   {CgoSupported: true},

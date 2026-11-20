@@ -8,7 +8,7 @@ const GOOS = `linux`
 
 const IsAix = 0
 const IsAndroid = 0
-const IsApe = 0
+const IsPortable = 0
 const IsDarwin = 0
 const IsDragonfly = 0
 const IsFreebsd = 0

@@ -306,7 +306,7 @@ func (a *Action) trimpath() string {
 	// package directory here.
 	var overlayNonGoRewrites string // rewrites for non-go files
 	hasCgoOverlay := false
-	if fsys.OverlayFile != "" || cfg.Goos == "ape" { // (GOOS=ape: apegen's overlay)
+	if fsys.OverlayFile != "" || cfg.Goos == "portable" { // (GOOS=portable: portgen's overlay)
 		for _, filename := range a.Package.AllFiles() {
 			path := filename
 			if !filepath.IsAbs(path) {
@@ -344,9 +344,9 @@ func asmArgs(a *Action, p *load.Package) []any {
 	// Add -I pkg/GOOS_GOARCH so #include "textflag.h" works in .s files.
 	inc := filepath.Join(cfg.GOROOT, "pkg", "include")
 	pkgpath := pkgPath(a)
-	args := []any{cfg.BuildToolexec, base.Tool("asm"), "-p", pkgpath, "-trimpath", a.trimpath(), "-I", a.Objdir, "-I", inc, "-D", "GOOS_" + cfg.Goos, "-D", "GOARCH_" + cfg.Goarch, apeAsmDefs(), forcedAsmflags, p.Internal.Asmflags}
-	if cfg.Goos == "ape" {
-		// The host copies of assembly files are apegen's, elsewhere: they
+	args := []any{cfg.BuildToolexec, base.Tool("asm"), "-p", pkgpath, "-trimpath", a.trimpath(), "-I", a.Objdir, "-I", inc, "-D", "GOOS_" + cfg.Goos, "-D", "GOARCH_" + cfg.Goarch, portableAsmDefs(), forcedAsmflags, p.Internal.Asmflags}
+	if cfg.Goos == "portable" {
+		// The host copies of assembly files are portgen's, elsewhere: they
 		// include the package's headers.
 		args = append(args, "-I", p.Dir)
 	}
@@ -731,8 +731,8 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 		}
 		return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
 	}
-	if apePacked(root, ldBuildmode, ldflags) {
-		return apeLink(root, targetPath, ldflags, link)
+	if portablePacked(root, ldBuildmode, ldflags) {
+		return portableLink(root, targetPath, ldflags, link)
 	}
 	return link(targetPath, ldflags)
 }

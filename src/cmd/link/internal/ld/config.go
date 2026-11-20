@@ -218,13 +218,13 @@ func determineLinkMode(ctxt *Link) {
 	}
 }
 
-// targetGOOS is the system the executable is for: GOOS, or for GOOS=ape
+// targetGOOS is the system the executable is for: GOOS, or for GOOS=portable
 // written as a Mach-O or PE executable, darwin's or windows'.
 func (ctxt *Link) targetGOOS() string {
 	switch {
-	case ctxt.apeMachO:
+	case ctxt.portableMachO:
 		return "darwin"
-	case ctxt.apePE:
+	case ctxt.portablePE:
 		return "windows"
 	}
 	return buildcfg.GOOS

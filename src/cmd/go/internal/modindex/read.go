@@ -146,9 +146,9 @@ func GetPackage(modroot, pkgdir string) (*IndexPackage, error) {
 	if cfg.BuildContext.Compiler == "gccgo" && str.HasFilePathPrefix(modroot, cfg.GOROOTsrc) {
 		return nil, err // gccgo has no sources for GOROOT packages.
 	}
-	// Under GOOS=ape, apegen's files replace some of the package's (see
-	// cmd/go/internal/work/ape.go): the index does not see them.
-	if _, ok := fsys.DirContainsReplacement(pkgdir); ok && cfg.Goos == "ape" {
+	// Under GOOS=portable, portgen's files replace some of the package's (see
+	// cmd/go/internal/work/portable.go): the index does not see them.
+	if _, ok := fsys.DirContainsReplacement(pkgdir); ok && cfg.Goos == "portable" {
 		return nil, errNotFromModuleCache
 	}
 	// The pkgdir for fips140 has been replaced in the fsys overlay,

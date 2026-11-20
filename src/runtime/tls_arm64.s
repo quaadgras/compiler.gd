@@ -9,9 +9,9 @@
 #include "tls_arm64.h"
 
 TEXT runtime·load_g(SB),NOSPLIT,$0
-#ifdef TLS_ape
-	MOVBU	runtime·apehost(SB), R0
-	CMP	$const_apeDarwin, R0
+#ifdef TLS_portable
+	MOVBU	runtime·portablehost(SB), R0
+	CMP	$const_portableDarwin, R0
 	BNE	nocgo
 #else
 #ifndef GOOS_darwin
@@ -29,7 +29,7 @@ TEXT runtime·load_g(SB),NOSPLIT,$0
 	// Darwin sometimes returns unaligned pointers
 	AND	$0xfffffffffffffff8, R0
 #endif
-#ifdef TLS_ape
+#ifdef TLS_portable
 	AND	$0xfffffffffffffff8, R0
 #endif
 	MOVD	runtime·tls_g(SB), R27
@@ -39,9 +39,9 @@ nocgo:
 	RET
 
 TEXT runtime·save_g(SB),NOSPLIT,$0
-#ifdef TLS_ape
-	MOVBU	runtime·apehost(SB), R0
-	CMP	$const_apeDarwin, R0
+#ifdef TLS_portable
+	MOVBU	runtime·portablehost(SB), R0
+	CMP	$const_portableDarwin, R0
 	BNE	nocgo
 #else
 #ifndef GOOS_darwin
@@ -59,7 +59,7 @@ TEXT runtime·save_g(SB),NOSPLIT,$0
 	// Darwin sometimes returns unaligned pointers
 	AND	$0xfffffffffffffff8, R0
 #endif
-#ifdef TLS_ape
+#ifdef TLS_portable
 	AND	$0xfffffffffffffff8, R0
 #endif
 	MOVD	runtime·tls_g(SB), R27

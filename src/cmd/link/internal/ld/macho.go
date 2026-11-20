@@ -6,11 +6,11 @@ package ld
 
 import (
 	"bytes"
-	"cmd/internal/apepack"
 	"cmd/internal/codesign"
 	"cmd/internal/hash"
 	imacho "cmd/internal/macho"
 	"cmd/internal/objabi"
+	"cmd/internal/portpack"
 	"cmd/internal/sys"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
@@ -847,15 +847,15 @@ func asmbMacho(ctxt *Link) {
 	if int32(a) > ctxt.HEADR {
 		Exitf("HEADR too small: %d > %d", a, ctxt.HEADR)
 	}
-	if ctxt.apeMachO {
-		if a > apepack.MachOELFOff {
-			Exitf("GOOS=ape: the Mach-O header is %d bytes, more than %d", a, apepack.MachOELFOff)
+	if ctxt.portableMachO {
+		if a > portpack.MachOELFOff {
+			Exitf("GOOS=portable: the Mach-O header is %d bytes, more than %d", a, portpack.MachOELFOff)
 		}
-		h := apeELFHeader(ctxt, apepack.MachOELFOff)
-		if apepack.MachOELFOff+len(h) > int(ctxt.HEADR) {
-			Exitf("GOOS=ape: no room for the ELF header in the Mach-O's")
+		h := portableELFHeader(ctxt, portpack.MachOELFOff)
+		if portpack.MachOELFOff+len(h) > int(ctxt.HEADR) {
+			Exitf("GOOS=portable: no room for the ELF header in the Mach-O's")
 		}
-		ctxt.Out.SeekSet(apepack.MachOELFOff)
+		ctxt.Out.SeekSet(portpack.MachOELFOff)
 		ctxt.Out.Write(h)
 	}
 

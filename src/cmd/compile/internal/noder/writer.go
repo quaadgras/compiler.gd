@@ -96,16 +96,16 @@ type pkgWriter struct {
 		std    bool
 	}
 
-	apeAsmDefs map[string]bool // symbols a GOOS=ape variant's assembly defines
+	portableAsmDefs map[string]bool // symbols a GOOS=portable variant's assembly defines
 
-	// Under GOOS=ape: the package's files, and its constants computed
+	// Under GOOS=portable: the package's files, and its constants computed
 	// from runtime.GOOS (1 yes, 2 no, 3 being decided) and their values.
 	files      []*syntax.File
 	hostConsts map[*types2.Const]int8
 	// The type of a constant expression computed from them that the
 	// type checker left untyped: the expression's it is part of.
-	apeUntypedAs map[syntax.Expr]types2.Type
-	constInits   map[*types2.Const]syntax.Expr
+	portableUntypedAs map[syntax.Expr]types2.Type
+	constInits        map[*types2.Const]syntax.Expr
 
 	// cgoPragmas accumulates any //go:cgo_* pragmas that need to be
 	// passed through to cmd/link.
@@ -178,14 +178,14 @@ func (pw *pkgWriter) maybeTypeAndValue(x syntax.Expr) (syntax.TypeAndValue, bool
 	}
 
 	if tv.Value != nil && pw.hostDependent(x) {
-		// Under GOOS=ape, runtime.GOOS is the host's, known only at
+		// Under GOOS=portable, runtime.GOOS is the host's, known only at
 		// run time, and so is any constant computed from it.
 		tv.Value = nil
 		if tv.Type != nil && !isUntyped(tv.Type) {
-			pw.apeTypeDown(x, tv.Type)
+			pw.portableTypeDown(x, tv.Type)
 		}
 	}
-	if t := pw.apeUntypedAs[x]; t != nil && tv.Type != nil && isUntyped(tv.Type) {
+	if t := pw.portableUntypedAs[x]; t != nil && tv.Type != nil && isUntyped(tv.Type) {
 		tv.Type = t
 	}
 	return tv, tv.Type != nil
@@ -1277,7 +1277,7 @@ func (w *writer) funcExt(obj *types2.Func) {
 	}
 
 	if decl.Body == nil {
-		w.p.apeVariantLinkname(obj)
+		w.p.portableVariantLinkname(obj)
 	}
 
 	sig, block := obj.Type().(*types2.Signature), decl.Body

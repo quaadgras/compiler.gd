@@ -624,8 +624,8 @@ nog1:
 	SYSCALL
 	MOVQ	AX, m_procid(R13)
 
-#ifdef GOOS_ape
-	// A GOOS=ape program finds g through GS, whose base the child
+#ifdef GOOS_portable
+	// A GOOS=portable program finds g through GS, whose base the child
 	// shares with its parent until it sets its own (CLONE_SETTLS sets FS).
 	LEAQ	m_tls(R13), DI
 	CALL	runtime·settls(SB)

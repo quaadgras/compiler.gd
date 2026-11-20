@@ -8,8 +8,8 @@
 #ifdef GOOS_darwin
 #define DIT_BARRIER
 #endif
-#ifdef GOOS_ape
-// (A GOOS=ape program may run on darwin.)
+#ifdef GOOS_portable
+// (A GOOS=portable program may run on darwin.)
 #define DIT_BARRIER
 #endif
 

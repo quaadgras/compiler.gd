@@ -2626,19 +2626,19 @@ func (l *Loader) checkLinkname(refpkg *oReader, name string, s Sym) {
 		return
 	}
 
-	// A GOOS=ape host variant of a package (ape/linux/syscall) may
+	// A GOOS=portable host variant of a package (portable/linux/syscall) may
 	// reference what its package (syscall) may.
-	pkg := objabi.APEVariantOf(refpkg.unit.Lib.Pkg)
+	pkg := objabi.PortableVariantOf(refpkg.unit.Lib.Pkg)
 	error := func() {
 		log.Fatalf("%s: invalid reference to %s", refpkg.unit.Lib.Pkg, name)
 	}
 	pkgs, ok := blockedLinknames[name]
 	if !ok && refpkg.Std() {
-		// The standard library's GOOS=ape host copies pull each other's
-		// host names (syscall.linux_utimensat), which cmd/apegen made
+		// The standard library's GOOS=portable host copies pull each other's
+		// host names (syscall.linux_utimensat), which cmd/portgen made
 		// from names they may pull.
 		if p, sym, found := strings.Cut(name, "."); found {
-			for _, h := range objabi.APEHosts[buildcfg.GOARCH] {
+			for _, h := range objabi.PortableHosts[buildcfg.GOARCH] {
 				for _, prefix := range []string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
 					if rest, cut := strings.CutPrefix(sym, prefix); cut {
 						if pk, found := blockedLinknames[p+"."+rest]; found {

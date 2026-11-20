@@ -17,7 +17,7 @@ package syslist
 var KnownOS = map[string]bool{
 	"aix":       true,
 	"android":   true,
-	"ape":       true,
+	"portable":  true,
 	"darwin":    true,
 	"dragonfly": true,
 	"freebsd":   true,
@@ -36,12 +36,12 @@ var KnownOS = map[string]bool{
 	"zos":       true,
 }
 
-// APEHosts lists, by GOARCH, the systems a GOOS=ape program runs on. A
-// file builds for ape if it builds for every one of them (with the "ape"
+// PortableHosts lists, by GOARCH, the systems a GOOS=portable program runs on. A
+// file builds for portable if it builds for every one of them (with the "portable"
 // tag set); the files only some of them build are copied per host by
-// cmd/internal/apegen. This list also appears in internal/buildcfg,
-// whose APEHosts is those a build is for.
-var APEHosts = map[string][]string{
+// cmd/internal/portgen. This list also appears in internal/buildcfg,
+// whose PortableHosts is those a build is for.
+var PortableHosts = map[string][]string{
 	"amd64": {"linux", "freebsd", "windows", "darwin"},
 	"arm64": {"linux", "darwin"},
 }

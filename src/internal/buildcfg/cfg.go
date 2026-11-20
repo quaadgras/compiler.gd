@@ -54,7 +54,7 @@ func Check() {
 var getenv = os.Getenv
 
 func envOr(key, value string) string {
-	apeLists()
+	portableLists()
 	if x := getenv(key); x != "" {
 		return x
 	}

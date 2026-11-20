@@ -78,12 +78,12 @@ func (d *deadcodePass) init() {
 			}
 		}
 		names = append(names, d.ctxt.flagEntrySymbol)
-		if d.ctxt.apePE || d.ctxt.apeMachO {
-			// The entry of the ELF hosts (see ape_image.go).
-			names = append(names, apeELFEntry())
+		if d.ctxt.portablePE || d.ctxt.portableMachO {
+			// The entry of the ELF hosts (see portable_image.go).
+			names = append(names, portableELFEntry())
 		}
-		if apeDarwinHost(d.ctxt) {
-			names = append(names, apeDarwinEntry())
+		if portableDarwinHost(d.ctxt) {
+			names = append(names, portableDarwinEntry())
 		}
 	}
 	// runtime.unreachableMethod is a function that will throw if called.

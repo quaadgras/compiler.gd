@@ -509,7 +509,7 @@ func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
 		return 0, false
 	}
 	switch gd.Ctxt.Headtype {
-	case objabi.Hlinux, objabi.Hdarwin, objabi.Hfreebsd, objabi.Hwindows, objabi.Hape:
+	case objabi.Hlinux, objabi.Hdarwin, objabi.Hfreebsd, objabi.Hwindows, objabi.Hportable:
 	default:
 		return 0, false
 	}

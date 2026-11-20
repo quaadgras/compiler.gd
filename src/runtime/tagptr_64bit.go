@@ -50,8 +50,8 @@ const (
 	// and there may be other issues (see #54104).
 	riscv64AddrBits = 56
 
-	// (A GOOS=ape program may run on FreeBSD.)
-	addrBits = goos.IsAix*aixAddrBits + goarch.IsRiscv64*riscv64AddrBits + (goos.IsFreebsd|goos.IsApe)*goarch.IsAmd64*freebsdAmd64AddrBits + (1-goos.IsAix)*(1-goarch.IsRiscv64)*(1-(goos.IsFreebsd|goos.IsApe)*goarch.IsAmd64)*defaultAddrBits
+	// (A GOOS=portable program may run on FreeBSD.)
+	addrBits = goos.IsAix*aixAddrBits + goarch.IsRiscv64*riscv64AddrBits + (goos.IsFreebsd|goos.IsPortable)*goarch.IsAmd64*freebsdAmd64AddrBits + (1-goos.IsAix)*(1-goarch.IsRiscv64)*(1-(goos.IsFreebsd|goos.IsPortable)*goarch.IsAmd64)*defaultAddrBits
 
 	// In addition to the 16 bits (or other, depending on arch/os) taken from the top,
 	// we can take 9 from the bottom, because we require pointers to be well-aligned

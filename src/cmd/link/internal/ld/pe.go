@@ -9,8 +9,8 @@ package ld
 
 import (
 	"bytes"
-	"cmd/internal/apepack"
 	"cmd/internal/objabi"
+	"cmd/internal/portpack"
 	"cmd/internal/sys"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
@@ -1241,11 +1241,11 @@ func Peinit(ctxt *Link) {
 		}
 	}
 
-	if ctxt.apePE {
-		// The image is an ELF executable too (see ape_image.go):
+	if ctxt.portablePE {
+		// The image is an ELF executable too (see portable_image.go):
 		// its sections' file offsets are aligned as their addresses.
-		ctxt.PEFILEALIGN = apepack.ELFAlign
-		ctxt.PESECTALIGN = apepack.ELFAlign
+		ctxt.PEFILEALIGN = portpack.ELFAlign
+		ctxt.PESECTALIGN = portpack.ELFAlign
 	}
 	var sh [16]pe.SectionHeader32
 	var fh pe.FileHeader
@@ -1302,11 +1302,11 @@ func Peinit(ctxt *Link) {
 	}
 }
 
-// dosStub returns the DOS header of the PE: under GOOS=ape, one that is
+// dosStub returns the DOS header of the PE: under GOOS=portable, one that is
 // also the start of the shell script of the one file for all its hosts.
 func (ctxt *Link) dosStub() []byte {
-	if ctxt.apePE {
-		return apepack.DOSStub()
+	if ctxt.portablePE {
+		return portpack.DOSStub()
 	}
 	return dosstub
 }
@@ -1802,7 +1802,7 @@ func addPEBaseReloc(ctxt *Link) {
 }
 
 func (ctxt *Link) dope() {
-	apeDarwinTable(ctxt)
+	portableDarwinTable(ctxt)
 	initdynimport(ctxt)
 	initdynexport(ctxt)
 }
@@ -1939,12 +1939,12 @@ func asmbPe(ctxt *Link) {
 	}
 
 	pewrite(ctxt)
-	if ctxt.apePE {
-		h := apeELFHeader(ctxt, apepack.PEELFOff)
-		if int64(apepack.PEELFOff+len(h)) > int64(ctxt.PEFILEHEADR) {
-			Exitf("GOOS=ape: no room for the ELF header in the PE's")
+	if ctxt.portablePE {
+		h := portableELFHeader(ctxt, portpack.PEELFOff)
+		if int64(portpack.PEELFOff+len(h)) > int64(ctxt.PEFILEHEADR) {
+			Exitf("GOOS=portable: no room for the ELF header in the PE's")
 		}
-		ctxt.Out.SeekSet(apepack.PEELFOff)
+		ctxt.Out.SeekSet(portpack.PEELFOff)
 		ctxt.Out.Write(h)
 	}
 }

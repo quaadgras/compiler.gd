@@ -32,9 +32,9 @@ package ld
 
 import (
 	"bufio"
-	"cmd/internal/apepack"
 	"cmd/internal/goobj"
 	"cmd/internal/objabi"
+	"cmd/internal/portpack"
 	"cmd/internal/sys"
 	"cmd/internal/telemetry/counter"
 	"cmd/link/internal/benchmark"
@@ -105,7 +105,7 @@ func setupFlags(ctxt *Link) {
 	fs.BoolVar(&ctxt.flagA, "a", false, "no-op (deprecated)")
 	fs.BoolVar(&ctxt.FlagC, "c", false, "dump call graph")
 	fs.BoolVar(&ctxt.FlagD, "d", false, "disable dynamic executable")
-	fs.StringVar(&ctxt.flagAPEFormat, "apeformat", "", "for GOOS=ape, write an `elf`, a `pe` or a `macho` executable")
+	fs.StringVar(&ctxt.flagPortableFormat, "portableformat", "", "for GOOS=portable, write an `elf`, a `pe` or a `macho` executable")
 	fs.BoolVar(&ctxt.flagF, "f", false, "ignore version mismatch")
 	fs.BoolVar(&ctxt.flagG, "g", false, "disable go package data checks")
 	fs.BoolVar(&ctxt.flagH, "h", false, "halt on error")
@@ -323,32 +323,32 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	if ctxt.HeadType == objabi.Hunknown {
 		ctxt.HeadType.Set(buildcfg.GOOS)
 	}
-	// A GOOS=ape program written as a PE executable is a Windows
+	// A GOOS=portable program written as a PE executable is a Windows
 	// executable: its Windows host's imports are its import table.
-	switch ctxt.flagAPEFormat {
+	switch ctxt.flagPortableFormat {
 	case "", "elf":
 	case "pe":
-		if ctxt.HeadType != objabi.Hape {
-			Errorf("-apeformat is for GOOS=ape")
+		if ctxt.HeadType != objabi.Hportable {
+			Errorf("-portableformat is for GOOS=portable")
 		}
 		ctxt.HeadType = objabi.Hwindows
-		ctxt.apePE = true
+		ctxt.portablePE = true
 		if ctxt.flagEntrySymbol == "" {
-			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_ape_windows"
+			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_portable_windows"
 		}
 	case "macho":
 		// Likewise a darwin executable: its darwin host's imports
 		// (libSystem's functions) are its imports.
-		if ctxt.HeadType != objabi.Hape {
-			Errorf("-apeformat is for GOOS=ape")
+		if ctxt.HeadType != objabi.Hportable {
+			Errorf("-portableformat is for GOOS=portable")
 		}
 		ctxt.HeadType = objabi.Hdarwin
-		ctxt.apeMachO = true
+		ctxt.portableMachO = true
 		if ctxt.flagEntrySymbol == "" {
-			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_ape_darwin"
+			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_portable_darwin"
 		}
 	default:
-		Errorf("-apeformat must be elf, pe or macho")
+		Errorf("-portableformat must be elf, pe or macho")
 	}
 
 	if !ctxt.flagAslr && ctxt.BuildMode != BuildModeCShared {
@@ -392,7 +392,7 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	if ctxt.BuildMode == BuildModeUnset {
 		ctxt.BuildMode.Set("exe")
 	}
-	if ctxt.apeMachO && ctxt.BuildMode == BuildModeExe && buildcfg.GOARCH == "arm64" {
+	if ctxt.portableMachO && ctxt.BuildMode == BuildModeExe && buildcfg.GOARCH == "arm64" {
 		// On darwin/arm64, everything is PIE.
 		ctxt.BuildMode = BuildModePIE
 	}
@@ -449,10 +449,10 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	ctxt.computeTLSOffset()
 	bench.Start("Archinit")
 	ctxt.thearch.Archinit(ctxt)
-	if ctxt.apeMachO {
-		// Room after the Mach-O header for the ELF one (ape_image.go).
-		ctxt.HEADR += apepack.MachOELFRoom
-		ctxt.FlagTextAddr += apepack.MachOELFRoom
+	if ctxt.portableMachO {
+		// Room after the Mach-O header for the ELF one (portable_image.go).
+		ctxt.HEADR += portpack.MachOELFRoom
+		ctxt.FlagTextAddr += portpack.MachOELFRoom
 	}
 
 	if ctxt.FlagDataAddr != -1 && ctxt.FlagDataAddr%ctxt.FlagRound != 0 {

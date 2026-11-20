@@ -908,7 +908,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		if newPath, dir, ok := fips140.ResolveImport(path); ok {
 			r.path = newPath
 			r.dir = dir
-		} else if newPath, dir, ok := apeResolveImport(path, parentPath); ok {
+		} else if newPath, dir, ok := portableResolveImport(path, parentPath); ok {
 			r.path = newPath
 			r.dir = dir
 		} else if cfg.ModulesEnabled {
@@ -945,7 +945,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		if r.dir != "" {
 			var buildMode build.ImportMode
 			buildContext := cfg.BuildContext
-			if ctx, ok := apeContext(r.path); ok {
+			if ctx, ok := portableContext(r.path); ok {
 				buildContext = ctx
 			}
 			if !cfg.ModulesEnabled {
@@ -964,7 +964,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 			if modroot != "" {
 				if rp, err := modindex.GetPackage(modroot, r.dir); err == nil {
 					ictx := cfg.BuildContext
-					if ctx, ok := apeContext(r.path); ok {
+					if ctx, ok := portableContext(r.path); ok {
 						ictx = ctx
 					}
 					data.p, data.err = rp.Import(ictx, buildMode)
@@ -1544,8 +1544,8 @@ func disallowInternal(ld *modload.Loader, ctx context.Context, srcDir string, im
 	}
 
 	// The runtime and other standard packages import variants of standard
-	// packages for the hosts of GOOS=ape.
-	if _, _, ok := apeVariantPath(p.ImportPath); ok && p.Standard {
+	// packages for the hosts of GOOS=portable.
+	if _, _, ok := portableVariantPath(p.ImportPath); ok && p.Standard {
 		return nil
 	}
 
@@ -3076,8 +3076,8 @@ func PackagesAndErrors(ld *modload.Loader, ctx context.Context, opts PackageOpts
 
 	setPGOProfilePath(pkgs)
 
-	if apeUser(pkgs) {
-		// GOOS=ape: apegen's files of packages outside the standard
+	if portableUser(pkgs) {
+		// GOOS=portable: portgen's files of packages outside the standard
 		// library are in place; load them.
 		ClearPackageCache()
 		packageDataCache = par.ErrCache[string, *build.Package]{}
