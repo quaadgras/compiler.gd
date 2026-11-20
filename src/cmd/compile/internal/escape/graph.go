@@ -115,6 +115,12 @@ type location struct {
 	// value to other holes instead of holding it.
 	transient bool
 
+	// moveCand marks the contents of the tracked variables of which
+	// one is sent on a channel and not used again; moveHeld, that
+	// something else than those variables holds a pointer to those
+	// contents (move.go).
+	moveCand, moveHeld bool
+
 	// escapedInGraph is set when src's address flowed to a location
 	// that already escaped (the heap) while the graph was built: flow
 	// marks src as escaping and records no edge. gd Phase G's walks
@@ -352,7 +358,7 @@ func (b *batch) flow(k hole, src *location) {
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
 	switch root {
-	case &b.heapLoc, &b.ownHeapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
 		return false
 	}
 	// Locations of other functions in the batch, the parameters
@@ -403,6 +409,7 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
 func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
 func (b *batch) ownHeapHole() hole   { return b.ownHeapLoc.asHole() }
+func (b *batch) moveHole() hole      { return b.moveLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }

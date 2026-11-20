@@ -45,6 +45,38 @@ its life.
   channel only its goroutine reaches shares nothing; what it holds is
   shared with it when the channel is published. A receive from such a
   channel straight into shared memory goes by way of a temporary.
+
+  **A send that hands over.** A pointer that the sender provably has no
+  way left to is not shared by the send: its object goes to whoever
+  receives it, who is then the only goroutine that reaches it, as the
+  sender was (`runtime.chansendmove1`). What the object points to is
+  shared as for any send (`publishContents`). The compiler shows it
+  (`cmd/compile/internal/escape/move.go`) when:
+  - the value sent is a variable that only ever holds allocations of the
+    function (a tracked variable, below);
+  - neither it nor a variable that may hold the same pointer, or one into
+    the same object, is mentioned by a statement that may run after the
+    send (up to a return; a loop's variables must be declared in its
+    body; no `goto`, no deferred call that has it);
+  - nothing else holds a pointer to the object: in the solved graph its
+    address has flowed to those variables only. A callee has it for the
+    call; what a callee keeps, returns or stores in another argument is
+    another holder, as are an object, a slice, an interface or a closure
+    that points to it.
+
+  A send that is not shown to hand over shares, when it runs. A pointer
+  received from a shared channel straight into shared memory is shared
+  before it is stored (`chanrecv`). `go build -gcflags=-m` says which
+  sends hand over; `-d=nomove` makes every send share.
+
+  This is what makes handing work to another goroutine cost what doing
+  it oneself costs: a message built and sent, and filled in by the
+  goroutine that receives it, took 1.4 µs when the send shared it and
+  takes 0.7 µs (0.3 µs with no sharing at all; the rest is the strings
+  and slices the message points to, which are shared, and the tests of
+  memory that is not). Not covered yet: a pointer that was itself
+  received and is sent on, a value sent that is not a plain pointer, a
+  send in a `select`, `sync.Pool`, and the arguments of a `go` statement.
 - A store of a pointer in a global or in a shared object: the compiler's
   barrier, below.
 - The runtime's own stores: `sync/atomic`'s pointer operations, the copies

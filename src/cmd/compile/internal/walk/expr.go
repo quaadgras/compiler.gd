@@ -961,7 +961,11 @@ func walkSend(gd *base.Invocation, n *ir.SendStmt, init *ir.Nodes) ir.Node {
 	n1 = typecheck.AssignConv(gd, n1, n.Chan.Type().Elem(), "chan send")
 	n1 = walkExpr(gd, n1, init)
 	n1 = typecheck.NodAddr(gd, n1)
-	return mkcall1(gd, chanfn(gd, "chansend1", 2, n.Chan.Type()), nil, init, n.Chan, n1)
+	fn := "chansend1"
+	if n.Move {
+		fn = "chansendmove1"
+	}
+	return mkcall1(gd, chanfn(gd, fn, 2, n.Chan.Type()), nil, init, n.Chan, n1)
 }
 
 // walkSlice walks an OSLICE, OSLICEARR, OSLICESTR, OSLICE3, or OSLICE3ARR node.

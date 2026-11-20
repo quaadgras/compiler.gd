@@ -806,3 +806,173 @@ func TestSharedAppend(t *testing.T) {
 		<-done
 	}
 }
+
+var handGlobal *sharedNode
+
+// handSend sends a node it allocates and does not use again: the send
+// hands it over.
+//
+//go:noinline
+func handSend(c chan *sharedNode, tail *sharedNode) {
+	n := &sharedNode{next: tail, v: 1}
+	n.i = "x"
+	c <- n
+}
+
+// handSendKept sends a node that it also returns.
+//
+//go:noinline
+func handSendKept(c chan *sharedNode) *sharedNode {
+	n := &sharedNode{v: 2}
+	c <- n
+	return n
+}
+
+// handSendHeld sends a node that another object points to.
+//
+//go:noinline
+func handSendHeld(c chan *sharedNode, h *sharedNode) {
+	n := &sharedNode{v: 3}
+	h.next = n
+	c <- n
+}
+
+// The senders below keep a way to the node they send, each in its own
+// manner: their sends do not hand over. They give the node the value 4.
+
+//go:noinline
+func handUsedAfter(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	c <- n
+	n.m = nil
+}
+
+//go:noinline
+func handAlias(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	p := n
+	c <- n
+	p.m = nil
+}
+
+//go:noinline
+func handInterior(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	p := &n.m
+	c <- n
+	*p = nil
+}
+
+//go:noinline
+func handDeferred(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	defer func(n *sharedNode) { n.m = nil }(n)
+	c <- n
+}
+
+//go:noinline
+func handClosure(c chan *sharedNode) func() {
+	n := &sharedNode{v: 4}
+	f := func() { n.m = nil }
+	c <- n
+	return f
+}
+
+//go:noinline
+func handTwice(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	for i := 0; i < 2; i++ {
+		c <- n
+	}
+}
+
+//go:noinline
+func handInSlice(c chan *sharedNode) []*sharedNode {
+	n := &sharedNode{v: 4}
+	l := []*sharedNode{n}
+	c <- n
+	return l
+}
+
+//go:noinline
+func handInInterface(c chan *sharedNode) any {
+	n := &sharedNode{v: 4}
+	var i any = n
+	c <- n
+	return i
+}
+
+// TestSharedHandOver checks that an object whose only pointer is sent on
+// a channel is the receiver's alone, and not shared, while what it
+// points to is; and that it is shared if the sender keeps a way to it,
+// or when the receiver puts it where others reach it.
+func TestSharedHandOver(t *testing.T) {
+	skipIfNotSharing(t)
+	type result struct {
+		v            int
+		root, tail   bool
+		after, store bool
+	}
+	c := make(chan *sharedNode)
+	res := make(chan result)
+	shared := new(sharedNode)
+	handGlobal = shared
+	go func() {
+		for n := range c {
+			r := result{v: n.v, root: isShared(n), tail: n.next != nil && isShared(n.next)}
+			// It is this goroutine's to change.
+			for i := 0; i < 100; i++ {
+				n.s = append(n.s, nil)
+				n.i = i
+			}
+			if len(n.s) != 100 || n.i != 99 {
+				r.v = -1
+			}
+			r.after = isShared(n)
+			handGlobal = n
+			r.store = isShared(n)
+			res <- r
+		}
+		// Received straight into memory that is shared.
+		shared.next = <-c
+		res <- result{root: isShared(shared.next)}
+	}()
+
+	handSend(c, new(sharedNode))
+	if r := <-res; r.v != 1 || r.root || !r.tail || r.after || !r.store {
+		t.Errorf("handed over: %+v, want an unshared node with a shared tail, shared once stored in a global", r)
+	}
+	kept := handSendKept(c)
+	if r := <-res; r.v != 2 || !r.root {
+		t.Errorf("sent and returned: %+v, want a shared node", r)
+	}
+	wantShared(t, "sent and returned", kept, true)
+	holder := new(sharedNode)
+	handSendHeld(c, holder)
+	if r := <-res; r.v != 3 || !r.root {
+		t.Errorf("sent and held by another object: %+v, want a shared node", r)
+	}
+	runtime.KeepAlive(holder)
+	for i, f := range []func(){
+		func() { handUsedAfter(c) },
+		func() { handAlias(c) },
+		func() { handInterior(c) },
+		func() { handDeferred(c) },
+		func() { runtime.KeepAlive(handClosure(c)) },
+		func() { handTwice(c) },
+		func() { runtime.KeepAlive(handInSlice(c)) },
+		func() { runtime.KeepAlive(handInInterface(c)) },
+	} {
+		go f()
+		if r := <-res; r.v != 4 || !r.root {
+			t.Errorf("sender %d that keeps a way to its node: %+v, want a shared node", i, r)
+		}
+		if i == 5 {
+			<-res
+		}
+	}
+	close(c)
+	if r := <-res; r.root {
+		t.Errorf("nil received from a closed channel is shared")
+	}
+}

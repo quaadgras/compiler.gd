@@ -167,7 +167,20 @@ func full(c *hchan) bool {
 //
 //go:nosplit
 func chansend1(c *hchan, elem unsafe.Pointer) {
-	chansend(c, elem, true, sys.GetCallerPC())
+	chansend(c, elem, true, sys.GetCallerPC(), false)
+}
+
+// chansendmove1 is c <- x for a pointer x that the compiler has shown
+// leaves the sending goroutine's hands with the send: x points to an
+// object the function allocated, nothing but the variable sent holds
+// its address, and that is not used again (cmd/compile/internal/escape,
+// move.go). The object is not shared by the send, it is handed over:
+// whoever receives it is the only goroutine that reaches it, as the
+// sender was. What it points to is shared, as for any send.
+//
+//go:nosplit
+func chansendmove1(c *hchan, elem unsafe.Pointer) {
+	chansend(c, elem, true, sys.GetCallerPC(), true)
 }
 
 /*
@@ -182,7 +195,9 @@ func chansend1(c *hchan, elem unsafe.Pointer) {
  * been closed.  it is easiest to loop and re-run
  * the operation; we'll see that it's now closed.
  */
-func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
+// With move, the element is a pointer to an object that is handed over
+// (chansendmove1).
+func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr, move bool) bool {
 	if c == nil {
 		if !block {
 			return false
@@ -206,8 +221,12 @@ func chansend(c *hchan, ep unsafe.Pointer, block bool, callerpc uintptr) bool {
 	// What goes into a channel other goroutines can reach is shared.
 	// (A channel only this goroutine can reach shares what it holds
 	// when it is itself published.)
-	if sharingEnabled && c.elemtype.Pointers() && isShared(unsafe.Pointer(c)) {
-		publishValue(c.elemtype, ep)
+	if sharingEnabled && c != nil && c.elemtype.Pointers() && isShared(unsafe.Pointer(c)) {
+		if move {
+			publishContents(*(*unsafe.Pointer)(ep))
+		} else {
+			publishValue(c.elemtype, ep)
+		}
 	}
 
 	// Fast path: check for failed non-blocking operation without acquiring the lock.
@@ -550,6 +569,18 @@ func chanrecv(c *hchan, ep unsafe.Pointer, block bool) (selected, received bool)
 	// more than one word is stored whole in shared memory. A value
 	// received straight into shared memory goes by way of a temporary
 	// for either.
+	// A pointer in a shared channel may be to an object that was handed
+	// over and is not shared (chansendmove1): received straight into
+	// shared memory, it is shared before it is stored there.
+	if sharingEnabled && c != nil && ep != nil && c.elemtype.Kind() == abi.Pointer && isShared(unsafe.Pointer(c)) && isShared(ep) {
+		var tmp unsafe.Pointer
+		selected, received = chanrecv(c, noescape(unsafe.Pointer(&tmp)), block)
+		if selected {
+			publish(tmp)
+			*(*unsafe.Pointer)(ep) = tmp
+		}
+		return
+	}
 	if sharingEnabled && c != nil && ep != nil && c.elemtype.Pointers() && isShared(ep) && (!isShared(unsafe.Pointer(c)) || tearable(c.elemtype)) {
 		tmp := newobject(c.elemtype)
 		selected, received = chanrecv(c, tmp, block)
@@ -813,7 +844,7 @@ func chanparkcommit(gp *g, chanLock unsafe.Pointer) bool {
 //		... bar
 //	}
 func selectnbsend(c *hchan, elem unsafe.Pointer) (selected bool) {
-	return chansend(c, elem, false, sys.GetCallerPC())
+	return chansend(c, elem, false, sys.GetCallerPC(), false)
 }
 
 // compiler implements
@@ -838,7 +869,7 @@ func selectnbrecv(elem unsafe.Pointer, c *hchan) (selected, received bool) {
 
 //go:linkname reflect_chansend reflect.chansend0
 func reflect_chansend(c *hchan, elem unsafe.Pointer, nb bool) (selected bool) {
-	return chansend(c, elem, !nb, sys.GetCallerPC())
+	return chansend(c, elem, !nb, sys.GetCallerPC(), false)
 }
 
 //go:linkname reflect_chanrecv reflect.chanrecv

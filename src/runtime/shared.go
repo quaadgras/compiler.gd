@@ -223,6 +223,40 @@ func publish(p unsafe.Pointer) {
 	KeepAlive(p)
 }
 
+// publishContents shares what the object p points to holds, and not the
+// object: it is handed to another goroutine, which is then the only one
+// that reaches it (chansendmove1). If it is shared already, so is what it
+// holds.
+func publishContents(p unsafe.Pointer) {
+	if !sharingEnabled || p == nil {
+		return
+	}
+	s := spanOfHeap(uintptr(p))
+	if s == nil || s.isUserArenaChunk || s.spanclass.noscan() || isShared(p) {
+		return
+	}
+	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	// The pointers first: the walk of each may be preempted for a
+	// collection, and the object is the sender's to read until it is
+	// sent.
+	var buf [16]unsafe.Pointer
+	work := buf[:0]
+	tp := s.typePointersOfUnchecked(base)
+	for {
+		var addr uintptr
+		if tp, addr = tp.next(base + s.elemsize); addr == 0 {
+			break
+		}
+		if q := *(*unsafe.Pointer)(unsafe.Pointer(addr)); q != nil {
+			work = append(work, q)
+		}
+	}
+	for _, q := range work {
+		publish(q)
+	}
+	KeepAlive(p)
+}
+
 // publishObject shares what the newly shared object at base, in s, points
 // to. The objects still to walk are kept as pointers: the walk allocates,
 // and may be preempted for a collection.

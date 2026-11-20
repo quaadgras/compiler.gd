@@ -104,6 +104,8 @@ type batch struct {
 	mutatorLoc   location
 	ownHeapLoc   location // the heap, in an object that no other goroutine reaches by itself (callbits.go)
 	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
+	moveLoc      location // where a pointer that is handed over goes: the heap, and out of its goroutine's hands (move.go)
+	moves        []moveSend
 	calleeLoc    location
 	blankLoc     location
 	candidateLoc location
@@ -196,6 +198,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	b.mutatorLoc.attrs = attrMutates
 	b.shareLoc.attrs = attrShares
 	b.ownHeapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
+	b.moveLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
 	// dynamic-callee edges, but with attrCandidateEscape in place of
@@ -437,6 +440,7 @@ type outBufUse struct {
 
 func (b *batch) finish(fns []*ir.Func) {
 	b.markUnshared(fns)
+	b.markMoves()
 	b.markReturnedOther()
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.

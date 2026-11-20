@@ -53,6 +53,7 @@ func (b *batch) walkAll() {
 	todo.pushFront(&b.calleeLoc)
 	todo.pushFront(&b.candidateLoc)
 	todo.pushFront(&b.ownHeapLoc)
+	todo.pushFront(&b.moveLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
@@ -61,6 +62,7 @@ func (b *batch) walkAll() {
 	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
 	b.ownHeapLoc.queuedWalkAll = true
+	b.moveLoc.queuedWalkAll = true
 
 	var walkgen uint32
 	for todo.len() > 0 {
@@ -258,6 +260,11 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 
 		for i, edge := range l.edges {
 			d := derefs + edge.derefs
+			if d < 0 && edge.src.moveCand && !edge.src.moveHeld && b.holdsMoved(root, edge.src) {
+				// root keeps a pointer to an object that a send
+				// would hand over: it is not handed over.
+				edge.src.moveHeld = true
+			}
 			srcRaw := lraw && !edge.ro
 			rd := rawDerefs + edge.derefs
 			if edge.src.hasAttr(attrEscapes) && !srcRaw {
@@ -396,7 +403,7 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 }
 
 func (b *batch) explainLoc(l *location) string {
-	if l == &b.heapLoc || l == &b.ownHeapLoc {
+	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc {
 		return "{heap}"
 	}
 	if l.n == nil {
