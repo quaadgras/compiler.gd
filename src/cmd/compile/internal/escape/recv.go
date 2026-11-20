@@ -102,7 +102,7 @@ func (e *escape) convHole(k hole, t, iface *types.Type) hole {
 // this one. The methods of iface are those that can be called of what
 // is converted to it, until it is asserted to have others (assertHole).
 func (b *batch) recvKeepsNothing(t, iface *types.Type) bool {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 || !t.IsPtr() || t.HasShape() {
+	if moveOff(b.gd) || !t.IsPtr() || t.HasShape() {
 		return false
 	}
 	if iface != nil && (!iface.IsInterface() || iface.HasShape()) {

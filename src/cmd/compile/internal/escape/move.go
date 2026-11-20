@@ -11,6 +11,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
+	"cmd/internal/sys"
 )
 
 // Handing over (doc/gd/sharing.md).
@@ -41,6 +42,13 @@ import (
 // ordinary send, which shares the object when it runs. The variables say
 // until then that the object is not shared, which is so: they are not
 // used after the send.
+
+// moveOff reports whether nothing is handed over: on wasm, where a
+// goroutine never runs while another does and nothing is shared, and the
+// runtime of GOWASM=gc has none of this.
+func moveOff(gd *base.Invocation) bool {
+	return gd.Debug.NoShare != 0 || gd.Debug.NoMove != 0 || gd.Ctxt.Arch.Family == sys.Wasm
+}
 
 // A moveSend is a send, or a call of (*sync.Pool).Put or of a function
 // that consumes its argument (ir.Func.Consumes), that hands over the
@@ -81,7 +89,7 @@ func (e *escape) handOverHole(n ir.Node) hole {
 // variable that may hold the same pointer is used once n has run. The
 // statement also evaluates others.
 func (e *escape) handOver(n, val ir.Node, others []ir.Node, arg int, params bool) bool {
-	if e.gd.Debug.NoShare != 0 || e.gd.Debug.NoMove != 0 {
+	if moveOff(e.gd) {
 		return false
 	}
 	for val.Op() == ir.OCONVIFACE || val.Op() == ir.OCONVNOP || val.Op() == ir.OPAREN {
@@ -185,7 +193,7 @@ type deferWrap struct {
 // noteDeferWraps finds the defer statements of fn that only call a
 // function with fn's variables.
 func (b *batch) noteDeferWraps(fn *ir.Func) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 {
+	if moveOff(b.gd) {
 		return
 	}
 	anyBody(fn, func(n ir.Node) bool {
@@ -296,7 +304,7 @@ func (e *escape) consumedArg(call *ir.CallExpr, fns []*ir.Name, i int, arg ir.No
 // (ir.Func.OwnedResult).
 func (e *escape) noteReturn(n *ir.ReturnStmt) {
 	fn := e.curfn
-	if e.gd.Debug.NoShare != 0 || e.gd.Debug.NoMove != 0 || fn.Type().NumResults() != 1 || len(n.Results) != 1 {
+	if moveOff(e.gd) || fn.Type().NumResults() != 1 || len(n.Results) != 1 {
 		return
 	}
 	res := fn.Type().Result(0)
@@ -330,7 +338,7 @@ func isAutoResult(name string) bool {
 // or one into its object (paramClass). It is called before fn's graph
 // is built.
 func (b *batch) trackParams(fn *ir.Func) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 {
+	if moveOff(b.gd) {
 		return
 	}
 	params := make(map[*ir.Name]bool)
@@ -811,7 +819,7 @@ type keptCheck struct {
 // handOverTypes returns the types that the functions hand pointers to
 // over: to a sync.Pool, or on a channel.
 func handOverTypes(gd *base.Invocation, fns []*ir.Func) map[*types.Type]bool {
-	if gd.Debug.NoShare != 0 || gd.Debug.NoMove != 0 {
+	if moveOff(gd) {
 		return nil
 	}
 	var m map[*types.Type]bool
@@ -957,7 +965,7 @@ func (b *batch) keepsParam(root, l *location) bool {
 // markKeptChecks makes the calls test that a proof needs, and records
 // the parameters of fns that only such calls keep.
 func (b *batch) markKeptChecks(fns []*ir.Func) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoMove != 0 {
+	if moveOff(b.gd) {
 		return
 	}
 	for _, r := range b.dynRoots {

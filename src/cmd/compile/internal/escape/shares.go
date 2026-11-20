@@ -59,7 +59,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 	if len(cand) == 0 {
 		return
 	}
-	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true }, b.gd.Debug.NoMove == 0)
+	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true }, !moveOff(b.gd))
 	if b.contents == nil {
 		b.contents = make(map[*ir.Name]*location)
 		b.sources = make(map[*ir.Name][]ir.Node)
