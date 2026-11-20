@@ -250,7 +250,7 @@ func sync_runtime_procUnpin() {}
 // Nothing is shared here, and nothing handed over (runtime/shared.go).
 
 //go:linkname sync_runtime_poolOwned sync.runtime_poolOwned
-func sync_runtime_poolOwned(x any, fresh bool) (owned, drop bool) { return false, false }
+func sync_runtime_poolOwned(x any, fresh, mixed bool) (owned, drop bool) { return false, false }
 
 //go:linkname sync_runtime_poolStoreOwned sync.runtime_poolStoreOwned
 func sync_runtime_poolStoreOwned(dst *any, x any) { *dst = x }

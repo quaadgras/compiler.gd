@@ -75,7 +75,12 @@ func (d *poolDequeue) pack(head, tail uint32) uint64 {
 // pushHead adds val at the head of the queue. It returns false if the
 // queue is full. It must only be called by a single producer.
 //
+// (Not checked, as popHead and popTail are not: the pointers that are
+// converted are to the slots of the queue's own array, as the interfaces
+// that they hold.)
+//
 //go:notear
+//go:nocheckptr
 func (d *poolDequeue) pushHead(val any, owned bool) bool {
 	ptrs := d.headTail.Load()
 	head, tail := d.unpack(ptrs)
@@ -115,6 +120,7 @@ func (d *poolDequeue) pushHead(val any, owned bool) bool {
 // single producer.
 //
 //go:notear
+//go:nocheckptr
 func (d *poolDequeue) popHead() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {
@@ -152,6 +158,7 @@ func (d *poolDequeue) popHead() (any, bool) {
 // number of consumers.
 //
 //go:notear
+//go:nocheckptr
 func (d *poolDequeue) popTail() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {

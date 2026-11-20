@@ -714,8 +714,28 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 // when the program runs read it there.
 func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
 	note := esc.Encode()
+	if fl := b.shareFlags(fn, i, esc); fl != 0 {
+		return "esc:" + string(esc[:]) + string([]byte{fl})
+	}
+	return note
+}
+
+// shareFlags returns the byte that follows the leaks in the note, or 0
+// if the note has none.
+func (b *batch) shareFlags(fn *ir.Func, i int, esc leaks) byte {
+	// Kept only by calls that check, which the call that tests for
+	// it reads.
+	// Kept by a method of its own is said of a parameter of an
+	// interface type only, whose methods the caller knows: of a
+	// pointer that the function converts, it knows nothing.
+	var checked byte
+	if i < 16 && fn.KeptChecked&^fn.KeptByAny&(1<<i) != 0 && esc.Heap() == 0 && !esc.anyResult() {
+		if params := fn.Type().RecvParams(); i < len(params) && (params[i].Type.IsInterface() || fn.KeptByRecv&(1<<i) == 0) {
+			checked = ir.EscNoteChecked
+		}
+	}
 	if fn.ParamShares == nil || i >= len(fn.ParamShares) || esc.Heap() < 0 && !esc.anyResult() {
-		return note
+		return checked
 	}
 	ps := fn.ParamShares[i]
 	// (What is stored through the parameter itself is where it is.)
@@ -726,9 +746,9 @@ func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
 		fl |= ir.EscNoteViaRecv
 	}
 	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() {
-		return note
+		return checked
 	}
-	return "esc:" + string(esc[:]) + string([]byte{fl})
+	return fl | checked
 }
 
 func (l leaks) anyResult() bool {
@@ -801,17 +821,19 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 // allocated in the argument d.arg of the call d.call: 1 if the function
 // that is called keeps it local.
 func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
-	return b.callArgBits(pos, d, false)
+	return b.callArgBits(pos, d, false, false)
 }
 
 // callArgKept returns the expression that is 1 if the function that
 // d.call calls does not keep its argument d.arg, as far as its escape
-// mask says, and 0 if it may.
-func (b *batch) callArgKept(pos src.XPos, d *dynRoot) ir.Node {
-	return b.callArgBits(pos, d, true)
+// mask says, and 0 if it may. With own, a function that keeps it only
+// by calls that check, or by methods of its own, does not
+// (ir.EscMaskHeld).
+func (b *batch) callArgKept(pos src.XPos, d *dynRoot, own bool) ir.Node {
+	return b.callArgBits(pos, d, true, own)
 }
 
-func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept bool) ir.Node {
+func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept, own bool) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	unsafePtr := types.Types[types.TUNSAFEPTR]
 	lit := func(v int64) ir.Node {
@@ -868,6 +890,7 @@ func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept bool) ir.Node {
 	ap.SetCheckPtr(true)
 	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(types.Types[types.TUINT64]), ap)
 	wp.SetTypecheck(1)
+	wp.SetCheckPtr(true)
 	word := ir.NewStarExpr(b.gd, pos, wp)
 	word.SetType(types.Types[types.TUINT64])
 	word.SetTypecheck(1)
@@ -887,7 +910,11 @@ func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept bool) ir.Node {
 	// shared and not stored through the receiver, or the receiver
 	// points to a local object.
 	if kept {
-		return binary(ir.OAND, not(bit(0)), not(bit(1+d.arg)))
+		free := not(bit(1 + d.arg))
+		if own {
+			free = binary(ir.OOR, free, not(bit(ir.EscMaskHeld+d.arg)))
+		}
+		return binary(ir.OAND, not(bit(0)), free)
 	}
 	stays := not(bit(ir.EscMaskViaRecv + d.arg))
 	if recv != nil {

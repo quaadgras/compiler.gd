@@ -98,7 +98,9 @@ that rule and they differed:
   argument 0: it read the inner interface out of rodata. Function
   symbols always have the static mask now.
 
-The mask has bits for 63 arguments (`ir.EscMaskArgs`); `&x` passed
+The mask has bits for 15 arguments (`ir.EscMaskArgs`: four bits each
+since 2026-11-21, with what sharing.md has of them; it was 63 with one
+bit, then 21 with three); `&x` passed
 after those goes to the heap as in stock Go (it was an internal
 compiler error at argument 62, and never re-homed after it).
 

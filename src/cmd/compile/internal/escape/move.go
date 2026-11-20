@@ -814,6 +814,12 @@ type keptCheck struct {
 	call   *ir.CallExpr
 	ptr    *ir.Name
 	relied bool // a parameter's or a variable's proof needs it
+	// own is whether a function that keeps the argument only by
+	// calls that check, or by the methods that its parameter's
+	// interface type has of it (ir.EscMaskHeld), keeps nothing:
+	// the pointer is passed as it is, or those methods of its type
+	// keep nothing of their receiver (recvKeepsNothing).
+	own bool
 }
 
 // handOverTypes returns the types that the functions hand pointers to
@@ -887,7 +893,19 @@ func (e *escape) noteKeptCheck(r *location, call *ir.CallExpr, arg ir.Node) {
 			return
 		}
 	}
-	r.keptCheck = &keptCheck{call: call, ptr: x}
+	own := true
+	for n := arg; n != x; {
+		switch v := n.(type) {
+		case *ir.ConvExpr:
+			if v.Op() == ir.OCONVIFACE && !e.recvKeepsNothing(x.Type(), v.Type()) {
+				own = false
+			}
+			n = v.X
+		case *ir.ParenExpr:
+			n = v.X
+		}
+	}
+	r.keptCheck = &keptCheck{call: call, ptr: x, own: own}
 }
 
 // heldInHeap reports, for a root that is the dynamic root of a call's
@@ -976,7 +994,7 @@ func (b *batch) markKeptChecks(fns []*ir.Func) {
 		}
 		pos := kc.call.Pos()
 		// (One if the function does not keep it.)
-		cond := ir.NewBinaryExpr(b.gd, pos, ir.OEQ, b.callArgKept(pos, d), ir.NewBasicLit(b.gd, pos, types.Types[types.TUINTPTR], constant.MakeInt64(0)))
+		cond := ir.NewBinaryExpr(b.gd, pos, ir.OEQ, b.callArgKept(pos, d, kc.own), ir.NewBasicLit(b.gd, pos, types.Types[types.TUINTPTR], constant.MakeInt64(0)))
 		cond.SetType(types.Types[types.TBOOL])
 		cond.SetTypecheck(1)
 		p := typecheck.ConvNop(b.gd, kc.ptr, types.Types[types.TUNSAFEPTR])
@@ -987,7 +1005,11 @@ func (b *batch) markKeptChecks(fns []*ir.Func) {
 		nif.SetTypecheck(1)
 		kc.call.PtrInit().Prepend(nif)
 		if b.gd.Flag.LowerM >= 3 {
-			b.gd.WarnfAt(pos, "%v is shared if the function called keeps it", kc.ptr)
+			if kc.own {
+				b.gd.WarnfAt(pos, "%v is shared if the function called keeps it other than by calls that check", kc.ptr)
+			} else {
+				b.gd.WarnfAt(pos, "%v is shared if the function called keeps it", kc.ptr)
+			}
 		}
 	}
 	for _, fn := range fns {

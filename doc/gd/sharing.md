@@ -176,13 +176,44 @@ its life.
   ns where it took 196 (77 with no sharing at all), and
   `io.WriteString` 50 where it took 76 (28).
 
-  Not covered: a function that is only known when the program runs
-  still answers by its mask, which says "keeps" for one that calls a
-  method of its parameter, as every real `Format` method does with its
-  `fmt.State` (and the printer has a method that hands it over); a
-  helper that was inlined, whose interface variable is a holder in the
-  caller; and an object of which a callee converts the address of a
-  field to an interface type (regexp's machine and its inputs).
+  **What the mask says of how it keeps.** A function that is only
+  known when the program runs answers by its mask, and the mask said
+  "keeps" for one that calls a method of its parameter, as every real
+  `Format` method does with its `fmt.State`: the printer was shared in
+  each call of one, and dropped by the put. The mask now has a fourth
+  bit for each argument (`ir.EscMaskHeld`, for 15 arguments where there
+  were three bits for 21), which is clear if the function keeps the
+  argument only by calls that check in turn, or by calling the methods
+  that the parameter's interface type has (`KeptChecked` without
+  `KeptByAny`; the note of the parameter says so, for every package
+  that makes a mask of it). The test before the call takes that for
+  "does not keep" if the pointer is passed as it is, or is converted to
+  an interface type whose methods, as the pointer's type has them, keep
+  nothing (`recvKeepsNothing`), which is what the caller knows and the
+  function does not.
+
+  A `Format` method that writes with `s.Write` takes 149 ns in
+  `Sprintf("%v", x)` where it took 384 (67 with no sharing at all), one
+  that calls `fmt.Fprintf(s, ...)` 293 where it took 392 (206).
+
+  **A put that does not look.** A put that hands its object over asked
+  whether the object was shared, which a call that found a keeper is
+  all that makes it (or a pool that gives shared objects out: one whose
+  `New` does not just allocate, or that had an object put that was not
+  handed over). Until a call has found one (`runtime.keptSeen`), and in
+  a pool that has no such objects (`sync.Pool.mixed`), it does not ask.
+  To be wrong about it would keep a shared object in the pool, no more.
+
+  Not covered: a function that asserts its parameter to have other
+  methods (`io.WriteString(s, ...)` in a `Format` method: all methods
+  of the printer's type would have to keep nothing, and those that are
+  analysed with the call are not known then); one that passes its
+  interface on to another function that is only known when the program
+  runs (a `Format` method that calls another's: the test is only made
+  for a pointer variable); a helper that was inlined, whose interface
+  variable is a holder in the caller; and an object of which a callee
+  converts the address of a field to an interface type (regexp's
+  machine and its inputs).
 
   What an object that is handed over points to is shared by the put,
   but for a pointer into the object itself (the printer points to its

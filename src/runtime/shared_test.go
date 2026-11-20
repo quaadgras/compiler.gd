@@ -1345,3 +1345,117 @@ func TestSharedRecvKeptNothing(t *testing.T) {
 		t.Errorf("an object that a function asserted to have a method that hands it over was handed over")
 	}
 }
+
+// A keptRelay passes the node on, by a call that checks what the
+// function it calls keeps: its escape mask says that it keeps the node,
+// but only so (ir.EscMaskHeld).
+type keptRelay struct{ to keptUser }
+
+func (r *keptRelay) use(n *keptNode) { n.keptPass(r.to) }
+
+// A heldUser is passed a sink, as an interface, by a function that puts
+// the sink back in its pool afterwards.
+type heldUser interface {
+	fill(s recvSink)
+}
+
+// heldCaller only calls the method that recvSink has.
+type heldCaller struct{}
+
+func (heldCaller) fill(s recvSink) { s.put(1) }
+
+// heldFiller passes the sink to a function that only does that.
+type heldFiller struct{}
+
+func (heldFiller) fill(s recvSink) { recvFill(s, 2) }
+
+// heldKeeper keeps the sink.
+type heldKeeper struct{ s recvSink }
+
+func (k *heldKeeper) fill(s recvSink) { k.s = s }
+
+// A heldSink's method keeps nothing of its receiver.
+type heldSink struct {
+	vs []int
+	id int
+}
+
+func (q *heldSink) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+var (
+	heldPool = sync.Pool{New: func() any { return new(heldSink) }}
+	heldIDs  int
+)
+
+// heldCycle gets a sink, lets u fill it and puts it back. It reports
+// whether the sink was shared when the pool gave it, and which it was.
+//
+//go:noinline
+func heldCycle(u heldUser) (shared bool, id int) {
+	q := heldPool.Get().(*heldSink)
+	shared = isShared(q)
+	if q.id == 0 {
+		heldIDs++
+		q.id = heldIDs
+	}
+	id = q.id
+	q.vs = q.vs[:0]
+	u.fill(q)
+	heldPool.Put(q)
+	return
+}
+
+// TestSharedHeldBit checks that an object which is passed to a function
+// that is only known when the program runs is handed over to its pool
+// if that function keeps it only by a call that checks in turn, or by
+// calling the methods that the parameter's interface type has, which
+// keep nothing; and that it is shared if the function, or the one at
+// the end of such calls, keeps it.
+func TestSharedHeldBit(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	relay := &keptRelay{to: new(keptReader)}
+	_, first := keptCycle(relay)
+	for i := 0; i < 3; i++ {
+		shared, id := keptCycle(relay)
+		if shared {
+			t.Errorf("round %d: an object passed on to a function that does not keep it is shared", i)
+		}
+		if id != first {
+			t.Errorf("round %d: the pool gave another object", i)
+		}
+	}
+	k := new(keptKeeper)
+	keptCycle(&keptRelay{to: k})
+	wantShared(t, "passed on to a function that keeps it", k.n, true)
+	if _, id := keptCycle(relay); id == first {
+		t.Errorf("the pool gave the object that was kept")
+	}
+
+	_, sink := heldCycle(heldCaller{})
+	for _, u := range []heldUser{heldCaller{}, heldFiller{}} {
+		for i := 0; i < 3; i++ {
+			shared, id := heldCycle(u)
+			if shared {
+				t.Errorf("%T, round %d: an object of which only methods that keep nothing were called is shared", u, i)
+			}
+			if id != sink {
+				t.Errorf("%T, round %d: the pool gave another object", u, i)
+			}
+		}
+	}
+	hk := new(heldKeeper)
+	heldCycle(hk)
+	wantShared(t, "kept, as an interface, by a function that is only known when the program runs", hk.s.(*heldSink), true)
+	if shared, id := heldCycle(heldCaller{}); shared || id == sink {
+		t.Errorf("the pool gave the object that was kept")
+	}
+	runtime.KeepAlive(k)
+	runtime.KeepAlive(hk)
+}

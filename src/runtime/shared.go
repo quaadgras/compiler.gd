@@ -301,8 +301,17 @@ func poolhandover(p unsafe.Pointer) {
 // it keeps the argument p: an object that its goroutine would hand over
 // later, because nothing else that it does keeps it, is shared instead.
 func publishkept(p unsafe.Pointer) {
+	if keptSeen.Load() == 0 {
+		keptSeen.Store(1)
+	}
 	publish(p)
 }
+
+// keptSeen is set once publishkept has shared an object. Until then, an
+// object that is handed to a pool which only holds objects that were
+// handed over, or that its New allocated, is not shared, and poolOwned
+// need not look.
+var keptSeen atomic.Uint32
 
 // poolOwned reports whether the object that x, which sync.Pool.Put was
 // given, points to is handed over; it then shares what the object points to.
@@ -314,8 +323,14 @@ func publishkept(p unsafe.Pointer) {
 // again, and whoever got it would take the locks of shared memory, where
 // a new one costs an allocation, once.
 //
+// Nothing has shared it if no call has found a function that keeps its
+// argument (keptSeen) and the pool has no shared objects: its New
+// allocates (fresh) and nothing was put that was not handed over (mixed
+// is false). To take a shared object for one that is not would only
+// keep it in the pool.
+//
 //go:linkname poolOwned sync.runtime_poolOwned
-func poolOwned(x any, fresh bool) (handed, drop bool) {
+func poolOwned(x any, fresh, mixed bool) (handed, drop bool) {
 	p := efaceOf(&x).data
 	gp := getg()
 	owned := gp.ownedPut
@@ -330,7 +345,7 @@ func poolOwned(x any, fresh bool) (handed, drop bool) {
 		publish(p)
 		return false, false
 	}
-	if isShared(p) {
+	if (!fresh || mixed || keptSeen.Load() != 0) && isShared(p) {
 		// (What it points to is shared with it.)
 		return !fresh, fresh
 	}
