@@ -791,28 +791,44 @@ masks of all the functions of the class, ORed
   the function values of their signature. A function value made of
   memory by unsafe code, or defined in assembly without a Go declaration,
   is not known.
+- **Receivers.** A class's word has no bit for the receiver, so the
+  receivers of the methods with one name and signature are a class of
+  their own (`ir.ShareKeyRecv`, key `R.`): its word has one argument,
+  the receiver, and says whether a method of the class lets another
+  goroutine reach its receiver or stores it through another parameter,
+  which is what a conversion asks of a method (`convOK`). A value that
+  is converted to an interface type, or asserted to be of one, where
+  its methods are not all known to keep their receiver (a type with a
+  shape, a method that is not analysed yet), flows to the link roots of
+  the receivers of the interface's methods, at most four
+  (`escape/recv.go`: `recvLinkHoles`), where it was shared.
+- **A parameter that only has its own methods called.** A function says
+  of a parameter that it keeps it only by calls that check
+  (`ir.Func.KeptChecked`, for a hand-over), which is also so of one that
+  it only calls methods of, and its callers' arguments then went to the
+  heap of the calls that check, where the object is shared when the
+  program runs if the function that is called keeps it: none could be a
+  local object. A function now also says whether a call that checks is
+  among them (`ir.Func.KeptCalls`), and without one the argument goes to
+  the heap of the receivers, which no other goroutine reaches by itself.
 - `-d=nolocallink` turns it off in the compiler. `-ldflags=-v` prints
   how many words and records a program has, `-v=2` each word.
   `-gcflags=-m=2` now also prints, for a value that is shared, where it
   flows to and how (`is shared by`).
-- **Measured** (local objects in the tests, before → after):
-  `encoding/json` 1519 → 2159, `go/types` 39645 → 55895, `net/http`
-  39693 → 42055, `go/printer` 4841 → 4889; no local object was
-  published. That is little: an object has other ways to be shared, and
-  one is enough. For the nodes that `go/parser` makes, after this:
-  `ast.Walk` converts a node to an interface in a function with a type
-  parameter (`walkList`), where the methods of its type are not known;
-  and it passes the node to `fmt.Sprintf` in a branch that panics, and
-  what `fmt` prints is shared (the printer keeps it while it prints, and
-  calls its methods).
+- **Measured** (local objects in the tests: before, with the words of
+  the arguments, and with those of the receivers): `encoding/json` 1519,
+  2159, 2166; `go/types` 39645, 55895, 103230; `net/http` 39693, 42055,
+  42573; `go/printer` 4841, 4889, 9807; no local object was published.
+  That is still little: an object has other ways to be shared, and one
+  is enough. The nodes that `go/parser` makes are still shared, because
+  `ast.Walk` passes the node to `fmt.Sprintf` in a branch that panics,
+  and what `fmt` prints is shared (the printer keeps it while it
+  prints, and calls its methods).
 
 ### Next
 
-0. More of what the linker knows: the receivers (a class's word has no
-   bit for the receiver, so a conversion to an interface still asks
-   whether every method of the type is known to keep its receiver, and
-   in a function with type parameters none is); what `fmt` does with
-   its arguments; reflect's allocations.
+0. What `fmt` does with its arguments; reflect's allocations; the
+   tag of an object that has several words reads each word four times.
 1. Callees that are parameters: `each(head, func(it *item) {...})`
    makes what `head` leads to shared, since `each` passes it to a
    function it does not know. `each` could say "what `head` leads to

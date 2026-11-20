@@ -467,11 +467,15 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 // function for the linker (ir/sharelink.go): name is the kind of class
 // and the function's name.
 func addShareRecord(gd *base.Invocation, from *obj.LSym, name, key string, params []*types.Field, shares []ir.ParamShare) {
+	addShareRecordData(gd, from, name, func() []byte { return ir.ShareRecord(key, params, shares) })
+}
+
+func addShareRecordData(gd *base.Invocation, from *obj.LSym, name string, record func() []byte) {
 	if !ir.LocalSpans(gd) {
 		return
 	}
 	rec := gd.Ctxt.LookupInit(ir.ShareRecPrefix+name, func(s *obj.LSym) {
-		data := ir.ShareRecord(key, params, shares)
+		data := record()
 		s.WriteBytes(gd.Ctxt, 0, data)
 		gd.Ctxt.Globl(s, int64(len(data)), obj.DUPOK|obj.RODATA|obj.NOPTR)
 	})
@@ -498,6 +502,13 @@ func ShareRecords(gd *base.Invocation, fn *ir.Func) {
 				shares = shares[1:]
 			}
 			addShareRecord(gd, fn.LSym, "M."+fn.LSym.Name, key, t.Params(), shares)
+			// And of what it does with its receiver.
+			rkey, _ := ir.ShareKeyRecv(name, t)
+			var ps *ir.ParamShare
+			if len(fn.ParamShares) != 0 {
+				ps = &fn.ParamShares[0]
+			}
+			addShareRecordData(gd, fn.LSym, "R."+fn.LSym.Name, func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), ps) })
 		} else {
 			gd.FatalfAt(fn.Pos(), "no class of methods for %v", fn)
 		}
@@ -527,4 +538,6 @@ func ShareRecordUnknown(gd *base.Invocation, from *obj.LSym, fn *ir.Func) {
 		params[i] = types.NewField(f.Pos, f.Sym, f.Type)
 	}
 	addShareRecord(gd, from, "M."+ir.LinkFuncName(fn), key, params, nil)
+	rkey, _ := ir.ShareKeyRecv(name, t)
+	addShareRecordData(gd, from, "R."+ir.LinkFuncName(fn), func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), nil) })
 }

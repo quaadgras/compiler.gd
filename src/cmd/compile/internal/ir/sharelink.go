@@ -54,8 +54,8 @@ type ShareLink struct {
 // counts as shared.
 const MaxShareLinks = 4
 
-// A key is the kind of class (M for the methods of interfaces, F for
-// function values), a dot, the method's name for M, and the types of
+// A key is the kind of class (M for the methods of interfaces, R for
+// their receivers, F for function values), a dot, the method's name for M, and the types of
 // the parameters and of the results, each list in parentheses and each
 // type as its length, a colon and its link string. A type that has a
 // shape is written "?": such a key is a pattern, which a function with
@@ -98,6 +98,45 @@ func ShareKeyMethod(name string, t *types.Type) (key string, wild bool) {
 		return "", false
 	}
 	return sb.String(), w1 || w2
+}
+
+// ShareKeyRecv returns the key of the class of the receivers of the
+// methods with the given name and the parameters and results of t: its
+// word is a mask of one argument, the receiver, and says whether a
+// method of the class lets another goroutine reach its receiver, or
+// stores it through another parameter.
+func ShareKeyRecv(name string, t *types.Type) (key string, wild bool) {
+	key, wild = ShareKeyMethod(name, t)
+	if key == "" {
+		return "", false
+	}
+	return "R" + key[1:], wild
+}
+
+// ShareRecvRecord returns the record of a method for the class key of
+// its receiver recv, of which ps says where it goes, or nil if nobody
+// knows.
+func ShareRecvRecord(key string, recv *types.Field, ps *ParamShare) []byte {
+	var mask uint64
+	var links []ShareLink
+	switch {
+	case !recv.Type.HasPointers():
+	case ps == nil || ps.Share != 0 || ps.Via&^1 != 0:
+		mask = 1<<1 | 1<<EscMaskShared | 1<<EscMaskViaRecv | 1<<EscMaskHeld
+	default:
+		links = ps.Links
+	}
+	var b []byte
+	b = binary.LittleEndian.AppendUint64(b, mask)
+	b = binary.AppendUvarint(b, uint64(len(key)))
+	b = append(b, key...)
+	b = binary.AppendUvarint(b, uint64(len(links)))
+	for _, l := range links {
+		b = append(b, 0, l.Arg)
+		b = binary.AppendUvarint(b, uint64(len(l.Key)))
+		b = append(b, l.Key...)
+	}
+	return b
 }
 
 // ShareKeyFunc returns the key of the class of the function values

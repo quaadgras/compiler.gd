@@ -128,20 +128,21 @@ type batch struct {
 
 	// Dynamic roots (shares.go): by statement and path, the statements
 	// that are one plain assignment, and those with a call.
-	dynRoots    map[dynKey]*location
-	simpleStmts map[int32]bool
-	stmtCalls   map[int32]bool
-	calls       []*callSite      // callbits.go
-	convOKs     map[convKey]bool // recv.go
-	retTags     map[*ir.Func]ir.Node
-	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
-	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
-	dynArg      int          // that argument's place
-	dynKey      string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
-	recvArg     bool         // and that a method of its own may keep
-	recvAnyArg  bool         // whichever
-	checkedArg  bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
-	addrStmts   map[addrStmtKey]uint8
+	dynRoots      map[dynKey]*location
+	simpleStmts   map[int32]bool
+	stmtCalls     map[int32]bool
+	calls         []*callSite      // callbits.go
+	convOKs       map[convKey]bool // recv.go
+	retTags       map[*ir.Func]ir.Node
+	callArgs      []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
+	dynCall       *ir.CallExpr // the call of an unknown function whose argument's hole is made
+	dynArg        int          // that argument's place
+	dynKey        string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
+	recvArg       bool         // and that a method of its own may keep
+	recvAnyArg    bool         // whichever
+	checkCallsArg bool         // and a call that checks is one of them (ir.Func.KeptCalls)
+	checkedArg    bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
+	addrStmts     map[addrStmtKey]uint8
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,

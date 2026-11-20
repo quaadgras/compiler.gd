@@ -134,6 +134,7 @@ type location struct {
 	// the dynamic root of a call's argument, the check that the call
 	// can make (move.go).
 	kept      bool
+	keptCall  bool // it is passed to a call that checks, which shares it if the function called keeps it
 	keptRecv  bool // a method of its own may keep it: it is the receiver of a call of an interface's method
 	keptAny   bool // and that may be any method of its type: it is asserted to have others than its interface type's
 	keptCheck *keptCheck

@@ -926,13 +926,13 @@ func (b *batch) heldInHeap(root *location) (held, ok bool) {
 // of, all keep their i'th parameter, with the receiver, only by calls
 // that check, and whether one of them may by a method of the
 // parameter's own.
-func keptChecked(fns []*ir.Name, i int) (checked, recv, any bool) {
+func keptChecked(fns []*ir.Name, i int) (checked, recv, any, calls bool) {
 	if len(fns) == 0 || i >= 16 {
-		return false, false, false
+		return false, false, false, false
 	}
 	for _, fn := range fns {
 		if fn.Func == nil || fn.Func.KeptChecked&(1<<i) == 0 {
-			return false, false, false
+			return false, false, false, false
 		}
 		if fn.Func.KeptByRecv&(1<<i) != 0 {
 			recv = true
@@ -940,15 +940,25 @@ func keptChecked(fns []*ir.Name, i int) (checked, recv, any bool) {
 		if fn.Func.KeptByAny&(1<<i) != 0 {
 			any = true
 		}
+		if fn.Func.KeptCalls&(1<<i) != 0 {
+			calls = true
+		}
 	}
-	return true, recv, any
+	return true, recv, any, calls
 }
 
 // checkHoles returns the holes that stand for the heap in the tag of a
 // parameter that is kept only by calls that check: checkLoc, and
 // recvHeldLoc if a method of the argument's own may keep it.
 func (e *escape) checkHoles() []hole {
+	// Where no call checks, nothing is shared when the program runs:
+	// only methods of the argument's own are called, and the heap
+	// that no other goroutine reaches by itself, and that keeps
+	// nothing for a hand-over, is the receivers' (recv.go).
 	hs := []hole{e.checkHole()}
+	if !e.checkCallsArg && e.recvOn() {
+		hs[0] = e.recvLoc.asHole()
+	}
 	if e.recvArg {
 		hs = append(hs, e.recvHeldHole())
 	}
@@ -1028,6 +1038,9 @@ func (b *batch) markKeptChecks(fns []*ir.Func) {
 			}
 			if loc.keptAny {
 				fn.KeptByAny |= 1 << i
+			}
+			if loc.keptCall {
+				fn.KeptCalls |= 1 << i
 			}
 		}
 		if fn.KeptChecked != 0 && b.gd.Flag.LowerM >= 3 {

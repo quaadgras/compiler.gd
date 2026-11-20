@@ -88,9 +88,51 @@ func (e *escape) convHole(k hole, t, iface *types.Type) hole {
 	if e.convOK(t, iface) {
 		return k
 	}
-	k2 := e.teeHole(k, e.convShareHole())
+	// Not known here: a type with a shape, a method that is not
+	// analysed yet. The linker knows what the methods with those names
+	// do with their receivers, of all the types that the program has.
+	hs := e.recvLinkHoles(iface)
+	if hs == nil {
+		hs = []hole{e.convShareHole()}
+	}
+	k2 := e.teeHole(append([]hole{k}, hs...)...)
 	k2.recvOK, k2.recvAllOK = k.recvOK, k.recvAllOK
 	return k2
+}
+
+// maxRecvLinks is the number of methods of an interface type over which
+// what is converted to it is shared, where the type that is converted
+// does not say: each method is a place that the value goes to.
+const maxRecvLinks = 4
+
+// recvLinkHoles returns the holes for a value that is converted to the
+// interface type iface, or asserted to be of it, by something that does
+// not know its type: the link roots of the receivers of iface's methods
+// (callbits.go), or nil if there are none.
+func (e *escape) recvLinkHoles(iface *types.Type) []hole {
+	if !e.linksOn() || !iface.IsInterface() || iface.HasShape() {
+		return nil
+	}
+	methods := iface.AllMethods()
+	if len(methods) == 0 || len(methods) > maxRecvLinks {
+		return nil
+	}
+	var hs []hole
+	for _, m := range methods {
+		if m.Sym == nil {
+			return nil
+		}
+		key, wild := ir.ShareKeyRecv(m.Sym.Name, m.Type)
+		if key == "" || wild {
+			return nil
+		}
+		r := e.linkRootOf(key, 0, false)
+		if r == nil {
+			return nil
+		}
+		hs = append(hs, r.asHole())
+	}
+	return hs
 }
 
 // recvKeepsNothing reports whether t is a pointer type of which no
@@ -195,6 +237,9 @@ func (e *escape) assertHole1(k hole, t, from *types.Type) hole {
 	}
 	if !t.HasShape() && !from.HasShape() && from.IsInterface() && hasMethods(from, t) {
 		return k
+	}
+	if hs := e.recvLinkHoles(t); hs != nil {
+		return e.teeHole(append([]hole{k}, hs...)...)
 	}
 	return e.teeHole(k, e.convShareHole())
 }

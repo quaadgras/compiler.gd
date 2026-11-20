@@ -1579,17 +1579,84 @@ func TestSharedLink(t *testing.T) {
 	// Passed on by a method to the methods of another class: local
 	// only if nothing at the end shares, and a method with that name
 	// passes it on to one that keeps it.
-	if linkLocal(func() { sum += linkPass(&linkPassesRead{r: linkReads{}}, linkNew(7)) }) {
+	passer := &linkPassesRead{r: linkReads{}}
+	if linkLocal(func() { sum += linkPass(passer, linkNew(7)) }) {
 		t.Errorf("an object that a method passes on to one that shares it is local")
 	}
 	// The same, of a class whose methods only pass it on to readers.
-	if !linkLocal(func() { sum += linkRelay(&linkRelays{r: linkReads{}}, linkNew(8)) }) {
+	relayer := &linkRelays{r: linkReads{}}
+	if !linkLocal(func() { sum += linkRelay(relayer, linkNew(8)) }) {
 		t.Errorf("an object that a method passes on to one that only reads it is not local")
 	}
+
+	// Converted to an interface by a function that does not know the
+	// type: local if no method with those names, of any type, shares
+	// its receiver. The node, the object and its number are three.
+	if n := runtime.CountLocalAllocs(func() { sum += linkSum(linkConv(&linkLeaf{o: linkNew(9)})) }); n < 3 {
+		t.Errorf("%d local objects, want 3, of a value whose methods keep their receivers", n)
+	}
+	if n := runtime.CountLocalAllocs(func() {
+		sum += linkSum(linkConv(&linkTree{kids: []linkNoder{&linkLeaf{o: linkNew(10)}}}))
+	}); n < 3 {
+		t.Errorf("%d local objects, want at least 3, of a tree whose methods call each other", n)
+	}
+	for i := 0; i < 2; i++ {
+		var n uint64
+		if i == 0 {
+			n = runtime.CountLocalAllocs(func() { linkHold(linkConvHolder(&linkHoldsNot{o: linkNew(11)})) })
+		} else {
+			n = runtime.CountLocalAllocs(func() { linkHold(linkConvHolder(&linkHolds{o: linkNew(12)})) })
+		}
+		if n != 0 {
+			t.Errorf("%d local objects of a value of which a method with that name shares its receiver", n)
+		}
+	}
+	go func() { done <- *linkHeld.o.p }()
+	sum += <-done
 	if sum == 0 {
 		t.Errorf("no sum")
 	}
 }
+
+type linkNoder interface{ LinkNodeSum() int }
+
+type linkLeaf struct{ o *linkObj }
+
+func (n *linkLeaf) LinkNodeSum() int { return *n.o.p }
+
+type linkTree struct{ kids []linkNoder }
+
+func (n *linkTree) LinkNodeSum() int {
+	s := 0
+	for _, k := range n.kids {
+		s += k.LinkNodeSum()
+	}
+	return s
+}
+
+//go:noinline
+func linkConv[T linkNoder](x T) linkNoder { return x }
+
+//go:noinline
+func linkSum(n linkNoder) int { return n.LinkNodeSum() }
+
+type linkHolder interface{ LinkHold() }
+
+type linkHoldsNot struct{ o *linkObj }
+
+func (n *linkHoldsNot) LinkHold() {}
+
+type linkHolds struct{ o *linkObj }
+
+var linkHeld *linkHolds
+
+func (n *linkHolds) LinkHold() { linkHeld = n }
+
+//go:noinline
+func linkConvHolder[T linkHolder](x T) linkHolder { return x }
+
+//go:noinline
+func linkHold(h linkHolder) { h.LinkHold() }
 
 type linkRelayer interface{ RelayLinkObj(o *linkObj) int }
 

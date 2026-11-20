@@ -317,6 +317,7 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Len(int(name.Func.KeptChecked))
 	w.Len(int(name.Func.KeptByRecv))
 	w.Len(int(name.Func.KeptByAny))
+	w.Len(int(name.Func.KeptCalls))
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
 		w.Len(int(inl.Cost))

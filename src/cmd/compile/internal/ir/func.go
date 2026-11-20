@@ -226,6 +226,11 @@ type Func struct {
 	// have other methods than their interface type's: the caller
 	// answers for every method of the argument's type.
 	KeptByAny uint16
+	// KeptCalls has the ones of the parameters that are passed to a
+	// call that checks: the object is then shared if the function
+	// that is called keeps it, so it cannot be a local one. Of the
+	// others only methods of their own are called.
+	KeptCalls uint16
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:

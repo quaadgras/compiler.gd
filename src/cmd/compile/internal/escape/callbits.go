@@ -660,7 +660,13 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	checked := x == 0 && e.checkedArg
 	if ps == nil {
 		if checked {
-			return e.checkHoles()
+			// Nothing says where it goes for sharing: as if a
+			// call checked.
+			calls := e.checkCallsArg
+			e.checkCallsArg = true
+			hs := e.checkHoles()
+			e.checkCallsArg = calls
+			return hs
 		}
 		return []hole{e.heapHole().shift(e.gd, x)}
 	}
@@ -668,15 +674,17 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	tagKs := []hole{e.mutatorHole().shift(e.gd, x), e.calleeHole().shift(e.gd, x)}
 	if checked {
 		tagKs = append(tagKs, e.checkHoles()...)
-	} else {
-		if ps.Heap != 0 {
+	}
+	if !checked || !e.checkCallsArg && e.recvOn() {
+		if ps.Heap != 0 && !checked {
 			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
 		}
 		if ps.Share != 0 {
 			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
 		}
 		for _, l := range ps.Links {
-			if r := e.linkRoot(l.Key, int(l.Arg)); r != nil {
+			// (Whether it must be in the heap, the tag and Heap say.)
+			if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
 				tagKs = append(tagKs, r.asHole().shift(e.gd, int(l.Derefs)-1))
 			} else {
 				tagKs = append(tagKs, e.shareHole().shift(e.gd, int(l.Derefs)-1))
@@ -708,6 +716,38 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 		}
 	}
 	return tagKs
+}
+
+// shareOnlyHoles returns the holes for an argument of the function fn's
+// parameter param that the function does not put in the heap: where
+// another goroutine may reach it, as the parameter says.
+func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
+	if fn.Func == nil || fn.Func.ParamShares == nil || !e.shareTagsOn() {
+		return nil
+	}
+	var ps *ir.ParamShare
+	for i, f := range fn.Type().RecvParams() {
+		if f == param && i < len(fn.Func.ParamShares) {
+			ps = &fn.Func.ParamShares[i]
+		}
+	}
+	if ps == nil {
+		return nil
+	}
+	// (Nothing keeps the pointer: it is shared as what is converted
+	// to an interface is, and no holder for a hand-over.)
+	var hs []hole
+	if ps.Share != 0 {
+		hs = append(hs, e.convShareHole().shift(e.gd, int(ps.Share)-1))
+	}
+	for _, l := range ps.Links {
+		if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
+			hs = append(hs, r.asHole().shift(e.gd, int(l.Derefs)-1))
+		} else {
+			hs = append(hs, e.convShareHole().shift(e.gd, int(l.Derefs)-1))
+		}
+	}
+	return hs
 }
 
 // storeThroughArg returns the hole for what a function stores through
@@ -1004,20 +1044,31 @@ func (e *escape) linkKey(call *ir.CallExpr) string {
 // linkRoot returns the link root of the current function for the
 // argument arg of the functions of the class key, or nil.
 func (e *escape) linkRoot(key string, arg int) *location {
+	return e.linkRootOf(key, arg, true)
+}
+
+// linkRootOf is linkRoot; without heap, what flows to the root need not
+// be in the heap for it: the root only says who reaches it, as for the
+// receiver of a method that some call may be of (recv.go).
+func (e *escape) linkRootOf(key string, arg int, heap bool) *location {
 	if key == "" || arg < 0 || arg >= ir.EscMaskArgs || !e.linksOn() {
 		return nil
 	}
 	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
 		return nil
 	}
-	k := dynKey{0, fmt.Sprintf("link %p %d %s", e.curfn, arg, key)}
+	k := dynKey{0, fmt.Sprintf("link %p %d %v %s", e.curfn, arg, heap, key)}
 	if r := e.dynRoots[k]; r != nil {
 		return r
+	}
+	attrs := attrDynShares
+	if heap {
+		attrs |= attrEscapes | attrPersists | attrMutates | attrCalls
 	}
 	r := &location{
 		curfn:     e.curfn,
 		loopDepth: 1,
-		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
+		attrs:     attrs,
 		dynRoot:   &dynRoot{link: key, arg: arg},
 		isDynRoot: true,
 	}

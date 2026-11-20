@@ -131,6 +131,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		if l.param && lplain && l.plainDerefs == 0 {
 			// For the callers that would hand it over
 			// (ir.Func.KeptChecked).
+			if root == &b.checkLoc || root.isDynRoot && root.keptCheck != nil {
+				l.keptCall = true
+			}
 			if root == &b.recvHeldLoc {
 				l.keptRecv = true
 			} else if root == &b.recvAnyLoc {
@@ -232,6 +235,12 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			newAttrs |= attrReturned
 		}
 
+		if b.gd.Flag.LowerM >= 4 && l.param && l.n != nil && lraw && root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 && root != l {
+			// Every place where a parameter is shared, not only
+			// the first.
+			fmt.Printf("%s: parameter %v reaches what is shared, %s, for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
+			b.explainPath(root, l)
+		}
 		if b.gd.Flag.LowerM >= 2 && l.n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
 			// Why an object is not local.
 			fmt.Printf("%s: %v is shared by %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
