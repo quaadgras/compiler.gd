@@ -201,6 +201,15 @@ func checkptrArithmetic(p unsafe.Pointer, originals []unsafe.Pointer) {
 // access to an object that never gave its address away.
 
 // exposeptr marks the object of the heap that p points into as exposed.
+//
+// It cannot move the stack: the compiler calls it between the conversions
+// of the arguments of a call, and an address of the stack that one of them
+// made an integer of, for a system call to write to, must stay the
+// address of the variable until the call (syscall.SyscallN and the like
+// are nosplit for the same reason). So it is nosplit, and marks on the
+// system stack.
+//
+//go:nosplit
 func exposeptr(p unsafe.Pointer) {
 	if p == nil {
 		return
@@ -210,10 +219,20 @@ func exposeptr(p unsafe.Pointer) {
 		return
 	}
 	i := s.objIndex(uintptr(p))
-	mask := uint8(1) << (i % 8)
-	if bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits))); bits != nil && atomic.Load8(bits.bytep(i/8))&mask != 0 {
+	if bits := (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.exposedBits))); bits != nil && atomic.Load8(bits.bytep(i/8))&(uint8(1)<<(i%8)) != 0 {
 		return
 	}
+	systemstack(func() {
+		exposeobj(s, i)
+	})
+	KeepAlive(p)
+}
+
+// exposeobj marks object i of s as exposed.
+//
+//go:systemstack
+func exposeobj(s *mspan, i uintptr) {
+	mask := uint8(1) << (i % 8)
 	// The sweeper replaces the bitmap, so the span must be swept and
 	// stay so: as for the bits of shared.go.
 	mp := acquirem()
@@ -229,7 +248,6 @@ func exposeptr(p unsafe.Pointer) {
 	}
 	unlock(&s.speciallock)
 	releasem(mp)
-	KeepAlive(p)
 }
 
 // checkptrExposed reports whether p is in an exposed object of the heap.
