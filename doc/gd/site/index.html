@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>compiler.gd: a Go compiler that allocates on the stack</title>
-<meta name="description" content="gd is a fork of the Go compiler that aggressively allocates on the stack, to reduce GC pressure in real-time graphics.">
+<title>compiler.gd: a memory-safe compiler for C and Go</title>
+<meta name="description" content="gd is a memory-safe compiler for C and Go source code. It allocates aggressively on the stack, to reduce GC pressure and increase security for real-time graphics software on personal devices.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23c2410c'/><text x='16' y='22' font-family='monospace' font-size='15' font-weight='700' text-anchor='middle' fill='white'>gd</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -18,7 +18,7 @@
   </nav>
 
   <h1><span>gd</span> compiler</h1>
-  <p class="lede">A compiler for Go that aggressively allocates on the stack. Intended to reduce GC pressure in real-time graphics, and to let carefully designed programs run without a GC.</p>
+  <p class="lede">A memory-safe compiler for C and Go source code. It allocates aggressively on the stack. Intended to reduce GC pressure and increase security for real-time graphics software running on personal devices.</p>
 
   <div class="stat">
     <div><b>−59%</b><small>time for calls through closures and interfaces (1 allocation → 0)</small></div>
@@ -30,10 +30,12 @@
   <ol>
     <li>Interfaces include 16 bytes of inline storage (strings and slices both fit).</li>
     <li>Small string optimization (15 bytes stored without allocating or a hash).</li>
-    <li>Escape analysis for dynamic dispatch (closures and interfaces).</li>
-    <li>Pointer results can be allocated on the caller's stack (if they don't escape).</li>
+    <li>Escape analysis at run time for dynamic dispatch (closures and interfaces).</li>
+    <li>Results passed by reference can be allocated on the caller's stack (if they don't escape).</li>
     <li>The entire compiler and standard library in a single self-contained binary.</li>
-    <li>Small wasm/js binaries: about 400 KB for a fmt hello world, no dispatch loop.</li>
+    <li>Small wasm/js binaries: under 500 KB for a fmt hello world, with cgo supported.</li>
+    <li>Strict memory-safety checks on <code>unsafe.Pointer</code> and undefined behaviour.</li>
+    <li>Goroutine collection, and race analysis at run time that prevents memory tearing.</li>
   </ol>
 
   <h2>Measured</h2>
@@ -69,12 +71,16 @@
 cd compiler.gd/src &amp;&amp; ./make.bash</code></pre>
 
   <h2>How? Why?</h2>
-  <p><a href="https://github.com/Splizard">@Splizard</a>, the project's director, developed an interest (after 10 years of Go) in exploring what an alternative Go compiler could look like. Recent technology has made an endeavour of this scale far more accessible. The compiler is intended to support <a href="https://graphics.gd">graphics.gd</a>.</p>
+  <p><a href="https://github.com/Splizard">@Splizard</a>, the project's director, developed an interest (after 10 years of Go) in exploring what an alternative Go compiler could look like. Recent technology has made an endeavour of this scale far more accessible. The compiler is intended to eventually support <a href="https://graphics.gd">graphics.gd</a>.</p>
+
+  <h2>Contributing</h2>
+  <p>Contributions may be a better fit for the upstream <code>gc</code> compiler (<a href="https://go.dev">go.dev</a>). If you prefer to support <em>this</em> project, <a href="https://github.com/sponsors/Splizard">consider a sponsorship</a>.</p>
+  <p>If you've run into a compiler bug and you've confirmed it's unique to <code>gd</code>, you may open a PR to fix it; include an analysis of the issue and new tests. For larger changes please don't open a PR unless we've coordinated on a discussion thread.</p>
 
   <footer>
     <a href="https://github.com/quaadgras/compiler.gd">github.com/quaadgras/compiler.gd</a> ·
     MIT licensed ·
-    contributions may be a better fit for <a href="https://go.dev">go.dev</a>
+    <a href="https://github.com/sponsors/Splizard">sponsor</a>
   </footer>
 </main>
 </body>
