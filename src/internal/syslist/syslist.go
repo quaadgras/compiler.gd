@@ -41,7 +41,7 @@ var KnownOS = map[string]bool{
 // tag set); the files only some of them build are copied per host by
 // cmd/internal/apegen. This list also appears in cmd/internal/objabi.
 var APEHosts = map[string][]string{
-	"amd64": {"linux", "freebsd", "windows"},
+	"amd64": {"linux", "freebsd", "windows", "darwin"},
 	"arm64": {"linux", "darwin"},
 }
 

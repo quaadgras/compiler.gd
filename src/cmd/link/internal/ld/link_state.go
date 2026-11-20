@@ -102,9 +102,11 @@ type linkState struct {
 	flagTmpdir          string
 	flagExtar           string
 	flagCaptureHostObjs string
-	flagAPEFormat       string // -apeformat: elf or pe for GOOS=ape
-	apePE               bool   // writing a GOOS=ape program as a PE executable
-	apeMachO            bool   // writing a GOOS=ape program as a Mach-O executable
+	flagAPEFormat       string         // -apeformat: elf or pe for GOOS=ape
+	apePE               bool           // writing a GOOS=ape program as a PE executable
+	apeMachO            bool           // writing a GOOS=ape program as a Mach-O executable
+	apeDarwinLibs       []string       // darwin's libraries, of a GOOS=ape PE (ape_image.go)
+	apeDarwinImps       []apeDarwinImp // and what it imports of them
 	flagA               bool
 	FlagC               bool
 	FlagD               bool

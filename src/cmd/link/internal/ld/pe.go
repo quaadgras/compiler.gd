@@ -1802,6 +1802,7 @@ func addPEBaseReloc(ctxt *Link) {
 }
 
 func (ctxt *Link) dope() {
+	apeDarwinTable(ctxt)
 	initdynimport(ctxt)
 	initdynexport(ctxt)
 }

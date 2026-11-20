@@ -395,7 +395,14 @@ TEXT runtime·mstart_stub(SB),NOSPLIT|NOFRAME,$0
 
 	// Initialize TLS entry.
 	// See cmd/link/internal/ld/sym.go:computeTLSOffset.
+#ifdef GOOS_ape
+	// A GOOS=ape program has there the address of m.tls, which has g.
+	LEAQ	m_tls(DI), AX
+	MOVQ	DX, 0(AX)
+	MOVQ	AX, 0x30(GS)
+#else
 	MOVQ	DX, 0x30(GS)
+#endif
 
 	CALL	runtime·mstart(SB)
 

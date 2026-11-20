@@ -66,6 +66,12 @@ const (
 	// ELF executable too: of their addresses and file offsets.
 	ELFAlign = 0x4000
 
+	// PT_APE_DARWIN is the type of the program header of an image
+	// that says where the table of its darwin imports is, if darwin
+	// runs the image as the ELF executable it is (see cmd/link's
+	// ape_image.go).
+	PT_APE_DARWIN = 0x65706101
+
 	scriptOff = 0x40 // after the DOS header
 	elfHdrLen = 64   // of an ELF64 header
 )
@@ -187,7 +193,8 @@ func Pack(images []Image) ([]byte, error) {
 		arches[im.GOARCH] = true
 		fmt.Fprintf(&manifest, "#ape %s %d %d %s\n", im.GOARCH, off, len(im.Data), strings.Join(im.Hosts, ","))
 
-		// The hosts whose loader maps the image as it is (darwin's),
+		// The hosts whose loader maps the image as it is (darwin's: a
+		// Mach-O, or an ELF executable with a table of its imports),
 		// and those whose loader maps it as an ELF executable.
 		var native, elfHosts []string
 		for _, h := range im.Hosts {
@@ -203,10 +210,8 @@ func Pack(images []Image) ([]byte, error) {
 			}
 			pat := u + "/" + im.GOARCH
 			switch {
-			case h == "darwin" && kinds[i] == kindMachO:
-				native = append(native, pat)
 			case h == "darwin":
-				return nil, fmt.Errorf("apepack: darwin host of an image that is no Mach-O")
+				native = append(native, pat)
 			default:
 				elfHosts = append(elfHosts, pat)
 			}

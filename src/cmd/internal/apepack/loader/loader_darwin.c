@@ -11,8 +11,9 @@
 //
 //	loader file off argv0 [args]
 //
-// where the program's image, a Mach-O executable, is at off in file
-// (decimal). The loader does for it what the kernel and dyld do for a
+// where the program's image is at off in file (decimal). If the image
+// is a Mach-O executable, the loader does for it what the kernel and
+// dyld do for a
 // Mach-O that is a file of its own: it gives the system the image's
 // signature, maps the image's segments from file (somewhere else than
 // they were linked for, where the loader is, so it rebases the image),
@@ -21,6 +22,10 @@
 // argv0 and args. The entry point (the runtime's) is told file's name in
 // place of an environment: by a third argument that is nil and a fourth
 // that is the name.
+//
+// If the image is not (see elf), the loader maps it as the ELF
+// executable it is, where it was linked to be, and binds the imports its
+// table lists.
 //
 // It is built by mkloader.sh into ../zloader.go.
 
@@ -169,6 +174,91 @@ static int within(struct segment_command_64 *s, uint64_t off, uint64_t size) {
 	return off >= s->fileoff && size <= s->filesize && off - s->fileoff <= s->filesize - size;
 }
 
+// An image that is no Mach-O (the PE of a GOARCH that has Windows for a
+// host) is an ELF executable too, with one more program header, which
+// says where the table of what the image imports of darwin's libraries
+// is (see cmd/link/internal/ld/ape_image.go).
+
+#define PEELFOFF 0xc00 // of the ELF header in a PE (apepack.PEELFOff)
+#define PT_LOAD 1
+#define PT_APE_DARWIN 0x65706101
+#define PF_X 1
+#define PF_W 2
+#define PF_R 4
+
+struct ehdr {
+	uint8_t ident[16];
+	uint16_t type, machine;
+	uint32_t version;
+	uint64_t entry, phoff, shoff;
+	uint32_t flags;
+	uint16_t ehsize, phentsize, phnum, shentsize, shnum, shstrndx;
+};
+
+struct phdr {
+	uint32_t type, flags;
+	uint64_t offset, vaddr, paddr, filesz, memsz, align;
+};
+
+// elf runs the image at off of fd whose ELF header is at eoff.
+__attribute__((noreturn)) static void elf(int argc, char **argv, int fd, long long off, long long eoff) {
+	const char *file = argv[1];
+	struct ehdr eh;
+	struct phdr ph[16];
+	if (readat(fd, &eh, sizeof eh, eoff) < 0 ||
+		eh.ident[0] != 0x7f || eh.ident[1] != 'E' || eh.ident[2] != 'L' || eh.ident[3] != 'F' ||
+		eh.phentsize != sizeof ph[0] || eh.phnum > sizeof ph / sizeof ph[0] ||
+		readat(fd, ph, eh.phnum * sizeof ph[0], off + eh.phoff) < 0)
+		die(file, "no image of the program where the file says", 0);
+
+	// Map the segments where they were linked to be. (The loader is
+	// not there: the system puts it somewhere in the 256 MB from 4 GB,
+	// and a PE is linked for 5 GB and up.)
+	uint64_t *table = 0, tablesize = 0;
+	for (int i = 0; i < eh.phnum; i++) {
+		struct phdr *p = &ph[i];
+		if (p->type == PT_LOAD && p->vaddr <= (uint64_t)elf && (uint64_t)elf < p->vaddr + p->memsz)
+			die(file, "the loader is where the program is to be", 0);
+		if (p->type == PT_APE_DARWIN) {
+			table = (uint64_t *)p->vaddr;
+			tablesize = p->memsz / 8;
+		}
+		if (p->type != PT_LOAD || p->memsz == 0)
+			continue;
+		if (p->vaddr % PAGE || p->offset % PAGE || p->filesz > p->memsz)
+			die(file, "bad image", 0);
+		int prot = (p->flags & PF_R ? 1 : 0) | (p->flags & PF_W ? 2 : 0) | (p->flags & PF_X ? 4 : 0);
+		uint64_t end = (p->vaddr + p->memsz + PAGE - 1) & -PAGE;
+		uint64_t fend = (p->vaddr + p->filesz + PAGE - 1) & -PAGE;
+		if (fend > p->vaddr && mmap((void *)p->vaddr, fend - p->vaddr, prot, MAP_PRIVATE | MAP_FIXED, fd, off + p->offset) == MAP_FAILED)
+			die(file, "cannot map the program", 0);
+		if (end > fend && mmap((void *)fend, end - fend, prot, MAP_PRIVATE | MAP_FIXED | MAP_ANON, -1, 0) == MAP_FAILED)
+			die(file, "cannot map the program", 0);
+		if (p->filesz < p->memsz && (prot & PROT_WRITE))
+			for (char *z = (char *)(p->vaddr + p->filesz); z < (char *)fend; z++)
+				*z = 0;
+	}
+	close(fd);
+	if (!table || tablesize < 3 || table[1] > tablesize || table[2] > tablesize || 3 + table[1] + 2 * table[2] > tablesize)
+		die(file, "this program does not run on this system", 0);
+
+	// Bind the imports.
+	uint64_t nlibs = table[1], nimps = table[2];
+	uint64_t *t = table + 3;
+	for (uint64_t i = 0; i < nlibs; i++, t++)
+		if (!dlopen((const char *)*t, RTLD_LAZY))
+			die(file, "cannot load ", (const char *)*t);
+	for (uint64_t i = 0; i < nimps; i++, t += 2) {
+		void *v = dlsym(RTLD_DEFAULT, (const char *)t[1]);
+		if (!v)
+			die(file, "the system has no ", (const char *)t[1]);
+		*(uint64_t *)t[0] = (uint64_t)v;
+	}
+
+	((void (*)(int, char **, void *, const char *))table[0])(argc - 3, argv + 3, 0, file);
+	_exit(127);
+}
+
 static char cmds[MAXCMDS];
 
 int main(int argc, char **argv) {
@@ -186,8 +276,11 @@ int main(int argc, char **argv) {
 	if (fd < 0)
 		die(file, "cannot open the file", 0);
 	struct mach_header_64 mh;
-	if (readat(fd, &mh, sizeof mh, off) < 0 || mh.magic != MH_MAGIC_64 || mh.sizeofcmds > MAXCMDS ||
-		readat(fd, cmds, mh.sizeofcmds, off + sizeof mh) < 0)
+	if (readat(fd, &mh, sizeof mh, off) < 0)
+		die(file, "no image of the program where the file says", 0);
+	if (mh.magic != MH_MAGIC_64)
+		elf(argc, argv, fd, off, (mh.magic & 0xffff) == 0x5a4d /* MZ */ ? off + PEELFOFF : off);
+	if (mh.sizeofcmds > MAXCMDS || readat(fd, cmds, mh.sizeofcmds, off + sizeof mh) < 0)
 		die(file, "no image of the program where the file says", 0);
 
 	struct segment_command_64 *segs[MAXSEGS], *linkedit = 0;

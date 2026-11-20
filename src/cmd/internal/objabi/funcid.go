@@ -100,7 +100,7 @@ func APEDisplayName(name string) string {
 // import (it is built with the bootstrap toolchain): the systems a
 // GOOS=ape program runs on, by GOARCH.
 var APEHosts = map[string][]string{
-	"amd64": {"linux", "freebsd", "windows"},
+	"amd64": {"linux", "freebsd", "windows", "darwin"},
 	"arm64": {"linux", "darwin"},
 }
 

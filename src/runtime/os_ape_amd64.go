@@ -12,12 +12,14 @@ const (
 	apeLinux = 1 + iota
 	apeFreebsd
 	apeWindows
+	apeDarwin
 )
 
 // apeGOOSNames are the hosts' names, by apehost.
-var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd", apeWindows: "windows"}
+var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd", apeWindows: "windows", apeDarwin: "darwin"}
 
-// apeinitFile finds the program's file, as the host's loader says it.
+// apeinitFile finds the program's file, as the host's loader says it
+// (darwin's says it to the entry point).
 //
 //go:nosplit
 func apeinitFile(c int32, v **byte) {

@@ -89,6 +89,10 @@ type pkgGen struct {
 	canon     map[string]bool // types that are the first host's, converted for others
 	api       map[string]*iface
 
+	// splitPushes are the linkname targets in other packages that are a
+	// different function on different hosts.
+	splitPushes map[string]bool
+
 	// pushes maps a linkname target in another package (time.now) to
 	// the function each host pushes to it.
 	pushes map[string]map[string]*types.Func
@@ -1289,6 +1293,20 @@ func (g *pkgGen) findPushes() {
 	sort.Strings(targets)
 	for _, t := range targets {
 		by := g.pushes[t]
+		// Functions that differ between the hosts are not one function:
+		// each host's is pushed to that host's name (see splitPull).
+		shapes := map[string]bool{}
+		for _, fn := range by {
+			shapes[sigShape(fn)] = true
+		}
+		if len(shapes) > 1 {
+			if g.splitPushes == nil {
+				g.splitPushes = map[string]bool{}
+			}
+			g.splitPushes[t] = true
+			delete(g.pushes, t)
+			continue
+		}
 		// Pushed by only some hosts: the others do not use it.
 		savedHosts := g.hs
 		var present []*hostPkg
@@ -1313,6 +1331,28 @@ func (g *pkgGen) findPushes() {
 		g.decls.WriteString(out)
 		g.hs = savedHosts
 	}
+}
+
+// sigShape is what of fn's signature has to be the same for one function
+// to stand for the hosts' functions.
+func sigShape(fn *types.Func) string {
+	sig := fn.Type().(*types.Signature)
+	return fmt.Sprint(sig.Params().Len(), sig.Variadic(), sig.Results().Len())
+}
+
+// splitPull reports whether the function name, which has no body, is a
+// different function on different hosts: another package pushes each
+// host's to the host's name.
+func (g *pkgGen) splitPull(name string) bool {
+	shapes := map[string]bool{}
+	for _, hp := range g.hs {
+		fn, ok := hp.pkg.Scope().Lookup(name).(*types.Func)
+		if !ok || hp.hasBody(fn) || g.asmDefinesFunc(hp, name) {
+			continue
+		}
+		shapes[sigShape(fn)] = true
+	}
+	return len(shapes) > 1
 }
 
 func cutLast(s, sep string) (before, after string, ok bool) {

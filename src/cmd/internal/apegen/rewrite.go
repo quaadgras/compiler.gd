@@ -388,7 +388,11 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 				break
 			}
 			needUnsafe = true
-			edits = append(edits, edit{off(n.Pos()), off(n.Pos()), fmt.Sprintf("//go:linkname %s %s.%s\n", hp.rename[fn], g.path, fn.Name())})
+			target := fn.Name()
+			if g.splitPull(target) {
+				target = hp.rename[fn]
+			}
+			edits = append(edits, edit{off(n.Pos()), off(n.Pos()), fmt.Sprintf("//go:linkname %s %s.%s\n", hp.rename[fn], g.path, target)})
 		case *ast.CallExpr:
 			// A shared function takes the ape type where the host file
 			// passes its own.
@@ -562,6 +566,12 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					fs = append(fs, g.path+"."+fs[1])
 				}
 				fs[1] = newName
+			}
+			if len(fs) == 3 && g.splitPushes[fs[2]] {
+				pkg, name, _ := cutLast(fs[2], ".")
+				fs[2] = pkg + "." + hostName(hp.host, name)
+				edits = append(edits, edit{off(c.Pos()), off(c.End()), strings.Join(fs, " ")})
+				continue
 			}
 			if len(fs) == 3 && g.pushes[fs[2]] != nil {
 				edits = append(edits, edit{off(c.Pos()), off(c.End()), "// (apegen: zape_dispatch pushes " + fs[2] + ")"})

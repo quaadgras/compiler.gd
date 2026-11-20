@@ -899,6 +899,10 @@ TEXT ·asmcgocall_landingpad(SB),NOSPLIT,$0-0
 	ADJSP	$-32
 	RET
 landingpadUnix:
+	// (Not a tail call: this function has a frame, for the above.)
+	MOVQ	BX, DI
+	CALL	AX
+	RET
 #endif
 #ifdef GOOS_windows
 	// Make sure we have enough room for 4 stack-backed fast-call

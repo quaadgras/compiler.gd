@@ -123,12 +123,20 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 				return
 			}
 
+			if apeDarwinHost(ctxt) && apeDarwinLib(lib) {
+				// darwin's loader binds darwin's imports.
+				if before, _, found := strings.Cut(remote, "#"); found {
+					remote = before
+				}
+				apeDarwinImport(ctxt, local, remote, lib)
+				continue
+			}
 			if ctxt.HeadType == objabi.Hape {
 				// Another host's imports, which the program never
 				// uses where it runs as this executable: a Windows
 				// import is a word of zero no code reads; code calls
 				// a darwin one, which is a trap.
-				if strings.HasSuffix(lib, ".dylib") {
+				if apeDarwinLib(lib) {
 					apeTrap(ctxt, local)
 				}
 				continue

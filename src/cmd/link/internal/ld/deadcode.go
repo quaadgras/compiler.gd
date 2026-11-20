@@ -82,6 +82,9 @@ func (d *deadcodePass) init() {
 			// The entry of the ELF hosts (see ape_image.go).
 			names = append(names, apeELFEntry())
 		}
+		if apeDarwinHost(d.ctxt) {
+			names = append(names, apeDarwinEntry())
+		}
 	}
 	// runtime.unreachableMethod is a function that will throw if called.
 	// We redirect unreachable methods to it.
