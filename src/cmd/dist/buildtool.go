@@ -43,6 +43,7 @@ var bootstrapDirs = []string{
 	"cmd/cgo/internal/cgomain",
 	"cmd/compile",
 	"cmd/compile/internal/...",
+	"cmd/internal/apepack",
 	"cmd/internal/archive",
 	"cmd/internal/bio",
 	"cmd/internal/codesign",

@@ -718,17 +718,23 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 	} else {
 		env = append(env, "GOROOT="+cfg.GOROOT)
 	}
-	args := []any{cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags, mainpkg}
-	// gd fork: cmd/link in-process is opt-in via GOGD_INPROC_LINK=1.
-	// The host package + Exit/Goexit dance is in place but cmd/link's
-	// package-level state (DWARF caches, Mach-O/ELF format vars,
-	// etc.) is not yet per-Link; back-to-back invocations would carry
-	// stale state. Default stays fork/exec until that migration
-	// finishes.
-	if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(env) {
-		return inProcessLink(b.Shell(root), dir, root.Package.ImportPath, env, args)
+	link := func(targetPath string, ldflags []string) error {
+		args := []any{cfg.BuildToolexec, base.Tool("link"), "-o", targetPath, "-importcfg", importcfg, ldflags, mainpkg}
+		// gd fork: cmd/link in-process is opt-in via GOGD_INPROC_LINK=1.
+		// The host package + Exit/Goexit dance is in place but cmd/link's
+		// package-level state (DWARF caches, Mach-O/ELF format vars,
+		// etc.) is not yet per-Link; back-to-back invocations would carry
+		// stale state. Default stays fork/exec until that migration
+		// finishes.
+		if useInProcessLink() && len(cfg.BuildToolexec) == 0 && !cfg.BuildN && canRunInProcess(env) {
+			return inProcessLink(b.Shell(root), dir, root.Package.ImportPath, env, args)
+		}
+		return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
 	}
-	return b.Shell(root).run(dir, root.Package.ImportPath, env, args...)
+	if apePacked(root, ldBuildmode, ldflags) {
+		return apeLink(targetPath, ldflags, link)
+	}
+	return link(targetPath, ldflags)
 }
 
 func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action, targetPath, importcfg string, allactions []*Action) error {

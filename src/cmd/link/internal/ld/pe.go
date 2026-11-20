@@ -9,6 +9,7 @@ package ld
 
 import (
 	"bytes"
+	"cmd/internal/apepack"
 	"cmd/internal/objabi"
 	"cmd/internal/sys"
 	"cmd/link/internal/loader"
@@ -1242,7 +1243,7 @@ func Peinit(ctxt *Link) {
 
 	var sh [16]pe.SectionHeader32
 	var fh pe.FileHeader
-	ctxt.PEFILEHEADR = int32(Rnd(int64(len(dosstub)+binary.Size(&fh)+l+binary.Size(&sh)), ctxt.PEFILEALIGN))
+	ctxt.PEFILEHEADR = int32(Rnd(int64(len(ctxt.dosStub())+binary.Size(&fh)+l+binary.Size(&sh)), ctxt.PEFILEALIGN))
 	if ctxt.LinkMode != LinkExternal {
 		ctxt.PESECTHEADR = int32(Rnd(int64(ctxt.PEFILEHEADR), ctxt.PESECTALIGN))
 	} else {
@@ -1295,10 +1296,19 @@ func Peinit(ctxt *Link) {
 	}
 }
 
+// dosStub returns the DOS header of the PE: under GOOS=ape, one that is
+// also the start of the shell script of the one file for all its hosts.
+func (ctxt *Link) dosStub() []byte {
+	if ctxt.apePE {
+		return apepack.DOSStub()
+	}
+	return dosstub
+}
+
 func pewrite(ctxt *Link) {
 	ctxt.Out.SeekSet(0)
 	if ctxt.LinkMode != LinkExternal {
-		ctxt.Out.Write(dosstub)
+		ctxt.Out.Write(ctxt.dosStub())
 		ctxt.Out.WriteStringN("PE", 4)
 	}
 	ctxt.pefile.
