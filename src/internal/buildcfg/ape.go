@@ -13,14 +13,15 @@ import (
 
 // A program for several systems at once is built by naming them:
 //
-//	GOOS=linux,windows,darwin GOARCH=amd64,arm64 go build
+//	GOOS=linux,darwin GOARCH=amd64,arm64 go build
 //
 // writes one file that runs on each named system on each named
-// architecture that system has a host of (apeAllHosts). To the toolchain
-// that is GOOS=ape, the port whose programs find the system they run on
-// when they start, for the hosts $GOAPEHOSTS on the architectures
-// $GOAPEARCHES: apeLists rewrites the environment so, when the package
-// starts. GOOS=ape itself is every host on every architecture.
+// architecture; every pair of them has to be one there is a host of
+// (APEAllHosts). Inside the toolchain that is GOOS=ape, the port whose
+// programs find the system they run on when they start, for the hosts
+// $GOAPEHOSTS on the architectures $GOAPEARCHES: apeLists rewrites the
+// environment so, when the package starts. GOOS=ape is not a system to
+// ask for: only the toolchain says it, with $GOAPEHOSTS.
 
 // APEAllHosts lists, by GOARCH, the systems a GOOS=ape program can run
 // on, in the order of the runtime's numbers for them (apehost). This
@@ -76,6 +77,9 @@ func apeLists() {
 	apeListsOnce.Do(func() {
 		goos, goarch := os.Getenv("GOOS"), os.Getenv("GOARCH")
 		if !strings.Contains(goos, ",") && !strings.Contains(goarch, ",") {
+			if goos == "ape" && os.Getenv("GOAPEHOSTS") == "" {
+				APEError = fmt.Errorf("GOOS=ape: name the systems the program is for, as in GOOS=linux,windows")
+			}
 			return
 		}
 		split := func(s, def string) []string {
@@ -94,36 +98,33 @@ func apeLists() {
 		fail := func(format string, args ...any) {
 			APEError = fmt.Errorf("GOOS=%s GOARCH=%s: "+format, append([]any{goos, goarch}, args...)...)
 			// (Something the tools know, so that they get to say so.)
-			os.Setenv("GOOS", oses[0])
-			os.Setenv("GOARCH", arches[0])
-		}
-		if len(oses) == 1 && oses[0] == "ape" {
-			// Every host there is, on these architectures.
-			os.Setenv("GOARCH", arches[0])
-			os.Setenv("GOAPEARCHES", strings.Join(arches, ","))
-			return
+			os.Setenv("GOOS", defaultGOOS)
+			os.Setenv("GOARCH", defaultGOARCH)
 		}
 		if len(oses) < 2 {
 			fail("several architectures of one system are not one file (yet)")
 			return
 		}
-		list := strings.Join(oses, ",")
-		for _, o := range oses {
-			found := false
-			for _, a := range arches {
-				found = found || len(APEHostsOf(a, o)) > 0
-			}
-			if !found {
-				fail("no %s in a program for several systems on %s", o, strings.Join(arches, ","))
-				return
-			}
-		}
+		// Every system on every architecture.
+		var missing []string
 		for _, a := range arches {
-			if hosts := APEHostsOf(a, list); len(hosts) < 2 {
-				fail("a program for several systems has at least two on each architecture: on %s there are %s", a, strings.Join(APEAllHosts[a], ", "))
-				return
+			for _, o := range oses {
+				if len(APEHostsOf(a, o)) == 0 {
+					missing = append(missing, o+"/"+a)
+				}
 			}
 		}
+		if missing != nil {
+			var have []string
+			for _, a := range []string{"amd64", "arm64"} {
+				for _, o := range APEAllHosts[a] {
+					have = append(have, o+"/"+a)
+				}
+			}
+			fail("no %s in a program for several systems (there are %s)", strings.Join(missing, ", "), strings.Join(have, ", "))
+			return
+		}
+		list := strings.Join(oses, ",")
 		os.Setenv("GOOS", "ape")
 		os.Setenv("GOARCH", arches[0])
 		os.Setenv("GOAPEHOSTS", list)

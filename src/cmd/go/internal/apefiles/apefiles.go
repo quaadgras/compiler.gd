@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"internal/buildcfg"
 	"io"
 	"io/fs"
 	"maps"
@@ -51,7 +52,7 @@ func Std() {
 		base.Fatalf("go: GOOS=ape: %v", err)
 	}
 	m, err := cached("std-"+key, func() (*apegen.Result, error) {
-		fmt.Fprintf(os.Stderr, "go: GOOS=ape: generating the host files of std (once for these sources)\n")
+		fmt.Fprintf(os.Stderr, "go: generating the files of std for %s (once for these sources)\n", strings.Join(buildcfg.APEHosts(cfg.Goarch), ","))
 		acfg := config()
 		paths, err := apegen.Candidates(acfg)
 		if err != nil {
@@ -165,7 +166,7 @@ func User(pkgs []Pkg) bool {
 	}
 	key := hex.EncodeToString(h.Sum(nil)[:16])
 	m, err := cached("user-"+key, func() (*apegen.Result, error) {
-		fmt.Fprintf(os.Stderr, "go: GOOS=ape: generating the host files of %s\n", strings.Join(gen, ", "))
+		fmt.Fprintf(os.Stderr, "go: generating the systems' files of %s\n", strings.Join(gen, ", "))
 		std, err := apegen.Candidates(acfg)
 		if err != nil {
 			return nil, err

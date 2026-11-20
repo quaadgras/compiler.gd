@@ -46,20 +46,16 @@ func apePacked(root *Action, buildmode string, ldflags []string) bool {
 }
 
 // apeArches returns the GOARCHes whose executables the one file has:
-// $GOAPEARCHES (a comma-separated list), or else every GOARCH GOOS=ape
-// has; GOARCH's first.
+// $GOAPEARCHES (a comma-separated list, of $GOARCH's), or else GOARCH
+// alone; GOARCH's first.
 func apeArches() []string {
 	var arches []string
 	if s := os.Getenv("GOAPEARCHES"); s != "" {
 		arches = strings.Split(s, ",")
-	} else {
-		arches = slices.Sorted(maps.Keys(buildcfg.APEAllHosts))
 	}
 	out := []string{cfg.Goarch}
 	for _, a := range arches {
-		// (An architecture with one host of $GOAPEHOSTS, or none, has
-		// no GOOS=ape program.)
-		if a = strings.TrimSpace(a); a != "" && !slices.Contains(out, a) && len(buildcfg.APEHosts(a)) >= 2 {
+		if a = strings.TrimSpace(a); a != "" && !slices.Contains(out, a) {
 			out = append(out, a)
 		}
 	}
