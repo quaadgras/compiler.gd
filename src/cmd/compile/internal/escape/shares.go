@@ -215,6 +215,7 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 			delete(cand, name)
 		}
 	}
+	b.noteDeferWraps(fn)
 	ir.VisitFuncAndClosures(fn, func(n ir.Node) {
 		switch n := n.(type) {
 		case *ir.AssignStmt:
@@ -255,6 +256,11 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 				drop(n.Var)
 			}
 		case *ir.ClosureExpr:
+			if b.deferWraps[n.Func] != nil {
+				// Only a call, when the function ends, with
+				// the variables as arguments (move.go).
+				break
+			}
 			for _, cv := range n.Func.ClosureVars {
 				drop(cv.Canonical())
 			}
@@ -277,7 +283,7 @@ func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func
 		switch n.Op() {
 		case ir.ONIL:
 			return true
-		case ir.ODOTTYPE, ir.ODOTTYPE2:
+		case ir.ODOTTYPE, ir.ODOTTYPE2, ir.OCALLFUNC:
 			return got && poolGot(n)
 		case ir.OCONVNOP, ir.OPAREN:
 			switch n := n.(type) {

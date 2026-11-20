@@ -239,11 +239,12 @@ type CallExpr struct {
 	GoDefer   bool // whether this call is part of a go or defer statement
 	NoInline  bool // whether this call must not be inlined
 	UseBuf    bool // use stack buffer for backing store (OAPPEND only)
-	// HandOver is, for a call of (*sync.Pool).Put that hands its
-	// object over, the variable that points to the object (escape
+	// HandOver is, for a call of (*sync.Pool).Put, or of a function
+	// that ends in one, that hands an object over, one more than the
+	// index in Args of the argument that points to the object (escape
 	// analysis, move.go).
-	HandOver      *Name `mknode:"-"`
-	AppendNoAlias bool  // backing store proven to be unaliased (OAPPEND only)
+	HandOver      int
+	AppendNoAlias bool // backing store proven to be unaliased (OAPPEND only)
 	// whether it's a runtime.KeepAlive call the compiler generates to
 	// keep a variable alive. See #73137.
 	IsCompilerVarLive bool

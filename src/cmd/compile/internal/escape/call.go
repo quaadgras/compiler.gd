@@ -118,12 +118,12 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for _, arg := range args {
 				argument(e.discardHole(), arg)
 			}
-		} else if e.poolPut(call, fns, recvArg, args) != nil {
+		} else if e.poolPut(call, fns, recvArg, args) {
 			// The object goes to the heap, and what it holds to
 			// where another goroutine reaches it: whether it is
 			// handed over is known when the graph is solved.
 			argument(e.discardHole(), recvArg)
-			argument(e.teeHole(e.moveHole().note(e.gd, call, "put (handed over)"), e.shareHole().deref(e.gd, call, "put (contents)")), args[0])
+			argument(e.handOverHole(call), args[0])
 		} else if isEscapeNonString(fns, fntype) {
 			// internal/abi.EscapeNonString forces its argument to
 			// the heap if it contains a non-string pointer. This is
@@ -173,6 +173,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.dynCall, e.dynArg = dyn, dynFirst-1
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
 				e.callArgs, e.dynCall = nil, nil
+				if e.consumedArg(call, fns, 0, recvArg) {
+					k = e.handOverHole(call)
+				}
 				if call.Op() == ir.OCALLINTER {
 					// The receiver of a method that is only known
 					// when the program runs (recv.go).
@@ -189,6 +192,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.dynCall, e.dynArg = dyn, dynFirst+i
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
 				e.callArgs, e.dynCall = nil, nil
+				if e.consumedArg(call, fns, first+i, args[i]) {
+					k = e.handOverHole(call)
+				}
 				argument(k, args[i])
 			}
 		}

@@ -583,12 +583,19 @@ func walkCall(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		reflectdata.MarkUsedIfaceMethod(gd, n)
 	}
 
-	if n.HandOver != nil {
+	if n.HandOver != 0 {
 		// Say that the object is handed over to the pool, right
-		// before Put asks (runtime.poolhandover).
-		p := typecheck.ConvNop(gd, n.HandOver, types.Types[types.TUNSAFEPTR])
-		init.Append(mkcall(gd, "poolhandover", nil, init, p))
-		n.HandOver = nil
+		// before the call that ends in Put, which asks
+		// (runtime.poolhandover).
+		arg := n.Args[n.HandOver-1]
+		n.HandOver = 0
+		for arg.Op() == ir.OCONVIFACE || arg.Op() == ir.OCONVNOP {
+			arg = arg.(*ir.ConvExpr).X
+		}
+		if arg.Op() == ir.ONAME && arg.Type().IsPtr() {
+			p := typecheck.ConvNop(gd, arg, types.Types[types.TUNSAFEPTR])
+			init.Append(mkcall(gd, "poolhandover", nil, init, p))
+		}
 	}
 
 	if n.Op() == ir.OCALLFUNC && n.Fun.Op() == ir.OCLOSURE {

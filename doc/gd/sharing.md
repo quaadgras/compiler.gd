@@ -96,12 +96,36 @@ its life.
   What any other `New` returns, `Get` shares: it could be kept
   elsewhere, in an object that is itself handed around.
 
+  **Across calls.** Code that uses a pool has helpers: one returns
+  what `Get` gave (`newPrinter`), one is given the object and puts it
+  back (`func (p *pp) free()`), and that one is often deferred. So a
+  function says two things of itself, which are exported with it:
+  - `ir.Func.OwnedResult`: what it returns is always a variable as
+    above (or it only returns an allocation), with nothing else holding
+    the object. A call of it is then a source like `Get`.
+  - `ir.Func.Consumes`: it hands a parameter over, to `Put` or to a
+    function that does, and does nothing else that keeps the pointer
+    (the same proof, for the parameter and the variables that only hold
+    its pointer). A call of it is then a place that hands over, like
+    `Put`: the caller, if the object is its own, calls `poolhandover`
+    before the call, and the `Put` at the end finds the same pointer.
+    A function that only consumes says nothing to the runtime itself.
+
+  A deferred call that hands over (`defer p.free()`) runs when the
+  function ends: nothing has to follow it, but no other deferred call
+  may have the variable, the statement may not be in a loop, and the
+  function may not return the object. The function that the compiler
+  makes of the deferred call is recognised when it only makes that
+  call with the function's variables, also when the call was inlined
+  into it.
+
   A buffer taken from a pool, appended to 64 times and put back took
-  1.0 µs and takes 0.45 µs (0.07 µs with no sharing at all). Only 3 of
-  the standard library's hundred or so calls of `Put` are shown to hand
-  over: most are in a helper that is given the object (`func (p *pp)
-  free()`), or deferred, and get what `Get` returned from another
-  helper. Those need the proof to cross calls.
+  1.0 µs and takes 0.45 µs (0.07 µs with no sharing at all). `gofmt` of
+  `go`, `net` and `cmd/compile`, whose printer comes from a pool and
+  took a lock for each of twelve million appends to its output, takes
+  4.0 s of CPU where it took 5.5 (3.0 with no sharing at all). `fmt` is
+  not helped: it passes its printer to the `Format` and `String` methods
+  of what it prints, as a `fmt.State`, and they may keep it.
 - A store of a pointer in a global or in a shared object: the compiler's
   barrier, below.
 - The runtime's own stores: `sync/atomic`'s pointer operations, the copies

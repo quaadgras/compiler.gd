@@ -199,6 +199,15 @@ type Func struct {
 	LocalBitsVar   *Name
 	TakesLocalBits bool
 
+	// Consumes has bit k set if the function hands over what its
+	// k'th parameter (the receiver first) points to, to a sync.Pool
+	// or to a function that does, and does nothing else that keeps
+	// it; OwnedResult, that what the function returns is an object
+	// that nobody else has, or that is shared (escape analysis,
+	// move.go).
+	Consumes    uint16
+	OwnedResult bool
+
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:
 	// the escape tags only say that it is in the heap. Nil if it is

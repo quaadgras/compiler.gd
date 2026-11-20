@@ -156,11 +156,11 @@ func (e *escape) stmt(n ir.Node) {
 	case ir.OSEND:
 		n := n.(*ir.SendStmt)
 		e.discard(n.Chan)
-		if e.moveCandidate(n) != nil {
+		if e.moveCandidate(n) {
 			// The object goes to the heap, and what it holds
 			// to where another goroutine reaches it; whether it
 			// is handed over is known when the graph is solved.
-			e.expr(e.teeHole(e.moveHole().note(e.gd, n, "send (moved)"), e.shareHole().deref(e.gd, n, "send (contents)")), n.Value)
+			e.expr(e.handOverHole(n), n.Value)
 			break
 		}
 		e.assignHeap(n.Value, "send", n)
@@ -201,6 +201,7 @@ func (e *escape) stmt(n ir.Node) {
 		}
 		// (Only these assignments of the results end the function:
 		// see location.assignedInBody.)
+		e.noteReturn(n)
 		e.returning = true
 		ks := e.addrs(dsts)
 		e.returning = false

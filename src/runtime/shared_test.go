@@ -1011,6 +1011,54 @@ func handPoolKeep() *sharedNode {
 	return n
 }
 
+// handPoolGet and handPoolFree are the helpers that code which uses a
+// pool has: one returns what the pool gave, the other puts it back.
+//
+//go:noinline
+func handPoolGet() *sharedNode {
+	n := handPool.Get().(*sharedNode)
+	n.v = 0
+	return n
+}
+
+//go:noinline
+func (n *sharedNode) handPoolFree() {
+	if n.v < 0 {
+		return
+	}
+	handPool.Put(n)
+}
+
+// handPoolHelpers uses the helpers, and keeps no way to the node.
+//
+//go:noinline
+func handPoolHelpers() bool {
+	n := handPoolGet()
+	shared := isShared(n)
+	n.i = "y"
+	n.handPoolFree()
+	return shared
+}
+
+// handPoolDeferred puts the node back with a deferred call.
+//
+//go:noinline
+func handPoolDeferred() bool {
+	n := handPoolGet()
+	defer n.handPoolFree()
+	n.i = "z"
+	return isShared(n)
+}
+
+// handPoolDeferredKept returns the node that a deferred call puts back.
+//
+//go:noinline
+func handPoolDeferredKept() *sharedNode {
+	n := handPoolGet()
+	defer n.handPoolFree()
+	return n
+}
+
 // TestSharedPool checks that an object that is put in a pool by a
 // function that keeps no way to it is not shared when the pool gives it
 // out again, while what it points to is; that it is shared if the
@@ -1032,6 +1080,16 @@ func TestSharedPool(t *testing.T) {
 			t.Errorf("round %d: an object handed back to the pool is shared (%v), or what it points to is not (%v)", i, shared, !tailShared)
 		}
 	}
+	for i := 0; i < 3; i++ {
+		if handPoolHelpers() {
+			t.Errorf("round %d: an object handed back to the pool by a helper is shared", i)
+		}
+		if handPoolDeferred() {
+			t.Errorf("round %d: an object handed back to the pool by a deferred call is shared", i)
+		}
+	}
+	wantShared(t, "put in a pool by a deferred call and returned", handPoolDeferredKept(), true)
+	handPool.Get() // not the one that is shared
 	kept := handPoolKeep()
 	wantShared(t, "put in a pool and kept", kept, true)
 	if n := handPool.Get().(*sharedNode); n == kept {

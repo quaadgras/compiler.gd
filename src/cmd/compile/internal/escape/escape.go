@@ -106,6 +106,9 @@ type batch struct {
 	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
 	moveLoc      location // where a pointer that is handed over goes: the heap, and out of its goroutine's hands (move.go)
 	moves        []moveSend
+	paramClass   map[*ir.Name]*ir.Name // the variables that only hold a parameter's pointer, and that parameter (move.go)
+	returns      map[*ir.Func]*returned
+	deferWraps   map[*ir.Func]*deferWrap
 	calleeLoc    location
 	blankLoc     location
 	candidateLoc location
@@ -297,6 +300,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 	}
 
 	b.trackPointers(fn)
+	b.trackParams(fn)
 }
 
 func (b *batch) walkFunc(fn *ir.Func) {

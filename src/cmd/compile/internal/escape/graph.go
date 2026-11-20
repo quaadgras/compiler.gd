@@ -120,6 +120,13 @@ type location struct {
 	// something else than those variables holds a pointer to those
 	// contents (move.go).
 	moveCand, moveHeld bool
+	// retCand marks such contents that the function returns; deferred,
+	// that a deferred call hands them over.
+	retCand, deferred bool
+	// later marks the temporaries of the hole of that name, which
+	// forward a value some time later.
+	later  bool
+	heldBy string
 
 	// escapedInGraph is set when src's address flowed to a location
 	// that already escaped (the heap) while the graph was built: flow
@@ -505,6 +512,7 @@ func (e *escape) teeHole(ks ...hole) hole {
 // variables introduced during Order.
 func (e *escape) later(k hole) hole {
 	loc := e.newLoc(nil, true)
+	loc.later = true
 	e.flow(k, loc)
 	return loc.asHole()
 }

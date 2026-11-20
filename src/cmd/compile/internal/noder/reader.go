@@ -1293,6 +1293,8 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.Heap = uint8(r.Len())
 			}
 		}
+		fn.Consumes = uint16(r.Len())
+		fn.OwnedResult = r.Bool()
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

@@ -113,6 +113,13 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		derefs := l.derefs
 		var newAttrs locAttr
 
+		if l.param && l.moveCand && derefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
+			// root keeps the pointer of a parameter that the
+			// function would hand over.
+			l.moveHeld = true
+			l.heldBy = b.explainLoc(root)
+		}
+
 		// If l.derefs < 0, then l's address flows to root.
 		addressOf := derefs < 0
 		if addressOf {
@@ -264,6 +271,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				// root keeps a pointer to an object that a send
 				// would hand over: it is not handed over.
 				edge.src.moveHeld = true
+				edge.src.heldBy = b.explainLoc(root)
 			}
 			srcRaw := lraw && !edge.ro
 			rd := rawDerefs + edge.derefs
