@@ -6,6 +6,7 @@ package objabi
 
 import (
 	"internal/abi"
+	"internal/buildcfg"
 	"maps"
 	"slices"
 	"strings"
@@ -96,13 +97,9 @@ func APEDisplayName(name string) string {
 	return name[:start] + strings.Join(parts, ".")
 }
 
-// APEHosts is internal/syslist.APEHosts, which the toolchain cannot
-// import (it is built with the bootstrap toolchain): the systems a
-// GOOS=ape program runs on, by GOARCH.
-var APEHosts = map[string][]string{
-	"amd64": {"linux", "freebsd", "windows", "darwin"},
-	"arm64": {"linux", "darwin"},
-}
+// APEHosts is the systems a GOOS=ape program can run on, by GOARCH
+// (buildcfg.APEAllHosts; buildcfg.APEHosts is those of this build).
+var APEHosts = buildcfg.APEAllHosts
 
 // allAPEHosts is every architecture's APEHosts.
 var allAPEHosts = func() []string {

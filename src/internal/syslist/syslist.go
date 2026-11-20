@@ -39,7 +39,8 @@ var KnownOS = map[string]bool{
 // APEHosts lists, by GOARCH, the systems a GOOS=ape program runs on. A
 // file builds for ape if it builds for every one of them (with the "ape"
 // tag set); the files only some of them build are copied per host by
-// cmd/internal/apegen. This list also appears in cmd/internal/objabi.
+// cmd/internal/apegen. This list also appears in internal/buildcfg,
+// whose APEHosts is those a build is for.
 var APEHosts = map[string][]string{
 	"amd64": {"linux", "freebsd", "windows", "darwin"},
 	"arm64": {"linux", "darwin"},

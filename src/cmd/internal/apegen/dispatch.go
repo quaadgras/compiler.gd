@@ -12,6 +12,7 @@ import (
 	"go/format"
 	"go/token"
 	"go/types"
+	"internal/buildcfg"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1081,12 +1082,9 @@ func (g *pkgGen) writeDispatch() {
 	}
 	if !g.isRuntime() {
 		b.WriteString("\n//go:linkname apehost runtime.apehost\nvar apehost uint8\n\nconst (\n")
-		for i, h := range g.u.hosts {
-			if i == 0 {
-				fmt.Fprintf(&b, "\tape%s = 1 + iota\n", title(h))
-			} else {
-				fmt.Fprintf(&b, "\tape%s\n", title(h))
-			}
+		// (The runtime's numbers: os_ape_$GOARCH.go.)
+		for _, h := range g.u.hosts {
+			fmt.Fprintf(&b, "\tape%s = %d\n", title(h), hostNumber(h))
 		}
 		b.WriteString(")\n")
 	}
@@ -1163,7 +1161,7 @@ func (g *pkgGen) writeAsmDispatch() {
 		}
 		for i, hp := range g.hs {
 			if i < len(g.hs)-1 {
-				c := fmt.Sprintf("$%d", i+1)
+				c := fmt.Sprintf("$%d", hostNumber(hp.host))
 				if g.isRuntime() {
 					c = "$const_ape" + title(hp.host)
 				}
@@ -1354,4 +1352,11 @@ func constLit(c *types.Const) string {
 		return v.String()
 	}
 	return v.ExactString()
+}
+
+// hostNumber is the runtime's number for host (apehost): one more than
+// its index among all the hosts of the architecture, of which a build
+// may have only some.
+func hostNumber(host string) int {
+	return buildcfg.APEHostIndex(*arch, host) + 1
 }

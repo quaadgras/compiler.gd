@@ -344,7 +344,7 @@ func asmArgs(a *Action, p *load.Package) []any {
 	// Add -I pkg/GOOS_GOARCH so #include "textflag.h" works in .s files.
 	inc := filepath.Join(cfg.GOROOT, "pkg", "include")
 	pkgpath := pkgPath(a)
-	args := []any{cfg.BuildToolexec, base.Tool("asm"), "-p", pkgpath, "-trimpath", a.trimpath(), "-I", a.Objdir, "-I", inc, "-D", "GOOS_" + cfg.Goos, "-D", "GOARCH_" + cfg.Goarch, forcedAsmflags, p.Internal.Asmflags}
+	args := []any{cfg.BuildToolexec, base.Tool("asm"), "-p", pkgpath, "-trimpath", a.trimpath(), "-I", a.Objdir, "-I", inc, "-D", "GOOS_" + cfg.Goos, "-D", "GOARCH_" + cfg.Goarch, apeAsmDefs(), forcedAsmflags, p.Internal.Asmflags}
 	if cfg.Goos == "ape" {
 		// The host copies of assembly files are apegen's, elsewhere: they
 		// include the package's headers.

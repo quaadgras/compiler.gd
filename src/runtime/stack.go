@@ -92,7 +92,8 @@ const (
 	// stackNosplit is the maximum number of bytes that a chain of NOSPLIT
 	// functions can use.
 	// This arithmetic must match that in cmd/internal/objabi/stack.go:StackNosplit.
-	stackNosplit = abi.StackNosplitBase * sys.StackGuardMultiplier
+	// (And more under GOOS=ape: see cmd/internal/objabi's StackNosplit.)
+	stackNosplit = abi.StackNosplitBase*sys.StackGuardMultiplier + 128*goos.IsApe
 
 	// The stack guard is a pointer this many bytes above the
 	// bottom of the stack.

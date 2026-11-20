@@ -10,20 +10,42 @@
 // _rt0_amd64_ape is the entry point of a GOOS=ape program run as an ELF
 // executable. Linux starts a process with DI zero; FreeBSD passes the
 // address of argc in it.
+//
+// (The assembler has GOAPEHOST_linux defined if Linux is a host of the
+// program, and so on: a program is for all of GOOS=ape's hosts or for
+// some. On a host it is not for, it stops.)
 TEXT _rt0_amd64_ape(SB),NOSPLIT,$-8
 	TESTQ	DI, DI
 	JNZ	freebsd
+#ifdef GOAPEHOST_linux
 	MOVB	$const_apeLinux, runtime·apehost(SB)
 	JMP	_rt0_amd64_linux(SB)
+#else
+	MOVL	$1, DI
+	MOVL	$231, AX	// exit_group
+	SYSCALL
+	INT	$3
+#endif
 freebsd:
+#ifdef GOAPEHOST_freebsd
 	MOVB	$const_apeFreebsd, runtime·apehost(SB)
 	JMP	_rt0_amd64_freebsd(SB)
+#else
+	MOVL	$1, DI
+	MOVL	$1, AX	// exit
+	SYSCALL
+	INT	$3
+#endif
 
 // _rt0_amd64_ape_windows is the entry point of a GOOS=ape program run as
 // a PE executable.
 TEXT _rt0_amd64_ape_windows(SB),NOSPLIT,$-8
+#ifdef GOAPEHOST_windows
 	MOVB	$const_apeWindows, runtime·apehost(SB)
 	JMP	_rt0_amd64_windows(SB)
+#else
+	INT	$3
+#endif
 
 // _rt0_amd64_ape_darwin is the entry point of a GOOS=ape program on
 // darwin: the loader of the program's file (cmd/internal/apepack/loader)
@@ -43,6 +65,7 @@ GLOBL runtime·tls_g+0(SB), NOPTR, $8
 
 // settls(DI = &m.tls) makes the word at GS:tls_g point at m.tls.
 TEXT runtime·settls(SB),NOSPLIT|NOFRAME,$0
+#ifdef GOAPEHOST_windows
 	CMPB	runtime·apehost(SB), $const_apeWindows
 	JNE	unix
 	CMPQ	runtime·tls_g(SB), $0
@@ -50,6 +73,7 @@ TEXT runtime·settls(SB),NOSPLIT|NOFRAME,$0
 	CALL	runtime·windows_wintls(SB)	// keeps DI
 	JMP	runtime·windows_settls(SB)
 unix:
+#endif
 	CMPB	runtime·apehost(SB), $const_apeFreebsd
 	JEQ	freebsd
 	CMPB	runtime·apehost(SB), $const_apeDarwin

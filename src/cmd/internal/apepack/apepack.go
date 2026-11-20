@@ -13,8 +13,9 @@
 // ape_image.go); only the first bytes of the file have to be the ELF
 // header's for an ELF host to run it.
 //
-// The file is the PE image, whose DOS header is also the start of a
-// shell script, and the other images after it:
+// The file of a program that has Windows for a host is the PE image,
+// whose DOS header is also the start of a shell script, and the other
+// images after it:
 //
 //	MZgoape='<rest of the DOS header>
 //	'
@@ -23,7 +24,9 @@
 //	<other images>
 //
 // Windows loads the PE. A Unix kernel does not know the file, so the
-// shell that asked it to run the file runs it as a script instead; the
+// shell that asked it to run the file runs it as a script instead. (The
+// file of a program that is not for Windows starts with "#!/bin/sh" and
+// the script, which a Unix kernel runs itself.) The
 // script finds the image for the system and machine it runs on (uname)
 // and runs the system's loader for it, which is in the file too, after
 // the images, and maps the image from the program's file. Nothing of the
@@ -40,6 +43,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -52,6 +56,9 @@ const (
 	// magic starts the file: "MZ" and the start of a shell variable
 	// assignment whose single quotes hold the rest of the DOS header.
 	magic = "MZgoape='\n"
+
+	// shMagic starts a file that is not for Windows.
+	shMagic = "#!/bin/sh\n"
 
 	// PEELFOff is where a PE has its ELF header (after its own, before
 	// its first section).
@@ -158,21 +165,30 @@ func Pack(images []Image) ([]byte, error) {
 			return nil, err
 		}
 		kinds[i] = k
-		if k == kindPE {
+		// Windows's image is the file's start.
+		if slices.Contains(im.Hosts, "windows") {
+			if k != kindPE {
+				return nil, fmt.Errorf("apepack: windows host of an image that is no PE")
+			}
 			if pe >= 0 {
-				return nil, fmt.Errorf("apepack: two PE images")
+				return nil, fmt.Errorf("apepack: two images for Windows")
 			}
 			pe = i
 		}
 	}
+	// The script is in the DOS header of Windows's PE or, in a file
+	// that is not for Windows, a script as Unix kernels know them (and
+	// run themselves).
 	var out []byte
+	scriptOff := scriptOff
 	if pe >= 0 {
 		out = append(out, images[pe].Data...)
+		if bytes.IndexByte(out[len(magic):scriptOff], '\'') >= 0 {
+			return nil, fmt.Errorf("apepack: quote in the DOS header")
+		}
 	} else {
-		out = stub("")
-	}
-	if bytes.IndexByte(out[len(magic):scriptOff], '\'') >= 0 {
-		return nil, fmt.Errorf("apepack: quote in the DOS header")
+		out = bytes.Repeat([]byte{'\n'}, StubSize)
+		scriptOff = 0
 	}
 
 	var manifest, cases strings.Builder
@@ -199,9 +215,6 @@ func Pack(images []Image) ([]byte, error) {
 		var native, elfHosts []string
 		for _, h := range im.Hosts {
 			if h == "windows" {
-				if kinds[i] != kindPE {
-					return nil, fmt.Errorf("apepack: windows host of an image that is no PE")
-				}
 				continue
 			}
 			u, ok := unames[h]
@@ -278,7 +291,11 @@ func Pack(images []Image) ([]byte, error) {
 	// file's name too, for os.Executable. The #ape lines say where the
 	// images are (see Images).
 	align := strconv.Itoa(ELFAlign)
-	script := "'\n" + manifest.String() +
+	start := "'\n" // the end of the DOS header's quote
+	if pe < 0 {
+		start = shMagic
+	}
+	script := start + manifest.String() +
 		"o=$0\ncase $o in /*)p=$o;;*)p=$PWD/${o#./};;esac\n" +
 		"m=`uname -m`\nu=`uname -s`\n" +
 		"case $m in " + archCases.String() + "*)a=$m;;esac\n" +
@@ -302,7 +319,11 @@ func Pack(images []Image) ([]byte, error) {
 	if scriptOff+len(script) > StubSize {
 		return nil, fmt.Errorf("apepack: the script is %d bytes, more than its %d", len(script), StubSize-scriptOff)
 	}
-	copy(out[scriptOff:StubSize], bytes.Repeat([]byte{' '}, StubSize-scriptOff))
+	pad := byte(' ')
+	if pe < 0 {
+		pad = '\n'
+	}
+	copy(out[scriptOff:StubSize], bytes.Repeat([]byte{pad}, StubSize-scriptOff))
 	copy(out[scriptOff:], script)
 	return out, nil
 }
@@ -317,11 +338,18 @@ type Section struct {
 // Images returns where the images are in r, if it is a packed file.
 func Images(r io.ReaderAt) ([]Section, bool) {
 	b := make([]byte, StubSize)
-	if _, err := r.ReadAt(b, 0); err != nil || !bytes.HasPrefix(b, []byte(magic)) {
+	if _, err := r.ReadAt(b, 0); err != nil {
+		return nil, false
+	}
+	switch {
+	case bytes.HasPrefix(b, []byte(magic)):
+		b = b[scriptOff:]
+	case bytes.HasPrefix(b, []byte(shMagic+"#ape ")):
+	default:
 		return nil, false
 	}
 	var secs []Section
-	for _, line := range strings.Split(string(b[scriptOff:]), "\n") {
+	for _, line := range strings.Split(string(b), "\n") {
 		f := strings.Fields(line)
 		if len(f) != 5 || f[0] != "#ape" {
 			continue

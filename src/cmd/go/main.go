@@ -104,6 +104,10 @@ func main() {
 	}
 	handleChdirFlag()
 	toolchain.Select()
+	if buildcfg.APEError != nil {
+		fmt.Fprintf(os.Stderr, "go: %v\n", buildcfg.APEError)
+		os.Exit(2)
+	}
 
 	if !cmdIsGoTelemetryOff {
 		telemetry.MaybeParent() // Run the upload process. Opening the counter file is idempotent.

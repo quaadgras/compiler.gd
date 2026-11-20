@@ -6,7 +6,7 @@ package load
 
 import (
 	"go/build"
-	"internal/syslist"
+	"internal/buildcfg"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -35,7 +35,7 @@ func apeVariantPath(path string) (host, rest string, ok bool) {
 		return "", "", false
 	}
 	host, rest, ok = strings.Cut(rest, "/")
-	if !ok || !slices.Contains(syslist.APEHosts[cfg.BuildContext.GOARCH], host) {
+	if !ok || !slices.Contains(buildcfg.APEHosts(cfg.BuildContext.GOARCH), host) {
 		return "", "", false
 	}
 	return host, rest, true

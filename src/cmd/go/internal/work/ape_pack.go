@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"internal/syslist"
+	"internal/buildcfg"
 	"maps"
 	"os"
 	"os/exec"
@@ -53,15 +53,31 @@ func apeArches() []string {
 	if s := os.Getenv("GOAPEARCHES"); s != "" {
 		arches = strings.Split(s, ",")
 	} else {
-		arches = slices.Sorted(maps.Keys(syslist.APEHosts))
+		arches = slices.Sorted(maps.Keys(buildcfg.APEAllHosts))
 	}
 	out := []string{cfg.Goarch}
 	for _, a := range arches {
-		if a = strings.TrimSpace(a); a != "" && !slices.Contains(out, a) {
+		// (An architecture with one host of $GOAPEHOSTS, or none, has
+		// no GOOS=ape program.)
+		if a = strings.TrimSpace(a); a != "" && !slices.Contains(out, a) && len(buildcfg.APEHosts(a)) >= 2 {
 			out = append(out, a)
 		}
 	}
 	return out
+}
+
+// apeAsmDefs returns the assembler's definitions of the hosts of a
+// GOOS=ape build (GOAPEHOST_linux): the runtime's entry points are for
+// those there are.
+func apeAsmDefs() []string {
+	if cfg.Goos != "ape" {
+		return nil
+	}
+	var defs []string
+	for _, h := range buildcfg.APEHosts(cfg.Goarch) {
+		defs = append(defs, "-D", "GOAPEHOST_"+h)
+	}
+	return defs
 }
 
 // apePackedID identifies, for the link action ID of root, what else
@@ -72,7 +88,7 @@ func apePackedID(root *Action) string {
 	h := cache.NewHash("apepacked")
 	fmt.Fprintf(h, "packer %s\n", apePackerID())
 	arches := apeArches()
-	fmt.Fprintf(h, "arches %q\n", arches)
+	fmt.Fprintf(h, "arches %q hosts %q\n", arches, os.Getenv("GOAPEHOSTS"))
 	if len(arches) > 1 {
 		for _, v := range []string{"GOAMD64", "GOARM64", "GOFLAGS"} {
 			fmt.Fprintf(h, "%s=%s\n", v, os.Getenv(v))
@@ -141,11 +157,14 @@ func apeBuildFlags() []string {
 
 // apeFormat returns the format of the one image of the hosts of arch:
 // a PE if Windows is one (whose image is an ELF executable too), else a
-// Mach-O if darwin is (likewise), else ELF.
+// Mach-O if darwin is (likewise), else ELF. On amd64, darwin's loader
+// runs the PE's ELF executable, so there it is a PE for darwin too.
 func apeFormat(arch string) string {
-	hosts := syslist.APEHosts[arch]
+	hosts := buildcfg.APEHosts(arch)
 	switch {
 	case slices.Contains(hosts, "windows"):
+		return "pe"
+	case slices.Contains(hosts, "darwin") && arch == "amd64":
 		return "pe"
 	case slices.Contains(hosts, "darwin"):
 		return "macho"
@@ -167,7 +186,7 @@ func apeLink(root *Action, target string, ldflags []string, link func(string, []
 	if err != nil {
 		return err
 	}
-	images := []apepack.Image{{GOARCH: cfg.Goarch, Hosts: syslist.APEHosts[cfg.Goarch], Data: data}}
+	images := []apepack.Image{{GOARCH: cfg.Goarch, Hosts: buildcfg.APEHosts(cfg.Goarch), Data: data}}
 	for _, arch := range apeArches()[1:] {
 		more, err := apeBuildArch(root, target, arch)
 		if err != nil {
@@ -185,7 +204,7 @@ func apeLink(root *Action, target string, ldflags []string, link func(string, []
 // apeBuildArch builds root's program for arch, as one file of its own
 // hosts, and returns its images.
 func apeBuildArch(root *Action, target, arch string) ([]apepack.Image, error) {
-	if _, ok := syslist.APEHosts[arch]; !ok {
+	if _, ok := buildcfg.APEAllHosts[arch]; !ok {
 		return nil, fmt.Errorf("GOOS=ape: no GOARCH %s in $GOAPEARCHES", arch)
 	}
 	p := root.Package

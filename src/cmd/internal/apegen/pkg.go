@@ -12,6 +12,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"internal/buildcfg"
 	"log"
 	"os"
 	"path/filepath"
@@ -89,6 +90,12 @@ type pkgGen struct {
 	canon     map[string]bool // types that are the first host's, converted for others
 	api       map[string]*iface
 
+	// every is the number of hosts of the architecture, and otherXTests
+	// the external test files of those this run is not for, by how many
+	// of them build each.
+	every       int
+	otherXTests map[string]int
+
 	// splitPushes are the linkname targets in other packages that are a
 	// different function on different hosts.
 	splitPushes map[string]bool
@@ -153,15 +160,52 @@ func newPkgGen(u *universe, path string) *pkgGen {
 		}
 		g.hs = append(g.hs, &hostPkg{host: h, ctxt: ctxt, bp: bp, u: u})
 	}
+	// A host that does not build the package is before those that do, as
+	// the first of all the hosts is for the packages only the others
+	// have: the first host's types are the ape package's.
+	slices.SortStableFunc(g.hs, func(a, b *hostPkg) int {
+		empty := func(hp *hostPkg) int {
+			if len(hp.bp.GoFiles) == 0 {
+				return 0
+			}
+			return 1
+		}
+		return empty(a) - empty(b)
+	})
+
+	// A file is shared if every host of the architecture builds it, also
+	// those this run is not for (cfg.Hosts may be some of them): what is
+	// a host's own does not depend on which other hosts the program has
+	// (and it is what builds for GOOS=ape: see go/build).
+	var others []*build.Package
+	for _, h := range buildcfg.APEAllHosts[*arch] {
+		if slices.Contains(u.hosts, h) {
+			continue
+		}
+		ctxt := build.Default
+		ctxt.GOROOT = gorootDir
+		ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = h, *arch, false
+		bp, err := ctxt.ImportDir(g.dir, 0)
+		if err != nil || bp == nil {
+			bp = &build.Package{}
+		}
+		others = append(others, bp)
+	}
+	every := len(g.hs) + len(others)
 	count := map[string]int{}
 	for _, hp := range g.hs {
 		for _, f := range slices.Concat(hp.bp.GoFiles, hp.bp.SFiles) {
 			count[f]++
 		}
 	}
+	for _, bp := range others {
+		for _, f := range slices.Concat(bp.GoFiles, bp.SFiles) {
+			count[f]++
+		}
+	}
 	g.shared = map[string]bool{}
 	for f, n := range count {
-		if n == len(g.hs) {
+		if n == every {
 			g.shared[f] = true
 		}
 	}
@@ -193,11 +237,23 @@ func newPkgGen(u *universe, path string) *pkgGen {
 			}
 		}
 	}
+	for _, bp := range others {
+		for _, f := range bp.TestGoFiles {
+			tcount[f]++
+		}
+	}
 	for f, n := range tcount {
-		if n == len(g.hs) {
+		if n == every {
 			g.sharedTests[f] = true
 		}
 	}
+	g.otherXTests = map[string]int{}
+	for _, bp := range others {
+		for _, f := range bp.XTestGoFiles {
+			g.otherXTests[f]++
+		}
+	}
+	g.every = every
 	return g
 }
 
@@ -486,6 +542,7 @@ func (g *pkgGen) run() {
 				renamed[fn.Name()] = append(renamed[fn.Name()], fn.Signature())
 			}
 		}
+		var viaInterface []*types.Func
 		implements := func(m *types.Func) bool {
 			for _, s := range renamed[m.Name()] {
 				if sameSig(s, m.Signature()) {
@@ -505,6 +562,37 @@ func (g *pkgGen) run() {
 			}
 			for m := range it.ExplicitMethods() {
 				if implements(m) {
+					hp.rename[m] = hostName(hp.host, m.Name())
+					viaInterface = append(viaInterface, m)
+				}
+			}
+		}
+		if viaInterface == nil {
+			continue
+		}
+		implementsRenamed := func(m *types.Func) bool {
+			for _, im := range viaInterface {
+				if im.Name() == m.Name() && sameSig(im.Signature(), m.Signature()) {
+					return true
+				}
+			}
+			return false
+		}
+		// And so have the host types' methods that implement it (the
+		// shared types' are those renamed above: which types are
+		// shared depends on the hosts).
+		scope := hp.pkg.Scope()
+		for _, name := range scope.Names() {
+			tn, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			nt, ok := tn.Type().(*types.Named)
+			if !ok {
+				continue
+			}
+			for m := range nt.Methods() {
+				if _, done := hp.rename[m]; !done && hp.inOnly(m.Pos()) && implementsRenamed(m) {
 					hp.rename[m] = hostName(hp.host, m.Name())
 				}
 			}

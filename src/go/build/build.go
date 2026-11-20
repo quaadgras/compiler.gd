@@ -1942,8 +1942,11 @@ func (ctxt *Context) matchAuto(text string, allTags map[string]bool) bool {
 
 func (ctxt *Context) eval(x constraint.Expr, allTags map[string]bool) bool {
 	if ctxt.GOOS == "ape" {
-		// A file builds for ape if it builds for every host ape runs on.
-		for _, host := range syslist.APEHosts[ctxt.GOARCH] {
+		// A file builds for ape if it builds for every host ape runs on:
+		// every one there is, also when the program is for some of
+		// them ($GOAPEHOSTS), so that what is a host's own does not
+		// depend on which other hosts the program has.
+		for _, host := range buildcfg.APEAllHosts[ctxt.GOARCH] {
 			if !x.Eval(func(tag string) bool { return ctxt.matchAPETag(tag, host, allTags) }) {
 				return false
 			}

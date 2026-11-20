@@ -52,7 +52,7 @@ import (
 	"fmt"
 	"go/build"
 	"go/token"
-	"internal/syslist"
+	"internal/buildcfg"
 	"io/fs"
 	"path/filepath"
 	"slices"
@@ -94,7 +94,7 @@ type Config struct {
 func DefaultConfig(goroot, arch string) Config {
 	return Config{
 		GOROOT:     goroot,
-		Hosts:      syslist.APEHosts[arch],
+		Hosts:      buildcfg.APEHosts(arch),
 		Arch:       arch,
 		Tests:      true,
 		MaxConsts:  "runtime._NSIG",
@@ -177,7 +177,9 @@ func Generate(cfg Config, paths []string) (res *Result, err error) {
 func Differs(cfg Config, dir string) bool {
 	var first []string
 	built := false // by some host: not just tests
-	for i, h := range cfg.Hosts {
+	// (Between any of the architecture's hosts, also those cfg is not
+	// for: what GOOS=ape builds of the package is what they all build.)
+	for i, h := range buildcfg.APEAllHosts[cfg.Arch] {
 		ctxt := build.Default
 		ctxt.GOROOT, ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = cfg.GOROOT, h, cfg.Arch, false
 		files := []string{}

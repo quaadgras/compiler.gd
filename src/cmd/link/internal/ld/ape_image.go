@@ -7,7 +7,6 @@ package ld
 import (
 	"bytes"
 	"cmd/internal/apepack"
-	"cmd/internal/objabi"
 	"cmd/internal/sys"
 	"cmd/link/internal/loader"
 	"cmd/link/internal/sym"
@@ -140,7 +139,7 @@ func apeDarwinHost(ctxt *Link) bool {
 	if !ctxt.apePE {
 		return false
 	}
-	for _, h := range objabi.APEHosts[buildcfg.GOARCH] {
+	for _, h := range buildcfg.APEHosts(buildcfg.GOARCH) {
 		if h == "darwin" {
 			return true
 		}

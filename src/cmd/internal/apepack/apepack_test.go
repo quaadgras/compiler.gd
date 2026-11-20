@@ -88,3 +88,30 @@ func TestScript(t *testing.T) {
 		t.Errorf("the loader's arguments were %q, not %q", lines[1:], want)
 	}
 }
+
+// TestPackNoWindows checks the file of a program that is not for
+// Windows: a script a Unix kernel runs itself, with its images after it.
+func TestPackNoWindows(t *testing.T) {
+	pe := append(DOSStub(), []byte("PE\x00\x00rest of the PE")...)
+	macho := []byte("\xcf\xfa\xed\xfe linux and darwin")
+	out, err := Pack([]Image{
+		{GOARCH: "amd64", Hosts: []string{"linux", "darwin"}, Data: pe},
+		{GOARCH: "arm64", Hosts: []string{"linux", "darwin"}, Data: macho},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(out, []byte("#!/bin/sh\n")) {
+		t.Fatalf("the file starts %q", out[:16])
+	}
+	secs, ok := Images(bytes.NewReader(out))
+	if !ok || len(secs) != 2 {
+		t.Fatalf("Images = %v, %v", secs, ok)
+	}
+	for i, im := range [][]byte{pe, macho} {
+		s := secs[i]
+		if s.Off == 0 || s.Off%ELFAlign != 0 || !bytes.Equal(out[s.Off:s.Off+s.Size], im) {
+			t.Errorf("image %d: %+v", i, s)
+		}
+	}
+}

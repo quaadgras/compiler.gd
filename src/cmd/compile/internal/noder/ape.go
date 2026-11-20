@@ -90,13 +90,27 @@ func hostValues(c *types2.Const) []*types2.Const {
 	if buildcfg.GOOS != "ape" || c.Pkg() == nil || c.Parent() != c.Pkg().Scope() {
 		return nil
 	}
-	var out []*types2.Const
-	for _, h := range objabi.APEHosts[buildcfg.GOARCH] {
+	// (By the runtime's numbers for the hosts: the value of a host
+	// the program is not for is never used.)
+	out := make([]*types2.Const, len(buildcfg.APEAllHosts[buildcfg.GOARCH]))
+	var first *types2.Const
+	for _, h := range buildcfg.APEHosts(buildcfg.GOARCH) {
 		hc, ok := c.Pkg().Scope().Lookup(apeHostName(h, c.Name())).(*types2.Const)
 		if !ok || hc == c {
 			return nil
 		}
-		out = append(out, hc)
+		out[buildcfg.APEHostIndex(buildcfg.GOARCH, h)] = hc
+		if first == nil {
+			first = hc
+		}
+	}
+	if first == nil {
+		return nil
+	}
+	for i := range out {
+		if out[i] == nil {
+			out[i] = first
+		}
 	}
 	return out
 }

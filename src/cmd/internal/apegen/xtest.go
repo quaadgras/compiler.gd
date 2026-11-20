@@ -28,7 +28,7 @@ func (g *pkgGen) xtestOff() map[string]bool {
 	}
 	shared := map[string]bool{}
 	for name, n := range count {
-		if n == len(g.hs) {
+		if n+g.otherXTests[name] == g.every {
 			shared[name] = true
 			off[name] = false
 		}
