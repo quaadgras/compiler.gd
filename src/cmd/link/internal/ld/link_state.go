@@ -104,6 +104,7 @@ type linkState struct {
 	flagCaptureHostObjs string
 	flagAPEFormat       string // -apeformat: elf or pe for GOOS=ape
 	apePE               bool   // writing a GOOS=ape program as a PE executable
+	apeMachO            bool   // writing a GOOS=ape program as a Mach-O executable
 	flagA               bool
 	FlagC               bool
 	FlagD               bool

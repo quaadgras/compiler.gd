@@ -6,6 +6,8 @@ package objabi
 
 import (
 	"internal/abi"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -59,7 +61,7 @@ func GetFuncID(name string, isWrapper bool) abi.FuncID {
 // APEUnprefixed returns the name a GOOS=ape host copy's name
 // (linux_sigpanic, Linux_Stat) was made from, or name.
 func APEUnprefixed(name string) string {
-	for _, h := range APEHosts {
+	for _, h := range allAPEHosts {
 		for _, p := range [...]string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
 			if rest, ok := strings.CutPrefix(name, p); ok && rest != "" {
 				return rest
@@ -96,5 +98,22 @@ func APEDisplayName(name string) string {
 
 // APEHosts is internal/syslist.APEHosts, which the toolchain cannot
 // import (it is built with the bootstrap toolchain): the systems a
-// GOOS=ape program runs on.
-var APEHosts = []string{"linux", "freebsd", "windows"}
+// GOOS=ape program runs on, by GOARCH.
+var APEHosts = map[string][]string{
+	"amd64": {"linux", "freebsd", "windows"},
+	"arm64": {"linux", "darwin"},
+}
+
+// allAPEHosts is every architecture's APEHosts.
+var allAPEHosts = func() []string {
+	var all []string
+	for _, arch := range slices.Sorted(maps.Keys(APEHosts)) {
+		hosts := APEHosts[arch]
+		for _, h := range hosts {
+			if !slices.Contains(all, h) {
+				all = append(all, h)
+			}
+		}
+	}
+	return all
+}()

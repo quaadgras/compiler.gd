@@ -102,7 +102,10 @@ type pkgWriter struct {
 	// from runtime.GOOS (1 yes, 2 no, 3 being decided) and their values.
 	files      []*syntax.File
 	hostConsts map[*types2.Const]int8
-	constInits map[*types2.Const]syntax.Expr
+	// The type of a constant expression computed from them that the
+	// type checker left untyped: the expression's it is part of.
+	apeUntypedAs map[syntax.Expr]types2.Type
+	constInits   map[*types2.Const]syntax.Expr
 
 	// cgoPragmas accumulates any //go:cgo_* pragmas that need to be
 	// passed through to cmd/link.
@@ -178,6 +181,12 @@ func (pw *pkgWriter) maybeTypeAndValue(x syntax.Expr) (syntax.TypeAndValue, bool
 		// Under GOOS=ape, runtime.GOOS is the host's, known only at
 		// run time, and so is any constant computed from it.
 		tv.Value = nil
+		if tv.Type != nil && !isUntyped(tv.Type) {
+			pw.apeTypeDown(x, tv.Type)
+		}
+	}
+	if t := pw.apeUntypedAs[x]; t != nil && tv.Type != nil && isUntyped(tv.Type) {
+		tv.Type = t
 	}
 	return tv, tv.Type != nil
 }

@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -95,6 +96,7 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		edits = g.hostPartEdits(realName(name))
 	}
 	needUnsafe := false
+	extraImports := map[string]string{} // path to name
 
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -205,6 +207,13 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					continue
 				}
 				// A host value held by value: the ape type's.
+				if hn, ok := types.Unalias(f.Type()).(*types.Named); ok && g.hostNamed(hp, hn) != nil && g.canon[hn.Obj().Name()] && token.IsExported(hn.Obj().Name()) && f.Exported() {
+					// (Converted as the type's functions do.)
+					g.needApePtr = true
+					edits = append(edits, edit{off(v.Pos()), off(v.Pos()), "*" + hostName(hp.host, "ToAPE_"+hn.Obj().Name()) + "(apePtr("})
+					edits = append(edits, edit{off(v.End()), off(v.End()), "))"})
+					continue
+				}
 				if hn, ok := types.Unalias(f.Type()).(*types.Named); ok && g.hostNamed(hp, hn) != nil && !g.union[hn.Obj().Name()] && !g.canon[hn.Obj().Name()] {
 					name := hn.Obj().Name()
 					if g.sideBySide(name) {
@@ -269,7 +278,29 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 					t := hostName(hp.host, a.Obj().Name())
 					edits = append(edits, edit{off(n.Pos()), off(n.Pos()), "(*(*" + t + ")(unsafe.Pointer(&"})
 					edits = append(edits, edit{off(n.End()), off(n.End()), ")))"})
+				} else if nt, ok := types.Unalias(ft).(*types.Named); ok && nt.TypeArgs().Len() > 0 && g.hostTypeString(hp, ft) != g.typeString(hp, ft) {
+					// An instance of a generic type of host types
+					// (atomic.Pointer[dirInfo]): the host's.
+					t := g.hostTypeStringQ(hp, ft, func(p *types.Package) string {
+						name := "ape_" + p.Name()
+						extraImports[p.Path()] = name
+						return name
+					})
+					needUnsafe = true
+					edits = append(edits, edit{off(n.Pos()), off(n.Pos()), "(*(*" + t + ")(unsafe.Pointer(&"})
+					edits = append(edits, edit{off(n.End()), off(n.End()), ")))"})
+				} else if nt := g.hostNamed(hp, ft); nt != nil && g.canon[nt.Obj().Name()] && token.IsExported(nt.Obj().Name()) && sel.Obj().Exported() && !isPointer(ft) && !hp.isWritten(n) {
+					// An exported type's value a shared struct's
+					// exported field holds is the ape type's (code
+					// outside reads it): the host's copy of it. (An
+					// unexported field, like SockaddrInet4.raw, holds
+					// the host's.)
+					edits = append(edits, edit{off(n.Pos()), off(n.Pos()), "(*" + hostName(hp.host, "FromAPE_"+nt.Obj().Name()) + "(&"})
+					edits = append(edits, edit{off(n.End()), off(n.End()), "))"})
 				} else if nt := g.hostNamed(hp, ft); nt != nil {
+					if g.canon[nt.Obj().Name()] && token.IsExported(nt.Obj().Name()) && sel.Obj().Exported() && !isPointer(ft) {
+						g.reportf("%s: %s: host code writes the ape type's %s as the host's", hp.host, relPos(n.Pos()), nt.Obj().Name())
+					}
 					t := hostName(hp.host, nt.Obj().Name())
 					if _, ok := types.Unalias(ft).(*types.Pointer); ok {
 						t = "*" + t
@@ -379,11 +410,26 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 			if fn == nil || fn.Pkg() != hp.pkg || hp.inOnly(fn.Pos()) || g.inTest(fn.Pos()) {
 				break
 			}
-			for _, arg := range n.Args {
+			sig, _ := fn.Type().Underlying().(*types.Signature)
+			for i, arg := range n.Args {
 				t := hp.info.Types[arg].Type
 				nt := g.hostNamed(hp, t)
 				if nt == nil {
 					continue
+				}
+				// (A parameter of an interface type takes the host's
+				// value as it is: KeepAlive(attr).)
+				if sig != nil && sig.Params().Len() > 0 {
+					pi := min(i, sig.Params().Len()-1)
+					pt := sig.Params().At(pi).Type()
+					if sig.Variadic() && pi == sig.Params().Len()-1 && !n.Ellipsis.IsValid() {
+						if s, ok := pt.(*types.Slice); ok {
+							pt = s.Elem()
+						}
+					}
+					if types.IsInterface(pt) {
+						continue
+					}
 				}
 				if g.canon[nt.Obj().Name()] && hp != g.first() {
 					g.reportf("%s: %s: cannot pass a %s to a shared function", hp.host, relPos(arg.Pos()), nt.Obj().Name())
@@ -435,7 +481,12 @@ func (g *pkgGen) writeGo(hp *hostPkg, name string) {
 		return true
 	})
 
-	if needUnsafe && !slices.ContainsFunc(f.Imports, func(s *ast.ImportSpec) bool { return s.Path.Value == `"unsafe"` && (s.Name == nil || s.Name.Name == "unsafe") }) {
+	for _, path := range slices.Sorted(maps.Keys(extraImports)) {
+		edits = append(edits, edit{off(f.Name.End()), off(f.Name.End()), fmt.Sprintf("\n\nimport %s %q", extraImports[path], strings.TrimPrefix(path, "vendor/"))})
+	}
+	if needUnsafe && !slices.ContainsFunc(f.Imports, func(s *ast.ImportSpec) bool {
+		return s.Path.Value == `"unsafe"` && (s.Name == nil || s.Name.Name == "unsafe")
+	}) {
 		edits = append(edits, edit{off(f.Name.End()), off(f.Name.End()), "\n\nimport \"unsafe\""})
 	}
 
@@ -720,6 +771,29 @@ func (g *pkgGen) fromAPE(hp *hostPkg, sel *types.Selection) string {
 // literal of a type that is not a host's: it stays the ape value.
 func (g *pkgGen) toShared(hp *hostPkg, e ast.Expr) bool {
 	hp.useType(e) // builds parents
+	if call, ok := hp.parents[e].(*ast.CallExpr); ok && call.Fun != e {
+		// An argument of a function that takes the ape type: one of
+		// a package with no host copies, or a shared one.
+		var fn types.Object
+		switch f := ast.Unparen(call.Fun).(type) {
+		case *ast.Ident:
+			fn = hp.info.Uses[f]
+		case *ast.SelectorExpr:
+			if hp.info.Selections[f] == nil {
+				fn = hp.info.Uses[f.Sel]
+			}
+		}
+		fn, ok := fn.(*types.Func)
+		if !ok || fn.Pkg() == nil {
+			return false
+		}
+		if fn.Pkg() == hp.pkg {
+			return !hp.inOnly(fn.Pos())
+		}
+		// (Another generated package's host function takes the
+		// host's.)
+		return !g.u.hostOnly(fn.Pkg().Path(), hp.host, fn.Name()) && !g.u.hostDiffers(fn.Pkg().Path(), hp.host, fn)
+	}
 	kv, ok := hp.parents[e].(*ast.KeyValueExpr)
 	if !ok || kv.Value != e {
 		return false
@@ -740,6 +814,41 @@ func (g *pkgGen) toShared(hp *hostPkg, e ast.Expr) bool {
 		return g.hostNamed(hp, n) == nil
 	}
 	return !g.u.hostDiffers(n.Obj().Pkg().Path(), hp.host, n.Obj())
+}
+
+// isWritten reports whether e, or a field or element of it, is assigned
+// to or has its address taken.
+func (hp *hostPkg) isWritten(e ast.Expr) bool {
+	for {
+		if hp.isLHS(e) {
+			return true
+		}
+		switch p := hp.parents[e].(type) {
+		case *ast.SelectorExpr:
+			if p.X != e {
+				return false
+			}
+			if s := hp.info.Selections[p]; s == nil || s.Kind() != types.FieldVal {
+				// (A method: one of a pointer receiver may write.)
+				return s != nil && isPointer(s.Obj().Type().(*types.Signature).Recv().Type())
+			}
+			e = p
+		case *ast.IndexExpr:
+			if p.X != e {
+				return false
+			}
+			e = p
+		case *ast.ParenExpr:
+			e = p
+		default:
+			return false
+		}
+	}
+}
+
+func isPointer(t types.Type) bool {
+	_, ok := types.Unalias(t).(*types.Pointer)
+	return ok
 }
 
 // isLHS reports whether e is assigned to or has its address taken.

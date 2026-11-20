@@ -332,7 +332,7 @@ func sigaction_trampoline()
 
 //go:nosplit
 //go:cgo_unsafe_args
-func sigprocmask(how uint32, new *sigset, old *sigset) {
+func sigprocmask(how int32, new *sigset, old *sigset) {
 	libcCall(unsafe.Pointer(abi.FuncPCABI0(sigprocmask_trampoline)), unsafe.Pointer(&how))
 	KeepAlive(new)
 	KeepAlive(old)

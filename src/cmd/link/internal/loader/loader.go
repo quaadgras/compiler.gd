@@ -2638,7 +2638,7 @@ func (l *Loader) checkLinkname(refpkg *oReader, name string, s Sym) {
 		// host names (syscall.linux_utimensat), which cmd/apegen made
 		// from names they may pull.
 		if p, sym, found := strings.Cut(name, "."); found {
-			for _, h := range objabi.APEHosts {
+			for _, h := range objabi.APEHosts[buildcfg.GOARCH] {
 				for _, prefix := range []string{h + "_", strings.ToUpper(h[:1]) + h[1:] + "_"} {
 					if rest, cut := strings.CutPrefix(sym, prefix); cut {
 						if pk, found := blockedLinknames[p+"."+rest]; found {

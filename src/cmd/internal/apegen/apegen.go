@@ -94,7 +94,7 @@ type Config struct {
 func DefaultConfig(goroot, arch string) Config {
 	return Config{
 		GOROOT:     goroot,
-		Hosts:      syslist.APEHosts,
+		Hosts:      syslist.APEHosts[arch],
 		Arch:       arch,
 		Tests:      true,
 		MaxConsts:  "runtime._NSIG",

@@ -124,8 +124,13 @@ func setCgoAttr(ctxt *Link, file string, pkg string, directives [][]string, host
 			}
 
 			if ctxt.HeadType == objabi.Hape {
-				// The Windows host's imports: on the other hosts
-				// they are words of zero no code reads.
+				// Another host's imports, which the program never
+				// uses where it runs as this executable: a Windows
+				// import is a word of zero no code reads; code calls
+				// a darwin one, which is a trap.
+				if strings.HasSuffix(lib, ".dylib") {
+					apeTrap(ctxt, local)
+				}
 				continue
 			}
 			if ctxt.FlagD {
@@ -483,4 +488,24 @@ func (ctxt *Link) addexport() {
 	for _, lib := range dedupLibraries(ctxt, ctxt.dynlib) {
 		adddynlib(ctxt, lib)
 	}
+}
+
+// apeTrap defines the symbol name, if nothing does, as a function that
+// traps: another GOOS=ape host's import, which code of that host calls.
+func apeTrap(ctxt *Link, name string) {
+	l := ctxt.loader
+	s := l.LookupOrCreateSym(name, 0)
+	if st := l.SymType(s); st != 0 && st != sym.SXREF {
+		return
+	}
+	su := l.MakeSymbolUpdater(s)
+	su.SetType(sym.STEXT)
+	switch ctxt.Arch.Family {
+	case sys.ARM64:
+		su.AddUint32(ctxt.Arch, 0xd4200000) // BRK #0
+	default:
+		su.AddUint8(0xcc) // INT3
+	}
+	l.SetAttrLocal(s, true)
+	ctxt.Textp = append(ctxt.Textp, s)
 }

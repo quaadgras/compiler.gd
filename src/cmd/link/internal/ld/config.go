@@ -150,7 +150,7 @@ func mustLinkExternal(ctxt *Link) (res bool, reason string) {
 		}
 		return true, "buildmode=c-shared"
 	case BuildModePIE:
-		if !platform.InternalLinkPIESupported(buildcfg.GOOS, buildcfg.GOARCH) {
+		if !platform.InternalLinkPIESupported(ctxt.targetGOOS(), buildcfg.GOARCH) {
 			// Internal linking does not support TLS_IE.
 			return true, "buildmode=pie"
 		}
@@ -216,4 +216,16 @@ func determineLinkMode(ctxt *Link) {
 	if ctxt.LinkMode == LinkInternal && extNeeded {
 		Exitf("internal linking requested %sbut external linking required: %s", via, extReason)
 	}
+}
+
+// targetGOOS is the system the executable is for: GOOS, or for GOOS=ape
+// written as a Mach-O or PE executable, darwin's or windows'.
+func (ctxt *Link) targetGOOS() string {
+	switch {
+	case ctxt.apeMachO:
+		return "darwin"
+	case ctxt.apePE:
+		return "windows"
+	}
+	return buildcfg.GOOS
 }

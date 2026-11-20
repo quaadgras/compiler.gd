@@ -109,6 +109,22 @@ TEXT runtime·rt0_go(SB),NOSPLIT|TOPFRAME,$0
 	BL	·tlsinit(SB)
 	ADD	$32, RSP
 #endif
+#ifdef TLS_ape
+	// Initialize TLS on darwin.
+	MOVBU	runtime·apehost(SB), R0
+	CMP	$const_apeDarwin, R0
+	BNE	apeNoTLS
+	MOVD	ZR, g
+	SUB	$32, RSP
+	MRS_TPIDR_R0
+	AND	$~7, R0
+	MOVD	R0, 16(RSP)             // arg2: TLS base
+	MOVD	$runtime·tls_g(SB), R2
+	MOVD	R2, 8(RSP)              // arg1: &tlsg
+	BL	·darwin_tlsinit(SB)
+	ADD	$32, RSP
+apeNoTLS:
+#endif
 
 	// create istack out of the given (operating system) stack.
 	// _cgo_init may update stackguard.

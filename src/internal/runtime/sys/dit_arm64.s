@@ -5,13 +5,21 @@
 #include "go_asm.h"
 #include "textflag.h"
 
+#ifdef GOOS_darwin
+#define DIT_BARRIER
+#endif
+#ifdef GOOS_ape
+// (A GOOS=ape program may run on darwin.)
+#define DIT_BARRIER
+#endif
+
 TEXT ·EnableDIT(SB),$0-1
     MRS DIT, R0
     UBFX $24, R0, $1, R1
     MOVB R1, ret+0(FP)
     TBNZ $0, R1, ret
     MSR $1, DIT
-#ifdef GOOS_darwin
+#ifdef DIT_BARRIER
     // Arm documents that barriers are not necessary when writing to, or reading
     // from, PSTATE fields. However, Apple documentation indicates that barriers
     // should be used, in particular when setting the PSTATE.DIT field. Barriers

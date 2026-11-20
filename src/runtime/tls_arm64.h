@@ -44,6 +44,17 @@
 #define MRS_TPIDR_R0 MOVD R18_PLATFORM, R0
 #endif
 
+// A GOOS=ape program finds g in TLS only on darwin (on Linux only cgo
+// does, and a GOOS=ape program has no cgo). (A host's copy of the
+// runtime's assembly has its GOOS_ defined too.)
+#ifdef GOOS_ape
+#ifndef MRS_TPIDR_R0
+#define TLS_ape
+#define TLSG_IS_VARIABLE
+#define MRS_TPIDR_R0 WORD $0xd53bd060 // MRS TPIDRRO_EL0, R0 (darwin)
+#endif
+#endif
+
 // Define something that will break the build if
 // the GOOS is unknown.
 #ifndef MRS_TPIDR_R0

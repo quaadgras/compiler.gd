@@ -65,6 +65,13 @@ func linkForGoroutine() *Link {
 	return currentLink
 }
 
+// onMainGoroutine reports whether this goroutine runs a link's Main
+// (not one of the goroutines Main starts).
+func onMainGoroutine() bool {
+	_, ok := goroutineLink.Load(goroutineID())
+	return ok
+}
+
 // SetCurrentLink registers ctxt as the *Link driving this goroutine's
 // Main. Call from host.Run (or directly from Main for the standalone
 // link binary) before any AtExit/Exit/Errorf path runs. Pass nil to
@@ -132,10 +139,12 @@ func (ctxt *Link) runAtExitFuncs() {
 func Exit(code int) {
 	if l := linkForGoroutine(); l != nil {
 		l.runAtExitFuncs()
-		if l.inProcessStatus != nil {
+		if l.inProcessStatus != nil && onMainGoroutine() {
 			*l.inProcessStatus = code
 			runtime.Goexit()
 		}
+		// (A goroutine Main started cannot end the link by ending
+		// itself: Main would wait for it forever.)
 	} else {
 		// Pre-Main: only legacy hooks to run.
 		for i := len(legacyAtExitFuncs) - 1; i >= 0; i-- {
@@ -155,7 +164,7 @@ func Exit(code int) {
 // os.Stderr when no per-goroutine *Link is registered (early
 // startup, or the standalone link binary's main).
 func stderrFor() io.Writer {
-	if l := linkForGoroutine(); l != nil && l.stderr != nil {
+	if l := linkForGoroutine(); l != nil && l.stderr != nil && onMainGoroutine() {
 		return l.stderr
 	}
 	return os.Stderr

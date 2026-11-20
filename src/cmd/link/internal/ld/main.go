@@ -104,7 +104,7 @@ func setupFlags(ctxt *Link) {
 	fs.BoolVar(&ctxt.flagA, "a", false, "no-op (deprecated)")
 	fs.BoolVar(&ctxt.FlagC, "c", false, "dump call graph")
 	fs.BoolVar(&ctxt.FlagD, "d", false, "disable dynamic executable")
-	fs.StringVar(&ctxt.flagAPEFormat, "apeformat", "", "for GOOS=ape, write an `elf` or a `pe` executable")
+	fs.StringVar(&ctxt.flagAPEFormat, "apeformat", "", "for GOOS=ape, write an `elf`, a `pe` or a `macho` executable")
 	fs.BoolVar(&ctxt.flagF, "f", false, "ignore version mismatch")
 	fs.BoolVar(&ctxt.flagG, "g", false, "disable go package data checks")
 	fs.BoolVar(&ctxt.flagH, "h", false, "halt on error")
@@ -335,8 +335,19 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 		if ctxt.flagEntrySymbol == "" {
 			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_ape_windows"
 		}
+	case "macho":
+		// Likewise a darwin executable: its darwin host's imports
+		// (libSystem's functions) are its imports.
+		if ctxt.HeadType != objabi.Hape {
+			Errorf("-apeformat is for GOOS=ape")
+		}
+		ctxt.HeadType = objabi.Hdarwin
+		ctxt.apeMachO = true
+		if ctxt.flagEntrySymbol == "" {
+			ctxt.flagEntrySymbol = "_rt0_" + buildcfg.GOARCH + "_ape_darwin"
+		}
 	default:
-		Errorf("-apeformat must be elf or pe")
+		Errorf("-apeformat must be elf, pe or macho")
 	}
 
 	if !ctxt.flagAslr && ctxt.BuildMode != BuildModeCShared {
@@ -379,6 +390,10 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	startProfile(ctxt)
 	if ctxt.BuildMode == BuildModeUnset {
 		ctxt.BuildMode.Set("exe")
+	}
+	if ctxt.apeMachO && ctxt.BuildMode == BuildModeExe && buildcfg.GOARCH == "arm64" {
+		// On darwin/arm64, everything is PIE.
+		ctxt.BuildMode = BuildModePIE
 	}
 
 	if ctxt.BuildMode != BuildModeShared && fs.NArg() != 1 {

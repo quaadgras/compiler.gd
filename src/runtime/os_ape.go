@@ -20,14 +20,8 @@ import _ "unsafe" // for linkname
 //go:linkname apehost
 var apehost uint8
 
-const (
-	apeLinux = 1 + iota
-	apeFreebsd
-	apeWindows
-)
-
-// apeGOOSNames are the hosts' names, by apehost.
-var apeGOOSNames = [...]string{apeLinux: "linux", apeFreebsd: "freebsd", apeWindows: "windows"}
+// The hosts (internal/syslist.APEHosts[GOARCH]) and their names, by
+// apehost, are in os_ape_$GOARCH.go.
 
 // apeGOOS is GOOS: the compiler compiles every use of GOOS (and of a
 // constant computed from it) as a call of apeGOOS.

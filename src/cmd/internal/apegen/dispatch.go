@@ -37,7 +37,24 @@ func (g *pkgGen) sameAll(ic *iface, f func(hp *hostPkg, obj types.Object) string
 
 // hostTypeString prints t as a host copy names it.
 func (g *pkgGen) hostTypeString(hp *hostPkg, t types.Type) string {
-	s := g.typeString(hp, t)
+	return g.hostTypeStringQ(hp, t, nil)
+}
+
+// hostTypeStringQ is hostTypeString with other packages qualified by
+// qual (by their names if nil).
+func (g *pkgGen) hostTypeStringQ(hp *hostPkg, t types.Type, qual func(*types.Package) string) string {
+	var s string
+	if qual == nil {
+		s = g.typeString(hp, t)
+		qual = (*types.Package).Name
+	} else {
+		s = types.TypeString(t, func(p *types.Package) string {
+			if p == hp.pkg {
+				return ""
+			}
+			return qual(p)
+		})
+	}
 	var refs []*types.Named
 	hp.namedRefs(t, map[types.Type]bool{}, &refs)
 	for _, n := range refs {
@@ -51,7 +68,7 @@ func (g *pkgGen) hostTypeString(hp *hostPkg, t types.Type) string {
 	for _, n := range all {
 		p := n.Obj().Pkg()
 		if p != nil && p != hp.pkg && g.u.hostOnly(p.Path(), hp.host, n.Obj().Name()) {
-			s = replaceIdent(s, p.Name()+"."+n.Obj().Name(), p.Name()+"."+hostName(hp.host, n.Obj().Name()))
+			s = replaceIdent(s, qual(p)+"."+n.Obj().Name(), qual(p)+"."+hostName(hp.host, n.Obj().Name()))
 		}
 	}
 	return s
@@ -1059,6 +1076,9 @@ func (g *pkgGen) writeDispatch() {
 	if g.needApeValue {
 		b.WriteString("\n// apeValue returns the host's value h as the ape type T, which is at\n// least as large.\nfunc apeValue[T, H any](h H) (t T) {\n*(*H)(unsafe.Pointer(&t)) = h\nreturn t\n}\n")
 	}
+	if g.needApePtr {
+		b.WriteString("\n// apePtr returns a pointer to a copy of v.\nfunc apePtr[T any](v T) *T {\nreturn &v\n}\n")
+	}
 	if !g.isRuntime() {
 		b.WriteString("\n//go:linkname apehost runtime.apehost\nvar apehost uint8\n\nconst (\n")
 		for i, h := range g.u.hosts {
@@ -1136,14 +1156,23 @@ func (g *pkgGen) writeAsmDispatch() {
 	for _, n := range names {
 		abi := g.asmDispatch[n][g.first().host]
 		fmt.Fprintf(&b, "\nTEXT ·%s%s(SB),NOSPLIT|NOFRAME,$0\n", n, abi)
+		if *arch == "arm64" {
+			// (R16 is no argument's, and the assembler's R27 makes
+			// the load's address.)
+			fmt.Fprintf(&b, "\tMOVBU\truntime·apehost(SB), R16\n")
+		}
 		for i, hp := range g.hs {
 			if i < len(g.hs)-1 {
+				c := fmt.Sprintf("$%d", i+1)
 				if g.isRuntime() {
-					fmt.Fprintf(&b, "\tCMPB\truntime·apehost(SB), $const_ape%s\n", title(hp.host))
-				} else {
-					fmt.Fprintf(&b, "\tCMPB\truntime·apehost(SB), $%d\n", i+1)
+					c = "$const_ape" + title(hp.host)
 				}
-				fmt.Fprintf(&b, "\tJNE\t2(PC)\n")
+				switch *arch {
+				case "arm64":
+					fmt.Fprintf(&b, "\tCMP\t%s, R16\n\tBNE\t2(PC)\n", c)
+				default:
+					fmt.Fprintf(&b, "\tCMPB\truntime·apehost(SB), %s\n\tJNE\t2(PC)\n", c)
+				}
 			}
 			fmt.Fprintf(&b, "\tJMP\t·%s%s(SB)\n", hostName(hp.host, n), g.asmDispatch[n][hp.host])
 		}

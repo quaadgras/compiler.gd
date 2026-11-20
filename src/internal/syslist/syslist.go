@@ -36,11 +36,14 @@ var KnownOS = map[string]bool{
 	"zos":       true,
 }
 
-// APEHosts lists the systems a GOOS=ape program runs on. A file builds
-// for ape if it builds for every one of them (with the "ape" tag set);
-// the files only some of them build are copied per host by cmd/apegen.
-// This list also appears in cmd/dist/build.go.
-var APEHosts = []string{"linux", "freebsd", "windows"}
+// APEHosts lists, by GOARCH, the systems a GOOS=ape program runs on. A
+// file builds for ape if it builds for every one of them (with the "ape"
+// tag set); the files only some of them build are copied per host by
+// cmd/internal/apegen. This list also appears in cmd/internal/objabi.
+var APEHosts = map[string][]string{
+	"amd64": {"linux", "freebsd", "windows"},
+	"arm64": {"linux", "darwin"},
+}
 
 // UnixOS is the set of GOOS values matched by the "unix" build tag.
 // This is not used for filename matching.

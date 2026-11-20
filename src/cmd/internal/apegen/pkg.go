@@ -41,7 +41,7 @@ type hostPkg struct {
 	xpkg   *types.Package
 	imp    types.ImporterFrom // the importer the package was checked with
 	u      *universe
-	sfiles []string           // assembly files only some hosts build
+	sfiles []string // assembly files only some hosts build
 
 	// decls are the package-level objects the host files declare.
 	decls map[string]types.Object
@@ -85,9 +85,9 @@ type pkgGen struct {
 	// sharedVar is the variables of the same type that hosts
 	// initialize differently: one variable, which host copies use.
 	sharedVar map[string]bool
-	union map[string]bool // host types shared structs embed
-	canon map[string]bool // types that are the first host's, converted for others
-	api   map[string]*iface
+	union     map[string]bool // host types shared structs embed
+	canon     map[string]bool // types that are the first host's, converted for others
+	api       map[string]*iface
 
 	// pushes maps a linkname target in another package (time.now) to
 	// the function each host pushes to it.
@@ -97,6 +97,7 @@ type pkgGen struct {
 	asmDispatch map[string]map[string]string
 
 	needApeValue bool // host copies use apeValue
+	needApePtr   bool // host copies use apePtr
 
 	importNames map[string]string // of the file writeGo writes: path -> name, if named
 
@@ -473,11 +474,21 @@ func (g *pkgGen) run() {
 	// A host interface's method that host methods on shared types
 	// implement has their name.
 	for _, hp := range g.hs {
-		renamed := map[string]bool{}
+		// (By name and signature: syscall's RoutingMessage.sockaddr
+		// is not Sockaddr's.)
+		renamed := map[string][]*types.Signature{}
 		for obj := range hp.rename {
 			if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil {
-				renamed[fn.Name()] = true
+				renamed[fn.Name()] = append(renamed[fn.Name()], fn.Signature())
 			}
+		}
+		implements := func(m *types.Func) bool {
+			for _, s := range renamed[m.Name()] {
+				if sameSig(s, m.Signature()) {
+					return true
+				}
+			}
+			return false
 		}
 		for name, obj := range hp.decls {
 			tn, ok := obj.(*types.TypeName)
@@ -489,7 +500,7 @@ func (g *pkgGen) run() {
 				continue
 			}
 			for m := range it.ExplicitMethods() {
-				if renamed[m.Name()] {
+				if implements(m) {
 					hp.rename[m] = hostName(hp.host, m.Name())
 				}
 			}
@@ -1339,4 +1350,13 @@ func (g *pkgGen) localHostRef(hp *hostPkg, t types.Type) bool {
 		}
 	}
 	return false
+}
+
+// sameSig reports whether a and b take and return the same, receivers
+// aside.
+func sameSig(a, b *types.Signature) bool {
+	strip := func(s *types.Signature) *types.Signature {
+		return types.NewSignatureType(nil, nil, nil, s.Params(), s.Results(), s.Variadic())
+	}
+	return types.Identical(strip(a), strip(b))
 }

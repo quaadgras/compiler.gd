@@ -434,6 +434,13 @@ func (g *pkgGen) dependsOnHost(hp *hostPkg, node ast.Node) string {
 				if v, ok := hp.info.Defs[name].(*types.Var); ok && v.Parent() == hp.pkg.Scope() && g.funcOfHost(hp, v.Type()) {
 					why = "variable " + v.Name() + " of functions of host values"
 				}
+				// A variable of a host type: host code takes its
+				// address as the host's (&zeroSysProcAttr).
+				if v, ok := hp.info.Defs[name].(*types.Var); ok && v.Parent() == hp.pkg.Scope() {
+					if nt, ok := types.Unalias(v.Type()).(*types.Named); ok && g.differsType(hp, nt) {
+						why = "variable " + v.Name() + " of " + nt.Obj().Name()
+					}
+				}
 			}
 		case *ast.CompositeLit:
 			if t, ok := types.Unalias(hp.info.Types[n].Type).(*types.Named); ok && g.differsType(hp, t) {

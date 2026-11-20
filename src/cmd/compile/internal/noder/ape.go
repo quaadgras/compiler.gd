@@ -7,10 +7,10 @@ package noder
 import (
 	"go/constant"
 	"internal/buildcfg"
-	"unicode"
-	"unicode/utf8"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -91,7 +91,7 @@ func hostValues(c *types2.Const) []*types2.Const {
 		return nil
 	}
 	var out []*types2.Const
-	for _, h := range objabi.APEHosts {
+	for _, h := range objabi.APEHosts[buildcfg.GOARCH] {
 		hc, ok := c.Pkg().Scope().Lookup(apeHostName(h, c.Name())).(*types2.Const)
 		if !ok || hc == c {
 			return nil
@@ -215,4 +215,36 @@ func convertConst(v constant.Value, typ types2.Type) constant.Value {
 		return constant.ToComplex(v)
 	}
 	return v
+}
+
+// apeTypeDown records t as the type of the untyped operands of the
+// constant expression x of type t computed from host constants: the type
+// checker types only the whole expression, and they are computed at run
+// time as it is.
+func (pw *pkgWriter) apeTypeDown(x syntax.Expr, t types2.Type) {
+	set := func(e syntax.Expr) {
+		if tv := e.GetTypeInfo(); tv.Type != nil && isUntyped(tv.Type) {
+			if pw.apeUntypedAs == nil {
+				pw.apeUntypedAs = map[syntax.Expr]types2.Type{}
+			}
+			pw.apeUntypedAs[e] = t
+			pw.apeTypeDown(e, t)
+		}
+	}
+	switch x := x.(type) {
+	case *syntax.ParenExpr:
+		set(x.X)
+	case *syntax.Operation:
+		switch {
+		case x.Y == nil:
+			set(x.X)
+		case x.Op == syntax.Shl || x.Op == syntax.Shr:
+			set(x.X)
+		case x.Op == syntax.Eql || x.Op == syntax.Neq || x.Op == syntax.Lss || x.Op == syntax.Leq ||
+			x.Op == syntax.Gtr || x.Op == syntax.Geq || x.Op == syntax.AndAnd || x.Op == syntax.OrOr:
+		default:
+			set(x.X)
+			set(x.Y)
+		}
+	}
 }

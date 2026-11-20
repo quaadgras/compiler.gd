@@ -6,12 +6,13 @@ package objabi
 
 import (
 	"internal/syslist"
+	"maps"
 	"slices"
 	"testing"
 )
 
 func TestAPEHosts(t *testing.T) {
-	if !slices.Equal(APEHosts, syslist.APEHosts) {
+	if !maps.EqualFunc(APEHosts, syslist.APEHosts, slices.Equal) {
 		t.Errorf("APEHosts = %v, internal/syslist.APEHosts = %v", APEHosts, syslist.APEHosts)
 	}
 }

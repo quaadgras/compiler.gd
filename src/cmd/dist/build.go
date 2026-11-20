@@ -1880,6 +1880,7 @@ var cgoEnabled = map[string]bool{
 	"js/wasm":         false,
 	"wasip1/wasm":     false,
 	"ape/amd64":       false,
+	"ape/arm64":       false,
 	"netbsd/386":      true,
 	"netbsd/amd64":    true,
 	"netbsd/arm":      true,
