@@ -283,6 +283,24 @@ func open_trampoline()
 
 //go:nosplit
 //go:cgo_unsafe_args
+func unlink(name *byte) (ret int32) {
+	ret = libcCall(unsafe.Pointer(abi.FuncPCABI0(unlink_trampoline)), unsafe.Pointer(&name))
+	KeepAlive(name)
+	return
+}
+func unlink_trampoline()
+
+//go:nosplit
+//go:cgo_unsafe_args
+func rmdir(name *byte) (ret int32) {
+	ret = libcCall(unsafe.Pointer(abi.FuncPCABI0(rmdir_trampoline)), unsafe.Pointer(&name))
+	KeepAlive(name)
+	return
+}
+func rmdir_trampoline()
+
+//go:nosplit
+//go:cgo_unsafe_args
 func nanotime1() int64 {
 	var r struct {
 		t            int64  // raw timer
@@ -587,6 +605,8 @@ func proc_regionfilename_trampoline()
 
 //go:cgo_import_dynamic libc_open open "/usr/lib/libSystem.B.dylib"
 //go:cgo_import_dynamic libc_close close "/usr/lib/libSystem.B.dylib"
+//go:cgo_import_dynamic libc_unlink unlink "/usr/lib/libSystem.B.dylib"
+//go:cgo_import_dynamic libc_rmdir rmdir "/usr/lib/libSystem.B.dylib"
 //go:cgo_import_dynamic libc_read read "/usr/lib/libSystem.B.dylib"
 //go:cgo_import_dynamic libc_write write "/usr/lib/libSystem.B.dylib"
 //go:cgo_import_dynamic libc_pipe pipe "/usr/lib/libSystem.B.dylib"

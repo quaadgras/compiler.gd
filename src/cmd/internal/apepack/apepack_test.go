@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -39,26 +41,21 @@ func TestPack(t *testing.T) {
 	}
 }
 
-// TestScript runs the script with sh on this machine, for a fake image
-// that is a shell script: as it is (as darwin's Mach-O) and with a fake
-// ELF header (64 bytes of a shell script) in place of its first bytes.
+// TestScript runs the script with sh on this machine, with a shell
+// script in the loader's place that prints its arguments.
 func TestScript(t *testing.T) {
-	if runtime.GOOS != "linux" && runtime.GOOS != "freebsd" && runtime.GOOS != "darwin" {
-		t.Skip("needs a Unix shell")
+	if runtime.GOOS != "linux" && runtime.GOOS != "freebsd" {
+		t.Skip("needs an ELF host")
 	}
-	if _, ok := machines[runtime.GOARCH]; !ok {
-		t.Skip("no uname -m for", runtime.GOARCH)
+	old, ok := loaders[runtime.GOARCH]
+	if !ok {
+		t.Skip("no loader for", runtime.GOARCH)
 	}
-	native := runtime.GOOS == "darwin"
-	head := "\xcf\xfa\xed\xfe\n"
-	if native {
-		head = "#!/bin/sh\n"
-	}
-	img := []byte(head + strings.Repeat("#", 64-len(head)-1) + "\necho \"ran $*\"\nexit 0\n")
-	elf := []byte("#!/bin/sh\n" + strings.Repeat("#", 64-10-1) + "\n")
-	img = append(img, make([]byte, MachOELFOff+len(elf)-len(img))...)
-	copy(img[MachOELFOff:], elf)
-	out, err := Pack([]Image{{GOARCH: runtime.GOARCH, Hosts: []string{runtime.GOOS}, Data: img}})
+	defer func() { loaders[runtime.GOARCH] = old }()
+	loaders[runtime.GOARCH] = "#!/bin/sh\necho \"$0\"\nfor a;do echo \"$a\";done\n"
+
+	pe := append(DOSStub(), []byte("PE\x00\x00rest of the PE")...)
+	out, err := Pack([]Image{{GOARCH: runtime.GOARCH, Hosts: []string{runtime.GOOS, "windows"}, Data: pe}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,12 +64,27 @@ func TestScript(t *testing.T) {
 	if err := os.WriteFile(file, out, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 { // copying it out, then not
-		cmd := exec.Command("sh", file, "a", "b c")
-		cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+filepath.Join(dir, "cache"))
-		got, err := cmd.CombinedOutput()
-		if err != nil || strings.TrimSpace(string(got)) != "ran a b c" {
-			t.Fatalf("sh prog: %q, %v", got, err)
-		}
+	tmp := filepath.Join(dir, "tmp")
+	if err := os.Mkdir(tmp, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "./prog", "a", "b c")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "TMPDIR="+tmp, "PWD="+dir)
+	got, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sh prog: %q, %v", got, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(got)), "\n")
+	loader := lines[0]
+	if filepath.Base(loader) != "prog" || filepath.Dir(filepath.Dir(loader)) != tmp {
+		t.Errorf("the loader was %s", loader)
+	}
+	if fi, err := os.Stat(filepath.Dir(loader)); err != nil || fi.Mode().Perm() != 0o700 {
+		t.Errorf("the loader's directory: %v, %v", fi, err)
+	}
+	want := []string{file, "0", strconv.Itoa(PEELFOff), "./prog", "a", "b c"}
+	if !slices.Equal(lines[1:], want) {
+		t.Errorf("the loader's arguments were %q, not %q", lines[1:], want)
 	}
 }

@@ -9,4 +9,4 @@ package runtime
 // apeinit sets what differs between the hosts of a GOOS=ape program.
 //
 //go:nosplit
-func apeinit() {}
+func apeinit(c int32, v **byte) {}

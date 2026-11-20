@@ -28,6 +28,16 @@ TEXT runtime·open_trampoline(SB),NOSPLIT,$0
 	CALL	libc_open(SB)
 	RET
 
+TEXT runtime·unlink_trampoline(SB),NOSPLIT,$0
+	MOVQ	0(DI), DI		// arg 1 pathname
+	CALL	libc_unlink(SB)
+	RET
+
+TEXT runtime·rmdir_trampoline(SB),NOSPLIT,$0
+	MOVQ	0(DI), DI		// arg 1 pathname
+	CALL	libc_rmdir(SB)
+	RET
+
 TEXT runtime·close_trampoline(SB),NOSPLIT,$0
 	MOVL	0(DI), DI		// arg 1 fd
 	CALL	libc_close(SB)

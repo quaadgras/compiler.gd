@@ -24,17 +24,18 @@
 //
 // Windows loads the PE. A Unix kernel does not know the file, so the
 // shell that asked it to run the file runs it as a script instead; the
-// script finds the image for the system and machine it runs on (uname),
-// copies it out of the file into a cache directory once (with the ELF
-// header at its start, for an ELF host of a PE or Mach-O image) and runs
-// that.
+// script finds the image for the system and machine it runs on (uname)
+// and starts it without keeping anything: on an ELF host it writes a
+// loader of a few KB (loader/loader.c, after the images in the file) to
+// a temporary file, which removes itself and maps the image from the
+// program's file; on darwin, which only runs a Mach-O that is a file of
+// its own, it writes the image to a temporary file, which the program
+// removes as it starts.
 package apepack
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"strconv"
@@ -167,6 +168,7 @@ func Pack(images []Image) ([]byte, error) {
 	}
 
 	var manifest, cases strings.Builder
+	var tail []func()
 	arches := map[string]bool{}
 	for i, im := range images {
 		off := 0
@@ -183,8 +185,8 @@ func Pack(images []Image) ([]byte, error) {
 		arches[im.GOARCH] = true
 		fmt.Fprintf(&manifest, "#ape %s %d %d %s\n", im.GOARCH, off, len(im.Data), strings.Join(im.Hosts, ","))
 
-		// The hosts that run the image as it is, and those that run
-		// it as an ELF executable.
+		// The hosts that run the image as it is (from a copy of it),
+		// and those whose loader maps it as an ELF executable.
 		var native, elfHosts []string
 		for _, h := range im.Hosts {
 			if h == "windows" {
@@ -198,20 +200,39 @@ func Pack(images []Image) ([]byte, error) {
 				return nil, fmt.Errorf("apepack: no uname -s for GOOS %s", h)
 			}
 			pat := u + "/" + im.GOARCH
-			if h == "darwin" && kinds[i] == kindMachO || kinds[i] == kindELF {
+			switch {
+			case h == "darwin" && kinds[i] == kindMachO:
 				native = append(native, pat)
-			} else {
+			case h == "darwin":
+				return nil, fmt.Errorf("apepack: darwin host of an image that is no Mach-O")
+			default:
 				elfHosts = append(elfHosts, pat)
 			}
 		}
-		sum := sha256.Sum256(im.Data)
-		h := hex.EncodeToString(sum[:8])
 		if native != nil {
-			fmt.Fprintf(&cases, "%s)s=%d n=%d x= h=%s;;\n", strings.Join(native, "|"), off, len(im.Data), h)
+			fmt.Fprintf(&cases, "%s)l=%d n=%d x=;;\n", strings.Join(native, "|"), off, len(im.Data))
 		}
 		if elfHosts != nil {
-			fmt.Fprintf(&cases, "%s)s=%d n=%d x=%d h=%se;;\n", strings.Join(elfHosts, "|"), off, len(im.Data), off+kinds[i].elfOff(), h)
+			ld, ok := loaders[im.GOARCH]
+			if !ok {
+				return nil, fmt.Errorf("apepack: no loader for GOARCH %s", im.GOARCH)
+			}
+			x := off
+			if kinds[i] != kindELF {
+				x += kinds[i].elfOff()
+			}
+			// (The loaders are after the images.)
+			tail = append(tail, func() {
+				for len(out)%ELFAlign != 0 {
+					out = append(out, 0)
+				}
+				fmt.Fprintf(&cases, "%s)l=%d n=%d s=%d x=%d;;\n", strings.Join(elfHosts, "|"), len(out), len(ld), off, x)
+				out = append(out, ld...)
+			})
 		}
+	}
+	for _, f := range tail {
+		f()
 	}
 	var archCases strings.Builder
 	for _, a := range []string{"amd64", "arm64"} {
@@ -220,28 +241,32 @@ func Pack(images []Image) ([]byte, error) {
 		}
 	}
 
-	// The script: only POSIX sh, uname, mkdir, tail, head -c, chmod
-	// and mv. It copies the image out under its hash (so a new build
-	// is copied anew), atomically, with the ELF header at its start if
-	// x says where that is, then runs it with the file's name as
-	// argv[0] where exec -a can. (One assignment a line: some shells
-	// expand all of a line's before they assign.) The #ape lines say
+	// The script: only POSIX sh, uname, mkdir, dd, head -c, chmod, rm and
+	// rmdir. It copies n bytes at l of the file (a multiple of ELFAlign:
+	// some systems' tail -c is slow) into a new directory
+	// of the user's own: the loader of an ELF host, which is to map the
+	// image at s whose ELF header is at x, or the image of a host that
+	// can only run a file of its own format (x is empty). Either
+	// removes the copy and the directory when it has started
+	// (loader/loader.c, and the runtime's apeinit for $GOAPETEMP), and
+	// is told the file's name, for os.Executable. The #ape lines say
 	// where the images are (see Images).
+	align := strconv.Itoa(ELFAlign)
 	script := "'\n" + manifest.String() +
-		"o=$0\nm=`uname -m`\nu=`uname -s`\n" +
+		"o=$0\ncase $o in /*)p=$o;;*)p=$PWD/${o#./};;esac\n" +
+		"m=`uname -m`\nu=`uname -s`\n" +
 		"case $m in " + archCases.String() + "*)a=$m;;esac\n" +
 		"case $u/$a in\n" + cases.String() +
 		"*)echo \"$o: no executable for $u/$m in this file\" >&2;exit 1;;\n" +
 		"esac\n" +
-		"d=${XDG_CACHE_HOME:-${HOME:-${TMPDIR:-/tmp}}/.cache}/goape\ne=$d/$h\n" +
-		"if ! [ -x \"$e\" ];then\n" +
-		"mkdir -p \"$d\"||exit 1\n" +
-		"if [ -n \"$x\" ];then\n" +
-		"{ tail -c +$((x+1)) \"$o\"|head -c 64;tail -c +$((s+65)) \"$o\"|head -c $((n-64));}>\"$e.$$\"\n" +
-		"else\n" +
-		"tail -c +$((s+1)) \"$o\"|head -c $n >\"$e.$$\"\n" +
-		"fi&&chmod 755 \"$e.$$\"&&mv -f \"$e.$$\" \"$e\"||{ rm -f \"$e.$$\";exit 1;}\n" +
-		"fi\n" +
+		"i=0\n" +
+		"until t=${TMPDIR:-/tmp}/.ape$$.$i;(umask 077;mkdir \"$t\") 2>/dev/null;do\n" +
+		"i=$((i+1));[ $i -lt 99 ]||{ echo \"$o: cannot make a directory in ${TMPDIR:-/tmp}\" >&2;exit 1;}\n" +
+		"done\n" +
+		"e=$t/${o##*/}\n" +
+		"dd if=\"$o\" bs=" + align + " skip=$((l/" + align + ")) 2>/dev/null|head -c $n >\"$e\"&&chmod 700 \"$e\"||{ rm -f \"$e\";rmdir \"$t\";exit 1;}\n" +
+		"if [ -n \"$x\" ];then exec \"$e\" \"$p\" $s $x \"$o\" \"$@\";fi\n" +
+		"export GOAPEFILE=\"$p\" GOAPETEMP=\"$e\"\n" +
 		"if (exec -a x true) 2>/dev/null;then exec -a \"$o\" \"$e\" \"$@\";fi\n" +
 		"exec \"$e\" \"$@\"\n" +
 		"exit 1\n"
