@@ -34,6 +34,7 @@ const (
 		ir.UintptrKeepAlive |
 		ir.UintptrEscapes |
 		ir.NoTear |
+		ir.LocalArgs |
 		ir.Systemstack |
 		ir.Nowritebarrier |
 		ir.Nowritebarrierrec |
@@ -60,6 +61,8 @@ func pragmaFlag(verb string) ir.PragmaFlag {
 		return ir.NoCheckPtr
 	case "go:notear":
 		return ir.NoTear
+	case "go:localargs":
+		return ir.LocalArgs
 	case "go:systemstack":
 		return ir.Systemstack
 	case "go:nowritebarrier":

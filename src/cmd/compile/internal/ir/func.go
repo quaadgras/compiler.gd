@@ -207,6 +207,11 @@ type Func struct {
 	// move.go).
 	Consumes    uint16
 	OwnedResult bool
+	// PoolResult is whether an object that the function returns as
+	// OwnedResult may be one that a sync.Pool gave: it is then shared,
+	// where one that the function allocated is as local as its caller
+	// says.
+	PoolResult bool
 
 	// KeptChecked has bit k set if all that keeps the pointer that
 	// is the function's k'th parameter (the receiver first) is a
@@ -231,6 +236,32 @@ type Func struct {
 	// that is called keeps it, so it cannot be a local one. Of the
 	// others only methods of their own are called.
 	KeptCalls uint16
+	// DeepBits has bit k set if the function reads the bit of its
+	// k'th parameter (the receiver first) for a store in an object
+	// that the parameter reaches: the caller sets it only if every
+	// object that the argument reaches is local. DirtyInto has the
+	// parameters in whose structures the function may store what its
+	// caller does not know. ResultExact is whether what the function
+	// returns is local exactly when its caller says that the results
+	// stay local (escape's groups.go).
+	DeepBits    uint16
+	DirtyInto   uint16
+	ResultExact bool
+	// ShareOpaque says that the function, or one that it calls, does
+	// with pointers what their types do not say (unsafe.Pointer): of
+	// what it shares, a caller cannot tell by type what is not shared
+	// (escape's typed.go).
+	ShareOpaque bool
+	// ResultDeep has the parameters in whose structures the function
+	// stores what it returns, or what that reaches: the results are
+	// local only if the bits of those parameters are set too, and
+	// the caller's results are among what its arguments reach.
+	ResultDeep uint16
+	// StoresInto has the parameters in whose structures the function
+	// may store anything at all: that is all that a caller which
+	// cannot say what it knows of them (through a function value, or
+	// in the function's own batch) has to go by.
+	StoresInto uint16
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:
@@ -854,15 +885,46 @@ func ContainsClosure(f, c *Func) bool {
 // A ParamShare is what a function does with a parameter, for which
 // goroutines reach what it points to (Func.ParamShares). The numbers of
 // dereferences are as in the escape tags, plus one: zero is none.
+// A MixLink is one of ParamShare.MixLinks.
+type MixLink struct {
+	Key string
+	// Arg is the parameter's place among the arguments of the call
+	// of that class, or MixRecv if it is the receiver.
+	Arg  uint8
+	Into uint16
+	Bad  bool
+}
+
+// MixRecv is MixLink.Arg for the receiver of a method of an interface.
+const MixRecv = 255
+
 type ParamShare struct {
 	// Share is the least number of dereferences of the parameter that
 	// give what flows to where another goroutine may reach it.
 	Share uint8
+	// ShareTyped says, of a parameter that is not shared itself
+	// (Share > 1), that only values of one type are shared of what
+	// it leads to: the type of the field that ShareField leads to
+	// from the parameter's type, by the index of a field at each
+	// step, through pointers and elements (escape's typed.go). What
+	// is stored beside such a value is not shared by this.
+	// ShareType and ShareAny are for the function's own batch.
+	ShareTyped bool
+	ShareField []uint8
+	ShareType  *types.Type
+	ShareAny   bool
 	// Via has bit k set if the parameter, dereferenced ViaDerefs-1
 	// times or more, is stored in what the function's k'th parameter
 	// (the receiver first) points to: it is then where that is.
 	Via       uint16
 	ViaDerefs uint8
+	// ViaDirect says that the parameter's own value is what is
+	// stored, as a field or an element of the object that the other
+	// parameter points to, and nothing else of it anywhere that the
+	// store says (escape's typed.go). ViaLoose is for the function's
+	// own batch: some store is not so.
+	ViaDirect bool
+	ViaLoose  bool
 	// Results has bit i set if the parameter flows to the function's
 	// i'th result, when the escape tag may not say it.
 	Results uint8
@@ -876,4 +938,30 @@ type ParamShare struct {
 	// another goroutine reaches it if one of them shares its argument,
 	// which the linker knows (sharelink.go).
 	Links []ShareLink
+	// Deep has bit k set if the parameter, dereferenced DeepDerefs-1
+	// times or more, is stored in an object that is reached from the
+	// function's k'th parameter (the receiver first), and nobody
+	// knows which: it is shared unless every object that the k'th
+	// argument reaches is local.
+	Deep       uint16
+	DeepDerefs uint8
+	// StoreLinks are the functions that are only known when the
+	// program runs to which the parameter is passed and that matter
+	// only for what they store in what it reaches: its receivers.
+	// (Those of Links matter for that too.)
+	StoreLinks []ShareLink
+	// MixLinks are the functions that are only known when the program
+	// runs to which the parameter is passed with others: if a function
+	// of that class stores one of its arguments in what another
+	// reaches (the class's word says), the parameter is stored in what
+	// the parameters of Into reach, or, with Bad, where nobody knows.
+	MixLinks []MixLink
+	// MixGroups are those classes too, for what the parameter
+	// reaches: if a function of the class stores any argument in what
+	// another reaches, what the parameter reaches may have gained
+	// what the parameters of Into reach.
+	MixGroups []MixLink
+	// LinksFull is set, while the function is analysed, when there
+	// were more links than a parameter may have: it is shared then.
+	LinksFull bool
 }

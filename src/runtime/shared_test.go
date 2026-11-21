@@ -1687,3 +1687,305 @@ func init() {
 		panic("PassLinkObj")
 	}
 }
+
+// A structure that one function builds and another annotates, storing
+// in objects that it reaches from its parameters (deep stores): all of
+// it is local if nothing of it is shared, and none of what is stored
+// is if something is (cmd/compile/internal/escape, groups.go).
+
+type deepNode struct {
+	name *deepIdent
+	kids []*deepNode
+}
+
+type deepIdent struct{ obj *deepObj }
+
+type deepObj struct{ decl *deepNode }
+
+//go:noinline
+func deepLeaf() *deepNode { return &deepNode{name: &deepIdent{}} }
+
+//go:noinline
+func deepBuild(n int) *deepNode {
+	root := &deepNode{name: &deepIdent{}}
+	for i := 0; i < n; i++ {
+		root.kids = append(root.kids, deepLeaf())
+	}
+	return root
+}
+
+//go:noinline
+func deepDeclare(decl *deepNode, idents ...*deepIdent) {
+	for _, id := range idents {
+		id.obj = &deepObj{decl: decl}
+	}
+}
+
+//go:noinline
+func deepResolve(root *deepNode) {
+	deepDeclare(root, root.name)
+	for _, k := range root.kids {
+		deepDeclare(k, k.name)
+	}
+}
+
+var deepSink *deepNode
+
+//go:noinline
+func deepCount(root *deepNode) int {
+	n := 0
+	for _, k := range root.kids {
+		if k.name.obj != nil && k.name.obj.decl == k {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSharedDeep(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	// Built and annotated: the root, its name, three leaves with
+	// theirs, and the slice of the leaves as it grows. (The objects
+	// of the four names are local if the page of each name says that
+	// it is, which in a large heap it does not always.)
+	n := runtime.CountLocalAllocs(func() {
+		root := deepBuild(3)
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure that is built and annotated", n)
+	if n < 8 {
+		t.Errorf("%d local objects, want at least 8", n)
+	}
+	// The same, and a leaf is stored where another goroutine reaches
+	// it: what is stored in it must not be local.
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(3)
+		deepSink = root.kids[0]
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure of which a part is shared", n)
+	if n != 0 {
+		t.Errorf("%d local objects in a structure that takes stores and of which a part is shared", n)
+	}
+	done := make(chan bool)
+	go func() { done <- deepSink.name.obj.decl == deepSink }()
+	if !<-done {
+		t.Errorf("the shared leaf is not annotated")
+	}
+
+	// Passed, before it is annotated, to a method of an interface
+	// that only reads it, whichever it is: the linker says that no
+	// method of that name stores in what its argument reaches.
+	for i, r := range []deepReader{new(deepKidCounter), deepNameCounter{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			sum += deepRead(r, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n < 8 {
+			t.Errorf("reader %d: %d local objects, want at least 8, in a structure that a method only reads", i, n)
+		}
+	}
+	// And to one of which a method with that name stores in it an
+	// object that it allocates, as local as what it stores it in:
+	// the call passes its bits.
+	for i, w := range []deepWriter{deepSkips{}, deepMarks{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			deepWrite(w, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n < 8 {
+			t.Errorf("writer %d: %d local objects, want at least 8, in a structure that a method stores its own objects in", i, n)
+		}
+	}
+	// And to one of which a method with that name stores in it what
+	// nobody knows where it is from, or stores it where another
+	// goroutine reaches it.
+	for i, w := range []deepSpoiler{deepSpoilsNot{}, deepPlants{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			deepSpoil(w, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n != 0 {
+			t.Errorf("spoiler %d: %d local objects in a structure that a method may have stored something unknown in", i, n)
+		}
+	}
+	go func() { done <- deepPlanted.decl == nil }()
+	<-done
+	// A function that returns what it has stored in what its
+	// parameter reaches: its caller knows where the result is.
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(0)
+		for range 3 {
+			k := deepAdd(root)
+			sum += len(k.kids)
+		}
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure that a function adds its results to", n)
+	if n < 8 {
+		t.Errorf("%d local objects, want at least 8", n)
+	}
+	// And if the result is stored where another goroutine reaches it,
+	// it is not local, nor what is stored in it afterwards: the two
+	// of the leaf, and the object of its name. (The root, its name,
+	// the slice of its leaves and the object of its name are: the
+	// leaf does not lead to them.)
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(0)
+		deepSink = deepAdd(root)
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure of which a function's result is shared", n)
+	if n > 4 {
+		t.Errorf("%d local objects, want at most 4", n)
+	}
+	go func() { done <- deepSink.name.obj.decl == deepSink }()
+	<-done
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
+type deepReader interface{ ReadDeep(n *deepNode) int }
+
+type deepKidCounter struct{ n int }
+
+func (c *deepKidCounter) ReadDeep(n *deepNode) int { c.n += len(n.kids); return c.n }
+
+type deepNameCounter struct{}
+
+func (deepNameCounter) ReadDeep(n *deepNode) int {
+	if n.name != nil {
+		return 1
+	}
+	return 0
+}
+
+type deepWriter interface{ WriteDeep(n *deepNode) }
+
+type deepMarks struct{}
+
+func (deepMarks) WriteDeep(n *deepNode) { n.name.obj = &deepObj{decl: n} }
+
+type deepSkips struct{}
+
+func (deepSkips) WriteDeep(n *deepNode) {}
+
+//go:noinline
+func deepRead(r deepReader, n *deepNode) int { return r.ReadDeep(n) }
+
+//go:noinline
+func deepWrite(w deepWriter, n *deepNode) { w.WriteDeep(n) }
+
+type deepSpoiler interface{ SpoilDeep(n *deepNode) }
+
+type deepSpoilsNot struct{}
+
+func (deepSpoilsNot) SpoilDeep(n *deepNode) {}
+
+// An object that holds a pointer to a shared one, and other things
+// beside: the shared one, and what is stored in its place later, must
+// not be local.
+
+type typedFile struct {
+	mu sync.Mutex
+	n  int
+}
+
+type typedHolder struct {
+	file *typedFile
+	buf  *[4]*int
+	next *typedHolder
+}
+
+// use shares h.file: a mutex is where every goroutine may reach it.
+//
+//go:noinline
+func (h *typedHolder) use() int {
+	h.file.mu.Lock()
+	h.file.n++
+	h.file.mu.Unlock()
+	return h.file.n
+}
+
+//go:noinline
+func (h *typedHolder) setBuf(b *[4]*int) { h.buf = b }
+
+//go:noinline
+func (h *typedHolder) setFile(f *typedFile) { h.file = f }
+
+var typedSink *typedFile
+
+func TestSharedTyped(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	// The holder and its buffer are local; the file is not.
+	n := runtime.CountLocalAllocs(func() {
+		h := &typedHolder{file: new(typedFile)}
+		h.setBuf(new([4]*int))
+		sum += h.use() + len(h.buf)
+	})
+	t.Logf("%d local objects beside a shared file", n)
+	if n < 1 {
+		t.Errorf("%d local objects, want the buffer", n)
+	}
+	if n > 2 {
+		// (The holder need not be in the heap.)
+		t.Errorf("%d local objects: the file is one, and its mutex is used", n)
+	}
+	// A file that is stored in the holder later is shared as well:
+	// another goroutine reads it.
+	n = runtime.CountLocalAllocs(func() {
+		h := &typedHolder{file: new(typedFile)}
+		f := new(typedFile)
+		h.setFile(f)
+		sum += h.use()
+		typedSink = h.file
+	})
+	t.Logf("%d local objects with a file stored later", n)
+	if n > 1 {
+		t.Errorf("%d local objects, want at most the holder", n)
+	}
+	done := make(chan bool)
+	go func() { typedSink.mu.Lock(); typedSink.n++; typedSink.mu.Unlock(); done <- true }()
+	<-done
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
+// deepAdd adds a leaf to root, and returns it.
+//
+//go:noinline
+func deepAdd(root *deepNode) *deepNode {
+	k := deepLeaf()
+	root.kids = append(root.kids, k)
+	return k
+}
+
+// deepPlanted is an object that every goroutine reaches.
+var deepPlanted = new(deepObj)
+
+type deepPlants struct{}
+
+func (deepPlants) SpoilDeep(n *deepNode) { n.name.obj = deepPlanted }
+
+//go:noinline
+func deepSpoil(w deepSpoiler, n *deepNode) { w.SpoilDeep(n) }

@@ -156,8 +156,39 @@ func (e *escape) storeThrough(p ir.Node) hole {
 	if c := e.contentsOf(p); c != nil {
 		return c.asHole()
 	}
-	if r := e.dynRootOf(p); r != nil {
-		return r.asHole()
+	if !e.deepOn() {
+		if r := e.dynRootOf(p); r != nil {
+			return r.asHole()
+		}
+		return e.heapHole()
 	}
-	return e.heapHole()
+	// What is stored is, from now on, in an object that the variable
+	// which the path starts from points to or reaches: the groups
+	// that have that object need to know (groups.go).
+	name, plain, global := e.pathBase(p)
+	if name != nil && name.Opt != nil {
+		if g := e.varGroup(name); g != nil {
+			// Not a parameter's structure, of which the caller
+			// knows: the function's own. What is stored is one
+			// of what the variable reaches, and local only if
+			// all of that is.
+			k := e.teeHole(e.ownHeapHole(), g.asHole(), e.condRoot(g).asHole())
+			return e.noteStray(k, name, plain)
+		}
+	}
+	k := e.heapHole()
+	if r := e.dynRootOf(p); r != nil {
+		k = r.asHole()
+	}
+	switch {
+	case name != nil && name.Opt != nil:
+		return e.noteStray(k, name, plain)
+	case global:
+	default:
+		if e.lost == nil {
+			e.lost = make(map[*ir.Func]bool)
+		}
+		e.lost[e.curfn] = true
+	}
+	return k
 }

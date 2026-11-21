@@ -825,6 +825,454 @@ masks of all the functions of the class, ORed
   and what `fmt` prints is shared (the printer keeps it while it
   prints, and calls its methods).
 
+### What a function does with its arguments' structures (design, 2026-11-21)
+
+Decided with the user on 2026-11-21, to get past stores that go deeper
+than a parameter (`ident.Obj.Decl = decl`): "Functions can include a
+short function that uses the facts passed in about their arguments to
+return/record relationships structurally", as bits (nothing is recorded
+when the program runs; every answer is derived where an object is
+allocated), with one fact for each pointer argument: *every object that
+is reached from it is local*.
+
+The short function of a function is, so far, data that the compiler and
+the linker evaluate, since a function of a few bits is a table: what
+`ir.ParamShare` says of each parameter (`Share`, `Via`, `Links`, and now
+`Deep`), with the bits of the call as its input. It becomes code only if
+a fact has to be computed from what the program holds when it runs.
+
+**The fact that a caller passes.** Bit k+1 of a call's bits said that
+nothing that is stored *through argument k* is shared. For a parameter
+whose bit the function reads for a deeper store (`ir.Func.DeepBits`) it
+says more: every object reached from argument k is local, so that a
+pointer may be stored in any of them. A caller that cannot say so
+passes 0.
+
+**In the function that is called.**
+- A variable is *derived* from parameters if all that it is ever
+  assigned is a path from a parameter that is never assigned, or from
+  another derived variable (`p.f`, `*p`, `p[i]`, the value of a range
+  over one, the variable of a type switch on one): what it points to is
+  reached from those parameters' arguments.
+- A store through a path that starts at a derived variable, or through
+  a path deeper than a parameter itself, is a store in an object that
+  is reached from those parameters. Its dynamic root has their mask
+  (`dynRoot.deep`).
+- A parameter that flows to such a root is stored in what those
+  parameters reach: `ParamShare.Deep` has their bits (it was `Share`).
+- An object that the function allocates and that flows to such a root
+  is local if the root's container is (the page of the pointer, where
+  that can be read in the statement, as before), or else if the bits of
+  those parameters are set.
+
+**In the caller, for a direct call.** For each argument j that some
+parameter is stored in the structure of, or whose bit the function reads
+so:
+- if the argument is a parameter of the caller, or derived from some,
+  the caller's own parameter is stored in what those reach (a root with
+  no path and their mask), and the bit that it passes is its own bits
+  of those, which it then reads so too;
+- otherwise the argument has a *group*: a location that the argument
+  flows to, so that a walk from it finds everything that the argument
+  reaches (as the walks that find what an object leads to do). The
+  argument i that is stored in it flows to the group (it is one of what
+  the argument reaches from then on) and to the group's *condition*, a
+  dynamic root whose tag is the bit that the caller passes for j: all
+  that the group reaches is local. The walk from the condition reaches
+  everything that argument i reaches, so each of those objects is local
+  only if the condition holds.
+
+**The condition of a group** is known when the graph is solved: of
+every location that the walk from the group finds,
+- an allocation of the function: it must not be shared for good, and
+  the dynamic roots that it flows to are conditions of the group (the
+  group's own condition is not one); if it is returned, the function's
+  own bit 0 is;
+- a parameter of the function, never assigned: its own bit, read as
+  above;
+- the result of a call: the function called must return only objects
+  that are local exactly when it is told that its results stay local
+  (`ir.Func.ResultExact`), and where the result goes is a condition as
+  for an allocation;
+- a variable that something is loaded through and that is not tracked,
+  or the *unknown source*: not known, the condition is false. The
+  unknown source is a location that every pointer which the graph did
+  not follow flows from: a load of a global, the result of a call that
+  is not recorded, a receive.
+A dynamic root that cannot be read at the call (the page of a pointer
+in another statement) makes it false.
+
+**Through a call of a function that is only known when the program
+runs** (not started): the class's word has the relations of its
+arguments too (argument i is stored in what argument j, or the
+receiver, reaches), and such a call passes its bits, in `g.localBits`
+with the address of the function that is called, so that the function
+allocates as its caller says.
+
+Built in this order: the function's side and `ParamShare.Deep`, with a
+caller that takes `Deep` for shared; then groups for direct calls; then
+the words and the bits of dynamic calls. `-d=nolocaldeep` turns it off.
+
+**Done**: the function's side (`escape/deep.go`: `deriveFromParams`,
+`dynRoot.deep`, `ParamShare.Deep`), and a caller that passes on its own
+parameters (`deepRoot`). In `go/parser` 417 variables are derived from
+parameters, and `(*resolver).declare` says that `decl` and `data` are
+stored in what `idents` reaches.
+
+**Done too** (`escape/groups.go`): the groups of the arguments of
+direct calls and their conditions, the bit that a caller passes for a
+parameter whose bit the function reads so (`ir.Func.DeepBits`), what a
+function may store in a parameter's structure that its caller does not
+know (`ir.Func.DirtyInto`), whether its results are exactly as local as
+it is told (`ir.Func.ResultExact`), and the unknown source. A store
+through a path from a variable of the function that is not a parameter
+nor derived from some (`root.kids = append(root.kids, leaf())`) has the
+group of that variable, where it had a root of its statement that the
+result of a call could not read. A structure that takes such stores is
+local as a whole or not at all. A program that builds a tree with one
+function, has another store in each node a pointer to an object that
+points back, and reads it, had no local object and has all 15000;
+`TestSharedDeep` in `runtime`.
+
+As built, with what differs from the notes below:
+- Every membership root has the locations of its own function only, and
+  its walk stops at another function's. The first version had a pair of
+  roots for each store, and then one root for each function whose walk
+  went on into the functions of its batch: in a large batch every
+  location was in thousands of roots, and `go/types` took 48 seconds to
+  compile. What comes from another function of the batch is then the
+  result of a recorded call, which answers for it by `ResultExact`
+  (computed for the batch until nothing changes, from all true), or an
+  argument; anything else makes the root one that does not know all
+  (`dynRoot.crossed`).
+- A function has four roots for its stores through variables that are
+  not tracked (the variables and what is stored, for those that are
+  parameters or derived from them, and for the others), for
+  `DirtyInto`. What a group of the function gains by such a store is
+  found when its condition is asked for, by walking back from the
+  variable and from what is stored (`membersOf`, `reachTo`).
+- An argument of a call of a function of the same batch, or of one that
+  is only known when the program runs, flows to the dirt of the
+  function: nobody knows what is stored in it.
+- A marker (`location.marker`) holds nothing: the proofs of a hand-over,
+  the candidates for a caller's buffer and what outlives a loop do not
+  count it.
+- A variable that holds the result of a function which returns an
+  object that is its caller's alone had contents that were shared from
+  the start, since the object may be a pool's (two days before). That
+  made the result of every constructor shared. It is so now only if the
+  function may return a pool's object (`ir.Func.PoolResult`).
+
+**Functions that nobody knows at the call, first half** (done): what
+an argument reaches was the dirt of the function where it was passed to
+a function that is only known when the program runs, or to one of the
+function's own batch. Now:
+- A function says in which parameters' structures it stores anything at
+  all (`ir.Func.StoresInto`): a parameter that flows to a variable which
+  it stores through, or that it passes to a function that does. For the
+  functions of a batch that is computed when the graph is solved, until
+  nothing changes, and an argument of a call of one of them is dirt only
+  if that function stores in what the parameter reaches
+  (`pendingDirt`), or passes it on to a function that nobody knows.
+- A function's record for the linker has the same, with the classes
+  that it passes each parameter on to, and the linker computes for each
+  class the arguments in whose structures a function of the class may
+  store: bits `ir.ShareWordStores`+k of the class's word.
+- A group's condition has, for each class that a member is passed to,
+  that no function of the class shares the member, and that none stores
+  in what it reaches (`groupCond.links`); for the classes that a member
+  is the receiver of, only the second (`groupCond.stores`, from a
+  membership root with the class's key, `classMarker`: a link root
+  there made every receiver depend on whether a method of that name
+  shares its receiver, which the conversion had answered better, and
+  was a holder for the hand-over proofs). A parameter that is passed on
+  as a receiver says so (`ir.ParamShare.StoreLinks`).
+- The conditions of the groups are computed together, in the order of
+  the locations, each from what the others are so far, until nothing
+  changes (`solveConds`), with what a group's members say by themselves
+  computed once (`groupInfoOf`): asked for one by one, the result
+  depended on which was asked first, and computed all anew each time,
+  the compiler took nine minutes to build.
+
+A structure that is also passed to a method of an interface which only
+reads it, whichever method that is, is local as a whole (`TestSharedDeep`);
+one that is passed to an interface of which some method stores in it is
+not, since that method allocates what it stores with no bits of a call.
+That is the second half: the relations of a class's arguments in its
+word, and the bits of a call of a function that is only known when the
+program runs.
+
+**Functions that nobody knows at the call, second half** (done): a call
+of a function that is only known when the program runs passes bits, and
+the class's word says what its functions do with their arguments'
+structures.
+- The first half had a hole: a function that is only known when the
+  program runs may store one argument in what another reaches (a
+  visitor that keeps the node, or a node that is given the visitor), and
+  nothing said so. The stored argument then stayed local in a structure
+  that another goroutine reaches.
+- A function's record says, for each parameter, whether it is stored in
+  what another parameter reaches, and whether something is stored in
+  what it reaches (`ir.ShareMix`, from `ParamShare.Deep`, `Via`,
+  `MixLinks` and `MixGroups`), with the classes that it passes the
+  parameters on to together. The linker computes them for the class:
+  bit `ShareWordMixRecv` (the receiver is stored in another's),
+  `ShareWordMixArg`+k (argument k is), `ShareWordMixDstRecv` and
+  `ShareWordMixDst`+k (something is stored in the receiver's, in
+  argument k's), and `ShareWordMix` where nobody knows. The two
+  directions are apart because one bit for both made every structure
+  that is only read depend on what the others do.
+- At the call each argument flows to a mix root of its class and place
+  (`mixRoot`): it is where all the arguments of the call are (their
+  group, `dynG`) if the word says that it is stored in another's. Once
+  for the argument itself, and once for what it reaches, which is stored
+  with it if the function stores anything there. A function with such a
+  call says of its parameters which class decides (`ParamShare.MixLinks`
+  for the object, `MixGroups` for its structure).
+- The bits of the call: bit k+1 is set if what argument k reaches is
+  all local, which is its group's tag, or the caller's own bit if the
+  argument is derived from a parameter. So a method that is called
+  through an interface and stores in the tree that it is given allocates
+  what it stores as its caller says (`TestSharedDeep`, the writers); if
+  another method of that name plants something that its caller does not
+  know (`deepPlants`), the class's word says so and the structure is not
+  local.
+- Whether a function may store what nobody knows in an argument's
+  structure is asked of the class (`classMarker`, bits
+  `ShareWordStores`+k, from `ir.Func.DirtyInto`), and no longer assumed
+  of every call without a body.
+
+What this costs: closures that are passed to `ast.Inspect` had captured
+variables that were local, and are not now (`go/printer`'s tests: 5263
+local objects, 9807 before). `Inspect` calls `Visitor.Visit`, and of
+the five methods of that name `(*go/parser.resolver).Visit` says that it
+may store its receiver in what the node reaches. It does not: it is in
+one batch with the functions that walk for it, and a function of the
+same batch has no facts when its caller's graph is built. That is next.
+
+Looked at closer (the same night), that method does store what its
+receiver reaches in the nodes: the objects of the resolver's scopes go
+in the identifiers. So the class's answer is right, and the closures
+that `Inspect` is given are local only where the tree that they walk
+is: the parser's tree has to be local as a whole first. What stands in
+the way there, as `-m=4` now says for each function (`stores what its
+caller does not know`, `is dirt`, `the results of ... are not exact`,
+`a pointer from where the graph does not follow`):
+
+- **A function that returns what it has stored in what a parameter
+  reaches** (done): `(*parser).consumeCommentGroup` appends the group
+  to the parser's list and returns it. The object is local only if the
+  caller says so both of the results and of the parameter's structure,
+  so its results were not exact and it stored what its caller did not
+  know. Now `ir.Func.ResultDeep` has the parameters in whose structures
+  the results are stored, a caller's result flows to what the argument
+  reaches (the deep root of the caller's own parameters, or the
+  argument's group and its condition; where nobody knows all that the
+  argument reaches, nothing: the call says so with the argument's bit
+  and the callee's tag makes the object shared), and such an object,
+  or the result of a function whose results are exact, is one that the
+  caller knows (`knownStored`). Only bits that come from stores count:
+  a function that returns its parameter, or what it has stored through
+  the parameter itself, is as before (`groupCond.from`): `append`-like
+  functions were shared for a while otherwise. For a callee of the same
+  batch the caller's graph has no such flow, and its results are not
+  taken as exact (`condOnce`). `TestSharedDeep`, the last two cases.
+- Open: the closure that `(*parser).init` gives the scanner (stored
+  through `&p.scanner`, a path from a parameter, and shared);
+  `(*parser).error` (`p.file.Position(pos)`: a result that is a struct
+  with a string, which no call site records); statement roots (`stored
+  where only its statement can tell`) in most of the functions that
+  build nodes; the results of functions of the same batch, which the
+  recursive part of the parser is.
+
+Open: the object file of a package (not what it exports) differs by one
+relocation in about one build in five when other packages are compiled
+at the same time; seen on `go/token` on 2026-11-21, not traced.
+
+**How the groups were to be built** (the notes of 2026-11-21, before):
+- A walk does not go past a location that escapes unless the root has
+  something to tell it (`wantsDyn`). So a group is a dynamic root: every
+  location that the argument reaches then has the group among its roots,
+  which is how its members are found when the graph is solved. That
+  membership is recorded apart from `location.dyn` (which has a limit,
+  over which a location is shared and forgets its roots), and what
+  counts `dyn` to tell whether a location stays local (`stays`,
+  `staysPointee`, the bits of a call's results) must not count it.
+- The condition is a second root, which only the argument that is
+  stored flows to: a member that is not stored anywhere by the call
+  keeps its own tag.
+- A store through a variable that is not tracked (`q.f = y`, with `q`
+  the result of a call) goes to a root of its statement or to the heap,
+  and `y` is then reached from what `q` points to without the graph
+  saying so. For the groups to find it, such a store also has an edge
+  from `y` to `q` that only the walks for sharing follow (`edge.share`):
+  `y` is where `q` is.
+- The result of a call that is recorded has a location of its own
+  already (`callSite.res`); it needs the function called (for
+  `ResultExact`).
+- A function of the same batch has no facts yet when its caller's graph
+  is built: its parameters' bits are 0 unless the caller passes on its
+  own.
+
+### A step back: field classes (2026-11-22, a design that is not built)
+
+All of the above proves, for an object that is stored in what a
+parameter reaches, that everything which the argument reaches is local.
+That is more than is needed, and false of ordinary structures, in which
+local objects point to shared ones: the one thing that must hold is
+that no shared object points to a local one. The user's idea: a local
+object may keep references to shared memory if the fields that do are
+known.
+
+The design under consideration keeps the decision at the allocation (an
+object that becomes shared later would make an arena that is freed when
+the goroutine exits much harder: its objects would have to be traced
+and handed over one by one), and asks only whether each container that
+the pointer is stored in is local: by a test of the container's address
+where it exists before the allocation, by the bit of the call's results
+where it is allocated later, and otherwise by the class of the fields
+on the path to it. Each field that holds a pointer has one class for
+the whole program, from all the stores in it: *holder* (in a local
+object it holds only local pointers or nil), or *mixed*. A container
+that is reached from a local root through holder fields is local.
+
+A census of the stores says how many fields could be holders
+(`-gcflags=all=-d=fieldcensus=1`, `escape/census.go`, summed by
+`doc/gd/tools/fieldcensus.py`). It looks at each function once, without
+order in time. Over the standard library, the compiler and the go
+command together, as if one program: 6792 fields, elements and maps
+with 112817 stores in containers that are not certainly shared.
+
+| what demotes a field | holder fields | stores in them |
+|---|---|---|
+| a shared or unknown value | 92% | 52% |
+| and a parameter | 63% | 21% |
+| and the result of a call | 42% | 12% |
+
+Of `go/ast`'s 126 fields 116 are holders in the first row and 90 in the
+second. `Ident.Obj` is not, as expected (the parser's `unresolved`
+is a package's variable), and `[]*ast.Ident` is not because `go/doc`
+stores one of its own variables in such a slice, which takes
+`[]ast.Expr` with it: the elements of a slice type are one field for
+all the program, which is coarse, and a real program links less. The
+fields that most often get a shared value are maps of tables, `error`
+fields and `time.Time.loc`.
+
+So the question is the 1842 fields in which a parameter is stored: each
+is an obligation on the callers (the argument is local exactly when the
+container is).
+
+Followed further the same day, the census says no to classes that are
+decided for the whole program without the call:
+
+- Parameters and results followed through their callers (`-arg`,
+  `-ret`, `-def`, `-esc` lines), for `cmd/gofmt` alone as one program:
+  123 of `go/ast`'s 126 fields have no shared value reach them
+  (`Ident.Obj` and two that hold errors and writers do).
+- But a class must also be kept: what is stored in a field that is not
+  a holder, or in a container that may be shared, has to be allocated
+  shared, and then the fields that hold *that* are not holders either.
+  With this rule and two classes, 33 of the 126 are left; the elements
+  of `[]interface{}` are one field for all the program and take
+  everything that is ever printed with them.
+- Two classes are not enough anyway: a local container that holds
+  shared values at times (the arguments of a `fmt` call) needs a third,
+  *mixed*: anything, as long as nothing that is loaded from it is
+  stored in what may be shared. With three classes, the origin of each
+  store's container, and allocations as nodes of their own (what
+  `fieldcensus.py` computes now): of `go/ast`'s fields in gofmt 8 are
+  holders, 19 mixed and 99 shared, and 214 of the 487 allocations in
+  `go/parser` may be local. Over everything, half of the allocations.
+
+The census is crude (no order in time, the elements of a slice type as
+one field, methods by name), and a finer one would do better. But the
+way it fails is not crudeness: one decision per field or per parameter
+for the whole program means that a helper which everything passes
+through (`fmt.Errorf`, an `append` in a loop) joins all its callers,
+and one of them that shares makes the others share. What the present
+design has, and this would give up, is that a call says what holds *at
+that call*, with bits that are computed when the program runs. That
+has to stay. What should change is what the bits claim: not that
+everything which an argument reaches is local, but that the containers
+which are stored in are.
+
+**Narrowing, first step** (done): a value that cannot lead to memory
+which holds pointers (a string, a slice of bytes, a struct of those:
+`leadsToPointers`) points to nothing that a pointer can be stored in.
+Where it comes from says nothing of a structure that has it, so it is
+no unknown member of a group (`unknownOf`, `location.leadsNowhere`),
+and a function that stores one in what its parameter reaches stores
+nothing that its caller does not know (`knownStored`). A variable of
+such a type is still an object that holds a pointer. `(*parser).error`
+and the resolver's `sprintf` are clean by this; 84 of the parser's
+functions still store what their callers do not know, of 100.
+
+**Stores through a variable that a closure captures** (done): such a
+store was taken to share what is stored, since whether a location is
+reassigned forgets what was before the capture. A variable that is
+never assigned after it is declared, in its function or a closure
+(`ir.ReassignOracle`), and whose address is not taken, is the same
+pointer wherever it is read (`neverAssigned`). `(*parser).init` gives
+the scanner a closure that has the parser, and stores through the
+parser: it no longer stores what its caller does not know (83 of the
+parser's functions do).
+
+**Sharing by the type of what is shared** (`escape/typed.go`; off with
+`-d=nolocaltyped=1`): `token.(*File).position` shares the file, which has
+a mutex, so the scanner's methods say that what the scanner holds is
+shared (`ParamShare.Share` = 2), by depth only, and the caller took
+everything that is stored in the scanner as shared. The fact now says
+*what* is shared, which is the user's idea of marking the fields that
+are shared and treating the object as local otherwise.
+
+- A value that a function shares of its argument flows to a share root
+  of the parameter's type (`shareHoleOf`), walked like `shareLoc`. The
+  walk goes by the types of the locations that it reaches with nothing
+  dereferenced (`typedAt`): what may be the shared pointer, or a struct
+  that holds it, is shared for that type (`location.shareOnly`), and
+  the walk from it goes by the type in turn; a pointer to a larger
+  object that the shared one may be a part of widens the type; an
+  object whose address is the shared value, an interface, an
+  `unsafe.Pointer`, and what is behind them are shared whatever their
+  types; what can only lead to such a value "leads to what is shared"
+  and no more; what cannot is not walked through.
+- The first version was not sound: with it `net/http`'s tests had 107
+  local objects that a shared one pointed to. `http.NewRequest` stores
+  the body in the request that it returns, the graph has that as a flow
+  from the body to the result without a dereference (it does not see
+  the object), and the walk took such a flow to be of the same value,
+  so that the body, of another type, stayed local in a request that
+  was shared later. Now a flow that stands for what a function did
+  with an argument is *loose* (`hole.loose`, `edge.loose`: to a call's
+  results, and to what another argument points to), and what comes
+  over one is shared with all that is behind it. A function says where
+  that is not needed: it stores the parameter's own value as a field
+  or an element of the object that the other parameter points to
+  (`ParamShare.ViaDirect`), which the walk from the place of the store
+  finds (the parameter comes to it by itself, through variables that
+  only pass a value on).
+- A function says of a parameter that it shares itself that a caller
+  can go by its type, and of one that is shared one dereference down
+  which field of the parameter's struct the shared value is in
+  (`ParamShare.ShareTyped`, `ShareField`: the export data's function
+  extension cannot name a type), if all the fields that could hold it
+  have one type. Not a function that makes pointers of
+  `unsafe.Pointer`, or calls one that does and shares by it
+  (`ir.Func.ShareOpaque`).
+- An allocation that is shared only for a type and not by its address
+  may be local itself (`markLocal`).
+- A variable that a closure captures and nothing assigns is as any
+  other in the tags of what is stored through it, and where a function
+  says what it stores through its parameters (`capturedAssigned`): the
+  closure that `(*parser).init` gives the scanner is local if the
+  parser is.
+
+Checks: `TestSharedTyped`; the tests of the standard library run with
+`GODEBUG=sharestats=3`, which stops at the first local object that a
+shared one points to (the tests that compare what a child process
+prints fail by the statistics alone); the toolchain building itself
+and everything else under the same.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:
@@ -835,16 +1283,43 @@ masks of all the functions of the class, ORed
    reflect loads through a converted pointer is not memory made into a
    string (`typedByConstruction`); `%p` prints
    `internal/abi.Address(p)`, an integer of an address that exposes
-   nothing, so that the checks refuse to make a pointer of it. Left, all
-   in `internal/fmtsort.Sort`, which prints a map's keys in order:
-   `reflect.(*MapIter).Next` shares what the iterator holds;
-   `Value.Pointer` in the comparison exposes; and
-   `slices.SortStableFunc` calls its comparison in a function with type
-   parameters, where a call of a function whose signature has one reads
-   no word. `-gcflags=-m=4` prints every function that shares an
-   argument where it is called (`shares its argument`).
-   Also: reflect's allocations; the tag of an object that has several
-   words reads each word four times.
+   nothing, so that the checks refuse to make a pointer of it.
+
+   Then, for `internal/fmtsort.Sort`, which prints a map's keys in
+   order: its comparison compares `internal/abi.Address`es; reflect's
+   functions that iterate over a map are `//go:localargs`, a word of
+   the standard library's for a function that shares nothing of its
+   arguments whatever its body seems to do (they call the runtime's
+   map, whose code the graph does not follow); and a call of a variable
+   in a function with type parameters, of a function whose signature
+   has one, reads the word of a key with `?` for the types with a
+   shape, which the linker fills in from every class that the key may
+   stand for (`unify`). A parameter may have 16 links (`ast.Walk`'s
+   node has 11), and the linker writes one bit for each argument, set
+   if a function of the class may share it, so that a link is one test.
+   The links are exported in an order that does not depend on how the
+   graph was walked. A store through `&p.f` that a function is given is
+   a store in what `p` points to.
+
+   `fmt` and `ast.Walk` then share nothing of what they are given, and
+   the nodes of `go/parser` are still not local. What is left is of
+   another kind: `(*resolver).declare` stores a parameter (a node) in an
+   object that it reaches from another parameter (`ident.Obj.Decl =
+   decl`, with `ident` out of a slice). Only a store through a parameter
+   itself is followed (`ParamShare.Via`); of a deeper one nobody knows
+   which object takes the pointer, and it may be a shared one. And the
+   resolver is called through `Visitor.Visit`, a call that passes no
+   bits.
+
+   `-gcflags=-m=4` prints every function that shares an argument where
+   it is called (`shares its argument`), and what in a function shares
+   a parameter that nothing else explains (a store through a pointer
+   that is not a parameter, a container that leads to what is shared,
+   too many links). Those lines are printed when the package is
+   compiled, not when the build cache has it: use `go build -a
+   -gcflags=pkg=-m=4` with a `GOCACHE` of its own.
+
+   Also: reflect's allocations.
 1. Callees that are parameters: `each(head, func(it *item) {...})`
    makes what `head` leads to shared, since `each` passes it to a
    function it does not know. `each` could say "what `head` leads to

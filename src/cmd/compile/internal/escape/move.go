@@ -432,6 +432,13 @@ func (b *batch) trackParams(fn *ir.Func) {
 // parameter at l flows, is another holder of it than the variables that
 // hold that parameter's pointer.
 func (b *batch) holdsMovedParam(root, l *location) bool {
+	if root.marker {
+		return false
+	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
+	}
 	switch root {
 	case l, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		return false
@@ -491,6 +498,26 @@ func poolGot(n ir.Node) bool {
 	return fn != nil && isPoolMethod(fn, "Get")
 }
 
+// poolShared reports whether n, which poolGot says is nobody else's or
+// shared, may be shared: what a sync.Pool returned, or the result of a
+// function that may return such an object. The result of a function
+// that allocates what it returns is as local as it is told.
+func poolShared(n ir.Node) bool {
+	for n.Op() == ir.OCONVNOP || n.Op() == ir.OPAREN {
+		switch v := n.(type) {
+		case *ir.ConvExpr:
+			n = v.X
+		case *ir.ParenExpr:
+			n = v.X
+		}
+	}
+	if call, ok := n.(*ir.CallExpr); ok && call.Op() == ir.OCALLFUNC && n.Type() != nil && n.Type().IsPtr() {
+		fn := ir.StaticCalleeName(call.Fun)
+		return fn == nil || fn.Func == nil || fn.Func.PoolResult
+	}
+	return true
+}
+
 // markFresh notes whether fn does nothing but return the address of an
 // object that it allocates (ir.Func.FreshResult).
 func markFresh(fn *ir.Func) {
@@ -521,6 +548,13 @@ func markFresh(fn *ir.Func) {
 // c of a class of tracked variables flows, is another holder of their
 // objects than those variables.
 func (b *batch) holdsMoved(root, c *location) bool {
+	if root.marker {
+		return false
+	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
+	}
 	switch root {
 	case c, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		// (The object may point to itself.)
@@ -602,6 +636,11 @@ func (b *batch) markMoves() {
 		}
 		if ok {
 			fn.OwnedResult = true
+			for _, c := range r.cs {
+				if c.hasAttr(attrShares) {
+					fn.PoolResult = true
+				}
+			}
 			if b.gd.Flag.LowerM >= 3 {
 				b.gd.WarnfAt(fn.Pos(), "%v returns an object that is its caller's alone", fn)
 			}
@@ -974,6 +1013,13 @@ func (e *escape) checkHoles() []hole {
 // that checks; what a method of the parameter's own does, recvHeldLoc
 // says apart.
 func (b *batch) keepsParam(root, l *location) bool {
+	if root.marker {
+		return false
+	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
+	}
 	switch root {
 	case l, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		return false

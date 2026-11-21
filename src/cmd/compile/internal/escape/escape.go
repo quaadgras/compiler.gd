@@ -128,21 +128,51 @@ type batch struct {
 
 	// Dynamic roots (shares.go): by statement and path, the statements
 	// that are one plain assignment, and those with a call.
-	dynRoots      map[dynKey]*location
-	simpleStmts   map[int32]bool
-	stmtCalls     map[int32]bool
-	calls         []*callSite      // callbits.go
-	convOKs       map[convKey]bool // recv.go
-	retTags       map[*ir.Func]ir.Node
-	callArgs      []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
-	dynCall       *ir.CallExpr // the call of an unknown function whose argument's hole is made
-	dynArg        int          // that argument's place
-	dynKey        string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
-	recvArg       bool         // and that a method of its own may keep
-	recvAnyArg    bool         // whichever
-	checkCallsArg bool         // and a call that checks is one of them (ir.Func.KeptCalls)
-	checkedArg    bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
-	addrStmts     map[addrStmtKey]uint8
+	dynRoots       map[dynKey]*location
+	noteParam      string // -m=4: the parameter that noteParamRoot is told of
+	fns            []*ir.Func
+	typedShares    map[any]*location // typed.go
+	typedShareList []*location
+	unsafeFns      map[*ir.Func]bool
+	opaqueFns      map[*ir.Func]bool
+	opaque         uint8
+	walkRoot       *location // of the walk that is going on, for messages
+	leads          map[any]bool
+	unknownSrc     location // where a pointer comes from that the graph does not follow: a global, the result of a call that is not recorded (groups.go)
+	dirt           map[*ir.Func]*location
+	strays         []*strayStore
+	lost           map[*ir.Func]bool // the functions that store through something that is not a variable
+	resGroups      map[*ir.Func]*location
+	conds          map[*location]*groupCond
+	storeRoot      map[*location]bool
+	infos          map[*location]*groupInfo
+	memberSets     map[*location]map[*location]bool
+	storeRoots     map[*ir.Func]*storeRoots
+	varGroups      map[*ir.Name]*location
+	pending        map[any]*location
+	storedRoots    map[*ir.Func]*location
+	reach          map[*location]map[*location]bool
+	reachCrossed   map[*location]bool
+	memberBad      map[*location]bool
+	derived        map[*ir.Name]uint16 // the parameters that a variable is reached from (deep.go)
+	derivedMask    func(ir.Node) (uint16, bool)
+	derivedOf      map[*ir.Func]func(ir.Node) (uint16, bool)
+	simpleStmts    map[int32]bool
+	stmtCalls      map[int32]bool
+	calls          []*callSite      // callbits.go
+	convOKs        map[convKey]bool // recv.go
+	retTags        map[*ir.Func]ir.Node
+	callArgs       []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
+	dynCall        *ir.CallExpr // the call of an unknown function whose argument's hole is made
+	dynArg         int          // that argument's place
+	dynKey         string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
+	argGroups      []*location  // the membership roots of the arguments of the call whose argument's hole is made (groups.go)
+	mixGroup       *location    // the group of the arguments of that call that a function which it passes them on to may mix (groups.go)
+	recvArg        bool         // and that a method of its own may keep
+	recvAnyArg     bool         // whichever
+	checkCallsArg  bool         // and a call that checks is one of them (ir.Func.KeptCalls)
+	checkedArg     bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
+	addrStmts      map[addrStmtKey]uint8
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,
@@ -210,6 +240,8 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle, handTypes map[*types.Type]bool) {
 	var b batch
 	b.gd = gd
+	b.fns = fns
+	b.unknownSrc.unknown = true
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
 	b.shareLoc.attrs = attrShares
@@ -228,6 +260,10 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	// doc/gd/escape-bits.md.
 	b.candidateLoc.attrs = attrCandidateEscape | attrPersists | attrMutates | attrCalls | attrShares
 	b.reassignOracles = reassignOracles
+
+	if gd.Debug.FieldCensus != 0 {
+		fieldCensus(gd, fns)
+	}
 
 	// Construct data-flow graph from syntax trees.
 	for _, fn := range fns {
@@ -318,6 +354,13 @@ func (b *batch) initFunc(fn *ir.Func) {
 		ir.Dump("escAnalyze", fn)
 	}
 
+	if usesUnsafe(fn) {
+		if b.unsafeFns == nil {
+			b.unsafeFns = make(map[*ir.Func]bool)
+		}
+		b.unsafeFns[fn] = true
+	}
+
 	// Allocate locations for local variables.
 	for _, n := range fn.Dcl {
 		e.newLoc(n, true)
@@ -337,6 +380,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 	}
 
 	b.trackPointers(fn)
+	b.deriveFromParams(fn)
 	b.trackParams(fn)
 }
 
@@ -481,6 +525,7 @@ type outBufUse struct {
 }
 
 func (b *batch) finish(fns []*ir.Func) {
+	b.solveGroups(fns)
 	b.markUnshared(fns)
 	b.markMoves()
 	b.markKeptChecks(fns)

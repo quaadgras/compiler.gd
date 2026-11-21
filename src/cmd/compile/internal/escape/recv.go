@@ -70,6 +70,7 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 		}
 		k = k.note(e.gd, call, "receiver in result")
 		k.recvRes = true
+		k.loose = true
 		hs = append(hs, k)
 	}
 	return e.teeHole(hs...)
@@ -337,4 +338,18 @@ func (b *batch) methodKeepsLocal(t *types.Type, sym *types.Sym) bool {
 	}
 	ps := name.Func.ParamShares[0]
 	return ps.Share == 0 && ps.Via&^1 == 0
+}
+
+// recvClassHole returns the hole by which the receivers of the methods
+// with the name of the method that call is of are asked for what they
+// store in what the receiver arg reaches, or the dirt of the function
+// if nobody can ask (groups.go). Whether they share it, its conversion
+// answered.
+func (e *escape) recvClassHole(call *ir.CallExpr, arg ir.Node) hole {
+	if sel, ok := call.Fun.(*ir.SelectorExpr); ok && sel.Op() == ir.ODOTINTER {
+		if key, wild := ir.ShareKeyRecv(sel.Sel.Name, sel.Type()); key != "" && !wild {
+			return e.classMarker(key, 0).asHole()
+		}
+	}
+	return e.dirtOf().asHole()
 }

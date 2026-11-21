@@ -51,6 +51,9 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	case ir.ONAME:
 		n := n.(*ir.Name)
 		if n.Class == ir.PFUNC || n.Class == ir.PEXTERN {
+			if n.Class == ir.PEXTERN {
+				e.unknown(k, n)
+			}
 			return
 		}
 		e.flow(k, e.oldLoc(n))
@@ -163,6 +166,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	case ir.ORECV:
 		n := n.(*ir.UnaryExpr)
 		e.discard(n.X)
+		e.unknown(k, n)
 
 	case ir.OUNSAFESTRINGDATA:
 		// gd: under the SSO fork unsafe.StringData may heap-allocate a

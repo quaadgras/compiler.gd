@@ -40,6 +40,17 @@ const (
 	shareMaskShared  = 1 + shareMaskArgs
 	shareMaskViaRecv = 1 + 2*shareMaskArgs
 	shareMaskHeld    = 1 + 3*shareMaskArgs
+
+	// The bits of a word that say in which arguments' structures a
+	// function of the class may store (ir.ShareWordStores).
+	shareWordStores     = 17
+	shareWordMixDstRecv = 16
+	shareWordMixDst     = 49
+	shareWordMix        = 32 // ir.ShareWordMix
+	shareWordMixRecv    = 33
+	shareWordMixArg     = 34
+	shareMixRecv        = 255 // ir.MixRecv
+	shareStoresAll      = 1<<shareMaskArgs - 1
 )
 
 type shareDep struct {
@@ -49,9 +60,28 @@ type shareDep struct {
 
 type shareRec struct {
 	key  string
-	sig  *shareSig // of a pattern
+	sig  *shareSig
 	mask uint64
 	deps []shareDep
+	// stores has bit k if the function stores in what its argument
+	// k reaches; it also does if a function of a class that it
+	// passes the argument on to (sdeps) does.
+	stores uint16
+	sdeps  []shareDep
+	// mix: the function may store one argument in what another
+	// reaches; it also does if a function of a class of mdeps does.
+	// src: the function may store in what another of its arguments
+	// reaches its receiver (bit 0) or its argument k (bit k+1); it
+	// also does if a function of a class of mdeps does.
+	src   uint16
+	mdeps []shareDep
+	// dst: the function may store another argument in what its
+	// receiver (bit 0) or its argument k (bit k+1) reaches; it also
+	// does, for a parameter of ddeps, if a function of that class
+	// stores any argument in what another reaches.
+	dst   uint16
+	ddeps []shareDep
+	name  string // of the record's symbol, for -v
 }
 
 // A shareSig is a key, taken apart.
@@ -122,26 +152,29 @@ func (p *shareSig) wild() bool {
 	return false
 }
 
-// matches reports whether the pattern p stands for the key k. With
-// anyKind, a method stands for the function value that is made of it.
-func (p *shareSig) matches(k *shareSig, anyKind bool) bool {
-	if p.kind != k.kind {
-		if !anyKind || p.kind != 'M' || k.kind != 'F' {
+// unify reports whether the key k, of a word, and the key r, of a
+// function's record, may be of one class: they are the same but where
+// one of them has a type with a shape, which stands for any type. With
+// anyKind, a method is also a function value, the one that is made of
+// it.
+func (k *shareSig) unify(r *shareSig, anyKind bool) bool {
+	if k.kind != r.kind {
+		if !anyKind || k.kind != 'F' || r.kind != 'M' {
 			return false
 		}
-	} else if p.name != k.name {
+	} else if k.name != r.name {
 		return false
 	}
-	if len(p.params) != len(k.params) || len(p.results) != len(k.results) {
+	if len(k.params) != len(r.params) || len(k.results) != len(r.results) {
 		return false
 	}
-	for i, s := range p.params {
-		if s != "?" && s != k.params[i] {
+	for i, s := range k.params {
+		if s != "?" && r.params[i] != "?" && s != r.params[i] {
 			return false
 		}
 	}
-	for i, s := range p.results {
-		if s != "?" && s != k.results[i] {
+	for i, s := range k.results {
+		if s != "?" && r.results[i] != "?" && s != r.results[i] {
 			return false
 		}
 	}
@@ -183,6 +216,57 @@ func parseShareRec(data []byte) *shareRec {
 		}
 		r.deps = append(r.deps, d)
 	}
+	st, w := binary.Uvarint(data)
+	if w <= 0 {
+		return nil
+	}
+	r.stores = uint16(st)
+	data = data[w:]
+	n, w = binary.Uvarint(data)
+	if w <= 0 {
+		return nil
+	}
+	data = data[w:]
+	for ; n > 0; n-- {
+		if len(data) < 2 {
+			return nil
+		}
+		d := shareDep{param: int(data[0]), arg: int(data[1])}
+		data = data[2:]
+		if d.key, ok = str(); !ok {
+			return nil
+		}
+		r.sdeps = append(r.sdeps, d)
+	}
+	for i := 0; i < 2; i++ {
+		m, w := binary.Uvarint(data)
+		if w <= 0 {
+			return nil
+		}
+		data = data[w:]
+		n, w = binary.Uvarint(data)
+		if w <= 0 {
+			return nil
+		}
+		data = data[w:]
+		var deps []shareDep
+		for ; n > 0; n-- {
+			if len(data) < 2 {
+				return nil
+			}
+			d := shareDep{param: int(data[0]), arg: int(data[1])}
+			data = data[2:]
+			if d.key, ok = str(); !ok {
+				return nil
+			}
+			deps = append(deps, d)
+		}
+		if i == 0 {
+			r.src, r.mdeps = uint16(m), deps
+		} else {
+			r.dst, r.ddeps = uint16(m), deps
+		}
+	}
 	return r
 }
 
@@ -195,7 +279,10 @@ func shareMaskShares(w uint64, arg int) bool {
 	if w>>(1+arg)&1 == 0 {
 		return false
 	}
-	return w>>(shareMaskShared+arg)&1 != 0 || w>>(shareMaskViaRecv+arg)&1 != 0
+	// (What is stored in what the receiver points to is in the one
+	// structure that the caller takes the arguments of such a call
+	// for.)
+	return w>>(shareMaskShared+arg)&1 != 0
 }
 
 func (ctxt *Link) shareMasks() {
@@ -245,7 +332,7 @@ func (ctxt *Link) shareMasks() {
 
 	// The functions of each class, and the patterns.
 	byKey := make(map[string][]*shareRec)
-	var patterns []*shareRec
+	var patterns, concrete []*shareRec
 	bySig := make(map[string][]*shareRec) // the methods, by what follows the name
 	keys := make(map[string]bool)
 	for _, s := range recSyms {
@@ -254,14 +341,16 @@ func (ctxt *Link) shareMasks() {
 			// Not understood: nothing is known.
 			return
 		}
+		r.name = ldr.SymName(s)
 		sig := parseShareKey(r.key)
 		if sig == nil {
 			return
 		}
+		r.sig = sig
 		if sig.wild() {
-			r.sig = sig
 			patterns = append(patterns, r)
 		} else {
+			concrete = append(concrete, r)
 			byKey[r.key] = append(byKey[r.key], r)
 			keys[r.key] = true
 			if sig.kind == 'M' {
@@ -272,6 +361,15 @@ func (ctxt *Link) shareMasks() {
 		for _, d := range r.deps {
 			keys[d.key] = true
 		}
+		for _, d := range r.sdeps {
+			keys[d.key] = true
+		}
+		for _, d := range r.mdeps {
+			keys[d.key] = true
+		}
+		for _, d := range r.ddeps {
+			keys[d.key] = true
+		}
 	}
 	for _, w := range words {
 		keys[w.key] = true
@@ -279,9 +377,12 @@ func (ctxt *Link) shareMasks() {
 
 	// The members of each class that some word needs.
 	type class struct {
-		recs []*shareRec
-		all  bool
-		mask uint64
+		recs   []*shareRec
+		all    bool
+		mask   uint64
+		stores uint16
+		src    uint16
+		dst    uint16
 	}
 	classes := make(map[string]*class, len(keys))
 	for key := range keys {
@@ -292,17 +393,24 @@ func (ctxt *Link) shareMasks() {
 			c.all = true
 			continue
 		}
-		if sig.kind == 'F' {
-			if madeFuncs {
-				c.all = true
-				continue
+		if sig.kind == 'F' && madeFuncs {
+			c.all = true
+			continue
+		}
+		if sig.wild() {
+			// The key of a call in a function with type
+			// parameters: every class that it may stand for.
+			c.recs = nil
+			for _, r := range concrete {
+				if sig.unify(r.sig, methodValues) {
+					c.recs = append(c.recs, r)
+				}
 			}
-			if methodValues {
-				c.recs = append(c.recs[:len(c.recs):len(c.recs)], bySig[key[2:]]...)
-			}
+		} else if sig.kind == 'F' && methodValues {
+			c.recs = append(c.recs[:len(c.recs):len(c.recs)], bySig[key[2:]]...)
 		}
 		for _, p := range patterns {
-			if p.sig.matches(sig, methodValues) {
+			if sig.unify(p.sig, methodValues) {
 				c.recs = append(c.recs[:len(c.recs):len(c.recs)], p)
 			}
 		}
@@ -342,17 +450,104 @@ func (ctxt *Link) shareMasks() {
 				c.mask = m
 				changed = true
 			}
+			st := c.stores
+			if c.all {
+				st = shareStoresAll
+			}
+			for _, r := range c.recs {
+				st |= r.stores
+				for _, d := range r.sdeps {
+					if dc := classes[d.key]; dc == nil || d.arg >= shareMaskArgs || dc.stores&(1<<d.arg) != 0 {
+						if d.param < shareMaskArgs {
+							st |= 1 << d.param
+						} else {
+							st = shareStoresAll
+						}
+					}
+				}
+			}
+			if st != c.stores {
+				c.stores = st
+				changed = true
+			}
+			src := c.src
+			if c.all {
+				src = ^uint16(0)
+			}
+			// bit returns the bit of src for the place p of an
+			// argument: shareMixRecv for a receiver.
+			bit := func(p int) uint16 {
+				if p == shareMixRecv {
+					return 1
+				}
+				if p >= shareMaskArgs {
+					return ^uint16(0)
+				}
+				return 1 << (1 + p)
+			}
+			for _, r := range c.recs {
+				src |= r.src
+				for _, d := range r.mdeps {
+					if dc := classes[d.key]; dc == nil || dc.src&bit(d.arg) != 0 {
+						src |= bit(d.param)
+					}
+				}
+			}
+			if src != c.src {
+				c.src = src
+				changed = true
+			}
+			dst := c.dst
+			if c.all {
+				dst = ^uint16(0)
+			}
+			for _, r := range c.recs {
+				dst |= r.dst
+				for _, d := range r.ddeps {
+					if dc := classes[d.key]; dc == nil || dc.src != 0 {
+						dst |= bit(d.param)
+					}
+				}
+			}
+			if dst != c.dst {
+				c.dst = dst
+				changed = true
+			}
 		}
 	}
 
 	for _, w := range words {
 		c := classes[w.key]
+		// What compiled code reads: bit k+1 is set if a function of
+		// the class may share its argument k, which is so if it
+		// keeps it where another goroutine reaches, or in what its
+		// receiver points to, which the caller does not know.
+		var word uint64
+		for arg := 0; arg < shareMaskArgs; arg++ {
+			if shareMaskShares(c.mask, arg) {
+				word |= 1 << (1 + arg)
+			}
+		}
+		word |= uint64(c.stores) << shareWordStores
+		if c.src != 0 {
+			word |= 1 << shareWordMix
+		}
+		word |= uint64(c.src&1) << shareWordMixRecv
+		word |= uint64(c.src>>1) & (1<<shareMaskArgs - 1) << shareWordMixArg
+		word |= uint64(c.dst&1) << shareWordMixDstRecv
+		word |= uint64(c.dst>>1) & (1<<shareMaskArgs - 1) << shareWordMixDst
+		if c.mask&1 != 0 {
+			word = ^uint64(0)
+		}
 		data := make([]byte, 8)
-		ctxt.Arch.ByteOrder.PutUint64(data, c.mask)
+		ctxt.Arch.ByteOrder.PutUint64(data, word)
 		sb := ldr.MakeSymbolUpdater(w.s)
 		sb.SetData(data)
 		if ctxt.Debugvlog > 1 {
-			ctxt.Logf("sharemask %s: %#x of %d functions\n", w.key, c.mask, len(c.recs))
+			ctxt.Logf("sharemask %s: %#x (mask %#x) of %d functions\n", w.key, word, c.mask, len(c.recs))
+			for _, r := range c.recs {
+				ctxt.Logf("\t%s: mask %#x, stores %#x, stores in another's %#x, passes on to %d, %d and %d\n", r.name, r.mask, r.stores, r.src, len(r.deps), len(r.sdeps), len(r.mdeps))
+			}
 		}
 	}
 	if ctxt.Debugvlog != 0 {

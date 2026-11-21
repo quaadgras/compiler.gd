@@ -77,23 +77,40 @@ type location struct {
 	// paramEsc records the represented parameter's leak set.
 	paramEsc leaks
 
-	heap        bool          // finish: the location is in the heap
-	local       uint8         // finish: how its object is local (localStatic, localTagged), if it is
-	shares      ir.ParamShare // for a parameter: see ir.Func.ParamShares
-	captured    bool          // has a closure captured this variable?
-	stmt        int32         // the statement the location was made in, or a variable declared in (shares.go)
-	rawgen      uint32        // walkOne: the walk that reached the location on a path with no read-only edge
-	rawDerefs   int           // walkOne: the least dereferences of such a path
-	plaingen    uint32        // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
-	plainDerefs int           // walkOne: the least dereferences of such a path
-	dynRoot     *dynRoot      // the location is a container known at run time (shares.go)
-	isDynRoot   bool          // the location was made as one, even if it is not one any more
-	dyn         []*location   // the dynamic roots that the location, or what it leads to, flows to
-	owners      []*location   // for the contents of tracked variables: those variables (shares.go)
-	reassigned  bool          // has this variable been reassigned?
-	addrtaken   bool          // has this variable's address been taken?
-	param       bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
-	paramOut    bool          // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+	heap     bool          // finish: the location is in the heap
+	local    uint8         // finish: how its object is local (localStatic, localTagged), if it is
+	shares   ir.ParamShare // for a parameter: see ir.Func.ParamShares
+	captured bool          // has a closure captured this variable?
+	stmt     int32         // the statement the location was made in, or a variable declared in (shares.go)
+	// For sharing by type (typed.go). shareType is the type of a share
+	// root for the values of one type; shareOnly, of a location that
+	// has its share attributes only from such roots, that type. The
+	// rest is of a walk: what the walk's filter is at the location.
+	shareType   *types.Type
+	shareConv   bool
+	shareOnly   *types.Type
+	filtergen   uint32
+	filterAt    int8
+	filterT     *types.Type
+	rawgen      uint32      // walkOne: the walk that reached the location on a path with no read-only edge
+	rawDerefs   int         // walkOne: the least dereferences of such a path
+	plaingen    uint32      // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
+	plainDerefs int         // walkOne: the least dereferences of such a path
+	dynRoot     *dynRoot    // the location is a container known at run time (shares.go)
+	isDynRoot   bool        // the location was made as one, even if it is not one any more
+	dyn         []*location // the dynamic roots that the location, or what it leads to, flows to
+	groups      []*location // the membership roots that the location flows to (groups.go)
+	unknown     bool        // the location is the source of what the graph does not follow
+	members     []*location // of a membership root: what flows to it
+	resType     *types.Type // of callRes: the type of the result
+	callRes     *callSite   // the location is what a result of that call flows through
+	marker      bool        // the location holds nothing: it is there for what flows to it to be found (groups.go)
+	index       int         // of a group: its place among the groups (groups.go)
+	owners      []*location // for the contents of tracked variables: those variables (shares.go)
+	reassigned  bool        // has this variable been reassigned?
+	addrtaken   bool        // has this variable's address been taken?
+	param       bool        // is this variable a parameter (ONAME of class ir.PPARAM)?
+	paramOut    bool        // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
 	// gd Phase G: assignedInBody reports whether this result
 	// variable is assigned other than by a return statement (p =
@@ -254,6 +271,7 @@ type edge struct {
 	// which says what such a method may do with it: who has the
 	// result is no holder of the receiver by this edge (move.go).
 	recvRes bool
+	loose   bool // see hole.loose
 }
 
 func (l *location) asHole() hole {
@@ -308,6 +326,11 @@ type hole struct {
 	// an interface's method, where it flows to the call's result: see
 	// edge.recvRes.
 	recvRes bool
+	// loose: the flow is what a function that is called does with an
+	// argument (it returns it, or stores it): the value may be anywhere
+	// in what the destination leads to, not only be its value or one
+	// that it holds (typed.go).
+	loose bool
 }
 
 type note struct {
@@ -386,13 +409,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address
@@ -401,6 +424,9 @@ func (b *batch) flow(k hole, src *location) {
 // but the pseudo-locations standing for the heap and for callees and
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
+	if root.marker || root.shareType != nil {
+		return false
+	}
 	switch root {
 	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc, &b.convShareLoc:
 		return false

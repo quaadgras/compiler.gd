@@ -1287,10 +1287,38 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 			for i := range fn.ParamShares {
 				ps := &fn.ParamShares[i]
 				ps.Share = uint8(r.Len())
+				if r.Bool() {
+					ps.ShareTyped = true
+					ps.ShareField = make([]uint8, r.Len())
+					for i := range ps.ShareField {
+						ps.ShareField[i] = uint8(r.Len())
+					}
+				}
 				ps.Via = uint16(r.Len())
 				ps.ViaDerefs = uint8(r.Len())
+				ps.ViaDirect = r.Bool()
 				ps.Results = uint8(r.Len())
 				ps.Heap = uint8(r.Len())
+				ps.Deep = uint16(r.Len())
+				ps.DeepDerefs = uint8(r.Len())
+				if n := r.Len(); n != 0 {
+					ps.MixLinks = make([]ir.MixLink, n)
+					for j := range ps.MixLinks {
+						ps.MixLinks[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
+					}
+				}
+				if n := r.Len(); n != 0 {
+					ps.MixGroups = make([]ir.MixLink, n)
+					for j := range ps.MixGroups {
+						ps.MixGroups[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
+					}
+				}
+				if n := r.Len(); n != 0 {
+					ps.StoreLinks = make([]ir.ShareLink, n)
+					for j := range ps.StoreLinks {
+						ps.StoreLinks[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}
+					}
+				}
 				if n := r.Len(); n != 0 {
 					ps.Links = make([]ir.ShareLink, n)
 					for j := range ps.Links {
@@ -1301,10 +1329,17 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		}
 		fn.Consumes = uint16(r.Len())
 		fn.OwnedResult = r.Bool()
+		fn.PoolResult = r.Bool()
 		fn.KeptChecked = uint16(r.Len())
 		fn.KeptByRecv = uint16(r.Len())
 		fn.KeptByAny = uint16(r.Len())
 		fn.KeptCalls = uint16(r.Len())
+		fn.DeepBits = uint16(r.Len())
+		fn.DirtyInto = uint16(r.Len())
+		fn.ResultExact = r.Bool()
+		fn.ResultDeep = uint16(r.Len())
+		fn.ShareOpaque = r.Bool()
+		fn.StoresInto = uint16(r.Len())
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

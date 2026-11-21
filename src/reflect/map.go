@@ -218,6 +218,9 @@ func (v Value) MapIndex(key Value) Value {
 
 // Equivalent to runtime.mapIterStart.
 //
+// (Iterating shares nothing of the map or the iterator.)
+//
+//go:localargs
 //go:noinline
 func mapIterStart(t *abi.MapType, m *maps.Map, it *maps.Iter) {
 	if race.Enabled && m != nil {
@@ -231,6 +234,9 @@ func mapIterStart(t *abi.MapType, m *maps.Map, it *maps.Iter) {
 
 // Equivalent to runtime.mapIterNext.
 //
+// (Iterating shares nothing of the map or the iterator.)
+//
+//go:localargs
 //go:noinline
 func mapIterNext(it *maps.Iter) {
 	if race.Enabled {

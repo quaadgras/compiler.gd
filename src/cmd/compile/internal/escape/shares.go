@@ -90,7 +90,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 	got := make(map[*ir.Name]bool)
 	for name := range cand {
 		for _, src := range srcs[name] {
-			if poolGot(src) {
+			if poolGot(src) && poolShared(src) {
 				got[find(name)] = true
 			}
 		}
@@ -411,7 +411,16 @@ func (b *batch) markLocal(loc *location) {
 		return
 	}
 	ret := loc.hasAttr(attrReturned)
-	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
+	notLocal := loc.hasAttr(attrNotLocal)
+	if notLocal && loc.shareOnly != nil && isAlloc(loc) && !loc.hasAttr(attrShares|attrReturnedOther) && b.typedOn() {
+		// An object that holds values of one type which another
+		// goroutine reaches, and nothing else that one does
+		// (typed.go): a local object may point to shared ones. What
+		// else is stored in it is local if it is, and what is
+		// stored in the shared ones is told by them.
+		notLocal = false
+	}
+	if notLocal || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
 			for i, name := range []string{"shares", "holds what is shared", "leads to what is shared", "is returned"} {
@@ -519,11 +528,63 @@ type dynRoot struct {
 	// (callbits.go). A root with no call is a link root: it has no
 	// path, and its tag can be read anywhere.
 	link string
+
+	// deep has the bits of the function's parameters that the object
+	// which the store is in is reached from, where nobody knows which
+	// object that is: the path starts at a variable that is derived
+	// from them, or is deeper than a parameter itself (deep.go). A
+	// root with no path and no link is such a store by a function
+	// that is called.
+	deep uint16
+
+	// group is set for a membership root, which is no dynamic root
+	// but for the solver's walk: dirt, for the dirt of a function;
+	// condOf is a group's condition, and cond the group of a
+	// condition (groups.go).
+	group, dirt bool
+	// pendFn and pendArg: the dirt is that of an argument of a
+	// function of the batch, which is dirt only if the function
+	// stores in what that parameter reaches, known when the graph is
+	// solved. stored: what flows to the root is passed to a function
+	// that stores in it.
+	pendFn  *ir.Name
+	pendArg int
+	stored  bool
+	// classKey and classArg: what flows to the membership root is
+	// that argument of a function of that class, which may store in
+	// what it reaches: the class's word says.
+	classKey string
+	classArg int
+	// mixKey: what flows to the root is passed, with other arguments,
+	// to a function of that class: if one of the class stores one
+	// argument in what another reaches, it is stored in what the
+	// group mixOther and the parameters of mixMask reach, or with
+	// mixBad where nobody knows (groups.go).
+	mixKey   string
+	mixOther *location
+	mixMask  uint16
+	mixBad   bool
+	mixFn    *ir.Func
+	// mixArg is the place of what flows to the root among the
+	// arguments of the call (ir.MixRecv for the receiver): the root
+	// matters only if a function of the class stores that one. With
+	// mixAny, the root is a membership root, for what the argument
+	// reaches, and matters if a function of the class stores another
+	// argument in that.
+	mixArg uint8
+	mixAny bool
+	// sawUnknown: a pointer that the graph does not follow flows to the
+	// membership root; crossed: so does something of another function
+	// of the batch that is neither an argument nor a recorded result.
+	sawUnknown, crossed bool
+	result              bool // the group of a function's results
+	condOf              *location
+	cond                *location
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
 // counts as shared.
-const maxDyn = 8
+const maxDyn = 24
 
 func (e *escape) noteSimpleStmt() {
 	if e.simpleStmts == nil {
@@ -663,7 +724,7 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 		curfn:     e.curfn,
 		loopDepth: 1,
 		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
-		dynRoot:   &dynRoot{path: p, name: name, plain: plain, stmt: key.stmt},
+		dynRoot:   &dynRoot{path: p, name: name, plain: plain, stmt: key.stmt, deep: e.deepOfPath(name, plain)},
 		isDynRoot: true,
 	}
 	e.allLocs = append(e.allLocs, r)
@@ -684,11 +745,14 @@ func (b *batch) settleDynRoots() {
 			continue
 		}
 		loc, _ := r.dynRoot.name.Opt.(*location)
-		if loc == nil || loc.captured || loc.addrtaken {
+		if loc == nil || loc.addrtaken || loc.captured && !b.neverAssigned(r.dynRoot.name) {
 			if d := r.dynRoot; d.call != nil && d.link != "" {
 				// What is called cannot be read: the linker knows.
 				r.dynRoot = &dynRoot{link: d.link, arg: d.arg}
 				continue
+			}
+			if b.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: a store through %v (or a call of it) shares what is stored: %v is captured (%v), has its address taken (%v), or has no location (%v)\n", b.gd.FmtPos(r.dynRoot.name.Pos()), r.dynRoot.path, r.dynRoot.name, loc != nil && loc.captured, loc != nil && loc.addrtaken, loc == nil)
 			}
 			r.dynRoot = nil
 			r.attrs |= attrShares
@@ -698,9 +762,33 @@ func (b *batch) settleDynRoots() {
 	}
 }
 
+// neverAssigned reports whether the variable name, which a closure
+// captures, is never assigned after it is declared, in its function or
+// in a closure: the closure then has its value, and a store through it
+// is a store through the same pointer wherever it is read. (Whether a
+// location is reassigned forgets what was before the capture.)
+func (b *batch) neverAssigned(name *ir.Name) bool {
+	name = name.Canonical()
+	if name.Curfn == nil || name.Addrtaken() {
+		return false
+	}
+	return !b.reassignOracle(name.Curfn).Reassigned(name)
+}
+
+// capturedAssigned reports whether the variable at l is captured by a
+// closure and may be assigned after it is declared: only then is it
+// another pointer where a closure reads it (neverAssigned).
+func (b *batch) capturedAssigned(l *location) bool {
+	if !l.captured {
+		return false
+	}
+	name, ok := l.n.(*ir.Name)
+	return !ok || !b.neverAssigned(name)
+}
+
 // dynOf returns the dynamic roots that what flows to root flows to.
 func dynOf(root *location) (self *location, more []*location) {
-	if root.dynRoot != nil {
+	if root.dynRoot != nil && !root.dynRoot.group {
 		self = root
 	}
 	return self, root.dyn
@@ -708,6 +796,9 @@ func dynOf(root *location) (self *location, more []*location) {
 
 // wantsDyn reports whether l would learn of a dynamic root from root.
 func (b *batch) wantsDyn(l, root *location) bool {
+	if wantsGroups(l, root) {
+		return true
+	}
 	if l.hasAttr(attrSharesDeep) {
 		return false
 	}
@@ -735,11 +826,11 @@ func hasDyn(l, r *location) bool {
 // addDyn records on l, which flows to root, the dynamic roots of root,
 // and reports whether l changed.
 func (b *batch) addDyn(l, root *location) bool {
+	changed := addGroups(l, root)
 	if l == root || l.hasAttr(attrSharesDeep) {
-		return false
+		return changed
 	}
 	self, more := dynOf(root)
-	changed := false
 	add := func(r *location) {
 		if r != nil && r != l && !hasDyn(l, r) {
 			l.dyn = append(l.dyn, r)
@@ -751,6 +842,9 @@ func (b *batch) addDyn(l, root *location) bool {
 		add(r)
 	}
 	if len(l.dyn) > maxDyn {
+		if b.gd.Flag.LowerM >= 4 && l.n != nil {
+			fmt.Printf("%s: %v is shared: it flows to more than %d places that are only known when the program runs\n", b.gd.FmtPos(l.n.Pos()), l.n, maxDyn)
+		}
 		l.dyn = nil
 		l.attrs |= attrSharesDeep
 	}
@@ -823,8 +917,58 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 			linked()
 			continue
 		}
+		if d.mixKey != "" {
+			if r.curfn != loc.curfn {
+				return nil
+			}
+			one := b.mixTerms([]*location{r}, pos)
+			if tag == nil {
+				tag = one
+			} else {
+				tag = binary(ir.OAND, tag, one)
+			}
+			continue
+		}
+		if d.cond != nil {
+			// Stored in a structure by a function that is
+			// called: local if all of the structure is.
+			if r.curfn != loc.curfn {
+				return nil
+			}
+			one := b.groupTag(d.cond, pos)
+			if one == nil {
+				return nil
+			}
+			if tag == nil {
+				tag = one
+			} else {
+				tag = binary(ir.OAND, tag, one)
+			}
+			continue
+		}
+		// deeper returns whether the store is in what parameters
+		// reach, whose bits then say it.
+		deeper := func() bool {
+			if d.deep == 0 || d.call != nil || r.curfn != loc.curfn || !bits {
+				return false
+			}
+			key := fmt.Sprintf("deep %d", d.deep)
+			if !seen[key] {
+				seen[key] = true
+				one := b.ownBits(loc.curfn, d.deep<<1, pos)
+				if tag == nil {
+					tag = one
+				} else {
+					tag = binary(ir.OAND, tag, one)
+				}
+			}
+			return true
+		}
+		if d.path == nil && deeper() {
+			continue
+		}
 		v := d.loc
-		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
+		if v == nil || b.capturedAssigned(v) || v.addrtaken || r.curfn != loc.curfn {
 			if d.call != nil && linked() {
 				continue
 			}
@@ -857,6 +1001,9 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		case param:
 		case !params && d.stmt != 0 && d.stmt == loc.stmt && b.simpleStmts[d.stmt] && (d.plain || !b.stmtCalls[d.stmt]):
 		default:
+			if deeper() {
+				continue
+			}
 			return nil
 		}
 		key := fmt.Sprint(d.path)
