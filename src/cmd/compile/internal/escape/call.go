@@ -195,15 +195,6 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			// withGroup adds to k the membership root of the j'th
 			// of all, or the dirt of the function for an argument
 			// of a function that nobody knows here.
-			withGroup := func(k hole, j int, arg ir.Node) hole {
-				if !direct || len(fns) != 1 {
-					return e.dirtyHole(k, arg)
-				}
-				if j < len(groups) && groups[j] != nil && k.dst != &e.blankLoc {
-					return e.teeHole(k, groups[j].asHole())
-				}
-				return k
-			}
 			// For a function that is not known: the call, and the
 			// argument's place among its arguments (an interface's
 			// receiver is not one).
@@ -218,6 +209,35 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			dynKey := ""
 			if dyn != nil && dynFirst == 0 {
 				dynKey = e.linkKey(call)
+			}
+			var stores uint16
+			if direct && len(fns) == 1 && !e.inMutualBatch(fns[0]) {
+				stores = calleeStores(fns[0])
+			}
+			withGroup := func(k hole, j int, arg ir.Node) hole {
+				if k.dst == &e.blankLoc {
+					return k
+				}
+				if !direct || len(fns) != 1 {
+					if len(fns) == 0 && dynKey != "" {
+						// The word of the class says what the
+						// functions that it may be do: the
+						// argument's hole has it (dynamicArgHole),
+						// and the receiver's does here.
+						if j == 0 && recvArg != nil && call.Op() == ir.OCALLINTER {
+							return e.recvCallHole(k, call, arg)
+						}
+						return k
+					}
+					return e.dirtyHole(k, arg)
+				}
+				if j < len(groups) && groups[j] != nil {
+					k = e.teeHole(k, groups[j].asHole())
+				}
+				if j < 16 && stores&(1<<j) != 0 && e.deepOn() && pointsToPointers(arg.Type()) {
+					k = e.teeHole(k, e.storedBy().asHole())
+				}
+				return k
 			}
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
@@ -563,6 +583,9 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	if e.dynCall != nil && e.dynArg >= 0 {
 		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
 			e.noteKeptCheck(r, e.dynCall, arg)
+			if r.dynRoot.link == "" {
+				return e.dirtyHole(r.asHole(), arg)
+			}
 			return r.asHole()
 		}
 		// Or what the linker knows of all the functions that it may
@@ -571,7 +594,9 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 			return r.asHole()
 		}
 	}
-	return e.heapHole()
+	// Nothing says what the function does with it, nor what it
+	// stores in what it reaches (groups.go).
+	return e.dirtyHole(e.heapHole(), arg)
 }
 
 // mergedTagHole returns the hole for arg, the argument at paramIdx (-1

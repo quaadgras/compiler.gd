@@ -247,6 +247,11 @@ type Func struct {
 	DeepBits    uint16
 	DirtyInto   uint16
 	ResultExact bool
+	// StoresInto has the parameters in whose structures the function
+	// may store anything at all: that is all that a caller which
+	// cannot say what it knows of them (through a function value, or
+	// in the function's own batch) has to go by.
+	StoresInto uint16
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:
@@ -899,6 +904,11 @@ type ParamShare struct {
 	// argument reaches is local.
 	Deep       uint16
 	DeepDerefs uint8
+	// StoreLinks are the functions that are only known when the
+	// program runs to which the parameter is passed and that matter
+	// only for what they store in what it reaches: its receivers.
+	// (Those of Links matter for that too.)
+	StoreLinks []ShareLink
 	// LinksFull is set, while the function is analysed, when there
 	// were more links than a parameter may have: it is shared then.
 	LinksFull bool

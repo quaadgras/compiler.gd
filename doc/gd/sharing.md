@@ -963,6 +963,49 @@ As built, with what differs from the notes below:
   made the result of every constructor shared. It is so now only if the
   function may return a pool's object (`ir.Func.PoolResult`).
 
+**Functions that nobody knows at the call, first half** (done): what
+an argument reaches was the dirt of the function where it was passed to
+a function that is only known when the program runs, or to one of the
+function's own batch. Now:
+- A function says in which parameters' structures it stores anything at
+  all (`ir.Func.StoresInto`): a parameter that flows to a variable which
+  it stores through, or that it passes to a function that does. For the
+  functions of a batch that is computed when the graph is solved, until
+  nothing changes, and an argument of a call of one of them is dirt only
+  if that function stores in what the parameter reaches
+  (`pendingDirt`), or passes it on to a function that nobody knows.
+- A function's record for the linker has the same, with the classes
+  that it passes each parameter on to, and the linker computes for each
+  class the arguments in whose structures a function of the class may
+  store: bits `ir.ShareWordStores`+k of the class's word.
+- A group's condition has, for each class that a member is passed to,
+  that no function of the class shares the member, and that none stores
+  in what it reaches (`groupCond.links`); for the classes that a member
+  is the receiver of, only the second (`groupCond.stores`, from a
+  membership root with the class's key, `classMarker`: a link root
+  there made every receiver depend on whether a method of that name
+  shares its receiver, which the conversion had answered better, and
+  was a holder for the hand-over proofs). A parameter that is passed on
+  as a receiver says so (`ir.ParamShare.StoreLinks`).
+- The conditions of the groups are computed together, in the order of
+  the locations, each from what the others are so far, until nothing
+  changes (`solveConds`), with what a group's members say by themselves
+  computed once (`groupInfoOf`): asked for one by one, the result
+  depended on which was asked first, and computed all anew each time,
+  the compiler took nine minutes to build.
+
+A structure that is also passed to a method of an interface which only
+reads it, whichever method that is, is local as a whole (`TestSharedDeep`);
+one that is passed to an interface of which some method stores in it is
+not, since that method allocates what it stores with no bits of a call.
+That is the second half: the relations of a class's arguments in its
+word, and the bits of a call of a function that is only known when the
+program runs.
+
+Open: the object file of a package (not what it exports) differs by one
+relocation in about one build in five when other packages are compiled
+at the same time; seen on `go/token` on 2026-11-21, not traced.
+
 **How the groups were to be built** (the notes of 2026-11-21, before):
 - A walk does not go past a location that escapes unless the root has
   something to tell it (`wantsDyn`). So a group is a dynamic root: every

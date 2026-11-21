@@ -40,6 +40,11 @@ const (
 	shareMaskShared  = 1 + shareMaskArgs
 	shareMaskViaRecv = 1 + 2*shareMaskArgs
 	shareMaskHeld    = 1 + 3*shareMaskArgs
+
+	// The bits of a word that say in which arguments' structures a
+	// function of the class may store (ir.ShareWordStores).
+	shareWordStores = 17
+	shareStoresAll  = 1<<shareMaskArgs - 1
 )
 
 type shareDep struct {
@@ -52,6 +57,11 @@ type shareRec struct {
 	sig  *shareSig
 	mask uint64
 	deps []shareDep
+	// stores has bit k if the function stores in what its argument
+	// k reaches; it also does if a function of a class that it
+	// passes the argument on to (sdeps) does.
+	stores uint16
+	sdeps  []shareDep
 }
 
 // A shareSig is a key, taken apart.
@@ -186,6 +196,28 @@ func parseShareRec(data []byte) *shareRec {
 		}
 		r.deps = append(r.deps, d)
 	}
+	st, w := binary.Uvarint(data)
+	if w <= 0 {
+		return nil
+	}
+	r.stores = uint16(st)
+	data = data[w:]
+	n, w = binary.Uvarint(data)
+	if w <= 0 {
+		return nil
+	}
+	data = data[w:]
+	for ; n > 0; n-- {
+		if len(data) < 2 {
+			return nil
+		}
+		d := shareDep{param: int(data[0]), arg: int(data[1])}
+		data = data[2:]
+		if d.key, ok = str(); !ok {
+			return nil
+		}
+		r.sdeps = append(r.sdeps, d)
+	}
 	return r
 }
 
@@ -276,6 +308,9 @@ func (ctxt *Link) shareMasks() {
 		for _, d := range r.deps {
 			keys[d.key] = true
 		}
+		for _, d := range r.sdeps {
+			keys[d.key] = true
+		}
 	}
 	for _, w := range words {
 		keys[w.key] = true
@@ -283,9 +318,10 @@ func (ctxt *Link) shareMasks() {
 
 	// The members of each class that some word needs.
 	type class struct {
-		recs []*shareRec
-		all  bool
-		mask uint64
+		recs   []*shareRec
+		all    bool
+		mask   uint64
+		stores uint16
 	}
 	classes := make(map[string]*class, len(keys))
 	for key := range keys {
@@ -353,6 +389,26 @@ func (ctxt *Link) shareMasks() {
 				c.mask = m
 				changed = true
 			}
+			st := c.stores
+			if c.all {
+				st = shareStoresAll
+			}
+			for _, r := range c.recs {
+				st |= r.stores
+				for _, d := range r.sdeps {
+					if dc := classes[d.key]; dc == nil || d.arg >= shareMaskArgs || dc.stores&(1<<d.arg) != 0 {
+						if d.param < shareMaskArgs {
+							st |= 1 << d.param
+						} else {
+							st = shareStoresAll
+						}
+					}
+				}
+			}
+			if st != c.stores {
+				c.stores = st
+				changed = true
+			}
 		}
 	}
 
@@ -368,6 +424,7 @@ func (ctxt *Link) shareMasks() {
 				word |= 1 << (1 + arg)
 			}
 		}
+		word |= uint64(c.stores) << shareWordStores
 		if c.mask&1 != 0 {
 			word = ^uint64(0)
 		}

@@ -318,7 +318,11 @@ func WriteFuncSyms(gd *base.Invocation) {
 			if nam.Func != nil {
 				shares = nam.Func.ParamShares
 			}
-			addShareRecord(gd, sf, "F."+target.Name, key, nam.Type().RecvParams(), shares)
+			stores := uint16(ir.StoresAll)
+			if nam.Func != nil && len(shares) != 0 {
+				stores = nam.Func.StoresInto
+			}
+			addShareRecord(gd, sf, "F."+target.Name, key, nam.Type().RecvParams(), shares, stores)
 		}
 		objw.Global(gd, sf, int32(types.ClosureVarsOffset), obj.DUPOK|obj.RODATA)
 	}
@@ -466,8 +470,8 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 // function may be called as one of the class key, the record of the
 // function for the linker (ir/sharelink.go): name is the kind of class
 // and the function's name.
-func addShareRecord(gd *base.Invocation, from *obj.LSym, name, key string, params []*types.Field, shares []ir.ParamShare) {
-	addShareRecordData(gd, from, name, func() []byte { return ir.ShareRecord(key, params, shares) })
+func addShareRecord(gd *base.Invocation, from *obj.LSym, name, key string, params []*types.Field, shares []ir.ParamShare, stores uint16) {
+	addShareRecordData(gd, from, name, func() []byte { return ir.ShareRecord(key, params, shares, stores) })
 }
 
 func addShareRecordData(gd *base.Invocation, from *obj.LSym, name string, record func() []byte) {
@@ -501,20 +505,28 @@ func ShareRecords(gd *base.Invocation, fn *ir.Func) {
 			if len(shares) != 0 {
 				shares = shares[1:]
 			}
-			addShareRecord(gd, fn.LSym, "M."+fn.LSym.Name, key, t.Params(), shares)
+			stores := uint16(ir.StoresAll)
+			if len(fn.ParamShares) != 0 {
+				stores = fn.StoresInto
+			}
+			addShareRecord(gd, fn.LSym, "M."+fn.LSym.Name, key, t.Params(), shares, stores>>1)
 			// And of what it does with its receiver.
 			rkey, _ := ir.ShareKeyRecv(name, t)
 			var ps *ir.ParamShare
 			if len(fn.ParamShares) != 0 {
 				ps = &fn.ParamShares[0]
 			}
-			addShareRecordData(gd, fn.LSym, "R."+fn.LSym.Name, func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), ps) })
+			addShareRecordData(gd, fn.LSym, "R."+fn.LSym.Name, func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), ps, stores&1 != 0) })
 		} else {
 			gd.FatalfAt(fn.Pos(), "no class of methods for %v", fn)
 		}
 	case fn.OClosure != nil || fn.Needctxt():
 		if key, _ := ir.ShareKeyFunc(t); key != "" {
-			addShareRecord(gd, fn.LSym, "F."+fn.LSym.Name, key, t.Params(), fn.ParamShares)
+			stores := uint16(ir.StoresAll)
+			if len(fn.ParamShares) != 0 {
+				stores = fn.StoresInto
+			}
+			addShareRecord(gd, fn.LSym, "F."+fn.LSym.Name, key, t.Params(), fn.ParamShares, stores)
 		}
 	}
 }
@@ -537,7 +549,7 @@ func ShareRecordUnknown(gd *base.Invocation, from *obj.LSym, fn *ir.Func) {
 	for i, f := range t.Params() {
 		params[i] = types.NewField(f.Pos, f.Sym, f.Type)
 	}
-	addShareRecord(gd, from, "M."+ir.LinkFuncName(fn), key, params, nil)
+	addShareRecord(gd, from, "M."+ir.LinkFuncName(fn), key, params, nil, ir.StoresAll)
 	rkey, _ := ir.ShareKeyRecv(name, t)
-	addShareRecordData(gd, from, "R."+ir.LinkFuncName(fn), func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), nil) })
+	addShareRecordData(gd, from, "R."+ir.LinkFuncName(fn), func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), nil, true) })
 }

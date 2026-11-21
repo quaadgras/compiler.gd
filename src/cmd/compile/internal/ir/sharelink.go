@@ -26,7 +26,9 @@ import (
 // of. For each such class the program has a word, which is an escape
 // mask (escmask.go): the masks of all the functions of the class, ORed.
 // What the linker writes is what compiled code asks, where it allocates:
-// bit k+1 is set if a function of the class may share its argument k.
+// bit k+1 is set if a function of the class may share its argument k,
+// and bit ShareWordStores+k if one may store in an object that the
+// argument reaches (escape's groups.go).
 //
 // The compiler writes the word with all bits set, so that a program
 // that is linked by something that does not know is safe, and a record
@@ -50,6 +52,10 @@ type ShareLink struct {
 	Arg    uint8
 	Derefs uint8
 }
+
+// ShareWordStores is the first of the bits of a class's word that say
+// in which arguments' structures a function of the class may store.
+const ShareWordStores = 17
 
 // MaxShareLinks is the number of links of a parameter over which it
 // counts as shared.
@@ -117,7 +123,7 @@ func ShareKeyRecv(name string, t *types.Type) (key string, wild bool) {
 // ShareRecvRecord returns the record of a method for the class key of
 // its receiver recv, of which ps says where it goes, or nil if nobody
 // knows.
-func ShareRecvRecord(key string, recv *types.Field, ps *ParamShare) []byte {
+func ShareRecvRecord(key string, recv *types.Field, ps *ParamShare, stores bool) []byte {
 	var mask uint64
 	var links []ShareLink
 	switch {
@@ -137,7 +143,16 @@ func ShareRecvRecord(key string, recv *types.Field, ps *ParamShare) []byte {
 		b = binary.AppendUvarint(b, uint64(len(l.Key)))
 		b = append(b, l.Key...)
 	}
-	return b
+	var st uint16
+	if stores {
+		st = 1
+	}
+	return appendStores(b, st, 1, func(int) []ShareLink {
+		if ps != nil {
+			return append(ps.Links[:len(ps.Links):len(ps.Links)], ps.StoreLinks...)
+		}
+		return nil
+	})
 }
 
 // ShareKeyFunc returns the key of the class of the function values
@@ -161,7 +176,7 @@ func ShareKeyFunc(t *types.Type) (key string, wild bool) {
 // the given parameters and what they say (shares may be nil, or
 // shorter): the mask, the key, and for each parameter that has links
 // and is not shared without them, the links.
-func ShareRecord(key string, params []*types.Field, shares []ParamShare) []byte {
+func ShareRecord(key string, params []*types.Field, shares []ParamShare, stores uint16) []byte {
 	var b []byte
 	b = binary.LittleEndian.AppendUint64(b, EscMaskBaseOf(params))
 	b = binary.AppendUvarint(b, uint64(len(key)))
@@ -183,6 +198,36 @@ func ShareRecord(key string, params []*types.Field, shares []ParamShare) []byte 
 		}
 	}
 	b = binary.AppendUvarint(b, uint64(n))
+	b = append(b, deps...)
+	return appendStores(b, stores, len(params), func(i int) []ShareLink {
+		if i < len(shares) {
+			return append(shares[i].Links[:len(shares[i].Links):len(shares[i].Links)], shares[i].StoreLinks...)
+		}
+		return nil
+	})
+}
+
+// StoresAll is the mask of a function that may store in what any of
+// its arguments reaches.
+const StoresAll = 1<<EscMaskArgs - 1
+
+// appendStores appends to a record the arguments in whose structures
+// the function stores (bit k for argument k), and for each of its n
+// parameters the classes that it passes the parameter on to: it stores
+// in what the argument reaches if one of those does.
+func appendStores(b []byte, stores uint16, n int, links func(i int) []ShareLink) []byte {
+	b = binary.AppendUvarint(b, uint64(stores&StoresAll))
+	var deps []byte
+	nd := 0
+	for i := 0; i < n && i < EscMaskArgs; i++ {
+		for _, l := range links(i) {
+			deps = append(deps, byte(i), l.Arg)
+			deps = binary.AppendUvarint(deps, uint64(len(l.Key)))
+			deps = append(deps, l.Key...)
+			nd++
+		}
+	}
+	b = binary.AppendUvarint(b, uint64(nd))
 	return append(b, deps...)
 }
 

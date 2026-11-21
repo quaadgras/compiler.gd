@@ -1778,7 +1778,65 @@ func TestSharedDeep(t *testing.T) {
 	if !<-done {
 		t.Errorf("the shared leaf is not annotated")
 	}
+
+	// Passed, before it is annotated, to a method of an interface
+	// that only reads it, whichever it is: the linker says that no
+	// method of that name stores in what its argument reaches.
+	for i, r := range []deepReader{new(deepKidCounter), deepNameCounter{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			sum += deepRead(r, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n < 8 {
+			t.Errorf("reader %d: %d local objects, want at least 8, in a structure that a method only reads", i, n)
+		}
+	}
+	// And to one of which a method with that name stores in it.
+	for i, w := range []deepWriter{deepSkips{}, deepMarks{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			deepWrite(w, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n != 0 {
+			t.Errorf("writer %d: %d local objects in a structure that a method may have stored in", i, n)
+		}
+	}
 	if sum == 0 {
 		t.Errorf("no sum")
 	}
 }
+
+type deepReader interface{ ReadDeep(n *deepNode) int }
+
+type deepKidCounter struct{ n int }
+
+func (c *deepKidCounter) ReadDeep(n *deepNode) int { c.n += len(n.kids); return c.n }
+
+type deepNameCounter struct{}
+
+func (deepNameCounter) ReadDeep(n *deepNode) int {
+	if n.name != nil {
+		return 1
+	}
+	return 0
+}
+
+type deepWriter interface{ WriteDeep(n *deepNode) }
+
+type deepMarks struct{}
+
+func (deepMarks) WriteDeep(n *deepNode) { n.name.obj = &deepObj{decl: n} }
+
+type deepSkips struct{}
+
+func (deepSkips) WriteDeep(n *deepNode) {}
+
+//go:noinline
+func deepRead(r deepReader, n *deepNode) int { return r.ReadDeep(n) }
+
+//go:noinline
+func deepWrite(w deepWriter, n *deepNode) { w.WriteDeep(n) }

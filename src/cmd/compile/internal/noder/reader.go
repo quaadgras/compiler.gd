@@ -1294,6 +1294,12 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.Deep = uint16(r.Len())
 				ps.DeepDerefs = uint8(r.Len())
 				if n := r.Len(); n != 0 {
+					ps.StoreLinks = make([]ir.ShareLink, n)
+					for j := range ps.StoreLinks {
+						ps.StoreLinks[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}
+					}
+				}
+				if n := r.Len(); n != 0 {
 					ps.Links = make([]ir.ShareLink, n)
 					for j := range ps.Links {
 						ps.Links[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len()), Derefs: uint8(r.Len())}
@@ -1311,6 +1317,7 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		fn.DeepBits = uint16(r.Len())
 		fn.DirtyInto = uint16(r.Len())
 		fn.ResultExact = r.Bool()
+		fn.StoresInto = uint16(r.Len())
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

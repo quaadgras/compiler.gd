@@ -782,6 +782,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 			ps[i].Share = 0
 			ps[i].Links = nil
 			ps[i].Deep = 0
+			ps[i].StoreLinks = nil
 		}
 	}
 	fn.ParamShares = ps
@@ -833,6 +834,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 		if ps.Deep != 0 {
 			tagKs = append(tagKs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.shareHole)...)
 		}
+		tagKs = append(tagKs, e.storeLinkHoles(ps)...)
 		for _, l := range ps.Links {
 			// (Whether it must be in the heap, the tag and Heap say.)
 			if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
@@ -869,6 +871,23 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	return tagKs
 }
 
+// storeLinkHoles returns the holes for an argument of a parameter that
+// the function called passes on as a receiver: what those methods store
+// in what it reaches, the classes' words say (groups.go).
+func (e *escape) storeLinkHoles(ps *ir.ParamShare) []hole {
+	if !e.deepOn() || len(ps.StoreLinks) == 0 {
+		return nil
+	}
+	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+		return nil
+	}
+	var hs []hole
+	for _, l := range ps.StoreLinks {
+		hs = append(hs, e.classMarker(l.Key, int(l.Arg)).asHole())
+	}
+	return hs
+}
+
 // shareOnlyHoles returns the holes for an argument of the function fn's
 // parameter param that the function does not put in the heap: where
 // another goroutine may reach it, as the parameter says.
@@ -894,6 +913,7 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 	if ps.Deep != 0 {
 		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)
 	}
+	hs = append(hs, e.storeLinkHoles(ps)...)
 	for _, l := range ps.Links {
 		if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
 			hs = append(hs, r.asHole().shift(e.gd, int(l.Derefs)-1))
@@ -1255,6 +1275,13 @@ func (e *escape) linkRootOf(key string, arg int, heap bool) *location {
 // linkTag returns the expression that is 1 if no function of the class
 // key shares its argument arg.
 func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
+	return b.linkTagOf(pos, key, arg, true, false)
+}
+
+// linkTagOf returns the expression that is 1 if no function of the
+// class key shares its argument arg (with shares), nor stores in what
+// it reaches (with stores: ir.ShareWordStores).
+func (b *batch) linkTagOf(pos src.XPos, key string, arg int, shares, stores bool) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	lit := func(v int64) ir.Node {
 		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
@@ -1283,5 +1310,12 @@ func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
 	// The linker's word has one bit for the argument: set if a function
 	// of the class may share it (cmd/link/internal/ld/sharemask.go).
 	// The word that the compiler writes has all bits set.
-	return binary(ir.OXOR, bit(1+arg), lit(1))
+	var tag ir.Node = lit(1)
+	if shares {
+		tag = binary(ir.OXOR, bit(1+arg), lit(1))
+	}
+	if stores {
+		tag = binary(ir.OAND, tag, binary(ir.OXOR, bit(ir.ShareWordStores+arg), lit(1)))
+	}
+	return tag
 }

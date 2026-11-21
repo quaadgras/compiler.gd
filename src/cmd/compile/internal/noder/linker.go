@@ -307,6 +307,11 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 		w.Len(int(ps.Heap))
 		w.Len(int(ps.Deep))
 		w.Len(int(ps.DeepDerefs))
+		w.Len(len(ps.StoreLinks))
+		for _, l := range ps.StoreLinks {
+			w.String(l.Key)
+			w.Len(int(l.Arg))
+		}
 		w.Len(len(ps.Links))
 		for _, l := range ps.Links {
 			w.String(l.Key)
@@ -324,6 +329,7 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Len(int(name.Func.DeepBits))
 	w.Len(int(name.Func.DirtyInto))
 	w.Bool(name.Func.ResultExact)
+	w.Len(int(name.Func.StoresInto))
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
 		w.Len(int(inl.Cost))

@@ -533,6 +533,19 @@ type dynRoot struct {
 	// condOf is a group's condition, and cond the group of a
 	// condition (groups.go).
 	group, dirt bool
+	// pendFn and pendArg: the dirt is that of an argument of a
+	// function of the batch, which is dirt only if the function
+	// stores in what that parameter reaches, known when the graph is
+	// solved. stored: what flows to the root is passed to a function
+	// that stores in it.
+	pendFn  *ir.Name
+	pendArg int
+	stored  bool
+	// classKey and classArg: what flows to the membership root is
+	// that argument of a function of that class, which may store in
+	// what it reaches: the class's word says.
+	classKey string
+	classArg int
 	// sawUnknown: a pointer that the graph does not follow flows to the
 	// membership root; crossed: so does something of another function
 	// of the batch that is neither an argument nor a recorded result.

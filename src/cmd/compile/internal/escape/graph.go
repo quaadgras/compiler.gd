@@ -94,6 +94,7 @@ type location struct {
 	members     []*location   // of a membership root: what flows to it
 	callRes     *callSite     // the location is what a result of that call flows through
 	marker      bool          // the location holds nothing: it is there for what flows to it to be found (groups.go)
+	index       int           // of a group: its place among the groups (groups.go)
 	owners      []*location   // for the contents of tracked variables: those variables (shares.go)
 	reassigned  bool          // has this variable been reassigned?
 	addrtaken   bool          // has this variable's address been taken?

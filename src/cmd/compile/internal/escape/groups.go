@@ -7,6 +7,8 @@ package escape
 import (
 	"fmt"
 	"go/constant"
+	"slices"
+	"strings"
 
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/types"
@@ -62,10 +64,15 @@ type storeRoots struct {
 
 // A groupCond is what a group needs to be local as a whole.
 type groupCond struct {
-	busy, done bool
-	bad        bool
-	why        string
-	own        uint16 // the bits of the function's call that must be set
+	bad bool
+	why string
+	own uint16 // the bits of the function's call that must be set
+	// links are the arguments of the classes of functions that are
+	// only known when the program runs to which a member is passed:
+	// none may share it, nor store in what it reaches.
+	links []ir.ShareLink
+	// stores are those of which only what they store matters.
+	stores []ir.ShareLink
 }
 
 func (b *batch) memberRoot(fn *ir.Func) *location {
@@ -109,6 +116,109 @@ func (e *escape) dirtOf() *location {
 	return d
 }
 
+// pendingDirt returns the membership root of the current function for
+// what it passes as the j'th argument to fn, a function of its batch:
+// dirt, if fn turns out to store in what that parameter reaches.
+func (e *escape) pendingDirt(fn *ir.Name, j int) *location {
+	type key struct {
+		cur *ir.Func
+		fn  *ir.Name
+		j   int
+	}
+	if e.pending == nil {
+		e.pending = make(map[any]*location)
+	}
+	k := key{e.curfn, fn, j}
+	d := e.pending[k]
+	if d == nil {
+		d = e.memberRoot(e.curfn)
+		d.dynRoot.dirt = true
+		d.dynRoot.pendFn, d.dynRoot.pendArg = fn, j
+		e.pending[k] = d
+	}
+	return d
+}
+
+// classMarker returns the membership root of the current function for
+// what it passes as argument arg to a function of the class key.
+func (e *escape) classMarker(key string, arg int) *location {
+	type ckey struct {
+		cur *ir.Func
+		key string
+		arg int
+	}
+	if e.pending == nil {
+		e.pending = make(map[any]*location)
+	}
+	k := ckey{e.curfn, key, arg}
+	d := e.pending[k]
+	if d == nil {
+		d = e.memberRoot(e.curfn)
+		d.dynRoot.classKey, d.dynRoot.classArg = key, arg
+		e.pending[k] = d
+	}
+	return d
+}
+
+// storedBy returns the membership root of the current function for
+// what it passes to a function that stores in what the argument
+// reaches.
+func (e *escape) storedBy() *location {
+	if e.storedRoots == nil {
+		e.storedRoots = make(map[*ir.Func]*location)
+	}
+	d := e.storedRoots[e.curfn]
+	if d == nil {
+		d = e.memberRoot(e.curfn)
+		d.dynRoot.stored = true
+		e.storedRoots[e.curfn] = d
+	}
+	return d
+}
+
+// calleeStores returns the parameters of fn in whose structures it may
+// store.
+func calleeStores(fn *ir.Name) uint16 {
+	if fn.Func == nil || len(fn.Func.ParamShares) == 0 {
+		return ^uint16(0)
+	}
+	return fn.Func.StoresInto
+}
+
+// isDirt reports whether the membership root x is dirt: what flows to
+// it may have had stored in it what nobody here knows.
+func isDirt(x *location) bool {
+	d := x.dynRoot
+	if !d.dirt {
+		return false
+	}
+	if d.pendFn != nil {
+		f := d.pendFn.Func
+		if f == nil || d.pendArg >= 16 || f.StoresInto&(1<<d.pendArg) != 0 {
+			return true
+		}
+		// (What it passes on to a function that is only known when
+		// the program runs, it may store in too.)
+		params := d.pendFn.Type().RecvParams()
+		if d.pendArg < len(params) && params[d.pendArg].Nname != nil {
+			if l, _ := params[d.pendArg].Nname.(*ir.Name).Opt.(*location); l != nil {
+				for _, g := range l.groups {
+					if g.dynRoot.classKey != "" {
+						return true
+					}
+				}
+				for _, r := range l.dyn {
+					if r.dynRoot != nil && r.dynRoot.link != "" {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	}
+	return true
+}
+
 // dirtyHole returns k, or k and the dirt of the current function if arg
 // has a structure: it is an argument of a call that may store in it
 // what nobody here knows.
@@ -146,10 +256,12 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 		groups[j] = g
 	}
 	if e.inMutualBatch(fn) {
-		// What it does is not known yet.
+		// What it does is not known yet: when the graph is solved,
+		// whether it stores in what the parameter reaches is, and
+		// that is all that its caller makes of it.
 		for j, arg := range all {
 			if pointsToPointers(arg.Type()) {
-				set(j, e.dirtOf())
+				set(j, e.pendingDirt(fn, j))
 			}
 		}
 		return groups
@@ -408,28 +520,64 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 	b.memberSets = make(map[*location]map[*location]bool)
 	b.memberBad = make(map[*location]bool)
 
+	// The parameters that are passed on as receivers.
+	for _, fn := range fns {
+		for i, f := range fn.Type().RecvParams() {
+			if i >= 16 || f.Nname == nil {
+				continue
+			}
+			l := b.oldLoc(f.Nname.(*ir.Name))
+			for _, g := range l.groups {
+				if g.dynRoot.classKey != "" {
+					l.shares.StoreLinks = addShareLink(l.shares.StoreLinks, g.dynRoot.classKey, g.dynRoot.classArg)
+				}
+			}
+		}
+	}
+
+	// In which parameters' structures a function stores: through a
+	// variable that the parameter flows to, or by a function that it
+	// passes it to; for one of the batch, until nothing changes.
+	for _, fn := range fns {
+		fn.StoresInto = 0
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range fns {
+			if st := b.storesInto(fn); st != fn.StoresInto {
+				fn.StoresInto = st
+				changed = true
+			}
+		}
+	}
+
 	// Whether a function's results are as local as it is told
 	// depends on the functions of the batch whose results it
 	// returns: all are, until one is found that is not.
 	for _, fn := range fns {
 		fn.ResultExact = true
 	}
+	b.storeRoot = make(map[*location]bool)
+	for _, sr := range b.storeRoots {
+		for _, r := range []*location{sr.q, sr.s, sr.qBad, sr.sBad} {
+			b.storeRoot[r] = true
+		}
+	}
 	for changed := true; changed; {
 		changed = false
-		b.conds = make(map[*location]*groupCond)
+		b.solveConds()
 		for _, fn := range fns {
 			if !fn.ResultExact {
 				continue
 			}
 			if g := b.resGroups[fn]; g != nil {
-				if c := b.cond(g); c.bad || c.own&^1 != 0 {
+				if c := b.cond(g); c.bad || c.own&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 {
 					fn.ResultExact = false
 					changed = true
 				}
 			}
 		}
 	}
-	b.conds = make(map[*location]*groupCond)
 
 	// What each function may store in its parameters' structures that
 	// its callers do not know.
@@ -543,17 +691,136 @@ func isAlloc(l *location) bool {
 	return true
 }
 
+func (c *groupCond) addLink(key string, arg int) {
+	c.links = addShareLink(c.links, key, arg)
+}
+
+// addShareLink returns links with the argument arg of the class key, in
+// an order that does not depend on how they came.
+func addShareLink(links []ir.ShareLink, key string, arg int) []ir.ShareLink {
+	for _, l := range links {
+		if l.Key == key && int(l.Arg) == arg {
+			return links
+		}
+	}
+	links = append(links, ir.ShareLink{Key: key, Arg: uint8(arg), Derefs: 1})
+	slices.SortFunc(links, func(a, b ir.ShareLink) int {
+		if x := strings.Compare(a.Key, b.Key); x != 0 {
+			return x
+		}
+		return int(a.Arg) - int(b.Arg)
+	})
+	return links
+}
+
 // cond returns the condition of the group g.
 func (b *batch) cond(g *location) *groupCond {
 	c := b.conds[g]
 	if c == nil {
-		c = new(groupCond)
+		// (Not one of the groups that solveConds knows: by itself.)
+		c = b.condOnce(g)
 		b.conds[g] = c
 	}
-	if c.done || c.busy {
+	return c
+}
+
+// solveConds computes the conditions of all the groups. One may need
+// another's (what is stored in a structure is in another too), and that
+// one the first's: each is computed from what the others are so far, in
+// the order of the locations, until nothing changes, so that the result
+// does not depend on the order in which anything else asks.
+func (b *batch) solveConds() {
+	var groups []*location
+	for _, l := range b.allLocs {
+		if d := l.dynRoot; d != nil && d.group && !d.dirt && !d.stored && d.classKey == "" && !b.storeRoot[l] {
+			groups = append(groups, l)
+		}
+	}
+	b.conds = make(map[*location]*groupCond, len(groups))
+	for i, g := range groups {
+		g.index = i
+		b.conds[g] = new(groupCond)
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, g := range groups {
+			c := b.condOnce(g)
+			old := b.conds[g]
+			if c.bad != old.bad || c.own != old.own || len(c.links) != len(old.links) || len(c.stores) != len(old.stores) {
+				changed = true
+			}
+			b.conds[g] = c
+		}
+	}
+	if b.gd.Flag.LowerM >= 4 {
+		for _, g := range groups {
+			b.printCond(g, b.conds[g])
+		}
+	}
+}
+
+// condOnce computes the condition of g from the conditions that the
+// other groups have so far.
+// A groupInfo is what a group's condition is made of: what its members
+// say by themselves, the groups whose conditions it needs, and the
+// functions of the batch whose results it has.
+type groupInfo struct {
+	static  groupCond
+	conds   []*location
+	callees []*ir.Name
+}
+
+// condOnce computes the condition of g from the conditions that the
+// other groups have so far, and from what is known so far of the
+// results of the functions of the batch.
+func (b *batch) condOnce(g *location) *groupCond {
+	in := b.groupInfoOf(g)
+	c := new(groupCond)
+	*c = in.static
+	if c.bad {
 		return c
 	}
-	c.busy = true
+	c.links = slices.Clone(in.static.links)
+	c.stores = slices.Clone(in.static.stores)
+	for _, callee := range in.callees {
+		if !callee.Func.ResultExact {
+			c.bad = true
+			c.why = fmt.Sprintf("the result of %v, which does not return what is as local as it is told", callee)
+			return c
+		}
+	}
+	for _, g2 := range in.conds {
+		c2 := b.conds[g2]
+		if c2 == nil {
+			continue
+		}
+		if c2.bad {
+			c.bad = true
+			c.why = "stored in a structure that is not local: " + c2.why
+			return c
+		}
+		c.own |= c2.own
+		for _, l := range c2.links {
+			c.addLink(l.Key, int(l.Arg))
+		}
+		for _, l := range c2.stores {
+			c.stores = addShareLink(c.stores, l.Key, int(l.Arg))
+		}
+	}
+	return c
+}
+
+// groupInfoOf returns what the group g's condition is made of.
+func (b *batch) groupInfoOf(g *location) *groupInfo {
+	if in := b.infos[g]; in != nil {
+		return in
+	}
+	in := new(groupInfo)
+	if b.infos == nil {
+		b.infos = make(map[*location]*groupInfo)
+	}
+	b.infos[g] = in
+	c := &in.static
 	fail := func(why string, l *location) {
 		if !c.bad {
 			c.bad = true
@@ -583,8 +850,11 @@ func (b *batch) cond(g *location) *groupCond {
 			break
 		}
 		for _, x := range m.groups {
-			if x.dynRoot.dirt {
+			if isDirt(x) {
 				fail("passed to what may store in it", m)
+			}
+			if x.dynRoot.classKey != "" {
+				c.stores = addShareLink(c.stores, x.dynRoot.classKey, x.dynRoot.classArg)
 			}
 		}
 		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
@@ -600,7 +870,12 @@ func (b *batch) cond(g *location) *groupCond {
 			switch {
 			case callee == nil:
 				fail("the result of a function that is only known when the program runs", m)
-			case callee.Func == nil || !callee.Func.ResultExact:
+			case callee.Func == nil:
+				fail("the result of a function that nobody knows", m)
+			case b.inMutualBatch(callee):
+				// Known when the batch is (solveGroups).
+				in.callees = append(in.callees, callee)
+			case !callee.Func.ResultExact:
 				fail("the result of a function that does not return what is as local as it is told", m)
 			}
 		}
@@ -624,17 +899,15 @@ func (b *batch) cond(g *location) *groupCond {
 			case d == nil:
 				fail("stored where it cannot tell", m)
 			case d.cond != nil:
-				if d.cond != g {
-					c2 := b.cond(d.cond)
-					if c2.bad {
-						fail("stored in a structure that is not local: "+c2.why, m)
-					}
-					c.own |= c2.own
+				if d.cond != g && !slices.Contains(in.conds, d.cond) {
+					in.conds = append(in.conds, d.cond)
 				}
 			case d.link != "":
-				// (Until a call of such a function passes its
-				// bits, what it allocates and stores is shared.)
-				fail("passed to a function that is only known when the program runs", m)
+				// None of the functions that it may be passed to
+				// may share it, nor store in what it reaches: a
+				// call of one passes no bits, so that what it
+				// allocates is shared.
+				c.addLink(d.link, d.arg)
 			case d.deep != 0 && r.curfn == fn:
 				c.own |= d.deep << 1
 			case d.plain && d.loc != nil && d.loc.param && r.curfn == fn && !d.loc.reassigned && !d.loc.captured && !d.loc.addrtaken:
@@ -651,25 +924,59 @@ func (b *batch) cond(g *location) *groupCond {
 			c.own |= 1
 		}
 	}
-	c.busy = false
-	c.done = true
-	if b.gd.Flag.LowerM >= 4 && !g.dynRoot.result {
-		what, pos := "", fn.Pos()
-		switch {
-		case g.dynRoot.call != nil:
-			what, pos = fmt.Sprintf("argument %d", g.dynRoot.arg), g.dynRoot.call.Pos()
-		case g.dynRoot.name != nil:
-			what, pos = fmt.Sprint(g.dynRoot.name), g.dynRoot.name.Pos()
+	// (In an order that does not depend on how the members came.)
+	slices.SortFunc(in.conds, func(x, y *location) int { return x.index - y.index })
+	return in
+}
+
+// printCond prints the condition c of the group g.
+func (b *batch) printCond(g *location, c *groupCond) {
+	if g.dynRoot.result {
+		return
+	}
+	fn := g.curfn
+	what, pos := "", fn.Pos()
+	switch {
+	case g.dynRoot.call != nil:
+		what, pos = fmt.Sprintf("argument %d", g.dynRoot.arg), g.dynRoot.call.Pos()
+	case g.dynRoot.name != nil:
+		what, pos = fmt.Sprint(g.dynRoot.name), g.dynRoot.name.Pos()
+	}
+	if what == "" {
+		return
+	}
+	if c.bad {
+		fmt.Printf("%s: what %s reaches is not known to be local: %s\n", b.gd.FmtPos(pos), what, c.why)
+	} else {
+		fmt.Printf("%s: what %s reaches is local if the bits %b of the call of %v are set, and %d kinds of functions that are only known when the program runs neither share it nor store in it\n", b.gd.FmtPos(pos), what, c.own, fn, len(c.links)+len(c.stores))
+	}
+}
+
+// storesInto returns the parameters of fn in whose structures it may
+// store anything, as far as is known of the functions of its batch.
+func (b *batch) storesInto(fn *ir.Func) uint16 {
+	if b.lost[fn] {
+		return ^uint16(0)
+	}
+	var st uint16
+	sr := b.storeRoots[fn]
+	for i, f := range fn.Type().RecvParams() {
+		if i >= 16 || f.Nname == nil || !f.Type.HasPointers() {
+			continue
 		}
-		if what != "" {
-			if c.bad {
-				fmt.Printf("%s: what %s reaches is not known to be local: %s\n", b.gd.FmtPos(pos), what, c.why)
-			} else {
-				fmt.Printf("%s: what %s reaches is local if the bits %b of the call of %v are set\n", b.gd.FmtPos(pos), what, c.own, fn)
+		l := b.oldLoc(f.Nname.(*ir.Name))
+		if sr != nil && (hasGroup(l, sr.q) || hasGroup(l, sr.qBad)) {
+			st |= 1 << i
+			continue
+		}
+		for _, g := range l.groups {
+			if g.curfn == fn && (g.dynRoot.stored || isDirt(g)) {
+				st |= 1 << i
+				break
 			}
 		}
 	}
-	return c
+	return st
 }
 
 // dirtyInto returns the parameters of fn in whose structures it may
@@ -709,7 +1016,7 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 		}
 		l := b.oldLoc(f.Nname.(*ir.Name))
 		for _, g := range l.groups {
-			if g.dynRoot.dirt && g.curfn == fn {
+			if g.curfn == fn && isDirt(g) {
 				// Passed on to what may.
 				dirty |= 1 << i
 			}
@@ -787,7 +1094,20 @@ func (b *batch) groupTag(g *location, pos src.XPos) ir.Node {
 	if c.bad {
 		return nil
 	}
-	return b.ownBits(g.curfn, c.own, pos)
+	tag := b.ownBits(g.curfn, c.own, pos)
+	and := func(t ir.Node) {
+		n := ir.NewBinaryExpr(b.gd, pos, ir.OAND, tag, t)
+		n.SetType(types.Types[types.TUINTPTR])
+		n.SetTypecheck(1)
+		tag = n
+	}
+	for _, l := range c.links {
+		and(b.linkTagOf(pos, l.Key, int(l.Arg), true, true))
+	}
+	for _, l := range c.stores {
+		and(b.linkTagOf(pos, l.Key, int(l.Arg), false, true))
+	}
+	return tag
 }
 
 // groupParam adds to ps, of the parameter at l, what the conditions
@@ -813,6 +1133,27 @@ func (b *batch) groupParam(ps *ir.ParamShare, l *location) {
 		if deep := c.own >> 1; deep != 0 {
 			ps.Deep |= deep
 			setMinDerefs(&ps.DeepDerefs, 0)
+		}
+		for _, l := range c.links {
+			// The caller's argument is passed to those too:
+			// its own groups then know. (The function reads
+			// their words for what it allocates.)
+			found := false
+			for _, x := range ps.Links {
+				if x.Key == l.Key && x.Arg == l.Arg {
+					found = true
+				}
+			}
+			switch {
+			case found:
+			case len(ps.Links) < ir.MaxShareLinks:
+				ps.Links = append(ps.Links, l)
+			default:
+				ps.LinksFull = true
+			}
+		}
+		for _, l := range c.stores {
+			ps.StoreLinks = addShareLink(ps.StoreLinks, l.Key, int(l.Arg))
 		}
 	}
 }

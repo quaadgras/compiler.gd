@@ -137,9 +137,13 @@ type batch struct {
 	lost          map[*ir.Func]bool // the functions that store through something that is not a variable
 	resGroups     map[*ir.Func]*location
 	conds         map[*location]*groupCond
+	storeRoot     map[*location]bool
+	infos         map[*location]*groupInfo
 	memberSets    map[*location]map[*location]bool
 	storeRoots    map[*ir.Func]*storeRoots
 	varGroups     map[*ir.Name]*location
+	pending       map[any]*location
+	storedRoots   map[*ir.Func]*location
 	reach         map[*location]map[*location]bool
 	reachCrossed  map[*location]bool
 	memberBad     map[*location]bool
