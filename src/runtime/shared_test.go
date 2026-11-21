@@ -1687,3 +1687,98 @@ func init() {
 		panic("PassLinkObj")
 	}
 }
+
+// A structure that one function builds and another annotates, storing
+// in objects that it reaches from its parameters (deep stores): all of
+// it is local if nothing of it is shared, and none of what is stored
+// is if something is (cmd/compile/internal/escape, groups.go).
+
+type deepNode struct {
+	name *deepIdent
+	kids []*deepNode
+}
+
+type deepIdent struct{ obj *deepObj }
+
+type deepObj struct{ decl *deepNode }
+
+//go:noinline
+func deepLeaf() *deepNode { return &deepNode{name: &deepIdent{}} }
+
+//go:noinline
+func deepBuild(n int) *deepNode {
+	root := &deepNode{name: &deepIdent{}}
+	for i := 0; i < n; i++ {
+		root.kids = append(root.kids, deepLeaf())
+	}
+	return root
+}
+
+//go:noinline
+func deepDeclare(decl *deepNode, idents ...*deepIdent) {
+	for _, id := range idents {
+		id.obj = &deepObj{decl: decl}
+	}
+}
+
+//go:noinline
+func deepResolve(root *deepNode) {
+	deepDeclare(root, root.name)
+	for _, k := range root.kids {
+		deepDeclare(k, k.name)
+	}
+}
+
+var deepSink *deepNode
+
+//go:noinline
+func deepCount(root *deepNode) int {
+	n := 0
+	for _, k := range root.kids {
+		if k.name.obj != nil && k.name.obj.decl == k {
+			n++
+		}
+	}
+	return n
+}
+
+func TestSharedDeep(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	// Built and annotated: the root, its name, three leaves with
+	// theirs, and the slice of the leaves as it grows. (The objects
+	// of the four names are local if the page of each name says that
+	// it is, which in a large heap it does not always.)
+	n := runtime.CountLocalAllocs(func() {
+		root := deepBuild(3)
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure that is built and annotated", n)
+	if n < 8 {
+		t.Errorf("%d local objects, want at least 8", n)
+	}
+	// The same, and a leaf is stored where another goroutine reaches
+	// it: what is stored in it must not be local.
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(3)
+		deepSink = root.kids[0]
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure of which a part is shared", n)
+	if n != 0 {
+		t.Errorf("%d local objects in a structure that takes stores and of which a part is shared", n)
+	}
+	done := make(chan bool)
+	go func() { done <- deepSink.name.obj.decl == deepSink }()
+	if !<-done {
+		t.Errorf("the shared leaf is not annotated")
+	}
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}

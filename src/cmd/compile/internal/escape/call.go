@@ -69,6 +69,24 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			cs, ks = e.noteCall(ks, call, nil, call.Fun.Type())
 		}
 
+		if cs == nil {
+			// Results that nothing records: where they point is
+			// not known (groups.go).
+			inBatch := len(fns) != 0
+			for _, f := range fns {
+				if !e.inMutualBatch(f) {
+					inBatch = false
+				}
+			}
+			if !inBatch {
+				for i, k := range ks {
+					if fntype != nil && i < fntype.NumResults() {
+						e.unknownOf(k, fntype.Result(i).Type)
+					}
+				}
+			}
+		}
+
 		// Wire result flows for in-batch callees.
 		if ks != nil {
 			for _, f := range fns {
@@ -167,6 +185,25 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				}
 				all = append(all, args[:len(fntype.Params())]...)
 			}
+			var groups []*location
+			if direct && len(fns) == 1 {
+				groups = e.argGroupsOf(call, fns[0], all)
+				if cs != nil {
+					cs.groups = groups
+				}
+			}
+			// withGroup adds to k the membership root of the j'th
+			// of all, or the dirt of the function for an argument
+			// of a function that nobody knows here.
+			withGroup := func(k hole, j int, arg ir.Node) hole {
+				if !direct || len(fns) != 1 {
+					return e.dirtyHole(k, arg)
+				}
+				if j < len(groups) && groups[j] != nil && k.dst != &e.blankLoc {
+					return e.teeHole(k, groups[j].asHole())
+				}
+				return k
+			}
 			// For a function that is not known: the call, and the
 			// argument's place among its arguments (an interface's
 			// receiver is not one).
@@ -185,11 +222,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
-				e.callArgs = all
+				e.callArgs, e.argGroups = all, groups
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst-1, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, "", false, false, false, false
+				e.callArgs, e.argGroups, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, "", false, false, false, false
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -200,20 +237,20 @@ func (e *escape) call(ks []hole, call ir.Node) {
 						k = e.recvHole(ks, call)
 					}
 				}
-				argument(k, recvArg)
+				argument(withGroup(k, 0, recvArg), recvArg)
 			}
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
-				e.callArgs = all
+				e.callArgs, e.argGroups = all, groups
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst+i, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, "", false, false, false, false
+				e.callArgs, e.argGroups, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, "", false, false, false, false
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
-				argument(k, args[i])
+				argument(withGroup(k, first+i, args[i]), args[i])
 			}
 		}
 

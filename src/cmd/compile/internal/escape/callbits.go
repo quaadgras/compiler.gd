@@ -54,6 +54,9 @@ type callSite struct {
 	stmt  int32
 	res   []*location // what the results flow through
 	args  []callArg
+	// groups has, for each argument, the receiver first, its
+	// membership root if it has one (groups.go).
+	groups []*location
 }
 
 type callArg struct {
@@ -130,6 +133,7 @@ func (e *escape) noteCall(ks []hole, call *ir.CallExpr, fn *ir.Name, fntype *typ
 		r := e.newLoc(nil, false)
 		r.transient = true
 		r.stmt = e.curStmt
+		r.callRes = cs
 		e.flow(k, r)
 		cs.res = append(cs.res, r)
 		nks[i] = r.asHole()
@@ -345,6 +349,33 @@ func (b *batch) callBits() {
 	if len(b.calls) == 0 {
 		return
 	}
+	// Which bits a function reads for a store in what a parameter
+	// reaches (ir.Func.DeepBits) depends on what the functions that
+	// it passes its parameters on to read, and the callers of the
+	// batch must know before they say anything: until nothing changes.
+	if b.deepOn() {
+		for {
+			var before []uint16
+			for _, fn := range b.fns {
+				before = append(before, fn.DeepBits)
+			}
+			b.callBits1(false)
+			same := true
+			for i, fn := range b.fns {
+				if fn.DeepBits != before[i] {
+					same = false
+				}
+			}
+			if same {
+				break
+			}
+		}
+	}
+	b.callBits1(true)
+}
+
+// callBits1 is callBits, once: with apply, the calls get their bits.
+func (b *batch) callBits1(apply bool) {
 	locOf := make(map[ir.Node]*location)
 	for _, l := range b.allLocs {
 		if l.n != nil {
@@ -422,8 +453,31 @@ func (b *batch) callBits() {
 			dyn = append(dyn, tag)
 		}
 
+		// The arguments whose bit the function reads for a store in
+		// what the argument reaches (groups.go): only a caller
+		// that knows all of it sets the bit.
+		var deep uint16
+		if cs.fn != nil && cs.fn.Func != nil {
+			deep = cs.fn.Func.DeepBits
+		}
+		for j, g := range cs.groups {
+			if g == nil || g.dynRoot.dirt || j+1 >= maxCallBits || deep&(1<<j) == 0 {
+				continue
+			}
+			if t := b.groupTag(g, pos); t != nil {
+				dyn = append(dyn, binary(ir.OLSH, t, lit(int64(j+1))))
+			}
+		}
+
 		// The arguments.
 		for _, a := range cs.args {
+			if deep&(1<<(a.bit-1)) != 0 && a.kind != argParam {
+				continue
+			}
+			if deep&(1<<(a.bit-1)) != 0 {
+				// Its own bit is then read so too.
+				cs.curfn.DeepBits |= 1 << (a.own - 1)
+			}
 			var ok, ret bool
 			switch a.kind {
 			case argAddr:
@@ -458,6 +512,9 @@ func (b *batch) callBits() {
 			} else {
 				bits = binary(ir.OOR, bits, d)
 			}
+		}
+		if !apply {
+			continue
 		}
 		cs.call.LocalBits = bits
 		if b.gd.Flag.LowerM >= 3 {
@@ -511,6 +568,11 @@ func setMinDerefs(p *uint8, derefs int) {
 // derefs times, is stored in the dynamic root r: through a parameter,
 // or where another goroutine may reach it.
 func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int) {
+	if d := r.dynRoot; d != nil && d.cond != nil {
+		// What the group needs is known when the graph is solved
+		// (groupParam).
+		return
+	}
 	if d := r.dynRoot; d != nil && d.link != "" {
 		// An argument of a function that is only known when the
 		// program runs: the caller reads what the linker knows.
@@ -676,6 +738,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 			b.noteParam = fmt.Sprint(loc.n)
 		}
 		ps[i] = loc.shares
+		b.groupParam(&ps[i], loc)
 		if b.gd.Flag.LowerM >= 4 && loc.hasAttr(attrShares|attrSharesValue) && ps[i].Share != 1 {
 			fmt.Printf("%s: the parameter %s of %v is itself where another goroutine reaches (attributes %#x)\n", b.gd.FmtPos(loc.n.Pos()), b.noteParam, fn, uint(loc.attrs))
 		}

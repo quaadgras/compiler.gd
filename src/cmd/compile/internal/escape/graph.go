@@ -89,6 +89,11 @@ type location struct {
 	dynRoot     *dynRoot      // the location is a container known at run time (shares.go)
 	isDynRoot   bool          // the location was made as one, even if it is not one any more
 	dyn         []*location   // the dynamic roots that the location, or what it leads to, flows to
+	groups      []*location   // the membership roots that the location flows to (groups.go)
+	unknown     bool          // the location is the source of what the graph does not follow
+	members     []*location   // of a membership root: what flows to it
+	callRes     *callSite     // the location is what a result of that call flows through
+	marker      bool          // the location holds nothing: it is there for what flows to it to be found (groups.go)
 	owners      []*location   // for the contents of tracked variables: those variables (shares.go)
 	reassigned  bool          // has this variable been reassigned?
 	addrtaken   bool          // has this variable's address been taken?
@@ -401,6 +406,9 @@ func (b *batch) flow(k hole, src *location) {
 // but the pseudo-locations standing for the heap and for callees and
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
+	if root.marker {
+		return false
+	}
 	switch root {
 	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc, &b.convShareLoc:
 		return false

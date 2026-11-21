@@ -919,8 +919,51 @@ parameters (`deepRoot`). In `go/parser` 417 variables are derived from
 parameters, and `(*resolver).declare` says that `decl` and `data` are
 stored in what `idents` reaches.
 
-**How the groups are to be built** (worked out on 2026-11-21, not
-written yet):
+**Done too** (`escape/groups.go`): the groups of the arguments of
+direct calls and their conditions, the bit that a caller passes for a
+parameter whose bit the function reads so (`ir.Func.DeepBits`), what a
+function may store in a parameter's structure that its caller does not
+know (`ir.Func.DirtyInto`), whether its results are exactly as local as
+it is told (`ir.Func.ResultExact`), and the unknown source. A store
+through a path from a variable of the function that is not a parameter
+nor derived from some (`root.kids = append(root.kids, leaf())`) has the
+group of that variable, where it had a root of its statement that the
+result of a call could not read. A structure that takes such stores is
+local as a whole or not at all. A program that builds a tree with one
+function, has another store in each node a pointer to an object that
+points back, and reads it, had no local object and has all 15000;
+`TestSharedDeep` in `runtime`.
+
+As built, with what differs from the notes below:
+- Every membership root has the locations of its own function only, and
+  its walk stops at another function's. The first version had a pair of
+  roots for each store, and then one root for each function whose walk
+  went on into the functions of its batch: in a large batch every
+  location was in thousands of roots, and `go/types` took 48 seconds to
+  compile. What comes from another function of the batch is then the
+  result of a recorded call, which answers for it by `ResultExact`
+  (computed for the batch until nothing changes, from all true), or an
+  argument; anything else makes the root one that does not know all
+  (`dynRoot.crossed`).
+- A function has four roots for its stores through variables that are
+  not tracked (the variables and what is stored, for those that are
+  parameters or derived from them, and for the others), for
+  `DirtyInto`. What a group of the function gains by such a store is
+  found when its condition is asked for, by walking back from the
+  variable and from what is stored (`membersOf`, `reachTo`).
+- An argument of a call of a function of the same batch, or of one that
+  is only known when the program runs, flows to the dirt of the
+  function: nobody knows what is stored in it.
+- A marker (`location.marker`) holds nothing: the proofs of a hand-over,
+  the candidates for a caller's buffer and what outlives a loop do not
+  count it.
+- A variable that holds the result of a function which returns an
+  object that is its caller's alone had contents that were shared from
+  the start, since the object may be a pool's (two days before). That
+  made the result of every constructor shared. It is so now only if the
+  function may return a pool's object (`ir.Func.PoolResult`).
+
+**How the groups were to be built** (the notes of 2026-11-21, before):
 - A walk does not go past a location that escapes unless the root has
   something to tell it (`wantsDyn`). So a group is a dynamic root: every
   location that the argument reaches then has the group among its roots,

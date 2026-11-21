@@ -316,10 +316,14 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	}
 	w.Len(int(name.Func.Consumes)) // gd: see escape/move.go
 	w.Bool(name.Func.OwnedResult)
+	w.Bool(name.Func.PoolResult)
 	w.Len(int(name.Func.KeptChecked))
 	w.Len(int(name.Func.KeptByRecv))
 	w.Len(int(name.Func.KeptByAny))
 	w.Len(int(name.Func.KeptCalls))
+	w.Len(int(name.Func.DeepBits))
+	w.Len(int(name.Func.DirtyInto))
+	w.Bool(name.Func.ResultExact)
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
 		w.Len(int(inl.Cost))

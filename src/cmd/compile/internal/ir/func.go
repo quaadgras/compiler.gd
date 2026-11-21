@@ -207,6 +207,11 @@ type Func struct {
 	// move.go).
 	Consumes    uint16
 	OwnedResult bool
+	// PoolResult is whether an object that the function returns as
+	// OwnedResult may be one that a sync.Pool gave: it is then shared,
+	// where one that the function allocated is as local as its caller
+	// says.
+	PoolResult bool
 
 	// KeptChecked has bit k set if all that keeps the pointer that
 	// is the function's k'th parameter (the receiver first) is a
@@ -231,6 +236,17 @@ type Func struct {
 	// that is called keeps it, so it cannot be a local one. Of the
 	// others only methods of their own are called.
 	KeptCalls uint16
+	// DeepBits has bit k set if the function reads the bit of its
+	// k'th parameter (the receiver first) for a store in an object
+	// that the parameter reaches: the caller sets it only if every
+	// object that the argument reaches is local. DirtyInto has the
+	// parameters in whose structures the function may store what its
+	// caller does not know. ResultExact is whether what the function
+	// returns is local exactly when its caller says that the results
+	// stay local (escape's groups.go).
+	DeepBits    uint16
+	DirtyInto   uint16
+	ResultExact bool
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:

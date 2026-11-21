@@ -1303,10 +1303,14 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		}
 		fn.Consumes = uint16(r.Len())
 		fn.OwnedResult = r.Bool()
+		fn.PoolResult = r.Bool()
 		fn.KeptChecked = uint16(r.Len())
 		fn.KeptByRecv = uint16(r.Len())
 		fn.KeptByAny = uint16(r.Len())
 		fn.KeptCalls = uint16(r.Len())
+		fn.DeepBits = uint16(r.Len())
+		fn.DirtyInto = uint16(r.Len())
+		fn.ResultExact = r.Bool()
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

@@ -16,6 +16,8 @@ import (
 // walkAll computes the minimal dereferences between all pairs of
 // locations.
 func (b *batch) walkAll() {
+	b.prepareGroups(b.fns)
+
 	// We use a work queue to keep track of locations that we need
 	// to visit, and repeatedly walk until we reach a fixed point.
 	//
@@ -241,6 +243,26 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			fmt.Printf("%s: parameter %v reaches what is shared, %s, for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
 			b.explainPath(root, l)
 		}
+		if b.gd.Flag.LowerM >= 4 && l.n == nil && len(l.owners) != 0 && l.owners[0].n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+			// The contents of a tracked variable have no name.
+			fmt.Printf("%s: what %v points to is shared by %s with derefs=%d\n", b.gd.FmtPos(l.owners[0].n.Pos()), l.owners[0].n, b.explainLoc(root), rawDerefs)
+		}
+		if b.gd.Flag.LowerM >= 4 && l.param && l.n != nil && lraw && (root == &b.heapLoc || root == &b.checkLoc || root == &b.shareLoc || root == &b.convShareLoc) {
+			// Every place where a parameter is shared, not only
+			// the first.
+			fmt.Printf("%s: parameter %v reaches what is shared, %s, for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
+			b.explainPath(root, l)
+		}
+		if b.gd.Flag.LowerM >= 4 && l.n == nil && len(l.owners) != 0 && l.owners[0].n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+			kind := "a location"
+			if d := root.dynRoot; d != nil {
+				kind = fmt.Sprintf("a root: group %v, condition %v, link %q, deep %b, call %v", d.group, d.cond != nil, d.link, d.deep, d.call != nil)
+			}
+			fmt.Printf("%s: what %v points to is shared by %s (attributes %#x, transient %v, marker %v, %s) with derefs=%d; root: of %v, was a dynamic root %v, later %v, a call's result %v, contents %v, edges %d\n", b.gd.FmtPos(l.owners[0].n.Pos()), l.owners[0].n, b.explainLoc(root), uint(root.attrs), root.transient, root.marker, kind, rawDerefs, root.curfn, root.isDynRoot, root.later, root.callRes != nil, len(root.owners) != 0, len(root.edges))
+			for _, e := range root.edges {
+				fmt.Printf("\tfrom %s (attributes %#x) derefs %d\n", b.explainLoc(e.src), uint(e.src.attrs), e.derefs)
+			}
+		}
 		if b.gd.Flag.LowerM >= 2 && l.n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
 			// Why an object is not local.
 			fmt.Printf("%s: %v is shared by %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
@@ -296,6 +318,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			if deep := l.attrs & (attrSharesDeep | attrReturned); deep != 0 {
 				for _, o := range l.owners {
 					if deep&^o.attrs != 0 {
+						if b.gd.Flag.LowerM >= 4 && o.n != nil && deep&attrSharesDeep&^o.attrs != 0 {
+							fmt.Printf("%s: %v leads to what is shared: what it points to does\n", b.gd.FmtPos(o.n.Pos()), o.n)
+						}
 						o.attrs |= deep
 						enqueue(o)
 					}
@@ -309,6 +334,14 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		for i, edge := range l.edges {
 			if edge.recvOK && root == &b.recvHeldLoc || edge.recvAllOK && root == &b.recvAnyLoc {
 				// No method of what flows here keeps it.
+				continue
+			}
+			if root.dynRoot != nil && root.dynRoot.group && edge.src.curfn != nil && edge.src.curfn != root.curfn {
+				// The walk of a membership root stays in its
+				// function (groups.go).
+				if !l.param && l.callRes == nil {
+					root.dynRoot.crossed = true
+				}
 				continue
 			}
 			d := derefs + edge.derefs
@@ -488,6 +521,11 @@ func (b *batch) explainLoc(l *location) string {
 // outlives reports whether values stored in l may survive beyond
 // other's lifetime if stack allocated.
 func (b *batch) outlives(l, other *location) bool {
+	// A root that is only there to say who reaches what flows to
+	// it holds nothing (groups.go, callbits.go).
+	if l.dynRoot != nil && !l.hasAttr(attrEscapes) {
+		return false
+	}
 	// The heap outlives everything.
 	if l.hasAttr(attrEscapes) {
 		return true

@@ -138,7 +138,8 @@ func (b *batch) phaseGFunc(fn *ir.Func, heap, cand map[*location]bool, results m
 			outer = make(map[*location]map[*location]bool)
 		}
 		for _, l := range b.allLocs {
-			if l.curfn != fn || l.loopDepth >= u.loopDepth || l.paramOut {
+			if l.curfn != fn || l.loopDepth >= u.loopDepth || l.paramOut || l.marker {
+				// (A marker holds nothing: groups.go.)
 				continue
 			}
 			r, ok := outer[l]

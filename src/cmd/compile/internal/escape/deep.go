@@ -302,7 +302,15 @@ func (e *escape) deepHoles(mask uint16, derefs int, share func() hole) []hole {
 		}
 		if r := e.deepRoot(m); r != nil {
 			hs = append(hs, r.asHole().shift(e.gd, derefs))
+		} else if k < len(e.argGroups) && e.argGroups[k] != nil && !e.argGroups[k].dynRoot.dirt {
+			// It is one of what the argument reaches from now
+			// on, and local only if all of that is.
+			g := e.argGroups[k]
+			hs = append(hs, g.asHole().shift(e.gd, derefs), e.condRoot(g).asHole().shift(e.gd, derefs))
 		} else if !shared {
+			if e.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: what is stored in what argument %d reaches is shared: nobody knows all that it reaches\n", e.gd.FmtPos(e.gd.Pos), k)
+			}
 			shared = true
 			hs = append(hs, share().shift(e.gd, derefs))
 		}
