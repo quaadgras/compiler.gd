@@ -519,6 +519,14 @@ type dynRoot struct {
 	// (callbits.go). A root with no call is a link root: it has no
 	// path, and its tag can be read anywhere.
 	link string
+
+	// deep has the bits of the function's parameters that the object
+	// which the store is in is reached from, where nobody knows which
+	// object that is: the path starts at a variable that is derived
+	// from them, or is deeper than a parameter itself (deep.go). A
+	// root with no path and no link is such a store by a function
+	// that is called.
+	deep uint16
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
@@ -663,7 +671,7 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 		curfn:     e.curfn,
 		loopDepth: 1,
 		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
-		dynRoot:   &dynRoot{path: p, name: name, plain: plain, stmt: key.stmt},
+		dynRoot:   &dynRoot{path: p, name: name, plain: plain, stmt: key.stmt, deep: e.deepOfPath(name, plain)},
 		isDynRoot: true,
 	}
 	e.allLocs = append(e.allLocs, r)

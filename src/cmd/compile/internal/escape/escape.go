@@ -129,7 +129,10 @@ type batch struct {
 	// Dynamic roots (shares.go): by statement and path, the statements
 	// that are one plain assignment, and those with a call.
 	dynRoots      map[dynKey]*location
-	noteParam     string // -m=4: the parameter that noteParamRoot is told of
+	noteParam     string              // -m=4: the parameter that noteParamRoot is told of
+	derived       map[*ir.Name]uint16 // the parameters that a variable is reached from (deep.go)
+	derivedMask   func(ir.Node) (uint16, bool)
+	derivedOf     map[*ir.Func]func(ir.Node) (uint16, bool)
 	simpleStmts   map[int32]bool
 	stmtCalls     map[int32]bool
 	calls         []*callSite      // callbits.go
@@ -338,6 +341,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 	}
 
 	b.trackPointers(fn)
+	b.deriveFromParams(fn)
 	b.trackParams(fn)
 }
 

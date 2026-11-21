@@ -546,6 +546,12 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 			}
 		}
 	}
+	if d := r.dynRoot; d != nil && r.curfn == fn && d.deep != 0 && d.call == nil {
+		// Stored in an object that those parameters reach.
+		ps.Deep |= d.deep
+		setMinDerefs(&ps.DeepDerefs, derefs)
+		return
+	}
 	if b.gd.Flag.LowerM >= 4 {
 		what := "a container that is only known when the program runs"
 		if d := r.dynRoot; d != nil && d.call != nil {
@@ -712,6 +718,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 		for i := range ps {
 			ps[i].Share = 0
 			ps[i].Links = nil
+			ps[i].Deep = 0
 		}
 	}
 	fn.ParamShares = ps
@@ -759,6 +766,9 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			if e.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: %v shares its argument %v, dereferenced %d times\n", e.gd.FmtPos(e.gd.Pos), fn, param.Sym, ps.Share-1)
 			}
+		}
+		if ps.Deep != 0 {
+			tagKs = append(tagKs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.shareHole)...)
 		}
 		for _, l := range ps.Links {
 			// (Whether it must be in the heap, the tag and Heap say.)
@@ -817,6 +827,9 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 	var hs []hole
 	if ps.Share != 0 {
 		hs = append(hs, e.convShareHole().shift(e.gd, int(ps.Share)-1))
+	}
+	if ps.Deep != 0 {
+		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)
 	}
 	for _, l := range ps.Links {
 		if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
@@ -901,7 +914,7 @@ func (b *batch) shareFlags(fn *ir.Func, i int, esc leaks) byte {
 		via &^= 1
 		fl |= ir.EscNoteViaRecv
 	}
-	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() {
+	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() || ps.Deep != 0 {
 		return checked
 	}
 	if len(ps.Links) != 0 {

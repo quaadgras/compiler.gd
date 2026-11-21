@@ -305,6 +305,8 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 		w.Len(int(ps.ViaDerefs))
 		w.Len(int(ps.Results))
 		w.Len(int(ps.Heap))
+		w.Len(int(ps.Deep))
+		w.Len(int(ps.DeepDerefs))
 		w.Len(len(ps.Links))
 		for _, l := range ps.Links {
 			w.String(l.Key)

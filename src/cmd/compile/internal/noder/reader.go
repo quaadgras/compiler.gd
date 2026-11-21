@@ -1291,6 +1291,8 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.ViaDerefs = uint8(r.Len())
 				ps.Results = uint8(r.Len())
 				ps.Heap = uint8(r.Len())
+				ps.Deep = uint16(r.Len())
+				ps.DeepDerefs = uint8(r.Len())
 				if n := r.Len(); n != 0 {
 					ps.Links = make([]ir.ShareLink, n)
 					for j := range ps.Links {

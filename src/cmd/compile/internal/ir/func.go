@@ -876,6 +876,13 @@ type ParamShare struct {
 	// another goroutine reaches it if one of them shares its argument,
 	// which the linker knows (sharelink.go).
 	Links []ShareLink
+	// Deep has bit k set if the parameter, dereferenced DeepDerefs-1
+	// times or more, is stored in an object that is reached from the
+	// function's k'th parameter (the receiver first), and nobody
+	// knows which: it is shared unless every object that the k'th
+	// argument reaches is local.
+	Deep       uint16
+	DeepDerefs uint8
 	// LinksFull is set, while the function is analysed, when there
 	// were more links than a parameter may have: it is shared then.
 	LinksFull bool
