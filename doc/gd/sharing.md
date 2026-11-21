@@ -1114,6 +1114,54 @@ at the same time; seen on `go/token` on 2026-11-21, not traced.
   is built: its parameters' bits are 0 unless the caller passes on its
   own.
 
+### A step back: field classes (2026-11-22, a design that is not built)
+
+All of the above proves, for an object that is stored in what a
+parameter reaches, that everything which the argument reaches is local.
+That is more than is needed, and false of ordinary structures, in which
+local objects point to shared ones: the one thing that must hold is
+that no shared object points to a local one. The user's idea: a local
+object may keep references to shared memory if the fields that do are
+known.
+
+The design under consideration keeps the decision at the allocation (an
+object that becomes shared later would make an arena that is freed when
+the goroutine exits much harder: its objects would have to be traced
+and handed over one by one), and asks only whether each container that
+the pointer is stored in is local: by a test of the container's address
+where it exists before the allocation, by the bit of the call's results
+where it is allocated later, and otherwise by the class of the fields
+on the path to it. Each field that holds a pointer has one class for
+the whole program, from all the stores in it: *holder* (in a local
+object it holds only local pointers or nil), or *mixed*. A container
+that is reached from a local root through holder fields is local.
+
+A census of the stores says how many fields could be holders
+(`-gcflags=all=-d=fieldcensus=1`, `escape/census.go`, summed by
+`doc/gd/tools/fieldcensus.py`). It looks at each function once, without
+order in time. Over the standard library, the compiler and the go
+command together, as if one program: 6792 fields, elements and maps
+with 112817 stores in containers that are not certainly shared.
+
+| what demotes a field | holder fields | stores in them |
+|---|---|---|
+| a shared or unknown value | 92% | 52% |
+| and a parameter | 63% | 21% |
+| and the result of a call | 42% | 12% |
+
+Of `go/ast`'s 126 fields 116 are holders in the first row and 90 in the
+second. `Ident.Obj` is not, as expected (the parser's `unresolved`
+is a package's variable), and `[]*ast.Ident` is not because `go/doc`
+stores one of its own variables in such a slice, which takes
+`[]ast.Expr` with it: the elements of a slice type are one field for
+all the program, which is coarse, and a real program links less. The
+fields that most often get a shared value are maps of tables, `error`
+fields and `time.Time.loc`.
+
+So the question is the 1842 fields in which a parameter is stored: each
+is an obligation on the callers (the argument is local exactly when the
+container is).
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

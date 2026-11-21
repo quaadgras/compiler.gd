@@ -254,6 +254,10 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 	b.candidateLoc.attrs = attrCandidateEscape | attrPersists | attrMutates | attrCalls | attrShares
 	b.reassignOracles = reassignOracles
 
+	if gd.Debug.FieldCensus != 0 {
+		fieldCensus(gd, fns)
+	}
+
 	// Construct data-flow graph from syntax trees.
 	for _, fn := range fns {
 		if gd.Flag.W > 1 {
