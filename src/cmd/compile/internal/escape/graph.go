@@ -92,6 +92,7 @@ type location struct {
 	groups      []*location   // the membership roots that the location flows to (groups.go)
 	unknown     bool          // the location is the source of what the graph does not follow
 	members     []*location   // of a membership root: what flows to it
+	resType     *types.Type   // of callRes: the type of the result
 	callRes     *callSite     // the location is what a result of that call flows through
 	marker      bool          // the location holds nothing: it is there for what flows to it to be found (groups.go)
 	index       int           // of a group: its place among the groups (groups.go)

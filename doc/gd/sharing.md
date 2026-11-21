@@ -1196,6 +1196,31 @@ has to stay. What should change is what the bits claim: not that
 everything which an argument reaches is local, but that the containers
 which are stored in are.
 
+**Narrowing, first step** (done): a value that cannot lead to memory
+which holds pointers (a string, a slice of bytes, a struct of those:
+`leadsToPointers`) points to nothing that a pointer can be stored in.
+Where it comes from says nothing of a structure that has it, so it is
+no unknown member of a group (`unknownOf`, `location.leadsNowhere`),
+and a function that stores one in what its parameter reaches stores
+nothing that its caller does not know (`knownStored`). A variable of
+such a type is still an object that holds a pointer. `(*parser).error`
+and the resolver's `sprintf` are clean by this; 84 of the parser's
+functions still store what their callers do not know, of 100.
+
+**Next, found by `(*parser).init`**: `token.(*File).position` shares the
+file, which has a mutex, so the scanner's methods say that what the
+scanner holds is shared (`ParamShare.Share` = 2), by depth only, and
+the caller takes everything that is stored in the scanner as shared,
+the closure in `s.err` with it. The fact has to say *what* is shared:
+the type of the value, so that only what may be a `*token.File` is.
+Planned: share roots with a type (one per type, walked like
+`shareLoc`), a location whose share attributes are only for that type
+(the walk from it skips, and goes no further through, a value whose
+type cannot be that one or hold it), `ParamShare` with the field of
+the parameter's type that the shared value is in, since the function's
+extension in the export data cannot name a type. Functions that
+convert through `unsafe.Pointer` have no types for this.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

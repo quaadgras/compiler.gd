@@ -148,6 +148,7 @@ func (e *escape) noteCall(ks []hole, call *ir.CallExpr, fn *ir.Name, fntype *typ
 		r.transient = true
 		r.stmt = e.curStmt
 		r.callRes = cs
+		r.resType = fntype.Result(i).Type
 		e.flow(k, r)
 		cs.res = append(cs.res, r)
 		nks[i] = r.asHole()

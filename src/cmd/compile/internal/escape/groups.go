@@ -92,6 +92,57 @@ func (b *batch) memberRoot(fn *ir.Func) *location {
 	return r
 }
 
+// leadsToPointers reports whether a value of type t may point, by
+// itself or through what it is made of, to memory that holds pointers.
+// A value that does not (a string, a slice of bytes, a struct of those)
+// points to nothing that a pointer can be stored in, so that where it
+// comes from, and which goroutines reach what it points to, says
+// nothing of whether a structure that has it is local: local objects
+// may point to shared ones.
+func leadsToPointers(t *types.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch t.Kind() {
+	case types.TSTRING:
+		return false
+	case types.TPTR, types.TSLICE:
+		return t.Elem().HasPointers()
+	case types.TARRAY:
+		return leadsToPointers(t.Elem())
+	case types.TSTRUCT:
+		for _, f := range t.Fields() {
+			if leadsToPointers(f.Type) {
+				return true
+			}
+		}
+		return false
+	}
+	return t.HasPointers()
+}
+
+// leadsNowhere reports whether l holds a value that does not lead to
+// memory that holds pointers (leadsToPointers): the result of a call
+// of such a type, or a variable or an expression of one.
+func (l *location) leadsNowhere() bool {
+	if l.resType != nil {
+		return !leadsToPointers(l.resType)
+	}
+	if l.callRes != nil || l.n == nil || isAlloc(l) {
+		return false
+	}
+	t := l.n.Type()
+	if t == nil {
+		return false
+	}
+	if l.n.Op() == ir.ONAME {
+		// (A variable is an object too, which its address may be
+		// stored through: a string variable holds a pointer.)
+		return !t.HasPointers()
+	}
+	return !leadsToPointers(t)
+}
+
 // pointsToPointers reports whether a value of type t may point to
 // memory that holds pointers: only such an argument has a structure
 // that something may be stored in.
@@ -1043,6 +1094,11 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 				c.mixes = append(c.mixes, x)
 			}
 		}
+		if m.leadsNowhere() {
+			// (Whoever reaches it: nothing is stored in what it
+			// points to.)
+			continue
+		}
 		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
 			fail("shared", m)
 			break
@@ -1256,6 +1312,9 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 	if m.unknown || m.curfn != fn {
 		return false
 	}
+	if m.leadsNowhere() {
+		return true
+	}
 	if m.callRes != nil {
 		// The result of a function that returns what is as local as
 		// its call says, and the call says what the caller says of
@@ -1460,7 +1519,7 @@ func (e *escape) unknown(k hole, n ir.Node) {
 
 // unknownOf is unknown for a value of type t.
 func (e *escape) unknownOf(k hole, t *types.Type) {
-	if !e.deepOn() || k.dst == &e.blankLoc || t == nil || !t.HasPointers() {
+	if !e.deepOn() || k.dst == &e.blankLoc || t == nil || !leadsToPointers(t) {
 		return
 	}
 	if k.derefs < 0 {
