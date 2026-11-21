@@ -77,30 +77,39 @@ type location struct {
 	// paramEsc records the represented parameter's leak set.
 	paramEsc leaks
 
-	heap        bool          // finish: the location is in the heap
-	local       uint8         // finish: how its object is local (localStatic, localTagged), if it is
-	shares      ir.ParamShare // for a parameter: see ir.Func.ParamShares
-	captured    bool          // has a closure captured this variable?
-	stmt        int32         // the statement the location was made in, or a variable declared in (shares.go)
-	rawgen      uint32        // walkOne: the walk that reached the location on a path with no read-only edge
-	rawDerefs   int           // walkOne: the least dereferences of such a path
-	plaingen    uint32        // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
-	plainDerefs int           // walkOne: the least dereferences of such a path
-	dynRoot     *dynRoot      // the location is a container known at run time (shares.go)
-	isDynRoot   bool          // the location was made as one, even if it is not one any more
-	dyn         []*location   // the dynamic roots that the location, or what it leads to, flows to
-	groups      []*location   // the membership roots that the location flows to (groups.go)
-	unknown     bool          // the location is the source of what the graph does not follow
-	members     []*location   // of a membership root: what flows to it
-	resType     *types.Type   // of callRes: the type of the result
-	callRes     *callSite     // the location is what a result of that call flows through
-	marker      bool          // the location holds nothing: it is there for what flows to it to be found (groups.go)
-	index       int           // of a group: its place among the groups (groups.go)
-	owners      []*location   // for the contents of tracked variables: those variables (shares.go)
-	reassigned  bool          // has this variable been reassigned?
-	addrtaken   bool          // has this variable's address been taken?
-	param       bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
-	paramOut    bool          // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+	heap     bool          // finish: the location is in the heap
+	local    uint8         // finish: how its object is local (localStatic, localTagged), if it is
+	shares   ir.ParamShare // for a parameter: see ir.Func.ParamShares
+	captured bool          // has a closure captured this variable?
+	stmt     int32         // the statement the location was made in, or a variable declared in (shares.go)
+	// For sharing by type (typed.go). shareType is the type of a share
+	// root for the values of one type; shareOnly, of a location that
+	// has its share attributes only from such roots, that type. The
+	// rest is of a walk: what the walk's filter is at the location.
+	shareType   *types.Type
+	shareConv   bool
+	shareOnly   *types.Type
+	filtergen   uint32
+	filterAt    int8
+	rawgen      uint32      // walkOne: the walk that reached the location on a path with no read-only edge
+	rawDerefs   int         // walkOne: the least dereferences of such a path
+	plaingen    uint32      // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
+	plainDerefs int         // walkOne: the least dereferences of such a path
+	dynRoot     *dynRoot    // the location is a container known at run time (shares.go)
+	isDynRoot   bool        // the location was made as one, even if it is not one any more
+	dyn         []*location // the dynamic roots that the location, or what it leads to, flows to
+	groups      []*location // the membership roots that the location flows to (groups.go)
+	unknown     bool        // the location is the source of what the graph does not follow
+	members     []*location // of a membership root: what flows to it
+	resType     *types.Type // of callRes: the type of the result
+	callRes     *callSite   // the location is what a result of that call flows through
+	marker      bool        // the location holds nothing: it is there for what flows to it to be found (groups.go)
+	index       int         // of a group: its place among the groups (groups.go)
+	owners      []*location // for the contents of tracked variables: those variables (shares.go)
+	reassigned  bool        // has this variable been reassigned?
+	addrtaken   bool        // has this variable's address been taken?
+	param       bool        // is this variable a parameter (ONAME of class ir.PPARAM)?
+	paramOut    bool        // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
 	// gd Phase G: assignedInBody reports whether this result
 	// variable is assigned other than by a return statement (p =
@@ -408,7 +417,7 @@ func (b *batch) flow(k hole, src *location) {
 // but the pseudo-locations standing for the heap and for callees and
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
-	if root.marker {
+	if root.marker || root.shareType != nil {
 		return false
 	}
 	switch root {

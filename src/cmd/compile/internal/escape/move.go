@@ -435,6 +435,10 @@ func (b *batch) holdsMovedParam(root, l *location) bool {
 	if root.marker {
 		return false
 	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
+	}
 	switch root {
 	case l, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
 		return false
@@ -546,6 +550,10 @@ func markFresh(fn *ir.Func) {
 func (b *batch) holdsMoved(root, c *location) bool {
 	if root.marker {
 		return false
+	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
 	}
 	switch root {
 	case c, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:
@@ -1007,6 +1015,10 @@ func (e *escape) checkHoles() []hole {
 func (b *batch) keepsParam(root, l *location) bool {
 	if root.marker {
 		return false
+	}
+	if root.shareType != nil {
+		// (As shareLoc, or convShareLoc.)
+		return !root.shareConv
 	}
 	switch root {
 	case l, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.convShareLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc:

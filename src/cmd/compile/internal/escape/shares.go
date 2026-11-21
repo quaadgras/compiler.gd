@@ -411,7 +411,16 @@ func (b *batch) markLocal(loc *location) {
 		return
 	}
 	ret := loc.hasAttr(attrReturned)
-	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
+	notLocal := loc.hasAttr(attrNotLocal)
+	if notLocal && loc.shareOnly != nil && isAlloc(loc) && !loc.hasAttr(attrShares|attrReturnedOther) && b.typedOn() {
+		// An object that holds values of one type which another
+		// goroutine reaches, and nothing else that one does
+		// (typed.go): a local object may point to shared ones. What
+		// else is stored in it is local if it is, and what is
+		// stored in the shared ones is told by them.
+		notLocal = false
+	}
+	if notLocal || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
 			for i, name := range []string{"shares", "holds what is shared", "leads to what is shared", "is returned"} {
@@ -736,7 +745,7 @@ func (b *batch) settleDynRoots() {
 			continue
 		}
 		loc, _ := r.dynRoot.name.Opt.(*location)
-		if loc == nil || loc.captured || loc.addrtaken {
+		if loc == nil || loc.addrtaken || loc.captured && !b.neverAssigned(r.dynRoot.name) {
 			if d := r.dynRoot; d.call != nil && d.link != "" {
 				// What is called cannot be read: the linker knows.
 				r.dynRoot = &dynRoot{link: d.link, arg: d.arg}
@@ -751,6 +760,19 @@ func (b *batch) settleDynRoots() {
 		}
 		r.dynRoot.loc = loc
 	}
+}
+
+// neverAssigned reports whether the variable name, which a closure
+// captures, is never assigned after it is declared, in its function or
+// in a closure: the closure then has its value, and a store through it
+// is a store through the same pointer wherever it is read. (Whether a
+// location is reassigned forgets what was before the capture.)
+func (b *batch) neverAssigned(name *ir.Name) bool {
+	name = name.Canonical()
+	if name.Curfn == nil || name.Addrtaken() {
+		return false
+	}
+	return !b.reassignOracle(name.Curfn).Reassigned(name)
 }
 
 // dynOf returns the dynamic roots that what flows to root flows to.

@@ -1207,19 +1207,54 @@ such a type is still an object that holds a pointer. `(*parser).error`
 and the resolver's `sprintf` are clean by this; 84 of the parser's
 functions still store what their callers do not know, of 100.
 
-**Next, found by `(*parser).init`**: `token.(*File).position` shares the
-file, which has a mutex, so the scanner's methods say that what the
+**Stores through a variable that a closure captures** (done): such a
+store was taken to share what is stored, since whether a location is
+reassigned forgets what was before the capture. A variable that is
+never assigned after it is declared, in its function or a closure
+(`ir.ReassignOracle`), and whose address is not taken, is the same
+pointer wherever it is read (`neverAssigned`). `(*parser).init` gives
+the scanner a closure that has the parser, and stores through the
+parser: it no longer stores what its caller does not know (83 of the
+parser's functions do).
+
+**Sharing by the type of what is shared** (built, NOT SOUND, off unless
+`-d=localtyped=1`; `escape/typed.go`): `token.(*File).position` shares
+the file, which has a mutex, so the scanner's methods say that what the
 scanner holds is shared (`ParamShare.Share` = 2), by depth only, and
-the caller takes everything that is stored in the scanner as shared,
-the closure in `s.err` with it. The fact has to say *what* is shared:
-the type of the value, so that only what may be a `*token.File` is.
-Planned: share roots with a type (one per type, walked like
-`shareLoc`), a location whose share attributes are only for that type
-(the walk from it skips, and goes no further through, a value whose
-type cannot be that one or hold it), `ParamShare` with the field of
-the parameter's type that the shared value is in, since the function's
-extension in the export data cannot name a type. Functions that
-convert through `unsafe.Pointer` have no types for this.
+the caller takes everything that is stored in the scanner as shared.
+The fact should say *what* is shared. As built:
+- A value that a function shares of its argument flows to a share root
+  of the parameter's type (`shareHoleOf`), walked like `shareLoc`.
+- In the walk from such a root a location whose type can neither be
+  that type nor lead to it is not shared and not walked through
+  (`typedAs`, `mayBe`, `leadsTo`); one that may only lead to it "leads
+  to what is shared" and no more; an object whose address is the
+  shared value is shared with all that is in it.
+- A location that is shared only by such walks is shared for that type
+  (`location.shareOnly`), and the walk from it goes by that.
+- A function says of a parameter that is shared one dereference down
+  which field of its struct the shared value is in
+  (`ParamShare.ShareTyped`, `ShareField`: the export data's function
+  extension cannot name a type), if all the fields that could hold it
+  have one type.
+- An allocation that only holds such values may be local itself
+  (`markLocal`).
+- Functions that convert through `unsafe.Pointer` have no types here.
+
+With it, `go/types`' tests have 121822 local objects (101324 without),
+and `net/http`'s have 107 local objects that a shared one points to:
+`http.NewRequest` stores the body in the request that it returns, the
+graph has that as a flow from the body to the result without a
+dereference (it does not see the object), the walk takes a flow without
+dereference to be of the same value, and the body, of another type, is
+left local in a request that is shared later. The walk has to know
+whether it is at the shared pointer itself, where a value of another
+type that flows in is stored in the object and shared with it, or
+among what a holder has, where it is another value: a state of the
+walk (at the pointer, among contents, leading only, behind), kept with
+the type on the locations that it shares. That is the next thing to
+build, with `net/http`'s tests under `GODEBUG=sharestats=2` as the
+check; `TestSharedTyped` has the simple cases.
 
 ### Next
 

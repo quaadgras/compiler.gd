@@ -1897,6 +1897,78 @@ type deepSpoilsNot struct{}
 
 func (deepSpoilsNot) SpoilDeep(n *deepNode) {}
 
+// An object that holds a pointer to a shared one, and other things
+// beside: the shared one, and what is stored in its place later, must
+// not be local.
+
+type typedFile struct {
+	mu sync.Mutex
+	n  int
+}
+
+type typedHolder struct {
+	file *typedFile
+	buf  *[4]*int
+	next *typedHolder
+}
+
+// use shares h.file: a mutex is where every goroutine may reach it.
+//
+//go:noinline
+func (h *typedHolder) use() int {
+	h.file.mu.Lock()
+	h.file.n++
+	h.file.mu.Unlock()
+	return h.file.n
+}
+
+//go:noinline
+func (h *typedHolder) setBuf(b *[4]*int) { h.buf = b }
+
+//go:noinline
+func (h *typedHolder) setFile(f *typedFile) { h.file = f }
+
+var typedSink *typedFile
+
+func TestSharedTyped(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	// The holder and its buffer are local; the file is not.
+	n := runtime.CountLocalAllocs(func() {
+		h := &typedHolder{file: new(typedFile)}
+		h.setBuf(new([4]*int))
+		sum += h.use() + len(h.buf)
+	})
+	t.Logf("%d local objects beside a shared file", n)
+	if n > 2 {
+		// (The buffer is local only with -d=localtyped=1, which
+		// is not sound yet; the holder need not be in the heap.)
+		t.Errorf("%d local objects: the file is one, and its mutex is used", n)
+	}
+	// A file that is stored in the holder later is shared as well:
+	// another goroutine reads it.
+	n = runtime.CountLocalAllocs(func() {
+		h := &typedHolder{file: new(typedFile)}
+		f := new(typedFile)
+		h.setFile(f)
+		sum += h.use()
+		typedSink = h.file
+	})
+	t.Logf("%d local objects with a file stored later", n)
+	if n > 1 {
+		t.Errorf("%d local objects, want at most the holder", n)
+	}
+	done := make(chan bool)
+	go func() { typedSink.mu.Lock(); typedSink.n++; typedSink.mu.Unlock(); done <- true }()
+	<-done
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
 // deepAdd adds a leaf to root, and returns it.
 //
 //go:noinline

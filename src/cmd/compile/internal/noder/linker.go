@@ -301,6 +301,12 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Len(len(name.Func.ParamShares))
 	for _, ps := range name.Func.ParamShares {
 		w.Len(int(ps.Share))
+		if w.Bool(ps.ShareTyped) {
+			w.Len(len(ps.ShareField))
+			for _, i := range ps.ShareField {
+				w.Len(int(i))
+			}
+		}
 		w.Len(int(ps.Via))
 		w.Len(int(ps.ViaDerefs))
 		w.Len(int(ps.Results))

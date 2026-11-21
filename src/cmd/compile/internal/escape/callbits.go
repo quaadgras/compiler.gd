@@ -640,7 +640,7 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 			fmt.Printf("%s: the parameter %s of %v is shared: it is passed to more than %d kinds of functions that are only known when the program runs\n", b.gd.FmtPos(fn.Pos()), b.noteParam, fn, ir.MaxShareLinks)
 		}
 		ps.LinksFull = true
-		setMinDerefs(&ps.Share, derefs)
+		noteShare(ps, derefs, nil)
 		return
 	}
 	if d := r.dynRoot; d != nil && r.curfn == fn {
@@ -676,7 +676,7 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 		}
 		fmt.Printf("%s: the parameter %s of %v is shared by %s (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, fn, what, derefs)
 	}
-	setMinDerefs(&ps.Share, derefs)
+	noteShare(ps, derefs, nil)
 }
 
 // noteParamHeap records what a location in the heap that the parameter
@@ -691,7 +691,7 @@ func (b *batch) noteParamHeap(fn *ir.Func, ps *ir.ParamShare, root *location, de
 			}
 			fmt.Printf("%s: the parameter %s of %v is shared by what it is stored in, %s, which holds or leads to what is shared (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, fn, b.explainLoc(root), derefs)
 		}
-		setMinDerefs(&ps.Share, derefs)
+		noteShare(ps, derefs, nil)
 	}
 	if root.hasAttr(attrReturned) || root.paramOut {
 		ps.Results = 0xff
@@ -703,7 +703,7 @@ func (b *batch) noteParamHeap(fn *ir.Func, ps *ir.ParamShare, root *location, de
 
 // noteParamShare records that the parameter l, dereferenced derefs
 // times, flows to root.
-func (b *batch) noteParamShare(l, root *location, derefs int) {
+func (b *batch) noteParamShare(l, root *location, derefs int, only *types.Type, blocked bool) {
 	if !b.shareTagsOn() {
 		return
 	}
@@ -714,7 +714,7 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 	switch {
 	case root.isDynRoot:
 		b.noteParamRoot(l.curfn, ps, root, derefs)
-	case root.hasAttr(attrShares):
+	case root.hasAttr(attrShares) && !blocked:
 		if b.gd.Flag.LowerM >= 4 && root != &b.shareLoc && root != &b.convShareLoc && root != &b.heapLoc && root != &b.checkLoc {
 			pos := l.curfn.Pos()
 			if root.n != nil {
@@ -722,7 +722,7 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 			}
 			fmt.Printf("%s: the parameter %s of %v flows to %s, which another goroutine reaches (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, l.curfn, b.explainLoc(root), derefs)
 		}
-		setMinDerefs(&ps.Share, derefs)
+		noteShare(ps, derefs, only)
 	case root.paramOut && root.curfn == l.curfn && !root.hasAttr(attrEscapes):
 		if ri := root.resultIndex - 1; ri < numEscResults && ri < 8 {
 			ps.Results |= 1 << ri
@@ -820,6 +820,23 @@ func (b *batch) paramShares(fn *ir.Func) {
 			})
 		}
 	}
+	// What is shared of what a parameter leads to, if it is of one
+	// type that the parameter's type says.
+	for i, f := range fn.Type().RecvParams() {
+		if i >= len(ps) {
+			break
+		}
+		p := &ps[i]
+		if b.typedOn() && p.Share == 2 && !p.ShareAny && p.ShareType != nil {
+			if path, ok := shareFieldOf(f.Type, p.ShareType); ok {
+				p.ShareTyped, p.ShareField = true, path
+			}
+		}
+		if b.gd.Flag.LowerM >= 4 && p.Share > 1 {
+			fmt.Printf("%s: parameter %d of %v shares what it leads to: of type %v only %v (any %v)\n", b.gd.FmtPos(fn.Pos()), i, fn, p.ShareType, p.ShareTyped, p.ShareAny)
+		}
+		p.ShareType, p.ShareAny = nil, false
+	}
 	if fn.Pragma&ir.LocalArgs != 0 {
 		// The standard library says that the function shares
 		// nothing: it calls into the runtime, whose code does with
@@ -883,7 +900,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
 		}
 		if ps.Share != 0 {
-			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
+			tagKs = append(tagKs, e.shareHoleFor(param, ps, false))
 			if e.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: %v shares its argument %v, dereferenced %d times\n", e.gd.FmtPos(e.gd.Pos), fn, param.Sym, ps.Share-1)
 			}
@@ -1020,7 +1037,7 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 	// to an interface is, and no holder for a hand-over.)
 	var hs []hole
 	if ps.Share != 0 {
-		hs = append(hs, e.convShareHole().shift(e.gd, int(ps.Share)-1))
+		hs = append(hs, e.shareHoleFor(param, ps, true))
 	}
 	if ps.Deep != 0 {
 		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)

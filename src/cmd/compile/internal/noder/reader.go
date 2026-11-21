@@ -1287,6 +1287,13 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 			for i := range fn.ParamShares {
 				ps := &fn.ParamShares[i]
 				ps.Share = uint8(r.Len())
+				if r.Bool() {
+					ps.ShareTyped = true
+					ps.ShareField = make([]uint8, r.Len())
+					for i := range ps.ShareField {
+						ps.ShareField[i] = uint8(r.Len())
+					}
+				}
 				ps.Via = uint16(r.Len())
 				ps.ViaDerefs = uint8(r.Len())
 				ps.Results = uint8(r.Len())

@@ -897,6 +897,17 @@ type ParamShare struct {
 	// Share is the least number of dereferences of the parameter that
 	// give what flows to where another goroutine may reach it.
 	Share uint8
+	// ShareTyped says, of a parameter that is not shared itself
+	// (Share > 1), that only values of one type are shared of what
+	// it leads to: the type of the field that ShareField leads to
+	// from the parameter's type, by the index of a field at each
+	// step, through pointers and elements (escape's typed.go). What
+	// is stored beside such a value is not shared by this.
+	// ShareType and ShareAny are for the function's own batch.
+	ShareTyped bool
+	ShareField []uint8
+	ShareType  *types.Type
+	ShareAny   bool
 	// Via has bit k set if the parameter, dereferenced ViaDerefs-1
 	// times or more, is stored in what the function's k'th parameter
 	// (the receiver first) points to: it is then where that is.
