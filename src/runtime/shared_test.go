@@ -1971,6 +1971,88 @@ func TestSharedTyped(t *testing.T) {
 	}
 }
 
+// What a function returns to a caller that calls it again, or to a
+// function that it is called by in turn: where the caller stores it is
+// the call's to say, not the function's.
+
+type recNode struct {
+	kid, next *recNode
+	v         int
+}
+
+// recBuild stores what its own call returns in the node that it was
+// given, which is its caller's, and not the one that it passes down.
+//
+//go:noinline
+func recBuild(n *recNode, d int) *recNode {
+	c := &recNode{v: d}
+	if d > 0 {
+		n.kid = recBuild(c, d-1)
+	}
+	return c
+}
+
+//go:noinline
+func recChain(n *recNode, d int) *recNode {
+	if d == 0 {
+		return &recNode{v: -1}
+	}
+	x := recLink(n, d-1)
+	n.next = x
+	return &recNode{v: d, kid: x}
+}
+
+//go:noinline
+func recLink(n *recNode, d int) *recNode {
+	c := &recNode{v: d}
+	c.next = recChain(c, d)
+	return c
+}
+
+var recSink *recNode
+
+func TestSharedRecursive(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	// The root is local: all the nodes may be.
+	n := runtime.CountLocalAllocs(func() {
+		root := &recNode{}
+		sum += recBuild(root, 5).v + recChain(root, 4).v
+	})
+	t.Logf("%d local objects under a local root", n)
+	if n < 6 {
+		t.Errorf("%d local objects, want at least the six of recBuild", n)
+	}
+	// The root is shared: every other node of recBuild is stored in
+	// one that the root leads to, and another goroutine walks them.
+	n = runtime.CountLocalAllocs(func() {
+		root := &recNode{}
+		recSink = root
+		sum += recBuild(root, 5).v + recChain(root, 4).v
+	})
+	t.Logf("%d local objects under a shared root", n)
+	done := make(chan int)
+	go func() {
+		k := 0
+		for x := recSink.kid; x != nil; x = x.kid {
+			k++
+		}
+		for x := recSink.next; x != nil; x = x.next {
+			k++
+		}
+		done <- k
+	}()
+	if k := <-done; k < 3 {
+		t.Errorf("%d nodes from the shared root, want at least 3", k)
+	}
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
 // deepAdd adds a leaf to root, and returns it.
 //
 //go:noinline

@@ -1273,6 +1273,47 @@ shared one points to (the tests that compare what a child process
 prints fail by the statistics alone); the toolchain building itself
 and everything else under the same.
 
+**The functions that call each other** (2026-11-22; the parser's
+recursive part is one batch):
+
+- *What a caller does with a result.* A function of the batch returns
+  a node and its caller, of the same batch, stores it: the walk from
+  the caller's store came through the function's result to its
+  allocation, which then had the caller's place among its own, a place
+  that it cannot tell of. 175 allocations in `go/parser` were "not
+  local, stored where it cannot tell": every node of an expression or a
+  statement. But the call says where its results go, with the bit of
+  its results, and what is returned goes by that bit. So a walk that
+  comes to a location through a result of its function, from a call of
+  it, and by no other way (`hole.retFlow`, `hole.argFlow`,
+  `location.viaF`), leaves no place there (`ownResult` in `walkOne`),
+  and says nothing of the function's parameters by it. 13 are left, and
+  436 allocations of `parser.go` have a tag (276 before). It is right
+  for a function that calls itself too, where the caller's place was
+  taken for the function's own and read in the wrong call
+  (`-d=nolocalret=1` for the old way).
+- *What is stored that the caller does not know.* A caller of the
+  batch only knew whether the function that it calls stores anything
+  at all in what a parameter reaches, and `p.next()` does. Where the
+  argument is the caller's own parameter (or a copy of it: the
+  receiver of a method that is inlined, `batch.copyOf`), the call
+  passes the caller's bit on, what the function allocates and stores
+  is as local as the caller's caller says, and what matters is whether
+  the function stores what its caller does not know (`dynRoot.pendOwn`,
+  `dirtOrStored`). That is solved for the batch together with whether
+  results are as local as they are told, from nothing stored and all
+  exact, until nothing changes (`solveGroups`), and the classes that
+  such a function asks of its parameter the caller says of its own.
+- The result of a function of the batch whose results are exact is
+  something that the caller knows, as of any other (`knownStored`).
+
+Still in the way, as `-m=4` says: a method value (`f =
+p.parseImportSpec`) sends what its results may be loaded from to the
+heap when it is made, since nobody knows who calls it, and that is
+everything the parser holds; a structure that holds the shared
+`*token.File` is not local as a whole, which a function that stores
+only in other parts of it does not need.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

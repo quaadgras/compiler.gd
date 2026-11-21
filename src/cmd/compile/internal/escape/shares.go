@@ -549,6 +549,9 @@ type dynRoot struct {
 	// that stores in it.
 	pendFn  *ir.Name
 	pendArg int
+	// pendOwn: the argument is that parameter of the function whose
+	// dirt it is, which passes its bit for it on (groups.go).
+	pendOwn *location
 	stored  bool
 	// classKey and classArg: what flows to the membership root is
 	// that argument of a function of that class, which may store in

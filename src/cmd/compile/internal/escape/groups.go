@@ -176,21 +176,22 @@ func (e *escape) dirtOf() *location {
 // pendingDirt returns the membership root of the current function for
 // what it passes as the j'th argument to fn, a function of its batch:
 // dirt, if fn turns out to store in what that parameter reaches.
-func (e *escape) pendingDirt(fn *ir.Name, j int) *location {
+func (e *escape) pendingDirt(fn *ir.Name, j int, own *location) *location {
 	type key struct {
 		cur *ir.Func
 		fn  *ir.Name
 		j   int
+		own *location
 	}
 	if e.pending == nil {
 		e.pending = make(map[any]*location)
 	}
-	k := key{e.curfn, fn, j}
+	k := key{e.curfn, fn, j, own}
 	d := e.pending[k]
 	if d == nil {
 		d = e.memberRoot(e.curfn)
 		d.dynRoot.dirt = true
-		d.dynRoot.pendFn, d.dynRoot.pendArg = fn, j
+		d.dynRoot.pendFn, d.dynRoot.pendArg, d.dynRoot.pendOwn = fn, j, own
 		e.pending[k] = d
 	}
 	return d
@@ -389,14 +390,32 @@ func calleeStores(fn *ir.Name) uint16 {
 
 // isDirt reports whether the membership root x is dirt: what flows to
 // it may have had stored in it what nobody here knows.
-func isDirt(x *location) bool {
+func (b *batch) isDirt(x *location) bool {
+	return b.dirtOrStored(x, false)
+}
+
+// dirtOrStored is isDirt, or with stores whether anything at all may be
+// stored in what flows to x.
+func (b *batch) dirtOrStored(x *location, stores bool) bool {
 	d := x.dynRoot
 	if !d.dirt {
 		return false
 	}
 	if d.pendFn != nil {
 		f := d.pendFn.Func
-		if f == nil || d.pendArg >= 16 || f.StoresInto&(1<<d.pendArg) != 0 {
+		if f == nil || d.pendArg >= 16 {
+			return true
+		}
+		if l := d.pendOwn; !stores && l != nil && !l.reassigned && !l.addrtaken && !b.capturedAssigned(l) {
+			// The function called allocates what it stores as
+			// this function's caller says (its results are the
+			// caller's affair, and what it passes on to the
+			// functions that are only known when the program
+			// runs this function says of its own parameter:
+			// solveGroups).
+			return f.DirtyInto&(1<<d.pendArg) != 0
+		}
+		if f.StoresInto&(1<<d.pendArg) != 0 {
 			return true
 		}
 		// (What it passes on to a function that is only known when
@@ -419,6 +438,42 @@ func isDirt(x *location) bool {
 		return false
 	}
 	return true
+}
+
+// ownParam returns the location of the parameter of the current
+// function that the argument arg is, if it is one whose bit a call
+// passes on (noteCallArg, callBits).
+func (e *escape) ownParam(arg ir.Node) *location {
+	for {
+		switch x := arg.(type) {
+		case *ir.ParenExpr:
+			arg = x.X
+			continue
+		case *ir.ConvExpr:
+			if x.Op() == ir.OCONVNOP && x.X.Type().HasPointers() {
+				arg = x.X
+				continue
+			}
+		}
+		break
+	}
+	if t := arg.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
+		return nil
+	}
+	x, ok := arg.(*ir.Name)
+	if !ok || x.Op() != ir.ONAME || x.Curfn != e.curfn || x.IsClosureVar() || x.Canonical() != x {
+		return nil
+	}
+	if p := e.copyOf[x]; p != nil && x.Class == ir.PAUTO {
+		x = p
+	}
+	if x.Class != ir.PPARAM {
+		return nil
+	}
+	if paramBit(e.curfn, x) == 0 {
+		return nil
+	}
+	return e.oldLoc(x)
 }
 
 // dirtyHole returns k, or k and the dirt of the current function if arg
@@ -461,9 +516,13 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 		// What it does is not known yet: when the graph is solved,
 		// whether it stores in what the parameter reaches is, and
 		// that is all that its caller makes of it.
+		// If the argument is a parameter of this function, the
+		// call passes this function's bit for it on (callBits),
+		// and what matters is only whether the function called
+		// stores what its caller does not know.
 		for j, arg := range all {
 			if pointsToPointers(arg.Type()) {
-				set(j, e.pendingDirt(fn, j))
+				set(j, e.pendingDirt(fn, j, e.ownParam(arg)))
 			}
 		}
 		return groups
@@ -740,6 +799,43 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 		}
 	}
 
+	// And those of the parameters of the functions of the batch that
+	// a parameter is passed on to as itself: the function says them
+	// of its own parameter, since its caller cannot ask of the
+	// function that it calls.
+	for changed := true; changed; {
+		changed = false
+		for _, fn := range fns {
+			for i, f := range fn.Type().RecvParams() {
+				if i >= 16 || f.Nname == nil {
+					continue
+				}
+				l := b.oldLoc(f.Nname.(*ir.Name))
+				for _, g := range l.groups {
+					d := g.dynRoot
+					if g.curfn != fn || d.pendOwn == nil || d.pendFn == nil {
+						continue
+					}
+					params := d.pendFn.Type().RecvParams()
+					if d.pendArg >= len(params) || params[d.pendArg].Nname == nil {
+						continue
+					}
+					lc, _ := params[d.pendArg].Nname.(*ir.Name).Opt.(*location)
+					if lc == nil {
+						continue
+					}
+					for _, sl := range lc.shares.StoreLinks {
+						n := len(l.shares.StoreLinks)
+						l.shares.StoreLinks = addShareLink(l.shares.StoreLinks, sl.Key, int(sl.Arg))
+						if len(l.shares.StoreLinks) != n {
+							changed = true
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// In which parameters' structures a function stores: through a
 	// variable that the parameter flows to, or by a function that it
 	// passes it to; for one of the batch, until nothing changes.
@@ -762,6 +858,7 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 	for _, fn := range fns {
 		fn.ResultExact = true
 		fn.ResultDeep = 0
+		fn.DirtyInto = 0
 	}
 	b.storeRoot = make(map[*location]bool)
 	for _, sr := range b.storeRoots {
@@ -769,36 +866,47 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 			b.storeRoot[r] = true
 		}
 	}
+	// And what each function may store in its parameters' structures
+	// that its callers do not know, which for a function of the
+	// batch that is passed a parameter as itself depends on the same
+	// of that function, and on whether results are as local as they
+	// are told: none stores such a thing until one is found that
+	// does, with the conditions of the groups for all that is known
+	// so far.
+	round := 0
 	for changed := true; changed; {
 		changed = false
+		round++
 		b.solveConds()
 		for _, fn := range fns {
-			if !fn.ResultExact {
-				continue
-			}
-			if g := b.resGroups[fn]; g != nil {
-				c := b.cond(g)
-				if c.bad || c.from&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
-					if b.gd.Flag.LowerM >= 4 {
-						fmt.Printf("%s: the results of %v are not exact: %v (%s), %d links, %d stores, %d mixes\n", b.gd.FmtPos(fn.Pos()), fn, c.bad, c.why, len(c.links), len(c.stores), len(c.mixes))
+			if fn.ResultExact {
+				if g := b.resGroups[fn]; g != nil {
+					c := b.cond(g)
+					if c.bad || c.from&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
+						if b.gd.Flag.LowerM >= 4 {
+							fmt.Printf("%s: the results of %v are not exact: %v (%s), %d links, %d stores, %d mixes\n", b.gd.FmtPos(fn.Pos()), fn, c.bad, c.why, len(c.links), len(c.stores), len(c.mixes))
+						}
+						fn.ResultExact = false
+						changed = true
+					} else if deep := c.own >> 1; deep&^fn.ResultDeep != 0 {
+						// Stored in what parameters reach as well:
+						// the caller is told (ir.Func.ResultDeep).
+						fn.ResultDeep |= deep
+						changed = true
 					}
-					fn.ResultExact = false
-					changed = true
-				} else if deep := c.own >> 1; deep&^fn.ResultDeep != 0 {
-					// Stored in what parameters reach as well: the
-					// caller is told (ir.Func.ResultDeep).
-					fn.ResultDeep |= deep
-					changed = true
 				}
+			}
+			if d := b.dirtyInto(fn); d&^fn.DirtyInto != 0 {
+				if b.gd.Flag.LowerM >= 4 {
+					fmt.Printf("%s: round %d: %v may store what its caller does not know in the structures of its parameters %b (had %b)\n", b.gd.FmtPos(fn.Pos()), round, fn, d, fn.DirtyInto)
+				}
+				fn.DirtyInto |= d
+				changed = true
 			}
 		}
 	}
-
-	// What each function may store in its parameters' structures that
-	// its callers do not know.
-	for _, fn := range fns {
-		fn.DirtyInto = b.dirtyInto(fn)
-		if b.gd.Flag.LowerM >= 4 {
+	if b.gd.Flag.LowerM >= 4 {
+		for _, fn := range fns {
 			fmt.Printf("%s: %v may store what its caller does not know in the structures of its parameters %b; its results are exact: %v\n", b.gd.FmtPos(fn.Pos()), fn, fn.DirtyInto, fn.ResultExact)
 		}
 	}
@@ -990,6 +1098,9 @@ type groupInfo struct {
 	static  groupCond
 	conds   []*location
 	callees []*ir.Name
+	// pending are the roots of members that are passed, as this
+	// function's own parameters, to functions of the batch.
+	pending []*location
 }
 
 // condOnce computes the condition of g from the conditions that the
@@ -1005,6 +1116,13 @@ func (b *batch) condOnce(g *location) *groupCond {
 	c.links = slices.Clone(in.static.links)
 	c.stores = slices.Clone(in.static.stores)
 	c.mixes = slices.Clone(in.static.mixes)
+	for _, x := range in.pending {
+		if b.isDirt(x) {
+			c.bad = true
+			c.why = fmt.Sprintf("passed to %v, which may store in it what its caller does not know", x.dynRoot.pendFn)
+			return c
+		}
+	}
 	for _, callee := range in.callees {
 		// (What a function of the batch stores of its results in
 		// its parameters' structures, its caller's graph does not
@@ -1084,7 +1202,12 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			break
 		}
 		for _, x := range m.groups {
-			if isDirt(x) {
+			if x.dynRoot.pendOwn != nil {
+				// (Known when the batch is: condOnce.)
+				if !slices.Contains(in.pending, x) {
+					in.pending = append(in.pending, x)
+				}
+			} else if b.isDirt(x) {
 				fail("passed to what may store in it", m)
 			}
 			if x.dynRoot.classKey != "" {
@@ -1100,6 +1223,9 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			continue
 		}
 		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
+			if b.gd.Flag.LowerM >= 4 && !c.bad {
+				fmt.Printf("%s: a member of a group of %v is shared: %v (attributes %#x, only for %v, a call's result %v, transient %v, contents of %d, a root %v)\n", b.gd.FmtPos(fn.Pos()), fn, m.n, uint(m.attrs), m.shareOnly, m.callRes != nil, m.transient, len(m.owners), m.isDynRoot)
+			}
 			fail("shared", m)
 			break
 		}
@@ -1166,6 +1292,13 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 					fail("stored through a parameter that has no bit", m)
 				}
 			default:
+				if b.gd.Flag.LowerM >= 4 && !c.bad {
+					pos := fn.Pos()
+					if m.n != nil {
+						pos = m.n.Pos()
+					}
+					fmt.Printf("%s: %v in %v is stored where only its statement can tell: path %v, of the variable %v, plain %v, a call %v, of %v, deep %b, its variable a parameter %v, reassigned %v, captured %v, address taken %v\n", b.gd.FmtPos(pos), m.n, fn, d.path, d.name, d.plain, d.call != nil, r.curfn, d.deep, d.loc != nil && d.loc.param, d.loc != nil && d.loc.reassigned, d.loc != nil && d.loc.captured, d.loc != nil && d.loc.addrtaken)
+				}
 				fail("stored where only its statement can tell", m)
 			}
 		}
@@ -1219,7 +1352,7 @@ func (b *batch) storesInto(fn *ir.Func) uint16 {
 			continue
 		}
 		for _, g := range l.groups {
-			if g.curfn == fn && (g.dynRoot.stored || isDirt(g)) {
+			if g.curfn == fn && (g.dynRoot.stored || b.dirtOrStored(g, true)) {
 				st |= 1 << i
 				break
 			}
@@ -1286,7 +1419,7 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 		}
 		l := b.oldLoc(f.Nname.(*ir.Name))
 		for _, g := range l.groups {
-			if g.curfn == fn && isDirt(g) {
+			if g.curfn == fn && b.isDirt(g) {
 				// Passed on to what may.
 				dirty |= 1 << i
 				if b.gd.Flag.LowerM >= 4 {
@@ -1298,6 +1431,18 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 			continue
 		}
 		if bad && hasGroup(l, sr.q) || badQ && hasGroup(l, sr.qBad) {
+			if b.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: %v stores in what its parameter %d reaches what its caller does not know: through a variable %v (unknown %v, crossed %v), or one that is not derived from parameters %v (unknown %v, crossed %v)\n", b.gd.FmtPos(fn.Pos()), fn, i, bad && hasGroup(l, sr.q), sr.s.dynRoot.sawUnknown, sr.s.dynRoot.crossed, badQ && hasGroup(l, sr.qBad), sr.sBad.dynRoot.sawUnknown, sr.sBad.dynRoot.crossed)
+				for _, m := range sr.sBad.members {
+					if m.callRes != nil || isAlloc(m) && m.hasAttr(attrEscapes) {
+						pos := fn.Pos()
+						if m.n != nil {
+							pos = m.n.Pos()
+						}
+						fmt.Printf("\t%s: %v (a call's result %v)\n", b.gd.FmtPos(pos), m.n, m.callRes != nil)
+					}
+				}
+			}
 			dirty |= 1 << i
 		}
 	}
@@ -1321,7 +1466,17 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 		// the structures that the result is stored in (callBits):
 		// as an object that fn allocates.
 		callee := m.callRes.fn
-		if callee == nil || callee.Func == nil || b.inMutualBatch(callee) || !callee.Func.ResultExact || callee.Func.PoolResult {
+		if callee == nil || callee.Func == nil || !callee.Func.ResultExact {
+			return false
+		}
+		if b.inMutualBatch(callee) {
+			// (As far as is known so far: solveGroups. What it
+			// stores of its results in its parameters'
+			// structures, this function's graph does not have.)
+			if callee.Func.ResultDeep != 0 {
+				return false
+			}
+		} else if callee.Func.PoolResult {
 			return false
 		}
 		if len(m.dyn) == 0 && m.hasAttr(attrDynShares|attrDynSharesValue) {

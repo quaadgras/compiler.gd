@@ -126,6 +126,8 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	// are stored there, and whether by themselves (viaDirect).
 	via := filter == nil && root.dynRoot != nil && root.dynRoot.plain && root.dynRoot.loc != nil && root.dynRoot.loc.param && b.typedOn()
 	track := filter != nil || via
+	root.viagen = walkgen
+	root.viaF = nil
 	root.filtergen = walkgen
 	root.filterAt = filterOff
 	root.filterT = filter
@@ -234,6 +236,17 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		lraw := l.rawgen == walkgen
 		rawAddr := lraw && l.rawDerefs < 0
 		rawDerefs := max(l.rawDerefs, 0)
+		// ownResult: the walk came here through a result of l's
+		// function, from a call of it, and by no other way. Where
+		// the caller puts what the function returns is no place
+		// that the function can tell of (it is another call's, even
+		// if it is of the same function): the call says it, with
+		// the bit of its results, which what is returned goes by.
+		var lvia *ir.Func
+		if l.viagen == walkgen {
+			lvia = l.viaF
+		}
+		ownResult := lvia != nil && lvia == l.curfn && b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
 		// at is what the walk shares of l, and eff what it shares
 		// of what flows to l (typed.go).
 		at := filterOff
@@ -381,7 +394,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				if filter != nil && at != filterOff && eff != filterOff {
 					only = st
 				}
+				b.walkOwnResult = ownResult
 				b.noteParamShare(l, root, rawDerefs, only, !lshare || deepOnly, direct)
+				b.walkOwnResult = false
 			}
 			if root.hasAttr(attrMutates) {
 				l.paramEsc.AddMutator(b.gd, derefs)
@@ -391,7 +406,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 		}
 
-		if lraw && b.addDyn(l, root) {
+		if lraw && !ownResult && b.addDyn(l, root) {
 			enqueue(l)
 			for _, o := range l.owners {
 				if b.addDyn(o, l) {
@@ -518,7 +533,24 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					continue
 				}
 			}
+			// Through which function's result the walk comes to
+			// the source, if by none else.
+			var sv *ir.Func
+			switch {
+			case edge.retFlow:
+				sv = edge.src.curfn
+			case edge.argFlow || edge.src.curfn != l.curfn:
+			case lvia == l.curfn:
+				sv = lvia
+			}
 			closer := edge.src.walkgen != walkgen || edge.src.derefs > d
+			if edge.src.viagen != walkgen {
+				edge.src.viagen = walkgen
+				edge.src.viaF = sv
+			} else if edge.src.viaF != nil && edge.src.viaF != sv {
+				edge.src.viaF = nil
+				closer = true
+			}
 			if closer {
 				edge.src.walkgen = walkgen
 				edge.src.derefs = d

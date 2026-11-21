@@ -92,6 +92,8 @@ type location struct {
 	filtergen   uint32
 	filterAt    int8
 	filterT     *types.Type
+	viagen      uint32      // walkOne: see viaF
+	viaF        *ir.Func    // walkOne: the function whose result the walk came through to here, and has not left
 	rawgen      uint32      // walkOne: the walk that reached the location on a path with no read-only edge
 	rawDerefs   int         // walkOne: the least dereferences of such a path
 	plaingen    uint32      // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
@@ -272,6 +274,8 @@ type edge struct {
 	// result is no holder of the receiver by this edge (move.go).
 	recvRes bool
 	loose   bool // see hole.loose
+	retFlow bool // see hole.retFlow
+	argFlow bool
 }
 
 func (l *location) asHole() hole {
@@ -331,6 +335,13 @@ type hole struct {
 	// in what the destination leads to, not only be its value or one
 	// that it holds (typed.go).
 	loose bool
+	// retFlow: the flow is from the result of a function of the batch
+	// to the call that it is a result of; argFlow, from an argument
+	// to the parameter of such a function. What a walk comes to
+	// through the first, and not the second, is what the function
+	// returns to that call: where the caller puts it, the call says
+	// (solve.go, the bit of a call's results).
+	retFlow, argFlow bool
 }
 
 type note struct {
@@ -409,13 +420,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address

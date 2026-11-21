@@ -94,7 +94,9 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for _, f := range fns {
 				if e.inMutualBatch(f) {
 					for i, result := range f.Type().Results() {
-						e.expr(ks[i], result.Nname.(*ir.Name))
+						k := ks[i]
+						k.retFlow = true
+						e.expr(k, result.Nname.(*ir.Name))
 					}
 				}
 			}
@@ -776,7 +778,9 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 		if param.Nname == nil {
 			return e.discardHole()
 		}
-		return e.addr(param.Nname.(*ir.Name))
+		k := e.addr(param.Nname.(*ir.Name))
+		k.argFlow = true
+		return k
 	}
 
 	// Call to previously tagged function.

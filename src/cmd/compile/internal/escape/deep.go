@@ -222,6 +222,63 @@ func (b *batch) deriveFromParams(fn *ir.Func) {
 			}
 		}
 	}
+	// The variables that are copies of one parameter: all that such a
+	// variable is ever assigned is that parameter, or another copy
+	// of it (the receiver of a method that is inlined). An argument
+	// that is one is the parameter (noteCallArg, ownParam).
+	copyOf := make(map[*ir.Name]*ir.Name)
+	paramOf := func(n ir.Node) *ir.Name {
+		for {
+			switch x := n.(type) {
+			case *ir.ParenExpr:
+				n = x.X
+				continue
+			case *ir.ConvExpr:
+				if x.Op() == ir.OCONVNOP && x.X.Type() != nil && x.X.Type().HasPointers() && !x.X.Type().IsUnsafePtr() && !x.Type().IsUnsafePtr() {
+					n = x.X
+					continue
+				}
+			case *ir.Name:
+				if x.Op() != ir.ONAME {
+					return nil
+				}
+				if _, ok := paramBit[x]; ok {
+					return x
+				}
+				return copyOf[x]
+			}
+			return nil
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for name := range cand {
+			if copyOf[name] != nil || len(srcs[name]) == 0 {
+				continue
+			}
+			var p *ir.Name
+			for _, src := range srcs[name] {
+				q := paramOf(src)
+				if q == nil || p != nil && q != p {
+					p = nil
+					break
+				}
+				p = q
+			}
+			if p != nil {
+				copyOf[name] = p
+				changed = true
+			}
+		}
+	}
+	if len(copyOf) != 0 {
+		if b.copyOf == nil {
+			b.copyOf = make(map[*ir.Name]*ir.Name)
+		}
+		for name, p := range copyOf {
+			b.copyOf[name] = p
+		}
+	}
 	if b.derived == nil {
 		b.derived = make(map[*ir.Name]uint16)
 	}

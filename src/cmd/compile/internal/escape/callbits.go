@@ -203,6 +203,10 @@ func (e *escape) noteCallArg(cs *callSite, bit int, arg ir.Node) {
 		if name == nil {
 			return
 		}
+		if p := e.copyOf[name]; p != nil && name.Class == ir.PAUTO {
+			// A copy of a parameter is the parameter.
+			name = p
+		}
 		a.name = name
 		if name.Class == ir.PPARAM {
 			a.kind = argParam
@@ -529,7 +533,7 @@ func (b *batch) callBits1(apply bool) {
 			case argTracked:
 				ok, ret = b.staysPointee(a.name, locOf, make(map[*ir.Name]bool))
 			case argParam:
-				if l := a.loc; !l.reassigned && !l.addrtaken && !l.captured {
+				if l := a.loc; !l.reassigned && !l.addrtaken && !b.capturedAssigned(l) {
 					dyn = append(dyn, own(a.own, a.bit))
 				}
 				continue
@@ -702,6 +706,9 @@ func (b *batch) noteParamHeap(fn *ir.Func, ps *ir.ParamShare, root *location, de
 	if root.hasAttr(attrReturned) || root.paramOut {
 		ps.Results = 0xff
 	}
+	if b.walkOwnResult {
+		return
+	}
 	for _, r := range root.dyn {
 		b.noteParamRoot(fn, ps, r, derefs, false)
 	}
@@ -719,6 +726,10 @@ func (b *batch) noteParamShare(l, root *location, derefs int, only *types.Type, 
 	}
 	switch {
 	case root.isDynRoot:
+		if b.walkOwnResult {
+			// (What the caller does with what is returned.)
+			return
+		}
 		b.noteParamRoot(l.curfn, ps, root, derefs, direct)
 	case root.hasAttr(attrShares) && !blocked:
 		if b.gd.Flag.LowerM >= 4 && root != &b.shareLoc && root != &b.convShareLoc && root != &b.heapLoc && root != &b.checkLoc {
