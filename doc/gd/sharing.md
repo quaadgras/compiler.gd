@@ -835,16 +835,43 @@ masks of all the functions of the class, ORed
    reflect loads through a converted pointer is not memory made into a
    string (`typedByConstruction`); `%p` prints
    `internal/abi.Address(p)`, an integer of an address that exposes
-   nothing, so that the checks refuse to make a pointer of it. Left, all
-   in `internal/fmtsort.Sort`, which prints a map's keys in order:
-   `reflect.(*MapIter).Next` shares what the iterator holds;
-   `Value.Pointer` in the comparison exposes; and
-   `slices.SortStableFunc` calls its comparison in a function with type
-   parameters, where a call of a function whose signature has one reads
-   no word. `-gcflags=-m=4` prints every function that shares an
-   argument where it is called (`shares its argument`).
-   Also: reflect's allocations; the tag of an object that has several
-   words reads each word four times.
+   nothing, so that the checks refuse to make a pointer of it.
+
+   Then, for `internal/fmtsort.Sort`, which prints a map's keys in
+   order: its comparison compares `internal/abi.Address`es; reflect's
+   functions that iterate over a map are `//go:localargs`, a word of
+   the standard library's for a function that shares nothing of its
+   arguments whatever its body seems to do (they call the runtime's
+   map, whose code the graph does not follow); and a call of a variable
+   in a function with type parameters, of a function whose signature
+   has one, reads the word of a key with `?` for the types with a
+   shape, which the linker fills in from every class that the key may
+   stand for (`unify`). A parameter may have 16 links (`ast.Walk`'s
+   node has 11), and the linker writes one bit for each argument, set
+   if a function of the class may share it, so that a link is one test.
+   The links are exported in an order that does not depend on how the
+   graph was walked. A store through `&p.f` that a function is given is
+   a store in what `p` points to.
+
+   `fmt` and `ast.Walk` then share nothing of what they are given, and
+   the nodes of `go/parser` are still not local. What is left is of
+   another kind: `(*resolver).declare` stores a parameter (a node) in an
+   object that it reaches from another parameter (`ident.Obj.Decl =
+   decl`, with `ident` out of a slice). Only a store through a parameter
+   itself is followed (`ParamShare.Via`); of a deeper one nobody knows
+   which object takes the pointer, and it may be a shared one. And the
+   resolver is called through `Visitor.Visit`, a call that passes no
+   bits.
+
+   `-gcflags=-m=4` prints every function that shares an argument where
+   it is called (`shares its argument`), and what in a function shares
+   a parameter that nothing else explains (a store through a pointer
+   that is not a parameter, a container that leads to what is shared,
+   too many links). Those lines are printed when the package is
+   compiled, not when the build cache has it: use `go build -a
+   -gcflags=pkg=-m=4` with a `GOCACHE` of its own.
+
+   Also: reflect's allocations.
 1. Callees that are parameters: `each(head, func(it *item) {...})`
    makes what `head` leads to shared, since `each` passes it to a
    function it does not know. `each` could say "what `head` leads to
