@@ -5,6 +5,8 @@
 package escape
 
 import (
+	"fmt"
+
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -214,25 +216,149 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			if direct && len(fns) == 1 && !e.inMutualBatch(fns[0]) {
 				stores = calleeStores(fns[0])
 			}
+			// The arguments that the function passes on, with
+			// others, to functions that nobody knows: those that
+			// the caller's parameters do not reach are a group.
+			var mixInto uint16
+			var mixG *location
+			if direct && len(fns) == 1 && !e.inMutualBatch(fns[0]) && fns[0].Func != nil && e.deepOn() {
+				for _, ps := range fns[0].Func.ParamShares {
+					for _, l := range ps.MixLinks {
+						mixInto |= l.Into
+					}
+					for _, l := range ps.MixGroups {
+						mixInto |= l.Into
+					}
+				}
+				if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+					mixInto = 0
+				}
+				for j, arg := range all {
+					if j < 16 && mixInto&(1<<j) != 0 && pointsToPointers(arg.Type()) && e.deepMaskOf(arg) == 0 && mixG == nil {
+						mixG = e.memberRoot(e.curfn)
+						mixG.dynRoot.call, mixG.dynRoot.arg = call, -2
+					}
+				}
+			}
+			// A function that is only known when the program runs
+			// may store any of its arguments in what any other
+			// reaches: those that parameters of the caller reach
+			// are stored in what those reach, and the others are
+			// one group (groups.go).
+			var dynG *location
+			var dynQ uint16
+			dynN := 0
+			// (With no class to ask, the function mixes them.)
+			dynMixKey := dynKey
+			if dynMixKey == "" {
+				dynMixKey = mixUnknown
+			}
+			dynOn := len(fns) == 0 && e.deepOn() && !call.GoDefer
+			if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+				dynOn = false
+			}
+			if dynOn {
+				var list []ir.Node
+				if recvArg != nil {
+					list = append(list, recvArg)
+				}
+				list = append(list, args[:len(fntype.Params())]...)
+				for _, arg := range list {
+					if !pointsToPointers(arg.Type()) {
+						continue
+					}
+					dynN++
+					if m := e.deepMaskOf(arg); m != 0 {
+						dynQ |= m
+					} else if dynG == nil {
+						dynG = e.memberRoot(e.curfn)
+						dynG.dynRoot.call, dynG.dynRoot.arg = call, -1
+					}
+				}
+				if cs != nil {
+					cs.dynGroup = dynG
+				}
+			}
 			withGroup := func(k hole, j int, arg ir.Node) hole {
 				if k.dst == &e.blankLoc {
 					return k
 				}
-				if !direct || len(fns) != 1 {
-					if len(fns) == 0 && dynKey != "" {
-						// The word of the class says what the
-						// functions that it may be do: the
-						// argument's hole has it (dynamicArgHole),
-						// and the receiver's does here.
-						if j == 0 && recvArg != nil && call.Op() == ir.OCALLINTER {
-							return e.recvCallHole(k, call, arg)
-						}
+				if dynOn {
+					if !pointsToPointers(arg.Type()) {
 						return k
+					}
+					hs := []hole{k}
+					m := e.deepMaskOf(arg)
+					// Its own structure, for the bit of the call.
+					if m == 0 {
+						g := e.memberRoot(e.curfn)
+						g.dynRoot.call, g.dynRoot.arg = call, j
+						if cs != nil {
+							for len(cs.groups) <= j {
+								cs.groups = append(cs.groups, nil)
+							}
+							cs.groups[j] = g
+						}
+						hs = append(hs, g.asHole())
+					}
+					// And, if a function of the class stores one
+					// argument in what another reaches, all that
+					// the arguments reach: the class's word says
+					// whether one does. (These are no holders:
+					// whether the function keeps the pointer, for
+					// a hand-over, its mask says when it is
+					// called.) Where there is no class, one does.
+					if dynN > 1 {
+						if dynG != nil {
+							hs = append(hs, dynG.asHole())
+						}
+						place := uint8(ir.MixRecv)
+						switch {
+						case j == 0 && recvArg != nil && call.Op() == ir.OCALLINTER:
+						case call.Op() == ir.OCALLINTER:
+							place = uint8(j - 1)
+						default:
+							place = uint8(j)
+						}
+						// What is stored is where it is stored: the
+						// argument itself only if the function
+						// stores this one, and what it reaches, for
+						// what is stored in it afterwards, if the
+						// function stores any.
+						hs = append(hs, e.mixRoot(dynMixKey, place, false, dynG, dynQ, false).asHole())
+						hs = append(hs, e.mixRoot(dynMixKey, place, true, dynG, dynQ, false).asHole())
+					}
+					// Whether it may store what nobody here knows,
+					// its class's word says.
+					switch {
+					case j == 0 && recvArg != nil && call.Op() == ir.OCALLINTER:
+						hs = append(hs, e.recvClassHole(call, arg))
+					case dynKey != "" && call.Op() == ir.OCALLINTER:
+						hs = append(hs, e.classMarker(dynKey, j-1).asHole())
+					case dynKey != "" && recvArg == nil:
+						hs = append(hs, e.classMarker(dynKey, j).asHole())
+					default:
+						if e.gd.Flag.LowerM >= 4 {
+							fmt.Printf("%s: argument %d is dirt: a dynamic call without a class\n", e.gd.FmtPos(call.Pos()), j)
+						}
+						hs = append(hs, e.dirtOf().asHole())
+					}
+					if cs != nil {
+						cs.dynArgs = append(cs.dynArgs, dynArg{pos: j, mask: m})
+					}
+					return e.teeHole(hs...)
+				}
+				if !direct || len(fns) != 1 {
+					if e.gd.Flag.LowerM >= 4 && pointsToPointers(arg.Type()) {
+						fmt.Printf("%s: argument %d is dirt: not a direct call of one function\n", e.gd.FmtPos(call.Pos()), j)
 					}
 					return e.dirtyHole(k, arg)
 				}
 				if j < len(groups) && groups[j] != nil {
 					k = e.teeHole(k, groups[j].asHole())
+				}
+				if mixG != nil && j < 16 && mixInto&(1<<j) != 0 && pointsToPointers(arg.Type()) && e.deepMaskOf(arg) == 0 {
+					k = e.teeHole(k, mixG.asHole())
 				}
 				if j < 16 && stores&(1<<j) != 0 && e.deepOn() && pointsToPointers(arg.Type()) {
 					k = e.teeHole(k, e.storedBy().asHole())
@@ -242,11 +368,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
-				e.callArgs, e.argGroups = all, groups
+				e.callArgs, e.argGroups, e.mixGroup = all, groups, mixG
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst-1, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.argGroups, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, "", false, false, false, false
+				e.callArgs, e.argGroups, e.mixGroup, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, nil, "", false, false, false, false
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -262,11 +388,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for i := range fntype.Params() {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
-				e.callArgs, e.argGroups = all, groups
+				e.callArgs, e.argGroups, e.mixGroup = all, groups, mixG
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst+i, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.argGroups, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, "", false, false, false, false
+				e.callArgs, e.argGroups, e.mixGroup, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, nil, "", false, false, false, false
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
@@ -583,9 +709,6 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	if e.dynCall != nil && e.dynArg >= 0 {
 		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
 			e.noteKeptCheck(r, e.dynCall, arg)
-			if r.dynRoot.link == "" {
-				return e.dirtyHole(r.asHole(), arg)
-			}
 			return r.asHole()
 		}
 		// Or what the linker knows of all the functions that it may
@@ -594,9 +717,7 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 			return r.asHole()
 		}
 	}
-	// Nothing says what the function does with it, nor what it
-	// stores in what it reaches (groups.go).
-	return e.dirtyHole(e.heapHole(), arg)
+	return e.heapHole()
 }
 
 // mergedTagHole returns the hole for arg, the argument at paramIdx (-1

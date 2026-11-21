@@ -546,6 +546,24 @@ type dynRoot struct {
 	// what it reaches: the class's word says.
 	classKey string
 	classArg int
+	// mixKey: what flows to the root is passed, with other arguments,
+	// to a function of that class: if one of the class stores one
+	// argument in what another reaches, it is stored in what the
+	// group mixOther and the parameters of mixMask reach, or with
+	// mixBad where nobody knows (groups.go).
+	mixKey   string
+	mixOther *location
+	mixMask  uint16
+	mixBad   bool
+	mixFn    *ir.Func
+	// mixArg is the place of what flows to the root among the
+	// arguments of the call (ir.MixRecv for the receiver): the root
+	// matters only if a function of the class stores that one. With
+	// mixAny, the root is a membership root, for what the argument
+	// reaches, and matters if a function of the class stores another
+	// argument in that.
+	mixArg uint8
+	mixAny bool
 	// sawUnknown: a pointer that the graph does not follow flows to the
 	// membership root; crossed: so does something of another function
 	// of the batch that is neither an argument nor a recorded result.
@@ -864,6 +882,18 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		}
 		if d.call == nil && d.link != "" {
 			linked()
+			continue
+		}
+		if d.mixKey != "" {
+			if r.curfn != loc.curfn {
+				return nil
+			}
+			one := b.mixTerms([]*location{r}, pos)
+			if tag == nil {
+				tag = one
+			} else {
+				tag = binary(ir.OAND, tag, one)
+			}
 			continue
 		}
 		if d.cond != nil {

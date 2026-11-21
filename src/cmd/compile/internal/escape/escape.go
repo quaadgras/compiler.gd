@@ -160,6 +160,7 @@ type batch struct {
 	dynArg        int          // that argument's place
 	dynKey        string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
 	argGroups     []*location  // the membership roots of the arguments of the call whose argument's hole is made (groups.go)
+	mixGroup      *location    // the group of the arguments of that call that a function which it passes them on to may mix (groups.go)
 	recvArg       bool         // and that a method of its own may keep
 	recvAnyArg    bool         // whichever
 	checkCallsArg bool         // and a call that checks is one of them (ir.Func.KeptCalls)

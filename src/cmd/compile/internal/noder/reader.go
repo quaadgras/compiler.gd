@@ -1294,6 +1294,18 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.Deep = uint16(r.Len())
 				ps.DeepDerefs = uint8(r.Len())
 				if n := r.Len(); n != 0 {
+					ps.MixLinks = make([]ir.MixLink, n)
+					for j := range ps.MixLinks {
+						ps.MixLinks[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
+					}
+				}
+				if n := r.Len(); n != 0 {
+					ps.MixGroups = make([]ir.MixLink, n)
+					for j := range ps.MixGroups {
+						ps.MixGroups[j] = ir.MixLink{Key: r.String(), Arg: uint8(r.Len()), Into: uint16(r.Len()), Bad: r.Bool()}
+					}
+				}
+				if n := r.Len(); n != 0 {
 					ps.StoreLinks = make([]ir.ShareLink, n)
 					for j := range ps.StoreLinks {
 						ps.StoreLinks[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}

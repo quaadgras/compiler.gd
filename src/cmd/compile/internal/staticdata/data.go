@@ -320,7 +320,7 @@ func WriteFuncSyms(gd *base.Invocation) {
 			}
 			stores := uint16(ir.StoresAll)
 			if nam.Func != nil && len(shares) != 0 {
-				stores = nam.Func.StoresInto
+				stores = nam.Func.DirtyInto
 			}
 			addShareRecord(gd, sf, "F."+target.Name, key, nam.Type().RecvParams(), shares, stores)
 		}
@@ -507,9 +507,12 @@ func ShareRecords(gd *base.Invocation, fn *ir.Func) {
 			}
 			stores := uint16(ir.StoresAll)
 			if len(fn.ParamShares) != 0 {
-				stores = fn.StoresInto
+				stores = fn.DirtyInto
 			}
-			addShareRecord(gd, fn.LSym, "M."+fn.LSym.Name, key, t.Params(), shares, stores>>1)
+			all := fn.ParamShares
+			addShareRecordData(gd, fn.LSym, "M."+fn.LSym.Name, func() []byte {
+				return ir.ShareRecordOf(key, t.Params(), shares, stores>>1, all, 1, len(all) != 0)
+			})
 			// And of what it does with its receiver.
 			rkey, _ := ir.ShareKeyRecv(name, t)
 			var ps *ir.ParamShare
@@ -524,7 +527,7 @@ func ShareRecords(gd *base.Invocation, fn *ir.Func) {
 		if key, _ := ir.ShareKeyFunc(t); key != "" {
 			stores := uint16(ir.StoresAll)
 			if len(fn.ParamShares) != 0 {
-				stores = fn.StoresInto
+				stores = fn.DirtyInto
 			}
 			addShareRecord(gd, fn.LSym, "F."+fn.LSym.Name, key, t.Params(), fn.ParamShares, stores)
 		}

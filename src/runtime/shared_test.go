@@ -1793,7 +1793,9 @@ func TestSharedDeep(t *testing.T) {
 			t.Errorf("reader %d: %d local objects, want at least 8, in a structure that a method only reads", i, n)
 		}
 	}
-	// And to one of which a method with that name stores in it.
+	// And to one of which a method with that name stores in it an
+	// object that it allocates, as local as what it stores it in:
+	// the call passes its bits.
 	for i, w := range []deepWriter{deepSkips{}, deepMarks{}} {
 		n = runtime.CountLocalAllocs(func() {
 			root := deepBuild(3)
@@ -1801,10 +1803,26 @@ func TestSharedDeep(t *testing.T) {
 			deepResolve(root)
 			sum += deepCount(root)
 		})
-		if n != 0 {
-			t.Errorf("writer %d: %d local objects in a structure that a method may have stored in", i, n)
+		if n < 8 {
+			t.Errorf("writer %d: %d local objects, want at least 8, in a structure that a method stores its own objects in", i, n)
 		}
 	}
+	// And to one of which a method with that name stores in it what
+	// nobody knows where it is from, or stores it where another
+	// goroutine reaches it.
+	for i, w := range []deepSpoiler{deepSpoilsNot{}, deepPlants{}} {
+		n = runtime.CountLocalAllocs(func() {
+			root := deepBuild(3)
+			deepSpoil(w, root)
+			deepResolve(root)
+			sum += deepCount(root)
+		})
+		if n != 0 {
+			t.Errorf("spoiler %d: %d local objects in a structure that a method may have stored something unknown in", i, n)
+		}
+	}
+	go func() { done <- deepPlanted.decl == nil }()
+	<-done
 	if sum == 0 {
 		t.Errorf("no sum")
 	}
@@ -1840,3 +1858,19 @@ func deepRead(r deepReader, n *deepNode) int { return r.ReadDeep(n) }
 
 //go:noinline
 func deepWrite(w deepWriter, n *deepNode) { w.WriteDeep(n) }
+
+type deepSpoiler interface{ SpoilDeep(n *deepNode) }
+
+type deepSpoilsNot struct{}
+
+func (deepSpoilsNot) SpoilDeep(n *deepNode) {}
+
+// deepPlanted is an object that every goroutine reaches.
+var deepPlanted = new(deepObj)
+
+type deepPlants struct{}
+
+func (deepPlants) SpoilDeep(n *deepNode) { n.name.obj = deepPlanted }
+
+//go:noinline
+func deepSpoil(w deepSpoiler, n *deepNode) { w.SpoilDeep(n) }

@@ -1002,6 +1002,54 @@ That is the second half: the relations of a class's arguments in its
 word, and the bits of a call of a function that is only known when the
 program runs.
 
+**Functions that nobody knows at the call, second half** (done): a call
+of a function that is only known when the program runs passes bits, and
+the class's word says what its functions do with their arguments'
+structures.
+- The first half had a hole: a function that is only known when the
+  program runs may store one argument in what another reaches (a
+  visitor that keeps the node, or a node that is given the visitor), and
+  nothing said so. The stored argument then stayed local in a structure
+  that another goroutine reaches.
+- A function's record says, for each parameter, whether it is stored in
+  what another parameter reaches, and whether something is stored in
+  what it reaches (`ir.ShareMix`, from `ParamShare.Deep`, `Via`,
+  `MixLinks` and `MixGroups`), with the classes that it passes the
+  parameters on to together. The linker computes them for the class:
+  bit `ShareWordMixRecv` (the receiver is stored in another's),
+  `ShareWordMixArg`+k (argument k is), `ShareWordMixDstRecv` and
+  `ShareWordMixDst`+k (something is stored in the receiver's, in
+  argument k's), and `ShareWordMix` where nobody knows. The two
+  directions are apart because one bit for both made every structure
+  that is only read depend on what the others do.
+- At the call each argument flows to a mix root of its class and place
+  (`mixRoot`): it is where all the arguments of the call are (their
+  group, `dynG`) if the word says that it is stored in another's. Once
+  for the argument itself, and once for what it reaches, which is stored
+  with it if the function stores anything there. A function with such a
+  call says of its parameters which class decides (`ParamShare.MixLinks`
+  for the object, `MixGroups` for its structure).
+- The bits of the call: bit k+1 is set if what argument k reaches is
+  all local, which is its group's tag, or the caller's own bit if the
+  argument is derived from a parameter. So a method that is called
+  through an interface and stores in the tree that it is given allocates
+  what it stores as its caller says (`TestSharedDeep`, the writers); if
+  another method of that name plants something that its caller does not
+  know (`deepPlants`), the class's word says so and the structure is not
+  local.
+- Whether a function may store what nobody knows in an argument's
+  structure is asked of the class (`classMarker`, bits
+  `ShareWordStores`+k, from `ir.Func.DirtyInto`), and no longer assumed
+  of every call without a body.
+
+What this costs: closures that are passed to `ast.Inspect` had captured
+variables that were local, and are not now (`go/printer`'s tests: 5263
+local objects, 9807 before). `Inspect` calls `Visitor.Visit`, and of
+the five methods of that name `(*go/parser.resolver).Visit` says that it
+may store its receiver in what the node reaches. It does not: it is in
+one batch with the functions that walk for it, and a function of the
+same batch has no facts when its caller's graph is built. That is next.
+
 Open: the object file of a package (not what it exports) differs by one
 relocation in about one build in five when other packages are compiled
 at the same time; seen on `go/token` on 2026-11-21, not traced.

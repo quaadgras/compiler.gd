@@ -261,10 +261,17 @@ func (e *escape) deepMaskOf(n ir.Node) uint16 {
 // deepRoot returns the dynamic root of the current function for a
 // store in what its parameters of the mask reach: it has no path.
 func (e *escape) deepRoot(mask uint16) *location {
+	return e.deepRootOf(mask, false)
+}
+
+// deepRootOf is deepRoot; with marker, the root is no holder of what
+// flows to it: the function that may store it is only known when the
+// program runs, and says then whether it keeps it.
+func (e *escape) deepRootOf(mask uint16, marker bool) *location {
 	if mask == 0 || !e.deepOn() {
 		return nil
 	}
-	k := dynKey{0, fmt.Sprintf("deep %p %d", e.curfn, mask)}
+	k := dynKey{0, fmt.Sprintf("deep %p %d %v", e.curfn, mask, marker)}
 	if r := e.dynRoots[k]; r != nil {
 		return r
 	}
@@ -274,6 +281,7 @@ func (e *escape) deepRoot(mask uint16) *location {
 		attrs:     attrDynShares,
 		dynRoot:   &dynRoot{deep: mask},
 		isDynRoot: true,
+		marker:    marker,
 	}
 	e.allLocs = append(e.allLocs, r)
 	if e.dynRoots == nil {

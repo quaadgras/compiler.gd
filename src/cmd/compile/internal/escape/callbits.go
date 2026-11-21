@@ -57,6 +57,20 @@ type callSite struct {
 	// groups has, for each argument, the receiver first, its
 	// membership root if it has one (groups.go).
 	groups []*location
+	// For a call of a function that is only known when the program
+	// runs: the group of its arguments that are not reached from
+	// parameters of the caller, and its arguments that may point to
+	// what holds pointers.
+	dynGroup *location
+	dynArgs  []dynArg
+}
+
+// A dynArg is an argument of such a call: its place, the receiver
+// first, and the parameters of the caller that it is reached from, or
+// zero if it is in the call's group.
+type dynArg struct {
+	pos  int
+	mask uint16
 }
 
 type callArg struct {
@@ -461,6 +475,9 @@ func (b *batch) callBits1(apply bool) {
 			deep = cs.fn.Func.DeepBits
 		}
 		for j, g := range cs.groups {
+			if cs.fn == nil {
+				break
+			}
 			if g == nil || g.dynRoot.dirt || j+1 >= maxCallBits || deep&(1<<j) == 0 {
 				continue
 			}
@@ -469,8 +486,34 @@ func (b *batch) callBits1(apply bool) {
 			}
 		}
 
+		// A function that is only known when the program runs may
+		// read any bit for a store in what the argument reaches:
+		// each is set only if all that the argument reaches is
+		// local, which is so of what parameters of the caller
+		// reach if its own bits say it, and of the rest if the
+		// call's group is.
+		if cs.fn == nil && b.deepOn() {
+			for _, a := range cs.dynArgs {
+				if a.pos+1 >= maxCallBits {
+					continue
+				}
+				var t ir.Node
+				if a.mask != 0 {
+					t = b.ownBits(cs.curfn, a.mask<<1, pos)
+				} else if a.pos < len(cs.groups) && cs.groups[a.pos] != nil {
+					t = b.groupTag(cs.groups[a.pos], pos)
+				}
+				if t != nil {
+					dyn = append(dyn, binary(ir.OLSH, t, lit(int64(a.pos+1))))
+				}
+			}
+		}
+
 		// The arguments.
 		for _, a := range cs.args {
+			if cs.fn == nil && b.deepOn() {
+				break
+			}
 			if deep&(1<<(a.bit-1)) != 0 && a.kind != argParam {
 				continue
 			}
@@ -568,9 +611,9 @@ func setMinDerefs(p *uint8, derefs int) {
 // derefs times, is stored in the dynamic root r: through a parameter,
 // or where another goroutine may reach it.
 func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int) {
-	if d := r.dynRoot; d != nil && d.cond != nil {
+	if d := r.dynRoot; d != nil && (d.cond != nil || d.mixKey != "") {
 		// What the group needs is known when the graph is solved
-		// (groupParam).
+		// (groupParam, mixParam).
 		return
 	}
 	if d := r.dynRoot; d != nil && d.link != "" {
@@ -739,6 +782,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 		}
 		ps[i] = loc.shares
 		b.groupParam(&ps[i], loc)
+		b.mixParam(&ps[i], loc)
 		if b.gd.Flag.LowerM >= 4 && loc.hasAttr(attrShares|attrSharesValue) && ps[i].Share != 1 {
 			fmt.Printf("%s: the parameter %s of %v is itself where another goroutine reaches (attributes %#x)\n", b.gd.FmtPos(loc.n.Pos()), b.noteParam, fn, uint(loc.attrs))
 		}
@@ -783,6 +827,15 @@ func (b *batch) paramShares(fn *ir.Func) {
 			ps[i].Links = nil
 			ps[i].Deep = 0
 			ps[i].StoreLinks = nil
+			ps[i].MixLinks = nil
+			ps[i].MixGroups = nil
+		}
+	}
+	if b.gd.Flag.LowerM >= 4 {
+		for i, p := range ps {
+			if p.Share != 0 || p.Via != 0 || p.Deep != 0 || len(p.Links) != 0 || len(p.StoreLinks) != 0 || len(p.MixLinks) != 0 {
+				fmt.Printf("%s: parameter %d of %v: shared %d, stored through %b, in what %b reach, results %b, %d links, %d as a receiver, mixed %v, its structure %v\n", b.gd.FmtPos(fn.Pos()), i, fn, p.Share, p.Via, p.Deep, p.Results, len(p.Links), len(p.StoreLinks), p.MixLinks, p.MixGroups)
+			}
 		}
 	}
 	fn.ParamShares = ps
@@ -835,6 +888,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			tagKs = append(tagKs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.shareHole)...)
 		}
 		tagKs = append(tagKs, e.storeLinkHoles(ps)...)
+		tagKs = append(tagKs, e.mixLinkHoles(ps)...)
 		for _, l := range ps.Links {
 			// (Whether it must be in the heap, the tag and Heap say.)
 			if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
@@ -888,6 +942,60 @@ func (e *escape) storeLinkHoles(ps *ir.ParamShare) []hole {
 	return hs
 }
 
+// mixLinkHoles returns the holes for an argument of a parameter that
+// the function called passes on, with others, to functions that are
+// only known when the program runs: if one of those stores it in what
+// another argument reaches, the argument is stored in what the
+// arguments of the link's parameters reach, of which those that the
+// caller's own parameters do not reach are a group of the call
+// (e.mixGroup); and if one stores any, what the argument reaches may
+// have gained what those reach.
+func (e *escape) mixLinkHoles(ps *ir.ParamShare) []hole {
+	if !e.deepOn() || len(ps.MixLinks) == 0 && len(ps.MixGroups) == 0 {
+		return nil
+	}
+	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+		if len(ps.MixLinks) == 0 {
+			return nil
+		}
+		return []hole{e.shareHole()}
+	}
+	root := func(l ir.MixLink, anyArg bool) hole {
+		var q uint16
+		grouped, bad := false, l.Bad
+		for k := 0; k < 16; k++ {
+			if l.Into&(1<<k) == 0 {
+				continue
+			}
+			if k >= len(e.callArgs) {
+				bad = true
+				continue
+			}
+			if m := e.deepMaskOf(e.callArgs[k]); m != 0 {
+				q |= m
+			} else if pointsToPointers(e.callArgs[k].Type()) {
+				grouped = true
+			}
+		}
+		var other *location
+		if grouped {
+			other = e.mixGroup
+			if other == nil {
+				bad = true
+			}
+		}
+		return e.mixRoot(l.Key, l.Arg, anyArg, other, q, bad).asHole()
+	}
+	var hs []hole
+	for _, l := range ps.MixLinks {
+		hs = append(hs, root(l, false))
+	}
+	for _, l := range ps.MixGroups {
+		hs = append(hs, root(l, true))
+	}
+	return hs
+}
+
 // shareOnlyHoles returns the holes for an argument of the function fn's
 // parameter param that the function does not put in the heap: where
 // another goroutine may reach it, as the parameter says.
@@ -914,6 +1022,7 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)
 	}
 	hs = append(hs, e.storeLinkHoles(ps)...)
+	hs = append(hs, e.mixLinkHoles(ps)...)
 	for _, l := range ps.Links {
 		if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
 			hs = append(hs, r.asHole().shift(e.gd, int(l.Derefs)-1))
@@ -997,8 +1106,16 @@ func (b *batch) shareFlags(fn *ir.Func, i int, esc leaks) byte {
 		via &^= 1
 		fl |= ir.EscNoteViaRecv
 	}
-	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() || ps.Deep != 0 {
+	if ps.Share != 0 || ps.Results != 0 || esc.anyResult() {
 		return checked
+	}
+	if via != 0 || ps.Deep != 0 || len(ps.MixLinks) != 0 {
+		// Stored in what another argument points to or reaches: a
+		// caller that does not know which function this is takes
+		// its arguments for one structure, and passes the bits of
+		// that (groups.go). To one that reads the mask where it
+		// allocates, the argument is shared.
+		return fl&^(1|ir.EscNoteViaRecv) | ir.EscNoteLinked | checked
 	}
 	if len(ps.Links) != 0 {
 		// Not by itself, but the functions that it is passed on to
@@ -1276,6 +1393,33 @@ func (e *escape) linkRootOf(key string, arg int, heap bool) *location {
 // key shares its argument arg.
 func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
 	return b.linkTagOf(pos, key, arg, true, false)
+}
+
+// linkBit returns the expression of the bit n of the word of the class
+// key, or with not of its complement.
+func (b *batch) linkBit(pos src.XPos, key string, n int, not bool) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	sym := b.gd.Ctxt.LookupInit(ir.ShareWordPrefix+key, func(s *obj.LSym) {
+		s.WriteInt(b.gd.Ctxt, 0, 8, -1)
+		b.gd.Ctxt.Globl(s, 8, obj.DUPOK|obj.NOPTR)
+	})
+	var w ir.Node = ir.NewLinksymExpr(b.gd, pos, sym, types.Types[types.TUINT64])
+	c := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, w)
+	c.SetTypecheck(1)
+	x := binary(ir.OAND, binary(ir.ORSH, c, lit(int64(n))), lit(1))
+	if not {
+		x = binary(ir.OXOR, x, lit(1))
+	}
+	return x
 }
 
 // linkTagOf returns the expression that is 1 if no function of the

@@ -27,8 +27,9 @@ import (
 // mask (escmask.go): the masks of all the functions of the class, ORed.
 // What the linker writes is what compiled code asks, where it allocates:
 // bit k+1 is set if a function of the class may share its argument k,
-// and bit ShareWordStores+k if one may store in an object that the
-// argument reaches (escape's groups.go).
+// and bit ShareWordStores+k if one may store, in an object that the
+// argument reaches, what its caller does not know (ir.Func.DirtyInto;
+// escape's groups.go).
 //
 // The compiler writes the word with all bits set, so that a program
 // that is linked by something that does not know is safe, and a record
@@ -56,6 +57,24 @@ type ShareLink struct {
 // ShareWordStores is the first of the bits of a class's word that say
 // in which arguments' structures a function of the class may store.
 const ShareWordStores = 17
+
+// ShareWordMix is the bit of a class's word that says that a function
+// of the class may store one of its arguments, or its receiver, in
+// what another of them reaches. ShareWordMixRecv says that it may so
+// store its receiver, and bit ShareWordMixArg+k its argument k: what is
+// stored is where it is stored, and not the other way round.
+//
+// ShareWordMixDstRecv says that a function of the class may store
+// another argument in what its receiver reaches, and bit
+// ShareWordMixDst+k in what its argument k reaches: only such a
+// structure gains anything by the call.
+const (
+	ShareWordMixDstRecv = 16
+	ShareWordMix        = 32
+	ShareWordMixRecv    = 33
+	ShareWordMixArg     = 34
+	ShareWordMixDst     = 49
+)
 
 // MaxShareLinks is the number of links of a parameter over which it
 // counts as shared.
@@ -128,7 +147,10 @@ func ShareRecvRecord(key string, recv *types.Field, ps *ParamShare, stores bool)
 	var links []ShareLink
 	switch {
 	case !recv.Type.HasPointers():
-	case ps == nil || ps.Share != 0 || ps.Via&^1 != 0:
+	case ps == nil || ps.Share != 0:
+		// (Stored through another parameter, it is in the one
+		// structure that the caller of a function which nobody
+		// knows takes its arguments for.)
 		mask = 1<<1 | 1<<EscMaskShared | 1<<EscMaskViaRecv | 1<<EscMaskHeld
 	default:
 		links = ps.Links
@@ -177,6 +199,13 @@ func ShareKeyFunc(t *types.Type) (key string, wild bool) {
 // shorter): the mask, the key, and for each parameter that has links
 // and is not shared without them, the links.
 func ShareRecord(key string, params []*types.Field, shares []ParamShare, stores uint16) []byte {
+	return ShareRecordOf(key, params, shares, stores, shares, 0, len(shares) != 0)
+}
+
+// ShareRecordOf is ShareRecord for a function whose parameters, the
+// receiver first, say all: shares are those of params, which start at
+// first of them; known is whether anything is known of the function.
+func ShareRecordOf(key string, params []*types.Field, shares []ParamShare, stores uint16, all []ParamShare, first int, known bool) []byte {
 	var b []byte
 	b = binary.LittleEndian.AppendUint64(b, EscMaskBaseOf(params))
 	b = binary.AppendUvarint(b, uint64(len(key)))
@@ -199,12 +228,85 @@ func ShareRecord(key string, params []*types.Field, shares []ParamShare, stores 
 	}
 	b = binary.AppendUvarint(b, uint64(n))
 	b = append(b, deps...)
-	return appendStores(b, stores, len(params), func(i int) []ShareLink {
+	mix, src, mdeps, dst, ddeps := ShareMix(all, first, known)
+	return appendStoresMix(b, stores, len(params), func(i int) []ShareLink {
 		if i < len(shares) {
 			return append(shares[i].Links[:len(shares[i].Links):len(shares[i].Links)], shares[i].StoreLinks...)
 		}
 		return nil
-	})
+	}, mix, src, mdeps, dst, ddeps)
+}
+
+// ShareMix returns which of the parameters of a function it may store
+// in what another reaches, as appendStoresMix wants them: first is the
+// number of parameters before the function's arguments (1 for a method
+// that an interface calls). With known false, nobody knows.
+func ShareMix(all []ParamShare, first int, known bool) (mix bool, src uint16, deps []MixDep, dst uint16, dstDeps []MixDep) {
+	if !known {
+		return true, 0, nil, 0, nil
+	}
+	place := func(i int) (uint8, uint16, bool) {
+		if i < first {
+			return MixRecv, 1, true
+		}
+		if i-first >= EscMaskArgs {
+			return 0, 0, false
+		}
+		return uint8(i - first), 1 << (1 + i - first), true
+	}
+	// into marks the parameters of the mask as ones in whose
+	// structures another is stored: always, or if a function of the
+	// class key stores any argument in another's.
+	into := func(mask uint16, key string) {
+		for j := range all {
+			if j >= 16 || mask&(1<<j) == 0 {
+				continue
+			}
+			p, bit, ok := place(j)
+			switch {
+			case !ok:
+				mix = true
+			case key == "":
+				dst |= bit
+			default:
+				dstDeps = append(dstDeps, MixDep{Param: p, Key: key})
+			}
+		}
+	}
+	for i, ps := range all {
+		p, bit, ok := place(i)
+		if !ok {
+			if ps.Deep != 0 || ps.Via != 0 || len(ps.MixLinks) != 0 {
+				mix = true
+			}
+			continue
+		}
+		if other := (ps.Deep | ps.Via) &^ (1 << i); other != 0 {
+			src |= bit
+			into(other, "")
+		}
+		for _, l := range ps.MixLinks {
+			if l.Bad || l.Key == "?" {
+				src |= bit
+				into(l.Into&^(1<<i), "")
+				if l.Bad {
+					// (And nobody knows where else.)
+					mix = true
+				}
+				continue
+			}
+			deps = append(deps, MixDep{Param: p, Arg: l.Arg, Key: l.Key})
+			into(l.Into&^(1<<i), l.Key)
+		}
+		for _, l := range ps.MixGroups {
+			if l.Bad || l.Key == "?" {
+				dst |= bit
+				continue
+			}
+			dstDeps = append(dstDeps, MixDep{Param: p, Key: l.Key})
+		}
+	}
+	return mix, src, deps, dst, dstDeps
 }
 
 // StoresAll is the mask of a function that may store in what any of
@@ -216,6 +318,42 @@ const StoresAll = 1<<EscMaskArgs - 1
 // parameters the classes that it passes the parameter on to: it stores
 // in what the argument reaches if one of those does.
 func appendStores(b []byte, stores uint16, n int, links func(i int) []ShareLink) []byte {
+	return appendStoresMix(b, stores, n, links, false, 0, nil, 0, nil)
+}
+
+// A MixDep says that the parameter Param of a function (MixRecv for
+// its receiver) is stored in what another reaches if the argument Arg
+// of a function of the class Key is.
+type MixDep struct {
+	Param, Arg uint8
+	Key        string
+}
+
+// appendStoresMix is appendStores, and appends which of the function's
+// arguments it may store in what another reaches (bit 0 for the
+// receiver of a method, bit k+1 for the argument k; all with mix), and
+// the classes that it passes them on to with others.
+func appendStoresMix(b []byte, stores uint16, n int, links func(i int) []ShareLink, mix bool, src uint16, deps []MixDep, dst uint16, dstDeps []MixDep) []byte {
+	b = appendStores1(b, stores, n, links)
+	if mix {
+		src, dst = ^uint16(0), ^uint16(0)
+	}
+	for _, x := range []struct {
+		mask uint16
+		deps []MixDep
+	}{{src, deps}, {dst, dstDeps}} {
+		b = binary.AppendUvarint(b, uint64(x.mask))
+		b = binary.AppendUvarint(b, uint64(len(x.deps)))
+		for _, d := range x.deps {
+			b = append(b, d.Param, d.Arg)
+			b = binary.AppendUvarint(b, uint64(len(d.Key)))
+			b = append(b, d.Key...)
+		}
+	}
+	return b
+}
+
+func appendStores1(b []byte, stores uint16, n int, links func(i int) []ShareLink) []byte {
 	b = binary.AppendUvarint(b, uint64(stores&StoresAll))
 	var deps []byte
 	nd := 0

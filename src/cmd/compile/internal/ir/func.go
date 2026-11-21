@@ -875,6 +875,19 @@ func ContainsClosure(f, c *Func) bool {
 // A ParamShare is what a function does with a parameter, for which
 // goroutines reach what it points to (Func.ParamShares). The numbers of
 // dereferences are as in the escape tags, plus one: zero is none.
+// A MixLink is one of ParamShare.MixLinks.
+type MixLink struct {
+	Key string
+	// Arg is the parameter's place among the arguments of the call
+	// of that class, or MixRecv if it is the receiver.
+	Arg  uint8
+	Into uint16
+	Bad  bool
+}
+
+// MixRecv is MixLink.Arg for the receiver of a method of an interface.
+const MixRecv = 255
+
 type ParamShare struct {
 	// Share is the least number of dereferences of the parameter that
 	// give what flows to where another goroutine may reach it.
@@ -909,6 +922,17 @@ type ParamShare struct {
 	// only for what they store in what it reaches: its receivers.
 	// (Those of Links matter for that too.)
 	StoreLinks []ShareLink
+	// MixLinks are the functions that are only known when the program
+	// runs to which the parameter is passed with others: if a function
+	// of that class stores one of its arguments in what another
+	// reaches (the class's word says), the parameter is stored in what
+	// the parameters of Into reach, or, with Bad, where nobody knows.
+	MixLinks []MixLink
+	// MixGroups are those classes too, for what the parameter
+	// reaches: if a function of the class stores any argument in what
+	// another reaches, what the parameter reaches may have gained
+	// what the parameters of Into reach.
+	MixGroups []MixLink
 	// LinksFull is set, while the function is analysed, when there
 	// were more links than a parameter may have: it is shared then.
 	LinksFull bool

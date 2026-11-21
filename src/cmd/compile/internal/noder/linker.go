@@ -307,6 +307,20 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 		w.Len(int(ps.Heap))
 		w.Len(int(ps.Deep))
 		w.Len(int(ps.DeepDerefs))
+		w.Len(len(ps.MixLinks))
+		for _, l := range ps.MixLinks {
+			w.String(l.Key)
+			w.Len(int(l.Arg))
+			w.Len(int(l.Into))
+			w.Bool(l.Bad)
+		}
+		w.Len(len(ps.MixGroups))
+		for _, l := range ps.MixGroups {
+			w.String(l.Key)
+			w.Len(int(l.Arg))
+			w.Len(int(l.Into))
+			w.Bool(l.Bad)
+		}
 		w.Len(len(ps.StoreLinks))
 		for _, l := range ps.StoreLinks {
 			w.String(l.Key)

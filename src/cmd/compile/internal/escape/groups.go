@@ -73,6 +73,8 @@ type groupCond struct {
 	links []ir.ShareLink
 	// stores are those of which only what they store matters.
 	stores []ir.ShareLink
+	// mixes are the mix roots that a member flows to.
+	mixes []*location
 }
 
 func (b *batch) memberRoot(fn *ir.Func) *location {
@@ -158,6 +160,151 @@ func (e *escape) classMarker(key string, arg int) *location {
 		e.pending[k] = d
 	}
 	return d
+}
+
+// mixUnknown is the key of a mix root for a call that has no class:
+// nobody can ask, and the function is taken to mix its arguments.
+const mixUnknown = "?"
+
+// mixRoot returns the dynamic root of the current function for what is
+// passed as the argument at place arg, with other arguments, to a
+// function of the class key: see dynRoot.mixKey. It is no holder. With
+// any, it returns the membership root for what that argument reaches
+// (dynRoot.mixAny): it matters if a function of the class stores
+// something in what that argument reaches.
+func (e *escape) mixRoot(key string, arg uint8, anyArg bool, other *location, mask uint16, bad bool) *location {
+	type mkey struct {
+		cur    *ir.Func
+		key    string
+		arg    uint8
+		anyArg bool
+		other  *location
+		mask   uint16
+		bad    bool
+	}
+	if e.pending == nil {
+		e.pending = make(map[any]*location)
+	}
+	k := mkey{e.curfn, key, arg, anyArg, other, mask, bad}
+	r := e.pending[k]
+	if r == nil {
+		d := &dynRoot{mixKey: key, mixArg: arg, mixAny: anyArg, mixOther: other, mixMask: mask, mixBad: bad, mixFn: e.curfn}
+		if anyArg {
+			r = e.memberRoot(e.curfn)
+			d.group = true
+			r.dynRoot = d
+		} else {
+			r = &location{
+				curfn:     e.curfn,
+				loopDepth: 1,
+				attrs:     attrDynShares,
+				dynRoot:   d,
+				isDynRoot: true,
+				marker:    true,
+			}
+			e.allLocs = append(e.allLocs, r)
+		}
+		e.pending[k] = r
+	}
+	return r
+}
+
+// mixTerms returns the expression that is 1 if, for each of the mix
+// roots and of those that their others' members flow to in turn, no
+// function of the root's class stores one argument in what another
+// reaches, or what the root's others reach is local by itself. (A root
+// that is only reached through one whose class does not mix is asked
+// all the same: the expression is one term for each root, not one in
+// another, which grew without bound.)
+func (b *batch) mixTerms(roots []*location, pos src.XPos) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	seen := make(map[*location]bool)
+	todo := append([]*location(nil), roots...)
+	var tag ir.Node = lit(1)
+	for len(todo) > 0 {
+		m := todo[0]
+		todo = todo[1:]
+		if seen[m] {
+			continue
+		}
+		seen[m] = true
+		d := m.dynRoot
+		// 1 if no function of the class stores this argument, or
+		// for what it reaches any argument, in what another
+		// reaches.
+		var apart ir.Node = lit(0)
+		if d.mixKey != mixUnknown {
+			bit := ir.ShareWordMix
+			switch {
+			case d.mixAny && d.mixArg == ir.MixRecv:
+				bit = ir.ShareWordMixDstRecv
+			case d.mixAny && int(d.mixArg) < ir.EscMaskArgs:
+				bit = ir.ShareWordMixDst + int(d.mixArg)
+			case d.mixAny:
+			case d.mixArg == ir.MixRecv:
+				bit = ir.ShareWordMixRecv
+			case int(d.mixArg) < ir.EscMaskArgs:
+				bit = ir.ShareWordMixArg + int(d.mixArg)
+			}
+			apart = b.linkBit(pos, d.mixKey, bit, true)
+		}
+		var rest ir.Node
+		ok := !d.mixBad
+		if ok && d.mixOther != nil {
+			c := b.cond(d.mixOther)
+			if c.bad {
+				ok = false
+			} else {
+				rest = b.groupAtoms(d.mixOther, c, pos)
+				todo = append(todo, c.mixes...)
+			}
+		}
+		if ok && d.mixMask != 0 {
+			own := b.ownBits(d.mixFn, d.mixMask<<1, pos)
+			if rest == nil {
+				rest = own
+			} else {
+				rest = binary(ir.OAND, rest, own)
+			}
+		}
+		term := apart
+		if ok {
+			if rest == nil {
+				continue
+			}
+			term = binary(ir.OOR, apart, rest)
+		}
+		tag = binary(ir.OAND, tag, term)
+	}
+	return tag
+}
+
+// groupAtoms returns the expression of what the group g needs by
+// itself, without the mix roots that its members flow to.
+func (b *batch) groupAtoms(g *location, c *groupCond, pos src.XPos) ir.Node {
+	tag := b.ownBits(g.curfn, c.own, pos)
+	and := func(t ir.Node) {
+		n := ir.NewBinaryExpr(b.gd, pos, ir.OAND, tag, t)
+		n.SetType(types.Types[types.TUINTPTR])
+		n.SetTypecheck(1)
+		tag = n
+	}
+	for _, l := range c.links {
+		and(b.linkTagOf(pos, l.Key, int(l.Arg), true, true))
+	}
+	for _, l := range c.stores {
+		and(b.linkTagOf(pos, l.Key, int(l.Arg), false, true))
+	}
+	return tag
 }
 
 // storedBy returns the membership root of the current function for
@@ -283,6 +430,9 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 		}
 		switch {
 		case dirty&(1<<j) != 0:
+			if e.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: argument %d of %v is dirt: the callee says so\n", e.gd.FmtPos(call.Pos()), j, fn)
+			}
 			set(j, e.dirtOf())
 		case need&(1<<j) != 0 && e.deepMaskOf(arg) == 0:
 			g := e.memberRoot(e.curfn)
@@ -571,7 +721,7 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 				continue
 			}
 			if g := b.resGroups[fn]; g != nil {
-				if c := b.cond(g); c.bad || c.own&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 {
+				if c := b.cond(g); c.bad || c.own&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
 					fn.ResultExact = false
 					changed = true
 				}
@@ -732,7 +882,7 @@ func (b *batch) cond(g *location) *groupCond {
 func (b *batch) solveConds() {
 	var groups []*location
 	for _, l := range b.allLocs {
-		if d := l.dynRoot; d != nil && d.group && !d.dirt && !d.stored && d.classKey == "" && !b.storeRoot[l] {
+		if d := l.dynRoot; d != nil && d.group && !d.dirt && !d.stored && d.classKey == "" && !d.mixAny && !b.storeRoot[l] {
 			groups = append(groups, l)
 		}
 	}
@@ -741,12 +891,19 @@ func (b *batch) solveConds() {
 		g.index = i
 		b.conds[g] = new(groupCond)
 	}
+	n := len(groups)
+	for _, l := range b.allLocs {
+		if l.dynRoot != nil && l.dynRoot.mixKey != "" {
+			l.index = n
+			n++
+		}
+	}
 	for changed := true; changed; {
 		changed = false
 		for _, g := range groups {
 			c := b.condOnce(g)
 			old := b.conds[g]
-			if c.bad != old.bad || c.own != old.own || len(c.links) != len(old.links) || len(c.stores) != len(old.stores) {
+			if c.bad != old.bad || c.own != old.own || len(c.links) != len(old.links) || len(c.stores) != len(old.stores) || len(c.mixes) != len(old.mixes) {
 				changed = true
 			}
 			b.conds[g] = c
@@ -782,6 +939,7 @@ func (b *batch) condOnce(g *location) *groupCond {
 	}
 	c.links = slices.Clone(in.static.links)
 	c.stores = slices.Clone(in.static.stores)
+	c.mixes = slices.Clone(in.static.mixes)
 	for _, callee := range in.callees {
 		if !callee.Func.ResultExact {
 			c.bad = true
@@ -806,7 +964,14 @@ func (b *batch) condOnce(g *location) *groupCond {
 		for _, l := range c2.stores {
 			c.stores = addShareLink(c.stores, l.Key, int(l.Arg))
 		}
+		for _, m := range c2.mixes {
+			if m.dynRoot.mixOther != g && !slices.Contains(c.mixes, m) {
+				c.mixes = append(c.mixes, m)
+			}
+		}
 	}
+	// (In an order that does not depend on how the members came.)
+	slices.SortFunc(c.mixes, func(x, y *location) int { return x.index - y.index })
 	return c
 }
 
@@ -856,6 +1021,9 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			if x.dynRoot.classKey != "" {
 				c.stores = addShareLink(c.stores, x.dynRoot.classKey, x.dynRoot.classArg)
 			}
+			if x.dynRoot.mixAny && x.dynRoot.mixOther != g && !slices.Contains(c.mixes, x) {
+				c.mixes = append(c.mixes, x)
+			}
 		}
 		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
 			fail("shared", m)
@@ -898,6 +1066,10 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			switch {
 			case d == nil:
 				fail("stored where it cannot tell", m)
+			case d.mixKey != "":
+				if d.mixOther != g && r.curfn == fn && !slices.Contains(c.mixes, r) {
+					c.mixes = append(c.mixes, r)
+				}
 			case d.cond != nil:
 				if d.cond != g && !slices.Contains(in.conds, d.cond) {
 					in.conds = append(in.conds, d.cond)
@@ -992,6 +1164,13 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 		for _, m := range sr.s.members {
 			if !b.knownStored(fn, m) {
 				bad = true
+				if b.gd.Flag.LowerM >= 4 {
+					pos := fn.Pos()
+					if m.n != nil {
+						pos = m.n.Pos()
+					}
+					fmt.Printf("%s: %v stores what its caller does not know: %v (unknown %v, of %v, a call's result %v, escapes %v, attributes %#x, %d roots)\n", b.gd.FmtPos(pos), fn, m.n, m.unknown, m.curfn, m.callRes != nil, m.hasAttr(attrEscapes), uint(m.attrs), len(m.dyn))
+				}
 				break
 			}
 		}
@@ -1000,6 +1179,9 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 		// stores: only what is not an object of its own, or a
 		// pointer from elsewhere, is harmless.
 		if sr.s.dynRoot.sawUnknown || sr.s.dynRoot.crossed {
+			if b.gd.Flag.LowerM >= 4 && !bad {
+				fmt.Printf("%s: %v stores what its caller does not know: saw unknown %v, crossed %v\n", b.gd.FmtPos(fn.Pos()), fn, sr.s.dynRoot.sawUnknown, sr.s.dynRoot.crossed)
+			}
 			bad = true
 		}
 		badQ = sr.sBad.dynRoot.sawUnknown || sr.sBad.dynRoot.crossed
@@ -1019,6 +1201,9 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 			if g.curfn == fn && isDirt(g) {
 				// Passed on to what may.
 				dirty |= 1 << i
+				if b.gd.Flag.LowerM >= 4 {
+					fmt.Printf("%s: %v passes its parameter %d on to what may store in it (a function of its batch: %v)\n", b.gd.FmtPos(fn.Pos()), fn, i, g.dynRoot.pendFn)
+				}
 			}
 		}
 		if sr == nil {
@@ -1094,20 +1279,63 @@ func (b *batch) groupTag(g *location, pos src.XPos) ir.Node {
 	if c.bad {
 		return nil
 	}
-	tag := b.ownBits(g.curfn, c.own, pos)
-	and := func(t ir.Node) {
-		n := ir.NewBinaryExpr(b.gd, pos, ir.OAND, tag, t)
+	tag := b.groupAtoms(g, c, pos)
+	if len(c.mixes) != 0 {
+		n := ir.NewBinaryExpr(b.gd, pos, ir.OAND, tag, b.mixTerms(c.mixes, pos))
 		n.SetType(types.Types[types.TUINTPTR])
 		n.SetTypecheck(1)
 		tag = n
 	}
-	for _, l := range c.links {
-		and(b.linkTagOf(pos, l.Key, int(l.Arg), true, true))
-	}
-	for _, l := range c.stores {
-		and(b.linkTagOf(pos, l.Key, int(l.Arg), false, true))
-	}
 	return tag
+}
+
+// mixParam adds to ps, of the parameter at l, the mix roots that it
+// flows to: what the parameter is stored in if a function of the root's
+// class stores it in what another argument reaches (MixLinks), and what
+// it reaches may have gained if one stores any (MixGroups).
+func (b *batch) mixParam(ps *ir.ParamShare, l *location) {
+	if !b.deepOn() {
+		return
+	}
+	link := func(d *dynRoot) ir.MixLink {
+		ml := ir.MixLink{Key: d.mixKey, Arg: d.mixArg, Into: d.mixMask, Bad: d.mixBad}
+		if o := d.mixOther; o != nil && !ml.Bad {
+			c := b.cond(o)
+			if c.bad || c.own&1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
+				ml.Bad = true
+			} else {
+				ml.Into |= c.own >> 1
+			}
+		}
+		return ml
+	}
+	add := func(list []ir.MixLink, ml ir.MixLink) []ir.MixLink {
+		for i := range list {
+			if x := &list[i]; x.Key == ml.Key && x.Arg == ml.Arg {
+				x.Into |= ml.Into
+				x.Bad = x.Bad || ml.Bad
+				return list
+			}
+		}
+		list = append(list, ml)
+		slices.SortFunc(list, func(x, y ir.MixLink) int {
+			if c := strings.Compare(x.Key, y.Key); c != 0 {
+				return c
+			}
+			return int(x.Arg) - int(y.Arg)
+		})
+		return list
+	}
+	for _, r := range l.dyn {
+		if d := r.dynRoot; d != nil && d.mixKey != "" && !d.mixAny && r.curfn == l.curfn {
+			ps.MixLinks = add(ps.MixLinks, link(d))
+		}
+	}
+	for _, r := range l.groups {
+		if d := r.dynRoot; d.mixAny && r.curfn == l.curfn {
+			ps.MixGroups = add(ps.MixGroups, link(d))
+		}
+	}
 }
 
 // groupParam adds to ps, of the parameter at l, what the conditions
@@ -1123,7 +1351,9 @@ func (b *batch) groupParam(ps *ir.ParamShare, l *location) {
 			continue
 		}
 		c := b.cond(d.cond)
-		if c.bad {
+		if c.bad || len(c.mixes) != 0 {
+			// (A structure of the function's that may be
+			// mixed with others: not said to the caller yet.)
 			setMinDerefs(&ps.Share, 0)
 			continue
 		}

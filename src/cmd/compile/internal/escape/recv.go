@@ -339,19 +339,16 @@ func (b *batch) methodKeepsLocal(t *types.Type, sym *types.Sym) bool {
 	return ps.Share == 0 && ps.Via&^1 == 0
 }
 
-// recvCallHole returns k, the hole of the receiver of the call of a
-// method of an interface, with a membership root by which the
-// methods of that name are asked for what they store in what the
-// receiver reaches, or it is the dirt of the function if nobody can ask
-// (groups.go). Whether they share it, its conversion answered.
-func (e *escape) recvCallHole(k hole, call *ir.CallExpr, arg ir.Node) hole {
-	if !e.deepOn() || !pointsToPointers(arg.Type()) {
-		return k
-	}
+// recvClassHole returns the hole by which the receivers of the methods
+// with the name of the method that call is of are asked for what they
+// store in what the receiver arg reaches, or the dirt of the function
+// if nobody can ask (groups.go). Whether they share it, its conversion
+// answered.
+func (e *escape) recvClassHole(call *ir.CallExpr, arg ir.Node) hole {
 	if sel, ok := call.Fun.(*ir.SelectorExpr); ok && sel.Op() == ir.ODOTINTER {
 		if key, wild := ir.ShareKeyRecv(sel.Sel.Name, sel.Type()); key != "" && !wild {
-			return e.teeHole(k, e.classMarker(key, 0).asHole())
+			return e.classMarker(key, 0).asHole()
 		}
 	}
-	return e.dirtyHole(k, arg)
+	return e.dirtOf().asHole()
 }
