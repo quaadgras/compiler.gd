@@ -129,6 +129,7 @@ type batch struct {
 	// Dynamic roots (shares.go): by statement and path, the statements
 	// that are one plain assignment, and those with a call.
 	dynRoots      map[dynKey]*location
+	noteParam     string // -m=4: the parameter that noteParamRoot is told of
 	simpleStmts   map[int32]bool
 	stmtCalls     map[int32]bool
 	calls         []*callSite      // callbits.go

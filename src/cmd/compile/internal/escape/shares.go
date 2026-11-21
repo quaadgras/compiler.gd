@@ -523,7 +523,7 @@ type dynRoot struct {
 
 // maxDyn is the number of dynamic roots of a location over which it
 // counts as shared.
-const maxDyn = 8
+const maxDyn = 24
 
 func (e *escape) noteSimpleStmt() {
 	if e.simpleStmts == nil {

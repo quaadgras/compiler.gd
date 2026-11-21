@@ -49,7 +49,7 @@ type shareDep struct {
 
 type shareRec struct {
 	key  string
-	sig  *shareSig // of a pattern
+	sig  *shareSig
 	mask uint64
 	deps []shareDep
 }
@@ -122,26 +122,29 @@ func (p *shareSig) wild() bool {
 	return false
 }
 
-// matches reports whether the pattern p stands for the key k. With
-// anyKind, a method stands for the function value that is made of it.
-func (p *shareSig) matches(k *shareSig, anyKind bool) bool {
-	if p.kind != k.kind {
-		if !anyKind || p.kind != 'M' || k.kind != 'F' {
+// unify reports whether the key k, of a word, and the key r, of a
+// function's record, may be of one class: they are the same but where
+// one of them has a type with a shape, which stands for any type. With
+// anyKind, a method is also a function value, the one that is made of
+// it.
+func (k *shareSig) unify(r *shareSig, anyKind bool) bool {
+	if k.kind != r.kind {
+		if !anyKind || k.kind != 'F' || r.kind != 'M' {
 			return false
 		}
-	} else if p.name != k.name {
+	} else if k.name != r.name {
 		return false
 	}
-	if len(p.params) != len(k.params) || len(p.results) != len(k.results) {
+	if len(k.params) != len(r.params) || len(k.results) != len(r.results) {
 		return false
 	}
-	for i, s := range p.params {
-		if s != "?" && s != k.params[i] {
+	for i, s := range k.params {
+		if s != "?" && r.params[i] != "?" && s != r.params[i] {
 			return false
 		}
 	}
-	for i, s := range p.results {
-		if s != "?" && s != k.results[i] {
+	for i, s := range k.results {
+		if s != "?" && r.results[i] != "?" && s != r.results[i] {
 			return false
 		}
 	}
@@ -245,7 +248,7 @@ func (ctxt *Link) shareMasks() {
 
 	// The functions of each class, and the patterns.
 	byKey := make(map[string][]*shareRec)
-	var patterns []*shareRec
+	var patterns, concrete []*shareRec
 	bySig := make(map[string][]*shareRec) // the methods, by what follows the name
 	keys := make(map[string]bool)
 	for _, s := range recSyms {
@@ -258,10 +261,11 @@ func (ctxt *Link) shareMasks() {
 		if sig == nil {
 			return
 		}
+		r.sig = sig
 		if sig.wild() {
-			r.sig = sig
 			patterns = append(patterns, r)
 		} else {
+			concrete = append(concrete, r)
 			byKey[r.key] = append(byKey[r.key], r)
 			keys[r.key] = true
 			if sig.kind == 'M' {
@@ -292,17 +296,24 @@ func (ctxt *Link) shareMasks() {
 			c.all = true
 			continue
 		}
-		if sig.kind == 'F' {
-			if madeFuncs {
-				c.all = true
-				continue
+		if sig.kind == 'F' && madeFuncs {
+			c.all = true
+			continue
+		}
+		if sig.wild() {
+			// The key of a call in a function with type
+			// parameters: every class that it may stand for.
+			c.recs = nil
+			for _, r := range concrete {
+				if sig.unify(r.sig, methodValues) {
+					c.recs = append(c.recs, r)
+				}
 			}
-			if methodValues {
-				c.recs = append(c.recs[:len(c.recs):len(c.recs)], bySig[key[2:]]...)
-			}
+		} else if sig.kind == 'F' && methodValues {
+			c.recs = append(c.recs[:len(c.recs):len(c.recs)], bySig[key[2:]]...)
 		}
 		for _, p := range patterns {
-			if p.sig.matches(sig, methodValues) {
+			if sig.unify(p.sig, methodValues) {
 				c.recs = append(c.recs[:len(c.recs):len(c.recs)], p)
 			}
 		}
@@ -347,12 +358,25 @@ func (ctxt *Link) shareMasks() {
 
 	for _, w := range words {
 		c := classes[w.key]
+		// What compiled code reads: bit k+1 is set if a function of
+		// the class may share its argument k, which is so if it
+		// keeps it where another goroutine reaches, or in what its
+		// receiver points to, which the caller does not know.
+		var word uint64
+		for arg := 0; arg < shareMaskArgs; arg++ {
+			if shareMaskShares(c.mask, arg) {
+				word |= 1 << (1 + arg)
+			}
+		}
+		if c.mask&1 != 0 {
+			word = ^uint64(0)
+		}
 		data := make([]byte, 8)
-		ctxt.Arch.ByteOrder.PutUint64(data, c.mask)
+		ctxt.Arch.ByteOrder.PutUint64(data, word)
 		sb := ldr.MakeSymbolUpdater(w.s)
 		sb.SetData(data)
 		if ctxt.Debugvlog > 1 {
-			ctxt.Logf("sharemask %s: %#x of %d functions\n", w.key, c.mask, len(c.recs))
+			ctxt.Logf("sharemask %s: %#x (mask %#x) of %d functions\n", w.key, word, c.mask, len(c.recs))
 		}
 	}
 	if ctxt.Debugvlog != 0 {

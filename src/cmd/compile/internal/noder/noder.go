@@ -345,7 +345,7 @@ func (p *noder) pragma(gd *base.Invocation, pos syntax.Pos, blankLine bool, text
 		if !gd.Flag.CompilingRuntime && flag&runtimePragmas != 0 {
 			p.error(syntax.Error{Pos: pos, Msg: fmt.Sprintf("//%s only allowed in runtime", verb)})
 		}
-		if flag == ir.UintptrKeepAlive && !gd.Flag.Std {
+		if (flag == ir.UintptrKeepAlive || flag == ir.LocalArgs) && !gd.Flag.Std {
 			p.error(syntax.Error{Pos: pos, Msg: fmt.Sprintf("//%s is only allowed in the standard library", verb)})
 		}
 		if flag == 0 && !allowedStdPragmas[verb] && gd.Flag.Std {

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"go/constant"
 	"internal/abi"
+	"slices"
+	"strings"
 
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
@@ -528,6 +530,10 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 			ps.Links = append(ps.Links, ir.ShareLink{Key: d.link, Arg: uint8(d.arg), Derefs: uint8(v)})
 			return
 		}
+		if b.gd.Flag.LowerM >= 4 {
+			fmt.Printf("%s: the parameter %s of %v is shared: it is passed to more than %d kinds of functions that are only known when the program runs\n", b.gd.FmtPos(fn.Pos()), b.noteParam, fn, ir.MaxShareLinks)
+		}
+		ps.LinksFull = true
 		setMinDerefs(&ps.Share, derefs)
 		return
 	}
@@ -540,6 +546,21 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 			}
 		}
 	}
+	if b.gd.Flag.LowerM >= 4 {
+		what := "a container that is only known when the program runs"
+		if d := r.dynRoot; d != nil && d.call != nil {
+			what = fmt.Sprintf("a call of a function that is only known when the program runs, %v", d.call)
+		} else if d != nil && d.path != nil {
+			what = fmt.Sprintf("a store through %v", d.path)
+		}
+		pos := fn.Pos()
+		if d := r.dynRoot; d != nil && d.call != nil {
+			pos = d.call.Pos()
+		} else if d != nil && d.path != nil {
+			pos = d.path.Pos()
+		}
+		fmt.Printf("%s: the parameter %s of %v is shared by %s (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, fn, what, derefs)
+	}
 	setMinDerefs(&ps.Share, derefs)
 }
 
@@ -548,6 +569,13 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 // from where that location flows stop there.
 func (b *batch) noteParamHeap(fn *ir.Func, ps *ir.ParamShare, root *location, derefs int) {
 	if root.hasAttr(attrSharesValue | attrSharesDeep) {
+		if b.gd.Flag.LowerM >= 4 {
+			pos := fn.Pos()
+			if root.n != nil {
+				pos = root.n.Pos()
+			}
+			fmt.Printf("%s: the parameter %s of %v is shared by what it is stored in, %s, which holds or leads to what is shared (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, fn, b.explainLoc(root), derefs)
+		}
 		setMinDerefs(&ps.Share, derefs)
 	}
 	if root.hasAttr(attrReturned) || root.paramOut {
@@ -565,10 +593,20 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 		return
 	}
 	ps := &l.shares
+	if b.gd.Flag.LowerM >= 4 && l.n != nil {
+		b.noteParam = fmt.Sprint(l.n)
+	}
 	switch {
 	case root.isDynRoot:
 		b.noteParamRoot(l.curfn, ps, root, derefs)
 	case root.hasAttr(attrShares):
+		if b.gd.Flag.LowerM >= 4 && root != &b.shareLoc && root != &b.convShareLoc && root != &b.heapLoc && root != &b.checkLoc {
+			pos := l.curfn.Pos()
+			if root.n != nil {
+				pos = root.n.Pos()
+			}
+			fmt.Printf("%s: the parameter %s of %v flows to %s, which another goroutine reaches (dereferenced %d times)\n", b.gd.FmtPos(pos), b.noteParam, l.curfn, b.explainLoc(root), derefs)
+		}
 		setMinDerefs(&ps.Share, derefs)
 	case root.paramOut && root.curfn == l.curfn && !root.hasAttr(attrEscapes):
 		if ri := root.resultIndex - 1; ri < numEscResults && ri < 8 {
@@ -628,7 +666,13 @@ func (b *batch) paramShares(fn *ir.Func) {
 			continue
 		}
 		loc := b.oldLoc(f.Nname.(*ir.Name))
+		if b.gd.Flag.LowerM >= 4 {
+			b.noteParam = fmt.Sprint(loc.n)
+		}
 		ps[i] = loc.shares
+		if b.gd.Flag.LowerM >= 4 && loc.hasAttr(attrShares|attrSharesValue) && ps[i].Share != 1 {
+			fmt.Printf("%s: the parameter %s of %v is itself where another goroutine reaches (attributes %#x)\n", b.gd.FmtPos(loc.n.Pos()), b.noteParam, fn, uint(loc.attrs))
+		}
 		if loc.hasAttr(attrShares | attrSharesValue) {
 			// What the parameter holds is reached.
 			setMinDerefs(&ps[i].Share, 0)
@@ -637,6 +681,37 @@ func (b *batch) paramShares(fn *ir.Func) {
 			// The variable is in the heap.
 			b.noteParamHeap(fn, &ps[i], loc, 0)
 			setMinDerefs(&ps[i].Heap, 0)
+		}
+	}
+	// The links in an order that does not depend on how the graph was
+	// walked: they are in what the package exports.
+	for i := range ps {
+		p := &ps[i]
+		if p.LinksFull {
+			// Which of them there was room for depends on it too.
+			setMinDerefs(&p.Share, 0)
+			p.Links, p.LinksFull = nil, false
+			continue
+		}
+		if len(p.Links) > 1 {
+			p.Links = slices.Clone(p.Links)
+			slices.SortFunc(p.Links, func(a, b ir.ShareLink) int {
+				if c := strings.Compare(a.Key, b.Key); c != 0 {
+					return c
+				}
+				return int(a.Arg) - int(b.Arg)
+			})
+		}
+	}
+	if fn.Pragma&ir.LocalArgs != 0 {
+		// The standard library says that the function shares
+		// nothing: it calls into the runtime, whose code does with
+		// pointers what the graph does not follow, for something
+		// that the language defines (a map's iteration). Where its
+		// parameters are stored, and what it returns, stand.
+		for i := range ps {
+			ps[i].Share = 0
+			ps[i].Links = nil
 		}
 	}
 	fn.ParamShares = ps
@@ -771,6 +846,14 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 			if name, ok := x.X.(*ir.Name); ok && x.Op() == ir.OADDR && name.Op() == ir.ONAME && name.Curfn == e.curfn &&
 				(name.Class == ir.PAUTO || name.Class == ir.PPARAM) && !name.IsClosureVar() && name.Canonical() == name {
 				return e.oldLoc(name).asHole()
+			}
+			// The address of a part of what a pointer points to
+			// (&p.f): a store in that object.
+			if x.Op() == ir.OADDR {
+				if q := addrThrough(x); q != nil {
+					p = q
+					continue
+				}
 			}
 		}
 		break
@@ -1037,9 +1120,19 @@ func (e *escape) linkKey(call *ir.CallExpr) string {
 		if t := call.Fun.Type(); t != nil && t.Recv() == nil {
 			key, wild = ir.ShareKeyFunc(t)
 		}
-	}
-	if wild {
-		return ""
+		if wild {
+			// A key with a shape stands for every class that it
+			// matches, which the linker finds. But a function with
+			// type parameters also calls the methods of its type
+			// arguments as functions, which it has from its
+			// dictionary, and those are in no class of function
+			// values: only what a variable of the program holds is
+			// asked about.
+			name, _ := e.purePath(call.Fun)
+			if name == nil || name.AutoTemp() || name.Sym() == nil || name.Sym().Name == typecheck.LocalDictName {
+				return ""
+			}
+		}
 	}
 	return key
 }
@@ -1084,9 +1177,7 @@ func (e *escape) linkRootOf(key string, arg int, heap bool) *location {
 }
 
 // linkTag returns the expression that is 1 if no function of the class
-// key shares its argument arg: it does not keep it, or keeps it where
-// no other goroutine reaches, and not in what its receiver points to,
-// which nobody knows here.
+// key shares its argument arg.
 func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	lit := func(v int64) ir.Node {
@@ -1113,7 +1204,8 @@ func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
 		}
 		return binary(ir.OAND, binary(ir.ORSH, c, lit(int64(n))), lit(1))
 	}
-	not := func(x ir.Node) ir.Node { return binary(ir.OXOR, x, lit(1)) }
-	stays := binary(ir.OAND, not(bit(ir.EscMaskShared+arg)), not(bit(ir.EscMaskViaRecv+arg)))
-	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+arg)), stays))
+	// The linker's word has one bit for the argument: set if a function
+	// of the class may share it (cmd/link/internal/ld/sharemask.go).
+	// The word that the compiler writes has all bits set.
+	return binary(ir.OXOR, bit(1+arg), lit(1))
 }

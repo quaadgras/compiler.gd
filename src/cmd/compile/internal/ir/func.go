@@ -876,4 +876,7 @@ type ParamShare struct {
 	// another goroutine reaches it if one of them shares its argument,
 	// which the linker knows (sharelink.go).
 	Links []ShareLink
+	// LinksFull is set, while the function is analysed, when there
+	// were more links than a parameter may have: it is shared then.
+	LinksFull bool
 }

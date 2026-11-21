@@ -10,6 +10,7 @@ package fmtsort
 
 import (
 	"cmp"
+	"internal/abi"
 	"reflect"
 	"slices"
 )
@@ -100,12 +101,14 @@ func compare(aVal, bVal reflect.Value) int {
 			return -1
 		}
 	case reflect.Pointer, reflect.UnsafePointer:
-		return cmp.Compare(aVal.Pointer(), bVal.Pointer())
+		// (Addresses to compare, not to make pointers of again.)
+		return cmp.Compare(abi.Address(aVal.UnsafePointer()), abi.Address(bVal.UnsafePointer()))
 	case reflect.Chan:
 		if c, ok := nilCompare(aVal, bVal); ok {
 			return c
 		}
-		return cmp.Compare(aVal.Pointer(), bVal.Pointer())
+		// (Addresses to compare, not to make pointers of again.)
+		return cmp.Compare(abi.Address(aVal.UnsafePointer()), abi.Address(bVal.UnsafePointer()))
 	case reflect.Struct:
 		for i := 0; i < aVal.NumField(); i++ {
 			if c := compare(aVal.Field(i), bVal.Field(i)); c != 0 {

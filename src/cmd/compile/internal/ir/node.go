@@ -437,7 +437,7 @@ func (s *NameSet) Add(n *Name) {
 	(*s)[n] = struct{}{}
 }
 
-type PragmaFlag uint16
+type PragmaFlag uint32
 
 const (
 	// Func pragmas.
@@ -451,6 +451,7 @@ const (
 	UintptrKeepAlive            // pointers converted to uintptr must be kept alive
 	UintptrEscapes              // pointers converted to uintptr escape
 	NoTear                      // gd: func has its own exclusion for the slices, strings and interfaces it loads and stores in shared memory (runtime/shared.go)
+	LocalArgs                   // gd: func lets no other goroutine reach what its arguments point to, whatever its body seems to do: the standard library's word for the runtime's own (escape/callbits.go)
 
 	// Runtime-only func pragmas.
 	// See ../../../../runtime/HACKING.md for detailed descriptions.

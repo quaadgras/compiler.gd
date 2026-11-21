@@ -25,7 +25,8 @@ import (
 // every function with that signature that the program makes a value
 // of. For each such class the program has a word, which is an escape
 // mask (escmask.go): the masks of all the functions of the class, ORed.
-// Compiled code reads it where it allocates.
+// What the linker writes is what compiled code asks, where it allocates:
+// bit k+1 is set if a function of the class may share its argument k.
 //
 // The compiler writes the word with all bits set, so that a program
 // that is linked by something that does not know is safe, and a record
@@ -52,7 +53,7 @@ type ShareLink struct {
 
 // MaxShareLinks is the number of links of a parameter over which it
 // counts as shared.
-const MaxShareLinks = 4
+const MaxShareLinks = 16
 
 // A key is the kind of class (M for the methods of interfaces, R for
 // their receivers, F for function values), a dot, the method's name for M, and the types of
