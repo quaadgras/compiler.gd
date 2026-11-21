@@ -913,6 +913,38 @@ Built in this order: the function's side and `ParamShare.Deep`, with a
 caller that takes `Deep` for shared; then groups for direct calls; then
 the words and the bits of dynamic calls. `-d=nolocaldeep` turns it off.
 
+**Done**: the function's side (`escape/deep.go`: `deriveFromParams`,
+`dynRoot.deep`, `ParamShare.Deep`), and a caller that passes on its own
+parameters (`deepRoot`). In `go/parser` 417 variables are derived from
+parameters, and `(*resolver).declare` says that `decl` and `data` are
+stored in what `idents` reaches.
+
+**How the groups are to be built** (worked out on 2026-11-21, not
+written yet):
+- A walk does not go past a location that escapes unless the root has
+  something to tell it (`wantsDyn`). So a group is a dynamic root: every
+  location that the argument reaches then has the group among its roots,
+  which is how its members are found when the graph is solved. That
+  membership is recorded apart from `location.dyn` (which has a limit,
+  over which a location is shared and forgets its roots), and what
+  counts `dyn` to tell whether a location stays local (`stays`,
+  `staysPointee`, the bits of a call's results) must not count it.
+- The condition is a second root, which only the argument that is
+  stored flows to: a member that is not stored anywhere by the call
+  keeps its own tag.
+- A store through a variable that is not tracked (`q.f = y`, with `q`
+  the result of a call) goes to a root of its statement or to the heap,
+  and `y` is then reached from what `q` points to without the graph
+  saying so. For the groups to find it, such a store also has an edge
+  from `y` to `q` that only the walks for sharing follow (`edge.share`):
+  `y` is where `q` is.
+- The result of a call that is recorded has a location of its own
+  already (`callSite.res`); it needs the function called (for
+  `ResultExact`).
+- A function of the same batch has no facts yet when its caller's graph
+  is built: its parameters' bits are 0 unless the caller passes on its
+  own.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:
