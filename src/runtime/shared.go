@@ -1213,7 +1213,7 @@ func shareSiteAlloc(x unsafe.Pointer, size uintptr) {
 			return
 		}
 	}
-	h := uint32(pc*0x9e3779b97f4a7c15>>40) % uint32(len(t.sites))
+	h := uint32(uint64(pc)*0x9e3779b97f4a7c15>>40) % uint32(len(t.sites))
 	var st *shareSite
 	for probe := 0; probe < 64; probe++ {
 		e := &t.sites[(h+uint32(probe))%uint32(len(t.sites))]
