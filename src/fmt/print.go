@@ -5,6 +5,7 @@
 package fmt
 
 import (
+	"internal/abi"
 	"internal/fmtsort"
 	"io"
 	"os"
@@ -543,7 +544,9 @@ func (p *pp) fmtPointer(arg any, value reflect.Value, verb rune) {
 	var u uintptr
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
-		u = uintptr(value.UnsafePointer())
+		// (An address to print, not to make a pointer of again:
+		// what it points to is not exposed for it.)
+		u = abi.Address(value.UnsafePointer())
 	default:
 		p.badVerb(arg, value, verb)
 		return

@@ -827,8 +827,24 @@ masks of all the functions of the class, ORed
 
 ### Next
 
-0. What `fmt` does with its arguments; reflect's allocations; the
-   tag of an object that has several words reads each word four times.
+0. What `fmt` does with its arguments. Done on 2026-11-21:
+   `internal/abi.NoEscape` is trusted not to share its argument (the
+   user's decision: only the standard library can call it, and its
+   conversion to an integer and back counted as showing the address to
+   everyone, which shared whatever reflect looked at); a string that
+   reflect loads through a converted pointer is not memory made into a
+   string (`typedByConstruction`); `%p` prints
+   `internal/abi.Address(p)`, an integer of an address that exposes
+   nothing, so that the checks refuse to make a pointer of it. Left, all
+   in `internal/fmtsort.Sort`, which prints a map's keys in order:
+   `reflect.(*MapIter).Next` shares what the iterator holds;
+   `Value.Pointer` in the comparison exposes; and
+   `slices.SortStableFunc` calls its comparison in a function with type
+   parameters, where a call of a function whose signature has one reads
+   no word. `-gcflags=-m=4` prints every function that shares an
+   argument where it is called (`shares its argument`).
+   Also: reflect's allocations; the tag of an object that has several
+   words reads each word four times.
 1. Callees that are parameters: `each(head, func(it *item) {...})`
    makes what `head` leads to shared, since `each` passes it to a
    function it does not know. `each` could say "what `head` leads to

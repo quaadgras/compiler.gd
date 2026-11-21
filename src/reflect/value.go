@@ -230,7 +230,10 @@ func packEface(v Value) any {
 		} else {
 			// Inline types are pointer-free so they are never IsDirectIface;
 			// if a non-indir Value somehow reaches here its bits live in v.ptr.
-			*(*unsafe.Pointer)(unsafe.Pointer(&ei.Inline)) = src
+			// (They are not a pointer: copied as the integer that
+			// they are, so that nothing says that v's pointer is
+			// stored where the compiler cannot follow.)
+			*(*uintptr)(unsafe.Pointer(&ei.Inline)) = *(*uintptr)(unsafe.Pointer(&src))
 		}
 	} else if t.IsSpreadIface() {
 		// gd Phase D: reflect stores spread-iface values with flagIndir

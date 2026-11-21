@@ -124,6 +124,18 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			// handed over is known when the graph is solved.
 			argument(e.discardHole(), recvArg)
 			argument(e.handOverHole(call), args[0])
+		} else if isNoEscape(fns) {
+			// internal/abi.NoEscape hides its argument from escape
+			// analysis, with a conversion to an integer and back
+			// that would count as showing the address to everyone:
+			// its argument would be shared, and with it whatever
+			// reflect looks at. Only the standard library can call
+			// it, and promises that what it returns goes nowhere
+			// that outlives the argument. That is trusted, here as
+			// it is for escaping: the argument goes nowhere.
+			for _, arg := range args {
+				argument(e.discardHole(), arg)
+			}
 		} else if isEscapeNonString(fns, fntype) {
 			// internal/abi.EscapeNonString forces its argument to
 			// the heap if it contains a non-string pointer. This is
@@ -626,6 +638,14 @@ func resolveAssignedCallees(assigns []*ir.AssignStmt) []*ir.Name {
 		fns = append(fns, callee)
 	}
 	return fns
+}
+
+func isNoEscape(fns []*ir.Name) bool {
+	if len(fns) != 1 || fns[0].Sym().Pkg.Path != "internal/abi" {
+		return false
+	}
+	// (Address makes an integer that is never a pointer again.)
+	return fns[0].Sym().Name == "NoEscape" || fns[0].Sym().Name == "Address"
 }
 
 func isEscapeNonString(fns []*ir.Name, fntype *types.Type) bool {

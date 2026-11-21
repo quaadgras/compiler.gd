@@ -235,7 +235,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			newAttrs |= attrReturned
 		}
 
-		if b.gd.Flag.LowerM >= 4 && l.param && l.n != nil && lraw && root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 && root != l {
+		if b.gd.Flag.LowerM >= 4 && l.param && l.n != nil && lraw && (root == &b.heapLoc || root == &b.checkLoc || root == &b.shareLoc || root == &b.convShareLoc) {
 			// Every place where a parameter is shared, not only
 			// the first.
 			fmt.Printf("%s: parameter %v reaches what is shared, %s, for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
@@ -468,6 +468,12 @@ func (b *batch) explainLoc(l *location) string {
 	}
 	if l == &b.recvHeldLoc || l == &b.recvAnyLoc {
 		return "a method of its own"
+	}
+	if l == &b.shareLoc {
+		return "{shared}"
+	}
+	if l == &b.convShareLoc {
+		return "{converted}"
 	}
 	if l.n == nil {
 		// TODO(mdempsky): Omit entirely.

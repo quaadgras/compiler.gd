@@ -264,6 +264,26 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 		}
 	}
 
+	if b.gd.Flag.LowerM >= 4 {
+		// Everything that the functions do which shares a value by
+		// itself: the walks only say the nearest for each value.
+		for _, root := range []*location{&b.shareLoc, &b.convShareLoc} {
+			for _, edge := range root.edges {
+				src := edge.src
+				what := "a value"
+				if src.n != nil {
+					what = fmt.Sprintf("%v", src.n)
+				}
+				for n := edge.notes; n != nil; n = n.next {
+					fmt.Printf("%s: %s goes to %s: %v (%s)\n", b.gd.FmtPos(n.where.Pos()), what, b.explainLoc(root), n.where, n.why)
+					break
+				}
+				if edge.notes == nil && src.n != nil {
+					fmt.Printf("%s: %s goes to %s\n", b.gd.FmtPos(src.n.Pos()), what, b.explainLoc(root))
+				}
+			}
+		}
+	}
 	b.walkAll()
 	b.finish(fns)
 

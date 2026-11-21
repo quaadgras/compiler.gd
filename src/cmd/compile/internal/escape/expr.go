@@ -71,7 +71,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.expr(k.addr(e.gd, n, "address-of"), n.X) // "address-of"
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
-		if punnedString(n) {
+		if punnedString(n) && !e.typedByConstruction() {
 			// What the pointer points to holds the pointer to
 			// the bytes.
 			k = e.aliasHole(k)
@@ -398,6 +398,21 @@ func (e *escape) aliasHole(k hole) hole {
 		return k
 	}
 	return e.teeHole(k, e.shareHole())
+}
+
+// typedByConstruction reports whether the current function is reflect's:
+// its pointers are to values of the types it says they are (ir.UncheckedPkg),
+// so a string that it loads through a converted pointer was allocated
+// as a string.
+func (e *escape) typedByConstruction() bool {
+	if e.curfn == nil || e.curfn.Sym() == nil || e.curfn.Sym().Pkg == nil {
+		return false
+	}
+	switch e.curfn.Sym().Pkg.Path {
+	case "reflect", "internal/reflectlite":
+		return true
+	}
+	return false
 }
 
 // punnedString reports whether n loads a string through a pointer that

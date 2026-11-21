@@ -681,6 +681,9 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 		}
 		if ps.Share != 0 {
 			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
+			if e.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: %v shares its argument %v, dereferenced %d times\n", e.gd.FmtPos(e.gd.Pos), fn, param.Sym, ps.Share-1)
+			}
 		}
 		for _, l := range ps.Links {
 			// (Whether it must be in the heap, the tag and Heap say.)
