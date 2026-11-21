@@ -1338,6 +1338,15 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		fn.DirtyInto = uint16(r.Len())
 		fn.ResultExact = r.Bool()
 		fn.ResultDeep = uint16(r.Len())
+		fn.ResultFrom = uint16(r.Len())
+		for _, ls := range []*[]ir.ShareLink{&fn.ResultLinks, &fn.ResultStores} {
+			if n := r.Len(); n != 0 {
+				*ls = make([]ir.ShareLink, n)
+				for j := range *ls {
+					(*ls)[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len())}
+				}
+			}
+		}
 		fn.ShareOpaque = r.Bool()
 		fn.StoresInto = uint16(r.Len())
 

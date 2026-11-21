@@ -127,7 +127,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	via := filter == nil && root.dynRoot != nil && root.dynRoot.plain && root.dynRoot.loc != nil && root.dynRoot.loc.param && b.typedOn()
 	track := filter != nil || via
 	root.viagen = walkgen
-	root.viaF = nil
+	root.via, root.nodyn = nil, false
 	root.filtergen = walkgen
 	root.filterAt = filterOff
 	root.filterT = filter
@@ -242,11 +242,12 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		// that the function can tell of (it is another call's, even
 		// if it is of the same function): the call says it, with
 		// the bit of its results, which what is returned goes by.
-		var lvia *ir.Func
-		if l.viagen == walkgen {
-			lvia = l.viaF
+		var lvia *viaFrame
+		lnodyn := false
+		if l.viagen == walkgen && b.gd.Debug.NoLocalRet == 0 {
+			lvia, lnodyn = l.via, l.nodyn
 		}
-		ownResult := lvia != nil && lvia == l.curfn && b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
+		ownResult := (lnodyn || lvia != nil) && b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
 		// at is what the walk shares of l, and eff what it shares
 		// of what flows to l (typed.go).
 		at := filterOff
@@ -534,23 +535,46 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				}
 			}
 			// Through which function's result the walk comes to
-			// the source, if by none else.
-			var sv *ir.Func
+			// the source, by which call, if by none else; or
+			// whether only by a way that no run of the program
+			// takes: into a function through a call's result, and
+			// out of it through another call's argument.
+			var sv *viaFrame
+			snodyn := lnodyn
 			switch {
+			case snodyn:
 			case edge.retFlow:
-				sv = edge.src.curfn
-			case edge.argFlow || edge.src.curfn != l.curfn:
-			case lvia == l.curfn:
+				// Down into the function that is called.
+				sv = lvia.down(l.curfn)
+			case edge.argFlow:
+				// Up into the function that calls it.
+				var ok bool
+				if sv, ok = lvia.up(edge.src.curfn); !ok {
+					snodyn = true
+				}
+			case edge.src.curfn != l.curfn:
+			default:
 				sv = lvia
 			}
-			closer := edge.src.walkgen != walkgen || edge.src.derefs > d
-			if edge.src.viagen != walkgen {
-				edge.src.viagen = walkgen
-				edge.src.viaF = sv
-			} else if edge.src.viaF != nil && edge.src.viaF != sv {
-				edge.src.viaF = nil
-				closer = true
+			requeue := false
+			switch src := edge.src; {
+			case src.viagen != walkgen:
+				src.viagen = walkgen
+				src.via, src.nodyn = sv, snodyn
+			default:
+				if src.nodyn && !snodyn {
+					// A way that the program takes, after
+					// all: what it had of the other ways is
+					// no guide.
+					src.nodyn = false
+					src.via = sv
+					requeue = true
+				} else if !snodyn && !src.nodyn && src.via != nil && !src.via.same(sv) {
+					src.via = mergeVia(src.via, sv)
+					requeue = true
+				}
 			}
+			closer := edge.src.walkgen != walkgen || edge.src.derefs > d
 			if closer {
 				edge.src.walkgen = walkgen
 				edge.src.derefs = d
@@ -562,7 +586,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				edge.src.rawDerefs = rd
 				closer = true
 			}
-			if weaker {
+			if weaker || requeue {
 				closer = true
 			}
 			if srcPlain && (edge.src.plaingen != walkgen || edge.src.plainDerefs > pd) {

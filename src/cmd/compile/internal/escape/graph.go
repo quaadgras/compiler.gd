@@ -11,6 +11,8 @@ import (
 	"cmd/compile/internal/types"
 	"cmd/internal/src"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 // Below we implement the methods for walking the AST and recording
@@ -94,7 +96,8 @@ type location struct {
 	filterAt    int8
 	filterT     *types.Type
 	viagen      uint32      // walkOne: see viaF
-	viaF        *ir.Func    // walkOne: the function whose result the walk came through to here, and has not left
+	via         *viaFrame   // walkOne: the calls through whose results the walk came to here, and has not left
+	nodyn       bool        // walkOne: reached only by ways that no run of the program takes
 	rawgen      uint32      // walkOne: the walk that reached the location on a path with no read-only edge
 	rawDerefs   int         // walkOne: the least dereferences of such a path
 	plaingen    uint32      // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
@@ -277,6 +280,7 @@ type edge struct {
 	loose   bool // see hole.loose
 	retFlow bool // see hole.retFlow
 	argFlow bool
+	site    *callSite
 }
 
 func (l *location) asHole() hole {
@@ -303,6 +307,77 @@ func (l *location) leakTo(gd *base.Invocation, sink *location, derefs int) {
 
 func (l *location) isName(c ir.Class) bool {
 	return l.n != nil && l.n.Op() == ir.ONAME && l.n.(*ir.Name).Class == c
+}
+
+// A viaFrame says how far below the level of its root a walk is: how
+// many calls it came into through their results and has not left
+// through the arguments of, and from which functions it went down the
+// first of them (solve.go). A walk at the level of its root has none.
+type viaFrame struct {
+	depth int
+	from  []*ir.Func // the functions at the root's level that it came down from
+	any   bool       // or any
+}
+
+// maxViaFrom is the number of functions that a frame keeps.
+const maxViaFrom = 4
+
+func (f *viaFrame) same(g *viaFrame) bool {
+	if f == nil || g == nil {
+		return f == g
+	}
+	return f.depth == g.depth && f.any == g.any && slices.Equal(f.from, g.from)
+}
+
+// down returns the frame of a walk that goes into a function through a
+// call's result from f, in the function from.
+func (f *viaFrame) down(from *ir.Func) *viaFrame {
+	if f == nil {
+		if from == nil {
+			// (From nowhere that it can name: any.)
+			return &viaFrame{depth: 1, any: true}
+		}
+		return &viaFrame{depth: 1, from: []*ir.Func{from}}
+	}
+	return &viaFrame{depth: f.depth + 1, from: f.from, any: f.any}
+}
+
+// up returns the frame of a walk that goes out of a function through
+// an argument of a call in the function caller, and whether a run of
+// the program may go that way.
+func (f *viaFrame) up(caller *ir.Func) (*viaFrame, bool) {
+	switch {
+	case f == nil:
+		return nil, true
+	case f.depth > 1:
+		return &viaFrame{depth: f.depth - 1, from: f.from, any: f.any}, true
+	case f.any || slices.Contains(f.from, caller):
+		return nil, true
+	}
+	return nil, false
+}
+
+// mergeVia returns what a location that a walk comes to with f and
+// with g has.
+func mergeVia(f, g *viaFrame) *viaFrame {
+	if f == nil || g == nil {
+		return nil
+	}
+	m := &viaFrame{depth: min(f.depth, g.depth), any: f.any || g.any}
+	m.from = slices.Clone(f.from)
+	for _, x := range g.from {
+		if !slices.Contains(m.from, x) {
+			m.from = append(m.from, x)
+		}
+	}
+	if len(m.from) > maxViaFrom {
+		m.from, m.any = nil, true
+	}
+	if m.any {
+		m.from = nil
+	}
+	slices.SortFunc(m.from, func(a, b *ir.Func) int { return strings.Compare(ir.FuncName(a), ir.FuncName(b)) })
+	return m
 }
 
 // A hole represents a context for evaluation of a Go
@@ -343,6 +418,7 @@ type hole struct {
 	// returns to that call: where the caller puts it, the call says
 	// (solve.go, the bit of a call's results).
 	retFlow, argFlow bool
+	site             *callSite // of retFlow and argFlow: the call
 }
 
 type note struct {
@@ -421,13 +497,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow, site: k.site})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow, site: k.site})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address

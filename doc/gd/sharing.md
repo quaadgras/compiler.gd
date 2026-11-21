@@ -1326,6 +1326,48 @@ whole, which a function that only stores in other parts of it does not
 need; but an experiment that ignored such members altogether changed
 nothing in the parser, so that is not what binds there.
 
+**What a function returns, and from where** (2026-11-22, later):
+
+- *A bug in the first version of the walk state of results*: two ways
+  to one location that disagreed on the function put the location back
+  in the queue with its count of dereferences set to the way's, which
+  may be more than the least: a walk could then say that a location is
+  reached with more dereferences than it is, which errs on the side
+  that is not safe for escaping. It was in 121b3e0858, which was never
+  pushed, and is fixed: a location is queued again without its count.
+- *A depth instead of a function* (`viaFrame`): the walk keeps how many
+  calls it came into through their results and has not left through
+  their arguments, and from which functions at the level of its root it
+  went down the first; nothing below that level takes the place of a
+  store (it is the call's to say), and a way out of a function through
+  an argument at the first level, to a function that the walk did not
+  come down from, is no way that a run of the program takes
+  (`location.nodyn`). Two ways to a location merge to the lesser depth
+  and both functions, so that the state does not collapse as a stack of
+  calls did (tried: 262 tags in `parser.go`, against 442 now).
+- *Conditions of results* (`ir.Func.ResultLinks`, `ResultStores`): a
+  result that is converted to an interface type, or passed to a function
+  only known when the program runs, is local only if what the linker
+  says of those classes holds; the caller asks the same of what it has
+  of the result, instead of the function being not exact.
+- *Results loaded from parameters* (`ir.Func.ResultFrom`): `return
+  p.lineComment` is local only if what `p` reaches is; the caller asks
+  that of the argument, its group or its own bits (`resultFrom`), as it
+  does of its own loads. Only groups that are solved count
+  (`solvedGroup`).
+
+What it gives: 442 allocations of `parser.go` have a tag (276 at the
+start of the day). The suites' counts have not moved, and the parser's
+tree is still not local: 83 of its functions may store what their
+callers do not know. An experiment that ignores what is shared only for
+a type, which is not sound, gives the same 83, so that is not the next
+thing. What binds is that the parser's own fields (its comment groups,
+which are loaded from `p`) are stored in the nodes: a store's place in
+one function legitimately reaches every caller of it, which in the
+recursive batch is every function, as "what `p` leads to is stored
+there". A group of `p` then needs the place of that store, in another
+function, to be local, and nothing says that it is.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

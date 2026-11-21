@@ -55,8 +55,10 @@ type callSite struct {
 	res   []*location // what the results flow through
 	args  []callArg
 	// groups has, for each argument, the receiver first, its
-	// membership root if it has one (groups.go).
+	// membership root if it has one (groups.go); all has the
+	// arguments, the receiver first, of a direct call.
 	groups []*location
+	all    []ir.Node
 	// For a call of a function that is only known when the program
 	// runs: the group of its arguments that are not reached from
 	// parameters of the caller, and its arguments that may point to

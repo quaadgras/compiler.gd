@@ -351,6 +351,14 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Len(int(name.Func.DirtyInto))
 	w.Bool(name.Func.ResultExact)
 	w.Len(int(name.Func.ResultDeep))
+	w.Len(int(name.Func.ResultFrom))
+	for _, ls := range [][]ir.ShareLink{name.Func.ResultLinks, name.Func.ResultStores} {
+		w.Len(len(ls))
+		for _, l := range ls {
+			w.String(l.Key)
+			w.Len(int(l.Arg))
+		}
+	}
 	w.Bool(name.Func.ShareOpaque)
 	w.Len(int(name.Func.StoresInto))
 

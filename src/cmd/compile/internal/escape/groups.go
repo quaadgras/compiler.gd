@@ -530,7 +530,7 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 	dirty := calleeDirty(fn)
 	var need uint16
 	if fn.Func != nil {
-		need = fn.Func.DeepBits | fn.Func.ResultDeep
+		need = fn.Func.DeepBits | fn.Func.ResultDeep | fn.Func.ResultFrom
 		for _, ps := range fn.Func.ParamShares {
 			need |= ps.Deep
 		}
@@ -859,6 +859,8 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 		fn.ResultExact = true
 		fn.ResultDeep = 0
 		fn.DirtyInto = 0
+		fn.ResultLinks, fn.ResultStores = nil, nil
+		fn.ResultFrom = 0
 	}
 	b.storeRoot = make(map[*location]bool)
 	for _, sr := range b.storeRoots {
@@ -882,17 +884,34 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 			if fn.ResultExact {
 				if g := b.resGroups[fn]; g != nil {
 					c := b.cond(g)
-					if c.bad || c.from&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
+					if c.bad || len(c.mixes) != 0 || len(c.links) > ir.MaxShareLinks || len(c.stores) > ir.MaxShareLinks {
 						if b.gd.Flag.LowerM >= 4 {
 							fmt.Printf("%s: the results of %v are not exact: %v (%s), %d links, %d stores, %d mixes\n", b.gd.FmtPos(fn.Pos()), fn, c.bad, c.why, len(c.links), len(c.stores), len(c.mixes))
 						}
 						fn.ResultExact = false
 						changed = true
-					} else if deep := c.own >> 1; deep&^fn.ResultDeep != 0 {
-						// Stored in what parameters reach as well:
-						// the caller is told (ir.Func.ResultDeep).
-						fn.ResultDeep |= deep
-						changed = true
+					} else {
+						if from := c.from >> 1; from&^fn.ResultFrom != 0 {
+							// Loaded from what parameters reach,
+							// or a parameter: the caller asks of
+							// its arguments (ir.Func.ResultFrom).
+							fn.ResultFrom |= from
+							changed = true
+						}
+						if deep := (c.own &^ c.from) >> 1; deep&^fn.ResultDeep != 0 {
+							// Stored in what parameters reach as
+							// well: the caller is told
+							// (ir.Func.ResultDeep).
+							fn.ResultDeep |= deep
+							changed = true
+						}
+						// And what else they are local only if:
+						// the caller asks it too (groupInfoOf).
+						if len(c.links) != len(fn.ResultLinks) || len(c.stores) != len(fn.ResultStores) {
+							fn.ResultLinks = slices.Clone(c.links)
+							fn.ResultStores = slices.Clone(c.stores)
+							changed = true
+						}
 					}
 				}
 			}
@@ -1047,6 +1066,13 @@ func (b *batch) cond(g *location) *groupCond {
 	return c
 }
 
+// solvedGroup reports whether l is a group whose condition solveConds
+// computes: one that another's may depend on.
+func (b *batch) solvedGroup(l *location) bool {
+	d := l.dynRoot
+	return d != nil && d.group && !d.dirt && !d.stored && d.classKey == "" && !d.mixAny && !b.storeRoot[l]
+}
+
 // solveConds computes the conditions of all the groups. One may need
 // another's (what is stored in a structure is in another too), and that
 // one the first's: each is computed from what the others are so far, in
@@ -1055,7 +1081,7 @@ func (b *batch) cond(g *location) *groupCond {
 func (b *batch) solveConds() {
 	var groups []*location
 	for _, l := range b.allLocs {
-		if d := l.dynRoot; d != nil && d.group && !d.dirt && !d.stored && d.classKey == "" && !d.mixAny && !b.storeRoot[l] {
+		if b.solvedGroup(l) {
 			groups = append(groups, l)
 		}
 	}
@@ -1127,10 +1153,16 @@ func (b *batch) condOnce(g *location) *groupCond {
 		// (What a function of the batch stores of its results in
 		// its parameters' structures, its caller's graph does not
 		// have.)
-		if !callee.Func.ResultExact || callee.Func.ResultDeep != 0 {
+		if !callee.Func.ResultExact || callee.Func.ResultDeep != 0 || callee.Func.ResultFrom != 0 {
 			c.bad = true
 			c.why = fmt.Sprintf("the result of %v, which does not return what is as local as it is told", callee)
 			return c
+		}
+		for _, l := range callee.Func.ResultLinks {
+			c.addLink(l.Key, int(l.Arg))
+		}
+		for _, l := range callee.Func.ResultStores {
+			c.stores = addShareLink(c.stores, l.Key, int(l.Arg))
 		}
 	}
 	for _, g2 := range in.conds {
@@ -1245,6 +1277,21 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 				in.callees = append(in.callees, callee)
 			case !callee.Func.ResultExact:
 				fail("the result of a function that does not return what is as local as it is told", m)
+			default:
+				// Local if the call's bit says so, if what the
+				// arguments reach that the results may be loaded
+				// from is, and if what else the function says of
+				// its results holds.
+				if why := b.resultFrom(fn, m.callRes, callee.Func.ResultFrom, c, in); why != "" {
+					fail(why, m)
+					break
+				}
+				for _, l := range callee.Func.ResultLinks {
+					c.addLink(l.Key, int(l.Arg))
+				}
+				for _, l := range callee.Func.ResultStores {
+					c.stores = addShareLink(c.stores, l.Key, int(l.Arg))
+				}
 			}
 		}
 		if name, ok := m.n.(*ir.Name); ok && name.Op() == ir.ONAME && !g.dynRoot.result {
@@ -1449,6 +1496,49 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 	return dirty
 }
 
+// resultFrom adds to c, the condition of a group of fn of which the
+// result of the call cs is a member, what the arguments of the
+// parameters in from must be: their own groups' conditions, or the bits
+// of fn's parameters that they are reached from. It returns why not,
+// if it cannot say.
+func (b *batch) resultFrom(fn *ir.Func, cs *callSite, from uint16, c *groupCond, in *groupInfo) string {
+	if from == 0 {
+		return ""
+	}
+	maskOf := b.derivedOf[fn]
+	for j := 0; j < 16; j++ {
+		if from&(1<<j) == 0 {
+			continue
+		}
+		if j >= len(cs.all) {
+			return "the result of a function that may load it from what an argument reaches, of a call that says nothing of its arguments"
+		}
+		arg := cs.all[j]
+		if !pointsToPointers(arg.Type()) && !arg.Type().HasPointers() {
+			continue
+		}
+		if maskOf != nil {
+			if m, ok := maskOf(arg); ok && m != 0 {
+				// What fn's parameters reach: as fn's caller
+				// says.
+				c.own |= m << 1
+				c.from |= m << 1
+				continue
+			}
+		}
+		if j < len(cs.groups) {
+			if g := cs.groups[j]; g != nil && b.solvedGroup(g) {
+				if !slices.Contains(in.conds, g) {
+					in.conds = append(in.conds, g)
+				}
+				continue
+			}
+		}
+		return "the result of a function that may load it from what an argument reaches, which is not known to be local"
+	}
+	return ""
+}
+
 // knownStored reports whether the caller of fn knows of m, which fn
 // stores in a parameter's structure: a parameter, of which the function
 // says where it is stored; or an object that fn allocates exactly as
@@ -1468,6 +1558,22 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 		callee := m.callRes.fn
 		if callee == nil || callee.Func == nil || !callee.Func.ResultExact {
 			return false
+		}
+		if from := callee.Func.ResultFrom; from != 0 {
+			// Loaded from what the arguments reach: known if those
+			// are fn's parameters'.
+			maskOf := b.derivedOf[fn]
+			for j := 0; j < 16; j++ {
+				if from&(1<<j) == 0 {
+					continue
+				}
+				if maskOf == nil || j >= len(m.callRes.all) {
+					return false
+				}
+				if mk, ok := maskOf(m.callRes.all[j]); !ok || mk == 0 {
+					return false
+				}
+			}
 		}
 		if b.inMutualBatch(callee) {
 			// (As far as is known so far: solveGroups. What it

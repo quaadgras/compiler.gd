@@ -166,6 +166,7 @@ type batch struct {
 	convOKs        map[convKey]bool // recv.go
 	retTags        map[*ir.Func]ir.Node
 	callArgs       []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
+	curSite        *callSite    // the call whose arguments are evaluated, if it is recorded
 	dynCall        *ir.CallExpr // the call of an unknown function whose argument's hole is made
 	dynArg         int          // that argument's place
 	dynKey         string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""

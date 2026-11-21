@@ -96,6 +96,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 					for i, result := range f.Type().Results() {
 						k := ks[i]
 						k.retFlow = true
+						k.site = cs
 						e.expr(k, result.Nname.(*ir.Name))
 					}
 				}
@@ -213,6 +214,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				groups = e.argGroupsOf(call, fns[0], all)
 				if cs != nil {
 					cs.groups = groups
+					cs.all = all
 				}
 				if f := fns[0].Func; cs != nil && f != nil && f.ResultDeep != 0 && !e.inMutualBatch(fns[0]) && e.deepOn() {
 					// What it returns it has stored in what
@@ -404,10 +406,12 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs, e.argGroups, e.mixGroup = all, groups, mixG
+				e.curSite = cs
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst-1, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
 				e.callArgs, e.argGroups, e.mixGroup, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, nil, "", false, false, false, false
+				e.curSite = nil
 				if e.consumedArg(call, fns, 0, recvArg) {
 					k = e.handOverHole(call)
 				}
@@ -424,10 +428,12 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs, e.argGroups, e.mixGroup = all, groups, mixG
+				e.curSite = cs
 				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst+i, dynKey
 				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
 				e.callArgs, e.argGroups, e.mixGroup, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, nil, nil, "", false, false, false, false
+				e.curSite = nil
 				if e.consumedArg(call, fns, first+i, args[i]) {
 					k = e.handOverHole(call)
 				}
@@ -799,6 +805,7 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 		}
 		k := e.addr(param.Nname.(*ir.Name))
 		k.argFlow = true
+		k.site = e.curSite
 		return k
 	}
 

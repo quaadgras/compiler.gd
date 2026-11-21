@@ -257,6 +257,19 @@ type Func struct {
 	// local only if the bits of those parameters are set too, and
 	// the caller's results are among what its arguments reach.
 	ResultDeep uint16
+	// ResultLinks and ResultStores are what else the results are
+	// local only if, where ResultExact: the classes of functions that
+	// are only known when the program runs to which they are passed
+	// (none may share them, nor store in what they reach), and those
+	// of which they are the receivers (none may store in what they
+	// reach). The caller asks the same of what it has of the results.
+	ResultLinks  []ShareLink
+	ResultStores []ShareLink
+	// ResultFrom has the parameters whose structures what the
+	// function returns may be loaded from, or be: the results are
+	// local only if what the arguments of those reach is (the caller
+	// asks it as of its own loads).
+	ResultFrom uint16
 	// StoresInto has the parameters in whose structures the function
 	// may store anything at all: that is all that a caller which
 	// cannot say what it knows of them (through a function value, or
