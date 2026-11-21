@@ -193,6 +193,20 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				if cs != nil {
 					cs.groups = groups
 				}
+				if f := fns[0].Func; cs != nil && f != nil && f.ResultDeep != 0 && !e.inMutualBatch(fns[0]) && e.deepOn() {
+					// What it returns it has stored in what
+					// those arguments reach. (Where nobody knows
+					// all that an argument reaches, the call says
+					// so with the argument's bit, and what is
+					// returned is not local.)
+					e.callArgs, e.argGroups = all, groups
+					for _, h := range e.deepHolesOf(f.ResultDeep, 0, nil, true) {
+						for _, r := range cs.res {
+							e.flow(h, r)
+						}
+					}
+					e.callArgs, e.argGroups = nil, nil
+				}
 			}
 			// withGroup adds to k the membership root of the j'th
 			// of all, or the dirt of the function for an argument

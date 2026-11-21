@@ -1329,6 +1329,7 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		fn.DeepBits = uint16(r.Len())
 		fn.DirtyInto = uint16(r.Len())
 		fn.ResultExact = r.Bool()
+		fn.ResultDeep = uint16(r.Len())
 		fn.StoresInto = uint16(r.Len())
 
 		if r.Bool() {

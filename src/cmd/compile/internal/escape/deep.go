@@ -298,6 +298,12 @@ func (e *escape) deepRootOf(mask uint16, marker bool) *location {
 // what those reach; anything else is not known yet, and shared (the
 // hole that share gives).
 func (e *escape) deepHoles(mask uint16, derefs int, share func() hole) []hole {
+	return e.deepHolesOf(mask, derefs, share, false)
+}
+
+// deepHolesOf is deepHoles; with marker, the roots are no holders of
+// what flows to them (deepRootOf).
+func (e *escape) deepHolesOf(mask uint16, derefs int, share func() hole, marker bool) []hole {
 	var hs []hole
 	shared := false
 	for k := 0; k < 16; k++ {
@@ -308,14 +314,17 @@ func (e *escape) deepHoles(mask uint16, derefs int, share func() hole) []hole {
 		if k < len(e.callArgs) {
 			m = e.deepMaskOf(e.callArgs[k])
 		}
-		if r := e.deepRoot(m); r != nil {
+		if r := e.deepRootOf(m, marker); r != nil {
+			if e.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: an argument is stored in what argument %d reaches, which the parameters %b of %v reach\n", e.gd.FmtPos(e.gd.Pos), k, m, e.curfn)
+			}
 			hs = append(hs, r.asHole().shift(e.gd, derefs))
 		} else if k < len(e.argGroups) && e.argGroups[k] != nil && !e.argGroups[k].dynRoot.dirt {
 			// It is one of what the argument reaches from now
 			// on, and local only if all of that is.
 			g := e.argGroups[k]
 			hs = append(hs, g.asHole().shift(e.gd, derefs), e.condRoot(g).asHole().shift(e.gd, derefs))
-		} else if !shared {
+		} else if !shared && share != nil {
 			if e.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: what is stored in what argument %d reaches is shared: nobody knows all that it reaches\n", e.gd.FmtPos(e.gd.Pos), k)
 			}

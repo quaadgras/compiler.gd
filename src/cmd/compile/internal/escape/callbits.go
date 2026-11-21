@@ -653,6 +653,9 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 	}
 	if d := r.dynRoot; d != nil && r.curfn == fn && d.deep != 0 && d.call == nil {
 		// Stored in an object that those parameters reach.
+		if b.gd.Flag.LowerM >= 4 {
+			fmt.Printf("%s: a parameter of %v is stored in what the parameters %b reach, by itself or by a function that says so\n", b.gd.FmtPos(fn.Pos()), fn, d.deep)
+		}
 		ps.Deep |= d.deep
 		setMinDerefs(&ps.DeepDerefs, derefs)
 		return

@@ -343,6 +343,7 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 	w.Len(int(name.Func.DeepBits))
 	w.Len(int(name.Func.DirtyInto))
 	w.Bool(name.Func.ResultExact)
+	w.Len(int(name.Func.ResultDeep))
 	w.Len(int(name.Func.StoresInto))
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {

@@ -67,6 +67,10 @@ type groupCond struct {
 	bad bool
 	why string
 	own uint16 // the bits of the function's call that must be set
+	// from has the bits of own that are there because a parameter,
+	// or what is derived from one, is a member itself: not only
+	// stored in what a parameter reaches.
+	from uint16
 	// links are the arguments of the classes of functions that are
 	// only known when the program runs to which a member is passed:
 	// none may share it, nor store in what it reaches.
@@ -416,7 +420,7 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 	dirty := calleeDirty(fn)
 	var need uint16
 	if fn.Func != nil {
-		need = fn.Func.DeepBits
+		need = fn.Func.DeepBits | fn.Func.ResultDeep
 		for _, ps := range fn.Func.ParamShares {
 			need |= ps.Deep
 		}
@@ -706,6 +710,7 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 	// returns: all are, until one is found that is not.
 	for _, fn := range fns {
 		fn.ResultExact = true
+		fn.ResultDeep = 0
 	}
 	b.storeRoot = make(map[*location]bool)
 	for _, sr := range b.storeRoots {
@@ -721,8 +726,17 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 				continue
 			}
 			if g := b.resGroups[fn]; g != nil {
-				if c := b.cond(g); c.bad || c.own&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
+				c := b.cond(g)
+				if c.bad || c.from&^1 != 0 || len(c.links) != 0 || len(c.stores) != 0 || len(c.mixes) != 0 {
+					if b.gd.Flag.LowerM >= 4 {
+						fmt.Printf("%s: the results of %v are not exact: %v (%s), %d links, %d stores, %d mixes\n", b.gd.FmtPos(fn.Pos()), fn, c.bad, c.why, len(c.links), len(c.stores), len(c.mixes))
+					}
 					fn.ResultExact = false
+					changed = true
+				} else if deep := c.own >> 1; deep&^fn.ResultDeep != 0 {
+					// Stored in what parameters reach as well: the
+					// caller is told (ir.Func.ResultDeep).
+					fn.ResultDeep |= deep
 					changed = true
 				}
 			}
@@ -903,7 +917,7 @@ func (b *batch) solveConds() {
 		for _, g := range groups {
 			c := b.condOnce(g)
 			old := b.conds[g]
-			if c.bad != old.bad || c.own != old.own || len(c.links) != len(old.links) || len(c.stores) != len(old.stores) || len(c.mixes) != len(old.mixes) {
+			if c.bad != old.bad || c.own != old.own || c.from != old.from || len(c.links) != len(old.links) || len(c.stores) != len(old.stores) || len(c.mixes) != len(old.mixes) {
 				changed = true
 			}
 			b.conds[g] = c
@@ -941,7 +955,10 @@ func (b *batch) condOnce(g *location) *groupCond {
 	c.stores = slices.Clone(in.static.stores)
 	c.mixes = slices.Clone(in.static.mixes)
 	for _, callee := range in.callees {
-		if !callee.Func.ResultExact {
+		// (What a function of the batch stores of its results in
+		// its parameters' structures, its caller's graph does not
+		// have.)
+		if !callee.Func.ResultExact || callee.Func.ResultDeep != 0 {
 			c.bad = true
 			c.why = fmt.Sprintf("the result of %v, which does not return what is as local as it is told", callee)
 			return c
@@ -958,6 +975,7 @@ func (b *batch) condOnce(g *location) *groupCond {
 			return c
 		}
 		c.own |= c2.own
+		c.from |= c2.from
 		for _, l := range c2.links {
 			c.addLink(l.Key, int(l.Arg))
 		}
@@ -1056,9 +1074,11 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 					fail("a parameter that is assigned, or has no bit", m)
 				} else {
 					c.own |= 1 << k
+					c.from |= 1 << k
 				}
 			} else if d := b.derived[name]; d != 0 {
 				c.own |= d << 1
+				c.from |= d << 1
 			}
 		}
 		for _, r := range m.dyn {
@@ -1085,6 +1105,7 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			case d.plain && d.loc != nil && d.loc.param && r.curfn == fn && !d.loc.reassigned && !d.loc.captured && !d.loc.addrtaken:
 				if k := paramBit(fn, d.name); k != 0 {
 					c.own |= 1 << k
+					c.from |= 1 << k
 				} else {
 					fail("stored through a parameter that has no bit", m)
 				}
@@ -1170,6 +1191,17 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 						pos = m.n.Pos()
 					}
 					fmt.Printf("%s: %v stores what its caller does not know: %v (unknown %v, of %v, a call's result %v, escapes %v, attributes %#x, %d roots)\n", b.gd.FmtPos(pos), fn, m.n, m.unknown, m.curfn, m.callRes != nil, m.hasAttr(attrEscapes), uint(m.attrs), len(m.dyn))
+					if m.callRes != nil && m.callRes.fn != nil && m.callRes.fn.Func != nil {
+						f := m.callRes.fn
+						fmt.Printf("\tthe result of %v: in the batch %v, exact %v, a pool's %v, not local %v, returned %v, candidate %v\n", f, b.inMutualBatch(f), f.Func.ResultExact, f.Func.PoolResult, m.hasAttr(attrNotLocal), m.hasAttr(attrReturned), m.hasAttr(attrCandidateEscape))
+					}
+					for _, r := range m.dyn {
+						if d := r.dynRoot; d == nil {
+							fmt.Printf("\ta root that is not dynamic\n")
+						} else {
+							fmt.Printf("\ta root: call %v, link %q, cond %v, of %v, deep %b, plain %v, mix %q, group %v\n", d.call != nil, d.link, d.cond != nil, r.curfn, d.deep, d.plain, d.mixKey, d.group)
+						}
+					}
 				}
 				break
 			}
@@ -1221,16 +1253,37 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 // says where it is stored; or an object that fn allocates exactly as
 // its caller says of that structure.
 func (b *batch) knownStored(fn *ir.Func, m *location) bool {
-	if m.unknown || m.curfn != fn || m.callRes != nil {
+	if m.unknown || m.curfn != fn {
 		return false
 	}
-	if !isAlloc(m) {
-		return true
+	if m.callRes != nil {
+		// The result of a function that returns what is as local as
+		// its call says, and the call says what the caller says of
+		// the structures that the result is stored in (callBits):
+		// as an object that fn allocates.
+		callee := m.callRes.fn
+		if callee == nil || callee.Func == nil || b.inMutualBatch(callee) || !callee.Func.ResultExact || callee.Func.PoolResult {
+			return false
+		}
+		if len(m.dyn) == 0 && m.hasAttr(attrDynShares|attrDynSharesValue) {
+			return false
+		}
+	} else {
+		if !isAlloc(m) {
+			return true
+		}
+		if !m.hasAttr(attrEscapes) {
+			return true
+		}
 	}
-	if !m.hasAttr(attrEscapes) {
-		return true
+	if m.hasAttr(attrNotLocal | attrCandidateEscape) {
+		return false
 	}
-	if m.hasAttr(attrNotLocal | attrReturned | attrCandidateEscape) {
+	// What is returned as well is local only if the caller says so of
+	// the results too, and the caller knows where it is
+	// (ir.Func.ResultDeep).
+	returned := m.hasAttr(attrReturned)
+	if returned && !fn.ResultExact {
 		return false
 	}
 	for _, r := range m.dyn {
@@ -1239,9 +1292,12 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 			return false
 		}
 		if d.deep != 0 {
+			if returned && d.deep&^fn.ResultDeep != 0 {
+				return false
+			}
 			continue
 		}
-		if d.plain && d.loc != nil && d.loc.param {
+		if d.plain && d.loc != nil && d.loc.param && !returned {
 			continue
 		}
 		return false
@@ -1361,6 +1417,13 @@ func (b *batch) groupParam(ps *ir.ParamShare, l *location) {
 			ps.Results = 0xff
 		}
 		if deep := c.own >> 1; deep != 0 {
+			if b.gd.Flag.LowerM >= 4 {
+				pos := l.curfn.Pos()
+				if d.cond.dynRoot.call != nil {
+					pos = d.cond.dynRoot.call.Pos()
+				}
+				fmt.Printf("%s: %v is stored in what the parameters %b reach: by a call, in what its argument %d reaches (variable %v)\n", b.gd.FmtPos(pos), l.n, deep, d.cond.dynRoot.arg, d.cond.dynRoot.name)
+			}
 			ps.Deep |= deep
 			setMinDerefs(&ps.DeepDerefs, 0)
 		}
@@ -1404,5 +1467,8 @@ func (e *escape) unknownOf(k hole, t *types.Type) {
 		k.derefs = 0
 	}
 	k.addrtaken = false
+	if e.gd.Flag.LowerM >= 4 {
+		fmt.Printf("%s: a pointer from where the graph does not follow, in %v\n", e.gd.FmtPos(e.gd.Pos), e.curfn)
+	}
 	e.flow(k, &e.unknownSrc)
 }

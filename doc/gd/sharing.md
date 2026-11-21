@@ -1050,6 +1050,41 @@ may store its receiver in what the node reaches. It does not: it is in
 one batch with the functions that walk for it, and a function of the
 same batch has no facts when its caller's graph is built. That is next.
 
+Looked at closer (the same night), that method does store what its
+receiver reaches in the nodes: the objects of the resolver's scopes go
+in the identifiers. So the class's answer is right, and the closures
+that `Inspect` is given are local only where the tree that they walk
+is: the parser's tree has to be local as a whole first. What stands in
+the way there, as `-m=4` now says for each function (`stores what its
+caller does not know`, `is dirt`, `the results of ... are not exact`,
+`a pointer from where the graph does not follow`):
+
+- **A function that returns what it has stored in what a parameter
+  reaches** (done): `(*parser).consumeCommentGroup` appends the group
+  to the parser's list and returns it. The object is local only if the
+  caller says so both of the results and of the parameter's structure,
+  so its results were not exact and it stored what its caller did not
+  know. Now `ir.Func.ResultDeep` has the parameters in whose structures
+  the results are stored, a caller's result flows to what the argument
+  reaches (the deep root of the caller's own parameters, or the
+  argument's group and its condition; where nobody knows all that the
+  argument reaches, nothing: the call says so with the argument's bit
+  and the callee's tag makes the object shared), and such an object,
+  or the result of a function whose results are exact, is one that the
+  caller knows (`knownStored`). Only bits that come from stores count:
+  a function that returns its parameter, or what it has stored through
+  the parameter itself, is as before (`groupCond.from`): `append`-like
+  functions were shared for a while otherwise. For a callee of the same
+  batch the caller's graph has no such flow, and its results are not
+  taken as exact (`condOnce`). `TestSharedDeep`, the last two cases.
+- Open: the closure that `(*parser).init` gives the scanner (stored
+  through `&p.scanner`, a path from a parameter, and shared);
+  `(*parser).error` (`p.file.Position(pos)`: a result that is a struct
+  with a string, which no call site records); statement roots (`stored
+  where only its statement can tell`) in most of the functions that
+  build nodes; the results of functions of the same batch, which the
+  recursive part of the parser is.
+
 Open: the object file of a package (not what it exports) differs by one
 relocation in about one build in five when other packages are compiled
 at the same time; seen on `go/token` on 2026-11-21, not traced.

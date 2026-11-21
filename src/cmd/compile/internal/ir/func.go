@@ -247,6 +247,11 @@ type Func struct {
 	DeepBits    uint16
 	DirtyInto   uint16
 	ResultExact bool
+	// ResultDeep has the parameters in whose structures the function
+	// stores what it returns, or what that reaches: the results are
+	// local only if the bits of those parameters are set too, and
+	// the caller's results are among what its arguments reach.
+	ResultDeep uint16
 	// StoresInto has the parameters in whose structures the function
 	// may store anything at all: that is all that a caller which
 	// cannot say what it knows of them (through a function value, or

@@ -1823,6 +1823,38 @@ func TestSharedDeep(t *testing.T) {
 	}
 	go func() { done <- deepPlanted.decl == nil }()
 	<-done
+	// A function that returns what it has stored in what its
+	// parameter reaches: its caller knows where the result is.
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(0)
+		for range 3 {
+			k := deepAdd(root)
+			sum += len(k.kids)
+		}
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure that a function adds its results to", n)
+	if n < 8 {
+		t.Errorf("%d local objects, want at least 8", n)
+	}
+	// And if the result is stored where another goroutine reaches it,
+	// it is not local, nor what is stored in it afterwards: the two
+	// of the leaf, and the object of its name. (The root, its name,
+	// the slice of its leaves and the object of its name are: the
+	// leaf does not lead to them.)
+	n = runtime.CountLocalAllocs(func() {
+		root := deepBuild(0)
+		deepSink = deepAdd(root)
+		deepResolve(root)
+		sum += deepCount(root)
+	})
+	t.Logf("%d local objects in a structure of which a function's result is shared", n)
+	if n > 4 {
+		t.Errorf("%d local objects, want at most 4", n)
+	}
+	go func() { done <- deepSink.name.obj.decl == deepSink }()
+	<-done
 	if sum == 0 {
 		t.Errorf("no sum")
 	}
@@ -1864,6 +1896,15 @@ type deepSpoiler interface{ SpoilDeep(n *deepNode) }
 type deepSpoilsNot struct{}
 
 func (deepSpoilsNot) SpoilDeep(n *deepNode) {}
+
+// deepAdd adds a leaf to root, and returns it.
+//
+//go:noinline
+func deepAdd(root *deepNode) *deepNode {
+	k := deepLeaf()
+	root.kids = append(root.kids, k)
+	return k
+}
 
 // deepPlanted is an object that every goroutine reaches.
 var deepPlanted = new(deepObj)
