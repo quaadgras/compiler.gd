@@ -1,77 +1,111 @@
-import sys, collections
+import sys, collections, os
 FRESH,RESULT,PARAM,SHARED,STATIC,UNKNOWN,LOAD=1,2,4,8,16,32,64
-stores=collections.defaultdict(list)
-for line in open(sys.argv[1], errors='replace'):
-    if not line.startswith('fieldcensus\t'): continue
-    p=line.rstrip('\n').split('\t')
-    if len(p)<7: continue
-    key,cat,incat,deps,ops,pos=p[1],int(p[2]),int(p[3]),p[4],p[5],p[6]
-    if incat==SHARED: continue   # the container is certainly shared
-    stores[key].append((cat,[d for d in deps.split('|') if d],ops,pos))
-def solve(bad):
-    dem={}
-    for k,ss in stores.items():
-        for cat,deps,ops,pos in ss:
-            if cat&bad:
-                dem.setdefault(k,(cat&bad,pos)); break
-    ch=True
-    while ch:
-        ch=False
-        for k,ss in stores.items():
-            if k in dem: continue
-            for cat,deps,ops,pos in ss:
-                d=[x for x in deps if x in dem and x!=k]
-                # a value loaded from a field nobody stores to here is unknown too
-                if d:
-                    dem[k]=('load '+d[0],pos); ch=True; break
-    return dem
-total=len(stores); nst=sum(len(v) for v in stores.values())
-print(f"{total} fields, elements and maps with {nst} stores")
-modes=[('optimistic (shared, unknown demote)',SHARED|UNKNOWN),('+ parameters demote',SHARED|UNKNOWN|PARAM),('+ call results demote',SHARED|UNKNOWN|PARAM|RESULT)]
-res={}
-for name,bad in modes:
-    dem=solve(bad); res[name]=dem
-    ok=[k for k in stores if k not in dem]
-    print(f"{name}: {len(ok)} holder ({100*len(ok)//total}%), covering {sum(len(stores[k]) for k in ok)} stores ({100*sum(len(stores[k]) for k in ok)//nst}%)")
-def kind(k):
-    return 'elem' if k.startswith('elem ') else 'key' if k.startswith('key ') else 'field'
-for name,bad in modes[:2]:
-    dem=res[name]
-    c=collections.Counter(); t=collections.Counter()
-    for k in stores:
-        t[kind(k)]+=1
-        if k not in dem: c[kind(k)]+=1
-    print(name, {x:f"{c[x]}/{t[x]}" for x in t})
-    why=collections.Counter()
-    for k,(w,pos) in dem.items():
-        if isinstance(w,int):
-            why['shared' if w&SHARED else 'unknown' if w&UNKNOWN else 'param' if w&PARAM else 'result']+=1
-        else: why['loaded from a demoted field']+=1
-    print('  demoted by:',dict(why))
-pk=sys.argv[2] if len(sys.argv)>2 else 'go/ast.'
-print(f"--- {pk} fields")
-for name,bad in modes[:2]:
-    dem=res[name]
-    ks=[k for k in stores if kind(k)=='field' and k.startswith(pk)]
-    okk=[k for k in ks if k not in dem]
-    print(f"{name}: {len(okk)}/{len(ks)} holder")
-    if bad==SHARED|UNKNOWN:
-        for k in sorted(ks):
-            if k in dem:
-                w,pos=dem[k]; print('   demoted', k, w, pos.replace('/home/quentin/git/go/src/',''))
-ops=collections.Counter()
-for k,ss in stores.items():
-    for cat,deps,o,pos in ss:
-        if cat&UNKNOWN:
-            for x in o.split('|'): ops[x]+=1
-print('unknown operations:',ops.most_common(12))
-def chain(k, dem):
-    out=[]
-    seen=set()
-    while k in dem and k not in seen:
-        seen.add(k); w,pos=dem[k]; out.append(f"{k} <- {w} at {pos.replace('/home/quentin/git/go/src/','')}")
-        if isinstance(w,str): k=w[5:]
-        else: break
-    return out
-for k in sys.argv[3:]:
-    print('\n'.join(chain(k,res[modes[0][0]])))
+path=sys.argv[1]
+pkgs=None
+if len(sys.argv)>2 and sys.argv[2]!='-': pkgs=set(open(sys.argv[2]).read().split())
+show=sys.argv[3] if len(sys.argv)>3 else 'go/ast.'
+dyn=os.environ.get('DYN')=='1'
+verbose=os.environ.get('V')=='1'
+def nd(d): return d if d[:2] in('p:','r:','a:') else 'f:'+d
+inc=collections.defaultdict(list)     # node -> [(sharedroot, deps, pos)]
+stores=[]                              # (key, vdeps, cshared, cdeps, pos)
+nstores=collections.Counter(); defs=collections.defaultdict(set); esc=set()
+for line in open(path, errors='replace'):
+    if not line.startswith('fieldcensus'): continue
+    p=line.rstrip('\n').split('\t'); kind=p[0]
+    if pkgs is not None and p[-1] not in pkgs: continue
+    if kind=='fieldcensus':
+        key,cat,incat,deps,ops,pos,cdeps=p[1],int(p[2]),int(p[3]),p[4],p[5],p[6],p[7]
+        sh=bool(cat&(SHARED|UNKNOWN)) or (dyn and 'dynamic result' in ops)
+        dl=[nd(d) for d in deps.split('|') if d]
+        cd=[nd(d) for d in cdeps.split('|') if d]
+        inc['f:'+key].append((sh,dl,pos))
+        stores.append(('f:'+key,dl,bool(incat&(SHARED|UNKNOWN)) or key=='<shared>',cd,pos))
+        nstores['f:'+key]+=1
+    else:
+        key,i,cat,deps,ops=p[1],p[2],int(p[3]),p[4],p[5]
+        dl=[nd(d) for d in deps.split('|') if d]
+        v=(bool(cat&(SHARED|UNKNOWN)) or (dyn and 'dynamic result' in ops),dl,'')
+        if kind=='fieldcensus-arg': inc[f'p:{key}#{i}'].append(v)
+        elif kind=='fieldcensus-ret': inc[f'r:{key}#{i}'].append(v)
+        elif kind=='fieldcensus-def': defs[ops].add(key)
+        elif kind=='fieldcensus-esc': esc.add(key)
+nodes=set(inc)
+for l in list(inc.values()):
+    for v in l: nodes.update(v[1])
+for s in stores: nodes.update(s[3])
+byfunc=collections.defaultdict(list)
+for n in nodes:
+    if n[:2] in('p:','r:'):
+        k,i=n[2:].rsplit('#',1); byfunc[k].append((n[0],i))
+for m,fs in defs.items():
+    for f in fs:
+        for kind,i in byfunc.get(f,[]):
+            if kind=='p': inc[f'p:{f}#{i}'].append((False,[f'p:{m}#{i}'],''))
+        if m in esc: esc.add(f)
+    for kind,i in byfunc.get(m,[]):
+        if kind=='r':
+            for f in fs: inc[f'r:{m}#{i}'].append((False,[f'r:{f}#{i}'],''))
+nodes|=set(inc)
+users=collections.defaultdict(set)
+for n,l in inc.items():
+    for v in l:
+        for d in v[1]: users[d].add(n)
+bycont=collections.defaultdict(list)
+for i,s in enumerate(stores):
+    for d in s[3]: bycont[d].append(i)
+P=set(); Fo=set(); why={}; work=[]
+def addP(n,w):
+    if n not in P: P.add(n); why.setdefault(n,w); work.append(n)
+def addF(n,w):
+    if n not in Fo:
+        Fo.add(n); why[n]=w; work.append(('F',n)); addP(n,w)
+def force(i,w):
+    for d in stores[i][1]: addF(d,w)
+for n,l in inc.items():
+    for sh,dl,pos in l:
+        if sh: addP(n,pos or 'a shared value')
+if dyn:
+    for n in nodes:
+        if n[:2]=='p:' and n[2:].rsplit('#',1)[0] in esc: addP(n,'callers nobody can name')
+for i,s in enumerate(stores):
+    if s[2]: force(i,'stored in what is shared at '+s[4])
+while work:
+    x=work.pop()
+    if isinstance(x,tuple):
+        n=x[1]
+        for sh,dl,pos in inc.get(n,[]):
+            for d in dl: addF(d,'flows to '+n)
+        continue
+    n=x
+    for u in users[n]: addP(u,'holds '+n)
+    for i in bycont[n]: force(i,f'stored at {stores[i][4]} in what {n} may make shared')
+fields=[n for n in inc if n[:2]=='f:' and n!='f:<shared>']
+allocs=[n for n in nodes if n[:2]=='a:']
+tot=len(fields); ns=sum(nstores[f] for f in fields)
+H=[f for f in fields if f not in P]; M=[f for f in fields if f in P and f not in Fo]; Sx=[f for f in fields if f in Fo]
+pc=lambda a,b: f"{a} ({100*a//max(1,b)}%)"
+print(f"{tot} fields/elements/maps, {ns} stores, {len(allocs)} allocations")
+print(f"fields: holder {pc(len(H),tot)}, mixed {pc(len(M),tot)}, shared {pc(len(Sx),tot)}")
+la=[a for a in allocs if a not in Fo]
+print(f"allocations that may be local: {pc(len(la),len(allocs))}")
+for sh in show.split(','):
+    k=[f for f in fields if f.startswith('f:'+sh)]
+    ka=[a for a in allocs if ('/src/'+sh.rstrip('.')+'/') in a]
+    print(f"  {sh:12} fields holder {sum(1 for f in k if f not in P)}, mixed {sum(1 for f in k if f in P and f not in Fo)}, shared {sum(1 for f in k if f in Fo)}; allocations that may be local {sum(1 for a in ka if a not in Fo)}/{len(ka)}")
+def chain(n):
+    out=[]; seen=set()
+    while n in why and n not in seen and len(out)<8:
+        seen.add(n); w=why[n]; out.append(n.replace('/home/quentin/git/go/src/',''))
+        if w.startswith('holds '): n=w[6:]
+        elif w.startswith('flows to '): out.append('[flows to]'); n=w[9:]
+        else: out.append(w.replace('/home/quentin/git/go/src/','')); break
+    return ' <- '.join(out)
+ends=collections.Counter()
+sh0=show.split(',')[0]
+for a in allocs:
+    if a in Fo and ('/src/'+sh0.rstrip('.')+'/') in a:
+        c=chain(a).split(' <- '); ends[c[-1][:170]]+=1
+        if verbose: print('   ',chain(a)[:600])
+print(f"why allocations in {sh0} are shared:")
+for k2,v in ends.most_common(10): print('  ',v,k2)

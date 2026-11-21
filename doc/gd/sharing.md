@@ -1162,6 +1162,40 @@ So the question is the 1842 fields in which a parameter is stored: each
 is an obligation on the callers (the argument is local exactly when the
 container is).
 
+Followed further the same day, the census says no to classes that are
+decided for the whole program without the call:
+
+- Parameters and results followed through their callers (`-arg`,
+  `-ret`, `-def`, `-esc` lines), for `cmd/gofmt` alone as one program:
+  123 of `go/ast`'s 126 fields have no shared value reach them
+  (`Ident.Obj` and two that hold errors and writers do).
+- But a class must also be kept: what is stored in a field that is not
+  a holder, or in a container that may be shared, has to be allocated
+  shared, and then the fields that hold *that* are not holders either.
+  With this rule and two classes, 33 of the 126 are left; the elements
+  of `[]interface{}` are one field for all the program and take
+  everything that is ever printed with them.
+- Two classes are not enough anyway: a local container that holds
+  shared values at times (the arguments of a `fmt` call) needs a third,
+  *mixed*: anything, as long as nothing that is loaded from it is
+  stored in what may be shared. With three classes, the origin of each
+  store's container, and allocations as nodes of their own (what
+  `fieldcensus.py` computes now): of `go/ast`'s fields in gofmt 8 are
+  holders, 19 mixed and 99 shared, and 214 of the 487 allocations in
+  `go/parser` may be local. Over everything, half of the allocations.
+
+The census is crude (no order in time, the elements of a slice type as
+one field, methods by name), and a finer one would do better. But the
+way it fails is not crudeness: one decision per field or per parameter
+for the whole program means that a helper which everything passes
+through (`fmt.Errorf`, an `append` in a loop) joins all its callers,
+and one of them that shares makes the others share. What the present
+design has, and this would give up, is that a call says what holds *at
+that call*, with bits that are computed when the program runs. That
+has to stay. What should change is what the bits claim: not that
+everything which an argument reaches is local, but that the containers
+which are stored in are.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

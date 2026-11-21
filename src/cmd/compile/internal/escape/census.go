@@ -63,6 +63,7 @@ type census struct {
 	vars    map[*ir.Name]*cenVal
 	changed bool
 	emit    bool
+	lit     map[ir.Node]ir.Node
 	curfn   *ir.Func
 }
 
@@ -82,7 +83,22 @@ func fieldCensus(gd *base.Invocation, fns []*ir.Func) {
 	c.emit = true
 	for _, fn := range fns {
 		c.curfn = fn
+		if fn.Type().Recv() != nil && fn.Sym() != nil {
+			name := fn.Sym().Name
+			if i := strings.LastIndex(name, "."); i >= 0 {
+				name = name[i+1:]
+			}
+			c.line("def", cenFuncKey(fn.Nname), 0, cenVal{ops: []string{"meth:" + name}})
+		}
 		ir.VisitList(fn.Body, c.visit)
+		// What the function returns by its named results.
+		for i, f := range fn.Type().Results() {
+			if n, ok := f.Nname.(*ir.Name); ok && n != nil && cenPointer(f.Type) {
+				if v := c.vars[n.Canonical()]; v != nil {
+					c.line("ret", cenFuncKey(fn.Nname), i, *v)
+				}
+			}
+		}
 	}
 }
 
@@ -123,10 +139,68 @@ func (c *census) of(n *ir.Name) *cenVal {
 		v = new(cenVal)
 		if n.Class == ir.PPARAM {
 			v.cat = cenParam
+			if n.Curfn != nil {
+				for i, f := range n.Curfn.Type().RecvParams() {
+					if f.Nname == n {
+						v.deps = []string{fmt.Sprintf("p:%s#%d", cenFuncKey(n.Curfn.Nname), i)}
+					}
+				}
+			}
 		}
 		c.vars[n] = v
 	}
 	return v
+}
+
+// cenFuncKey returns the name of the function fn for the census.
+func cenFuncKey(fn *ir.Name) string {
+	s := fn.Sym()
+	if s == nil {
+		return "?"
+	}
+	if s.Pkg == nil {
+		return s.Name
+	}
+	return s.Pkg.Path + "." + s.Name
+}
+
+// cenCallee returns the key of what call calls, or "" if only the
+// program knows; first is the index of its first argument.
+func cenCallee(call *ir.CallExpr) (key string, recv ir.Node) {
+	switch call.Op() {
+	case ir.OCALLFUNC, ir.OCALLMETH:
+		if fn := ir.StaticCalleeName(call.Fun); fn != nil {
+			return cenFuncKey(fn), nil
+		}
+	case ir.OCALLINTER:
+		if sel, ok := call.Fun.(*ir.SelectorExpr); ok {
+			return "meth:" + sel.Sel.Name, sel.X
+		}
+	}
+	return "", nil
+}
+
+func (c *census) line(kind, key string, i int, v cenVal) {
+	if !c.emit {
+		return
+	}
+	fmt.Printf("fieldcensus-%s\t%s\t%d\t%d\t%s\t%s\t%s\n", kind, key, i, v.cat, strings.Join(v.deps, "|"), strings.Join(v.ops, "|"), c.pkg())
+}
+
+func (c *census) pkg() string {
+	if s := c.curfn.Sym(); s != nil && s.Pkg != nil {
+		return s.Pkg.Path
+	}
+	return ""
+}
+
+// alloc returns the value of an allocation at n.
+func (c *census) alloc(n ir.Node) cenVal {
+	if o := c.lit[n]; o != nil {
+		// (A literal whose address is taken is that allocation.)
+		n = o
+	}
+	return cenVal{cat: cenFresh, deps: []string{"a:" + c.gd.FmtPos(n.Pos()) + ":" + n.Op().String()}}
 }
 
 func load(key string) cenVal { return cenVal{cat: cenLoad, deps: []string{key}} }
@@ -147,6 +221,7 @@ func (c *census) eval(n ir.Node) cenVal {
 		case ir.PEXTERN:
 			return cenVal{cat: cenShared}
 		case ir.PFUNC:
+			c.line("esc", cenFuncKey(n), 0, cenVal{})
 			return cenVal{cat: cenStatic}
 		}
 		if ir.IsBlank(n) {
@@ -155,9 +230,17 @@ func (c *census) eval(n ir.Node) cenVal {
 		return *c.of(n)
 	case ir.OADDR:
 		return c.evalAddr(n.(*ir.AddrExpr).X)
+	case ir.OCLOSURE:
+		if f := n.(*ir.ClosureExpr).Func; f != nil && f.Nname != nil {
+			c.line("esc", cenFuncKey(f.Nname), 0, cenVal{})
+		}
+		return c.alloc(n)
+	case ir.OMETHVALUE:
+		c.line("esc", "meth:"+n.(*ir.SelectorExpr).Sel.Name, 0, cenVal{})
+		return c.alloc(n)
 	case ir.OPTRLIT, ir.ONEW, ir.OMAKESLICE, ir.OMAKEMAP, ir.OMAKECHAN, ir.OSLICELIT, ir.OARRAYLIT, ir.OSTRUCTLIT, ir.OMAPLIT,
-		ir.OCLOSURE, ir.OMETHVALUE, ir.OADDSTR, ir.OBYTES2STR, ir.OSTR2BYTES, ir.OSTR2RUNES, ir.ORUNES2STR, ir.ORUNESTR, ir.OMAKESLICECOPY:
-		return cenVal{cat: cenFresh}
+		ir.OADDSTR, ir.OBYTES2STR, ir.OSTR2BYTES, ir.OSTR2RUNES, ir.ORUNES2STR, ir.ORUNESTR, ir.OMAKESLICECOPY:
+		return c.alloc(n)
 	case ir.OCONVIFACE:
 		n := n.(*ir.ConvExpr)
 		if n.X.Type().IsInterface() || types.IsDirectIface(n.X.Type()) {
@@ -166,7 +249,7 @@ func (c *census) eval(n ir.Node) cenVal {
 		if n.X.Op() == ir.OLITERAL {
 			return cenVal{cat: cenStatic}
 		}
-		return cenVal{cat: cenFresh}
+		return c.alloc(n)
 	case ir.OCONV, ir.OCONVNOP:
 		n := n.(*ir.ConvExpr)
 		if !n.X.Type().HasPointers() {
@@ -196,7 +279,7 @@ func (c *census) eval(n ir.Node) cenVal {
 	case ir.ODEREF:
 		return load(cenElemKey(n.(*ir.StarExpr).X.Type()))
 	case ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER, ir.OCALL:
-		return cenVal{cat: cenResult}
+		return c.result(n, 0)
 	case ir.OINLCALL:
 		n := n.(*ir.InlinedCallExpr)
 		var v cenVal
@@ -206,7 +289,7 @@ func (c *census) eval(n ir.Node) cenVal {
 		return v
 	case ir.OAPPEND:
 		n := n.(*ir.CallExpr)
-		v := cenVal{cat: cenFresh}
+		v := c.alloc(n)
 		if len(n.Args) > 0 {
 			v.merge(c.eval(n.Args[0]))
 		}
@@ -219,6 +302,16 @@ func (c *census) eval(n ir.Node) cenVal {
 		return c.eval(n.(*ir.UnaryExpr).X)
 	}
 	return cenVal{cat: cenUnknown, ops: []string{n.Op().String()}}
+}
+
+// result returns where the i'th result of the call n comes from.
+func (c *census) result(n ir.Node, i int) cenVal {
+	if call, ok := n.(*ir.CallExpr); ok {
+		if key, _ := cenCallee(call); key != "" {
+			return cenVal{cat: cenResult, deps: []string{fmt.Sprintf("r:%s#%d", key, i)}}
+		}
+	}
+	return cenVal{cat: cenResult, ops: []string{"dynamic result"}}
 }
 
 // evalAddr returns where the address of x comes from.
@@ -246,9 +339,9 @@ func (c *census) evalAddr(x ir.Node) cenVal {
 			if x.(*ir.Name).Class == ir.PEXTERN {
 				return cenVal{cat: cenShared}
 			}
-			return cenVal{cat: cenFresh}
+			return c.alloc(x.(*ir.Name).Canonical())
 		case ir.OSTRUCTLIT, ir.OARRAYLIT, ir.OSLICELIT, ir.OMAPLIT:
-			return cenVal{cat: cenFresh}
+			return c.alloc(x)
 		}
 		return cenVal{cat: cenUnknown, ops: []string{"&" + x.Op().String()}}
 	}
@@ -260,7 +353,7 @@ func (c *census) store(key string, in, v cenVal, pos ir.Node) {
 	if !c.emit {
 		return
 	}
-	fmt.Printf("fieldcensus\t%s\t%d\t%d\t%s\t%s\t%s\n", key, v.cat, in.cat, strings.Join(v.deps, "|"), strings.Join(v.ops, "|"), c.gd.FmtPos(pos.Pos()))
+	fmt.Printf("fieldcensus\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", key, v.cat, in.cat, strings.Join(v.deps, "|"), strings.Join(v.ops, "|"), c.gd.FmtPos(pos.Pos()), strings.Join(in.deps, "|"), c.pkg())
 }
 
 // assign notes the assignment of v to lhs.
@@ -272,6 +365,7 @@ func (c *census) assign(lhs ir.Node, v cenVal) {
 	case ir.ONAME:
 		n := lhs.(*ir.Name)
 		if n.Class == ir.PEXTERN {
+			c.store("<shared>", cenVal{cat: cenShared}, v, lhs)
 			return
 		}
 		if c.of(n).merge(v) {
@@ -293,7 +387,64 @@ func (c *census) assign(lhs ir.Node, v cenVal) {
 
 func (c *census) visit(n ir.Node) {
 	fresh := cenVal{cat: cenFresh}
+	_ = fresh
 	switch n.Op() {
+	case ir.OPTRLIT, ir.OADDR:
+		if x := n.(*ir.AddrExpr).X; x.Op() == ir.OSTRUCTLIT || x.Op() == ir.OARRAYLIT {
+			if c.lit == nil {
+				c.lit = make(map[ir.Node]ir.Node)
+			}
+			c.lit[x] = n
+		}
+	case ir.OCALLFUNC, ir.OCALLMETH, ir.OCALLINTER:
+		if !c.emit {
+			break
+		}
+		call := n.(*ir.CallExpr)
+		key, recv := cenCallee(call)
+		first := 0
+		if recv != nil {
+			first = 1
+			if cenPointer(recv.Type()) {
+				c.line("arg", key, 0, c.eval(recv))
+			}
+		}
+		for i, a := range call.Args {
+			if !cenPointer(a.Type()) {
+				continue
+			}
+			v := c.eval(a)
+			if key == "" {
+				// (Evaluated for the functions that it names.)
+				continue
+			}
+			c.line("arg", key, first+i, v)
+		}
+	case ir.OSEND:
+		n := n.(*ir.SendStmt)
+		if cenPointer(n.Value.Type()) {
+			c.store("<shared>", cenVal{cat: cenShared}, c.eval(n.Value), n)
+		}
+	case ir.OGO:
+		if call, ok := n.(*ir.GoDeferStmt).Call.(*ir.CallExpr); ok {
+			for _, a := range call.Args {
+				if cenPointer(a.Type()) {
+					c.store("<shared>", cenVal{cat: cenShared}, c.eval(a), n)
+				}
+			}
+			if cenPointer(call.Fun.Type()) && call.Fun.Op() != ir.ONAME {
+				c.store("<shared>", cenVal{cat: cenShared}, c.eval(call.Fun), n)
+			}
+		}
+	case ir.ORETURN:
+		if !c.emit {
+			break
+		}
+		for i, r := range n.(*ir.ReturnStmt).Results {
+			if cenPointer(r.Type()) {
+				c.line("ret", cenFuncKey(c.curfn.Nname), i, c.eval(r))
+			}
+		}
 	case ir.OAS:
 		n := n.(*ir.AssignStmt)
 		if n.Y != nil {
@@ -316,8 +467,8 @@ func (c *census) visit(n ir.Node) {
 			}
 			break
 		}
-		for _, l := range n.Lhs {
-			c.assign(l, cenVal{cat: cenResult})
+		for i, l := range n.Lhs {
+			c.assign(l, c.result(n.Rhs[0], i))
 		}
 	case ir.OAS2DOTTYPE, ir.OAS2MAPR:
 		n := n.(*ir.AssignListStmt)
@@ -370,7 +521,7 @@ func (c *census) visit(n ir.Node) {
 		n := n.(*ir.CompLitExpr)
 		for _, e := range n.List {
 			if kv, ok := e.(*ir.StructKeyExpr); ok && cenPointer(kv.Field.Type) {
-				c.store(n.Type().LinkString()+"."+kv.Field.Sym.Name, fresh, c.eval(kv.Value), kv)
+				c.store(n.Type().LinkString()+"."+kv.Field.Sym.Name, c.alloc(n), c.eval(kv.Value), kv)
 			}
 		}
 	case ir.OARRAYLIT, ir.OSLICELIT:
@@ -382,7 +533,7 @@ func (c *census) visit(n ir.Node) {
 			if kv, ok := e.(*ir.KeyExpr); ok {
 				e = kv.Value
 			}
-			c.store(cenElemKey(n.Type()), fresh, c.eval(e), e)
+			c.store(cenElemKey(n.Type()), c.alloc(n), c.eval(e), e)
 		}
 	case ir.OMAPLIT:
 		n := n.(*ir.CompLitExpr)
@@ -392,10 +543,10 @@ func (c *census) visit(n ir.Node) {
 				continue
 			}
 			if cenPointer(n.Type().Key()) {
-				c.store("key "+n.Type().LinkString(), fresh, c.eval(kv.Key), kv)
+				c.store("key "+n.Type().LinkString(), c.alloc(n), c.eval(kv.Key), kv)
 			}
 			if cenPointer(n.Type().Elem()) {
-				c.store(cenElemKey(n.Type()), fresh, c.eval(kv.Value), kv)
+				c.store(cenElemKey(n.Type()), c.alloc(n), c.eval(kv.Value), kv)
 			}
 		}
 	}
