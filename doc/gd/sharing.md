@@ -1368,6 +1368,75 @@ recursive batch is every function, as "what `p` leads to is stored
 there". A group of `p` then needs the place of that store, in another
 function, to be local, and nothing says that it is.
 
+**What a function of the batch stores, and in what** (2026-11-22,
+last): that diagnosis was of the wrong functions. Following the
+functions that become dirty in the first round of `solveGroups`, and
+not those that only call them, gave five causes. For each, an
+experiment that was not sound measured first whether it mattered.
+Three did, together and not alone. Each now has a sound rule:
+
+- *A store through a variable that has a group of its own*
+  (`parseInterfaceType`: `f := p.parseMethodSpec()`, then
+  `f.Comment = p.expectSemi()`). What is stored there is local only if
+  the variable's group is (`storeThrough`: the group's condition), and
+  that group's condition has the bit of each parameter among its
+  members. So such a store says nothing new to the caller, whatever is
+  stored, unless it comes from where the graph does not follow
+  (`storeRoots.qGrp`, `sGrp`).
+- *Another argument passed to a function of the batch*
+  (`parseMethodSpec` passes `name0`, a result of `parseExpr(p)`, to
+  `parseParameterList`). The call sets that argument's bit only if the
+  caller knows all that it reaches (`callBits`). So what matters is not
+  whether the function stores in it at all (`StoresInto`), but what it
+  stores that its caller does not know (`DirtyInto`). What it passes on
+  to functions only known when the program runs (`typ0.Pos()`) becomes
+  a condition of the groups that have the argument (`pendingStores`)
+  and of the caller's parameters (`StoreLinks`). Such roots are now
+  evaluated again in each round, as those of the caller's own
+  parameters were.
+- *A parameter that is assigned* (`typ0 = nil` in `parseParameterList`)
+  is still a member of a group as the argument that was passed. What is
+  assigned to it is a member of its own.
+- *A result that is also stored in what a parameter reaches*
+  (`p.imports = append(p.imports, spec)`, then `return spec`). The
+  caller is told by `ResultFrom` as well as by `ResultDeep`, and asks
+  the same of the argument either way (`knownStored`).
+- *The result of a function of the batch* that is loaded from, or also
+  stored in, what an argument reaches: the condition takes the bits of
+  the caller's parameters that the argument is derived from
+  (`batchResultFrom`), as `resultFrom` does for a function of another
+  batch, instead of being bad.
+
+What it gives: 27 of the parser's functions may store what their
+callers do not know, against 83, and the recursive descent is clean but
+for `parseTypeSpec` and `parseGenericType`. `TestSharedRecursiveStores`
+has the shape: a store through a result, a result passed to another
+function of the batch that stores in it, and a result also kept in the
+parser.
+
+Two things are left, and the second is a design question:
+
+1. *Loaded from one parameter, stored in what another reaches, by a
+   function of the batch* (`recFill(p, it)` doing `it.note = p.note`;
+   the parser does it with its comment groups). The walk from the store
+   climbs into the caller and leaves a root of the callee there, which
+   the caller cannot read ("stored where only its statement can tell").
+   A fact "what parameter j reaches is stored in what parameter k
+   reaches" would replace that climb at the caller, but the caller's
+   graph then needs edges that only the callee's walk finds: the batch
+   would be solved again until nothing changes.
+2. *Nothing in the parser is local when the program runs yet.*
+   `ParseFile` passes no bit for `p` ("nobody knows all that it
+   reaches"), because `p` holds the `*token.File`, which is shared, and
+   a bit says that everything the argument reaches is local. The comment
+   groups need `p`'s bit, and the nodes that hold them need theirs.
+   Allowing a typed exception in the bit ("all but the values of type T,
+   which nobody stores in under it") is not sound as it is: a function
+   that does not know that T is shared could store a local object in
+   one. What the census pointed to fits instead: the bit says that the
+   objects which the callee stores in are local, not everything that
+   the argument reaches.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

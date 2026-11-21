@@ -2011,6 +2011,85 @@ func recLink(n *recNode, d int) *recNode {
 
 var recSink *recNode
 
+// As a parser does: a function of the batch stores in what another
+// returns, passes what it gets back to another one that stores in it,
+// and returns what it also keeps in the parser.
+
+type recParser struct {
+	note  *recNote
+	items []*recItem
+}
+
+type recNote struct{ v int }
+
+type recItem struct {
+	note *recNote
+	sub  *recItem
+	v    int
+}
+
+//go:noinline
+func recItemOf(p *recParser, d int) *recItem {
+	it := &recItem{v: d}
+	if d > 0 {
+		sub := recItemOf(p, d-1)
+		sub.note = p.note
+		recFill(p, sub, d-1)
+		it.sub = sub
+	}
+	p.items = append(p.items, it)
+	return it
+}
+
+//go:noinline
+func recFill(p *recParser, it *recItem, d int) {
+	if d > 1 {
+		it.sub = recItemOf(p, d-2)
+	}
+}
+
+var recParserSink *recParser
+
+func TestSharedRecursiveStores(t *testing.T) {
+	skipIfNotSharing(t)
+	if !linkLocal(func() { _ = *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	sum := 0
+	n := runtime.CountLocalAllocs(func() {
+		p := &recParser{note: &recNote{v: 1}}
+		sum += recItemOf(p, 5).v + len(p.items)
+	})
+	t.Logf("%d local objects under a local parser", n)
+	if n < 1 {
+		t.Errorf("no local object under a local parser")
+	}
+	n = runtime.CountLocalAllocs(func() {
+		p := &recParser{note: &recNote{v: 1}}
+		recParserSink = p
+		sum += recItemOf(p, 5).v
+	})
+	t.Logf("%d local objects under a shared parser", n)
+	done := make(chan int)
+	go func() {
+		k := 0
+		for _, it := range recParserSink.items {
+			for ; it != nil; it = it.sub {
+				if it.note != nil {
+					k += it.note.v
+				}
+			}
+		}
+		done <- k
+	}()
+	if k := <-done; k < 3 {
+		t.Errorf("%d notes from the shared parser, want at least 3", k)
+	}
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
 func TestSharedRecursive(t *testing.T) {
 	skipIfNotSharing(t)
 	sum := 0

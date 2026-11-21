@@ -55,10 +55,12 @@ type strayStore struct {
 
 // The membership roots of a function for its stores through variables
 // that are not tracked: what the variables are, and what is stored,
-// for those that are parameters or derived from them and for the
-// others. Their walks stay in the function.
+// for those that are parameters or derived from them, for those that
+// have a group of their own (varGroup), and for the others. Their
+// walks stay in the function.
 type storeRoots struct {
 	q, s       *location
+	qGrp, sGrp *location
 	qBad, sBad *location
 }
 
@@ -406,7 +408,7 @@ func (b *batch) dirtOrStored(x *location, stores bool) bool {
 		if f == nil || d.pendArg >= 16 {
 			return true
 		}
-		if l := d.pendOwn; !stores && l != nil && !l.reassigned && !l.addrtaken && !b.capturedAssigned(l) {
+		if !stores && b.ownPending(d) {
 			// The function called allocates what it stores as
 			// this function's caller says (its results are the
 			// caller's affair, and what it passes on to the
@@ -415,29 +417,83 @@ func (b *batch) dirtOrStored(x *location, stores bool) bool {
 			// solveGroups).
 			return f.DirtyInto&(1<<d.pendArg) != 0
 		}
-		if f.StoresInto&(1<<d.pendArg) != 0 {
-			return true
-		}
-		// (What it passes on to a function that is only known when
-		// the program runs, it may store in too.)
-		params := d.pendFn.Type().RecvParams()
-		if d.pendArg < len(params) && params[d.pendArg].Nname != nil {
-			if l, _ := params[d.pendArg].Nname.(*ir.Name).Opt.(*location); l != nil {
-				for _, g := range l.groups {
-					if g.dynRoot.classKey != "" {
-						return true
-					}
-				}
+		if !stores {
+			// Another argument: the call sets its bit only if this
+			// function knows all that it reaches (callBits), so that
+			// what the function called allocates and stores in it is
+			// as local as that, and what else it stores there that
+			// its caller does not know, it says. What it passes on to
+			// the functions that are only known when the program
+			// runs, the classes of its parameter say, which the
+			// groups that have the argument ask (pendingStores);
+			// what it converts to an interface, nothing here does.
+			if f.DirtyInto&(1<<d.pendArg) != 0 {
+				return true
+			}
+			if l := pendParam(d); l != nil {
 				for _, r := range l.dyn {
 					if r.dynRoot != nil && r.dynRoot.link != "" {
 						return true
 					}
 				}
 			}
+			return false
+		}
+		if f.StoresInto&(1<<d.pendArg) != 0 {
+			return true
+		}
+		// (What it passes on to a function that is only known when
+		// the program runs, it may store in too.)
+		if l := pendParam(d); l != nil {
+			for _, g := range l.groups {
+				if g.dynRoot.classKey != "" {
+					return true
+				}
+			}
+			for _, r := range l.dyn {
+				if r.dynRoot != nil && r.dynRoot.link != "" {
+					return true
+				}
+			}
 		}
 		return false
 	}
 	return true
+}
+
+// ownPending reports whether the pending root d is for a parameter of
+// the caller that the call passes as itself, with the caller's bit.
+func (b *batch) ownPending(d *dynRoot) bool {
+	l := d.pendOwn
+	return l != nil && !l.reassigned && !l.addrtaken && !b.capturedAssigned(l)
+}
+
+// pendParam returns the location of the parameter of the function of
+// the batch that the pending root d is for.
+func pendParam(d *dynRoot) *location {
+	params := d.pendFn.Type().RecvParams()
+	if d.pendArg >= len(params) || params[d.pendArg].Nname == nil {
+		return nil
+	}
+	l, _ := params[d.pendArg].Nname.(*ir.Name).Opt.(*location)
+	return l
+}
+
+// pendingStores adds to c the classes of the functions that are only
+// known when the program runs to which the function of the batch that
+// the pending root d is for passes on what its parameter reaches: none
+// may store in it what its caller does not know.
+func pendingStores(d *dynRoot, c *groupCond) {
+	if l := pendParam(d); l != nil {
+		for _, g := range l.groups {
+			if g.dynRoot.classKey != "" {
+				c.stores = addShareLink(c.stores, g.dynRoot.classKey, g.dynRoot.classArg)
+			}
+		}
+		for _, sl := range l.shares.StoreLinks {
+			c.stores = addShareLink(c.stores, sl.Key, int(sl.Arg))
+		}
+	}
 }
 
 // ownParam returns the location of the parameter of the current
@@ -602,7 +658,12 @@ func (e *escape) condRoot(g *location) *location {
 // noteStray records a store, through a path from the variable name
 // that is not tracked, of what flows to the hole that it returns with
 // k.
-func (e *escape) noteStray(k hole, name *ir.Name, plain bool) hole {
+//
+// grouped says that what is stored is also stored in the variable's
+// group, and is local only if the group's condition is (storeThrough):
+// what the group's members reach, a parameter among them, may then hold
+// it whatever it is.
+func (e *escape) noteStray(k hole, name *ir.Name, plain, grouped bool) hole {
 	if !e.deepOn() || k.dst == &e.blankLoc {
 		return k
 	}
@@ -619,13 +680,17 @@ func (e *escape) noteStray(k hole, name *ir.Name, plain bool) hole {
 	sr := e.storeRoots[e.curfn]
 	if sr == nil {
 		sr = new(storeRoots)
-		for _, r := range []**location{&sr.q, &sr.s, &sr.qBad, &sr.sBad} {
+		for _, r := range []**location{&sr.q, &sr.s, &sr.qGrp, &sr.sGrp, &sr.qBad, &sr.sBad} {
 			*r = e.memberRoot(e.curfn)
 		}
 		e.storeRoots[e.curfn] = sr
 	}
 	rq, rs := sr.q, sr.s
-	if !st.param && st.deep == 0 {
+	switch {
+	case st.param || st.deep != 0:
+	case grouped:
+		rq, rs = sr.qGrp, sr.sGrp
+	default:
 		rq, rs = sr.qBad, sr.sBad
 	}
 	rq.edges = append(rq.edges, edge{src: q})
@@ -812,15 +877,13 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 				}
 				l := b.oldLoc(f.Nname.(*ir.Name))
 				for _, g := range l.groups {
+					// (Of another argument that the parameter's
+					// group has too.)
 					d := g.dynRoot
-					if g.curfn != fn || d.pendOwn == nil || d.pendFn == nil {
+					if g.curfn != fn || d.pendFn == nil || d.pendFn.Func == nil {
 						continue
 					}
-					params := d.pendFn.Type().RecvParams()
-					if d.pendArg >= len(params) || params[d.pendArg].Nname == nil {
-						continue
-					}
-					lc, _ := params[d.pendArg].Nname.(*ir.Name).Opt.(*location)
+					lc := pendParam(d)
 					if lc == nil {
 						continue
 					}
@@ -864,7 +927,7 @@ func (b *batch) solveGroups(fns []*ir.Func) {
 	}
 	b.storeRoot = make(map[*location]bool)
 	for _, sr := range b.storeRoots {
-		for _, r := range []*location{sr.q, sr.s, sr.qBad, sr.sBad} {
+		for _, r := range []*location{sr.q, sr.s, sr.qGrp, sr.sGrp, sr.qBad, sr.sBad} {
 			b.storeRoot[r] = true
 		}
 	}
@@ -1121,11 +1184,13 @@ func (b *batch) solveConds() {
 // say by themselves, the groups whose conditions it needs, and the
 // functions of the batch whose results it has.
 type groupInfo struct {
-	static  groupCond
-	conds   []*location
-	callees []*ir.Name
-	// pending are the roots of members that are passed, as this
-	// function's own parameters, to functions of the batch.
+	static groupCond
+	conds  []*location
+	// calls are those of functions of the batch whose results are
+	// members.
+	calls []*callSite
+	// pending are the roots of members that are passed to functions
+	// of the batch.
 	pending []*location
 }
 
@@ -1148,14 +1213,27 @@ func (b *batch) condOnce(g *location) *groupCond {
 			c.why = fmt.Sprintf("passed to %v, which may store in it what its caller does not know", x.dynRoot.pendFn)
 			return c
 		}
+		if !b.ownPending(x.dynRoot) {
+			pendingStores(x.dynRoot, c)
+		}
 	}
-	for _, callee := range in.callees {
-		// (What a function of the batch stores of its results in
-		// its parameters' structures, its caller's graph does not
-		// have.)
-		if !callee.Func.ResultExact || callee.Func.ResultDeep != 0 || callee.Func.ResultFrom != 0 {
+	for _, cs := range in.calls {
+		callee := cs.fn
+		if !callee.Func.ResultExact {
 			c.bad = true
 			c.why = fmt.Sprintf("the result of %v, which does not return what is as local as it is told", callee)
+			return c
+		}
+		// What the function loads its results from, or stores them
+		// in as well, is what the arguments reach: as of a function
+		// of another batch (resultFrom), but only of arguments that
+		// are derived from this function's parameters, since the
+		// groups of the others are pending (argGroupsOf). (What it
+		// stores of its results in its parameters' structures, this
+		// function's graph does not have: the condition says it.)
+		if why := b.batchResultFrom(g.curfn, cs, callee.Func.ResultFrom, callee.Func.ResultDeep, c); why != "" {
+			c.bad = true
+			c.why = why
 			return c
 		}
 		for _, l := range callee.Func.ResultLinks {
@@ -1234,7 +1312,7 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			break
 		}
 		for _, x := range m.groups {
-			if x.dynRoot.pendOwn != nil {
+			if x.dynRoot.pendFn != nil {
 				// (Known when the batch is: condOnce.)
 				if !slices.Contains(in.pending, x) {
 					in.pending = append(in.pending, x)
@@ -1274,7 +1352,9 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 				fail("the result of a function that nobody knows", m)
 			case b.inMutualBatch(callee):
 				// Known when the batch is (solveGroups).
-				in.callees = append(in.callees, callee)
+				if !slices.Contains(in.calls, m.callRes) {
+					in.calls = append(in.calls, m.callRes)
+				}
 			case !callee.Func.ResultExact:
 				fail("the result of a function that does not return what is as local as it is told", m)
 			default:
@@ -1299,7 +1379,10 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			// caller sees.)
 			if m.param {
 				k := paramBit(fn, name)
-				if k == 0 || m.reassigned || m.addrtaken || b.capturedAssigned(m) {
+				// (One that is assigned is a member as the
+				// argument; what is assigned to it is a member of
+				// its own.)
+				if k == 0 || m.addrtaken || b.capturedAssigned(m) {
 					fail("a parameter that is assigned, or has no bit", m)
 				} else {
 					c.own |= 1 << k
@@ -1394,7 +1477,7 @@ func (b *batch) storesInto(fn *ir.Func) uint16 {
 			continue
 		}
 		l := b.oldLoc(f.Nname.(*ir.Name))
-		if sr != nil && (hasGroup(l, sr.q) || hasGroup(l, sr.qBad)) {
+		if sr != nil && (hasGroup(l, sr.q) || hasGroup(l, sr.qGrp) || hasGroup(l, sr.qBad)) {
 			st |= 1 << i
 			continue
 		}
@@ -1416,7 +1499,7 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 	}
 	var dirty uint16
 	sr := b.storeRoots[fn]
-	bad, badQ := false, false
+	bad, badG, badQ := false, false, false
 	if sr != nil {
 		for _, m := range sr.s.members {
 			if !b.knownStored(fn, m) {
@@ -1452,6 +1535,12 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 			}
 			bad = true
 		}
+		// Through a variable that has a group of its own: what is
+		// stored is local only if all that the variable reaches is,
+		// a parameter's structure among it (storeThrough), so that
+		// only a pointer from where the graph does not follow says
+		// nothing.
+		badG = sr.sGrp.dynRoot.sawUnknown || sr.sGrp.dynRoot.crossed
 		badQ = sr.sBad.dynRoot.sawUnknown || sr.sBad.dynRoot.crossed
 		for _, m := range sr.sBad.members {
 			if m.callRes != nil || isAlloc(m) && m.hasAttr(attrEscapes) {
@@ -1477,7 +1566,7 @@ func (b *batch) dirtyInto(fn *ir.Func) uint16 {
 		if sr == nil {
 			continue
 		}
-		if bad && hasGroup(l, sr.q) || badQ && hasGroup(l, sr.qBad) {
+		if bad && hasGroup(l, sr.q) || badG && hasGroup(l, sr.qGrp) || badQ && hasGroup(l, sr.qBad) {
 			if b.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: %v stores in what its parameter %d reaches what its caller does not know: through a variable %v (unknown %v, crossed %v), or one that is not derived from parameters %v (unknown %v, crossed %v)\n", b.gd.FmtPos(fn.Pos()), fn, i, bad && hasGroup(l, sr.q), sr.s.dynRoot.sawUnknown, sr.s.dynRoot.crossed, badQ && hasGroup(l, sr.qBad), sr.sBad.dynRoot.sawUnknown, sr.sBad.dynRoot.crossed)
 				for _, m := range sr.sBad.members {
@@ -1535,6 +1624,42 @@ func (b *batch) resultFrom(fn *ir.Func, cs *callSite, from uint16, c *groupCond,
 			}
 		}
 		return "the result of a function that may load it from what an argument reaches, which is not known to be local"
+	}
+	return ""
+}
+
+// batchResultFrom adds to c, the condition of a group of fn of which
+// the result of the call cs of a function of the batch is a member, the
+// bits of fn's parameters that the arguments in from or deep are
+// derived from: the results are loaded from what those reach (from), or
+// stored there as well (deep). It returns why not, if an argument is
+// not derived from fn's parameters.
+func (b *batch) batchResultFrom(fn *ir.Func, cs *callSite, from, deep uint16, c *groupCond) string {
+	if from|deep == 0 {
+		return ""
+	}
+	maskOf := b.derivedOf[fn]
+	for j := 0; j < 16; j++ {
+		if (from|deep)&(1<<j) == 0 {
+			continue
+		}
+		if j >= len(cs.all) {
+			return "the result of a function of the batch that may load it from what an argument reaches, of a call that says nothing of its arguments"
+		}
+		arg := cs.all[j]
+		if !pointsToPointers(arg.Type()) && !arg.Type().HasPointers() {
+			continue
+		}
+		if maskOf != nil {
+			if m, ok := maskOf(arg); ok && m != 0 {
+				c.own |= m << 1
+				if from&(1<<j) != 0 {
+					c.from |= m << 1
+				}
+				continue
+			}
+		}
+		return fmt.Sprintf("the result of %v, which may load it from, or store it in, what an argument reaches that is not derived from parameters", cs.fn)
 	}
 	return ""
 }
@@ -1601,7 +1726,7 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 	}
 	// What is returned as well is local only if the caller says so of
 	// the results too, and the caller knows where it is
-	// (ir.Func.ResultDeep).
+	// (ir.Func.ResultDeep, ResultFrom).
 	returned := m.hasAttr(attrReturned)
 	if returned && !fn.ResultExact {
 		return false
@@ -1612,13 +1737,23 @@ func (b *batch) knownStored(fn *ir.Func, m *location) bool {
 			return false
 		}
 		if d.deep != 0 {
-			if returned && d.deep&^fn.ResultDeep != 0 {
+			// (A caller that is told that the results are loaded
+			// from what the parameter reaches asks the same of it.)
+			if returned && d.deep&^(fn.ResultDeep|fn.ResultFrom) != 0 {
 				return false
 			}
 			continue
 		}
 		if d.plain && d.loc != nil && d.loc.param && !returned {
 			continue
+		}
+		if d.plain && d.loc != nil && d.loc.param && returned && !d.loc.reassigned && !d.loc.addrtaken && !b.capturedAssigned(d.loc) {
+			// Stored in the parameter's own object and returned:
+			// its caller is told (ir.Func.ResultFrom: groupInfoOf
+			// says it of a member stored there).
+			if k := paramBit(fn, d.name); k != 0 && fn.ResultFrom&(1<<(k-1)) != 0 {
+				continue
+			}
 		}
 		return false
 	}

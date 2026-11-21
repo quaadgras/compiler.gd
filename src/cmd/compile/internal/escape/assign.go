@@ -173,7 +173,7 @@ func (e *escape) storeThrough(p ir.Node) hole {
 			// of what the variable reaches, and local only if
 			// all of that is.
 			k := e.teeHole(e.ownHeapHole(), g.asHole(), e.condRoot(g).asHole())
-			return e.noteStray(k, name, plain)
+			return e.noteStray(k, name, plain, true)
 		}
 	}
 	k := e.heapHole()
@@ -182,7 +182,7 @@ func (e *escape) storeThrough(p ir.Node) hole {
 	}
 	switch {
 	case name != nil && name.Opt != nil:
-		return e.noteStray(k, name, plain)
+		return e.noteStray(k, name, plain, false)
 	case global:
 	default:
 		if e.lost == nil {
