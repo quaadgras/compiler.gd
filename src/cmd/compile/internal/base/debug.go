@@ -71,6 +71,7 @@ type DebugFlags struct {
 	NoLocalLink           int    `help:"count what is passed to a function that is only known when the program runs as shared, whatever the linker knows (for measurements)" concurrent:"ok"`
 	NoLocalDeep           int    `help:"count what is stored deeper than a parameter as shared (for measurements)" concurrent:"ok"`
 	FieldCensus           int    `help:"print where each pointer that is stored in a field comes from (a measurement)" concurrent:"ok"`
+	NoLocalMethVal        int    `help:"send what a method value's results may be to the heap where the value is made (for measurements)" concurrent:"ok"`
 	NoLocalRet            int    `help:"take what a caller in the batch does with a result for what the function does (for measurements)" concurrent:"ok"`
 	NoLocalTyped          int    `help:"share by depth only, not by the type of what is shared (for measurements)" concurrent:"ok"`
 	NoLocalRecv           int    `help:"do not keep local what is only the receiver of interface calls (for measurements)" concurrent:"ok"`

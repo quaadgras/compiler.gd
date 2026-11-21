@@ -218,12 +218,32 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		//
 		// TODO(mdempsky): Change ks into a callback, so that
 		// we don't have to create this slice?
+		//
+		// Which goroutines reach what it returns, the call says:
+		// what a function value's call returns may be what the
+		// value holds, or what that leads to (call.go). The heap
+		// here said that all which the receiver holds is shared,
+		// as soon as a method that returns some of it was a value.
+		rk := e.heapHole()
+		if e.shareTagsOn() && e.gd.Debug.NoLocalMethVal == 0 {
+			rk = e.ownHeapHole()
+		}
 		var ks []hole
 		for i := m.Type.NumResults(); i > 0; i-- {
-			ks = append(ks, e.heapHole())
+			ks = append(ks, rk)
 		}
 		name, _ := m.Nname.(*ir.Name)
+		// What the method says it stores through its receiver, or
+		// in what that reaches, is of the receiver that the value
+		// binds: the method's first argument whenever it is called.
+		// (Of its other parameters nothing is known here, and those
+		// go to the heap.)
+		saved, savedGroups, savedMix := e.callArgs, e.argGroups, e.mixGroup
+		if e.shareTagsOn() && e.gd.Debug.NoLocalMethVal == 0 {
+			e.callArgs, e.argGroups, e.mixGroup = []ir.Node{n.X}, nil, nil
+		}
 		paramK := e.tagHole(ks, name, m.Type.Recv())
+		e.callArgs, e.argGroups, e.mixGroup = saved, savedGroups, savedMix
 
 		e.expr(e.teeHole(paramK, closureK), n.X)
 

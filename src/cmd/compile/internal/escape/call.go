@@ -117,6 +117,25 @@ func (e *escape) call(ks []hole, call ir.Node) {
 						break
 					}
 				}
+				if e.shareTagsOn() && e.gd.Debug.NoLocalMethVal == 0 {
+					// What it returns may be what the function
+					// value holds (the receiver of a method
+					// value, what a closure has captured), or
+					// anything that this leads to: who reaches a
+					// result reaches that. It is no holder of it
+					// by this.
+					hs := []hole{calleeK}
+					for i, k := range ks {
+						if k.dst == &e.blankLoc || k.derefs < 0 || i >= fntype.NumResults() || !fntype.Result(i).Type.HasPointers() {
+							continue
+						}
+						k = k.deref(e.gd, call, "what the function value holds, in a result")
+						k.loose = true
+						k.recvRes = true
+						hs = append(hs, k)
+					}
+					calleeK = e.teeHole(hs...)
+				}
 			}
 			e.expr(calleeK, call.Fun)
 		} else {

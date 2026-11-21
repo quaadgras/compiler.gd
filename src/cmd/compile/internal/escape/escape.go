@@ -136,9 +136,10 @@ type batch struct {
 	unsafeFns      map[*ir.Func]bool
 	opaqueFns      map[*ir.Func]bool
 	opaque         uint8
-	copyOf         map[*ir.Name]*ir.Name // deep.go: a variable that is a copy of a parameter
-	walkRoot       *location             // of the walk that is going on, for messages
-	walkOwnResult  bool                  // the walk came to the parameter that is noted through a result of its function
+	copyOf         map[*ir.Name]*ir.Name  // deep.go: a variable that is a copy of a parameter
+	walkRoot       *location              // of the walk that is going on, for messages
+	walkOwnResult  bool                   // the walk came to the parameter that is noted through a result of its function
+	madeAt         map[*location]src.XPos // with -m=4: where a location was made
 	leads          map[any]bool
 	unknownSrc     location // where a pointer comes from that the graph does not follow: a global, the result of a call that is not recorded (groups.go)
 	dirt           map[*ir.Func]*location

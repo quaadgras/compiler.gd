@@ -633,6 +633,43 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 	flow := fmt.Sprintf("   flow: %s ← %s%v:", b.explainLoc(dst), ops, b.explainLoc(srcloc))
 	if print {
 		fmt.Printf("%s:%s\n", pos, flow)
+		if b.gd.Flag.LowerM >= 4 && notes == nil {
+			// Where a temporary comes from, when nothing says.
+			desc := func(l *location) string {
+				if l == nil {
+					return "?"
+				}
+				s := fmt.Sprintf("%p of %v", l, l.curfn)
+				for _, r := range []struct {
+					l    *location
+					name string
+				}{{&b.heapLoc, "heapLoc"}, {&b.ownHeapLoc, "ownHeapLoc"}, {&b.moveLoc, "moveLoc"}, {&b.checkLoc, "checkLoc"}, {&b.recvLoc, "recvLoc"}} {
+					if l == r.l {
+						s += " " + r.name + fmt.Sprintf(" (attributes %#x)", uint(l.attrs))
+					}
+				}
+				if l.n != nil {
+					s += fmt.Sprintf(" %v %v at %s", l.n.Op(), l.n, b.gd.FmtPos(l.n.Pos()))
+				}
+				if l.callRes != nil {
+					s += fmt.Sprintf(", the result of the call at %s", b.gd.FmtPos(l.callRes.call.Pos()))
+				}
+				if pos, ok := b.madeAt[l]; ok {
+					s += fmt.Sprintf(", made at %s", b.gd.FmtPos(pos))
+				}
+				return s
+			}
+			fmt.Printf("%s:\t\t%s <- %s; it has %d edges, the first from %s\n", pos, desc(dst), desc(srcloc), len(srcloc.edges), func() string {
+				if len(srcloc.edges) == 0 {
+					return "nothing"
+				}
+				e := srcloc.edges[0]
+				if e.notes != nil {
+					return fmt.Sprintf("%s (%s)", b.gd.FmtPos(e.notes.where.Pos()), e.notes.why)
+				}
+				return desc(e.src)
+			}())
+		}
 	}
 	if logopt.Enabled() {
 		var epos src.XPos

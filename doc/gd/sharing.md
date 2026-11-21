@@ -1307,12 +1307,24 @@ recursive part is one batch):
 - The result of a function of the batch whose results are exact is
   something that the caller knows, as of any other (`knownStored`).
 
-Still in the way, as `-m=4` says: a method value (`f =
-p.parseImportSpec`) sends what its results may be loaded from to the
-heap when it is made, since nobody knows who calls it, and that is
-everything the parser holds; a structure that holds the shared
-`*token.File` is not local as a whole, which a function that stores
-only in other parts of it does not need.
+**Method values** (done): `f = p.parseImportSpec` sent what the
+method's results may be loaded from to the heap where the value was
+made, since nobody knows who calls it, and what the method says it
+stores through its receiver went to the heap too, since there were no
+arguments of a call to say whose. That was everything the parser holds,
+untyped: in 77 of the parser's functions. Now the receiver is the
+method's first argument when its facts are applied where the value is
+made (the others go to the heap as before), the results go to the heap
+that shares nothing, and a call through a function value has a loose
+flow, dereferenced once, from the value to its results: who reaches a
+result reaches what the value holds (`-d=nolocalmethval=1` for the old
+way). And `-m=4` names the temporaries on an explained path, where they
+were made.
+
+A structure that holds the shared `*token.File` is not local as a
+whole, which a function that only stores in other parts of it does not
+need; but an experiment that ignored such members altogether changed
+nothing in the parser, so that is not what binds there.
 
 ### Next
 

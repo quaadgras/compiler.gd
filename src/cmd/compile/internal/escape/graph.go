@@ -9,6 +9,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logopt"
 	"cmd/compile/internal/types"
+	"cmd/internal/src"
 	"fmt"
 )
 
@@ -519,6 +520,15 @@ func (e *escape) newLoc(n ir.Node, persists bool) *location {
 		if canon := n.(*ir.Name).Canonical(); n != canon {
 			e.gd.FatalfAt(n.Pos(), "newLoc on non-canonical %v (canonical is %v)", n, canon)
 		}
+	}
+	if e.gd.Flag.LowerM >= 4 {
+		if e.madeAt == nil {
+			e.madeAt = make(map[*location]src.XPos)
+		}
+		defer func(pos src.XPos) {
+			// (Set below: the location is made last.)
+			e.madeAt[e.allLocs[len(e.allLocs)-1]] = pos
+		}(e.gd.Pos)
 	}
 	loc := &location{
 		n:         n,
