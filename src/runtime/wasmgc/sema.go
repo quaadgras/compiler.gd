@@ -247,6 +247,17 @@ func sync_runtime_procPin() int { return 0 }
 //go:linkname sync_runtime_procUnpin sync.runtime_procUnpin
 func sync_runtime_procUnpin() {}
 
+// Nothing is shared here, and nothing handed over (runtime/shared.go).
+
+//go:linkname sync_runtime_poolOwned sync.runtime_poolOwned
+func sync_runtime_poolOwned(x any, fresh, mixed bool) (owned, drop bool) { return false, false }
+
+//go:linkname sync_runtime_poolStoreOwned sync.runtime_poolStoreOwned
+func sync_runtime_poolStoreOwned(dst *any, x any) { *dst = x }
+
+//go:linkname sync_runtime_poolNew sync.runtime_poolNew
+func sync_runtime_poolNew(f func() any, x any) bool { return false }
+
 //go:linkname sync_runtime_registerPoolCleanup sync.runtime_registerPoolCleanup
 func sync_runtime_registerPoolCleanup(cleanup func()) { poolcleanup = cleanup }
 

@@ -298,7 +298,7 @@ func ilp32IntLit(t *ctype, v uint64, suffix string, decimal bool) *ctype {
 // takes or returns one, a closure that converts as a call does (libcConv).
 func (g *gen) libcAdapter(name string, s *symbol) string {
 	ct := g.calleeType(s)
-	if !target.ilp32() || !strings.HasPrefix(name, "c23.") || ct == nil {
+	if !target.ilp32() || !isLibcGo(name) || ct == nil {
 		return name
 	}
 	ft := ct.fn

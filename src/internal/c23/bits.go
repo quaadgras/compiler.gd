@@ -141,7 +141,7 @@ func Overflow(op byte, a int64, au bool, b int64, bu bool, width int32, ru bool)
 // LoadBytes loads n (1 to 8) bytes at p as a little-endian integer: a
 // packed bit-field's.
 func LoadBytes(p Ptr, n int) uint64 {
-	b := bytesAt(p, uintptr(n))
+	b := BytesAt(p, uintptr(n))
 	var v uint64
 	for i := n - 1; i >= 0; i-- {
 		v = v<<8 | uint64(b[i])

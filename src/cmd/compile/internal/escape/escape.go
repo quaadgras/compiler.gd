@@ -104,6 +104,18 @@ type batch struct {
 	mutatorLoc   location
 	ownHeapLoc   location // the heap, in an object that no other goroutine reaches by itself (callbits.go)
 	shareLoc     location // where another goroutine reaches, without being the heap (shares.go)
+	moveLoc      location // where a pointer that is handed over goes: the heap, and out of its goroutine's hands (move.go)
+	convShareLoc location // shareLoc for what is shared by being converted to an interface type (recv.go): that says how it is treated, and nothing has its pointer by it (move.go)
+	checkLoc     location // the heap, where a function keeps a parameter only by calls that check (ir.Func.KeptChecked, move.go)
+	recvLoc      location // ownHeapLoc for the receiver of a call of an interface's method (recv.go): whether that keeps the pointer, recvHeldLoc says
+	recvHeldLoc  location // where the receiver of such a call goes besides: the method may keep it, unless its type says not (edge.recvOK, move.go)
+	recvAnyLoc   location // where an interface goes that is asserted to have other methods than those of its type: any method of what it holds may be called
+	recvNothing  map[convKey]bool
+	handTypes    map[*types.Type]bool
+	moves        []moveSend
+	paramClass   map[*ir.Name]*ir.Name // the variables that only hold a parameter's pointer, and that parameter (move.go)
+	returns      map[*ir.Func]*returned
+	deferWraps   map[*ir.Func]*deferWrap
 	calleeLoc    location
 	blankLoc     location
 	candidateLoc location
@@ -116,17 +128,21 @@ type batch struct {
 
 	// Dynamic roots (shares.go): by statement and path, the statements
 	// that are one plain assignment, and those with a call.
-	dynRoots    map[dynKey]*location
-	simpleStmts map[int32]bool
-	stmtCalls   map[int32]bool
-	calls       []*callSite           // callbits.go
-	recvRoots   map[recvKey]*location // recv.go
-	convOKs     map[convKey]bool
-	retTags     map[*ir.Func]ir.Node
-	callArgs    []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
-	dynCall     *ir.CallExpr // the call of an unknown function whose argument's hole is made
-	dynArg      int          // that argument's place
-	addrStmts   map[addrStmtKey]uint8
+	dynRoots      map[dynKey]*location
+	simpleStmts   map[int32]bool
+	stmtCalls     map[int32]bool
+	calls         []*callSite      // callbits.go
+	convOKs       map[convKey]bool // recv.go
+	retTags       map[*ir.Func]ir.Node
+	callArgs      []ir.Node    // the arguments of the direct call whose tags are read (callbits.go)
+	dynCall       *ir.CallExpr // the call of an unknown function whose argument's hole is made
+	dynArg        int          // that argument's place
+	dynKey        string       // and the key of the class of functions that the call may be of (ir.ShareKeyFunc), or ""
+	recvArg       bool         // and that a method of its own may keep
+	recvAnyArg    bool         // whichever
+	checkCallsArg bool         // and a call that checks is one of them (ir.Func.KeptCalls)
+	checkedArg    bool         // the argument whose hole is made is of a parameter that is kept only by calls that check (move.go)
+	addrStmts     map[addrStmtKey]uint8
 }
 
 // A closure holds a closure expression and its spill hole (i.e.,
@@ -162,20 +178,47 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 	// to use that field elsewhere, like in walk. See discussion in https://go.dev/cl/688075.
 	reassignOracles := make(map[*ir.Func]*ir.ReassignOracle)
 
+	// A conversion to an interface type answers for the methods of
+	// the type that is converted (recv.go), which it can only do for
+	// those that are analysed: the methods first, then, and the
+	// functions that they call, so that only a function that a method
+	// needs is analysed before the methods it converts for. (Not as
+	// callees of the function that converts: the batches would be
+	// larger, and escaping in a batch is less exact.)
+	if gd.Debug.NoLocalRecv == 0 && gd.Debug.NoShare == 0 && gd.Debug.NoLocal == 0 {
+		ordered := make([]*ir.Func, 0, len(all))
+		for _, fn := range all {
+			if fn.Type().Recv() != nil {
+				ordered = append(ordered, fn)
+			}
+		}
+		for _, fn := range all {
+			if fn.Type().Recv() == nil {
+				ordered = append(ordered, fn)
+			}
+		}
+		all = ordered
+	}
+	handTypes := handOverTypes(gd, all)
 	ir.VisitFuncsBottomUp(all, func(list []*ir.Func, recursive bool) {
-		Batch(gd, list, reassignOracles)
+		Batch(gd, list, reassignOracles, handTypes)
 	})
 }
 
 // Batch performs escape analysis on a minimal batch of
 // functions.
-func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle) {
+func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir.ReassignOracle, handTypes map[*types.Type]bool) {
 	var b batch
 	b.gd = gd
 	b.heapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls | attrShares
 	b.mutatorLoc.attrs = attrMutates
 	b.shareLoc.attrs = attrShares
+	b.convShareLoc.attrs = attrShares
 	b.ownHeapLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
+	b.moveLoc.attrs = attrEscapes | attrPersists | attrMutates | attrCalls
+	b.checkLoc.attrs = b.heapLoc.attrs
+	b.recvLoc.attrs = b.ownHeapLoc.attrs
+	b.handTypes = handTypes
 	b.calleeLoc.attrs = attrCalls
 	// candidateLoc plays the role of heapLoc for values flowing into
 	// dynamic-callee edges, but with attrCandidateEscape in place of
@@ -193,6 +236,7 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 			ir.Dump(s, fn)
 		}
 		b.initFunc(fn)
+		markFresh(fn)
 	}
 	for _, fn := range fns {
 		if !fn.IsClosure() {
@@ -220,6 +264,26 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 		}
 	}
 
+	if b.gd.Flag.LowerM >= 4 {
+		// Everything that the functions do which shares a value by
+		// itself: the walks only say the nearest for each value.
+		for _, root := range []*location{&b.shareLoc, &b.convShareLoc} {
+			for _, edge := range root.edges {
+				src := edge.src
+				what := "a value"
+				if src.n != nil {
+					what = fmt.Sprintf("%v", src.n)
+				}
+				for n := edge.notes; n != nil; n = n.next {
+					fmt.Printf("%s: %s goes to %s: %v (%s)\n", b.gd.FmtPos(n.where.Pos()), what, b.explainLoc(root), n.where, n.why)
+					break
+				}
+				if edge.notes == nil && src.n != nil {
+					fmt.Printf("%s: %s goes to %s\n", b.gd.FmtPos(src.n.Pos()), what, b.explainLoc(root))
+				}
+			}
+		}
+	}
 	b.walkAll()
 	b.finish(fns)
 
@@ -273,6 +337,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 	}
 
 	b.trackPointers(fn)
+	b.trackParams(fn)
 }
 
 func (b *batch) walkFunc(fn *ir.Func) {
@@ -417,6 +482,8 @@ type outBufUse struct {
 
 func (b *batch) finish(fns []*ir.Func) {
 	b.markUnshared(fns)
+	b.markMoves()
+	b.markKeptChecks(fns)
 	b.markReturnedOther()
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.

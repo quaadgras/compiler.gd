@@ -45,6 +45,197 @@ its life.
   channel only its goroutine reaches shares nothing; what it holds is
   shared with it when the channel is published. A receive from such a
   channel straight into shared memory goes by way of a temporary.
+
+  **A send that hands over.** A pointer that the sender provably has no
+  way left to is not shared by the send: its object goes to whoever
+  receives it, who is then the only goroutine that reaches it, as the
+  sender was (`runtime.chansendmove1`). What the object points to is
+  shared as for any send (`publishContents`). The compiler shows it
+  (`cmd/compile/internal/escape/move.go`) when:
+  - the value sent is a variable that only ever holds allocations of the
+    function (a tracked variable, below);
+  - neither it nor a variable that may hold the same pointer, or one into
+    the same object, is mentioned by a statement that may run after the
+    send (up to a return; a loop's variables must be declared in its
+    body; no `goto`, no deferred call that has it);
+  - nothing else holds a pointer to the object: in the solved graph its
+    address has flowed to those variables only. A callee has it for the
+    call; what a callee keeps, returns or stores in another argument is
+    another holder, as are an object, a slice, an interface or a closure
+    that points to it.
+
+  A send that is not shown to hand over shares, when it runs. A pointer
+  received from a shared channel straight into shared memory is shared
+  before it is stored (`chanrecv`). `go build -gcflags=-m` says which
+  sends hand over; `-d=nomove` makes every send share.
+
+  This is what makes handing work to another goroutine cost what doing
+  it oneself costs: a message built and sent, and filled in by the
+  goroutine that receives it, took 1.4 µs when the send shared it and
+  takes 0.7 µs (0.3 µs with no sharing at all; the rest is the strings
+  and slices the message points to, which are shared, and the tests of
+  memory that is not). Not covered yet: a pointer that was itself
+  received and is sent on, a value sent that is not a plain pointer, a
+  send in a `select`, and the arguments of a `go` statement. (Receiving
+  is not a source yet for a reason: a channel that only its goroutine
+  has may hold a pointer that the goroutine still has elsewhere.)
+- `sync.Pool.Put`: what a pool holds is shared, **unless the put hands
+  it over**, by the same proof as a send: the variable put only ever
+  holds allocations of the function or what `Get` returned
+  (`p.Get().(*T)`), it is not mentioned again, and nothing else holds
+  the object. Compiled code then calls `runtime.poolhandover` right
+  before `Put`, which stores the object without sharing it and shares
+  what it points to.
+
+  The proof takes what `Get` returns for an object that nobody else
+  has, or that is shared. That holds for what was put (handed over, or
+  else shared by `Put`, also in a pool that only one goroutine has) and
+  for what `New` returns if `New` does nothing but return an allocation
+  (`return new(T)`, `return &T{...}`): the compiler marks such a
+  function (`abi.FuncFlagFreshResult`) and `Get` looks the mark up.
+  What any other `New` returns, `Get` shares: it could be kept
+  elsewhere, in an object that is itself handed around.
+
+  **Across calls.** Code that uses a pool has helpers: one returns
+  what `Get` gave (`newPrinter`), one is given the object and puts it
+  back (`func (p *pp) free()`), and that one is often deferred. So a
+  function says two things of itself, which are exported with it:
+  - `ir.Func.OwnedResult`: what it returns is always a variable as
+    above (or it only returns an allocation), with nothing else holding
+    the object. A call of it is then a source like `Get`.
+  - `ir.Func.Consumes`: it hands a parameter over, to `Put` or to a
+    function that does, and does nothing else that keeps the pointer
+    (the same proof, for the parameter and the variables that only hold
+    its pointer). A call of it is then a place that hands over, like
+    `Put`: the caller, if the object is its own, calls `poolhandover`
+    before the call, and the `Put` at the end finds the same pointer.
+    A function that only consumes says nothing to the runtime itself.
+
+  A deferred call that hands over (`defer p.free()`) runs when the
+  function ends: nothing has to follow it, but no other deferred call
+  may have the variable, the statement may not be in a loop, and the
+  function may not return the object. The function that the compiler
+  makes of the deferred call is recognised when it only makes that
+  call with the function's variables, also when the call was inlined
+  into it.
+
+  A buffer taken from a pool, appended to 64 times and put back took
+  1.0 µs and takes 0.45 µs (0.07 µs with no sharing at all). `gofmt` of
+  `go`, `net` and `cmd/compile`, whose printer comes from a pool and
+  took a lock for each of twelve million appends to its output, takes
+  4.0 s of CPU where it took 5.5 (3.0 with no sharing at all).
+
+  **A function that is only known when the program runs.** `fmt` passes
+  its printer, as a `fmt.State`, to the `Format` method of an argument
+  that has one, and that method may keep it: a holder, for the proof,
+  in every `Printf` though few arguments have the method. But the
+  function's escape mask says whether it keeps the argument
+  ([escape-bits.md](escape-bits.md)), so the call asks. Where the
+  argument is a pointer variable, and what is called and the other
+  arguments are read with no call between, the mask is tested before
+  the call and the object is shared if the function keeps it
+  (`runtime.publishkept`); the call is then no holder. A function whose
+  parameter is kept by such calls only says so
+  (`ir.Func.KeptChecked`), for its callers' proofs. The test is made
+  only for pointers to the types that the package hands over.
+
+  An object that was shared this way is not handed over, and `Put`
+  drops it if the pool's `New` only allocates: the pool would give it
+  out again and again, to pay the locks of shared memory each time,
+  where a new one is one allocation. (So is one that an unproven `Put`
+  shared, when a proven one puts it next.)
+
+  **A method of its own.** A buffer from a pool that is passed to
+  `fmt.Fprintf` or `io.WriteString` is the receiver of a call of an
+  interface's method there, which went to the heap: a holder. But all
+  that such a call can do with the object is what a method of the
+  object's own type does, and the caller knows the type where it
+  converts the pointer to the interface type. So:
+
+  - The receiver of a call of an interface's method flows to
+    `recvHeldLoc`, besides the heap (`recvLoc`). A parameter that
+    nothing keeps but that says so (`ir.Func.KeptByRecv`), and an
+    argument of it flows to `recvHeldLoc` in the caller.
+  - A conversion of a pointer to an interface type marks its edge if
+    no method of the pointer's type that the interface type has keeps
+    its receiver or returns it (`recvKeepsNothing`): the walk from
+    `recvHeldLoc` does not follow that edge, so the object has no
+    holder by it.
+  - An interface that is asserted to have methods that its type does
+    not have flows to `recvAnyLoc` (`ir.Func.KeptByAny`), which an edge
+    is only cut from if no method at all of the type keeps its
+    receiver. A pooled type has, as a rule, a method that puts it back
+    in its pool, which is one that keeps it: so only the methods that
+    can be called count, where that is known.
+  - What a call of an interface's method returns may be its receiver;
+    that edge (`edge.recvRes`) is not one that a holder is found along,
+    since the receiver flows to `recvHeldLoc` anyway, and a method that
+    returns its receiver is one that keeps it for `recvKeepsNothing`.
+
+  With a pooled `bytes.Buffer`, `fmt.Fprintf(buf, "%d", x)` takes 148
+  ns where it took 196 (77 with no sharing at all), and
+  `io.WriteString` 50 where it took 76 (28).
+
+  **What the mask says of how it keeps.** A function that is only
+  known when the program runs answers by its mask, and the mask said
+  "keeps" for one that calls a method of its parameter, as every real
+  `Format` method does with its `fmt.State`: the printer was shared in
+  each call of one, and dropped by the put. The mask now has a fourth
+  bit for each argument (`ir.EscMaskHeld`, for 15 arguments where there
+  were three bits for 21), which is clear if the function keeps the
+  argument only by calls that check in turn, or by calling the methods
+  that the parameter's interface type has (`KeptChecked` without
+  `KeptByAny`; the note of the parameter says so, for every package
+  that makes a mask of it). The test before the call takes that for
+  "does not keep" if the pointer is passed as it is, or is converted to
+  an interface type whose methods, as the pointer's type has them, keep
+  nothing (`recvKeepsNothing`), which is what the caller knows and the
+  function does not.
+
+  A `Format` method that writes with `s.Write` takes 149 ns in
+  `Sprintf("%v", x)` where it took 384 (67 with no sharing at all), one
+  that calls `fmt.Fprintf(s, ...)` 293 where it took 392 (206).
+
+  **A put that does not look.** A put that hands its object over asked
+  whether the object was shared, which a call that found a keeper is
+  all that makes it (or a pool that gives shared objects out: one whose
+  `New` does not just allocate, or that had an object put that was not
+  handed over). Until a call has found one (`runtime.keptSeen`), and in
+  a pool that has no such objects (`sync.Pool.mixed`), it does not ask.
+  To be wrong about it would keep a shared object in the pool, no more.
+
+  Not covered: a function that asserts its parameter to have other
+  methods (`io.WriteString(s, ...)` in a `Format` method: all methods
+  of the printer's type would have to keep nothing, and those that are
+  analysed with the call are not known then); one that passes its
+  interface on to another function that is only known when the program
+  runs (a `Format` method that calls another's: the test is only made
+  for a pointer variable); a helper that was inlined, whose interface
+  variable is a holder in the caller; and an object of which a callee
+  converts the address of a field to an interface type (regexp's
+  machine and its inputs).
+
+  What an object that is handed over points to is shared by the put,
+  but for a pointer into the object itself (the printer points to its
+  own buffer field), which says nothing.
+
+  **An object without pointers is not marked as shared**
+  (`markShared`). Nothing in it is locked: what is stored whole is a
+  string, a slice or an interface, which have pointers, and so do the
+  maps and the atomic pointers that ask whether they are shared. It
+  leads nowhere, and small ones share a block and would share its bit.
+  So the buffers of bytes that a pooled object points to cost the walk
+  at each put nothing, and leave their pages' bytes clear. A channel
+  does ask whether it is shared, for what is sent on it: the header of
+  one whose elements have pointers is allocated with pointers, also
+  when it has no queue (`makechan`).
+
+  `Sprintf("%d", x)` takes 93 ns where it took 107 (46 with no sharing
+  at all), with a `String` method 353 where it took 428 (215), a struct
+  1090 where it took 1340 (790). What is left is the walk of the
+  object at each put, and the stores in it: the printer is in a page
+  with shared objects, so each store of a slice or an interface calls
+  the runtime to learn that the printer is not one.
 - A store of a pointer in a global or in a shared object: the compiler's
   barrier, below.
 - The runtime's own stores: `sync/atomic`'s pointer operations, the copies
@@ -112,6 +303,28 @@ holds one.
   ever shared; if it is zero there is no call. And if the runtime says
   the memory is not shared, the store that follows has no publishing
   calls either: there are two copies of the store.
+- **A store of a whole string, slice or interface** has one copy: after
+  the byte, compiled code calls `runtime.sharestorestring`,
+  `sharestoreslice` or `sharestoreiface` with the value. If the memory is
+  shared the runtime publishes what the value points to and stores it
+  under the locks; if not it says so, and the function stores as it does
+  in memory that is not shared. The shared store is in the runtime once,
+  not in every function that has one.
+- **The stores of one statement share their locks** where no
+  synchronisation separates them: between two synchronisations no
+  goroutine can tell stores made under one lock from stores made each
+  under its own, and a program in which one could has no say in how they
+  interleave (the Go memory model). An append in place to a slice of
+  strings, slices or interfaces (`p.f = append(p.f, x)`) stores the
+  slice and its new elements under one call of `runtime.sharestore2`,
+  which takes the locks of both places in the order every goroutine
+  takes locks in, and one of `shareunlock2`: one test and one copy of
+  the stores where each had its own. Nothing between the two calls can
+  fault, call or wait for another lock: the operands are evaluated
+  before. An append that grew stores the pointer, the capacity and the
+  length together: the length that is there may be another goroutine's,
+  of a slice the new array is too short for. (`-d=nogroup` gives each
+  store its locks back, for measurements.)
 - **A function with its own exclusion** for what it loads and stores is
   marked `//go:notear` and has none of this (its pointer stores still
   publish): `sync.Pool`'s, where a P's private value is its own and the
@@ -324,7 +537,19 @@ because the callee is unknown.
 - **Oracle**. The store barrier, the publish walk and the per-object bit
   still run and still decide the guards. `GODEBUG=sharestats=1` counts the
   objects of each range and the local ones that were published all the
-  same, each of which is a wrong decision; `=2` traces them, `=3` throws.
+  same, each of which is a wrong decision; `=2` traces them, with where
+  the object was allocated, `=3` throws.
+  It also counts, of the objects that are not local, those without
+  pointers (never marked) and those that were marked: the rest another
+  goroutine never came to. `GODEBUG=sharesites=1` prints, at exit, the
+  places that allocated the most of those (`shareSiteAlloc`): the first
+  function on the stack that is not the runtime's or reflect's. On
+  2026-11-21, 37 to 93% of the objects with pointers that were not local
+  were never marked in the tests of `encoding/json`, `go/printer`,
+  `go/types` and `net/http`; a program that only parses a file and reads
+  the result has no local object at all, because `ast.Walk` passes every
+  node to `Visitor.Visit`, a function that is not known where the node
+  is allocated.
 
 - **Dynamic roots** (`escape/shares.go`: `dynRootOf`, `localTag`). A
   store through a pure path from a local variable (`p.f = x`, `*p = x`,
@@ -425,42 +650,71 @@ because the callee is unknown.
     for objects allocated before the call's statement;
     `r.list = append(r.list, p)` in the callee (deeper than the
     receiver: shared).
-- **Receivers of interface calls** (`escape/recv.go`). The method is
-  only known when the program runs, but the object is allocated with a
-  type, and the type says what the methods are: this is the rule above
-  with the callee known from the type. The receiver of `i.M()` flows to
-  a *receiver root* (the heap for escaping, with the interface type and
-  `M`), and a conversion of a pointer to an interface type has a
-  location that the pointer flows through, with the pointer's type.
-  - A conversion that reaches a receiver root by a path with no other
-    conversion on it (a *raw* path: the solver keeps, for the walks from
-    these roots, the least dereferences of such paths apart) is checked:
-    the method `M` of its type must not let another goroutine reach its
-    receiver or what the receiver leads to, nor return it, nor store it
-    through another parameter (the method's `ParamShare`; a method that
-    is not analysed yet, or is not Go, fails). If one fails, what was
-    converted is shared, as before. If all pass, the root says nothing
-    of what was converted: `use(&Sq{})` with `func use(s Shape)` leaves
-    the object local, and what `(*Sq).Grow` stores through its receiver
-    is local by the receiver's address.
-  - A parameter of an interface type that is itself the receiver, of
-    methods of its own type, says so (`ParamShare.Recv`, exported), and
-    a caller's argument flows to a receiver root for any method of that
-    type. The parameter is shared in the escape masks: a caller that
-    does not know the function cannot check.
-  - Everything else that reaches a receiver root on a raw path holds or
-    leads to an interface of a type that is not known here: an
-    allocation the receiver is loaded from, the result of a call (the
-    bit for results is clear), a parameter that is not the receiver
-    (shared at that depth). A value that an interface was asserted to
-    hold (`i.(*T)`, a case of a type switch) has a location too: what is
-    reached from it is reached from the interface without its methods,
-    so if a raw path gets there, the interface's object is shared.
-  - `-d=nolocalrecv` turns it off. Not yet: a receiver that the method
-    returns (`func (b *B) Self() I`); methods that are analysed after
-    the function that converts (interface calls are not edges of the
-    order in which functions are analysed); values that are not
-    pointers (the box that `convT` makes is not tagged).
+- **Interfaces** (`escape/recv.go`). The method that an interface call
+  runs is only known when the program runs, but an interface value is
+  made by a conversion, of a value whose type says what the methods are.
+  The rule is on the conversion, once for all the calls there will be:
+  - A value of type `T` converted to the interface type `I` is shared
+    unless every method of `I`, as `T` has it, keeps its receiver to
+    the goroutine: it does not let another goroutine reach it or what it
+    leads to, nor store it through another parameter (`convOK`, from
+    the methods' `ParamShare`; a method that is not analysed yet, or is
+    not Go, fails). Functions are analysed methods first, so that a
+    conversion finds its methods done unless one of them needs the
+    function that converts.
+  - A call `i.M()` then says nothing about which goroutines reach its
+    receiver: whatever `i` holds answered for `M` where it was
+    converted. The receiver is in the heap, as before, and what the
+    call returns may be the receiver or what it leads to, as for a
+    function that returns a field of its argument.
+  - An interface asserted to hold a value of another interface type
+    (`i.(J)`, a case of a type switch) may have methods called that its
+    conversion did not answer for: unless `i`'s own type has all of
+    `J`'s methods, what it holds is shared.
+  - A value that is not a pointer is in a box that is only read: the
+    box needs no place in this, and is not allocated with the local
+    objects.
+
+  The first version (2026-11-19, a few hours earlier) had the receiver
+  of each call as a root and checked the conversions that reached it;
+  it could not say anything of an interface loaded from a container,
+  which is where `go/types` and `go/ast` keep theirs. `-d=nolocalrecv`
+  turns the rule off.
+- **What is only read is not shared** (the user, 2026-11-19; `edge.ro`,
+  `escape`'s `readOnlyOn`). What a string points to is never written, so
+  who reaches a string says nothing of who may write what it was loaded
+  from: `ch <- obj.name` does not make `obj` shared. Every flow of a
+  value of type string is a read-only edge, which counts for escaping
+  and not for sharing: the solver keeps, for each walk, the least
+  dereferences of the paths without such an edge, and the marks for
+  sharing, the containers known at run time, the results and the
+  parameters' `ParamShare` follow those paths only.
+  - The bytes of a string are not allocated with the local objects
+    (they would be reached by other goroutines, which is harmless for
+    the locks and not for freeing a goroutine's memory when it exits).
+  - A string made of memory that was not allocated for one
+    (`unsafe.String`, a load through a pointer converted from another
+    type) makes that memory shared from then on (`aliasHole`): a
+    `strings.Builder`'s buffer, once `String` is called.
+  - The address of a string variable is not a string.
+  - `-d=nolocalro` turns it off. Only strings so far: an object that is
+    never written after it is built would count as well, which needs
+    to know that nothing writes it.
+- **Maps** (`escape`'s `mapsOn`, `runtime.makemap`,
+  `internal/runtime/maps`). A map is a container as an object is: what
+  `m[k] = v` stores (the key too) is where the map is, the heap for
+  escaping, and what `m[k]` or a range loads is reached from the map. So
+  a map is a tracked variable or a container known at run time like a
+  pointer, `make(map...)` and a map literal are allocations that can be
+  local (the type passed to `makemap` is tagged; a small map that is
+  local is made by `makemap`, not `makemap_small`, which has no type),
+  and a value stored in a map that is a local object is local. The
+  runtime allocates what a map needs as its header is: the directory,
+  the tables, the groups and the keys and elements that are kept apart
+  (`Map.local`, `table.local`). A clone is not local. A parameter that
+  a map element is returned from leaks at one dereference now
+  (`leaking param: m to result ~r0 level=1`): escaping is as before,
+  since what a map holds is in the heap. `-d=nolocalmap` turns it off.
 - Variables that are moved to the heap with the same tag are still
   allocated together.
 
@@ -480,19 +734,133 @@ What it finds, measured with `-m=2` and `GODEBUG=sharestats=1`
   `net/http`): tests are called through function values and hand their
   results to `reflect.DeepEqual` and `fmt`.
 
+### What the linker knows of the functions that are only known when the program runs
+
+Measured on 2026-11-21 (`GODEBUG=sharesites=1`): the objects that are
+not local and that no other goroutine ever reaches are, first of all,
+the ones that are passed to a function value or to a method of an
+interface some time after they are allocated. Nobody knows there which
+function that will be, so by the rule above they are shared from birth.
+
+The linker knows all the functions that it may be. A **class** is the
+methods with one name and signature, of all the types of the program, or
+the function values with one signature. For each class that compiled
+code asks about, the program has a word that is an escape mask: the
+masks of all the functions of the class, ORed
+(`cmd/compile/internal/ir/sharelink.go`,
+`cmd/link/internal/ld/sharemask.go`).
+
+- **Compiler.** The argument of such a call flows to a *link root*, a
+  dynamic root whose tag is read from the class's word
+  (`escape/callbits.go`: `linkRoot`, `linkTag`). The word can be read
+  anywhere, so the object may have been allocated long before, and in
+  another function: a parameter that flows to a link root says so
+  (`ir.ParamShare.Links`, at most four), the caller's argument flows to
+  a link root of its own, and the bits of a call are computed from the
+  words where a result depends on them. The word of a call whose
+  function is known in the statement that allocates is still read from
+  the closure or the method table, which says more (what is stored
+  through a receiver that is local).
+- **Records.** Every function that may be called so has a record, a
+  symbol that the program has if it has the function: a method by its
+  code, a function with a name by its function value, a closure or a
+  method value by its code; a method in assembly by its type, with a
+  mask that says that it does anything. The record has the class, the
+  mask and the links of the parameters. The mask is the one the linker
+  starts from: a parameter that is only shared if a function that it is
+  passed on to shares it is not shared there (`ir.EscNoteLinked`,
+  `ir.EscMaskBaseOf`), where the masks that are read when the program
+  runs say that it is.
+- **Linker.** After the dead code is found, the records of what is left
+  are read and the words computed until nothing changes: a function
+  shares a parameter if a function of a class that it passes it on to
+  does. So a method that calls a method of the same name on what it
+  holds (a visitor that walks its children) shares nothing if none of
+  them does. The records are then dropped.
+- **Type parameters.** A call in a function with type parameters, of a
+  function whose signature has one, reads no word. A function whose
+  signature has one has a pattern for its class, which stands for every
+  class that it matches: a closure of such a function is called as a
+  function value of each of its instances.
+- **What the linker cannot know.** The compiler writes the words with
+  all bits set, and they stay so in a plugin, a shared library, or a
+  program that can load one. If the program has `reflect.MakeFunc`, the
+  words of the function values stay. Reflect also makes function values
+  of methods (`Value.Method(i).Interface()`), so if the program has that
+  (anything that prints with `fmt` does), the methods are counted with
+  the function values of their signature. A function value made of
+  memory by unsafe code, or defined in assembly without a Go declaration,
+  is not known.
+- **Receivers.** A class's word has no bit for the receiver, so the
+  receivers of the methods with one name and signature are a class of
+  their own (`ir.ShareKeyRecv`, key `R.`): its word has one argument,
+  the receiver, and says whether a method of the class lets another
+  goroutine reach its receiver or stores it through another parameter,
+  which is what a conversion asks of a method (`convOK`). A value that
+  is converted to an interface type, or asserted to be of one, where
+  its methods are not all known to keep their receiver (a type with a
+  shape, a method that is not analysed yet), flows to the link roots of
+  the receivers of the interface's methods, at most four
+  (`escape/recv.go`: `recvLinkHoles`), where it was shared.
+- **A parameter that only has its own methods called.** A function says
+  of a parameter that it keeps it only by calls that check
+  (`ir.Func.KeptChecked`, for a hand-over), which is also so of one that
+  it only calls methods of, and its callers' arguments then went to the
+  heap of the calls that check, where the object is shared when the
+  program runs if the function that is called keeps it: none could be a
+  local object. A function now also says whether a call that checks is
+  among them (`ir.Func.KeptCalls`), and without one the argument goes to
+  the heap of the receivers, which no other goroutine reaches by itself.
+- `-d=nolocallink` turns it off in the compiler. `-ldflags=-v` prints
+  how many words and records a program has, `-v=2` each word.
+  `-gcflags=-m=2` now also prints, for a value that is shared, where it
+  flows to and how (`is shared by`).
+- **Measured** (local objects in the tests: before, with the words of
+  the arguments, and with those of the receivers): `encoding/json` 1519,
+  2159, 2166; `go/types` 39645, 55895, 103230; `net/http` 39693, 42055,
+  42573; `go/printer` 4841, 4889, 9807; no local object was published.
+  That is still little: an object has other ways to be shared, and one
+  is enough. The nodes that `go/parser` makes are still shared, because
+  `ast.Walk` passes the node to `fmt.Sprintf` in a branch that panics,
+  and what `fmt` prints is shared (the printer keeps it while it
+  prints, and calls its methods).
+
 ### Next
 
-1. Callees that are parameters, consulted where the object is
-   allocated. Receivers: results that are the receiver, and methods
-   analysed before the functions that convert to their interfaces.
+0. What `fmt` does with its arguments. Done on 2026-11-21:
+   `internal/abi.NoEscape` is trusted not to share its argument (the
+   user's decision: only the standard library can call it, and its
+   conversion to an integer and back counted as showing the address to
+   everyone, which shared whatever reflect looked at); a string that
+   reflect loads through a converted pointer is not memory made into a
+   string (`typedByConstruction`); `%p` prints
+   `internal/abi.Address(p)`, an integer of an address that exposes
+   nothing, so that the checks refuse to make a pointer of it. Left, all
+   in `internal/fmtsort.Sort`, which prints a map's keys in order:
+   `reflect.(*MapIter).Next` shares what the iterator holds;
+   `Value.Pointer` in the comparison exposes; and
+   `slices.SortStableFunc` calls its comparison in a function with type
+   parameters, where a call of a function whose signature has one reads
+   no word. `-gcflags=-m=4` prints every function that shares an
+   argument where it is called (`shares its argument`).
+   Also: reflect's allocations; the tag of an object that has several
+   words reads each word four times.
+1. Callees that are parameters: `each(head, func(it *item) {...})`
+   makes what `head` leads to shared, since `each` passes it to a
+   function it does not know. `each` could say "what `head` leads to
+   is argument 0 of `f`" (as `ParamShare.Via` says "stored through"),
+   and a caller that passes a function literal or a named function
+   would follow it into that function, which is in its own batch.
+   Also for closures: an allocation in a closure that flows to a result
+   of the function around it needs that function's bits (now "returned
+   by another function": not local).
 2. Results in a caller's buffer (Phase G, `maybeInPlace`) are shared
    when the buffer is nil: pass the tag.
 3. `P.s = append(P.s, x)`: x is tested against the old array, nil the
    first time. A nil array could take the tag of `P`.
 4. A variable that is assigned once and in scope at the allocation as a
    whole-function container (needs scopes in the graph).
-5. Maps (`makemap` tagged, tables as the header), strings, `convT*`,
-   closures.
+5. Strings, `convT*`, closures.
 6. `unique.Make` of a string gets no bits (an SSA rule needs the call to
    follow the conversion of its argument).
 
@@ -544,6 +912,14 @@ only sees a stack address. This is the cost of the design for
   memory).
   `sharePages`, the store barrier, the publish walk and the per-object
   bit stay only under `-d=sharecheck` as the witness.
+  Not before most objects are local: with the page test alone, every
+  store of a slice, string or interface in an object that is not local
+  takes a lock, and today the publish machinery spares the ones that
+  were never handed over. In the tests of `go/types` and `net/http`
+  1 to 2% of the objects were local on 2026-11-19 (the constructors'
+  results end in maps, interfaces and closures), so the order is: more
+  objects local first (maps are in; boxes of `convT`, closures, callees
+  that are parameters), then the guards.
 - Fast paths for local allocation (size-specialized, tiny).
 - Exposed addresses: `exposeptr` of a local object must be refused or the
   conversion made a static sink everywhere (now only in escape analysis).

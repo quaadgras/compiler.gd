@@ -456,9 +456,207 @@ defined); a `_Thread_local` object is each goroutine's, made on first use; `_Ato
 objects and `stdatomic.h` use `sync/atomic`, or a lock for small objects
 and pointers.
 
-C's library is Go, in internal/c23 (`libc.go`, `math.go`, `ctype.go`,
-`uchar.go`, `time.go`, `errno.go`, `thread.go`, `threads.go`), with C prototypes in the
-headers cmd/cc provides (`headers.go`); `TestLibc` compares it with gcc.
+Sockets (`sys/socket.h`, `netinet/in.h`, `arpa/inet.h`, `netdb.h`,
+`sys/un.h`) are `net`'s listeners and connections, in
+internal/c23/sys/socket (and netdb, arpa/inet, netinet/in, net/if; only
+sys/socket, netdb and net/if link `net`). They are descriptors of internal/c23's table, as files are, so
+`read`, `write`, `close`, `dup`, `fdopen` and `fcntl`'s `O_NONBLOCK` work
+on them. Go has no readiness, so `poll` and `select` have one of their
+own: a descriptor whose reads may block (a socket's connection, a pipe, a
+terminal) is read ahead by a goroutine into a buffer of up to 64 KiB, and
+is readable when that has data or an end; a listener accepts into a
+queue, a datagram socket receives into one. Non-blocking `connect` dials
+in the background (`EINPROGRESS`, then `POLLOUT` and `SO_ERROR`). Writes
+block until Go has written. Names resolve with Go's resolver;
+`getnameinfo` gives a port's number, not its name. Not there: ancillary
+data (`SCM_RIGHTS`), raw sockets, `AF_UNIX` datagrams, and options Go
+cannot set (kept for `getsockopt`, otherwise ignored).
+
+`ndbm.h`'s databases are file.pag, a log of stores and deletes that
+`dbm_open` reads and `dbm_close` rewrites compactly (and file.dir,
+empty), their keys in sorted order: a format of cmd/cc's own, which
+POSIX leaves to the library. `posix_devctl` is `ioctl` returning the
+error number; `ppoll` does not change the signal mask while it waits.
+
+Files and the system: `statvfs` and `statfs` are the system's where
+package syscall has them (Linux, macOS, the BSDs; `ENOSYS` elsewhere,
+Windows and wasm included); `nftw` walks with `os.ReadDir` (names in
+order); `wordexp` expands in Go as glibc does, running `/bin/sh` only
+for a command substitution; `times`, `sysinfo` and `getifaddrs` give
+what Go and `/proc` know; `libintl.h` has no catalogs (messages are
+their own translations) and `catopen` none either; `res_query` cannot
+give raw DNS messages (Go's resolver has none).
+
+The rest of POSIX's files and system interfaces (musl's headers in POSIX
+mode; `TestPxFiles`): the `*at` functions resolve a name relative to a
+directory descriptor against that directory's name (made absolute when
+it was opened, so `fchdir` does not move it), not with `os.Root`, which
+would keep names inside the directory; a directory renamed after it was
+opened is not followed, and `futimens` and `fexecve` use the name a
+file was opened by. `AT_SYMLINK_NOFOLLOW` sets a link's own times only
+on Linux, `AT_EACCESS` checks the effective ids only on Linux, and
+`mkfifo` and `mknod` are the system's where package syscall has them
+(`ENOSYS` elsewhere). `fdopendir`'s `DIR` reads by name too, and
+`posix_getdents` returns readdir's entries (sorted, read at its first
+call; `lseek` does not rewind it). `pipe2`'s `O_NONBLOCK` pipe is read
+ahead, as a pipe that `poll` watches: what the program writes to it may
+not be readable at once. `pathconf` gives Linux's limits whatever the
+file system (glibc's `_PC_LINK_MAX` of 127 for all), `confstr` only
+`_CS_PATH` and the width-restricted environments; `getlogin` is
+`$LOGNAME` (musl's), `gethostid` `/etc/hostid` or 0; `ttyname` reads
+`/proc/self/fd` on Linux, else searches `/dev`. The ids, `nice` and
+priorities, `getrlimit` and `setrlimit` are the system's on Linux, macOS
+and the BSDs (Go raises `RLIMIT_NOFILE` at start, so that one is not
+what the program started with); elsewhere ids may only be set to what
+they are, there are no limits, and `setrlimit` fails with `EPERM`.
+`flockfile` is a recursive lock per `FILE` that the streams' functions
+do not take, so the `_unlocked` ones are theirs. `mlock` and its kin
+succeed and do nothing; `shm_open` opens a file of `/dev/shm` (the
+temporary directory elsewhere), whose `MAP_SHARED` mappings the process
+shares with itself only. `getpwent` and `getgrent` read `/etc/passwd` and
+`/etc/group`; `utmpx.h` reads glibc's x86-64 records of `/var/run/utmp`
+(none elsewhere) and cannot write (`pututxline` fails with `EPERM`).
+netdb.h's databases are `/etc/hosts`, `/etc/networks`, `/etc/protocols`
+(else getprotobyname's table) and `/etc/services` (else the few services
+Go's net package knows without one); `if_nameindex` is
+`net.Interfaces`. Pseudo-terminals (`posix_openpt`, `grantpt`,
+`unlockpt`, `ptsname`) are the system's on Linux and macOS (`ENOSYS`
+elsewhere), as are `tcgetwinsize` and `tcsetwinsize`; `_Fork` fails as
+`fork` does.
+
+Locales: the library has "C" (or "POSIX") and "C.UTF-8" (or "C.utf8"),
+which behave alike (C's multibyte characters are UTF-8's already);
+`newlocale` fails with `ENOENT` for any other name, as glibc does for a
+locale it has not installed (musl accepts any name), and `""` is the
+environment's, or C's. A `locale_t` says which categories are C.UTF-8's;
+`uselocale` keeps one for each thread. The `_l` functions are the plain
+ones, whatever the locale. `wcwidth` is glibc's in a UTF-8 locale, from
+Unicode 15.1's East Asian widths (a table, as Go's unicode has none) and
+Go's tables of marks and format characters. `random` and `rand_r` are
+glibc's (musl's numbers differ), `a64l` sign-extends as POSIX says,
+`crypt` has MD5-, SHA-256- and SHA-512-crypt and DES (not bcrypt or
+yescrypt), `strptime` is glibc's in the C locale (`%z` and `%Z` are read
+and dropped: `struct tm` has no `tm_gmtoff`), and `inet_network`,
+`inet_lnaof` and `inet_makeaddr` are glibc's (musl's are not in the
+network's byte order). `tzset`, and `localtime` when `TZ` changes, read
+`TZ` as a zone's name (Go's `time.LoadLocation`) or as a POSIX TZ string
+(Go's reading of a zone file's footer); `tzname`, `timezone` and
+`daylight` are this year's. `mbsnrtowcs` leaves a character its limit
+splits for the next call, rather than keeping its bytes in the
+`mbstate_t`, and `open_wmemstream`'s positions count wide characters.
+`strerror_r` is POSIX's, returning a number, unless `_GNU_SOURCE` is
+defined.
+
+`regex.h` is a matcher of its own (internal/c23/regex), not Go's
+`regexp`: POSIX's basic and extended syntax with glibc's GNU operators
+and error codes, back-references in both, and the leftmost-longest match
+with each subexpression, from the left, the longest it can be. It works
+on sets of positions, so it takes polynomial time where there are no
+back-references (and backtracks where there are). `termios.h` is the
+terminal's on Linux (with the generic termios: not mips, ppc64) and
+macOS (translated to and from its struct and flags), with Linux's
+struct and constants; elsewhere no descriptor is a terminal (`ENOTTY`).
+
+Linux's event descriptors are descriptors of the same kind, on every
+target: `epoll` (internal/c23/sys/epoll) finds its interests ready with
+`poll`'s readiness, level-triggered, or with `EPOLLET` when something
+became ready or arrived (data read ahead, an `eventfd` write, a timer's
+expiry) since it last reported them, and `EPOLLONESHOT`; an epoll
+descriptor is itself pollable. `struct epoll_event` is 16 bytes
+everywhere: Linux packs it on x86-64 (12 bytes), where `epoll_data`'s
+pointer would be unaligned, and an unaligned pointer cannot keep its
+capability. `eventfd` is a counter, `timerfd` a `time.Timer` (on Go's
+monotonic clock, also for `CLOCK_REALTIME`), and `signalfd` reads the
+signals of its mask pending for the reading thread or the process, as
+`sigwait` takes them. `setitimer`'s three timers count wall time;
+`ITIMER_REAL` is `alarm`'s. `wait4` gives a child's times (and the rest
+of `struct rusage` where the system has it); `waitid` reports only ends,
+and `P_PGID` is any child. `sigqueue` carries its value only to the
+program's own process, and signals are not queued (one pending is sent
+once). `pthread_kill` of another thread that does not block the signal
+runs the handler on a goroutine of its own, as the program's other
+signals; `sigaltstack` and `siginterrupt` are kept and change nothing.
+
+Interprocess communication is the process's own. C's memory is Go's
+heap, which no other process can map, and the program's other processes
+are programs it spawns, so POSIX message queues (`mqueue.h`,
+internal/c23/mqueue), XSI message queues, semaphore sets and shared
+memory segments (`sys/msg.h`, `sys/sem.h`, `sys/shm.h`) live within the
+process, shared by its threads, by name or key as on Linux (and with
+Linux's structures, limits and errors); a spawned program does not see
+them. A message queue descriptor is a descriptor of the table, which
+`poll`, `select` and `epoll` see (readable when a message waits, writable
+when the queue is not full); `mq_notify` signals with `SI_MESGQ` and the
+registered value, or calls the function on a new thread. `shmat` returns
+a pointer to one C object of the segment's size, the same for every
+attach, and cannot place a segment at an address; `SHM_RDONLY` attaches
+it writable. `SEM_UNDO`'s adjustments are applied by `exit`, after the
+`atexit` functions, where only the threads still running see them.
+`ftok` is glibc's formula. `aio.h` (internal/c23/aio) runs each operation
+on a goroutine, those of one descriptor in order as glibc does, with
+`pread` and `pwrite` (or `read` and `write` where there is no offset),
+and notifies as the `struct sigevent` says (`SI_ASYNCIO`); `aio_cancel`
+cancels only what has not started. `shm_open` is `sys/mman.h`'s.
+
+POSIX's threads are complete (internal/c23/pthread, and internal/c23's
+`cancel.go`): attributes (`pthread_create` honors the detach state and
+an explicit scheduling; the stack's size and address, the guard and the
+scope are kept for the getters, as a goroutine's stack grows),
+read-write locks (readers preferred, as glibc's default), barriers, spin
+locks (an `int`, spinning then yielding), robust mutexes (a thread that
+ends holding one gives `EOWNERDEAD` to the next to lock it, and an
+unlock without `pthread_mutex_consistent` makes it `ENOTRECOVERABLE`),
+condition variables on `CLOCK_MONOTONIC`, and cancellation with musl's
+`pthread_cleanup_push` (a `struct __ptcb` per block; the handlers are
+the thread's, in Go). A canceled thread acts at the cancellation points
+that wait (`pthread_join`, `pthread_cond_wait` and `timedwait`,
+`sleep`, `usleep`, `nanosleep`, `clock_nanosleep`, `sem_wait`,
+`sigwait` and its kin, `sigsuspend`, `pause`, `poll`, `select`,
+`epoll_wait`), at `pthread_testcancel`, and when `read` or `write` is
+called (not while it waits): it runs its cleanup handlers, the last
+pushed first, then its keys' destructors, and ends with
+`PTHREAD_CANCELED` (which is not `(void *)-1` but -1 without bits 31
+and 55: a pointer without a capability stored in Go's memory loses the
+tag, so -1 would not compare equal once stored). Asynchronous cancellation acts at the same points
+(and when it is chosen): a goroutine cannot be interrupted. Cancellation
+and `pthread_exit` of the main thread wait for the other threads, then
+exit with status 0. Scheduling changes nothing: policies and priorities
+are kept, as for a user without privileges (a real-time policy is
+`EPERM`; `sched_setscheduler` and `sched_setparam` behave as glibc's,
+not musl's `ENOSYS`), and `sched_rr_get_interval` is 100 ms;
+`pthread_setconcurrency` keeps its level (musl's is `EAGAIN` above 0);
+`pthread_atfork` keeps its handlers and never calls them. The CPU-time
+clocks (`CLOCK_PROCESS_CPUTIME_ID`, `CLOCK_THREAD_CPUTIME_ID`,
+`clock_getcpuclockid`'s and `pthread_getcpuclockid`'s, encoded as
+Linux's) count the time since the process or the thread started: Go
+cannot know a goroutine's processor time. `timer_create`'s timers are
+`time.Timer`s on Go's monotonic clock, for every clock (an absolute
+`CLOCK_REALTIME` time is converted when the timer is set); a
+`SIGEV_SIGNAL` expiry is a process signal with `SI_TIMER` and the
+`sigev_value`, and an expiry while it is pending is an overrun (signals
+are not queued, so two timers of one signal share it); `SIGEV_THREAD`
+calls the function on a new detached thread; `struct sigevent` is
+glibc's. `clock_settime` is `EPERM`
+and `clock_getcpuclockid` of another process `EPERM`. `killpg` signals
+the program's children in the group (their group is the system's where
+package syscall has `Getpgid`) and the program itself if the group is
+its own. `psiginfo` writes glibc's text, `sigpause` is XSI's, and
+`sigsetjmp(env, 1)` saves the mask in `env`, which `siglongjmp` (and
+`longjmp`, as in glibc and musl) restores.
+
+C's library is Go: internal/c23, the run-time support of the generated
+Go (memory and capabilities, errno, descriptors, threads' storage, the
+floating-point environment), and a package for each header with
+functions, named after it: internal/c23/stdio, internal/c23/sys/socket
+and so on (a function that more than one header declares is in the
+first's). The generated Go imports internal/c23 and the packages whose
+functions it calls (libcpkg.go), so a program links only the library it
+uses; cmd/go lists them all as the dependencies of a package it builds
+with cmd/cc, and the linker takes only those imported. A header's
+helpers are in its package, those that two need in internal/c23.
+
+The C prototypes are in the headers cmd/cc provides (`headers.go`,
+`headers_*.go`); `TestLibc` and its kin compare the library with gcc's.
 
 `go test cmd/cc -run Slimcc` runs slimcc's tests (MIT, C23 and GNU C);
 `testdata/slimcc/status.txt` lists the 81 of 106 that pass. Given

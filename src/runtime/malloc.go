@@ -1111,10 +1111,10 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 	}
 
 	if debug.sharestats != 0 {
-		shareStatsAlloc(size, local)
+		shareStatsAlloc(size, local, typ == nil || !typ.Pointers())
 	}
 
-	if sizeSpecializedMallocEnabled && !local && size < uintptr(len(mallocNoScanTable)) {
+	if sizeSpecializedMallocEnabled && !local && debug.sharesites == 0 && size < uintptr(len(mallocNoScanTable)) {
 		if typ == nil || !typ.Pointers() {
 			if size >= maxTinySize {
 				return mallocNoScanTable[size](size, typ, needzero)
@@ -1234,6 +1234,13 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 		if assistG := getg().m.curg; assistG != nil {
 			assistG.gcAssistBytes -= int64(elemsize - size)
 		}
+	}
+
+	if local && debug.sharestats >= 2 {
+		shareStatsSite(x)
+	}
+	if !local && debug.sharesites != 0 && typ != nil && typ.Pointers() {
+		shareSiteAlloc(x, size)
 	}
 
 	// Post-malloc debug hooks.
@@ -2251,6 +2258,34 @@ func newarray(typ *_type, n int) unsafe.Pointer {
 //go:linkname reflect_unsafe_NewArray reflect.unsafe_NewArray
 func reflect_unsafe_NewArray(typ *_type, n int) unsafe.Pointer {
 	return newarray(typ, n)
+}
+
+//go:linkname maps_newobjectIn internal/runtime/maps.newobjectIn
+func maps_newobjectIn(typ *_type, local bool) unsafe.Pointer {
+	if local {
+		typ = localType(typ)
+	}
+	return maps_newobject(typ)
+}
+
+//go:linkname maps_newarrayIn internal/runtime/maps.newarrayIn
+func maps_newarrayIn(typ *_type, n int, local bool) unsafe.Pointer {
+	if !local {
+		return maps_newarray(typ, n)
+	}
+	mem, overflow := math.MulUintptr(typ.Size_, uintptr(n))
+	if overflow || mem > maxAlloc || n < 0 {
+		panic(plainError("runtime: allocation size out of range"))
+	}
+	p := mallocgcl(mem, typ, true, true)
+	maps_shareAlloc(p)
+	return p
+}
+
+//go:linkname maps_isLocal internal/runtime/maps.isLocal
+//go:nosplit
+func maps_isLocal(p unsafe.Pointer) bool {
+	return isLocalObject(p)
 }
 
 //go:linkname maps_newarray internal/runtime/maps.newarray

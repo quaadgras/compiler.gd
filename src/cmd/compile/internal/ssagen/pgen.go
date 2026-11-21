@@ -6,6 +6,7 @@ package ssagen
 
 import (
 	"fmt"
+	"internal/abi"
 	"internal/buildcfg"
 	"os"
 	"slices"
@@ -300,8 +301,8 @@ const maxStackSize = 1 << 30
 // uses it to generate a plist,
 // and flushes that plist to machine code.
 // worker indicates which of the backend workers is doing the processing.
-func Compile(gd *base.Invocation, fn *ir.Func, worker int, profile *pgoir.Profile) {
-	f := buildssa(gd, fn, worker, inline.IsPgoHotFunc(gd, fn, profile) || inline.HasPgoHotInline(gd, fn))
+func Compile(gd *base.Invocation, fn *ir.Func, w *Worker, profile *pgoir.Profile) {
+	f := buildssa(gd, fn, &w.cache, inline.IsPgoHotFunc(gd, fn, profile) || inline.HasPgoHotInline(gd, fn))
 	// Note: check arg size to fix issue 25507.
 	if f.Frontend().(*ssafn).stksize >= maxStackSize || f.OwnAux.ArgWidth() >= maxStackSize {
 		largeStackFramesMu.Lock()
@@ -309,7 +310,7 @@ func Compile(gd *base.Invocation, fn *ir.Func, worker int, profile *pgoir.Profil
 		largeStackFramesMu.Unlock()
 		return
 	}
-	pp := objw.NewProgs(gd, fn, worker)
+	pp := objw.NewProgs(gd, fn, w.progs)
 	defer pp.Free(gd)
 	genssa(gd, f, pp)
 	// Check frame size again.
@@ -327,6 +328,22 @@ func Compile(gd *base.Invocation, fn *ir.Func, worker int, profile *pgoir.Profil
 	}
 
 	pp.Flush(gd) // assemble, fill in boilerplate, etc.
+	if fn.FreshResult {
+		fn.LSym.Func().FuncFlag |= abi.FuncFlagFreshResult
+	}
+
+	// The function is assembled and its tables are written. What they
+	// were made from points to its instructions: without it, those that
+	// did not come from the worker's array (a large function's) can go
+	// now, instead of staying until the end of the compilation.
+	if d, ok := fn.DebugInfo.(*ssa.FuncDebug); ok {
+		d.GetPC = nil
+	}
+	fi := fn.LSym.Func()
+	fi.InlMarks = nil
+	for i := range fi.JumpTables {
+		clear(fi.JumpTables[i].Targets) // their number still sizes the table
+	}
 
 	// If we're compiling the package init function, search for any
 	// relocations that target global map init outline functions and

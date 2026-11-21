@@ -2213,3 +2213,16 @@ func NewLocal(words int, pointers bool) unsafe.Pointer {
 }
 
 func IsLocal(p unsafe.Pointer) bool { return isLocalObject(p) }
+
+// CountLocalAllocs counts the local objects that f allocates: with it, a
+// test knows whether an object is local without a pointer to it, which
+// would be one more place that the object goes to.
+func CountLocalAllocs(f func()) uint64 {
+	old := debug.sharestats
+	debug.sharestats = 1
+	n := shareStats.local.Load()
+	f()
+	n = shareStats.local.Load() - n
+	debug.sharestats = old
+	return n
+}

@@ -75,8 +75,13 @@ func (d *poolDequeue) pack(head, tail uint32) uint64 {
 // pushHead adds val at the head of the queue. It returns false if the
 // queue is full. It must only be called by a single producer.
 //
+// (Not checked, as popHead and popTail are not: the pointers that are
+// converted are to the slots of the queue's own array, as the interfaces
+// that they hold.)
+//
 //go:notear
-func (d *poolDequeue) pushHead(val any) bool {
+//go:nocheckptr
+func (d *poolDequeue) pushHead(val any, owned bool) bool {
 	ptrs := d.headTail.Load()
 	head, tail := d.unpack(ptrs)
 	if (tail+uint32(len(d.vals)))&(1<<dequeueBits-1) == head {
@@ -97,7 +102,12 @@ func (d *poolDequeue) pushHead(val any) bool {
 	if val == nil {
 		val = dequeueNil(nil)
 	}
-	*(*any)(unsafe.Pointer(slot)) = val
+	if owned {
+		// Handed over: not shared by the store (Pool.Put).
+		runtime_poolStoreOwned((*any)(unsafe.Pointer(slot)), val)
+	} else {
+		*(*any)(unsafe.Pointer(slot)) = val
+	}
 
 	// Increment head. This passes ownership of slot to popTail
 	// and acts as a store barrier for writing the slot.
@@ -110,6 +120,7 @@ func (d *poolDequeue) pushHead(val any) bool {
 // single producer.
 //
 //go:notear
+//go:nocheckptr
 func (d *poolDequeue) popHead() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {
@@ -147,6 +158,7 @@ func (d *poolDequeue) popHead() (any, bool) {
 // number of consumers.
 //
 //go:notear
+//go:nocheckptr
 func (d *poolDequeue) popTail() (any, bool) {
 	var slot *abi.EmptyInterface
 	for {
@@ -220,7 +232,7 @@ type poolChainElt struct {
 	next, prev atomic.Pointer[poolChainElt]
 }
 
-func (c *poolChain) pushHead(val any) {
+func (c *poolChain) pushHead(val any, owned bool) {
 	d := c.head
 	if d == nil {
 		// Initialize the chain.
@@ -231,7 +243,7 @@ func (c *poolChain) pushHead(val any) {
 		c.tail.Store(d)
 	}
 
-	if d.pushHead(val) {
+	if d.pushHead(val, owned) {
 		return
 	}
 
@@ -248,7 +260,7 @@ func (c *poolChain) pushHead(val any) {
 	d2.vals = make([]abi.EmptyInterface, newSize)
 	c.head = d2
 	d.next.Store(d2)
-	d2.pushHead(val)
+	d2.pushHead(val, owned)
 }
 
 func (c *poolChain) popHead() (any, bool) {

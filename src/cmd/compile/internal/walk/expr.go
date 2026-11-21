@@ -583,6 +583,21 @@ func walkCall(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		reflectdata.MarkUsedIfaceMethod(gd, n)
 	}
 
+	if n.HandOver != 0 {
+		// Say that the object is handed over to the pool, right
+		// before the call that ends in Put, which asks
+		// (runtime.poolhandover).
+		arg := n.Args[n.HandOver-1]
+		n.HandOver = 0
+		for arg.Op() == ir.OCONVIFACE || arg.Op() == ir.OCONVNOP {
+			arg = arg.(*ir.ConvExpr).X
+		}
+		if arg.Op() == ir.ONAME && arg.Type().IsPtr() {
+			p := typecheck.ConvNop(gd, arg, types.Types[types.TUNSAFEPTR])
+			init.Append(mkcall(gd, "poolhandover", nil, init, p))
+		}
+	}
+
 	if n.Op() == ir.OCALLFUNC && n.Fun.Op() == ir.OCLOSURE {
 		directClosureCall(gd, n)
 	}
@@ -961,7 +976,11 @@ func walkSend(gd *base.Invocation, n *ir.SendStmt, init *ir.Nodes) ir.Node {
 	n1 = typecheck.AssignConv(gd, n1, n.Chan.Type().Elem(), "chan send")
 	n1 = walkExpr(gd, n1, init)
 	n1 = typecheck.NodAddr(gd, n1)
-	return mkcall1(gd, chanfn(gd, "chansend1", 2, n.Chan.Type()), nil, init, n.Chan, n1)
+	fn := "chansend1"
+	if n.Move {
+		fn = "chansendmove1"
+	}
+	return mkcall1(gd, chanfn(gd, fn, 2, n.Chan.Type()), nil, init, n.Chan, n1)
 }
 
 // walkSlice walks an OSLICE, OSLICEARR, OSLICESTR, OSLICE3, or OSLICE3ARR node.

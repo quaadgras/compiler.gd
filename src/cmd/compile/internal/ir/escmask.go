@@ -14,7 +14,7 @@ import (
 // escape-bits, doc/gd/escape-bits.md) has a bit for: argument k's is
 // bit k+1, bit 0 being reserved. An argument past them is never an
 // escape candidate (escape's dynamicArgHole).
-const EscMaskArgs = 21
+const EscMaskArgs = 15
 
 // After the bits that say which arguments the function keeps, an escape
 // mask has, for the same arguments, the bits that say whether another
@@ -29,9 +29,18 @@ const EscMaskArgs = 21
 // With both clear, what the function keeps of the argument stays with
 // the goroutine that calls it. A mask with all bits set (abi.ITabEscAll)
 // says that everything is shared.
+//
+// After those, bit EscMaskHeld+k says how the function keeps argument
+// k. It is clear if the function keeps it only by calls that check, or
+// by calling the methods that the parameter's interface type has of it
+// (ir.Func.KeptChecked, without KeptByAny): if a pointer to the object
+// is kept then, the function has shared the object, and a caller that
+// knows that those methods of the object keep nothing has no holder in
+// the call (escape's move.go). The mask with all bits set says held.
 const (
 	EscMaskShared  = 1 + EscMaskArgs
 	EscMaskViaRecv = 1 + 2*EscMaskArgs
+	EscMaskHeld    = 1 + 3*EscMaskArgs
 )
 
 // The byte that follows the eight of the leaks in an escape note, if the
@@ -41,6 +50,8 @@ const (
 	EscNoteShareByte = 8
 	EscNoteStays     = 0x81 // what is kept is not reached by another goroutine by itself
 	EscNoteViaRecv   = 0x02 // and it is stored through the receiver
+	EscNoteChecked   = 0x84 // it is kept only by calls that check (with or without the first)
+	EscNoteLinked    = 0x88 // without the first: it would be so but for the functions that the parameter's links name (ParamShare.Links)
 )
 
 // The bytes of a parameter's escape note after "esc:" (escape's leaks
@@ -75,6 +86,17 @@ const EscFuncTagged = 3
 // and method tables, in the package that defines it and those that
 // import it, comes from here, so that they agree.
 func EscMaskOf(params []*types.Field) uint64 {
+	return escMaskOf(params, false)
+}
+
+// EscMaskBaseOf is EscMaskOf, but that what a parameter with links
+// keeps is not shared by itself (EscNoteLinked): the mask that the
+// linker starts from (sharelink.go).
+func EscMaskBaseOf(params []*types.Field) uint64 {
+	return escMaskOf(params, true)
+}
+
+func escMaskOf(params []*types.Field, base bool) uint64 {
 	var mask uint64
 	for i, f := range params {
 		if i >= EscMaskArgs {
@@ -82,8 +104,12 @@ func EscMaskOf(params []*types.Field) uint64 {
 		}
 		if escNoteKeeps(f.Note) {
 			mask |= 1 << uint(i+1)
-			switch fl := escNoteShare(f.Note); {
-			case fl&EscNoteStays != EscNoteStays:
+			fl := escNoteShare(f.Note)
+			if fl&EscNoteChecked != EscNoteChecked {
+				mask |= 1 << uint(EscMaskHeld+i)
+			}
+			switch {
+			case fl&EscNoteStays != EscNoteStays && !(base && fl&EscNoteLinked == EscNoteLinked):
 				mask |= 1<<uint(EscMaskShared+i) | 1<<uint(EscMaskViaRecv+i)
 			case fl&EscNoteViaRecv != 0:
 				mask |= 1 << uint(EscMaskViaRecv+i)

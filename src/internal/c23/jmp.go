@@ -19,19 +19,39 @@ func NewJmpFrame() *JmpFrame { return &JmpFrame{live: true} }
 // Done marks the call returned: longjmp to it faults.
 func (f *JmpFrame) Done() { f.live = false }
 
-// jmpBuf is what a jmp_buf points to.
+// jmpBuf is what a jmp_buf points to: and, if sigsetjmp saved it, the
+// signal mask that longjmp restores.
 type jmpBuf struct {
-	f    *JmpFrame
-	site int32
+	f     *JmpFrame
+	site  int32
+	saved bool
+	mask  uint64
 }
 
-var jmpBufInfo = tinfoOf[jmpBuf]()
+var jmpBufInfo = TinfoOf[jmpBuf]()
 
 // Setjmp is setjmp(env) at site of frame f's function: it saves both in
 // env, a jmp_buf, and returns 0.
 func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
 	p := New[jmpBuf]()
-	*(*jmpBuf)(p.obj) = jmpBuf{f, site}
+	*(*jmpBuf)(p.Obj) = jmpBuf{f: f, site: site}
+	StorePtr(env, p)
+	return 0
+}
+
+// Sigsetjmp is sigsetjmp(env, save): setjmp that also saves the calling
+// thread's signal mask in env if save is not 0, for longjmp (and
+// siglongjmp) to restore, as glibc's and musl's do.
+func Sigsetjmp(env Ptr, f *JmpFrame, site, save int32) int32 {
+	p := New[jmpBuf]()
+	jb := (*jmpBuf)(p.Obj)
+	*jb = jmpBuf{f: f, site: site}
+	if save != 0 {
+		t := SigSelf()
+		SigMu.Lock()
+		jb.saved, jb.mask = true, t.Mask
+		SigMu.Unlock()
+	}
 	StorePtr(env, p)
 	return 0
 }
@@ -44,15 +64,22 @@ type longjmpPanic struct {
 // Longjmp is longjmp.
 func Longjmp(env Ptr, val int32) {
 	p := LoadPtr(env)
-	if p.obj == nil || p.off != 0 || p.info() != jmpBufInfo {
-		fault("longjmp to a jmp_buf setjmp did not set", Addr(p))
+	if p.Obj == nil || p.Off != 0 || p.Info() != jmpBufInfo {
+		RaiseFault("longjmp to a jmp_buf setjmp did not set", Addr(p))
 	}
-	jb := (*jmpBuf)(p.obj)
+	jb := (*jmpBuf)(p.Obj)
 	if !jb.f.live {
-		fault("longjmp to a function that has returned", Addr(p))
+		RaiseFault("longjmp to a function that has returned", Addr(p))
 	}
 	if val == 0 {
 		val = 1
+	}
+	if jb.saved {
+		t := SigSelf()
+		SigMu.Lock()
+		t.Mask = jb.mask
+		SigMu.Unlock()
+		t.DeliverPending()
 	}
 	panic(&longjmpPanic{jb.f, jb.site, val})
 }

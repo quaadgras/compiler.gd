@@ -305,8 +305,19 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 		w.Len(int(ps.ViaDerefs))
 		w.Len(int(ps.Results))
 		w.Len(int(ps.Heap))
-		w.Bool(ps.Recv)
+		w.Len(len(ps.Links))
+		for _, l := range ps.Links {
+			w.String(l.Key)
+			w.Len(int(l.Arg))
+			w.Len(int(l.Derefs))
+		}
 	}
+	w.Len(int(name.Func.Consumes)) // gd: see escape/move.go
+	w.Bool(name.Func.OwnedResult)
+	w.Len(int(name.Func.KeptChecked))
+	w.Len(int(name.Func.KeptByRecv))
+	w.Len(int(name.Func.KeptByAny))
+	w.Len(int(name.Func.KeptCalls))
 
 	if inl := name.Func.Inl; w.Bool(inl != nil) {
 		w.Len(int(inl.Cost))

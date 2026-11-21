@@ -578,6 +578,7 @@ type g struct {
 	fipsIndicator   uint8
 	fipsOnlyBypass  bool
 	ditWanted       bool // set if g wants to be executed with DIT enabled
+	leakReported    bool // the goroutine leak profile reported it: it is not collected
 	syncSafePoint   bool // set if g is stopped at a synchronous safe point.
 	shareAllocs     bool // what g allocates for a map is shared: it is writing a shared map (shared.go)
 	runningCleanups atomic.Bool
@@ -595,6 +596,7 @@ type g struct {
 	waiting         *sudog         // sudog structures this g is waiting on (that have a valid elem ptr); in lock order
 	cgoCtxt         []uintptr      // cgo traceback context
 	labels          unsafe.Pointer // profiler labels
+	ownedPut        unsafe.Pointer // the object that the next sync.Pool.Put hands over (shared.go)
 	timer           *timer         // cached timer for time.Sleep
 	sleepWhen       int64          // when to sleep until
 	selectDone      atomic.Uint32  // are we participating in a select and did someone win the race?

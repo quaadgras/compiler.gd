@@ -77,26 +77,23 @@ type location struct {
 	// paramEsc records the represented parameter's leak set.
 	paramEsc leaks
 
-	heap       bool          // finish: the location is in the heap
-	local      uint8         // finish: how its object is local (localStatic, localTagged), if it is
-	shares     ir.ParamShare // for a parameter: see ir.Func.ParamShares
-	captured   bool          // has a closure captured this variable?
-	stmt       int32         // the statement the location was made in, or a variable declared in (shares.go)
-	dynRoot    *dynRoot      // the location is a container known at run time (shares.go)
-	isDynRoot  bool          // the location was made as one, even if it is not one any more
-	dyn        []*location   // the dynamic roots that the location, or what it leads to, flows to
-	owners     []*location   // for the contents of tracked variables: those variables (shares.go)
-	recv       *recvRoot     // the location is the receiver of an interface call (recv.go)
-	recvs      []*location   // the receiver roots that the location, or what it leads to, reaches on a raw path
-	recvOver   bool          // too many to list: what flows here is shared
-	conv       *types.Type   // the location is a conversion of a pointer of this type to an interface
-	assert     bool          // the location is what an interface was asserted to hold, of a type that is not an interface
-	rawgen     uint32        // walkOne: the walk that reached the location on a raw path
-	rawDerefs  int           // walkOne: the least dereferences of such a path
-	reassigned bool          // has this variable been reassigned?
-	addrtaken  bool          // has this variable's address been taken?
-	param      bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
-	paramOut   bool          // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
+	heap        bool          // finish: the location is in the heap
+	local       uint8         // finish: how its object is local (localStatic, localTagged), if it is
+	shares      ir.ParamShare // for a parameter: see ir.Func.ParamShares
+	captured    bool          // has a closure captured this variable?
+	stmt        int32         // the statement the location was made in, or a variable declared in (shares.go)
+	rawgen      uint32        // walkOne: the walk that reached the location on a path with no read-only edge
+	rawDerefs   int           // walkOne: the least dereferences of such a path
+	plaingen    uint32        // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
+	plainDerefs int           // walkOne: the least dereferences of such a path
+	dynRoot     *dynRoot      // the location is a container known at run time (shares.go)
+	isDynRoot   bool          // the location was made as one, even if it is not one any more
+	dyn         []*location   // the dynamic roots that the location, or what it leads to, flows to
+	owners      []*location   // for the contents of tracked variables: those variables (shares.go)
+	reassigned  bool          // has this variable been reassigned?
+	addrtaken   bool          // has this variable's address been taken?
+	param       bool          // is this variable a parameter (ONAME of class ir.PPARAM)?
+	paramOut    bool          // is this variable an out parameter (ONAME of class ir.PPARAMOUT)?
 
 	// gd Phase G: assignedInBody reports whether this result
 	// variable is assigned other than by a return statement (p =
@@ -119,6 +116,28 @@ type location struct {
 	// transient marks the temporaries of teeHole, which forward a
 	// value to other holes instead of holding it.
 	transient bool
+
+	// moveCand marks the contents of the tracked variables of which
+	// one is sent on a channel and not used again; moveHeld, that
+	// something else than those variables holds a pointer to those
+	// contents (move.go).
+	moveCand, moveHeld bool
+	// retCand marks such contents that the function returns; deferred,
+	// that a deferred call hands them over.
+	retCand, deferred bool
+	// later marks the temporaries of the hole of that name, which
+	// forward a value some time later.
+	later  bool
+	heldBy string
+	// kept marks a parameter whose pointer something keeps that is
+	// not a call that checks (ir.Func.KeptChecked); keptCheck is, for
+	// the dynamic root of a call's argument, the check that the call
+	// can make (move.go).
+	kept      bool
+	keptCall  bool // it is passed to a call that checks, which shares it if the function called keeps it
+	keptRecv  bool // a method of its own may keep it: it is the receiver of a call of an interface's method
+	keptAny   bool // and that may be any method of its type: it is asserted to have others than its interface type's
+	keptCheck *keptCheck
 
 	// escapedInGraph is set when src's address flowed to a location
 	// that already escaped (the heap) while the graph was built: flow
@@ -207,11 +226,34 @@ type edge struct {
 	derefs int // >= -1
 	notes  *note
 
+	// ro is set for an edge that only a string flows along: what a
+	// string points to is never written, so who reaches the string
+	// says nothing of who may write what it was loaded from (shares.go:
+	// a value that is only read is not shared). The edge counts for
+	// escaping and not for sharing.
+	ro bool
+
 	// share is set for an edge that is in the graph only to find what
 	// other goroutines may reach (shares.go): one that the graph did
 	// not have before, because its source escapes anyway. Only the
 	// solver follows it.
 	share bool
+
+	// recvOK is set for an edge along which a pointer flows into an
+	// interface, of a type none of whose methods keeps its receiver
+	// (recv.go, recvKeepsNothing): a call of a method of that
+	// interface does not keep the object, whatever the method is. The
+	// walk from recvHeldLoc does not follow it (move.go). That is for
+	// the methods of the interface type; recvAllOK is for all that the
+	// type has, and for the walk from recvAnyLoc.
+	recvOK, recvAllOK bool
+
+	// recvRes is set for an edge from the receiver of a call of an
+	// interface's method to what the call returns, which may be the
+	// receiver (recv.go). The receiver flows to recvHeldLoc as well,
+	// which says what such a method may do with it: who has the
+	// result is no holder of the receiver by this edge (move.go).
+	recvRes bool
 }
 
 func (l *location) asHole() hole {
@@ -252,6 +294,20 @@ type hole struct {
 	// the expression, independent of whether the address will actually
 	// be stored into a variable.
 	addrtaken bool
+
+	// ro says that the expression is, or is a part of what gives, a
+	// string: see edge.ro.
+	ro bool
+
+	// recvOK says that the expression is converted to an interface
+	// type from a type whose methods do not keep their receiver: see
+	// edge.recvOK.
+	recvOK, recvAllOK bool
+
+	// recvRes says that the expression is the receiver of a call of
+	// an interface's method, where it flows to the call's result: see
+	// edge.recvRes.
+	recvRes bool
 }
 
 type note struct {
@@ -330,13 +386,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address
@@ -346,7 +402,7 @@ func (b *batch) flow(k hole, src *location) {
 // teeHole's temporaries, which only forward values.
 func (b *batch) holdsAddr(root, l *location) bool {
 	switch root {
-	case &b.heapLoc, &b.ownHeapLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc:
+	case &b.heapLoc, &b.ownHeapLoc, &b.moveLoc, &b.checkLoc, &b.recvLoc, &b.recvHeldLoc, &b.recvAnyLoc, &b.mutatorLoc, &b.calleeLoc, &b.blankLoc, &b.candidateLoc, &b.shareLoc, &b.convShareLoc:
 		return false
 	}
 	// Locations of other functions in the batch, the parameters
@@ -396,7 +452,12 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
 func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
+func (b *batch) convShareHole() hole { return b.convShareLoc.asHole() }
 func (b *batch) ownHeapHole() hole   { return b.ownHeapLoc.asHole() }
+func (b *batch) moveHole() hole      { return b.moveLoc.asHole() }
+func (b *batch) checkHole() hole     { return b.checkLoc.asHole() }
+func (b *batch) recvHeldHole() hole  { return b.recvHeldLoc.asHole() }
+func (b *batch) recvAnyHole() hole   { return b.recvAnyLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }
@@ -492,6 +553,7 @@ func (e *escape) teeHole(ks ...hole) hole {
 // variables introduced during Order.
 func (e *escape) later(k hole) hole {
 	loc := e.newLoc(nil, true)
+	loc.later = true
 	e.flow(k, loc)
 	return loc.asHole()
 }

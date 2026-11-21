@@ -33,6 +33,7 @@ import (
 	"internal/runtime/atomic"
 	"internal/runtime/gc"
 	"internal/runtime/sys"
+	"internal/stringslite"
 	"unsafe"
 )
 
@@ -132,9 +133,16 @@ func isGlobal(p uintptr) bool {
 // markShared marks the heap object p points into as shared. If it was not,
 // it returns the object's base and span; otherwise, or if p does not point
 // into a heap object, zero.
+//
+// An object without pointers is not marked. Nothing in it is locked: what
+// is stored whole is a string, a slice or an interface, which have
+// pointers, and so do the maps, the channels and the atomic pointers that
+// ask whether they are shared. It leads nowhere, and the small ones share
+// a block, and would share its bit. So a buffer of bytes costs nothing
+// here, and leaves its page's byte clear for isShared.
 func markShared(p uintptr) (base uintptr, s *mspan) {
 	s = spanOf(p)
-	if s == nil || s.state.get() != mSpanInUse || p < s.base() || p >= s.limit || s.isUserArenaChunk {
+	if s == nil || s.state.get() != mSpanInUse || p < s.base() || p >= s.limit || s.isUserArenaChunk || s.spanclass.noscan() {
 		return 0, nil
 	}
 	i := s.objIndex(p)
@@ -167,6 +175,13 @@ func markShared(p uintptr) (base uintptr, s *mspan) {
 	releasem(mp)
 	if fresh && s.spanclass.local() {
 		localPublished(s.base() + i*s.elemsize)
+	}
+	if fresh && debug.sharestats != 0 {
+		shareStats.marked.Add(1)
+		shareStats.markedBytes.Add(int64(s.elemsize))
+	}
+	if fresh && debug.sharesites != 0 {
+		shareSiteMarked(s.base() + i*s.elemsize)
 	}
 	if !fresh {
 		return 0, nil
@@ -221,6 +236,157 @@ func publish(p unsafe.Pointer) {
 	}
 	publishObject(base, s)
 	KeepAlive(p)
+}
+
+// publishContents shares what the object p points to holds, and not the
+// object: it is handed to another goroutine, which is then the only one
+// that reaches it (chansendmove1). If it is shared already, so is what it
+// holds.
+func publishContents(p unsafe.Pointer) {
+	if !sharingEnabled || p == nil || isShared(p) {
+		return
+	}
+	publishContentsOf(p)
+}
+
+// publishContentsOf is publishContents for an object that is not shared.
+func publishContentsOf(p unsafe.Pointer) {
+	s := spanOfHeap(uintptr(p))
+	if s == nil || s.isUserArenaChunk || s.spanclass.noscan() {
+		return
+	}
+	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	limit := base + s.elemsize
+	// The object is the caller's to read until it is handed over, and
+	// p keeps it while what it points to is walked.
+	tp := s.typePointersOfUnchecked(base)
+	for {
+		var addr uintptr
+		if tp, addr = tp.next(limit); addr == 0 {
+			break
+		}
+		// A pointer into the object itself (a field that points to
+		// another, as fmt's printer has) shares nothing.
+		q := *(*uintptr)(unsafe.Pointer(addr))
+		if q == 0 || q-base < s.elemsize {
+			continue
+		}
+		// As a rule it is shared already, by the last time the
+		// object was handed over, or has no pointers.
+		if b, qs := markShared(q); b != 0 {
+			publishObject(b, qs)
+		}
+	}
+	KeepAlive(p)
+}
+
+// Handing an object to a sync.Pool.
+//
+// An object put in a pool was shared from then on, and whoever got it
+// from the pool took a lock for every store of a slice, a string or an
+// interface in it, though it had the object to itself. Where the compiler
+// shows that the goroutine that puts an object has no way left to it
+// (cmd/compile/internal/escape, move.go), the pool hands it over: it is
+// not shared, as a pointer sent on a channel is not (chansendmove1).
+//
+// Compiled code says so with poolhandover(p) right before it calls
+// (*sync.Pool).Put, which asks poolOwned. The proof takes what Get
+// returned for an object that nobody else has, or that is shared, which
+// is what was put (handed over, or shared by poolOwned) and what New
+// returns if New only allocates (poolNewFresh); what another New
+// returns, Get shares.
+
+// poolhandover is called by compiled code before a call of
+// (*sync.Pool).Put that hands over the object p points to.
+//
+//go:nosplit
+func poolhandover(p unsafe.Pointer) {
+	getg().ownedPut = p
+}
+
+// publishkept is called by compiled code before a call of a function
+// that is only known when the program runs, whose escape mask says that
+// it keeps the argument p: an object that its goroutine would hand over
+// later, because nothing else that it does keeps it, is shared instead.
+func publishkept(p unsafe.Pointer) {
+	if keptSeen.Load() == 0 {
+		keptSeen.Store(1)
+	}
+	publish(p)
+}
+
+// keptSeen is set once publishkept has shared an object. Until then, an
+// object that is handed to a pool which only holds objects that were
+// handed over, or that its New allocated, is not shared, and poolOwned
+// need not look.
+var keptSeen atomic.Uint32
+
+// poolOwned reports whether the object that x, which sync.Pool.Put was
+// given, points to is handed over; it then shares what the object points to.
+//
+// An object that would be handed over but is shared was shared since Get
+// returned it (publishkept: a function that is only known when the
+// program runs kept it). In a pool whose New returns objects that nobody
+// else has (fresh), it is dropped: the pool would give it out again and
+// again, and whoever got it would take the locks of shared memory, where
+// a new one costs an allocation, once.
+//
+// Nothing has shared it if no call has found a function that keeps its
+// argument (keptSeen) and the pool has no shared objects: its New
+// allocates (fresh) and nothing was put that was not handed over (mixed
+// is false). To take a shared object for one that is not would only
+// keep it in the pool.
+//
+//go:linkname poolOwned sync.runtime_poolOwned
+func poolOwned(x any, fresh, mixed bool) (handed, drop bool) {
+	p := efaceOf(&x).data
+	gp := getg()
+	owned := gp.ownedPut
+	gp.ownedPut = nil
+	if !sharingEnabled {
+		return false, false
+	}
+	if owned == nil || owned != p {
+		// What a pool holds is the next caller of Get's alone, or
+		// shared: also in a pool that only this goroutine has,
+		// whose memory the store would not share it for.
+		publish(p)
+		return false, false
+	}
+	if (!fresh || mixed || keptSeen.Load() != 0) && isShared(p) {
+		// (What it points to is shared with it.)
+		return !fresh, fresh
+	}
+	publishContentsOf(p)
+	return true, false
+}
+
+// poolStoreOwned stores x, which is handed over, in a pool: without
+// sharing it, as compiled code would.
+//
+//go:linkname poolStoreOwned sync.runtime_poolStoreOwned
+func poolStoreOwned(dst *any, x any) {
+	*dst = x
+}
+
+// poolNewFresh reports whether what the function f returned to
+// sync.Pool.Get is an object that only its caller has. If not, it is
+// shared here.
+//
+//go:linkname poolNewFresh sync.runtime_poolNew
+func poolNewFresh(f func() any, x any) bool {
+	if !sharingEnabled {
+		return false
+	}
+	fv := *(**funcval)(unsafe.Pointer(&f))
+	if fv != nil {
+		if fi := findfunc(fv.fn); fi.valid() && fi.flag&abi.FuncFlagFreshResult != 0 {
+			return true
+		}
+	}
+	e := efaceOf(&x)
+	publish(e.data)
+	return false
 }
 
 // publishObject shares what the newly shared object at base, in s, points
@@ -293,7 +459,7 @@ func publishStore(typ *abi.Type, dst, src unsafe.Pointer) {
 //
 //go:nosplit
 func publishptr(dst, val unsafe.Pointer) {
-	if isShared(dst) {
+	if val != nil && isShared(dst) {
 		publish(val)
 	}
 }
@@ -464,6 +630,107 @@ func sharestore(dst unsafe.Pointer, size uintptr) bool {
 
 func shareunlock(dst unsafe.Pointer, size uintptr) {
 	shareUnlockRange(uintptr(dst), size)
+	releasem(getg().m)
+}
+
+// sharestorestring, sharestoreslice and sharestoreiface are called by
+// compiled code that stores a whole string, slice or interface at dst, in
+// a page where something was shared once. If dst is shared they publish
+// what v points to, store v under the locks and report true: the store is
+// here and not in every function that has one. If not they report false,
+// and the caller stores, as it does in memory that is not shared.
+func sharestorestring(dst *string, v string) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(*(*unsafe.Pointer)(unsafe.Pointer(&v)))
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
+func sharestoreslice(dst *slice, v slice) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(v.array)
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
+func sharestoreiface(dst *eface, v eface) bool {
+	if !isShared(unsafe.Pointer(dst)) {
+		return false
+	}
+	publish(unsafe.Pointer(v._type))
+	publish(v.data)
+	mp := acquirem()
+	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	*dst = v
+	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
+	releasem(mp)
+	return true
+}
+
+// shareStripes2 calls f for the locks of the blocks of [a, a+asize) and
+// [b, b+bsize), each once, in the order in which every goroutine takes
+// them: by index.
+func shareStripes2(a, asize, b, bsize uintptr, f func(i uintptr)) {
+	var idx [16]uintptr
+	n := 0
+	for _, r := range [2][2]uintptr{{a, asize}, {b, bsize}} {
+		first, last := r[0]>>shareBlockShift, (r[0]+r[1]-1)>>shareBlockShift
+		if last-first >= uintptr(len(idx)/2) {
+			// Too many to sort here: all of them.
+			for i := uintptr(0); i < shareStripes; i++ {
+				f(i)
+			}
+			return
+		}
+		for i := first; i <= last; i++ {
+			// Insert in order, unless it is there.
+			x := i & (shareStripes - 1)
+			j := n
+			for j > 0 && idx[j-1] > x {
+				j--
+			}
+			if j > 0 && idx[j-1] == x {
+				continue
+			}
+			copy(idx[j+1:n+1], idx[j:n])
+			idx[j] = x
+			n++
+		}
+	}
+	for _, i := range idx[:n] {
+		f(i)
+	}
+}
+
+// sharestore2 is sharestore for the stores of one statement in two
+// places, asize bytes at a and bsize bytes at b (a slice and the elements
+// appended to it): between two synchronisations no goroutine can tell
+// stores made under one lock from stores made each under its own. It
+// takes the locks of both if either is shared, and the caller then calls
+// shareunlock2 after the stores.
+func sharestore2(a unsafe.Pointer, asize uintptr, b unsafe.Pointer, bsize uintptr) bool {
+	if !isShared(a) && !isShared(b) {
+		return false
+	}
+	acquirem()
+	shareStripes2(uintptr(a), asize, uintptr(b), bsize, shareLockStripe)
+	return true
+}
+
+func shareunlock2(a unsafe.Pointer, asize uintptr, b unsafe.Pointer, bsize uintptr) {
+	shareStripes2(uintptr(a), asize, uintptr(b), bsize, func(i uintptr) { atomic.Xadd(&shareSeq[i].seq, 1) })
 	releasem(getg().m)
 }
 
@@ -741,9 +1008,18 @@ var shareStats struct {
 	local, localBytes   atomic.Uint64
 	shared, sharedBytes atomic.Uint64
 	published           atomic.Uint64
+	// Of the shared ones, those without pointers, which are never
+	// marked, and the ones that were marked: stored where another
+	// goroutine reaches. The rest another goroutine never came to.
+	noscan, noscanBytes atomic.Uint64
+	marked, markedBytes atomic.Uint64
 }
 
-func shareStatsAlloc(size uintptr, local bool) {
+func shareStatsAlloc(size uintptr, local, noscan bool) {
+	if !local && noscan {
+		shareStats.noscan.Add(1)
+		shareStats.noscanBytes.Add(int64(size))
+	}
 	if local {
 		shareStats.local.Add(1)
 		shareStats.localBytes.Add(int64(size))
@@ -753,9 +1029,48 @@ func shareStatsAlloc(size uintptr, local bool) {
 	}
 }
 
+// shareSites remembers, with sharestats=2, where the local objects were
+// allocated, by address (the last one of those with the same place in the
+// table), for localPublished to say.
+var shareSites struct {
+	lock mutex
+	tab  [1 << 16]struct {
+		addr uintptr
+		pcs  [5]uintptr
+	}
+}
+
+func shareStatsSite(x unsafe.Pointer) {
+	var pcs [5]uintptr
+	callers(3, pcs[:])
+	lock(&shareSites.lock)
+	e := &shareSites.tab[uintptr(x)>>3%uintptr(len(shareSites.tab))]
+	e.addr = uintptr(x)
+	e.pcs = pcs
+	unlock(&shareSites.lock)
+}
+
+func printShareSite(base uintptr) {
+	lock(&shareSites.lock)
+	e := shareSites.tab[base>>3%uintptr(len(shareSites.tab))]
+	unlock(&shareSites.lock)
+	if e.addr != base {
+		print("\t(allocation not recorded)\n")
+		return
+	}
+	print("\tallocated by:\n")
+	for _, pc := range e.pcs {
+		if f := findfunc(pc); f.valid() {
+			file, line := funcline(f, pc-1)
+			print("\t\t", funcname(f), " ", file, ":", line, "\n")
+		}
+	}
+}
+
 func localPublished(base uintptr) {
 	if n := shareStats.published.Add(1); debug.sharestats >= 2 && n <= 20 {
 		print("runtime: local object ", hex(base), " is published\n")
+		printShareSite(base)
 		if gp := getg(); gp == gp.m.curg {
 			pc, sp := sys.GetCallerPC(), sys.GetCallerSP()
 			systemstack(func() {
@@ -769,11 +1084,14 @@ func localPublished(base uintptr) {
 }
 
 func printShareStats() {
+	printShareSites()
 	if debug.sharestats == 0 {
 		return
 	}
 	print("sharestats: local ", shareStats.local.Load(), " objects ", shareStats.localBytes.Load(), " bytes, shared ",
-		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(), "\n")
+		shareStats.shared.Load(), " objects ", shareStats.sharedBytes.Load(), " bytes, local published ", shareStats.published.Load(),
+		"; of the shared, without pointers ", shareStats.noscan.Load(), " objects ", shareStats.noscanBytes.Load(), " bytes, marked ",
+		shareStats.marked.Load(), " objects ", shareStats.markedBytes.Load(), " bytes\n")
 }
 
 // The bits of a call.
@@ -804,3 +1122,180 @@ const _ = uint(7*goarch.PtrSize - unsafe.Offsetof(g{}.localBits))
 // for an argument reads if there is no function (cmd/compile's
 // escape.callArgTag).
 var escMaskAll uint64 = abi.ITabEscAll
+
+// Where the objects that are not local come from.
+//
+// With GODEBUG=sharesites=1, each object with pointers that is not
+// allocated as a local one is counted for the place that allocates it:
+// the first function on the stack that is not the runtime's or
+// reflect's, once the packages are initialized. When an
+// object is first marked as shared, which is when it is stored where
+// another goroutine reaches, that is counted for its place too. At exit
+// the places are printed that allocated the most objects which were
+// never marked: those another goroutine never came to, so that each was
+// a local object if the compiler had known. (Some of them outlived
+// their goroutine all the same: handed over on a channel or to a pool.)
+//
+// The table of objects is by address and forgets: an object whose entry
+// another has taken is counted as unknown when it is marked.
+type shareSite struct {
+	pc                 uintptr
+	stack              [5]uintptr
+	allocs, bytes      uint64
+	marked, markedSize uint64
+	printed            bool
+}
+
+type shareSiteObj struct {
+	addr uintptr
+	site uint32
+	size uint32
+}
+
+const shareSiteObjs = 1 << 22
+
+var shareSiteTab struct {
+	lock    mutex
+	sites   [1 << 15]shareSite
+	nsites  int
+	full    uint64
+	unknown uint64
+	objs    *[shareSiteObjs]shareSiteObj
+}
+
+// shareSitesMain is set when the packages are initialized: what they
+// allocate before is for the variables of the program.
+var shareSitesMain bool
+
+// hasSuffixDir reports whether the directory of file ends in dir.
+func hasSuffixDir(file, dir string) bool {
+	i := len(file)
+	for i > 0 && file[i-1] != '/' {
+		i--
+	}
+	return i >= len(dir) && file[i-len(dir):i] == dir
+}
+
+func shareSiteAlloc(x unsafe.Pointer, size uintptr) {
+	if !shareSitesMain {
+		return
+	}
+	var pcs [12]uintptr
+	n := callers(2, pcs[:])
+	first := 0
+	for i := 0; i < n; i++ {
+		f := findfunc(pcs[i])
+		if !f.valid() {
+			continue
+		}
+		// (The runtime's functions have other names where another
+		// package links to them.)
+		name := funcname(f)
+		if stringslite.HasPrefix(name, "runtime.") || stringslite.HasPrefix(name, "reflect.") || stringslite.HasPrefix(name, "internal/runtime/") {
+			continue
+		}
+		if file, _ := funcline(f, pcs[i]-1); hasSuffixDir(file, "/runtime/") {
+			continue
+		}
+		first = i
+		break
+	}
+	pc := pcs[first]
+	if pc == 0 {
+		return
+	}
+	t := &shareSiteTab
+	lock(&t.lock)
+	if t.objs == nil {
+		t.objs = (*[shareSiteObjs]shareSiteObj)(sysAlloc(unsafe.Sizeof(*t.objs), &memstats.other_sys, "share sites"))
+		if t.objs == nil {
+			unlock(&t.lock)
+			return
+		}
+	}
+	h := uint32(pc*0x9e3779b97f4a7c15>>40) % uint32(len(t.sites))
+	var st *shareSite
+	for probe := 0; probe < 64; probe++ {
+		e := &t.sites[(h+uint32(probe))%uint32(len(t.sites))]
+		if e.pc == pc {
+			st = e
+			break
+		}
+		if e.pc == 0 {
+			e.pc = pc
+			copy(e.stack[:], pcs[first:n])
+			t.nsites++
+			st = e
+			break
+		}
+	}
+	if st == nil {
+		t.full++
+		unlock(&t.lock)
+		return
+	}
+	st.allocs++
+	st.bytes += uint64(size)
+	o := &t.objs[uintptr(x)>>3%shareSiteObjs]
+	o.addr = uintptr(x)
+	o.site = uint32((uintptr(unsafe.Pointer(st)) - uintptr(unsafe.Pointer(&t.sites[0]))) / unsafe.Sizeof(*st))
+	o.size = uint32(min(size, 1<<32-1))
+	unlock(&t.lock)
+}
+
+func shareSiteMarked(base uintptr) {
+	t := &shareSiteTab
+	lock(&t.lock)
+	if t.objs != nil {
+		if o := &t.objs[base>>3%shareSiteObjs]; o.addr == base {
+			st := &t.sites[o.site]
+			st.marked++
+			st.markedSize += uint64(o.size)
+			o.addr = 0
+		} else {
+			t.unknown++
+		}
+	}
+	unlock(&t.lock)
+}
+
+func printShareSites() {
+	if debug.sharesites == 0 {
+		return
+	}
+	t := &shareSiteTab
+	lock(&t.lock)
+	var allocs, marked uint64
+	for i := range t.sites {
+		allocs += t.sites[i].allocs
+		marked += t.sites[i].marked
+	}
+	print("sharesites: ", t.nsites, " places allocated ", allocs, " objects with pointers that are not local; ", marked,
+		" were marked as shared, and ", t.unknown, " more of places unknown; ", t.full, " not counted\n")
+	var sum uint64
+	for n := 0; n < 40; n++ {
+		var best *shareSite
+		for i := range t.sites {
+			e := &t.sites[i]
+			if e.pc == 0 || e.printed || e.allocs <= e.marked {
+				continue
+			}
+			if best == nil || e.allocs-e.marked > best.allocs-best.marked {
+				best = e
+			}
+		}
+		if best == nil {
+			break
+		}
+		best.printed = true
+		sum += best.allocs - best.marked
+		print("sharesites: #", n+1, " never shared ", best.allocs-best.marked, " of ", best.allocs, " objects, ", best.bytes-best.markedSize, " bytes (", sum*100/max(allocs-marked, 1), "% so far)\n")
+		for _, pc := range best.stack {
+			if f := findfunc(pc); f.valid() {
+				file, line := funcline(f, pc-1)
+				print("sharesites:\t", funcname(f), " ", file, ":", line, "\n")
+			}
+		}
+	}
+	unlock(&t.lock)
+}

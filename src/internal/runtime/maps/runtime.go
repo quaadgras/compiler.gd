@@ -39,6 +39,32 @@ func newarray(typ *abi.Type, n int) unsafe.Pointer
 //go:linkname newobject
 func newobject(typ *abi.Type) unsafe.Pointer
 
+// newobjectIn and newarrayIn allocate, if local is set, a local object:
+// what a map whose header is one allocates (isLocal). No other goroutine
+// reaches such a map, nor what is in it (runtime/shared.go).
+//
+//go:linkname newobjectIn
+func newobjectIn(typ *abi.Type, local bool) unsafe.Pointer
+
+//go:linkname newarrayIn
+func newarrayIn(typ *abi.Type, n int, local bool) unsafe.Pointer
+
+// isLocal reports whether p points to a local object.
+//
+//go:linkname isLocal
+func isLocal(p unsafe.Pointer) bool
+
+// local reports whether the map is a local object: what it allocates is
+// then local too.
+func (m *Map) local() bool {
+	return isLocal(unsafe.Pointer(m))
+}
+
+// newDirectory allocates a directory of n tables.
+func newDirectory(n int, local bool) []*table {
+	return unsafe.Slice((**table)(newarrayIn(abi.TypeFor[*table](), n, local)), n)
+}
+
 // Pushed from runtime in order to use runtime.plainError
 //
 //go:linkname errNilAssign
@@ -272,7 +298,7 @@ outer:
 					slotKey := g.key(typ, i)
 					slotKeyOrig := slotKey
 					if typ.IndirectKey() {
-						kmem := newobject(typ.Key)
+						kmem := newobjectIn(typ.Key, t.local)
 						*(*unsafe.Pointer)(slotKey) = kmem
 						slotKey = kmem
 					}
@@ -284,7 +310,7 @@ outer:
 						slotElem = unsafe.Pointer(uintptr(slotKeyOrig) + typ.ElemOff)
 					}
 					if typ.IndirectElem() {
-						emem := newobject(typ.Elem)
+						emem := newobjectIn(typ.Elem, t.local)
 						*(*unsafe.Pointer)(slotElem) = emem
 						slotElem = emem
 					}

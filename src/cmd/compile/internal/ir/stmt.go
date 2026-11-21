@@ -466,6 +466,11 @@ type SendStmt struct {
 	miniStmt
 	Chan  Node
 	Value Node
+
+	// Move reports that the pointer sent is to an object that the
+	// send hands over: the sender has no other way to it, and does
+	// not use this one again (escape analysis, move.go).
+	Move bool
 }
 
 func NewSendStmt(gd *base.Invocation, pos src.XPos, ch, value Node) *SendStmt {

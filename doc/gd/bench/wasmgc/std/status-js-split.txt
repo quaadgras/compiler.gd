@@ -173,6 +173,89 @@ internal/buildcfg ok
 internal/bytealg SKIP no test files
 internal/byteorder SKIP no test files
 internal/c23 ok
+internal/c23/aio SKIP no test files
+internal/c23/arpa/inet ok
+internal/c23/complex SKIP no test files
+internal/c23/crypt ok
+internal/c23/ctype SKIP no test files
+internal/c23/devctl SKIP no test files
+internal/c23/dirent SKIP no test files
+internal/c23/err SKIP no test files
+internal/c23/errno SKIP no test files
+internal/c23/fcntl SKIP no test files
+internal/c23/fmtmsg SKIP no test files
+internal/c23/fnmatch SKIP no test files
+internal/c23/ftw SKIP no test files
+internal/c23/getopt SKIP no test files
+internal/c23/glob SKIP no test files
+internal/c23/grp SKIP no test files
+internal/c23/iconv SKIP no test files
+internal/c23/ifaddrs SKIP no test files
+internal/c23/langinfo SKIP no test files
+internal/c23/libgen SKIP no test files
+internal/c23/libintl SKIP no test files
+internal/c23/locale SKIP no test files
+internal/c23/malloc SKIP no test files
+internal/c23/math ok
+internal/c23/monetary SKIP no test files
+internal/c23/mqueue SKIP no test files
+internal/c23/ndbm SKIP no test files
+internal/c23/net/if SKIP no test files
+internal/c23/netdb SKIP no test files
+internal/c23/netinet/in SKIP no test files
+internal/c23/nl_types SKIP no test files
+internal/c23/poll SKIP no test files
+internal/c23/pthread SKIP no test files
+internal/c23/pwd SKIP no test files
+internal/c23/regex ok
+internal/c23/resolv SKIP no test files
+internal/c23/sched SKIP no test files
+internal/c23/search SKIP no test files
+internal/c23/semaphore SKIP no test files
+internal/c23/signal SKIP no test files
+internal/c23/spawn SKIP no test files
+internal/c23/stdatomic SKIP no test files
+internal/c23/stdbit SKIP no test files
+internal/c23/stdio SKIP no test files
+internal/c23/stdio_ext SKIP no test files
+internal/c23/stdlib ok
+internal/c23/string SKIP no test files
+internal/c23/strings SKIP no test files
+internal/c23/sys/epoll SKIP no test files
+internal/c23/sys/eventfd SKIP no test files
+internal/c23/sys/file SKIP no test files
+internal/c23/sys/ioctl SKIP no test files
+internal/c23/sys/ipc SKIP no test files
+internal/c23/sys/mman SKIP no test files
+internal/c23/sys/msg SKIP no test files
+internal/c23/sys/random SKIP no test files
+internal/c23/sys/resource SKIP no test files
+internal/c23/sys/select SKIP no test files
+internal/c23/sys/sem SKIP no test files
+internal/c23/sys/shm SKIP no test files
+internal/c23/sys/signalfd SKIP no test files
+internal/c23/sys/socket SKIP no test files
+internal/c23/sys/stat SKIP no test files
+internal/c23/sys/statvfs SKIP no test files
+internal/c23/sys/sysinfo SKIP no test files
+internal/c23/sys/time SKIP no test files
+internal/c23/sys/timerfd SKIP no test files
+internal/c23/sys/times SKIP no test files
+internal/c23/sys/uio SKIP no test files
+internal/c23/sys/utsname SKIP no test files
+internal/c23/sys/wait SKIP no test files
+internal/c23/syslog SKIP no test files
+internal/c23/termios SKIP no test files
+internal/c23/threads SKIP no test files
+internal/c23/time SKIP no test files
+internal/c23/uchar SKIP no test files
+internal/c23/ulimit SKIP no test files
+internal/c23/unistd SKIP no test files
+internal/c23/utime SKIP no test files
+internal/c23/utmpx SKIP no test files
+internal/c23/wchar SKIP no test files
+internal/c23/wctype SKIP no test files
+internal/c23/wordexp SKIP no test files
 internal/cfg SKIP no test files
 internal/chacha8rand ok
 internal/copyright ok

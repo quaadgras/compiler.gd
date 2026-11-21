@@ -1024,6 +1024,27 @@ static void testPthread(void) {
 	printf(" delete %d\n", pthread_key_delete(key));
 }
 
+// environ follows setenv, putenv, unsetenv and clearenv.
+extern char **environ;
+
+static int countEnv(const char *prefix) {
+	int n = 0;
+	for (char **e = environ; *e; e++)
+		if (strncmp(*e, prefix, strlen(prefix)) == 0)
+			n++;
+	return n;
+}
+
+static void testEnviron(void) {
+	setenv("CCENV_A", "1", 1);
+	printf("environ after setenv %d\n", countEnv("CCENV_A=1"));
+	putenv("CCENV_B=two");
+	printf("environ after putenv %d %s\n", countEnv("CCENV_"), getenv("CCENV_B"));
+	unsetenv("CCENV_A");
+	printf("environ after unsetenv %d\n", countEnv("CCENV_"));
+	unsetenv("CCENV_B");
+}
+
 int main(void) {
 #ifndef __GD_CC__
 	setlocale(LC_ALL, "C.UTF-8");
@@ -1053,5 +1074,6 @@ int main(void) {
 	testClocks();
 	testPwd();
 	testPthread();
+	testEnviron();
 	return 0;
 }

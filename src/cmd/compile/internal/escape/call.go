@@ -118,6 +118,24 @@ func (e *escape) call(ks []hole, call ir.Node) {
 			for _, arg := range args {
 				argument(e.discardHole(), arg)
 			}
+		} else if e.poolPut(call, fns, recvArg, args) {
+			// The object goes to the heap, and what it holds to
+			// where another goroutine reaches it: whether it is
+			// handed over is known when the graph is solved.
+			argument(e.discardHole(), recvArg)
+			argument(e.handOverHole(call), args[0])
+		} else if isNoEscape(fns) {
+			// internal/abi.NoEscape hides its argument from escape
+			// analysis, with a conversion to an integer and back
+			// that would count as showing the address to everyone:
+			// its argument would be shared, and with it whatever
+			// reflect looks at. Only the standard library can call
+			// it, and promises that what it returns goes nowhere
+			// that outlives the argument. That is trusted, here as
+			// it is for escaping: the argument goes nowhere.
+			for _, arg := range args {
+				argument(e.discardHole(), arg)
+			}
 		} else if isEscapeNonString(fns, fntype) {
 			// internal/abi.EscapeNonString forces its argument to
 			// the heap if it contains a non-string pointer. This is
@@ -160,18 +178,26 @@ func (e *escape) call(ks []hole, call ir.Node) {
 					dynFirst = 1
 				}
 			}
+			dynKey := ""
+			if dyn != nil && dynFirst == 0 {
+				dynKey = e.linkKey(call)
+			}
 			if recvArg != nil {
 				e.rewriteArgument(recvArg, call, fns)
 				e.noteCallArg(cs, 0, recvArg)
 				e.callArgs = all
-				e.dynCall, e.dynArg = dyn, dynFirst-1
+				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst-1, dynKey
+				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, 0)
 				k := e.mergedTagHole(ks, fns, -1, fntype, recvArg)
-				e.callArgs, e.dynCall = nil, nil
+				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, "", false, false, false, false
+				if e.consumedArg(call, fns, 0, recvArg) {
+					k = e.handOverHole(call)
+				}
 				if call.Op() == ir.OCALLINTER {
 					// The receiver of a method that is only known
 					// when the program runs (recv.go).
 					if sel, ok := call.Fun.(*ir.SelectorExpr); ok && sel.Op() == ir.ODOTINTER {
-						k = e.recvHole(sel.X.Type(), sel.Sel)
+						k = e.recvHole(ks, call)
 					}
 				}
 				argument(k, recvArg)
@@ -180,9 +206,13 @@ func (e *escape) call(ks []hole, call ir.Node) {
 				e.rewriteArgument(args[i], call, fns)
 				e.noteCallArg(cs, first+i, args[i])
 				e.callArgs = all
-				e.dynCall, e.dynArg = dyn, dynFirst+i
+				e.dynCall, e.dynArg, e.dynKey = dyn, dynFirst+i, dynKey
+				e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = keptChecked(fns, first+i)
 				k := e.mergedTagHole(ks, fns, i, fntype, args[i])
-				e.callArgs, e.dynCall = nil, nil
+				e.callArgs, e.dynCall, e.dynKey, e.checkedArg, e.recvArg, e.recvAnyArg, e.checkCallsArg = nil, nil, "", false, false, false, false
+				if e.consumedArg(call, fns, first+i, args[i]) {
+					k = e.handOverHole(call)
+				}
 				argument(k, args[i])
 			}
 		}
@@ -330,7 +360,11 @@ func (e *escape) call(ks []hole, call ir.Node) {
 
 	case ir.OUNSAFEADD, ir.OUNSAFESLICE, ir.OUNSAFESTRING:
 		call := call.(*ir.BinaryExpr)
-		argument(ks[0], call.X)
+		k := ks[0]
+		if call.Op() == ir.OUNSAFESTRING {
+			k = e.aliasHole(k)
+		}
+		argument(k, call.X)
 		e.discard(call.Y)
 		e.discard(call.RType)
 	}
@@ -491,6 +525,12 @@ func (e *escape) dynamicArgHole(arg ir.Node, argIdx int) hole {
 	// another goroutine reaches it (callbits.go).
 	if e.dynCall != nil && e.dynArg >= 0 {
 		if r := e.callArgRoot(e.dynCall, e.dynArg); r != nil {
+			e.noteKeptCheck(r, e.dynCall, arg)
+			return r.asHole()
+		}
+		// Or what the linker knows of all the functions that it may
+		// be (sharelink.go).
+		if r := e.linkRoot(e.dynKey, e.dynArg); r != nil {
 			return r.asHole()
 		}
 	}
@@ -549,6 +589,12 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 
 	if x := esc.Heap(); x >= 0 {
 		tagKs = append(tagKs, e.sharedTagHoles(ks, fn, param, esc, x)...)
+	} else {
+		// It need not be in the heap, and another goroutine may
+		// reach it all the same: the function converts it to an
+		// interface type whose methods are not known to keep it,
+		// and returns that.
+		tagKs = append(tagKs, e.shareOnlyHoles(fn, param)...)
 	}
 	if x := esc.Mutator(); x >= 0 {
 		tagKs = append(tagKs, e.mutatorHole().shift(e.gd, x))
@@ -560,7 +606,12 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 	if ks != nil {
 		for i := 0; i < numEscResults; i++ {
 			if x := esc.Result(i); x >= 0 {
-				tagKs = append(tagKs, ks[i].shift(e.gd, x))
+				k := ks[i].shift(e.gd, x)
+				// A function that keeps the parameter only by
+				// calls that check does not return it either,
+				// but as what a method of its own returned.
+				k.recvRes = x == 0 && e.checkedArg
+				tagKs = append(tagKs, k)
 			}
 		}
 	}
@@ -587,6 +638,14 @@ func resolveAssignedCallees(assigns []*ir.AssignStmt) []*ir.Name {
 		fns = append(fns, callee)
 	}
 	return fns
+}
+
+func isNoEscape(fns []*ir.Name) bool {
+	if len(fns) != 1 || fns[0].Sym().Pkg.Path != "internal/abi" {
+		return false
+	}
+	// (Address makes an integer that is never a pointer again.)
+	return fns[0].Sym().Name == "NoEscape" || fns[0].Sym().Name == "Address"
 }
 
 func isEscapeNonString(fns []*ir.Name, fntype *types.Type) bool {

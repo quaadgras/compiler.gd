@@ -79,7 +79,47 @@ int *__cc_errno(void);
 #define ECONNRESET 104
 #define ETIMEDOUT 110
 #define ECONNREFUSED 111
+#define ENOMSG 42
+#define EIDRM 43
+#define ENOSTR 60
+#define ENODATA 61
+#define ETIME 62
+#define ENOSR 63
+#define ENOLINK 67
+#define EPROTO 71
+#define EMULTIHOP 72
+#define EBADMSG 74
+#define EUSERS 87
+#define EDESTADDRREQ 89
+#define EMSGSIZE 90
+#define EPROTOTYPE 91
+#define ENOPROTOOPT 92
+#define EPROTONOSUPPORT 93
+#define ESOCKTNOSUPPORT 94
+#define EPFNOSUPPORT 96
+#define EAFNOSUPPORT 97
+#define EADDRNOTAVAIL 99
+#define ENETDOWN 100
+#define ENETUNREACH 101
+#define ENETRESET 102
+#define ECONNABORTED 103
+#define ENOBUFS 105
+#define EISCONN 106
+#define ENOTCONN 107
+#define ESHUTDOWN 108
+#define ETOOMANYREFS 109
+#define EHOSTDOWN 112
+#define EHOSTUNREACH 113
+#define EALREADY 114
+#define EINPROGRESS 115
+#define ESTALE 116
+#define EDQUOT 122
+#define ECANCELED 125
+#define EOWNERDEAD 130
+#define ENOTRECOVERABLE 131
 #define ENOTSUP EOPNOTSUPP
+#define EWOULDBLOCK EAGAIN
+#define EDEADLOCK EDEADLK
 #endif
 `,
 	"inttypes.h": `#ifndef __CC_INTTYPES_H
@@ -1730,6 +1770,14 @@ int vsscanf(const char *restrict s, const char *restrict format, va_list arg);
 typedef struct { long long __pos; } fpos_t;
 int fgetpos(FILE *restrict stream, fpos_t *restrict pos);
 int fsetpos(FILE *stream, const fpos_t *pos);
+long getline(char **restrict lineptr, size_t *restrict n, FILE *restrict stream);
+long getdelim(char **restrict lineptr, size_t *restrict n, int delim, FILE *restrict stream);
+int asprintf(char **restrict strp, const char *restrict fmt, ...);
+int vasprintf(char **restrict strp, const char *restrict fmt, va_list ap);
+int dprintf(int fd, const char *restrict format, ...);
+int vdprintf(int fd, const char *restrict format, va_list ap);
+FILE *fmemopen(void *restrict buf, size_t size, const char *restrict mode);
+FILE *open_memstream(char **bufp, size_t *sizep);
 #endif
 `,
 	"stdlib.h": `#ifndef __CC_STDLIB_H
@@ -1795,6 +1843,9 @@ int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
 int mkstemp(char *template);
 char *realpath(const char *restrict path, char *restrict resolved);
+void *reallocarray(void *ptr, size_t nmemb, size_t size);
+void qsort_r(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *, void *), void *arg);
+char *mkdtemp(char *template);
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,
@@ -1832,6 +1883,7 @@ struct lconv {
 #define LC_TIME 2
 #define LC_COLLATE 3
 #define LC_MONETARY 4
+#define LC_MESSAGES 5
 #define LC_ALL 6
 char *setlocale(int category, const char *locale);
 struct lconv *localeconv(void);
@@ -1894,6 +1946,8 @@ size_t strlcpy(char *restrict s1, const char *restrict s2, size_t n);
 size_t strlcat(char *restrict s1, const char *restrict s2, size_t n);
 #define __STDC_VERSION_STRING_H__ 202311L
 size_t strxfrm(char *restrict s1, const char *restrict s2, size_t n);
+char *strsep(char **restrict stringp, const char *restrict delim);
+char *strsignal(int sig);
 #endif
 `,
 	"sys/types.h": `#ifndef __CC_SYS_TYPES_H
@@ -1956,6 +2010,8 @@ uid_t geteuid(void);
 gid_t getgid(void);
 gid_t getegid(void);
 int isatty(int fd);
+pid_t tcgetpgrp(int fd);
+int tcsetpgrp(int fd, pid_t pgrp);
 char *getcwd(char *buf, size_t size);
 int chdir(const char *path);
 unsigned int sleep(unsigned int seconds);
@@ -2165,6 +2221,7 @@ int utimes(const char *path, const struct timeval times[2]);
 #define timercmp(a, b, CMP) ((a)->tv_sec == (b)->tv_sec ? (a)->tv_usec CMP (b)->tv_usec : (a)->tv_sec CMP (b)->tv_sec)
 #define timeradd(a, b, r) do { (r)->tv_sec = (a)->tv_sec + (b)->tv_sec; (r)->tv_usec = (a)->tv_usec + (b)->tv_usec; if ((r)->tv_usec >= 1000000) { (r)->tv_sec++; (r)->tv_usec -= 1000000; } } while (0)
 #define timersub(a, b, r) do { (r)->tv_sec = (a)->tv_sec - (b)->tv_sec; (r)->tv_usec = (a)->tv_usec - (b)->tv_usec; if ((r)->tv_usec < 0) { (r)->tv_sec--; (r)->tv_usec += 1000000; } } while (0)
+#include <sys/select.h>
 #endif
 `,
 	"sys/ioctl.h": `#ifndef __CC_SYS_IOCTL_H

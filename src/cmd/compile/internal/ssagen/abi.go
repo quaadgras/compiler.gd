@@ -393,7 +393,7 @@ func CreateWasmImportWrapper(gd *base.Invocation, fn *ir.Func) bool {
 		fn.LSym.Func().WasmGC = &obj.WasmGCFunc{Sig: wasm.GCTypeSym(gd.Ctxt, sig)}
 	}
 
-	pp := objw.NewProgs(gd, fn, 0)
+	pp := objw.NewProgs(gd, fn, nil)
 	defer pp.Free(gd)
 	pp.Text.To.Type = obj.TYPE_TEXTSIZE
 	pp.Text.To.Val = int32(types.RoundUp(fn.Type().ArgWidth(), int64(types.RegSize)))
@@ -440,7 +440,7 @@ func GenWasmExportWrapper(gd *base.Invocation, wrapped *ir.Func) {
 		setupWasmExportGC(gd, fn, wrapped)
 	}
 
-	pp := objw.NewProgs(gd, fn, 0)
+	pp := objw.NewProgs(gd, fn, nil)
 	defer pp.Free(gd)
 	// TEXT. Has a frame to pass args on stack to the Go function.
 	pp.Text.To.Type = obj.TYPE_TEXTSIZE

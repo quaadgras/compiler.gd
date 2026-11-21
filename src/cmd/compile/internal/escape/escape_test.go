@@ -210,11 +210,10 @@ func TestStackAllocatable(t *testing.T) {
 }
 
 func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
-	// With 63 heap-escaping params we fill bits 1..63. The 64th and
-	// beyond are dropped — callers treat unset bits as "maybe
-	// conservative heap-alloc" in a future phase; this test just
-	// locks that the computer doesn't panic and doesn't scribble
-	// into bit 0.
+	// With more heap-escaping params than the mask has bits for
+	// (ir.EscMaskArgs, four bits each) we fill all of those. The
+	// params beyond are dropped; this test just locks that the
+	// computer doesn't panic and doesn't scribble into bit 0.
 	intT := types.Types[types.TINT]
 	ptrT := types.NewPtr(intT)
 	const N = 70
@@ -225,8 +224,8 @@ func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
 	sig := types.NewSignature(testGd, nil, params, nil)
 
 	got := computeEscMask(testGd, sig)
-	// Bits 1..63 should all be set; bits 0 and 64+ not representable.
-	want := uint64(0xFFFFFFFFFFFFFFFE) // all except bit 0
+	// The bits of every argument should be set, and not bit 0.
+	want := uint64(1)<<(1+4*ir.EscMaskArgs) - 2
 	if got != want {
 		t.Errorf("overflow: got mask=0x%x, want 0x%x", got, want)
 	}
@@ -236,5 +235,5 @@ func TestComputeEscMask_OverflowGoesConservative(t *testing.T) {
 // function keeps, with nothing said of where: it is shared too
 // (ir.EscMaskShared).
 func keptBits(k int) uint64 {
-	return 1<<uint(k+1) | 1<<uint(ir.EscMaskShared+k) | 1<<uint(ir.EscMaskViaRecv+k)
+	return 1<<uint(k+1) | 1<<uint(ir.EscMaskShared+k) | 1<<uint(ir.EscMaskViaRecv+k) | 1<<uint(ir.EscMaskHeld+k)
 }

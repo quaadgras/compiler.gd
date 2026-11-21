@@ -55,9 +55,9 @@ func object(p unsafe.Pointer) (base unsafe.Pointer, size uintptr)
 
 // Ptr is a C pointer in a register.
 type Ptr struct {
-	obj  unsafe.Pointer // base of the capability; nil: none
-	size uintptr        // bytes the capability covers
-	off  int            // address - base; with no capability, the address
+	Obj  unsafe.Pointer // base of the capability; nil: none
+	Size uintptr        // bytes the capability covers
+	Off  int            // address - base; with no capability, the address
 	ti   uintptr        // the memory is an array of this *tinfo's type; bit 0: C's object; bit 1: scalars only
 }
 
@@ -77,7 +77,7 @@ const (
 	refShift      = 3
 )
 
-func (p Ptr) info() *tinfo {
+func (p Ptr) Info() *tinfo {
 	if i := p.ti >> refShift; i < uintptr(len(tinfoFast)) {
 		return tinfoFast[i].Load()
 	}
@@ -91,7 +91,7 @@ func (p Ptr) header() *header {
 	if p.ti&refC == 0 {
 		return nil
 	}
-	return (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
+	return (*header)(abi.NoEscape(unsafe.Add(p.Obj, -int(hdrSize))))
 }
 
 // A Fault is what a C access that its capability does not allow panics with.
@@ -122,22 +122,22 @@ func (b boundsFault) fault() *Fault {
 	return &Fault{fmt.Sprintf("access of %d bytes out of bounds of %s", b.n, capString(true, ti, b.size, b.off)), addr}
 }
 
-func fault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
+func RaiseFault(msg string, addr uintptr) { panic(&Fault{msg, addr}) }
 
 // Addr returns the address p holds.
-func Addr(p Ptr) uintptr { return uintptr(p.obj) + uintptr(p.off) }
+func Addr(p Ptr) uintptr { return uintptr(p.Obj) + uintptr(p.Off) }
 
 // FromInt returns a pointer made of an integer: it has no capability.
-func FromInt(u uintptr) Ptr { return Ptr{off: int(u)} }
+func FromInt(u uintptr) Ptr { return Ptr{Off: int(u)} }
 
 // Add returns p moved by n bytes. Arithmetic is never checked.
-func Add(p Ptr, n int) Ptr { p.off += n; return p }
+func Add(p Ptr, n int) Ptr { p.Off += n; return p }
 
 // Sub returns the difference of the addresses of p and q.
 func Sub(p, q Ptr) int { return int(Addr(p) - Addr(q)) }
 
 // Cap describes p's capability, for tests and messages.
-func Cap(p Ptr) string { return capString(p.obj != nil, p.info(), p.size, p.off) }
+func Cap(p Ptr) string { return capString(p.Obj != nil, p.Info(), p.Size, p.Off) }
 
 // capString takes the parts of a capability that do not point into its
 // memory, so that formatting a fault does not make what the memory points
@@ -174,7 +174,7 @@ type Obj[T any] struct {
 }
 
 // Local returns the C pointer for a local C object.
-func Local[T any](o *Obj[T]) Ptr { return LocalT(o, tinfoOf[T]()) }
+func Local[T any](o *Obj[T]) Ptr { return LocalT(o, TinfoOf[T]()) }
 
 // A Type describes a type for C's checks: cmd/cc makes one for each type
 // once (TypeOf), in a package variable, and passes it to the allocations
@@ -183,12 +183,12 @@ func Local[T any](o *Obj[T]) Ptr { return LocalT(o, tinfoOf[T]()) }
 type Type = tinfo
 
 // TypeOf returns T's Type.
-func TypeOf[T any]() *Type { return tinfoOf[T]() }
+func TypeOf[T any]() *Type { return TinfoOf[T]() }
 
 // LocalT is Local, of a T whose Type is t.
 func LocalT[T any](o *Obj[T], t *Type) Ptr {
 	o.h = header{ref: t.ref | refC, ti: t, size: unsafe.Sizeof(o.V)}
-	return Ptr{obj: unsafe.Pointer(&o.V), size: unsafe.Sizeof(o.V), ti: t.ref | refC}
+	return Ptr{Obj: unsafe.Pointer(&o.V), Size: unsafe.Sizeof(o.V), ti: t.ref | refC}
 }
 
 // New allocates a T for C in the heap.
@@ -198,12 +198,12 @@ func New[T any]() Ptr { return Local(new(Obj[T])) }
 func NewT[T any](t *Type) Ptr { return LocalT(new(Obj[T]), t) }
 
 // NewArray allocates n bytes for C as an array of T, in the heap.
-func NewArray[T any](n uintptr) Ptr { return newOf(tinfoOf[T](), n) }
+func NewArray[T any](n uintptr) Ptr { return newOf(TinfoOf[T](), n) }
 
 // NewArrayT allocates n bytes for C as an array of t's type, in the heap.
 func NewArrayT(t *Type, n uintptr) Ptr { return newOf(t, n) }
 
-var rawInfo = tinfoOf[Raw]()
+var rawInfo = TinfoOf[Raw]()
 
 // Malloc is C's malloc: n bytes of untyped memory, in which C may keep
 // pointers.
@@ -218,7 +218,7 @@ func Malloc(n uint64) Ptr { return newOf(rawInfo, uintptr(n)) }
 // no capability may be malloc's result that went through an integer:
 // free lets it be.
 func Free(p Ptr) {
-	if p.obj != nil && !mallocd(p) {
+	if p.Obj != nil && !mallocd(p) {
 		badFree("free", p)
 	}
 }
@@ -228,19 +228,19 @@ func Free(p Ptr) {
 // aligned, whose heap object's marker says it is there (newAligned). C's
 // locals and globals that Go puts in the heap pass too.
 func mallocd(p Ptr) bool {
-	if p.off != 0 || p.ti&refC == 0 {
+	if p.Off != 0 || p.ti&refC == 0 {
 		return false
 	}
-	hdr := uintptr(p.obj) - hdrSize
-	base, size := object(p.obj)
+	hdr := uintptr(p.Obj) - hdrSize
+	base, size := object(p.Obj)
 	if base == nil {
 		return false // on a stack, or a global
 	}
 	if uintptr(base) == hdr {
 		return true
 	}
-	return size >= 2*wordSize && *(*uintptr)(base) == alignMagic &&
-		uintptr(base)+*(*uintptr)(unsafe.Add(base, wordSize))-hdrSize == hdr
+	return size >= 2*WordSize && *(*uintptr)(base) == alignMagic &&
+		uintptr(base)+*(*uintptr)(unsafe.Add(base, WordSize))-hdrSize == hdr
 }
 
 // badFree faults for a pointer that malloc cannot have returned, given to
@@ -250,20 +250,20 @@ func mallocd(p Ptr) bool {
 func badFree(fn string, p Ptr) {
 	what := "an object that is not an allocation of its own"
 	switch {
-	case p.off != 0:
+	case p.Off != 0:
 		what = "a pointer into an object, not to its start"
 	case p.ti&refC == 0:
 		what = "Go's memory"
 	}
-	fault(fmt.Sprintf("%s of %s: %s", fn, what, capString(true, p.info(), p.size, p.off)), Addr(p))
+	RaiseFault(fmt.Sprintf("%s of %s: %s", fn, what, capString(true, p.Info(), p.Size, p.Off)), Addr(p))
 }
 
 // checkRealloc faults for a pointer realloc may not be given: one free
 // faults for, and one with no capability, whose object it cannot copy.
 func checkRealloc(p Ptr) {
-	if p.obj == nil {
-		if p.off != 0 {
-			fault("realloc of a pointer with no capability", Addr(p))
+	if p.Obj == nil {
+		if p.Off != 0 {
+			RaiseFault("realloc of a pointer with no capability", Addr(p))
 		}
 	} else if !mallocd(p) {
 		badFree("realloc", p)
@@ -279,7 +279,7 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	}
 	if *(*uintptr)(base) == alignMagic {
 		// An over-aligned object (NewAligned): its header is further in.
-		off := *(*uintptr)(unsafe.Add(base, wordSize))
+		off := *(*uintptr)(unsafe.Add(base, WordSize))
 		if off < hdrSize || off > size {
 			return Ptr{}, false
 		}
@@ -297,7 +297,7 @@ func cobject(w unsafe.Pointer) (Ptr, bool) {
 	if off < 0 || uintptr(off) > h.size {
 		return Ptr{}, false
 	}
-	return Ptr{obj: data, size: h.size, off: off, ti: h.ref}, true
+	return Ptr{Obj: data, Size: h.size, Off: off, ti: h.ref}, true
 }
 
 // derive returns the capability of the untagged word w, which points to a
@@ -312,7 +312,7 @@ func derive(w unsafe.Pointer, want *tinfo) Ptr {
 	if want == nil {
 		return FromInt(uintptr(w))
 	}
-	return Ptr{obj: w, size: want.size, ti: tref(want)}
+	return Ptr{Obj: w, Size: want.size, ti: tref(want)}
 }
 
 // FromGo returns the C pointer for a Go pointer: a capability for the value
@@ -327,14 +327,14 @@ func FromGo[T any](p *T) Ptr {
 	if c, ok := cobject(unsafe.Pointer(p)); ok {
 		return c
 	}
-	return Ptr{obj: unsafe.Pointer(p), size: unsafe.Sizeof(*p), ti: tref(tinfoOf[T]())}
+	return Ptr{Obj: unsafe.Pointer(p), Size: unsafe.Sizeof(*p), ti: tref(TinfoOf[T]())}
 }
 
 // FromSlice returns the C pointer for s's first element, with a capability
 // for its whole array, as cgo lets C reach.
 func FromSlice[T any](s []T) Ptr {
 	var z T
-	return Ptr{obj: unsafe.Pointer(unsafe.SliceData(s)), size: uintptr(cap(s)) * unsafe.Sizeof(z), ti: tref(tinfoOf[T]())}
+	return Ptr{Obj: unsafe.Pointer(unsafe.SliceData(s)), Size: uintptr(cap(s)) * unsafe.Sizeof(z), ti: tref(TinfoOf[T]())}
 }
 
 // FromGoUnsafe returns the C pointer for an unsafe.Pointer: only C's own
@@ -344,21 +344,21 @@ func FromGoUnsafe(p unsafe.Pointer) Ptr { return derive(p, nil) }
 // valid reports whether v may be stored as a plain word where Go reads it
 // as a pointer to want.
 func valid(v Ptr, want *tinfo) bool {
-	if v.obj == nil || v.off < 0 {
+	if v.Obj == nil || v.Off < 0 {
 		return false
 	}
 	if want == nil {
-		return uintptr(v.off) < v.size
+		return uintptr(v.Off) < v.Size
 	}
-	return uintptr(v.off)+want.size <= v.size && holds(v.info(), uintptr(v.off), want)
+	return uintptr(v.Off)+want.size <= v.Size && holds(v.Info(), uintptr(v.Off), want)
 }
 
 // encode returns the word for v where Go reads a pointer to want.
 func encode(v Ptr, want *tinfo) (w unsafe.Pointer, tagged bool) {
 	if valid(v, want) {
-		return unsafe.Add(v.obj, v.off), false
+		return unsafe.Add(v.Obj, v.Off), false
 	}
-	if v.obj == nil && v.off == 0 {
+	if v.Obj == nil && v.Off == 0 {
 		return nil, false
 	}
 	return unsafe.Pointer(Addr(v) | Tag), true
@@ -367,7 +367,7 @@ func encode(v Ptr, want *tinfo) (w unsafe.Pointer, tagged bool) {
 // ToGo returns p as a Go *T: tagged, so that it faults when Go uses it, if
 // it is not a pointer to a whole T.
 func ToGo[T any](p Ptr) *T {
-	w, _ := encode(p, tinfoOf[T]())
+	w, _ := encode(p, TinfoOf[T]())
 	return (*T)(w)
 }
 
@@ -425,22 +425,22 @@ type capRec struct {
 
 // capOf returns what a slot holds for v's capability.
 func capOf(v Ptr) unsafe.Pointer {
-	if v.obj == nil {
+	if v.Obj == nil {
 		return nil
 	}
 	if v.ti&refC != 0 {
-		return unsafe.Add(v.obj, -int(hdrSize))
+		return unsafe.Add(v.Obj, -int(hdrSize))
 	}
-	return unsafe.Pointer(&capRec{v.ti, v.obj, v.size})
+	return unsafe.Pointer(&capRec{v.ti, v.Obj, v.Size})
 }
 
 // fromCap returns the capability a slot holds, at offset 0.
 func fromCap(c unsafe.Pointer) Ptr {
 	if h := (*header)(c); h.ref&refC != 0 {
-		return Ptr{obj: unsafe.Add(c, hdrSize), size: h.size, ti: h.ref}
+		return Ptr{Obj: unsafe.Add(c, hdrSize), Size: h.size, ti: h.ref}
 	}
 	r := (*capRec)(c)
-	return Ptr{obj: r.obj, size: r.size, ti: r.ti}
+	return Ptr{Obj: r.obj, Size: r.size, ti: r.ti}
 }
 
 // slot returns the slot of the word at off in h's object; nil if it has
@@ -453,11 +453,11 @@ func (h *header) slot(off uintptr, create bool) *unsafe.Pointer {
 		}
 		t = h.makeSlots()
 	}
-	return (*unsafe.Pointer)(unsafe.Add(t, off/wordSize*wordSize))
+	return (*unsafe.Pointer)(unsafe.Add(t, off/WordSize*WordSize))
 }
 
 func (h *header) makeSlots() unsafe.Pointer {
-	t := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((h.size+wordSize-1)/wordSize, 1))))
+	t := unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((h.size+WordSize-1)/WordSize, 1))))
 	if atomic.CompareAndSwapPointer(&h.aux, nil, t) {
 		return t
 	}
@@ -470,15 +470,15 @@ func (h *header) makeSlots() unsafe.Pointer {
 // a check another dominates goes, and a call of boundsPanic, in a block
 // that does not return. This body is the same check, for where the
 // intrinsic is not used.
-func check(p Ptr, n uintptr) unsafe.Pointer {
+func Check(p Ptr, n uintptr) unsafe.Pointer {
 	// A pointer with no capability has size 0; a negative offset is
 	// past any size.
-	if off := uintptr(p.off); off > p.size || n > p.size-off {
+	if off := uintptr(p.Off); off > p.Size || n > p.Size-off {
 		// A panic, not a call: Go knows it does not return, so values
 		// need not be saved around it.
-		panic(boundsFault{uintptr(p.obj), p.size, p.ti, n, p.off})
+		panic(boundsFault{uintptr(p.Obj), p.Size, p.ti, n, p.Off})
 	}
-	return unsafe.Add(p.obj, p.off)
+	return unsafe.Add(p.Obj, p.Off)
 }
 
 // boundsPanic is check's fault, as the intrinsic calls it.
@@ -493,25 +493,25 @@ func boundsPanic(obj unsafe.Pointer, size, ti, n uintptr, off int) {
 //
 //go:noinline
 func checkFail(p Ptr, n uintptr) {
-	if p.obj == nil {
-		fault("access through a pointer with no capability", Addr(p))
+	if p.Obj == nil {
+		RaiseFault("access through a pointer with no capability", Addr(p))
 	}
-	ti, size, off := p.info(), p.size, p.off
-	fault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
+	ti, size, off := p.Info(), p.Size, p.Off
+	RaiseFault(fmt.Sprintf("access of %d bytes out of bounds of %s", n, capString(true, ti, size, off)), Addr(p))
 }
 
 func checkPtrWord(p Ptr) unsafe.Pointer {
-	a := check(p, wordSize)
+	a := Check(p, WordSize)
 	// Aligned, and the object's types are aligned too: one word.
-	if uintptr(a)%wordSize != 0 || uintptr(p.off)%wordSize != 0 {
-		fault("misaligned pointer access", uintptr(a))
+	if uintptr(a)%WordSize != 0 || uintptr(p.Off)%WordSize != 0 {
+		RaiseFault("misaligned pointer access", uintptr(a))
 	}
 	return a
 }
 
 // checkScalar checks a store of n bytes at p.
 func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
-	a := check(p, n)
+	a := Check(p, n)
 	if p.ti&2 != 0 { // no word a scalar store may not write
 		return a
 	}
@@ -519,24 +519,24 @@ func checkScalar(p Ptr, n uintptr) unsafe.Pointer {
 }
 
 func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
-	ti := p.info()
+	ti := p.Info()
 	if ti.fewWords && n > 0 {
 		// The words the store covers, in one value of the type, against
 		// the mask of those it may not write.
-		if o := ti.mod(uintptr(p.off)); o+n <= ti.size {
-			w0, w1 := o/wordSize, (o+n-1)/wordSize
+		if o := ti.mod(uintptr(p.Off)); o+n <= ti.size {
+			w0, w1 := o/WordSize, (o+n-1)/WordSize
 			if ti.noStore>>w0&(2<<(w1-w0)-1) == 0 {
 				return a
 			}
 		}
 	}
-	end := uintptr(p.off) + n
-	for b := uintptr(p.off); b < end; b = (b + wordSize) &^ (wordSize - 1) {
+	end := uintptr(p.Off) + n
+	for b := uintptr(p.Off); b < end; b = (b + WordSize) &^ (WordSize - 1) {
 		switch ti.kindAt(b) {
 		case wPtr:
-			fault("scalar store over a pointer word", uintptr(a))
+			RaiseFault("scalar store over a pointer word", uintptr(a))
 		case wRO:
-			fault("store into a word of a Go value with invariants ("+typeName(p.info())+")", uintptr(a))
+			RaiseFault("store into a word of a Go value with invariants ("+typeName(p.Info())+")", uintptr(a))
 		}
 	}
 	return a
@@ -548,7 +548,7 @@ func checkScalarWords(p Ptr, n uintptr, a unsafe.Pointer) unsafe.Pointer {
 func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
 	w := *(*uintptr)(a)
 	if c, ok := auxLoad(p, a, w, false); ok {
-		return Ptr{obj: c.obj, size: c.size, off: int(w - uintptr(c.obj)), ti: c.ti}
+		return Ptr{Obj: c.Obj, Size: c.Size, Off: int(w - uintptr(c.Obj)), ti: c.ti}
 	}
 	return FromInt(w)
 }
@@ -558,12 +558,12 @@ func splitLoad(p Ptr, a unsafe.Pointer) Ptr {
 // word is still in.
 func LoadPtr(p Ptr) Ptr {
 	// C's object (whose base is aligned), an aligned word in bounds.
-	if off := uintptr(p.off); p.ti&refC != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
+	if off := uintptr(p.Off); p.ti&refC != 0 && off%WordSize == 0 && off < p.Size && p.Size-off >= WordSize {
 		// A slot is only set by a pointer store, which checked the word
 		// may hold one.
-		w := *(*uintptr)(unsafe.Add(p.obj, off))
+		w := *(*uintptr)(unsafe.Add(p.Obj, off))
 		var c *header
-		if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize)))).aux); t != nil {
+		if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(p.Obj, -int(hdrSize)))).aux); t != nil {
 			c = (*header)(atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, off))))
 		}
 		if c == nil {
@@ -580,7 +580,7 @@ func LoadPtr(p Ptr) Ptr {
 			// bytes hold (Fil-C's); another word's, only while it is in
 			// it (Go may have written the word since).
 			if o := w - uintptr(obj); p.ti&refSplit != 0 || o <= c.size {
-				return Ptr{obj: obj, size: c.size, off: int(o), ti: c.ref}
+				return Ptr{Obj: obj, Size: c.size, Off: int(o), ti: c.ref}
 			}
 		}
 	}
@@ -596,7 +596,7 @@ func LoadPtr(p Ptr) Ptr {
 func loadPtrSlow(p Ptr) Ptr { return loadPtr(p, checkPtrWord(p)) }
 
 func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
-	k := p.info().kindAt(uintptr(p.off))
+	k := p.Info().kindAt(uintptr(p.Off))
 	if k != wPtr && k != wSplit {
 		// An integer, or a word of a Go value, read as a pointer: no
 		// capability.
@@ -604,17 +604,17 @@ func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 	}
 	if h := p.header(); h != nil {
 		w := *(*uintptr)(a)
-		if s := h.slot(uintptr(p.off), false); s != nil {
+		if s := h.slot(uintptr(p.Off), false); s != nil {
 			if c := atomic.LoadPointer(s); c != nil {
 				q := fromCap(c)
 				if k == wSplit {
 					// Whatever the bytes hold now.
-					q.off = int(w - uintptr(q.obj))
+					q.Off = int(w - uintptr(q.Obj))
 					return q
 				}
 				// A tagged word is one C stored (out of the bounds or
 				// type of its capability); a plain one may be Go's since.
-				if q.off = int(w&^Tag - uintptr(q.obj)); uintptr(q.off) <= q.size || w&Tag != 0 {
+				if q.Off = int(w&^Tag - uintptr(q.Obj)); uintptr(q.Off) <= q.Size || w&Tag != 0 {
 					return q
 				}
 			}
@@ -632,25 +632,25 @@ func loadPtr(p Ptr, a unsafe.Pointer) Ptr {
 		// Copied by Go, or a stale word: the capability is lost.
 		return FromInt(uintptr(w) &^ Tag)
 	}
-	return derive(w, p.info().elemAt(uintptr(p.off)))
+	return derive(w, p.Info().elemAt(uintptr(p.Off)))
 }
 
 // StorePtr stores the pointer v at p. Its fast path, which cmd/compile
 // inlines, is C's pointer into C's object stored in a split word of C's
 // object (a union's, say).
 func StorePtr(p, v Ptr) {
-	if off := uintptr(p.off); p.ti&v.ti&refC != 0 && off%wordSize == 0 && off < p.size && p.size-off >= wordSize {
-		h := (*header)(abi.NoEscape(unsafe.Add(p.obj, -int(hdrSize))))
+	if off := uintptr(p.Off); p.ti&v.ti&refC != 0 && off%WordSize == 0 && off < p.Size && p.Size-off >= WordSize {
+		h := (*header)(abi.NoEscape(unsafe.Add(p.Obj, -int(hdrSize))))
 		// A split word: of memory that is all split (malloc's, refSplit),
 		// or found by a mask: C's arrays' elements are mostly of a size
 		// that is a power of two.
-		if t := atomic.LoadPointer(&h.aux); t != nil && (p.ti&refSplit != 0 || h.ti.mask != 0 && h.ti.kinds[(off&h.ti.mask)/wordSize] == wSplit) {
+		if t := atomic.LoadPointer(&h.aux); t != nil && (p.ti&refSplit != 0 || h.ti.mask != 0 && h.ti.kinds[(off&h.ti.mask)/WordSize] == wSplit) {
 			// The capability first, so that what it points to stays
 			// alive; a plain store, with the write barrier: a load
 			// racing with it sees the old capability or the new one, as
 			// Go's memory model has a word-sized read see one write.
-			*(*unsafe.Pointer)(unsafe.Add(t, off)) = unsafe.Add(v.obj, -int(hdrSize))
-			*(*uintptr)(unsafe.Add(p.obj, off)) = Addr(v)
+			*(*unsafe.Pointer)(unsafe.Add(t, off)) = unsafe.Add(v.Obj, -int(hdrSize))
+			*(*uintptr)(unsafe.Add(p.Obj, off)) = Addr(v)
 			return
 		}
 	}
@@ -661,48 +661,48 @@ func StorePtr(p, v Ptr) {
 func storePtrSlow(p, v Ptr) { storePtr(p, v, checkPtrWord(p)) }
 
 func storePtr(p, v Ptr, a unsafe.Pointer) {
-	k := p.info().kindAt(uintptr(p.off))
+	k := p.Info().kindAt(uintptr(p.Off))
 	switch k {
 	case wScalar:
-		fault("pointer store into a word the collector does not scan", uintptr(a))
+		RaiseFault("pointer store into a word the collector does not scan", uintptr(a))
 	case wRO:
-		fault("store into a word of a Go value with invariants ("+typeName(p.info())+")", uintptr(a))
+		RaiseFault("store into a word of a Go value with invariants ("+typeName(p.Info())+")", uintptr(a))
 	}
 	if h := p.header(); h != nil {
 		// The capability first, so that what it points to stays alive.
 		c := capOf(v)
-		if s := h.slot(uintptr(p.off), c != nil); s != nil {
+		if s := h.slot(uintptr(p.Off), c != nil); s != nil {
 			*s = c // as above
 		}
 		if k == wSplit {
 			*(*uintptr)(a) = Addr(v)
 			return
 		}
-		w, _ := encode(v, p.info().elemAt(uintptr(p.off)))
+		w, _ := encode(v, p.Info().elemAt(uintptr(p.Off)))
 		*(*unsafe.Pointer)(a) = w // with the write barrier
 		return
 	}
 	if k == wSplit {
-		auxStore(p, a, v.obj != nil, Addr(v), v)
+		auxStore(p, a, v.Obj != nil, Addr(v), v)
 		*(*uintptr)(a) = Addr(v)
 		return
 	}
-	want := p.info().elemAt(uintptr(p.off))
+	want := p.Info().elemAt(uintptr(p.Off))
 	w, tagged := encode(v, want)
-	keep := tagged && v.obj != nil
+	keep := tagged && v.Obj != nil
 	if !tagged && w != nil {
 		// Keep the capability if the word does not give it back.
 		d := derive(w, want)
-		keep = d.obj == nil || Addr(Ptr{obj: d.obj}) != Addr(Ptr{obj: v.obj}) || d.size != v.size || d.ti != v.ti
+		keep = d.Obj == nil || Addr(Ptr{Obj: d.Obj}) != Addr(Ptr{Obj: v.Obj}) || d.Size != v.Size || d.ti != v.ti
 	}
 	auxStore(p, a, keep, uintptr(w), v)
 	*(*unsafe.Pointer)(a) = w // with the write barrier
 }
 
-func Load8(p Ptr) uint8   { return *(*uint8)(check(p, 1)) }
-func Load16(p Ptr) uint16 { return *(*uint16)(check(p, 2)) }
-func Load32(p Ptr) uint32 { return *(*uint32)(check(p, 4)) }
-func Load64(p Ptr) uint64 { return *(*uint64)(check(p, 8)) }
+func Load8(p Ptr) uint8   { return *(*uint8)(Check(p, 1)) }
+func Load16(p Ptr) uint16 { return *(*uint16)(Check(p, 2)) }
+func Load32(p Ptr) uint32 { return *(*uint32)(Check(p, 4)) }
+func Load64(p Ptr) uint64 { return *(*uint64)(Check(p, 8)) }
 
 func LoadF32(p Ptr) float32 { return math.Float32frombits(Load32(p)) }
 func LoadF64(p Ptr) float64 { return math.Float64frombits(Load64(p)) }
@@ -720,7 +720,7 @@ func StoreF64(p Ptr, v float64) { Store64(p, math.Float64bits(v)) }
 // a scalar word becomes its address; a scalar copied into a pointer word
 // must be zero.
 func Memmove(dst, src Ptr, n uintptr) {
-	if n == wordSize && (Addr(dst)|Addr(src))%wordSize == 0 && Addr(dst) != Addr(src) {
+	if n == WordSize && (Addr(dst)|Addr(src))%WordSize == 0 && Addr(dst) != Addr(src) {
 		// One word (a union of C's, often), which moveWord checks.
 		moveWord(dst, src)
 		return
@@ -728,28 +728,28 @@ func Memmove(dst, src Ptr, n uintptr) {
 	if n == 0 {
 		return
 	}
-	d := check(dst, n)
-	s := check(src, n)
-	if src.info().scalarOnly && dst.info().scalarOnly || uintptr(d)%wordSize != 0 || uintptr(s)%wordSize != 0 {
+	d := Check(dst, n)
+	s := Check(src, n)
+	if src.Info().scalarOnly && dst.Info().scalarOnly || uintptr(d)%WordSize != 0 || uintptr(s)%WordSize != 0 {
 		checkScalar(dst, n)
 		copy(unsafe.Slice((*byte)(d), n), unsafe.Slice((*byte)(s), n))
 		return
 	}
-	if dst.ti == src.ti && dst.ti&refC != 0 && n%wordSize == 0 {
-		if ti := dst.info(); ti.size%wordSize == 0 && !ti.hasRO && ti.mod(uintptr(dst.off)) == ti.mod(uintptr(src.off)) {
+	if dst.ti == src.ti && dst.ti&refC != 0 && n%WordSize == 0 {
+		if ti := dst.Info(); ti.size%WordSize == 0 && !ti.hasRO && ti.mod(uintptr(dst.Off)) == ti.mod(uintptr(src.Off)) {
 			moveSame(dst, src, n, d, s, ti)
 			return
 		}
 	}
-	nw := n / wordSize
+	nw := n / WordSize
 	if !overlaps(dst, src, n) {
 		// Word by word: no copy aside needed.
 		for i := uintptr(0); i < nw; i++ {
-			moveWord(Add(dst, int(i*wordSize)), Add(src, int(i*wordSize)))
+			moveWord(Add(dst, int(i*WordSize)), Add(src, int(i*WordSize)))
 		}
-		if t := n % wordSize; t > 0 {
-			d2 := checkScalar(Add(dst, int(nw*wordSize)), t)
-			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*wordSize)), t))
+		if t := n % WordSize; t > 0 {
+			d2 := checkScalar(Add(dst, int(nw*WordSize)), t)
+			copy(unsafe.Slice((*byte)(d2), t), unsafe.Slice((*byte)(unsafe.Add(s, nw*WordSize)), t))
 		}
 		return
 	}
@@ -760,40 +760,40 @@ func Memmove(dst, src Ptr, n uintptr) {
 	}
 	ws := make([]word, nw)
 	for i := range nw {
-		sp := Add(src, int(i*wordSize))
-		switch src.info().kindAt(uintptr(sp.off)) {
+		sp := Add(src, int(i*WordSize))
+		switch src.Info().kindAt(uintptr(sp.Off)) {
 		case wPtr:
 			ws[i] = word{ptr: true, p: LoadPtr(sp)}
 		case wSplit:
-			if c := LoadPtr(sp); c.obj != nil {
+			if c := LoadPtr(sp); c.Obj != nil {
 				ws[i] = word{ptr: true, p: c}
 			} else {
-				ws[i] = word{u: loadWord(sp)}
+				ws[i] = word{u: LoadWord(sp)}
 			}
 		default:
-			ws[i] = word{u: loadWord(sp)}
+			ws[i] = word{u: LoadWord(sp)}
 		}
 	}
-	tail := make([]byte, n%wordSize)
-	copy(tail, unsafe.Slice((*byte)(unsafe.Add(s, nw*wordSize)), n%wordSize))
+	tail := make([]byte, n%WordSize)
+	copy(tail, unsafe.Slice((*byte)(unsafe.Add(s, nw*WordSize)), n%WordSize))
 	for i, w := range ws {
-		dp := Add(dst, i*int(wordSize))
+		dp := Add(dst, i*int(WordSize))
 		switch {
-		case dst.info().kindAt(uintptr(dp.off)) == wPtr:
+		case dst.Info().kindAt(uintptr(dp.Off)) == wPtr:
 			if !w.ptr && w.u != 0 {
-				fault("non-zero scalar copied into a pointer word", Addr(dp))
+				RaiseFault("non-zero scalar copied into a pointer word", Addr(dp))
 			}
 			StorePtr(dp, w.p)
-		case w.ptr && dst.info().kindAt(uintptr(dp.off)) == wSplit:
+		case w.ptr && dst.Info().kindAt(uintptr(dp.Off)) == wSplit:
 			StorePtr(dp, w.p)
 		case w.ptr:
-			storeWord(dp, Addr(w.p))
+			StoreWord(dp, Addr(w.p))
 		default:
-			storeWord(dp, w.u)
+			StoreWord(dp, w.u)
 		}
 	}
 	if len(tail) > 0 {
-		t := checkScalar(Add(dst, int(nw*wordSize)), uintptr(len(tail)))
+		t := checkScalar(Add(dst, int(nw*WordSize)), uintptr(len(tail)))
 		copy(unsafe.Slice((*byte)(t), len(tail)), tail)
 	}
 }
@@ -804,11 +804,11 @@ func Memmove(dst, src Ptr, n uintptr) {
 // write barrier, and the slots of the capabilities with them, as Fil-C
 // copies its auxiliary words.
 func moveSame(dst, src Ptr, n uintptr, d, s unsafe.Pointer, ti *tinfo) {
-	nw := n / wordSize
+	nw := n / WordSize
 	// The slots first, so that what the pointers point to stays alive.
 	var ss unsafe.Pointer
 	if t := atomic.LoadPointer(&src.header().aux); t != nil {
-		ss = unsafe.Add(t, uintptr(src.off))
+		ss = unsafe.Add(t, uintptr(src.Off))
 	}
 	dh := dst.header()
 	dt := atomic.LoadPointer(&dh.aux)
@@ -816,7 +816,7 @@ func moveSame(dst, src Ptr, n uintptr, d, s unsafe.Pointer, ti *tinfo) {
 		dt = dh.makeSlots()
 	}
 	if dt != nil {
-		ds := unsafe.Slice((*unsafe.Pointer)(unsafe.Add(dt, uintptr(dst.off))), nw)
+		ds := unsafe.Slice((*unsafe.Pointer)(unsafe.Add(dt, uintptr(dst.Off))), nw)
 		if ss != nil {
 			copy(ds, unsafe.Slice((*unsafe.Pointer)(ss), nw))
 		} else {
@@ -824,12 +824,12 @@ func moveSame(dst, src Ptr, n uintptr, d, s unsafe.Pointer, ti *tinfo) {
 		}
 	}
 	nk := uintptr(len(ti.kinds))
-	k := ti.mod(uintptr(src.off)) / wordSize
+	k := ti.mod(uintptr(src.Off)) / WordSize
 	if uintptr(d) > uintptr(s) && uintptr(d) < uintptr(s)+n {
 		// Overlapping, the destination later: from the end.
 		k = (k + nw - 1) % nk
 		for i := nw; i > 0; i-- {
-			moveWordOf(ti.kinds[k], unsafe.Add(d, (i-1)*wordSize), unsafe.Add(s, (i-1)*wordSize))
+			moveWordOf(ti.kinds[k], unsafe.Add(d, (i-1)*WordSize), unsafe.Add(s, (i-1)*WordSize))
 			if k == 0 {
 				k = nk
 			}
@@ -838,7 +838,7 @@ func moveSame(dst, src Ptr, n uintptr, d, s unsafe.Pointer, ti *tinfo) {
 		return
 	}
 	for i := uintptr(0); i < nw; i++ {
-		moveWordOf(ti.kinds[k], unsafe.Add(d, i*wordSize), unsafe.Add(s, i*wordSize))
+		moveWordOf(ti.kinds[k], unsafe.Add(d, i*WordSize), unsafe.Add(s, i*WordSize))
 		if k++; k == nk {
 			k = 0
 		}
@@ -865,7 +865,7 @@ func MoveWord(dst, src Ptr) {
 	if moveSplit(dst, src) {
 		return
 	}
-	Memmove(dst, src, wordSize)
+	Memmove(dst, src, WordSize)
 }
 
 // moveSplit copies the word at src to dst if both are words of C's objects
@@ -874,16 +874,16 @@ func MoveWord(dst, src Ptr) {
 // capability goes with the bytes, whatever they are. It reports false,
 // having done nothing, if not.
 func moveSplit(dst, src Ptr) bool {
-	do, so := uintptr(dst.off), uintptr(src.off)
-	if dst.ti&src.ti&(refC|refSplit) != refC|refSplit || (do|so)%wordSize != 0 ||
-		do >= dst.size || dst.size-do < wordSize || so >= src.size || src.size-so < wordSize {
+	do, so := uintptr(dst.Off), uintptr(src.Off)
+	if dst.ti&src.ti&(refC|refSplit) != refC|refSplit || (do|so)%WordSize != 0 ||
+		do >= dst.Size || dst.Size-do < WordSize || so >= src.Size || src.Size-so < WordSize {
 		return false
 	}
 	var c unsafe.Pointer
-	if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(src.obj, -int(hdrSize)))).aux); t != nil {
+	if t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(src.Obj, -int(hdrSize)))).aux); t != nil {
 		c = atomic.LoadPointer((*unsafe.Pointer)(unsafe.Add(t, so)))
 	}
-	t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(dst.obj, -int(hdrSize)))).aux)
+	t := atomic.LoadPointer(&(*header)(abi.NoEscape(unsafe.Add(dst.Obj, -int(hdrSize)))).aux)
 	if t == nil {
 		if c != nil {
 			return false // the destination has no slots yet
@@ -891,30 +891,30 @@ func moveSplit(dst, src Ptr) bool {
 	} else {
 		*(*unsafe.Pointer)(unsafe.Add(t, do)) = c // with the write barrier
 	}
-	*(*uintptr)(unsafe.Add(dst.obj, do)) = *(*uintptr)(unsafe.Add(src.obj, so))
+	*(*uintptr)(unsafe.Add(dst.Obj, do)) = *(*uintptr)(unsafe.Add(src.Obj, so))
 	return true
 }
 
 // moveWord copies the word at src to dst, as Memmove does.
 func moveWord(dst, src Ptr) {
-	sk := src.info().kindAt(uintptr(src.off))
-	dk := dst.info().kindAt(uintptr(dst.off))
+	sk := src.Info().kindAt(uintptr(src.Off))
+	dk := dst.Info().kindAt(uintptr(dst.Off))
 	if sk == wSplit && dk == wSplit && dst.ti&src.ti&refC != 0 {
 		// Split words of C's objects (a union copied): the bytes, and
 		// the slot's capability, whatever the bytes are.
 		a, b := checkPtrWord(dst), checkPtrWord(src)
 		var c unsafe.Pointer
-		if s := src.header().slot(uintptr(src.off), false); s != nil {
+		if s := src.header().slot(uintptr(src.Off), false); s != nil {
 			c = atomic.LoadPointer(s)
 		}
-		if s := dst.header().slot(uintptr(dst.off), c != nil); s != nil {
+		if s := dst.header().slot(uintptr(dst.Off), c != nil); s != nil {
 			*s = c
 		}
 		*(*uintptr)(a) = *(*uintptr)(b)
 		return
 	}
 	if sk != wPtr && sk != wSplit && dk != wPtr && dk != wSplit {
-		storeWord(dst, loadWord(src))
+		StoreWord(dst, LoadWord(src))
 		return
 	}
 	var p Ptr
@@ -923,39 +923,39 @@ func moveWord(dst, src Ptr) {
 	case wPtr:
 		p, isPtr = LoadPtr(src), true
 	case wSplit:
-		if c := LoadPtr(src); c.obj != nil {
+		if c := LoadPtr(src); c.Obj != nil {
 			p, isPtr = c, true
 		}
 	}
 	switch {
 	case dk == wPtr:
 		if !isPtr {
-			if u := loadWord(src); u != 0 {
-				fault("non-zero scalar copied into a pointer word", Addr(dst))
+			if u := LoadWord(src); u != 0 {
+				RaiseFault("non-zero scalar copied into a pointer word", Addr(dst))
 			}
 		}
 		StorePtr(dst, p)
 	case isPtr && dk == wSplit:
 		StorePtr(dst, p)
 	case isPtr:
-		storeWord(dst, Addr(p))
+		StoreWord(dst, Addr(p))
 	default:
-		storeWord(dst, loadWord(src))
+		StoreWord(dst, LoadWord(src))
 	}
 }
 
 // Memset sets n bytes at p to c. Pointer words may only be set to zero.
 func Memset(p Ptr, c int32, size uint64) Ptr {
 	n := uintptr(size)
-	a := check(p, n)
+	a := Check(p, n)
 	for i := uintptr(0); i < n; {
 		q := Add(p, int(i))
-		if (uintptr(a)+i)%wordSize == 0 && i+wordSize <= n && p.info().kindAt(uintptr(q.off)) == wPtr {
+		if (uintptr(a)+i)%WordSize == 0 && i+WordSize <= n && p.Info().kindAt(uintptr(q.Off)) == wPtr {
 			if c&0xff != 0 {
-				fault("non-zero memset of a pointer word", Addr(q))
+				RaiseFault("non-zero memset of a pointer word", Addr(q))
 			}
 			StorePtr(q, Ptr{})
-			i += wordSize
+			i += WordSize
 			continue
 		}
 		Store8(q, uint8(c))

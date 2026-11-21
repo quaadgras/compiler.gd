@@ -47,11 +47,28 @@ func ssaConfigOf(gd *base.Invocation) *ssa.Config {
 	return c
 }
 
-// ssaCachesOf returns gd's per-Invocation []ssa.Cache slice, sized
-// by gd.Flag.LowerC in InitConfig.
-func ssaCachesOf(gd *base.Invocation) []ssa.Cache {
-	c, _ := gd.SsaCaches.([]ssa.Cache)
-	return c
+// A Worker is what one of the backend's goroutines keeps from one
+// function to the next: the storage that ssa and the assembler reuse.
+//
+// The goroutine makes its own (NewWorker), so that no other goroutine
+// reaches it. The caches were the elements of one array for all the
+// workers, which each of them could reach: memory that goroutines share,
+// and with it everything that was stored there, which is all of a
+// function's values and blocks, though each worker only ever used its
+// own element (doc/gd/sharing.md).
+type Worker struct {
+	cache ssa.Cache
+	progs []obj.Prog
+}
+
+// NewWorker returns the storage of a worker of the backend. It is called
+// by the goroutine that is the worker.
+func NewWorker(gd *base.Invocation) *Worker {
+	w := new(Worker)
+	if gd.Ctxt.CanReuseProgs() {
+		w.progs = make([]obj.Prog, objw.ProgCacheSize/max(gd.Flag.LowerC, 1))
+	}
+	return w
 }
 
 var ssaDump string     // early copy of $GOSSAFUNC; the func name to dump output for
@@ -118,7 +135,6 @@ func InitConfig(gd *base.Invocation) {
 		gd.Fatalf("abi.InternalRegCounts = %d, %d; ssa config has %d, %d", ni, nf, cfg.ABI1.NumIntRegs(), cfg.ABI1.NumFloatRegs())
 	}
 	gd.SsaConfig = cfg
-	gd.SsaCaches = make([]ssa.Cache, gd.Flag.LowerC)
 	ir.Syms(
 
 		// Set up some runtime functions we'll need to call.
@@ -225,6 +241,11 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).PublishMove = typecheck.LookupRuntimeFunc(gd, "publishmove")
 	ir.Syms(gd).ShareStore = typecheck.LookupRuntimeFunc(gd, "sharestore")
 	ir.Syms(gd).ShareUnlock = typecheck.LookupRuntimeFunc(gd, "shareunlock")
+	ir.Syms(gd).ShareStore2 = typecheck.LookupRuntimeFunc(gd, "sharestore2")
+	ir.Syms(gd).ShareUnlock2 = typecheck.LookupRuntimeFunc(gd, "shareunlock2")
+	ir.Syms(gd).ShareStoreSlice = typecheck.LookupRuntimeFunc(gd, "sharestoreslice")
+	ir.Syms(gd).ShareStoreString = typecheck.LookupRuntimeFunc(gd, "sharestorestring")
+	ir.Syms(gd).ShareStoreIface = typecheck.LookupRuntimeFunc(gd, "sharestoreiface")
 	ir.Syms(gd).ShareLoadSlice = typecheck.LookupRuntimeFunc(gd, "shareloadslice")
 	ir.Syms(gd).ShareLoadString = typecheck.LookupRuntimeFunc(gd, "shareloadstring")
 	ir.Syms(gd).ShareLoadIface = typecheck.LookupRuntimeFunc(gd, "shareloadiface")
@@ -362,7 +383,7 @@ func (s *state) emitOpenDeferInfo() {
 
 // buildssa builds an SSA function for fn.
 // worker indicates which of the backend workers is doing the processing.
-func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.Func {
+func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool) *ssa.Func {
 	name := ir.FuncName(fn)
 
 	cfg := ssaConfigOf(gd)
@@ -427,7 +448,6 @@ func buildssa(gd *base.Invocation, fn *ir.Func, worker int, isPgoHot bool) *ssa.
 	}
 	s.curfn = fn
 
-	cache := &ssaCachesOf(gd)[worker]
 	cache.Reset()
 
 	s.f = cfg.NewFunc(&fe, cache)
@@ -5237,6 +5257,19 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	hdrLocal := inplace && s.localExpr(sn)
 	elemLocal := localPointer(sn) && s.gd.Debug.NoShare == 0 && s.gd.Debug.NoLocal == 0
 
+	// In shared memory, the slice and the elements are stored under one
+	// lock where each store would have its own: see appendGrouped.
+	grouped := false
+	if inplace && s.tear && s.gd.Debug.NoGroup == 0 && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
+		len(n.Args) > 1 && int64(len(n.Args)-1)*et.Size() <= 256 && !ssa.IsStackAddr(addr) && !s.unpublished(addr) {
+		grouped = true
+		for _, a := range n.Args[1:] {
+			if !ssa.CanSSA(a.Type()) {
+				grouped = false
+			}
+		}
+	}
+
 	// Allocate new blocks
 	grow := s.f.NewBlock(ssa.BlockPlain)
 	assign := s.f.NewBlock(ssa.BlockPlain)
@@ -5440,23 +5473,33 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			}
 		}
 		// In shared memory the pointer and the capacity are stored
-		// together (with the old length, which the new array has).
+		// together, and the length with them: the length that is
+		// there may be that of a slice another goroutine has stored
+		// since this one was loaded, which the new array may not
+		// have. (Its new elements are zero until they are stored.)
 		if hdrLocal {
 			s.shareCheck(addr)
 		}
-		s.dstLocal = hdrLocal
-		guard := s.tearGuard(n.Type(), addr)
-		var locked *ssa.Value
-		if guard {
-			locked = s.shareLock(addr, n.Type().Size())
+		// (If grouped, with the length and the elements.)
+		if !grouped {
+			s.dstLocal = hdrLocal
+			guard := s.tearGuard(n.Type(), addr)
+			var locked *ssa.Value
+			if guard {
+				locked = s.shareLock(addr, n.Type().Size())
+			}
+			capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
+			if guard {
+				lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
+				s.store(types.Types[types.TINT], lenaddr, l)
+			}
+			s.store(types.Types[types.TINT], capaddr, c)
+			s.store(pt, addr, p)
+			if guard {
+				s.shareUnlock(locked, addr, n.Type().Size())
+			}
+			s.dstLocal = false
 		}
-		capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
-		s.store(types.Types[types.TINT], capaddr, c)
-		s.store(pt, addr, p)
-		if guard {
-			s.shareUnlock(locked, addr, n.Type().Size())
-		}
-		s.dstLocal = false
 	}
 
 	b = s.endBlock()
@@ -5467,6 +5510,13 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	p = s.variable(ptrVar, pt)                      // generates phi for ptr
 	l = s.variable(lenVar, types.Types[types.TINT]) // generates phi for len
 	c = s.variable(capVar, types.Types[types.TINT]) // generates phi for cap
+
+	if grouped {
+		s.appendGrouped(n, addr, p, l, c, nargs)
+		delete(s.vars, ptrVar)
+		delete(s.vars, lenVar)
+		return nil
+	}
 
 	if inplace {
 		// Update length in place.
@@ -9178,10 +9228,21 @@ func genssa(gd *base.Invocation, f *ssa.Func, pp *objw.Progs) {
 				return StackOffset(gd, ls)
 			}, debugInfo)
 		}
+		// gd: the function that is kept in debugInfo, which goroutines
+		// share with the function's declaration, has what it needs
+		// and no more: not f, which leads to all of the function's
+		// values and blocks and to the worker's cache, that would be
+		// memory that goroutines share from here on, every store in
+		// it under a lock (doc/gd/sharing.md).
 		bstart := s.bstart
-		idToIdx := make([]int, f.NumBlocks())
-		for i, b := range f.Blocks {
-			idToIdx[b.ID] = i
+		entryID := f.Entry.ID
+		lsym := e.curfn.LSym
+		lastValue := make([]ssa.ID, f.NumBlocks()) // of each block, by its ID
+		for _, b := range f.Blocks {
+			lastValue[b.ID] = -1 // (not asked for, as before)
+			if nv := len(b.Values); nv > 0 {
+				lastValue[b.ID] = b.Values[nv-1].ID
+			}
 		}
 		// Register a callback that will be used later to fill in PCs into location
 		// lists. At the moment, Prog.Pc is a sequence number; it's not a real PC
@@ -9189,17 +9250,15 @@ func genssa(gd *base.Invocation, f *ssa.Func, pp *objw.Progs) {
 		debugInfo.GetPC = func(b, v ssa.ID) int64 {
 			switch v {
 			case ssa.BlockStart.ID:
-				if b == f.Entry.ID {
+				if b == entryID {
 					return 0 // Start at the very beginning, at the assembler-generated prologue.
 					// this should only happen for function args (ssa.OpArg)
 				}
 				return bstart[b].Pc
 			case ssa.BlockEnd.ID:
-				blk := f.Blocks[idToIdx[b]]
-				nv := len(blk.Values)
-				return valueToProgAfter[blk.Values[nv-1].ID].Pc
+				return valueToProgAfter[lastValue[b]].Pc
 			case ssa.FuncEnd.ID:
-				return e.curfn.LSym.Size
+				return lsym.Size
 			default:
 				return valueToProgAfter[v].Pc
 			}

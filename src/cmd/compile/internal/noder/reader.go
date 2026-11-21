@@ -1291,9 +1291,20 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				ps.ViaDerefs = uint8(r.Len())
 				ps.Results = uint8(r.Len())
 				ps.Heap = uint8(r.Len())
-				ps.Recv = r.Bool()
+				if n := r.Len(); n != 0 {
+					ps.Links = make([]ir.ShareLink, n)
+					for j := range ps.Links {
+						ps.Links[j] = ir.ShareLink{Key: r.String(), Arg: uint8(r.Len()), Derefs: uint8(r.Len())}
+					}
+				}
 			}
 		}
+		fn.Consumes = uint16(r.Len())
+		fn.OwnedResult = r.Bool()
+		fn.KeptChecked = uint16(r.Len())
+		fn.KeptByRecv = uint16(r.Len())
+		fn.KeptByAny = uint16(r.Len())
+		fn.KeptCalls = uint16(r.Len())
 
 		if r.Bool() {
 			fn.Inl = &ir.Inline{

@@ -1,0 +1,130 @@
+epoll_create1: 1
+epoll_create 0: -1 1
+epoll_create1 bad flags: -1 1
+add: 0
+add again: -1 1
+mod absent: -1 1
+del absent: -1 1
+add bad fd: -1 1
+add self: -1 1
+not epoll: -1 1
+bad op: -1 1
+regular file: -1 1
+maxevents 0: -1 1
+nothing: 0
+level: 1 0x1 77
+level again: 1 0x1
+read: 2
+drained: 0
+mod: 0
+edge: 1 0x1 0x1122334455667788
+edge again: 0
+edge after write: 1
+edge again: 0
+mod oneshot: 0
+oneshot: 1 1
+oneshot again: 0
+oneshot add: -1 1
+rearm: 0
+rearmed: 1
+writable: 1 0x4 7
+poll epoll: 1 0x1
+nest: 0
+loop: -1 1
+nested: 1 0x1 9
+del: 0
+nested empty: 0
+hangup: 1 0x10
+closed: 0
+round robin: 1
+both: 2
+semaphore read: 1
+semaphore read: 1
+semaphore read: 1
+semaphore empty: -1 1
+eventfd_write: 0
+eventfd_read: 0 1
+empty: -1 1
+counter: 5
+short read: -1 1
+short write: -1 1
+write max: -1 1
+write full: -1 1
+poll: 1 0x5
+poll empty: 1 0x4
+edge none: 0
+edge: 1
+edge again: 0
+edge after write: 1
+blocking read: 9
+bad flags: -1 1
+bad clock: -1 1
+settime: 0
+armed: 1
+one-shot: 1
+disarmed: 1
+interval count: 1
+next: 1
+old interval: 0 20000000
+not expired: -1 1
+short read: -1 1
+bad nsec: -1 1
+bad flags: -1 1
+not a timerfd: -1 1
+abstime: 0
+poll: 1 0x1
+expired: 1
+epoll timerfd: 1 1
+past: 1
+sizeof(struct signalfd_siginfo): 128
+nothing: -1 1
+short read: -1 1
+poll: 1 0x1
+read: 128 1 1 1
+sigqueue: 128 1 1 42
+not pending: 0
+new mask: 1
+not a signalfd: -1 1
+wait4: 1 1 3 1
+waitid: 0 1 1 1 1 1
+WNOWAIT: 1 1 5
+still there: 1 5
+WNOHANG: 0 0
+wait4 WNOHANG: 0
+wait3: 1 6
+no children: -1 1
+no options: -1 1
+wait4 none: -1 1
+sigtimedwait timeout: -1 1
+sigtimedwait bad timeout: -1 1
+sigtimedwait: 1 1 1 1
+sigwaitinfo: 1 1 1234
+sigqueue handler: 1 1 77
+sigqueue bad: -1 1
+pthread_kill: 0
+taken by sigwaitinfo: 1
+pthread_kill 0: 0
+pthread_kill handler: 0
+handler ran: 1
+pthread_kill self: 0 1
+pthread_kill bad: 1
+epoll_pwait: -1 1
+handler: 1
+altstack initially: 1
+sigaltstack: 0
+altstack: 1 0 1
+altstack small: -1 1
+altstack flags: -1 1
+altstack disabled: 1
+siginterrupt 1: 0
+siginterrupt 0: 1
+siginterrupt bad: -1 1
+setitimer: 0
+alarms: 1, old interval 0 20000
+disarmed: 1
+alarm sees it: 5
+getitimer sees alarm: 1
+bad usec: -1 1
+bad which: -1 1
+virtual: 0
+prof: 1

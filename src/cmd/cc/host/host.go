@@ -52,3 +52,8 @@ func Undefined(dir string, goFiles []string) ([]string, error) {
 func Headers() []string {
 	return ccmain.Headers()
 }
+
+// LibcPackages returns the import paths of internal/c23's packages of
+// headers: the Go cmd/cc generates imports internal/c23 and those whose
+// functions it calls.
+func LibcPackages() []string { return ccmain.LibcPackages() }

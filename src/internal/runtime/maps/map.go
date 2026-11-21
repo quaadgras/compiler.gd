@@ -343,11 +343,12 @@ func NewMap(mt *abi.MapType, hint uintptr, m *Map, maxAlloc uintptr) *Map {
 	m.globalDepth = uint8(sys.TrailingZeros64(dirSize))
 	m.globalShift = depthToShift(m.globalDepth)
 
-	directory := make([]*table, dirSize)
+	local := m.local()
+	directory := newDirectory(int(dirSize), local)
 
 	for i := range directory {
 		// TODO: Think more about initial table capacity.
-		directory[i] = newTable(mt, uint64(targetCapacity)/dirSize, i, m.globalDepth)
+		directory[i] = newTable(mt, uint64(targetCapacity)/dirSize, i, m.globalDepth, local)
 	}
 
 	m.dirPtr = unsafe.Pointer(&directory[0])
@@ -392,7 +393,7 @@ func (m *Map) installTableSplit(old, left, right *table) {
 	if old.localDepth == m.globalDepth {
 		// No room for another level in the directory. Grow the
 		// directory.
-		newDir := make([]*table, m.dirLen*2)
+		newDir := newDirectory(m.dirLen*2, m.local())
 		shareAlloc(unsafe.Pointer(&newDir[0]))
 		for i := range m.dirLen {
 			t := m.directoryAt(uintptr(i))
@@ -606,7 +607,7 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 
 	slotKey := g.key(typ, i)
 	if typ.IndirectKey() {
-		kmem := newobject(typ.Key)
+		kmem := newobjectIn(typ.Key, m.local())
 		*(*unsafe.Pointer)(slotKey) = kmem
 		slotKey = kmem
 	}
@@ -614,7 +615,7 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 
 	slotElem := g.elem(typ, i)
 	if typ.IndirectElem() {
-		emem := newobject(typ.Elem)
+		emem := newobjectIn(typ.Elem, m.local())
 		*(*unsafe.Pointer)(slotElem) = emem
 		slotElem = emem
 	}
@@ -626,7 +627,7 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 }
 
 func (m *Map) growToSmall(typ *abi.MapType) {
-	grp := newGroups(typ, 1)
+	grp := newGroups(typ, 1, m.local())
 	m.dirPtr = grp.data
 
 	g := groupReference{
@@ -636,7 +637,8 @@ func (m *Map) growToSmall(typ *abi.MapType) {
 }
 
 func (m *Map) growToTable(typ *abi.MapType) *table {
-	tab := newTable(typ, 2*abi.MapGroupSlots, 0, 0)
+	local := m.local()
+	tab := newTable(typ, 2*abi.MapGroupSlots, 0, 0, local)
 
 	g := groupReference{
 		data: m.dirPtr,
@@ -663,7 +665,7 @@ func (m *Map) growToTable(typ *abi.MapType) *table {
 		tab.uncheckedPutSlot(typ, hash, key, elem)
 	}
 
-	directory := make([]*table, 1)
+	directory := newDirectory(1, local)
 	shareAlloc(unsafe.Pointer(&directory[0]))
 
 	directory[0] = tab
@@ -862,8 +864,8 @@ func (m *Map) clone(typ *abi.MapType) *Map {
 	} else if m.dirLen == 0 {
 		// Clone one group.
 		oldGroup := groupReference{data: m.dirPtr}
-		newGroup := groupReference{data: newGroups(typ, 1).data}
-		cloneGroup(typ, newGroup, oldGroup)
+		newGroup := groupReference{data: newGroups(typ, 1, false).data}
+		cloneGroup(typ, newGroup, oldGroup, false)
 		m.dirPtr = newGroup.data
 	} else {
 		// Clone each (different) table.

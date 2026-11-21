@@ -57,7 +57,7 @@ func CapArith(op byte, x, y Ptr, s bool) Ptr {
 	default:
 		r = a ^ b
 	}
-	if x.obj == nil && y.obj != nil {
+	if x.Obj == nil && y.Obj != nil {
 		return rebase(y, r)
 	}
 	return rebase(x, r)

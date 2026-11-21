@@ -4,11 +4,11 @@
 
 package c23
 
-const fpHasFMA = true
+const FpHasFMA = true
 
-// fpControl is FPCR for rounding direction r: Go's (zero) with its RMode
+// FpControl is FPCR for rounding direction r: Go's (zero) with its RMode
 // field (bits 22-23: RN, RP, RM, RZ).
-func fpControl(r int32) uint64 {
+func FpControl(r int32) uint64 {
 	switch r {
 	case FeUpward:
 		return 1 << 22
@@ -20,6 +20,6 @@ func fpControl(r int32) uint64 {
 	return 0
 }
 
-// fpExcepts are the exceptions FPSR's cumulative bits st hold: IOC, DZC,
+// FpExcepts are the exceptions FPSR's cumulative bits st hold: IOC, DZC,
 // OFC, UFC and IXC (bits 0-4), as fenv.h numbers them.
-func fpExcepts(st uint64) int32 { return int32(st&1) | int32(st&0x1e)<<1 }
+func FpExcepts(st uint64) int32 { return int32(st&1) | int32(st&0x1e)<<1 }

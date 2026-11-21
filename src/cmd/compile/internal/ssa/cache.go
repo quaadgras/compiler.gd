@@ -31,10 +31,8 @@ type Cache struct {
 
 	Liveness any // *gc.livenessFuncCache
 
-	// Free "headers" for use by the allocators in allocators.go.
-	// Used to put slices in sync.Pools without allocation.
-	hdrValueSlice []*[]*Value
-	hdrLimitSlice []*[]limit
+	// The free lists of the allocators in allocators.go.
+	free cacheFree
 }
 
 func (c *Cache) Reset() {

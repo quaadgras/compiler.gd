@@ -298,6 +298,7 @@ func main() {
 		}
 		return
 	}
+	shareSitesMain = true
 	fn := main_main // make an indirect call, as the linker doesn't know the address of the main package when laying down the runtime
 	fn()
 
@@ -4578,6 +4579,8 @@ func gdestroy(gp *g) {
 	gp.c23 = nil
 	gp.bubble = nil
 	gp.fipsOnlyBypass = false
+	gp.leakReported = false
+	gp.ownedPut = nil
 	gp.secret = 0
 
 	if gcBlackenEnabled != 0 && gp.gcAssistBytes > 0 {

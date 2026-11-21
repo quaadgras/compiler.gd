@@ -12,6 +12,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
+	"cmd/internal/obj"
 	"cmd/internal/src"
 )
 
@@ -139,7 +140,7 @@ func (e *escape) noteCallArg(cs *callSite, bit int, arg ir.Node) {
 	if cs == nil || bit+1 >= maxCallBits {
 		return
 	}
-	if t := arg.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := arg.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return
 	}
 	for {
@@ -237,7 +238,9 @@ func (b *batch) markReturnedOther() {
 			l := todo[len(todo)-1]
 			todo = todo[:len(todo)-1]
 			for _, e := range l.edges {
-				visit(e.src)
+				if !e.ro {
+					visit(e.src)
+				}
 			}
 			for _, o := range l.owners {
 				visit(o)
@@ -254,7 +257,7 @@ const attrNotLocal = attrShares | attrSharesValue | attrSharesDeep | attrReturne
 // allocation of l is shared: always (ok), or if the results of l's
 // function are not (ret).
 func (b *batch) stays(l *location) (ok, ret bool) {
-	if l == nil || l.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue|attrCandidateEscape) || len(l.dyn) != 0 || l.hasRecv() {
+	if l == nil || l.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue|attrCandidateEscape) || len(l.dyn) != 0 {
 		return false, false
 	}
 	ret = l.hasAttr(attrReturned)
@@ -277,7 +280,7 @@ func (b *batch) staysPointee(name *ir.Name, locOf map[ir.Node]*location, seen ma
 	}
 	seen[name] = true
 	c := b.contents[name]
-	if c == nil || c.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue) || len(c.dyn) != 0 || c.hasRecv() {
+	if c == nil || c.hasAttr(attrNotLocal|attrDynShares|attrDynSharesValue) || len(c.dyn) != 0 {
 		return false, false
 	}
 	ret = c.hasAttr(attrReturned)
@@ -298,7 +301,7 @@ func (b *batch) staysPointee(name *ir.Name, locOf map[ir.Node]*location, seen ma
 			case *ir.ParenExpr:
 				return fresh(n.X)
 			}
-		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT:
+		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT, ir.OMAKEMAP, ir.OMAPLIT:
 			return alloc(n)
 		case ir.OADDR:
 			if p := addrThrough(n.(*ir.AddrExpr)); p != nil {
@@ -380,7 +383,7 @@ func (b *batch) callBits() {
 		ok, ret := true, false
 		var tag ir.Node
 		for _, r := range cs.res {
-			if r.hasAttr(attrNotLocal) || r.hasRecv() {
+			if r.hasAttr(attrNotLocal) {
 				ok = false
 				break
 			}
@@ -506,6 +509,28 @@ func setMinDerefs(p *uint8, derefs int) {
 // derefs times, is stored in the dynamic root r: through a parameter,
 // or where another goroutine may reach it.
 func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int) {
+	if d := r.dynRoot; d != nil && d.link != "" {
+		// An argument of a function that is only known when the
+		// program runs: the caller reads what the linker knows.
+		v := derefs + 1
+		if v > 255 {
+			v = 255
+		}
+		for i := range ps.Links {
+			if l := &ps.Links[i]; l.Key == d.link && int(l.Arg) == d.arg {
+				if uint8(v) < l.Derefs {
+					l.Derefs = uint8(v)
+				}
+				return
+			}
+		}
+		if len(ps.Links) < ir.MaxShareLinks {
+			ps.Links = append(ps.Links, ir.ShareLink{Key: d.link, Arg: uint8(d.arg), Derefs: uint8(v)})
+			return
+		}
+		setMinDerefs(&ps.Share, derefs)
+		return
+	}
 	if d := r.dynRoot; d != nil && r.curfn == fn {
 		if v := d.loc; d.plain && v != nil && v.param && !v.reassigned && !v.captured && !v.addrtaken {
 			if k := paramBit(fn, d.name); k != 0 {
@@ -544,9 +569,6 @@ func (b *batch) noteParamShare(l, root *location, derefs int) {
 	case root.isDynRoot:
 		b.noteParamRoot(l.curfn, ps, root, derefs)
 	case root.hasAttr(attrShares):
-		setMinDerefs(&ps.Share, derefs)
-	case (root.conv != nil || root.assert || root.recvOver) && root.hasAttr(attrSharesValue):
-		// What flows there is shared (recv.go).
 		setMinDerefs(&ps.Share, derefs)
 	case root.paramOut && root.curfn == l.curfn && !root.hasAttr(attrEscapes):
 		if ri := root.resultIndex - 1; ri < numEscResults && ri < 8 {
@@ -632,20 +654,45 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			}
 		}
 	}
+	// A function that keeps the parameter only by calls that check
+	// (ir.Func.KeptChecked) puts it in the heap, where anyone may
+	// reach it, but for an object that is handed over later.
+	checked := x == 0 && e.checkedArg
 	if ps == nil {
+		if checked {
+			// Nothing says where it goes for sharing: as if a
+			// call checked.
+			calls := e.checkCallsArg
+			e.checkCallsArg = true
+			hs := e.checkHoles()
+			e.checkCallsArg = calls
+			return hs
+		}
 		return []hole{e.heapHole().shift(e.gd, x)}
 	}
 	// What the heap of the tag stood for.
 	tagKs := []hole{e.mutatorHole().shift(e.gd, x), e.calleeHole().shift(e.gd, x)}
-	if ps.Heap != 0 {
-		tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
+	if checked {
+		tagKs = append(tagKs, e.checkHoles()...)
 	}
-	if ps.Share != 0 {
-		tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
-	}
-	if ps.Recv {
-		// The receiver of any method of the parameter's type.
-		tagKs = append(tagKs, e.recvHole(param.Type, nil))
+	if !checked || !e.checkCallsArg && e.recvOn() {
+		if ps.Heap != 0 && !checked {
+			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
+		}
+		if ps.Share != 0 {
+			tagKs = append(tagKs, e.shareHole().shift(e.gd, int(ps.Share)-1))
+			if e.gd.Flag.LowerM >= 4 {
+				fmt.Printf("%s: %v shares its argument %v, dereferenced %d times\n", e.gd.FmtPos(e.gd.Pos), fn, param.Sym, ps.Share-1)
+			}
+		}
+		for _, l := range ps.Links {
+			// (Whether it must be in the heap, the tag and Heap say.)
+			if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
+				tagKs = append(tagKs, r.asHole().shift(e.gd, int(l.Derefs)-1))
+			} else {
+				tagKs = append(tagKs, e.shareHole().shift(e.gd, int(l.Derefs)-1))
+			}
+		}
 	}
 	if ps.Via != 0 {
 		d := int(ps.ViaDerefs) - 1
@@ -666,10 +713,44 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 	for i := range ks {
 		all := ps.Results == 0xff
 		if (all || i < 8 && ps.Results&(1<<i) != 0) && (i >= numEscResults || esc.Result(i) < 0) {
-			tagKs = append(tagKs, ks[i].shift(e.gd, x))
+			k := ks[i].shift(e.gd, x)
+			k.recvRes = checked
+			tagKs = append(tagKs, k)
 		}
 	}
 	return tagKs
+}
+
+// shareOnlyHoles returns the holes for an argument of the function fn's
+// parameter param that the function does not put in the heap: where
+// another goroutine may reach it, as the parameter says.
+func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
+	if fn.Func == nil || fn.Func.ParamShares == nil || !e.shareTagsOn() {
+		return nil
+	}
+	var ps *ir.ParamShare
+	for i, f := range fn.Type().RecvParams() {
+		if f == param && i < len(fn.Func.ParamShares) {
+			ps = &fn.Func.ParamShares[i]
+		}
+	}
+	if ps == nil {
+		return nil
+	}
+	// (Nothing keeps the pointer: it is shared as what is converted
+	// to an interface is, and no holder for a hand-over.)
+	var hs []hole
+	if ps.Share != 0 {
+		hs = append(hs, e.convShareHole().shift(e.gd, int(ps.Share)-1))
+	}
+	for _, l := range ps.Links {
+		if r := e.linkRootOf(l.Key, int(l.Arg), false); r != nil {
+			hs = append(hs, r.asHole().shift(e.gd, int(l.Derefs)-1))
+		} else {
+			hs = append(hs, e.convShareHole().shift(e.gd, int(l.Derefs)-1))
+		}
+	}
+	return hs
 }
 
 // storeThroughArg returns the hole for what a function stores through
@@ -694,7 +775,7 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 		}
 		break
 	}
-	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return e.heapHole()
 	}
 	return e.storeThrough(p)
@@ -706,14 +787,30 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 // when the program runs read it there.
 func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
 	note := esc.Encode()
+	if fl := b.shareFlags(fn, i, esc); fl != 0 {
+		return "esc:" + string(esc[:]) + string([]byte{fl})
+	}
+	return note
+}
+
+// shareFlags returns the byte that follows the leaks in the note, or 0
+// if the note has none.
+func (b *batch) shareFlags(fn *ir.Func, i int, esc leaks) byte {
+	// Kept only by calls that check, which the call that tests for
+	// it reads.
+	// Kept by a method of its own is said of a parameter of an
+	// interface type only, whose methods the caller knows: of a
+	// pointer that the function converts, it knows nothing.
+	var checked byte
+	if i < 16 && fn.KeptChecked&^fn.KeptByAny&(1<<i) != 0 && esc.Heap() == 0 && !esc.anyResult() {
+		if params := fn.Type().RecvParams(); i < len(params) && (params[i].Type.IsInterface() || fn.KeptByRecv&(1<<i) == 0) {
+			checked = ir.EscNoteChecked
+		}
+	}
 	if fn.ParamShares == nil || i >= len(fn.ParamShares) || esc.Heap() < 0 && !esc.anyResult() {
-		return note
+		return checked
 	}
 	ps := fn.ParamShares[i]
-	if ps.Recv {
-		// A method that is not known may share it.
-		return note
-	}
 	// (What is stored through the parameter itself is where it is.)
 	via := ps.Via &^ (1 << i)
 	fl := byte(ir.EscNoteStays)
@@ -722,9 +819,15 @@ func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
 		fl |= ir.EscNoteViaRecv
 	}
 	if ps.Share != 0 || ps.Results != 0 || via != 0 || esc.anyResult() {
-		return note
+		return checked
 	}
-	return "esc:" + string(esc[:]) + string([]byte{fl})
+	if len(ps.Links) != 0 {
+		// Not by itself, but the functions that it is passed on to
+		// may share it: a mask says that it is shared, and the
+		// linker starts from one that does not (ir.EscMaskBaseOf).
+		return fl&^1 | ir.EscNoteLinked | checked
+	}
+	return fl | checked
 }
 
 func (l leaks) anyResult() bool {
@@ -782,7 +885,7 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 		curfn:     e.curfn,
 		loopDepth: 1,
 		attrs:     attrEscapes | attrPersists | attrMutates | attrCalls | attrDynShares,
-		dynRoot:   &dynRoot{path: fun, name: name, stmt: key.stmt, call: call, arg: idx},
+		dynRoot:   &dynRoot{path: fun, name: name, stmt: key.stmt, call: call, arg: idx, link: e.dynKey},
 		isDynRoot: true,
 	}
 	e.allLocs = append(e.allLocs, r)
@@ -797,6 +900,19 @@ func (e *escape) callArgRoot(call *ir.CallExpr, idx int) *location {
 // allocated in the argument d.arg of the call d.call: 1 if the function
 // that is called keeps it local.
 func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
+	return b.callArgBits(pos, d, false, false)
+}
+
+// callArgKept returns the expression that is 1 if the function that
+// d.call calls does not keep its argument d.arg, as far as its escape
+// mask says, and 0 if it may. With own, a function that keeps it only
+// by calls that check, or by methods of its own, does not
+// (ir.EscMaskHeld).
+func (b *batch) callArgKept(pos src.XPos, d *dynRoot, own bool) ir.Node {
+	return b.callArgBits(pos, d, true, own)
+}
+
+func (b *batch) callArgBits(pos src.XPos, d *dynRoot, kept, own bool) ir.Node {
 	uintptrType := types.Types[types.TUINTPTR]
 	unsafePtr := types.Types[types.TUNSAFEPTR]
 	lit := func(v int64) ir.Node {
@@ -853,6 +969,7 @@ func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
 	ap.SetCheckPtr(true)
 	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(types.Types[types.TUINT64]), ap)
 	wp.SetTypecheck(1)
+	wp.SetCheckPtr(true)
 	word := ir.NewStarExpr(b.gd, pos, wp)
 	word.SetType(types.Types[types.TUINT64])
 	word.SetTypecheck(1)
@@ -871,10 +988,132 @@ func (b *batch) callArgTag(pos src.XPos, d *dynRoot) ir.Node {
 	// Not a mask that is computed (bit 0), and: not kept; or not
 	// shared and not stored through the receiver, or the receiver
 	// points to a local object.
+	if kept {
+		free := not(bit(1 + d.arg))
+		if own {
+			free = binary(ir.OOR, free, not(bit(ir.EscMaskHeld+d.arg)))
+		}
+		return binary(ir.OAND, not(bit(0)), free)
+	}
 	stays := not(bit(ir.EscMaskViaRecv + d.arg))
 	if recv != nil {
 		stays = binary(ir.OOR, stays, b.localTest(pos, recv))
 	}
 	stays = binary(ir.OAND, not(bit(ir.EscMaskShared+d.arg)), stays)
 	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+d.arg)), stays))
+}
+
+// What the linker knows of the functions that are only known when the
+// program runs (ir/sharelink.go).
+//
+// The argument of a call of such a function flows to a link root: a
+// dynamic root whose tag is read from the word of the class of functions
+// that the call may be of, which the linker fills in. It can be read
+// anywhere, so an object that was allocated long before the call, and in
+// another function, is local if none of those functions shares it: a
+// parameter that flows to a link root says so (ir.ParamShare.Links), and
+// the caller's argument flows to a link root of its own.
+
+func (b *batch) linksOn() bool {
+	return b.gd.Debug.NoLocalLink == 0 && b.callBitsOn()
+}
+
+// linkKey returns the key of the class of functions that call, of a
+// function that is only known when the program runs, may be of, or "".
+func (e *escape) linkKey(call *ir.CallExpr) string {
+	if !e.linksOn() || call.GoDefer {
+		return ""
+	}
+	var key string
+	var wild bool
+	switch call.Op() {
+	case ir.OCALLINTER:
+		sel, ok := call.Fun.(*ir.SelectorExpr)
+		if !ok || sel.Op() != ir.ODOTINTER {
+			return ""
+		}
+		key, wild = ir.ShareKeyMethod(sel.Sel.Name, sel.Type())
+	case ir.OCALLFUNC:
+		if t := call.Fun.Type(); t != nil && t.Recv() == nil {
+			key, wild = ir.ShareKeyFunc(t)
+		}
+	}
+	if wild {
+		return ""
+	}
+	return key
+}
+
+// linkRoot returns the link root of the current function for the
+// argument arg of the functions of the class key, or nil.
+func (e *escape) linkRoot(key string, arg int) *location {
+	return e.linkRootOf(key, arg, true)
+}
+
+// linkRootOf is linkRoot; without heap, what flows to the root need not
+// be in the heap for it: the root only says who reaches it, as for the
+// receiver of a method that some call may be of (recv.go).
+func (e *escape) linkRootOf(key string, arg int, heap bool) *location {
+	if key == "" || arg < 0 || arg >= ir.EscMaskArgs || !e.linksOn() {
+		return nil
+	}
+	if pkg := e.curfn.Sym().Pkg; pkg == nil || ir.UncheckedPkg(pkg.Path) {
+		return nil
+	}
+	k := dynKey{0, fmt.Sprintf("link %p %d %v %s", e.curfn, arg, heap, key)}
+	if r := e.dynRoots[k]; r != nil {
+		return r
+	}
+	attrs := attrDynShares
+	if heap {
+		attrs |= attrEscapes | attrPersists | attrMutates | attrCalls
+	}
+	r := &location{
+		curfn:     e.curfn,
+		loopDepth: 1,
+		attrs:     attrs,
+		dynRoot:   &dynRoot{link: key, arg: arg},
+		isDynRoot: true,
+	}
+	e.allLocs = append(e.allLocs, r)
+	if e.dynRoots == nil {
+		e.dynRoots = make(map[dynKey]*location)
+	}
+	e.dynRoots[k] = r
+	return r
+}
+
+// linkTag returns the expression that is 1 if no function of the class
+// key shares its argument arg: it does not keep it, or keeps it where
+// no other goroutine reaches, and not in what its receiver points to,
+// which nobody knows here.
+func (b *batch) linkTag(pos src.XPos, key string, arg int) ir.Node {
+	uintptrType := types.Types[types.TUINTPTR]
+	lit := func(v int64) ir.Node {
+		return ir.NewBasicLit(b.gd, pos, uintptrType, constant.MakeInt64(v))
+	}
+	binary := func(op ir.Op, x, y ir.Node) ir.Node {
+		n := ir.NewBinaryExpr(b.gd, pos, op, x, y)
+		n.SetType(uintptrType)
+		n.SetTypecheck(1)
+		return n
+	}
+	// Until the linker writes it, all is shared. (It is not read-only,
+	// which the compiler would take for a constant.)
+	sym := b.gd.Ctxt.LookupInit(ir.ShareWordPrefix+key, func(s *obj.LSym) {
+		s.WriteInt(b.gd.Ctxt, 0, 8, -1)
+		b.gd.Ctxt.Globl(s, 8, obj.DUPOK|obj.NOPTR)
+	})
+	bit := func(n int) ir.Node {
+		var w ir.Node = ir.NewLinksymExpr(b.gd, pos, sym, types.Types[types.TUINT64])
+		c := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, uintptrType, w)
+		c.SetTypecheck(1)
+		if n == 0 {
+			return binary(ir.OAND, c, lit(1))
+		}
+		return binary(ir.OAND, binary(ir.ORSH, c, lit(int64(n))), lit(1))
+	}
+	not := func(x ir.Node) ir.Node { return binary(ir.OXOR, x, lit(1)) }
+	stays := binary(ir.OAND, not(bit(ir.EscMaskShared+arg)), not(bit(ir.EscMaskViaRecv+arg)))
+	return binary(ir.OAND, not(bit(0)), binary(ir.OOR, not(bit(1+arg)), stays))
 }

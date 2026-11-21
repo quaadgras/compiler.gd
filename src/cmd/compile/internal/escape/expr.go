@@ -32,6 +32,14 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 	if k.derefs >= 0 && !n.Type().IsUntyped() && !n.Type().HasPointers() {
 		k.dst = &e.blankLoc
 	}
+	if k.derefs >= 0 && n.Type().IsString() && e.readOnlyOn() {
+		// (Not the address of a string variable, which is written.)
+		// Only a string comes of this expression: what it points
+		// to is never written. (Where a string is made of memory
+		// that was not allocated for one, that memory is shared
+		// from then on: aliasHole.)
+		k.ro = true
+	}
 
 	switch n.Op() {
 	default:
@@ -63,6 +71,11 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.expr(k.addr(e.gd, n, "address-of"), n.X) // "address-of"
 	case ir.ODEREF:
 		n := n.(*ir.StarExpr)
+		if punnedString(n) && !e.typedByConstruction() {
+			// What the pointer points to holds the pointer to
+			// the bytes.
+			k = e.aliasHole(k)
+		}
 		e.expr(k.deref(e.gd, n, "indirection"), n.X) // "indirection"
 	case ir.ODOT, ir.ODOTMETH, ir.ODOTINTER:
 		n := n.(*ir.SelectorExpr)
@@ -72,10 +85,10 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.expr(k.deref(e.gd, n, "dot of pointer"), n.X) // "dot of pointer"
 	case ir.ODOTTYPE, ir.ODOTTYPE2:
 		n := n.(*ir.TypeAssertExpr)
-		e.expr(e.assertHole(k, n.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
+		e.expr(e.assertHole(k, n.Type(), n.X.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
 	case ir.ODYNAMICDOTTYPE, ir.ODYNAMICDOTTYPE2:
 		n := n.(*ir.DynamicTypeAssertExpr)
-		e.expr(e.assertHole(k, n.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
+		e.expr(e.assertHole(k, n.Type(), n.X.Type()).dotType(e.gd, n.Type(), n, "dot"), n.X)
 		// n.T doesn't need to be tracked; it always points to read-only storage.
 	case ir.OINDEX:
 		n := n.(*ir.IndexExpr)
@@ -88,7 +101,12 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		e.discard(n.Index)
 	case ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
-		e.discard(n.X)
+		if e.mapsOn() {
+			// What is loaded from a map is reached from it.
+			e.expr(k.deref(e.gd, n, "map index"), n.X)
+		} else {
+			e.discard(n.X)
+		}
 		// Keys used in map lookups do not need to escape.
 		// See "Hashing Pointers" doc in internal/runtime/maps/map.go.
 		e.discard(n.Index)
@@ -124,7 +142,7 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 			k = e.spill(k, n)
 		}
 		if !n.X.Type().IsInterface() {
-			k = e.convHole(k, n.X.Type())
+			k = e.convHole(k, n.X.Type(), n.Type())
 		}
 		e.expr(k.note(e.gd, n, "interface-converted"), n.X)
 	case ir.OMAKEFACE:
@@ -237,11 +255,19 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 
 	case ir.OMAPLIT:
 		n := n.(*ir.CompLitExpr)
-		e.spill(k, n)
+		mk := e.spill(k, n)
 
 		// Map keys and values are always stored in the heap.
 		for _, elt := range n.List {
 			elt := elt.(*ir.KeyExpr)
+			if e.mapsOn() {
+				// In the heap that is where the map is: what
+				// the map holds, as the elements of a slice.
+				hk := e.teeHole(mk.note(e.gd, n, "map literal element"), e.ownHeapHole())
+				e.expr(hk, elt.Key)
+				e.expr(hk, elt.Value)
+				continue
+			}
 			e.assignHeap(elt.Key, "map literal key", n)
 			e.assignHeap(elt.Value, "map literal value", n)
 		}
@@ -359,4 +385,46 @@ func (e *escape) spill(k hole, n ir.Node) hole {
 	loc := e.newLoc(n, false)
 	e.flow(k.addr(e.gd, n, "spill"), loc)
 	return loc.asHole()
+}
+
+// aliasHole returns the hole for the memory that a string is made of
+// without a copy (unsafe.String, a load through a pointer converted from
+// another type), where the string goes to k: the memory is that of
+// something that may be written, a buffer, and the flows of strings are
+// not followed for who reaches what they point to (edge.ro). So it counts
+// as shared from here on.
+func (e *escape) aliasHole(k hole) hole {
+	if !e.readOnlyOn() || k.dst == &e.blankLoc || k.derefs < 0 {
+		return k
+	}
+	return e.teeHole(k, e.shareHole())
+}
+
+// typedByConstruction reports whether the current function is reflect's:
+// its pointers are to values of the types it says they are (ir.UncheckedPkg),
+// so a string that it loads through a converted pointer was allocated
+// as a string.
+func (e *escape) typedByConstruction() bool {
+	if e.curfn == nil || e.curfn.Sym() == nil || e.curfn.Sym().Pkg == nil {
+		return false
+	}
+	switch e.curfn.Sym().Pkg.Path {
+	case "reflect", "internal/reflectlite":
+		return true
+	}
+	return false
+}
+
+// punnedString reports whether n loads a string through a pointer that
+// was converted from another type.
+func punnedString(n *ir.StarExpr) bool {
+	if n.Type() == nil || !n.Type().IsString() {
+		return false
+	}
+	x := n.X
+	for x.Op() == ir.OPAREN {
+		x = x.(*ir.ParenExpr).X
+	}
+	c, ok := x.(*ir.ConvExpr)
+	return ok && c.Op() == ir.OCONVNOP && c.X.Type() != nil && c.X.Type().IsUnsafePtr()
 }

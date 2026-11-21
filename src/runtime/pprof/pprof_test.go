@@ -1588,6 +1588,10 @@ func TestGoroutineLeakProfileConcurrency(t *testing.T) {
 
 	testenv.MustHaveParallelism(t)
 	regexLeakCount := regexp.MustCompile("goroutineleak profile: total ")
+
+	// gd fork: no automatic cycle collects the goroutines this test leaks
+	// before the profile reports them.
+	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	whiteSpace := regexp.MustCompile("\\s+")
 
 	// Regular goroutine profile. Used to check that there is no interference between
@@ -1715,6 +1719,15 @@ func TestGoroutineLeakProfileConcurrency(t *testing.T) {
 			goroutineLeakProf.WriteTo(&w, 0)
 			parseProfile(t, []byte(w.String()), checkLeakStack(t))
 		}
+	})
+
+	// gd fork: a cycle that the program forces collects the goroutines that
+	// are blocked forever, but not those the profile has reported.
+	t.Run("leak persists after a forced collection", func(t *testing.T) {
+		runtime.GC()
+		var w strings.Builder
+		goroutineLeakProf.WriteTo(&w, 0)
+		parseProfile(t, []byte(w.String()), checkLeakStack(t))
 	})
 
 	// Concurrent calls to the goroutine leak profiler should not trigger data races

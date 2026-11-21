@@ -7,6 +7,8 @@ package runtime_test
 import (
 	"reflect"
 	"runtime"
+	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -743,3 +745,945 @@ func TestLocalRange(t *testing.T) {
 }
 
 var sharedSink any
+
+type sharedAppendBox struct {
+	pad   [3]int
+	names []string
+	trace []any
+}
+
+// TestSharedAppend appends in place to slices in shared memory that other
+// goroutines replace and load: every slice loaded is one of its arrays
+// with a length that array has, and every element is whole. (An append
+// that grew once stored the new array before the length, with the locks
+// given back in between: a longer slice stored there meanwhile left its
+// length with the new, shorter array.)
+func TestSharedAppend(t *testing.T) {
+	strs := []string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
+	check := func(x string) {
+		if len(x) > 19 || (len(x) > 0 && x[0] < 'a') {
+			panic("torn string")
+		}
+	}
+	n := 200000
+	if testing.Short() {
+		n = 40000
+	}
+	b := &sharedAppendBox{}
+	done := make(chan bool)
+	for g := 0; g < 8; g++ {
+		go func() {
+			defer func() { done <- true }()
+			for i := 0; i < n; i++ {
+				switch i % 6 {
+				case 0:
+					b.names = nil
+					b.trace = nil
+				case 1:
+					b.names = append(b.names, strs[i%4])
+				case 2:
+					b.trace = append(b.trace, strs[i%4], i)
+				case 3:
+					b.names = append(b.names, strs[i%4], strs[(i+1)%4], strs[(i+2)%4])
+				case 4:
+					if s := b.names; len(s) > 0 {
+						check(s[len(s)-1])
+						check(s[0])
+					}
+				case 5:
+					for _, x := range b.trace {
+						switch v := x.(type) {
+						case string:
+							check(v)
+						case int, nil:
+						default:
+							panic("torn interface")
+						}
+					}
+				}
+			}
+		}()
+	}
+	for g := 0; g < 8; g++ {
+		<-done
+	}
+}
+
+var handGlobal *sharedNode
+
+// handSend sends a node it allocates and does not use again: the send
+// hands it over.
+//
+//go:noinline
+func handSend(c chan *sharedNode, tail *sharedNode) {
+	n := &sharedNode{next: tail, v: 1}
+	n.i = "x"
+	c <- n
+}
+
+// handSendKept sends a node that it also returns.
+//
+//go:noinline
+func handSendKept(c chan *sharedNode) *sharedNode {
+	n := &sharedNode{v: 2}
+	c <- n
+	return n
+}
+
+// handSendHeld sends a node that another object points to.
+//
+//go:noinline
+func handSendHeld(c chan *sharedNode, h *sharedNode) {
+	n := &sharedNode{v: 3}
+	h.next = n
+	c <- n
+}
+
+// The senders below keep a way to the node they send, each in its own
+// manner: their sends do not hand over. They give the node the value 4.
+
+//go:noinline
+func handUsedAfter(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	c <- n
+	n.m = nil
+}
+
+//go:noinline
+func handAlias(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	p := n
+	c <- n
+	p.m = nil
+}
+
+//go:noinline
+func handInterior(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	p := &n.m
+	c <- n
+	*p = nil
+}
+
+//go:noinline
+func handDeferred(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	defer func(n *sharedNode) { n.m = nil }(n)
+	c <- n
+}
+
+//go:noinline
+func handClosure(c chan *sharedNode) func() {
+	n := &sharedNode{v: 4}
+	f := func() { n.m = nil }
+	c <- n
+	return f
+}
+
+//go:noinline
+func handTwice(c chan *sharedNode) {
+	n := &sharedNode{v: 4}
+	for i := 0; i < 2; i++ {
+		c <- n
+	}
+}
+
+//go:noinline
+func handInSlice(c chan *sharedNode) []*sharedNode {
+	n := &sharedNode{v: 4}
+	l := []*sharedNode{n}
+	c <- n
+	return l
+}
+
+//go:noinline
+func handInInterface(c chan *sharedNode) any {
+	n := &sharedNode{v: 4}
+	var i any = n
+	c <- n
+	return i
+}
+
+// TestSharedHandOver checks that an object whose only pointer is sent on
+// a channel is the receiver's alone, and not shared, while what it
+// points to is; and that it is shared if the sender keeps a way to it,
+// or when the receiver puts it where others reach it.
+func TestSharedHandOver(t *testing.T) {
+	skipIfNotSharing(t)
+	type result struct {
+		v            int
+		root, tail   bool
+		after, store bool
+	}
+	c := make(chan *sharedNode)
+	res := make(chan result)
+	shared := new(sharedNode)
+	handGlobal = shared
+	go func() {
+		for n := range c {
+			r := result{v: n.v, root: isShared(n), tail: n.next != nil && isShared(n.next)}
+			// It is this goroutine's to change.
+			for i := 0; i < 100; i++ {
+				n.s = append(n.s, nil)
+				n.i = i
+			}
+			if len(n.s) != 100 || n.i != 99 {
+				r.v = -1
+			}
+			r.after = isShared(n)
+			handGlobal = n
+			r.store = isShared(n)
+			res <- r
+		}
+		// Received straight into memory that is shared.
+		shared.next = <-c
+		res <- result{root: isShared(shared.next)}
+	}()
+
+	handSend(c, new(sharedNode))
+	if r := <-res; r.v != 1 || r.root || !r.tail || r.after || !r.store {
+		t.Errorf("handed over: %+v, want an unshared node with a shared tail, shared once stored in a global", r)
+	}
+	kept := handSendKept(c)
+	if r := <-res; r.v != 2 || !r.root {
+		t.Errorf("sent and returned: %+v, want a shared node", r)
+	}
+	wantShared(t, "sent and returned", kept, true)
+	holder := new(sharedNode)
+	handSendHeld(c, holder)
+	if r := <-res; r.v != 3 || !r.root {
+		t.Errorf("sent and held by another object: %+v, want a shared node", r)
+	}
+	runtime.KeepAlive(holder)
+	for i, f := range []func(){
+		func() { handUsedAfter(c) },
+		func() { handAlias(c) },
+		func() { handInterior(c) },
+		func() { handDeferred(c) },
+		func() { runtime.KeepAlive(handClosure(c)) },
+		func() { handTwice(c) },
+		func() { runtime.KeepAlive(handInSlice(c)) },
+		func() { runtime.KeepAlive(handInInterface(c)) },
+	} {
+		go f()
+		if r := <-res; r.v != 4 || !r.root {
+			t.Errorf("sender %d that keeps a way to its node: %+v, want a shared node", i, r)
+		}
+		if i == 5 {
+			<-res
+		}
+	}
+	close(c)
+	if r := <-res; r.root {
+		t.Errorf("nil received from a closed channel is shared")
+	}
+}
+
+var handPool = sync.Pool{New: func() any { return new(sharedNode) }}
+
+//go:noinline
+func handPoolMake() *sharedNode { return new(sharedNode) }
+
+// handPoolOther's New does more than allocate: what Get returns is shared.
+var handPoolOther = sync.Pool{New: func() any { return handPoolMake() }}
+
+// handPoolCycle gets a node, fills it in and puts it back, without
+// keeping a way to it: the put hands it over.
+//
+//go:noinline
+func handPoolCycle(tail *sharedNode) (shared, tailShared bool) {
+	n := handPool.Get().(*sharedNode)
+	shared = isShared(n)
+	tailShared = n.next != nil && isShared(n.next)
+	n.next = tail
+	n.i = "x"
+	n.s = append(n.s[:0], nil)
+	handPool.Put(n)
+	return
+}
+
+// handPoolKeep puts a node back and returns it.
+//
+//go:noinline
+func handPoolKeep() *sharedNode {
+	n := handPool.Get().(*sharedNode)
+	handPool.Put(n)
+	return n
+}
+
+// handPoolGet and handPoolFree are the helpers that code which uses a
+// pool has: one returns what the pool gave, the other puts it back.
+//
+//go:noinline
+func handPoolGet() *sharedNode {
+	n := handPool.Get().(*sharedNode)
+	n.v = 0
+	return n
+}
+
+//go:noinline
+func (n *sharedNode) handPoolFree() {
+	if n.v < 0 {
+		return
+	}
+	handPool.Put(n)
+}
+
+// handPoolHelpers uses the helpers, and keeps no way to the node.
+//
+//go:noinline
+func handPoolHelpers() bool {
+	n := handPoolGet()
+	shared := isShared(n)
+	n.i = "y"
+	n.handPoolFree()
+	return shared
+}
+
+// handPoolDeferred puts the node back with a deferred call.
+//
+//go:noinline
+func handPoolDeferred() bool {
+	n := handPoolGet()
+	defer n.handPoolFree()
+	n.i = "z"
+	return isShared(n)
+}
+
+// handPoolDeferredKept returns the node that a deferred call puts back.
+//
+//go:noinline
+func handPoolDeferredKept() *sharedNode {
+	n := handPoolGet()
+	defer n.handPoolFree()
+	return n
+}
+
+// TestSharedPool checks that an object that is put in a pool by a
+// function that keeps no way to it is not shared when the pool gives it
+// out again, while what it points to is; that it is shared if the
+// function keeps one; and that a pool whose New does not just allocate
+// gives out shared objects.
+func TestSharedPool(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	tail := new(sharedNode)
+	if shared, _ := handPoolCycle(tail); shared {
+		t.Errorf("a new object from a pool whose New only allocates is shared")
+	}
+	wantShared(t, "pointed to by an object handed to a pool", tail, true)
+	for i := 0; i < 3; i++ {
+		if shared, tailShared := handPoolCycle(tail); shared || !tailShared {
+			t.Errorf("round %d: an object handed back to the pool is shared (%v), or what it points to is not (%v)", i, shared, !tailShared)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if handPoolHelpers() {
+			t.Errorf("round %d: an object handed back to the pool by a helper is shared", i)
+		}
+		if handPoolDeferred() {
+			t.Errorf("round %d: an object handed back to the pool by a deferred call is shared", i)
+		}
+	}
+	wantShared(t, "put in a pool by a deferred call and returned", handPoolDeferredKept(), true)
+	handPool.Get() // not the one that is shared
+	kept := handPoolKeep()
+	wantShared(t, "put in a pool and kept", kept, true)
+	if n := handPool.Get().(*sharedNode); n == kept {
+		wantShared(t, "from the pool, after a put that kept it", n, true)
+	}
+	if n := handPoolOther.Get().(*sharedNode); !isShared(n) {
+		t.Errorf("an object from a pool whose New calls a function is not shared")
+	}
+}
+
+// A keptNode is what a pool of its own gives out; it points to itself,
+// as fmt's printer does.
+type keptNode struct {
+	self *int
+	v    int
+	id   int
+	s    []*int
+}
+
+var keptPool = sync.Pool{New: func() any { return new(keptNode) }}
+
+var keptIDs int
+
+// A keptUser is passed a node by a function that puts the node back in
+// the pool afterwards.
+type keptUser interface {
+	use(n *keptNode)
+}
+
+type keptReader struct{ sum int }
+
+func (r *keptReader) use(n *keptNode) { r.sum += n.v }
+
+type keptKeeper struct{ n *keptNode }
+
+func (k *keptKeeper) use(n *keptNode) { k.n = n }
+
+//go:noinline
+func keptGet() *keptNode {
+	n := keptPool.Get().(*keptNode)
+	n.self = &n.v
+	if n.id == 0 {
+		keptIDs++
+		n.id = keptIDs
+	}
+	return n
+}
+
+// keptPass passes the node on to u, which is only known when the
+// program runs.
+//
+//go:noinline
+func (n *keptNode) keptPass(u keptUser) {
+	if u != nil {
+		u.use(n)
+	}
+}
+
+// keptCycle gets a node, lets u use it and puts it back. It reports
+// whether the node was shared when the pool gave it, and which node it
+// was.
+//
+//go:noinline
+func keptCycle(u keptUser) (shared bool, id int) {
+	n := keptGet()
+	shared = isShared(n)
+	id = n.id
+	n.v++
+	n.s = append(n.s[:0], nil)
+	n.keptPass(u)
+	keptPool.Put(n)
+	return
+}
+
+// TestSharedKeptCheck checks that an object which is passed to a
+// function that is only known when the program runs is still handed
+// over to its pool if that function does not keep it, though it points
+// to itself; and that it is shared, and not given out by the pool
+// again, if the function keeps it.
+func TestSharedKeptCheck(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	r := new(keptReader)
+	_, first := keptCycle(r)
+	for i := 0; i < 3; i++ {
+		shared, addr := keptCycle(r)
+		if shared {
+			t.Errorf("round %d: an object passed to a function that does not keep it is shared", i)
+		}
+		if addr != first {
+			t.Errorf("round %d: the pool gave another object", i)
+		}
+	}
+	k := new(keptKeeper)
+	if shared, addr := keptCycle(k); shared || addr != first {
+		t.Errorf("before it is kept: shared %v, another object %v", shared, addr != first)
+	}
+	wantShared(t, "kept by a function that is only known when the program runs", k.n, true)
+	for i := 0; i < 3; i++ {
+		shared, addr := keptCycle(r)
+		if shared {
+			t.Errorf("round %d after one was kept: the pool gave a shared object", i)
+		}
+		if addr == first {
+			t.Errorf("round %d after one was kept: the pool gave the object that was kept", i)
+		}
+	}
+	runtime.KeepAlive(k)
+}
+
+// A recvSink is written to through an interface by a function that does
+// not know what it is.
+type recvSink interface {
+	put(v int) error
+}
+
+// recvQuiet's methods keep nothing of their receiver.
+type recvQuiet struct {
+	vs []int
+	i  any
+}
+
+func (q *recvQuiet) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+// recvLoud's method keeps its receiver.
+type recvLoud struct {
+	vs []int
+}
+
+var recvLoudKept *recvLoud
+
+func (q *recvLoud) put(v int) error {
+	q.vs = append(q.vs, v)
+	recvLoudKept = q
+	return nil
+}
+
+var (
+	recvQuietPool = sync.Pool{New: func() any { return new(recvQuiet) }}
+	recvLoudPool  = sync.Pool{New: func() any { return new(recvLoud) }}
+)
+
+// recvFill calls a method of s, and returns what that returns.
+//
+//go:noinline
+func recvFill(s recvSink, n int) error {
+	for i := 0; i < n; i++ {
+		if err := s.put(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+//go:noinline
+func recvQuietCycle() (shared bool, err error) {
+	q := recvQuietPool.Get().(*recvQuiet)
+	shared = isShared(q)
+	q.vs = q.vs[:0]
+	q.i = "x"
+	err = recvFill(q, 3)
+	recvQuietPool.Put(q)
+	return
+}
+
+//go:noinline
+func recvLoudCycle() (err error) {
+	q := recvLoudPool.Get().(*recvLoud)
+	q.vs = q.vs[:0]
+	err = recvFill(q, 3)
+	recvLoudPool.Put(q)
+	return
+}
+
+// recvFreer has a method that puts it back in its pool, as pooled types
+// have, besides the one of recvSink, which keeps nothing.
+type recvFreer struct {
+	vs []int
+}
+
+var recvFreerPool = sync.Pool{New: func() any { return new(recvFreer) }}
+
+func (q *recvFreer) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+//go:noinline
+func (q *recvFreer) free() { recvFreerPool.Put(q) }
+
+// recvFillWider calls a method of s, and one that recvSink does not
+// have if what s holds has it.
+//
+//go:noinline
+func recvFillWider(s recvSink, n int) {
+	s.put(n)
+	if f, ok := s.(interface{ free() }); ok && n < 0 {
+		f.free()
+	}
+}
+
+//go:noinline
+func recvFreerWiderCycle() (shared bool) {
+	q := recvFreerPool.Get().(*recvFreer)
+	shared = isShared(q)
+	recvFillWider(q, 3)
+	q.free()
+	return
+}
+
+//go:noinline
+func recvFreerPlainCycle() (shared bool) {
+	q := recvFreerPool.Get().(*recvFreer)
+	shared = isShared(q)
+	recvFill(q, 3)
+	q.free()
+	return
+}
+
+// TestSharedRecvKeptNothing checks that an object which is passed, as an
+// interface, to a function that calls a method of it is handed over to
+// its pool if no method of its type keeps the receiver, and is shared
+// by the put if one does.
+func TestSharedRecvKeptNothing(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	for i := 0; i < 4; i++ {
+		if shared, _ := recvQuietCycle(); shared {
+			t.Errorf("round %d: an object whose methods keep nothing is shared after it was passed as an interface", i)
+		}
+	}
+	recvLoudCycle()
+	wantShared(t, "kept by a method of its own, and put in a pool", recvLoudKept, true)
+
+	// A type with a method that hands it over: only the methods of
+	// the interface type count, until it is asserted to have others.
+	for i := 0; i < 4; i++ {
+		if recvFreerPlainCycle() {
+			t.Errorf("round %d: an object whose interface methods keep nothing is shared", i)
+		}
+	}
+	recvFreerWiderCycle()
+	if !recvFreerWiderCycle() {
+		t.Errorf("an object that a function asserted to have a method that hands it over was handed over")
+	}
+}
+
+// A keptRelay passes the node on, by a call that checks what the
+// function it calls keeps: its escape mask says that it keeps the node,
+// but only so (ir.EscMaskHeld).
+type keptRelay struct{ to keptUser }
+
+func (r *keptRelay) use(n *keptNode) { n.keptPass(r.to) }
+
+// A heldUser is passed a sink, as an interface, by a function that puts
+// the sink back in its pool afterwards.
+type heldUser interface {
+	fill(s recvSink)
+}
+
+// heldCaller only calls the method that recvSink has.
+type heldCaller struct{}
+
+func (heldCaller) fill(s recvSink) { s.put(1) }
+
+// heldFiller passes the sink to a function that only does that.
+type heldFiller struct{}
+
+func (heldFiller) fill(s recvSink) { recvFill(s, 2) }
+
+// heldKeeper keeps the sink.
+type heldKeeper struct{ s recvSink }
+
+func (k *heldKeeper) fill(s recvSink) { k.s = s }
+
+// A heldSink's method keeps nothing of its receiver.
+type heldSink struct {
+	vs []int
+	id int
+}
+
+func (q *heldSink) put(v int) error {
+	q.vs = append(q.vs, v)
+	return nil
+}
+
+var (
+	heldPool = sync.Pool{New: func() any { return new(heldSink) }}
+	heldIDs  int
+)
+
+// heldCycle gets a sink, lets u fill it and puts it back. It reports
+// whether the sink was shared when the pool gave it, and which it was.
+//
+//go:noinline
+func heldCycle(u heldUser) (shared bool, id int) {
+	q := heldPool.Get().(*heldSink)
+	shared = isShared(q)
+	if q.id == 0 {
+		heldIDs++
+		q.id = heldIDs
+	}
+	id = q.id
+	q.vs = q.vs[:0]
+	u.fill(q)
+	heldPool.Put(q)
+	return
+}
+
+// TestSharedHeldBit checks that an object which is passed to a function
+// that is only known when the program runs is handed over to its pool
+// if that function keeps it only by a call that checks in turn, or by
+// calling the methods that the parameter's interface type has, which
+// keep nothing; and that it is shared if the function, or the one at
+// the end of such calls, keeps it.
+func TestSharedHeldBit(t *testing.T) {
+	skipIfNotSharing(t)
+	defer debug.SetGCPercent(debug.SetGCPercent(-1)) // the pool keeps what it has
+	runtime.LockOSThread()                           // and gives it back to this goroutine
+	defer runtime.UnlockOSThread()
+
+	relay := &keptRelay{to: new(keptReader)}
+	_, first := keptCycle(relay)
+	for i := 0; i < 3; i++ {
+		shared, id := keptCycle(relay)
+		if shared {
+			t.Errorf("round %d: an object passed on to a function that does not keep it is shared", i)
+		}
+		if id != first {
+			t.Errorf("round %d: the pool gave another object", i)
+		}
+	}
+	k := new(keptKeeper)
+	keptCycle(&keptRelay{to: k})
+	wantShared(t, "passed on to a function that keeps it", k.n, true)
+	if _, id := keptCycle(relay); id == first {
+		t.Errorf("the pool gave the object that was kept")
+	}
+
+	_, sink := heldCycle(heldCaller{})
+	for _, u := range []heldUser{heldCaller{}, heldFiller{}} {
+		for i := 0; i < 3; i++ {
+			shared, id := heldCycle(u)
+			if shared {
+				t.Errorf("%T, round %d: an object of which only methods that keep nothing were called is shared", u, i)
+			}
+			if id != sink {
+				t.Errorf("%T, round %d: the pool gave another object", u, i)
+			}
+		}
+	}
+	hk := new(heldKeeper)
+	heldCycle(hk)
+	wantShared(t, "kept, as an interface, by a function that is only known when the program runs", hk.s.(*heldSink), true)
+	if shared, id := heldCycle(heldCaller{}); shared || id == sink {
+		t.Errorf("the pool gave the object that was kept")
+	}
+	runtime.KeepAlive(k)
+	runtime.KeepAlive(hk)
+}
+
+// Objects that are passed to a function that is only known when the
+// program runs, after they are allocated and in another function than
+// the one that allocates them: the linker knows every function that it
+// may be (cmd/link/internal/ld/sharemask.go), and the object is local
+// if none shares it.
+
+type linkObj struct {
+	p    *int
+	next *linkObj
+}
+
+type linkReader interface{ ReadLinkObj(o *linkObj) int }
+
+type linkKeeper interface{ KeepLinkObj(o *linkObj) }
+
+type linkPasser interface{ PassLinkObj(o *linkObj) int }
+
+type linkReads struct{}
+
+func (linkReads) ReadLinkObj(o *linkObj) int { return *o.p }
+
+type linkCounts struct{ n int }
+
+func (c *linkCounts) ReadLinkObj(o *linkObj) int { c.n += *o.p; return c.n }
+
+var linkKept *linkObj
+
+type linkKeeps struct{}
+
+func (linkKeeps) KeepLinkObj(o *linkObj) { linkKept = o }
+
+type linkDrops struct{}
+
+func (linkDrops) KeepLinkObj(o *linkObj) {}
+
+// A method that passes its argument on to another class, and to its own.
+type linkPassesOn struct {
+	r    linkReader
+	k    linkKeeper
+	more linkPasser
+}
+
+func (p *linkPassesOn) PassLinkObj(o *linkObj) int {
+	if p.k != nil {
+		p.k.KeepLinkObj(o)
+	}
+	if p.more != nil {
+		return p.more.PassLinkObj(o)
+	}
+	return p.r.ReadLinkObj(o)
+}
+
+type linkPassesRead struct{ r linkReader }
+
+func (p *linkPassesRead) PassLinkObj(o *linkObj) int { return linkRead(p.r, o) }
+
+//go:noinline
+func linkRead(r linkReader, o *linkObj) int { return r.ReadLinkObj(o) }
+
+//go:noinline
+func linkKeep(k linkKeeper, o *linkObj) { k.KeepLinkObj(o) }
+
+//go:noinline
+func linkCall(f func(*linkObj, bool) int, o *linkObj) int { return f(o, true) }
+
+//go:noinline
+func linkCallKeep(f func(*linkObj), o *linkObj) { f(o) }
+
+//go:noinline
+func linkNew(v int) *linkObj {
+	return &linkObj{p: &v}
+}
+
+// linkLocal reports whether the object that f makes, with linkNew, is
+// local.
+func linkLocal(f func()) bool { return runtime.CountLocalAllocs(f) != 0 }
+
+func TestSharedLink(t *testing.T) {
+	skipIfNotSharing(t)
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+
+	// Read by a method of an interface: no method with that name
+	// shares its argument.
+	for _, r := range []linkReader{linkReads{}, new(linkCounts)} {
+		if !linkLocal(func() { sum += linkRead(r, linkNew(2)) }) {
+			t.Errorf("%T: an object that no method that may be called shares is not local", r)
+		}
+	}
+
+	// One of the methods with that name keeps it where another
+	// goroutine reaches it: none of the objects is local, whichever
+	// is called.
+	for _, k := range []linkKeeper{linkDrops{}, linkKeeps{}} {
+		if linkLocal(func() { linkKeep(k, linkNew(3)) }) {
+			t.Errorf("%T: an object that a method that may be called shares is local", k)
+		}
+	}
+	done := make(chan int)
+	go func() { done <- *linkKept.p }()
+	sum += <-done
+
+	// Function values: read, and kept. (No method has the signature
+	// of the first: reflect makes function values of methods.)
+	if !linkLocal(func() { sum += linkCall(func(o *linkObj, _ bool) int { return *o.p }, linkNew(4)) }) {
+		t.Errorf("an object that no function that may be called shares is not local")
+	}
+	if linkLocal(func() { linkCallKeep(func(o *linkObj) { linkKept = o }, linkNew(5)) }) {
+		t.Errorf("an object that the function that is called shares is local")
+	}
+	if linkLocal(func() { linkCallKeep(func(o *linkObj) { sum += *o.p }, linkNew(6)) }) {
+		t.Errorf("an object that a function that may be called shares is local")
+	}
+
+	// Passed on by a method to the methods of another class: local
+	// only if nothing at the end shares, and a method with that name
+	// passes it on to one that keeps it.
+	passer := &linkPassesRead{r: linkReads{}}
+	if linkLocal(func() { sum += linkPass(passer, linkNew(7)) }) {
+		t.Errorf("an object that a method passes on to one that shares it is local")
+	}
+	// The same, of a class whose methods only pass it on to readers.
+	relayer := &linkRelays{r: linkReads{}}
+	if !linkLocal(func() { sum += linkRelay(relayer, linkNew(8)) }) {
+		t.Errorf("an object that a method passes on to one that only reads it is not local")
+	}
+
+	// Converted to an interface by a function that does not know the
+	// type: local if no method with those names, of any type, shares
+	// its receiver. The node, the object and its number are three.
+	if n := runtime.CountLocalAllocs(func() { sum += linkSum(linkConv(&linkLeaf{o: linkNew(9)})) }); n < 3 {
+		t.Errorf("%d local objects, want 3, of a value whose methods keep their receivers", n)
+	}
+	if n := runtime.CountLocalAllocs(func() {
+		sum += linkSum(linkConv(&linkTree{kids: []linkNoder{&linkLeaf{o: linkNew(10)}}}))
+	}); n < 3 {
+		t.Errorf("%d local objects, want at least 3, of a tree whose methods call each other", n)
+	}
+	for i := 0; i < 2; i++ {
+		var n uint64
+		if i == 0 {
+			n = runtime.CountLocalAllocs(func() { linkHold(linkConvHolder(&linkHoldsNot{o: linkNew(11)})) })
+		} else {
+			n = runtime.CountLocalAllocs(func() { linkHold(linkConvHolder(&linkHolds{o: linkNew(12)})) })
+		}
+		if n != 0 {
+			t.Errorf("%d local objects of a value of which a method with that name shares its receiver", n)
+		}
+	}
+	go func() { done <- *linkHeld.o.p }()
+	sum += <-done
+	if sum == 0 {
+		t.Errorf("no sum")
+	}
+}
+
+type linkNoder interface{ LinkNodeSum() int }
+
+type linkLeaf struct{ o *linkObj }
+
+func (n *linkLeaf) LinkNodeSum() int { return *n.o.p }
+
+type linkTree struct{ kids []linkNoder }
+
+func (n *linkTree) LinkNodeSum() int {
+	s := 0
+	for _, k := range n.kids {
+		s += k.LinkNodeSum()
+	}
+	return s
+}
+
+//go:noinline
+func linkConv[T linkNoder](x T) linkNoder { return x }
+
+//go:noinline
+func linkSum(n linkNoder) int { return n.LinkNodeSum() }
+
+type linkHolder interface{ LinkHold() }
+
+type linkHoldsNot struct{ o *linkObj }
+
+func (n *linkHoldsNot) LinkHold() {}
+
+type linkHolds struct{ o *linkObj }
+
+var linkHeld *linkHolds
+
+func (n *linkHolds) LinkHold() { linkHeld = n }
+
+//go:noinline
+func linkConvHolder[T linkHolder](x T) linkHolder { return x }
+
+//go:noinline
+func linkHold(h linkHolder) { h.LinkHold() }
+
+type linkRelayer interface{ RelayLinkObj(o *linkObj) int }
+
+type linkRelays struct {
+	r    linkReader
+	more linkRelayer
+}
+
+func (p *linkRelays) RelayLinkObj(o *linkObj) int {
+	if p.more != nil {
+		return p.more.RelayLinkObj(o)
+	}
+	return p.r.ReadLinkObj(o)
+}
+
+//go:noinline
+func linkRelay(p linkRelayer, o *linkObj) int { return p.RelayLinkObj(o) }
+
+//go:noinline
+func linkPass(p linkPasser, o *linkObj) int { return p.PassLinkObj(o) }
+
+var _ linkPasser = (*linkPassesOn)(nil)
+
+func init() {
+	// The program has a value of each type.
+	var p linkPasser = &linkPassesOn{r: linkReads{}, k: linkDrops{}}
+	if p.PassLinkObj(&linkObj{p: new(int)}) != 0 {
+		panic("PassLinkObj")
+	}
+}

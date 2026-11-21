@@ -667,3 +667,14 @@ func isStackAddr(n ir.Node) bool {
 	name, ok := ir.OuterValue(n.(*ir.AddrExpr).X).(*ir.Name)
 	return ok && name.Op() == ir.ONAME && name.Class != ir.PEXTERN && name.Esc() != ir.EscHeap && name.Heapaddr == nil
 }
+
+// addrInt returns the pointer p, an unsafe.Pointer, as an integer for a
+// computation of the compiler's own: the integer is not kept, and its
+// object is not exposed (walkConv).
+func addrInt(gd *base.Invocation, p ir.Node) ir.Node {
+	c := ir.NewConvExpr(gd, p.Pos(), ir.OCONVNOP, types.Types[types.TUINTPTR], p)
+	c.SetType(types.Types[types.TUINTPTR])
+	c.SetTypecheck(1)
+	c.SetCheckPtr(true)
+	return c
+}

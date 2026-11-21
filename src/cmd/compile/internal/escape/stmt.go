@@ -110,6 +110,10 @@ func (e *escape) stmt(n ir.Node) {
 		} else {
 			e.flow(ks[1].deref(e.gd, n, "range-deref"), tmp)
 		}
+		if n.X.Type().IsMap() && e.mapsOn() {
+			// The keys are loaded from the map as the values are.
+			e.flow(ks[0].deref(e.gd, n, "range-deref"), tmp)
+		}
 		e.reassigned(ks, n)
 
 		e.block(n.Body)
@@ -125,7 +129,7 @@ func (e *escape) stmt(n ir.Node) {
 					cv := cas.Var
 					k := e.dcl(cv) // type switch variables have no ODCL.
 					if cv.Type().HasPointers() {
-						ks = append(ks, e.assertHole(k, cv.Type()).dotType(e.gd, cv.Type(), cas, "switch case"))
+						ks = append(ks, e.assertHole(k, cv.Type(), guard.X.Type()).dotType(e.gd, cv.Type(), cas, "switch case"))
 					}
 				}
 			}
@@ -152,6 +156,13 @@ func (e *escape) stmt(n ir.Node) {
 	case ir.OSEND:
 		n := n.(*ir.SendStmt)
 		e.discard(n.Chan)
+		if e.moveCandidate(n) {
+			// The object goes to the heap, and what it holds
+			// to where another goroutine reaches it; whether it
+			// is handed over is known when the graph is solved.
+			e.expr(e.handOverHole(n), n.Value)
+			break
+		}
 		e.assignHeap(n.Value, "send", n)
 
 	case ir.OAS:
@@ -190,6 +201,7 @@ func (e *escape) stmt(n ir.Node) {
 		}
 		// (Only these assignments of the results end the function:
 		// see location.assignedInBody.)
+		e.noteReturn(n)
 		e.returning = true
 		ks := e.addrs(dsts)
 		e.returning = false

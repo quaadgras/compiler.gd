@@ -152,6 +152,10 @@ type Func struct {
 	// otherwise gc.prepareFunc → ir.InitLSym fires twice.
 	GdForwarderSynthRegistered bool
 
+	// FreshResult reports that the function only returns the address
+	// of an object that it allocates (abi.FuncFlagFreshResult).
+	FreshResult bool
+
 	flags bitset16
 
 	// ABI is a function's "definition" ABI. This is the ABI that
@@ -194,6 +198,39 @@ type Func struct {
 	// take them wastes its time, no more.
 	LocalBitsVar   *Name
 	TakesLocalBits bool
+
+	// Consumes has bit k set if the function hands over what its
+	// k'th parameter (the receiver first) points to, to a sync.Pool
+	// or to a function that does, and does nothing else that keeps
+	// it; OwnedResult, that what the function returns is an object
+	// that nobody else has, or that is shared (escape analysis,
+	// move.go).
+	Consumes    uint16
+	OwnedResult bool
+
+	// KeptChecked has bit k set if all that keeps the pointer that
+	// is the function's k'th parameter (the receiver first) is a
+	// function that is only known when the program runs, and the
+	// call of that one shares the object if its escape mask says
+	// that it keeps the argument (escape analysis, move.go): for
+	// the callers that would hand the object over, the function
+	// does not keep it.
+	KeptChecked uint16
+	// KeptByRecv has, of those bits, the ones of the parameters that
+	// are the receiver of a call of a method of an interface, here or
+	// in a function that this one passes them to: a method of the
+	// argument's own type may keep it, which the caller answers for
+	// by that type (escape analysis, recv.go).
+	KeptByRecv uint16
+	// KeptByAny has the ones of the parameters that are asserted to
+	// have other methods than their interface type's: the caller
+	// answers for every method of the argument's type.
+	KeptByAny uint16
+	// KeptCalls has the ones of the parameters that are passed to a
+	// call that checks: the object is then shared if the function
+	// that is called keeps it, so it cannot be a local one. Of the
+	// others only methods of their own are called.
+	KeptCalls uint16
 
 	// ParamShares says, for each of the receiver and the parameters,
 	// where another goroutine may reach what the function is passed:
@@ -834,8 +871,9 @@ type ParamShare struct {
 	// through a parameter (Via): what is only stored through one
 	// lives as long as what that one points to.
 	Heap uint8
-	// Recv says that the parameter, of an interface type, is the
-	// receiver of calls of methods of that type: what it holds is
-	// where the methods of its dynamic type put their receiver.
-	Recv bool
+	// Links are the functions that are only known when the program
+	// runs to which the parameter is passed, or what it points to:
+	// another goroutine reaches it if one of them shares its argument,
+	// which the linker knows (sharelink.go).
+	Links []ShareLink
 }

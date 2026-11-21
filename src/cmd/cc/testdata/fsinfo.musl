@@ -1,0 +1,105 @@
+statvfs: 0 bsize 1 frsize 1 namemax 1 blocks 1 bfree 1
+fstatvfs: 0 same 1
+statfs: 0 bsize 1 blocks 1 namelen 1
+fstatfs: 0 same 1
+statvfs missing: -1 1
+fstatvfs bad: -1 1
+sizes: 112 120
+nftw plain: 0
+  tree D level 0 base 0 dir 1
+  tree/a F level 1 base 5 size 5
+  tree/b D level 1 base 5 dir 1
+  tree/b/c F level 2 base 7 size 2
+nftw depth: 0
+  tree DP level 0 base 0 dir 1
+  tree/a F level 1 base 5 size 5
+  tree/b DP level 1 base 5 dir 1
+  tree/b/c F level 2 base 7 size 2
+  dp after children: 1
+nftw phys: 0
+  tree D level 0 base 0 dir 1
+  tree/a F level 1 base 5 size 5
+  tree/b D level 1 base 5 dir 1
+  tree/b/c F level 2 base 7 size 2
+  tree/dangling SL level 1 base 5
+  tree/l SL level 1 base 5
+nftw follow: 0
+  tree D level 0 base 0 dir 1
+  tree/a F level 1 base 5 size 5
+  tree/b D level 1 base 5 dir 1
+  tree/b/c F level 2 base 7 size 2
+  tree/dangling SLN level 1 base 5
+  tree/l F level 1 base 5 size 5
+nftw phys depth: 0
+  tree DP level 0 base 0 dir 1
+  tree/a F level 1 base 5 size 5
+  tree/b DP level 1 base 5 dir 1
+  tree/b/c F level 2 base 7 size 2
+  tree/dangling SL level 1 base 5
+  tree/l SL level 1 base 5
+  dp after children: 1
+nftw stop: 7
+nftw missing: -1 1
+ftw: 0
+  t2 D
+  t2/x D
+  t2/x/y F
+wordexp [a b  c]: 0 3: <a> <b> <c>
+wordexp [$FSV]: 0 2: <one> <two>
+wordexp ["$FSV"]: 0 1: <one two>
+wordexp [${FSV}x]: 0 2: <one> <twox>
+wordexp [x$FSE y "$FSE"]: 0 3: <x> <y> <>
+wordexp ['$FSV' "a b" c\ d]: 0 3: <$FSV> <a b> <c d>
+wordexp [~ ~/x a~]: 0 3: </home/test> </home/test/x> <a~>
+wordexp [${FSU:-def} ${FSV:+alt} ${FSE:-empty} ${FSE-unset} ${#FSV}]: 0 4: <def> <alt> <empty> <7>
+wordexp [${FSP%.c} ${FSP#*/} ${FSP##*/} ${FSP%%/*} ${FSP%/*}]: 0 5: <dir/sub/file> <sub/file.c> <file.c> <dir> <dir/sub>
+wordexp [$((1+2*3)) $((FSN*2)) $(((7-1)/2)) $((-5%3)) $((1<<4|1))]: 0 5: <7> <42> <3> <-2> <17>
+wordexp [g*.txt]: 0 2: <g1.txt> <g2.txt>
+wordexp [*.none 'g*' g\*]: 0 3: <*.none> <g*> <g*>
+wordexp [.g*]: 0 1: <.g3.txt>
+wordexp [$(echo hi there) "$(echo a  b)" `echo x`]: 0 4: <hi> <there> <a b> <x>
+wordexp ["abc]: 5
+wordexp ['abc]: 5
+wordexp [$(echo hi)]: 4
+wordexp [`echo hi`]: 4
+wordexp [${FSV]: 5
+wordexp [$FSU]: 0 0:
+wordexp [x${FSU}y]: 0 1: <xy>
+dooffs: 0 2 1 1 one two 1
+append: 0 3 one two three 1
+times: 1 1 1 size 32
+sysinfo: 0 uptime 1 ram 1 free 1 unit 1 procs 1
+nprocs: 1 1
+pages: 1 1
+makedev: 2049 8 1
+makedev big: 12006789345ab 12345 6789ab
+stat dev: 1
+lo: 127.0.0.1/255.0.0.0 up 1 loopback 1
+lo ipv4 1 packet 1
+ext: readable 0 writable 1 pending 3 writing 1 flushed 0 purged 0 lbf 0
+ext: reading 1 writable 0 content abc
+gettext: 1 msg cmsg
+ngettext: file files dirs x
+textdomain: messages myapp myapp
+bindtextdomain: /opt/locale
+bindtextdomain again: /opt/locale
+codeset: UTF-8
+strfmon: 57 [1234.56] [1234.56] [   1234.56] [2.500] [2] [-7.25] 100%
+strfmon small: -1 1
+catopen: 1 1
+fmtmsg: 0 0
+  cmd:sub: ERROR: something failed
+  INFO: just text
+ulimit: 1
+sysexits: 0 64 70 78
+paths: /dev/null /bin/sh /dev/tty
+values: 1 1 8 32 -32768
+tar: ustar 6 00 0 5 400 1000
+cpio: 070707 40000 120000 400
+ar: 1 1 60 10
+udp: 8 53
+ip: 20 20 0x45 0x10 0x4000 0xa0 255 4
+nameser: 512 1025 28 1 15 12
+get16: 0x102 2
+resolv: 0
+if: 0x1 0x8 0x40 0x1000

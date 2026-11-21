@@ -12,9 +12,7 @@ import (
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
-	"cmd/internal/objabi"
 	"cmd/internal/src"
-	"cmd/internal/sys"
 )
 
 // Goroutine sharing, statically (doc/gd/sharing.md, runtime/shared.go).
@@ -59,7 +57,7 @@ func (b *batch) trackPointers(fn *ir.Func) {
 	if len(cand) == 0 {
 		return
 	}
-	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true })
+	dropUnfresh(cand, srcs, func(n ir.Node) bool { return true }, !moveOff(b.gd))
 	if b.contents == nil {
 		b.contents = make(map[*ir.Name]*location)
 		b.sources = make(map[*ir.Name][]ir.Node)
@@ -87,6 +85,16 @@ func (b *batch) trackPointers(fn *ir.Func) {
 			})
 		}
 	}
+	// The variables that may hold what a pool returned point to what
+	// may be shared.
+	got := make(map[*ir.Name]bool)
+	for name := range cand {
+		for _, src := range srcs[name] {
+			if poolGot(src) {
+				got[find(name)] = true
+			}
+		}
+	}
 	for name := range cand {
 		root := find(name)
 		c := b.contents[root]
@@ -95,6 +103,9 @@ func (b *batch) trackPointers(fn *ir.Func) {
 				curfn:     fn,
 				loopDepth: 1,
 				attrs:     attrEscapes | attrPersists | attrMutates | attrCalls,
+			}
+			if got[root] {
+				c.attrs |= attrShares
 			}
 			b.allLocs = append(b.allLocs, c)
 			b.contents[root] = c
@@ -186,7 +197,7 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 		if n.Class != ir.PAUTO || n.IsClosureVar() || n.Addrtaken() || !n.Type().HasPointers() {
 			continue
 		}
-		if !n.Type().IsPtr() && !n.Type().IsSlice() && !n.Type().IsUnsafePtr() {
+		if !n.Type().IsPtr() && !n.Type().IsSlice() && !n.Type().IsUnsafePtr() && !(n.Type().IsMap() && b.mapsOn()) {
 			continue
 		}
 		switch n.Defn.(type) {
@@ -202,6 +213,7 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 			delete(cand, name)
 		}
 	}
+	b.noteDeferWraps(fn)
 	ir.VisitFuncAndClosures(fn, func(n ir.Node) {
 		switch n := n.(type) {
 		case *ir.AssignStmt:
@@ -213,6 +225,14 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 				srcs[name] = append(srcs[name], n.Y)
 			}
 		case *ir.AssignListStmt:
+			if n.Op() == ir.OAS2DOTTYPE && len(n.Lhs) == 2 && len(n.Rhs) == 1 {
+				// x, ok := y.(T)
+				if name, ok := n.Lhs[0].(*ir.Name); ok && cand[name] {
+					srcs[name] = append(srcs[name], n.Rhs[0])
+				}
+				drop(n.Lhs[1])
+				break
+			}
 			if n.Op() == ir.OAS2 && len(n.Lhs) == len(n.Rhs) {
 				for i, l := range n.Lhs {
 					if name, ok := l.(*ir.Name); ok && cand[name] {
@@ -234,6 +254,11 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 				drop(n.Var)
 			}
 		case *ir.ClosureExpr:
+			if b.deferWraps[n.Func] != nil {
+				// Only a call, when the function ends, with
+				// the variables as arguments (move.go).
+				break
+			}
 			for _, cv := range n.Func.ClosureVars {
 				drop(cv.Canonical())
 			}
@@ -246,12 +271,18 @@ func (b *batch) pointerSources(fn *ir.Func) (cand map[*ir.Name]bool, srcs map[*i
 // fresh: an allocation that alloc accepts, nil, a variable that stays in
 // cand, or a slice or the address of a part of what one of those points
 // to.
-func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func(n ir.Node) bool) {
+//
+// With got, also what sync.Pool.Get returned (poolGot): a pointer that
+// nobody else has, or to an object that is shared, which is not known
+// here (move.go).
+func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func(n ir.Node) bool, got bool) {
 	var fresh func(n ir.Node) bool
 	fresh = func(n ir.Node) bool {
 		switch n.Op() {
 		case ir.ONIL:
 			return true
+		case ir.ODOTTYPE, ir.ODOTTYPE2, ir.OCALLFUNC:
+			return got && poolGot(n)
 		case ir.OCONVNOP, ir.OPAREN:
 			switch n := n.(type) {
 			case *ir.ConvExpr:
@@ -260,7 +291,7 @@ func dropUnfresh(cand map[*ir.Name]bool, srcs map[*ir.Name][]ir.Node, alloc func
 			case *ir.ParenExpr:
 				return fresh(n.X)
 			}
-		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT:
+		case ir.ONEW, ir.OPTRLIT, ir.OMAKESLICE, ir.OSLICELIT, ir.OMAKEMAP, ir.OMAPLIT:
 			return alloc(n)
 		case ir.OADDR:
 			n := n.(*ir.AddrExpr)
@@ -344,7 +375,7 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 				cand[n] = true
 			}
 		}
-		dropUnfresh(cand, b.sources, unshared)
+		dropUnfresh(cand, b.sources, unshared, false)
 		for name := range cand {
 			name.Unshared |= ir.UnsharedPointee
 		}
@@ -372,14 +403,14 @@ func (b *batch) markLocal(loc *location) {
 	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
 		return
 	}
-	ret := loc.hasAttr(attrReturned)
-	if loc.hasRecv() {
-		// It leads to the receiver of a method that is not known.
-		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
-			fmt.Printf("%s: %v is not local, a method is called on what it holds\n", b.gd.FmtPos(loc.n.Pos()), loc.n)
-		}
+	if n := loc.n; n != nil && n.Op() != ir.ONAME && n.Type() != nil && n.Type().IsString() && b.readOnlyOn() {
+		// The bytes of a string: never written, so no goroutine that
+		// reaches them matters, and the flows of strings are not
+		// followed for that (edge.ro). They are not allocated with
+		// the local objects, which only one goroutine reaches.
 		return
 	}
+	ret := loc.hasAttr(attrReturned)
 	if loc.hasAttr(attrNotLocal) || ret && !b.callBitsOn() {
 		if b.gd.Flag.LowerM >= 2 && loc.n != nil {
 			why := ""
@@ -482,6 +513,12 @@ type dynRoot struct {
 	// called (callbits.go).
 	call *ir.CallExpr
 	arg  int
+
+	// link is the key of the class of functions that the call may be
+	// of, if the linker knows what they do with the argument arg
+	// (callbits.go). A root with no call is a link root: it has no
+	// path, and its tag can be read anywhere.
+	link string
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
@@ -505,19 +542,7 @@ func (e *escape) noteStmtCall() {
 // splitHeap reports whether the target has spans of local objects
 // (runtime.localSpans).
 func splitHeap(gd *base.Invocation) (shift int64, ok bool) {
-	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
-		return 0, false
-	}
-	switch gd.Ctxt.Headtype {
-	case objabi.Hlinux, objabi.Hdarwin, objabi.Hfreebsd, objabi.Hwindows, objabi.Hportable:
-	default:
-		return 0, false
-	}
-	switch gd.Ctxt.Arch.Family {
-	case sys.AMD64, sys.ARM64:
-		return 0, true
-	}
-	return 0, false
+	return 0, ir.LocalSpans(gd)
 }
 
 // The runtime's table of the pages that hold something else than local
@@ -556,6 +581,7 @@ func (b *batch) localTest(pos src.XPos, u ir.Node) ir.Node {
 	ap.SetCheckPtr(true)
 	wp := ir.NewConvExpr(b.gd, pos, ir.OCONVNOP, types.NewPtr(u32), ap)
 	wp.SetTypecheck(1)
+	wp.SetCheckPtr(true) // a word of the table, as aligned as the table
 	word := ir.NewStarExpr(b.gd, pos, wp)
 	word.SetType(u32)
 	word.SetTypecheck(1)
@@ -564,6 +590,23 @@ func (b *batch) localTest(pos src.XPos, u ir.Node) ir.Node {
 	n.SetTypecheck(1)
 	// (n - 1) >> 63: 1 if n is zero.
 	return binary(ir.ORSH, binary(ir.OSUB, n, lit(1)), lit(63))
+}
+
+// mapsOn reports whether a map is a container as an object is: what is
+// stored in it is where the map is, and what is loaded from it is reached
+// from it. The map is then a local object if nothing that it holds is
+// shared, and what it allocates is local with it (runtime.makemap).
+func (b *batch) mapsOn() bool {
+	if b.gd.Debug.NoLocalMap != 0 || !b.callBitsOn() {
+		return false
+	}
+	return true
+}
+
+// readOnlyOn reports whether a value that is only ever read counts as
+// not shared: today, what a string points to.
+func (b *batch) readOnlyOn() bool {
+	return b.gd.Debug.NoLocalRO == 0 && b.callBitsOn()
 }
 
 // purePath returns the variable that the path n starts from, and
@@ -602,7 +645,7 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 	if _, ok := splitHeap(e.gd); !ok {
 		return nil
 	}
-	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() {
+	if t := p.Type(); t == nil || !t.IsPtr() && !t.IsSlice() && !(t.IsMap() && e.mapsOn()) {
 		return nil
 	}
 	name, plain := e.purePath(p)
@@ -636,8 +679,17 @@ func (e *escape) dynRootOf(p ir.Node) *location {
 // called when the graph is built.
 func (b *batch) settleDynRoots() {
 	for _, r := range b.dynRoots {
+		if r.dynRoot.name == nil {
+			// A link root.
+			continue
+		}
 		loc, _ := r.dynRoot.name.Opt.(*location)
 		if loc == nil || loc.captured || loc.addrtaken {
+			if d := r.dynRoot; d.call != nil && d.link != "" {
+				// What is called cannot be read: the linker knows.
+				r.dynRoot = &dynRoot{link: d.link, arg: d.arg}
+				continue
+			}
 			r.dynRoot = nil
 			r.attrs |= attrShares
 			continue
@@ -750,8 +802,32 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 		if d == nil {
 			return nil
 		}
+		// What the linker knows can be read anywhere.
+		linked := func() bool {
+			if d.link == "" {
+				return false
+			}
+			key := fmt.Sprintf("link %d %s", d.arg, d.link)
+			if !seen[key] {
+				seen[key] = true
+				one := b.linkTag(pos, d.link, d.arg)
+				if tag == nil {
+					tag = one
+				} else {
+					tag = binary(ir.OAND, tag, one)
+				}
+			}
+			return true
+		}
+		if d.call == nil && d.link != "" {
+			linked()
+			continue
+		}
 		v := d.loc
 		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
+			if d.call != nil && linked() {
+				continue
+			}
 			return nil
 		}
 		param := d.call == nil && d.plain && !v.reassigned && v.param
@@ -759,6 +835,9 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 			// Allocated in the call's statement, when what is
 			// called is known.
 			if params || d.stmt == 0 || d.stmt != loc.stmt {
+				if linked() {
+					continue
+				}
 				return nil
 			}
 			key := fmt.Sprintf("call %p %d", d.call, d.arg)

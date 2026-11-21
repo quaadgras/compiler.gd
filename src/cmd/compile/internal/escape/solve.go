@@ -50,17 +50,29 @@ func (b *batch) walkAll() {
 	}
 	todo.pushFront(&b.mutatorLoc)
 	todo.pushFront(&b.shareLoc)
+	todo.pushFront(&b.convShareLoc)
 	todo.pushFront(&b.calleeLoc)
 	todo.pushFront(&b.candidateLoc)
 	todo.pushFront(&b.ownHeapLoc)
+	todo.pushFront(&b.moveLoc)
+	todo.pushFront(&b.checkLoc)
+	todo.pushFront(&b.recvLoc)
+	todo.pushFront(&b.recvHeldLoc)
+	todo.pushFront(&b.recvAnyLoc)
 	todo.pushFront(&b.heapLoc)
 
 	b.mutatorLoc.queuedWalkAll = true
 	b.shareLoc.queuedWalkAll = true
+	b.convShareLoc.queuedWalkAll = true
 	b.calleeLoc.queuedWalkAll = true
 	b.candidateLoc.queuedWalkAll = true
 	b.heapLoc.queuedWalkAll = true
 	b.ownHeapLoc.queuedWalkAll = true
+	b.moveLoc.queuedWalkAll = true
+	b.checkLoc.queuedWalkAll = true
+	b.recvLoc.queuedWalkAll = true
+	b.recvHeldLoc.queuedWalkAll = true
+	b.recvAnyLoc.queuedWalkAll = true
 
 	var walkgen uint32
 	for todo.len() > 0 {
@@ -82,14 +94,14 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	root.walkgen = walkgen
 	root.derefs = 0
 	root.dst = nil
-
-	// The paths to a receiver of an interface call that go through
-	// no conversion to an interface (recv.go).
-	trackRaw := tracksRecv(root)
-	if trackRaw {
-		root.rawgen = walkgen
-		root.rawDerefs = 0
-	}
+	// The paths that have no read-only edge: sharing follows those
+	// only (edge.ro).
+	root.rawgen = walkgen
+	root.rawDerefs = 0
+	// The paths that have no edge from a receiver to its call's
+	// result: who holds a pointer is found along those (edge.recvRes).
+	root.plaingen = walkgen
+	root.plainDerefs = 0
 
 	if root.hasAttr(attrCalls) {
 		if clo, ok := root.n.(*ir.ClosureExpr); ok {
@@ -114,6 +126,28 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 
 		derefs := l.derefs
 		var newAttrs locAttr
+
+		lplain := l.plaingen == walkgen
+		if l.param && lplain && l.plainDerefs == 0 {
+			// For the callers that would hand it over
+			// (ir.Func.KeptChecked).
+			if root == &b.checkLoc || root.isDynRoot && root.keptCheck != nil {
+				l.keptCall = true
+			}
+			if root == &b.recvHeldLoc {
+				l.keptRecv = true
+			} else if root == &b.recvAnyLoc {
+				l.keptAny = true
+			} else if !l.kept && b.keepsParam(root, l) {
+				l.kept = true
+			}
+		}
+		if l.param && l.moveCand && lplain && l.plainDerefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
+			// root keeps the pointer of a parameter that the
+			// function would hand over.
+			l.moveHeld = true
+			l.heldBy = b.explainLoc(root)
+		}
 
 		// If l.derefs < 0, then l's address flows to root.
 		addressOf := derefs < 0
@@ -163,18 +197,26 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 
 		if derefs == 0 {
 			newAttrs |= root.attrs & (attrMutates | attrCalls)
+		}
+
+		// For which goroutines reach l, only the paths without a
+		// read-only edge count.
+		lraw := l.rawgen == walkgen
+		rawAddr := lraw && l.rawDerefs < 0
+		rawDerefs := max(l.rawDerefs, 0)
+		if lraw && rawDerefs == 0 {
 			// What root holds, another goroutine may reach: l
 			// itself if that is l's address, what l points to if
 			// it is l's value.
 			if root.attrs&(attrShares|attrSharesValue) != 0 {
-				if addressOf {
+				if rawAddr {
 					newAttrs |= attrShares
 				} else {
 					newAttrs |= attrSharesValue
 				}
 			}
 			if root.attrs&(attrDynShares|attrDynSharesValue) != 0 {
-				if addressOf {
+				if rawAddr {
 					newAttrs |= attrDynShares
 				} else {
 					newAttrs |= attrDynSharesValue
@@ -186,11 +228,23 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		// that is reached from l is where root is: an object is
 		// local only if nothing that it leads to is shared, since
 		// what is stored in it is allocated as it is (shares.go).
-		if root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+		if lraw && root.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
 			newAttrs |= attrSharesDeep
 		}
-		if root.paramOut || root.hasAttr(attrReturned) {
+		if lraw && (root.paramOut || root.hasAttr(attrReturned)) {
 			newAttrs |= attrReturned
+		}
+
+		if b.gd.Flag.LowerM >= 4 && l.param && l.n != nil && lraw && (root == &b.heapLoc || root == &b.checkLoc || root == &b.shareLoc || root == &b.convShareLoc) {
+			// Every place where a parameter is shared, not only
+			// the first.
+			fmt.Printf("%s: parameter %v reaches what is shared, %s, for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
+			b.explainPath(root, l)
+		}
+		if b.gd.Flag.LowerM >= 2 && l.n != nil && newAttrs&^l.attrs&(attrShares|attrSharesValue|attrSharesDeep) != 0 {
+			// Why an object is not local.
+			fmt.Printf("%s: %v is shared by %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), rawDerefs)
+			b.explainPath(root, l)
 		}
 
 		// l's value flows to root. If l is a function
@@ -214,7 +268,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				l.leakTo(b.gd, root, derefs)
 				b.noteParamLeak(l, root, derefs)
 			}
-			b.noteParamShare(l, root, derefs)
+			if lraw {
+				b.noteParamShare(l, root, rawDerefs)
+			}
 			if root.hasAttr(attrMutates) {
 				l.paramEsc.AddMutator(b.gd, derefs)
 			}
@@ -223,7 +279,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 		}
 
-		if b.addDyn(l, root) {
+		if lraw && b.addDyn(l, root) {
 			enqueue(l)
 			for _, o := range l.owners {
 				if b.addDyn(o, l) {
@@ -231,36 +287,6 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				}
 			}
 		}
-
-		lraw := trackRaw && l.rawgen == walkgen
-		rawDerefs := max(l.rawDerefs, 0)
-		if lraw && l != root {
-			if l.param {
-				b.noteParamRecvs(l, root, rawDerefs)
-			}
-			if b.addRecv(l, root) {
-				enqueue(l)
-				for _, o := range l.owners {
-					if b.addRecv(o, l) {
-						enqueue(o)
-					}
-				}
-				// A conversion whose type has a method that may
-				// share its receiver, and a location with more
-				// roots than it lists: what flows there is shared.
-				if l.recvOver || l.conv != nil && !b.convOK(l) {
-					newAttrs |= attrSharesValue | attrSharesDeep
-				}
-			}
-			if l.assert {
-				// Reached from an interface otherwise than by
-				// its methods.
-				newAttrs |= attrSharesValue | attrSharesDeep
-			}
-		}
-		// What flows into a conversion is the conversion's to answer
-		// for, and what flows into an assertion is shared.
-		srcRaw := lraw && l.conv == nil && !l.assert
 
 		if newAttrs&^l.attrs != 0 {
 			l.attrs |= newAttrs
@@ -281,7 +307,26 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		}
 
 		for i, edge := range l.edges {
+			if edge.recvOK && root == &b.recvHeldLoc || edge.recvAllOK && root == &b.recvAnyLoc {
+				// No method of what flows here keeps it.
+				continue
+			}
 			d := derefs + edge.derefs
+			srcPlain := lplain && !edge.recvRes
+			pd := max(l.plainDerefs, 0) + edge.derefs
+			if srcPlain && pd < 0 && edge.src.moveCand && !edge.src.moveHeld && b.holdsMoved(root, edge.src) {
+				// root keeps a pointer to an object that a send
+				// would hand over: it is not handed over.
+				edge.src.moveHeld = true
+				edge.src.heldBy = b.explainLoc(root)
+			}
+			srcRaw := lraw && !edge.ro
+			rd := rawDerefs + edge.derefs
+			if edge.src.hasAttr(attrEscapes) && !srcRaw {
+				// Nothing to learn: it escapes, and this path says
+				// nothing of who reaches it.
+				continue
+			}
 			if edge.src.hasAttr(attrEscapes) {
 				// A location that escapes is a root itself, with
 				// nothing left to learn here but whether another
@@ -291,9 +336,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					want |= attrSharesDeep
 				}
 				if root.attrs&(attrShares|attrSharesValue) != 0 {
-					if d < 0 {
+					if rd < 0 {
 						want |= attrShares
-					} else if d == 0 {
+					} else if rd == 0 {
 						want |= attrSharesValue
 					}
 				}
@@ -301,13 +346,13 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 					want |= attrReturned
 				}
 				if root.attrs&(attrDynShares|attrDynSharesValue) != 0 {
-					if d < 0 {
+					if rd < 0 {
 						want |= attrDynShares
-					} else if d == 0 {
+					} else if rd == 0 {
 						want |= attrDynSharesValue
 					}
 				}
-				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) && !(srcRaw && b.wantsRecv(edge.src, root)) {
+				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) {
 					continue
 				}
 			}
@@ -318,12 +363,15 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				edge.src.dst = l
 				edge.src.dstEdgeIdx = i
 			}
-			if srcRaw {
-				if rd := rawDerefs + edge.derefs; edge.src.rawgen != walkgen || edge.src.rawDerefs > rd {
-					edge.src.rawgen = walkgen
-					edge.src.rawDerefs = rd
-					closer = true
-				}
+			if srcRaw && (edge.src.rawgen != walkgen || edge.src.rawDerefs > rd) {
+				edge.src.rawgen = walkgen
+				edge.src.rawDerefs = rd
+				closer = true
+			}
+			if srcPlain && (edge.src.plaingen != walkgen || edge.src.plainDerefs > pd) {
+				edge.src.plaingen = walkgen
+				edge.src.plainDerefs = pd
+				closer = true
 			}
 			if closer {
 				// Check if already queued in todo.
@@ -415,8 +463,17 @@ func (b *batch) explainFlow(pos string, dst, srcloc *location, derefs int, notes
 }
 
 func (b *batch) explainLoc(l *location) string {
-	if l == &b.heapLoc || l == &b.ownHeapLoc {
+	if l == &b.heapLoc || l == &b.ownHeapLoc || l == &b.moveLoc || l == &b.checkLoc || l == &b.recvLoc {
 		return "{heap}"
+	}
+	if l == &b.recvHeldLoc || l == &b.recvAnyLoc {
+		return "a method of its own"
+	}
+	if l == &b.shareLoc {
+		return "{shared}"
+	}
+	if l == &b.convShareLoc {
+		return "{converted}"
 	}
 	if l.n == nil {
 		// TODO(mdempsky): Omit entirely.
@@ -445,7 +502,7 @@ func (b *batch) outlives(l, other *location) bool {
 	}
 
 	// Pseudo-locations that don't really exist.
-	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc {
+	if l == &b.mutatorLoc || l == &b.calleeLoc || l == &b.shareLoc || l == &b.convShareLoc || l == &b.recvHeldLoc || l == &b.recvAnyLoc {
 		return false
 	}
 

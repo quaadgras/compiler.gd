@@ -21,6 +21,21 @@ func NoEscape(p unsafe.Pointer) unsafe.Pointer {
 	return unsafe.Pointer(x ^ 0)
 }
 
+// Address returns the address that p holds, as an integer that is not
+// a pointer again: converting p to uintptr exposes the object that it
+// points to, so that an integer with its address may be made a pointer
+// anywhere, and the object then counts as one that every goroutine
+// reaches. Nothing is exposed here, so the checks refuse to make a
+// pointer of what Address returns. It is for printing and comparing
+// addresses.
+//
+//go:nosplit
+//go:nocheckptr
+//go:noinline
+func Address(p unsafe.Pointer) uintptr {
+	return uintptr(p)
+}
+
 var alwaysFalse bool
 var escapeSink any
 

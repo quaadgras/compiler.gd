@@ -116,6 +116,10 @@ func (s *state) loadFrom(n ir.Node, t *types.Type, src *ssa.Value) *ssa.Value {
 		s.shareCheck(src)
 		return s.loadWhole(t, src)
 	}
+	if name, ok := n.(*ir.Name); ok && name.Op() == ir.ONAME && name.Class == ir.PEXTERN && name.Readonly() {
+		// Nothing stores in a read-only variable: it loads whole.
+		return s.loadWhole(t, src)
+	}
 	return s.load(t, src)
 }
 
@@ -367,6 +371,148 @@ func (s *state) shareLock(dst *ssa.Value, size int64) *ssa.Value {
 	return locked
 }
 
+// sharePage loads the byte that says whether anything in a page like
+// dst's was ever shared.
+func (s *state) sharePage(dst *ssa.Value) *ssa.Value {
+	uptr := types.Types[types.TUINTPTR]
+	u8 := types.Types[types.TUINT8]
+	p := s.newValue2(ssa.OpConvert, uptr, dst, s.mem())
+	var idx *ssa.Value
+	if s.config.PtrSize == 8 {
+		idx = s.newValue2(ssa.OpRsh64Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift))
+		idx = s.newValue2(ssa.OpAnd64, uptr, idx, s.constInt64(uptr, sharePagesLen-1))
+	} else {
+		idx = s.newValue2(ssa.OpRsh32Ux64, uptr, p, s.constInt64(types.Types[types.TUINT64], sharePageShift))
+		idx = s.newValue2(ssa.OpAnd32, uptr, idx, s.constInt32(uptr, sharePagesLen-1))
+	}
+	base := s.entryNewValue1A(ssa.OpAddr, types.NewPtr(u8), ir.Syms(s.gd).SharePages, s.sb)
+	return s.rawLoad(u8, s.newValue2(ssa.OpAddPtr, types.NewPtr(u8), base, idx))
+}
+
+// appendGrouped ends the append n to the slice at addr, which is not in
+// the stack and may be shared, as may its array: it stores the length l
+// (the pointer p and the capacity c too if the slice grew, or if another
+// goroutine stored another slice there) and the nargs elements.
+//
+// Each of these stores would take the locks of what it stores in, and
+// give them back. They take them once for all: no synchronisation
+// separates the stores, so no goroutine can tell, and a program in which
+// one could has no say in how they interleave. Nothing between the locks
+// can fault, call, or wait for another lock: the operands are evaluated
+// before, and the stores are in memory the append has loaded from or
+// that growslice returned.
+func (s *state) appendGrouped(n *ir.CallExpr, addr, p, l, c, nargs *ssa.Value) {
+	tInt := types.Types[types.TINT]
+	uptr := types.Types[types.TUINTPTR]
+	et := n.Type().Elem()
+	pt := types.NewPtr(et)
+
+	var vals, addrs []*ssa.Value
+	for _, a := range n.Args[1:] {
+		vals = append(vals, s.expr(a))
+	}
+	oldLen := s.newValue2(s.ssaOp(ir.OSUB, tInt), tInt, l, nargs)
+	p2 := s.newValue2(ssa.OpPtrIndex, pt, p, oldLen)
+	for i := range vals {
+		ea := s.newValue2(ssa.OpPtrIndex, pt, p2, s.constInt(tInt, int64(i)))
+		s.instrument(et, ea, instrumentWrite)
+		addrs = append(addrs, ea)
+	}
+	lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
+	capaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceCapOffset, addr)
+	hdrSize := s.constInt(uptr, n.Type().Size())
+	elemSize := s.constInt(uptr, int64(len(vals))*et.Size())
+
+	u8 := types.Types[types.TUINT8]
+	any := s.newValue2(ssa.OpOr8, u8, s.sharePage(addr), s.sharePage(p2))
+	cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], any, s.constInt8(u8, 0))
+
+	bCall := s.f.NewBlock(ssa.BlockPlain)
+	bLocked := s.f.NewBlock(ssa.BlockPlain)
+	bAll := s.f.NewBlock(ssa.BlockPlain)
+	bLen := s.f.NewBlock(ssa.BlockPlain)
+	bElems := s.f.NewBlock(ssa.BlockPlain)
+	bLocal := s.f.NewBlock(ssa.BlockPlain)
+	bLocalAll := s.f.NewBlock(ssa.BlockPlain)
+	bLocalElems := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(cond)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bCall)
+	b.AddEdgeTo(bLocal)
+
+	s.startBlock(bCall)
+	locked := s.rtcall(ir.Syms(s.gd).ShareStore2, true, []*types.Type{types.Types[types.TBOOL]}, addr, hdrSize, p2, elemSize)[0]
+	b = s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(locked)
+	b.AddEdgeTo(bLocked)
+	b.AddEdgeTo(bLocal)
+
+	// With the locks: the length alone if the array is the one that
+	// is there, with at least that capacity.
+	s.startBlock(bLocked)
+	capNow := s.rawLoad(tInt, capaddr)
+	fits := s.newValue2(s.ssaOp(ir.OLE, types.Types[types.TUINT]), types.Types[types.TBOOL], l, capNow)
+	fits = s.newValue2(ssa.OpAndB, types.Types[types.TBOOL], fits, s.newValue2(ssa.OpEqPtr, types.Types[types.TBOOL], s.rawLoad(pt, addr), p))
+	b = s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(fits)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bLen)
+	b.AddEdgeTo(bAll)
+
+	s.startBlock(bAll)
+	s.store(tInt, lenaddr, l)
+	s.store(tInt, capaddr, c)
+	s.store(pt, addr, p)
+	s.endBlock().AddEdgeTo(bElems)
+
+	s.startBlock(bLen)
+	s.store(tInt, lenaddr, l)
+	s.endBlock().AddEdgeTo(bElems)
+
+	s.startBlock(bElems)
+	for i, v := range vals {
+		s.rawStoreType(et, addrs[i], v, 0, true)
+	}
+	s.rtcall(ir.Syms(s.gd).ShareUnlock2, true, nil, addr, hdrSize, p2, elemSize)
+	s.endBlock().AddEdgeTo(bDone)
+
+	// Neither is shared, which the runtime may have just found: what
+	// is stored there needs no publishing either.
+	s.startBlock(bLocal)
+	s.store(tInt, lenaddr, l)
+	same := s.newValue2(ssa.OpEqPtr, types.Types[types.TBOOL], s.rawLoad(pt, addr), p)
+	b = s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(same)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bLocalElems)
+	b.AddEdgeTo(bLocalAll)
+
+	// The slice grew.
+	s.startBlock(bLocalAll)
+	s.dstLocal = true
+	s.store(tInt, capaddr, c)
+	s.store(pt, addr, p)
+	s.dstLocal = false
+	s.endBlock().AddEdgeTo(bLocalElems)
+
+	s.startBlock(bLocalElems)
+	s.dstLocal = true
+	for i, v := range vals {
+		s.rawStoreType(et, addrs[i], v, 0, true)
+	}
+	s.dstLocal = false
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+}
+
 func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 	bUnlock := s.f.NewBlock(ssa.BlockPlain)
 	bDone := s.f.NewBlock(ssa.BlockPlain)
@@ -390,6 +536,46 @@ func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 // is there now, and a store of the whole slice otherwise: another
 // goroutine may have stored a shorter one since this one was loaded.
 func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
+	if skip == 0 && s.gd.Debug.NoGroup == 0 && (t.IsString() || t.IsSlice() || t.IsInterface()) {
+		// The whole of a string, a slice or an interface: the
+		// runtime stores it if the memory is shared, and this
+		// function has only the store for memory that is not.
+		fn := ir.Syms(s.gd).ShareStoreSlice
+		switch {
+		case t.IsString():
+			fn = ir.Syms(s.gd).ShareStoreString
+		case t.IsInterface():
+			fn = ir.Syms(s.gd).ShareStoreIface
+		}
+		cond := s.newValue2(ssa.OpNeq8, types.Types[types.TBOOL], s.sharePage(left), s.constInt8(types.Types[types.TUINT8], 0))
+		bCall := s.f.NewBlock(ssa.BlockPlain)
+		bLocal := s.f.NewBlock(ssa.BlockPlain)
+		bDone := s.f.NewBlock(ssa.BlockPlain)
+		b := s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(cond)
+		b.Likely = ssa.BranchUnlikely
+		b.AddEdgeTo(bCall)
+		b.AddEdgeTo(bLocal)
+
+		s.startBlock(bCall)
+		stored := s.rtcall(fn, true, []*types.Type{types.Types[types.TBOOL]}, left, right)[0]
+		b = s.endBlock()
+		b.Kind = ssa.BlockIf
+		b.SetControl(stored)
+		b.Likely = ssa.BranchLikely
+		b.AddEdgeTo(bDone)
+		b.AddEdgeTo(bLocal)
+
+		s.startBlock(bLocal)
+		s.dstLocal = true
+		s.rawStoreType(t, left, right, 0, leftIsStmt)
+		s.dstLocal = false
+		s.endBlock().AddEdgeTo(bDone)
+
+		s.startBlock(bDone)
+		return
+	}
 	locked := s.shareLock(left, t.Size())
 	if skip == 0 {
 		// Two copies of the store: if the memory is not shared,

@@ -62,6 +62,14 @@ type Pool struct {
 	// a value when Get would otherwise return nil.
 	// It may not be changed concurrently with calls to Get.
 	New func() any
+
+	// fresh is set once New has returned an object that nobody else
+	// had: what Get returns is then its caller's alone until it is
+	// shared (runtime/shared.go).
+	fresh atomic.Uint32
+	// mixed is set once an object was put that was not handed over:
+	// the pool then holds shared objects, which Put looks for.
+	mixed atomic.Uint32
 }
 
 // Local per-P Pool appendix.
@@ -105,8 +113,15 @@ func poolRaceAddr(x any) unsafe.Pointer {
 //
 //go:notear
 func (p *Pool) Put(x any) {
-	if x == nil {
+	// Whether the caller hands x over, and x is not shared by being
+	// put (runtime/shared.go): asked first, so that what the caller
+	// said is not left for another Put.
+	owned, drop := runtime_poolOwned(x, p.fresh.Load() != 0, p.mixed.Load() != 0)
+	if x == nil || drop {
 		return
+	}
+	if !owned && p.mixed.Load() == 0 {
+		p.mixed.Store(1)
 	}
 	if race.Enabled {
 		if runtime_randn(4) == 0 {
@@ -118,15 +133,24 @@ func (p *Pool) Put(x any) {
 	}
 	l, _ := p.pin()
 	if l.private == nil {
-		l.private = x
+		if owned {
+			runtime_poolStoreOwned(&l.private, x)
+		} else {
+			l.private = x
+		}
 	} else {
-		l.shared.pushHead(x)
+		l.shared.pushHead(x, owned)
 	}
 	runtime_procUnpin()
 	if race.Enabled {
 		race.Enable()
 	}
 }
+
+// Implemented in runtime (shared.go).
+func runtime_poolOwned(x any, fresh, mixed bool) (owned, drop bool)
+func runtime_poolStoreOwned(dst *any, x any)
+func runtime_poolNew(f func() any, x any) bool
 
 // Get selects an arbitrary item from the [Pool], removes it from the
 // Pool, and returns it to the caller.
@@ -163,6 +187,10 @@ func (p *Pool) Get() any {
 	}
 	if x == nil && p.New != nil {
 		x = p.New()
+		// What Get returns is the caller's alone, or shared.
+		if runtime_poolNew(p.New, x) && p.fresh.Load() == 0 {
+			p.fresh.Store(1)
+		}
 	}
 	return x
 }

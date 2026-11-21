@@ -57,6 +57,12 @@ const (
 
 	// FuncFlagAsm indicates that a function was implemented in assembly.
 	FuncFlagAsm
+
+	// FuncFlagFreshResult indicates (gd fork) a function that does
+	// nothing but return the address of an object that it allocates:
+	// whoever calls it is the only one that has the object. sync.Pool
+	// asks it of its New function (runtime/shared.go).
+	FuncFlagFreshResult
 )
 
 // A FuncID identifies particular functions that need to be treated

@@ -150,6 +150,183 @@ func TestThreads(t *testing.T) {
 	}
 }
 
+// TestSock compares sockets, name resolution, poll and select
+// (testdata/sock.c) with gcc's.
+func TestSock(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/sock.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "sock")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // it makes a socket file
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestRegex compares regex.h's matching (and termios.h's, without a
+// terminal) of testdata/regex.c with gcc's C library's.
+func TestRegex(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/regex.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "regex", func() string {
+		bin := filepath.Join(t.TempDir(), "regex")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		want, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestPxMisc checks ndbm.h, devctl.h, ppoll, sig2str and str2sig
+// (testdata/pxmisc.c) against what POSIX says: the host's musl has no
+// ndbm.h, devctl.h or sig2str to compare with.
+func TestPxMisc(t *testing.T) {
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxmisc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	const want = `open 1
+store 0 0 0
+insert again 1, replace 0
+fetch a ay
+fetch zz 1
+delete b 0, again -1
+reopened: a=ay c=see
+readonly store -1 error 1 cleared 0
+missing 1
+ppoll timeout 0
+ppoll ready 1 1
+devctl 0 3 0
+devctl tcgets 1
+1 HUP 1
+15 TERM 15
+17 CHLD 17
+34 RTMIN 34
+40 RTMIN+6 40
+60 RTMAX-4 60
+64 RTMAX 64
+str2sig 9 0 9, bad -1, SIGINT -1
+`
+	if got := goRun(t, dir); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestPxLocale compares locale objects and the _l functions, wide
+// characters' widths, and POSIX's string, random number, crypt, time,
+// Bessel and inet functions (testdata/pxlocale.c) with the host's C
+// library.
+func TestPxLocale(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/pxlocale.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "pxlocale", func() string {
+		bin := filepath.Join(t.TempDir(), "pxlocale")
+		// glibc's crypt is libcrypt's, musl's libc's.
+		args := []string{"-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lm"}
+		if out, err := exec.Command(gcc, append(args, "-lcrypt")...).CombinedOutput(); err != nil {
+			if out2, err := exec.Command(gcc, args...).CombinedOutput(); err != nil {
+				t.Fatalf("gcc: %v\n%s%s", err, out, out2)
+			}
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program makes files
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(want)
+	})
+	ccbin := filepath.Join(t.TempDir(), "pxlocale")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd := exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestPxThreads compares POSIX's threads, timers and signals
+// (testdata/pxthreads.c: attributes, read-write locks, barriers, spin
+// locks, cancellation, robust mutexes, timer_create, clock_nanosleep,
+// killpg, sigset and sigsetjmp) with the host's C library, on Linux.
+func TestPxThreads(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the test compares with Linux's C library")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxthreads.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "pxthreads", func() string {
+		bin := filepath.Join(t.TempDir(), "pxthreads")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		want, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestFenv compares the floating-point environment (Annex F: rounding
 // directions, exceptions, the library's conversions) with gcc's, on the
 // architectures that have one.
@@ -216,6 +393,256 @@ func TestLibc(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestUtil compares the common extensions of glibc and musl (getopt_long,
+// err.h, glob.h, search.h, iconv.h, getline, fmemopen and others) of
+// testdata/util.c with gcc's (and its C library's). Both programs run in
+// a directory of their own, where they write files, and only their
+// standard output is compared.
+func TestUtil(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/util.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "util")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir()
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ccbin := filepath.Join(t.TempDir(), "util")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestFsinfo compares file systems' and the system's information, file
+// tree walks, wordexp and the small headers of glibc and musl
+// (testdata/fsinfo.c) with the host's C library.
+func TestFsinfo(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/fsinfo.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "fsinfo", func() string {
+		bin := filepath.Join(t.TempDir(), "fsinfo")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program makes files
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(want)
+	})
+	ccbin := filepath.Join(t.TempDir(), "fsinfo")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd := exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestPxFiles compares the rest of POSIX's files and system interfaces
+// (testdata/pxfiles.c: the *at functions, dirent.h's, dup3 and pipe2,
+// stream locks, limits, shared memory objects, the user, group and
+// network databases, pseudo-terminals) with the host's C library. Both
+// programs run in a directory of their own, where they make files.
+func TestPxFiles(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoBuild(t)
+	src, err := filepath.Abs("testdata/pxfiles.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "pxfiles", func() string {
+		bin := filepath.Join(t.TempDir(), "pxfiles")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir()
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
+	ccbin := filepath.Join(t.TempDir(), "pxfiles")
+	build := testenv.Command(t, testenv.GoToolPath(t), "build", "-o", ccbin, ".")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd := exec.Command(ccbin)
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestProc compares processes, signals, scheduling and semaphores
+// (sys/wait.h, spawn.h, the exec family, sigaction, sched.h,
+// semaphore.h) with the host's C library.
+func TestProc(t *testing.T) {
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/proc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "proc")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestEvents compares epoll, eventfd, timerfd, signalfd, waitid and
+// wait4, sigtimedwait and its kin, pthread_kill, sigaltstack and
+// setitimer (testdata/events.c) with the host's C library, on Linux.
+func TestEvents(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the host's C library has epoll only on Linux")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/events.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	want := hostWant(t, gcc, "events", func() string {
+		bin := filepath.Join(t.TempDir(), "events")
+		if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src).CombinedOutput(); err != nil {
+			t.Fatalf("gcc: %v\n%s", err, out)
+		}
+		cmd := exec.Command(bin)
+		cmd.Dir = t.TempDir() // the program writes a file
+		want, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("%v\n%s", err, want)
+		}
+		return string(want)
+	})
+	if got := goRun(t, dir); got != string(want) {
+		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestPxIPC compares message queues (mqueue.h), XSI IPC (sys/msg.h,
+// sys/sem.h, sys/shm.h) and aio.h (testdata/pxipc.c) with the host's C
+// library, on Linux: within one process, with threads as the other
+// parties.
+func TestPxIPC(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the host's message queues are Linux's")
+	}
+	gcc, err := exec.LookPath("gcc")
+	if err != nil {
+		t.Skip("no gcc")
+	}
+	testenv.MustHaveGoRun(t)
+	src, err := filepath.Abs("testdata/pxipc.c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := module(t, src, true)
+	bin := filepath.Join(t.TempDir(), "pxipc")
+	if out, err := exec.Command(gcc, "-std=gnu2x", "-w", "-pthread", "-o", bin, src, "-lrt").CombinedOutput(); err != nil {
+		t.Fatalf("gcc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = t.TempDir() // the program writes files
+	want, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, want)
+	}
+	cmd = testenv.Command(t, testenv.GoToolPath(t), "build", "-o", filepath.Join(dir, "pxipc"), ".")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	cmd = exec.Command(filepath.Join(dir, "pxipc"))
+	cmd.Dir = t.TempDir()
+	got, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	if string(got) != string(want) {
 		t.Errorf("output differs from gcc's\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
@@ -370,7 +797,7 @@ func TestBuildTag(t *testing.T) {
 #include "add.h"`, "cgo: 5\n"},
 		{"ldflags", `#cgo LDFLAGS: -lm
 #include "add.h"`, "no cgo\n"},
-		{"system header", `#include <sys/socket.h>
+		{"system header", `#include <X11/Xlib.h>
 #include "add.h"`, "no cgo\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -403,4 +830,33 @@ func TestBuildTag(t *testing.T) {
 			}
 		})
 	}
+}
+
+// hostWant returns the output that a test program of testdata/name.c
+// should have: that of run, which builds it with gcc and runs it, where
+// the host's C library is musl, and otherwise musl's recorded in
+// testdata/name.musl. The programs follow musl where POSIX leaves the
+// behavior to the implementation, and use what POSIX 2024 added, which
+// glibc lacks in part. On musl, the recorded output must be run's: set
+// CC_UPDATE_MUSL=1 to write it.
+func hostWant(t *testing.T, gcc, name string, run func() string) string {
+	t.Helper()
+	file := filepath.Join("testdata", name+".musl")
+	machine, err := exec.Command(gcc, "-dumpmachine").Output()
+	if err != nil || !strings.Contains(string(machine), "musl") {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	want := run()
+	if os.Getenv("CC_UPDATE_MUSL") != "" {
+		if err := os.WriteFile(file, []byte(want), 0o666); err != nil {
+			t.Fatal(err)
+		}
+	} else if b, err := os.ReadFile(file); err != nil || string(b) != want {
+		t.Errorf("%s differs from musl's output; run with CC_UPDATE_MUSL=1", file)
+	}
+	return want
 }

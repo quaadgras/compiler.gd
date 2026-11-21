@@ -97,7 +97,7 @@ func infoOf(t reflect.Type) *tinfo {
 		return ti.(*tinfo)
 	}
 	size := t.Size()
-	n := (size + wordSize - 1) / wordSize
+	n := (size + WordSize - 1) / WordSize
 	ti := &tinfo{t: t, size: max(size, 1), kinds: make([]wordKind, max(n, 1)), elems: make([]reflect.Type, max(n, 1)), elemInfo: make([]atomic.Pointer[tinfo], max(n, 1))}
 	ti.walk(t, 0)
 	if ti.size&(ti.size-1) == 0 {
@@ -149,7 +149,7 @@ func infoOf(t reflect.Type) *tinfo {
 
 // tinfoOf returns T's tinfo, from fastTinfos, a table by the address of
 // Go's type, without hashing a reflect.Type.
-func tinfoOf[T any]() *tinfo {
+func TinfoOf[T any]() *tinfo {
 	k := unsafe.Pointer(abi.TypeFor[T]())
 	if tab := fastTinfos.Load(); tab != nil {
 		for i := fastHash(k) & tab.mask; ; i = (i + 1) & tab.mask {
@@ -225,7 +225,7 @@ func addFast(k unsafe.Pointer, ti *tinfo) {
 var rank = [...]int{wScalar: 0, wSplit: 1, wPtr: 2, wRO: 3}
 
 func (ti *tinfo) mark(off uintptr, k wordKind, elem reflect.Type) {
-	w := off / wordSize
+	w := off / WordSize
 	if rank[ti.kinds[w]] > rank[k] {
 		return
 	}
@@ -240,7 +240,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 	case reflect.UnsafePointer:
 		ti.mark(off, wPtr, nil)
 	case reflect.Bool, reflect.String, reflect.Slice, reflect.Interface, reflect.Map, reflect.Chan, reflect.Func:
-		for b := off; b < off+t.Size(); b += wordSize - b%wordSize {
+		for b := off; b < off+t.Size(); b += WordSize - b%WordSize {
 			ti.mark(b, wRO, nil)
 		}
 	case reflect.Array:
@@ -251,7 +251,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if f.Tag.Get("c23") == "union" {
-				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += wordSize - b%wordSize {
+				for b := off + f.Offset; b < off+f.Offset+f.Type.Size(); b += WordSize - b%WordSize {
 					ti.mark(b, wSplit, nil)
 				}
 				continue
@@ -264,7 +264,7 @@ func (ti *tinfo) walk(t reflect.Type, off uintptr) {
 // kindAt returns the kind of the byte at off in memory that is an array of
 // ti's type.
 func (ti *tinfo) kindAt(off uintptr) wordKind {
-	return ti.kinds[ti.mod(off)/wordSize]
+	return ti.kinds[ti.mod(off)/WordSize]
 }
 
 // mod returns off % ti.size, without dividing for the offsets memory has.
@@ -284,7 +284,7 @@ func (ti *tinfo) mod(off uintptr) uintptr {
 // elemAt returns what the pointer word at off points to: nil for
 // unsafe.Pointer.
 func (ti *tinfo) elemAt(off uintptr) *tinfo {
-	i := ti.mod(off) / wordSize
+	i := ti.mod(off) / WordSize
 	if e := ti.elemInfo[i].Load(); e != nil {
 		return e
 	}

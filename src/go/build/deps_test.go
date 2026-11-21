@@ -242,6 +242,86 @@ var depsRules = `
 	FMT, math/cmplx
 	< internal/c23;
 
+	# C's library by header (gd fork): internal/c23/<header>, the
+	# packages of the functions of each header cmd/cc provides.
+	internal/c23
+	< internal/c23/aio,
+	  internal/c23/complex,
+	  internal/c23/ctype,
+	  internal/c23/dirent,
+	  internal/c23/err,
+	  internal/c23/errno,
+	  internal/c23/fcntl,
+	  internal/c23/fmtmsg,
+	  internal/c23/fnmatch,
+	  internal/c23/getopt,
+	  internal/c23/glob,
+	  internal/c23/grp,
+	  internal/c23/iconv,
+	  internal/c23/langinfo,
+	  internal/c23/libintl,
+	  internal/c23/locale,
+	  internal/c23/malloc,
+	  internal/c23/math,
+	  internal/c23/monetary,
+	  internal/c23/mqueue,
+	  internal/c23/nl_types,
+	  internal/c23/poll,
+	  internal/c23/pthread,
+	  internal/c23/pwd,
+	  internal/c23/regex,
+	  internal/c23/sched,
+	  internal/c23/search,
+	  internal/c23/semaphore,
+	  internal/c23/signal,
+	  internal/c23/spawn,
+	  internal/c23/stdatomic,
+	  internal/c23/stdbit,
+	  internal/c23/stdio,
+	  internal/c23/stdio_ext,
+	  internal/c23/string,
+	  internal/c23/strings,
+	  internal/c23/sys/epoll,
+	  internal/c23/sys/eventfd,
+	  internal/c23/sys/file,
+	  internal/c23/sys/ioctl,
+	  internal/c23/sys/ipc,
+	  internal/c23/sys/mman,
+	  internal/c23/sys/msg,
+	  internal/c23/sys/random,
+	  internal/c23/sys/resource,
+	  internal/c23/sys/select,
+	  internal/c23/sys/sem,
+	  internal/c23/sys/shm,
+	  internal/c23/sys/signalfd,
+	  internal/c23/sys/stat,
+	  internal/c23/sys/statvfs,
+	  internal/c23/sys/sysinfo,
+	  internal/c23/sys/time,
+	  internal/c23/sys/timerfd,
+	  internal/c23/sys/times,
+	  internal/c23/sys/uio,
+	  internal/c23/sys/utsname,
+	  internal/c23/sys/wait,
+	  internal/c23/syslog,
+	  internal/c23/termios,
+	  internal/c23/time,
+	  internal/c23/uchar,
+	  internal/c23/ulimit,
+	  internal/c23/unistd,
+	  internal/c23/utime,
+	  internal/c23/utmpx,
+	  internal/c23/wctype,
+	  internal/c23/wordexp
+	< internal/c23/ftw, internal/c23/libgen, internal/c23/stdlib, internal/c23/threads
+	< internal/c23/wchar;
+
+	internal/c23, internal/c23/sys/ioctl
+	< internal/c23/devctl;
+
+	internal/c23, maps
+	< internal/c23/ndbm;
+
 	# Misc packages needing only FMT.
 	FMT
 	< html,
@@ -449,6 +529,16 @@ var depsRules = `
 	fmt, unicode !< net;
 	math/rand !< net; # net uses runtime instead
 
+	# C's sockets, for cmd/cc (gd fork): packages of their own, so that
+	# only C that uses them links net.
+	internal/c23, net/netip
+	< internal/c23/arpa/inet, internal/c23/netinet/in;
+
+	internal/c23, internal/c23/arpa/inet, internal/c23/netinet/in, net
+	< internal/c23/net/if, internal/c23/sys/socket
+	< internal/c23/ifaddrs, internal/c23/netdb
+	< internal/c23/resolv;
+
 	# NET is net plus net-helper packages.
 	FMT, net
 	< net/textproto;
@@ -577,6 +667,10 @@ var depsRules = `
 
 	CRYPTO
 	< golang.org/x/crypto/hkdf;
+
+	# crypt.h's crypt, of C's library (gd fork).
+	CRYPTO, internal/c23
+	< internal/c23/crypt;
 
 	CGO, fmt, net !< CRYPTO;
 

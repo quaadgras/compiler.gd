@@ -16,8 +16,8 @@ stdout '^nocgo.go $'
 go run .
 stderr '^no cgo$'
 
-# Nor if it uses a C name that cmd/cc does not define, from headers it
-# provides (internal/testpty's posix_openpt).
+# Nor if it uses a C name that neither cmd/cc's headers nor the
+# package's define.
 cp p.go.undefined p.go
 go list -f '{{range .GoFiles}}{{.}} {{end}}'
 stdout '^nocgo.go $'
@@ -50,7 +50,7 @@ package main
 // #include "add.h"
 import "C"
 
-func main() { show(int(C.add(2, int(C.posix_openpt(0))))) }
+func main() { show(int(C.add(2, int(C.not_in_libc(0))))) }
 -- cgotag.go --
 //go:build cgo
 

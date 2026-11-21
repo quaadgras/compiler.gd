@@ -33,7 +33,8 @@ run, as they would not have.
 
 In every cycle a program forces with `runtime.GC`, and in one automatic
 cycle in four (`collectGoroutinesEvery`). A cycle the leak profile asked
-for reports and does not collect.
+for reports and does not collect. What it reported is never collected, by
+any later cycle: the profiles that follow show the same goroutines.
 
 ## What is never collected
 

@@ -103,7 +103,7 @@ func (g *gen) globalName(s *symbol) string {
 	if s.kind == symVar && !s.t.isComplete() {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
-	if s.kind == symVar && s.storage == sExtern && !s.defined {
+	if _, lib := libcVars[s.name]; s.kind == symVar && s.storage == sExtern && !s.defined && !lib {
 		g.errorf(s.p, "undefined reference to %q", s.name)
 	}
 	return n
@@ -1119,7 +1119,7 @@ func (g *gen) funcName(s *symbol, at pos) string {
 	}
 	if !def.defined {
 		if n, ok := libc[s.name]; ok {
-			return "c23." + n
+			return g.libcFunc(n)
 		}
 		if s.weak || def.weak {
 			return ""
@@ -1188,7 +1188,7 @@ func (g *gen) callCode(c *call) string {
 				continue // an extra argument: ignored
 			}
 		}
-		if direct && strings.HasPrefix(fn, "c23.") && i < len(callee.params) {
+		if direct && isLibcGo(fn) && i < len(callee.params) {
 			v = libcConv(v, callee.params[i], true)
 		}
 		if !direct && !isSimple(v) && !isPure(v) {
@@ -1204,7 +1204,7 @@ func (g *gen) callCode(c *call) string {
 		args = append(args, v)
 	}
 	code := fmt.Sprintf("%s(%s)", fn, strings.Join(args, ", "))
-	if direct && strings.HasPrefix(fn, "c23.") {
+	if direct && isLibcGo(fn) {
 		code = libcConv(code, callee.ret, false)
 	}
 	if callee != c.ft && !compatible(callee.ret.unqual(), c.ft.ret.unqual()) {
@@ -1400,7 +1400,11 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "setjmp":
 		k := e.args[1].(*intConst).v
 		t := g.tmp("int32")
-		g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+		if len(e.args) == 3 {
+			g.p("%s = c23.Sigsetjmp(%s, jf, %d, %s)", t, g.rv(e.args[0]), k, g.rv(e.args[2]))
+		} else {
+			g.p("%s = c23.Setjmp(%s, jf, %d)", t, g.rv(e.args[0]), k)
+		}
 		// longjmp comes back here.
 		g.p("J%d:", k)
 		g.p("if jsite == %d {", k)

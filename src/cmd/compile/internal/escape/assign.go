@@ -55,10 +55,19 @@ func (e *escape) addr(n ir.Node) hole {
 		k = e.storeThrough(n.X)
 	case ir.OINDEXMAP:
 		n := n.(*ir.IndexExpr)
-		e.discard(n.X)
-		// Keys used in map assignments must escape.
-		// See "Hashing Pointers" doc in internal/runtime/maps/map.go.
-		e.assignHeap(n.Index, "key of map put", n)
+		if !e.mapsOn() {
+			e.discard(n.X)
+			// Keys used in map assignments must escape.
+			// See "Hashing Pointers" doc in internal/runtime/maps/map.go.
+			e.assignHeap(n.Index, "key of map put", n)
+			break
+		}
+		// The key and the value are stored in what the map
+		// allocates, which is where the map is: the heap, for
+		// escaping, and local if the map is (shares.go).
+		e.mutate(n.X)
+		k = e.storeThrough(n.X)
+		e.expr(k.note(e.gd, n, "key of map put"), n.Index)
 	}
 
 	return k

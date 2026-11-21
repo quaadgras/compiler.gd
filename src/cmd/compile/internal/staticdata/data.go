@@ -312,6 +312,14 @@ func WriteFuncSyms(gd *base.Invocation) {
 		// this function value ((*W).M)(w, &x) has neither: its
 		// carrier is this symbol and the receiver is argument 0.
 		objw.EscMask(gd, sf, int(types.FuncMaskOffset), ir.EscMaskOf(nam.Type().RecvParams()))
+		// What the linker is to know of a call of this value.
+		if key, _ := ir.ShareKeyFunc(nam.Type()); key != "" {
+			var shares []ir.ParamShare
+			if nam.Func != nil {
+				shares = nam.Func.ParamShares
+			}
+			addShareRecord(gd, sf, "F."+target.Name, key, nam.Type().RecvParams(), shares)
+		}
 		objw.Global(gd, sf, int32(types.ClosureVarsOffset), obj.DUPOK|obj.RODATA)
 	}
 }
@@ -452,4 +460,84 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 	default:
 		gd.Fatalf("InitConst unhandled OLITERAL %v", c)
 	}
+}
+
+// addShareRecord gives the symbol from, which the program has if the
+// function may be called as one of the class key, the record of the
+// function for the linker (ir/sharelink.go): name is the kind of class
+// and the function's name.
+func addShareRecord(gd *base.Invocation, from *obj.LSym, name, key string, params []*types.Field, shares []ir.ParamShare) {
+	addShareRecordData(gd, from, name, func() []byte { return ir.ShareRecord(key, params, shares) })
+}
+
+func addShareRecordData(gd *base.Invocation, from *obj.LSym, name string, record func() []byte) {
+	if !ir.LocalSpans(gd) {
+		return
+	}
+	rec := gd.Ctxt.LookupInit(ir.ShareRecPrefix+name, func(s *obj.LSym) {
+		data := record()
+		s.WriteBytes(gd.Ctxt, 0, data)
+		gd.Ctxt.Globl(s, int64(len(data)), obj.DUPOK|obj.RODATA|obj.NOPTR)
+	})
+	from.AddRel(gd.Ctxt, obj.Reloc{Type: objabi.R_KEEP, Sym: rec})
+}
+
+// ShareRecords gives the function fn, which is compiled, its records
+// for the linker: as a method, which an interface may call, and as a
+// function that only exists as a value (a closure, a method value).
+// A function with a name has the record of its value where that is
+// written (WriteFuncSyms).
+func ShareRecords(gd *base.Invocation, fn *ir.Func) {
+	if fn.LSym == nil || fn.Sym() == nil {
+		return
+	}
+	t := fn.Type()
+	switch {
+	case t.Recv() != nil:
+		name := fn.Sym().Name
+		name = name[strings.LastIndex(name, ".")+1:]
+		if key, _ := ir.ShareKeyMethod(name, t); key != "" {
+			shares := fn.ParamShares
+			if len(shares) != 0 {
+				shares = shares[1:]
+			}
+			addShareRecord(gd, fn.LSym, "M."+fn.LSym.Name, key, t.Params(), shares)
+			// And of what it does with its receiver.
+			rkey, _ := ir.ShareKeyRecv(name, t)
+			var ps *ir.ParamShare
+			if len(fn.ParamShares) != 0 {
+				ps = &fn.ParamShares[0]
+			}
+			addShareRecordData(gd, fn.LSym, "R."+fn.LSym.Name, func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), ps) })
+		} else {
+			gd.FatalfAt(fn.Pos(), "no class of methods for %v", fn)
+		}
+	case fn.OClosure != nil || fn.Needctxt():
+		if key, _ := ir.ShareKeyFunc(t); key != "" {
+			addShareRecord(gd, fn.LSym, "F."+fn.LSym.Name, key, t.Params(), fn.ParamShares)
+		}
+	}
+}
+
+// ShareRecordUnknown gives the symbol from the record of the method fn,
+// which is not compiled here (assembly): it may do anything.
+func ShareRecordUnknown(gd *base.Invocation, from *obj.LSym, fn *ir.Func) {
+	t := fn.Type()
+	if t.Recv() == nil || fn.Sym() == nil {
+		return
+	}
+	name := fn.Sym().Name
+	name = name[strings.LastIndex(name, ".")+1:]
+	key, _ := ir.ShareKeyMethod(name, t)
+	if key == "" {
+		gd.FatalfAt(fn.Pos(), "no class of methods for %v", fn)
+	}
+	// (With no notes, the parameters are kept and shared.)
+	params := make([]*types.Field, len(t.Params()))
+	for i, f := range t.Params() {
+		params[i] = types.NewField(f.Pos, f.Sym, f.Type)
+	}
+	addShareRecord(gd, from, "M."+ir.LinkFuncName(fn), key, params, nil)
+	rkey, _ := ir.ShareKeyRecv(name, t)
+	addShareRecordData(gd, from, "R."+ir.LinkFuncName(fn), func() []byte { return ir.ShareRecvRecord(rkey, t.Recv(), nil) })
 }

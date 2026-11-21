@@ -53,6 +53,10 @@ type table struct {
 	// but this table has not yet been split.
 	localDepth uint8
 
+	// local says that the map is a local object, and so are the table
+	// and what it allocates (Map.local).
+	local bool
+
 	// Index of this table in the Map directory. This is the index of the
 	// _first_ location in the directory. The table may occur in multiple
 	// sequential indices.
@@ -73,15 +77,15 @@ type table struct {
 	groups groupsReference
 }
 
-func newTable(typ *abi.MapType, capacity uint64, index int, localDepth uint8) *table {
+func newTable(typ *abi.MapType, capacity uint64, index int, localDepth uint8, local bool) *table {
 	if capacity < abi.MapGroupSlots {
 		capacity = abi.MapGroupSlots
 	}
 
-	t := &table{
-		index:      index,
-		localDepth: localDepth,
-	}
+	t := (*table)(newobjectIn(abi.TypeFor[table](), local))
+	t.index = index
+	t.localDepth = localDepth
+	t.local = local
 	shareAlloc(unsafe.Pointer(t))
 
 	if capacity > maxTableCapacity {
@@ -104,7 +108,7 @@ func newTable(typ *abi.MapType, capacity uint64, index int, localDepth uint8) *t
 // capacity.
 func (t *table) reset(typ *abi.MapType, capacity uint16) {
 	groupCount := uint64(capacity) / abi.MapGroupSlots
-	t.groups = newGroups(typ, groupCount)
+	t.groups = newGroups(typ, groupCount, t.local)
 	t.capacity = capacity
 	t.growthLeft = t.maxGrowthLeft()
 
@@ -340,7 +344,7 @@ func (t *table) PutSlot(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Point
 		if t.growthLeft > 0 {
 			slotKey := g.key(typ, i)
 			if typ.IndirectKey() {
-				kmem := newobject(typ.Key)
+				kmem := newobjectIn(typ.Key, t.local)
 				*(*unsafe.Pointer)(slotKey) = kmem
 				slotKey = kmem
 			}
@@ -348,7 +352,7 @@ func (t *table) PutSlot(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Point
 
 			slotElem := g.elem(typ, i)
 			if typ.IndirectElem() {
-				emem := newobject(typ.Elem)
+				emem := newobjectIn(typ.Elem, t.local)
 				*(*unsafe.Pointer)(slotElem) = emem
 				slotElem = emem
 			}
@@ -456,7 +460,7 @@ func (t *table) uncheckedPutSlotForAssign(typ *abi.MapType, hash uintptr, key un
 
 			slotKey := g.key(typ, i)
 			if typ.IndirectKey() {
-				kmem := newobject(typ.Key)
+				kmem := newobjectIn(typ.Key, t.local)
 				*(*unsafe.Pointer)(slotKey) = kmem
 				slotKey = kmem
 			}
@@ -464,7 +468,7 @@ func (t *table) uncheckedPutSlotForAssign(typ *abi.MapType, hash uintptr, key un
 
 			slotElem := g.elem(typ, i)
 			if typ.IndirectElem() {
-				emem := newobject(typ.Elem)
+				emem := newobjectIn(typ.Elem, t.local)
 				*(*unsafe.Pointer)(slotElem) = emem
 				slotElem = emem
 			}
@@ -1267,8 +1271,8 @@ func (t *table) split(typ *abi.MapType, m *Map) {
 	localDepth++
 
 	// TODO: is this the best capacity?
-	left := newTable(typ, maxTableCapacity, -1, localDepth)
-	right := newTable(typ, maxTableCapacity, -1, localDepth)
+	left := newTable(typ, maxTableCapacity, -1, localDepth, t.local)
+	right := newTable(typ, maxTableCapacity, -1, localDepth, t.local)
 
 	// Split in half at the localDepth bit from the top.
 	mask := localDepthMask(localDepth)
@@ -1311,7 +1315,7 @@ func (t *table) split(typ *abi.MapType, m *Map) {
 // that no insertion here will Put an already-present value), and discard the
 // old table.
 func (t *table) grow(typ *abi.MapType, m *Map, newCapacity uint16) {
-	newTable := newTable(typ, uint64(newCapacity), t.index, t.localDepth)
+	newTable := newTable(typ, uint64(newCapacity), t.index, t.localDepth, t.local)
 
 	if t.capacity > 0 {
 		for i := uint64(0); i <= t.groups.lengthMask; i++ {
@@ -1382,14 +1386,15 @@ func (t *table) clone(typ *abi.MapType) *table {
 	t2 := new(table)
 	*t2 = *t
 	t = t2
+	t.local = false // as the clone's header is
 
 	// We need to just deep copy the groups.data field.
 	oldGroups := t.groups
-	newGroups := newGroups(typ, oldGroups.lengthMask+1)
+	newGroups := newGroups(typ, oldGroups.lengthMask+1, false)
 	for i := uint64(0); i <= oldGroups.lengthMask; i++ {
 		oldGroup := oldGroups.group(typ, i)
 		newGroup := newGroups.group(typ, i)
-		cloneGroup(typ, newGroup, oldGroup)
+		cloneGroup(typ, newGroup, oldGroup, false)
 	}
 	t.groups = newGroups
 
