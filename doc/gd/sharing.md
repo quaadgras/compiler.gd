@@ -825,6 +825,94 @@ masks of all the functions of the class, ORed
   and what `fmt` prints is shared (the printer keeps it while it
   prints, and calls its methods).
 
+### What a function does with its arguments' structures (design, 2026-11-21)
+
+Decided with the user on 2026-11-21, to get past stores that go deeper
+than a parameter (`ident.Obj.Decl = decl`): "Functions can include a
+short function that uses the facts passed in about their arguments to
+return/record relationships structurally", as bits (nothing is recorded
+when the program runs; every answer is derived where an object is
+allocated), with one fact for each pointer argument: *every object that
+is reached from it is local*.
+
+The short function of a function is, so far, data that the compiler and
+the linker evaluate, since a function of a few bits is a table: what
+`ir.ParamShare` says of each parameter (`Share`, `Via`, `Links`, and now
+`Deep`), with the bits of the call as its input. It becomes code only if
+a fact has to be computed from what the program holds when it runs.
+
+**The fact that a caller passes.** Bit k+1 of a call's bits said that
+nothing that is stored *through argument k* is shared. For a parameter
+whose bit the function reads for a deeper store (`ir.Func.DeepBits`) it
+says more: every object reached from argument k is local, so that a
+pointer may be stored in any of them. A caller that cannot say so
+passes 0.
+
+**In the function that is called.**
+- A variable is *derived* from parameters if all that it is ever
+  assigned is a path from a parameter that is never assigned, or from
+  another derived variable (`p.f`, `*p`, `p[i]`, the value of a range
+  over one, the variable of a type switch on one): what it points to is
+  reached from those parameters' arguments.
+- A store through a path that starts at a derived variable, or through
+  a path deeper than a parameter itself, is a store in an object that
+  is reached from those parameters. Its dynamic root has their mask
+  (`dynRoot.deep`).
+- A parameter that flows to such a root is stored in what those
+  parameters reach: `ParamShare.Deep` has their bits (it was `Share`).
+- An object that the function allocates and that flows to such a root
+  is local if the root's container is (the page of the pointer, where
+  that can be read in the statement, as before), or else if the bits of
+  those parameters are set.
+
+**In the caller, for a direct call.** For each argument j that some
+parameter is stored in the structure of, or whose bit the function reads
+so:
+- if the argument is a parameter of the caller, or derived from some,
+  the caller's own parameter is stored in what those reach (a root with
+  no path and their mask), and the bit that it passes is its own bits
+  of those, which it then reads so too;
+- otherwise the argument has a *group*: a location that the argument
+  flows to, so that a walk from it finds everything that the argument
+  reaches (as the walks that find what an object leads to do). The
+  argument i that is stored in it flows to the group (it is one of what
+  the argument reaches from then on) and to the group's *condition*, a
+  dynamic root whose tag is the bit that the caller passes for j: all
+  that the group reaches is local. The walk from the condition reaches
+  everything that argument i reaches, so each of those objects is local
+  only if the condition holds.
+
+**The condition of a group** is known when the graph is solved: of
+every location that the walk from the group finds,
+- an allocation of the function: it must not be shared for good, and
+  the dynamic roots that it flows to are conditions of the group (the
+  group's own condition is not one); if it is returned, the function's
+  own bit 0 is;
+- a parameter of the function, never assigned: its own bit, read as
+  above;
+- the result of a call: the function called must return only objects
+  that are local exactly when it is told that its results stay local
+  (`ir.Func.ResultExact`), and where the result goes is a condition as
+  for an allocation;
+- a variable that something is loaded through and that is not tracked,
+  or the *unknown source*: not known, the condition is false. The
+  unknown source is a location that every pointer which the graph did
+  not follow flows from: a load of a global, the result of a call that
+  is not recorded, a receive.
+A dynamic root that cannot be read at the call (the page of a pointer
+in another statement) makes it false.
+
+**Through a call of a function that is only known when the program
+runs** (not started): the class's word has the relations of its
+arguments too (argument i is stored in what argument j, or the
+receiver, reaches), and such a call passes its bits, in `g.localBits`
+with the address of the function that is called, so that the function
+allocates as its caller says.
+
+Built in this order: the function's side and `ParamShare.Deep`, with a
+caller that takes `Deep` for shared; then groups for direct calls; then
+the words and the bits of dynamic calls. `-d=nolocaldeep` turns it off.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:
