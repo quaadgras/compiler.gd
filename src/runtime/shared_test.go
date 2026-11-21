@@ -1943,9 +1943,11 @@ func TestSharedTyped(t *testing.T) {
 		sum += h.use() + len(h.buf)
 	})
 	t.Logf("%d local objects beside a shared file", n)
+	if n < 1 {
+		t.Errorf("%d local objects, want the buffer", n)
+	}
 	if n > 2 {
-		// (The buffer is local only with -d=localtyped=1, which
-		// is not sound yet; the holder need not be in the heap.)
+		// (The holder need not be in the heap.)
 		t.Errorf("%d local objects: the file is one, and its mutex is used", n)
 	}
 	// A file that is stored in the holder later is shared as well:

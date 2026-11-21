@@ -775,6 +775,17 @@ func (b *batch) neverAssigned(name *ir.Name) bool {
 	return !b.reassignOracle(name.Curfn).Reassigned(name)
 }
 
+// capturedAssigned reports whether the variable at l is captured by a
+// closure and may be assigned after it is declared: only then is it
+// another pointer where a closure reads it (neverAssigned).
+func (b *batch) capturedAssigned(l *location) bool {
+	if !l.captured {
+		return false
+	}
+	name, ok := l.n.(*ir.Name)
+	return !ok || !b.neverAssigned(name)
+}
+
 // dynOf returns the dynamic roots that what flows to root flows to.
 func dynOf(root *location) (self *location, more []*location) {
 	if root.dynRoot != nil && !root.dynRoot.group {
@@ -957,7 +968,7 @@ func (b *batch) localTag(loc *location, pos src.XPos, ret, params bool) ir.Node 
 			continue
 		}
 		v := d.loc
-		if v == nil || v.captured || v.addrtaken || r.curfn != loc.curfn {
+		if v == nil || b.capturedAssigned(v) || v.addrtaken || r.curfn != loc.curfn {
 			if d.call != nil && linked() {
 				continue
 			}

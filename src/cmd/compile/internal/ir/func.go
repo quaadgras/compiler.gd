@@ -247,6 +247,11 @@ type Func struct {
 	DeepBits    uint16
 	DirtyInto   uint16
 	ResultExact bool
+	// ShareOpaque says that the function, or one that it calls, does
+	// with pointers what their types do not say (unsafe.Pointer): of
+	// what it shares, a caller cannot tell by type what is not shared
+	// (escape's typed.go).
+	ShareOpaque bool
 	// ResultDeep has the parameters in whose structures the function
 	// stores what it returns, or what that reaches: the results are
 	// local only if the bits of those parameters are set too, and
@@ -913,6 +918,13 @@ type ParamShare struct {
 	// (the receiver first) points to: it is then where that is.
 	Via       uint16
 	ViaDerefs uint8
+	// ViaDirect says that the parameter's own value is what is
+	// stored, as a field or an element of the object that the other
+	// parameter points to, and nothing else of it anywhere that the
+	// store says (escape's typed.go). ViaLoose is for the function's
+	// own batch: some store is not so.
+	ViaDirect bool
+	ViaLoose  bool
 	// Results has bit i set if the parameter flows to the function's
 	// i'th result, when the escape tag may not say it.
 	Results uint8

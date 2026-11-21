@@ -611,7 +611,7 @@ func setMinDerefs(p *uint8, derefs int) {
 // noteParamRoot records that the parameter l's shares, dereferenced
 // derefs times, is stored in the dynamic root r: through a parameter,
 // or where another goroutine may reach it.
-func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int) {
+func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, derefs int, direct bool) {
 	if d := r.dynRoot; d != nil && (d.cond != nil || d.mixKey != "") {
 		// What the group needs is known when the graph is solved
 		// (groupParam, mixParam).
@@ -644,10 +644,16 @@ func (b *batch) noteParamRoot(fn *ir.Func, ps *ir.ParamShare, r *location, deref
 		return
 	}
 	if d := r.dynRoot; d != nil && r.curfn == fn {
-		if v := d.loc; d.plain && v != nil && v.param && !v.reassigned && !v.captured && !v.addrtaken {
+		if v := d.loc; d.plain && v != nil && v.param && !v.reassigned && !b.capturedAssigned(v) && !v.addrtaken {
 			if k := paramBit(fn, d.name); k != 0 {
 				ps.Via |= 1 << (k - 1)
 				setMinDerefs(&ps.ViaDerefs, derefs)
+				if !direct || derefs != 0 {
+					if b.gd.Flag.LowerM >= 4 && !ps.ViaLoose {
+						fmt.Printf("%s: the parameter %s of %v is stored through parameter %d, and not only by itself: direct %v, dereferenced %d times, from the walk of %s (a root %v)\n", b.gd.FmtPos(fn.Pos()), b.noteParam, fn, k-1, direct, derefs, b.explainLoc(b.walkRoot), b.walkRoot != nil && b.walkRoot.isDynRoot)
+					}
+					ps.ViaLoose = true
+				}
 				return
 			}
 		}
@@ -697,13 +703,13 @@ func (b *batch) noteParamHeap(fn *ir.Func, ps *ir.ParamShare, root *location, de
 		ps.Results = 0xff
 	}
 	for _, r := range root.dyn {
-		b.noteParamRoot(fn, ps, r, derefs)
+		b.noteParamRoot(fn, ps, r, derefs, false)
 	}
 }
 
 // noteParamShare records that the parameter l, dereferenced derefs
 // times, flows to root.
-func (b *batch) noteParamShare(l, root *location, derefs int, only *types.Type, blocked bool) {
+func (b *batch) noteParamShare(l, root *location, derefs int, only *types.Type, blocked, direct bool) {
 	if !b.shareTagsOn() {
 		return
 	}
@@ -713,7 +719,7 @@ func (b *batch) noteParamShare(l, root *location, derefs int, only *types.Type, 
 	}
 	switch {
 	case root.isDynRoot:
-		b.noteParamRoot(l.curfn, ps, root, derefs)
+		b.noteParamRoot(l.curfn, ps, root, derefs, direct)
 	case root.hasAttr(attrShares) && !blocked:
 		if b.gd.Flag.LowerM >= 4 && root != &b.shareLoc && root != &b.convShareLoc && root != &b.heapLoc && root != &b.checkLoc {
 			pos := l.curfn.Pos()
@@ -820,22 +826,29 @@ func (b *batch) paramShares(fn *ir.Func) {
 			})
 		}
 	}
-	// What is shared of what a parameter leads to, if it is of one
-	// type that the parameter's type says.
+	// What is shared of a parameter, or of what it leads to, if a
+	// caller can go by its type (typed.go).
+	opaque := b.opaqueBatch()
+	fn.ShareOpaque = opaque
 	for i, f := range fn.Type().RecvParams() {
 		if i >= len(ps) {
 			break
 		}
 		p := &ps[i]
-		if b.typedOn() && p.Share == 2 && !p.ShareAny && p.ShareType != nil {
+		p.ViaDirect = b.typedOn() && p.Via != 0 && !p.ViaLoose
+		switch {
+		case !b.typedOn() || opaque:
+		case p.Share == 1:
+			p.ShareTyped = true
+		case p.Share == 2 && !p.ShareAny && p.ShareType != nil:
 			if path, ok := shareFieldOf(f.Type, p.ShareType); ok {
 				p.ShareTyped, p.ShareField = true, path
 			}
 		}
-		if b.gd.Flag.LowerM >= 4 && p.Share > 1 {
-			fmt.Printf("%s: parameter %d of %v shares what it leads to: of type %v only %v (any %v)\n", b.gd.FmtPos(fn.Pos()), i, fn, p.ShareType, p.ShareTyped, p.ShareAny)
+		if b.gd.Flag.LowerM >= 4 && (p.Share > 1 || p.Via != 0) {
+			fmt.Printf("%s: parameter %d of %v shares what it leads to (%d): of type %v only %v (any %v, opaque %v); stored through others by itself %v\n", b.gd.FmtPos(fn.Pos()), i, fn, p.Share, p.ShareType, p.ShareTyped, p.ShareAny, opaque, p.ViaDirect)
 		}
-		p.ShareType, p.ShareAny = nil, false
+		p.ShareType, p.ShareAny, p.ViaLoose = nil, false, false
 	}
 	if fn.Pragma&ir.LocalArgs != 0 {
 		// The standard library says that the function shares
@@ -900,7 +913,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			tagKs = append(tagKs, e.ownHeapHole().shift(e.gd, int(ps.Heap)-1))
 		}
 		if ps.Share != 0 {
-			tagKs = append(tagKs, e.shareHoleFor(param, ps, false))
+			tagKs = append(tagKs, e.shareHoleFor(fn, param, ps, false))
 			if e.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: %v shares its argument %v, dereferenced %d times\n", e.gd.FmtPos(e.gd.Pos), fn, param.Sym, ps.Share-1)
 			}
@@ -932,7 +945,9 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			// A store through the argument: the heap, unless
 			// the argument is the address of a variable, which
 			// then holds what is stored for as long as it lives.
-			tagKs = append(tagKs, e.storeThroughArg(e.callArgs[k]).shift(e.gd, d))
+			vk := e.storeThroughArg(e.callArgs[k]).shift(e.gd, d)
+			vk.loose = !ps.ViaDirect || d != 0
+			tagKs = append(tagKs, vk)
 		}
 	}
 	for i := range ks {
@@ -940,6 +955,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 		if (all || i < 8 && ps.Results&(1<<i) != 0) && (i >= numEscResults || esc.Result(i) < 0) {
 			k := ks[i].shift(e.gd, x)
 			k.recvRes = checked
+			k.loose = true
 			tagKs = append(tagKs, k)
 		}
 	}
@@ -1037,7 +1053,7 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 	// to an interface is, and no holder for a hand-over.)
 	var hs []hole
 	if ps.Share != 0 {
-		hs = append(hs, e.shareHoleFor(param, ps, true))
+		hs = append(hs, e.shareHoleFor(fn, param, ps, true))
 	}
 	if ps.Deep != 0 {
 		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)

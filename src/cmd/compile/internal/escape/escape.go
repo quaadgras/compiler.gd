@@ -134,6 +134,9 @@ type batch struct {
 	typedShares    map[any]*location // typed.go
 	typedShareList []*location
 	unsafeFns      map[*ir.Func]bool
+	opaqueFns      map[*ir.Func]bool
+	opaque         uint8
+	walkRoot       *location // of the walk that is going on, for messages
 	leads          map[any]bool
 	unknownSrc     location // where a pointer comes from that the graph does not follow: a global, the result of a call that is not recorded (groups.go)
 	dirt           map[*ir.Func]*location

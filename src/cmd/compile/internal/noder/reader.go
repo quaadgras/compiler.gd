@@ -1296,6 +1296,7 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 				}
 				ps.Via = uint16(r.Len())
 				ps.ViaDerefs = uint8(r.Len())
+				ps.ViaDirect = r.Bool()
 				ps.Results = uint8(r.Len())
 				ps.Heap = uint8(r.Len())
 				ps.Deep = uint16(r.Len())
@@ -1337,6 +1338,7 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 		fn.DirtyInto = uint16(r.Len())
 		fn.ResultExact = r.Bool()
 		fn.ResultDeep = uint16(r.Len())
+		fn.ShareOpaque = r.Bool()
 		fn.StoresInto = uint16(r.Len())
 
 		if r.Bool() {

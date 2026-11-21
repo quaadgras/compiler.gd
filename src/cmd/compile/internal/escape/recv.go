@@ -70,6 +70,7 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 		}
 		k = k.note(e.gd, call, "receiver in result")
 		k.recvRes = true
+		k.loose = true
 		hs = append(hs, k)
 	}
 	return e.teeHole(hs...)

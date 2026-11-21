@@ -18,41 +18,66 @@ import (
 // to shared ones, and what else it points to is not shared by that.
 //
 // So a value that is shared because a function says so of its
-// parameter flows to a share root of the parameter's type, and in the
-// walk from that root a location whose value cannot be of that type,
-// nor hold one, is not shared, and the walk does not go on through it
-// for sharing (filterBlocked). Once the walk has an object whose
-// address is the shared value, all that is in the object is shared,
-// whatever its type (filterOff): a shared object points to no local
-// one. A location that is shared only by such a walk is shared for
-// that type only (location.shareOnly), which the walk from it goes by
-// in turn. A function says the same of its parameters
-// (ir.ParamShare.ShareTyped).
+// parameter flows to a share root of the parameter's type
+// (shareHoleOf), and the walk from that root goes by the types of the
+// locations that it comes to with nothing dereferenced (typedAt):
 //
-// The types are those of the variables and the expressions, which is
-// no ground in a function that converts pointers through
-// unsafe.Pointer: its locations have no type for this.
+//   - One whose value may be the shared pointer, or a struct that holds
+//     it, is shared for that type (location.shareOnly), and the walk
+//     from it goes by the type in turn.
+//   - One whose value points to a larger object that the shared one may
+//     be a part of: the walk goes on for the larger type.
+//   - An object whose address is the shared value is shared with all
+//     that is in it, whatever its type: a shared object points to no
+//     local one. So is what flows to an interface or an
+//     unsafe.Pointer, which say nothing, and to a location in a
+//     function that makes pointers of unsafe.Pointer (usesUnsafe).
+//   - One that can be neither, but may lead to such a value, leads to
+//     what is shared and is not shared itself (filterDeep); the walk
+//     goes on to mark what else may.
+//   - One that cannot lead to such a value is not shared, and the walk
+//     does not go on through it (filterBlocked).
 //
-// NOT SOUND AS IT IS, and off unless -d=localtyped=1. A flow without
-// dereference is taken to be of the same value, so that a location of
-// another type is not the shared one. But the graph has such flows for
-// what is stored in the object that a value points to, where it does
-// not see the object: a parameter that a function stores in what it
-// returns flows to the result. The body of a request, which
-// http.NewRequest stores in the request, was local in a request that
-// was shared (net/http's tests, with GODEBUG=sharestats=2). The walk
-// has to know whether it is at the shared pointer, where a value of
-// another type that flows in is stored in the object and shared with
-// it, or among what a holder has, where one is another value.
+// That is sound only where a flow without dereference is of the same
+// value, or of one that the destination holds beside others. The graph
+// has such flows for what a function that is called did with an
+// argument, where it does not see the object: a parameter that the
+// function stores in what it returns flows to the result, and so
+// does one that it stores, however deep, in what another parameter
+// points to. The body that http.NewRequest stores in the request was
+// local in a request that was shared, before this was told apart. Such
+// a flow is loose (hole.loose), and what comes over one is shared with
+// everything behind it, unless the function says that it stores the
+// parameter's own value as a field or an element of the object that
+// the other parameter points to (ir.ParamShare.ViaDirect): the walk
+// from the place of such a store finds whether a parameter comes to it
+// by itself, through variables that only pass a value on (carrier).
+//
+// A function says of its parameters what a caller can go by
+// (ir.ParamShare.ShareTyped): of one that it shares itself, that the
+// value shared is the argument's, of its type; of one that is shared
+// one dereference down, which field of the parameter's struct the
+// shared value is in (shareFieldOf: the export data cannot name a
+// type), if all the fields that could hold it have one type. Not if
+// the function, or one that it calls and shares by, makes pointers of
+// unsafe.Pointer (ir.Func.ShareOpaque): what such a function shares,
+// types do not say.
+//
+// An allocation that is only shared for a type, and not by its
+// address, holds values of that type or leads to them, and may be
+// local itself (markLocal).
+//
+// Off with -d=nolocaltyped=1.
 
 const (
 	filterOff     int8 = iota // everything is shared
 	filterOn                  // only what may be of the walk's type
+	filterDeep                // nothing: it may lead to what is shared
 	filterBlocked             // nothing: behind a value of another type
 )
 
 func (b *batch) typedOn() bool {
-	return b.gd.Debug.LocalTyped != 0 && b.shareTagsOn()
+	return b.gd.Debug.NoLocalTyped == 0 && b.shareTagsOn()
 }
 
 // shareHoleOf returns the hole for a value of type t that another
@@ -112,26 +137,138 @@ func (b *batch) isShareRoot(l *location) (yes, conv bool) {
 	return false, false
 }
 
-// typedAs reports, of the location l in a walk that shares the values
-// of type t, whether l's value (or its address, with addr) may be such
-// a value, and whether it may lead to one.
-func (b *batch) typedAs(l *location, addr bool, t *types.Type) (is, leads bool) {
+// valueType returns the type of the value of the location l, or of its
+// address with addr: for an expression that allocates, the value is
+// what the object holds and the address is the expression's. It is nil
+// where nothing is known.
+func (b *batch) valueType(l *location, addr bool) *types.Type {
 	if l.n == nil || l.curfn == nil || b.unsafeFns[l.curfn] {
-		return true, true
+		return nil
 	}
-	lt := l.n.Type()
-	if lt == nil {
-		return true, true
+	t := l.n.Type()
+	if t == nil {
+		return nil
 	}
-	if addr && l.n.Op() == ir.ONAME {
-		// The address of a variable. (An expression that
-		// allocates has the type of the pointer.)
-		lt = types.NewPtr(lt)
+	if l.n.Op() == ir.ONAME {
+		if addr {
+			return types.NewPtr(t)
+		}
+		return t
 	}
-	if mayBe(lt, t) {
-		return true, true
+	if addr {
+		return t
 	}
-	return false, b.leadsTo(lt, t)
+	switch l.n.Op() {
+	case ir.OPTRLIT, ir.ONEW, ir.OMAKESLICE, ir.OSLICELIT, ir.OAPPEND:
+		if t.IsPtr() || t.IsSlice() {
+			return t.Elem()
+		}
+		return nil
+	case ir.OMAKEMAP, ir.OMAPLIT, ir.OCLOSURE, ir.OMETHVALUE, ir.OCONVIFACE, ir.OMAKECHAN:
+		return nil
+	}
+	return t
+}
+
+// typedAt returns, for the location l that a walk which shares the
+// values of type t has reached with nothing dereferenced, what the walk
+// shares of l (at) and of what flows to it (eff):
+//
+//   - filterOn, filterOn: l's value may be the shared one, or l holds
+//     it beside others;
+//   - filterOn, filterOff: l's value may be the shared one or be in
+//     what it leads to, and what flows to l is in the shared object, or
+//     nothing says what it is (an interface, a larger object that the
+//     shared one may be a part of);
+//   - filterOn, filterOn and a type: l's value points to a larger
+//     object that the shared one may be a part of, and the walk goes
+//     on for values of that type;
+//   - filterDeep: l is not shared, and may lead to what is;
+//   - filterBlocked: neither.
+func (b *batch) typedAt(l *location, addr bool, t *types.Type) (at, eff int8, wider *types.Type) {
+	v := b.valueType(l, addr)
+	if v == nil {
+		if addr {
+			// An object that what is shared points to.
+			return filterOn, filterOff, nil
+		}
+		return filterOn, filterOn, nil
+	}
+	if v.HasShape() || t.HasShape() {
+		return filterOn, filterOff, nil
+	}
+	switch v.Kind() {
+	case types.TINTER, types.TUNSAFEPTR, types.TUINTPTR:
+		return filterOn, filterOff, nil
+	case types.TSTRUCT, types.TARRAY:
+		switch {
+		case b.leadsTo(t, v):
+			return filterOn, filterOff, nil
+		case mayBe(v, t):
+			return filterOn, filterOn, nil
+		case b.leadsTo(v, t):
+			return filterDeep, filterDeep, nil
+		}
+		return filterBlocked, filterBlocked, nil
+	}
+	if !v.HasPointers() {
+		return filterBlocked, filterBlocked, nil
+	}
+	pointer := func(x *types.Type) bool { return x.Kind() == types.TPTR || x.Kind() == types.TSLICE }
+	if pointer(v) && pointer(t) {
+		x, y := v.Elem(), t.Elem()
+		switch {
+		case sameUnder(x, y) || holds(y, x):
+			// The shared pointer, or one into its object.
+			if addr {
+				return filterOn, filterOff, nil
+			}
+			return filterOn, filterOn, nil
+		case holds(x, y):
+			// A larger object that the shared one is a part of: it
+			// is the object that is shared, with all that it has.
+			if addr || !filterType(v) {
+				return filterOn, filterOff, nil
+			}
+			return filterOn, filterOn, v
+		}
+	} else if !pointer(v) && !pointer(t) && sameUnder(v, t) {
+		if addr {
+			return filterOn, filterOff, nil
+		}
+		return filterOn, filterOn, nil
+	}
+	switch {
+	case b.leadsTo(t, v):
+		// It may be in what the shared value leads to.
+		return filterOn, filterOff, nil
+	case b.leadsTo(v, t):
+		return filterDeep, filterDeep, nil
+	}
+	return filterBlocked, filterBlocked, nil
+}
+
+// typedLeads reports whether the location l, which is not what is
+// shared, may lead to a value of type t.
+func (b *batch) typedLeads(l *location, addr bool, t *types.Type) bool {
+	v := b.valueType(l, addr)
+	if v == nil {
+		return true
+	}
+	return b.leadsTo(v, t)
+}
+
+// carrier reports whether the location l only passes its value on: a
+// variable that is no struct or array, or a temporary of the graph.
+func carrier(l *location) bool {
+	if l.n == nil {
+		return l.transient && l.callRes == nil && !l.isDynRoot && len(l.owners) == 0
+	}
+	if l.n.Op() != ir.ONAME {
+		return false
+	}
+	t := l.n.Type()
+	return t != nil && !t.IsStruct() && !t.IsArray()
 }
 
 // leadsTo reports whether a value of type a may lead to one of type t:
@@ -186,6 +323,9 @@ func mayBe(a, t *types.Type) bool {
 	if a == nil || t == nil || a.HasShape() || t.HasShape() {
 		return true
 	}
+	if sameUnder(a, t) {
+		return true
+	}
 	if !a.HasPointers() {
 		return false
 	}
@@ -238,15 +378,24 @@ func holds(s, f *types.Type) bool {
 	return false
 }
 
-// usesUnsafe reports whether fn converts a pointer through
-// unsafe.Pointer, or makes one with the functions of unsafe.
+// usesUnsafe reports whether fn makes a pointer of an unsafe.Pointer or
+// of an integer, or with the functions of unsafe.
 func usesUnsafe(fn *ir.Func) bool {
 	found := false
 	ir.VisitList(fn.Body, func(n ir.Node) {
 		switch n.Op() {
 		case ir.OCONVNOP, ir.OCONV:
+			// A pointer that is made of an unsafe.Pointer, or an
+			// unsafe.Pointer of an integer. (A pointer that is
+			// only converted to unsafe.Pointer, to be passed on,
+			// keeps its type where it is, and the unsafe.Pointer
+			// is taken for anything.)
 			n := n.(*ir.ConvExpr)
-			if n.Type().IsUnsafePtr() || n.X.Type() != nil && n.X.Type().IsUnsafePtr() {
+			from, to := n.X.Type(), n.Type()
+			if from == nil || to == nil {
+				break
+			}
+			if from.IsUnsafePtr() && !to.IsUnsafePtr() || to.IsUnsafePtr() && !from.IsUnsafePtr() && !from.IsPtr() {
 				found = true
 			}
 		case ir.OUNSAFEADD, ir.OUNSAFESLICE, ir.OUNSAFESTRING, ir.OUNSAFESLICEDATA, ir.OUNSAFESTRINGDATA:
@@ -352,15 +501,26 @@ func noteShare(ps *ir.ParamShare, derefs int, t *types.Type) {
 }
 
 // shareHoleFor returns the hole for an argument of the parameter
-// param, of which the function called says ps: where another goroutine
-// reaches what it shares of the argument.
-func (e *escape) shareHoleFor(param *types.Field, ps *ir.ParamShare, conv bool) hole {
+// param of the function fn, of which fn says ps: where another
+// goroutine reaches what it shares of the argument.
+func (e *escape) shareHoleFor(fn *ir.Name, param *types.Field, ps *ir.ParamShare, conv bool) hole {
 	var t *types.Type
-	switch {
-	case ps.Share == 1:
-		t = param.Type
-	case ps.ShareTyped:
-		t = shareTypeOf(param.Type, ps.ShareField)
+	if ps.ShareTyped {
+		switch ps.Share {
+		case 1:
+			t = param.Type
+		case 2:
+			t = shareTypeOf(param.Type, ps.ShareField)
+		}
+	}
+	if fn == nil || fn.Func == nil || fn.Func.ShareOpaque || fn.Sym().Pkg == nil || ir.UncheckedPkg(fn.Sym().Pkg.Path) {
+		// What it shares, types do not say: nor of what its
+		// caller shares by it.
+		t = nil
+		if e.opaqueFns == nil {
+			e.opaqueFns = make(map[*ir.Func]bool)
+		}
+		e.opaqueFns[e.curfn] = true
 	}
 	var k hole
 	if t != nil {
@@ -371,4 +531,19 @@ func (e *escape) shareHoleFor(param *types.Field, ps *ir.ParamShare, conv bool) 
 		k = e.shareHole()
 	}
 	return k.shift(e.gd, int(ps.Share)-1)
+}
+
+// opaqueBatch reports whether a function of the batch does with
+// pointers what their types do not say, or calls one that does and
+// shares by it.
+func (b *batch) opaqueBatch() bool {
+	if b.opaque == 0 {
+		b.opaque = 1
+		for _, fn := range b.fns {
+			if b.unsafeFns[fn] || b.opaqueFns[fn] {
+				b.opaque = 2
+			}
+		}
+	}
+	return b.opaque == 2
 }

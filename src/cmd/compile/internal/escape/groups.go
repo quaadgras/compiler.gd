@@ -1126,7 +1126,7 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			// caller sees.)
 			if m.param {
 				k := paramBit(fn, name)
-				if k == 0 || m.reassigned || m.addrtaken || m.captured {
+				if k == 0 || m.reassigned || m.addrtaken || b.capturedAssigned(m) {
 					fail("a parameter that is assigned, or has no bit", m)
 				} else {
 					c.own |= 1 << k
@@ -1158,7 +1158,7 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 				c.addLink(d.link, d.arg)
 			case d.deep != 0 && r.curfn == fn:
 				c.own |= d.deep << 1
-			case d.plain && d.loc != nil && d.loc.param && r.curfn == fn && !d.loc.reassigned && !d.loc.captured && !d.loc.addrtaken:
+			case d.plain && d.loc != nil && d.loc.param && r.curfn == fn && !d.loc.reassigned && !b.capturedAssigned(d.loc) && !d.loc.addrtaken:
 				if k := paramBit(fn, d.name); k != 0 {
 					c.own |= 1 << k
 					c.from |= 1 << k

@@ -101,6 +101,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	root.walkgen = walkgen
 	root.derefs = 0
 	root.dst = nil
+	b.walkRoot = root
 	// The paths that have no read-only edge: sharing follows those
 	// only (edge.ro).
 	root.rawgen = walkgen
@@ -113,13 +114,23 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	// type (typed.go).
 	shareAttrs := attrShares | attrSharesValue | attrSharesDeep
 	filter := root.shareType
-	if filter == nil && root.attrs&shareAttrs != 0 {
+	rootAt := filterOn
+	if filter == nil && root.attrs&shareAttrs != 0 && root.shareOnly != nil {
 		filter = root.shareOnly
+		if root.attrs&(attrShares|attrSharesValue) == 0 {
+			// It only leads to what is shared.
+			rootAt = filterDeep
+		}
 	}
+	// A walk from what a parameter points to finds which parameters
+	// are stored there, and whether by themselves (viaDirect).
+	via := filter == nil && root.dynRoot != nil && root.dynRoot.plain && root.dynRoot.loc != nil && root.dynRoot.loc.param && b.typedOn()
+	track := filter != nil || via
 	root.filtergen = walkgen
 	root.filterAt = filterOff
-	if filter != nil {
-		root.filterAt = filterOn
+	root.filterT = filter
+	if track {
+		root.filterAt = rootAt
 	}
 
 	if root.hasAttr(attrCalls) {
@@ -223,20 +234,40 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		lraw := l.rawgen == walkgen
 		rawAddr := lraw && l.rawDerefs < 0
 		rawDerefs := max(l.rawDerefs, 0)
+		// at is what the walk shares of l, and eff what it shares
+		// of what flows to l (typed.go).
 		at := filterOff
-		// deepOnly: l is not what is shared, but may lead to it.
-		deepOnly := false
-		if filter != nil && l.filtergen == walkgen {
+		// ft is the type that the walk shares the values of here,
+		// and st what it is for what flows to l: the type of a
+		// larger object, if the shared one may be a part of it.
+		ft := filter
+		if track && l.filtergen == walkgen {
 			at = l.filterAt
-			if at == filterOn && l != root && lraw && rawDerefs == 0 {
-				switch is, leads := b.typedAs(l, rawAddr, filter); {
-				case !leads:
-					at = filterBlocked
-				case !is:
-					deepOnly = true
+			if filter != nil && l.filterT != nil {
+				ft = l.filterT
+			}
+		}
+		eff, st := at, ft
+		if filter != nil && l != root && lraw && rawDerefs == 0 {
+			switch at {
+			case filterOn:
+				var wider *types.Type
+				at, eff, wider = b.typedAt(l, rawAddr, ft)
+				if wider != nil {
+					st = wider
+				}
+			case filterDeep:
+				if !b.typedLeads(l, rawAddr, ft) {
+					at, eff = filterBlocked, filterBlocked
 				}
 			}
 		}
+		direct := via && at == filterOn && rawDerefs == 0 && !rawAddr
+		if via && l != root && eff == filterOn && !carrier(l) {
+			eff = filterOff
+		}
+		// deepOnly: l is not what is shared, but may lead to it.
+		deepOnly := filter != nil && at == filterDeep
 		lshare := lraw && at != filterBlocked
 		var shared locAttr
 		if lraw && rawDerefs == 0 {
@@ -270,15 +301,11 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		if shared != 0 {
 			// For which values l is shared: for those of the
 			// walk's type, if that is all that shares it.
-			if at == filterOn && rawAddr && newAttrs&attrShares != 0 {
-				// An object that is shared: all of it is.
-				at = filterOff
-			}
 			var only *types.Type
-			if at == filterOn {
-				only = filter
+			if filter != nil && at != filterOff && eff != filterOff {
+				only = st
 			}
-			if b.gd.Flag.LowerM >= 4 && l.n == nil && (l.attrs&shareAttrs == 0 || l.shareOnly != nil && only == nil) {
+			if b.gd.Flag.LowerM >= 5 && l.n == nil && (l.attrs&shareAttrs == 0 || l.shareOnly != nil && only == nil) {
 				fmt.Printf("typed: a place without a name %p in %v (attributes %#x, a root %v, transient %v, contents of %d) is shared by %s %p for the type %v: its address %v, dereferenced %d times, at %d; had %#x for %v; gets %#x\n", l, l.curfn, uint(l.attrs), l.isDynRoot, l.transient, len(l.owners), b.explainLoc(root), root, only, rawAddr, rawDerefs, at, uint(l.attrs&shareAttrs), l.shareOnly, uint(shared))
 			}
 			switch {
@@ -351,10 +378,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 			if lraw {
 				var only *types.Type
-				if at == filterOn {
-					only = filter
+				if filter != nil && at != filterOff && eff != filterOff {
+					only = st
 				}
-				b.noteParamShare(l, root, rawDerefs, only, !lshare || deepOnly)
+				b.noteParamShare(l, root, rawDerefs, only, !lshare || deepOnly, direct)
 			}
 			if root.hasAttr(attrMutates) {
 				l.paramEsc.AddMutator(b.gd, derefs)
@@ -427,20 +454,35 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			srcRaw := l.rawgen == walkgen && !edge.ro
 			rd := rawDerefs + edge.derefs
 			weaker := false
-			if filter != nil && srcRaw {
-				// (A walk from a location that is shared for a
-				// type goes on behind a value of another type,
-				// for what else the location says.)
-				if edge.src.filtergen != walkgen {
-					edge.src.filtergen = walkgen
-					edge.src.filterAt = at
-				} else if at < edge.src.filterAt {
-					edge.src.filterAt = at
+			if track {
+				sat := eff
+				switch {
+				case via:
+					if sat == filterOn && (edge.derefs != 0 || edge.loose) {
+						sat = filterOff
+					}
+				case sat == filterOn && edge.loose:
+					// What a function that is called did with
+					// it: it may be anywhere in what l leads to.
+					sat = filterOff
+				}
+				if !srcRaw {
+					sat = filterBlocked
+				}
+				switch src := edge.src; {
+				case src.filtergen != walkgen:
+					src.filtergen = walkgen
+					src.filterAt = sat
+					src.filterT = st
+				case sat < src.filterAt:
+					src.filterAt = sat
+					src.filterT = st
+					weaker = true
+				case sat == src.filterAt && (sat == filterOn || sat == filterDeep) && st != nil && src.filterT != nil && !types.Identical(st, src.filterT):
+					// Two types: nothing is told apart.
+					src.filterAt = filterOff
 					weaker = true
 				}
-			} else if filter != nil && edge.src.filtergen != walkgen {
-				edge.src.filtergen = walkgen
-				edge.src.filterAt = filterBlocked
 			}
 			if edge.src.hasAttr(attrEscapes) && !srcRaw {
 				// Nothing to learn: it escapes, and this path says
@@ -472,7 +514,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 						want |= attrDynSharesValue
 					}
 				}
-				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) {
+				if want&^edge.src.attrs == 0 && !b.wantsDyn(edge.src, root) && edge.src.shareOnly == nil {
 					continue
 				}
 			}

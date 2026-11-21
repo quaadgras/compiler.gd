@@ -808,6 +808,7 @@ func (e *escape) tagHole(ks []hole, fn *ir.Name, param *types.Field) hole {
 				// calls that check does not return it either,
 				// but as what a method of its own returned.
 				k.recvRes = x == 0 && e.checkedArg
+				k.loose = true
 				tagKs = append(tagKs, k)
 			}
 		}

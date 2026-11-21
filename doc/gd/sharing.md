@@ -1217,44 +1217,61 @@ the scanner a closure that has the parser, and stores through the
 parser: it no longer stores what its caller does not know (83 of the
 parser's functions do).
 
-**Sharing by the type of what is shared** (built, NOT SOUND, off unless
-`-d=localtyped=1`; `escape/typed.go`): `token.(*File).position` shares
-the file, which has a mutex, so the scanner's methods say that what the
-scanner holds is shared (`ParamShare.Share` = 2), by depth only, and
-the caller takes everything that is stored in the scanner as shared.
-The fact should say *what* is shared. As built:
+**Sharing by the type of what is shared** (`escape/typed.go`; off with
+`-d=nolocaltyped=1`): `token.(*File).position` shares the file, which has
+a mutex, so the scanner's methods say that what the scanner holds is
+shared (`ParamShare.Share` = 2), by depth only, and the caller took
+everything that is stored in the scanner as shared. The fact now says
+*what* is shared, which is the user's idea of marking the fields that
+are shared and treating the object as local otherwise.
+
 - A value that a function shares of its argument flows to a share root
-  of the parameter's type (`shareHoleOf`), walked like `shareLoc`.
-- In the walk from such a root a location whose type can neither be
-  that type nor lead to it is not shared and not walked through
-  (`typedAs`, `mayBe`, `leadsTo`); one that may only lead to it "leads
-  to what is shared" and no more; an object whose address is the
-  shared value is shared with all that is in it.
-- A location that is shared only by such walks is shared for that type
-  (`location.shareOnly`), and the walk from it goes by that.
-- A function says of a parameter that is shared one dereference down
-  which field of its struct the shared value is in
+  of the parameter's type (`shareHoleOf`), walked like `shareLoc`. The
+  walk goes by the types of the locations that it reaches with nothing
+  dereferenced (`typedAt`): what may be the shared pointer, or a struct
+  that holds it, is shared for that type (`location.shareOnly`), and
+  the walk from it goes by the type in turn; a pointer to a larger
+  object that the shared one may be a part of widens the type; an
+  object whose address is the shared value, an interface, an
+  `unsafe.Pointer`, and what is behind them are shared whatever their
+  types; what can only lead to such a value "leads to what is shared"
+  and no more; what cannot is not walked through.
+- The first version was not sound: with it `net/http`'s tests had 107
+  local objects that a shared one pointed to. `http.NewRequest` stores
+  the body in the request that it returns, the graph has that as a flow
+  from the body to the result without a dereference (it does not see
+  the object), and the walk took such a flow to be of the same value,
+  so that the body, of another type, stayed local in a request that
+  was shared later. Now a flow that stands for what a function did
+  with an argument is *loose* (`hole.loose`, `edge.loose`: to a call's
+  results, and to what another argument points to), and what comes
+  over one is shared with all that is behind it. A function says where
+  that is not needed: it stores the parameter's own value as a field
+  or an element of the object that the other parameter points to
+  (`ParamShare.ViaDirect`), which the walk from the place of the store
+  finds (the parameter comes to it by itself, through variables that
+  only pass a value on).
+- A function says of a parameter that it shares itself that a caller
+  can go by its type, and of one that is shared one dereference down
+  which field of the parameter's struct the shared value is in
   (`ParamShare.ShareTyped`, `ShareField`: the export data's function
   extension cannot name a type), if all the fields that could hold it
-  have one type.
-- An allocation that only holds such values may be local itself
-  (`markLocal`).
-- Functions that convert through `unsafe.Pointer` have no types here.
+  have one type. Not a function that makes pointers of
+  `unsafe.Pointer`, or calls one that does and shares by it
+  (`ir.Func.ShareOpaque`).
+- An allocation that is shared only for a type and not by its address
+  may be local itself (`markLocal`).
+- A variable that a closure captures and nothing assigns is as any
+  other in the tags of what is stored through it, and where a function
+  says what it stores through its parameters (`capturedAssigned`): the
+  closure that `(*parser).init` gives the scanner is local if the
+  parser is.
 
-With it, `go/types`' tests have 121822 local objects (101324 without),
-and `net/http`'s have 107 local objects that a shared one points to:
-`http.NewRequest` stores the body in the request that it returns, the
-graph has that as a flow from the body to the result without a
-dereference (it does not see the object), the walk takes a flow without
-dereference to be of the same value, and the body, of another type, is
-left local in a request that is shared later. The walk has to know
-whether it is at the shared pointer itself, where a value of another
-type that flows in is stored in the object and shared with it, or
-among what a holder has, where it is another value: a state of the
-walk (at the pointer, among contents, leading only, behind), kept with
-the type on the locations that it shares. That is the next thing to
-build, with `net/http`'s tests under `GODEBUG=sharestats=2` as the
-check; `TestSharedTyped` has the simple cases.
+Checks: `TestSharedTyped`; the tests of the standard library run with
+`GODEBUG=sharestats=3`, which stops at the first local object that a
+shared one points to (the tests that compare what a child process
+prints fail by the statistics alone); the toolchain building itself
+and everything else under the same.
 
 ### Next
 

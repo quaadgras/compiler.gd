@@ -91,6 +91,7 @@ type location struct {
 	shareOnly   *types.Type
 	filtergen   uint32
 	filterAt    int8
+	filterT     *types.Type
 	rawgen      uint32      // walkOne: the walk that reached the location on a path with no read-only edge
 	rawDerefs   int         // walkOne: the least dereferences of such a path
 	plaingen    uint32      // walkOne: the walk that reached the location on a path with no edge from a receiver to its call's result (edge.recvRes)
@@ -270,6 +271,7 @@ type edge struct {
 	// which says what such a method may do with it: who has the
 	// result is no holder of the receiver by this edge (move.go).
 	recvRes bool
+	loose   bool // see hole.loose
 }
 
 func (l *location) asHole() hole {
@@ -324,6 +326,11 @@ type hole struct {
 	// an interface's method, where it flows to the call's result: see
 	// edge.recvRes.
 	recvRes bool
+	// loose: the flow is what a function that is called does with an
+	// argument (it returns it, or stores it): the value may be anywhere
+	// in what the destination leads to, not only be its value or one
+	// that it holds (typed.go).
+	loose bool
 }
 
 type note struct {
@@ -402,13 +409,13 @@ func (b *batch) flow(k hole, src *location) {
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
 		if src.n != nil || src.curfn != nil {
-			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
+			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
 		}
 		return
 	}
 
 	// TODO(mdempsky): Deduplicate edges?
-	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes})
+	dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose})
 }
 
 // holdsAddr reports whether root, whose walk found that l's address
