@@ -2090,6 +2090,73 @@ func TestSharedRecursiveStores(t *testing.T) {
 	}
 }
 
+// What a bit says: that what the function stores in is local, of what
+// the argument reaches. A holder of a shared file is passed with its bit
+// to a function that stores only in the holder and its list.
+
+type narrowFile struct {
+	mu   sync.Mutex
+	name string
+}
+
+type narrowItem struct {
+	next *narrowItem
+	v    int
+}
+
+type narrowHolder struct {
+	file  *narrowFile
+	items []*narrowItem
+}
+
+var narrowShared *narrowFile
+
+//go:noinline
+func narrowAdd(h *narrowHolder, v int) {
+	h.items = append(h.items, &narrowItem{v: v})
+}
+
+func TestSharedNarrow(t *testing.T) {
+	skipIfNotSharing(t)
+	if !linkLocal(func() { _ = *linkNew(1).p }) {
+		t.Skip("no local objects here")
+	}
+	narrowShared = &narrowFile{name: "x"}
+	done := make(chan bool)
+	go func() {
+		narrowShared.mu.Lock()
+		narrowShared.mu.Unlock()
+		done <- true
+	}()
+	<-done
+	sum := 0
+	n := runtime.CountLocalAllocs(func() {
+		h := &narrowHolder{file: narrowShared}
+		for i := 0; i < 10; i++ {
+			narrowAdd(h, i)
+		}
+		sum += len(h.items)
+	})
+	t.Logf("%d local objects in a holder of a shared file", n)
+	if n < 1 {
+		t.Errorf("no local object in a holder of a shared file")
+	}
+	// The holder is shared: so is what is stored in it.
+	var h *narrowHolder
+	n = runtime.CountLocalAllocs(func() {
+		h = &narrowHolder{file: narrowShared}
+		go func() { done <- h.file != nil }()
+		<-done
+		for i := 0; i < 10; i++ {
+			narrowAdd(h, i)
+		}
+	})
+	t.Logf("%d local objects in a shared holder", n)
+	if sum != 10 {
+		t.Errorf("sum %d", sum)
+	}
+}
+
 func TestSharedRecursive(t *testing.T) {
 	skipIfNotSharing(t)
 	sum := 0

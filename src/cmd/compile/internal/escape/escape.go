@@ -151,6 +151,12 @@ type batch struct {
 	infos          map[*location]*groupInfo
 	memberSets     map[*location]map[*location]bool
 	storeRoots     map[*ir.Func]*storeRoots
+	storeTypes     map[*ir.Func]*[16]storeSet // the function's own stores (storeset.go)
+	storeSets      map[*ir.Func]*[16]storeSet // the parameters' store types, solved
+	relies         []reliance
+	needGroups     []*location // the groups whose need is known
+	reachMem       map[any]bool
+	skipStoreTypes bool // storeThroughSharedArg
 	varGroups      map[*ir.Name]*location
 	pending        map[any]*location
 	storedRoots    map[*ir.Func]*location
@@ -530,6 +536,7 @@ type outBufUse struct {
 
 func (b *batch) finish(fns []*ir.Func) {
 	b.solveGroups(fns)
+	b.solveStoreSets(fns)
 	b.markUnshared(fns)
 	b.markMoves()
 	b.markKeptChecks(fns)

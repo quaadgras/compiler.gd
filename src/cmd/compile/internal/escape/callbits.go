@@ -225,6 +225,11 @@ func (e *escape) noteCallArg(cs *callSite, bit int, arg ir.Node) {
 	}
 	a.loc = e.oldLoc(a.name)
 	cs.args = append(cs.args, a)
+	if a.kind == argParam && cs.fn != nil {
+		// The call passes the parameter's bit on: what the function
+		// stores in what it reaches, the bit is for (storeset.go).
+		e.noteReliance(1<<(a.own-1), cs.fn, a.bit-1)
+	}
 }
 
 // markReturnedOther marks the locations that flow, or lead, to a result
@@ -496,9 +501,10 @@ func (b *batch) callBits1(apply bool) {
 		// A function that is only known when the program runs may
 		// read any bit for a store in what the argument reaches:
 		// each is set only if all that the argument reaches is
-		// local, which is so of what parameters of the caller
-		// reach if its own bits say it, and of the rest if the
-		// call's group is.
+		// local, which is so of the call's group if it is. Of what
+		// the caller's parameters reach, its own bits do not say
+		// it: they are for what the caller stores in, of some
+		// types (storeset.go).
 		if cs.fn == nil && b.deepOn() {
 			for _, a := range cs.dynArgs {
 				if a.pos+1 >= maxCallBits {
@@ -506,7 +512,7 @@ func (b *batch) callBits1(apply bool) {
 				}
 				var t ir.Node
 				if a.mask != 0 {
-					t = b.ownBits(cs.curfn, a.mask<<1, pos)
+					continue
 				} else if a.pos < len(cs.groups) && cs.groups[a.pos] != nil {
 					t = b.groupTag(cs.groups[a.pos], pos)
 				}
@@ -804,6 +810,7 @@ func (b *batch) paramShares(fn *ir.Func) {
 			b.noteParam = fmt.Sprint(loc.n)
 		}
 		ps[i] = loc.shares
+		b.noteStoreSet(fn, i, &ps[i])
 		b.groupParam(&ps[i], loc)
 		b.mixParam(&ps[i], loc)
 		if b.gd.Flag.LowerM >= 4 && loc.hasAttr(attrShares|attrSharesValue) && ps[i].Share != 1 {
@@ -932,7 +939,7 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			}
 		}
 		if ps.Deep != 0 {
-			tagKs = append(tagKs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.shareHole)...)
+			tagKs = append(tagKs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.shareHole, fn)...)
 		}
 		tagKs = append(tagKs, e.storeLinkHoles(ps)...)
 		tagKs = append(tagKs, e.mixLinkHoles(ps)...)
@@ -958,7 +965,15 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			// A store through the argument: the heap, unless
 			// the argument is the address of a variable, which
 			// then holds what is stored for as long as it lives.
-			vk := e.storeThroughArg(e.callArgs[k]).shift(e.gd, d)
+			var vk hole
+			if k < len(fn.Func.ParamShares) && fn.Func.ParamShares[k].Share == 1 {
+				// In an object that the function shares itself:
+				// what is stored there is shared, whatever the
+				// caller's bits say (storeset.go).
+				vk = e.storeThroughSharedArg(e.callArgs[k]).shift(e.gd, d)
+			} else {
+				vk = e.storeThroughArg(e.callArgs[k]).shift(e.gd, d)
+			}
 			vk.loose = !ps.ViaDirect || d != 0
 			tagKs = append(tagKs, vk)
 		}
@@ -1069,7 +1084,7 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 		hs = append(hs, e.shareHoleFor(fn, param, ps, true))
 	}
 	if ps.Deep != 0 {
-		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole)...)
+		hs = append(hs, e.deepHoles(ps.Deep, int(ps.DeepDerefs)-1, e.convShareHole, fn)...)
 	}
 	hs = append(hs, e.storeLinkHoles(ps)...)
 	hs = append(hs, e.mixLinkHoles(ps)...)
@@ -1081,6 +1096,18 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 		}
 	}
 	return hs
+}
+
+// storeThroughSharedArg is storeThroughArg for a parameter whose object
+// the function shares itself: what is stored is shared too, and the
+// store says nothing of what the caller's parameters' bits are for
+// (storeset.go). Where it goes is as for any store.
+func (e *escape) storeThroughSharedArg(p ir.Node) hole {
+	skip := e.skipStoreTypes
+	e.skipStoreTypes = true
+	k := e.storeThroughArg(p)
+	e.skipStoreTypes = skip
+	return e.teeHole(k, e.shareHole())
 }
 
 // storeThroughArg returns the hole for what a function stores through

@@ -354,13 +354,17 @@ func (e *escape) deepRootOf(mask uint16, marker bool) *location {
 // reached from parameters of the current function, that is a store in
 // what those reach; anything else is not known yet, and shared (the
 // hole that share gives).
-func (e *escape) deepHoles(mask uint16, derefs int, share func() hole) []hole {
-	return e.deepHolesOf(mask, derefs, share, false)
+func (e *escape) deepHoles(mask uint16, derefs int, share func() hole, callee *ir.Name) []hole {
+	return e.deepHolesOf(mask, derefs, share, false, callee)
 }
 
 // deepHolesOf is deepHoles; with marker, the roots are no holders of
 // what flows to them (deepRootOf).
-func (e *escape) deepHolesOf(mask uint16, derefs int, share func() hole, marker bool) []hole {
+//
+// callee is the function that stores there: the current function
+// relies on its parameters' bits for what callee stores in what its
+// parameter k reaches (storeset.go).
+func (e *escape) deepHolesOf(mask uint16, derefs int, share func() hole, marker bool, callee *ir.Name) []hole {
 	var hs []hole
 	shared := false
 	for k := 0; k < 16; k++ {
@@ -372,6 +376,7 @@ func (e *escape) deepHolesOf(mask uint16, derefs int, share func() hole, marker 
 			m = e.deepMaskOf(e.callArgs[k])
 		}
 		if r := e.deepRootOf(m, marker); r != nil {
+			e.noteReliance(m, callee, k)
 			if e.gd.Flag.LowerM >= 4 {
 				fmt.Printf("%s: an argument is stored in what argument %d reaches, which the parameters %b of %v reach\n", e.gd.FmtPos(e.gd.Pos), k, m, e.curfn)
 			}

@@ -1326,6 +1326,34 @@ func (r *reader) funcExt(name *ir.Name, method *types.Sym) {
 					}
 				}
 			}
+			params := name.Type().RecvParams()
+			for i := range fn.ParamShares {
+				ps := &fn.ParamShares[i]
+				if !r.Bool() {
+					continue
+				}
+				ok := i < len(params)
+				n := r.Len()
+				for j := 0; j < n; j++ {
+					p := make([]uint8, r.Len())
+					for k := range p {
+						p[k] = uint8(r.Len())
+					}
+					if !ok {
+						continue
+					}
+					t := ir.TypeAtPath(params[i].Type, p)
+					if t == nil {
+						ok = false
+						continue
+					}
+					ps.StoreTypes = append(ps.StoreTypes, t)
+				}
+				ps.StoreKnown = ok
+				if !ok {
+					ps.StoreTypes = nil
+				}
+			}
 		}
 		fn.Consumes = uint16(r.Len())
 		fn.OwnedResult = r.Bool()

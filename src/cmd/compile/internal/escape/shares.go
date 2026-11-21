@@ -542,6 +542,10 @@ type dynRoot struct {
 	// condOf is a group's condition, and cond the group of a
 	// condition (groups.go).
 	group, dirt bool
+	// need is what the user of a group stores in (storeset.go): its
+	// members matter only if they may be or lead to such memory. Nil
+	// for any.
+	need *storeSet
 	// pendFn and pendArg: the dirt is that of an argument of a
 	// function of the batch, which is dirt only if the function
 	// stores in what that parameter reaches, known when the graph is

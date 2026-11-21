@@ -387,3 +387,63 @@ func LocalSpans(gd *base.Invocation) bool {
 	}
 	return false
 }
+
+// TypePath returns the steps from the type p to the type t, which
+// export data can carry where it cannot name a type: 0 for the element
+// of a pointer, slice, array, channel or map, 1 for a map's key, and
+// 2+i for a struct's field i. It reports false if there are none.
+func TypePath(p, t *types.Type) ([]uint8, bool) {
+	type item struct {
+		x    *types.Type
+		path []uint8
+	}
+	seen := make(map[*types.Type]bool)
+	todo := []item{{p, nil}}
+	for len(todo) > 0 {
+		it := todo[0]
+		todo = todo[1:]
+		if types.Identical(it.x, t) {
+			return it.path, true
+		}
+		if seen[it.x] || len(it.path) >= 8 {
+			continue
+		}
+		seen[it.x] = true
+		next := func(x *types.Type, s int) {
+			todo = append(todo, item{x, append(append([]uint8(nil), it.path...), uint8(s))})
+		}
+		switch it.x.Kind() {
+		case types.TPTR, types.TSLICE, types.TARRAY, types.TCHAN:
+			next(it.x.Elem(), 0)
+		case types.TMAP:
+			next(it.x.Elem(), 0)
+			next(it.x.Key(), 1)
+		case types.TSTRUCT:
+			for i, f := range it.x.Fields() {
+				if i < 254 {
+					next(f.Type, 2+i)
+				}
+			}
+		}
+	}
+	return nil, false
+}
+
+// TypeAtPath returns the type that the steps path (TypePath) lead to
+// from the type p, or nil.
+func TypeAtPath(p *types.Type, path []uint8) *types.Type {
+	x := p
+	for _, s := range path {
+		switch {
+		case s == 0 && (x.IsPtr() || x.IsSlice() || x.IsArray() || x.IsChan() || x.IsMap()):
+			x = x.Elem()
+		case s == 1 && x.IsMap():
+			x = x.Key()
+		case s >= 2 && x.IsStruct() && int(s-2) < x.NumFields():
+			x = x.Field(int(s - 2)).Type
+		default:
+			return nil
+		}
+	}
+	return x
+}

@@ -316,10 +316,12 @@ func (b *batch) mixTerms(roots []*location, pos src.XPos) ir.Node {
 			apart = b.linkBit(pos, d.mixKey, bit, true)
 		}
 		var rest ir.Node
-		ok := !d.mixBad
+		// (Whatever the class stores in, its own bits do not say:
+		// storeset.go.)
+		ok := !d.mixBad && d.mixMask == 0
 		if ok && d.mixOther != nil {
 			c := b.cond(d.mixOther)
-			if c.bad {
+			if c.bad || blindOwn(d.mixOther, c) {
 				ok = false
 			} else {
 				rest = b.groupAtoms(d.mixOther, c, pos)
@@ -607,6 +609,12 @@ func (e *escape) argGroupsOf(call *ir.CallExpr, fn *ir.Name, all []ir.Node) []*l
 		case need&(1<<j) != 0 && e.deepMaskOf(arg) == 0:
 			g := e.memberRoot(e.curfn)
 			g.dynRoot.call, g.dynRoot.arg = call, j
+			// Its members matter if they may be what fn stores in
+			// (storeset.go).
+			if st := e.storeSetOf(fn, j); !st.isAll() {
+				g.dynRoot.need = &storeSet{ts: slices.Clone(st.ts)}
+				e.needGroups = append(e.needGroups, g)
+			}
 			set(j, g)
 		}
 	}
@@ -632,6 +640,8 @@ func (e *escape) varGroup(name *ir.Name) *location {
 	if g == nil {
 		g = e.memberRoot(e.curfn)
 		g.dynRoot.name = name
+		g.dynRoot.need = new(storeSet)
+		e.needGroups = append(e.needGroups, g)
 		g.edges = append(g.edges, edge{src: e.oldLoc(name)})
 		e.varGroups[name] = g
 	}
@@ -1253,6 +1263,11 @@ func (b *batch) condOnce(g *location) *groupCond {
 			c.why = "stored in a structure that is not local: " + c2.why
 			return c
 		}
+		if blindOwn(g2, c2) {
+			c.bad = true
+			c.why = "stored in a structure that may be stored in anywhere, which the parameters' bits do not say"
+			return c
+		}
 		c.own |= c2.own
 		c.from |= c2.from
 		for _, l := range c2.links {
@@ -1303,11 +1318,15 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 	if g.dynRoot.crossed || b.memberBad[g] {
 		fail("a value from a function of the batch that nothing records", nil)
 	}
+	// What the group's user stores in: only the members that may be
+	// such memory, or lead to it, need be local (storeset.go).
+	need := g.dynRoot.need
 	for m := range members {
 		if c.bad {
 			break
 		}
-		if m.unknown {
+		rel := b.relevant(m, need)
+		if m.unknown && rel {
 			fail("a pointer from where the graph does not follow", nil)
 			break
 		}
@@ -1330,6 +1349,12 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 		if m.leadsNowhere() {
 			// (Whoever reaches it: nothing is stored in what it
 			// points to.)
+			continue
+		}
+		if !rel {
+			// Neither what the user stores in, nor what leads to
+			// it: it may be shared, or anywhere. (What may be
+			// stored in it later, the groups above say.)
 			continue
 		}
 		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
@@ -1787,7 +1812,7 @@ func (b *batch) ownBits(fn *ir.Func, mask uint16, pos src.XPos) ir.Node {
 // a whole, or nil if nobody knows.
 func (b *batch) groupTag(g *location, pos src.XPos) ir.Node {
 	c := b.cond(g)
-	if c.bad {
+	if c.bad || blindOwn(g, c) {
 		return nil
 	}
 	tag := b.groupAtoms(g, c, pos)
@@ -1798,6 +1823,13 @@ func (b *batch) groupTag(g *location, pos src.XPos) ir.Node {
 		tag = n
 	}
 	return tag
+}
+
+// blindOwn reports whether the condition c of the group g needs the
+// bits of its function's own parameters for a user that may store in
+// memory of any type: they do not say that (storeset.go).
+func blindOwn(g *location, c *groupCond) bool {
+	return g.dynRoot.need == nil && !g.dynRoot.result && c.own>>1 != 0
 }
 
 // mixParam adds to ps, of the parameter at l, the mix roots that it

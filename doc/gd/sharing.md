@@ -1437,6 +1437,86 @@ Two things are left, and the second is a design question:
    objects which the callee stores in are local, not everything that
    the argument reaches.
 
+**What a bit says: the objects that are stored in** (2026-11-22, the
+user: "Yes change what the bit claims"). A parameter's bit no longer
+says that everything the argument reaches is local. It says that every
+object reached from the argument, of one of the types that the function
+may store a pointer in through it, is local. Those types are the
+parameter's store types (`ir.ParamShare.StoreTypes`; `StoreKnown` false
+means any type, which is also what a function says that nobody
+analysed).
+
+A function's store types for parameter k are the types of what it
+relies on bit k for:
+
+- *Its own stores* through a path from the parameter, or from a
+  variable derived from it (`storeThrough`): the type of the memory
+  written, which is the pointer's element, or the slice's element, or
+  the map. An allocation that is stored there is tagged with the bit,
+  and so is what another parameter gives that is stored there.
+- *A function that it calls* and passes the parameter to as itself, with
+  its bit (`callBits`), or a function that stores another argument, or
+  its results, in what the argument reaches (`ParamShare.Deep`,
+  `ResultDeep`: `deepHolesOf`): that function's store types for the
+  argument. For a function of the same batch, they are solved
+  together.
+- *A group* whose condition is used, which has the bit among its own:
+  the group's need. A group's need is what its user stores in. For an
+  argument of a function of another batch, that is the function's store
+  types for it (`argGroupsOf`). For the variable of the function's own
+  stores, it is their types (`varGroup`).
+
+A function only known when the program runs says nothing of its store
+types. So a call of one no longer passes the caller's own bits for an
+argument derived from its parameters. A group whose need is not known
+gives no tag if it needs the function's own bits. A mix that needs them
+is not local.
+
+At the caller, a group checks only the members that may be, or lead to,
+memory of a type in its need (`relevant`). An allocation is relevant if
+its object may hold such memory. A value is relevant if it may lead to
+such memory. Members that are not relevant may be shared, may be stored
+where nobody can tell, or may be the results of anything. What may be
+stored in them later still counts: a member passed to what may store in
+it something that the caller does not know is still dirt, since what
+that stores may be of a type in the need.
+
+The parser's `p` holds the shared `*token.File`, and the parser stores
+nothing in a File through `p`. One more rule was needed for that.
+`(*File).AddLine` stores what its receiver reaches back in the receiver
+(`f.lines = append(f.lines, …)`, `ParamShare.Via`), and a caller took
+that for a store through its argument, `s.file`, with the scanner's
+bit. But `AddLine` shares its receiver's object itself (`Share` 1),
+and what is stored in a shared object must be shared. So what such a
+store stores is now shared at the caller as well, and the store records
+no store type (`storeThroughSharedArg`). Its flows stay as for any
+store. A first version sent them to the shared heap instead. Then the
+variable `&x` names, or a tracked allocation's contents, no longer
+had what was stored in them, and `log`, `net/http` and others
+miscompiled (`log.Println` wrote nothing). The sharing oracle cannot
+see that kind of bug; the tests of the standard library did.
+
+As built (`escape/storeset.go`, `ir.TypePath` for export data;
+`-m=4` prints "stores through its parameter k in [...]" and every
+reliance):
+
+- `TestSharedNarrow`: a holder that points to a shared object is passed
+  with its bit to a function that appends to the holder's list. All the
+  items are local (14 objects). Before, the holder's group had the
+  shared object, and no bit was set.
+- The parser: what `parseFile` stores in through `p` is
+  `[parser scanner.ErrorList *scanner.Error *ast.CommentGroup
+  *ast.ImportSpec]`, without the File. `ParseFile` still passes no bit
+  for `p`: `parseFile` passes the tree to `resolveFile`, which may store
+  what its caller does not know (`*ast.Object`s) in identifiers that
+  `p.imports` reaches too. An `Object` has fields of type `any`, so no
+  type says what it does not lead to. That holds even with
+  `SkipObjectResolution`, which only skips the call at run time. What
+  binds the parser now is the resolver, as before.
+- The suites' counts did not move (go/printer 5263, go/types 101417,
+  net/http 41944, encoding/json 2161), and none published a local
+  object.
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

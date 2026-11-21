@@ -166,8 +166,15 @@ func (e *escape) storeThrough(p ir.Node) hole {
 	// which the path starts from points to or reaches: the groups
 	// that have that object need to know (groups.go).
 	name, plain, global := e.pathBase(p)
+	// The store is in what the parameters that p is derived from reach
+	// (storeset.go).
+	target := storeTarget(p.Type())
+	e.noteStoreType(e.deepMaskOf(p), target)
 	if name != nil && name.Opt != nil {
 		if g := e.varGroup(name); g != nil {
+			if !e.skipStoreTypes {
+				g.dynRoot.need.add(target)
+			}
 			// Not a parameter's structure, of which the caller
 			// knows: the function's own. What is stored is one
 			// of what the variable reaches, and local only if

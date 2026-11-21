@@ -223,7 +223,7 @@ func (e *escape) call(ks []hole, call ir.Node) {
 					// so with the argument's bit, and what is
 					// returned is not local.)
 					e.callArgs, e.argGroups = all, groups
-					for _, h := range e.deepHolesOf(f.ResultDeep, 0, nil, true) {
+					for _, h := range e.deepHolesOf(f.ResultDeep, 0, nil, true, fns[0]) {
 						for _, r := range cs.res {
 							e.flow(h, r)
 						}

@@ -8,6 +8,7 @@ import (
 	"internal/buildcfg"
 	"internal/pkgbits"
 	"io"
+	"slices"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -338,6 +339,31 @@ func (l *linker) relocFuncExt(w *pkgbits.Encoder, name *ir.Name) {
 			w.String(l.Key)
 			w.Len(int(l.Arg))
 			w.Len(int(l.Derefs))
+		}
+	}
+	// The store types, as paths from the parameters' types (export
+	// data cannot name a type here).
+	for i, ps := range name.Func.ParamShares {
+		params := name.Type().RecvParams()
+		paths, ok := [][]uint8(nil), ps.StoreKnown && i < len(params)
+		for _, t := range ps.StoreTypes {
+			if !ok {
+				break
+			}
+			var p []uint8
+			p, ok = ir.TypePath(params[i].Type, t)
+			paths = append(paths, p)
+		}
+		if w.Bool(ok) {
+			slices.SortFunc(paths, slices.Compare)
+			paths = slices.CompactFunc(paths, slices.Equal)
+			w.Len(len(paths))
+			for _, p := range paths {
+				w.Len(len(p))
+				for _, s := range p {
+					w.Len(int(s))
+				}
+			}
 		}
 	}
 	w.Len(int(name.Func.Consumes)) // gd: see escape/move.go

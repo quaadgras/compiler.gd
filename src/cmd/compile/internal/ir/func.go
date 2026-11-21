@@ -977,4 +977,10 @@ type ParamShare struct {
 	// LinksFull is set, while the function is analysed, when there
 	// were more links than a parameter may have: it is shared then.
 	LinksFull bool
+	// StoreTypes are the types of the memory that the function may
+	// store a pointer in, of what is reached from the parameter: what
+	// the parameter's bit says is local (escape's storeset.go). If
+	// StoreKnown is false, any type.
+	StoreKnown bool
+	StoreTypes []*types.Type
 }
