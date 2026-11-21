@@ -45,17 +45,12 @@ func portablePacked(root *Action, buildmode string, ldflags []string) bool {
 	return true
 }
 
-// portableArches returns the GOARCHes whose executables the one file has:
-// $GOPORTABLEARCHES (a comma-separated list, of $GOARCH's), or else GOARCH
-// alone; GOARCH's first.
+// portableArches returns the GOARCHes whose images the one file has: those
+// of the list in $GOARCH, or GOARCH alone; GOARCH's first.
 func portableArches() []string {
-	var arches []string
-	if s := os.Getenv("GOPORTABLEARCHES"); s != "" {
-		arches = strings.Split(s, ",")
-	}
 	out := []string{cfg.Goarch}
-	for _, a := range arches {
-		if a = strings.TrimSpace(a); a != "" && !slices.Contains(out, a) {
+	for _, a := range cfg.PortableArches {
+		if !slices.Contains(out, a) {
 			out = append(out, a)
 		}
 	}
@@ -84,7 +79,7 @@ func portablePackedID(root *Action) string {
 	h := cache.NewHash("portpacked")
 	fmt.Fprintf(h, "packer %s\n", portablePackerID())
 	arches := portableArches()
-	fmt.Fprintf(h, "arches %q hosts %q\n", arches, os.Getenv("GOPORTABLEHOSTS"))
+	fmt.Fprintf(h, "arches %q hosts %q\n", arches, buildcfg.PortableList())
 	if len(arches) > 1 {
 		for _, v := range []string{"GOAMD64", "GOARM64", "GOFLAGS"} {
 			fmt.Fprintf(h, "%s=%s\n", v, os.Getenv(v))
@@ -168,6 +163,29 @@ func portableFormat(arch string) string {
 	return "elf"
 }
 
+// portableTestFormat returns the format of an executable for several
+// systems that is not their one file (a test binary, go run's program):
+// that of the system whose tests it has, which is the one the go command
+// runs on or the first of the list in $GOOS. It is "" if ldflags say, or
+// the program is for one system.
+func portableTestFormat(ldflags []string) string {
+	if cfg.Goos != "portable" {
+		return ""
+	}
+	for _, f := range ldflags {
+		if strings.Contains(f, "-portableformat") {
+			return ""
+		}
+	}
+	switch host := portfiles.TestHost(); {
+	case host == "windows", host == "darwin" && cfg.Goarch == "amd64":
+		return "pe"
+	case host == "darwin":
+		return "macho"
+	}
+	return "elf"
+}
+
 // portableLink links the image of the hosts of each GOARCH and packs them into
 // target: GOARCH's here, the others' by a go build of each.
 func portableLink(root *Action, target string, ldflags []string, link func(string, []string) error) error {
@@ -201,7 +219,7 @@ func portableLink(root *Action, target string, ldflags []string, link func(strin
 // hosts, and returns its images.
 func portableBuildArch(root *Action, target, arch string) ([]portpack.Image, error) {
 	if _, ok := buildcfg.PortableAllHosts[arch]; !ok {
-		return nil, fmt.Errorf("GOOS=portable: no GOARCH %s in $GOPORTABLEARCHES", arch)
+		return nil, fmt.Errorf("no programs for several systems on GOARCH %s", arch)
 	}
 	p := root.Package
 	var pkgs []string
@@ -226,7 +244,8 @@ func portableBuildArch(root *Action, target, arch string) ([]portpack.Image, err
 	args = append(args, pkgs...)
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = base.Cwd()
-	cmd.Env = append(os.Environ(), "GOOS=portable", "GOARCH="+arch, "GOPORTABLEARCHES="+arch)
+	// (For the same systems, the list in $GOOS, on arch alone.)
+	cmd.Env = append(os.Environ(), "GOARCH="+arch)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stderr

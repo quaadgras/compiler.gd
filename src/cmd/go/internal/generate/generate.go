@@ -368,7 +368,7 @@ func (g *Generator) setEnv() {
 	env := []string{
 		"GOROOT=" + cfg.GOROOT,
 		"GOARCH=" + cfg.BuildContext.GOARCH,
-		"GOOS=" + cfg.BuildContext.GOOS,
+		"GOOS=" + cfg.GoosEnv(),
 		"GOFILE=" + g.file,
 		"GOLINE=" + strconv.Itoa(g.lineNum),
 		"GOPACKAGE=" + g.pkg,

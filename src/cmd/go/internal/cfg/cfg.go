@@ -30,8 +30,13 @@ import (
 
 // Global build parameters (used during package load)
 var (
-	Goos   = envOr("GOOS", build.Default.GOOS)
-	Goarch = envOr("GOARCH", build.Default.GOARCH)
+	Goos   = targetOr("GOOS", build.Default.GOOS)
+	Goarch = targetOr("GOARCH", build.Default.GOARCH)
+
+	// PortableArches is the list of architectures in $GOARCH, if it is
+	// one: of which Goarch is the first. (As the go command was run:
+	// its tools are given Goarch.)
+	PortableArches = buildcfg.PortableArches()
 
 	ExeSuffix = exeSuffix()
 
@@ -811,3 +816,31 @@ func (d *dirInfo) Mode() fs.FileMode { return d.dir.Type() }
 func (d *dirInfo) Size() int64        { panic("dirInfo.Size") }
 func (d *dirInfo) ModTime() time.Time { panic("dirInfo.ModTime") }
 func (d *dirInfo) Sys() any           { panic("dirInfo.Sys") }
+
+// targetOr is envOr for GOOS and GOARCH: if either is a list (of the
+// systems and architectures one file is for), they are what
+// internal/buildcfg makes of the lists, which is def.
+func targetOr(key, def string) string {
+	if strings.Contains(os.Getenv("GOOS"), ",") || strings.Contains(os.Getenv("GOARCH"), ",") || os.Getenv("GOOS") == "portable" {
+		return def
+	}
+	return envOr(key, def)
+}
+
+// GoosEnv returns GOOS as the environment has it: Goos, or the list of
+// systems that Goos stands for.
+func GoosEnv() string {
+	if list := buildcfg.PortableList(); list != "" && Goos == "portable" {
+		return list
+	}
+	return Goos
+}
+
+// GoarchEnv returns GOARCH as the environment has it: Goarch, or the
+// list of architectures of which Goarch is the first.
+func GoarchEnv() string {
+	if PortableArches != nil && Goos == "portable" {
+		return strings.Join(PortableArches, ",")
+	}
+	return Goarch
+}

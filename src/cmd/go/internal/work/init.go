@@ -39,7 +39,8 @@ var cfgChangedEnv []string
 
 func makeCfgChangedEnv() []string {
 	var env []string
-	if cfg.Getenv("GOOS") != cfg.Goos {
+	// (A list of systems in GOOS is the tools' to read too.)
+	if cfg.Getenv("GOOS") != cfg.Goos && cfg.Goos != "portable" {
 		env = append(env, "GOOS="+cfg.Goos)
 	}
 	if cfg.Getenv("GOARCH") != cfg.Goarch {

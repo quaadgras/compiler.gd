@@ -657,7 +657,7 @@ func (ctxt *Context) eval(x constraint.Expr, allTags map[string]bool) bool {
 	if ctxt.GOOS == "portable" {
 		// A file builds for portable if it builds for every host portable runs on:
 		// every one there is, also when the program is for some of
-		// them ($GOPORTABLEHOSTS), so that what is a host's own does not
+		// them (the list in $GOOS), so that what is a host's own does not
 		// depend on which other hosts the program has.
 		for _, host := range buildcfg.PortableAllHosts[ctxt.GOARCH] {
 			if !x.Eval(func(tag string) bool { return ctxt.matchPortableTag(tag, host, allTags) }) {

@@ -6,9 +6,7 @@ package buildcfg
 
 import (
 	"fmt"
-	"os"
 	"strings"
-	"sync"
 )
 
 // A program for several systems at once is built by naming them:
@@ -17,11 +15,13 @@ import (
 //
 // writes one file that runs on each named system on each named
 // architecture; every pair of them has to be one there is a host of
-// (PortableAllHosts). Inside the toolchain that is GOOS=portable, the port whose
-// programs find the system they run on when they start, for the hosts
-// $GOPORTABLEHOSTS on the architectures $GOPORTABLEARCHES: portableLists rewrites the
-// environment so, when the package starts. GOOS=portable is not a system to
-// ask for: only the toolchain says it, with $GOPORTABLEHOSTS.
+// (PortableAllHosts). Inside the toolchain a list of systems is
+// GOOS=portable, the port whose programs find the system they run on when
+// they start, and a list of architectures is its first, the one a tool
+// works for (the go command runs itself for each other one): GOOS and
+// GOARCH above are that, and the lists stay what the environment says,
+// for PortableHosts and PortableArches. GOOS=portable is not a system to
+// ask for.
 
 // PortableAllHosts lists, by GOARCH, the systems a GOOS=portable program can run
 // on, in the order of the runtime's numbers for them (portablehost). This
@@ -31,14 +31,47 @@ var PortableAllHosts = map[string][]string{
 	"arm64": {"linux", "darwin"},
 }
 
-// PortableHosts returns the systems the GOOS=portable program being built runs on
-// on goarch: those of PortableAllHosts that $GOPORTABLEHOSTS (a comma-separated
-// list) names, or all of them.
+// PortableHosts returns the systems the GOOS=portable program being built
+// runs on on goarch: those of PortableAllHosts that the list in $GOOS
+// names (all of them, if it is no list).
 func PortableHosts(goarch string) []string {
-	return PortableHostsOf(goarch, os.Getenv("GOPORTABLEHOSTS"))
+	return PortableHostsOf(goarch, PortableList())
 }
 
-// PortableHostsOf is PortableHosts for only as $GOPORTABLEHOSTS.
+// PortableList returns the list in $GOOS, as it is, or "" if $GOOS is no
+// list.
+func PortableList() string {
+	if goos := getenv("GOOS"); strings.Contains(goos, ",") {
+		return goos
+	}
+	return ""
+}
+
+// PortableListed returns the systems of the list in $GOOS, in its order.
+func PortableListed() []string {
+	return splitList(PortableList())
+}
+
+// PortableArches returns the architectures of the list in $GOARCH, in
+// its order, or nil if $GOARCH is no list.
+func PortableArches() []string {
+	if goarch := getenv("GOARCH"); strings.Contains(goarch, ",") {
+		return splitList(goarch)
+	}
+	return nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// PortableHostsOf is PortableHosts for only as the list in $GOOS.
 func PortableHostsOf(goarch, only string) []string {
 	all := PortableAllHosts[goarch]
 	if only == "" {
@@ -70,64 +103,53 @@ func PortableHostIndex(goarch, host string) int {
 // PortableError is what is wrong with lists in $GOOS and $GOARCH, if anything.
 var PortableError error
 
-var portableListsOnce sync.Once
-
-// portableLists makes $GOOS and $GOARCH that are lists GOOS=portable's.
-func portableLists() {
-	portableListsOnce.Do(func() {
-		goos, goarch := os.Getenv("GOOS"), os.Getenv("GOARCH")
-		if !strings.Contains(goos, ",") && !strings.Contains(goarch, ",") {
-			if goos == "portable" && os.Getenv("GOPORTABLEHOSTS") == "" {
-				PortableError = fmt.Errorf("GOOS=portable: name the systems the program is for, as in GOOS=linux,windows")
-			}
-			return
+// portableTarget returns what the toolchain's GOOS or GOARCH (key) is if
+// $GOOS or $GOARCH is a list: "portable", and the first architecture.
+// If the lists are no program's, it sets PortableError and returns what
+// the tools know, so that they get to say so.
+func portableTarget(key string) (string, bool) {
+	goos, goarch := getenv("GOOS"), getenv("GOARCH")
+	if !strings.Contains(goos, ",") && !strings.Contains(goarch, ",") {
+		if goos == "portable" {
+			PortableError = fmt.Errorf("GOOS=portable: name the systems the program is for, as in GOOS=linux,windows")
+			return map[string]string{"GOOS": defaultGOOS, "GOARCH": defaultGOARCH}[key], key == "GOOS"
 		}
-		split := func(s, def string) []string {
-			var out []string
-			for _, f := range strings.Split(s, ",") {
-				if f = strings.TrimSpace(f); f != "" {
-					out = append(out, f)
-				}
-			}
-			if out == nil {
-				out = []string{def}
-			}
-			return out
-		}
-		oses, arches := split(goos, defaultGOOS), split(goarch, defaultGOARCH)
-		fail := func(format string, args ...any) {
-			PortableError = fmt.Errorf("GOOS=%s GOARCH=%s: "+format, append([]any{goos, goarch}, args...)...)
-			// (Something the tools know, so that they get to say so.)
-			os.Setenv("GOOS", defaultGOOS)
-			os.Setenv("GOARCH", defaultGOARCH)
-		}
-		if len(oses) < 2 {
-			fail("several architectures of one system are not one file (yet)")
-			return
-		}
-		// Every system on every architecture.
-		var missing []string
-		for _, a := range arches {
-			for _, o := range oses {
-				if len(PortableHostsOf(a, o)) == 0 {
-					missing = append(missing, o+"/"+a)
-				}
+		return "", false
+	}
+	oses, arches := splitList(goos), splitList(goarch)
+	if oses == nil {
+		oses = []string{defaultGOOS}
+	}
+	if arches == nil {
+		arches = []string{defaultGOARCH}
+	}
+	fail := func(format string, args ...any) (string, bool) {
+		PortableError = fmt.Errorf("GOOS=%s GOARCH=%s: "+format, append([]any{goos, goarch}, args...)...)
+		return map[string]string{"GOOS": defaultGOOS, "GOARCH": defaultGOARCH}[key], true
+	}
+	if len(oses) < 2 {
+		return fail("several architectures of one system are not one file (yet)")
+	}
+	// Every system on every architecture.
+	var missing []string
+	for _, a := range arches {
+		for _, o := range oses {
+			if len(PortableHostsOf(a, o)) == 0 {
+				missing = append(missing, o+"/"+a)
 			}
 		}
-		if missing != nil {
-			var have []string
-			for _, a := range []string{"amd64", "arm64"} {
-				for _, o := range PortableAllHosts[a] {
-					have = append(have, o+"/"+a)
-				}
+	}
+	if missing != nil {
+		var have []string
+		for _, a := range []string{"amd64", "arm64"} {
+			for _, o := range PortableAllHosts[a] {
+				have = append(have, o+"/"+a)
 			}
-			fail("no %s in a program for several systems (there are %s)", strings.Join(missing, ", "), strings.Join(have, ", "))
-			return
 		}
-		list := strings.Join(oses, ",")
-		os.Setenv("GOOS", "portable")
-		os.Setenv("GOARCH", arches[0])
-		os.Setenv("GOPORTABLEHOSTS", list)
-		os.Setenv("GOPORTABLEARCHES", strings.Join(arches, ","))
-	})
+		return fail("no %s in a program for several systems (there are %s)", strings.Join(missing, ", "), strings.Join(have, ", "))
+	}
+	if key == "GOOS" {
+		return "portable", true
+	}
+	return arches[0], true
 }

@@ -12,9 +12,9 @@
 // _windows.go files) when a build has some. Both are kept in the build
 // cache.
 //
-// A test binary has one host's tests, as host copies: the host named by
-// $GOPORTABLETESTHOST, or else the one the go command runs on (the first host
-// if that is none of them).
+// A test binary has one host's tests, as host copies: the host the go
+// command runs on, or the first of the list in $GOOS if the go command's
+// is not in it.
 package portfiles
 
 import (
@@ -359,15 +359,23 @@ func hashDir(h io.Writer, dir string, all bool) error {
 	})
 }
 
+// TestHost returns the host whose tests a test binary has.
+func TestHost() string {
+	return config().TestHost
+}
+
 func config() portgen.Config {
 	acfg := portgen.DefaultConfig(cfg.GOROOT, cfg.Goarch)
-	switch h := os.Getenv("GOPORTABLETESTHOST"); {
-	case h != "":
-		acfg.TestHost = h
-	case slices.Contains(acfg.Hosts, runtime.GOOS):
+	acfg.TestHost = acfg.Hosts[0]
+	if slices.Contains(acfg.Hosts, runtime.GOOS) {
 		acfg.TestHost = runtime.GOOS
-	default:
-		acfg.TestHost = acfg.Hosts[0]
+	} else {
+		for _, h := range buildcfg.PortableListed() {
+			if slices.Contains(acfg.Hosts, h) {
+				acfg.TestHost = h
+				break
+			}
+		}
 	}
 	return acfg
 }

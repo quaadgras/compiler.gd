@@ -81,7 +81,7 @@ func MkEnv() []cfg.EnvVar {
 	env := []cfg.EnvVar{
 		// NOTE: Keep this list (and in general, all lists in source code) sorted by name.
 		{Name: "GO111MODULE", Value: cfg.Getenv("GO111MODULE")},
-		{Name: "GOARCH", Value: cfg.Goarch, Changed: cfg.Goarch != runtime.GOARCH},
+		{Name: "GOARCH", Value: cfg.GoarchEnv(), Changed: cfg.Goarch != runtime.GOARCH},
 		{Name: "GOAUTH", Value: cfg.GOAUTH, Changed: cfg.GOAUTHChanged},
 		{Name: "GOCACHE"},
 		{Name: "GOCACHEPROG", Value: cfg.GOCACHEPROG, Changed: cfg.GOCACHEPROGChanged},
@@ -104,7 +104,7 @@ func MkEnv() []cfg.EnvVar {
 		{Name: "GOMODCACHE", Value: cfg.GOMODCACHE, Changed: cfg.GOMODCACHEChanged},
 		{Name: "GONOPROXY", Value: cfg.GONOPROXY, Changed: cfg.GONOPROXYChanged},
 		{Name: "GONOSUMDB", Value: cfg.GONOSUMDB, Changed: cfg.GONOSUMDBChanged},
-		{Name: "GOOS", Value: cfg.Goos, Changed: cfg.Goos != runtime.GOOS},
+		{Name: "GOOS", Value: cfg.GoosEnv(), Changed: cfg.Goos != runtime.GOOS},
 
 		// GOPACKAGESDRIVER isn't read or used by cmd/go, so it can only
 		// be sourced from environment variables.

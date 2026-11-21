@@ -734,6 +734,10 @@ func (gcToolchain) ld(b *Builder, root *Action, targetPath, importcfg, mainpkg s
 	if portablePacked(root, ldBuildmode, ldflags) {
 		return portableLink(root, targetPath, ldflags, link)
 	}
+	if f := portableTestFormat(ldflags); f != "" {
+		// (A slice of its own: ldflags is the caller's.)
+		ldflags = append(slices.Clip(ldflags), "-portableformat="+f)
+	}
 	return link(targetPath, ldflags)
 }
 
