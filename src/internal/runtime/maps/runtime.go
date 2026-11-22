@@ -57,7 +57,7 @@ func isLocal(p unsafe.Pointer) bool
 // local reports whether the map is a local object: what it allocates is
 // then local too.
 func (m *Map) local() bool {
-	return isLocal(unsafe.Pointer(m))
+	return goexperiment.Sharing && isLocal(unsafe.Pointer(m))
 }
 
 // newDirectory allocates a directory of n tables.

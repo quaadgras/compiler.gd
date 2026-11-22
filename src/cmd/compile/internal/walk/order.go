@@ -286,7 +286,7 @@ func (o *orderState) addrTemp(n ir.Node) ir.Node {
 		// of more than one word that another goroutine may be storing
 		// is copied whole first (runtime/shared.go): any that is not in
 		// a variable of the stack.
-		if o.gd.Debug.NoShare == 0 && o.gd.Debug.NoTear == 0 && !o.gd.Flag.CompilingRuntime && o.gd.Ctxt.Arch.Family != sys.Wasm && types.HasTearable(n.Type()) {
+		if o.gd.Sharing && o.gd.Debug.NoTear == 0 && !o.gd.Flag.CompilingRuntime && o.gd.Ctxt.Arch.Family != sys.Wasm && types.HasTearable(n.Type()) {
 			if !ok || name.Op() != ir.ONAME || name.Class == ir.PEXTERN || name.Esc() == ir.EscHeap || name.Heapaddr != nil {
 				goto Copy
 			}

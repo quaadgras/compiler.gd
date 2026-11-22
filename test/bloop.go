@@ -1,5 +1,9 @@
 // errorcheck -0 -m=2
 
+// gd: GOEXPERIMENT=sharing escapes more (what is loaded from a map is
+// reached from it) and says, with -m=2, who reaches what.
+//go:build !goexperiment.sharing
+
 // Copyright 2025 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.

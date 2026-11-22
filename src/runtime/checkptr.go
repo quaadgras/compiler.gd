@@ -321,7 +321,7 @@ func checkptrBase(p unsafe.Pointer) uintptr {
 //
 //go:linkname reflect_checkptr reflect.checkptr
 func reflect_checkptr(p unsafe.Pointer, t *_type) {
-	if sharingEnabled { // not wasm: see cmd/compile/internal/base/flag.go
+	if GOARCH != "wasm" { // see cmd/compile/internal/base/flag.go
 		checkptrAlignment(p, t, 1)
 	}
 }

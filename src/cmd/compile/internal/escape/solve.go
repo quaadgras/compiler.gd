@@ -17,6 +17,10 @@ import (
 // walkAll computes the minimal dereferences between all pairs of
 // locations.
 func (b *batch) walkAll() {
+	if !b.gd.Sharing {
+		b.walkAllEscape()
+		return
+	}
 	b.prepareGroups(b.fns)
 
 	// We use a work queue to keep track of locations that we need
@@ -126,8 +130,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	// are stored there, and whether by themselves (viaDirect).
 	via := filter == nil && root.dynRoot != nil && root.dynRoot.plain && root.dynRoot.loc != nil && root.dynRoot.loc.param && b.typedOn()
 	track := filter != nil || via
-	// Via frames are for the call bits only (ownResult): without
-	// them, merging frames could requeue without end.
+	// Through which results the walk came (viaFrame) is only for
+	// ownResult, which needs the bits of calls. Without them it is not
+	// followed: its merges would requeue for nothing, and in a large
+	// package without end.
 	retVia := b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
 	root.viagen = walkgen
 	root.via, root.nodyn = nil, false
@@ -602,6 +608,183 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				closer = true
 			}
 			if closer {
+				// Check if already queued in todo.
+				if edge.src.queuedWalkOne != walkgen {
+					edge.src.queuedWalkOne = walkgen // Mark queued for this walkgen.
+
+					// Place at the back to possibly give time for
+					// other possible attribute changes to src.
+					todo.pushBack(edge.src)
+				}
+			}
+		}
+	}
+}
+
+// walkAllEscape is walkAll without the sharing analysis (shares.go,
+// base.Invocation.Sharing): the walks of stock escape analysis, from
+// every location, the heap, the mutator and the callee, and from the
+// escape candidates' location (escape-bits).
+func (b *batch) walkAllEscape() {
+	todo := newQueue(len(b.allLocs) + 4)
+	enqueue := func(loc *location) {
+		if !loc.queuedWalkAll {
+			loc.queuedWalkAll = true
+			if loc.hasAttr(attrEscapes) {
+				// Favor locations that escape to the heap,
+				// which in some cases allows attrEscape to
+				// propagate faster.
+				todo.pushFront(loc)
+			} else {
+				todo.pushBack(loc)
+			}
+		}
+	}
+	for _, loc := range b.allLocs {
+		todo.pushFront(loc)
+		loc.queuedWalkAll = true
+	}
+	for _, loc := range []*location{&b.mutatorLoc, &b.calleeLoc, &b.candidateLoc, &b.heapLoc} {
+		todo.pushFront(loc)
+		loc.queuedWalkAll = true
+	}
+	var walkgen uint32
+	for todo.len() > 0 {
+		root := todo.popFront()
+		root.queuedWalkAll = false
+		walkgen++
+		b.walkOneEscape(root, walkgen, enqueue)
+	}
+}
+
+// walkOneEscape is walkOne without the sharing analysis: stock escape
+// analysis's walk, and escape-bits' candidates (attrCandidateEscape,
+// addrHeld).
+func (b *batch) walkOneEscape(root *location, walkgen uint32, enqueue func(*location)) {
+	root.walkgen = walkgen
+	root.derefs = 0
+	root.dst = nil
+
+	if root.hasAttr(attrCalls) {
+		if clo, ok := root.n.(*ir.ClosureExpr); ok {
+			if fn := clo.Func; b.inMutualBatch(fn.Nname) && !fn.ClosureResultsLost() {
+				fn.SetClosureResultsLost(true)
+
+				// Re-flow from the closure's results, now that we're aware
+				// we lost track of them.
+				for _, result := range fn.Type().Results() {
+					enqueue(b.oldLoc(result.Nname.(*ir.Name)))
+				}
+			}
+		}
+	}
+
+	todo := newQueue(1)
+	todo.pushFront(root)
+
+	for todo.len() > 0 {
+		l := todo.popFront()
+		l.queuedWalkOne = 0 // no longer queued for walkOne
+
+		derefs := l.derefs
+		var newAttrs locAttr
+
+		// If l.derefs < 0, then l's address flows to root.
+		addressOf := derefs < 0
+		if addressOf {
+			// For a flow path like "root = &l; l = x",
+			// l's address flows to root, but x's does
+			// not. We recognize this by lower bounding
+			// derefs at 0.
+			derefs = 0
+
+			// gd escape-bits: if root keeps a pointer to l, l
+			// can't be an escape candidate (see addrHeld).
+			if b.holdsAddr(root, l) {
+				l.addrHeld = true
+			}
+
+			// If l's address flows somewhere that
+			// outlives it, then l needs to be heap
+			// allocated.
+			if b.outlives(root, l) {
+				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || b.gd.Flag.LowerM >= 2) {
+					if b.gd.Flag.LowerM >= 2 {
+						fmt.Printf("%s: %v escapes to heap in %v:\n", b.gd.FmtPos(l.n.Pos()), l.n, ir.FuncName(l.curfn))
+					}
+					explanation := b.explainPath(root, l)
+					if logopt.Enabled() {
+						var e_curfn *ir.Func // TODO(mdempsky): Fix.
+						logopt.LogOpt(b.gd, l.n.Pos(), "escape", "escape", ir.FuncName(e_curfn), fmt.Sprintf("%v escapes to heap", l.n), explanation)
+					}
+				}
+				// gd escape-bits: when the sole outliving root is
+				// a candidate-only location, propagate
+				// attrCandidateEscape in place of attrEscapes.
+				// See doc/gd/escape-bits.md.
+				if root.hasAttr(attrCandidateEscape) && !root.hasAttr(attrEscapes) {
+					newAttrs |= attrCandidateEscape | attrPersists | attrMutates | attrCalls
+				} else {
+					newAttrs |= attrEscapes | attrPersists | attrMutates | attrCalls
+				}
+			} else
+			// If l's address flows to a persistent location, then l needs
+			// to persist too.
+			if root.hasAttr(attrPersists) {
+				newAttrs |= attrPersists
+			}
+		}
+
+		if derefs == 0 {
+			newAttrs |= root.attrs & (attrMutates | attrCalls)
+		}
+
+		// l's value flows to root. If l is a function
+		// parameter and root is the heap or a
+		// corresponding result parameter, then record
+		// that value flow for tagging the function
+		// later.
+		if l.param {
+			if b.outlives(root, l) {
+				if !l.hasAttr(attrEscapes) && (logopt.Enabled() || b.gd.Flag.LowerM >= 2) {
+					if b.gd.Flag.LowerM >= 2 {
+						fmt.Printf("%s: parameter %v leaks to %s for %v with derefs=%d:\n", b.gd.FmtPos(l.n.Pos()), l.n, b.explainLoc(root), ir.FuncName(l.curfn), derefs)
+					}
+					explanation := b.explainPath(root, l)
+					if logopt.Enabled() {
+						var e_curfn *ir.Func // TODO(mdempsky): Fix.
+						logopt.LogOpt(b.gd, l.n.Pos(), "leak", "escape", ir.FuncName(e_curfn),
+							fmt.Sprintf("parameter %v leaks to %s with derefs=%d", l.n, b.explainLoc(root), derefs), explanation)
+					}
+				}
+				l.leakTo(b.gd, root, derefs)
+			}
+			if root.hasAttr(attrMutates) {
+				l.paramEsc.AddMutator(b.gd, derefs)
+			}
+			if root.hasAttr(attrCalls) {
+				l.paramEsc.AddCallee(b.gd, derefs)
+			}
+		}
+
+		if newAttrs&^l.attrs != 0 {
+			l.attrs |= newAttrs
+			enqueue(l)
+			if l.attrs&attrEscapes != 0 {
+				continue
+			}
+		}
+
+		for i, edge := range l.edges {
+			if edge.src.hasAttr(attrEscapes) {
+				continue
+			}
+			d := derefs + edge.derefs
+			if edge.src.walkgen != walkgen || edge.src.derefs > d {
+				edge.src.walkgen = walkgen
+				edge.src.derefs = d
+				edge.src.dst = l
+				edge.src.dstEdgeIdx = i
 				// Check if already queued in todo.
 				if edge.src.queuedWalkOne != walkgen {
 					edge.src.queuedWalkOne = walkgen // Mark queued for this walkgen.

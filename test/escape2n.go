@@ -807,9 +807,9 @@ func foo97(m [1]*int) *int { // ERROR "leaking param: m to result ~r0 level=0$"
 	return m[0]
 }
 
-// does not leak m, but what it holds (gd: what is loaded from a map is
-// reached from it, for which goroutines reach it)
-func foo98(m map[int]*int) *int { // ERROR "leaking param: m to result ~r0 level=1$"
+// does not leak m (gd: with GOEXPERIMENT=sharing, what it holds: what is
+// loaded from a map is reached from it, for which goroutines reach it)
+func foo98(m map[int]*int) *int { // ERROR "m does not escape$|leaking param: m to result ~r0 level=1$"
 	return m[0]
 }
 

@@ -79,6 +79,9 @@ func (e *escape) recvHole(ks []hole, call *ir.CallExpr) hole {
 // convHole returns the hole for the operand of a conversion of a value
 // of type t to the interface type iface, whose result goes to k.
 func (e *escape) convHole(k hole, t, iface *types.Type) hole {
+	if !e.gd.Sharing {
+		return k
+	}
 	if k.dst != &e.blankLoc && k.derefs >= 0 {
 		k.recvAllOK = e.recvKeepsNothing(t, nil)
 		k.recvOK = k.recvAllOK || e.recvKeepsNothing(t, iface)
@@ -218,6 +221,9 @@ func (b *batch) recvKeepsNothing(t, iface *types.Type) bool {
 // interface of type from holds a value of type t, whose result goes to
 // k.
 func (e *escape) assertHole(k hole, t, from *types.Type) hole {
+	if !e.gd.Sharing {
+		return k
+	}
 	k = e.assertHole1(k, t, from)
 	if k.dst != &e.blankLoc && t != nil && from != nil && t.IsInterface() && !(from.IsInterface() && !t.HasShape() && !from.HasShape() && hasMethods(from, t)) {
 		// Methods may be called that the interface's type does

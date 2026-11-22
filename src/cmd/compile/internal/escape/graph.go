@@ -497,7 +497,7 @@ func (b *batch) flow(k hole, src *location) {
 		// whether another goroutine may reach src: dst may only learn
 		// then that one may reach it (shares.go). For escaping, the
 		// solver does not follow an edge from a location that escapes.
-		if src.n != nil || src.curfn != nil {
+		if b.gd.Sharing && (src.n != nil || src.curfn != nil) {
 			dst.edges = append(dst.edges, edge{src: src, derefs: k.derefs, notes: k.notes, share: true, ro: k.ro, recvOK: k.recvOK, recvAllOK: k.recvAllOK, recvRes: k.recvRes, loose: k.loose, retFlow: k.retFlow, argFlow: k.argFlow, site: k.site})
 		}
 		return
@@ -566,17 +566,30 @@ func (b *batch) noteAddrTaken(src *location, asCandidateArg bool) {
 }
 
 func (b *batch) heapHole() hole      { return b.heapLoc.asHole() }
-func (b *batch) shareHole() hole     { return b.shareLoc.asHole() }
-func (b *batch) convShareHole() hole { return b.convShareLoc.asHole() }
-func (b *batch) ownHeapHole() hole   { return b.ownHeapLoc.asHole() }
-func (b *batch) moveHole() hole      { return b.moveLoc.asHole() }
-func (b *batch) checkHole() hole     { return b.checkLoc.asHole() }
-func (b *batch) recvHeldHole() hole  { return b.recvHeldLoc.asHole() }
-func (b *batch) recvAnyHole() hole   { return b.recvAnyLoc.asHole() }
 func (b *batch) mutatorHole() hole   { return b.mutatorLoc.asHole() }
 func (b *batch) calleeHole() hole    { return b.calleeLoc.asHole() }
 func (b *batch) discardHole() hole   { return b.blankLoc.asHole() }
 func (b *batch) candidateHole() hole { return b.candidateLoc.asHole() }
+
+// The holes of the goroutine sharing analysis (shares.go). Without the
+// sharing experiment (base.Invocation.Sharing) the places that only say
+// who reaches what are no places at all, and the heaps of their own are
+// the heap: the graph has nothing that stock escape analysis does not.
+func (b *batch) shareHole() hole     { return b.sharingHole(&b.shareLoc, &b.blankLoc) }
+func (b *batch) convShareHole() hole { return b.sharingHole(&b.convShareLoc, &b.blankLoc) }
+func (b *batch) recvHeldHole() hole  { return b.sharingHole(&b.recvHeldLoc, &b.blankLoc) }
+func (b *batch) recvAnyHole() hole   { return b.sharingHole(&b.recvAnyLoc, &b.blankLoc) }
+func (b *batch) ownHeapHole() hole   { return b.sharingHole(&b.ownHeapLoc, &b.heapLoc) }
+func (b *batch) moveHole() hole      { return b.sharingHole(&b.moveLoc, &b.heapLoc) }
+func (b *batch) checkHole() hole     { return b.sharingHole(&b.checkLoc, &b.heapLoc) }
+
+// sharingHole returns l's hole, or without sharing off's.
+func (b *batch) sharingHole(l, off *location) hole {
+	if !b.gd.Sharing {
+		return off.asHole()
+	}
+	return l.asHole()
+}
 
 func (b *batch) oldLoc(n *ir.Name) *location {
 	if n.Canonical().Opt == nil {
@@ -644,6 +657,11 @@ func (e *escape) newLoc(n ir.Node, persists bool) *location {
 // teeHole returns a new hole that flows into each hole of ks,
 // similar to the Unix tee(1) command.
 func (e *escape) teeHole(ks ...hole) hole {
+	if !e.gd.Sharing && slices.ContainsFunc(ks, func(k hole) bool { return k.dst == &e.blankLoc }) {
+		// (The holes of the sharing analysis are discards without
+		// it: no place of their own for them.)
+		ks = slices.DeleteFunc(slices.Clone(ks), func(k hole) bool { return k.dst == &e.blankLoc })
+	}
 	if len(ks) == 0 {
 		return e.discardHole()
 	}

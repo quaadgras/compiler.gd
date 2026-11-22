@@ -91,7 +91,7 @@ const (
 
 func (b *batch) callBitsOn() bool {
 	d := &b.gd.Debug
-	if d.NoShare != 0 || d.NoLocal != 0 || d.NoLocalAlloc != 0 || d.NoLocalDyn != 0 || d.NoLocalBits != 0 {
+	if !b.gd.Sharing || d.NoLocal != 0 || d.NoLocalAlloc != 0 || d.NoLocalDyn != 0 || d.NoLocalBits != 0 {
 		return false
 	}
 	_, ok := splitHeap(b.gd)
@@ -598,7 +598,7 @@ func (b *batch) callBits1(apply bool) {
 
 func (b *batch) shareTagsOn() bool {
 	d := &b.gd.Debug
-	return d.NoShare == 0 && d.NoLocal == 0 && d.NoLocalAlloc == 0 && d.NoLocalBits == 0
+	return b.gd.Sharing && d.NoLocal == 0 && d.NoLocalAlloc == 0 && d.NoLocalBits == 0
 }
 
 // appendHeapHole is where the elements of an appended slice flow, for
@@ -1158,6 +1158,9 @@ func (e *escape) storeThroughArg(p ir.Node) hole {
 // masks (ir.EscMaskShared): the callers of a function that is only known
 // when the program runs read it there.
 func (b *batch) shareNote(fn *ir.Func, i int, esc leaks) string {
+	if !b.gd.Sharing {
+		return esc.Encode()
+	}
 	note := esc.Encode()
 	if fl := b.shareFlags(fn, i, esc); fl != 0 {
 		return "esc:" + string(esc[:]) + string([]byte{fl})

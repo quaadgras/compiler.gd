@@ -371,9 +371,10 @@ func appendStores1(b []byte, stores uint16, n int, links func(i int) []ShareLink
 
 // LocalSpans reports whether the target has spans of local objects
 // (runtime.localSpans): only there does compiled code ask whether an
-// object is local, and the linker need the records.
+// object is local, and the linker need the records. Never without the
+// sharing experiment (base.Invocation.Sharing).
 func LocalSpans(gd *base.Invocation) bool {
-	if gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
+	if !gd.Sharing || gd.Flag.Race || gd.Flag.MSan || gd.Flag.ASan {
 		return false
 	}
 	switch gd.Ctxt.Headtype {

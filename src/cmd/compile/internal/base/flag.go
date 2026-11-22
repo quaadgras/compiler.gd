@@ -199,7 +199,7 @@ func (gd *Invocation) ParseFlags(args []string) {
 	gd.Debug.ZeroCopy = 1
 	gd.Debug.RangeFuncCheck = 1
 	gd.Debug.MergeLocals = 1
-	gd.Debug.NoShare = 1 // goroutine sharing is off by default for now: -d=noshare=0 turns it on
+	gd.Sharing = buildcfg.Experiment.Sharing
 
 	gd.Debug.Checkptr = -1 // so we can tell whether it is set explicitly
 

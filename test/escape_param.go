@@ -1,5 +1,7 @@
 // errorcheck -0 -m -l
 
+//go:build !goexperiment.sharing
+
 // Copyright 2015 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -47,7 +49,7 @@ func param2(p1 *int, p2 **int) { // ERROR "leaking param: p1$" "p2 does not esca
 }
 
 func caller2a() {
-	i := 0 // gd: stored through the other argument only, which stays on the stack
+	i := 0 // ERROR "moved to heap: i$"
 	var p *int
 	param2(&i, &p)
 	_ = p
@@ -163,7 +165,7 @@ func (p *Pair) param4(i *int) { // ERROR "p does not escape$" "leaking param: i$
 }
 
 func caller4a() {
-	i := 0 // gd: stored through the other argument only, which stays on the stack
+	i := 0 // ERROR "moved to heap: i$"
 	p := Pair{}
 	p.param4(&i)
 	_ = p

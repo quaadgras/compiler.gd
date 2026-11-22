@@ -63,7 +63,7 @@ func (s *state) tearGuard(t *types.Type, addr *ssa.Value) bool {
 // whose memory is not shared, or what a variable that only points to such
 // memory points to.
 func (s *state) localExpr(n ir.Node) bool {
-	if s.gd.Debug.NoShare != 0 || s.gd.Debug.NoLocal != 0 {
+	if !s.gd.Sharing || s.gd.Debug.NoLocal != 0 {
 		return false
 	}
 	for {

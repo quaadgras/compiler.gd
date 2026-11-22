@@ -504,8 +504,10 @@ func Main(arch *sys.Arch, theArch Arch, args []string, workDir string, status *i
 	bench.Start("deadcode")
 	deadcode(ctxt)
 
-	bench.Start("sharemasks")
-	ctxt.shareMasks()
+	if buildcfg.Experiment.Sharing {
+		bench.Start("sharemasks")
+		ctxt.shareMasks()
+	}
 
 	bench.Start("linksetup")
 	ctxt.linksetup()

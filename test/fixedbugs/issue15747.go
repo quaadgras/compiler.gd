@@ -1,6 +1,6 @@
-// errorcheck -0 -live -d=noshare
+// errorcheck -0 -live
 
-//go:build !goexperiment.cgocheck2
+//go:build !goexperiment.cgocheck2 && !goexperiment.sharing
 
 // Copyright 2016 The Go Authors.  All rights reserved.
 // Use of this source code is governed by a BSD-style
