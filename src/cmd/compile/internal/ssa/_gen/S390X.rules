@@ -973,11 +973,11 @@
 // Offsets from SB must not be merged into unaligned memory accesses because
 // loads/stores using PC-relative addressing directly must be aligned to the
 // size of the target.
-(MOVDload   [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (t.IsPtr() && t.Elem().Alignment()%8 == 0 && (off1+off2)%8 == 0)) =>
+(MOVDload   [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (!isStringDataSym(mergeSym(sym1, sym2)) && t.IsPtr() && t.Elem().Alignment()%8 == 0 && (off1+off2)%8 == 0)) =>
 	(MOVDload  [off1+off2] {mergeSym(sym1,sym2)} base mem)
-(MOVWZload  [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (t.IsPtr() && t.Elem().Alignment()%4 == 0 && (off1+off2)%4 == 0)) =>
+(MOVWZload  [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (!isStringDataSym(mergeSym(sym1, sym2)) && t.IsPtr() && t.Elem().Alignment()%4 == 0 && (off1+off2)%4 == 0)) =>
 	(MOVWZload  [off1+off2] {mergeSym(sym1,sym2)} base mem)
-(MOVHZload  [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (t.IsPtr() && t.Elem().Alignment()%2 == 0 && (off1+off2)%2 == 0)) =>
+(MOVHZload  [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (!isStringDataSym(mergeSym(sym1, sym2)) && t.IsPtr() && t.Elem().Alignment()%2 == 0 && (off1+off2)%2 == 0)) =>
 	(MOVHZload  [off1+off2] {mergeSym(sym1,sym2)} base mem)
 (MOVBZload  [off1] {sym1} (MOVDaddr [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) =>
 	(MOVBZload  [off1+off2] {mergeSym(sym1,sym2)} base mem)
@@ -986,9 +986,9 @@
 (FMOVDload [off1] {sym1} (MOVDaddr [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) =>
 	(FMOVDload [off1+off2] {mergeSym(sym1,sym2)} base mem)
 
-(MOVWload [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (t.IsPtr() && t.Elem().Alignment()%4 == 0 && (off1+off2)%4 == 0)) =>
+(MOVWload [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (!isStringDataSym(mergeSym(sym1, sym2)) && t.IsPtr() && t.Elem().Alignment()%4 == 0 && (off1+off2)%4 == 0)) =>
 	(MOVWload [off1+off2] {mergeSym(sym1,sym2)} base mem)
-(MOVHload [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (t.IsPtr() && t.Elem().Alignment()%2 == 0 && (off1+off2)%2 == 0)) =>
+(MOVHload [off1] {sym1} (MOVDaddr <t> [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) && (base.Op != OpSB || (!isStringDataSym(mergeSym(sym1, sym2)) && t.IsPtr() && t.Elem().Alignment()%2 == 0 && (off1+off2)%2 == 0)) =>
 	(MOVHload [off1+off2] {mergeSym(sym1,sym2)} base mem)
 (MOVBload [off1] {sym1} (MOVDaddr [off2] {sym2} base) mem) && is32Bit(int64(off1)+int64(off2)) && canMergeSym(sym1, sym2) =>
 	(MOVBload [off1+off2] {mergeSym(sym1,sym2)} base mem)

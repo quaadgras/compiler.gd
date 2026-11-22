@@ -494,6 +494,14 @@ func isSpecializedMalloc(aux Aux) bool {
 }
 
 // canLoadUnaligned reports if the architecture supports unaligned load operations.
+// isStringDataSym reports whether sym is the data of a string constant,
+// which the linker does not align (s390x's PC-relative loads need the
+// alignment of their size).
+func isStringDataSym(sym Sym) bool {
+	s, ok := sym.(*obj.LSym)
+	return ok && strings.HasPrefix(s.Name, "go:string.")
+}
+
 func canLoadUnaligned(c *Config) bool {
 	return c.ctxt.Arch.Alignment == 1
 }
