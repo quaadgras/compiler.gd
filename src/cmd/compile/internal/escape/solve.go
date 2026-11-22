@@ -126,6 +126,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 	// are stored there, and whether by themselves (viaDirect).
 	via := filter == nil && root.dynRoot != nil && root.dynRoot.plain && root.dynRoot.loc != nil && root.dynRoot.loc.param && b.typedOn()
 	track := filter != nil || via
+	// Via frames are for the call bits only (ownResult): without
+	// them, merging frames could requeue without end.
+	retVia := b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
 	root.viagen = walkgen
 	root.via, root.nodyn = nil, false
 	root.filtergen = walkgen
@@ -247,10 +250,10 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 		// the bit of its results, which what is returned goes by.
 		var lvia *viaFrame
 		lnodyn := false
-		if l.viagen == walkgen && b.gd.Debug.NoLocalRet == 0 {
+		if l.viagen == walkgen && retVia {
 			lvia, lnodyn = l.via, l.nodyn
 		}
-		ownResult := (lnodyn || lvia != nil) && b.callBitsOn() && b.gd.Debug.NoLocalRet == 0
+		ownResult := (lnodyn || lvia != nil) && retVia
 		// at is what the walk shares of l, and eff what it shares
 		// of what flows to l (typed.go).
 		at := filterOff
@@ -561,6 +564,7 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 			}
 			requeue := false
 			switch src := edge.src; {
+			case !retVia:
 			case src.viagen != walkgen:
 				src.viagen = walkgen
 				src.via, src.nodyn = sv, snodyn
