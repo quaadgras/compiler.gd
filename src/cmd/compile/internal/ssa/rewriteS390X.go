@@ -6523,7 +6523,7 @@ func rewriteValueS390X_OpS390XCMPU(v *Value) bool {
 func rewriteValueS390X_OpS390XCMPUconst(v *Value) bool {
 	v_0 := v.Args[0]
 	// match: (CMPUconst (MOVDconst [x]) [y])
-	// cond: uint64(x)==uint64(y)
+	// cond: uint64(x)==uint64(uint32(y))
 	// result: (FlagEQ)
 	for {
 		y := auxIntToInt32(v.AuxInt)
@@ -6531,14 +6531,14 @@ func rewriteValueS390X_OpS390XCMPUconst(v *Value) bool {
 			break
 		}
 		x := auxIntToInt64(v_0.AuxInt)
-		if !(uint64(x) == uint64(y)) {
+		if !(uint64(x) == uint64(uint32(y))) {
 			break
 		}
 		v.reset(OpS390XFlagEQ)
 		return true
 	}
 	// match: (CMPUconst (MOVDconst [x]) [y])
-	// cond: uint64(x)<uint64(y)
+	// cond: uint64(x)<uint64(uint32(y))
 	// result: (FlagLT)
 	for {
 		y := auxIntToInt32(v.AuxInt)
@@ -6546,14 +6546,14 @@ func rewriteValueS390X_OpS390XCMPUconst(v *Value) bool {
 			break
 		}
 		x := auxIntToInt64(v_0.AuxInt)
-		if !(uint64(x) < uint64(y)) {
+		if !(uint64(x) < uint64(uint32(y))) {
 			break
 		}
 		v.reset(OpS390XFlagLT)
 		return true
 	}
 	// match: (CMPUconst (MOVDconst [x]) [y])
-	// cond: uint64(x)>uint64(y)
+	// cond: uint64(x)>uint64(uint32(y))
 	// result: (FlagGT)
 	for {
 		y := auxIntToInt32(v.AuxInt)
@@ -6561,7 +6561,7 @@ func rewriteValueS390X_OpS390XCMPUconst(v *Value) bool {
 			break
 		}
 		x := auxIntToInt64(v_0.AuxInt)
-		if !(uint64(x) > uint64(y)) {
+		if !(uint64(x) > uint64(uint32(y))) {
 			break
 		}
 		v.reset(OpS390XFlagGT)

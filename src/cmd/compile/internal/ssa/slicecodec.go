@@ -562,7 +562,7 @@ func (c *sliceCodecState) call(b *Block, pos src.XPos, fn *obj.LSym, mem, p, l, 
 	inRegs := f.ABIDefault == f.ABI1 && len(config.intParamRegs) >= 3
 	if !inRegs {
 		for i, a := range args {
-			off := config.ctxt.Arch.FixedFrameSize + aux.OffsetOfArg(int64(i))
+			off := aux.OffsetOfArg(int64(i)) // (from SP: FixedFrameSize is in it)
 			addr := b.NewValue1I(pos, OpOffPtr, argTypes[i].PtrTo(), off, c.sp)
 			mem = b.NewValue3A(pos, OpStore, types.TypeMem, argTypes[i], addr, a, mem)
 		}
@@ -579,7 +579,7 @@ func (c *sliceCodecState) call(b *Block, pos src.XPos, fn *obj.LSym, mem, p, l, 
 		call = b.NewValue0A(pos, OpStaticCall, types.TypeResultMem, aux)
 		call.AddArgs(args...)
 		m = b.NewValue1I(pos, OpSelectN, types.TypeMem, 0, call)
-		off := config.ctxt.Arch.FixedFrameSize + aux.OffsetOfResult(0)
+		off := aux.OffsetOfResult(0)
 		res = b.NewValue2(pos, OpLoad, typs.BytePtr, b.NewValue1I(pos, OpOffPtr, typs.BytePtrPtr, off, c.sp), m)
 	}
 	call.AuxInt = abi.ArgWidth()

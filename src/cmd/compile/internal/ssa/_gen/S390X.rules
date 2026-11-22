@@ -1043,9 +1043,10 @@
 (CMPconst (MOVDconst [x]) [y]) && x==int64(y) => (FlagEQ)
 (CMPconst (MOVDconst [x]) [y]) && x<int64(y) => (FlagLT)
 (CMPconst (MOVDconst [x]) [y]) && x>int64(y) => (FlagGT)
-(CMPUconst (MOVDconst [x]) [y]) && uint64(x)==uint64(y) => (FlagEQ)
-(CMPUconst (MOVDconst [x]) [y]) && uint64(x)<uint64(y) => (FlagLT)
-(CMPUconst (MOVDconst [x]) [y]) && uint64(x)>uint64(y) => (FlagGT)
+// (CMPUconst's immediate is zero-extended: an unsigned 32-bit value.)
+(CMPUconst (MOVDconst [x]) [y]) && uint64(x)==uint64(uint32(y)) => (FlagEQ)
+(CMPUconst (MOVDconst [x]) [y]) && uint64(x)<uint64(uint32(y)) => (FlagLT)
+(CMPUconst (MOVDconst [x]) [y]) && uint64(x)>uint64(uint32(y)) => (FlagGT)
 
 (CMPWconst (MOVDconst [x]) [y]) && int32(x)==int32(y) => (FlagEQ)
 (CMPWconst (MOVDconst [x]) [y]) && int32(x)<int32(y) => (FlagLT)

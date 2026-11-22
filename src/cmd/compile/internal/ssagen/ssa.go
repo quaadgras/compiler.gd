@@ -2231,8 +2231,17 @@ func (s *state) inlineStageTemp(pos src.XPos) *ssa.Value {
 func (s *state) spreadStageTemp(pos src.XPos) *ssa.Value {
 	t := types.Types[types.TSTRING]
 	if !types.StringWasm32() {
-		// (24 bytes, a slice's: a string is 16 bytes with two words.)
-		t = types.NewSlice(types.ByteType)
+		// (24 bytes: a pointer and two words; a string is 16 bytes
+		// with two words, and so is a slice where it is packed,
+		// doc/gd/slice16.md.)
+		blankSym := types.BlankSym(s.gd)
+		t = types.NewStruct([]*types.Field{
+			{Sym: blankSym, Type: s.f.Config.Types.BytePtr},
+			{Sym: blankSym, Type: types.Types[types.TUINTPTR]},
+			{Sym: blankSym, Type: types.Types[types.TUINTPTR]},
+		})
+		t.SetNoalg(true)
+		types.CalcStructSize(s.gd, t)
 	}
 	tmp := typecheck.TempAt(s.gd, pos, s.curfn, t)
 	tmp.SetAddrtaken(true)
