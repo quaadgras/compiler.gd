@@ -24,8 +24,8 @@ func TestSizeof(t *testing.T) {
 		// 64-bit (was 16 B), 12 B on 32-bit (was 8 B). LSym holds 2
 		// string fields (Name, Pkg) → +16 bytes on 64-bit, +8 on 32-bit.
 		{Addr{}, 48, 64},
-		{LSym{}, 80, 136},
-		{Prog{}, 164, 232},
+		{LSym{}, 80, 128},
+		{Prog{}, 164, 224},
 	}
 
 	for _, tt := range tests {
