@@ -205,10 +205,11 @@ func (s *state) stringTaggedEq(l, r *ssa.Value) *ssa.Value {
 }
 
 // stringTaggedEqConst is stringTaggedEq against a non-empty constant c
-// (r): a constant of 1 to 15 bytes is inline, so l equals it if its
-// words are c's, or if l is not inline, has the length of c, and its
-// bytes are c's (exact-width loads: no call); a longer one is a length
-// compare and memequal.
+// (r), whose value is in rodata, but which a string made at run time
+// holds inline if it is 1 to 15 bytes long: l equals it if its words are
+// those c's would be inline, or if l is not inline, has the length of
+// c, and its bytes are c's (exact-width loads: no call); a longer one is
+// a length compare and memequal.
 func (s *state) stringTaggedEqConst(l, r *ssa.Value, c string) *ssa.Value {
 	boolT := types.Types[types.TBOOL]
 	intT := types.Types[types.TINT]

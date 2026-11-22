@@ -36,11 +36,15 @@ inline:      w0 @0  1<<63 | n<<56 | bytes 8..14   (n = 1..15)
   in order in the string itself, whose w0 comes first. On a big-endian
   target w1 is bytes 0..7 as a big-endian load of them has them, and
   `w0<<8` is bytes 8..15 (`types.StringTaggedWords`).
-- **Canonical.** The unused bytes of an inline string are zero and the
-  empty string is (nil, 0), never inline: two inline strings are equal
-  exactly when their words are. A string that is not inline may be short
-  (`unsafe.String`, a substring of a longer string, `-X` and embedded
-  strings), and equal an inline one: equality and hashing go by the bytes.
+- **Not canonical.** A string made at run time of 1 to 15 bytes is
+  inline (its unused bytes zero); a constant is not, however short: its
+  bytes are in rodata, and it is their address and its length, as are
+  `unsafe.String`, a substring of a longer string, `-X` and embedded
+  strings. So a value of 1 to 15 bytes may have either form, and nothing
+  infers the form from the length: it is decoded from the tag. Two inline
+  strings are equal exactly when their words are; otherwise equal words
+  are a fast "equal" and the bytes decide (equality and hashing go by the
+  bytes). The empty string is (nil, 0), never inline.
 - `len(s) = inline ? w0>>56&15 : w1` (dec.rules lowers `StringLen` to
   shifts and masks, no branch; a string the compiler made of an address
   and a length, `stringHeapPtr`, has the length).
@@ -50,7 +54,8 @@ inline:      w0 @0  1<<63 | n<<56 | bytes 8..14   (n = 1..15)
   the same length is compared with `memequal`, and an inline one is
   unequal to another inline one. An inline string and one that is not, of
   the same length, call `runtime.streqfast`. Against a constant of 1..15
-  bytes the constant's words are immediates.
+  bytes the words the constant would have inline are immediates, then a
+  string not inline of its length compares bytes (loads of exact width).
 - **Ordering** (`cmpstring`, amd64 and arm64 assembly): two inline
   strings compare as their byte-swapped words do, w1 then w0, whose low
   byte after the swap is the tag (the shorter of two equal prefixes is
@@ -59,12 +64,11 @@ inline:      w0 @0  1<<63 | n<<56 | bytes 8..14   (n = 1..15)
 - **Hash**: `strhash` hashes the bytes (an inline string's from a 16-byte
   copy) with the seed, so a key hashes alike in either form.
 
-Literals of 1..15 bytes are inline (immediates); longer ones are their
-`go:string.*` symbol and their length. (The 24-byte form also pointed an
-inline literal's word 0 at its bytes in rodata, so `unsafe.StringData` of
-a short literal was stable; an inline string has no address, so
-`unsafe.StringData` of one that escapes is a copy in the heap,
-`runtime.stringDataHeap`, and of one that does not, a copy in the frame.)
+Constants stay in rodata: `unsafe.StringData` of a constant is the
+stable address of its bytes, as on stock Go, and C reads them in place.
+(The 24-byte form made short constants inline.) An inline string has no
+address: `unsafe.StringData` of one that escapes is a copy in the heap
+(`runtime.stringDataHeap`), of one that does not, a copy in the frame.
 
 ## 2. The collector and word 0
 
@@ -98,7 +102,9 @@ looks at a pointer word ignores it:
 
 Inline when 1..15 bytes: `slicebytetostring`, `concatstrings`,
 `slicerunetostring`, `intstring`, `sliceinlinestring` (a substring of an
-inline string), literals. Heap (any length): `rawstring` users
+inline string), and what calls them (`strconv`, `fmt`, conversions).
+Not inline (any length): constants (`ConstString` lowers to the
+go:string symbol, static data writes its address), `rawstring` users
 (`gostring`, `gostringn`, ...), `unsafe.String`, substrings of heap
 strings, the linker's `-X` and runtime strings, `//go:embed`.
 
@@ -116,7 +122,7 @@ pointer, the tag if inline), `StringWord1` w1, `StringLen` the length;
 registers. `ssagen/stringtagged.go` has the index, the address of the
 bytes (`stringBytesTransient`: an inline string's are copied to the
 frame), slicing (`runtime.sliceinlinestring` for an inline source) and
-equality. Static data writes an inline string's words as integers.
+equality. A constant's bytes are its go:string symbol's.
 
 Assembly that takes a string (`internal/bytealg`: `IndexString`,
 `IndexByteString`, `CountString`, `cmpstring` on amd64 and arm64) tests

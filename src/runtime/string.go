@@ -354,7 +354,7 @@ func (s *stringStruct) isInline() bool {
 //go:nosplit
 func (s *stringStruct) length() int {
 	if s.isInline() {
-		return int(uintptr(s.str) >> abi.StringTagShift & 15)
+		return int(uint64(uintptr(s.str)) >> abi.StringTagShift & 15)
 	}
 	return s.len
 }

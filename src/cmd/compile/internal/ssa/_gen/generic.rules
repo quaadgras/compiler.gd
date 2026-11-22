@@ -1010,10 +1010,9 @@
 // happens in a later pass, dec, so that these operations are available
 // to other passes for optimizations.
 //
-// Two words (types.StringTwoWords): w0 and w1. With 8-byte words a
-// constant of 1 to 15 bytes is inline (types.StringTagged: w0 a pointer
-// whose bits are the tag and bytes 8..14, w1 bytes 0..7), a longer one
-// its go:string symbol and its length.
+// Two words (types.StringTwoWords): w0 and w1. A constant is its
+// go:string symbol and its length, never inline (types.StringTagged),
+// however short: only strings made at run time are.
 (StringPtr  (StringMake (Addr <t> {s} base) _)) => (Addr <t> {s} base)
 (StringLen  (StringMake p n)) && config.stringTwoWords() && (config.PtrSize == 4 || stringHeapPtr(p)) => n
 (StringLen  (StringMake (Const64 [w0]) _)) && config.stringTagged() && w0 < 0 => (Const64 <typ.Int> [int64(uint64(w0)>>56)&15])
@@ -1029,11 +1028,7 @@
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)} (SB))
     (Const32 <typ.Int> [int32(len(str))]))
-(ConstString {str}) && config.stringTagged() && len(str) > 0 && len(str) <= 15 =>
-  (StringMake
-    (Const64 <typ.BytePtr> [stringTaggedW0(str, config.BigEndian)])
-    (Const64 <typ.Int> [stringTaggedW1(str, config.BigEndian)]))
-(ConstString {str}) && config.stringTagged() && len(str) > 15 =>
+(ConstString {str}) && config.stringTagged() && len(str) > 0 =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)} (SB))
     (Const64 <typ.Int> [int64(len(str))]))

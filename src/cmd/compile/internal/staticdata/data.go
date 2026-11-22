@@ -395,16 +395,9 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 			break
 		}
 		if types.StringTwoWords() {
-			// Two words: a string of 1 to 15 bytes is inline with
-			// 8-byte words (types.StringTagged; w0, written as an
-			// integer, is no address), any other the address of its
-			// bytes (nil for "") and its length.
-			if types.StringTagged() && slen >= 1 && slen <= types.StringInlineCap {
-				w0, w1 := types.StringTaggedWords(i, gd.Ctxt.Arch.ByteOrder == binary.BigEndian)
-				s.WriteInt(gd.Ctxt, noff, 8, w0)
-				s.WriteInt(gd.Ctxt, noff+8, 8, w1)
-				break
-			}
+			// Two words: the address of the bytes (nil for "") and
+			// the length. A constant is never inline, however short
+			// (types.StringTagged): its bytes are in rodata.
 			if slen == 0 {
 				s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
 			} else {

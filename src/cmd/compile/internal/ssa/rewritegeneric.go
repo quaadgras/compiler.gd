@@ -7887,27 +7887,11 @@ func rewriteValuegeneric_OpConstString(v *Value) bool {
 		return true
 	}
 	// match: (ConstString {str})
-	// cond: config.stringTagged() && len(str) > 0 && len(str) <= 15
-	// result: (StringMake (Const64 <typ.BytePtr> [stringTaggedW0(str, config.BigEndian)]) (Const64 <typ.Int> [stringTaggedW1(str, config.BigEndian)]))
-	for {
-		str := auxToString(v.Aux)
-		if !(config.stringTagged() && len(str) > 0 && len(str) <= 15) {
-			break
-		}
-		v.reset(OpStringMake)
-		v0 := b.NewValue0(v.Pos, OpConst64, typ.BytePtr)
-		v0.AuxInt = int64ToAuxInt(stringTaggedW0(str, config.BigEndian))
-		v1 := b.NewValue0(v.Pos, OpConst64, typ.Int)
-		v1.AuxInt = int64ToAuxInt(stringTaggedW1(str, config.BigEndian))
-		v.AddArg2(v0, v1)
-		return true
-	}
-	// match: (ConstString {str})
-	// cond: config.stringTagged() && len(str) > 15
+	// cond: config.stringTagged() && len(str) > 0
 	// result: (StringMake (Addr <typ.BytePtr> {fe.StringData(str)} (SB)) (Const64 <typ.Int> [int64(len(str))]))
 	for {
 		str := auxToString(v.Aux)
-		if !(config.stringTagged() && len(str) > 15) {
+		if !(config.stringTagged() && len(str) > 0) {
 			break
 		}
 		v.reset(OpStringMake)
