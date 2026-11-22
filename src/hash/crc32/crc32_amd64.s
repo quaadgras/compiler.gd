@@ -11,7 +11,7 @@
 TEXT ·castagnoliSSE42(SB),NOSPLIT,$0
 	MOVL crc+0(FP), AX  // CRC value
 	MOVQ p+8(FP), SI  // data pointer
-	MOVQ p_len+16(FP), CX  // len(p)
+	MOVL p_len+16(FP), CX  // len(p)
 
 	// If there are fewer than 8 bytes to process, skip alignment.
 	CMPQ CX, $8
@@ -84,7 +84,7 @@ less_than_2:
 	CRC32B (SI), AX
 
 done:
-	MOVL AX, ret+32(FP)
+	MOVL AX, ret+24(FP)
 	RET
 
 // castagnoliSSE42Triple updates three (non-inverted) crcs with (24*rounds)
@@ -101,10 +101,10 @@ TEXT ·castagnoliSSE42Triple(SB),NOSPLIT,$0
 	MOVL crcC+8(FP), DX
 
 	MOVQ a+16(FP), R8   // data pointer
-	MOVQ b+40(FP), R9   // data pointer
-	MOVQ c+64(FP), R10  // data pointer
+	MOVQ b+32(FP), R9   // data pointer
+	MOVQ c+48(FP), R10  // data pointer
 
-	MOVL rounds+88(FP), R11
+	MOVL rounds+64(FP), R11
 
 loop:
 	CRC32Q (R8), AX
@@ -126,9 +126,9 @@ loop:
 	DECQ R11
 	JNZ loop
 
-	MOVL AX, retA+96(FP)
-	MOVL CX, retB+100(FP)
-	MOVL DX, retC+104(FP)
+	MOVL AX, retA+72(FP)
+	MOVL CX, retB+76(FP)
+	MOVL DX, retC+80(FP)
 	RET
 
 // CRC32 polynomial data
@@ -165,7 +165,7 @@ GLOBL r5<>(SB),RODATA,$8
 TEXT ·ieeeCLMUL(SB),NOSPLIT,$0
 	MOVL   crc+0(FP), X0             // Initial CRC value
 	MOVQ   p+8(FP), SI  	         // data pointer
-	MOVQ   p_len+16(FP), CX          // len(p)
+	MOVL   p_len+16(FP), CX          // len(p)
 
 	// Check feature support and length to be >= 1024 bytes.
 	CMPB internal∕cpu·X86+const_offsetX86HasAVX512VPCLMULQDQL(SB), $1
@@ -321,6 +321,6 @@ finish:
 	PXOR        X2, X1
 
 	PEXTRD	$1, X1, AX
-	MOVL        AX, ret+32(FP)
+	MOVL        AX, ret+24(FP)
 
 	RET

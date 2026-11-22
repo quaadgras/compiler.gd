@@ -15,7 +15,7 @@
 //   R5: b cap (needle) (unused)
 // return:
 //   R0: result
-TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
+TEXT ·indexSlices<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVD	R3, R2
 	MOVD	R4, R3
 	B	indexstringbody<>(SB)

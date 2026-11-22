@@ -466,8 +466,7 @@ func stringHash(s string, seed uintptr) uintptr {
 }
 
 func bytesHash(b []byte, seed uintptr) uintptr {
-	s := (*slice)(unsafe.Pointer(&b))
-	return memhash(s.array, seed, uintptr(s.len))
+	return memhash(unsafe.Pointer(unsafe.SliceData(b)), seed, uintptr(len(b)))
 }
 
 func int32Hash(i uint32, seed uintptr) uintptr {

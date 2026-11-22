@@ -7,9 +7,9 @@
 #include "textflag.h"
 
 TEXT ·addVVvec(SB), NOSPLIT, $0
-	MOVD z_len+8(FP), R3
-	MOVD x+24(FP), R8
-	MOVD y+48(FP), R9
+	MOVWZ z_len+8(FP), R3
+	MOVD x+16(FP), R8
+	MOVD y+32(FP), R9
 	MOVD z+0(FP), R2
 
 	MOVD $0, R4  // c = 0
@@ -155,13 +155,13 @@ L1:  // n > 0
 
 E1:
 	NEG  R4, R4
-	MOVD R4, c+72(FP) // return c
+	MOVD R4, c+48(FP) // return c
 	RET
 
 TEXT ·subVVvec(SB), NOSPLIT, $0
-	MOVD z_len+8(FP), R3
-	MOVD x+24(FP), R8
-	MOVD y+48(FP), R9
+	MOVWZ z_len+8(FP), R3
+	MOVD x+16(FP), R8
+	MOVD y+32(FP), R9
 	MOVD z+0(FP), R2
 	MOVD $0, R4          // c = 0
 	MOVD $0, R0          // make sure it's zero
@@ -306,5 +306,5 @@ L1:  // n > 0
 
 E1:
 	NEG  R4, R4
-	MOVD R4, c+72(FP) // return c
+	MOVD R4, c+48(FP) // return c
 	RET

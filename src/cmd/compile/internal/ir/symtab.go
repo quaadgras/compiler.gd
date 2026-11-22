@@ -107,6 +107,8 @@ type SymsStruct struct {
 	StringLoad                *obj.LSym
 	StringStore               *obj.LSym
 	StringAtomic              *obj.LSym
+	SliceHdr                  *obj.LSym
+	SliceHdrNotInHeap         *obj.LSym
 	ShareSeq                  *obj.LSym
 	ShareSeqLoad              *obj.LSym
 	SharePages                *obj.LSym

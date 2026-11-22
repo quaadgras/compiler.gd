@@ -14,8 +14,22 @@
 
 package bytealg
 
+import "unsafe"
+
+// (No race instrumentation, as the assembly has none: the runtime calls
+// it before it may.)
+//
+//go:norace
+func IndexByte(b []byte, c byte) int {
+	return indexByteSlice(unsafe.SliceData(b), len(b), cap(b), c)
+}
+
+// The assembly takes the words of stock Go's slices, the array, the
+// length and the capacity: with 8-byte words a slice is packed, or is a
+// huge one's header (doc/gd/slice16.md), which it would not read.
+//
 //go:noescape
-func IndexByte(b []byte, c byte) int
+func indexByteSlice(b *byte, blen, bcap int, c byte) int
 
 //go:noescape
 func IndexByteString(s string, c byte) int

@@ -150,9 +150,9 @@
 	SHA512ROUND(index, a, b, c, d, e, f, g, h)
 
 // func block(dig *Digest, p []byte)
-TEXT ·block(SB),0,$128-32
+TEXT ·block(SB),0,$128-24
 	MOV	p_base+8(FP), X29
-	MOV	p_len+16(FP), X30
+	MOVWU	p_len+16(FP), X30
 	SRL	$7, X30
 	SLL	$7, X30
 

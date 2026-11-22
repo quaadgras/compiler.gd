@@ -521,6 +521,14 @@ func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suff
 
 	case asmSlice:
 		cc = append(cc, newComponent(suffix+"_base", asmKind(arch.ptrSize), "slice base", off, arch.ptrSize, suffix))
+		if arch.ptrSize == 8 && arch.name != "wasm" {
+			// gd: the length and the capacity are uint32s (a huge
+			// slice's are 0 and 0xFFFFFFFF, its base a header's
+			// address: doc/gd/slice16.md).
+			cc = append(cc, newComponent(suffix+"_len", asmKind(4), "slice len", off+8, 4, suffix))
+			cc = append(cc, newComponent(suffix+"_cap", asmKind(4), "slice cap", off+12, 4, suffix))
+			break
+		}
 		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "slice len", off+arch.ptrSize, arch.intSize, suffix))
 		cc = append(cc, newComponent(suffix+"_cap", asmKind(arch.intSize), "slice cap", off+arch.ptrSize+arch.intSize, arch.intSize, suffix))
 

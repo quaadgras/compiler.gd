@@ -18,6 +18,7 @@ type gcSizes struct {
 	// StringWasm32).
 	stringWords int64 // the words of a string: 2, but 3 with GOWASM=gc and 4 with its 4-byte words
 	stringAlign int64 // the alignment of a string if not WordSize: 16 with 8-byte words but on wasm
+	slicePacked bool  // a slice is two words, with 8-byte words but on wasm (cmd/compile/internal/types's SlicePacked)
 }
 
 func (s *gcSizes) Alignof(T Type) (result int64) {
@@ -157,6 +158,11 @@ func (s *gcSizes) Sizeof(T Type) int64 {
 		}
 		return esize * n
 	case *Slice:
+		if s.slicePacked {
+			// gd: its pointer, and its length and capacity as
+			// uint32s (doc/gd/slice16.md).
+			return 16
+		}
 		return s.WordSize * 3
 	case *Struct:
 		n := t.NumFields()

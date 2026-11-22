@@ -146,7 +146,12 @@
 (SliceCap (SliceMake _ _ cap)) => cap
 (SlicePtrUnchecked (SliceMake ptr _ _ )) => ptr
 
-(Load <t> ptr mem) && t.IsSlice() =>
+// Packed slices (types.SlicePacked, doc/gd/slice16.md): w0 and w1 in
+// memory, unpacked when loaded and packed when stored (slicecodec.go).
+(Load <t> ptr mem) && t.IsSlice() && config.slicePacked() => sliceLoadPacked(v)
+(Store {t} dst (SliceMake ptr len cap) mem) && config.slicePacked() => sliceStorePacked(v)
+
+(Load <t> ptr mem) && t.IsSlice() && !config.slicePacked() =>
   (SliceMake
     (Load <t.Elem().PtrTo()> ptr mem)
     (Load <typ.Int>
@@ -155,7 +160,7 @@
     (Load <typ.Int>
       (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
       mem))
-(Store {t} dst (SliceMake ptr len cap) mem) =>
+(Store {t} dst (SliceMake ptr len cap) mem) && !config.slicePacked() =>
   (Store {typ.Int}
     (OffPtr <typ.IntPtr> [2*config.PtrSize] dst)
     cap
@@ -268,11 +273,11 @@
       (OffPtr <typ.Float64Ptr> [2*config.PtrSize+8] ptr)
       mem)
 
-(SlicePtr x:(Load <t> ptr mem)) && t.IsSlice() => @x.Block (Load <t.Elem().PtrTo()> ptr mem)
-(SliceLen x:(Load <t> ptr mem)) && t.IsSlice() => @x.Block (Load <typ.Int>
+(SlicePtr x:(Load <t> ptr mem)) && t.IsSlice() && !config.slicePacked() => @x.Block (Load <t.Elem().PtrTo()> ptr mem)
+(SliceLen x:(Load <t> ptr mem)) && t.IsSlice() && !config.slicePacked() => @x.Block (Load <typ.Int>
       (OffPtr <typ.IntPtr> [config.PtrSize] ptr)
       mem)
-(SliceCap x:(Load <t> ptr mem)) && t.IsSlice() => @x.Block (Load <typ.Int>
+(SliceCap x:(Load <t> ptr mem)) && t.IsSlice() && !config.slicePacked() => @x.Block (Load <typ.Int>
       (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr)
       mem)
 

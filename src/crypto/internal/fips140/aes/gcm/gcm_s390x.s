@@ -7,14 +7,14 @@
 #include "textflag.h"
 
 // func cryptBlocksGCM(fn code, key, dst, src, buf []byte, cnt *[16]byte)
-TEXT ·cryptBlocksGCM(SB),NOSPLIT,$0-112
-       MOVD    src_len+64(FP), R0
-       MOVD    buf_base+80(FP), R1
-       MOVD    cnt+104(FP), R12
+TEXT ·cryptBlocksGCM(SB),NOSPLIT,$0-80
+       MOVWZ    src_len+48(FP), R0
+       MOVD    buf_base+56(FP), R1
+       MOVD    cnt+72(FP), R12
        LMG     (R12), R2, R3
 
        // Check that the src size is less than or equal to the buffer size.
-       MOVD    buf_len+88(FP), R4
+       MOVWZ    buf_len+64(FP), R4
        CMP     R0, R4
        BGT     crash
 
@@ -24,7 +24,7 @@ TEXT ·cryptBlocksGCM(SB),NOSPLIT,$0-112
        BLT     crash // non-zero
 
        // Check that the src size is less than or equal to the dst size.
-       MOVD    dst_len+40(FP), R4
+       MOVWZ    dst_len+32(FP), R4
        CMP     R0, R4
        BGT     crash
 
@@ -60,10 +60,10 @@ crypt:
        STMG    R2, R3, (R12)       // update next counter value
        MOVD    fn+0(FP), R0        // function code (encryption)
        MOVD    key_base+8(FP), R1  // key
-       MOVD    buf_base+80(FP), R2 // counter values
-       MOVD    dst_base+32(FP), R4 // dst
-       MOVD    src_base+56(FP), R6 // src
-       MOVD    src_len+64(FP), R7  // len
+       MOVD    buf_base+56(FP), R2 // counter values
+       MOVD    dst_base+24(FP), R4 // dst
+       MOVD    src_base+40(FP), R6 // src
+       MOVWZ    src_len+48(FP), R7  // len
 loop:
        KMCTR   R4, R2, R6          // cipher message with counter (KMCTR)
        BVS     loop                // branch back if interrupted
@@ -74,7 +74,7 @@ crash:
 
 
 // func ghashAsm(key *gcmHashKey, hash *[16]byte, data []byte)
-TEXT ·ghashAsm(SB),NOSPLIT,$32-40
+TEXT ·ghashAsm(SB),NOSPLIT,$32-32
 	MOVD    $65, R0 // GHASH function code
 	MOVD	key+0(FP), R2
 	LMG	(R2), R6, R7
@@ -91,17 +91,17 @@ loop:
 	RET
 
 // func kmaGCM(fn int, key, dst, src, aad []byte, tag *[16]byte, cnt *[gcmBlockSize]byte)
-TEXT ·kmaGCM(SB),NOSPLIT,$112-120
+TEXT ·kmaGCM(SB),NOSPLIT,$112-88
 	MOVD	fn+0(FP), R0
 	MOVD	$params-112(SP), R1
 
 	// load ptr/len pairs
-	LMG	dst+32(FP), R2, R3 // R2=base R3=len
-	LMG	src+56(FP), R4, R5 // R4=base R5=len
-	LMG	aad+80(FP), R6, R7 // R6=base R7=len
+	LMG	dst+24(FP), R2, R3 // R2=base R3=len
+	LMG	src+40(FP), R4, R5 // R4=base R5=len
+	LMG	aad+56(FP), R6, R7 // R6=base R7=len
 
 	// setup parameters
-	MOVD	cnt+112(FP), R8
+	MOVD	cnt+80(FP), R8
 	XC	$12, (R1), (R1)     // reserved
 	MVC	$4, 12(R8), 12(R1)  // set chain value
 	MVC	$16, (R8), 64(R1)   // set initial counter value
@@ -122,9 +122,9 @@ kma:
 	KMA	R2, R6, R4       // Cipher Message with Authentication
 	BVS	kma
 
-	MOVD	tag+104(FP), R2
+	MOVD	tag+72(FP), R2
 	MVC	$16, 16(R1), 0(R2) // copy tag to output
-	MOVD	cnt+112(FP), R8
+	MOVD	cnt+80(FP), R8
 	MVC	$4, 12(R1), 12(R8) // update counter value
 
 	RET

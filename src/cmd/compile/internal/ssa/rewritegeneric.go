@@ -428,8 +428,16 @@ func rewriteValuegeneric(v *Value) bool {
 		return rewriteValuegeneric_OpSliceLen(v)
 	case OpSliceMake:
 		return rewriteValuegeneric_OpSliceMake(v)
+	case OpSlicePackW1:
+		return rewriteValuegeneric_OpSlicePackW1(v)
 	case OpSlicePtr:
 		return rewriteValuegeneric_OpSlicePtr(v)
+	case OpSliceUnpackCap:
+		return rewriteValuegeneric_OpSliceUnpackCap(v)
+	case OpSliceUnpackLen:
+		return rewriteValuegeneric_OpSliceUnpackLen(v)
+	case OpSliceUnpackPtr:
+		return rewriteValuegeneric_OpSliceUnpackPtr(v)
 	case OpSlicemask:
 		return rewriteValuegeneric_OpSlicemask(v)
 	case OpSqrt:
@@ -32964,6 +32972,58 @@ func rewriteValuegeneric_OpSelect0(v *Value) bool {
 		v.AddArg2(x, y)
 		return true
 	}
+	// match: (Select0 (SlicePack (SliceUnpackPtr w0 w1 _) (SliceUnpackLen w0 w1 _) (SliceUnpackCap w0 w1 _) _))
+	// result: w0
+	for {
+		if v_0.Op != OpSlicePack {
+			break
+		}
+		_ = v_0.Args[2]
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpSliceUnpackPtr {
+			break
+		}
+		w1 := v_0_0.Args[1]
+		w0 := v_0_0.Args[0]
+		v_0_1 := v_0.Args[1]
+		if v_0_1.Op != OpSliceUnpackLen {
+			break
+		}
+		_ = v_0_1.Args[1]
+		if w0 != v_0_1.Args[0] || w1 != v_0_1.Args[1] {
+			break
+		}
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpSliceUnpackCap {
+			break
+		}
+		_ = v_0_2.Args[1]
+		if w0 != v_0_2.Args[0] || w1 != v_0_2.Args[1] {
+			break
+		}
+		v.copyOf(w0)
+		return true
+	}
+	// match: (Select0 (SlicePack ptr _ (Const64 [c]) _))
+	// cond: c >= 0 && c < 0xFFFFFFFF
+	// result: ptr
+	for {
+		if v_0.Op != OpSlicePack {
+			break
+		}
+		_ = v_0.Args[2]
+		ptr := v_0.Args[0]
+		v_0_2 := v_0.Args[2]
+		if v_0_2.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_0_2.AuxInt)
+		if !(c >= 0 && c < 0xFFFFFFFF) {
+			break
+		}
+		v.copyOf(ptr)
+		return true
+	}
 	// match: (Select0 (MakeTuple x y))
 	// result: x
 	for {
@@ -33300,6 +33360,38 @@ func rewriteValuegeneric_OpSelectN(v *Value) bool {
 			break
 		}
 		v.copyOf(x)
+		return true
+	}
+	// match: (SelectN [1] (StaticLECall {sym} _ newLen:(Const64) _ _ _ _))
+	// cond: v.Type.IsInteger() && (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))
+	// result: newLen
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 || v_0.Op != OpStaticLECall || len(v_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0.Aux)
+		_ = v_0.Args[1]
+		newLen := v_0.Args[1]
+		if newLen.Op != OpConst64 || !(v.Type.IsInteger() && (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))) {
+			break
+		}
+		v.copyOf(newLen)
+		return true
+	}
+	// match: (SelectN [1] (StaticLECall {sym} _ newLen:(Const32) _ _ _ _))
+	// cond: v.Type.IsInteger() && (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))
+	// result: newLen
+	for {
+		if auxIntToInt64(v.AuxInt) != 1 || v_0.Op != OpStaticLECall || len(v_0.Args) != 6 {
+			break
+		}
+		sym := auxToCall(v_0.Aux)
+		_ = v_0.Args[1]
+		newLen := v_0.Args[1]
+		if newLen.Op != OpConst32 || !(v.Type.IsInteger() && (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))) {
+			break
+		}
+		v.copyOf(newLen)
 		return true
 	}
 	// match: (SelectN [1] (StaticCall {sym} _ newLen:(Const64) _ _ _ _))
@@ -33818,46 +33910,6 @@ func rewriteValuegeneric_OpSliceLen(v *Value) bool {
 		v.copyOf(x)
 		return true
 	}
-	// match: (SliceLen (SelectN [0] (StaticLECall {sym} _ newLen:(Const64) _ _ _ _)))
-	// cond: (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))
-	// result: newLen
-	for {
-		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
-			break
-		}
-		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpStaticLECall || len(v_0_0.Args) != 6 {
-			break
-		}
-		sym := auxToCall(v_0_0.Aux)
-		_ = v_0_0.Args[1]
-		newLen := v_0_0.Args[1]
-		if newLen.Op != OpConst64 || !(isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias")) {
-			break
-		}
-		v.copyOf(newLen)
-		return true
-	}
-	// match: (SliceLen (SelectN [0] (StaticLECall {sym} _ newLen:(Const32) _ _ _ _)))
-	// cond: (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))
-	// result: newLen
-	for {
-		if v_0.Op != OpSelectN || auxIntToInt64(v_0.AuxInt) != 0 {
-			break
-		}
-		v_0_0 := v_0.Args[0]
-		if v_0_0.Op != OpStaticLECall || len(v_0_0.Args) != 6 {
-			break
-		}
-		sym := auxToCall(v_0_0.Aux)
-		_ = v_0_0.Args[1]
-		newLen := v_0_0.Args[1]
-		if newLen.Op != OpConst32 || !(isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias")) {
-			break
-		}
-		v.copyOf(newLen)
-		return true
-	}
 	return false
 }
 func rewriteValuegeneric_OpSliceMake(v *Value) bool {
@@ -33945,6 +33997,71 @@ func rewriteValuegeneric_OpSliceMake(v *Value) bool {
 	}
 	return false
 }
+func rewriteValuegeneric_OpSlicePackW1(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (SlicePackW1 (SliceUnpackLen w0 w1 _) (SliceUnpackCap w0 w1 _) _)
+	// result: w1
+	for {
+		if v_0.Op != OpSliceUnpackLen {
+			break
+		}
+		w1 := v_0.Args[1]
+		w0 := v_0.Args[0]
+		if v_1.Op != OpSliceUnpackCap {
+			break
+		}
+		_ = v_1.Args[1]
+		if w0 != v_1.Args[0] || w1 != v_1.Args[1] {
+			break
+		}
+		v.copyOf(w1)
+		return true
+	}
+	// match: (SlicePackW1 (Const64 [l]) (Const64 [c]) _)
+	// cond: c >= 0 && c < 0xFFFFFFFF && !config.BigEndian
+	// result: (Const64 <typ.UInt64> [l | c<<32])
+	for {
+		if v_0.Op != OpConst64 {
+			break
+		}
+		l := auxIntToInt64(v_0.AuxInt)
+		if v_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(c >= 0 && c < 0xFFFFFFFF && !config.BigEndian) {
+			break
+		}
+		v.reset(OpConst64)
+		v.Type = typ.UInt64
+		v.AuxInt = int64ToAuxInt(l | c<<32)
+		return true
+	}
+	// match: (SlicePackW1 len (Const64 [c]) _)
+	// cond: c >= 0 && c < 0xFFFFFFFF && !config.BigEndian
+	// result: (Or64 <typ.UInt64> len (Const64 <typ.UInt64> [c<<32]))
+	for {
+		len := v_0
+		if v_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(c >= 0 && c < 0xFFFFFFFF && !config.BigEndian) {
+			break
+		}
+		v.reset(OpOr64)
+		v.Type = typ.UInt64
+		v0 := b.NewValue0(v.Pos, OpConst64, typ.UInt64)
+		v0.AuxInt = int64ToAuxInt(c << 32)
+		v.AddArg2(len, v0)
+		return true
+	}
+	return false
+}
 func rewriteValuegeneric_OpSlicePtr(v *Value) bool {
 	v_0 := v.Args[0]
 	// match: (SlicePtr (SliceMake (SlicePtr x) _ _))
@@ -33960,6 +34077,126 @@ func rewriteValuegeneric_OpSlicePtr(v *Value) bool {
 		x := v_0_0.Args[0]
 		v.reset(OpSlicePtr)
 		v.AddArg(x)
+		return true
+	}
+	return false
+}
+func rewriteValuegeneric_OpSliceUnpackCap(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (SliceUnpackCap (Select0 (SlicePack _ len cap _)) (SlicePackW1 len cap _) _)
+	// result: cap
+	for {
+		if v_0.Op != OpSelect0 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpSlicePack {
+			break
+		}
+		cap := v_0_0.Args[2]
+		len := v_0_0.Args[1]
+		if v_1.Op != OpSlicePackW1 {
+			break
+		}
+		_ = v_1.Args[1]
+		if len != v_1.Args[0] || cap != v_1.Args[1] {
+			break
+		}
+		v.copyOf(cap)
+		return true
+	}
+	// match: (SliceUnpackCap _ (Const64 [c]) _)
+	// cond: int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian
+	// result: (Const64 <typ.Int> [int64(uint32(c>>32))])
+	for {
+		if v_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian) {
+			break
+		}
+		v.reset(OpConst64)
+		v.Type = typ.Int
+		v.AuxInt = int64ToAuxInt(int64(uint32(c >> 32)))
+		return true
+	}
+	return false
+}
+func rewriteValuegeneric_OpSliceUnpackLen(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	b := v.Block
+	config := b.Func.Config
+	typ := &b.Func.Config.Types
+	// match: (SliceUnpackLen (Select0 (SlicePack _ len cap _)) (SlicePackW1 len cap _) _)
+	// result: len
+	for {
+		if v_0.Op != OpSelect0 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpSlicePack {
+			break
+		}
+		cap := v_0_0.Args[2]
+		len := v_0_0.Args[1]
+		if v_1.Op != OpSlicePackW1 {
+			break
+		}
+		_ = v_1.Args[1]
+		if len != v_1.Args[0] || cap != v_1.Args[1] {
+			break
+		}
+		v.copyOf(len)
+		return true
+	}
+	// match: (SliceUnpackLen _ (Const64 [c]) _)
+	// cond: int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian
+	// result: (Const64 <typ.Int> [int64(uint32(c))])
+	for {
+		if v_1.Op != OpConst64 {
+			break
+		}
+		c := auxIntToInt64(v_1.AuxInt)
+		if !(int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian) {
+			break
+		}
+		v.reset(OpConst64)
+		v.Type = typ.Int
+		v.AuxInt = int64ToAuxInt(int64(uint32(c)))
+		return true
+	}
+	return false
+}
+func rewriteValuegeneric_OpSliceUnpackPtr(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (SliceUnpackPtr (Select0 (SlicePack ptr len cap _)) (SlicePackW1 len cap _) _)
+	// result: ptr
+	for {
+		if v_0.Op != OpSelect0 {
+			break
+		}
+		v_0_0 := v_0.Args[0]
+		if v_0_0.Op != OpSlicePack {
+			break
+		}
+		cap := v_0_0.Args[2]
+		ptr := v_0_0.Args[0]
+		len := v_0_0.Args[1]
+		if v_1.Op != OpSlicePackW1 {
+			break
+		}
+		_ = v_1.Args[1]
+		if len != v_1.Args[0] || cap != v_1.Args[1] {
+			break
+		}
+		v.copyOf(ptr)
 		return true
 	}
 	return false

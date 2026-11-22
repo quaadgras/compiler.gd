@@ -79,7 +79,17 @@ func decodetypeFuncOutCount(arch *sys.Arch, p []byte) int {
 
 // InterfaceType.methods.length
 func decodetypeIfaceMethodCount(arch *sys.Arch, p []byte) int64 {
-	return int64(decodeInuxi(arch, p[commonsize(arch)+2*arch.PtrSize:], arch.PtrSize))
+	return decodeSliceLen(arch, p[commonsize(arch)+arch.PtrSize:])
+}
+
+// decodeSliceLen returns the length of the slice at the start of p: a
+// word after its pointer, or a uint32 where a slice is packed
+// (slicePacked).
+func decodeSliceLen(arch *sys.Arch, p []byte) int64 {
+	if slicePacked(arch) {
+		return int64(decodeInuxi(arch, p[8:], 4))
+	}
+	return int64(decodeInuxi(arch, p[arch.PtrSize:], arch.PtrSize))
 }
 
 func decodeReloc(ldr *loader.Loader, symIdx loader.Sym, relocs *loader.Relocs, off int32) loader.Reloc {
@@ -122,7 +132,7 @@ func decodetypeNameEmbedded(ldr *loader.Loader, symIdx loader.Sym, relocs *loade
 }
 
 func decodetypeFuncInType(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, relocs *loader.Relocs, i int) loader.Sym {
-	uadd := abi.RTypeSize(abi.Func, arch.PtrSize)
+	uadd := abi.RTypeSize(abi.Func, arch.PtrSize, slicePacked(arch))
 	if decodetypeHasUncommon(arch, ldr.Data(symIdx)) {
 		uadd += uncommonSize(arch)
 	}
@@ -169,12 +179,12 @@ func decodetypePtrElem(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) lo
 
 func decodetypeStructFieldCount(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) int {
 	data := ldr.Data(symIdx)
-	return int(decodeInuxi(arch, data[commonsize(arch)+2*arch.PtrSize:], arch.PtrSize))
+	return int(decodeSliceLen(arch, data[commonsize(arch)+arch.PtrSize:]))
 }
 
 func decodetypeStructFieldArrayOff(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, i int) int {
 	data := ldr.Data(symIdx)
-	off := abi.RTypeSize(abi.Struct, arch.PtrSize)
+	off := abi.RTypeSize(abi.Struct, arch.PtrSize, slicePacked(arch))
 	if decodetypeHasUncommon(arch, data) {
 		off += uncommonSize(arch)
 	}

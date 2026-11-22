@@ -503,7 +503,7 @@ func convTstring(val string) (x unsafe.Pointer) {
 //go:linkname convTslice
 func convTslice(val []byte) (x unsafe.Pointer) {
 	// Note: this must work for any element type, not just byte.
-	if (*slice)(unsafe.Pointer(&val)).array == nil {
+	if unsafe.SliceData(val) == nil {
 		x = unsafe.Pointer(&zeroVal[0])
 	} else {
 		x = mallocgc(unsafe.Sizeof(val), sliceType, true)

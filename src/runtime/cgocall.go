@@ -757,15 +757,14 @@ func cgocallbackg1(fn, frame unsafe.Pointer, ctxt uintptr) {
 		// tracing up the stack. We need to ensure that the
 		// handler always sees a valid slice, so set the
 		// values in an order such that it always does.
-		p := (*slice)(unsafe.Pointer(&gp.cgoCtxt))
-		atomicstorep(unsafe.Pointer(&p.array), unsafe.Pointer(&s[0]))
-		p.cap = cap(s)
-		p.len = len(s)
+		// (The array first, then the slice: with 8-byte words its
+		// length and capacity are one word, stored after.)
+		atomicstorep(unsafe.Pointer(&gp.cgoCtxt), unsafe.Pointer(&s[0]))
+		gp.cgoCtxt = s
 
 		defer func(gp *g) {
 			// Decrease the length of the slice by one, safely.
-			p := (*slice)(unsafe.Pointer(&gp.cgoCtxt))
-			p.len--
+			gp.cgoCtxt = gp.cgoCtxt[:len(gp.cgoCtxt)-1]
 		}(gp)
 	}
 
@@ -1054,8 +1053,8 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 		cgoCheckArg(it, p, !it.IsDirectIface(), false, msg)
 	case abi.Slice:
 		st := (*slicetype)(unsafe.Pointer(t))
-		s := (*slice)(p)
-		p = s.array
+		s := *(*[]byte)(p) // (any slice: its words)
+		p = unsafe.Pointer(unsafe.SliceData(s))
 		if p == nil || !cgoIsGoPointer(p) {
 			return
 		}
@@ -1065,7 +1064,7 @@ func cgoCheckArg(t *_type, p unsafe.Pointer, indir, top bool, msg cgoErrorMsg) {
 		if !st.Elem.Pointers() {
 			return
 		}
-		for i := 0; i < s.cap; i++ {
+		for i := 0; i < cap(s); i++ {
 			cgoCheckArg(st.Elem, p, true, false, msg)
 			p = add(p, st.Elem.Size_)
 		}

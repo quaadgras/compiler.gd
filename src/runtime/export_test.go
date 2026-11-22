@@ -264,8 +264,7 @@ var (
 var UseAeshash = &maps.UseAeshash
 
 func MemclrBytes(b []byte) {
-	s := (*slice)(unsafe.Pointer(&b))
-	memclrNoHeapPointers(s.array, uintptr(s.len))
+	memclrNoHeapPointers(unsafe.Pointer(unsafe.SliceData(b)), uintptr(len(b)))
 }
 
 const HashLoad = hashLoad

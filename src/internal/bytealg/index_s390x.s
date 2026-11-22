@@ -6,9 +6,9 @@
 #include "textflag.h"
 
 // Caller must confirm availability of vx facility before calling.
-TEXT ·Index(SB),NOSPLIT|NOFRAME,$0-56
-	LMG	a_base+0(FP), R1, R2  // R1=&s[0],   R2=len(s)
-	LMG	b_base+24(FP), R3, R4 // R3=&sep[0], R4=len(sep)
+TEXT ·indexSlices(SB),NOSPLIT|NOFRAME,$0-56
+	LMG	a+0(FP), R1, R2  // R1=&s[0],   R2=len(s)
+	LMG	b+24(FP), R3, R4 // R3=&sep[0], R4=len(sep)
 	MOVD	$ret+48(FP), R5
 	BR	indexbody<>(SB)
 

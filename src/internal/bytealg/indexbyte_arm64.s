@@ -12,7 +12,7 @@
 //   R3: c byte to search
 // return
 //   R0: result
-TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·indexByteSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	MOVD	R3, R2
 	B	indexbytestringbody<>(SB)
 

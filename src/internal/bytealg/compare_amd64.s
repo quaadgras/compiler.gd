@@ -6,7 +6,7 @@
 #include "asm_amd64.h"
 #include "textflag.h"
 
-TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
+TEXT ·compareSlices<ABIInternal>(SB),NOSPLIT,$0-56
 	// AX = a_base (want in SI)
 	// BX = a_len  (want in BX)
 	// CX = a_cap  (unused)

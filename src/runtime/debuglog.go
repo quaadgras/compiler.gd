@@ -363,11 +363,8 @@ func (l *dloggerImpl) s(x string) *dloggerImpl {
 		// We can't use unsafe.Slice as it may panic, which isn't safe
 		// in this (potentially) nowritebarrier context.
 		var b []byte
-		bb := (*slice)(unsafe.Pointer(&b))
-		bb.array = unsafe.Pointer(strData)
-		bb.len, bb.cap = len(x), len(x)
-		if len(b) > debugLogStringLimit {
-			b = b[:debugLogStringLimit]
+		if n := min(len(x), debugLogStringLimit); n > 0 {
+			b = (*[debugLogStringLimit]byte)(unsafe.Pointer(strData))[:n:n]
 		}
 		l.w.uvarint(uint64(len(b)))
 		l.w.bytes(b)
@@ -385,11 +382,8 @@ func (l dloggerFake) hexdump(p unsafe.Pointer, bytes uintptr) dloggerFake { retu
 //go:nosplit
 func (l *dloggerImpl) hexdump(p unsafe.Pointer, bytes uintptr) *dloggerImpl {
 	var b []byte
-	bb := (*slice)(unsafe.Pointer(&b))
-	bb.array = unsafe.Pointer(p)
-	bb.len, bb.cap = int(bytes), int(bytes)
-	if len(b) > debugLogStringLimit {
-		b = b[:debugLogStringLimit]
+	if n := min(bytes, debugLogStringLimit); n > 0 {
+		b = (*[debugLogStringLimit]byte)(p)[:n:n]
 	}
 
 	l.w.byte(debugLogHexdump)

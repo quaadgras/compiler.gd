@@ -921,14 +921,15 @@ mapped:
 				throw("out of memory allocating allArenas")
 			}
 			oldSlice := (*arenaList)
-			*(*notInHeapSlice)(unsafe.Pointer(&(*arenaList))) = notInHeapSlice{newArray, len((*arenaList)), int(size / goarch.PtrSize)}
+			*(*notInHeapSlice)(unsafe.Pointer(&(*arenaList))) = mkNotInHeapSlice(newArray, len((*arenaList)), int(size/goarch.PtrSize))
 			copy((*arenaList), oldSlice)
 			// Do not free the old backing array because
 			// there may be concurrent readers. Since we
 			// double the array each time, this can lead
 			// to at most 2x waste.
 		}
-		(*arenaList) = (*arenaList)[:len((*arenaList))+1]
+		sl := noWBSlice(unsafe.Pointer(arenaList))
+		*sl = (*sl)[:len(*sl)+1]
 		(*arenaList)[len((*arenaList))-1] = ri
 
 		// Store atomically just in case an object from the

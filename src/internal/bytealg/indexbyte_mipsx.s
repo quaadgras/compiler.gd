@@ -7,9 +7,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte(SB),NOSPLIT,$0-20
-	MOVW	b_base+0(FP), R1
-	MOVW	b_len+4(FP), R2
+TEXT ·indexByteSlice(SB),NOSPLIT,$0-20
+	MOVW	b+0(FP), R1
+	MOVW	blen+4(FP), R2
 	MOVBU	c+12(FP), R3	// byte to find
 	ADDU	$1, R1, R4	// store base+1 for later
 	ADDU	R1, R2	// end

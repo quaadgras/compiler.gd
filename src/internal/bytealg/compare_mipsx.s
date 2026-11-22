@@ -7,11 +7,11 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB),NOSPLIT,$0-28
-	MOVW	a_base+0(FP), R3
-	MOVW	b_base+12(FP), R4
-	MOVW	a_len+4(FP), R1
-	MOVW	b_len+16(FP), R2
+TEXT ·compareSlices(SB),NOSPLIT,$0-28
+	MOVW	a+0(FP), R3
+	MOVW	b+12(FP), R4
+	MOVW	alen+4(FP), R1
+	MOVW	blen+16(FP), R2
 	BEQ	R3, R4, samebytes
 	SGTU	R1, R2, R7
 	MOVW	R1, R8

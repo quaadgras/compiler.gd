@@ -104,10 +104,10 @@
 // the frame size used for data expansion is 64 bytes.
 // See the definition of the macro LOAD above, and the definition
 // of the local variable w in the general implementation (sha1block.go).
-TEXT ·block(SB),NOSPLIT,$64-32
+TEXT ·block(SB),NOSPLIT,$64-24
 	MOVV	dig+0(FP),	R4
 	MOVV	p_base+8(FP),	R5
-	MOVV	p_len+16(FP),	R6
+	MOVWU	p_len+16(FP),	R6
 	AND	$~63, R6
 	BEQ	R6, zero
 

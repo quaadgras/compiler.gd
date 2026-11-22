@@ -27,12 +27,17 @@ func TFlagOff(ptrSize int) int { return 2*ptrSize + 4 }
 // ITabTypeOff returns the offset of ITab.Type for a compilation target with a given ptrSize
 func ITabTypeOff(ptrSize int) int { return ptrSize }
 
-// RTypeSize returns sizeof(kindType) for a compilation target with a given ptrSize.
-func RTypeSize(kind Kind, ptrSize int) int {
+// RTypeSize returns sizeof(kindType) for a compilation target with a given
+// ptrSize, whose slices are packed (16 bytes: SlicePacked) or not.
+func RTypeSize(kind Kind, ptrSize int, slicePacked bool) int {
 	cs := CommonSize(ptrSize)
+	sliceSize := 3 * ptrSize
+	if slicePacked {
+		sliceSize = 16
+	}
 	switch kind {
 	case Struct: // reflect.structType
-		return cs + 4*ptrSize
+		return cs + ptrSize + sliceSize
 	case Pointer: // reflect.ptrType
 		return cs + ptrSize
 	case Func: // reflect.funcType
@@ -50,7 +55,7 @@ func RTypeSize(kind Kind, ptrSize int) int {
 		}
 		return sz
 	case Interface: // reflect.interfaceType
-		return cs + 4*ptrSize
+		return cs + ptrSize + sliceSize
 	default:
 		// just Sizeof(rtype)
 		return cs

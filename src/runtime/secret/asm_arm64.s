@@ -59,7 +59,7 @@ TEXT ·spillRegisters(SB),0,$0-16
 	MOVD	R0, ret+8(FP)
 	RET
 
-TEXT ·useSecret(SB),0,$0-24
+TEXT ·useSecret(SB),0,$0-16
 	NO_LOCAL_POINTERS
 
 	// Load secret into R0

@@ -5,11 +5,11 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB),NOSPLIT,$0-28
-	MOVL	a_base+0(FP), SI
-	MOVL	a_len+4(FP), BX
-	MOVL	b_base+12(FP), DI
-	MOVL	b_len+16(FP), DX
+TEXT ·compareSlices(SB),NOSPLIT,$0-28
+	MOVL	a+0(FP), SI
+	MOVL	alen+4(FP), BX
+	MOVL	b+12(FP), DI
+	MOVL	blen+16(FP), DX
 	LEAL	ret+24(FP), AX
 	JMP	cmpbody<>(SB)
 

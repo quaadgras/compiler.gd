@@ -8,7 +8,10 @@
 
 package main
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 const N = 1000000
 
@@ -17,6 +20,12 @@ type X struct {
 }
 
 func TestSlice(t *testing.T) {
+	if unsafe.Sizeof([]int(nil)) == 16 {
+		// gd: the length and the capacity are one word, stored with
+		// the pointer, whole: a race keeps one store's slice
+		// (doc/gd/slice16.md).
+		t.Skip("a slice's length is stored with its pointer")
+	}
 	done := make(chan struct{})
 	a := make([]int, N+10)
 

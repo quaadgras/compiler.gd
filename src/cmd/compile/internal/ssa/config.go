@@ -80,6 +80,10 @@ func (c *Config) stringWasm32() bool { return c.PtrSize == 4 && types.StringWasm
 func (c *Config) stringTwoWords() bool { return types.StringTwoWords() }
 func (c *Config) stringTagged() bool   { return c.PtrSize == 8 && types.StringTwoWords() }
 
+// slicePacked reports whether a slice is two words, w0 and w1, with the
+// length and the capacity in w1 (types.SlicePacked).
+func (c *Config) slicePacked() bool { return c.PtrSize == 8 && types.SlicePacked() }
+
 type (
 	blockRewriter func(*Block) bool
 	valueRewriter func(*Value) bool

@@ -156,10 +156,14 @@ func arena_heapify(s any) any {
 			v = stringStructOf((*string)(e.data)).str
 		}
 	case abi.Slice:
+		// A spread slice is in the eface as in memory, from its data
+		// word on (with 8-byte words its pointer, and its length and
+		// capacity in a word: doc/gd/slice16.md). ([]byte has any
+		// slice's words.)
 		if t.IsSpreadIface() {
-			v = e.data // word 0 = slice.array
+			v = unsafe.Pointer(unsafe.SliceData(*(*[]byte)(unsafe.Pointer(&e.data))))
 		} else {
-			v = (*slice)(e.data).array
+			v = unsafe.Pointer(unsafe.SliceData(*(*[]byte)(e.data)))
 		}
 	case abi.Pointer:
 		v = e.data
@@ -180,28 +184,26 @@ func arena_heapify(s any) any {
 		copy(b, s1)
 		x = s2
 	case abi.Slice:
-		var sliceLen int
-		var sliceArray unsafe.Pointer
+		var old []byte
 		if t.IsSpreadIface() {
-			sliceLen = int(*(*uintptr)(unsafe.Pointer(&e.inline)))
-			sliceArray = e.data
+			old = *(*[]byte)(unsafe.Pointer(&e.data))
 		} else {
-			sliceLen = (*slice)(e.data).len
-			sliceArray = (*slice)(e.data).array
+			old = *(*[]byte)(e.data)
 		}
+		sliceLen := len(old)
 		et := (*slicetype)(unsafe.Pointer(t)).Elem
-		sl := new(slice)
-		*sl = slice{makeslicecopy(et, sliceLen, sliceLen, sliceArray), sliceLen, sliceLen}
+		sl := unsafe.Slice((*byte)(makeslicecopy(et, sliceLen, sliceLen, unsafe.Pointer(unsafe.SliceData(old)))), sliceLen)
 		xe := efaceOf(&x)
 		xe._type = t
 		// gd Phase D: if the concrete type is spread-eligible, write
 		// the fresh slice header back across data + inline. Otherwise
 		// the stock single-pointer boxed form is correct.
 		if t.IsSpreadIface() {
-			xe.data = sl.array
-			*(*[2]uintptr)(unsafe.Pointer(&xe.inline)) = [2]uintptr{uintptr(sl.len), uintptr(sl.cap)}
+			*(*[]byte)(unsafe.Pointer(&xe.data)) = sl
 		} else {
-			xe.data = unsafe.Pointer(sl)
+			p := new([]byte)
+			*p = sl
+			xe.data = unsafe.Pointer(p)
 		}
 	case abi.Pointer:
 		et := (*ptrtype)(unsafe.Pointer(t)).Elem
@@ -330,7 +332,7 @@ func (a *userArena) slice(sl any, cap int) {
 	typ = (*slicetype)(unsafe.Pointer(typ)).Elem
 	// t is now the element type of the slice we want to allocate.
 
-	*((*slice)(i.data)) = slice{a.alloc(typ, cap), cap, cap}
+	*(*[]byte)(i.data) = unsafe.Slice((*byte)(a.alloc(typ, cap)), cap) // (any slice's words)
 }
 
 // free returns the userArena's chunks back to mheap and marks it as defunct.

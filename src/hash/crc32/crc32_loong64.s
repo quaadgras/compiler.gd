@@ -7,10 +7,10 @@
 // castagnoliUpdate updates the non-inverted crc with the given data.
 
 // func castagnoliUpdate(crc uint32, p []byte) uint32
-TEXT ·castagnoliUpdate(SB),NOSPLIT,$0-36
+TEXT ·castagnoliUpdate(SB),NOSPLIT,$0-28
 	MOVWU	crc+0(FP), R4		// a0 = CRC value
 	MOVV	p+8(FP), R5		// a1 = data pointer
-	MOVV	p_len+16(FP), R6	// a2 = len(p)
+	MOVWU	p_len+16(FP), R6	// a2 = len(p)
 
 	SGT	$8, R6, R12
 	BNE	R12, less_than_8
@@ -78,16 +78,16 @@ less_than_2:
 	CRCCWBW	R4, R13, R4
 
 done:
-	MOVW	R4, ret+32(FP)
+	MOVW	R4, ret+24(FP)
 	RET
 
 // ieeeUpdate updates the non-inverted crc with the given data.
 
 // func ieeeUpdate(crc uint32, p []byte) uint32
-TEXT ·ieeeUpdate(SB),NOSPLIT,$0-36
+TEXT ·ieeeUpdate(SB),NOSPLIT,$0-28
 	MOVWU	crc+0(FP), R4		// a0 = CRC value
 	MOVV	p+8(FP), R5		// a1 = data pointer
-	MOVV	p_len+16(FP), R6	// a2 = len(p)
+	MOVWU	p_len+16(FP), R6	// a2 = len(p)
 
 	SGT	$8, R6, R12
 	BNE	R12, less_than_8
@@ -155,6 +155,6 @@ less_than_2:
 	CRCWBW	R4, R13, R4
 
 done:
-	MOVW	R4, ret+32(FP)
+	MOVW	R4, ret+24(FP)
 	RET
 

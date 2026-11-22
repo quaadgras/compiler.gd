@@ -1028,8 +1028,7 @@ func readMetrics(samplesp unsafe.Pointer, len int, cap int) {
 // initMetrics must have been called already.
 func readMetricsLocked(samplesp unsafe.Pointer, len int, cap int) {
 	// Construct a slice from the args.
-	sl := slice{samplesp, len, cap}
-	samples := *(*[]metricSample)(unsafe.Pointer(&sl))
+	samples := unsafe.Slice((*metricSample)(samplesp), cap)[:len]
 
 	// Clear agg defensively.
 	agg = statAggregate{}

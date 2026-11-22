@@ -5,9 +5,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte(SB),NOSPLIT,$0-20
-	MOVL	b_base+0(FP), SI
-	MOVL	b_len+4(FP), CX
+TEXT ·indexByteSlice(SB),NOSPLIT,$0-20
+	MOVL	b+0(FP), SI
+	MOVL	blen+4(FP), CX
 	MOVB	c+12(FP), AL
 	MOVL	SI, DI
 	CLD; REPN; SCASB

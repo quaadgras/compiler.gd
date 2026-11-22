@@ -1302,7 +1302,7 @@ func InterfaceMethodOffset(gd *base.Invocation, ityp *types.Type, i int64) int64
 	//   [...]imethod
 	// }
 	// The size of imethod is 8.
-	return int64(commonSize()+4*types.PtrSize+uncommonSize(gd, ityp)) + i*8
+	return int64(rttype.InterfaceType.Size()) + int64(uncommonSize(gd, ityp)) + i*8
 }
 
 // NeedRuntimeType ensures that a runtime type descriptor is emitted for t.

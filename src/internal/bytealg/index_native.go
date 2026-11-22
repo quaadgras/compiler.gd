@@ -6,8 +6,21 @@
 
 package bytealg
 
+import "unsafe"
+
 // Index returns the index of the first instance of b in a, or -1 if b is not present in a.
 // Requires 2 <= len(b) <= MaxLen.
+// (No race instrumentation, as the assembly has none: the runtime calls
+// it before it may.)
+//
+//go:norace
+func Index(a, b []byte) int {
+	return indexSlices(unsafe.SliceData(a), len(a), cap(a), unsafe.SliceData(b), len(b), cap(b))
+}
+
+// The assembly takes the words of stock Go's slices, the array, the
+// length and the capacity: with 8-byte words a slice is packed, or is a
+// huge one's header (doc/gd/slice16.md), which it would not read.
 //
 //go:noescape
-func Index(a, b []byte) int
+func indexSlices(a *byte, alen, acap int, b *byte, blen, bcap int) int

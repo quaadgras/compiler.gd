@@ -11,7 +11,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
+TEXT ·indexByteSlice<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
 	// R3 = byte array pointer
 	// R4 = length
 	MOVD	R6, R5		// R5 = byte

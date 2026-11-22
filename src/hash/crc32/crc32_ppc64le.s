@@ -35,15 +35,15 @@
 #define MAX_SIZE	32*1024
 #define REFLECT
 
-TEXT ·ppc64SlicingUpdateBy8(SB), NOSPLIT|NOFRAME, $0-44
+TEXT ·ppc64SlicingUpdateBy8(SB), NOSPLIT|NOFRAME, $0-36
 	MOVWZ	crc+0(FP), R3   // incoming crc
 	MOVD    table8+8(FP), R4   // *Table
 	MOVD    p+16(FP), R5
-	MOVD    p_len+24(FP), R6 // p len
+	MOVWZ    p_len+24(FP), R6 // p len
 
 	CMP     $0,R6           // len == 0?
 	BNE     start
-	MOVW    R3,ret+40(FP)   // return crc
+	MOVW    R3,ret+32(FP)   // return crc
 	RET
 
 start:
@@ -115,7 +115,7 @@ short:
 	BDNZ 	short
 done:
 	NOR     R7,R7,R7        // ^crc
-	MOVW    R7,ret+40(FP)   // return crc
+	MOVW    R7,ret+32(FP)   // return crc
 	RET
 
 #ifdef BYTESWAP_DATA
@@ -125,11 +125,11 @@ DATA ·byteswapcons+8(SB)/8,$0x0f0e0d0c0b0a0908
 GLOBL ·byteswapcons+0(SB),RODATA,$16
 #endif
 
-TEXT ·vectorCrc32(SB), NOSPLIT|NOFRAME, $0-36
+TEXT ·vectorCrc32(SB), NOSPLIT|NOFRAME, $0-28
 	MOVWZ	crc+0(FP), R3   // incoming crc
 	MOVWZ	ctab+4(FP), R14   // crc poly id
 	MOVD    p+8(FP), R4
-	MOVD    p_len+16(FP), R5 // p len
+	MOVWZ    p_len+16(FP), R5 // p len
 
 	// R3 = incoming crc
 	// R14 = constant table identifier
@@ -538,7 +538,7 @@ startbarConst:
 	MFVSRD	VS32,R3 // VS32 = V0
 
 	NOR	R3,R3,R3 // return ^crc
-	MOVW	R3,ret+32(FP)
+	MOVW	R3,ret+24(FP)
 	RET
 
 first_warm_up_done:
@@ -690,5 +690,5 @@ v0:	VXOR	V20,V0,V20
 
 zero:
 	// This case is the original crc, so just return it
-	MOVW    R10,ret+32(FP)
+	MOVW    R10,ret+24(FP)
 	RET

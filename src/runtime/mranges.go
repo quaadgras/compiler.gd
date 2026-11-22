@@ -252,10 +252,7 @@ type addrRanges struct {
 }
 
 func (a *addrRanges) init(sysStat *sysMemStat) {
-	ranges := (*notInHeapSlice)(unsafe.Pointer(&a.ranges))
-	ranges.len = 0
-	ranges.cap = 16
-	ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, sysStat))
+	*(*notInHeapSlice)(unsafe.Pointer(&a.ranges)) = mkNotInHeapSlice((*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*16, goarch.PtrSize, sysStat)), 0, 16)
 	a.sysStat = sysStat
 	a.totalBytes = 0
 }
@@ -361,7 +358,7 @@ func (a *addrRanges) add(r addrRange) {
 
 		// Delete a.ranges[i].
 		copy(a.ranges[i:], a.ranges[i+1:])
-		a.ranges = a.ranges[:len(a.ranges)-1]
+		*noWBSlice(unsafe.Pointer(&a.ranges)) = (*noWBSlice(unsafe.Pointer(&a.ranges)))[:len(a.ranges)-1]
 	} else if coalescesDown {
 		// We have a neighbor at a lower address only and it borders us.
 		// Merge the new space into a.ranges[i-1].
@@ -379,16 +376,14 @@ func (a *addrRanges) add(r addrRange) {
 			// 4 MiB arenas which are all discontiguous (both very conservative
 			// assumptions), this would waste at most 4 MiB of memory.
 			oldRanges := a.ranges
-			ranges := (*notInHeapSlice)(unsafe.Pointer(&a.ranges))
-			ranges.len = len(oldRanges) + 1
-			ranges.cap = cap(oldRanges) * 2
-			ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, a.sysStat))
+			ncap := cap(oldRanges) * 2
+			*(*notInHeapSlice)(unsafe.Pointer(&a.ranges)) = mkNotInHeapSlice((*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ncap), goarch.PtrSize, a.sysStat)), len(oldRanges)+1, ncap)
 
 			// Copy in the old array, but make space for the new range.
 			copy(a.ranges[:i], oldRanges[:i])
 			copy(a.ranges[i+1:], oldRanges[i:])
 		} else {
-			a.ranges = a.ranges[:len(a.ranges)+1]
+			*noWBSlice(unsafe.Pointer(&a.ranges)) = (*noWBSlice(unsafe.Pointer(&a.ranges)))[:len(a.ranges)+1]
 			copy(a.ranges[i+1:], a.ranges[i:])
 		}
 		a.ranges[i] = r
@@ -411,7 +406,7 @@ func (a *addrRanges) removeLast(nBytes uintptr) addrRange {
 		a.totalBytes -= nBytes
 		return addrRange{newEnd, r.limit}
 	}
-	a.ranges = a.ranges[:len(a.ranges)-1]
+	*noWBSlice(unsafe.Pointer(&a.ranges)) = (*noWBSlice(unsafe.Pointer(&a.ranges)))[:len(a.ranges)-1]
 	a.totalBytes -= size
 	return r
 }
@@ -423,7 +418,7 @@ func (a *addrRanges) removeGreaterEqual(addr uintptr) {
 	if pivot == 0 {
 		// addr is before all ranges in a.
 		a.totalBytes = 0
-		a.ranges = a.ranges[:0]
+		*noWBSlice(unsafe.Pointer(&a.ranges)) = (*noWBSlice(unsafe.Pointer(&a.ranges)))[:0]
 		return
 	}
 	removed := uintptr(0)
@@ -440,7 +435,7 @@ func (a *addrRanges) removeGreaterEqual(addr uintptr) {
 			a.ranges[pivot-1] = r
 		}
 	}
-	a.ranges = a.ranges[:pivot]
+	*noWBSlice(unsafe.Pointer(&a.ranges)) = (*noWBSlice(unsafe.Pointer(&a.ranges)))[:pivot]
 	a.totalBytes -= removed
 }
 
@@ -449,12 +444,10 @@ func (a *addrRanges) removeGreaterEqual(addr uintptr) {
 func (a *addrRanges) cloneInto(b *addrRanges) {
 	if len(a.ranges) > cap(b.ranges) {
 		// Grow the array.
-		ranges := (*notInHeapSlice)(unsafe.Pointer(&b.ranges))
-		ranges.len = 0
-		ranges.cap = cap(a.ranges)
-		ranges.array = (*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ranges.cap), goarch.PtrSize, b.sysStat))
+		ncap := cap(a.ranges)
+		*(*notInHeapSlice)(unsafe.Pointer(&b.ranges)) = mkNotInHeapSlice((*notInHeap)(persistentalloc(unsafe.Sizeof(addrRange{})*uintptr(ncap), goarch.PtrSize, b.sysStat)), 0, ncap)
 	}
-	b.ranges = b.ranges[:len(a.ranges)]
+	*noWBSlice(unsafe.Pointer(&b.ranges)) = (*noWBSlice(unsafe.Pointer(&b.ranges)))[:len(a.ranges)]
 	b.totalBytes = a.totalBytes
 	copy(b.ranges, a.ranges)
 }

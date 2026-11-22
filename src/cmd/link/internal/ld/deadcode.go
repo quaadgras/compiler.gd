@@ -560,7 +560,7 @@ func (d *deadcodePass) decodetypeMethods(ldr *loader.Loader, arch *sys.Arch, sym
 	if !decodetypeHasUncommon(arch, p) {
 		panic(fmt.Sprintf("no methods on %q", ldr.SymName(symIdx)))
 	}
-	off := abi.RTypeSize(decodetypeKind(arch, p), arch.PtrSize)
+	off := abi.RTypeSize(decodetypeKind(arch, p), arch.PtrSize, slicePacked(arch))
 
 	mcount := int(decodeInuxi(arch, p[off+4:], 2))
 	moff := int(decodeInuxi(arch, p[off+4+2+2:], 4))

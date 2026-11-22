@@ -72,9 +72,10 @@ type S struct {
 	// gd: an S of up to 8 words is SSA-able, and copied with
 	// per-field write barriers, and one that holds strings is copied
 	// whole by the runtime (doc/gd/sharing.md): slices keep *dst = *sp
-	// a large wbMove, which is what this test is about.
-	a, b, d []byte
-	c       *int
+	// a large wbMove, which is what this test is about (four: a slice
+	// is two words, doc/gd/slice16.md).
+	a, b, d, e []byte
+	c          *int
 }
 
 var g1, g2 *int

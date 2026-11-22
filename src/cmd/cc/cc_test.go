@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func translate(t *testing.T, in, out string, withMain bool) {
@@ -674,6 +675,9 @@ func TestInterop(t *testing.T) {
 	}
 }
 
+// wasm reports whether env is that of a GOARCH=wasm variant.
+func wasm(env []string) bool { return env != nil }
+
 func testInterop(t *testing.T, env []string, split bool, word int) {
 	dir := t.TempDir()
 	files := map[string]string{"go.mod": "module cctest\n\ngo 1.27\n"}
@@ -712,6 +716,14 @@ func testInterop(t *testing.T, env []string, split bool, word int) {
 		sum = int64(int32(sum))
 	}
 	thing := (8 + 3*word + 7) / 8 * 8
+	if !wasm(env) && word == 8 {
+		// gd: a slice is two words with 8-byte words but on wasm,
+		// aligned as the slice is (doc/gd/slice16.md).
+		thing = int(unsafe.Sizeof(struct {
+			n    int64
+			data []int32
+		}{}))
+	}
 	for _, want := range []string{
 		"C's list in Go: 1 2 3 4 5\n",
 		"Go's list summed by C: 60\n",

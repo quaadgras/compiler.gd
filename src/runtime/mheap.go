@@ -545,14 +545,11 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 		if n < cap(h.allspans)*3/2 {
 			n = cap(h.allspans) * 3 / 2
 		}
-		var new []*mspan
-		sp := (*slice)(unsafe.Pointer(&new))
-		sp.array = sysAlloc(uintptr(n)*goarch.PtrSize, &memstats.other_sys, "allspans array")
-		if sp.array == nil {
+		array := sysAlloc(uintptr(n)*goarch.PtrSize, &memstats.other_sys, "allspans array")
+		if array == nil {
 			throw("runtime: cannot allocate memory")
 		}
-		sp.len = len(h.allspans)
-		sp.cap = n
+		new := unsafe.Slice((**mspan)(array), n)[:len(h.allspans)]
 		if len(h.allspans) > 0 {
 			copy(new, h.allspans)
 		}
@@ -562,7 +559,8 @@ func recordspan(vh unsafe.Pointer, p unsafe.Pointer) {
 			sysFree(unsafe.Pointer(&oldAllspans[0]), uintptr(cap(oldAllspans))*unsafe.Sizeof(oldAllspans[0]), &memstats.other_sys)
 		}
 	}
-	h.allspans = h.allspans[:len(h.allspans)+1]
+	sl := noWBSlice(unsafe.Pointer(&h.allspans))
+	*sl = (*sl)[:len(*sl)+1]
 	h.allspans[len(h.allspans)-1] = s
 }
 

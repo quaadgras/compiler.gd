@@ -6,10 +6,22 @@
 
 package bytealg
 
-import _ "unsafe" // For go:linkname
+import "unsafe"
 
+// (No race instrumentation, as the assembly has none: the runtime calls
+// it before it may.)
+//
+//go:norace
+func Compare(a, b []byte) int {
+	return compareSlices(unsafe.SliceData(a), len(a), cap(a), unsafe.SliceData(b), len(b), cap(b))
+}
+
+// The assembly takes the words of stock Go's slices, the array, the
+// length and the capacity: with 8-byte words a slice is packed, or is a
+// huge one's header (doc/gd/slice16.md), which it would not read.
+//
 //go:noescape
-func Compare(a, b []byte) int
+func compareSlices(a *byte, alen, acap int, b *byte, blen, bcap int) int
 
 func CompareString(a, b string) int {
 	return abigen_runtime_cmpstring(a, b)

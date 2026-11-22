@@ -11,12 +11,12 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Count(SB),NOSPLIT,$0-40
+TEXT ·countSlice(SB),NOSPLIT,$0-40
 	// R1 = b_base
 	// R2 = b_len
 	// R3 = byte to count
-	MOVV	b_base+0(FP), R1
-	MOVV	b_len+8(FP), R2
+	MOVV	b+0(FP), R1
+	MOVV	blen+8(FP), R2
 	MOVBU	c+24(FP), R3
 	MOVV	R0, R5	// count
 	ADDV	R1, R2	// end

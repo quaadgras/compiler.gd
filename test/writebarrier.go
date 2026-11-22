@@ -176,8 +176,8 @@ type T18 struct {
 }
 
 func f18(p *T18, x *[]int) {
-	p.a = p.a[:5]    // no barrier
-	*x = (*x)[0:5]   // no barrier
+	p.a = p.a[:5]    // ERROR "write barrier" (gd: stored whole, doc/gd/slice16.md)
+	*x = (*x)[0:5]   // ERROR "write barrier"
 	p.a = p.a[3:5]   // ERROR "write barrier"
 	p.a = p.a[1:2:3] // ERROR "write barrier"
 	p.s = p.s[8:9]   // ERROR "write barrier"

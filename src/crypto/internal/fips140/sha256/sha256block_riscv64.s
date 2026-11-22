@@ -141,9 +141,9 @@
 // for the message schedule (4 bytes * 16 entries).
 //
 // func block(dig *Digest, p []byte)
-TEXT ·block(SB),0,$64-32
+TEXT ·block(SB),0,$64-24
 	MOV	p_base+8(FP), X29
-	MOV	p_len+16(FP), X30
+	MOVWU	p_len+16(FP), X30
 	SRL	$6, X30
 	SLL	$6, X30
 

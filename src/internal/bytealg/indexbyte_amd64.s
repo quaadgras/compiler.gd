@@ -7,9 +7,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT	·IndexByte(SB), NOSPLIT, $0-40
-	MOVQ b_base+0(FP), SI
-	MOVQ b_len+8(FP), BX
+TEXT	·indexByteSlice(SB), NOSPLIT, $0-40
+	MOVQ b+0(FP), SI
+	MOVQ blen+8(FP), BX
 	MOVB c+24(FP), AL
 	LEAQ ret+32(FP), R8
 	JMP  indexbytebody<>(SB)

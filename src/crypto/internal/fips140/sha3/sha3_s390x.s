@@ -7,7 +7,7 @@
 #include "textflag.h"
 
 // func kimd(function code, a *[200]byte, src []byte)
-TEXT ·kimd(SB), NOFRAME|NOSPLIT, $0-40
+TEXT ·kimd(SB), NOFRAME|NOSPLIT, $0-32
 	MOVD function+0(FP), R0
 	MOVD a+8(FP), R1
 	LMG  src+16(FP), R2, R3 // R2=base, R3=len
@@ -19,11 +19,11 @@ continue:
 	RET
 
 // func klmd(function code, a *[200]byte, dst, src []byte)
-TEXT ·klmd(SB), NOFRAME|NOSPLIT, $0-64
+TEXT ·klmd(SB), NOFRAME|NOSPLIT, $0-48
 	MOVD function+0(FP), R0
 	MOVD a+8(FP), R1
 	LMG  dst+16(FP), R2, R3 // R2=base, R3=len
-	LMG  src+40(FP), R4, R5 // R4=base, R5=len
+	LMG  src+32(FP), R4, R5 // R4=base, R5=len
 
 continue:
 	KLMD R2, R4

@@ -5,11 +5,11 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB),NOSPLIT|NOFRAME,$0-28
-	MOVW	a_base+0(FP), R2
-	MOVW	a_len+4(FP), R0
-	MOVW	b_base+12(FP), R3
-	MOVW	b_len+16(FP), R1
+TEXT ·compareSlices(SB),NOSPLIT|NOFRAME,$0-28
+	MOVW	a+0(FP), R2
+	MOVW	alen+4(FP), R0
+	MOVW	b+12(FP), R3
+	MOVW	blen+16(FP), R1
 	ADD	$28, R13, R7
 	B	cmpbody<>(SB)
 

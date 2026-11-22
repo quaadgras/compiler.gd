@@ -712,11 +712,12 @@ func sharestorestring(dst *string, v string) bool {
 	return true
 }
 
-func sharestoreslice(dst *slice, v slice) bool {
+// (A slice of any type: []byte has its words.)
+func sharestoreslice(dst *[]byte, v []byte) bool {
 	if !isShared(unsafe.Pointer(dst)) {
 		return false
 	}
-	publishNew(unsafe.Pointer(dst), v.array)
+	publishNew(unsafe.Pointer(dst), unsafe.Pointer(unsafe.SliceData(v)))
 	mp := acquirem()
 	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
 	*dst = v
@@ -848,7 +849,7 @@ func shareRead(typ *_type, dst, src unsafe.Pointer, size uintptr) {
 // The loads that compiled code calls when its inline load found a store
 // in progress.
 
-func shareloadslice(p *slice) (v slice) {
+func shareloadslice(p *[]byte) (v []byte) {
 	shareRead(nil, unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
 	return
 }

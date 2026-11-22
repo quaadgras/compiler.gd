@@ -485,6 +485,7 @@ var passes = [...]pass{
 	{name: "dead auto elim", fn: elimDeadAutosGeneric},
 	{name: "sccp", fn: sccp},
 	{name: "generic deadcode", fn: deadcode, required: true}, // remove dead stores, which otherwise mess up store chain
+	{name: "slice codec", fn: sliceCodec, required: true},    // expand the packs and unpacks of slices to their branches
 	{name: "late fuse", fn: fuseLate},
 	{name: "check bce", fn: checkbce},
 	{name: "dse", fn: dse},
@@ -568,6 +569,8 @@ var passOrder = [...]constraint{
 	{"expand calls", "decompose builtin"},
 	// don't run optimization pass until we've decomposed builtin objects
 	{"decompose builtin", "late opt"},
+	{"generic deadcode", "slice codec"},
+	{"slice codec", "writebarrier"},
 	// decompose builtin is the last pass that may introduce new float ops, so run softfloat after it
 	{"decompose builtin", "softfloat"},
 	// tuple selectors must be tightened to generators and de-duplicated before scheduling

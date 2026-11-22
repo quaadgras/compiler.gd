@@ -24,15 +24,15 @@ func TestSizeof(t *testing.T) {
 		{Basic{}, 16, 32},
 		{Array{}, 32, 40},
 		{Slice{}, 24, 32},
-		{Struct{}, 24, 48},
+		{Struct{}, 24, 32},
 		{Pointer{}, 24, 32},
-		{Tuple{}, 12, 24},
+		{Tuple{}, 12, 16},
 		{Signature{}, 32, 64},
-		{Union{}, 12, 24},
-		{Interface{}, 40, 80},
+		{Union{}, 12, 16},
+		{Interface{}, 40, 64},
 		{Map{}, 48, 64},
 		{Chan{}, 28, 40},
-		{Named{}, 100, 160},
+		{Named{}, 100, 152},
 		{TypeParam{}, 44, 64},
 		{term{}, 28, 40},
 
@@ -48,8 +48,8 @@ func TestSizeof(t *testing.T) {
 
 		// Misc
 		{Scope{}, 44, 96},
-		{Package{}, 44, 96},
-		{_TypeSet{}, 28, 56},
+		{Package{}, 44, 80},
+		{_TypeSet{}, 28, 40},
 	}
 	if !_64bit && runtime.GOARCH == "wasm" {
 		// wasm32 is not the 32-bit column: a string is 16 bytes, and an

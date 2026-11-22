@@ -102,7 +102,7 @@ return:
 	MOVQ	AX, ret+8(FP)
 	RET
 
-TEXT ·useSecret(SB),0,$64-24
+TEXT ·useSecret(SB),0,$64-16
 	NO_LOCAL_POINTERS
 
 	// Load secret into AX

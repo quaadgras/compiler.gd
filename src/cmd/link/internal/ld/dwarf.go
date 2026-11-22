@@ -832,7 +832,7 @@ func (d *dwctxt) synthesizestringtypes(ctxt *Link, die *dwarf.DWDie) {
 }
 
 func (d *dwctxt) synthesizeslicetypes(ctxt *Link, die *dwarf.DWDie) {
-	prototype := walktypedef(d.findprotodie(ctxt, "type:runtime.slice"))
+	prototype := walktypedef(d.findprotodie(ctxt, "type:runtime.sliceDWARF"))
 	if prototype == nil {
 		return
 	}
@@ -1902,7 +1902,7 @@ func dwarfGenerateDebugInfo(ctxt *Link) {
 		// Prototypes needed for type synthesis.
 		prototypedies = map[string]*dwarf.DWDie{
 		"type:runtime.stringStructDWARF":             nil,
-		"type:runtime.slice":                         nil,
+		"type:runtime.sliceDWARF":                    nil,
 		"type:runtime.sudog":                         nil,
 		"type:runtime.waitq":                         nil,
 		"type:runtime.hchan":                         nil,

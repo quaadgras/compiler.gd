@@ -82,11 +82,13 @@ func TestWriteThroughHeader(t *testing.T) {
 	t.Run("Slice", func(t *testing.T) {
 		s := []byte("Hello, checkptr!")[:5]
 
+		// (A slice in memory is not a Slice with 8-byte words: it is
+		// written with WriteSlice, doc/gd/slice16.md.)
 		var alias []byte
-		hdr := (*unsafeheader.Slice)(unsafe.Pointer(&alias))
-		hdr.Data = unsafe.Pointer(&s[0])
-		hdr.Cap = cap(s)
-		hdr.Len = len(s)
+		unsafeheader.WriteSlice(unsafe.Pointer(&alias), unsafeheader.Slice{Data: unsafe.Pointer(&s[0]), Len: len(s), Cap: cap(s)})
+		if got := unsafeheader.ReadSlice(unsafe.Pointer(&alias)); got.Data != unsafe.Pointer(&s[0]) || got.Len != len(s) || got.Cap != cap(s) {
+			t.Errorf("ReadSlice = %v", got)
+		}
 
 		if !bytes.Equal(alias, s) {
 			t.Errorf("alias of %T(%q) constructed via Slice = %T(%q)", s, s, alias, alias)

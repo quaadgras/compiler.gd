@@ -231,6 +231,11 @@ func (a *abiSeq) regAssign(t *abi.Type, offset uintptr) bool {
 		}
 		return a.assignFloatN(offset+2*goarch.PtrSize, 8, 2)
 	case Slice:
+		if abi.SlicePacked {
+			// w0 and w1, the pointer and the length and capacity
+			// (doc/gd/slice16.md).
+			return a.assignIntN(offset, goarch.PtrSize, 2, 0b01)
+		}
 		return a.assignIntN(offset, goarch.PtrSize, 3, 0b001)
 	case Array:
 		tt := (*arrayType)(unsafe.Pointer(t))

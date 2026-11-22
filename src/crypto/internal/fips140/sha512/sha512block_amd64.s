@@ -6,10 +6,10 @@
 
 // func blockAVX2(dig *Digest, p []byte)
 // Requires: AVX, AVX2, BMI2
-TEXT ·blockAVX2(SB), NOSPLIT, $56-32
+TEXT ·blockAVX2(SB), NOSPLIT, $56-24
 	MOVQ    dig+0(FP), SI
 	MOVQ    p_base+8(FP), DI
-	MOVQ    p_len+16(FP), DX
+	MOVL    p_len+16(FP), DX
 	SHRQ    $0x07, DX
 	SHLQ    $0x07, DX
 	JZ      done_hash

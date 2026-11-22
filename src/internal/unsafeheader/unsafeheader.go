@@ -24,3 +24,21 @@ type Slice struct {
 	Len  int
 	Cap  int
 }
+
+// ReadSlice returns the pointer, the length and the capacity of the slice
+// at p, of any element type. A slice in memory is not a Slice: with
+// 8-byte words its length and capacity are 32-bit fields of one word, or
+// it is the address of a header (doc/gd/slice16.md).
+//
+//go:nocheckptr
+func ReadSlice(p unsafe.Pointer) Slice {
+	s := *(*[]byte)(p)
+	return Slice{unsafe.Pointer(unsafe.SliceData(s)), len(s), cap(s)}
+}
+
+// WriteSlice stores the slice s at p, of any element type.
+//
+//go:nocheckptr
+func WriteSlice(p unsafe.Pointer, s Slice) {
+	*(*[]byte)(p) = unsafe.Slice((*byte)(s.Data), s.Cap)[:s.Len]
+}

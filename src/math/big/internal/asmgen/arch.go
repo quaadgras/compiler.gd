@@ -60,29 +60,30 @@ type Arch struct {
 	maxColumns int
 
 	// Instruction names.
-	mov   string // move (word-sized)
-	add   string // add with no carry involvement
-	adds  string // add, setting but not using carry
-	adc   string // add, using but not setting carry
-	adcs  string // add, setting and using carry
-	sub   string // sub with no carry involvement
-	subs  string // sub, setting but not using carry
-	sbc   string // sub, using but not setting carry
-	sbcs  string // sub, setting and using carry
-	mul   string // multiply
-	mulhi string // multiply producing high bits
-	lsh   string // left shift
-	lshd  string // double-width left shift
-	rsh   string // right shift
-	rshd  string // double-width right shift
-	and   string // bitwise and
-	or    string // bitwise or
-	xor   string // bitwise xor
-	neg   string // negate
-	rsb   string // reverse subtract
-	sltu  string // set less-than unsigned (dst = src2 < src1), for carry-less systems
-	sgtu  string // set greater-than unsigned (dst = src2 > src1), for carry-less systems
-	lea   string // load effective address
+	mov    string // move (word-sized)
+	movLen string // load of a slice's length, a uint32 with 8-byte words (gd: doc/gd/slice16.md)
+	add    string // add with no carry involvement
+	adds   string // add, setting but not using carry
+	adc    string // add, using but not setting carry
+	adcs   string // add, setting and using carry
+	sub    string // sub with no carry involvement
+	subs   string // sub, setting but not using carry
+	sbc    string // sub, using but not setting carry
+	sbcs   string // sub, setting and using carry
+	mul    string // multiply
+	mulhi  string // multiply producing high bits
+	lsh    string // left shift
+	lshd   string // double-width left shift
+	rsh    string // right shift
+	rshd   string // double-width right shift
+	and    string // bitwise and
+	or     string // bitwise or
+	xor    string // bitwise xor
+	neg    string // negate
+	rsb    string // reverse subtract
+	sltu   string // set less-than unsigned (dst = src2 < src1), for carry-less systems
+	sgtu   string // set greater-than unsigned (dst = src2 > src1), for carry-less systems
+	lea    string // load effective address
 
 	// addF and subF implement a.Add and a.Sub
 	// on systems where the situation is more complicated than

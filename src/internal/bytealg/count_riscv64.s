@@ -17,7 +17,7 @@ TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$0-32
 	MOV	X12, X13
 	JMP	·Count<ABIInternal>(SB)
 
-TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·countSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	// X10 = b_base
 	// X11 = b_len
 	// X12 = b_cap (unused)

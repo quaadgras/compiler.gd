@@ -556,13 +556,24 @@ func rewriteValuedec_OpLoad(v *Value) bool {
 		return true
 	}
 	// match: (Load <t> ptr mem)
-	// cond: t.IsSlice()
+	// cond: t.IsSlice() && config.slicePacked()
+	// result: sliceLoadPacked(v)
+	for {
+		t := v.Type
+		if !(t.IsSlice() && config.slicePacked()) {
+			break
+		}
+		v.copyOf(sliceLoadPacked(v))
+		return true
+	}
+	// match: (Load <t> ptr mem)
+	// cond: t.IsSlice() && !config.slicePacked()
 	// result: (SliceMake (Load <t.Elem().PtrTo()> ptr mem) (Load <typ.Int> (OffPtr <typ.IntPtr> [config.PtrSize] ptr) mem) (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem))
 	for {
 		t := v.Type
 		ptr := v_0
 		mem := v_1
-		if !(t.IsSlice()) {
+		if !(t.IsSlice() && !config.slicePacked()) {
 			break
 		}
 		v.reset(OpSliceMake)
@@ -630,7 +641,7 @@ func rewriteValuedec_OpSliceCap(v *Value) bool {
 		return true
 	}
 	// match: (SliceCap x:(Load <t> ptr mem))
-	// cond: t.IsSlice()
+	// cond: t.IsSlice() && !config.slicePacked()
 	// result: @x.Block (Load <typ.Int> (OffPtr <typ.IntPtr> [2*config.PtrSize] ptr) mem)
 	for {
 		x := v_0
@@ -640,7 +651,7 @@ func rewriteValuedec_OpSliceCap(v *Value) bool {
 		t := x.Type
 		mem := x.Args[1]
 		ptr := x.Args[0]
-		if !(t.IsSlice()) {
+		if !(t.IsSlice() && !config.slicePacked()) {
 			break
 		}
 		b = x.Block
@@ -670,7 +681,7 @@ func rewriteValuedec_OpSliceLen(v *Value) bool {
 		return true
 	}
 	// match: (SliceLen x:(Load <t> ptr mem))
-	// cond: t.IsSlice()
+	// cond: t.IsSlice() && !config.slicePacked()
 	// result: @x.Block (Load <typ.Int> (OffPtr <typ.IntPtr> [config.PtrSize] ptr) mem)
 	for {
 		x := v_0
@@ -680,7 +691,7 @@ func rewriteValuedec_OpSliceLen(v *Value) bool {
 		t := x.Type
 		mem := x.Args[1]
 		ptr := x.Args[0]
-		if !(t.IsSlice()) {
+		if !(t.IsSlice() && !config.slicePacked()) {
 			break
 		}
 		b = x.Block
@@ -697,6 +708,7 @@ func rewriteValuedec_OpSliceLen(v *Value) bool {
 func rewriteValuedec_OpSlicePtr(v *Value) bool {
 	v_0 := v.Args[0]
 	b := v.Block
+	config := b.Func.Config
 	// match: (SlicePtr (SliceMake ptr _ _ ))
 	// result: ptr
 	for {
@@ -708,7 +720,7 @@ func rewriteValuedec_OpSlicePtr(v *Value) bool {
 		return true
 	}
 	// match: (SlicePtr x:(Load <t> ptr mem))
-	// cond: t.IsSlice()
+	// cond: t.IsSlice() && !config.slicePacked()
 	// result: @x.Block (Load <t.Elem().PtrTo()> ptr mem)
 	for {
 		x := v_0
@@ -718,7 +730,7 @@ func rewriteValuedec_OpSlicePtr(v *Value) bool {
 		t := x.Type
 		mem := x.Args[1]
 		ptr := x.Args[0]
-		if !(t.IsSlice()) {
+		if !(t.IsSlice() && !config.slicePacked()) {
 			break
 		}
 		b = x.Block
@@ -899,6 +911,20 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		return true
 	}
 	// match: (Store {t} dst (SliceMake ptr len cap) mem)
+	// cond: config.slicePacked()
+	// result: sliceStorePacked(v)
+	for {
+		if v_1.Op != OpSliceMake {
+			break
+		}
+		if !(config.slicePacked()) {
+			break
+		}
+		v.copyOf(sliceStorePacked(v))
+		return true
+	}
+	// match: (Store {t} dst (SliceMake ptr len cap) mem)
+	// cond: !config.slicePacked()
 	// result: (Store {typ.Int} (OffPtr <typ.IntPtr> [2*config.PtrSize] dst) cap (Store {typ.Int} (OffPtr <typ.IntPtr> [config.PtrSize] dst) len (Store {t.Elem().PtrTo()} dst ptr mem)))
 	for {
 		t := auxToType(v.Aux)
@@ -910,6 +936,9 @@ func rewriteValuedec_OpStore(v *Value) bool {
 		ptr := v_1.Args[0]
 		len := v_1.Args[1]
 		mem := v_2
+		if !(!config.slicePacked()) {
+			break
+		}
 		v.reset(OpStore)
 		v.Aux = typeToAux(typ.Int)
 		v0 := b.NewValue0(v.Pos, OpOffPtr, typ.IntPtr)

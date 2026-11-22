@@ -84,10 +84,10 @@
 	ADD	b, a;
 
 
-TEXT ·block(SB),NOSPLIT,$0-32
+TEXT ·block(SB),NOSPLIT,$0-24
 	MOVD	dig+0(FP), R10
 	MOVD	p+8(FP), R6
-	MOVD	p_len+16(FP), R5
+	MOVWZ	p_len+16(FP), R5
 
 	// We assume p_len >= 64
 	SRD 	$6, R5

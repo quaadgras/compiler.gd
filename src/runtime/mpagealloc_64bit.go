@@ -82,7 +82,7 @@ func (p *pageAlloc) sysInit(test bool) {
 		}
 
 		// Put this reservation into a slice.
-		sl := notInHeapSlice{(*notInHeap)(r), 0, entries}
+		sl := mkNotInHeapSlice((*notInHeap)(r), 0, entries)
 		p.summary[l] = *(*[]pallocSum)(unsafe.Pointer(&sl))
 	}
 }
@@ -153,7 +153,8 @@ func (p *pageAlloc) sysGrow(base, limit uintptr) {
 		//
 		// We must do this regardless of whether we map new memory.
 		if needIdxLimit > len(p.summary[l]) {
-			p.summary[l] = p.summary[l][:needIdxLimit]
+			sl := noWBSlice(unsafe.Pointer(&p.summary[l]))
+			*sl = (*sl)[:needIdxLimit]
 		}
 
 		// Compute the needed address range in the summary array for level l.
@@ -246,7 +247,7 @@ func (s *scavengeIndex) sysInit(test bool, sysStat *sysMemStat) uintptr {
 	n := uintptr(1<<heapAddrBits) / pallocChunkBytes
 	nbytes := n * unsafe.Sizeof(atomicScavChunkData{})
 	r := sysReserve(nil, nbytes, "scavenge index")
-	sl := notInHeapSlice{(*notInHeap)(r), int(n), int(n)}
+	sl := mkNotInHeapSlice((*notInHeap)(r), int(n), int(n))
 	s.chunks = *(*[]atomicScavChunkData)(unsafe.Pointer(&sl))
 	return 0 // All memory above is mapped Reserved.
 }

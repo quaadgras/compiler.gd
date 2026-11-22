@@ -524,8 +524,11 @@ func appendSlice(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 	nif.Body = []ir.Node{ir.NewAssignStmt(gd, gd.Pos, s, slice)}
 
 	// else { s = growslice(oldPtr, newLen, oldCap, num, T) }
-	call := walkGrowslice(gd, s, nif.PtrInit(), oldPtr, newLen, oldCap, num)
-	nif.Else = []ir.Node{ir.NewAssignStmt(gd, gd.Pos, s, call)}
+	// (growslice's results are assigned in the else branch.)
+	var els ir.Nodes
+	call := walkGrowslice(gd, s, &els, oldPtr, newLen, oldCap, num)
+	els.Append(ir.NewAssignStmt(gd, gd.Pos, s, call))
+	nif.Else = els
 
 	nodes.Append(nif)
 
@@ -708,13 +711,14 @@ func extendSlice(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 	nif.Body = []ir.Node{ir.NewAssignStmt(gd, gd.Pos, s, nt)}
 
 	// else { s = growslice(s.ptr, n, s.cap, l2, T) }
-	nif.Else = []ir.Node{
-		ir.NewAssignStmt(gd, gd.Pos, s, walkGrowslice(gd, s, nif.PtrInit(),
-			ir.NewUnaryExpr(gd, gd.Pos, ir.OSPTR, s),
-			nn,
-			ir.NewUnaryExpr(gd, gd.Pos, ir.OCAP, s),
-			l2)),
-	}
+	var els ir.Nodes
+	call := walkGrowslice(gd, s, &els,
+		ir.NewUnaryExpr(gd, gd.Pos, ir.OSPTR, s),
+		nn,
+		ir.NewUnaryExpr(gd, gd.Pos, ir.OCAP, s),
+		l2)
+	els.Append(ir.NewAssignStmt(gd, gd.Pos, s, call))
+	nif.Else = els
 
 	nifnz.Body = append(nifnz.Body, nif)
 

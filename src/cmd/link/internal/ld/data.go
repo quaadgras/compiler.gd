@@ -1347,6 +1347,41 @@ func addStringRest(arch *sys.Arch, s *loader.SymbolBuilder, n uint64) {
 	}
 }
 
+// slicePacked reports whether a slice is two words, its pointer and its
+// length and capacity as uint32s (cmd/compile/internal/types's
+// SlicePacked): with 8-byte words but on wasm.
+func slicePacked(arch *sys.Arch) bool {
+	return arch.PtrSize == 8 && arch.Family != sys.Wasm
+}
+
+// sliceAlign is the alignment of a slice.
+func sliceAlign(arch *sys.Arch) int64 {
+	return int64(arch.PtrSize)
+}
+
+// alignSlice pads s, a structure being laid out, to the alignment of a
+// slice, which is added next.
+func alignSlice(arch *sys.Arch, s *loader.SymbolBuilder) {
+	for s.Size()%sliceAlign(arch) != 0 {
+		s.AddUint8(0)
+	}
+}
+
+// addSliceRest adds the words of a slice after its pointer to s, for a
+// slice of length and capacity n.
+func addSliceRest(arch *sys.Arch, s *loader.SymbolBuilder, n uint64) {
+	if slicePacked(arch) {
+		if n >= 1<<32-1 {
+			panic("slice too large")
+		}
+		s.AddUint32(arch, uint32(n))
+		s.AddUint32(arch, uint32(n))
+		return
+	}
+	s.AddUint(arch, n)
+	s.AddUint(arch, n)
+}
+
 func (ctxt *Link) dostrdata() {
 	for _, name := range ctxt.strnames {
 		addstrdata(ctxt.Arch, ctxt.loader, name, ctxt.strdata[name])

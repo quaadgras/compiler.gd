@@ -257,6 +257,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).StringLoad = typecheck.LookupRuntimeFunc(gd, "stringload")
 	ir.Syms(gd).StringStore = typecheck.LookupRuntimeFunc(gd, "stringstore")
 	ir.Syms(gd).StringAtomic = typecheck.LookupRuntimeVar(gd, "stringAtomic") // bool
+	ir.Syms(gd).SliceHdr = typecheck.LookupRuntimeFunc(gd, "slicehdr")
+	ir.Syms(gd).SliceHdrNotInHeap = typecheck.LookupRuntimeFunc(gd, "slicehdrnotinheap")
 	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
 	ir.Syms(gd).SharePages = typecheck.LookupRuntimeVar(gd, "sharePages") // [1 << 20]uint8
 	ir.Syms(gd).ShareSeqLoad = typecheck.LookupRuntimeFunc(gd, "shareseqload")
@@ -2270,6 +2272,10 @@ func (s *state) iMakeSpreadFromValue(ifaceT *types.Type, tab *ssa.Value, valNode
 		w0 = s.newValue1(ssa.OpStringPtr, byteptr, src)
 		w1 = s.newValue1(ssa.OpStringWord1, s.f.Config.Types.StringWord1, src)
 		w2 = s.newValue1(ssa.OpStringWord2, s.f.Config.Types.StringWord2, src)
+	case valT.IsSlice() && types.SlicePacked():
+		// w0 and w1, as the slice is in memory (types.SlicePacked).
+		w0, w1 = s.slicePack(src)
+		w2 = s.constInt64(u64, 0)
 	case valT.IsSlice():
 		elemPtrT := valT.Elem().PtrTo()
 		w0 = s.newValue1(ssa.OpSlicePtr, elemPtrT, src)
@@ -2430,6 +2436,9 @@ func (s *state) spreadExtract(pos src.XPos, t *types.Type, iface *ssa.Value) *ss
 		hash := s.newValue1(ssa.OpCopy, s.f.Config.Types.StringWord1, w1)
 		word2 := s.newValue1(ssa.OpCopy, s.f.Config.Types.StringWord2, w2)
 		return s.newValue3(ssa.OpStringMake, t, data, hash, word2)
+	case t.IsSlice() && types.SlicePacked():
+		// w0 and w1, as the slice is in memory (types.SlicePacked).
+		return s.sliceUnpack(t, s.newValue1(ssa.OpCopy, t.Elem().PtrTo(), data), w1)
 	case t.IsSlice():
 		// Reinterpret iface data (BytePtr) as *T via OpCopy; both are
 		// pointer-shaped register-width values. The slice header's ptr
@@ -3062,7 +3071,9 @@ func (s *state) stmt(n ir.Node) {
 		var skip skipMask
 		// (Not for a tagged string, whose w0 holds the bytes and length
 		// of an inline one: types.StringTagged.)
-		if rhs != nil && (rhs.Op() == ir.OSLICE || rhs.Op() == ir.OSLICE3 || rhs.Op() == ir.OSLICESTR && !types.StringTagged()) && ir.SameSafeExpr(rhs.(*ir.SliceExpr).X, n.X) {
+		// (Nor for a packed slice, whose length and capacity are one
+		// word, stored with the pointer: types.SlicePacked.)
+		if rhs != nil && (rhs.Op() == ir.OSLICE && !types.SlicePacked() || rhs.Op() == ir.OSLICE3 && !types.SlicePacked() || rhs.Op() == ir.OSLICESTR && !types.StringTagged()) && ir.SameSafeExpr(rhs.(*ir.SliceExpr).X, n.X) {
 			// We're assigning a slicing operation back to its source.
 			// Don't write back fields we aren't changing. See issue #14855.
 			rhs := rhs.(*ir.SliceExpr)
@@ -4741,7 +4752,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		n := n.(*ir.UnaryExpr)
 		// Note: all constant cases are handled by the frontend. If len or cap
 		// makes it here, we want the side effects of the argument. See issue 72844.
-		if x := n.X; s.tear && !s.ifaceOnly && x.Type().IsSlice() && !s.canSSA(x) && ir.IsAddressable(x) {
+		if x := n.X; s.tear && !s.ifaceOnly && x.Type().IsSlice() && !types.SlicePacked() && !s.canSSA(x) && ir.IsAddressable(x) {
 			// One word of a slice in memory: no other word to be
 			// loaded with.
 			switch x.Op() {
@@ -5140,7 +5151,8 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// In shared memory, the slice and the elements are stored under one
 	// lock where each store would have its own: see appendGrouped.
 	grouped := false
-	if inplace && s.tear && !s.ifaceOnly && s.gd.Debug.NoGroup == 0 && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
+	// (Not a packed slice: types.SlicePacked.)
+	if inplace && s.tear && !s.ifaceOnly && s.gd.Debug.NoGroup == 0 && !types.SlicePacked() && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
 		len(n.Args) > 1 && int64(len(n.Args)-1)*et.Size() <= 256 && !ssa.IsStackAddr(addr) && !s.unpublished(addr) {
 		grouped = true
 		for _, a := range n.Args[1:] {
@@ -5323,7 +5335,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			// without pointers while waiting on additional runtime support (CL 698515).
 			fn = ir.Syms(s.gd).GrowsliceBufNoAlias
 		}
-		r = s.rtcall(fn, true, []*types.Type{n.Type()}, p, l, c, nargs, taddr, s.addr(info.store), s.constInt(types.Types[types.TINT], info.K))
+		r = s.rtcall(fn, true, sliceResults(), p, l, c, nargs, taddr, s.addr(info.store), s.constInt(types.Types[types.TINT], info.K))
 	} else {
 		fn := ir.Syms(s.gd).Growslice
 		if goexperiment.RuntimeFreegc && n.AppendNoAlias && !et.HasPointers() {
@@ -5333,13 +5345,11 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			// without pointers while waiting on additional runtime support (CL 698515).
 			fn = ir.Syms(s.gd).GrowsliceNoAlias
 		}
-		r = s.rtcall(fn, true, []*types.Type{n.Type()}, p, l, c, nargs, taddr)
+		r = s.rtcall(fn, true, sliceResults(), p, l, c, nargs, taddr)
 	}
 
-	// Decompose output slice
-	p = s.newValue1(ssa.OpSlicePtr, pt, r[0])
-	l = s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], r[0])
-	c = s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], r[0])
+	// growslice returns the pointer, the length and the capacity.
+	p, l, c = s.newValue1(ssa.OpCopy, pt, r[0]), r[1], r[2]
 
 	s.vars[ptrVar] = p
 	s.vars[lenVar] = l
@@ -5360,8 +5370,9 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		if hdrLocal {
 			s.shareCheck(addr)
 		}
-		// (If grouped, with the length and the elements.)
-		if !grouped {
+		// (If grouped, with the length and the elements. A packed
+		// slice is stored whole after the merge: types.SlicePacked.)
+		if !grouped && !types.SlicePacked() {
 			s.dstLocal = hdrLocal
 			guard := s.tearGuard(n.Type(), addr)
 			var locked *ssa.Value
@@ -5398,7 +5409,13 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		return nil
 	}
 
-	if inplace {
+	if inplace && types.SlicePacked() {
+		// The length and the capacity are one word: the whole slice,
+		// grown or not.
+		s.dstLocal = hdrLocal
+		s.storeType(n.Type(), addr, s.newValue3(ssa.OpSliceMake, n.Type(), p, l, c), 0, true)
+		s.dstLocal = false
+	} else if inplace {
 		// Update length in place.
 		// We have to wait until here to make sure growslice succeeded.
 		lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
@@ -5563,26 +5580,27 @@ func (s *state) move2heap(n *ir.MoveToHeapExpr) *ssa.Value {
 
 	// Move the slice to heap
 	s.startBlock(moveBlock)
-	var newSlice *ssa.Value
+	// (The runtime returns the pointer, the length and the capacity.)
+	var r []*ssa.Value
+	rts := sliceResults()
 	if et.HasPointers() {
 		typ := s.expr(n.RType)
 		if n.PreserveCapacity {
-			newSlice = s.rtcall(ir.Syms(s.gd).MoveSlice, true, []*types.Type{slice.Type}, typ, p, l, c)[0]
+			r = s.rtcall(ir.Syms(s.gd).MoveSlice, true, rts, typ, p, l, c)
 		} else {
-			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoCap, true, []*types.Type{slice.Type}, typ, p, l)[0]
+			r = s.rtcall(ir.Syms(s.gd).MoveSliceNoCap, true, rts, typ, p, l)
 		}
 	} else {
 		elemSize := s.constInt(types.Types[types.TUINTPTR], et.Size())
 		if n.PreserveCapacity {
-			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoScan, true, []*types.Type{slice.Type}, elemSize, p, l, c)[0]
+			r = s.rtcall(ir.Syms(s.gd).MoveSliceNoScan, true, rts, elemSize, p, l, c)
 		} else {
-			newSlice = s.rtcall(ir.Syms(s.gd).MoveSliceNoCapNoScan, true, []*types.Type{slice.Type}, elemSize, p, l)[0]
+			r = s.rtcall(ir.Syms(s.gd).MoveSliceNoCapNoScan, true, rts, elemSize, p, l)
 		}
 	}
-	// Decompose output slice
-	s.vars[ptrVar] = s.newValue1(ssa.OpSlicePtr, pt, newSlice)
-	s.vars[lenVar] = s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], newSlice)
-	s.vars[capVar] = s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], newSlice)
+	s.vars[ptrVar] = s.newValue1(ssa.OpCopy, pt, r[0])
+	s.vars[lenVar] = r[1]
+	s.vars[capVar] = r[2]
 	b = s.endBlock()
 	b.AddEdgeTo(mergeBlock)
 
@@ -7255,6 +7273,13 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	return res
 }
 
+// sliceResults are the results of the runtime functions that return a
+// slice's pointer, length and capacity (growslice, moveSlice): the
+// pointer as an unsafe.Pointer, which has no outBuf (types.PhaseGApplies).
+func sliceResults() []*types.Type {
+	return []*types.Type{types.Types[types.TUNSAFEPTR], types.Types[types.TINT], types.Types[types.TINT]}
+}
+
 // do *left = right for type t.
 func (s *state) storeType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 	s.instrument(t, left, instrumentWrite)
@@ -7339,6 +7364,10 @@ func (s *state) storeTypeScalars(t *types.Type, left, right *ssa.Value, skip ski
 		len := s.newValue1(ssa.OpStringWord2, w2T, right)
 		lenAddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.StringWord2Ptr, 2*s.config.PtrSize, left)
 		s.store(w2T, lenAddr, len)
+	case t.IsSlice() && types.SlicePacked():
+		// The whole slice, its pointer too (storeTypePtrs stores
+		// nothing): it is packed, and its words go together.
+		s.store(t, left, right)
 	case t.IsSlice():
 		if skip&skipLen == 0 {
 			len := s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], right)
@@ -7399,6 +7428,8 @@ func (s *state) storeTypePtrs(t *types.Type, left, right *ssa.Value) {
 			break
 		}
 		s.store(s.f.Config.Types.BytePtr, left, ptr)
+	case t.IsSlice() && types.SlicePacked():
+		// (Stored whole by storeTypeScalars.)
 	case t.IsSlice():
 		elType := types.NewPtr(t.Elem())
 		ptr := s.newValue1(ssa.OpSlicePtr, elType, right)
@@ -8648,6 +8679,13 @@ func EmitArgInfo(gd *base.Invocation, f *ir.Func, abiInfo *abi.ABIParamResultInf
 		case t.IsInterface(), t.IsString():
 			_ = visitType(baseOffset, uintptrTyp, depth) &&
 				visitType(baseOffset+PtrSize, uintptrTyp, depth)
+		case t.IsSlice() && types.SlicePacked():
+			// The length and the capacity are uint32s (a huge
+			// slice's are the marker).
+			u32 := types.Types[types.TUINT32]
+			_ = visitType(baseOffset, uintptrTyp, depth) &&
+				visitType(baseOffset+types.SliceLenOffset, u32, depth) &&
+				visitType(baseOffset+types.SliceCapOffset, u32, depth)
 		case t.IsSlice():
 			_ = visitType(baseOffset, uintptrTyp, depth) &&
 				visitType(baseOffset+PtrSize, uintptrTyp, depth) &&
@@ -9732,7 +9770,12 @@ func (s *State) PrepareCall(v *ssa.Value) {
 	if ok {
 		// Record call graph information for nowritebarrierrec
 		// analysis.
-		if c := nowritebarrierrecCheck(s.gd); c != nil {
+		// (Not the slow path of the pack of a slice, the call
+		// that makes the header of a huge one: runtime.slicehdr
+		// allocates, but the runtime's own slices are never huge;
+		// it throws if called where it may not allocate:
+		// doc/gd/slice16.md.)
+		if c := nowritebarrierrecCheck(s.gd); c != nil && call.Fn != ir.Syms(s.gd).SliceHdr {
 			c.recordCall(s.pp.CurFunc, call.Fn, v.Pos)
 		}
 	}
@@ -9877,6 +9920,10 @@ func (e *ssafn) Syslook(name string) *obj.LSym {
 		return ir.Syms(e.gd).CgoCheckMemmove
 	case "cgoCheckPtrWrite":
 		return ir.Syms(e.gd).CgoCheckPtrWrite
+	case "slicehdr":
+		return ir.Syms(e.gd).SliceHdr
+	case "slicehdrnotinheap":
+		return ir.Syms(e.gd).SliceHdrNotInHeap
 	}
 	e.Fatalf(src.NoXPos, "unknown Syslook func %v", name)
 	return nil

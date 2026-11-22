@@ -12,7 +12,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·indexByteSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	// X10 = b_base
 	// X11 = b_len
 	// X12 = b_cap (unused)

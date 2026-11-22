@@ -577,9 +577,9 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	moduledata := ldr.MakeSymbolUpdater(ctxt.Moduledata)
 
 	slice := func(sym loader.Sym, len uint64) {
+		alignSlice(ctxt.Arch, moduledata)
 		moduledata.AddAddr(ctxt.Arch, sym)
-		moduledata.AddUint(ctxt.Arch, len)
-		moduledata.AddUint(ctxt.Arch, len)
+		addSliceRest(ctxt.Arch, moduledata, len)
 	}
 
 	sliceSym := func(sym loader.Sym) {
@@ -587,9 +587,9 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	}
 
 	nilSlice := func() {
+		alignSlice(ctxt.Arch, moduledata)
 		moduledata.AddUint(ctxt.Arch, 0)
-		moduledata.AddUint(ctxt.Arch, 0)
-		moduledata.AddUint(ctxt.Arch, 0)
+		addSliceRest(ctxt.Arch, moduledata, 0)
 	}
 
 	// pcHeader through ftab. GOWASM=gc leaves the table out; the fields
@@ -731,17 +731,13 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 	// Add inittasks slice
 	t := ctxt.mainInittasks
 	if t != 0 {
-		moduledata.AddAddr(ctxt.Arch, t)
-		moduledata.AddUint(ctxt.Arch, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
-		moduledata.AddUint(ctxt.Arch, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
+		slice(t, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
 	} else {
 		// Some build modes have no inittasks, like a shared library.
 		// Its inittask list will be constructed by a higher-level
 		// linking step.
 		// This branch can also happen if there are no init tasks at all.
-		moduledata.AddUint(ctxt.Arch, 0)
-		moduledata.AddUint(ctxt.Arch, 0)
-		moduledata.AddUint(ctxt.Arch, 0)
+		nilSlice()
 	}
 
 	if len(ctxt.Shlibs) > 0 {

@@ -129,6 +129,26 @@ func StringAligned16() bool {
 	return StringTagged() && buildcfg.GOARCH != "wasm"
 }
 
+// SlicePacked reports whether a slice is two words, 16 bytes
+// (doc/gd/slice16.md): on the targets with 8-byte words but GOARCH=wasm.
+//
+//	w0 @0   the address of the array, or of a huge slice's header
+//	w1 @8   len (uint32 @8) and cap (uint32 @12)
+//
+// A slice whose capacity is SliceHugeCap or more is huge: w0 is the
+// address of an immutable header {ptr, len, cap} of three words in the
+// heap, and w1 the marker, len 0 and cap 0xFFFFFFFF, which no other
+// slice has. In SSA a slice is three values as in stock Go, its length
+// and capacity full words: it is packed where it is stored, or passed in
+// registers (OpSlicePack, OpSlicePackW1), and unpacked where it is loaded
+// (OpSliceUnpackPtr, Len and Cap).
+func SlicePacked() bool {
+	return PtrSize == 8 && buildcfg.GOARCH != "wasm"
+}
+
+// SliceHugeCap is the least capacity of a huge slice (SlicePacked).
+const SliceHugeCap = 1<<32 - 1
+
 // StackAlignment is the alignment of a value of type t in a stack frame,
 // which is aligned to a register: t's, but a register's for a string,
 // whose alignment to 16 (StringAligned16) is for a 16-byte access that is
@@ -730,6 +750,9 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		CheckSize(gd, t.Elem())
 		t.align = uint8(PtrSize)
 		t.intRegs = 3
+		if SlicePacked() {
+			t.intRegs = 2 // {w0, w1} (SlicePacked)
+		}
 		t.setAlg(ANOEQ)
 		if !t.Elem().NotInHeap() {
 			t.ptrBytes = int64(PtrSize)

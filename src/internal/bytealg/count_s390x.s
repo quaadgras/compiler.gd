@@ -39,7 +39,7 @@ DATA countbytemask<>+0(SB)/8, $0x0101010101010101
 DATA countbytemask<>+8(SB)/8, $0x0101010101010101
 
 // func Count(b []byte, c byte) int
-TEXT ·Count(SB), NOSPLIT|NOFRAME, $0-40
+TEXT ·countSlice(SB), NOSPLIT|NOFRAME, $0-40
 	LMG   b+0(FP), R_PTR, R_LEN
 	MOVBZ c+24(FP), R_CHAR
 	MOVD  $ret+32(FP), R_RET

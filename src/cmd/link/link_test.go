@@ -2044,11 +2044,13 @@ func TestFuncdataPlacement(t *testing.T) {
 		t.Fatal("could not find module data")
 	}
 
-	// What a slice looks like in the object file.
+	// What a slice looks like in the object file: with 8-byte words its
+	// length and capacity are uint32s, and it is aligned to 16
+	// (doc/gd/slice16.md); _ has a slice's alignment.
 	type moddataSlice struct {
-		addr uintptr
-		len  int
-		cap  int
+		_      [0][]byte
+		addr   uintptr
+		lenCap [unsafe.Sizeof([]byte(nil))/unsafe.Sizeof(uintptr(0)) - 1]uintptr
 	}
 
 	// This needs to match the struct defined in runtime/symtab.go,
@@ -2096,7 +2098,10 @@ func TestFuncdataPlacement(t *testing.T) {
 	}
 	// The ftab slice in moddata has one extra entry used to record
 	// the final PC.
-	ftabLen := moddata.ftab.len - 1
+	ftabLen := int(moddata.ftab.lenCap[0]) - 1
+	if len(moddata.ftab.lenCap) == 1 {
+		ftabLen = int(uint32(moddata.ftab.lenCap[0])) - 1 // (little-endian)
+	}
 	ftab := make([]functab, ftabLen)
 	copy(ftab, unsafe.Slice((*functab)(unsafe.Pointer(&pclntab[ftabAddr-pclntabAddr])), ftabLen))
 

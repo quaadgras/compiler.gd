@@ -68,7 +68,7 @@ func Swapper(slice any) func(i, j int) {
 		}
 	}
 
-	s := (*unsafeheader.Slice)(v.ptr)
+	s := unsafeheader.ReadSlice(v.ptr)
 	tmp := unsafe_New(typ) // swap scratch space
 
 	return func(i, j int) {

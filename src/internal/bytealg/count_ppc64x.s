@@ -11,7 +11,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Count<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
+TEXT ·countSlice<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
 	// R3 = byte array pointer
 	// R4 = length
 	// R6 = byte to count

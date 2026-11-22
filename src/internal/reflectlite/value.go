@@ -181,6 +181,14 @@ func packEface(v Value) any {
 			*(*[2]uintptr)(unsafe.Pointer(&e.Inline)) = [2]uintptr{w[1], 0}
 			break
 		}
+		if abi.SlicePacked {
+			// A slice too, two words (doc/gd/slice16.md).
+			sl := *(*[]unsafe.Pointer)(src) // (any slice's words)
+			w := (*[2]uintptr)(unsafe.Pointer(&sl))
+			e.Data = *(*unsafe.Pointer)(unsafe.Pointer(&sl))
+			*(*[2]uintptr)(unsafe.Pointer(&e.Inline)) = [2]uintptr{w[1], 0}
+			break
+		}
 		e.Data = *(*unsafe.Pointer)(src)
 		*(*[16]byte)(unsafe.Pointer(&e.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 	case !t.IsDirectIface():
@@ -439,7 +447,7 @@ func (v Value) Len() int {
 		return maplen(v.pointer())
 	case abi.Slice:
 		// Slice is bigger than a word; assume flagIndir.
-		return (*unsafeheader.Slice)(v.dataPtr()).Len
+		return unsafeheader.ReadSlice(v.dataPtr()).Len
 	case abi.String:
 		// String is bigger than a word; assume flagIndir.
 		return len(*(*string)(v.dataPtr()))

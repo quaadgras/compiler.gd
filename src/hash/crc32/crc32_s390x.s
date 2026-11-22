@@ -83,7 +83,7 @@ GLOBL   ·crcclecons(SB),RODATA, $144
 TEXT ·vectorizedIEEE(SB),NOSPLIT,$0
 	MOVWZ   crc+0(FP), R2     // R2 stores the CRC value
 	MOVD    p+8(FP), R3       // data pointer
-	MOVD    p_len+16(FP), R4  // len(p)
+	MOVWZ    p_len+16(FP), R4  // len(p)
 
 	MOVD    $·crclecons(SB), R5
 	BR      vectorizedBody<>(SB)
@@ -92,7 +92,7 @@ TEXT ·vectorizedIEEE(SB),NOSPLIT,$0
 TEXT ·vectorizedCastagnoli(SB),NOSPLIT,$0
 	MOVWZ   crc+0(FP), R2     // R2 stores the CRC value
 	MOVD    p+8(FP), R3       // data pointer
-	MOVD    p_len+16(FP), R4  // len(p)
+	MOVWZ    p_len+16(FP), R4  // len(p)
 
 	// R5: crc-32 constant pool base pointer, constant is used to reduce crc
 	MOVD    $·crcclecons(SB), R5

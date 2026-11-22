@@ -561,8 +561,7 @@ func (span *mspan) heapBits() []uintptr {
 func heapBitsSlice(spanBase, spanSize, elemsize uintptr) []uintptr {
 	base, bitmapSize := spanHeapBitsRange(spanBase, spanSize, elemsize)
 	elems := int(bitmapSize / goarch.PtrSize)
-	var sl notInHeapSlice
-	sl = notInHeapSlice{(*notInHeap)(unsafe.Pointer(base)), elems, elems}
+	sl := mkNotInHeapSlice((*notInHeap)(unsafe.Pointer(base)), elems, elems)
 	return *(*[]uintptr)(unsafe.Pointer(&sl))
 }
 

@@ -603,6 +603,14 @@ func setup(gd *base.Invocation) {
 			types.NewField(nxp, fname("len"), it),
 			types.NewField(nxp, fname("cap"), it),
 		})
+		if types.SlicePacked() {
+			// { w0, w1 }: the pointer (a huge slice's header's), and
+			// the length and the capacity (types.SlicePacked).
+			synthSlice = types.NewStruct([]*types.Field{
+				types.NewField(nxp, fname("ptr"), bp),
+				types.NewField(nxp, fname("lencap"), types.Types[types.TUINT64]),
+			})
+		}
 		types.CalcStructSize(gd, synthSlice)
 		// Two words (types.StringTwoWords): { w0, w1 }, w0 the sole
 		// pointer word (an inline string's tag and bytes 8..14 with

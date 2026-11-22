@@ -121,12 +121,9 @@ func (tab *traceMap) put(data unsafe.Pointer, size uintptr) (uint64, bool) {
 
 func (tab *traceMap) newTraceMapNode(data unsafe.Pointer, size, hash uintptr, id uint64) *traceMapNode {
 	// Create data array.
-	sl := notInHeapSlice{
-		array: tab.mem.alloc(size),
-		len:   int(size),
-		cap:   int(size),
-	}
-	memmove(unsafe.Pointer(sl.array), data, size)
+	p := tab.mem.alloc(size)
+	sl := mkNotInHeapSlice(p, int(size), int(size))
+	memmove(unsafe.Pointer(p), data, size)
 
 	// Create metadata structure.
 	meta := (*traceMapNode)(unsafe.Pointer(tab.mem.alloc(unsafe.Sizeof(traceMapNode{}))))

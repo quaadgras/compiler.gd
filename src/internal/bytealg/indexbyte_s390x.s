@@ -12,7 +12,7 @@
 #include "textflag.h"
 
 
-TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
+TEXT ·indexByteSlice<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
 	MOVD    R5, R4
 	AND	$0xff, R4
 	BR      indexbytebody<>(SB)

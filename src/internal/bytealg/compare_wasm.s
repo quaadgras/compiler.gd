@@ -5,12 +5,12 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB), NOSPLIT, $0-56
+TEXT ·compareSlices(SB), NOSPLIT, $0-56
 	Get SP
-	I64Load a_base+0(FP)
-	I64Load a_len+8(FP)
-	I64Load b_base+24(FP)
-	I64Load b_len+32(FP)
+	I64Load a+0(FP)
+	I64Load alen+8(FP)
+	I64Load b+24(FP)
+	I64Load blen+32(FP)
 	Call cmpbody<>(SB)
 	I64Store ret+48(FP)
 	RET

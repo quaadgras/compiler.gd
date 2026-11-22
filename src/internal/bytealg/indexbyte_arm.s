@@ -5,9 +5,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte(SB),NOSPLIT,$0-20
-	MOVW	b_base+0(FP), R0
-	MOVW	b_len+4(FP), R1
+TEXT ·indexByteSlice(SB),NOSPLIT,$0-20
+	MOVW	b+0(FP), R0
+	MOVW	blen+4(FP), R1
 	MOVBU	c+12(FP), R2	// byte to find
 	MOVW	$ret+16(FP), R5
 	B	indexbytebody<>(SB)

@@ -56,6 +56,10 @@ const (
 	vdsoVerSymSize     = vdsoArrayMax / 2 // uint16
 	vdsoHashSize       = vdsoArrayMax / 4 // uint32
 
+	// vdsoChainMax bounds the GNU hash chain, whose length is that of
+	// the symbol table.
+	vdsoChainMax = 1 << 20
+
 	// vdsoBloomSizeScale is a scaling factor for gnuhash tables which are uint32 indexed,
 	// but contain uintptrs
 	vdsoBloomSizeScale = unsafe.Sizeof(uintptr(0)) / 4 // uint32
@@ -170,15 +174,20 @@ func vdsoInitFromSysinfoEhdr(info *vdsoInfo, hdr *elfEhdr) {
 		nbucket := gnuhash[0]
 		info.symOff = gnuhash[1]
 		bloomSize := gnuhash[2]
-		info.bucket = gnuhash[4+bloomSize*uint32(vdsoBloomSizeScale):][:nbucket]
-		info.chain = gnuhash[4+bloomSize*uint32(vdsoBloomSizeScale)+nbucket:]
+		info.bucket = gnuhash[4+bloomSize*uint32(vdsoBloomSizeScale):][:nbucket:nbucket]
+		// (The capacities are bounded: with 8-byte words a slice
+		// whose capacity does not fit in 32 bits is a header in the
+		// heap, which there is none of yet: doc/gd/slice16.md. The
+		// chain has an entry for each symbol.)
+		c := 4 + bloomSize*uint32(vdsoBloomSizeScale) + nbucket
+		info.chain = gnuhash[c : c+vdsoChainMax : c+vdsoChainMax]
 		info.isGNUHash = true
 	} else {
 		// Parse the hash table header.
 		nbucket := hash[0]
 		nchain := hash[1]
-		info.bucket = hash[2 : 2+nbucket]
-		info.chain = hash[2+nbucket : 2+nbucket+nchain]
+		info.bucket = hash[2 : 2+nbucket : 2+nbucket]
+		info.chain = hash[2+nbucket : 2+nbucket+nchain : 2+nbucket+nchain]
 	}
 
 	// That's all we need.

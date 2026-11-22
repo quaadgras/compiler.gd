@@ -36,9 +36,13 @@ func f1(q *Q, xx []byte) interface{} { // ERROR "live at call to (newobject|mall
 //go:noinline
 func f2(d []byte, n int) (odata, res []byte, e interface{}) { // ERROR "live at entry to f2: d$"
 	if n > len(d) {
-		return d, nil, &T{M: "hello"} // ERROR "live at call to (newobject|mallocgcSmallScanNoHeaderSC[0-9]+)+: d"
+		// (gd: with 8-byte words a slice is two words, unpacked on
+		// entry: what is live is its parts, and a slice is packed
+		// again for the results, which may make the header of a huge
+		// one: doc/gd/slice16.md.)
+		return d, nil, &T{M: "hello"} // ERROR "live at call to (newobject|mallocgcSmallScanNoHeaderSC[0-9]+)+: (d|.autotmp_[0-9]+)"
 	}
 	res = d[:n]
 	odata = d[n:]
-	return
+	return // ERROR "live at call to slicehdr: .autotmp_[0-9]+"
 }

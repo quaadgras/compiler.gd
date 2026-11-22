@@ -16,7 +16,7 @@
 //   R5 = b_len
 //   R6 = b_cap (unused)
 //   R7 = byte to find
-TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·indexByteSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	AND	$0xff, R7
 	JMP	indexbytebody<>(SB)
 

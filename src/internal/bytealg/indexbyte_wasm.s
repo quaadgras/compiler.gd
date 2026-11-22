@@ -11,11 +11,11 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·IndexByte(SB), NOSPLIT, $0-40
-	I64Load b_base+0(FP)
+TEXT ·indexByteSlice(SB), NOSPLIT, $0-40
+	I64Load b+0(FP)
 	I32WrapI64
 	I32Load8U c+24(FP)
-	I64Load b_len+8(FP)
+	I64Load blen+8(FP)
 	I32WrapI64
 	Call memchr<>(SB)
 	I64ExtendI32U
@@ -24,7 +24,7 @@ TEXT ·IndexByte(SB), NOSPLIT, $0-40
 	Get SP
 	I64Const $-1
 	Get R0
-	I64Load b_base+0(FP)
+	I64Load b+0(FP)
 	I64Sub
 	Get R0
 	I64Eqz $0

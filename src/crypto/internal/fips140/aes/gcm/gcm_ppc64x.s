@@ -390,7 +390,7 @@ keysLoaded:
 	ADD $64, blk_out
 
 // func gcmInit(productTable *[256]byte, h []byte)
-TEXT ·gcmInit(SB), NOSPLIT, $0-32
+TEXT ·gcmInit(SB), NOSPLIT, $0-24
 	MOVD productTable+0(FP), XIP
 	MOVD h+8(FP), HTBL
 
@@ -511,11 +511,11 @@ TEXT ·gcmInit(SB), NOSPLIT, $0-32
 	RET
 
 // func gcmHash(output []byte, productTable *[256]byte, inp []byte, len int)
-TEXT ·gcmHash(SB), NOSPLIT, $0-64
+TEXT ·gcmHash(SB), NOSPLIT, $0-48
 	MOVD output+0(FP), XIP
-	MOVD productTable+24(FP), HTBL
-	MOVD inp+32(FP), INP
-	MOVD len+56(FP), LEN
+	MOVD productTable+16(FP), HTBL
+	MOVD inp+24(FP), INP
+	MOVD len+40(FP), LEN
 
 	MOVD   $0x10, R8
 	MOVD   $0x20, R9
@@ -865,14 +865,14 @@ done_4x:
 // endian as well as different ISA targets.
 //func (g *gcmAsm) counterCrypt(out, in []byte, counter *[gcmBlockSize]byte, key[gcmBlockSize]uint32)
 //func counterCryptASM(xr, out, in, counter, key)
-TEXT ·counterCryptASM(SB), NOSPLIT, $16-72
+TEXT ·counterCryptASM(SB), NOSPLIT, $16-56
 	MOVD	xr(FP), KEY_LEN
 	MOVD    out+8(FP), BLK_OUT
-	MOVD    out_len+16(FP), R8
-	MOVD    in+32(FP), BLK_INP
-	MOVD    in_len+40(FP), IN_LEN
-	MOVD    counter+56(FP), COUNTER
-	MOVD    key+64(FP), BLK_KEY
+	MOVWZ    out_len+16(FP), R8
+	MOVD    in+24(FP), BLK_INP
+	MOVWZ    in_len+32(FP), IN_LEN
+	MOVD    counter+40(FP), COUNTER
+	MOVD    key+48(FP), BLK_KEY
 
 // Set up permute string when needed.
 #ifdef NEEDS_ESPERM

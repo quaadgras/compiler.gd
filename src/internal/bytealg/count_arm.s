@@ -5,9 +5,9 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Count(SB),NOSPLIT,$0-20
-	MOVW	b_base+0(FP), R0
-	MOVW	b_len+4(FP), R1
+TEXT ·countSlice(SB),NOSPLIT,$0-20
+	MOVW	b+0(FP), R0
+	MOVW	blen+4(FP), R1
 	MOVBU	c+12(FP), R2
 	MOVW	$ret+16(FP), R7
 	B	countbytebody<>(SB)

@@ -981,3 +981,26 @@ func (s *state) shareStoreString(left, right *ssa.Value) {
 
 	s.startBlock(bDone)
 }
+
+// slicePack returns the words w0 and w1 of the slice v, packed
+// (types.SlicePacked, ssa/slicecodec.go).
+func (s *state) slicePack(v *ssa.Value) (w0, w1 *ssa.Value) {
+	pt := v.Type.Elem().PtrTo()
+	p := s.newValue1(ssa.OpSlicePtrUnchecked, pt, v)
+	l := s.newValue1(ssa.OpSliceLen, types.Types[types.TINT], v)
+	c := s.newValue1(ssa.OpSliceCap, types.Types[types.TINT], v)
+	pk := s.newValue4(ssa.OpSlicePack, types.NewTuple(pt, types.TypeMem), p, l, c, s.mem())
+	s.vars[memVar] = s.newValue1(ssa.OpSelect1, types.TypeMem, pk)
+	w0 = s.newValue1(ssa.OpSelect0, pt, pk)
+	w1 = s.newValue3(ssa.OpSlicePackW1, types.Types[types.TUINT64], l, c, w0)
+	return
+}
+
+// sliceUnpack returns the slice of type t whose words are w0 and w1.
+func (s *state) sliceUnpack(t *types.Type, w0, w1 *ssa.Value) *ssa.Value {
+	mem := s.mem()
+	p := s.newValue3(ssa.OpSliceUnpackPtr, t.Elem().PtrTo(), w0, w1, mem)
+	l := s.newValue3(ssa.OpSliceUnpackLen, types.Types[types.TINT], w0, w1, mem)
+	c := s.newValue3(ssa.OpSliceUnpackCap, types.Types[types.TINT], w0, w1, mem)
+	return s.newValue3(ssa.OpSliceMake, t, p, l, c)
+}

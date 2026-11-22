@@ -17,10 +17,16 @@ func main() {
 	test2()
 }
 
+// newSlice returns a slice in memory long enough for a reflect.SliceHeader,
+// which is longer than a slice with 8-byte words (doc/gd/slice16.md).
+func newSlice() *[]int {
+	return &new([2][]int)[0]
+}
+
 func test1() {
 	var all []interface{}
 	for i := 0; i < 100; i++ {
-		p := new([]int)
+		p := newSlice()
 		*p = append(*p, 1, 2, 3, 4)
 		h := (*reflect.SliceHeader)(unsafe.Pointer(p))
 		all = append(all, h, p)
@@ -43,7 +49,7 @@ type T struct {
 func test2() {
 	var all []T
 	for i := 0; i < 100; i++ {
-		p := new([]int)
+		p := newSlice()
 		*p = append(*p, 1, 2, 3, 4)
 		h := (*reflect.SliceHeader)(unsafe.Pointer(p))
 		all = append(all, T{H: h}, T{P: p})

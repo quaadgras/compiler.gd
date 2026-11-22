@@ -131,11 +131,19 @@ func walkAppend(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes, dst ir.Node
 }
 
 // growslice(ptr *T, newLen, oldCap, num int, <type>) (ret []T)
-func walkGrowslice(gd *base.Invocation, slice *ir.Name, init *ir.Nodes, oldPtr, newLen, oldCap, num ir.Node) *ir.CallExpr {
+func walkGrowslice(gd *base.Invocation, slice *ir.Name, init *ir.Nodes, oldPtr, newLen, oldCap, num ir.Node) ir.Node {
 	elemtype := slice.Type().Elem()
-	fn := typecheck.LookupRuntime(gd, "growslice", elemtype, elemtype)
+	fn := typecheck.LookupRuntime(gd, "growslice", elemtype)
 	elemtypeptr := reflectdata.TypePtrAt(gd, gd.Pos, elemtype)
-	return mkcall1(gd, fn, slice.Type(), init, oldPtr, newLen, oldCap, num, elemtypeptr)
+	// growslice returns the pointer, the length and the capacity, not
+	// a slice: p, l, c := growslice(...); the slice is made of them.
+	call := ir.NewCallExpr(gd, gd.Pos, ir.OCALL, fn, []ir.Node{oldPtr, newLen, oldCap, num, elemtypeptr})
+	p := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TUNSAFEPTR])
+	l := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TINT])
+	c := typecheck.TempAt(gd, gd.Pos, ir.CurFunc(gd), types.Types[types.TINT])
+	// (Not walked: the caller walks the statements init goes to.)
+	init.Append(typecheck.Stmt(gd, ir.NewAssignListStmt(gd, gd.Pos, ir.OAS2, []ir.Node{p, l, c}, []ir.Node{call})))
+	return typecheck.Expr(gd, ir.NewSliceHeaderExpr(gd, gd.Pos, slice.Type(), p, l, c))
 }
 
 // walkClear walks an OCLEAR node.

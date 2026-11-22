@@ -129,19 +129,18 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		if kind == embedString {
 			off = stringRest(gd, sym, off, uint64(size))
 		} else {
-			// embedBytes: slice header is unchanged at 3 words
-			// (ptr, len, cap). No hash slot.
-			off = objw.Uintptr(gd, sym, off, uint64(size)) // len
-			objw.Uintptr(gd, sym, off, uint64(size))       // cap for slice
+			// embedBytes: the slice's len and cap. No hash slot.
+			sliceRest(gd, sym, off, uint64(size))
 		}
 
 	case embedFiles:
 		slicedata := v.Sym().Pkg.Lookup(v.Sym().Name + `.files`).Linksym(gd)
 		off := 0
 		// []files pointed at by Files
-		off = objw.SymPtr(gd, slicedata, off, slicedata, 3*types.PtrSize) // []file, pointing just past slice
-		off = objw.Uintptr(gd, slicedata, off, uint64(len(files)))
-		off = objw.Uintptr(gd, slicedata, off, uint64(len(files)))
+		// (The files are where the slice ends, which their strings
+		// are aligned for: the slice is 16 bytes or 3 words.)
+		off = objw.SymPtr(gd, slicedata, off, slicedata, int(types.SliceSize)) // []file, pointing just past slice
+		off = sliceRest(gd, slicedata, off, uint64(len(files)))
 
 		// embed/embed.go type file is:
 		//	name string
@@ -175,6 +174,21 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		sym := v.Linksym()
 		objw.SymPtr(gd, sym, 0, slicedata, 0)
 	}
+}
+
+// sliceRest writes the length and capacity n of a slice after its
+// pointer, at off in sym, and returns the offset after them: uint32s
+// where a slice is packed (types.SlicePacked), else words.
+func sliceRest(gd *base.Invocation, sym *obj.LSym, off int, n uint64) int {
+	if types.SlicePacked() {
+		if n >= types.SliceHugeCap {
+			gd.Fatalf("embedded slice of %d bytes", n)
+		}
+		off = objw.Uint32(gd, sym, off, uint32(n))
+		return objw.Uint32(gd, sym, off, uint32(n))
+	}
+	off = objw.Uintptr(gd, sym, off, n)
+	return objw.Uintptr(gd, sym, off, n)
 }
 
 // stringRest writes the words of a string after its pointer, at off in

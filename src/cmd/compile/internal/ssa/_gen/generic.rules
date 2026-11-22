@@ -1106,6 +1106,21 @@
     (ConstNil <v.Type.Elem().PtrTo()>)
     (Const64 <typ.Int> [0])
     (Const64 <typ.Int> [0]))
+// Packed slices (slicecodec.go): a slice unpacked from the words it was
+// packed to is that slice, and a slice packed as it was unpacked, those
+// words. (Not the memory of the pack: it goes with its w0, and the
+// slicecodec pass drops the pack that needs no branch.)
+(SliceUnpackPtr (Select0 (SlicePack ptr len cap _)) (SlicePackW1 len cap _) _) => ptr
+(SliceUnpackLen (Select0 (SlicePack _ len cap _)) (SlicePackW1 len cap _) _) => len
+(SliceUnpackCap (Select0 (SlicePack _ len cap _)) (SlicePackW1 len cap _) _) => cap
+(Select0 (SlicePack (SliceUnpackPtr w0 w1 _) (SliceUnpackLen w0 w1 _) (SliceUnpackCap w0 w1 _) _)) => w0
+(SlicePackW1 (SliceUnpackLen w0 w1 _) (SliceUnpackCap w0 w1 _) _) => w1
+(SliceUnpackLen _ (Const64 [c]) _) && int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian => (Const64 <typ.Int> [int64(uint32(c))])
+(SliceUnpackCap _ (Const64 [c]) _) && int64(uint32(c>>32)) != 0xFFFFFFFF && !config.BigEndian => (Const64 <typ.Int> [int64(uint32(c>>32))])
+(SlicePackW1 (Const64 [l]) (Const64 [c]) _) && c >= 0 && c < 0xFFFFFFFF && !config.BigEndian => (Const64 <typ.UInt64> [l | c<<32])
+(SlicePackW1 len (Const64 [c]) _) && c >= 0 && c < 0xFFFFFFFF && !config.BigEndian => (Or64 <typ.UInt64> len (Const64 <typ.UInt64> [c<<32]))
+(Select0 (SlicePack ptr _ (Const64 [c]) _)) && c >= 0 && c < 0xFFFFFFFF => ptr
+
 (SliceLen (Phi (SliceMake _ x _) (SliceMake _ x _))) => x
 (SliceCap (Phi (SliceMake _ _ x) (SliceMake _ _ x))) => x
 
@@ -2202,7 +2217,7 @@
 // Note there are 2 rules here, one for the pre-decomposed []T result and one for
 // the post-decomposed (*T,int,int) result. (The latter is generated after call expansion.)
 // TODO(thepudds): we probably need the new growsliceBuf and growsliceBufNoAlias here as well?
-(SliceLen (SelectN [0] (StaticLECall {sym} _ newLen:(Const(64|32)) _ _ _ _)))
+(SelectN [1] (StaticLECall {sym} _ newLen:(Const(64|32)) _ _ _ _)) && v.Type.IsInteger()
 	&& (isSameCall(sym, "runtime.growslice") || isSameCall(sym, "runtime.growsliceNoAlias"))
 	=> newLen
 (SelectN [1] (StaticCall {sym} _ newLen:(Const(64|32)) _ _ _ _)) && v.Type.IsInteger()

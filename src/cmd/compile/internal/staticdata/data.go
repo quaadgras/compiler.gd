@@ -49,6 +49,15 @@ func InitAddr(gd *base.Invocation, n *ir.Name, noff int64, lsym *obj.LSym) {
 func InitSlice(gd *base.Invocation, n *ir.Name, noff int64, lsym *obj.LSym, lencap int64) {
 	s := n.Linksym()
 	s.WriteAddr(gd.Ctxt, noff, types.PtrSize, lsym, 0)
+	if types.SlicePacked() {
+		// uint32s, which a static slice fits (types.SlicePacked).
+		if lencap >= types.SliceHugeCap {
+			gd.Fatalf("static slice of %d elements", lencap)
+		}
+		s.WriteInt(gd.Ctxt, noff+types.SliceLenOffset, 4, lencap)
+		s.WriteInt(gd.Ctxt, noff+types.SliceCapOffset, 4, lencap)
+		return
+	}
 	s.WriteInt(gd.Ctxt, noff+types.SliceLenOffset, types.PtrSize, lencap)
 	s.WriteInt(gd.Ctxt, noff+types.SliceCapOffset, types.PtrSize, lencap)
 }

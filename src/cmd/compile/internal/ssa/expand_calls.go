@@ -321,6 +321,9 @@ func (x *expandState) rewriteCallArgs(v *Value, firstArg int) {
 		rc.init(aRegs, aux.abiInfo, result, sp, aOffset)
 		mem = x.decomposeAsNecessary(v.Pos, v.Block, a, mem, rc)
 	}
+	if x.f.Config.slicePacked() {
+		mem = hoistSlicePacks(m0, mem)
+	}
 	var preArgStore [2]*Value
 	preArgs := append(preArgStore[:0], v.Args[0:firstArg]...)
 	v.resetArgs()
@@ -414,6 +417,13 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		return mem
 
 	case types.TSLICE:
+		if x.f.Config.slicePacked() {
+			// w0 and w1 (types.SlicePacked).
+			w0, w1, m := slicePack(b, pos, a, mem)
+			mem = x.decomposeAsNecessary(pos, b, w0, m, rc.next(x.typs.BytePtr))
+			pos = pos.WithNotStmt()
+			return x.decomposeAsNecessary(pos, b, w1, mem, rc.next(x.typs.UInt64))
+		}
 		mem = x.decomposeOne(pos, b, a, mem, at.Elem().PtrTo(), OpSlicePtr, &rc)
 		pos = pos.WithNotStmt()
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.Int, OpSliceLen, &rc)
@@ -604,6 +614,16 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		return a
 
 	case types.TSLICE:
+		if x.f.Config.slicePacked() {
+			// w0 and w1 (types.SlicePacked), unpacked.
+			w0 := x.rewriteSelectOrArg(pos, b, container, nil, m0, at.Elem().PtrTo(), rc.next(x.typs.BytePtr))
+			pos = pos.WithNotStmt()
+			w1 := x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.UInt64, rc.next(x.typs.UInt64))
+			p, l, c := sliceUnpackParts(b, pos, at, w0, w1, m0)
+			a = makeOf(a, OpSliceMake, []*Value{p, l, c})
+			x.commonSelectors[sk] = a
+			return a
+		}
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, at.Elem().PtrTo(), rc.next(x.typs.BytePtr)))
 		pos = pos.WithNotStmt()
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Int, rc.next(x.typs.Int)))
@@ -777,6 +797,12 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 		return m0
 
 	case types.TSLICE:
+		if x.f.Config.slicePacked() {
+			// w0 and w1, as they are (types.SlicePacked).
+			m0 = x.rewriteWideSelectToStores(pos, b, container, m0, at.Elem().PtrTo(), rc.next(x.typs.BytePtr))
+			pos = pos.WithNotStmt()
+			return x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.UInt64, rc.next(x.typs.UInt64))
+		}
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, at.Elem().PtrTo(), rc.next(x.typs.BytePtr))
 		pos = pos.WithNotStmt()
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Int, rc.next(x.typs.Int))

@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	_ "unsafe"
+	"unsafe"
 )
 
 // Test traceback printing of inlined frames.
@@ -433,7 +433,10 @@ func TestTracebackArgs(t *testing.T) {
 				return testTracebackArgsSlice(testTracebackArgsSliceBackingStore[:])
 			},
 			// Note: capacity of the slice might be junk, as it is not used.
-			fmt.Sprintf("testTracebackArgsSlice({%p, 0x2, ", &testTracebackArgsSliceBackingStore[0]),
+			// With 8-byte words (but on wasm) the slice is two words,
+			// unpacked on entry: what is live is its pointer and its
+			// length, not the words, which are not spilled (doc/gd/slice16.md).
+			testTracebackArgsSliceExpect(),
 		},
 	}
 	for _, test := range tests {
@@ -694,6 +697,13 @@ func testTracebackArgsSlice(a []int) int {
 }
 
 var testTracebackArgsSliceBackingStore [2]int
+
+func testTracebackArgsSliceExpect() string {
+	if unsafe.Sizeof(uintptr(0)) == 8 && runtime.GOARCH != "wasm" {
+		return fmt.Sprintf("testTracebackArgsSlice({%p", &testTracebackArgsSliceBackingStore[0])
+	}
+	return fmt.Sprintf("testTracebackArgsSlice({%p, 0x2, ", &testTracebackArgsSliceBackingStore[0])
+}
 
 // Poison the arg area with deterministic values.
 //

@@ -12,16 +12,31 @@
 
 package bytealg
 
+import "unsafe"
+
+// (No race instrumentation, as the assembly has none: the runtime calls
+// it before it may.)
+//
+//go:norace
+func Count(b []byte, c byte) int {
+	return countSlice(unsafe.SliceData(b), len(b), cap(b), c)
+}
+
+// The assembly takes the words of stock Go's slices, the array, the
+// length and the capacity: with 8-byte words a slice is packed, or is a
+// huge one's header (doc/gd/slice16.md), which it would not read.
+//
 //go:noescape
-func Count(b []byte, c byte) int
+func countSlice(b *byte, blen, bcap int, c byte) int
 
 //go:noescape
 func CountString(s string, c byte) int
 
 // A backup implementation to use by assembly.
-func countGeneric(b []byte, c byte) int {
+// (The words of the slice, as countSlice has them.)
+func countGeneric(b *byte, blen, bcap int, c byte) int {
 	n := 0
-	for _, x := range b {
+	for _, x := range unsafe.Slice(b, blen) {
 		if x == c {
 			n++
 		}

@@ -7076,6 +7076,11 @@ const (
 	OpSliceLen
 	OpSliceCap
 	OpSlicePtrUnchecked
+	OpSlicePack
+	OpSlicePackW1
+	OpSliceUnpackPtr
+	OpSliceUnpackLen
+	OpSliceUnpackCap
 	OpComplexMake
 	OpComplexReal
 	OpComplexImag
@@ -107274,6 +107279,31 @@ var opcodeTable = [...]opInfo{
 	{
 		name:    "SlicePtrUnchecked",
 		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "SlicePack",
+		argLen:  4,
+		generic: true,
+	},
+	{
+		name:    "SlicePackW1",
+		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "SliceUnpackPtr",
+		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "SliceUnpackLen",
+		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "SliceUnpackCap",
+		argLen:  3,
 		generic: true,
 	},
 	{

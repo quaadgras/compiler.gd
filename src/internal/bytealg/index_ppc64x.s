@@ -46,7 +46,7 @@ DATA byteswap<>+8(SB)/8, $0x0f0e0d0c0b0a0908
 
 GLOBL byteswap<>+0(SB), RODATA, $16
 
-TEXT ·Index<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+TEXT ·indexSlices<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	// R3 = byte array pointer
 	// R4 = length
 	MOVD R6, R5             // R5 = separator pointer

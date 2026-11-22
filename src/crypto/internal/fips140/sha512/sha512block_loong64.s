@@ -106,8 +106,8 @@
 // See the definition of the macro LOAD1 above (8 bytes * 16 entries).
 //
 // func block(dig *Digest, p []byte)
-TEXT ·block(SB),NOSPLIT,$128-32
-	MOVV	p_len+16(FP), R6
+TEXT ·block(SB),NOSPLIT,$128-24
+	MOVWU	p_len+16(FP), R6
 	MOVV	p_base+8(FP), R5
 	AND	$~127, R6
 	BEQ	R6, end

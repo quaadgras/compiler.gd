@@ -22,7 +22,7 @@ import (
 //
 // swigForGdVersion is in the action ID of a package with SWIG files:
 // change it when swigForGd changes, so that they are built again.
-const swigForGdVersion = "2"
+const swigForGdVersion = "3"
 
 var (
 	swigGostring   = "typedef struct { char *p; intgo n; } _gostring_;"
@@ -45,10 +45,24 @@ func _swig_gdString(s *string) *string {
 }
 `
 
-func swigForGd(goFile, cFile string) error {
+// swigGoslice is SWIG's slice, which with 8-byte words but on wasm is
+// gd's packed slice, its length and capacity uint32s (doc/gd/slice16.md):
+// swigForGd rewrites the C file's typedef.
+var (
+	swigGoslice       = "typedef struct { void* array; intgo len; intgo cap; } _goslice_;"
+	swigGoslicePacked = "typedef struct { void* array; unsigned int len; unsigned int cap; } _goslice_;"
+)
+
+func swigForGd(goFile, cFile string, slicePacked bool) error {
 	c, err := os.ReadFile(cFile)
 	if err != nil {
 		return err
+	}
+	if slicePacked && strings.Contains(string(c), swigGoslice) {
+		c = []byte(strings.ReplaceAll(string(c), swigGoslice, swigGoslicePacked))
+		if err := os.WriteFile(cFile, c, 0666); err != nil {
+			return err
+		}
 	}
 	if !strings.Contains(string(c), swigGostring) {
 		return fmt.Errorf("%s: no %q: this SWIG's strings are not of the layout cmd/go knows", cFile, swigGostring)

@@ -66,6 +66,12 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		SliceLenOffset = RoundUp(SlicePtrOffset+int64(PtrSize), int64(PtrSize))
 		SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
 		SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
+		if SlicePacked() {
+			// w0, and the length and capacity as uint32s in w1.
+			SliceLenOffset = 8
+			SliceCapOffset = 12
+			SliceSize = 16
+		}
 
 		// gd escape-bits: a function value is {F uintptr; M uint64;
 		// captures...}; M is aligned as a uint64 (to a register), which

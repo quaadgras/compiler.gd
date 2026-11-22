@@ -5,11 +5,11 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Index(SB),NOSPLIT,$0-56
-	MOVQ a_base+0(FP), DI
-	MOVQ a_len+8(FP), DX
-	MOVQ b_base+24(FP), R8
-	MOVQ b_len+32(FP), AX
+TEXT ·indexSlices(SB),NOSPLIT,$0-56
+	MOVQ a+0(FP), DI
+	MOVQ alen+8(FP), DX
+	MOVQ b+24(FP), R8
+	MOVQ blen+32(FP), AX
 	MOVQ DI, R10
 	LEAQ ret+48(FP), R11
 	JMP  indexbody<>(SB)

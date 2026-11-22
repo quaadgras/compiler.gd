@@ -23,12 +23,7 @@ type quoted string
 func bytes(s string) []byte {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
 	if !sh.isInline() {
-		var b []byte
-		bp := (*slice)(unsafe.Pointer(&b))
-		bp.array = sh.str
-		bp.len = sh.len
-		bp.cap = bp.len
-		return b
+		return unsafe.Slice((*byte)(sh.str), sh.len)
 	}
 	return unsafe.Slice(stringDataHeap(s), sh.length())
 }
@@ -110,7 +105,8 @@ func gwrite(b []byte) {
 	}
 
 	n := copy(gp.writebuf[len(gp.writebuf):cap(gp.writebuf)], b)
-	gp.writebuf = gp.writebuf[:len(gp.writebuf)+n]
+	sl := noWBSlice(unsafe.Pointer(&gp.writebuf))
+	*sl = (*sl)[:len(*sl)+n]
 }
 
 func printsp() {
@@ -281,18 +277,12 @@ func printstring(s string) {
 	var buf [16]byte
 	sp := stringStructOf(&s)
 	n := sp.length()
-	var b []byte
-	rp := (*slice)(unsafe.Pointer(&b))
-	rp.array = sp.data(&buf)
-	rp.len = n
-	rp.cap = n
-	gwrite(b)
+	gwrite(unsafe.Slice((*byte)(sp.data(&buf)), n))
 }
 
 func printslice(s []byte) {
-	sp := (*slice)(unsafe.Pointer(&s))
 	print("[", len(s), "/", cap(s), "]")
-	printpointer(sp.array)
+	printpointer(unsafe.Pointer(unsafe.SliceData(s)))
 }
 
 func printeface(e eface) {

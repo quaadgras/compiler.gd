@@ -536,6 +536,17 @@ var genericOps = []opData{
 	// SlicePtrUnchecked values can be nil.
 	{name: "SlicePtrUnchecked", argLength: 1},
 
+	// Packed slices (types.SlicePacked, doc/gd/slice16.md): in memory
+	// and in registers a slice is w0, a pointer, and w1, a uint64 whose
+	// bytes as stored are the length (bytes 0..3) and the capacity
+	// (bytes 4..7); a huge slice's w0 is its header's address and w1 the
+	// marker. The slicecodec pass expands these ops to their branches.
+	{name: "SlicePack", argLength: 4},                  // w0 of the slice arg0=ptr, arg1=len, arg2=cap: ptr, or a new header if huge. arg3=memory. Returns (w0, memory).
+	{name: "SlicePackW1", argLength: 3, typ: "UInt64"}, // w1 of the slice of length arg0 and capacity arg1: the two, or the marker if huge. arg2=its w0 (Select0 of its SlicePack), which it goes with.
+	{name: "SliceUnpackPtr", argLength: 3},             // the pointer of the slice of words arg0 (w0) and arg1 (w1); arg2=memory (a huge slice's header is read)
+	{name: "SliceUnpackLen", argLength: 3, typ: "Int"}, // its length
+	{name: "SliceUnpackCap", argLength: 3, typ: "Int"}, // its capacity
+
 	// Complex (part/whole)
 	{name: "ComplexMake", argLength: 2}, // arg0=real, arg1=imag
 	{name: "ComplexReal", argLength: 1}, // real(arg0)

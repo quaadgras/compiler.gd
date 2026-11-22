@@ -668,7 +668,7 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 	}
 
 	if inProlog {
-		fmt.Fprint(fgo2, builtinDefs[name])
+		fmt.Fprint(fgo2, p.builtinDef(name))
 		if strings.Contains(builtinDefs[name], "_cgo_cmalloc") {
 			*callsMalloc = true
 		}
@@ -1542,6 +1542,10 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 	case *ast.ArrayType:
 		if t.Len == nil {
 			// Slice: pointer, len, cap.
+			if p.slicePacked() {
+				// gd: len and cap as uint32s (doc/gd/slice16.md).
+				return &Type{Size: 16, Align: p.PtrSize, C: c("GoSlice")}
+			}
 			return &Type{Size: p.PtrSize * 3, Align: p.PtrSize, C: c("GoSlice")}
 		}
 		// Non-slice array types are not supported.
@@ -1879,6 +1883,29 @@ func _Cfunc__CMalloc(n _Ctype_size_t) unsafe.Pointer {
 }
 `
 
+// builtinDef returns builtinDefs[name] for the target: where a slice is
+// packed (slicePacked), its slices of C memory are made of array pointers,
+// not of a slice header in words.
+func (p *Package) builtinDef(name string) string {
+	def := builtinDefs[name]
+	if !p.slicePacked() {
+		return def
+	}
+	def = strings.Replace(def, `sliceHeader := struct {
+		p   unsafe.Pointer
+		len int
+		cap int
+	}{p, len(s)+1, len(s)+1}
+	b := *(*[]byte)(unsafe.Pointer(&sliceHeader))`, `b := (*[1 << 46]byte)(p)[:len(s)+1:len(s)+1]`, 1)
+	def = strings.Replace(def, `sliceHeader := struct {
+		p   unsafe.Pointer
+		len int
+		cap int
+	}{p, len(b), len(b)}
+	s := *(*[]byte)(unsafe.Pointer(&sliceHeader))`, `s := (*[1 << 46]byte)(p)[:len(b):len(b)]`, 1)
+	return def
+}
+
 var builtinDefs = map[string]string{
 	"GoString":  goStringDef,
 	"GoStringN": goStringNDef,
@@ -2072,7 +2099,21 @@ extern const char *_GoStringPtr(_GoString_ s);
 `
 
 func (p *Package) gccExportHeaderProlog() string {
-	return strings.ReplaceAll(gccExportHeaderProlog, "GOINTBITS", fmt.Sprint(8*p.IntSize))
+	prolog := gccExportHeaderProlog
+	if p.slicePacked() {
+		// gd: a slice is its pointer and its length and capacity as
+		// uint32s (doc/gd/slice16.md).
+		prolog = strings.ReplaceAll(prolog, "typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;",
+			"typedef struct { void *data; GoUint32 len; GoUint32 cap; } GoSlice;")
+	}
+	return strings.ReplaceAll(prolog, "GOINTBITS", fmt.Sprint(8*p.IntSize))
+}
+
+// slicePacked reports whether a slice is two words, its pointer and its
+// length and capacity as uint32s: with 8-byte words but on wasm
+// (cmd/compile/internal/types's SlicePacked).
+func (p *Package) slicePacked() bool {
+	return p.PtrSize == 8 && goarch != "wasm"
 }
 
 // gccExportHeaderProlog is written to the exported header, after the

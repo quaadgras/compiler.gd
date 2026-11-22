@@ -5,7 +5,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
+TEXT ·indexSlices<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVV	R7, R6		// R6 = separator pointer
 	MOVV	R8, R7		// R7 = separator length
 	JMP	indexbody<>(SB)

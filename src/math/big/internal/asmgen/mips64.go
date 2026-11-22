@@ -28,7 +28,9 @@ var ArchMIPS64x = &Arch{
 	regCarry:    "R24",
 	regAltCarry: "R25",
 
-	mov:      "MOVV",
+	mov: "MOVV",
+
+	movLen:   "MOVWU",
 	add:      "ADDVU",
 	sltu:     "SGTU", // SGTU args are swapped, so it's really SLTU
 	sub:      "SUBVU",

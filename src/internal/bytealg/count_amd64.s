@@ -6,14 +6,14 @@
 #include "asm_amd64.h"
 #include "textflag.h"
 
-TEXT ·Count(SB),NOSPLIT,$0-40
+TEXT ·countSlice(SB),NOSPLIT,$0-40
 #ifndef hasPOPCNT
 	CMPB	internal∕cpu·X86+const_offsetX86HasPOPCNT(SB), $1
 	JEQ	2(PC)
 	JMP	·countGeneric(SB)
 #endif
-	MOVQ	b_base+0(FP), SI
-	MOVQ	b_len+8(FP), BX
+	MOVQ	b+0(FP), SI
+	MOVQ	blen+8(FP), BX
 	MOVB	c+24(FP), AL
 	LEAQ	ret+32(FP), R8
 	JMP	countbody<>(SB)

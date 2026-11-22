@@ -1287,7 +1287,8 @@ func rcvrPayload(v *Value) (word unsafe.Pointer, w [2]uint64) {
 	}
 	p := v.dataPtr()
 	if t.IsSpreadIface() {
-		return *(*unsafe.Pointer)(p), *(*[2]uint64)(add(p, goarch.PtrSize, "spread header words 1-2"))
+		d, in := spreadWords(t, p)
+		return d, *(*[2]uint64)(unsafe.Pointer(&in))
 	}
 	memmove(unsafe.Pointer(&w), p, t.Size())
 	return nil, w
@@ -1546,6 +1547,10 @@ func (v Value) Cap() int {
 	// abi.NoEscape on &v.inline keeps v from leaking into escape
 	// analysis (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
+		if abi.SlicePacked {
+			// The slice's two words, at &v.ptr (doc/gd/slice16.md).
+			return cap(*(*[]unsafe.Pointer)(abi.NoEscape(unsafe.Pointer(&v.ptr))))
+		}
 		return (*[2]int)(abi.NoEscape(unsafe.Pointer(&v.inline)))[1]
 	}
 	return v.capNonSlice()
@@ -1556,7 +1561,7 @@ func (v Value) capNonSlice() int {
 	switch k {
 	case Slice:
 		// Non-spread slice: heap header at v.ptr.
-		return (*unsafeheader.Slice)(v.ptr).Cap
+		return unsafeheader.ReadSlice(v.ptr).Cap
 	case Array:
 		return v.typ().Len()
 	case Chan:
@@ -1896,7 +1901,7 @@ func (v Value) Index(i int) Value {
 	case Slice:
 		// Element flag same as Elem of Pointer.
 		// Addressable, indirect, possibly read-only.
-		s := (*unsafeheader.Slice)(v.dataPtr())
+		s := unsafeheader.ReadSlice(v.dataPtr())
 		if uint(i) >= uint(s.Len) {
 			panic("reflect: slice index out of range")
 		}
@@ -2369,7 +2374,7 @@ func (v Value) SetZero() {
 	case String:
 		*(*string)(v.dataPtr()) = ""
 	case Slice:
-		*(*unsafeheader.Slice)(v.dataPtr()) = unsafeheader.Slice{}
+		*(*[]unsafe.Pointer)(v.dataPtr()) = nil // (any slice's words)
 	case Interface:
 		*(*any)(v.dataPtr()) = nil // (whole: runtime/shared.go)
 	case Chan, Func, Map, Pointer, UnsafePointer:
@@ -2401,6 +2406,10 @@ func (v Value) Len() int {
 	// abi.NoEscape on &v.inline keeps v from leaking into escape
 	// analysis (see Bytes for the cascading rationale).
 	if v.flag&(flagKindMask|flagSpread) == flag(Slice)|flagSpread {
+		if abi.SlicePacked {
+			// The slice's two words, at &v.ptr (doc/gd/slice16.md).
+			return len(*(*[]unsafe.Pointer)(abi.NoEscape(unsafe.Pointer(&v.ptr))))
+		}
 		return *(*int)(abi.NoEscape(unsafe.Pointer(&v.inline)))
 	}
 	return v.lenNonSlice()
@@ -2410,7 +2419,7 @@ func (v Value) lenNonSlice() int {
 	switch k := v.kind(); k {
 	case Slice:
 		// Non-spread slice: heap header at v.ptr.
-		return (*unsafeheader.Slice)(v.ptr).Len
+		return unsafeheader.ReadSlice(v.ptr).Len
 	case Array:
 		tt := (*arrayType)(unsafe.Pointer(v.typ()))
 		return int(tt.Len)
@@ -2661,7 +2670,7 @@ func (v Value) Pointer() uintptr {
 		}
 		return uintptr(p)
 	case Slice:
-		return uintptr((*unsafeheader.Slice)(v.dataPtr()).Data)
+		return uintptr(unsafeheader.ReadSlice(v.dataPtr()).Data)
 	case String:
 		// gd: the bytes of an inline string are copied to the heap
 		// (unsafe.StringData).
@@ -2845,11 +2854,12 @@ func (v Value) SetInt(x int64) {
 func (v Value) SetLen(n int) {
 	v.mustBeAssignable()
 	v.mustBe(Slice)
-	s := (*unsafeheader.Slice)(v.dataPtr())
+	s := unsafeheader.ReadSlice(v.dataPtr())
 	if uint(n) > uint(s.Cap) {
 		panic("reflect: slice length out of range in SetLen")
 	}
 	s.Len = n
+	unsafeheader.WriteSlice(v.dataPtr(), s)
 }
 
 // SetCap sets v's capacity to n.
@@ -2859,11 +2869,12 @@ func (v Value) SetLen(n int) {
 func (v Value) SetCap(n int) {
 	v.mustBeAssignable()
 	v.mustBe(Slice)
-	s := (*unsafeheader.Slice)(v.dataPtr())
+	s := unsafeheader.ReadSlice(v.dataPtr())
 	if n < s.Len || n > s.Cap {
 		panic("reflect: slice capacity out of range in SetCap")
 	}
 	s.Cap = n
+	unsafeheader.WriteSlice(v.dataPtr(), s)
 }
 
 // SetUint sets v's underlying value to x.
@@ -2930,7 +2941,7 @@ func (v Value) Slice(i, j int) Value {
 
 	case Slice:
 		typ = (*sliceType)(unsafe.Pointer(v.typ()))
-		s := (*unsafeheader.Slice)(v.dataPtr())
+		s := unsafeheader.ReadSlice(v.dataPtr())
 		base = s.Data
 		cap = s.Cap
 
@@ -2975,8 +2986,7 @@ func (v Value) Slice(i, j int) Value {
 	// Declare slice so that gc can see the base pointer in it.
 	var x []unsafe.Pointer
 
-	// Reinterpret as *unsafeheader.Slice to edit.
-	s := (*unsafeheader.Slice)(unsafe.Pointer(&x))
+	var s unsafeheader.Slice
 	s.Len = j - i
 	s.Cap = cap - i
 	if cap-i > 0 {
@@ -2985,6 +2995,7 @@ func (v Value) Slice(i, j int) Value {
 		// do not advance pointer, to avoid pointing beyond end of slice
 		s.Data = base
 	}
+	unsafeheader.WriteSlice(unsafe.Pointer(&x), s)
 
 	fl := v.flag.ro() | flagIndir | flag(Slice)
 	return Value{typ_: typ.Common(), ptr: unsafe.Pointer(&x), flag: fl}
@@ -3014,7 +3025,7 @@ func (v Value) Slice3(i, j, k int) Value {
 
 	case Slice:
 		typ = (*sliceType)(unsafe.Pointer(v.typ()))
-		s := (*unsafeheader.Slice)(v.dataPtr())
+		s := unsafeheader.ReadSlice(v.dataPtr())
 		base = s.Data
 		cap = s.Cap
 	}
@@ -3027,8 +3038,7 @@ func (v Value) Slice3(i, j, k int) Value {
 	// can see the base pointer in it.
 	var x []unsafe.Pointer
 
-	// Reinterpret as *unsafeheader.Slice to edit.
-	s := (*unsafeheader.Slice)(unsafe.Pointer(&x))
+	var s unsafeheader.Slice
 	s.Len = j - i
 	s.Cap = k - i
 	if k-i > 0 {
@@ -3037,6 +3047,7 @@ func (v Value) Slice3(i, j, k int) Value {
 		// do not advance pointer, to avoid pointing beyond end of slice
 		s.Data = base
 	}
+	unsafeheader.WriteSlice(unsafe.Pointer(&x), s)
 
 	fl := v.flag.ro() | flagIndir | flag(Slice)
 	return Value{typ_: typ.Common(), ptr: unsafe.Pointer(&x), flag: fl}
@@ -3260,7 +3271,7 @@ func (v Value) UnsafePointer() unsafe.Pointer {
 		}
 		return p
 	case Slice:
-		return (*unsafeheader.Slice)(v.dataPtr()).Data
+		return unsafeheader.ReadSlice(v.dataPtr()).Data
 	case String:
 		// gd: for inline-rep strings Data is nil and the bytes live
 		// in the header itself. Returning &v.inline would expose a
@@ -3383,7 +3394,7 @@ func (v Value) Grow(n int) {
 
 // grow is identical to Grow but does not check for assignability.
 func (v Value) grow(n int) {
-	p := (*unsafeheader.Slice)(v.dataPtr())
+	p := unsafeheader.ReadSlice(v.dataPtr())
 	switch {
 	case n < 0:
 		panic("reflect.Value.Grow: negative len")
@@ -3391,7 +3402,7 @@ func (v Value) grow(n int) {
 		panic("reflect.Value.Grow: slice overflow")
 	case p.Len+n > p.Cap:
 		t := v.typ().Elem()
-		*p = growslice(t, *p, n)
+		unsafeheader.WriteSlice(v.dataPtr(), growslice(t, p, n))
 	}
 }
 
@@ -3406,13 +3417,13 @@ func (v Value) extendSlice(n int) Value {
 	v.mustBe(Slice)
 
 	// Shallow copy the slice header to avoid mutating the source slice.
-	sh := *(*unsafeheader.Slice)(v.dataPtr())
-	s := &sh
+	s := new([]unsafe.Pointer) // (any slice's words)
+	*s = *(*[]unsafe.Pointer)(v.dataPtr())
 	v.ptr = unsafe.Pointer(s)
 	v.flag = flagIndir | flag(Slice) // equivalent flag to MakeSlice
 
 	v.grow(n) // fine to treat as assignable since we allocate a new slice header
-	s.Len += n
+	*s = (*s)[:len(*s)+n]
 	return v
 }
 
@@ -3422,7 +3433,7 @@ func (v Value) extendSlice(n int) Value {
 func (v Value) Clear() {
 	switch v.Kind() {
 	case Slice:
-		sh := *(*unsafeheader.Slice)(v.dataPtr())
+		sh := unsafeheader.ReadSlice(v.dataPtr())
 		st := (*sliceType)(unsafe.Pointer(v.typ()))
 		typedarrayclear(st.Elem, sh.Data, sh.Len)
 	case Map:
@@ -3497,14 +3508,14 @@ func Copy(dst, src Value) int {
 		ds.Len = dst.Len()
 		ds.Cap = ds.Len
 	} else {
-		ds = *(*unsafeheader.Slice)((&dst).dataPtr())
+		ds = unsafeheader.ReadSlice((&dst).dataPtr())
 	}
 	if sk == Array {
 		ss.Data = (&src).dataPtr()
 		ss.Len = src.Len()
 		ss.Cap = ss.Len
 	} else if sk == Slice {
-		ss = *(*unsafeheader.Slice)((&src).dataPtr())
+		ss = unsafeheader.ReadSlice((&src).dataPtr())
 	} else {
 		// gd: decode inline-vs-heap for the source string and produce
 		// a Slice view of its bytes. For inline rep Data must point
@@ -3736,8 +3747,9 @@ func MakeSlice(typ Type, len, cap int) Value {
 		panic("reflect.MakeSlice: len > cap")
 	}
 
-	s := unsafeheader.Slice{Data: unsafe_NewArray(&(typ.Elem().(*rtype).t), cap), Len: len, Cap: cap}
-	return Value{typ_: &typ.(*rtype).t, ptr: unsafe.Pointer(&s), flag: flagIndir | flag(Slice)}
+	s := new([]unsafe.Pointer) // (any slice's words)
+	unsafeheader.WriteSlice(unsafe.Pointer(s), unsafeheader.Slice{Data: unsafe_NewArray(&(typ.Elem().(*rtype).t), cap), Len: len, Cap: cap})
+	return Value{typ_: &typ.(*rtype).t, ptr: unsafe.Pointer(s), flag: flagIndir | flag(Slice)}
 }
 
 // SliceAt returns a [Value] representing a slice whose underlying
@@ -3746,8 +3758,9 @@ func MakeSlice(typ Type, len, cap int) Value {
 // This is like [unsafe.Slice].
 func SliceAt(typ Type, p unsafe.Pointer, n int) Value {
 	unsafeslice(typ.common(), p, n)
-	s := unsafeheader.Slice{Data: p, Len: n, Cap: n}
-	return Value{typ_: SliceOf(typ).common(), ptr: unsafe.Pointer(&s), flag: flagIndir | flag(Slice)}
+	s := new([]unsafe.Pointer) // (any slice's words)
+	unsafeheader.WriteSlice(unsafe.Pointer(s), unsafeheader.Slice{Data: p, Len: n, Cap: n})
+	return Value{typ_: SliceOf(typ).common(), ptr: unsafe.Pointer(s), flag: flagIndir | flag(Slice)}
 }
 
 // MakeChan creates a new channel with the specified type and buffer size.
@@ -4335,7 +4348,7 @@ func cvtSliceArrayPtr(v Value, t Type) Value {
 	if n > v.Len() {
 		panic("reflect: cannot convert slice with length " + strconv.Itoa(v.Len()) + " to pointer to array with length " + strconv.Itoa(n))
 	}
-	h := (*unsafeheader.Slice)(v.dataPtr())
+	h := unsafeheader.ReadSlice(v.dataPtr())
 	// Result is Pointer kind (direct iface); clear flagSpread/flagInline
 	// so ptr is interpreted as the pointer value, not as word 0 of an
 	// in-Value spread/inline header.
@@ -4349,7 +4362,7 @@ func cvtSliceArray(v Value, t Type) Value {
 	if n > v.Len() {
 		panic("reflect: cannot convert slice with length " + strconv.Itoa(v.Len()) + " to array with length " + strconv.Itoa(n))
 	}
-	h := (*unsafeheader.Slice)(v.dataPtr())
+	h := unsafeheader.ReadSlice(v.dataPtr())
 	typ := t.common()
 	ptr := h.Data
 	c := unsafe_New(typ)
@@ -4588,6 +4601,13 @@ func spreadWords(t *abi.Type, src unsafe.Pointer) (data unsafe.Pointer, inline [
 		w := (*[2]uintptr)(unsafe.Pointer(&str))
 		*(*uintptr)(unsafe.Pointer(&inline)) = w[1]
 		return *(*unsafe.Pointer)(unsafe.Pointer(&str)), inline
+	}
+	if abi.SlicePacked {
+		// A slice too is two words, loaded whole (doc/gd/slice16.md).
+		sl := *(*[]unsafe.Pointer)(src) // (any slice's words)
+		w := (*[2]uintptr)(unsafe.Pointer(&sl))
+		*(*uintptr)(unsafe.Pointer(&inline)) = w[1]
+		return *(*unsafe.Pointer)(unsafe.Pointer(&sl)), inline
 	}
 	return *(*unsafe.Pointer)(src), *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 }

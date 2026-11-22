@@ -88,7 +88,7 @@ func (p *pageAlloc) sysInit(test bool) {
 		entries := 1 << (heapAddrBits - shift)
 
 		// Put this reservation into a slice.
-		sl := notInHeapSlice{(*notInHeap)(reservation), 0, entries}
+		sl := mkNotInHeapSlice((*notInHeap)(reservation), 0, entries)
 		p.summary[l] = *(*[]pallocSum)(unsafe.Pointer(&sl))
 
 		reservation = add(reservation, uintptr(entries)*pallocSumBytes)

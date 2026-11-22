@@ -43,7 +43,7 @@
 	MOVD	$1,R21
 #endif
 
-TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+TEXT ·compareSlices<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	// incoming:
 	// R3 a addr
 	// R4 a len

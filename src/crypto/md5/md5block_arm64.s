@@ -9,10 +9,10 @@
 
 #include "textflag.h"
 
-TEXT	·block(SB),NOSPLIT,$0-32
+TEXT	·block(SB),NOSPLIT,$0-24
 	MOVD	dig+0(FP), R0
 	MOVD	p+8(FP), R1
-	MOVD	p_len+16(FP), R2
+	MOVWU	p_len+16(FP), R2
 	AND	$~63, R2
 	CBZ	R2, zero
 

@@ -84,18 +84,39 @@ class SliceValue:
 	def __init__(self, val):
 		self.val = val
 
+	def _huge(self):
+		"""The header {array, len, cap} of a huge slice, else None.
+
+		gd (doc/gd/slice16.md): with 8-byte words len and cap are
+		uint32s, and a slice whose capacity does not fit is the
+		address of a header in 'array' and a capacity of 0xFFFFFFFF.
+		"""
+		if self.val['cap'].type.sizeof != 4 or int(self.val['cap']) != 0xFFFFFFFF:
+			return None
+		words = self.val['array'].cast(gdb.lookup_type('uintptr').pointer())
+		return int(words[0]), int(words[1]), int(words[2])
+
 	@property
 	def len(self):
+		h = self._huge()
+		if h:
+			return h[1]
 		return int(self.val['len'])
 
 	@property
 	def cap(self):
+		h = self._huge()
+		if h:
+			return h[2]
 		return int(self.val['cap'])
 
 	def __getitem__(self, i):
 		if i < 0 or i >= self.len:
 			raise IndexError(i)
 		ptr = self.val["array"]
+		h = self._huge()
+		if h:
+			ptr = gdb.Value(h[0]).cast(ptr.type)
 		return (ptr + i).dereference()
 
 

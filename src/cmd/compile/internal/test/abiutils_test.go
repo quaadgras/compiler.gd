@@ -250,6 +250,7 @@ func TestABIUtilsEmptyFieldAtEndOfStruct(t *testing.T) {
 }
 
 func TestABIUtilsSliceString(t *testing.T) {
+	// (gd: a slice is two words with 8-byte words, doc/gd/slice16.md.)
 	// func(p1 []int32, p2 int8, p3 []int32, p4 int8, p5 string,
 	//      p6 int64, p6 []intr32) (r1 string, r2 int64, r3 string, r4 []int32)
 	i32 := types.Types[types.TINT32]
@@ -261,19 +262,19 @@ func TestABIUtilsSliceString(t *testing.T) {
 		[]*types.Type{str, i64, str, sli32})
 
 	exp := makeExpectedDump(`
-        IN 0: R{ I0 I1 I2 } spilloffset: 0 typ: []int32
-        IN 1: R{ I3 } spilloffset: 24 typ: int8
-        IN 2: R{ I4 I5 I6 } spilloffset: 32 typ: []int32
-        IN 3: R{ I7 } spilloffset: 56 typ: int8
-        IN 4: R{ } offset: 0 typ: string
-        IN 5: R{ I8 } spilloffset: 57 typ: int8
-        IN 6: R{ } offset: 16 typ: int64
-        IN 7: R{ } offset: 24 typ: []int32
+        IN 0: R{ I0 I1 } spilloffset: 0 typ: []int32
+        IN 1: R{ I2 } spilloffset: 16 typ: int8
+        IN 2: R{ I3 I4 } spilloffset: 24 typ: []int32
+        IN 3: R{ I5 } spilloffset: 40 typ: int8
+        IN 4: R{ I6 I7 } spilloffset: 48 typ: string
+        IN 5: R{ I8 } spilloffset: 64 typ: int8
+        IN 6: R{ } offset: 0 typ: int64
+        IN 7: R{ } offset: 8 typ: []int32
         OUT 0: R{ I0 I1 } spilloffset: -1 typ: string
         OUT 1: R{ I2 } spilloffset: -1 typ: int64
         OUT 2: R{ I3 I4 } spilloffset: -1 typ: string
-        OUT 3: R{ I5 I6 I7 } spilloffset: -1 typ: []int32
-        offsetToSpillArea: 48 spillAreaSize: 64
+        OUT 3: R{ I5 I6 } spilloffset: -1 typ: []int32
+        offsetToSpillArea: 24 spillAreaSize: 72
 `)
 
 	abitest(t, ft, exp)

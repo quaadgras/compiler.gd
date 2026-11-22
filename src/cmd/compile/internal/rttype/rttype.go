@@ -116,7 +116,7 @@ func Init(gd *base.Invocation) {
 			{abi.Map, MapType, "Map"},
 			{abi.Interface, InterfaceType, "Interface"},
 		} {
-			if got, want := int64(abi.RTypeSize(test.kind, ptrSize)), test.typ.Size(); got != want {
+			if got, want := int64(abi.RTypeSize(test.kind, ptrSize, types.SlicePacked())), test.typ.Size(); got != want {
 				gd.Fatalf("abi.RTypeSize(%s) == %d, want %d", test.name, got, want)
 			}
 		}
@@ -282,8 +282,14 @@ func (c Cursor) WriteSlice(target *obj.LSym, off, len, cap int64) {
 		c.gd.Fatalf("can't write slice, it has kind %s", c.typ.Kind())
 	}
 	objw.SymPtr(c.gd, c.lsym, int(c.offset), target, int(off))
-	objw.Uintptr(c.gd, c.lsym, int(c.offset)+types.PtrSize, uint64(len))
-	objw.Uintptr(c.gd, c.lsym, int(c.offset)+2*types.PtrSize, uint64(cap))
+	if types.SlicePacked() {
+		// uint32s (types.SlicePacked).
+		objw.Uint32(c.gd, c.lsym, int(c.offset+types.SliceLenOffset), uint32(len))
+		objw.Uint32(c.gd, c.lsym, int(c.offset+types.SliceCapOffset), uint32(cap))
+	} else {
+		objw.Uintptr(c.gd, c.lsym, int(c.offset)+types.PtrSize, uint64(len))
+		objw.Uintptr(c.gd, c.lsym, int(c.offset)+2*types.PtrSize, uint64(cap))
+	}
 	// TODO: ability to switch len&cap. Maybe not needed here, as every caller
 	// passes the same thing for both?
 	if len != cap {

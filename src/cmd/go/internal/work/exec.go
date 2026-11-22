@@ -3639,7 +3639,8 @@ func (b *Builder) swigOne(a *Action, file, objdir string, pcCFLAGS []string, cxx
 			return err
 		}
 		if !gccgo {
-			if err := swigForGd(newGoFile, outC); err != nil {
+			slicePacked := cfg.Goarch != "wasm" && cfg.Goarch != "386" && cfg.Goarch != "arm" && cfg.Goarch != "mips" && cfg.Goarch != "mipsle"
+			if err := swigForGd(newGoFile, outC, slicePacked); err != nil {
 				return err
 			}
 		}

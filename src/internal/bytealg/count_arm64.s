@@ -13,7 +13,7 @@
 //   R3: c byte to search
 // return:
 //   R0: result
-TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·countSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	MOVD	R3, R2
 	B	countstringbody<>(SB)
 

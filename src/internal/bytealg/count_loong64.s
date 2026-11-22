@@ -10,7 +10,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·countSlice<ABIInternal>(SB),NOSPLIT,$0-40
 	// R4 = b_base
 	// R5 = b_len
 	// R6 = b_cap (unused)

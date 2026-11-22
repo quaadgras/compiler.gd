@@ -19,11 +19,55 @@ type slice struct {
 	cap   int
 }
 
-// A notInHeapSlice is a slice backed by internal/runtime/sys.NotInHeap memory.
-type notInHeapSlice struct {
-	array *notInHeap
-	len   int
-	cap   int
+// A notInHeapSlice is a slice backed by internal/runtime/sys.NotInHeap
+// memory: a store of one has no write barrier.
+type notInHeapSlice []notInHeap
+
+// mkNotInHeapSlice returns the notInHeapSlice of array p, length len and
+// capacity cap.
+//
+//go:nosplit
+func mkNotInHeapSlice(p *notInHeap, len, cap int) notInHeapSlice {
+	// (Not through a pointer to an array, which would be checked for
+	// nil: p may be memory that is only reserved.)
+	s := unsafe.Slice((*byte)(unsafe.Pointer(p)), cap)[:len]
+	return *(*notInHeapSlice)(unsafe.Pointer(&s))
+}
+
+// noWBSlice returns the slice at p as a notInHeapSlice, whose stores have
+// no write barrier, for code that may have none: where a slice's array
+// stays (s = s[:n]: with 8-byte words its length is in a word with its
+// capacity, and the slice is stored whole) or is not in the heap.
+//
+//go:nosplit
+func noWBSlice(p unsafe.Pointer) *notInHeapSlice {
+	return (*notInHeapSlice)(p)
+}
+
+// slicehdr is called by compiled code to store a huge slice, or to pass
+// it in registers (doc/gd/slice16.md): with 8-byte words a slice whose
+// capacity does not fit in its 32-bit field is the address of a header,
+// a new one for each store, which no one writes after, and the marker.
+// It returns the address of a new header of the slice p, len, cap.
+func slicehdr(p unsafe.Pointer, len, cap int) unsafe.Pointer {
+	if gp := getg(); gp.m.mallocing != 0 || gp == gp.m.g0 || gp == gp.m.gsignal {
+		// (The runtime's own slices are never huge: the compiler's
+		// check of the functions with no write barrier does not
+		// follow the calls here.)
+		throw("huge slice where the runtime may not allocate")
+	}
+	h := new(slice)
+	*h = slice{p, len, cap}
+	// The header is written before its address is stored.
+	publicationBarrier()
+	return unsafe.Pointer(h)
+}
+
+// slicehdrnotinheap is slicehdr for a slice of a type not in the heap,
+// whose word 0 is stored without a write barrier: there is no huge one.
+func slicehdrnotinheap(p unsafe.Pointer, len, cap int) unsafe.Pointer {
+	throw("slice of a type not in the heap too large")
+	return nil
 }
 
 func panicmakeslicelen() {

@@ -5,10 +5,10 @@
 #include "textflag.h"
 
 // func block(dig *digest, p []byte)
-TEXT ·block(SB), NOSPLIT, $8-32
+TEXT ·block(SB), NOSPLIT, $8-24
 	MOVQ dig+0(FP), BP
 	MOVQ p_base+8(FP), SI
-	MOVQ p_len+16(FP), DX
+	MOVL p_len+16(FP), DX
 	SHRQ $0x06, DX
 	SHLQ $0x06, DX
 	LEAQ (SI)(DX*1), DI

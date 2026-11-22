@@ -72,8 +72,7 @@ func (ctxt *Link) inittasks() {
 		sb.SetSize(0)
 		sb.SetType(sym.SNOPTRDATA) // Could be SRODATA, but see issue 58857.
 		sb.AddAddr(ctxt.Arch, t)
-		sb.AddUint(ctxt.Arch, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
-		sb.AddUint(ctxt.Arch, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
+		addSliceRest(ctxt.Arch, sb, uint64(ldr.SymSize(t)/int64(ctxt.Arch.PtrSize)))
 	}
 }
 

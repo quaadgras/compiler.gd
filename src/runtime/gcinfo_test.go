@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"runtime"
 	"testing"
+	"unsafe"
 )
 
 const (
@@ -164,7 +165,16 @@ func infoBigStruct() []byte {
 			typeScalar, typeScalar, typeScalar, typeScalar, // t int; y uint16; u uint64
 			typePointer, typeScalar, // i string
 		}
-	case "arm64", "amd64", "loong64", "mips64", "mips64le", "ppc64", "ppc64le", "riscv64", "s390x", "wasm":
+	case "arm64", "amd64", "loong64", "mips64", "mips64le", "ppc64", "ppc64le", "riscv64", "s390x":
+		// A slice is two words (doc/gd/slice16.md).
+		return []byte{
+			typePointer,                        // q *int
+			typeScalar, typeScalar, typeScalar, // w byte; e [17]byte
+			typePointer, typeScalar, // r []byte
+			typeScalar, typeScalar, typeScalar, typeScalar, // t int; y uint16; u uint64; padding
+			typePointer, typeScalar, // i string
+		}
+	case "wasm":
 		return []byte{
 			typePointer,                        // q *int
 			typeScalar, typeScalar, typeScalar, // w byte; e [17]byte
@@ -208,7 +218,16 @@ var (
 	dataIface     Iface = IfaceImpl(42)
 
 	infoString = []byte{typePointer, typeScalar}
-	infoSlice  = []byte{typePointer, typeScalar, typeScalar}
+	infoSlice  = infoSliceFor()
 	infoEface  = []byte{typeScalar, typePointer}
 	infoIface  = []byte{typeScalar, typePointer}
 )
+
+// infoSliceFor is the GC info of a slice: two words with 8-byte words but
+// on wasm (doc/gd/slice16.md).
+func infoSliceFor() []byte {
+	if unsafe.Sizeof(uintptr(0)) == 8 && runtime.GOARCH != "wasm" {
+		return []byte{typePointer, typeScalar}
+	}
+	return []byte{typePointer, typeScalar, typeScalar}
+}

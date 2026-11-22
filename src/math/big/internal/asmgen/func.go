@@ -77,6 +77,16 @@ func (a *Asm) Func(decl string) *Func {
 			} else {
 				f.inputs = append(f.inputs, name)
 			}
+			if a.Arch.movLen != "" {
+				// gd: with 8-byte words a slice is its base and
+				// its length and capacity as uint32s
+				// (doc/gd/slice16.md).
+				f.args[name+"_base"] = off
+				f.args[name+"_len"] = off + 8
+				f.args[name+"_cap"] = off + 12
+				off += 16
+				break
+			}
 			f.args[name+"_base"] = off
 			f.args[name+"_len"] = off + a.Arch.WordBytes
 			f.args[name+"_cap"] = off + 2*a.Arch.WordBytes
@@ -106,6 +116,12 @@ func (f *Func) ArgHint(name string, hint Hint) Reg {
 		f.Asm.Fatalf("unknown argument %s", name)
 	}
 	mem := Reg{fmt.Sprintf("%s+%d(FP)", name, off)}
+	if f.Asm.Arch.movLen != "" && (strings.HasSuffix(name, "_len") || strings.HasSuffix(name, "_cap")) {
+		// (A uint32: loaded, not an operand.)
+		r := f.Asm.RegHint(hint)
+		f.Asm.Printf("\t%s %s, %s\n", f.Asm.Arch.movLen, mem, r)
+		return r
+	}
 	if hint == HintMemOK && f.Asm.Arch.memOK {
 		return mem
 	}
