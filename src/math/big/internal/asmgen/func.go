@@ -79,8 +79,9 @@ func (a *Asm) Func(decl string) *Func {
 			}
 			if a.Arch.movLen != "" {
 				// gd: with 8-byte words a slice is its base and
-				// its length and capacity as uint32s
-				// (doc/gd/slice16.md).
+				// its length and capacity as uint32s, aligned to
+				// 16 (doc/gd/slice16.md).
+				off = (off + 15) &^ 15
 				f.args[name+"_base"] = off
 				f.args[name+"_len"] = off + 8
 				f.args[name+"_cap"] = off + 12

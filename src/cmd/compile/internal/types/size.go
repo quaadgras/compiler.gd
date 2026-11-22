@@ -150,26 +150,34 @@ func SlicePacked() bool {
 const SliceHugeCap = 1<<32 - 1
 
 // StackAlignment is the alignment of a value of type t in a stack frame,
-// which is aligned to a register: t's, but a register's for a string,
-// whose alignment to 16 (StringAligned16) is for a 16-byte access that is
-// one access, which a stack, where no other goroutine accesses it, does
-// not need. (Such a type can be in the stack, not too aligned for it.)
+// which is aligned to a register: t's, but a register's for a string or a
+// slice, whose alignment to 16 (StringAligned16, SliceAligned16) is for a
+// 16-byte access that is one access, which a stack, where no other
+// goroutine accesses it, does not need. (Such a type can be in the stack,
+// not too aligned for it.)
 func StackAlignment(t *Type) int64 {
 	a := t.Alignment()
-	if a <= int64(RegSize) || !StringAligned16() || overAligned(t) {
+	if a <= int64(RegSize) || !StringAligned16() && !SliceAligned16() || overAligned(t) {
 		return a
 	}
 	return int64(RegSize)
 }
 
+// SliceAligned16 reports whether a slice is aligned to 16 bytes, so that
+// it is loaded and stored with one 16-byte access, tear-free
+// (doc/gd/slice16.md): where it is packed (SlicePacked).
+func SliceAligned16() bool {
+	return SlicePacked()
+}
+
 // overAligned reports whether t has a part aligned beyond a register's
-// that is not a string.
+// that is not a string or a slice.
 func overAligned(t *Type) bool {
 	if t.Alignment() <= int64(RegSize) {
 		return false
 	}
 	switch {
-	case t.IsString():
+	case t.IsString(), t.IsSlice():
 		return false
 	case t.IsStruct():
 		for _, f := range t.Fields() {
@@ -749,6 +757,11 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		w = SliceSize
 		CheckSize(gd, t.Elem())
 		t.align = uint8(PtrSize)
+		if SliceAligned16() {
+			// Aligned to 16, so that a slice is loaded and stored
+			// with one 16-byte access (doc/gd/slice16.md).
+			t.align = 16
+		}
 		t.intRegs = 3
 		if SlicePacked() {
 			t.intRegs = 2 // {w0, w1} (SlicePacked)

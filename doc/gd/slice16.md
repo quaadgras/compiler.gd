@@ -131,19 +131,25 @@ capacity).
   descriptors it decodes) and DWARF (`runtime.sliceDWARF`) write and read
   the packed form; `runtime-gdb.py` decodes a huge slice.
 - Assembly: an ABI0 frame lays a slice out as memory does: `x_base+0`,
-  `x_len+8` and `x_cap+12`, uint32s (vet's asmdecl knows). The functions of `internal/bytealg` that take slices take their
+  `x_len+8` and `x_cap+12`, uint32s (vet's asmdecl knows), aligned to 16
+  (§4). The functions of `internal/bytealg` that take slices take their
   words from Go wrappers (`compareSlices`, `countSlice`, `indexSlices`,
   `indexByteSlice`: the pointer, the length and the capacity, the stock
   slice's frame and registers), so they handle huge slices. The other
   assembly functions read the uint32 fields (`MOVL`, `MOVWU`, `MOVWZ`):
   given a huge slice they see an empty one (open item).
-- cgo: `GoSlice` is `{void *data; GoUint32 len; GoUint32 cap;}`; `C.CString` and `C.CBytes` make their slices of C memory from
+- cgo: `GoSlice` is `{void *data; GoUint32 len; GoUint32 cap;}`, aligned
+  to 16; `C.CString` and `C.CBytes` make their slices of C memory from
   array pointers. SWIG's `_goslice_` is rewritten likewise (`cmd/go`).
 
 ## 4. Alignment
 
-A slice is aligned to a word, for now; aligned to 16, it will be one
-block a 16-byte access can load and store whole (`sharing.md`).
+A slice is aligned to 16 where it is packed (`types.SliceAligned16`), as
+a string is (`sso-string.md` §6), and for the same reasons: a slice in
+the heap, the data or the bss is one aligned 16-byte block. The stack
+aligns it to a word (`types.StackAlignment`). go/types and types2
+(`gcSizes.slicePacked`), cgo, the linker (`sliceAlign`) and the runtime's
+type descriptors (`abi.RTypeSize`) agree.
 
 ## 5. Targets
 

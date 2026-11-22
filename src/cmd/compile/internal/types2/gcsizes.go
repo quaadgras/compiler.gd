@@ -65,6 +65,12 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 			// with its 4-byte words, to 4 on the other 32-bit targets.
 			return min(8, s.MaxAlign)
 		}
+		if _, ok := t.(*Slice); ok && s.slicePacked {
+			// gd: aligned to 16 where packed, so that a slice is
+			// loaded and stored with one 16-byte access
+			// (cmd/compile/internal/types's SliceAligned16).
+			return 16
+		}
 		return s.WordSize
 	case *Basic:
 		// Strings are like slices and interfaces.

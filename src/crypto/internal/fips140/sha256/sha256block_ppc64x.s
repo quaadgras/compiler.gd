@@ -285,10 +285,10 @@ GLOBL ·kcon(SB), RODATA, $1088
 #endif
 
 // func blockPOWER(dig *Digest, p []byte)
-TEXT ·blockPOWER(SB),0,$0-24
+TEXT ·blockPOWER(SB),0,$0-32
 	MOVD	dig+0(FP), CTX
-	MOVD	p_base+8(FP), INP
-	MOVWZ	p_len+16(FP), LEN
+	MOVD	p_base+16(FP), INP
+	MOVWZ	p_len+24(FP), LEN
 
 	SRD	$6, LEN
 	SLD	$6, LEN

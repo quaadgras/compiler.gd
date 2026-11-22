@@ -1354,8 +1354,13 @@ func slicePacked(arch *sys.Arch) bool {
 	return arch.PtrSize == 8 && arch.Family != sys.Wasm
 }
 
-// sliceAlign is the alignment of a slice.
+// sliceAlign is the alignment of a slice: 16 where it is packed, so that
+// it is loaded and stored with one 16-byte access (cmd/compile/internal/
+// types's SliceAligned16).
 func sliceAlign(arch *sys.Arch) int64 {
+	if slicePacked(arch) {
+		return 16
+	}
 	return int64(arch.PtrSize)
 }
 

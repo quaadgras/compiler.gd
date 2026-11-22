@@ -10,8 +10,8 @@
 // func castagnoliSSE42(crc uint32, p []byte) uint32
 TEXT ·castagnoliSSE42(SB),NOSPLIT,$0
 	MOVL crc+0(FP), AX  // CRC value
-	MOVQ p+8(FP), SI  // data pointer
-	MOVL p_len+16(FP), CX  // len(p)
+	MOVQ p+16(FP), SI  // data pointer
+	MOVL p_len+24(FP), CX  // len(p)
 
 	// If there are fewer than 8 bytes to process, skip alignment.
 	CMPQ CX, $8
@@ -84,7 +84,7 @@ less_than_2:
 	CRC32B (SI), AX
 
 done:
-	MOVL AX, ret+24(FP)
+	MOVL AX, ret+32(FP)
 	RET
 
 // castagnoliSSE42Triple updates three (non-inverted) crcs with (24*rounds)
@@ -164,8 +164,8 @@ GLOBL r5<>(SB),RODATA,$8
 // func ieeeCLMUL(crc uint32, p []byte) uint32
 TEXT ·ieeeCLMUL(SB),NOSPLIT,$0
 	MOVL   crc+0(FP), X0             // Initial CRC value
-	MOVQ   p+8(FP), SI  	         // data pointer
-	MOVL   p_len+16(FP), CX          // len(p)
+	MOVQ   p+16(FP), SI  	         // data pointer
+	MOVL   p_len+24(FP), CX          // len(p)
 
 	// Check feature support and length to be >= 1024 bytes.
 	CMPB internal∕cpu·X86+const_offsetX86HasAVX512VPCLMULQDQL(SB), $1
@@ -321,6 +321,6 @@ finish:
 	PXOR        X2, X1
 
 	PEXTRD	$1, X1, AX
-	MOVL        AX, ret+24(FP)
+	MOVL        AX, ret+32(FP)
 
 	RET

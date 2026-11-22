@@ -43,8 +43,8 @@
 // func blockSHA512(dig *Digest, p []byte)
 TEXT ·blockSHA512(SB),NOSPLIT,$0
 	MOVD	dig+0(FP), R0
-	MOVD	p_base+8(FP), R1
-	MOVWU	p_len+16(FP), R2
+	MOVD	p_base+16(FP), R1
+	MOVWU	p_len+24(FP), R2
 	MOVD	$·_K+0(SB), R3
 
 	// long enough to prefetch

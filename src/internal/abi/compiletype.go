@@ -31,13 +31,15 @@ func ITabTypeOff(ptrSize int) int { return ptrSize }
 // ptrSize, whose slices are packed (16 bytes: SlicePacked) or not.
 func RTypeSize(kind Kind, ptrSize int, slicePacked bool) int {
 	cs := CommonSize(ptrSize)
-	sliceSize := 3 * ptrSize
+	// The size of a structure of a common type, a pointer and a slice:
+	// the slice is aligned to 16 where it is packed (SlicePacked).
+	withSlice := cs + ptrSize + 3*ptrSize
 	if slicePacked {
-		sliceSize = 16
+		withSlice = (cs+ptrSize+15)&^15 + 16
 	}
 	switch kind {
 	case Struct: // reflect.structType
-		return cs + ptrSize + sliceSize
+		return withSlice
 	case Pointer: // reflect.ptrType
 		return cs + ptrSize
 	case Func: // reflect.funcType
@@ -55,7 +57,7 @@ func RTypeSize(kind Kind, ptrSize int, slicePacked bool) int {
 		}
 		return sz
 	case Interface: // reflect.interfaceType
-		return cs + ptrSize + sliceSize
+		return withSlice
 	default:
 		// just Sizeof(rtype)
 		return cs

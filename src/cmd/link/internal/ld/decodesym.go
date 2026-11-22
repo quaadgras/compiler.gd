@@ -79,7 +79,13 @@ func decodetypeFuncOutCount(arch *sys.Arch, p []byte) int {
 
 // InterfaceType.methods.length
 func decodetypeIfaceMethodCount(arch *sys.Arch, p []byte) int64 {
-	return decodeSliceLen(arch, p[commonsize(arch)+arch.PtrSize:])
+	return decodeSliceLen(arch, p[alignSliceOff(arch, commonsize(arch)+arch.PtrSize):])
+}
+
+// alignSliceOff rounds off, in a structure, up to where a slice is.
+func alignSliceOff(arch *sys.Arch, off int) int {
+	a := int(sliceAlign(arch))
+	return (off + a - 1) &^ (a - 1)
 }
 
 // decodeSliceLen returns the length of the slice at the start of p: a
@@ -179,7 +185,7 @@ func decodetypePtrElem(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) lo
 
 func decodetypeStructFieldCount(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym) int {
 	data := ldr.Data(symIdx)
-	return int(decodeSliceLen(arch, data[commonsize(arch)+arch.PtrSize:]))
+	return int(decodeSliceLen(arch, data[alignSliceOff(arch, commonsize(arch)+arch.PtrSize):]))
 }
 
 func decodetypeStructFieldArrayOff(ldr *loader.Loader, arch *sys.Arch, symIdx loader.Sym, i int) int {

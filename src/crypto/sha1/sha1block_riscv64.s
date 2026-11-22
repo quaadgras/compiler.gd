@@ -84,9 +84,9 @@
 	MIX(a, b, c, d, e, X18)
 
 // func block(dig *Digest, p []byte)
-TEXT ·block(SB),NOSPLIT,$64-24
-	MOV	p_base+8(FP), X29
-	MOVWU	p_len+16(FP), X30
+TEXT ·block(SB),NOSPLIT,$64-32
+	MOV	p_base+16(FP), X29
+	MOVWU	p_len+24(FP), X30
 	SRL	$6, X30
 	SLL	$6, X30
 

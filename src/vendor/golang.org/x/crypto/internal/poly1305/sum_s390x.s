@@ -233,7 +233,7 @@ DATA ·constants<>+0x28(SB)/8, $0x1d1d1d1d1d1f1e1d
 // func updateVX(state *macState, msg []byte)
 TEXT ·updateVX(SB), NOSPLIT, $0
 	MOVD state+0(FP), R1
-	LMG  msg+8(FP), R2, R3 // R2=msg_base, R3=msg_len
+	LMG  msg+16(FP), R2, R3 // R2=msg_base, R3=msg_len
 
 	// load EX0, EX1 and EX2
 	MOVD $·constants<>(SB), R5

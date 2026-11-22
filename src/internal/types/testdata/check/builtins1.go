@@ -260,7 +260,7 @@ func _[T comparable]() {
 	const pp = unsafe.Alignof(p)
 	assert(pp == 8)
 	const ll = unsafe.Alignof(l)
-	assert(ll == 8)
+	assert(ll == 16) // gd: a slice is aligned to 16 with 8-byte words (doc/gd/slice16.md)
 	const ff = unsafe.Alignof(f)
 	assert(ff == 8)
 	const ii = unsafe.Alignof(i)

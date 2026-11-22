@@ -119,8 +119,8 @@ TEXT ·gcmAesInit(SB),NOSPLIT,$0
 #define NR R2
 #define I R3
 	MOVD	productTable+0(FP), pTbl
-	MOVD	ks_base+8(FP), KS
-	MOVWU	ks_len+16(FP), NR
+	MOVD	ks_base+16(FP), KS
+	MOVWU	ks_len+24(FP), NR
 
 	MOVD	$0xC2, I
 	LSL	$56, I
@@ -251,9 +251,9 @@ TEXT ·gcmAesData(SB),NOSPLIT,$0
 	VEOR	T3.B16, ACCM.B16, ACCM.B16
 
 	MOVD	productTable+0(FP), pTbl
-	MOVD	data_base+8(FP), aut
-	MOVWU	data_len+16(FP), autLen
-	MOVD	T+24(FP), tPtr
+	MOVD	data_base+16(FP), aut
+	MOVWU	data_len+24(FP), autLen
+	MOVD	T+32(FP), tPtr
 
 	VEOR	ACC0.B16, ACC0.B16, ACC0.B16
 	CBZ	autLen, dataBail
@@ -473,13 +473,13 @@ tailStore1: \
 tailStore0:
 
 	MOVD	productTable+0(FP), pTbl
-	MOVD	dst+8(FP), dstPtr
-	MOVD	src_base+24(FP), srcPtr
-	MOVWU	src_len+32(FP), srcPtrLen
-	MOVD	ctr+40(FP), ctrPtr
-	MOVD	T+48(FP), tPtr
-	MOVD	ks_base+56(FP), ks
-	MOVWU	ks_len+64(FP), NR
+	MOVD	dst+16(FP), dstPtr
+	MOVD	src_base+32(FP), srcPtr
+	MOVWU	src_len+40(FP), srcPtrLen
+	MOVD	ctr+48(FP), ctrPtr
+	MOVD	T+56(FP), tPtr
+	MOVD	ks_base+64(FP), ks
+	MOVWU	ks_len+72(FP), NR
 
 	MOVD	$0xC2, H1
 	LSL	$56, H1
@@ -747,13 +747,13 @@ done:
 // func gcmAesDec(productTable *[256]byte, dst, src []byte, ctr, T *[16]byte, ks []uint32)
 TEXT ·gcmAesDec(SB),NOSPLIT,$0
 	MOVD	productTable+0(FP), pTbl
-	MOVD	dst+8(FP), dstPtr
-	MOVD	src_base+24(FP), srcPtr
-	MOVWU	src_len+32(FP), srcPtrLen
-	MOVD	ctr+40(FP), ctrPtr
-	MOVD	T+48(FP), tPtr
-	MOVD	ks_base+56(FP), ks
-	MOVWU	ks_len+64(FP), NR
+	MOVD	dst+16(FP), dstPtr
+	MOVD	src_base+32(FP), srcPtr
+	MOVWU	src_len+40(FP), srcPtrLen
+	MOVD	ctr+48(FP), ctrPtr
+	MOVD	T+56(FP), tPtr
+	MOVD	ks_base+64(FP), ks
+	MOVWU	ks_len+72(FP), NR
 
 	MOVD	$0xC2, H1
 	LSL	$56, H1

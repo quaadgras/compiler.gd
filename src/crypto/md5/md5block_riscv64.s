@@ -131,9 +131,9 @@
 //		  &p[0]
 // X30		: temporary register
 
-TEXT	·block(SB),NOSPLIT,$0-24
-	MOV	p+8(FP), X29
-	MOVWU	p_len+16(FP), X30
+TEXT	·block(SB),NOSPLIT,$0-32
+	MOV	p+16(FP), X29
+	MOVWU	p_len+24(FP), X30
 	SRL	$6, X30
 	SLL	$6, X30
 	BEQZ	X30, zero

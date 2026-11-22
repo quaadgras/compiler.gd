@@ -1544,7 +1544,7 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 			// Slice: pointer, len, cap.
 			if p.slicePacked() {
 				// gd: len and cap as uint32s (doc/gd/slice16.md).
-				return &Type{Size: 16, Align: p.PtrSize, C: c("GoSlice")}
+				return &Type{Size: 16, Align: 16, C: c("GoSlice")}
 			}
 			return &Type{Size: p.PtrSize * 3, Align: p.PtrSize, C: c("GoSlice")}
 		}
@@ -2102,9 +2102,9 @@ func (p *Package) gccExportHeaderProlog() string {
 	prolog := gccExportHeaderProlog
 	if p.slicePacked() {
 		// gd: a slice is its pointer and its length and capacity as
-		// uint32s (doc/gd/slice16.md).
+		// uint32s, aligned to 16 (doc/gd/slice16.md).
 		prolog = strings.ReplaceAll(prolog, "typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;",
-			"typedef struct { void *data; GoUint32 len; GoUint32 cap; } GoSlice;")
+			"typedef struct { void *data; GoUint32 len; GoUint32 cap; } __attribute__((aligned(16))) GoSlice;")
 	}
 	return strings.ReplaceAll(prolog, "GOINTBITS", fmt.Sprint(8*p.IntSize))
 }

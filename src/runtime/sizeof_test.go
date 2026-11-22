@@ -16,12 +16,9 @@ import (
 func TestSizeof(t *testing.T) {
 	const _64bit = unsafe.Sizeof(uintptr(0)) == 8
 	const xreg = unsafe.Sizeof(runtime.XRegPerG{}) // Varies per architecture
-	// With 8-byte words but on wasm a slice is two words, not three
-	// (doc/gd/slice16.md): g has two.
+	// (With 8-byte words but on wasm a slice is two words aligned to 16,
+	// doc/gd/slice16.md: g's two take what three words did.)
 	g64 := uintptr(472)
-	if runtime.GOARCH != "wasm" {
-		g64 = 456
-	}
 	var tests = []struct {
 		val    any     // type as a value
 		_32bit uintptr // size on 32bit platforms

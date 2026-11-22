@@ -5,10 +5,10 @@
 //go:build (gc || gd) && !purego
 
 // func update(state *macState, msg []byte)
-TEXT ·update(SB), $0-24
+TEXT ·update(SB), $0-32
 	MOVV	state+0(FP), R4
-	MOVV	msg_base+8(FP), R5
-	MOVWU	msg_len+16(FP), R6
+	MOVV	msg_base+16(FP), R5
+	MOVWU	msg_len+24(FP), R6
 
 	MOVV	$0x10, R7
 
