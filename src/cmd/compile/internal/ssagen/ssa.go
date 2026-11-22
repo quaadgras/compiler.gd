@@ -4775,6 +4775,12 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 				return s.rawLoad(types.Types[types.TINT], s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, off, addr))
 			}
 		}
+		if x := n.X; types.SlicePacked() && x.Type().IsSlice() && !s.canSSA(x) && ir.IsAddressable(x) {
+			switch x.Op() {
+			case ir.ONAME, ir.ODOT, ir.ODOTPTR, ir.ODEREF, ir.OINDEX:
+				return s.sliceLenCapMem(n.Op() == ir.OCAP, x)
+			}
+		}
 		a := s.expr(n.X)
 		t := n.X.Type()
 		switch {

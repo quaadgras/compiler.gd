@@ -580,7 +580,9 @@ everywhere but in the stack (`types.Has16`):
 - `s = s[:n]` and an append in place store the whole slice: its length
   is in a word with its capacity, which another goroutine's store may
   have changed (the stock length-only store would tear).
-- `len` and `cap` of a slice in memory load the slice whole.
+- `len` and `cap` of a slice in memory load its second word, whose
+  length and capacity go together, and the whole slice if it is the
+  marker of a huge one.
 
 `TestSliceTear` (`runtime/slicetear_test.go`) races stores of slices of
 distinct capacities, whose arrays hold a mark of their own, and of huge

@@ -330,7 +330,7 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 func (s *state) shareLoadSliceLocked(t *types.Type, src *ssa.Value) *ssa.Value {
 	ptrT := t.Elem().PtrTo()
 	u64 := types.Types[types.TUINT64]
-	sliceVar := ssaMarker("slice")
+	w0Var, w1Var := ssaMarker("slicew0"), ssaMarker("slicew1")
 	seq := s.shareSeqAddr(src)
 	s1 := s.shareSeq(seq)
 	w0 := s.rawLoad(ptrT, src)
@@ -350,18 +350,28 @@ func (s *state) shareLoadSliceLocked(t *types.Type, src *ssa.Value) *ssa.Value {
 	b.AddEdgeTo(bSlow)
 
 	s.startBlock(bQuiet)
-	s.vars[sliceVar] = s.sliceUnpack(t, w0, w1)
+	s.vars[w0Var], s.vars[w1Var] = w0, w1
 	s.endBlock().AddEdgeTo(bDone)
 
 	// A store was in progress: the runtime waits for it.
 	s.startBlock(bSlow)
-	s.vars[sliceVar] = s.rtcall(ir.Syms(s.gd).ShareLoadSlice, true, []*types.Type{t}, src)[0]
+	s.vars[w0Var], s.vars[w1Var] = s.shareLoadSliceWords(t, src)
 	s.endBlock().AddEdgeTo(bDone)
 
+	// (One unpack of the words of both.)
 	s.startBlock(bDone)
-	v := s.variable(sliceVar, t)
-	delete(s.vars, sliceVar)
+	v := s.sliceUnpack(t, s.variable(w0Var, ptrT), s.variable(w1Var, u64))
+	delete(s.vars, w0Var)
+	delete(s.vars, w1Var)
 	return v
+}
+
+// shareLoadSliceWords calls runtime.shareloadslice for the slice of type
+// t at src, and returns its words, packed (doc/gd/slice16.md): its
+// result is a slice, two words in two registers, or two in the frame.
+func (s *state) shareLoadSliceWords(t *types.Type, src *ssa.Value) (w0, w1 *ssa.Value) {
+	r := s.rtcall(ir.Syms(s.gd).ShareLoadSlice, true, []*types.Type{t.Elem().PtrTo(), types.Types[types.TUINT64]}, src)
+	return r[0], r[1]
 }
 
 // shareLoadMem copies a value of type t from src, which is not in the
@@ -1060,36 +1070,40 @@ func (s *state) sliceUnpack(t *types.Type, w0, w1 *ssa.Value) *ssa.Value {
 // and under the sequence lock of its block elsewhere. It is packed before
 // it is stored: the header of a huge one is made before any lock is taken.
 
-// sliceLoad16 loads the slice of type t at src with one 16-byte access.
-func (s *state) sliceLoad16(t *types.Type, src *ssa.Value) *ssa.Value {
+// sliceLoad16 loads the words of the slice of type t at src with one
+// 16-byte access.
+func (s *state) sliceLoad16(t *types.Type, src *ssa.Value) (w0, w1 *ssa.Value) {
 	ptrT := t.Elem().PtrTo()
 	u64 := types.Types[types.TUINT64]
 	tup := s.newValue2(ssa.OpStringLoad16, types.NewTuple(ptrT, u64), src, s.mem())
-	w0 := s.newValue1(ssa.OpSelect0, ptrT, tup)
-	w1 := s.newValue1(ssa.OpSelect1, u64, tup)
-	return s.sliceUnpack(t, w0, w1)
+	return s.newValue1(ssa.OpSelect0, ptrT, tup), s.newValue1(ssa.OpSelect1, u64, tup)
 }
 
 // shareLoadSlice is shareLoad for a slice on amd64 and arm64.
 func (s *state) shareLoadSlice(t *types.Type, src *ssa.Value) *ssa.Value {
 	if s.stringAtomicKnown() {
-		return s.sliceLoad16(t, src)
+		w0, w1 := s.sliceLoad16(t, src)
+		return s.sliceUnpack(t, w0, w1)
 	}
-	sliceVar := ssaMarker("slice")
+	ptrT := t.Elem().PtrTo()
+	u64 := types.Types[types.TUINT64]
+	w0Var, w1Var := ssaMarker("slicew0"), ssaMarker("slicew1")
 	atomic, locked := s.stringAtomicBranch()
 	bDone := s.f.NewBlock(ssa.BlockPlain)
 
 	s.startBlock(atomic)
-	s.vars[sliceVar] = s.sliceLoad16(t, src)
+	s.vars[w0Var], s.vars[w1Var] = s.sliceLoad16(t, src)
 	s.endBlock().AddEdgeTo(bDone)
 
 	s.startBlock(locked)
-	s.vars[sliceVar] = s.rtcall(ir.Syms(s.gd).ShareLoadSlice, true, []*types.Type{t}, s.nilCheck(src))[0]
+	s.vars[w0Var], s.vars[w1Var] = s.shareLoadSliceWords(t, s.nilCheck(src))
 	s.endBlock().AddEdgeTo(bDone)
 
+	// (One unpack of the words of both.)
 	s.startBlock(bDone)
-	v := s.variable(sliceVar, t)
-	delete(s.vars, sliceVar)
+	v := s.sliceUnpack(t, s.variable(w0Var, ptrT), s.variable(w1Var, u64))
+	delete(s.vars, w0Var)
+	delete(s.vars, w1Var)
 	return v
 }
 
@@ -1124,4 +1138,52 @@ func (s *state) shareStoreSlice(t *types.Type, left, right *ssa.Value) {
 	s.endBlock().AddEdgeTo(bDone)
 
 	s.startBlock(bDone)
+}
+
+// sliceLenCapMem returns the length, or the capacity with isCap, of the
+// packed slice x in memory (types.SlicePacked): its second word alone,
+// one 8-byte load, whose fields go together, unless it is the marker of a
+// huge slice; then the slice is loaded whole.
+func (s *state) sliceLenCapMem(isCap bool, x ir.Node) *ssa.Value {
+	t := x.Type()
+	addr := s.addr(x)
+	s.instrumentFields(t, addr, instrumentRead)
+	intT := types.Types[types.TINT]
+	u64 := types.Types[types.TUINT64]
+	w1 := s.rawLoad(u64, s.newValue1I(ssa.OpOffPtr, types.NewPtr(u64), 8, addr))
+	lo := s.newValue1(ssa.OpZeroExt32to64, intT, s.newValue1(ssa.OpTrunc64to32, types.Types[types.TUINT32], w1))
+	hi := s.newValue2(ssa.OpRsh64Ux64, intT, w1, s.constInt64(u64, 32))
+	lenF, capF := lo, hi
+	if s.f.Config.BigEndian {
+		lenF, capF = hi, lo
+	}
+	huge := s.newValue2(ssa.OpEq32, types.Types[types.TBOOL], s.newValue1(ssa.OpTrunc64to32, types.Types[types.TUINT32], capF), s.constInt32(types.Types[types.TUINT32], -1))
+	resVar := ssaMarker("lencap")
+	if isCap {
+		s.vars[resVar] = capF
+	} else {
+		s.vars[resVar] = lenF
+	}
+	bHuge := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(huge)
+	b.Likely = ssa.BranchUnlikely
+	b.AddEdgeTo(bHuge)
+	b.AddEdgeTo(bDone)
+
+	s.startBlock(bHuge)
+	v := s.load(t, addr)
+	if isCap {
+		s.vars[resVar] = s.newValue1(ssa.OpSliceCap, intT, v)
+	} else {
+		s.vars[resVar] = s.newValue1(ssa.OpSliceLen, intT, v)
+	}
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	r := s.variable(resVar, intT)
+	delete(s.vars, resVar)
+	return r
 }

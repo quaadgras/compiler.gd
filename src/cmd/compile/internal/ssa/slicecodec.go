@@ -458,7 +458,8 @@ func (c *sliceCodecState) unpack(b, bSlow, bEnd *Block, v *Value, after []*Value
 	if f.Config.BigEndian {
 		lenF, capF = hi, lo
 	}
-	huge := b.NewValue2(pos, OpEq64, typs.Bool, capF, f.ConstInt64(typs.UInt64, sliceMarkerCap))
+	// (A 32-bit compare with -1: an 8-bit immediate on amd64.)
+	huge := b.NewValue2(pos, OpEq32, typs.Bool, b.NewValue1(pos, OpTrunc64to32, typs.UInt32, capF), f.ConstInt32(typs.UInt32, -1))
 	b.SetControl(huge)
 	b.Likely = BranchUnlikely
 	b.AddEdgeTo(bSlow)

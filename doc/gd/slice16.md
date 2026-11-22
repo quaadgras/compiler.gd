@@ -188,6 +188,24 @@ published before it and is never written. Stale, never torn.
 `TestSliceTear` (`runtime/slicetear_test.go`) checks it, with huge
 slices among the values; with `-d=notear` it fails.
 
+`len(s)` and `cap(s)` of a slice in memory load w1 alone, one 8-byte
+load (its two fields go together), and the whole slice only if it is the
+marker (`sliceLenCapMem`). The marker test of an unpack is a 32-bit
+compare with -1 (an 8-bit immediate on amd64). Where a load has two
+paths (the 16-byte load, or the runtime's while a store is in progress)
+it unpacks the words of both once.
+
+What it costs (amd64, GOAMD64=v1, against the release branch, best of
+6, a noisy machine): a geomean of +5.5% over 64 benchmarks of sort,
+encoding/json, bytes, strings, bufio, io and the runtime's slices
+(`-d=notear`: +0.6%). An append in place to a slice in memory is the
+worst (`AppendInPlace/NoGrow/Byte` x3): each append loads the slice and
+stores it whole, a chain of 16-byte loads and stores through memory,
+where stock Go stores the length. encoding/json is +15% to +39%. What
+allocates slices of slices allocates a third less (`bytes.Fields`).
+The text of cmd/gofmt is 2.08 MB, +15% (1.81 MB on the release branch,
+1.75 MB with `-d=notear`: two words are less code than three).
+
 ## 6. Targets
 
 - 8-byte words but wasm: packed (amd64, arm64, ppc64, ppc64le, riscv64,
