@@ -114,7 +114,6 @@ func spawnThread(thr Ptr, detached, blocked bool, run func(t *Thread)) *Thread {
 		tb.Sig = sig
 		tb.th = t
 		defer liveAdd(-1)
-		defer sigExit(sig)
 		defer func() {
 			ThreadsMu.Lock()
 			if t.detached {
@@ -123,6 +122,11 @@ func spawnThread(thr Ptr, detached, blocked bool, run func(t *Thread)) *Thread {
 			ThreadsMu.Unlock()
 		}()
 		defer close(t.done)
+		// The thread takes no more signals before it is joined: a
+		// signal to the process sent after pthread_join returns must not
+		// go to it (and take its default action for a mask the thread
+		// no longer has).
+		defer sigExit(sig)
 		defer releaseRobust()
 		defer runKeyDestructors()
 		defer func() {
