@@ -61,8 +61,11 @@ inline:      w0 @0  1<<63 | n<<56 | bytes 8..14   (n = 1..15)
   byte after the swap is the tag (the shorter of two equal prefixes is
   less); otherwise the bytes of an inline one are put in order in the
   frame for the usual comparison.
-- **Hash**: `strhash` hashes the bytes (an inline string's from a 16-byte
-  copy) with the seed, so a key hashes alike in either form.
+- **Hash**: `strhash` (`maps.StrHash`, which the string fast paths of
+  the maps call directly) hashes the bytes with the seed, so a key hashes
+  alike in either form: on amd64 an inline string's from its words in an
+  X register (`memHashInlineAES`, masked as `memHashAES` masks), elsewhere
+  from a 16-byte copy.
 
 Constants stay in rodata: `unsafe.StringData` of a constant is the
 stable address of its bytes, as on stock Go, and C reads them in place.
