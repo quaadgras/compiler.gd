@@ -174,6 +174,14 @@ func (s *state) stringTaggedEq(l, r *ssa.Value) *ssa.Value {
 	rw1 := s.newValue1(ssa.OpStringWord1, intT, r)
 	zero := s.constInt64(i64, 0)
 	cold := func(e *strEq) {
+		if Arch.LinkArch.Family == sys.ARM64 {
+			// A call that writes no memory (see OpStrEqFast), so that
+			// loads around the compare are not done again.
+			v := s.curBlock.NewValue0(s.peekPos(), ssa.OpStrEqFast, boolT)
+			v.AddArgs(lw0, lw1, rw0, rw1, s.mem())
+			e.result(v)
+			return
+		}
 		e.result(s.rtcall(ir.Syms(s.gd).Streqfast, true, []*types.Type{boolT}, l, r)[0])
 	}
 

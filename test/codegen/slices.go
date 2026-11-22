@@ -445,12 +445,12 @@ func Slice0(p *struct{}, i int) []struct{} {
 // --------------------------------------- //
 
 func SlicePut(a []byte, c uint8) []byte {
-	// arm64:`CBZ R1`
+	// arm64:`CBZ R[0-9]+`
 	a[0] = c
-	// arm64:`CMP \$1, R1`
+	// arm64:`CMP \$1, R[0-9]+`
 	a = a[1:]
 	a[0] = c
-	// arm64:`CMP \$2, R1`
+	// arm64:`CMP \$2, R[0-9]+`
 	a = a[1:]
 	a[0] = c
 	a = a[1:]

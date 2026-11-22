@@ -6,6 +6,7 @@ package walk
 
 import (
 	"fmt"
+	"go/constant"
 	"internal/abi"
 	"internal/buildcfg"
 
@@ -515,6 +516,22 @@ func analyzePreWalk(fn *ir.Func) *walkAnalysis {
 	scs := make(map[*ir.Name]*types.Type)
 	ir.Visit(fn, func(n ir.Node) {
 		switch n.Op() {
+		case ir.OEQ, ir.ONE, ir.OLT, ir.OLE, ir.OGT, ir.OGE:
+			// A string compared with a local that holds a constant (as
+			// s := "…", never reassigned) is compared with the constant
+			// (walkCompareString).
+			n := n.(*ir.BinaryExpr)
+			if !n.X.Type().IsString() {
+				return
+			}
+			for _, x := range []ir.Node{n.X, n.Y} {
+				if x.Op() != ir.ONAME {
+					continue
+				}
+				if v := ro.StaticValue(x); v != nil && v != x && ir.IsConst(v, constant.String) {
+					sv[x] = v
+				}
+			}
 		case ir.OCONVIFACE:
 			x := n.(*ir.ConvExpr).X
 			v := ro.StaticValue(x)

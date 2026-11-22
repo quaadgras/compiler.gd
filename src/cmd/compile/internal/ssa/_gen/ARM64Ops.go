@@ -548,7 +548,7 @@ func init() {
 
 		// pseudo-ops
 		{name: "LoweredNilCheck", argLength: 2, reg: regInfo{inputs: []regMask{gpg}}, nilCheck: true, faultOnNilArg0: true},                                                                                                                                                      // panic if arg0 is nil.  arg1=mem.
-		{name: "LoweredStrEqFast", argLength: 7, reg: regInfo{inputs: []regMask{buildReg("R0"), buildReg("R1"), buildReg("R2"), buildReg("R3"), buildReg("R4"), buildReg("R5")}, outputs: []regMask{buildReg("R0")}, clobbers: callerSave}, typ: "Bool", clobberFlags: true, call: true}, // gd: runtime.streqfast(arg0..2, arg3..5), arg6=mem.
+		{name: "LoweredStrEqFast", argLength: 5, reg: regInfo{inputs: []regMask{buildReg("R0"), buildReg("R1"), buildReg("R2"), buildReg("R3")}, outputs: []regMask{buildReg("R0")}, clobbers: callerSave}, typ: "Bool", clobberFlags: true, call: true}, // gd: runtime.streqmixed(arg0..1, arg2..3), arg4=mem.
 		{name: "LoweredMemEq", argLength: 4, reg: regInfo{inputs: []regMask{buildReg("R0"), buildReg("R1"), buildReg("R2")}, outputs: []regMask{buildReg("R0")}, clobbers: callerSave}, typ: "Bool", faultOnNilArg0: true, faultOnNilArg1: true, clobberFlags: true, call: true}, // arg0, arg1 - pointers to memory, arg2=size, arg3=mem.
 
 		{name: "Equal", argLength: 1, reg: readflags, earlyOk: true},            // bool, true flags encode x==y false otherwise.

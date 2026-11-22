@@ -1387,3 +1387,68 @@ TEXT ·getfp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	MOVD R29, R0
 	RET
 
+
+// func streqmixed(s, t string) bool
+//
+// gd: s in R0 (w0), R1 (w1), t in R2, R3; the result in R0. A leaf with
+// no frame, so that the compiler can call it as an op that writes no
+// memory (OpStrEqFast), which it does where one of the strings may be
+// inline. An inline string has w0's bit 63 set and its length at bit
+// 56; its byte i is bits 8i of w1 (i < 8) or 8(i-8) of w0. Any other
+// string's length is w1 and its bytes are at w0. The bytes are compared
+// one at a time: with one string inline, there are at most 15.
+TEXT runtime·streqmixed<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-33
+	MOVD	R1, R4			// s's length
+	TBZ	$63, R0, 2(PC)
+	UBFX	$56, R0, $4, R4
+	MOVD	R3, R5			// t's length
+	TBZ	$63, R2, 2(PC)
+	UBFX	$56, R2, $4, R5
+	CMP	R4, R5
+	BNE	ne
+	MOVD	ZR, R6			// i
+loop:
+	CMP	R4, R6
+	BEQ	eq
+	// R7 = s's byte i
+	TBNZ	$63, R0, sinline
+	MOVBU	(R0)(R6), R7
+	B	tbyte
+sinline:
+	LSL	$3, R6, R9
+	CMP	$8, R6
+	BGE	shigh
+	LSR	R9, R1, R7
+	B	smask
+shigh:
+	SUB	$64, R9, R9
+	LSR	R9, R0, R7
+smask:
+	AND	$0xff, R7, R7
+tbyte:
+	// R8 = t's byte i
+	TBNZ	$63, R2, tinline
+	MOVBU	(R2)(R6), R8
+	B	cmpbytes
+tinline:
+	LSL	$3, R6, R9
+	CMP	$8, R6
+	BGE	thigh
+	LSR	R9, R3, R8
+	B	tmask
+thigh:
+	SUB	$64, R9, R9
+	LSR	R9, R2, R8
+tmask:
+	AND	$0xff, R8, R8
+cmpbytes:
+	CMP	R7, R8
+	BNE	ne
+	ADD	$1, R6, R6
+	B	loop
+eq:
+	MOVD	$1, R0
+	RET
+ne:
+	MOVD	ZR, R0
+	RET

@@ -357,6 +357,17 @@ func walkCompareString(gd *base.Invocation, n *ir.BinaryExpr, init *ir.Nodes) ir
 			init.Append(mkcall(gd, fn, nil, init, tracecmpArg(gd, n.X, paramType, init), tracecmpArg(gd, n.Y, paramType, init), fakePC(gd, n)))
 		}
 	}
+	// A local that holds a constant (s := "…", never reassigned) is the
+	// constant: so a compare with it takes the constant paths below and
+	// in SSA, where a constant is never inline.
+	// (Only a constant: the cache also holds other static values, for
+	// conversions to interfaces, of the same names.)
+	if v := staticValue(gd, n.X); v != nil && ir.IsConst(v, constant.String) {
+		n.X = v
+	}
+	if v := staticValue(gd, n.Y); v != nil && ir.IsConst(v, constant.String) {
+		n.Y = v
+	}
 	// Rewrite comparisons to short constant strings as length+byte-wise comparisons.
 	var cs, ncs ir.Node // const string, non-const string
 	switch {

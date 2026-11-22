@@ -733,11 +733,11 @@ var genericOps = []opData{
 	// Helper instruction which is semantically equivalent to calling runtime.memequal, but some targets may prefer to custom lower it later, e.g. for specific constant sizes.
 	{name: "MemEq", argLength: 4, commutative: true, typ: "Bool"}, // arg0=ptr0, arg1=ptr1, arg2=size, arg3=memory.
 
-	// gd: runtime.streqfast of two strings, given by their 3 words
-	// (arg0..arg2 and arg3..arg5); arg6=memory. Like MemEq it writes no
+	// gd: runtime.streqfast of two strings, given by their 2 words
+	// (arg0..arg1 and arg2..arg3); arg4=memory. Like MemEq it writes no
 	// memory (a string's bytes cannot change), so loads around it are
 	// not done again. arm64 calls runtime.streqmixed, a leaf.
-	{name: "StrEqFast", argLength: 7, typ: "Bool"},
+	{name: "StrEqFast", argLength: 5, typ: "Bool"},
 
 	// Value of a zero-sized type.
 	{name: "Empty", argLength: 0},

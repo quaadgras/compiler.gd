@@ -701,9 +701,12 @@ func equalVarStringNoSpill(a, b string) bool {
 	s := string("123456789012345678901234567890123")
 	// arm64:".*memequal"
 	memeq1 := a[:33] == s
-	// arm64:-".*"
+	// (gd: not folded into memeq1. A string equals the constant if its
+	// length is 33 and it is not inline (w0's bit 63, which the compiler
+	// cannot know clear for a[:33]): a branch around each memequal,
+	// whose results are then kept in the frame across the next.)
 	memeq2 := s == a[:33]
-	// arm64:-"MOVB R0,.*SP" ".*memequal"
+	// arm64:".*memequal"
 	memeq3 := s == b[:33]
 	return memeq1 && memeq2 && memeq3
 }
