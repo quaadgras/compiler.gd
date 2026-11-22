@@ -584,6 +584,7 @@ func (v Value) call(op string, in []Value) []Value {
 		rcvrtype *abi.Type
 	)
 	if v.flag&flagMethod != 0 {
+		v = v.ownReceiver()
 		rcvr = v
 		rcvrtype, t, fn = methodReceiver(op, v, int(v.flag)>>flagMethodShift)
 	} else if v.flag&flagIndir != 0 {
@@ -746,6 +747,10 @@ func (v Value) call(op string, in []Value) []Value {
 		// scratch space for this assignment check. Previously, it
 		// was possible to use space in the argument frame.
 		v = v.assignTo("reflect.Value.Call", &targ.t, nil)
+		if targ.t.Kind() == abi.Interface {
+			// Read word by word below.
+			v = v.ownReceiver()
+		}
 	stepsLoop:
 		for _, st := range abid.call.stepsForValue(i + inStart) {
 			switch st.kind {
@@ -1259,6 +1264,21 @@ func storeRcvr(v Value, p unsafe.Pointer, ext bool) {
 	}
 }
 
+// ownReceiver returns v, the receiver of a method (or an argument), or for
+// an interface in memory a Value of a copy of it: the receiver is read word
+// by word, and the method may be passed a pointer into it, where another
+// goroutine may be storing (runtime/shared.go).
+func (v Value) ownReceiver() Value {
+	if v.typ().Kind() != abi.Interface || v.flag&flagIndir == 0 {
+		return v
+	}
+	c := unsafe_New(v.typ())
+	*(*any)(c) = *(*any)(v.ptr)
+	v.ptr = c
+	v.flag &^= flagAddr
+	return v
+}
+
 // rcvrPayload returns the interface data word and the two inline payload
 // words of method receiver v, whose concrete type is inline or spread.
 func rcvrPayload(v *Value) (word unsafe.Pointer, w [2]uint64) {
@@ -1616,7 +1636,12 @@ func (v Value) Elem() Value {
 		// For non-empty interfaces (interface{ M() }) the first word
 		// is *ITab, not *Type. The concrete type lives at itab.Type.
 		// Empty and non-empty share the {Data, Inline} tail layout.
-		ci := (*abi.CommonInterface)(v.dataPtr())
+		//
+		// The interface is loaded whole first: another goroutine may
+		// be storing in it (runtime/shared.go).
+		var whole abi.CommonInterface
+		*(*any)(unsafe.Pointer(&whole)) = *(*any)(v.dataPtr())
+		ci := &whole
 		var t *abi.Type
 		if toRType(v.typ()).NumMethod() == 0 {
 			t = (*abi.EmptyInterface)(unsafe.Pointer(ci)).Type
@@ -2365,7 +2390,7 @@ func (v Value) SetZero() {
 	case Slice:
 		*(*unsafeheader.Slice)(v.dataPtr()) = unsafeheader.Slice{}
 	case Interface:
-		*(*abi.EmptyInterface)(v.dataPtr()) = abi.EmptyInterface{}
+		*(*any)(v.dataPtr()) = nil // (whole: runtime/shared.go)
 	case Chan, Func, Map, Pointer, UnsafePointer:
 		*(*unsafe.Pointer)(v.dataPtr()) = nil
 	case Array, Struct:

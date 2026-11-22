@@ -111,6 +111,7 @@ func makeMethodValue(op string, v Value) Value {
 
 	// Ignoring the flagMethod bit, v describes the receiver, not the method type.
 	(&v).materialize() // method value needs a stable receiver pointer
+	v = v.ownReceiver()
 	fl := v.flag & (flagRO | flagAddr | flagIndir)
 	fl |= flag(v.typ().Kind())
 	rcvr := Value{typ_: v.typ(), ptr: v.ptr, flag: fl}
