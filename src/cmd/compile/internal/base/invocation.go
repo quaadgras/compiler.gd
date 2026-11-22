@@ -65,6 +65,13 @@ type Invocation struct {
 	// Debug holds the parsed debugging configuration values.
 	Debug DebugFlags
 
+	// Sharing is whether the goroutine sharing machinery is on
+	// (GOEXPERIMENT=sharing, doc/gd/sharing.md): escape analysis of
+	// which goroutines reach what, local objects, the publishing of
+	// pointers stored in shared memory and the guards of values of more
+	// than one word there. Without it none of that runs.
+	Sharing bool
+
 	// DebugSSA is called to set a -d ssa/... option.
 	// If nil, those options are reported as invalid options.
 	// If DebugSSA returns a non-empty string, that text is reported as a compiler error.

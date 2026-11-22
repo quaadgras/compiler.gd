@@ -50,7 +50,7 @@ import (
 // trackPointers finds fn's tracked variables and gives each the location
 // of its contents. It is called before fn's graph is built.
 func (b *batch) trackPointers(fn *ir.Func) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 {
+	if !b.gd.Sharing || b.gd.Debug.NoLocal != 0 {
 		return
 	}
 	cand, srcs := b.pointerSources(fn)
@@ -342,7 +342,7 @@ func (l *location) mayShare() bool {
 // markUnshared records on fns' variables what the solved graph says no
 // other goroutine can reach.
 func (b *batch) markUnshared(fns []*ir.Func) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 {
+	if !b.gd.Sharing || b.gd.Debug.NoLocal != 0 {
 		return
 	}
 	// The allocations that are shared, by the expression or the variable
@@ -400,7 +400,7 @@ func (b *batch) markUnshared(fns []*ir.Func) {
 // Nothing that is reached from a local object may be shared, however
 // deep, and not by the caller either: no part of it is returned.
 func (b *batch) markLocal(loc *location) {
-	if b.gd.Debug.NoShare != 0 || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
+	if !b.gd.Sharing || b.gd.Debug.NoLocal != 0 || b.gd.Debug.NoLocalAlloc != 0 {
 		return
 	}
 	if n := loc.n; n != nil && n.Op() != ir.ONAME && n.Type() != nil && n.Type().IsString() && b.readOnlyOn() {
@@ -597,6 +597,9 @@ type dynRoot struct {
 const maxDyn = 24
 
 func (e *escape) noteSimpleStmt() {
+	if !e.gd.Sharing {
+		return
+	}
 	if e.simpleStmts == nil {
 		e.simpleStmts = make(map[int32]bool)
 	}
@@ -604,6 +607,9 @@ func (e *escape) noteSimpleStmt() {
 }
 
 func (e *escape) noteStmtCall() {
+	if !e.gd.Sharing {
+		return
+	}
 	if e.stmtCalls == nil {
 		e.stmtCalls = make(map[int32]bool)
 	}
@@ -710,7 +716,7 @@ func (e *escape) purePath(n ir.Node) (name *ir.Name, plain bool) {
 // dynRootOf returns the dynamic root of a store through the pointer or
 // slice p in the current statement, or nil if p is not a path.
 func (e *escape) dynRootOf(p ir.Node) *location {
-	if e.gd.Debug.NoShare != 0 || e.gd.Debug.NoLocal != 0 || e.gd.Debug.NoLocalAlloc != 0 || e.gd.Debug.NoLocalDyn != 0 {
+	if !e.gd.Sharing || e.gd.Debug.NoLocal != 0 || e.gd.Debug.NoLocalAlloc != 0 || e.gd.Debug.NoLocalDyn != 0 {
 		return nil
 	}
 	if _, ok := splitHeap(e.gd); !ok {

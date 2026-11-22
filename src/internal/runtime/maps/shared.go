@@ -8,6 +8,7 @@ package maps
 
 import (
 	"internal/abi"
+	"internal/goexperiment"
 	"internal/runtime/atomic"
 	"unsafe"
 )
@@ -21,19 +22,37 @@ import (
 // The lock is held for the operation only. The slot an access or an
 // assignment returns is read or written after it, as the slots an
 // iteration returns are.
+//
+// Without the sharing experiment (GOEXPERIMENT=sharing) no map is shared
+// and none of this runs: the functions below are constants then.
 
-//go:linkname isShared
-func isShared(p unsafe.Pointer) bool
+func isShared(p unsafe.Pointer) bool {
+	return goexperiment.Sharing && runtimeIsShared(p)
+}
 
 // shareAllocs sets whether what this goroutine allocates for a map is
 // shared from the start: newobject's and newarray's memory, and what is
 // passed to shareAlloc.
-//
-//go:linkname shareAllocs
-func shareAllocs(on bool)
+func shareAllocs(on bool) {
+	if goexperiment.Sharing {
+		runtimeShareAllocs(on)
+	}
+}
 
-//go:linkname shareAlloc
-func shareAlloc(p unsafe.Pointer)
+func shareAlloc(p unsafe.Pointer) {
+	if goexperiment.Sharing {
+		runtimeShareAlloc(p)
+	}
+}
+
+//go:linkname runtimeIsShared
+func runtimeIsShared(p unsafe.Pointer) bool
+
+//go:linkname runtimeShareAllocs
+func runtimeShareAllocs(on bool)
+
+//go:linkname runtimeShareAlloc
+func runtimeShareAlloc(p unsafe.Pointer)
 
 // lockYield waits for a lock that was not free the last spins times.
 //

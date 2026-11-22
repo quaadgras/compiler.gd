@@ -300,7 +300,8 @@ const (
 	// allocated them reaches are in spans of their own (shared.go): the
 	// second classes of spans. What a store goes through is then local
 	// or not by its page (otherPages).
-	localSpans = (goarch.IsAmd64|goarch.IsArm64 == 1) &&
+	localSpans = goexperiment.Sharing &&
+		(goarch.IsAmd64|goarch.IsArm64 == 1) &&
 		(goos.IsLinux|goos.IsDarwin|goos.IsFreebsd|goos.IsWindows|goos.IsPortable == 1) &&
 		!raceenabled && !msanenabled && !asanenabled && !valgrindenabled
 
@@ -309,7 +310,7 @@ const (
 	// which two pages have the same place in it. Nothing where there
 	// are no spans of local objects. The compiler has the number too
 	// (escape's otherPagesLen).
-	otherPagesOn  = (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows | goos.IsPortable)
+	otherPagesOn  = goexperiment.SharingInt * (goarch.IsAmd64 | goarch.IsArm64) * (goos.IsLinux | goos.IsDarwin | goos.IsFreebsd | goos.IsWindows | goos.IsPortable)
 	otherPagesLen = 1 << 23 * otherPagesOn
 
 	// otherPagesMod is otherPagesLen, a power of two, or one where the
@@ -1110,11 +1111,11 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 		return unsafe.Pointer(&zerobase)
 	}
 
-	if debug.sharestats != 0 {
+	if goexperiment.Sharing && debug.sharestats != 0 {
 		shareStatsAlloc(size, local, typ == nil || !typ.Pointers())
 	}
 
-	if sizeSpecializedMallocEnabled && !local && debug.sharesites == 0 && size < uintptr(len(mallocNoScanTable)) {
+	if sizeSpecializedMallocEnabled && !local && (!goexperiment.Sharing || debug.sharesites == 0) && size < uintptr(len(mallocNoScanTable)) {
 		if typ == nil || !typ.Pointers() {
 			if size >= maxTinySize {
 				return mallocNoScanTable[size](size, typ, needzero)
@@ -1236,10 +1237,10 @@ func mallocgcl(size uintptr, typ *_type, needzero bool, local bool) unsafe.Point
 		}
 	}
 
-	if local && debug.sharestats >= 2 {
+	if goexperiment.Sharing && local && debug.sharestats >= 2 {
 		shareStatsSite(x)
 	}
-	if !local && debug.sharesites != 0 && typ != nil && typ.Pointers() {
+	if goexperiment.Sharing && !local && debug.sharesites != 0 && typ != nil && typ.Pointers() {
 		shareSiteAlloc(x, size)
 	}
 

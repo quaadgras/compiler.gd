@@ -226,7 +226,7 @@ func Funcs(gd *base.Invocation, all []*ir.Func) {
 	// needs is analysed before the methods it converts for. (Not as
 	// callees of the function that converts: the batches would be
 	// larger, and escaping in a batch is less exact.)
-	if gd.Debug.NoLocalRecv == 0 && gd.Debug.NoShare == 0 && gd.Debug.NoLocal == 0 {
+	if gd.Debug.NoLocalRecv == 0 && gd.Sharing && gd.Debug.NoLocal == 0 {
 		ordered := make([]*ir.Func, 0, len(all))
 		for _, fn := range all {
 			if fn.Type().Recv() != nil {
@@ -283,7 +283,9 @@ func Batch(gd *base.Invocation, fns []*ir.Func, reassignOracles map[*ir.Func]*ir
 			ir.Dump(s, fn)
 		}
 		b.initFunc(fn)
-		markFresh(fn)
+		if gd.Sharing {
+			markFresh(fn)
+		}
 	}
 	for _, fn := range fns {
 		if !fn.IsClosure() {
@@ -365,7 +367,7 @@ func (b *batch) initFunc(fn *ir.Func) {
 		ir.Dump("escAnalyze", fn)
 	}
 
-	if usesUnsafe(fn) {
+	if b.gd.Sharing && usesUnsafe(fn) {
 		if b.unsafeFns == nil {
 			b.unsafeFns = make(map[*ir.Func]bool)
 		}
@@ -390,9 +392,13 @@ func (b *batch) initFunc(fn *ir.Func) {
 		e.oldLoc(f.Nname.(*ir.Name)).resultIndex = 1 + i
 	}
 
-	b.trackPointers(fn)
-	b.deriveFromParams(fn)
-	b.trackParams(fn)
+	if b.gd.Sharing {
+		// The variables and parameters whose pointers the sharing
+		// analysis follows (shares.go, deep.go, move.go).
+		b.trackPointers(fn)
+		b.deriveFromParams(fn)
+		b.trackParams(fn)
+	}
 }
 
 func (b *batch) walkFunc(fn *ir.Func) {
@@ -536,12 +542,16 @@ type outBufUse struct {
 }
 
 func (b *batch) finish(fns []*ir.Func) {
-	b.solveGroups(fns)
-	b.solveStoreSets(fns)
-	b.markUnshared(fns)
-	b.markMoves()
-	b.markKeptChecks(fns)
-	b.markReturnedOther()
+	if b.gd.Sharing {
+		// What the solved graph says of which goroutines reach what
+		// (shares.go).
+		b.solveGroups(fns)
+		b.solveStoreSets(fns)
+		b.markUnshared(fns)
+		b.markMoves()
+		b.markKeptChecks(fns)
+		b.markReturnedOther()
+	}
 	// gd Phase G: the allocations to place in a caller's buffer for
 	// a result (phaseg.go), decided while locations are still bound.
 	phaseG := b.phaseGTags(fns)
@@ -551,7 +561,9 @@ func (b *batch) finish(fns []*ir.Func) {
 	for _, fn := range fns {
 		fn.SetEsc(escFuncTagged)
 
-		b.paramShares(fn)
+		if b.gd.Sharing {
+			b.paramShares(fn)
+		}
 		for i, param := range fn.Type().RecvParams() {
 			param.Note = b.paramTag(fn, 1+i, param)
 		}
@@ -638,7 +650,9 @@ func (b *batch) finish(fns []*ir.Func) {
 			}
 			n.SetEsc(ir.EscHeap)
 			loc.heap = true
-			b.markLocal(loc)
+			if b.gd.Sharing {
+				b.markLocal(loc)
+			}
 			// gd Phase G: an allocation phaseGTags placed in the
 			// caller's buffer for a result: a local's storage
 			// (ssagen's newHeapaddr), new or &T{} (walk), or a
@@ -696,7 +710,9 @@ func (b *batch) finish(fns []*ir.Func) {
 		}
 	}
 
-	b.callBits()
+	if b.gd.Sharing {
+		b.callBits()
+	}
 
 	// gd Phase G: an outBuf param says whether the function places
 	// anything in that buffer; callers that know it doesn't pass none

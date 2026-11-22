@@ -130,4 +130,13 @@ type Flags struct {
 	// from interleaved key/elem slots (KVKVKVKV) to split key and elem
 	// arrays (KKKKVVVV).
 	MapSplitGroup bool
+
+	// Sharing enables the fork's goroutine sharing machinery (gd,
+	// doc/gd/sharing.md): escape analysis finds the objects that only
+	// one goroutine reaches, which are allocated in spans of their own;
+	// stores of pointers in shared memory publish what they store; and
+	// values of more than one word in shared memory are loaded and
+	// stored whole, under sequence locks. Without it none of this is
+	// analysed, compiled or done at run time.
+	Sharing bool
 }

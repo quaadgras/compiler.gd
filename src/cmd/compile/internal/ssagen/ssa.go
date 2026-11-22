@@ -425,7 +425,7 @@ func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool)
 	defer s.popLine()
 
 	s.hasdefer = fn.HasDefer()
-	s.tear = gd.Debug.NoShare == 0 && gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
+	s.tear = gd.Sharing && gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
 		(algFunc(fn) || gd.Flag.WB && !gd.Flag.CompilingRuntime && tearFunc(fn))
 	if fn.Pragma&ir.CgoUnsafeArgs != 0 {
 		s.cgoUnsafeArgs = true
@@ -5255,7 +5255,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// Whether no other goroutine can reach the slice variable's memory
 	// (if it is appended to in place), and the array.
 	hdrLocal := inplace && s.localExpr(sn)
-	elemLocal := localPointer(sn) && s.gd.Debug.NoShare == 0 && s.gd.Debug.NoLocal == 0
+	elemLocal := localPointer(sn) && s.gd.Sharing && s.gd.Debug.NoLocal == 0
 
 	// In shared memory, the slice and the elements are stored under one
 	// lock where each store would have its own: see appendGrouped.
@@ -9965,7 +9965,7 @@ func (e *ssafn) UseWriteBarrier() bool {
 // store in shared memory (runtime/shared.go). The runtime's packages do
 // it by hand, where they hand a pointer to another goroutine.
 func (e *ssafn) UseShareBarrier() bool {
-	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Debug.NoShare == 0 && e.gd.Ctxt.Arch.Family != sys.Wasm && e.curfn.Pragma&(ir.Norace|ir.Nosplit) == 0
+	return e.gd.Flag.WB && !e.gd.Flag.CompilingRuntime && e.gd.Sharing && e.gd.Ctxt.Arch.Family != sys.Wasm && e.curfn.Pragma&(ir.Norace|ir.Nosplit) == 0
 }
 
 func (e *ssafn) Syslook(name string) *obj.LSym {

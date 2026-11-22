@@ -47,7 +47,7 @@ import (
 // goroutine never runs while another does and nothing is shared, and the
 // runtime of GOWASM=gc has none of this.
 func moveOff(gd *base.Invocation) bool {
-	return gd.Debug.NoShare != 0 || gd.Debug.NoMove != 0 || gd.Ctxt.Arch.Family == sys.Wasm
+	return !gd.Sharing || gd.Debug.NoMove != 0 || gd.Ctxt.Arch.Family == sys.Wasm
 }
 
 // A moveSend is a send, or a call of (*sync.Pool).Put or of a function

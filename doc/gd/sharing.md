@@ -15,6 +15,46 @@ that is.
 > callee masks, and local and shared objects in spans of their own (the
 > end of this document).
 
+## Turning it on: `GOEXPERIMENT=sharing`
+
+All of this is an experiment, off by default since 2026-11-22:
+`GOEXPERIMENT=sharing` turns it on (`internal/goexperiment.Sharing`, the
+`goexperiment.sharing` build tag; the go command keys its cache by the
+experiments, so the standard library is rebuilt for it). Off, none of it
+runs, and it costs nothing:
+
+- **The compiler** (`base.Invocation.Sharing`, from
+  `buildcfg.Experiment.Sharing`): escape analysis builds the graph and
+  walks it as stock escape analysis does (`walkAllEscape`), with
+  escape-bits' candidates; the holes of the sharing analysis are the heap
+  (`ownHeapHole`, `moveHole`, `checkHole`) or nothing (`shareHole`,
+  `convShareHole`, `recvHeldHole`, `recvAnyHole`, `graph.go`); there are
+  no tracked variables, dynamic roots, groups, typed roots, calls' bits,
+  hand-overs, receivers' analysis or store sets, and no `ParamShares`,
+  share records or masks (`ir.LocalSpans` is false). Ssagen has no tear
+  guards, no publishing (`UseShareBarrier`) and no local objects; order
+  makes no copies for the tear guards. The linker does not compute the
+  share masks.
+- **The runtime**: `sharingEnabled` and `localSpans` are false, and with
+  them every path of `shared.go`: `isShared` and `publish` are inlined
+  constants, `typedmemmove`, `typedslicecopy`, `growslice`, channels,
+  `select` and `sync.Pool` neither publish nor lock, no span is local,
+  `otherPages` has no size, `allocType` never finds a tag, and
+  `GODEBUG=sharestats`/`sharesites` count nothing. `internal/runtime/maps`
+  never asks whether a map is shared or local.
+
+The escape decisions with it off are those of the walks without it: for
+runtime, encoding/json, net/http and go/parser, `-m` says the same as the
+compiler that ran the sharing walks and ignored them, and the code is the
+same instruction for instruction. With it on, escape analysis is more
+conservative in places (what is loaded from a map is reached from the
+map; `test/escape_sharing.go`) and less in others (an argument stored
+through another only).
+
+`-d=noshare` is gone: the experiment is the one switch. The finer
+`-d=nolocal...`, `-d=notear` and `-d=sharecheck` flags remain for
+measurements and debugging within a sharing build.
+
 ## Shared objects
 
 A heap object is *unshared* while only the goroutine that allocated it can
@@ -258,8 +298,8 @@ sequence: what a store publishes depends on the stores before it
 No call is made for a store in an object that the function allocated and
 has only initialized since (`isUnpublished`), which covers composite
 literals. The runtime's packages are compiled without the barrier and
-publish by hand. `-gcflags=all=-d=noshare` turns the barrier off, for
-measurements only.
+publish by hand. (A build without `GOEXPERIMENT=sharing` has no
+barrier.)
 
 ## Maps
 
@@ -424,8 +464,9 @@ with the pointer: the next step.
 
 ## What it costs (amd64, 8 CPUs)
 
-Everything on against everything off (`-d=noshare,checkptr=0`), the best
-of three runs, 2026-11-19, after the changes above:
+Everything on against everything off (`-d=noshare,checkptr=0`, the
+switch then; `GOEXPERIMENT=sharing` now), the best of three runs,
+2026-11-19, after the changes above:
 
 | benchmark | off | on | |
 |-----------|-----|----|-|

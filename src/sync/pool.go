@@ -5,6 +5,7 @@
 package sync
 
 import (
+	"internal/goexperiment"
 	"internal/race"
 	rtatomic "internal/runtime/atomic"
 	"runtime"
@@ -115,12 +116,16 @@ func poolRaceAddr(x any) unsafe.Pointer {
 func (p *Pool) Put(x any) {
 	// Whether the caller hands x over, and x is not shared by being
 	// put (runtime/shared.go): asked first, so that what the caller
-	// said is not left for another Put.
-	owned, drop := runtime_poolOwned(x, p.fresh.Load() != 0, p.mixed.Load() != 0)
+	// said is not left for another Put. (Only with the sharing
+	// experiment: without it nothing is shared or handed over.)
+	owned, drop := false, false
+	if goexperiment.Sharing {
+		owned, drop = runtime_poolOwned(x, p.fresh.Load() != 0, p.mixed.Load() != 0)
+	}
 	if x == nil || drop {
 		return
 	}
-	if !owned && p.mixed.Load() == 0 {
+	if goexperiment.Sharing && !owned && p.mixed.Load() == 0 {
 		p.mixed.Store(1)
 	}
 	if race.Enabled {
@@ -188,7 +193,7 @@ func (p *Pool) Get() any {
 	if x == nil && p.New != nil {
 		x = p.New()
 		// What Get returns is the caller's alone, or shared.
-		if runtime_poolNew(p.New, x) && p.fresh.Load() == 0 {
+		if goexperiment.Sharing && runtime_poolNew(p.New, x) && p.fresh.Load() == 0 {
 			p.fresh.Store(1)
 		}
 	}

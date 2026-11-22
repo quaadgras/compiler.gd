@@ -697,7 +697,7 @@ func (sl *sweepLocked) sweep(preserve bool) bool {
 	s.allocBits = s.gcmarkBits
 	s.gcmarkBits = newMarkBits(uintptr(s.nelems))
 
-	if s.sharedBits != nil {
+	if sharingEnabled && s.sharedBits != nil {
 		s.refreshSharedBits()
 	}
 	if s.exposedBits != nil {

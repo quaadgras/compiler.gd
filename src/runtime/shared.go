@@ -24,12 +24,18 @@
 // are, allocated when a span gets its first shared object. Memory that is
 // not the heap's is shared if it is not a goroutine's stack: globals are,
 // and whatever else the runtime does not know.
+//
+// All of this is the sharing experiment's (GOEXPERIMENT=sharing,
+// doc/gd/sharing.md). Without it sharingEnabled and localSpans are false,
+// and every path here compiles away: nothing is marked, published,
+// locked or allocated in spans of local objects.
 
 package runtime
 
 import (
 	"internal/abi"
 	"internal/goarch"
+	"internal/goexperiment"
 	"internal/runtime/atomic"
 	"internal/runtime/gc"
 	"internal/runtime/sys"
@@ -37,10 +43,11 @@ import (
 	"unsafe"
 )
 
-// sharingEnabled is whether objects are marked shared at all. Where
-// goroutines run one at a time and are never preempted between two
-// instructions (wasm), no operation can race.
-const sharingEnabled = GOARCH != "wasm"
+// sharingEnabled is whether objects are marked shared at all: only with
+// the sharing experiment, and not where goroutines run one at a time and
+// are never preempted between two instructions (wasm), where no
+// operation can race.
+const sharingEnabled = goexperiment.Sharing && GOARCH != "wasm"
 
 func (s *mspan) getSharedBits() *gcBits {
 	return (*gcBits)(atomic.Loadp(unsafe.Pointer(&s.sharedBits)))
@@ -54,9 +61,15 @@ func (s *mspan) getSharedBits() *gcBits {
 //
 //go:nosplit
 func isShared(p unsafe.Pointer) bool {
+	// (Small enough to inline, so that it is nothing without sharing.)
 	if !sharingEnabled || p == nil {
 		return false
 	}
+	return isSharedObject(p)
+}
+
+//go:nosplit
+func isSharedObject(p unsafe.Pointer) bool {
 	if sharePages[uintptr(p)>>sharePageShift&uintptr(len(sharePages)-1)] == 0 {
 		// Nothing shared was ever in a page like this one.
 		return false
@@ -240,9 +253,14 @@ func (s *mspan) refreshObjectBits(field **gcBits) {
 // it, as shared. The caller owns whatever of it is not shared yet, and
 // calls publish before another goroutine can load p.
 func publish(p unsafe.Pointer) {
+	// (Small enough to inline, so that it is nothing without sharing.)
 	if !sharingEnabled || p == nil {
 		return
 	}
+	publishObjectOf(p)
+}
+
+func publishObjectOf(p unsafe.Pointer) {
 	base, s := markShared(uintptr(p))
 	if base == 0 {
 		return
@@ -489,7 +507,7 @@ func publishmove(typ *abi.Type, dst, src unsafe.Pointer) {
 
 // Maps (internal/runtime/maps/shared.go).
 
-//go:linkname maps_isShared internal/runtime/maps.isShared
+//go:linkname maps_isShared internal/runtime/maps.runtimeIsShared
 //go:nosplit
 func maps_isShared(p unsafe.Pointer) bool {
 	return isShared(p)
@@ -498,14 +516,14 @@ func maps_isShared(p unsafe.Pointer) bool {
 // maps_shareAllocs sets whether what the goroutine allocates for a map is
 // shared: it is while it writes a shared map.
 //
-//go:linkname maps_shareAllocs internal/runtime/maps.shareAllocs
+//go:linkname maps_shareAllocs internal/runtime/maps.runtimeShareAllocs
 func maps_shareAllocs(on bool) {
 	getg().shareAllocs = on
 }
 
-//go:linkname maps_shareAlloc internal/runtime/maps.shareAlloc
+//go:linkname maps_shareAlloc internal/runtime/maps.runtimeShareAlloc
 func maps_shareAlloc(p unsafe.Pointer) {
-	if getg().shareAllocs {
+	if sharingEnabled && getg().shareAllocs {
 		markShared(uintptr(p))
 	}
 }
@@ -1042,7 +1060,7 @@ func localType(typ *_type) *_type {
 //
 //go:nosplit
 func allocType(typ *_type) (*_type, bool) {
-	if uintptr(unsafe.Pointer(typ))&1 != 0 {
+	if goexperiment.Sharing && uintptr(unsafe.Pointer(typ))&1 != 0 {
 		return (*_type)(add(unsafe.Pointer(typ), ^uintptr(0))), true
 	}
 	return typ, false
@@ -1132,6 +1150,9 @@ func localPublished(base uintptr) {
 }
 
 func printShareStats() {
+	if !goexperiment.Sharing {
+		return
+	}
 	printShareSites()
 	if debug.sharestats == 0 {
 		return

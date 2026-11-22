@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"internal/goexperiment"
 	"reflect"
 	"runtime"
 	"runtime/debug"
@@ -33,12 +34,15 @@ func wantShared[T any](t *testing.T, what string, p *T, want bool) {
 }
 
 func skipIfNotSharing(t *testing.T) {
+	if !goexperiment.Sharing {
+		t.Skip("goroutine sharing is off (GOEXPERIMENT=sharing turns it on)")
+	}
 	if runtime.GOARCH == "wasm" {
 		t.Skip("goroutines do not race on wasm")
 	}
 	sum := 0
 	if !linkLocal(func() { sum += *linkNew(1).p }) {
-		t.Skip("compiled without goroutine sharing (it is on with -gcflags=all=-d=noshare=0)")
+		t.Skip("no local objects here")
 	}
 }
 
@@ -764,7 +768,7 @@ type sharedAppendBox struct {
 // length with the new, shorter array.)
 func TestSharedAppend(t *testing.T) {
 	skipIfNotSharing(t)
-	strs :=[]string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
+	strs := []string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
 	check := func(x string) {
 		if len(x) > 19 || (len(x) > 0 && x[0] < 'a') {
 			panic("torn string")
