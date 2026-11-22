@@ -827,6 +827,13 @@ type p struct {
 	pcache      pageCache
 	raceprocctx uintptr
 
+	// sharedObj is the last heap object that isShared found shared,
+	// while mheap_.sweepgen is gen (shared.go).
+	sharedObj struct {
+		base, size uintptr
+		gen        uint32
+	}
+
 	// oldm is the previous m this p ran on.
 	//
 	// We are not associated with this m, so we have no control over its

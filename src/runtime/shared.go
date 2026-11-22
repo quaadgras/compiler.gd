@@ -61,6 +61,14 @@ func isShared(p unsafe.Pointer) bool {
 		// Nothing shared was ever in a page like this one.
 		return false
 	}
+	// The object that was found shared last, which stores in a pooled
+	// object hit again and again: one that a goroutine still points to
+	// is not freed, nor its slot used again, before the next sweep, and
+	// a live object's shared bit is never cleared.
+	pp := getg().m.p.ptr()
+	if pp != nil && uintptr(p)-pp.sharedObj.base < pp.sharedObj.size && pp.sharedObj.gen == mheap_.sweepgen {
+		return true
+	}
 	s := spanOf(uintptr(p))
 	if s == nil {
 		// Not the heap's: a global is shared. What else there is
@@ -81,6 +89,11 @@ func isShared(p unsafe.Pointer) bool {
 	}
 	i := s.objIndex(uintptr(p))
 	shared := atomic.Load8(bits.bytep(i/8))&(1<<(i%8)) != 0
+	if shared && pp != nil {
+		pp.sharedObj.base = s.base() + i*s.elemsize
+		pp.sharedObj.size = s.elemsize
+		pp.sharedObj.gen = mheap_.sweepgen
+	}
 	KeepAlive(p)
 	return shared
 }
@@ -605,11 +618,35 @@ func shareStripeRange(p, size uintptr, f func(i uintptr)) {
 }
 
 func shareLockRange(p, size uintptr) {
-	shareStripeRange(p, size, shareLockStripe)
+	// (A value of a few words is in one block, or two: their locks
+	// directly, in the order of shareStripeRange.)
+	first, last := p>>shareBlockShift, (p+size-1)>>shareBlockShift
+	switch last - first {
+	case 0:
+		shareLockStripe(first & (shareStripes - 1))
+	case 1:
+		a, b := first&(shareStripes-1), last&(shareStripes-1)
+		if b < a {
+			a, b = b, a
+		}
+		shareLockStripe(a)
+		shareLockStripe(b)
+	default:
+		shareStripeRange(p, size, shareLockStripe)
+	}
 }
 
 func shareUnlockRange(p, size uintptr) {
-	shareStripeRange(p, size, func(i uintptr) { atomic.Xadd(&shareSeq[i].seq, 1) })
+	first, last := p>>shareBlockShift, (p+size-1)>>shareBlockShift
+	switch last - first {
+	case 0:
+		atomic.Xadd(&shareSeq[first&(shareStripes-1)].seq, 1)
+	case 1:
+		atomic.Xadd(&shareSeq[first&(shareStripes-1)].seq, 1)
+		atomic.Xadd(&shareSeq[last&(shareStripes-1)].seq, 1)
+	default:
+		shareStripeRange(p, size, func(i uintptr) { atomic.Xadd(&shareSeq[i].seq, 1) })
+	}
 }
 
 // sharestore is called by compiled code before it stores size bytes that
@@ -643,7 +680,7 @@ func sharestorestring(dst *string, v string) bool {
 	if !isShared(unsafe.Pointer(dst)) {
 		return false
 	}
-	publish(*(*unsafe.Pointer)(unsafe.Pointer(&v)))
+	publishNew(unsafe.Pointer(dst), *(*unsafe.Pointer)(unsafe.Pointer(&v)))
 	mp := acquirem()
 	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
 	*dst = v
@@ -656,13 +693,24 @@ func sharestoreslice(dst *slice, v slice) bool {
 	if !isShared(unsafe.Pointer(dst)) {
 		return false
 	}
-	publish(v.array)
+	publishNew(unsafe.Pointer(dst), v.array)
 	mp := acquirem()
 	shareLockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
 	*dst = v
 	shareUnlockRange(uintptr(unsafe.Pointer(dst)), unsafe.Sizeof(v))
 	releasem(mp)
 	return true
+}
+
+// publishNew publishes p, which is to be stored in the first word of the
+// shared memory at dst, unless that word holds p already: then p is
+// shared, since it was published when it was stored there, or when what
+// holds it was (b = append(b, x) with room left).
+func publishNew(dst, p unsafe.Pointer) {
+	if atomic.Loadp(dst) == p {
+		return
+	}
+	publish(p)
 }
 
 func sharestoreiface(dst *eface, v eface) bool {

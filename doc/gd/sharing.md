@@ -461,6 +461,31 @@ are shared for good once they have been in it: every store of a slice, a
 string or an interface in one takes a lock (a buffer's `buf = append(buf,
 ...)`), and every pointer stored is looked up. Both want the next step.
 
+Again on 2026-11-22, the same benchmarks and command: `net/http`
+header write 2.82, `encoding/json` encoder 2.69, stable sort of
+strings 2.24, `fmt` Fprint 2.09, decoder 1.90, sort of strings 1.65,
+Sprintf of an int 1.64, `bufio` flush 1.57, Sprintf of a string 1.41,
+`regexp` 1.36, `go/parser` 1.31, the rest about 1.1 or less (`sync.Pool`
+1.09, down from 1.5). Then two changes to the stores of a whole
+string, slice or interface in shared memory: the locks of the one or
+two blocks of such a value are taken directly, and not through a
+function for each; and a pointer that the memory holds already is not
+published again (`b = append(b, x)` with room left). And a cache, per
+P, of the last object that `isShared` found shared, good while the
+sweep's generation is the same: a live object's shared bit is never
+cleared, and one that a goroutine points to is not freed before the next
+sweep. The encoder went to 2.15, the header write to 2.54, the decoder
+to 1.81.
+
+The encoder's state comes from a `sync.Pool` and is not handed over,
+rightly: `MarshalEncode` passes it to the arshalers, which are only
+known when the program runs, and a user's `MarshalToFunc` gets the
+`*Encoder` and may keep it. What is left of its cost is the protocol of
+a store in shared memory, half of it on one CPU (2.0 there). On eight
+there is spinning on the locks of its own stores (its buffer, its
+state machine's stacks), which a table four times as large did not
+change: not two objects a megabyte apart, and not understood yet.
+
 ## Not covered
 
 - Pointers stored by way of `unsafe` (as bytes, or through a `uintptr`).
