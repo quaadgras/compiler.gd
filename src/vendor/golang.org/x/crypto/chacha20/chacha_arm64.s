@@ -11,11 +11,11 @@
 // func xorKeyStreamVX(dst, src []byte, key *[8]uint32, nonce *[3]uint32, counter *uint32)
 TEXT ·xorKeyStreamVX(SB), NOSPLIT, $0
 	MOVD	dst+0(FP), R1
-	MOVD	src+16(FP), R2
-	MOVWU	src_len+24(FP), R3
-	MOVD	key+32(FP), R4
-	MOVD	nonce+40(FP), R6
-	MOVD	counter+48(FP), R7
+	MOVD	src+24(FP), R2
+	MOVD	src_len+32(FP), R3
+	MOVD	key+48(FP), R4
+	MOVD	nonce+56(FP), R6
+	MOVD	counter+64(FP), R7
 
 	MOVD	$·constants(SB), R10
 	MOVD	$·incRotMatrix(SB), R11

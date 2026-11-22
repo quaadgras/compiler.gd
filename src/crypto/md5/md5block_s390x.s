@@ -17,8 +17,8 @@
 // func block(dig *digest, p []byte)
 TEXT ·block(SB),NOSPLIT,$16-32
 	MOVD	dig+0(FP), R1
-	MOVD	p+16(FP), R6
-	MOVWZ	p_len+24(FP), R5
+	MOVD	p+8(FP), R6
+	MOVD	p_len+16(FP), R5
 	AND	$-64, R5
 	LAY	(R6)(R5*1), R7
 

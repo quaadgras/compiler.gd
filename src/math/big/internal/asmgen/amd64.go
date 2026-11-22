@@ -27,9 +27,7 @@ var ArchAMD64 = &Arch{
 		OptionAltCarry: amd64JmpADX,
 	},
 
-	mov: "MOVQ",
-
-	movLen:   "MOVL",
+	mov:      "MOVQ",
 	adds:     "ADDQ",
 	adcs:     "ADCQ",
 	subs:     "SUBQ",

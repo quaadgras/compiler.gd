@@ -107,8 +107,8 @@
 //
 // func block(dig *Digest, p []byte)
 TEXT ·block(SB),NOSPLIT,$128-32
-	MOVWU	p_len+24(FP), R6
-	MOVV	p_base+16(FP), R5
+	MOVV	p_len+16(FP), R6
+	MOVV	p_base+8(FP), R5
 	AND	$~127, R6
 	BEQ	R6, end
 

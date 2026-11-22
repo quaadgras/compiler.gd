@@ -169,16 +169,16 @@ hashADDone:
 
 // func chacha20Poly1305Open(dst []byte, key []uint32, src []byte, ad []byte) bool
 // Requires: AVX, AVX2, BMI2, CMOV, SSE2
-TEXT ·chacha20Poly1305Open(SB), $288-65
+TEXT ·chacha20Poly1305Open(SB), $288-97
 	// For aligned stack access
 	MOVQ           SP, BP
 	ADDQ           $0x20, BP
 	ANDQ           $-32, BP
 	MOVQ           dst_base+0(FP), DI
-	MOVQ           key_base+16(FP), R8
-	MOVQ           src_base+32(FP), SI
-	MOVL           src_len+40(FP), BX
-	MOVQ           ad_base+48(FP), CX
+	MOVQ           key_base+24(FP), R8
+	MOVQ           src_base+48(FP), SI
+	MOVQ           src_len+56(FP), BX
+	MOVQ           ad_base+72(FP), CX
 	VZEROUPPER
 	VMOVDQU        ·chacha20Constants<>+0(SB), Y0
 	VBROADCASTI128 16(R8), Y14
@@ -254,7 +254,7 @@ openAVX2PreparePolyKey:
 	VPERM2I128 $0x13, Y12, Y4, Y14
 
 	// Hash AD + first 64 bytes
-	MOVL ad_len+56(FP), R9
+	MOVQ ad_len+80(FP), R9
 	CALL polyHashADInternal<>(SB)
 	XORQ CX, CX
 
@@ -756,10 +756,8 @@ openAVX2MainLoopDone:
 
 openSSEFinalize:
 	// Hash in the PT, AAD lengths
-	MOVL  ad_len+56(FP), AX
-	MOVL  src_len+40(FP), R15
-	ADDQ  AX, R10
-	ADCQ  R15, R11
+	ADDQ  ad_len+80(FP), R10
+	ADCQ  src_len+56(FP), R11
 	ADCQ  $0x01, R12
 	MOVQ  (BP), AX
 	MOVQ  AX, R15
@@ -824,7 +822,7 @@ openSSEFinalize:
 	CMOVQEQ DX, AX
 
 	// Return true iff tags are equal
-	MOVB AX, ret+64(FP)
+	MOVB AX, ret+96(FP)
 	RET
 
 openSSETail16:
@@ -1009,7 +1007,7 @@ openAVX2192InnerCipherLoop:
 
 openAVX2ShortOpen:
 	// Hash
-	MOVL ad_len+56(FP), R9
+	MOVQ ad_len+80(FP), R9
 	CALL polyHashADInternal<>(SB)
 
 openAVX2ShortOpenLoop:
@@ -2474,15 +2472,15 @@ GLOBL ·andMask<>(SB), RODATA|NOPTR, $240
 
 // func chacha20Poly1305Seal(dst []byte, key []uint32, src []byte, ad []byte)
 // Requires: AVX, AVX2, BMI2, CMOV, SSE2
-TEXT ·chacha20Poly1305Seal(SB), $288-64
+TEXT ·chacha20Poly1305Seal(SB), $288-96
 	MOVQ           SP, BP
 	ADDQ           $0x20, BP
 	ANDQ           $-32, BP
 	MOVQ           dst_base+0(FP), DI
-	MOVQ           key_base+16(FP), R8
-	MOVQ           src_base+32(FP), SI
-	MOVL           src_len+40(FP), BX
-	MOVQ           ad_base+48(FP), CX
+	MOVQ           key_base+24(FP), R8
+	MOVQ           src_base+48(FP), SI
+	MOVQ           src_len+56(FP), BX
+	MOVQ           ad_base+72(FP), CX
 	VZEROUPPER
 	VMOVDQU        ·chacha20Constants<>+0(SB), Y0
 	VBROADCASTI128 16(R8), Y14
@@ -2705,7 +2703,7 @@ sealAVX2IntroLoop:
 	VMOVDQA Y4, (BP)
 
 	// Hash AD
-	MOVL ad_len+56(FP), R9
+	MOVQ ad_len+80(FP), R9
 	CALL polyHashADInternal<>(SB)
 
 	// Can store at least 320 bytes
@@ -3578,10 +3576,8 @@ sealSSETailLoadLoop:
 
 sealSSEFinalize:
 	// Hash in the buffer lengths
-	MOVL  ad_len+56(FP), AX
-	MOVL  src_len+40(FP), R15
-	ADDQ  AX, R10
-	ADCQ  R15, R11
+	ADDQ  ad_len+80(FP), R10
+	ADCQ  src_len+56(FP), R11
 	ADCQ  $0x01, R12
 	MOVQ  (BP), AX
 	MOVQ  AX, R15
@@ -3757,7 +3753,7 @@ sealAVX2192InnerCipherLoop:
 
 sealAVX2ShortSeal:
 	// Hash aad
-	MOVL ad_len+56(FP), R9
+	MOVQ ad_len+80(FP), R9
 	CALL polyHashADInternal<>(SB)
 	XORQ CX, CX
 

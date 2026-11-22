@@ -755,7 +755,9 @@ func (v Value) call(op string, in []Value) []Value {
 			case abiStepStack:
 				// Copy values to the "stack."
 				addr := add(stackArgs, st.stkOff, "precomputed stack arg offset")
-				if v.flag&flagIndir != 0 {
+				if stockSlice(&targ.t) {
+					*(*unsafeheader.Slice)(addr) = unsafeheader.ReadSlice(v.dataPtr())
+				} else if v.flag&flagIndir != 0 {
 					typedmemmove(&targ.t, addr, v.dataPtr())
 				} else {
 					*(*unsafe.Pointer)(addr) = v.dataPtr()
@@ -858,6 +860,13 @@ func (v Value) call(op string, in []Value) []Value {
 				continue
 			}
 			steps := abid.ret.stepsForValue(i)
+			if st := steps[0]; st.kind == abiStepStack && stockSlice(tv) {
+				// Stock Go's three words in the frame (stockSlice).
+				p := unsafe_New(tv)
+				unsafeheader.WriteSlice(p, *(*unsafeheader.Slice)(add(stackArgs, st.stkOff, "stock slice")))
+				ret[i] = Value{typ_: tv, ptr: p, flag: flagIndir | flag(tv.Kind())}
+				continue
+			}
 			if st := steps[0]; st.kind == abiStepStack {
 				// This value is on the stack. If part of a value is stack
 				// allocated, the entire value is according to the ABI. So
@@ -1027,7 +1036,10 @@ func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool, regs 
 				// and we cannot let f keep a reference to the stack frame
 				// after this function returns, not even a read-only reference.
 				v.ptr = unsafe_New(typ)
-				if typ.Size() > 0 {
+				if stockSlice(typ) {
+					// Stock Go's three words in the frame.
+					unsafeheader.WriteSlice(v.ptr, *(*unsafeheader.Slice)(add(ptr, st.stkOff, "stock slice")))
+				} else if typ.Size() > 0 {
 					typedmemmove(typ, v.dataPtr(), add(ptr, st.stkOff, "typ.size > 0"))
 				}
 				v.flag |= flagIndir
@@ -1130,7 +1142,12 @@ func callReflect(ctxt *makeFuncImpl, frame unsafe.Pointer, retValid *bool, regs 
 					// for this call is not adequately zeroed, and we
 					// are careful to keep the arguments alive until we
 					// return to makeFuncStub's caller.
-					if v.flag&flagIndir != 0 {
+					if stockSlice(typ) {
+						// Stock Go's three words in the frame
+						// (stockSlice), without write barriers.
+						h := unsafeheader.ReadSlice(v.dataPtr())
+						*(*[3]uintptr)(addr) = [3]uintptr{uintptr(h.Data), uintptr(h.Len), uintptr(h.Cap)}
+					} else if v.flag&flagIndir != 0 {
 						memmove(addr, v.dataPtr(), st.size)
 					} else {
 						// This case must be a pointer type.

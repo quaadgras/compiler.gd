@@ -10,9 +10,9 @@
 
 // func addVV(z, x, y []Word) (c Word)
 TEXT ·addVV(SB), NOSPLIT, $0
-	MOVWZ z_len+8(FP), R3
-	MOVD x_base+16(FP), R4
-	MOVD y_base+32(FP), R5
+	MOVD z_len+8(FP), R3
+	MOVD x_base+24(FP), R4
+	MOVD y_base+48(FP), R5
 	MOVD z_base+0(FP), R6
 	// compute unrolled loop lengths
 	ANDCC $3, R3, R7
@@ -57,14 +57,14 @@ loop4cont:
 	BDNZ loop4cont
 loop4done:
 	ADDE R0, R0, R4	// save & convert add carry
-	MOVD R4, c+48(FP)
+	MOVD R4, c+72(FP)
 	RET
 
 // func subVV(z, x, y []Word) (c Word)
 TEXT ·subVV(SB), NOSPLIT, $0
-	MOVWZ z_len+8(FP), R3
-	MOVD x_base+16(FP), R4
-	MOVD y_base+32(FP), R5
+	MOVD z_len+8(FP), R3
+	MOVD x_base+24(FP), R4
+	MOVD y_base+48(FP), R5
 	MOVD z_base+0(FP), R6
 	// compute unrolled loop lengths
 	ANDCC $3, R3, R7
@@ -110,15 +110,15 @@ loop4cont:
 loop4done:
 	SUBE R4, R4	// save carry
 	SUB R4, R0, R4	// convert sub carry
-	MOVD R4, c+48(FP)
+	MOVD R4, c+72(FP)
 	RET
 
 // func lshVU(z, x []Word, s uint) (c Word)
 TEXT ·lshVU(SB), NOSPLIT, $0
-	MOVWZ z_len+8(FP), R3
+	MOVD z_len+8(FP), R3
 	CMP R3, $0; BEQ ret0
-	MOVD s+32(FP), R4
-	MOVD x_base+16(FP), R5
+	MOVD s+48(FP), R4
+	MOVD x_base+24(FP), R5
 	MOVD z_base+0(FP), R6
 	// run loop backward
 	SLD $3, R3, R7
@@ -131,7 +131,7 @@ TEXT ·lshVU(SB), NOSPLIT, $0
 	SUB R4, R8
 	SRD R8, R7, R9
 	SLD R4, R7
-	MOVD R9, c+40(FP)
+	MOVD R9, c+56(FP)
 	// shift remaining words
 	SUB $1, R3
 	// compute unrolled loop lengths
@@ -182,15 +182,15 @@ loop4done:
 	MOVD R7, -8(R6)
 	RET
 ret0:
-	MOVD R0, c+40(FP)
+	MOVD R0, c+56(FP)
 	RET
 
 // func rshVU(z, x []Word, s uint) (c Word)
 TEXT ·rshVU(SB), NOSPLIT, $0
-	MOVWZ z_len+8(FP), R3
+	MOVD z_len+8(FP), R3
 	CMP R3, $0; BEQ ret0
-	MOVD s+32(FP), R4
-	MOVD x_base+16(FP), R5
+	MOVD s+48(FP), R4
+	MOVD x_base+24(FP), R5
 	MOVD z_base+0(FP), R6
 	// shift first word into carry
 	MOVD 0(R5), R7
@@ -198,7 +198,7 @@ TEXT ·rshVU(SB), NOSPLIT, $0
 	SUB R4, R8
 	SLD R8, R7, R9
 	SRD R4, R7
-	MOVD R9, c+40(FP)
+	MOVD R9, c+56(FP)
 	// shift remaining words
 	SUB $1, R3
 	// compute unrolled loop lengths
@@ -249,15 +249,15 @@ loop4done:
 	MOVD R7, 0(R6)
 	RET
 ret0:
-	MOVD R0, c+40(FP)
+	MOVD R0, c+56(FP)
 	RET
 
 // func mulAddVWW(z, x []Word, m, a Word) (c Word)
 TEXT ·mulAddVWW(SB), NOSPLIT, $0
-	MOVD m+32(FP), R3
-	MOVD a+40(FP), R4
-	MOVWZ z_len+8(FP), R5
-	MOVD x_base+16(FP), R6
+	MOVD m+48(FP), R3
+	MOVD a+56(FP), R4
+	MOVD z_len+8(FP), R5
+	MOVD x_base+24(FP), R6
 	MOVD z_base+0(FP), R7
 	// compute unrolled loop lengths
 	ANDCC $3, R5, R8
@@ -307,16 +307,16 @@ loop4cont:
 	ADD $32, R7
 	BDNZ loop4cont
 loop4done:
-	MOVD R4, c+48(FP)
+	MOVD R4, c+64(FP)
 	RET
 
 // func addMulVVWW(z, x, y []Word, m, a Word) (c Word)
 TEXT ·addMulVVWW(SB), NOSPLIT, $0
-	MOVD m+48(FP), R3
-	MOVD a+56(FP), R4
-	MOVWZ z_len+8(FP), R5
-	MOVD x_base+16(FP), R6
-	MOVD y_base+32(FP), R7
+	MOVD m+72(FP), R3
+	MOVD a+80(FP), R4
+	MOVD z_len+8(FP), R5
+	MOVD x_base+24(FP), R6
+	MOVD y_base+48(FP), R7
 	MOVD z_base+0(FP), R8
 	// compute unrolled loop lengths
 	ANDCC $3, R5, R9
@@ -382,5 +382,5 @@ loop4cont:
 	ADD $32, R8
 	BDNZ loop4cont
 loop4done:
-	MOVD R4, c+64(FP)
+	MOVD R4, c+88(FP)
 	RET

@@ -490,6 +490,9 @@ func componentsOfType(arch *asmArch, t types.Type) []component {
 func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suffix string, off int) []component {
 	s := t.String()
 	size := int(arch.sizes.Sizeof(t))
+	if _, ok := t.Underlying().(*types.Slice); ok {
+		size = arch.ptrSize + 2*arch.intSize // (gd: stock Go's, as in addParams)
+	}
 	kind := asmKindForType(t, size)
 	cc = append(cc, newComponent(suffix, kind, s, off, size, suffix))
 
@@ -521,14 +524,6 @@ func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suff
 
 	case asmSlice:
 		cc = append(cc, newComponent(suffix+"_base", asmKind(arch.ptrSize), "slice base", off, arch.ptrSize, suffix))
-		if arch.ptrSize == 8 && arch.name != "wasm" {
-			// gd: the length and the capacity are uint32s (a huge
-			// slice's are 0 and 0xFFFFFFFF, its base a header's
-			// address: doc/gd/slice16.md).
-			cc = append(cc, newComponent(suffix+"_len", asmKind(4), "slice len", off+8, 4, suffix))
-			cc = append(cc, newComponent(suffix+"_cap", asmKind(4), "slice cap", off+12, 4, suffix))
-			break
-		}
 		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "slice len", off+arch.ptrSize, arch.intSize, suffix))
 		cc = append(cc, newComponent(suffix+"_cap", asmKind(arch.intSize), "slice cap", off+arch.ptrSize+arch.intSize, arch.intSize, suffix))
 
@@ -596,6 +591,13 @@ func asmParseDecl(pass *analysis.Pass, decl *ast.FuncDecl) map[string]*asmFunc {
 
 			align := int(arch.sizes.Alignof(t))
 			size := int(arch.sizes.Sizeof(t))
+			if _, ok := t.Underlying().(*types.Slice); ok {
+				// gd: an assembly function's slice argument or
+				// result is stock Go's three words, aligned to a
+				// word, also where slices are packed in memory
+				// (doc/gd/slice16.md).
+				align, size = arch.ptrSize, arch.ptrSize+2*arch.intSize
+			}
 			offset += -offset & (align - 1)
 			cc := componentsOfType(arch, t)
 

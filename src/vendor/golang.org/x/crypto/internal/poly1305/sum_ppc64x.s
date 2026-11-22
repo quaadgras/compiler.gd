@@ -63,8 +63,8 @@
 // func update(state *[7]uint64, msg []byte)
 TEXT ·update(SB), $0-32
 	MOVD state+0(FP), R3
-	MOVD msg_base+16(FP), R4
-	MOVWZ msg_len+24(FP), R5
+	MOVD msg_base+8(FP), R4
+	MOVD msg_len+16(FP), R5
 
 	MOVD 0(R3), R8   // h0
 	MOVD 8(R3), R9   // h1

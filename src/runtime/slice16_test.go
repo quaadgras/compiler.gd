@@ -7,6 +7,8 @@
 package runtime_test
 
 import (
+	"bytes"
+	"hash/crc32"
 	"reflect"
 	"runtime"
 	"syscall"
@@ -230,5 +232,40 @@ func TestSliceHugeZeroSize(t *testing.T) {
 	runtime.GC()
 	if len(h.s) != 1<<32+1 {
 		t.Fatalf("after GC: len %d", len(h.s))
+	}
+}
+
+// TestSliceHugeAsm passes a huge slice to assembly (an ABI0 function,
+// which gets stock Go's three words, and internal/bytealg, which gets
+// them from Go), which must see its whole length: crc32 of 5 GiB in one
+// call is that of its gigabytes one at a time, and bytes.IndexByte finds
+// a byte above 2^32.
+func TestSliceHugeAsm(t *testing.T) {
+	b, unmap := hugeBytes(t)
+	defer unmap()
+	const hi = 1<<32 + 12345
+	b[7], b[hi] = 1, 2
+	if i := bytes.IndexByte(b, 2); i != hi {
+		t.Errorf("IndexByte: %d, want %d", i, hi)
+	}
+	if i := bytes.LastIndexByte(b, 1); i != 7 {
+		t.Errorf("LastIndexByte: %d, want 7", i)
+	}
+	if n := bytes.Count(b[hi-100:], []byte{2}); n != 1 {
+		t.Errorf("Count: %d, want 1", n)
+	}
+	if testing.Short() && runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64" {
+		return // (crc32 of 5 GiB is slow where it may be emulated)
+	}
+	for _, tab := range []*crc32.Table{crc32.IEEETable, crc32.MakeTable(crc32.Castagnoli)} {
+		want := uint32(0)
+		for p := b; len(p) > 0; {
+			n := min(len(p), 1<<30)
+			want = crc32.Update(want, tab, p[:n])
+			p = p[n:]
+		}
+		if got := crc32.Update(0, tab, b); got != want {
+			t.Errorf("crc32 of %d bytes: %#x, want %#x", len(b), got, want)
+		}
 	}
 }

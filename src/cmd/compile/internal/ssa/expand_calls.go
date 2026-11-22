@@ -131,6 +131,7 @@ func expandCalls(f *Func) {
 		}
 		auxBase := x.offsetFrom(x.f.Entry, x.sp, offset, types.NewPtr(v.Type))
 		rc.init(regs, aux.abiInfo, nil, auxBase, 0)
+		rc.stockSlice(v.Type)
 		x.rewriteSelectOrArg(f.Entry.Pos, f.Entry, v, v, m0, v.Type, rc)
 	}
 
@@ -182,6 +183,7 @@ func expandCalls(f *Func) {
 		}
 		var rc registerCursor
 		rc.init(regs, aux.abiInfo, nil, auxBase, 0)
+		rc.stockSlice(v.Type)
 		x.rewriteSelectOrArg(call.Pos, call.Block, v, v, mem, v.Type, rc)
 	}
 
@@ -246,11 +248,15 @@ func (x *expandState) rewriteFuncResults(v *Value, b *Block, aux *AuxCall) {
 		if len(aRegs) > 0 {
 			result = &allResults
 		} else {
-			if a.Op == OpLoad && a.Args[0].Op == OpLocalAddr && a.Args[0].Aux == aux.NameOfResult(i) {
+			if a.Op == OpLoad && a.Args[0].Op == OpLocalAddr && a.Args[0].Aux == aux.NameOfResult(i) &&
+				!(auxType.IsSlice() && aux.abiInfo.Config().StockSlices()) {
+				// (A slice of its own in a frame of stock slices is
+				// in memory as in the heap, and is laid out again.)
 				continue // Self move to output parameter
 			}
 		}
 		rc.init(aRegs, aux.abiInfo, result, auxBase, auxOffset)
+		rc.stockSlice(auxType)
 		mem = x.decomposeAsNecessary(v.Pos, b, a, mem, rc)
 	}
 	v.resetArgs()
@@ -319,6 +325,7 @@ func (x *expandState) rewriteCallArgs(v *Value, firstArg int) {
 		}
 
 		rc.init(aRegs, aux.abiInfo, result, sp, aOffset)
+		rc.stockSlice(aType)
 		mem = x.decomposeAsNecessary(v.Pos, v.Block, a, mem, rc)
 	}
 	if x.f.Config.slicePacked() {
@@ -417,7 +424,7 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		return mem
 
 	case types.TSLICE:
-		if x.f.Config.slicePacked() {
+		if x.f.Config.slicePacked() && !rc.stock {
 			// w0 and w1 (types.SlicePacked).
 			w0, w1, m := slicePack(b, pos, a, mem)
 			mem = x.decomposeAsNecessary(pos, b, w0, m, rc.next(x.typs.BytePtr))
@@ -614,7 +621,7 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		return a
 
 	case types.TSLICE:
-		if x.f.Config.slicePacked() {
+		if x.f.Config.slicePacked() && !rc.stock {
 			// w0 and w1 (types.SlicePacked), unpacked.
 			w0 := x.rewriteSelectOrArg(pos, b, container, nil, m0, at.Elem().PtrTo(), rc.next(x.typs.BytePtr))
 			pos = pos.WithNotStmt()
@@ -904,6 +911,7 @@ type registerCursor struct {
 	nextSlice   Abi1RO         // the next register/register-slice offset
 	config      *abi.ABIConfig
 	regValues   *[]*Value // values assigned to registers accumulate here
+	stock       bool      // a slice of its own in the frame, stock Go's three words (abi.ABIConfig.StockSlices)
 }
 
 func (c *registerCursor) String() string {
@@ -984,6 +992,14 @@ func (c *registerCursor) init(regs []abi.RegIndex, info *abi.ABIParamResultInfo,
 	c.storeDest = storeDest
 	c.config = info.Config()
 	c.regValues = result
+	c.stock = false
+}
+
+// stockSlice notes that the cursor is for a parameter or a result of type
+// t, which, if it is a slice in a frame where slices are stock Go's
+// three words (abi.ABIConfig.StockSlices), is decomposed as in stock Go.
+func (c *registerCursor) stockSlice(t *types.Type) {
+	c.stock = len(c.regs) == 0 && t.IsSlice() && c.config.StockSlices()
 }
 
 func (c *registerCursor) addArg(v *Value) {

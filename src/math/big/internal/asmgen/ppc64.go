@@ -38,22 +38,20 @@ var ArchPPC64x = &Arch{
 	// Note: Could write an addF and subF to use ADDZE and SUBZE,
 	// but we have R0 so it doesn't seem to matter much.
 
-	mov: "MOVD",
-
-	movLen: "MOVWZ",
-	add:    "ADD",
-	adds:   "ADDC",
-	adcs:   "ADDE",
-	sub:    "SUB",
-	subs:   "SUBC",
-	sbcs:   "SUBE",
-	mul:    "MULLD",
-	mulhi:  "MULHDU",
-	lsh:    "SLD",
-	rsh:    "SRD",
-	and:    "ANDCC", // regular AND does not accept immediates
-	or:     "OR",
-	xor:    "XOR",
+	mov:   "MOVD",
+	add:   "ADD",
+	adds:  "ADDC",
+	adcs:  "ADDE",
+	sub:   "SUB",
+	subs:  "SUBC",
+	sbcs:  "SUBE",
+	mul:   "MULLD",
+	mulhi: "MULHDU",
+	lsh:   "SLD",
+	rsh:   "SRD",
+	and:   "ANDCC", // regular AND does not accept immediates
+	or:    "OR",
+	xor:   "XOR",
 
 	jmpZero:    "CMP %[1]s, $0; BEQ %[2]s",
 	jmpNonZero: "CMP %s, $0; BNE %s",

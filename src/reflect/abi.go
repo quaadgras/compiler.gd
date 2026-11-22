@@ -150,10 +150,25 @@ func (a *abiSeq) addArg(t *abi.Type) *abiStep {
 		// Register assignment failed. Roll back any changes
 		// and stack-assign.
 		*a = aOld
+		if stockSlice(t) {
+			// Stock Go's three words (stockSlice).
+			a.stackAssign(3*goarch.PtrSize, goarch.PtrSize)
+			return &a.steps[len(a.steps)-1]
+		}
 		a.stackAssign(t.Size(), uintptr(t.Align()))
 		return &a.steps[len(a.steps)-1]
 	}
 	return nil
+}
+
+// stockSlice reports whether a value of type t, an argument or a result
+// that is not in registers, is a slice that is stock Go's three words,
+// {ptr, len, cap}, in a frame: where slices are packed in memory
+// (abi.SlicePacked) and Go's functions are called with ABI0, which has
+// no registers (doc/gd/slice16.md). It is converted where it is copied
+// to or from a frame.
+func stockSlice(t *abi.Type) bool {
+	return abi.SlicePacked && intArgRegs == 0 && t.Kind() == abi.Slice
 }
 
 // addRcvr extends the abiSeq with a new method call

@@ -139,10 +139,10 @@ DATA ·constants<>+0x1c(SB)/4, $0x6b206574
 TEXT ·xorKeyStreamVX(SB), NOSPLIT, $0
 	MOVD $·constants<>(SB), R1
 	MOVD dst+0(FP), R2         // R2=&dst[0]
-	LMG  src+16(FP), R3, R4    // R3=&src[0] R4=len(src)
-	MOVD key+32(FP), R5        // R5=key
-	MOVD nonce+40(FP), R6      // R6=nonce
-	MOVD counter+48(FP), R7    // R7=counter
+	LMG  src+24(FP), R3, R4    // R3=&src[0] R4=len(src)
+	MOVD key+48(FP), R5        // R5=key
+	MOVD nonce+56(FP), R6      // R6=nonce
+	MOVD counter+64(FP), R7    // R7=counter
 
 	// load BSWAP and J0
 	VLM (R1), BSWAP, J0

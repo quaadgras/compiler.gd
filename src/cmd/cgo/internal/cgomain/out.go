@@ -1051,7 +1051,13 @@ func (p *Package) writeExports(fgo2, fm, fgcc, fgcch io.Writer) {
 			}
 			fmt.Fprintf(&ctype, "\t\t%s %s;\n", t.C, name)
 			fmt.Fprintf(gotype, "\t\t%s ", name)
-			noSourceConf.Fprint(gotype, fset, typ)
+			if p.stockSlice(typ) {
+				// gd: GoSlice is stock Go's three words; Go's
+				// slice is packed (stockSlice).
+				fmt.Fprintf(gotype, "struct{ data unsafe.Pointer; len, cap int }")
+			} else {
+				noSourceConf.Fprint(gotype, fset, typ)
+			}
 			fmt.Fprintf(gotype, "\n")
 			off += t.Size
 			// keep track of the maximum alignment among all fields
@@ -1202,6 +1208,22 @@ func (p *Package) writeExports(fgo2, fm, fgcc, fgcch io.Writer) {
 
 		fmt.Fprintf(fgo2, "\t")
 
+		// gd: results that are slices are converted to stock
+		// GoSlices (stockSlice) from variables of their own.
+		stockResults := false
+		if gccResult != "void" {
+			forFieldList(fntype.Results,
+				func(i int, aname string, atype ast.Expr) {
+					stockResults = stockResults || p.stockSlice(atype)
+				})
+		}
+		result := func(i int) string {
+			if stockResults {
+				return fmt.Sprintf("_cgo_r%d", i)
+			}
+			return fmt.Sprintf("a.r%d", i)
+		}
+
 		if gccResult != "void" {
 			// Write results back to frame.
 			forFieldList(fntype.Results,
@@ -1209,9 +1231,13 @@ func (p *Package) writeExports(fgo2, fm, fgcc, fgcch io.Writer) {
 					if i > 0 {
 						fmt.Fprintf(fgo2, ", ")
 					}
-					fmt.Fprintf(fgo2, "a.r%d", i)
+					fmt.Fprintf(fgo2, "%s", result(i))
 				})
-			fmt.Fprintf(fgo2, " = ")
+			if stockResults {
+				fmt.Fprintf(fgo2, " := ")
+			} else {
+				fmt.Fprintf(fgo2, " = ")
+			}
 		}
 		if fn.Recv != nil {
 			fmt.Fprintf(fgo2, "a.recv.")
@@ -1222,9 +1248,25 @@ func (p *Package) writeExports(fgo2, fm, fgcc, fgcch io.Writer) {
 				if i > 0 {
 					fmt.Fprint(fgo2, ", ")
 				}
+				if p.stockSlice(atype) {
+					fmt.Fprintf(fgo2, "unsafe.Slice((*")
+					noSourceConf.Fprint(fgo2, fset, atype.(*ast.ArrayType).Elt)
+					fmt.Fprintf(fgo2, ")(a.p%d.data), a.p%d.cap)[:a.p%d.len]", i, i, i)
+					return
+				}
 				fmt.Fprintf(fgo2, "a.p%d", i)
 			})
 		fmt.Fprint(fgo2, ")\n")
+		if stockResults {
+			forFieldList(fntype.Results,
+				func(i int, aname string, atype ast.Expr) {
+					if p.stockSlice(atype) {
+						fmt.Fprintf(fgo2, "\ta.r%d.data, a.r%d.len, a.r%d.cap = unsafe.Pointer(unsafe.SliceData(_cgo_r%d)), len(_cgo_r%d), cap(_cgo_r%d)\n", i, i, i, i, i, i)
+					} else {
+						fmt.Fprintf(fgo2, "\ta.r%d = _cgo_r%d\n", i, i)
+					}
+				})
+		}
 		if gccResult != "void" {
 			// Verify that any results don't contain any
 			// Go pointers.
@@ -1237,7 +1279,7 @@ func (p *Package) writeExports(fgo2, fm, fgcc, fgcch io.Writer) {
 					// Use the export'ed file/line in error messages.
 					pos := fset.Position(exp.Func.Pos())
 					fmt.Fprintf(fgo2, "//line %s:%d\n", pos.Filename, pos.Line)
-					fmt.Fprintf(fgo2, "\t_cgoCheckResult(a.r%d)\n", i)
+					fmt.Fprintf(fgo2, "\t_cgoCheckResult(%s)\n", result(i))
 				})
 		}
 		fmt.Fprint(fgo2, "}\n")
@@ -1542,10 +1584,6 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 	case *ast.ArrayType:
 		if t.Len == nil {
 			// Slice: pointer, len, cap.
-			if p.slicePacked() {
-				// gd: len and cap as uint32s (doc/gd/slice16.md).
-				return &Type{Size: 16, Align: 16, C: c("GoSlice")}
-			}
 			return &Type{Size: p.PtrSize * 3, Align: p.PtrSize, C: c("GoSlice")}
 		}
 		// Non-slice array types are not supported.
@@ -2099,14 +2137,15 @@ extern const char *_GoStringPtr(_GoString_ s);
 `
 
 func (p *Package) gccExportHeaderProlog() string {
-	prolog := gccExportHeaderProlog
-	if p.slicePacked() {
-		// gd: a slice is its pointer and its length and capacity as
-		// uint32s, aligned to 16 (doc/gd/slice16.md).
-		prolog = strings.ReplaceAll(prolog, "typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;",
-			"typedef struct { void *data; GoUint32 len; GoUint32 cap; } __attribute__((aligned(16))) GoSlice;")
-	}
-	return strings.ReplaceAll(prolog, "GOINTBITS", fmt.Sprint(8*p.IntSize))
+	return strings.ReplaceAll(gccExportHeaderProlog, "GOINTBITS", fmt.Sprint(8*p.IntSize))
+}
+
+// stockSlice reports whether typ is a slice whose C type, GoSlice, is
+// stock Go's three words, {data, len, cap}, while Go's is packed
+// (slicePacked): an exported function's wrapper converts it.
+func (p *Package) stockSlice(typ ast.Expr) bool {
+	t, ok := typ.(*ast.ArrayType)
+	return ok && t.Len == nil && p.slicePacked()
 }
 
 // slicePacked reports whether a slice is two words, its pointer and its

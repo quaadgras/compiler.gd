@@ -617,6 +617,16 @@ func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool)
 						// Note that expand calls knows about this and doesn't trouble itself with larger-than-SSA-able Args in registers.
 						s.storeParameterRegsToStack(s.f.ABISelf, paramAssignment, n, s.decladdrs[n], false)
 					}
+				} else if paramAssignment.StockSlice(s.f.ABISelf) {
+					// A slice of its own in a frame of stock slices
+					// (abi.ABIConfig.StockSlices): its address is
+					// its slot's, where it is laid out as in memory
+					// (in place: its 24 bytes hold its 16).
+					if s.cgoUnsafeArgs {
+						s.Fatalf("go:cgo_unsafe_args function with a slice parameter %v", n)
+					}
+					v := s.newValue0A(ssa.OpArg, n.Type(), n)
+					s.store(n.Type(), s.decladdrs[n], v)
 				}
 			}
 		}
@@ -8673,6 +8683,9 @@ func EmitArgInfo(gd *base.Invocation, f *ir.Func, abiInfo *abi.ABIParamResultInf
 
 	// Visit t recursively and write it out.
 	// Returns whether to continue visiting.
+	// stockTop: the parameter visited is a slice in stock Go's three
+	// words (abi.ABIConfig.StockSlices).
+	stockTop := false
 	var visitType func(baseOffset int64, t *types.Type, depth int) bool
 	visitType = func(baseOffset int64, t *types.Type, depth int) bool {
 		if n >= rtabi.TraceArgsLimit {
@@ -8695,7 +8708,7 @@ func EmitArgInfo(gd *base.Invocation, f *ir.Func, abiInfo *abi.ABIParamResultInf
 		case t.IsInterface(), t.IsString():
 			_ = visitType(baseOffset, uintptrTyp, depth) &&
 				visitType(baseOffset+PtrSize, uintptrTyp, depth)
-		case t.IsSlice() && types.SlicePacked():
+		case t.IsSlice() && types.SlicePacked() && !(depth == 1 && stockTop):
 			// The length and the capacity are uint32s (a huge
 			// slice's are the marker).
 			u32 := types.Types[types.TUINT32]
@@ -8749,6 +8762,7 @@ func EmitArgInfo(gd *base.Invocation, f *ir.Func, abiInfo *abi.ABIParamResultInf
 			strings.HasPrefix(a.Name.Sym().Name, types.OutBufNamePrefix) {
 			continue
 		}
+		stockTop = a.StockSlice(abiInfo.Config())
 		if !visitType(a.FrameOffset(gd, abiInfo), a.Type, 0) {
 			break
 		}

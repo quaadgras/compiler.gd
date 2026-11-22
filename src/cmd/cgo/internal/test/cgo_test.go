@@ -112,6 +112,7 @@ func TestDITCgo(t *testing.T)                   { testDITCgo(t) }
 func TestDITCgoCallback(t *testing.T)           { testDITCgoCallback(t) }
 func TestDITCgoCallbackEnableDIT(t *testing.T)  { testDITCgoCallbackEnableDIT(t) }
 func TestDITCgoCallbackDisableDIT(t *testing.T) { testDITCgoCallbackDisableDIT(t) }
+func TestSliceRoundTrip(t *testing.T)           { testSliceRoundTrip(t) }
 
 func BenchmarkCgoCall(b *testing.B)      { benchCgoCall(b) }
 func BenchmarkGoString(b *testing.B)     { benchGoString(b) }

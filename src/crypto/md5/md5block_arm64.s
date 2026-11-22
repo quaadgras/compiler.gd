@@ -11,8 +11,8 @@
 
 TEXT	·block(SB),NOSPLIT,$0-32
 	MOVD	dig+0(FP), R0
-	MOVD	p+16(FP), R1
-	MOVWU	p_len+24(FP), R2
+	MOVD	p+8(FP), R1
+	MOVD	p_len+16(FP), R2
 	AND	$~63, R2
 	CBZ	R2, zero
 

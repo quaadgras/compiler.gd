@@ -62,8 +62,8 @@ GLOBL gcmPoly<>(SB), RODATA|NOPTR, $16
 // Requires: AES, PCLMULQDQ, SSE2, SSSE3
 TEXT ·gcmAesInit(SB), NOSPLIT, $0-32
 	MOVQ  productTable+0(FP), DI
-	MOVQ  ks_base+16(FP), SI
-	MOVL  ks_len+24(FP), DX
+	MOVQ  ks_base+8(FP), SI
+	MOVQ  ks_len+16(FP), DX
 	SHRQ  $0x02, DX
 	DECQ  DX
 	MOVOU bswapMask<>+0(SB), X15
@@ -164,8 +164,8 @@ initLoop:
 // Requires: PCLMULQDQ, SSE2, SSE4.1, SSSE3
 TEXT ·gcmAesData(SB), NOSPLIT, $0-40
 	MOVQ  productTable+0(FP), DI
-	MOVQ  data_base+16(FP), SI
-	MOVL  data_len+24(FP), DX
+	MOVQ  data_base+8(FP), SI
+	MOVQ  data_len+16(FP), DX
 	MOVQ  T+32(FP), CX
 	PXOR  X8, X8
 	MOVOU bswapMask<>+0(SB), X15
@@ -373,15 +373,15 @@ dataBail:
 
 // func gcmAesEnc(productTable *[256]byte, dst []byte, src []byte, ctr *[16]byte, T *[16]byte, ks []uint32)
 // Requires: AES, PCLMULQDQ, SSE2, SSE4.1, SSSE3
-TEXT ·gcmAesEnc(SB), $256-80
+TEXT ·gcmAesEnc(SB), $256-96
 	MOVQ   productTable+0(FP), DI
-	MOVQ   dst_base+16(FP), DX
+	MOVQ   dst_base+8(FP), DX
 	MOVQ   src_base+32(FP), SI
-	MOVL   src_len+40(FP), R9
-	MOVQ   ctr+48(FP), CX
-	MOVQ   T+56(FP), R8
-	MOVQ   ks_base+64(FP), AX
-	MOVL   ks_len+72(FP), R13
+	MOVQ   src_len+40(FP), R9
+	MOVQ   ctr+56(FP), CX
+	MOVQ   T+64(FP), R8
+	MOVQ   ks_base+72(FP), AX
+	MOVQ   ks_len+80(FP), R13
 	SHRQ   $0x02, R13
 	DECQ   R13
 	MOVOU  bswapMask<>+0(SB), X15
@@ -1322,15 +1322,15 @@ GLOBL andMask<>(SB), RODATA|NOPTR, $240
 
 // func gcmAesDec(productTable *[256]byte, dst []byte, src []byte, ctr *[16]byte, T *[16]byte, ks []uint32)
 // Requires: AES, PCLMULQDQ, SSE2, SSE4.1, SSSE3
-TEXT ·gcmAesDec(SB), $128-80
+TEXT ·gcmAesDec(SB), $128-96
 	MOVQ   productTable+0(FP), DI
-	MOVQ   dst_base+16(FP), SI
+	MOVQ   dst_base+8(FP), SI
 	MOVQ   src_base+32(FP), DX
-	MOVL   src_len+40(FP), R9
-	MOVQ   ctr+48(FP), CX
-	MOVQ   T+56(FP), R8
-	MOVQ   ks_base+64(FP), AX
-	MOVL   ks_len+72(FP), R13
+	MOVQ   src_len+40(FP), R9
+	MOVQ   ctr+56(FP), CX
+	MOVQ   T+64(FP), R8
+	MOVQ   ks_base+72(FP), AX
+	MOVQ   ks_len+80(FP), R13
 	SHRQ   $0x02, R13
 	DECQ   R13
 	MOVOU  bswapMask<>+0(SB), X15

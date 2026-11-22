@@ -85,10 +85,11 @@ memory or to registers, and unpacked where it comes from them
 
 They come from the decomposition of loads and stores of slices
 (`dec.rules`), from the calls (`expand_calls.go`: a slice is passed and
-returned in two integer registers, w0 and w1, and on the stack as in
-memory), from interfaces (a slice is spread in an interface as in memory:
-w0 in the data word, w1 in the first half of the payload, the second
-zero, as a string is) and from `ssagen`. Rules fold an unpack of a pack
+returned in two integer registers, w0 and w1, and on ABIInternal's
+stack as in memory; ABI0's frames have stock Go's three words, §5a),
+from interfaces (a slice is spread in an interface as in memory: w0 in
+the data word, w1 in the first half of the payload, the second zero, as
+a string is) and from `ssagen`. Rules fold an unpack of a pack
 (a slice stored and loaded back), and the w0 and w1 of a pack of an
 unpack.
 
@@ -138,17 +139,56 @@ capacity).
   the linker (`moduledata`, the inittasks: `addSliceRest`; the type
   descriptors it decodes) and DWARF (`runtime.sliceDWARF`) write and read
   the packed form; `runtime-gdb.py` decodes a huge slice.
-- Assembly: an ABI0 frame lays a slice out as memory does: `x_base+0`,
-  `x_len+8` and `x_cap+12`, uint32s (vet's asmdecl knows), aligned to 16
-  (§4). The functions of `internal/bytealg` that take slices take their
-  words from Go wrappers (`compareSlices`, `countSlice`, `indexSlices`,
+- Assembly: a slice that is an argument or a result of its own is
+  stock Go's three words in an ABI0 frame, `x_base+0`, `x_len+8` and
+  `x_cap+16`, 24 bytes aligned to a word, a huge slice too: its real
+  pointer, length and capacity (`abi.ABIConfig.StockSlices`, §5a).
+  So the assembly is stock Go's, and so is vet's asmdecl for arguments.
+  A slice in a struct or an array argument is as in memory; no assembly
+  takes one. The functions of `internal/bytealg` that take slices are
+  ABIInternal (registers) on most targets: they take the words from Go
+  wrappers (`compareSlices`, `countSlice`, `indexSlices`,
   `indexByteSlice`: the pointer, the length and the capacity, the stock
-  slice's frame and registers), so they handle huge slices. The other
-  assembly functions read the uint32 fields (`MOVL`, `MOVWU`, `MOVWZ`):
-  given a huge slice they see an empty one (open item).
-- cgo: `GoSlice` is `{void *data; GoUint32 len; GoUint32 cap;}`, aligned
-  to 16; `C.CString` and `C.CBytes` make their slices of C memory from
-  array pointers. SWIG's `_goslice_` is rewritten likewise (`cmd/go`).
+  slice's registers), which are inlined.
+- No assembly reads a slice in memory (a field or a global) by its
+  offsets: the search for `_len`/`_cap` and slice fields of `go_asm.h`
+  outside frames finds none.
+- cgo: `GoSlice` is stock Go's `{void *data; GoInt len; GoInt cap;}`.
+  An exported function's Go wrapper gets its slice arguments as that
+  and makes the slices (`unsafe.Slice`), and lays out its slice results
+  so (`cmd/cgo`): C sees a huge slice's real length. C cannot declare a
+  Go slice parameter of an imported function. `C.CString` and `C.CBytes`
+  make their slices of C memory from array pointers. SWIG's
+  `_goslice_`, which SWIG's Go code reads from a slice in memory, is
+  rewritten to the packed layout (`cmd/go`; a huge slice is empty there).
+
+## 5a. ABI0: stock slices
+
+ABI0, the assembly's calling convention (and on the targets without
+register arguments, s390x and mips64x, Go's own), lays out a slice
+argument or result of its own as stock Go does. The compiler converts at
+the boundary, where a slice is in SSA three values anyway
+(`expand_calls`: a call's slice arguments are stored as their three
+words, its results made of them; a pack or an unpack happens only where
+the slice goes to or comes from memory or registers). A huge result
+becomes a header in the Go caller or the ABI wrapper when it is stored,
+never in assembly. Where a function with ABI0 has its body in Go
+(s390x and mips64x, the ABI wrappers, `go:cgo_unsafe_args`) and a slice
+parameter's address is taken, the parameter is laid out as in memory in
+its own 24-byte slot at entry; such a result is laid out again in stock
+Go's words at return (`rewriteFuncResults`). reflect's frames on those
+targets convert their slices (`reflect.stockSlice`), and so do the
+traceback's argument maps (`EmitArgInfo`). No assembly function returns
+a slice.
+
+Against ABI0 frames of packed slices (amd64, best of 6 over 152
+benchmarks, the asm-heavy hash/crc32, crypto/sha256, crypto/cipher and
+math/big among them): a geomean of +0.1%, +1.2% for those four
+packages. A call of assembly on a small input is up to 0.7 ns slower
+(math/big's `AddVV` of one word +13%, crc32 IEEE of 15 bytes +8%): each
+slice argument loaded from memory is unpacked (its marker tested) and
+its three words stored, where a packed frame took its two words as they
+were. Large inputs are unchanged, and so is cmd/gofmt's text.
 
 ## 4. Alignment
 
@@ -222,10 +262,10 @@ The text of cmd/gofmt is 2.08 MB, +15% (1.81 MB on the release branch,
   path, where `s[i]` of a loaded slice uses w1's
   length field (0 for a huge slice) and only a failed bounds check
   decodes the header, is not done.
-- **Assembly** other than `internal/bytealg`'s reads the uint32 fields:
-  given a huge slice it sees an empty one, so a hash or cipher of more
-  than 4 GiB in one call computes over nothing. Their Go callers should
-  pass words, as `bytealg`'s wrappers do, or chunk.
+- On s390x and mips64x a slice parameter's DWARF location is its frame
+  slot, typed as a packed slice, which holds stock Go's words: a
+  debugger shows such a parameter wrong.
+- SWIG's slices are the packed layout (§3).
 - **Programs that cast a slice's address** to `reflect.SliceHeader` or
   a struct of their own (stock Go's layout) are wrong with 8-byte words;
   vet does not see it.

@@ -292,6 +292,23 @@ func (config *ABIConfig) Which() obj.ABI {
 	return config.which
 }
 
+// StockSlices reports whether a slice that is a parameter or a result
+// of its own is stock Go's three words in the frames of config, ABI0,
+// where slices are packed in memory (types.SlicePacked): ABI0 is the
+// assembly's (and on the architectures without register arguments Go's
+// too), which sees a slice's pointer, length and capacity as stock Go
+// lays them out, 24 bytes aligned to a word (doc/gd/slice16.md). A
+// slice in a struct or an array that is a parameter is as in memory.
+func (config *ABIConfig) StockSlices() bool {
+	return config.which == obj.ABI0 && types.SlicePacked()
+}
+
+// StockSlice reports whether the parameter or result a is a slice in
+// stock Go's three words (StockSlices).
+func (a *ABIParamAssignment) StockSlice(config *ABIConfig) bool {
+	return len(a.Registers) == 0 && a.Type.IsSlice() && config.StockSlices()
+}
+
 // LocalsOffset returns the architecture-dependent offset from SP for args and results.
 // In theory this is only used for debugging; it ought to already be incorporated into
 // results from the ABI-related methods
@@ -327,6 +344,7 @@ func (config *ABIConfig) ABIAnalyzeTypes(params, results []*types.Type) *ABIPara
 		stackOffset: config.offsetForLocals,
 		stackBase:   config.offsetForLocals,
 		rTotal:      config.regAmounts,
+		stockSlices: config.StockSlices(),
 	}
 
 	assignParams := func(params []*types.Type, isResult bool) []ABIParamAssignment {
@@ -366,6 +384,7 @@ func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Type) *ABIParamResultInfo 
 		stackOffset: config.offsetForLocals,
 		stackBase:   config.offsetForLocals,
 		rTotal:      config.regAmounts,
+		stockSlices: config.StockSlices(),
 	}
 
 	assignParams := func(params []*types.Field, isResult bool) []ABIParamAssignment {
@@ -500,6 +519,7 @@ type assignState struct {
 	rTotal      RegAmounts // total reg amounts from ABI rules
 	rUsed       RegAmounts // regs used by params completely assigned so far
 	stackOffset int64      // current stack offset
+	stockSlices bool       // a slice of its own is three words (ABIConfig.StockSlices)
 	stackBase   int64      // where the stack arguments start (offsetForLocals)
 	spillOffset int64      // current spill offset
 }
@@ -666,7 +686,14 @@ func (state *assignState) assignParam(gd *base.Invocation, typ *types.Type, name
 		// frames and vet's asmdecl are: a string, aligned to 16, after
 		// one word is at 16 of the arguments wherever they start.)
 		state.stackOffset -= state.stackBase
-		offset = nextSlot(&state.stackOffset, typ) + state.stackBase
+		if state.stockSlices && typ.IsSlice() {
+			// Stock Go's {ptr, len, cap} (ABIConfig.StockSlices).
+			offset = types.RoundUp(state.stackOffset, int64(types.PtrSize))
+			state.stackOffset = offset + 3*int64(types.PtrSize)
+			offset += state.stackBase
+		} else {
+			offset = nextSlot(&state.stackOffset, typ) + state.stackBase
+		}
 		state.stackOffset += state.stackBase
 	} else if !isResult { // register-allocated param; needs spill slot
 		offset = nextSlot(&state.spillOffset, typ)

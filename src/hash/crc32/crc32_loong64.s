@@ -9,8 +9,8 @@
 // func castagnoliUpdate(crc uint32, p []byte) uint32
 TEXT ·castagnoliUpdate(SB),NOSPLIT,$0-36
 	MOVWU	crc+0(FP), R4		// a0 = CRC value
-	MOVV	p+16(FP), R5		// a1 = data pointer
-	MOVWU	p_len+24(FP), R6	// a2 = len(p)
+	MOVV	p+8(FP), R5		// a1 = data pointer
+	MOVV	p_len+16(FP), R6	// a2 = len(p)
 
 	SGT	$8, R6, R12
 	BNE	R12, less_than_8
@@ -86,8 +86,8 @@ done:
 // func ieeeUpdate(crc uint32, p []byte) uint32
 TEXT ·ieeeUpdate(SB),NOSPLIT,$0-36
 	MOVWU	crc+0(FP), R4		// a0 = CRC value
-	MOVV	p+16(FP), R5		// a1 = data pointer
-	MOVWU	p_len+24(FP), R6	// a2 = len(p)
+	MOVV	p+8(FP), R5		// a1 = data pointer
+	MOVV	p_len+16(FP), R6	// a2 = len(p)
 
 	SGT	$8, R6, R12
 	BNE	R12, less_than_8

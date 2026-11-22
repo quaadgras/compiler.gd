@@ -32,9 +32,7 @@ var ArchS390X = &Arch{
 	// Instruction reference: chapter 7 of
 	// https://www.ibm.com/docs/en/SSQ2R2_15.0.0/com.ibm.tpf.toolkit.hlasm.doc/dz9zr006.pdf
 
-	mov: "MOVD",
-
-	movLen:   "MOVWZ",
+	mov:      "MOVD",
 	adds:     "ADDC", // ADD is an alias for ADDC, sets carry
 	adcs:     "ADDE",
 	subs:     "SUBC", // SUB is an alias for SUBC, sets carry

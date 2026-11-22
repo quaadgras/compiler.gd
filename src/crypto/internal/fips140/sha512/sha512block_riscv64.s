@@ -151,8 +151,8 @@
 
 // func block(dig *Digest, p []byte)
 TEXT ·block(SB),0,$128-32
-	MOV	p_base+16(FP), X29
-	MOVWU	p_len+24(FP), X30
+	MOV	p_base+8(FP), X29
+	MOV	p_len+16(FP), X30
 	SRL	$7, X30
 	SLL	$7, X30
 

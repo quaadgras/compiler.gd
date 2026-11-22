@@ -8,8 +8,8 @@
 // Requires: AVX, AVX2, BMI2
 TEXT ·blockAVX2(SB), $536-32
 	MOVQ dig+0(FP), SI
-	MOVQ p_base+16(FP), DI
-	MOVL p_len+24(FP), DX
+	MOVQ p_base+8(FP), DI
+	MOVQ p_len+16(FP), DX
 	LEAQ -64(DI)(DX*1), DX
 	MOVQ DX, 512(SP)
 	CMPQ DX, DI
@@ -1290,8 +1290,8 @@ GLOBL shuff_DC00<>(SB), RODATA, $32
 // Requires: AVX, SHA, SSE2, SSE4.1, SSSE3
 TEXT ·blockSHANI(SB), $0-32
 	MOVQ    dig+0(FP), DI
-	MOVQ    p_base+16(FP), SI
-	MOVL    p_len+24(FP), DX
+	MOVQ    p_base+8(FP), SI
+	MOVQ    p_len+16(FP), DX
 	SHRQ    $0x06, DX
 	SHLQ    $0x06, DX
 	CMPQ    DX, $0x00
