@@ -173,6 +173,14 @@ func packEface(v Value) any {
 			*(*[2]uint64)(unsafe.Pointer(&e.Inline)) = w
 			break
 		}
+		if t.Kind() == abi.String {
+			// gd: loaded whole (doc/gd/sso-string.md): two words.
+			str := *(*string)(src)
+			w := (*[2]uintptr)(unsafe.Pointer(&str))
+			e.Data = *(*unsafe.Pointer)(unsafe.Pointer(&str))
+			*(*[2]uintptr)(unsafe.Pointer(&e.Inline)) = [2]uintptr{w[1], 0}
+			break
+		}
 		e.Data = *(*unsafe.Pointer)(src)
 		*(*[16]byte)(unsafe.Pointer(&e.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 	case !t.IsDirectIface():

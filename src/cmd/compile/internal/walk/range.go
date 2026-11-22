@@ -593,7 +593,7 @@ func arrayClear(gd *base.Invocation, wbPos src.XPos, a ir.Node, nrange *ir.Range
 	n.Body.Append(ir.NewAssignStmt(gd, gd.Pos, hn, mul))
 
 	var fn ir.Node
-	if et := a.Type().Elem(); tearType(gd, et) && types.HasIface(et) {
+	if et := a.Type().Elem(); wholeType(gd, et) {
 		// typedarrayclear(T, hp, len(a)): the interfaces whole.
 		ir.CurFunc(gd).SetWBPos(gd, wbPos)
 		fn = mkcallstmt(gd, "typedarrayclear", reflectdata.TypePtrAt(gd, gd.Pos, et), hp, typecheck.Conv(gd, ln, types.Types[types.TUINTPTR]))

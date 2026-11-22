@@ -252,9 +252,7 @@ func packEface(v Value) any {
 				*(*[2]uint64)(unsafe.Pointer(&ei.Inline)) = w
 			}
 		} else {
-			src := v.dataPtr()
-			ei.Data = *(*unsafe.Pointer)(src)
-			*(*[16]byte)(unsafe.Pointer(&ei.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+			ei.Data, *(*[16]byte)(unsafe.Pointer(&ei.Inline)) = spreadWords(t, v.dataPtr())
 		}
 	} else {
 		ei.Data = packEfaceData(v)
@@ -2111,9 +2109,7 @@ func TypeAssert[T any](v Value) (T, bool) {
 					outC.Data, w = abi.SpreadString((*string)(v.dataPtr()))
 					*(*[2]uint64)(unsafe.Pointer(&outC.Inline)) = w
 				} else {
-					src := v.dataPtr()
-					outC.Data = *(*unsafe.Pointer)(src)
-					*(*[16]byte)(unsafe.Pointer(&outC.Inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
+					outC.Data, *(*[16]byte)(unsafe.Pointer(&outC.Inline)) = spreadWords(t, v.dataPtr())
 				}
 			} else {
 				outC.Data = packEfaceData(v)
@@ -2447,8 +2443,7 @@ func copyVal(typ *abi.Type, fl flag, ptr unsafe.Pointer) Value {
 		if typ.IsSpreadIface() && goarch.PtrSize == 8 {
 			var v Value
 			v.typ_ = typ
-			v.ptr = *(*unsafe.Pointer)(ptr)
-			*(*[16]byte)(unsafe.Pointer(&v.inline)) = *(*[16]byte)(unsafe.Pointer(uintptr(ptr) + goarch.PtrSize))
+			v.ptr, *(*[16]byte)(unsafe.Pointer(&v.inline)) = spreadWords(typ, ptr)
 			v.flag = fl | flagIndir | flagSpread
 			return v
 		}
@@ -4580,4 +4575,19 @@ func contentEscapes(x unsafe.Pointer) {
 	if dummy.b {
 		escapes(*(*any)(x)) // the dereference may not always be safe, but never executed
 	}
+}
+
+// spreadWords returns the words of the value of the spread type t (a
+// string or a slice, with 8-byte words) at src as an interface holds
+// them: the first, and the next two in the payload. A string is loaded
+// whole (doc/gd/sso-string.md), and is two words: the payload's second
+// half is zero.
+func spreadWords(t *abi.Type, src unsafe.Pointer) (data unsafe.Pointer, inline [16]byte) {
+	if t.Kind() == abi.String {
+		str := *(*string)(src)
+		w := (*[2]uintptr)(unsafe.Pointer(&str))
+		*(*uintptr)(unsafe.Pointer(&inline)) = w[1]
+		return *(*unsafe.Pointer)(unsafe.Pointer(&str)), inline
+	}
+	return *(*unsafe.Pointer)(src), *(*[16]byte)(unsafe.Pointer(uintptr(src) + goarch.PtrSize))
 }

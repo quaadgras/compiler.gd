@@ -106,7 +106,7 @@ func needwb(v *Value, zeroes map[ID]ZeroRegion) bool {
 	// Lastly, check if the values we're writing might be heap pointers.
 	// If they aren't, we don't need a write barrier.
 	switch v.Op {
-	case OpStore:
+	case OpStore, OpStringStore16:
 		if !mightBeHeapPointer(v.Args[1]) {
 			return false
 		}
@@ -127,7 +127,7 @@ func needwb(v *Value, zeroes map[ID]ZeroRegion) bool {
 // in an object that no other goroutine can reach yet.
 func storePublishes(w *Value, select1 []*Value) (heap, call bool) {
 	switch w.Op {
-	case OpStoreWB:
+	case OpStoreWB, OpStringStore16WB:
 		val := w.Args[1]
 		heap = val.Op != OpConstNil && mightBeHeapPointer(val)
 		if w.AuxInt == 1 {
@@ -160,7 +160,7 @@ func isUnpublished(dst, mem *Value, select1 []*Value) bool {
 			return false
 		}
 		switch mem.Op {
-		case OpStore, OpZero, OpMove, OpStoreWB, OpZeroWB, OpMoveWB:
+		case OpStore, OpZero, OpMove, OpStoreWB, OpZeroWB, OpMoveWB, OpStringStore16, OpStringStore16WB:
 			p := mem.Args[0]
 			if !IsStackAddr(p) {
 				for p.Op == OpOffPtr {
@@ -264,9 +264,11 @@ func writebarrier(f *Func) {
 		nWBops := 0 // count of temporarily created WB ops remaining to be rewritten in the current block
 		for _, v := range b.Values {
 			switch v.Op {
-			case OpStore, OpMove, OpZero:
+			case OpStore, OpMove, OpZero, OpStringStore16:
 				if needwb(v, zeroes) {
 					switch v.Op {
+					case OpStringStore16:
+						v.Op = OpStringStore16WB
 					case OpStore:
 						v.Op = OpStoreWB
 					case OpMove:
@@ -326,7 +328,7 @@ func writebarrier(f *Func) {
 		for i := len(values) - 1; i >= 0; i-- {
 			w := values[i]
 			switch w.Op {
-			case OpStoreWB, OpMoveWB, OpZeroWB:
+			case OpStoreWB, OpMoveWB, OpZeroWB, OpStringStore16WB:
 				if share {
 					// The sequence publishes before it stores, and
 					// what a store publishes depends on the pointers
@@ -450,7 +452,7 @@ func writebarrier(f *Func) {
 					dst = nilcheck.Args[0]
 				}
 				switch w.Op {
-				case OpStoreWB:
+				case OpStoreWB, OpStringStore16WB:
 					mem = wbcall(w.Pos, b, publishptr, sp, mem, dst, w.Args[1])
 				case OpMoveWB:
 					src := w.Args[1]
@@ -555,7 +557,7 @@ func writebarrier(f *Func) {
 
 		// Find all the pointers we need to write to the buffer.
 		for _, w := range stores {
-			if w.Op != OpStoreWB {
+			if w.Op != OpStoreWB && w.Op != OpStringStore16WB {
 				continue
 			}
 			pos := w.Pos
@@ -642,6 +644,10 @@ func writebarrier(f *Func) {
 					mem = wbcall(pos, bEnd, cgoCheckPtrWrite, sp, mem, dst, val)
 				}
 				mem = bEnd.NewValue3A(pos, OpStore, types.TypeMem, w.Aux, dst, val, mem)
+			case OpStringStore16WB:
+				// (cgocheck2 does not check what a string points to.)
+				mem = bEnd.NewValue4(pos, OpStringStore16, types.TypeMem, dst, w.Args[1], w.Args[2], mem)
+				mem.Aux = w.Aux
 			case OpZeroWB:
 				mem = bEnd.NewValue2I(pos, OpZero, types.TypeMem, w.AuxInt, dst, mem)
 				mem.Aux = w.Aux
@@ -668,6 +674,9 @@ func writebarrier(f *Func) {
 			case OpStore:
 				val := w.Args[1]
 				mem = bEnd.NewValue3A(pos, OpStore, types.TypeMem, w.Aux, dst, val, mem)
+			case OpStringStore16:
+				mem = bEnd.NewValue4(pos, OpStringStore16, types.TypeMem, dst, w.Args[1], w.Args[2], mem)
+				mem.Aux = w.Aux
 			}
 		}
 

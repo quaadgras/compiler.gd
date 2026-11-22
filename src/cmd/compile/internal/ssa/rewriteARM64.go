@@ -2091,6 +2091,10 @@ func rewriteValueARM64(v *Value) bool {
 	case OpStrEqFast:
 		v.Op = OpARM64LoweredStrEqFast
 		return true
+	case OpStringLoad16:
+		return rewriteValueARM64_OpStringLoad16(v)
+	case OpStringStore16:
+		return rewriteValueARM64_OpStringStore16(v)
 	case OpSub16:
 		v.Op = OpARM64SUB
 		return true
@@ -24051,6 +24055,36 @@ func rewriteValueARM64_OpStore(v *Value) bool {
 		return true
 	}
 	return false
+}
+func rewriteValueARM64_OpStringLoad16(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (StringLoad16 ptr mem)
+	// result: (LDP ptr mem)
+	for {
+		ptr := v_0
+		mem := v_1
+		v.reset(OpARM64LDP)
+		v.AddArg2(ptr, mem)
+		return true
+	}
+}
+func rewriteValueARM64_OpStringStore16(v *Value) bool {
+	v_3 := v.Args[3]
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (StringStore16 ptr w0 w1 mem)
+	// result: (STP ptr w0 w1 mem)
+	for {
+		ptr := v_0
+		w0 := v_1
+		w1 := v_2
+		mem := v_3
+		v.reset(OpARM64STP)
+		v.AddArg4(ptr, w0, w1, mem)
+		return true
+	}
 }
 func rewriteValueARM64_OpZero(v *Value) bool {
 	v_1 := v.Args[1]

@@ -39,3 +39,28 @@ func HasIface(t *Type) bool {
 	}
 	return false
 }
+
+// HasString reports whether a value of type t holds a string.
+func HasString(t *Type) bool {
+	switch {
+	case t.IsString():
+		return true
+	case t.IsArray():
+		return t.NumElem() > 0 && HasString(t.Elem())
+	case t.IsStruct():
+		for _, f := range t.Fields() {
+			if HasString(f.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// HasWhole reports whether a value of type t holds values that are
+// loaded and stored whole by default, without the sharing analysis: the
+// interfaces, and the strings where they are aligned to 16
+// (StringAligned16; runtime/shared_string.go).
+func HasWhole(t *Type) bool {
+	return HasIface(t) || StringAligned16() && HasString(t)
+}

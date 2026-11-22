@@ -8,27 +8,29 @@
 
 package codegen
 
+// gd: a string is stored whole, with one 16-byte access after a test of
+// runtime.stringAtomic (doc/gd/sharing.md): its write barrier is its own
+// but with GOAMD64=v3 and later, which need no test.
+
 func combine2string(p *[2]string, a, b string) {
-	// amd64:`.*runtime[.]gcWriteBarrier4\(SB\)`
-	// arm64:`.*runtime[.]gcWriteBarrier4\(SB\)`
+	// amd64/v3:`.*runtime[.]gcWriteBarrier4\(SB\)`
+	// amd64/v1,amd64/v2:`.*runtime[.]gcWriteBarrier2\(SB\)`
+	// arm64:`.*runtime[.]gcWriteBarrier2\(SB\)`
 	p[0] = a
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[1] = b
 }
 
 func combine4string(p *[4]string, a, b, c, d string) {
-	// amd64:`.*runtime[.]gcWriteBarrier8\(SB\)`
-	// arm64:`.*runtime[.]gcWriteBarrier8\(SB\)`
+	// amd64/v3:`.*runtime[.]gcWriteBarrier8\(SB\)`
+	// amd64/v1,amd64/v2:`.*runtime[.]gcWriteBarrier2\(SB\)`
+	// arm64:`.*runtime[.]gcWriteBarrier2\(SB\)`
 	p[0] = a
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[1] = b
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[2] = c
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[3] = d
 }
 
@@ -68,10 +70,11 @@ func trickyWriteNil(p *int, q **int) {
 
 type S struct {
 	// gd: an S of up to 8 words is SSA-able, and copied with
-	// per-field write barriers; d and e keep *dst = *sp a large
-	// wbMove, which is what this test is about.
-	a, b, d, e string
-	c          *int
+	// per-field write barriers, and one that holds strings is copied
+	// whole by the runtime (doc/gd/sharing.md): slices keep *dst = *sp
+	// a large wbMove, which is what this test is about.
+	a, b, d []byte
+	c       *int
 }
 
 var g1, g2 *int

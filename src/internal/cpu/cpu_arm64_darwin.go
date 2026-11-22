@@ -20,6 +20,10 @@ func osInit() {
 
 	ARM64.HasSB = sysctlEnabled([]byte("hw.optional.arm.FEAT_SB\x00"))
 
+	// Every Apple silicon has FEAT_LSE2 (macOS 12 reports it as
+	// hw.optional.arm.FEAT_LSE2).
+	ARM64.HasLSE2 = true
+
 	// There are no hw.optional sysctl values for the below features on macOS 11
 	// to detect their supported state dynamically (although they are available
 	// in the hw.optional.arm tree on macOS 12). Assume the CPU features that

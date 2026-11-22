@@ -806,15 +806,16 @@ func shareunlock2(a unsafe.Pointer, asize uintptr, b unsafe.Pointer, bsize uintp
 }
 
 // shareRead copies the size bytes at src to dst, which only this goroutine
-// can reach, as no store in progress left them.
-func shareRead(dst, src unsafe.Pointer, size uintptr) {
+// can reach, as no store in progress left them: values of type typ, or
+// nil if they hold no string (moveWhole).
+func shareRead(typ *_type, dst, src unsafe.Pointer, size uintptr) {
 	first, last := uintptr(src)>>shareBlockShift, (uintptr(src)+size-1)>>shareBlockShift
 	if last-first >= 4 {
 		// Many locks to watch: with them held there is no store in
 		// progress.
 		mp := acquirem()
 		shareLockRange(uintptr(src), size)
-		memmove(dst, src, size)
+		moveWhole(typ, dst, src, size)
 		shareUnlockRange(uintptr(src), size)
 		releasem(mp)
 		return
@@ -829,7 +830,7 @@ func shareRead(dst, src unsafe.Pointer, size uintptr) {
 			quiet = quiet && seq[i]&1 == 0
 		}
 		if quiet {
-			memmove(dst, src, size)
+			moveWhole(typ, dst, src, size)
 			// The loads of the value are done before the locks
 			// are read again, also where loads may be reordered.
 			shareLoadBarrier()
@@ -848,30 +849,31 @@ func shareRead(dst, src unsafe.Pointer, size uintptr) {
 // in progress.
 
 func shareloadslice(p *slice) (v slice) {
-	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	shareRead(nil, unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
 	return
 }
 
 func shareloadstring(p *string) (v string) {
-	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	shareRead(nil, unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
 	return
 }
 
 func shareloadiface(p *eface) (v eface) {
-	shareRead(unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
+	shareRead(nil, unsafe.Pointer(&v), unsafe.Pointer(p), unsafe.Sizeof(v))
 	return
 }
 
 // shareloadmem is the load of a value that is not loaded in registers:
 // size bytes from src to dst, which is in the stack.
 func shareloadmem(dst, src unsafe.Pointer, size uintptr) {
-	shareRead(dst, src, size)
+	shareRead(nil, dst, src, size)
 }
 
 // What a type holds that is loaded and stored whole (tearKind).
 const (
-	tearAny   = 1 << 0 // a slice, a string or an interface
-	tearIface = 1 << 1 // an interface
+	tearAny    = 1 << 0 // a slice, a string or an interface
+	tearIface  = 1 << 1 // an interface
+	tearString = 1 << 2 // a string
 )
 
 // tearKind says whether a value of type t holds a slice, a string or an
@@ -881,7 +883,9 @@ func tearKind(t *_type) uintptr {
 		return 0
 	}
 	switch t.Kind() {
-	case abi.String, abi.Slice:
+	case abi.String:
+		return tearAny | tearString
+	case abi.Slice:
 		return tearAny
 	case abi.Interface:
 		return tearAny | tearIface
@@ -895,8 +899,8 @@ func tearKind(t *_type) uintptr {
 		// Remember the answer for the structs: one word, the type
 		// with the answer in its low bits.
 		c := &tearableCache[(uintptr(unsafe.Pointer(t))>>4)%uintptr(len(tearableCache))]
-		if v := atomic.Loaduintptr(c); v&^3 == uintptr(unsafe.Pointer(t)) {
-			return v & 3
+		if v := atomic.Loaduintptr(c); v&^7 == uintptr(unsafe.Pointer(t)) {
+			return v & 7
 		}
 		st := (*structtype)(unsafe.Pointer(t))
 		var k uintptr
@@ -947,11 +951,23 @@ func onCurStack(p unsafe.Pointer) bool {
 }
 
 // holdsIface reports whether values of type t that are not in the stack
-// are copied whole, for the interfaces they hold.
+// are copied whole, for the interfaces or, with 8-byte words, the
+// strings they hold (shared_string.go).
 //
 //go:nosplit
 func holdsIface(t *_type) bool {
-	return tearEnabled && tearKind(t)&tearIface != 0
+	k := tearKind(t)
+	return tearEnabled && k&tearIface != 0 || stringsWhole && k&tearString != 0
+}
+
+// atomicOnly reports whether values of type t are copied whole without
+// locks: they hold strings, but no interface, and a 16-byte access is
+// atomic (moveWhole and clearWhole copy and clear them).
+//
+//go:nosplit
+func atomicOnly(t *_type) bool {
+	k := tearKind(t)
+	return stringsWhole && stringAtomic && k&tearString != 0 && k&tearIface == 0
 }
 
 // ifacestore is called by compiled code to store the interface v at dst,
@@ -991,8 +1007,11 @@ const shareChunk = 192
 // takes the locks of dst and checks those of src.
 func shareSides(typ *_type, dst, src unsafe.Pointer) (sd, ss bool) {
 	switch k := tearKind(typ); {
-	case k&tearIface != 0 && tearEnabled:
+	case k&tearIface != 0 && tearEnabled, k&tearString != 0 && stringsLocked():
 		return !onCurStack(dst), !onCurStack(src)
+	case k&tearString != 0 && stringsWhole:
+		// Strings alone, each copied whole (moveWhole): no locks.
+		return false, false
 	case k != 0:
 		return isShared(dst), isShared(src)
 	}
@@ -1091,7 +1110,7 @@ func shareMoveLocked(typ *_type, dst, src unsafe.Pointer, n uintptr, sd, ss bool
 		if writeBarrier.enabled && typ.Pointers() {
 			bulkBarrierPreWrite(uintptr(dst), uintptr(src), size-typ.Size_+typ.PtrBytes, typ)
 		}
-		shareRead(dst, src, size)
+		shareRead(typ, dst, src, size)
 		return
 	}
 	mp := acquirem()
@@ -1118,18 +1137,22 @@ func shareMoveRaw(typ *_type, dst, src unsafe.Pointer, n uintptr) {
 	if writeBarrier.enabled && typ.Pointers() {
 		bulkBarrierPreWrite(uintptr(dst), uintptr(src), size-typ.Size_+typ.PtrBytes, typ)
 	}
-	memmove(dst, src, size)
+	moveWhole(typ, dst, src, size)
 }
 
 // shareCopyFrom copies n values of type typ from src to dst, which no
 // other goroutine can reach yet and whose write barriers are done (the
 // new array of growslice): as shareRead does, a few values at a time.
 func shareCopyFrom(typ *_type, dst, src unsafe.Pointer, n uintptr) {
+	if atomicOnly(typ) {
+		moveWhole(typ, dst, src, n*typ.Size_)
+		return
+	}
 	es := typ.Size_
 	per := max(1, shareChunk/es)
 	for i := uintptr(0); i < n; i += per {
 		k := min(per, n-i)
-		shareRead(add(dst, i*es), add(src, i*es), k*es)
+		shareRead(typ, add(dst, i*es), add(src, i*es), k*es)
 	}
 }
 
@@ -1139,6 +1162,11 @@ func shareCopyFrom(typ *_type, dst, src unsafe.Pointer, n uintptr) {
 func shareClearTyped(typ *_type, ptr unsafe.Pointer, n uintptr) bool {
 	if n*typ.Size_ == 0 || !holdsIface(typ) || onCurStack(ptr) {
 		return false
+	}
+	if atomicOnly(typ) {
+		bulkBarrierPreWrite(uintptr(ptr), 0, n*typ.Size_, nil)
+		clearWhole(typ, ptr, n*typ.Size_)
+		return true
 	}
 	shareClearGuarded(typ, ptr, n)
 	return true
@@ -1155,7 +1183,7 @@ func shareClearGuarded(typ *_type, ptr unsafe.Pointer, n uintptr) {
 	per := max(1, shareChunk/es)
 	for i := uintptr(0); i < n; i += per {
 		k := min(per, n-i)
-		shareClearLocked(add(ptr, i*es), k*es)
+		shareClearLockedTyped(typ, add(ptr, i*es), k*es)
 	}
 }
 
@@ -1238,10 +1266,16 @@ func shareClear(ptr unsafe.Pointer, n uintptr) bool {
 }
 
 func shareClearLocked(ptr unsafe.Pointer, n uintptr) {
+	shareClearLockedTyped(nil, ptr, n)
+}
+
+// shareClearLockedTyped is shareClearLocked for values of type typ
+// (clearWhole).
+func shareClearLockedTyped(typ *_type, ptr unsafe.Pointer, n uintptr) {
 	mp := acquirem()
 	shareLockRange(uintptr(ptr), n)
 	bulkBarrierPreWrite(uintptr(ptr), 0, n, nil)
-	memclrNoHeapPointers(ptr, n)
+	clearWhole(typ, ptr, n)
 	shareUnlockRange(uintptr(ptr), n)
 	releasem(mp)
 }

@@ -799,6 +799,10 @@ func cpuinit(env string) {
 	case "riscv64":
 		riscv64HasZbb = cpu.RISCV64.HasZbb
 	}
+
+	// gd: strings are loaded and stored with one 16-byte access where it
+	// is single-copy atomic (shared_string.go).
+	stringAtomic = stringsWhole && (GOARCH == "amd64" && cpu.X86.HasAVX && cpu.X86.HasSSE41 || GOARCH == "arm64" && cpu.ARM64.HasLSE2)
 }
 
 // getGodebugEarly extracts the environment variable GODEBUG from the environment on

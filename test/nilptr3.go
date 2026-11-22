@@ -83,7 +83,7 @@ func f2() {
 	_ = *emptyp     // ERROR "generated nil check"
 	_ = *arrayp     // ERROR "removed.* nil check"
 	_ = *bigarrayp  // ERROR "generated nil check" ARM removed nil check before indirect!!
-	_ = *bigstructp // ERROR "generated nil check"
+	_ = *bigstructp // ERROR "generated nil check" "removed nil check"
 	_ = *empty1p    // ERROR "generated nil check"
 }
 

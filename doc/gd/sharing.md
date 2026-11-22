@@ -406,13 +406,13 @@ them. That costs the optimizations that merge two loads of one field:
 ### By default: the interfaces, wherever they are
 
 Without the sharing experiment (`GOEXPERIMENT=sharing`, off by default)
-nothing is known to be shared or not, and the interfaces alone are
-guarded, everywhere but in the stack: an interface is four words whose
+nothing is known to be shared or not, and the interfaces are guarded,
+everywhere but in the stack: an interface is four words whose
 payload is what its type word says (`fat-iface.md`), so a torn one is not
 memory safe, and no instruction loads or stores 32 bytes atomically. A
 racing program may load a stale interface, never one made of two. The
-slices and the strings are not guarded, as in Go (they will be 16 bytes,
-and atomic). The guards are their own: on whether or not the experiment
+slices are not guarded, as in Go; the strings are, with 8-byte words
+(next section). The guards are their own: on whether or not the experiment
 is, `-gcflags=all=-d=notear` turns them off, for measurements.
 
 - **A load** is the inline sequence check above, unchanged.
@@ -490,6 +490,71 @@ sections above; its runtime guards interfaces by type as well.
 Not covered yet: a struct that holds an interface passed in registers
 by `reflect.Value.Call` from a Value in memory (read word by word);
 assembly that stores interfaces (none known in std).
+
+### By default: the strings too, with one 16-byte access
+
+A string is two words (`sso-string.md`): its address and its length, or
+the bytes of a short one with a tag in the first word. A torn one (the
+address of one and the length of another, or a tag and bytes with
+another's address) is not memory safe, so without the experiment the
+strings are guarded too, everywhere but in the stack, on the targets
+with 8-byte words but wasm (`types.StringAligned16`, `runtime`'s
+`stringsWhole`). A string is aligned to 16 there, so a string outside the
+stack is one aligned 16-byte block, and:
+
+- **Where an aligned 16-byte access is single-copy atomic** (amd64 with
+  AVX, the Intel SDM and AMD's manual; arm64 with FEAT_LSE2, `LDP`/`STP`
+  of X registers; `runtime.stringAtomic`, set by `cpuinit` from
+  `internal/cpu`: `cpu.X86.HasAVX`, `cpu.ARM64.HasLSE2`, which Linux
+  reports as `HWCAP_USCAT` and every Apple silicon has), a load is one
+  16-byte load and a store one 16-byte store: `MOVUPS` through X14 with
+  `MOVQ`/`PEXTRQ` or `MOVQ`/`PINSRQ` (`AMD64MOVOloadstr`,
+  `AMD64MOVOstorestr`), `LDP`/`STP` on arm64. The SSA ops are
+  `StringLoad16` and `StringStore16`; the write barrier pass gives the
+  store the barrier of its first word (`StringStore16WB`). Compiled code
+  tests `runtime.stringAtomic` first, but with GOAMD64=v3 or later. No
+  lock, no sequence check: a stale string, never two. (The SDM's list of
+  instructions whose aligned 16-byte accesses AVX makes atomic names the
+  aligned forms, `MOVAPS`/`MOVDQA`; `MOVUPS` on an aligned address is the
+  same access on every implementation, and does not fault on a string in
+  a stack, which is aligned to 8 only.)
+- **Otherwise** (no AVX or LSE2, `GODEBUG=cpu.avx=off` or `cpu.lse2=off`,
+  and the other 64-bit targets) strings are guarded as interfaces are:
+  a load checks the sequence lock of its block, inline (`shareLoad`) or,
+  on amd64 and arm64, in `runtime.stringload`; a store takes the lock in
+  `runtime.stringstore`. `CMPXCHG16B`, `LDXP`/`STXP` and `CASP` would
+  fault on a string in read-only data, and the pool needs no new path.
+- **The runtime decides by type** as for interfaces (`tearKind`'s
+  `tearString`, `holdsIface`, `atomicOnly`): a value that holds strings
+  but no interface is copied and cleared whole without locks, 16 bytes at
+  a time (`memmove16`, `memclr16`: `MOVUPS` or `LDP`/`STP` loops, in the
+  direction memmove copies), so each string, at an offset that is a
+  multiple of 16, is read and written by one access; one that also holds
+  interfaces is copied under the locks, 16 bytes at a time. Where the
+  16-byte access is not atomic strings take the locks as interfaces do.
+  That covers `typedmemmove` (reflect's, maps'), `typedslicecopy`
+  (`copy`, `reflect.Copy`), `growslice`, `typedarrayclear` (`clear(s)`),
+  `typedmemclr`, and the copies of a value the runtime reads through an
+  address (`ifaceCopy`: map keys, channel sends). Compiled code loads a
+  struct of strings field by field, each string whole, and stores it
+  likewise; a larger one is copied by `sharetypedmemmove` (to a stack
+  temporary it zeroes first, which is live across the call).
+- reflect reads a spread string whole (`spreadWords`) where it made an
+  interface of it word by word.
+- `-gcflags=all=-d=notear` turns the string guards off with the others.
+  Under `GOEXPERIMENT=sharing` strings are as the sections above say
+  (sequence locks where shared), and the runtime's copies agree.
+
+`TestStringTear` (`runtime/shared_test.go`) races stores of inline
+strings of every length (0 to 15 bytes) and heap strings with loads that
+check that the length and the bytes go together: a global, a field, an
+element (`clear`, `copy` overlapping and not, `append`), an array copy, a
+map's keys and values, reflect (`SetString`, `Set`, `String`,
+`Interface`), a channel send and receive, struct copies in registers and
+in memory, and a struct with an interface. It passes by default, with
+`GODEBUG=cpu.avx=off`, on arm64 (qemu `-cpu max`, LSE2, and `-cpu
+cortex-a57` or `cpu.lse2=off`, the locks), riscv64, ppc64le, s390x,
+loong64 and mips64 (qemu, locks); with `-d=notear` it fails.
 
 ## What the compiler proves (`cmd/compile/internal/escape/shares.go`)
 

@@ -2513,3 +2513,320 @@ func TestIfaceTear(t *testing.T) {
 		})
 	})
 }
+
+// Strings are loaded and stored whole by default too, with 8-byte words
+// (runtime/shared_string.go): the tests below race goroutines that store
+// strings of every form (inline of 0 to 15 bytes, made at run time, and
+// in the heap) with goroutines that load them and check that the length
+// and the bytes go together. With -gcflags=all=-d=notear they fail.
+
+// strTearVals are the stored values: the string of length n is n times
+// the byte 'a'+n%26, so a load is checked by its length.
+var strTearVals = func() []string {
+	var v []string
+	for n := 0; n <= 15; n++ {
+		v = append(v, strings.Repeat(string(rune('a'+n%26)), n)) // inline
+		v = append(v, strTearHeap(100+n))
+	}
+	return append(v, strTearHeap(5000))
+}()
+
+func strTearHeap(n int) string { return strings.Repeat(string(rune('a'+n%26)), n) }
+
+// strTearCheck reports what is wrong with s, which was loaded from where
+// only the values of strTearVals (and "") are stored.
+func strTearCheck(s string) string {
+	n := len(s)
+	if n > 15 && n < 100 || n > 115 && n != 5000 {
+		return "length " + itoa(n)
+	}
+	c := byte('a' + n%26)
+	for i := 0; i < n; i++ {
+		if s[i] != c {
+			return "bytes of a string of length " + itoa(n)
+		}
+	}
+	return ""
+}
+
+func itoa(n int) string {
+	if n < 0 {
+		return "-" + itoa(-n)
+	}
+	if n < 10 {
+		return string(rune('0' + n))
+	}
+	return itoa(n/10) + string(rune('0'+n%10))
+}
+
+// strTearRace is ifaceTearRace for strings.
+func strTearRace(t *testing.T, store func(i int, v string), load func(i int) string) {
+	if runtime.GOARCH == "wasm" {
+		t.Skip("goroutines do not race on wasm")
+	}
+	const G = 8
+	n := 200000
+	if testing.Short() {
+		n = 50000
+	}
+	var wg sync.WaitGroup
+	var bad atomic.Value
+	for id := 0; id < G; id++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				switch e := recover().(type) {
+				case nil:
+				case string:
+					bad.CompareAndSwap(nil, "panic: "+e)
+				case error:
+					bad.CompareAndSwap(nil, "panic: "+e.Error())
+				default:
+					bad.CompareAndSwap(nil, "panic")
+				}
+			}()
+			for i := 0; i < n && bad.Load() == nil; i++ {
+				if id%2 == 0 {
+					store(i, strTearVals[(i*7+id/2)%len(strTearVals)])
+					continue
+				}
+				if msg := strTearCheck(load(i)); msg != "" {
+					bad.CompareAndSwap(nil, msg)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if msg := bad.Load(); msg != nil {
+		t.Fatalf("torn string: %s", msg)
+	}
+}
+
+var strTearGlobal string
+
+type strTearStruct struct {
+	pad [5]int64
+	S   string
+}
+
+// strTearPair is loaded and stored in registers, field by field.
+type strTearPair struct {
+	n int
+	s string
+}
+
+// strTearLarge is copied in memory, not in registers.
+type strTearLarge struct {
+	a [5]int
+	s string
+	b [5]int
+	t string
+}
+
+// strTearMixed holds an interface and strings: copied under the locks of
+// the interface, each string whole.
+type strTearMixed struct {
+	s string
+	v any
+	t string
+	a [6]int
+}
+
+func TestStringTear(t *testing.T) {
+	t.Run("global", func(t *testing.T) {
+		strTearRace(t, func(_ int, v string) { strTearGlobal = v }, func(int) string { return strTearGlobal })
+	})
+	t.Run("field", func(t *testing.T) {
+		p := runtime.HeapNew[strTearStruct]()
+		strTearRace(t, func(_ int, v string) { p.S = v }, func(int) string { return p.S })
+	})
+	t.Run("element", func(t *testing.T) {
+		s := make([]string, 3)
+		other := []string{"", strings.Repeat("c", 2), strTearHeap(105)}
+		strTearRace(t, func(i int, v string) {
+			switch i % 64 {
+			case 0:
+				clear(s)
+			case 1:
+				copy(s, other)
+			case 2:
+				// growslice reads the elements.
+				if s2 := append(s, v); strTearCheck(s2[1]) != "" {
+					panic("append")
+				}
+			case 3:
+				copy(s[1:], s[:2]) // overlapping, backwards
+			default:
+				s[1] = v
+			}
+		}, func(int) string { return s[1] })
+	})
+	t.Run("array", func(t *testing.T) {
+		p := runtime.HeapNew[[4]string]()
+		q := runtime.HeapNew[[4]string]()
+		strTearRace(t, func(i int, v string) {
+			switch i % 3 {
+			case 0:
+				p[i%4] = v
+			case 1:
+				*q = *p
+			case 2:
+				*q = [4]string{}
+			}
+		}, func(i int) string {
+			x := *q
+			return x[i%4]
+		})
+	})
+	t.Run("map", func(t *testing.T) {
+		// A map is not for goroutines that race on it: they lock it.
+		// What is stored in it, and what it is loaded in, race.
+		var mu sync.Mutex
+		m := map[string]string{}
+		in, out := runtime.HeapNew[strTearStruct](), runtime.HeapNew[strTearStruct]()
+		strTearRace(t, func(i int, v string) {
+			switch i % 3 {
+			case 0:
+				in.S = v
+			case 1:
+				mu.Lock()
+				m[in.S] = in.S // key and value
+				if len(m) > 40 {
+					clear(m)
+				}
+				mu.Unlock()
+			case 2:
+				mu.Lock()
+				for k, e := range m {
+					out.S = k
+					out.S = e
+					break
+				}
+				mu.Unlock()
+			}
+		}, func(i int) string {
+			if i%2 == 0 {
+				return out.S
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for k := range m {
+				return k
+			}
+			return ""
+		})
+	})
+	t.Run("reflect", func(t *testing.T) {
+		p := runtime.HeapNew[strTearStruct]()
+		src := runtime.HeapNew[strTearStruct]()
+		rv := reflect.ValueOf(p).Elem().Field(1)
+		rsrc := reflect.ValueOf(src).Elem().Field(1)
+		strTearRace(t, func(i int, v string) {
+			switch i % 3 {
+			case 0:
+				rv.SetString(v)
+			case 1:
+				src.S = v
+			case 2:
+				rv.Set(rsrc)
+			}
+		}, func(i int) string {
+			if i%2 == 0 {
+				return rv.String()
+			}
+			return rv.Interface().(string)
+		})
+	})
+	t.Run("chan", func(t *testing.T) {
+		p := runtime.HeapNew[strTearStruct]()
+		c := make(chan string, 1)
+		strTearRace(t, func(i int, v string) {
+			switch i % 3 {
+			case 0:
+				p.S = v
+			case 1:
+				select {
+				case c <- p.S: // sent from where it is stored
+				default:
+				}
+			case 2:
+				select {
+				case p.S = <-c: // received in where it is loaded
+				default:
+				}
+			}
+		}, func(i int) string {
+			if i%2 == 0 {
+				return p.S
+			}
+			select {
+			case v := <-c:
+				return v
+			default:
+				return ""
+			}
+		})
+	})
+	t.Run("struct", func(t *testing.T) {
+		p, q := runtime.HeapNew[strTearPair](), runtime.HeapNew[strTearPair]()
+		strTearRace(t, func(i int, v string) {
+			switch i % 3 {
+			case 0:
+				*p = strTearPair{i, v}
+			case 1:
+				*q = *p
+			case 2:
+				*q = strTearPair{}
+			}
+		}, func(i int) string {
+			x := *q
+			return x.s
+		})
+	})
+	t.Run("copy", func(t *testing.T) {
+		p, q := runtime.HeapNew[strTearLarge](), runtime.HeapNew[strTearLarge]()
+		strTearRace(t, func(i int, v string) {
+			switch i % 4 {
+			case 0:
+				*p = strTearLarge{s: v, t: v}
+			case 1:
+				*q = *p
+			case 2:
+				q.t = v
+			case 3:
+				*q = strTearLarge{}
+			}
+		}, func(i int) string {
+			x := *q
+			if i%2 == 0 {
+				return x.s
+			}
+			return x.t
+		})
+	})
+	t.Run("mixed", func(t *testing.T) {
+		p, q := runtime.HeapNew[strTearMixed](), runtime.HeapNew[strTearMixed]()
+		strTearRace(t, func(i int, v string) {
+			switch i % 4 {
+			case 0:
+				*p = strTearMixed{s: v, v: v, t: v}
+			case 1:
+				*q = *p
+			case 2:
+				q.t = v
+			case 3:
+				*q = strTearMixed{}
+			}
+		}, func(i int) string {
+			x := *q
+			if s, ok := x.v.(string); ok && strTearCheck(s) != "" {
+				return s
+			}
+			if i%2 == 0 {
+				return x.s
+			}
+			return x.t
+		})
+	})
+}

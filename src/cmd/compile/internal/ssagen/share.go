@@ -5,6 +5,8 @@
 package ssagen
 
 import (
+	"internal/buildcfg"
+
 	"cmd/compile/internal/ir"
 	"cmd/compile/internal/ssa"
 	"cmd/compile/internal/typecheck"
@@ -80,7 +82,7 @@ func isStackAddr(v *ssa.Value) bool {
 // the interfaces alone.
 func (s *state) tearable(t *types.Type) bool {
 	if s.ifaceOnly {
-		return types.HasIface(t)
+		return types.HasWhole(t)
 	}
 	return types.HasTearable(t)
 }
@@ -274,6 +276,8 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 		return v
 	case t.IsArray():
 		return s.newValue1(ssa.OpArrayMake1, t, s.load(t.Elem(), s.newValue1I(ssa.OpOffPtr, types.NewPtr(t.Elem()), 0, src)))
+	case t.IsString() && s.ifaceOnly && stringAtomicArch(s.gd.Ctxt.Arch.Family):
+		return s.shareLoadString(t, src)
 	}
 
 	// A variable of its own: the values of two loads have two types.
@@ -701,7 +705,9 @@ func (s *state) shareStoreParts(t *types.Type, left, right *ssa.Value, leftIsStm
 	switch {
 	case t.IsInterface():
 		s.shareStoreIface(t, left, right, leftIsStmt)
-	case !types.HasIface(t):
+	case t.IsString():
+		s.shareStoreString(left, right)
+	case !types.HasWhole(t):
 		s.rawStoreType(t, left, right, 0, leftIsStmt)
 	case t.IsStruct():
 		for i, f := range t.Fields() {
@@ -816,6 +822,18 @@ func (s *state) shareZero(t *types.Type, dst *ssa.Value) {
 func (s *state) shareMove(t *types.Type, dst, src *ssa.Value) {
 	// (Memory no other goroutine can reach is as good as the stack.)
 	srcStack, dstStack := isStackAddr(src), isStackAddr(dst) || s.dstLocal
+	if s.ifaceOnly && dstStack && types.StringAligned16() && types.HasString(t) {
+		// shareLoadMem's copy does not copy a string whole: load it
+		// whole (shareLoad), or have the runtime copy it.
+		if ssa.CanSSA(t) {
+			s.rawStoreType(t, dst, s.shareLoad(t, src), 0, false)
+			return
+		}
+		// dst is live across the runtime's call: what it holds before
+		// is no value, which the collector would scan.
+		s.rawZero(t, dst)
+		dstStack = false
+	}
 	switch {
 	case dstStack:
 		s.shareLoadMem(t, dst, src)
@@ -858,4 +876,108 @@ func isCallResultAddr(addr *ssa.Value) bool {
 		addr = addr.Args[0]
 	}
 	return addr.Op == ssa.OpSP || addr.Op == ssa.OpSelectNAddr
+}
+
+// Strings, without the sharing analysis (runtime/shared_string.go): with
+// 8-byte words a string is aligned to 16 (types.StringAligned16), and is
+// loaded and stored wherever it is but in the stack with one 16-byte
+// access where the processor makes that single-copy atomic
+// (runtime.stringAtomic): on amd64 and arm64. Where it does not, the
+// runtime loads and stores it under the sequence lock of its block, as
+// on the other targets, which check the lock inline when they load one
+// (shareLoad) and call the runtime to store one.
+
+// stringAtomicArch reports whether the target may load and store a
+// string with one 16-byte access.
+func stringAtomicArch(f sys.ArchFamily) bool {
+	return f == sys.AMD64 || f == sys.ARM64
+}
+
+// stringAtomicKnown reports whether the target always has the 16-byte
+// accesses atomic: amd64 v3 and later have AVX.
+func (s *state) stringAtomicKnown() bool {
+	return s.gd.Ctxt.Arch.Family == sys.AMD64 && buildcfg.GOAMD64 >= 3
+}
+
+// stringAtomicBranch ends the current block on runtime.stringAtomic and
+// returns its (true, false) successors, true likely.
+func (s *state) stringAtomicBranch() (atomic, locked *ssa.Block) {
+	boolT := types.Types[types.TBOOL]
+	addr := s.entryNewValue1A(ssa.OpAddr, types.NewPtr(boolT), ir.Syms(s.gd).StringAtomic, s.sb)
+	flag := s.rawLoad(boolT, addr)
+	atomic = s.f.NewBlock(ssa.BlockPlain)
+	locked = s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(flag)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(atomic)
+	b.AddEdgeTo(locked)
+	return
+}
+
+// stringLoad16 loads the string at src with one 16-byte access.
+func (s *state) stringLoad16(t *types.Type, src *ssa.Value) *ssa.Value {
+	ptrT := s.f.Config.Types.BytePtr
+	intT := types.Types[types.TINT]
+	tup := s.newValue2(ssa.OpStringLoad16, types.NewTuple(ptrT, intT), src, s.mem())
+	w0 := s.newValue1(ssa.OpSelect0, ptrT, tup)
+	w1 := s.newValue1(ssa.OpSelect1, intT, tup)
+	return s.newValue2(ssa.OpStringMake, t, w0, w1)
+}
+
+// shareLoadString is shareLoad for a string on amd64 and arm64.
+func (s *state) shareLoadString(t *types.Type, src *ssa.Value) *ssa.Value {
+	if s.stringAtomicKnown() {
+		return s.stringLoad16(t, src)
+	}
+	strVar := ssaMarker("string")
+	atomic, locked := s.stringAtomicBranch()
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+
+	s.startBlock(atomic)
+	s.vars[strVar] = s.stringLoad16(t, src)
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(locked)
+	s.vars[strVar] = s.rtcall(ir.Syms(s.gd).StringLoad, true, []*types.Type{t}, s.nilCheck(src))[0]
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	v := s.variable(strVar, t)
+	delete(s.vars, strVar)
+	return v
+}
+
+// shareStoreString stores the string right at left, which is not in the
+// stack, whole: with one 16-byte access (and the write barrier of its
+// first word, which the write barrier pass adds), or by the runtime.
+func (s *state) shareStoreString(left, right *ssa.Value) {
+	if !stringAtomicArch(s.gd.Ctxt.Arch.Family) {
+		s.rtcall(ir.Syms(s.gd).StringStore, true, nil, s.nilCheck(left), right)
+		return
+	}
+	store := func() {
+		w0 := s.newValue1(ssa.OpStringPtr, s.f.Config.Types.BytePtr, right)
+		w1 := s.newValue1(ssa.OpStringWord1, types.Types[types.TINT], right)
+		v := s.newValue4(ssa.OpStringStore16, types.TypeMem, left, w0, w1, s.mem())
+		v.Aux = types.Types[types.TSTRING]
+		s.vars[memVar] = v
+	}
+	if s.stringAtomicKnown() {
+		store()
+		return
+	}
+	atomic, locked := s.stringAtomicBranch()
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+
+	s.startBlock(atomic)
+	store()
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(locked)
+	s.rtcall(ir.Syms(s.gd).StringStore, true, nil, s.nilCheck(left), right)
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
 }

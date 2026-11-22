@@ -86,6 +86,7 @@ var ARM64 struct {
 	HasCPUID   bool
 	HasDIT     bool
 	HasSB      bool
+	HasLSE2    bool // FEAT_LSE2: aligned 16-byte LDP/STP are single-copy atomic
 	IsNeoverse bool
 	_          CacheLinePad
 }

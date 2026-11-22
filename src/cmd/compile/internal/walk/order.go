@@ -305,9 +305,16 @@ func tearType(gd *base.Invocation, t *types.Type) bool {
 		return false
 	}
 	if !gd.Sharing {
-		return types.HasIface(t)
+		return types.HasWhole(t)
 	}
 	return types.HasTearable(t)
+}
+
+// wholeType reports whether values of type t that are not in the stack
+// are cleared whole by the runtime (typedarrayclear): the interfaces,
+// and the strings without the sharing analysis.
+func wholeType(gd *base.Invocation, t *types.Type) bool {
+	return tearType(gd, t) && (types.HasIface(t) || !gd.Sharing && types.HasWhole(t))
 }
 
 // isStackVar reports whether n is (in) a variable of the stack.

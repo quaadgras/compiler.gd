@@ -6738,6 +6738,10 @@ func rewriteValueAMD64(v *Value) bool {
 		return rewriteValueAMD64_OpStoreMasked64(v)
 	case OpStoreMasked8:
 		return rewriteValueAMD64_OpStoreMasked8(v)
+	case OpStringLoad16:
+		return rewriteValueAMD64_OpStringLoad16(v)
+	case OpStringStore16:
+		return rewriteValueAMD64_OpStringStore16(v)
 	case OpSub16:
 		v.Op = OpAMD64SUBL
 		return true
@@ -104676,6 +104680,36 @@ func rewriteValueAMD64_OpStoreMasked8(v *Value) bool {
 		return true
 	}
 	return false
+}
+func rewriteValueAMD64_OpStringLoad16(v *Value) bool {
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (StringLoad16 ptr mem)
+	// result: (MOVOloadstr ptr mem)
+	for {
+		ptr := v_0
+		mem := v_1
+		v.reset(OpAMD64MOVOloadstr)
+		v.AddArg2(ptr, mem)
+		return true
+	}
+}
+func rewriteValueAMD64_OpStringStore16(v *Value) bool {
+	v_3 := v.Args[3]
+	v_2 := v.Args[2]
+	v_1 := v.Args[1]
+	v_0 := v.Args[0]
+	// match: (StringStore16 ptr w0 w1 mem)
+	// result: (MOVOstorestr ptr w0 w1 mem)
+	for {
+		ptr := v_0
+		w0 := v_1
+		w1 := v_2
+		mem := v_3
+		v.reset(OpAMD64MOVOstorestr)
+		v.AddArg4(ptr, w0, w1, mem)
+		return true
+	}
 }
 func rewriteValueAMD64_OpTrunc(v *Value) bool {
 	v_0 := v.Args[0]

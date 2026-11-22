@@ -607,6 +607,8 @@ const (
 	OpAMD64MOVSDloadidx8
 	OpAMD64MOVSSstore
 	OpAMD64MOVSDstore
+	OpAMD64MOVOloadstr
+	OpAMD64MOVOstorestr
 	OpAMD64MOVSSstoreidx1
 	OpAMD64MOVSSstoreidx4
 	OpAMD64MOVSDstoreidx1
@@ -6995,6 +6997,8 @@ const (
 	OpLoad
 	OpDereference
 	OpStore
+	OpStringLoad16
+	OpStringStore16
 	OpLoadMasked8
 	OpLoadMasked16
 	OpLoadMasked32
@@ -7006,6 +7010,7 @@ const (
 	OpMove
 	OpZero
 	OpStoreWB
+	OpStringStore16WB
 	OpMoveWB
 	OpZeroWB
 	OpWBend
@@ -12628,6 +12633,38 @@ var opcodeTable = [...]opInfo{
 				{1, regMask{v1: 2147418112, v2: 0}},        // X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14
 				{0, regMask{v1: 72057594037977087, v2: 0}}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 R15 SB
 			},
+		},
+	},
+	{
+		name:           "MOVOloadstr",
+		auxType:        auxSymOff,
+		argLen:         2,
+		faultOnNilArg0: true,
+		symEffect:      SymRead,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{0, regMask{v1: 72057594037993471, v2: 0}}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+			clobbers: regMask{v1: 1073741824, v2: 0}, // X14
+			outputs: []outputInfo{
+				{0, regMask{v1: 49135, v2: 0}}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{1, regMask{v1: 49135, v2: 0}}, // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+			},
+		},
+	},
+	{
+		name:           "MOVOstorestr",
+		auxType:        auxSymOff,
+		argLen:         4,
+		faultOnNilArg0: true,
+		symEffect:      SymWrite,
+		reg: regInfo{
+			inputs: []inputInfo{
+				{1, regMask{v1: 49135, v2: 0}},             // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{2, regMask{v1: 49135, v2: 0}},             // AX CX DX BX BP SI DI R8 R9 R10 R11 R12 R13 R15
+				{0, regMask{v1: 72057594037993471, v2: 0}}, // AX CX DX BX SP BP SI DI R8 R9 R10 R11 R12 R13 g R15 SB
+			},
+			clobbers: regMask{v1: 1073741824, v2: 0}, // X14
 		},
 	},
 	{
@@ -106804,6 +106841,17 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
+		name:    "StringLoad16",
+		argLen:  2,
+		generic: true,
+	},
+	{
+		name:    "StringStore16",
+		auxType: auxTypSize,
+		argLen:  4,
+		generic: true,
+	},
+	{
 		name:    "LoadMasked8",
 		argLen:  3,
 		generic: true,
@@ -106863,6 +106911,12 @@ var opcodeTable = [...]opInfo{
 		name:    "StoreWB",
 		auxType: auxTypSize,
 		argLen:  3,
+		generic: true,
+	},
+	{
+		name:    "StringStore16WB",
+		auxType: auxTypSize,
+		argLen:  4,
 		generic: true,
 	},
 	{

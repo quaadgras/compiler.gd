@@ -20,6 +20,7 @@ func doinit() {
 		{Name: "crc32", Feature: &ARM64.HasCRC32},
 		{Name: "atomics", Feature: &ARM64.HasATOMICS},
 		{Name: "cpuid", Feature: &ARM64.HasCPUID},
+		{Name: "lse2", Feature: &ARM64.HasLSE2},
 		{Name: "isNeoverse", Feature: &ARM64.IsNeoverse},
 	}
 

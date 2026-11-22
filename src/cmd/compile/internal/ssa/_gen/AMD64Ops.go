@@ -126,6 +126,7 @@ func init() {
 		fp         = buildReg("X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14")
 		v          = buildReg("X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14")
 		w          = buildReg("X0 X1 X2 X3 X4 X5 X6 X7 X8 X9 X10 X11 X12 X13 X14 X16 X17 X18 X19 X20 X21 X22 X23 X24 X25 X26 X27 X28 X29 X30 X31")
+		x14        = buildReg("X14")
 		x15        = buildReg("X15")
 		mask       = buildReg("K1 K2 K3 K4 K5 K6 K7")
 		gpsp       = gp.union(buildReg("SP"))
@@ -315,6 +316,13 @@ func init() {
 		// does *(arg0+auxint+aux) = arg1, arg2 = mem
 		{name: "MOVSSstore", argLength: 3, reg: fpstore, asm: "MOVSS", aux: "SymOff", faultOnNilArg0: true, symEffect: "Write", addrSinkArg0: true},
 		{name: "MOVSDstore", argLength: 3, reg: fpstore, asm: "MOVSD", aux: "SymOff", faultOnNilArg0: true, symEffect: "Write", addrSinkArg0: true},
+
+		// gd: the two words of a string, loaded and stored with one
+		// 16-byte access through X14 (MOVUPS, then MOVQ and PEXTRQ, or
+		// MOVQ and PINSRQ): single-copy atomic where aligned on a CPU
+		// with AVX (runtime.stringAtomic).
+		{name: "MOVOloadstr", argLength: 2, reg: regInfo{inputs: []regMask{gpspsbg, {}}, outputs: []regMask{gp, gp}, clobbers: x14}, aux: "SymOff", typ: "(UInt64,UInt64)", faultOnNilArg0: true, symEffect: "Read"},
+		{name: "MOVOstorestr", argLength: 4, reg: regInfo{inputs: []regMask{gpspsbg, gp, gp, {}}, clobbers: x14}, aux: "SymOff", typ: "Mem", faultOnNilArg0: true, symEffect: "Write"},
 
 		// MOVSxstoreidx: floating-point indexed stores
 		// x==S for float32, x==D for float64

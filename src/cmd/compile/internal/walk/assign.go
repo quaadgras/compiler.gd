@@ -736,7 +736,7 @@ func extendSlice(gd *base.Invocation, n *ir.CallExpr, init *ir.Nodes) ir.Node {
 
 	var clr ir.Nodes
 	var clrfn ir.Node
-	if tearType(gd, elemtype) && types.HasIface(elemtype) {
+	if wholeType(gd, elemtype) {
 		// The interfaces whole.
 		clrfn = mkcall(gd, "typedarrayclear", nil, &clr, reflectdata.TypePtrAt(gd, gd.Pos, elemtype), hp, typecheck.Conv(gd, l2, types.Types[types.TUINTPTR]))
 	} else {

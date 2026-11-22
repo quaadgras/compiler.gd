@@ -1924,3 +1924,7 @@
 (SETEQ t:(TESTL x:(MOVBQZX s:(SET(EQ|NE|L|G|LE|GE|A|B|AE|BE) flags)) x)) && t.Block == s.Block => (SET(NE|EQ|GE|LE|G|L|BE|AE|B|A) flags)
 (SETEQ t:(TESTW x:(MOVBQZX s:(SET(EQ|NE|L|G|LE|GE|A|B|AE|BE) flags)) x)) && t.Block == s.Block => (SET(NE|EQ|GE|LE|G|L|BE|AE|B|A) flags)
 (SETEQ t:(TESTB            s:(SET(EQ|NE|L|G|LE|GE|A|B|AE|BE) flags)  s)) && t.Block == s.Block => (SET(NE|EQ|GE|LE|G|L|BE|AE|B|A) flags)
+
+// gd: a string loaded and stored with one 16-byte access.
+(StringLoad16 ptr mem) => (MOVOloadstr ptr mem)
+(StringStore16 ptr w0 w1 mem) => (MOVOstorestr ptr w0 w1 mem)

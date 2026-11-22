@@ -883,6 +883,44 @@ func ssaGenValue(gd *base.Invocation, s *ssagen.State, v *ssa.Value) {
 		p.To.Type = obj.TYPE_MEM
 		p.To.Reg = v.Args[0].Reg()
 		ssagen.AddAux(&p.To, v)
+	case ssa.OpAMD64MOVOloadstr:
+		// MOVUPS off(ptr), X14; MOVQ X14, r0; PEXTRQ $1, X14, r1
+		p := s.Prog(x86.AMOVUPS)
+		p.From.Type = obj.TYPE_MEM
+		p.From.Reg = v.Args[0].Reg()
+		ssagen.AddAux(&p.From, v)
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = x86.REG_X14
+		p = s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = x86.REG_X14
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg0()
+		p = s.Prog(x86.APEXTRQ)
+		p.From.Type = obj.TYPE_CONST
+		p.From.Offset = 1
+		p.AddRestSourceReg(x86.REG_X14)
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = v.Reg1()
+	case ssa.OpAMD64MOVOstorestr:
+		// MOVQ w0, X14; PINSRQ $1, w1, X14; MOVUPS X14, off(ptr)
+		p := s.Prog(x86.AMOVQ)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = v.Args[1].Reg()
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = x86.REG_X14
+		p = s.Prog(x86.APINSRQ)
+		p.From.Type = obj.TYPE_CONST
+		p.From.Offset = 1
+		p.AddRestSourceReg(v.Args[2].Reg())
+		p.To.Type = obj.TYPE_REG
+		p.To.Reg = x86.REG_X14
+		p = s.Prog(x86.AMOVUPS)
+		p.From.Type = obj.TYPE_REG
+		p.From.Reg = x86.REG_X14
+		p.To.Type = obj.TYPE_MEM
+		p.To.Reg = v.Args[0].Reg()
+		ssagen.AddAux(&p.To, v)
 	case ssa.OpAMD64MOVBstoreidx1, ssa.OpAMD64MOVWstoreidx1, ssa.OpAMD64MOVLstoreidx1, ssa.OpAMD64MOVQstoreidx1, ssa.OpAMD64MOVSSstoreidx1, ssa.OpAMD64MOVSDstoreidx1,
 		ssa.OpAMD64MOVQstoreidx8, ssa.OpAMD64MOVSDstoreidx8, ssa.OpAMD64MOVLstoreidx8, ssa.OpAMD64MOVSSstoreidx4, ssa.OpAMD64MOVLstoreidx4, ssa.OpAMD64MOVWstoreidx2,
 		ssa.OpAMD64ADDLmodifyidx1, ssa.OpAMD64ADDLmodifyidx4, ssa.OpAMD64ADDLmodifyidx8, ssa.OpAMD64ADDQmodifyidx1, ssa.OpAMD64ADDQmodifyidx8,

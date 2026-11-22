@@ -1857,3 +1857,8 @@
 
 // SIMD zero
 (ZeroSIMD <t>) && t.Size() == 16 => (VMOVI16B [0] <t>)
+
+// gd: a string loaded and stored with one 16-byte access (X registers:
+// single-copy atomic where aligned with FEAT_LSE2).
+(StringLoad16 ptr mem) => (LDP ptr mem)
+(StringStore16 ptr w0 w1 mem) => (STP ptr w0 w1 mem)

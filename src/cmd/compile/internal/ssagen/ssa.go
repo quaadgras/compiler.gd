@@ -254,6 +254,9 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).ShareTypedmemmove = typecheck.LookupRuntimeFunc(gd, "sharetypedmemmove")
 	ir.Syms(gd).TypedArrayClear = typecheck.LookupRuntimeFunc(gd, "typedarrayclear")
 	ir.Syms(gd).IfaceStore = typecheck.LookupRuntimeFunc(gd, "ifacestore")
+	ir.Syms(gd).StringLoad = typecheck.LookupRuntimeFunc(gd, "stringload")
+	ir.Syms(gd).StringStore = typecheck.LookupRuntimeFunc(gd, "stringstore")
+	ir.Syms(gd).StringAtomic = typecheck.LookupRuntimeVar(gd, "stringAtomic") // bool
 	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
 	ir.Syms(gd).SharePages = typecheck.LookupRuntimeVar(gd, "sharePages") // [1 << 20]uint8
 	ir.Syms(gd).ShareSeqLoad = typecheck.LookupRuntimeFunc(gd, "shareseqload")

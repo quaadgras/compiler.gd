@@ -376,6 +376,12 @@ var genericOps = []opData{
 	{name: "Dereference", argLength: 2},                       // Load from arg0.  arg1=memory.  Helper op for arg/result passing, result is an otherwise not-SSA-able "value".
 	{name: "Store", argLength: 3, typ: "Mem", aux: "TypSize"}, // Store arg1 to arg0.  arg2=memory, aux=type.  Returns memory. auxint=1 if what is stored needs no publishing (runtime/shared.go).
 
+	// gd: a string's words, loaded and stored with one 16-byte access
+	// (single-copy atomic where runtime.stringAtomic; doc/gd/sharing.md).
+	// Generated for amd64 and arm64 only.
+	{name: "StringLoad16", argLength: 2},                              // load the two words of the string at arg0, as a tuple (w0, w1). arg1=memory
+	{name: "StringStore16", argLength: 4, typ: "Mem", aux: "TypSize"}, // store the string of words arg1 (w0, a pointer) and arg2 (w1) at arg0. arg3=memory, aux=type (string).  Returns memory.
+
 	// masked memory operations.
 	// TODO add 16 and 8
 	{name: "LoadMasked8", argLength: 3},                           // Load from arg0, arg1 = mask of 8-bits, arg2 = memory
@@ -404,10 +410,11 @@ var genericOps = []opData{
 
 	// Memory operations with write barriers.
 	// Expand to runtime calls. Write barrier will be removed if write on stack.
-	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "TypSize"}, // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
-	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"},  // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
-	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"},  // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
-	{name: "WBend", argLength: 1, typ: "Mem"},                   // Write barrier code is done, interrupting is now allowed.
+	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "TypSize"},         // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
+	{name: "StringStore16WB", argLength: 4, typ: "Mem", aux: "TypSize"}, // StringStore16 with a write barrier for arg1.
+	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"},          // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
+	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"},          // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
+	{name: "WBend", argLength: 1, typ: "Mem"},                           // Write barrier code is done, interrupting is now allowed.
 
 	// A sequence lock is held from ShareLocked, whose memory is that of
 	// the compare-and-swap that took it, to ShareUnlocked, after the
