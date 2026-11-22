@@ -36,6 +36,10 @@ func skipIfNotSharing(t *testing.T) {
 	if runtime.GOARCH == "wasm" {
 		t.Skip("goroutines do not race on wasm")
 	}
+	sum := 0
+	if !linkLocal(func() { sum += *linkNew(1).p }) {
+		t.Skip("compiled without goroutine sharing (it is on with -gcflags=all=-d=noshare=0)")
+	}
 }
 
 // list returns a heap list of n nodes, the last of which holds a slice of
@@ -759,7 +763,8 @@ type sharedAppendBox struct {
 // given back in between: a longer slice stored there meanwhile left its
 // length with the new, shorter array.)
 func TestSharedAppend(t *testing.T) {
-	strs := []string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
+	skipIfNotSharing(t)
+	strs :=[]string{"a", "bb", "ccc", "dddd-dddd-dddd-dddd"}
 	check := func(x string) {
 		if len(x) > 19 || (len(x) > 0 && x[0] < 'a') {
 			panic("torn string")

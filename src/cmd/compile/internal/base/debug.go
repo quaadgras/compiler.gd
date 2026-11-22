@@ -64,7 +64,7 @@ type DebugFlags struct {
 	NoDeadLocals          int    `help:"disable deadlocals pass" concurrent:"ok"`
 	NoOpenDefer           int    `help:"disable open-coded defers" concurrent:"ok"`
 	NoRefName             int    `help:"do not include referenced symbol names in object file" concurrent:"ok"`
-	NoShare               int    `help:"do not publish the pointers stored in shared memory (unsafe; for measurements)" concurrent:"ok"`
+	NoShare               int    `help:"do not track goroutine sharing: no local objects, no publishing, no tear guards (default 1; 0 turns sharing on)" concurrent:"ok"`
 	LocalDbg              int    `help:"decide at run time only for the allocations of these kinds (1 new, 2 append, 4 make, 8 variables; for debugging)" concurrent:"ok"`
 	NoLocalMap            int    `help:"do not treat a map as a container that may be a local object (for measurements)" concurrent:"ok"`
 	NoLocalRO             int    `help:"count what a string points to as shared where the string goes (for measurements)" concurrent:"ok"`
