@@ -28,7 +28,7 @@ func main() {
 		return
 	}
 	n = unsafe.Alignof("")
-	if n != 4 && n != 8 {
+	if n != 4 && n != 8 && n != 16 { // gd: 16 with 8-byte words
 		println("BUG alignof \"\"", n)
 		return
 	}

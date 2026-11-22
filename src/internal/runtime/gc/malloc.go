@@ -13,8 +13,10 @@ const (
 	// A malloc header is functionally a single type pointer, but
 	// we need to use 8 here to ensure 8-byte alignment of allocations
 	// on 32-bit platforms. It's wasteful, but a lot of code relies on
-	// 8-byte alignment for 8-byte atomics.
-	MallocHeaderSize = 8
+	// 8-byte alignment for 8-byte atomics. (gd: and 16 with 8-byte
+	// words, where a string is aligned to 16, so that it is loaded and
+	// stored with one 16-byte access, but on wasm: doc/gd/sso-string.md.)
+	MallocHeaderSize = 8 + 8*(goarch.PtrSize/8)*(1-goarch.IsWasm)
 
 	// The minimum object size that has a malloc header, exclusive.
 	//

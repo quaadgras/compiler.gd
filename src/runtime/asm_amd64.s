@@ -1477,7 +1477,11 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 //
 // This is ABIInternal because Go code injects its PC directly into new
 // goroutine stacks.
-TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
+//
+// gd: the frame is 160 bytes, not 152, so that frameSize-128(SP) is
+// SP+32: debugCallCheck's string result, aligned to 16, is at
+// 16(SP)..31(SP).
+TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$160-0
 	// Save all registers that may contain pointers so they can be
 	// conservatively scanned.
 	//
@@ -1509,13 +1513,13 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
 	MOVQ	retpc-8(FP), AX	// Caller's PC
 	MOVQ	AX, 0(SP)
 	CALL	runtime·debugCallCheck(SB)
-	MOVQ	8(SP), AX
+	MOVQ	16(SP), AX
 	TESTQ	AX, AX
 	JZ	good
 	// The safety check failed. Put the reason string at the top
 	// of the stack.
 	MOVQ	AX, 0(SP)
-	MOVQ	16(SP), AX
+	MOVQ	24(SP), AX
 	MOVQ	AX, 8(SP)
 	// Set R12 to 8 and invoke INT3. The debugger should get the
 	// reason a call can't be injected from the top of the stack

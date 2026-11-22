@@ -246,9 +246,9 @@ func (s *ssafn) AllocFrame(gd *base.Invocation, f *ssa.Func) {
 			w = 1
 		}
 		s.stksize += w
-		s.stksize = types.RoundUp(s.stksize, n.Type().Alignment())
-		if n.Type().Alignment() > int64(types.RegSize) {
-			s.stkalign = n.Type().Alignment()
+		s.stksize = types.RoundUp(s.stksize, types.StackAlignment(n.Type()))
+		if a := types.StackAlignment(n.Type()); a > int64(types.RegSize) {
+			s.stkalign = a
 		}
 		if n.Type().HasPointers() {
 			s.stkptrsize = s.stksize

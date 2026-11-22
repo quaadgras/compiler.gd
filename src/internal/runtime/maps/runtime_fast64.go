@@ -58,7 +58,7 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 				if goexperiment.MapSplitGroup {
 					return g.elem(typ, i), true
 				} else {
-					return unsafe.Pointer(uintptr(slotKey) + 8), true
+					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
 				}
 			}
 			slotKey = unsafe.Pointer(uintptr(slotKey) + keyStride)
@@ -97,7 +97,7 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 				if goexperiment.MapSplitGroup {
 					return g.elem(typ, i), true
 				} else {
-					return unsafe.Pointer(uintptr(slotKey) + 8), true
+					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
 				}
 			}
 			match = match.removeFirst()

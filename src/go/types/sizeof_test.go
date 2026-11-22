@@ -37,18 +37,18 @@ func TestSizeof(t *testing.T) {
 		{term{}, 28, 40},
 
 		// Objects
-		{PkgName{}, 56, 96},
-		{Const{}, 76, 120},
-		{TypeName{}, 52, 88},
-		{Var{}, 60, 104},
-		{Func{}, 60, 104},
-		{Label{}, 56, 96},
-		{Builtin{}, 56, 96},
-		{Nil{}, 52, 88},
+		{PkgName{}, 56, 112},
+		{Const{}, 76, 128},
+		{TypeName{}, 52, 96},
+		{Var{}, 60, 112},
+		{Func{}, 60, 112},
+		{Label{}, 56, 112},
+		{Builtin{}, 56, 112},
+		{Nil{}, 52, 96},
 
 		// Misc
-		{Scope{}, 44, 88},
-		{Package{}, 44, 88},
+		{Scope{}, 44, 96},
+		{Package{}, 44, 96},
 		{_TypeSet{}, 28, 56},
 	}
 	if !_64bit && runtime.GOARCH == "wasm" {

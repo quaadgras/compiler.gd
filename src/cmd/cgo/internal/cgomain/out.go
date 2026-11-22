@@ -1610,7 +1610,12 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 			return &Type{Size: p.PtrSize, Align: p.PtrSize, C: c("GoUintptr")}
 		}
 		if t.Name == "string" {
-			return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoString")}
+			// gd: aligned to 16 with 8-byte words (doc/gd/sso-string.md).
+			align := p.PtrSize
+			if p.PtrSize == 8 {
+				align = 16
+			}
+			return &Type{Size: 2 * p.PtrSize, Align: align, C: c("GoString")}
 		}
 		if t.Name == "error" {
 			// gd fat-iface: 2 words + 16-byte inline payload.
@@ -1752,8 +1757,9 @@ typedef ptrdiff_t intgo;
 
 #define GO_CGO_GOSTRING_TYPEDEF
 /* gd: a Go string passed to C is never inline (the Go side calls
- * _cgoStringNormalize), so p and n are its address and length. */
-typedef struct { const char *p; intgo n; } _GoString_;
+ * _cgoStringNormalize), so p and n are its address and length; it is
+ * aligned to 16 with 8-byte pointers, as Go aligns it. */
+typedef struct { const char *p; intgo n; } __attribute__((aligned(sizeof(void*) == 8 ? 16 : sizeof(void*)))) _GoString_;
 typedef struct { char *p; intgo n; intgo c; } _GoBytes_;
 _GoString_ GoString(char *p);
 _GoString_ GoStringN(char *p, int l);
@@ -2057,7 +2063,7 @@ const builtinExportProlog = `
 #define GO_CGO_EXPORT_PROLOGUE_H
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
-typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+typedef struct { const char *p; ptrdiff_t n; } __attribute__((aligned(sizeof(void*) == 8 ? 16 : sizeof(void*)))) _GoString_;
 extern size_t _GoStringLen(_GoString_ s);
 extern const char *_GoStringPtr(_GoString_ s);
 #endif

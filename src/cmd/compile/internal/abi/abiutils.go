@@ -325,6 +325,7 @@ func (config *ABIConfig) ABIAnalyzeTypes(params, results []*types.Type) *ABIPara
 	setup(config.gd)
 	s := assignState{
 		stackOffset: config.offsetForLocals,
+		stackBase:   config.offsetForLocals,
 		rTotal:      config.regAmounts,
 	}
 
@@ -363,6 +364,7 @@ func (config *ABIConfig) ABIAnalyzeFuncType(ft *types.Type) *ABIParamResultInfo 
 	setup(config.gd)
 	s := assignState{
 		stackOffset: config.offsetForLocals,
+		stackBase:   config.offsetForLocals,
 		rTotal:      config.regAmounts,
 	}
 
@@ -498,6 +500,7 @@ type assignState struct {
 	rTotal      RegAmounts // total reg amounts from ABI rules
 	rUsed       RegAmounts // regs used by params completely assigned so far
 	stackOffset int64      // current stack offset
+	stackBase   int64      // where the stack arguments start (offsetForLocals)
 	spillOffset int64      // current spill offset
 }
 
@@ -651,7 +654,12 @@ func (state *assignState) assignParam(gd *base.Invocation, typ *types.Type, name
 
 	var offset int64 = -1
 	if registers == nil { // stack allocated; needs stack slot
-		offset = nextSlot(&state.stackOffset, typ)
+		// (Aligned from where the arguments start, as reflect's
+		// frames and vet's asmdecl are: a string, aligned to 16, after
+		// one word is at 16 of the arguments wherever they start.)
+		state.stackOffset -= state.stackBase
+		offset = nextSlot(&state.stackOffset, typ) + state.stackBase
+		state.stackOffset += state.stackBase
 	} else if !isResult { // register-allocated param; needs spill slot
 		offset = nextSlot(&state.spillOffset, typ)
 	}

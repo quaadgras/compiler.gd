@@ -17,6 +17,7 @@ type gcSizes struct {
 	// of wasm (its inline form: cmd/compile/internal/types's
 	// StringWasm32).
 	stringWords int64 // the words of a string: 2, but 3 with GOWASM=gc and 4 with its 4-byte words
+	stringAlign int64 // the alignment of a string if not WordSize: 16 with 8-byte words but on wasm
 }
 
 func (s *gcSizes) Alignof(T Type) (result int64) {
@@ -70,6 +71,12 @@ func (s *gcSizes) Alignof(T Type) (result int64) {
 	case *Basic:
 		// Strings are like slices and interfaces.
 		if t.Info()&IsString != 0 {
+			if s.stringAlign != 0 {
+				// gd: aligned to 16 with 8-byte words, so that a
+				// string is loaded and stored with one 16-byte access
+				// (cmd/compile/internal/types's StringAligned16).
+				return s.stringAlign
+			}
 			return s.WordSize
 		}
 	case *TypeParam, *Union:

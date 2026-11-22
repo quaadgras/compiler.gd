@@ -121,6 +121,49 @@ func StringTaggedWords(s string, bigEndian bool) (w0, w1 int64) {
 	return int64(u0&(1<<56-1) | 1<<63 | uint64(len(s))<<56), int64(u1)
 }
 
+// StringAligned16 reports whether a string is aligned to 16 bytes, so
+// that it is loaded and stored with one 16-byte access, tear-free
+// (doc/gd/sso-string.md): on the targets with 8-byte words (StringTagged)
+// but GOARCH=wasm, whose goroutines do not run in parallel.
+func StringAligned16() bool {
+	return StringTagged() && buildcfg.GOARCH != "wasm"
+}
+
+// StackAlignment is the alignment of a value of type t in a stack frame,
+// which is aligned to a register: t's, but a register's for a string,
+// whose alignment to 16 (StringAligned16) is for a 16-byte access that is
+// one access, which a stack, where no other goroutine accesses it, does
+// not need. (Such a type can be in the stack, not too aligned for it.)
+func StackAlignment(t *Type) int64 {
+	a := t.Alignment()
+	if a <= int64(RegSize) || !StringAligned16() || overAligned(t) {
+		return a
+	}
+	return int64(RegSize)
+}
+
+// overAligned reports whether t has a part aligned beyond a register's
+// that is not a string.
+func overAligned(t *Type) bool {
+	if t.Alignment() <= int64(RegSize) {
+		return false
+	}
+	switch {
+	case t.IsString():
+		return false
+	case t.IsStruct():
+		for _, f := range t.Fields() {
+			if overAligned(f.Type) {
+				return true
+			}
+		}
+		return false
+	case t.IsArray():
+		return overAligned(t.Elem())
+	}
+	return true
+}
+
 // StringWasmGC64 reports whether a string has the form of GOWASM=gc
 // with 8-byte words: three words, the address of the bytes (nil if
 // inline), the cached hash or bytes 0..7, and the length with a tag of
@@ -219,7 +262,7 @@ var CalcSizeDisabled bool
 
 // RoundUp rounds o to a multiple of r, r is a power of 2.
 func RoundUp(o int64, r int64) int64 {
-	if r < 1 || r > 8 || r&(r-1) != 0 {
+	if r < 1 || r > 64 || r&(r-1) != 0 { // (a string is aligned to 16: StringTagged)
 		panic(fmt.Sprintf("Round %d", r))
 	}
 	return (o + r - 1) &^ (r - 1)
@@ -660,6 +703,11 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		}
 		w = StringSize
 		t.align = uint8(PtrSize)
+		if StringAligned16() {
+			// Aligned to 16, so that a string is loaded and stored
+			// with one 16-byte access (doc/gd/sso-string.md).
+			t.align = 16
+		}
 		t.intRegs = 3 // gd: {word0=ptr/nil, word1=hash/bytes, word2=tag|len/bytes}
 		if StringTwoWords() {
 			t.intRegs = 2 // {w0, w1} (StringTagged)

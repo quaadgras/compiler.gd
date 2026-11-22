@@ -5,7 +5,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-40
+TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 	// R4 = a_base
 	// R5 = a_len
 	// R6 = a_cap (unused)

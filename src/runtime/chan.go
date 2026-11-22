@@ -19,6 +19,7 @@ package runtime
 
 import (
 	"internal/abi"
+	"internal/goarch"
 	"internal/runtime/atomic"
 	"internal/runtime/math"
 	"internal/runtime/sys"
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	maxAlign  = 8
+	maxAlign  = 8 + 8*(goarch.PtrSize/8)*(1-goarch.IsWasm) // gd: a string is aligned to 16 with 8-byte words, but on wasm
 	hchanSize = unsafe.Sizeof(hchan{}) + uintptr(-int(unsafe.Sizeof(hchan{}))&(maxAlign-1))
 	debugChan = false
 )

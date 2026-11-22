@@ -28,7 +28,7 @@ func TestSizeof(t *testing.T) {
 		// process-global map[*Type]*sync.Once that pinned every Type
 		// for cmd/go's lifetime under in-process compile (commit
 		// 31c94ef222). +12 B on 64-bit / +8 B on 32-bit, padded.
-		{Sym{}, 48, 80},
+		{Sym{}, 48, 96},
 		{Type{}, 108, 144},
 		{Map{}, 12, 24},
 		{Forward{}, 20, 32},

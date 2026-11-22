@@ -5,7 +5,7 @@ A string is two words, as in stock Go, but with 8-byte words a string of
 a short string touch no memory but its words, and making one (`string(b)`,
 `a+b`, `strconv.Itoa`, a conversion of a rune) allocates nothing. With
 4-byte words (386, arm, mips) a string is stock Go's. GOARCH=wasm with
-GOWASM=gc has forms of its own (§6).
+GOWASM=gc has forms of its own (§7).
 
 History: the first form (2026) was three words, 24 bytes: word 0 a
 pointer or nil, word 1 a cached hash of a heap string or bytes 0..7, and
@@ -142,14 +142,51 @@ and indexing; `Value.Pointer`/`UnsafePointer` of an inline string is a
 heap copy. `runtime-gdb.py` and `lib/wasm/wasm_exec.js` (GOWASM=linear)
 read inline strings.
 
-## 6. Other targets
+## 6. Alignment
 
-### 6.1 4-byte words
+With 8-byte words but on GOARCH=wasm (`types.StringAligned16`) a string
+is **aligned to 16**, and so is a type that holds one: a string in the
+heap, the data or the bss is then one aligned 16-byte block, which can be
+loaded and stored with one access (`doc/gd/sharing.md`). What follows
+from it:
+
+- `types.CalcSize` (TSTRING align 16), go/types' and types2' `gcSizes`
+  (`stringAlign`, so `unsafe.Alignof("")` is 16 and vet's asmdecl lays
+  out argument frames with it), `cmd/cgo` (`_GoString_` is
+  `aligned(16)`), the linker (`alignString` before the strings of
+  `moduledata` and `modulehash`; a symbol of 16 bytes or more is aligned
+  to 16 already).
+- The heap: a size class of 16 or more is a multiple of 16, so an object
+  of a type aligned to 16 is; the malloc header of objects of 512 bytes
+  to 32 KiB with pointers is 16 bytes (`gc.MallocHeaderSize`), so that
+  what follows it is aligned too. `makechan` allows elements aligned to
+  16. The maps read `ElemOff` for 8-byte keys too: an element aligned to
+  16 follows an 8-byte key at 16.
+- Stacks are aligned to 8 only, and a string in one is too
+  (`types.StackAlignment`, which escape analysis, frame layout and
+  `typebits` use: a type is not "too aligned for the stack" for its
+  strings). No other goroutine accesses a stack, so the 16-byte accesses
+  there need only work, not be atomic (MOVUPS and LDP do), and checkptr
+  checks a pointer's alignment up to a word's.
+- Arguments on the stack (ABI0, spills, reflect's frames) are aligned
+  to 16 as the type is, counted from where the arguments start (abiutils
+  and `rtcall` as reflect and vet's asmdecl do: on arm64 they start at
+  8(RSP)): `debugCallV2` reads `debugCallCheck`'s result at 16(SP)
+  (amd64, a frame of 160 bytes) and 24(RSP) (arm64, registers saved from
+  48(RSP)). The compare stubs of the other 64-bit targets had a wrong
+  argument size for `Compare` since the first commit.
+
+Not on wasm (linear or GOWASM=gc), whose goroutines never run in
+parallel, nor with 4-byte words: there a string is aligned to a word.
+
+## 7. Other targets
+
+### 7.1 4-byte words
 
 386, arm and mips: stock Go's two words, never inline
 (`abi.StringInlineCap` is 0).
 
-### 6.2 wasm32: 16 bytes, 15 inline
+### 7.2 wasm32: 16 bytes, 15 inline
 
 With 4-byte words on WebAssembly a string is **16 bytes, aligned to 4**,
 seen as two `uint64`s, A at offset 0 and B at offset 8:
@@ -191,7 +228,7 @@ pointer and A overlap. In an interface a string is spread as word 0's
 pointer in the data word and A and B in the 16-byte payload (not in a
 row, as the 8-byte form is), so `any(s)` does not allocate.
 
-### 6.3 GOWASM=gc with 8-byte words
+### 7.3 GOWASM=gc with 8-byte words
 
 The struct model (`GOWASM=gc`) and `GOWASM=gc,split,ptr64` keep the
 three-word form (`types.StringWasmGC64`): word 0 the address or nil (a

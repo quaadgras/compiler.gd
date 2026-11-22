@@ -5,7 +5,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB), NOSPLIT, $0-40
+TEXT ·Compare(SB), NOSPLIT, $0-56
 	Get SP
 	I64Load a_base+0(FP)
 	I64Load a_len+8(FP)

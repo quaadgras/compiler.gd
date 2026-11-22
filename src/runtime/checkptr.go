@@ -21,7 +21,10 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 	// Note that we allow unaligned pointers if the types they point to contain
 	// no pointers themselves. See issue 37298.
 	// TODO(mdempsky): What about fieldAlign?
-	if elem.Pointers() && uintptr(p)&(uintptr(elem.Align_)-1) != 0 {
+	// (gd: pointers need no more than their own alignment; a string,
+	// aligned to 16 with 8-byte words for a 16-byte access, is only
+	// aligned to 8 in a stack frame: doc/gd/sso-string.md.)
+	if elem.Pointers() && uintptr(p)&(uintptr(min(elem.Align_, goarch.PtrSize))-1) != 0 {
 		throw("checkptr: misaligned pointer conversion")
 	}
 

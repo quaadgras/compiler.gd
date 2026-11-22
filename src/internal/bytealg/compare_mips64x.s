@@ -7,7 +7,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB),NOSPLIT,$0-40
+TEXT ·Compare(SB),NOSPLIT,$0-56
 	MOVV	a_base+0(FP), R3
 	MOVV	b_base+24(FP), R4
 	MOVV	a_len+8(FP), R1

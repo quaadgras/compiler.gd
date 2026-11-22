@@ -1317,6 +1317,24 @@ func stringLenWord(arch *sys.Arch) int64 {
 	return 1
 }
 
+// stringAlign is the alignment of a string: 16 with 8-byte words, so that
+// a string is loaded and stored with one 16-byte access, but on wasm
+// (cmd/compile/internal/types's StringAligned16).
+func stringAlign(arch *sys.Arch) int64 {
+	if arch.PtrSize == 8 && arch.Family != sys.Wasm {
+		return 16
+	}
+	return int64(arch.PtrSize)
+}
+
+// alignString pads s, a structure being laid out, to the alignment of
+// a string, which is added next.
+func alignString(arch *sys.Arch, s *loader.SymbolBuilder) {
+	for s.Size()%stringAlign(arch) != 0 {
+		s.AddUint8(0)
+	}
+}
+
 // addStringRest adds the words of a string after its pointer to s, for
 // a string of length n that is not inline.
 func addStringRest(arch *sys.Arch, s *loader.SymbolBuilder, n uint64) {
@@ -1348,6 +1366,7 @@ func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symnam
 	sdata.SetType(sym.SRODATA)
 	sdata.SetSize(int64(len(str)))
 	sdata.SetData([]byte(str))
+	alignString(ctxt.Arch, s)
 	s.AddAddr(ctxt.Arch, sdata.Sym())
 	addStringRest(ctxt.Arch, s, uint64(len(str)))
 }

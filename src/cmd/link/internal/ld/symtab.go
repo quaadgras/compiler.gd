@@ -723,7 +723,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 		}
 		slice(pkghashes.Sym(), uint64(len(ctxt.Library)))
 	} else {
-		// gd: empty string field is 3 words (ptr, hash, len).
+		alignString(ctxt.Arch, moduledata)
 		moduledata.AddUint(ctxt.Arch, 0) // pluginpath.ptr
 		addStringRest(ctxt.Arch, moduledata, 0)
 		nilSlice() // pkghashes slice
@@ -774,7 +774,7 @@ func (ctxt *Link) symtab(pcln *pclntab) []sym.SymKind {
 
 		slice(modulehashes.Sym(), uint64(len(ctxt.Shlibs)))
 	} else {
-		// gd: empty string field is 3 words (ptr, hash, len).
+		alignString(ctxt.Arch, moduledata)
 		moduledata.AddUint(ctxt.Arch, 0) // modulename.ptr
 		addStringRest(ctxt.Arch, moduledata, 0)
 		nilSlice() // modulehashes slice

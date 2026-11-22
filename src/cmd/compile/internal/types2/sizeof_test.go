@@ -36,18 +36,18 @@ func TestSizeof(t *testing.T) {
 		{term{}, 28, 40},
 
 		// Objects (all embed `object`, which has 1 string field "name")
-		{PkgName{}, 72, 112},
-		{Const{}, 92, 136},
-		{TypeName{}, 68, 104},
-		{Var{}, 76, 120},
-		{Func{}, 76, 120},
-		{Label{}, 72, 112},
-		{Builtin{}, 72, 112},
-		{Nil{}, 68, 104},
+		{PkgName{}, 72, 128},
+		{Const{}, 92, 144},
+		{TypeName{}, 68, 112},
+		{Var{}, 76, 128},
+		{Func{}, 76, 128},
+		{Label{}, 72, 128},
+		{Builtin{}, 72, 128},
+		{Nil{}, 68, 112},
 
 		// Misc
-		{Scope{}, 60, 104}, // +1 string (comment)
-		{Package{}, 44, 88},
+		{Scope{}, 60, 112}, // +1 string (comment)
+		{Package{}, 44, 96},
 		{_TypeSet{}, 28, 56},
 	}
 

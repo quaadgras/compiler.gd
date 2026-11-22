@@ -339,16 +339,9 @@ func writeMapType(gd *base.Invocation, t *types.Type, lsym *obj.LSym, c rttype.C
 		elemsOff = keysOff + elemOffInSlot
 		elemStride = slotSize
 		elemOff = slotTyp.Field(1).Offset
-		// (These are assumptions of internal/runtime/maps, which
-		// GOWASM=gc's runtime does without: it has maps of its own.)
-		gcwasm := buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC
-		if types.AlgType(gd, t.Key()) == types.AMEM && t.Key().Size() == 8 && elemOff != 8 && !gcwasm {
-			gd.Fatalf("runtime assumes elemOff for 8-byte keys is 8, got %d", elemOff)
-		}
-		if types.AlgType(gd, t.Key()) == types.ASTRING && elemOff != types.StringSize && !gcwasm {
-			// gd small-string optimization: string header is 3 words (24 B).
-			gd.Fatalf("runtime assumes elemOff for string keys is %d, got %d", types.StringSize, elemOff)
-		}
+		// (gd: internal/runtime/maps reads ElemOff for 8-byte and
+		// string keys: an element aligned to 16, which a string is
+		// with 8-byte words, is at 16.)
 	}
 
 	c.Field("Key").WritePtr(s1)

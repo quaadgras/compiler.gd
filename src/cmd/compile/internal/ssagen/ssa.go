@@ -7200,7 +7200,10 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	}
 
 	// Write args to the stack
-	off := s.gd.Ctxt.Arch.FixedFrameSize
+	// (Aligned from where the arguments start, as abiutils does: a
+	// string is aligned to 16.)
+	base := s.gd.Ctxt.Arch.FixedFrameSize
+	off := int64(0)
 	var callArgs []*ssa.Value
 	var callArgTypes []*types.Type
 
@@ -7227,7 +7230,7 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 		b := s.endBlock()
 		b.Kind = ssa.BlockExit
 		b.SetControl(call)
-		call.AuxInt = off - s.gd.Ctxt.Arch.FixedFrameSize
+		call.AuxInt = off
 		if len(results) > 0 {
 			s.Fatalf("panic call can't have results")
 		}
@@ -7244,7 +7247,7 @@ func (s *state) rtcall(fn *obj.LSym, returns bool, results []*types.Type, args .
 	off = types.RoundUp(off, int64(types.PtrSize))
 
 	// Remember how much callee stack space we needed.
-	call.AuxInt = off
+	call.AuxInt = base + off
 
 	return res
 }

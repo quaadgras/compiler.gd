@@ -233,20 +233,20 @@ func (s *StdSizes) Sizeof(T Type) int64 {
 // common architecture word sizes and alignments
 var gcArchSizes = map[string]*gcSizes{
 	"386":      {WordSize: 4, MaxAlign: 4},
-	"amd64":    {WordSize: 8, MaxAlign: 8},
+	"amd64":    {WordSize: 8, MaxAlign: 8, stringAlign: 16},
 	"amd64p32": {WordSize: 4, MaxAlign: 8},
 	"arm":      {WordSize: 4, MaxAlign: 4},
-	"arm64":    {WordSize: 8, MaxAlign: 8},
-	"loong64":  {WordSize: 8, MaxAlign: 8},
+	"arm64":    {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"loong64":  {WordSize: 8, MaxAlign: 8, stringAlign: 16},
 	"mips":     {WordSize: 4, MaxAlign: 4},
 	"mipsle":   {WordSize: 4, MaxAlign: 4},
-	"mips64":   {WordSize: 8, MaxAlign: 8},
-	"mips64le": {WordSize: 8, MaxAlign: 8},
-	"ppc64":    {WordSize: 8, MaxAlign: 8},
-	"ppc64le":  {WordSize: 8, MaxAlign: 8},
-	"riscv64":  {WordSize: 8, MaxAlign: 8},
-	"s390x":    {WordSize: 8, MaxAlign: 8},
-	"sparc64":  {WordSize: 8, MaxAlign: 8},
+	"mips64":   {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"mips64le": {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"ppc64":    {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"ppc64le":  {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"riscv64":  {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"s390x":    {WordSize: 8, MaxAlign: 8, stringAlign: 16},
+	"sparc64":  {WordSize: 8, MaxAlign: 8, stringAlign: 16},
 	"wasm":     {WordSize: 8, MaxAlign: 8},
 	// When adding more architectures here,
 	// update the doc string of SizesFor below.
@@ -336,9 +336,10 @@ func (conf *Config) sizeof(T Type) int64 {
 }
 
 // align returns the smallest y >= x such that y % a == 0.
-// a must be within 1 and 8 and it must be a power of 2.
+// a must be within 1 and 16 and it must be a power of 2 (gd: a string
+// is aligned to 16 with 8-byte words).
 // The result may be negative due to overflow.
 func align(x, a int64) int64 {
-	assert(x >= 0 && 1 <= a && a <= 8 && a&(a-1) == 0)
+	assert(x >= 0 && 1 <= a && a <= 16 && a&(a-1) == 0)
 	return (x + a - 1) &^ (a - 1)
 }

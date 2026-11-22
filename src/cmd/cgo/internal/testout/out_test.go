@@ -58,7 +58,7 @@ var wantAligns = map[string]int{
 	"ReturnOnlyInt":       goarch.PtrSize,
 	"ReturnOnlyPtr":       goarch.PtrSize,
 	"ReturnByteSlice":     goarch.PtrSize,
-	"ReturnString":        goarch.PtrSize,
+	"ReturnString":        2 * goarch.PtrSize / (8 / goarch.PtrSize), // gd: a string is aligned to 16 with 8-byte words
 	"InputAndReturnUint8": 1,
 	"MixedTypes":          goarch.PtrSize,
 }

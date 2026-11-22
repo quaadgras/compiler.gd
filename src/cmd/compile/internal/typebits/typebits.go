@@ -23,8 +23,10 @@ func SetNoCheck(t *types.Type, off int64, bv bitvec.BitVec) {
 }
 
 func set(t *types.Type, off int64, bv bitvec.BitVec, skip bool) {
-	if !skip && uint8(t.Alignment()) > 0 && off&int64(uint8(t.Alignment())-1) != 0 {
-		fatal.Error("typebits.Set: invalid initial alignment: type %v has alignment %d, but offset is %v", t, uint8(t.Alignment()), off)
+	// (The offset may be in a stack frame, aligned to a register:
+	// types.StackAlignment.)
+	if a := types.StackAlignment(t); !skip && uint8(a) > 0 && off&int64(uint8(a)-1) != 0 {
+		fatal.Error("typebits.Set: invalid initial alignment: type %v has alignment %d, but offset is %v", t, uint8(a), off)
 	}
 	if !t.HasPointers() {
 		// Note: this case ensures that pointers to not-in-heap types
