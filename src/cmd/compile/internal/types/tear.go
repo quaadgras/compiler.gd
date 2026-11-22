@@ -22,3 +22,20 @@ func HasTearable(t *Type) bool {
 	}
 	return false
 }
+
+// HasIface reports whether a value of type t holds an interface.
+func HasIface(t *Type) bool {
+	switch {
+	case t.IsInterface():
+		return true
+	case t.IsArray():
+		return t.NumElem() > 0 && HasIface(t.Elem())
+	case t.IsStruct():
+		for _, f := range t.Fields() {
+			if HasIface(f.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -594,6 +594,9 @@ func reflect_rselect(cases []runtimeSelect) (int, bool) {
 		case selectSend:
 			j = nsends
 			nsends++
+			if rc.ch != nil {
+				rc.val = ifaceCopy(rc.ch.elemtype, rc.val)
+			}
 		case selectRecv:
 			nrecvs++
 			j = len(cases) - nrecvs

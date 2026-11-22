@@ -19,6 +19,13 @@ import (
 // stack checks the sequence lock of its 64-byte block before and after, inline; a
 // store there calls the runtime, which takes the locks if the memory is
 // shared.
+//
+// Without the sharing experiment (GOEXPERIMENT=sharing) the values are
+// the interfaces alone (s.ifaceOnly), and a store of one takes the lock
+// of its block wherever it is but in the stack, inline (shareStoreIface).
+// A value that holds interfaces is stored field by field, each interface
+// whole, as it is loaded (shareLoad); one too large for that is copied or
+// cleared by the runtime, which locks by type.
 
 const (
 	shareBlockShift = 6       // a lock for every 64 bytes, 64 bytes apart
@@ -55,7 +62,27 @@ func algFunc(fn *ir.Func) bool {
 // tearGuard reports whether a value of type t at addr is loaded and
 // stored under the sequence locks.
 func (s *state) tearGuard(t *types.Type, addr *ssa.Value) bool {
-	return s.tear && !s.dstLocal && !ssa.IsStackAddr(addr) && types.HasTearable(t) && !s.unpublished(addr)
+	return s.tear && !s.dstLocal && !isStackAddr(addr) && s.tearable(t) && !s.unpublished(addr)
+}
+
+// isStackAddr is ssa.IsStackAddr, which also sees through the nil checks
+// that are still there when the stores are made (p := &T{...} in the
+// stack; p.f = x).
+func isStackAddr(v *ssa.Value) bool {
+	for v.Op == ssa.OpOffPtr || v.Op == ssa.OpAddPtr || v.Op == ssa.OpPtrIndex || v.Op == ssa.OpCopy || v.Op == ssa.OpNilCheck {
+		v = v.Args[0]
+	}
+	return ssa.IsStackAddr(v)
+}
+
+// tearable reports whether a value of type t holds values that the
+// function loads and stores whole: slices, strings and interfaces, or
+// the interfaces alone.
+func (s *state) tearable(t *types.Type) bool {
+	if s.ifaceOnly {
+		return types.HasIface(t)
+	}
+	return types.HasTearable(t)
 }
 
 // localExpr reports whether n designates memory that escape analysis
@@ -536,6 +563,10 @@ func (s *state) shareUnlock(locked, dst *ssa.Value, size int64) {
 // is there now, and a store of the whole slice otherwise: another
 // goroutine may have stored a shorter one since this one was loaded.
 func (s *state) shareStoreType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
+	if s.ifaceOnly {
+		s.shareStoreParts(t, left, right, leftIsStmt)
+		return
+	}
 	if skip == 0 && s.gd.Debug.NoGroup == 0 && (t.IsString() || t.IsSlice() || t.IsInterface()) {
 		// The whole of a string, a slice or an interface: the
 		// runtime stores it if the memory is shared, and this
@@ -662,8 +693,119 @@ func (s *state) shareFits(left, right *ssa.Value, skip skipMask) *ssa.Value {
 	return s.newValue2(s.ssaOp(ir.OLE, types.Types[types.TUINT]), types.Types[types.TBOOL], n, capNow)
 }
 
+// shareStoreParts is storeType for a value that holds interfaces, by
+// itself an SSA value, without the sharing analysis: each interface is
+// stored whole, and the rest as it is (the value is loaded the same way:
+// shareLoad).
+func (s *state) shareStoreParts(t *types.Type, left, right *ssa.Value, leftIsStmt bool) {
+	switch {
+	case t.IsInterface():
+		s.shareStoreIface(t, left, right, leftIsStmt)
+	case !types.HasIface(t):
+		s.rawStoreType(t, left, right, 0, leftIsStmt)
+	case t.IsStruct():
+		for i, f := range t.Fields() {
+			if f.Type.Size() == 0 {
+				continue
+			}
+			addr := s.newValue1I(ssa.OpOffPtr, f.Type.PtrTo(), f.Offset, left)
+			s.shareStoreParts(f.Type, addr, s.newValue1I(ssa.OpStructSelect, f.Type, int64(i), right), leftIsStmt)
+		}
+	case t.IsArray() && t.NumElem() == 1:
+		s.shareStoreParts(t.Elem(), left, s.newValue1I(ssa.OpArraySelect, t.Elem(), 0, right), leftIsStmt)
+	default:
+		s.Fatalf("shareStoreParts of %v", t)
+	}
+}
+
+// ifaceLockInline reports whether the target takes the lock of an
+// interface's store inline (shareStoreIface); the others call the runtime.
+func ifaceLockInline(f sys.ArchFamily) bool {
+	return f == sys.AMD64 || f == sys.ARM64
+}
+
+// shareStoreIface stores the interface right at left, which is not in the
+// stack, under the sequence lock of left's block: the one that a load of
+// it checks (shareLoad), and that the runtime takes for a copy of more.
+//
+//	seq := &runtime.shareSeq[left's block]
+//	v := *seq &^ 1
+//	if CAS(seq, v, v+1) {    // likely: no store in that block now
+//		*left = right
+//		*seq = v + 2      // a release store
+//	} else {
+//		runtime.ifacestore(left, right)
+//	}
+//
+// The goroutine must not stop while it holds the lock: one that waits for
+// it may be unable to let it run again (one P), so the code between the
+// CAS and the release, write barrier included, is not a place where it
+// may be preempted (ShareLocked and ShareUnlocked mark it for liveness),
+// and nothing there can fault or call but the write barrier: the pointer
+// is checked for nil first, and the value is computed before.
+//
+// The lock is found from the address, and taken and given back by the
+// same code with nothing between that can move the stack: an address in
+// the stack that is not known to be one is locked and unlocked alike.
+func (s *state) shareStoreIface(t *types.Type, left, right *ssa.Value, leftIsStmt bool) {
+	if !ifaceLockInline(s.gd.Ctxt.Arch.Family) {
+		s.rtcall(ir.Syms(s.gd).IfaceStore, true, nil, left, right)
+		return
+	}
+	left = s.nilCheck(left)
+	u32 := types.Types[types.TUINT32]
+	seq := s.shareSeqAddr(left)
+	v := s.newValue2(ssa.OpAnd32, u32, s.rawLoad(u32, seq), s.constInt32(u32, ^1))
+	cas := s.newValue4(ssa.OpAtomicCompareAndSwap32, types.NewTuple(types.Types[types.TBOOL], types.TypeMem), seq, v, s.newValue2(ssa.OpAdd32, u32, v, s.constInt32(u32, 1)), s.mem())
+	s.vars[memVar] = s.newValue1(ssa.OpSelect1, types.TypeMem, cas)
+	locked := s.newValue1(ssa.OpSelect0, types.Types[types.TBOOL], cas)
+
+	bLocked := s.f.NewBlock(ssa.BlockPlain)
+	bSlow := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(locked)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bLocked)
+	b.AddEdgeTo(bSlow)
+
+	s.startBlock(bLocked)
+	s.vars[memVar] = s.newValue1(ssa.OpShareLocked, types.TypeMem, s.mem())
+	if s.gd.Ctxt.Arch.Family == sys.ARM64 {
+		// DMB ISHST: the lock is seen held before the stores are seen.
+		s.vars[memVar] = s.newValue1I(ssa.OpARM64DMB, types.TypeMem, 0xa, s.mem())
+	}
+	s.rawStoreType(t, left, right, 0, leftIsStmt)
+	unlocked := s.newValue2(ssa.OpAdd32, u32, v, s.constInt32(u32, 2))
+	if s.gd.Ctxt.Arch.Family == sys.AMD64 {
+		// Stores are seen in their order: a plain store releases.
+		s.store(u32, seq, unlocked)
+	} else {
+		s.vars[memVar] = s.newValue3(ssa.OpAtomicStore32, types.TypeMem, seq, unlocked, s.mem())
+	}
+	s.vars[memVar] = s.newValue1(ssa.OpShareUnlocked, types.TypeMem, s.mem())
+	s.endBlock().AddEdgeTo(bDone)
+
+	// Another store holds the lock: the runtime waits for it.
+	s.startBlock(bSlow)
+	s.rtcall(ir.Syms(s.gd).IfaceStore, true, nil, left, right)
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+}
+
 // shareZero is zero for a value tearGuard says to guard.
 func (s *state) shareZero(t *types.Type, dst *ssa.Value) {
+	if s.ifaceOnly {
+		if ssa.CanSSA(t) {
+			s.shareStoreParts(t, dst, s.zeroVal(t), false)
+			return
+		}
+		// The runtime clears each interface whole.
+		s.rtcall(ir.Syms(s.gd).TypedArrayClear, true, nil, s.reflectType(t), dst, s.constInt(types.Types[types.TUINTPTR], 1))
+		return
+	}
 	locked := s.shareLock(dst, t.Size())
 	s.rawZero(t, dst)
 	s.shareUnlock(locked, dst, t.Size())
@@ -673,11 +815,13 @@ func (s *state) shareZero(t *types.Type, dst *ssa.Value) {
 // than one word, when dst or src is not in the stack.
 func (s *state) shareMove(t *types.Type, dst, src *ssa.Value) {
 	// (Memory no other goroutine can reach is as good as the stack.)
-	srcStack, dstStack := ssa.IsStackAddr(src), ssa.IsStackAddr(dst) || s.dstLocal
+	srcStack, dstStack := isStackAddr(src), isStackAddr(dst) || s.dstLocal
 	switch {
 	case dstStack:
 		s.shareLoadMem(t, dst, src)
-	case srcStack:
+	case srcStack && s.ifaceOnly && ssa.CanSSA(t):
+		s.shareStoreParts(t, dst, s.rawLoad(t, src), false)
+	case srcStack && !s.ifaceOnly:
 		// The calls must not write over a call's results, which
 		// are where the next call's arguments go.
 		if isCallResultAddr(src) {
@@ -692,7 +836,17 @@ func (s *state) shareMove(t *types.Type, dst, src *ssa.Value) {
 		s.rawMove(t, dst, src)
 		s.shareUnlock(locked, dst, t.Size())
 	default:
-		// The runtime reads the one whole and writes the other whole.
+		// The runtime reads the one whole and writes the other whole
+		// (without the analysis, also if it is a stack's).
+		if srcStack && isCallResultAddr(src) {
+			// (As above.)
+			tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, t)
+			tmp.SetAddrtaken(true)
+			s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+			tmpAddr := s.addr(tmp)
+			s.rawMove(t, tmpAddr, src)
+			src = tmpAddr
+		}
 		s.rtcall(ir.Syms(s.gd).ShareTypedmemmove, true, nil, s.reflectType(t), dst, src)
 		s.curfn.SetWBPos(s.gd, s.peekPos())
 	}

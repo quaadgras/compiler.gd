@@ -409,6 +409,12 @@ var genericOps = []opData{
 	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
 	{name: "WBend", argLength: 1, typ: "Mem"},                  // Write barrier code is done, interrupting is now allowed.
 
+	// A sequence lock is held from ShareLocked, whose memory is that of
+	// the compare-and-swap that took it, to ShareUnlocked, after the
+	// store that gave it back (ssagen's shareStoreIface): no interrupting.
+	{name: "ShareLocked", argLength: 1, typ: "Mem"},
+	{name: "ShareUnlocked", argLength: 1, typ: "Mem"},
+
 	// WB invokes runtime.gcWriteBarrier.  This is not a normal
 	// call: it takes arguments in registers, doesn't clobber
 	// general-purpose registers (the exact clobber set is

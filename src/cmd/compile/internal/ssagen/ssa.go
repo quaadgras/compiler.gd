@@ -251,6 +251,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).ShareLoadIface = typecheck.LookupRuntimeFunc(gd, "shareloadiface")
 	ir.Syms(gd).ShareLoadMem = typecheck.LookupRuntimeFunc(gd, "shareloadmem")
 	ir.Syms(gd).ShareTypedmemmove = typecheck.LookupRuntimeFunc(gd, "sharetypedmemmove")
+	ir.Syms(gd).TypedArrayClear = typecheck.LookupRuntimeFunc(gd, "typedarrayclear")
+	ir.Syms(gd).IfaceStore = typecheck.LookupRuntimeFunc(gd, "ifacestore")
 	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
 	ir.Syms(gd).SharePages = typecheck.LookupRuntimeVar(gd, "sharePages") // [1 << 20]uint8
 	ir.Syms(gd).ShareSeqLoad = typecheck.LookupRuntimeFunc(gd, "shareseqload")
@@ -425,8 +427,9 @@ func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool)
 	defer s.popLine()
 
 	s.hasdefer = fn.HasDefer()
-	s.tear = gd.Sharing && gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
+	s.tear = gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
 		(algFunc(fn) || gd.Flag.WB && !gd.Flag.CompilingRuntime && tearFunc(fn))
+	s.ifaceOnly = !gd.Sharing
 	if fn.Pragma&ir.CgoUnsafeArgs != 0 {
 		s.cgoUnsafeArgs = true
 	}
@@ -1338,6 +1341,10 @@ type state struct {
 	// tear is whether values of more than one word are loaded and
 	// stored whole where goroutines may race on them (share.go).
 	tear bool
+	// ifaceOnly is whether those are the interfaces alone, wherever
+	// they are but in the stack, as they are without the sharing
+	// experiment (GOEXPERIMENT=sharing, off by default).
+	ifaceOnly bool
 
 	// dstLocal is set while the stores being generated are in memory
 	// that no other goroutine can reach (localExpr).
@@ -2877,7 +2884,13 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		// Cases where this is happening must pass mayOverlap to false.
 		// (Currently this only happens when unmarshaling results of a call.)
 		if t.HasPointers() {
-			s.rtcall(ir.Syms(s.gd).Typedmemmove, true, nil, s.reflectType(t), dst, src)
+			fn := ir.Syms(s.gd).Typedmemmove
+			if s.tear && s.tearable(t) {
+				// (Whole, where values of more than one word
+				// are: memmove's direction too.)
+				fn = ir.Syms(s.gd).ShareTypedmemmove
+			}
+			s.rtcall(fn, true, nil, s.reflectType(t), dst, src)
 			// We would have otherwise implemented this move with straightline code,
 			// including a write barrier. Pretend we issue a write barrier here,
 			// so that the write barrier tests work. (Otherwise they'd need to know
@@ -2889,7 +2902,7 @@ func (s *state) moveWhichMayOverlap(t *types.Type, dst, src *ssa.Value, mayOverl
 		ssa.LogLargeCopy(s.gd, s.f.Name, s.peekPos(), t.Size())
 		return
 	}
-	if s.tear && types.HasTearable(t) && !(ssa.IsStackAddr(dst) && ssa.IsStackAddr(src)) {
+	if s.tear && s.tearable(t) && !(isStackAddr(dst) && isStackAddr(src)) {
 		s.shareMove(t, dst, src)
 		return
 	}
@@ -4861,7 +4874,7 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 		n := n.(*ir.UnaryExpr)
 		// Note: all constant cases are handled by the frontend. If len or cap
 		// makes it here, we want the side effects of the argument. See issue 72844.
-		if x := n.X; s.tear && x.Type().IsSlice() && !s.canSSA(x) && ir.IsAddressable(x) {
+		if x := n.X; s.tear && !s.ifaceOnly && x.Type().IsSlice() && !s.canSSA(x) && ir.IsAddressable(x) {
 			// One word of a slice in memory: no other word to be
 			// loaded with.
 			switch x.Op() {
@@ -5260,7 +5273,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 	// In shared memory, the slice and the elements are stored under one
 	// lock where each store would have its own: see appendGrouped.
 	grouped := false
-	if inplace && s.tear && s.gd.Debug.NoGroup == 0 && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
+	if inplace && s.tear && !s.ifaceOnly && s.gd.Debug.NoGroup == 0 && !hdrLocal && !elemLocal && types.HasTearable(et) && ssa.CanSSA(et) &&
 		len(n.Args) > 1 && int64(len(n.Args)-1)*et.Size() <= 256 && !ssa.IsStackAddr(addr) && !s.unpublished(addr) {
 		grouped = true
 		for _, a := range n.Args[1:] {
@@ -8996,7 +9009,7 @@ func genssa(gd *base.Invocation, f *ssa.Func, pp *objw.Progs) {
 			case ssa.OpGetG:
 				// nothing to do when there's a g register,
 				// and checkLower complains if there's not
-			case ssa.OpVarDef, ssa.OpVarLive, ssa.OpKeepAlive, ssa.OpWBend:
+			case ssa.OpVarDef, ssa.OpVarLive, ssa.OpKeepAlive, ssa.OpWBend, ssa.OpShareLocked, ssa.OpShareUnlocked:
 				// nothing to do; already used by liveness
 			case ssa.OpPhi:
 				CheckLoweredPhi(v)

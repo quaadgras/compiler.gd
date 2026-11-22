@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2229,3 +2230,286 @@ func (deepPlants) SpoilDeep(n *deepNode) { n.name.obj = deepPlanted }
 
 //go:noinline
 func deepSpoil(w deepSpoiler, n *deepNode) { w.SpoilDeep(n) }
+
+// Interfaces are loaded and stored whole by default, without the sharing
+// analysis: wherever they are but in the stack (runtime/shared.go). The
+// tests below race goroutines that store interfaces of every
+// representation (a pointer, a float64 and an array of two words inline, a
+// string and a slice spread over the words) with goroutines that load them
+// and check that the type and the payload go together. With
+// -gcflags=all=-d=notear they fail.
+
+type ifaceTearPtr struct{ a, b int }
+
+var (
+	ifaceTearLong  = strings.Repeat("z", 5000)
+	ifaceTearShort = []int{7, 7}
+	ifaceTearBig   = func() []int {
+		s := make([]int, 4096)
+		for i := range s {
+			s[i] = 7
+		}
+		return s
+	}()
+	ifaceTearVals = [...]any{
+		&ifaceTearPtr{1, 2},
+		1.5,
+		[2]int64{7, 7},
+		"ab",
+		ifaceTearLong,
+		ifaceTearShort,
+		ifaceTearBig,
+		&ifaceTearPtr{2, 1},
+	}
+)
+
+// ifaceTearCheck reports what is wrong with v, which was loaded from where
+// only the values of ifaceTearVals and nil are stored.
+func ifaceTearCheck(v any) string {
+	switch x := v.(type) {
+	case nil:
+	case *ifaceTearPtr:
+		if x.a+x.b != 3 {
+			return "pointer"
+		}
+	case float64:
+		if x != 1.5 {
+			return "float64"
+		}
+	case [2]int64:
+		if x != [2]int64{7, 7} {
+			return "array"
+		}
+	case string:
+		if x != "ab" && (len(x) != 5000 || x[0] != 'z' || x[4999] != 'z') {
+			return "string"
+		}
+	case []int:
+		if len(x) != 2 && len(x) != 4096 || cap(x) != len(x) || x[0] != 7 || x[len(x)-1] != 7 {
+			return "slice"
+		}
+	default:
+		return "type"
+	}
+	return ""
+}
+
+// ifaceTearRace runs writers, which call store with each value in turn,
+// and readers, which check what load returns, n times each.
+func ifaceTearRace(t *testing.T, store func(i int, v any), load func(i int) any) {
+	if runtime.GOARCH == "wasm" {
+		t.Skip("goroutines do not race on wasm")
+	}
+	const G = 8
+	n := 200000
+	if testing.Short() {
+		n = 50000
+	}
+	var wg sync.WaitGroup
+	var bad atomic.Value
+	for id := 0; id < G; id++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				switch e := recover().(type) {
+				case nil:
+				case string:
+					bad.CompareAndSwap(nil, "panic: "+e)
+				case error:
+					bad.CompareAndSwap(nil, "panic: "+e.Error())
+				default:
+					bad.CompareAndSwap(nil, "panic")
+				}
+			}()
+			for i := 0; i < n && bad.Load() == nil; i++ {
+				if id%2 == 0 {
+					store(i, ifaceTearVals[(i+id/2)%len(ifaceTearVals)])
+					continue
+				}
+				if msg := ifaceTearCheck(load(i)); msg != "" {
+					bad.CompareAndSwap(nil, msg)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if msg := bad.Load(); msg != nil {
+		t.Fatalf("torn interface: %s", msg)
+	}
+}
+
+var ifaceTearGlobal any
+
+type ifaceTearStruct struct {
+	pad [5]int64 // (V is in two blocks of 64 bytes, if the struct is aligned)
+	V   any
+}
+
+// ifaceTearPair is loaded and stored in registers, field by field.
+type ifaceTearPair struct {
+	n int
+	v any
+}
+
+// ifaceTearLarge is copied in memory, not in registers.
+type ifaceTearLarge struct {
+	a [5]int
+	v any
+	b [5]int
+	w any
+}
+
+func TestIfaceTear(t *testing.T) {
+	t.Run("global", func(t *testing.T) {
+		ifaceTearRace(t, func(_ int, v any) { ifaceTearGlobal = v }, func(int) any { return ifaceTearGlobal })
+	})
+	t.Run("field", func(t *testing.T) {
+		p := runtime.HeapNew[ifaceTearStruct]()
+		ifaceTearRace(t, func(_ int, v any) { p.V = v }, func(int) any { return p.V })
+	})
+	t.Run("element", func(t *testing.T) {
+		s := make([]any, 3)
+		other := []any{nil, &ifaceTearPtr{1, 2}, "ab"}
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 64 {
+			case 0:
+				clear(s)
+			case 1:
+				copy(s, other)
+			case 2:
+				// growslice reads the elements.
+				if s2 := append(s, v); ifaceTearCheck(s2[1]) != "" {
+					panic("append")
+				}
+			default:
+				s[1] = v
+			}
+		}, func(int) any { return s[1] })
+	})
+	t.Run("map", func(t *testing.T) {
+		// A map is not for goroutines that race on it: they lock it.
+		// What is stored in it, and what it is loaded in, race.
+		var mu sync.Mutex
+		m := map[int]any{}
+		in, out := runtime.HeapNew[ifaceTearStruct](), runtime.HeapNew[ifaceTearStruct]()
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 3 {
+			case 0:
+				in.V = v
+			case 1:
+				mu.Lock()
+				m[i%4] = in.V
+				mu.Unlock()
+			case 2:
+				mu.Lock()
+				out.V = m[i%4]
+				mu.Unlock()
+			}
+		}, func(i int) any {
+			if i%2 == 0 {
+				return out.V
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			return m[i%4]
+		})
+	})
+	t.Run("reflect", func(t *testing.T) {
+		p := runtime.HeapNew[ifaceTearStruct]()
+		src := runtime.HeapNew[ifaceTearStruct]()
+		rv := reflect.ValueOf(p).Elem().Field(1)
+		rsrc := reflect.ValueOf(src).Elem().Field(1)
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 4 {
+			case 0:
+				rv.Set(reflect.ValueOf(v))
+			case 1:
+				src.V = v
+			case 2:
+				rv.Set(rsrc)
+			case 3:
+				if i%32 == 3 {
+					rv.SetZero()
+				} else {
+					rv.Set(reflect.ValueOf(&v).Elem())
+				}
+			}
+		}, func(i int) any {
+			if i%2 == 0 {
+				return rv.Interface()
+			}
+			if e := rv.Elem(); e.IsValid() {
+				return e.Interface()
+			}
+			return nil
+		})
+	})
+	t.Run("chan", func(t *testing.T) {
+		p := runtime.HeapNew[ifaceTearStruct]()
+		c := make(chan any, 1)
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 3 {
+			case 0:
+				p.V = v
+			case 1:
+				select {
+				case c <- p.V: // sent from where it is stored
+				default:
+				}
+			case 2:
+				select {
+				case p.V = <-c: // received in where it is loaded
+				default:
+				}
+			}
+		}, func(i int) any {
+			if i%2 == 0 {
+				return p.V
+			}
+			select {
+			case v := <-c:
+				return v
+			default:
+				return nil
+			}
+		})
+	})
+	t.Run("struct", func(t *testing.T) {
+		p, q := runtime.HeapNew[ifaceTearPair](), runtime.HeapNew[ifaceTearPair]()
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 3 {
+			case 0:
+				*p = ifaceTearPair{i, v}
+			case 1:
+				*q = *p
+			case 2:
+				*q = ifaceTearPair{}
+			}
+		}, func(i int) any {
+			x := *q
+			return x.v
+		})
+	})
+	t.Run("copy", func(t *testing.T) {
+		p, q := runtime.HeapNew[ifaceTearLarge](), runtime.HeapNew[ifaceTearLarge]()
+		ifaceTearRace(t, func(i int, v any) {
+			switch i % 4 {
+			case 0:
+				*p = ifaceTearLarge{v: v, w: v}
+			case 1:
+				*q = *p
+			case 2:
+				q.w = v
+			case 3:
+				*q = ifaceTearLarge{}
+			}
+		}, func(i int) any {
+			x := *q
+			if i%2 == 0 {
+				return x.v
+			}
+			return x.w
+		})
+	})
+}

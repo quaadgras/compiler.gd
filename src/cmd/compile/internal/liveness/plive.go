@@ -524,6 +524,8 @@ func (lv *Liveness) markUnsafePoints(gd *base.Invocation) {
 		}
 	}
 
+	lv.markShareLocked()
+
 	for _, b := range lv.f.Blocks {
 		for _, v := range b.Values {
 			if v.Op != ssa.OpWBend {
@@ -638,6 +640,78 @@ func (lv *Liveness) markUnsafePoints(gd *base.Invocation) {
 					break
 				}
 				lv.unsafePoints.Set(int32(v.ID))
+			}
+		}
+	}
+}
+
+// markShareLocked marks the code that holds a sequence lock (ssagen's
+// shareStoreIface) unsafe: from the compare-and-swap that may take it, in
+// the block that branches on whether it did, to the ShareUnlocked after
+// the store that gives it back. A goroutine stopped there would keep it,
+// and one that waits for it may be unable to let it run again.
+func (lv *Liveness) markShareLocked() {
+	var locked []*ssa.Value
+	for _, b := range lv.f.Blocks {
+		for _, v := range b.Values {
+			if v.Op == ssa.OpShareLocked {
+				locked = append(locked, v)
+			}
+		}
+	}
+	for _, h := range locked {
+		// The compare-and-swap: ShareLocked's memory is its (with the
+		// marks that the end of its block may have).
+		m := h.MemoryArg()
+		for m.Op == ssa.OpVarDef || m.Op == ssa.OpVarLive {
+			m = m.MemoryArg()
+		}
+		if m.Op != ssa.OpSelect1 || m.Block == h.Block {
+			lv.f.Fatalf("can't find the compare-and-swap before %v: memory %v", h.LongString(), m.LongString())
+		}
+		// The compare-and-swap too: on amd64 its value is the CMPXCHG
+		// and the SETEQ after it, which is after the lock is taken.
+		cas := m.Args[0]
+		found := false
+		for _, v := range cas.Block.Values {
+			found = found || v == cas
+			if found {
+				lv.unsafePoints.Set(int32(v.ID))
+			}
+		}
+		if !found {
+			lv.f.Fatalf("compare-and-swap %v not in its block", cas.LongString())
+		}
+		lv.unsafeBlocks.Set(int32(cas.Block.ID))
+		// Then every block from h's on, up to the ShareUnlocked: the
+		// code between has no way out but to it (the write barrier's
+		// branches join again before).
+		seen := map[*ssa.Block]bool{}
+		work := []*ssa.Block{h.Block}
+		for len(work) > 0 {
+			b := work[len(work)-1]
+			work = work[:len(work)-1]
+			if seen[b] {
+				continue
+			}
+			seen[b] = true
+			ended := false
+			for _, v := range b.Values {
+				lv.unsafePoints.Set(int32(v.ID))
+				if v.Op == ssa.OpShareUnlocked {
+					ended = true
+					break
+				}
+			}
+			if ended {
+				continue
+			}
+			lv.unsafeBlocks.Set(int32(b.ID))
+			if len(b.Succs) == 0 {
+				lv.f.Fatalf("no ShareUnlocked after %v", h.LongString())
+			}
+			for _, e := range b.Succs {
+				work = append(work, e.Block())
 			}
 		}
 	}

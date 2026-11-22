@@ -224,7 +224,7 @@ func reflect_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 		asanread(src, typ.Size_)
 	}
 	publishStore(typ, dst, src)
-	if sharingEnabled && typ.Pointers() {
+	if tearEnabled && typ.Pointers() {
 		shareMove(typ, dst, src, 1)
 		if goexperiment.CgoCheck2 {
 			cgoCheckMemmove2(typ, dst, src, 0, typ.Size_)
@@ -242,7 +242,7 @@ func reflectlite_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 //go:linkname maps_typedmemmove internal/runtime/maps.typedmemmove
 func maps_typedmemmove(typ *_type, dst, src unsafe.Pointer) {
 	publishStore(typ, dst, src)
-	if sharingEnabled && typ.Pointers() {
+	if tearEnabled && typ.Pointers() {
 		shareMove(typ, dst, src, 1)
 		return
 	}
@@ -327,8 +327,8 @@ func typedslicecopy(typ *_type, dstPtr unsafe.Pointer, dstLen int, srcPtr unsafe
 	// and growslice and reflect_typedslicecopy check for pointers
 	// before calling typedslicecopy.
 	size := uintptr(n) * typ.Size_
-	if sharingEnabled {
-		if isShared(dstPtr) {
+	if tearEnabled {
+		if sharingEnabled && isShared(dstPtr) {
 			for i := 0; i < n; i++ {
 				publishValue(typ, add(srcPtr, uintptr(i)*typ.Size_))
 			}
@@ -403,11 +403,17 @@ func typedmemclr(typ *_type, ptr unsafe.Pointer) {
 //
 //go:linkname reflect_typedmemclr reflect.typedmemclr
 func reflect_typedmemclr(typ *_type, ptr unsafe.Pointer) {
+	if shareClearTyped(typ, ptr, 1) {
+		return
+	}
 	typedmemclr(typ, ptr)
 }
 
 //go:linkname maps_typedmemclr internal/runtime/maps.typedmemclr
 func maps_typedmemclr(typ *_type, ptr unsafe.Pointer) {
+	if shareClearTyped(typ, ptr, 1) {
+		return
+	}
 	typedmemclr(typ, ptr)
 }
 
@@ -425,6 +431,9 @@ func reflect_typedmemclrpartial(typ *_type, ptr unsafe.Pointer, off, size uintpt
 
 //go:linkname reflect_typedarrayclear reflect.typedarrayclear
 func reflect_typedarrayclear(typ *_type, ptr unsafe.Pointer, len int) {
+	if shareClearTyped(typ, ptr, uintptr(len)) {
+		return
+	}
 	size := typ.Size_ * uintptr(len)
 	if writeBarrier.enabled && typ.Pointers() {
 		// This always clears whole elements of an array, so it's

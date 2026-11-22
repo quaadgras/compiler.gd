@@ -272,7 +272,9 @@ func dataWord(gd *base.Invocation, conv *ir.ConvExpr, init *ir.Nodes) ir.Node {
 		// with a non-interface, especially in a switch on interface value
 		// with non-interface cases, is not visible to order.stmt, so we
 		// have to fall back on allocating a temp here.
-		if !ir.IsAddressable(n) {
+		if !ir.IsAddressable(n) || tearType(gd, fromType) && !isStackVar(n) {
+			// (The runtime copies it word by word: in the stack,
+			// a value that is loaded whole.)
 			n = copyExpr(gd, n, fromType, init)
 		}
 		fn = typecheck.LookupRuntime(gd, fnname, fromType)

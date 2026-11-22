@@ -737,12 +737,22 @@ var emptyInterfaceSwitchCache = abi.InterfaceSwitchCache{Mask: 0}
 //
 //go:linkname reflect_ifaceE2I reflect.ifaceE2I
 func reflect_ifaceE2I(inter *interfacetype, e eface, dst *iface) {
-	*dst = iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline}
+	storeIface(dst, iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline})
 }
 
 //go:linkname reflectlite_ifaceE2I internal/reflectlite.ifaceE2I
 func reflectlite_ifaceE2I(inter *interfacetype, e eface, dst *iface) {
-	*dst = iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline}
+	storeIface(dst, iface{tab: assertE2I(inter, e._type), data: e.data, inline: e.inline})
+}
+
+// storeIface stores v at dst, whole if dst is not in the stack (a
+// reflect.Value's memory): see ifacestore.
+func storeIface(dst *iface, v iface) {
+	if tearEnabled && !onCurStack(unsafe.Pointer(dst)) {
+		ifacestore((*eface)(unsafe.Pointer(dst)), *(*eface)(unsafe.Pointer(&v)))
+		return
+	}
+	*dst = v
 }
 
 func iterate_itabs(fn func(*itab)) {

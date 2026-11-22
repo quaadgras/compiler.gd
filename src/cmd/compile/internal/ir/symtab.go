@@ -102,6 +102,8 @@ type SymsStruct struct {
 	ShareLoadIface            *obj.LSym
 	ShareLoadMem              *obj.LSym
 	ShareTypedmemmove         *obj.LSym
+	TypedArrayClear           *obj.LSym
+	IfaceStore                *obj.LSym
 	ShareSeq                  *obj.LSym
 	ShareSeqLoad              *obj.LSym
 	SharePages                *obj.LSym

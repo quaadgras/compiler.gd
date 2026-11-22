@@ -236,6 +236,7 @@ func moveSliceNoCapNoScan(elemSize uintptr, old *byte, len int) (*byte, int, int
 func memmove(to *any, frm *any, length uintptr)
 func memclrNoHeapPointers(ptr unsafe.Pointer, n uintptr)
 func memclrHasPointers(ptr unsafe.Pointer, n uintptr)
+func typedarrayclear(typ *byte, ptr unsafe.Pointer, n uintptr)
 
 func memequal(x, y unsafe.Pointer, size uintptr) bool
 func memequal0(x, y unsafe.Pointer) bool

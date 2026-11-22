@@ -403,6 +403,94 @@ them. That costs the optimizations that merge two loads of one field:
 `for i := 0; i < len(p.b); i++ { p.b[i] }` checks its bounds again, where
 `s := p.b` before the loop does not.
 
+### By default: the interfaces, wherever they are
+
+Without the sharing experiment (`GOEXPERIMENT=sharing`, off by default)
+nothing is known to be shared or not, and the interfaces alone are
+guarded, everywhere but in the stack: an interface is four words whose
+payload is what its type word says (`fat-iface.md`), so a torn one is not
+memory safe, and no instruction loads or stores 32 bytes atomically. A
+racing program may load a stale interface, never one made of two. The
+slices and the strings are not guarded, as in Go (they will be 16 bytes,
+and atomic). The guards are their own: on whether or not the experiment
+is, `-gcflags=all=-d=notear` turns them off, for measurements.
+
+- **A load** is the inline sequence check above, unchanged.
+- **A store** of an interface takes the lock of the block where it
+  starts, the one a load checks, inline (`ssagen`'s `shareStoreIface`):
+  a plain load of the lock, a compare-and-swap from even to odd, the four
+  words (with the write barrier), a store of the next even value (a plain
+  `MOV` on amd64, `STLR` on arm64, which also has a `DMB ISHST` after
+  the swap). If the swap fails, `runtime.ifacestore` waits for the lock.
+  No `sharePages` byte, no `isShared`, no publishing. Other targets call
+  `ifacestore` for every store.
+- **Nothing may stop the goroutine while it holds a lock**: one that waits
+  for it may be unable to let it run again (one P, or a stop of the world
+  that waits for the waiter). The code from the swap to the release is
+  marked unsafe for asynchronous preemption (`ShareLocked` and
+  `ShareUnlocked`, which `liveness` reads); the pointer is checked for
+  nil before, and the value is computed before. The swap itself is in it
+  too: on amd64 its `SETEQ` comes after the lock is taken.
+- **A struct or an array that holds interfaces** is stored as it is
+  loaded: field by field, each interface whole under its own lock, when it
+  is an SSA value; zeroed the same way; and copied or cleared by the
+  runtime otherwise (`sharetypedmemmove`, `typedarrayclear`).
+- **The runtime decides by type** (`tearKind`, `tearEnabled`): a value
+  that holds an interface is copied whole wherever it is but in the
+  goroutine's stack (`onCurStack`), shared or not: reflect's and maps'
+  `typedmemmove`, `typedslicecopy` (`copy`, `reflect.Copy`), the old
+  array in `growslice`, `makeslicecopy` and `growsliceBuf`, reflect's
+  and maps' `typedmemclr`, `reflect.Value.Clear`, and `typedarrayclear`,
+  which compiled code calls for `clear(s)` and the loops that do the same
+  where it called `memclrHasPointers` (which has no type). Copies are
+  made a few values at a time (at most 192 bytes) under the locks of both
+  places, taken in the order of their indices, or as `shareRead` does if
+  only the source is guarded; a larger value field by field.
+  `reflect.ifaceE2I` stores whole too.
+- **Where the runtime or reflect reads through an address** they copy
+  whole first: a value sent by `reflect.Value.Send` or `reflect.Select`,
+  a map key from reflect (`ifaceCopy`), the interface `reflect.Value.Elem`
+  decomposes, the interface receiver or argument of `reflect.Value.Call`
+  and of a method value (`ownReceiver`). `reflect.Value.SetZero` stores a
+  nil interface whole. Compiled code passes temporaries of its stack:
+  `addrTemp` copies a value that holds an interface unless it is in a
+  variable of the stack, and so does the boxing in `convT`; a channel
+  receive goes to a temporary.
+- `sync.Pool`'s queues (`//go:notear`) and `atomic.Value` (its own
+  sequence lock, over two `abi.EmptyInterface` slots, which hold no
+  interface type) keep their protocols.
+
+What made the first version of this hang (`log/slog`, `html/template`):
+it took the locks of a store of a struct with `sharelock` and gave them
+back with another call, `shareunlock`, both from the address. For an
+address in the stack that the compiler did not know was one (a
+variadic call's array, a closure's fields behind a nil check), the stack
+could move in between (the second call grew it): the unlock then added
+to another lock, which stayed odd forever, and the first stayed held.
+Now the lock is found once and nothing between takes and gives it back
+that can move the stack; and the nil checks are seen through.
+
+Cost (amd64, 32 cores, default / `-d=notear`, best of 6, 2026-11-22):
+encoding/json CodeEncoder 1.09, CodeDecoder 1.06; fmt with one CPU
+SprintfString 1.15 (the printer's `arg` is stored in a pooled object: one
+`LOCK CMPXCHG` a call), SprintfInt and FprintInt 1.03; net/http
+HeaderWriteSubset and sort StableString1K no change (0.98 to 1.00; no
+interface stores). fmt's parallel benchmarks at 8 CPUs are a few
+nanoseconds and vary by 2x between runs either way. `cmd/gofmt` is 2.8%
+larger (text 4.1%).
+
+`TestIfaceTear` (`runtime/shared_test.go`) races stores of interfaces of
+every representation (pointer, inline float64 and `[2]int64`, spread
+string and slice) with loads, in a global, a field, an element
+(with `clear`, `copy` and `append`), through a map, reflect, a channel,
+and struct copies in registers and in memory; with `-d=notear` every
+subtest fails. With `GOEXPERIMENT=sharing` the compiler is as in the
+sections above; its runtime guards interfaces by type as well.
+
+Not covered yet: a struct that holds an interface passed in registers
+by `reflect.Value.Call` from a Value in memory (read word by word);
+assembly that stores interfaces (none known in std).
+
 ## What the compiler proves (`cmd/compile/internal/escape/shares.go`)
 
 The solver has two more attributes. `attrShares`: the location's address

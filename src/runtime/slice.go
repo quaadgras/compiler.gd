@@ -86,6 +86,11 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 		asanread(from, copymem)
 	}
 
+	if tearEnabled && copymem > 0 && et.Pointers() && (holdsIface(et) && !onCurStack(from) || isShared(from) && tearable(et)) {
+		// Another goroutine may be storing an element.
+		shareCopyFrom(et, to, from, copymem/et.Size_)
+		return to
+	}
 	memmove(to, from, copymem)
 
 	return to
@@ -290,13 +295,9 @@ func growslicel(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, local
 			bulkBarrierPreWriteSrcOnly(uintptr(p), uintptr(oldPtr), lenmem-et.Size_+et.PtrBytes, et)
 		}
 	}
-	if sharingEnabled && lenmem > 0 && isShared(oldPtr) && tearable(et) {
+	if tearEnabled && lenmem > 0 && (holdsIface(et) && !onCurStack(oldPtr) || isShared(oldPtr) && tearable(et)) {
 		// Another goroutine may be storing an element.
-		mp := acquirem()
-		shareLockRange(uintptr(oldPtr), lenmem)
-		memmove(p, oldPtr, lenmem)
-		shareUnlockRange(uintptr(oldPtr), lenmem)
-		releasem(mp)
+		shareCopyFrom(et, p, oldPtr, uintptr(oldLen))
 	} else {
 		memmove(p, oldPtr, lenmem)
 	}
@@ -536,7 +537,12 @@ func growsliceBuf(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, buf
 	if oldPtr != bufPtr && oldLen != 0 {
 		// Move data to start of buffer.
 		// Note: bufPtr is on the stack, so no write barrier needed.
-		memmove(bufPtr, oldPtr, uintptr(oldLen)*et.Size_)
+		if holdsIface(et) && !onCurStack(oldPtr) {
+			// Another goroutine may be storing an element.
+			shareCopyFrom(et, bufPtr, oldPtr, uintptr(oldLen))
+		} else {
+			memmove(bufPtr, oldPtr, uintptr(oldLen)*et.Size_)
+		}
 	}
 	// Pick a new capacity.
 	//

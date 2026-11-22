@@ -7009,6 +7009,8 @@ const (
 	OpMoveWB
 	OpZeroWB
 	OpWBend
+	OpShareLocked
+	OpShareUnlocked
 	OpWB
 	OpHasCPUFeature
 	OpPanicBounds
@@ -106877,6 +106879,16 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "WBend",
+		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "ShareLocked",
+		argLen:  1,
+		generic: true,
+	},
+	{
+		name:    "ShareUnlocked",
 		argLen:  1,
 		generic: true,
 	},

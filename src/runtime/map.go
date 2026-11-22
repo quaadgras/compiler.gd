@@ -242,6 +242,7 @@ func reflect_makemap(t *abi.MapType, cap int) unsafe.Pointer {
 //
 //go:linkname reflect_mapaccess reflect.mapaccess
 func reflect_mapaccess(t *abi.MapType, m *maps.Map, key unsafe.Pointer) unsafe.Pointer {
+	key = ifaceCopy(t.Key, key)
 	elem, ok := mapaccess2(t, m, key)
 	if !ok {
 		// reflect wants nil for a missing element
@@ -270,18 +271,20 @@ func reflect_mapaccess_faststr(t *abi.MapType, m *maps.Map, key string) unsafe.P
 //
 //go:linkname reflect_mapassign reflect.mapassign0
 func reflect_mapassign(t *abi.MapType, m *maps.Map, key unsafe.Pointer, elem unsafe.Pointer) {
+	key = ifaceCopy(t.Key, key)
 	p := mapassign(t, m, key)
-	typedmemmove(t.Elem, p, elem)
+	maps_typedmemmove(t.Elem, p, elem)
 }
 
 //go:linkname reflect_mapassign_faststr reflect.mapassign_faststr0
 func reflect_mapassign_faststr(t *abi.MapType, m *maps.Map, key string, elem unsafe.Pointer) {
 	p := mapassign_faststr(t, m, key)
-	typedmemmove(t.Elem, p, elem)
+	maps_typedmemmove(t.Elem, p, elem)
 }
 
 //go:linkname reflect_mapdelete reflect.mapdelete
 func reflect_mapdelete(t *abi.MapType, m *maps.Map, key unsafe.Pointer) {
+	key = ifaceCopy(t.Key, key)
 	mapdelete(t, m, key)
 }
 
