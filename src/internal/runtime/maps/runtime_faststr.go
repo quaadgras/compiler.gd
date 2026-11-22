@@ -62,12 +62,7 @@ func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Poi
 
 dohash:
 	// This path will cost 1 hash and 1+ε comparisons.
-	// gd: route through typ.Hasher (runtime.strhash) rather than
-	// memHashAES so the cached / fixed-seed string hash stays in
-	// lockstep with the generic map paths and compiler-emitted
-	// literal hashes (see doc/gd/sso-string.md).
-	k := key
-	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
+	hash := strHash(key, m.seed)
 	h2 := uint8(h2(hash))
 	ctrls = *g.ctrls()
 	slotKey = g.key(typ, 0)
@@ -141,12 +136,7 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 		return elem, true
 	}
 
-	// gd: route through typ.Hasher (runtime.strhash) rather than
-	// memHashAES so the cached / fixed-seed string hash stays in
-	// lockstep with the generic map paths and compiler-emitted
-	// literal hashes (see doc/gd/sso-string.md).
-	k := key
-	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
+	hash := strHash(key, m.seed)
 
 	// Select table.
 	idx := m.directoryIndex(hash)
@@ -273,12 +263,7 @@ func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poin
 		fatal("concurrent map writes")
 	}
 
-	// gd: route through typ.Hasher (runtime.strhash) rather than
-	// memHashAES so the cached / fixed-seed string hash stays in
-	// lockstep with the generic map paths and compiler-emitted
-	// literal hashes (see doc/gd/sso-string.md).
-	k := key
-	hash := typ.Hasher(abi.NoEscape(unsafe.Pointer(&k)), m.seed)
+	hash := strHash(key, m.seed)
 
 	// Set writing after calling Hasher, since Hasher may panic, in which
 	// case we have not actually done a write.
@@ -419,4 +404,26 @@ func runtime_mapdelete_faststr(typ *abi.MapType, m *Map, key string) {
 	}
 
 	m.Delete(typ, abi.NoEscape(unsafe.Pointer(&key)))
+}
+
+// strHash is runtime.strhash, the hash of the bytes of key, inline or not
+// (doc/gd/sso-string.md), called directly.
+//
+//go:nosplit
+func strHash(key string, seed uintptr) uintptr {
+	var buf [16]byte
+	p := *(*unsafe.Pointer)(unsafe.Pointer(&key))
+	n := uintptr(len(key))
+	if abi.StringIsInline(key) {
+		if memHashInlineImplemented && UseAeshash {
+			w := (*[2]uintptr)(unsafe.Pointer(&key))
+			return memHashInlineAES(w[1], w[0], seed)
+		}
+		buf, _ = abi.StringInlineBytes(key)
+		p = abi.NoEscape(unsafe.Pointer(&buf))
+	}
+	if memHashAESImplemented && UseAeshash {
+		return memHashAES(p, seed, n)
+	}
+	return memHashFallback(p, seed, n)
 }

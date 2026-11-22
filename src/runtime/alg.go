@@ -106,12 +106,7 @@ func memhash32(p unsafe.Pointer, seed uintptr) uintptr {
 //go:nosplit
 //go:linkname strhash
 func strhash(p unsafe.Pointer, h uintptr) uintptr {
-	x := (*stringStruct)(p)
-	if x.isInline() {
-		b, n := abi.StringInlineBytes(*(*string)(p))
-		return memhash(noescape(unsafe.Pointer(&b)), h, uintptr(n))
-	}
-	return memhash(x.str, h, uintptr(x.len))
+	return maps.StrHash(*(*string)(p), h)
 }
 
 // strhashSeq hashes the string at p as a part of a larger key (a field

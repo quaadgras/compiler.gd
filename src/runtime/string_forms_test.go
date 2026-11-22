@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -75,6 +76,21 @@ func TestStringForms(t *testing.T) {
 		}
 		if unique.Make(c) != unique.Make(r) {
 			t.Errorf("%q: unique.Make between forms", c)
+		}
+	}
+
+	// The hash is that of the bytes, in either form, whatever the seed.
+	for n := 1; n <= 20; n++ {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(i*37 + n)
+		}
+		r := string(b)                             // inline if short
+		h := unsafe.String(unsafe.SliceData(b), n) // not inline
+		for seed := uintptr(0); seed < 5; seed++ {
+			if runtime.StringHash(r, seed*0x9e3779b9) != runtime.StringHash(h, seed*0x9e3779b9) {
+				t.Errorf("hash of %d bytes differs between forms", n)
+			}
 		}
 	}
 

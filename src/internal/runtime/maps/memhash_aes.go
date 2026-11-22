@@ -38,6 +38,7 @@ func MemHash64(k uint64, h uintptr) uintptr {
 	return memHash64Fallback(k, h)
 }
 
+// StrHash is the hash of the bytes of s, inline or not (strHash).
 func StrHash(s string, h uintptr) uintptr {
-	return MemHash(unsafe.Pointer(unsafe.StringData(s)), h, uintptr(len(s)))
+	return strHash(s, h)
 }
