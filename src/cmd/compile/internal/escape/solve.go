@@ -172,6 +172,9 @@ func (b *batch) walkOne(root *location, walkgen uint32, enqueue func(*location))
 				l.keptAny = true
 			} else if !l.kept && b.keepsParam(root, l) {
 				l.kept = true
+				if b.gd.Flag.LowerM >= 3 {
+					b.gd.WarnfAt(l.n.Pos(), "parameter %v of %v is kept by %s (made at %s, attributes %#x)", l.n, l.curfn, b.explainLoc(root), b.gd.FmtPos(b.madeAt[root]), uint(root.attrs))
+				}
 			}
 		}
 		if l.param && l.moveCand && lplain && l.plainDerefs == 0 && !l.moveHeld && b.holdsMovedParam(root, l) {
