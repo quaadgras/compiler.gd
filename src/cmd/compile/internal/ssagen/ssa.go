@@ -258,6 +258,7 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).StringStore = typecheck.LookupRuntimeFunc(gd, "stringstore")
 	ir.Syms(gd).StringAtomic = typecheck.LookupRuntimeVar(gd, "stringAtomic") // bool
 	ir.Syms(gd).SliceHdr = typecheck.LookupRuntimeFunc(gd, "slicehdr")
+	ir.Syms(gd).SliceStore = typecheck.LookupRuntimeFunc(gd, "slicestore")
 	ir.Syms(gd).SliceHdrNotInHeap = typecheck.LookupRuntimeFunc(gd, "slicehdrnotinheap")
 	ir.Syms(gd).ShareCheck = typecheck.LookupRuntimeFunc(gd, "sharecheck")
 	ir.Syms(gd).SharePages = typecheck.LookupRuntimeVar(gd, "sharePages") // [1 << 20]uint8

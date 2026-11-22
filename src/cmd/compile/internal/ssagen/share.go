@@ -278,6 +278,12 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 		return s.newValue1(ssa.OpArrayMake1, t, s.load(t.Elem(), s.newValue1I(ssa.OpOffPtr, types.NewPtr(t.Elem()), 0, src)))
 	case t.IsString() && s.ifaceOnly && stringAtomicArch(s.gd.Ctxt.Arch.Family):
 		return s.shareLoadString(t, src)
+	case t.IsSlice() && s.ifaceOnly && stringAtomicArch(s.gd.Ctxt.Arch.Family):
+		return s.shareLoadSlice(t, src)
+	}
+
+	if t.IsSlice() && types.SlicePacked() {
+		return s.shareLoadSliceLocked(t, src)
 	}
 
 	// A variable of its own: the values of two loads have two types.
@@ -314,6 +320,47 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 	s.startBlock(bDone)
 	v = s.variable(shareVar, t)
 	delete(s.vars, shareVar)
+	return v
+}
+
+// shareLoadSliceLocked is shareLoad for a packed slice (types.SlicePacked)
+// under the sequence lock: its words are loaded between the checks of the
+// lock, and unpacked only once the lock says they go together (a torn
+// huge slice's w0 is no header).
+func (s *state) shareLoadSliceLocked(t *types.Type, src *ssa.Value) *ssa.Value {
+	ptrT := t.Elem().PtrTo()
+	u64 := types.Types[types.TUINT64]
+	sliceVar := ssaMarker("slice")
+	seq := s.shareSeqAddr(src)
+	s1 := s.shareSeq(seq)
+	w0 := s.rawLoad(ptrT, src)
+	w1 := s.rawLoad(u64, s.newValue1I(ssa.OpOffPtr, types.NewPtr(u64), 8, src))
+	s.shareLoaded()
+	s2 := s.shareSeq(seq)
+	quiet := s.shareQuiet(s1, s2)
+
+	bQuiet := s.f.NewBlock(ssa.BlockPlain)
+	bSlow := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(quiet)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bQuiet)
+	b.AddEdgeTo(bSlow)
+
+	s.startBlock(bQuiet)
+	s.vars[sliceVar] = s.sliceUnpack(t, w0, w1)
+	s.endBlock().AddEdgeTo(bDone)
+
+	// A store was in progress: the runtime waits for it.
+	s.startBlock(bSlow)
+	s.vars[sliceVar] = s.rtcall(ir.Syms(s.gd).ShareLoadSlice, true, []*types.Type{t}, src)[0]
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	v := s.variable(sliceVar, t)
+	delete(s.vars, sliceVar)
 	return v
 }
 
@@ -707,6 +754,8 @@ func (s *state) shareStoreParts(t *types.Type, left, right *ssa.Value, leftIsStm
 		s.shareStoreIface(t, left, right, leftIsStmt)
 	case t.IsString():
 		s.shareStoreString(left, right)
+	case t.IsSlice():
+		s.shareStoreSlice(t, left, right)
 	case !types.HasWhole(t):
 		s.rawStoreType(t, left, right, 0, leftIsStmt)
 	case t.IsStruct():
@@ -822,7 +871,7 @@ func (s *state) shareZero(t *types.Type, dst *ssa.Value) {
 func (s *state) shareMove(t *types.Type, dst, src *ssa.Value) {
 	// (Memory no other goroutine can reach is as good as the stack.)
 	srcStack, dstStack := isStackAddr(src), isStackAddr(dst) || s.dstLocal
-	if s.ifaceOnly && dstStack && types.StringAligned16() && types.HasString(t) {
+	if s.ifaceOnly && dstStack && types.Has16(t) {
 		// shareLoadMem's copy does not copy a string whole: load it
 		// whole (shareLoad), or have the runtime copy it.
 		if ssa.CanSSA(t) {
@@ -1003,4 +1052,76 @@ func (s *state) sliceUnpack(t *types.Type, w0, w1 *ssa.Value) *ssa.Value {
 	l := s.newValue3(ssa.OpSliceUnpackLen, types.Types[types.TINT], w0, w1, mem)
 	c := s.newValue3(ssa.OpSliceUnpackCap, types.Types[types.TINT], w0, w1, mem)
 	return s.newValue3(ssa.OpSliceMake, t, p, l, c)
+}
+
+// Slices, without the sharing analysis (doc/gd/slice16.md): with 8-byte
+// words a slice is two words aligned to 16 (types.SliceAligned16), loaded
+// and stored as a string is, with one 16-byte access where it is atomic,
+// and under the sequence lock of its block elsewhere. It is packed before
+// it is stored: the header of a huge one is made before any lock is taken.
+
+// sliceLoad16 loads the slice of type t at src with one 16-byte access.
+func (s *state) sliceLoad16(t *types.Type, src *ssa.Value) *ssa.Value {
+	ptrT := t.Elem().PtrTo()
+	u64 := types.Types[types.TUINT64]
+	tup := s.newValue2(ssa.OpStringLoad16, types.NewTuple(ptrT, u64), src, s.mem())
+	w0 := s.newValue1(ssa.OpSelect0, ptrT, tup)
+	w1 := s.newValue1(ssa.OpSelect1, u64, tup)
+	return s.sliceUnpack(t, w0, w1)
+}
+
+// shareLoadSlice is shareLoad for a slice on amd64 and arm64.
+func (s *state) shareLoadSlice(t *types.Type, src *ssa.Value) *ssa.Value {
+	if s.stringAtomicKnown() {
+		return s.sliceLoad16(t, src)
+	}
+	sliceVar := ssaMarker("slice")
+	atomic, locked := s.stringAtomicBranch()
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+
+	s.startBlock(atomic)
+	s.vars[sliceVar] = s.sliceLoad16(t, src)
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(locked)
+	s.vars[sliceVar] = s.rtcall(ir.Syms(s.gd).ShareLoadSlice, true, []*types.Type{t}, s.nilCheck(src))[0]
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	v := s.variable(sliceVar, t)
+	delete(s.vars, sliceVar)
+	return v
+}
+
+// shareStoreSlice stores the slice right of type t at left, which is not
+// in the stack, whole: packed, then with one 16-byte access (and the
+// write barrier of its first word, which the write barrier pass adds), or
+// by the runtime.
+func (s *state) shareStoreSlice(t *types.Type, left, right *ssa.Value) {
+	w0, w1 := s.slicePack(right)
+	if !stringAtomicArch(s.gd.Ctxt.Arch.Family) {
+		s.rtcall(ir.Syms(s.gd).SliceStore, true, nil, s.nilCheck(left), w0, w1)
+		return
+	}
+	store := func() {
+		v := s.newValue4(ssa.OpStringStore16, types.TypeMem, left, w0, w1, s.mem())
+		v.Aux = t
+		s.vars[memVar] = v
+	}
+	if s.stringAtomicKnown() {
+		store()
+		return
+	}
+	atomic, locked := s.stringAtomicBranch()
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+
+	s.startBlock(atomic)
+	store()
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(locked)
+	s.rtcall(ir.Syms(s.gd).SliceStore, true, nil, s.nilCheck(left), w0, w1)
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
 }

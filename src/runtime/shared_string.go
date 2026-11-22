@@ -64,6 +64,21 @@ func stringstore(dst *string, v string) {
 	releasem(mp)
 }
 
+// slicestore is called by compiled code to store the slice of words w0
+// and w1 at dst, which may not be in the stack, where a 16-byte access is
+// not atomic: under the sequence lock of its block, as stringstore
+// stores. The slice is packed already (doc/gd/slice16.md): a huge one's
+// header is made before the lock is taken.
+func slicestore(dst unsafe.Pointer, w0 unsafe.Pointer, w1 uint64) {
+	mp := acquirem()
+	i := uintptr(dst) >> shareBlockShift & (shareStripes - 1)
+	shareLockStripe(i)
+	*(*unsafe.Pointer)(dst) = w0
+	*(*uint64)(add(dst, 8)) = w1
+	shareUnlockStripe(i)
+	releasem(mp)
+}
+
 // moveWhole copies size bytes of values of type typ from src to dst, as
 // memmove does: 16 bytes at a time if typ holds strings and stringAtomic,
 // so that each string, which is aligned to 16, is read and written whole.

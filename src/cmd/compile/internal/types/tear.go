@@ -57,10 +57,35 @@ func HasString(t *Type) bool {
 	return false
 }
 
+// HasSlice reports whether a value of type t holds a slice.
+func HasSlice(t *Type) bool {
+	switch {
+	case t.IsSlice():
+		return true
+	case t.IsArray():
+		return t.NumElem() > 0 && HasSlice(t.Elem())
+	case t.IsStruct():
+		for _, f := range t.Fields() {
+			if HasSlice(f.Type) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Has16 reports whether a value of type t holds values of 16 bytes,
+// aligned to 16, that are loaded and stored with one 16-byte access where
+// it is atomic: the strings (StringAligned16) and the slices
+// (SliceAligned16; runtime/shared_string.go, doc/gd/slice16.md).
+func Has16(t *Type) bool {
+	return StringAligned16() && HasString(t) || SliceAligned16() && HasSlice(t)
+}
+
 // HasWhole reports whether a value of type t holds values that are
 // loaded and stored whole by default, without the sharing analysis: the
-// interfaces, and the strings where they are aligned to 16
-// (StringAligned16; runtime/shared_string.go).
+// interfaces, and the strings and slices where they are aligned to 16
+// (Has16).
 func HasWhole(t *Type) bool {
-	return HasIface(t) || StringAligned16() && HasString(t)
+	return HasIface(t) || Has16(t)
 }

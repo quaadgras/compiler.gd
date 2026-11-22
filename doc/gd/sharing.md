@@ -556,6 +556,44 @@ in memory, and a struct with an interface. It passes by default, with
 cortex-a57` or `cpu.lse2=off`, the locks), riscv64, ppc64le, s390x,
 loong64 and mips64 (qemu, locks); with `-d=notear` it fails.
 
+### By default: the slices too, with one 16-byte access
+
+A slice is three words in stock Go; one torn between two stores (the
+array of one and the capacity of another) indexes past an array. With
+8-byte words but on wasm a slice is two words, 16 bytes, aligned to 16
+(`slice16.md`): its pointer, and its length and capacity as uint32s; a
+slice whose capacity does not fit is the address of an immutable header
+in the heap and a marker. So the slices are guarded as the strings are,
+everywhere but in the stack (`types.Has16`):
+
+- A slice is packed before it is stored (the header of a huge one is
+  made then, before any lock is taken) and unpacked after it is loaded.
+- Where a 16-byte access is atomic (`runtime.stringAtomic`), a load is
+  one 16-byte load and a store one 16-byte store, the ops of the strings
+  (`StringLoad16`, `StringStore16` with the barrier of w0): no lock.
+  Elsewhere a load checks the sequence lock of its block (or calls
+  `runtime.shareloadslice`) and a store calls `runtime.slicestore` with
+  the words.
+- The runtime decides by type: a slice is `tearString` in `tearKind`, so
+  a value that holds slices is copied and cleared 16 bytes at a time
+  (`memmove16`, `memclr16`) or under the locks, as strings are.
+- `s = s[:n]` and an append in place store the whole slice: its length
+  is in a word with its capacity, which another goroutine's store may
+  have changed (the stock length-only store would tear).
+- `len` and `cap` of a slice in memory load the slice whole.
+
+`TestSliceTear` (`runtime/slicetear_test.go`) races stores of slices of
+distinct capacities, whose arrays hold a mark of their own, and of huge
+ones, with loads that check the length, the capacity and the elements up
+to the capacity: a global, a field, an element (`clear`, `copy`
+overlapping both ways, `append`), an array copy, a map's values, reflect
+(`Set`, `Interface`), a channel, struct copies in registers and in
+memory, a struct with an interface and a string, and an interface. It
+passes by default, with `GODEBUG=cpu.avx=off` (the locks), on arm64
+(qemu `-cpu max`, LSE2; `cortex-a57`, the locks), riscv64, ppc64le,
+ppc64, s390x, loong64 and mips64 (qemu, the locks); with `-d=notear` it
+fails.
+
 ## What the compiler proves (`cmd/compile/internal/escape/shares.go`)
 
 The solver has two more attributes. `attrShares`: the location's address

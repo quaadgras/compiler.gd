@@ -19,14 +19,16 @@ type T struct{ M string }
 
 var b bool
 
-func f1(q *Q, xx []byte) interface{} { // ERROR "live at call to (newobject|mallocgcSmallScanNoHeaderSC[0-9]+): xx$" "live at entry to f1: xx$"
+func f1(q *Q, xx []byte) interface{} { // ERROR "live at call to (newobject|mallocgcSmallScanNoHeaderSC[0-9]+|slicestore): (xx|&xx)$" "live at entry to f1: xx$"
 	// xx was copied from the stack to the heap on the previous line:
 	// xx was live for the first two prints but then it switched to &xx
 	// being live. We should not see plain xx again.
+	// (gd: where a 16-byte access may not be atomic, a slice in the
+	// heap is loaded and stored by the runtime: doc/gd/slice16.md.)
 	if b {
 		global = &xx
 	}
-	xx, _, err := f2(xx, 5) // ERROR "live at call to f2: &xx$"
+	xx, _, err := f2(xx, 5) // ERROR "live at call to (f2|slicehdr|shareloadslice|slicestore): (&xx|err.data)$"
 	if err != nil {
 		return err
 	}

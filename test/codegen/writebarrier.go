@@ -34,27 +34,27 @@ func combine4string(p *[4]string, a, b, c, d string) {
 	p[3] = d
 }
 
+// gd: so is a slice (doc/gd/slice16.md).
+
 func combine2slice(p *[2][]byte, a, b []byte) {
-	// amd64:`.*runtime[.]gcWriteBarrier4\(SB\)`
-	// arm64:`.*runtime[.]gcWriteBarrier4\(SB\)`
+	// amd64/v3:`.*runtime[.]gcWriteBarrier4\(SB\)`
+	// amd64/v1,amd64/v2:`.*runtime[.]gcWriteBarrier2\(SB\)`
+	// arm64:`.*runtime[.]gcWriteBarrier2\(SB\)`
 	p[0] = a
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[1] = b
 }
 
 func combine4slice(p *[4][]byte, a, b, c, d []byte) {
-	// amd64:`.*runtime[.]gcWriteBarrier8\(SB\)`
-	// arm64:`.*runtime[.]gcWriteBarrier8\(SB\)`
+	// amd64/v3:`.*runtime[.]gcWriteBarrier8\(SB\)`
+	// amd64/v1,amd64/v2:`.*runtime[.]gcWriteBarrier2\(SB\)`
+	// arm64:`.*runtime[.]gcWriteBarrier2\(SB\)`
 	p[0] = a
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[1] = b
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[2] = c
-	// amd64:-`.*runtime[.]gcWriteBarrier`
-	// arm64:-`.*runtime[.]gcWriteBarrier`
+	// amd64/v3:-`.*runtime[.]gcWriteBarrier`
 	p[3] = d
 }
 
@@ -70,12 +70,12 @@ func trickyWriteNil(p *int, q **int) {
 
 type S struct {
 	// gd: an S of up to 8 words is SSA-able, and copied with
-	// per-field write barriers, and one that holds strings is copied
-	// whole by the runtime (doc/gd/sharing.md): slices keep *dst = *sp
-	// a large wbMove, which is what this test is about (four: a slice
-	// is two words, doc/gd/slice16.md).
-	a, b, d, e []byte
-	c          *int
+	// per-field write barriers, and one that holds strings or slices
+	// is copied whole by the runtime (doc/gd/sharing.md,
+	// doc/gd/slice16.md): arrays of pointers keep *dst = *sp a large
+	// wbMove, which is what this test is about.
+	a, b, d [3]*byte
+	c       *int
 }
 
 var g1, g2 *int

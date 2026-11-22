@@ -874,7 +874,7 @@ func shareloadmem(dst, src unsafe.Pointer, size uintptr) {
 const (
 	tearAny    = 1 << 0 // a slice, a string or an interface
 	tearIface  = 1 << 1 // an interface
-	tearString = 1 << 2 // a string
+	tearString = 1 << 2 // a string, or a slice where it is two words (16 bytes, aligned to 16: abi.SlicePacked)
 )
 
 // tearKind says whether a value of type t holds a slice, a string or an
@@ -887,6 +887,11 @@ func tearKind(t *_type) uintptr {
 	case abi.String:
 		return tearAny | tearString
 	case abi.Slice:
+		if abi.SlicePacked {
+			// Copied and cleared 16 bytes at a time, or under the
+			// locks, as a string is (doc/gd/slice16.md).
+			return tearAny | tearString
+		}
 		return tearAny
 	case abi.Interface:
 		return tearAny | tearIface

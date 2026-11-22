@@ -102,7 +102,15 @@ pack:     if cap < 0xFFFFFFFF     { w0, w1 = ptr, len | cap<<32 }            // 
           else                    { w0, w1 = runtime.slicehdr(ptr, len, cap), marker }
 ```
 
-(big-endian: the halves of w1 swapped). It first drops the packs that
+(big-endian: the halves of w1 swapped). The marker test is the load's,
+not each use's: the branch of an unpack (unlikely, so predicted) serves
+every index, `len`, `cap`, slice expression and append of the loaded
+slice, which then work with its real pointer, length and capacity: a
+slice expression of a huge slice adds its offsets to the array's
+address, never to the header's. (An index alone would not need the
+test: a huge slice's length field is 0, so `i <u len` fails and could
+reach a slow path that decodes the header. Not testing loads that are
+only indexed is an open item, §7.) The pass first drops the packs that
 need no branch (a capacity that is a constant that fits, or the slice
 unpacked from words w0 and w1, which are its words) and the unpacks that
 leaves dead, so that a slice that is passed on, or loaded and stored, is
@@ -151,7 +159,36 @@ aligns it to a word (`types.StackAlignment`). go/types and types2
 (`gcSizes.slicePacked`), cgo, the linker (`sliceAlign`) and the runtime's
 type descriptors (`abi.RTypeSize`) agree.
 
-## 5. Targets
+## 5. Loaded and stored whole
+
+Aligned to 16, a slice is guarded as a string is (`sharing.md`, "the
+slices too"), by default, everywhere but in the stack (`types.Has16`,
+`HasWhole`):
+
+- A store packs the slice first (a huge one's header is made then,
+  before any lock is taken), then stores its words with one 16-byte store
+  (`StringStore16`, with the write barrier of w0) where a 16-byte access
+  is atomic (amd64 with AVX, arm64 with LSE2: `runtime.stringAtomic`),
+  else calls `runtime.slicestore`, which stores them under the sequence
+  lock of their block.
+- A load is one 16-byte load (`StringLoad16`) and an unpack, or, where
+  the access is not atomic, two 8-byte loads between two reads of the
+  sequence lock: the words are unpacked only once the lock says no store
+  was in progress (`shareLoadSliceLocked`), since a torn w0 with a marker
+  is no header; else `runtime.shareloadslice` waits.
+- The runtime copies and clears what holds slices 16 bytes at a time or
+  under the locks (`tearKind`: a slice is `tearString`), as it does
+  strings: `typedmemmove`, `memclr`, `growslice`, maps, channels,
+  reflect.
+
+So a racing load gets one store's slice: w0 and w1 come from one store,
+so a compact slice's pointer, length and capacity go together, and a
+huge slice's marker comes with its header's address, whose header was
+published before it and is never written. Stale, never torn.
+`TestSliceTear` (`runtime/slicetear_test.go`) checks it, with huge
+slices among the values; with `-d=notear` it fails.
+
+## 6. Targets
 
 - 8-byte words but wasm: packed (amd64, arm64, ppc64, ppc64le, riscv64,
   s390x, loong64, mips64, mips64le).
@@ -160,3 +197,25 @@ type descriptors (`abi.RTypeSize`) agree.
   words), a slice there is loaded and stored word by word.
 - wasm (all GOWASM modes): stock Go's three words; its goroutines do not
   run in parallel.
+
+## 7. Open items
+
+- **Loads that are only indexed** test the marker anyway: a cheaper fast
+  path, where `s[i]` of a loaded slice uses w1's
+  length field (0 for a huge slice) and only a failed bounds check
+  decodes the header, is not done.
+- **Assembly** other than `internal/bytealg`'s reads the uint32 fields:
+  given a huge slice it sees an empty one, so a hash or cipher of more
+  than 4 GiB in one call computes over nothing. Their Go callers should
+  pass words, as `bytealg`'s wrappers do, or chunk.
+- **Programs that cast a slice's address** to `reflect.SliceHeader` or
+  a struct of their own (stock Go's layout) are wrong with 8-byte words;
+  vet does not see it.
+- An append in place stores w0 again, with its write barrier, which
+  stock Go's length-only store did not (issue 14855's test skips); the
+  parameters' liveness names autotmps where it named the slice
+  (`test/fixedbugs/issue15747.go`).
+- With `GOEXPERIMENT=sharing`, a huge slice's header is a new object
+  that the store of w0 publishes as it would an array; the experiment's
+  tests do not have huge slices.
+- 4-byte words (386, arm, mips) are not guarded (§6).
