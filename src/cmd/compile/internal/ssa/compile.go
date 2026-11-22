@@ -34,8 +34,11 @@ func Compile(f *Func) {
 		f.Logf("compiling %s\n", f.Name)
 	}
 
+	// (Read once: the compiler runs in-process, and another build may
+	// set the flag while this function compiles.)
+	check := checkEnabled
 	var rnd *rand.Rand
-	if checkEnabled {
+	if check {
 		seed := int64(crc32.ChecksumIEEE(([]byte)(f.Name))) ^ int64(checkRandSeed)
 		rnd = rand.New(rand.NewSource(seed))
 	}
@@ -63,7 +66,7 @@ func Compile(f *Func) {
 	if BuildDump[f.Name] {
 		f.dumpFile("build")
 	}
-	if checkEnabled {
+	if check {
 		checkFunc(f)
 	}
 	const logMemStats = false
@@ -85,7 +88,7 @@ func Compile(f *Func) {
 			runtime.ReadMemStats(&mStart)
 		}
 
-		if checkEnabled && !f.scheduled {
+		if check && !f.scheduled {
 			// Test that we don't depend on the value order, by randomizing
 			// the order of values in each block. See issue 18169.
 			for _, b := range f.Blocks {
@@ -138,7 +141,7 @@ func Compile(f *Func) {
 			// Dump function to appropriately named file
 			f.dumpFile(phaseName)
 		}
-		if checkEnabled {
+		if check {
 			checkFunc(f)
 		}
 	}
