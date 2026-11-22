@@ -900,10 +900,11 @@ func (b *batch) paramShares(fn *ir.Func) {
 // times, as its tag esc says.
 func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc leaks, x int) []hole {
 	var ps *ir.ParamShare
+	self := -1
 	if fn.Func != nil && fn.Func.ParamShares != nil && e.shareTagsOn() {
 		for i, f := range fn.Type().RecvParams() {
 			if f == param && i < len(fn.Func.ParamShares) {
-				ps = &fn.Func.ParamShares[i]
+				ps, self = &fn.Func.ParamShares[i], i
 			}
 		}
 	}
@@ -969,8 +970,9 @@ func (e *escape) sharedTagHoles(ks []hole, fn *ir.Name, param *types.Field, esc 
 			if k < len(fn.Func.ParamShares) && fn.Func.ParamShares[k].Share == 1 {
 				// In an object that the function shares itself:
 				// what is stored there is shared, whatever the
-				// caller's bits say (storeset.go).
-				vk = e.storeThroughSharedArg(e.callArgs[k]).shift(e.gd, d)
+				// caller's bits say (storeset.go). What that object
+				// reaches, stored in it again, is shared already.
+				vk = e.storeThroughSharedArg(e.callArgs[k], k == self).shift(e.gd, d)
 			} else {
 				vk = e.storeThroughArg(e.callArgs[k]).shift(e.gd, d)
 			}
@@ -1101,12 +1103,17 @@ func (e *escape) shareOnlyHoles(fn *ir.Name, param *types.Field) []hole {
 // storeThroughSharedArg is storeThroughArg for a parameter whose object
 // the function shares itself: what is stored is shared too, and the
 // store says nothing of what the caller's parameters' bits are for
-// (storeset.go). Where it goes is as for any store.
-func (e *escape) storeThroughSharedArg(p ir.Node) hole {
+// (storeset.go). Where it goes is as for any store. With own, what is
+// stored is what that parameter reaches, which a shared object reaches
+// and so is shared already.
+func (e *escape) storeThroughSharedArg(p ir.Node, own bool) hole {
 	skip := e.skipStoreTypes
 	e.skipStoreTypes = true
 	k := e.storeThroughArg(p)
 	e.skipStoreTypes = skip
+	if own {
+		return k
+	}
 	return e.teeHole(k, e.shareHole())
 }
 

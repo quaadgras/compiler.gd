@@ -107,6 +107,7 @@ type location struct {
 	dyn         []*location // the dynamic roots that the location, or what it leads to, flows to
 	groups      []*location // the membership roots that the location flows to (groups.go)
 	unknown     bool        // the location is the source of what the graph does not follow
+	unkType     *types.Type // of a value of that type, or nil for any (unknownOf)
 	members     []*location // of a membership root: what flows to it
 	resType     *types.Type // of callRes: the type of the result
 	callRes     *callSite   // the location is what a result of that call flows through

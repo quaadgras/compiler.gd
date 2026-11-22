@@ -1517,6 +1517,46 @@ reliance):
   net/http 41944, encoding/json 2161), and none published a local
   object.
 
+**Toward `ParseFile`** (2026-11-22, later). An experiment removed the
+`resolveFile` call from `parseFile` (an overlay, not a change to the
+package). `parseFile` was then clean, and what still kept `ParseFile`
+from passing `p`'s bit led to these changes:
+
+- *Pointers from where the graph does not follow have types*
+  (`unknownSrcOf`). A group fails on one only if its type may lead to
+  what the group's user stores in. The address of a global is a
+  pointer to the global's type.
+- *A member that is shared only for a type* (`shareOnly`: it holds the
+  shared `*token.File`, and is not shared itself) fails a group only if
+  that type may lead to what the user stores in.
+- *A junction of flows* (`teeHole`'s temporary, which has no type) is
+  no member that matters by itself: what flows through it is.
+- *A store in an object that the function shares itself, of what that
+  object reaches* (`AddLine`'s `f.lines = append(f.lines, …)`), shares
+  nothing new: what a shared object reaches is shared already. Only
+  what another argument gives is shared there.
+- *A bug in the first version, now fixed.* A variable, or a value on
+  its way, is memory of its own type too, not only what it leads to.
+  `Date`'s `t` is a `Time` that `t.setLoc(loc)` stores in. The first
+  version counted only what `t` leads to, dropped it from its group,
+  and with it the fact that `t` is returned. The condition then said
+  "local" with no bit at all, and `FixedZone`'s `Location` stayed local
+  in a `Time` that a global holds. An unknown pointer in the same group
+  hid this until the unknowns had types; the sharing oracle over the
+  standard library's tests caught it (`time`, `encoding/asn1`,
+  `encoding/json/v2`).
+- *Tried and dropped:* judging members by the way the group reaches
+  them, through relevant members only. It assumed that a group reaches
+  its members only through other members, which is not so.
+
+`ParseFile` still passes no bit for `p`, for two more reasons. The
+closure that `init` gives the scanner (`eh`) holds `p` and is stored in
+`p.scanner`. That store of `p` in its own object is loose
+(`ParamShare.ViaDirect` false), so the typed walk shares everything `p`
+reaches. And `src`, an `any`, is in `p`'s group through `text :=
+src.([]byte)`, and `readSource` may store in what `src` reaches (an
+`io.Reader`'s `Read`).
+
 ### Next
 
 0. What `fmt` does with its arguments. Done on 2026-11-21:

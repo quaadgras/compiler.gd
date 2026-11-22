@@ -157,6 +157,7 @@ type batch struct {
 	needGroups     []*location // the groups whose need is known
 	reachMem       map[any]bool
 	skipStoreTypes bool // storeThroughSharedArg
+	unknownSrcs    map[*types.Type]*location
 	varGroups      map[*ir.Name]*location
 	pending        map[any]*location
 	storedRoots    map[*ir.Func]*location

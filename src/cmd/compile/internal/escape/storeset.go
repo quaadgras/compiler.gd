@@ -245,6 +245,17 @@ func (b *batch) relevant(m *location, need *storeSet) bool {
 	if len(need.ts) == 0 {
 		return false
 	}
+	if m.unknown {
+		return b.relevantType(m.unkType, need)
+	}
+	if m.n == nil && m.callRes != nil && m.resType != nil {
+		return b.relevantType(m.resType, need)
+	}
+	if m.n == nil && m.transient && m.callRes == nil && !m.isDynRoot {
+		// A junction of flows (teeHole): what flows through it is
+		// a member by itself, where it comes from.
+		return false
+	}
 	if m.n == nil || m.curfn == nil || b.unsafeFns[m.curfn] {
 		return true
 	}
@@ -264,8 +275,24 @@ func (b *batch) relevant(m *location, need *storeSet) bool {
 		}
 		return false
 	}
+	// A variable, or a value on its way, is memory too: of its own
+	// type, and what it leads to.
 	for _, u := range need.ts {
-		if b.mayReachMem(t, u) {
+		if mayHoldMem(t, u) || b.mayReachMem(t, u) {
+			return true
+		}
+	}
+	return false
+}
+
+// relevantType is relevant for a value of type t, or of any type if t
+// is nil.
+func (b *batch) relevantType(t *types.Type, need *storeSet) bool {
+	if need.isAll() || t == nil {
+		return true
+	}
+	for _, u := range need.ts {
+		if mayHoldMem(t, u) || b.mayReachMem(t, u) {
 			return true
 		}
 	}

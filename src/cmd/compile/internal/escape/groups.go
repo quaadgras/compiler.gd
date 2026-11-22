@@ -807,6 +807,9 @@ func addGroups(l, root *location) bool {
 		}
 		if l.unknown {
 			g.dynRoot.sawUnknown = true
+			if !slices.Contains(g.dynRoot.unknowns, l) {
+				g.dynRoot.unknowns = append(g.dynRoot.unknowns, l)
+			}
 			return
 		}
 		if l.curfn == g.curfn && !hasGroup(l, g) {
@@ -829,7 +832,7 @@ func wantsGroups(l, root *location) bool {
 			return false
 		}
 		if l.unknown {
-			return !g.dynRoot.sawUnknown
+			return !slices.Contains(g.dynRoot.unknowns, l)
 		}
 		return l.curfn == g.curfn && !hasGroup(l, g)
 	}
@@ -1312,15 +1315,21 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 		fail("the function stores through something that is not a variable", nil)
 	}
 	members := b.membersOf(g)
-	if g.dynRoot.sawUnknown {
-		fail("a pointer from where the graph does not follow", nil)
+	// What the group's user stores in: only the members that may be
+	// such memory, or lead to it, by the way that the group reaches
+	// them, need be local (storeset.go).
+	need := g.dynRoot.need
+	// (Of a type that cannot lead to what the user stores in, it
+	// does not matter where it comes from.)
+	for _, u := range g.dynRoot.unknowns {
+		if b.relevantType(u.unkType, need) {
+			fail("a pointer from where the graph does not follow", nil)
+			break
+		}
 	}
 	if g.dynRoot.crossed || b.memberBad[g] {
 		fail("a value from a function of the batch that nothing records", nil)
 	}
-	// What the group's user stores in: only the members that may be
-	// such memory, or lead to it, need be local (storeset.go).
-	need := g.dynRoot.need
 	for m := range members {
 		if c.bad {
 			break
@@ -1357,9 +1366,13 @@ func (b *batch) groupInfoOf(g *location) *groupInfo {
 			// stored in it later, the groups above say.)
 			continue
 		}
-		if m.hasAttr(attrShares | attrSharesValue | attrSharesDeep | attrReturnedOther) {
+		// (One that is shared only for values of a type that it holds
+		// or leads to, and not itself, matters only if those may
+		// lead to what the user stores in.)
+		typedOnly := m.shareOnly != nil && !m.hasAttr(attrReturnedOther) && g.dynRoot.need != nil && !b.relevantType(m.shareOnly, g.dynRoot.need)
+		if m.hasAttr(attrShares|attrSharesValue|attrSharesDeep|attrReturnedOther) && !typedOnly {
 			if b.gd.Flag.LowerM >= 4 && !c.bad {
-				fmt.Printf("%s: a member of a group of %v is shared: %v (attributes %#x, only for %v, a call's result %v, transient %v, contents of %d, a root %v)\n", b.gd.FmtPos(fn.Pos()), fn, m.n, uint(m.attrs), m.shareOnly, m.callRes != nil, m.transient, len(m.owners), m.isDynRoot)
+				fmt.Printf("%s: a member of a group of %v is shared: %v (attributes %#x, only for %v, a call's result %v, transient %v, contents of %d, a root %v, made at %s)\n", b.gd.FmtPos(fn.Pos()), fn, m.n, uint(m.attrs), m.shareOnly, m.callRes != nil, m.transient, len(m.owners), m.isDynRoot, b.gd.FmtPos(b.madeAt[m]))
 			}
 			fail("shared", m)
 			break
@@ -1951,11 +1964,31 @@ func (e *escape) unknownOf(k hole, t *types.Type) {
 		return
 	}
 	if k.derefs < 0 {
+		// Its address: a pointer to memory of type t, which is
+		// what matters of where it comes from (storeset.go).
 		k.derefs = 0
+		t = types.NewPtr(t)
 	}
 	k.addrtaken = false
 	if e.gd.Flag.LowerM >= 4 {
 		fmt.Printf("%s: a pointer from where the graph does not follow, in %v\n", e.gd.FmtPos(e.gd.Pos), e.curfn)
 	}
-	e.flow(k, &e.unknownSrc)
+	e.flow(k, e.unknownSrcOf(t))
+}
+
+// unknownSrcOf returns the source of the pointers of type t that the
+// graph does not follow.
+func (e *escape) unknownSrcOf(t *types.Type) *location {
+	if t == nil {
+		return &e.unknownSrc
+	}
+	if l := e.unknownSrcs[t]; l != nil {
+		return l
+	}
+	if e.unknownSrcs == nil {
+		e.unknownSrcs = make(map[*types.Type]*location)
+	}
+	l := &location{unknown: true, unkType: t}
+	e.unknownSrcs[t] = l
+	return l
 }

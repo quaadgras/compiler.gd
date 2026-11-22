@@ -584,9 +584,12 @@ type dynRoot struct {
 	// membership root; crossed: so does something of another function
 	// of the batch that is neither an argument nor a recorded result.
 	sawUnknown, crossed bool
-	result              bool // the group of a function's results
-	condOf              *location
-	cond                *location
+	// unknowns are the sources of the pointers that the graph does not
+	// follow that flow to a membership root, by their types.
+	unknowns []*location
+	result   bool // the group of a function's results
+	condOf   *location
+	cond     *location
 }
 
 // maxDyn is the number of dynamic roots of a location over which it
