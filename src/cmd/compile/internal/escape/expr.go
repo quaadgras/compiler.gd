@@ -174,12 +174,13 @@ func (e *escape) exprSkipInit(k hole, n ir.Node) {
 		// the returned *byte escapes the caller's frame. Spill here
 		// so the escape solver records an EscHeap/EscNone bit on n
 		// that walk can read to pick between runtime.stringDataHeap
-		// and a cheap stack-spill via OSPTR. The string argument
-		// flows through the spill location, preserving stock's
-		// "if the result escapes, so does the string's data pointer"
-		// invariant.
+		// and a cheap stack-spill via OSPTR. The result is that
+		// buffer, which holds bytes and no pointers, or the string's
+		// data pointer, which flows to the result as in stock (to
+		// the result, not through the buffer to the heap).
 		n := n.(*ir.UnaryExpr)
-		e.expr(e.spill(k, n), n.X)
+		e.spill(k, n)
+		e.expr(k, n.X)
 
 	case ir.OCALLMETH, ir.OCALLFUNC, ir.OCALLINTER, ir.OINLCALL,
 		ir.OLEN, ir.OCAP, ir.OMIN, ir.OMAX, ir.OCOMPLEX, ir.OREAL, ir.OIMAG, ir.OAPPEND, ir.OCOPY, ir.ORECOVER,

@@ -1659,9 +1659,10 @@ func (v Value) Elem() Value {
 		//
 		// The interface is loaded whole first: another goroutine may
 		// be storing in it (runtime/shared.go).
-		var whole abi.CommonInterface
-		*(*any)(unsafe.Pointer(&whole)) = *(*any)(v.dataPtr())
-		ci := &whole
+		// (Into a variable, not through a pointer to one, which
+		// escape analysis takes for a store to the heap.)
+		whole := *(*any)(v.dataPtr())
+		ci := (*abi.CommonInterface)(unsafe.Pointer(&whole))
 		var t *abi.Type
 		if toRType(v.typ()).NumMethod() == 0 {
 			t = (*abi.EmptyInterface)(unsafe.Pointer(ci)).Type
@@ -2875,8 +2876,10 @@ func (v Value) SetLen(n int) {
 	if uint(n) > uint(s.Cap) {
 		panic("reflect: slice length out of range in SetLen")
 	}
-	s.Len = n
-	unsafeheader.WriteSlice(v.dataPtr(), s)
+	// Resliced in place, of any element type (the address does not
+	// move): for escape analysis no new pointer is stored.
+	sp := (*[]byte)(v.dataPtr())
+	*sp = (*sp)[:n]
 }
 
 // SetCap sets v's capacity to n.
@@ -2890,8 +2893,9 @@ func (v Value) SetCap(n int) {
 	if n < s.Len || n > s.Cap {
 		panic("reflect: slice capacity out of range in SetCap")
 	}
-	s.Cap = n
-	unsafeheader.WriteSlice(v.dataPtr(), s)
+	// As in SetLen.
+	sp := (*[]byte)(v.dataPtr())
+	*sp = (*sp)[:s.Len:n]
 }
 
 // SetUint sets v's underlying value to x.
