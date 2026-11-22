@@ -12,13 +12,11 @@ TEXT ·IndexByte(SB),NOSPLIT,$0-20
 	MOVW	$ret+16(FP), R5
 	B	indexbytebody<>(SB)
 
-// gd: a string is {ptr, hash, len} (doc/gd/sso-string.md; with 4-byte
-// words it has no inline form), so its length is at 8.
-TEXT ·IndexByteString(SB),NOSPLIT,$0-20
+TEXT ·IndexByteString(SB),NOSPLIT,$0-16
 	MOVW	s_base+0(FP), R0
-	MOVW	s_len+8(FP), R1
-	MOVBU	c+12(FP), R2	// byte to find
-	MOVW	$ret+16(FP), R5
+	MOVW	s_len+4(FP), R1
+	MOVBU	c+8(FP), R2	// byte to find
+	MOVW	$ret+12(FP), R5
 	B	indexbytebody<>(SB)
 
 // input:

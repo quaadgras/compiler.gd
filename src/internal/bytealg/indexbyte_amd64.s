@@ -14,21 +14,22 @@ TEXT	·IndexByte(SB), NOSPLIT, $0-40
 	LEAQ ret+32(FP), R8
 	JMP  indexbytebody<>(SB)
 
-// gd small-string optimization: string header is 24 B (ptr, hash, len).
-// Args are (s string, c byte) int → frame size 24 + 8 (c pad) + 8 (ret) = 40.
-// For inline-rep strings s_base is nil and the bytes live starting at
-// s_hash+8(FP); the length sits in the top 4 bits of s_len (tag nibble).
-TEXT	·IndexByteString(SB), NOSPLIT, $0-40
+TEXT	·IndexByteString(SB), NOSPLIT, $0-32
 	MOVQ s_base+0(FP), SI
-	MOVQ s_len+16(FP), BX
-	MOVQ BX, CX
-	SHRQ $60, CX
-	JZ   ibs_heap
-	LEAQ s_hash+8(FP), SI
-	MOVQ CX, BX
+	MOVQ s_len+8(FP), BX
+	TESTQ	SI, SI
+	JNS	ibs_heap
+	// gd: inline (doc/gd/sso-string.md): put its bytes in order in
+	// its argument slots, w1 then w0, and point at them.
+	MOVQ	BX, s_base+0(FP)
+	MOVQ	SI, s_len+8(FP)
+	SHRQ	$56, SI
+	ANDL	$15, SI
+	MOVQ	SI, BX
+	LEAQ	s_base+0(FP), SI
 ibs_heap:
-	MOVB c+24(FP), AL
-	LEAQ ret+32(FP), R8
+	MOVB c+16(FP), AL
+	LEAQ ret+24(FP), R8
 	JMP  indexbytebody<>(SB)
 
 // input:

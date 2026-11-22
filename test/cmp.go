@@ -20,12 +20,17 @@ func use(b bool) { global = b }
 // stringptr returns the address of the bytes of s, or 0 if they are in
 // the string itself: with gd's strings of 16 bytes on a 32-bit target
 // (wasm32), a short string's bytes start at its word 0, and the top 4
-// bits of its last byte are its length.
+// bits of its last byte are its length; with 8-byte words a short
+// string's word 0 has its top bit set.
 func stringptr(s string) uintptr {
 	if unsafe.Sizeof(s) == 16 && unsafe.Sizeof(uintptr(0)) == 4 && *(*byte)(unsafe.Add(unsafe.Pointer(&s), 15))>>4 != 0 {
 		return 0
 	}
-	return *(*uintptr)(unsafe.Pointer(&s))
+	p := *(*uintptr)(unsafe.Pointer(&s))
+	if unsafe.Sizeof(p) == 8 && uint64(p)>>63 != 0 {
+		return 0
+	}
+	return p
 }
 
 func isfalse(b bool) {
@@ -58,11 +63,10 @@ func main() {
 
 	// go.tools/ssa/interp can't handle unsafe.Pointer.
 	if os.Getenv("GOSSAINTERP") == "" {
-		// gd small-string optimization: both literals and short
-		// concatenations produce inline-rep headers where word 0 is
-		// nil — the stock "distinct pointers" assumption no longer
-		// holds for strings of length <= 15. Only check distinctness
-		// when at least one side is heap-rep.
+		// gd: both literals and short concatenations are inline
+		// strings, which have no pointer — the stock "distinct
+		// pointers" assumption no longer holds for strings of length
+		// <= 15. Only check distinctness when neither is inline.
 		if pc, pd := stringptr(c), stringptr(d); pc != 0 && pd != 0 && pc == pd {
 			panic("compiler too smart -- got same string")
 		}

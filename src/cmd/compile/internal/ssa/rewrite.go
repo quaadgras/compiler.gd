@@ -18,7 +18,6 @@ import (
 	"cmd/internal/src"
 	"encoding/binary"
 	"fmt"
-	"internal/abi"
 	"internal/buildcfg"
 	"io"
 	"math"
@@ -845,9 +844,6 @@ func StringInlineWords(s string) (w1, w2 int64) {
 	return stringInlineWord1(s), stringInlineWord2(s)
 }
 
-// StringConstHash is the cached hash a heap-rep constant carries in
-// word 1 (see stringConstHash).
-func StringConstHash(s string) int64 { return stringConstHash(s) }
 func symToAux(s Sym) Aux {
 	return s
 }
@@ -1325,8 +1321,13 @@ func isConstZero(v *Value) bool {
 	case OpConst64, OpConst32, OpConst16, OpConst8, OpConstBool, OpConst32F, OpConst64F:
 		return v.AuxInt == 0
 	case OpStringMake:
-		// gd: 3-arg StringMake (ptr, hash, len).
-		return isConstZero(v.Args[0]) && isConstZero(v.Args[1]) && isConstZero(v.Args[2])
+		// gd: two args (w0, w1), or three with GOWASM=gc.
+		for _, a := range v.Args {
+			if !isConstZero(a) {
+				return false
+			}
+		}
+		return true
 	case OpComplexMake:
 		return isConstZero(v.Args[0]) && isConstZero(v.Args[1])
 	case OpIMake:
@@ -1335,7 +1336,7 @@ func isConstZero(v *Value) bool {
 			isConstZero(v.Args[2]) && isConstZero(v.Args[3])
 	case OpSliceMake:
 		return isConstZero(v.Args[0]) && isConstZero(v.Args[1]) && isConstZero(v.Args[2])
-	case OpStringPtr, OpStringHash, OpStringLen, OpSlicePtr, OpSliceLen, OpSliceCap, OpITab, OpIData, OpComplexReal, OpComplexImag:
+	case OpStringPtr, OpStringWord1, OpStringLen, OpSlicePtr, OpSliceLen, OpSliceCap, OpITab, OpIData, OpComplexReal, OpComplexImag:
 		return isConstZero(v.Args[0])
 	}
 	return false
@@ -2838,29 +2839,41 @@ func isDictArgSym(sym Sym) bool {
 	return sym.(*ir.Name).Sym().Name == typecheck.LocalDictName
 }
 
-// stringConstHash returns the fork's cached string hash for a literal
-// string. Matches runtime.sealStringHash / strhashFallback so
-// ConstString lowerings (in-function assignments, argument passing)
-// write the same value that runtime producers and staticdata.InitConst
-// compute — the invariant the word-1 cache depends on.
-func stringConstHash(s string) int64 {
-	// Dispatch on target GOARCH so rodata-baked hashes match what the
-	// target's runtime aeshashbody (or Go fallback port) will compute.
-	// arm64 uses AESE+AESMC, a different round function than x86's
-	// AESENC, so it needs its own port (abi.AeshashStringARM64).
-	// Everything else (amd64/386 asm, non-AES Go port on any arch)
-	// agrees with the x86-style abi.AeshashString.
-	var h int64
-	switch buildcfg.GOARCH {
-	case "arm64":
-		h = int64(abi.AeshashStringARM64(s))
-	default:
-		h = int64(abi.AeshashString(s))
+// stringHeapPtr reports whether v, word 0 of a string of two words with
+// 8-byte words (types.StringTagged), is known to be an address, so that
+// the string is not inline: its w1 is then its length.
+func stringHeapPtr(v *Value) bool {
+	for v.Op == OpOffPtr || v.Op == OpAddPtr || v.Op == OpCopy && v.Type.IsPtrShaped() {
+		if v.Op == OpAddPtr && v.Args[0].Op == OpStringPtr {
+			// Only made from the address of a string's bytes.
+			return true
+		}
+		v = v.Args[0]
 	}
-	if h == 0 {
-		h = 1 // reserve 0 as the unsealed sentinel
+	switch v.Op {
+	case OpAddr, OpLocalAddr, OpConstNil, OpSP, OpSB, OpSlicePtr, OpSlicePtrUnchecked, OpGetClosurePtr:
+		return true
+	case OpConst64:
+		return v.AuxInt >= 0
 	}
-	return h
+	return false
+}
+
+// stringTaggedW0 and stringTaggedW1 are the words of an inline string
+// of 1 to 15 bytes, s (types.StringTaggedWords).
+func stringTaggedW0(s string, bigEndian bool) int64 {
+	w0, _ := types.StringTaggedWords(s, bigEndian)
+	return w0
+}
+
+func stringTaggedW1(s string, bigEndian bool) int64 {
+	_, w1 := types.StringTaggedWords(s, bigEndian)
+	return w1
+}
+
+// StringTaggedWords is types.StringTaggedWords.
+func StringTaggedWords(s string, bigEndian bool) (w0, w1 int64) {
+	return types.StringTaggedWords(s, bigEndian)
 }
 
 // stringInlineWord1 packs the first up to 8 bytes of s little-endian

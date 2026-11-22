@@ -31,8 +31,9 @@ func (t *traceStringTable) put(gen uintptr, s string) uint64 {
 		s = s[:tracev2.MaxEventTrailerDataSize]
 	}
 	// Put the string in the table.
+	var buf [16]byte
 	ss := stringStructOf(&s)
-	id, added := t.tab.put(ss.bytes(), uintptr(ss.length()))
+	id, added := t.tab.put(ss.data(&buf), uintptr(ss.length()))
 	if added {
 		// Write the string to the buffer.
 		systemstack(func() {

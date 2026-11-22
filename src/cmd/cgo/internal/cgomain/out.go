@@ -604,7 +604,7 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 	inProlog := builtinDefs[name] != ""
 	cname := fmt.Sprintf("_cgo%s%s", cPrefix, n.Mangle)
 	paramnames := []string(nil)
-	stringParamNames := []string(nil) // gd SSO: subset needing heap-rep normalize
+	stringParamNames := []string(nil) // gd: strings, which must not be inline in C
 	if d.Type.Params != nil {
 		for i, param := range d.Type.Params.List {
 			paramName := fmt.Sprintf("p%d", i)
@@ -709,11 +709,10 @@ func (p *Package) writeDefsFunc(fgo2 io.Writer, n *Name, callsMalloc *bool) {
 		fmt.Fprintf(fgo2, "\t_Cgo_no_callback(true)\n")
 	}
 
-	// gd SSO: normalize inline-rep strings to heap-rep before handing the
-	// argument frame to C. Inline strings have s.p == nil and a
-	// tag-encoded s.n; C code reading those fields reads garbage. The
-	// helper is a nop on heap-rep inputs (tag == 0), so cost is one
-	// load + branch per string arg.
+	// gd: an inline string (doc/gd/sso-string.md) is copied to the heap
+	// before the argument frame is handed to C, which reads a string as
+	// its address and its length. The helper returns any other string
+	// as it is: a test of its first word's sign.
 	for _, name := range stringParamNames {
 		fmt.Fprintf(fgo2, "\t%s = _cgoStringNormalize(%s)\n", name, name)
 	}
@@ -1611,8 +1610,7 @@ func (p *Package) doCgoType(e ast.Expr, m map[ast.Expr]bool) *Type {
 			return &Type{Size: p.PtrSize, Align: p.PtrSize, C: c("GoUintptr")}
 		}
 		if t.Name == "string" {
-			// gd small-string optimization: 3 words (ptr, hash, len).
-			return &Type{Size: 3 * p.PtrSize, Align: p.PtrSize, C: c("GoString")}
+			return &Type{Size: 2 * p.PtrSize, Align: p.PtrSize, C: c("GoString")}
 		}
 		if t.Name == "error" {
 			// gd fat-iface: 2 words + 16-byte inline payload.
@@ -1753,12 +1751,9 @@ const builtinProlog = `
 typedef ptrdiff_t intgo;
 
 #define GO_CGO_GOSTRING_TYPEDEF
-/* gd small-string optimization: Go's string header is 3 words
- * (ptr, hash, len). The hash slot sits between p and n; cgo helpers
- * reading p/n still see the right values because field names match.
- * size_t is pointer-sized on every platform cgo supports, matching
- * Go's uint hash slot. */
-typedef struct { const char *p; size_t h; intgo n; } _GoString_;
+/* gd: a Go string passed to C is never inline (the Go side calls
+ * _cgoStringNormalize), so p and n are its address and length. */
+typedef struct { const char *p; intgo n; } _GoString_;
 typedef struct { char *p; intgo n; intgo c; } _GoBytes_;
 _GoString_ GoString(char *p);
 _GoString_ GoStringN(char *p, int l);
@@ -2062,7 +2057,7 @@ const builtinExportProlog = `
 #define GO_CGO_EXPORT_PROLOGUE_H
 
 #ifndef GO_CGO_GOSTRING_TYPEDEF
-typedef struct { const char *p; size_t h; ptrdiff_t n; } _GoString_;
+typedef struct { const char *p; ptrdiff_t n; } _GoString_;
 extern size_t _GoStringLen(_GoString_ s);
 extern const char *_GoStringPtr(_GoString_ s);
 #endif

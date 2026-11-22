@@ -709,11 +709,10 @@ func suffix(s, suffix string) bool {
 }
 
 func constsuffix(s string) bool {
-	// gd small-string optimization: the comparison with the constant
-	// is open-coded on the string's words (word 2 against the inline
-	// encoding, then against the length), so prove reports Neq64 on
-	// that length check instead of the stock Eq64.
-	return suffix(s, "abc") // ERROR "Proved IsSliceInBounds$" "Proved slicemask not needed" "Proved Neq64$"
+	// gd: the comparison with the constant is open-coded on the
+	// string's words (w0 against the inline encoding, then w1 against
+	// the length), which prove has nothing to say about.
+	return suffix(s, "abc") // ERROR "Proved IsSliceInBounds$" "Proved slicemask not needed"
 }
 
 func atexit(foobar []func()) {

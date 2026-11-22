@@ -38,19 +38,49 @@
     imag
     (Store {typ.Float64} dst real mem))
 
-// string ops — gd small-string optimization (3-word header).
+// string ops.
+// Where a string is two words (types.StringTwoWords), arg0=w0 and
+// arg1=w1: the address of the bytes and the length, or with 8-byte
+// words (types.StringTagged) an inline string, whose w0 has bit 63 set,
+// the length in bits 56..62 and bytes 8..14, and whose w1 is bytes
+// 0..7. StringLen is the logical length:
+//   m      = int64(w0) >>s 63          (-1 if inline, else 0)
+//   result = (w0 >>u 56 & 15 & m) | (w1 &^ m)
+(StringPtr   (StringMake ptr _)) => ptr
+(StringWord1 (StringMake _ w1)) => w1
+(StringLen   (StringMake _ w1)) && config.PtrSize == 4 => w1
+(StringLen   (StringMake w0 w1)) && config.PtrSize == 8 =>
+  (Or64 <typ.Int>
+    (And64 <typ.Int>
+      (Rsh64Ux64 <typ.Int> (PtrBits <typ.Uintptr> w0) (Const64 <typ.UInt64> [56]))
+      (And64 <typ.Int>
+        (Const64 <typ.Int> [15])
+        (Rsh64x64 <typ.Int> (PtrBits <typ.Uintptr> w0) (Const64 <typ.UInt64> [63]))))
+    (And64 <typ.Int>
+      w1
+      (Com64 <typ.Int> (Rsh64x64 <typ.Int> (PtrBits <typ.Uintptr> w0) (Const64 <typ.UInt64> [63])))))
+(Load <t> ptr mem) && t.IsString() && config.stringTwoWords() =>
+  (StringMake
+    (Load <typ.BytePtr> ptr mem)
+    (Load <typ.Int>
+      (OffPtr <typ.IntPtr> [config.PtrSize] ptr)
+      mem))
+(Store dst (StringMake ptr len) mem) =>
+  (Store {typ.Int}
+    (OffPtr <typ.IntPtr> [config.PtrSize] dst)
+    len
+    (Store {typ.BytePtr} dst ptr mem))
+
+// GOWASM=gc: three values.
 // arg0=ptr (word 0), arg1=hash or inline bytes[0:8] (word 1),
 // arg2=raw word 2 (tag<<60 | logical len for heap rep; tag<<60 |
 // packed bytes[8:15] for inline rep).
 //
-// StringLen is the LOGICAL length — on 32-bit the raw word 2 always
-// has tag=0 so it is the length. On 64-bit decode the tag nibble.
 // StringWord2 is the raw word 2, used by helpers that need the tag
 // for inline-vs-heap dispatch.
 (StringPtr   (StringMake ptr  _  _  )) => ptr
-(StringHash  (StringMake _    hash _)) => hash
+(StringWord1 (StringMake _    hash _)) => hash
 (StringWord2 (StringMake _    _  w2)) => w2
-(StringLen   (StringMake _    _  w2)) && config.PtrSize == 4 && !config.stringWasm32() => w2
 // wasm32 (types.StringWasm32): the values are word 0 as a pointer,
 // A (bytes 0 to 7, or word 0 and the length in word 1) and B (bytes 8
 // to 14 and the tag in the top 4 bits, or the hash and 0). The length
@@ -58,8 +88,7 @@
 // (A call of a helper, wasm.strlen, which is less code than the
 // select at each use.)
 (StringLen   (StringMake _    wa wb)) && config.stringWasm32() => (StringLenAB <typ.Int> wa wb)
-// 64-bit: decode tag-encoded word 2 without CondSelect so every arch
-// (incl. ARM, MIPS, S390X, RISCV64) lowers cleanly. Formula:
+// 64-bit: decode tag-encoded word 2 without CondSelect. Formula:
 //   tag    = w2 >>u 60           (0 for heap, 1..15 for inline)
 //   masked = w2 & ((1<<60)-1)    (heap len, or garbage on inline)
 //   zm     = int64(tag-1) >>s 63 (-1 if tag==0, 0 otherwise)
@@ -93,7 +122,7 @@
       (OffPtr <typ.StringWord1Ptr> [0] dst)
       wa
       (StringStorePtr dst ptr mem)))
-(Load <t> ptr mem) && t.IsString() && !config.stringWasm32() =>
+(Load <t> ptr mem) && t.IsString() && !config.stringWasm32() && !config.stringTwoWords() =>
   (StringMake
     (Load <typ.BytePtr> ptr mem)
     (Load <typ.Uintptr>
@@ -207,14 +236,17 @@
 (StringPtr   x:(Load <t> ptr mem)) && t.IsString() && config.stringWasm32() => @x.Block (StringLoadPtr <typ.BytePtr> ptr
       (Load <typ.UInt64> (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr) mem)
       mem)
-(StringHash  x:(Load <t> ptr mem)) && t.IsString() && config.stringWasm32() => @x.Block (Load <typ.UInt64>
+(StringWord1 x:(Load <t> ptr mem)) && t.IsString() && config.stringWasm32() => @x.Block (Load <typ.UInt64>
       (OffPtr <typ.StringWord1Ptr> [0] ptr)
       mem)
 (StringPtr   x:(Load <t> ptr mem)) && t.IsString() && !config.stringWasm32() => @x.Block (Load <typ.BytePtr> ptr mem)
-(StringHash  x:(Load <t> ptr mem)) && t.IsString() && !config.stringWasm32() => @x.Block (Load <typ.Uintptr>
+(StringWord1 x:(Load <t> ptr mem)) && t.IsString() && config.stringTwoWords() => @x.Block (Load <typ.Int>
+      (OffPtr <typ.IntPtr> [config.PtrSize] ptr)
+      mem)
+(StringWord1 x:(Load <t> ptr mem)) && t.IsString() && !config.stringWasm32() && !config.stringTwoWords() => @x.Block (Load <typ.Uintptr>
       (OffPtr <typ.UintptrPtr> [config.PtrSize] ptr)
       mem)
-(StringWord2 x:(Load <t> ptr mem)) && t.IsString() => @x.Block (Load <typ.StringWord2>
+(StringWord2 x:(Load <t> ptr mem)) && t.IsString() && !config.stringTwoWords() => @x.Block (Load <typ.StringWord2>
       (OffPtr <typ.StringWord2Ptr> [2*config.PtrSize] ptr)
       mem)
 

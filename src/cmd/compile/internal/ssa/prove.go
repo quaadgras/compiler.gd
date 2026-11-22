@@ -2603,6 +2603,12 @@ func (ft *factsTable) addValueFact(b *Block, v *Value) {
 					}
 				}
 			}
+		} else if v.Args[0].Op == OpStringMake && len(v.Args[0].Args) == 2 {
+			// Two words: w1 is the length unless the string is
+			// inline, which a known address in w0 rules out.
+			if b.Func.Config.PtrSize == 4 || stringHeapPtr(v.Args[0].Args[0]) {
+				ft.update(b, v, v.Args[0].Args[1], signed, eq)
+			}
 		} else if v.Args[0].Op == OpStringMake {
 			a2 := v.Args[0].Args[2]
 			if a2.Op != OpConst64 || uint64(a2.AuxInt)>>60 == 0 {
@@ -2614,7 +2620,7 @@ func (ft *factsTable) addValueFact(b *Block, v *Value) {
 		// CondSelect is emitted on arches that support it instead
 		// of the if/phi form.
 		if sl := unwrapStringDecodedLen(v); sl != nil {
-			if sl.Args[0].Op == OpStringMake {
+			if sl.Args[0].Op == OpStringMake && len(sl.Args[0].Args) == 3 {
 				ft.update(b, v, sl.Args[0].Args[2], signed, eq)
 			}
 		}
@@ -2646,7 +2652,7 @@ func (ft *factsTable) addValueFact(b *Block, v *Value) {
 		// the same equivalence fact we'd attach to the wrapped
 		// OpStringLen.
 		if sl := unwrapStringDecodedLen(v); sl != nil {
-			if sl.Args[0].Op == OpStringMake {
+			if sl.Args[0].Op == OpStringMake && len(sl.Args[0].Args) == 3 {
 				ft.update(b, v, sl.Args[0].Args[2], signed, eq)
 			}
 		}
@@ -2886,8 +2892,9 @@ func (ft *factsTable) simplifyValue(b *Block, v *Value) {
 		lim := ft.limits[by.ID]
 		bits := 8 * v.Args[0].Type.Size()
 		if lim.umax < uint64(bits) || (lim.max < bits && ft.isNonNegative(by)) {
-			v.AuxInt = 1 // see shiftIsBounded
-			if b.Func.pass.debug > 0 && !by.isGenericIntConst() {
+			known := v.AuxInt == 1 // (as the shifts of an inline string's bytes are)
+			v.AuxInt = 1           // see shiftIsBounded
+			if b.Func.pass.debug > 0 && !by.isGenericIntConst() && !known {
 				b.Func.Warnl(v.Pos, "Proved %v bounded", v.Op)
 			}
 		}

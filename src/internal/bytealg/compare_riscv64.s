@@ -6,7 +6,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
 	// X10 = a_base
 	// X11 = a_len
 	// X12 = a_cap (unused)
@@ -18,9 +18,9 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	JMP	compare<>(SB)
 
 // gd: stock cmpstring asm assumed a 16 B string ABI; the fork's
-// 24 B header breaks every per-arch version. Redirect to the Go
+// inline strings (doc/gd/sso-string.md) break every per-arch version. Redirect to the Go
 // fallback, which lowers len(s) / s[i] through tag-aware helpers.
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
 	JMP	·cmpstringFallback<ABIInternal>(SB)
 
 // On entry:

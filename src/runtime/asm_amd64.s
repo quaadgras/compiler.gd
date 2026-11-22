@@ -1287,156 +1287,6 @@ fences:
 	RDTSC
 	JMP done
 
-// func strhash(p unsafe.Pointer, h uintptr) uintptr
-//
-// gd fork layout: stringStruct is 24 B (ptr, hash, len). Heap-rep
-// strings carry a cached hash in word 1 (populated by sealStringHash
-// and by the compiler for static literals); a non-zero cache short-
-// circuits the call. On cache miss we tail-route the bytes into
-// runtime·memhash with seed=0 so aeshashbody runs against the fork's
-// fixed aeskeysched and matches the compile-time hash emitted for
-// string literals.
-//
-// Since go1.27 the AES hash bodies (memhash/aeshashbody/memhash32/64)
-// live in internal/runtime/maps (memhash_amd64.s); runtime·memhash is
-// a Go wrapper around maps.MemHash, and the UseAeshash flag plus the
-// aeskeysched table are owned by that package. The inline fast path
-// below keeps a private copy of the byte-mask table.
-//
-// Layouts:
-//   heap rep (word 0 != nil):  hash = word 1, data = word 0, len = word 2 & 0x0fff...
-//   inline rep (word 0 == nil): bytes packed in words 1+2, len = word 2 >> 60.
-//     Inline bytes are spilled to a 16 B local buffer before calling
-//     memhash, since memhash wants a pointer.
-TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$16-24
-	NO_LOCAL_POINTERS
-	// AX = ptr to string struct, BX = caller seed (ignored).
-	// Dispatch on the length tag, not word 0: an inline literal also
-	// carries word 0 = its rodata bytes, and must hash exactly like the
-	// same bytes held inline at runtime. The empty string (tag 0) takes
-	// the heap path, which hashes it as memhash(nil, 0) like any other
-	// empty heap string.
-	MOVQ	16(AX), DX
-	SHRQ	$60, DX
-	JNZ	strhash_inline
-	MOVQ	(AX), CX		// CX = word 0
-	// Heap rep: check cache.
-	MOVQ	8(AX), DX		// DX = cached hash
-	TESTQ	DX, DX
-	JZ	strhash_heap_unsealed
-	MOVQ	DX, AX
-	RET
-strhash_heap_unsealed:
-	// Heap cache miss: hash data bytes with seed=0 via memhash (which
-	// dispatches to aeshashbody on AES-capable CPUs or memhashFallback
-	// otherwise).
-	MOVQ	16(AX), DX		// DX = word 2 (len|tag)
-	MOVQ	$0x0fffffffffffffff, R8
-	ANDQ	R8, DX
-	MOVQ	CX, AX			// data ptr
-	XORL	BX, BX
-	MOVQ	DX, CX
-	CALL	runtime·memhash<ABIInternal>(SB)
-	RET
-strhash_inline:
-	// Inline-rep strings keep their bytes in word 1 + low 60 bits of
-	// word 2, so we can feed them straight into an XMM register and
-	// run aeshashbody's aes0to15 final1 pattern inline — no stack
-	// spill, no CALL. On non-AES CPUs we still need memhashFallback,
-	// which wants a pointer, so that path spills and CALLs.
-	CMPB	internal∕runtime∕maps·UseAeshash(SB), $0
-	JEQ	strhash_inline_wy
-	// Fast path: inline aeshash for 0..15 B strings.
-	MOVQ	8(AX), DX		// DX = word 1 (bytes[0..7])
-	MOVQ	16(AX), R8		// R8 = word 2 (len<<60 | bytes[8..14])
-	MOVQ	R8, CX
-	SHRQ	$60, CX			// CX = length (0..15)
-	// Seed X0 the same way aeshashbody does with BX=0.
-	XORPS	X0, X0
-	PINSRW	$4, CX, X0
-	PSHUFHW	$0, X0, X0
-	PXOR	internal∕runtime∕maps·aeskeysched(SB), X0
-	AESENC	X0, X0
-	// Length 0 literal "" reaches this path via word 0 == nil with
-	// tag 0. Its heap-rep counterpart (sliced-to-empty of a heap
-	// string) routes through memhash→aeshashbody→aes0, which does
-	// exactly one more AESENC on the scrambled seed. Mirror that so
-	// the two representations produce identical hashes; otherwise
-	// map lookups with a literal "" key vs a sliced "" key miss each
-	// other.
-	TESTQ	CX, CX
-	JZ	strhash_inline_empty
-	// Length 1..15: pack bytes into X1 and run aes0to15 final1.
-	MOVQ	DX, X1
-	PINSRQ	$1, R8, X1
-	// Zero-mask bytes at positions >= length (also strips the tag
-	// nibble and any padding). masks<>+16*len gives a 16 B mask with
-	// 1s in low `len` bytes and 0s elsewhere.
-	LEAQ	masks<>(SB), R9
-	MOVQ	CX, R10
-	SHLQ	$4, R10
-	MOVOU	(R9)(R10*1), X2
-	PAND	X2, X1
-	// final1: PXOR seed; AESENC 3 rounds; return low 64.
-	PXOR	X0, X1
-	AESENC	X1, X1
-	AESENC	X1, X1
-	AESENC	X1, X1
-	MOVQ	X1, AX
-	RET
-strhash_inline_empty:
-	AESENC	X0, X0
-	MOVQ	X0, AX
-	RET
-strhash_inline_wy:
-	// Non-AES fallback: spill inline bytes to local frame and CALL
-	// memhash so memhashFallback (wyhash) sees contiguous memory.
-	MOVQ	8(AX), DX
-	MOVQ	16(AX), R8
-	MOVQ	DX, 0(SP)
-	MOVQ	R8, 8(SP)
-	MOVQ	R8, CX
-	SHRQ	$60, CX
-	MOVQ	SP, AX
-	XORL	BX, BX
-	CALL	runtime·memhash<ABIInternal>(SB)
-	RET
-
-// simple mask to get rid of data in the high part of the register.
-DATA masks<>+0x00(SB)/8, $0x0000000000000000
-DATA masks<>+0x08(SB)/8, $0x0000000000000000
-DATA masks<>+0x10(SB)/8, $0x00000000000000ff
-DATA masks<>+0x18(SB)/8, $0x0000000000000000
-DATA masks<>+0x20(SB)/8, $0x000000000000ffff
-DATA masks<>+0x28(SB)/8, $0x0000000000000000
-DATA masks<>+0x30(SB)/8, $0x0000000000ffffff
-DATA masks<>+0x38(SB)/8, $0x0000000000000000
-DATA masks<>+0x40(SB)/8, $0x00000000ffffffff
-DATA masks<>+0x48(SB)/8, $0x0000000000000000
-DATA masks<>+0x50(SB)/8, $0x000000ffffffffff
-DATA masks<>+0x58(SB)/8, $0x0000000000000000
-DATA masks<>+0x60(SB)/8, $0x0000ffffffffffff
-DATA masks<>+0x68(SB)/8, $0x0000000000000000
-DATA masks<>+0x70(SB)/8, $0x00ffffffffffffff
-DATA masks<>+0x78(SB)/8, $0x0000000000000000
-DATA masks<>+0x80(SB)/8, $0xffffffffffffffff
-DATA masks<>+0x88(SB)/8, $0x0000000000000000
-DATA masks<>+0x90(SB)/8, $0xffffffffffffffff
-DATA masks<>+0x98(SB)/8, $0x00000000000000ff
-DATA masks<>+0xa0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xa8(SB)/8, $0x000000000000ffff
-DATA masks<>+0xb0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xb8(SB)/8, $0x0000000000ffffff
-DATA masks<>+0xc0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xc8(SB)/8, $0x00000000ffffffff
-DATA masks<>+0xd0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xd8(SB)/8, $0x000000ffffffffff
-DATA masks<>+0xe0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xe8(SB)/8, $0x0000ffffffffffff
-DATA masks<>+0xf0(SB)/8, $0xffffffffffffffff
-DATA masks<>+0xf8(SB)/8, $0x00ffffffffffffff
-GLOBL masks<>(SB),RODATA,$256
-
 // Called from cgo wrappers, this function returns g->m->curg.stack.hi.
 // Must obey the gcc calling convention.
 TEXT _cgo_topofstack(SB),NOSPLIT,$0
@@ -1627,16 +1477,7 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 //
 // This is ABIInternal because Go code injects its PC directly into new
 // goroutine stacks.
-//
-// gd small-string optimization: frame bumped 152→160 so that
-// frameSize-128(SP) resolves to SP+32 (was SP+24). debugCallCheck
-// returns a 3-word string which spans 8(SP)..31(SP) under gd; storing
-// argSize at SP+24 (the old slot) was being clobbered by the return
-// string's len field, causing the dispatch to read 0 and pick
-// debugCall32 for any frame size — TestDebugCallLarge symptom was an
-// "unexpected return pc 0x5" because args.in[5]=5 wound up at fn's RA
-// slot.
-TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$160-0
+TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$152-0
 	// Save all registers that may contain pointers so they can be
 	// conservatively scanned.
 	//
@@ -1665,10 +1506,6 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$160-0
 	MOVQ	DX, frameSize-128(SP)
 
 	// Perform a safe-point check.
-	// gd small-string optimization: debugCallCheck returns a 3-word
-	// string under stack ABI — ptr at 8(SP), hash at 16(SP), len at
-	// 24(SP). The safe-point error path then republishes that string
-	// at the top of stack as a 3-word header for debugCallUnsafe.
 	MOVQ	retpc-8(FP), AX	// Caller's PC
 	MOVQ	AX, 0(SP)
 	CALL	runtime·debugCallCheck(SB)
@@ -1676,11 +1513,10 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT,$160-0
 	TESTQ	AX, AX
 	JZ	good
 	// The safety check failed. Put the reason string at the top
-	// of the stack as a 3-word string {ptr, hash=0, len}.
-	MOVQ	AX, 0(SP)        // ptr (already in AX from MOVQ 8(SP), AX)
-	MOVQ	24(SP), AX       // len from gd return slot 24(SP)
-	MOVQ	AX, 16(SP)       // store len at word 2
-	MOVQ	$0, 8(SP)        // hash slot, Phase A = 0
+	// of the stack.
+	MOVQ	AX, 0(SP)
+	MOVQ	16(SP), AX
+	MOVQ	AX, 8(SP)
 	// Set R12 to 8 and invoke INT3. The debugger should get the
 	// reason a call can't be injected from the top of the stack
 	// and resume execution.
@@ -1728,11 +1564,9 @@ good:
 	DEBUG_CALL_DISPATCH(debugCall32768<>, 32768)
 	DEBUG_CALL_DISPATCH(debugCall65536<>, 65536)
 	// The frame size is too large. Report the error.
-	// gd small-string optimization: write a 3-word string {ptr, hash=0, len}.
 	MOVQ	$debugCallFrameTooLarge<>(SB), AX
-	MOVQ	AX, 0(SP)            // ptr
-	MOVQ	$0, 8(SP)            // hash slot, Phase A = 0
-	MOVQ	$20, 16(SP)          // len of debugCallFrameTooLarge string at word 2
+	MOVQ	AX, 0(SP)
+	MOVQ	$20, 8(SP) // length of debugCallFrameTooLarge string
 	MOVQ	$8, R12
 	BYTE	$0xcc
 	JMP	restore

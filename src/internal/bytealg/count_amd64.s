@@ -18,26 +18,27 @@ TEXT ·Count(SB),NOSPLIT,$0-40
 	LEAQ	ret+32(FP), R8
 	JMP	countbody<>(SB)
 
-// gd small-string optimization: string is 24 B (ptr, hash, len).
-// CountString(s string, c byte) int → 24 + 8 (c) + 8 (ret) = 40.
-// Inline-rep strings have s_base == nil and the bytes live in the header
-// itself (starting at s_hash+8(FP)); the length is the top-4-bit tag.
-TEXT ·CountString(SB),NOSPLIT,$0-40
+TEXT ·CountString(SB),NOSPLIT,$0-32
 #ifndef hasPOPCNT
 	CMPB	internal∕cpu·X86+const_offsetX86HasPOPCNT(SB), $1
 	JEQ	2(PC)
 	JMP	·countGenericString(SB)
 #endif
 	MOVQ	s_base+0(FP), SI
-	MOVQ	s_len+16(FP), BX
-	MOVQ	BX, CX
-	SHRQ	$60, CX
-	JZ	cs_heap
-	LEAQ	s_hash+8(FP), SI
-	MOVQ	CX, BX
+	MOVQ	s_len+8(FP), BX
+	TESTQ	SI, SI
+	JNS	cs_heap
+	// gd: inline (doc/gd/sso-string.md): put its bytes in order in
+	// its argument slots, w1 then w0, and point at them.
+	MOVQ	BX, s_base+0(FP)
+	MOVQ	SI, s_len+8(FP)
+	SHRQ	$56, SI
+	ANDL	$15, SI
+	MOVQ	SI, BX
+	LEAQ	s_base+0(FP), SI
 cs_heap:
-	MOVB	c+24(FP), AL
-	LEAQ	ret+32(FP), R8
+	MOVB	c+16(FP), AL
+	LEAQ	ret+24(FP), R8
 	JMP	countbody<>(SB)
 
 // input:

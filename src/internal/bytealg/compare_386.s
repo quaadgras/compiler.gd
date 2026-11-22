@@ -13,14 +13,12 @@ TEXT ·Compare(SB),NOSPLIT,$0-28
 	LEAL	ret+24(FP), AX
 	JMP	cmpbody<>(SB)
 
-// gd: a string is {ptr, hash, len} (doc/gd/sso-string.md; with 4-byte
-// words it has no inline form), so a string argument is 12 bytes.
-TEXT runtime·cmpstring(SB),NOSPLIT,$0-28
+TEXT runtime·cmpstring(SB),NOSPLIT,$0-20
 	MOVL	a_base+0(FP), SI
-	MOVL	a_len+8(FP), BX
-	MOVL	b_base+12(FP), DI
-	MOVL	b_len+20(FP), DX
-	LEAL	ret+24(FP), AX
+	MOVL	a_len+4(FP), BX
+	MOVL	b_base+8(FP), DI
+	MOVL	b_len+12(FP), DX
+	LEAL	ret+16(FP), AX
 	JMP	cmpbody<>(SB)
 
 // input:

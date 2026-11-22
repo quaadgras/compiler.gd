@@ -343,13 +343,13 @@ func (l dloggerFake) s(x string) dloggerFake { return l }
 
 //go:nosplit
 func (l *dloggerImpl) s(x string) *dloggerImpl {
-	// Use stringStruct.bytes() instead of unsafe.StringData to avoid the
-	// stringDataHeap alloc path in nowritebarrier contexts. For inline-
-	// rep x the returned pointer aliases x's header (stack- or register-
-	// spilled), which is fine here: the bytes are consumed immediately
-	// by l.w writes that complete before x goes out of scope.
+	// Use stringStruct.data instead of unsafe.StringData to avoid the
+	// stringDataHeap alloc path in nowritebarrier contexts. For an
+	// inline x the returned pointer is buf's, which is fine here: the
+	// bytes are consumed immediately by l.w writes.
+	var buf [16]byte
 	xh := (*stringStruct)(unsafe.Pointer(&x))
-	strData := (*byte)(xh.bytes())
+	strData := (*byte)(xh.data(&buf))
 	datap := &firstmoduledata
 	if len(x) > 4 && datap.etext <= uintptr(unsafe.Pointer(strData)) && uintptr(unsafe.Pointer(strData)) < datap.end {
 		// String constants are in the rodata section, which
@@ -736,7 +736,7 @@ func (r *debugLogReader) printVal() bool {
 		// in this (potentially) nowritebarrier context.
 		str := stringStruct{
 			str: unsafe.Pointer(ptr),
-			len: uint(len),
+			len: len,
 		}
 		s := *(*string)(unsafe.Pointer(&str))
 		print(s)

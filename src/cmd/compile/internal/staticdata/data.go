@@ -24,8 +24,6 @@ import (
 	"cmd/internal/obj"
 	"cmd/internal/objabi"
 	"cmd/internal/src"
-	"internal/abi"
-	"internal/buildcfg"
 )
 
 // InitAddrOffset writes the static name symbol lsym to n, it does not modify n.
@@ -374,20 +372,7 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 		}
 
 	case constant.String:
-		// gd small-string optimization: string is a 3-word header
-		// (ptr, hash, len). Phase A writes hash = 0 for heap rep;
-		// literal pre-hashing will land in a later phase.
-		// See doc/gd/sso-string.md.
-		//
-		// Phase C Step 7: on 64-bit, strings of length 1..15 are
-		// emitted inline — word 0 = 0 (no relocation to go:string
-		// data), word 1 = bytes[0:8] packed little-endian, word 2 =
-		// (tag<<60) | bytes[8:15] packed low 56 bits. Safe because
-		// OSLICESTR on an inline source takes the register path
-		// added in Step 5 (no interior pointers escape), and the
-		// consumer helpers (stringLen, stringIndex, stringEqFast)
-		// are inline-aware. 32-bit targets keep heap rep — the 12 B
-		// header has no room for 15 B inline bytes.
+		// See doc/gd/sso-string.md and types.StringTwoWords.
 		i := constant.StringVal(u)
 		slen := int64(len(i))
 		if types.StringWasm32() {
@@ -409,6 +394,26 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 			s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, 8, 0)
 			break
 		}
+		if types.StringTwoWords() {
+			// Two words: a string of 1 to 15 bytes is inline with
+			// 8-byte words (types.StringTagged; w0, written as an
+			// integer, is no address), any other the address of its
+			// bytes (nil for "") and its length.
+			if types.StringTagged() && slen >= 1 && slen <= types.StringInlineCap {
+				w0, w1 := types.StringTaggedWords(i, gd.Ctxt.Arch.ByteOrder == binary.BigEndian)
+				s.WriteInt(gd.Ctxt, noff, 8, w0)
+				s.WriteInt(gd.Ctxt, noff+8, 8, w1)
+				break
+			}
+			if slen == 0 {
+				s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
+			} else {
+				s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, StringSym(gd, n.Pos(), i), 0)
+			}
+			s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
+			break
+		}
+		// GOWASM=gc with 8-byte words: three words.
 		if types.PtrSize == 8 && slen >= 1 && slen <= 15 {
 			var w1buf [8]byte
 			copy(w1buf[:], i)
@@ -420,45 +425,14 @@ func InitConst(gd *base.Invocation, n *ir.Name, noff int64, c ir.Node, wid int) 
 			}
 			const lenMask = 1<<60 - 1
 			word2 := int64(binary.LittleEndian.Uint64(w2buf[:]))&lenMask | slen<<60
-
-			// Literal provenance (amd64, arm64; see generic.rules): word 0
-			// points at the literal's bytes in rodata. Elsewhere it
-			// is an explicit 0, guarding against a previous
-			// initializer at the same offset.
-			if buildcfg.GOARCH == "amd64" || buildcfg.GOARCH == "arm64" {
-				s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, StringSym(gd, n.Pos(), i), 0)
-			} else {
-				s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
-			}
+			s.WriteInt(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, 0)
 			s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, word1)
 			s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, word2)
 			break
 		}
 		symdata := StringSym(gd, n.Pos(), i)
 		s.WriteAddr(gd.Ctxt, noff+types.StringPtrOffset, types.PtrSize, symdata, 0)
-		// gd string hash cache: pre-populate word 1 with the fork's
-		// canonical string hash so the very first map lookup /
-		// equality check on a literal hits the cache without any
-		// runtime computation. abi.AeshashString mirrors the runtime
-		// asm aeshashbody with AeskeyschedSeed installed, so rodata-
-		// embedded hashes match what sealStringHash / strhashFallback
-		// would compute at runtime. 32-bit targets leave the slot
-		// at 0 (no reserved hash slot on their 12 B header).
-		var hash int64
-		if types.PtrSize == 8 {
-			// arm64 runtime uses AESE+AESMC, which produces bit-
-			// different output from x86's AESENC. Match the target.
-			switch buildcfg.GOARCH {
-			case "arm64":
-				hash = int64(abi.AeshashStringARM64(i))
-			default:
-				hash = int64(abi.AeshashString(i))
-			}
-			if hash == 0 {
-				hash = 1 // reserve 0 as the unsealed sentinel
-			}
-		}
-		s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, hash)
+		s.WriteInt(gd.Ctxt, noff+types.StringHashOffset, types.PtrSize, 0)
 		s.WriteInt(gd.Ctxt, noff+types.StringLenOffset, types.PtrSize, slen)
 
 	default:

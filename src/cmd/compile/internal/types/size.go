@@ -44,7 +44,9 @@ var (
 
 	SliceSize int64
 
-	// gd: 3-word string header. See doc/gd/sso-string.md.
+	// The words of a string (see StringTwoWords). StringHashOffset is
+	// the offset of the second value of a string in SSA when it has three
+	// (GOWASM=gc), else StringLenOffset.
 	StringPtrOffset  int64
 	StringHashOffset int64
 	StringLenOffset  int64
@@ -53,7 +55,7 @@ var (
 	// StringInlineCap is the longest string kept in its header: 15
 	// with 8-byte words and with the 4-byte words of wasm32
 	// (StringWasm32), 0 on the other 32-bit targets, which have no
-	// inline form.
+	// inline form (and stock Go's strings).
 	StringInlineCap int64
 
 	// FuncMaskOffset is the offset of the escape mask M of a function
@@ -64,6 +66,68 @@ var (
 )
 
 var SkipSizeForTracing bool
+
+// StringTwoWords reports whether a string is two words, as in stock Go:
+// on every target but GOARCH=wasm with GOWASM=gc. With 8-byte words
+// (StringTagged) a string of 1 to 15 bytes is kept in them; with 4-byte
+// words (386, arm, mips) a string is stock Go's, the address of its
+// bytes and its length.
+func StringTwoWords() bool {
+	return !(buildcfg.GOARCH == "wasm" && buildcfg.GOWASM.GC)
+}
+
+// StringTagged reports whether a string has the tagged form of the
+// targets with 8-byte words (doc/gd/sso-string.md): 16 bytes, words w0
+// and w1.
+//
+//	heap:   w0 = the address of the bytes (nil for ""), w1 = the length.
+//	inline: w0 = 1<<63 | n<<56 | bytes 8..14, w1 = bytes 0..7, of a
+//	        string of n = 1..15 bytes, the unused bytes zero.
+//
+// Byte i of an inline string is bits 8i to 8i+7 of w1 (i < 8) or of w0
+// (8 <= i < 15, as i-8), as if the 16 bytes w1, w0 were loaded little-
+// endian; on a big-endian target they are where a big-endian load of
+// the bytes would put them, w0's below the tag (StringTaggedWords).
+// Bit 63 of w0 tells the forms apart: a canonical address never has it,
+// so word 0, which the collector scans, is never in the heap when the
+// string is inline.
+func StringTagged() bool {
+	return PtrSize == 8 && StringTwoWords()
+}
+
+// StringTaggedWords returns the words w0 and w1 of an inline string of
+// 1 to 15 bytes, s (StringTagged): w1 bytes 0..7, w0 1<<63, the length
+// at bit 56 and bytes 8..14, as little-endian loads would have them
+// (big-endian loads with bigEndian, w0's bytes below the tag).
+func StringTaggedWords(s string, bigEndian bool) (w0, w1 int64) {
+	var b0, b1 [8]byte
+	copy(b1[:], s)
+	if len(s) > 8 {
+		copy(b0[:], s[8:])
+	}
+	var u0, u1 uint64
+	for i := 7; i >= 0; i-- {
+		if bigEndian {
+			u0 |= uint64(b0[i]) << (56 - 8*i)
+			u1 |= uint64(b1[i]) << (56 - 8*i)
+		} else {
+			u0 |= uint64(b0[i]) << (8 * i)
+			u1 |= uint64(b1[i]) << (8 * i)
+		}
+	}
+	if bigEndian {
+		u0 >>= 8
+	}
+	return int64(u0&(1<<56-1) | 1<<63 | uint64(len(s))<<56), int64(u1)
+}
+
+// StringWasmGC64 reports whether a string has the form of GOWASM=gc
+// with 8-byte words: three words, the address of the bytes (nil if
+// inline), the cached hash or bytes 0..7, and the length with a tag of
+// 0 or the tag (the length) in the top 4 bits over bytes 8..14.
+func StringWasmGC64() bool {
+	return PtrSize == 8 && !StringTwoWords()
+}
 
 // StringWasm32 reports whether a string has the form of wasm32
 // (GOWASM=gc,split with 4-byte words; doc/gd/sso-string.md, stage 16
@@ -92,6 +156,9 @@ func StringWasm32() bool {
 // third values of a string in SSA: a uintptr (word 1) and an int (word
 // 2), or two uint64s (A and B) with StringWasm32.
 func StringWord1Type() *Type {
+	if StringTwoWords() {
+		return Types[TINT]
+	}
 	if StringWasm32() {
 		return Types[TUINT64]
 	}
@@ -594,6 +661,9 @@ func calcSizeBody(gd *base.Invocation, t *Type) {
 		w = StringSize
 		t.align = uint8(PtrSize)
 		t.intRegs = 3 // gd: {word0=ptr/nil, word1=hash/bytes, word2=tag|len/bytes}
+		if StringTwoWords() {
+			t.intRegs = 2 // {w0, w1} (StringTagged)
+		}
 		t.setAlg(ASTRING)
 		t.ptrBytes = int64(PtrSize) // word0 is the only pointer slot
 

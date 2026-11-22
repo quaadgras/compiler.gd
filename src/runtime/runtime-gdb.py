@@ -104,6 +104,22 @@ class SliceValue:
 #
 
 # The patterns for matching types are permissive because gdb 8.2 switched to matching on (we think) typedef names instead of C syntax names.
+def goInlineString(val):
+	"""The bytes of the Go string val if it is inline, else None.
+
+	gd (doc/gd/sso-string.md): a string of 1 to 15 bytes may be kept in
+	its two words. Bit 63 of its first ('str') says so; bits 56..59 are
+	its length, and its bytes are those of the second ('len') and then
+	the low 7 of the first, little-endian."""
+	w0 = int(val['str']) & ((1 << 64) - 1)
+	if w0 >> 63 == 0:
+		return None
+	n = (w0 >> 56) & 15
+	w1 = int(val['len']) & ((1 << 64) - 1)
+	b = w1.to_bytes(8, 'little') + (w0 & ((1 << 56) - 1)).to_bytes(8, 'little')
+	return b[:n]
+
+
 class StringTypePrinter:
 	"Pretty print Go strings."
 
@@ -116,25 +132,11 @@ class StringTypePrinter:
 		return 'string'
 
 	def to_string(self):
-		# gd small-string optimization: the top 4 bits of the 'len' field
-		# are a length tag. tag == 0 means heap-rep (str points to the
-		# bytes, length is the low 60 bits). tag 1..15 means inline-rep
-		# (str is nil, bytes are packed into the header at offset 8..22
-		# — &hash..&hash+7 then low 7 bytes of len — and tag is the
-		# length).
-		raw = int(self.val['len'])
-		tag = (raw >> 60) & 0xf
-		if tag != 0:
-			length = tag
-			addr = self.val.address
-			if addr is None:
-				return "<inline string, no address>"
-			inferior = gdb.selected_inferior()
-			# Bytes start at offset 8 (the 'hash' word).
-			buf = inferior.read_memory(int(addr) + 8, length)
-			return str(bytes(buf), encoding="utf-8", errors="ignore")
-		length = raw & ((1 << 60) - 1)
-		return self.val['str'].string("utf-8", "ignore", length)
+		b = goInlineString(self.val)
+		if b is not None:
+			return str(b, encoding="utf-8", errors="ignore")
+		l = int(self.val['len'])
+		return self.val['str'].string("utf-8", "ignore", l)
 
 
 class SliceTypePrinter:
@@ -501,6 +503,10 @@ class GoLenFunc(gdb.Function):
 					if 'buckets' in fields:
 						# Old maps.
 						fld = 'count'
+				if klass == StringTypePrinter:
+					b = goInlineString(obj)
+					if b is not None:
+						return len(b)
 
 				return obj[fld]
 

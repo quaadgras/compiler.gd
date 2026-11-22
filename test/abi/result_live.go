@@ -6,7 +6,8 @@
 
 package p
 
-type T struct { a, b, c, d string } // pass in registers, not SSA-able
+// (gd: e makes it larger than the 8 words of an SSA-able value.)
+type T struct { a, b, c, d string; e int8 } // pass in registers, not SSA-able
 
 //go:registerparams
 func F() (r T) {

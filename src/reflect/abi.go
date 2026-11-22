@@ -215,10 +215,10 @@ func (a *abiSeq) regAssign(t *abi.Type, offset uintptr) bool {
 	case Complex128:
 		return a.assignFloatN(offset, 8, 2)
 	case String:
-		// gd small-string optimization: string is 3 words (ptr, hash, len).
-		// ptr (word 0) is the only pointer-tracked slot — mask 0b001
-		// (LSB = first reg = pointer slot). See doc/gd/sso-string.md.
-		return a.assignIntN(offset, goarch.PtrSize, 3, 0b001)
+		// gd: two words, the first the only pointer slot (an inline
+		// string's is no address in the heap: doc/gd/sso-string.md).
+		// (GOWASM=gc has no registers for arguments.)
+		return a.assignIntN(offset, goarch.PtrSize, 2, 0b01)
 	case Interface:
 		// gd fat-iface: interface is {ptr, ptr, complex128}. Two
 		// pointer-sized int regs for tab/_type and data, then the

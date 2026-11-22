@@ -601,21 +601,29 @@ func setup(gd *base.Invocation) {
 			types.NewField(nxp, fname("cap"), it),
 		})
 		types.CalcStructSize(gd, synthSlice)
-		// gd small-string optimization: 3-word header
-		// { data ptr / nil, hash / bytes[0:8], tag<<60|len / tag|bytes[8:15] }.
-		// See doc/gd/sso-string.md. data is the sole pointer word;
-		// hash and len are non-pointer (uint).
-		w1, w2 := types.Types[types.TUINT], it
-		if types.StringWasm32() {
-			// wasm32: A and B (types.StringWasm32), which
-			// appendParamOffsets places.
-			w1, w2 = types.StringWord1Type(), types.StringWord2Type()
+		// Two words (types.StringTwoWords): { w0, w1 }, w0 the sole
+		// pointer word (an inline string's tag and bytes 8..14 with
+		// 8-byte words, which is no address in the heap). GOWASM=gc:
+		// three, { data ptr / nil, hash / bytes[0:8], tag<<60|len /
+		// tag|bytes[8:15] } (wasm32: data, A and B).
+		if types.StringTwoWords() {
+			synthString = types.NewStruct([]*types.Field{
+				types.NewField(nxp, fname("data"), bp),
+				types.NewField(nxp, fname("len"), it),
+			})
+		} else {
+			w1, w2 := types.Types[types.TUINT], it
+			if types.StringWasm32() {
+				// wasm32: A and B (types.StringWasm32), which
+				// appendParamOffsets places.
+				w1, w2 = types.StringWord1Type(), types.StringWord2Type()
+			}
+			synthString = types.NewStruct([]*types.Field{
+				types.NewField(nxp, fname("data"), bp),
+				types.NewField(nxp, fname("hash"), w1),
+				types.NewField(nxp, fname("len"), w2),
+			})
 		}
-		synthString = types.NewStruct([]*types.Field{
-			types.NewField(nxp, fname("data"), bp),
-			types.NewField(nxp, fname("hash"), w1),
-			types.NewField(nxp, fname("len"), w2),
-		})
 		types.CalcStructSize(gd, synthString)
 		unsp := types.Types[types.TUNSAFEPTR]
 		c128 := types.Types[types.TCOMPLEX128]

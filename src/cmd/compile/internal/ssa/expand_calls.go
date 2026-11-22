@@ -433,7 +433,11 @@ func (x *expandState) decomposeAsNecessary(pos src.XPos, b *Block, a, m0 *Value,
 		}
 		mem = x.decomposeOne(pos, b, a, mem, x.typs.BytePtr, OpStringPtr, &rc)
 		pos = pos.WithNotStmt()
-		e1 := b.NewValue1(pos, OpStringHash, x.typs.StringWord1, a)
+		if types.StringTwoWords() {
+			// w0 and w1, raw.
+			return x.decomposeOne(pos, b, a, mem, x.typs.Int, OpStringWord1, &rc)
+		}
+		e1 := b.NewValue1(pos, OpStringWord1, x.typs.StringWord1, a)
 		mem = x.decomposeAsNecessary(pos, b, e1, mem, rc.nextStringWord1(x.typs.StringWord1))
 		e := b.NewValue1(pos, OpStringWord2, x.typs.StringWord2, a)
 		return x.decomposeAsNecessary(pos, b, e, mem, rc.nextStringWord2(x.typs.StringWord2))
@@ -612,6 +616,12 @@ func (x *expandState) rewriteSelectOrArg(pos src.XPos, b *Block, container, a, m
 		// gd: 3-slot decomposition (ptr, hash, len).
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr)))
 		pos = pos.WithNotStmt()
+		if types.StringTwoWords() {
+			addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.Int, rc.next(x.typs.Int)))
+			a = makeOf(a, OpStringMake, args)
+			x.commonSelectors[sk] = a
+			return a
+		}
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.StringWord1, rc.nextStringWord1(x.typs.StringWord1)))
 		addArg(x.rewriteSelectOrArg(pos, b, container, nil, m0, x.typs.StringWord2, rc.nextStringWord2(x.typs.StringWord2)))
 		a = makeOf(a, OpStringMake, args)
@@ -784,6 +794,9 @@ func (x *expandState) rewriteWideSelectToStores(pos src.XPos, b *Block, containe
 		}
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.BytePtr, rc.next(x.typs.BytePtr))
 		pos = pos.WithNotStmt()
+		if types.StringTwoWords() {
+			return x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Int, rc.next(x.typs.Int))
+		}
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.Uintptr, rc.next(x.typs.Uintptr))
 		m0 = x.rewriteWideSelectToStores(pos, b, container, m0, x.typs.StringWord2, rc.nextStringWord2(x.typs.StringWord2))
 		return m0

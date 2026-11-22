@@ -23,8 +23,7 @@ func main() {
 	}
 	
 	n = unsafe.Sizeof("")
-	// gd small-string optimization: string is 3 words (ptr, hash, len).
-	if n != 12 && n != 24 {
+	if n != 8 && n != 16 {
 		println("BUG sizeof \"\"", n)
 		return
 	}

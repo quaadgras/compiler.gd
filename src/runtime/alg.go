@@ -89,55 +89,35 @@ func memhash32(p unsafe.Pointer, seed uintptr) uintptr {
 	return maps.MemHash32(readUnaligned32(p), seed)
 }
 
-// strhash is declared in strhash_asm.go (amd64, arm64: assembly
-// implementation in asm_$GOARCH.s) and strhash_noasm.go (everything
-// else: strhashFallback). Both keep the go:linkname hall-of-shame
-// contract from upstream.
+// strhash should be an internal detail,
+// but widely used packages access it using linkname.
+// Notable members of the hall of shame include:
+//   - github.com/aristanetworks/goarista
+//   - github.com/bytedance/sonic
+//   - github.com/bytedance/go-tagexpr/v2
+//   - github.com/cloudwego/dynamicgo
+//   - github.com/v2fly/v2ray-core/v5
 //
-// strhashFallback is the gd fork's portable cache-aware string hash.
-func strhashFallback(a unsafe.Pointer, h uintptr) uintptr {
-	x := (*stringStruct)(a)
-	// gd string hash cache: heap-rep strings carry their hash in
-	// word 1, populated eagerly by runtime producers (see
-	// sealStringHash) or by the compiler's static-init emitter.
-	// Inline rep keeps bytes in word 1, so gate the cache check on a
-	// non-nil data pointer. h (the caller's seed) is ignored — the
-	// fork uses a process-wide fixed seed (aeskeysched loaded from
-	// abi.AeskeyschedSeed) so runtime and static-init emit identical
-	// values.
-	if x.str != nil && x.hash != 0 && !x.isInline() {
-		return uintptr(x.hash)
+// Do not remove or change the type signature.
+// See go.dev/issue/67401.
+//
+// The hash of a string is that of its bytes, inline or not.
+//
+//go:nosplit
+//go:linkname strhash
+func strhash(p unsafe.Pointer, h uintptr) uintptr {
+	x := (*stringStruct)(p)
+	if x.isInline() {
+		b, n := abi.StringInlineBytes(*(*string)(p))
+		return memhash(noescape(unsafe.Pointer(&b)), h, uintptr(n))
 	}
-	// Cache miss. Inline-rep (x.str==nil) reads bytes from the header
-	// via bytes() — valid while x is live. Heap-rep with hash==0 means
-	// the seal never ran; compute now. On AES-capable CPUs route
-	// through memhash so the fast asm aeshashbody path runs; otherwise
-	// fall back to the pure-Go aeshash port so the output still
-	// matches what the compiler emitted for literals.
-	n := x.length()
-	if maps.UseAeshash {
-		if n == 0 {
-			return memhash(nil, 0, 0)
-		}
-		return memhash(x.bytes(), 0, uintptr(n))
-	}
-	if n == 0 {
-		return uintptr(strhashPort(""))
-	}
-	return uintptr(strhashPort(unsafe.String((*byte)(x.bytes()), n)))
+	return memhash(x.str, h, uintptr(x.len))
 }
 
-// strhashSeq hashes the string at p as a part of a larger key: a field
-// of a struct, an element of an array, what an interface holds. The hash
-// of a string does not depend on the seed, since the string carries it
-// (strhashFallback), so a key hashed part by part, each with the hash of
-// those before it as its seed, would have the hash of its last string and
-// what follows alone: all the keys that only differ before it would
-// collide, which a map cannot get out of by growing. So the string's hash
-// is hashed with the seed.
+// strhashSeq hashes the string at p as a part of a larger key (a field
+// of a struct, an element of an array, what an interface holds): strhash.
 func strhashSeq(p unsafe.Pointer, h uintptr) uintptr {
-	s := strhash(p, h)
-	return memhash(noescape(unsafe.Pointer(&s)), h, goarch.PtrSize)
+	return strhash(p, h)
 }
 
 // NOTE: Because NaN != NaN, a map can contain any
@@ -362,26 +342,25 @@ func strequal(p, q unsafe.Pointer) bool {
 	return *(*string)(p) == *(*string)(q)
 }
 
-// streqfast is the fallback implementation of the string-equality
-// intrinsic. The compiler lowers calls to this function directly into
-// optimised SSA (3-word fast path + decoded len / memequal fallback),
-// so this body only runs if the intrinsic is disabled. Kept as a
-// non-recursive byte-level compare to avoid infinite recursion if the
-// compiler routes `==` back through streqfast.
+// streqfast is string equality. The compiler lowers calls to it into
+// compares of the strings' words (ssagen's stringEqFast), which call it
+// for an inline string and one that is not, of the same length; it is
+// called elsewhere where the intrinsic is not (GOARCH=wasm). It must
+// not compare strings with ==.
 //
 //go:nosplit
 func streqfast(s, t string) bool {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
 	th := (*stringStruct)(unsafe.Pointer(&t))
 	sl := sh.length()
-	tl := th.length()
-	if sl != tl {
+	if sl != th.length() {
 		return false
 	}
 	if sl == 0 {
 		return true
 	}
-	return memequal(sh.bytes(), th.bytes(), uintptr(sl))
+	var sb, tb [16]byte
+	return memequal(sh.data(&sb), th.data(&tb), uintptr(sl))
 }
 
 func interequal(p, q unsafe.Pointer) bool {

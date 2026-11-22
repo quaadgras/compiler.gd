@@ -1005,11 +1005,40 @@
 (Load <t> _ _) && t.Size() == 0 => (Empty)
 (Store _ (Empty) mem) => mem
 
-// string ops — gd: 3-word header (ptr, hash, len).
-// Decomposing StringMake and lowering of StringPtr/StringHash/StringLen
+// string ops.
+// Decomposing StringMake and lowering of StringPtr/StringWord1/StringLen
 // happens in a later pass, dec, so that these operations are available
-// to other passes for optimizations. Phase A: hash word is zero for
-// all compiler-constructed strings; literal pre-hashing is a later phase.
+// to other passes for optimizations.
+//
+// Two words (types.StringTwoWords): w0 and w1. With 8-byte words a
+// constant of 1 to 15 bytes is inline (types.StringTagged: w0 a pointer
+// whose bits are the tag and bytes 8..14, w1 bytes 0..7), a longer one
+// its go:string symbol and its length.
+(StringPtr  (StringMake (Addr <t> {s} base) _)) => (Addr <t> {s} base)
+(StringLen  (StringMake p n)) && config.stringTwoWords() && (config.PtrSize == 4 || stringHeapPtr(p)) => n
+(StringLen  (StringMake (Const64 [w0]) _)) && config.stringTagged() && w0 < 0 => (Const64 <typ.Int> [int64(uint64(w0)>>56)&15])
+(StringWord1 (StringMake _ w1:(Const64))) => w1
+(StringWord1 (StringMake _ w1:(Const32))) => w1
+(PtrBits <t> (Const64 [c])) && config.PtrSize == 8 => (Const64 <t> [c])
+(PtrBits <t> x) && config.PtrSize == 8 && x.Op != OpConst64 => (Copy <t> x)
+(ConstString {str}) && config.stringTwoWords() && str == "" && config.PtrSize == 8 =>
+  (StringMake (ConstNil) (Const64 <typ.Int> [0]))
+(ConstString {str}) && config.stringTwoWords() && str == "" && config.PtrSize == 4 =>
+  (StringMake (ConstNil) (Const32 <typ.Int> [0]))
+(ConstString {str}) && config.stringTwoWords() && str != "" && config.PtrSize == 4 =>
+  (StringMake
+    (Addr <typ.BytePtr> {fe.StringData(str)} (SB))
+    (Const32 <typ.Int> [int32(len(str))]))
+(ConstString {str}) && config.stringTagged() && len(str) > 0 && len(str) <= 15 =>
+  (StringMake
+    (Const64 <typ.BytePtr> [stringTaggedW0(str, config.BigEndian)])
+    (Const64 <typ.Int> [stringTaggedW1(str, config.BigEndian)]))
+(ConstString {str}) && config.stringTagged() && len(str) > 15 =>
+  (StringMake
+    (Addr <typ.BytePtr> {fe.StringData(str)} (SB))
+    (Const64 <typ.Int> [int64(len(str))]))
+
+// GOWASM=gc: three values (ptr, word 1, word 2).
 (StringPtr  (StringMake (Addr <t> {s} base) _ _)) => (Addr <t> {s} base)
 // StringLen is the decoded logical length. For a heap-rep const (tag==0)
 // the raw word 2 IS the length; for an inline-rep const the tag nibble
@@ -1021,11 +1050,12 @@
 (StringLen  (StringMake _ _ (Const64 [c]))) && config.stringWasm32() && uint64(c)>>60 != 0 => (Const32 <typ.Int> [int32(uint64(c)>>60)])
 (StringLen  (StringMake _ (Const64 [a]) (Const64 [0]))) && config.stringWasm32() => (Const32 <typ.Int> [int32(uint64(a)>>32)])
 (StringLen  (StringMake _ (Or64 _ (Const64 [a])) (Const64 [0]))) && config.stringWasm32() && uint32(a) == 0 => (Const32 <typ.Int> [int32(uint64(a)>>32)])
-(PtrBits <t> (ConstNil)) => (Const32 <t> [0])
+(PtrBits <t> (ConstNil)) && config.PtrSize == 4 => (Const32 <t> [0])
+(PtrBits <t> (ConstNil)) && config.PtrSize == 8 => (Const64 <t> [0])
 // StringWord2 is the raw word 2 (tag nibble + payload).
 (StringWord2 (StringMake _ _ (Const64 <t> [c]))) => (Const64 <t> [c])
-(StringHash (StringMake _ (Const64 <t> [c]) _)) => (Const64 <t> [c])
-(StringHash (StringMake _ (Const32 <t> [c]) _)) => (Const32 <t> [c])
+(StringWord1 (StringMake _ (Const64 <t> [c]) _)) => (Const64 <t> [c])
+(StringWord1 (StringMake _ (Const32 <t> [c]) _)) => (Const32 <t> [c])
 // wasm32: a constant of 1 to 15 bytes is A and B as the words 1 and 2
 // of 8-byte words (word 0 nil, with no element of the array of
 // pointers); a longer one is its go:string symbol, and A its address
@@ -1044,53 +1074,20 @@
       (ZeroExt32to64 <typ.UInt64> (PtrBits <typ.UInt32> (Addr <typ.BytePtr> {fe.StringData(str)} (SB))))
       (Const64 <typ.UInt64> [int64(len(str))<<32]))
     (Const64 <typ.UInt64> [0]))
-(ConstString {str}) && config.PtrSize == 4 && !config.stringWasm32() && str == "" =>
-  (StringMake (ConstNil) (Const32 <typ.Uintptr> [0]) (Const32 <typ.Int> [0]))
-(ConstString {str}) && config.PtrSize == 8 && str == "" =>
+// GOWASM=gc with 8-byte words: 1..15 bytes inline (word 0 nil), else
+// the go:string symbol, a hash of 0 and the length.
+(ConstString {str}) && config.PtrSize == 8 && !config.stringTwoWords() && str == "" =>
   (StringMake (ConstNil) (Const64 <typ.Uintptr> [0]) (Const64 <typ.Int> [0]))
-(ConstString {str}) && config.PtrSize == 4 && !config.stringWasm32() && str != "" =>
-  (StringMake
-    (Addr <typ.BytePtr> {fe.StringData(str)}
-      (SB))
-    (Const32 <typ.Uintptr> [0])
-    (Const32 <typ.Int> [int32(len(str))]))
-// gd small-string optimization (Phase C): compile-time literals with
-// 1..15 bytes lower to an inline-rep header. word0 = nil, word1 holds
-// bytes[0:8] LE, word2 holds (tag<<60) | bytes[8:15] LE. No go:string
-// symbol is emitted. Slicing such a literal is safe because OSLICESTR
-// routes through stringSlice (SSA register path for heap, runtime
-// sliceinlinestring for inline — neither exposes an interior ptr).
-//
-// Literal provenance (amd64, arm64): word0 additionally points at the literal's
-// bytes in a go:string symbol, so unsafe.StringData of a literal is a
-// stable rodata address (as on stock Go) and C/cgo can read it in place.
-// Representation is decided by the tag alone; equality and hashing use
-// words 1 and 2 only, so a literal equals the same bytes built inline at
-// runtime. Other arches keep word0 = nil until their string assembly
-// (cmpstring, strhash, IndexString, IndexByteString, CountString)
-// dispatches on the tag too.
-(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && (config.arch == "amd64" || config.arch == "arm64") =>
-  (StringMake
-    (Addr <typ.BytePtr> {fe.StringData(str)}
-      (SB))
-    (Const64 <typ.Uintptr> [stringInlineWord1(str)])
-    (Const64 <typ.Int>     [stringInlineWord2(str)]))
-(ConstString {str}) && config.PtrSize == 8 && len(str) > 0 && len(str) <= 15 && config.arch != "amd64" && config.arch != "arm64" =>
+(ConstString {str}) && config.PtrSize == 8 && !config.stringTwoWords() && len(str) > 0 && len(str) <= 15 =>
   (StringMake
     (ConstNil)
     (Const64 <typ.Uintptr> [stringInlineWord1(str)])
     (Const64 <typ.Int>     [stringInlineWord2(str)]))
-// gd string hash cache: pre-populate word 1 with the compile-time
-// hash so local string-literal assignments and in-function materialised
-// headers hit the cache too (matches what staticdata.InitConst writes
-// for package-level globals). Shared algorithm lives in
-// internal/abi.StringHashBytes; stringConstHash is the thin wrapper
-// in rewrite.go.
-(ConstString {str}) && config.PtrSize == 8 && len(str) > 15 =>
+(ConstString {str}) && config.PtrSize == 8 && !config.stringTwoWords() && len(str) > 15 =>
   (StringMake
     (Addr <typ.BytePtr> {fe.StringData(str)}
       (SB))
-    (Const64 <typ.Uintptr> [stringConstHash(str)])
+    (Const64 <typ.Uintptr> [0])
     (Const64 <typ.Int> [int64(len(str))]))
 
 // slice ops
@@ -2393,7 +2390,6 @@
 // Note that this does not handle some obscure cases like
 // m[[2]string{string(b1), string(b2)}]. There is code in ../walk/order.go
 // which handles some of those cases.
-// gd: StringMake is 3-ary (ptr, hash, len). Hash word is zero in phase A.
 (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   &&    (isSameCall(f, "runtime.mapaccess1_faststr")
       || isSameCall(f, "runtime.mapaccess2_faststr")
@@ -2401,11 +2397,11 @@
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
-  && config.PtrSize == 8
+  && config.stringTwoWords()
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
+=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr len) mem)
 
 (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   &&    (isSameCall(f, "runtime.mapaccess1_faststr")
@@ -2414,12 +2410,12 @@
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
-  && config.PtrSize == 4
-  && !config.stringWasm32()
+  && config.PtrSize == 8
+  && !config.stringTwoWords()
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
+=> (StaticLECall {f} [argsize] typ_ map_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
 
 (StaticLECall {f} [argsize] typ_ map_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   &&    (isSameCall(f, "runtime.mapaccess1_faststr")
@@ -2440,23 +2436,23 @@
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
-  && config.PtrSize == 8
+  && config.stringTwoWords()
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
+=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr len) mem)
 
 (StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   && isSameCall(f, "unique.Make[go.shape.string]")
   && isSameCall(g, "runtime.slicebytetostring")
   && key.Uses == 1
   && sbts.Uses == 2
-  && config.PtrSize == 4
-  && !config.stringWasm32()
+  && config.PtrSize == 8
+  && !config.stringTwoWords()
   && resetCopy(m, mem)
   && clobber(sbts)
   && clobber(key)
-=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const32 <typ.Uintptr> [0]) len) mem)
+=> (StaticLECall {f} [argsize] dict_ (StringMake <typ.String> ptr (Const64 <typ.Uintptr> [0]) len) mem)
 
 (StaticLECall {f} [argsize] dict_ key:(SelectN [0] sbts:(StaticLECall {g} _ ptr len mem)) m:(SelectN [1] sbts))
   && isSameCall(f, "unique.Make[go.shape.string]")

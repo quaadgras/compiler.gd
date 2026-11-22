@@ -1927,34 +1927,19 @@ func (v Value) Index(i int) Value {
 			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
 			return sub
 		}
-		s := (*unsafeheader.String)(v.dataPtr())
-		// (With 4-byte words, wasm32's string, internal/abi's
-		// string_ptr32.go: its tag is not in Len.)
-		if sp := (*string)(v.dataPtr()); goarch.PtrSize == 4 && abi.StringIsInline(*sp) {
-			if uint(i) >= uint(len(*sp)) {
-				panic("reflect: string index out of range")
-			}
-			var sub Value
-			sub.typ_ = uint8Type
-			*(*byte)(unsafe.Pointer(&sub.inline)) = abi.StringBytes(sp)[i]
-			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
-			return sub
-		}
-		if tag := uint64(s.Len) >> abi.StringTagShift; goarch.PtrSize == 8 && tag != 0 {
-			if uint64(i) >= tag {
-				panic("reflect: string index out of range")
-			}
-			b := *(*byte)(unsafe.Pointer(uintptr(v.dataPtr()) + goarch.PtrSize + uintptr(i)))
-			var sub Value
-			sub.typ_ = uint8Type
-			*(*byte)(unsafe.Pointer(&sub.inline)) = b
-			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
-			return sub
-		}
-		if uint(i) >= uint(s.Len) {
+		// (The compiler indexes a string inline or not.)
+		str := *(*string)(v.dataPtr())
+		if uint(i) >= uint(len(str)) {
 			panic("reflect: string index out of range")
 		}
-		p := arrayAt(s.Data, i, 1, "i < s.Len")
+		if abi.StringIsInline(str) {
+			var sub Value
+			sub.typ_ = uint8Type
+			*(*byte)(unsafe.Pointer(&sub.inline)) = str[i]
+			sub.flag = v.flag.ro() | flag(Uint8) | flagIndir | flagInline
+			return sub
+		}
+		p := arrayAt(unsafe.Pointer(unsafe.StringData(str)), i, 1, "i < s.Len")
 		fl := v.flag.ro() | flag(Uint8) | flagIndir
 		return Value{typ_: uint8Type, ptr: p, flag: fl}
 	}
@@ -2438,20 +2423,11 @@ func (v Value) lenNonSlice() int {
 	case Map:
 		return maplen(v.pointer())
 	case String:
-		// String is bigger than a word; assume flagIndir. gd: Len is
-		// the raw word2 (tag nibble + length/bytes); decode the tag
-		// to get the logical length.
-		if goarch.PtrSize == 4 {
-			if v.flag&flagSpread != 0 {
-				return len(spreadString32(&v))
-			}
-			return len(*(*string)(v.dataPtr()))
+		// String is bigger than a word; assume flagIndir.
+		if goarch.PtrSize == 4 && v.flag&flagSpread != 0 {
+			return len(spreadString32(&v))
 		}
-		raw := uint64((*unsafeheader.String)(v.dataPtr()).Len)
-		if tag := raw >> abi.StringTagShift; tag != 0 {
-			return int(tag)
-		}
-		return int(raw & abi.StringLenMask)
+		return len(*(*string)(v.dataPtr()))
 	case Ptr:
 		if v.typ().Elem().Kind() == abi.Array {
 			return v.typ().Elem().Len()
@@ -2692,18 +2668,9 @@ func (v Value) Pointer() uintptr {
 	case Slice:
 		return uintptr((*unsafeheader.Slice)(v.dataPtr()).Data)
 	case String:
-		// gd: for heap-rep strings Data is the byte pointer. For
-		// inline-rep the bytes live in the header itself — return
-		// &s.Hash, which points at the first inline byte. The
-		// lifetime matches the Value's flagIndir storage.
-		if goarch.PtrSize == 4 {
-			return uintptr(unsafe.Pointer(unsafe.SliceData(abi.StringBytes((*string)(v.dataPtr())))))
-		}
-		sh := (*unsafeheader.String)(v.dataPtr())
-		if sh.Data != nil {
-			return uintptr(sh.Data)
-		}
-		return uintptr(v.dataPtr()) + goarch.PtrSize
+		// gd: the bytes of an inline string are copied to the heap
+		// (unsafe.StringData).
+		return uintptr(unsafe.Pointer(unsafe.StringData(*(*string)(v.dataPtr()))))
 	}
 	panic(&ValueError{"reflect.Value.Pointer", v.kind()})
 }
@@ -2989,23 +2956,14 @@ func (v Value) Slice(i, j int) Value {
 			fl := v.flag&^(flagSpread|flagInline) | flagIndir
 			return Value{typ_: v.typ(), ptr: unsafe.Pointer(&t), flag: fl}
 		}
-		s := (*unsafeheader.String)(v.dataPtr())
-		raw := uint64(s.Len)
-		var logicalLen int
-		if tag := raw >> abi.StringTagShift; tag != 0 {
-			logicalLen = int(tag)
-		} else {
-			logicalLen = int(raw & abi.StringLenMask)
-		}
-		if i < 0 || j < i || j > logicalLen {
+		src := *(*string)(v.dataPtr())
+		if i < 0 || j < i || j > len(src) {
 			panic("reflect.Value.Slice: string slice index out of bounds")
 		}
 		var t string
-		if i < logicalLen {
-			// Route through the compiler's OSLICESTR path by slicing
-			// a string-typed copy. This picks up the rep-aware
-			// stringSlice helper (heap: ptr+i; inline: fresh inline).
-			src := *(*string)(v.dataPtr())
+		if i < len(src) {
+			// The compiler's OSLICESTR (heap: ptr+i; inline: fresh
+			// inline).
 			t = src[i:j]
 		}
 		// Return a flagIndir Value pointing at t. Clear flagSpread /
@@ -3315,9 +3273,8 @@ func (v Value) UnsafePointer() unsafe.Pointer {
 		// return, and outright wrong under -d=maymorestack which
 		// moves the stack between UnsafePointer returning and the
 		// caller dereferencing. Allocate a stable heap copy.
-		sh := (*unsafeheader.String)(v.dataPtr())
-		if goarch.PtrSize == 4 && !abi.StringIsInline(*(*string)(v.dataPtr())) || goarch.PtrSize == 8 && sh.Data != nil {
-			return sh.Data
+		if str := *(*string)(v.dataPtr()); !abi.StringIsInline(str) {
+			return unsafe.Pointer(unsafe.StringData(str))
 		}
 		s := v.String()
 		if len(s) == 0 {
@@ -3558,19 +3515,9 @@ func Copy(dst, src Value) int {
 		// a Slice view of its bytes. For inline rep Data must point
 		// at the header's inline-byte area, not nil.
 		srcPtr := (&src).dataPtr()
-		sh := *(*unsafeheader.String)(srcPtr)
-		raw := uint64(sh.Len)
-		if goarch.PtrSize == 4 {
-			sb := abi.StringBytes((*string)(srcPtr))
-			ss.Data = unsafe.Pointer(unsafe.SliceData(sb))
-			ss.Len = len(sb)
-		} else if tag := raw >> abi.StringTagShift; tag != 0 {
-			ss.Data = unsafe.Pointer(uintptr(srcPtr) + goarch.PtrSize)
-			ss.Len = int(tag)
-		} else {
-			ss.Data = sh.Data
-			ss.Len = int(raw & abi.StringLenMask)
-		}
+		sb := abi.StringBytes((*string)(srcPtr))
+		ss.Data = unsafe.Pointer(unsafe.SliceData(sb))
+		ss.Len = len(sb)
 		ss.Cap = ss.Len
 	}
 
@@ -4519,7 +4466,9 @@ func mapassign(t *abi.Type, m unsafe.Pointer, key, val unsafe.Pointer) {
 func mapassign_faststr0(t *abi.Type, m unsafe.Pointer, key string, val unsafe.Pointer)
 
 func mapassign_faststr(t *abi.Type, m unsafe.Pointer, key string, val unsafe.Pointer) {
-	contentEscapes((*unsafeheader.String)(unsafe.Pointer(&key)).Data)
+	if !abi.StringIsInline(key) {
+		contentEscapes(unsafe.Pointer(unsafe.StringData(key)))
+	}
 	contentEscapes(val)
 	mapassign_faststr0(t, m, key, val)
 }

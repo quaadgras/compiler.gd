@@ -525,11 +525,8 @@ func appendComponentsRecursive(arch *asmArch, t types.Type, cc []component, suff
 		cc = append(cc, newComponent(suffix+"_cap", asmKind(arch.intSize), "slice cap", off+arch.ptrSize+arch.intSize, arch.intSize, suffix))
 
 	case asmString:
-		// gd small-string optimization: 3-word header (ptr, hash, len).
-		// See doc/gd/sso-string.md.
 		cc = append(cc, newComponent(suffix+"_base", asmKind(arch.ptrSize), "string base", off, arch.ptrSize, suffix))
-		cc = append(cc, newComponent(suffix+"_hash", asmKind(arch.ptrSize), "string hash", off+arch.ptrSize, arch.ptrSize, suffix))
-		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "string len", off+2*arch.ptrSize, arch.intSize, suffix))
+		cc = append(cc, newComponent(suffix+"_len", asmKind(arch.intSize), "string len", off+arch.ptrSize, arch.intSize, suffix))
 
 	case asmComplex:
 		fsize := size / 2

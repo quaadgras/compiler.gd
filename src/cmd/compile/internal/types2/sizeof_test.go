@@ -14,17 +14,13 @@ import (
 func TestSizeof(t *testing.T) {
 	const _64bit = ^uint(0)>>32 != 0
 
-	// gd small-string optimization: each `string` field is 24 B on
-	// 64-bit (was 16 B), 12 B on 32-bit (was 8 B). Sizes here include
-	// the +8/+4 per string field for every struct that holds a string
-	// (either directly or via embedded `object`, which has `name string`).
 	var tests = []struct {
 		val    any     // type as a value
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
 		// Types
-		{Basic{}, 20, 40}, // +1 string (name)
+		{Basic{}, 16, 32},
 		{Array{}, 32, 40},
 		{Slice{}, 24, 32},
 		{Struct{}, 24, 48},
@@ -40,18 +36,18 @@ func TestSizeof(t *testing.T) {
 		{term{}, 28, 40},
 
 		// Objects (all embed `object`, which has 1 string field "name")
-		{PkgName{}, 76, 120},
-		{Const{}, 96, 144},
-		{TypeName{}, 72, 112},
-		{Var{}, 80, 128},
-		{Func{}, 80, 128},
-		{Label{}, 76, 120},
-		{Builtin{}, 76, 120},
-		{Nil{}, 72, 112},
+		{PkgName{}, 72, 112},
+		{Const{}, 92, 136},
+		{TypeName{}, 68, 104},
+		{Var{}, 76, 120},
+		{Func{}, 76, 120},
+		{Label{}, 72, 112},
+		{Builtin{}, 72, 112},
+		{Nil{}, 68, 104},
 
 		// Misc
-		{Scope{}, 64, 112},   // +1 string (comment)
-		{Package{}, 56, 112}, // +3 strings (path, name, goVersion)
+		{Scope{}, 60, 104}, // +1 string (comment)
+		{Package{}, 44, 88},
 		{_TypeSet{}, 28, 56},
 	}
 

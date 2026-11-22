@@ -5,43 +5,32 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-// gd small-string optimization: CountString takes a 24 B string
-// header — (R0=s.ptr, R1=s.hash, R2=s.word2, R3=c). Inline-rep
-// inputs spill word 1+2 to the function's 16 B local frame and
-// point at it; heap inputs decode the length from word 2 low 60
-// bits. Both paths reach countBody<>(R0=ptr, R1=len, R2=c).
-
 // func Count(b []byte, c byte) int
+// input:
+//   R0: b ptr
+//   R1: b len
+//   R2: b cap
+//   R3: c byte to search
+// return:
+//   R0: result
 TEXT ·Count<ABIInternal>(SB),NOSPLIT,$0-40
 	MOVD	R3, R2
-	B	countBody<>(SB)
+	B	countstringbody<>(SB)
 
 // func CountString(s string, c byte) int
-TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$24-40
-	TST	$0xf000000000000000, R2	// inline iff the length tag is set
-	BEQ	cs_heap
-	// Inline rep: bytes packed in R1 (bytes[0:8]) + low 7 of R2 (bytes[8:14]).
-	// (MOVD+ADD rather than ADD $8, RSP, R0: vet's asmdecl skips lines
-	// it reads as SP writes, and must see R0 written before the RETs.)
-	MOVD	R1, 8(RSP)
-	MOVD	R2, 16(RSP)
-	MOVD	RSP, R0
-	ADD	$8, R0
-	LSR	$60, R2, R1
-	MOVD	R3, R2
-	BL	countBody<>(SB)
-	RET
-cs_heap:
-	// Heap rep: R0 already the data pointer; len in low 60 bits of R2.
-	AND	$0x0fffffffffffffff, R2, R1
-	MOVD	R3, R2
-	BL	countBody<>(SB)
-	RET
+// input:
+//   R0: s ptr
+//   R1: s len
+//   R2: c byte to search (due to ABIInternal upper bits can contain junk)
+// return:
+//   R0: result
+TEXT ·CountString<ABIInternal>(SB),NOSPLIT,$0-32
+	TBZ	$63, R0, notinline
+	B	countstringinline<>(SB)
+notinline:
+	B	countstringbody<>(SB)
 
-// countBody is the shared byte-count loop. Entry: R0=ptr, R1=len,
-// R2=c. Return: R0=count. NOFRAME; callers either tail-call it (B)
-// from a no-frame function or BL + RET with their own epilogue.
-TEXT countBody<>(SB),NOSPLIT|NOFRAME,$0
+TEXT countstringbody<>(SB),NOSPLIT,$0
 	// R11 = count of byte to search
 	MOVD	$0, R11
 	// short path to handle 0-byte case
@@ -109,3 +98,15 @@ chunk_loop:
 	ADD	R6, R11, R11
 	CBZ	R1, done
 	B	tail
+
+// countstringinline is ·CountString for an inline string s (R0, R1; doc/gd/sso-string.md):
+// its bytes are put in order in the frame, w1 then w0, and searched.
+TEXT countstringinline<>(SB),NOSPLIT,$24-0
+	MOVD	R1, 8(RSP)
+	MOVD	R0, 16(RSP)
+	LSR	$56, R0, R1
+	AND	$15, R1
+	MOVD	RSP, R0
+	ADD	$8, R0
+	BL	countstringbody<>(SB)
+	RET

@@ -5,7 +5,7 @@
 #include "go_asm.h"
 #include "textflag.h"
 
-TEXT ·Compare(SB), NOSPLIT, $0-56
+TEXT ·Compare(SB), NOSPLIT, $0-40
 	Get SP
 	I64Load a_base+0(FP)
 	I64Load a_len+8(FP)
@@ -16,9 +16,9 @@ TEXT ·Compare(SB), NOSPLIT, $0-56
 	RET
 
 // gd: stock cmpstring asm assumes a 16 B string ABI; redirect to
-// the Go fallback, which handles the fork's 24 B / inline layouts
+// the Go fallback, which handles the fork.s inline strings
 // via tag-aware len/index helpers.
-TEXT runtime·cmpstring(SB), NOSPLIT, $0-56
+TEXT runtime·cmpstring(SB), NOSPLIT, $0-40
 	JMP ·cmpstringFallback(SB)
 
 // params: a, alen, b, blen

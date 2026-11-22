@@ -690,61 +690,6 @@ CALLFN(·call268435456, 268435456)
 CALLFN(·call536870912, 536870912)
 CALLFN(·call1073741824, 1073741824)
 
-// func strhash(p unsafe.Pointer, h uintptr) uintptr
-//
-// gd fork: 24 B string header with a cached hash in word 1 for heap
-// reps and a 15 B inline rep when the length tag (word 2's top nibble)
-// is set; an inline literal's word 0 points at its rodata bytes and is
-// ignored here (doc/gd/sso-string.md section 1a). Heap cache hits
-// return immediately. Misses route through aeshashbody (with seed=0
-// and the fork's fixed aeskeysched) so the runtime produces the same
-// hash any other producer would. Inline-rep strings keep their bytes
-// in the header and have no cache slot, so they compute on every
-// call.
-//
-// Since go1.27 the AES hash bodies live in internal/runtime/maps
-// (memhash_arm64.s); runtime·memhash is a Go wrapper around
-// maps.MemHash, which is what both miss paths below call.
-TEXT runtime·strhash<ABIInternal>(SB),NOSPLIT,$24-24
-	NO_LOCAL_POINTERS
-	MOVD	16(R0), R12		// R12 = word 2 (len|tag)
-	TST	$0xf000000000000000, R12	// inline iff the length tag is set
-	BNE	strhash_inline
-	MOVD	(R0), R10		// R10 = word 0 (data ptr)
-	MOVD	8(R0), R11		// R11 = word 1 (cached hash)
-	CBZ	R11, strhash_heap_unsealed
-	MOVD	R11, R0
-	RET
-strhash_heap_unsealed:
-	// Heap cache miss: memhash(data=word0, seed=0, size=word2 & lenMask).
-	MOVD	16(R0), R12		// word 2 (len|tag)
-	MOVD	$0x0fffffffffffffff, R13
-	AND	R13, R12
-	MOVD	R10, R0
-	MOVD	$0, R1
-	MOVD	R12, R2
-	BL	runtime·memhash<ABIInternal>(SB)
-	RET
-strhash_inline:
-	// Inline-rep: spill word 1 + word 2 (tag nibble excluded by the
-	// mask below) to the 16 B local frame and CALL memhash. A register
-	// fast-path analogous to amd64's isn't correct here because
-	// aeshashbody_arm64's aes0to15 uses a bit-test chain of positional
-	// loads (VLD1 into V2.S[2], V2.H[6], V2.B[14]) whose byte layout
-	// doesn't match a contiguous pack of word 1 + word 2 for every
-	// length. Funneling through memory lets aeshashbody run the exact
-	// byte-for-byte sequence it would on a heap-rep string. The spill
-	// starts at 8(RSP): 0(RSP) holds the saved LR on arm64.
-	MOVD	8(R0), R11
-	MOVD	16(R0), R12
-	LSR	$60, R12, R2		// R2 = length
-	MOVD	R11, 8(RSP)
-	MOVD	R12, 16(RSP)
-	ADD	$8, RSP, R0
-	MOVD	$0, R1
-	BL	runtime·memhash<ABIInternal>(SB)
-	RET
-
 // The Arm architecture provides a user space accessible counter-timer which
 // is incremented at a fixed but machine-specific rate. Software can (spin)
 // wait until the counter-timer reaches some desired value.
@@ -1223,7 +1168,7 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 //
 // To inject a function call, a debugger should:
 // 1. Check that the goroutine is in state _Grunning and that
-//    there are at least 304 bytes free on the stack.
+//    there are at least 288 bytes free on the stack.
 // 2. Set SP as SP-16.
 // 3. Store the current LR in (SP) (using the SP after step 2).
 // 4. Store the current PC in the LR register.
@@ -1256,32 +1201,28 @@ GLOBL	debugCallFrameTooLarge<>(SB), RODATA, $20	// Size duplicated below
 // This is ABIInternal because Go code injects its PC directly into new
 // goroutine stacks.
 TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
-	STP	(R29, R30), -296(RSP)
-	SUB	$288, RSP, RSP
+	STP	(R29, R30), -280(RSP)
+	SUB	$272, RSP, RSP
 	SUB	$8, RSP, R29
 	// Save all registers that may contain pointers so they can be
 	// conservatively scanned.
 	//
-	// gd: they are saved from 48(RSP) up, above debugCallCheck's
-	// stack frame: its pc argument at 8(RSP) and its 3-word string
-	// result at 16(RSP)..39(RSP) would otherwise overwrite R0 and R1.
-	//
 	// We can't do anything that might clobber any of these
 	// registers before this.
-	STP	(R27, g), (30*8+16)(RSP)
-	STP	(R25, R26), (28*8+16)(RSP)
-	STP	(R23, R24), (26*8+16)(RSP)
-	STP	(R21, R22), (24*8+16)(RSP)
-	STP	(R19, R20), (22*8+16)(RSP)
-	STP	(R16, R17), (20*8+16)(RSP)
-	STP	(R14, R15), (18*8+16)(RSP)
-	STP	(R12, R13), (16*8+16)(RSP)
-	STP	(R10, R11), (14*8+16)(RSP)
-	STP	(R8, R9), (12*8+16)(RSP)
-	STP	(R6, R7), (10*8+16)(RSP)
-	STP	(R4, R5), (8*8+16)(RSP)
-	STP	(R2, R3), (6*8+16)(RSP)
-	STP	(R0, R1), (4*8+16)(RSP)
+	STP	(R27, g), (30*8)(RSP)
+	STP	(R25, R26), (28*8)(RSP)
+	STP	(R23, R24), (26*8)(RSP)
+	STP	(R21, R22), (24*8)(RSP)
+	STP	(R19, R20), (22*8)(RSP)
+	STP	(R16, R17), (20*8)(RSP)
+	STP	(R14, R15), (18*8)(RSP)
+	STP	(R12, R13), (16*8)(RSP)
+	STP	(R10, R11), (14*8)(RSP)
+	STP	(R8, R9), (12*8)(RSP)
+	STP	(R6, R7), (10*8)(RSP)
+	STP	(R4, R5), (8*8)(RSP)
+	STP	(R2, R3), (6*8)(RSP)
+	STP	(R0, R1), (4*8)(RSP)
 
 	// Perform a safe-point check.
 	MOVD	R30, 8(RSP) // Caller's PC
@@ -1289,13 +1230,11 @@ TEXT runtime·debugCallV2<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-0
 	MOVD	16(RSP), R0
 	CBZ	R0, good
 
-	// The safety check failed. Put the reason string, 3 words
-	// {ptr, hash, len} under gd, at the top of the stack.
+	// The safety check failed. Put the reason string at the top
+	// of the stack.
 	MOVD	R0, 8(RSP)
 	MOVD	24(RSP), R0
 	MOVD	R0, 16(RSP)
-	MOVD	32(RSP), R0
-	MOVD	R0, 24(RSP)
 
 	// Set R20 to 8 and invoke BRK. The debugger should get the
 	// reason a call can't be injected from SP+8 and resume execution.
@@ -1330,7 +1269,7 @@ good:
 	CALL	runtime·debugCallWrap(SB);	\
 	JMP	restore
 
-	MOVD	272(RSP), R0 // the argument frame size
+	MOVD	256(RSP), R0 // the argument frame size
 	DEBUG_CALL_DISPATCH(debugCall32<>, 32)
 	DEBUG_CALL_DISPATCH(debugCall64<>, 64)
 	DEBUG_CALL_DISPATCH(debugCall128<>, 128)
@@ -1346,9 +1285,8 @@ good:
 	// The frame size is too large. Report the error.
 	MOVD	$debugCallFrameTooLarge<>(SB), R0
 	MOVD	R0, 8(RSP)
-	MOVD	ZR, 16(RSP) // no cached hash
 	MOVD	$20, R0
-	MOVD	R0, 24(RSP) // length of debugCallFrameTooLarge string
+	MOVD	R0, 16(RSP) // length of debugCallFrameTooLarge string
 	MOVD	$8, R20
 	BREAK
 	JMP	restore
@@ -1364,23 +1302,23 @@ restore:
 
 	// Restore pointer-containing registers, which may have been
 	// modified from the debugger's copy by stack copying.
-	LDP	(30*8+16)(RSP), (R27, g)
-	LDP	(28*8+16)(RSP), (R25, R26)
-	LDP	(26*8+16)(RSP), (R23, R24)
-	LDP	(24*8+16)(RSP), (R21, R22)
-	LDP	(22*8+16)(RSP), (R19, R20)
-	LDP	(20*8+16)(RSP), (R16, R17)
-	LDP	(18*8+16)(RSP), (R14, R15)
-	LDP	(16*8+16)(RSP), (R12, R13)
-	LDP	(14*8+16)(RSP), (R10, R11)
-	LDP	(12*8+16)(RSP), (R8, R9)
-	LDP	(10*8+16)(RSP), (R6, R7)
-	LDP	(8*8+16)(RSP), (R4, R5)
-	LDP	(6*8+16)(RSP), (R2, R3)
-	LDP	(4*8+16)(RSP), (R0, R1)
+	LDP	(30*8)(RSP), (R27, g)
+	LDP	(28*8)(RSP), (R25, R26)
+	LDP	(26*8)(RSP), (R23, R24)
+	LDP	(24*8)(RSP), (R21, R22)
+	LDP	(22*8)(RSP), (R19, R20)
+	LDP	(20*8)(RSP), (R16, R17)
+	LDP	(18*8)(RSP), (R14, R15)
+	LDP	(16*8)(RSP), (R12, R13)
+	LDP	(14*8)(RSP), (R10, R11)
+	LDP	(12*8)(RSP), (R8, R9)
+	LDP	(10*8)(RSP), (R6, R7)
+	LDP	(8*8)(RSP), (R4, R5)
+	LDP	(6*8)(RSP), (R2, R3)
+	LDP	(4*8)(RSP), (R0, R1)
 
 	LDP	-8(RSP), (R29, R27)
-	ADD	$304, RSP, RSP // Add 16 more bytes, see saveSigContext
+	ADD	$288, RSP, RSP // Add 16 more bytes, see saveSigContext
 	MOVD	-16(RSP), R30 // restore old lr
 	JMP	(R27)
 
@@ -1444,71 +1382,3 @@ TEXT ·getfp<ABIInternal>(SB),NOSPLIT|NOFRAME,$0
 	MOVD R29, R0
 	RET
 
-// func streqmixed(s, t string) bool
-//
-// gd: s in R0..R2, t in R3..R5 (each {ptr, hash, word 2}); the result
-// in R0. A leaf with no frame, so that the compiler can call it as an
-// op (OpStrEqFast). An inline string's length is its tag (word 2's top
-// nibble) and its bytes are word 1 then word 2's low 7 bytes; a heap
-// string's length is word 2 and its bytes are at its pointer. The bytes
-// are compared one at a time: the compiler calls this only when one
-// string is inline, so there are at most 15.
-TEXT runtime·streqmixed<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-49
-	LSR	$60, R2, R6		// s's tag
-	LSR	$60, R5, R7		// t's tag
-	AND	$0x0fffffffffffffff, R2, R8
-	CMP	$0, R6
-	CSEL	NE, R6, R8, R8		// R8 = len(s)
-	AND	$0x0fffffffffffffff, R5, R9
-	CMP	$0, R7
-	CSEL	NE, R7, R9, R9		// R9 = len(t)
-	CMP	R8, R9
-	BNE	streqmixed_ne
-	MOVD	ZR, R10			// i
-	CBZ	R8, streqmixed_eq
-streqmixed_loop:
-	// R11 = s[i]
-	CBNZ	R6, streqmixed_sinl
-	MOVBU	(R0)(R10), R11
-	B	streqmixed_t
-streqmixed_sinl:
-	CMP	$8, R10
-	BHS	streqmixed_shi
-	LSL	$3, R10, R12
-	LSR	R12, R1, R11
-	B	streqmixed_smask
-streqmixed_shi:
-	SUB	$8, R10, R12
-	LSL	$3, R12, R12
-	LSR	R12, R2, R11
-streqmixed_smask:
-	AND	$0xff, R11, R11
-streqmixed_t:
-	// R13 = t[i]
-	CBNZ	R7, streqmixed_tinl
-	MOVBU	(R3)(R10), R13
-	B	streqmixed_cmp
-streqmixed_tinl:
-	CMP	$8, R10
-	BHS	streqmixed_thi
-	LSL	$3, R10, R12
-	LSR	R12, R4, R13
-	B	streqmixed_tmask
-streqmixed_thi:
-	SUB	$8, R10, R12
-	LSL	$3, R12, R12
-	LSR	R12, R5, R13
-streqmixed_tmask:
-	AND	$0xff, R13, R13
-streqmixed_cmp:
-	CMP	R11, R13
-	BNE	streqmixed_ne
-	ADD	$1, R10, R10
-	CMP	R8, R10
-	BLO	streqmixed_loop
-streqmixed_eq:
-	MOVD	$1, R0
-	RET
-streqmixed_ne:
-	MOVD	ZR, R0
-	RET

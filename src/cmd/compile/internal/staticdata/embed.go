@@ -127,9 +127,6 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		off := 0
 		off = objw.SymPtr(gd, sym, off, fsym, 0) // data string
 		if kind == embedString {
-			// gd small-string optimization: a Go string is now 3 words
-			// (ptr, hash, len). Embed writes hash = 0 in Phase A; len
-			// lives in word 2 (offset 2*PtrSize). See doc/gd/sso-string.md.
 			off = stringRest(gd, sym, off, uint64(size))
 		} else {
 			// embedBytes: slice header is unchanged at 3 words
@@ -150,13 +147,12 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 		//	name string
 		//	data string
 		//	hash [16]byte
-		// Emit one of these per file in the set. Each Go string is now
-		// 3 words under the gd small-string optimization (ptr, hash, len);
-		// hash slot is zero in Phase A.
+		// Emit one of these per file in the set (stringRest writes the
+		// words of a string after its pointer).
 		const hashSize = 16
 		hash := make([]byte, hashSize)
 		for _, file := range files {
-			// name string: ptr, hash=0, len
+			// name string
 			off = objw.SymPtr(gd, slicedata, off, StringSym(gd, v.Pos(), file), 0)
 			off = stringRest(gd, slicedata, off, uint64(len(file)))
 			if strings.HasSuffix(file, "/") {
@@ -169,7 +165,7 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 				if err != nil {
 					gd.ErrorfAt(v.Pos(), 0, "embed %s: %v", file, err)
 				}
-				// data string: ptr, hash=0, len
+				// data string
 				off = objw.SymPtr(gd, slicedata, off, fsym, 0)
 				off = stringRest(gd, slicedata, off, uint64(size))
 				off = int(slicedata.WriteBytes(gd.Ctxt, int64(off), hash))
@@ -182,9 +178,15 @@ func WriteEmbed(gd *base.Invocation, v *ir.Name) {
 }
 
 // stringRest writes the words of a string after its pointer, at off in
-// sym, for a length of n: the hash slot (zero) and n, or with
-// types.StringWasm32 n, then zero for the hash and the last word.
+// sym, for a length of n: n (types.StringTwoWords), else the hash slot
+// (zero) and n, or with types.StringWasm32 n, then zero for the hash
+// and the last word.
 func stringRest(gd *base.Invocation, sym *obj.LSym, off int, n uint64) int {
+	if types.StringTwoWords() {
+		// The length (a string not inline, even if short: see
+		// types.StringTagged).
+		return objw.Uintptr(gd, sym, off, n)
+	}
 	if types.StringWasm32() {
 		off = objw.Uintptr(gd, sym, off, n)
 		off = objw.Uintptr(gd, sym, off, 0)

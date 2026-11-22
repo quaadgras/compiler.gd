@@ -199,8 +199,13 @@ func (f *Func) SplitString(name *LocalSlot) (*LocalSlot, *LocalSlot, *LocalSlot)
 	ptrType := types.NewPtr(types.Types[types.TUINT8])
 	hashType := types.Types[types.TUINTPTR]
 	lenType := types.Types[types.TINT]
-	// gd small-string optimization: three sub-slots — ptr, hash, len —
-	// matching the 24 B stringStruct header.
+	if f.Config.stringTwoWords() {
+		// w0 and w1 (types.StringTwoWords): no hash slot.
+		p := f.SplitSlot(name, ".ptr", 0, ptrType)
+		l := f.SplitSlot(name, ".len", ptrType.Size(), lenType)
+		return p, nil, l
+	}
+	// GOWASM=gc: three sub-slots — ptr, hash, len.
 	p := f.SplitSlot(name, ".ptr", 0, ptrType)
 	h := f.SplitSlot(name, ".hash", ptrType.Size(), hashType)
 	l := f.SplitSlot(name, ".len", ptrType.Size()+hashType.Size(), lenType)

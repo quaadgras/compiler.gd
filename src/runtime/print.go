@@ -5,7 +5,6 @@
 package runtime
 
 import (
-	"internal/abi"
 	"internal/strconv"
 	"unsafe"
 )
@@ -18,49 +17,20 @@ type hex uint64
 // printquoted instead of printstring.
 type quoted string
 
-// bytes returns a []byte view of s. For heap-rep strings it aliases
-// s.str directly (no copy); for inline-rep strings (gd Phase C
-// SSO) it heap-materialises a 1..15-byte buffer and returns a slice
-// pointing at that, so the result is safe to outlive s.
-//
-// Stock Go's bytes() unconditionally aliased the string's data
-// pointer, which was fine because Go strings have a single rep.
-// gd Phase C packs short strings into the header itself, where the
-// "data pointer" is the address of the header. Aliasing that for
-// any caller that outlives bytes()'s frame produces a dangling
-// []byte (the original symptom appeared as garbled \U escapes in
-// goroutine label tracebacks). The heap-materialise path keeps the
-// helper safe for callers like runtime/race.go that store the
-// pointer in long-lived state.
-//
-// //go:nosplit so callers in nosplit contexts (e.g. tracebacks) can
-// still use it; the heap path goes through mallocgc which is
-// nosplit-safe under the runtime's own stack invariants.
+// bytes returns a []byte view of s. A string that is not inline is
+// aliased (no copy); an inline one is copied to a 1..15-byte heap
+// buffer, so the result is safe to outlive s.
 func bytes(s string) []byte {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str != nil {
-		// heap rep, or an inline literal whose word 0 points at its
-		// rodata bytes: alias. length() decodes the tag for the latter.
+	if !sh.isInline() {
 		var b []byte
 		bp := (*slice)(unsafe.Pointer(&b))
 		bp.array = sh.str
-		bp.len = sh.length()
+		bp.len = sh.len
 		bp.cap = bp.len
 		return b
 	}
-	// inline rep: heap-materialise so the result outlives s.
-	n := int(uint64(sh.len) >> abi.StringTagShift)
-	if n == 0 {
-		return nil
-	}
-	p := mallocgc(uintptr(n), nil, false)
-	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
-	var b []byte
-	bp := (*slice)(unsafe.Pointer(&b))
-	bp.array = p
-	bp.len = n
-	bp.cap = n
-	return b
+	return unsafe.Slice(stringDataHeap(s), sh.length())
 }
 
 var (
@@ -303,22 +273,17 @@ func printuintptr(p uintptr) {
 	printhex(uint64(p))
 }
 
-// gd Phase G.2.1: the inline budget for runtime's bytes() is 81
-// while the inline max is 80 — the extra outBuf param Phase G
-// threads through some of bytes's dependencies (stringStructOf
-// etc.) just tips it over. Left uninlined, bytes's return aliases
-// its OWN stack param for inline-rep strings, producing dangling
-// reads at the gwrite call site. Manually inline the body here
-// where &s is printstring's param storage, which lives through
-// the gwrite call.
+// printstring prints s; an inline one's bytes are copied to buf
+// (stringStruct.data), which lives through the gwrite call.
 //
 //go:nosplit
 func printstring(s string) {
+	var buf [16]byte
 	sp := stringStructOf(&s)
 	n := sp.length()
 	var b []byte
 	rp := (*slice)(unsafe.Pointer(&b))
-	rp.array = sp.bytes()
+	rp.array = sp.data(&buf)
 	rp.len = n
 	rp.cap = n
 	gwrite(b)

@@ -44,6 +44,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"internal/abi"
+	"internal/buildcfg"
 	"log"
 	"math/rand"
 	"os"
@@ -1277,10 +1278,9 @@ func addstrdata(arch *sys.Arch, l *loader.Loader, name, value string) {
 	sbld.SetType(sym.SRODATA)
 
 	// Don't reset the variable's size. String variable usually has size of
-	// 3*PtrSize under the gd small-string optimization (stock Go is
-	// 2*PtrSize). ASAN build may be larger due to red zone (issue 56175).
-	// Layout: word 0 = data ptr, word 1 = hash (phase A = 0),
-	// word 2 = length. See doc/gd/sso-string.md.
+	// 2*PtrSize (stringWords). ASAN build may be larger due to red zone
+	// (issue 56175). The string is never inline, even if short: word 0
+	// is the address of the bytes (doc/gd/sso-string.md).
 	bld.SetData(make([]byte, arch.PtrSize*stringWords(arch)))
 	bld.SetReadOnly(false)
 	bld.ResetRelocs()
@@ -1297,19 +1297,24 @@ func wasm32String(arch *sys.Arch) bool {
 }
 
 // stringWords is the number of words of a string; stringLenWord the
-// one that holds the length of a string that is not inline.
+// one that holds the length of a string that is not inline: two words,
+// the address and the length, but with GOWASM=gc (three with 8-byte
+// words: the hash before the length).
 func stringWords(arch *sys.Arch) int {
-	if wasm32String(arch) {
+	switch {
+	case wasm32String(arch):
 		return 4
+	case arch.Family == sys.Wasm && buildcfg.GOWASM.GC:
+		return 3
 	}
-	return 3
+	return 2
 }
 
 func stringLenWord(arch *sys.Arch) int64 {
-	if wasm32String(arch) {
-		return 1
+	if arch.Family == sys.Wasm && buildcfg.GOWASM.GC && !wasm32String(arch) {
+		return 2
 	}
-	return 2
+	return 1
 }
 
 // addStringRest adds the words of a string after its pointer to s, for
@@ -1333,9 +1338,7 @@ func (ctxt *Link) dostrdata() {
 // addgostring adds str, as a Go string value, to s. symname is the name of the
 // symbol used to define the string data and must be unique per linked object.
 //
-// gd small-string optimization: the emitted Go string header is 3 words
-// (ptr, hash, len). Phase A always emits heap rep with hash = 0; literal
-// pre-hashing lands in a later phase.
+// The string is not inline, even if short (stringWords).
 func addgostring(ctxt *Link, ldr *loader.Loader, s *loader.SymbolBuilder, symname, str string) {
 	sdata := ldr.CreateSymForUpdate(symname, 0)
 	if sdata.Type() != sym.Sxxx {

@@ -7076,7 +7076,7 @@ const (
 	OpComplexImag
 	OpStringMake
 	OpStringPtr
-	OpStringHash
+	OpStringWord1
 	OpStringLen
 	OpStringWord2
 	OpPtrBits
@@ -107239,7 +107239,7 @@ var opcodeTable = [...]opInfo{
 	},
 	{
 		name:    "StringMake",
-		argLen:  3,
+		argLen:  -1,
 		generic: true,
 	},
 	{
@@ -107248,7 +107248,7 @@ var opcodeTable = [...]opInfo{
 		generic: true,
 	},
 	{
-		name:    "StringHash",
+		name:    "StringWord1",
 		argLen:  1,
 		generic: true,
 	},

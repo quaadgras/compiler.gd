@@ -16,39 +16,55 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 	MOVD	R4, R3
 	B	cmpbody<>(SB)
 
-// gd: under the fork's 24 B string layout, args come in as
-//   R0=a.ptr R1=a.hash R2=a.word2  R3=b.ptr R4=b.hash R5=b.word2
-// whereas cmpbody expects (R0=a_base, R1=a_len, R2=b_base, R3=b_len).
-// Decode each string: heap rep → len from word 2 low 60 bits; inline
-// rep → spill words 1+2 to a local 16 B buffer, point at the buffer,
-// take length from word 2's top nibble. 32 B local frame for both
-// strings; BL + RET so the epilogue restores SP.
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$40-56
-	// Decode a: R0=ptr, R1=len on exit.
-	TST	$0xf000000000000000, R2	// inline iff the length tag is set
-	BNE	cs_a_inline
-	AND	$0x0fffffffffffffff, R2, R1
-	B	cs_a_done
-cs_a_inline:
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
+	// R0 = a_base
+	// R1 = a_len
+	// R2 = b_base
+	// R3 = b_len
+	// gd: either inline (w0's bit 63, doc/gd/sso-string.md)?
+	ORR	R0, R2, R4
+	TBZ	$63, R4, notinline
+	B	cmpstrinline<>(SB)
+notinline:
+	B	cmpbody<>(SB)
+
+// cmpstrinline is cmpstring with at least one inline string. Two inline
+// strings are compared in registers: byte-reversed, w1 (bytes 0..7) and
+// then w0 (bytes 8..14 and, last, the tag, whose low bits are the
+// length) compare as their bytes do, the shorter of two whose bytes
+// agree less. Otherwise the inline one's bytes are put in order in the
+// frame (w1, w0) for cmpbody.
+TEXT cmpstrinline<>(SB),NOSPLIT,$40-0
+	AND	R0, R2, R4
+	TBZ	$63, R4, mixed
+	REV	R1, R1
+	REV	R3, R3
+	CMP	R3, R1
+	BNE	differ
+	REV	R0, R0
+	REV	R2, R2
+	CMP	R2, R0
+differ:
+	CSET	HI, R4
+	CSINV	HS, R4, ZR, R0
+	RET
+mixed:
+	TBZ	$63, R0, aheap
 	MOVD	R1, 8(RSP)
-	MOVD	R2, 16(RSP)
-	ADD	$8, RSP, R0
-	LSR	$60, R2, R1
-cs_a_done:
-
-	// Decode b: R2=ptr, R3=len on exit.
-	TST	$0xf000000000000000, R5
-	BNE	cs_b_inline
-	MOVD	R3, R2
-	AND	$0x0fffffffffffffff, R5, R3
-	B	cs_b_done
-cs_b_inline:
-	MOVD	R4, 24(RSP)
-	MOVD	R5, 32(RSP)
-	ADD	$24, RSP, R2
-	LSR	$60, R5, R3
-cs_b_done:
-
+	MOVD	R0, 16(RSP)
+	LSR	$56, R0, R1
+	AND	$15, R1
+	MOVD	RSP, R0
+	ADD	$8, R0
+aheap:
+	TBZ	$63, R2, bheap
+	MOVD	R3, 24(RSP)
+	MOVD	R2, 32(RSP)
+	LSR	$56, R2, R3
+	AND	$15, R3
+	MOVD	RSP, R2
+	ADD	$24, R2
+bheap:
 	BL	cmpbody<>(SB)
 	RET
 

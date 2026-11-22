@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !compiler_bootstrap && !wasm.ptr32
+//go:build !compiler_bootstrap && wasm.gc && !wasm.ptr32
 
 package unsafeheader
 
 import "unsafe"
 
-// String is the runtime representation of a string under the gd
-// small-string optimization: 3-word header (ptr, hash, len).
+// String is the runtime representation of a string with GOWASM=gc and
+// 8-byte words: 3-word header (ptr, hash, len).
 // See doc/gd/sso-string.md.
 //
 // Hash is word 1 — cached 64-bit string hash for heap-rep strings

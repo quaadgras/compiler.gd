@@ -69,7 +69,7 @@ func (s *state) stringWasm32Data(str *ssa.Value, resultT *types.Type) *ssa.Value
 	tmp.SetAddrtaken(true)
 	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
 	tmpAddr := s.addr(tmp)
-	s.store(u64, s.newValue1I(ssa.OpOffPtr, types.NewPtr(u64), 0, tmpAddr), s.newValue1(ssa.OpStringHash, u64, str))
+	s.store(u64, s.newValue1I(ssa.OpOffPtr, types.NewPtr(u64), 0, tmpAddr), s.newValue1(ssa.OpStringWord1, u64, str))
 	s.store(u64, s.newValue1I(ssa.OpOffPtr, types.NewPtr(u64), 8, tmpAddr), s.newValue1(ssa.OpStringWord2, u64, str))
 	s.vars[marker] = s.newValue1I(ssa.OpOffPtr, resultT, 0, tmpAddr)
 	s.endBlock().AddEdgeTo(bEnd)
@@ -109,7 +109,7 @@ func (s *state) stringWasm32Index(str, i *ssa.Value) *ssa.Value {
 	// Bytes 0 to 7 are A, 8 to 14 B: the byte is that word shifted
 	// right by (i&7)*8.
 	s.startBlock(bInline)
-	a := s.newValue1(ssa.OpStringHash, u64, str)
+	a := s.newValue1(ssa.OpStringWord1, u64, str)
 	bw := s.newValue1(ssa.OpStringWord2, u64, str)
 	inA := s.newValue2(ssa.OpLess32U, types.Types[types.TBOOL], i, s.constInt32(intT, 8))
 	w := s.newValue3(ssa.OpCondSelect, u64, a, bw, inA)

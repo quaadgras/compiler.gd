@@ -104,6 +104,13 @@ func Funcs(gd *base.Invocation, fns []*ir.Func) {
 	if !enabled(gd) {
 		return
 	}
+	if types.StringTagged() {
+		// The address of a tagged string's bytes is a phi of its w0
+		// and a copy, which the compiler cannot tell is no inline
+		// string's: a heap string made of it is dispatched on again at
+		// each index. (A test of w0's sign is all the dispatch costs.)
+		return
+	}
 	// Skip the runtime package entirely — write-barrier checks are
 	// transitive (Nowritebarrierrec propagates through callees), and
 	// our synthesized unsafe.String emits a panicunsafestringlen call

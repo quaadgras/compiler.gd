@@ -29,12 +29,10 @@ notfound:
 	MOVW	R1, ret+16(FP)
 	RET
 
-// gd: a string is {ptr, hash, len} (doc/gd/sso-string.md; with 4-byte
-// words it has no inline form), so its length is at 8.
-TEXT ·IndexByteString(SB),NOSPLIT,$0-20
+TEXT ·IndexByteString(SB),NOSPLIT,$0-16
 	MOVW	s_base+0(FP), R1
-	MOVW	s_len+8(FP), R2
-	MOVBU	c+12(FP), R3	// byte to find
+	MOVW	s_len+4(FP), R2
+	MOVBU	c+8(FP), R3	// byte to find
 	ADDU	$1, R1, R4	// store base+1 for later
 	ADDU	R1, R2	// end
 
@@ -45,10 +43,10 @@ loop:
 	BNE	R3, R5, loop
 
 	SUBU	R4, R1	// remove (base+1)
-	MOVW	R1, ret+16(FP)
+	MOVW	R1, ret+12(FP)
 	RET
 
 notfound:
 	MOVW	$-1, R1
-	MOVW	R1, ret+16(FP)
+	MOVW	R1, ret+12(FP)
 	RET

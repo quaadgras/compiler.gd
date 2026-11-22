@@ -64,9 +64,21 @@ func decomposeBuiltin(f *Func) {
 				toDelete = append(toDelete, namedVal{i, j})
 			}
 		case t.IsString():
-			// gd: 3-slot string split (ptr, hash, len).
 			ptrName, hashName, lenName := f.SplitString(name)
 			newNames = maybeAppend2(f, newNames, ptrName, lenName)
+			if hashName == nil {
+				// Two words (types.StringTwoWords).
+				for j, v := range f.NamedValues[*name] {
+					if v.Op != OpStringMake {
+						continue
+					}
+					f.NamedValues[*ptrName] = append(f.NamedValues[*ptrName], v.Args[0])
+					f.NamedValues[*lenName] = append(f.NamedValues[*lenName], v.Args[1])
+					toDelete = append(toDelete, namedVal{i, j})
+				}
+				break
+			}
+			// GOWASM=gc: three slots (ptr, hash, len).
 			newNames = maybeAppend(f, newNames, hashName)
 			for j, v := range f.NamedValues[*name] {
 				if v.Op != OpStringMake {
@@ -153,6 +165,19 @@ func decomposeStringPhi(v *Value) {
 	// inline-rep headers.
 	types := &v.Block.Func.Config.Types
 	ptrType := types.BytePtr
+	if v.Block.Func.Config.stringTwoWords() {
+		// w0 and w1, raw: an inline string's w0 is its tag and bytes.
+		w0 := v.Block.NewValue0(v.Pos, OpPhi, ptrType)
+		w1 := v.Block.NewValue0(v.Pos, OpPhi, types.Int)
+		for _, a := range v.Args {
+			w0.AddArg(a.Block.NewValue1(v.Pos, OpStringPtr, ptrType, a))
+			w1.AddArg(a.Block.NewValue1(v.Pos, OpStringWord1, types.Int, a))
+		}
+		v.reset(OpStringMake)
+		v.AddArg(w0)
+		v.AddArg(w1)
+		return
+	}
 	hashType := types.Uintptr
 	lenType := types.StringWord2
 
@@ -161,7 +186,7 @@ func decomposeStringPhi(v *Value) {
 	word2 := v.Block.NewValue0(v.Pos, OpPhi, lenType)
 	for _, a := range v.Args {
 		ptr.AddArg(a.Block.NewValue1(v.Pos, OpStringPtr, ptrType, a))
-		hash.AddArg(a.Block.NewValue1(v.Pos, OpStringHash, hashType, a))
+		hash.AddArg(a.Block.NewValue1(v.Pos, OpStringWord1, hashType, a))
 		word2.AddArg(a.Block.NewValue1(v.Pos, OpStringWord2, lenType, a))
 	}
 	v.reset(OpStringMake)

@@ -20,10 +20,6 @@ func TestSizeof(t *testing.T) {
 		_32bit uintptr // size on 32bit platforms
 		_64bit uintptr // size on 64bit platforms
 	}{
-		// gd small-string optimization: each `string` field grows by
-		// 8 B on 64-bit / 4 B on 32-bit. Sym has 2 string fields
-		// (Linkname, Name) → +16 / +8.
-		//
 		// gd parallelism-ast: Type gained a cache struct of two
 		// atomic.Pointer[Type] (cache.ptr, cache.slice) so concurrent
 		// in-process compile invocations don't race on shared composite-
@@ -32,8 +28,8 @@ func TestSizeof(t *testing.T) {
 		// process-global map[*Type]*sync.Once that pinned every Type
 		// for cmd/go's lifetime under in-process compile (commit
 		// 31c94ef222). +12 B on 64-bit / +8 B on 32-bit, padded.
-		{Sym{}, 64, 96},
-		{Type{}, 112, 144},
+		{Sym{}, 48, 80},
+		{Type{}, 108, 144},
 		{Map{}, 12, 24},
 		{Forward{}, 20, 32},
 		{Func{}, 32, 56},

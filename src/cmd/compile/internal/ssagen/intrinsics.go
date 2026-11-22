@@ -271,17 +271,15 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 		},
 		sys.ARM64)
 
-	// gd small-string optimization: streqfast is the fast path for
-	// string equality under the 3-word header. When all three words
-	// match (same heap pointer OR two inline strings with identical
-	// content), we return true without decoding lengths or calling
-	// memequal. Otherwise we fall back to decoded-len + memequal —
-	// the same cost as before Phase B.
+	// streqfast is string equality (stringEqFast): with 8-byte words,
+	// compares of the words of the strings first (doc/gd/sso-string.md).
+	// (Not on GOARCH=wasm, whose strings have three or four words with
+	// GOWASM=gc.)
 	addF("runtime", "streqfast",
 		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
 			return s.stringEqFast(args[0], args[1])
 		},
-		sys.AMD64, sys.ARM64)
+		sys.AMD64, sys.ARM64, sys.Loong64, sys.PPC64, sys.RISCV64, sys.S390X, sys.MIPS64, sys.I386, sys.ARM, sys.MIPS)
 
 	if cfg.goppc64 >= 10 {
 		// Use only on Power10 as the new byte reverse instructions that Power10 provide

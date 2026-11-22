@@ -23,8 +23,8 @@ import (
 // string and 2-word interface headers. Equality signatures and the
 // generated hash/eq bodies below must use these sizes.
 //
-//   - string: 3-word header (ptr, hash/bytes, tag|len/bytes); see
-//     doc/gd/sso-string.md and types.StringSize.
+//   - string: types.StringSize (two words, but with GOWASM=gc); see
+//     doc/gd/sso-string.md.
 //   - interface: fat-interface layout {tab/_type, data, inline [16]byte};
 //     see types.CalcSize TINTER.
 func ifaceSize() int64 {

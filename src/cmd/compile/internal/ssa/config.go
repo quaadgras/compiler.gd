@@ -74,6 +74,12 @@ func (c *Config) GD() *base.Invocation { return c.gd }
 // (types.StringWasm32).
 func (c *Config) stringWasm32() bool { return c.PtrSize == 4 && types.StringWasm32() }
 
+// stringTwoWords reports whether a string is two words, w0 and w1
+// (types.StringTwoWords); stringTagged, whether it also has the inline
+// form of 8-byte words (types.StringTagged).
+func (c *Config) stringTwoWords() bool { return types.StringTwoWords() }
+func (c *Config) stringTagged() bool   { return c.PtrSize == 8 && types.StringTwoWords() }
+
 type (
 	blockRewriter func(*Block) bool
 	valueRewriter func(*Value) bool

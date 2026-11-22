@@ -222,14 +222,15 @@ func syscall_runtimeUnsetenv(key string) {
 // If SetCrashOutput(f) was called, it also writes to f.
 //
 // Callable from nowritebarrier contexts (badmorestackgsignal,
-// badsignal, ...) — uses stringStruct.bytes() instead of
-// unsafe.StringData so inline-rep input doesn't force a heap alloc.
+// badsignal, ...) — uses stringStruct.data instead of
+// unsafe.StringData so an inline input doesn't force a heap alloc.
 // writeErrData consumes the bytes synchronously.
 //
 //go:nosplit
 func writeErrStr(s string) {
+	var buf [16]byte
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	writeErrData((*byte)(sh.bytes()), int32(len(s)))
+	writeErrData((*byte)(sh.data(&buf)), int32(len(s)))
 }
 
 // writeErrData is the common parts of writeErr{,Str}.

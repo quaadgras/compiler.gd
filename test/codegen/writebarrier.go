@@ -67,11 +67,11 @@ func trickyWriteNil(p *int, q **int) {
 }
 
 type S struct {
-	// gd: strings are 24 bytes here, and a 56-byte S is copied with
-	// per-field write barriers; the third string keeps *dst = *sp a
-	// large wbMove, which is what this test is about.
-	a, b, d string
-	c       *int
+	// gd: an S of up to 8 words is SSA-able, and copied with
+	// per-field write barriers; d and e keep *dst = *sp a large
+	// wbMove, which is what this test is about.
+	a, b, d, e string
+	c          *int
 }
 
 var g1, g2 *int

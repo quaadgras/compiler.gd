@@ -372,8 +372,8 @@ var genericOps = []opData{
 	{name: "SPanchored", typ: "Uintptr", argLength: 2, zeroWidth: true}, // arg0 = SP, arg1 = mem. Result is identical to arg0, but cannot be scheduled before memory state arg1.
 
 	// Memory operations
-	{name: "Load", argLength: 2},                          // Load from arg0.  arg1=memory
-	{name: "Dereference", argLength: 2},                   // Load from arg0.  arg1=memory.  Helper op for arg/result passing, result is an otherwise not-SSA-able "value".
+	{name: "Load", argLength: 2},                              // Load from arg0.  arg1=memory
+	{name: "Dereference", argLength: 2},                       // Load from arg0.  arg1=memory.  Helper op for arg/result passing, result is an otherwise not-SSA-able "value".
 	{name: "Store", argLength: 3, typ: "Mem", aux: "TypSize"}, // Store arg1 to arg0.  arg2=memory, aux=type.  Returns memory. auxint=1 if what is stored needs no publishing (runtime/shared.go).
 
 	// masked memory operations.
@@ -404,10 +404,10 @@ var genericOps = []opData{
 
 	// Memory operations with write barriers.
 	// Expand to runtime calls. Write barrier will be removed if write on stack.
-	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "TypSize"},    // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
-	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
-	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"}, // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
-	{name: "WBend", argLength: 1, typ: "Mem"},                  // Write barrier code is done, interrupting is now allowed.
+	{name: "StoreWB", argLength: 3, typ: "Mem", aux: "TypSize"}, // Store arg1 to arg0. arg2=memory, aux=type.  Returns memory.
+	{name: "MoveWB", argLength: 3, typ: "Mem", aux: "TypSize"},  // arg0=destptr, arg1=srcptr, arg2=mem, auxint=size, aux=type.  Returns memory.
+	{name: "ZeroWB", argLength: 2, typ: "Mem", aux: "TypSize"},  // arg0=destptr, arg1=mem, auxint=size, aux=type. Returns memory.
+	{name: "WBend", argLength: 1, typ: "Mem"},                   // Write barrier code is done, interrupting is now allowed.
 
 	// A sequence lock is held from ShareLocked, whose memory is that of
 	// the compare-and-swap that took it, to ShareUnlocked, after the
@@ -535,35 +535,38 @@ var genericOps = []opData{
 	{name: "ComplexImag", argLength: 1}, // imag(arg0)
 
 	// Strings
-	// gd small-string optimization: StringMake carries the full 24 B
-	// header in SSA. arg0=ptr (word 0: data ptr or nil-when-inline),
-	// arg1=hash (word 1: cached hash for heap rep, zero in phase A;
-	// inline bytes[0:8] under future inline rep), arg2=len-or-tagbits
-	// (word 2: tag<<60 | len for heap, tag<<60 | inline bytes[8:15]
-	// for inline). Phase A always emits heap rep with hash=0 and
-	// tag bits zero.
-	{name: "StringMake", argLength: 3},                   // arg0=ptr, arg1=hash, arg2=word2 (raw: tag<<60|len-or-bytes)
-	{name: "StringPtr", argLength: 1, typ: "BytePtr"},    // ptr(arg0): heap data pointer, or nil for inline rep
-	{name: "StringHash", argLength: 1, typ: "Uintptr"},   // hash(arg0): word 1 (heap: cached hash; inline: bytes[0:8])
-	{name: "StringLen", argLength: 1, typ: "Int"},        // len(arg0): logical length (tag-decoded)
-	{name: "StringWord2", argLength: 1, typ: "Int"},      // word 2 of arg0 raw (tag nibble + packed). Use by helpers that need tag access.
+	// A string has two values in SSA where it is two words
+	// (types.StringTwoWords): arg0=w0 (the address of the bytes, or
+	// with 8-byte words an inline string's tag and bytes 8..14:
+	// types.StringTagged) and arg1=w1 (the length, or an inline
+	// string's bytes 0..7). With GOWASM=gc it has three: arg0=ptr (word
+	// 0: the address of the bytes, nil if inline), arg1=word 1 (the
+	// hash or bytes 0..7; wasm32: A) and arg2=word 2 (tag<<60 | len, or
+	// tag<<60 | bytes 8..14; wasm32: B).
+	{name: "StringMake", argLength: -1},                 // arg0=w0, arg1=w1[, arg2=word 2]
+	{name: "StringPtr", argLength: 1, typ: "BytePtr"},   // word 0 of arg0, raw: the address of the bytes unless inline (tagged, or nil with GOWASM=gc)
+	{name: "StringWord1", argLength: 1, typ: "Uintptr"}, // word 1 of arg0, raw (two words: the length or bytes 0..7)
+	{name: "StringLen", argLength: 1, typ: "Int"},       // len(arg0): logical length (tag-decoded)
+	{name: "StringWord2", argLength: 1, typ: "Int"},     // word 2 of arg0 raw (tag nibble + packed), GOWASM=gc only.
 
 	// The string of wasm32 (types.StringWasm32), whose word 0 is text
 	// in an inline string and the address of the bytes otherwise, and
 	// in SSA both a pointer (nil if inline) and the low half of A.
-	// Generated only for GOWASM=gc,split, whose backend compiles them.
-	{name: "PtrBits", argLength: 1, typ: "Uintptr"},                // the address of the pointer arg0, as an integer (no memory argument)
-	{name: "StringLenAB", argLength: 2, typ: "Int"},                // the length of the string whose A and B are arg0 and arg1
-	{name: "StringLoadPtr", argLength: 3, typ: "BytePtr"},          // word 0 of the string at arg0 as a pointer if arg1 (its B) has a tag of 0, else nil. arg2=mem
-	{name: "StringStorePtr", argLength: 3, typ: "Mem"},            // store the pointer arg1 as word 0 of the string at arg0 (the word and its element of the array of pointers); A is stored after it. arg2=mem
+	// Generated only for GOWASM=gc,split, whose backend compiles them,
+	// but PtrBits, which is also word 0 of a tagged string as an integer
+	// (generic.rules turns it into a copy elsewhere).
+	{name: "PtrBits", argLength: 1, typ: "Uintptr"},       // the address of the pointer arg0, as an integer (no memory argument)
+	{name: "StringLenAB", argLength: 2, typ: "Int"},       // the length of the string whose A and B are arg0 and arg1
+	{name: "StringLoadPtr", argLength: 3, typ: "BytePtr"}, // word 0 of the string at arg0 as a pointer if arg1 (its B) has a tag of 0, else nil. arg2=mem
+	{name: "StringStorePtr", argLength: 3, typ: "Mem"},    // store the pointer arg1 as word 0 of the string at arg0 (the word and its element of the array of pointers); A is stored after it. arg2=mem
 
 	// Interfaces
 	// gd fat-interface: IMake carries the full 32B iface header in SSA.
 	// arg0=itab, arg1=data (boxed pointer, nil when inline), arg2=inline real
 	// (float64 half of the 16B inline payload), arg3=inline imag.
 	{name: "IMake", argLength: 4},
-	{name: "ITab", argLength: 1, typ: "Uintptr"},       // arg0=interface, returns itable field
-	{name: "IData", argLength: 1},                      // arg0=interface, returns data field (boxed; nil if inline)
+	{name: "ITab", argLength: 1, typ: "Uintptr"},        // arg0=interface, returns itable field
+	{name: "IData", argLength: 1},                       // arg0=interface, returns data field (boxed; nil if inline)
 	{name: "IInlineReal", argLength: 1, typ: "Float64"}, // arg0=interface, returns inline payload real half
 	{name: "IInlineImag", argLength: 1, typ: "Float64"}, // arg0=interface, returns inline payload imag half
 

@@ -61,21 +61,6 @@ TEXT ·Index<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-56
 power8:
 	BR indexbody<>(SB)
 
-TEXT ·IndexString<ABIInternal>(SB),NOSPLIT|NOFRAME,$0-40
-	// R3 = string
-	// R4 = length
-	// R5 = separator pointer
-	// R6 = separator length
-
-#ifdef GOARCH_ppc64le
-	MOVBZ internal∕cpu·PPC64+const_offsetPPC64HasPOWER9(SB), R7
-	CMP   R7, $1
-	BNE   power8
-	BR    indexbodyp9<>(SB)
-
-#endif
-power8:
-	BR indexbody<>(SB)
 
 	// s: string we are searching
 	// sep: string to search for

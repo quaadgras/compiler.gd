@@ -10,9 +10,6 @@ TEXT ·Index<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVV	R8, R7		// R7 = separator length
 	JMP	indexbody<>(SB)
 
-TEXT ·IndexString<ABIInternal>(SB),NOSPLIT,$0-40
-	JMP	indexbody<>(SB)
-
 // input:
 //   R4 = string
 //   R5 = length

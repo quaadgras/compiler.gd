@@ -17,94 +17,72 @@ TEXT ·Compare<ABIInternal>(SB),NOSPLIT,$0-56
 	MOVQ	AX, SI
 	JMP	cmpbody<>(SB)
 
-// gd small-string optimization: each string is 24 B (ptr, hash, len),
-// passed in 3 int regs. cmpstring(a, b string) int register layout is:
-//   a.ptr=AX, a.hash=BX, a.len=CX, b.ptr=DI, b.hash=SI, b.len=R8.
-// cmpbody wants SI=a_ptr, BX=a_len, DI=b_ptr, DX=b_len.
-//
-// For inline-rep strings word 0 (ptr) is nil and the 15 data bytes live
-// inside the header (word1 || low 7 B of word2). When BOTH operands are
-// inline we stay entirely in registers via a BSWAPQ-and-compare fast
-// path; otherwise we spill the inline side's header to the local frame
-// and repoint the data pointer before dispatching to cmpbody. 32 B of
-// local frame: 16 B spill slot each for a (0..15) and b (16..31).
-TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$32-56
-	// BOTH-INLINE fast path: OR word 0 of both operands. If the combined
-	// value is zero, neither operand has a heap data pointer — the bytes
-	// live in the 24 B header. Skip the stack spill + cmpbody call and
-	// decide the ordering with two BSWAPQ + CMPQ pairs in registers.
-	//
-	// Correctness: bytes 0..7 sit in word 1 little-endian, bytes 8..14 in
-	// word 2 low 56 bits little-endian, length in word 2 top nibble, the
-	// nibble at bits 56..59 is always zero. BSWAPQ reverses byte order so
-	// byte 0 lands in the MSB; an unsigned compare on the reversed value
-	// is lexicographic byte order over bytes 0..7 / 8..14. Trailing-zero
-	// padding can't confuse the result because (a) positions past each
-	// length are zero on both sides when content through the shared
-	// prefix matches, and (b) if content through the prefix truly matches
-	// and one string is shorter, its word 2 has a smaller length tag —
-	// and BSWAPQ places that tag at the LSB of word 2, so the unsigned
-	// compare breaks the tie in favour of the longer string (i.e. the
-	// shorter string compares less).
-	//
-	// The representation is decided by the length tag (top nibble of
-	// word 2), never by word 0: an inline literal also carries word 0 =
-	// its rodata bytes. R9/R10 = a/b tags, reused below.
-	MOVQ	CX, R9
-	SHRQ	$60, R9
-	MOVQ	R8, R10
-	SHRQ	$60, R10
-	TESTQ	R9, R9
-	JEQ	cmpstr_any_heap
-	TESTQ	R10, R10
-	JEQ	cmpstr_any_heap
+TEXT runtime·cmpstring<ABIInternal>(SB),NOSPLIT,$0-40
+	// AX = a_base (want in SI)
+	// BX = a_len  (want in BX)
+	// CX = b_base (want in DI)
+	// DI = b_len  (want in DX)
+	// gd: either inline (w0's bit 63, doc/gd/sso-string.md)?
+	MOVQ	AX, R9
+	ORQ	CX, R9
+	JNS	cmpstr_heap
+	JMP	cmpstrinline<>(SB)
+cmpstr_heap:
+	MOVQ	AX, SI
+	MOVQ	DI, DX
+	MOVQ	CX, DI
+	JMP	cmpbody<>(SB)
+
+// cmpstrinline is cmpstring with at least one inline string. Two inline
+// strings are compared in registers: byte-swapped, w1 (bytes 0..7) and
+// then w0 (bytes 8..14 and, last, the tag, whose low bits are the
+// length) compare as their bytes do, the shorter of two whose bytes
+// agree less. Otherwise the inline one's bytes are put in order in the
+// frame (w1, w0) for cmpbody.
+TEXT cmpstrinline<>(SB),NOSPLIT,$32-0
+	MOVQ	AX, R9
+	ANDQ	CX, R9
+	JNS	cmpstr_mixed
 	BSWAPQ	BX
-	BSWAPQ	SI
-	CMPQ	BX, SI
-	JB	cmpstr_ii_less
-	JA	cmpstr_ii_greater
+	BSWAPQ	DI
+	CMPQ	BX, DI
+	JB	cmpstr_less
+	JA	cmpstr_greater
+	BSWAPQ	AX
 	BSWAPQ	CX
-	BSWAPQ	R8
-	CMPQ	CX, R8
-	JB	cmpstr_ii_less
-	JA	cmpstr_ii_greater
+	CMPQ	AX, CX
+	JB	cmpstr_less
+	JA	cmpstr_greater
 	XORL	AX, AX
 	RET
-cmpstr_ii_less:
+cmpstr_less:
 	MOVQ	$-1, AX
 	RET
-cmpstr_ii_greater:
+cmpstr_greater:
 	MOVQ	$1, AX
 	RET
-
-cmpstr_any_heap:
-	TESTQ	R9, R9
-	JEQ	cmpstr_a_heap
-	// a is inline. A literal already points at its rodata bytes;
-	// otherwise spill the header and point at the inline bytes.
+cmpstr_mixed:
 	TESTQ	AX, AX
-	JNE	cmpstr_a_lit
+	JNS	cmpstr_a_heap
 	MOVQ	BX, 0(SP)
-	MOVQ	CX, 8(SP)
+	MOVQ	AX, 8(SP)
+	SHRQ	$56, AX
+	ANDL	$15, AX
+	MOVQ	AX, BX
 	LEAQ	0(SP), AX
-cmpstr_a_lit:
-	MOVQ	R9, CX    // CX = tag = real length (inline)
 cmpstr_a_heap:
-	TESTQ	R10, R10
-	JEQ	cmpstr_b_heap
-	TESTQ	DI, DI
-	JNE	cmpstr_b_lit
-	MOVQ	SI, 16(SP)
-	MOVQ	R8, 24(SP)
-	LEAQ	16(SP), DI
-cmpstr_b_lit:
-	MOVQ	R10, R8
+	TESTQ	CX, CX
+	JNS	cmpstr_b_heap
+	MOVQ	DI, 16(SP)
+	MOVQ	CX, 24(SP)
+	SHRQ	$56, CX
+	ANDL	$15, CX
+	MOVQ	CX, DI
+	LEAQ	16(SP), CX
 cmpstr_b_heap:
-	MOVQ	AX, SI    // SI = a.ptr
-	MOVQ	CX, BX    // BX = a.len
-	MOVQ	R8, DX    // DX = b.len
-	// cmpbody is tail-called via CALL+RET (not JMP) because cmpstring
-	// now owns a $32 local frame that must be unwound on return.
+	MOVQ	AX, SI
+	MOVQ	DI, DX
+	MOVQ	CX, DI
 	CALL	cmpbody<>(SB)
 	RET
 

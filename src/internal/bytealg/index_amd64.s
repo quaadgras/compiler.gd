@@ -14,29 +14,35 @@ TEXT ·Index(SB),NOSPLIT,$0-56
 	LEAQ ret+48(FP), R11
 	JMP  indexbody<>(SB)
 
-// gd small-string optimization: each string is 24 B (ptr, hash, len).
-// IndexString(a, b string) int → 24 + 24 + 8 (ret) = 56.
-// Inline-rep strings have base==nil and bytes inside the header; decode
-// the tag nibble and redirect the data pointer to &hash+offset(FP).
-TEXT ·IndexString(SB),NOSPLIT,$0-56
+TEXT ·IndexString(SB),NOSPLIT,$0-40
 	MOVQ a_base+0(FP), DI
-	MOVQ a_len+16(FP), DX
-	MOVQ DX, CX
-	SHRQ $60, CX
-	JZ   is_a_heap
-	LEAQ a_hash+8(FP), DI
-	MOVQ CX, DX
+	MOVQ a_len+8(FP), DX
+	TESTQ	DI, DI
+	JNS	is_a_heap
+	// gd: inline (doc/gd/sso-string.md): put its bytes in order in
+	// its argument slots, w1 then w0, and point at them.
+	MOVQ	DX, a_base+0(FP)
+	MOVQ	DI, a_len+8(FP)
+	SHRQ	$56, DI
+	ANDL	$15, DI
+	MOVQ	DI, DX
+	LEAQ	a_base+0(FP), DI
 is_a_heap:
-	MOVQ b_base+24(FP), R8
-	MOVQ b_len+40(FP), AX
-	MOVQ AX, CX
-	SHRQ $60, CX
-	JZ   is_b_heap
-	LEAQ b_hash+32(FP), R8
-	MOVQ CX, AX
+	MOVQ b_base+16(FP), R8
+	MOVQ b_len+24(FP), AX
+	TESTQ	R8, R8
+	JNS	is_b_heap
+	// gd: inline (doc/gd/sso-string.md): put its bytes in order in
+	// its argument slots, w1 then w0, and point at them.
+	MOVQ	AX, b_base+16(FP)
+	MOVQ	R8, b_len+24(FP)
+	SHRQ	$56, R8
+	ANDL	$15, R8
+	MOVQ	R8, AX
+	LEAQ	b_base+16(FP), R8
 is_b_heap:
 	MOVQ DI, R10
-	LEAQ ret+48(FP), R11
+	LEAQ ret+32(FP), R11
 	JMP  indexbody<>(SB)
 
 // AX: length of string, that we are searching for

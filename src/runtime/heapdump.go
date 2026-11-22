@@ -158,10 +158,11 @@ func dumpslice(b []byte) {
 }
 
 func dumpstr(s string) {
-	// gd: bytes() is ok here (same-call consumption) and avoids the
+	// gd: data is ok here (same-call consumption) and avoids the
 	// stringDataHeap alloc path in this STW nowritebarrier context.
+	var buf [16]byte
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	dumpmemrange(sh.bytes(), uintptr(len(s)))
+	dumpmemrange(sh.data(&buf), uintptr(len(s)))
 }
 
 // dump information for a type.
@@ -207,9 +208,10 @@ func dumptype(t *_type) {
 		dumpint(uint64(uintptr(len(pkgpath)) + 1 + uintptr(len(name))))
 		pkgpathH := (*stringStruct)(unsafe.Pointer(&pkgpath))
 		nameH := (*stringStruct)(unsafe.Pointer(&name))
-		dwrite(pkgpathH.bytes(), uintptr(len(pkgpath)))
+		var buf [16]byte
+		dwrite(pkgpathH.data(&buf), uintptr(len(pkgpath)))
 		dwritebyte('.')
-		dwrite(nameH.bytes(), uintptr(len(name)))
+		dwrite(nameH.data(&buf), uintptr(len(name)))
 	}
 	dumpbool(!t.IsDirectIface() || t.Pointers())
 }

@@ -9,7 +9,6 @@ import (
 	"internal/bytealg"
 	"internal/goarch"
 	"internal/goos"
-	"internal/runtime/maps"
 	"internal/runtime/math"
 	"internal/runtime/sys"
 	"internal/strconv"
@@ -53,23 +52,22 @@ func concatstrings(buf *tmpBuf, a []string) string {
 	if count == 1 && (buf != nil || !stringDataOnStack(a[idx])) {
 		return a[idx]
 	}
-	// gd small-string optimization: assemble 1..15-byte results inline.
-	// Zero alloc and no dependency on buf — we only touch a local
-	// 16-byte staging buffer before packing into the header.
-	if goarch.PtrSize == 8 && l <= 15 {
+	// gd: 1..15-byte results are inline. Zero alloc and no dependency
+	// on buf — we only touch a local 16-byte staging buffer.
+	if l <= abi.StringInlineCap {
 		var tmp [16]byte
 		off := 0
 		for _, x := range a {
 			off += copy(tmp[off:], x)
 		}
-		return inlineStringFromBytes(&tmp[0], l)
+		return abi.StringFromInlineBytes(&tmp, l)
 	}
 	s, b := rawstringtmp(buf, l)
 	for _, x := range a {
 		n := copy(b, x)
 		b = b[n:]
 	}
-	return sealStringHash(s)
+	return s
 }
 
 // concatstring2 helps make the callsite smaller (compared to concatstrings),
@@ -168,10 +166,9 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
 	if asanenabled {
 		asanread(unsafe.Pointer(ptr), uintptr(n))
 	}
-	// gd small-string optimization: 1..15-byte results ride inside an
-	// inline-rep header — zero alloc, no dependency on buf. Supersedes
-	// stock's n==1 staticuint64s shortcut on 64-bit.
-	if goarch.PtrSize == 8 && n <= 15 {
+	// gd: 1..15-byte results are inline — zero alloc, no dependency on
+	// buf. Supersedes stock's n==1 staticuint64s shortcut on 64-bit.
+	if n <= abi.StringInlineCap {
 		return inlineStringFromBytes(ptr, n)
 	}
 	if n == 1 {
@@ -189,13 +186,17 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
 		p = mallocgc(uintptr(n), nil, false)
 	}
 	memmove(p, unsafe.Pointer(ptr), uintptr(n))
-	return sealStringHash(unsafe.String((*byte)(p), n))
+	return unsafe.String((*byte)(p), n)
 }
 
 // stringDataOnStack reports whether the string's data is
 // stored on the current goroutine's stack.
 func stringDataOnStack(s string) bool {
-	ptr := uintptr(unsafe.Pointer(unsafe.StringData(s)))
+	sh := stringStructOf(&s)
+	if sh.isInline() {
+		return false
+	}
+	ptr := uintptr(sh.str)
 	stk := getg().stack
 	return stk.lo <= ptr && ptr < stk.hi
 }
@@ -294,10 +295,10 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 	for _, r := range a {
 		size1 += encoderune(dum[:], r)
 	}
-	// gd small-string optimization: if the final encoding certainly
-	// fits inline, encode into a local 16-byte staging buffer and
-	// pack directly — no rawstringtmp (no heap alloc, no buf dep).
-	if goarch.PtrSize == 8 && size1 >= 1 && size1 <= 15 {
+	// gd: if the final encoding certainly fits inline, encode into a
+	// local 16-byte staging buffer and pack directly — no rawstringtmp
+	// (no heap alloc, no buf dep).
+	if size1 >= 1 && size1 <= abi.StringInlineCap {
 		var tmp [16]byte
 		size2 := 0
 		for _, r := range a {
@@ -317,222 +318,138 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 		}
 		size2 += encoderune(b[size2:], r)
 	}
-	// Subslice first (s[:size2] still heap-rep), then seal its hash.
-	return sealStringHash(s[:size2])
+	return s[:size2]
 }
 
-// stringStruct is the runtime layout of a Go string under the gd
-// small-string optimization. See doc/gd/sso-string.md and
-// src/internal/abi/string.go for the full encoding.
-//
-// Phase A invariant: only heap rep is constructed — hash is zero
-// (reserved slot), len's tag nibble is zero, so .len reads as a plain
-// length. Inline rep (tag != 0) is never produced in phase A.
+// stringStruct is the runtime layout of a Go string: two words, as in
+// stock Go, but with 8-byte words a string of 1 to 15 bytes is inline:
+// str has bit 63 set, the length at bit 56 and bytes 8..14 below it, and
+// len is bytes 0..7. See internal/abi/string.go and doc/gd/sso-string.md.
+// The collector scans str as a pointer; an inline one is no address in
+// the heap, which it ignores.
 type stringStruct struct {
-	str  unsafe.Pointer // word 0: data ptr (heap); nil, or the rodata bytes of a literal (inline)
-	hash uint           // word 1: cached hash (heap) or bytes[0:8] (inline)
-	len  uint           // word 2: (tag<<60) | len (heap, tag=0)
-	//                             (tag<<60) | bytes[8:15] packed (inline)
+	str unsafe.Pointer
+	len int
 }
 
 // Variant with *byte pointer type for DWARF debugging.
 type stringStructDWARF struct {
-	str  *byte
-	hash uint
-	len  uint
+	str *byte
+	len int
 }
 
 func stringStructOf(sp *string) *stringStruct {
 	return (*stringStruct)(unsafe.Pointer(sp))
 }
 
-// length returns the logical string length regardless of representation.
-func (s *stringStruct) length() int {
-	tag := uint64(s.len) >> abi.StringTagShift
-	if tag != 0 {
-		return int(tag)
-	}
-	return int(uint64(s.len) & abi.StringLenMask)
-}
-
-// isInline reports whether the string is inline-rep.
-//
-// The length tag alone decides the representation: an inline string
-// built from a compile-time literal also carries word 0 = a pointer to
-// the literal's bytes in rodata (see doc/gd/sso-string.md, "literal
-// provenance"), so word 0 being non-nil does not imply heap rep.
-func (s *stringStruct) isInline() bool {
-	return uint64(s.len)>>abi.StringTagShift != 0
-}
-
-// bytes returns a pointer to the first data byte. For heap rep it
-// returns the data pointer; for inline rep it points into the header
-// itself (aliases &s.hash), which is only valid for the lifetime of s.
-// Callers must not outlive s when the result aliases inline bytes.
+// isInline reports whether the string is inline.
 //
 //go:nosplit
-func (s *stringStruct) bytes() unsafe.Pointer {
-	if s.str != nil {
-		return s.str
+func (s *stringStruct) isInline() bool {
+	return goarch.PtrSize == 8 && int64(uintptr(s.str)) < 0
+}
+
+// length returns the length of the string.
+//
+//go:nosplit
+func (s *stringStruct) length() int {
+	if s.isInline() {
+		return int(uintptr(s.str) >> abi.StringTagShift & 15)
 	}
-	return noescape(unsafe.Pointer(&s.hash))
+	return s.len
+}
+
+// data returns the address of the string's bytes: str, or for an inline
+// string buf, to which it copies them. Callers must not keep it past buf.
+//
+//go:nosplit
+func (s *stringStruct) data(buf *[16]byte) unsafe.Pointer {
+	if s.isInline() {
+		*buf, _ = abi.StringInlineBytes(*(*string)(unsafe.Pointer(s)))
+		return noescape(unsafe.Pointer(buf))
+	}
+	return s.str
 }
 
 // stringSameBacking reports whether a and b share the same underlying
 // byte storage. Two heap-rep strings share backing iff their data
-// pointers are equal. Two inline-rep strings share "backing" iff their
-// inline word pairs are bit-equal (i.e. same content encoded identically
-// — there is no distinct backing for inline bytes). Mixed rep is never
-// shared: an inline copy of a heap string's content has independent
-// storage.
+// pointers are equal. Two inline strings share "backing" iff their
+// words are equal (the same content: there is no distinct backing for
+// inline bytes). Mixed rep is never shared: an inline copy of a heap
+// string's content has independent storage.
 //
 // Intended for tests and clone-detection paths that need to ask "did
 // this op copy the bytes?" — a question unsafe.StringData pointer
-// identity can no longer answer under gd's small-string optimization.
+// identity can no longer answer for inline strings.
 //
 //go:nosplit
 func stringSameBacking(a, b string) bool {
 	ah := (*stringStruct)(unsafe.Pointer(&a))
 	bh := (*stringStruct)(unsafe.Pointer(&b))
-	if ah.str != nil || bh.str != nil {
-		// At least one is heap-rep; share iff both heap with same ptr.
-		return ah.str == bh.str
+	if ah.isInline() && bh.isInline() {
+		return *ah == *bh
 	}
-	// Both inline-rep: share iff identical header content.
-	return ah.hash == bh.hash && ah.len == bh.len
+	return ah.str == bh.str
 }
 
 // stringDataHeap returns a stable pointer to the bytes of s. For heap-
 // rep inputs it returns s.str unchanged (matching stock unsafe.StringData
-// semantics). For inline-rep inputs it allocates a 1..15-byte heap
-// buffer, copies the inline bytes in, and returns the buffer — so the
-// returned pointer never aliases the caller's stack and survives as long
-// as the caller holds it.
+// semantics). For inline inputs it allocates a 1..15-byte heap buffer,
+// copies the inline bytes in, and returns the buffer — so the returned
+// pointer never aliases the caller's stack and survives as long as the
+// caller holds it.
 //
 // Used by the compiler for user-visible unsafe.StringData calls via
 // walkUnsafeData. Runtime-internal callers that consume the pointer
-// within a single call should use stringStruct.bytes() instead —
+// within a single call should use stringStruct.data instead —
 // stringDataHeap's alloc path is not reachable from //go:nowritebarrierrec
 // contexts (writeErrStr, dloggerImpl.s, heapdump.*).
 func stringDataHeap(s string) *byte {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str != nil {
+	if !sh.isInline() {
 		return (*byte)(sh.str)
 	}
-	n := int(uint64(sh.len) >> abi.StringTagShift)
-	if n == 0 {
-		return nil
-	}
+	b, n := abi.StringInlineBytes(s)
 	p := mallocgc(uintptr(n), nil, false)
-	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
+	memmove(p, noescape(unsafe.Pointer(&b)), uintptr(n))
 	return (*byte)(p)
 }
 
-// sliceinlinestring is called by the compiler to implement OSLICESTR
-// when the source string is inline-rep. It copies bytes[lo:hi] from the
-// source header into a fresh inline header and returns it as a new
-// string value — no pointer into the caller's frame is exposed.
+// cgoStringNormalize ensures s is not inline before it is passed to a
+// cgo C function, which reads a string as its address and its length
+// (_GoString_). Cgo's generated Go stubs call this helper on each
+// string argument.
 //
-// The compiler only routes this call from the tag-dispatched inline
-// branch of stringSlice; bounds have already been checked by the
-// caller, and the source is known to be inline-rep (word0 == nil,
-// tag != 0). Result length is guaranteed ≤ 15.
-//
-// cgoStringNormalize ensures s has a heap representation before being
-// passed to a cgo C function. Inline-rep strings (word0 == nil, bytes in
-// word1 + low 56 bits of word2) are not readable from C — s.p is nil and
-// s.n is tag-encoded. Cgo's generated Go stubs call this helper on each
-// string argument so the C side always sees a normal {ptr, 0, len}
-// header with valid s.p and decoded s.n.
-//
-// Heap-rep inputs (tag == 0) return s unchanged. Inline-rep inputs
-// allocate a len-sized heap buffer, copy the inline bytes in, and
-// return a fresh heap-rep string pointing at the buffer.
+// Other strings are returned unchanged. An inline one is copied to a
+// len-sized heap buffer.
 //
 //go:linkname cgoStringNormalize
 func cgoStringNormalize(s string) string {
 	sh := (*stringStruct)(unsafe.Pointer(&s))
-	n := int(uint64(sh.len) >> abi.StringTagShift)
-	if n == 0 {
-		return s // heap rep (or empty)
+	if !sh.isInline() {
+		return s
 	}
-	if sh.str != nil {
-		// Inline literal: word 0 already points at the bytes in
-		// rodata, so C can read them in place — no copy.
-		var r stringStruct
-		r.str = sh.str
-		r.len = uint(n)
-		return *(*string)(unsafe.Pointer(&r))
-	}
-	if n == 0 {
-		return ""
-	}
+	b, n := abi.StringInlineBytes(s)
 	p := mallocgc(uintptr(n), nil, false)
-	memmove(p, unsafe.Pointer(&sh.hash), uintptr(n))
-	var r stringStruct
-	r.str = p
-	r.hash = 0
-	r.len = uint(n)
-	return sealStringHash(*(*string)(unsafe.Pointer(&r)))
-}
-
-// sealStringHash populates word 1 of a freshly-constructed heap-rep
-// string with the process-wide hash. Idempotent — does nothing if the
-// string is inline-rep, empty, or already sealed. Called by every
-// runtime producer that returns a heap-rep string so subsequent
-// strhash / streqfast calls skip the aeshash compute.
-//
-// The fork uses a single process-wide seed for string hashing (the
-// runtime-initialised aeskeysched via memhash(…, 0, …)), trading
-// per-map DoS scrambling for cache consistency across map instances.
-// See doc/gd/sso-string.md.
-//
-//go:nosplit
-func sealStringHash(s string) string {
-	sh := (*stringStruct)(unsafe.Pointer(&s))
-	// Inline rep (including literals, whose word 0 points at rodata)
-	// keeps bytes in word 1: there is no hash slot to seal.
-	if sh.str == nil || sh.hash != 0 || sh.isInline() {
-		return s
-	}
-	n := int(uint64(sh.len) & abi.StringLenMask)
-	if n == 0 {
-		return s
-	}
-	if maps.UseAeshash {
-		sh.hash = uint(memhash(sh.str, 0, uintptr(n)))
-	} else {
-		sh.hash = uint(strhashPort(unsafe.String((*byte)(sh.str), n)))
-	}
-	if sh.hash == 0 {
-		sh.hash = 1 // 0 is reserved as the unsealed sentinel
-	}
-	return s
+	memmove(p, noescape(unsafe.Pointer(&b)), uintptr(n))
+	return unsafe.String((*byte)(p), n)
 }
 
 // inlineStringFromBytes packs 1..15 bytes starting at ptr into an
-// inline-rep string header — word 0 = nil, word 1 = bytes[0:8] packed
-// little-endian, word 2 = (tag<<60) | bytes[8:15] low 56 bits. Zero
-// allocations; the returned string is self-contained, so callers can
-// hand it back without worrying about the source buffer's lifetime.
-// 64-bit only; callers must gate on goarch.PtrSize == 8.
+// inline string. Zero allocations; the returned string is
+// self-contained, so callers can hand it back without worrying about
+// the source buffer's lifetime. 64-bit only; callers must gate on
+// goarch.PtrSize == 8 (abi.StringInlineCap).
 //
 //go:nosplit
 func inlineStringFromBytes(ptr *byte, n int) string {
 	var buf [16]byte
-	memmove(unsafe.Pointer(&buf[0]), unsafe.Pointer(ptr), uintptr(n))
-	var r stringStruct
-	r.hash = uint(*(*uint64)(unsafe.Pointer(&buf[0])))
-	lenWord := *(*uint64)(unsafe.Pointer(&buf[8]))
-	r.len = uint(lenWord&abi.StringLenMask | uint64(n)<<abi.StringTagShift)
-	return *(*string)(unsafe.Pointer(&r))
+	memmove(noescape(unsafe.Pointer(&buf[0])), unsafe.Pointer(ptr), uintptr(n))
+	return abi.StringFromInlineBytes(&buf, n)
 }
 
-// stringcopy implements copy(dst, src) where src is a string. It handles
-// both heap-rep (word0 != nil) and inline-rep (word0 == nil; bytes live
-// in word1 and low 56 bits of word2) sources uniformly, so the compiler
-// no longer emits a raw memmove(dst, StringPtr(src), n) that would deref
-// a nil StringPtr on inline-rep inputs.
+// stringcopy implements copy(dst, src) where src is a string, inline or
+// not.
 //
 // Returns the number of bytes copied: min(dstLen, len(src)).
 //
@@ -545,47 +462,37 @@ func stringcopy(dst *byte, dstLen int, s string) int {
 	if n == 0 {
 		return 0
 	}
-	sh := (*stringStruct)(unsafe.Pointer(&s))
-	if sh.str != nil {
-		memmove(unsafe.Pointer(dst), sh.str, uintptr(n))
-		return n
-	}
-	// Inline rep — bytes live in &sh.hash (word 1, 8 bytes) and the low 7
-	// bytes of sh.len (word 2 masked). Materialize into a stack buffer and
-	// memmove; the buffer doesn't escape this frame.
 	var buf [16]byte
-	*(*uint64)(unsafe.Pointer(&buf[0])) = uint64(sh.hash)
-	*(*uint64)(unsafe.Pointer(&buf[8])) = uint64(sh.len) & abi.StringLenMask
-	memmove(unsafe.Pointer(dst), noescape(unsafe.Pointer(&buf[0])), uintptr(n))
+	sh := (*stringStruct)(unsafe.Pointer(&s))
+	memmove(unsafe.Pointer(dst), sh.data(&buf), uintptr(n))
 	return n
 }
 
+// sliceinlinestring is called by the compiler to implement OSLICESTR
+// when the source string is inline. It copies bytes[lo:hi] into a fresh
+// inline string and returns it as a new string value — no pointer into
+// the caller's frame is exposed. Bounds have already been checked by
+// the caller.
+//
 //go:nosplit
 func sliceinlinestring(s string, lo, hi int) string {
-	sh := (*stringStruct)(unsafe.Pointer(&s))
 	n := hi - lo
 	if n == 0 {
 		return ""
 	}
-	src := noescape(unsafe.Pointer(&sh.hash))
-	var buf [16]byte
-	for i := 0; i < n; i++ {
-		buf[i] = *(*byte)(unsafe.Pointer(uintptr(src) + uintptr(lo+i)))
-	}
-	var r stringStruct
-	r.hash = uint(*(*uint64)(unsafe.Pointer(&buf[0])))
-	lenWord := *(*uint64)(unsafe.Pointer(&buf[8]))
-	r.len = uint(lenWord&abi.StringLenMask | uint64(n)<<abi.StringTagShift)
-	return *(*string)(unsafe.Pointer(&r))
+	b, _ := abi.StringInlineBytes(s)
+	var r [16]byte
+	copy(r[:n], b[lo:hi])
+	return abi.StringFromInlineBytes(&r, n)
 }
 
 func intstring(buf *[4]byte, v int64) (s string) {
 	if int64(rune(v)) != v {
 		v = runeError
 	}
-	// gd small-string optimization: rune encodes to 1..4 bytes, always
-	// fits inline. Zero alloc regardless of buf.
-	if goarch.PtrSize == 8 {
+	// gd: a rune encodes to 1..4 bytes, always inline with 8-byte
+	// words. Zero alloc regardless of buf.
+	if abi.StringInlineCap > 0 {
 		var tmp [4]byte
 		n := encoderune(tmp[:], rune(v))
 		return inlineStringFromBytes(&tmp[0], n)
@@ -598,7 +505,7 @@ func intstring(buf *[4]byte, v int64) (s string) {
 		s, b = rawstring(4)
 	}
 	n := encoderune(b, rune(v))
-	return sealStringHash(s[:n])
+	return s[:n]
 }
 
 // rawstring allocates storage for a new string. The returned
@@ -664,7 +571,7 @@ func gostring(p *byte) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
-	return sealStringHash(s)
+	return s
 }
 
 // internal_syscall_gostring is a version of gostring for internal/syscall/unix.
@@ -680,7 +587,7 @@ func gostringn(p *byte, l int) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
-	return sealStringHash(s)
+	return s
 }
 
 // parseByteCount parses a string that represents a count of bytes.
@@ -801,7 +708,7 @@ func findnull(s *byte) int {
 	safeLen := int(pageSize - uintptr(ptr)%pageSize)
 
 	for {
-		t := *(*string)(unsafe.Pointer(&stringStruct{str: ptr, len: uint(safeLen)}))
+		t := *(*string)(unsafe.Pointer(&stringStruct{str: ptr, len: safeLen}))
 		// Check one page at a time.
 		if i := bytealg.IndexByteString(t, 0); i != -1 {
 			return offset + i
@@ -827,7 +734,7 @@ func findnullw(s *uint16) int {
 
 //go:nosplit
 func gostringnocopy(str *byte) string {
-	ss := stringStruct{str: unsafe.Pointer(str), len: uint(findnull(str))}
+	ss := stringStruct{str: unsafe.Pointer(str), len: findnull(str)}
 	s := *(*string)(unsafe.Pointer(&ss))
 	return s
 }
@@ -849,5 +756,5 @@ func gostringw(strw *uint16) string {
 		n2 += encoderune(b[n2:], rune(str[i]))
 	}
 	b[n2] = 0 // for luck
-	return sealStringHash(s[:n2])
+	return s[:n2]
 }

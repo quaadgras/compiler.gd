@@ -4,63 +4,32 @@
 
 #include "textflag.h"
 
-// gd small-string optimization: IndexByteString takes a 24 B string
-// header — (R0=s.ptr, R1=s.hash, R2=s.word2, R3=c). Inline-rep inputs
-// have s.ptr == nil and hold bytes in words 1+2 with length in the
-// top 4 bits of word 2; spill those words to the function's 16 B
-// local frame and point at them so the shared scan walks over the
-// inline bytes. Heap-rep inputs decode the length from word 2 (low
-// 60 bits). Both paths converge on indexByteBody<>(R0=ptr, R1=len,
-// R2=c) via BL, and IndexByteString's epilogue tears down the frame
-// on return.
-//
-// IndexByte takes a []byte; its ABI is unchanged from stock
-// (R0=ptr, R1=len, R2=cap, R3=c). After moving c into R2 it calls
-// the same body — no frame needed there.
-
 // func IndexByte(b []byte, c byte) int
+// input:
+//   R0: b ptr
+//   R1: b len
+//   R2: b cap (unused)
+//   R3: c byte to search
+// return
+//   R0: result
 TEXT ·IndexByte<ABIInternal>(SB),NOSPLIT,$0-40
 	MOVD	R3, R2
-	// R0=ptr, R1=len, R2=c
-	B	indexByteBody<>(SB)
+	B	indexbytestringbody<>(SB)
 
 // func IndexByteString(s string, c byte) int
-//
-// The 16 B local frame holds the inline spill buffer; because Go asm
-// auto-generates prologue/epilogue for non-zero framesize, we have to
-// go through BL + RET (not tail-call B) so the epilogue restores SP
-// before returning to the caller. The heap path doesn't use the
-// spill buffer but shares the frame for a single RET.
-TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$24-40
-	TST	$0xf000000000000000, R2	// inline iff the length tag is set
-	BEQ	ibs_heap
-	// Inline rep: bytes packed across R1 (0..7) and low 7 bytes of
-	// R2 (8..14); tag = R2 >> 60 is the length. Word 0 is nil, or a
-	// literal's rodata bytes; either way the spill is used. (MOVD+ADD
-	// rather than ADD $8, RSP, R0: vet's asmdecl skips lines it reads
-	// as SP writes, and must see R0 written before the RETs.)
-	MOVD	R1, 8(RSP)
-	MOVD	R2, 16(RSP)
-	MOVD	RSP, R0
-	ADD	$8, R0
-	LSR	$60, R2, R1
-	MOVD	R3, R2
-	BL	indexByteBody<>(SB)
-	RET
-ibs_heap:
-	// Heap rep: R0 already the data pointer; length lives in the
-	// low 60 bits of R2 (top nibble is the zero tag).
-	AND	$0x0fffffffffffffff, R2, R1
-	MOVD	R3, R2
-	// R0=ptr, R1=len, R2=c
-	BL	indexByteBody<>(SB)
-	RET
+// input:
+//   R0: s ptr
+//   R1: s len
+//   R2: c byte to search
+// return
+//   R0: result
+TEXT ·IndexByteString<ABIInternal>(SB),NOSPLIT,$0-32
+	TBZ	$63, R0, notinline
+	B	indexbytestringinline<>(SB)
+notinline:
+	B	indexbytestringbody<>(SB)
 
-// indexByteBody is the shared byte-search loop. Entry: R0=ptr, R1=len,
-// R2=c. Return: R0=index-or-(-1). NOFRAME — called via B (tail) when
-// the caller has no frame, or via BL (with the caller running its own
-// epilogue) when a frame must outlive the scan.
-TEXT indexByteBody<>(SB),NOSPLIT|NOFRAME,$0
+TEXT indexbytestringbody<>(SB),NOSPLIT,$0
 	// Core algorithm:
 	// For each 32-byte chunk we calculate a 64-bit syndrome value,
 	// with two bits per byte. For each tuple, bit 0 is set if the
@@ -186,4 +155,16 @@ tail:
 
 fail:
 	MOVD	$-1, R0
+	RET
+
+// indexbytestringinline is ·IndexByteString for an inline string s (R0, R1; doc/gd/sso-string.md):
+// its bytes are put in order in the frame, w1 then w0, and searched.
+TEXT indexbytestringinline<>(SB),NOSPLIT,$24-0
+	MOVD	R1, 8(RSP)
+	MOVD	R0, 16(RSP)
+	LSR	$56, R0, R1
+	AND	$15, R1
+	MOVD	RSP, R0
+	ADD	$8, R0
+	BL	indexbytestringbody<>(SB)
 	RET

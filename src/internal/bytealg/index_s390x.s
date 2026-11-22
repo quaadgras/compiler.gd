@@ -12,13 +12,6 @@ TEXT ·Index(SB),NOSPLIT|NOFRAME,$0-56
 	MOVD	$ret+48(FP), R5
 	BR	indexbody<>(SB)
 
-// Caller must confirm availability of vx facility before calling.
-TEXT ·IndexString(SB),NOSPLIT|NOFRAME,$0-40
-	LMG	a_base+0(FP), R1, R2  // R1=&s[0],   R2=len(s)
-	LMG	b_base+16(FP), R3, R4 // R3=&sep[0], R4=len(sep)
-	MOVD	$ret+32(FP), R5
-	BR	indexbody<>(SB)
-
 // s: string we are searching
 // sep: string to search for
 // R1=&s[0], R2=len(s)

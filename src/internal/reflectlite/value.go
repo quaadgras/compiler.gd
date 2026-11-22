@@ -434,10 +434,7 @@ func (v Value) Len() int {
 		return (*unsafeheader.Slice)(v.dataPtr()).Len
 	case abi.String:
 		// String is bigger than a word; assume flagIndir.
-		if goarch.PtrSize == 4 {
-			return len(*(*string)(v.dataPtr())) // (wasm32's string: Len is not all of it)
-		}
-		return (*unsafeheader.String)(v.dataPtr()).Len
+		return len(*(*string)(v.dataPtr()))
 	}
 	panic(&ValueError{"reflectlite.Value.Len", v.kind()})
 }

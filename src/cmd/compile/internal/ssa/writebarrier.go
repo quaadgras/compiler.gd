@@ -31,6 +31,11 @@ func mightBeHeapPointer(v *Value) bool {
 	if IsGlobalAddr(v) {
 		return false
 	}
+	if v.Op == OpConst64 || v.Op == OpConst32 {
+		// A pointer constant other than nil: word 0 of an inline
+		// string (types.StringTagged), no address.
+		return false
+	}
 	return true
 }
 

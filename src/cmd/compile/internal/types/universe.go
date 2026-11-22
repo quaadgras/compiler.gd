@@ -67,11 +67,6 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		SliceCapOffset = RoundUp(SliceLenOffset+int64(PtrSize), int64(PtrSize))
 		SliceSize = RoundUp(SliceCapOffset+int64(PtrSize), int64(PtrSize))
 
-		// gd: string header grows from 2 words to 3 words. See
-		// doc/gd/sso-string.md / src/internal/abi/string.go.
-		//   word 0 @ 0            : data ptr (heap) / nil (inline)
-		//   word 1 @ PtrSize      : cached hash (heap) / bytes[0:8] (inline)
-		//   word 2 @ 2*PtrSize    : tag<<60 | len-or-inline-bytes
 		// gd escape-bits: a function value is {F uintptr; M uint64;
 		// captures...}; M is aligned as a uint64 (to a register), which
 		// with 4-byte pointers and 8-byte registers (wasm32) puts it
@@ -80,12 +75,19 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 		ClosureVarsOffset = FuncMaskOffset + 8
 
 		StringPtrOffset = 0
-		StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
-		StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
-		StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
 		switch {
-		case PtrSize == 8:
-			StringInlineCap = 15
+		case StringTwoWords():
+			// Two words, as in stock Go: the address of the bytes (or,
+			// with 8-byte words, a string of up to 15 bytes tagged in
+			// its top byte) and the length (or the first 8 bytes). See
+			// StringTagged and doc/gd/sso-string.md.
+			StringLenOffset = int64(PtrSize)
+			StringHashOffset = StringLenOffset
+			StringSize = 2 * int64(PtrSize)
+			StringInlineCap = 0
+			if PtrSize == 8 {
+				StringInlineCap = 15
+			}
 		case StringWasm32():
 			// Four words: the address of the bytes, the length, the
 			// cached hash and zero, or up to 15 bytes and the length
@@ -93,6 +95,12 @@ func InitTypes(gd *base.Invocation, defTypeName func(sym *Sym, typ *Type) Object
 			StringLenOffset = StringPtrOffset + int64(PtrSize)
 			StringHashOffset = StringLenOffset + int64(PtrSize)
 			StringSize = 4 * int64(PtrSize)
+			StringInlineCap = 15
+		default:
+			// GOWASM=gc with 8-byte words (StringWasmGC64): three.
+			StringHashOffset = RoundUp(StringPtrOffset+int64(PtrSize), int64(PtrSize))
+			StringLenOffset = RoundUp(StringHashOffset+int64(PtrSize), int64(PtrSize))
+			StringSize = RoundUp(StringLenOffset+int64(PtrSize), int64(PtrSize))
 			StringInlineCap = 15
 		}
 
