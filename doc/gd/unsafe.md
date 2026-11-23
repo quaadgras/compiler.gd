@@ -25,7 +25,10 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
   last is new: an integer that happens to be an address is not read as a
   pointer. (The first word of an interface is a word the collector does
   not look at that points to a type or a method table, outside the heap,
-  and reflect reads it as a pointer: that stays allowed.)
+  and reflect reads it as a pointer: this check allows it, and reflect is
+  not held to the rule on views below.)
+- **`(*T)(p)` is not a partial view of a string, a slice or an interface**
+  (below).
 - **`unsafe.Pointer(u)`**, `u` a `uintptr` (`checkptrArithmetic`): if the
   result is in a heap object, one of the pointers the expression was
   computed from is in the same object, or the object is *exposed*.
@@ -45,6 +48,82 @@ memory (`runtime/checkptr.go`). A check that fails is a fatal error.
 - **`unsafe.Slice`, `unsafe.String`**: the result is inside one
   allocation. (What the language says panics still panics, and is not a
   fatal error: `unsafeslicecheckptr` uses the caller's pc.)
+
+## Views of strings, slices and interfaces
+
+These values are loaded and stored as a unit, which is what makes a race on
+them safe (`publication-point.md`, `sso-string.md`, `slice16.md`,
+`fat-iface.md`). Storing one word at a time through a converted pointer
+would undo that for every reader, and a conversion cannot tell a load from
+a store. So:
+
+> A view is **whole** if every string, slice or interface it overlaps is
+> covered completely by a value of the same kind at the same offset.
+> Otherwise it is **partial**, and the conversion is a fatal error:
+> `checkptr: converted pointer is a partial view of a string, a slice or an
+> interface`.
+
+- Allowed: string as string, slice as slice of any element type, interface
+  as interface, `internal/abi`'s `EmptyInterface` and `NonEmptyInterface` as
+  an interface, and any of these inside a struct or an array at the same
+  offset. A view of memory that holds none of them may have any type: it is
+  not part of a value that goes whole.
+- A plain pointer viewed as `*uintptr` is not covered.
+- **`[]byte` as `string`, and the reverse**, are partial with 8-byte words:
+  they never worked there. A slice's second word is `len:32|cap:32`, so a
+  slice read as a string has the length `len|cap<<32`, and an inline string
+  read as a slice has its bytes for a pointer and a length. With 4-byte
+  words a string is a slice's first two words, and they stay allowed. Use
+  `unsafe.String` and `unsafe.Slice`.
+- **`reflect.StringHeader`, `reflect.SliceHeader` and `internal/unsafeheader`
+  views of a string or a slice are partial.** What the compiler has for
+  them is two things, and neither makes such a view safe: a store to a
+  `Data` field has a write barrier (`ir.IsReflectHeaderDataField`), and
+  `unsafe.Pointer(h.Data)` is not checked as arithmetic. A `SliceHeader`
+  has not been a slice's layout with 8-byte words since slices were packed.
+  The other direction, a header variable read as a value, is not a partial
+  view and is not rejected: a `StringHeader` read as a `string` works, but
+  a `SliceHeader` read as a `[]T` has its `Len` as the length and a
+  capacity of 0, which is wrong.
+
+How it is checked:
+
+- **The compiler**, where it knows what `p` points into: `&x`, `&x.f`,
+  `&a[i]`, a `p` of static type `*U`, `unsafe.Add` or `uintptr` arithmetic
+  of those with a constant, and a local assigned once to any of these
+  (`walk/wholeview.go`, `types/whole.go`). If the view is partial, it emits a
+  call that fails at the conversion, so code that never runs that line
+  still builds. If it is whole, nothing is added.
+- **The runtime**, for a plain `unsafe.Pointer`: `checkptrAlignment`
+  compares the view with the type the object records, if it has one, and
+  `checkptrView` does for types of alignment 1, which need no other check.
+  Objects with a malloc header and large objects record their type.
+
+`-d=checkptr=0` turns it off. `-d=unsafewhole=1` reports the conversions
+the compiler proves partial instead of failing, and `=2` also those whose
+source it does not know.
+
+A nil pointer views nothing and always passes. `sync/atomic`'s `ifaceEq` is
+`//go:nocheckptr`: it compares two by-value copies in its own frame, word by
+word, which no other goroutine can reach.
+
+### Known gaps
+
+- **Objects of 512 bytes or less** have only a pointer bitmap, in which a
+  string looks like `struct{p *T; n int}`, so a view through a plain
+  `unsafe.Pointer` is not checked. Closing it takes a record per word of
+  which words begin and continue a whole value.
+- **The stack and globals through a plain `unsafe.Pointer`**: they have no
+  recorded type here. A pointer whose source the compiler can see is
+  checked; one that came through a parameter or a field is not.
+- A pointer of static type `*U` is taken to point to a `U`, so a `*byte`
+  that really points into a string is only caught by the runtime check. The
+  reverse rejects valid code: plain memory converted to `*string`, passed
+  through a parameter and converted back to its own type is a fatal error.
+- `(*[N]T)(p)[:l:m]` with a non-constant `m` is checked by the compiler for
+  its first element only.
+- `reflect.Value`, which goes whole too, is checked as a whole value, but
+  package reflect itself is not held to the rule.
 
 ## Where it is not
 
@@ -102,7 +181,8 @@ the type its object was allocated with, and memory outside the heap.
 
 ## Tests
 
-`runtime/checkptr_test.go`, with `CheckPtrPointers*` for the new check;
+`runtime/checkptr_test.go`, with `CheckPtrPointers*` for the check of
+pointers and `TestCheckPtrViews` for views (`testprog/checkptr_whole.go`);
 the standard library's tests pass with the checks on. Six tests of
 `test/` that count instructions or diagnostics, or that misuse `unsafe`
 on purpose, run with `-d=checkptr=0`.

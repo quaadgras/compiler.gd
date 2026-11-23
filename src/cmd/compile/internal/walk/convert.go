@@ -56,6 +56,12 @@ func walkConv(gd *base.Invocation, n *ir.ConvExpr, init *ir.Nodes) ir.Node {
 			init.Append(mkcall(gd, "exposeptr", nil, init, n.X))
 			return n
 		}
+		if n.View == ir.ViewPartial && !n.CheckPtr() {
+			// gd: a view of part of a string, a slice or an
+			// interface (wholeview.go).
+			n.X = cheapExpr(gd, n.X, init)
+			init.Append(mkcall(gd, "checkptrPartial", nil, init, n.X))
+		}
 	}
 	param, result := rtconvfn(n.X.Type(), n.Type())
 	if param == types.Txxx {

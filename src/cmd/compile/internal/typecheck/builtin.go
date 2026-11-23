@@ -249,6 +249,8 @@ var runtimeDecls = [...]struct {
 	{"asanwrite", funcTag, 164},
 	{"checkptrAlignment", funcTag, 166},
 	{"checkptrArithmetic", funcTag, 168},
+	{"checkptrPartial", funcTag, 122},
+	{"checkptrView", funcTag, 166},
 	{"exposeptr", funcTag, 122},
 	{"libfuzzerTraceCmp1", funcTag, 169},
 	{"libfuzzerTraceCmp2", funcTag, 170},

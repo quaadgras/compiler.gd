@@ -99,6 +99,8 @@ func TestWriteThroughHeader(t *testing.T) {
 	})
 
 	t.Run("String", func(t *testing.T) {
+		t.Skip("gd: a view of a string as its words is a fatal error (doc/gd/unsafe.md)")
+
 		s := "Hello, checkptr!"
 
 		var alias string

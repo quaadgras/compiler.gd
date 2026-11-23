@@ -140,13 +140,7 @@ func checkSlice(desc string, f func() []byte, xbase, xlen, xcap int) {
 	x := f()
 
 	arrayBase := uintptr(unsafe.Pointer(array))
-	raw := *(*[3]uintptr)(unsafe.Pointer(&x))
-	base, len, cap := raw[0] - arrayBase, raw[1], raw[2]
-	if unsafe.Sizeof(x) == 16 {
-		// gd: the length and the capacity are uint32s (doc/gd/slice16.md).
-		w := (*struct{ p uintptr; l, c uint32 })(unsafe.Pointer(&x))
-		len, cap = uintptr(w.l), uintptr(w.c)
-	}
+	base, len, cap := uintptr(unsafe.Pointer(unsafe.SliceData(x))) - arrayBase, uintptr(len(x)), uintptr(cap(x))
 	if xbase < 0 {
 		notOK()
 		println(desc, "=", base, len, cap, "want panic")

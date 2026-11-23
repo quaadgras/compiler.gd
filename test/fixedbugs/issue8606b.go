@@ -1,4 +1,4 @@
-// run
+// run -gcflags=-d=checkptr=0
 
 //go:build linux || darwin
 

@@ -5,6 +5,7 @@
 package runtime
 
 import (
+	"internal/abi"
 	"internal/goarch"
 	"internal/runtime/atomic"
 	"internal/runtime/gc"
@@ -40,8 +41,16 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 		if end := uintptr(p) + size; end > base+s.elemsize || end < uintptr(p) {
 			throw("checkptr: converted pointer straddles multiple allocations")
 		}
-		if elem.Pointers() && !checkptrSameType(s, base, uintptr(p), elem) {
+		typ, tbase := checkptrObjectType(s, base)
+		if typ == elem && size != 0 && uintptr(p) >= tbase && (uintptr(p)-tbase)%elem.Size_ == 0 {
+			// A pointer to what the object was allocated as.
+			return
+		}
+		if elem.Pointers() {
 			checkptrPointers(s, uintptr(p), elem, n)
+		}
+		if typ != nil {
+			checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, size)
 		}
 		return
 	}
@@ -59,25 +68,213 @@ func checkptrAlignment(p unsafe.Pointer, elem *_type, n uintptr) {
 	}
 }
 
-// checkptrSameType reports whether p, in the object at base of the span s,
-// is known to point to a value of type elem, or to one of an array of them,
-// without looking at where the object's pointers are: the object was
-// allocated as elems and p is at one. It is what a pointer converted to
-// unsafe.Pointer and back points to.
-func checkptrSameType(s *mspan, base, p uintptr, elem *_type) bool {
+// checkptrObjectType returns the type that the object at base of the span
+// s records, and where the values of that type begin, or nil if it has only
+// a bitmap, or no pointers.
+func checkptrObjectType(s *mspan, base uintptr) (*_type, uintptr) {
 	if s.spanclass.noscan() || heapBitsInSpan(s.elemsize) {
-		// No pointers, or no type: the object has only a bitmap.
-		return false
+		return nil, 0
 	}
-	var typ *_type
+	if s.isFree(s.objIndex(base)) {
+		// A pointer kept from before: its first word is not a type.
+		return nil, 0
+	}
 	if s.spanclass.sizeclass() != 0 {
 		// The object begins with its type.
-		typ = *(**_type)(unsafe.Pointer(base))
-		base += gc.MallocHeaderSize
-	} else {
-		typ = (*_type)(atomic.Loadp(unsafe.Pointer(&s.largeType)))
+		return *(**_type)(unsafe.Pointer(base)), base + gc.MallocHeaderSize
 	}
-	return typ == elem && p >= base && (p-base)%elem.Size_ == 0
+	return (*_type)(atomic.Loadp(unsafe.Pointer(&s.largeType))), base
+}
+
+// checkptrView is the check of (*[n]elem)(p) for a type that needs no
+// other: its alignment is 1, and p is not known to the compiler to point
+// to anything in particular.
+func checkptrView(p unsafe.Pointer, elem *_type, n uintptr) {
+	if p == nil {
+		return
+	}
+	s := spanOfHeap(uintptr(p))
+	if s == nil || s.isUserArenaChunk {
+		return
+	}
+	base := s.base() + s.objIndex(uintptr(p))*s.elemsize
+	if typ, tbase := checkptrObjectType(s, base); typ != nil {
+		checkptrWhole(typ, tbase, base+s.elemsize, uintptr(p), elem, n*elem.Size_)
+	}
+}
+
+// checkptrPartial is called where the compiler knows that a conversion
+// makes a view of part of a string, a slice or an interface, if p is not
+// nil: a nil pointer views nothing. It cannot move the stack, as exposeptr
+// cannot, since it runs between the conversions of a call's arguments.
+//
+//go:nosplit
+func checkptrPartial(p unsafe.Pointer) {
+	if p != nil {
+		throw(checkptrPartialMsg)
+	}
+}
+
+const checkptrPartialMsg = "checkptr: converted pointer is a partial view of a string, a slice or an interface"
+
+// The state of a word of memory, for the check that a view of it does not
+// take part of a string, a slice or an interface. A view is whole if each
+// of its words has the state the memory has where the memory holds one.
+const (
+	wordPlain      = 0b00 // not part of a whole value
+	wordSliceFirst = 0b01 // the first word of a slice
+	wordCont       = 0b10 // a later word of a whole value
+	wordFirst      = 0b11 // the first word of a string, an interface or a whole struct
+)
+
+// wordState returns the state of the word at offset off of a value of
+// type t.
+func wordState(t *_type, off uintptr) uint8 {
+	for {
+		if !t.Pointers() {
+			return wordPlain
+		}
+		switch t.Kind() {
+		case abi.String, abi.Interface:
+			if off == 0 {
+				return wordFirst
+			}
+			return wordCont
+		case abi.Slice:
+			if off == 0 {
+				return wordSliceFirst
+			}
+			return wordCont
+		case abi.Array:
+			a := (*arraytype)(unsafe.Pointer(t))
+			if a.Len == 0 || a.Elem.Size_ == 0 {
+				return wordPlain
+			}
+			off %= a.Elem.Size_
+			t = a.Elem
+		case abi.Struct:
+			if isWholeStruct(t) || isABIInterface(t) {
+				if off == 0 {
+					return wordFirst
+				}
+				return wordCont
+			}
+			st := (*structtype)(unsafe.Pointer(t))
+			var in *abi.StructField
+			for i := range st.Fields {
+				f := &st.Fields[i]
+				if f.Typ.Size_ != 0 && f.Offset <= off && off < f.Offset+f.Typ.Size_ {
+					in = f
+					break
+				}
+			}
+			if in == nil {
+				return wordPlain
+			}
+			off -= in.Offset
+			t = in.Typ
+		default:
+			return wordPlain
+		}
+	}
+}
+
+// isABIInterface reports whether the struct type t is internal/abi's
+// description of an interface, which is the same words.
+func isABIInterface(t *_type) bool {
+	if t.TFlag&abi.TFlagNamed == 0 {
+		return false
+	}
+	rt := toRType(t)
+	if rt.pkgpath() != "internal/abi" {
+		return false
+	}
+	switch rt.name() {
+	case "EmptyInterface", "NonEmptyInterface", "CommonInterface":
+		return true
+	}
+	return false
+}
+
+// wholeStringAt reports whether a string begins at offset off of a value
+// of type t.
+func wholeStringAt(t *_type, off uintptr) bool {
+	for {
+		switch t.Kind() {
+		case abi.String:
+			return off == 0
+		case abi.Array:
+			a := (*arraytype)(unsafe.Pointer(t))
+			if a.Len == 0 || a.Elem.Size_ == 0 {
+				return false
+			}
+			off %= a.Elem.Size_
+			t = a.Elem
+		case abi.Struct:
+			st := (*structtype)(unsafe.Pointer(t))
+			var in *abi.StructField
+			for i := range st.Fields {
+				f := &st.Fields[i]
+				if f.Typ.Size_ != 0 && f.Offset <= off && off < f.Offset+f.Typ.Size_ {
+					in = f
+					break
+				}
+			}
+			if in == nil {
+				return false
+			}
+			off -= in.Offset
+			t = in.Typ
+		default:
+			return false
+		}
+	}
+}
+
+// checkptrWhole checks that the view of size bytes at p, of values of type
+// elem, is not of part of a string, a slice or an interface of the object
+// that ends at limit, which holds values of type typ from tbase on.
+//
+// It goes by words: where the object has a whole value, the view must
+// have the same state, and the word after the view must not be the rest
+// of a value that the view began.
+func checkptrWhole(typ *_type, tbase, limit, p uintptr, elem *_type, size uintptr) {
+	if size == 0 || p < tbase || tearKind(typ) == 0 {
+		return
+	}
+	const word = goarch.PtrSize
+	lo := p - tbase
+	aligned := lo&(word-1) == 0
+	end := alignUp(lo+size, word)
+	excused := ^uintptr(0) // the third word of a slice viewed as a string
+	for w := lo &^ (word - 1); w < end; w += word {
+		have := wordState(typ, w%typ.Size_)
+		var want uint8
+		if aligned {
+			want = wordState(elem, (w-lo)%elem.Size_)
+		}
+		if have == want || have == wordPlain || w == excused && want == wordPlain {
+			continue
+		}
+		// Where a slice is three words, a string is its first two,
+		// and the one may be viewed as the other.
+		if !abi.SlicePacked && aligned {
+			if have == wordSliceFirst && want == wordFirst && wholeStringAt(elem, (w-lo)%elem.Size_) {
+				excused = w + 2*word
+				continue
+			}
+			if have == wordFirst && want == wordSliceFirst && wholeStringAt(typ, w%typ.Size_) {
+				continue
+			}
+		}
+		throw(checkptrPartialMsg)
+	}
+	if end == excused {
+		end += word
+	}
+	if tbase+end < limit && wordState(typ, end%typ.Size_) == wordCont {
+		throw(checkptrPartialMsg)
+	}
 }
 
 // checkptrSameObject reports whether a, in an object of the span s, and v

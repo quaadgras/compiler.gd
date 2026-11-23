@@ -150,6 +150,8 @@ func InitConfig(gd *base.Invocation) {
 	ir.Syms(gd).
 		CheckPtrAlignment = typecheck.LookupRuntimeFunc(gd, "checkptrAlignment")
 	ir.Syms(gd).
+		CheckPtrView = typecheck.LookupRuntimeFunc(gd, "checkptrView")
+	ir.Syms(gd).
 		Deferproc = typecheck.LookupRuntimeFunc(gd, "deferproc")
 	ir.Syms(gd).
 		Deferprocat = typecheck.LookupRuntimeFunc(gd, "deferprocat")
@@ -1193,9 +1195,16 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 		elem, rtypeExpr = elem.Elem(), n.ElemElemRType
 	}
 	size := elem.Size()
-	// Casting from larger type to smaller one is ok, so for smallest type, do nothing.
+	// Casting from larger type to smaller one is ok, so for smallest type,
+	// there is no check of alignment or bounds. gd: there is still the
+	// check that it is not part of a string, a slice or an interface,
+	// unless the compiler knows what it points into (walk's markWholeViews).
+	fn := ir.Syms(s.gd).CheckPtrAlignment
 	if elem.Alignment() == 1 && (size == 0 || size == 1 || count == nil) {
-		return
+		if size == 0 || n.View != ir.ViewUnknown {
+			return
+		}
+		fn = ir.Syms(s.gd).CheckPtrView
 	}
 	if count == nil {
 		count = s.constInt(types.Types[types.TUINTPTR], 1)
@@ -1209,7 +1218,7 @@ func (s *state) checkPtrAlignment(n *ir.ConvExpr, v *ssa.Value, count *ssa.Value
 	} else {
 		rtype = s.reflectType(elem)
 	}
-	s.rtcall(ir.Syms(s.gd).CheckPtrAlignment, true, nil, v, rtype, count)
+	s.rtcall(fn, true, nil, v, rtype, count)
 }
 
 // reflectType returns an SSA value representing a pointer to typ's

@@ -883,13 +883,13 @@ func testRuntimeTypeAttr(t *testing.T, flags string) {
 	const prog = `
 package main
 
-import "unsafe"
+import "reflect"
 
 type X struct{ _ int }
 
 func main() {
 	var x interface{} = &X{}
-	p := *(*uintptr)(unsafe.Pointer(&x))
+	p := reflect.ValueOf(reflect.TypeOf(x)).Pointer()
 	print(p)
 	f(nil)
 }

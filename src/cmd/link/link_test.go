@@ -2243,7 +2243,7 @@ package main
 
 import (
 	"fmt"
-	"unsafe"
+	"reflect"
 )
 
 type MyInt int
@@ -2262,9 +2262,8 @@ var global int
 func main() {
 	fmt.Printf("global %#x\n", &global)
 	for _, v := range vals {
-		// Unsafe assumption: the first word of a value
-		// of type any is the type descriptor.
-		td := *(*uintptr)(unsafe.Pointer(&v))
+		// The address of the type descriptor.
+		td := reflect.ValueOf(reflect.TypeOf(v)).Pointer()
 		fmt.Printf("%#x\n", td)
 	}
 }

@@ -181,7 +181,10 @@ func (v *Value) Store(val any) {
 // ifaceEq reports whether two iface headers (32 bytes, 24 with 4-byte
 // words) are bytewise identical. Reads them as uint64s so the compiler
 // turns this into a few cmp+jne pairs with no branches in the equal
-// case.
+// case. x and y are copies in its own frame, which no other goroutine can
+// reach, so this view of their words cannot tear.
+//
+//go:nocheckptr
 func ifaceEq(x, y abi.EmptyInterface) bool {
 	const n = unsafe.Sizeof(abi.EmptyInterface{}) / 8
 	return *(*[n]uint64)(unsafe.Pointer(&x)) == *(*[n]uint64)(unsafe.Pointer(&y))

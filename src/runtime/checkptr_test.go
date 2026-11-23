@@ -71,6 +71,38 @@ func TestCheckPtr(t *testing.T) {
 	}
 }
 
+// TestCheckPtrViews runs the views of strings, slices and interfaces of
+// testprog's checkptr_whole.go, with the checks as they are by default.
+func TestCheckPtrViews(t *testing.T) {
+	t.Parallel()
+	testenv.MustHaveGoRun(t)
+
+	exe, err := buildTestProg(t, "testprog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := testenv.CleanCmdEnv(exec.Command(exe, "CheckPtrViewList")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v\n%s", err, list)
+	}
+	const fatal = "fatal error: checkptr: converted pointer is a partial view of a string, a slice or an interface\n"
+	for _, name := range strings.Fields(string(list)) {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := testenv.CleanCmdEnv(exec.Command(exe, name)).CombinedOutput()
+			if strings.HasPrefix(name, "CheckPtrPartial") {
+				if !strings.HasPrefix(string(got), fatal) {
+					t.Errorf("output:\n%s\n\nwant output starting with: %s", got, fatal)
+				}
+				return
+			}
+			if err != nil || len(got) > 0 {
+				t.Errorf("%v, output:\n%s\nwant no output", err, got)
+			}
+		})
+	}
+}
+
 func TestCheckPtr2(t *testing.T) {
 	// This test requires rebuilding packages with -d=checkptr=2,
 	// so it's somewhat slow.

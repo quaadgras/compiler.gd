@@ -188,7 +188,7 @@ func adjStringChunk() (string, *objtype) {
 	for {
 		s := string(b)
 		t := new(objtype)
-		p := *(*uintptr)(unsafe.Pointer(&s))
+		p := uintptr(unsafe.Pointer(unsafe.StringData(s)))
 		q := uintptr(unsafe.Pointer(t))
 		if p+objsize == q {
 			return s, t

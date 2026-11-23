@@ -26,8 +26,8 @@ func notOK() {
 }
 
 func checkString(desc, s string) {
-	p1 := *(*uintptr)(unsafe.Pointer(&s))
-	p2 := *(*uintptr)(unsafe.Pointer(&hello))
+	p1 := uintptr(unsafe.Pointer(unsafe.StringData(s)))
+	p2 := uintptr(unsafe.Pointer(unsafe.StringData(hello)))
 	if p1 == 0 && len(s) == 0 {
 		// gd: an empty string is canonical, with a nil word 0, so it
 		// cannot point past the end of hello either.
@@ -40,16 +40,16 @@ func checkString(desc, s string) {
 }
 
 func checkBytes(desc string, s []byte) {
-	p1 := *(*uintptr)(unsafe.Pointer(&s))
-	p2 := *(*uintptr)(unsafe.Pointer(&bytes))
+	p1 := uintptr(unsafe.Pointer(unsafe.SliceData(s)))
+	p2 := uintptr(unsafe.Pointer(unsafe.SliceData(bytes)))
 	if p1-p2 >= 5 {
 		println("byte slice", desc, "has invalid base")
 	}
 }
 
 func checkInts(desc string, s []int32) {
-	p1 := *(*uintptr)(unsafe.Pointer(&s))
-	p2 := *(*uintptr)(unsafe.Pointer(&ints))
+	p1 := uintptr(unsafe.Pointer(unsafe.SliceData(s)))
+	p2 := uintptr(unsafe.Pointer(unsafe.SliceData(ints)))
 	if p1-p2 >= 5*4 {
 		println("int slice", desc, "has invalid base")
 	}

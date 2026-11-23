@@ -29,7 +29,7 @@ func Walk(gd *base.Invocation, fn *ir.Func) {
 	// hang them off the Invocation for the duration of this fn.
 	// (At some point, it might be worthwhile to have a walkState structure
 	// that gets passed everywhere where things like this can go.)
-	gd.WalkStaticValues = analyzePreWalk(fn)
+	gd.WalkStaticValues = analyzePreWalk(gd, fn)
 	defer func() { gd.WalkStaticValues = nil }()
 
 	errorsBefore := gd.Errors()
@@ -509,9 +509,10 @@ func curWalkAnalysis(gd *base.Invocation) *walkAnalysis {
 // ir.StaticValue in the middle of walk because they don't currently
 // handle transformed assignments (e.g., will complain about
 // 'RHS == nil'). So we build these maps before walk begins.
-func analyzePreWalk(fn *ir.Func) *walkAnalysis {
+func analyzePreWalk(gd *base.Invocation, fn *ir.Func) *walkAnalysis {
 	ro := &ir.ReassignOracle{}
 	ro.Init(fn)
+	markWholeViews(gd, fn, ro)
 	sv := make(map[ir.Node]ir.Node)
 	scs := make(map[*ir.Name]*types.Type)
 	ir.Visit(fn, func(n ir.Node) {

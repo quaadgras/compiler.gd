@@ -35,6 +35,7 @@ import "C"
 
 import (
 	"errors"
+	"internal/abi"
 	"sync"
 	"unsafe"
 )
@@ -111,11 +112,11 @@ func open(name string) (*Plugin, error) {
 		if p == nil {
 			return nil, errors.New(`plugin.Open("` + name + `"): could not find symbol ` + symName + `: ` + C.GoString(cErr))
 		}
-		valp := (*[2]unsafe.Pointer)(unsafe.Pointer(&sym))
+		valp := (*abi.EmptyInterface)(unsafe.Pointer(&sym))
 		if isFunc {
-			(*valp)[1] = unsafe.Pointer(&p)
+			valp.Data = unsafe.Pointer(&p)
 		} else {
-			(*valp)[1] = p
+			valp.Data = p
 		}
 		// we can't add to syms during iteration as we'll end up processing
 		// some symbols twice with the inability to tell if the symbol is a function

@@ -25,8 +25,7 @@ func runtimeString(s string) string {
 }
 
 func stringInline(s string) bool {
-	w0 := *(*uintptr)(unsafe.Pointer(&s))
-	return unsafe.Sizeof(w0) == 8 && unsafe.Sizeof(s) == 16 && uint64(w0)>>63 != 0
+	return unsafe.Sizeof(uintptr(0)) == 8 && unsafe.Sizeof(s) == 16 && runtime.StringWord0(s)>>63 != 0
 }
 
 func TestStringForms(t *testing.T) {

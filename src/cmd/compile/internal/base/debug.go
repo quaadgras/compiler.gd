@@ -20,6 +20,7 @@ type DebugFlags struct {
 	AstDump               string `help:"for specified function/method, dump AST/IR at interesting points in compilation, to file pkg.func.ast. Use leading ~ for regular expression match."`
 	Checkptr              int    `help:"instrument unsafe pointer conversions\n0: instrumentation disabled\n1: conversions involving unsafe.Pointer are instrumented\n2: conversions to unsafe.Pointer force heap allocation" concurrent:"ok"`
 	Closure               int    `help:"print information about closure compilation"`
+	UnsafeWhole           int    `help:"report conversions that make a partial view of a string, slice or interface, instead of failing at run time\n1: report them\n2: also report those whose source is not known"`
 	CompressInstructions  int    `help:"use compressed instructions when possible (if supported by architecture)" concurrent:"ok"`
 	Converthash           string `help:"hash value for use in debugging changes to platform-dependent float-to-[u]int conversion" concurrent:"ok"`
 	Defer                 int    `help:"print information about defer compilation"`

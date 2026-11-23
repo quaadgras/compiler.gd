@@ -286,7 +286,7 @@ var ptrTests = []ptrTest{
 		    typedef struct { const char *p; ptrdiff_t h; ptrdiff_t n; } gostring23;
 		    gostring23 f23(gostring23 s) { return s; }`,
 		imports: []string{"unsafe"},
-		body:    `s := "a"; r := C.f23(*(*C.gostring23)(unsafe.Pointer(&s))); if *(*string)(unsafe.Pointer(&r)) != s { panic(r) }`,
+		body:    `s := "a"; r := C.f23(C.gostring23{p: (*C.char)(unsafe.Pointer(unsafe.StringData(s))), n: C.ptrdiff_t(len(s))}); if unsafe.String((*byte)(unsafe.Pointer(r.p)), int(r.n)) != s { panic(r) }`,
 	},
 	{
 		// Passing a slice of Go strings fails.

@@ -10,7 +10,6 @@
 package main
 
 import (
-	"reflect"
 	"unsafe"
 )
 
@@ -20,10 +19,8 @@ func main() {
 		large    = string(buf)
 		sub      = large[10:12]
 		subcopy  = string([]byte(sub))
-		subh     = *(*reflect.StringHeader)(unsafe.Pointer(&sub))
-		subcopyh = *(*reflect.StringHeader)(unsafe.Pointer(&subcopy))
 	)
-	if subh.Data == subcopyh.Data {
+	if unsafe.StringData(sub) == unsafe.StringData(subcopy) {
 		panic("sub and subcopy have the same underlying array")
 	}
 }

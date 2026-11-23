@@ -2225,3 +2225,9 @@ func CountLocalAllocs(f func()) uint64 {
 	debug.sharestats = old
 	return n
 }
+
+// StringWord0 returns the first word of s, which has its top bit set if s
+// keeps its bytes in its words (doc/gd/sso-string.md).
+func StringWord0(s string) uint64 {
+	return uint64(uintptr(stringStructOf(&s).str))
+}

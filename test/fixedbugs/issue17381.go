@@ -10,8 +10,8 @@
 package main
 
 import (
+	"reflect"
 	"runtime"
-	"unsafe"
 )
 
 func main() {
@@ -34,8 +34,7 @@ func main() {
 }
 
 func funcPC(f interface{}) uintptr {
-	var ptr uintptr
-	return **(**uintptr)(unsafe.Pointer(uintptr(unsafe.Pointer(&f)) + unsafe.Sizeof(ptr)))
+	return reflect.ValueOf(f).Pointer()
 }
 
 //go:noinline

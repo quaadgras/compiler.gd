@@ -359,7 +359,21 @@ type ConvExpr struct {
 	// expressions.
 	ElemRType     Node `mknode:"-"`
 	ElemElemRType Node `mknode:"-"`
+
+	// View is what the compiler knows of a conversion from
+	// unsafe.Pointer to a pointer: see walk's markWholeViews.
+	View ViewKind
 }
+
+// A ViewKind says whether a conversion to a pointer views a string, a
+// slice or an interface whole (doc/gd/unsafe.md).
+type ViewKind uint8
+
+const (
+	ViewUnknown ViewKind = iota // what it points into is not known
+	ViewWhole                   // known, and it views them whole
+	ViewPartial                 // known, and it views part of one: it fails at run time
+)
 
 func NewConvExpr(gd *base.Invocation, pos src.XPos, op Op, typ *types.Type, x Node) *ConvExpr {
 	n := &ConvExpr{X: x}

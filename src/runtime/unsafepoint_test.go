@@ -158,11 +158,8 @@ func TestUnsafePointTailCall(t *testing.T) {
 
 	// The itab's first method slot holds the generated wrapper for
 	// tailCallOuter.M, which is the function containing the tail call.
-	iface := (*struct {
-		tab  *abi.ITab
-		data unsafe.Pointer
-	})(unsafe.Pointer(&tailCallValue))
-	f := runtime.FuncForPC(iface.tab.Fun[0])
+	iface := (*abi.NonEmptyInterface)(unsafe.Pointer(&tailCallValue))
+	f := runtime.FuncForPC(iface.ITab.Fun[0])
 	if f == nil {
 		t.Fatal("no func for the tailCallOuter.M wrapper")
 	}

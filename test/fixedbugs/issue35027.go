@@ -15,7 +15,7 @@ var s []int
 
 func main() {
 	s = []int{42}
-	h := (*reflect.SliceHeader)(unsafe.Pointer(&s))
+	h := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(unsafe.SliceData(s))), Len: len(s), Cap: cap(s)}
 	x := *(*int)(unsafe.Pointer(h.Data))
 	if x != 42 {
 		panic(x)

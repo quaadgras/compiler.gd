@@ -5,6 +5,7 @@
 package sync
 
 import (
+	"internal/abi"
 	"internal/goexperiment"
 	"internal/race"
 	rtatomic "internal/runtime/atomic"
@@ -100,7 +101,7 @@ var poolRaceHash [128]uint64
 // Instead, we hash the pointer to get an index into poolRaceHash.
 // See discussion on golang.org/cl/31589.
 func poolRaceAddr(x any) unsafe.Pointer {
-	ptr := uintptr((*[2]unsafe.Pointer)(unsafe.Pointer(&x))[1])
+	ptr := uintptr((*abi.EmptyInterface)(unsafe.Pointer(&x)).Data)
 	h := uint32((uint64(uint32(ptr)) * 0x85ebca6b) >> 16)
 	return unsafe.Pointer(&poolRaceHash[h%uint32(len(poolRaceHash))])
 }

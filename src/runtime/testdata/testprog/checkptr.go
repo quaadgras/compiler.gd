@@ -175,16 +175,10 @@ func CheckPtrPointersOK() {
 	sink2 = (*[2]pair2)(unsafe.Pointer(&x[2]))
 	sink2 = (*[2]uintptr)(unsafe.Pointer(&x[3]))
 	sink2 = (**int)(unsafe.Pointer(&x[3].p))
-	s := []string{"a", "b"}
-	checkptrSink = s
-	sink2 = (*[]byte)(unsafe.Pointer(&s[1]))
 	// A pointer over an integer that is not an address in the heap,
 	// as the first word of an interface is.
 	x[0].n = 12345
 	sink2 = (*checkptrRiap)(unsafe.Pointer(&x[0]))
-	var e any = x
-	checkptrSink = &e
-	sink2 = *(*unsafe.Pointer)(unsafe.Pointer(&e))
 }
 
 //go:noinline
