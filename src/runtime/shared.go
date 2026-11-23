@@ -916,8 +916,12 @@ func tearKind(t *_type) uintptr {
 		}
 		st := (*structtype)(unsafe.Pointer(t))
 		var k uintptr
-		for i := range st.Fields {
-			k |= tearKind(st.Fields[i].Typ)
+		if isWholeStruct(t) {
+			k = tearAny | tearIface
+		} else {
+			for i := range st.Fields {
+				k |= tearKind(st.Fields[i].Typ)
+			}
 		}
 		atomic.Storeuintptr(c, uintptr(unsafe.Pointer(t))|k)
 		return k
@@ -926,6 +930,19 @@ func tearKind(t *_type) uintptr {
 }
 
 var tearableCache [256]uintptr
+
+// isWholeStruct reports whether the struct type t is one whose words mean
+// nothing apart, loaded and stored whole as an interface is, under the
+// same locks: reflect.Value, whose type, pointer, inline payload and flags
+// must be those of one value. As cmd/compile/internal/types's
+// IsWholeStruct.
+func isWholeStruct(t *_type) bool {
+	if t.TFlag&abi.TFlagNamed == 0 {
+		return false
+	}
+	rt := toRType(t)
+	return rt.name() == "Value" && rt.pkgpath() == "reflect"
+}
 
 // tearable reports whether a value of type t holds a slice, a string or
 // an interface.

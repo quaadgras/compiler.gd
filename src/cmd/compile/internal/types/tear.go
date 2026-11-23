@@ -4,12 +4,25 @@
 
 package types
 
+// IsWholeStruct reports whether t is a struct whose words mean nothing
+// apart, and which is loaded and stored whole as an interface is:
+// reflect.Value, whose type, pointer, inline payload and flags must be
+// those of one value (doc/gd/publication-point.md). As runtime's
+// isWholeStruct.
+func IsWholeStruct(t *Type) bool {
+	if !t.IsStruct() {
+		return false
+	}
+	s := t.Sym()
+	return s != nil && s.Name == "Value" && s.Pkg != nil && s.Pkg.Path == "reflect"
+}
+
 // HasTearable reports whether a value of type t holds a slice, a string
 // or an interface: values of more than one word, which are loaded and
 // stored whole where goroutines may race on them (runtime/shared.go).
 func HasTearable(t *Type) bool {
 	switch {
-	case t.IsSlice(), t.IsString(), t.IsInterface():
+	case t.IsSlice(), t.IsString(), t.IsInterface(), IsWholeStruct(t):
 		return true
 	case t.IsArray():
 		return t.NumElem() > 0 && HasTearable(t.Elem())
@@ -23,10 +36,11 @@ func HasTearable(t *Type) bool {
 	return false
 }
 
-// HasIface reports whether a value of type t holds an interface.
+// HasIface reports whether a value of type t holds an interface, or a
+// struct that goes whole as one does (IsWholeStruct).
 func HasIface(t *Type) bool {
 	switch {
-	case t.IsInterface():
+	case t.IsInterface(), IsWholeStruct(t):
 		return true
 	case t.IsArray():
 		return t.NumElem() > 0 && HasIface(t.Elem())

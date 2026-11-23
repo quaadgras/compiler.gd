@@ -446,6 +446,8 @@ func (s *state) shareQuiet(s1, s2 *ssa.Value) *ssa.Value {
 // src.
 func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 	switch {
+	case types.IsWholeStruct(t):
+		return s.shareLoadWhole(t, src)
 	case t.IsStruct():
 		// Each field is whole; the struct need not be.
 		// (The loads end blocks: the struct is made after them.)
@@ -501,6 +503,46 @@ func (s *state) shareLoad(t *types.Type, src *ssa.Value) *ssa.Value {
 		fn = ir.Syms(s.gd).ShareLoadIface
 	}
 	s.vars[shareVar] = s.rtcall(fn, true, []*types.Type{t}, src)[0]
+	s.endBlock().AddEdgeTo(bDone)
+
+	s.startBlock(bDone)
+	v = s.variable(shareVar, t)
+	delete(s.vars, shareVar)
+	return v
+}
+
+// shareLoadWhole is shareLoad for a struct that goes whole
+// (types.IsWholeStruct), under the sequence lock of the block where it
+// starts, which every store of it holds, as for an interface.
+func (s *state) shareLoadWhole(t *types.Type, src *ssa.Value) *ssa.Value {
+	shareVar := ssaMarker("share")
+	seq := s.shareSeqAddr(src)
+	s1 := s.shareSeq(seq)
+	v := s.rawLoad(t, src)
+	s.shareLoaded()
+	s2 := s.shareSeq(seq)
+	quiet := s.shareQuiet(s1, s2)
+
+	bSlow := s.f.NewBlock(ssa.BlockPlain)
+	bDone := s.f.NewBlock(ssa.BlockPlain)
+	s.vars[shareVar] = v
+	b := s.endBlock()
+	b.Kind = ssa.BlockIf
+	b.SetControl(quiet)
+	b.Likely = ssa.BranchLikely
+	b.AddEdgeTo(bDone)
+	b.AddEdgeTo(bSlow)
+
+	// A store was in progress: the runtime waits for it. (The temporary
+	// is live across its call, so it holds a value before.)
+	s.startBlock(bSlow)
+	tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, t)
+	tmp.SetAddrtaken(true)
+	s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+	tmpAddr := s.addr(tmp)
+	s.rawZero(t, tmpAddr)
+	s.rtcall(ir.Syms(s.gd).ShareLoadMem, true, nil, tmpAddr, s.nilCheck(src), s.constInt(types.Types[types.TUINTPTR], t.Size()))
+	s.vars[shareVar] = s.rawLoad(t, tmpAddr)
 	s.endBlock().AddEdgeTo(bDone)
 
 	s.startBlock(bDone)
@@ -570,8 +612,10 @@ func (s *state) shareLoadMem(t *types.Type, dst, src *ssa.Value) {
 	s.shareLoaded()
 	s2 := s.shareSeq(seq)
 	quiet := s.shareQuiet(s1, s2)
-	if t.Size() > 1 {
-		// One lock was checked: the value must be in one block.
+	if t.Size() > 1 && !types.IsWholeStruct(t) {
+		// One lock was checked: the value must be in one block. (Not
+		// for one that goes whole: every store holds the lock of the
+		// block where it starts.)
 		p := s.newValue2(ssa.OpConvert, uptr, src, s.mem())
 		var onePage *ssa.Value
 		if s.config.PtrSize == 8 {
@@ -948,6 +992,8 @@ func (s *state) shareStoreParts(t *types.Type, left, right *ssa.Value, leftIsStm
 	switch {
 	case t.IsInterface():
 		s.shareStoreIface(t, left, right, leftIsStmt)
+	case types.IsWholeStruct(t):
+		s.shareStoreWhole(t, left, right, leftIsStmt)
 	case t.IsString():
 		s.shareStoreString(left, right)
 	case t.IsSlice():
@@ -999,10 +1045,39 @@ func ifaceLockInline(f sys.ArchFamily) bool {
 // same code with nothing between that can move the stack: an address in
 // the stack that is not known to be one is locked and unlocked alike.
 func (s *state) shareStoreIface(t *types.Type, left, right *ssa.Value, leftIsStmt bool) {
-	if !ifaceLockInline(s.gd.Ctxt.Arch.Family) {
+	slow := func(left *ssa.Value) {
 		s.rtcall(ir.Syms(s.gd).IfaceStore, true, nil, left, right)
+	}
+	if !ifaceLockInline(s.gd.Ctxt.Arch.Family) {
+		slow(left)
 		return
 	}
+	s.shareStoreLocked(t, left, right, leftIsStmt, slow)
+}
+
+// shareStoreWhole stores a struct that goes whole (types.IsWholeStruct)
+// as shareStoreIface stores an interface. If another store holds the lock,
+// or the target takes none inline, the runtime copies it from the stack.
+func (s *state) shareStoreWhole(t *types.Type, left, right *ssa.Value, leftIsStmt bool) {
+	slow := func(left *ssa.Value) {
+		tmp := typecheck.TempAt(s.gd, s.peekPos(), s.curfn, t)
+		tmp.SetAddrtaken(true)
+		s.vars[memVar] = s.newValue1A(ssa.OpVarDef, types.TypeMem, tmp, s.mem())
+		tmpAddr := s.addr(tmp)
+		s.rawStoreType(t, tmpAddr, right, 0, false)
+		s.rtcall(ir.Syms(s.gd).ShareTypedmemmove, true, nil, s.reflectType(t), left, tmpAddr)
+		s.curfn.SetWBPos(s.gd, s.peekPos())
+	}
+	if !ifaceLockInline(s.gd.Ctxt.Arch.Family) {
+		slow(s.nilCheck(left))
+		return
+	}
+	s.shareStoreLocked(t, left, right, leftIsStmt, slow)
+}
+
+// shareStoreLocked is the store of shareStoreIface, with slow for when
+// another store holds the lock.
+func (s *state) shareStoreLocked(t *types.Type, left, right *ssa.Value, leftIsStmt bool, slow func(left *ssa.Value)) {
 	left = s.nilCheck(left)
 	u32 := types.Types[types.TUINT32]
 	seq := s.shareSeqAddr(left)
@@ -1040,7 +1115,7 @@ func (s *state) shareStoreIface(t *types.Type, left, right *ssa.Value, leftIsStm
 
 	// Another store holds the lock: the runtime waits for it.
 	s.startBlock(bSlow)
-	s.rtcall(ir.Syms(s.gd).IfaceStore, true, nil, left, right)
+	slow(left)
 	s.endBlock().AddEdgeTo(bDone)
 
 	s.startBlock(bDone)
