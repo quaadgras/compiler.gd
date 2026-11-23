@@ -133,9 +133,16 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 	if tearEnabled && copymem > 0 && et.Pointers() && (holdsIface(et) && !onCurStack(from) || isShared(from) && tearable(et)) {
 		// Another goroutine may be storing an element.
 		shareCopyFrom(et, to, from, copymem/et.Size_)
+		if !storesOrdered {
+			// The copy is seen before the slice is.
+			publicationBarrier()
+		}
 		return to
 	}
 	memmove(to, from, copymem)
+	if !storesOrdered && copymem > 0 {
+		publicationBarrier()
+	}
 
 	return to
 }
@@ -345,6 +352,11 @@ func growslicel(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, local
 	} else {
 		memmove(p, oldPtr, lenmem)
 	}
+	if !storesOrdered && lenmem > 0 {
+		// The copy, from the stack or whole from elsewhere, is seen
+		// before the new array is.
+		publicationBarrier()
+	}
 
 	return slice{p, newLen, newcap}
 }
@@ -514,6 +526,10 @@ func moveSlice(et *_type, old unsafe.Pointer, len, cap int) (unsafe.Pointer, int
 	new := mallocgc(capmem, et, true)
 	bulkBarrierPreWriteSrcOnly(uintptr(new), uintptr(old), capmem, et)
 	memmove(new, old, capmem)
+	if !storesOrdered {
+		// The copy of the stack's elements is seen before the slice is.
+		publicationBarrier()
+	}
 	return new, len, cap
 }
 
@@ -548,6 +564,10 @@ func moveSliceNoCap(et *_type, old unsafe.Pointer, len int) (unsafe.Pointer, int
 	new := mallocgc(cap*et.Size_, et, true)
 	bulkBarrierPreWriteSrcOnly(uintptr(new), uintptr(old), lenmem, et)
 	memmove(new, old, lenmem)
+	if !storesOrdered {
+		// (As in moveSlice.)
+		publicationBarrier()
+	}
 	return new, len, int(cap)
 }
 

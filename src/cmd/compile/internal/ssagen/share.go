@@ -84,6 +84,173 @@ func (s *state) tearGuard(t *types.Type, addr *ssa.Value) bool {
 	return s.tear && !s.dstLocal && !isStackAddr(addr) && s.tearable(t) && !s.unpublished(addr)
 }
 
+// tearGuardStore is tearGuard for a store. If it is not guarded because
+// the object is new, its plain stores must be seen before the pointer to
+// it is: see sealFills.
+func (s *state) tearGuardStore(t *types.Type, addr *ssa.Value) bool {
+	if !s.tear || s.dstLocal || isStackAddr(addr) || !s.tearable(t) {
+		return false
+	}
+	if !s.unpublished(addr) {
+		return true
+	}
+	if sealArch(s.gd.Ctxt.Arch.Family) {
+		if s.fills == nil {
+			s.fills = make(map[*ssa.Value]bool)
+		}
+		s.fills[addrBase(addr)] = true
+	}
+	return false
+}
+
+// sealArch reports whether stores may be seen out of order on the target
+// (a weakly ordered one with 8-byte words), so that a new object filled
+// with plain stores needs a barrier before anything can publish it.
+func sealArch(f sys.ArchFamily) bool {
+	switch f {
+	case sys.ARM64, sys.Loong64, sys.MIPS64, sys.PPC64, sys.RISCV64:
+		return true
+	}
+	return false
+}
+
+// addrBase returns the pointer that addr is an offset from.
+func addrBase(addr *ssa.Value) *ssa.Value {
+	for addr.Op == ssa.OpOffPtr || addr.Op == ssa.OpAddPtr || addr.Op == ssa.OpPtrIndex || addr.Op == ssa.OpCopy || addr.Op == ssa.OpNilCheck {
+		addr = addr.Args[0]
+	}
+	return addr
+}
+
+// sealFills adds one store barrier after the last plain store of each
+// straight-line fill of a new object (doc/gd/publication-point.md, §5).
+//
+// tearGuardStore let those stores be plain because nothing but stores in
+// the object and the stack happened since it was allocated. So every point
+// that could publish the object comes after the run of such stores ends,
+// and a barrier there orders all of them before it, wherever it is: a
+// store, a call, a return. A run is in one block, since unpublished stops
+// at the start of its block. It goes on across any store in the same
+// object, guarded or not, and across stores to the stack.
+//
+// It runs before the optimization passes, which may merge or remove the
+// stores: from here on the barrier is a memory operation that none of them
+// moves a store across.
+func (s *state) sealFills() {
+	if len(s.fills) == 0 {
+		return
+	}
+	seals := make(map[*ssa.Value]*ssa.Value) // last store of a run -> its barrier
+	seal := func(last *ssa.Value) {
+		seals[last] = last.Block.NewValue1(last.Pos, ssa.OpPubBarrier, types.TypeMem, last)
+	}
+	for _, b := range s.f.Blocks {
+		var open, last *ssa.Value // the object of the run, and its last store
+		for _, m := range s.blockMemChain(b) {
+			switch m.Op {
+			case ssa.OpStore, ssa.OpZero, ssa.OpMove:
+				dst := m.Args[0]
+				if isStackAddr(dst) {
+					continue
+				}
+				base := addrBase(dst)
+				if base == open {
+					last = m
+					continue
+				}
+				if open != nil {
+					seal(last)
+				}
+				open, last = nil, nil
+				if s.fills[base] {
+					open, last = base, m
+				}
+			case ssa.OpVarDef, ssa.OpVarLive:
+			default:
+				if open != nil {
+					seal(last)
+				}
+				open, last = nil, nil
+			}
+		}
+		if open != nil {
+			seal(last)
+		}
+	}
+	// What goes on from a sealed store goes on from its barrier. (A load
+	// may stay before the barrier: it sees the goroutine's own stores
+	// either way, and is forwarded from them.)
+	for _, b := range s.f.Blocks {
+		for _, v := range b.Values {
+			if v.Op == ssa.OpPubBarrier && seals[v.Args[0]] == v {
+				continue
+			}
+			if !v.Type.IsMemory() && !v.Type.IsTuple() && !v.Type.IsResults() {
+				continue
+			}
+			for i, a := range v.Args {
+				if r := seals[a]; r != nil {
+					v.SetArg(i, r)
+				}
+			}
+		}
+		for i, c := range b.ControlValues() {
+			if r := seals[c]; r != nil {
+				b.ReplaceControl(i, r)
+			}
+		}
+	}
+}
+
+// blockMemChain returns the memory values of b in the order they happen.
+func (s *state) blockMemChain(b *ssa.Block) []*ssa.Value {
+	prev := func(m *ssa.Value) *ssa.Value {
+		switch m.Op {
+		case ssa.OpPhi:
+			return nil
+		case ssa.OpSelectN, ssa.OpSelect0, ssa.OpSelect1:
+			// The memory of a call, which is one of its results, or
+			// of an atomic operation, which is half of a tuple.
+			m = m.Args[0]
+			if m.Type.IsMemory() {
+				return m
+			}
+		}
+		p := m.MemoryArg()
+		for p != nil && p.Op == ssa.OpCopy {
+			p = p.Args[0] // (What insertPhis made of a forward reference.)
+		}
+		return p
+	}
+	var first *ssa.Value
+	n := 0
+	next := make(map[*ssa.Value]*ssa.Value)
+	for _, v := range b.Values {
+		if !v.Type.IsMemory() || v.Op == ssa.OpCopy {
+			continue
+		}
+		n++
+		if p := prev(v); p != nil && p.Block == b {
+			if next[p] != nil {
+				s.Fatalf("sealFills: two memory states follow %v in %v: %v and %v", p.LongString(), b, next[p].LongString(), v.LongString())
+			}
+			next[p] = v
+		} else if first != nil {
+			s.Fatalf("sealFills: memory of %v does not start at one value: %v, %v", b, first, v)
+		} else {
+			first = v
+		}
+	}
+	chain := make([]*ssa.Value, 0, n)
+	for m := first; m != nil; m = next[m] {
+		chain = append(chain, m)
+	}
+	if len(chain) != n {
+		s.Fatalf("sealFills: %d of the %d memory values of %v are in its chain", len(chain), n, b)
+	}
+	return chain
+}
+
 // isStackAddr is ssa.IsStackAddr, which also sees through the nil checks
 // that are still there when the stores are made (p := &T{...} in the
 // stack; p.f = x).
@@ -182,10 +349,15 @@ func (s *state) shareCheck(addr *ssa.Value) {
 // allocated and has only stored in since, in the object itself and in the
 // stack: no other goroutine can reach it yet.
 func (s *state) unpublished(addr *ssa.Value) bool {
-	base := addr
-	for base.Op == ssa.OpOffPtr || base.Op == ssa.OpAddPtr || base.Op == ssa.OpPtrIndex || base.Op == ssa.OpCopy || base.Op == ssa.OpNilCheck {
-		base = base.Args[0]
+	if s.hasdefer && sealArch(s.gd.Ctxt.Arch.Family) {
+		// A fault in the middle of a fill (p.t = q.v) may run a deferred
+		// function that publishes the object, with no barrier after
+		// the stores made so far. Stores are in order on the targets
+		// that are not weakly ordered, and a fault does not land
+		// between the words of one value.
+		return false
 	}
+	base := addrBase(addr)
 	if base.Op != ssa.OpSelectN || base.AuxInt != 0 {
 		return false
 	}
@@ -208,10 +380,7 @@ func (s *state) unpublished(addr *ssa.Value) bool {
 		case ssa.OpStore, ssa.OpZero, ssa.OpMove:
 			p := mem.Args[0]
 			if !ssa.IsStackAddr(p) {
-				for p.Op == ssa.OpOffPtr || p.Op == ssa.OpAddPtr || p.Op == ssa.OpPtrIndex || p.Op == ssa.OpCopy || p.Op == ssa.OpNilCheck {
-					p = p.Args[0]
-				}
-				if p != base {
+				if addrBase(p) != base {
 					return false
 				}
 			}

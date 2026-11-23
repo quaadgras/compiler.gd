@@ -708,6 +708,7 @@ func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool)
 	s.f.HTMLWriter.WritePhase("before insert phis", "before insert phis")
 
 	s.insertPhis()
+	s.sealFills()
 
 	// Main call to ssa package to compile function
 	ssa.Compile(s.f)
@@ -1366,6 +1367,11 @@ type state struct {
 	// dstLocal is set while the stores being generated are in memory
 	// that no other goroutine can reach (localExpr).
 	dstLocal bool
+
+	// fills are the new objects with plain stores that sealFills must
+	// order before what publishes them, on weakly ordered targets.
+	fills map[*ssa.Value]bool
+
 	// value representing address of where deferBits autotmp is stored
 	deferBitsAddr *ssa.Value
 	deferBitsTemp *ir.Name
@@ -5400,7 +5406,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		// slice is stored whole after the merge: types.SlicePacked.)
 		if !grouped && !types.SlicePacked() {
 			s.dstLocal = hdrLocal
-			guard := s.tearGuard(n.Type(), addr)
+			guard := s.tearGuardStore(n.Type(), addr)
 			var locked *ssa.Value
 			if guard {
 				locked = s.shareLock(addr, n.Type().Size())
@@ -5446,7 +5452,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		// We have to wait until here to make sure growslice succeeded.
 		lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
 		s.dstLocal = hdrLocal
-		if s.tearGuard(n.Type(), addr) {
+		if s.tearGuardStore(n.Type(), addr) {
 			// In shared memory another goroutine may have stored
 			// another slice since this one was loaded, and its
 			// capacity may be less than this length: the slice is
@@ -7309,7 +7315,7 @@ func sliceResults() []*types.Type {
 // do *left = right for type t.
 func (s *state) storeType(t *types.Type, left, right *ssa.Value, skip skipMask, leftIsStmt bool) {
 	s.instrument(t, left, instrumentWrite)
-	if s.tearGuard(t, left) {
+	if s.tearGuardStore(t, left) {
 		s.shareStoreType(t, left, right, skip, leftIsStmt)
 		return
 	}

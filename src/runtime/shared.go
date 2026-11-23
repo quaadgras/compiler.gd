@@ -602,6 +602,12 @@ func shareLockStripe(i uintptr) {
 	}
 }
 
+// storesOrdered is whether the processor keeps stores in order, so that
+// what a goroutine stored in a new object is seen before a pointer to it
+// that it stores after (doc/gd/publication-point.md). publicationBarrier
+// is a call there, which code on a fast path guards with this constant.
+const storesOrdered = goarch.IsAmd64|goarch.Is386|goarch.IsS390x|goarch.IsWasm != 0
+
 // shareLoadBarrier orders the loads before it before those after it. It
 // is an atomic operation on a word of its own, which is a barrier where
 // one is needed (arm64 and the like) and nearly free where none is.
