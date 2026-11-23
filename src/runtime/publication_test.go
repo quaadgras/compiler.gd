@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"bytes"
 	"fmt"
 	"internal/asan"
 	"internal/msan"
@@ -21,7 +22,8 @@ import (
 
 // Litmus tests of the publication point (doc/gd/publication-point.md): a
 // new object that a goroutine fills with plain stores and then publishes
-// with a racy store must be seen filled. They race on purpose.
+// with a racy store must be seen filled, and the bytes of a new string or
+// slice must never be those of a freed object. They race on purpose.
 //
 // What they look for depends on the processor's memory order, so a pass
 // proves little and a failure proves a lot. GD_PUB_LITMUS=30s runs each
@@ -336,4 +338,155 @@ func TestPublicationGrowFromStack(t *testing.T) {
 			}
 		}
 	})
+}
+
+// Stale bytes. pubDirty leaves garbage full of a marker in the size
+// classes of the values below, which the next allocations of those sizes
+// reuse without clearing it. No value contains the marker.
+
+const pubMarker = 0xEE
+
+var pubDirtySink atomic.Pointer[[]byte]
+
+func pubDirty(sizes []int) {
+	for _, n := range sizes {
+		for range 32 {
+			b := make([]byte, n)
+			for i := range b {
+				b[i] = pubMarker
+			}
+			pubDirtySink.Store(&b)
+		}
+	}
+}
+
+// pubGC keeps the collector running, so that the garbage is swept and
+// reused, until stop is set.
+func pubGC(stop *atomic.Bool) {
+	for !stop.Load() {
+		runtime.GC()
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A cell of the stale-bytes tests. Each form stores in a field of its own.
+type pubBytesCell struct {
+	str   string // string(b), concatenation, Repeat, Builder
+	bs    []byte // []byte(s), bytes.Repeat, append, append in place
+	runes []rune // []rune(s)
+	_     [64]byte
+}
+
+var pubStale [8]pubBytesCell
+
+// pubScan reports whether b holds the marker.
+func pubScan(b []byte) bool {
+	for _, x := range b {
+		if x == pubMarker {
+			return true
+		}
+	}
+	return false
+}
+
+func pubStaleRead(p int, c *pubCounts) {
+	cell := &pubStale[p]
+	if s := cell.str; len(s) > 0 && pubScan(unsafe.Slice(unsafe.StringData(s), len(s))) {
+		c.fail("stale byte in a new string")
+	}
+	if b := cell.bs; cap(b) > 0 {
+		if pubScan(b) {
+			c.fail("stale byte in a new slice")
+		} else if pubScan(b[:cap(b)]) {
+			c.fail("stale byte in the capacity of a new slice")
+		}
+	}
+	if r := cell.runes; cap(r) > 0 {
+		for _, x := range r[:cap(r)] {
+			if x&0xff == pubMarker {
+				c.fail("stale bytes in a new []rune")
+				break
+			}
+		}
+	}
+}
+
+func pubStaleTest(t *testing.T, sizes []int, write func(cell *pubBytesCell, n, i int)) {
+	var gcStop atomic.Bool
+	var gcDone sync.WaitGroup
+	gcDone.Add(1)
+	go func() {
+		defer gcDone.Done()
+		pubGC(&gcStop)
+	}()
+	defer func() {
+		gcStop.Store(true)
+		gcDone.Wait()
+	}()
+	pubRace(t, func(p int, stop *atomic.Bool) {
+		cell := &pubStale[p]
+		for i := 0; !stop.Load(); i++ {
+			pubDirty(sizes)
+			for j := range 64 {
+				write(cell, sizes[j%len(sizes)], i+j)
+			}
+		}
+	}, pubStaleRead)
+}
+
+var (
+	pubSrcBytes  = bytes.Repeat([]byte{'A'}, 2048)
+	pubSrcString = strings.Repeat("A", 2048)
+	pubSrcRunes  = []rune(pubSrcString)
+	pubSizes     = []int{24, 32, 48, 64, 96, 128, 256, 512, 1024}
+)
+
+func TestPublicationStaleBytes(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		write func(cell *pubBytesCell, n, i int)
+	}{
+		{"slicebytetostring", func(cell *pubBytesCell, n, i int) {
+			cell.str = string(pubSrcBytes[:n])
+		}},
+		{"concatstrings", func(cell *pubBytesCell, n, i int) {
+			cell.str = pubSrcString[:n/2] + pubSrcString[:n-n/2]
+		}},
+		{"stringtoslicebyte", func(cell *pubBytesCell, n, i int) {
+			cell.bs = []byte(pubSrcString[:n])
+		}},
+		{"stringtoslicerune", func(cell *pubBytesCell, n, i int) {
+			cell.runes = []rune(pubSrcString[:n])
+		}},
+		{"slicerunetostring", func(cell *pubBytesCell, n, i int) {
+			cell.str = string(pubSrcRunes[:n])
+		}},
+		{"strings.Repeat", func(cell *pubBytesCell, n, i int) {
+			cell.str = strings.Repeat("A", n)
+		}},
+		{"strings.Builder", func(cell *pubBytesCell, n, i int) {
+			var b strings.Builder
+			b.Grow(n)
+			b.WriteString(pubSrcString[:n])
+			cell.str = b.String()
+		}},
+		{"bytes.Repeat", func(cell *pubBytesCell, n, i int) {
+			cell.bs = bytes.Repeat([]byte{'A'}, n)
+		}},
+		{"append", func(cell *pubBytesCell, n, i int) {
+			cell.bs = append([]byte(nil), pubSrcBytes[:n]...)
+		}},
+		{"append in place", func(cell *pubBytesCell, n, i int) {
+			// The growth of a slice in memory: its header is what the
+			// reader loads.
+			cell.bs = nil
+			for range n {
+				cell.bs = append(cell.bs, 'A')
+			}
+		}},
+	} {
+		t.Run(strings.ReplaceAll(tt.name, " ", "_"), func(t *testing.T) {
+			pubStaleTest(t, pubSizes, tt.write)
+		})
+	}
 }

@@ -53,6 +53,11 @@ func materializeToHeap(src unsafe.Pointer, typ *abi.Type) unsafe.Pointer {
 	if typ.PtrBytes != 0 {
 		rebaseSelfPointers(dst, uintptr(src), typ)
 	}
+	if !storesOrdered {
+		// A plain copy: it is seen before the pointer to it, which the
+		// callee may store (doc/gd/publication-point.md).
+		publicationBarrier()
+	}
 	return dst
 }
 

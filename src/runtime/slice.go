@@ -140,7 +140,9 @@ func makeslicecopy(et *_type, tolen int, fromlen int, from unsafe.Pointer) unsaf
 		return to
 	}
 	memmove(to, from, copymem)
-	if !storesOrdered && copymem > 0 {
+	if !storesOrdered && (copymem > 0 || !et.Pointers()) {
+		// (Without pointers the array was not cleared by mallocgc,
+		// whose barrier would have covered that.)
 		publicationBarrier()
 	}
 
@@ -211,7 +213,8 @@ func makeslice64(et *_type, len64, cap64 int64) unsafe.Pointer {
 // A new backing store is allocated with space for at least newLen elements.
 // Existing entries [0, oldLen) are copied over to the new backing store.
 // Added entries [oldLen, newLen) are not initialized by growslice
-// (although for pointer-containing element types, they are zeroed). They
+// (although for pointer-containing element types, and where the new slice
+// could be seen before the caller stores them, they are zeroed). They
 // must be initialized by the caller.
 // Trailing entries [newLen, newCap) are zeroed.
 //
@@ -332,7 +335,17 @@ func growslicel(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, local
 		// Only clear the part that will not be overwritten.
 		// The reflect_growslice() that calls growslice will manually clear
 		// the region not cleared here.
-		memclrNoHeapPointers(add(p, newlenmem), capmem-newlenmem)
+		//
+		// Where the slice may be seen before those elements are, clear
+		// them too, or a racing reader would get what a freed object
+		// left there: where stores are not in order, and where append
+		// stores the slice's words before the elements (a slice that
+		// is not packed; a packed one is stored after them).
+		from := newlenmem
+		if !storesOrdered || !abi.SlicePacked {
+			from = lenmem
+		}
+		memclrNoHeapPointers(add(p, from), capmem-from)
 	} else {
 		// Note: can't use rawmem (which avoids zeroing of memory), because then GC can scan uninitialized memory.
 		p = mallocgcl(capmem, et, true, local)
@@ -352,9 +365,9 @@ func growslicel(oldPtr unsafe.Pointer, newLen, oldCap, num int, et *_type, local
 	} else {
 		memmove(p, oldPtr, lenmem)
 	}
-	if !storesOrdered && lenmem > 0 {
-		// The copy, from the stack or whole from elsewhere, is seen
-		// before the new array is.
+	if !storesOrdered && (lenmem > 0 || !et.Pointers()) {
+		// The copy, from the stack or whole from elsewhere, and what
+		// was cleared above, are seen before the new array is.
 		publicationBarrier()
 	}
 
@@ -455,6 +468,9 @@ func reflect_growslice(et *_type, old slice, num int) slice {
 		oldcapmem := uintptr(old.cap) * et.Size_
 		newlenmem := uintptr(new.len) * et.Size_
 		memclrNoHeapPointers(add(new.array, oldcapmem), newlenmem-oldcapmem)
+		if !storesOrdered {
+			publicationBarrier()
+		}
 	}
 	new.len = old.len // preserve the old length
 	return new
@@ -510,7 +526,13 @@ func bytealg_MakeNoZero(len int) []byte {
 		panicmakeslicelen()
 	}
 	cap := roundupsize(uintptr(len), true)
-	return unsafe.Slice((*byte)(mallocgc(cap, nil, false)), cap)[:len]
+	// The caller fills it after this returns, so no barrier here can
+	// order that fill before the slice is seen. Where stores are not in
+	// order the memory is cleared (with mallocgc's barrier after it): a
+	// racing reader then sees zeros, not what a freed object left. Where
+	// they are, callers store the slice after they fill what it shows,
+	// and do not expose its capacity.
+	return unsafe.Slice((*byte)(mallocgc(cap, nil, !storesOrdered)), cap)[:len]
 }
 
 // moveSlice copies the input slice to the heap and returns it.
@@ -545,6 +567,9 @@ func moveSliceNoScan(elemSize uintptr, old unsafe.Pointer, len, cap int) (unsafe
 	capmem := uintptr(cap) * elemSize
 	new := mallocgc(capmem, nil, false)
 	memmove(new, old, capmem)
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return new, len, cap
 }
 
@@ -585,6 +610,9 @@ func moveSliceNoCapNoScan(elemSize uintptr, old unsafe.Pointer, len int) (unsafe
 	memmove(new, old, lenmem)
 	if capmem > lenmem {
 		memclrNoHeapPointers(add(new, lenmem), capmem-lenmem)
+	}
+	if !storesOrdered {
+		publicationBarrier()
 	}
 	return new, len, int(capmem / elemSize)
 }

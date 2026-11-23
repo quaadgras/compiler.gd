@@ -618,6 +618,16 @@ func walkMakeSlice(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node 
 }
 
 // walkMakeSliceCopy walks an OMAKESLICECOPY node.
+// storesOrdered reports whether the target keeps stores in order, as
+// runtime.storesOrdered does.
+func storesOrdered(f sys.ArchFamily) bool {
+	switch f {
+	case sys.AMD64, sys.I386, sys.S390X, sys.Wasm:
+		return true
+	}
+	return false
+}
+
 func walkMakeSliceCopy(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.Node {
 	if ir.NodeStackAllocatable(n) {
 		gd.Fatalf("OMAKESLICECOPY with EscNone: %v", n)
@@ -632,9 +642,12 @@ func walkMakeSliceCopy(gd *base.Invocation, n *ir.MakeExpr, init *ir.Nodes) ir.N
 	copylen := ir.NewUnaryExpr(gd, gd.Pos, ir.OLEN, n.Cap)
 	copyptr := ir.NewUnaryExpr(gd, gd.Pos, ir.OSPTR, n.Cap)
 
-	if !t.Elem().HasPointers() && n.Bounded() {
+	if !t.Elem().HasPointers() && n.Bounded() && storesOrdered(gd.Ctxt.Arch.Family) {
 		// When len(to)==len(from) and elements have no pointers:
 		// replace make+copy with runtime.mallocgc+runtime.memmove.
+		// (Not where stores may be seen out of order: the memory is
+		// not cleared, so the copy must be seen before the slice is,
+		// and makeslicecopy has the barrier for that.)
 
 		// We do not check for overflow of len(to)*elem.Width here
 		// since len(from) is an existing checked slice capacity

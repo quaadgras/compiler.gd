@@ -182,6 +182,9 @@ func arena_heapify(s any) any {
 		s1 := s.(string)
 		s2, b := rawstring(len(s1))
 		copy(b, s1)
+		if !storesOrdered {
+			publicationBarrier()
+		}
 		x = s2
 	case abi.Slice:
 		var old []byte

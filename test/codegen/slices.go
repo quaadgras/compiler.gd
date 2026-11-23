@@ -152,9 +152,11 @@ func SliceMakeCopyLen(s []int) []int {
 	// amd64:`.*runtime\.mallocgc`
 	// amd64:`.*runtime\.memmove`
 	// amd64:-`.*runtime\.makeslice`
-	// ppc64x:`.*runtime\.mallocgc`
-	// ppc64x:`.*runtime\.memmove`
-	// ppc64x:-`.*runtime\.makeslice`
+	// (Where stores are not in order, makeslicecopy has the barrier that
+	// orders the copy before the slice.)
+	// ppc64x:`.*runtime\.makeslicecopy`
+	// ppc64x:-`.*runtime\.makeslice\(`
+	// ppc64x:-`.*runtime\.mallocgc`
 	a := make([]int, len(s))
 	copy(a, s)
 	return a

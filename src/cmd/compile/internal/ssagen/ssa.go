@@ -5441,13 +5441,7 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 		return nil
 	}
 
-	if inplace && types.SlicePacked() {
-		// The length and the capacity are one word: the whole slice,
-		// grown or not.
-		s.dstLocal = hdrLocal
-		s.storeType(n.Type(), addr, s.newValue3(ssa.OpSliceMake, n.Type(), p, l, c), 0, true)
-		s.dstLocal = false
-	} else if inplace {
+	if inplace && !types.SlicePacked() {
 		// Update length in place.
 		// We have to wait until here to make sure growslice succeeded.
 		lenaddr := s.newValue1I(ssa.OpOffPtr, s.f.Config.Types.IntPtr, types.SliceLenOffset, addr)
@@ -5538,6 +5532,17 @@ func (s *state) append(n *ir.CallExpr, inplace bool) *ssa.Value {
 			s.move(et, addr, arg.v)
 			s.dstLocal = false
 		}
+	}
+
+	if inplace && types.SlicePacked() {
+		// The length and the capacity are one word: the whole slice,
+		// grown or not. After the elements: an array that growslice
+		// did not clear holds what a freed object left where the new
+		// elements go, and a racing reader of the slice must not see
+		// that.
+		s.dstLocal = hdrLocal
+		s.storeType(n.Type(), addr, s.newValue3(ssa.OpSliceMake, n.Type(), p, l, c), 0, true)
+		s.dstLocal = false
 	}
 
 	// The following deletions have no practical effect at this time

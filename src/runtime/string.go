@@ -67,6 +67,11 @@ func concatstrings(buf *tmpBuf, a []string) string {
 		n := copy(b, x)
 		b = b[n:]
 	}
+	if !storesOrdered && (buf == nil || l > len(buf)) {
+		// The bytes of a new string are seen before it is: what is
+		// there before them is what a freed object left.
+		publicationBarrier()
+	}
 	return s
 }
 
@@ -117,6 +122,9 @@ func concatbytes(buf *tmpBuf, a []string) []byte {
 	for _, x := range a {
 		copy(b[offset:], x)
 		offset += len(x)
+	}
+	if !storesOrdered && (buf == nil || l > len(buf)) {
+		publicationBarrier()
 	}
 
 	return b
@@ -186,6 +194,9 @@ func slicebytetostring(buf *tmpBuf, ptr *byte, n int) string {
 		p = mallocgc(uintptr(n), nil, false)
 	}
 	memmove(p, unsafe.Pointer(ptr), uintptr(n))
+	if !storesOrdered && (buf == nil || n > len(buf)) {
+		publicationBarrier()
+	}
 	return unsafe.String((*byte)(p), n)
 }
 
@@ -250,6 +261,9 @@ func stringtoslicebyte(buf *tmpBuf, s string) []byte {
 		b = rawbyteslice(len(s))
 	}
 	copy(b, s)
+	if !storesOrdered && (buf == nil || len(s) > len(buf)) {
+		publicationBarrier()
+	}
 	return b
 }
 
@@ -273,6 +287,9 @@ func stringtoslicerune(buf *[tmpStringBufSize]rune, s string) []rune {
 	for _, r := range s {
 		a[n] = r
 		n++
+	}
+	if !storesOrdered && (buf == nil || n > len(buf)) {
+		publicationBarrier()
 	}
 	return a
 }
@@ -317,6 +334,9 @@ func slicerunetostring(buf *tmpBuf, a []rune) string {
 			break
 		}
 		size2 += encoderune(b[size2:], r)
+	}
+	if !storesOrdered && (buf == nil || size1+3 > len(buf)) {
+		publicationBarrier()
 	}
 	return s[:size2]
 }
@@ -412,6 +432,9 @@ func stringDataHeap(s string) *byte {
 	b, n := abi.StringInlineBytes(s)
 	p := mallocgc(uintptr(n), nil, false)
 	memmove(p, noescape(unsafe.Pointer(&b)), uintptr(n))
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return (*byte)(p)
 }
 
@@ -432,6 +455,9 @@ func cgoStringNormalize(s string) string {
 	b, n := abi.StringInlineBytes(s)
 	p := mallocgc(uintptr(n), nil, false)
 	memmove(p, noescape(unsafe.Pointer(&b)), uintptr(n))
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return unsafe.String((*byte)(p), n)
 }
 
@@ -505,13 +531,18 @@ func intstring(buf *[4]byte, v int64) (s string) {
 		s, b = rawstring(4)
 	}
 	n := encoderune(b, rune(v))
+	if !storesOrdered && buf == nil {
+		publicationBarrier()
+	}
 	return s[:n]
 }
 
 // rawstring allocates storage for a new string. The returned
 // string and byte slice both refer to the same storage.
 // The storage is not zeroed. Callers should use
-// b to set the string contents and then drop b.
+// b to set the string contents and then drop b, and where stores are not
+// in order (storesOrdered) call publicationBarrier before the string can
+// reach another goroutine: what is there before is a freed object's.
 func rawstring(size int) (s string, b []byte) {
 	p := mallocgc(uintptr(size), nil, false)
 	return unsafe.String((*byte)(p), size), unsafe.Slice((*byte)(p), size)
@@ -554,6 +585,9 @@ func gobytes(p *byte, n int) (b []byte) {
 
 	bp := mallocgc(uintptr(n), nil, false)
 	memmove(bp, unsafe.Pointer(p), uintptr(n))
+	if !storesOrdered {
+		publicationBarrier()
+	}
 
 	return unsafe.Slice((*byte)(bp), n)
 }
@@ -568,6 +602,9 @@ func gostring(p *byte) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return s
 }
 
@@ -584,6 +621,9 @@ func gostringn(p *byte, l int) string {
 	}
 	s, b := rawstring(l)
 	memmove(unsafe.Pointer(&b[0]), unsafe.Pointer(p), uintptr(l))
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return s
 }
 
