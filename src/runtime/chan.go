@@ -138,6 +138,11 @@ func makechan(t *chantype, size int) unsafe.Pointer {
 	if debugChan {
 		print("makechan: chan=", c, "; elemsize=", elem.Size_, "; dataqsiz=", size, "\n")
 	}
+	if !storesOrdered {
+		// The caller may store the channel with a racy store, and a
+		// send indexes buf by what it reads of the rest.
+		publicationBarrier()
+	}
 	return unsafe.Pointer(c)
 }
 

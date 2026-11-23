@@ -95,12 +95,41 @@ func (s *state) tearGuardStore(t *types.Type, addr *ssa.Value) bool {
 		return true
 	}
 	if sealArch(s.gd.Ctxt.Arch.Family) {
-		if s.fills == nil {
-			s.fills = make(map[*ssa.Value]bool)
-		}
-		s.fills[addrBase(addr)] = true
+		s.addFill(addrBase(addr))
 	}
 	return false
+}
+
+func (s *state) addFill(base *ssa.Value) {
+	if s.fills == nil {
+		s.fills = make(map[*ssa.Value]bool)
+	}
+	s.fills[base] = true
+}
+
+// sealFuncValue has sealFills seal v, a new object of type t, if it is a
+// closure or a method value, whatever its fields are and even in a function
+// with a defer. Its words are not guarded, as each is one word, but their
+// users rely on them together: the code a function value calls reads the
+// rest without testing it (what a closure captured by reference is indexed
+// through a pointer with no nil check), and a mask of zero tells a caller
+// that the callee keeps none of its arguments, which may then stay in the
+// caller's frame.
+func (s *state) sealFuncValue(t *types.Type, v *ssa.Value) {
+	if sealArch(s.gd.Ctxt.Arch.Family) && isFuncValueType(t) {
+		s.addFill(v)
+	}
+}
+
+// isFuncValueType reports whether t is the struct of a closure or a method
+// value: typecheck.ClosureType, typecheck.MethodValueType.
+func isFuncValueType(t *types.Type) bool {
+	if !t.IsStruct() || !t.Noalg() || t.NumFields() < 2 {
+		return false
+	}
+	f, m := t.Field(0), t.Field(1)
+	return f.Sym != nil && f.Sym.Name == "F" && f.Type.Kind() == types.TUINTPTR &&
+		m.Sym != nil && m.Sym.Name == "M" && m.Type.Kind() == types.TUINT64
 }
 
 // sealArch reports whether stores may be seen out of order on the target

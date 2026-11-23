@@ -48,3 +48,16 @@ func pubDefer(s string, q *pubT) {
 	p.N = q.N
 	pubP = p
 }
+
+var pubF func() int
+
+// A function value is sealed even with no string, slice or interface in
+// it, and in a function with a defer: its words are read together.
+func pubClosure(x *int) {
+	pubF = func() int { return *x + 1 } // arm64:"DMB" ppc64x:"LWSYNC" riscv64:"FENCE" loong64:"DBAR" amd64:-"MFENCE"
+}
+
+func pubClosureDefer(x *int) {
+	defer func() { recover() }()
+	pubF = func() int { return *x + 2 } // arm64:"DMB" ppc64x:"LWSYNC" riscv64:"FENCE" loong64:"DBAR" amd64:-"MFENCE"
+}

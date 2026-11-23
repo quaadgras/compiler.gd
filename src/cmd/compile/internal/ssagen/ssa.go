@@ -5006,16 +5006,20 @@ func (s *state) exprCheckPtr(n ir.Node, checkPtrOK bool) *ssa.Value {
 
 	case ir.ONEW:
 		n := n.(*ir.UnaryExpr)
+		var v *ssa.Value
 		if x, ok := n.X.(*ir.DynamicType); ok && x.Op() == ir.ODYNAMICTYPE {
 			if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
-				return s.newObjectLocal(n.Type().Elem(), s.expr(x.RType), tag)
+				v = s.newObjectLocal(n.Type().Elem(), s.expr(x.RType), tag)
+			} else {
+				v = s.newObjectNonSpecialized(n.Type().Elem(), s.expr(x.RType))
 			}
-			return s.newObjectNonSpecialized(n.Type().Elem(), s.expr(x.RType))
+		} else if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
+			v = s.newObjectLocal(n.Type().Elem(), nil, tag)
+		} else {
+			v = s.newObject(n.Type().Elem())
 		}
-		if tag := s.localTag(n, n.LocalAlloc()); tag != nil {
-			return s.newObjectLocal(n.Type().Elem(), nil, tag)
-		}
-		return s.newObject(n.Type().Elem())
+		s.sealFuncValue(n.Type().Elem(), v)
+		return v
 
 	case ir.OUNSAFEADD:
 		n := n.(*ir.BinaryExpr)

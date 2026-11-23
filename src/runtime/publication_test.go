@@ -11,7 +11,9 @@ import (
 	"internal/msan"
 	"internal/race"
 	"os"
+	"reflect"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -290,6 +292,100 @@ func TestPublicationClosure(t *testing.T) {
 			if e != "" {
 				c.fail(e)
 			}
+		}
+	})
+}
+
+type pubRefCell struct {
+	f func(int) byte
+	_ [120]byte
+}
+
+var (
+	pubRefFuncs [8]pubRefCell
+	pubRefFault [8]bool
+)
+
+// A function value with no string, slice or interface in it must be seen
+// whole too. Its code runs on the words after it without checking them: a
+// closure indexes what it captured by reference through a pointer it does
+// not test for nil, here at an address past the zero page, and a caller
+// takes a mask of zero to say that the callee keeps none of its arguments.
+func TestPublicationClosureContext(t *testing.T) {
+	pubRace(t, func(p int, stop *atomic.Bool) {
+		var buf [8192]byte
+		buf[5000] = 7
+		c := &pubRefFuncs[p]
+		for !stop.Load() {
+			for range 256 {
+				c.f = func(i int) byte { return buf[i&8191] }
+			}
+		}
+		runtime.KeepAlive(&buf)
+	}, func(p int, c *pubCounts) {
+		if !pubRefFault[p] {
+			pubRefFault[p] = true
+			debug.SetPanicOnFault(true)
+		}
+		f := pubRefFuncs[p].f
+		if f != nil && f(5000) != 7 {
+			c.fail("closure read the wrong byte")
+		}
+	})
+}
+
+type pubMakeFuncCell struct {
+	f func(int) int
+	_ [120]byte
+}
+
+var pubMakeFuncs [8]pubMakeFuncCell
+
+func TestPublicationMakeFunc(t *testing.T) {
+	typ := reflect.TypeFor[func(int) int]()
+	pubRace(t, func(p int, stop *atomic.Bool) {
+		c := &pubMakeFuncs[p]
+		for !stop.Load() {
+			v := reflect.MakeFunc(typ, func(a []reflect.Value) []reflect.Value {
+				return []reflect.Value{reflect.ValueOf(int(a[0].Int()) + 1)}
+			})
+			c.f = v.Interface().(func(int) int)
+		}
+	}, func(p int, c *pubCounts) {
+		if f := pubMakeFuncs[p].f; f != nil && f(1) != 2 {
+			c.fail("MakeFunc returned the wrong value")
+		}
+	})
+}
+
+type pubChanCell struct {
+	c chan [512]byte
+	_ [120]byte
+}
+
+var pubChans [8]pubChanCell
+
+// A new channel's buffer, element type and size are seen before it is.
+func TestPublicationChan(t *testing.T) {
+	pubRace(t, func(p int, stop *atomic.Bool) {
+		c := &pubChans[p]
+		for !stop.Load() {
+			for range 64 {
+				c.c = make(chan [512]byte, 2)
+			}
+		}
+	}, func(p int, c *pubCounts) {
+		ch := pubChans[p].c
+		if ch == nil {
+			return
+		}
+		var v [512]byte
+		select {
+		case ch <- v:
+		default:
+		}
+		if cap(ch) != 2 {
+			c.fail("channel with the wrong capacity")
 		}
 	})
 }

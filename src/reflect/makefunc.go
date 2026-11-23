@@ -73,9 +73,15 @@ func MakeFunc(typ Type, fn func(args []Value) (results []Value)) Value {
 		ftyp: ftyp,
 		fn:   fn,
 	}
+	publicationBarrier()
 
 	return Value{typ_: t, ptr: unsafe.Pointer(impl), flag: flag(Func)}
 }
+
+// publicationBarrier orders the stores before it, of a new function value,
+// before those after it: a caller that races with the store of the value
+// must see its code with its mask and its stack map. In package runtime.
+func publicationBarrier()
 
 // makeFuncStub is an assembly function that is the code half of
 // the function returned from MakeFunc. It expects a *callReflectFunc
@@ -134,6 +140,7 @@ func makeMethodValue(op string, v Value) Value {
 		method: int(v.flag) >> flagMethodShift,
 		rcvr:   rcvr,
 	}
+	publicationBarrier()
 
 	// Cause panic if method is not appropriate.
 	// The panic would still happen during the call if we omit this,

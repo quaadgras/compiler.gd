@@ -608,6 +608,16 @@ func shareLockStripe(i uintptr) {
 // is a call there, which code on a fast path guards with this constant.
 const storesOrdered = goarch.IsAmd64|goarch.Is386|goarch.IsS390x|goarch.IsWasm != 0
 
+// reflect_publicationBarrier orders the fill of a function value that
+// reflect made before the racy store that may publish it.
+//
+//go:linkname reflect_publicationBarrier reflect.publicationBarrier
+func reflect_publicationBarrier() {
+	if !storesOrdered {
+		publicationBarrier()
+	}
+}
+
 // shareLoadBarrier orders the loads before it before those after it. It
 // is an atomic operation on a word of its own, which is a barrier where
 // one is needed (arm64 and the like) and nearly free where none is.

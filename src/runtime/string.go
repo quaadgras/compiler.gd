@@ -793,5 +793,8 @@ func gostringw(strw *uint16) string {
 		n2 += encoderune(b[n2:], rune(str[i]))
 	}
 	b[n2] = 0 // for luck
+	if !storesOrdered {
+		publicationBarrier()
+	}
 	return s[:n2]
 }
