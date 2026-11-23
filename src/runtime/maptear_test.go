@@ -5,6 +5,7 @@
 package runtime_test
 
 import (
+	"internal/goexperiment"
 	"internal/race"
 	"maps"
 	"reflect"
@@ -553,7 +554,12 @@ func TestMapConcurrentWrites(t *testing.T) {
 	if e := wrong.Load(); e != nil {
 		t.Fatalf("wrong panic: %v", e)
 	}
-	if panics.Load() == 0 {
+	if goexperiment.Sharing {
+		// The writers of a shared map wait for each other.
+		if panics.Load() != 0 {
+			t.Errorf("%d writes to a shared map panicked", panics.Load())
+		}
+	} else if panics.Load() == 0 {
 		t.Errorf("%d goroutines wrote one map %d times each and none panicked", G, n)
 	}
 	t.Logf("%d writes panicked", panics.Load())
