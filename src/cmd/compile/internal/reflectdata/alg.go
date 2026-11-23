@@ -437,13 +437,24 @@ func eqFunc(gd *base.Invocation, sig string) *ir.Func {
 	// we never load the header words raw. Instead we load the value as
 	// a string and go through compare.EqString, which lowers OSPTR/OLEN
 	// with full knowledge of the inline/heap representation.
-	var pendingStrings []int64
+	//
+	// gd: each string, and each interface below, is loaded once into a
+	// temporary, whole. What p or q points to may be written by another
+	// goroutine (the key in a map's slot, doc/gd/maps.md): a second load
+	// could get a shorter string than the length just compared, or an
+	// interface's payload with another's type.
+	loadTemps := func(t *types.Type) (*ir.Name, *ir.Name) {
+		x, y := load(t)
+		tx := typecheck.TempAt(gd, pos, ir.CurFunc(gd), t)
+		ty := typecheck.TempAt(gd, pos, ir.CurFunc(gd), t)
+		fn.Body.Append(ir.NewAssignStmt(gd, pos, tx, x), ir.NewAssignStmt(gd, pos, ty, y))
+		return tx, ty
+	}
+	var pendingStrings [][2]*ir.Name
 	flushStrings := func() {
 		for _, x := range pendingStrings {
-			sx, sy := loadAt(types.Types[types.TSTRING], x)
-			sx, sy = typecheck.Expr(gd, sx), typecheck.Expr(gd, sy)
 			// Note: we already checked that the lengths are equal.
-			_, eqmem := compare.EqString(gd, sx, sy)
+			_, eqmem := compare.EqString(gd, x[0], x[1])
 			test(eqmem)
 			hasCall = true
 		}
@@ -501,9 +512,8 @@ func eqFunc(gd *base.Invocation, sig string) *ir.Func {
 		case sigString:
 			// Compare just the lengths right now.
 			// Save the contents for later.
-			pendingStrings = append(pendingStrings, off)
-			sx, sy := load(types.Types[types.TSTRING])
-			sx, sy = typecheck.Expr(gd, sx), typecheck.Expr(gd, sy)
+			sx, sy := loadTemps(types.Types[types.TSTRING])
+			pendingStrings = append(pendingStrings, [2]*ir.Name{sx, sy})
 			eqlen, _ := compare.EqString(gd, sx, sy)
 			test(eqlen)
 		case sigEface, sigIface:
@@ -516,20 +526,27 @@ func eqFunc(gd *base.Invocation, sig string) *ir.Func {
 			// inline / spread / boxed). See compare.EqInterface.
 			//   func ifaceeq(tab *uintptr, x, y unsafe.Pointer) bool
 			//   func efaceeq(typ *uintptr, x, y unsafe.Pointer) bool
-			start := off
-			typeX, typeY := load(types.Types[types.TUINTPTR].PtrTo())
+			//
+			// gd: of whole copies (loadTemps). An interface has the
+			// same words whatever its methods, so both kinds are
+			// loaded as an empty interface.
+			ix, iy := loadTemps(types.Types[types.TINTER])
+			typeX := ir.NewUnaryExpr(gd, pos, ir.OITAB, ix)
+			typeY := ir.NewUnaryExpr(gd, pos, ir.OITAB, iy)
 			cmp(typeX, typeY)
-			c := ir.NewBasicLit(gd, pos, types.Types[types.TUINTPTR], constant.MakeInt64(start))
-			dataX := ir.NewBinaryExpr(gd, pos, ir.OUNSAFEADD, np, c)
-			dataY := ir.NewBinaryExpr(gd, pos, ir.OUNSAFEADD, nq, c)
-			off = start + ifaceSize()
+			dataX := typecheck.NodAddr(gd, ix)
+			dataY := typecheck.NodAddr(gd, iy)
+			dataX.SetType(types.Types[types.TUNSAFEPTR])
+			dataY.SetType(types.Types[types.TUNSAFEPTR])
+			dataX.SetTypecheck(1)
+			dataY.SetTypecheck(1)
 			var eqFn *ir.Name
 			if kind == sigEface {
 				eqFn = typecheck.LookupRuntime(gd, "efaceeq")
 			} else {
 				eqFn = typecheck.LookupRuntime(gd, "ifaceeq")
 			}
-			test(typecheck.Call(gd, pos, eqFn, []ir.Node{typeX, dataX, dataY}, false))
+			test(typecheck.Call(gd, pos, eqFn, []ir.Node{ir.NewUnaryExpr(gd, pos, ir.OITAB, ix), dataX, dataY}, false))
 			hasCall = true
 		case sigSkip:
 			var n int64

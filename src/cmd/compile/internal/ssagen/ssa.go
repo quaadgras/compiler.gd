@@ -435,7 +435,7 @@ func buildssa(gd *base.Invocation, fn *ir.Func, cache *ssa.Cache, isPgoHot bool)
 
 	s.hasdefer = fn.HasDefer()
 	s.tear = gd.Debug.NoTear == 0 && gd.Ctxt.Arch.Family != sys.Wasm &&
-		(algFunc(fn) || gd.Flag.WB && !gd.Flag.CompilingRuntime && tearFunc(fn))
+		(algFunc(fn) || gd.Flag.WB && (!gd.Flag.CompilingRuntime || runtimeTearFunc(gd.Ctxt.Pkgpath, fn)) && tearFunc(fn))
 	s.ifaceOnly = !gd.Sharing
 	if fn.Pragma&ir.CgoUnsafeArgs != 0 {
 		s.cgoUnsafeArgs = true

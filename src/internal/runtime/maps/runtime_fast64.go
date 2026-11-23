@@ -22,9 +22,6 @@ func runtime_mapaccess1_fast64(typ *abi.MapType, m *Map, key uint64) unsafe.Poin
 
 //go:linkname runtime_mapaccess2_fast64 runtime.mapaccess2_fast64
 func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Pointer, bool) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		return sharedGet(typ, m, abi.NoEscape(unsafe.Pointer(&key)))
-	}
 	if race.Enabled && m != nil {
 		callerpc := sys.GetCallerPC()
 		pc := abi.FuncPCABIInternal(runtime_mapaccess2_fast64)
@@ -35,14 +32,19 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 		return unsafe.Pointer(&zeroVal[0]), false
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
-		return nil, false
+	tries := 0
+retry:
+	rseq, dir, dirLen, shift := m.readFields()
+	if !m.readOK(rseq) {
+		rseq, dir, dirLen, shift = m.readBeginSlow()
 	}
 
-	if m.dirLen == 0 {
+	if dirLen == 0 {
+		if dir == nil {
+			return unsafe.Pointer(&zeroVal[0]), false
+		}
 		g := groupReference{
-			data: m.dirPtr,
+			data: dir,
 		}
 		full := g.ctrls().matchFull()
 		slotKey := g.key(typ, 0)
@@ -53,17 +55,25 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 			keyStride = typ.KeyStride // == SlotSize in interleaved layout
 		}
 		var i uintptr
+		var elem unsafe.Pointer
 		for full != 0 {
 			if key == *(*uint64)(slotKey) && full.lowestSet() {
 				if goexperiment.MapSplitGroup {
-					return g.elem(typ, i), true
+					elem = g.elem(typ, i)
 				} else {
-					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
+					elem = unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 				}
+				break
 			}
 			slotKey = unsafe.Pointer(uintptr(slotKey) + keyStride)
 			full = full.shiftOutLowest()
 			i++
+		}
+		if m.readRetry(rseq, &tries) {
+			goto retry
+		}
+		if elem != nil {
+			return elem, true
 		}
 		return unsafe.Pointer(&zeroVal[0]), false
 	}
@@ -77,10 +87,9 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 	}
 
 	// Select table.
-	idx := m.directoryIndex(hash)
-	t := m.directoryAt(idx)
+	t := dirAt(dir, dirIndex(hash, dirLen, shift))
 
-	// Probe table.
+	// Probe table. See the comment in table.getWithKey.
 	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
 
 	h2Hash := h2(hash)
@@ -94,19 +103,26 @@ func runtime_mapaccess2_fast64(typ *abi.MapType, m *Map, key uint64) (unsafe.Poi
 
 			slotKey := g.key(typ, i)
 			if key == *(*uint64)(slotKey) {
+				var elem unsafe.Pointer
 				if goexperiment.MapSplitGroup {
-					return g.elem(typ, i), true
+					elem = g.elem(typ, i)
 				} else {
-					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
+					elem = unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 				}
+				if m.readRetry(rseq, &tries) {
+					goto retry
+				}
+				return elem, true
 			}
 			match = match.removeFirst()
 		}
 
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
+		if g.ctrls().matchEmpty() != 0 || seq.last() {
 			// Finding an empty slot means we've reached the end of
 			// the probe sequence.
+			if m.readRetry(rseq, &tries) {
+				goto retry
+			}
 			return unsafe.Pointer(&zeroVal[0]), false
 		}
 	}
@@ -196,9 +212,7 @@ func runtime_mapassign_fast64(typ *abi.MapType, m *Map, key uint64) unsafe.Point
 		pc := abi.FuncPCABIInternal(runtime_mapassign_fast64)
 		race.WritePC(unsafe.Pointer(m), callerpc, pc)
 	}
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
+	m.lockWrite()
 
 	var hash uintptr
 	// See the related comment in runtime_mapaccess2_fast32
@@ -207,10 +221,6 @@ func runtime_mapassign_fast64(typ *abi.MapType, m *Map, key uint64) unsafe.Point
 	} else {
 		hash = memHash64Fallback(key, m.seed)
 	}
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
 
 	if m.dirPtr == nil {
 		m.growToSmall(typ)
@@ -228,10 +238,7 @@ func runtime_mapassign_fast64(typ *abi.MapType, m *Map, key uint64) unsafe.Point
 			tab.checkInvariants(typ, m)
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -323,10 +330,7 @@ outer:
 		}
 	}
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 
 	return slotElem
 }
@@ -417,9 +421,7 @@ func runtime_mapassign_fast64ptr(typ *abi.MapType, m *Map, key unsafe.Pointer) u
 		pc := abi.FuncPCABIInternal(runtime_mapassign_fast64ptr)
 		race.WritePC(unsafe.Pointer(m), callerpc, pc)
 	}
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
+	m.lockWrite()
 
 	var hash uintptr
 	// See the related comment in runtime_mapaccess2_fast32
@@ -428,10 +430,6 @@ func runtime_mapassign_fast64ptr(typ *abi.MapType, m *Map, key unsafe.Pointer) u
 	} else {
 		hash = memHash64Fallback(uint64((uintptr)(key)), m.seed)
 	}
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
 
 	if m.dirPtr == nil {
 		m.growToSmall(typ)
@@ -449,10 +447,7 @@ func runtime_mapassign_fast64ptr(typ *abi.MapType, m *Map, key unsafe.Pointer) u
 			tab.checkInvariants(typ, m)
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -543,10 +538,7 @@ outer:
 		}
 	}
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 
 	return slotElem
 }

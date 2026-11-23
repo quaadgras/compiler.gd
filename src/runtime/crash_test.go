@@ -687,37 +687,32 @@ func TestConcurrentMapWrites(t *testing.T) {
 	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapWrites")
-	want := "fatal error: concurrent map writes\n"
+	want := "panic: concurrent map writes\n" // gd: doc/gd/maps.md
 	if !strings.HasPrefix(output, want) {
 		t.Fatalf("output does not start with %q:\n%s", want, output)
 	}
 }
+
+// gd: a read that races with a write is memory safe and is not an error
+// (doc/gd/maps.md), and neither is an iteration.
 func TestConcurrentMapReadWrite(t *testing.T) {
-	if !*concurrentMapTest {
-		t.Skip("skipping without -run_concurrent_map_tests")
-	}
 	if race.Enabled {
 		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
 	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapReadWrite")
-	want := "fatal error: concurrent map read and map write\n"
-	if !strings.HasPrefix(output, want) {
-		t.Fatalf("output does not start with %q:\n%s", want, output)
+	if output != "" {
+		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
 func TestConcurrentMapIterateWrite(t *testing.T) {
-	if !*concurrentMapTest {
-		t.Skip("skipping without -run_concurrent_map_tests")
-	}
 	if race.Enabled {
 		t.Skip("skipping test: -race will catch the race, this test is for the built-in race detection")
 	}
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapIterateWrite")
-	want := "fatal error: concurrent map iteration and map write\n"
-	if !strings.HasPrefix(output, want) {
-		t.Fatalf("output does not start with %q:\n%s", want, output)
+	if output != "" {
+		t.Fatalf("unexpected output:\n%s", output)
 	}
 }
 
@@ -741,7 +736,7 @@ func TestConcurrentMapWritesIssue69447(t *testing.T) {
 			// detect a problem even if there is one.)
 			continue
 		}
-		want := "fatal error: concurrent map writes\n"
+		want := "panic: concurrent map writes\n" // gd: doc/gd/maps.md
 		if !strings.HasPrefix(output, want) {
 			t.Fatalf("output does not start with %q:\n%s", want, output)
 		}

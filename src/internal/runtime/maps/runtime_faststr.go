@@ -14,9 +14,12 @@ import (
 	"unsafe"
 )
 
-func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, key string) unsafe.Pointer {
+func (m *Map) getWithoutKeySmallFastStr(typ *abi.MapType, dir unsafe.Pointer, key string) unsafe.Pointer {
+	if dir == nil {
+		return nil
+	}
 	g := groupReference{
-		data: m.dirPtr,
+		data: dir,
 	}
 
 	ctrls := *g.ctrls()
@@ -110,9 +113,6 @@ func runtime_mapaccess1_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poi
 
 //go:linkname runtime_mapaccess2_faststr runtime.mapaccess2_faststr
 func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Pointer, bool) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		return sharedGet(typ, m, abi.NoEscape(unsafe.Pointer(&key)))
-	}
 	if race.Enabled && m != nil {
 		callerpc := sys.GetCallerPC()
 		pc := abi.FuncPCABIInternal(runtime_mapaccess2_faststr)
@@ -123,13 +123,18 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 		return unsafe.Pointer(&zeroVal[0]), false
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
-		return nil, false
+	tries := 0
+retry:
+	rseq, dir, dirLen, shift := m.readFields()
+	if !m.readOK(rseq) {
+		rseq, dir, dirLen, shift = m.readBeginSlow()
 	}
 
-	if m.dirLen <= 0 {
-		elem := m.getWithoutKeySmallFastStr(typ, key)
+	if dirLen <= 0 {
+		elem := m.getWithoutKeySmallFastStr(typ, dir, key)
+		if m.readRetry(rseq, &tries) {
+			goto retry
+		}
 		if elem == nil {
 			return unsafe.Pointer(&zeroVal[0]), false
 		}
@@ -139,10 +144,9 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 	hash := strHash(key, m.seed)
 
 	// Select table.
-	idx := m.directoryIndex(hash)
-	t := m.directoryAt(idx)
+	t := dirAt(dir, dirIndex(hash, dirLen, shift))
 
-	// Probe table.
+	// Probe table. See the comment in table.getWithKey.
 	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
 	h2Hash := h2(hash)
 	for ; ; seq = seq.next() {
@@ -155,19 +159,26 @@ func runtime_mapaccess2_faststr(typ *abi.MapType, m *Map, key string) (unsafe.Po
 
 			slotKey := g.key(typ, i)
 			if key == *(*string)(slotKey) {
+				var elem unsafe.Pointer
 				if goexperiment.MapSplitGroup {
-					return g.elem(typ, i), true
+					elem = g.elem(typ, i)
 				} else {
-					return unsafe.Pointer(uintptr(slotKey) + typ.ElemOff), true
+					elem = unsafe.Pointer(uintptr(slotKey) + typ.ElemOff)
 				}
+				if m.readRetry(rseq, &tries) {
+					goto retry
+				}
+				return elem, true
 			}
 			match = match.removeFirst()
 		}
 
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
+		if g.ctrls().matchEmpty() != 0 || seq.last() {
 			// Finding an empty slot means we've reached the end of
 			// the probe sequence.
+			if m.readRetry(rseq, &tries) {
+				goto retry
+			}
 			return unsafe.Pointer(&zeroVal[0]), false
 		}
 	}
@@ -259,15 +270,9 @@ func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poin
 		pc := abi.FuncPCABIInternal(runtime_mapassign_faststr)
 		race.WritePC(unsafe.Pointer(m), callerpc, pc)
 	}
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
+	m.lockWrite()
 
 	hash := strHash(key, m.seed)
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
 
 	if m.dirPtr == nil {
 		m.growToSmall(typ)
@@ -285,10 +290,7 @@ func runtime_mapassign_faststr(typ *abi.MapType, m *Map, key string) unsafe.Poin
 			tab.checkInvariants(typ, m)
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -383,10 +385,7 @@ outer:
 		}
 	}
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 
 	return slotElem
 }

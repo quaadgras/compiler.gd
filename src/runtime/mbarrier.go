@@ -417,6 +417,19 @@ func maps_typedmemclr(typ *_type, ptr unsafe.Pointer) {
 	typedmemclr(typ, ptr)
 }
 
+// maps_typedmemclrSlots clears the map group of type typ at ptr but for
+// its control word, the group's first field: a reader may be looking at
+// the group, and a control word of zero says that every slot is full.
+//
+//go:linkname maps_typedmemclrSlots internal/runtime/maps.typedmemclrSlots
+func maps_typedmemclrSlots(typ *_type, ptr unsafe.Pointer) {
+	st := (*structtype)(unsafe.Pointer(typ))
+	for i := 1; i < len(st.Fields); i++ {
+		f := &st.Fields[i]
+		maps_typedmemclr(f.Typ, add(ptr, f.Offset))
+	}
+}
+
 //go:linkname reflect_typedmemclrpartial reflect.typedmemclrpartial
 func reflect_typedmemclrpartial(typ *_type, ptr unsafe.Pointer, off, size uintptr) {
 	if writeBarrier.enabled && typ.Pointers() {

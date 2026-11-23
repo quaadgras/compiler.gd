@@ -20,6 +20,19 @@ const (
 //go:linkname maps_errNilAssign internal/runtime/maps.errNilAssign
 var maps_errNilAssign error = plainError("assignment to entry in nil map")
 
+// maps_errConcurrentWrites is what a map write panics with if another
+// goroutine is writing the map. The loser has not touched the map and the
+// winner is not disturbed, so a program may recover (doc/gd/maps.md).
+//
+//go:linkname maps_errConcurrentWrites internal/runtime/maps.errConcurrentWrites
+var maps_errConcurrentWrites error = plainError("concurrent map writes")
+
+//go:linkname maps_publicationBarrier internal/runtime/maps.runtimePublicationBarrier
+//go:nosplit
+func maps_publicationBarrier() {
+	publicationBarrier()
+}
+
 // gd Phase G: return unsafe.Pointer (TUNSAFEPTR), not *maps.Map (TPTR), so
 // types.NewSignature does not extend this sig with a trailing outBuf param.
 // The compiler's builtin decl sees `(hmap map[any]any)` (TMAP, not extended)

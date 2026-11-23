@@ -251,19 +251,14 @@ type Map struct {
 	// On 64-bit systems, this is 64 - globalDepth.
 	globalShift uint8
 
-	// writing is a flag that is toggled (XOR 1) while the map is being
-	// written. Normally it is set to 1 when writing, but if there are
-	// multiple concurrent writers, then toggling increases the probability
-	// that both sides will detect the race.
-	writing uint8
-
 	// tombstonePossible is false if we know that no table in this map
 	// contains a tombstone.
 	tombstonePossible bool
 
-	// lock is taken by the operations on a map that other goroutines can
-	// reach (shared.go), by any number of readers or by one writer.
-	lock uint32
+	// seq is the map's sequence lock (seq.go): odd while a writer holds
+	// the map. The fields that readers need to go together, dirPtr,
+	// dirLen and globalShift, are only written with it held.
+	seq uint32
 
 	// clearSeq is a sequence counter of calls to Clear. It is used to
 	// detect map clears during iteration.
@@ -354,6 +349,10 @@ func NewMap(mt *abi.MapType, hint uintptr, m *Map, maxAlloc uintptr) *Map {
 	m.dirPtr = unsafe.Pointer(&directory[0])
 	m.dirLen = len(directory)
 
+	// What the caller stores the map in may be read by a goroutine that
+	// races with it: the map is seen initialized first.
+	storeBarrier()
+
 	return m
 }
 
@@ -383,6 +382,7 @@ func (m *Map) replaceTable(nt *table) {
 	// The number of entries that reference the same table doubles for each
 	// time the globalDepth grows without the table splitting.
 	entries := 1 << (m.globalDepth - nt.localDepth)
+	storeBarrier() // nt is seen whole by who finds it in the directory
 	for i := 0; i < entries; i++ {
 		//m.directory[nt.index+i] = nt
 		m.directorySet(uintptr(nt.index+i), nt)
@@ -409,6 +409,7 @@ func (m *Map) installTableSplit(old, left, right *table) {
 		}
 		m.globalDepth++
 		m.globalShift--
+		storeBarrier() // the directory is seen whole
 		//m.directory = newDir
 		m.dirPtr = unsafe.Pointer(&newDir[0])
 		m.dirLen = len(newDir)
@@ -434,48 +435,41 @@ func (m *Map) Get(typ *abi.MapType, key unsafe.Pointer) (unsafe.Pointer, bool) {
 	return m.getWithoutKey(typ, key)
 }
 
-func (m *Map) getWithKey(typ *abi.MapType, key unsafe.Pointer) (unsafe.Pointer, unsafe.Pointer, bool) {
+func (m *Map) getWithKey(typ *abi.MapType, key unsafe.Pointer) (slotKey, slotElem unsafe.Pointer, ok bool) {
 	if m.Used() == 0 {
 		return nil, nil, false
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
-	}
-
+	tries := 0
+retry:
+	seq, dir, dirLen, shift := m.readBegin()
 	hash := typ.Hasher(key, m.seed)
 
-	if m.dirLen == 0 {
-		return m.getWithKeySmall(typ, hash, key)
+	if dirLen == 0 {
+		slotKey, slotElem, ok = getWithKeySmall(typ, dir, hash, key)
+	} else {
+		slotKey, slotElem, ok = dirAt(dir, dirIndex(hash, dirLen, shift)).getWithKey(typ, hash, key)
 	}
-
-	idx := m.directoryIndex(hash)
-	return m.directoryAt(idx).getWithKey(typ, hash, key)
+	if m.readRetry(seq, &tries) {
+		goto retry
+	}
+	return slotKey, slotElem, ok
 }
 
 func (m *Map) getWithoutKey(typ *abi.MapType, key unsafe.Pointer) (unsafe.Pointer, bool) {
-	if m.Used() == 0 {
-		return nil, false
-	}
-
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
-	}
-
-	hash := typ.Hasher(key, m.seed)
-
-	if m.dirLen == 0 {
-		_, elem, ok := m.getWithKeySmall(typ, hash, key)
-		return elem, ok
-	}
-
-	idx := m.directoryIndex(hash)
-	return m.directoryAt(idx).getWithoutKey(typ, hash, key)
+	_, elem, ok := m.getWithKey(typ, key)
+	return elem, ok
 }
 
-func (m *Map) getWithKeySmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) (unsafe.Pointer, unsafe.Pointer, bool) {
+// getWithKeySmall looks for key in the group of a small map, dir (nil if
+// the map has none yet). The slots are read as a lookup reads them:
+// see the comment in table.getWithKey.
+func getWithKeySmall(typ *abi.MapType, dir unsafe.Pointer, hash uintptr, key unsafe.Pointer) (unsafe.Pointer, unsafe.Pointer, bool) {
+	if dir == nil {
+		return nil, nil, false
+	}
 	g := groupReference{
-		data: m.dirPtr,
+		data: dir,
 	}
 
 	match := g.ctrls().matchH2(h2(hash))
@@ -486,12 +480,20 @@ func (m *Map) getWithKeySmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer
 		slotKey := g.key(typ, i)
 		if typ.IndirectKey() {
 			slotKey = *((*unsafe.Pointer)(slotKey))
+			if slotKey == nil {
+				match = match.removeFirst()
+				continue
+			}
 		}
 
 		if typ.Key.Equal(key, slotKey) {
 			slotElem := g.elem(typ, i)
 			if typ.IndirectElem() {
 				slotElem = *((*unsafe.Pointer)(slotElem))
+				if slotElem == nil {
+					match = match.removeFirst()
+					continue
+				}
 			}
 			return slotKey, slotElem, true
 		}
@@ -514,15 +516,7 @@ func (m *Map) Put(typ *abi.MapType, key, elem unsafe.Pointer) {
 //
 // PutSlot never returns nil.
 func (m *Map) PutSlot(typ *abi.MapType, key unsafe.Pointer) unsafe.Pointer {
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
-
-	hash := typ.Hasher(key, m.seed)
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
+	hash := m.lockWriteHash(typ, key)
 
 	if m.dirPtr == nil {
 		m.growToSmall(typ)
@@ -540,10 +534,7 @@ func (m *Map) PutSlot(typ *abi.MapType, key unsafe.Pointer) unsafe.Pointer {
 			tab.checkInvariants(typ, m)
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -555,10 +546,7 @@ func (m *Map) PutSlot(typ *abi.MapType, key unsafe.Pointer) unsafe.Pointer {
 			continue
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -576,12 +564,13 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 		i := match.first()
 
 		slotKey := g.key(typ, i)
+		origSlotKey := slotKey
 		if typ.IndirectKey() {
 			slotKey = *((*unsafe.Pointer)(slotKey))
 		}
 		if typ.Key.Equal(key, slotKey) {
 			if typ.NeedKeyUpdate() {
-				typedmemmove(typ.Key, slotKey, key)
+				updateKey(typ, origSlotKey, slotKey, key, m.local())
 			}
 
 			slotElem := g.elem(typ, i)
@@ -608,10 +597,11 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 	slotKey := g.key(typ, i)
 	if typ.IndirectKey() {
 		kmem := newobjectIn(typ.Key, m.local())
+		typedmemmove(typ.Key, kmem, key)
 		*(*unsafe.Pointer)(slotKey) = kmem
-		slotKey = kmem
+	} else {
+		typedmemmove(typ.Key, slotKey, key)
 	}
-	typedmemmove(typ.Key, slotKey, key)
 
 	slotElem := g.elem(typ, i)
 	if typ.IndirectElem() {
@@ -628,12 +618,14 @@ func (m *Map) putSlotSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) u
 
 func (m *Map) growToSmall(typ *abi.MapType) {
 	grp := newGroups(typ, 1, m.local())
-	m.dirPtr = grp.data
 
 	g := groupReference{
-		data: m.dirPtr,
+		data: grp.data,
 	}
 	g.ctrls().setEmpty()
+
+	storeBarrier() // the group is seen empty
+	m.dirPtr = grp.data
 }
 
 func (m *Map) growToTable(typ *abi.MapType) *table {
@@ -670,6 +662,7 @@ func (m *Map) growToTable(typ *abi.MapType) *table {
 
 	directory[0] = tab
 
+	storeBarrier() // the table and the directory are seen whole
 	m.dirPtr = unsafe.Pointer(&directory[0])
 	m.dirLen = len(directory)
 
@@ -679,17 +672,6 @@ func (m *Map) growToTable(typ *abi.MapType) *table {
 }
 
 func (m *Map) Delete(typ *abi.MapType, key unsafe.Pointer) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		typ.Hasher(key, m.seed) // may panic: not with the lock held
-		m.wlock()
-		m.delete(typ, key)
-		m.wunlock()
-		return
-	}
-	m.delete(typ, key)
-}
-
-func (m *Map) delete(typ *abi.MapType, key unsafe.Pointer) {
 	if m == nil || m.Used() == 0 {
 		if err := mapKeyError(typ, key); err != nil {
 			panic(err) // see issue 23734
@@ -697,15 +679,7 @@ func (m *Map) delete(typ *abi.MapType, key unsafe.Pointer) {
 		return
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
-
-	hash := typ.Hasher(key, m.seed)
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
+	hash := m.lockWriteHash(typ, key)
 
 	if m.dirLen == 0 {
 		m.deleteSmall(typ, hash, key)
@@ -723,10 +697,7 @@ func (m *Map) delete(typ *abi.MapType, key unsafe.Pointer) {
 		m.seed = uintptr(rand())
 	}
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 }
 
 func (m *Map) deleteSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) {
@@ -745,6 +716,12 @@ func (m *Map) deleteSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) {
 		}
 		if typ.Key.Equal(key, slotKey) {
 			m.used--
+
+			// We only have 1 group, so it is OK to immediately
+			// reuse deleted slots. (The slot is empty before it is
+			// cleared: a reader does not take its zero key for a
+			// key.)
+			g.ctrls().set(i, ctrlEmpty)
 
 			if typ.IndirectKey() {
 				// Clearing the pointer is sufficient.
@@ -766,10 +743,6 @@ func (m *Map) deleteSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) {
 				// https://go.dev/issue/25936.
 				typedmemclr(typ.Elem, slotElem)
 			}
-
-			// We only have 1 group, so it is OK to immediately
-			// reuse deleted slots.
-			g.ctrls().set(i, ctrlEmpty)
 			return
 		}
 		match = match.removeFirst()
@@ -778,24 +751,11 @@ func (m *Map) deleteSmall(typ *abi.MapType, hash uintptr, key unsafe.Pointer) {
 
 // Clear deletes all entries from the map resulting in an empty map.
 func (m *Map) Clear(typ *abi.MapType) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		m.wlock()
-		m.clear(typ)
-		m.wunlock()
-		return
-	}
-	m.clear(typ)
-}
-
-func (m *Map) clear(typ *abi.MapType) {
 	if m == nil || m.Used() == 0 && !m.tombstonePossible {
 		return
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1 // toggle, see comment on writing
+	m.lockWrite()
 
 	if m.dirLen == 0 {
 		m.clearSmall(typ)
@@ -819,10 +779,7 @@ func (m *Map) clear(typ *abi.MapType) {
 	// repeatedly trigger hash collisions. See https://go.dev/issue/25237.
 	m.seed = uintptr(rand())
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 }
 
 func (m *Map) clearSmall(typ *abi.MapType) {
@@ -830,33 +787,47 @@ func (m *Map) clearSmall(typ *abi.MapType) {
 		data: m.dirPtr,
 	}
 
-	typedmemclr(typ.Group, g.data)
+	// Empty before it is cleared: see table.Clear.
 	g.ctrls().setEmpty()
+	typedmemclrSlots(typ.Group, g.data)
 
 	m.used = 0
 }
 
+// Clone returns a copy of the map. It is a read: it copies the map as it
+// was in one state, starting again if a write overlaps the copy, and if
+// writes keep overlapping it, it holds the map while it copies.
 func (m *Map) Clone(typ *abi.MapType) *Map {
-	if isShared(unsafe.Pointer(m)) {
-		m.rlock()
-		m2 := m.clone(typ)
-		m.runlock()
-		return m2
+	for range mapCloneTries {
+		seq, dir, dirLen, shift := m.readBegin()
+		m2 := m.clone(typ, dir, dirLen, shift)
+		if !m.readChanged(seq) {
+			storeBarrier() // as NewMap
+			return m2
+		}
 	}
-	return m.clone(typ)
+	m.lockWriteWait()
+	m2 := m.clone(typ, m.dirPtr, m.dirLen, m.globalShift)
+	m.unlockWrite()
+	storeBarrier()
+	return m2
 }
 
-func (m *Map) clone(typ *abi.MapType) *Map {
+// clone copies the map whose directory fields are dir, dirLen and shift,
+// which go together. If a write overlaps it the copy is thrown away, but
+// it stays within what it reads: see the comment in table.getWithKey.
+func (m *Map) clone(typ *abi.MapType, dir unsafe.Pointer, dirLen int, shift uint8) *Map {
 	// Note: this should never be called with a nil map.
-	if m.writing != 0 {
-		fatal("concurrent map clone and map write")
-	}
 
 	// Shallow copy the Map structure.
 	m2 := new(Map)
 	*m2 = *m
 	m = m2
-	m.lock = 0
+	m.seq = 0
+	m.dirPtr = dir
+	m.dirLen = dirLen
+	m.globalShift = shift
+	m.globalDepth = depthOf(dirLen, shift)
 
 	// We need to just deep copy the dirPtr field.
 	if m.dirPtr == nil {
@@ -871,11 +842,15 @@ func (m *Map) clone(typ *abi.MapType) *Map {
 		// Clone each (different) table.
 		oldDir := unsafe.Slice((**table)(m.dirPtr), m.dirLen)
 		newDir := make([]*table, m.dirLen)
-		for i, t := range oldDir {
-			if i > 0 && t == oldDir[i-1] {
+		var last *table
+		for i := range oldDir {
+			// One load of each entry: a split may be replacing them.
+			t := oldDir[i]
+			if i > 0 && t == last {
 				newDir[i] = newDir[i-1]
 				continue
 			}
+			last = t
 			newDir[i] = t.clone(typ)
 		}
 		m.dirPtr = unsafe.Pointer(&newDir[0])

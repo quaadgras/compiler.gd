@@ -61,6 +61,23 @@ func algFunc(fn *ir.Func) bool {
 	return strings.HasPrefix(name, ".eq.") || strings.HasPrefix(name, ".hash.")
 }
 
+// runtimeTearFunc reports whether fn, in the runtime's package pkg, loads
+// and stores whole as compiled code does: the map's functions, and the
+// equality functions it calls on the keys in its slots, read memory that
+// another goroutine may be writing (doc/gd/maps.md).
+func runtimeTearFunc(pkg string, fn *ir.Func) bool {
+	switch pkg {
+	case "internal/runtime/maps":
+		return true
+	case "runtime":
+		switch fn.Sym().Name {
+		case "strequal", "interequal", "nilinterequal":
+			return true
+		}
+	}
+	return false
+}
+
 // tearGuard reports whether a value of type t at addr is loaded and
 // stored under the sequence locks.
 func (s *state) tearGuard(t *types.Type, addr *ssa.Value) bool {

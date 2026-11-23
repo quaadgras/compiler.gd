@@ -194,9 +194,8 @@ func MapType(gd *base.Invocation) *types.Type {
 		//     globalDepth uint8
 		//     globalShift uint8
 		//
-		//     writing uint8
 		//     tombstonePossible bool
-		//     lock uint32
+		//     seq uint32
 		//
 		//     clearSeq uint64
 		// }
@@ -208,9 +207,8 @@ func MapType(gd *base.Invocation) *types.Type {
 			makefield("dirLen", types.Types[types.TINT]),
 			makefield("globalDepth", types.Types[types.TUINT8]),
 			makefield("globalShift", types.Types[types.TUINT8]),
-			makefield("writing", types.Types[types.TUINT8]),
 			makefield("tombstonePossible", types.Types[types.TBOOL]),
-			makefield("lock", types.Types[types.TUINT32]),
+			makefield("seq", types.Types[types.TUINT32]),
 			makefield("clearSeq", types.Types[types.TUINT64]),
 		}
 
@@ -223,7 +221,7 @@ func MapType(gd *base.Invocation) *types.Type {
 		types.CalcSize(gd, m)
 
 		// The size of Map should be 48 bytes on 64 bit platforms, and 36 or
-		// 40 on 32 bit ones (the lock is in the padding of the first).
+		// 40 on 32 bit ones (seq is in the padding of the first).
 		size := int64(48)
 		if types.PtrSize == 4 {
 			size = types.RoundUp(28, int64(types.Types[types.TUINT64].Alignment())) + 8

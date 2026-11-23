@@ -303,15 +303,16 @@ barrier.)
 
 ## Maps
 
-A map's header has a lock word (in the padding it had on 64-bit targets):
-readers count in it, a writer takes it whole, a waiting writer stops new
-readers. Every map operation starts by asking whether the map is shared
-(`internal/runtime/maps/shared.go`); a shared one runs the generic
-operation with the lock held, and what a write allocates for the map is
-shared from the start. The lock is held for the operation only, so two
-goroutines that race on a map see a map; they may still see an entry
-before its value is stored, or lose an update. "concurrent map writes" is
-no longer reachable for a map goroutines share.
+A map's header has a sequence lock, in every build (`doc/gd/maps.md`):
+readers write nothing and check it, and a writer takes it with one
+compare-and-swap and panics if it is held. Under this experiment a write
+asks whether the map is shared (`internal/runtime/maps/shared.go`): what
+it allocates for a shared map is shared from the start, and the writers
+of a shared map wait for the lock instead of panicking, so "concurrent
+map writes" is not reachable for a map goroutines share. The lock is held
+for the operation only, so two goroutines that race on a map see a map;
+they may still see an entry before its value is stored, or lose an
+update.
 
 ## Values of more than one word
 

@@ -1439,6 +1439,23 @@ func initIntrinsicsBody(gd *base.Invocation, cfg *intrinsicBuildConfig) {
 	// could be handled with build tags (though that would break
 	// -d=ssa/intrinsics/off=1).
 
+	// The load barrier of a map lookup's second check of its sequence
+	// (internal/runtime/maps/seq.go): DMB ISHLD.
+	addF("internal/runtime/maps", "loadBarrier",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			s.vars[memVar] = s.newValue1I(ssa.OpARM64DMB, types.TypeMem, 0x9, s.mem())
+			return nil
+		},
+		sys.ARM64)
+
+	// Its store barrier, in the fast path of a write: DMB ISHST.
+	addF("internal/runtime/maps", "storeBarrier",
+		func(s *state, n *ir.CallExpr, args []*ssa.Value) *ssa.Value {
+			s.vars[memVar] = s.newValue1I(ssa.OpARM64DMB, types.TypeMem, 0xa, s.mem())
+			return nil
+		},
+		sys.ARM64)
+
 	// With a packed representation we no longer need to shift the result
 	// of TrailingZeros64.
 	alias("internal/runtime/maps", "bitsetFirst", "internal/runtime/sys", "TrailingZeros64", sys.ArchAMD64)

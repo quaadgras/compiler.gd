@@ -33,6 +33,12 @@ func typedmemmove(typ *abi.Type, dst, src unsafe.Pointer)
 //go:linkname typedmemclr
 func typedmemclr(typ *abi.Type, ptr unsafe.Pointer)
 
+// typedmemclrSlots clears the group of type typ at ptr but for its control
+// word, each value whole.
+//
+//go:linkname typedmemclrSlots
+func typedmemclrSlots(typ *abi.Type, ptr unsafe.Pointer)
+
 //go:linkname newarray
 func newarray(typ *abi.Type, n int) unsafe.Pointer
 
@@ -89,9 +95,6 @@ func runtime_mapaccess1(typ *abi.MapType, m *Map, key unsafe.Pointer) unsafe.Poi
 
 //go:linkname runtime_mapaccess2 runtime.mapaccess2
 func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Pointer, bool) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		return sharedGet(typ, m, key)
-	}
 	if race.Enabled && m != nil {
 		callerpc := sys.GetCallerPC()
 		pc := abi.FuncPCABIInternal(runtime_mapaccess2)
@@ -112,14 +115,20 @@ func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Po
 		return unsafe.Pointer(&zeroVal[0]), false
 	}
 
-	if m.writing != 0 {
-		fatal("concurrent map read and map write")
+	tries := 0
+retry:
+	rseq, dir, dirLen, shift := m.readFields()
+	if !m.readOK(rseq) {
+		rseq, dir, dirLen, shift = m.readBeginSlow()
 	}
 
 	hash := typ.Hasher(key, m.seed)
 
-	if m.dirLen == 0 {
-		_, elem, ok := m.getWithKeySmall(typ, hash, key)
+	if dirLen == 0 {
+		_, elem, ok := getWithKeySmall(typ, dir, hash, key)
+		if m.readRetry(rseq, &tries) {
+			goto retry
+		}
 		if !ok {
 			return unsafe.Pointer(&zeroVal[0]), false
 		}
@@ -127,10 +136,9 @@ func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Po
 	}
 
 	// Select table.
-	idx := m.directoryIndex(hash)
-	t := m.directoryAt(idx)
+	t := dirAt(dir, dirIndex(hash, dirLen, shift))
 
-	// Probe table.
+	// Probe table. See the comment in table.getWithKey.
 	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
 	h2Hash := h2(hash)
 	for ; ; seq = seq.next() {
@@ -145,6 +153,10 @@ func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Po
 			slotKeyOrig := slotKey
 			if typ.IndirectKey() {
 				slotKey = *((*unsafe.Pointer)(slotKey))
+				if slotKey == nil {
+					match = match.removeFirst()
+					continue
+				}
 			}
 			if typ.Key.Equal(key, slotKey) {
 				var slotElem unsafe.Pointer
@@ -155,16 +167,25 @@ func runtime_mapaccess2(typ *abi.MapType, m *Map, key unsafe.Pointer) (unsafe.Po
 				}
 				if typ.IndirectElem() {
 					slotElem = *((*unsafe.Pointer)(slotElem))
+					if slotElem == nil {
+						match = match.removeFirst()
+						continue
+					}
+				}
+				if m.readRetry(rseq, &tries) {
+					goto retry
 				}
 				return slotElem, true
 			}
 			match = match.removeFirst()
 		}
 
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
+		if g.ctrls().matchEmpty() != 0 || seq.last() {
 			// Finding an empty slot means we've reached the end of
 			// the probe sequence.
+			if m.readRetry(rseq, &tries) {
+				goto retry
+			}
 			return unsafe.Pointer(&zeroVal[0]), false
 		}
 	}
@@ -190,15 +211,7 @@ func runtime_mapassign(typ *abi.MapType, m *Map, key unsafe.Pointer) unsafe.Poin
 	if asan.Enabled {
 		asan.Read(key, typ.Key.Size_)
 	}
-	if m.writing != 0 {
-		fatal("concurrent map writes")
-	}
-
-	hash := typ.Hasher(key, m.seed)
-
-	// Set writing after calling Hasher, since Hasher may panic, in which
-	// case we have not actually done a write.
-	m.writing ^= 1 // toggle, see comment on writing
+	hash := m.lockWriteHash(typ, key)
 
 	if m.dirPtr == nil {
 		m.growToSmall(typ)
@@ -216,10 +229,7 @@ func runtime_mapassign(typ *abi.MapType, m *Map, key unsafe.Pointer) unsafe.Poin
 			tab.checkInvariants(typ, m)
 		}
 
-		if m.writing == 0 {
-			fatal("concurrent map writes")
-		}
-		m.writing ^= 1
+		m.unlockWrite()
 
 		return elem
 	}
@@ -255,7 +265,7 @@ outer:
 				}
 				if typ.Key.Equal(key, slotKey) {
 					if typ.NeedKeyUpdate() {
-						typedmemmove(typ.Key, slotKey, key)
+						updateKey(typ, slotKeyOrig, slotKey, key, t.local)
 					}
 
 					if goexperiment.MapSplitGroup {
@@ -299,10 +309,11 @@ outer:
 					slotKeyOrig := slotKey
 					if typ.IndirectKey() {
 						kmem := newobjectIn(typ.Key, t.local)
+						typedmemmove(typ.Key, kmem, key)
 						*(*unsafe.Pointer)(slotKey) = kmem
-						slotKey = kmem
+					} else {
+						typedmemmove(typ.Key, slotKey, key)
 					}
-					typedmemmove(typ.Key, slotKey, key)
 
 					if goexperiment.MapSplitGroup {
 						slotElem = g.elem(typ, i)
@@ -345,10 +356,7 @@ outer:
 		}
 	}
 
-	if m.writing == 0 {
-		fatal("concurrent map writes")
-	}
-	m.writing ^= 1
+	m.unlockWrite()
 
 	return slotElem
 }

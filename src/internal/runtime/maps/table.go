@@ -197,6 +197,16 @@ func (t *table) getWithKey(typ *abi.MapType, hash uintptr, key unsafe.Pointer) (
 	// is then k/128. Measurements and analysis indicate that even at high
 	// load factors, k is less than 32, meaning that the number of false
 	// positive comparisons we must perform is less than 1/8 per find.
+	//
+	// gd: this runs while a writer may be changing the table (seq.go,
+	// doc/gd/maps.md). The groups and the mask of a table never change
+	// once it is published, so every group is in bounds whatever the
+	// control words say. A control word that changes under the lookup
+	// only sends it to another slot. The pointer of an indirect key or
+	// element is nil in a slot that is being filled or was deleted, and
+	// such a slot is no match. Equal reads the key whole. A probe that
+	// has seen every group stops, for a table where a clear or an insert
+	// moved the empty slots behind it.
 	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
 	h2Hash := h2(hash)
 	for ; ; seq = seq.next() {
@@ -210,19 +220,26 @@ func (t *table) getWithKey(typ *abi.MapType, hash uintptr, key unsafe.Pointer) (
 			slotKey := g.key(typ, i)
 			if typ.IndirectKey() {
 				slotKey = *((*unsafe.Pointer)(slotKey))
+				if slotKey == nil {
+					match = match.removeFirst()
+					continue
+				}
 			}
 			if typ.Key.Equal(key, slotKey) {
 				slotElem := g.elem(typ, i)
 				if typ.IndirectElem() {
 					slotElem = *((*unsafe.Pointer)(slotElem))
+					if slotElem == nil {
+						match = match.removeFirst()
+						continue
+					}
 				}
 				return slotKey, slotElem, true
 			}
 			match = match.removeFirst()
 		}
 
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
+		if g.ctrls().matchEmpty() != 0 || seq.last() {
 			// Finding an empty slot means we've reached the end of
 			// the probe sequence.
 			return nil, nil, false
@@ -231,37 +248,8 @@ func (t *table) getWithKey(typ *abi.MapType, hash uintptr, key unsafe.Pointer) (
 }
 
 func (t *table) getWithoutKey(typ *abi.MapType, hash uintptr, key unsafe.Pointer) (unsafe.Pointer, bool) {
-	seq := makeProbeSeq(h1(hash), t.groups.lengthMask)
-	h2Hash := h2(hash)
-	for ; ; seq = seq.next() {
-		g := t.groups.group(typ, seq.offset)
-
-		match := g.ctrls().matchH2(h2Hash)
-
-		for match != 0 {
-			i := match.first()
-
-			slotKey := g.key(typ, i)
-			if typ.IndirectKey() {
-				slotKey = *((*unsafe.Pointer)(slotKey))
-			}
-			if typ.Key.Equal(key, slotKey) {
-				slotElem := g.elem(typ, i)
-				if typ.IndirectElem() {
-					slotElem = *((*unsafe.Pointer)(slotElem))
-				}
-				return slotElem, true
-			}
-			match = match.removeFirst()
-		}
-
-		match = g.ctrls().matchEmpty()
-		if match != 0 {
-			// Finding an empty slot means we've reached the end of
-			// the probe sequence.
-			return nil, false
-		}
-	}
+	_, elem, ok := t.getWithKey(typ, hash, key)
+	return elem, ok
 }
 
 // PutSlot returns a pointer to the element slot where an inserted element
@@ -289,12 +277,13 @@ func (t *table) PutSlot(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Point
 			i := match.first()
 
 			slotKey := g.key(typ, i)
+			origSlotKey := slotKey
 			if typ.IndirectKey() {
 				slotKey = *((*unsafe.Pointer)(slotKey))
 			}
 			if typ.Key.Equal(key, slotKey) {
 				if typ.NeedKeyUpdate() {
-					typedmemmove(typ.Key, slotKey, key)
+					updateKey(typ, origSlotKey, slotKey, key, t.local)
 				}
 
 				slotElem := g.elem(typ, i)
@@ -345,10 +334,11 @@ func (t *table) PutSlot(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Point
 			slotKey := g.key(typ, i)
 			if typ.IndirectKey() {
 				kmem := newobjectIn(typ.Key, t.local)
+				typedmemmove(typ.Key, kmem, key)
 				*(*unsafe.Pointer)(slotKey) = kmem
-				slotKey = kmem
+			} else {
+				typedmemmove(typ.Key, slotKey, key)
 			}
-			typedmemmove(typ.Key, slotKey, key)
 
 			slotElem := g.elem(typ, i)
 			if typ.IndirectElem() {
@@ -461,10 +451,11 @@ func (t *table) uncheckedPutSlotForAssign(typ *abi.MapType, hash uintptr, key un
 			slotKey := g.key(typ, i)
 			if typ.IndirectKey() {
 				kmem := newobjectIn(typ.Key, t.local)
+				typedmemmove(typ.Key, kmem, key)
 				*(*unsafe.Pointer)(slotKey) = kmem
-				slotKey = kmem
+			} else {
+				typedmemmove(typ.Key, slotKey, key)
 			}
-			typedmemmove(typ.Key, slotKey, key)
 
 			slotElem := g.elem(typ, i)
 			if typ.IndirectElem() {
@@ -502,6 +493,25 @@ func (t *table) Delete(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Pointe
 				t.used--
 				m.used--
 
+				// Only a full group can appear in the middle
+				// of a probe sequence (a group with at least
+				// one empty slot terminates probing). Once a
+				// group becomes full, it stays full until
+				// rehashing/resizing. So if the group isn't
+				// full now, we can simply remove the element.
+				// Otherwise, we create a tombstone to mark the
+				// slot as deleted. (Before the slot is
+				// cleared: a reader does not take its zero key
+				// for a key.)
+				var tombstone bool
+				if g.ctrls().matchEmpty() != 0 {
+					g.ctrls().set(i, ctrlEmpty)
+					t.growthLeft++
+				} else {
+					g.ctrls().set(i, ctrlDeleted)
+					tombstone = true
+				}
+
 				if typ.IndirectKey() {
 					// Clearing the pointer is sufficient.
 					*(*unsafe.Pointer)(origSlotKey) = nil
@@ -522,23 +532,6 @@ func (t *table) Delete(typ *abi.MapType, m *Map, hash uintptr, key unsafe.Pointe
 					// deleted values. See
 					// https://go.dev/issue/25936.
 					typedmemclr(typ.Elem, slotElem)
-				}
-
-				// Only a full group can appear in the middle
-				// of a probe sequence (a group with at least
-				// one empty slot terminates probing). Once a
-				// group becomes full, it stays full until
-				// rehashing/resizing. So if the group isn't
-				// full now, we can simply remove the element.
-				// Otherwise, we create a tombstone to mark the
-				// slot as deleted.
-				var tombstone bool
-				if g.ctrls().matchEmpty() != 0 {
-					g.ctrls().set(i, ctrlEmpty)
-					t.growthLeft++
-				} else {
-					g.ctrls().set(i, ctrlDeleted)
-					tombstone = true
 				}
 
 				t.checkInvariants(typ, m)
@@ -677,6 +670,10 @@ func (t *table) Clear(typ *abi.MapType) {
 	//     bother testing, as it confuses the branch predictor. See #75097.
 	//  4) But if a group is really large, do the test anyway, as
 	//     clearing is expensive.
+	//
+	// gd: a group's control word is set empty before its slots are
+	// cleared, and is never zero, which would say that all its slots are
+	// full: a reader may be looking at it (doc/gd/maps.md).
 	fullTest := uint64(t.used)*4 <= t.groups.lengthMask // less than ~0.25 entries per group -> >3/4 empty groups
 	if goexperiment.MapSplitGroup {
 		if (typ.KeyStride + typ.ElemStride) > 32 {
@@ -692,16 +689,17 @@ func (t *table) Clear(typ *abi.MapType) {
 	if fullTest {
 		for i := uint64(0); i <= t.groups.lengthMask; i++ {
 			g := t.groups.group(typ, i)
-			if g.ctrls().anyFull() {
-				typedmemclr(typ.Group, g.data)
-			}
+			full := g.ctrls().anyFull()
 			g.ctrls().setEmpty()
+			if full {
+				typedmemclrSlots(typ.Group, g.data)
+			}
 		}
 	} else {
 		for i := uint64(0); i <= t.groups.lengthMask; i++ {
 			g := t.groups.group(typ, i)
-			typedmemclr(typ.Group, g.data)
 			g.ctrls().setEmpty()
+			typedmemclrSlots(typ.Group, g.data)
 		}
 	}
 	t.used = 0
@@ -746,34 +744,30 @@ type Iter struct {
 
 // Init initializes Iter for iteration.
 func (it *Iter) Init(typ *abi.MapType, m *Map) {
-	if m != nil && isShared(unsafe.Pointer(m)) {
-		m.rlock()
-		it.init(typ, m)
-		m.runlock()
-		return
-	}
-	it.init(typ, m)
-}
-
-func (it *Iter) init(typ *abi.MapType, m *Map) {
 	it.typ = typ
 
 	if m == nil || m.used == 0 {
 		return
 	}
 
+	_, dir, dirLen, shift := m.readBegin()
+
 	dirIdx := 0
 	var groupSmall groupReference
-	if m.dirLen <= 0 {
+	if dirLen <= 0 {
+		if dir == nil {
+			// used was from a write that this load does not see.
+			return
+		}
 		// Use dirIdx == -1 as sentinel for small maps.
 		dirIdx = -1
-		groupSmall.data = m.dirPtr
+		groupSmall.data = dir
 	}
 
 	it.m = m
 	it.entryOffset = rand()
 	it.dirOffset = rand()
-	it.globalDepth = m.globalDepth
+	it.globalDepth = depthOf(dirLen, shift)
 	it.dirIdx = dirIdx
 	it.group = groupSmall
 	it.clearSeq = m.clearSeq
@@ -830,7 +824,14 @@ func (it *Iter) nextDirIdx() {
 	// We can achieve both of these by using to difference between
 	// the directory and table depth to compute how many entries
 	// the table covers.
-	entries := 1 << (it.m.globalDepth - it.tab.localDepth)
+	//
+	// (it.globalDepth is at least the depth of a table of the directory
+	// it was read with; the test is for a table that a racing write put
+	// in that directory: iteration must advance.)
+	entries := 1
+	if it.tab.localDepth < it.globalDepth {
+		entries = 1 << (it.globalDepth - it.tab.localDepth)
+	}
 	it.dirIdx += entries
 	it.tab = nil
 	it.group = groupReference{}
@@ -840,6 +841,8 @@ func (it *Iter) nextDirIdx() {
 // Return the appropriate key/elem for key at slotIdx index within it.group, if
 // any.
 func (it *Iter) grownKeyElem(key unsafe.Pointer, slotIdx uintptr) (unsafe.Pointer, unsafe.Pointer, bool) {
+	// (key does not change: it is in a table or a group that no write
+	// reaches any more, or an indirect key, whose memory never changes.)
 	newKey, newElem, ok := it.m.getWithKey(it.typ, key)
 	if !ok {
 		// Key has likely been deleted, and
@@ -869,6 +872,9 @@ func (it *Iter) grownKeyElem(key unsafe.Pointer, slotIdx uintptr) (unsafe.Pointe
 			elem := it.group.elem(it.typ, slotIdx)
 			if it.typ.IndirectElem() {
 				elem = *((*unsafe.Pointer)(elem))
+				if elem == nil {
+					return nil, nil, false
+				}
 			}
 			return key, elem, true
 		}
@@ -887,17 +893,12 @@ func (it *Iter) grownKeyElem(key unsafe.Pointer, slotIdx uintptr) (unsafe.Pointe
 // the mutations will be visible to the iteration.
 //
 // Init must be called prior to Next.
+//
+// gd: a write may race with Next (doc/gd/maps.md). The directory is read
+// once, whole; what is read through it is safe as a lookup's is (see the
+// comment in table.getWithKey). An iteration that races with a write may
+// return an entry twice or miss one, but only ever returns entries.
 func (it *Iter) Next() {
-	if m := it.m; m != nil && isShared(unsafe.Pointer(m)) {
-		m.rlock()
-		it.next()
-		m.runlock()
-		return
-	}
-	it.next()
-}
-
-func (it *Iter) next() {
 	if it.m == nil {
 		// Map was empty at Iter.Init.
 		it.key = nil
@@ -905,10 +906,7 @@ func (it *Iter) next() {
 		return
 	}
 
-	if it.m.writing != 0 {
-		fatal("concurrent map iteration and map write")
-		return
-	}
+	_, dir, dirLen, shift := it.m.readBegin()
 
 	if it.dirIdx < 0 {
 		// Map was small at Init.
@@ -923,35 +921,30 @@ func (it *Iter) next() {
 			key := it.group.key(it.typ, k)
 			if it.typ.IndirectKey() {
 				key = *((*unsafe.Pointer)(key))
+				if key == nil {
+					continue // being filled, or deleted
+				}
 			}
 
 			// As below, if we have grown to a full map since Init,
 			// we continue to use the old group to decide the keys
 			// to return, but must look them up again in the new
 			// tables.
-			grown := it.m.dirLen > 0
+			grown := dirLen > 0
 			var elem unsafe.Pointer
 			if grown {
 				var ok bool
-				newKey, newElem, ok := it.m.getWithKey(it.typ, key)
+				key, elem, ok = it.grownKeyElem(key, k)
 				if !ok {
-					// See comment below.
-					if it.clearSeq == it.m.clearSeq && !it.typ.Key.Equal(key, key) {
-						elem = it.group.elem(it.typ, k)
-						if it.typ.IndirectElem() {
-							elem = *((*unsafe.Pointer)(elem))
-						}
-					} else {
-						continue
-					}
-				} else {
-					key = newKey
-					elem = newElem
+					continue
 				}
 			} else {
 				elem = it.group.elem(it.typ, k)
 				if it.typ.IndirectElem() {
 					elem = *((*unsafe.Pointer)(elem))
+					if elem == nil {
+						continue
+					}
 				}
 			}
 
@@ -965,7 +958,7 @@ func (it *Iter) next() {
 		return
 	}
 
-	if it.globalDepth != it.m.globalDepth {
+	if depth := depthOf(dirLen, shift); it.globalDepth < depth {
 		// Directory has grown since the last call to Next. Adjust our
 		// directory index.
 		//
@@ -995,20 +988,20 @@ func (it *Iter) next() {
 		//
 		// Thus we can achieve this by adjusting it.dirIdx,
 		// it.dirOffset, and it.m.dirLen individually.
-		orders := it.m.globalDepth - it.globalDepth
+		orders := depth - it.globalDepth
 		it.dirIdx <<= orders
 		it.dirOffset <<= orders
-		// it.m.dirLen was already adjusted when the directory grew.
+		// dirLen was already adjusted when the directory grew.
 
-		it.globalDepth = it.m.globalDepth
+		it.globalDepth = depth
 	}
 
 	// Continue iteration until we find a full slot.
-	for ; it.dirIdx < it.m.dirLen; it.nextDirIdx() {
+	for ; it.dirIdx < dirLen; it.nextDirIdx() {
 		// Resolve the table.
 		if it.tab == nil {
-			dirIdx := int((uint64(it.dirIdx) + it.dirOffset) & uint64(it.m.dirLen-1))
-			newTab := it.m.directoryAt(uintptr(dirIdx))
+			dirIdx := int((uint64(it.dirIdx) + it.dirOffset) & uint64(dirLen-1))
+			newTab := dirAt(dir, uintptr(dirIdx))
 			if newTab.index != dirIdx {
 				// Normally we skip past all duplicates of the
 				// same entry in the table (see updates to
@@ -1066,6 +1059,9 @@ func (it *Iter) next() {
 			key := it.group.key(it.typ, slotIdx)
 			if it.typ.IndirectKey() {
 				key = *((*unsafe.Pointer)(key))
+				if key == nil {
+					goto next // being filled, or deleted
+				}
 			}
 
 			grown := it.tab.index == -1
@@ -1085,6 +1081,9 @@ func (it *Iter) next() {
 				elem = it.group.elem(it.typ, slotIdx)
 				if it.typ.IndirectElem() {
 					elem = *((*unsafe.Pointer)(elem))
+					if elem == nil {
+						goto next
+					}
 				}
 			}
 
@@ -1157,8 +1156,10 @@ func (it *Iter) next() {
 			}
 
 			key := it.group.key(it.typ, slotIdx)
+			ok := true
 			if it.typ.IndirectKey() {
 				key = *((*unsafe.Pointer)(key))
+				ok = key != nil // nil: being filled, or deleted
 			}
 
 			// If the table has changed since the last
@@ -1174,33 +1175,31 @@ func (it *Iter) next() {
 			// the same key twice.
 			grown := it.tab.index == -1
 			var elem unsafe.Pointer
-			if grown {
-				newKey, newElem, ok := it.grownKeyElem(key, slotIdx)
-				if !ok {
-					// This entry doesn't exist anymore.
-					// Continue to the next one.
-					groupMatch = groupMatch.removeFirst()
-					if groupMatch == 0 {
-						// No more entries in this
-						// group. Continue to next
-						// group.
-						it.entryIdx += abi.MapGroupSlots - uint64(slotIdx)
-						continue
-					}
-
-					// Next full slot.
-					i := groupMatch.first()
-					it.entryIdx += uint64(i - slotIdx)
-					continue
-				} else {
-					key = newKey
-					elem = newElem
-				}
-			} else {
+			if ok && grown {
+				key, elem, ok = it.grownKeyElem(key, slotIdx)
+			} else if ok {
 				elem = it.group.elem(it.typ, slotIdx)
 				if it.typ.IndirectElem() {
 					elem = *((*unsafe.Pointer)(elem))
+					ok = elem != nil
 				}
+			}
+			if !ok {
+				// This entry doesn't exist anymore.
+				// Continue to the next one.
+				groupMatch = groupMatch.removeFirst()
+				if groupMatch == 0 {
+					// No more entries in this
+					// group. Continue to next
+					// group.
+					it.entryIdx += abi.MapGroupSlots - uint64(slotIdx)
+					continue
+				}
+
+				// Next full slot.
+				i := groupMatch.first()
+				it.entryIdx += uint64(i - slotIdx)
+				continue
 			}
 
 			// Jump ahead to the next full slot or next group.
@@ -1373,6 +1372,11 @@ func makeProbeSeq(hash uintptr, mask uint64) probeSeq {
 		offset: uint64(hash) & mask,
 		index:  0,
 	}
+}
+
+// last reports whether the sequence has visited every group.
+func (s probeSeq) last() bool {
+	return s.index >= s.mask
 }
 
 func (s probeSeq) next() probeSeq {

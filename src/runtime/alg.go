@@ -359,26 +359,33 @@ func streqfast(s, t string) bool {
 }
 
 func interequal(p, q unsafe.Pointer) bool {
-	x := (*iface)(p)
-	y := (*iface)(q)
+	// gd: each is loaded whole (the compiler guards the loads of this
+	// function, ssagen's runtimeTearFunc): q may be a key in a map that
+	// another goroutine is writing (doc/gd/maps.md). The words of an
+	// interface are the same with a method table.
+	a, b := *(*any)(p), *(*any)(q)
+	x := (*iface)(noescape(unsafe.Pointer(&a)))
+	y := (*iface)(noescape(unsafe.Pointer(&b)))
 	if x.tab != y.tab {
 		return false
 	}
 	// gd fat-iface / Phase D: ifaceeq now takes pointers to the full
 	// iface headers so it can handle direct / inline / spread storage
-	// internally. Pass p and q through verbatim.
-	return ifaceeq(x.tab, p, q)
+	// internally.
+	return ifaceeq(x.tab, unsafe.Pointer(x), unsafe.Pointer(y))
 }
 func nilinterequal(p, q unsafe.Pointer) bool {
-	x := (*eface)(p)
-	y := (*eface)(q)
+	// gd: each is loaded whole, as in interequal.
+	a, b := *(*any)(p), *(*any)(q)
+	x := (*eface)(noescape(unsafe.Pointer(&a)))
+	y := (*eface)(noescape(unsafe.Pointer(&b)))
 	if x._type != y._type {
 		return false
 	}
 	// gd fat-iface / Phase D: efaceeq now takes pointers to the full
 	// eface headers so it can handle direct / inline / spread storage
 	// internally.
-	return efaceeq(x._type, p, q)
+	return efaceeq(x._type, unsafe.Pointer(x), unsafe.Pointer(y))
 }
 
 // efaceeq is the callee for compiler-generated empty-interface equality.
