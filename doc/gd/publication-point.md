@@ -903,11 +903,22 @@ change amd64 code, as §13.3 measures.
 
 ### 13.5 Other types that depend on words staying together
 
-From reading the source. **None is fixed, and no race on them was run.**
+`log/slog.Value` was the first of these and is fixed. Its `num` word held the
+length of a group, or the nanoseconds of a time, beside the pointer in `any`.
+A race reproduced on amd64 within 5 seconds: a group of 1 attribute with length
+1000, stopped only by the `unsafe.Slice` check. `Value` is now one interface,
+which is loaded and stored whole: a group is a `[]Attr` spread in the
+interface, a UTC time is inline, and any other time is boxed. It shrank from 40
+to 32 bytes. The price is one allocation for a `TimeValue` that is not in UTC,
+since an interface has no room for a location pointer and nanoseconds without a
+box. `TestValueRaceWhole` in `log/slog` passes for 20 s on amd64 and 60 s on an
+M4.
+
+The rest are from reading the source. **None is fixed, and no race on them was
+run.**
 
 | Type | Words | What a tear does |
 | --- | --- | --- |
-| `log/slog.Value` (and `Attr`, and `Record`, which holds them) | `num` is the length of the `groupptr` in `any` | `Group()` makes a slice with the pointer of one value and the length of another: reads out of bounds. Public API. |
 | `reflect.MapIter` (`maps.Iter`) | Table, group, indices, key and element pointers | Racing calls of `Next` on one iterator can combine the state of two positions. Needs its own check. |
 | `internal/reflectlite.Value` | As `reflect.Value` | Type confusion, if one were ever raced on. It is internal, and I found it only in locals and arguments (`errors`). |
 | `internal/trace.Value` | `kind`, `pointer`, `scalar` | `String` makes a string from the pointer and the scalar. Internal. |

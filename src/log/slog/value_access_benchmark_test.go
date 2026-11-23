@@ -146,7 +146,7 @@ func (a Value) AsInt64() (int64, bool) {
 
 func (a Value) AsUint64() (uint64, bool) {
 	if a.Kind() == KindUint64 {
-		return a.num, true
+		return uint64(a.any.(kindUint64)), true
 	}
 	return 0, false
 }

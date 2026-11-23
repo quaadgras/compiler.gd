@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 )
 
 // A Value can represent any Go value, but unlike type any,
@@ -19,25 +18,16 @@ import (
 // The zero Value corresponds to nil.
 type Value struct {
 	_ [0]func() // disallow ==
-	// num holds the value for Kinds Int64, Uint64, Float64, Bool and Duration,
-	// the string length for KindString, and nanoseconds since the epoch for KindTime.
-	num uint64
-	// If any is of type Kind, then the value is in num as described above.
-	// If any is of type *time.Location, then the Kind is Time and time.Time value
-	// can be constructed from the Unix nanos in num and the location (monotonic time
-	// is not preserved).
-	// If any is of type stringptr, then the Kind is String and the string value
-	// consists of the length in num and the pointer in any.
-	// Otherwise, the Kind is Any and any is the value.
-	// (This implies that Attrs cannot store values of type Kind, *time.Location
-	// or stringptr.)
+	// any holds the whole value, so that a Value is loaded and stored as
+	// one interface: a goroutine racing on a Value sees the value of one
+	// store, never the pointer of one and the length of another
+	// (doc/gd/publication-point.md).
+	//
+	// If any is of one of the unexported kind types or time types below,
+	// the Kind is the one it stands for. Otherwise, the Kind is Any or
+	// LogValuer and any is the value.
 	any any
 }
-
-type (
-	stringptr *byte // used in Value.any when the Value is a string
-	groupptr  *Attr // used in Value.any when the Value is a []Attr
-)
 
 // Kind is the kind of a [Value].
 type Kind int
@@ -88,6 +78,7 @@ type kindUint64 uint64
 type kindFloat64 float64
 type kindString string
 type kindDuration time.Duration
+type kindGroup []Attr
 
 // Kind returns v's Kind.
 func (v Value) Kind() Kind {
@@ -104,11 +95,11 @@ func (v Value) Kind() Kind {
 		return KindBool
 	case kindString:
 		return KindString
-	case timeLocation, timeTime:
+	case timeZero, timeUTC, timeTime:
 		return KindTime
 	case kindDuration:
 		return KindDuration
-	case groupptr:
+	case kindGroup:
 		return KindGroup
 	case LogValuer:
 		return KindLogValuer
@@ -152,11 +143,14 @@ func BoolValue(v bool) Value {
 }
 
 type (
-	// Unexported version of *time.Location, just so we can store *time.Locations in
-	// Values. (No user-provided value has this type.)
-	timeLocation *time.Location
+	// timeZero is the zero time, whose UnixNano is undefined.
+	timeZero struct{}
 
-	// timeTime is for times where UnixNano is undefined.
+	// timeUTC is a time in UTC, in nanoseconds since the epoch. It fits in
+	// an interface without an allocation.
+	timeUTC int64
+
+	// timeTime is for every other time.
 	timeTime time.Time
 )
 
@@ -164,17 +158,14 @@ type (
 // It discards the monotonic portion.
 func TimeValue(v time.Time) Value {
 	if v.IsZero() {
-		// UnixNano on the zero time is undefined, so represent the zero time
-		// with a nil *time.Location instead. time.Time.Location method never
-		// returns nil, so a Value with any == timeLocation(nil) cannot be
-		// mistaken for any other Value, time.Time or otherwise.
-		return Value{any: timeLocation(nil)}
+		return Value{any: timeZero{}}
 	}
-	nsec := v.UnixNano()
-	t := time.Unix(0, nsec)
-	if v.Equal(t) {
-		// UnixNano correctly represents the time, so use a zero-alloc representation.
-		return Value{num: uint64(nsec), any: timeLocation(v.Location())}
+	if v.Location() == time.UTC {
+		nsec := v.UnixNano()
+		if v.Equal(time.Unix(0, nsec)) {
+			// UnixNano correctly represents the time, so use a zero-alloc representation.
+			return Value{any: timeUTC(nsec)}
+		}
 	}
 	// Fall back to the general form.
 	// Strip the monotonic portion to match the other representation.
@@ -201,7 +192,7 @@ func GroupValue(as ...Attr) Value {
 		}
 		as = as2
 	}
-	return Value{num: uint64(len(as)), any: groupptr(unsafe.SliceData(as))}
+	return Value{any: kindGroup(slices.Clip(as))}
 }
 
 // countEmptyGroups returns the number of empty group values in its argument.
@@ -380,11 +371,10 @@ func (v Value) Time() time.Time {
 // See TimeValue to understand how times are represented.
 func (v Value) time() time.Time {
 	switch a := v.any.(type) {
-	case timeLocation:
-		if a == nil {
-			return time.Time{}
-		}
-		return time.Unix(0, int64(v.num)).In(a)
+	case timeZero:
+		return time.Time{}
+	case timeUTC:
+		return time.Unix(0, int64(a)).UTC()
 	case timeTime:
 		return time.Time(a)
 	default:
@@ -401,14 +391,14 @@ func (v Value) LogValuer() LogValuer {
 // Group returns v's value as a []Attr.
 // It panics if v's [Kind] is not [KindGroup].
 func (v Value) Group() []Attr {
-	if sp, ok := v.any.(groupptr); ok {
-		return unsafe.Slice((*Attr)(sp), v.num)
+	if g, ok := v.any.(kindGroup); ok {
+		return g
 	}
 	panic("Group: bad kind")
 }
 
 func (v Value) group() []Attr {
-	return unsafe.Slice((*Attr)(v.any.(groupptr)), v.num)
+	return v.any.(kindGroup)
 }
 
 //////////////// Other
