@@ -1,27 +1,29 @@
-# The publication point (design, 2026-11-23)
+# The publication point (design 2026-11-23, phase 1 built)
 
 A data race must never be memory-unsafe: racing goroutines may see stale
 values, never torn ones. This document asks whether the guards that give
 that guarantee (`fat-iface.md`, `sso-string.md`, `slice16.md`, `maps.md`)
 can be skipped until the first point where another goroutine could reach
-an object, and what that would be worth. Nothing here is implemented.
-Measured at c7a0e1fde2, on amd64.
+an object, and what that would be worth.
+
+**Phase 1 is built: §13 says what was built, what ran where and what it
+costs.** The rest is the design as reviewed. §1 to §4 were measured at
+c7a0e1fde2, on amd64, before anything was built.
 
 ## 0. Summary
 
 **The idea is sound, and the general version is not worth building.**
 
-- **There is a real hole today.** `(*state).unpublished` skips the guards
-  in a new object and issues no barrier. On every weakly ordered target a
-  racing reader can get a string or interface made of some of its words
-  (§3). The arm64 code shows it; it has **not been reproduced** on
-  hardware.
-- **It can be closed for almost nothing, with no new analysis.** Keep
-  today's window, and put one store barrier after the last plain store of
-  each straight-line fill (§5). The barrier does not have to be at X, only
-  between the fill and X. In the measured programs that is at most **0.08
-  barriers per 1000 instructions**, and none on amd64 or s390x. Removing
-  the skip instead costs up to **+6.95%** instructions on amd64.
+- **There was a real hole.** `(*state).unpublished` skipped the guards in
+  a new object and issued no barrier. On a weakly ordered target a racing
+  reader could get a string or interface made of some of its words (§3).
+  **Reproduced on an Apple M4** (§13.2), with torn strings and interfaces
+  and closures with no code pointer.
+- **It is closed for little, with no new analysis.** One store barrier
+  follows the last plain store of each straight-line fill (§5). The barrier
+  does not have to be at X, only between the fill and X. On the M4 that
+  costs about 1.1% of a compile of `go/types`, against about 3.4% for
+  removing the skip (§13.3). amd64 and s390x text does not change.
 - **A real X analysis buys almost nothing more.** The guards cost 3% to
   20% of all instructions. A flow-sensitive analysis across blocks and
   non-keeping calls removes **0.00% to 0.51%**. Adding fresh-result
@@ -33,9 +35,9 @@ Measured at c7a0e1fde2, on amd64.
 - **Maps: do not build it.** It would skip one compare-and-swap on 22% of
   map writes, about 0.15% of the cycles of a compile (an estimate, §8).
 
-The recommendation is phase 1 of §11 and nothing else for now. §6 to §8
-keep the full design, because goroutine-local arenas need the same
-definition of X, and so that the question need not be reopened from
+Phase 1 of §11 is what was built, and nothing else is recommended for
+now. §6 to §8 keep the full design, because goroutine-local arenas need the
+same definition of X, and so that the question need not be reopened from
 scratch.
 
 ## 1. Semantics
@@ -140,6 +142,8 @@ and `weak`. That is the rule the measurements used.
 
 ## 3. How big the hole is today
 
+This section describes the code **before phase 1**. §13 says what changed.
+
 ### The mechanism, as compiled
 
 For `p := &R{ID: 1, V: x}; P = p`, arm64 (`go tool compile -S`):
@@ -170,10 +174,12 @@ means it comes from reading the source, and was not exercised.
 | `&T{}`, `new(T)` + fields, `[]T{}`, inlined constructors | **Yes, all CPUs** | `unpublished`: word-by-word stores, no barrier. | compiled |
 | Closures and method values | **Yes, all CPUs** | The same path. A reader may also see a nil code pointer, which faults. | compiled |
 | `growslice`, `makeslicecopy`, `moveSlice*`, from a **stack** source | **Yes** on LSE2 CPUs | Plain `memmove`, then a header `STP` with no barrier (`runtime/slice.go:138,346,516,550`). Without LSE2 the header's stripe orders it. | read |
-| The same from a **heap** source | No | `shareCopyFrom` copies whole, or under stripes. | read |
+| The same from a **heap** source | **Yes** (this row said no until phase 1) | `shareCopyFrom` reads each value whole, but writes the new array with plain stores, and nothing ordered them before the slice. | read |
 | Static part of a literal (`*p = stat`) | No | `shareMove` ignores `unpublished`. | read |
 | `convT*` boxes | No, in themselves | A guarded interface store has a `DMB ISHST` after its CAS, which orders the box first. The *interface* holding the box may tear, as in row 1. | read |
-| String conversions, `concatstrings` | Header no; **stale bytes yes** | `needzero=false`, a byte fill, a header store: a reader can see the old bytes of a freed object. Not a pointer/length tear (decision 3). | read |
+| String conversions, `concatstrings` | Header no; **stale bytes yes** | `needzero=false`, a byte fill, a header store: a reader can see the old bytes of a freed object. Not a pointer/length tear (decision 3). | reproduced, M4 |
+| `s.f = append(s.f, x)`, elements without pointers | **Stale bytes, on amd64 too** | The slice was stored before its new elements, which `growslice` had not cleared. Found by the litmus test; this document had said they were zero. | reproduced, amd64 and M4 |
+| `materializeToHeap` (escape bits) | **Yes** | A plain copy from the stack to a new object, whose pointer the callee may store. Found while auditing phase 1. | read |
 | `appendGrouped` | Unreachable | It needs `!ifaceOnly` and `!SlicePacked()`; packed is true on every 64-bit target but wasm, so it is dead even with `GOEXPERIMENT=sharing`. | read |
 | Elements stored by `append` | No | Guarded: `growslice` is not a recognized allocation. | read |
 | `reflect` Set, New, Append, Copy, Zero | No | `shareMove`; `unsafe_New` is not in `unpublished`'s list. | read |
@@ -199,7 +205,8 @@ through a `*[1000]int`, a `*[1]int` and an `int`, 7.5M of 134M racy reads
 had a kind flag that disagreed with the type, and 116,267 had the type
 `*[1000]int` with the pointer to the `[1]int`, so that `Elem().Index(999)`
 would read past the object. Unlike the rest of this section it does not
-depend on weak ordering, and the seal does not touch it.
+depend on weak ordering, and the seal does not touch it. Phase 1 fixes it
+separately (§13.1).
 
 ## 4. Measurements
 
@@ -309,8 +316,9 @@ the number of allocations with at least one plain multi-word store:
 | json encode, decode | ~240 | 0.00 |
 
 If a barrier cost 30 cycles, 0.08 per 1000 instructions is about 2.4 cycles
-per 1000 instructions: under 0.5% at any plausible IPC. **The 30 cycles is
-an assumption. Nothing here ran on arm64.**
+per 1000 instructions: under 0.5% at any plausible IPC. **The 30 cycles was
+an assumption.** Measured on an M4, the whole seal costs more than that
+estimate in some programs (§13.3).
 
 ### 4.5 What the numbers decide
 
@@ -375,28 +383,32 @@ measured separately.
 **What it gives up.** An object that is never published pays for a barrier
 it did not need. §4.4 bounds that.
 
-### Implementation sketch
+### As built
 
-1. `unpublished` stores are marked as `dstLocal` stores are (`Store`'s
-   auxint), with a value of their own.
-2. At the end of `buildssa`, after `insertPhis` and before `ssa.Compile`, a
-   small function walks each block's memory chain. It inserts one
-   `OpPubBarrier` before the first memory operation after a marked store
-   that is neither a store **into the same object** (marked or not) nor a
-   store to the stack, and at the end of the block if the run reaches it.
-   Plain words between two guarded fields must not end the run:
-   `&T{S: a, N: n, I: x}` stores `N` between them, and is one fill, which
-   is what §4.4 counts.
+1. `tearGuardStore` is `tearGuard` for a store. When it skips the guard
+   because the object is new, it records the object (`s.fills`). Stores
+   are not marked one by one.
+2. `sealFills` runs at the end of `buildssa`, after `insertPhis` and before
+   `ssa.Compile`. It walks each block's memory chain. A run starts at a
+   store into a recorded object, and goes on across any store **into the
+   same object** (guarded or not) and any store to the stack: `&T{S: a, N:
+   n, I: x}` stores `N` between two guarded fields and is one fill. One
+   `OpPubBarrier` follows the run's last store into the object.
 3. It runs that early because `memcombine` and `dse` may merge or remove
-   marked stores. Once inserted, the barrier is an ordinary memory
-   operation, and no pass moves a store across it.
+   the stores. Afterwards the barrier is a memory operation that consumes
+   the store before it. `dse` treats that as a read, so nothing before it
+   is shadowed by a store after it. `memcombine` stops at anything that is
+   not a store. The write barrier pass ends its sequence of stores there.
+   A load after the fill may keep the store's memory state, so that it is
+   still forwarded from the store.
 4. Targets: arm64, ppc64, riscv64, loong64, mips64. `OpPubBarrier` is
-   already lowered on all of them. Nothing on amd64 and s390x, whose stores
-   are ordered, so their code does not change at all.
+   already lowered on all of them. 32-bit `arm` and `mips` are weakly
+   ordered too and **are not sealed**: they were outside this phase.
 
-Also needed, in the runtime: a `publicationBarrier()` after the plain
-`memmove` from a stack source in `growslice`, `makeslicecopy`, `moveSlice`
-and `moveSliceNoCap`. That closes the third row of the audit.
+In the runtime, `publicationBarrier()` follows the copy in `growslice`,
+`makeslicecopy`, `moveSlice`, `moveSliceNoCap` and `materializeToHeap`, from
+any source, behind the constant `storesOrdered`: on amd64 it is a call to an
+empty function, and the compiled code must not change.
 
 ### Why the alternatives lose
 
@@ -646,25 +658,34 @@ from an object filled through `unpublished`.
 5. The allocator's own `publicationBarrier` orders the zeroing before the
    fill, so a reader never sees memory older than the zeroed object.
 
-What this argument does **not** cover: bytes behind a string or slice
-pointer from `needzero=false` allocations (decision 3), and the
-`reflect.Value` race of §3.
+This argument does not cover the bytes behind a string or slice pointer
+from `needzero=false` allocations, or the `reflect.Value` race of §3. Phase
+1 closes both by other means (§13.1).
 
-## 10. What I could not verify
+A closure, or any object, with **no** string, slice or interface among its
+fields is not sealed. A racing reader may see one of its words still zero:
+a nil code pointer or a nil pointer, which panics. That is a stale value,
+as in stock Go, and not a tear.
 
-- **Nothing ran on arm64 or any weakly ordered CPU.** The hole is shown by
-  generated code and has not been reproduced. The barrier's cost is an
-  assumption.
-- The audit is mostly from reading the source (see its last column), and
-  the rows marked partial checked only the publication points.
-- Window savings are from a prototype whose sites lined up at 96.6%, and it
-  did not model open-coded defers.
+## 10. What is not verified
+
+- The litmus tests ran on one weakly ordered CPU, an Apple M4. **ppc64,
+  riscv64, loong64 and mips64 were compiled, and their barrier is checked in
+  the assembly, but nothing ran on them.** A pass on the M4 is evidence
+  about the M4's reordering, not a proof.
+- The audit of §3 is mostly from reading the source (see its last column),
+  and the rows marked partial checked only the publication points.
+- `materializeToHeap`'s barrier has no litmus test of its own.
+- Window savings (§4) are from a prototype whose sites lined up at 96.6%,
+  and it did not model open-coded defers.
 - Multi-copy atomicity on ppc64 across a goroutine migration (§7.5).
 - Whether keeping guards as high-level ops would shrink code (§6).
+- The list in §13.5 is from reading the source; no race on those types was
+  run.
 
 ## 11. Build plan
 
-**Phase 1: close the hole.** Small, and useful alone.
+**Phase 1: close the hole. Built (§13).** Small, and useful alone.
 
 1. A litmus test first: a writer that fills `&T{s, i}` and stores it racily
    in a loop, a reader that checks each string and interface it loads. It
@@ -680,28 +701,199 @@ pointer from `needzero=false` allocations (decision 3), and the
 5. Measure on arm64: today, seal, and skip removed. **If the seal costs more
    than removing the skip, remove the skip.**
 
-**Phase 2, only if decided:** the stale-bytes barrier for `needzero=false`
-allocations (decision 3).
+**Phase 2: the stale bytes of `needzero=false` allocations (decision 3).
+Decided, and built with phase 1 (§13.1).**
 
 **Phase 3, not planned.** The analysis of §6 and §7 only if one of these
 becomes true: arm64 measurements show barriers or stores costing far more
 than amd64's counts suggest, or goroutine-local arenas need X as a checked
 property.
 
-**Separately:** `reflect.Value` (§3).
+**Separately:** `reflect.Value` (§3). **Built (§13.1).**
 
-## 12. Decisions for the user
+## 12. Decisions
 
-1. **Accept the seal as the fix, and stop there?** The alternative is the
-   full X analysis, which measures under 1%.
-2. **Where should phase 1 be proved?** It needs arm64 hardware, for the
-   litmus test and the cost of the barrier. Nothing has been run on it.
-3. **Are stale bytes a safety violation?** A racing reader of a new string
-   can see the previous contents of freed memory. It is not a torn value and
-   breaks no pointer, but it can expose another object's data. Closing it is
-   one barrier per such allocation.
-4. **Is `reflect.Value` in scope** for "a data race is memory safe"? As it
-   stands, a race on one confuses types, on amd64 too (reproduced, §3).
-5. **Should guards as high-level ops be looked at on their own?** They are
-   16% to 32% of text. That is the larger prize this work turned up, and it
-   is not about publication.
+Taken: the seal and no X analysis (1); it was proved on an Apple M4 (2);
+stale bytes are a safety violation and are closed (3); `reflect.Value` is in
+scope (4).
+
+Still open:
+
+- **Guards as high-level ops** (the old decision 5). They are 16% to 32% of
+  text. That is the larger prize this work turned up, and it is not about
+  publication.
+- **32-bit `arm` and `mips`** have the hole of §3 and are not sealed.
+- **The types of §13.5** are not fixed.
+- **`fmt` pays for `reflect.Value`** when it prints a structure (§13.3).
+  The cost was not attributed. `internal/fmtsort`, which holds a map's keys
+  and elements as a `[]KeyValue` of Values, is the first place to look.
+
+## 13. Phase 1 as built
+
+Branch `publication-point`: `5641b410e0` (the seal), `5c7a35755a` (stale
+bytes), `e7a8e1c45e` (`reflect.Value`).
+
+### 13.1 What changed
+
+**The seal** is §5, as built there.
+
+**Stale bytes.** Memory from `mallocgc(..., needzero=false)` holds what a
+freed object left. Each path that can reach user code:
+
+| Path | Who fills it | What was done |
+| --- | --- | --- |
+| `concatstrings`, `concatbytes`, `slicebytetostring`, `stringtoslicebyte`, `stringtoslicerune`, `slicerunetostring`, `intstring`, `gostring`, `gostringn`, `gobytes`, `stringDataHeap`, `cgoStringNormalize`, arena clone | The runtime | Barrier after the fill, unless the result is in the caller's stack buffer. |
+| `makeslicecopy`, `moveSliceNoScan`, `moveSliceNoCapNoScan` | The runtime | Barrier after the copy and the clear of the tail. |
+| `make` + `copy`, inlined by `walk` as `mallocgc` + `memmove` | Compiled code | On weakly ordered targets it calls `makeslicecopy` instead. |
+| `growslice`, the capacity tail | The runtime | Cleared as before. A barrier now orders that before the slice. |
+| `growslice`, the new elements `[oldLen, newLen)` | **The caller, after it returns** | A barrier cannot help. Weakly ordered targets, and targets whose slices are not packed, clear them too. |
+| `s.f = append(s.f, x)` | Compiled code | The slice is now stored **after** its elements, on every 64-bit target. This is what fixes amd64, at no cost: it removes a spill. |
+| `bytealg.MakeNoZero` (`strings.Builder`, `bytes`) | **The caller, after it returns** | Cleared on weakly ordered targets. On amd64 and s390x, callers store the slice after filling what it shows, and none exposes its capacity. |
+| `convT*` boxes | The runtime | Nothing. Every store of an interface orders the box first: its lock's barrier, or the seal. |
+
+A racing reader of a slice may therefore see zeros where elements are yet
+to arrive, and never another object's bytes.
+
+**`reflect.Value`** goes as an interface does. `types.IsWholeStruct` and
+the runtime's `isWholeStruct` recognize it, by package path and name, and
+it counts as holding an interface (`HasIface`, `tearKind`). So structs,
+arrays, slices, maps and `typedmemmove` follow from the existing paths.
+Compiled code loads it under the sequence lock of the block where it starts
+and stores it holding that lock, with the write barrier inside, as
+`shareStoreIface` does. Values in the stack are not guarded.
+`internal/reflectlite.Value` is not covered (§13.5).
+
+### 13.2 Litmus tests
+
+`runtime/publication_test.go` and `reflect/value_whole_test.go`. They run
+100 ms each with `-short`, 1 s otherwise, and `GD_PUB_LITMUS=60s` sets the
+time. Before is `105a31a6ac` with the tests added. The M4 ran native arm64
+binaries on all its cores, with five writer and reader pairs (`Value`: one
+writer, three readers). Threads were not pinned to a core type.
+
+| Test | Before, on the M4 | After, on the M4 |
+| --- | --- | --- |
+| Fill, one or two lines | 30 s: 176 torn strings, 1,627 torn interfaces, about 4,300 unfilled fields, of 4.3G reads | 60 s: none |
+| Fill, several lines | 30 s: 562 torn strings, 1,168 torn interfaces, about 219,000 unfilled fields, of 4.8G | 60 s: none |
+| Closure, method value | 30 s: 5,277 torn strings, 98,713 panics, about 141,000 unfilled, of 6.7G | 60 s: none |
+| Grown from the stack | 40 s: 1,080 torn strings, 20,454 unfilled, of 10.3G | 60 s: none |
+| Stale: `slicebytetostring` | 30 s: 6,029 | 60 s: none |
+| Stale: concatenation | 30 s: 3,357 | 60 s: none |
+| Stale: `[]byte(s)` | 30 s: 12,500 | 60 s: none |
+| Stale: `[]rune(s)` | 30 s: 560 | 60 s: none |
+| Stale: `string(runes)` | 30 s: **1** | 60 s + 300 s: none |
+| Stale: `strings.Repeat` | 30 s: 119 | 60 s: none |
+| Stale: `strings.Builder` | 30 s: 1,174 | 60 s: none |
+| Stale: `bytes.Repeat` | 30 s: 2,728 | 60 s: none |
+| Stale: `append` | 30 s: 11,691 | 60 s: none |
+| Stale: append in place | 30 s: 76,682 | 60 s: none |
+| `Value`: global, field, struct, array, slice, copy, reflect | 15 s each: 12M to 226M torn per test | 15 s each: none |
+| `Value`: large struct, clear, map element, map key | 15 s each: 10K to 166M torn or panics per test | 15 s each: none |
+| `Value`: channel | 15 s: **passes before too** (the channel's lock) | 15 s: none |
+
+On amd64 (32 threads, this machine): the fill, closure and grow tests pass
+before, as they should. The append in place had 2,823 stale reads of 729M in
+20 s before, and none of 467M after. The `Value` tests failed before, except
+the channel's, and pass after.
+
+A pass is evidence, and weakest for `string(runes)`, which failed once in 30
+seconds before. That is why it ran for 300 more.
+
+### 13.3 Cost
+
+**On the M4**, as times of benchmarks and of `compile -c=1` of `go/types`,
+`GOMAXPROCS=4`, not pinned. Each round runs every variant once. The figure
+is the median of the per-round ratio to today's build, with quartiles in
+brackets. Every build started from an empty cache. macOS has no `perf`, and
+two campaigns of the same builds differed by up to 0.7 points on http and 2
+points on json encode, so **differences under about 1% (2% for json) are not
+resolved.** `Sprintf` of an int and `ManyArgs` varied by more than 10% between
+rounds on the M4 and are left out; their instruction counts are below.
+
+Seal against removing the skip (20 rounds):
+
+| Workload | Seal | Skip removed |
+| --- | ---: | ---: |
+| compile `go/types` | +1.07% [+0.80, +1.59] | +3.39% [+3.06, +3.89] |
+| http ClientServer | +0.67% [+0.33, +1.37] | +3.51% [+3.14, +4.24] |
+| go/parser | +1.37% [+1.24, +1.73] | +2.64% [+2.06, +3.30] |
+| json encode | +0.89% [-0.09, +1.86] | -0.26% [-1.01, +1.27] |
+| json decode | -0.67% [-1.32, -0.19] | +0.82% [+0.53, +1.22] |
+| go/printer | -0.34% [-1.15, +0.49] | -0.80% [-1.13, -0.21] |
+| size of `compile` | +0.16% | +1.28% |
+
+**The seal costs less than removing the skip wherever the difference is
+resolved, so the seal stays.**
+
+All three, cumulative (15 rounds, a separate campaign):
+
+| Workload | Seal | + stale bytes | + `Value` |
+| --- | ---: | ---: | ---: |
+| compile `go/types` | +1.09% [+0.92, +1.77] | +1.79% [+1.39, +1.92] | +1.70% [+1.25, +1.93] |
+| http ClientServer | +1.38% [+0.53, +1.58] | +1.48% [+1.13, +2.63] | +1.21% [+0.88, +1.35] |
+| go/parser | +1.62% [+1.18, +1.89] | +2.08% [+1.56, +2.78] | +2.03% [+1.45, +2.32] |
+| json encode | -1.08% [-2.04, -0.04] | +0.22% [-2.71, +1.06] | -1.20% [-2.68, -0.30] |
+| json decode | -1.03% [-1.66, -0.28] | +0.27% [-0.73, +0.70] | +0.95% [+0.55, +1.70] |
+| go/printer | -0.44% [-0.92, +0.51] | -0.32% [-0.73, +0.16] | -0.01% [-0.49, +0.72] |
+| fmt `SprintfStructure` | -0.56% [-0.86, +0.67] | +0.74% [-1.32, +1.48] | **+7.07%** [+5.98, +8.01] |
+
+**On amd64**, user-mode instructions, `perf stat -r 3`, `GOGC=off`, each
+build from an empty cache. The seal is zero here (§13.4). The largest spread
+between runs was 0.09%.
+
+| Workload | Stale bytes, against today | `Value`, against stale bytes |
+| --- | ---: | ---: |
+| gofmt | -0.24% | -0.01% |
+| json encode | -0.15% | +0.01% |
+| json decode | -0.03% | +0.08% |
+| compile `go/types` | -0.37% | +0.11% |
+| http FakeConn | -0.04% | +0.26% |
+| http ClientServer | -1.05% | -0.30% |
+| fmt `Sprintf` of scalars and strings | -0.97% | -0.02% |
+| fmt `SprintfStructure` | -0.54% | **+8.55%** |
+| fmt `ManyArgs` | +0.10% | -0.06% |
+
+The stale-byte change makes amd64 slightly **faster**: storing the slice
+after its elements removes a spill in every append in place. `Value` costs
+nothing measurable in these workloads except one: `fmt` printing a slice
+that holds a struct and a map with `%#v` pays 8.5% in instructions on amd64
+and about 7% in time on the M4.
+
+### 13.4 amd64 and s390x text under the seal
+
+`gofmt`, `vet`, `link`, `asm`, `cover`, `json.test` and `http.test`, for
+amd64 and for s390x, built with `-a -trimpath` by `105a31a6ac` and by
+`5641b410e0`: the `.text` sections of all 14 binaries are **byte for byte
+identical.** This covers the seal only. The stale-byte and `Value` commits do
+change amd64 code, as §13.3 measures.
+
+### 13.5 Other types that depend on words staying together
+
+From reading the source. **None is fixed, and no race on them was run.**
+
+| Type | Words | What a tear does |
+| --- | --- | --- |
+| `log/slog.Value` (and `Attr`, and `Record`, which holds them) | `num` is the length of the `groupptr` in `any` | `Group()` makes a slice with the pointer of one value and the length of another: reads out of bounds. Public API. |
+| `reflect.MapIter` (`maps.Iter`) | Table, group, indices, key and element pointers | Racing calls of `Next` on one iterator can combine the state of two positions. Needs its own check. |
+| `internal/reflectlite.Value` | As `reflect.Value` | Type confusion, if one were ever raced on. It is internal, and I found it only in locals and arguments (`errors`). |
+| `internal/trace.Value` | `kind`, `pointer`, `scalar` | `String` makes a string from the pointer and the scalar. Internal. |
+| `sync.Pool` | `local` and `localSize` | Published in order with atomics, so sound in use. A racy **copy** of a Pool (which `vet` rejects) could pair them, and `indexLocal` does not check. |
+
+### 13.6 What ran where
+
+| Suite | Machine | Result |
+| --- | --- | --- |
+| `./run.bash --no-rebuild` | linux/amd64 | ALL TESTS PASSED |
+| `go test -short std cmd/internal/testdir` | linux/amd64 | pass |
+| `runtime`, `reflect`, `sync`, `internal/runtime/maps`, `-short`, native | M4 | pass |
+| `Test/codegen/{publication,slices,append}.go`, native | M4 | pass |
+| `runtime`, `reflect`, `sync`, `internal/runtime/maps`, `GOEXPERIMENT=sharing`, `-short` | linux/amd64 | pass |
+| `go build std` for 386, arm, mips, mipsle, mips64, mips64le, ppc64, ppc64le, riscv64, loong64, s390x, js/wasm (also `GOWASM=gc,split`), windows | cross | builds |
+| `Test/codegen` with `-all_codegen` | linux/amd64 | **49 assertions fail** (js/wasm 32, ppc64 9, ppc64le 3, s390x 5), the same 49 at `105a31a6ac`. CI does not run this mode. Not fixed. |
+
+Not run: `std` on the M4; the CI jobs for linux/arm64, windows and js/wasm;
+anything on real ppc64, riscv64, loong64 or mips64 hardware.
+
+`cmd/go/internal/work` fails if `GOTMPDIR` is set and differs from `TMPDIR`,
+at `105a31a6ac` too: its tests take their directory from one and its check
+from the other. `run.bash` above ran with both set to the same directory.
