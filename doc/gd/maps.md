@@ -182,3 +182,26 @@ All of these are memory safe, and none happens without a data race:
   on a map that is shared they **wait** for it instead of panicking
   (`lockWriteSlow`), which is what `TestSharedMapRace` expects of the
   experiment.
+
+## 6. What it costs
+
+Against the `release` branch (2488e444dc), amd64, two pinned cores, six
+runs; the machine was shared, so the times are less reliable than the
+instruction counts. The raw numbers are not in the tree.
+
+- **Instructions per operation** (the difference between a run of 5,001,000
+  operations and one of 1,000, median of five): a lookup +13 to +30 (`int64`
+  in a 65536-entry map 124 to 137, in a small map 92 to 122; `string` +17
+  to +21), an assignment to an existing key +7 to +11, a step of an
+  iteration +18, a delete +6.
+- **Time**: +6.0% as a geomean of 36 map benchmarks (access, assign, fill,
+  delete, iteration; `int64` and `string` keys). A hit in an `int64` map is
+  +11% to +15%.
+- **Programs**: instructions of `encoding/json`'s decoder +0.0%, its encoder
+  -0.5%, and `go/types`' `BenchmarkCheck` +0.2%.
+- **Memory**: B/op of the map benchmarks +0.02% as a geomean, allocs/op
+  +0.00%. The JSON decoder showed +3.7% B/op with the collector on, and
+  the same bytes and allocations as `release` with it off.
+
+These were not measured on real arm64 hardware, where the read path has
+four `LDAR`s and a `DMB ISHLD` that amd64 does not pay for.
