@@ -193,8 +193,13 @@ Go programs.
 **Outside this hole, found on the way.** `reflect.Value` holds a type word,
 a pointer, an inline payload and flags, and no string, slice or interface,
 so it is not guarded at all. A race on a variable of type `reflect.Value`
-can pair the type of one value with the pointer of another: type confusion.
-The shape is read from `reflect/value.go`; I did not build a reproducer.
+pairs the type of one value with the pointer of another: type confusion.
+**This one is reproduced, on amd64.** With a writer cycling one variable
+through a `*[1000]int`, a `*[1]int` and an `int`, 7.5M of 134M racy reads
+had a kind flag that disagreed with the type, and 116,267 had the type
+`*[1000]int` with the pointer to the `[1]int`, so that `Elem().Index(999)`
+would read past the object. Unlike the rest of this section it does not
+depend on weak ordering, and the seal does not touch it.
 
 ## 4. Measurements
 
@@ -345,14 +350,27 @@ has happened. So "the fill ended" is a safe stand-in for "X may follow".
 - Almost no panic case: a bounds or division check ends the block, so the
   barrier comes before its branch.
 
-**One exception: functions with a `defer`.** A nil dereference while
-computing a later field (`p.b = q.x`) faults in the middle of a fill, with
-no block boundary, and the panic may run a deferred closure that publishes
-`p`. An open-coded `defer` leaves only stack stores in the chain, so
-`unpublished` does not see it. **`unpublished` must return false in a
-function with a `defer`** (`s.hasdefer`). What that costs was not measured
-separately; it is part of the "skip removed" column, for those functions
-only.
+**One exception: functions with a `defer`, on weakly ordered targets.** A
+nil dereference while computing a later field (`p.b = q.x`) faults in the
+middle of a fill, with no block boundary, and the panic may run a deferred
+closure that publishes `p`. The object reaches the closure through a stack
+variable, which is a stack store to `unpublished` (compiled on arm64, the
+first string is stored plain):
+
+```go
+var h *M
+defer func() { recover(); G = h }()
+p := new(M)
+h = p
+p.S = a   // plain
+p.T = q.V // may fault
+```
+
+**On those targets `unpublished` must return false in a function with a
+`defer`** (`s.hasdefer`). amd64 and s390x keep the window: their stores
+stay in order and a fault cannot land between the words of one value, so
+what the closure publishes is whole. What the rule costs on arm64 was not
+measured separately.
 
 **What it gives up.** An object that is never published pays for a barrier
 it did not need. §4.4 bounds that.
@@ -364,8 +382,11 @@ it did not need. §4.4 bounds that.
 2. At the end of `buildssa`, after `insertPhis` and before `ssa.Compile`, a
    small function walks each block's memory chain. It inserts one
    `OpPubBarrier` before the first memory operation after a marked store
-   that is neither another marked store nor a store to the stack, and at
-   the end of the block if the run reaches it.
+   that is neither a store **into the same object** (marked or not) nor a
+   store to the stack, and at the end of the block if the run reaches it.
+   Plain words between two guarded fields must not end the run:
+   `&T{S: a, N: n, I: x}` stores `N` between them, and is one fill, which
+   is what §4.4 counts.
 3. It runs that early because `memcombine` and `dse` may merge or remove
    marked stores. Once inserted, the barrier is an ordinary memory
    operation, and no pass moves a store across it.
@@ -600,7 +621,8 @@ A write already costs far more than its lock.
 Claim: with §5, no goroutine can load a torn string, slice or interface
 from an object filled through `unpublished`.
 
-1. `unpublished(addr)` holds only in a function with no `defer`, and only if the memory chain from here back to the
+1. On a weakly ordered target, `unpublished(addr)` holds only in a function
+   with no `defer`, and only if the memory chain from here back to the
    allocation holds nothing but stores into that object and into the stack.
    So no pointer to the object has been stored outside the stack, and no
    call has been made since the allocation. **No other goroutine can hold a
@@ -648,8 +670,8 @@ pointer from `needzero=false` allocations (decision 3), and the
    in a loop, a reader that checks each string and interface it loads. It
    should **fail on arm64 hardware before the change**, or the premise of
    this document needs another look.
-2. The seal of §5, on the five weakly ordered 64-bit targets, and no window
-   in functions with a `defer`.
+2. The seal of §5, on the five weakly ordered 64-bit targets, and on those
+   targets no window in functions with a `defer`.
 3. `publicationBarrier()` after the stack-source copies in `growslice`,
    `makeslicecopy`, `moveSlice` and `moveSliceNoCap`.
 4. A compiler test that the arm64 output has one barrier per fill, between
@@ -679,7 +701,7 @@ property.
    breaks no pointer, but it can expose another object's data. Closing it is
    one barrier per such allocation.
 4. **Is `reflect.Value` in scope** for "a data race is memory safe"? As it
-   stands, a race on one can confuse types.
+   stands, a race on one confuses types, on amd64 too (reproduced, §3).
 5. **Should guards as high-level ops be looked at on their own?** They are
    16% to 32% of text. That is the larger prize this work turned up, and it
    is not about publication.
