@@ -189,7 +189,7 @@ means it comes from reading the source, and was not exercised.
 | `atomic.Value` | No | Guarded store, then an atomic. | read |
 | `go` closures, defer records | No | Run queue with release; defers stay on one goroutine. | read |
 | `unique`, HashTrieMap, itabs, type caches, finalizers, cleanups, weak handles | No | Published by atomics or under locks. Only the publication points were checked. | read, partial |
-| `makechan` | Crash only | Fields filled with no final barrier: a racy reader may fault near nil. No user value tears. | read |
+| `makechan` | **Yes** | Fields filled with no final barrier: a racy reader can see a channel with a capacity of zero, or index a nil buffer by what it read of the rest (§13.2). | run on the M4 |
 
 The hole is therefore **ordinary code**: any new object with a string,
 slice or interface field whose pointer then reaches another goroutine
@@ -662,10 +662,14 @@ This argument does not cover the bytes behind a string or slice pointer
 from `needzero=false` allocations, or the `reflect.Value` race of §3. Phase
 1 closes both by other means (§13.1).
 
-A closure, or any object, with **no** string, slice or interface among its
-fields is not sealed. A racing reader may see one of its words still zero:
-a nil code pointer or a nil pointer, which panics. That is a stale value,
-as in stock Go, and not a tear.
+An ordinary object with **no** string, slice or interface among its fields
+is not sealed. A racing reader may see one of its words still zero, a nil
+pointer that the code it runs tests like any other: a stale value, as in
+stock Go, and not a tear.
+
+**A function value is not such an object**, whatever it holds, and is always
+sealed (§13.1). The code it calls does not test the words after the first,
+and its mask has a meaning at zero.
 
 ## 10. What is not verified
 
@@ -731,7 +735,8 @@ Still open:
 ## 13. Phase 1 as built
 
 Branch `publication-point`: `5641b410e0` (the seal), `5c7a35755a` (stale
-bytes), `e7a8e1c45e` (`reflect.Value`).
+bytes), `e7a8e1c45e` (`reflect.Value`), `72ce8286ae` (function values and
+channels, found in review).
 
 ### 13.1 What changed
 
@@ -763,6 +768,24 @@ and stores it holding that lock, with the write barrier inside, as
 `shareStoreIface` does. Values in the stack are not guarded.
 `internal/reflectlite.Value` is not covered (§13.5).
 
+**Function values and channels.** A closure with no string, slice or
+interface had no barrier, and its words are not independent:
+
+- Its code reads what it captured by reference through a pointer **with no
+  nil check**, since that pointer is never nil in a whole closure. With a
+  captured `[8192]byte`, `buf[5000]` on a closure whose pointer is still
+  zero is an access to the absolute address 5000, past the zero page.
+- Its second word is the escape mask, and **zero means "the callee keeps
+  none of its arguments"** (`escape-bits-safety.md`, R1c). A caller that saw
+  the code pointer and a zero mask could leave in its frame an argument that
+  the callee stores.
+
+So on weakly ordered targets every closure and method value allocated in the
+heap is sealed (`sealFuncValue`), also in a function with a `defer`, where
+its plain words are not covered by `unpublished`. `reflect.MakeFunc` and
+`makeMethodValue` order their fill with a barrier, and so does `makechan`,
+since a send indexes the buffer by the other fields.
+
 ### 13.2 Litmus tests
 
 `runtime/publication_test.go` and `reflect/value_whole_test.go`. They run
@@ -790,6 +813,9 @@ writer, three readers). Threads were not pinned to a core type.
 | `Value`: global, field, struct, array, slice, copy, reflect | 15 s each: 12M to 226M torn per test | 15 s each: none |
 | `Value`: large struct, clear, map element, map key | 15 s each: 10K to 166M torn or panics per test | 15 s each: none |
 | `Value`: channel | 15 s: **passes before too** (the channel's lock) | 15 s: none |
+| Closure with only a pointer (separately, before: `e7a8e1c45e`) | 30 s: 160,801 faults at address `0x1388`, 1.4M nil panics. In the test, 20 s: 1.7M panics of 14.4G reads | 40 s: none of 30.7G |
+| New channel (before: `e7a8e1c45e`) | 20 s: 19,485 with the wrong capacity of 7.6G | 40 s: none of 14.6G |
+| `reflect.MakeFunc` | 20 s: **passes before too**, so it is no evidence for its barrier | 40 s: none |
 
 On amd64 (32 threads, this machine): the fill, closure and grow tests pass
 before, as they should. The append in place had 2,823 stale reads of 729M in
@@ -859,6 +885,14 @@ nothing measurable in these workloads except one: `fmt` printing a slice
 that holds a struct and a map with `%#v` pays 8.5% in instructions on amd64
 and about 7% in time on the M4.
 
+**Sealing function values and channels** (`72ce8286ae` against the commit
+before it, M4, 12 rounds): compile `go/types` +0.08% [-0.22, +0.49], http
+ClientServer +0.25% [-0.49, +0.52], go/parser +0.19% [-0.11, +0.53],
+go/printer +0.18% [-0.48, +0.98], fmt `SprintfStructure` -0.41% [-0.64,
++1.45], json encode -0.48% [-1.16, +1.63]. json decode measured -1.97%
+[-2.32, -1.50], which this change cannot explain and is within what the
+campaigns above disagree by. So it is **not measurable** on these workloads.
+
 ### 13.4 amd64 and s390x text under the seal
 
 `gofmt`, `vet`, `link`, `asm`, `cover`, `json.test` and `http.test`, for
@@ -883,8 +917,8 @@ From reading the source. **None is fixed, and no race on them was run.**
 
 | Suite | Machine | Result |
 | --- | --- | --- |
-| `./run.bash --no-rebuild` | linux/amd64 | ALL TESTS PASSED |
-| `go test -short std cmd/internal/testdir` | linux/amd64 | pass |
+| `./run.bash --no-rebuild`, at `72ce8286ae`, from an empty cache | linux/amd64 | ALL TESTS PASSED |
+| `go test -short std cmd/internal/testdir`, at `72ce8286ae` | linux/amd64 | pass |
 | `runtime`, `reflect`, `sync`, `internal/runtime/maps`, `-short`, native | M4 | pass |
 | `Test/codegen/{publication,slices,append}.go`, native | M4 | pass |
 | `runtime`, `reflect`, `sync`, `internal/runtime/maps`, `GOEXPERIMENT=sharing`, `-short` | linux/amd64 | pass |
