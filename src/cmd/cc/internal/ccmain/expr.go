@@ -317,6 +317,9 @@ func (p *parser) binaryExpr(min int) expr {
 				x, y = p.classOperand(x, y, at), p.classOperand(y, x, at)
 			}
 			x = p.binop(at, t.text, p.rvalue(x), p.rvalue(y))
+			if prec <= 7 && prec != 3 && prec != 4 && prec != 5 {
+				x = p.boolResult(x) // &&, ||, comparisons
+			}
 			continue
 		}
 		y := p.binaryExpr(prec)
@@ -806,6 +809,9 @@ func (p *parser) unaryExpr() expr {
 		case "!":
 			p.next()
 			x := p.scalarCond(p.rvalue(p.castExpr()), at)
+			if p.cxx {
+				return p.boolResult(p.fold(&unary{node{tInt, at}, "!", x}))
+			}
 			return p.fold(&unary{node{tInt, at}, "!", x})
 		case "&":
 			p.next()
@@ -1592,6 +1598,9 @@ func (p *parser) assignConvert(e expr, t *ctype, at pos, what string) expr {
 	case tu.isPtr() && et.isPtr():
 		// GCC warns about incompatible pointers; cmd/cc accepts them,
 		// and keeps C's checks at run time.
+		if p.cxx {
+			e = p.baseAddr(e, tu.elem, at) // C++: to a base class
+		}
 	case tu.isPtr() && et.isInteger() || tu.isInteger() && et.isPtr():
 		// GCC warns (an error in GCC 14), but accepts it.
 	case tu.kind == kVaList && et.kind == kVaList:

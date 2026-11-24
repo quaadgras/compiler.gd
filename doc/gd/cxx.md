@@ -169,9 +169,30 @@ There (step 1 of the order above):
   `new[]`, placement `new`, `delete`, and allocation functions of the
   program's own.
 
-Not there yet, of step 1: static locals with constructors, `delete[]`
-of objects with destructors, braces for aggregates whose members have
-copy constructors, comparisons of type `bool` (they are `int`, as in C,
-which only overload resolution and `auto` can tell), move construction
-by implicit members (they copy), and access checking, which is not
-planned. Then steps 2 to 5.
+And of step 2:
+
+- base classes: a base's subobject is a leading field with no name, so
+  its members are found as C finds an anonymous member's; an empty base
+  takes no room; conversions to a base and back move the pointer (a null
+  pointer stays null); constructors initialize bases, then the table
+  pointer, then members, and destructors undo it in reverse;
+- virtual functions: the table is a C array of function pointers
+  (`_ZTV...`), an object's first word points to its class's, set by
+  each constructor and destructor for its own class as C++ has it; a
+  call through a pointer or reference loads the function from the table,
+  a call on an object whose class is known or with a qualified name is
+  direct; a virtual destructor has a second entry that also frees the
+  object, which `delete` calls; pure virtual functions are null entries;
+- static locals that are constructed or initialized with what is not
+  constant, the first time their declaration is reached (with a flag:
+  not yet safe against two threads reaching it at once);
+- comparisons, `!`, `&&` and `||` are `bool`;
+- `new T[n]{...}` and `delete[]` of objects with destructors: the count
+  is the size the pointer's capability has.
+
+Not there yet: a second base class with virtual functions (its table
+needs functions that adjust `this`), virtual base classes, pointers to
+members, braces for aggregates whose members have copy constructors,
+move construction by implicit members (they copy), destructors of
+objects of static duration at exit, `dynamic_cast` and `typeid`, and
+access checking, which is not planned. Then steps 3 to 5.

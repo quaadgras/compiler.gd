@@ -429,6 +429,22 @@ func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
 		out = append(out, p.convert(v, promoteArg(v.ty())))
 	}
 	sym.used = true
+	direct := p.direct
+	p.direct = false
+	if sym.virtual && !ft.dtor && ft.recv != nil && !direct && !p.exactObject(obj) {
+		// A virtual call: of the function in the object's table.
+		if slot, ok := classOf(ft.recv.elem).vslot[sym]; ok {
+			var pre []stmt
+			if !noEffects(out[0]) {
+				tmp := p.newLocalOrStatic("this", out[0].ty().unqual(), at)
+				tv := &varRef{node{tmp.t, at}, tmp}
+				pre = []stmt{&exprStmt{&assign{node{tmp.t, at}, "=", tv, out[0], tmp.t}}}
+				out[0] = tv
+			}
+			fn := p.virtualFn(out[0], slot, sym.t, at)
+			return p.wrapPre(pre, p.callResult(&call{node{ft.ret.unqual(), at}, fn, ft, out}, ft, at))
+		}
+	}
 	fn := &decay{node{ptrTo(sym.t), at}, &varRef{node{sym.t, at}, sym}}
 	return p.callResult(&call{node{ft.ret.unqual(), at}, fn, ft, out}, ft, at)
 }
@@ -499,6 +515,7 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 			sym := p.resolve(funcSet(x.sym), nil, args, at, x.sym.src, false)
 			if sym.t.fn.recv != nil {
 				// A member function named within its class: on *this.
+				p.direct = p.qualified[x]
 				return p.callFunc(sym, p.thisObject(at), args, at)
 			}
 			return p.callFunc(sym, nil, args, at)
@@ -508,6 +525,7 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 		if sym.t.fn.recv == nil {
 			return p.callFunc(sym, nil, args, at)
 		}
+		p.direct = x.direct
 		return p.callFunc(sym, x.obj, args, at)
 	}
 	if x.ty().kind == kStruct {

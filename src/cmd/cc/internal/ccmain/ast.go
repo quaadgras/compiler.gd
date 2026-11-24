@@ -241,10 +241,13 @@ type symbol struct {
 	implicit bool // a member function the class declares implicitly, or = default
 	deleted  bool // = delete
 	trivial  bool // an implicit member that does nothing, or copies bytes: never called
+	virtual  bool // a virtual member function
+	pure     bool // = 0
 	noCopy   bool // a parameter of class type that is the caller's object, not a copy
 	nrvo     bool // a local that is the function's result: in the caller's memory
 
 	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
+	once     stmt      // a static local's initialization, the first time its declaration is reached
 }
 
 type funcDecl struct {

@@ -142,6 +142,14 @@ func (p *parser) declaration() []stmt {
 			continue
 		}
 		sym := p.declarator2(name, t, s, a, at)
+		if sym != nil && sym.once != nil {
+			if len(syms) > 0 {
+				out = append(out, &declStmt{syms: syms})
+				syms = nil
+			}
+			out = append(out, sym.once)
+			sym.once = nil
+		}
 		if len(p.pendingVLA) > 0 {
 			if len(syms) > 0 {
 				out = append(out, &declStmt{syms: syms})

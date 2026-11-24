@@ -20,6 +20,16 @@ type classInfo struct {
 	nsdmi map[*field]defArg // default member initializers
 	syms  map[string]*symbol
 
+	bases   []*baseClass
+	primary *baseClass // the base whose table of virtual functions the class extends
+	methods []*symbol  // its member functions, in order
+	poly    bool       // has virtual functions
+	empty   bool       // has no data: takes no room as a base
+	vfuncs  []*symbol  // its table of virtual functions (nil: pure)
+	vslot   map[*symbol]int
+	vtable  *symbol
+	delDtor *symbol // the destructor that also frees the object
+
 	complete    bool
 	userCtor    bool // a constructor is declared
 	nontrivCtor bool // default initialization runs code
@@ -40,8 +50,18 @@ type lateFunc struct {
 // a call's operand.
 type methodRef struct {
 	node
-	obj expr
-	set []*symbol
+	obj    expr
+	set    []*symbol
+	direct bool // its name is qualified: not a virtual call
+}
+
+func (ci *classInfo) addMethod(sym *symbol) {
+	for _, m := range ci.methods {
+		if m == sym {
+			return
+		}
+	}
+	ci.methods = append(ci.methods, sym)
 }
 
 func classOf(t *ctype) *classInfo {
@@ -98,20 +118,207 @@ func (s *scope) findMember(name string, seen map[*scope]bool) *symbol {
 		r.cls.syms[name] = sym
 		return sym
 	}
+	for _, b := range r.cls.bases {
+		if bc := classOf(b.t); bc != nil {
+			if v := bc.scope.findIn(name, seen); v != nil {
+				return v
+			}
+		}
+	}
 	return nil
+}
+
+// A baseClass is a direct base of a class: f is its subobject, nil for
+// an empty base, which takes no room.
+type baseClass struct {
+	t *ctype
+	f *field
+}
+
+// baseOffset is where the subobject of the class base is in an object
+// of the class derived: ok is false if it is not a base.
+func baseOffset(base, derived *record) (off int64, ok bool) {
+	if derived.cls == nil {
+		return 0, false
+	}
+	for _, b := range derived.cls.bases {
+		o := int64(0)
+		if b.f != nil {
+			o = b.f.off
+		}
+		if b.t.rec == base {
+			return o, true
+		}
+		if bo, ok := baseOffset(base, b.t.rec); ok {
+			return o + bo, true
+		}
+	}
+	return 0, false
 }
 
 // isBaseOf reports whether base is a base class of derived (not the
 // same class).
-func isBaseOf(base, derived *ctype) bool { return false }
+func isBaseOf(base, derived *ctype) bool {
+	if base.kind != kStruct || derived.kind != kStruct || base.rec == derived.rec {
+		return false
+	}
+	_, ok := baseOffset(base.rec, derived.rec)
+	return ok
+}
+
+// offsetPtr is ptr moved by off bytes, as a pointer to the class to
+// (with its pointee's qualifiers): a null pointer stays null, unless
+// ptr cannot be one (nonNull).
+func (p *parser) offsetPtr(ptr expr, off int64, to *ctype, nonNull bool, at pos) expr {
+	pt := ptrTo(to.unqual().qualified(ptr.ty().elem.q))
+	if off == 0 {
+		return &cast{node{pt, at}, ptr}
+	}
+	move := func(x expr) expr {
+		bytes := &cast{node{ptrTo(tChar), at}, x}
+		return &cast{node{pt, at}, &binary{node{ptrTo(tChar), at}, "+", bytes, p.intc(off, tLong, at)}}
+	}
+	if nonNull {
+		return move(ptr)
+	}
+	var pre []stmt
+	if !noEffects(ptr) {
+		tmp := p.newLocalOrStatic("ptr", ptr.ty().unqual(), at)
+		tv := &varRef{node{tmp.t, at}, tmp}
+		pre = []stmt{&exprStmt{&assign{node{tmp.t, at}, "=", tv, ptr, tmp.t}}}
+		ptr = tv
+	}
+	var e expr = &cond{node{pt, at}, ptr, move(ptr), &intConst{node{pt, at}, 0}}
+	if pre != nil {
+		e = &seqExpr{node{pt, at}, pre, e}
+	}
+	return e
+}
+
+// isNonNull reports whether the pointer ptr is an object's address.
+func isNonNull(ptr expr) bool {
+	switch e := ptr.(type) {
+	case *addrOf:
+		return true
+	case *cast:
+		return isNonNull(e.x)
+	case *seqExpr:
+		return isNonNull(e.x)
+	}
+	return false
+}
 
 // baseAddr is ptr, a pointer to a class, converted to point to its base
 // to, if to is one.
-func (p *parser) baseAddr(ptr expr, to *ctype, at pos) expr { return ptr }
+func (p *parser) baseAddr(ptr expr, to *ctype, at pos) expr {
+	pt := ptr.ty()
+	if !pt.isPtr() || pt.elem.kind != kStruct || to.kind != kStruct || pt.elem.rec == to.rec {
+		return ptr
+	}
+	off, ok := baseOffset(to.rec, pt.elem.rec)
+	if !ok {
+		return ptr
+	}
+	return p.offsetPtr(ptr, off, to, isNonNull(ptr), at)
+}
 
 // derivedAddr is ptr, a pointer to a class, converted to point to the
 // class to derived from it, if to is one.
-func (p *parser) derivedAddr(ptr expr, to *ctype, at pos) expr { return ptr }
+func (p *parser) derivedAddr(ptr expr, to *ctype, at pos) expr {
+	pt := ptr.ty()
+	if !pt.isPtr() || pt.elem.kind != kStruct || to.kind != kStruct || pt.elem.rec == to.rec {
+		return ptr
+	}
+	off, ok := baseOffset(pt.elem.rec, to.rec)
+	if !ok {
+		return ptr
+	}
+	return p.offsetPtr(ptr, -off, to, isNonNull(ptr), at)
+}
+
+// baseObject is e, an object of a class, as its base to, if to is one.
+func (p *parser) baseObject(e expr, to *ctype, at pos) expr {
+	if e.ty().kind != kStruct || !isBaseOf(to, e.ty()) {
+		return e
+	}
+	bt := to.unqual().qualified(e.ty().q)
+	return &deref{node{bt, at}, p.offsetPtr(p.addressOf(e, at), mustOffset(to.rec, e.ty().rec), to, true, at)}
+}
+
+func mustOffset(base, derived *record) int64 {
+	off, _ := baseOffset(base, derived)
+	return off
+}
+
+// parseBases parses a class's base clause, after its ":".
+func (p *parser) parseBases() []*ctype {
+	var bases []*ctype
+	for {
+		p.attributes()
+		for p.is("virtual") || p.is("public") || p.is("private") || p.is("protected") {
+			if p.next().text == "virtual" {
+				p.errorf("virtual base classes are not supported")
+			}
+		}
+		sym, n := p.cxxTypeAt(0)
+		if sym == nil || sym.t.kind != kStruct {
+			p.errorf("expected a base class's name, found %s", p.peek())
+		}
+		p.pos += n
+		p.requireComplete(sym.t, p.here())
+		bases = append(bases, sym.t.unqual())
+		if !p.accept(",") {
+			return bases
+		}
+	}
+}
+
+// fnPtrType is the type of the entries of a table of virtual functions.
+var fnPtrType = ptrTo(&ctype{kind: kFunc, fn: &funcType{ret: tVoid, proto: true}})
+
+// leadingFields are the fields a class's object begins with, before its
+// own members: its bases' subobjects, or the pointer to its table of
+// virtual functions if no base has one.
+func (p *parser) leadingFields(t *ctype, own []*field) []*field {
+	ci := t.rec.cls
+	for _, m := range ci.methods {
+		ci.poly = ci.poly || m.virtual
+	}
+	for _, b := range ci.bases {
+		bc := classOf(b.t)
+		if bc != nil && bc.poly {
+			ci.poly = true
+			if ci.primary == nil {
+				ci.primary = b
+			}
+		}
+	}
+	var out []*field
+	if ci.poly && ci.primary == nil {
+		out = append(out, &field{name: "__vptr", t: ptrTo(fnPtrType), bits: -1, vptr: true})
+	}
+	add := func(b *baseClass) {
+		if bc := classOf(b.t); bc != nil && bc.empty {
+			return
+		}
+		b.f = &field{t: b.t, bits: -1, base: true}
+		out = append(out, b.f)
+	}
+	if ci.primary != nil {
+		add(ci.primary)
+	}
+	for _, b := range ci.bases {
+		if b == ci.primary {
+			continue
+		}
+		if bc := classOf(b.t); bc != nil && bc.poly {
+			p.errorf("a second base class with virtual functions (%s) is not supported yet", b.t)
+		}
+		add(b)
+	}
+	ci.empty = len(out) == 0 && len(own) == 0
+	return out
+}
 
 // The function being parsed, and what is kept with it: saved where a
 // function is parsed within another (a local class's, an implicit
@@ -204,9 +411,6 @@ func (p *parser) classMember(ct *ctype, fields *[]*field) {
 			*fields = append(*fields, &field{t: s.t, bits: -1})
 		}
 		return
-	}
-	if s.virtual {
-		p.errorAt(at, "virtual functions are not supported yet")
 	}
 	for {
 		f := &field{bits: -1}
@@ -438,6 +642,8 @@ func (p *parser) declareMember(ct *ctype, name string, t *ctype, s specs, at pos
 	p.declIn = nil
 	sym := p.cxxDeclareFunc(name, mt, s, at)
 	sym.explicit = s.explicit
+	sym.virtual = sym.virtual || s.virtual
+	ci.addMethod(sym)
 	if inBlock(p.sc) {
 		sym.linkage = 0
 	}
@@ -447,8 +653,11 @@ func (p *parser) declareMember(ct *ctype, name string, t *ctype, s specs, at pos
 			sym.implicit = true
 		case p.accept("delete"):
 			sym.deleted = true
+		case p.peek().kind == tkInt && p.peek().ival == 0:
+			p.next()
+			sym.pure, sym.virtual = true, true
 		default:
-			p.errorf("pure virtual functions are not supported yet")
+			p.errorf("expected default, delete or 0")
 		}
 		return false
 	}
@@ -501,15 +710,31 @@ func (p *parser) completeClass(t *ctype) {
 			userAssign = true
 		}
 	}
-	ci.nontrivCtor = ci.nontrivCtor || userDefault || len(ci.nsdmi) > 0
+	ci.nontrivCtor = ci.nontrivCtor || userDefault || len(ci.nsdmi) > 0 || ci.poly
 	ci.nontrivDtor = userDtor != nil && !userDtor.implicit
-	ci.nontrivCopy = userCopy || userAssign
+	ci.nontrivCopy = userCopy || userAssign || ci.poly
 	if !r.union {
 		for _, f := range r.fields {
 			ci.nontrivCtor = ci.nontrivCtor || needsCtor(f.t)
 			ci.nontrivDtor = ci.nontrivDtor || needsDtor(f.t)
 			ci.nontrivCopy = ci.nontrivCopy || needsCopy(f.t)
 		}
+	}
+	for _, b := range ci.bases {
+		ci.nontrivCtor = ci.nontrivCtor || needsCtor(b.t)
+		ci.nontrivDtor = ci.nontrivDtor || needsDtor(b.t)
+		ci.nontrivCopy = ci.nontrivCopy || needsCopy(b.t)
+		if bc := classOf(b.t); bc != nil {
+			for _, v := range bc.vfuncs {
+				if v.t.fn.dtor {
+					// An implicit destructor overrides a virtual one.
+					ci.nontrivDtor = true
+				}
+			}
+		}
+	}
+	if userDtor != nil && userDtor.virtual {
+		ci.nontrivDtor = true
 	}
 	ci.complete = true
 
@@ -541,6 +766,7 @@ func (p *parser) completeClass(t *ctype) {
 		}
 		sym.comdat = true
 		sym.trivial = trivial
+		ci.addMethod(sym)
 		return sym
 	}
 	var todo []func()
@@ -568,6 +794,7 @@ func (p *parser) completeClass(t *ctype) {
 			todo = append(todo, func() { p.implicitDtor(sym, t) })
 		}
 	}
+	p.buildVtable(t, at)
 	for _, f := range todo {
 		f()
 	}
@@ -621,31 +848,51 @@ func (p *parser) synth(sym *symbol, body func(params []*symbol) []stmt) {
 // implicitCtor defines a class's implicit default constructor.
 func (p *parser) implicitCtor(sym *symbol, t *ctype) {
 	p.synth(sym, func(ps []*symbol) []stmt {
-		return p.initMembers(t, nil, sym.p)
+		return p.initMembers(t, nil, nil, sym.p)
 	})
 }
 
 // implicitCopy defines a class's implicit copy constructor, or copy
-// assignment operator: member by member.
+// assignment operator: base by base, then member by member.
 func (p *parser) implicitCopy(sym *symbol, t *ctype, isAssign bool) {
 	p.synth(sym, func(ps []*symbol) []stmt {
 		at := sym.p
+		ci := t.rec.cls
 		this := p.thisObject(at)
 		other := p.unref(&varRef{node{ps[1].t, at}, ps[1]})
 		var out []stmt
-		for _, f := range t.rec.fields {
-			dst := &member{node{f.t, at}, this, f}
-			src := &member{node{qualifyDeep(f.t, qConst), at}, other, f}
+		copyObj := func(dst, src expr) {
 			switch {
-			case f.bits >= 0:
-				out = append(out, &exprStmt{&assign{node{f.t.unqual(), at}, "=", dst, &cast{node{f.t.unqual(), at}, src}, f.t}})
-			case !needsCopy(f.t):
-				out = append(out, &exprStmt{p.copyBytes(dst, src, at)})
+			case !needsCopy(dst.ty()):
+				if dst.ty().sizeof() > 0 {
+					out = append(out, &exprStmt{p.copyBytes(dst, src, at)})
+				}
 			case isAssign:
 				out = append(out, p.eachElem(dst, src, at, func(d, s expr) expr { return p.rvalueVoid(p.classAssign("=", d, s, at)) }))
 			default:
 				out = append(out, p.eachElem(dst, src, at, func(d, s expr) expr { return p.constructAt(d, d.ty(), []expr{s}, at, 0) }))
 			}
+		}
+		for _, b := range ci.bases {
+			if b.f == nil && !needsCopy(b.t) {
+				continue
+			}
+			copyObj(p.baseObject(this, b.t, at), p.baseObject(other, b.t, at))
+		}
+		if !isAssign {
+			out = append(out, p.setVptr(t, at)...)
+		}
+		for _, f := range t.rec.fields {
+			if f.base || f.vptr {
+				continue
+			}
+			dst := &member{node{f.t, at}, this, f}
+			src := &member{node{qualifyDeep(f.t, qConst), at}, other, f}
+			if f.bits >= 0 {
+				out = append(out, &exprStmt{&assign{node{f.t.unqual(), at}, "=", dst, &cast{node{f.t.unqual(), at}, src}, f.t}})
+				continue
+			}
+			copyObj(dst, src)
 		}
 		if isAssign {
 			out = append(out, &returnStmt{&cast{node{sym.t.fn.ret, at}, &varRef{node{p.this.t, at}, p.this}}})
@@ -671,10 +918,38 @@ type memInit struct {
 
 // initMembers are the statements that initialize the members of *this
 // in a constructor: inits are its member initializers.
-func (p *parser) initMembers(t *ctype, inits map[*field]memInit, at pos) []stmt {
+func (p *parser) initMembers(t *ctype, inits map[*field]memInit, baseInits map[*baseClass]memInit, at pos) []stmt {
 	ci := t.rec.cls
 	var out []stmt
+	for _, b := range ci.bases {
+		in, ok := baseInits[b]
+		if !ok && !needsCtor(b.t) {
+			continue
+		}
+		mark := len(p.temps)
+		mode := mValue
+		if !ok {
+			mode = 0
+		}
+		if in.braceAt != 0 {
+			save := p.pos
+			p.pos = in.braceAt + 1
+			for !p.is("}") {
+				in.args = append(in.args, p.assignment())
+				if !p.accept(",") {
+					break
+				}
+			}
+			p.pos = save
+		}
+		e := p.constructAt(p.baseObject(p.thisObject(at), b.t, at), b.t, in.args, at, mode)
+		out = append(out, &exprStmt{p.fullExpr(mark, e)})
+	}
+	out = append(out, p.setVptr(t, at)...)
 	for _, f := range t.rec.fields {
+		if f.base || f.vptr {
+			continue
+		}
 		in, ok := inits[f]
 		if !ok && t.rec.union {
 			continue
@@ -783,10 +1058,16 @@ func (p *parser) destroyMembers(t *ctype, at pos) []stmt {
 	}
 	for i := len(t.rec.fields) - 1; i >= 0; i-- {
 		f := t.rec.fields[i]
-		if !needsDtor(f.t) {
+		if !needsDtor(f.t) || f.base || f.vptr {
 			continue
 		}
 		if d := p.destroy(&member{node{f.t, at}, p.thisObject(at), f}, at); d != nil {
+			out = append(out, d)
+		}
+	}
+	bases := t.rec.cls.bases
+	for i := len(bases) - 1; i >= 0; i-- {
+		if d := p.destroy(p.baseObject(p.thisObject(at), bases[i].t, at), at); d != nil {
 			out = append(out, d)
 		}
 	}
@@ -802,19 +1083,39 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 	r := ct.rec
 	if ft.dtor {
 		body := p.funcBody()
+		list := p.setVptr(ct, at)
 		if members := p.destroyMembers(ct, at); len(members) > 0 {
 			// When the body is left, however it is.
-			return &block{list: []stmt{&deferStmt{&block{list: members}}, body}}
+			list = append(list, &deferStmt{&block{list: members}})
 		}
-		return body
+		if len(list) == 0 {
+			return body
+		}
+		return &block{list: append(list, body)}
 	}
 	inits := map[*field]memInit{}
+	baseInits := map[*baseClass]memInit{}
 	var pre []stmt
 	delegated := false
 	if p.accept(":") {
 		for {
 			mat := p.here()
-			name := p.ident()
+			var base *baseClass
+			name := ""
+			if sym, n := p.cxxTypeAt(0); sym != nil && sym.t.kind == kStruct && (p.isAt(n, "(") || p.isAt(n, "{")) {
+				p.pos += n
+				name = sym.t.rec.tag
+				for _, b := range r.cls.bases {
+					if b.t.rec == sym.t.rec {
+						base = b
+					}
+				}
+				if base == nil && sym.t.rec != r {
+					p.errorAt(mat, "%s is not a base of %s", sym.t, ct)
+				}
+			} else {
+				name = p.ident()
+			}
 			in := memInit{at: mat}
 			if p.is("{") {
 				in.braceAt = p.pos
@@ -823,7 +1124,9 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 				p.expect("(")
 				in.args = p.callArgs()
 			}
-			if name == r.tag {
+			if base != nil {
+				baseInits[base] = in
+			} else if name == r.tag {
 				// A delegating constructor.
 				if in.braceAt != 0 {
 					p.errorAt(mat, "a delegating constructor's arguments are in parentheses here")
@@ -844,7 +1147,7 @@ func (p *parser) ctorBody(sym *symbol, at pos) *block {
 		}
 	}
 	if !delegated {
-		pre = append(pre, p.initMembers(ct, inits, at)...)
+		pre = append(pre, p.initMembers(ct, inits, baseInits, at)...)
 	}
 	body := p.funcBody()
 	if len(pre) == 0 {
@@ -951,7 +1254,7 @@ func (p *parser) cxxMember(x expr, arrow bool, at pos) expr {
 	}
 	switch sym.kind {
 	case symFunc:
-		return &methodRef{node{sym.t, at}, x, funcSet(sym)}
+		return &methodRef{node{sym.t, at}, x, funcSet(sym), in != nil}
 	case symEnumConst:
 		return p.intc(sym.val, sym.t, at)
 	case symVar:
@@ -983,4 +1286,168 @@ func (p *parser) memberCall(x expr, name string, args []expr, at pos) expr {
 		return p.callFunc(sym, nil, args, at)
 	}
 	return p.callFunc(sym, x, args, at)
+}
+
+// Virtual functions.
+
+// sameVirtual reports whether the member function m overrides the
+// virtual function v of a base class.
+func sameVirtual(m, v *symbol) bool {
+	mf, vf := m.t.fn, v.t.fn
+	if mf.dtor || vf.dtor {
+		return mf.dtor && vf.dtor
+	}
+	if m.src != v.src || len(mf.params) != len(vf.params) || mf.variadic != vf.variadic || constThis(mf) != constThis(vf) {
+		return false
+	}
+	for i := 1; i < len(mf.params); i++ {
+		x, y := mf.params[i], vf.params[i]
+		if x.ref == 0 && y.ref == 0 {
+			x, y = x.unqual(), y.unqual()
+		}
+		if !sameType(x, y) {
+			return false
+		}
+	}
+	return true
+}
+
+// buildVtable makes the table of virtual functions of the class t: its
+// primary base's, with the functions t overrides replaced and those it
+// adds at the end. A virtual destructor has two entries: the destructor,
+// and the function that also frees the object, which delete calls.
+func (p *parser) buildVtable(t *ctype, at pos) {
+	ci := t.rec.cls
+	ci.vslot = map[*symbol]int{}
+	if !ci.poly {
+		return
+	}
+	if ci.primary != nil {
+		ci.vfuncs = append([]*symbol(nil), classOf(ci.primary.t).vfuncs...)
+	}
+	deleting := func(dtor *symbol) *symbol {
+		sym := &symbol{name: strings.Replace(dtor.name, "D1Ev", "D0Ev", 1), src: dtor.src, kind: symFunc, t: dtor.t, global: true,
+			linkage: dtor.linkage, p: at, sc: dtor.sc, comdat: true, implicit: true}
+		p.u.syms = append(p.u.syms, sym)
+		ci.delDtor = sym
+		return sym
+	}
+	for _, m := range ci.methods {
+		ft := m.t.fn
+		if ft.recv == nil || ft.ctor {
+			continue
+		}
+		found := -1
+		for i, v := range ci.vfuncs {
+			if sameVirtual(m, v) {
+				found = i
+				break
+			}
+		}
+		switch {
+		case found >= 0:
+			m.virtual = true
+			ci.vfuncs[found] = m
+			ci.vslot[m] = found
+			if ft.dtor {
+				ci.vfuncs[found+1] = deleting(m)
+			}
+		case m.virtual:
+			ci.vslot[m] = len(ci.vfuncs)
+			ci.vfuncs = append(ci.vfuncs, m)
+			if ft.dtor {
+				ci.vfuncs = append(ci.vfuncs, deleting(m))
+			}
+		}
+	}
+	// The table: an array of pointers to functions.
+	vt := &symbol{name: "_ZTV" + rawType(t.unqual()), kind: symVar, t: arrayOf(fnPtrType, int64(len(ci.vfuncs))), global: true,
+		linkage: 'e', defined: true, comdat: true, p: at, addr: true}
+	vt.src = vt.name
+	if inBlock(ci.scope) {
+		vt.linkage = 0
+	}
+	in := &initializer{}
+	for i, f := range ci.vfuncs {
+		var x expr = &intConst{node{fnPtrType, at}, 0}
+		if !f.pure {
+			f.used = true
+			x = &cast{node{fnPtrType, at}, &decay{node{ptrTo(f.t), at}, &varRef{node{f.t, at}, f}}}
+		}
+		in.items = append(in.items, initItem{off: int64(i) * fnPtrType.sizeof(), t: fnPtrType, x: x})
+	}
+	vt.init = in
+	p.u.syms = append(p.u.syms, vt)
+	ci.vtable = vt
+	if d := ci.delDtor; d != nil {
+		dtor := ci.scope.vars["~"+t.rec.tag]
+		p.synth(d, func(ps []*symbol) []stmt {
+			this := &varRef{node{p.this.t, at}, p.this}
+			return []stmt{
+				&exprStmt{p.callFunc(dtor, p.thisObject(at), nil, at)},
+				p.deallocate(&cast{node{ptrTo(tVoid), at}, this}, t, false, at),
+			}
+		})
+	}
+}
+
+// setVptr are the statements that make *this an object of the class t
+// to virtual calls: its pointer to the table is t's.
+func (p *parser) setVptr(t *ctype, at pos) []stmt {
+	ci := t.rec.cls
+	if ci == nil || !ci.poly || ci.vtable == nil {
+		return nil
+	}
+	vpt := ptrTo(fnPtrType)
+	this := &varRef{node{p.this.t, at}, p.this}
+	slot := &deref{node{vpt, at}, &cast{node{ptrTo(vpt), at}, this}}
+	vt := ci.vtable
+	val := &decay{node{vpt, at}, &varRef{node{vt.t, at}, vt}}
+	return []stmt{&exprStmt{&assign{node{vpt, at}, "=", slot, val, vpt}}}
+}
+
+// virtualFn is the function that the entry slot of the table of the
+// object this points to (a pointer to a class with virtual functions,
+// with no effects) holds, as a pointer to a function of type ft.
+func (p *parser) virtualFn(this expr, slot int, ft *ctype, at pos) expr {
+	vpt := ptrTo(fnPtrType)
+	vptr := &deref{node{vpt, at}, &cast{node{ptrTo(vpt), at}, this}}
+	entry := &deref{node{fnPtrType, at}, &binary{node{vpt, at}, "+", vptr, p.intc(int64(slot), tLong, at)}}
+	return &cast{node{ptrTo(ft), at}, entry}
+}
+
+// exactObject reports whether obj is an object whose class is known: a
+// variable or a temporary, not what a pointer or reference refers to.
+func (p *parser) exactObject(obj expr) bool {
+	switch e := obj.(type) {
+	case *varRef:
+		return e.sym.t.kind == kStruct
+	case *seqExpr:
+		return p.xvalues[obj]
+	case *member:
+		return !e.f.base && p.exactObject(e.x)
+	}
+	return false
+}
+
+// wrapPre is e after the statements pre.
+func (p *parser) wrapPre(pre []stmt, e expr) expr {
+	if len(pre) == 0 {
+		return e
+	}
+	switch x := e.(type) {
+	case *classPR:
+		return &classPR{x.node, func(dst expr) expr {
+			in := x.build(dst)
+			return &seqExpr{node{in.ty(), in.at()}, pre, in}
+		}}
+	case *deref:
+		// A reference's referent: still an lvalue.
+		d := &deref{x.node, &seqExpr{node{x.x.ty(), x.p}, pre, x.x}}
+		if p.xvalues[e] {
+			p.xvalue(d)
+		}
+		return d
+	}
+	return &seqExpr{node{e.ty(), e.at()}, pre, e}
 }

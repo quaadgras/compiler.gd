@@ -1044,7 +1044,14 @@ func (p *parser) cxxName(at pos) expr {
 		return p.fieldRef(sym, in, at)
 	}
 	sym.used = true
-	return p.unref(&varRef{node{sym.t, at}, sym})
+	v := &varRef{node{sym.t, at}, sym}
+	if in != nil && sym.kind == symFunc {
+		if p.qualified == nil {
+			p.qualified = map[expr]bool{}
+		}
+		p.qualified[v] = true
+	}
+	return p.unref(v)
 }
 
 // typeSpecEnd is the token offset after the simple type specifier at
@@ -1212,4 +1219,24 @@ func (p *parser) classOperand(x, y expr, at pos) expr {
 	}
 	p.errorAt(at, "no match for an operator with operands of types %s and %s", x.ty(), y.ty())
 	return nil
+}
+
+// boolResult is e, the result of a comparison or a logical operator,
+// which C types int, as C++'s bool.
+func (p *parser) boolResult(e expr) expr {
+	switch x := e.(type) {
+	case *binary:
+		if x.t.kind == kInt {
+			x.t = tBool
+			return x
+		}
+	case *unary:
+		if x.op == "!" {
+			x.t = tBool
+			return x
+		}
+	case *intConst:
+		return &intConst{node{tBool, x.p}, b2i(x.v != 0)}
+	}
+	return p.convert(e, tBool)
 }

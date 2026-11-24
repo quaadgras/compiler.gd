@@ -183,7 +183,7 @@ func (p *parser) constructAt(dst expr, t *ctype, args []expr, at pos, mode int) 
 		if pr, ok := src.(*classPR); ok {
 			src = p.materializePR(pr)
 		}
-		return &assign{node{t, at}, "=", dst, p.rvalue(src), t}
+		return &assign{node{t, at}, "=", dst, p.rvalue(p.baseObject(src, t, at)), t}
 	}
 	call := p.callFunc(ctor, dst, args, at)
 	if mode&mValue != 0 && ctor.implicit && len(args) == 0 {
@@ -441,9 +441,67 @@ func (p *parser) finishVar(sym *symbol, mark int, at pos) {
 		sym.addr = true
 		sym.dtor = p.destroy(&varRef{node{sym.t, at}, sym}, at)
 	}
-	if sym.kind == symVar && sym.global && p.fn != nil && sym.ctor != nil {
-		p.errorAt(at, "static locals that are constructed are not supported yet")
+	if sym.kind == symVar && sym.global && p.fn != nil && sym.storage != sExtern {
+		// A static local that is not initialized with constants is
+		// initialized the first time its declaration is reached.
+		ref := &varRef{node{sym.t, at}, sym}
+		var init []stmt
+		if sym.init != nil && sym.init.scalar != nil && !staticInit(sym.init.scalar) {
+			init = append(init, &exprStmt{&assign{node{sym.t, at}, "=", ref, sym.init.scalar, sym.t}})
+			sym.init = nil
+		}
+		if sym.ctor != nil {
+			init = append(init, &exprStmt{sym.ctor})
+			sym.ctor = nil
+		}
+		if len(init) > 0 {
+			p.symN++
+			guard := &symbol{name: "guard." + itoa(int64(p.symN)), kind: symVar, t: tBool, global: true, storage: sStatic, p: at, defined: true}
+			p.u.statics = append(p.u.statics, guard)
+			gv := &varRef{node{tBool, at}, guard}
+			init = append([]stmt{&exprStmt{&assign{node{tBool, at}, "=", gv, p.intc(1, tBool, at), tBool}}}, init...)
+			sym.once = &ifStmt{&unary{node{tInt, at}, "!", gv}, &block{list: init}, nil}
+		}
 	}
+}
+
+// staticInit reports whether e can initialize an object of static
+// duration before the program starts: it is made of constants and
+// addresses of such objects.
+func staticInit(e expr) bool {
+	switch e := e.(type) {
+	case *intConst, *floatConst, *complexConst, *strLit:
+		return true
+	case *cast:
+		return staticInit(e.x)
+	case *decay:
+		return staticAddr(e.x)
+	case *addrOf:
+		return staticAddr(e.x)
+	case *unary:
+		return staticInit(e.x)
+	case *binary:
+		return e.op != "," && staticInit(e.x) && staticInit(e.y)
+	case *cond:
+		return staticInit(e.c) && staticInit(e.x) && staticInit(e.y)
+	}
+	return false
+}
+
+func staticAddr(e expr) bool {
+	switch e := e.(type) {
+	case *varRef:
+		return e.sym.global || e.sym.kind == symFunc
+	case *strLit:
+		return true
+	case *compoundLit:
+		return e.sym.global
+	case *member:
+		return staticAddr(e.x)
+	case *deref:
+		return staticInit(e.x)
+	}
+	return false
 }
 
 // Conversions.
@@ -702,7 +760,9 @@ func (p *parser) classAssign(op string, x, y expr, at pos) expr {
 			if t.q&qConst != 0 {
 				p.errorAt(at, "assignment of read-only location")
 			}
-			if !sameType(y.ty().unqual(), t.unqual()) {
+			if isBaseOf(t, y.ty()) {
+				y = p.baseObject(p.rvalue(y), t, at)
+			} else if !sameType(y.ty().unqual(), t.unqual()) {
 				y = p.classTemp(t, y, at, "assignment")
 			} else if pr, ok := y.(*classPR); ok {
 				y = p.materializePR(pr)
@@ -849,10 +909,20 @@ func (p *parser) newExpr(at pos) expr {
 		p.expect(end)
 		switch {
 		case count != nil:
-			if len(as) != 0 {
-				p.errorAt(at, "an array new's initializer is empty here")
+			// The elements given, then the rest value-initialized.
+			var list []stmt
+			for i, a := range as {
+				elem := &deref{node{t, at}, &binary{node{ptrTo(t), at}, "+", pv, p.intc(int64(i), tLong, at)}}
+				if t.kind == kStruct {
+					list = append(list, &exprStmt{p.constructAt(elem, t, []expr{a}, at, mImplicit)})
+				} else {
+					list = append(list, &exprStmt{p.initScalar(elem, a, at)})
+				}
 			}
-			init = p.eachNew(pv, t, count, at, mValue)
+			if n, ok := p.foldInt(count); !ok || n > int64(len(as)) {
+				list = append(list, p.eachNew(pv, t, count, at, mValue, int64(len(as))))
+			}
+			init = &block{list: list}
 		case t.kind == kStruct:
 			init = &exprStmt{p.constructAt(obj, t, as, at, mValue)}
 		case len(as) == 0:
@@ -864,7 +934,7 @@ func (p *parser) newExpr(at pos) expr {
 		}
 	case count != nil:
 		if needsCtor(t) {
-			init = p.eachNew(pv, t, count, at, 0)
+			init = p.eachNew(pv, t, count, at, 0, 0)
 		}
 	case needsCtor(t):
 		init = p.eachElem(obj, nil, at, func(d, _ expr) expr { return p.constructAt(d, d.ty(), nil, at, 0) })
@@ -892,7 +962,7 @@ func (p *parser) newLocalOrStatic(what string, t *ctype, at pos) *symbol {
 
 // eachNew initializes the count elements of type t at ptr, as new T[n]
 // does.
-func (p *parser) eachNew(ptr expr, t *ctype, count expr, at pos, mode int) stmt {
+func (p *parser) eachNew(ptr expr, t *ctype, count expr, at pos, mode int, start int64) stmt {
 	n := p.newLocalOrStatic("n", tULong, at)
 	i := p.newLocalOrStatic("i", tULong, at)
 	nv, iv := &varRef{node{tULong, at}, n}, &varRef{node{tULong, at}, i}
@@ -908,7 +978,7 @@ func (p *parser) eachNew(ptr expr, t *ctype, count expr, at pos, mode int) stmt 
 	return &block{list: []stmt{
 		&exprStmt{&assign{node{tULong, at}, "=", nv, count, tULong}},
 		&forStmt{
-			init: &exprStmt{&assign{node{tULong, at}, "=", iv, p.intc(0, tULong, at), tULong}},
+			init: &exprStmt{&assign{node{tULong, at}, "=", iv, p.intc(start, tULong, at), tULong}},
 			c:    &binary{node{tInt, at}, "<", iv, nv},
 			post: &incDec{node{tULong, at}, "++", true, iv},
 			body: body,
@@ -942,29 +1012,63 @@ func (p *parser) deleteExpr(at pos) expr {
 	ptr := p.newLocalOrStatic("del", pt.unqual(), at)
 	pv := &varRef{node{ptr.t, at}, ptr}
 	var body []stmt
+	virtual := false
 	if t.kind != kVoid {
 		p.requireComplete(baseElem(t), at)
-		if needsDtor(t) {
-			if array {
-				p.errorAt(at, "delete[] of objects with destructors is not supported yet")
+		if ci := classOf(t); ci != nil && !array {
+			if dtor := ci.scope.vars["~"+t.rec.tag]; dtor != nil && dtor.virtual {
+				// The object's own class destroys and frees it.
+				virtual = true
+				slot := ci.vslot[dtor] + 1
+				this := &cast{node{ptrTo(t.unqual()), at}, pv}
+				body = append(body, &exprStmt{&call{node{tVoid, at}, p.virtualFn(this, slot, dtor.t, at), dtor.t.fn, []expr{this}}})
 			}
-			body = append(body, p.destroy(&deref{node{t.unqual(), at}, &cast{node{ptrTo(t.unqual()), at}, pv}}, at))
+		}
+		if needsDtor(t) && !virtual {
+			obj := &deref{node{t.unqual(), at}, &cast{node{ptrTo(t.unqual()), at}, pv}}
+			if array {
+				body = append(body, p.destroyArray(pv, t.unqual(), at))
+			} else {
+				body = append(body, p.destroy(obj, at))
+			}
 		}
 	}
-	opName := "operator delete"
-	if array {
-		opName = "operator delete[]"
-	}
-	vp := &cast{node{ptrTo(tVoid), at}, pv}
-	if sym := p.resolve(p.allocFuncs(opName, t), nil, []expr{vp}, at, opName, true); sym != nil {
-		body = append(body, &exprStmt{p.rvalueVoid(p.callFunc(sym, nil, []expr{vp}, at))})
-	} else {
-		free := p.libcFunc("free", at)
-		body = append(body, &exprStmt{&call{node{tVoid, at}, free, free.ty().elem.fn, []expr{vp}}})
+	if !virtual {
+		body = append(body, p.deallocate(&cast{node{ptrTo(tVoid), at}, pv}, t, array, at))
 	}
 	list := []stmt{
 		&exprStmt{&assign{node{ptr.t, at}, "=", pv, v, ptr.t}},
 		&ifStmt{pv, &block{list: body}, nil},
 	}
 	return &stmtExpr{node{tVoid, at}, &block{list: list}, nil}
+}
+
+// deallocate is the statement that frees the memory at ptr (a void *)
+// of an object of type t, as delete does: by a deallocation function of
+// the program's, else the C library's.
+func (p *parser) deallocate(ptr expr, t *ctype, array bool, at pos) stmt {
+	opName := "operator delete"
+	if array {
+		opName = "operator delete[]"
+	}
+	if sym := p.resolve(p.allocFuncs(opName, t), nil, []expr{ptr}, at, opName, true); sym != nil {
+		return &exprStmt{p.rvalueVoid(p.callFunc(sym, nil, []expr{ptr}, at))}
+	}
+	free := p.libcFunc("free", at)
+	return &exprStmt{&call{node{tVoid, at}, free, free.ty().elem.fn, []expr{ptr}}}
+}
+
+// destroyArray is the statement that destroys the objects of type t of
+// the array that new[] made at ptr, the last first: the capability has
+// the array's size.
+func (p *parser) destroyArray(ptr expr, t *ctype, at pos) stmt {
+	i := p.newLocalOrStatic("i", tLong, at)
+	iv := &varRef{node{tLong, at}, i}
+	count := &binary{node{tLong, at}, "/", &cast{node{tLong, at}, &builtinCall{node{tULong, at}, "cxx_size", []expr{ptr}}}, p.intc(t.sizeof(), tLong, at)}
+	elem := &deref{node{t, at}, &binary{node{ptrTo(t), at}, "+", &cast{node{ptrTo(t), at}, ptr}, iv}}
+	return &forStmt{
+		init: &exprStmt{&assign{node{tLong, at}, "=", iv, count, tLong}},
+		c:    &binary{node{tInt, at}, ">", iv, p.intc(0, tLong, at)},
+		body: &block{list: []stmt{&exprStmt{&incDec{node{tLong, at}, "--", false, iv}}, p.destroy(elem, at)}},
+	}
 }

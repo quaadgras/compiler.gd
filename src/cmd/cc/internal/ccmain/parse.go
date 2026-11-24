@@ -67,6 +67,8 @@ type parser struct {
 	extend     *[]*symbol    // where temporaries a declared reference binds are kept, to live as long
 	declTo     *scope        // the scope the next function is declared in, if not the current one
 	userConv   int           // ranking a user-defined conversion's own argument
+	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
+	qualified  map[expr]bool // the functions named with a qualified name
 	condDepth  int           // in an operand that is not always evaluated
 	convType   *ctype        // the type of the conversion function whose name was last parsed
 	exprType   int           // parsing a type specifier in an expression: T(x)
@@ -800,8 +802,13 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	if p.cxx && p.is("final") && (p.isAt(1, "{") || p.isAt(1, ":")) {
 		p.next()
 	}
+	var bases []*ctype
 	if p.cxx && p.is(":") && tag != "" {
-		p.errorf("base classes are not supported yet")
+		p.next()
+		bases = p.parseBases()
+		if !p.is("{") {
+			p.errorf("expected a class's body")
+		}
 	}
 	if tag != "" && !p.is("{") {
 		if t, _ := p.lookupTag(tag); t != nil && !p.is(";") {
@@ -850,6 +857,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	var saveCls *ctype
 	if p.cxx {
 		saveSc, saveCls = p.beginClass(t)
+		for _, b := range bases {
+			r.cls.bases = append(r.cls.bases, &baseClass{t: b})
+		}
 	}
 	for !p.accept("}") {
 		if p.is("_Static_assert") || p.is("static_assert") {
@@ -916,6 +926,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	}
 	if p.cxx {
 		p.sc, p.cls = saveSc, saveCls
+		fields = append(p.leadingFields(t, fields), fields...)
 	}
 	a.merge(p.attributes())
 	for _, f := range fields {
@@ -935,6 +946,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	if a.aligned > 0 {
 		r.align = max(r.align, a.aligned)
 		r.size = (r.size + r.align - 1) / r.align * r.align
+	}
+	if p.cxx && len(r.fields) == 0 && r.size == 0 {
+		r.size = 1 // C++: every object has a size
 	}
 	if prev != nil {
 		// C23: the same tag and contents again is the same type.

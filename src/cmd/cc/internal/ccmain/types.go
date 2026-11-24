@@ -104,6 +104,8 @@ type field struct {
 	ubytes int64 // a packed bit-field's: the bytes it spans, from off
 
 	mutable bool // C++: not const in a const object
+	base    bool // C++: a base class's subobject
+	vptr    bool // C++: the pointer to the class's table of virtual functions
 }
 
 type funcType struct {

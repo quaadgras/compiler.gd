@@ -581,6 +581,9 @@ func (g *gen) rv(e expr) string {
 	case *unary:
 		switch e.op {
 		case "!":
+			if e.t.kind == kBool {
+				return "uint8(c23.B2I(" + g.cond(e) + "))" // C++
+			}
 			return "c23.B2I(" + g.cond(e) + ")"
 		case "-":
 			if is128(e.t) {
@@ -639,6 +642,9 @@ func (g *gen) binary(e *binary) string {
 		g.effect(e.x)
 		return g.rv(e.y)
 	case "&&", "||", "==", "!=", "<", ">", "<=", ">=":
+		if e.t.kind == kBool {
+			return "uint8(c23.B2I(" + g.cond(e) + "))" // C++
+		}
 		return "c23.B2I(" + g.cond(e) + ")"
 	}
 	xt := e.x.ty()
@@ -1350,6 +1356,8 @@ func (g *gen) builtinCode(e *builtinCall) string {
 	case "cxx_zero":
 		g.p("c23.Memset(%s, 0, %d)", g.rv(e.args[0]), e.args[1].(*intConst).v)
 		return ""
+	case "cxx_size":
+		return fmt.Sprintf("%s(%s.Size)", goType(tULong), g.rv(e.args[0]))
 	case "cxx_copy":
 		g.p("c23.Memmove(%s, %s, %d)", g.rv(e.args[0]), g.rv(e.args[1]), e.args[2].(*intConst).v)
 		return ""
