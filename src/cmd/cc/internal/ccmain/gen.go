@@ -90,6 +90,14 @@ type gen struct {
 	flatSt  *flatState // a flat function's (flat.go)
 	jmp     bool       // the function calls setjmp: its body is a closure
 	frames  []*frame   // the blocks, loops and switches being generated (cleanup.go)
+
+	// The 1:1 translation's locals (thin.go): the ones not declared yet,
+	// which are declared where C declares them if nothing can jump
+	// over that (inPlace), and at the function's top otherwise; and
+	// the names of those declared in place (inBody).
+	pending []*symbol
+	inPlace bool
+	inBody  map[string]bool
 }
 
 func (g *gen) errorf(at pos, format string, args ...any) {

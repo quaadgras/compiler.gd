@@ -538,30 +538,157 @@ func (g *gen) tdeclareLocal(s *symbol) {
 		g.names[s] = "(*sret)"
 		return
 	}
-	n := g.localName(s)
+	g.localName(s)
+	g.pending = append(g.pending, s) // declared where C declares it, or at the top (funcLit)
+}
+
+// localType is the Go type of the variable of the local s.
+func (g *gen) localType(s *symbol) string {
 	if s.t.isVLA() {
-		fmt.Fprintf(&g.locals, "var %s *c23.Void\n_ = %s\n", n, n)
-		return
+		return voidPtr // the pointer to its array
 	}
-	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, g.mirror(s.t), n)
+	return g.mirror(s.t)
+}
+
+// thoist declares the local s at the function's top.
+func (g *gen) thoist(s *symbol) {
+	n := g.localName(s)
+	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, g.localType(s), n)
+}
+
+// declareHere reports whether the local s, whose declaration is being
+// generated, is declared here by Go too, and takes it off the list of
+// those that are not yet.
+func (g *gen) declareHere(s *symbol) bool {
+	if !g.inPlace || g.fn == nil {
+		return false
+	}
+	if n := len(g.frames); n > 0 && g.frames[n-1].kind == frSwitch {
+		return false // a later case, which Go gives a scope of its own, may name it
+	}
+	for i, p := range g.pending {
+		if p == s {
+			g.pending = append(g.pending[:i:i], g.pending[i+1:]...)
+			g.inBody[g.localName(s)] = true
+			return true
+		}
+	}
+	return false
+}
+
+// declare declares the local named n, of the Go type t, here: with the
+// value v if that is not "". The blank use is taken out again if
+// something reads the variable (usedLocals).
+func (g *gen) declare(n, t, v string) {
+	inner, conv := wholeConv(v, t)
+	switch {
+	case v == "" || conv && (inner == "0" || inner == "nil"):
+		g.p("var %s %s", n, t) // Go's zero
+	case conv && numLit.MatchString(inner):
+		g.p("var %s %s = %s", n, t, inner)
+	case conv:
+		g.p("%s := %s", n, v)
+	default:
+		g.p("var %s %s = %s", n, t, v)
+	}
+	g.p("_ = %s", n)
+}
+
+var numLit = regexp.MustCompile(`^-?[0-9][0-9a-fA-FxX_.+eEpP-]*$`)
+
+// wholeConv reports whether the Go expression v is a conversion to the
+// type t, T(x) or (*T)(x), and gives its x.
+func wholeConv(v, t string) (string, bool) {
+	rest, ok := strings.CutPrefix(v, t+"(")
+	if !ok {
+		rest, ok = strings.CutPrefix(v, "("+t+")(")
+	}
+	if !ok || !strings.HasSuffix(rest, ")") {
+		return "", false
+	}
+	rest = rest[:len(rest)-1]
+	depth := 0
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth--; depth < 0 {
+				return "", false // the conversion's parenthesis closes before the end
+			}
+		case '"', '\'', '`':
+			return "", false // not looked into
+		}
+	}
+	return rest, depth == 0
+}
+
+// names reports whether the Go expression x names the variable n.
+func names(x, n string) bool {
+	for i := 0; ; {
+		j := strings.Index(x[i:], n)
+		if j < 0 {
+			return false
+		}
+		i += j
+		before := i == 0 || !identByte(x[i-1]) && x[i-1] != '.'
+		after := i+len(n) == len(x) || !identByte(x[i+len(n)])
+		if before && after {
+			return true
+		}
+		i += len(n)
+	}
+}
+
+func identByte(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
 }
 
 func (g *gen) tlocalInit(s *symbol) {
 	n := g.localName(s)
+	here := !s.global && !s.nrvo && g.declareHere(s)
 	if s.t.isVLA() {
-		g.p("%s = c23.NewArrayT(%s, uintptr(%s))", n, g.typeDesc(g.mirror(baseElem(s.t))), g.vlaSize(s.t))
+		alloc := fmt.Sprintf("c23.NewArrayT(%s, uintptr(%s))", g.typeDesc(g.mirror(baseElem(s.t))), g.vlaSize(s.t))
+		if here {
+			g.declare(n, voidPtr, alloc)
+		} else {
+			g.p("%s = %s", n, alloc)
+		}
 		return
 	}
 	l := lval{x: n, t: s.t}
+	m := g.mirror(s.t)
 	switch {
 	case s.init != nil && s.init.scalar != nil:
-		g.tstore(l, g.rv(s.init.scalar), s.init.scalar)
+		v := g.rv(s.init.scalar)
+		// Go's declaration is not in scope in its own value, as C's is
+		// (void *p = &p).
+		if here && !s.t.isAggregate() && !memValue(s.t) && !names(v, n) {
+			if k, ok := s.init.scalar.(*intConst); ok && !s.t.isPtr() && s.t.kind != kNullptr {
+				v = constLit(s.t, k.v)
+			}
+			g.declare(n, m, v)
+			break
+		}
+		if here {
+			g.declare(n, m, "")
+		}
+		g.tstore(l, v, s.init.scalar)
 	case s.init != nil:
-		g.p("%s = %s{}", n, g.mirror(s.t))
+		if here {
+			g.declare(n, m, "") // zero, each time it is reached
+		} else {
+			g.p("%s = %s{}", n, m)
+		}
 		g.tinitObject(n, s.t, s.init)
-	case !s.global && !s.t.isAggregate():
+	case here:
 		// Without an initializer its value is indeterminate each time
-		// the declaration is reached: zero (see localInit).
+		// the declaration is reached: Go's zero.
+		g.declare(n, m, "")
+	case !s.global && !s.t.isAggregate():
+		// Declared at the function's top (a goto may pass this): set
+		// here, so that the Go compiler does not keep its value from
+		// one pass of a loop to the next (see localInit).
 		g.p("%s = %s", n, g.zero(s.t))
 	}
 	if s.ctor != nil {

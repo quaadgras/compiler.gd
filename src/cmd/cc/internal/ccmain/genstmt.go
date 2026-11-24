@@ -6,6 +6,8 @@ package ccmain
 
 import (
 	"fmt"
+	"go/scanner"
+	gotoken "go/token"
 	"strings"
 )
 
@@ -141,6 +143,11 @@ func (g *gen) funcLit(f *funcDecl) string {
 	g.fn = f
 	g.locals.Reset()
 	g.cells.Reset()
+	g.pending, g.inBody = nil, map[string]bool{}
+	// A goto may not jump over a Go declaration, and setjmp's and a flat
+	// function's code is entered at labels: there the locals are all
+	// declared at the top.
+	g.inPlace = g.o.thin && !needsFlat(f) && f.setjmps == 0 && len(f.labels) == 0 && len(f.addrLabels) == 0
 	var fb strings.Builder
 	ft := f.sym.t.fn
 	var body strings.Builder
@@ -196,9 +203,16 @@ func (g *gen) funcLit(f *funcDecl) string {
 	sig := g.funcSig(ft, names)
 	hasRes := ft.ret.kind != kVoid && ft.ret.kind != kStruct
 	fmt.Fprintf(&fb, "%s {\n", sig)
-	fb.WriteString(g.locals.String())
-	fb.WriteString(g.cells.String())
+	for _, s := range g.pending {
+		g.thoist(s)
+	}
 	text := body.String()
+	locals := g.locals.String()
+	if g.o.thin {
+		locals, text = usedLocals(locals, g.cells.String(), text, g.inBody)
+	}
+	fb.WriteString(locals)
+	fb.WriteString(g.cells.String())
 	if g.flatSt != nil {
 		text = dropUnusedLabels(text)
 	}
@@ -232,6 +246,104 @@ func (g *gen) funcLit(f *funcDecl) string {
 	return fb.String()
 }
 
+// usedLocals takes out of a function's Go what Go's rule that a variable
+// be used made it carry. locals are the declarations at its top, each
+// "var x T" followed by "_ = x"; cells and body are the rest; inBody
+// are the variables body declares itself, each also followed by
+// "_ = x". A variable that is read needs no blank use; one at the top
+// that is never named needs no declaration; one that is only assigned
+// keeps both (what is assigned may have effects).
+func usedLocals(locals, cells, body string, inBody map[string]bool) (string, string) {
+	reads, writes := varUses(cells + body)
+	var out strings.Builder
+	lines := strings.SplitAfter(locals, "\n")
+	for i := 0; i < len(lines); i++ {
+		l := lines[i]
+		name, ok := "", false
+		if f := strings.Fields(l); len(f) >= 3 && f[0] == "var" && i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == "_ = "+f[1] {
+			name, ok = f[1], true
+		}
+		switch {
+		case !ok:
+			out.WriteString(l)
+		case reads[name] > 0:
+			out.WriteString(l)
+			i++
+		case writes[name] == 0:
+			i++
+		default:
+			out.WriteString(l)
+			out.WriteString(lines[i+1])
+			i++
+		}
+	}
+	if len(inBody) == 0 {
+		return out.String(), body
+	}
+	var b strings.Builder
+	for _, l := range strings.SplitAfter(body, "\n") {
+		// Its own blank use is one of the reads counted.
+		if name, ok := strings.CutPrefix(strings.TrimSpace(l), "_ = "); ok && inBody[name] && reads[name] > 1 {
+			continue
+		}
+		b.WriteString(l)
+	}
+	return out.String(), b.String()
+}
+
+// varUses counts, for each identifier of the Go statements src, where
+// it is read and where it is only assigned (x = v, x++, x += v at the
+// start of a statement, which Go does not take for a use). A
+// declaration's own name and a selector's field are neither.
+func varUses(src string) (reads, writes map[string]int) {
+	reads, writes = map[string]int{}, map[string]int{}
+	fset := gotoken.NewFileSet()
+	var sc scanner.Scanner
+	sc.Init(fset.AddFile("", fset.Base(), len(src)), []byte(src), nil, 0)
+	type tok struct {
+		t   gotoken.Token
+		lit string
+	}
+	var toks []tok
+	for {
+		_, t, lit := sc.Scan()
+		if t == gotoken.EOF {
+			break
+		}
+		toks = append(toks, tok{t, lit})
+	}
+	for i, k := range toks {
+		if k.t != gotoken.IDENT {
+			continue
+		}
+		prev := gotoken.SEMICOLON
+		if i > 0 {
+			prev = toks[i-1].t
+		}
+		if prev == gotoken.VAR || prev == gotoken.PERIOD {
+			continue
+		}
+		if i+1 < len(toks) && toks[i+1].t == gotoken.DEFINE {
+			continue // x := v declares it
+		}
+		next := gotoken.EOF
+		if i+1 < len(toks) {
+			next = toks[i+1].t
+		}
+		if next == gotoken.COLON && (prev == gotoken.LBRACE || prev == gotoken.COMMA) {
+			continue // a field's name in a composite literal
+		}
+		start := prev == gotoken.SEMICOLON || prev == gotoken.LBRACE || prev == gotoken.RBRACE || prev == gotoken.COLON
+		assigned := next == gotoken.ASSIGN || next == gotoken.INC || next == gotoken.DEC || next >= gotoken.ADD_ASSIGN && next <= gotoken.AND_NOT_ASSIGN
+		if start && assigned {
+			writes[k.lit]++
+		} else {
+			reads[k.lit]++
+		}
+	}
+	return reads, writes
+}
+
 // endsInReturn reports whether the last statement of body, a function's,
 // is a return: Go then wants none after it.
 func endsInReturn(body string) bool {
@@ -245,6 +357,7 @@ func endsInReturn(body string) bool {
 func (g *gen) nestedFunc(f *funcDecl) {
 	saveFn, saveOut, saveInd := g.fn, g.out, g.ind
 	saveLocals, saveCells := g.locals.String(), g.cells.String()
+	savePending, saveInPlace, saveInBody := g.pending, g.inPlace, g.inBody
 	saveSret, saveJmp, saveFlat, saveFrames := g.sret, g.jmp, g.flatSt, g.frames
 	g.frames = nil
 	lit := g.funcLit(f)
@@ -254,6 +367,7 @@ func (g *gen) nestedFunc(f *funcDecl) {
 	g.cells.Reset()
 	g.cells.WriteString(saveCells)
 	g.sret, g.jmp, g.flatSt, g.frames = saveSret, saveJmp, saveFlat, saveFrames
+	g.pending, g.inPlace, g.inBody = savePending, saveInPlace, saveInBody
 	name := g.localName(f.sym)
 	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", name, g.funcSig(f.sym.t.fn, nil), name)
 	g.p("%s = %s", name, lit)
