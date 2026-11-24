@@ -16,6 +16,10 @@ func (p *parser) initExpr() expr {
 // literal's braces), completing an array's length.
 func (p *parser) initializer(sym *symbol) *initializer {
 	t := sym.t
+	if !p.is("{") && t.isScalar() && p.cxx {
+		e := p.initExpr()
+		return &initializer{scalar: p.initConvert(e, t, e.at(), "initializer")}
+	}
 	if !p.is("{") && t.isScalar() {
 		e := p.rvalue(p.initExpr())
 		return &initializer{scalar: p.assignConvert(e, t, e.at(), "initializer")}

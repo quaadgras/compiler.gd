@@ -20,6 +20,14 @@ type scope struct {
 	tags   map[string]*ctype
 	labels map[string]*label // GNU's local labels
 	parent *scope
+
+	// C++ (cxx.go).
+	kind      scopeKind
+	name      string    // a namespace's or class's
+	anon      bool      // an unnamed namespace
+	using     []*scope  // using directives, and inline and unnamed namespaces in it
+	usedFuncs []*symbol // functions that using declarations add to sets declared here
+	rec       *record   // skClass
 }
 
 type parser struct {
@@ -46,6 +54,20 @@ type parser struct {
 
 	fe              fenvPragmas // the floating-point pragmas in effect (fenv.go)
 	translationTime int         // in an initializer computed as if at translation time
+
+	// C++ (cxx.go).
+	cxx        bool
+	externC    int           // in extern "C"
+	externSpec bool          // in extern "C" declaration, without braces: as if extern
+	noGT       int           // in template arguments: ">" ends them
+	declIn     *scope        // the scope the last declarator's qualified name is in
+	this       *symbol       // in a non-static member function
+	cls        *ctype        // the class whose members are being declared
+	temps      []*symbol     // the temporaries with destructors of the full expression being parsed
+	condDepth  int           // in an operand that is not always evaluated
+	convType   *ctype        // the type of the conversion function whose name was last parsed
+	exprType   int           // parsing a type specifier in an expression: T(x)
+	xvalues    map[expr]bool // lvalues of the tree that are rvalues to C++: temporaries, what T && casts and calls give
 }
 
 type parseError struct{ msg string }
@@ -74,9 +96,10 @@ func parse(file string, toks []token) (u *unit, err error) {
 			err = fmt.Errorf("%s", pe.msg)
 		}
 	}()
-	p := &parser{file: file, toks: toks, fe: defaultPragmas}
+	p := &parser{file: file, toks: toks, fe: defaultPragmas, cxx: isCxxFile(file)}
 	p.u = &unit{file: file, tags: map[string]*ctype{}}
 	p.push()
+	p.sc.kind = skNamespace
 	p.u.scope = p.sc.vars
 	p.u.tags = p.sc.tags
 	for p.peek().kind != tkEOF {
@@ -98,6 +121,14 @@ func (p *parser) push() {
 func (p *parser) pop() { p.sc = p.sc.parent }
 
 func (p *parser) lookup(name string) *symbol {
+	if p.cxx {
+		for s := p.sc; s != nil; s = s.parent {
+			if v := s.find(name); v != nil {
+				return v
+			}
+		}
+		return nil
+	}
 	for s := p.sc; s != nil; s = s.parent {
 		if v, ok := s.vars[name]; ok {
 			return v
@@ -371,6 +402,13 @@ type specs struct {
 	q        qual // with auto: the qualifiers
 	align    int64
 	attrs    attrs
+
+	// C++.
+	virtual  bool
+	explicit bool
+	friend   bool
+	mutable  bool
+	noType   bool // no type specifier: a constructor's, destructor's or conversion function's declaration
 }
 
 var typeWords = map[string]bool{
@@ -394,11 +432,22 @@ func (p *parser) isTypeStart(i int) bool {
 	if t.kind == tkPunct && t.text == "[" && p.isAt(i+1, "[") {
 		return true
 	}
+	if p.cxx && t.kind == tkPunct && t.text == "::" {
+		s, _ := p.cxxTypeAt(i)
+		return s != nil
+	}
 	if t.kind != tkIdent {
 		return false
 	}
 	if typeWords[t.text] {
 		return true
+	}
+	if p.cxx {
+		if cxxTypeWords[t.text] {
+			return true
+		}
+		s, _ := p.cxxTypeAt(i)
+		return s != nil
 	}
 	s := p.lookup(t.text)
 	return s != nil && s.kind == symTypedef
@@ -417,10 +466,69 @@ func (p *parser) declSpecs() specs {
 		a := p.attributes()
 		s.attrs.merge(a)
 		t := p.peek()
+		if p.cxx && t.kind == tkPunct && t.text == "::" && base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
+			if sym, n := p.cxxTypeAt(0); sym != nil {
+				s.t = sym.t
+				sym.used = true
+				seen = true
+				p.pos += n
+				continue
+			}
+		}
 		if t.kind != tkIdent {
 			break
 		}
 		w := t.text
+		if p.cxx {
+			switch w {
+			case "class":
+				w = "struct"
+			case "virtual":
+				s.virtual = true
+				seen = true
+				p.next()
+				continue
+			case "explicit":
+				s.explicit = true
+				seen = true
+				p.next()
+				if p.is("(") {
+					p.skipParens()
+				}
+				continue
+			case "friend":
+				s.friend = true
+				seen = true
+				p.next()
+				continue
+			case "mutable":
+				s.mutable = true
+				seen = true
+				p.next()
+				continue
+			case "typename", "constinit":
+				p.next()
+				continue
+			case "consteval":
+				w = "constexpr"
+			case "wchar_t":
+				w = "int"
+			case "char8_t":
+				p.next()
+				s.t, seen = tUChar, true
+				continue
+			case "char16_t":
+				p.next()
+				s.t, seen = tUShort, true
+				continue
+			case "char32_t":
+				p.next()
+				s.t, seen = tUInt, true
+				continue
+			case "decltype":
+				w = "typeof"
+			}
+		}
 		switch w {
 		case "typedef":
 			s.storage = sTypedef
@@ -545,6 +653,16 @@ func (p *parser) declSpecs() specs {
 			seen = true
 			continue
 		default:
+			if p.cxx && base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
+				if sym, n := p.cxxTypeAt(0); sym != nil && !(s.auto && (p.isAt(n, "=") || p.isAt(n, ";") || p.isAt(n, ","))) && !p.isCtorName(sym, n) {
+					s.t = sym.t
+					sym.used = true
+					seen = true
+					p.pos += n
+					continue
+				}
+				goto done
+			}
 			if base == "" && s.t == nil && !unsigned && !signed && !short && nlong == 0 && nint == 0 {
 				if sym := p.lookup(w); sym != nil && sym.kind == symTypedef {
 					// A typedef name, unless it is the declarator: auto
@@ -637,6 +755,12 @@ done:
 			s.t = tInt
 		case s.auto:
 			s.t = nil // inferred
+		case p.cxx:
+			// No implicit int: a constructor, destructor or conversion
+			// function, or an error the caller reports.
+			s.noType = true
+			s.q = q
+			return s
 		default:
 			if !seen {
 				p.errorf("expected a type, found %s", p.peek())
@@ -674,8 +798,9 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 			return t
 		}
 		// A new incomplete type.
-		t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord()}}
+		t := &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
 		p.sc.tags[tag] = t
+		p.declareTag(p.sc, tag, t)
 		return t
 	}
 	if !p.is("{") {
@@ -693,10 +818,11 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	}
 	var prev *ctype // a complete type of the same tag in this scope
 	if t == nil {
-		t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord()}}
+		t = &ctype{kind: kStruct, rec: &record{tag: tag, union: union, id: p.nextRecord(), sc: p.sc}}
 		if tag != "" {
 			prev = p.sc.tags[tag]
 			p.sc.tags[tag] = t // in scope in its own body
+			p.declareTag(p.sc, tag, t)
 		}
 	}
 	r := t.rec
@@ -801,6 +927,19 @@ func (p *parser) nextRecord() int {
 
 // enumSpec parses an enum specifier, after its keyword.
 func (p *parser) enumSpec() *ctype {
+	scoped := p.cxx && (p.accept("class") || p.accept("struct"))
+	t := p.enumSpec1(scoped)
+	if p.cxx && t.enum.sc == nil {
+		t.enum.sc = p.sc
+		if t.enum.names == nil {
+			t.enum.names = &scope{vars: map[string]*symbol{}, tags: map[string]*ctype{}, kind: skEnum, name: t.enum.tag}
+		}
+		p.declareTag(p.sc, t.enum.tag, t)
+	}
+	return t
+}
+
+func (p *parser) enumSpec1(scoped bool) *ctype {
 	p.attributes()
 	tag := ""
 	if p.peek().kind == tkIdent {
@@ -811,6 +950,13 @@ func (p *parser) enumSpec() *ctype {
 	if p.is(":") && p.isTypeStart(1) {
 		p.next()
 		fixed = p.specQualType()
+	}
+	if scoped && fixed == nil {
+		fixed = tInt
+	}
+	var names *scope
+	if p.cxx {
+		names = &scope{vars: map[string]*symbol{}, tags: map[string]*ctype{}, kind: skEnum, name: tag}
 	}
 	if !p.is("{") {
 		if tag == "" {
@@ -897,7 +1043,12 @@ func (p *parser) enumSpec() *ctype {
 			ct = long64(ct)
 		}
 		sym := &symbol{name: name, kind: symEnumConst, t: ct, val: v, p: at}
-		if old, ok := p.sc.vars[name]; ok && prev != nil && old.kind == symEnumConst && old.val == v && slices.Contains(prev.enum.consts, old) {
+		if names != nil {
+			names.vars[name] = sym
+		}
+		if scoped {
+			// Named only as E::name.
+		} else if old, ok := p.sc.vars[name]; ok && prev != nil && old.kind == symEnumConst && old.val == v && slices.Contains(prev.enum.consts, old) {
 			// The same constant of the same enum, again.
 		} else {
 			p.declare(sym, at)
@@ -942,6 +1093,8 @@ func (p *parser) enumSpec() *ctype {
 	t.enum.complete = true
 	t.enum.fixed = fixed != nil
 	t.enum.consts = consts
+	t.enum.scoped = scoped
+	t.enum.names = names
 	if prev != nil {
 		if prev.kind != t.kind || !sameEnum(prev.enum, t.enum) {
 			p.errorf("redefinition of enum %q", tag)
@@ -957,7 +1110,7 @@ func (p *parser) enumSpec() *ctype {
 		}
 	}
 	for _, c := range consts {
-		if fixed != nil || !fitInt {
+		if fixed != nil || !fitInt || p.cxx {
 			c.t = t
 		} else {
 			c.t = tInt
@@ -985,8 +1138,12 @@ func (p *parser) specQualType() *ctype {
 func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 	a := p.attributes()
 	t := base
-	for p.is("*") || p.is("^") {
-		p.next()
+	for p.is("*") || p.is("^") || p.cxx && (p.is("&") || p.is("&&")) {
+		if op := p.next().text; op[0] == '&' {
+			t = refTo(t, uint8(len(op)))
+			a.merge(p.attributes())
+			continue
+		}
 		t = ptrTo(t)
 		for {
 			a.merge(p.attributes())
@@ -1034,6 +1191,23 @@ func (p *parser) declarator(base *ctype) (string, *ctype, attrs) {
 		return name, it, a
 	}
 	name := ""
+	if p.cxx {
+		var in *scope
+		name, in = p.declaratorID()
+		a.merge(p.attributes())
+		if !(name != "" && p.is("(") && p.directInitAhead()) {
+			save := p.sc
+			if in != nil {
+				// What follows the name is in its scope.
+				p.sc = in
+			}
+			t = p.suffixes(t, &a)
+			p.sc = save
+		}
+		a.merge(p.attributes())
+		p.declIn = in
+		return name, t, a
+	}
 	if p.peek().kind == tkIdent && !p.isTypeStartWord() {
 		name = p.ident()
 	}
@@ -1177,8 +1351,14 @@ func (p *parser) suffixes(t *ctype, a *attrs) *ctype {
 	case p.is("("):
 		p.next()
 		ft := p.params()
+		if p.cxx {
+			p.funcQuals(ft)
+		}
 		a.merge(p.attributes())
 		ret := p.suffixes(t, a)
+		if p.cxx && ret.isAuto && p.accept("->") {
+			ret = p.typeName()
+		}
 		if ret.kind == kFunc || ret.kind == kArray {
 			p.errorf("function returning an array or function")
 		}
@@ -1237,14 +1417,14 @@ func (p *parser) newLocal(what string, t *ctype, at pos) *symbol {
 func (p *parser) params() *funcType {
 	ft := &funcType{proto: true}
 	if p.accept(")") {
-		ft.proto = false
+		ft.proto = p.cxx // C++: no parameters
 		return ft
 	}
 	if p.is("void") && p.isAt(1, ")") {
 		p.pos += 2
 		return ft
 	}
-	if p.peek().kind == tkIdent && !p.isTypeStart(0) {
+	if p.peek().kind == tkIdent && !p.isTypeStart(0) && !p.cxx {
 		// K&R: a list of names.
 		ft.proto = false
 		for {
@@ -1287,8 +1467,21 @@ func (p *parser) params() *funcType {
 			}
 			ft.psyms = append(ft.psyms, ps)
 		}
+		if p.cxx && p.accept("=") {
+			// A default argument: parsed where it is used.
+			for len(ft.defaults) < len(ft.params) {
+				ft.defaults = append(ft.defaults, defArg{})
+			}
+			ft.defaults[len(ft.params)-1] = defArg{p.pos, p.sc}
+			p.skipDefaultArg()
+		}
 		if !p.accept(",") {
 			break
+		}
+	}
+	if ft.defaults != nil {
+		for len(ft.defaults) < len(ft.params) {
+			ft.defaults = append(ft.defaults, defArg{})
 		}
 	}
 	ft.tags = p.sc.tags
@@ -1342,16 +1535,20 @@ func (p *parser) typeName() *ctype {
 // Declarations.
 
 func (p *parser) declare(s *symbol, at pos) {
-	if old, ok := p.sc.vars[s.name]; ok {
+	name := s.name
+	if s.src != "" {
+		name = s.src
+	}
+	if old, ok := p.sc.vars[name]; ok && !old.tagName {
 		if old.kind == symTypedef && s.kind == symTypedef && compatible(old.t, s.t) {
 			return
 		}
 		if (old.kind == symVar || old.kind == symFunc) && old.kind == s.kind && old.global && s.global {
 			return
 		}
-		p.errorAt(at, "redefinition of %q", s.name)
+		p.errorAt(at, "redefinition of %q", name)
 	}
-	p.sc.vars[s.name] = s
+	p.sc.vars[name] = s
 }
 
 func (p *parser) staticAssert() {
@@ -1397,6 +1594,23 @@ func (p *parser) topLevel() {
 		p.expect(";")
 		return
 	}
+	if p.cxx {
+		switch {
+		case p.is("namespace"):
+			p.namespaceDef(false)
+			return
+		case p.is("inline") && p.isAt(1, "namespace"):
+			p.next()
+			p.namespaceDef(true)
+			return
+		case p.is("using"):
+			p.usingDecl()
+			return
+		case p.is("extern") && p.peekAt(1).kind == tkString:
+			p.linkageSpec()
+			return
+		}
+	}
 	if p.is("[") && p.isAt(1, "[") {
 		// C23's attribute declaration, [[...]];, or a declaration's
 		// attributes.
@@ -1409,6 +1623,10 @@ func (p *parser) topLevel() {
 	}
 	at := p.here()
 	s := p.declSpecs()
+	if s.noType {
+		p.specialMember(s, at)
+		return
+	}
 	if s.t == nil && !s.auto {
 		p.errorf("expected a declaration")
 	}
@@ -1436,6 +1654,9 @@ func (p *parser) topLevel() {
 }
 
 func (p *parser) baseOr(s specs) *ctype {
+	if s.t == nil && p.cxx {
+		return &ctype{kind: kInt, isAuto: true, q: s.q}
+	}
 	if s.t == nil {
 		return tInt // replaced by the initializer's type
 	}
@@ -1487,6 +1708,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 	} else if s.storage == sExtern {
 		sym.linkage = 'e'
 	}
+	if p.cxx {
+		p.cxxVarName(sym, name, s, at)
+	}
 	if s.align > 0 || a.aligned > 0 {
 		c := *t
 		c.align = max(s.align, a.aligned)
@@ -1537,7 +1761,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 			p.fn.locals = append(p.fn.locals, sym)
 		}
 	}
-	if p.accept("=") {
+	if p.cxx && p.cxxInit(sym, s, at) {
+		// Initialized as C++ initializes.
+	} else if p.accept("=") {
 		if s.storage == sExtern && p.fn != nil {
 			p.errorAt(at, "%q has both extern and an initializer", name)
 		}
@@ -1584,6 +1810,11 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 	}
 	if s.constx {
 		p.constexprValue(sym, at)
+	} else if p.cxx && !sym.constx && sym.t.q&qConst != 0 && sym.t.isArith() && sym.init != nil && sym.init.scalar != nil && p.constInit(sym.init) {
+		// C++: a const object of arithmetic type with a constant
+		// initializer is a constant.
+		sym.constx = true
+		p.constexprValue(sym, at)
 	}
 	if !global && !sym.t.isComplete() && sym.t.vla == nil {
 		p.errorAt(at, "storage size of %q isn't known", name)
@@ -1592,6 +1823,9 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 }
 
 func (p *parser) declareFunc(name string, t *ctype, s specs, at pos) *symbol {
+	if p.cxx {
+		return p.cxxDeclareFunc(name, t, s, at)
+	}
 	if old := p.lookupFunc(name); old != nil {
 		if !compatible(old.t, t) {
 			p.errorAt(at, "conflicting types for %q", name)

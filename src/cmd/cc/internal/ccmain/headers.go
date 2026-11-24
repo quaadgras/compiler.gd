@@ -905,6 +905,7 @@ int __cc_flt_rounds(void);
 `,
 	"iso646.h": `#ifndef __CC_ISO646_H
 #define __CC_ISO646_H
+#ifndef __cplusplus
 #define and &&
 #define and_eq &=
 #define bitand &
@@ -916,6 +917,7 @@ int __cc_flt_rounds(void);
 #define or_eq |=
 #define xor ^
 #define xor_eq ^=
+#endif
 #endif
 `,
 	"limits.h": `#ifndef __CC_LIMITS_H
@@ -1749,7 +1751,7 @@ int ungetc(int c, FILE *stream);
 int setvbuf(FILE *restrict stream, char *restrict buf, int mode, size_t size);
 void setbuf(FILE *restrict stream, char *restrict buf);
 int remove(const char *filename);
-int rename(const char *old, const char *new);
+int rename(const char *__old, const char *__new);
 void perror(const char *s);
 FILE *freopen(const char *restrict filename, const char *restrict mode, FILE *restrict stream);
 int fileno(FILE *stream);
@@ -1841,11 +1843,11 @@ void *aligned_alloc(size_t alignment, size_t size);
 int posix_memalign(void **memptr, size_t alignment, size_t size);
 int setenv(const char *name, const char *value, int overwrite);
 int unsetenv(const char *name);
-int mkstemp(char *template);
+int mkstemp(char *__template);
 char *realpath(const char *restrict path, char *restrict resolved);
 void *reallocarray(void *ptr, size_t nmemb, size_t size);
 void qsort_r(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *, void *), void *arg);
-char *mkdtemp(char *template);
+char *mkdtemp(char *__template);
 #define __STDC_VERSION_STDLIB_H__ 202311L
 #endif
 `,

@@ -72,6 +72,10 @@ func (p *parser) blockItem() []stmt {
 		p.expect(";")
 		return nil
 	}
+	if p.cxx && p.is("using") {
+		p.usingDecl()
+		return nil
+	}
 	if p.is("[") && p.isAt(1, "[") {
 		// Attributes, of a declaration or a statement.
 		save := p.pos
@@ -96,6 +100,9 @@ func (p *parser) blockItem() []stmt {
 // an expression that starts with a typedef name).
 func (p *parser) isDecl() bool {
 	if !p.isTypeStart(0) {
+		return false
+	}
+	if p.cxx && !p.declAhead() {
 		return false
 	}
 	if p.peek().kind == tkIdent && p.isAt(1, ":") && !typeWords[p.peek().text] {
@@ -370,6 +377,9 @@ func (p *parser) statement() stmt {
 					return &block{list: []stmt{&exprStmt{x}, &returnStmt{}}}
 				}
 				return &block{list: []stmt{&exprStmt{x}, &returnStmt{}}}
+			}
+			if p.cxx {
+				return p.returnValue(x, rt, at)
 			}
 			return &returnStmt{p.assignConvert(p.rvalue(x), rt, at, "return")}
 		case "_Defer":

@@ -196,6 +196,8 @@ const (
 	symFunc
 	symTypedef
 	symEnumConst
+	symNamespace // C++
+	symField     // C++: a class's non-static data member, in its scope
 )
 
 type symbol struct {
@@ -222,6 +224,17 @@ type symbol struct {
 	nested    bool    // GNU's nested function
 	vlaSize   string  // the Go temp with a VLA's size in bytes
 	allocSize int64   // more than its type\'s size: a flexible array member\'s initializer
+
+	// C++ (cxx.go). A symbol with C++ linkage has its mangled name as
+	// name, and its name in the source as src.
+	src     string
+	next    *symbol // the next function of its overload set
+	sc      *scope  // the scope it is declared in
+	ns      *scope  // symNamespace: the namespace
+	cLink   bool    // extern "C"
+	comdat  bool    // inline: each unit that uses it defines it
+	tagName bool    // a class or enumeration's name, as a type name
+	ctor    expr    // a class object's construction, after its (C) initializer
 }
 
 type funcDecl struct {

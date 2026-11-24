@@ -70,6 +70,10 @@ type ctype struct {
 	enum *enumType // an integer kind that is an enumeration
 
 	align int64 // _Alignas or aligned, if more than the type's own
+
+	// C++ (cxx.go).
+	ref    uint8 // kPtr: a reference (1: T &, 2: T &&)
+	isAuto bool  // the placeholder auto, until its initializer says
 }
 
 type record struct {
@@ -84,6 +88,9 @@ type record struct {
 	id       int   // unique in the translation unit
 	goName   string
 	bytes    bool // its mirror is bytes (gen.go's record)
+
+	sc  *scope     // C++: the scope it is declared in
+	cls *classInfo // C++: a class's members that are not fields (cxxclass.go)
 }
 
 type field struct {
@@ -107,6 +114,15 @@ type funcType struct {
 	psyms    []*symbol         // the parameters, as parsed: a definition's
 	vlas     []*symbol         // the lengths of VLA types in the parameters
 	tags     map[string]*ctype // the tags the parameters declare: a definition's body's too (C23 6.2.1)
+
+	// C++.
+	defaults []defArg // the parameters' default arguments, if any has one
+	recv     *ctype   // a non-static member function's: the type of this, its first parameter
+	thisQ    qual     // the qualifiers after a member function's declarator: of *this
+	noexcept bool
+	ctor     bool
+	dtor     bool
+	conv     *ctype // a conversion function's type
 }
 
 type enumType struct {
@@ -114,6 +130,10 @@ type enumType struct {
 	complete bool
 	fixed    bool      // C23's enum E : type
 	consts   []*symbol // the constants, once complete
+
+	sc     *scope // C++: the scope it is declared in
+	scoped bool   // enum class
+	names  *scope // C++: its constants, for E::name
 }
 
 // sameEnum reports whether two enumerated types with the same tag and
@@ -486,7 +506,7 @@ func compat(a, b *ctype, seen map[[2]*record]bool) bool {
 	case kComplex:
 		return a.elem.kind == b.elem.kind
 	case kPtr:
-		return compat(a.elem, b.elem, seen)
+		return a.ref == b.ref && compat(a.elem, b.elem, seen)
 	case kArray:
 		if a.n >= 0 && b.n >= 0 && a.n != b.n {
 			return false
@@ -623,6 +643,9 @@ func (t *ctype) String() string {
 	case kPtr:
 		if t.elem.kind == kFunc {
 			return t.elem.funcString("(*)")
+		}
+		if t.ref != 0 {
+			return t.elem.String() + " " + "&&"[:t.ref]
 		}
 		s := t.elem.String() + " *"
 		if q != "" {

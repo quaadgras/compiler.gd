@@ -142,6 +142,14 @@ func lexUnitDirs(srcs []source, incDirs []string) ([]token, error) {
 	if len(srcs) > 0 {
 		last = srcs[len(srcs)-1].name
 	}
+	if isCxxFile(last) {
+		// C++: a character constant is a char.
+		for i := range toks {
+			if t := &toks[i]; t.kind == tkChar && t.ty == tInt && !strings.HasPrefix(t.text, "L") && t.ival == int64(int8(t.ival)) && len(t.text) <= 6 {
+				t.ty = tChar
+			}
+		}
+	}
 	return append(toks, token{kind: tkEOF, file: last}), nil
 }
 
@@ -161,7 +169,11 @@ func preprocess(srcs []source, incDirs []string) (toks []token, err error) {
 	for i := len(srcs) - 1; i >= 0; i-- {
 		p.pushFile(srcs[i].name, srcs[i].text, token{file: srcs[i].name})
 	}
-	pre, err := lexRaw("<built-in>", predefinedMacros(), 1)
+	predef := predefinedMacros()
+	if len(srcs) > 0 && isCxxFile(srcs[len(srcs)-1].name) {
+		predef += cxxMacros
+	}
+	pre, err := lexRaw("<built-in>", predef, 1)
 	if err != nil {
 		return nil, err
 	}

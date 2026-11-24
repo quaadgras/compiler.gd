@@ -180,6 +180,9 @@ func (pg *pkgGen) link() {
 		for _, s := range u.syms {
 			if s.linkage == 'e' {
 				if old := pg.ext[s.name]; old != nil {
+					if old.defined && s.defined && old.comdat && s.comdat {
+						continue // C++'s inline: the first definition
+					}
 					if old.defined && s.defined && !(s.kind == symVar && (old.init == nil || s.init == nil)) {
 						panic(genError{fmt.Sprintf("%s:%d: multiple definition of %q", s.p.file, s.p.line, s.name)})
 					}
@@ -281,6 +284,9 @@ func (g *gen) unit() {
 		g.globalVar(s)
 	}
 	for _, f := range g.u.funcs {
+		if f.sym.comdat && f.sym.linkage == 'e' && g.ext[f.sym.name] != f.sym {
+			continue // C++'s inline: defined by another unit
+		}
 		g.function(f)
 	}
 }

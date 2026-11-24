@@ -141,15 +141,21 @@ func (p *parser) conditional() expr {
 			c = p.intc(b2i(v), tInt, at)
 		}
 	}
-	var x expr
+	var x, y expr
 	if p.is(":") {
 		// GNU's c ?: y.
 		x = c
 	} else {
-		x = p.rvalueVoid(p.expr())
+		x = p.expr()
 	}
 	p.expect(":")
-	y := p.rvalueVoid(p.conditional())
+	if p.cxx {
+		y = p.assignment()
+	} else {
+		y = p.conditional()
+	}
+	lx, ly := x, y
+	x, y = p.rvalueVoid(x), p.rvalueVoid(y)
 	if cv, ok := p.foldInt(c); ok && isConstExpr(x) && isConstExpr(y) {
 		// Keep it a constant expression.
 		t := p.condType(x, y, at)
@@ -157,6 +163,11 @@ func (p *parser) conditional() expr {
 			return p.convert(x, t)
 		}
 		return p.convert(y, t)
+	}
+	if p.cxx && lx.ty().kind != kVoid && p.isLvalueCxx(lx) && p.isLvalueCxx(ly) && sameType(lx.ty(), ly.ty()) && bitField(lx) == nil && bitField(ly) == nil {
+		// C++: of two lvalues of one type, an lvalue.
+		t := lx.ty()
+		return &deref{node{t, at}, &cond{node{ptrTo(t), at}, c, p.addressOf(lx, at), p.addressOf(ly, at)}}
 	}
 	t := p.condType(x, y, at).unqual()
 	if t.isPtr() && x.ty().isPtr() && y.ty().isPtr() && noEffects(c) {
@@ -659,7 +670,7 @@ func (p *parser) castExpr() expr {
 		// (__extension__ expr)
 		return p.postfix(p.primary())
 	}
-	if p.is("(") && p.isTypeStart(1) {
+	if p.is("(") && p.isTypeStart(1) && (!p.cxx || p.castAhead()) {
 		at := p.here()
 		save := p.pos
 		n := len(p.pendingVLA)
@@ -677,6 +688,9 @@ func (p *parser) castExpr() expr {
 				p.pendingVLA = p.pendingVLA[:n]
 			}
 			return p.postfix(e)
+		}
+		if p.cxx {
+			return p.castTo(p.castExpr(), t, at, "")
 		}
 		// The type's lengths are evaluated before the operand (as GCC
 		// and clang do), not with the declaration this is in.
@@ -879,6 +893,16 @@ func (p *parser) unaryExpr() expr {
 			return &builtinCall{node{x.ty().elem, at}, name, []expr{x}}
 		}
 	}
+	if p.cxx && p.isTypeStart(0) {
+		// T(args), T{args}: a simple type specifier, then its operand.
+		p.exprType++
+		s := p.declSpecs()
+		p.exprType--
+		if s.t == nil || !p.is("(") && !p.is("{") {
+			p.errorAt(at, "expected an expression")
+		}
+		return p.postfix(p.functionalCast(s.t, at))
+	}
 	return p.postfix(p.primary())
 }
 
@@ -903,6 +927,9 @@ func (p *parser) vlaOperand(x expr) expr {
 }
 
 func (p *parser) sizeofType(t *ctype, at pos) expr {
+	if t.isRef() {
+		t = t.elem
+	}
 	if t.isVLA() {
 		return &vlaSizeof{node{tULong, at}, t}
 	}
@@ -964,6 +991,12 @@ func (p *parser) addressOf(x expr, at pos) expr {
 			p.errorAt(at, "lvalue required as unary & operand")
 		}
 	case *compoundLit, *strLit:
+	case *seqExpr:
+		if p.cxx {
+			// A temporary, after what makes it.
+			return &seqExpr{node{ptrTo(x.ty()), at}, x.pre, p.addressOf(x.x, at)}
+		}
+		p.errorAt(at, "lvalue required as unary & operand")
 	case *stmtExpr, *call, *cond, *assign:
 		if x.ty().kind == kStruct {
 			break // GNU: the address of a temporary
@@ -1071,11 +1104,17 @@ func (p *parser) memberOf(x expr, name string, at pos) expr {
 		x = &member{node{ft, at}, x, f}
 		t = ft
 	}
+	if p.cxx {
+		return p.unref(x)
+	}
 	return x
 }
 
 // callOf types a call of x, after its "(".
 func (p *parser) callOf(x expr, at pos) expr {
+	if p.cxx {
+		return p.cxxCall(x, at)
+	}
 	if v, ok := x.(*varRef); ok && v.sym.kind == symFunc {
 		v.sym.used = true
 	}
@@ -1136,8 +1175,16 @@ func (p *parser) primary() expr {
 		return &floatConst{node{t.ty, at}, t.fval}
 	case tkString:
 		n := int64(len(t.str))/t.ty.sizeof() + 1
+		if p.cxx {
+			// C++: an array of const elements.
+			return &strLit{node{arrayOf(t.ty.qualified(qConst), n), at}, t.str}
+		}
 		return &strLit{node{arrayOf(t.ty, n), at}, t.str}
 	case tkPunct:
+		if t.text == "::" && p.cxx {
+			p.pos--
+			return p.cxxName(at)
+		}
 		if t.text == "(" {
 			for p.is("__extension__") && !p.isTypeStart(1) {
 				p.next()
@@ -1173,6 +1220,19 @@ func (p *parser) primary() expr {
 		}
 		if len(t.text) > 10 && t.text[:10] == "__builtin_" || len(t.text) > 12 && t.text[:12] == "__cc_atomic_" {
 			return p.builtin(t.text, at)
+		}
+		if p.cxx {
+			switch t.text {
+			case "this":
+				if p.this == nil {
+					p.errorAt(at, "invalid use of this outside a non-static member function")
+				}
+				return &varRef{node{p.this.t, at}, p.this}
+			case "static_cast", "const_cast", "reinterpret_cast", "dynamic_cast":
+				return p.namedCast(t.text, at)
+			}
+			p.pos--
+			return p.cxxName(at)
 		}
 		s := p.lookup(t.text)
 		if s == nil {
