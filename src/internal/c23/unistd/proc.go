@@ -27,7 +27,7 @@ func Fork() int32 {
 // and the signals the process receives are its handlers' (its
 // handlers do not become the defaults). If the program cannot run, the
 // result is -1 with errno set, as exec's.
-func execProc(path string, search bool, args []string, envp c23.Ptr) int32 {
+func execProc(path string, search bool, args []string, envp *c23.Void) int32 {
 	cmd, _, e := c23.Command(path, search, args, envp, nil)
 	if e != 0 {
 		c23.SetErrno(e)
@@ -45,25 +45,25 @@ func execProc(path string, search bool, args []string, envp c23.Ptr) int32 {
 	return 0
 }
 
-func Execv(path, argv c23.Ptr) int32 {
-	return execProc(c23.GoString(path), false, c23.GoStrings(argv), c23.Ptr(nil))
+func Execv(path, argv *c23.Void) int32 {
+	return execProc(c23.GoString(path), false, c23.GoStrings(argv), (*c23.Void)(nil))
 }
 
-func Execve(path, argv, envp c23.Ptr) int32 {
+func Execve(path, argv, envp *c23.Void) int32 {
 	return execProc(c23.GoString(path), false, c23.GoStrings(argv), envOrEmpty(envp))
 }
 
-func Execvp(file, argv c23.Ptr) int32 {
-	return execProc(c23.GoString(file), true, c23.GoStrings(argv), c23.Ptr(nil))
+func Execvp(file, argv *c23.Void) int32 {
+	return execProc(c23.GoString(file), true, c23.GoStrings(argv), (*c23.Void)(nil))
 }
 
-func Execvpe(file, argv, envp c23.Ptr) int32 {
+func Execvpe(file, argv, envp *c23.Void) int32 {
 	return execProc(c23.GoString(file), true, c23.GoStrings(argv), envOrEmpty(envp))
 }
 
 // envOrEmpty is envp, or, if it is null, an empty environment (execve's
 // null envp is not the program's environment).
-func envOrEmpty(envp c23.Ptr) c23.Ptr {
+func envOrEmpty(envp *c23.Void) *c23.Void {
 	if c23.Addr(envp) == 0 {
 		return c23.Calloc(1, uint64(c23.WordSize))
 	}
@@ -72,28 +72,28 @@ func envOrEmpty(envp c23.Ptr) c23.Ptr {
 
 // execlArgs reads execl's arguments: arg, then va up to a null pointer;
 // with env, execle's envp after it.
-func execlArgs(arg c23.Ptr, va []any, env bool) (args []string, envp c23.Ptr) {
+func execlArgs(arg *c23.Void, va []any, env bool) (args []string, envp *c23.Void) {
 	ap := c23.VaStart(va)
-	for p := arg; c23.Addr(p) != 0; p = c23.VaArg[c23.Ptr](ap) {
+	for p := arg; c23.Addr(p) != 0; p = c23.VaArg[*c23.Void](ap) {
 		args = append(args, c23.GoString(p))
 	}
 	if env {
-		envp = envOrEmpty(c23.VaArg[c23.Ptr](ap))
+		envp = envOrEmpty(c23.VaArg[*c23.Void](ap))
 	}
 	return args, envp
 }
 
-func Execl(path, arg c23.Ptr, va ...any) int32 {
+func Execl(path, arg *c23.Void, va ...any) int32 {
 	args, _ := execlArgs(arg, va, false)
-	return execProc(c23.GoString(path), false, args, c23.Ptr(nil))
+	return execProc(c23.GoString(path), false, args, (*c23.Void)(nil))
 }
 
-func Execlp(file, arg c23.Ptr, va ...any) int32 {
+func Execlp(file, arg *c23.Void, va ...any) int32 {
 	args, _ := execlArgs(arg, va, false)
-	return execProc(c23.GoString(file), true, args, c23.Ptr(nil))
+	return execProc(c23.GoString(file), true, args, (*c23.Void)(nil))
 }
 
-func Execle(path, arg c23.Ptr, va ...any) int32 {
+func Execle(path, arg *c23.Void, va ...any) int32 {
 	args, envp := execlArgs(arg, va, true)
 	return execProc(c23.GoString(path), false, args, envp)
 }

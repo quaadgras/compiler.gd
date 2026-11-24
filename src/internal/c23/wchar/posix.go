@@ -16,17 +16,17 @@ import (
 // functions), which are the global locale's: the library's locales
 // compare and convert alike.
 
-func WcscollL(a, b, _ c23.Ptr) int32 { return Wcscoll(a, b) }
+func WcscollL(a, b, _ *c23.Void) int32 { return Wcscoll(a, b) }
 
-func WcsxfrmL(d, s c23.Ptr, n uint64, _ c23.Ptr) uint64 { return Wcsxfrm(d, s, n) }
+func WcsxfrmL(d, s *c23.Void, n uint64, _ *c23.Void) uint64 { return Wcsxfrm(d, s, n) }
 
-func WcsftimeL(s c23.Ptr, max uint64, format, tm, _ c23.Ptr) uint64 {
+func WcsftimeL(s *c23.Void, max uint64, format, tm, _ *c23.Void) uint64 {
 	return Wcsftime(s, max, format, tm)
 }
 
-func WcscasecmpL(a, b, _ c23.Ptr) int32 { return Wcscasecmp(a, b) }
+func WcscasecmpL(a, b, _ *c23.Void) int32 { return Wcscasecmp(a, b) }
 
-func WcsncasecmpL(a, b c23.Ptr, n uint64, _ c23.Ptr) int32 { return Wcsncasecmp(a, b, n) }
+func WcsncasecmpL(a, b *c23.Void, n uint64, _ *c23.Void) int32 { return Wcsncasecmp(a, b, n) }
 
 // wideWidth are the characters of East Asian width W (wide) and F
 // (full-width), as Unicode 15.1's EastAsianWidth.txt has them, in order.
@@ -107,7 +107,7 @@ func Wcwidth(c int32) int32 { return int32(width(c)) }
 
 // Wcswidth is wcswidth: the columns of the first n wide characters at s
 // (to its null), or -1 if one of them is not printable.
-func Wcswidth(s c23.Ptr, n uint64) int32 {
+func Wcswidth(s *c23.Void, n uint64) int32 {
 	w := 0
 	for i := 0; uint64(i) < n; i++ {
 		c := c23.Wat(s, i)
@@ -124,7 +124,7 @@ func Wcswidth(s c23.Ptr, n uint64) int32 {
 }
 
 // Wcsdup is wcsdup.
-func Wcsdup(s c23.Ptr) c23.Ptr {
+func Wcsdup(s *c23.Void) *c23.Void {
 	n := Wcslen(s) + 1
 	d := c23.Malloc(4 * n)
 	c23.Memmove(d, s, uintptr(4*n))
@@ -132,7 +132,7 @@ func Wcsdup(s c23.Ptr) c23.Ptr {
 }
 
 // Wcpcpy is wcpcpy: wcscpy returning the end of what it copied.
-func Wcpcpy(d, s c23.Ptr) c23.Ptr {
+func Wcpcpy(d, s *c23.Void) *c23.Void {
 	n := Wcslen(s)
 	c23.Memmove(d, s, uintptr(4*(n+1)))
 	return wptr(d, n)
@@ -140,14 +140,14 @@ func Wcpcpy(d, s c23.Ptr) c23.Ptr {
 
 // Wcpncpy is wcpncpy: wcsncpy returning where the first null it stored
 // is, or d+n.
-func Wcpncpy(d, s c23.Ptr, n uint64) c23.Ptr {
+func Wcpncpy(d, s *c23.Void, n uint64) *c23.Void {
 	k := Wcsnlen(s, n)
 	Wcsncpy(d, s, n)
 	return wptr(d, k)
 }
 
 // Wcsnlen is wcsnlen.
-func Wcsnlen(s c23.Ptr, max uint64) uint64 {
+func Wcsnlen(s *c23.Void, max uint64) uint64 {
 	n := uint64(0)
 	for n < max && c23.Wat(s, int(n)) != 0 {
 		n++
@@ -163,10 +163,10 @@ func wlower(c int32) int32 {
 }
 
 // Wcscasecmp is wcscasecmp: wcscmp of the characters' lower cases.
-func Wcscasecmp(a, b c23.Ptr) int32 { return Wcsncasecmp(a, b, ^uint64(0)) }
+func Wcscasecmp(a, b *c23.Void) int32 { return Wcsncasecmp(a, b, ^uint64(0)) }
 
 // Wcsncasecmp is wcsncasecmp.
-func Wcsncasecmp(a, b c23.Ptr, n uint64) int32 {
+func Wcsncasecmp(a, b *c23.Void, n uint64) int32 {
 	for i := 0; uint64(i) < n; i++ {
 		x, y := wlower(c23.Wat(a, i)), wlower(c23.Wat(b, i))
 		if x != y || x == 0 {
@@ -179,7 +179,7 @@ func Wcsncasecmp(a, b c23.Ptr, n uint64) int32 {
 // Mbsnrtowcs is mbsnrtowcs: mbsrtowcs of at most the nms bytes at *src.
 // A character that the nms bytes end within is not converted: *src is
 // left at it (glibc keeps its first bytes in *ps, and moves past them).
-func Mbsnrtowcs(dst, src c23.Ptr, nms, n uint64, ps c23.Ptr) uint64 {
+func Mbsnrtowcs(dst, src *c23.Void, nms, n uint64, ps *c23.Void) uint64 {
 	s := c23.LoadPtr(src)
 	k := uint64(0)
 	i := uint64(0)
@@ -194,7 +194,7 @@ func Mbsnrtowcs(dst, src c23.Ptr, nms, n uint64, ps c23.Ptr) uint64 {
 		if b[0] == 0 {
 			if c23.Addr(dst) != 0 {
 				c23.Wset(dst, int(k), 0)
-				c23.StorePtr(src, c23.Ptr(nil))
+				c23.StorePtr(src, (*c23.Void)(nil))
 			}
 			return k
 		}
@@ -223,7 +223,7 @@ func Mbsnrtowcs(dst, src c23.Ptr, nms, n uint64, ps c23.Ptr) uint64 {
 
 // Wcsnrtombs is wcsnrtombs: wcsrtombs of at most the nwc wide
 // characters at *src.
-func Wcsnrtombs(dst, src c23.Ptr, nwc, n uint64, ps c23.Ptr) uint64 {
+func Wcsnrtombs(dst, src *c23.Void, nwc, n uint64, ps *c23.Void) uint64 {
 	s := c23.LoadPtr(src)
 	k := uint64(0)
 	for i := 0; uint64(i) < nwc; i++ {
@@ -232,7 +232,7 @@ func Wcsnrtombs(dst, src c23.Ptr, nwc, n uint64, ps c23.Ptr) uint64 {
 			if c23.Addr(dst) != 0 {
 				if k < n {
 					c23.Store8(c23.Add(dst, int(k)), 0)
-					c23.StorePtr(src, c23.Ptr(nil))
+					c23.StorePtr(src, (*c23.Void)(nil))
 				} else {
 					c23.StorePtr(src, c23.Add(s, 4*i))
 				}
@@ -267,11 +267,11 @@ func Wcsnrtombs(dst, src c23.Ptr, nwc, n uint64, ps c23.Ptr) uint64 {
 // whose address and the position (in wide characters) it keeps at *bufp
 // and *sizep.
 type wmemFile struct {
-	buf         c23.Ptr
+	buf         *c23.Void
 	size        int // the wide characters buf holds
 	pos, end    int
 	pend        []byte // a character's first bytes
-	bufp, sizep c23.Ptr
+	bufp, sizep *c23.Void
 }
 
 func (m *wmemFile) Read(b []byte) (int, error) { return 0, io.EOF }
@@ -342,7 +342,7 @@ func (m *wmemFile) Close() { m.sync() }
 
 // OpenWmemstream is open_wmemstream: open_memstream of wide characters.
 // Its positions (fseek's and ftell's) are in wide characters.
-func OpenWmemstream(bufp, sizep c23.Ptr) c23.Ptr {
+func OpenWmemstream(bufp, sizep *c23.Void) *c23.Void {
 	m := &wmemFile{bufp: bufp, sizep: sizep}
 	m.sync()
 	return c23_stdio.NewMemStream(m, false, true)

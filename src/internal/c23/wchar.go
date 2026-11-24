@@ -14,15 +14,15 @@ import (
 // wide characters are UTF-8 in it, as are its multibyte ones, so that
 // wide output is narrow output of the same characters.
 
-func Wat(s Ptr, i int) int32     { return int32(Load32(Add(s, 4*i))) }
-func Wset(s Ptr, i int, c int32) { Store32(Add(s, 4*i), uint32(c)) }
+func Wat(s *Void, i int) int32     { return int32(Load32(Add(s, 4*i))) }
+func Wset(s *Void, i int, c int32) { Store32(Add(s, 4*i), uint32(c)) }
 
 // The wide strings' numbers: the narrow functions', of the ASCII prefix
 // of the wide string, which is all a number can be.
 
 // wideNumber calls f on a C string of s's ASCII prefix, and stores at
 // end where in s f's end is.
-func WideNumber[T any](s, end Ptr, f func(ns, nend Ptr) T) T {
+func WideNumber[T any](s, end *Void, f func(ns, nend *Void) T) T {
 	var b []byte
 	for i := 0; ; i++ {
 		c := Wat(s, i)
@@ -40,12 +40,12 @@ func WideNumber[T any](s, end Ptr, f func(ns, nend Ptr) T) T {
 	return v
 }
 
-func Wcstol32(s, end Ptr, base int32) int64 {
-	return WideNumber(s, end, func(ns, ne Ptr) int64 { return Strtol32(ns, ne, base) })
+func Wcstol32(s, end *Void, base int32) int64 {
+	return WideNumber(s, end, func(ns, ne *Void) int64 { return Strtol32(ns, ne, base) })
 }
 
-func Wcstoul32(s, end Ptr, base int32) uint64 {
-	return WideNumber(s, end, func(ns, ne Ptr) uint64 { return Strtoul32(ns, ne, base) })
+func Wcstoul32(s, end *Void, base int32) uint64 {
+	return WideNumber(s, end, func(ns, ne *Void) uint64 { return Strtoul32(ns, ne, base) })
 }
 
 // Wide input and output.
@@ -56,7 +56,7 @@ func Wcstoul32(s, end Ptr, base int32) uint64 {
 var mbtowcMu sync.Mutex
 
 // decodeMB decodes the character at s, of at most n bytes.
-func DecodeMB(s Ptr, n uint64) (r rune, size int, ok bool) {
+func DecodeMB(s *Void, n uint64) (r rune, size int, ok bool) {
 	var b []byte
 	for i := uint64(0); i < n && i < utf8.UTFMax; i++ {
 		b = append(b, Load8(Add(s, int(i))))

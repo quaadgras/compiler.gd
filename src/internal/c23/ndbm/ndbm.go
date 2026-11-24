@@ -41,7 +41,7 @@ var (
 	dbs = map[uintptr]*db{} // by the address of the C object DBM * points to
 )
 
-func dbOf(p c23.Ptr) *db {
+func dbOf(p *c23.Void) *db {
 	mu.Lock()
 	defer mu.Unlock()
 	return dbs[c23.Addr(p)]
@@ -69,12 +69,12 @@ func goFlags(flags int32) int {
 }
 
 // DbmOpen is dbm_open.
-func DbmOpen(file c23.Ptr, flags int32, mode uint32) c23.Ptr {
+func DbmOpen(file *c23.Void, flags int32, mode uint32) *c23.Void {
 	name := c23.GoString(file)
 	f, err := os.OpenFile(name+".pag", goFlags(flags), os.FileMode(mode&0o777))
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	if flags&c23.O_CREAT != 0 {
 		if d, err := os.OpenFile(name+".dir", os.O_RDWR|os.O_CREATE, os.FileMode(mode&0o777)); err == nil {
@@ -85,7 +85,7 @@ func DbmOpen(file c23.Ptr, flags int32, mode uint32) c23.Ptr {
 	if err := d.load(); err != nil {
 		f.Close()
 		c23.SetErrnoOf(err)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	p := c23.Malloc(1)
 	mu.Lock()
@@ -138,7 +138,7 @@ func putLE32(b []byte, v uint32) {
 
 // DbmClose is dbm_close: a database open for writing is rewritten with
 // one record a key.
-func DbmClose(p c23.Ptr) {
+func DbmClose(p *c23.Void) {
 	mu.Lock()
 	d := dbs[c23.Addr(p)]
 	delete(dbs, c23.Addr(p))
@@ -166,7 +166,7 @@ func DbmClose(p c23.Ptr) {
 	d.f.Close()
 }
 
-func datumBytes(p c23.Ptr, n uint64) []byte {
+func datumBytes(p *c23.Void, n uint64) []byte {
 	if n == 0 {
 		return nil
 	}
@@ -175,10 +175,10 @@ func datumBytes(p c23.Ptr, n uint64) []byte {
 
 // storeDatum stores b as a datum {void *dptr; size_t dsize;} at out, in
 // memory of its own; nil is the null datum.
-func storeDatum(out c23.Ptr, b []byte, ok bool) {
+func storeDatum(out *c23.Void, b []byte, ok bool) {
 	ws := int(c23.WordSize)
 	if !ok {
-		c23.StorePtr(out, c23.Ptr(nil))
+		c23.StorePtr(out, (*c23.Void)(nil))
 		c23.StoreLong(c23.Add(out, ws), 0)
 		return
 	}
@@ -189,7 +189,7 @@ func storeDatum(out c23.Ptr, b []byte, ok bool) {
 }
 
 // DbmStore is dbm_store: 1 if DBM_INSERT finds the key there.
-func DbmStore(p, k c23.Ptr, kn uint64, v c23.Ptr, vn uint64, mode int32) int32 {
+func DbmStore(p, k *c23.Void, kn uint64, v *c23.Void, vn uint64, mode int32) int32 {
 	d := dbOf(p)
 	if d == nil {
 		c23.SetErrno(c23.EBADF)
@@ -215,7 +215,7 @@ func DbmStore(p, k c23.Ptr, kn uint64, v c23.Ptr, vn uint64, mode int32) int32 {
 }
 
 // DbmFetch is dbm_fetch, its datum stored at out.
-func DbmFetch(p, k c23.Ptr, kn uint64, out c23.Ptr) {
+func DbmFetch(p, k *c23.Void, kn uint64, out *c23.Void) {
 	d := dbOf(p)
 	if d == nil {
 		storeDatum(out, nil, false)
@@ -226,7 +226,7 @@ func DbmFetch(p, k c23.Ptr, kn uint64, out c23.Ptr) {
 }
 
 // DbmDelete is dbm_delete.
-func DbmDelete(p, k c23.Ptr, kn uint64) int32 {
+func DbmDelete(p, k *c23.Void, kn uint64) int32 {
 	d := dbOf(p)
 	if d == nil {
 		c23.SetErrno(c23.EBADF)
@@ -252,7 +252,7 @@ func DbmDelete(p, k c23.Ptr, kn uint64) int32 {
 
 // DbmFirstkey is dbm_firstkey: the keys from here are those there now,
 // sorted.
-func DbmFirstkey(p, out c23.Ptr) {
+func DbmFirstkey(p, out *c23.Void) {
 	d := dbOf(p)
 	if d == nil {
 		storeDatum(out, nil, false)
@@ -264,7 +264,7 @@ func DbmFirstkey(p, out c23.Ptr) {
 }
 
 // DbmNextkey is dbm_nextkey.
-func DbmNextkey(p, out c23.Ptr) {
+func DbmNextkey(p, out *c23.Void) {
 	d := dbOf(p)
 	if d == nil || d.next >= len(d.keys) {
 		storeDatum(out, nil, false)
@@ -276,7 +276,7 @@ func DbmNextkey(p, out c23.Ptr) {
 }
 
 // DbmError is dbm_error.
-func DbmError(p c23.Ptr) int32 {
+func DbmError(p *c23.Void) int32 {
 	if d := dbOf(p); d != nil && d.err {
 		return 1
 	}
@@ -284,7 +284,7 @@ func DbmError(p c23.Ptr) int32 {
 }
 
 // DbmClearerr is dbm_clearerr.
-func DbmClearerr(p c23.Ptr) int32 {
+func DbmClearerr(p *c23.Void) int32 {
 	if d := dbOf(p); d != nil {
 		d.err = false
 	}

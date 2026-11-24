@@ -19,11 +19,11 @@ import (
 //
 // C's objects are Go allocations of mirror types (the Go type with the
 // C type's layout, unions as bytes) and every access goes through a
-// c23.Ptr. A local whose address is never taken is a Go variable; one
+// *c23.Void. A local whose address is never taken is a Go variable; one
 // whose address is, or an array or struct, is a c23.Obj on the Go
 // stack. Every local is declared at the top of its function, so that
 // goto may jump anywhere Go lets it. A struct value is always in memory:
-// as an rvalue it is the c23.Ptr to it, a parameter is copied in by the
+// as an rvalue it is the *c23.Void to it, a parameter is copied in by the
 // callee, and a result is written to memory the caller passes.
 
 // options says what to generate.
@@ -137,7 +137,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 		fmt.Fprintf(&b, "\t%s %q\n", libcAlias(path), "internal/c23/"+path)
 	}
 	b.WriteString(")\n\n")
-	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ c23.Ptr\n\n")
+	b.WriteString("var _ = math.Inf\nvar _ = os.Exit\nvar _ unsafe.Pointer\nvar _ *c23.Void\n\n")
 	b.WriteString(pg.types.String())
 	b.WriteString(pg.tdVars.String())
 	b.WriteString(pg.vars.String())
@@ -163,7 +163,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 			args = "int32(len(os.Args)), c23.Args()"
 			if o.thin {
 				g := &gen{pkgGen: pg, u: units[0]}
-				args = "int32(len(os.Args)), " + g.retype("c23.Unthin(c23.Args())", "unsafe.Pointer", g.gt(m.t.fn.params[1]))
+				args = "int32(len(os.Args)), " + g.retype("c23.Args()", voidPtr, g.gt(m.t.fn.params[1]))
 			}
 		}
 		ret := fmt.Sprintf("%s(%s)", pg.names[m], args)
@@ -328,7 +328,7 @@ func (g *gen) globalVar(s *symbol) {
 	name := g.names[s]
 	if s.tls {
 		// Each thread's, made when it first uses it.
-		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
+		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
 		fmt.Fprintf(&g.vars, "p := c23.New[%s]()\n", g.objMirror(s.t))
 		if s.init != nil {
 			save, saveInd := g.out, g.ind
@@ -416,7 +416,7 @@ func goType(t *ctype) string {
 	case kDouble, kLDouble:
 		return "float64"
 	case kPtr, kNullptr, kVaList, kStruct, kArray, kIntCap, kUIntCap:
-		return "c23.Ptr"
+		return "*c23.Void"
 	}
 	panic(fmt.Sprintf("no Go type for %s", t))
 }
@@ -433,9 +433,9 @@ func (g *gen) mirror(t *ctype) string {
 		case e.kind == kFunc:
 			// To a function's descriptor (c23.Func), or an integer C
 			// keeps in its place (SIG_IGN).
-			return "unsafe.Pointer"
+			return voidPtr
 		case e.kind == kVoid || e.kind == kStruct && !e.rec.complete || e.kind == kArray && e.n < 0:
-			return "unsafe.Pointer"
+			return voidPtr
 		}
 		return "*" + g.mirror(e)
 	case kArray:
@@ -448,9 +448,9 @@ func (g *gen) mirror(t *ctype) string {
 	case kVoid:
 		return "byte"
 	case kNullptr:
-		return "unsafe.Pointer"
+		return voidPtr
 	case kVaList:
-		return "unsafe.Pointer"
+		return voidPtr
 	case kLDouble:
 		return "c23.LDouble"
 	case kComplex:
@@ -605,7 +605,7 @@ func constLit(t *ctype, v int64) string {
 		return fmt.Sprintf("%s(%d)", goType(t), uint64(wrap(t, v)))
 	case t.isPtr() || t.kind == kNullptr || t.kind == kVaList || t.isCap():
 		if v == 0 {
-			return "c23.Ptr(nil)"
+			return "(*c23.Void)(nil)"
 		}
 		return fmt.Sprintf("c23.FromInt(%d)", uint64(v)&(1<<(8*target.ptrSize)-1))
 	case t.isFloat():

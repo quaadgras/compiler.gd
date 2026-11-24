@@ -14,7 +14,7 @@ const AT_FDCWD = c23.AT_FDCWD
 
 // Openat is openat: open of path relative to the directory of dirfd
 // (c23.AtPath).
-func Openat(dirfd int32, path c23.Ptr, flags int32, va ...any) int32 {
+func Openat(dirfd int32, path *c23.Void, flags int32, va ...any) int32 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1

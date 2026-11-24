@@ -14,7 +14,7 @@ import (
 // sign, with the tokens, and returns the index of the token, with the
 // value after the equals sign (or null) at *valuep. For a suboption that
 // is no token's it returns -1 and the suboption at *valuep.
-func Getsubopt(optionp, tokens, valuep c23.Ptr) int32 {
+func Getsubopt(optionp, tokens, valuep *c23.Void) int32 {
 	opt := c23.LoadPtr(optionp)
 	if c23.Load8(opt) == 0 {
 		return -1
@@ -44,7 +44,7 @@ func Getsubopt(optionp, tokens, valuep c23.Ptr) int32 {
 			if k < n {
 				c23.StorePtr(valuep, c23.Add(opt, k+1))
 			} else {
-				c23.StorePtr(valuep, c23.Ptr(nil))
+				c23.StorePtr(valuep, (*c23.Void)(nil))
 			}
 			c23.StorePtr(optionp, next)
 			return int32(i)
@@ -57,14 +57,14 @@ func Getsubopt(optionp, tokens, valuep c23.Ptr) int32 {
 
 // Mkostemp is mkostemp: mkstemp, opening the file with flags (O_APPEND,
 // O_CLOEXEC, O_SYNC) too.
-func Mkostemp(template c23.Ptr, flags int32) int32 { return Mkostemps(template, 0, flags) }
+func Mkostemp(template *c23.Void, flags int32) int32 { return Mkostemps(template, 0, flags) }
 
 // Mkstemps is mkstemps: mkstemp of a template whose XXXXXX is followed
 // by suffixlen bytes.
-func Mkstemps(template c23.Ptr, suffixlen int32) int32 { return Mkostemps(template, suffixlen, 0) }
+func Mkstemps(template *c23.Void, suffixlen int32) int32 { return Mkostemps(template, suffixlen, 0) }
 
 // Mkostemps is mkostemps.
-func Mkostemps(template c23.Ptr, suffixlen, flags int32) int32 {
+func Mkostemps(template *c23.Void, suffixlen, flags int32) int32 {
 	n := int64(c23_string.Strlen(template))
 	if suffixlen < 0 || n < 6+int64(suffixlen) ||
 		string(c23.BytesAt(c23.Add(template, int(n)-int(suffixlen)-6), 6)) != "XXXXXX" ||
@@ -92,18 +92,18 @@ func Mkostemps(template c23.Ptr, suffixlen, flags int32) int32 {
 // The functions of a locale (glibc's _l functions), which are the
 // global locale's: the library's locales have the same radix character.
 
-func StrtodL(s, end, _ c23.Ptr) float64 { return Strtod(s, end) }
+func StrtodL(s, end, _ *c23.Void) float64 { return Strtod(s, end) }
 
-func StrtofL(s, end, _ c23.Ptr) float32 { return Strtof(s, end) }
+func StrtofL(s, end, _ *c23.Void) float32 { return Strtof(s, end) }
 
-func StrtolL(s, end c23.Ptr, base int32, _ c23.Ptr) int64 { return Strtol(s, end, base) }
+func StrtolL(s, end *c23.Void, base int32, _ *c23.Void) int64 { return Strtol(s, end, base) }
 
-func StrtoulL(s, end c23.Ptr, base int32, _ c23.Ptr) uint64 { return Strtoul(s, end, base) }
+func StrtoulL(s, end *c23.Void, base int32, _ *c23.Void) uint64 { return Strtoul(s, end, base) }
 
 // StrtolL32 and StrtoulL32 are strtol_l and strtoul_l where long is 32
 // bits (cmd/cc's libcLong32).
-func StrtolL32(s, end c23.Ptr, base int32, _ c23.Ptr) int64 { return c23.Strtol32(s, end, base) }
+func StrtolL32(s, end *c23.Void, base int32, _ *c23.Void) int64 { return c23.Strtol32(s, end, base) }
 
-func StrtoulL32(s, end c23.Ptr, base int32, _ c23.Ptr) uint64 {
+func StrtoulL32(s, end *c23.Void, base int32, _ *c23.Void) uint64 {
 	return c23.Strtoul32(s, end, base)
 }

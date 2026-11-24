@@ -10,16 +10,14 @@ import (
 	c23 "internal/c23"
 )
 
-type Ptr = c23.Ptr
-
 // Catopen is catopen: (nl_catd)-1 and ENOENT, as no catalog exists.
-func Catopen(name Ptr, oflag int32) Ptr {
+func Catopen(name *c23.Void, oflag int32) *c23.Void {
 	c23.SetErrno(c23.ENOENT)
 	return c23.FromInt(^uintptr(0))
 }
 
 // Catgets is catgets: the default message s.
-func Catgets(catd Ptr, setID, msgID int32, s Ptr) Ptr {
+func Catgets(catd *c23.Void, setID, msgID int32, s *c23.Void) *c23.Void {
 	if c23.Addr(catd) == ^uintptr(0) {
 		c23.SetErrno(c23.EBADF)
 	} else {
@@ -29,7 +27,7 @@ func Catgets(catd Ptr, setID, msgID int32, s Ptr) Ptr {
 }
 
 // Catclose is catclose: EBADF for (nl_catd)-1.
-func Catclose(catd Ptr) int32 {
+func Catclose(catd *c23.Void) int32 {
 	if c23.Addr(catd) == ^uintptr(0) || c23.Addr(catd) == 0 {
 		c23.SetErrno(c23.EBADF)
 		return -1

@@ -10,7 +10,7 @@ import (
 
 const weof = 0xffffffff
 
-func Mbrtowc(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
+func Mbrtowc(pc *c23.Void, s *c23.Void, n uint64, ps *c23.Void) uint64 {
 	r, k := c23.Mbrto(s, n, ps, &c23.MbrtowcState)
 	if k < c23.MbStored && c23.Addr(pc) != 0 {
 		c23.Store32(pc, uint32(r))
@@ -18,12 +18,12 @@ func Mbrtowc(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 	return k
 }
 
-func Mbrlen(s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
+func Mbrlen(s *c23.Void, n uint64, ps *c23.Void) uint64 {
 	_, k := c23.Mbrto(s, n, ps, &c23.MbrlenState)
 	return k
 }
 
-func Wcrtomb(s c23.Ptr, c int32, ps c23.Ptr) uint64 {
+func Wcrtomb(s *c23.Void, c int32, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &c23.WcrtombState)
 	st.Reset()
 	if c23.Addr(s) == 0 {
@@ -33,7 +33,7 @@ func Wcrtomb(s c23.Ptr, c int32, ps c23.Ptr) uint64 {
 }
 
 // Mbsinit is mbsinit: whether ps is null or an initial state.
-func Mbsinit(ps c23.Ptr) int32 {
+func Mbsinit(ps *c23.Void) int32 {
 	return c23.B2I(c23.Addr(ps) == 0 || c23.Load32(ps) == 0)
 }
 
@@ -51,7 +51,7 @@ func Wctob(c uint32) int32 {
 	return int32(c)
 }
 
-func Wcslen(s c23.Ptr) uint64 {
+func Wcslen(s *c23.Void) uint64 {
 	n := uint64(0)
 	for c23.Load32(c23.Add(s, int(4*n))) != 0 {
 		n++
@@ -59,9 +59,9 @@ func Wcslen(s c23.Ptr) uint64 {
 	return n
 }
 
-func Wcscmp(a, b c23.Ptr) int32 { return Wcsncmp(a, b, ^uint64(0)) }
+func Wcscmp(a, b *c23.Void) int32 { return Wcsncmp(a, b, ^uint64(0)) }
 
-func Wcsncmp(a, b c23.Ptr, n uint64) int32 {
+func Wcsncmp(a, b *c23.Void, n uint64) int32 {
 	for ; n > 0; n-- {
 		x, y := int32(c23.Load32(a)), int32(c23.Load32(b))
 		switch {
@@ -77,24 +77,24 @@ func Wcsncmp(a, b c23.Ptr, n uint64) int32 {
 	return 0
 }
 
-func Wcscpy(d, s c23.Ptr) c23.Ptr {
+func Wcscpy(d, s *c23.Void) *c23.Void {
 	c23.Memmove(d, s, uintptr(4*(Wcslen(s)+1)))
 	return d
 }
 
-func Wcscat(d, s c23.Ptr) c23.Ptr {
+func Wcscat(d, s *c23.Void) *c23.Void {
 	Wcscpy(c23.Add(d, int(4*Wcslen(d))), s)
 	return d
 }
 
-func Wcschr(s c23.Ptr, c int32) c23.Ptr {
+func Wcschr(s *c23.Void, c int32) *c23.Void {
 	for {
 		x := int32(c23.Load32(s))
 		if x == c {
 			return s
 		}
 		if x == 0 {
-			return c23.Ptr(nil)
+			return (*c23.Void)(nil)
 		}
 		s = c23.Add(s, 4)
 	}

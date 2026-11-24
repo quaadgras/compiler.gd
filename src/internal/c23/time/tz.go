@@ -25,11 +25,11 @@ var (
 	tzSet   bool   // whether TZ was set
 	tzEnv   string // and its value
 	tzLoc   *time.Location
-	tzNames = map[string]c23.Ptr{}
+	tzNames = map[string]*c23.Void{}
 
 	// tzname, timezone and daylight, the library's variables (cmd/cc's
 	// libcVars).
-	tznameP, timezoneP, daylightP c23.Ptr
+	tznameP, timezoneP, daylightP *c23.Void
 )
 
 // local returns the local time zone, as TZ says now.
@@ -153,7 +153,7 @@ func setVars() {
 }
 
 // tzName is the C string of a zone's name, which it keeps.
-func tzName(s string) c23.Ptr {
+func tzName(s string) *c23.Void {
 	p, ok := tzNames[s]
 	if !ok {
 		p = c23.CString(s)
@@ -175,34 +175,34 @@ func Tzset() { vars() }
 
 // Tzname, Timezone and Daylight return where tzname, timezone and
 // daylight are (cmd/cc's libcVars).
-func Tzname() c23.Ptr { vars(); return tznameP }
+func Tzname() *c23.Void { vars(); return tznameP }
 
-func Timezone() c23.Ptr { vars(); return timezoneP }
+func Timezone() *c23.Void { vars(); return timezoneP }
 
-func Daylight() c23.Ptr { vars(); return daylightP }
+func Daylight() *c23.Void { vars(); return daylightP }
 
 // AsctimeR is asctime_r: asctime at buf (at least 26 bytes).
-func AsctimeR(p, buf c23.Ptr) c23.Ptr {
+func AsctimeR(p, buf *c23.Void) *c23.Void {
 	b := asctime(p)
 	if len(b) > 26 {
 		c23.SetErrno(c23.EOVERFLOW)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	copy(c23.BytesAt(buf, uintptr(len(b))), b)
 	return buf
 }
 
 // CtimeR is ctime_r: asctime_r(localtime_r(t), buf).
-func CtimeR(t, buf c23.Ptr) c23.Ptr {
+func CtimeR(t, buf *c23.Void) *c23.Void {
 	p := c23.New[tm]()
 	if c23.Addr(LocaltimeR(t, p)) == 0 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return AsctimeR(p, buf)
 }
 
 // StrftimeL is strftime_l, which is strftime: the library's locales
 // format times alike.
-func StrftimeL(s c23.Ptr, max uint64, format, p, _ c23.Ptr) uint64 {
+func StrftimeL(s *c23.Void, max uint64, format, p, _ *c23.Void) uint64 {
 	return Strftime(s, max, format, p)
 }

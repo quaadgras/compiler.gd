@@ -4,6 +4,8 @@
 
 package c23
 
+import "unsafe"
+
 // setjmp and longjmp, as Fil-C has them: longjmp may only go back to a
 // function still running, and is checked. A function that calls setjmp
 // runs its body in a closure that recovers longjmp's panic and goes back
@@ -32,9 +34,9 @@ var jmpBufInfo = TinfoOf[jmpBuf]()
 
 // Setjmp is setjmp(env) at site of frame f's function: it saves both in
 // env, a jmp_buf, and returns 0.
-func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
+func Setjmp(env *Void, f *JmpFrame, site int32) int32 {
 	p := New[jmpBuf]()
-	*(*jmpBuf)(p) = jmpBuf{f: f, site: site}
+	*(*jmpBuf)(unsafe.Pointer(p)) = jmpBuf{f: f, site: site}
 	StorePtr(env, p)
 	return 0
 }
@@ -42,9 +44,9 @@ func Setjmp(env Ptr, f *JmpFrame, site int32) int32 {
 // Sigsetjmp is sigsetjmp(env, save): setjmp that also saves the calling
 // thread's signal mask in env if save is not 0, for longjmp (and
 // siglongjmp) to restore, as glibc's and musl's do.
-func Sigsetjmp(env Ptr, f *JmpFrame, site, save int32) int32 {
+func Sigsetjmp(env *Void, f *JmpFrame, site, save int32) int32 {
 	p := New[jmpBuf]()
-	jb := (*jmpBuf)(p)
+	jb := (*jmpBuf)(unsafe.Pointer(p))
 	*jb = jmpBuf{f: f, site: site}
 	if save != 0 {
 		t := SigSelf()
@@ -62,12 +64,12 @@ type longjmpPanic struct {
 }
 
 // Longjmp is longjmp.
-func Longjmp(env Ptr, val int32) {
+func Longjmp(env *Void, val int32) {
 	p := LoadPtr(env)
 	if p == nil {
 		RaiseFault("longjmp to a jmp_buf setjmp did not set", Addr(p))
 	}
-	jb := (*jmpBuf)(p)
+	jb := (*jmpBuf)(unsafe.Pointer(p))
 	if !jb.f.live {
 		RaiseFault("longjmp to a function that has returned", Addr(p))
 	}

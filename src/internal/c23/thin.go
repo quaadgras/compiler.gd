@@ -4,16 +4,13 @@
 
 package c23
 
-import (
-	"fmt"
-	"unsafe"
-)
+import "unsafe"
 
 // What cmd/cc's 1:1 translation (cc -thin, doc/gd/cc.md) uses: there a C
 // pointer is Go's, *T or unsafe.Pointer, a C object is a Go variable of
 // the type that mirrors it, and the checks are the ones the compiler
 // makes of unsafe.Pointer (doc/gd/unsafe.md), not this package's. The
-// library is still this package's, which takes a Ptr: Thin makes one of
+// library is still this package's, which takes a *Void: Thin makes one of
 // a Go pointer where the library is called.
 
 const wordBytes = uint64(WordSize)
@@ -38,8 +35,8 @@ func AllocOf[T any](n uint64) *T {
 // AllocRaw is malloc(n) that is given no type: memory in which any word
 // may come to hold a pointer, which the collector therefore looks at
 // word by word.
-func AllocRaw(n uint64) unsafe.Pointer {
-	return unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((n+wordBytes-1)/wordBytes, 1))))
+func AllocRaw(n uint64) *Void {
+	return (*Void)(unsafe.Pointer(unsafe.SliceData(make([]unsafe.Pointer, max((n+wordBytes-1)/wordBytes, 1)))))
 }
 
 // sizeOf is the number of bytes from p to the end of the heap object it
@@ -66,55 +63,49 @@ func ReallocOf1[T any](p *T, n uint64) *T {
 }
 
 // ReallocRaw is realloc(p, n) that is given no type.
-func ReallocRaw(p unsafe.Pointer, n uint64) unsafe.Pointer {
+func ReallocRaw(p *Void, n uint64) *Void {
 	q := AllocRaw(n)
 	if p != nil {
-		old := sizeOf(p) / WordSize
-		copy(unsafe.Slice((*unsafe.Pointer)(q), max((uintptr(n)+WordSize-1)/WordSize, 1)), unsafe.Slice((*unsafe.Pointer)(p), old))
+		old := sizeOf(unsafe.Pointer(p)) / WordSize
+		copy(unsafe.Slice((*unsafe.Pointer)(unsafe.Pointer(q)), max((uintptr(n)+WordSize-1)/WordSize, 1)), unsafe.Slice((*unsafe.Pointer)(unsafe.Pointer(p)), old))
 	}
 	return q
 }
 
 // Free1 is free: the collector frees.
-func Free1(p unsafe.Pointer) {}
-
-// Thin is p: the library takes Go's pointers.
-func Thin(p unsafe.Pointer) Ptr { return p }
-
-// Unthin is p.
-func Unthin(p Ptr) unsafe.Pointer { return p }
+func Free1(p *Void) {}
 
 // MallocAligned is aligned_alloc: n bytes at a multiple of align.
-func MallocAligned(align, n uintptr) Ptr {
+func MallocAligned(align, n uintptr) *Void {
 	p := AllocRaw(uint64(n + align))
-	return unsafe.Add(p, (align-uintptr(p)%align)%align)
+	return Add(p, int((align-Addr(p)%align)%align))
 }
 
 // NewAligned allocates an object of type T at a multiple of align.
-func NewAligned[T any](align uintptr) Ptr { return NewAlignedT(TinfoOf[T](), align) }
+func NewAligned[T any](align uintptr) *Void { return NewAlignedT(TinfoOf[T](), align) }
 
 // NewAlignedT allocates an object of type t at a multiple of align.
-func NewAlignedT(t *Type, align uintptr) Ptr { return NewArrayAlignedT(t, t.size, align) }
+func NewAlignedT(t *Type, align uintptr) *Void { return NewArrayAlignedT(t, t.size, align) }
 
 // NewArrayAlignedT allocates n bytes as an array of t's at a multiple
 // of align: in memory that has no type, since Go aligns no type so.
-func NewArrayAlignedT(t *Type, n, align uintptr) Ptr { return MallocAligned(align, max(n, 1)) }
+func NewArrayAlignedT(t *Type, n, align uintptr) *Void { return MallocAligned(align, max(n, 1)) }
 
 // The library's functions that 1:1 code calls most, on Go's pointers.
 
 // Strlen1 is strlen.
-func Strlen1(s unsafe.Pointer) uint64 {
+func Strlen1(s *Void) uint64 {
 	n := uint64(0)
-	for *(*byte)(unsafe.Add(s, n)) != 0 {
+	for *(*byte)(unsafe.Add(unsafe.Pointer(s), n)) != 0 {
 		n++
 	}
 	return n
 }
 
 // Strcmp1 is strcmp.
-func Strcmp1(a, b unsafe.Pointer) int32 {
+func Strcmp1(a, b *Void) int32 {
 	for i := 0; ; i++ {
-		x, y := *(*byte)(unsafe.Add(a, i)), *(*byte)(unsafe.Add(b, i))
+		x, y := *(*byte)(unsafe.Add(unsafe.Pointer(a), i)), *(*byte)(unsafe.Add(unsafe.Pointer(b), i))
 		if x != y {
 			return int32(x) - int32(y)
 		}
@@ -139,20 +130,22 @@ func words(n uint64, ps ...unsafe.Pointer) bool {
 }
 
 // Memcpy1 is memcpy and memmove.
-func Memcpy1(dst, src unsafe.Pointer, n uint64) unsafe.Pointer {
+func Memcpy1(to, from *Void, n uint64) *Void {
+	dst, src := unsafe.Pointer(to), unsafe.Pointer(from)
 	if words(n, dst, src) {
 		copy(unsafe.Slice((*unsafe.Pointer)(dst), n/wordBytes), unsafe.Slice((*unsafe.Pointer)(src), n/wordBytes))
-		return dst
+		return to
 	}
 	copy(unsafe.Slice((*byte)(dst), n), unsafe.Slice((*byte)(src), n))
-	return dst
+	return to
 }
 
 // Memset1 is memset.
-func Memset1(p unsafe.Pointer, c int32, n uint64) unsafe.Pointer {
+func Memset1(to *Void, c int32, n uint64) *Void {
+	p := unsafe.Pointer(to)
 	if c == 0 && words(n, p) {
 		clear(unsafe.Slice((*unsafe.Pointer)(p), n/wordBytes))
-		return p
+		return to
 	}
 	b := unsafe.Slice((*byte)(p), n)
 	if c == 0 {
@@ -162,45 +155,25 @@ func Memset1(p unsafe.Pointer, c int32, n uint64) unsafe.Pointer {
 			b[i] = byte(c)
 		}
 	}
-	return p
-}
-
-// NewFunc1 is the pointer to the function f: its descriptor.
-func NewFunc1(f any) *Func { return &Func{f: f} }
-
-// FuncOf1 is the Go function of type F that p points to, which a call
-// through a C function pointer calls.
-func FuncOf1[F any](p *Func) F {
-	if p == nil {
-		RaiseFault("call through a null pointer to a function", 0)
-	}
-	f, ok := p.f.(F)
-	if !ok {
-		if g, ok := adapt[F](p.f); ok {
-			return g
-		}
-		var z F
-		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", p.f, z), uintptr(unsafe.Pointer(p)))
-	}
-	return f
+	return to
 }
 
 // SizeOf1 is the number of bytes from p to the end of the object it
 // points into, as the collector knows it: the object's size class, which
 // may be more than what was asked for.
-func SizeOf1(p unsafe.Pointer) uint64 { return uint64(sizeOf(p)) }
+func SizeOf1(p *Void) uint64 { return uint64(sizeOf(unsafe.Pointer(p))) }
 
 // labels are what the addresses of labels (GNU's &&label) point to: one
 // byte for each label of a function, by its number.
 var labels [1 << 16]byte
 
 // LabelAddr is the address of the label numbered id.
-func LabelAddr(id int) unsafe.Pointer { return unsafe.Pointer(&labels[id]) }
+func LabelAddr(id int) *Void { return (*Void)(unsafe.Pointer(&labels[id])) }
 
 // LabelOf is the number of the label whose address is p: -1 if p is not
 // one's.
-func LabelOf(p unsafe.Pointer) int {
-	d := uintptr(p) - uintptr(unsafe.Pointer(&labels[0]))
+func LabelOf(p *Void) int {
+	d := Addr(p) - uintptr(unsafe.Pointer(&labels[0]))
 	if d >= uintptr(len(labels)) {
 		return -1
 	}

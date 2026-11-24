@@ -21,9 +21,9 @@ const (
 
 )
 
-type mbstate struct{ p Ptr }
+type mbstate struct{ p *Void }
 
-func StateOf(ps Ptr, internal *Ptr) mbstate {
+func StateOf(ps *Void, internal **Void) mbstate {
 	if Addr(ps) != 0 {
 		return mbstate{ps}
 	}
@@ -62,7 +62,7 @@ func (s mbstate) SetPending(b []byte) {
 // mbDecode decodes a character from at most n bytes at p, after the
 // incomplete character in st: the character, and how many of the n
 // bytes it took, or mbIncomplete or mbInvalid.
-func mbDecode(p Ptr, n uint64, st mbstate) (rune, uint64) {
+func mbDecode(p *Void, n uint64, st mbstate) (rune, uint64) {
 	b := st.Pending()
 	for i := uint64(0); i < n; i++ {
 		b = append(b, Load8(Add(p, int(i))))
@@ -83,7 +83,7 @@ func mbDecode(p Ptr, n uint64, st mbstate) (rune, uint64) {
 }
 
 // mbrto is mbrtowc and mbrtoc32 without the store.
-func Mbrto(s Ptr, n uint64, ps Ptr, internal *Ptr) (rune, uint64) {
+func Mbrto(s *Void, n uint64, ps *Void, internal **Void) (rune, uint64) {
 	if Addr(s) == 0 {
 		s, n = String[int8]("\x00"), 1
 	}
@@ -98,10 +98,10 @@ func Mbrto(s Ptr, n uint64, ps Ptr, internal *Ptr) (rune, uint64) {
 	return r, k
 }
 
-var Mbrtoc32State, MbrtowcState, MbrlenState Ptr
+var Mbrtoc32State, MbrtowcState, MbrlenState *Void
 
 // putRune writes r's UTF-8 at s: how many bytes, or mbInvalid.
-func PutRune(s Ptr, r uint32) uint64 {
+func PutRune(s *Void, r uint32) uint64 {
 	if r > utf8.MaxRune || r >= 0xd800 && r < 0xe000 {
 		SetErrno(EILSEQ)
 		return MbInvalid
@@ -113,6 +113,6 @@ func PutRune(s Ptr, r uint32) uint64 {
 	return uint64(len(b))
 }
 
-var C32rtombState, WcrtombState Ptr
+var C32rtombState, WcrtombState *Void
 
 // wchar.h's strings

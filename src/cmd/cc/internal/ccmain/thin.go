@@ -20,13 +20,21 @@ import (
 //
 // It is a mode of the generator, not another one: statements and the
 // arithmetic of numbers are the same. An lvalue is an addressable Go
-// expression (lval.x) instead of a c23.Ptr, the value of a struct or an
+// expression (lval.x) instead of a *c23.Void, the value of a struct or an
 // array is still the pointer to it, and a struct is still passed by the
 // pointer to it and returned in memory the caller gives.
 //
 // Not there yet, and an error: bit-fields, variable length arrays,
 // thread-local objects, _Atomic, va_arg, long double and _Complex in
 // memory.
+
+// voidPtr is the Go type of a void *, and of any pointer where the
+// library, or a call through a pointer to a function, does not say what
+// it points to.
+const voidPtr = "*c23.Void"
+
+// vptr is the pointer p, of C type t, as a *c23.Void.
+func (g *gen) vptr(p string, t *ctype) string { return g.retype(p, g.gt(t), voidPtr) }
 
 // gt is the Go type of a C value of type t.
 func (g *gen) gt(t *ctype) string {
@@ -121,7 +129,7 @@ func (g *gen) tlv(e expr, forAddr bool) lval {
 	}
 	if l.t.q&qAtomic != 0 && !forAddr && (l.t.isScalar() || l.t.kind == kStruct) {
 		// _Atomic: through its address, by internal/c23's functions.
-		return lval{addr: g.unsafePtr(taddr(l.x), ptrTo(l.t)), t: l.t}
+		return lval{addr: g.vptr(taddr(l.x), ptrTo(l.t)), t: l.t}
 	}
 	l.addr = taddr(l.x)
 	return l
@@ -139,7 +147,7 @@ func memValue(t *ctype) bool {
 // translation has a value of type t.
 func (g *gen) fromOld(v string, t *ctype) string {
 	if g.o.thin && v != "" && (t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray) {
-		return g.retype(v, "unsafe.Pointer", g.gt(t))
+		return g.retype(v, voidPtr, g.gt(t))
 	}
 	return v
 }
@@ -147,7 +155,7 @@ func (g *gen) fromOld(v string, t *ctype) string {
 // toOld is the reverse of fromOld.
 func (g *gen) toOld(v string, t *ctype) string {
 	if g.o.thin && (t.isPtr() || t.kind == kNullptr || t.kind == kStruct || t.kind == kArray) {
-		return g.unsafePtr(v, t)
+		return g.vptr(v, t)
 	}
 	return v
 }
@@ -165,13 +173,13 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 		if s.global {
 			if s.tls {
 				// The calling thread's.
-				return lval{x: fmt.Sprintf("(*(*%s)(%s.Get()))", g.mirror(s.t), g.globalName(s)), t: s.t}
+				return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s.Get())))", g.mirror(s.t), g.globalName(s)), t: s.t}
 			}
 			return lval{x: g.tglobal(s), t: s.t}
 		}
 		if s.t.isVLA() {
 			// The Go variable is the pointer to its array.
-			return lval{x: fmt.Sprintf("(*(*%s)(%s))", g.mirror(s.t), g.localName(s)), t: s.t}
+			return lval{x: fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(s.t), g.localName(s)), t: s.t}
 		}
 		return lval{x: g.localName(s), t: s.t}
 	case *deref:
@@ -196,7 +204,7 @@ func (g *gen) tlv1(e expr, forAddr bool) lval {
 		if e.f.bits >= 0 {
 			// In a unit of its type's size at its offset: internal/c23's
 			// loads and stores, through an unsafe.Pointer.
-			return lval{addr: addOff(g.unsafePtr(taddr(base), ptrTo(xt)), e.f.off), t: e.t, f: e.f}
+			return lval{addr: addOff(g.vptr(taddr(base), ptrTo(xt)), e.f.off), t: e.t, f: e.f}
 		}
 		if r := xt.rec; !r.bytes {
 			for i, f := range r.fields {
@@ -260,23 +268,20 @@ func (g *gen) tindex(e *deref, forAddr bool) (string, bool) {
 func (g *gen) tglobal(s *symbol) string {
 	if v, lib := libcVars[s.name]; lib && s.storage == sExtern && !s.defined {
 		// The library's object, where the library keeps it.
-		return fmt.Sprintf("(*(*%s)(%s()))", g.mirror(s.t), g.libcFunc(v))
+		return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s())))", g.mirror(s.t), g.libcFunc(v))
 	}
 	def := s
 	if d := g.ext[s.name]; s.linkage == 'e' && d != nil {
 		def = d
 	}
 	if def.allocSize > def.t.sizeof() {
-		return fmt.Sprintf("(*(*%s)(%s))", g.mirror(s.t), g.globalName(s))
+		return fmt.Sprintf("(*(*%s)(unsafe.Pointer(%s)))", g.mirror(s.t), g.globalName(s))
 	}
 	return g.globalName(s)
 }
 
 // unsafePtr is the pointer p, of C type t, as an unsafe.Pointer.
 func (g *gen) unsafePtr(p string, t *ctype) string {
-	if g.gt(t) == "unsafe.Pointer" {
-		return p
-	}
 	if isNil(p) {
 		return "unsafe.Pointer(nil)"
 	}
@@ -299,7 +304,7 @@ func (g *gen) tload(l lval) string {
 	case l.t.kind == kStruct || l.t.kind == kArray:
 		return taddr(l.x)
 	case memValue(l.t):
-		return loadCode(g.unsafePtr(taddr(l.x), ptrTo(l.t)), l.t)
+		return loadCode(g.vptr(taddr(l.x), ptrTo(l.t)), l.t)
 	}
 	return l.x
 }
@@ -312,7 +317,7 @@ func (g *gen) tstore(l lval, v string, c expr) {
 		}
 		return
 	case memValue(l.t):
-		g.store(g.unsafePtr(taddr(l.x), ptrTo(l.t)), l.t, v, c)
+		g.store(g.vptr(taddr(l.x), ptrTo(l.t)), l.t, v, c)
 		return
 	}
 	if k, ok := c.(*intConst); ok && !l.t.isPtr() && l.t.kind != kNullptr {
@@ -329,7 +334,7 @@ func (g *gen) trv(e expr) (string, bool) {
 			if e.v == 0 {
 				return g.nilOf(e.t), true
 			}
-			return g.retype(fmt.Sprintf("c23.FromInt(%d)", uint64(e.v)), "unsafe.Pointer", g.gt(e.t)), true
+			return g.retype(fmt.Sprintf("c23.FromInt(%d)", uint64(e.v)), voidPtr, g.gt(e.t)), true
 		}
 	case *strLit:
 		return "&" + g.tstr(e), true
@@ -415,7 +420,7 @@ func (g *gen) tconv(x string, from, to *ctype) string {
 		}
 		// Through internal/c23: an integer that is no address (a
 		// sentinel) is still a pointer C may compare.
-		return g.retype(fmt.Sprintf("c23.FromInt(uintptr(%s))", x), "unsafe.Pointer", g.gt(to))
+		return g.retype(fmt.Sprintf("c23.FromInt(uintptr(%s))", x), voidPtr, g.gt(to))
 	case fromP && to.kind == kBool:
 		return fmt.Sprintf("c23.B2U8(%s != nil)", x)
 	case fromP && to.isInteger():
@@ -521,7 +526,7 @@ func (g *gen) tdeclareLocal(s *symbol) {
 	}
 	n := g.localName(s)
 	if s.t.isVLA() {
-		fmt.Fprintf(&g.locals, "var %s unsafe.Pointer\n_ = %s\n", n, n)
+		fmt.Fprintf(&g.locals, "var %s *c23.Void\n_ = %s\n", n, n)
 		return
 	}
 	fmt.Fprintf(&g.locals, "var %s %s\n_ = %s\n", n, g.mirror(s.t), n)
@@ -622,14 +627,14 @@ func (g *gen) tinitObject(x string, t *ctype, in *initializer) {
 	for _, it := range in.items {
 		switch {
 		case it.f != nil && it.f.bits >= 0:
-			g.bitStore(addOff("unsafe.Pointer("+taddr(x)+")", it.off), it.f, g.rv(it.x), it.x)
+			g.bitStore(addOff("(*c23.Void)(unsafe.Pointer("+taddr(x)+"))", it.off), it.f, g.rv(it.x), it.x)
 		case it.zero:
 			g.p("%s = %s{}", g.tat(x, t, it.off, it.t), g.mirror(it.t))
 		default:
 			dst := g.tat(x, t, it.off, it.t)
 			if s, ok := it.x.(*strLit); ok && it.t.kind == kArray {
 				n := min(it.t.sizeof(), s.t.sizeof())
-				g.p("c23.Memcpy1(unsafe.Pointer(%s), unsafe.Pointer(&%s), %d)", taddr(dst), g.tstr(s), n)
+				g.p("c23.Memcpy1((*c23.Void)(unsafe.Pointer(%s)), (*c23.Void)(unsafe.Pointer(&%s)), %d)", taddr(dst), g.tstr(s), n)
 				continue
 			}
 			g.tstore(lval{x: dst, t: it.t}, g.rv(it.x), it.x)
@@ -656,7 +661,7 @@ func (g *gen) tglobalVar(s *symbol) {
 	}
 	if s.tls {
 		// Each thread's, made when it first uses it.
-		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() c23.Ptr {\n", name)
+		fmt.Fprintf(&g.vars, "var %s = c23.NewTLS(func() *c23.Void {\n", name)
 		fmt.Fprintf(&g.vars, "p := new(%s)\n", g.mirror(s.t))
 		if s.init != nil {
 			save, saveInd := g.out, g.ind
@@ -664,7 +669,7 @@ func (g *gen) tglobalVar(s *symbol) {
 			g.tinitObject("(*p)", s.t, s.init)
 			g.out, g.ind = save, saveInd
 		}
-		g.vars.WriteString("return unsafe.Pointer(p)\n})\n")
+		g.vars.WriteString("return (*c23.Void)(unsafe.Pointer(p))\n})\n")
 		return
 	}
 	x := name
@@ -736,7 +741,7 @@ func (g *gen) tfuncSig(ft *funcType, names []string) string {
 func (g *gen) tfuncPtr(s *symbol) string {
 	name := g.funcName(s, s.p)
 	if name == "" {
-		return "unsafe.Pointer(nil)" // weak, and not defined
+		return "(*c23.Void)(nil)" // weak, and not defined
 	}
 	f := name
 	if isLibcGo(name) {
@@ -755,7 +760,7 @@ func (g *gen) tfuncPtr(s *symbol) string {
 	d := "fd_" + strings.ReplaceAll(name, ".", "_")
 	if !g.descs[d] {
 		g.descs[d] = true
-		fmt.Fprintf(&g.vars, "var %s unsafe.Pointer\n", d)
+		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
 		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, f)
 	}
 	return d
@@ -779,7 +784,7 @@ func (g *gen) tbuiltin(e *builtinCall) (string, bool) {
 		if m, ok := whole(e.args[0], n); ok {
 			g.p("%s = %s{}", tderef(p), m)
 		} else if n > 0 {
-			g.p("c23.Memset1(%s, 0, %d)", g.unsafePtr(p, e.args[0].ty()), n)
+			g.p("c23.Memset1(%s, 0, %d)", g.vptr(p, e.args[0].ty()), n)
 		}
 		return "", true
 	case "cxx_copy":
@@ -789,11 +794,11 @@ func (g *gen) tbuiltin(e *builtinCall) (string, bool) {
 		if m2, ok2 := whole(e.args[1], n); ok && ok2 && m == m2 {
 			g.p("%s = %s", tderef(dst), tderef(src))
 		} else if n > 0 {
-			g.p("c23.Memcpy1(%s, %s, %d)", g.unsafePtr(dst, e.args[0].ty()), g.unsafePtr(src, e.args[1].ty()), n)
+			g.p("c23.Memcpy1(%s, %s, %d)", g.vptr(dst, e.args[0].ty()), g.vptr(src, e.args[1].ty()), n)
 		}
 		return "", true
 	case "cxx_size":
-		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.unsafePtr(g.rv(e.args[0]), e.args[0].ty())), true
+		return fmt.Sprintf("%s(c23.SizeOf1(%s))", goType(tULong), g.vptr(g.rv(e.args[0]), e.args[0].ty())), true
 	case "alloca":
 		return fmt.Sprintf("c23.AllocRaw(uint64(%s))", g.rv(e.args[0])), true
 	}
@@ -801,13 +806,13 @@ func (g *gen) tbuiltin(e *builtinCall) (string, bool) {
 }
 
 // et is the Go type of a C value of type t in a call through a pointer
-// to a function: every pointer an unsafe.Pointer, so that functions
+// to a function: every pointer a *c23.Void, so that functions
 // whose types differ only in what their pointers point to, which C and
 // C++ let a pointer call, have one Go type.
 func (g *gen) et(t *ctype) string {
 	switch t.kind {
 	case kPtr, kNullptr, kStruct, kArray:
-		return "unsafe.Pointer"
+		return voidPtr
 	}
 	return goType(t)
 }
@@ -817,7 +822,7 @@ func (g *gen) et(t *ctype) string {
 func (g *gen) erasedSig(ft *funcType) string {
 	var ps []string
 	if ft.ret.kind == kStruct {
-		ps = append(ps, "unsafe.Pointer")
+		ps = append(ps, voidPtr)
 	}
 	for _, pt := range ft.params {
 		ps = append(ps, g.et(pt))
@@ -837,14 +842,14 @@ func (g *gen) erasedSig(ft *funcType) string {
 func (g *gen) erased(name string, ft *funcType) string {
 	var ps, args []string
 	if ft.ret.kind == kStruct {
-		ps = append(ps, "sret unsafe.Pointer")
-		args = append(args, g.retype("sret", "unsafe.Pointer", g.gt(ft.ret)))
+		ps = append(ps, "sret "+voidPtr)
+		args = append(args, g.retype("sret", voidPtr, g.gt(ft.ret)))
 	}
 	for i, pt := range ft.params {
 		a := fmt.Sprintf("a%d", i)
 		ps = append(ps, a+" "+g.et(pt))
-		if g.et(pt) == "unsafe.Pointer" {
-			a = g.retype(a, "unsafe.Pointer", g.gt(pt))
+		if g.et(pt) == voidPtr {
+			a = g.retype(a, voidPtr, g.gt(pt))
 		}
 		args = append(args, a)
 	}
@@ -856,14 +861,14 @@ func (g *gen) erased(name string, ft *funcType) string {
 	switch {
 	case ft.ret.kind == kVoid || ft.ret.kind == kStruct:
 		return fmt.Sprintf("func(%s) { %s }", strings.Join(ps, ", "), call)
-	case g.et(ft.ret) == "unsafe.Pointer":
-		return fmt.Sprintf("func(%s) unsafe.Pointer { return %s }", strings.Join(ps, ", "), g.retype(call, g.gt(ft.ret), "unsafe.Pointer"))
+	case g.et(ft.ret) == voidPtr:
+		return fmt.Sprintf("func(%s) %s { return %s }", strings.Join(ps, ", "), voidPtr, g.retype(call, g.gt(ft.ret), voidPtr))
 	}
 	return fmt.Sprintf("func(%s) %s { return %s }", strings.Join(ps, ", "), g.et(ft.ret), call)
 }
 
 // thinLibc are the library's functions that 1:1 code calls on Go's
-// pointers, without a c23.Ptr made of each.
+// pointers, without a *c23.Void made of each.
 var thinLibc = map[string]string{
 	"strlen": "c23.Strlen1", "strcmp": "c23.Strcmp1", "memcpy": "c23.Memcpy1", "memmove": "c23.Memcpy1",
 	"memset": "c23.Memset1", "free": "c23.Free1", "malloc": "c23.AllocRaw", "realloc": "c23.ReallocRaw",
@@ -895,7 +900,7 @@ func (g *gen) tcall(c *call) string {
 	if isLib {
 		thin = thinLibc[lib]
 		if lib == "calloc" {
-			return g.retype(fmt.Sprintf("c23.AllocRaw(uint64(%s) * uint64(%s))", g.rv(c.args[0]), g.rv(c.args[1])), "unsafe.Pointer", g.gt(c.ft.ret))
+			return g.retype(fmt.Sprintf("c23.AllocRaw(uint64(%s) * uint64(%s))", g.rv(c.args[0]), g.rv(c.args[1])), voidPtr, g.gt(c.ft.ret))
 		}
 	}
 	if d, ok := c.fn.(*decay); ok {
@@ -915,7 +920,7 @@ func (g *gen) tcall(c *call) string {
 		for i, a := range c.args {
 			v := g.rv(a)
 			if at := a.ty(); at.isPtr() || at.kind == kNullptr {
-				v = g.unsafePtr(v, at)
+				v = g.vptr(v, at)
 			} else if i < len(callee.params) {
 				v = g.tconv(v, a.ty(), callee.params[i])
 			}
@@ -923,7 +928,7 @@ func (g *gen) tcall(c *call) string {
 		}
 		code := fmt.Sprintf("%s(%s)", thin, strings.Join(args, ", "))
 		if c.ft.ret.isPtr() {
-			return g.retype(code, "unsafe.Pointer", g.gt(c.ft.ret))
+			return g.retype(code, voidPtr, g.gt(c.ft.ret))
 		}
 		return code
 	}
@@ -947,7 +952,7 @@ func (g *gen) tcall(c *call) string {
 	}
 	if sret != "" {
 		if libGo {
-			args = append(args, "unsafe.Pointer("+sret+")")
+			args = append(args, "(*c23.Void)(unsafe.Pointer("+sret+"))")
 		} else {
 			args = append(args, sret)
 		}
@@ -959,10 +964,10 @@ func (g *gen) tcall(c *call) string {
 		switch {
 		case at.kind == kStruct && i >= len(callee.params):
 			// By value, in variable arguments: a copy.
-			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", g.unsafePtr(v, at), at.sizeof())
+			v = fmt.Sprintf("c23.ByValue{P: c23.Copy(%s, %d)}", g.vptr(v, at), at.sizeof())
 		case libGo && isP:
 			// The library's: any pointer.
-			v = g.unsafePtr(v, at)
+			v = g.vptr(v, at)
 		case libGo:
 			if i < len(callee.params) {
 				v = libcConv(abiConvert(v, a, callee.params[i]), callee.params[i], true)
@@ -977,7 +982,7 @@ func (g *gen) tcall(c *call) string {
 		case !callee.variadic && (callee.proto || len(callee.params) > 0):
 			continue // an extra argument: ignored
 		case at.isPtr() || at.kind == kNullptr || at.kind == kArray:
-			v = g.unsafePtr(v, at) // in variable arguments: any pointer is one type
+			v = g.vptr(v, at) // in variable arguments: any pointer is one type
 		}
 		if !direct && !isSimple(v) && !isPure(v) {
 			t := g.tmp(g.gt(at))
@@ -995,7 +1000,7 @@ func (g *gen) tcall(c *call) string {
 	case rt.kind == kVoid:
 		return code
 	case libGo && (rt.isPtr() || rt.kind == kNullptr):
-		return g.retype(code, "unsafe.Pointer", g.gt(rt))
+		return g.retype(code, voidPtr, g.gt(rt))
 	case libGo:
 		return libcConv(code, callee.ret, false)
 	case rt.isPtr() || rt.kind == kNullptr:
@@ -1017,7 +1022,7 @@ func (g *gen) tcall(c *call) string {
 // tcallPtr is the call c through a pointer to a function: with every
 // pointer an unsafe.Pointer (erasedSig).
 func (g *gen) tcallPtr(c *call) string {
-	fp := g.unsafePtr(g.rv(c.fn), c.fn.ty())
+	fp := g.vptr(g.rv(c.fn), c.fn.ty())
 	var args []string
 	var sret string
 	if into := g.u.callInto[c]; into != nil {
@@ -1031,13 +1036,13 @@ func (g *gen) tcallPtr(c *call) string {
 		sret = "&" + g.tmp(g.mirror(c.ft.ret))
 	}
 	if sret != "" {
-		args = append(args, "unsafe.Pointer("+sret+")")
+		args = append(args, "(*c23.Void)(unsafe.Pointer("+sret+"))")
 	}
 	for _, a := range c.args {
 		v := g.rv(a)
 		at := a.ty()
-		if g.et(at) == "unsafe.Pointer" {
-			v = g.unsafePtr(v, at)
+		if g.et(at) == voidPtr {
+			v = g.vptr(v, at)
 		}
 		if !isSimple(v) && !isPure(v) {
 			// C evaluates the arguments before the call.
@@ -1052,8 +1057,8 @@ func (g *gen) tcallPtr(c *call) string {
 	case sret != "":
 		g.p("%s", code)
 		return sret
-	case rt.kind != kVoid && g.et(rt) == "unsafe.Pointer":
-		return g.retype(code, "unsafe.Pointer", g.gt(rt))
+	case rt.kind != kVoid && g.et(rt) == voidPtr:
+		return g.retype(code, voidPtr, g.gt(rt))
 	}
 	return code
 }
@@ -1092,7 +1097,7 @@ func (g *gen) tallocCall(c *call, to *ctype) (string, bool) {
 	case "calloc":
 		return fmt.Sprintf("c23.AllocOf[%s](uint64(%s) * uint64(%s))", m, g.rv(c.args[0]), g.rv(c.args[1])), true
 	case "realloc":
-		return fmt.Sprintf("c23.ReallocOf1[%s]((*%s)(%s), uint64(%s))", m, m, g.rv(c.args[0]), g.rv(c.args[1])), true
+		return fmt.Sprintf("c23.ReallocOf1[%s](%s, uint64(%s))", m, g.retype(g.rv(c.args[0]), g.gt(c.args[0].ty()), "*"+m), g.rv(c.args[1])), true
 	}
 	return "", false
 }

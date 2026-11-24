@@ -5,7 +5,7 @@
 package c23
 
 // intptr_t and uintptr_t, which cmd/cc still gives a kind of their own
-// from when they carried a pointer's capability: their value is a Ptr
+// from when they carried a pointer's capability: their value is a *Void
 // that holds the integer, and their arithmetic is the integer's. They
 // are to become plain integers.
 
@@ -16,7 +16,7 @@ type Intcap struct {
 
 // CapArith is x op y ('+', '-', '*', '/', '%', '&', '|', '^'), signed if
 // s.
-func CapArith(op byte, x, y Ptr, s bool) Ptr {
+func CapArith(op byte, x, y *Void, s bool) *Void {
 	a, b := Addr(x), Addr(y)
 	var r uintptr
 	switch op {
@@ -49,7 +49,7 @@ func CapArith(op byte, x, y Ptr, s bool) Ptr {
 }
 
 // CapShift is x << n ('<') or x >> n ('>'), arithmetic if s.
-func CapShift(op byte, x Ptr, n uint64, s bool) Ptr {
+func CapShift(op byte, x *Void, n uint64, s bool) *Void {
 	a := Addr(x)
 	switch {
 	case op == '<':
@@ -63,7 +63,7 @@ func CapShift(op byte, x Ptr, n uint64, s bool) Ptr {
 }
 
 // CapUnary is -x ('-') or ^x ('~').
-func CapUnary(op byte, x Ptr) Ptr {
+func CapUnary(op byte, x *Void) *Void {
 	if op == '-' {
 		return FromInt(-Addr(x))
 	}
@@ -72,5 +72,5 @@ func CapUnary(op byte, x Ptr) Ptr {
 
 // IntToCap and UintToCap convert an integer to an intptr_t or a
 // uintptr_t.
-func IntToCap(v int64) Ptr   { return FromInt(uintptr(v)) }
-func UintToCap(v uint64) Ptr { return FromInt(uintptr(v)) }
+func IntToCap(v int64) *Void   { return FromInt(uintptr(v)) }
+func UintToCap(v uint64) *Void { return FromInt(uintptr(v)) }

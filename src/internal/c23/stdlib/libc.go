@@ -14,7 +14,7 @@ import (
 
 // ExitNow is _Exit: exit without the functions atexit registered.
 func ExitNow(status int32) {
-	c23.Fflush(c23.Ptr(nil))
+	c23.Fflush((*c23.Void)(nil))
 	os.Exit(int(status))
 }
 
@@ -22,13 +22,13 @@ func ExitNow(status int32) {
 // a temporary object, so that the pointers they hold keep their
 // capabilities.
 type qsorter struct {
-	base c23.Ptr
+	base *c23.Void
 	size int
-	tmp  c23.Ptr
-	cmp  func(c23.Ptr, c23.Ptr) int32
+	tmp  *c23.Void
+	cmp  func(*c23.Void, *c23.Void) int32
 }
 
-func (q *qsorter) at(i int) c23.Ptr { return c23.Add(q.base, i*q.size) }
+func (q *qsorter) at(i int) *c23.Void { return c23.Add(q.base, i*q.size) }
 
 func (q *qsorter) less(i, j int) bool { return q.cmp(q.at(i), q.at(j)) < 0 }
 
@@ -58,7 +58,7 @@ func (q *qsorter) siftDown(i, n int) {
 }
 
 // Qsort is qsort: a heapsort, in place and in O(n log n).
-func Qsort(base c23.Ptr, n, size uint64, cmp c23.Ptr) {
+func Qsort(base *c23.Void, n, size uint64, cmp *c23.Void) {
 	if n < 2 || size == 0 {
 		return
 	}
@@ -73,7 +73,7 @@ func Qsort(base c23.Ptr, n, size uint64, cmp c23.Ptr) {
 	}
 }
 
-func Bsearch(key, base c23.Ptr, n, size uint64, cmp c23.Ptr) c23.Ptr {
+func Bsearch(key, base *c23.Void, n, size uint64, cmp *c23.Void) *c23.Void {
 	f := c23.CmpFunc(cmp)
 	lo, hi := uint64(0), n
 	for lo < hi {
@@ -88,11 +88,11 @@ func Bsearch(key, base c23.Ptr, n, size uint64, cmp c23.Ptr) c23.Ptr {
 			lo = m + 1
 		}
 	}
-	return c23.Ptr(nil)
+	return (*c23.Void)(nil)
 }
 
 // Atexit is atexit: Exit calls f, after the functions registered later.
-func Atexit(f c23.Ptr) int32 {
+func Atexit(f *c23.Void) int32 {
 	fn := c23.FuncOf[func()](f)
 	c23.AtexitMu.Lock()
 	c23.AtexitFn = append(c23.AtexitFn, fn)
@@ -115,25 +115,25 @@ func Labs(j int64) int64 {
 }
 
 // Div is div: it stores the div_t {quot, rem} of n/d at sret.
-func Div(sret c23.Ptr, n, d int32) {
+func Div(sret *c23.Void, n, d int32) {
 	c23.Store32(sret, uint32(n/d))
 	c23.Store32(c23.Add(sret, 4), uint32(n%d))
 }
 
 // Ldiv is ldiv, lldiv and imaxdiv: it stores the ldiv_t {quot, rem} of
 // n/d at sret.
-func Ldiv(sret c23.Ptr, n, d int64) {
+func Ldiv(sret *c23.Void, n, d int64) {
 	c23.Store64(sret, uint64(n/d))
 	c23.Store64(c23.Add(sret, 8), uint64(n%d))
 }
 
-func Atoi(s c23.Ptr) int32 { return int32(Strtol(s, c23.Ptr(nil), 10)) }
+func Atoi(s *c23.Void) int32 { return int32(Strtol(s, (*c23.Void)(nil), 10)) }
 
-func Atol(s c23.Ptr) int64 { return Strtol(s, c23.Ptr(nil), 10) }
+func Atol(s *c23.Void) int64 { return Strtol(s, (*c23.Void)(nil), 10) }
 
-func Atof(s c23.Ptr) float64 { return Strtod(s, c23.Ptr(nil)) }
+func Atof(s *c23.Void) float64 { return Strtod(s, (*c23.Void)(nil)) }
 
-func Strtol(s, end c23.Ptr, base int32) int64 {
+func Strtol(s, end *c23.Void, base int32) int64 {
 	v, neg, of, n := c23.StrtoParse(c23.GoString(s), int(base))
 	c23.SetEnd(end, s, n)
 	switch {
@@ -149,7 +149,7 @@ func Strtol(s, end c23.Ptr, base int32) int64 {
 	return int64(v)
 }
 
-func Strtoul(s, end c23.Ptr, base int32) uint64 {
+func Strtoul(s, end *c23.Void, base int32) uint64 {
 	v, neg, of, n := c23.StrtoParse(c23.GoString(s), int(base))
 	c23.SetEnd(end, s, n)
 	if of {
@@ -162,14 +162,14 @@ func Strtoul(s, end c23.Ptr, base int32) uint64 {
 	return v
 }
 
-func Strtod(s, end c23.Ptr) float64 { return strtod(s, end, 64) }
+func Strtod(s, end *c23.Void) float64 { return strtod(s, end, 64) }
 
-func Strtof(s, end c23.Ptr) float32 { return float32(strtod(s, end, 32)) }
+func Strtof(s, end *c23.Void) float32 { return float32(strtod(s, end, 32)) }
 
-func Strtold(s, end c23.Ptr) float64 { return strtod(s, end, 64) }
+func Strtold(s, end *c23.Void) float64 { return strtod(s, end, 64) }
 
 // strtod is strtod of a float of the given bits.
-func strtod(s, end c23.Ptr, bits int) float64 {
+func strtod(s, end *c23.Void, bits int) float64 {
 	str := c23.GoString(s)
 	i := 0
 	for i < len(str) && strings.IndexByte(" \t\n\v\f\r", str[i]) >= 0 {
@@ -207,10 +207,10 @@ func Rand() int32 {
 
 func Srand(seed uint32) { randState = uint64(seed) }
 
-func Getenv(name c23.Ptr) c23.Ptr {
+func Getenv(name *c23.Void) *c23.Void {
 	v, ok := os.LookupEnv(c23.GoString(name))
 	if !ok {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.CString(v)
 }

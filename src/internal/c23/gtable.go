@@ -12,12 +12,12 @@ func gTableSlot() *unsafe.Pointer
 // A gTable is what C's library keeps for one goroutine, which is a C
 // thread. Only its goroutine uses it.
 type gTable struct {
-	tls    map[*TLS]Ptr   // the goroutine's _Thread_local objects (thread.go)
-	Keys   map[uint32]Ptr // its pthread_setspecific values (thread.go)
-	fe     fenvState      // its floating-point environment (fenv.go)
-	Sig    *SigThread     // its signal state (sigaction.go)
-	errno  Ptr            // its errno, once it has used it (libc.go)
-	errnoP *int32         // where errno is: nil until then
+	tls    map[*TLS]*Void   // the goroutine's _Thread_local objects (thread.go)
+	Keys   map[uint32]*Void // its pthread_setspecific values (thread.go)
+	fe     fenvState        // its floating-point environment (fenv.go)
+	Sig    *SigThread       // its signal state (sigaction.go)
+	errno  *Void            // its errno, once it has used it (libc.go)
+	errnoP *int32           // where errno is: nil until then
 
 	th      *Thread             // the thread it is, if it is one (cancel.go)
 	cleanup []cleanupHandler    // pthread_cleanup_push's handlers (cancel.go)

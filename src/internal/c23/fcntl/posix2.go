@@ -31,7 +31,7 @@ type flock struct {
 
 // fcntlLock is fcntl's F_GETLK, F_SETLK and F_SETLKW of the struct flock
 // at p.
-func fcntlLock(fd, cmd int32, p c23.Ptr) int32 {
+func fcntlLock(fd, cmd int32, p *c23.Void) int32 {
 	of := c23.FdFile(fd)
 	if of == nil {
 		c23.SetErrno(c23.EBADF)

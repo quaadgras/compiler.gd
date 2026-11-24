@@ -167,7 +167,7 @@ func timerfdOf(fd int32) *timerfd {
 }
 
 // loadTimespec reads a struct timespec {time_t tv_sec; long tv_nsec;}.
-func loadTimespec(p c23.Ptr) (time.Duration, bool) {
+func loadTimespec(p *c23.Void) (time.Duration, bool) {
 	sec, nsec := int64(c23.Load64(p)), c23.LoadLong(c23.Add(p, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		return 0, false
@@ -178,21 +178,21 @@ func loadTimespec(p c23.Ptr) (time.Duration, bool) {
 	return time.Duration(sec)*time.Second + time.Duration(nsec), true
 }
 
-func storeTimespec(p c23.Ptr, d time.Duration) {
+func storeTimespec(p *c23.Void, d time.Duration) {
 	c23.Store64(p, uint64(d/time.Second))
 	c23.StoreLong(c23.Add(p, 8), int64(d%time.Second))
 }
 
 // storeItimerspec stores struct itimerspec {struct timespec it_interval,
 // it_value;}.
-func (tf *timerfd) storeItimerspec(p c23.Ptr) {
+func (tf *timerfd) storeItimerspec(p *c23.Void) {
 	storeTimespec(p, tf.interval)
 	storeTimespec(c23.Add(p, 16), tf.left())
 }
 
 // TimerfdSettime is timerfd_settime. It resets the count of expirations.
 // TFD_TIMER_CANCEL_ON_SET is accepted, and does nothing.
-func TimerfdSettime(fd, flags int32, newValue, oldValue c23.Ptr) int32 {
+func TimerfdSettime(fd, flags int32, newValue, oldValue *c23.Void) int32 {
 	tf := timerfdOf(fd)
 	if tf == nil {
 		return -1
@@ -232,7 +232,7 @@ func TimerfdSettime(fd, flags int32, newValue, oldValue c23.Ptr) int32 {
 }
 
 // TimerfdGettime is timerfd_gettime.
-func TimerfdGettime(fd int32, currValue c23.Ptr) int32 {
+func TimerfdGettime(fd int32, currValue *c23.Void) int32 {
 	tf := timerfdOf(fd)
 	if tf == nil {
 		return -1

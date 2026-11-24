@@ -11,8 +11,6 @@ import (
 	"internal/c23/netdb"
 )
 
-type Ptr = c23.Ptr
-
 // ResInit is res_init: there is no state to read.
 func ResInit() int32 { return 0 }
 
@@ -23,10 +21,12 @@ func fail() int32 {
 }
 
 // ResQuery is res_query: it fails, as no DNS message can be had.
-func ResQuery(dname Ptr, class, typ int32, answer Ptr, anslen int32) int32 { return fail() }
+func ResQuery(dname *c23.Void, class, typ int32, answer *c23.Void, anslen int32) int32 { return fail() }
 
-func ResSearch(dname Ptr, class, typ int32, answer Ptr, anslen int32) int32 { return fail() }
+func ResSearch(dname *c23.Void, class, typ int32, answer *c23.Void, anslen int32) int32 {
+	return fail()
+}
 
-func ResQuerydomain(name, domain Ptr, class, typ int32, answer Ptr, anslen int32) int32 {
+func ResQuerydomain(name, domain *c23.Void, class, typ int32, answer *c23.Void, anslen int32) int32 {
 	return fail()
 }

@@ -9,6 +9,6 @@ import c23 "internal/c23"
 // The functions of a locale (POSIX's _l functions), which are the global
 // locale's: the library's locales compare alike.
 
-func StrcasecmpL(a, b, _ c23.Ptr) int32 { return Strcasecmp(a, b) }
+func StrcasecmpL(a, b, _ *c23.Void) int32 { return Strcasecmp(a, b) }
 
-func StrncasecmpL(a, b c23.Ptr, n uint64, _ c23.Ptr) int32 { return Strncasecmp(a, b, n) }
+func StrncasecmpL(a, b *c23.Void, n uint64, _ *c23.Void) int32 { return Strncasecmp(a, b, n) }

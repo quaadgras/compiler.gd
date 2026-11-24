@@ -37,8 +37,8 @@ func thrdResult(e int32) int32 {
 }
 
 // ThrdCreate is thrd_create: start is an int (*)(void *).
-func ThrdCreate(thr, start, arg c23.Ptr) int32 {
-	f := c23.FuncOf[func(c23.Ptr) int32](start)
+func ThrdCreate(thr, start, arg *c23.Void) int32 {
+	f := c23.FuncOf[func(*c23.Void) int32](start)
 	c23.Spawn(thr, func(t *c23.Thread) { t.Res = f(arg) })
 	return thrdSuccess
 }
@@ -48,7 +48,7 @@ func ThrdExit(res int32) { panic(c23.ThreadExit{Res: res}) }
 
 // ThrdJoin is thrd_join, which stores the thread's result at res unless
 // it is null.
-func ThrdJoin(id uint64, res c23.Ptr) int32 {
+func ThrdJoin(id uint64, res *c23.Void) int32 {
 	t := c23.Join(id)
 	if t == nil {
 		return thrdError
@@ -63,7 +63,7 @@ func ThrdDetach(id uint64) int32 { return thrdResult(c23.Detach(id)) }
 
 // ThrdSleep is thrd_sleep, which is not interrupted: 0, or -2 for a
 // duration that is not one.
-func ThrdSleep(dur, rem c23.Ptr) int32 {
+func ThrdSleep(dur, rem *c23.Void) int32 {
 	sec, nsec := int64(c23.Load64(dur)), c23.LoadLong(c23.Add(dur, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		return -2
@@ -79,7 +79,7 @@ const mtxRecursive = 1
 const mtxTimed = 2
 
 // MtxInit is mtx_init: any mutex may be timed.
-func MtxInit(m c23.Ptr, typ int32) int32 {
+func MtxInit(m *c23.Void, typ int32) int32 {
 	if typ&^(mtxRecursive|mtxTimed) != 0 {
 		return thrdError
 	}
@@ -92,34 +92,34 @@ func MtxInit(m c23.Ptr, typ int32) int32 {
 	return thrdSuccess
 }
 
-func MtxDestroy(m c23.Ptr) { c23_pthread.PthreadMutexDestroy(m) }
+func MtxDestroy(m *c23.Void) { c23_pthread.PthreadMutexDestroy(m) }
 
-func MtxLock(m c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadMutexLock(m)) }
+func MtxLock(m *c23.Void) int32 { return thrdResult(c23_pthread.PthreadMutexLock(m)) }
 
-func MtxTrylock(m c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadMutexTrylock(m)) }
+func MtxTrylock(m *c23.Void) int32 { return thrdResult(c23_pthread.PthreadMutexTrylock(m)) }
 
-func MtxTimedlock(m, ts c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadMutexTimedlock(m, ts)) }
+func MtxTimedlock(m, ts *c23.Void) int32 { return thrdResult(c23_pthread.PthreadMutexTimedlock(m, ts)) }
 
-func MtxUnlock(m c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadMutexUnlock(m)) }
+func MtxUnlock(m *c23.Void) int32 { return thrdResult(c23_pthread.PthreadMutexUnlock(m)) }
 
-func CndInit(c c23.Ptr) int32 { c23.Check(c, 4); return thrdSuccess }
+func CndInit(c *c23.Void) int32 { c23.Check(c, 4); return thrdSuccess }
 
-func CndDestroy(c c23.Ptr) { c23_pthread.PthreadCondDestroy(c) }
+func CndDestroy(c *c23.Void) { c23_pthread.PthreadCondDestroy(c) }
 
-func CndSignal(c c23.Ptr) int32 { c23_pthread.PthreadCondSignal(c); return thrdSuccess }
+func CndSignal(c *c23.Void) int32 { c23_pthread.PthreadCondSignal(c); return thrdSuccess }
 
-func CndBroadcast(c c23.Ptr) int32 { c23_pthread.PthreadCondBroadcast(c); return thrdSuccess }
+func CndBroadcast(c *c23.Void) int32 { c23_pthread.PthreadCondBroadcast(c); return thrdSuccess }
 
-func CndWait(c, m c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadCondWait(c, m)) }
+func CndWait(c, m *c23.Void) int32 { return thrdResult(c23_pthread.PthreadCondWait(c, m)) }
 
-func CndTimedwait(c, m, ts c23.Ptr) int32 {
+func CndTimedwait(c, m, ts *c23.Void) int32 {
 	return thrdResult(c23_pthread.PthreadCondTimedwait(c, m, ts))
 }
 
-func TssCreate(k, dtor c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadKeyCreate(k, dtor)) }
+func TssCreate(k, dtor *c23.Void) int32 { return thrdResult(c23_pthread.PthreadKeyCreate(k, dtor)) }
 
 func TssDelete(k uint32) { c23_pthread.PthreadKeyDelete(k) }
 
-func TssGet(k uint32) c23.Ptr { return c23_pthread.PthreadGetspecific(k) }
+func TssGet(k uint32) *c23.Void { return c23_pthread.PthreadGetspecific(k) }
 
-func TssSet(k uint32, v c23.Ptr) int32 { return thrdResult(c23_pthread.PthreadSetspecific(k, v)) }
+func TssSet(k uint32, v *c23.Void) int32 { return thrdResult(c23_pthread.PthreadSetspecific(k, v)) }

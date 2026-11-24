@@ -25,12 +25,12 @@ const itoa64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 
 var (
 	cryptMu  sync.Mutex
-	cryptBuf c23.Ptr // crypt's result
+	cryptBuf *c23.Void // crypt's result
 )
 
 // Crypt is crypt: the hash of key that salt says, in an array the next
 // call reuses; null (EINVAL) for a salt it cannot use.
-func Crypt(key, salt c23.Ptr) c23.Ptr {
+func Crypt(key, salt *c23.Void) *c23.Void {
 	cryptMu.Lock()
 	defer cryptMu.Unlock()
 	if c23.Addr(cryptBuf) == 0 {
@@ -41,13 +41,13 @@ func Crypt(key, salt c23.Ptr) c23.Ptr {
 
 // CryptR is crypt_r: crypt with its result in data, a struct crypt_data
 // (an int, then 256 bytes for the result).
-func CryptR(key, salt, data c23.Ptr) c23.Ptr { return put(c23.Add(data, 4), key, salt) }
+func CryptR(key, salt, data *c23.Void) *c23.Void { return put(c23.Add(data, 4), key, salt) }
 
-func put(buf, key, salt c23.Ptr) c23.Ptr {
+func put(buf, key, salt *c23.Void) *c23.Void {
 	s, ok := Hash(c23.GoString(key), c23.GoString(salt))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	copy(c23.BytesAt(buf, uintptr(len(s)+1)), s+"\x00")
 	return buf
@@ -304,7 +304,7 @@ var (
 
 // Setkey is setkey: encrypt's key is the 64 bytes at key, each a bit
 // (its low bit), of which DES uses all but each eighth (the parity).
-func Setkey(key c23.Ptr) {
+func Setkey(key *c23.Void) {
 	k := bitsOf(key)
 	keyMu.Lock()
 	defer keyMu.Unlock()
@@ -313,7 +313,7 @@ func Setkey(key c23.Ptr) {
 
 // Encrypt is encrypt: it encrypts (edflag 0) or decrypts the 64 bits,
 // one in each byte, at block with DES of setkey's key.
-func Encrypt(block c23.Ptr, edflag int32) {
+func Encrypt(block *c23.Void, edflag int32) {
 	b := bitsOf(block)
 	keyMu.Lock()
 	if keyDES == nil {
@@ -328,7 +328,7 @@ func Encrypt(block c23.Ptr, edflag int32) {
 	}
 }
 
-func bitsOf(p c23.Ptr) uint64 {
+func bitsOf(p *c23.Void) uint64 {
 	var v uint64
 	for _, c := range c23.BytesAt(p, 64) {
 		v = v<<1 | uint64(c&1)

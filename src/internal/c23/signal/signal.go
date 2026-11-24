@@ -57,7 +57,7 @@ func sysSignalOf(sig int32) os.Signal {
 // ignores the signal and SIG_DFL restores its default action (as raise
 // takes it, once the program set another handler). raise calls the
 // handlers of any signal.
-func Signal(sig int32, handler c23.Ptr) c23.Ptr {
+func Signal(sig int32, handler *c23.Void) *c23.Void {
 	if sig <= 0 || sig >= c23.Nsig || sig == c23.SIGKILL || sig == c23.SIGSTOP {
 		c23.SetErrno(c23.EINVAL)
 		return c23.FromInt(^uintptr(0))
@@ -70,7 +70,7 @@ func Signal(sig int32, handler c23.Ptr) c23.Ptr {
 
 // sigWire makes os/signal deliver sig to handler, if other processes
 // send it. sigMu is held.
-func sigWire(sig int32, handler c23.Ptr) {
+func sigWire(sig int32, handler *c23.Void) {
 	s := osSignal(sig)
 	if s == nil {
 		return

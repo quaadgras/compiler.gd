@@ -50,9 +50,9 @@ type Func struct {
 }
 
 // NewFunc returns the C pointer to the function f.
-func NewFunc(f any) Ptr {
+func NewFunc(f any) *Void {
 	p := New[Func]()
-	(*Func)(p).f = f
+	(*Func)(unsafe.Pointer(p)).f = f
 	return p
 }
 
@@ -60,17 +60,17 @@ var funcInfo = TinfoOf[Func]()
 
 // FuncOf returns the Go function of type F that p points to, which a
 // call through a C function pointer calls.
-func FuncOf[F any](p Ptr) F {
+func FuncOf[F any](p *Void) F {
 	if p == nil {
 		RaiseFault("call through a pointer that is not to a function", Addr(p))
 	}
-	f, ok := (*Func)(p).f.(F)
+	f, ok := (*Func)(unsafe.Pointer(p)).f.(F)
 	if !ok {
-		if g, ok := adapt[F]((*Func)(p).f); ok {
+		if g, ok := adapt[F]((*Func)(unsafe.Pointer(p)).f); ok {
 			return g
 		}
 		var z F
-		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(p).f, z), Addr(p))
+		RaiseFault(fmt.Sprintf("call of a %T through a pointer to a function of type %T", (*Func)(unsafe.Pointer(p)).f, z), Addr(p))
 	}
 	return f
 }
@@ -151,35 +151,35 @@ func convertible(a, b reflect.Type) bool {
 
 // String allocates a string literal's array: s holds its elements'
 // bytes, the null element included.
-func String[T any](s string) Ptr {
+func String[T any](s string) *Void {
 	p := NewArray[T](uintptr(len(s)))
-	copy(unsafe.Slice((*byte)(p), len(s)), s)
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(s)), s)
 	return p
 }
 
 // StringOf is String for a literal whose array, A ([N]T), cmd/cc knows:
 // the same object, of a type the compiler makes rather than reflect.
-func StringOf[T, A any](s string) Ptr {
+func StringOf[T, A any](s string) *Void {
 	p := LocalT(new(Obj[A]), TinfoOf[T]())
-	copy(unsafe.Slice((*byte)(p), len(s)), s)
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(p)), len(s)), s)
 	return p
 }
 
 // A ByValue is a struct or union passed by value in variable arguments:
-// the pointer to a copy of it. (A pointer that is passed is a Ptr.)
+// the pointer to a copy of it. (A pointer that is passed is a *Void.)
 type ByValue struct {
-	P Ptr
+	P *Void
 }
 
 // Copy returns a copy of the n bytes at p.
-func Copy(p Ptr, n uint64) Ptr {
+func Copy(p *Void, n uint64) *Void {
 	q := Malloc(n)
 	Memmove(q, p, uintptr(n))
 	return q
 }
 
 // Args returns main's argv.
-func Args() Ptr {
+func Args() *Void {
 	argv := NewArray[unsafe.Pointer](uintptr(len(os.Args)+1) * WordSize)
 	for i, a := range os.Args {
 		StorePtr(Add(argv, i*int(WordSize)), CString(a))
@@ -192,9 +192,9 @@ func Trap() { panic(&Fault{"trap", 0}) }
 
 // AssertC is C's assert: if ok is false, it reports the assertion's text,
 // file and line, and aborts.
-func AssertC(ok bool, text, file Ptr, line int32) {
+func AssertC(ok bool, text, file *Void, line int32) {
 	if !ok {
-		Fflush(Ptr(nil))
+		Fflush((*Void)(nil))
 		fmt.Fprintf(os.Stderr, "%s:%d: assertion failed: %s\n", GoString(file), line, GoString(text))
 		Abort()
 	}
@@ -216,24 +216,24 @@ type VaList struct {
 var vaInfo = TinfoOf[VaList]()
 
 // VaStart is va_start: a va_list of a function's variable arguments.
-func VaStart(va []any) Ptr {
+func VaStart(va []any) *Void {
 	p := New[VaList]()
-	(*VaList)(p).args = va
+	(*VaList)(unsafe.Pointer(p)).args = va
 	return p
 }
 
-func VaOf(ap Ptr) *VaList {
+func VaOf(ap *Void) *VaList {
 	if ap == nil {
 		RaiseFault("va_arg of a va_list not started", Addr(ap))
 	}
-	return (*VaList)(ap)
+	return (*VaList)(unsafe.Pointer(ap))
 }
 
 // VaCopy is va_copy.
-func VaCopy(ap Ptr) Ptr {
+func VaCopy(ap *Void) *Void {
 	v := VaOf(ap)
 	p := New[VaList]()
-	*(*VaList)(p) = *v
+	*(*VaList)(unsafe.Pointer(p)) = *v
 	return p
 }
 
@@ -248,19 +248,19 @@ func (v *VaList) Next() any {
 
 // VaArg is va_arg(ap, T) of a scalar T. An argument of another type of
 // the same size and class is converted, as C allows for signedness.
-func VaArg[T any](ap Ptr) T {
+func VaArg[T any](ap *Void) T {
 	a := VaOf(ap).Next()
 	if v, ok := a.(T); ok {
 		return v
 	}
 	var r T
-	if _, ok := any(r).(Ptr); ok {
+	if _, ok := any(r).(*Void); ok {
 		// An integer passed for a pointer (0 for a null pointer).
 		if n, ok := intArgValue(a); ok {
 			return any(FromInt(uintptr(n))).(T)
 		}
 	}
-	if p, ok := a.(Ptr); ok {
+	if p, ok := a.(*Void); ok {
 		// An intcap (or a pointer) passed for an integer: its address.
 		a = uint64(Addr(p))
 	}
@@ -285,13 +285,13 @@ func VaArg[T any](ap Ptr) T {
 	return r
 }
 
-// VaArgPtr is va_arg(ap, T) of a struct T: the c23.Ptr to its copy.
-func VaArgPtr(ap Ptr) Ptr {
+// VaArgPtr is va_arg(ap, T) of a struct T: the *c23.Void to its copy.
+func VaArgPtr(ap *Void) *Void {
 	a := VaOf(ap).Next()
 	if v, ok := a.(ByValue); ok {
 		return v.P
 	}
-	p, ok := a.(Ptr)
+	p, ok := a.(*Void)
 	if !ok {
 		RaiseFault(fmt.Sprintf("va_arg of a %T as a struct", a), 0)
 	}
@@ -301,10 +301,10 @@ func VaArgPtr(ap Ptr) Ptr {
 // ReallocOf is realloc whose result is a T*: n bytes as an array of T,
 // with what p's object holds. p is NULL or what malloc returned
 // (checkRealloc).
-func ReallocOf[T any](p Ptr, n uintptr) Ptr {
+func ReallocOf[T any](p *Void, n uintptr) *Void {
 	q := NewArray[T](n)
 	if p != nil {
-		Memmove(q, p, min(n, sizeOf(p)))
+		Memmove(q, p, min(n, sizeOf(unsafe.Pointer(p))))
 	}
 	return q
 }
@@ -326,16 +326,16 @@ func intArgValue(a any) (int64, bool) {
 // dlfcn.h: C compiled by cmd/cc cannot load native code, so dlopen
 // fails, as for a library not found.
 
-func Dlopen(path Ptr, flags int32) Ptr { return Ptr(nil) }
-func Dlsym(h, name Ptr) Ptr            { return Ptr(nil) }
-func Dlclose(h Ptr) int32              { return 0 }
+func Dlopen(path *Void, flags int32) *Void { return (*Void)(nil) }
+func Dlsym(h, name *Void) *Void            { return (*Void)(nil) }
+func Dlclose(h *Void) int32                { return 0 }
 
 var (
 	dlMsgOnce sync.Once
-	dlMsg     Ptr
+	dlMsg     *Void
 )
 
-func Dlerror() Ptr {
+func Dlerror() *Void {
 	dlMsgOnce.Do(func() { dlMsg = CString("dynamic loading is not supported by cmd/cc") })
 	return dlMsg
 }

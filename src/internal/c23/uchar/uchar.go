@@ -9,7 +9,7 @@ import (
 	"unicode/utf8"
 )
 
-func Mbrtoc32(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
+func Mbrtoc32(pc *c23.Void, s *c23.Void, n uint64, ps *c23.Void) uint64 {
 	r, k := c23.Mbrto(s, n, ps, &c23.Mbrtoc32State)
 	if k < c23.MbStored && c23.Addr(pc) != 0 {
 		c23.Store32(pc, uint32(r))
@@ -17,9 +17,9 @@ func Mbrtoc32(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 	return k
 }
 
-var mbrtoc16State c23.Ptr
+var mbrtoc16State *c23.Void
 
-func Mbrtoc16(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
+func Mbrtoc16(pc *c23.Void, s *c23.Void, n uint64, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &mbrtoc16State)
 	if st.Count() < 0 {
 		if c23.Addr(pc) != 0 {
@@ -43,9 +43,9 @@ func Mbrtoc16(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 	return k
 }
 
-var mbrtoc8State c23.Ptr
+var mbrtoc8State *c23.Void
 
-func Mbrtoc8(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
+func Mbrtoc8(pc *c23.Void, s *c23.Void, n uint64, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &mbrtoc8State)
 	if c := st.Count(); c < 0 {
 		v := st.Value()
@@ -77,7 +77,7 @@ func Mbrtoc8(pc c23.Ptr, s c23.Ptr, n uint64, ps c23.Ptr) uint64 {
 	return k
 }
 
-func C32rtomb(s c23.Ptr, c uint32, ps c23.Ptr) uint64 {
+func C32rtomb(s *c23.Void, c uint32, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &c23.C32rtombState)
 	st.Reset()
 	if c23.Addr(s) == 0 {
@@ -86,9 +86,9 @@ func C32rtomb(s c23.Ptr, c uint32, ps c23.Ptr) uint64 {
 	return c23.PutRune(s, c)
 }
 
-var c16rtombState c23.Ptr
+var c16rtombState *c23.Void
 
-func C16rtomb(s c23.Ptr, c uint16, ps c23.Ptr) uint64 {
+func C16rtomb(s *c23.Void, c uint16, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &c16rtombState)
 	if c23.Addr(s) == 0 {
 		st.Reset()
@@ -110,9 +110,9 @@ func C16rtomb(s c23.Ptr, c uint16, ps c23.Ptr) uint64 {
 	return c23.PutRune(s, uint32(c))
 }
 
-var c8rtombState c23.Ptr
+var c8rtombState *c23.Void
 
-func C8rtomb(s c23.Ptr, c uint8, ps c23.Ptr) uint64 {
+func C8rtomb(s *c23.Void, c uint8, ps *c23.Void) uint64 {
 	st := c23.StateOf(ps, &c8rtombState)
 	if c23.Addr(s) == 0 {
 		st.Reset()

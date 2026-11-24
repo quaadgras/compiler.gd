@@ -24,7 +24,7 @@ type passwd struct {
 
 var pwMu sync.Mutex
 
-var pwBuf c23.Ptr
+var pwBuf *c23.Void
 
 // pwEntry is a user: the fields of a line of /etc/passwd.
 type pwEntry [7]string
@@ -65,9 +65,9 @@ func lookupUser(name string, uid uint32) (pwEntry, bool) {
 
 // pwResult returns the static struct passwd of e, or null (errno
 // unchanged: no such user).
-func pwResult(e pwEntry, ok bool) c23.Ptr {
+func pwResult(e pwEntry, ok bool) *c23.Void {
 	if !ok {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	pwMu.Lock()
 	defer pwMu.Unlock()
@@ -79,13 +79,13 @@ func pwResult(e pwEntry, ok bool) c23.Ptr {
 }
 
 // Getpwuid is getpwuid.
-func Getpwuid(uid uint32) c23.Ptr { return pwResult(lookupUser("", uid)) }
+func Getpwuid(uid uint32) *c23.Void { return pwResult(lookupUser("", uid)) }
 
 // Getpwnam is getpwnam.
-func Getpwnam(name c23.Ptr) c23.Ptr {
+func Getpwnam(name *c23.Void) *c23.Void {
 	n := c23.GoString(name)
 	if n == "" {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return pwResult(lookupUser(n, 0))
 }

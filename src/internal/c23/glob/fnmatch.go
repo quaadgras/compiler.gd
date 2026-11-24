@@ -76,12 +76,12 @@ func unescape(p string, noescape bool) string {
 // unless GLOB_NOSORT. A wildcard matches a leading . of a name only with
 // GLOB_PERIOD; errfunc, if not null, is called for a directory that
 // cannot be read, and glob stops if it returns nonzero or with GLOB_ERR.
-func Glob(pattern c23.Ptr, flags int32, errfunc, pglob c23.Ptr) int32 {
+func Glob(pattern *c23.Void, flags int32, errfunc, pglob *c23.Void) int32 {
 	pat := c23.GoString(pattern)
 	noescape := flags&GLOB_NOESCAPE != 0
-	var errf func(c23.Ptr, int32) int32
+	var errf func(*c23.Void, int32) int32
 	if c23.Addr(errfunc) != 0 {
-		errf = c23.FuncOf[func(c23.Ptr, int32) int32](errfunc)
+		errf = c23.FuncOf[func(*c23.Void, int32) int32](errfunc)
 	}
 	fnflags := int32(c23.FNM_PERIOD)
 	if flags&GLOB_PERIOD != 0 {
@@ -189,7 +189,7 @@ func Glob(pattern c23.Ptr, flags int32, errfunc, pglob c23.Ptr) int32 {
 	if flags&GLOB_DOOFFS != 0 {
 		offs = int(c23.LoadLong(c23.Add(pglob, offOffs)))
 	}
-	var old []c23.Ptr
+	var old []*c23.Void
 	if flags&GLOB_APPEND != 0 {
 		n := int(c23.LoadLong(pglob))
 		if pv := c23.LoadPtr(c23.Add(pglob, offPathv)); c23.Addr(pv) != 0 {
@@ -216,8 +216,8 @@ func Glob(pattern c23.Ptr, flags int32, errfunc, pglob c23.Ptr) int32 {
 }
 
 // Globfree is globfree: the collector frees what glob allocated.
-func Globfree(pglob c23.Ptr) {
+func Globfree(pglob *c23.Void) {
 	var g globT
 	c23.StoreLong(pglob, 0)
-	c23.StorePtr(c23.Add(pglob, int(unsafe.Offsetof(g.pathv))), c23.Ptr(nil))
+	c23.StorePtr(c23.Add(pglob, int(unsafe.Offsetof(g.pathv))), (*c23.Void)(nil))
 }

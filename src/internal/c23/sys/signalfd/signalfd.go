@@ -103,7 +103,7 @@ func (s *signalfd) Mode() uint32 { return 0o600 }
 
 // Signalfd is signalfd: a new descriptor if fd is -1, or a new mask for
 // signalfd fd. SIGKILL and SIGSTOP in mask are ignored.
-func Signalfd(fd int32, mask c23.Ptr, flags int32) int32 {
+func Signalfd(fd int32, mask *c23.Void, flags int32) int32 {
 	if flags&^(SFD_NONBLOCK|SFD_CLOEXEC) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1

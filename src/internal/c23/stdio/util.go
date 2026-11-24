@@ -12,7 +12,7 @@ import (
 // which it grows with realloc (*n is its size), and ends it with a null.
 // It returns the number of bytes read, or -1 at the end of the file or
 // for an error.
-func Getdelim(lineptr, n c23.Ptr, delim int32, stream c23.Ptr) int64 {
+func Getdelim(lineptr, n *c23.Void, delim int32, stream *c23.Void) int64 {
 	f := c23.FileOf(stream)
 	if c23.Addr(lineptr) == 0 || c23.Addr(n) == 0 {
 		c23.SetErrno(c23.EINVAL)
@@ -50,25 +50,27 @@ func Getdelim(lineptr, n c23.Ptr, delim int32, stream c23.Ptr) int64 {
 }
 
 // Getline is getline: getdelim of '\n'.
-func Getline(lineptr, n, stream c23.Ptr) int64 { return Getdelim(lineptr, n, '\n', stream) }
+func Getline(lineptr, n, stream *c23.Void) int64 { return Getdelim(lineptr, n, '\n', stream) }
 
-func Asprintf(strp, format c23.Ptr, va ...any) int32 { return Vasprintf(strp, format, c23.VaStart(va)) }
+func Asprintf(strp, format *c23.Void, va ...any) int32 {
+	return Vasprintf(strp, format, c23.VaStart(va))
+}
 
 // Vasprintf is vasprintf: it formats into memory it allocates, whose
 // address it stores at *strp.
-func Vasprintf(strp, format, ap c23.Ptr) int32 {
+func Vasprintf(strp, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	c23.StorePtr(strp, c23.CString(string(b)))
 	return int32(len(b))
 }
 
-func Dprintf(fd int32, format c23.Ptr, va ...any) int32 {
+func Dprintf(fd int32, format *c23.Void, va ...any) int32 {
 	return Vdprintf(fd, format, c23.VaStart(va))
 }
 
 // Vdprintf is vdprintf: it formats to the file descriptor fd, with one
 // write.
-func Vdprintf(fd int32, format, ap c23.Ptr) int32 {
+func Vdprintf(fd int32, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	f := c23.FdOS(fd)
 	if f == nil {

@@ -16,11 +16,11 @@ import (
 // for the value its type says it points to (or the whole of C's object, if
 // it points into one). An unsafe.Pointer has a capability only into C's
 // objects; an integer has none.
-func Arg[P any](p P) Ptr {
+func Arg[P any](p P) *Void {
 	t := reflect.TypeFor[P]()
 	switch t.Kind() {
 	case reflect.Pointer, reflect.UnsafePointer:
-		return *(*unsafe.Pointer)(unsafe.Pointer(&p))
+		return (*Void)(*(*unsafe.Pointer)(unsafe.Pointer(&p)))
 	case reflect.Uintptr:
 		return FromInt(*(*uintptr)(unsafe.Pointer(&p)))
 	}
@@ -28,7 +28,7 @@ func Arg[P any](p P) Ptr {
 }
 
 // whole array.
-func FromSliceAt[T any](s []T, i int) Ptr {
+func FromSliceAt[T any](s []T, i int) *Void {
 	if i < 0 || i >= len(s) {
 		_ = s[i] // Go's own bounds check
 	}

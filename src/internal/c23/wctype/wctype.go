@@ -80,7 +80,7 @@ var wctypes = []struct {
 	{"punct", iswpunct}, {"space", iswspace}, {"upper", iswupper}, {"xdigit", iswxdigit},
 }
 
-func Wctype(name c23.Ptr) uint32 {
+func Wctype(name *c23.Void) uint32 {
 	n := c23.GoString(name)
 	for i, t := range wctypes {
 		if i > 0 && t.name == n {
@@ -108,7 +108,7 @@ func Towlower(c uint32) uint32 { return wcase(c, unicode.ToLower) }
 
 func Towupper(c uint32) uint32 { return wcase(c, unicode.ToUpper) }
 
-func Wctrans(name c23.Ptr) uint32 {
+func Wctrans(name *c23.Void) uint32 {
 	switch c23.GoString(name) {
 	case "tolower":
 		return 1

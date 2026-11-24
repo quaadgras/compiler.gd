@@ -112,7 +112,7 @@ type sembuf struct {
 // unless an operation that cannot apply has IPC_NOWAIT (EAGAIN), or
 // until the relative timeout at ts, if it is not null (EAGAIN). With
 // SEM_UNDO, the process's exit undoes the operation.
-func Semtimedop(id int32, sops c23.Ptr, nsops uint64, ts c23.Ptr) int32 {
+func Semtimedop(id int32, sops *c23.Void, nsops uint64, ts *c23.Void) int32 {
 	if id < 0 || nsops == 0 {
 		return fail(c23.EINVAL)
 	}
@@ -219,8 +219,8 @@ func Semtimedop(id int32, sops c23.Ptr, nsops uint64, ts c23.Ptr) int32 {
 }
 
 // Semop is semop: semtimedop without a timeout.
-func Semop(id int32, sops c23.Ptr, nsops uint64) int32 {
-	return Semtimedop(id, sops, nsops, c23.Ptr(nil))
+func Semop(id int32, sops *c23.Void, nsops uint64) int32 {
+	return Semtimedop(id, sops, nsops, (*c23.Void)(nil))
 }
 
 // undoAll applies the SEM_UNDO adjustments, as the process's exit does
@@ -242,18 +242,18 @@ func undoAll() {
 // semArg is semctl's fourth argument, a union semun { int val; struct
 // semid_ds *buf; unsigned short *array; } passed by value (which arrives
 // as a copy of it), or its member itself: the int, or the pointer.
-func semArg(va []any, wantPtr bool) (int32, c23.Ptr) {
+func semArg(va []any, wantPtr bool) (int32, *c23.Void) {
 	if len(va) == 0 {
-		return 0, c23.Ptr(nil)
+		return 0, (*c23.Void)(nil)
 	}
 	if u, ok := va[0].(c23.ByValue); ok {
 		// The union's copy: it holds the int, or the pointer.
 		if !wantPtr {
-			return int32(c23.Load32(u.P)), c23.Ptr(nil)
+			return int32(c23.Load32(u.P)), (*c23.Void)(nil)
 		}
 		return 0, c23.LoadPtr(u.P)
 	}
-	if p, ok := va[0].(c23.Ptr); ok {
+	if p, ok := va[0].(*c23.Void); ok {
 		return int32(c23.Addr(p)), p
 	}
 	v := c23.ToInt64(va[0])

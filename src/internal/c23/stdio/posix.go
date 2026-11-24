@@ -39,7 +39,7 @@ func fdSet(fd int32, f *os.File, flags int32) {
 }
 
 // Fileno is fileno.
-func Fileno(p c23.Ptr) int32 {
+func Fileno(p *c23.Void) int32 {
 	f := c23.FileOf(p)
 	if c23.FdFile(f.Fd) == nil {
 		c23.SetErrno(c23.EBADF)
@@ -49,20 +49,20 @@ func Fileno(p c23.Ptr) int32 {
 }
 
 // Fdopen is fdopen: a stream of fd, which fclose closes.
-func Fdopen(fd int32, mode c23.Ptr) c23.Ptr {
+func Fdopen(fd int32, mode *c23.Void) *c23.Void {
 	_, rd, wr, ok := openMode(c23.GoString(mode))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	of := c23.FdFile(fd)
 	if of == nil {
 		c23.SetErrno(c23.EBADF)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	if acc := of.Flags & c23.O_ACCMODE; rd && acc == c23.O_WRONLY || wr && acc == c23.O_RDONLY {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.NewFile(fd, rd, wr)
 }

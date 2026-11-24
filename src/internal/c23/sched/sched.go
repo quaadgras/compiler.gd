@@ -28,7 +28,7 @@ func SchedGetcpu() int32 { return 0 }
 // SchedGetaffinity is sched_getaffinity: the processors the program may
 // use, runtime.NumCPU of them, as the first bits of the cpu_set_t of n
 // bytes at mask.
-func SchedGetaffinity(pid int32, n uint64, mask c23.Ptr) int32 {
+func SchedGetaffinity(pid int32, n uint64, mask *c23.Void) int32 {
 	cpus := runtime.NumCPU()
 	if n < uint64(cpus+7)/8 {
 		c23.SetErrno(c23.EINVAL)
@@ -44,7 +44,7 @@ func SchedGetaffinity(pid int32, n uint64, mask c23.Ptr) int32 {
 
 // SchedSetaffinity is sched_setaffinity, which is accepted and ignored
 // unless the set is empty (EINVAL).
-func SchedSetaffinity(pid int32, n uint64, mask c23.Ptr) int32 {
+func SchedSetaffinity(pid int32, n uint64, mask *c23.Void) int32 {
 	for _, c := range c23.BytesAt(mask, uintptr(n)) {
 		if c != 0 {
 			return 0
@@ -93,7 +93,7 @@ func SchedGetscheduler(pid int32) int32 {
 
 // SchedGetparam is sched_getparam: priority 0, that of every policy the
 // program may have.
-func SchedGetparam(pid int32, param c23.Ptr) int32 {
+func SchedGetparam(pid int32, param *c23.Void) int32 {
 	if !selfPid(pid) {
 		return -1
 	}
@@ -140,7 +140,7 @@ func checkParam(p, prio int32) bool {
 // SchedSetscheduler is sched_setscheduler: SCHED_OTHER, SCHED_BATCH and
 // SCHED_IDLE (with priority 0) are kept, real-time policies are EPERM.
 // It returns 0, as Linux's.
-func SchedSetscheduler(pid, p int32, param c23.Ptr) int32 {
+func SchedSetscheduler(pid, p int32, param *c23.Void) int32 {
 	if !selfPid(pid) || !checkParam(p, int32(c23.Load32(param))) {
 		return -1
 	}
@@ -149,7 +149,7 @@ func SchedSetscheduler(pid, p int32, param c23.Ptr) int32 {
 }
 
 // SchedSetparam is sched_setparam: a priority of the program's policy.
-func SchedSetparam(pid int32, param c23.Ptr) int32 {
+func SchedSetparam(pid int32, param *c23.Void) int32 {
 	if !selfPid(pid) || !checkParam(policy.Load(), int32(c23.Load32(param))) {
 		return -1
 	}
@@ -158,7 +158,7 @@ func SchedSetparam(pid int32, param c23.Ptr) int32 {
 
 // SchedRrGetInterval is sched_rr_get_interval: 100ms, SCHED_RR's time
 // slice on Linux, whatever the policy.
-func SchedRrGetInterval(pid int32, ts c23.Ptr) int32 {
+func SchedRrGetInterval(pid int32, ts *c23.Void) int32 {
 	if !selfPid(pid) {
 		return -1
 	}

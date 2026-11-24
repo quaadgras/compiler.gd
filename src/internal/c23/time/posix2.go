@@ -17,7 +17,7 @@ const CLOCK_PROCESS_CPUTIME_ID = 2
 
 const CLOCK_THREAD_CPUTIME_ID = 3
 
-func storeTimespec(ts c23.Ptr, sec, nsec int64) {
+func storeTimespec(ts *c23.Void, sec, nsec int64) {
 	c23.Store64(ts, uint64(sec))
 	c23.StoreLong(c23.Add(ts, 8), nsec)
 }
@@ -26,7 +26,7 @@ func storeTimespec(ts c23.Ptr, sec, nsec int64) {
 // the program started (CLOCK_PROCESS_CPUTIME_ID) or the thread did
 // (CLOCK_THREAD_CPUTIME_ID, and pthread_getcpuclockid's), as Go cannot
 // know their processor time.
-func ClockGettime(id int32, ts c23.Ptr) int32 {
+func ClockGettime(id int32, ts *c23.Void) int32 {
 	d, ok := c23.ClockNow(id)
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
@@ -37,7 +37,7 @@ func ClockGettime(id int32, ts c23.Ptr) int32 {
 }
 
 // ClockGetres is clock_getres: a nanosecond, for each clock.
-func ClockGetres(id int32, ts c23.Ptr) int32 {
+func ClockGetres(id int32, ts *c23.Void) int32 {
 	if _, ok := c23.ClockOrigin(id); !ok {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -50,7 +50,7 @@ func ClockGetres(id int32, ts c23.Ptr) int32 {
 
 // Nanosleep is nanosleep, a cancellation point, which is not interrupted
 // by signals, so it does not store what is left at rem.
-func Nanosleep(req, rem c23.Ptr) int32 {
+func Nanosleep(req, rem *c23.Void) int32 {
 	sec, nsec := int64(c23.Load64(req)), c23.LoadLong(c23.Add(req, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		c23.SetErrno(c23.EINVAL)

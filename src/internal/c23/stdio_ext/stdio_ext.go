@@ -10,8 +10,6 @@ import (
 	c23 "internal/c23"
 )
 
-type Ptr = c23.Ptr
-
 const FSETLOCKING_INTERNAL = 1
 
 func b2i(b bool) int32 {
@@ -23,7 +21,7 @@ func b2i(b bool) int32 {
 
 // Fbufsize is __fbufsize: the size of the stream's buffer (1 if it is
 // unbuffered, as glibc's).
-func Fbufsize(p Ptr) uint64 {
+func Fbufsize(p *c23.Void) uint64 {
 	f := c23.FileOf(p)
 	if f.Unbuf {
 		return 1
@@ -36,47 +34,47 @@ func Fbufsize(p Ptr) uint64 {
 
 // Fpending is __fpending: the bytes written to the buffer and not yet to
 // the file.
-func Fpending(p Ptr) uint64 { return uint64(c23.FileOf(p).W.Buffered()) }
+func Fpending(p *c23.Void) uint64 { return uint64(c23.FileOf(p).W.Buffered()) }
 
 // Flbf is __flbf: streams are fully buffered or unbuffered, never line
 // buffered.
-func Flbf(p Ptr) int32 {
+func Flbf(p *c23.Void) int32 {
 	c23.FileOf(p)
 	return 0
 }
 
-func Freadable(p Ptr) int32 { return b2i(c23.FileOf(p).Rd) }
+func Freadable(p *c23.Void) int32 { return b2i(c23.FileOf(p).Rd) }
 
-func Fwritable(p Ptr) int32 { return b2i(c23.FileOf(p).Wr) }
+func Fwritable(p *c23.Void) int32 { return b2i(c23.FileOf(p).Wr) }
 
 // Freading is __freading: whether the stream is read-only or its last
 // operation was a read.
-func Freading(p Ptr) int32 {
+func Freading(p *c23.Void) int32 {
 	f := c23.FileOf(p)
 	return b2i(f.Rd && !f.Wr || f.R != nil || len(f.Unget) > 0)
 }
 
 // Fwriting is __fwriting: whether the stream is write-only or its last
 // operation was a write (its buffer holds what was written).
-func Fwriting(p Ptr) int32 {
+func Fwriting(p *c23.Void) int32 {
 	f := c23.FileOf(p)
 	return b2i(f.Wr && !f.Rd || f.R == nil && f.W.Buffered() > 0)
 }
 
 // Fsetlocking is __fsetlocking: the library locks for each call, which a
 // program cannot change.
-func Fsetlocking(p Ptr, typ int32) int32 {
+func Fsetlocking(p *c23.Void, typ int32) int32 {
 	c23.FileOf(p)
 	return FSETLOCKING_INTERNAL
 }
 
 // Flushlbf is _flushlbf: it flushes every stream, which includes the
 // line-buffered ones.
-func Flushlbf() { c23.Fflush(Ptr(nil)) }
+func Flushlbf() { c23.Fflush((*c23.Void)(nil)) }
 
 // Fpurge is __fpurge: it drops what the buffer holds, written or read
 // ahead, and what ungetc pushed back.
-func Fpurge(p Ptr) {
+func Fpurge(p *c23.Void) {
 	f := c23.FileOf(p)
 	f.W.Reset(c23.FdIO{F: f})
 	f.R, f.Unget = nil, nil

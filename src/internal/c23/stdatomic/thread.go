@@ -12,10 +12,10 @@ import (
 // the macros'). An atomic_flag is an _Atomic _Bool.
 func AtomicThreadFence(order uint32) {}
 
-func AtomicFlagTestAndSet(p c23.Ptr) uint8 { return c23.AtomicFetch[uint8](p, '=', 1) }
+func AtomicFlagTestAndSet(p *c23.Void) uint8 { return c23.AtomicFetch[uint8](p, '=', 1) }
 
-func AtomicFlagTestAndSetExplicit(p c23.Ptr, order uint32) uint8 { return AtomicFlagTestAndSet(p) }
+func AtomicFlagTestAndSetExplicit(p *c23.Void, order uint32) uint8 { return AtomicFlagTestAndSet(p) }
 
-func AtomicFlagClear(p c23.Ptr) { c23.AtomicStore[uint8](p, 0) }
+func AtomicFlagClear(p *c23.Void) { c23.AtomicStore[uint8](p, 0) }
 
-func AtomicFlagClearExplicit(p c23.Ptr, order uint32) { AtomicFlagClear(p) }
+func AtomicFlagClearExplicit(p *c23.Void, order uint32) { AtomicFlagClear(p) }

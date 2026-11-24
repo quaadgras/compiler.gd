@@ -195,7 +195,7 @@ var errnoText = map[int32]string{
 
 var (
 	strerrorMu  sync.Mutex
-	strerrorMsg = map[int32]Ptr{}
+	strerrorMsg = map[int32]*Void{}
 )
 
 func ErrnoString(e int32) string {
@@ -206,7 +206,7 @@ func ErrnoString(e int32) string {
 }
 
 // Strerror returns e's message, in an array C must not modify.
-func Strerror(e int32) Ptr {
+func Strerror(e int32) *Void {
 	strerrorMu.Lock()
 	defer strerrorMu.Unlock()
 	p, ok := strerrorMsg[e]

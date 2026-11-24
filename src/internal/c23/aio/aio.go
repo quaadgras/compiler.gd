@@ -86,7 +86,7 @@ var (
 )
 
 // submit starts the operation of cb, of kind; 0 or -1 with errno.
-func submit(cb c23.Ptr, kind int32, syncOp int32, l *list) int32 {
+func submit(cb *c23.Void, kind int32, syncOp int32, l *list) int32 {
 	o := &op{
 		fd:   int32(c23.Load32(cb)),
 		kind: kind,
@@ -219,14 +219,14 @@ func (o *op) do() (int64, int32) {
 // AioRead is aio_read: it starts reading aio_nbytes bytes at aio_offset
 // of aio_fildes into aio_buf. As glibc's, what fails once started (a
 // descriptor that is not open, say) is aio_error's.
-func AioRead(cb c23.Ptr) int32 { return submit(cb, LIO_READ, 0, nil) }
+func AioRead(cb *c23.Void) int32 { return submit(cb, LIO_READ, 0, nil) }
 
 // AioWrite is aio_write.
-func AioWrite(cb c23.Ptr) int32 { return submit(cb, LIO_WRITE, 0, nil) }
+func AioWrite(cb *c23.Void) int32 { return submit(cb, LIO_WRITE, 0, nil) }
 
 // AioFsync is aio_fsync: once the descriptor's earlier operations end,
 // its file is synchronized (op O_SYNC or O_DSYNC: both are fsync's).
-func AioFsync(syncOp int32, cb c23.Ptr) int32 {
+func AioFsync(syncOp int32, cb *c23.Void) int32 {
 	if syncOp != c23.O_SYNC && syncOp != c23.O_DSYNC {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -241,7 +241,7 @@ func AioFsync(syncOp int32, cb c23.Ptr) int32 {
 // AioError is aio_error: EINPROGRESS, or the operation's error number
 // (ECANCELED if it was canceled; 0 if it succeeded). An aiocb of no
 // operation is EINVAL.
-func AioError(cb c23.Ptr) int32 {
+func AioError(cb *c23.Void) int32 {
 	mu.Lock()
 	defer mu.Unlock()
 	o := ops[c23.Addr(cb)]
@@ -254,7 +254,7 @@ func AioError(cb c23.Ptr) int32 {
 
 // AioReturn is aio_return: the operation's result, once, after it ended
 // (EINVAL before, or for an aiocb of no operation).
-func AioReturn(cb c23.Ptr) int64 {
+func AioReturn(cb *c23.Void) int64 {
 	mu.Lock()
 	defer mu.Unlock()
 	o := ops[c23.Addr(cb)]
@@ -273,7 +273,7 @@ func AioReturn(cb c23.Ptr) int64 {
 // cb's, if it is not null) that have not started are canceled, and
 // notify as they would have ended. AIO_CANCELED if all were,
 // AIO_NOTCANCELED if one runs, AIO_ALLDONE if all had ended.
-func AioCancel(fd int32, cb c23.Ptr) int32 {
+func AioCancel(fd int32, cb *c23.Void) int32 {
 	if c23.FdFile(fd) == nil {
 		c23.SetErrno(c23.EBADF)
 		return -1
@@ -324,7 +324,7 @@ func AioCancel(fd int32, cb c23.Ptr) int32 {
 // AioSuspend is aio_suspend: it waits until one of the nent operations
 // of the aiocbs at list (null ones ignored) has ended, or the relative
 // timeout at ts, if it is not null, has passed (EAGAIN).
-func AioSuspend(lst c23.Ptr, nent int32, ts c23.Ptr) int32 {
+func AioSuspend(lst *c23.Void, nent int32, ts *c23.Void) int32 {
 	if nent < 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -367,7 +367,7 @@ func AioSuspend(lst c23.Ptr, nent int32, ts c23.Ptr) int32 {
 // ignored). With LIO_WAIT it waits for them all (EIO if one failed);
 // with LIO_NOWAIT the struct sigevent at sev (if not null) notifies when
 // they all have ended. Each operation also notifies as its aiocb says.
-func LioListio(mode int32, lst c23.Ptr, nent int32, sev c23.Ptr) int32 {
+func LioListio(mode int32, lst *c23.Void, nent int32, sev *c23.Void) int32 {
 	if mode != LIO_WAIT && mode != LIO_NOWAIT || nent < 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -376,7 +376,7 @@ func LioListio(mode int32, lst c23.Ptr, nent int32, sev c23.Ptr) int32 {
 	if mode == LIO_NOWAIT && c23.Addr(sev) != 0 {
 		l = &list{ev: c23.LoadSigEvent(sev), left: 1}
 	}
-	var started []c23.Ptr
+	var started []*c23.Void
 	failed := false
 	for i := range int(nent) {
 		cb := c23.LoadPtr(c23.Add(lst, i*w))

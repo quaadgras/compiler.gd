@@ -63,11 +63,11 @@ func sigValid(sig int32) bool {
 	return true
 }
 
-func Sigemptyset(set c23.Ptr) int32 { c23.StoreSigset(set, 0); return 0 }
+func Sigemptyset(set *c23.Void) int32 { c23.StoreSigset(set, 0); return 0 }
 
-func Sigfillset(set c23.Ptr) int32 { c23.StoreSigset(set, 1<<(c23.Nsig-1)-1); return 0 }
+func Sigfillset(set *c23.Void) int32 { c23.StoreSigset(set, 1<<(c23.Nsig-1)-1); return 0 }
 
-func Sigaddset(set c23.Ptr, sig int32) int32 {
+func Sigaddset(set *c23.Void, sig int32) int32 {
 	if !sigValid(sig) {
 		return -1
 	}
@@ -75,7 +75,7 @@ func Sigaddset(set c23.Ptr, sig int32) int32 {
 	return 0
 }
 
-func Sigdelset(set c23.Ptr, sig int32) int32 {
+func Sigdelset(set *c23.Void, sig int32) int32 {
 	if !sigValid(sig) {
 		return -1
 	}
@@ -85,7 +85,7 @@ func Sigdelset(set c23.Ptr, sig int32) int32 {
 
 // storeSigset32 sets or clears sig in the set at p, in the int of p that
 // holds it.
-func storeSigset32(p c23.Ptr, sig int32, on bool) {
+func storeSigset32(p *c23.Void, sig int32, on bool) {
 	w := c23.Add(p, int(sig-1)/32*4)
 	b := uint32(1) << ((sig - 1) % 32)
 	if on {
@@ -95,7 +95,7 @@ func storeSigset32(p c23.Ptr, sig int32, on bool) {
 	}
 }
 
-func Sigismember(set c23.Ptr, sig int32) int32 {
+func Sigismember(set *c23.Void, sig int32) int32 {
 	if !sigValid(sig) {
 		return -1
 	}
@@ -109,7 +109,7 @@ const saFlagsOff = saMaskOff + c23.SigsetLen
 // Sigaction is sigaction. An action for SIGINT, SIGTERM, SIGHUP, SIGQUIT,
 // SIGUSR1, SIGUSR2, SIGPIPE or SIGWINCH also takes those the program
 // receives from other processes (os/signal).
-func Sigaction(sig int32, act, oact c23.Ptr) int32 {
+func Sigaction(sig int32, act, oact *c23.Void) int32 {
 	if !sigValid(sig) {
 		return -1
 	}
@@ -126,7 +126,7 @@ func Sigaction(sig int32, act, oact c23.Ptr) int32 {
 		}
 		if h := c23.Addr(a.Handler); h != c23.SigDfl && h != c23.SigIgn {
 			if a.Flags&c23.SA_SIGINFO != 0 {
-				c23.FuncOf[func(int32, c23.Ptr, c23.Ptr)](a.Handler)
+				c23.FuncOf[func(int32, *c23.Void, *c23.Void)](a.Handler)
 			} else {
 				c23.FuncOf[func(int32)](a.Handler)
 			}
@@ -166,7 +166,7 @@ func sigSet(sig int32, a c23.SigAction, set bool) c23.SigAction {
 // PthreadSigmask is pthread_sigmask: it changes the calling thread's
 // mask, and runs the actions of the pending signals it unblocks before
 // it returns.
-func PthreadSigmask(how int32, set, oset c23.Ptr) int32 {
+func PthreadSigmask(how int32, set, oset *c23.Void) int32 {
 	t := c23.SigSelf()
 	c23.SigMu.Lock()
 	old := t.Mask
@@ -194,7 +194,7 @@ func PthreadSigmask(how int32, set, oset c23.Ptr) int32 {
 }
 
 // Sigprocmask is sigprocmask, which is pthread_sigmask.
-func Sigprocmask(how int32, set, oset c23.Ptr) int32 {
+func Sigprocmask(how int32, set, oset *c23.Void) int32 {
 	if e := PthreadSigmask(how, set, oset); e != 0 {
 		c23.SetErrno(e)
 		return -1
@@ -204,7 +204,7 @@ func Sigprocmask(how int32, set, oset c23.Ptr) int32 {
 
 // Sigpending is sigpending: the signals pending for the calling thread
 // or the process that it blocks.
-func Sigpending(set c23.Ptr) int32 {
+func Sigpending(set *c23.Void) int32 {
 	t := c23.SigSelf()
 	c23.SigMu.Lock()
 	m := (t.Pending | c23.SigPending) & t.Mask
@@ -216,7 +216,7 @@ func Sigpending(set c23.Ptr) int32 {
 // Sigsuspend is sigsuspend: it waits with the mask at mask until a
 // signal's action runs on the calling thread, then restores its mask.
 // It returns -1 with errno EINTR.
-func Sigsuspend(mask c23.Ptr) int32 {
+func Sigsuspend(mask *c23.Void) int32 {
 	c23.Suspend(c23.LoadSigset(mask) &^ c23.SigUnblockable)
 	c23.SetErrno(c23.EINTR)
 	return -1
@@ -225,7 +225,7 @@ func Sigsuspend(mask c23.Ptr) int32 {
 // Sigwait is sigwait, a cancellation point: it waits for a signal of set
 // to be pending (the caller blocks them), takes it and stores its number
 // at sig.
-func Sigwait(set, sig c23.Ptr) int32 {
+func Sigwait(set, sig *c23.Void) int32 {
 	w := c23.LoadSigset(set) &^ c23.SigUnblockable
 	if w == 0 {
 		return c23.EINVAL
@@ -369,7 +369,7 @@ var sysSignalsMu sync.Mutex
 var sysSignals = map[int32]os.Signal{}
 
 // Psignal is psignal: "s: description" on standard error (fd 2).
-func Psignal(sig int32, s c23.Ptr) {
+func Psignal(sig int32, s *c23.Void) {
 	msg := c23.Strsignal(sig) + "\n"
 	if c23.Addr(s) != 0 && c23.Load8(s) != 0 {
 		msg = c23.GoString(s) + ": " + msg

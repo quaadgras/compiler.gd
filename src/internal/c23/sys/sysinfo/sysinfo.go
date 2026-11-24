@@ -86,7 +86,7 @@ func read() info {
 
 // Sysinfo is sysinfo. The memory is in units of mem_unit bytes, 1 unless
 // a size does not fit in an unsigned long.
-func Sysinfo(buf c23.Ptr) int32 {
+func Sysinfo(buf *c23.Void) int32 {
 	in := read()
 	l := int(c23.LongSize)
 	unit := uint64(1)

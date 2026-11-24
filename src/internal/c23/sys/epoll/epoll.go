@@ -53,8 +53,8 @@ type interest struct {
 	fd     int32
 	of     *c23.Ofile // what fd named when it was added
 	events uint32
-	data   c23.Ptr // 8 bytes: the epoll_data_t, a pointer kept as one
-	off    bool    // EPOLLONESHOT reported it: disabled until EPOLL_CTL_MOD
+	data   *c23.Void // 8 bytes: the epoll_data_t, a pointer kept as one
+	off    bool      // EPOLLONESHOT reported it: disabled until EPOLL_CTL_MOD
 
 	// For EPOLLET: what was ready, and the count of arrivals, when it
 	// was last reported.
@@ -162,7 +162,7 @@ func (ep *epoll) remove(it *interest) {
 }
 
 // collect stores up to max ready events at events, and returns how many.
-func (ep *epoll) collect(events c23.Ptr, max int) int {
+func (ep *epoll) collect(events *c23.Void, max int) int {
 	n := 0
 	var reported []*interest
 	for _, it := range ep.snapshot() {
@@ -271,7 +271,7 @@ func (ep *epoll) contains(target *epoll, depth int) bool {
 
 // EpollCtl is epoll_ctl. A regular file or a directory cannot be added
 // (EPERM), as on Linux.
-func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
+func EpollCtl(epfd, op, fd int32, event *c23.Void) int32 {
 	ep := epollOf(epfd)
 	if ep == nil {
 		return -1
@@ -350,7 +350,7 @@ func EpollCtl(epfd, op, fd int32, event c23.Ptr) int32 {
 
 // EpollWait is epoll_wait: timeout is in milliseconds, -1 for none. It
 // is not interrupted by signals (their handlers run on other goroutines).
-func EpollWait(epfd int32, events c23.Ptr, maxevents, timeout int32) int32 {
+func EpollWait(epfd int32, events *c23.Void, maxevents, timeout int32) int32 {
 	return epollWait(epfd, events, maxevents, timeout, false, 0)
 }
 
@@ -358,14 +358,14 @@ func EpollWait(epfd int32, events c23.Ptr, maxevents, timeout int32) int32 {
 // while it waits, if that is not null, and if a pending signal it then
 // unblocks runs its handler before anything is ready, the result is -1
 // with errno EINTR.
-func EpollPwait(epfd int32, events c23.Ptr, maxevents, timeout int32, sigmask c23.Ptr) int32 {
+func EpollPwait(epfd int32, events *c23.Void, maxevents, timeout int32, sigmask *c23.Void) int32 {
 	if c23.Addr(sigmask) == 0 {
 		return EpollWait(epfd, events, maxevents, timeout)
 	}
 	return epollWait(epfd, events, maxevents, timeout, true, c23.LoadSigset(sigmask)&^c23.SigUnblockable)
 }
 
-func epollWait(epfd int32, events c23.Ptr, maxevents, timeout int32, setMask bool, mask uint64) int32 {
+func epollWait(epfd int32, events *c23.Void, maxevents, timeout int32, setMask bool, mask uint64) int32 {
 	ep := epollOf(epfd)
 	if ep == nil {
 		return -1

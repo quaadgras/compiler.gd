@@ -20,7 +20,7 @@ var (
 	OptoptObj = newInt32('?')
 )
 
-func newInt32(v int32) Ptr {
+func newInt32(v int32) *Void {
 	p := New[int32]()
 	Store32(p, uint32(v))
 	return p
@@ -30,7 +30,7 @@ func newInt32(v int32) Ptr {
 type getoptStateT struct {
 	sync.Mutex
 	init        bool
-	nextchar    Ptr // the rest of the current argument's options
+	nextchar    *Void // the rest of the current argument's options
 	ordering    int
 	firstNonopt int32
 	lastNonopt  int32
@@ -45,14 +45,14 @@ const (
 )
 
 // getopt is getopt, getopt_long (longopts not null) and getopt_long_only.
-func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) int32 {
+func Getopt(argc int32, argv, optstring, longopts, longind *Void, longOnly bool) int32 {
 	st := &getoptState
 	st.Lock()
 	defer st.Unlock()
-	arg := func(i int32) Ptr { return LoadPtr(Add(argv, int(i)*int(WordSize))) }
+	arg := func(i int32) *Void { return LoadPtr(Add(argv, int(i)*int(WordSize))) }
 	optind := int32(Load32(OptindObj))
 	setOptind := func(i int32) { optind = i; Store32(OptindObj, uint32(i)) }
-	StorePtr(OptargObj, Ptr(nil))
+	StorePtr(OptargObj, (*Void)(nil))
 	if argc < 1 {
 		return -1
 	}
@@ -62,7 +62,7 @@ func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 			setOptind(1)
 		}
 		st.firstNonopt, st.lastNonopt = optind, optind
-		st.nextchar = Ptr(nil)
+		st.nextchar = (*Void)(nil)
 		switch {
 		case len(opts) > 0 && opts[0] == '-':
 			st.ordering = returnInOrder
@@ -211,13 +211,13 @@ func Getopt(argc int32, argv, optstring, longopts, longind Ptr, longOnly bool) i
 			StorePtr(OptargObj, arg(optind))
 			setOptind(optind + 1)
 		}
-		st.nextchar = Ptr(nil)
+		st.nextchar = (*Void)(nil)
 	}
 	return int32(c)
 }
 
 // getoptError writes getopt's message, as glibc words it, on stderr.
-func getoptError(msg string, prog Ptr, c byte) {
+func getoptError(msg string, prog *Void, c byte) {
 	FileOf(Stdio(2)).Write([]byte(GoString(prog) + ": " + msg + " -- '" + string([]byte{c}) + "'\n"))
 }
 
@@ -232,7 +232,7 @@ type option struct {
 // longOption is glibc's process_long_option: the long option at
 // st.nextchar, which prefix ("--" or "-") came before, in argv[optind].
 // It returns -1 if getopt_long_only should take it as short options.
-func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string, longopts, longind Ptr, longOnly, printErrors bool, prefix string, optind int32, setOptind func(int32)) int32 {
+func (st *getoptStateT) longOption(argc int32, arg func(int32) *Void, opts string, longopts, longind *Void, longOnly, printErrors bool, prefix string, optind int32, setOptind func(int32)) int32 {
 	var o option
 	osize := int(unsafe.Sizeof(o))
 	offHas, offFlag, offVal := int(unsafe.Offsetof(o.hasArg)), int(unsafe.Offsetof(o.flag)), int(unsafe.Offsetof(o.val))
@@ -241,7 +241,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 	type opt struct {
 		name        string
 		hasArg, val int32
-		flag        Ptr
+		flag        *Void
 		idx         int
 	}
 	var all []opt
@@ -283,7 +283,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 				}
 				FileOf(Stdio(2)).Write([]byte(msg + "\n"))
 			}
-			st.nextchar = Ptr(nil)
+			st.nextchar = (*Void)(nil)
 			setOptind(optind + 1)
 			Store32(OptoptObj, 0)
 			return '?'
@@ -294,7 +294,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 			if printErrors {
 				FileOf(Stdio(2)).Write([]byte(GoString(arg(0)) + ": unrecognized option '" + prefix + rest + "'\n"))
 			}
-			st.nextchar = Ptr(nil)
+			st.nextchar = (*Void)(nil)
 			setOptind(optind + 1)
 			Store32(OptoptObj, 0)
 			return '?'
@@ -303,7 +303,7 @@ func (st *getoptStateT) longOption(argc int32, arg func(int32) Ptr, opts string,
 	}
 	optind++
 	setOptind(optind)
-	st.nextchar = Ptr(nil)
+	st.nextchar = (*Void)(nil)
 	if hasValue {
 		if found.hasArg != 0 {
 			StorePtr(OptargObj, Add(arg(optind-1), len(prefix)+len(name)+1))

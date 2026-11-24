@@ -13,16 +13,16 @@ import (
 
 // A MemFile is the memory a memory stream reads and writes.
 type MemFile struct {
-	Buf  c23.Ptr // the memory
-	Size int     // fmemopen's: the buffer's size; open_memstream's: what buf holds
-	Pos  int     // the position
-	End  int     // the end of the contents
+	Buf  *c23.Void // the memory
+	Size int       // fmemopen's: the buffer's size; open_memstream's: what buf holds
+	Pos  int       // the position
+	End  int       // the end of the contents
 	App  bool
 
 	// open_memstream's: it grows buf, and keeps *bufp and *sizep up to
 	// date with buf and the position.
 	Dyn         bool
-	Bufp, Sizep c23.Ptr
+	Bufp, Sizep *c23.Void
 	Binary      bool
 }
 

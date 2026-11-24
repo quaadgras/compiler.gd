@@ -11,7 +11,7 @@ import (
 
 // Gettimeofday is gettimeofday, which stores the time as a struct timeval
 // {time_t tv_sec; suseconds_t tv_usec;} at tv.
-func Gettimeofday(tv, tz c23.Ptr) int32 {
+func Gettimeofday(tv, tz *c23.Void) int32 {
 	if c23.Addr(tv) != 0 {
 		now := time.Now()
 		c23.Store64(tv, uint64(now.Unix()))

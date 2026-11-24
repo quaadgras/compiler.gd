@@ -13,9 +13,9 @@ import (
 	"unicode/utf8"
 )
 
-func Mblen(s c23.Ptr, n uint64) int32 { return Mbtowc(c23.Ptr(nil), s, n) }
+func Mblen(s *c23.Void, n uint64) int32 { return Mbtowc((*c23.Void)(nil), s, n) }
 
-func Mbtowc(pwc, s c23.Ptr, n uint64) int32 {
+func Mbtowc(pwc, s *c23.Void, n uint64) int32 {
 	if c23.Addr(s) == 0 {
 		return 0 // no state
 	}
@@ -39,7 +39,7 @@ func Mbtowc(pwc, s c23.Ptr, n uint64) int32 {
 	return int32(size)
 }
 
-func Wctomb(s c23.Ptr, wc int32) int32 {
+func Wctomb(s *c23.Void, wc int32) int32 {
 	if c23.Addr(s) == 0 {
 		return 0
 	}
@@ -52,7 +52,7 @@ func Wctomb(s c23.Ptr, wc int32) int32 {
 
 // Mbstowcs is mbstowcs: the characters of the multibyte string at src,
 // at most n stored at dst (none if it is null), and how many.
-func Mbstowcs(dst, src c23.Ptr, n uint64) uint64 {
+func Mbstowcs(dst, src *c23.Void, n uint64) uint64 {
 	k := uint64(0)
 	for i := 0; c23.Addr(dst) == 0 || k < n; {
 		if c23.Load8(c23.Add(src, i)) == 0 {
@@ -78,7 +78,7 @@ func Mbstowcs(dst, src c23.Ptr, n uint64) uint64 {
 // Wcstombs is wcstombs: the multibyte characters of the wide string at
 // src, at most n bytes of whole ones stored at dst (none if it is null),
 // and how many bytes.
-func Wcstombs(dst, src c23.Ptr, n uint64) uint64 {
+func Wcstombs(dst, src *c23.Void, n uint64) uint64 {
 	k := uint64(0)
 	for i := 0; ; i++ {
 		c := c23.Wat(src, i)
@@ -107,35 +107,35 @@ func Wcstombs(dst, src c23.Ptr, n uint64) uint64 {
 
 // Strfromd is strfromd: snprintf of one double, of a format of a
 // precision and a conversion.
-func Strfromd(s c23.Ptr, n uint64, format c23.Ptr, fp float64) int32 {
+func Strfromd(s *c23.Void, n uint64, format *c23.Void, fp float64) int32 {
 	return c23_stdio.Snprintf(s, n, format, fp)
 }
 
-func Strfromf(s c23.Ptr, n uint64, format c23.Ptr, fp float32) int32 {
+func Strfromf(s *c23.Void, n uint64, format *c23.Void, fp float32) int32 {
 	return c23_stdio.Snprintf(s, n, format, float64(fp))
 }
 
 // FreeSized and FreeAlignedSized are free_sized and free_aligned_sized:
 // free, which does not check the size or alignment.
-func FreeSized(p c23.Ptr, n uint64) { c23.Free(p) }
+func FreeSized(p *c23.Void, n uint64) { c23.Free(p) }
 
-func FreeAlignedSized(p c23.Ptr, align, n uint64) { c23.Free(p) }
+func FreeAlignedSized(p *c23.Void, align, n uint64) { c23.Free(p) }
 
 // Memalignment is memalignment: the greatest power of two p's address is
 // a multiple of.
-func Memalignment(p c23.Ptr) uint64 {
+func Memalignment(p *c23.Void) uint64 {
 	a := uint64(c23.Addr(p))
 	return a & -a
 }
 
 // CallOnce is call_once: pthread_once's, which a once_flag is.
-func CallOnce(flag, f c23.Ptr) { c23_pthread.PthreadOnce(flag, f) }
+func CallOnce(flag, f *c23.Void) { c23_pthread.PthreadOnce(flag, f) }
 
 var quickMu sync.Mutex
 
-var quickFn []c23.Ptr
+var quickFn []*c23.Void
 
-func AtQuickExit(f c23.Ptr) int32 {
+func AtQuickExit(f *c23.Void) int32 {
 	c23.FuncOf[func()](f)
 	quickMu.Lock()
 	quickFn = append(quickFn, f)
@@ -157,6 +157,6 @@ func QuickExit(status int32) {
 		quickMu.Unlock()
 		c23.FuncOf[func()](f)()
 	}
-	c23.Fflush(c23.Ptr(nil))
+	c23.Fflush((*c23.Void)(nil))
 	os.Exit(int(status))
 }

@@ -20,7 +20,7 @@ var start = time.Now()
 // program started as its user time), and the time since the program
 // started, plus one tick so that it is never 0 or -1 (clock_t is 64
 // bits everywhere, so it does not wrap).
-func Times(buf c23.Ptr) int64 {
+func Times(buf *c23.Void) int64 {
 	u, s, cu, cs := cpuTimes()
 	if c23.Addr(buf) != 0 {
 		for i, d := range []time.Duration{u, s, cu, cs} {

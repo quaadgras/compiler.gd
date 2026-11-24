@@ -14,8 +14,6 @@ import (
 	"runtime"
 )
 
-type Ptr = c23.Ptr
-
 // net/if.h's flags, Linux's.
 const (
 	IFF_UP          = 0x1
@@ -87,7 +85,7 @@ func sockaddr(ip netip.Addr, zone string) []byte {
 // IPv4 addresses, then the IPv6 ones; elsewhere only the addresses.
 // ifa_flags has the flags Go knows: IFF_UP, IFF_BROADCAST,
 // IFF_LOOPBACK, IFF_POINTOPOINT, IFF_MULTICAST and IFF_RUNNING.
-func Getifaddrs(ifap Ptr) int32 {
+func Getifaddrs(ifap *c23.Void) int32 {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		c23.SetErrnoOf(err)
@@ -151,7 +149,7 @@ func Getifaddrs(ifap Ptr) int32 {
 	// ifa_netmask, ifa_ifu, ifa_data; the sockaddrs follow it, 28 bytes
 	// each.
 	size := 7 * ws
-	var head, tail Ptr
+	var head, tail *c23.Void
 	for _, e := range append(append(links, v4...), v6...) {
 		p := c23.Malloc(uint64(size + 3*28))
 		c23.Memset(p, 0, uint64(size+3*28))
@@ -177,4 +175,4 @@ func Getifaddrs(ifap Ptr) int32 {
 }
 
 // Freeifaddrs is freeifaddrs: the collector frees the list.
-func Freeifaddrs(ifa Ptr) {}
+func Freeifaddrs(ifa *c23.Void) {}

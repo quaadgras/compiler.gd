@@ -42,14 +42,14 @@ var (
 
 // Getgrent is getgrent: the next group of /etc/group, or null at the
 // end.
-func Getgrent() c23.Ptr {
+func Getgrent() *c23.Void {
 	grMu.Lock()
 	if !entRead {
 		entGroups, entRead, entNext = groups(), true, 0
 	}
 	if entNext >= len(entGroups) {
 		grMu.Unlock()
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	e := entGroups[entNext]
 	entNext++
@@ -71,8 +71,8 @@ func Endgrent() { Setgrent() }
 // group at gr, its strings and its array of members in the n bytes at
 // buf (ERANGE if they do not fit), and *result gr, or null if there is
 // no such group.
-func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
-	c23.StorePtr(result, c23.Ptr(nil))
+func grResultR(e []string, ok bool, gr, buf *c23.Void, n uint64, result *c23.Void) int32 {
+	c23.StorePtr(result, (*c23.Void)(nil))
 	if !ok {
 		return 0
 	}
@@ -91,7 +91,7 @@ func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) i
 	}
 	mem := c23.Add(buf, int(pad))
 	off := int(pad) + (len(members)+1)*int(ws)
-	str := func(s string) c23.Ptr {
+	str := func(s string) *c23.Void {
 		p := c23.Add(buf, off)
 		copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
 		off += len(s) + 1
@@ -100,7 +100,7 @@ func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) i
 	for i, m := range members {
 		c23.StorePtr(c23.Add(mem, i*int(ws)), str(m))
 	}
-	c23.StorePtr(c23.Add(mem, len(members)*int(ws)), c23.Ptr(nil))
+	c23.StorePtr(c23.Add(mem, len(members)*int(ws)), (*c23.Void)(nil))
 	gid, _ := strconv.ParseUint(e[2], 10, 32)
 	var g group
 	c23.StorePtr(gr, str(e[0]))
@@ -112,13 +112,13 @@ func grResultR(e []string, ok bool, gr, buf c23.Ptr, n uint64, result c23.Ptr) i
 }
 
 // GetgrgidR is getgrgid_r.
-func GetgrgidR(gid uint32, gr, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
+func GetgrgidR(gid uint32, gr, buf *c23.Void, n uint64, result *c23.Void) int32 {
 	e, ok := lookupGroup("", gid)
 	return grResultR(e, ok, gr, buf, n, result)
 }
 
 // GetgrnamR is getgrnam_r.
-func GetgrnamR(name, gr, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
+func GetgrnamR(name, gr, buf *c23.Void, n uint64, result *c23.Void) int32 {
 	s := c23.GoString(name)
 	var e []string
 	ok := false

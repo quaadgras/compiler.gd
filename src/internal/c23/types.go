@@ -13,10 +13,6 @@ import "unsafe"
 // model's (long, and size_t and the others that follow it) are with the
 // model (Long, in tag.go and its siblings).
 type (
-	// Void is what a void * points to. A void * itself is an
-	// unsafe.Pointer.
-	Void = [0]byte
-
 	Bool      = uint8 // _Bool, and C++'s bool: 0 or 1
 	Char      = int8  // char is signed in cmd/cc's C
 	SChar     = int8
@@ -47,3 +43,11 @@ type (
 	// Nullptr is nullptr_t.
 	Nullptr = unsafe.Pointer
 )
+
+// Void is what a void * points to: nothing that can be loaded or
+// stored. A void * is a *Void, and so is any pointer where C's library,
+// or a call through a pointer to a function, does not say what it points
+// to. It is converted to and from the pointer to what is there through
+// unsafe.Pointer, which is where the compiler checks it
+// (doc/gd/unsafe.md).
+type Void [0]byte

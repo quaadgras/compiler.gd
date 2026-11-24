@@ -18,10 +18,10 @@ import (
 // A TLS is a _Thread_local object: each goroutine has its own, made by
 // new (allocated and initialized) the first time it uses it.
 type TLS struct {
-	new func() Ptr
+	new func() *Void
 }
 
-func NewTLS(new func() Ptr) *TLS { return &TLS{new: new} }
+func NewTLS(new func() *Void) *TLS { return &TLS{new: new} }
 
 // gSelf returns the calling goroutine's table, which identifies it while
 // it runs.
@@ -36,13 +36,13 @@ func GSelf() *gTable {
 }
 
 // Get returns the calling goroutine's object.
-func (t *TLS) Get() Ptr {
+func (t *TLS) Get() *Void {
 	tb := GSelf()
 	if p, ok := tb.tls[t]; ok {
 		return p
 	}
 	if tb.tls == nil {
-		tb.tls = map[*TLS]Ptr{}
+		tb.tls = map[*TLS]*Void{}
 	}
 	p := t.new()
 	tb.tls[t] = p
@@ -53,7 +53,7 @@ func (t *TLS) Get() Ptr {
 
 type Thread struct {
 	done  chan struct{}
-	Ret   Ptr   // pthread_exit's value, or the start routine's
+	Ret   *Void // pthread_exit's value, or the start routine's
 	Res   int32 // thrd_exit's, or a <threads.h> start routine's
 	Sig   *SigThread
 	Start time.Time // when it started: its CPU-time clock counts from then
@@ -73,25 +73,25 @@ var (
 	ThreadsMu sync.Mutex
 	Threads   = map[uint64]*Thread{}
 	threadN   atomic.Uint64
-	ThreadID  = NewTLS(func() Ptr { return New[uint64]() })
+	ThreadID  = NewTLS(func() *Void { return New[uint64]() })
 )
 
 // spawn starts a goroutine that is a thread, whose id it stores at thr
 // (a pthread_t or thrd_t, each an unsigned long), and runs run in it.
-func Spawn(thr Ptr, run func(t *Thread)) { spawnThread(thr, false, false, run) }
+func Spawn(thr *Void, run func(t *Thread)) { spawnThread(thr, false, false, run) }
 
 // SpawnThread is Spawn of a thread that is detached from the start if
 // detached. The new thread has its creator's scheduling policy and
 // priority.
-func SpawnThread(thr Ptr, detached bool, run func(t *Thread)) *Thread {
+func SpawnThread(thr *Void, detached bool, run func(t *Thread)) *Thread {
 	return spawnThread(thr, detached, false, run)
 }
 
 // SpawnBlocked is Spawn of a detached thread that blocks every signal it
 // may, as glibc's and musl's threads of SIGEV_THREAD notifications do.
-func SpawnBlocked(thr Ptr, run func(t *Thread)) { spawnThread(thr, true, true, run) }
+func SpawnBlocked(thr *Void, run func(t *Thread)) { spawnThread(thr, true, true, run) }
 
-func spawnThread(thr Ptr, detached, blocked bool, run func(t *Thread)) *Thread {
+func spawnThread(thr *Void, detached, blocked bool, run func(t *Thread)) *Thread {
 	id := threadN.Add(1)
 	t := newThread()
 	self := Self()
@@ -148,7 +148,7 @@ func newThread() *Thread {
 }
 
 type ThreadExit struct {
-	Ret Ptr
+	Ret *Void
 	Res int32
 }
 
@@ -440,7 +440,7 @@ func (m *Mutex) acquire(how int, deadline time.Time) int32 {
 
 // loadDeadline reads the struct timespec at ts, a CLOCK_REALTIME
 // (TIME_UTC) time; false if it is not one.
-func LoadDeadline(ts Ptr) (time.Time, bool) {
+func LoadDeadline(ts *Void) (time.Time, bool) {
 	sec, nsec := int64(Load64(ts)), LoadLong(Add(ts, 8))
 	if nsec < 0 || nsec >= 1e9 {
 		return time.Time{}, false
@@ -457,7 +457,7 @@ func LoadDeadline(ts Ptr) (time.Time, bool) {
 // goroutine's values are in its gTable.
 
 type Key struct {
-	Destructor Ptr
+	Destructor *Void
 	Live       bool
 }
 
@@ -479,13 +479,13 @@ func runKeyDestructors() {
 			}
 			delete(tb.Keys, k)
 			KeysMu.Lock()
-			var d Ptr
+			var d *Void
 			if int(k) < len(Keys) && Keys[k].Live {
 				d = Keys[k].Destructor
 			}
 			KeysMu.Unlock()
 			if Addr(d) != 0 {
-				FuncOf[func(Ptr)](d)(v)
+				FuncOf[func(*Void)](d)(v)
 				ran = true
 			}
 		}
@@ -504,9 +504,9 @@ type atomicT interface {
 
 var stripes [64]sync.Mutex
 
-func stripe(p Ptr) *sync.Mutex { return &stripes[(Addr(p)>>3)%64] }
+func stripe(p *Void) *sync.Mutex { return &stripes[(Addr(p)>>3)%64] }
 
-func AtomicLoad[T atomicT](p Ptr) T {
+func AtomicLoad[T atomicT](p *Void) T {
 	var z T
 	n := unsafe.Sizeof(z)
 	a := Check(p, n)
@@ -525,39 +525,39 @@ func AtomicLoad[T atomicT](p Ptr) T {
 	return v
 }
 
-func AtomicStore[T atomicT](p Ptr, v T) {
+func AtomicStore[T atomicT](p *Void, v T) {
 	n := unsafe.Sizeof(v)
 	a := p
 	switch n {
 	case 4:
-		atomic.StoreUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&v)))
+		atomic.StoreUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&v)))
 		return
 	case 8:
-		atomic.StoreUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&v)))
+		atomic.StoreUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&v)))
 		return
 	}
 	m := stripe(p)
 	m.Lock()
-	*(*T)(a) = v
+	*(*T)(unsafe.Pointer(a)) = v
 	m.Unlock()
 }
 
 // AtomicCAS replaces old at p with new if it is there (by bits, as C
 // compares).
-func AtomicCAS[T atomicT](p Ptr, old, new T) bool {
+func AtomicCAS[T atomicT](p *Void, old, new T) bool {
 	n := unsafe.Sizeof(old)
 	a := p
 	switch n {
 	case 4:
-		return atomic.CompareAndSwapUint32((*uint32)(a), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint32((*uint32)(unsafe.Pointer(a)), *(*uint32)(unsafe.Pointer(&old)), *(*uint32)(unsafe.Pointer(&new)))
 	case 8:
-		return atomic.CompareAndSwapUint64((*uint64)(a), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
+		return atomic.CompareAndSwapUint64((*uint64)(unsafe.Pointer(a)), *(*uint64)(unsafe.Pointer(&old)), *(*uint64)(unsafe.Pointer(&new)))
 	}
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
-	if memEq(a, unsafe.Pointer(&old), n) {
-		*(*T)(a) = new
+	if memEq(unsafe.Pointer(a), unsafe.Pointer(&old), n) {
+		*(*T)(unsafe.Pointer(a)) = new
 		return true
 	}
 	return false
@@ -570,7 +570,7 @@ func memEq(a, b unsafe.Pointer, n uintptr) bool {
 // AtomicCmpXchg is atomic_compare_exchange: if p holds what expected
 // points to, desired replaces it; if not, what p holds is stored where
 // expected points.
-func AtomicCmpXchg[T atomicT](p, expected Ptr, desired T) int32 {
+func AtomicCmpXchg[T atomicT](p, expected *Void, desired T) int32 {
 	var old T
 	switch any(old).(type) {
 	case float32:
@@ -586,7 +586,7 @@ func AtomicCmpXchg[T atomicT](p, expected Ptr, desired T) int32 {
 		}
 		cur := AtomicLoad[T](p)
 		if !memEq(unsafe.Pointer(&cur), unsafe.Pointer(&old), unsafe.Sizeof(old)) {
-			*(*T)(expected) = cur
+			*(*T)(unsafe.Pointer(expected)) = cur
 			return 0
 		}
 	}
@@ -594,7 +594,7 @@ func AtomicCmpXchg[T atomicT](p, expected Ptr, desired T) int32 {
 
 // AtomicFetch applies op ('+', '-', '&', '|', '^', '=') with v at p, and
 // returns what p held.
-func AtomicFetch[T atomicT](p Ptr, op byte, v T) T {
+func AtomicFetch[T atomicT](p *Void, op byte, v T) T {
 	for {
 		old := AtomicLoad[T](p)
 		var new T
@@ -634,21 +634,21 @@ func bitOp[T atomicT](x T, op byte, y T) T {
 
 // Pointers.
 
-func AtomicLoadP(p Ptr) Ptr {
+func AtomicLoadP(p *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
 	return LoadPtr(p)
 }
 
-func AtomicStoreP(p, v Ptr) {
+func AtomicStoreP(p, v *Void) {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
 	StorePtr(p, v)
 }
 
-func AtomicCASP(p, old, new Ptr) bool {
+func AtomicCASP(p, old, new *Void) bool {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
@@ -659,7 +659,7 @@ func AtomicCASP(p, old, new Ptr) bool {
 	return true
 }
 
-func AtomicCmpXchgP(p, expected, desired Ptr) int32 {
+func AtomicCmpXchgP(p, expected, desired *Void) int32 {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
@@ -673,7 +673,7 @@ func AtomicCmpXchgP(p, expected, desired Ptr) int32 {
 }
 
 // AtomicFetchP applies op ('+' by bytes, '=') at p, returning what it held.
-func AtomicFetchP(p Ptr, op byte, n int, v Ptr) Ptr {
+func AtomicFetchP(p *Void, op byte, n int, v *Void) *Void {
 	m := stripe(p)
 	m.Lock()
 	defer m.Unlock()
@@ -694,10 +694,10 @@ func Fence() {}
 // under a lock, one of those striped by the object's address.
 var aggLocks [64]sync.Mutex
 
-func aggLock(p Ptr) *sync.Mutex { return &aggLocks[(Addr(p)>>4)%uintptr(len(aggLocks))] }
+func aggLock(p *Void) *sync.Mutex { return &aggLocks[(Addr(p)>>4)%uintptr(len(aggLocks))] }
 
 // AtomicLoadAgg copies the n bytes of the atomic object at src to dst.
-func AtomicLoadAgg(dst, src Ptr, n uintptr) {
+func AtomicLoadAgg(dst, src *Void, n uintptr) {
 	m := aggLock(src)
 	m.Lock()
 	Memmove(dst, src, n)
@@ -705,7 +705,7 @@ func AtomicLoadAgg(dst, src Ptr, n uintptr) {
 }
 
 // AtomicStoreAgg copies n bytes at src to the atomic object at dst.
-func AtomicStoreAgg(dst, src Ptr, n uintptr) {
+func AtomicStoreAgg(dst, src *Void, n uintptr) {
 	m := aggLock(dst)
 	m.Lock()
 	Memmove(dst, src, n)
@@ -714,7 +714,7 @@ func AtomicStoreAgg(dst, src Ptr, n uintptr) {
 
 // AtomicSwapAgg replaces the atomic object at p with v's n bytes, and
 // copies what it was to old.
-func AtomicSwapAgg(p, old, v Ptr, n uintptr) {
+func AtomicSwapAgg(p, old, v *Void, n uintptr) {
 	m := aggLock(p)
 	m.Lock()
 	Memmove(old, p, n)
@@ -725,7 +725,7 @@ func AtomicSwapAgg(p, old, v Ptr, n uintptr) {
 // AtomicCmpXchgAgg is atomic_compare_exchange of the n bytes at p: if
 // they are those at exp, they become those at des; if not, exp's become
 // p's.
-func AtomicCmpXchgAgg(p, exp, des Ptr, n uintptr) bool {
+func AtomicCmpXchgAgg(p, exp, des *Void, n uintptr) bool {
 	m := aggLock(p)
 	m.Lock()
 	defer m.Unlock()

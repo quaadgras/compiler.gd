@@ -140,7 +140,7 @@ func Overflow(op byte, a int64, au bool, b int64, bu bool, width int32, ru bool)
 
 // LoadBytes loads n (1 to 8) bytes at p as a little-endian integer: a
 // packed bit-field's.
-func LoadBytes(p Ptr, n int) uint64 {
+func LoadBytes(p *Void, n int) uint64 {
 	b := BytesAt(p, uintptr(n))
 	var v uint64
 	for i := n - 1; i >= 0; i-- {
@@ -150,9 +150,9 @@ func LoadBytes(p Ptr, n int) uint64 {
 }
 
 // StoreBytes stores the n low bytes of v at p, little-endian.
-func StoreBytes(p Ptr, n int, v uint64) {
+func StoreBytes(p *Void, n int, v uint64) {
 	a := p
 	for i := 0; i < n; i++ {
-		*(*byte)(unsafe.Add(a, i)) = byte(v >> (8 * i))
+		*(*byte)(unsafe.Add(unsafe.Pointer(a), i)) = byte(v >> (8 * i))
 	}
 }

@@ -54,7 +54,7 @@ func takeWait(w uint64, deadline time.Time) (int32, c23.SigInfo) {
 // Sigtimedwait is sigtimedwait: sigwait that stores the signal's
 // siginfo_t at info (if not null) and returns its number, or -1 with
 // errno EAGAIN once timeout (if not null) has passed.
-func Sigtimedwait(set, info, timeout c23.Ptr) int32 {
+func Sigtimedwait(set, info, timeout *c23.Void) int32 {
 	w := c23.LoadSigset(set) &^ c23.SigUnblockable
 	var deadline time.Time
 	if c23.Addr(timeout) != 0 {
@@ -83,13 +83,13 @@ func Sigtimedwait(set, info, timeout c23.Ptr) int32 {
 }
 
 // Sigwaitinfo is sigwaitinfo: sigtimedwait without a timeout.
-func Sigwaitinfo(set, info c23.Ptr) int32 { return Sigtimedwait(set, info, c23.Ptr(nil)) }
+func Sigwaitinfo(set, info *c23.Void) int32 { return Sigtimedwait(set, info, (*c23.Void)(nil)) }
 
 // Sigqueue is sigqueue: to the program's own process, the signal is sent
 // with si_code SI_QUEUE and si_value value (union sigval, passed as its
 // pointer member); to another, it is kill's, without the value. A signal
 // already pending is not queued again, even a real-time one.
-func Sigqueue(pid, sig int32, value c23.Ptr) int32 {
+func Sigqueue(pid, sig int32, value *c23.Void) int32 {
 	if sig < 0 || sig >= c23.Nsig {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -174,7 +174,7 @@ const (
 )
 
 type altStack struct {
-	sp    c23.Ptr
+	sp    *c23.Void
 	flags int32
 	size  int64
 }
@@ -187,7 +187,7 @@ var (
 // Sigaltstack is sigaltstack: it keeps the thread's stack_t {void *ss_sp;
 // int ss_flags; size_t ss_size;} to give back, and has no other effect,
 // as handlers run on goroutines.
-func Sigaltstack(ss, oss c23.Ptr) int32 {
+func Sigaltstack(ss, oss *c23.Void) int32 {
 	t := c23.SigSelf()
 	altStacksMu.Lock()
 	defer altStacksMu.Unlock()

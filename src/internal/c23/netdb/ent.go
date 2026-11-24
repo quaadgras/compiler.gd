@@ -52,7 +52,7 @@ type db struct {
 	read bool
 	next int
 	load func() [][]string
-	ent  Ptr // the struct its function returns
+	ent  *c23.Void // the struct its function returns
 }
 
 func (d *db) rewind() {
@@ -97,12 +97,12 @@ func (d *db) search(f func(e []string) bool) bool {
 }
 
 // strArray is a null-terminated array of C strings.
-func strArray(ss []string) Ptr {
+func strArray(ss []string) *c23.Void {
 	a := c23.Malloc(uint64((len(ss) + 1) * ws))
 	for i, s := range ss {
 		c23.StorePtr(c23.Add(a, i*ws), c23.CString(s))
 	}
-	c23.StorePtr(c23.Add(a, len(ss)*ws), Ptr(nil))
+	c23.StorePtr(c23.Add(a, len(ss)*ws), (*c23.Void)(nil))
 	return a
 }
 
@@ -121,8 +121,8 @@ var hostDB = db{load: func() [][]string {
 
 // Gethostent is gethostent: the next host of /etc/hosts (one per line,
 // with its one address), or null at the end.
-func Gethostent() Ptr {
-	var r Ptr
+func Gethostent() *c23.Void {
+	var r *c23.Void
 	hostDB.each(func(e []string) bool {
 		ip, _ := netip.ParseAddr(e[0])
 		ip = ip.Unmap()
@@ -175,7 +175,7 @@ func netNumber(s string) (uint32, bool) {
 	return n, true
 }
 
-func netResult(e []string) Ptr {
+func netResult(e []string) *c23.Void {
 	if Addr(netDB.ent) == 0 {
 		netDB.ent = c23.Malloc(uint64(2*ws + 8))
 	}
@@ -189,16 +189,16 @@ func netResult(e []string) Ptr {
 }
 
 // Getnetent is getnetent: the next network of /etc/networks, or null.
-func Getnetent() Ptr {
-	var r Ptr
+func Getnetent() *c23.Void {
+	var r *c23.Void
 	netDB.each(func(e []string) bool { r = netResult(e); return true })
 	return r
 }
 
 // Getnetbyname is getnetbyname: the network of the name or alias.
-func Getnetbyname(name Ptr) Ptr {
+func Getnetbyname(name *c23.Void) *c23.Void {
 	n := c23.GoString(name)
-	var r Ptr
+	var r *c23.Void
 	netDB.search(func(e []string) bool {
 		if e[0] == n || contains(e[2:], n) {
 			r = netResult(e)
@@ -210,11 +210,11 @@ func Getnetbyname(name Ptr) Ptr {
 }
 
 // Getnetbyaddr is getnetbyaddr: the network of the number, of AF_INET.
-func Getnetbyaddr(net uint32, typ int32) Ptr {
+func Getnetbyaddr(net uint32, typ int32) *c23.Void {
 	if typ != AF_INET {
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
-	var r Ptr
+	var r *c23.Void
 	netDB.search(func(e []string) bool {
 		if n, _ := netNumber(e[1]); n == net {
 			r = netResult(e)
@@ -260,8 +260,8 @@ var protoDB = db{load: func() [][]string {
 
 // Getprotoent is getprotoent: the next protocol of /etc/protocols (or
 // getprotobyname's table), or null.
-func Getprotoent() Ptr {
-	var r Ptr
+func Getprotoent() *c23.Void {
+	var r *c23.Void
 	protoDB.each(func(e []string) bool {
 		n, _ := strconv.Atoi(e[1])
 		r = protoResult(e[0], int32(n))
@@ -311,7 +311,7 @@ func servPort(s string) (uint16, string, bool) {
 	return uint16(n), proto, ok && err == nil && proto != ""
 }
 
-func servResult(e []string) Ptr {
+func servResult(e []string) *c23.Void {
 	if Addr(servDB.ent) == 0 {
 		servDB.ent = c23.Malloc(uint64(4 * ws))
 	}
@@ -325,21 +325,21 @@ func servResult(e []string) Ptr {
 }
 
 // Getservent is getservent: the next service of /etc/services, or null.
-func Getservent() Ptr {
-	var r Ptr
+func Getservent() *c23.Void {
+	var r *c23.Void
 	servDB.each(func(e []string) bool { r = servResult(e); return true })
 	return r
 }
 
 // Getservbyport is getservbyport: the service of the port (in network
 // order) and the protocol (any if null).
-func Getservbyport(port int32, proto Ptr) Ptr {
+func Getservbyport(port int32, proto *c23.Void) *c23.Void {
 	want := in.Ntohs(uint16(port))
 	p := ""
 	if Addr(proto) != 0 {
 		p = c23.GoString(proto)
 	}
-	var r Ptr
+	var r *c23.Void
 	servDB.search(func(e []string) bool {
 		n, pr, _ := servPort(e[1])
 		if n == want && (p == "" || pr == p) {

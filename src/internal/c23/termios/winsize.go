@@ -10,7 +10,7 @@ import (
 
 // Tcgetwinsize is tcgetwinsize: the terminal's struct winsize
 // {unsigned short ws_row, ws_col, ws_xpixel, ws_ypixel;}.
-func Tcgetwinsize(fd int32, p c23.Ptr) int32 {
+func Tcgetwinsize(fd int32, p *c23.Void) int32 {
 	f := fdTTY(fd)
 	if f == nil {
 		return -1
@@ -26,7 +26,7 @@ func Tcgetwinsize(fd int32, p c23.Ptr) int32 {
 }
 
 // Tcsetwinsize is tcsetwinsize.
-func Tcsetwinsize(fd int32, p c23.Ptr) int32 {
+func Tcsetwinsize(fd int32, p *c23.Void) int32 {
 	f := fdTTY(fd)
 	if f == nil {
 		return -1

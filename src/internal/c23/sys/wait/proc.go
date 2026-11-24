@@ -78,22 +78,22 @@ func reap(pid int32, nohang, keep bool) (*c23.Child, int32) {
 // ended, with Linux's status: the exit status times 256, or the signal
 // that ended it. WUNTRACED and WCONTINUED are accepted, and report
 // nothing. It is not interrupted by signals.
-func Waitpid(pid int32, status c23.Ptr, options int32) int32 {
-	return Wait4(pid, status, options, c23.Ptr(nil))
+func Waitpid(pid int32, status *c23.Void, options int32) int32 {
+	return Wait4(pid, status, options, (*c23.Void)(nil))
 }
 
 // Wait is wait.
-func Wait(status c23.Ptr) int32 { return Waitpid(-1, status, 0) }
+func Wait(status *c23.Void) int32 { return Waitpid(-1, status, 0) }
 
 // Wait3 is wait3: wait4 of any child.
-func Wait3(status c23.Ptr, options int32, usage c23.Ptr) int32 {
+func Wait3(status *c23.Void, options int32, usage *c23.Void) int32 {
 	return Wait4(-1, status, options, usage)
 }
 
 // Wait4 is wait4: waitpid, and the child's struct rusage at usage if
 // that is not null: its user and system time, as os.ProcessState gives
 // them, and where the system tells it (syscall.Rusage), the rest.
-func Wait4(pid int32, status c23.Ptr, options int32, usage c23.Ptr) int32 {
+func Wait4(pid int32, status *c23.Void, options int32, usage *c23.Void) int32 {
 	if options&^(WNOHANG|WUNTRACED|WCONTINUED) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -117,7 +117,7 @@ func Wait4(pid int32, status c23.Ptr, options int32, usage c23.Ptr) int32 {
 
 // storeRusage stores ps's usage as struct rusage: two struct timevals
 // and 14 longs.
-func storeRusage(usage c23.Ptr, ps *os.ProcessState) {
+func storeRusage(usage *c23.Void, ps *os.ProcessState) {
 	var ru [18]int64
 	if ps != nil {
 		ru = sysRusage(ps)
@@ -141,7 +141,7 @@ func storeRusage(usage c23.Ptr, ps *os.ProcessState) {
 // and report nothing. infop's siginfo_t is filled as Linux does: SIGCHLD,
 // CLD_EXITED or CLD_KILLED, the pid, the uid and the status; with
 // WNOHANG and no child that ended, it is zeroed and the result is 0.
-func Waitid(idtype uint32, id uint32, infop c23.Ptr, options int32) int32 {
+func Waitid(idtype uint32, id uint32, infop *c23.Void, options int32) int32 {
 	if options&^(WNOHANG|WSTOPPED|WEXITED|WCONTINUED|WNOWAIT) != 0 || options&(WSTOPPED|WEXITED|WCONTINUED) == 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1

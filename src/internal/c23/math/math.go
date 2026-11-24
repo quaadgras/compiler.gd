@@ -355,7 +355,7 @@ func Scalbln(x float64, e int64) float64 {
 	return ranged(math.Ldexp(x, int(e)), x)
 }
 
-func Frexp(x float64, e c23.Ptr) float64 {
+func Frexp(x float64, e *c23.Void) float64 {
 	f, n := math.Frexp(x)
 	if math.IsInf(x, 0) || math.IsNaN(x) {
 		f, n = x, 0
@@ -364,7 +364,7 @@ func Frexp(x float64, e c23.Ptr) float64 {
 	return f
 }
 
-func Modf(x float64, ip c23.Ptr) float64 {
+func Modf(x float64, ip *c23.Void) float64 {
 	if math.IsInf(x, 0) {
 		c23.StoreF64(ip, x)
 		return math.Copysign(0, x)
@@ -375,7 +375,7 @@ func Modf(x float64, ip c23.Ptr) float64 {
 }
 
 // Nan is nan: a quiet NaN, whatever the tag.
-func Nan(tag c23.Ptr) float64 { return math.NaN() }
+func Nan(tag *c23.Void) float64 { return math.NaN() }
 
 const fpNaN = 0
 
@@ -613,9 +613,9 @@ func Scalblnf(x float32, e int64) float32 {
 	return rangedf(math.Ldexp(float64(x), int(max(min(e, 1000), -1000))), x)
 }
 
-func Frexpf(x float32, e c23.Ptr) float32 { return float32(Frexp(float64(x), e)) }
+func Frexpf(x float32, e *c23.Void) float32 { return float32(Frexp(float64(x), e)) }
 
-func Modff(x float32, ip c23.Ptr) float32 {
+func Modff(x float32, ip *c23.Void) float32 {
 	if math.IsInf(float64(x), 0) {
 		c23.StoreF32(ip, x)
 		return float32(math.Copysign(0, float64(x)))
@@ -625,7 +625,7 @@ func Modff(x float32, ip c23.Ptr) float32 {
 	return float32(f)
 }
 
-func Nanf(tag c23.Ptr) float32 { return float32(math.NaN()) }
+func Nanf(tag *c23.Void) float32 { return float32(math.NaN()) }
 
 func Scalbn(x float64, e int32) float64 { return Scalbln(x, int64(e)) }
 

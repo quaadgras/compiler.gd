@@ -16,7 +16,7 @@ import (
 // _unlocked functions are the others.
 var fileLocks sync.Map // *c23.File -> *c23.Mutex
 
-func fileLock(p c23.Ptr) *c23.Mutex {
+func fileLock(p *c23.Void) *c23.Mutex {
 	f := c23.FileOf(p)
 	if m, ok := fileLocks.Load(f); ok {
 		return m.(*c23.Mutex)
@@ -27,15 +27,15 @@ func fileLock(p c23.Ptr) *c23.Mutex {
 
 // Flockfile is flockfile: the calling thread holds the stream's lock,
 // once more if it holds it already.
-func Flockfile(p c23.Ptr) { fileLock(p).Lock(c23.LockWait, time.Time{}) }
+func Flockfile(p *c23.Void) { fileLock(p).Lock(c23.LockWait, time.Time{}) }
 
 // Ftrylockfile is ftrylockfile: flockfile if the lock is free or the
 // thread's (0), else nonzero.
-func Ftrylockfile(p c23.Ptr) int32 { return fileLock(p).Lock(c23.LockTry, time.Time{}) }
+func Ftrylockfile(p *c23.Void) int32 { return fileLock(p).Lock(c23.LockTry, time.Time{}) }
 
 // Funlockfile is funlockfile: one of the thread's holds of the lock is
 // released.
-func Funlockfile(p c23.Ptr) {
+func Funlockfile(p *c23.Void) {
 	m := fileLock(p)
 	if m.Owner.Load() != c23.GSelf() {
 		return
@@ -49,7 +49,7 @@ func Funlockfile(p c23.Ptr) {
 
 // Renameat is renameat: rename of names relative to directory
 // descriptors (c23.AtPath).
-func Renameat(olddirfd int32, old c23.Ptr, newdirfd int32, new c23.Ptr) int32 {
+func Renameat(olddirfd int32, old *c23.Void, newdirfd int32, new *c23.Void) int32 {
 	oname, ok := c23.AtName(olddirfd, old)
 	if !ok {
 		return -1
@@ -63,7 +63,7 @@ func Renameat(olddirfd int32, old c23.Ptr, newdirfd int32, new c23.Ptr) int32 {
 
 // Ctermid is ctermid: "/dev/tty", in s if it is not null (of L_ctermid
 // bytes), else in an array of its own.
-func Ctermid(s c23.Ptr) c23.Ptr {
+func Ctermid(s *c23.Void) *c23.Void {
 	if c23.Addr(s) == 0 {
 		return c23.CString("/dev/tty")
 	}

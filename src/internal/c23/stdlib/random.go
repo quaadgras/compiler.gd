@@ -23,10 +23,10 @@ const (
 
 var (
 	r48Mu   sync.Mutex
-	r48X    uint64  = 0x1234abcd330e // glibc's and musl's X before srand48
-	r48A    uint64  = lcgA
-	r48C    uint64  = lcgC
-	seed48P c23.Ptr // seed48's array
+	r48X    uint64    = 0x1234abcd330e // glibc's and musl's X before srand48
+	r48A    uint64    = lcgA
+	r48C    uint64    = lcgC
+	seed48P *c23.Void // seed48's array
 )
 
 func step48(x uint64) uint64 { return (r48A*x + r48C) & (1<<48 - 1) }
@@ -41,18 +41,18 @@ func next48() uint64 {
 
 // loadX and storeX read and write an X kept as unsigned short[3], the
 // least significant first.
-func loadX(p c23.Ptr) uint64 {
+func loadX(p *c23.Void) uint64 {
 	return uint64(c23.Load16(p)) | uint64(c23.Load16(c23.Add(p, 2)))<<16 | uint64(c23.Load16(c23.Add(p, 4)))<<32
 }
 
-func storeX(p c23.Ptr, x uint64) {
+func storeX(p *c23.Void, x uint64) {
 	c23.Store16(p, uint16(x))
 	c23.Store16(c23.Add(p, 2), uint16(x>>16))
 	c23.Store16(c23.Add(p, 4), uint16(x>>32))
 }
 
 // nextX steps the X at xsubi, with the global a and c.
-func nextX(xsubi c23.Ptr) uint64 {
+func nextX(xsubi *c23.Void) uint64 {
 	r48Mu.Lock()
 	x := step48(loadX(xsubi))
 	r48Mu.Unlock()
@@ -64,15 +64,15 @@ func unit48(x uint64) float64 { return float64(x) / (1 << 48) }
 
 func Drand48() float64 { return unit48(next48()) }
 
-func Erand48(xsubi c23.Ptr) float64 { return unit48(nextX(xsubi)) }
+func Erand48(xsubi *c23.Void) float64 { return unit48(nextX(xsubi)) }
 
 func Lrand48() int64 { return int64(next48() >> 17) }
 
-func Nrand48(xsubi c23.Ptr) int64 { return int64(nextX(xsubi) >> 17) }
+func Nrand48(xsubi *c23.Void) int64 { return int64(nextX(xsubi) >> 17) }
 
 func Mrand48() int64 { return int64(int32(next48() >> 16)) }
 
-func Jrand48(xsubi c23.Ptr) int64 { return int64(int32(nextX(xsubi) >> 16)) }
+func Jrand48(xsubi *c23.Void) int64 { return int64(int32(nextX(xsubi) >> 16)) }
 
 // Srand48 is srand48: X is the seed's low 32 bits and 0x330e, and a and
 // c are the standard ones again.
@@ -85,7 +85,7 @@ func Srand48(seed int64) {
 
 // Seed48 is seed48: X is the seed's, a and c the standard ones again; it
 // returns an array of the X before.
-func Seed48(seed c23.Ptr) c23.Ptr {
+func Seed48(seed *c23.Void) *c23.Void {
 	x := loadX(seed)
 	r48Mu.Lock()
 	defer r48Mu.Unlock()
@@ -99,7 +99,7 @@ func Seed48(seed c23.Ptr) c23.Ptr {
 }
 
 // Lcong48 is lcong48: X, a and c are param's.
-func Lcong48(param c23.Ptr) {
+func Lcong48(param *c23.Void) {
 	x, a, c := loadX(param), loadX(c23.Add(param, 6)), uint64(c23.Load16(c23.Add(param, 12)))
 	r48Mu.Lock()
 	defer r48Mu.Unlock()
@@ -119,7 +119,7 @@ var (
 )
 
 type randomGen struct {
-	state      c23.Ptr // the first word of the state, after the type's
+	state      *c23.Void // the first word of the state, after the type's
 	typ        int
 	deg, sep   int
 	fptr, rptr int // indexes in state
@@ -128,7 +128,7 @@ type randomGen struct {
 var (
 	rndMu sync.Mutex
 	rnd   randomGen
-	l64aP c23.Ptr
+	l64aP *c23.Void
 )
 
 func (g *randomGen) at(i int) int32     { return int32(c23.Load32(c23.Add(g.state, 4*i))) }
@@ -146,7 +146,7 @@ func (g *randomGen) init() {
 }
 
 // start makes the type typ's state the one in buf.
-func (g *randomGen) start(buf c23.Ptr, typ int) {
+func (g *randomGen) start(buf *c23.Void, typ int) {
 	g.state = c23.Add(buf, 4)
 	g.typ, g.deg, g.sep = typ, randDegrees[typ], randSeps[typ]
 }
@@ -226,12 +226,12 @@ func Srandom(seed uint32) {
 // Initstate is initstate: random's state is the n bytes at buf (at
 // least 8: 8 for TYPE_0, 32 for TYPE_1, 64, 128 and 256 for TYPE_4),
 // seeded with seed. It returns the state random had.
-func Initstate(seed uint32, buf c23.Ptr, n uint64) c23.Ptr {
+func Initstate(seed uint32, buf *c23.Void, n uint64) *c23.Void {
 	var typ int
 	switch {
 	case n < 8:
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	case n < 32:
 		typ = 0
 	case n < 64:
@@ -256,7 +256,7 @@ func Initstate(seed uint32, buf c23.Ptr, n uint64) c23.Ptr {
 
 // Setstate is setstate: random's state is the one initstate made at buf
 // (which random has used since), and it returns the state random had.
-func Setstate(buf c23.Ptr) c23.Ptr {
+func Setstate(buf *c23.Void) *c23.Void {
 	rndMu.Lock()
 	defer rndMu.Unlock()
 	rnd.init()
@@ -264,7 +264,7 @@ func Setstate(buf c23.Ptr) c23.Ptr {
 	typ := int(info % maxTypes)
 	if info < 0 || typ < 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	rnd.save()
 	old := c23.Add(rnd.state, -4)
@@ -279,7 +279,7 @@ func Setstate(buf c23.Ptr) c23.Ptr {
 
 // RandR is glibc's rand_r: three steps of rand's LCG, 11, 10 and 10 bits
 // of them.
-func RandR(seed c23.Ptr) int32 {
+func RandR(seed *c23.Void) int32 {
 	next := c23.Load32(seed)
 	next = next*1103515245 + 12345
 	result := (next / 65536) % 2048
@@ -296,7 +296,7 @@ const radix64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxy
 
 // A64l is a64l: the value of up to 6 digits of base 64, sign-extended
 // from 32 bits as POSIX says (and musl does; glibc's is not).
-func A64l(s c23.Ptr) int64 {
+func A64l(s *c23.Void) int64 {
 	var x uint32
 	for i := 0; i < 6; i++ {
 		c := c23.Load8(c23.Add(s, i))
@@ -316,7 +316,7 @@ func A64l(s c23.Ptr) int64 {
 
 // L64a is l64a: v's low 32 bits in base 64, in an array the next call
 // reuses ("" for 0).
-func L64a(v int64) c23.Ptr {
+func L64a(v int64) *c23.Void {
 	rndMu.Lock()
 	defer rndMu.Unlock()
 	if c23.Addr(l64aP) == 0 {

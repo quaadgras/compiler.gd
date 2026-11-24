@@ -12,8 +12,6 @@ import (
 	"strings"
 )
 
-type Ptr = c23.Ptr
-
 func toFloat(a any) float64 {
 	switch v := a.(type) {
 	case float64:
@@ -128,7 +126,7 @@ func strfmon(format string, va []any) (string, bool) {
 	return b.String(), true
 }
 
-func store(s Ptr, maxsize uint64, format Ptr, va []any) int64 {
+func store(s *c23.Void, maxsize uint64, format *c23.Void, va []any) int64 {
 	out, ok := strfmon(c23.GoString(format), va)
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
@@ -143,12 +141,12 @@ func store(s Ptr, maxsize uint64, format Ptr, va []any) int64 {
 }
 
 // Strfmon is strfmon, in the C locale.
-func Strfmon(s Ptr, maxsize uint64, format Ptr, va ...any) int64 {
+func Strfmon(s *c23.Void, maxsize uint64, format *c23.Void, va ...any) int64 {
 	return store(s, maxsize, format, va)
 }
 
 // StrfmonL is strfmon_l, which is strfmon: the library's locales have
 // the same conventions (internal/c23/locale).
-func StrfmonL(s Ptr, maxsize uint64, _ Ptr, format Ptr, va ...any) int64 {
+func StrfmonL(s *c23.Void, maxsize uint64, _ *c23.Void, format *c23.Void, va ...any) int64 {
 	return store(s, maxsize, format, va)
 }

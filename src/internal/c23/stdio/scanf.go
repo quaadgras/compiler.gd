@@ -20,7 +20,7 @@ type scanSrc interface {
 }
 
 type strSrc struct {
-	s c23.Ptr
+	s *c23.Void
 	i int
 }
 
@@ -49,19 +49,19 @@ func (s fileSrc) unget(c int32) {
 	}
 }
 
-func Sscanf(s, format c23.Ptr, va ...any) int32 { return Vsscanf(s, format, c23.VaStart(va)) }
+func Sscanf(s, format *c23.Void, va ...any) int32 { return Vsscanf(s, format, c23.VaStart(va)) }
 
-func Scanf(format c23.Ptr, va ...any) int32 { return Vscanf(format, c23.VaStart(va)) }
+func Scanf(format *c23.Void, va ...any) int32 { return Vscanf(format, c23.VaStart(va)) }
 
-func Fscanf(f, format c23.Ptr, va ...any) int32 { return Vfscanf(f, format, c23.VaStart(va)) }
+func Fscanf(f, format *c23.Void, va ...any) int32 { return Vfscanf(f, format, c23.VaStart(va)) }
 
-func Vsscanf(s, format, ap c23.Ptr) int32 {
+func Vsscanf(s, format, ap *c23.Void) int32 {
 	return scanC(&strSrc{s: s}, c23.GoString(format), c23.VaOf(ap))
 }
 
-func Vscanf(format, ap c23.Ptr) int32 { return Vfscanf(c23.Stdio(0), format, ap) }
+func Vscanf(format, ap *c23.Void) int32 { return Vfscanf(c23.Stdio(0), format, ap) }
 
-func Vfscanf(f, format, ap c23.Ptr) int32 {
+func Vfscanf(f, format, ap *c23.Void) int32 {
 	fl := c23.FileOf(f)
 	if !fl.Readable() {
 		return -1
@@ -308,7 +308,7 @@ func (s *scanner) scanFloat() (float64, bool) {
 }
 
 // storeInt stores v at p, as an integer of size bytes.
-func storeInt(p c23.Ptr, size int, v uint64) {
+func storeInt(p *c23.Void, size int, v uint64) {
 	switch size {
 	case 1:
 		c23.Store8(p, uint8(v))
@@ -396,9 +396,9 @@ func scanC(src scanSrc, f string, ap *c23.VaList) int32 {
 			return result()
 		}
 		conv := f[i]
-		var dst c23.Ptr
+		var dst *c23.Void
 		if !suppress && conv != 'n' {
-			dst, _ = ap.Next().(c23.Ptr)
+			dst, _ = ap.Next().(*c23.Void)
 		}
 		if conv != 'c' && conv != '[' && conv != 'n' {
 			s.skipSpace()
@@ -407,7 +407,7 @@ func scanC(src scanSrc, f string, ap *c23.VaList) int32 {
 		switch conv {
 		case 'n':
 			if !suppress {
-				p, _ := ap.Next().(c23.Ptr)
+				p, _ := ap.Next().(*c23.Void)
 				storeInt(p, isize, uint64(s.n))
 			}
 			continue

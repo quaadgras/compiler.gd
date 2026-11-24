@@ -46,14 +46,14 @@ var (
 
 // Getpwent is getpwent: the next user of /etc/passwd, or null at the
 // end.
-func Getpwent() c23.Ptr {
+func Getpwent() *c23.Void {
 	pwMu.Lock()
 	if !entRead {
 		entUsers, entRead, entNext = users(), true, 0
 	}
 	if entNext >= len(entUsers) {
 		pwMu.Unlock()
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	e := entUsers[entNext]
 	entNext++
@@ -73,7 +73,7 @@ func Endpwent() { Setpwent() }
 
 // storePasswd stores e as the struct passwd at p, its strings made by
 // str.
-func storePasswd(p c23.Ptr, e pwEntry, str func(string) c23.Ptr) {
+func storePasswd(p *c23.Void, e pwEntry, str func(string) *c23.Void) {
 	uid, _ := strconv.ParseUint(e[2], 10, 32)
 	gid, _ := strconv.ParseUint(e[3], 10, 32)
 	var pw passwd
@@ -89,8 +89,8 @@ func storePasswd(p c23.Ptr, e pwEntry, str func(string) c23.Ptr) {
 // pwResultR is the result of getpwuid_r and getpwnam_r: e as the struct
 // passwd at pw, its strings in the n bytes at buf (ERANGE if they do not
 // fit), and *result pw, or null if there is no such user.
-func pwResultR(e pwEntry, ok bool, pw, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
-	c23.StorePtr(result, c23.Ptr(nil))
+func pwResultR(e pwEntry, ok bool, pw, buf *c23.Void, n uint64, result *c23.Void) int32 {
+	c23.StorePtr(result, (*c23.Void)(nil))
 	if !ok {
 		return 0
 	}
@@ -102,7 +102,7 @@ func pwResultR(e pwEntry, ok bool, pw, buf c23.Ptr, n uint64, result c23.Ptr) in
 		return c23.ERANGE
 	}
 	off := 0
-	storePasswd(pw, e, func(s string) c23.Ptr {
+	storePasswd(pw, e, func(s string) *c23.Void {
 		p := c23.Add(buf, off)
 		copy(c23.BytesAt(p, uintptr(len(s)+1)), s+"\x00")
 		off += len(s) + 1
@@ -113,13 +113,13 @@ func pwResultR(e pwEntry, ok bool, pw, buf c23.Ptr, n uint64, result c23.Ptr) in
 }
 
 // GetpwuidR is getpwuid_r.
-func GetpwuidR(uid uint32, pw, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
+func GetpwuidR(uid uint32, pw, buf *c23.Void, n uint64, result *c23.Void) int32 {
 	e, ok := lookupUser("", uid)
 	return pwResultR(e, ok, pw, buf, n, result)
 }
 
 // GetpwnamR is getpwnam_r.
-func GetpwnamR(name, pw, buf c23.Ptr, n uint64, result c23.Ptr) int32 {
+func GetpwnamR(name, pw, buf *c23.Void, n uint64, result *c23.Void) int32 {
 	s := c23.GoString(name)
 	var e pwEntry
 	ok := false

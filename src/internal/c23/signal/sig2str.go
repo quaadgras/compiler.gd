@@ -27,7 +27,7 @@ const (
 )
 
 // Sig2str is sig2str: str has SIG2STR_MAX (32) bytes.
-func Sig2str(sig int32, str c23.Ptr) int32 {
+func Sig2str(sig int32, str *c23.Void) int32 {
 	var s string
 	switch {
 	case sig > 0 && int(sig) < len(sigNames):
@@ -48,7 +48,7 @@ func Sig2str(sig int32, str c23.Ptr) int32 {
 }
 
 // Str2sig is str2sig: a name without "SIG", or a signal's number.
-func Str2sig(str, pnum c23.Ptr) int32 {
+func Str2sig(str, pnum *c23.Void) int32 {
 	s := c23.GoString(str)
 	sig := int32(-1)
 	for i, n := range sigNames {

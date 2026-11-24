@@ -30,7 +30,7 @@ var unameMachine = map[string]string{
 // from os.Hostname; release, version and domainname from Linux's
 // /proc/sys/kernel (elsewhere, empty); machine from GOARCH, as Linux
 // calls it (x86_64 for amd64, and on darwin arm64).
-func Uname(name c23.Ptr) int32 {
+func Uname(name *c23.Void) int32 {
 	sys := unameSys[runtime.GOOS]
 	if sys == "" {
 		sys = runtime.GOOS

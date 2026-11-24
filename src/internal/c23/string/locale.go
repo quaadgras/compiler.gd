@@ -14,24 +14,24 @@ import (
 // locale's: the library's locales collate alike, and have the same
 // messages.
 
-func StrcollL(a, b, _ c23.Ptr) int32 { return Strcoll(a, b) }
+func StrcollL(a, b, _ *c23.Void) int32 { return Strcoll(a, b) }
 
-func StrxfrmL(d, s c23.Ptr, n uint64, _ c23.Ptr) uint64 { return Strxfrm(d, s, n) }
+func StrxfrmL(d, s *c23.Void, n uint64, _ *c23.Void) uint64 { return Strxfrm(d, s, n) }
 
-func StrerrorL(e int32, _ c23.Ptr) c23.Ptr { return c23.Strerror(e) }
+func StrerrorL(e int32, _ *c23.Void) *c23.Void { return c23.Strerror(e) }
 
 // Memmem is memmem: the first of the n bytes at needle in the hn at
 // haystack, or null; an empty needle is at haystack.
-func Memmem(haystack c23.Ptr, hn uint64, needle c23.Ptr, n uint64) c23.Ptr {
+func Memmem(haystack *c23.Void, hn uint64, needle *c23.Void, n uint64) *c23.Void {
 	if n == 0 {
 		return haystack
 	}
 	if n > hn {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	i := bytes.Index(c23.BytesAt(haystack, uintptr(hn)), c23.BytesAt(needle, uintptr(n)))
 	if i < 0 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.Add(haystack, i)
 }
@@ -40,7 +40,7 @@ func Memmem(haystack c23.Ptr, hn uint64, needle c23.Ptr, n uint64) c23.Ptr {
 // or as much of it as fits with a null (ERANGE), and returns 0, or, as
 // glibc does, EINVAL for a number that is no error's (with its "Unknown
 // error" message).
-func StrerrorR(e int32, buf c23.Ptr, n uint64) int32 {
+func StrerrorR(e int32, buf *c23.Void, n uint64) int32 {
 	msg := c23.ErrnoString(e)
 	r := int32(0)
 	if strings.HasPrefix(msg, "Unknown error") {
@@ -61,7 +61,7 @@ func StrerrorR(e int32, buf c23.Ptr, n uint64) int32 {
 // GnuStrerrorR is glibc's strerror_r (with _GNU_SOURCE): it returns e's
 // message, which is strerror's array for an error's number, or, for
 // another number, its "Unknown error" message at buf (cut to fit).
-func GnuStrerrorR(e int32, buf c23.Ptr, n uint64) c23.Ptr {
+func GnuStrerrorR(e int32, buf *c23.Void, n uint64) *c23.Void {
 	msg := c23.ErrnoString(e)
 	if !strings.HasPrefix(msg, "Unknown error") {
 		return c23.Strerror(e)

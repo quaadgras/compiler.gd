@@ -90,7 +90,7 @@ func wait(q *queue) bool {
 // Msgsnd is msgsnd: the message is the struct { long mtype; char
 // mtext[n]; } at p. It waits while the queue is full (its bytes or
 // messages would pass msg_qbytes), unless flg has IPC_NOWAIT (EAGAIN).
-func Msgsnd(id int32, p c23.Ptr, n uint64, flg int32) int32 {
+func Msgsnd(id int32, p *c23.Void, n uint64, flg int32) int32 {
 	if n > msgmax || id < 0 {
 		return fail(c23.EINVAL)
 	}
@@ -152,7 +152,7 @@ func (q *queue) find(msgtyp int64, flg int32) int {
 // the lowest type at most -msgtyp (< 0), into the struct at p, waiting
 // for one unless flg has IPC_NOWAIT (ENOMSG). A message longer than n
 // bytes is E2BIG, and stays, unless flg has MSG_NOERROR: then it is cut.
-func Msgrcv(id int32, p c23.Ptr, n uint64, msgtyp int64, flg int32) int64 {
+func Msgrcv(id int32, p *c23.Void, n uint64, msgtyp int64, flg int32) int64 {
 	if id < 0 || int64(n) < 0 {
 		return int64(fail(c23.EINVAL))
 	}
@@ -214,7 +214,7 @@ var (
 // Msgctl is msgctl: IPC_STAT, IPC_SET (the owner, the permissions and
 // msg_qbytes) and IPC_RMID (threads waiting on the queue fail with
 // EIDRM).
-func Msgctl(id, cmd int32, buf c23.Ptr) int32 {
+func Msgctl(id, cmd int32, buf *c23.Void) int32 {
 	mu.Lock()
 	defer mu.Unlock()
 	switch cmd {

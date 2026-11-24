@@ -10,7 +10,7 @@ import (
 
 // MallocUsableSize is malloc_usable_size: the size of what malloc
 // returned, which is what it was asked for.
-func MallocUsableSize(p c23.Ptr) uint64 {
+func MallocUsableSize(p *c23.Void) uint64 {
 	if p == nil {
 		return 0
 	}
@@ -19,7 +19,7 @@ func MallocUsableSize(p c23.Ptr) uint64 {
 
 // Memalign is memalign: aligned_alloc, with the alignment rounded up to
 // a power of two, as glibc does.
-func Memalign(align, size uint64) c23.Ptr {
+func Memalign(align, size uint64) *c23.Void {
 	a := uint64(1)
 	for a < align {
 		a <<= 1
@@ -27,8 +27,8 @@ func Memalign(align, size uint64) c23.Ptr {
 	return c23.AlignedAlloc(a, size)
 }
 
-func Valloc(size uint64) c23.Ptr { return c23.AlignedAlloc(4096, size) }
+func Valloc(size uint64) *c23.Void { return c23.AlignedAlloc(4096, size) }
 
-func Pvalloc(size uint64) c23.Ptr {
+func Pvalloc(size uint64) *c23.Void {
 	return c23.AlignedAlloc(4096, (size+4095)&^4095)
 }

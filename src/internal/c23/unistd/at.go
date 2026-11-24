@@ -15,7 +15,7 @@ import (
 // directory, by its name (c23.AtPath).
 
 // Unlinkat is unlinkat: unlink, or rmdir with AT_REMOVEDIR.
-func Unlinkat(dirfd int32, path c23.Ptr, flags int32) int32 {
+func Unlinkat(dirfd int32, path *c23.Void, flags int32) int32 {
 	if flags&^c23.AT_REMOVEDIR != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -41,7 +41,7 @@ func Unlinkat(dirfd int32, path c23.Ptr, flags int32) int32 {
 
 // Linkat is linkat: a link to the symbolic link old itself, or with
 // AT_SYMLINK_FOLLOW to what it names.
-func Linkat(olddirfd int32, old c23.Ptr, newdirfd int32, new c23.Ptr, flags int32) int32 {
+func Linkat(olddirfd int32, old *c23.Void, newdirfd int32, new *c23.Void, flags int32) int32 {
 	if flags&^(c23.AT_SYMLINK_FOLLOW|c23.AT_EMPTY_PATH) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -68,7 +68,7 @@ func Linkat(olddirfd int32, old c23.Ptr, newdirfd int32, new c23.Ptr, flags int3
 
 // Symlinkat is symlinkat: a link at path, relative to dirfd, whose
 // contents are target (not resolved).
-func Symlinkat(target c23.Ptr, dirfd int32, path c23.Ptr) int32 {
+func Symlinkat(target *c23.Void, dirfd int32, path *c23.Void) int32 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1
@@ -77,7 +77,7 @@ func Symlinkat(target c23.Ptr, dirfd int32, path c23.Ptr) int32 {
 }
 
 // Readlinkat is readlinkat.
-func Readlinkat(dirfd int32, path, buf c23.Ptr, n uint64) int64 {
+func Readlinkat(dirfd int32, path, buf *c23.Void, n uint64) int64 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1
@@ -95,7 +95,7 @@ func Readlinkat(dirfd int32, path, buf c23.Ptr, n uint64) int64 {
 // Faccessat is faccessat: access of path relative to dirfd, with the
 // effective ids if AT_EACCESS (where the system can check with them;
 // elsewhere, the real ones).
-func Faccessat(dirfd int32, path c23.Ptr, mode, flags int32) int32 {
+func Faccessat(dirfd int32, path *c23.Void, mode, flags int32) int32 {
 	if mode&^7 != 0 || flags&^(c23.AT_EACCESS|c23.AT_SYMLINK_NOFOLLOW) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -119,7 +119,7 @@ func Faccessat(dirfd int32, path c23.Ptr, mode, flags int32) int32 {
 
 // Fchownat is fchownat: chown, or lchown with AT_SYMLINK_NOFOLLOW; with
 // AT_EMPTY_PATH and an empty path, fchown of dirfd.
-func Fchownat(dirfd int32, path c23.Ptr, uid, gid uint32, flags int32) int32 {
+func Fchownat(dirfd int32, path *c23.Void, uid, gid uint32, flags int32) int32 {
 	if flags&^(c23.AT_SYMLINK_NOFOLLOW|c23.AT_EMPTY_PATH) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -179,7 +179,7 @@ func Dup3(fd, fd2, flags int32) int32 {
 
 // Pipe2 is pipe2: pipe, with O_CLOEXEC (both descriptors are
 // FD_CLOEXEC) and O_NONBLOCK (both ends are non-blocking).
-func Pipe2(fds c23.Ptr, flags int32) int32 {
+func Pipe2(fds *c23.Void, flags int32) int32 {
 	if flags&^(c23.O_CLOEXEC|c23.O_NONBLOCK) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -198,7 +198,7 @@ func Pipe2(fds c23.Ptr, flags int32) int32 {
 
 // Fexecve is fexecve: execve of the program fd is a descriptor of, by the
 // name it was opened by (the exec family's emulation).
-func Fexecve(fd int32, argv, envp c23.Ptr) int32 {
+func Fexecve(fd int32, argv, envp *c23.Void) int32 {
 	of := c23.FdFile(fd)
 	if of == nil || of.F == nil {
 		c23.SetErrno(c23.EBADF)

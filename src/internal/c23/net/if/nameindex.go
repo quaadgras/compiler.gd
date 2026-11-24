@@ -13,11 +13,11 @@ import (
 // an array of struct if_nameindex {unsigned int if_index; char *if_name;}
 // that ends with one of index 0 and a null name; null with errno ENOBUFS
 // if the system's cannot be listed.
-func IfNameindex() Ptr {
+func IfNameindex() *c23.Void {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		c23.SetErrno(c23.ENOBUFS)
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	ws := int(c23.WordSize)
 	a := c23.Malloc(uint64((len(ifs) + 1) * 2 * ws))
@@ -28,9 +28,9 @@ func IfNameindex() Ptr {
 	}
 	e := c23.Add(a, 2*ws*len(ifs))
 	c23.Store32(e, 0)
-	c23.StorePtr(c23.Add(e, ws), Ptr(nil))
+	c23.StorePtr(c23.Add(e, ws), (*c23.Void)(nil))
 	return a
 }
 
 // IfFreenameindex is if_freenameindex: the collector frees the array.
-func IfFreenameindex(p Ptr) {}
+func IfFreenameindex(p *c23.Void) {}

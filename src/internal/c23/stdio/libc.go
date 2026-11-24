@@ -15,21 +15,21 @@ import (
 
 func out() *c23.File { return c23.FileOf(c23.Stdio(1)) }
 
-func Printf(format c23.Ptr, va ...any) int32 { return Vprintf(format, c23.VaStart(va)) }
+func Printf(format *c23.Void, va ...any) int32 { return Vprintf(format, c23.VaStart(va)) }
 
-func Fprintf(f, format c23.Ptr, va ...any) int32 {
+func Fprintf(f, format *c23.Void, va ...any) int32 {
 	return Vfprintf(f, format, c23.VaStart(va))
 }
 
-func Sprintf(s, format c23.Ptr, va ...any) int32 { return Vsprintf(s, format, c23.VaStart(va)) }
+func Sprintf(s, format *c23.Void, va ...any) int32 { return Vsprintf(s, format, c23.VaStart(va)) }
 
-func Snprintf(s c23.Ptr, n uint64, format c23.Ptr, va ...any) int32 {
+func Snprintf(s *c23.Void, n uint64, format *c23.Void, va ...any) int32 {
 	return Vsnprintf(s, n, format, c23.VaStart(va))
 }
 
-func Vprintf(format, ap c23.Ptr) int32 { return Vfprintf(c23.Stdio(1), format, ap) }
+func Vprintf(format, ap *c23.Void) int32 { return Vfprintf(c23.Stdio(1), format, ap) }
 
-func Vfprintf(f, format, ap c23.Ptr) int32 {
+func Vfprintf(f, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	if !c23.FileOf(f).Write(b) {
 		return -1
@@ -37,13 +37,13 @@ func Vfprintf(f, format, ap c23.Ptr) int32 {
 	return int32(len(b))
 }
 
-func Vsprintf(s, format, ap c23.Ptr) int32 {
+func Vsprintf(s, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	copy(c23.BytesAt(s, uintptr(len(b)+1)), append(b, 0))
 	return int32(len(b))
 }
 
-func Vsnprintf(s c23.Ptr, n uint64, format, ap c23.Ptr) int32 {
+func Vsnprintf(s *c23.Void, n uint64, format, ap *c23.Void) int32 {
 	b := c23.FormatC(c23.GoString(format), c23.VaOf(ap))
 	if n > 0 {
 		k := min(uint64(len(b)), n-1)
@@ -52,14 +52,14 @@ func Vsnprintf(s c23.Ptr, n uint64, format, ap c23.Ptr) int32 {
 	return int32(len(b))
 }
 
-func Puts(s c23.Ptr) int32 {
+func Puts(s *c23.Void) int32 {
 	if !out().Write(append([]byte(c23.GoString(s)), '\n')) {
 		return -1
 	}
 	return 0
 }
 
-func Fputs(s, f c23.Ptr) int32 {
+func Fputs(s, f *c23.Void) int32 {
 	if !c23.FileOf(f).Write([]byte(c23.GoString(s))) {
 		return -1
 	}
@@ -68,25 +68,25 @@ func Fputs(s, f c23.Ptr) int32 {
 
 func Putchar(c int32) int32 { return Fputc(c, c23.Stdio(1)) }
 
-func Fputc(c int32, f c23.Ptr) int32 {
+func Fputc(c int32, f *c23.Void) int32 {
 	if !c23.FileOf(f).Write([]byte{byte(c)}) {
 		return -1
 	}
 	return int32(uint8(c))
 }
 
-func Fwrite(p c23.Ptr, size, n uint64, f c23.Ptr) uint64 {
+func Fwrite(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
 	if size == 0 || !c23.FileOf(f).Write(c23.BytesAt(p, uintptr(size*n))) {
 		return 0
 	}
 	return n
 }
 
-func Fgetc(f c23.Ptr) int32 { return c23.FileOf(f).Getc() }
+func Fgetc(f *c23.Void) int32 { return c23.FileOf(f).Getc() }
 
 func Getchar() int32 { return Fgetc(c23.Stdio(0)) }
 
-func Ungetc(c int32, p c23.Ptr) int32 {
+func Ungetc(c int32, p *c23.Void) int32 {
 	if c == -1 {
 		return -1
 	}
@@ -100,9 +100,9 @@ func Ungetc(c int32, p c23.Ptr) int32 {
 	return int32(uint8(c))
 }
 
-func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
+func Fgets(s *c23.Void, n int32, f *c23.Void) *c23.Void {
 	if n <= 0 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	fl := c23.FileOf(f)
 	i := int32(0)
@@ -110,7 +110,7 @@ func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 		c := fl.Getc()
 		if c < 0 {
 			if fl.Err {
-				return c23.Ptr(nil)
+				return (*c23.Void)(nil)
 			}
 			break
 		}
@@ -121,13 +121,13 @@ func Fgets(s c23.Ptr, n int32, f c23.Ptr) c23.Ptr {
 		}
 	}
 	if i == 0 && n > 1 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	c23.Store8(c23.Add(s, int(i)), 0)
 	return s
 }
 
-func Fread(p c23.Ptr, size, n uint64, f c23.Ptr) uint64 {
+func Fread(p *c23.Void, size, n uint64, f *c23.Void) uint64 {
 	if size == 0 || n == 0 {
 		return 0
 	}
@@ -182,16 +182,16 @@ func openMode(m string) (flag int, rd, wr, ok bool) {
 }
 
 // Fopen is fopen.
-func Fopen(name, mode c23.Ptr) c23.Ptr {
+func Fopen(name, mode *c23.Void) *c23.Void {
 	flag, rd, wr, ok := openMode(c23.GoString(mode))
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	f, err := os.OpenFile(c23.GoString(name), flag, 0o666)
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.NewFile(c23.FdNew(f, cflags(flag)), rd, wr)
 }
@@ -199,12 +199,12 @@ func Fopen(name, mode c23.Ptr) c23.Ptr {
 // Freopen is freopen: it closes the stream's file and opens name in its
 // place, or, if name is null, the stream's file again with the new mode.
 // The stream is closed if that fails.
-func Freopen(name, mode, p c23.Ptr) c23.Ptr {
+func Freopen(name, mode, p *c23.Void) *c23.Void {
 	f := c23.FileOf(p)
 	if f.Mem != nil { // a memory stream has no file to reopen
 		Fclose(p)
 		c23.SetErrno(c23.EBADF)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	f.Flush()
 	flag, rd, wr, ok := openMode(c23.GoString(mode))
@@ -218,13 +218,13 @@ func Freopen(name, mode, p c23.Ptr) c23.Ptr {
 	if !ok {
 		c23.SetErrno(c23.EINVAL)
 		f.Close()
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	nf, err := os.OpenFile(path, flag, 0o666)
 	if err != nil {
 		c23.SetErrnoOf(err)
 		f.Close()
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	fdSet(f.Fd, nf, cflags(flag))
 	f.W.Reset(c23.FdIO{F: f})
@@ -236,14 +236,14 @@ func Freopen(name, mode, p c23.Ptr) c23.Ptr {
 
 var tmpnamMu sync.Mutex
 
-var tmpnamBuf c23.Ptr
+var tmpnamBuf *c23.Void
 
 var tmpnamN uint64
 
 // Tmpnam is tmpnam: a name in /tmp of no existing file, at s or, if s is
 // null, in an array the next call reuses. Its names are at most
 // L_tmpnam (20) bytes long, with the null.
-func Tmpnam(s c23.Ptr) c23.Ptr {
+func Tmpnam(s *c23.Void) *c23.Void {
 	tmpnamMu.Lock()
 	defer tmpnamMu.Unlock()
 	if c23.Addr(s) == 0 {
@@ -267,10 +267,10 @@ func Tmpnam(s c23.Ptr) c23.Ptr {
 		copy(c23.BytesAt(s, uintptr(len(name)+1)), append(name, 0))
 		return s
 	}
-	return c23.Ptr(nil)
+	return (*c23.Void)(nil)
 }
 
-func Fclose(p c23.Ptr) int32 {
+func Fclose(p *c23.Void) int32 {
 	f := c23.FileOf(p)
 	r := f.Flush()
 	if f.Mem != nil {
@@ -288,17 +288,17 @@ func Fclose(p c23.Ptr) int32 {
 
 // Tmpfile is tmpfile: a new file, opened w+, removed when closed (on
 // Unix, at once).
-func Tmpfile() c23.Ptr {
+func Tmpfile() *c23.Void {
 	f, err := os.CreateTemp("", "tmpf")
 	if err != nil {
 		c23.SetErrnoOf(err)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	os.Remove(f.Name())
 	return c23.NewFile(c23.FdNew(f, c23.O_RDWR), true, true)
 }
 
-func Fseek(p c23.Ptr, off int64, whence int32) int32 {
+func Fseek(p *c23.Void, off int64, whence int32) int32 {
 	f := c23.FileOf(p)
 	if whence < 0 || whence > 2 {
 		c23.SetErrno(c23.EINVAL)
@@ -319,7 +319,7 @@ func Fseek(p c23.Ptr, off int64, whence int32) int32 {
 	return 0
 }
 
-func Ftell(p c23.Ptr) int64 {
+func Ftell(p *c23.Void) int64 {
 	f := c23.FileOf(p)
 	pos, err := f.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -332,23 +332,23 @@ func Ftell(p c23.Ptr) int64 {
 	return pos + int64(f.W.Buffered())
 }
 
-func Rewind(p c23.Ptr) {
+func Rewind(p *c23.Void) {
 	Fseek(p, 0, io.SeekStart)
 	c23.FileOf(p).Err = false
 }
 
-func Feof(p c23.Ptr) int32 { return c23.B2I(c23.FileOf(p).Eof) }
+func Feof(p *c23.Void) int32 { return c23.B2I(c23.FileOf(p).Eof) }
 
-func Ferror(p c23.Ptr) int32 { return c23.B2I(c23.FileOf(p).Err) }
+func Ferror(p *c23.Void) int32 { return c23.B2I(c23.FileOf(p).Err) }
 
-func Clearerr(p c23.Ptr) {
+func Clearerr(p *c23.Void) {
 	f := c23.FileOf(p)
 	f.Eof, f.Err = false, false
 }
 
 // Setvbuf is setvbuf: _IONBF (2) makes the stream unbuffered; line
 // buffering is full buffering. C's buffer is not used.
-func Setvbuf(p, buf c23.Ptr, mode int32, size uint64) int32 {
+func Setvbuf(p, buf *c23.Void, mode int32, size uint64) int32 {
 	if mode < 0 || mode > 2 {
 		return -1
 	}
@@ -356,11 +356,11 @@ func Setvbuf(p, buf c23.Ptr, mode int32, size uint64) int32 {
 	return 0
 }
 
-func Setbuf(p, buf c23.Ptr) {
+func Setbuf(p, buf *c23.Void) {
 	c23.FileOf(p).Unbuf = c23.Addr(buf) == 0
 }
 
-func Remove(name c23.Ptr) int32 {
+func Remove(name *c23.Void) int32 {
 	if err := os.Remove(c23.GoString(name)); err != nil {
 		c23.SetErrnoOf(err)
 		return -1
@@ -368,7 +368,7 @@ func Remove(name c23.Ptr) int32 {
 	return 0
 }
 
-func Rename(old, new c23.Ptr) int32 {
+func Rename(old, new *c23.Void) int32 {
 	if err := os.Rename(c23.GoString(old), c23.GoString(new)); err != nil {
 		c23.SetErrnoOf(err)
 		return -1
@@ -377,7 +377,7 @@ func Rename(old, new c23.Ptr) int32 {
 }
 
 // Perror is perror: s, then the message of errno, on stderr.
-func Perror(s c23.Ptr) {
+func Perror(s *c23.Void) {
 	msg := c23.ErrnoString(c23.Errno())
 	if c23.Addr(s) != 0 && c23.Load8(s) != 0 {
 		msg = c23.GoString(s) + ": " + msg

@@ -10,7 +10,7 @@ import (
 	"unsafe"
 )
 
-func Strlen(p c23.Ptr) uint64 {
+func Strlen(p *c23.Void) uint64 {
 	n := uint64(0)
 	for c23.Load8(c23.Add(p, int(n))) != 0 {
 		n++
@@ -18,7 +18,7 @@ func Strlen(p c23.Ptr) uint64 {
 	return n
 }
 
-func Strcmp(a, b c23.Ptr) int32 {
+func Strcmp(a, b *c23.Void) int32 {
 	for {
 		x, y := c23.Load8(a), c23.Load8(b)
 		if x != y || x == 0 {
@@ -28,7 +28,7 @@ func Strcmp(a, b c23.Ptr) int32 {
 	}
 }
 
-func Strncmp(a, b c23.Ptr, n uint64) int32 {
+func Strncmp(a, b *c23.Void, n uint64) int32 {
 	for ; n > 0; n-- {
 		x, y := c23.Load8(a), c23.Load8(b)
 		if x != y || x == 0 {
@@ -39,7 +39,7 @@ func Strncmp(a, b c23.Ptr, n uint64) int32 {
 	return 0
 }
 
-func Strcpy(d, s c23.Ptr) c23.Ptr {
+func Strcpy(d, s *c23.Void) *c23.Void {
 	r := d
 	for {
 		c := c23.Load8(s)
@@ -51,7 +51,7 @@ func Strcpy(d, s c23.Ptr) c23.Ptr {
 	}
 }
 
-func Strncpy(d, s c23.Ptr, n uint64) c23.Ptr {
+func Strncpy(d, s *c23.Void, n uint64) *c23.Void {
 	r := d
 	for ; n > 0; n-- {
 		c := c23.Load8(s)
@@ -64,12 +64,12 @@ func Strncpy(d, s c23.Ptr, n uint64) c23.Ptr {
 	return r
 }
 
-func Strcat(d, s c23.Ptr) c23.Ptr {
+func Strcat(d, s *c23.Void) *c23.Void {
 	Strcpy(c23.Add(d, int(Strlen(d))), s)
 	return d
 }
 
-func Strncat(d, s c23.Ptr, n uint64) c23.Ptr {
+func Strncat(d, s *c23.Void, n uint64) *c23.Void {
 	e := c23.Add(d, int(Strlen(d)))
 	for ; n > 0; n-- {
 		c := c23.Load8(s)
@@ -83,21 +83,21 @@ func Strncat(d, s c23.Ptr, n uint64) c23.Ptr {
 	return d
 }
 
-func Strchr(s c23.Ptr, c int32) c23.Ptr {
+func Strchr(s *c23.Void, c int32) *c23.Void {
 	for {
 		x := c23.Load8(s)
 		if x == uint8(c) {
 			return s
 		}
 		if x == 0 {
-			return c23.Ptr(nil)
+			return (*c23.Void)(nil)
 		}
 		s = c23.Add(s, 1)
 	}
 }
 
-func Strrchr(s c23.Ptr, c int32) c23.Ptr {
-	var r c23.Ptr
+func Strrchr(s *c23.Void, c int32) *c23.Void {
+	var r *c23.Void
 	for {
 		x := c23.Load8(s)
 		if x == uint8(c) {
@@ -110,16 +110,16 @@ func Strrchr(s c23.Ptr, c int32) c23.Ptr {
 	}
 }
 
-func Strstr(s, sub c23.Ptr) c23.Ptr {
+func Strstr(s, sub *c23.Void) *c23.Void {
 	h, n := c23.GoString(s), c23.GoString(sub)
 	i := strings.Index(h, n)
 	if i < 0 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.Add(s, i)
 }
 
-func Strspn(s, set c23.Ptr) uint64 {
+func Strspn(s, set *c23.Void) uint64 {
 	h, cs := c23.GoString(s), c23.GoString(set)
 	n := 0
 	for n < len(h) && strings.IndexByte(cs, h[n]) >= 0 {
@@ -128,7 +128,7 @@ func Strspn(s, set c23.Ptr) uint64 {
 	return uint64(n)
 }
 
-func Strcspn(s, set c23.Ptr) uint64 {
+func Strcspn(s, set *c23.Void) uint64 {
 	h, cs := c23.GoString(s), c23.GoString(set)
 	n := 0
 	for n < len(h) && strings.IndexByte(cs, h[n]) < 0 {
@@ -137,9 +137,9 @@ func Strcspn(s, set c23.Ptr) uint64 {
 	return uint64(n)
 }
 
-func Strdup(s c23.Ptr) c23.Ptr { return c23.CString(c23.GoString(s)) }
+func Strdup(s *c23.Void) *c23.Void { return c23.CString(c23.GoString(s)) }
 
-func Strndup(s c23.Ptr, n uint64) c23.Ptr {
+func Strndup(s *c23.Void, n uint64) *c23.Void {
 	g := c23.GoString(s)
 	if uint64(len(g)) > n {
 		g = g[:n]
@@ -147,7 +147,7 @@ func Strndup(s c23.Ptr, n uint64) c23.Ptr {
 	return c23.CString(g)
 }
 
-func Strnlen(p c23.Ptr, max uint64) uint64 {
+func Strnlen(p *c23.Void, max uint64) uint64 {
 	n := uint64(0)
 	for n < max && c23.Load8(c23.Add(p, int(n))) != 0 {
 		n++
@@ -155,42 +155,42 @@ func Strnlen(p c23.Ptr, max uint64) uint64 {
 	return n
 }
 
-func Strpbrk(s, set c23.Ptr) c23.Ptr {
+func Strpbrk(s, set *c23.Void) *c23.Void {
 	n := Strcspn(s, set)
 	if c23.Load8(c23.Add(s, int(n))) == 0 {
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return c23.Add(s, int(n))
 }
 
 // Strcoll is strcoll in the C locale: strcmp.
-func Strcoll(a, b c23.Ptr) int32 { return Strcmp(a, b) }
+func Strcoll(a, b *c23.Void) int32 { return Strcmp(a, b) }
 
 // MemsetExplicit is memset_explicit: memset, which the Go compiler does
 // not remove.
-func MemsetExplicit(p c23.Ptr, c int32, n uint64) c23.Ptr { return c23.Memset(p, c, n) }
+func MemsetExplicit(p *c23.Void, c int32, n uint64) *c23.Void { return c23.Memset(p, c, n) }
 
 var strtokSave = c23.New[unsafe.Pointer]()
 
 // Strtok is strtok, whose state is its last string's rest.
-func Strtok(s, sep c23.Ptr) c23.Ptr { return StrtokR(s, sep, strtokSave) }
+func Strtok(s, sep *c23.Void) *c23.Void { return StrtokR(s, sep, strtokSave) }
 
 // StrtokR is strtok_r.
-func StrtokR(s, sep, save c23.Ptr) c23.Ptr {
+func StrtokR(s, sep, save *c23.Void) *c23.Void {
 	if c23.Addr(s) == 0 {
 		s = c23.LoadPtr(save)
 		if c23.Addr(s) == 0 {
-			return c23.Ptr(nil)
+			return (*c23.Void)(nil)
 		}
 	}
 	s = c23.Add(s, int(Strspn(s, sep)))
 	if c23.Load8(s) == 0 {
-		c23.StorePtr(save, c23.Ptr(nil))
-		return c23.Ptr(nil)
+		c23.StorePtr(save, (*c23.Void)(nil))
+		return (*c23.Void)(nil)
 	}
 	e := c23.Add(s, int(Strcspn(s, sep)))
 	if c23.Load8(e) == 0 {
-		c23.StorePtr(save, c23.Ptr(nil))
+		c23.StorePtr(save, (*c23.Void)(nil))
 	} else {
 		c23.Store8(e, 0)
 		c23.StorePtr(save, c23.Add(e, 1))
@@ -199,12 +199,12 @@ func StrtokR(s, sep, save c23.Ptr) c23.Ptr {
 }
 
 // Memcpy is memcpy and memmove.
-func Memcpy(dst, src c23.Ptr, n uint64) c23.Ptr {
+func Memcpy(dst, src *c23.Void, n uint64) *c23.Void {
 	c23.Memmove(dst, src, uintptr(n))
 	return dst
 }
 
-func Memccpy(dst, src c23.Ptr, c int32, n uint64) c23.Ptr {
+func Memccpy(dst, src *c23.Void, c int32, n uint64) *c23.Void {
 	for i := uint64(0); i < n; i++ {
 		x := c23.Load8(c23.Add(src, int(i)))
 		c23.Store8(c23.Add(dst, int(i)), x)
@@ -212,14 +212,14 @@ func Memccpy(dst, src c23.Ptr, c int32, n uint64) c23.Ptr {
 			return c23.Add(dst, int(i+1))
 		}
 	}
-	return c23.Ptr(nil)
+	return (*c23.Void)(nil)
 }
 
-func Memchr(s c23.Ptr, c int32, n uint64) c23.Ptr {
+func Memchr(s *c23.Void, c int32, n uint64) *c23.Void {
 	for i := uint64(0); i < n; i++ {
 		if c23.Load8(c23.Add(s, int(i))) == uint8(c) {
 			return c23.Add(s, int(i))
 		}
 	}
-	return c23.Ptr(nil)
+	return (*c23.Void)(nil)
 }

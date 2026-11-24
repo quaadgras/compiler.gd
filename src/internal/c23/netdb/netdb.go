@@ -20,11 +20,9 @@ import (
 	"sync"
 )
 
-type Ptr = c23.Ptr
-
 var ws = int(c23.WordSize)
 
-func Addr(p Ptr) uintptr { return c23.Addr(p) }
+func Addr(p *c23.Void) uintptr { return c23.Addr(p) }
 
 // The values of sys/socket.h and netinet/in.h that netdb.h's use.
 const (
@@ -83,7 +81,7 @@ var (
 
 // Getaddrinfo is getaddrinfo, with Go's resolver (the hosts file, then
 // DNS). Each result is one allocation, its address in it.
-func Getaddrinfo(node, service, hints, res Ptr) int32 {
+func Getaddrinfo(node, service, hints, res *c23.Void) int32 {
 	var flags, family, socktype, proto int32
 	if Addr(hints) != 0 {
 		flags = int32(c23.Load32(hints))
@@ -167,7 +165,7 @@ func Getaddrinfo(node, service, hints, res Ptr) int32 {
 		}
 	}
 
-	var head, tail Ptr
+	var head, tail *c23.Void
 	n := 0
 	for _, ip := range ips {
 		ip = ip.Unmap()
@@ -229,7 +227,7 @@ func gaiErr(err error) int32 {
 }
 
 // Freeaddrinfo is freeaddrinfo.
-func Freeaddrinfo(ai Ptr) {
+func Freeaddrinfo(ai *c23.Void) {
 	for Addr(ai) != 0 {
 		next := c23.LoadPtr(c23.Add(ai, aiNext))
 		if c := c23.LoadPtr(c23.Add(ai, aiCanon)); Addr(c) != 0 {
@@ -255,12 +253,12 @@ var gaiText = map[int32]string{
 
 var (
 	textMu  sync.Mutex
-	textMap = map[string]Ptr{}
+	textMap = map[string]*c23.Void{}
 )
 
 // static returns a C string of s that lives as long as the program, one
 // per string.
-func static(s string) Ptr {
+func static(s string) *c23.Void {
 	textMu.Lock()
 	defer textMu.Unlock()
 	p, ok := textMap[s]
@@ -272,7 +270,7 @@ func static(s string) Ptr {
 }
 
 // GaiStrerror is gai_strerror: glibc's messages.
-func GaiStrerror(e int32) Ptr {
+func GaiStrerror(e int32) *c23.Void {
 	if s, ok := gaiText[e]; ok {
 		return static(s)
 	}
@@ -281,7 +279,7 @@ func GaiStrerror(e int32) Ptr {
 
 // Getnameinfo is getnameinfo. The service is the port's number: Go
 // cannot find a port's name.
-func Getnameinfo(addr Ptr, alen uint32, host Ptr, hlen uint32, serv Ptr, slen uint32, flags int32) int32 {
+func Getnameinfo(addr *c23.Void, alen uint32, host *c23.Void, hlen uint32, serv *c23.Void, slen uint32, flags int32) int32 {
 	if alen < 2 {
 		return EAI_FAMILY
 	}
@@ -319,7 +317,7 @@ func Getnameinfo(addr Ptr, alen uint32, host Ptr, hlen uint32, serv Ptr, slen ui
 }
 
 // putString stores s and its NUL in the n bytes at p, if it fits.
-func putString(p Ptr, n uint32, s string) bool {
+func putString(p *c23.Void, n uint32, s string) bool {
 	if uint32(len(s)) >= n {
 		return false
 	}
@@ -333,21 +331,21 @@ func putString(p Ptr, n uint32, s string) bool {
 
 var (
 	hostMu  sync.Mutex
-	hostent Ptr
-	hErrno  = c23.NewTLS(func() Ptr { return c23.Malloc(4) })
+	hostent *c23.Void
+	hErrno  = c23.NewTLS(func() *c23.Void { return c23.Malloc(4) })
 )
 
 // HErrnoLocation is where h_errno is.
-func HErrnoLocation() Ptr { return hErrno.Get() }
+func HErrnoLocation() *c23.Void { return hErrno.Get() }
 
 // SetHErrno sets h_errno (resolv.h's functions' too).
 func SetHErrno(e int32) { c23.Store32(hErrno.Get(), uint32(e)) }
 
 // Gethostbyname is gethostbyname: IPv4 addresses.
-func Gethostbyname(name Ptr) Ptr { return Gethostbyname2(name, AF_INET) }
+func Gethostbyname(name *c23.Void) *c23.Void { return Gethostbyname2(name, AF_INET) }
 
 // Gethostbyname2 is gethostbyname2.
-func Gethostbyname2(name Ptr, family int32) Ptr {
+func Gethostbyname2(name *c23.Void, family int32) *c23.Void {
 	host := c23.GoString(name)
 	var ips []netip.Addr
 	if ip, err := netip.ParseAddr(host); err == nil {
@@ -362,7 +360,7 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 			} else {
 				SetHErrno(HOST_NOT_FOUND)
 			}
-			return Ptr(nil)
+			return (*c23.Void)(nil)
 		}
 		ips = addrs
 	}
@@ -379,13 +377,13 @@ func Gethostbyname2(name Ptr, family int32) Ptr {
 	}
 	if len(bs) == 0 {
 		SetHErrno(NO_DATA)
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return newHostent(host, family, bs)
 }
 
 // Gethostbyaddr is gethostbyaddr.
-func Gethostbyaddr(addr Ptr, n uint32, family int32) Ptr {
+func Gethostbyaddr(addr *c23.Void, n uint32, family int32) *c23.Void {
 	var ip netip.Addr
 	switch {
 	case family == AF_INET && n == 4:
@@ -394,17 +392,17 @@ func Gethostbyaddr(addr Ptr, n uint32, family int32) Ptr {
 		ip = netip.AddrFrom16([16]byte(c23.BytesAt(addr, 16)))
 	default:
 		SetHErrno(NO_RECOVERY)
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	names, err := net.LookupAddr(ip.String())
 	if err != nil || len(names) == 0 {
 		SetHErrno(HOST_NOT_FOUND)
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return newHostent(strings.TrimSuffix(names[0], "."), family, [][]byte{c23.BytesAt(addr, uintptr(n))})
 }
 
-func newHostent(name string, family int32, addrs [][]byte) Ptr {
+func newHostent(name string, family int32, addrs [][]byte) *c23.Void {
 	hostMu.Lock()
 	defer hostMu.Unlock()
 	if Addr(hostent) == 0 {
@@ -413,7 +411,7 @@ func newHostent(name string, family int32, addrs [][]byte) Ptr {
 	h := hostent
 	c23.StorePtr(h, c23.CString(name))
 	aliases := c23.Malloc(uint64(ws))
-	c23.StorePtr(aliases, Ptr(nil))
+	c23.StorePtr(aliases, (*c23.Void)(nil))
 	c23.StorePtr(c23.Add(h, ws), aliases)
 	c23.Store32(c23.Add(h, 2*ws), uint32(family))
 	c23.Store32(c23.Add(h, 2*ws+4), uint32(len(addrs[0])))
@@ -423,13 +421,13 @@ func newHostent(name string, family int32, addrs [][]byte) Ptr {
 		copy(c23.BytesAt(p, uintptr(len(a))), a)
 		c23.StorePtr(c23.Add(list, i*ws), p)
 	}
-	c23.StorePtr(c23.Add(list, len(addrs)*ws), Ptr(nil))
+	c23.StorePtr(c23.Add(list, len(addrs)*ws), (*c23.Void)(nil))
 	c23.StorePtr(c23.Add(h, 2*ws+8), list)
 	return h
 }
 
 // HstrError is hstrerror.
-func HstrError(e int32) Ptr {
+func HstrError(e int32) *c23.Void {
 	switch e {
 	case HOST_NOT_FOUND:
 		return static("Unknown host")
@@ -446,10 +444,10 @@ func HstrError(e int32) Ptr {
 // getservbyname: struct servent {char *s_name; char **s_aliases; int
 // s_port; char *s_proto;}, the port in network order.
 
-var servent Ptr
+var servent *c23.Void
 
 // Getservbyname is getservbyname.
-func Getservbyname(name, proto Ptr) Ptr {
+func Getservbyname(name, proto *c23.Void) *c23.Void {
 	s := c23.GoString(name)
 	p := "tcp"
 	if Addr(proto) != 0 {
@@ -457,14 +455,14 @@ func Getservbyname(name, proto Ptr) Ptr {
 	}
 	port, err := net.LookupPort(p, s)
 	if err != nil {
-		return Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	hostMu.Lock()
 	defer hostMu.Unlock()
 	if Addr(servent) == 0 {
 		servent = c23.Malloc(uint64(4 * ws))
 		aliases := c23.Malloc(uint64(ws))
-		c23.StorePtr(aliases, Ptr(nil))
+		c23.StorePtr(aliases, (*c23.Void)(nil))
 		c23.StorePtr(c23.Add(servent, ws), aliases)
 	}
 	c23.StorePtr(servent, static(s))
@@ -476,20 +474,20 @@ func Getservbyname(name, proto Ptr) Ptr {
 // getprotobyname: struct protoent {char *p_name; char **p_aliases; int
 // p_proto;}, of the protocols Go's sockets have.
 
-var protoent Ptr
+var protoent *c23.Void
 
 var protocols = []struct {
 	name  string
 	proto int32
 }{{"ip", 0}, {"icmp", 1}, {"tcp", 6}, {"udp", 17}, {"ipv6", 41}, {"ipv6-icmp", 58}}
 
-func protoResult(name string, proto int32) Ptr {
+func protoResult(name string, proto int32) *c23.Void {
 	hostMu.Lock()
 	defer hostMu.Unlock()
 	if Addr(protoent) == 0 {
 		protoent = c23.Malloc(uint64(3 * ws))
 		aliases := c23.Malloc(uint64(ws))
-		c23.StorePtr(aliases, Ptr(nil))
+		c23.StorePtr(aliases, (*c23.Void)(nil))
 		c23.StorePtr(c23.Add(protoent, ws), aliases)
 	}
 	c23.StorePtr(protoent, static(name))
@@ -498,22 +496,22 @@ func protoResult(name string, proto int32) Ptr {
 }
 
 // Getprotobyname is getprotobyname.
-func Getprotobyname(name Ptr) Ptr {
+func Getprotobyname(name *c23.Void) *c23.Void {
 	n := c23.GoString(name)
 	for _, p := range protocols {
 		if p.name == n {
 			return protoResult(p.name, p.proto)
 		}
 	}
-	return Ptr(nil)
+	return (*c23.Void)(nil)
 }
 
 // Getprotobynumber is getprotobynumber.
-func Getprotobynumber(proto int32) Ptr {
+func Getprotobynumber(proto int32) *c23.Void {
 	for _, p := range protocols {
 		if p.proto == proto {
 			return protoResult(p.name, p.proto)
 		}
 	}
-	return Ptr(nil)
+	return (*c23.Void)(nil)
 }

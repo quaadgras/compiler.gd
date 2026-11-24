@@ -22,7 +22,7 @@ func randomFill(b []byte) {
 // Getrandom is getrandom: buflen random bytes, from the runtime's
 // generator, whatever the flags (GRND_NONBLOCK, GRND_RANDOM and
 // GRND_INSECURE): it never blocks.
-func Getrandom(buf c23.Ptr, n uint64, flags uint32) int64 {
+func Getrandom(buf *c23.Void, n uint64, flags uint32) int64 {
 	if flags&^7 != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -33,7 +33,7 @@ func Getrandom(buf c23.Ptr, n uint64, flags uint32) int64 {
 
 // Getentropy is getentropy: at most 256 random bytes (errno EIO for
 // more).
-func Getentropy(buf c23.Ptr, n uint64) int32 {
+func Getentropy(buf *c23.Void, n uint64) int32 {
 	if n > 256 {
 		c23.SetErrno(c23.EIO)
 		return -1

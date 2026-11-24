@@ -11,7 +11,7 @@ import (
 
 // iovecs returns the cnt struct iovec {void *iov_base; size_t iov_len}
 // at iov, or ok false (errno EINVAL).
-func iovecs(iov c23.Ptr, cnt int32) (bases []c23.Ptr, lens []int, total int, ok bool) {
+func iovecs(iov *c23.Void, cnt int32) (bases []*c23.Void, lens []int, total int, ok bool) {
 	if cnt < 0 || cnt > 1024 {
 		c23.SetErrno(c23.EINVAL)
 		return nil, nil, 0, false
@@ -31,7 +31,7 @@ func iovecs(iov c23.Ptr, cnt int32) (bases []c23.Ptr, lens []int, total int, ok 
 }
 
 // Readv is readv: one read, into the buffers in order.
-func Readv(fd int32, iov c23.Ptr, cnt int32) int64 {
+func Readv(fd int32, iov *c23.Void, cnt int32) int64 {
 	bases, lens, total, ok := iovecs(iov, cnt)
 	if !ok {
 		return -1
@@ -60,7 +60,7 @@ func Readv(fd int32, iov c23.Ptr, cnt int32) int64 {
 }
 
 // Writev is writev: the buffers in order, with one write.
-func Writev(fd int32, iov c23.Ptr, cnt int32) int64 {
+func Writev(fd int32, iov *c23.Void, cnt int32) int64 {
 	bases, lens, total, ok := iovecs(iov, cnt)
 	if !ok {
 		return -1

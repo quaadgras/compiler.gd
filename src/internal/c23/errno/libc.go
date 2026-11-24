@@ -10,4 +10,4 @@ import (
 
 // ErrnoLoc returns the pointer to the calling thread's errno
 // (__cc_errno).
-func ErrnoLoc() c23.Ptr { return c23.ErrnoLoc() }
+func ErrnoLoc() *c23.Void { return c23.ErrnoLoc() }

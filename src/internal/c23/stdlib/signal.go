@@ -14,7 +14,7 @@ import (
 // status as wait does (its exit status times 256, or the number of the
 // signal that ended it), -1 if it cannot run, or, for a null command,
 // whether there is a shell. It does not flush C's streams first.
-func System(command c23.Ptr) int32 {
+func System(command *c23.Void) int32 {
 	if c23.Addr(command) == 0 {
 		_, err := os.Stat("/bin/sh")
 		return c23.B2I(err == nil)

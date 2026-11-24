@@ -210,7 +210,7 @@ func (g *gen) rewriteCall(b *edit.Buffer, off func(gotoken.Pos) int, line int, c
 // it its capability.
 func (g *gen) pointerArg(b *edit.Buffer, off func(gotoken.Pos) int, a ast.Expr) {
 	if id, ok := a.(*ast.Ident); ok && id.Name == "nil" {
-		b.Replace(off(a.Pos()), off(a.End()), "_c23.Ptr(nil)")
+		b.Replace(off(a.Pos()), off(a.End()), "(*_c23.Void)(nil)")
 		return
 	}
 	// unsafe.Pointer(e): e's capability.

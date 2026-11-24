@@ -51,7 +51,7 @@ func NewIpcPerm(key, flg int32) IpcPerm {
 }
 
 // Store stores p as struct ipc_perm at q.
-func (p *IpcPerm) Store(q Ptr) {
+func (p *IpcPerm) Store(q *Void) {
 	Memset(q, 0, uint64(IpcPermSize))
 	Store32(q, uint32(p.Key))
 	Store32(Add(q, 4), p.Uid)
@@ -64,7 +64,7 @@ func (p *IpcPerm) Store(q Ptr) {
 
 // Set is IPC_SET's: the owner and the permissions of the struct
 // ipc_perm at q.
-func (p *IpcPerm) Set(q Ptr) {
+func (p *IpcPerm) Set(q *Void) {
 	p.Uid = Load32(Add(q, 4))
 	p.Gid = Load32(Add(q, 8))
 	p.Mode = p.Mode&^0o777 | Load32(Add(q, 20))&0o777
@@ -223,7 +223,7 @@ func (b *Broadcast) Notify() {
 
 // LoadTimeout reads the struct timespec at ts, a relative timeout, as a
 // deadline from now; false if it is not a valid one.
-func LoadTimeout(ts Ptr) (time.Time, bool) {
+func LoadTimeout(ts *Void) (time.Time, bool) {
 	sec, nsec := int64(Load64(ts)), LoadLong(Add(ts, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		return time.Time{}, false
@@ -256,17 +256,17 @@ const (
 //
 // in 64 bytes.
 type SigEvent struct {
-	Value    Ptr
+	Value    *Void
 	Signo    int32
 	Notify   int32
-	Function Ptr
+	Function *Void
 }
 
 // SigEventSize is sizeof(struct sigevent).
 const SigEventSize = 64
 
 // LoadSigEvent reads the struct sigevent at p.
-func LoadSigEvent(p Ptr) SigEvent {
+func LoadSigEvent(p *Void) SigEvent {
 	fn := (int(WordSize) + 8 + int(WordSize) - 1) &^ (int(WordSize) - 1)
 	return SigEvent{
 		Value:    LoadPtr(p),
@@ -317,7 +317,7 @@ func (ev *SigEvent) Fire(code int32, self *SigThread) {
 			ThreadsMu.Unlock()
 			v := Malloc(uint64(WordSize)) // the union sigval, by value
 			StorePtr(v, val)
-			FuncOf[func(Ptr)](fn)(v)
+			FuncOf[func(*Void)](fn)(v)
 		})
 	}
 }

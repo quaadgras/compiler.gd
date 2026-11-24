@@ -30,7 +30,7 @@ const (
 
 type segment struct {
 	perm                c23.IpcPerm
-	p                   c23.Ptr
+	p                   *c23.Void
 	size                uint64
 	nattch              int64
 	cpid, lpid          int32
@@ -90,7 +90,7 @@ var shmFailed = c23.FromInt(^uintptr(0))
 // segment cannot be placed at an address (a shmaddr that is not null is
 // EINVAL, but for the segment's own address), and SHM_RDONLY attaches it
 // for writing too.
-func Shmat(id int32, addr c23.Ptr, flg int32) c23.Ptr {
+func Shmat(id int32, addr *c23.Void, flg int32) *c23.Void {
 	mu.Lock()
 	defer mu.Unlock()
 	want := int32(0o600)
@@ -116,7 +116,7 @@ func Shmat(id int32, addr c23.Ptr, flg int32) c23.Ptr {
 
 // Shmdt is shmdt: one attach of the segment at addr ends; a removed
 // segment goes with its last.
-func Shmdt(addr c23.Ptr) int32 {
+func Shmdt(addr *c23.Void) int32 {
 	mu.Lock()
 	defer mu.Unlock()
 	var found *segment
@@ -156,7 +156,7 @@ var (
 // Shmctl is shmctl: IPC_STAT, IPC_SET, IPC_RMID (the segment goes at
 // its last detach, and its key names it no more), and SHM_LOCK and
 // SHM_UNLOCK, which do nothing.
-func Shmctl(id, cmd int32, buf c23.Ptr) int32 {
+func Shmctl(id, cmd int32, buf *c23.Void) int32 {
 	mu.Lock()
 	defer mu.Unlock()
 	switch cmd {

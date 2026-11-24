@@ -12,11 +12,11 @@ import (
 )
 
 // Expressions. rv returns a Go expression of a C value (goType of its
-// type; a struct's is the c23.Ptr to it), emitting first the statements
+// type; a struct's is the *c23.Void to it), emitting first the statements
 // it needs. Where C leaves the order unspecified, those statements may
 // run before the operands they are beside.
 
-// An lval is a C lvalue: a Go variable, or memory at a c23.Ptr.
+// An lval is a C lvalue: a Go variable, or memory at a *c23.Void.
 type lval struct {
 	goVar string
 	addr  string
@@ -118,7 +118,7 @@ func (g *gen) globalName(s *symbol) string {
 }
 
 // compound initializes a compound literal where it is evaluated: its
-// object's c23.Ptr.
+// object's *c23.Void.
 func (g *gen) compound(e *compoundLit) string {
 	if g.o.thin {
 		return taddr(g.tcompound(e))
@@ -149,7 +149,7 @@ func (g *gen) bind(l *lval) {
 	if l.goVar != "" || isSimple(l.addr) {
 		return
 	}
-	t := g.tmp("c23.Ptr")
+	t := g.tmp("*c23.Void")
 	g.p("%s = %s", t, l.addr)
 	l.addr = t
 }
@@ -200,14 +200,14 @@ func isAtomic(l lval) bool {
 }
 
 func atomicLoad(addr string, t *ctype) string {
-	if goType(t) == "c23.Ptr" {
+	if goType(t) == "*c23.Void" {
 		return fmt.Sprintf("c23.AtomicLoadP(%s)", addr)
 	}
 	return fmt.Sprintf("c23.AtomicLoad[%s](%s)", goType(t), addr)
 }
 
 func atomicCAS(addr string, t *ctype, old, new string) string {
-	if goType(t) == "c23.Ptr" {
+	if goType(t) == "*c23.Void" {
 		return fmt.Sprintf("c23.AtomicCASP(%s, %s, %s)", addr, old, new)
 	}
 	return fmt.Sprintf("c23.AtomicCAS(%s, %s, %s)", addr, old, new)
@@ -330,7 +330,7 @@ func (g *gen) storeL(l lval, v string, c expr) {
 	case isAtomicAgg(l):
 		g.p("c23.AtomicStoreAgg(%s, %s, %d)", l.addr, g.toOld(v, l.t), l.t.sizeof())
 	case isAtomic(l):
-		if goType(l.t) == "c23.Ptr" {
+		if goType(l.t) == "*c23.Void" {
 			g.p("c23.AtomicStoreP(%s, %s)", l.addr, g.toOld(v, l.t))
 		} else {
 			if k, ok := c.(*intConst); ok {
@@ -370,7 +370,7 @@ func (g *gen) bitStore(addr string, f *field, v string, c expr) {
 		n = 64
 	}
 	if !isSimple(addr) {
-		t := g.tmp("c23.Ptr")
+		t := g.tmp("*c23.Void")
 		g.p("%s = %s", t, addr)
 		addr = t
 	}
@@ -1105,7 +1105,7 @@ func (g *gen) elvis(e *cond) string {
 		var y string
 		preY := g.capture(func() { y = g.rv(e.y) })
 		truth := t + " != 0"
-		if goType(e.t) == "c23.Ptr" {
+		if goType(e.t) == "*c23.Void" {
 			truth = "c23.Addr(" + t + ") != 0"
 		}
 		g.p("if %s {", truth)
@@ -1200,14 +1200,14 @@ func (g *gen) funcName(s *symbol, at pos) string {
 	return g.names[def]
 }
 
-// funcPtr is the c23.Ptr to a function: its descriptor.
+// funcPtr is the *c23.Void to a function: its descriptor.
 func (g *gen) funcPtr(s *symbol) string {
 	if g.o.thin {
 		return g.tfuncPtr(s)
 	}
 	name := g.funcName(s, s.p)
 	if name == "" {
-		return "c23.Ptr(nil)" // weak, and not defined
+		return "(*c23.Void)(nil)" // weak, and not defined
 	}
 	if s.nested {
 		return fmt.Sprintf("c23.NewFunc(%s)", name)
@@ -1218,7 +1218,7 @@ func (g *gen) funcPtr(s *symbol) string {
 		// package-level initializer would make a cycle if the function
 		// uses its own address.
 		g.descs[d] = true
-		fmt.Fprintf(&g.vars, "var %s c23.Ptr\n", d)
+		fmt.Fprintf(&g.vars, "var %s *c23.Void\n", d)
 		fmt.Fprintf(&g.descInit, "%s = c23.NewFunc(%s)\n", d, g.libcAdapter(name, s))
 	}
 	return d
@@ -1249,7 +1249,7 @@ func (g *gen) callCode(c *call) string {
 		// C++: the object the call constructs.
 		sret = g.lv(into).addr
 		if !isSimple(sret) {
-			t := g.tmp("c23.Ptr")
+			t := g.tmp("*c23.Void")
 			g.p("%s = %s", t, sret)
 			sret = t
 		}
@@ -1471,7 +1471,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 			g.p("c23.AtomicSwapAgg(%s, %s, %s, %d)", p, old, v, et.sizeof())
 			return old
 		}
-		if goType(et) == "c23.Ptr" {
+		if goType(et) == "*c23.Void" {
 			if op == '=' {
 				return fmt.Sprintf("c23.AtomicFetchP(%s, '=', 0, %s)", p, v)
 			}
@@ -1479,7 +1479,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 			if op == '-' {
 				n = "-" + n
 			}
-			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, c23.Ptr(nil))", p, n)
+			return fmt.Sprintf("c23.AtomicFetchP(%s, '+', %s, nil)", p, n)
 		}
 		return fmt.Sprintf("c23.AtomicFetch(%s, %d, %s(%s))", p, op, goType(et), v)
 	case "atomic_cmpxchg":
@@ -1488,7 +1488,7 @@ func (g *gen) builtinCode(e *builtinCall) string {
 		if et.kind == kStruct {
 			return fmt.Sprintf("c23.B2U8(c23.AtomicCmpXchgAgg(%s, %s, %s, %d))", p, ex, d, et.sizeof())
 		}
-		if goType(et) == "c23.Ptr" {
+		if goType(et) == "*c23.Void" {
 			return fmt.Sprintf("uint8(c23.AtomicCmpXchgP(%s, %s, %s))", p, ex, d)
 		}
 		return fmt.Sprintf("uint8(c23.AtomicCmpXchg(%s, %s, %s(%s)))", p, ex, goType(et), d)

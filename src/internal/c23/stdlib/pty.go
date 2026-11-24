@@ -69,24 +69,24 @@ func Unlockpt(fd int32) int32 {
 	return 0
 }
 
-var ptsBuf c23.Ptr
+var ptsBuf *c23.Void
 
 // Ptsname is ptsname: the name of the slave of the master fd, in an
 // array the next call reuses, or null (errno EBADF, ENOTTY).
-func Ptsname(fd int32) c23.Ptr {
+func Ptsname(fd int32) *c23.Void {
 	if c23.Addr(ptsBuf) == 0 {
 		ptsBuf = c23.Malloc(128)
 	}
 	if e := PtsnameR(fd, ptsBuf, 128); e != 0 {
 		c23.SetErrno(e)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	return ptsBuf
 }
 
 // PtsnameR is ptsname_r: the name in the n bytes at buf; an errno value
 // (EBADF, ENOTTY, ERANGE) or 0.
-func PtsnameR(fd int32, buf c23.Ptr, n uint64) int32 {
+func PtsnameR(fd int32, buf *c23.Void, n uint64) int32 {
 	of := c23.FdFile(fd)
 	if of == nil {
 		return c23.EBADF

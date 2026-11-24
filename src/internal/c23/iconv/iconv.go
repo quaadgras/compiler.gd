@@ -8,6 +8,7 @@ import (
 	c23 "internal/c23"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // An encoding is one of iconv's character sets.
@@ -65,7 +66,7 @@ var iconvInfo = c23.TinfoOf[iconvT]()
 
 // IconvOpen is iconv_open: a conversion from fromcode to tocode, or
 // (iconv_t)-1 (errno EINVAL) if one is not a character set iconv has.
-func IconvOpen(tocode, fromcode c23.Ptr) c23.Ptr {
+func IconvOpen(tocode, fromcode *c23.Void) *c23.Void {
 	to, translit, ignore, ok1 := encodingOf(c23.GoString(tocode))
 	from, _, _, ok2 := encodingOf(c23.GoString(fromcode))
 	if !ok1 || !ok2 {
@@ -73,19 +74,19 @@ func IconvOpen(tocode, fromcode c23.Ptr) c23.Ptr {
 		return c23.FromInt(^uintptr(0))
 	}
 	p := c23.New[iconvT]()
-	*(*iconvT)(p) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
+	*(*iconvT)(unsafe.Pointer(p)) = iconvT{from: from, to: to, translit: translit, ignore: ignore}
 	return p
 }
 
-func iconvOf(p c23.Ptr) *iconvT {
+func iconvOf(p *c23.Void) *iconvT {
 	if p == nil {
 		return nil
 	}
-	return (*iconvT)(p)
+	return (*iconvT)(unsafe.Pointer(p))
 }
 
 // IconvClose is iconv_close.
-func IconvClose(cd c23.Ptr) int32 {
+func IconvClose(cd *c23.Void) int32 {
 	if iconvOf(cd) == nil {
 		c23.SetErrno(c23.EBADF)
 		return -1
@@ -227,7 +228,7 @@ func (cv *iconvT) encodeIn(b []byte, to encoding, r rune) []byte {
 // set lacks), EINVAL (an incomplete one at the end of the input) or E2BIG
 // (no room in the output); *inbuf is then at that character. A null
 // inbuf or *inbuf resets the conversion's state.
-func Iconv(cd, inbuf, inleft, outbuf, outleft c23.Ptr) uint64 {
+func Iconv(cd, inbuf, inleft, outbuf, outleft *c23.Void) uint64 {
 	cv := iconvOf(cd)
 	if cv == nil {
 		c23.SetErrno(c23.EBADF)

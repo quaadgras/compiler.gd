@@ -204,7 +204,7 @@ func funcOf(ret *ctype, params ...*ctype) *ctype {
 func (t *ctype) isInteger() bool { return t.kind >= kBool && t.kind <= kUIntCap }
 
 // isCap reports whether t is an intcap (intcap.go in internal/c23): an
-// integer whose value is a c23.Ptr, keeping a pointer's capability.
+// integer whose value is a *c23.Void, keeping a pointer's capability.
 func (t *ctype) isCap() bool { return t.kind == kIntCap || t.kind == kUIntCap }
 
 // capInt is the integer type of an intcap's address.

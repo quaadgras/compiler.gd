@@ -28,7 +28,7 @@ type rwlock struct {
 
 var rwlocks sync.Map // uintptr -> *rwlock
 
-func rwlockOf(p c23.Ptr) *rwlock {
+func rwlockOf(p *c23.Void) *rwlock {
 	c23.Check(p, 4)
 	a := c23.Addr(p)
 	if v, ok := rwlocks.Load(a); ok {
@@ -40,13 +40,13 @@ func rwlockOf(p c23.Ptr) *rwlock {
 
 // PthreadRwlockInit is pthread_rwlock_init: attr says only whether it
 // is shared.
-func PthreadRwlockInit(p, attr c23.Ptr) int32 {
+func PthreadRwlockInit(p, attr *c23.Void) int32 {
 	c23.Check(p, 4)
 	rwlocks.Store(c23.Addr(p), &rwlock{changed: make(chan struct{})})
 	return 0
 }
 
-func PthreadRwlockDestroy(p c23.Ptr) int32 {
+func PthreadRwlockDestroy(p *c23.Void) int32 {
 	rwlocks.Delete(c23.Addr(p))
 	return 0
 }
@@ -95,24 +95,28 @@ func (r *rwlock) lock(write bool, how int, deadline time.Time) int32 {
 	}
 }
 
-func PthreadRwlockRdlock(p c23.Ptr) int32 { return rwlockOf(p).lock(false, c23.LockWait, time.Time{}) }
+func PthreadRwlockRdlock(p *c23.Void) int32 {
+	return rwlockOf(p).lock(false, c23.LockWait, time.Time{})
+}
 
-func PthreadRwlockTryrdlock(p c23.Ptr) int32 {
+func PthreadRwlockTryrdlock(p *c23.Void) int32 {
 	return rwlockOf(p).lock(false, c23.LockTry, time.Time{})
 }
 
-func PthreadRwlockWrlock(p c23.Ptr) int32 { return rwlockOf(p).lock(true, c23.LockWait, time.Time{}) }
+func PthreadRwlockWrlock(p *c23.Void) int32 { return rwlockOf(p).lock(true, c23.LockWait, time.Time{}) }
 
-func PthreadRwlockTrywrlock(p c23.Ptr) int32 { return rwlockOf(p).lock(true, c23.LockTry, time.Time{}) }
+func PthreadRwlockTrywrlock(p *c23.Void) int32 {
+	return rwlockOf(p).lock(true, c23.LockTry, time.Time{})
+}
 
 // PthreadRwlockTimedrdlock is pthread_rwlock_timedrdlock, which gives up
 // at the CLOCK_REALTIME time at ts.
-func PthreadRwlockTimedrdlock(p, ts c23.Ptr) int32 { return timedRwlock(p, ts, false) }
+func PthreadRwlockTimedrdlock(p, ts *c23.Void) int32 { return timedRwlock(p, ts, false) }
 
 // PthreadRwlockTimedwrlock is pthread_rwlock_timedwrlock.
-func PthreadRwlockTimedwrlock(p, ts c23.Ptr) int32 { return timedRwlock(p, ts, true) }
+func PthreadRwlockTimedwrlock(p, ts *c23.Void) int32 { return timedRwlock(p, ts, true) }
 
-func timedRwlock(p, ts c23.Ptr, write bool) int32 {
+func timedRwlock(p, ts *c23.Void, write bool) int32 {
 	r := rwlockOf(p)
 	if e := r.lock(write, c23.LockTry, time.Time{}); e != c23.EBUSY {
 		return e
@@ -126,7 +130,7 @@ func timedRwlock(p, ts c23.Ptr, write bool) int32 {
 
 // PthreadRwlockUnlock is pthread_rwlock_unlock: the calling thread's
 // write lock, or a read lock. EPERM if it is not locked.
-func PthreadRwlockUnlock(p c23.Ptr) int32 {
+func PthreadRwlockUnlock(p *c23.Void) int32 {
 	r := rwlockOf(p)
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -160,7 +164,7 @@ var barriers sync.Map // uintptr -> *barrier
 const barrierSerial = -1
 
 // PthreadBarrierInit is pthread_barrier_init: EINVAL for a count of 0.
-func PthreadBarrierInit(p, attr c23.Ptr, count uint32) int32 {
+func PthreadBarrierInit(p, attr *c23.Void, count uint32) int32 {
 	if count == 0 {
 		return c23.EINVAL
 	}
@@ -169,7 +173,7 @@ func PthreadBarrierInit(p, attr c23.Ptr, count uint32) int32 {
 	return 0
 }
 
-func PthreadBarrierDestroy(p c23.Ptr) int32 {
+func PthreadBarrierDestroy(p *c23.Void) int32 {
 	barriers.Delete(c23.Addr(p))
 	return 0
 }
@@ -177,7 +181,7 @@ func PthreadBarrierDestroy(p c23.Ptr) int32 {
 // PthreadBarrierWait is pthread_barrier_wait: the last thread to arrive
 // gets PTHREAD_BARRIER_SERIAL_THREAD, the others 0. EINVAL if the barrier
 // was not initialized.
-func PthreadBarrierWait(p c23.Ptr) int32 {
+func PthreadBarrierWait(p *c23.Void) int32 {
 	v, ok := barriers.Load(c23.Addr(p))
 	if !ok {
 		return c23.EINVAL
@@ -200,13 +204,13 @@ func PthreadBarrierWait(p c23.Ptr) int32 {
 
 // Spin locks: pthread_spinlock_t is an int, 0 when it is free.
 
-func PthreadSpinInit(p c23.Ptr, pshared int32) int32 { c23.AtomicStore(p, int32(0)); return 0 }
+func PthreadSpinInit(p *c23.Void, pshared int32) int32 { c23.AtomicStore(p, int32(0)); return 0 }
 
-func PthreadSpinDestroy(p c23.Ptr) int32 { return 0 }
+func PthreadSpinDestroy(p *c23.Void) int32 { return 0 }
 
 // PthreadSpinLock is pthread_spin_lock, which spins, yielding to the
 // other goroutines between tries.
-func PthreadSpinLock(p c23.Ptr) int32 {
+func PthreadSpinLock(p *c23.Void) int32 {
 	for i := 0; !c23.AtomicCAS(p, int32(0), int32(1)); i++ {
 		if i >= 64 {
 			runtime.Gosched()
@@ -215,8 +219,8 @@ func PthreadSpinLock(p c23.Ptr) int32 {
 	return 0
 }
 
-func PthreadSpinTrylock(p c23.Ptr) int32 {
+func PthreadSpinTrylock(p *c23.Void) int32 {
 	return c23.If[int32](c23.AtomicCAS(p, int32(0), int32(1)), 0, c23.EBUSY)
 }
 
-func PthreadSpinUnlock(p c23.Ptr) int32 { c23.AtomicStore(p, int32(0)); return 0 }
+func PthreadSpinUnlock(p *c23.Void) int32 { c23.AtomicStore(p, int32(0)); return 0 }

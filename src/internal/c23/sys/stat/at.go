@@ -16,7 +16,7 @@ import (
 
 // Fstatat is fstatat: stat, or lstat with AT_SYMLINK_NOFOLLOW, of path
 // relative to dirfd; with AT_EMPTY_PATH and an empty path, fstat of dirfd.
-func Fstatat(dirfd int32, path, buf c23.Ptr, flags int32) int32 {
+func Fstatat(dirfd int32, path, buf *c23.Void, flags int32) int32 {
 	if flags&^(c23.AT_SYMLINK_NOFOLLOW|c23.AT_EMPTY_PATH) != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -43,7 +43,7 @@ func Fstatat(dirfd int32, path, buf c23.Ptr, flags int32) int32 {
 }
 
 // Mkdirat is mkdirat.
-func Mkdirat(dirfd int32, path c23.Ptr, mode uint32) int32 {
+func Mkdirat(dirfd int32, path *c23.Void, mode uint32) int32 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1
@@ -53,7 +53,7 @@ func Mkdirat(dirfd int32, path c23.Ptr, mode uint32) int32 {
 
 // Fchmodat is fchmodat. With AT_SYMLINK_NOFOLLOW, a symbolic link's mode
 // cannot be changed (EOPNOTSUPP), as on Linux.
-func Fchmodat(dirfd int32, path c23.Ptr, mode uint32, flags int32) int32 {
+func Fchmodat(dirfd int32, path *c23.Void, mode uint32, flags int32) int32 {
 	if flags&^c23.AT_SYMLINK_NOFOLLOW != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -83,7 +83,7 @@ const (
 
 // loadTimes reads utimensat's times: two struct timespecs, or now if
 // times is null. A zero time.Time is one not to change (UTIME_OMIT).
-func loadTimes(times c23.Ptr) (at, mt time.Time, ok bool) {
+func loadTimes(times *c23.Void) (at, mt time.Time, ok bool) {
 	now := time.Now()
 	if c23.Addr(times) == 0 {
 		return now, now, true
@@ -109,7 +109,7 @@ func loadTimes(times c23.Ptr) (at, mt time.Time, ok bool) {
 // Utimensat is utimensat: the access and modification times of path
 // relative to dirfd, to nanoseconds. With AT_SYMLINK_NOFOLLOW, a
 // symbolic link's own times are set only on Linux (EOPNOTSUPP elsewhere).
-func Utimensat(dirfd int32, path, times c23.Ptr, flags int32) int32 {
+func Utimensat(dirfd int32, path, times *c23.Void, flags int32) int32 {
 	if flags&^c23.AT_SYMLINK_NOFOLLOW != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -138,7 +138,7 @@ func Utimensat(dirfd int32, path, times c23.Ptr, flags int32) int32 {
 
 // Futimens is futimens: the times of fd's file, which are set by its
 // name (the name it was opened by).
-func Futimens(fd int32, times c23.Ptr) int32 {
+func Futimens(fd int32, times *c23.Void) int32 {
 	f := c23.FdOS(fd)
 	if f == nil {
 		return -1
@@ -155,12 +155,12 @@ func Futimens(fd int32, times c23.Ptr) int32 {
 
 // Mkfifo is mkfifo: the system's, where it has named pipes (ENOSYS
 // elsewhere).
-func Mkfifo(path c23.Ptr, mode uint32) int32 {
+func Mkfifo(path *c23.Void, mode uint32) int32 {
 	return c23.ErrRet(mkfifo(c23.GoString(path), mode&0o7777))
 }
 
 // Mkfifoat is mkfifoat.
-func Mkfifoat(dirfd int32, path c23.Ptr, mode uint32) int32 {
+func Mkfifoat(dirfd int32, path *c23.Void, mode uint32) int32 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1
@@ -170,12 +170,12 @@ func Mkfifoat(dirfd int32, path c23.Ptr, mode uint32) int32 {
 
 // Mknod is mknod: the system's (ENOSYS where it has none). A regular
 // file or a FIFO needs no privilege; a device does.
-func Mknod(path c23.Ptr, mode uint32, dev uint64) int32 {
+func Mknod(path *c23.Void, mode uint32, dev uint64) int32 {
 	return c23.ErrRet(mknod(c23.GoString(path), mode, dev))
 }
 
 // Mknodat is mknodat.
-func Mknodat(dirfd int32, path c23.Ptr, mode uint32, dev uint64) int32 {
+func Mknodat(dirfd int32, path *c23.Void, mode uint32, dev uint64) int32 {
 	name, ok := c23.AtName(dirfd, path)
 	if !ok {
 		return -1

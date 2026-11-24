@@ -12,17 +12,17 @@ import (
 
 var dotOnce sync.Once
 
-var dotStr c23.Ptr
+var dotStr *c23.Void
 
 // dot is the "." basename and dirname return for an empty path.
-func dot() c23.Ptr {
+func dot() *c23.Void {
 	dotOnce.Do(func() { dotStr = c23.CString(".") })
 	return dotStr
 }
 
 // Basename is POSIX's basename (glibc's __xpg_basename): the last element
 // of path, whose trailing slashes it removes in place.
-func Basename(path c23.Ptr) c23.Ptr {
+func Basename(path *c23.Void) *c23.Void {
 	if c23.Addr(path) == 0 || c23.Load8(path) == 0 {
 		return dot()
 	}
@@ -37,7 +37,7 @@ func Basename(path c23.Ptr) c23.Ptr {
 
 // Dirname is dirname: path without its last element, which it removes
 // in place, as musl does ("//" is "/", where glibc keeps "//").
-func Dirname(path c23.Ptr) c23.Ptr {
+func Dirname(path *c23.Void) *c23.Void {
 	if c23.Addr(path) == 0 || c23.Load8(path) == 0 {
 		return dot()
 	}

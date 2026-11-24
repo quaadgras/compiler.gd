@@ -7,16 +7,17 @@ package stdio
 import (
 	"bufio"
 	c23 "internal/c23"
+	"unsafe"
 )
 
 // newMemFile returns a stream of m.
-func newMemFile(m *MemFile, rd, wr bool) c23.Ptr { return NewMemStream(m, rd, wr) }
+func newMemFile(m *MemFile, rd, wr bool) *c23.Void { return NewMemStream(m, rd, wr) }
 
 // NewMemStream returns a stream of m, which it reads and writes as a
 // file.
-func NewMemStream(m c23.MemStream, rd, wr bool) c23.Ptr {
+func NewMemStream(m c23.MemStream, rd, wr bool) *c23.Void {
 	p := c23.New[c23.File]()
-	fl := (*c23.File)(p)
+	fl := (*c23.File)(unsafe.Pointer(p))
 	fl.Fd = -1
 	fl.Mem = m
 	fl.W = bufio.NewWriter(c23.FdIO{F: fl})
@@ -32,12 +33,12 @@ func NewMemStream(m c23.MemStream, rd, wr bool) c23.Ptr {
 // none (it stores a null at buf); a starts after the first null. A write
 // stores a null after what it wrote where there is room, unless the mode
 // has b.
-func Fmemopen(buf c23.Ptr, size uint64, mode c23.Ptr) c23.Ptr {
+func Fmemopen(buf *c23.Void, size uint64, mode *c23.Void) *c23.Void {
 	md := c23.GoString(mode)
 	_, rd, wr, ok := openMode(md)
 	if !ok || size == 0 {
 		c23.SetErrno(c23.EINVAL)
-		return c23.Ptr(nil)
+		return (*c23.Void)(nil)
 	}
 	m := &MemFile{Buf: buf, Size: int(size)}
 	for i := 1; i < len(md); i++ {
@@ -66,7 +67,7 @@ func Fmemopen(buf c23.Ptr, size uint64, mode c23.Ptr) c23.Ptr {
 // allocates and grows, whose address and the position (the size written)
 // fflush and fclose store at *bufp and *sizep. What it holds ends with a
 // null; C frees it after fclose.
-func OpenMemstream(bufp, sizep c23.Ptr) c23.Ptr {
+func OpenMemstream(bufp, sizep *c23.Void) *c23.Void {
 	m := &MemFile{Dyn: true, Bufp: bufp, Sizep: sizep}
 	m.Sync()
 	return newMemFile(m, false, true)

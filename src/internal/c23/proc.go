@@ -38,7 +38,7 @@ var (
 )
 
 // goStrings reads a null-terminated array of strings, such as argv.
-func GoStrings(p Ptr) []string {
+func GoStrings(p *Void) []string {
 	var s []string
 	if Addr(p) == 0 {
 		return nil
@@ -79,7 +79,7 @@ const (
 // search) with args and the environment envp, whose descriptors are the
 // program's after acts. owned are the files the actions opened, which
 // the caller closes once the child started; e is an errno value.
-func Command(path string, search bool, args []string, envp Ptr, acts []SpawnAction) (cmd *exec.Cmd, owned []*os.File, e int32) {
+func Command(path string, search bool, args []string, envp *Void, acts []SpawnAction) (cmd *exec.Cmd, owned []*os.File, e int32) {
 	if path == "" {
 		return nil, nil, ENOENT
 	}

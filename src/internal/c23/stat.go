@@ -43,10 +43,10 @@ var ()
 
 // AlignedAlloc is aligned_alloc: size bytes of untyped memory, at a
 // multiple of align, which must be a power of two (errno EINVAL).
-func AlignedAlloc(align, size uint64) Ptr {
+func AlignedAlloc(align, size uint64) *Void {
 	if align == 0 || align&(align-1) != 0 {
 		SetErrno(EINVAL)
-		return Ptr(nil)
+		return (*Void)(nil)
 	}
 	if align <= 8 {
 		return Malloc(size)

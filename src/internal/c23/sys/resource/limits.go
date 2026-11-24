@@ -69,7 +69,7 @@ const RLIM_INFINITY = ^uint64(0)
 // none, or the system has no limits C can see). Go raises the limit of
 // open files (RLIMIT_NOFILE) to its maximum when the program starts, so
 // that one is not what the program was started with.
-func Getrlimit(res int32, rl c23.Ptr) int32 {
+func Getrlimit(res int32, rl *c23.Void) int32 {
 	if res < 0 || res >= RLIMIT_NLIMITS {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -86,7 +86,7 @@ func Getrlimit(res int32, rl c23.Ptr) int32 {
 
 // Setrlimit is setrlimit: the system's (EPERM where it has none, or
 // the system has not the resource).
-func Setrlimit(res int32, rl c23.Ptr) int32 {
+func Setrlimit(res int32, rl *c23.Void) int32 {
 	if res < 0 || res >= RLIMIT_NLIMITS {
 		c23.SetErrno(c23.EINVAL)
 		return -1

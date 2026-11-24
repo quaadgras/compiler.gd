@@ -101,11 +101,11 @@ func TestCancel() {
 
 // A cleanupHandler is what pthread_cleanup_push pushed: a void
 // (*)(void *) and its argument.
-type cleanupHandler struct{ f, arg Ptr }
+type cleanupHandler struct{ f, arg *Void }
 
 // CleanupPush pushes cleanup handler f, a void (*)(void *), with arg.
-func CleanupPush(f, arg Ptr) {
-	FuncOf[func(Ptr)](f)
+func CleanupPush(f, arg *Void) {
+	FuncOf[func(*Void)](f)
 	tb := GSelf()
 	tb.cleanup = append(tb.cleanup, cleanupHandler{f, arg})
 }
@@ -120,7 +120,7 @@ func CleanupPop(run bool) {
 	h := tb.cleanup[n-1]
 	tb.cleanup = tb.cleanup[:n-1]
 	if run {
-		FuncOf[func(Ptr)](h.f)(h.arg)
+		FuncOf[func(*Void)](h.f)(h.arg)
 	}
 }
 
@@ -129,7 +129,7 @@ func CleanupPop(run bool) {
 // thread-specific data's destructors run as it ends). The main thread
 // waits for the program's other threads to end, then the program exits
 // with status 0, as when the last thread ends in C.
-func ExitThread(ret Ptr) {
+func ExitThread(ret *Void) {
 	tb := GSelf()
 	for len(tb.cleanup) > 0 {
 		CleanupPop(true)
@@ -254,7 +254,7 @@ func ClockNow(id int32) (time.Duration, bool) {
 // LoadTimespec reads the struct timespec at ts as a duration: false if
 // its nanoseconds are not between 0 and 999999999 or its seconds are
 // negative.
-func LoadTimespec(ts Ptr) (time.Duration, bool) {
+func LoadTimespec(ts *Void) (time.Duration, bool) {
 	sec, nsec := int64(Load64(ts)), LoadLong(Add(ts, 8))
 	if sec < 0 || nsec < 0 || nsec >= 1e9 {
 		return 0, false
@@ -266,14 +266,14 @@ func LoadTimespec(ts Ptr) (time.Duration, bool) {
 }
 
 // StoreTimespec stores d as the struct timespec at ts.
-func StoreTimespec(ts Ptr, d time.Duration) {
+func StoreTimespec(ts *Void, d time.Duration) {
 	Store64(ts, uint64(d/time.Second))
 	StoreLong(Add(ts, 8), int64(d%time.Second))
 }
 
 // LoadClockDeadline reads the struct timespec at ts, a time on clock id:
 // false if it is not one.
-func LoadClockDeadline(id int32, ts Ptr) (time.Time, bool) {
+func LoadClockDeadline(id int32, ts *Void) (time.Time, bool) {
 	if id == CLOCK_REALTIME {
 		return LoadDeadline(ts)
 	}

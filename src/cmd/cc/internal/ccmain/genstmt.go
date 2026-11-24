@@ -16,8 +16,8 @@ type localKind uint8
 
 const (
 	lkVar     localKind = iota // a Go variable of its value
-	lkCell                     // a c23.Obj on the stack; the Go variable is its c23.Ptr
-	lkHeap                     // a variable length array: the Go variable is its c23.Ptr
+	lkCell                     // a c23.Obj on the stack; the Go variable is its *c23.Void
+	lkHeap                     // a variable length array: the Go variable is its *c23.Void
 	lkAligned                  // aligned more than Go aligns: in the heap (c23.NewAligned)
 )
 
@@ -40,9 +40,9 @@ func (g *gen) funcSig(ft *funcType, names []string) string {
 	}
 	var ps []string
 	if ft.ret.kind == kStruct && names != nil {
-		ps = append(ps, "sret c23.Ptr")
+		ps = append(ps, "sret *c23.Void")
 	} else if ft.ret.kind == kStruct {
-		ps = append(ps, "c23.Ptr") // a type: its parameters have no names
+		ps = append(ps, "*c23.Void") // a type: its parameters have no names
 	}
 	for i, pt := range ft.params {
 		if names != nil {
@@ -79,7 +79,7 @@ func (g *gen) tmp(t string) string {
 	return n
 }
 
-// cellTmp makes a temporary object of type t on the stack: its c23.Ptr.
+// cellTmp makes a temporary object of type t on the stack: its *c23.Void.
 func (g *gen) cellTmp(t *ctype) string {
 	g.tmpN++
 	if g.fn == nil {
@@ -123,7 +123,7 @@ func (g *gen) declareLocal(s *symbol) {
 			g.objs[s] = fmt.Sprintf("o%d.V", g.tmpN)
 		}
 	case lkHeap:
-		fmt.Fprintf(&g.locals, "var %s c23.Ptr\n_ = %s\n", n, n)
+		fmt.Fprintf(&g.locals, "var %s *c23.Void\n_ = %s\n", n, n)
 	case lkAligned:
 		fmt.Fprintf(&g.cells, "%s := c23.NewAlignedT(%s, %d)\n_ = %s\n", n, g.typeDesc(g.objMirror(s.t)), s.t.alignof(), n)
 	}
@@ -274,8 +274,8 @@ func (g *gen) ret(v string) {
 }
 
 func zeroOf(t *ctype) string {
-	if goType(t) == "c23.Ptr" {
-		return "c23.Ptr(nil)"
+	if goType(t) == "*c23.Void" {
+		return "(*c23.Void)(nil)"
 	}
 	if is128(t) {
 		return goType(t) + "{}"
@@ -423,7 +423,7 @@ func (g *gen) stmt(s stmt) {
 		if s.x != nil {
 			// goto *x: to the label whose address x is.
 			if g.o.thin {
-				g.p("switch c23.LabelOf(%s) {", g.unsafePtr(g.rv(s.x), s.x.ty()))
+				g.p("switch c23.LabelOf(%s) {", g.vptr(g.rv(s.x), s.x.ty()))
 			} else {
 				g.p("switch c23.Addr(%s) {", g.rv(s.x))
 			}

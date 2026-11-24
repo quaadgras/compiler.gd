@@ -19,8 +19,6 @@ import (
 	"unsafe"
 )
 
-type Ptr = c23.Ptr
-
 const (
 	WRDE_DOOFFS  = 1
 	WRDE_APPEND  = 2
@@ -602,7 +600,7 @@ func (p *parser) command(cmd string) (string, error) {
 	if p.flags&WRDE_NOCMD != 0 {
 		return "", errWord(WRDE_CMDSUB)
 	}
-	c23.Fflush(Ptr(nil))
+	c23.Fflush((*c23.Void)(nil))
 	sh := exec.Command("/bin/sh", "-c", cmd)
 	sh.Stdin = os.Stdin
 	if p.flags&WRDE_SHOWERR != 0 {
@@ -749,7 +747,7 @@ type wordexpT struct {
 // splitting on IFS, pathname expansion and quote removal, as a POSIX
 // shell does; a word whose pattern matches no file is kept. we is not
 // changed on an error.
-func Wordexp(words, we Ptr, flags int32) int32 {
+func Wordexp(words, we *c23.Void, flags int32) int32 {
 	found, e := expandWords(c23.GoString(words), flags)
 	if e != 0 {
 		return e
@@ -761,7 +759,7 @@ func Wordexp(words, we Ptr, flags int32) int32 {
 	if flags&WRDE_DOOFFS != 0 {
 		offs = int(c23.LoadLong(c23.Add(we, offOffs)))
 	}
-	var old []Ptr
+	var old []*c23.Void
 	if flags&WRDE_APPEND != 0 {
 		n := int(c23.LoadLong(we))
 		if pv := c23.LoadPtr(c23.Add(we, offWordv)); c23.Addr(pv) != 0 {
@@ -787,11 +785,11 @@ func Wordexp(words, we Ptr, flags int32) int32 {
 }
 
 // Wordfree is wordfree: the collector frees the words.
-func Wordfree(we Ptr) {
+func Wordfree(we *c23.Void) {
 	if c23.Addr(we) == 0 {
 		return
 	}
 	var t wordexpT
 	c23.StoreLong(we, 0)
-	c23.StorePtr(c23.Add(we, int(unsafe.Offsetof(t.wordv))), Ptr(nil))
+	c23.StorePtr(c23.Add(we, int(unsafe.Offsetof(t.wordv))), (*c23.Void)(nil))
 }

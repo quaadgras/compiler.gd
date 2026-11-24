@@ -67,7 +67,7 @@ func FdDirName(fd int32) (string, int32) {
 }
 
 // AtName is AtPath of the C string path, setting errno if it fails.
-func AtName(dirfd int32, path Ptr) (string, bool) {
+func AtName(dirfd int32, path *Void) (string, bool) {
 	name, e := AtPath(dirfd, GoString(path))
 	if e != 0 {
 		SetErrno(e)

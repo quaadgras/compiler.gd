@@ -27,7 +27,7 @@ var mapFailed = c23.FromInt(^uintptr(0))
 // memory, and a private mapping of a file a copy of what it holds (zeros
 // past its end). A shared mapping of a file fails (ENODEV), as does
 // MAP_FIXED (EINVAL); prot is not enforced.
-func Mmap(addr c23.Ptr, length uint64, prot, flags, fd int32, off int64) c23.Ptr {
+func Mmap(addr *c23.Void, length uint64, prot, flags, fd int32, off int64) *c23.Void {
 	page := int64(os.Getpagesize())
 	share := flags & (MAP_SHARED | MAP_PRIVATE)
 	if length == 0 || share == 0 || share == MAP_SHARED|MAP_PRIVATE || flags&MAP_FIXED != 0 || off < 0 || off%page != 0 {
@@ -54,7 +54,7 @@ func Mmap(addr c23.Ptr, length uint64, prot, flags, fd int32, off int64) c23.Ptr
 
 // Munmap is munmap: the collector frees the memory when it is no longer
 // reachable.
-func Munmap(addr c23.Ptr, length uint64) int32 {
+func Munmap(addr *c23.Void, length uint64) int32 {
 	if length == 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -63,24 +63,24 @@ func Munmap(addr c23.Ptr, length uint64) int32 {
 }
 
 // Msync is msync: no mapping is shared with a file.
-func Msync(addr c23.Ptr, length uint64, flags int32) int32 { return 0 }
+func Msync(addr *c23.Void, length uint64, flags int32) int32 { return 0 }
 
 // Mprotect is mprotect, which changes nothing.
-func Mprotect(addr c23.Ptr, length uint64, prot int32) int32 { return 0 }
+func Mprotect(addr *c23.Void, length uint64, prot int32) int32 { return 0 }
 
 // Madvise is madvise, which takes no advice.
-func Madvise(addr c23.Ptr, length uint64, advice int32) int32 { return 0 }
+func Madvise(addr *c23.Void, length uint64, advice int32) int32 { return 0 }
 
 var sharedMu sync.Mutex
 
-var sharedMaps = map[sharedKey]c23.Ptr{}
+var sharedMaps = map[sharedKey]*c23.Void{}
 
 type sharedKey struct {
 	file     string
 	off, len int64
 }
 
-func mapShared(f *os.File, length uint64, off, page int64) c23.Ptr {
+func mapShared(f *os.File, length uint64, off, page int64) *c23.Void {
 	name := f.Name()
 	if abs, err := filepath.Abs(name); err == nil {
 		name = abs

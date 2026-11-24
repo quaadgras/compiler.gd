@@ -148,7 +148,7 @@ const (
 	offOspeed = 56
 )
 
-func load(p c23.Ptr) termios {
+func load(p *c23.Void) termios {
 	var t termios
 	t.iflag = c23.Load32(p)
 	t.oflag = c23.Load32(c23.Add(p, 4))
@@ -163,7 +163,7 @@ func load(p c23.Ptr) termios {
 	return t
 }
 
-func store(p c23.Ptr, t *termios) {
+func store(p *c23.Void, t *termios) {
 	c23.Store32(p, t.iflag)
 	c23.Store32(c23.Add(p, 4), t.oflag)
 	c23.Store32(c23.Add(p, 8), t.cflag)
@@ -196,7 +196,7 @@ func result(err error) int32 {
 }
 
 // Tcgetattr is tcgetattr.
-func Tcgetattr(fd int32, t c23.Ptr) int32 {
+func Tcgetattr(fd int32, t *c23.Void) int32 {
 	f := fdTTY(fd)
 	if f == nil {
 		return -1
@@ -212,7 +212,7 @@ func Tcgetattr(fd int32, t c23.Ptr) int32 {
 }
 
 // Tcsetattr is tcsetattr.
-func Tcsetattr(fd, act int32, t c23.Ptr) int32 {
+func Tcsetattr(fd, act int32, t *c23.Void) int32 {
 	if act < TCSANOW || act > TCSAFLUSH {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -306,7 +306,7 @@ func Tcgetsid(fd int32) int32 {
 }
 
 // Cfmakeraw is cfmakeraw.
-func Cfmakeraw(t c23.Ptr) {
+func Cfmakeraw(t *c23.Void) {
 	tio := load(t)
 	tio.iflag &^= IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON
 	tio.oflag &^= OPOST
@@ -319,13 +319,13 @@ func Cfmakeraw(t c23.Ptr) {
 }
 
 // Cfgetospeed is cfgetospeed: the B constant c_cflag has.
-func Cfgetospeed(t c23.Ptr) uint32 { return c23.Load32(c23.Add(t, 8)) & CBAUD }
+func Cfgetospeed(t *c23.Void) uint32 { return c23.Load32(c23.Add(t, 8)) & CBAUD }
 
 // Cfgetispeed is cfgetispeed, which is the output's (as musl's).
-func Cfgetispeed(t c23.Ptr) uint32 { return Cfgetospeed(t) }
+func Cfgetispeed(t *c23.Void) uint32 { return Cfgetospeed(t) }
 
 // Cfsetospeed is cfsetospeed: speed is a B constant, or EINVAL.
-func Cfsetospeed(t c23.Ptr, speed uint32) int32 {
+func Cfsetospeed(t *c23.Void, speed uint32) int32 {
 	if speed&^CBAUD != 0 {
 		c23.SetErrno(c23.EINVAL)
 		return -1
@@ -339,7 +339,7 @@ func Cfsetospeed(t c23.Ptr, speed uint32) int32 {
 
 // Cfsetispeed is cfsetispeed: as cfsetospeed, as there is one speed;
 // 0 leaves it.
-func Cfsetispeed(t c23.Ptr, speed uint32) int32 {
+func Cfsetispeed(t *c23.Void, speed uint32) int32 {
 	if speed == 0 {
 		return 0
 	}
@@ -347,4 +347,4 @@ func Cfsetispeed(t c23.Ptr, speed uint32) int32 {
 }
 
 // Cfsetspeed is cfsetspeed.
-func Cfsetspeed(t c23.Ptr, speed uint32) int32 { return Cfsetospeed(t, speed) }
+func Cfsetspeed(t *c23.Void, speed uint32) int32 { return Cfsetospeed(t, speed) }

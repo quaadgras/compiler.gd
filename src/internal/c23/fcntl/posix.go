@@ -23,7 +23,7 @@ const F_DUPFD_CLOEXEC = 1030
 const FD_CLOEXEC = 1
 
 // Open is open: the mode, if flags has O_CREAT, is its third argument.
-func Open(path c23.Ptr, flags int32, va ...any) int32 {
+func Open(path *c23.Void, flags int32, va ...any) int32 {
 	var mode uint32
 	if flags&c23.O_CREAT != 0 && len(va) > 0 {
 		mode = uint32(c23.ToInt64(va[0]))
@@ -31,7 +31,7 @@ func Open(path c23.Ptr, flags int32, va ...any) int32 {
 	return c23.Open(c23.GoString(path), flags, mode)
 }
 
-func Creat(path c23.Ptr, mode uint32) int32 {
+func Creat(path *c23.Void, mode uint32) int32 {
 	return c23.Open(c23.GoString(path), c23.O_WRONLY|c23.O_CREAT|c23.O_TRUNC, mode)
 }
 
@@ -48,7 +48,7 @@ func Fcntl(fd, cmd int32, va ...any) int32 {
 	case F_DUPFD, F_DUPFD_CLOEXEC:
 		return c23.DupFrom(fd, arg, cmd == F_DUPFD_CLOEXEC)
 	case F_GETLK, F_SETLK, F_SETLKW:
-		return fcntlLock(fd, cmd, c23.VaArg[c23.Ptr](c23.VaStart(va)))
+		return fcntlLock(fd, cmd, c23.VaArg[*c23.Void](c23.VaStart(va)))
 	}
 	c23.FdMu.Lock()
 	defer c23.FdMu.Unlock()
