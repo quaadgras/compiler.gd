@@ -1,7 +1,7 @@
 # C++ in cmd/cc: the plan, and what is there
 
-`cmd/cc` compiles C++ as it compiles C (cc.md): to Go, on the memory
-rules of internal/c23, with typed capabilities. C++ is added to the C
+`cmd/cc` compiles C++ as it compiles C (cc.md): to Go, 1:1, a class's
+object a Go variable and its pointers Go's. C++ is added to the C
 front end, not beside it: the parser lowers each C++ construct to the
 typed C tree it already builds (ast.go), as cfront did, so the generator
 and the run-time support stay C's. A file is C++ by its name (`.cc`,
@@ -55,8 +55,7 @@ Steps 1 to 3 are largely done, and step 4 has begun (Status, below).
 - **A reference is a pointer** in the tree (a pointer type marked as a
   reference). No expression has reference type: the parser dereferences
   a reference where it is named, and takes the address where one is
-  bound. In memory and in registers it is C's pointer, so it has a
-  capability as any pointer has.
+  bound. In memory and in registers it is C's pointer, which is Go's.
 - **Names with C++ linkage are mangled** as the Itanium ABI mangles them
   (`_ZN3Foo3barEi`), and the mangled name is the symbol's name from the
   parser on: units link by it as C's link by theirs. `extern "C"` names,
@@ -99,30 +98,25 @@ Steps 1 to 3 are largely done, and step 4 has begun (Status, below).
   therefore all looked up at instantiation: two-phase lookup's
   differences are not there.)
 
-## C++ on typed capabilities
+## C++ in the 1:1 translation
 
-What cc.md says of C holds: a class's object is a C object with its
-type, checked the same way. What C++ adds:
+What cc.md says of C holds: a class's object is a Go variable of the
+struct that mirrors it. What C++ adds:
 
-- **`new T`** makes a C object of type `T`, as `malloc` does when its
-  result is converted to `T *`: typed, so its pointer fields are pointer
-  words that Go and the collector see, and no side table is used.
-  `delete` runs the destructor; like `free` it frees nothing (the
-  collector does) and faults for a pointer `new` did not return.
-  `delete[]` needs no count kept in front of the array: the capability has
-  the array's exact size.
-- **A pointer to a base** is a pointer into the object, and a word that
-  points into a C object gets the whole object's capability back. So a
-  downcast is arithmetic on the offset, as in C++, and a wrong one cannot
-  reach outside the object the pointer came from, nor read a pointer
-  where the object has none: type confusion is confined to one object's
-  scalars.
-- **The table pointer** is a pointer field like another: only a pointer
-  store writes it, and it points to a C global, so a call through a
-  forged or stale one fails C's function pointer check.
+- **`new T`** allocates as `malloc` does when its result is converted
+  to `T *`: a Go allocation of T's type, whose pointer fields the
+  collector sees. `delete` runs the destructor; like `free` it frees
+  nothing (the collector does). `new T[n]` of a class with a destructor
+  keeps n in the 8 bytes in front of the array, which `delete[]` reads.
+- **A pointer to a base** is a pointer into the object, and a downcast
+  is arithmetic on the offset, as in C++: `unsafe.Add`, which the
+  compiler checks stays in the object (unsafe.md).
+- **The table pointer** is a pointer field like another, to a Go
+  variable of the class's table, whose entries are descriptors of
+  functions (`c23.Func`).
 - **Placement `new` and allocation functions of one's own are the open
   question.** Memory from `malloc` that is not converted to an object
-  type is untyped (`c23.Raw`): bytes to Go, with split words, where every
+  type is untyped (`c23.AllocRaw`): words that may each hold a pointer, where every
   pointer goes through a side table. An object placed there works, but
   slowly, and Go sees only bytes. Godot allocates every object so
   (`memnew` is placement `new` over `Memory::alloc_static`, which offsets

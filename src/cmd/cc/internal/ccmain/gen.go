@@ -69,6 +69,12 @@ type pkgGen struct {
 	refs     map[*symbol]bool // nil: not being made
 	refFunc  bool             // it refers to a function
 
+	// The struct and union types that a unit completes, by what names
+	// them in every unit (completeKey): a pointer to one is a pointer
+	// to its mirror in a unit that only declares it too. nil for a
+	// name that two units give different types.
+	complete map[string]*ctype
+	fileTmpN int // temporaries of file-scope code, which is all in one function
 }
 
 // gen generates one function, or file-scope code, of a unit.
@@ -135,6 +141,7 @@ func generate(file string, units []*unit, o options) (src []byte, pg *pkgGen, er
 	pg = newPkgGen(file, o)
 	pg.units = units
 	pg.link()
+	pg.completed()
 	for i, u := range units {
 		g := &gen{pkgGen: pg, u: u, unitN: i}
 		g.unit()
@@ -441,7 +448,13 @@ func (g *gen) mirror(t *ctype) string {
 			// To a function's descriptor (c23.Func), or an integer C
 			// keeps in its place (SIG_IGN).
 			return voidPtr
-		case e.kind == kVoid || e.kind == kStruct && !e.rec.complete || e.kind == kArray && e.n < 0:
+		case e.kind == kStruct && !e.rec.complete:
+			// Declared only, here: another unit may complete it.
+			if c := g.complete[completeKey(e)]; c != nil {
+				return "*" + g.mirror(c)
+			}
+			return voidPtr
+		case e.kind == kVoid || e.kind == kArray && e.n < 0:
 			return voidPtr
 		}
 		return "*" + g.mirror(e)
@@ -494,12 +507,18 @@ func (g *gen) record(t *ctype) string {
 	var key strings.Builder
 	keyTag, typeKey := r.tag, (*ctype).String
 	if r.sc != nil {
-		keyTag, typeKey = rawType(t.unqual()), rawType
+		keyTag, typeKey = rawType(t.unqual()), cxxTypeKey
+		if unnamedMember(t) {
+			// It has no name of its own, and the number that stands
+			// for one is its translation unit's: the scope it is
+			// declared in, and below its members, say which it is.
+			keyTag = strings.Join(scopeNames(r.sc), "::") + "::"
+		}
 	} else if keyTag == "" {
 		keyTag = r.tdName // div_t and ldiv_t are not one mirror
 	}
 	fmt.Fprintf(&key, "%s|%d|%d|%v|", keyTag, r.size, r.align, bytes)
-	if !bytes {
+	if !bytes || unnamedMember(t) {
 		for _, f := range r.fields {
 			fmt.Fprintf(&key, "%s:%d:%s;", f.name, f.off, typeKey(f.t))
 		}
@@ -566,6 +585,93 @@ func (g *gen) record(t *ctype) string {
 	}
 	g.types.WriteString(b.String())
 	return name
+}
+
+// completeKey is what names the struct or union type t in every unit of
+// the program: a C++ class's mangled name, a C tag of file scope. "" if
+// nothing does.
+func completeKey(t *ctype) string {
+	r := t.rec
+	if r.tag == "" {
+		return ""
+	}
+	for sc := r.sc; sc != nil; sc = sc.parent {
+		if sc.kind == skBlock {
+			return "" // a block's: its function's only
+		}
+	}
+	if r.sc != nil {
+		return "c++:" + rawType(t.unqual())
+	}
+	return "c:" + r.tag
+}
+
+// completed finds the types that each unit completes.
+func (pg *pkgGen) completed() {
+	pg.complete = map[string]*ctype{}
+	layout := map[string]string{}
+	for _, u := range pg.units {
+		for _, t := range u.records {
+			k := completeKey(t)
+			if k == "" || !t.rec.complete {
+				continue
+			}
+			if t.rec.sc == nil && u.tags[t.rec.tag] != t && (u.tags[t.rec.tag] == nil || u.tags[t.rec.tag].rec != t.rec) {
+				continue // a tag of a block's scope
+			}
+			// Two units' types of one name are one type if they are
+			// laid out alike: else the name says nothing.
+			var l strings.Builder
+			fmt.Fprintf(&l, "%d|%d|", t.rec.size, t.rec.align)
+			for _, f := range t.rec.fields {
+				fmt.Fprintf(&l, "%s:%d:%d;", f.name, f.off, f.t.sizeof())
+			}
+			if old, ok := layout[k]; ok && old != l.String() {
+				pg.complete[k] = nil
+				continue
+			} else if ok {
+				continue
+			}
+			layout[k] = l.String()
+			pg.complete[k] = t.unqual()
+		}
+	}
+}
+
+// unnamedMember reports whether t is a struct or union with no name that
+// a class or a namespace declares: one that every unit that includes
+// its declaration has, as the same type. (One that a block declares is
+// its function's only.)
+func unnamedMember(t *ctype) bool {
+	if t.kind != kStruct || t.rec.tag != "" || t.rec.sc == nil {
+		return false
+	}
+	for sc := t.rec.sc; sc != nil; sc = sc.parent {
+		if sc.kind == skBlock {
+			return false
+		}
+	}
+	return true
+}
+
+// cxxTypeKey is what says which type t is in the key of a C++ class's
+// mirror: its mangled name, but for a class with no name, which is its
+// members.
+func cxxTypeKey(t *ctype) string {
+	switch {
+	case unnamedMember(t):
+		var b strings.Builder
+		fmt.Fprintf(&b, "{%d|%d|%v|", t.rec.size, t.rec.align, t.rec.union)
+		for _, f := range t.rec.fields {
+			fmt.Fprintf(&b, "%s:%d:%s;", f.name, f.off, cxxTypeKey(f.t))
+		}
+		return b.String() + "}"
+	case t.kind == kArray:
+		return fmt.Sprintf("A%d_%s", t.n, cxxTypeKey(t.elem))
+	case t.kind == kPtr && unnamedMember(t.elem):
+		return "P" + cxxTypeKey(t.elem)
+	}
+	return rawType(t)
 }
 
 func (g *gen) mirrorTaken(name string) bool {

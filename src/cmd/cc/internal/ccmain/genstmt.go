@@ -25,7 +25,10 @@ func (g *gen) tmp(t string) string {
 	g.tmpN++
 	n := fmt.Sprintf("__%d", g.tmpN)
 	if g.fn == nil {
-		// File scope (an initializer): declared where it is.
+		// File scope (an initializer): declared where it is, in the
+		// function that all of them are in.
+		g.fileTmpN++
+		n = fmt.Sprintf("__g%d", g.fileTmpN)
 		g.p("var %s %s", n, t)
 		g.p("_ = %s", n)
 		return n
@@ -38,7 +41,8 @@ func (g *gen) tmp(t string) string {
 func (g *gen) cellTmp(t *ctype) string {
 	g.tmpN++
 	if g.fn == nil {
-		n := fmt.Sprintf("__%d", g.tmpN)
+		g.fileTmpN++
+		n := fmt.Sprintf("__g%d", g.fileTmpN)
 		g.p("%s := c23.New[%s]()", n, g.mirror(t))
 		g.p("_ = %s", n)
 		return n

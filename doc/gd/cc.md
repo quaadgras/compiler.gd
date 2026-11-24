@@ -1,4 +1,4 @@
-# C with typed capabilities: a prototype
+# C in Go: cmd/cc
 
 `cmd/cc` translates a subset of C to Go so that C and Go share one
 heap, one stack, one collector and one pointer representation, and C
@@ -31,7 +31,7 @@ change to one file translates them all. (When `cmd/go` builds a package
 with cc, the translation is part of the package's build, which `cmd/go`
 caches.)
 
-## Where this stands (2026-11-24): the capabilities are gone
+## Where this stands (2026-11-25): the translation is 1:1
 
 Most of this document describes C's pointers as typed capabilities
 (`c23.Ptr`: a base, a size, a type and an offset, checked at every
@@ -40,40 +40,60 @@ core does it ran 1.5 to 9.8 times slower than `gcc -O2`, and the Go
 compiler now checks `unsafe.Pointer` itself (unsafe.md). The sections
 below that speak of capabilities, tagged words, side tables, split
 words and faults describe what was, and are to be rewritten. What is
-there now:
+there now is one translation, in which C's objects and pointers are
+Go's:
 
+```c
+static const char *name(enum color c) {
+	switch (c) {
+	case RED:
+		return "red";
+	case GREEN:
+	case BLUE:
+		return "green or blue";
+	default:
+		return "?";
+	}
+}
+```
+
+```go
+func c0_name(c c23.UInt) *c23.Char {
+	switch c {
+	case 0:
+		return c23.String("red")
+	case 5, 6:
+		return c23.String("green or blue")
+	default:
+		return c23.String("?")
+	}
+}
+```
+
+- **A C object is a Go variable** of the Go type that mirrors it (the
+  struct, field for field), declared where C declares it, with C's
+  name. A load, a store or a member's access is Go's own: `n->count++`
+  is `n.count++`. An element of an array that is named (`a[i]`, not
+  `p[i]`) is Go's index, with Go's bounds check. What the translation
+  adds has names that begin with two underscores (`__1`), which C keeps
+  for the implementation.
 - **A C pointer is a Go pointer.** `*T` where C's type says what it
   points to; `*c23.Void` (`type Void [0]byte`, as cgo's) for `void *`,
   for a pointer to a function or to a type that is not complete, in C's
   library, whose functions take any pointer, in a call through a pointer
   to a function, and in variable arguments. One is converted to the
-  other through `unsafe.Pointer`, which is where the compiler checks.
-- **internal/c23 checks nothing.** `c23.Add`, `c23.Load32`,
-  `c23.StorePtr`, `c23.Memmove` are plain operations on a `*c23.Void`.
-  The package is compiled without the compiler's checks, as the runtime
-  is.
-- **Two translations, for now.** The older one still keeps every C
-  object behind a `*c23.Void` and reads and writes it with those
-  functions: unchecked, and going. The 1:1 one (`cc -thin`) is what
-  replaces it.
-
-### The 1:1 translation (`cc -thin`)
-
-A C object is a Go variable of the Go type that mirrors it (the struct,
-field for field), and a load, a store or a member's access is Go's own:
-`n->count++` is `n.count++`. The generated Go uses `unsafe` only where C
-converts a pointer or does arithmetic on one, and an element of an
-array that is named (`a[i]`, not `p[i]`) is Go's index, with Go's bounds
-check.
-
-- **Speed.** On that benchmark (a sorted vector of structs, a tree, a
-  hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
-  1.3 times with `-d=checkptr=0`. With the checks as they are today it
-  is 0.9 to 10 times: each arithmetic and conversion is a call into the
-  runtime. The typed code, which is most of C and C++, is at Go's speed
-  either way; making the checks of the rest cheap is the compiler's work.
-- **Structs** are still passed by the pointer to them and returned in
-  memory the caller gives, as C++'s lowering expects (cxx.md).
+  other through `unsafe.Pointer`, and arithmetic is `unsafe.Add`: that
+  is where the compiler checks, and the only use of `unsafe` in the
+  generated Go.
+- **C's types** have their C names: `c23.Int`, `c23.Long`, `c23.Char`,
+  `c23.Double`, aliases of the Go types of their sizes.
+- **Initializers** are in the declarations where they are constant:
+  `int table[N] = {1, 2, 3}` is `var g_table = [8]c23.Int{1, 2, 3}`, at
+  the package's level for a global and in the function for a local. A
+  string literal is `c23.String("hello")`: the Go string's bytes, which
+  the compiler ends with a 0.
+- **Structs** are passed by the pointer to them and returned in memory
+  the caller gives, as C++'s lowering expects (cxx.md).
 - **Pointers to functions** point to a descriptor (`c23.Func`). A call
   through one passes every pointer as a `*c23.Void`: C and C++ call
   functions whose types differ in what their pointers point to (a
@@ -83,31 +103,59 @@ check.
   may hold a pointer (`c23.AllocRaw`), which the collector looks at word
   by word. It is to become an allocation in spans of C's own, whose
   words all start as possible pointers, with a bit for each that a
-  scalar store may clear and a pointer store sets again, under a
-  seqlock of the span taken only when a bit changes. `free` does nothing.
-- **What it shares with the older translation**, through the address of
-  the object and internal/c23's functions: bit-fields, `_Atomic`,
-  `long double` and `_Complex` in memory, `va_arg`, variable length
-  arrays, thread-local objects.
-- **C's types** have their C names in internal/c23 (`c23.Int`,
-  `c23.Long`, `c23.Float`, `c23.Void`); but for `Void` they are aliases
-  of the Go types, and the generated Go still writes `int32`.
+  scalar store clears and a pointer store sets again, under a seqlock
+  of the span taken only when a bit changes. `free` does nothing.
+- **A union** (and a struct that Go cannot lay out as C does: packed,
+  over-aligned) is its bytes to Go; its words, each a possible pointer,
+  if a member is a pointer, so that the collector sees what C stores.
+- **What Go has no variable for** is reached through its address, with
+  internal/c23's loads and stores: bit-fields, `_Atomic`, `long double`
+  and `_Complex` in memory, `va_arg`. A variable length array and a
+  variable aligned more than Go aligns (`alignas(64)`) are allocated,
+  and their Go variables are the pointers to them.
+- **internal/c23 checks nothing.** `c23.Add`, `c23.Load32`,
+  `c23.Memmove` are plain operations on a `*c23.Void`. The package is
+  compiled without the compiler's checks, as the runtime is.
+- **Speed.** On that benchmark (a sorted vector of structs, a tree, a
+  hash map with string keys, byte strings), against `gcc -O2`: 0.85 to
+  1.3 times with `-d=checkptr=0`. With the checks as they are today it
+  is 0.9 to 10 times: each arithmetic and conversion is a call into the
+  runtime. The typed code, which is most of C and C++, is at Go's speed
+  either way; making the checks of the rest cheap is the compiler's work.
 
-Where C and the compiler's checks disagree, so far:
+Where C and Go's rules for pointers disagree:
 
-- A pointer one past the end of an array in the heap, which C lets a
-  program make and compare, fails the check of pointer arithmetic.
-- C keeps integers in pointers (`SIG_IGN`, `(void *)1`, a union's
-  `int`). Such a conversion goes through `c23.FromInt`, unchecked; a
-  pointer to a function is a `*c23.Void` because of them; and a program
-  with C in it runs as with `GODEBUG=invalidptr=0`, since the stack scan
-  stopped the program for an integer in a pointer's word.
+- **One past the end.** C lets a program make the pointer one past the
+  end of an object and keep it. To Go that is a pointer to the next
+  object of the heap: the check of pointer arithmetic refuses it, the
+  collector would keep the wrong object alive for it, and stops if
+  that one is free. So every object of C's on the heap has at least a
+  byte after it: malloc and new allocate one more element (or word),
+  and in a package that imports internal/c23 the compiler allocates a
+  variable that it moves to the heap as `struct { v T; _ byte }`
+  (cmd/compile's `ir.CObjType`), as Go itself does for a struct that
+  ends in a field of no size. The stack, and the program's data, are
+  each one allocation to both. Such a package is also compiled without
+  the escape bits (`-d=gdescbitsoff`), which move a variable from the
+  stack to the heap when a callee keeps its address: C has pointers to
+  it where the compiler sees none. `new T[n]` of a class with a
+  destructor keeps n in front of the array, as other compilers do,
+  since the size of the allocation no longer says it.
+- **Integers in pointers.** C keeps them there (`SIG_IGN`, `(void *)1`,
+  a union's `int`) and adds to a null pointer. Such a conversion goes
+  through `c23.FromInt`, unchecked; a pointer to a function is a
+  `*c23.Void` because of them; and a program with C in it runs as with
+  `GODEBUG=invalidptr=0` (`runtime.c23AllowIntegers`), which also lets
+  pointer arithmetic give a small integer.
 
-`go test cmd/cc -run Thin` runs the C++ programs of `testdata/cxx` and
-`testdata/thin` this way; with `CCTHIN=1` every translation is 1:1,
-which the rest of cmd/cc's tests do not all pass yet. `TestInterop`,
-which tested the capabilities' faults, is skipped until it is written
-again.
+Not there: wasm. The translation does not build for `GOARCH=wasm` yet
+(the library's 1:1 entry points take 64-bit sizes, and `GOWASM=gc`'s
+runtime lacks two of internal/c23's hooks), where the older one ran
+`TestInterop`.
+
+`CCDEBUG=layout` (or `cc -debug`) adds to the generated Go the
+declarations that fail to compile if Go lays a struct out other than C
+does; the tests set it.
 
 ## cgo packages, with cgo off
 
@@ -128,20 +176,25 @@ The build (cmd/go/internal/work/cc_gd.go) runs cc in-process on the
 preambles and the C files, as one unit, and rewrites the import "C"
 files as cgo rewrites them (`rewrite.go`), into the object directory:
 
-- `C.f(args)` calls the translation of f. A pointer argument gets the
-  capability of the Go value it points to, by its static type
-  (`c23.Arg`); `&x[i]` gets x's whole array, cgo's rule for what C may
-  reach (`c23.FromSliceAt`); `unsafe.Pointer(p)` passes p's own
-  capability, so a Go value passed as a `void *` keeps its type. A
-  pointer f returns is a Go pointer if it points to a whole value of
-  its type, and a word that faults where Go uses it if not.
+- `C.f(args)` calls the translation of f, with the arguments as they
+  are: C's types are the Go types that mirror them and its pointers are
+  Go's. `void *` is `*c23.Void` in the translation and
+  `unsafe.Pointer` to Go, as with cgo: an argument is converted from it
+  and a result to it.
 - `C.struct_node`, `C.union_value`, typedefs, `C.int` and the other
   basic types are the mirror types; enum constants are their values; C's
-  globals are their values in C's memory; `C.CString`, `C.GoString`,
-  `C.malloc` and `C.free` work as in cgo.
+  globals are the Go variables they are translated to; `C.CString`,
+  `C.GoString`, `C.malloc` and `C.free` work as in cgo. A field that is
+  a `void *` is a `*c23.Void` to Go, not an `unsafe.Pointer`.
 - Every name cc generates starts with `_C23`, so nothing clashes with the
-  package's own; fault messages name C's types as cgo does
-  (`C.struct_node`).
+  package's own.
+- A function with variable arguments, and one that takes or returns a
+  struct by value, cannot be called from Go.
+
+`testdata/interop` is such a package: lists that each side allocates and
+the other walks, a slice kept by C, strings, variables, enumerations,
+unions, memory that malloc was given no type for, and arrays summed
+from one past their end, across collections (`TestInterop`).
 
 ## What Go may rely on, with no checks
 
