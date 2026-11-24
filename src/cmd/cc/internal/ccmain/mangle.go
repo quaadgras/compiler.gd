@@ -63,7 +63,8 @@ func (m *mangler) sub(key string) bool {
 }
 
 // scopeNames are the names of the namespaces and classes sc is in, the
-// outermost first; sc's own last.
+// outermost first, sc's own last: each as it is mangled (its length,
+// then the name; a template's instance with its arguments).
 func scopeNames(sc *scope) []string {
 	var names []string
 	for ; sc != nil; sc = sc.parent {
@@ -73,12 +74,16 @@ func scopeNames(sc *scope) []string {
 				continue // the global namespace
 			}
 			if sc.name == "" {
-				names = append(names, "_GLOBAL__N_1")
+				names = append(names, sourceName("_GLOBAL__N_1"))
 			} else {
-				names = append(names, sc.name)
+				names = append(names, sourceName(sc.name))
 			}
 		case skClass:
-			names = append(names, sc.name)
+			if sc.rec != nil && sc.rec.mtag != "" {
+				names = append(names, sc.rec.mtag)
+			} else {
+				names = append(names, sourceName(sc.name))
+			}
 		}
 	}
 	for i, j := 0, len(names)-1; i < j; i, j = i+1, j-1 {
@@ -96,9 +101,9 @@ func (m *mangler) prefix(names []string) string {
 	for n := len(names); n > 0; n-- {
 		k := ""
 		for _, s := range names[:n] {
-			k += sourceName(s)
+			k += s
 		}
-		if n == 1 && names[0] == "std" {
+		if n == 1 && names[0] == "3std" {
 			m.b.WriteString("St")
 			key, start = k, n
 			break
@@ -109,8 +114,8 @@ func (m *mangler) prefix(names []string) string {
 		}
 	}
 	for _, s := range names[start:] {
-		m.b.WriteString(sourceName(s))
-		key += sourceName(s)
+		m.b.WriteString(s)
+		key += s
 		m.subs = append(m.subs, "N"+key)
 	}
 	return key
@@ -123,7 +128,7 @@ func (m *mangler) name(sc *scope, unqualified, cv string) {
 	switch {
 	case len(names) == 0:
 		m.b.WriteString(unqualified)
-	case len(names) == 1 && names[0] == "std" && cv == "":
+	case len(names) == 1 && names[0] == "3std" && cv == "":
 		m.b.WriteString("St" + unqualified)
 	default:
 		m.b.WriteString("N" + cv)
@@ -170,11 +175,17 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		return
 	}
 	if t.enum != nil && t.enum.tag != "" {
-		m.named(t.enum.sc, t.enum.tag, raw)
+		m.named(t.enum.sc, sourceName(t.enum.tag), raw)
 		return
 	}
 	switch t.kind {
 	case kPtr, kArray, kFunc, kStruct, kComplex:
+	case kTParam:
+		m.b.WriteString("T" + itoa(t.n) + "_")
+		return
+	case kDependent:
+		m.b.WriteString("u9dependent")
+		return
 	case kBitInt:
 		m.b.WriteString("DB" + itoa(t.n) + "_")
 		return
@@ -223,6 +234,10 @@ func (m *mangler) typ(t *ctype, raw bool) {
 		if tag == "" {
 			tag = "._" + itoa(int64(t.rec.id))
 		}
+		tag = sourceName(tag)
+		if t.rec.mtag != "" {
+			tag = t.rec.mtag
+		}
 		m.named(t.rec.sc, tag, raw)
 		return // a class's name is its own substitution, made by named
 	}
@@ -231,38 +246,39 @@ func (m *mangler) typ(t *ctype, raw bool) {
 	}
 }
 
-// named writes the name of the class or enumeration tag declared in sc.
+// named writes the name of the class or enumeration declared in sc,
+// whose own name is mangled as tag.
 func (m *mangler) named(sc *scope, tag string, raw bool) {
 	names := append(scopeNames(sc), tag)
 	if raw {
 		if len(names) == 1 {
-			m.b.WriteString(sourceName(tag))
+			m.b.WriteString(tag)
 			return
 		}
 		m.b.WriteString("N")
 		for _, s := range names {
-			m.b.WriteString(sourceName(s))
+			m.b.WriteString(s)
 		}
 		m.b.WriteString("E")
 		return
 	}
 	if len(names) == 1 {
-		if m.sub("N" + sourceName(tag)) {
+		if m.sub("N" + tag) {
 			return
 		}
-		m.b.WriteString(sourceName(tag))
-		m.subs = append(m.subs, "N"+sourceName(tag))
+		m.b.WriteString(tag)
+		m.subs = append(m.subs, "N"+tag)
 		return
 	}
 	k := ""
 	for _, s := range names {
-		k += sourceName(s)
+		k += s
 	}
 	if m.sub("N" + k) {
 		return
 	}
-	if len(names) == 2 && names[0] == "std" {
-		m.b.WriteString("St" + sourceName(tag))
+	if len(names) == 2 && names[0] == "3std" {
+		m.b.WriteString("St" + tag)
 		m.subs = append(m.subs, "N"+k)
 		return
 	}
@@ -295,7 +311,7 @@ func (m *mangler) params(ft *funcType, raw bool) {
 // mangleFunc is the mangled name of the function named name (in the
 // source: an identifier, or "operator+", "~T", ...) declared in sc with
 // type ft.
-func mangleFunc(sc *scope, name string, ft *funcType) string {
+func mangleFunc(sc *scope, name string, ft *funcType, targs string) string {
 	var m mangler
 	m.b.WriteString("_Z")
 	cv := ""
@@ -323,6 +339,7 @@ func mangleFunc(sc *scope, name string, ft *funcType) string {
 	default:
 		unq = sourceName(name)
 	}
+	unq += targs // a function template's instance
 	if ft.conv != nil {
 		names := scopeNames(sc)
 		m.b.WriteString("N" + cv)

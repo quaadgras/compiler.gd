@@ -57,16 +57,23 @@ type parser struct {
 
 	// C++ (cxx.go).
 	cxx        bool
-	externC    int           // in extern "C"
-	externSpec bool          // in extern "C" declaration, without braces: as if extern
-	noGT       int           // in template arguments: ">" ends them
-	declIn     *scope        // the scope the last declarator's qualified name is in
-	this       *symbol       // in a non-static member function
-	cls        *ctype        // the class whose members are being declared
-	temps      []*tempObj    // the temporaries with destructors of the full expression being parsed
-	extend     *[]*symbol    // where temporaries a declared reference binds are kept, to live as long
-	declTo     *scope        // the scope the next function is declared in, if not the current one
-	userConv   int           // ranking a user-defined conversion's own argument
+	externC    int        // in extern "C"
+	externSpec bool       // in extern "C" declaration, without braces: as if extern
+	noGT       int        // in template arguments: ">" ends them
+	declIn     *scope     // the scope the last declarator's qualified name is in
+	this       *symbol    // in a non-static member function
+	cls        *ctype     // the class whose members are being declared
+	temps      []*tempObj // the temporaries with destructors of the full expression being parsed
+	extend     *[]*symbol // where temporaries a declared reference binds are kept, to live as long
+	declTo     *scope     // the scope the next function is declared in, if not the current one
+	userConv   int        // ranking a user-defined conversion's own argument
+	pattern    int        // parsing a template's pattern: its parameters are placeholders
+	explicitT  []targ     // the explicit template arguments of the call being resolved
+	tmplSuffix string     // the template arguments, mangled, of the function being instantiated
+	instTag    *ctype     // the class template instance whose definition is being parsed
+	pending    []*symbol  // used, and not yet defined: template instances' functions
+	draining   bool
+	tids       map[tidKey]tidVal
 	direct     bool          // the next call of a virtual function is not virtual: its name is qualified
 	qualified  map[expr]bool // the functions named with a qualified name
 	condDepth  int           // in an operand that is not always evaluated
@@ -109,6 +116,12 @@ func parse(file string, toks []token) (u *unit, err error) {
 	p.u.tags = p.sc.tags
 	for p.peek().kind != tkEOF {
 		p.topLevel()
+		if p.cxx {
+			p.drain(false)
+		}
+	}
+	if p.cxx {
+		p.drain(true)
 	}
 	// A tentative definition with no initializer is a definition.
 	for _, s := range p.u.syms {
@@ -511,7 +524,16 @@ func (p *parser) declSpecs() specs {
 				seen = true
 				p.next()
 				continue
-			case "typename", "constinit":
+			case "typename":
+				p.next()
+				if _, n := p.cxxTypeAt(0); n == 0 && p.pattern > 0 && s.t == nil {
+					// In a pattern: a type that cannot be known.
+					p.skipQualName()
+					s.t = &ctype{kind: kDependent, dep: &depType{}}
+					seen = true
+				}
+				continue
+			case "constinit":
 				p.next()
 				continue
 			case "consteval":
@@ -789,7 +811,7 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	a := p.attributes()
 	if p.cxx {
 		// A class that is named, perhaps with a qualified name.
-		if sym, n := p.cxxTypeAt(0); sym != nil && sym.t.kind == kStruct && (n > 1 || !sym.tagName) && !p.isAt(n, "{") && !p.isAt(n, ":") && !p.isAt(n, ";") && !p.isAt(n, "final") {
+		if sym, n := p.cxxTypeAt(0); p.instTag == nil && sym != nil && sym.t.kind == kStruct && (n > 1 || !sym.tagName) && !p.isAt(n, "{") && !p.isAt(n, ":") && !p.isAt(n, ";") && !p.isAt(n, "final") {
 			p.pos += n
 			return sym.t
 		}
@@ -798,6 +820,10 @@ func (p *parser) recordSpec(union bool, kw token) *ctype {
 	if p.peek().kind == tkIdent && !p.is("__attribute__") {
 		tag = p.ident()
 	}
+	if p.cxx && p.is("<") && p.instTag != nil && p.instTag.rec.tag == tag {
+		p.skipAngles() // a specialization's arguments
+	}
+	p.instTag = nil
 	a.merge(p.attributes())
 	if p.cxx && p.is("final") && (p.isAt(1, "{") || p.isAt(1, ":")) {
 		p.next()
@@ -1316,7 +1342,7 @@ func (p *parser) nestedDeclarator() bool {
 	}
 	t := p.peekAt(k)
 	if t.kind == tkPunct {
-		return t.text == "*" || t.text == "(" || t.text == "^" || t.text == "["
+		return t.text == "*" || t.text == "(" || t.text == "^" || t.text == "[" || p.cxx && (t.text == "&" || t.text == "&&")
 	}
 	return !p.isTypeStart(k)
 }
@@ -1364,9 +1390,13 @@ func (p *parser) suffixes(t *ctype, a *attrs) *ctype {
 			at.vla = &intConst{node{tULong, p.here()}, 0}
 			return at
 		}
+		depN := 0
 		if !p.is("]") {
 			e := p.assignment()
-			if v, ok := p.foldInt(e); ok {
+			if d, ok := e.(*depConst); ok && p.pattern > 0 {
+				// In a pattern: a length to deduce.
+				n, depN = 0, d.param+1
+			} else if v, ok := p.foldInt(e); ok {
 				if v < 0 {
 					p.errorf("size of array is negative")
 				}
@@ -1386,6 +1416,7 @@ func (p *parser) suffixes(t *ctype, a *attrs) *ctype {
 		}
 		at := arrayOf(inner, n)
 		at.q = q
+		at.depN = depN
 		if n > 0 && inner.sizeof() > 0 && n > (1<<47)/inner.sizeof() {
 			p.errorf("size of array is too large")
 		}
@@ -1654,6 +1685,13 @@ func (p *parser) topLevel() {
 		case p.is("extern") && p.peekAt(1).kind == tkString:
 			p.linkageSpec()
 			return
+		case p.is("template"):
+			p.templateDecl()
+			return
+		case p.is("extern") && p.isAt(1, "template"):
+			p.next()
+			p.templateDecl()
+			return
 		}
 	}
 	if p.is("[") && p.isAt(1, "[") {
@@ -1725,6 +1763,7 @@ func (p *parser) declarator2(name string, t *ctype, s specs, a attrs, at pos) *s
 		p.sc = in
 		defer func() { p.sc = save }()
 	}
+	p.complete(baseElem(t))
 	mark := len(p.temps)
 	sym := p.declarator2C(name, t, s, a, at)
 	if sym.kind == symVar {

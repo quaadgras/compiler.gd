@@ -53,6 +53,7 @@ type methodRef struct {
 	obj    expr
 	set    []*symbol
 	direct bool // its name is qualified: not a virtual call
+	targs  []targ
 }
 
 func (ci *classInfo) addMethod(sym *symbol) {
@@ -107,6 +108,9 @@ func (s *scope) findMember(name string, seen map[*scope]bool) *symbol {
 			return sym
 		}
 		sym := &symbol{name: name, src: name, kind: symTypedef, t: r.cls.t, sc: s}
+		if r.inst != nil {
+			sym.instOf = r.inst.tmpl // with arguments, the template
+		}
 		r.cls.syms["{name}"] = sym
 		return sym
 	}
@@ -388,7 +392,8 @@ func (p *parser) classMember(ct *ctype, fields *[]*field) {
 		return
 	}
 	if p.is("template") {
-		p.errorf("member templates are not supported yet")
+		p.templateDecl()
+		return
 	}
 	if p.is("friend") && (p.isAt(1, "class") || p.isAt(1, "struct")) && p.isAt(3, ";") {
 		p.pos += 4 // friend class X;
@@ -452,6 +457,7 @@ func (p *parser) classMember(ct *ctype, fields *[]*field) {
 			}
 			f.packed = fa.packed || s.attrs.packed
 			f.mutable = s.mutable
+			p.complete(baseElem(f.t))
 			if p.is("=") || p.is("{") {
 				// A default member initializer: parsed in each
 				// constructor that uses it.
@@ -690,6 +696,10 @@ func (p *parser) completeClass(t *ctype) {
 		return pt.kind == kStruct && pt.rec == r
 	}
 	for o := sc.vars["{ctor}"]; o != nil; o = o.next {
+		if o.tmpl != nil {
+			ci.nontrivCtor = true
+			continue
+		}
 		ps := o.t.fn.params[1:]
 		if len(ps) == 0 {
 			if o.implicit {
@@ -706,7 +716,7 @@ func (p *parser) completeClass(t *ctype) {
 		}
 	}
 	for o := sc.vars["operator="]; o != nil; o = o.next {
-		if ps := o.t.fn.params; len(ps) == 2 && isSelf(ps[1]) && !o.implicit {
+		if ps := o.t.fn.params; o.tmpl == nil && len(ps) == 2 && isSelf(ps[1]) && !o.implicit {
 			userAssign = true
 		}
 	}
@@ -750,7 +760,7 @@ func (p *parser) completeClass(t *ctype) {
 		}
 		mt := &ctype{kind: kFunc, fn: withRecv(ft, self)}
 		for o := sc.vars[key]; o != nil; o = o.next {
-			if o.implicit && sameParams(o.t.fn, mt.fn) {
+			if o.tmpl == nil && o.implicit && sameParams(o.t.fn, mt.fn) {
 				sym = o // declared = default
 			}
 		}
@@ -769,34 +779,39 @@ func (p *parser) completeClass(t *ctype) {
 		ci.addMethod(sym)
 		return sym
 	}
-	var todo []func()
+	// A class template's instance defines its members when they are
+	// used, the implicit ones too.
+	lazy := r.inst != nil
+	var todo []*symbol
+	later := func(sym *symbol, f func()) {
+		if !sym.trivial && !sym.defined {
+			sym.synth = f
+			todo = append(todo, sym)
+		}
+	}
 	if !ci.userCtor || defaultedDefault {
 		sym := implicit(r.tag, &funcType{ret: tVoid, proto: true, ctor: true}, !ci.nontrivCtor)
-		if !sym.trivial && !sym.defined {
-			todo = append(todo, func() { p.implicitCtor(sym, t) })
-		}
+		later(sym, func() { p.implicitCtor(sym, t) })
 	}
 	if !userCopy {
 		sym := implicit(r.tag, &funcType{ret: tVoid, proto: true, ctor: true, params: []*ctype{cref}, names: []string{"o"}}, !ci.nontrivCopy)
-		if !sym.trivial && !sym.defined {
-			todo = append(todo, func() { p.implicitCopy(sym, t, false) })
-		}
+		later(sym, func() { p.implicitCopy(sym, t, false) })
 	}
 	if !userAssign {
 		sym := implicit("operator=", &funcType{ret: refTo(self, 1), proto: true, params: []*ctype{cref}, names: []string{"o"}}, !ci.nontrivCopy)
-		if !sym.trivial && !sym.defined {
-			todo = append(todo, func() { p.implicitCopy(sym, t, true) })
-		}
+		later(sym, func() { p.implicitCopy(sym, t, true) })
 	}
 	if userDtor == nil || userDtor.implicit {
 		sym := implicit("~"+r.tag, &funcType{ret: tVoid, proto: true, dtor: true}, !ci.nontrivDtor)
-		if !sym.trivial && !sym.defined {
-			todo = append(todo, func() { p.implicitDtor(sym, t) })
-		}
+		later(sym, func() { p.implicitDtor(sym, t) })
 	}
 	p.buildVtable(t, at)
-	for _, f := range todo {
-		f()
+	if !lazy {
+		for _, sym := range todo {
+			f := sym.synth
+			sym.synth = nil
+			f()
+		}
 	}
 
 	// The functions defined in the class, once the outermost class
@@ -808,6 +823,19 @@ func (p *parser) completeClass(t *ctype) {
 	}
 	late := ci.late
 	ci.late = nil
+	if lazy {
+		for _, lf := range late {
+			lf := lf
+			lf.sym.late = &lf
+			if lf.sym.sc.kind != skClass {
+				lf.sym.lateSc = sc // a friend: in the class's scope
+			}
+		}
+		for _, v := range ci.vfuncs {
+			p.use(v) // the table has its address
+		}
+		return
+	}
 	for _, lf := range late {
 		save, saveCls := p.pos, p.cls
 		st := p.saveFunc()
@@ -1254,7 +1282,11 @@ func (p *parser) cxxMember(x expr, arrow bool, at pos) expr {
 	}
 	switch sym.kind {
 	case symFunc:
-		return &methodRef{node{sym.t, at}, x, funcSet(sym), in != nil}
+		m := &methodRef{node{sym.t, at}, x, funcSet(sym), in != nil, nil}
+		if p.is("<") && hasTemplate(m.set) {
+			m.targs = p.templateArgs()
+		}
+		return m
 	case symEnumConst:
 		return p.intc(sym.val, sym.t, at)
 	case symVar:

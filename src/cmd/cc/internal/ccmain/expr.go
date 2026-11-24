@@ -985,6 +985,9 @@ func (p *parser) sizeofType(t *ctype, at pos) expr {
 	if t.isRef() {
 		t = t.elem
 	}
+	if p.cxx {
+		p.complete(baseElem(t))
+	}
 	if t.isVLA() {
 		return &vlaSizeof{node{tULong, at}, t}
 	}

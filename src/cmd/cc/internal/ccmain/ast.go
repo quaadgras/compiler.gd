@@ -198,6 +198,8 @@ const (
 	symEnumConst
 	symNamespace // C++
 	symField     // C++: a class's non-static data member, in its scope
+	symTemplate  // C++: a class, alias or variable template
+	symPack      // C++: a template parameter pack, with its arguments
 )
 
 type symbol struct {
@@ -248,6 +250,18 @@ type symbol struct {
 
 	extended []*symbol // the temporaries whose lifetime a reference's declaration extends
 	once     stmt      // a static local's initialization, the first time its declaration is reached
+
+	// Templates (cxxtmpl.go).
+	tmpl     *template // the template it is (symTemplate; a function template, in its overload set)
+	instOf   *template // a class template's name within its own instance
+	inst     *tinst    // the instance it is
+	pack     []targ    // symPack
+	depVal   bool      // a value parameter's placeholder, in a pattern
+	depParam int
+	late     *lateFunc // its body, not parsed until it is used
+	lateSc   *scope    // the scope late is parsed in, if not its own
+	synth    func()    // makes its (implicit) definition, when it is used
+	queued   bool
 }
 
 type funcDecl struct {

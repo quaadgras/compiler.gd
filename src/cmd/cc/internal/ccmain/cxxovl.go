@@ -48,6 +48,9 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 	var last *symbol
 	for o := head; o != nil; o = o.next {
 		last = o
+		if o.tmpl != nil {
+			continue
+		}
 		if o.cLink && clink || sameParams(o.t.fn, t.fn) && constThis(o.t.fn) == constThis(t.fn) {
 			if !sameType(o.t.fn.ret, t.fn.ret) && !(o.cLink && compatible(o.t, t)) {
 				p.errorAt(at, "conflicting return types for %q", name)
@@ -77,7 +80,7 @@ func (p *parser) cxxDeclareFunc(name string, t *ctype, s specs, at pos) *symbol 
 	}
 	sym := &symbol{name: name, src: name, kind: symFunc, t: t, global: true, linkage: 'e', p: at, sc: sc, cLink: clink, comdat: s.inline}
 	if !clink {
-		sym.name = mangleFunc(sc, name, t.fn)
+		sym.name = mangleFunc(sc, name, t.fn, p.tmplSuffix)
 	}
 	if s.storage == sStatic && sc.kind == skNamespace || inAnon(sc) {
 		sym.linkage = 'i'
@@ -154,6 +157,8 @@ func valueType(e expr) *ctype {
 // parameter of type pt: rkNone if there is none.
 func (p *parser) convRank(a expr, pt *ctype) int {
 	at := a.ty()
+	p.completeFor(at)
+	p.completeFor(pt)
 	if pt.isRef() {
 		to := pt.elem
 		if to.kind == kFunc {
@@ -263,8 +268,10 @@ func (p *parser) convRank(a expr, pt *ctype) int {
 // the functions ordinary lookup finds.
 type adlRef struct {
 	node
-	name string
-	set  []*symbol
+	name  string
+	set   []*symbol
+	targs []targ // explicit template arguments
+	noADL bool   // the name is qualified
 }
 
 // A candidate is a function a call may be to, with the rank of each
@@ -272,11 +279,22 @@ type adlRef struct {
 type candidate struct {
 	sym   *symbol
 	ranks []int
+	tmpl  bool // a function template's instance
 }
 
 // viable ranks a call of sym with the arguments args, on the object obj
 // if sym is a member function.
 func (p *parser) viable(sym *symbol, obj expr, args []expr) (candidate, bool) {
+	if sym.tmpl != nil {
+		// A function template: its instance for these arguments.
+		inst := p.instantiateFor(sym, args, sym.p)
+		if inst == nil {
+			return candidate{}, false
+		}
+		c, ok := p.viable(inst, obj, args)
+		c.tmpl = true
+		return c, ok
+	}
 	ft := sym.t.fn
 	c := candidate{sym: sym}
 	params := ft.params
@@ -357,12 +375,15 @@ func (p *parser) resolve(set []*symbol, obj expr, args []expr, at pos, name stri
 	}
 	best := cands[0]
 	for _, c := range cands[1:] {
-		if better(c, best) {
+		if better(c, best) || !better(best, c) && best.tmpl && !c.tmpl {
 			best = c
 		}
 	}
 	for _, c := range cands {
 		if c.sym != best.sym && !better(best, c) {
+			if c.tmpl {
+				continue // a function that is not a template's is better; of two templates, the first
+			}
 			if quiet {
 				return nil
 			}
@@ -429,6 +450,7 @@ func (p *parser) callFunc(sym *symbol, obj expr, args []expr, at pos) expr {
 		out = append(out, p.convert(v, promoteArg(v.ty())))
 	}
 	sym.used = true
+	p.use(sym)
 	direct := p.direct
 	p.direct = false
 	if sym.virtual && !ft.dtor && ft.recv != nil && !direct && !p.exactObject(obj) {
@@ -480,6 +502,9 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 			seen[s] = true
 		}
 		for _, a := range args {
+			if x.noADL {
+				break
+			}
 			t := a.ty()
 			for t.kind == kPtr || t.kind == kArray {
 				t = t.elem
@@ -509,7 +534,13 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 		if len(set) == 0 {
 			p.errorAt(at, "%q undeclared", x.name)
 		}
-		return p.callFunc(p.resolve(set, nil, args, at, x.name, false), nil, args, at)
+		p.explicitT = x.targs
+		sym := p.resolve(set, p.thisOrNil(set, at), args, at, x.name, false)
+		p.explicitT = nil
+		if sym.t.fn.recv != nil {
+			return p.callFunc(sym, p.thisObject(at), args, at)
+		}
+		return p.callFunc(sym, nil, args, at)
 	case *varRef:
 		if x.sym.kind == symFunc {
 			sym := p.resolve(funcSet(x.sym), nil, args, at, x.sym.src, false)
@@ -521,7 +552,9 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 			return p.callFunc(sym, nil, args, at)
 		}
 	case *methodRef:
+		p.explicitT = x.targs
 		sym := p.resolve(x.set, x.obj, args, at, x.set[0].src, false)
+		p.explicitT = nil
 		if sym.t.fn.recv == nil {
 			return p.callFunc(sym, nil, args, at)
 		}
@@ -554,4 +587,35 @@ func (p *parser) cxxCall(x expr, at pos) expr {
 		}
 	}
 	return p.callResult(&call{node{ft.ret.unqual(), at}, fx, ft, out}, ft, at)
+}
+
+// hasTemplate reports whether a set of functions has a function
+// template.
+func hasTemplate(set []*symbol) bool {
+	for _, s := range set {
+		if s.tmpl != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// thisOrNil is *this, if the functions of set may be member functions
+// called on it.
+func (p *parser) thisOrNil(set []*symbol, at pos) expr {
+	if p.this == nil {
+		return nil
+	}
+	for _, s := range set {
+		if s.sc != nil {
+			sc := s.sc
+			for sc.kind == skTemplate && sc.parent != nil {
+				sc = sc.parent
+			}
+			if sc.kind == skClass {
+				return p.thisObject(at)
+			}
+		}
+	}
+	return nil
 }

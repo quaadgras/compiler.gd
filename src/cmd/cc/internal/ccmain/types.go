@@ -46,6 +46,10 @@ const (
 	kStruct // and union: rec.union
 	kFunc
 	kVaList // __builtin_va_list
+
+	// C++, in a template's pattern only (cxxtmpl.go).
+	kTParam    // a template parameter: n is its index
+	kDependent // a type that depends on template parameters: dep
 )
 
 type qual uint8
@@ -72,8 +76,11 @@ type ctype struct {
 	align int64 // _Alignas or aligned, if more than the type's own
 
 	// C++ (cxx.go).
-	ref    uint8 // kPtr: a reference (1: T &, 2: T &&)
-	isAuto bool  // the placeholder auto, until its initializer says
+	ref     uint8    // kPtr: a reference (1: T &, 2: T &&)
+	isAuto  bool     // the placeholder auto, until its initializer says
+	isPackT bool     // kTParam: a parameter pack
+	depN    int      // kArray, in a pattern: its length is the value parameter depN-1
+	dep     *depType // kDependent
 }
 
 type record struct {
@@ -89,8 +96,10 @@ type record struct {
 	goName   string
 	bytes    bool // its mirror is bytes (gen.go's record)
 
-	sc  *scope     // C++: the scope it is declared in
-	cls *classInfo // C++: a class's members that are not fields (cxxclass.go)
+	sc   *scope     // C++: the scope it is declared in
+	cls  *classInfo // C++: a class's members that are not fields (cxxclass.go)
+	mtag string     // C++: its name as mangled, if it is a template's instance
+	inst *tinst     // C++: the template's instance it is
 }
 
 type field struct {

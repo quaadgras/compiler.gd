@@ -39,7 +39,8 @@ const (
 	skBlock     scopeKind = iota // a block's, a function's parameters'
 	skNamespace                  // a namespace's; the file's is the global namespace's
 	skClass
-	skEnum // a scoped enumeration's constants
+	skEnum     // a scoped enumeration's constants
+	skTemplate // a template instance's parameters, as its arguments
 )
 
 var cxxTypeWords = map[string]bool{
@@ -65,7 +66,7 @@ func (s *scope) find(name string) *symbol {
 		return v
 	}
 	if len(s.using) == 0 && s.kind != skClass {
-		return nil
+		return s.findStd(name)
 	}
 	return s.findIn(name, map[*scope]bool{})
 }
@@ -85,6 +86,18 @@ func (s *scope) findIn(name string, seen map[*scope]bool) *symbol {
 	}
 	if s.kind == skClass {
 		return s.findMember(name, seen)
+	}
+	return s.findStd(name)
+}
+
+// findStd finds in std a name that C's library declares: std's names
+// that are C's are the global namespace's.
+func (s *scope) findStd(name string) *symbol {
+	if s.kind != skNamespace || s.name != "std" || s.parent == nil || s.parent.parent != nil {
+		return nil
+	}
+	if v := s.parent.vars[name]; v != nil && (v.cLink || isCHeader(v.p.file)) {
+		return v
 	}
 	return nil
 }
@@ -253,6 +266,54 @@ func (p *parser) declareTag(sc *scope, tag string, t *ctype) {
 	sc.vars[tag] = &symbol{name: tag, src: tag, kind: symTypedef, t: t, sc: sc, tagName: true}
 }
 
+type tidKey struct {
+	pos     int
+	sc      *scope
+	pattern int
+}
+
+type tidVal struct {
+	tm  *template
+	sym *symbol
+	end int
+}
+
+// nameAt resolves the name at token offset j, in the scope in (nil: by
+// unqualified lookup): its symbol, and the offset after it, which is
+// after its template arguments if it names a template and has them.
+func (p *parser) nameAt(j int, in *scope) (*symbol, int) {
+	t := p.peekAt(j)
+	var s *symbol
+	if in == nil {
+		s = p.lookup(t.text)
+	} else {
+		s = in.find(t.text)
+	}
+	if s == nil || !p.isAt(j+1, "<") {
+		return s, j + 1
+	}
+	var tm *template
+	switch {
+	case s.kind == symTemplate:
+		tm = s.tmpl
+	case s.kind == symTypedef && s.instOf != nil:
+		tm = s.instOf
+	}
+	if tm == nil {
+		return s, j + 1
+	}
+	key := tidKey{p.pos + j, p.sc, p.pattern}
+	if c, ok := p.tids[key]; ok && c.tm == tm {
+		return c.sym, c.end - p.pos
+	}
+	sym, end := p.templateID(tm, j+1, pos{t.file, t.line})
+	if p.tids == nil {
+		p.tids = map[tidKey]tidVal{}
+	}
+	p.tids[key] = tidVal{tm, sym, p.pos + end}
+	return sym, end
+}
+
 // nested scans the nested name specifier at token offset i (A::B::,
 // ::): the scope it names, nil if there is none, and the offset after it.
 func (p *parser) nested(i int) (in *scope, j int) {
@@ -261,13 +322,13 @@ func (p *parser) nested(i int) (in *scope, j int) {
 		in = p.fileScope()
 		j++
 	}
-	for p.peekAt(j).kind == tkIdent && p.isAt(j+1, "::") {
-		name := p.peekAt(j).text
-		var s *symbol
-		if in == nil {
-			s = p.lookup(name)
-		} else {
-			s = in.find(name)
+	for p.peekAt(j).kind == tkIdent {
+		if !p.isAt(j+1, "::") && !p.isAt(j+1, "<") {
+			break
+		}
+		s, e := p.nameAt(j, in)
+		if !p.isAt(e, "::") {
+			break
 		}
 		var next *scope
 		if s != nil {
@@ -275,6 +336,7 @@ func (p *parser) nested(i int) (in *scope, j int) {
 			case symNamespace:
 				next = s.ns
 			case symTypedef:
+				p.complete(s.t)
 				next = typeScope(s.t)
 			}
 		}
@@ -282,7 +344,10 @@ func (p *parser) nested(i int) (in *scope, j int) {
 			break
 		}
 		in = next
-		j += 2
+		j = e + 1
+		if p.isAt(j, "template") {
+			j++
+		}
 	}
 	return in, j
 }
@@ -298,12 +363,8 @@ func (p *parser) qualName(i int) (sym *symbol, in *scope, n int) {
 	if t.kind != tkIdent || t.text == "operator" || t.text == "template" {
 		return nil, in, j - i
 	}
-	if in == nil {
-		sym = p.lookup(t.text)
-	} else {
-		sym = in.find(t.text)
-	}
-	return sym, in, j + 1 - i
+	sym, e := p.nameAt(j, in)
+	return sym, in, e - i
 }
 
 // typeScope is the scope of a class's members or an enumeration's
@@ -748,20 +809,24 @@ func (p *parser) autoType(t *ctype, e expr, at pos) *ctype {
 // isCtorName reports whether the type name sym, n tokens long at the
 // parser's position, is not a type specifier but a constructor's name.
 func (p *parser) isCtorName(sym *symbol, n int) bool {
-	if sym.t.kind != kStruct || !p.isAt(n, "(") {
+	if sym.t.kind != kStruct || !p.isAt(n, "(") || p.peekAt(n-1).kind != tkIdent {
 		return false
 	}
-	if n >= 3 && p.isAt(n-2, "::") && p.peekAt(n-3).text == p.peekAt(n-1).text {
-		return true // A::A(
+	if in, j := p.nested(0); in != nil && j == n-1 {
+		return in.kind == skClass && in.rec == sym.t.rec && p.peekAt(n-1).text == in.rec.tag // A::A(
 	}
-	return n == 1 && p.exprType == 0 && p.cls != nil && p.cls.rec == sym.t.rec && p.sc.kind == skClass
+	cs := p.sc
+	for cs != nil && cs.kind == skTemplate {
+		cs = cs.parent
+	}
+	return n == 1 && p.exprType == 0 && p.cls != nil && p.cls.rec == sym.t.rec && cs != nil && cs.kind == skClass && cs.rec == sym.t.rec
 }
 
 // declaratorID parses a declarator's name in C++, "" if it has none: an
 // identifier, ~T, operator+ or operator T, which may be qualified. in is
 // the scope its qualifier names.
 func (p *parser) declaratorID() (name string, in *scope) {
-	if p.is("::") || p.peek().kind == tkIdent && p.isAt(1, "::") {
+	if p.is("::") || p.peek().kind == tkIdent && (p.isAt(1, "::") || p.isAt(1, "<")) {
 		var j int
 		in, j = p.nested(0)
 		p.pos += j
@@ -1007,11 +1072,21 @@ func (p *parser) extending(sym *symbol, f func()) {
 // cxxName parses a name in an expression, which may be qualified.
 func (p *parser) cxxName(at pos) expr {
 	sym, in, n := p.qualName(0)
-	if in == nil && n == 1 && p.isAt(1, "(") && (sym == nil || sym.kind == symFunc && sym.t.fn.recv == nil && (sym.sc == nil || sym.sc.kind != skClass)) {
+	if sym != nil && sym.kind == symFunc && p.isAt(n, "<") && hasTemplate(funcSet(sym)) {
+		// A function template with explicit arguments.
+		name := p.peekAt(n - 1).text
+		p.pos += n
+		a := &adlRef{node{tVoid, at}, name, funcSet(sym), p.templateArgs(), in != nil}
+		if !p.is("(") {
+			p.errorAt(at, "a function template's name with arguments is only called here")
+		}
+		return a
+	}
+	if in == nil && n == 1 && p.isAt(1, "(") && (sym == nil || sym.kind == symFunc && (sym.tmpl != nil || sym.t.fn.recv == nil) && (sym.sc == nil || sym.sc.kind != skClass)) {
 		// An unqualified function's call: the functions of its
 		// arguments' namespaces are candidates too.
 		name := p.next().text
-		a := &adlRef{node{tVoid, at}, name, nil}
+		a := &adlRef{node: node{tVoid, at}, name: name}
 		if sym != nil {
 			sym.used = true
 			a.set = funcSet(sym)
@@ -1032,7 +1107,12 @@ func (p *parser) cxxName(at pos) expr {
 	p.pos += n
 	switch sym.kind {
 	case symEnumConst:
+		if sym.depVal {
+			return &depConst{intConst{node{sym.t, at}, 0}, sym.depParam}
+		}
 		return p.intc(sym.val, sym.t, at)
+	case symTemplate, symPack:
+		p.errorAt(at, "unexpected template name %q", name)
 	case symTypedef:
 		if p.is("(") || p.is("{") {
 			return p.functionalCast(sym.t, at)
@@ -1044,6 +1124,14 @@ func (p *parser) cxxName(at pos) expr {
 		return p.fieldRef(sym, in, at)
 	}
 	sym.used = true
+	if sym.kind == symFunc && sym.tmpl != nil {
+		// A function template, by lookup: called.
+		if !p.is("(") {
+			p.errorAt(at, "the function template %q is only called here", name)
+		}
+		return &adlRef{node{tVoid, at}, name, funcSet(sym), nil, in != nil}
+	}
+	p.use(sym)
 	v := &varRef{node{sym.t, at}, sym}
 	if in != nil && sym.kind == symFunc {
 		if p.qualified == nil {
@@ -1239,4 +1327,23 @@ func (p *parser) boolResult(e expr) expr {
 		return &intConst{node{tBool, x.p}, b2i(x.v != 0)}
 	}
 	return p.convert(e, tBool)
+}
+
+// skipQualName skips a qualified name that cannot be resolved, in a
+// template's pattern: A<T>::B::c.
+func (p *parser) skipQualName() {
+	p.accept("::")
+	for {
+		p.accept("template")
+		if p.peek().kind != tkIdent {
+			return
+		}
+		p.next()
+		if p.is("<") {
+			p.skipAngles()
+		}
+		if !p.accept("::") {
+			return
+		}
+	}
 }

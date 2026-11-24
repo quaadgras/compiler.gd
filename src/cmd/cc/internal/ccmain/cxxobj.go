@@ -109,6 +109,7 @@ func (p *parser) destroy(obj expr, at pos) stmt {
 
 // requireComplete reports an error if the class t is not defined.
 func (p *parser) requireComplete(t *ctype, at pos) {
+	p.complete(t)
 	if t.kind == kStruct && !t.rec.complete {
 		p.errorAt(at, "invalid use of the incomplete type %s", t)
 	}
